@@ -1,0 +1,887 @@
+---
+import TooltipLabel from "../components/TooltipLabel.astro";
+import "../styles/global.css";
+
+const tooltips = {
+  strategy: "브라우저에서 바로 계산할 전략 템플릿입니다. Zipline 결과 CSV 확인 기능은 별도로 유지됩니다.",
+  ticker: "실험에 표시할 KRX 종목코드입니다. 예: 삼성전자 005930.",
+  start: "브라우저 백테스트에 포함할 첫 날짜입니다.",
+  end: "브라우저 백테스트에 포함할 마지막 날짜입니다.",
+  webDownload: "FastAPI 백엔드가 pykrx로 이 종목과 기간의 가격 데이터를 새로 받아옵니다.",
+  loadLatest: "마지막으로 저장된 가격 CSV를 읽고, 파일이 없으면 FastAPI 최신 데이터로 폴백합니다.",
+  runBacktest: "현재 가격 데이터와 전략 입력값으로 브라우저에서 즉시 다시 계산합니다.",
+  shortMa: "단기 이동평균 기간입니다. 단기선이 장기선보다 높으면 매수 신호로 봅니다.",
+  longMa: "장기 이동평균 기간입니다. 단기 이동평균보다 크게 잡고 충분한 워밍업 데이터가 필요합니다.",
+  rebalance: "포지션 비중을 다시 계산하고 바꿀 수 있는 주기입니다.",
+  allocation: "매수 신호가 켜졌을 때 목표 투자 비중입니다. 100%는 전액 투자입니다.",
+  capital: "브라우저 시뮬레이션의 초기 투자금입니다.",
+  feeBps: "거래 수수료입니다. 1bp는 0.01%이며 포지션 비중이 바뀔 때 반영합니다.",
+  slippageBps: "체결 불리함을 비용으로 본 값입니다. 수수료처럼 포지션 변경 시 반영합니다.",
+  finalValue: "선택한 백테스트 마지막 행의 포트폴리오 가치입니다.",
+  totalReturn: "최종 포트폴리오 가치를 시작 가치로 나눈 뒤 1을 뺀 값입니다.",
+  cagr: "첫 포트폴리오 가치와 마지막 포트폴리오 가치로 계산한 연복리 수익률입니다.",
+  mdd: "최대 낙폭입니다. 이전 고점 대비 가장 크게 하락한 비율입니다.",
+  sharpe: "일간 수익률 평균을 변동성으로 나눈 뒤 연율화한 값입니다. 무위험수익률은 0으로 둡니다.",
+  sortino: "하락한 날의 변동성만 사용한 Sharpe 유사 지표입니다.",
+  calmar: "CAGR을 MDD 절댓값으로 나눈 값입니다. 낙폭 대비 수익률을 봅니다.",
+  volatility: "일간 포트폴리오 수익률의 표준편차를 연율화한 값입니다.",
+  winRate: "일간 포트폴리오 수익률이 0보다 큰 날의 비율입니다.",
+  bestDay: "선택한 결과에서 가장 좋았던 하루 수익률입니다.",
+  worstDay: "선택한 결과에서 가장 나빴던 하루 수익률입니다.",
+  exposure: "평균 투자 비중입니다. 100%면 전체 기간 내내 전액 투자한 상태입니다.",
+  benchmark: "같은 기간 단순 보유했을 때의 수익률이며 차트에 비교선으로 표시됩니다.",
+  rows: "현재 표시 중인 결과에 포함된 거래일 행 수입니다.",
+};
+---
+
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>KRX 백테스트 실험실</title>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="topbar">
+        <div>
+          <p class="eyebrow">Zipline + PyKRX</p>
+          <h1>백테스트 실험실</h1>
+          <p class="subtitle">가격 데이터 준비, 전략 조건 변경, 성과 확인을 한 화면에서 처리합니다.</p>
+        </div>
+        <div class="actions">
+          <label class="file-button">
+            <input id="performance-file" type="file" accept=".csv,text/csv" />
+            성과 CSV 열기
+          </label>
+          <button id="reload-latest" type="button">최신 성과 다시 읽기</button>
+        </div>
+      </section>
+
+      <section class="input-panel">
+        <div class="panel-head">
+          <div>
+            <h2>1. 데이터와 전략 설정</h2>
+            <p id="price-source-label">latest_ohlcv.csv 대기 중</p>
+          </div>
+          <div class="status-pill" id="data-status-pill">가격 데이터 없음</div>
+        </div>
+        <div class="quick-actions" aria-label="빠른 설정">
+          <button type="button" data-preset="sample">샘플 1개월</button>
+          <button type="button" data-preset="five-year">5년 데이터</button>
+          <button type="button" data-window="5-20">MA 5/20</button>
+          <button type="button" data-window="20-60">MA 20/60</button>
+        </div>
+        <form id="strategy-form" class="control-grid">
+          <label>
+            <TooltipLabel label="전략" tooltip={tooltips.strategy} />
+            <select id="strategy-input" name="strategy">
+              <option value="ma-trend" selected>이동평균 추세</option>
+              <option value="buy-hold">단순 보유</option>
+              <option value="price-above-ma">가격이 장기선 위</option>
+            </select>
+          </label>
+          <label>
+            <TooltipLabel label="종목코드" tooltip={tooltips.ticker} />
+            <input id="ticker-input" name="ticker" value="005930" />
+          </label>
+          <label>
+            <TooltipLabel label="시작일" tooltip={tooltips.start} />
+            <input id="start-input" name="start" type="date" value="2020-01-13" />
+          </label>
+          <label>
+            <TooltipLabel label="종료일" tooltip={tooltips.end} />
+            <input id="end-input" name="end" type="date" value="2020-01-31" />
+          </label>
+          <label>
+            <TooltipLabel label="단기 MA" tooltip={tooltips.shortMa} />
+            <input id="short-window-input" name="shortWindow" type="number" min="1" value="2" />
+          </label>
+          <label>
+            <TooltipLabel label="장기 MA" tooltip={tooltips.longMa} />
+            <input id="long-window-input" name="longWindow" type="number" min="2" value="5" />
+          </label>
+          <label>
+            <TooltipLabel label="리밸런싱" tooltip={tooltips.rebalance} />
+            <select id="rebalance-input" name="rebalance">
+              <option value="daily" selected>매일</option>
+              <option value="weekly">매주</option>
+              <option value="monthly">매월</option>
+            </select>
+          </label>
+          <label>
+            <TooltipLabel label="투자 비중 %" tooltip={tooltips.allocation} />
+            <input
+              id="allocation-input"
+              name="allocationPct"
+              type="number"
+              min="0"
+              max="100"
+              step="1"
+              value="100"
+            />
+          </label>
+          <label>
+            <TooltipLabel label="초기 자본" tooltip={tooltips.capital} />
+            <input id="capital-input" name="capital" type="number" min="1" value="10000000" />
+          </label>
+          <label>
+            <TooltipLabel label="수수료 bps" tooltip={tooltips.feeBps} />
+            <input id="fee-input" name="feeBps" type="number" min="0" step="0.1" value="0" />
+          </label>
+          <label>
+            <TooltipLabel label="슬리피지 bps" tooltip={tooltips.slippageBps} />
+            <input
+              id="slippage-input"
+              name="slippageBps"
+              type="number"
+              min="0"
+              step="0.1"
+              value="0"
+            />
+          </label>
+          <div class="control-actions">
+            <label class="file-button">
+              <input id="price-file" type="file" accept=".csv,text/csv" />
+              가격 CSV 열기
+            </label>
+            <button id="download-price" type="button" title={tooltips.webDownload}>
+              웹에서 다운로드
+            </button>
+            <button id="load-latest-price" type="button" title={tooltips.loadLatest}>
+              저장된 가격 다시 읽기
+            </button>
+            <button
+              id="run-browser-backtest"
+              class="primary-action"
+              type="button"
+              title={tooltips.runBacktest}
+              disabled
+            >
+              백테스트 실행
+            </button>
+          </div>
+        </form>
+        <p id="run-status" class="run-status">가격 데이터를 먼저 불러오세요.</p>
+      </section>
+
+      <section class="section-heading">
+        <div>
+          <h2>2. 성과 요약</h2>
+          <p>전략 결과와 단순보유 비교값을 같은 기준으로 계산합니다.</p>
+        </div>
+      </section>
+
+      <section class="metrics" aria-label="백테스트 요약">
+        <article>
+          <TooltipLabel label="최종 평가금" tooltip={tooltips.finalValue} />
+          <strong id="final-value">-</strong>
+        </article>
+        <article>
+          <TooltipLabel label="총수익률" tooltip={tooltips.totalReturn} />
+          <strong id="total-return">-</strong>
+        </article>
+        <article>
+          <TooltipLabel label="CAGR" tooltip={tooltips.cagr} />
+          <strong id="cagr">-</strong>
+        </article>
+        <article>
+          <TooltipLabel label="MDD" tooltip={tooltips.mdd} />
+          <strong id="max-drawdown">-</strong>
+        </article>
+        <article>
+          <TooltipLabel label="Sharpe" tooltip={tooltips.sharpe} />
+          <strong id="sharpe-ratio">-</strong>
+        </article>
+        <article>
+          <TooltipLabel label="Sortino" tooltip={tooltips.sortino} />
+          <strong id="sortino-ratio">-</strong>
+        </article>
+        <article>
+          <TooltipLabel label="Calmar" tooltip={tooltips.calmar} />
+          <strong id="calmar-ratio">-</strong>
+        </article>
+        <article>
+          <TooltipLabel label="변동성" tooltip={tooltips.volatility} />
+          <strong id="volatility">-</strong>
+        </article>
+        <article>
+          <TooltipLabel label="승률" tooltip={tooltips.winRate} />
+          <strong id="win-rate">-</strong>
+        </article>
+        <article>
+          <TooltipLabel label="최고 일수익" tooltip={tooltips.bestDay} />
+          <strong id="best-day">-</strong>
+        </article>
+        <article>
+          <TooltipLabel label="최악 일수익" tooltip={tooltips.worstDay} />
+          <strong id="worst-day">-</strong>
+        </article>
+        <article>
+          <TooltipLabel label="노출도" tooltip={tooltips.exposure} />
+          <strong id="exposure">-</strong>
+        </article>
+        <article>
+          <TooltipLabel label="벤치마크" tooltip={tooltips.benchmark} />
+          <strong id="benchmark-return">-</strong>
+        </article>
+        <article>
+          <TooltipLabel label="행 수" tooltip={tooltips.rows} />
+          <strong id="row-count">-</strong>
+        </article>
+      </section>
+
+      <section class="chart-panel">
+        <div class="panel-head">
+          <h2>3. 포트폴리오 가치</h2>
+          <p id="source-label">latest_performance.csv 대기 중</p>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="equity-chart"></canvas>
+        </div>
+      </section>
+
+      <section class="table-panel">
+        <div class="panel-head">
+          <h2>4. 최근 행</h2>
+          <p>최근 12거래일</p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>날짜</th>
+                <th>포트폴리오</th>
+                <th>가격</th>
+                <th>투자 비중</th>
+              </tr>
+            </thead>
+            <tbody id="recent-rows">
+              <tr>
+                <td colspan="4">백테스트를 실행하거나 CSV 파일을 불러오세요.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      import Chart from "chart.js/auto";
+
+      const appBasePath = import.meta.env.BASE_URL;
+      const latestPath = `${appBasePath}backtests/latest_performance.csv`;
+      const latestPricePath = `${appBasePath}market_data/latest_ohlcv.csv`;
+      const apiBaseUrl = "http://127.0.0.1:8000";
+      const chartCanvas = document.getElementById("equity-chart");
+      const sourceLabel = document.getElementById("source-label");
+      const priceSourceLabel = document.getElementById("price-source-label");
+      const dataStatusPill = document.getElementById("data-status-pill");
+      const finalValue = document.getElementById("final-value");
+      const totalReturn = document.getElementById("total-return");
+      const cagr = document.getElementById("cagr");
+      const maxDrawdown = document.getElementById("max-drawdown");
+      const sharpeRatio = document.getElementById("sharpe-ratio");
+      const sortinoRatio = document.getElementById("sortino-ratio");
+      const calmarRatio = document.getElementById("calmar-ratio");
+      const volatility = document.getElementById("volatility");
+      const winRate = document.getElementById("win-rate");
+      const bestDay = document.getElementById("best-day");
+      const worstDay = document.getElementById("worst-day");
+      const exposure = document.getElementById("exposure");
+      const benchmarkReturn = document.getElementById("benchmark-return");
+      const rowCount = document.getElementById("row-count");
+      const recentRows = document.getElementById("recent-rows");
+      const performanceFileInput = document.getElementById("performance-file");
+      const priceFileInput = document.getElementById("price-file");
+      const reloadButton = document.getElementById("reload-latest");
+      const loadLatestPriceButton = document.getElementById("load-latest-price");
+      const downloadPriceButton = document.getElementById("download-price");
+      const runBrowserBacktestButton = document.getElementById("run-browser-backtest");
+      const strategyForm = document.getElementById("strategy-form");
+      const strategyInput = document.getElementById("strategy-input");
+      const tickerInput = document.getElementById("ticker-input");
+      const startInput = document.getElementById("start-input");
+      const endInput = document.getElementById("end-input");
+      const shortWindowInput = document.getElementById("short-window-input");
+      const longWindowInput = document.getElementById("long-window-input");
+      const rebalanceInput = document.getElementById("rebalance-input");
+      const allocationInput = document.getElementById("allocation-input");
+      const capitalInput = document.getElementById("capital-input");
+      const feeInput = document.getElementById("fee-input");
+      const slippageInput = document.getElementById("slippage-input");
+      const runStatus = document.getElementById("run-status");
+      const presetButtons = document.querySelectorAll("[data-preset]");
+      const windowButtons = document.querySelectorAll("[data-window]");
+      let chart;
+      let priceRows = [];
+
+      const formatKrw = new Intl.NumberFormat("ko-KR", {
+        maximumFractionDigits: 0,
+        style: "currency",
+        currency: "KRW"
+      });
+      const formatPct = new Intl.NumberFormat("ko-KR", {
+        maximumFractionDigits: 2,
+        minimumFractionDigits: 2,
+        style: "percent"
+      });
+
+      function splitCsvLine(line) {
+        const values = [];
+        let current = "";
+        let insideQuotes = false;
+        for (const char of line) {
+          if (char === '"') {
+            insideQuotes = !insideQuotes;
+          } else if (char === "," && !insideQuotes) {
+            values.push(current);
+            current = "";
+          } else {
+            current += char;
+          }
+        }
+        values.push(current);
+        return values;
+      }
+
+      function parsePerformanceCsv(text) {
+        const lines = text.trim().split(/\r?\n/);
+        const headers = splitCsvLine(lines[0]);
+        const dateKey = headers[0];
+        return lines
+          .slice(1)
+          .map((line) => {
+            const values = splitCsvLine(line);
+            const row = Object.fromEntries(headers.map((header, index) => [header, values[index]]));
+            return {
+              date: row[dateKey],
+              portfolioValue: Number(row.portfolio_value),
+              price: Number(row.price),
+              invested: Number(row.invested),
+              benchmarkValue: Number(row.benchmarkValue),
+              algorithmPeriodReturn: Number(row.algorithm_period_return),
+              maxDrawdown: Number(row.max_drawdown),
+              sharpe: Number(row.sharpe),
+              sortino: Number(row.sortino),
+              algoVolatility: Number(row.algo_volatility)
+            };
+          })
+          .filter((row) => Number.isFinite(row.portfolioValue));
+      }
+
+      function pick(row, names) {
+        return names.map((name) => row[name]).find((value) => value !== undefined);
+      }
+
+      function parseNumber(value) {
+        return Number(String(value ?? "").replaceAll(",", ""));
+      }
+
+      function parsePriceCsv(text) {
+        const lines = text.trim().split(/\r?\n/);
+        const headers = splitCsvLine(lines[0]);
+        return lines
+          .slice(1)
+          .map((line) => {
+            const values = splitCsvLine(line);
+            const row = Object.fromEntries(headers.map((header, index) => [header, values[index]]));
+            return {
+              date: pick(row, ["date", "날짜", "Date"]),
+              open: parseNumber(pick(row, ["open", "시가", "Open"])),
+              high: parseNumber(pick(row, ["high", "고가", "High"])),
+              low: parseNumber(pick(row, ["low", "저가", "Low"])),
+              close: parseNumber(pick(row, ["close", "종가", "Close"])),
+              volume: parseNumber(pick(row, ["volume", "거래량", "Volume"]))
+            };
+          })
+          .filter((row) => row.date && Number.isFinite(row.close))
+          .sort((left, right) => new Date(left.date) - new Date(right.date));
+      }
+
+      function calculateMaxDrawdown(rows) {
+        let peak = rows[0]?.portfolioValue ?? 0;
+        let worst = 0;
+        for (const row of rows) {
+          peak = Math.max(peak, row.portfolioValue);
+          const drawdown = peak === 0 ? 0 : row.portfolioValue / peak - 1;
+          worst = Math.min(worst, drawdown);
+        }
+        return worst;
+      }
+
+      function calculateDailyReturns(rows) {
+        return rows
+          .slice(1)
+          .map((row, index) => row.portfolioValue / rows[index].portfolioValue - 1)
+          .filter((value) => Number.isFinite(value));
+      }
+
+      function calculateMean(values) {
+        if (values.length === 0) return null;
+        return values.reduce((sum, value) => sum + value, 0) / values.length;
+      }
+
+      function calculateStdev(values) {
+        if (values.length < 2) return null;
+        const mean = calculateMean(values);
+        const variance =
+          values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (values.length - 1);
+        return Math.sqrt(variance);
+      }
+
+      function calculateAnnualizedSharpe(returns) {
+        if (returns.length < 2) return null;
+
+        const mean = calculateMean(returns);
+        const stdev = calculateStdev(returns);
+        if (stdev === 0) return null;
+        return (mean / stdev) * Math.sqrt(252);
+      }
+
+      function calculateAnnualizedSortino(returns) {
+        if (returns.length < 2) return null;
+
+        const mean = calculateMean(returns);
+        const downsideReturns = returns.filter((value) => value < 0);
+        const downsideStdev = calculateStdev(downsideReturns);
+        if (!downsideStdev) return null;
+        return (mean / downsideStdev) * Math.sqrt(252);
+      }
+
+      function calculateCagr(rows) {
+        if (rows.length < 2) return null;
+        const firstDate = new Date(rows[0].date);
+        const lastDate = new Date(rows.at(-1).date);
+        const years = (lastDate - firstDate) / (365.25 * 24 * 60 * 60 * 1000);
+        if (years <= 0) return null;
+        return (rows.at(-1).portfolioValue / rows[0].portfolioValue) ** (1 / years) - 1;
+      }
+
+      function lastFinite(rows, key) {
+        return rows
+          .slice()
+          .reverse()
+          .find((row) => Number.isFinite(row[key]))?.[key];
+      }
+
+      function formatRatio(value) {
+        return Number.isFinite(value) ? value.toFixed(2) : "-";
+      }
+
+      function formatStrategyName(strategy) {
+        return {
+          "ma-trend": "이동평균 추세",
+          "buy-hold": "단순 보유",
+          "price-above-ma": "가격이 장기선 위"
+        }[strategy] ?? strategy;
+      }
+
+      function formatRebalanceName(rebalance) {
+        return {
+          daily: "매일",
+          weekly: "매주",
+          monthly: "매월"
+        }[rebalance] ?? rebalance;
+      }
+
+      function setRunStatus(message, isError = false) {
+        runStatus.textContent = message;
+        runStatus.dataset.state = isError ? "error" : "ok";
+      }
+
+      function setDataStatus(message, state = "neutral") {
+        dataStatusPill.textContent = message;
+        dataStatusPill.dataset.state = state;
+      }
+
+      function updateRunButtonState() {
+        const hasPriceRows = priceRows.length > 0;
+        runBrowserBacktestButton.disabled = !hasPriceRows;
+        if (!hasPriceRows) {
+          setDataStatus("가격 데이터 없음", "error");
+          setRunStatus("가격 데이터를 먼저 불러오세요.", true);
+          return;
+        }
+        const firstDate = priceRows[0].date.slice(0, 10);
+        const lastDate = priceRows.at(-1).date.slice(0, 10);
+        setDataStatus(`${priceRows.length.toLocaleString("ko-KR")}행 · ${firstDate} ~ ${lastDate}`, "ok");
+      }
+
+      function applyPreset(name) {
+        if (name === "sample") {
+          startInput.value = "2020-01-01";
+          endInput.value = "2020-01-31";
+          shortWindowInput.value = "5";
+          longWindowInput.value = "20";
+        }
+        if (name === "five-year") {
+          startInput.value = "2015-01-01";
+          endInput.value = "2020-01-31";
+          shortWindowInput.value = "20";
+          longWindowInput.value = "60";
+        }
+      }
+
+      function applyWindowPreset(value) {
+        const [shortWindow, longWindow] = value.split("-");
+        shortWindowInput.value = shortWindow;
+        longWindowInput.value = longWindow;
+      }
+
+      function getStrategyInputs() {
+        const shortWindow = Number(shortWindowInput.value);
+        const longWindow = Number(longWindowInput.value);
+        const capital = Number(capitalInput.value);
+        const feeBps = Number(feeInput.value);
+        const slippageBps = Number(slippageInput.value);
+        const allocationPct = Number(allocationInput.value);
+        if (!Number.isInteger(shortWindow) || !Number.isInteger(longWindow)) {
+          throw new Error("이동평균 기간은 정수여야 합니다");
+        }
+        if (shortWindow < 1 || longWindow < 2 || shortWindow >= longWindow) {
+          throw new Error("단기 MA는 장기 MA보다 작아야 합니다");
+        }
+        if (!Number.isFinite(capital) || capital <= 0) {
+          throw new Error("초기 자본은 0보다 커야 합니다");
+        }
+        if (!Number.isFinite(feeBps) || feeBps < 0) {
+          throw new Error("수수료 bps는 0 이상이어야 합니다");
+        }
+        if (!Number.isFinite(slippageBps) || slippageBps < 0) {
+          throw new Error("슬리피지 bps는 0 이상이어야 합니다");
+        }
+        if (!Number.isFinite(allocationPct) || allocationPct < 0 || allocationPct > 100) {
+          throw new Error("투자 비중은 0에서 100 사이여야 합니다");
+        }
+        return {
+          strategy: strategyInput.value,
+          ticker: tickerInput.value.trim() || "manual",
+          start: startInput.value,
+          end: endInput.value,
+          rebalance: rebalanceInput.value,
+          allocation: allocationPct / 100,
+          shortWindow,
+          longWindow,
+          capital,
+          feeBps,
+          slippageBps
+        };
+      }
+
+      function meanClose(rows, endIndex, window) {
+        const startIndex = endIndex - window + 1;
+        if (startIndex < 0) return null;
+        const closes = rows.slice(startIndex, endIndex + 1).map((row) => row.close);
+        return closes.reduce((sum, value) => sum + value, 0) / closes.length;
+      }
+
+      function shouldRebalance(rows, index, frequency) {
+        if (index === 0 || frequency === "daily") return true;
+        const date = new Date(rows[index].date);
+        const previousDate = new Date(rows[index - 1].date);
+        if (frequency === "weekly") return date.getDay() < previousDate.getDay();
+        if (frequency === "monthly") return date.getMonth() !== previousDate.getMonth();
+        return true;
+      }
+
+      function getTargetExposure(rows, index, inputs) {
+        if (inputs.strategy === "buy-hold") return inputs.allocation;
+
+        const shortMa = meanClose(rows, index, inputs.shortWindow);
+        const longMa = meanClose(rows, index, inputs.longWindow);
+        if (longMa === null) return 0;
+        if (inputs.strategy === "price-above-ma") {
+          return rows[index].close > longMa ? inputs.allocation : 0;
+        }
+        if (shortMa === null) return 0;
+        return shortMa > longMa ? inputs.allocation : 0;
+      }
+
+      function simulateMovingAverageStrategy(rows, inputs) {
+        const selectedRows = rows.filter((row) => {
+          const date = row.date.slice(0, 10);
+          return (!inputs.start || date >= inputs.start) && (!inputs.end || date <= inputs.end);
+        });
+        if (selectedRows.length < inputs.longWindow) {
+          throw new Error(
+            `장기 MA 계산에 필요한 행이 부족합니다: 행=${selectedRows.length} 장기MA=${inputs.longWindow}`
+          );
+        }
+
+        const tradeCostRate = (inputs.feeBps + inputs.slippageBps) / 10_000;
+        let portfolioValue = inputs.capital;
+        let invested = 0;
+        const performanceRows = [];
+        const benchmarkStartClose = selectedRows[0].close;
+
+        for (let index = 0; index < selectedRows.length; index += 1) {
+          const row = selectedRows[index];
+          if (index > 0 && invested > 0) {
+            const previousClose = selectedRows[index - 1].close;
+            portfolioValue *= 1 + invested * (row.close / previousClose - 1);
+          }
+
+          const shortMa = meanClose(selectedRows, index, inputs.shortWindow);
+          const longMa = meanClose(selectedRows, index, inputs.longWindow);
+          const nextInvested = shouldRebalance(selectedRows, index, inputs.rebalance)
+            ? getTargetExposure(selectedRows, index, inputs)
+            : invested;
+          if (nextInvested !== invested) {
+            portfolioValue *= 1 - Math.abs(nextInvested - invested) * tradeCostRate;
+          }
+          invested = nextInvested;
+
+          performanceRows.push({
+            date: row.date,
+            portfolioValue,
+            price: row.close,
+            invested,
+            benchmarkValue: inputs.capital * (row.close / benchmarkStartClose),
+            shortMa,
+            longMa
+          });
+        }
+        return performanceRows;
+      }
+
+      function renderRows(rows, source) {
+        if (rows.length === 0) {
+          sourceLabel.textContent = `${source}: portfolio_value 행을 찾지 못했습니다`;
+          return;
+        }
+
+        const first = rows[0].portfolioValue;
+        const last = rows.at(-1).portfolioValue;
+        const returns = calculateDailyReturns(rows);
+        const computedCagr = calculateCagr(rows);
+        const computedMdd = calculateMaxDrawdown(rows);
+        const dailyStdev = calculateStdev(returns);
+        const computedVolatility = dailyStdev === null ? null : dailyStdev * Math.sqrt(252);
+        const computedSharpe = lastFinite(rows, "sharpe") ?? calculateAnnualizedSharpe(returns);
+        const computedSortino = lastFinite(rows, "sortino") ?? calculateAnnualizedSortino(returns);
+        const computedCalmar =
+          computedCagr === null || computedMdd === 0 ? null : computedCagr / Math.abs(computedMdd);
+        const positiveReturns = returns.filter((value) => value > 0).length;
+        const finiteExposureRows = rows.filter((row) => Number.isFinite(row.invested));
+        const averageExposure =
+          finiteExposureRows.length === 0
+            ? null
+            : calculateMean(finiteExposureRows.map((row) => row.invested));
+
+        finalValue.textContent = formatKrw.format(last);
+        totalReturn.textContent = formatPct.format(
+          lastFinite(rows, "algorithmPeriodReturn") ?? last / first - 1
+        );
+        cagr.textContent = computedCagr === null ? "-" : formatPct.format(computedCagr);
+        maxDrawdown.textContent = formatPct.format(lastFinite(rows, "maxDrawdown") ?? computedMdd);
+        sharpeRatio.textContent = formatRatio(computedSharpe);
+        sortinoRatio.textContent = formatRatio(computedSortino);
+        calmarRatio.textContent = formatRatio(computedCalmar);
+        const displayedVolatility = lastFinite(rows, "algoVolatility") ?? computedVolatility;
+        volatility.textContent =
+          displayedVolatility === null ? "-" : formatPct.format(displayedVolatility);
+        winRate.textContent =
+          returns.length === 0 ? "-" : formatPct.format(positiveReturns / returns.length);
+        bestDay.textContent = returns.length === 0 ? "-" : formatPct.format(Math.max(...returns));
+        worstDay.textContent = returns.length === 0 ? "-" : formatPct.format(Math.min(...returns));
+        exposure.textContent = averageExposure === null ? "-" : formatPct.format(averageExposure);
+        const finalBenchmarkValue = rows.at(-1).benchmarkValue;
+        benchmarkReturn.textContent = Number.isFinite(finalBenchmarkValue)
+          ? formatPct.format(finalBenchmarkValue / rows[0].benchmarkValue - 1)
+          : "-";
+        rowCount.textContent = rows.length.toLocaleString("ko-KR");
+        sourceLabel.textContent = source;
+
+        recentRows.innerHTML = rows
+          .slice(-12)
+          .reverse()
+          .map(
+            (row) => `<tr>
+              <td>${row.date}</td>
+              <td>${formatKrw.format(row.portfolioValue)}</td>
+              <td>${Number.isFinite(row.price) ? row.price.toLocaleString("ko-KR") : "-"}</td>
+              <td>${Number.isFinite(row.invested) ? row.invested.toFixed(0) : "-"}</td>
+            </tr>`
+          )
+          .join("");
+
+        chart?.destroy();
+        chart = new Chart(chartCanvas, {
+          type: "line",
+          data: {
+            labels: rows.map((row) => row.date.slice(0, 10)),
+            datasets: [
+              {
+                label: "전략 포트폴리오",
+                data: rows.map((row) => row.portfolioValue),
+                borderColor: "#0f766e",
+                backgroundColor: "rgba(15, 118, 110, 0.12)",
+                borderWidth: 2,
+                fill: true,
+                pointRadius: 0,
+                tension: 0.2
+              },
+              {
+                label: "벤치마크",
+                data: rows.map((row) =>
+                  Number.isFinite(row.benchmarkValue) ? row.benchmarkValue : null
+                ),
+                borderColor: "#475569",
+                borderDash: [6, 5],
+                borderWidth: 2,
+                fill: false,
+                pointRadius: 0,
+                tension: 0.2
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { intersect: false, mode: "index" },
+            scales: {
+              x: { ticks: { maxTicksLimit: 8 } },
+              y: { ticks: { callback: (value) => Number(value).toLocaleString("ko-KR") } }
+            },
+            plugins: {
+              legend: { display: true },
+              tooltip: {
+                callbacks: {
+                  label: (item) => formatKrw.format(item.parsed.y)
+                }
+              }
+            }
+          }
+        });
+      }
+
+      async function loadLatest() {
+        try {
+          const response = await fetch(`${latestPath}?t=${Date.now()}`);
+          if (!response.ok) {
+            throw new Error(`status=${response.status}`);
+          }
+          renderRows(parsePerformanceCsv(await response.text()), latestPath);
+        } catch (error) {
+          sourceLabel.textContent = `최신 성과 파일을 아직 읽지 못했습니다: ${error.message}`;
+        }
+      }
+
+      async function loadLatestPrice() {
+        try {
+          runBrowserBacktestButton.disabled = true;
+          setRunStatus("최신 가격 데이터를 읽는 중입니다.");
+          let response = await fetch(`${latestPricePath}?t=${Date.now()}`);
+          if (response.ok) {
+            priceRows = parsePriceCsv(await response.text());
+            priceSourceLabel.textContent =
+              `${latestPricePath} (${priceRows.length.toLocaleString("ko-KR")}행)`;
+          } else {
+            response = await fetch(
+              `${apiBaseUrl}/api/prices/latest?ticker=${encodeURIComponent(tickerInput.value.trim())}`
+            );
+            const payload = await response.json();
+            if (!response.ok) {
+              throw new Error(payload.detail ?? `status=${response.status}`);
+            }
+            priceRows = payload.prices;
+            priceSourceLabel.textContent =
+              `FastAPI 최신 데이터 (${priceRows.length.toLocaleString("ko-KR")}행)`;
+          }
+          updateRunButtonState();
+          setRunStatus("가격 데이터 준비 완료. 브라우저에서 실행할 수 있습니다.");
+        } catch (error) {
+          priceRows = [];
+          updateRunButtonState();
+          priceSourceLabel.textContent = `최신 가격 파일을 아직 읽지 못했습니다: ${error.message}`;
+          setRunStatus(`가격 데이터 로드 실패: ${error.message}`, true);
+        }
+      }
+
+      async function downloadPriceFromApi() {
+        try {
+          runBrowserBacktestButton.disabled = true;
+          downloadPriceButton.disabled = true;
+          setRunStatus("FastAPI로 pykrx 데이터를 다운로드하는 중입니다.");
+          const response = await fetch(`${apiBaseUrl}/api/download`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ticker: tickerInput.value.trim(),
+              start: startInput.value,
+              end: endInput.value
+            })
+          });
+          const payload = await response.json();
+          if (!response.ok) {
+            throw new Error(payload.detail ?? `status=${response.status}`);
+          }
+          priceRows = payload.prices;
+          priceSourceLabel.textContent =
+            `FastAPI ${payload.ticker} (${priceRows.length.toLocaleString("ko-KR")}행)`;
+          updateRunButtonState();
+          setRunStatus(
+            `다운로드 완료: ${payload.ticker}, ${payload.rows.toLocaleString("ko-KR")}행. 바로 실행할 수 있습니다.`
+          );
+        } catch (error) {
+          setRunStatus(
+            `다운로드 실패: FastAPI 서버가 켜져 있는지 확인하세요. ${error.message}`,
+            true
+          );
+        } finally {
+          downloadPriceButton.disabled = false;
+        }
+      }
+
+      function runBrowserBacktest() {
+        try {
+          if (priceRows.length === 0) {
+            throw new Error("가격 데이터가 없습니다. 최신 가격을 읽거나 가격 CSV를 먼저 여세요.");
+          }
+          const inputs = getStrategyInputs();
+          const rows = simulateMovingAverageStrategy(priceRows, inputs);
+          renderRows(
+            rows,
+            `브라우저 백테스트: ${inputs.ticker}, ${formatStrategyName(inputs.strategy)}, ${inputs.shortWindow}/${inputs.longWindow}, ${formatRebalanceName(inputs.rebalance)}, 투자비중 ${Math.round(inputs.allocation * 100)}%, 비용 ${inputs.feeBps + inputs.slippageBps}bps`
+          );
+          setRunStatus(`실행 완료: ${rows.length.toLocaleString("ko-KR")}개 행 계산`);
+        } catch (error) {
+          sourceLabel.textContent = `입력 오류: ${error.message}`;
+          setRunStatus(`실행 실패: ${error.message}`, true);
+        }
+      }
+
+      performanceFileInput.addEventListener("change", async () => {
+        const file = performanceFileInput.files?.[0];
+        if (!file) return;
+        renderRows(parsePerformanceCsv(await file.text()), file.name);
+      });
+      priceFileInput.addEventListener("change", async () => {
+        const file = priceFileInput.files?.[0];
+        if (!file) return;
+        runBrowserBacktestButton.disabled = true;
+        setRunStatus("가격 CSV를 읽는 중입니다.");
+        priceRows = parsePriceCsv(await file.text());
+        priceSourceLabel.textContent = `${file.name} (${priceRows.length.toLocaleString("ko-KR")}행)`;
+        updateRunButtonState();
+        setRunStatus("가격 데이터 준비 완료. 브라우저에서 실행할 수 있습니다.");
+      });
+      strategyForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        runBrowserBacktest();
+      });
+      reloadButton.addEventListener("click", loadLatest);
+      loadLatestPriceButton.addEventListener("click", loadLatestPrice);
+      downloadPriceButton.addEventListener("click", downloadPriceFromApi);
+      runBrowserBacktestButton.addEventListener("click", runBrowserBacktest);
+      presetButtons.forEach((button) => {
+        button.addEventListener("click", () => applyPreset(button.dataset.preset));
+      });
+      windowButtons.forEach((button) => {
+        button.addEventListener("click", () => applyWindowPreset(button.dataset.window));
+      });
+      loadLatest();
+      loadLatestPrice();
+    </script>
+  </body>
+</html>

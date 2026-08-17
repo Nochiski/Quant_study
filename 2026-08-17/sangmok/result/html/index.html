@@ -2850,6 +2850,12 @@ validated = prepare_strategy(pairs_strategy, engine.capabilities)
 
             <section>
               <h2>현재 실험 앱 실행</h2>
+              <p>
+                현재 웹의 실행 버튼은 FastAPI <code>POST /api/backtests</code>를 호출한다. 서버가
+                PyKRX 워밍업 데이터를 준비하고 csvdir bundle을 ingest한 뒤 Zipline
+                <code>run_algorithm()</code> 결과를 typed JSON으로 반환한다. 아래에서 설계한 커스텀
+                이벤트 엔진을 구현한 것은 아니며, 그 자리를 비교·관찰할 Zipline 기준 실행이다.
+              </p>
               <pre><code class="language-bash"># 프로젝트 의존성을 설치한다.
 cd 2026-08-17/sangmok/implementation
 uv sync

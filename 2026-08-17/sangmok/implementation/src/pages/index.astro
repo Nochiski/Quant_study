@@ -3,18 +3,18 @@ import TooltipLabel from "../components/TooltipLabel.astro";
 import "../styles/global.css";
 
 const tooltips = {
-  strategy: "브라우저에서 바로 계산할 전략 템플릿입니다. Zipline 결과 CSV 확인 기능은 별도로 유지됩니다.",
+  strategy: "FastAPI가 Zipline callback으로 실행할 전략 템플릿입니다.",
   ticker: "실험에 표시할 KRX 종목코드입니다. 예: 삼성전자 005930.",
-  start: "브라우저 백테스트에 포함할 첫 날짜입니다.",
-  end: "브라우저 백테스트에 포함할 마지막 날짜입니다.",
+  start: "Zipline 백테스트 결과에 포함할 첫 날짜입니다. 워밍업 데이터는 서버가 앞에서 더 받습니다.",
+  end: "Zipline 백테스트 결과에 포함할 마지막 날짜입니다.",
   webDownload: "FastAPI 백엔드가 pykrx로 이 종목과 기간의 가격 데이터를 새로 받아옵니다.",
   loadLatest: "마지막으로 저장된 가격 CSV를 읽고, 파일이 없으면 FastAPI 최신 데이터로 폴백합니다.",
-  runBacktest: "현재 가격 데이터와 전략 입력값으로 브라우저에서 즉시 다시 계산합니다.",
+  runBacktest: "FastAPI가 PyKRX 데이터를 준비하고 Zipline bundle을 ingest한 뒤 백테스트를 실행합니다.",
   shortMa: "단기 이동평균 기간입니다. 단기선이 장기선보다 높으면 매수 신호로 봅니다.",
   longMa: "장기 이동평균 기간입니다. 단기 이동평균보다 크게 잡고 충분한 워밍업 데이터가 필요합니다.",
   rebalance: "포지션 비중을 다시 계산하고 바꿀 수 있는 주기입니다.",
   allocation: "매수 신호가 켜졌을 때 목표 투자 비중입니다. 100%는 전액 투자입니다.",
-  capital: "브라우저 시뮬레이션의 초기 투자금입니다.",
+  capital: "Zipline run_algorithm에 전달할 초기 투자금입니다.",
   feeBps: "거래 수수료입니다. 1bp는 0.01%이며 포지션 비중이 바뀔 때 반영합니다.",
   slippageBps: "체결 불리함을 비용으로 본 값입니다. 수수료처럼 포지션 변경 시 반영합니다.",
   finalValue: "선택한 백테스트 마지막 행의 포트폴리오 가치입니다.",
@@ -63,7 +63,7 @@ const tooltips = {
             <h2>1. 데이터와 전략 설정</h2>
             <p id="price-source-label">latest_ohlcv.csv 대기 중</p>
           </div>
-          <div class="status-pill" id="data-status-pill">가격 데이터 없음</div>
+          <div class="status-pill" id="data-status-pill">Zipline 실행 준비</div>
         </div>
         <div class="quick-actions" aria-label="빠른 설정">
           <button type="button" data-preset="sample">샘플 1개월</button>
@@ -151,17 +151,18 @@ const tooltips = {
               저장된 가격 다시 읽기
             </button>
             <button
-              id="run-browser-backtest"
+              id="run-zipline-backtest"
               class="primary-action"
               type="button"
               title={tooltips.runBacktest}
-              disabled
             >
-              백테스트 실행
+              Zipline 백테스트 실행
             </button>
           </div>
         </form>
-        <p id="run-status" class="run-status">가격 데이터를 먼저 불러오세요.</p>
+        <p id="run-status" class="run-status">
+          실행하면 FastAPI가 PyKRX 데이터 준비부터 Zipline 계산까지 처리합니다.
+        </p>
       </section>
 
       <section class="section-heading">
@@ -296,7 +297,7 @@ const tooltips = {
       const reloadButton = document.getElementById("reload-latest");
       const loadLatestPriceButton = document.getElementById("load-latest-price");
       const downloadPriceButton = document.getElementById("download-price");
-      const runBrowserBacktestButton = document.getElementById("run-browser-backtest");
+      const runZiplineBacktestButton = document.getElementById("run-zipline-backtest");
       const strategyForm = document.getElementById("strategy-form");
       const strategyInput = document.getElementById("strategy-input");
       const tickerInput = document.getElementById("ticker-input");
@@ -357,8 +358,9 @@ const tooltips = {
               date: row[dateKey],
               portfolioValue: Number(row.portfolio_value),
               price: Number(row.price),
-              invested: Number(row.invested),
+              invested: parseNumber(pick(row, ["gross_leverage", "invested"])),
               benchmarkValue: Number(row.benchmarkValue),
+              benchmarkPeriodReturn: Number(row.benchmark_period_return),
               algorithmPeriodReturn: Number(row.algorithm_period_return),
               maxDrawdown: Number(row.max_drawdown),
               sharpe: Number(row.sharpe),
@@ -496,10 +498,8 @@ const tooltips = {
 
       function updateRunButtonState() {
         const hasPriceRows = priceRows.length > 0;
-        runBrowserBacktestButton.disabled = !hasPriceRows;
         if (!hasPriceRows) {
-          setDataStatus("가격 데이터 없음", "error");
-          setRunStatus("가격 데이터를 먼저 불러오세요.", true);
+          setDataStatus("Zipline 실행 준비", "neutral");
           return;
         }
         const firstDate = priceRows[0].date.slice(0, 10);
@@ -568,82 +568,6 @@ const tooltips = {
         };
       }
 
-      function meanClose(rows, endIndex, window) {
-        const startIndex = endIndex - window + 1;
-        if (startIndex < 0) return null;
-        const closes = rows.slice(startIndex, endIndex + 1).map((row) => row.close);
-        return closes.reduce((sum, value) => sum + value, 0) / closes.length;
-      }
-
-      function shouldRebalance(rows, index, frequency) {
-        if (index === 0 || frequency === "daily") return true;
-        const date = new Date(rows[index].date);
-        const previousDate = new Date(rows[index - 1].date);
-        if (frequency === "weekly") return date.getDay() < previousDate.getDay();
-        if (frequency === "monthly") return date.getMonth() !== previousDate.getMonth();
-        return true;
-      }
-
-      function getTargetExposure(rows, index, inputs) {
-        if (inputs.strategy === "buy-hold") return inputs.allocation;
-
-        const shortMa = meanClose(rows, index, inputs.shortWindow);
-        const longMa = meanClose(rows, index, inputs.longWindow);
-        if (longMa === null) return 0;
-        if (inputs.strategy === "price-above-ma") {
-          return rows[index].close > longMa ? inputs.allocation : 0;
-        }
-        if (shortMa === null) return 0;
-        return shortMa > longMa ? inputs.allocation : 0;
-      }
-
-      function simulateMovingAverageStrategy(rows, inputs) {
-        const selectedRows = rows.filter((row) => {
-          const date = row.date.slice(0, 10);
-          return (!inputs.start || date >= inputs.start) && (!inputs.end || date <= inputs.end);
-        });
-        if (selectedRows.length < inputs.longWindow) {
-          throw new Error(
-            `장기 MA 계산에 필요한 행이 부족합니다: 행=${selectedRows.length} 장기MA=${inputs.longWindow}`
-          );
-        }
-
-        const tradeCostRate = (inputs.feeBps + inputs.slippageBps) / 10_000;
-        let portfolioValue = inputs.capital;
-        let invested = 0;
-        const performanceRows = [];
-        const benchmarkStartClose = selectedRows[0].close;
-
-        for (let index = 0; index < selectedRows.length; index += 1) {
-          const row = selectedRows[index];
-          if (index > 0 && invested > 0) {
-            const previousClose = selectedRows[index - 1].close;
-            portfolioValue *= 1 + invested * (row.close / previousClose - 1);
-          }
-
-          const shortMa = meanClose(selectedRows, index, inputs.shortWindow);
-          const longMa = meanClose(selectedRows, index, inputs.longWindow);
-          const nextInvested = shouldRebalance(selectedRows, index, inputs.rebalance)
-            ? getTargetExposure(selectedRows, index, inputs)
-            : invested;
-          if (nextInvested !== invested) {
-            portfolioValue *= 1 - Math.abs(nextInvested - invested) * tradeCostRate;
-          }
-          invested = nextInvested;
-
-          performanceRows.push({
-            date: row.date,
-            portfolioValue,
-            price: row.close,
-            invested,
-            benchmarkValue: inputs.capital * (row.close / benchmarkStartClose),
-            shortMa,
-            longMa
-          });
-        }
-        return performanceRows;
-      }
-
       function renderRows(rows, source) {
         if (rows.length === 0) {
           sourceLabel.textContent = `${source}: portfolio_value 행을 찾지 못했습니다`;
@@ -685,10 +609,13 @@ const tooltips = {
         bestDay.textContent = returns.length === 0 ? "-" : formatPct.format(Math.max(...returns));
         worstDay.textContent = returns.length === 0 ? "-" : formatPct.format(Math.min(...returns));
         exposure.textContent = averageExposure === null ? "-" : formatPct.format(averageExposure);
+        const finalBenchmarkPeriodReturn = lastFinite(rows, "benchmarkPeriodReturn");
         const finalBenchmarkValue = rows.at(-1).benchmarkValue;
-        benchmarkReturn.textContent = Number.isFinite(finalBenchmarkValue)
-          ? formatPct.format(finalBenchmarkValue / rows[0].benchmarkValue - 1)
-          : "-";
+        benchmarkReturn.textContent = Number.isFinite(finalBenchmarkPeriodReturn)
+          ? formatPct.format(finalBenchmarkPeriodReturn)
+          : Number.isFinite(finalBenchmarkValue)
+            ? formatPct.format(finalBenchmarkValue / rows[0].benchmarkValue - 1)
+            : "-";
         rowCount.textContent = rows.length.toLocaleString("ko-KR");
         sourceLabel.textContent = source;
 
@@ -769,7 +696,6 @@ const tooltips = {
 
       async function loadLatestPrice() {
         try {
-          runBrowserBacktestButton.disabled = true;
           setRunStatus("최신 가격 데이터를 읽는 중입니다.");
           let response = await fetch(`${latestPricePath}?t=${Date.now()}`);
           if (response.ok) {
@@ -789,7 +715,7 @@ const tooltips = {
               `FastAPI 최신 데이터 (${priceRows.length.toLocaleString("ko-KR")}행)`;
           }
           updateRunButtonState();
-          setRunStatus("가격 데이터 준비 완료. 브라우저에서 실행할 수 있습니다.");
+          setRunStatus("가격 데이터 준비 완료. Zipline 백테스트를 실행할 수 있습니다.");
         } catch (error) {
           priceRows = [];
           updateRunButtonState();
@@ -800,7 +726,6 @@ const tooltips = {
 
       async function downloadPriceFromApi() {
         try {
-          runBrowserBacktestButton.disabled = true;
           downloadPriceButton.disabled = true;
           setRunStatus("FastAPI로 pykrx 데이터를 다운로드하는 중입니다.");
           const response = await fetch(`${apiBaseUrl}/api/download`, {
@@ -833,21 +758,57 @@ const tooltips = {
         }
       }
 
-      function runBrowserBacktest() {
+      async function runZiplineBacktest() {
         try {
-          if (priceRows.length === 0) {
-            throw new Error("가격 데이터가 없습니다. 최신 가격을 읽거나 가격 CSV를 먼저 여세요.");
-          }
           const inputs = getStrategyInputs();
-          const rows = simulateMovingAverageStrategy(priceRows, inputs);
+          runZiplineBacktestButton.disabled = true;
+          setRunStatus("PyKRX 워밍업 데이터 준비 및 Zipline bundle ingest 중입니다.");
+          const response = await fetch(`${apiBaseUrl}/api/backtests`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ticker: inputs.ticker,
+              start: inputs.start,
+              end: inputs.end,
+              strategy: inputs.strategy,
+              short_window: inputs.shortWindow,
+              long_window: inputs.longWindow,
+              rebalance: inputs.rebalance,
+              allocation: inputs.allocation,
+              capital: inputs.capital,
+              fee_bps: inputs.feeBps,
+              slippage_bps: inputs.slippageBps
+            })
+          });
+          const payload = await response.json();
+          if (!response.ok) {
+            throw new Error(payload.detail ?? `status=${response.status}`);
+          }
+          const rows = payload.points.map((point) => ({
+            date: point.date,
+            portfolioValue: point.portfolio_value,
+            price: point.price ?? Number.NaN,
+            invested: point.invested,
+            benchmarkValue: point.benchmark_value ?? Number.NaN,
+            benchmarkPeriodReturn: point.benchmark_period_return ?? Number.NaN,
+            algorithmPeriodReturn: point.algorithm_period_return ?? Number.NaN,
+            maxDrawdown: point.max_drawdown ?? Number.NaN,
+            sharpe: point.sharpe ?? Number.NaN,
+            sortino: point.sortino ?? Number.NaN,
+            algoVolatility: point.algo_volatility ?? Number.NaN
+          }));
           renderRows(
             rows,
-            `브라우저 백테스트: ${inputs.ticker}, ${formatStrategyName(inputs.strategy)}, ${inputs.shortWindow}/${inputs.longWindow}, ${formatRebalanceName(inputs.rebalance)}, 투자비중 ${Math.round(inputs.allocation * 100)}%, 비용 ${inputs.feeBps + inputs.slippageBps}bps`
+            `Zipline: ${inputs.ticker}, ${formatStrategyName(inputs.strategy)}, ${inputs.shortWindow}/${inputs.longWindow}, ${formatRebalanceName(inputs.rebalance)}, 투자비중 ${Math.round(inputs.allocation * 100)}%, 비용 ${inputs.feeBps + inputs.slippageBps}bps`
           );
-          setRunStatus(`실행 완료: ${rows.length.toLocaleString("ko-KR")}개 행 계산`);
+          setRunStatus(
+            `Zipline 실행 완료: ${payload.rows.toLocaleString("ko-KR")}개 거래일 계산`
+          );
         } catch (error) {
-          sourceLabel.textContent = `입력 오류: ${error.message}`;
-          setRunStatus(`실행 실패: ${error.message}`, true);
+          sourceLabel.textContent = `Zipline 실행 오류: ${error.message}`;
+          setRunStatus(`Zipline 실행 실패: ${error.message}`, true);
+        } finally {
+          runZiplineBacktestButton.disabled = false;
         }
       }
 
@@ -859,21 +820,20 @@ const tooltips = {
       priceFileInput.addEventListener("change", async () => {
         const file = priceFileInput.files?.[0];
         if (!file) return;
-        runBrowserBacktestButton.disabled = true;
         setRunStatus("가격 CSV를 읽는 중입니다.");
         priceRows = parsePriceCsv(await file.text());
         priceSourceLabel.textContent = `${file.name} (${priceRows.length.toLocaleString("ko-KR")}행)`;
         updateRunButtonState();
-        setRunStatus("가격 데이터 준비 완료. 브라우저에서 실행할 수 있습니다.");
+        setRunStatus("가격 데이터 준비 완료. Zipline 백테스트를 실행할 수 있습니다.");
       });
       strategyForm.addEventListener("submit", (event) => {
         event.preventDefault();
-        runBrowserBacktest();
+        runZiplineBacktest();
       });
       reloadButton.addEventListener("click", loadLatest);
       loadLatestPriceButton.addEventListener("click", loadLatestPrice);
       downloadPriceButton.addEventListener("click", downloadPriceFromApi);
-      runBrowserBacktestButton.addEventListener("click", runBrowserBacktest);
+      runZiplineBacktestButton.addEventListener("click", runZiplineBacktest);
       presetButtons.forEach((button) => {
         button.addEventListener("click", () => applyPreset(button.dataset.preset));
       });

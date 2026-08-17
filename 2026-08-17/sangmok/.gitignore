@@ -7,6 +7,7 @@ __pycache__/
 
 implementation/data/raw/*.csv
 implementation/data/zipline_csvdir/daily/*.csv
+implementation/data/web_zipline_csvdir/daily/*.csv
 implementation/results/*
 !implementation/results/.gitkeep
 implementation/public/backtests/*.csv

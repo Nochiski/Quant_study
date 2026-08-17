@@ -27,3 +27,7 @@ npm run dev
 개발 앱은 `http://127.0.0.1:4321/app/`, FastAPI 문서는
 `http://127.0.0.1:8000/docs`에서 연다. `result/html`을 정적 서버로 열 때는
 `http://127.0.0.1:4173/index.html`에서 설계 아티팩트와 빌드 앱을 함께 볼 수 있다.
+
+웹의 `Zipline 백테스트 실행` 버튼은 JavaScript 간이 계산을 사용하지 않는다.
+FastAPI `POST /api/backtests`가 PyKRX 워밍업 데이터를 받고, 전용 csvdir bundle을
+ingest한 뒤 Zipline `run_algorithm()` 결과를 화면에 반환한다.

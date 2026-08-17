@@ -355,6 +355,10 @@
         margin: 0 0 8px;
       }
 
+      .subsection-heading {
+        margin-top: 18px;
+      }
+
       p,
       li,
       td {
@@ -1064,7 +1068,9 @@
           <h2>읽는 기준</h2>
           <a href="#protocol-map" data-tab-target="overview">전체 프로토콜</a>
           <a href="#responsibility" data-tab-target="architecture">책임 경계</a>
-          <a href="#contract" data-tab-target="schema">전략 작성 계약</a>
+          <a href="#strategy-story" data-tab-target="schema">전략 한 사이클</a>
+          <a href="#strategy-minimum" data-tab-target="schema">최소 전략 구현</a>
+          <a href="#contract" data-tab-target="schema">타입 참조 시작</a>
           <a href="#requirements" data-tab-target="schema">Requirements 선언</a>
           <a href="#decision-protocol" data-tab-target="schema">Decision / Action</a>
           <a href="#strategy-contexts" data-tab-target="schema">전략별 Context</a>
@@ -1228,21 +1234,204 @@
           </div>
 
           <div id="schema" class="panel stack" hidden>
+            <section id="strategy-story">
+              <p class="eyebrow">먼저 흐름부터</p>
+              <h2>전략 계약을 한 문장으로 이해하기</h2>
+              <div class="callout">
+                엔진이 <code>on_event(ctx, event)</code>를 호출하면, 전략은 현재까지 알 수 있는
+                정보만 읽어 <code>StrategyDecision</code>을 반환한다. 그 판단을 주문과 체결로
+                바꾸고 포트폴리오에 반영하는 일은 엔진이 맡는다.
+              </div>
+              <div class="grid-3">
+                <div class="tile">
+                  <strong>실행 전에 한 번</strong>
+                  <p>전략의 <code>requirements()</code>를 읽어 필요한 과거 데이터와 지원 기능을 준비한다.</p>
+                </div>
+                <div class="tile">
+                  <strong>이벤트마다 반복</strong>
+                  <p>엔진이 Event와 읽기 전용 Context를 주고, 전략은 Decision 하나를 돌려준다.</p>
+                </div>
+                <div class="tile">
+                  <strong>체결될 때만 변경</strong>
+                  <p>Decision이나 Order가 아니라 실제 <code>FillEvent</code>만 현금과 포지션을 바꾼다.</p>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <h2>골든크로스 전략 한 사이클</h2>
+              <p>
+                아래 흐름은 클래스 이름이 아니라 시간 순서로 읽는다. 시작할 때 필요한 것을
+                선언하고, 매 거래일 같은 함수가 호출되며, 마지막 상태 변경은 엔진이 담당한다.
+              </p>
+              <div class="pipeline diagram" aria-label="골든크로스 전략의 한 사이클">
+                <div class="node"><b>1 · 선언</b><span>종가 20일, MARKET 이벤트, 목표·청산 Action 요구</span></div>
+                <div class="node"><b>2 · 호출</b><span>오늘 MarketSnapshot 때문에 on_event 실행</span></div>
+                <div class="node"><b>3 · 조회</b><span>ctx에서 20일 종가와 현재 보유 상태 읽기</span></div>
+                <div class="node"><b>4 · 판단</b><span>5일선 &gt; 20일선인지, 급락 조건인지 계산</span></div>
+                <div class="node"><b>5 · 반환</b><span>목표 100%, 청산 또는 NoAction을 Decision에 담음</span></div>
+                <div class="node"><b>6 · 실행</b><span>엔진이 검증 → 주문 → 체결 → Portfolio 반영</span></div>
+              </div>
+              <div class="callout warning">
+                2~5단계가 전략 코드다. 1단계는 실행 준비 계약이고, 6단계는 공통 엔진 코드다.
+                전략을 추가할 때 Broker나 Portfolio를 다시 구현하지 않는다.
+              </div>
+              <h3 class="subsection-heading">숫자를 넣어 보면</h3>
+              <div class="execution-example" aria-label="골든크로스 판단부터 체결까지의 숫자 예시">
+                <article class="execution-step">
+                  <span class="step-label">EVENT</span>
+                  <strong>8월 17일 장 마감</strong>
+                  <p>5일선 72,000원<br />20일선 70,000원<br />현재 보유 0주</p>
+                </article>
+                <article class="execution-step">
+                  <span class="step-label">DECISION</span>
+                  <strong>목표 비중 100%</strong>
+                  <p>전략은 SetPositionTarget을 반환한다. 아직 주문도 체결도 아니다.</p>
+                </article>
+                <article class="execution-step">
+                  <span class="step-label">ORDER / FILL</span>
+                  <strong>다음 시가에 체결</strong>
+                  <p>엔진이 수량을 계산하고 다음 거래일 71,900원에 체결했다고 시뮬레이션한다.</p>
+                </article>
+                <article class="execution-step result">
+                  <span class="step-label">PORTFOLIO</span>
+                  <strong>Fill만 반영</strong>
+                  <p>체결 수량, 수수료, 남은 현금이 이 시점에 처음 포트폴리오 상태를 바꾼다.</p>
+                </article>
+              </div>
+            </section>
+
+            <section id="contract-map">
+              <h2><code>event</code>, <code>ctx</code>, <code>decision</code>을 나눈 이유</h2>
+              <div class="table-scroll">
+                <table aria-label="전략 계약 객체의 역할">
+                  <thead>
+                    <tr><th>객체</th><th>한 문장 역할</th><th>누가 만드는가</th><th>전략이 하는 일</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><td><code>StrategyRequirements</code></td><td>실행 전에 무엇이 필요한지 선언</td><td>전략</td><td>종목·lookback·이벤트·Action·기능을 채운다.</td></tr>
+                    <tr><td><code>StrategyEvent</code></td><td>왜 지금 전략을 호출했는지 전달</td><td>엔진</td><td>Market, Timer, Fill 등 종류에 따라 분기한다.</td></tr>
+                    <tr><td><code>StrategyContext</code></td><td>현재 시점에 허용된 정보를 조회</td><td>엔진</td><td>과거 가격, 현금, 포지션을 읽기만 한다.</td></tr>
+                    <tr><td><code>StrategyDecision</code></td><td>이번 호출에서 내린 판단 한 건</td><td>전략</td><td>이유와 하나 이상의 Action을 담아 반환한다.</td></tr>
+                    <tr><td><code>StrategyAction</code></td><td>판단을 어떤 방식으로 실행할지 표현</td><td>전략</td><td>목표, 청산, 주문, 취소·정정 중 의미가 맞는 타입을 고른다.</td></tr>
+                    <tr><td><code>Order / Fill / Portfolio</code></td><td>판단 이후의 시장 시뮬레이션과 회계</td><td>엔진</td><td>직접 만들거나 수정하지 않는다.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="grid-2">
+                <div class="tile decision">
+                  <h3>Event와 Context가 따로인 이유</h3>
+                  <p>Event는 “무슨 일이 생겼나”이고 Context는 “그 판단에 필요한 현재 상태를 어떻게 읽나”다. 새 이벤트가 늘어도 조회 API를 중복하지 않는다.</p>
+                </div>
+                <div class="tile decision">
+                  <h3>Decision과 Action이 따로인 이유</h3>
+                  <p>Decision은 한 번의 판단과 공통 메타데이터다. Action은 그 판단 안의 구체적인 목표·청산·주문을 각각 타입으로 구분한다.</p>
+                </div>
+              </div>
+              <div class="callout">
+                <code>ctx</code>가 Requirements를 소유하는 것이 아니다. 전략이 Requirements를 먼저
+                반환하고, 엔진이 그 선언을 검증한 결과로 매 호출의 Context를 만들어 준다.
+              </div>
+            </section>
+
+            <section id="strategy-minimum">
+              <p class="eyebrow">작성자는 이것부터 구현</p>
+              <h2>하나로 이어서 보는 최소 전략 코드</h2>
+              <p>
+                처음 읽을 때는 각 dataclass의 필드보다 아래 세 부분만 본다.
+                <code>requirements()</code>로 준비를 요청하고, <code>on_event()</code>에서 읽고 판단한 뒤,
+                Portfolio를 건드리지 않고 Decision을 반환한다.
+              </p>
+              <pre><code class="language-python">class GoldenCrossStrategy:
+    def __init__(self, instrument: InstrumentId) -&gt; None:
+        # 이 값들은 연구자가 바꾸는 전략 설정이다.
+        self.instrument = instrument
+        self.price_window = HistoryRequest(
+            instruments=(instrument,),
+            field=PriceField.CLOSE,
+            lookback=20,
+        )
+
+    def requirements(self) -&gt; StrategyRequirements:
+        # 1. 실행 전에 엔진이 준비하고 검증할 것을 선언한다.
+        return StrategyRequirements(
+            histories=(self.price_window,),
+            schedule=Schedule.every_session_close(),
+            events=frozenset({EventKind.MARKET}),
+            actions=frozenset({
+                ActionKind.SET_POSITION_TARGET,
+                ActionKind.LIQUIDATE_POSITION,
+            }),
+            features=frozenset(),
+        )
+
+    def on_event(
+        self,
+        ctx: StrategyContext,
+        event: StrategyEvent,
+    ) -&gt; StrategyDecision:
+        # 2. 이 전략은 시장 가격 이벤트에만 반응한다.
+        if not isinstance(event, MarketSnapshot):
+            return StrategyDecision.no_action(ctx.now, "market_event_only")
+
+        # 3. Context에서 선언해 둔 과거 가격과 현재 상태를 읽는다.
+        closes = ctx.history(self.price_window).column(self.instrument)
+        # 최근 20일 고점 대비 종가 낙폭은 전략이 가격 창에서 직접 계산한다.
+        recent_peak = max(closes[-20:])
+        recent_drawdown = closes[-1] / recent_peak - 1.0
+
+        # 4. 급락 시에는 목표 0%가 아니라 긴급 청산 의미를 반환한다.
+        if recent_drawdown &lt;= -0.12:
+            action = LiquidatePosition(
+                instrument=self.instrument,
+                execution=ExecutionPolicy.market_next_available(),
+                cancel_open_orders=True,
+                persistence=LiquidationPersistence.UNTIL_FLAT,
+            )
+            return StrategyDecision.of(ctx.now, action, "emergency_drawdown")
+
+        short_ma = mean(closes[-5:])
+        long_ma = mean(closes[-20:])
+        target_weight = 1.0 if short_ma &gt; long_ma else 0.0
+
+        # 5. 전략은 원하는 상태만 말한다. 주문 수량과 체결은 엔진 책임이다.
+        action = SetPositionTarget(
+            target=WeightTarget(self.instrument, target_weight),
+            execution=ExecutionPolicy.market_next_open(),
+        )
+        return StrategyDecision.of(ctx.now, action, "moving_average_signal")</code></pre>
+              <div class="grid-3">
+                <div class="tile"><strong>전략마다 달라지는 것</strong><p>설정값, Requirements 값, 조회한 데이터를 사용한 판단 로직, 반환할 Action.</p></div>
+                <div class="tile"><strong>항상 같은 것</strong><p><code>requirements()</code>와 <code>on_event(ctx, event)</code> 함수 모양, Decision 반환 타입.</p></div>
+                <div class="tile"><strong>전략이 하지 않는 것</strong><p>주문 수량 확정, 체결 가격 결정, 현금 차감, 포지션 직접 변경.</p></div>
+              </div>
+            </section>
+
+            <section>
+              <p class="eyebrow">여기부터 세부 참조</p>
+              <h2>이제 타입 정의를 읽는 방법</h2>
+              <p>
+                아래 스키마는 앞의 흐름을 구현할 때 컴포넌트 사이에서 의미가 흔들리지 않게 만드는
+                참조 사전이다. 처음부터 필드를 외우지 말고 “누가 만들고, 누가 읽고, 어떤 잘못된
+                상태를 막는가”만 확인한다.
+              </p>
+              <div class="pipeline diagram" aria-label="스키마 참조를 읽는 순서">
+                <div class="node"><b>무엇을 구현하나?</b><span>Strategy Protocol의 두 메서드</span></div>
+                <div class="node"><b>무엇이 필요한가?</b><span>Requirements로 데이터와 기능 선언</span></div>
+                <div class="node"><b>왜 호출됐나?</b><span>Event가 시장·타이머·체결을 구분</span></div>
+                <div class="node"><b>무엇을 읽나?</b><span>Context로 과거 데이터와 현재 상태 조회</span></div>
+                <div class="node"><b>무엇을 돌려주나?</b><span>Decision 안에 typed Action을 담음</span></div>
+                <div class="node"><b>그다음은?</b><span>엔진이 Order·Fill·Portfolio 처리</span></div>
+              </div>
+            </section>
+
             <section id="contract">
-              <h2>전략 I/O 계약</h2>
+              <h2>참조 1 · 모든 전략이 지키는 함수 모양</h2>
               <p>
                 전략 종류가 모멘텀이든 골든크로스든 리밸런싱이든, 엔진이 호출하는 함수 모양은
                 동일해야 한다. 전략별 차이는 어떤 Event를 구독하고 Context를 어떻게 조회하며,
                 어떤 Action을 Decision에 담아 반환하는지에만 둔다.
               </p>
-              <div class="pipeline diagram" aria-label="전략 프로토콜을 읽는 순서">
-                <div class="node"><b>Requirements</b><span>필요한 데이터·이벤트·기능을 실행 전에 선언</span></div>
-                <div class="node"><b>StrategyEvent</b><span>시장·타이머·체결·주문 상태가 호출을 시작</span></div>
-                <div class="node"><b>StrategyContext</b><span>현재까지 확정된 데이터와 상태를 조회</span></div>
-                <div class="node"><b>StrategyDecision</b><span>한 번의 판단과 이유를 불변 객체로 반환</span></div>
-                <div class="node"><b>StrategyAction</b><span>목표·청산·주문 등 실행 의미를 합 타입으로 구분</span></div>
-                <div class="node"><b>Capability</b><span>엔진이 처리할 수 없는 요구를 루프 전에 거절</span></div>
-              </div>
               <pre><code class="language-python">StrategyEvent = (
     MarketSnapshot
     | TimerEvent
@@ -1280,7 +1469,7 @@ class Strategy(Protocol):
             </section>
 
             <section id="requirements">
-              <h2>Requirements: 전략이 먼저 요구사항을 선언한다</h2>
+              <h2>참조 2 · Requirements 필드</h2>
               <p>
                 <code>StrategyContext</code>가 Requirements를 소유하는 구조가 아니다. 전략이 공통
                 <code>StrategyRequirements</code> 타입의 값을 반환하고, 엔진은 그 선언을 검증한 뒤
@@ -1328,7 +1517,7 @@ class StrategyRequirements:
             </section>
 
             <section id="decision-protocol">
-              <h2>StrategyDecision과 Action 합 타입</h2>
+              <h2>참조 3 · StrategyDecision과 Action 합 타입</h2>
               <p>
                 최상위 출력 타입은 하나로 유지하고, 실제 의사결정 의미는 서로 다른 Action 타입으로
                 나눈다. 새 기능은 기존 타입에 nullable 필드를 붙이지 않고 새로운 Action variant로 추가한다.
@@ -1365,6 +1554,21 @@ class StrategyDecision:
     reason: str | None = None
 
     @classmethod
+    def of(
+        cls,
+        as_of: datetime,
+        action: StrategyAction,
+        reason: str | None = None,
+    ) -&gt; "StrategyDecision":
+        # 단일 Action도 항상 tuple envelope로 감싼다.
+        return cls(
+            schema_version=1,
+            as_of=as_of,
+            actions=(action,),
+            reason=reason,
+        )
+
+    @classmethod
     def no_action(
         cls,
         as_of: datetime,
@@ -1383,7 +1587,7 @@ class StrategyDecision:
             </section>
 
             <section>
-              <h2>목표·청산 Action 스키마</h2>
+              <h2>참조 4 · 목표·청산 Action 스키마</h2>
               <div class="grid-2">
                 <div class="contract-box">
                   <h3>종목과 목표값</h3>
@@ -1477,14 +1681,32 @@ class ExecutionPolicy:
     style: ExecutionStyle
     timing: ExecutionTiming
     time_in_force: TimeInForce
-    max_participation: float | None = None</code></pre>
+    max_participation: float | None = None
+
+    @classmethod
+    def market_next_open(cls) -&gt; "ExecutionPolicy":
+        # 일봉 종가 신호의 기본 실행 정책이다.
+        return cls(
+            ExecutionStyle.MARKET,
+            ExecutionTiming.NEXT_OPEN,
+            TimeInForce.DAY,
+        )
+
+    @classmethod
+    def market_next_available(cls) -&gt; "ExecutionPolicy":
+        # 신호 이후 처음 가능한 가격에 시장가로 실행한다.
+        return cls(
+            ExecutionStyle.MARKET,
+            ExecutionTiming.NEXT_AVAILABLE,
+            TimeInForce.DAY,
+        )</code></pre>
                   <div class="schema-rule">일봉 종가로 판단한 Decision은 같은 종가에 체결하지 않고 NEXT_OPEN 같은 미래 시점을 사용한다.</div>
                 </div>
               </div>
             </section>
 
             <section>
-              <h2>주문 생명주기와 Basket Action 스키마</h2>
+              <h2>참조 5 · 주문 생명주기와 Basket Action</h2>
               <div class="grid-2">
                 <div class="contract-box">
                   <h3>주문 종류</h3>
@@ -1573,7 +1795,7 @@ class NoAction:
             </section>
 
             <section>
-              <h2>Capability 협상 스키마</h2>
+              <h2>참조 6 · Capability 협상</h2>
               <p>스키마에 타입이 있다는 이유만으로 현재 엔진이 실행할 수 있다고 가정하지 않는다.</p>
               <pre><code class="language-python">class SupportLevel(Enum):
     IMPLEMENTED = "implemented"
@@ -1663,7 +1885,7 @@ engine.validate_requirements(
             </section>
 
             <section>
-              <h2>Typed Schema</h2>
+              <h2>참조 7 · 엔진 데이터 타입</h2>
               <p>
                 아래 타입은 단순 데이터 묶음이 아니라 컴포넌트 사이의 계약이다. 각 카드에서
                 생성 주체와 소비 주체를 분리해 보면 엔진 책임 경계가 더 명확해진다.

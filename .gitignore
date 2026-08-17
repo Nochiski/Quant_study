@@ -216,3 +216,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# 데이터/산출물 — 코드로 재현하고 git 에는 넣지 않는다
+**/data/
+*.csv
+*.parquet
+*.feather
+*.h5
+*.db
+!tests/fixtures/**/*.csv

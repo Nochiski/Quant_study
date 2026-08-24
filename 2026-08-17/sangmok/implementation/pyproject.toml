@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Personal Zipline Reloaded backtesting tutorial using PyKRX data."
 requires-python = ">=3.11,<3.12"
 dependencies = [
+    "backtest-engine",
     "exchange-calendars>=4.5",
     "fastapi>=0.116",
     "matplotlib>=3.8",
@@ -12,6 +13,10 @@ dependencies = [
     "uvicorn>=0.35",
     "zipline-reloaded>=3.0",
 ]
+
+# 루트의 커스텀 백테스트 엔진 — Zipline 대조 하네스(engine_compare)가 사용한다.
+[tool.uv.sources]
+backtest-engine = { path = "../../..", editable = true }
 
 [dependency-groups]
 dev = [

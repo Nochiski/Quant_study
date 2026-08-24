@@ -41,3 +41,9 @@ uv run ruff check src tests examples
 uv run pyright src tests examples
 uv run python examples/run_demo.py  # 005930 일봉으로 골든크로스 백테스트
 ```
+
+## 검증: Zipline 대조
+
+엔진 회계는 Zipline과의 세션 단위 equity 대조로 검증됐다 (buy-hold 오차 0,
+골든크로스 최대 3e-16). 실행 방법과 리포트는 `tests/manual/README.md` 참고.
+

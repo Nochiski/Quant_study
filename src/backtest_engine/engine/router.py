@@ -12,7 +12,6 @@ v1 구현 범위 (Capability와 일치):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import ROUND_FLOOR, Decimal
 
 from backtest_engine.engine.orders import OrderManager
 from backtest_engine.errors import (
@@ -21,6 +20,7 @@ from backtest_engine.errors import (
     UndeclaredActionReturned,
     UnsupportedActionValue,
 )
+from backtest_engine.sizing import floor_delta_shares
 from backtest_engine.types.actions import (
     ActionKind,
     ExecutionPolicy,
@@ -156,9 +156,7 @@ class DecisionRouter:
             current_position = portfolio.position(instrument)
             current_notional = current_position.market_value if current_position else 0.0
             delta_notional = target_notional - current_notional
-            quantity = Decimal(abs(delta_notional) / reference_price).quantize(
-                Decimal(1), rounding=ROUND_FLOOR
-            )
+            quantity = floor_delta_shares(delta_notional, reference_price)
             if quantity <= 0:
                 continue
             side = Side.BUY if delta_notional > 0 else Side.SELL

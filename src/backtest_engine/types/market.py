@@ -37,6 +37,14 @@ class Bar:
     volume: int
 
     def __post_init__(self) -> None:
+        if min(self.open, self.high, self.low, self.close) <= 0:
+            # 가격 0은 거래정지 마커 등 결측의 다른 표기다. 0원 체결·0원 평가가
+            # 회계를 조용히 오염시키므로 Bar 단계에서 거른다.
+            raise ValueError(
+                "bar prices must be > 0 — "
+                f"instrument={self.instrument.symbol} ts={self.ts} "
+                f"o={self.open} h={self.high} l={self.low} c={self.close}"
+            )
         body_high = max(self.open, self.close)
         body_low = min(self.open, self.close)
         if self.high < body_high or self.low > body_low:

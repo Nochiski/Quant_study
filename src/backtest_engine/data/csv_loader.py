@@ -27,9 +27,10 @@ class LoadStatus(Enum):
 class OhlcPolicy(Enum):
     """OHLC 불변조건(high ≥ open/close, low ≤ open/close) 위반 행 처리 정책.
 
-    실제 벤더 데이터(예: PyKRX 수정주가)에는 close가 high를 넘는 행이
-    존재한다. STRICT는 그런 행을 FORMAT_ERROR로 거절하고, CLAMP는
-    high/low를 몸통을 포함하도록 넓힌 뒤 보정 행 수를 결과에 남긴다.
+    실제 벤더 데이터(예: PyKRX 수정주가)에는 close가 high를 넘는 행과
+    가격이 0인 거래정지 행이 존재한다. STRICT는 그런 행을 FORMAT_ERROR로
+    거절한다. CLAMP는 high/low를 몸통을 포함하도록 넓히고(보정 행 수 기록),
+    가격이 0 이하인 행은 거래 불가 마커로 보고 drop한다(제거 행 수 기록).
     """
 
     STRICT = "strict"
@@ -42,6 +43,7 @@ class LoadResult:
     status: LoadStatus
     detail: str | None = None
     repaired_rows: int = 0  # CLAMP 정책으로 high/low를 보정한 행 수
+    dropped_rows: int = 0  # CLAMP 정책으로 제거한 비양수 가격(거래정지) 행 수
 
     @property
     def ok(self) -> bool:
@@ -87,6 +89,7 @@ def load_bars_csv(
         bars: list[Bar] = []
         previous_ts: datetime | None = None
         repaired_rows = 0
+        dropped_rows = 0
         for line_number, row in enumerate(reader, start=2):
             try:
                 ts = datetime.strptime(row[0], "%Y-%m-%d")
@@ -97,6 +100,21 @@ def load_bars_csv(
                     float(row[4]),
                 )
                 if ohlc_policy is OhlcPolicy.CLAMP:
+                    if min(open_price, high, low, close) <= 0:
+                        # 거래정지 마커(가격 0) — 세션 자체가 없는 것으로 취급한다.
+                        dropped_rows += 1
+                        if previous_ts is not None and ts <= previous_ts:
+                            return LoadResult(
+                                bars=(),
+                                status=LoadStatus.FORMAT_ERROR,
+                                detail=(
+                                    f"timestamps must be strictly increasing — path={path} "
+                                    f"line={line_number} previous={previous_ts.date()} "
+                                    f"got={ts.date()}"
+                                ),
+                            )
+                        previous_ts = ts
+                        continue
                     clamped_high = max(high, open_price, close)
                     clamped_low = min(low, open_price, close)
                     if clamped_high != high or clamped_low != low:
@@ -138,4 +156,9 @@ def load_bars_csv(
             status=LoadStatus.NO_DATA,
             detail=f"no data rows — path={path} instrument={instrument.symbol}",
         )
-    return LoadResult(bars=tuple(bars), status=LoadStatus.OK, repaired_rows=repaired_rows)
+    return LoadResult(
+        bars=tuple(bars),
+        status=LoadStatus.OK,
+        repaired_rows=repaired_rows,
+        dropped_rows=dropped_rows,
+    )

@@ -33,6 +33,8 @@ def main() -> int:
         return 1
     if loaded.repaired_rows:
         print(f"[data prep] clamped OHLC on {loaded.repaired_rows} rows")
+    if loaded.dropped_rows:
+        print(f"[data prep] dropped {loaded.dropped_rows} halt rows (non-positive price)")
 
     feed = DataFeed(loaded.bars)
     config = RunConfig(run_id="demo-005930-golden-cross", initial_cash=10_000_000, fee_bps=15)

@@ -107,6 +107,12 @@ class FillEvent:
                 f"fill quantity must be > 0 — fill_id={self.fill_id} "
                 f"order_id={self.order_id} quantity={self.quantity}"
             )
+        if self.price <= 0:
+            raise ValueError(
+                f"fill price must be > 0 — fill_id={self.fill_id} "
+                f"order_id={self.order_id} instrument={self.instrument.symbol} "
+                f"price={self.price}"
+            )
 
 
 StrategyEvent = (

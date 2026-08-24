@@ -54,6 +54,27 @@ class TestCsvLoader:
         assert result.status is LoadStatus.FORMAT_ERROR
         assert result.detail is not None and "line=2" in result.detail
 
+    def test_clamp_policy_drops_halt_rows(self, tmp_path: Path) -> None:
+        # 삼성전자 액면분할 정지 구간에서 관찰된 패턴: open/high/low=0, close만 존재
+        path = write_csv(
+            tmp_path / "halt.csv",
+            [
+                "2018-04-27,53380,53639,52440,53000,606216",
+                "2018-04-30,0,0,0,53000,0",
+                "2018-05-04,53000,53900,51800,51900,39565391",
+            ],
+        )
+        result = load_bars_csv(path, INSTRUMENT, ohlc_policy=OhlcPolicy.CLAMP)
+        assert result.ok
+        assert result.dropped_rows == 1
+        assert [bar.ts.day for bar in result.bars] == [27, 4]
+
+    def test_strict_policy_rejects_halt_rows(self, tmp_path: Path) -> None:
+        path = write_csv(tmp_path / "halt_strict.csv", ["2018-04-30,0,0,0,53000,0"])
+        result = load_bars_csv(path, INSTRUMENT)
+        assert result.status is LoadStatus.FORMAT_ERROR
+        assert result.detail is not None and "line=2" in result.detail
+
     def test_clamp_policy_repairs_and_counts(self, tmp_path: Path) -> None:
         # close(28000) > high(27999): 실제 PyKRX 수정주가에서 관찰되는 패턴
         path = write_csv(

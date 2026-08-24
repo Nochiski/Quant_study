@@ -23,6 +23,19 @@ class TestBar:
                 volume=10,
             )
 
+    def test_zero_price_rejected(self) -> None:
+        # 거래정지 행(open=0)이 0원 체결로 이어지는 것을 Bar 단계에서 차단
+        with pytest.raises(ValueError, match="prices must be > 0"):
+            Bar(
+                ts=day(1),
+                instrument=make_instrument(),
+                open=0.0,
+                high=0.0,
+                low=0.0,
+                close=53_000.0,
+                volume=0,
+            )
+
     def test_negative_volume_rejected(self) -> None:
         with pytest.raises(ValueError, match="volume"):
             Bar(

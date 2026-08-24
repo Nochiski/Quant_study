@@ -15,6 +15,7 @@ from zipline.api import (
     symbol,
 )
 from zipline.finance import commission, slippage
+from zipline.utils.calendar_utils import get_calendar
 
 
 class StrategyKind(StrEnum):
@@ -133,6 +134,9 @@ def run_moving_average_backtest(
     return run_algorithm(
         start=pd.Timestamp(start),
         end=pd.Timestamp(end),
+        # 기본값은 XNYS(뉴욕) 캘린더라 한국 휴일이 세션으로, 미국 휴일이 휴장으로
+        # 잘못 처리된다 (엔진 대조 하네스에서 발견). KRX 번들에는 XKRX를 쓴다.
+        trading_calendar=get_calendar("XKRX"),
         initialize=make_initialize(ticker, transaction_cost_bps=fee_bps + slippage_bps),
         handle_data=make_handle_data(
             short_window_days,

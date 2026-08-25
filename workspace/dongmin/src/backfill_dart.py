@@ -11,7 +11,7 @@
   · 예산 카운터는 키별로 분리한다. 한 카운터로 합산하면 전환 자체가 일어나지 않는다.
   · 재무 하한은 2015 사업연도(실측: 2014 이하는 전 엔드포인트 013 무자료).
 """
-import os, sys, json, time, sqlite3, argparse
+import os, sys, json, time, sqlite3, argparse, hashlib
 from datetime import datetime, timedelta
 
 BASE = os.environ.get("QL_HOME") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -101,37 +101,64 @@ def call(con, name, corp, key_id, key, year=None, reprt="11011", fs=None):
     time.sleep(PACE)
     return rows, v, st
 
-def store(con, name, rows, extra):
-    """응답 필드를 그대로 컬럼으로. 원장이므로 PK 는 전체 컬럼 — 완전중복만 제거한다.
+def row_hash(cols, vals):
+    """행 내용만으로 만드는 안정 해시. collected_at 은 넣지 않는다 — 넣으면 매 수집마다 달라진다.
 
-    자연키를 추측해 PK 로 쓰면 추측이 틀렸을 때 조용히 덮어쓴다(실측: elestock 4,112→5행).
-    전체 컬럼 PK 는 무엇이 키인지 몰라도 손실이 0이고, 키 판정은 통합 단계로 미룰 수 있다.
+    None 과 빈 문자열을 구분해서 직렬화한다. 둘을 같게 보면 서로 다른 응답이 한 행으로 접힌다.
+    """
+    payload = {c: (None if v is None else str(v)) for c, v in zip(cols, vals)}
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()[:32]
+
+
+def store(con, name, rows, extra):
+    """응답을 원문 그대로 적재한다. PK 는 행 해시 하나.
+
+    설계 근거:
+      · 컬럼은 rows[0] 이 아니라 전 행의 키 합집합으로 정한다. 응답이 ragged 라서
+        앞쪽 행에 없는 필드가 뒤에 나온다 — 분기 재무는 52행째부터 누계 4필드가 붙는다.
+        첫 행 기준이면 그 컬럼이 아예 안 생기고 값이 조용히 버려진다(실측 유실 12%).
+      · 요청 파라미터는 req_ 접두어로 분리한다. 응답에 같은 이름의 필드가 있으면
+        그것이 요청값을 덮는다 — dart_audit.bsns_year 는 '제38기(당기)' 같은 기수 라벨이라
+        요청 연도로 조인이 안 된다(실측 39/39행 오염).
+      · PK 를 전체 컬럼으로 두면 그중 하나라도 NULL 일 때 SQLite 가 NULL≠NULL 로 봐서
+        재수집마다 행이 증식한다(실측 audit +9/회, hyslr +20/회). 행 해시는 NULL 을
+        값으로 직렬화하므로 그 경로가 막힌다.
     """
     if not rows: return 0
     s = SPEC[name]; tbl = s["tbl"]
-    cols = sorted(set(c for c in rows[0] if c not in ("status", "message")) | set(extra))
+    keys = sorted(set().union(*(set(r) for r in rows)) - {"status", "message"})
+    req  = {f"req_{k}": v for k, v in extra.items()}
+    cols = keys + sorted(req)
+
     have = {r[1] for r in con.execute(f"PRAGMA table_info({tbl})")}
     if not have:
         ddl = ", ".join(f'"{c}" TEXT' for c in cols)
-        con.execute(f'CREATE TABLE {tbl} ({ddl}, collected_at TEXT NOT NULL, '
-                    f'PRIMARY KEY ({", ".join(chr(34)+c+chr(34) for c in cols)}))')
-        have = set(cols)
+        con.execute(f'CREATE TABLE {tbl} (row_hash TEXT PRIMARY KEY, {ddl}, '
+                    f'collected_at TEXT NOT NULL)')
+        have = set(cols) | {"row_hash", "collected_at"}
     for c in cols:
         if c not in have:
             print(f"    [{tbl}] 새 필드 {c} — 컬럼 추가")
             con.execute(f'ALTER TABLE {tbl} ADD COLUMN "{c}" TEXT'); have.add(c)
+
     now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
-    ph = ",".join("?" * (len(cols) + 1))
+    vals = []
+    for r in rows:
+        v = [r.get(k) for k in keys] + [req[k] for k in sorted(req)]
+        vals.append([row_hash(cols, v)] + v + [now])
+    ph = ",".join("?" * (len(cols) + 2))
+    quoted = ",".join(chr(34) + c + chr(34) for c in cols)
     before = con.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
     # IGNORE 여야 collected_at 이 "최초 관측 시각"으로 남는다.
     # REPLACE 면 주간 스냅샷을 돌릴 때마다 덮여서 언제 처음 봤는지가 사라진다.
     con.executemany(
-        f'INSERT OR IGNORE INTO {tbl} ({",".join(chr(34)+c+chr(34) for c in cols)}, collected_at) VALUES ({ph})',
-        [[r.get(c, extra.get(c)) for c in cols] + [now] for r in rows])
+        f'INSERT OR IGNORE INTO {tbl} (row_hash, {quoted}, collected_at) VALUES ({ph})', vals)
     con.commit()
     gained = con.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0] - before
     if gained < len(rows):
-        # 재실행이면 정상(이미 있던 행). 첫 적재인데 줄면 진짜 손실이다.
+        # 재실행이면 정상(이미 있던 행). 첫 적재인데 줄면 DART 응답 자체의 중복이다.
         print(f"    [{tbl}] 응답 {len(rows)}행 중 신규 {gained}행 (중복 {len(rows)-gained})")
     return len(rows)
 

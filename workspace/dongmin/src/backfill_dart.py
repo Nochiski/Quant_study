@@ -22,13 +22,21 @@ DB      = f"{BASE}/data/raw/dart.db"
 # 키별 롤링24h 상한. kael 은 프로덕션 크론(1일 2회) 몫 ~300 을 남긴다.
 CAPS    = {"k2": 19_800, "kael": 19_500}
 PACE    = 0.25            # 초당 4콜. DART 는 초당 제한이 미공지라 보수적으로
+# 013(무자료) 재확인 정책. 최근 N개 사업연도는 잠정일 수 있다고 보고,
+# 마지막 확인으로부터 D일이 지났으면 한 번 더 쏜다.
+RECHECK_YEARS = 2
+RECHECK_DAYS  = 30
+
 RETRY_MAX  = 3            # 800/900 서버 오류 재시도 횟수
 RETRY_BASE = 5.0          # 지수 백오프 기준(초). 5 → 10 → 20
 
 # 단계. 1차부터 순차로 돌린다. 재무제표만 먼저 받으면 나머지를 기다리지 않고 쓸 수 있다.
-STAGES  = {1: ["fin"],
-           2: ["company", "elestock", "majorstock"],
-           3: ["dividend", "shares", "capital", "tesstk", "hyslr", "audit"]}
+# company 가 1차다. acc_mt(결산월)가 013 의 영구/잠정 판별에 전제이기 때문이다 —
+# 3월 결산 법인은 period_end 가 9개월 어긋나므로 12월 결산 폴백으로는 판정할 수 없다.
+STAGES  = {1: ["company"],
+           2: ["fin"],
+           3: ["dividend", "shares", "capital", "tesstk", "hyslr", "audit",
+               "elestock", "majorstock"]}
 
 # 엔드포인트 스펙. key = 자연키 컬럼(응답 필드명), axis = 수집 축
 SPEC = {
@@ -128,12 +136,15 @@ def call(con, name, corp, key_id, key, year=None, reprt="11011", fs=None):
         log(st, len(rows))          # 실패도 예산에 계상한다 — DART 는 실패 콜도 셀 수 있다
         time.sleep(PACE)
 
-        if v not in ("retry", "exc") or attempt == RETRY_MAX:
+        # v 는 verdict("error"), st 가 "exc" 다. v 로 "exc" 를 검사하면 예외 경로가
+        # 첫 시도에서 빠져나가 재시도가 0 회가 된다.
+        if (v != "retry" and st != "exc") or attempt == RETRY_MAX:
             if v == "unknown":
                 print(f"    ? 모르는 status={st} — endpoint={s['ep']} corp={corp} "
                       f"year={year or '-'} reprt={reprt}. VERDICT 에 추가할 것")
             return rows, v, st
-        # 800/900 은 DART 서버 측 일시 오류다. 즉시 다시 쏘면 같은 답이 온다.
+        # 800/900 은 DART 서버 측 일시 오류, exc 는 네트워크·JSON 예외다.
+        # 즉시 다시 쏘면 같은 답이 온다.
         wait = RETRY_BASE * (2 ** attempt)
         print(f"    · {st} 재시도 {attempt+1}/{RETRY_MAX} — {wait:.0f}초 대기")
         time.sleep(wait)
@@ -162,12 +173,18 @@ def store(con, name, rows, extra):
       · PK 를 전체 컬럼으로 두면 그중 하나라도 NULL 일 때 SQLite 가 NULL≠NULL 로 봐서
         재수집마다 행이 증식한다(실측 audit +9/회, hyslr +20/회). 행 해시는 NULL 을
         값으로 직렬화하므로 그 경로가 막힌다.
+      · 해시에 응답 배열 인덱스(resp_ord)를 넣는다. DART 는 한 응답 안에 바이트 단위
+        동일한 행을 여러 개 준다 — 배당 미지급사의 보통주/우선주 행이 그렇다.
+        내용만 해시하면 INSERT OR IGNORE 가 그걸 1행으로 접는다(실측 유실
+        audit 13.3% · tesstk 10.9% · dividend 5.3% · capital 2.0%).
+        재무·지분공시는 행마다 구분 키가 있어 유실이 0 이었지만, 엔드포인트마다
+        따로 판단하면 새 엔드포인트에서 같은 실수가 반복된다. 전 엔드포인트에 건다.
     """
     if not rows: return 0
     s = SPEC[name]; tbl = s["tbl"]
     keys = sorted(set().union(*(set(r) for r in rows)) - {"status", "message"})
     req  = {f"req_{k}": v for k, v in extra.items()}
-    cols = keys + sorted(req)
+    cols = keys + sorted(req) + ["resp_ord"]
 
     have = {r[1] for r in con.execute(f"PRAGMA table_info({tbl})")}
     if not have:
@@ -182,8 +199,8 @@ def store(con, name, rows, extra):
 
     now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
     vals = []
-    for r in rows:
-        v = [r.get(k) for k in keys] + [req[k] for k in sorted(req)]
+    for i, r in enumerate(rows):
+        v = [r.get(k) for k in keys] + [req[k] for k in sorted(req)] + [str(i)]
         vals.append([row_hash(cols, v)] + v + [now])
     ph = ",".join("?" * (len(cols) + 2))
     quoted = ",".join(chr(34) + c + chr(34) for c in cols)
@@ -195,8 +212,9 @@ def store(con, name, rows, extra):
     con.commit()
     gained = con.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0] - before
     if gained < len(rows):
-        # 재실행이면 정상(이미 있던 행). 첫 적재인데 줄면 DART 응답 자체의 중복이다.
-        print(f"    [{tbl}] 응답 {len(rows)}행 중 신규 {gained}행 (중복 {len(rows)-gained})")
+        # resp_ord 를 키에 넣은 뒤로 응답 내 중복은 유실을 만들지 않는다.
+        # 여기가 찍히면 전부 재실행(이미 적재된 행)이다.
+        print(f"    [{tbl}] 응답 {len(rows)}행 중 신규 {gained}행 (기적재 {len(rows)-gained})")
     return len(rows)
 
 def fetch(con, name, corp, y, keys, blocked, reprt="11011"):
@@ -267,18 +285,31 @@ def main():
     # 둔갑해 정상 종료한다. 경로 의도를 먼저 판정해서 조용한 오작동을 막는다.
     looks_like_path = ("/" in a.corps) or a.corps.endswith((".txt", ".csv", ".lst"))
     if os.path.exists(a.corps):
-        corps = [l.strip() for l in open(a.corps) if l.strip()]
+        # corps.txt 는 "corp_code<TAB>first_year<TAB>last_year". 탭이 없으면
+        # 구형 포맷(코드만)이라 게이팅 없이 전 연도를 돈다.
+        corps, gate = [], {}
+        for line in open(a.corps):
+            line = line.strip()
+            if not line: continue
+            parts = line.split("\t")
+            corps.append(parts[0])
+            if len(parts) == 3:
+                gate[parts[0]] = (parts[1], parts[2])
     elif looks_like_path:
         print(f"  ✖ --corps 파일을 찾을 수 없다: {a.corps}"); con.close(); return
     else:
         corps = [c.strip() for c in a.corps.split(",") if c.strip()]
+        gate = {}
     bad = [c for c in corps if not (len(c) == 8 and c.isdigit())]
     if bad:
         print(f"  ✖ corp_code 형식 오류 {len(bad)}건 (8자리 숫자여야 한다): {bad[:5]}")
         con.close(); return
 
+    # 기본 상한은 작년이다. 올해 사업연도 정기보고서는 아직 제출 시점이 오지 않아
+    # 전건 013 이 오고, 그게 ingest_log 에 no_data 로 종결 기록되면 내년에 실제
+    # 공시가 올라와도 다시 부르지 않는다(DEFECT-B02 경로).
     years = ([y.strip() for y in a.years.split(",") if y.strip()] if a.years
-             else [str(y) for y in range(2015, datetime.utcnow().year + 1)])
+             else [str(y) for y in range(2015, datetime.utcnow().year)])
 
     if a.only:
         # strip() 없이 매칭하면 "a, b" 의 뒤쪽이 조용히 탈락한다.
@@ -313,11 +344,31 @@ def main():
     print(f"  · 키 {[k for k, _ in keys]} · 대상 {len(corps)}사 × {names}")
     blocked = set()
 
-    # bsns_year 는 corp 축에서 None 이다. SQLite 는 PK 안의 NULL 을 막지 않고
-    # 파이썬 튜플 비교에서도 None 이 그대로 매치되므로 저장/조회 키가 일치한다.
+    # bsns_year 는 corp 축에서 빈 문자열이다. 저장(:y or "")과 조회 키가 일치한다.
+    #
+    # 013 을 무조건 종결로 보면 안 된다. 013 은 두 가지를 같은 코드로 말한다 —
+    # "그 회사에 원래 그 자료가 없다"(영구)와 "아직 공시 시점이 안 왔다"(잠정).
+    # 후자를 종결로 적으면 나중에 실제 공시가 올라와도 다시 부르지 않는다.
+    # 감사의견 거절로 사업보고서를 늦게 내는 종목이 그렇게 사라진다.
+    #
+    # 정확한 판별은 acc_mt 로 period_end 를 구해 +161일을 보는 것이지만(설계 §3-1),
+    # 그 전에 값싼 근사를 쓴다: 최근 RECHECK_YEARS 사업연도의 no_data 는
+    # RECHECK_DAYS 가 지났으면 한 번 더 확인한다. 오래된 연도의 no_data 는 종결.
+    # 30분 캐치업 틱이 같은 유닛을 반복 재시도하지 않게 ts 조건이 필요하다.
+    cutoff_year = str(datetime.utcnow().year - RECHECK_YEARS)
+    cutoff_ts = (datetime.utcnow() - timedelta(days=RECHECK_DAYS)).strftime("%Y-%m-%dT%H:%M:%S")
     done = {(r[0], r[1], r[2], r[3]) for r in con.execute(
         "SELECT name, corp_code, bsns_year, reprt_code FROM ingest_log "
-        "WHERE status IN ('ok','no_data')")}
+        "WHERE status = 'ok' "
+        "   OR (status = 'no_data' AND (bsns_year < ? OR ts > ?))",
+        (cutoff_year, cutoff_ts))}
+    pending = con.execute(
+        "SELECT COUNT(*) FROM ingest_log "
+        "WHERE status = 'no_data' AND bsns_year >= ? AND ts <= ?",
+        (cutoff_year, cutoff_ts)).fetchone()[0]
+    if pending:
+        print(f"  013 재확인 대상 {pending:,}유닛 "
+              f"(FY{cutoff_year} 이후 · 마지막 확인 {RECHECK_DAYS}일 경과)")
     used0 = {kid: budget_used(con, kid) for kid, _ in keys}
     print("  키 " + " · ".join(f"{kid} {used0[kid]:,}/{CAPS.get(kid,19500):,}" for kid, _ in keys))
     print(f"  대상 {len(corps)}종목 × {len(names)}종 × {len(years)}년 × 보고서 {reprts}")
@@ -325,10 +376,14 @@ def main():
 
     tot = {}
     for corp in corps:
+        # 상장구간 밖 연도는 쏘지 않는다. 폐지 종목을 올해까지 도는 것이
+        # corp_year 축 예산을 배로 부풀리는 원인이다.
+        lo, hi = gate.get(corp, ("0000", "9999"))
+        yrs = [y for y in years if lo <= y <= hi]
         for name in names:
             s_ = SPEC[name]
             corp_year = s_["axis"] == "corp_year"
-            ys = years if corp_year else [""]
+            ys = yrs if corp_year else [""]
             rcs = reprts if corp_year else [""]
             for y in ys:
               for rc in rcs:

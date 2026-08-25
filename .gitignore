@@ -216,3 +216,27 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# 데이터/산출물 — 코드로 재현하고 git 에는 넣지 않는다
+**/data/
+*.csv
+*.parquet
+*.feather
+*.h5
+*.db
+!tests/fixtures/**/*.csv
+
+# ── 프로젝트 전용 ───────────────────────────────────────────
+# macOS
+.DS_Store
+
+# API 인증 토큰 — 절대 커밋 금지
+*_token.json
+.kis_token.json
+.kw_token.json
+*.token
+
+# 원장/파생 데이터 (서버가 정본, 로컬은 작업 사본)
+workspace/*/data/
+workspace/*/logs/
+workspace/*/scratchpad/

@@ -1,0 +1,3516 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>백테스트 엔진 설계 노트</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #191a1c;
+        --muted: #60646d;
+        --soft: #f5f6f8;
+        --paper: #ffffff;
+        --line: #d9dde5;
+        --accent: #0f766e;
+        --accent-2: #b42318;
+        --blue: #2563eb;
+        --amber: #a16207;
+        --green-soft: #e6f4ef;
+        --blue-soft: #eaf1ff;
+        --red-soft: #fff0ed;
+        --amber-soft: #fff7df;
+        --shadow: 0 18px 42px rgb(17 24 39 / 9%);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        background:
+          linear-gradient(180deg, #f8fafc 0, #eef2f7 310px, #f7f8fb 100%);
+        color: var(--ink);
+        margin: 0;
+      }
+
+      button,
+      input,
+      select {
+        font: inherit;
+      }
+
+      a {
+        color: var(--accent);
+        font-weight: 800;
+        text-decoration: none;
+      }
+
+      a:hover {
+        text-decoration: underline;
+      }
+
+      code {
+        background: #edf1f5;
+        border: 1px solid #dfe4ea;
+        border-radius: 6px;
+        color: #0f172a;
+        padding: 2px 5px;
+      }
+
+      pre {
+        background: #0d1117;
+        border: 1px solid #293241;
+        border-radius: 8px;
+        color: #c9d1d9;
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        font-size: 13.5px;
+        line-height: 1.7;
+        margin: 12px 0 0;
+        overflow-x: auto;
+        padding: 46px 18px 18px;
+        position: relative;
+        tab-size: 4;
+      }
+
+      pre code {
+        background: transparent;
+        border: 0;
+        color: inherit;
+        display: block;
+        padding: 0;
+      }
+
+      .code-language {
+        color: #8b949e;
+        font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+        font-size: 11px;
+        font-weight: 900;
+        left: 18px;
+        letter-spacing: 0;
+        position: absolute;
+        text-transform: uppercase;
+        top: 14px;
+      }
+
+      .copy-code {
+        background: #21262d;
+        border: 1px solid #3b434e;
+        border-radius: 6px;
+        color: #c9d1d9;
+        cursor: pointer;
+        font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+        font-size: 11px;
+        font-weight: 850;
+        min-height: 28px;
+        padding: 4px 9px;
+        position: absolute;
+        right: 10px;
+        top: 8px;
+      }
+
+      .copy-code:hover,
+      .copy-code:focus-visible {
+        background: #30363d;
+        border-color: #6e7681;
+        outline: none;
+      }
+
+      .tok-keyword,
+      .tok-operator {
+        color: #ff7b72;
+      }
+
+      .tok-variable {
+        color: #79c0ff;
+      }
+
+      .tok-function {
+        color: #d2a8ff;
+      }
+
+      .tok-type,
+      .tok-decorator {
+        color: #ffa657;
+      }
+
+      .tok-string {
+        color: #a5d6ff;
+      }
+
+      .tok-number {
+        color: #79c0ff;
+      }
+
+      .tok-comment {
+        color: #8b949e;
+        font-style: italic;
+      }
+
+      .tok-builtin,
+      .tok-command {
+        color: #7ee787;
+      }
+
+      .tok-flag {
+        color: #ffa657;
+      }
+
+      .shell {
+        margin: 0 auto;
+        max-width: 1240px;
+        padding: 26px 20px 72px;
+      }
+
+      .hero {
+        display: grid;
+        gap: 28px;
+        grid-template-columns: minmax(0, 1.1fr) 360px;
+        padding: 26px 0 18px;
+      }
+
+      .eyebrow {
+        color: var(--accent);
+        font-size: 13px;
+        font-weight: 900;
+        letter-spacing: 0;
+        margin: 0 0 12px;
+      }
+
+      h1 {
+        font-size: 56px;
+        line-height: 1.03;
+        margin: 0;
+        max-width: 760px;
+      }
+
+      .lead {
+        color: #3f4652;
+        font-size: 18px;
+        line-height: 1.72;
+        margin: 18px 0 0;
+        max-width: 800px;
+      }
+
+      .hero-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 22px;
+      }
+
+      .primary-link,
+      .secondary-link {
+        align-items: center;
+        border-radius: 8px;
+        display: inline-flex;
+        font-weight: 900;
+        min-height: 42px;
+        padding: 10px 14px;
+      }
+
+      .primary-link {
+        background: var(--accent);
+        color: #fff;
+      }
+
+      .secondary-link {
+        background: #fff;
+        border: 1px solid var(--line);
+        color: var(--ink);
+      }
+
+      .summary-panel {
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: var(--shadow);
+        padding: 18px;
+      }
+
+      .summary-panel h2 {
+        font-size: 16px;
+        margin: 0 0 12px;
+      }
+
+      .status-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .status-item {
+        border-left: 4px solid var(--accent);
+        background: #f8fafc;
+        padding: 10px 12px;
+      }
+
+      .status-item strong {
+        display: block;
+        font-size: 13px;
+        margin-bottom: 3px;
+      }
+
+      .status-item span {
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      .tabs-wrap {
+        background: rgb(247 248 251 / 92%);
+        border-bottom: 1px solid var(--line);
+        border-top: 1px solid var(--line);
+        margin: 8px -20px 0;
+        padding: 10px 20px;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+
+      .tabs {
+        display: flex;
+        gap: 8px;
+        margin: 0 auto;
+        max-width: 1240px;
+        overflow-x: auto;
+      }
+
+      .tab-button {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        color: #3f4652;
+        cursor: pointer;
+        flex: 0 0 auto;
+        font-size: 14px;
+        font-weight: 900;
+        min-height: 40px;
+        padding: 9px 12px;
+      }
+
+      .tab-button[aria-selected="true"] {
+        background: #111827;
+        border-color: #111827;
+        color: #fff;
+      }
+
+      .workspace {
+        display: grid;
+        gap: 18px;
+        grid-template-columns: 250px minmax(0, 1fr);
+        padding-top: 20px;
+      }
+
+      .toc {
+        align-self: start;
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 16px;
+        position: sticky;
+        top: 72px;
+      }
+
+      .toc h2 {
+        font-size: 14px;
+        margin: 0 0 12px;
+      }
+
+      .toc a {
+        color: var(--muted);
+        display: block;
+        font-size: 13px;
+        font-weight: 800;
+        padding: 7px 0;
+      }
+
+      .panel[hidden] {
+        display: none;
+      }
+
+      .stack {
+        display: grid;
+        gap: 16px;
+      }
+
+      section {
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 22px;
+        scroll-margin-top: 76px;
+      }
+
+      h2 {
+        font-size: 23px;
+        letter-spacing: 0;
+        margin: 0 0 8px;
+      }
+
+      h3 {
+        font-size: 16px;
+        margin: 0 0 8px;
+      }
+
+      .subsection-heading {
+        margin-top: 18px;
+      }
+
+      #schema > section {
+        padding: 28px 30px;
+      }
+
+      #schema > section > p:not(.eyebrow) {
+        color: #414751;
+        font-size: 16px;
+        line-height: 1.8;
+        max-width: 72ch;
+      }
+
+      #schema > section > .eyebrow {
+        margin-bottom: 8px;
+      }
+
+      #schema > section > h2 {
+        font-size: 25px;
+        line-height: 1.35;
+      }
+
+      .contract-sentence {
+        align-items: center;
+        background: #f8fafc;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        display: flex;
+        flex-wrap: wrap;
+        font-size: 15px;
+        gap: 10px;
+        margin-top: 20px;
+        padding: 18px;
+      }
+
+      .contract-sentence span,
+      .contract-sentence strong {
+        color: var(--ink);
+      }
+
+      .contract-sentence .contract-arrow {
+        color: var(--accent);
+        font-size: 20px;
+        font-weight: 900;
+      }
+
+      .lesson-flow {
+        list-style: none;
+        margin: 18px 0 0;
+        padding: 0;
+      }
+
+      .lesson-flow li {
+        align-items: start;
+        border-bottom: 1px solid var(--line);
+        display: grid;
+        gap: 12px;
+        grid-template-columns: 34px minmax(0, 1fr) auto;
+        padding: 14px 0;
+      }
+
+      .lesson-flow li:last-child {
+        border-bottom: 0;
+      }
+
+      .lesson-number {
+        align-items: center;
+        background: #111827;
+        border-radius: 50%;
+        color: #fff;
+        display: inline-flex;
+        font-size: 13px;
+        font-weight: 900;
+        height: 30px;
+        justify-content: center;
+        width: 30px;
+      }
+
+      .lesson-flow strong {
+        color: var(--ink);
+        display: block;
+        font-size: 16px;
+      }
+
+      .lesson-flow p {
+        font-size: 14px;
+        margin: 4px 0 0;
+      }
+
+      .lesson-owner {
+        background: #eef2f7;
+        border-radius: 999px;
+        color: #46505f;
+        font-size: 12px;
+        font-weight: 900;
+        padding: 5px 8px;
+        white-space: nowrap;
+      }
+
+      .lesson-owner.strategy {
+        background: var(--green-soft);
+        color: #155e54;
+      }
+
+      .role-list {
+        border-top: 1px solid var(--line);
+        margin-top: 18px;
+      }
+
+      .role-row {
+        align-items: start;
+        border-bottom: 1px solid var(--line);
+        display: grid;
+        gap: 16px;
+        grid-template-columns: 92px minmax(0, 1fr) 110px;
+        padding: 16px 0;
+      }
+
+      .role-phase {
+        color: var(--accent);
+        font-size: 13px;
+        font-weight: 900;
+      }
+
+      .role-row strong {
+        color: var(--ink);
+      }
+
+      .role-row p {
+        font-size: 14px;
+        margin: 4px 0 0;
+      }
+
+      .role-owner {
+        color: #535b67;
+        font-size: 12px;
+        font-weight: 850;
+        text-align: right;
+      }
+
+      .reference-divider {
+        background: #f8fafc;
+        border-style: dashed;
+      }
+
+      p,
+      li,
+      td {
+        color: var(--muted);
+        line-height: 1.65;
+      }
+
+      p {
+        margin: 8px 0 0;
+      }
+
+      ul,
+      ol {
+        margin: 10px 0 0;
+        padding-left: 22px;
+      }
+
+      table {
+        border-collapse: collapse;
+        margin-top: 14px;
+        width: 100%;
+      }
+
+      .table-scroll {
+        max-width: 100%;
+        overflow-x: auto;
+      }
+
+      th,
+      td {
+        border-bottom: 1px solid var(--line);
+        padding: 12px 10px;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        color: #384150;
+        font-size: 13px;
+      }
+
+      .grid-2,
+      .grid-3,
+      .grid-4 {
+        display: grid;
+        gap: 12px;
+        margin-top: 14px;
+      }
+
+      .grid-2 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .grid-3 {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .grid-4 {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .tile,
+      .metric,
+      .entity,
+      .contract-box {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 15px;
+      }
+
+      .tile strong,
+      .metric strong {
+        color: var(--ink);
+        display: block;
+        margin-bottom: 6px;
+      }
+
+      .tile p,
+      .metric p {
+        font-size: 14px;
+        margin: 0;
+      }
+
+      .schema-purpose {
+        color: #3f4652;
+        font-size: 14px;
+        margin: 0;
+        min-height: 46px;
+      }
+
+      .schema-meta {
+        border-top: 1px solid #dfe4ea;
+        display: grid;
+        gap: 8px;
+        margin: 14px 0 0;
+        padding-top: 12px;
+      }
+
+      .schema-meta > div {
+        display: grid;
+        gap: 8px;
+        grid-template-columns: 54px 1fr;
+      }
+
+      .schema-meta dt {
+        color: var(--ink);
+        font-size: 12px;
+        font-weight: 900;
+      }
+
+      .schema-meta dd {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+        margin: 0;
+      }
+
+      .schema-rule {
+        background: #eef8f6;
+        border-left: 3px solid var(--accent);
+        color: #285b56;
+        font-size: 12px;
+        font-weight: 750;
+        line-height: 1.55;
+        margin-top: 12px;
+        padding: 9px 10px;
+      }
+
+      .metric {
+        min-height: 120px;
+      }
+
+      .metric.good {
+        background: var(--green-soft);
+        border-color: #b8dfd2;
+      }
+
+      .metric.warn {
+        background: var(--amber-soft);
+        border-color: #efd386;
+      }
+
+      .metric.bad {
+        background: var(--red-soft);
+        border-color: #ffc1b7;
+      }
+
+      .callout {
+        background: #eef8f6;
+        border: 1px solid #afd9d2;
+        border-radius: 8px;
+        color: #0f4f49;
+        font-weight: 850;
+        line-height: 1.6;
+        margin-top: 14px;
+        padding: 14px 16px;
+      }
+
+      .warning {
+        background: #fff7ed;
+        border-color: #fed7aa;
+        color: #7c2d12;
+      }
+
+      .diagram {
+        margin-top: 16px;
+      }
+
+      .pipeline {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+      }
+
+      .node {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        min-height: 112px;
+        padding: 14px;
+        position: relative;
+      }
+
+      .node::after {
+        color: var(--accent);
+        content: "→";
+        font-size: 22px;
+        font-weight: 900;
+        position: absolute;
+        right: -17px;
+        top: 38px;
+        z-index: 1;
+      }
+
+      .node:last-child::after {
+        content: "";
+      }
+
+      .node b {
+        color: var(--ink);
+        display: block;
+        margin-bottom: 6px;
+      }
+
+      .node span {
+        color: var(--muted);
+        display: block;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .swimlane {
+        display: grid;
+        gap: 10px;
+        margin-top: 16px;
+      }
+
+      .lane {
+        display: grid;
+        gap: 0;
+        grid-template-columns: 140px repeat(4, minmax(0, 1fr));
+      }
+
+      .lane-label {
+        align-items: center;
+        background: #111827;
+        border-radius: 8px 0 0 8px;
+        color: #fff;
+        display: flex;
+        font-weight: 900;
+        justify-content: center;
+        padding: 12px;
+      }
+
+      .lane-cell {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-left: 0;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.45;
+        min-height: 66px;
+        padding: 12px;
+      }
+
+      .lane-cell:last-child {
+        border-radius: 0 8px 8px 0;
+      }
+
+      .sequence {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        display: grid;
+        grid-template-columns: 160px 1fr 160px;
+        margin-top: 16px;
+        overflow: hidden;
+      }
+
+      .seq-head {
+        background: #111827;
+        color: #fff;
+        font-weight: 900;
+        padding: 12px;
+        text-align: center;
+      }
+
+      .seq-row {
+        display: contents;
+      }
+
+      .seq-row > div {
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        min-height: 52px;
+        padding: 12px;
+      }
+
+      .seq-arrow {
+        color: var(--accent);
+        font-weight: 900;
+        text-align: center;
+      }
+
+      .erd {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        margin-top: 16px;
+      }
+
+      .entity {
+        padding: 0;
+        overflow: hidden;
+      }
+
+      .entity h3 {
+        background: #111827;
+        color: #fff;
+        font-size: 14px;
+        margin: 0;
+        padding: 11px 13px;
+      }
+
+      .entity ul {
+        list-style: none;
+        margin: 0;
+        padding: 8px 0;
+      }
+
+      .entity li {
+        border-top: 1px solid #e2e8f0;
+        color: #475569;
+        font-size: 13px;
+        line-height: 1.35;
+        padding: 8px 13px;
+      }
+
+      .entity li:first-child {
+        border-top: 0;
+      }
+
+      .badge {
+        background: #edf1f5;
+        border: 1px solid #dfe4ea;
+        border-radius: 999px;
+        color: #475569;
+        display: inline-block;
+        font-size: 12px;
+        font-weight: 900;
+        margin: 0 6px 6px 0;
+        padding: 5px 8px;
+      }
+
+      .status-pill {
+        border: 1px solid;
+        border-radius: 999px;
+        display: inline-block;
+        font-size: 11px;
+        font-weight: 900;
+        padding: 4px 7px;
+        white-space: nowrap;
+      }
+
+      .status-defined {
+        background: var(--blue-soft);
+        border-color: #b7ccff;
+        color: #1746a2;
+      }
+
+      .status-missing {
+        background: var(--amber-soft);
+        border-color: #efd386;
+        color: #7c4a03;
+      }
+
+      .status-unsupported {
+        background: var(--red-soft);
+        border-color: #ffc1b7;
+        color: var(--accent-2);
+      }
+
+      .decision {
+        border-left: 4px solid var(--blue);
+      }
+
+      .decision h3 {
+        color: var(--blue);
+      }
+
+      .example-grid {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        margin-top: 16px;
+      }
+
+      .code-example {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .code-example h3 {
+        background: #f8fafc;
+        border-bottom: 1px solid var(--line);
+        font-size: 14px;
+        margin: 0;
+        padding: 11px 14px;
+      }
+
+      .code-example.bad h3 {
+        background: var(--red-soft);
+        color: var(--accent-2);
+      }
+
+      .code-example.good h3 {
+        background: var(--green-soft);
+        color: #0f5c54;
+      }
+
+      .code-example pre {
+        border-radius: 0;
+        margin: 0;
+        min-height: 305px;
+      }
+
+      .execution-example {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        margin-top: 16px;
+      }
+
+      .execution-step {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        min-height: 152px;
+        padding: 14px;
+        position: relative;
+      }
+
+      .execution-step::after {
+        color: var(--accent);
+        content: "\2192";
+        font-size: 22px;
+        font-weight: 900;
+        position: absolute;
+        right: -17px;
+        top: 62px;
+        z-index: 1;
+      }
+
+      .execution-step:last-child::after {
+        content: "";
+      }
+
+      .execution-step .step-label {
+        color: var(--accent);
+        display: block;
+        font-size: 12px;
+        font-weight: 900;
+        margin-bottom: 8px;
+      }
+
+      .execution-step strong {
+        display: block;
+        margin-bottom: 7px;
+      }
+
+      .execution-step p {
+        font-size: 13px;
+        margin: 0;
+      }
+
+      .execution-step.result {
+        background: var(--green-soft);
+        border-color: #b8dfd2;
+      }
+
+      .tooltip {
+        border-bottom: 1px dotted currentColor;
+        cursor: help;
+        font-weight: 850;
+        position: relative;
+      }
+
+      .tooltip:hover::after,
+      .tooltip:focus::after {
+        background: #111827;
+        border-radius: 8px;
+        bottom: calc(100% + 8px);
+        color: #fff;
+        content: attr(data-tip);
+        font-size: 12px;
+        font-weight: 700;
+        left: 0;
+        line-height: 1.45;
+        max-width: 280px;
+        min-width: 220px;
+        padding: 9px 10px;
+        position: absolute;
+        z-index: 20;
+      }
+
+      .checklist {
+        display: grid;
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      .check {
+        align-items: start;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        display: grid;
+        gap: 10px;
+        grid-template-columns: 24px 1fr;
+        padding: 12px;
+      }
+
+      .check span:first-child {
+        align-items: center;
+        background: var(--accent);
+        border-radius: 50%;
+        color: #fff;
+        display: inline-flex;
+        font-size: 12px;
+        font-weight: 900;
+        height: 22px;
+        justify-content: center;
+        width: 22px;
+      }
+
+      .state-machine {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        margin-top: 16px;
+      }
+
+      .state {
+        background: var(--blue-soft);
+        border: 1px solid #b7ccff;
+        border-radius: 8px;
+        min-height: 92px;
+        padding: 13px;
+        position: relative;
+      }
+
+      .state::after {
+        color: var(--blue);
+        content: "→";
+        font-weight: 900;
+        position: absolute;
+        right: -12px;
+        top: 34px;
+      }
+
+      .state:last-child::after {
+        content: "";
+      }
+
+      .state b {
+        display: block;
+        margin-bottom: 5px;
+      }
+
+      .state span {
+        color: #42526e;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      @media (max-width: 980px) {
+        h1 {
+          font-size: 46px;
+        }
+
+        .hero,
+        .workspace {
+          grid-template-columns: 1fr;
+        }
+
+        .toc {
+          display: none;
+        }
+
+        .pipeline,
+        .erd,
+        .grid-3,
+        .grid-4,
+        .state-machine,
+        .execution-example {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .lane {
+          grid-template-columns: 1fr;
+        }
+
+        .lane-label,
+        .lane-cell,
+        .lane-cell:last-child {
+          border: 1px solid #e2e8f0;
+          border-radius: 8px;
+        }
+      }
+
+      @media (max-width: 640px) {
+        h1 {
+          font-size: 36px;
+        }
+
+        .shell {
+          padding-left: 14px;
+          padding-right: 14px;
+        }
+
+        .tabs-wrap {
+          margin-left: -14px;
+          margin-right: -14px;
+          padding-left: 14px;
+          padding-right: 14px;
+        }
+
+        section {
+          padding: 18px;
+        }
+
+        #schema > section {
+          padding: 20px 18px;
+        }
+
+        .contract-sentence {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .contract-sentence .contract-arrow {
+          transform: rotate(90deg);
+        }
+
+        .lesson-flow li,
+        .role-row {
+          grid-template-columns: 34px minmax(0, 1fr);
+        }
+
+        .lesson-owner {
+          grid-column: 2;
+          justify-self: start;
+          text-align: left;
+        }
+
+        .role-phase,
+        .role-row > div,
+        .role-owner {
+          grid-column: 1 / -1;
+          justify-self: start;
+          text-align: left;
+        }
+
+        .pipeline,
+        .grid-2,
+        .grid-3,
+        .grid-4,
+        .erd,
+        .state-machine,
+        .example-grid,
+        .execution-example {
+          grid-template-columns: 1fr;
+        }
+
+        .node::after,
+        .state::after,
+        .execution-step::after {
+          bottom: -20px;
+          left: 50%;
+          right: auto;
+          top: auto;
+          transform: translateX(-50%) rotate(90deg);
+        }
+
+        .sequence {
+          grid-template-columns: 1fr;
+        }
+
+        .seq-head:nth-child(2),
+        .seq-head:nth-child(3) {
+          display: none;
+        }
+
+        .seq-row {
+          display: grid;
+        }
+
+        .seq-row > div {
+          border-top: 1px solid var(--line);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Quant Study · Backtest Engine Design Artifact</p>
+          <h1>백테스트 엔진을 만들기 위한 학습 노트</h1>
+          <p class="lead">
+            이 문서는 Zipline 사용법 정리가 아니라, 직접 이벤트 드리븐 백테스트 엔진을 만들기
+            전에 필요한 <strong>전략 I/O 계약</strong>, <strong>엔진 책임 경계</strong>,
+            <strong>Decision/Action 프로토콜</strong>, <strong>Capability 협상</strong>,
+            <strong>Rust 포팅 경로</strong>를 고정하기 위한 설계 아티팩트다.
+          </p>
+          <div class="hero-actions">
+            <a class="primary-link" href="./app/index.html">관찰용 웹앱 열기</a>
+            <a class="secondary-link" href="../../implementation/src/quant_study/api.py">FastAPI 코드 보기</a>
+          </div>
+        </div>
+
+        <aside class="summary-panel" aria-label="현재 설계 결론">
+          <h2>현재 결론</h2>
+          <div class="status-list">
+            <div class="status-item">
+              <strong>전략은 Python</strong>
+              <span>전략 연구와 실험 속도가 중요하므로 Python으로 유지한다.</span>
+            </div>
+            <div class="status-item">
+              <strong>엔진 코어는 Rust 후보</strong>
+              <span>이벤트 루프, 체결, 포트폴리오 회계는 타입과 성능 이점이 있다.</span>
+            </div>
+            <div class="status-item">
+              <strong>출력은 StrategyDecision</strong>
+              <span>목표 비중, 긴급 청산, 주문, 취소·정정을 서로 다른 Action 타입으로 표현한다.</span>
+            </div>
+            <div class="status-item">
+              <strong>스키마와 구현 상태는 분리</strong>
+              <span>프로토콜 자리는 먼저 정의하고 미구현 기능은 Capability에서 명시적으로 거절한다.</span>
+            </div>
+          </div>
+        </aside>
+      </header>
+
+      <div class="tabs-wrap">
+        <nav class="tabs" aria-label="문서 탭">
+          <button class="tab-button" type="button" data-tab="overview" aria-selected="true">1. 전체 지도</button>
+          <button class="tab-button" type="button" data-tab="architecture" aria-selected="false">2. 책임 경계</button>
+          <button class="tab-button" type="button" data-tab="schema" aria-selected="false">3. 전략 프로토콜</button>
+          <button class="tab-button" type="button" data-tab="eventloop" aria-selected="false">4. 실행 흐름</button>
+          <button class="tab-button" type="button" data-tab="rust" aria-selected="false">5. Rust 경계</button>
+          <button class="tab-button" type="button" data-tab="validation" aria-selected="false">6. 구현 상태</button>
+        </nav>
+      </div>
+
+      <div class="workspace">
+        <aside class="toc" aria-label="탭 안에서 볼 기준">
+          <h2>읽는 기준</h2>
+          <a href="#protocol-map" data-tab-target="overview">전체 프로토콜</a>
+          <a href="#responsibility" data-tab-target="architecture">책임 경계</a>
+          <a href="#strategy-story" data-tab-target="schema">전략 한 사이클</a>
+          <a href="#strategy-minimum" data-tab-target="schema">최소 전략 구현</a>
+          <a href="#contract" data-tab-target="schema">타입 참조 시작</a>
+          <a href="#requirements" data-tab-target="schema">Requirements 선언</a>
+          <a href="#decision-protocol" data-tab-target="schema">Decision / Action</a>
+          <a href="#strategy-contexts" data-tab-target="schema">전략별 Context</a>
+          <a href="#events" data-tab-target="schema">이벤트 모델</a>
+          <a href="#emergency-exit" data-tab-target="eventloop">긴급 청산 흐름</a>
+          <a href="#portfolio" data-tab-target="eventloop">포트폴리오 회계</a>
+          <a href="#rust-boundary" data-tab-target="rust">Python/Rust 경계</a>
+          <a href="#capability-status" data-tab-target="validation">Capability 상태</a>
+        </aside>
+
+        <div class="content">
+          <div id="overview" class="panel stack">
+            <section id="why">
+              <h2>이 실험의 진짜 목적</h2>
+              <p>
+                지금 만든 Zipline/PyKRX/FastAPI/Astro 코드는 최종 산출물이 아니다. 목적은
+                “백테스트 엔진을 직접 작성할 때 무엇을 엔진이 알고 있어야 하고, 무엇을 전략에게
+                맡겨야 하는가”를 눈으로 확인하는 것이다.
+              </p>
+              <div class="grid-3">
+                <div class="metric good">
+                  <strong>배우려는 것</strong>
+                  <p>전략 함수의 입력, 출력, 상태 조회, 주문 변환, 체결, 포트폴리오 회계.</p>
+                </div>
+                <div class="metric warn">
+                  <strong>임시로 쓰는 것</strong>
+                  <p>Zipline은 기준 동작 관찰용, PyKRX는 한국 주식 데이터 수집용.</p>
+                </div>
+                <div class="metric bad">
+                  <strong>구현과 구분할 것</strong>
+                  <p>전체 스키마는 먼저 정의하되 실제 엔진 구현 여부는 Capability로 따로 표시한다.</p>
+                </div>
+              </div>
+              <div class="callout">
+                설계 기준은 하나다. 전략은 “판단”만 하고, 엔진은 “시장 시뮬레이션과 회계”를
+                책임진다.
+              </div>
+            </section>
+
+            <section id="protocol-map">
+              <h2>위에서 아래로 보는 전체 프로토콜</h2>
+              <p>
+                전략을 실행하기 전 계약 협상부터 Fill이 포트폴리오를 바꾸는 순간까지를 두 줄로
+                고정한다. 아래 타입 이름은 이후 탭에서 같은 이름으로 상세화한다.
+              </p>
+              <div class="pipeline diagram">
+                <div class="node"><b>Requirements</b><span>데이터, 이벤트, Action, 기능 요구 선언</span></div>
+                <div class="node"><b>Capabilities</b><span>IMPLEMENTED / NOT_IMPLEMENTED / UNSUPPORTED 협상</span></div>
+                <div class="node"><b>StrategyEvent</b><span>Market, Timer, Fill, OrderUpdate 전달</span></div>
+                <div class="node"><b>Context</b><span>과거 데이터와 포트폴리오 읽기 전용 조회</span></div>
+                <div class="node"><b>Decision</b><span>전략 판단을 typed Action 묶음으로 반환</span></div>
+                <div class="node"><b>Validator</b><span>충돌, 미구현 기능, 시간 규칙 검증</span></div>
+              </div>
+              <div class="pipeline diagram">
+                <div class="node"><b>Action Router</b><span>목표·청산·주문·취소 경로 분기</span></div>
+                <div class="node"><b>Risk Manager</b><span>한도 검사와 전역 위험 규칙 적용</span></div>
+                <div class="node"><b>Order Manager</b><span>실행 가능한 OrderEvent 생성</span></div>
+                <div class="node"><b>BrokerSim</b><span>가격, 부분체결, 수수료, 슬리피지</span></div>
+                <div class="node"><b>FillEvent</b><span>실제로 체결된 가격과 수량 기록</span></div>
+                <div class="node"><b>Portfolio</b><span>Fill만 적용하고 Snapshot·성과 생성</span></div>
+              </div>
+              <div class="callout">
+                프로토콜에 타입이 존재하는 것과 엔진이 그 타입을 처리할 수 있는 것은 별개다.
+                자리는 먼저 정의하되 구현되지 않은 Action은 실행 전에 명시적으로 거절한다.
+              </div>
+            </section>
+
+            <section>
+              <h2>문서를 읽는 순서</h2>
+              <div class="grid-3">
+                <div class="tile"><strong>1 · 전체 지도</strong><p>어떤 타입이 어느 컴포넌트 사이를 이동하는지 먼저 본다.</p></div>
+                <div class="tile"><strong>2 · 책임 경계</strong><p>전략, 엔진, BrokerSim, Portfolio가 무엇을 소유하는지 나눈다.</p></div>
+                <div class="tile"><strong>3 · 전략 프로토콜</strong><p>Requirements, Event, Context, Decision, Action 스키마를 고정한다.</p></div>
+                <div class="tile"><strong>4 · 실행 흐름</strong><p>평상시 리밸런싱과 급락 시장가 청산이 어떻게 다른지 따라간다.</p></div>
+                <div class="tile"><strong>5 · Rust 경계</strong><p>Python callback과 Rust enum 사이의 변환 및 배치 전략을 본다.</p></div>
+                <div class="tile"><strong>6 · 구현 상태</strong><p>스키마 정의 여부와 실제 지원 여부를 Capability 표로 구분한다.</p></div>
+              </div>
+            </section>
+
+            <section>
+              <h2>C4 Context Diagram</h2>
+              <p>내가 만드는 엔진이 전체 리서치 흐름에서 어디에 놓이는지 먼저 고정한다.</p>
+              <div class="pipeline diagram">
+                <div class="node"><b>PyKRX</b><span>한국 주식 OHLCV 원천 데이터</span></div>
+                <div class="node"><b>Data Prep</b><span>정렬, 결측, 컬럼 표준화</span></div>
+                <div class="node"><b>Python Strategy</b><span>requirements + on_event 구현</span></div>
+                <div class="node"><b>Backtest Engine</b><span>이벤트, 체결, 회계</span></div>
+                <div class="node"><b>Result Store</b><span>equity, orders, fills</span></div>
+                <div class="node"><b>Web Artifact</b><span>지표와 설계 관찰</span></div>
+              </div>
+            </section>
+          </div>
+
+          <div id="architecture" class="panel stack" hidden>
+            <section id="responsibility">
+              <h2>엔진 컴포넌트 구조</h2>
+              <p>전략을 바꿔도 엔진 내부 컴포넌트의 책임은 흔들리지 않아야 한다.</p>
+              <div class="pipeline diagram">
+                <div class="node"><b>Data Portal</b><span>MarketSnapshot과 PriceWindow 준비</span></div>
+                <div class="node"><b>Context Factory</b><span>선언된 데이터만 읽기 전용으로 노출</span></div>
+                <div class="node"><b>Strategy Runner</b><span>Python on_event 호출</span></div>
+                <div class="node"><b>Decision Router</b><span>Action 검증과 실행 경로 분기</span></div>
+                <div class="node"><b>BrokerSim</b><span>Order 체결, 비용, 유동성 처리</span></div>
+                <div class="node"><b>Portfolio</b><span>Fill 적용과 평가·성과 기록</span></div>
+              </div>
+              <div class="grid-3">
+                <div class="tile"><strong>Calendar</strong><p>세션, 타이머, 리밸런싱 일정을 결정한다.</p></div>
+                <div class="tile"><strong>Capability Registry</strong><p>스키마 타입별 실제 구현 상태를 제공한다.</p></div>
+                <div class="tile"><strong>Event Store</strong><p>Decision, Order, Fill, Snapshot을 append-only로 저장한다.</p></div>
+              </div>
+            </section>
+
+            <section>
+              <h2>책임 분리 Swimlane</h2>
+              <div class="swimlane diagram">
+                <div class="lane">
+                  <div class="lane-label">Python</div>
+                  <div class="lane-cell">Strategy Config / State</div>
+                  <div class="lane-cell">requirements()</div>
+                  <div class="lane-cell">on_event()</div>
+                  <div class="lane-cell">Decision 반환</div>
+                </div>
+                <div class="lane">
+                  <div class="lane-label">Rust Core</div>
+                  <div class="lane-cell">Capability 검증</div>
+                  <div class="lane-cell">이벤트 / Context 생성</div>
+                  <div class="lane-cell">Action 라우팅 / Risk</div>
+                  <div class="lane-cell">체결 / 포트폴리오 회계</div>
+                </div>
+                <div class="lane">
+                  <div class="lane-label">Boundary</div>
+                  <div class="lane-cell">Requirements 변환</div>
+                  <div class="lane-cell">StrategyEvent 전달</div>
+                  <div class="lane-cell">Context read-only view</div>
+                  <div class="lane-cell">StrategyDecision 변환</div>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <h2>핵심 설계 결정</h2>
+              <div class="grid-2">
+                <div class="tile decision">
+                  <h3>출력은 Decision + Action</h3>
+                  <p>목표 비중만 강제하지 않는다. 목표, 긴급 청산, 주문, 취소·정정을 합 타입으로 구분한다.</p>
+                </div>
+                <div class="tile decision">
+                  <h3>Context는 조회 전용</h3>
+                  <p>전략이 포트폴리오 상태를 직접 바꾸면 재현성, 테스트, 결과 대조가 어려워진다.</p>
+                </div>
+                <div class="tile decision">
+                  <h3>이벤트는 append-only로 기록</h3>
+                  <p>나중에 결과가 이상할 때 event, decision, action, order, fill, snapshot 순서로 추적한다.</p>
+                </div>
+                <div class="tile decision">
+                  <h3>스키마와 구현 상태 분리</h3>
+                  <p>전체 Action 자리는 미리 정의하고 미구현 타입은 Capability 검증에서 실행 전에 거절한다.</p>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <div id="schema" class="panel stack" hidden>
+            <section id="strategy-story">
+              <p class="eyebrow">이 장의 결론</p>
+              <h2>전략은 판단까지만 한다</h2>
+              <p>
+                엔진은 전략을 호출하면서 두 가지를 건넨다. 하나는 <strong>왜 지금 호출했는지</strong>를
+                알려 주는 <code>event</code>이고, 다른 하나는 <strong>판단에 필요한 자료</strong>를 읽는
+                <code>ctx</code>다. 전략은 둘을 보고 이번에 할 일을 <code>decision</code>으로 돌려준다.
+                주문을 만들고 체결한 뒤 잔고를 바꾸는 일은 엔진이 이어서 처리한다.
+              </p>
+              <div class="contract-sentence" aria-label="전략 함수의 입력과 출력">
+                <span>호출 이유 <code>event</code></span>
+                <span>+</span>
+                <span>판단 자료 <code>ctx</code></span>
+                <span class="contract-arrow">→</span>
+                <strong><code>strategy.on_event()</code></strong>
+                <span class="contract-arrow">→</span>
+                <span>전략의 판단 <code>decision</code></span>
+              </div>
+              <div class="grid-3">
+                <div class="tile">
+                  <strong>시작하기 전에</strong>
+                  <p>전략이 <code>requirements()</code>로 필요한 가격 기록, 호출 시점, 주문 기능을 미리 알린다.</p>
+                </div>
+                <div class="tile">
+                  <strong>전략을 호출할 때</strong>
+                  <p>엔진이 <code>event</code>와 읽기 전용 <code>ctx</code>를 주고, 전략은 판단 하나를 반환한다.</p>
+                </div>
+                <div class="tile">
+                  <strong>판단을 돌려준 뒤</strong>
+                  <p>엔진이 주문과 체결을 처리한다. 현금과 보유 수량은 실제 체결이 생겼을 때만 바뀐다.</p>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <h2>한 거래일은 이렇게 흘러간다</h2>
+              <p>
+                골든크로스 전략을 예로 들어 보자. 전략은 5일 이동평균과 20일 이동평균을 비교하지만,
+                그 앞뒤의 데이터 준비와 주문 처리는 엔진이 맡는다. 아래 순서를 위에서부터 따라가면
+                전략 코드와 엔진 코드의 경계가 보인다.
+              </p>
+              <ol class="lesson-flow" aria-label="골든크로스 전략의 한 거래일">
+                <li>
+                  <span class="lesson-number">1</span>
+                  <div><strong>필요한 자료를 먼저 선언한다</strong><p><code>requirements()</code>에서 최근 20일 종가와 매 거래일 장 마감 호출이 필요하다고 알린다.</p></div>
+                  <span class="lesson-owner strategy">전략 코드</span>
+                </li>
+                <li>
+                  <span class="lesson-number">2</span>
+                  <div><strong>엔진이 오늘의 호출을 만든다</strong><p>장 마감 시세를 <code>event</code>에 담고, 현재까지의 데이터만 읽을 수 있는 <code>ctx</code>를 만든다.</p></div>
+                  <span class="lesson-owner">엔진 코드</span>
+                </li>
+                <li>
+                  <span class="lesson-number">3</span>
+                  <div><strong>전략이 가격 기록을 읽는다</strong><p><code>ctx.history()</code>로 미리 선언해 둔 최근 20일 종가를 가져온다.</p></div>
+                  <span class="lesson-owner strategy">전략 코드</span>
+                </li>
+                <li>
+                  <span class="lesson-number">4</span>
+                  <div><strong>매수할지 청산할지 판단한다</strong><p>두 이동평균을 비교하고, 최근 고점 대비 낙폭이 긴급 청산 기준을 넘었는지도 계산한다.</p></div>
+                  <span class="lesson-owner strategy">전략 코드</span>
+                </li>
+                <li>
+                  <span class="lesson-number">5</span>
+                  <div><strong>판단을 값으로 반환한다</strong><p>목표 비중 조정이나 긴급 청산을 <code>StrategyDecision</code>에 담는다. 이때는 아직 주문이 아니다.</p></div>
+                  <span class="lesson-owner strategy">전략 코드</span>
+                </li>
+                <li>
+                  <span class="lesson-number">6</span>
+                  <div><strong>엔진이 주문부터 회계까지 처리한다</strong><p>판단을 검증하고 주문 수량을 계산한다. 체결이 발생하면 그때 현금과 보유 수량을 갱신한다.</p></div>
+                  <span class="lesson-owner">엔진 코드</span>
+                </li>
+              </ol>
+              <div class="callout">
+                새 전략을 추가할 때 작성하는 부분은 1, 3, 4, 5단계다. 데이터 준비, 주문 체결,
+                포트폴리오 회계는 모든 전략이 같은 엔진 구현을 사용한다.
+              </div>
+              <h3 class="subsection-heading">숫자를 넣어 보면</h3>
+              <div class="execution-example" aria-label="골든크로스 판단부터 체결까지의 숫자 예시">
+                <article class="execution-step">
+                  <span class="step-label">EVENT</span>
+                  <strong>8월 17일 장 마감</strong>
+                  <p>5일선 72,000원<br />20일선 70,000원<br />현재 보유 0주</p>
+                </article>
+                <article class="execution-step">
+                  <span class="step-label">DECISION</span>
+                  <strong>목표 비중 100%</strong>
+                  <p>전략은 “이 종목을 자산의 100%까지 보유하겠다”는 판단만 반환한다.</p>
+                </article>
+                <article class="execution-step">
+                  <span class="step-label">ORDER / FILL</span>
+                  <strong>다음 시가에 체결</strong>
+                  <p>엔진이 주문 수량을 계산하고 다음 거래일 시가 71,900원에 체결된 것으로 처리한다.</p>
+                </article>
+                <article class="execution-step result">
+                  <span class="step-label">PORTFOLIO</span>
+                  <strong>체결 결과를 반영</strong>
+                  <p>이 시점에 처음으로 보유 수량이 늘고, 매수 금액과 수수료만큼 현금이 줄어든다.</p>
+                </article>
+              </div>
+            </section>
+
+            <section id="contract-map">
+              <h2>이름이 많아 보여도 역할은 네 단계뿐이다</h2>
+              <p>
+                타입 이름부터 외우려고 하면 흐름을 놓치기 쉽다. 우선 각 값이 어느 시점에 필요하고
+                어느 쪽에서 만드는지만 구분한다.
+              </p>
+              <div class="role-list" aria-label="전략 계약 객체의 역할">
+                <div class="role-row">
+                  <span class="role-phase">시작 전</span>
+                  <div><strong><code>Requirements</code>: 필요한 것을 미리 알린다</strong><p>가격 기록의 길이, 호출 일정, 사용할 주문 기능을 전략이 선언한다.</p></div>
+                  <span class="role-owner">전략 → 엔진</span>
+                </div>
+                <div class="role-row">
+                  <span class="role-phase">호출할 때</span>
+                  <div><strong><code>Event</code>: 왜 불렀는지 알려 준다</strong><p>새 시세, 예약 시각, 체결 통지처럼 이번 호출의 원인을 엔진이 전달한다.</p></div>
+                  <span class="role-owner">엔진 → 전략</span>
+                </div>
+                <div class="role-row">
+                  <span class="role-phase">판단할 때</span>
+                  <div><strong><code>Context</code>: 필요한 자료를 읽게 해 준다</strong><p>과거 가격과 현재 잔고를 조회한다. 읽기만 할 수 있고 직접 바꿀 수는 없다.</p></div>
+                  <span class="role-owner">엔진 → 전략</span>
+                </div>
+                <div class="role-row">
+                  <span class="role-phase">반환할 때</span>
+                  <div><strong><code>Decision</code>: 이번 판단을 하나로 묶는다</strong><p>그 안의 <code>Action</code>이 목표 비중 조정, 긴급 청산, 주문 취소처럼 구체적인 뜻을 나타낸다.</p></div>
+                  <span class="role-owner">전략 → 엔진</span>
+                </div>
+              </div>
+              <div class="grid-2">
+                <div class="tile decision">
+                  <h3><code>event</code>와 <code>ctx</code>를 왜 나눌까?</h3>
+                  <p><code>event</code>는 호출 원인이고, <code>ctx</code>는 판단 재료다. 원인과 조회 방법을 분리하면 이벤트 종류가 늘어도 같은 조회 API를 쓸 수 있다.</p>
+                </div>
+                <div class="tile decision">
+                  <h3><code>decision</code>과 <code>action</code>을 왜 나눌까?</h3>
+                  <p><code>decision</code>은 판단 시각과 이유까지 묶는 바깥 봉투다. <code>action</code>은 실제로 무엇을 원하는지 나타내는 내용물이다.</p>
+                </div>
+              </div>
+              <div class="callout">
+                <code>ctx</code> 안에 <code>requirements</code>가 들어 있는 구조가 아니다. 전략이 시작 전에
+                요구사항을 알려 주면, 엔진은 그 범위에 맞는 <code>ctx</code>를 매번 새로 만들어 건넨다.
+              </div>
+            </section>
+
+            <section id="strategy-minimum">
+              <p class="eyebrow">실제로 작성할 부분</p>
+              <h2>전략 작성자는 두 메서드를 맞추면 된다</h2>
+              <p>
+                클래스가 길어 보여도 엔진과 맞닿는 곳은 두 군데다. <code>requirements()</code>는
+                실행 전에 필요한 것을 알리고, <code>on_event()</code>는 호출될 때마다 자료를 읽고
+                판단을 반환한다. 아래 코드는 앞에서 본 여섯 단계를 한 클래스에 이어 붙인 예다.
+              </p>
+              <pre><code class="language-python">class GoldenCrossStrategy:
+    def __init__(self, instrument: InstrumentId) -&gt; None:
+        # 이 값들은 연구자가 바꾸는 전략 설정이다.
+        self.instrument = instrument
+        self.price_window = HistoryRequest(
+            instruments=(instrument,),
+            field=PriceField.CLOSE,
+            lookback=20,
+        )
+
+    def requirements(self) -&gt; StrategyRequirements:
+        # 1. 실행 전에 엔진이 준비하고 검증할 것을 선언한다.
+        return StrategyRequirements(
+            histories=(self.price_window,),
+            schedule=Schedule.every_session_close(),
+            events=frozenset({EventKind.MARKET}),
+            actions=frozenset({
+                ActionKind.SET_POSITION_TARGET,
+                ActionKind.LIQUIDATE_POSITION,
+            }),
+            features=frozenset(),
+        )
+
+    def on_event(
+        self,
+        ctx: StrategyContext,
+        event: StrategyEvent,
+    ) -&gt; StrategyDecision:
+        # 2. 이 전략은 시장 가격 이벤트에만 반응한다.
+        if not isinstance(event, MarketSnapshot):
+            return StrategyDecision.no_action(ctx.now, "market_event_only")
+
+        # 3. 미리 선언해 둔 과거 가격을 ctx에서 읽는다.
+        closes = ctx.history(self.price_window).column(self.instrument)
+        # 최근 20일 고점 대비 종가 낙폭은 전략이 가격 창에서 직접 계산한다.
+        recent_peak = max(closes[-20:])
+        recent_drawdown = closes[-1] / recent_peak - 1.0
+
+        # 4. 급락 시에는 목표 0%가 아니라 긴급 청산 의미를 반환한다.
+        if recent_drawdown &lt;= -0.12:
+            action = LiquidatePosition(
+                instrument=self.instrument,
+                execution=ExecutionPolicy.market_next_available(),
+                cancel_open_orders=True,
+                persistence=LiquidationPersistence.UNTIL_FLAT,
+            )
+            return StrategyDecision.of(ctx.now, action, "emergency_drawdown")
+
+        short_ma = mean(closes[-5:])
+        long_ma = mean(closes[-20:])
+        target_weight = 1.0 if short_ma &gt; long_ma else 0.0
+
+        # 5. 전략은 원하는 상태만 말한다. 주문 수량과 체결은 엔진 책임이다.
+        action = SetPositionTarget(
+            target=WeightTarget(self.instrument, target_weight),
+            execution=ExecutionPolicy.market_next_open(),
+        )
+        return StrategyDecision.of(ctx.now, action, "moving_average_signal")</code></pre>
+              <div class="grid-3">
+                <div class="tile"><strong>전략마다 바뀌는 부분</strong><p>필요한 데이터, 매매 조건, 전략 설정값, 반환할 <code>Action</code>이 달라진다.</p></div>
+                <div class="tile"><strong>모든 전략이 맞출 부분</strong><p>두 메서드의 입력과 출력 타입은 어떤 전략이든 같은 모양을 유지한다.</p></div>
+                <div class="tile"><strong>엔진에 맡길 부분</strong><p>주문 수량, 체결 가격, 수수료, 현금과 보유 수량의 변경은 전략이 처리하지 않는다.</p></div>
+              </div>
+            </section>
+
+            <section class="reference-divider">
+              <p class="eyebrow">핵심 설명은 여기까지</p>
+              <h2>아래부터는 읽는 글이 아니라 찾아보는 타입 사전이다</h2>
+              <p>
+                지금 당장 모든 필드를 외울 필요는 없다. 엔진을 구현하다가 특정 타입이 필요할 때
+                해당 항목만 다시 찾으면 된다. 각 항목에서는 “누가 만들고, 누가 읽으며, 어떤 오류를
+                막기 위한 타입인가”만 확인한다.
+              </p>
+              <div class="pipeline diagram" aria-label="스키마 참조를 읽는 순서">
+                <div class="node"><b>무엇을 구현하나?</b><span><code>Strategy</code>의 두 메서드</span></div>
+                <div class="node"><b>무엇이 필요한가?</b><span><code>Requirements</code>에 미리 선언</span></div>
+                <div class="node"><b>왜 호출됐나?</b><span><code>Event</code>가 호출 원인을 구분</span></div>
+                <div class="node"><b>무엇을 읽나?</b><span><code>Context</code>로 가격과 잔고 조회</span></div>
+                <div class="node"><b>무엇을 돌려주나?</b><span><code>Decision</code>에 할 일을 담아 반환</span></div>
+                <div class="node"><b>그다음은?</b><span>엔진이 주문, 체결, 회계를 처리</span></div>
+              </div>
+            </section>
+
+            <section id="contract">
+              <h2>참조 1 · 모든 전략이 지키는 함수 모양</h2>
+              <p>
+                엔진은 전략의 이름이나 내부 공식을 알 필요가 없다. 실행 전에
+                <code>requirements()</code>를 한 번 부르고, 실행 중에는 <code>on_event()</code>를 반복해서
+                부를 수 있으면 된다. 모멘텀과 골든크로스의 차이는 이 두 메서드 안에 들어간다.
+              </p>
+              <pre><code class="language-python">StrategyEvent = (
+    MarketSnapshot
+    | TimerEvent
+    | FillEvent
+    | OrderUpdateEvent
+    | CorporateActionEvent
+)
+
+class Strategy(Protocol):
+    # 실행 전에 필요한 데이터와 호출 일정을 엔진에 알린다.
+    def requirements(self) -> StrategyRequirements:
+        ...
+
+    # 모든 전략은 같은 입력과 출력 타입을 사용한다.
+    def on_event(
+        self,
+        ctx: StrategyContext,
+        event: StrategyEvent,
+    ) -> StrategyDecision:
+        ...</code></pre>
+              <div class="callout">
+                두 메서드의 모양은 같지만 내용은 전략마다 다르다. 엔진은 먼저 요구사항을 검증한 뒤,
+                실행 중에는 같은 방식으로 어떤 전략이든 호출한다.
+              </div>
+              <div class="grid-2">
+                <div class="tile">
+                  <strong>전략 작성자가 구현</strong>
+                  <p>전략 설정, 두 메서드의 내용, 다음 호출까지 기억할 값이 있다면 전략 상태를 구현한다.</p>
+                </div>
+                <div class="tile">
+                  <strong>엔진이 공통으로 제공</strong>
+                  <p>공통 타입, 데이터 조회 객체, 시세 공급, 주문과 체결, 포트폴리오 회계를 제공한다.</p>
+                </div>
+              </div>
+            </section>
+
+            <section id="requirements">
+              <h2>참조 2 · Requirements 필드</h2>
+              <p>
+                전략마다 새로운 요구사항 클래스를 만드는 것은 아니다. 엔진이 제공하는
+                <code>StrategyRequirements</code>에 필요한 값만 채운다. 엔진은 이 값을 보고 데이터를
+                준비하고, 현재 구현으로 실행할 수 있는 전략인지 미리 확인한다.
+              </p>
+              <pre><code class="language-python"># 전략이 사용할 과거 데이터 창 하나를 선언한다.
+@dataclass(frozen=True)
+class HistoryRequest:
+    instruments: tuple[InstrumentId, ...]
+    field: PriceField
+    lookback: int
+
+class EventKind(Enum):
+    MARKET = "market"
+    TIMER = "timer"
+    FILL = "fill"
+    ORDER_UPDATE = "order_update"
+    CORPORATE_ACTION = "corporate_action"
+
+class EngineFeature(Enum):
+    SHORT_SELLING = "short_selling"
+    MARGIN = "margin"
+    PARTIAL_FILL = "partial_fill"
+    LIMIT_ORDER = "limit_order"
+    STOP_ORDER = "stop_order"
+    PROPORTIONAL_BASKET = "proportional_basket"
+
+# 모든 전략이 같은 타입을 반환하고 필드 값만 다르게 채운다.
+@dataclass(frozen=True)
+class StrategyRequirements:
+    histories: tuple[HistoryRequest, ...]
+    schedule: Schedule
+    events: frozenset[EventKind]
+    actions: frozenset[ActionKind]
+    features: frozenset[EngineFeature]</code></pre>
+              <div class="grid-3">
+                <div class="tile"><strong>전략이 적는 값</strong><p>필요한 종목과 기간, 호출받을 이벤트, 사용할 주문 기능을 적는다.</p></div>
+                <div class="tile"><strong>엔진이 확인할 것</strong><p>잘못된 기간, 없는 종목, 아직 구현하지 않은 주문 기능을 실행 전에 찾는다.</p></div>
+                <div class="tile"><strong><code>ctx</code>에 미치는 영향</strong><p>선언하고 검증한 범위 안의 가격 기록과 포트폴리오 정보만 조회할 수 있다.</p></div>
+              </div>
+              <div class="callout">
+                정리하면, 전략 작성자는 공통 요구사항 타입에 값을 채운다. 별도의 요구사항 클래스는
+                만들지 않고 전략의 판단 로직에 집중한다.
+              </div>
+            </section>
+
+            <section id="decision-protocol">
+              <h2>참조 3 · StrategyDecision과 Action 합 타입</h2>
+              <p>
+                전략의 반환형은 항상 <code>StrategyDecision</code> 하나다. 다만 “목표 비중 변경”과
+                “긴급 청산”처럼 뜻이 다른 행동은 각기 다른 <code>Action</code> 타입으로 표현한다.
+                그래야 어떤 필드가 필요한지 타입만 보고 알 수 있고 잘못된 조합도 막을 수 있다.
+              </p>
+              <pre><code class="language-python">class ActionKind(Enum):
+    NO_ACTION = "no_action"
+    SET_PORTFOLIO_TARGET = "set_portfolio_target"
+    SET_POSITION_TARGET = "set_position_target"
+    ADJUST_POSITION = "adjust_position"
+    LIQUIDATE_POSITION = "liquidate_position"
+    SUBMIT_ORDER = "submit_order"
+    CANCEL_ORDER = "cancel_order"
+    REPLACE_ORDER = "replace_order"
+    BASKET = "basket"
+
+StrategyAction = (
+    NoAction
+    | SetPortfolioTarget
+    | SetPositionTarget
+    | AdjustPosition
+    | LiquidatePosition
+    | SubmitOrder
+    | CancelOrder
+    | ReplaceOrder
+    | BasketAction
+)
+
+@dataclass(frozen=True)
+class StrategyDecision:
+    # 스키마 버전은 Python/Rust 직렬화 계약을 식별한다.
+    schema_version: int
+    as_of: datetime
+    actions: tuple[StrategyAction, ...]
+    reason: str | None = None
+
+    @classmethod
+    def of(
+        cls,
+        as_of: datetime,
+        action: StrategyAction,
+        reason: str | None = None,
+    ) -&gt; "StrategyDecision":
+        # 단일 Action도 항상 tuple envelope로 감싼다.
+        return cls(
+            schema_version=1,
+            as_of=as_of,
+            actions=(action,),
+            reason=reason,
+        )
+
+    @classmethod
+    def no_action(
+        cls,
+        as_of: datetime,
+        reason: str | None = None,
+    ) -&gt; "StrategyDecision":
+        return cls(
+            schema_version=1,
+            as_of=as_of,
+            actions=(NoAction(reason),),
+            reason=reason,
+        )</code></pre>
+              <div class="callout">
+                한 전략도 상황에 따라 다른 행동을 고를 수 있다. 평소에는 목표 비중을 조정하고,
+                급락하면 긴급 청산하며, 체결 상황이 바뀌면 기존 주문을 취소하거나 정정할 수 있다.
+              </div>
+            </section>
+
+            <section>
+              <h2>참조 4 · 목표·청산 Action 스키마</h2>
+              <div class="grid-2">
+                <div class="contract-box">
+                  <h3>종목과 목표값</h3>
+                  <pre><code class="language-python"># 거래소까지 포함한 식별자를 모든 목표 타입에서 재사용한다.
+@dataclass(frozen=True)
+class InstrumentId:
+    venue: str
+    symbol: str
+    asset_class: AssetClass
+    currency: str
+
+@dataclass(frozen=True)
+class WeightTarget:
+    instrument: InstrumentId
+    weight: float
+
+@dataclass(frozen=True)
+class QuantityTarget:
+    instrument: InstrumentId
+    quantity: Decimal
+
+@dataclass(frozen=True)
+class NotionalTarget:
+    instrument: InstrumentId
+    notional: Money
+
+PositionTarget = WeightTarget | QuantityTarget | NotionalTarget</code></pre>
+                  <div class="schema-rule">InstrumentId를 별도 타입으로 두어 같은 symbol을 쓰는 거래소·자산군 충돌을 막는다.</div>
+                </div>
+                <div class="contract-box">
+                  <h3>포트폴리오 목표와 증감</h3>
+                  <pre><code class="language-python">class TargetScope(Enum):
+    # 목록에 없는 기존 포지션은 0으로 본다.
+    REPLACE = "replace"
+    # 목록에 들어온 포지션만 변경한다.
+    PATCH = "patch"
+
+@dataclass(frozen=True)
+class SetPortfolioTarget:
+    targets: tuple[PositionTarget, ...]
+    scope: TargetScope
+    execution: ExecutionPolicy
+
+@dataclass(frozen=True)
+class SetPositionTarget:
+    target: PositionTarget
+    execution: ExecutionPolicy
+
+@dataclass(frozen=True)
+class AdjustPosition:
+    instrument: InstrumentId
+    delta: QuantityDelta | NotionalDelta
+    execution: ExecutionPolicy</code></pre>
+                  <div class="schema-rule">절대 목표와 매매 증감량은 의미가 다르므로 같은 숫자 필드로 합치지 않는다.</div>
+                </div>
+                <div class="contract-box">
+                  <h3>긴급 청산</h3>
+                  <pre><code class="language-python"># 일부 체결 뒤에도 청산을 이어갈지 명시한다.
+class LiquidationPersistence(Enum):
+    ONCE = "once"
+    UNTIL_FLAT = "until_flat"
+
+@dataclass(frozen=True)
+class LiquidatePosition:
+    instrument: InstrumentId
+    execution: ExecutionPolicy
+    cancel_open_orders: bool
+    persistence: LiquidationPersistence</code></pre>
+                  <div class="schema-rule">목표 0%와 긴급 청산은 최종 상태가 같아도 주문 취소·재시도·긴급도가 달라 별도 타입이 필요하다.</div>
+                </div>
+                <div class="contract-box">
+                  <h3>실행 정책</h3>
+                  <pre><code class="language-python"># 판단 시점과 체결 시점을 분리해 look-ahead를 막는다.
+class ExecutionTiming(Enum):
+    NEXT_OPEN = "next_open"
+    NEXT_AVAILABLE = "next_available"
+
+class ExecutionStyle(Enum):
+    MARKET = "market"
+    VWAP = "vwap"
+    TWAP = "twap"
+
+class TimeInForce(Enum):
+    DAY = "day"
+    GTC = "gtc"
+    IOC = "ioc"
+    FOK = "fok"
+
+@dataclass(frozen=True)
+class ExecutionPolicy:
+    style: ExecutionStyle
+    timing: ExecutionTiming
+    time_in_force: TimeInForce
+    max_participation: float | None = None
+
+    @classmethod
+    def market_next_open(cls) -&gt; "ExecutionPolicy":
+        # 일봉 종가 신호의 기본 실행 정책이다.
+        return cls(
+            ExecutionStyle.MARKET,
+            ExecutionTiming.NEXT_OPEN,
+            TimeInForce.DAY,
+        )
+
+    @classmethod
+    def market_next_available(cls) -&gt; "ExecutionPolicy":
+        # 신호 이후 처음 가능한 가격에 시장가로 실행한다.
+        return cls(
+            ExecutionStyle.MARKET,
+            ExecutionTiming.NEXT_AVAILABLE,
+            TimeInForce.DAY,
+        )</code></pre>
+                  <div class="schema-rule">일봉 종가로 판단한 Decision은 같은 종가에 체결하지 않고 NEXT_OPEN 같은 미래 시점을 사용한다.</div>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <h2>참조 5 · 주문 생명주기와 Basket Action</h2>
+              <div class="grid-2">
+                <div class="contract-box">
+                  <h3>주문 종류</h3>
+                  <pre><code class="language-python"># 주문 종류별 필수 가격 필드를 별도 타입으로 강제한다.
+@dataclass(frozen=True)
+class OrderCore:
+    instrument: InstrumentId
+    side: Side
+    quantity: Decimal
+    time_in_force: TimeInForce
+
+@dataclass(frozen=True)
+class MarketOrderRequest:
+    core: OrderCore
+
+@dataclass(frozen=True)
+class LimitOrderRequest:
+    core: OrderCore
+    limit_price: Decimal
+
+@dataclass(frozen=True)
+class StopOrderRequest:
+    core: OrderCore
+    stop_price: Decimal
+
+@dataclass(frozen=True)
+class StopLimitOrderRequest:
+    core: OrderCore
+    stop_price: Decimal
+    limit_price: Decimal
+
+OrderRequest = (
+    MarketOrderRequest
+    | LimitOrderRequest
+    | StopOrderRequest
+    | StopLimitOrderRequest
+)</code></pre>
+                </div>
+                <div class="contract-box">
+                  <h3>제출·취소·정정</h3>
+                  <pre><code class="language-python"># 주문 변경도 추적 가능한 새 요청으로 표현한다.
+@dataclass(frozen=True)
+class SubmitOrder:
+    request: OrderRequest
+
+@dataclass(frozen=True)
+class CancelOrder:
+    order_id: str
+
+@dataclass(frozen=True)
+class ReplaceOrder:
+    order_id: str
+    replacement: OrderRequest</code></pre>
+                  <div class="schema-rule">주문 정정은 기존 Order를 몰래 수정하지 않고 Cancel/Replace 이벤트로 추적한다.</div>
+                </div>
+                <div class="contract-box">
+                  <h3>Basket 실행 정책</h3>
+                  <pre><code class="language-python"># 여러 leg가 함께 실행될 때 허용할 체결 관계다.
+class GroupPolicy(Enum):
+    BEST_EFFORT = "best_effort"
+    PROPORTIONAL = "proportional"
+    ALL_OR_NONE = "all_or_none"
+
+BasketLeg = (
+    SetPositionTarget
+    | AdjustPosition
+    | LiquidatePosition
+    | SubmitOrder
+)
+
+@dataclass(frozen=True)
+class BasketAction:
+    legs: tuple[BasketLeg, ...]
+    group_policy: GroupPolicy</code></pre>
+                  <div class="schema-rule">페어 전략처럼 한쪽만 체결될 위험이 있는 경우 여러 Action을 하나의 실행 그룹으로 묶는다.</div>
+                </div>
+                <div class="contract-box">
+                  <h3>아무 행동도 없음</h3>
+                  <pre><code class="language-python">@dataclass(frozen=True)
+class NoAction:
+    # None이나 빈 dict 대신 의도적인 무행동을 타입으로 남긴다.
+    reason: str | None = None</code></pre>
+                  <div class="schema-rule">전략이 호출됐지만 조건이 충족되지 않았다는 사실도 Decision 로그에 남길 수 있다.</div>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <h2>참조 6 · Capability 협상</h2>
+              <p>
+                타입을 문서에 정의해 두었다고 해서 엔진 구현까지 끝난 것은 아니다. 전략이 요구한
+                기능을 현재 엔진이 실제로 처리할 수 있는지 백테스트를 시작하기 전에 확인한다.
+              </p>
+              <pre><code class="language-python">class SupportLevel(Enum):
+    IMPLEMENTED = "implemented"
+    NOT_IMPLEMENTED = "not_implemented"
+    UNSUPPORTED = "unsupported"
+
+@dataclass(frozen=True)
+class ActionCapability:
+    kind: ActionKind
+    support: SupportLevel
+    reason: str | None = None
+
+@dataclass(frozen=True)
+class EngineCapabilities:
+    schema_version: int
+    actions: tuple[ActionCapability, ...]
+
+# 데이터 루프를 시작하기 전에 실패해야 한다.
+engine.validate_requirements(
+    strategy.requirements(),
+)</code></pre>
+              <div class="grid-3">
+                <div class="tile"><strong>IMPLEMENTED</strong><p>실제 코드와 테스트가 있어 Decision을 실행할 수 있다.</p></div>
+                <div class="tile"><strong>NOT_IMPLEMENTED</strong><p>스키마 의미는 확정됐지만 현재 처리 코드가 없다.</p></div>
+                <div class="tile"><strong>UNSUPPORTED</strong><p>현재 데이터 해상도나 체결 모델로 의미 있게 시뮬레이션할 수 없다.</p></div>
+              </div>
+            </section>
+
+            <section>
+              <h2>왜 전략이 포트폴리오를 직접 바꾸면 안 되는가</h2>
+              <p>
+                전략은 매매 판단만 내리고, 실제 상태 변경은 체결된 <code>FillEvent</code>를 받은
+                포트폴리오가 담당한다. 주문은 거절되거나 일부만 체결될 수 있기 때문에 전략의
+                판단을 곧바로 보유 수량으로 확정하면 실제 체결 과정이 사라진다.
+              </p>
+              <div class="example-grid">
+                <article class="code-example bad">
+                  <h3>잘못된 예: 전략이 매수를 확정함</h3>
+                  <pre><code class="language-python">def on_event(self, ctx, event):
+    if not isinstance(event, MarketSnapshot):
+        return StrategyDecision.no_action(ctx.now)
+
+    bar = event.bar(self.instrument)
+    if bar.close &gt; 70_000:
+        # 실제로 체결됐는지 알기 전에
+        # 현금과 보유 수량을 바꿔 버린다.
+        ctx.portfolio.cash -= bar.close * 10
+        ctx.portfolio.positions[bar.instrument] += 10
+
+    return StrategyDecision.no_action(ctx.now)</code></pre>
+                </article>
+                <article class="code-example good">
+                  <h3>올바른 예: 전략은 Decision만 반환함</h3>
+                  <pre><code class="language-python">def on_event(
+    self,
+    ctx: StrategyContext,
+    event: StrategyEvent,
+) -&gt; StrategyDecision:
+    if not isinstance(event, MarketSnapshot):
+        return StrategyDecision.no_action(ctx.now)
+
+    bar = event.bar(self.instrument)
+    if bar.close &gt; 70_000:
+        # 목표와 실행 정책을 Action으로 명시한다.
+        action = SetPortfolioTarget(
+            targets=(WeightTarget(
+                instrument=self.instrument,
+                weight=0.70,
+            ),),
+            scope=TargetScope.PATCH,
+            execution=ExecutionPolicy.next_open(),
+        )
+        return StrategyDecision(
+            schema_version=1,
+            as_of=ctx.now,
+            actions=(action,),
+            reason="price_above_threshold",
+        )
+
+    return StrategyDecision.no_action(ctx.now)</code></pre>
+                </article>
+              </div>
+              <div class="callout">
+                SetPortfolioTarget 경로에서는 전략이 목표와 실행 시점을 말하고, 주문 수량 계산,
+                주문 가능 여부, 체결 가격과 수량, 수수료 반영은 엔진이 담당한다.
+              </div>
+            </section>
+
+            <section>
+              <h2>참조 7 · 엔진 데이터 타입</h2>
+              <p>
+                아래 타입은 단순 데이터 묶음이 아니라 컴포넌트 사이의 계약이다. 각 카드에서
+                생성 주체와 소비 주체를 분리해 보면 엔진 책임 경계가 더 명확해진다.
+              </p>
+              <div class="grid-2">
+                <div class="contract-box">
+                  <h3>Bar</h3>
+                  <p class="schema-purpose">한 종목의 한 시점 시장 상태를 나타내는 불변 입력 이벤트다.</p>
+                  <pre><code class="language-python"># DataFeed가 만든 시장 원본이므로 수정하지 않는다.
+@dataclass(frozen=True)
+class Bar:
+    ts: datetime
+    instrument: InstrumentId
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: int</code></pre>
+                  <dl class="schema-meta">
+                    <div><dt>생성</dt><dd>DataFeed가 정제된 PyKRX 데이터를 시간순으로 변환한다.</dd></div>
+                    <div><dt>소비</dt><dd>Strategy, BrokerSim, Portfolio 평가 로직이 같은 객체를 읽는다.</dd></div>
+                    <div><dt>핵심</dt><dd><code>ts</code>는 v1에서 봉 마감 시각을 뜻하며, 가격 수정 여부도 실행 전체에서 동일해야 한다.</dd></div>
+                  </dl>
+                  <div class="schema-rule">불변조건: high ≥ open/close, low ≤ open/close, volume ≥ 0, 시간 역행 금지.</div>
+                </div>
+                <div class="contract-box">
+                  <h3>MarketSnapshot</h3>
+                  <p class="schema-purpose">같은 거래 시각에 확정된 여러 종목의 Bar를 하나로 묶은 전략 입력이다.</p>
+                  <pre><code class="language-python"># 동일 시각의 종목들을 한 번의 전략 호출로 묶는다.
+@dataclass(frozen=True)
+class MarketSnapshot:
+    ts: datetime
+    bars: tuple[Bar, ...]
+
+    def bar(self, instrument: InstrumentId) -> Bar:
+        ...</code></pre>
+                  <dl class="schema-meta">
+                    <div><dt>생성</dt><dd>DataFeed가 동일 timestamp의 Bar를 모두 모은 뒤 한 번 생성한다.</dd></div>
+                    <div><dt>소비</dt><dd>단일 종목 전략과 횡단면 전략 모두 MarketSnapshot 이벤트에서 받는다.</dd></div>
+                    <div><dt>핵심</dt><dd>여러 종목을 한 시점 기준으로 비교해 종목별 호출 순서에 따른 편향을 막는다.</dd></div>
+                  </dl>
+                  <div class="schema-rule">Snapshot 안의 모든 Bar는 같은 ts를 가져야 하며, symbol은 중복될 수 없다.</div>
+                </div>
+                <div class="contract-box">
+                  <h3>OrderEvent</h3>
+                  <p class="schema-purpose">목표 비중을 실제로 제출 가능한 매매 지시로 변환한 결과다.</p>
+                  <pre><code class="language-python"># DecisionRouter와 OrderManager가 Action을 실행 가능한 주문으로 바꾼다.
+@dataclass(frozen=True)
+class OrderEvent:
+    order_id: str
+    decision_id: str
+    ts: datetime
+    instrument: InstrumentId
+    quantity: Decimal
+    side: Side
+    source_action: StrategyAction</code></pre>
+                  <dl class="schema-meta">
+                    <div><dt>생성</dt><dd>OrderManager가 현금, 현재 포지션, lot size를 확인한 뒤 만든다.</dd></div>
+                    <div><dt>소비</dt><dd>BrokerSim이 거래 가능 여부와 체결 수량 및 가격을 계산한다.</dd></div>
+                    <div><dt>핵심</dt><dd><code>decision_id</code>와 source_action을 남겨 어떤 전략 판단에서 나온 주문인지 추적한다.</dd></div>
+                  </dl>
+                  <div class="schema-rule">quantity는 항상 양수로 두고 방향은 Side로만 표현해 부호 해석의 중복을 막는다.</div>
+                </div>
+                <div class="contract-box">
+                  <h3>FillEvent</h3>
+                  <p class="schema-purpose">주문 중 실제로 시장에서 체결됐다고 시뮬레이션된 부분이다.</p>
+                  <pre><code class="language-python"># 이 이벤트만 현금과 포지션을 실제로 변경할 수 있다.
+@dataclass(frozen=True)
+class FillEvent:
+    fill_id: str
+    order_id: str
+    ts: datetime
+    instrument: InstrumentId
+    quantity: Decimal
+    price: float
+    fee: float
+    slippage_per_share: float</code></pre>
+                  <dl class="schema-meta">
+                    <div><dt>생성</dt><dd>BrokerSim이 가격 모델, 거래량 제한, 수수료 모델을 적용해 만든다.</dd></div>
+                    <div><dt>소비</dt><dd>Portfolio와 EventStore가 받아 현금 및 포지션을 변경하고 기록한다.</dd></div>
+                    <div><dt>핵심</dt><dd>한 Order에서 여러 Fill이 나올 수 있으므로 <code>order_id</code>로 묶는다.</dd></div>
+                  </dl>
+                  <div class="schema-rule">포트폴리오 상태를 바꿀 수 있는 유일한 거래 이벤트다. fee는 총액, slippage는 주당 금액으로 고정한다.</div>
+                </div>
+                <div class="contract-box">
+                  <h3>Position</h3>
+                  <p class="schema-purpose">종목 하나에 대해 체결 내역을 누적한 현재 보유 상태다.</p>
+                  <pre><code class="language-python"># FillEvent를 누적해 계산한 종목별 파생 상태다.
+@dataclass(frozen=True)
+class Position:
+    instrument: InstrumentId
+    quantity: Decimal
+    average_price: float
+    market_price: float
+    market_value: float
+    unrealized_pnl: float</code></pre>
+                  <dl class="schema-meta">
+                    <div><dt>생성</dt><dd>Portfolio가 이전 Position에 FillEvent를 순서대로 적용해 계산한다.</dd></div>
+                    <div><dt>소비</dt><dd>StrategyContext, 주문 수량 계산, 성과 분석에서 읽는다.</dd></div>
+                    <div><dt>핵심</dt><dd>원본 이벤트가 아니라 파생 상태이므로 fills로 다시 계산할 수 있어야 한다.</dd></div>
+                  </dl>
+                  <div class="schema-rule">v1에서는 average_price에 수수료를 섞지 않고 수수료는 cash에서 별도로 차감한다.</div>
+                </div>
+                <div class="contract-box">
+                  <h3>PortfolioSnapshot</h3>
+                  <p class="schema-purpose">특정 시점의 포트폴리오를 읽기 전용으로 고정한 관찰값이다.</p>
+                  <pre><code class="language-python"># 전략 호출 직전에 고정한 읽기 전용 포트폴리오다.
+@dataclass(frozen=True)
+class PortfolioSnapshot:
+    ts: datetime
+    cash: float
+    positions: tuple[Position, ...]
+    equity: float
+    gross_exposure: float</code></pre>
+                  <dl class="schema-meta">
+                    <div><dt>생성</dt><dd>Portfolio가 Fill 반영과 현재가 평가를 마친 뒤 생성한다.</dd></div>
+                    <div><dt>소비</dt><dd>다음 전략 호출의 Context와 PerformanceAnalyzer가 읽는다.</dd></div>
+                    <div><dt>핵심</dt><dd><code>equity = cash + Σ market_value</code>가 항상 성립해야 한다.</dd></div>
+                  </dl>
+                  <div class="schema-rule">Snapshot 자체를 수정하지 않는다. 새 상태가 필요하면 다음 Snapshot을 새로 만든다.</div>
+                </div>
+                <div class="contract-box">
+                  <h3>PerformanceMetrics</h3>
+                  <p class="schema-purpose">스냅샷과 체결 기록으로부터 사후 계산되는 성과 요약이다.</p>
+                  <pre><code class="language-python"># 실행 종료 후 equity curve와 fills에서 계산한다.
+@dataclass(frozen=True)
+class PerformanceMetrics:
+    total_return: float
+    cagr: float
+    volatility: float
+    sharpe: float | None
+    sortino: float | None
+    max_drawdown: float
+    calmar: float | None
+    turnover: float</code></pre>
+                  <dl class="schema-meta">
+                    <div><dt>생성</dt><dd>PerformanceAnalyzer가 실행 종료 후 equity curve와 fills로 계산한다.</dd></div>
+                    <div><dt>소비</dt><dd>FastAPI 응답, Astro 차트, Python 노트북이 같은 결과를 표시한다.</dd></div>
+                    <div><dt>핵심</dt><dd>Sharpe 등 연율화 지표는 XKRX 거래일 기준 252를 사용했는지 함께 기록한다.</dd></div>
+                  </dl>
+                  <div class="schema-rule">0으로 나눌 수 없는 지표는 0으로 위장하지 않고 None으로 표현한다. MDD는 음수 비율로 통일한다.</div>
+                </div>
+                <div class="contract-box">
+                  <h3>BacktestResult</h3>
+                  <p class="schema-purpose">한 번의 실행을 재현하고 분석하는 데 필요한 최종 출력 묶음이다.</p>
+                  <pre><code class="language-python"># API와 분석기가 받는 한 번의 실행 결과 전체다.
+@dataclass(frozen=True)
+class BacktestResult:
+    run_id: str
+    snapshots: tuple[PortfolioSnapshot, ...]
+    orders: tuple[OrderEvent, ...]
+    fills: tuple[FillEvent, ...]
+    metrics: PerformanceMetrics</code></pre>
+                  <dl class="schema-meta">
+                    <div><dt>생성</dt><dd>Engine이 이벤트 루프와 성과 계산을 모두 마친 뒤 한 번 생성한다.</dd></div>
+                    <div><dt>소비</dt><dd>API 직렬화 계층과 결과 비교 도구가 받아 저장하거나 화면에 표시한다.</dd></div>
+                    <div><dt>핵심</dt><dd>엔진 내부 출력은 tuple과 typed model로 고정하고 JSON 경계에서만 dict로 바꾼다.</dd></div>
+                  </dl>
+                  <div class="schema-rule">run_id와 별도로 RunConfig, 데이터 버전, 전략 버전을 저장해야 같은 실행을 재현할 수 있다.</div>
+                </div>
+              </div>
+            </section>
+
+            <section id="context">
+              <h2><code>ctx</code>는 전략이 자료를 읽는 창구다</h2>
+              <p>
+                <code>ctx</code>는 특별한 파이썬 문법이 아니라 <code>context</code>를 줄여 쓴 변수 이름이다.
+                엔진이 매 호출마다 읽기 전용 조회 객체를 만들어 <code>on_event()</code>에 넘긴다.
+                변수 이름을 <code>context</code>로 바꿔도 동작은 같다.
+              </p>
+              <div class="callout">
+                <code>ctx</code>는 어디서나 접근하는 전역 변수가 아니다. 엔진이 함수 인자로 명시적으로
+                건네며, 전략은 여기서 현재 상태를 읽기만 한다.
+              </div>
+              <pre><code class="language-python">class StrategyContext(Protocol):
+    # 현재 전략 호출의 기준 시각이다.
+    @property
+    def now(self) -> datetime: ...
+
+    # 선언한 과거 데이터만 읽기 전용 PriceWindow로 받는다.
+    def history(self, request: HistoryRequest) -> PriceWindow: ...
+
+    # 포트폴리오는 조회 API만 노출한다.
+    def current_weight(self, instrument: InstrumentId) -> float: ...
+    def position_qty(self, instrument: InstrumentId) -> Decimal: ...
+    def cash(self) -> float: ...
+    def portfolio_value(self) -> float: ...</code></pre>
+              <div class="grid-3">
+                <div class="tile">
+                  <strong>시장 데이터 조회</strong>
+                  <p><code>history()</code>는 현재 시점까지 확정된 과거 데이터만 반환한다. 미래 bar가 섞이면 look-ahead bias가 된다.</p>
+                </div>
+                <div class="tile">
+                  <strong>포트폴리오 조회</strong>
+                  <p>비중, 수량, 현금은 직전 Fill까지 반영된 Snapshot에서 읽는다. 반환값을 통해 상태를 수정할 수는 없다.</p>
+                </div>
+                <div class="tile">
+                  <strong>거래 일정 조회</strong>
+                  <p>Engine Calendar가 requirements의 schedule과 맞는 시점에만 전략을 호출한다.</p>
+                </div>
+              </div>
+              <div class="grid-2">
+                <div class="contract-box">
+                  <h3>공통 Context 구현체</h3>
+                  <p class="schema-purpose">선언한 데이터만 현재 시점까지 잘라서 돌려주는 엔진 소유 객체다.</p>
+                  <pre><code class="language-python">@dataclass(frozen=True)
+class EngineStrategyContext:
+    # 엔진이 매 전략 호출마다 채우는 읽기 전용 값들이다.
+    now: datetime
+    snapshot: PortfolioSnapshot
+    history_store: HistoryStore
+    # 전략이 반환한 requirements를 엔진이 검증해 보관한 집합이다.
+    declared: frozenset[HistoryRequest]
+
+    def history(
+        self,
+        request: HistoryRequest,
+    ) -&gt; PriceWindow:
+        # requirements()에 없던 데이터의 즉석 조회를 막는다.
+        if request not in self.declared:
+            raise UndeclaredDataAccess(request)
+
+        # end=self.now로 미래 데이터 유입을 차단한다.
+        return self.history_store.window(
+            request=request,
+            end=self.now,
+        )
+
+    def current_weight(self, instrument: InstrumentId) -&gt; float:
+        return self.snapshot.weight(instrument)
+
+    def cash(self) -&gt; float:
+        return self.snapshot.cash</code></pre>
+                  <div class="schema-rule">전략별 차이는 Context 클래스가 아니라 declared 데이터와 schedule 값이다.</div>
+                </div>
+                <div class="contract-box">
+                  <h3>엔진에서 context 주입하기</h3>
+                  <p class="schema-purpose">실행 전에 요구사항을 읽고, 매 시장 시점에 같은 타입의 Context를 채운다.</p>
+                  <pre><code class="language-python"># 1. 전략 요구사항을 먼저 검증하고 데이터를 준비한다.
+requirements = strategy.requirements()
+data_feed.prepare(requirements.histories)
+
+for market in data_feed.snapshots():
+    # 2. 전략이 선언한 일정이 아닌 날은 호출하지 않는다.
+    if not calendar.matches(
+        requirements.schedule,
+        market.ts,
+    ):
+        continue
+
+    # 3. 직전 Fill까지 반영된 상태를 읽기 전용으로 고정한다.
+    snapshot = portfolio.snapshot(market.ts)
+
+    context = EngineStrategyContext(
+        now=market.ts,
+        snapshot=snapshot,
+        history_store=history_store,
+        declared=frozenset(
+            requirements.histories
+        ),
+    )
+
+    # 4. Python 전략은 Context를 읽고 Decision만 반환한다.
+    decision = strategy.on_event(
+        context,
+        market,
+    )
+
+    # 5. Action 종류에 따라 목표·청산·주문 경로로 분기한다.
+    orders = decision_router.to_orders(
+        decision=decision,
+        portfolio=snapshot,
+        market=market,
+    )
+
+    # 6. BrokerSim이 실행 가능한 Order를 체결한다.
+    for order in orders:
+        for fill in broker.execute(order, market):
+            # 7. 실제 상태 변경은 Fill 적용 시점에만 일어난다.
+            portfolio.apply(fill)</code></pre>
+                  <div class="schema-rule">같은 market 처리 중에는 snapshot이 변하지 않는다. Fill 결과는 다음 Context에서 보인다.</div>
+                </div>
+              </div>
+              <div class="callout warning">
+                <strong><code>contextvars.ContextVar</code>와는 다른 개념이다.</strong>
+                표준 라이브러리의 ContextVar는 async 작업별 요청 ID 같은 값을 격리할 때 쓰는 도구다.
+                백테스트 전략 입력은 숨겨진 ContextVar보다 함수 인자로 명시적으로 전달하는 편이 테스트와 재현에 유리하다.
+              </div>
+              <div class="callout warning">
+                여기서 dict를 남발하지 않는다. YAML/API/JSON 경계에서는 dict가 나와도 되지만,
+                엔진 내부로 들어오면 dataclass, enum, typed model로 고정한다.
+              </div>
+            </section>
+
+            <section id="strategy-contexts">
+              <h2>전략이 달라도 <code>ctx</code> 타입은 같다</h2>
+              <p>
+                전략마다 별도의 Context 클래스를 만들지 않는다. 모든 전략이 같은
+                <code>EngineStrategyContext</code>를 받고, <code>requirements()</code>에 무엇을 선언했는지에
+                따라 조회할 수 있는 가격 기록과 호출 일정만 달라진다.
+              </p>
+              <table>
+                <thead>
+                  <tr>
+                    <th>전략</th>
+                    <th>가격 데이터</th>
+                    <th>포트폴리오 조회</th>
+                    <th>호출 일정</th>
+                    <th>전략 전용 상태</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>골든크로스</td>
+                    <td>한 종목 종가 60일</td>
+                    <td>현재 목표 종목 비중</td>
+                    <td>매 거래일</td>
+                    <td>없어도 됨</td>
+                  </tr>
+                  <tr>
+                    <td>횡단면 모멘텀</td>
+                    <td>유니버스 전체 종가 252일</td>
+                    <td>전체 종목 현재 비중</td>
+                    <td>월말 거래일</td>
+                    <td>없어도 됨</td>
+                  </tr>
+                  <tr>
+                    <td>페어 평균회귀</td>
+                    <td>두 종목 정렬 종가 120일</td>
+                    <td>양쪽 종목 수량과 비중</td>
+                    <td>매 거래일</td>
+                    <td>FLAT/LONG/SHORT regime</td>
+                  </tr>
+                </tbody>
+              </table>
+              <div class="grid-2">
+                <div class="contract-box">
+                  <h3>Context가 반환하는 PriceWindow</h3>
+                  <p class="schema-purpose">단일 종목과 다중 종목 전략이 같은 시간축 정렬 규칙을 쓰게 한다.</p>
+                  <pre><code class="language-python"># time × symbol 모양으로 정렬된 읽기 전용 가격 배열이다.
+@dataclass(frozen=True)
+class PriceWindow:
+    timestamps: tuple[datetime, ...]
+    instruments: tuple[InstrumentId, ...]
+    values: NDArray[np.float64]
+
+    def column(
+        self,
+        instrument: InstrumentId,
+    ) -&gt; NDArray[np.float64]:
+        ...
+
+    def is_complete(self, instrument: InstrumentId) -&gt; bool:
+        ...</code></pre>
+                  <div class="schema-rule">values 배열도 writeable=False로 설정해 전략이 과거 가격을 덮어쓸 수 없게 한다.</div>
+                </div>
+                <div class="contract-box">
+                  <h3>Config, Context, State 구분</h3>
+                  <p class="schema-purpose">전략에 필요한 값을 성격별로 분리해야 재현과 테스트가 쉬워진다.</p>
+                  <dl class="schema-meta">
+                    <div><dt>Config</dt><dd>lookback, 임계값, 유니버스처럼 실행 중 변하지 않는 전략 설정.</dd></div>
+                    <div><dt>Context</dt><dd>현재 시각, 과거 가격 창, 포트폴리오처럼 엔진이 제공하는 읽기 전용 상태.</dd></div>
+                    <div><dt>State</dt><dd>진입 regime, cooldown처럼 전략이 다음 호출까지 기억해야 하는 전략 내부 상태.</dd></div>
+                  </dl>
+                  <div class="callout warning">
+                    전략 State는 변경할 수 있지만 Portfolio는 변경할 수 없다. 재현 가능한 재시작이 필요해지면
+                    State도 typed schema로 직렬화하고 실행 로그에 체크포인트를 남긴다.
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <h2>예시 1 · 골든크로스 Context</h2>
+              <p>
+                단일 종목의 이동평균만 필요하다. Context 전용 클래스를 만들지 않고, 필요한 종가
+                60개와 매일 호출할 일정만 선언한다.
+              </p>
+              <div class="grid-2">
+                <div class="contract-box">
+                  <h3>설정과 데이터 요구사항</h3>
+                  <pre><code class="language-python"># Config는 실행 중 바뀌지 않는 전략 파라미터다.
+@dataclass(frozen=True)
+class GoldenCrossConfig:
+    instrument: InstrumentId
+    short_window: int = 20
+    long_window: int = 60
+    target_weight: float = 0.7
+    emergency_drawdown: float = -0.12
+
+class GoldenCrossStrategy:
+    def __init__(self, config: GoldenCrossConfig):
+        self.config = config
+        # 전략이 소유할 데이터 요청을 한 번 만들어 재사용한다.
+        self.prices = HistoryRequest(
+            instruments=(config.instrument,),
+            field=PriceField.CLOSE,
+            lookback=config.long_window,
+        )
+
+    def requirements(self) -&gt; StrategyRequirements:
+        # 엔진은 이 선언으로 60일 워밍업과 매일 호출을 준비한다.
+        return StrategyRequirements(
+            histories=(self.prices,),
+            schedule=EverySession(),
+            events=frozenset({EventKind.MARKET}),
+            actions=frozenset({
+                ActionKind.SET_PORTFOLIO_TARGET,
+                ActionKind.LIQUIDATE_POSITION,
+            }),
+            features=frozenset(),
+        )</code></pre>
+                </div>
+                <div class="contract-box">
+                  <h3>Context 사용</h3>
+                  <pre><code class="language-python">def on_event(self, ctx, event):
+    if not isinstance(event, MarketSnapshot):
+        return StrategyDecision.no_action(ctx.now)
+
+    # requirements()에 선언한 종가 창을 Context에서 가져온다.
+    closes = ctx.history(
+        self.prices
+    ).column(self.config.instrument)
+
+    # 급락은 일반 이동평균 규칙보다 먼저 평가한다.
+    drawdown = closes[-1] / max(closes) - 1
+    if drawdown &lt;= self.config.emergency_drawdown:
+        return StrategyDecision(
+            schema_version=1,
+            as_of=ctx.now,
+            actions=(LiquidatePosition(
+                instrument=self.config.instrument,
+                execution=ExecutionPolicy(
+                    style=ExecutionStyle.MARKET,
+                    timing=ExecutionTiming.NEXT_OPEN,
+                    time_in_force=TimeInForce.DAY,
+                ),
+                cancel_open_orders=True,
+                persistence=LiquidationPersistence.UNTIL_FLAT,
+            ),),
+            reason="emergency_drawdown_exit",
+        )
+
+    # 지표 계산은 엔진이 아니라 전략의 책임이다.
+    short_ma = mean(
+        closes[-self.config.short_window:]
+    )
+    long_ma = mean(closes)
+    target = (
+        self.config.target_weight
+        if short_ma &gt; long_ma
+        else 0.0
+    )
+
+    # 이미 목표 비중과 비슷하면 불필요한 주문을 만들지 않는다.
+    current = ctx.current_weight(
+        self.config.instrument
+    )
+    if abs(current - target) &lt; 0.01:
+        return StrategyDecision.no_action(ctx.now)
+
+    # 평상시에는 목표 비중 Action을 반환한다.
+    action = SetPortfolioTarget(
+        targets=(WeightTarget(
+            instrument=self.config.instrument,
+            weight=target,
+        ),),
+        scope=TargetScope.PATCH,
+        execution=ExecutionPolicy(
+            style=ExecutionStyle.MARKET,
+            timing=ExecutionTiming.NEXT_OPEN,
+            time_in_force=TimeInForce.DAY,
+        ),
+    )
+    return StrategyDecision(
+        schema_version=1,
+        as_of=ctx.now,
+        actions=(action,),
+        reason="golden_cross",
+    )</code></pre>
+                </div>
+              </div>
+              <div class="callout">
+                같은 전략이 평상시에는 SetPortfolioTarget, 급락 시에는 LiquidatePosition을 반환한다.
+                MA와 drawdown은 Context 필드가 아니라 PriceWindow로부터 계산하는 전략 로직이다.
+              </div>
+            </section>
+
+            <section>
+              <h2>예시 2 · 횡단면 모멘텀 Context</h2>
+              <p>
+                여러 종목의 같은 기간 수익률을 한 시점에서 비교해야 한다. 그래서 단일 Bar가 아니라
+                유니버스 전체가 시간축에 맞춰진 PriceWindow와 MarketSnapshot이 필요하다.
+              </p>
+              <div class="grid-2">
+                <div class="contract-box">
+                  <h3>설정과 데이터 요구사항</h3>
+                  <pre><code class="language-python"># 유니버스와 순위 기준도 실행 중 바꾸지 않는다.
+@dataclass(frozen=True)
+class MomentumConfig:
+    universe: tuple[InstrumentId, ...]
+    lookback: int = 252
+    top_n: int = 5
+
+class MomentumStrategy:
+    def __init__(self, config: MomentumConfig):
+        self.config = config
+        # 모든 종목을 같은 lookback과 시간축으로 요청한다.
+        self.prices = HistoryRequest(
+            instruments=config.universe,
+            field=PriceField.CLOSE,
+            lookback=config.lookback,
+        )
+
+    def requirements(self) -&gt; StrategyRequirements:
+        # 월말에만 Python 전략을 호출하도록 엔진에 알린다.
+        return StrategyRequirements(
+            histories=(self.prices,),
+            schedule=MonthEndSession(),
+            events=frozenset({EventKind.MARKET}),
+            actions=frozenset({
+                ActionKind.SET_PORTFOLIO_TARGET,
+            }),
+            features=frozenset(),
+        )</code></pre>
+                </div>
+                <div class="contract-box">
+                  <h3>Context 사용</h3>
+                  <pre><code class="language-python">def on_event(self, ctx, event):
+    if not isinstance(event, MarketSnapshot):
+        return StrategyDecision.no_action(ctx.now)
+
+    # Context가 시간축을 맞춘 유니버스 전체 가격을 반환한다.
+    window = ctx.history(self.prices)
+    # 결측이 없는 종목만 lookback 수익률을 계산한다.
+    scores = [
+        (
+            instrument,
+            window.column(instrument)[-1]
+            / window.column(instrument)[0] - 1,
+        )
+        for instrument in self.config.universe
+        if window.is_complete(instrument)
+    ]
+    # 수익률이 높은 순서로 정렬해 상위 N개를 고른다.
+    ranked = sorted(
+        scores,
+        key=lambda item: item[1],
+        reverse=True,
+    )
+    selected = frozenset(
+        instrument
+        for instrument, _ in ranked[:self.config.top_n]
+    )
+    weight = 1 / len(selected) if selected else 0
+
+    # REPLACE이므로 목록 밖 기존 포지션도 0 비중으로 간주한다.
+    targets = tuple(
+        WeightTarget(
+            instrument=instrument,
+            weight=weight if instrument in selected else 0,
+        )
+        for instrument in self.config.universe
+    )
+    action = SetPortfolioTarget(
+        targets=targets,
+        scope=TargetScope.REPLACE,
+        execution=ExecutionPolicy(
+            style=ExecutionStyle.MARKET,
+            timing=ExecutionTiming.NEXT_OPEN,
+            time_in_force=TimeInForce.DAY,
+        ),
+    )
+    return StrategyDecision(
+        schema_version=1,
+        as_of=ctx.now,
+        actions=(action,),
+        reason="cross_sectional_momentum",
+    )</code></pre>
+                </div>
+              </div>
+              <div class="callout warning">결측 종목을 임의로 0원 처리하면 순위가 왜곡된다. PriceWindow의 정렬 및 결측 정책을 엔진 수준에서 고정해야 한다.</div>
+            </section>
+
+            <section>
+              <h2>예시 3 · 페어 평균회귀 Context</h2>
+              <p>
+                두 종목의 날짜가 정확히 정렬된 가격 창과 진입 상태가 필요하다. 가격과 포트폴리오는
+                Context에서 읽고, FLAT/LONG/SHORT regime만 전략 State로 관리한다.
+              </p>
+              <div class="grid-2">
+                <div class="contract-box">
+                  <h3>요구사항과 전략 State</h3>
+                  <pre><code class="language-python"># 다음 호출까지 기억할 전략 내부 상태다.
+class PairRegime(Enum):
+    FLAT = "flat"
+    LONG_SPREAD = "long_spread"
+    SHORT_SPREAD = "short_spread"
+
+@dataclass
+class PairsState:
+    regime: PairRegime = PairRegime.FLAT
+
+class PairsStrategy:
+    def __init__(
+        self,
+        left: InstrumentId,
+        right: InstrumentId,
+    ):
+        # Config에 해당하는 고정 파라미터다.
+        self.left = left
+        self.right = right
+        self.beta = 1.0
+        self.entry_z = 2.0
+        self.exit_z = 0.5
+        # Portfolio와 별개로 전략 자신만 변경할 수 있다.
+        self.state = PairsState()
+        # 두 종목은 반드시 같은 시간축으로 요청한다.
+        self.prices = HistoryRequest(
+            instruments=(left, right),
+            field=PriceField.CLOSE,
+            lookback=120,
+        )
+
+    def requirements(self) -&gt; StrategyRequirements:
+        # 공매도 기능이 없으면 엔진이 실행 전에 거절한다.
+        return StrategyRequirements(
+            histories=(self.prices,),
+            schedule=EverySession(),
+            events=frozenset({EventKind.MARKET}),
+            actions=frozenset({
+                ActionKind.BASKET,
+                ActionKind.SET_POSITION_TARGET,
+            }),
+            features=frozenset({
+                EngineFeature.SHORT_SELLING,
+                EngineFeature.PROPORTIONAL_BASKET,
+            }),
+        )
+
+    def basket(
+        self,
+        left: float,
+        right: float,
+    ) -&gt; BasketAction:
+        execution = ExecutionPolicy(
+            style=ExecutionStyle.MARKET,
+            timing=ExecutionTiming.NEXT_OPEN,
+            time_in_force=TimeInForce.DAY,
+        )
+        # 양쪽 목표를 비례 체결해야 하는 하나의 Basket으로 묶는다.
+        return BasketAction(
+            legs=(
+                SetPositionTarget(
+                    target=WeightTarget(self.left, left),
+                    execution=execution,
+                ),
+                SetPositionTarget(
+                    target=WeightTarget(self.right, right),
+                    execution=execution,
+                ),
+            ),
+            group_policy=GroupPolicy.PROPORTIONAL,
+        )</code></pre>
+                </div>
+                <div class="contract-box">
+                  <h3>Context 사용</h3>
+                  <pre><code class="language-python">def on_event(self, ctx, event):
+    if not isinstance(event, MarketSnapshot):
+        return StrategyDecision.no_action(ctx.now)
+
+    # Context가 날짜를 교집합 기준으로 정렬한 가격을 준다.
+    window = ctx.history(self.prices)
+    left = window.column(self.left)
+    right = window.column(self.right)
+
+    # 두 로그 가격의 차이를 표준화해 진입 신호로 쓴다.
+    spread = np.log(left) - self.beta * np.log(right)
+    sigma = np.std(spread)
+    # 분산이 없으면 z-score를 계산할 수 없다.
+    if sigma == 0:
+        return StrategyDecision.no_action(ctx.now)
+
+    zscore = (
+        spread[-1] - mean(spread)
+    ) / sigma
+
+    # 전략 State 변경은 허용되지만 Portfolio는 건드리지 않는다.
+    if zscore &gt; self.entry_z:
+        self.state.regime = PairRegime.SHORT_SPREAD
+        action = self.basket(left=-0.5, right=0.5)
+
+    elif zscore &lt; -self.entry_z:
+        self.state.regime = PairRegime.LONG_SPREAD
+        action = self.basket(left=0.5, right=-0.5)
+
+    elif abs(zscore) &lt; self.exit_z:
+        self.state.regime = PairRegime.FLAT
+        action = self.basket(left=0.0, right=0.0)
+
+    else:
+        return StrategyDecision.no_action(ctx.now)
+
+    return StrategyDecision(
+        schema_version=1,
+        as_of=ctx.now,
+        actions=(action,),
+        reason="pairs_mean_reversion",
+    )</code></pre>
+                </div>
+              </div>
+              <div class="callout warning">
+                BasketAction과 SHORT_SELLING의 스키마 자리는 정의돼 있지만 현재 reference engine에서는
+                NOT_IMPLEMENTED다. 데이터 루프를 시작하기 전에 CapabilityNotImplemented로 거절한다.
+              </div>
+            </section>
+
+            <section>
+              <h2>Rust 경계를 고려한 Context 구현</h2>
+              <p>
+                Rust 엔진에서 Python 전략을 호출할 때 <code>ctx.history()</code>가 종목마다 Rust를
+                다시 호출하게 만들면 경계 왕복 비용이 커진다. requirements를 먼저 받는 이유는
+                엔진이 필요한 PriceWindow를 한 번에 준비해 NumPy read-only 배열로 넘기기 위해서다.
+              </p>
+              <div class="pipeline diagram">
+                <div class="node"><b>requirements()</b><span>종목, 필드, lookback, schedule 선언</span></div>
+                <div class="node"><b>Rust Prefetch</b><span>필요한 구간을 연속 메모리로 준비</span></div>
+                <div class="node"><b>PriceWindow</b><span>읽기 전용 NumPy view로 노출</span></div>
+                <div class="node"><b>on_event()</b><span>이벤트 묶음당 Python callback 1회</span></div>
+                <div class="node"><b>Decision Batch</b><span>서로 다른 Action을 tuple로 한 번에 반환</span></div>
+                <div class="node"><b>Rust Engine</b><span>주문, 체결, 회계 계속 처리</span></div>
+              </div>
+            </section>
+
+            <section id="events">
+              <h2>엔진 데이터 모델 ERD</h2>
+              <div class="erd diagram">
+                <article class="entity">
+                  <h3>BacktestRun</h3>
+                  <ul>
+                    <li>run_id PK</li>
+                    <li>strategy_name</li>
+                    <li>initial_cash</li>
+                    <li>started_at</li>
+                  </ul>
+                </article>
+                <article class="entity">
+                  <h3>Bar</h3>
+                  <ul>
+                    <li>ts + symbol PK</li>
+                    <li>open/high/low/close</li>
+                    <li>volume</li>
+                    <li>source</li>
+                  </ul>
+                </article>
+                <article class="entity">
+                  <h3>StrategyDecision</h3>
+                  <ul>
+                    <li>decision_id PK</li>
+                    <li>run_id FK</li>
+                    <li>as_of</li>
+                    <li>schema_version</li>
+                    <li>reason</li>
+                  </ul>
+                </article>
+                <article class="entity">
+                  <h3>StrategyAction</h3>
+                  <ul>
+                    <li>action_id PK</li>
+                    <li>decision_id FK</li>
+                    <li>action_kind</li>
+                    <li>payload_version</li>
+                  </ul>
+                </article>
+                <article class="entity">
+                  <h3>Order</h3>
+                  <ul>
+                    <li>order_id PK</li>
+                    <li>action_id FK</li>
+                    <li>quantity</li>
+                    <li>side</li>
+                  </ul>
+                </article>
+                <article class="entity">
+                  <h3>Fill</h3>
+                  <ul>
+                    <li>fill_id PK</li>
+                    <li>order_id FK</li>
+                    <li>price</li>
+                    <li>fee + slippage</li>
+                  </ul>
+                </article>
+                <article class="entity">
+                  <h3>PortfolioSnapshot</h3>
+                  <ul>
+                    <li>run_id + ts PK</li>
+                    <li>cash</li>
+                    <li>equity</li>
+                    <li>drawdown</li>
+                  </ul>
+                </article>
+              </div>
+              <p>
+                관계는 <code>Run → Decision → Action → Order → Fill → Snapshot</code>으로 추적한다.
+                이 순서를 남겨야 결과가 이상할 때 원인을 역추적할 수 있다.
+              </p>
+              <div class="callout">
+                <code>MarketSnapshot</code>과 <code>PriceWindow</code>는 Bar에서 조립되는 런타임 조회
+                객체라 별도 원본 테이블로 저장하지 않는다. 저장된 Bar로 언제든 다시 만들 수 있어야 한다.
+              </div>
+            </section>
+          </div>
+
+          <div id="eventloop" class="panel stack" hidden>
+            <section>
+              <h2>전체 실행 Sequence Diagram</h2>
+              <div class="sequence diagram" aria-label="이벤트 루프 시퀀스 다이어그램">
+                <div class="seq-head">Engine</div>
+                <div class="seq-head">Message</div>
+                <div class="seq-head">Strategy / State</div>
+
+                <div class="seq-row">
+                  <div>EventLoop</div>
+                  <div class="seq-arrow">next_event()</div>
+                  <div>StrategyEvent</div>
+                </div>
+                <div class="seq-row">
+                  <div>StrategyRunner</div>
+                  <div class="seq-arrow">on_event(ctx, event)</div>
+                  <div>Python Strategy</div>
+                </div>
+                <div class="seq-row">
+                  <div>Strategy</div>
+                  <div class="seq-arrow">history(), current_weight()</div>
+                  <div>Read-only Context</div>
+                </div>
+                <div class="seq-row">
+                  <div>Strategy</div>
+                  <div class="seq-arrow">StrategyDecision</div>
+                  <div>CapabilityValidator</div>
+                </div>
+                <div class="seq-row">
+                  <div>DecisionRouter</div>
+                  <div class="seq-arrow">route(action)</div>
+                  <div>Risk / OrderManager</div>
+                </div>
+                <div class="seq-row">
+                  <div>OrderManager</div>
+                  <div class="seq-arrow">create_order()</div>
+                  <div>OrderEvent</div>
+                </div>
+                <div class="seq-row">
+                  <div>BrokerSim</div>
+                  <div class="seq-arrow">execute(order)</div>
+                  <div>FillEvent</div>
+                </div>
+                <div class="seq-row">
+                  <div>Portfolio</div>
+                  <div class="seq-arrow">apply(fill)</div>
+                  <div>Cash / Position / Equity</div>
+                </div>
+              </div>
+            </section>
+
+            <section id="emergency-exit">
+              <h2>이평선 전략의 급락 시장가 청산</h2>
+              <p>
+                평상시 목표 비중 조절과 비상 청산은 최종 목표가 0%로 같아도 실행 의미가 다르다.
+                긴급 경로는 기존 주문 취소, 시장가, 미체결 수량 재시도까지 명시해야 한다.
+              </p>
+              <div class="pipeline diagram">
+                <div class="node"><b>Drawdown 감지</b><span>현재까지 확정된 가격으로 -12% 조건 확인</span></div>
+                <div class="node"><b>LiquidatePosition</b><span>MARKET, cancel_open_orders, UNTIL_FLAT</span></div>
+                <div class="node"><b>Capability 검증</b><span>청산·시장가·부분체결 지원 상태 확인</span></div>
+                <div class="node"><b>Order 생성</b><span>실제 보유 수량만큼 전량 매도 주문</span></div>
+                <div class="node"><b>Fill / Retry</b><span>부분체결이면 남은 수량을 정책에 따라 재주문</span></div>
+                <div class="node"><b>Portfolio Flat</b><span>Fill 누적 결과가 0주가 되면 청산 종료</span></div>
+              </div>
+              <div class="grid-2">
+                <div class="tile">
+                  <strong>전략 전용 급락 규칙</strong>
+                  <p>이 이동평균 전략만 사용하는 drawdown 조건이면 Strategy가 LiquidatePosition을 반환한다.</p>
+                </div>
+                <div class="tile">
+                  <strong>전역 포트폴리오 손실 제한</strong>
+                  <p>모든 전략에 적용되는 MDD 제한이면 RiskManager가 Decision을 차단하고 강제 청산 Action을 생성한다.</p>
+                </div>
+              </div>
+              <div class="callout warning">
+                일봉 종가로 급락을 감지한 뒤 같은 종가에 체결하면 look-ahead다. 일봉 엔진에서는
+                NEXT_OPEN, 장중 엔진에서는 신호 이벤트 이후 NEXT_AVAILABLE 가격으로 체결한다.
+              </div>
+            </section>
+
+            <section id="portfolio">
+              <h2>Portfolio State Machine</h2>
+              <div class="state-machine diagram">
+                <div class="state"><b>Before Bar</b><span>이전 cash, position, equity 보유</span></div>
+                <div class="state"><b>Mark Price</b><span>현재 bar 가격으로 평가금 갱신</span></div>
+                <div class="state"><b>Apply Fill</b><span>체결 수량, 수수료, 슬리피지 반영</span></div>
+                <div class="state"><b>Snapshot</b><span>equity, return, drawdown 기록</span></div>
+                <div class="state"><b>Next Bar</b><span>다음 이벤트로 상태 전달</span></div>
+              </div>
+            </section>
+
+            <section>
+              <h2>구체적인 일부 체결 예시</h2>
+              <p>
+                전략의 판단과 실제 포트폴리오 상태가 왜 분리되어야 하는지 한 번의 이벤트로
+                따라가 본다. 종가는 70,000원이고 초기 현금은 1,000,000원이라고 가정한다.
+              </p>
+              <div class="execution-example" aria-label="전략 Decision부터 포트폴리오 갱신까지의 예시">
+                <article class="execution-step">
+                  <span class="step-label">1 · READ</span>
+                  <strong>읽기 전용 상태 조회</strong>
+                  <p>현금 1,000,000원<br />보유 수량 0주<br />포트폴리오는 아직 그대로다.</p>
+                </article>
+                <article class="execution-step">
+                  <span class="step-label">2 · DECISION</span>
+                  <strong>SetPortfolioTarget 70% 반환</strong>
+                  <p>엔진이 이를 10주 매수 주문으로 변환한다. 주문을 만들었어도 현금과 수량은 변하지 않는다.</p>
+                </article>
+                <article class="execution-step">
+                  <span class="step-label">3 · FILL</span>
+                  <strong>4주만 71,000원에 체결</strong>
+                  <p>거래량 제약으로 일부 체결되고 수수료 100원이 발생한다. 미체결 6주는 당일 취소로 가정한다.</p>
+                </article>
+                <article class="execution-step result">
+                  <span class="step-label">4 · APPLY</span>
+                  <strong>체결 결과만 상태에 반영</strong>
+                  <p>현금 715,900원<br />보유 수량 4주<br />평가자산 999,900원</p>
+                </article>
+              </div>
+              <div class="callout warning">
+                전략이 2단계에서 10주를 직접 더했다면 실제 보유 수량은 4주인데 백테스트에는
+                10주로 기록된다. 수익률, 현금, MDD, 수수료가 모두 잘못 계산되는 출발점이다.
+              </div>
+            </section>
+
+            <section>
+              <h2>이벤트별 불변조건</h2>
+              <div class="checklist">
+                <div class="check">
+                  <span>1</span>
+                  <div><strong>Bar는 시간순이다.</strong><p>동일 instrument에서 timestamp가 역행하면 엔진이 중단되어야 한다.</p></div>
+                </div>
+                <div class="check">
+                  <span>2</span>
+                  <div><strong>Strategy는 엔진 상태를 변경하지 않는다.</strong><p>typed StrategyState는 바꿀 수 있지만 Context와 Portfolio는 조회 전용이고 거래 상태는 Fill로만 변한다.</p></div>
+                </div>
+                <div class="check">
+                  <span>3</span>
+                  <div><strong>현금은 체결 이후에만 변한다.</strong><p>주문 생성만으로 cash나 position이 바뀌면 안 된다.</p></div>
+                </div>
+                <div class="check">
+                  <span>4</span>
+                  <div><strong>Snapshot은 재계산 가능해야 한다.</strong><p>fills와 bars만 있으면 equity curve를 다시 만들 수 있어야 한다.</p></div>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <div id="rust" class="panel stack" hidden>
+            <section id="rust-boundary">
+              <h2>왜 Rust를 쓰려는가</h2>
+              <p>
+                Rust를 쓰는 이유는 “빠르니까” 하나로 끝나지 않는다. 백테스트 엔진은 반복 루프,
+                상태 전이, 수치 계산, 회계 규칙이 섞인다. 이 부분을 타입으로 강제하면 버그를
+                줄이고, 나중에 여러 종목/긴 기간으로 확장할 때 성능 여지도 생긴다.
+              </p>
+              <div class="grid-4">
+                <div class="tile"><strong>타입 안정성</strong><p>Order와 Fill, Cash와 Quantity를 구분해 실수를 줄인다.</p></div>
+                <div class="tile"><strong>재현성</strong><p>상태 전이 위치를 엔진 내부로 제한해 결과 추적이 쉬워진다.</p></div>
+                <div class="tile"><strong>성능</strong><p>반복되는 bar loop와 portfolio update를 Python 밖으로 뺄 수 있다.</p></div>
+                <div class="tile"><strong>학습 가치</strong><p>실거래 엔진과 유사한 event/order/fill 구조를 직접 익힌다.</p></div>
+              </div>
+            </section>
+
+            <section>
+              <h2>maturin / PyO3 경계</h2>
+              <p>
+                전략은 Python으로 유지하고, Rust 엔진은 Python 패키지처럼 import한다.
+                <code>maturin</code>은 Rust crate를 Python wheel로 빌드하는 흐름을 단순하게 해준다.
+              </p>
+              <pre><code class="language-python"># Python side
+from quant_engine import BacktestEngine
+
+# maturin으로 빌드한 Rust 엔진을 일반 Python 패키지처럼 사용한다.
+engine = BacktestEngine(config)
+# Python 전략 객체는 PyO3 adapter를 통해 on_event()로 호출된다.
+result = engine.run(strategy=my_strategy, data=market_data)</code></pre>
+              <div class="callout warning">
+                Python callback은 종목별 Bar가 아니라 시점별 MarketSnapshot 한 번으로 묶는다.
+                Decision의 Action도 tuple 배치로 반환하고, 실제 병목이 확인된 전략만 Rust-native trait로 옮긴다.
+              </div>
+            </section>
+
+            <section>
+              <h2>포팅 단계 다이어그램</h2>
+              <div class="pipeline diagram">
+                <div class="node"><b>Python 기준 구현</b><span>스키마와 테스트 먼저 고정</span></div>
+                <div class="node"><b>Rust Types</b><span>Event, Decision, Action, Order, Fill</span></div>
+                <div class="node"><b>Rust Loop</b><span>DataFeed와 상태 전이</span></div>
+                <div class="node"><b>PyO3 Adapter</b><span>Python on_event 호출</span></div>
+                <div class="node"><b>Result Diff</b><span>Python/Zipline 결과 대조</span></div>
+                <div class="node"><b>Optimize</b><span>callback, batch, multi-symbol</span></div>
+              </div>
+            </section>
+
+            <section>
+              <h2>Rust v1 모듈 계획</h2>
+              <table>
+                <thead>
+                  <tr><th>Rust 모듈</th><th>책임</th><th>Python과 닿는가</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td><code>types</code></td><td>Event, Decision, Action, Order, Fill, Snapshot 정의</td><td>예. PyO3 변환 필요</td></tr>
+                  <tr><td><code>capability</code></td><td>Action/Feature 지원 상태와 실행 전 협상</td><td>Requirements 변환 시</td></tr>
+                  <tr><td><code>feed</code></td><td>정렬된 bar iterator 제공</td><td>초기에는 Python list를 받음</td></tr>
+                  <tr><td><code>router</code></td><td>Action variant 검증과 주문 경로 분기</td><td>아니오</td></tr>
+                  <tr><td><code>broker</code></td><td>주문 생명주기, 체결, 비용, 슬리피지</td><td>아니오</td></tr>
+                  <tr><td><code>portfolio</code></td><td>현금, 포지션, 평가금 상태 전이</td><td>결과 반환 시에만</td></tr>
+                  <tr><td><code>adapter</code></td><td>Python strategy callback 호출</td><td>예. PyO3 핵심 경계</td></tr>
+                </tbody>
+              </table>
+            </section>
+          </div>
+
+          <div id="validation" class="panel stack" hidden>
+            <section id="capability-status">
+              <h2>현재 Capability 상태</h2>
+              <p>
+                아래 표는 이 문서에서 의미와 타입을 고정한 것과, 실제 커스텀 엔진 코드가 실행할
+                수 있는 것을 분리한다. 현재 저장소의 Zipline/FastAPI/Astro 앱은 동작 관찰용이며
+                아래 Python reference engine이나 Rust engine의 구현 완료를 뜻하지 않는다.
+              </p>
+              <div class="callout warning">
+                <strong>DEFINED ≠ IMPLEMENTED.</strong> Action 스키마 자리는 미리 만들었지만 새 이벤트
+                드리븐 엔진은 아직 작성 전이다. 현재 모든 Action handler는 정직하게
+                <code>NOT_IMPLEMENTED</code>로 시작한다.
+              </div>
+              <div class="table-scroll">
+                <table aria-label="Action별 스키마와 엔진 구현 상태">
+                  <thead>
+                    <tr><th>Action</th><th>프로토콜 스키마</th><th>Python reference</th><th>Rust core</th><th>처음 고정할 테스트</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><td><code>NoAction</code></td><td><span class="status-pill status-defined">DEFINED</span></td><td><span class="status-pill status-missing">NOT_IMPLEMENTED</span></td><td><span class="status-pill status-missing">NOT_IMPLEMENTED</span></td><td>주문·상태 변경이 없음</td></tr>
+                    <tr><td><code>SetPortfolioTarget</code></td><td><span class="status-pill status-defined">DEFINED</span></td><td><span class="status-pill status-missing">NOT_IMPLEMENTED</span></td><td><span class="status-pill status-missing">NOT_IMPLEMENTED</span></td><td>REPLACE/PATCH와 목표 수량 변환</td></tr>
+                    <tr><td><code>SetPositionTarget</code></td><td><span class="status-pill status-defined">DEFINED</span></td><td><span class="status-pill status-missing">NOT_IMPLEMENTED</span></td><td><span class="status-pill status-missing">NOT_IMPLEMENTED</span></td><td>weight/quantity/notional 변환</td></tr>
+                    <tr><td><code>AdjustPosition</code></td><td><span class="status-pill status-defined">DEFINED</span></td><td><span class="status-pill status-missing">NOT_IMPLEMENTED</span></td><td><span class="status-pill status-missing">NOT_IMPLEMENTED</span></td><td>증감량과 절대 목표의 구분</td></tr>
+                    <tr><td><code>LiquidatePosition</code></td><td><span class="status-pill status-defined">DEFINED</span></td><td><span class="status-pill status-missing">NOT_IMPLEMENTED</span></td><td><span class="status-pill status-missing">NOT_IMPLEMENTED</span></td><td>주문 취소·부분체결·UNTIL_FLAT</td></tr>
+                    <tr><td><code>SubmitOrder</code></td><td><span class="status-pill status-defined">DEFINED</span></td><td><span class="status-pill status-missing">NOT_IMPLEMENTED</span></td><td><span class="status-pill status-missing">NOT_IMPLEMENTED</span></td><td>시장가·지정가·스톱 주문 상태 전이</td></tr>
+                    <tr><td><code>CancelOrder / ReplaceOrder</code></td><td><span class="status-pill status-defined">DEFINED</span></td><td><span class="status-pill status-missing">NOT_IMPLEMENTED</span></td><td><span class="status-pill status-missing">NOT_IMPLEMENTED</span></td><td>중복 요청과 이미 체결된 주문 처리</td></tr>
+                    <tr><td><code>BasketAction</code></td><td><span class="status-pill status-defined">DEFINED</span></td><td><span class="status-pill status-missing">NOT_IMPLEMENTED</span></td><td><span class="status-pill status-missing">NOT_IMPLEMENTED</span></td><td>비례 체결과 한쪽 체결 위험</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p>
+                <span class="status-pill status-unsupported">UNSUPPORTED</span>는 구현 순서가 늦다는 뜻이
+                아니다. 예를 들어 일봉 데이터로 밀리초 주문 우선순위를 재현하는 기능처럼 현재
+                데이터와 모델로 의미 있는 시뮬레이션이 불가능한 경우에만 사용한다.
+              </p>
+            </section>
+
+            <section>
+              <h2>미구현 요구는 실행 전에 실패한다</h2>
+              <p>
+                Capability 검증은 첫 Bar를 읽은 뒤가 아니라 전략 등록 직후 수행한다. 페어 전략이
+                Basket과 공매도를 요구했는데 엔진이 지원하지 않으면 긴 실행 끝에 이상한 결과를
+                만드는 대신 즉시 구체적인 오류를 낸다.
+              </p>
+              <pre><code class="language-python">def prepare_strategy(
+    strategy: Strategy,
+    capabilities: EngineCapabilities,
+) -&gt; ValidatedStrategy:
+    # 전략 선언은 데이터 루프보다 먼저 한 번만 읽는다.
+    requirements = strategy.requirements()
+
+    # Registry 내부 조회는 map이어도 외부 계약은 typed method로 유지한다.
+    for action in requirements.actions:
+        capabilities.require_action(action)
+    for feature in requirements.features:
+        capabilities.require_feature(feature)
+
+    # 모든 요구가 통과한 전략만 Context를 받을 수 있다.
+    return ValidatedStrategy(strategy, requirements)
+
+# BasketAction + SHORT_SELLING이 미구현이면 여기서 즉시 예외가 난다.
+validated = prepare_strategy(pairs_strategy, engine.capabilities)
+# CapabilityNotImplemented:
+# action=BASKET, feature=SHORT_SELLING</code></pre>
+              <div class="grid-2">
+                <div class="tile"><strong>NOT_IMPLEMENTED</strong><p>계약은 유지한다. 해당 handler와 테스트를 추가하면 상태를 IMPLEMENTED로 바꿀 수 있다.</p></div>
+                <div class="tile"><strong>UNSUPPORTED</strong><p>데이터 해상도나 체결 가정을 바꾸지 않는 한 실행을 허용하지 않는다.</p></div>
+              </div>
+            </section>
+
+            <section id="tests">
+              <h2>검증 기준</h2>
+              <p>엔진은 “돌아간다”가 아니라 “설명 가능한 결과를 낸다”가 기준이다.</p>
+              <div class="grid-2">
+                <div class="tile">
+                  <h3>단위 테스트</h3>
+                  <p>수수료 계산, 수량 변환, drawdown 계산, 포지션 평균단가 갱신을 작게 검증한다.</p>
+                </div>
+                <div class="tile">
+                  <h3>골든 테스트</h3>
+                  <p>아주 짧은 수동 예제로 cash, position, equity가 손계산과 일치하는지 본다.</p>
+                </div>
+                <div class="tile">
+                  <h3>Zipline 대조</h3>
+                  <p>동일 데이터, 동일 전략, 동일 비용 가정에서 equity curve 차이를 비교한다.</p>
+                </div>
+                <div class="tile">
+                  <h3>회귀 테스트</h3>
+                  <p>엔진 수정 후 기존 전략 결과가 의도 없이 변하지 않는지 diff를 남긴다.</p>
+                </div>
+                <div class="tile">
+                  <h3>계약 테스트</h3>
+                  <p>Requirements에서 선언하지 않은 데이터 조회와 Action 반환이 항상 거절되는지 확인한다.</p>
+                </div>
+                <div class="tile">
+                  <h3>상태 전이 테스트</h3>
+                  <p>Order 생성으로는 자산이 바뀌지 않고 Fill 적용으로만 cash와 position이 변하는지 확인한다.</p>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <h2>성과 지표 목록</h2>
+              <table>
+                <thead><tr><th>지표</th><th>의미</th><th>주의점</th></tr></thead>
+                <tbody>
+                  <tr><td>Total Return</td><td>전체 기간 누적 수익률</td><td>기간 길이와 현금흐름을 함께 봐야 함</td></tr>
+                  <tr><td>CAGR</td><td>연복리 수익률</td><td>기간이 짧으면 과장될 수 있음</td></tr>
+                  <tr><td>MDD</td><td>고점 대비 최대 낙폭</td><td>전략 생존 가능성을 볼 때 중요</td></tr>
+                  <tr><td>Sharpe</td><td>변동성 대비 수익</td><td>일봉/연율화 가정이 명확해야 함</td></tr>
+                  <tr><td>Sortino</td><td>하방 변동성 대비 수익</td><td>손실 변동성만 따로 계산</td></tr>
+                  <tr><td>Calmar</td><td>CAGR을 MDD 절댓값으로 나눈 값</td><td>MDD가 0이면 None으로 둠</td></tr>
+                  <tr><td>Volatility</td><td>수익률 변동성의 연율화 값</td><td>표본 빈도와 연율화 계수를 기록</td></tr>
+                  <tr><td>Win Rate</td><td>이익 거래 비율</td><td>손익비와 같이 봐야 함</td></tr>
+                  <tr><td>Profit Factor</td><td>총이익을 총손실로 나눈 값</td><td>거래 단위 손익 로그가 필요</td></tr>
+                  <tr><td>Average Win/Loss</td><td>평균 이익과 평균 손실</td><td>승률만 높은 전략의 손실 꼬리를 확인</td></tr>
+                  <tr><td>Turnover</td><td>포트폴리오 교체 빈도</td><td>비용 민감도와 직결</td></tr>
+                  <tr><td>Exposure</td><td>시장에 노출된 비율</td><td>현금 보유 전략과 비교할 때 필요</td></tr>
+                  <tr><td>Alpha / Beta</td><td>벤치마크 대비 초과수익과 민감도</td><td>벤치마크와 관측일 정렬이 필요</td></tr>
+                  <tr><td>Information Ratio</td><td>추적오차 대비 초과수익</td><td>시장 중립·상대수익 전략 비교에 유용</td></tr>
+                  <tr><td>VaR / CVaR</td><td>손실 분위수와 꼬리 평균 손실</td><td>분포·신뢰수준·기간을 함께 기록</td></tr>
+                </tbody>
+              </table>
+            </section>
+
+            <section>
+              <h2>구체 로드맵</h2>
+              <div class="checklist">
+                <div class="check">
+                  <span>1</span>
+                  <div><strong>프로토콜 타입과 직렬화 테스트 고정</strong><p>Requirements, Event, Context view, Decision, Action, Order, Fill의 필드와 schema_version을 먼저 고정한다.</p></div>
+                </div>
+                <div class="check">
+                  <span>2</span>
+                  <div><strong>Capability Registry와 거절 경로 구현</strong><p>모든 Action이 NOT_IMPLEMENTED인 상태에서도 전략 요구를 검사하고 정확한 오류를 내는 엔진 뼈대를 만든다.</p></div>
+                </div>
+                <div class="check">
+                  <span>3</span>
+                  <div><strong>최소 Python reference engine 작성</strong><p>NoAction, SetPortfolioTarget, LiquidatePosition과 Fill 기반 회계부터 구현해 손계산 골든 테스트를 통과시킨다.</p></div>
+                </div>
+                <div class="check">
+                  <span>4</span>
+                  <div><strong>주문 생명주기 확장</strong><p>시장가·지정가·스톱, 부분체결, 취소·정정, 수수료·슬리피지 상태 전이를 구현한다.</p></div>
+                </div>
+                <div class="check">
+                  <span>5</span>
+                  <div><strong>Basket과 공매도 구현</strong><p>페어 전략의 비례 체결과 한쪽 체결 위험을 테스트한 뒤 Capability를 IMPLEMENTED로 승격한다.</p></div>
+                </div>
+                <div class="check">
+                  <span>6</span>
+                  <div><strong>Rust 포팅과 maturin 패키지화</strong><p>순수 상태 전이부터 옮기고 PyO3 adapter를 붙인 뒤 Python reference·Zipline과 결과 diff를 남긴다.</p></div>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <h2>현재 실험 앱 실행</h2>
+              <p>
+                현재 웹의 실행 버튼은 FastAPI <code>POST /api/backtests</code>를 호출한다. 서버가
+                PyKRX 워밍업 데이터를 준비하고 csvdir bundle을 ingest한 뒤 Zipline
+                <code>run_algorithm()</code> 결과를 typed JSON으로 반환한다. 아래에서 설계한 커스텀
+                이벤트 엔진을 구현한 것은 아니며, 그 자리를 비교·관찰할 Zipline 기준 실행이다.
+              </p>
+              <pre><code class="language-bash"># 프로젝트 의존성을 설치한다.
+cd 2026-08-17/sangmok/implementation
+uv sync
+npm install
+
+# 터미널 1: FastAPI
+uv run python scripts/run_api.py
+
+# 터미널 2: Astro
+npm run dev
+
+# 터미널 3: 설계 아티팩트와 빌드 앱
+python3 -m http.server 4173 --directory ../result/html</code></pre>
+              <p>
+                실험 앱은 <code>http://127.0.0.1:4321/app/</code>, API는
+                <code>http://127.0.0.1:8000</code>에서 확인한다. 설계 아티팩트와 빌드 앱은
+                <code>http://127.0.0.1:4173/index.html</code>에서 함께 연다.
+              </p>
+            </section>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      const escapeCode = (value) =>
+        value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+
+      const pythonKeywords = new Set([
+        "and", "as", "assert", "async", "await", "break", "class", "continue",
+        "def", "del", "elif", "else", "except", "False", "finally", "for", "from",
+        "global", "if", "import", "in", "is", "lambda", "None", "nonlocal", "not",
+        "or", "pass", "raise", "return", "True", "try", "while", "with", "yield",
+      ]);
+      const pythonBuiltins = new Set([
+        "abs", "bool", "dict", "enumerate", "float", "frozenset", "int", "len",
+        "list", "max", "min", "print", "range", "set", "sorted", "str", "sum",
+        "super", "tuple", "zip",
+      ]);
+      const pythonTypes = new Set([
+        "ActionKind", "Bar", "BasketAction", "EngineCapabilities", "FillEvent",
+        "HistoryRequest", "InstrumentId", "LiquidatePosition", "MarketSnapshot",
+        "OrderEvent", "Protocol", "Sequence", "Strategy", "StrategyAction",
+        "StrategyContext", "StrategyDecision", "StrategyRequirements", "PriceField",
+      ]);
+      const pythonTokenPattern = /("""[\s\S]*?"""|'''[\s\S]*?'''|#[^\n]*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|@[A-Za-z_]\w*|\b\d[\d_]*(?:\.\d[\d_]*)?\b|\b[A-Za-z_]\w*\b|->|:=|==|!=|<=|>=|\*\*|\/\/|[+\-*\/%=<>|&^~])/g;
+
+      function highlightPython(source) {
+        let result = "";
+        let cursor = 0;
+        let previousWord = "";
+
+        for (const match of source.matchAll(pythonTokenPattern)) {
+          const token = match[0];
+          result += escapeCode(source.slice(cursor, match.index));
+
+          let tokenClass = "";
+          if (token.startsWith("#")) tokenClass = "tok-comment";
+          else if (token.startsWith('"') || token.startsWith("'")) tokenClass = "tok-string";
+          else if (token.startsWith("@")) tokenClass = "tok-decorator";
+          else if (/^\d/.test(token)) tokenClass = "tok-number";
+          else if (pythonKeywords.has(token)) tokenClass = "tok-keyword";
+          else if (previousWord === "def") tokenClass = "tok-function";
+          else if (previousWord === "class" || pythonTypes.has(token) || /^[A-Z]/.test(token)) {
+            tokenClass = "tok-type";
+          } else if (pythonBuiltins.has(token)) tokenClass = "tok-builtin";
+          else if (/^[A-Za-z_]/.test(token)) tokenClass = "tok-variable";
+          else tokenClass = "tok-operator";
+
+          result += `<span class="${tokenClass}">${escapeCode(token)}</span>`;
+          if (/^[A-Za-z_]\w*$/.test(token)) previousWord = token;
+          cursor = match.index + token.length;
+        }
+
+        return result + escapeCode(source.slice(cursor));
+      }
+
+      const shellCommands = new Set(["cd", "npm", "uv", "python"]);
+      const bashTokenPattern = /(#[^\n]*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\$\{?[A-Za-z_]\w*\}?|--?[A-Za-z][\w-]*|\b\d+(?:\.\d+)?\b|\b[A-Za-z_]\w*\b)/g;
+
+      function highlightBash(source) {
+        let result = "";
+        let cursor = 0;
+
+        for (const match of source.matchAll(bashTokenPattern)) {
+          const token = match[0];
+          result += escapeCode(source.slice(cursor, match.index));
+
+          let tokenClass = "tok-variable";
+          if (token.startsWith("#")) tokenClass = "tok-comment";
+          else if (token.startsWith('"') || token.startsWith("'")) tokenClass = "tok-string";
+          else if (token.startsWith("$")) tokenClass = "tok-variable";
+          else if (token.startsWith("-")) tokenClass = "tok-flag";
+          else if (/^\d/.test(token)) tokenClass = "tok-number";
+          else if (shellCommands.has(token)) tokenClass = "tok-command";
+
+          result += `<span class="${tokenClass}">${escapeCode(token)}</span>`;
+          cursor = match.index + token.length;
+        }
+
+        return result + escapeCode(source.slice(cursor));
+      }
+
+      function fallbackCopy(text) {
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.append(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        textarea.remove();
+      }
+
+      document.querySelectorAll("pre > code").forEach((code) => {
+        const source = code.textContent;
+        const isBash = code.classList.contains("language-bash");
+        code.innerHTML = isBash ? highlightBash(source) : highlightPython(source);
+
+        const language = document.createElement("span");
+        language.className = "code-language";
+        language.textContent = isBash ? "Shell" : "Python";
+        language.setAttribute("aria-hidden", "true");
+
+        const copyButton = document.createElement("button");
+        copyButton.className = "copy-code";
+        copyButton.type = "button";
+        copyButton.textContent = "복사";
+        copyButton.title = "코드를 클립보드에 복사";
+        copyButton.setAttribute("aria-label", "코드 복사");
+        copyButton.addEventListener("click", async () => {
+          try {
+            await navigator.clipboard.writeText(source);
+          } catch {
+            fallbackCopy(source);
+          }
+          copyButton.textContent = "복사됨";
+          window.setTimeout(() => {
+            copyButton.textContent = "복사";
+          }, 1200);
+        });
+
+        code.parentElement.append(language, copyButton);
+      });
+
+      const tabButtons = [...document.querySelectorAll(".tab-button")];
+      const panels = [...document.querySelectorAll(".panel")];
+      const tocLinks = [...document.querySelectorAll(".toc a[data-tab-target]")];
+      const validTabs = new Set(tabButtons.map((button) => button.dataset.tab));
+
+      function activateTab(tabId, updateHash = true) {
+        const nextTab = validTabs.has(tabId) ? tabId : "overview";
+
+        tabButtons.forEach((button) => {
+          const selected = button.dataset.tab === nextTab;
+          button.setAttribute("aria-selected", String(selected));
+        });
+
+        panels.forEach((panel) => {
+          panel.hidden = panel.id !== nextTab;
+        });
+
+        if (updateHash) {
+          history.replaceState(null, "", `#${nextTab}`);
+        }
+      }
+
+      tabButtons.forEach((button) => {
+        button.addEventListener("click", () => activateTab(button.dataset.tab));
+      });
+
+      function activateLocationHash() {
+        const targetId = location.hash.replace("#", "");
+        if (validTabs.has(targetId)) {
+          activateTab(targetId, false);
+          return;
+        }
+
+        const tocLink = tocLinks.find(
+          (link) => link.getAttribute("href") === `#${targetId}`,
+        );
+        if (!tocLink) {
+          activateTab("overview", false);
+          return;
+        }
+
+        activateTab(tocLink.dataset.tabTarget, false);
+        window.requestAnimationFrame(() => {
+          document.getElementById(targetId)?.scrollIntoView({ block: "start" });
+        });
+      }
+
+      tocLinks.forEach((link) => {
+        link.addEventListener("click", (event) => {
+          event.preventDefault();
+          const targetId = link.getAttribute("href").slice(1);
+          activateTab(link.dataset.tabTarget, false);
+          history.replaceState(null, "", `#${targetId}`);
+          window.requestAnimationFrame(() => {
+            document.getElementById(targetId)?.scrollIntoView({
+              behavior: "smooth",
+              block: "start",
+            });
+          });
+        });
+      });
+
+      window.addEventListener("hashchange", activateLocationHash);
+      activateLocationHash();
+    </script>
+  </body>
+</html>

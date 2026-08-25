@@ -81,6 +81,11 @@ def build(stage_path: str, out_path: str) -> None:
         SELECT corp_code, bsns_year, reprt_code, fs_div, term_rank, term_nm, rcept_no,
                sj_div, concept, account_nm, amount
         FROM st.fin_fact""").fetchall()
+    if not rows:
+        con.close()
+        raise RuntimeError(
+            f"스테이지가 비어 있다 — stage={stage_path} fin_fact=0행. "
+            f"원장에 dart_fin_raw 가 있는지 확인하고 build_stage.py 를 먼저 실행하라")
     K = ("corp_code", "bsns_year", "reprt_code", "fs_div", "term_rank")
     grp = collections.defaultdict(list)
     meta = {}

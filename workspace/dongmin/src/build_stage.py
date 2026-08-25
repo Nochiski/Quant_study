@@ -96,7 +96,12 @@ def build(raw_path: str, out_path: str) -> None:
 
     cols = {r[1] for r in con.execute("PRAGMA raw.table_info(dart_fin_raw)")}
     if not cols:
-        print(f"  dart_fin_raw 가 비어 있다 — raw={raw_path}"); con.close(); return
+        # 0행이 아니라 테이블 자체가 없다. 조용히 return 하면 다음 단계가
+        # 빈 스테이지를 정상으로 오해한다.
+        con.close()
+        raise RuntimeError(
+            f"원장에 dart_fin_raw 테이블이 없다 — raw={raw_path}. "
+            f"재무 엔드포인트(fnlttSinglAcntAll) 를 아직 수집하지 않은 DB 다")
     need = {"req_corp_code", "req_bsns_year", "req_reprt_code"}
     missing = need - cols
     if missing:

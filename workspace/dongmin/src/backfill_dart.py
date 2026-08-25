@@ -22,6 +22,8 @@ DB      = f"{BASE}/data/raw/dart.db"
 # 키별 롤링24h 상한. kael 은 프로덕션 크론(1일 2회) 몫 ~300 을 남긴다.
 CAPS    = {"k2": 19_800, "kael": 19_500}
 PACE    = 0.25            # 초당 4콜. DART 는 초당 제한이 미공지라 보수적으로
+RETRY_MAX  = 3            # 800/900 서버 오류 재시도 횟수
+RETRY_BASE = 5.0          # 지수 백오프 기준(초). 5 → 10 → 20
 
 # 단계. 1차부터 순차로 돌린다. 재무제표만 먼저 받으면 나머지를 기다리지 않고 쓸 수 있다.
 STAGES  = {1: ["fin"],
@@ -66,12 +68,33 @@ def pick_key(con, keys, blocked):
             return kid, k
     return None, None
 
+# DART status → verdict. 화이트리스트다. 여기 없는 코드는 '모르는 상태'로 다룬다.
+#   ok       정상
+#   no_data  그 회사·그 해에 자료가 없다. 재시도해도 안 나온다
+#   quota    키 한도 소진. 그 키만 접고 다음 키로
+#   abuse    남용 판정·계정 만료. 계속 쏘면 제재로 간다 — 즉시 그 키를 접는다
+#   fatal    키 자체가 잘못됐다(미등록·오류·사용불가)
+#   retry    서버 측 일시 오류. 백오프 후 재시도
+VERDICT = {
+    "000": "ok",
+    "013": "no_data",
+    "020": "quota",
+    "021": "abuse",    # 요청 과다 — 021 을 그냥 error 로 두면 계속 두들긴다
+    "101": "abuse",    # 부정 사용 판정
+    "901": "abuse",    # 계정 만료·정지
+    "010": "fatal", "011": "fatal", "012": "fatal",
+    "014": "no_data",  # 파일 미존재
+    "100": "error",    # 필드 부적절 — 우리 요청이 틀렸다. 재시도해도 같다
+    "800": "retry", "900": "retry",
+}
+
 def classify(j):
-    """DART status → verdict. 013 과 020 을 절대 같게 처리하지 않는다."""
+    """DART status → verdict. 013 과 020 을 절대 같게 처리하지 않는다.
+
+    모르는 코드를 error 로 뭉개면 새 코드가 생겼을 때 조용히 지나간다.
+    unknown 으로 따로 표시해서 로그에 드러나게 한다."""
     st = (j or {}).get("status")
-    return {"000":"ok", "013":"no_data", "020":"quota", "021":"too_many",
-            "010":"fatal", "011":"fatal", "012":"fatal",
-            "800":"retry", "900":"retry"}.get(st, "error"), st
+    return VERDICT.get(st, "unknown"), st
 
 def call(con, name, corp, key_id, key, year=None, reprt="11011", fs=None):
     """(rows, verdict, status). 콜은 여기서만 나가고 전부 로그에 남는다.
@@ -82,24 +105,38 @@ def call(con, name, corp, key_id, key, year=None, reprt="11011", fs=None):
         p["bsns_year"] = year
         p["reprt_code"] = reprt
     if fs: p["fs_div"] = fs
-    # 네트워크·HTTP·JSON 예외를 잡지 않으면 502 하나에 프로세스가 죽는다.
-    # 실패도 로그에 남겨야 재개 때 그 샤드를 다시 집는다.
-    try:
-        j = api.dart(s["ep"], key=key, **p)
-    except Exception as e:
-        # 어느 샤드가 왜 죽었는지 없이 로그를 남기면 재개 때 추적이 안 된다.
-        # 키 값 자체는 절대 찍지 않는다 — key_id 로만 식별한다.
-        j = None
-        print(f"    ! 콜 실패 — endpoint={s['ep']} corp={corp} year={year or '-'} "
-              f"fs={fs or '-'} key_id={key_id} {type(e).__name__}: {str(e)[:120]}")
-    v, st = ("error", "exc") if j is None else classify(j)
-    rows = [] if j is None else ([j] if (s.get("flat") and v == "ok") else (j.get("list") or []))
-    con.execute("INSERT INTO dart_call_log VALUES (?,?,?,?,?,?,?,?,?)",
-                (s["ep"], corp, year, reprt, fs, st, len(rows),
-                 datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"), key_id))
-    con.commit()
-    time.sleep(PACE)
-    return rows, v, st
+
+    def log(status, n):
+        con.execute("INSERT INTO dart_call_log VALUES (?,?,?,?,?,?,?,?,?)",
+                    (s["ep"], corp, year, reprt, fs, status, n,
+                     datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"), key_id))
+        con.commit()
+
+    for attempt in range(RETRY_MAX + 1):
+        # 네트워크·HTTP·JSON 예외를 잡지 않으면 502 하나에 프로세스가 죽는다.
+        try:
+            j = api.dart(s["ep"], key=key, **p)
+        except Exception as e:
+            # 어느 샤드가 왜 죽었는지 없이 로그를 남기면 재개 때 추적이 안 된다.
+            # 키 값 자체는 절대 찍지 않는다 — key_id 로만 식별한다.
+            j = None
+            print(f"    ! 콜 실패 — endpoint={s['ep']} corp={corp} year={year or '-'} "
+                  f"reprt={reprt} fs={fs or '-'} key_id={key_id} "
+                  f"{type(e).__name__}: {str(e)[:120]}")
+        v, st = ("error", "exc") if j is None else classify(j)
+        rows = [] if j is None else ([j] if (s.get("flat") and v == "ok") else (j.get("list") or []))
+        log(st, len(rows))          # 실패도 예산에 계상한다 — DART 는 실패 콜도 셀 수 있다
+        time.sleep(PACE)
+
+        if v not in ("retry", "exc") or attempt == RETRY_MAX:
+            if v == "unknown":
+                print(f"    ? 모르는 status={st} — endpoint={s['ep']} corp={corp} "
+                      f"year={year or '-'} reprt={reprt}. VERDICT 에 추가할 것")
+            return rows, v, st
+        # 800/900 은 DART 서버 측 일시 오류다. 즉시 다시 쏘면 같은 답이 온다.
+        wait = RETRY_BASE * (2 ** attempt)
+        print(f"    · {st} 재시도 {attempt+1}/{RETRY_MAX} — {wait:.0f}초 대기")
+        time.sleep(wait)
 
 def row_hash(cols, vals):
     """행 내용만으로 만드는 안정 해시. collected_at 은 넣지 않는다 — 넣으면 매 수집마다 달라진다.
@@ -175,15 +212,17 @@ def fetch(con, name, corp, y, keys, blocked, reprt="11011"):
         if s_.get("fallback"):
             rows, v, st = call(con, name, corp, kid, k, y, reprt, fs="CFS")  # fs_div 는 필수 파라미터
             extra_fs = "CFS"
-            if v == "quota":
-                print(f"  · {kid} 020 도달 → 다음 키로"); blocked.add(kid); continue
+            if v in ("quota", "abuse"):
+                print(f"  · {kid} {st} {'한도 소진' if v == 'quota' else '남용 판정 — 즉시 중단'}"
+                      f" → 다음 키로"); blocked.add(kid); continue
             if v == "no_data":                                          # 연결재무제표가 없는 회사
                 rows, v, st = call(con, name, corp, kid, k, y, reprt, fs="OFS")
                 extra_fs = "OFS"
         else:
             rows, v, st = call(con, name, corp, kid, k, y, reprt)
-        if v == "quota":
-            print(f"  · {kid} 020 도달 → 다음 키로"); blocked.add(kid); continue
+        if v in ("quota", "abuse"):
+            print(f"  · {kid} {st} {'한도 소진' if v == 'quota' else '남용 판정 — 즉시 중단'}"
+                  f" → 다음 키로"); blocked.add(kid); continue
         return rows, v, st, extra_fs, kid
 
 
@@ -296,7 +335,11 @@ def main():
                 if (name, corp, y, rc) in done: continue
                 got = fetch(con, name, corp, y or None, keys, blocked, rc or "11011")
                 if got is None:
-                    print("  ⚠ 전 키 롤링24h 한도 도달 — 중단"); con.close(); return
+                    # 한도 소진이면 24h 뒤 재개하면 되고, 남용 판정이면 원인을 봐야 한다.
+                    print(f"  ⚠ 쓸 수 있는 키가 없다 (접힌 키: {sorted(blocked) or '없음 — 전부 예산 소진'})")
+                    print("     한도 소진이면 24시간 뒤 재개하면 이어진다. "
+                          "021/101/901 이었다면 로그를 먼저 확인할 것")
+                    con.close(); return
                 rows, v, st, extra_fs, kid = got
                 if v == "fatal":
                     # 010/011/012 는 키 문제(미등록·오류·사용불가)다. 프로세스를 죽이면

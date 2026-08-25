@@ -127,15 +127,31 @@ def dart_keys():
     if _K.get("DART_API_KEY"):   out.append(("kael", _K["DART_API_KEY"]))
     return out
 
+class DartError(Exception):
+    """DART 호출 실패. 메시지에서 crtfc_key 가 마스킹된 상태로만 올라온다."""
+
+
 def dart(path, key=None, **params):
     """DART OpenAPI. path 예: 'list.json', 'fnlttSinglAcntAll.json', 'corpCode.xml'.
     .json 은 dict, .xml/.zip 은 bytes 를 돌려준다.
-    key 를 주면 그 키로, 없으면 1순위 키로 나간다."""
+    key 를 주면 그 키로, 없으면 1순위 키로 나간다.
+
+    예외는 전부 DartError 로 감싸 나간다. requests 가 만드는 메시지는
+    ConnectionError·HTTPError 어느 쪽이든 요청 URL 을 통째로 담는데,
+    crtfc_key 가 query string 에 있어 그대로 로그에 평문으로 박힌다.
+    (카엘 dart.log 에 같은 사고가 2,198회 실재한다.)"""
     q = dict(params)
-    q["crtfc_key"] = key or dart_keys()[0][1]
-    r = requests.get(f"{DART_BASE}/{path}", params=q, timeout=60)
-    r.raise_for_status()
-    time.sleep(0.2)
-    if path.endswith(".json"):
-        return r.json()
-    return r.content
+    k = key or dart_keys()[0][1]
+    q["crtfc_key"] = k
+    safe = {kk: vv for kk, vv in q.items() if kk != "crtfc_key"}
+    try:
+        r = requests.get(f"{DART_BASE}/{path}", params=q, timeout=60)
+        if r.status_code >= 400:
+            raise DartError(f"HTTP {r.status_code} — path={path} params={safe}")
+        time.sleep(0.2)
+        return r.json() if path.endswith(".json") else r.content
+    except DartError:
+        raise
+    except Exception as e:
+        msg = str(e).replace(k, "***") if k else str(e)
+        raise DartError(f"{type(e).__name__} — path={path} params={safe} :: {msg}") from None

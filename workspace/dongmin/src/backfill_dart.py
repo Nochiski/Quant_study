@@ -162,7 +162,7 @@ def store(con, name, rows, extra):
         print(f"    [{tbl}] 응답 {len(rows)}행 중 신규 {gained}행 (중복 {len(rows)-gained})")
     return len(rows)
 
-def fetch(con, name, corp, y, keys, blocked):
+def fetch(con, name, corp, y, keys, blocked, reprt="11011"):
     """한 샤드를 받는다. 키가 020 이면 그 키를 접고 같은 샤드를 다음 키로 재시도한다.
     quota 를 결과로 흘려보내지 않는 이유: 호출부가 그걸 ingest_log 에 적으면 영구 공백이 된다.
     반환 None = 모든 키 소진(오늘은 여기까지)."""
@@ -173,15 +173,15 @@ def fetch(con, name, corp, y, keys, blocked):
             return None
         extra_fs = None
         if s_.get("fallback"):
-            rows, v, st = call(con, name, corp, kid, k, y, fs="CFS")   # fs_div 는 필수 파라미터
+            rows, v, st = call(con, name, corp, kid, k, y, reprt, fs="CFS")  # fs_div 는 필수 파라미터
             extra_fs = "CFS"
             if v == "quota":
                 print(f"  · {kid} 020 도달 → 다음 키로"); blocked.add(kid); continue
             if v == "no_data":                                          # 연결재무제표가 없는 회사
-                rows, v, st = call(con, name, corp, kid, k, y, fs="OFS")
+                rows, v, st = call(con, name, corp, kid, k, y, reprt, fs="OFS")
                 extra_fs = "OFS"
         else:
-            rows, v, st = call(con, name, corp, kid, k, y)
+            rows, v, st = call(con, name, corp, kid, k, y, reprt)
         if v == "quota":
             print(f"  · {kid} 020 도달 → 다음 키로"); blocked.add(kid); continue
         return rows, v, st, extra_fs, kid
@@ -193,6 +193,8 @@ def main():
     ap.add_argument("--years", default="", help="미지정 시 2015~올해")
     ap.add_argument("--stage", type=int, default=0, help="1=재무제표 2=corp축3종 3=나머지6종 (0=전부)")
     ap.add_argument("--only",  default="", help="엔드포인트 이름 쉼표구분(stage 보다 우선)")
+    ap.add_argument("--reprt", default="11011",
+                    help="보고서 종류 쉼표구분. 11011=사업 11012=반기 11013=1분기 11014=3분기")
     a = ap.parse_args()
 
     os.makedirs(os.path.dirname(DB), exist_ok=True)
@@ -206,10 +208,20 @@ def main():
     if "key_id" not in {r[1] for r in con.execute("PRAGMA table_info(dart_call_log)")}:
         con.execute("ALTER TABLE dart_call_log ADD COLUMN key_id TEXT NOT NULL DEFAULT 'kael'")
     con.execute("CREATE INDEX IF NOT EXISTS ix_calllog_key_ts ON dart_call_log(key_id, ts)")
+    # PK 에 reprt_code 가 없으면 사업/반기/1분기/3분기가 서로를 덮는다.
+    # fs_div 가 없으면 CFS 성공 시 OFS 를 영원히 안 받는다.
+    # NULL 대신 '' 를 쓰는 이유: SQLite 는 PK 안의 NULL 을 서로 다른 값으로 봐서
+    # corp 축(bsns_year 없음)에서 INSERT OR REPLACE 가 REPLACE 되지 않는다.
     con.execute("""CREATE TABLE IF NOT EXISTS ingest_log(
-      name TEXT NOT NULL, corp_code TEXT NOT NULL, bsns_year TEXT,
+      name TEXT NOT NULL, corp_code TEXT NOT NULL,
+      bsns_year TEXT NOT NULL DEFAULT '', reprt_code TEXT NOT NULL DEFAULT '',
+      fs_div TEXT NOT NULL DEFAULT '',
       status TEXT NOT NULL, n_rows INTEGER NOT NULL, note TEXT, ts TEXT NOT NULL,
-      PRIMARY KEY (name, corp_code, bsns_year))""")
+      PRIMARY KEY (name, corp_code, bsns_year, reprt_code, fs_div))""")
+    _cols = {r[1] for r in con.execute("PRAGMA table_info(ingest_log)")}
+    if "reprt_code" not in _cols:
+        print("  ✖ ingest_log 가 구 스키마다 — migrate_ingest_log.py 를 먼저 실행하라")
+        con.close(); return
     con.commit()
 
     # --corps 가 경로처럼 생겼는데 파일이 없으면, 그 문자열이 corp_code 1건으로
@@ -245,6 +257,12 @@ def main():
     else:
         names = list(SPEC)
 
+    reprts = [r.strip() for r in a.reprt.split(",") if r.strip()]
+    bad_rc = [r for r in reprts if r not in ("11011", "11012", "11013", "11014")]
+    if bad_rc:
+        print(f"  ✖ --reprt 값이 잘못됐다: {bad_rc} (11011/11012/11013/11014)")
+        con.close(); return
+
     keys = api.dart_keys()
     if not keys:
         print("  ✖ DART 키가 없다"); con.close(); return
@@ -258,21 +276,25 @@ def main():
 
     # bsns_year 는 corp 축에서 None 이다. SQLite 는 PK 안의 NULL 을 막지 않고
     # 파이썬 튜플 비교에서도 None 이 그대로 매치되므로 저장/조회 키가 일치한다.
-    done = {(r[0], r[1], r[2]) for r in con.execute(
-        "SELECT name, corp_code, bsns_year FROM ingest_log WHERE status IN ('ok','no_data')")}
+    done = {(r[0], r[1], r[2], r[3]) for r in con.execute(
+        "SELECT name, corp_code, bsns_year, reprt_code FROM ingest_log "
+        "WHERE status IN ('ok','no_data')")}
     used0 = {kid: budget_used(con, kid) for kid, _ in keys}
     print("  키 " + " · ".join(f"{kid} {used0[kid]:,}/{CAPS.get(kid,19500):,}" for kid, _ in keys))
-    print(f"  대상 {len(corps)}종목 × {len(names)}종 × {len(years)}년  (stage {a.stage or '전부'})")
+    print(f"  대상 {len(corps)}종목 × {len(names)}종 × {len(years)}년 × 보고서 {reprts}")
     print()
 
     tot = {}
     for corp in corps:
         for name in names:
             s_ = SPEC[name]
-            ys = years if s_["axis"] == "corp_year" else [None]
+            corp_year = s_["axis"] == "corp_year"
+            ys = years if corp_year else [""]
+            rcs = reprts if corp_year else [""]
             for y in ys:
-                if (name, corp, y) in done: continue
-                got = fetch(con, name, corp, y, keys, blocked)
+              for rc in rcs:
+                if (name, corp, y, rc) in done: continue
+                got = fetch(con, name, corp, y or None, keys, blocked, rc or "11011")
                 if got is None:
                     print("  ⚠ 전 키 롤링24h 한도 도달 — 중단"); con.close(); return
                 rows, v, st, extra_fs, kid = got
@@ -285,11 +307,12 @@ def main():
                         print("  ✖ 전 키 사용 불가 — 중단"); con.close(); return
                     continue
                 extra = {"corp_code": corp}
-                if y: extra |= {"bsns_year": y, "reprt_code": "11011"}
-                if extra_fs: extra["fs_div_used"] = extra_fs
+                if y: extra |= {"bsns_year": y, "reprt_code": rc}
+                if extra_fs: extra["fs_div"] = extra_fs
                 n = store(con, name, rows, extra) if v == "ok" else 0
-                con.execute("INSERT OR REPLACE INTO ingest_log VALUES (?,?,?,?,?,?,?)",
-                            (name, corp, y, v, n, st, datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")))
+                con.execute("INSERT OR REPLACE INTO ingest_log VALUES (?,?,?,?,?,?,?,?,?)",
+                            (name, corp, y or "", rc or "", extra_fs or "", v, n, st,
+                             datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")))
                 con.commit()
                 tot[name] = tot.get(name, 0) + n
 

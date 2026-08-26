@@ -21,7 +21,7 @@
     롤링 윈도우였다면 old 구간 콜이 013 이거나 범위 밖 최신 행을 돌려줬어야 한다.
 """
 import os, sys, json, time, sqlite3, argparse, hashlib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 
 BASE = os.environ.get("QL_HOME") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "src"))
@@ -31,10 +31,46 @@ DB      = f"{BASE}/data/raw/dart.db"
 # 키별 롤링24h 상한. kael 은 프로덕션 크론(1일 2회) 몫 ~300 을 남긴다.
 CAPS    = {"k2": 19_800, "kael": 19_500}
 PACE    = 0.25            # 초당 4콜. DART 는 초당 제한이 미공지라 보수적으로
-# 013(무자료) 재확인 정책. 최근 N개 사업연도는 잠정일 수 있다고 보고,
-# 마지막 확인으로부터 D일이 지났으면 한 번 더 쏜다.
-RECHECK_YEARS = 2
-RECHECK_DAYS  = 30
+# ── 013(무자료)의 영구/잠정 판별 ──────────────────────────────
+# 013 은 두 가지를 같은 코드로 말한다: "이 회사엔 원래 그 자료가 없다"(영구)와
+# "아직 공시 시점이 오지 않았다"(잠정). 후자를 영구로 적으면 나중에 실제 공시가
+# 올라와도 다시 부르지 않는다.
+#
+# 판정: 사업연도(또는 분기) 종료일 + 유예 가 지났는데도 013 이면 영구.
+#
+# 유예는 **법정 최초 제출 기한**을 기준으로 잡는다. 접수일 실측(10사 40유닛)은
+# 1분기 44~60일 · 3분기 44~45 · 반기 44~267 · 사업 72~170 인데, 큰 값은 전부
+# 정정본이다 — DART 재무 API 는 최신본만 주므로 rcept_no 가 최종 정정일을 가리킨다
+# (KB금융 FY2025 반기 267일 = 2026-03-24 접수, 사업 170일 = 2026-06-19).
+# 정정을 기다릴 이유는 없다. 최초 제출이 늦어지는 경우(감사의견 거절 등)만 덮으면 된다.
+GRACE_DAYS = {"11011": 180,   # 사업보고서 법정 90일 × 2
+              "11012": 135,   # 반기 법정 45일 + 90
+              "11013": 135,   # 1분기
+              "11014": 135}   # 3분기
+GRACE_DEFAULT = 180
+
+# corp·corp_range 축은 사업연도가 없어 period_end 를 못 만든다. 그 축의 013 은
+# 마지막 확인으로부터 이 일수가 지나면 한 번 더 쏜다.
+RECHECK_DAYS = 30
+
+
+def fiscal_end(acc_mt, bsns_year, reprt_code):
+    """사업연도·분기 종료일. bsns_year 는 **종료일이 속한 연도**다(실측).
+
+    기신정기(acc_mt=03) 사업보고서 접수일: bsns_year=2024 → 2024-06-13,
+    bsns_year=2025 → 2025-06-12. 즉 FY2025 = 2024-04-01 ~ 2025-03-31 이고
+    결산 73일 만에 제출됐다. 시작 연도 기준이면 1년이 통째로 어긋난다.
+
+    분기는 결산월 기준으로 밀린다 — 3월 결산의 1분기는 전년 6월에 끝난다.
+    """
+    off = {"11013": -9, "11012": -6, "11014": -3, "11011": 0}.get(reprt_code, 0)
+    m = int(acc_mt) + off
+    y = int(bsns_year)
+    if m <= 0:
+        m += 12
+        y -= 1
+    nxt = date(y + (m == 12), (m % 12) + 1, 1)
+    return nxt - timedelta(days=1)
 
 RETRY_MAX  = 3            # 800/900 서버 오류 재시도 횟수
 RETRY_BASE = 5.0          # 지수 백오프 기준(초). 5 → 10 → 20
@@ -408,35 +444,42 @@ def main():
 
     # bsns_year 는 corp 축에서 빈 문자열이다. 저장(:y or "")과 조회 키가 일치한다.
     #
-    # 013 을 무조건 종결로 보면 안 된다. 013 은 두 가지를 같은 코드로 말한다 —
-    # "그 회사에 원래 그 자료가 없다"(영구)와 "아직 공시 시점이 안 왔다"(잠정).
-    # 후자를 종결로 적으면 나중에 실제 공시가 올라와도 다시 부르지 않는다.
-    # 감사의견 거절로 사업보고서를 늦게 내는 종목이 그렇게 사라진다.
-    #
-    # 정확한 판별은 acc_mt 로 period_end 를 구해 +161일을 보는 것이지만(설계 §3-1),
-    # 그 전에 값싼 근사를 쓴다: 최근 RECHECK_YEARS 사업연도의 no_data 는
-    # RECHECK_DAYS 가 지났으면 한 번 더 확인한다. 오래된 연도의 no_data 는 종결.
-    # 30분 캐치업 틱이 같은 유닛을 반복 재시도하지 않게 ts 조건이 필요하다.
-    cutoff_year = str(datetime.utcnow().year - RECHECK_YEARS)
-    cutoff_ts = (datetime.utcnow() - timedelta(days=RECHECK_DAYS)).strftime("%Y-%m-%dT%H:%M:%S")
-    # corp·corp_range 축은 bsns_year 가 빈 문자열이다. 그냥 bsns_year < ? 로 쓰면
-    # '' < '2024' 가 참이라 그 축의 no_data 가 전부 영구 종결된다 — DS005 의 상폐
-    # 이벤트(E07)가 백필 시점에 동결되고, 나중에 부도·회생이 나도 다시 부르지 않는다.
-    # 연도 조건은 corp_year 축에만 건다.
-    done = {(r[0], r[1], r[2], r[3]) for r in con.execute(
-        "SELECT name, corp_code, bsns_year, reprt_code FROM ingest_log "
-        "WHERE status = 'ok' "
-        "   OR (status = 'no_data' AND "
-        "       ((bsns_year <> '' AND bsns_year < ?) OR ts > ?))",
-        (cutoff_year, cutoff_ts))}
-    pending = con.execute(
-        "SELECT COUNT(*) FROM ingest_log "
-        "WHERE status = 'no_data' AND ts <= ? "
-        "  AND (bsns_year = '' OR bsns_year >= ?)",
-        (cutoff_ts, cutoff_year)).fetchone()[0]
+    # 종결 판정.
+    #   ok        → 무조건 종결
+    #   no_data   → corp_year 축은 period_end + 유예 로 판정(영구/잠정),
+    #               corp·corp_range 축은 사업연도가 없으므로 최근 확인 시각으로 판정
+    #   그 외      → 미종결(재개 시 다시 쏜다)
+    acc = dict(con.execute("SELECT corp_code, acc_mt FROM dart_company")) \
+          if con.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
+                         "AND name='dart_company'").fetchone()[0] else {}
+    today = datetime.utcnow().date()
+    cut_ts = (datetime.utcnow() - timedelta(days=RECHECK_DAYS)).strftime("%Y-%m-%dT%H:%M:%S")
+
+    done, pending, unknown_accmt = set(), 0, 0
+    for nm, cc, by, rc, stt, ts in con.execute(
+            "SELECT name, corp_code, bsns_year, reprt_code, status, ts FROM ingest_log"):
+        key = (nm, cc, by, rc)
+        if stt == "ok":
+            done.add(key); continue
+        if stt != "no_data":
+            continue
+        if not by:                                  # corp·corp_range 축
+            if (ts or "") > cut_ts: done.add(key)
+            else: pending += 1
+            continue
+        am = acc.get(cc)
+        if not am:
+            # acc_mt 를 모르면 판정 불가. 12월로 넘겨짚으면 3월 결산 32사가
+            # 3개월 일찍 영구 종결된다. 미종결로 두고 다시 쏘는 쪽이 안전하다.
+            unknown_accmt += 1; pending += 1; continue
+        grace = GRACE_DAYS.get(rc, GRACE_DEFAULT)
+        if today >= fiscal_end(am, by, rc) + timedelta(days=grace):
+            done.add(key)                            # 영구
+        else:
+            pending += 1                             # 잠정 — 다시 쏜다
     if pending:
-        print(f"  013 재확인 대상 {pending:,}유닛 "
-              f"(FY{cutoff_year} 이후 · 마지막 확인 {RECHECK_DAYS}일 경과)")
+        print(f"  013 재확인 대상 {pending:,}유닛"
+              + (f" (acc_mt 미상 {unknown_accmt:,} 포함)" if unknown_accmt else ""))
     used0 = {kid: budget_used(con, kid) for kid, _ in keys}
     print("  키 " + " · ".join(f"{kid} {used0[kid]:,}/{CAPS.get(kid,19500):,}" for kid, _ in keys))
     print(f"  대상 {len(corps)}종목 × {len(names)}종 × {len(years)}년 × 보고서 {reprts}")

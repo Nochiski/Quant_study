@@ -97,6 +97,12 @@ def fiscal_end(acc_mt, bsns_year, reprt_code):
     nxt = date(y + (m == 12), (m % 12) + 1, 1)
     return nxt - timedelta(days=1)
 
+# status=000 인데 응답 배열이 빈 경우. DART 명세상 "정상 + 0행"은 013 이 담당하므로
+# 이 조합은 설명되지 않는다. 키움이 폐지종목에 rc=0 + 0행을 주고 수집기 로그가
+# 100% 성공으로 보였던 전례가 있어(DEFECT-E04 계열) 감시가 필요하다.
+# 한도 초과가 020 이 아니라 빈 응답으로 나타날 가능성도 여기서 잡는다.
+EMPTY_OK_STREAK = 10      # 연속 이 횟수면 그 키를 접는다
+
 RETRY_MAX  = 3            # 800/900 서버 오류 재시도 횟수
 RETRY_BASE = 5.0          # 지수 백오프 기준(초). 5 → 10 → 20
 
@@ -224,6 +230,7 @@ def on_020(con, name, kid, key, corp, year, reprt, fs):
 
 
 _last_kid = None
+_empty = {}          # 키별 "정상응답+0행" 연속 횟수
 
 def pick_key(con, keys, blocked):
     """남은 예산이 있는 첫 키. 순서가 곧 우선순위다. 없으면 (None, None).
@@ -307,6 +314,10 @@ def call(con, name, corp, key_id, key, year=None, reprt="11011", fs=None):
                   f"{type(e).__name__}: {str(e)[:120]}")
         v, st = ("error", "exc") if j is None else classify(j)
         rows = [] if j is None else ([j] if (s.get("flat") and v == "ok") else (j.get("list") or []))
+        # 정상이라며 빈 배열을 주는 경우. 명세상 0행은 013 이 담당하므로 설명이 안 된다.
+        # 조용히 넘기면 "수집했는데 데이터가 없는 종목"으로 위장된다.
+        if v == "ok" and not rows:
+            v, st = "ok_empty", st + "+0행"
         log(st, len(rows))          # 실패도 예산에 계상한다 — DART 는 실패 콜도 셀 수 있다
         time.sleep(PACE)
 
@@ -427,6 +438,14 @@ def fetch(con, name, corp, y, keys, blocked, reprt="11011"):
                 extra_fs = "OFS"
         else:
             rows, v, st = call(con, name, corp, kid, k, y, reprt)
+        if v == "ok_empty":
+            _empty[kid] = _empty.get(kid, 0) + 1
+            if _empty[kid] >= EMPTY_OK_STREAK:
+                print(f"  ⚠ {kid} 정상응답+0행 이 {_empty[kid]}회 연속이다. "
+                      f"한도가 020 이 아니라 빈 응답으로 나타나는 중일 수 있다 → 이 키 접는다")
+                blocked.add(kid); _empty[kid] = 0; continue
+        else:
+            _empty[kid] = 0
         if v == "quota":
             if on_020(con, name, kid, k, corp, y, reprt, None) == "burst":
                 continue

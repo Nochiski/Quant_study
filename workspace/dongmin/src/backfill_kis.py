@@ -30,6 +30,7 @@ PACE       = 0.12         # 실측 초당 5콜. 네트워크 왕복이 병목이
 RETRY_MAX  = 4
 RETRY_BASE = 3.0          # 3 → 6 → 12 → 24초
 ABORT_STREAK = 20         # 연속 실패 이 횟수면 중단. 계정 제재를 계속 두들기지 않는다
+EMPTY_STREAK = 30         # 빈 응답이 이만큼 연속이면 중단. 한도가 빈 응답으로 올 수 있다
 
 # ── 엔드포인트 ────────────────────────────────────────────────
 #   axis="span"  : START_DATE/END_DATE 범위 (100행/콜)
@@ -91,6 +92,29 @@ def classify(status, body):
     return "error", mc or str(rt)
 
 
+def normalize(body, key):
+    """응답 → (행 리스트, 이상신호). JSON 은 무엇이든 올 수 있다.
+
+    `.get(k) or []` 는 falsy 만 막는다. 아래 둘은 조용히 오염된다 —
+      · 값이 배열이 아니라 객체    → len() 이 키 개수를 세고 for 가 키를 순회한다
+      · 원소가 dict 이 아님        → store() 의 set(r) 에서 깨진다
+    살릴 수 있으면 살리되, 예상 밖이면 반드시 신호를 남긴다.
+    """
+    if not isinstance(body, dict):
+        return [], f"resp_{type(body).__name__}"
+    v = body.get(key)
+    if v is None:
+        return [], None
+    if isinstance(v, dict):
+        return [v], "out_is_object"
+    if not isinstance(v, list):
+        return [], f"out_is_{type(v).__name__}"
+    rows = [r for r in v if isinstance(r, dict)]
+    if len(rows) != len(v):
+        return rows, f"non_dict_rows_{len(v) - len(rows)}"
+    return rows, None
+
+
 def call(name, tk, d1, d2, stat):
     """단일 콜. 재시도·백오프·토큰 재발급을 여기서 흡수한다."""
     s = SPEC[name]
@@ -112,9 +136,10 @@ def call(name, tk, d1, d2, stat):
         time.sleep(PACE)
 
         if v == "ok":
-            out = (body or {}).get(s["out"]) or []
-            if isinstance(out, dict):
-                out = [out]
+            out, odd = normalize(body, s["out"])
+            if odd:
+                print(f"    ? 응답 형태 이상({odd}) — {name} {tk} {d1}~{d2} → rows={len(out)}")
+                mc = f"{mc}/{odd}"
             return ("ok" if out else "empty"), mc, out
         if v == "token":
             # 23h 캐싱이라 19시간 실행에서 만료될 수 있다. 캐시를 버리고 재발급한다.
@@ -215,8 +240,16 @@ def main():
     os.makedirs(os.path.dirname(DB), exist_ok=True)
     con = sqlite3.connect(DB, timeout=60)
     ensure(con)
+    # empty 를 종결로 보면 안 된다. KIS 에는 DART 의 013 같은 "정상 무자료" 코드가 없어서
+    # 한도 초과·제재가 rt_cd=0 + 빈 배열로 나타나면 남은 유닛이 전부 "수집 완료, 데이터 없음"
+    # 으로 굳는다. 키움이 폐지종목에 그렇게 답해 909종목이 통째로 비었던 전례가 있다.
+    # 빈 응답은 재방문 대상으로 두고, 진짜 무자료는 재실행 때 다시 빈 응답이 올 뿐이다.
     done = {(r[0], r[1], r[2], r[3]) for r in con.execute(
-        "SELECT name, ticker, d1, d2 FROM kis_ingest_log WHERE status IN ('ok','empty')")}
+        "SELECT name, ticker, d1, d2 FROM kis_ingest_log WHERE status = 'ok'")}
+    n_empty = con.execute(
+        "SELECT COUNT(*) FROM kis_ingest_log WHERE status = 'empty'").fetchone()[0]
+    if n_empty:
+        print(f"  빈 응답 유닛 {n_empty:,} — 종결로 보지 않는다(재방문 대상)")
 
     plan = []
     for name in names:
@@ -230,7 +263,7 @@ def main():
         print("  전부 완료됨"); con.close(); return
 
     stat = {"calls": 0, "ok": 0, "empty": 0, "err": 0, "rows": 0}
-    streak = 0
+    streak = estreak = 0
     t0 = time.time()
     for i, (name, tk, d1, d2) in enumerate(plan, 1):
         if a.max_calls and stat["calls"] >= a.max_calls:
@@ -239,6 +272,14 @@ def main():
         now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
         con.execute("INSERT INTO kis_call_log VALUES (?,?,?,?,?,?,?,?)",
                     (name, tk, d1, d2, v, code, len(out), now))
+        if v == "empty":
+            estreak += 1
+            if estreak >= EMPTY_STREAK:
+                print(f"  ✖ 빈 응답 {estreak}회 연속 — 한도·제재가 빈 응답으로 오는 중일 수 있다. "
+                      f"중단한다. kis_call_log 를 확인할 것")
+                break
+        else:
+            estreak = 0
         if v in ("ok", "empty"):
             streak = 0
             stat["ok" if v == "ok" else "empty"] += 1

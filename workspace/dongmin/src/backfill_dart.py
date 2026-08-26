@@ -429,6 +429,8 @@ def main():
                     help="1=기업개황 2=재무제표 3=정기보고서 나머지 8종 "
                          "4=DS005 주요사항보고서 7종 (0=전부)")
     ap.add_argument("--only",  default="", help="엔드포인트 이름 쉼표구분(stage 보다 우선)")
+    ap.add_argument("--use-kael", action="store_true",
+                    help="우리 키 소진 후 카엘 프로덕션 키로 폴백한다. 기본은 쓰지 않는다")
     ap.add_argument("--reprt", default="11011",
                     help="보고서 종류 쉼표구분. 11011=사업 11012=반기 11013=1분기 11014=3분기")
     a = ap.parse_args()
@@ -515,9 +517,18 @@ def main():
     keys = api.dart_keys()
     if not keys:
         print("  ✖ DART 키가 없다"); con.close(); return
-    if keys[0][0] != "k2":
-        print(f"  ✖ 1순위 키가 k2 가 아니다({keys[0][0]}) — 카엘 프로덕션 키로 전량이 나간다")
+    if keys[0][0] == "kael":
+        print("  ✖ 1순위가 카엘 프로덕션 키다 — 우리 키(DART_API_KEY_2~)를 먼저 등록하라")
         con.close(); return
+    # 카엘 프로덕션 키는 명시적으로 켜야 나간다. 그 시스템이 매일 자기 몫을 쓰는데
+    # 우리 카운터는 그걸 못 보므로, 실수로 흘러드는 경로를 기본값에서 막는다.
+    if not a.use_kael:
+        keys = [(kid, k) for kid, k in keys if kid != "kael"]
+        if not keys:
+            print("  ✖ 우리 키가 없다. 카엘 키를 쓰려면 --use-kael 을 명시하라")
+            con.close(); return
+    else:
+        print("  ⚠ --use-kael — 우리 키 소진 후 카엘 프로덕션 키로 넘어간다")
     if len(keys) == 1:
         print(f"  ⚠ 키가 1개뿐이다({keys[0][0]}) — 폴백 없이 진행한다")
     print(f"  · 키 {[k for k, _ in keys]} · 대상 {len(corps)}사 × {names}")
@@ -562,7 +573,7 @@ def main():
         print(f"  013 재확인 대상 {pending:,}유닛"
               + (f" (acc_mt 미상 {unknown_accmt:,} 포함)" if unknown_accmt else ""))
     used0 = {kid: budget_used(con, kid) for kid, _ in keys}
-    print("  키 " + " · ".join(f"{kid} {used0[kid]:,}/{CAPS.get(kid,19500):,}" for kid, _ in keys))
+    print("  키 " + " · ".join(f"{kid} {used0[kid]:,}/{CAPS.get(kid, CAP_OURS):,}" for kid, _ in keys))
     print(f"  대상 {len(corps)}종목 × {len(names)}종 × {len(years)}년 × 보고서 {reprts}")
     print()
 

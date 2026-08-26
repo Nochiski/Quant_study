@@ -1,0 +1,285 @@
+"""KIS 원장 수집기. 키움이 원천적으로 못 주는 폐지종목 구간을 메운다.
+
+왜 KIS 인가:
+  키움 종목축은 상장폐지 종목에 rc=0 + 0행을 준다 — 에러가 아니라 정상 응답이라
+  수집기 로그가 100% 성공으로 보인다(실측 909종목 전건). KIS 종목축은 같은 종목을
+  정상 반환한다(한진해운 2017년 폐지 → 100행). 생존편향은 소스의 성질이 아니라
+  **축의 성질**이다.
+
+원장 계약:
+  응답을 그대로 보존한다. 해석·단위환산·중복제거는 위층 몫이다.
+  backfill_dart.store() 를 재사용한다 — 동적 컬럼, row_hash PK, dup_seq 가 이미 검증됐다.
+
+요청 파라미터를 반드시 남기는 이유:
+  FID_ORG_ADJ_PRC 는 응답의 가격 의미를 바꾼다(""/"0"=수정주가, "1"=원주가).
+  키움 amt_qty_tp 가 이걸 안 남겨서 컬럼 의미를 영구히 잃은 전례가 있다.
+  수정주가는 조회 시점 의존이라(나중에 분할이 또 나면 같은 (종목,날짜)에 다른 값)
+  원장 불변성과 충돌한다 → chart 계열은 "1"(원주가)로 받는다. KRX 실체결가와 일치한다.
+"""
+import os, sys, json, time, sqlite3, argparse, requests
+from datetime import datetime, timedelta
+
+BASE = os.environ.get("QL_HOME") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(BASE, "src"))
+import api
+from backfill_dart import store, SPEC as DART_SPEC          # noqa: F401  (store 재사용)
+
+DB = f"{BASE}/data/raw/kis.db"
+
+PACE       = 0.12         # 실측 초당 5콜. 네트워크 왕복이 병목이라 유량 제한(20/s)에 안 닿는다
+RETRY_MAX  = 4
+RETRY_BASE = 3.0          # 3 → 6 → 12 → 24초
+ABORT_STREAK = 20         # 연속 실패 이 횟수면 중단. 계정 제재를 계속 두들기지 않는다
+
+# ── 엔드포인트 ────────────────────────────────────────────────
+#   axis="span"  : START_DATE/END_DATE 범위 (100행/콜)
+#   axis="asof"  : 기준일 하나, 그 이전 N행 (30행/콜) — 날짜를 밀어가며 소급
+SPEC = {
+ "flow": dict(                                    # 수급 F01·F03·F04
+   url="/uapi/domestic-stock/v1/quotations/investor-trade-by-stock-daily",
+   tr="FHPTJ04160001", tbl="kis_investor_flow", axis="asof", rows=30, out="output2",
+   params=lambda tk, d1, d2: {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": tk,
+                              "FID_INPUT_DATE_1": d2,
+                              "FID_ORG_ADJ_PRC": "0",     # 무시되지만 명시한다
+                              "FID_ETC_CLS_CODE": "0"}),  # 필수 — 빠지면 에러
+ "short": dict(                                   # 공매도 F05·F06
+   url="/uapi/domestic-stock/v1/quotations/daily-short-sale",
+   tr="FHPST04830000", tbl="kis_short_sale", axis="span", rows=100, out="output2",
+   params=lambda tk, d1, d2: {"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": tk,
+                              "FID_INPUT_DATE_1": d1, "FID_INPUT_DATE_2": d2}),
+ "loan": dict(                                    # 대차 F07. 하한 2014-01-02(실측)
+   url="/uapi/domestic-stock/v1/quotations/daily-loan-trans",
+   tr="HHPST074500C0", tbl="kis_loan_trans", axis="span", rows=100, out="output1",
+   floor="20140102",
+   params=lambda tk, d1, d2: {"MRKT_DIV_CLS_CODE": "3",   # 1:코스피 2:코스닥 3:종목
+                              "MKSC_SHRN_ISCD": tk,
+                              "START_DATE": d1, "END_DATE": d2, "CTS": ""}),
+ "credit": dict(                                  # 신용잔고. 원장에 없던 축
+   url="/uapi/domestic-stock/v1/quotations/daily-credit-balance",
+   tr="FHPST04760000", tbl="kis_credit_balance", axis="asof", rows=30, out="output",
+   params=lambda tk, d1, d2: {"FID_COND_MRKT_DIV_CODE": "J", "FID_COND_SCR_DIV_CODE": "20476",
+                              "FID_INPUT_ISCD": tk, "FID_INPUT_DATE_1": d2}),
+ "master": dict(                                  # 상장폐지일 등 마스터 67필드
+   url="/uapi/domestic-stock/v1/quotations/search-stock-info",
+   tr="CTPF1002R", tbl="kis_stock_info", axis="corp", rows=1, out="output",
+   params=lambda tk, d1, d2: {"PRDT_TYPE_CD": "300", "PDNO": tk}),
+}
+
+
+# ── 오류 분류 ─────────────────────────────────────────────────
+#   KIS 는 rt_cd(0 성공 / 1,2 실패) + msg_cd 로 온다. DART 의 status 체계와 다르다.
+def classify(status, body):
+    """(verdict, code). verdict: ok · empty · retry · token · quota · fatal · error"""
+    if status is None:
+        return "retry", "exc"                     # 네트워크·JSON 예외
+    if status == 429:
+        return "quota", "http429"
+    if status >= 500:
+        return "retry", f"http{status}"
+    mc = (body or {}).get("msg_cd") or ""
+    rt = (body or {}).get("rt_cd")
+    if mc in ("EGW00121", "EGW00123"):            # 토큰 만료·유효하지 않음
+        return "token", mc
+    if mc == "EGW00201":                          # 유량 초과
+        return "quota", mc
+    if mc in ("EGW00133",):                       # 서비스 점검
+        return "retry", mc
+    if rt == "0":
+        return "ok", mc or "0"
+    if status != 200:
+        return "error", f"http{status}"
+    return "error", mc or str(rt)
+
+
+def call(name, tk, d1, d2, stat):
+    """단일 콜. 재시도·백오프·토큰 재발급을 여기서 흡수한다."""
+    s = SPEC[name]
+    url = f"{api.KIS_BASE}{s['url']}"
+    for attempt in range(RETRY_MAX + 1):
+        body, code = None, None
+        try:
+            h = {"content-type": "application/json; charset=utf-8",
+                 "authorization": f"Bearer {api._kis_token()}",
+                 "appkey": api._K["KIS_APP_KEY"], "appsecret": api._K["KIS_APP_SECRET"],
+                 "tr_id": s["tr"], "custtype": "P"}
+            r = requests.get(url, headers=h, params=s["params"](tk, d1, d2), timeout=30)
+            code = r.status_code
+            body = r.json()
+        except Exception as e:
+            print(f"    ! 콜 실패 — {name} {tk} {d1}~{d2} {type(e).__name__}: {str(e)[:90]}")
+        v, mc = classify(code, body)
+        stat["calls"] += 1
+        time.sleep(PACE)
+
+        if v == "ok":
+            out = (body or {}).get(s["out"]) or []
+            if isinstance(out, dict):
+                out = [out]
+            return ("ok" if out else "empty"), mc, out
+        if v == "token":
+            # 23h 캐싱이라 19시간 실행에서 만료될 수 있다. 캐시를 버리고 재발급한다.
+            print(f"    · 토큰 만료({mc}) — 재발급")
+            api._kis_tok = None
+            try:
+                os.remove(api._KIS_CACHE)
+            except OSError:
+                pass
+            time.sleep(1.0)
+            continue
+        if v in ("retry", "quota") and attempt < RETRY_MAX:
+            wait = RETRY_BASE * (2 ** attempt)
+            if v == "quota":
+                wait = max(wait, 30.0)            # 유량 초과는 더 길게 쉰다
+            print(f"    · {mc} 재시도 {attempt+1}/{RETRY_MAX} — {wait:.0f}초")
+            time.sleep(wait)
+            continue
+        return v, mc, []
+    return "error", "retry_exhausted", []
+
+
+def ensure(con):
+    con.execute("PRAGMA journal_mode=WAL")
+    con.execute("""CREATE TABLE IF NOT EXISTS kis_call_log(
+      name TEXT NOT NULL, ticker TEXT NOT NULL, d1 TEXT, d2 TEXT,
+      verdict TEXT NOT NULL, code TEXT, n_rows INTEGER NOT NULL, ts TEXT NOT NULL)""")
+    # 유닛 = (엔드포인트, 종목, 조회창). 재개는 이 테이블이 기준이다.
+    con.execute("""CREATE TABLE IF NOT EXISTS kis_ingest_log(
+      name TEXT NOT NULL, ticker TEXT NOT NULL, d1 TEXT NOT NULL, d2 TEXT NOT NULL,
+      status TEXT NOT NULL, n_rows INTEGER NOT NULL, ts TEXT NOT NULL,
+      PRIMARY KEY (name, ticker, d1, d2))""")
+    con.commit()
+
+
+def windows(name, first, last):
+    """조회창 목록. axis 에 따라 범위창(span) 또는 기준일 역행(asof)."""
+    s = SPEC[name]
+    floor = s.get("floor")
+    if floor and last < floor:
+        return []
+    if floor and first < floor:
+        first = floor
+    if s["axis"] == "corp":
+        return [("", "")]
+    f = datetime.strptime(first, "%Y%m%d")
+    l = datetime.strptime(last, "%Y%m%d")
+    out = []
+    if s["axis"] == "span":
+        # 100행/콜 ≈ 140 캘린더일(거래일 비율 0.68 감안, 여유 두고 130)
+        cur = l
+        while cur >= f:
+            beg = max(f, cur - timedelta(days=130))
+            out.append((beg.strftime("%Y%m%d"), cur.strftime("%Y%m%d")))
+            cur = beg - timedelta(days=1)
+    else:
+        # 30행/콜 ≈ 42 캘린더일. 기준일을 밀어가며 소급한다.
+        cur = l
+        while cur >= f:
+            out.append((f.strftime("%Y%m%d"), cur.strftime("%Y%m%d")))
+            cur = cur - timedelta(days=42)
+    return out
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--only", required=True, help=f"엔드포인트: {', '.join(SPEC)}")
+    ap.add_argument("--scope", default="delisted", choices=("delisted", "all"),
+                    help="delisted=폐지종목만 · all=전 종목")
+    ap.add_argument("--limit", type=int, default=0, help="종목 수 상한(테스트용)")
+    ap.add_argument("--max-calls", type=int, default=0, help="콜 상한. 0=무제한")
+    a = ap.parse_args()
+
+    names = [n.strip() for n in a.only.split(",") if n.strip()]
+    bad = [n for n in names if n not in SPEC]
+    if bad:
+        print(f"  ✖ 없는 엔드포인트: {bad}\n     사용 가능: {', '.join(SPEC)}")
+        return
+
+    panel = f"{BASE}/data/build/equity_fin.db"
+    if not os.path.exists(panel):
+        print(f"  ✖ corp_ticker 가 없다 — {panel}. build_bridge.py 를 먼저 실행하라")
+        return
+    p = sqlite3.connect(f"file:{panel}?mode=ro", uri=True)
+    cond = ("last_dd < (SELECT MAX(last_dd) FROM corp_ticker)"
+            if a.scope == "delisted" else "1=1")
+    # 스팩·우선주 제외: 공매도·대차 대상이 아니고(실측 60종목 중 57이 스팩),
+    # 우선주는 본주와 재무를 공유하므로 수급 축에서 별도 의미가 없다.
+    rows = p.execute(f"""
+        SELECT ticker, first_dd, last_dd FROM corp_ticker
+        WHERE is_common = 1 AND {cond}
+          AND corp_name NOT LIKE '%기업인수목적%' AND corp_name NOT LIKE '%스팩%'
+        ORDER BY ticker""").fetchall()
+    p.close()
+    if a.limit:
+        rows = rows[:a.limit]
+
+    os.makedirs(os.path.dirname(DB), exist_ok=True)
+    con = sqlite3.connect(DB, timeout=60)
+    ensure(con)
+    done = {(r[0], r[1], r[2], r[3]) for r in con.execute(
+        "SELECT name, ticker, d1, d2 FROM kis_ingest_log WHERE status IN ('ok','empty')")}
+
+    plan = []
+    for name in names:
+        for tk, f, l in rows:
+            for d1, d2 in windows(name, f, l):
+                if (name, tk, d1, d2) not in done:
+                    plan.append((name, tk, d1, d2))
+    print(f"  대상 {len(rows):,}종목 × {names} → 남은 유닛 {len(plan):,}"
+          f"  (완료 {len(done):,})")
+    if not plan:
+        print("  전부 완료됨"); con.close(); return
+
+    stat = {"calls": 0, "ok": 0, "empty": 0, "err": 0, "rows": 0}
+    streak = 0
+    t0 = time.time()
+    for i, (name, tk, d1, d2) in enumerate(plan, 1):
+        if a.max_calls and stat["calls"] >= a.max_calls:
+            print(f"  ⏸ 콜 상한 {a.max_calls} 도달 — 중단"); break
+        v, code, out = call(name, tk, d1, d2, stat)
+        now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+        con.execute("INSERT INTO kis_call_log VALUES (?,?,?,?,?,?,?,?)",
+                    (name, tk, d1, d2, v, code, len(out), now))
+        if v in ("ok", "empty"):
+            streak = 0
+            stat["ok" if v == "ok" else "empty"] += 1
+            if out:
+                # 요청 파라미터를 req_ 접두어로 남긴다 — 응답 의미를 바꾸는 값이 섞여 있다.
+                extra = {"ticker": tk, "d1": d1, "d2": d2, "name": name}
+                s = SPEC[name]
+                pr = s["params"](tk, d1, d2)
+                for k in ("FID_ORG_ADJ_PRC", "FID_ETC_CLS_CODE", "MRKT_DIV_CLS_CODE"):
+                    if k in pr:
+                        extra[k.lower()] = pr[k]
+                store(con, _spec_shim(name), out, extra)
+                stat["rows"] += len(out)
+            con.execute("INSERT OR REPLACE INTO kis_ingest_log VALUES (?,?,?,?,?,?,?)",
+                        (name, tk, d1, d2, v, len(out), now))
+        else:
+            streak += 1
+            stat["err"] += 1
+            if streak >= ABORT_STREAK:
+                print(f"  ✖ 연속 실패 {streak}회 ({code}) — 중단한다. "
+                      f"계정 제재일 수 있으니 로그를 먼저 확인하라")
+                break
+        con.commit()
+        if i % 500 == 0:
+            el = time.time() - t0
+            print(f"  {i:,}/{len(plan):,}  콜 {stat['calls']:,} · 행 {stat['rows']:,} · "
+                  f"{stat['calls']/el:.1f}콜/s · 남은 {(len(plan)-i)*el/i/3600:.1f}h")
+
+    el = time.time() - t0
+    print(f"\n  콜 {stat['calls']:,} ({stat['calls']/max(el,1):.1f}/s) · "
+          f"ok {stat['ok']:,} · 빈응답 {stat['empty']:,} · 오류 {stat['err']:,} · "
+          f"행 {stat['rows']:,}")
+    con.close()
+
+
+# store() 는 SPEC[name]["tbl"] 을 참조한다. KIS SPEC 을 그 형태로 잠깐 끼워 넣는다.
+def _spec_shim(name):
+    key = f"__kis_{name}"
+    DART_SPEC[key] = {"tbl": SPEC[name]["tbl"]}
+    return key
+
+
+if __name__ == "__main__":
+    main()

@@ -39,7 +39,9 @@ DB      = f"{BASE}/data/raw/dart.db"
 #
 #   kael — 카엘 프로덕션 키다. 여기서는 부딪히면 안 된다. 그쪽 시스템이 매일 ~300콜을
 #         쓰는데 우리 카운터는 그걸 모르므로, 사전 계상으로 19,500 에서 멈춘다.
-CAPS    = {"k2": 25_000, "kael": 19_500}
+#   우리 키(k2, k3, ...) 는 전부 같은 정책이다. CAPS 에 없으면 CAP_OURS 를 쓴다.
+CAP_OURS = 25_000
+CAPS    = {"kael": 19_500}
 PACE    = 0.25            # 초당 4콜. DART 는 초당 제한이 미공지라 보수적으로
 PACE_MIN = 0.25           # 020 판별이 페이스를 늦출 때의 시작점(런타임에 변한다)
 # ── 013(무자료)의 영구/잠정 판별 ──────────────────────────────
@@ -176,7 +178,7 @@ def on_020(con, name, kid, key, corp, year, reprt, fs):
     반환: "ours" 접는다 · "burst" 페이스 늦추고 계속 · "foreign" 접고 알린다
     """
     global PACE
-    used, cap = budget_used(con, kid), CAPS.get(kid, 19_500)
+    used, cap = budget_used(con, kid), CAPS.get(kid, CAP_OURS)
     if used >= 0.8 * cap:
         print(f"  · {kid} 020 — 우리 소진 확정 ({used:,}/{cap:,}) → 이 키 접는다")
         return "ours"
@@ -206,11 +208,11 @@ def pick_key(con, keys, blocked):
     for kid, k in keys:
         if kid in blocked: continue
         used = budget_used(con, kid)
-        if used < CAPS.get(kid, 19_500):
+        if used < CAPS.get(kid, CAP_OURS):
             if kid != _last_kid:
                 mark = "  ⚠ 카엘 프로덕션 키다" if kid == "kael" else ""
                 print(f"  · 키 전환 {_last_kid or '시작'} → {kid} "
-                      f"({used:,}/{CAPS.get(kid, 19_500):,}){mark}")
+                      f"({used:,}/{CAPS.get(kid, CAP_OURS):,}){mark}")
                 _last_kid = kid
             return kid, k
     return None, None

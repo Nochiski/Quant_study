@@ -15,7 +15,8 @@ _K = {}
 for _l in open(ENV, encoding="utf-8"):
     _l = _l.strip()
     for _k in ("KRX_API_KEY","KRX_ID","KRX_PW","KIS_APP_KEY","KIS_APP_SECRET",
-               "KIWOOM_APP_KEY","KIWOOM_SECRET_KEY","DART_API_KEY","DART_API_KEY_2"):
+               "KIWOOM_APP_KEY","KIWOOM_SECRET_KEY","DART_API_KEY","DART_API_KEY_2",
+               "DART_API_KEY_3","DART_API_KEY_4","DART_API_KEY_5"):
         if _l.startswith(_k + "="):
             _K[_k] = _l.split("=", 1)[1].strip().strip('"\'')
 os.environ["KRX_ID"] = _K.get("KRX_ID",""); os.environ["KRX_PW"] = _K.get("KRX_PW","")
@@ -121,10 +122,19 @@ def kiwoom(api_id, url, body, cont=None, next_key=None):
 DART_BASE = "https://opendart.fss.or.kr/api"
 
 def dart_keys():
-    """(key_id, key) 순서 목록. 앞이 1순위. 여기서 순서가 곧 소진 순서다."""
+    """(key_id, key) 순서 목록. 앞이 1순위. 여기서 순서가 곧 소진 순서다.
+
+    카엘 프로덕션 키(DART_API_KEY)는 **항상 마지막**이다. 우리 키를 다 쓴 뒤에만
+    나가야 그 시스템의 하루치를 뺏지 않는다. 우리 키는 DART_API_KEY_2 부터
+    번호순으로 붙이면 자동으로 잡힌다 — 키가 늘면 .env 에 넣기만 하면 된다.
+    """
     out = []
-    if _K.get("DART_API_KEY_2"): out.append(("k2", _K["DART_API_KEY_2"]))
-    if _K.get("DART_API_KEY"):   out.append(("kael", _K["DART_API_KEY"]))
+    for n in range(2, 6):                       # _2 .. _5
+        k = _K.get(f"DART_API_KEY_{n}")
+        if k:
+            out.append((f"k{n}", k))
+    if _K.get("DART_API_KEY"):
+        out.append(("kael", _K["DART_API_KEY"]))
     return out
 
 class DartError(Exception):

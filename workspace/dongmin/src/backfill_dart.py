@@ -280,6 +280,32 @@ def classify(j):
     st = (j or {}).get("status")
     return VERDICT.get(st, "unknown"), st
 
+def normalize_rows(j, flat):
+    """응답 → (행 리스트, 이상신호). 예상 밖 형태는 전부 빈 리스트로 떨어뜨린다.
+
+    `j.get("list") or []` 만으로는 falsy(None·[]·0·"")밖에 못 막는다.
+    JSON 은 무엇이든 올 수 있고, 특히 아래 둘은 조용히 오염된다:
+      · list 가 배열이 아니라 객체     → len() 이 키 개수를 세고 for 가 키를 순회한다
+      · list 원소가 dict 이 아님        → store() 의 set(r) 에서 깨진다
+    한 건이라도 예상 밖이면 신호를 돌려 ingest_log 에 남긴다 — 조용히 넘기지 않는다.
+    """
+    if not isinstance(j, dict):
+        return [], f"resp_{type(j).__name__}"
+    if flat:
+        return [j], None
+    v = j.get("list")
+    if v is None:
+        return [], None                      # 키 부재·null 은 013 과 함께 오는 정상 형태
+    if isinstance(v, dict):
+        return [v], "list_is_object"         # 단일 객체로 온 경우 — 행 1개로 받되 신호
+    if not isinstance(v, list):
+        return [], f"list_is_{type(v).__name__}"
+    rows = [r for r in v if isinstance(r, dict)]
+    if len(rows) != len(v):
+        return rows, f"non_dict_rows_{len(v) - len(rows)}"
+    return rows, None
+
+
 def call(con, name, corp, key_id, key, year=None, reprt="11011", fs=None):
     """(rows, verdict, status). 콜은 여기서만 나가고 전부 로그에 남는다.
     로그에 key_id 를 같이 박아야 키별 예산이 성립한다."""
@@ -313,7 +339,12 @@ def call(con, name, corp, key_id, key, year=None, reprt="11011", fs=None):
                   f"reprt={reprt} fs={fs or '-'} key_id={key_id} "
                   f"{type(e).__name__}: {str(e)[:120]}")
         v, st = ("error", "exc") if j is None else classify(j)
-        rows = [] if j is None else ([j] if (s.get("flat") and v == "ok") else (j.get("list") or []))
+        rows, odd = normalize_rows(j, s.get("flat") and v == "ok")
+        if odd:
+            # 형태가 예상 밖이다. 값을 버리든 살리든 반드시 기록에 남긴다.
+            print(f"    ? 응답 형태 이상({odd}) — endpoint={s['ep']} corp={corp} "
+                  f"year={year or '-'} reprt={reprt} → rows={len(rows)}")
+            st = f"{st}/{odd}"
         # 정상이라며 빈 배열을 주는 경우. 명세상 0행은 013 이 담당하므로 설명이 안 된다.
         # 조용히 넘기면 "수집했는데 데이터가 없는 종목"으로 위장된다.
         if v == "ok" and not rows:

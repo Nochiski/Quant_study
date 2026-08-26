@@ -450,8 +450,6 @@ def main():
     ap.add_argument("--keys", default="",
                     help="사용할 키를 쉼표로 제한한다(예: k2). 미지정이면 우리 키 전부. "
                          "한 키의 실한도를 재려면 그 키만 남겨야 한다")
-    ap.add_argument("--use-kael", action="store_true",
-                    help="우리 키 소진 후 카엘 프로덕션 키로 폴백한다. 기본은 쓰지 않는다")
     ap.add_argument("--reprt", default="11011",
                     help="보고서 종류 쉼표구분. 11011=사업 11012=반기 11013=1분기 11014=3분기")
     a = ap.parse_args()
@@ -546,15 +544,9 @@ def main():
     if keys[0][0] == "kael":
         print("  ✖ 1순위가 카엘 프로덕션 키다 — 우리 키(DART_API_KEY_2~)를 먼저 등록하라")
         con.close(); return
-    # 카엘 프로덕션 키는 명시적으로 켜야 나간다. 그 시스템이 매일 자기 몫을 쓰는데
-    # 우리 카운터는 그걸 못 보므로, 실수로 흘러드는 경로를 기본값에서 막는다.
-    if not a.use_kael:
-        keys = [(kid, k) for kid, k in keys if kid != "kael"]
-        if not keys:
-            print("  ✖ 우리 키가 없다. 카엘 키를 쓰려면 --use-kael 을 명시하라")
-            con.close(); return
-    else:
-        print("  ⚠ --use-kael — 우리 키 소진 후 카엘 프로덕션 키로 넘어간다")
+    # 순차 폴백: k2 → k3 → ... → kael.
+    # 카엘 프로덕션 키는 우리 키를 다 쓴 뒤에만 나가고, CAPS 의 19,500 에서 멈춘다.
+    # 우리 키는 상한 없이 020 이 올 때까지 쓴다.
     if a.keys:
         want = [k.strip() for k in a.keys.split(",") if k.strip()]
         have = {kid for kid, _ in keys}

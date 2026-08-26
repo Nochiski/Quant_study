@@ -29,8 +29,12 @@ import api
 
 DB      = f"{BASE}/data/raw/dart.db"
 # 키별 롤링24h 상한. kael 은 프로덕션 크론(1일 2회) 몫 ~300 을 남긴다.
-CAPS    = {"k2": 19_800, "kael": 19_500}
+# 사전 계상은 이제 안전망이다. 실제 한도(20,000)에 붙이고, 넘는 순간은 020 판별이 받는다.
+# 예전엔 여기에 마진을 크게 둬서 020 을 볼 일이 없었고(실측 0건), 그만큼 한도를 버렸다.
+# kael 은 카엘 프로덕션 키라 마진을 남긴다 — 그쪽이 매일 ~300콜을 쓴다.
+CAPS    = {"k2": 20_000, "kael": 19_200}
 PACE    = 0.25            # 초당 4콜. DART 는 초당 제한이 미공지라 보수적으로
+PACE_MIN = 0.25           # 020 판별이 페이스를 늦출 때의 시작점(런타임에 변한다)
 # ── 013(무자료)의 영구/잠정 판별 ──────────────────────────────
 # 013 은 두 가지를 같은 코드로 말한다: "이 회사엔 원래 그 자료가 없다"(영구)와
 # "아직 공시 시점이 오지 않았다"(잠정). 후자를 영구로 적으면 나중에 실제 공시가
@@ -148,11 +152,59 @@ def budget_used(con, key_id):
     return con.execute("SELECT COUNT(*) FROM dart_call_log WHERE ts > ? AND key_id = ?",
                        (cut, key_id)).fetchone()[0]
 
+def on_020(con, name, kid, key, corp, year, reprt, fs):
+    """020(요청제한 초과)이 왔을 때 원인을 가른다.
+
+    020 은 두 가지를 같은 코드로 말한다 —
+      (a) 우리가 한도를 다 썼다        → 접는 게 맞다
+      (b) 잠깐 몰아 쏴서 막혔거나, 키를 공유하는 쪽이 먼저 썼다
+                                     → 접으면 하루 19,000콜을 버린다
+
+    우리는 우리 콜 수를 정확히 아니까 (a) 는 카운터로 판별한다. 애매한 구간만
+    프로브 1콜로 확인한다 — 프로브 1콜 vs 오판 19,000콜의 비대칭이 근거다.
+
+    kael 은 카엘 프로덕션 키라 우리 카운터가 그쪽 사용분을 모른다. 저사용 구간의
+    020 은 대개 그 경우이므로 여기서 걸러야 조용한 하루 손실을 막는다.
+
+    반환: "ours" 접는다 · "burst" 페이스 늦추고 계속 · "foreign" 접고 알린다
+    """
+    global PACE
+    used, cap = budget_used(con, kid), CAPS.get(kid, 19_500)
+    if used >= 0.8 * cap:
+        print(f"  · {kid} 020 — 우리 소진 확정 ({used:,}/{cap:,}) → 이 키 접는다")
+        return "ours"
+
+    # 저사용 구간의 020 은 설명이 안 된다. 1분 쉬고 딱 1콜로 확인한다.
+    print(f"  · {kid} 020 인데 사용량이 {used:,}/{cap:,} 뿐이다 — 60초 후 프로브 1콜")
+    time.sleep(60)
+    _, v, st = call(con, name, corp, kid, key, year, reprt, fs=fs)
+    if v == "ok":
+        PACE = min(PACE * 2, 2.0)
+        print(f"  · 프로브 성공 → 버스트 한도로 판단. 페이스 {PACE:.2f}s 로 늦추고 계속")
+        return "burst"
+    print(f"  ⚠ 프로브도 {st} → 외부 소진 의심. {kid} 를 접는다. "
+          f"이 키를 공유하는 쪽의 사용량을 확인할 것")
+    return "foreign"
+
+
+_last_kid = None
+
 def pick_key(con, keys, blocked):
-    """남은 예산이 있는 첫 키. 순서가 곧 우선순위다. 없으면 (None, None)."""
+    """남은 예산이 있는 첫 키. 순서가 곧 우선순위다. 없으면 (None, None).
+
+    전환을 반드시 찍는다. 예전에는 조용히 넘어가서 카엘 프로덕션 키로 6,959콜이
+    나간 것을 dart_call_log 를 직접 조회해야만 알 수 있었다(실측).
+    """
+    global _last_kid
     for kid, k in keys:
         if kid in blocked: continue
-        if budget_used(con, kid) < CAPS.get(kid, 19_500):
+        used = budget_used(con, kid)
+        if used < CAPS.get(kid, 19_500):
+            if kid != _last_kid:
+                mark = "  ⚠ 카엘 프로덕션 키다" if kid == "kael" else ""
+                print(f"  · 키 전환 {_last_kid or '시작'} → {kid} "
+                      f"({used:,}/{CAPS.get(kid, 19_500):,}){mark}")
+                _last_kid = kid
             return kid, k
     return None, None
 
@@ -326,17 +378,25 @@ def fetch(con, name, corp, y, keys, blocked, reprt="11011"):
         if s_.get("fallback"):
             rows, v, st = call(con, name, corp, kid, k, y, reprt, fs="CFS")  # fs_div 는 필수 파라미터
             extra_fs = "CFS"
-            if v in ("quota", "abuse"):
-                print(f"  · {kid} {st} {'한도 소진' if v == 'quota' else '남용 판정 — 즉시 중단'}"
-                      f" → 다음 키로"); blocked.add(kid); continue
+            if v == "quota":
+                if on_020(con, name, kid, k, corp, y, reprt, "CFS") == "burst":
+                    continue                                            # 같은 키로 재시도
+                blocked.add(kid); continue
+            if v == "abuse":
+                print(f"  · {kid} {st} 남용 판정 — 즉시 중단 → 다음 키로")
+                blocked.add(kid); continue
             if v == "no_data":                                          # 연결재무제표가 없는 회사
                 rows, v, st = call(con, name, corp, kid, k, y, reprt, fs="OFS")
                 extra_fs = "OFS"
         else:
             rows, v, st = call(con, name, corp, kid, k, y, reprt)
-        if v in ("quota", "abuse"):
-            print(f"  · {kid} {st} {'한도 소진' if v == 'quota' else '남용 판정 — 즉시 중단'}"
-                  f" → 다음 키로"); blocked.add(kid); continue
+        if v == "quota":
+            if on_020(con, name, kid, k, corp, y, reprt, None) == "burst":
+                continue
+            blocked.add(kid); continue
+        if v == "abuse":
+            print(f"  · {kid} {st} 남용 판정 — 즉시 중단 → 다음 키로")
+            blocked.add(kid); continue
         return rows, v, st, extra_fs, kid
 
 

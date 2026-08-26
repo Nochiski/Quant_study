@@ -31,11 +31,13 @@ DB      = f"{BASE}/data/raw/dart.db"
 # 키별 롤링24h 상한. kael 은 프로덕션 크론(1일 2회) 몫 ~300 을 남긴다.
 # 두 키의 역할이 다르므로 한도 정책도 다르다.
 #
-#   k2  — 우리 키다. 실제로 020 에 부딪힐 때까지 쓴다. 사전 계상값을 실한도(20,000)보다
-#         높게 둬서 우리가 먼저 비켜서지 않게 한다. DART 공식 설명이 "일반적으로 20,000건
-#         이상"이라 실한도가 정확히 20,000 이라는 보장이 없고, 미리 접으면 그 차이만큼
-#         매일 버린다. 부딪히면 on_020 이 판별한다 — 20,000(= 0.8 × 25,000)을 넘긴 상태의
-#         020 은 "우리 소진"으로 확정되어 즉시 kael 로 넘어간다.
+#   우리 키(k2, k3, ...) — 사전 상한이 없다. 020 이 올 때까지 쓰고, 오면 on_020 이
+#         판별해 다음 키로 넘긴다. 숫자로 미리 막을 이유가 없다 —
+#         ① 실한도를 모른다. 공식 안내는 "일반적으로 20,000건 이상"이고, 2026-08-26 실측에서
+#            k2 가 25,000콜까지 020 없이 통과했다. 그날 멈춘 것도 DART 가 아니라 우리 상한이었다.
+#         ② 임의값으로 막으면 실한도와의 차이를 매일 버린다.
+#         ③ 막지 않아도 안전하다. 020 은 다음 키로, 021/101/901(남용·제재)은 즉시 그 키를
+#            접는 경로가 이미 있다.
 #
 #   kael — 카엘 프로덕션 키다. 여기서는 부딪히면 안 된다. 그쪽 시스템이 매일 ~300콜을
 #         쓰는데 우리 카운터는 그걸 모르므로, 사전 계상으로 19,500 에서 멈춘다.
@@ -50,7 +52,7 @@ DB      = f"{BASE}/data/raw/dart.db"
 #     kael 의 020 은 QUOTA_LIMIT 에 도달할 수 없고, 오면 그건 카엘 쪽이 먼저 썼다는 뜻이라
 #     항상 프로브 판별을 탄다.
 QUOTA_LIMIT = 20_000
-CAP_OURS    = 25_000
+CAP_OURS    = None          # 우리 키는 사전 상한을 두지 않는다 — 아래 근거
 CAPS        = {"kael": 19_500}
 PACE    = 0.25            # 초당 4콜. DART 는 초당 제한이 미공지라 보수적으로
 PACE_MIN = 0.25           # 020 판별이 페이스를 늦출 때의 시작점(런타임에 변한다)
@@ -165,9 +167,22 @@ SPEC = {
 }
 
 # ── 예산 (롤링 24h) ────────────────────────────────────────────
+# 한도 창(window). DART 가 자정 리셋인지 롤링 24h 인지는 공식 안내에 없다(§3-2).
+#   rolling  — 보수적. 어느 쪽이든 한도를 안 넘는다. 기본값이다
+#   midnight — KST 자정 리셋 가정. 리셋이 사실이면 롤링보다 많이 쓸 수 있다
+# 실측으로 가려야 하는 값이라 런타임에 바꿀 수 있게 둔다.
+QUOTA_WINDOW = "rolling"
+
+
 def budget_used(con, key_id):
-    """키별 롤링24h 사용량. 합산하면 전환이 안 되므로 반드시 키로 좁힌다."""
-    cut = (datetime.utcnow() - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%S")
+    """키별 사용량. 합산하면 전환이 안 되므로 반드시 키로 좁힌다."""
+    if QUOTA_WINDOW == "midnight":
+        # DART 는 KST 기준이다. UTC 로 저장하므로 +9h 로 옮겨 자정을 잡고 되돌린다.
+        cut = con.execute(
+            "SELECT strftime('%Y-%m-%dT%H:%M:%S','now','+9 hours','start of day','-9 hours')"
+        ).fetchone()[0]
+    else:
+        cut = (datetime.utcnow() - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%S")
     return con.execute("SELECT COUNT(*) FROM dart_call_log WHERE ts > ? AND key_id = ?",
                        (cut, key_id)).fetchone()[0]
 
@@ -188,7 +203,7 @@ def on_020(con, name, kid, key, corp, year, reprt, fs):
     반환: "ours" 접는다 · "burst" 페이스 늦추고 계속 · "foreign" 접고 알린다
     """
     global PACE
-    used, cap = budget_used(con, kid), CAPS.get(kid, CAP_OURS)
+    used = budget_used(con, kid)
     if used >= QUOTA_LIMIT:
         print(f"  · {kid} 020 — 우리 소진 확정 ({used:,} ≥ 실한도 {QUOTA_LIMIT:,}) "
               f"→ 이 키 접는다")
@@ -220,11 +235,12 @@ def pick_key(con, keys, blocked):
     for kid, k in keys:
         if kid in blocked: continue
         used = budget_used(con, kid)
-        if used < CAPS.get(kid, CAP_OURS):
+        cap = CAPS.get(kid, CAP_OURS)
+        if cap is None or used < cap:
             if kid != _last_kid:
                 mark = "  ⚠ 카엘 프로덕션 키다" if kid == "kael" else ""
-                print(f"  · 키 전환 {_last_kid or '시작'} → {kid} "
-                      f"({used:,}/{CAPS.get(kid, CAP_OURS):,}){mark}")
+                lim = f"{cap:,}" if cap else "무제한"
+                print(f"  · 키 전환 {_last_kid or '시작'} → {kid} ({used:,}/{lim}){mark}")
                 _last_kid = kid
             return kid, k
     return None, None
@@ -429,6 +445,11 @@ def main():
                     help="1=기업개황 2=재무제표 3=정기보고서 나머지 8종 "
                          "4=DS005 주요사항보고서 7종 (0=전부)")
     ap.add_argument("--only",  default="", help="엔드포인트 이름 쉼표구분(stage 보다 우선)")
+    ap.add_argument("--quota-window", default="rolling", choices=("rolling", "midnight"),
+                    help="한도 창. rolling=24시간(보수적) · midnight=KST 자정 리셋 가정")
+    ap.add_argument("--keys", default="",
+                    help="사용할 키를 쉼표로 제한한다(예: k2). 미지정이면 우리 키 전부. "
+                         "한 키의 실한도를 재려면 그 키만 남겨야 한다")
     ap.add_argument("--use-kael", action="store_true",
                     help="우리 키 소진 후 카엘 프로덕션 키로 폴백한다. 기본은 쓰지 않는다")
     ap.add_argument("--reprt", default="11011",
@@ -514,6 +535,11 @@ def main():
         print(f"  ✖ --reprt 값이 잘못됐다: {bad_rc} (11011/11012/11013/11014)")
         con.close(); return
 
+    global QUOTA_WINDOW
+    QUOTA_WINDOW = a.quota_window
+    if QUOTA_WINDOW == "midnight":
+        print("  · 한도 창 = KST 자정 리셋 가정 (미확정 정책 — 020 이 오면 판별이 받는다)")
+
     keys = api.dart_keys()
     if not keys:
         print("  ✖ DART 키가 없다"); con.close(); return
@@ -529,8 +555,18 @@ def main():
             con.close(); return
     else:
         print("  ⚠ --use-kael — 우리 키 소진 후 카엘 프로덕션 키로 넘어간다")
+    if a.keys:
+        want = [k.strip() for k in a.keys.split(",") if k.strip()]
+        have = {kid for kid, _ in keys}
+        miss = [k for k in want if k not in have]
+        if miss:
+            print(f"  ✖ --keys 에 없는 키: {miss} · 사용 가능: {sorted(have)}")
+            con.close(); return
+        keys = [(kid, k) for kid, k in keys if kid in want]
+        print(f"  · --keys {want} — 이 키만 쓴다")
     if len(keys) == 1:
-        print(f"  ⚠ 키가 1개뿐이다({keys[0][0]}) — 폴백 없이 진행한다")
+        print(f"  ⚠ 키가 1개뿐이다({keys[0][0]}) — 폴백 없이 진행한다. "
+              f"소진되면 그 지점이 실한도다")
     print(f"  · 키 {[k for k, _ in keys]} · 대상 {len(corps)}사 × {names}")
     blocked = set()
 
@@ -573,7 +609,9 @@ def main():
         print(f"  013 재확인 대상 {pending:,}유닛"
               + (f" (acc_mt 미상 {unknown_accmt:,} 포함)" if unknown_accmt else ""))
     used0 = {kid: budget_used(con, kid) for kid, _ in keys}
-    print("  키 " + " · ".join(f"{kid} {used0[kid]:,}/{CAPS.get(kid, CAP_OURS):,}" for kid, _ in keys))
+    print("  키 " + " · ".join(
+        f"{kid} {used0[kid]:,}/" + (f"{CAPS[kid]:,}" if kid in CAPS else "무제한")
+        for kid, _ in keys))
     print(f"  대상 {len(corps)}종목 × {len(names)}종 × {len(years)}년 × 보고서 {reprts}")
     print()
 

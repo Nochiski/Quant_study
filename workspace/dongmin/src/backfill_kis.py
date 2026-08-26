@@ -32,6 +32,16 @@ RETRY_BASE = 3.0          # 3 → 6 → 12 → 24초
 ABORT_STREAK = 20         # 연속 실패 이 횟수면 중단. 계정 제재를 계속 두들기지 않는다
 EMPTY_STREAK = 30         # 빈 응답이 이만큼 연속이면 중단. 한도가 빈 응답으로 올 수 있다
 
+# 유량 초과(EGW00201·429) 정책.
+#   KIS 는 키가 하나라 DART 처럼 다음 키로 넘어갈 수 없다. 그래서 두 경우를 갈라야 한다 —
+#     · 순간 과속(초당 제한)  → 잠깐 쉬면 풀린다. 백오프가 의미 있다
+#     · 일일 한도            → 자정까지 안 열린다. 기다리는 시간이 전부 낭비다
+#   구분 기준은 "쉬고 나서 풀리는가"다. 한 유닛에서 QUOTA_RETRY 회까지만 시도하고,
+#   그래도 안 되는 유닛이 QUOTA_STREAK 개 연속이면 일일 한도로 판단해 즉시 중단한다.
+#   실측(2026-08-26): 하루 33,379콜을 오류 없이 통과했으므로 일일 한도는 그보다 높다.
+QUOTA_RETRY  = 2          # 유닛당 유량 재시도 (30초 → 60초). 그 이상은 순간 과속이 아니다
+QUOTA_STREAK = 3          # 유량으로 실패한 유닛이 이만큼 연속이면 일일 한도로 보고 중단
+
 # ── 엔드포인트 ────────────────────────────────────────────────
 #   axis="span"  : START_DATE/END_DATE 범위 (100행/콜)
 #   axis="asof"  : 기준일 하나, 그 이전 N행 (30행/콜) — 날짜를 밀어가며 소급
@@ -151,11 +161,12 @@ def call(name, tk, d1, d2, stat):
                 pass
             time.sleep(1.0)
             continue
-        if v in ("retry", "quota") and attempt < RETRY_MAX:
+        cap = QUOTA_RETRY if v == "quota" else RETRY_MAX
+        if v in ("retry", "quota") and attempt < cap:
             wait = RETRY_BASE * (2 ** attempt)
             if v == "quota":
                 wait = max(wait, 30.0)            # 유량 초과는 더 길게 쉰다
-            print(f"    · {mc} 재시도 {attempt+1}/{RETRY_MAX} — {wait:.0f}초")
+            print(f"    · {mc} 재시도 {attempt+1}/{cap} — {wait:.0f}초")
             time.sleep(wait)
             continue
         return v, mc, []
@@ -263,7 +274,7 @@ def main():
         print("  전부 완료됨"); con.close(); return
 
     stat = {"calls": 0, "ok": 0, "empty": 0, "err": 0, "rows": 0}
-    streak = estreak = 0
+    streak = estreak = qstreak = 0
     t0 = time.time()
     for i, (name, tk, d1, d2) in enumerate(plan, 1):
         if a.max_calls and stat["calls"] >= a.max_calls:
@@ -281,7 +292,7 @@ def main():
         else:
             estreak = 0
         if v in ("ok", "empty"):
-            streak = 0
+            streak = qstreak = 0
             stat["ok" if v == "ok" else "empty"] += 1
             if out:
                 # 요청 파라미터를 req_ 접두어로 남긴다 — 응답 의미를 바꾸는 값이 섞여 있다.
@@ -296,6 +307,15 @@ def main():
             con.execute("INSERT OR REPLACE INTO kis_ingest_log VALUES (?,?,?,?,?,?,?)",
                         (name, tk, d1, d2, v, len(out), now))
         else:
+            if v == "quota":
+                qstreak += 1
+                if qstreak >= QUOTA_STREAK:
+                    print(f"  ✖ 유량 초과가 {qstreak}유닛 연속이다({code}). "
+                          f"쉬어도 안 풀리므로 일일 한도로 판단해 중단한다.\n"
+                          f"     콜 {stat['calls']:,}회 사용 · 재개하면 여기서 이어진다")
+                    break
+            else:
+                qstreak = 0
             streak += 1
             stat["err"] += 1
             if streak >= ABORT_STREAK:

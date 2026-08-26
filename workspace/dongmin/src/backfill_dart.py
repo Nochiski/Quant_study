@@ -10,6 +10,15 @@
     2순위(카엘 프로덕션 키)가 아예 나가지 않는다. 병렬로 쏘면 그 격리가 사라진다.
   · 예산 카운터는 키별로 분리한다. 한 카운터로 합산하면 전환 자체가 일어나지 않는다.
   · 재무 하한은 2015 사업연도(실측: 2014 이하는 전 엔드포인트 013 무자료).
+  · DS005(주요사항보고서)는 bsns_year/reprt_code 를 안 받는다. corp_code+bgn_de+end_de 가
+    전부 필수라 corp_year 축 파라미터로는 호출 자체가 안 된다 → axis="corp_range".
+  · corp_range 는 날짜 상한이 없어 종목당 1콜에 전이력이 온다(실측 2026-08-26, k2 키 12콜).
+    irdsSttus 를 "누적 이력형"으로 가정했다가 롤링 윈도우로 판명난 전례(DEFECT-A04)가 있어
+    가정이 아니라 분할검정으로 확인했다 — wide 1콜의 rcept_no 집합 == 서로 겹치지 않는
+    두 하위 구간 콜의 합집합:
+      tsstkAqDecsn/00126380  wide 15 == old(~2019) 8 + new(2020~) 7
+      cvbdIsDecsn /00919966  wide  8 == old(~2019) 4 + new(2020~) 4
+    롤링 윈도우였다면 old 구간 콜이 013 이거나 범위 밖 최신 행을 돌려줬어야 한다.
 """
 import os, sys, json, time, sqlite3, argparse, hashlib
 from datetime import datetime, timedelta
@@ -30,13 +39,26 @@ RECHECK_DAYS  = 30
 RETRY_MAX  = 3            # 800/900 서버 오류 재시도 횟수
 RETRY_BASE = 5.0          # 지수 백오프 기준(초). 5 → 10 → 20
 
+# corp_range 축(DS005)의 고정 조회창. 상수여야 한다 —
+# end_de 를 "오늘"로 두면 재수집마다 요청 파라미터가 달라져, 같은 사건이 다른 값으로
+# 원장에 남을 여지가 생기고 UTC/KST 경계에서 하루가 흔들린다.
+# 20991231(미래 일자)이 status=000 으로 통과하는 것을 실측 확인했다.
+RANGE_BGN = "19990101"    # DS005 실측 최소 rcept_no 는 2015 년이지만 하한을 걸 이유가 없다
+RANGE_END = "20991231"
+
 # 단계. 1차부터 순차로 돌린다. 재무제표만 먼저 받으면 나머지를 기다리지 않고 쓸 수 있다.
 # company 가 1차다. acc_mt(결산월)가 013 의 영구/잠정 판별에 전제이기 때문이다 —
 # 3월 결산 법인은 period_end 가 9개월 어긋나므로 12월 결산 폴백으로는 판정할 수 없다.
+# 4차(DS005)를 3차에 합치지 않는 이유: 3차는 전부 정기보고서 계열(corp_year/corp)이고
+# 4차는 주요사항보고서 계열(corp_range)이라 축도 소급특성도 다르다. 예산도 4차 혼자
+# 24,346콜(≈1.2일)이라 한 스테이지로 묶으면 중간 재개점이 사라진다. 서로 의존이 없어
+# 순서는 자유롭다 — 3차를 기다릴 필요 없이 단독으로 돌릴 수 있다.
 STAGES  = {1: ["company"],
            2: ["fin"],
            3: ["dividend", "shares", "capital", "tesstk", "hyslr", "audit",
-               "elestock", "majorstock"]}
+               "elestock", "majorstock"],
+           4: ["tsstkAqDecsn", "piicDecsn", "cvbdIsDecsn",
+               "ctrcvsBgrq", "dfOcr", "dsRsOcr", "bnkMngtPcbg"]}
 
 # 엔드포인트 스펙. key = 자연키 컬럼(응답 필드명), axis = 수집 축
 SPEC = {
@@ -59,6 +81,28 @@ SPEC = {
                       key=["corp_code","bsns_year","reprt_code","rcept_no","bsns_year_"]),
  "elestock":     dict(ep="elestock.json",                  tbl="dart_elestock",   axis="corp"),
  "majorstock":   dict(ep="majorstock.json",                tbl="dart_majorstock", axis="corp"),
+
+ # ── DS005 주요사항보고서 (FACTORS E05·E06·E07) ────────────────────
+ # 이름을 엔드포인트 그대로 쓴다. docs/FACTORS.md·DART_CENSUS.md 가 이 철자로 팩터를
+ # 지목하고 있어, 별도 축약어를 만들면 --only 인자와 문서가 어긋난다.
+ # 엔드포인트별 개별 테이블: 필드가 9~46개로 편차가 크고 의미가 전혀 달라 통합은 손해다.
+ # 자연 PK 는 전부 rcept_no 단독(실측 15/15·8/8·3/3·1/1 중복 0). key 는 문서용이다.
+ # 정정공시가 같은 사건을 rcept_no 만 다른 별도 행으로 주므로 원장은 전 행을 남기고,
+ # 사용 시 (corp_code, bddd[, bd_tm]) 로 묶는다 — 해석은 위층 몫(설계 §5-3).
+ "tsstkAqDecsn": dict(ep="tsstkAqDecsn.json",              tbl="dart_tsstk_aq_decsn", axis="corp_range",
+                      key=["rcept_no"]),   # E05 자기주식 취득 결정
+ "piicDecsn":    dict(ep="piicDecsn.json",                 tbl="dart_piic_decsn",     axis="corp_range",
+                      key=["rcept_no"]),   # E06 유상증자 결정
+ "cvbdIsDecsn":  dict(ep="cvbdIsDecsn.json",               tbl="dart_cvbd_is_decsn",  axis="corp_range",
+                      key=["rcept_no"]),   # E06 전환사채 발행 결정
+ "ctrcvsBgrq":   dict(ep="ctrcvsBgrq.json",                tbl="dart_ctrcvs_bgrq",    axis="corp_range",
+                      key=["rcept_no"]),   # E07 회생절차 개시신청
+ "dfOcr":        dict(ep="dfOcr.json",                     tbl="dart_df_ocr",         axis="corp_range",
+                      key=["rcept_no"]),   # E07 부도발생
+ "dsRsOcr":      dict(ep="dsRsOcr.json",                   tbl="dart_ds_rs_ocr",      axis="corp_range",
+                      key=["rcept_no"]),   # E07 해산사유 발생 (영업정지는 bsnSp — 별건)
+ "bnkMngtPcbg":  dict(ep="bnkMngtPcbg.json",               tbl="dart_bnk_mngt_pcbg",  axis="corp_range",
+                      key=["rcept_no"]),   # E07 채권은행 관리절차 개시
 }
 
 # ── 예산 (롤링 24h) ────────────────────────────────────────────
@@ -112,6 +156,11 @@ def call(con, name, corp, key_id, key, year=None, reprt="11011", fs=None):
     if s["axis"] == "corp_year":
         p["bsns_year"] = year
         p["reprt_code"] = reprt
+    elif s["axis"] == "corp_range":
+        # DS005 는 세 파라미터가 전부 필수다. 하나라도 빠지면 status=100(필드 부적절)이라
+        # 재시도해도 같다. 고정 상수라 종목당 정확히 1콜이다.
+        p["bgn_de"] = RANGE_BGN
+        p["end_de"] = RANGE_END
     if fs: p["fs_div"] = fs
 
     def log(status, n):
@@ -173,18 +222,25 @@ def store(con, name, rows, extra):
       · PK 를 전체 컬럼으로 두면 그중 하나라도 NULL 일 때 SQLite 가 NULL≠NULL 로 봐서
         재수집마다 행이 증식한다(실측 audit +9/회, hyslr +20/회). 행 해시는 NULL 을
         값으로 직렬화하므로 그 경로가 막힌다.
-      · 해시에 응답 배열 인덱스(resp_ord)를 넣는다. DART 는 한 응답 안에 바이트 단위
-        동일한 행을 여러 개 준다 — 배당 미지급사의 보통주/우선주 행이 그렇다.
-        내용만 해시하면 INSERT OR IGNORE 가 그걸 1행으로 접는다(실측 유실
-        audit 13.3% · tesstk 10.9% · dividend 5.3% · capital 2.0%).
-        재무·지분공시는 행마다 구분 키가 있어 유실이 0 이었지만, 엔드포인트마다
-        따로 판단하면 새 엔드포인트에서 같은 실수가 반복된다. 전 엔드포인트에 건다.
+      · 해시에 dup_seq 를 넣는다. DART 는 한 응답 안에 바이트 단위 동일한 행을
+        여러 개 준다 — 배당 미지급사의 보통주/우선주 행이 그렇다. 내용만 해시하면
+        INSERT OR IGNORE 가 그걸 1행으로 접는다(실측 유실 audit 13.3% ·
+        tesstk 10.9% · dividend 5.3% · capital 2.0%). 재무·지분공시는 행마다 구분
+        키가 있어 유실이 0 이었지만, 엔드포인트마다 따로 판단하면 새 엔드포인트에서
+        같은 실수가 반복된다. 전 엔드포인트에 건다.
+
+        dup_seq 는 배열 인덱스가 아니라 **같은 내용이 그 응답에서 몇 번째로
+        나왔는가**다. 배열 인덱스를 쓰면 응답 순서가 흔들릴 때 같은 행이 다른
+        해시를 받아 재수집마다 증식한다 — DS005 tsstkAqDecsn 응답은 rcept_no
+        오름차순도 내림차순도 아니어서(실측) 새 이벤트가 배열 중간에 끼면
+        뒤 행 전부의 인덱스가 밀린다. 내용별 출현 순번은 순서·삽입 양쪽에
+        불변이면서 완전중복 행은 여전히 갈라낸다.
     """
     if not rows: return 0
     s = SPEC[name]; tbl = s["tbl"]
     keys = sorted(set().union(*(set(r) for r in rows)) - {"status", "message"})
     req  = {f"req_{k}": v for k, v in extra.items()}
-    cols = keys + sorted(req) + ["resp_ord"]
+    cols = keys + sorted(req) + ["dup_seq"]
 
     have = {r[1] for r in con.execute(f"PRAGMA table_info({tbl})")}
     if not have:
@@ -198,9 +254,13 @@ def store(con, name, rows, extra):
             con.execute(f'ALTER TABLE {tbl} ADD COLUMN "{c}" TEXT'); have.add(c)
 
     now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
-    vals = []
-    for i, r in enumerate(rows):
-        v = [r.get(k) for k in keys] + [req[k] for k in sorted(req)] + [str(i)]
+    vals, seen = [], {}
+    for r in rows:
+        body = [r.get(k) for k in keys] + [req[k] for k in sorted(req)]
+        base = row_hash(cols[:-1], body)          # 내용만으로 만든 해시
+        n = seen.get(base, 0)
+        seen[base] = n + 1
+        v = body + [str(n)]
         vals.append([row_hash(cols, v)] + v + [now])
     ph = ",".join("?" * (len(cols) + 2))
     quoted = ",".join(chr(34) + c + chr(34) for c in cols)
@@ -212,7 +272,7 @@ def store(con, name, rows, extra):
     con.commit()
     gained = con.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0] - before
     if gained < len(rows):
-        # resp_ord 를 키에 넣은 뒤로 응답 내 중복은 유실을 만들지 않는다.
+        # dup_seq 를 키에 넣은 뒤로 응답 내 중복은 유실을 만들지 않는다.
         # 여기가 찍히면 전부 재실행(이미 적재된 행)이다.
         print(f"    [{tbl}] 응답 {len(rows)}행 중 신규 {gained}행 (기적재 {len(rows)-gained})")
     return len(rows)
@@ -248,7 +308,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--corps", required=True, help="corp_code 쉼표구분, 또는 목록파일 경로")
     ap.add_argument("--years", default="", help="미지정 시 2015~올해")
-    ap.add_argument("--stage", type=int, default=0, help="1=재무제표 2=corp축3종 3=나머지6종 (0=전부)")
+    ap.add_argument("--stage", type=int, default=0,
+                    help="1=기업개황 2=재무제표 3=정기보고서 나머지 8종 "
+                         "4=DS005 주요사항보고서 7종 (0=전부)")
     ap.add_argument("--only",  default="", help="엔드포인트 이름 쉼표구분(stage 보다 우선)")
     ap.add_argument("--reprt", default="11011",
                     help="보고서 종류 쉼표구분. 11011=사업 11012=반기 11013=1분기 11014=3분기")
@@ -357,15 +419,21 @@ def main():
     # 30분 캐치업 틱이 같은 유닛을 반복 재시도하지 않게 ts 조건이 필요하다.
     cutoff_year = str(datetime.utcnow().year - RECHECK_YEARS)
     cutoff_ts = (datetime.utcnow() - timedelta(days=RECHECK_DAYS)).strftime("%Y-%m-%dT%H:%M:%S")
+    # corp·corp_range 축은 bsns_year 가 빈 문자열이다. 그냥 bsns_year < ? 로 쓰면
+    # '' < '2024' 가 참이라 그 축의 no_data 가 전부 영구 종결된다 — DS005 의 상폐
+    # 이벤트(E07)가 백필 시점에 동결되고, 나중에 부도·회생이 나도 다시 부르지 않는다.
+    # 연도 조건은 corp_year 축에만 건다.
     done = {(r[0], r[1], r[2], r[3]) for r in con.execute(
         "SELECT name, corp_code, bsns_year, reprt_code FROM ingest_log "
         "WHERE status = 'ok' "
-        "   OR (status = 'no_data' AND (bsns_year < ? OR ts > ?))",
+        "   OR (status = 'no_data' AND "
+        "       ((bsns_year <> '' AND bsns_year < ?) OR ts > ?))",
         (cutoff_year, cutoff_ts))}
     pending = con.execute(
         "SELECT COUNT(*) FROM ingest_log "
-        "WHERE status = 'no_data' AND bsns_year >= ? AND ts <= ?",
-        (cutoff_year, cutoff_ts)).fetchone()[0]
+        "WHERE status = 'no_data' AND ts <= ? "
+        "  AND (bsns_year = '' OR bsns_year >= ?)",
+        (cutoff_ts, cutoff_year)).fetchone()[0]
     if pending:
         print(f"  013 재확인 대상 {pending:,}유닛 "
               f"(FY{cutoff_year} 이후 · 마지막 확인 {RECHECK_DAYS}일 경과)")

@@ -39,9 +39,19 @@ DB      = f"{BASE}/data/raw/dart.db"
 #
 #   kael — 카엘 프로덕션 키다. 여기서는 부딪히면 안 된다. 그쪽 시스템이 매일 ~300콜을
 #         쓰는데 우리 카운터는 그걸 모르므로, 사전 계상으로 19,500 에서 멈춘다.
-#   우리 키(k2, k3, ...) 는 전부 같은 정책이다. CAPS 에 없으면 CAP_OURS 를 쓴다.
-CAP_OURS = 25_000
-CAPS    = {"kael": 19_500}
+#   순서: k2 → k3 → ... → kael. 카엘 프로덕션 키는 언제나 마지막이다.
+#
+#   QUOTA_LIMIT — DART 개인계정 실한도. 공식 안내가 "일반적으로 20,000건 이상"이고
+#     웹 확인으로 개인계정 20,000 이 확정됐다. 020 이 이 지점 이후에 오면 "우리 소진"이다.
+#   CAP_OURS    — 사전 계상의 안전 상한. 실한도보다 높게 둬야 우리가 먼저 비켜서지 않고
+#     실제로 020 에 부딪힌다. 정상 운영에서는 도달하지 않는 값이고, 닿으면 카운터가
+#     실한도와 어긋났다는 신호다.
+#   kael        — 프로덕션 키라 부딪히면 안 된다. 19,500 에서 사전 정지한다. 그래서
+#     kael 의 020 은 QUOTA_LIMIT 에 도달할 수 없고, 오면 그건 카엘 쪽이 먼저 썼다는 뜻이라
+#     항상 프로브 판별을 탄다.
+QUOTA_LIMIT = 20_000
+CAP_OURS    = 25_000
+CAPS        = {"kael": 19_500}
 PACE    = 0.25            # 초당 4콜. DART 는 초당 제한이 미공지라 보수적으로
 PACE_MIN = 0.25           # 020 판별이 페이스를 늦출 때의 시작점(런타임에 변한다)
 # ── 013(무자료)의 영구/잠정 판별 ──────────────────────────────
@@ -179,12 +189,14 @@ def on_020(con, name, kid, key, corp, year, reprt, fs):
     """
     global PACE
     used, cap = budget_used(con, kid), CAPS.get(kid, CAP_OURS)
-    if used >= 0.8 * cap:
-        print(f"  · {kid} 020 — 우리 소진 확정 ({used:,}/{cap:,}) → 이 키 접는다")
+    if used >= QUOTA_LIMIT:
+        print(f"  · {kid} 020 — 우리 소진 확정 ({used:,} ≥ 실한도 {QUOTA_LIMIT:,}) "
+              f"→ 이 키 접는다")
         return "ours"
 
     # 저사용 구간의 020 은 설명이 안 된다. 1분 쉬고 딱 1콜로 확인한다.
-    print(f"  · {kid} 020 인데 사용량이 {used:,}/{cap:,} 뿐이다 — 60초 후 프로브 1콜")
+    print(f"  · {kid} 020 인데 사용량이 {used:,} 뿐이다(실한도 {QUOTA_LIMIT:,}) "
+          f"— 60초 후 프로브 1콜")
     time.sleep(60)
     _, v, st = call(con, name, corp, kid, key, year, reprt, fs=fs)
     if v == "ok":

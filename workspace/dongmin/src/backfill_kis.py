@@ -30,7 +30,7 @@ PACE       = 0.12         # 실측 초당 5콜. 네트워크 왕복이 병목이
 RETRY_MAX  = 4
 RETRY_BASE = 3.0          # 3 → 6 → 12 → 24초
 ABORT_STREAK = 20         # 연속 실패 이 횟수면 중단. 계정 제재를 계속 두들기지 않는다
-EMPTY_STREAK = 30         # 빈 응답이 이만큼 연속이면 중단. 한도가 빈 응답으로 올 수 있다
+EMPTY_STREAK = 30         # 전 콜이 빈 응답인 "종목"이 이만큼 연속이면 중단. 한도가 빈 응답으로 올 수 있다
 
 # 유량 초과(EGW00201·429) 정책.
 #   KIS 는 키가 하나라 DART 처럼 다음 키로 넘어갈 수 없다. 그래서 두 경우를 갈라야 한다 —
@@ -254,19 +254,28 @@ def main():
     # empty 를 종결로 보면 안 된다. KIS 에는 DART 의 013 같은 "정상 무자료" 코드가 없어서
     # 한도 초과·제재가 rt_cd=0 + 빈 배열로 나타나면 남은 유닛이 전부 "수집 완료, 데이터 없음"
     # 으로 굳는다. 키움이 폐지종목에 그렇게 답해 909종목이 통째로 비었던 전례가 있다.
-    # 빈 응답은 재방문 대상으로 두고, 진짜 무자료는 재실행 때 다시 빈 응답이 올 뿐이다.
+    # 빈 응답 1회는 재방문 대상으로 두고, 서로 다른 실행에서 2회 비면 no_data 로 확정한다.
     done = {(r[0], r[1], r[2], r[3]) for r in con.execute(
         "SELECT name, ticker, d1, d2 FROM kis_ingest_log WHERE status = 'ok'")}
+    # 빈 응답이 서로 다른 실행에서 2회 나온 유닛은 no_data 로 확정하고 건너뛴다.
+    # 한도가 빈 응답으로 왔다면 다음 실행에서 ok 로 바뀌므로 확정에 이르지 않는다.
+    no_data = {(r[0], r[1], r[2], r[3]) for r in con.execute(
+        "SELECT name, ticker, d1, d2 FROM kis_call_log WHERE verdict = 'empty' "
+        "GROUP BY 1, 2, 3, 4 HAVING COUNT(*) >= 2")} - done
+    # 1회 empty 유닛 — 재방문에서 또 empty 여도 "예상된 결과"라 한도 증거가 아니다
+    seen_empty = {(r[0], r[1], r[2], r[3]) for r in con.execute(
+        "SELECT DISTINCT name, ticker, d1, d2 FROM kis_call_log WHERE verdict = 'empty'")}
     n_empty = con.execute(
         "SELECT COUNT(*) FROM kis_ingest_log WHERE status = 'empty'").fetchone()[0]
     if n_empty:
-        print(f"  빈 응답 유닛 {n_empty:,} — 종결로 보지 않는다(재방문 대상)")
+        print(f"  빈 응답 유닛 {n_empty:,} — no_data 확정 {len(no_data):,} · "
+              f"재방문 {n_empty - len(no_data):,}")
 
     plan = []
     for name in names:
         for tk, f, l in rows:
             for d1, d2 in windows(name, f, l):
-                if (name, tk, d1, d2) not in done:
+                if (name, tk, d1, d2) not in done and (name, tk, d1, d2) not in no_data:
                     plan.append((name, tk, d1, d2))
     print(f"  대상 {len(rows):,}종목 × {names} → 남은 유닛 {len(plan):,}"
           f"  (완료 {len(done):,})")
@@ -275,22 +284,32 @@ def main():
 
     stat = {"calls": 0, "ok": 0, "empty": 0, "err": 0, "rows": 0}
     streak = estreak = qstreak = 0
+    # 빈 응답 감시는 콜이 아니라 종목 단위로 센다. 무데이터 종목은 티커가 인접해
+    # 구조적으로 뭉치므로(실측: 동북아10·11·12호선박투자회사 연속 27콜) 콜 단위는 오발화한다.
+    # 판정 대상은 "처음 부르는 유닛이 있는 종목"뿐이다 — 재개 시 plan 앞머리는 지난번
+    # empty 유닛의 재방문 행렬이라, 이를 세면 재개 직후 반드시 오발화한다(실측 89콜 만에).
+    # 한도가 빈 응답으로 온다면 처음 부르는 유닛도 전부 비므로 감지력은 그대로다.
+    e_cur, e_empty, e_fresh = None, False, False
     t0 = time.time()
     for i, (name, tk, d1, d2) in enumerate(plan, 1):
         if a.max_calls and stat["calls"] >= a.max_calls:
             print(f"  ⏸ 콜 상한 {a.max_calls} 도달 — 중단"); break
+        if (name, tk) != e_cur:                     # 종목 경계 — 직전 종목을 판정한다
+            if e_fresh:                             # 재방문뿐인 종목은 중립 (세지도 리셋도 않음)
+                estreak = estreak + 1 if e_empty else 0
+            if estreak >= EMPTY_STREAK:
+                print(f"  ✖ 전 구간 빈 응답 종목 {estreak}개 연속 — 한도·제재가 빈 응답으로 "
+                      f"오는 중일 수 있다. 중단한다. kis_call_log 를 확인할 것")
+                break
+            e_cur, e_empty, e_fresh = (name, tk), True, False
         v, code, out = call(name, tk, d1, d2, stat)
         now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
         con.execute("INSERT INTO kis_call_log VALUES (?,?,?,?,?,?,?,?)",
                     (name, tk, d1, d2, v, code, len(out), now))
-        if v == "empty":
-            estreak += 1
-            if estreak >= EMPTY_STREAK:
-                print(f"  ✖ 빈 응답 {estreak}회 연속 — 한도·제재가 빈 응답으로 오는 중일 수 있다. "
-                      f"중단한다. kis_call_log 를 확인할 것")
-                break
-        else:
-            estreak = 0
+        if (name, tk, d1, d2) not in seen_empty:
+            e_fresh = True
+        if v != "empty":
+            e_empty = False
         if v in ("ok", "empty"):
             streak = qstreak = 0
             stat["ok" if v == "ok" else "empty"] += 1

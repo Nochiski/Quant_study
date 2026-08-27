@@ -183,6 +183,7 @@ SPEC = {
 #   midnight — KST 자정 리셋 가정. 리셋이 사실이면 롤링보다 많이 쓸 수 있다
 # 실측으로 가려야 하는 값이라 런타임에 바꿀 수 있게 둔다.
 QUOTA_WINDOW = "rolling"
+_quota_day = None        # 마지막으로 관측한 예산 창(KST 날짜)
 
 
 def budget_used(con, key_id):
@@ -237,13 +238,29 @@ def on_020(con, name, kid, key, corp, year, reprt, fs):
 _last_kid = None
 _empty = {}          # 키별 "정상응답+0행" 연속 횟수
 
+def quota_day(con):
+    """현재 예산 창의 식별자. midnight 창에서는 KST 날짜가 곧 창이다."""
+    if QUOTA_WINDOW != "midnight":
+        return None
+    return con.execute("SELECT date('now','+9 hours')").fetchone()[0]
+
+
 def pick_key(con, keys, blocked):
     """남은 예산이 있는 첫 키. 순서가 곧 우선순위다. 없으면 (None, None).
 
     전환을 반드시 찍는다. 예전에는 조용히 넘어가서 카엘 프로덕션 키로 6,959콜이
     나간 것을 dart_call_log 를 직접 조회해야만 알 수 있었다(실측).
     """
-    global _last_kid
+    global _last_kid, _quota_day
+    # KST 자정을 넘기면 DART 예산이 리셋된다. budget_used 는 창 기준이라 자동으로
+    # 0 이 되지만 blocked 는 프로세스 메모리라 남는다 — 비우지 않으면 살아난 키를
+    # 스스로 거부한다(2026-08-28 실측: 자정 후 k2·k3 의 80,000콜이 놀았다).
+    today = quota_day(con)
+    if today is not None and today != _quota_day:
+        if _quota_day is not None and blocked:
+            print(f"  · 예산 창 전환 {_quota_day} → {today} — 접힌 키 해제 {sorted(blocked)}")
+        blocked.clear()
+        _quota_day = today
     for kid, k in keys:
         if kid in blocked: continue
         used = budget_used(con, kid)

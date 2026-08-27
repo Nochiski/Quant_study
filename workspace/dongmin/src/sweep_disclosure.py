@@ -246,7 +246,9 @@ def sweep_window(con, bgn, end, keys, blocked, today, budget):
             mark(con, bgn, end, "partial", n_prior + n_api, tc, tp, st)
             return "bad", calls
 
-        rows = j.get("list") or []
+        rows, anom = bf.normalize_rows(j, False)
+        if anom:
+            print(f"  ! {bgn}-{end} page {page} 응답 형태 이상({anom}) — 정규화 경로로 처리했다")
         tc = int(j.get("total_count") or 0)
         tp = int(j.get("total_page") or 0)
         bf.store(con, NAME, rows, {"bgn_de": bgn, "end_de": end, "page_no": f"{page:04d}"})
@@ -273,7 +275,17 @@ def sweep_window(con, bgn, end, keys, blocked, today, budget):
         mark(con, bgn, end, "mismatch", n_recv, tc, tp, st)
         return "bad", calls
 
-    status = "no_data" if tc == 0 and st == "013" else ("open" if open_win else "ok")
+    if tc == 0 and st == "013":
+        # 열린 창의 013 은 "아직 공시 전"(분기 첫날·휴일)일 수 있다 — 종결하면 분기 통손실
+        status = "open" if open_win else "no_data"
+    elif tc == 0:
+        # 000 + 0행: 명세상 0행은 013 담당이다. 전 시장 분기가 0건일 수는 없으므로
+        # 한도·장애가 빈 응답으로 위장했을 수 있다 — 완료로 적지 않는다 (다음 런 재시도)
+        print(f"  ✖ {bgn}-{end} status=000 인데 total_count=0 — 비정상. 완료로 적지 않는다")
+        mark(con, bgn, end, "mismatch", n_recv, tc, tp, st)
+        return "bad", calls
+    else:
+        status = "open" if open_win else "ok"
     mark(con, bgn, end, status, n_recv, tc, tp, st)
     print(f"  ✓ {bgn}-{end} {status:<8} total_count={tc:,} 수신={n_recv:,} 적재={n_db:,} "
           f"페이지={tp} 콜={calls}")

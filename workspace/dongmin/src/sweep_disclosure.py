@@ -298,7 +298,10 @@ def main():
     ap.add_argument("--from", dest="frm", default="2010Q1", help="시작 창 (YYYYQn 또는 YYYYMMDD)")
     ap.add_argument("--to",   dest="to",  default="",       help="끝 창 (기본: 오늘이 든 분기)")
     ap.add_argument("--max-calls", type=int, default=0, help="이 런의 콜 상한 (0=무제한)")
+    ap.add_argument("--quota-window", default="rolling", choices=["rolling", "midnight"],
+                    help="키 소진 계산 창. backfill_dart 와 동일 — 자정 리셋 실측 확정이므로 운영은 midnight 권장")
     a = ap.parse_args()
+    bf.QUOTA_WINDOW = a.quota_window   # 미지정 시 bf 기본(rolling)과 동일 — 두 도구의 판정 기준을 일치시킨다
 
     today = datetime.utcnow().date()
     bgn = parse_point(a.frm, upper=False)

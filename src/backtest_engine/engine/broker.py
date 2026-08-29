@@ -1,12 +1,6 @@
 """BrokerSim: 일봉 OHLC로 주문 종류별 트리거·체결을 결정하는 체결 모델.
 
-체결 규칙 (경로 정보가 없는 일봉에서 결정론적으로 정한다):
-- MARKET: 시가.
-- LIMIT L: 시가가 이미 L 이내면 시가, 장중 L에 닿으면 L, 아니면 미체결.
-- STOP S: 시가가 이미 S를 지났으면 시가, 장중 S에 닿으면 S, 아니면 미발동.
-- STOP_LIMIT: STOP 규칙으로 발동한 가격 p가 L 이내면 p에 체결, 아니면 발동만
-  기록하고 이후 세션부터 LIMIT으로 평가한다.
-낙관적 가정(장중 최유리가 체결)은 쓰지 않는다.
+체결 가격 규칙은 `engine/pricing.py`(Python) 또는 Rust 코어가 제공한다 (`pricing` 인자).
 
 수량 규칙:
 - 유동성 캡 = floor(bar.volume × participation). participation은 주문을 만든
@@ -26,8 +20,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import ROUND_FLOOR, Decimal
 from enum import Enum
+from typing import Protocol
 
 from backtest_engine.engine.orders import OpenOrder
+from backtest_engine.engine.pricing import PriceDecision, execution_price
 from backtest_engine.engine.slippage import NoSlippage
 from backtest_engine.ports.execution import SlippageModel
 from backtest_engine.types.actions import (
@@ -38,7 +34,7 @@ from backtest_engine.types.actions import (
 )
 from backtest_engine.types.events import FillEvent, OrderEvent
 from backtest_engine.types.market import Bar
-from backtest_engine.types.orders import OrderType, Side, TimeInForce
+from backtest_engine.types.orders import Side, TimeInForce
 
 
 class ExecutionStatus(Enum):
@@ -74,61 +70,6 @@ class Quote:
     detail: str | None
 
 
-@dataclass(frozen=True)
-class PriceDecision:
-    price: float | None  # None이면 이 세션에 체결 없음
-    triggered: bool  # STOP/STOP_LIMIT이 이 세션에 발동했는가
-
-
-def execution_price(order: OrderEvent, bar: Bar, already_triggered: bool) -> PriceDecision:
-    """주문 종류·방향과 bar OHLC로 체결 가격을 정한다. 순수 함수."""
-    buy = order.side is Side.BUY
-    match order.order_type:
-        case OrderType.MARKET:
-            return PriceDecision(bar.open, False)
-        case OrderType.LIMIT:
-            return PriceDecision(_limit_price(bar, float(_require(order.limit_price)), buy), False)
-        case OrderType.STOP:
-            if already_triggered:  # 발동 후 잔량은 시장가로 취급한다 (부분체결 이월)
-                return PriceDecision(bar.open, False)
-            return PriceDecision(_stop_price(bar, float(_require(order.stop_price)), buy), False)
-        case OrderType.STOP_LIMIT:
-            limit = float(_require(order.limit_price))
-            if already_triggered:
-                return PriceDecision(_limit_price(bar, limit, buy), False)
-            trigger = _stop_price(bar, float(_require(order.stop_price)), buy)
-            if trigger is None:
-                return PriceDecision(None, False)
-            within_limit = trigger <= limit if buy else trigger >= limit
-            return PriceDecision(trigger if within_limit else None, True)
-
-
-def _limit_price(bar: Bar, limit: float, buy: bool) -> float | None:
-    if buy:
-        if bar.open <= limit:
-            return bar.open
-        return limit if bar.low <= limit else None
-    if bar.open >= limit:
-        return bar.open
-    return limit if bar.high >= limit else None
-
-
-def _stop_price(bar: Bar, stop: float, buy: bool) -> float | None:
-    if buy:
-        if bar.open >= stop:
-            return bar.open
-        return stop if bar.high >= stop else None
-    if bar.open <= stop:
-        return bar.open
-    return stop if bar.low <= stop else None
-
-
-def _require(price: Decimal | None) -> Decimal:
-    if price is None:  # OrderEvent.__post_init__가 막으므로 방어용
-        raise ValueError("order type requires a price that is missing")
-    return price
-
-
 def participation_of(order: OrderEvent) -> float | None:
     """주문을 만든 Action이 지정한 거래량 참여율. 없으면 None."""
     match order.source_action:
@@ -143,12 +84,28 @@ def participation_of(order: OrderEvent) -> float | None:
             return None
 
 
+class ExecutionPricing(Protocol):
+    """체결 가격 규칙 제공자 (Python 기본 구현 또는 Rust 코어 어댑터)."""
+
+    def execution_price(
+        self, order: OrderEvent, bar: Bar, already_triggered: bool
+    ) -> PriceDecision: ...
+
+
+class _DefaultPricing:
+    def execution_price(
+        self, order: OrderEvent, bar: Bar, already_triggered: bool
+    ) -> PriceDecision:
+        return execution_price(order, bar, already_triggered)
+
+
 class BrokerSim:
     def __init__(
         self,
         fee_bps: float,
         slippage: SlippageModel | None = None,
         max_participation: float | None = None,
+        pricing: ExecutionPricing | None = None,
     ) -> None:
         if max_participation is not None and not 0.0 < max_participation <= 1.0:
             raise ValueError(
@@ -157,6 +114,7 @@ class BrokerSim:
         self._fee_rate = fee_bps / 10_000.0
         self._slippage: SlippageModel = slippage if slippage is not None else NoSlippage()
         self._max_participation = max_participation
+        self._pricing: ExecutionPricing = pricing if pricing is not None else _DefaultPricing()
 
     def fee_for(self, notional: float) -> float:
         return notional * self._fee_rate
@@ -193,7 +151,7 @@ class BrokerSim:
         보유를 넘어 숏을 여는 부분은 매수와 같이 buying_power 캡을 받는다 (스펙 5 결정 1).
         """
         order = open_order.order
-        decision = execution_price(order, bar, open_order.triggered)
+        decision = self._pricing.execution_price(order, bar, open_order.triggered)
         if decision.price is None:
             status = (
                 ExecutionStatus.TRIGGERED_UNFILLED

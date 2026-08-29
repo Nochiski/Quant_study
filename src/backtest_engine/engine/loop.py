@@ -28,10 +28,10 @@ from backtest_engine.data.feed import DataFeed
 from backtest_engine.engine import calendar
 from backtest_engine.engine.broker import BrokerSim, ExecutionStatus, Quote
 from backtest_engine.engine.context import EngineStrategyContext, HistoryStore
+from backtest_engine.engine.core import PortfolioLedger, make_portfolio, make_pricing
 from backtest_engine.engine.costs import session_costs
 from backtest_engine.engine.metrics import compute_metrics
 from backtest_engine.engine.orders import BasketGroup, OpenOrder, OrderManager
-from backtest_engine.engine.portfolio import Portfolio
 from backtest_engine.engine.queue import (
     EventPriority,
     EventQueue,
@@ -84,6 +84,7 @@ class _Run:
         requirements: StrategyRequirements,
         slippage: SlippageModel | None,
         max_participation: float | None,
+        core: str,
     ) -> None:
         self.strategy = strategy
         self.requirements = requirements
@@ -93,13 +94,16 @@ class _Run:
         self.declared: frozenset[HistoryRequest] = frozenset(requirements.histories)
         self.history_store = HistoryStore()
         self.config = config
-        self.portfolio = Portfolio(
+        self.portfolio: PortfolioLedger = make_portfolio(
+            core,
             config.initial_cash,
             allow_short=EngineFeature.SHORT_SELLING in requirements.features,
             allow_margin=EngineFeature.MARGIN in requirements.features,
         )
         self.order_manager = OrderManager()
-        self.broker = BrokerSim(config.fee_bps, slippage, max_participation)
+        self.broker = BrokerSim(
+            config.fee_bps, slippage, max_participation, pricing=make_pricing(core)
+        )
         self.router = DecisionRouter(
             requirements.actions, self.order_manager, requirements.features
         )
@@ -174,6 +178,7 @@ class BacktestEngine:
         *,
         slippage: SlippageModel | None = None,
         max_participation: float | None = None,
+        core: str = "python",
     ) -> None:
         """
         Args:
@@ -182,6 +187,8 @@ class BacktestEngine:
             slippage: 체결가 슬리피지 모델. 기본 NoSlippage.
             max_participation: 세션 거래량 대비 체결 상한 (0, 1]. None이면 무제한.
                 Action의 ExecutionPolicy.max_participation이 있으면 그 값이 우선한다.
+            core: 체결 가격 규칙·포트폴리오 회계 구현. "python"(기본) 또는 "rust"
+                (backtest_core 확장 필요, 없으면 CoreUnavailable).
         """
         self._config = config
         self._capabilities = (
@@ -189,6 +196,7 @@ class BacktestEngine:
         )
         self._slippage = slippage
         self._max_participation = max_participation
+        self._core = core
         self._event_store: EventStore | None = None
 
     @property
@@ -229,6 +237,7 @@ class BacktestEngine:
             validated.requirements,
             self._slippage,
             self._max_participation,
+            self._core,
         )
         self._event_store = run.store
         run.universe = universe

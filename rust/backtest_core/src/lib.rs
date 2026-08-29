@@ -1,0 +1,394 @@
+//! backtest_engine의 결정론적 코어 (로드맵 6a).
+//!
+//! Python 구현(`src/backtest_engine/engine/{broker,portfolio}.py`, `sizing.py`)이 진실 원천이다.
+//! 여기 함수는 그 구현과 **같은 부동소수 연산 순서**로 같은 결과를 내야 하며, 동일성은
+//! `tests/test_core_parity.py`가 두 코어를 나란히 돌려 고정한다.
+//!
+//! 경계는 원시 타입만 쓴다: 종목은 `"venue:symbol"` 키 문자열, 수량은 정수 주식 수(i64),
+//! 가격·현금은 f64. Decimal 비율이 필요한 자본변동 산술은 Python 어댑터가 하고 여기는
+//! 결과만 적용한다.
+
+use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
+use std::collections::BTreeMap;
+
+// ---------------------------------------------------------------------------
+// 체결 가격 규칙 (broker.execution_price와 동일)
+// ---------------------------------------------------------------------------
+
+/// 일봉 OHLC에서 주문 종류·방향별 체결 가격을 정한다.
+///
+/// 반환: `(가격 또는 None, 이번 세션에 STOP이 발동했는가)`.
+/// 규칙: 시가에서 이미 조건 충족이면 시가, 장중 충족이면 조건 가격, 아니면 None.
+/// STOP_LIMIT은 발동 가격이 지정가 안이면 그 가격, 아니면 (None, true)로 발동만 알린다.
+#[pyfunction]
+#[pyo3(signature = (order_type, side, open, high, low, limit_price=None, stop_price=None, already_triggered=false))]
+#[allow(clippy::too_many_arguments)]
+fn execution_price(
+    order_type: &str,
+    side: &str,
+    open: f64,
+    high: f64,
+    low: f64,
+    limit_price: Option<f64>,
+    stop_price: Option<f64>,
+    already_triggered: bool,
+) -> PyResult<(Option<f64>, bool)> {
+    let buy = match side {
+        "buy" => true,
+        "sell" => false,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "side must be buy|sell — got {other:?}"
+            )))
+        }
+    };
+    let require = |label: &str, value: Option<f64>| -> PyResult<f64> {
+        value.ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "order type {order_type} requires {label} — got None"
+            ))
+        })
+    };
+    match order_type {
+        "market" => Ok((Some(open), false)),
+        "limit" => Ok((
+            limit_fill(open, high, low, require("limit_price", limit_price)?, buy),
+            false,
+        )),
+        "stop" => {
+            if already_triggered {
+                // 발동 후 잔량은 시장가로 취급한다 (부분체결 이월)
+                return Ok((Some(open), false));
+            }
+            Ok((
+                stop_fill(open, high, low, require("stop_price", stop_price)?, buy),
+                false,
+            ))
+        }
+        "stop_limit" => {
+            let limit = require("limit_price", limit_price)?;
+            if already_triggered {
+                return Ok((limit_fill(open, high, low, limit, buy), false));
+            }
+            let trigger = stop_fill(open, high, low, require("stop_price", stop_price)?, buy);
+            match trigger {
+                None => Ok((None, false)),
+                Some(price) => {
+                    let within = if buy { price <= limit } else { price >= limit };
+                    Ok((if within { Some(price) } else { None }, true))
+                }
+            }
+        }
+        other => Err(PyValueError::new_err(format!(
+            "order_type must be market|limit|stop|stop_limit — got {other:?}"
+        ))),
+    }
+}
+
+fn limit_fill(open: f64, high: f64, low: f64, limit: f64, buy: bool) -> Option<f64> {
+    if buy {
+        if open <= limit {
+            return Some(open);
+        }
+        return if low <= limit { Some(limit) } else { None };
+    }
+    if open >= limit {
+        return Some(open);
+    }
+    if high >= limit {
+        Some(limit)
+    } else {
+        None
+    }
+}
+
+fn stop_fill(open: f64, high: f64, low: f64, stop: f64, buy: bool) -> Option<f64> {
+    if buy {
+        if open >= stop {
+            return Some(open);
+        }
+        return if high >= stop { Some(stop) } else { None };
+    }
+    if open <= stop {
+        return Some(open);
+    }
+    if low <= stop {
+        Some(stop)
+    } else {
+        None
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 수량 변환 (sizing.floor_delta_shares와 동일)
+// ---------------------------------------------------------------------------
+
+/// 목표 금액 변화량을 정수 주식 수로 변환한다 (절대값 floor). 방향은 호출 측 부호 판단.
+#[pyfunction]
+fn floor_delta_shares(delta_notional: f64, reference_price: f64) -> PyResult<i64> {
+    if reference_price <= 0.0 {
+        return Err(PyValueError::new_err(format!(
+            "reference price must be > 0 — reference_price={reference_price} delta_notional={delta_notional}"
+        )));
+    }
+    Ok((delta_notional.abs() / reference_price).floor() as i64)
+}
+
+// ---------------------------------------------------------------------------
+// 포트폴리오 회계 (engine/portfolio.Portfolio와 동일)
+// ---------------------------------------------------------------------------
+
+/// 스냅샷 포지션 행: `(key, quantity, average_price, market_price, market_value, unrealized_pnl)`.
+type PositionRow = (String, i64, f64, f64, f64, f64);
+/// 스냅샷: `(cash, positions, equity, gross_exposure)`.
+type SnapshotTuple = (f64, Vec<PositionRow>, f64, f64);
+
+#[derive(Clone, Debug)]
+struct Ledger {
+    quantity: i64,
+    average_price: f64,
+}
+
+/// 현금·보유 원장. Fill / 비용 / 자본변동 적용 시점에만 상태가 변한다.
+#[pyclass]
+struct Portfolio {
+    cash: f64,
+    ledgers: BTreeMap<String, Ledger>,
+    marks: BTreeMap<String, f64>,
+    allow_short: bool,
+    allow_margin: bool,
+}
+
+#[pymethods]
+impl Portfolio {
+    #[new]
+    #[pyo3(signature = (initial_cash, allow_short=false, allow_margin=false))]
+    fn new(initial_cash: f64, allow_short: bool, allow_margin: bool) -> Self {
+        Self {
+            cash: initial_cash,
+            ledgers: BTreeMap::new(),
+            marks: BTreeMap::new(),
+            allow_short,
+            allow_margin,
+        }
+    }
+
+    /// 체결 적용. 실패는 ValueError 메시지 접두어로 종류를 알린다:
+    /// `negative_position:` / `negative_cash:` — Python 어댑터가 도메인 예외로 바꾼다.
+    fn apply(
+        &mut self,
+        key: &str,
+        side: &str,
+        quantity: i64,
+        price: f64,
+        fee: f64,
+    ) -> PyResult<()> {
+        let buy = match side {
+            "buy" => true,
+            "sell" => false,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "side must be buy|sell — got {other:?}"
+                )))
+            }
+        };
+        if quantity <= 0 {
+            return Err(PyValueError::new_err(format!(
+                "fill quantity must be > 0 — key={key} quantity={quantity}"
+            )));
+        }
+        let qty_f = quantity as f64;
+        let notional = qty_f * price;
+        let old_quantity = self.ledgers.get(key).map(|l| l.quantity).unwrap_or(0);
+        let signed = if buy { quantity } else { -quantity };
+        let new_quantity = old_quantity + signed;
+
+        if new_quantity < 0 && !self.allow_short {
+            return Err(PyValueError::new_err(format!(
+                "negative_position: sell fill exceeds held quantity — key={key} sell={quantity} held={old_quantity} (SHORT_SELLING not declared)"
+            )));
+        }
+        let new_cash = if buy {
+            self.cash - notional - fee
+        } else {
+            self.cash + notional - fee
+        };
+        if new_cash < 0.0 && !self.allow_margin {
+            return Err(PyValueError::new_err(format!(
+                "negative_cash: buy fill would make cash negative — key={key} quantity={quantity} price={price} fee={fee} cash={} (MARGIN not declared)",
+                self.cash
+            )));
+        }
+
+        if new_quantity == 0 {
+            self.ledgers.remove(key);
+        } else {
+            let crossed = old_quantity == 0 || (old_quantity > 0) != (new_quantity > 0);
+            match self.ledgers.get_mut(key) {
+                Some(ledger) if !crossed => {
+                    if new_quantity.abs() > old_quantity.abs() {
+                        let old_abs = old_quantity.abs() as f64;
+                        ledger.average_price = (old_abs * ledger.average_price + notional)
+                            / (new_quantity.abs() as f64);
+                    }
+                    ledger.quantity = new_quantity;
+                }
+                _ => {
+                    self.ledgers.insert(
+                        key.to_string(),
+                        Ledger {
+                            quantity: new_quantity,
+                            average_price: price,
+                        },
+                    );
+                }
+            }
+        }
+        self.cash = new_cash;
+        self.marks.entry(key.to_string()).or_insert(price);
+        Ok(())
+    }
+
+    /// 비용(차입·이자) 차감.
+    fn charge(&mut self, amount: f64) -> PyResult<()> {
+        if amount <= 0.0 {
+            return Err(PyValueError::new_err(format!(
+                "cost amount must be > 0 — amount={amount}"
+            )));
+        }
+        self.cash -= amount;
+        Ok(())
+    }
+
+    /// 자본변동 결과 적용. 산술(floor(qty×ratio), 단주 현금)은 Python 어댑터가 Decimal로 하고
+    /// 여기는 새 수량·평균단가·현금 지급·정산가 마크만 반영한다.
+    fn apply_corporate_action(
+        &mut self,
+        key: &str,
+        new_quantity: i64,
+        new_average_price: f64,
+        cash_paid: f64,
+        settlement_price: f64,
+    ) -> PyResult<()> {
+        if settlement_price <= 0.0 {
+            return Err(PyValueError::new_err(format!(
+                "corporate action settlement price must be > 0 — key={key} price={settlement_price}"
+            )));
+        }
+        self.cash += cash_paid;
+        if new_quantity == 0 {
+            self.ledgers.remove(key);
+        } else {
+            self.ledgers.insert(
+                key.to_string(),
+                Ledger {
+                    quantity: new_quantity,
+                    average_price: new_average_price,
+                },
+            );
+        }
+        self.marks.insert(key.to_string(), settlement_price);
+        Ok(())
+    }
+
+    /// 세션 종가로 평가 가격 갱신.
+    fn mark(&mut self, closes: Vec<(String, f64)>) {
+        for (key, close) in closes {
+            self.marks.insert(key, close);
+        }
+    }
+
+    #[getter]
+    fn cash(&self) -> f64 {
+        self.cash
+    }
+
+    fn held_qty(&self, key: &str) -> i64 {
+        self.ledgers.get(key).map(|l| l.quantity).unwrap_or(0)
+    }
+
+    fn average_price(&self, key: &str) -> Option<f64> {
+        self.ledgers.get(key).map(|l| l.average_price)
+    }
+
+    /// 스냅샷: `(cash, [(key, quantity, average_price, market_price, market_value, unrealized_pnl)], equity, gross_exposure)`.
+    /// Python 구현과 같은 순서(보유 등록 순)를 위해 삽입 순서를 별도로 보존하지 않고
+    /// 키 정렬 순서를 쓴다 — 어댑터가 Python 원장 순서와 맞추는 책임을 진다.
+    fn snapshot(&self) -> PyResult<SnapshotTuple> {
+        let mut positions = Vec::with_capacity(self.ledgers.len());
+        let mut equity = self.cash;
+        let mut gross = 0.0;
+        for (key, ledger) in &self.ledgers {
+            let mark = *self.marks.get(key).ok_or_else(|| {
+                PyValueError::new_err(format!("no mark price for held instrument — key={key}"))
+            })?;
+            let qty_f = ledger.quantity as f64;
+            let market_value = qty_f * mark;
+            let unrealized = (mark - ledger.average_price) * qty_f;
+            equity += market_value;
+            gross += market_value.abs();
+            positions.push((
+                key.clone(),
+                ledger.quantity,
+                ledger.average_price,
+                mark,
+                market_value,
+                unrealized,
+            ));
+        }
+        let gross_exposure = if equity != 0.0 { gross / equity } else { 0.0 };
+        Ok((self.cash, positions, equity, gross_exposure))
+    }
+}
+
+#[pymodule]
+fn backtest_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(execution_price, m)?)?;
+    m.add_function(wrap_pyfunction!(floor_delta_shares, m)?)?;
+    m.add_class::<Portfolio>()?;
+    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn limit_buy_rules() {
+        // open 100, high 110, low 90
+        assert_eq!(limit_fill(100.0, 110.0, 90.0, 105.0, true), Some(100.0));
+        assert_eq!(limit_fill(100.0, 110.0, 90.0, 95.0, true), Some(95.0));
+        assert_eq!(limit_fill(100.0, 110.0, 90.0, 85.0, true), None);
+    }
+
+    #[test]
+    fn stop_sell_rules() {
+        assert_eq!(stop_fill(100.0, 110.0, 90.0, 105.0, false), Some(100.0));
+        assert_eq!(stop_fill(100.0, 110.0, 90.0, 92.0, false), Some(92.0));
+        assert_eq!(stop_fill(100.0, 110.0, 90.0, 85.0, false), None);
+    }
+
+    #[test]
+    fn equity_identity_after_fills_and_mark() {
+        let mut p = Portfolio::new(100_000.0, false, false);
+        p.apply("XKRX:005930", "buy", 10, 100.0, 100.0).unwrap();
+        p.mark(vec![("XKRX:005930".to_string(), 120.0)]);
+        let (cash, positions, equity, gross) = p.snapshot().unwrap();
+        assert_eq!(cash, 98_900.0);
+        assert_eq!(positions[0].4, 1_200.0);
+        assert_eq!(equity, cash + 1_200.0);
+        assert!((gross - 1_200.0 / equity).abs() < 1e-12);
+    }
+
+    #[test]
+    fn long_to_short_flip_resets_average() {
+        let mut p = Portfolio::new(10_000.0, true, false);
+        p.apply("k", "buy", 5, 100.0, 0.0).unwrap();
+        p.apply("k", "sell", 8, 120.0, 0.0).unwrap();
+        assert_eq!(p.held_qty("k"), -3);
+        assert_eq!(p.average_price("k"), Some(120.0));
+        assert_eq!(p.cash(), 10_000.0 - 500.0 + 960.0);
+    }
+}

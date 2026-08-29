@@ -50,6 +50,10 @@ class EquityWipedOut(EngineError):
     """세션 종료 평가에서 equity가 0 미만 (신용·공매도 손실이 자본을 초과). 계속 진행 불가."""
 
 
+class CoreUnavailable(EngineError):
+    """요청한 코어(core="rust" 등)가 설치돼 있지 않거나 알 수 없는 이름. 조용한 fallback 금지."""
+
+
 class SchemaVersionMismatch(EngineError):
     """StrategyDecision.schema_version이 엔진이 아는 버전과 다름."""
 

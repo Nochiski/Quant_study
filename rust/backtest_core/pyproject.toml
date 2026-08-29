@@ -1,0 +1,13 @@
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "backtest-core"
+version = "0.1.0"
+description = "backtest_engine 선택적 Rust 코어 (execution_price, floor_delta_shares, Portfolio)"
+requires-python = ">=3.11"
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+module-name = "backtest_core"

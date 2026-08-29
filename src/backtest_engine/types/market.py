@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -82,17 +83,23 @@ class MarketSnapshot:
                 )
             seen.add(bar.instrument)
 
+    @functools.cached_property
+    def _by_instrument(self) -> dict[InstrumentId, Bar]:
+        # 종목 → Bar 인덱스 (유니버스 크기에 선형 조회 방지). dataclass 필드가 아니라 인스턴스
+        # __dict__에만 놓이므로 fields()/asdict/==/hash/repr 어디에도 나타나지 않는다.
+        return {bar.instrument: bar for bar in self.bars}
+
     def bar(self, instrument: InstrumentId) -> Bar:
-        for candidate in self.bars:
-            if candidate.instrument == instrument:
-                return candidate
-        raise InstrumentNotInSnapshot(
-            f"instrument not in snapshot — ts={self.ts} requested={instrument.symbol} "
-            f"available={[b.instrument.symbol for b in self.bars]}"
-        )
+        found = self._by_instrument.get(instrument)
+        if found is None:
+            raise InstrumentNotInSnapshot(
+                f"instrument not in snapshot — ts={self.ts} requested={instrument.symbol} "
+                f"available={[b.instrument.symbol for b in self.bars]}"
+            )
+        return found
 
     def has(self, instrument: InstrumentId) -> bool:
-        return any(candidate.instrument == instrument for candidate in self.bars)
+        return instrument in self._by_instrument
 
 
 @dataclass(frozen=True, eq=False)  # ndarray 필드 → eq=False (원소별 __eq__ 모호성 회피)

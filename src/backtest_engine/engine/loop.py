@@ -14,6 +14,7 @@ EventStore에 자동으로 남는다.
 
 from __future__ import annotations
 
+import importlib
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from datetime import datetime
@@ -26,12 +27,22 @@ from backtest_engine.capability import (
 )
 from backtest_engine.data.feed import DataFeed
 from backtest_engine.engine import calendar
-from backtest_engine.engine.broker import BrokerSim, ExecutionStatus, Quote
+from backtest_engine.engine.broker import BrokerSim, ExecutionStatus, Quote, participation_of
 from backtest_engine.engine.context import EngineStrategyContext, HistoryStore
+from backtest_engine.engine.core import (
+    BuyingPowerTracker,
+    PortfolioLedger,
+    RustBuyingPower,
+    instrument_key,
+    make_buying_power,
+    make_portfolio,
+    make_pricing,
+    make_quote_core,
+    slippage_config,
+)
 from backtest_engine.engine.costs import session_costs
 from backtest_engine.engine.metrics import compute_metrics
 from backtest_engine.engine.orders import BasketGroup, OpenOrder, OrderManager
-from backtest_engine.engine.portfolio import Portfolio
 from backtest_engine.engine.queue import (
     EventPriority,
     EventQueue,
@@ -42,8 +53,10 @@ from backtest_engine.engine.queue import (
     StrategyNotify,
 )
 from backtest_engine.engine.router import DecisionRouter
+from backtest_engine.engine.slippage import NoSlippage
 from backtest_engine.engine.store import DecisionRecord, EventStore, RecordKind
 from backtest_engine.errors import (
+    CoreUnavailable,
     CorporateActionsNotProvided,
     CorporateActionWithoutBar,
     EquityWipedOut,
@@ -60,10 +73,8 @@ from backtest_engine.types.events import (
     OrderUpdateEvent,
     StrategyEvent,
 )
-from backtest_engine.types.instruments import InstrumentId
 from backtest_engine.types.market import MarketSnapshot
 from backtest_engine.types.orders import OrderType, Side, TimeInForce
-from backtest_engine.types.portfolio import PortfolioSnapshot
 from backtest_engine.types.requirements import (
     EngineFeature,
     EventKind,
@@ -84,6 +95,7 @@ class _Run:
         requirements: StrategyRequirements,
         slippage: SlippageModel | None,
         max_participation: float | None,
+        core: str,
     ) -> None:
         self.strategy = strategy
         self.requirements = requirements
@@ -93,13 +105,25 @@ class _Run:
         self.declared: frozenset[HistoryRequest] = frozenset(requirements.histories)
         self.history_store = HistoryStore()
         self.config = config
-        self.portfolio = Portfolio(
+        self.portfolio: PortfolioLedger = make_portfolio(
+            core,
             config.initial_cash,
             allow_short=EngineFeature.SHORT_SELLING in requirements.features,
             allow_margin=EngineFeature.MARGIN in requirements.features,
         )
         self.order_manager = OrderManager()
-        self.broker = BrokerSim(config.fee_bps, slippage, max_participation)
+        self.core = core
+        self.slippage_model = slippage if slippage is not None else NoSlippage()
+        self.max_participation = max_participation
+        # Rust 코어는 내장 슬리피지만 지원한다 — 첫 세션이 아니라 run 시작에 거절한다.
+        self.rust_slippage = slippage_config(self.slippage_model) if core == "rust" else None
+        self.broker = BrokerSim(
+            config.fee_bps,
+            slippage,
+            max_participation,
+            pricing=make_pricing(core),
+            quote_core=make_quote_core(core),
+        )
         self.router = DecisionRouter(
             requirements.actions, self.order_manager, requirements.features
         )
@@ -115,57 +139,6 @@ class _Run:
         return feature in self.requirements.features
 
 
-class _BuyingPower:
-    """한 세션 안에서 체결이 진행될 때의 매수 여력 = leverage × equity − 총노출.
-
-    MARGIN 없음(leverage 1.0, 롱 전용)이면 정확히 현금과 같다. 체결마다 수량 변화로
-    총노출을, 수수료로 equity를 갱신한다. 가격은 세션 시작 평가가 아니라 체결가를 쓴다.
-    """
-
-    def __init__(self, snapshot: PortfolioSnapshot, leverage: float) -> None:
-        self._leverage = leverage
-        self._equity = snapshot.equity
-        self._gross = sum(abs(p.market_value) for p in snapshot.positions)
-        self._quantities = {p.instrument: p.quantity for p in snapshot.positions}
-        self._marks = {p.instrument: p.market_price for p in snapshot.positions}
-
-    @property
-    def available(self) -> float:
-        return self._leverage * self._equity - self._gross
-
-    def quantity_of(self, instrument: InstrumentId) -> Decimal:
-        return self._quantities.get(instrument, Decimal(0))
-
-    def consume(self, fill: FillEvent) -> None:
-        self.consume_quantity(fill.instrument, fill.side, fill.quantity, fill.price, fill.fee)
-
-    def consume_quantity(
-        self, instrument: InstrumentId, side: Side, quantity: Decimal, price: float, fee: float
-    ) -> None:
-        old = self._quantities.get(instrument, Decimal(0))
-        signed = quantity if side is Side.BUY else -quantity
-        new = old + signed
-        # 기존 노출은 세션 시작 평가가, 변화분은 체결가가 기준이다. 체결가로 재평가되면
-        # 기존 보유분의 평가 손익만큼 equity도 움직인다 (equity = cash + Σ qty × mark).
-        old_mark = self._marks.get(instrument, price)
-        self._gross += float(abs(new)) * price - float(abs(old)) * old_mark
-        self._equity += float(old) * (price - old_mark) - fee
-        self._marks[instrument] = price
-        self._quantities[instrument] = new
-
-    def checkpoint(
-        self,
-    ) -> tuple[float, float, dict[InstrumentId, Decimal], dict[InstrumentId, float]]:
-        return self._equity, self._gross, dict(self._quantities), dict(self._marks)
-
-    def restore(
-        self, state: tuple[float, float, dict[InstrumentId, Decimal], dict[InstrumentId, float]]
-    ) -> None:
-        self._equity, self._gross, quantities, marks = state
-        self._quantities = dict(quantities)
-        self._marks = dict(marks)
-
-
 class BacktestEngine:
     def __init__(
         self,
@@ -174,6 +147,7 @@ class BacktestEngine:
         *,
         slippage: SlippageModel | None = None,
         max_participation: float | None = None,
+        core: str = "python",
     ) -> None:
         """
         Args:
@@ -182,6 +156,8 @@ class BacktestEngine:
             slippage: 체결가 슬리피지 모델. 기본 NoSlippage.
             max_participation: 세션 거래량 대비 체결 상한 (0, 1]. None이면 무제한.
                 Action의 ExecutionPolicy.max_participation이 있으면 그 값이 우선한다.
+            core: 체결 가격 규칙·포트폴리오 회계 구현. "python"(기본) 또는 "rust"
+                (backtest_core 확장 필요, 없으면 CoreUnavailable).
         """
         self._config = config
         self._capabilities = (
@@ -189,6 +165,7 @@ class BacktestEngine:
         )
         self._slippage = slippage
         self._max_participation = max_participation
+        self._core = core
         self._event_store: EventStore | None = None
 
     @property
@@ -229,6 +206,7 @@ class BacktestEngine:
             validated.requirements,
             self._slippage,
             self._max_participation,
+            self._core,
         )
         self._event_store = run.store
         run.universe = universe
@@ -325,12 +303,19 @@ class BacktestEngine:
         for action in run.corporate_actions.get(snapshot.ts, ()):
             self._apply_corporate_action(run, action, snapshot, update)
 
+        if run.core == "rust":
+            self._on_market_rust(run, snapshot, update)
+            run.queue.push(snapshot.ts, EventPriority.SESSION_CLOSE, SessionClose(snapshot))
+            return
+
         # 매도 먼저 처리해 매수가 쓸 수 있는 현금을 확정한다 (결정론적 규칙).
         due = sorted(
             order_manager.due(snapshot),
             key=lambda entry: (entry.order.side is not Side.SELL, entry.order_id),
         )
-        power = _BuyingPower(run.portfolio.snapshot(snapshot.ts), run.config.max_gross_leverage)
+        power = make_buying_power(
+            run.core, run.portfolio.snapshot(snapshot.ts), run.config.max_gross_leverage
+        )
         # 바스켓 그룹은 leg를 함께 견적해 정책을 판정한 뒤 체결한다 (단일 주문보다 먼저).
         for group in order_manager.open_groups():
             self._process_group(run, group, snapshot, power, update)
@@ -387,6 +372,99 @@ class BacktestEngine:
 
         run.queue.push(snapshot.ts, EventPriority.SESSION_CLOSE, SessionClose(snapshot))
 
+    def _on_market_rust(
+        self,
+        run: _Run,
+        snapshot: MarketSnapshot,
+        update: Callable[[str, OrderStatus, str | None], None],
+    ) -> None:
+        """세션 MARKET 처리를 Rust `process_market`에 맡기고 계획(ops)을 순서대로 적용한다."""
+        core = importlib.import_module("backtest_core")
+        order_manager = run.order_manager
+        power = make_buying_power(
+            run.core, run.portfolio.snapshot(snapshot.ts), run.config.max_gross_leverage
+        )
+        if not isinstance(power, RustBuyingPower):  # 코어가 rust면 항상 Rust 누산기다
+            raise CoreUnavailable("rust session core requires the rust buying-power tracker")
+        entries = []
+        for entry in order_manager.open_entries():
+            order = entry.order
+            override = participation_of(order)
+            entries.append(
+                (
+                    order.order_id,
+                    instrument_key(order.instrument),
+                    order.instrument.symbol,
+                    order.side.value,
+                    order.order_type.value,
+                    (
+                        None if order.limit_price is None else float(order.limit_price),
+                        None if order.stop_price is None else float(order.stop_price),
+                        None if order.limit_price is None else str(order.limit_price),
+                        None if order.stop_price is None else str(order.stop_price),
+                    ),
+                    order.time_in_force.value,
+                    int(entry.remaining),
+                    entry.triggered,
+                    order.group_id,
+                    None if override is None else str(override),
+                )
+            )
+        groups = [
+            (g.group_id, g.policy.value, list(g.order_ids)) for g in order_manager.open_groups()
+        ]
+        bars = {
+            instrument_key(bar.instrument): (bar.open, bar.high, bar.low, bar.volume)
+            for bar in snapshot.bars
+        }
+        default = None if run.max_participation is None else str(run.max_participation)
+        ops = core.process_market(
+            str(snapshot.ts),
+            entries,
+            groups,
+            bars,
+            power.inner,
+            run.broker.fee_rate,
+            default,
+            run.rust_slippage,
+        )
+        for kind, order_id, quantity, price, slip, fee, payload in ops:
+            match kind:
+                case "fill":
+                    entry = order_manager.get(order_id)
+                    if entry is None:
+                        raise RuntimeError(
+                            f"rust core filled an order that is not open — order_id={order_id}"
+                        )
+                    fill = FillEvent(
+                        fill_id=order_manager.next_fill_id(),
+                        order_id=order_id,
+                        ts=snapshot.ts,
+                        instrument=entry.order.instrument,
+                        quantity=Decimal(quantity),
+                        side=entry.order.side,
+                        price=price,
+                        fee=fee,
+                        slippage_per_share=slip,
+                    )
+                    run.queue.push(fill.ts, EventPriority.FILL, FillOccurred(fill, snapshot))
+                    if run.wants(EventKind.FILL):
+                        run.queue.push(
+                            fill.ts, EventPriority.NOTIFY, StrategyNotify(fill, snapshot)
+                        )
+                    order_manager.settle(order_id, fill.quantity)
+                case "update":
+                    status_text, _, detail = payload.partition("|")
+                    update(order_id, OrderStatus(status_text), detail or None)
+                case "trigger":
+                    order_manager.mark_triggered(order_id)
+                case "remove":
+                    order_manager.remove(order_id)
+                case "drop_group":
+                    order_manager.drop_group(order_id)
+                case _:
+                    raise RuntimeError(f"unknown op from rust core — kind={kind!r}")
+
     @staticmethod
     def _settlement_session(feed: DataFeed, action: CorporateActionEvent) -> datetime:
         for snapshot in feed.snapshots():
@@ -406,7 +484,7 @@ class BacktestEngine:
         quote: Quote,
         quantity: Decimal,
         snapshot: MarketSnapshot,
-        power: _BuyingPower,
+        power: BuyingPowerTracker,
         update: Callable[[str, OrderStatus, str | None], None],
     ) -> None:
         """견적을 실제 체결로 확정한다: Fill 큐 적재, 잔량 갱신, 상태 기록, 여력 소모."""
@@ -438,7 +516,7 @@ class BacktestEngine:
         run: _Run,
         group: BasketGroup,
         snapshot: MarketSnapshot,
-        power: _BuyingPower,
+        power: BuyingPowerTracker,
         update: Callable[[str, OrderStatus, str | None], None],
     ) -> None:
         order_manager = run.order_manager

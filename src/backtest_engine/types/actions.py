@@ -50,6 +50,12 @@ class ExecutionPolicy:
     time_in_force: TimeInForce
     max_participation: float | None = None
 
+    def __post_init__(self) -> None:
+        if self.max_participation is not None and not 0.0 < self.max_participation <= 1.0:
+            raise ValueError(
+                f"max_participation must be in (0, 1] — max_participation={self.max_participation}"
+            )
+
     @classmethod
     def market_next_open(cls) -> ExecutionPolicy:
         """일봉 종가 신호의 기본 실행 정책."""

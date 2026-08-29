@@ -6,6 +6,7 @@ Snapshot 자체를 수정하지 않는다 — 새 상태가 필요하면 다음 
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -42,11 +43,25 @@ class PortfolioSnapshot:
     equity: float
     gross_exposure: float
 
+    def __post_init__(self) -> None:
+        # 같은 종목이 두 번 들어오면 인덱스 조회가 하나만 보게 된다 — 불가능한 상태로 막는다.
+        seen: set[InstrumentId] = set()
+        for position in self.positions:
+            if position.instrument in seen:
+                raise ValueError(
+                    f"duplicate instrument in portfolio snapshot — ts={self.ts} "
+                    f"instrument={position.instrument.symbol} positions={len(self.positions)}"
+                )
+            seen.add(position.instrument)
+
+    @functools.cached_property
+    def _by_instrument(self) -> dict[InstrumentId, Position]:
+        # 종목 → Position 인덱스 (조회 전용). dataclass 필드가 아니라 인스턴스 __dict__에만
+        # 놓이므로 fields()/asdict/==/hash/repr 어디에도 나타나지 않는다.
+        return {position.instrument: position for position in self.positions}
+
     def position(self, instrument: InstrumentId) -> Position | None:
-        for candidate in self.positions:
-            if candidate.instrument == instrument:
-                return candidate
-        return None
+        return self._by_instrument.get(instrument)
 
     def position_qty(self, instrument: InstrumentId) -> Decimal:
         found = self.position(instrument)

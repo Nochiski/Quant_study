@@ -471,17 +471,13 @@ def test_max_participation_requires_partial_fill_feature() -> None:
 
 @pytest.mark.parametrize("participation", [0.0, 1.5, -0.1])
 def test_out_of_range_participation_rejected(participation: float) -> None:
-    policy = ExecutionPolicy(
-        ExecutionStyle.MARKET,
-        ExecutionTiming.NEXT_OPEN,
-        TimeInForce.DAY,
-        max_participation=participation,
-    )
-    action = SetPositionTarget(target=QuantityTarget(INSTRUMENT, Decimal(1)), execution=policy)
-    router = make_router(features=frozenset({EngineFeature.PARTIAL_FILL}))
-    with pytest.raises(UnsupportedActionValue, match="max_participation"):
-        router.route(
-            StrategyDecision.of(day(1), action), "D-000001", portfolio_with(100_000), market()
+    # 범위 검증은 ExecutionPolicy 생성 시점에 이미 걸린다 (라우터 검증은 방어용으로 남아 있다).
+    with pytest.raises(ValueError, match="max_participation"):
+        ExecutionPolicy(
+            ExecutionStyle.MARKET,
+            ExecutionTiming.NEXT_OPEN,
+            TimeInForce.DAY,
+            max_participation=participation,
         )
 
 
@@ -554,3 +550,27 @@ def test_replace_unknown_order_id_aborts_run() -> None:
     action = ReplaceOrder(order_id="O-424242", replacement=MarketOrderRequest(core=core(Side.BUY)))
     with pytest.raises(UnknownOrderId, match="O-424242"):
         route_one(action, portfolio_with(100_000))
+
+
+def test_target_orders_carry_execution_policy_time_in_force() -> None:
+    """Zipline 대조에서 발견: GTC 정책 목표 주문이 DAY로 나가 참여율 캡 잔량이 이월되지 않았다."""
+    gtc = ExecutionPolicy(ExecutionStyle.MARKET, ExecutionTiming.NEXT_OPEN, TimeInForce.GTC)
+    target = SetPositionTarget(target=QuantityTarget(INSTRUMENT, Decimal(5)), execution=gtc)
+    (order,) = route_one(target, portfolio_with(100_000))
+    assert order.time_in_force is TimeInForce.GTC
+    liquidate = LiquidatePosition(
+        instrument=INSTRUMENT,
+        execution=gtc,
+        cancel_open_orders=False,
+        persistence=LiquidationPersistence.ONCE,
+    )
+    (order,) = route_one(liquidate, portfolio_with(0.0, {INSTRUMENT: (3, 100.0)}))
+    assert order.time_in_force is TimeInForce.GTC
+    (order,) = route_one(
+        SetPositionTarget(
+            target=QuantityTarget(INSTRUMENT, Decimal(5)),
+            execution=ExecutionPolicy.market_next_open(),
+        ),
+        portfolio_with(100_000),
+    )
+    assert order.time_in_force is TimeInForce.DAY

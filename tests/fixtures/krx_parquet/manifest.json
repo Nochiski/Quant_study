@@ -1,0 +1,345 @@
+{
+  "sliced_at": "2026-08-29T16:45:12",
+  "source_dir": "quant-data-20260826",
+  "tickers": {
+    "005930": "삼성전자 — KOSPI 대형주, 2018-05 액면분할(50:1) 정지 구간 포함",
+    "000660": "SK하이닉스 — KOSPI 대형주, 정상 케이스",
+    "008080": "에스와이코퍼레이션 — 2013 감자·정지·+6,699,900% 등락률 이상치, 2013-09 상장폐지",
+    "247540": "에코프로비엠 — KOSDAQ, 2019 상장 (기간 중간 시작 케이스)",
+    "066970": "엘앤에프 — KOSDAQ, 정상 케이스"
+  },
+  "files": {
+    "krx_stk_bydd_trd.parquet": 9738,
+    "krx_ksq_bydd_trd.parquet": 5306
+  },
+  "source_manifest": {
+    "build_id": "20260826T0930",
+    "built_at": "2026-08-26T09:32:15.681761+09:00",
+    "generator": "rebuild_share.py",
+    "duckdb_version": "1.5.5",
+    "sources": {
+      "krx.db": {
+        "sha256": "7adfd4ec7798ecc28d2b4ad84b4f5a8571f09408283ce39569a0bb3fb24f3d89",
+        "mtime": "2026-08-24T03:41:13.530607+09:00",
+        "bytes": 4073091072
+      },
+      "kiwoom.db": {
+        "sha256": "6aa8fc86ab8b125627287327c037d2e0b89c4a940589505b4c3fd66cf72532a5",
+        "mtime": "2026-08-24T19:41:48.640577+09:00",
+        "bytes": 3780710400
+      }
+    },
+    "tables": [
+      {
+        "name": "krx_stk_bydd_trd",
+        "rows": 3771174,
+        "min_date": "2010-01-04",
+        "max_date": "2026-08-20",
+        "bytes": 88385907,
+        "columns": [
+          "bas_dd",
+          "isu_cd",
+          "isu_nm",
+          "mkt_nm",
+          "sect_tp_nm",
+          "tdd_clsprc",
+          "tdd_opnprc",
+          "tdd_hgprc",
+          "tdd_lwprc",
+          "cmpprevdd_prc",
+          "fluc_rt",
+          "acc_trdvol",
+          "acc_trdval",
+          "mktcap",
+          "list_shrs",
+          "bas_dd_req",
+          "collected_at"
+        ]
+      },
+      {
+        "name": "krx_ksq_bydd_trd",
+        "rows": 5430342,
+        "min_date": "2010-01-04",
+        "max_date": "2026-08-20",
+        "bytes": 127790466,
+        "columns": [
+          "bas_dd",
+          "isu_cd",
+          "isu_nm",
+          "mkt_nm",
+          "sect_tp_nm",
+          "tdd_clsprc",
+          "tdd_opnprc",
+          "tdd_hgprc",
+          "tdd_lwprc",
+          "cmpprevdd_prc",
+          "fluc_rt",
+          "acc_trdvol",
+          "acc_trdval",
+          "mktcap",
+          "list_shrs",
+          "bas_dd_req",
+          "collected_at"
+        ]
+      },
+      {
+        "name": "krx_stk_isu_base_info",
+        "rows": 3771174,
+        "min_date": "2010-01-04",
+        "max_date": "2026-08-20",
+        "bytes": 4323292,
+        "columns": [
+          "isu_cd",
+          "isu_srt_cd",
+          "isu_nm",
+          "isu_abbrv",
+          "isu_eng_nm",
+          "list_dd",
+          "mkt_tp_nm",
+          "secugrp_nm",
+          "sect_tp_nm",
+          "kind_stkcert_tp_nm",
+          "parval",
+          "list_shrs",
+          "bas_dd_req",
+          "collected_at"
+        ]
+      },
+      {
+        "name": "krx_ksq_isu_base_info",
+        "rows": 5430342,
+        "min_date": "2010-01-04",
+        "max_date": "2026-08-20",
+        "bytes": 10943552,
+        "columns": [
+          "isu_cd",
+          "isu_srt_cd",
+          "isu_nm",
+          "isu_abbrv",
+          "isu_eng_nm",
+          "list_dd",
+          "mkt_tp_nm",
+          "secugrp_nm",
+          "sect_tp_nm",
+          "kind_stkcert_tp_nm",
+          "parval",
+          "list_shrs",
+          "bas_dd_req",
+          "collected_at"
+        ]
+      },
+      {
+        "name": "krx_etf_bydd_trd",
+        "rows": 1688735,
+        "min_date": "2010-01-04",
+        "max_date": "2026-08-20",
+        "bytes": 67947869,
+        "columns": [
+          "bas_dd",
+          "isu_cd",
+          "isu_nm",
+          "tdd_clsprc",
+          "cmpprevdd_prc",
+          "fluc_rt",
+          "nav",
+          "tdd_opnprc",
+          "tdd_hgprc",
+          "tdd_lwprc",
+          "acc_trdvol",
+          "acc_trdval",
+          "mktcap",
+          "invstasst_netasst_totamt",
+          "list_shrs",
+          "idx_ind_nm",
+          "obj_stkprc_idx",
+          "cmpprevdd_idx",
+          "fluc_rt_idx",
+          "bas_dd_req",
+          "collected_at"
+        ]
+      },
+      {
+        "name": "krx_kospi_dd_trd",
+        "rows": 195711,
+        "min_date": "2010-01-04",
+        "max_date": "2026-08-20",
+        "bytes": 5717667,
+        "columns": [
+          "bas_dd",
+          "idx_clss",
+          "idx_nm",
+          "clsprc_idx",
+          "opnprc_idx",
+          "hgprc_idx",
+          "lwprc_idx",
+          "cmpprevdd_idx",
+          "fluc_rt",
+          "acc_trdvol",
+          "acc_trdval",
+          "mktcap",
+          "bas_dd_req",
+          "collected_at"
+        ]
+      },
+      {
+        "name": "krx_kosdaq_dd_trd",
+        "rows": 152110,
+        "min_date": "2010-01-04",
+        "max_date": "2026-08-20",
+        "bytes": 4625402,
+        "columns": [
+          "bas_dd",
+          "idx_clss",
+          "idx_nm",
+          "clsprc_idx",
+          "opnprc_idx",
+          "hgprc_idx",
+          "lwprc_idx",
+          "cmpprevdd_idx",
+          "fluc_rt",
+          "acc_trdvol",
+          "acc_trdval",
+          "mktcap",
+          "bas_dd_req",
+          "collected_at"
+        ]
+      },
+      {
+        "name": "ingest_log",
+        "rows": 30373,
+        "min_date": "2010-01-04",
+        "max_date": "2026-08-20",
+        "bytes": 84641,
+        "columns": [
+          "endpoint",
+          "bas_dd",
+          "n_rows",
+          "status",
+          "note",
+          "collected_at"
+        ]
+      },
+      {
+        "name": "ka10008_foreign_holdings",
+        "rows": 7682844,
+        "min_date": "2009-10-15",
+        "max_date": "2026-08-24",
+        "bytes": 133847838,
+        "columns": [
+          "ticker",
+          "dt",
+          "close_pric",
+          "pred_pre",
+          "trde_qty",
+          "chg_qty",
+          "poss_stkcnt",
+          "wght",
+          "gain_pos_stkcnt",
+          "frgnr_limit",
+          "frgnr_limit_irds",
+          "limit_exh_rt",
+          "src_api",
+          "collected_at"
+        ]
+      },
+      {
+        "name": "ka10014_short_selling",
+        "rows": 3971630,
+        "min_date": "2008-06-23",
+        "max_date": "2026-08-20",
+        "bytes": 81297453,
+        "columns": [
+          "ticker",
+          "dt",
+          "close_pric",
+          "pred_pre_sig",
+          "pred_pre",
+          "flu_rt",
+          "trde_qty",
+          "shrts_qty",
+          "ovr_shrts_qty",
+          "trde_wght",
+          "shrts_trde_prica",
+          "shrts_avg_pric",
+          "src_api",
+          "collected_at"
+        ]
+      },
+      {
+        "name": "ka10060_investor_flows",
+        "rows": 7621338,
+        "min_date": "2009-12-22",
+        "max_date": "2026-08-20",
+        "bytes": 128318260,
+        "columns": [
+          "ticker",
+          "dt",
+          "cur_prc",
+          "pred_pre",
+          "acc_trde_prica",
+          "ind_invsr",
+          "frgnr_invsr",
+          "orgn",
+          "fnnc_invt",
+          "insrnc",
+          "invtrt",
+          "etc_fnnc",
+          "bank",
+          "penfnd_etc",
+          "samo_fund",
+          "natn",
+          "etc_corp",
+          "natfor",
+          "src_api",
+          "collected_at"
+        ]
+      },
+      {
+        "name": "ka20068_lending_balance",
+        "rows": 6988296,
+        "min_date": "2011-07-25",
+        "max_date": "2026-08-20",
+        "bytes": 53086073,
+        "columns": [
+          "ticker",
+          "dt",
+          "dbrt_trde_cntrcnt",
+          "dbrt_trde_rpy",
+          "dbrt_trde_irds",
+          "rmnd",
+          "remn_amt",
+          "src_api",
+          "collected_at"
+        ]
+      },
+      {
+        "name": "ingest_shard",
+        "rows": 10420,
+        "min_date": "2008-06-23",
+        "max_date": "2025-01-01",
+        "bytes": 56974,
+        "columns": [
+          "src_api",
+          "ticker",
+          "req_start",
+          "req_end",
+          "n_rows",
+          "cap",
+          "status",
+          "first_dt",
+          "last_dt",
+          "collected_at",
+          "next_cursor"
+        ]
+      }
+    ],
+    "total_rows": 46744489,
+    "known_gaps": [
+      "수정주가 없음(원주가)",
+      "배당/TR수익률 없음",
+      "유니버스 플래그 없음",
+      "DART 재무·공시 없음"
+    ],
+    "notice": "typed 변환본. 원형 TEXT는 카엘 서버 원장에만 존재. KNOWN_GAPS.md 참조"
+  }
+}

@@ -12,8 +12,9 @@ from pathlib import Path
 from golden_cross import GoldenCrossConfig, GoldenCrossStrategy
 
 from backtest_engine import BacktestEngine, RunConfig
-from backtest_engine.data.csv_loader import OhlcPolicy, load_bars_csv
+from backtest_engine.adapters.csv_bars import load_bars_csv
 from backtest_engine.data.feed import DataFeed
+from backtest_engine.ports.market_data import OhlcPolicy
 from backtest_engine.types.instruments import AssetClass, InstrumentId
 
 CSV_PATH = (

@@ -157,16 +157,11 @@ class BacktestEngine:
         )
         self._event_store = run.store
         run.universe = universe
+        # 사건은 해당 종목이 실제로 거래되는 첫 세션(사건 세션 이후)에 적용한다 — 원장의
+        # 분할 세션이 거래정지 행이라 feed에서 빠지는 경우 다음 거래일 시가로 정산한다.
         for action in corporate_actions:
-            run.corporate_actions[action.ts].append(action)
-        sessions = set(feed.sessions)
-        for ts in sorted(run.corporate_actions):
-            if ts not in sessions:
-                symbols = [a.instrument.symbol for a in run.corporate_actions[ts]]
-                raise CorporateActionWithoutBar(
-                    f"corporate action ts is not a feed session — ts={ts} instruments={symbols} "
-                    f"sessions={len(sessions)}"
-                )
+            settle_ts = self._settlement_session(feed, action)
+            run.corporate_actions[settle_ts].append(action)
 
         for snapshot in feed.snapshots():
             run.queue.push(snapshot.ts, EventPriority.MARKET, MarketArrived(snapshot))
@@ -321,6 +316,18 @@ class BacktestEngine:
 
         run.queue.push(snapshot.ts, EventPriority.SESSION_CLOSE, SessionClose(snapshot))
 
+    @staticmethod
+    def _settlement_session(feed: DataFeed, action: CorporateActionEvent) -> datetime:
+        for snapshot in feed.snapshots():
+            if snapshot.ts >= action.ts and snapshot.has(action.instrument):
+                return snapshot.ts
+        raise CorporateActionWithoutBar(
+            f"no traded session for instrument at or after corporate action — "
+            f"instrument={action.instrument.symbol} ts={action.ts} "
+            f"action={action.action_type.value} ratio={action.ratio} "
+            f"feed_sessions={len(feed)} last_session={feed.sessions[-1] if len(feed) else None}"
+        )
+
     def _apply_corporate_action(
         self,
         run: _Run,
@@ -328,28 +335,26 @@ class BacktestEngine:
         snapshot: MarketSnapshot,
         update: Callable[[str, OrderStatus, str | None], None],
     ) -> None:
-        if not snapshot.has(action.instrument):
-            raise CorporateActionWithoutBar(
-                f"corporate action session has no bar for instrument — "
-                f"instrument={action.instrument.symbol} ts={action.ts} "
-                f"action={action.action_type.value} ratio={action.ratio}"
-            )
-        run.store.append(action.ts, RecordKind.CORPORATE_ACTION, action)
+        # _settlement_session이 bar 존재를 보장한다. 기록·적용 시각은 정산 세션이다.
+        run.store.append(snapshot.ts, RecordKind.CORPORATE_ACTION, action)
+        remaining_by_id = {e.order_id: e.remaining for e in run.order_manager.open_entries()}
         for stale in run.order_manager.cancel_for_instrument(action.instrument):
+            stale_remaining = remaining_by_id[stale.order_id]
             update(
                 stale.order_id,
                 OrderStatus.CANCELLED,
                 f"cancelled by corporate action — instrument={action.instrument.symbol} "
-                f"action={action.action_type.value} ratio={action.ratio} ts={action.ts}",
+                f"action={action.action_type.value} ratio={action.ratio} "
+                f"event_ts={action.ts} settled_at={snapshot.ts} remaining={stale_remaining}",
             )
         if action.action_type in (CorporateActionType.SPLIT, CorporateActionType.REVERSE_SPLIT):
             applied = run.portfolio.apply_corporate_action(
-                action, snapshot.bar(action.instrument).open
+                action, snapshot.bar(action.instrument).open, settled_at=snapshot.ts
             )
             if applied is not None:
-                run.store.append(action.ts, RecordKind.CORPORATE_ACTION_APPLIED, applied)
+                run.store.append(snapshot.ts, RecordKind.CORPORATE_ACTION_APPLIED, applied)
         if run.wants(EventKind.CORPORATE_ACTION):
-            run.queue.push(action.ts, EventPriority.NOTIFY, StrategyNotify(action, snapshot))
+            run.queue.push(snapshot.ts, EventPriority.NOTIFY, StrategyNotify(action, snapshot))
 
     def _on_session_close(self, run: _Run, snapshot: MarketSnapshot) -> None:
         run.portfolio.mark(snapshot)

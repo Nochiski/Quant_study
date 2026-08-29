@@ -131,6 +131,12 @@
 - D3 sqlite 어댑터는 `mode=ro` URI로 열어 없는 파일을 만들지 않는다. 중복 세션은 별도 검사
   없이 `clean_raw_bars`의 역행 검사로 FORMAT_ERROR가 된다.
 - 픽스처 스모크는 `.claude/rules/testing.md`에 따라 값 단언 없이 "로드·실행이 되는지"만 본다.
+- (리뷰 반영) 사건 세션이 거래정지라 feed에 없으면 그 종목의 **다음 거래 세션 시가**로 정산하고
+  `CorporateActionApplied.ts`는 정산 세션이다. 원장의 분할 세션 자체가 정지 행인 경우가 흔해
+  (에스와이코퍼레이션 2013-08-22) 이전 규칙("bar 없으면 예외")은 스펙의 대표 예제를 죽였다.
+  feed 마지막 세션 이후의 사건만 `CorporateActionWithoutBar`.
+- (리뷰 반영) `qty × ratio`는 1e-9로 반올림한 뒤 floor한다 — 1억/3억 같은 정수 비율이 Decimal에서
+  순환소수가 되어 30 × 0.333…이 9주로 깎이는 것을 막는다.
 
 ## 다음 단계
 

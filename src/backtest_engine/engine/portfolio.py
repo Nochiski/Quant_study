@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import ROUND_FLOOR, Decimal
+from decimal import ROUND_FLOOR, ROUND_HALF_EVEN, Decimal
 
 from backtest_engine.errors import NegativeCashError, NegativePositionError
 from backtest_engine.types.events import CorporateActionApplied, CorporateActionEvent, FillEvent
@@ -25,6 +25,16 @@ from backtest_engine.types.portfolio import PortfolioSnapshot, Position
 class _Ledger:
     quantity: Decimal
     average_price: float
+
+
+# 원장 정수 비율(예: 1억/3억)은 Decimal로 순환소수가 되어 30 × 0.333…3 = 9.999…7이 된다.
+# 주식 수 × 비율은 이론상 유리수이므로 소수 아래를 이 정밀도로 반올림한 뒤 floor한다.
+_SCALE_QUANTUM = Decimal("1e-9")
+
+
+def scale_quantity(quantity: Decimal, ratio: Decimal) -> Decimal:
+    """자본변동 비율을 적용한 이론 수량 (floor 전). 순환소수 오차를 1e-9에서 흡수한다."""
+    return (quantity * ratio).quantize(_SCALE_QUANTUM, rounding=ROUND_HALF_EVEN)
 
 
 class Portfolio:
@@ -82,12 +92,16 @@ class Portfolio:
         self._marks.setdefault(fill.instrument, fill.price)
 
     def apply_corporate_action(
-        self, action: CorporateActionEvent, settlement_price: float
+        self,
+        action: CorporateActionEvent,
+        settlement_price: float,
+        settled_at: datetime | None = None,
     ) -> CorporateActionApplied | None:
         """확인된 분할·병합을 보유 포지션에 적용한다. 보유가 없으면 None.
 
         수량은 floor(qty × ratio), 평균단가는 avg / ratio. 단주(소수 부분)는
-        settlement_price(사건 세션 시가)로 현금 지급한다.
+        settlement_price(정산 세션 시가)로 현금 지급한다. settled_at은 실제 적용 세션
+        (사건 세션이 거래정지면 그 뒤 첫 거래 세션); None이면 action.ts.
         """
         ledger = self._ledgers.get(action.instrument)
         if ledger is None:
@@ -98,7 +112,7 @@ class Portfolio:
                 f"instrument={action.instrument.symbol} ts={action.ts} price={settlement_price}"
             )
         old_quantity = ledger.quantity
-        scaled = old_quantity * action.ratio
+        scaled = scale_quantity(old_quantity, action.ratio)
         new_quantity = scaled.quantize(Decimal(1), rounding=ROUND_FLOOR)
         cash_paid = float(scaled - new_quantity) * settlement_price
         old_average = ledger.average_price
@@ -113,7 +127,7 @@ class Portfolio:
         # 이전 세션 마크(분할 전 가격)로 평가하면 equity가 왜곡되므로 정산가로 교체한다.
         self._marks[action.instrument] = settlement_price
         return CorporateActionApplied(
-            ts=action.ts,
+            ts=settled_at if settled_at is not None else action.ts,
             instrument=action.instrument,
             action=action,
             old_quantity=old_quantity,

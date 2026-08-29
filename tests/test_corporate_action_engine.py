@@ -244,3 +244,72 @@ class TestUnconfirmedAndDelivery:
         assert isinstance(applied, CorporateActionApplied)
         assert applied.ts == day(3)
         assert applied.instrument == INSTRUMENT
+
+
+class TestReviewRegressions:
+    def test_action_on_halted_session_settles_at_next_traded_open(self) -> None:
+        """DEFECT-201: 사건 세션이 거래정지로 feed에 없으면 다음 거래 세션 시가로 정산한다."""
+        bars = (
+            make_ohlc(day(1), INSTRUMENT, 100.0, 100.0, 100.0, 100.0),
+            make_ohlc(day(2), INSTRUMENT, 100.0, 106.0, 99.0, 105.0),
+            # day(3): 거래정지 → bar 없음 (사건 세션)
+            make_ohlc(day(4), INSTRUMENT, 20.0, 21.0, 20.0, 21.0),
+        )
+        engine, _, result = run(bars, (split("5"),))
+        (applied,) = engine.event_store.corporate_actions_applied()
+        assert applied.ts == day(4)
+        assert applied.new_quantity == Decimal(35)
+        assert result.snapshots[-1].position_qty(INSTRUMENT) == Decimal(35)
+
+    def test_share_count_change_on_halted_session_is_recorded_not_fatal(self) -> None:
+        bars = (
+            make_ohlc(day(1), INSTRUMENT, 100.0, 100.0, 100.0, 100.0),
+            make_ohlc(day(2), INSTRUMENT, 100.0, 106.0, 99.0, 105.0),
+            make_ohlc(day(4), INSTRUMENT, 100.0, 100.0, 100.0, 100.0),
+        )
+        engine, _, result = run(bars, (split("50", CorporateActionType.SHARE_COUNT_CHANGE),))
+        assert len(engine.event_store.corporate_actions()) == 1
+        assert result.snapshots[-1].position_qty(INSTRUMENT) == Decimal(7)
+
+    def test_action_after_last_session_aborts(self) -> None:
+        late = CorporateActionEvent(
+            ts=day(9),
+            instrument=INSTRUMENT,
+            action_type=CorporateActionType.SPLIT,
+            ratio=Decimal(5),
+            detail="after feed",
+        )
+        with pytest.raises(CorporateActionWithoutBar, match="2026-08-09"):
+            run(bars_with_split(20.0, 21.0), (late,))
+
+    def test_non_terminating_ratio_does_not_lose_a_whole_share(self) -> None:
+        """DEFECT-202: 30주 × (1/3) = 10주여야 한다 (9.999… → 9 금지)."""
+        from backtest_engine.engine.portfolio import Portfolio
+        from backtest_engine.types.events import FillEvent
+
+        portfolio = Portfolio(1_000_000.0)
+        portfolio.apply(
+            FillEvent(
+                fill_id="F-1",
+                order_id="O-1",
+                ts=day(1),
+                instrument=INSTRUMENT,
+                quantity=Decimal(30),
+                side=Side.BUY,
+                price=1_000.0,
+                fee=0.0,
+                slippage_per_share=0.0,
+            )
+        )
+        ratio = Decimal(100_000_000) / Decimal(300_000_000)
+        action = CorporateActionEvent(
+            ts=day(2),
+            instrument=INSTRUMENT,
+            action_type=CorporateActionType.REVERSE_SPLIT,
+            ratio=ratio,
+            detail="3:1",
+        )
+        applied = portfolio.apply_corporate_action(action, 3_000.0)
+        assert applied is not None
+        assert applied.new_quantity == Decimal(10)
+        assert applied.cash_paid == pytest.approx(0.0)

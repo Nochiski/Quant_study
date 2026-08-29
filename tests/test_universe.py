@@ -201,13 +201,14 @@ class TestKrxUniverseAdapter:
 
 
 def test_fixture_master_slice_smoke() -> None:
-    """슬라이스 마스터가 어댑터를 통해 읽히고 상장폐지 종목이 이후 세션에서 빠지는지만 본다."""
+    """슬라이스 마스터가 어댑터를 통해 읽히고 API가 예외 없이 도는지만 본다 (값 단언 없음)."""
     fixture = Path(__file__).resolve().parent / "fixtures" / "krx_parquet"
     result = KrxParquetUniverseSource(fixture).load_universe(UniverseQuery(venue="XKRX"))
     assert result.ok, result.detail
-    symbols = {m.instrument.symbol for m in result.memberships}
-    assert {"005930", "008080"} <= symbols
-    delisted = next(m for m in result.memberships if m.instrument.symbol == "008080")
-    assert make_instrument("008080") not in result.members(
-        date(delisted.last_session.year + 1, 1, 1)
+    assert result.memberships
+    first = result.memberships[0]
+    assert first.instrument in result.members(first.first_session)
+    assert first.instrument not in result.members(
+        date(first.last_session.year + 1, first.last_session.month, first.last_session.day)
     )
+    assert result.instruments_active_between(first.first_session, first.last_session)

@@ -505,7 +505,7 @@ fn quote_numbers(
     Ok((price, quantity, applied, status.to_string()))
 }
 
-/// 세션 안 매수 여력 = leverage × equity − 총노출 (loop._BuyingPower와 동일 연산 순서).
+/// 세션 안 매수 여력 = leverage × equity − 총노출 (core.PythonBuyingPower와 동일 연산 순서).
 #[pyclass]
 struct BuyingPower {
     leverage: f64,
@@ -833,6 +833,8 @@ impl<'a> Session<'a> {
 
     /// 견적을 체결로 확정: fill op, 여력 소모, 잔량 갱신(호출 측 entry 갱신), 상태 기록.
     fn apply(&mut self, e: &mut EntryIn, q: &QuoteOut, quantity: i64) -> PyResult<()> {
+        // Python은 견적 시점(여력 소모·잔량 갱신 전)에 detail을 만든다.
+        let detail_before = self.detail(q, e);
         let notional = quantity as f64 * q.price;
         let fee = notional * self.fee_rate;
         self.power
@@ -846,7 +848,6 @@ impl<'a> Session<'a> {
             fee,
             String::new(),
         ));
-        let detail_before = self.detail(q, e); // Python은 잔량 갱신 전 detail을 만든다
         e.remaining -= quantity;
         if e.remaining == 0 {
             self.update(&e.order_id.clone(), "filled", None);

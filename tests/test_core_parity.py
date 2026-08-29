@@ -22,7 +22,14 @@ from backtest_engine.engine.core import (
 from backtest_engine.engine.slippage import FixedBpsSlippage
 from backtest_engine.errors import CoreUnavailable, NegativeCashError, NegativePositionError
 from backtest_engine.sizing import floor_delta_shares
-from backtest_engine.types.actions import BasketAction, GroupPolicy, StrategyAction
+from backtest_engine.types.actions import (
+    BasketAction,
+    CancelOrder,
+    GroupPolicy,
+    ReplaceOrder,
+    StrategyAction,
+)
+from backtest_engine.types.decision import StrategyDecision
 from backtest_engine.types.events import (
     CorporateActionEvent,
     CorporateActionType,
@@ -30,14 +37,19 @@ from backtest_engine.types.events import (
     CostKind,
     FillEvent,
     OrderEvent,
+    OrderStatus,
+    StrategyEvent,
 )
-from backtest_engine.types.market import Bar
+from backtest_engine.types.market import Bar, MarketSnapshot
 from backtest_engine.types.orders import (
+    LimitOrderRequest,
     OrderCore,
     Side,
     StopLimitOrderRequest,
     TimeInForce,
 )
+from backtest_engine.types.requirements import EngineFeature, EventKind, StrategyRequirements
+from backtest_engine.types.strategy import StrategyContext
 from tests import test_basket, test_corporate_action_engine, test_margin, test_short_selling
 from tests.conftest import day, make_bar, make_instrument, make_ohlc, make_snapshot
 from tests.test_broker import RULE_TABLE
@@ -499,3 +511,190 @@ def test_custom_slippage_model_requires_python_core() -> None:
     )
     with pytest.raises(CoreUnavailable, match="built-in slippage"):
         engine.run(lc.OrderScript((None,)), DataFeed(lc.BARS))
+
+
+# --- 6c 리뷰 반영: 추가 세션 시나리오 -------------------------------------------------
+
+
+def _short_basket(core_name: str) -> tuple[BacktestEngine, BacktestResult]:
+    """보유 없이 매도 leg를 낸다 → 숏 진입 leg가 여력 캡을 받는 경로."""
+    from tests import test_basket as tb
+
+    class ShortBasketStrategy(tb.BasketStrategy):
+        def requirements(self) -> StrategyRequirements:
+            base = super().requirements()
+            return StrategyRequirements(
+                histories=base.histories,
+                schedule=base.schedule,
+                events=base.events,
+                actions=base.actions,
+                features=base.features | frozenset({EngineFeature.SHORT_SELLING}),
+            )
+
+    basket = BasketAction(
+        legs=(tb.market_leg(tb.A, Side.BUY, 100), tb.market_leg(tb.B, Side.SELL, 1_500)),
+        group_policy=GroupPolicy.BEST_EFFORT,
+    )
+    engine = BacktestEngine(
+        RunConfig(run_id="short-bk", initial_cash=20_000.0, fee_bps=0.0), core=core_name
+    )
+    return engine, engine.run(ShortBasketStrategy((None, basket)), DataFeed(tb.BARS))
+
+
+def _two_groups(core_name: str) -> tuple[BacktestEngine, BacktestResult]:
+    """한 세션에 그룹 2개 — 여력을 순서대로 나눠 쓴다."""
+    from tests import test_basket as tb
+
+    class TwoGroups(tb.BasketStrategy):
+        def on_event(self, ctx: StrategyContext, event: StrategyEvent) -> StrategyDecision:
+            if ctx.now == day(2):
+                return StrategyDecision(
+                    schema_version=1,
+                    as_of=ctx.now,
+                    actions=(
+                        BasketAction(
+                            legs=(tb.market_leg(tb.A, Side.BUY, 600),),
+                            group_policy=GroupPolicy.ALL_OR_NONE,
+                        ),
+                        BasketAction(
+                            legs=(
+                                tb.market_leg(tb.A, Side.BUY, 300),
+                                tb.market_leg(tb.B, Side.BUY, 100),
+                            ),
+                            group_policy=GroupPolicy.PROPORTIONAL,
+                        ),
+                    ),
+                )
+            return StrategyDecision.no_action(ctx.now)
+
+    engine = BacktestEngine(
+        RunConfig(run_id="two-groups", initial_cash=70_000.0, fee_bps=5.0),
+        core=core_name,
+        max_participation=0.5,
+    )
+    return engine, engine.run(TwoGroups(()), DataFeed(tb.BARS))
+
+
+def _split_with_group(core_name: str) -> tuple[BacktestEngine, BacktestResult]:
+    """자본변동(B 분할)과 바스켓 그룹이 같은 세션에 — leg 소실 후 AON 판정."""
+    from tests import test_basket as tb
+    from tests import test_corporate_action_engine as cae
+
+    split_b = CorporateActionEvent(
+        ts=day(3),
+        instrument=tb.B,
+        action_type=CorporateActionType.SPLIT,
+        ratio=Decimal(2),
+        detail="t",
+    )
+    engine = BacktestEngine(
+        RunConfig(run_id="split-bk", initial_cash=100_000.0, fee_bps=0.0),
+        core=core_name,
+        max_participation=0.1,
+    )
+    strategy = tb.BasketStrategy((tb.hold_b(10), tb.pair(GroupPolicy.ALL_OR_NONE)))
+    result = engine.run(strategy, DataFeed(tb.BARS), corporate_actions=(split_b,))
+    del cae  # 같은 픽스처 패턴(분할 이벤트)만 빌려 쓴다
+    return engine, result
+
+
+def _cancel_replace(core_name: str) -> tuple[BacktestEngine, BacktestResult]:
+    from tests import test_order_lifecycle as lc
+
+    def handler(ctx: StrategyContext, event: StrategyEvent) -> StrategyAction | None:
+        if not isinstance(event, MarketSnapshot):
+            return None
+        if ctx.now == day(1):
+            return lc.limit_buy(50.0, TimeInForce.GTC)
+        if ctx.now == day(2) and ctx.open_orders():
+            core = OrderCore(INSTRUMENT, Side.BUY, Decimal(10), TimeInForce.GTC)
+            return ReplaceOrder(
+                order_id=ctx.open_orders()[0].order_id,
+                replacement=LimitOrderRequest(core=core, limit_price=Decimal(95)),
+            )
+        if ctx.now == day(3) and ctx.open_orders():
+            return CancelOrder(order_id=ctx.open_orders()[0].order_id)
+        return None
+
+    engine = BacktestEngine(
+        RunConfig(run_id="cancel-replace", initial_cash=100_000.0, fee_bps=0.0), core=core_name
+    )
+    strategy = lc.CallbackStrategy(
+        handler, frozenset({EventKind.MARKET, EventKind.FILL, EventKind.ORDER_UPDATE})
+    )
+    return engine, engine.run(strategy, DataFeed(lc.BARS))
+
+
+def _two_orders_notified(core_name: str) -> tuple[BacktestEngine, BacktestResult]:
+    """같은 세션에 서로 다른 두 주문이 체결될 때 FILL/ORDER_UPDATE 알림 순서."""
+    from tests import test_order_lifecycle as lc
+
+    def handler(ctx: StrategyContext, event: StrategyEvent) -> StrategyAction | None:
+        if ctx.now == day(1):
+            return None
+        return None
+
+    class TwoOrders(lc.CallbackStrategy):
+        def on_event(self, ctx: StrategyContext, event: StrategyEvent) -> StrategyDecision:
+            self.received.append(event)
+            if ctx.now == day(1) and isinstance(event, MarketSnapshot):
+                return StrategyDecision(
+                    schema_version=1,
+                    as_of=ctx.now,
+                    actions=(
+                        lc.market_buy(5, TimeInForce.DAY),
+                        lc.limit_buy(120.0, TimeInForce.DAY, quantity=7),
+                    ),
+                )
+            return StrategyDecision.no_action(ctx.now)
+
+    engine = BacktestEngine(
+        RunConfig(run_id="two-orders", initial_cash=100_000.0, fee_bps=0.0), core=core_name
+    )
+    strategy = TwoOrders(
+        handler, frozenset({EventKind.MARKET, EventKind.FILL, EventKind.ORDER_UPDATE})
+    )
+    result = engine.run(strategy, DataFeed(lc.BARS))
+    return engine, result
+
+
+_EXTRA_SCENARIOS: dict[str, Callable[[str], tuple[BacktestEngine, BacktestResult]]] = {
+    "short_entry_via_basket": _short_basket,
+    "two_groups_one_session": _two_groups,
+    "split_and_group_same_session": _split_with_group,
+    "cancel_replace_rust": _cancel_replace,
+    "two_orders_notification_order": _two_orders_notified,
+}
+
+
+@RUST_ONLY
+@pytest.mark.parametrize("name", sorted(_EXTRA_SCENARIOS))
+def test_extra_session_scenarios_identical_across_cores(name: str) -> None:
+    scenario = _EXTRA_SCENARIOS[name]
+    python_engine, python_result = scenario("python")
+    rust_engine, rust_result = scenario("rust")
+    assert python_result == rust_result
+    assert _records(python_engine) == _records(rust_engine)
+
+
+@RUST_ONLY
+def test_rejected_no_cash_gtc_waits_in_rust_session() -> None:
+    """리뷰 DEFECT-901: 여력 0(1주도 못 삼)이 실제로 REJECTED_NO_CASH → OPEN 경로를 탄다."""
+    from tests import test_order_lifecycle as lc
+
+    bars = (
+        make_ohlc(day(1), INSTRUMENT, 100.0, 100.0, 100.0, 100.0),
+        make_ohlc(day(2), INSTRUMENT, 500.0, 500.0, 500.0, 500.0),
+        make_ohlc(day(3), INSTRUMENT, 50.0, 50.0, 50.0, 50.0),
+    )
+    traces = []
+    for core_name in ("python", "rust"):
+        engine = BacktestEngine(
+            RunConfig(run_id="nocash", initial_cash=300.0, fee_bps=0.0), core=core_name
+        )
+        result = engine.run(lc.OrderScript((lc.market_buy(2, TimeInForce.GTC),)), DataFeed(bars))
+        updates = [(u.ts, u.status, u.detail) for u in engine.event_store.order_updates()]
+        traces.append((updates, [(f.ts, int(f.quantity)) for f in result.fills]))
+    assert traces[0] == traces[1]
+    assert traces[0][0][0][1] is OrderStatus.OPEN
+    assert "cannot afford" in (traces[0][0][0][2] or "")

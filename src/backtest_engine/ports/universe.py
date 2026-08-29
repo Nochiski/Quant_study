@@ -6,7 +6,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import bisect
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Protocol
 
@@ -57,13 +58,29 @@ class UniverseResult:
     memberships: tuple[Membership, ...]
     status: LoadStatus
     detail: str | None = None
+    # 조회 인덱스 (값 동등성·해시에서 제외). 첫 조회 때 구간을 first_session 순으로 정렬한다.
+    _cache: dict[date, frozenset[InstrumentId]] = field(
+        default_factory=dict, repr=False, compare=False
+    )
+    _sorted: list[Membership] = field(default_factory=list, repr=False, compare=False)
+    _starts: list[date] = field(default_factory=list, repr=False, compare=False)
 
     @property
     def ok(self) -> bool:
         return self.status is LoadStatus.OK
 
     def members(self, session: date) -> frozenset[InstrumentId]:
-        return frozenset(m.instrument for m in self.memberships if m.active_on(session))
+        """세션 d의 구성. first_session ≤ d 인 구간만 bisect로 잘라 보고, 세션별 결과를 메모한다."""
+        cached = self._cache.get(session)
+        if cached is not None:
+            return cached
+        if not self._sorted and self.memberships:
+            self._sorted.extend(sorted(self.memberships, key=lambda m: m.first_session))
+            self._starts.extend(m.first_session for m in self._sorted)
+        end = bisect.bisect_right(self._starts, session)
+        result = frozenset(m.instrument for m in self._sorted[:end] if m.last_session >= session)
+        self._cache[session] = result
+        return result
 
     def instruments_active_between(self, start: date, end: date) -> tuple[InstrumentId, ...]:
         """기간과 겹치는 구간이 하나라도 있는 종목 (심볼 정렬, 중복 제거)."""

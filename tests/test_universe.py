@@ -231,3 +231,14 @@ class TestKrxUniverseGaps:
         assert intervals == [(d(1), d(2)), (d(4), d(5))]
         assert make_instrument("005930") not in result.members(d(3))
         assert make_instrument("000660") in result.members(d(3))
+
+
+def test_members_is_memoized_and_consistent_after_first_query() -> None:
+    """DEFECT-208: 같은 세션 재조회는 캐시, 정렬 인덱스 뒤에도 결과 동일."""
+    u = universe()
+    first = u.members(date(2026, 8, 3))
+    assert u.members(date(2026, 8, 3)) is first
+    assert u.members(date(2026, 8, 1)) == frozenset({A, C})
+    assert u.members(date(2026, 8, 31)) == frozenset({A, B})
+    assert u.members(date(2026, 9, 1)) == frozenset()
+    assert u.members(date(2026, 7, 31)) == frozenset()

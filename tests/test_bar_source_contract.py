@@ -154,16 +154,36 @@ def test_strict_rejects_ohlc_violation(build: Callable[[Rows], BarSource]) -> No
     assert result.status is LoadStatus.FORMAT_ERROR
 
 
-def test_clamp_drops_non_positive_price_rows_and_reports(
-    build: Callable[[Rows], BarSource],
-) -> None:
-    halt: Row = (d(2), 0.0, 0.0, 0.0, 0.0, 0)
+def test_clamp_drops_zero_price_rows_and_reports(build: Callable[[Rows], BarSource]) -> None:
+    """가격 0 행(거래량 양수)은 정제 공통 규칙으로 세 어댑터 모두 제거한다."""
+    halt: Row = (d(2), 0.0, 0.0, 0.0, 0.0, 500)
     result = build({"005930": [NORMAL[0], halt, NORMAL[2]]}).load_bars(
         BarQuery(instruments=(A,), ohlc_policy=OhlcPolicy.CLAMP)
     )
     assert result.ok, result.detail
     assert [b.ts.day for b in result.bars] == [1, 3]
     assert result.dropped_rows == 1
+
+
+# 거래량 0(가격 양수) 행의 처리는 어댑터별 정책이다 — 계약에 명시한다.
+# KRX 원장은 정지 중에도 종가를 유지한 행이 매일 있어 거래량 0을 정지 신호로 보고 제거하고,
+# CSV·sqlite는 거래량 0을 데이터로 신뢰해 유지한다.
+ZERO_VOLUME_DROPPED: dict[str, bool] = {"csv": False, "sqlite": False, "krx_parquet": True}
+
+
+@pytest.mark.parametrize("name", sorted(BUILDERS), ids=sorted(BUILDERS))
+def test_zero_volume_row_policy_is_explicit_per_adapter(tmp_path: Path, name: str) -> None:
+    quiet: Row = (d(2), 105.0, 105.0, 105.0, 105.0, 0)
+    result = BUILDERS[name](tmp_path, {"005930": [NORMAL[0], quiet, NORMAL[2]]}).load_bars(
+        BarQuery(instruments=(A,), ohlc_policy=OhlcPolicy.CLAMP)
+    )
+    assert result.ok, result.detail
+    if ZERO_VOLUME_DROPPED[name]:
+        assert [b.ts.day for b in result.bars] == [1, 3]
+        assert result.dropped_rows == 1
+    else:
+        assert [b.ts.day for b in result.bars] == [1, 2, 3]
+        assert result.dropped_rows == 0
 
 
 # --- sqlite 고유 -----------------------------------------------------------------

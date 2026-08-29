@@ -63,6 +63,22 @@ Python 엔진은 4·5·D 단계로 방금 크게 바뀌었으므로 전부를 �
 - 게이트: `cargo clippy -D warnings`, `cargo fmt --check`, 기존 Python 게이트.
 - 회귀: `core="python"` 기본 경로 결과 불변(KRX 데모 출력 동일).
 
+## 구현 결과와 스펙 차이 (2026-08-29 6a 구현 완료)
+
+- 가격 규칙을 `engine/pricing.py`로 분리하고 `BrokerSim(pricing=)`으로 주입한다. `ExecutionPricing`
+  프로토콜은 broker 모듈에 두었다(core.py ↔ broker 순환 import 회피).
+- Rust `Portfolio.snapshot`은 키 정렬 순서를 돌려주고, Python 원장의 dict 삽입 순서는
+  `RustPortfolio` 어댑터가 별도 리스트로 재현한다 — 스냅샷 `positions` 순서까지 동일.
+- 자본변동 산술(`floor(qty × ratio)`, 단주 현금)은 Python 어댑터가 Decimal로 계산하고 Rust는
+  결과만 적용한다. Rust 쪽 `ratio`는 받지 않는다.
+- Rust 오류는 `ValueError` 메시지 접두어(`negative_position:` / `negative_cash:`)로 종류를 알리고
+  어댑터가 도메인 예외로 바꾼다.
+- 동일성: 규칙표 24케이스, `floor_delta_shares` 경계, 포트폴리오 8단계 시나리오, 엔진 5시나리오
+  (골든·공매도·MARGIN·바스켓·분할) 모두 스냅샷·체결·주문·지표가 정확히 일치.
+- 성능(측정만): 픽스처 슬라이스 1,619세션 골든크로스 — python 0.42s, rust 0.43s. 6a는 함수
+  호출 단위라 FFI 왕복이 계산 이득을 상쇄한다. 이득은 6b(세션당 배치)·6c(루프)에서 기대한다.
+- 게이트: `cargo fmt --check`, `cargo clippy --all-targets -D warnings`, `cargo test` 통과.
+
 ## 다음 단계
 
 6b 브로커 견적·여력, 6c 세션 루프. 각각 같은 동일성 테스트를 확장한다.

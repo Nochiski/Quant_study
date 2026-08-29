@@ -75,6 +75,11 @@ Requirements → Capability 검증 → StrategyEvent + 읽기 전용 Context
   기록, equity < 0이면 `EquityWipedOut`), `BasketAction`은 leg를 함께 견적해 BEST_EFFORT /
   ALL_OR_NONE / PROPORTIONAL로 판정한다. 이제 Action·Feature 축에 `NOT_IMPLEMENTED`가 없고
   TIMER 이벤트·`MonthEndSession`만 남는다.
+- 6a Rust 코어(`docs/superpowers/specs/2026-08-29-rust-core-design.md`): `rust/backtest_core`
+  (PyO3)가 체결 가격 규칙·수량 변환·포트폴리오 회계를 제공하고 `BacktestEngine(core="rust")`로
+  켠다. Python 구현이 진실 원천이며 `tests/test_core_parity.py`가 두 코어의 결과를 레코드
+  단위로 고정한다(확장 없으면 skip). 세션 루프가 아직 Python이라 6a의 wall-clock은 같다
+  (슬라이스 1,619세션: python 0.42s / rust 0.43s) — 6b·6c에서 브로커 견적·세션 루프를 옮긴다.
 - 데이터 후속(D, `docs/superpowers/specs/2026-08-29-data-followups-design.md`): 원장의
   상장주식수 변화로 액면분할·병합을 검출해 `run(corporate_actions=)`로 넘기면 엔진이 사건
   세션 시작에 보유 수량·평균단가를 조정하고(단주는 시가 현금 정산) 대기 주문을 취소한다.
@@ -92,6 +97,8 @@ uv run pyright src tests examples
 uv run python examples/run_demo.py      # PyKRX CSV(005930)로 골든크로스 백테스트
 uv run python examples/run_krx_demo.py  # KRX 원장 parquet 슬라이스로 동일 전략 실행
 uv run python examples/run_krx_demo.py <원장 디렉토리>   # quant-data 빌드 전체 대상
+uv run maturin develop --manifest-path rust/backtest_core/Cargo.toml --release  # Rust 코어(선택)
+uv run python examples/run_krx_demo.py --core rust      # Rust 코어로 같은 데모
 ```
 
 ## 검증: Zipline 대조

@@ -12,7 +12,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import IntEnum
 
-from backtest_engine.types.events import FillEvent, OrderEvent, OrderUpdateEvent
+from backtest_engine.types.events import (
+    CorporateActionEvent,
+    FillEvent,
+    OrderEvent,
+    OrderUpdateEvent,
+)
 from backtest_engine.types.market import MarketSnapshot
 
 
@@ -41,7 +46,7 @@ class FillOccurred:
 class StrategyNotify:
     """전략이 requirements().events에 선언한 이벤트를 전달한다."""
 
-    event: FillEvent | OrderUpdateEvent
+    event: FillEvent | OrderUpdateEvent | CorporateActionEvent
     snapshot: MarketSnapshot
 
 

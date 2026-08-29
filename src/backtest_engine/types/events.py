@@ -48,13 +48,46 @@ class OrderUpdateEvent:
     detail: str | None = None
 
 
+class CorporateActionType(Enum):
+    SPLIT = "split"  # 주식 수 증가 + 가격 반비례 확인
+    REVERSE_SPLIT = "reverse_split"  # 주식 수 감소 + 가격 반비례 확인
+    SHARE_COUNT_CHANGE = "share_count_change"  # 주식 수 변화만 확인 (가격 미확인) — 알림 전용
+
+
 @dataclass(frozen=True)
 class CorporateActionEvent:
-    """배당·분할 등 기업 행위 통지. (스키마만 정의, v1 미전달)"""
+    """상장주식수 변동 사건 통지 (D1).
+
+    ratio는 구주 1주당 신주 수(SPLIT이면 > 1). 엔진은 SPLIT/REVERSE_SPLIT에만 포지션을
+    조정하고, SHARE_COUNT_CHANGE는 기록·알림만 한다. detail은 검출 근거.
+    """
 
     ts: datetime
     instrument: InstrumentId
-    action_type: str
+    action_type: CorporateActionType
+    ratio: Decimal
+    detail: str
+
+    def __post_init__(self) -> None:
+        if self.ratio <= 0:
+            raise ValueError(
+                f"corporate action ratio must be > 0 — instrument={self.instrument.symbol} "
+                f"ts={self.ts} ratio={self.ratio}"
+            )
+
+
+@dataclass(frozen=True)
+class CorporateActionApplied:
+    """엔진이 포지션에 실제로 적용한 자본변동 기록. Fill과 함께 회계 재계산의 입력이다."""
+
+    ts: datetime
+    instrument: InstrumentId
+    action: CorporateActionEvent
+    old_quantity: Decimal
+    new_quantity: Decimal
+    old_average_price: float
+    new_average_price: float
+    cash_paid: float  # 단주(소수 부분) 정산 현금, 세션 시가 기준
 
 
 @dataclass(frozen=True)

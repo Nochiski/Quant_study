@@ -1,7 +1,8 @@
 """포트폴리오 원장.
 
-현금과 보유 수량은 FillEvent 적용 시점에만 변한다 — 주문 생성으로는
-절대 변하지 않는다. Snapshot은 fills와 bars만으로 재계산 가능해야 한다.
+현금과 보유 수량은 FillEvent와 확인된 자본변동(CorporateActionApplied) 적용
+시점에만 변한다 — 주문 생성으로는 절대 변하지 않는다. Snapshot은 bars + fills +
+corporate actions applied만으로 재계산 가능해야 한다.
 
 명령(apply/mark)과 조회(snapshot/cash/held_qty)를 분리한다 (CQS).
 """
@@ -10,10 +11,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal
+from decimal import ROUND_FLOOR, Decimal
 
 from backtest_engine.errors import NegativeCashError, NegativePositionError
-from backtest_engine.types.events import FillEvent
+from backtest_engine.types.events import CorporateActionApplied, CorporateActionEvent, FillEvent
 from backtest_engine.types.instruments import InstrumentId
 from backtest_engine.types.market import MarketSnapshot
 from backtest_engine.types.orders import Side
@@ -79,6 +80,48 @@ class Portfolio:
                 del self._ledgers[fill.instrument]
 
         self._marks.setdefault(fill.instrument, fill.price)
+
+    def apply_corporate_action(
+        self, action: CorporateActionEvent, settlement_price: float
+    ) -> CorporateActionApplied | None:
+        """확인된 분할·병합을 보유 포지션에 적용한다. 보유가 없으면 None.
+
+        수량은 floor(qty × ratio), 평균단가는 avg / ratio. 단주(소수 부분)는
+        settlement_price(사건 세션 시가)로 현금 지급한다.
+        """
+        ledger = self._ledgers.get(action.instrument)
+        if ledger is None:
+            return None
+        if settlement_price <= 0:
+            raise ValueError(
+                f"corporate action settlement price must be > 0 — "
+                f"instrument={action.instrument.symbol} ts={action.ts} price={settlement_price}"
+            )
+        old_quantity = ledger.quantity
+        scaled = old_quantity * action.ratio
+        new_quantity = scaled.quantize(Decimal(1), rounding=ROUND_FLOOR)
+        cash_paid = float(scaled - new_quantity) * settlement_price
+        old_average = ledger.average_price
+        new_average = old_average / float(action.ratio)
+
+        self._cash += cash_paid
+        if new_quantity == 0:
+            del self._ledgers[action.instrument]
+        else:
+            ledger.quantity = new_quantity
+            ledger.average_price = new_average
+        # 이전 세션 마크(분할 전 가격)로 평가하면 equity가 왜곡되므로 정산가로 교체한다.
+        self._marks[action.instrument] = settlement_price
+        return CorporateActionApplied(
+            ts=action.ts,
+            instrument=action.instrument,
+            action=action,
+            old_quantity=old_quantity,
+            new_quantity=new_quantity,
+            old_average_price=old_average,
+            new_average_price=new_average,
+            cash_paid=cash_paid,
+        )
 
     def mark(self, snapshot: MarketSnapshot) -> None:
         """현재 세션 종가로 평가 가격을 갱신한다."""

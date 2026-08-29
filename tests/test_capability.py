@@ -150,7 +150,12 @@ def test_reference_capabilities_are_honest() -> None:
         for capability in capabilities.events
         if capability.support is SupportLevel.IMPLEMENTED
     }
-    assert implemented_events == {EventKind.MARKET, EventKind.FILL, EventKind.ORDER_UPDATE}
+    assert implemented_events == {
+        EventKind.MARKET,
+        EventKind.FILL,
+        EventKind.ORDER_UPDATE,
+        EventKind.CORPORATE_ACTION,
+    }
     implemented_features = {
         capability.feature
         for capability in capabilities.features

@@ -14,6 +14,10 @@ EventStore에 자동으로 남는다.
 
 from __future__ import annotations
 
+from collections import defaultdict
+from collections.abc import Callable, Iterable
+from datetime import datetime
+
 from backtest_engine.capability import (
     EngineCapabilities,
     prepare_strategy,
@@ -37,8 +41,15 @@ from backtest_engine.engine.queue import (
 )
 from backtest_engine.engine.router import DecisionRouter
 from backtest_engine.engine.store import DecisionRecord, EventStore, RecordKind
+from backtest_engine.errors import CorporateActionWithoutBar
 from backtest_engine.ports.execution import SlippageModel
-from backtest_engine.types.events import OrderStatus, OrderUpdateEvent, StrategyEvent
+from backtest_engine.types.events import (
+    CorporateActionEvent,
+    CorporateActionType,
+    OrderStatus,
+    OrderUpdateEvent,
+    StrategyEvent,
+)
 from backtest_engine.types.market import MarketSnapshot
 from backtest_engine.types.orders import OrderType, Side, TimeInForce
 from backtest_engine.types.requirements import EventKind, HistoryRequest, StrategyRequirements
@@ -72,6 +83,7 @@ class _Run:
         )
         self.store = EventStore()
         self.queue = EventQueue()
+        self.corporate_actions: dict[datetime, list[CorporateActionEvent]] = defaultdict(list)
 
     def wants(self, kind: EventKind) -> bool:
         return kind in self.requirements.events
@@ -115,7 +127,21 @@ class BacktestEngine:
             )
         return self._event_store
 
-    def run(self, strategy: Strategy, feed: DataFeed) -> BacktestResult:
+    def run(
+        self,
+        strategy: Strategy,
+        feed: DataFeed,
+        *,
+        corporate_actions: Iterable[CorporateActionEvent] = (),
+    ) -> BacktestResult:
+        """
+        Args:
+            strategy: 실행할 전략. requirements()가 먼저 Capability 검증을 통과해야 한다.
+            feed: 세션순 MarketSnapshot 공급자.
+            corporate_actions: 기간 안의 자본변동 사건. 확인된 분할·병합(SPLIT/REVERSE_SPLIT)은
+                사건 세션 시작 시 보유 포지션에 적용되고, 모든 사건은 기록되며 선언한 전략에
+                전달된다. 사건 세션에 해당 종목 Bar가 없으면 CorporateActionWithoutBar.
+        """
         # 1. Capability 검증은 첫 Bar를 읽기 전, 전략 등록 직후 수행한다.
         validated = prepare_strategy(strategy, self._capabilities)
         run = _Run(
@@ -126,6 +152,16 @@ class BacktestEngine:
             self._max_participation,
         )
         self._event_store = run.store
+        for action in corporate_actions:
+            run.corporate_actions[action.ts].append(action)
+        sessions = set(feed.sessions)
+        for ts in sorted(run.corporate_actions):
+            if ts not in sessions:
+                symbols = [a.instrument.symbol for a in run.corporate_actions[ts]]
+                raise CorporateActionWithoutBar(
+                    f"corporate action ts is not a feed session — ts={ts} instruments={symbols} "
+                    f"sessions={len(sessions)}"
+                )
 
         for snapshot in feed.snapshots():
             run.queue.push(snapshot.ts, EventPriority.MARKET, MarketArrived(snapshot))
@@ -194,6 +230,11 @@ class BacktestEngine:
                 OrderUpdateEvent(ts=snapshot.ts, order_id=order_id, status=status, detail=detail),
                 snapshot,
             )
+
+        # 자본변동은 이 세션의 어떤 체결보다 먼저 적용한다 — 분할 후 가격으로 체결되는
+        # 주문이 분할 전 수량과 섞이면 안 된다.
+        for action in run.corporate_actions.get(snapshot.ts, ()):
+            self._apply_corporate_action(run, action, snapshot, update)
 
         # 매도 먼저 처리해 매수가 쓸 수 있는 현금을 확정한다 (결정론적 규칙).
         due = sorted(
@@ -274,6 +315,36 @@ class BacktestEngine:
             update(order.order_id, OrderStatus.CANCELLED, reason)
 
         run.queue.push(snapshot.ts, EventPriority.SESSION_CLOSE, SessionClose(snapshot))
+
+    def _apply_corporate_action(
+        self,
+        run: _Run,
+        action: CorporateActionEvent,
+        snapshot: MarketSnapshot,
+        update: Callable[[str, OrderStatus, str | None], None],
+    ) -> None:
+        if not snapshot.has(action.instrument):
+            raise CorporateActionWithoutBar(
+                f"corporate action session has no bar for instrument — "
+                f"instrument={action.instrument.symbol} ts={action.ts} "
+                f"action={action.action_type.value} ratio={action.ratio}"
+            )
+        run.store.append(action.ts, RecordKind.CORPORATE_ACTION, action)
+        for stale in run.order_manager.cancel_for_instrument(action.instrument):
+            update(
+                stale.order_id,
+                OrderStatus.CANCELLED,
+                f"cancelled by corporate action — instrument={action.instrument.symbol} "
+                f"action={action.action_type.value} ratio={action.ratio} ts={action.ts}",
+            )
+        if action.action_type in (CorporateActionType.SPLIT, CorporateActionType.REVERSE_SPLIT):
+            applied = run.portfolio.apply_corporate_action(
+                action, snapshot.bar(action.instrument).open
+            )
+            if applied is not None:
+                run.store.append(action.ts, RecordKind.CORPORATE_ACTION_APPLIED, applied)
+        if run.wants(EventKind.CORPORATE_ACTION):
+            run.queue.push(action.ts, EventPriority.NOTIFY, StrategyNotify(action, snapshot))
 
     def _on_session_close(self, run: _Run, snapshot: MarketSnapshot) -> None:
         run.portfolio.mark(snapshot)

@@ -18,7 +18,10 @@ from decimal import Decimal
 from pathlib import Path
 
 from backtest_engine.data.cleaning import RawBar, clean_raw_bars, merge_results
+from backtest_engine.data.corporate_actions import ShareCountRow, detect_share_count_events
+from backtest_engine.ports.corporate_actions import CorporateActionQuery, CorporateActionResult
 from backtest_engine.ports.market_data import BarQuery, LoadResult, LoadStatus
+from backtest_engine.types.events import CorporateActionEvent
 from backtest_engine.types.instruments import InstrumentId
 
 KOSPI_TRADES_FILE = "krx_stk_bydd_trd.parquet"
@@ -26,6 +29,7 @@ KOSDAQ_TRADES_FILE = "krx_ksq_bydd_trd.parquet"
 TRADES_FILES = (KOSPI_TRADES_FILE, KOSDAQ_TRADES_FILE)
 
 _COLUMNS = ("bas_dd", "isu_cd", "tdd_opnprc", "tdd_hgprc", "tdd_lwprc", "tdd_clsprc", "acc_trdvol")
+_SHARE_COLUMNS = ("bas_dd", "isu_cd", "tdd_clsprc", "acc_trdvol", "list_shrs")
 
 
 @dataclass(frozen=True)
@@ -39,7 +43,9 @@ class _TradeRow:
     file: str
 
 
-def _read_rows(path: Path, symbol: str, start: date | None, end: date | None) -> list[_TradeRow]:
+def _read_records(
+    path: Path, symbol: str, start: date | None, end: date | None, columns: tuple[str, ...]
+) -> list[dict[str, object]]:
     import pyarrow.parquet as pq  # 어댑터 안에서만 import — 코어는 pyarrow를 모른다
 
     filters: list[tuple[str, str, object]] = [("isu_cd", "==", symbol)]
@@ -47,9 +53,12 @@ def _read_rows(path: Path, symbol: str, start: date | None, end: date | None) ->
         filters.append(("bas_dd", ">=", start))
     if end is not None:
         filters.append(("bas_dd", "<=", end))
-    table = pq.read_table(path, columns=list(_COLUMNS), filters=filters)
+    return pq.read_table(path, columns=list(columns), filters=filters).to_pylist()
+
+
+def _read_rows(path: Path, symbol: str, start: date | None, end: date | None) -> list[_TradeRow]:
     rows: list[_TradeRow] = []
-    for record in table.to_pylist():
+    for record in _read_records(path, symbol, start, end, _COLUMNS):
         rows.append(
             _TradeRow(
                 session=_as_date(record["bas_dd"]),
@@ -105,9 +114,7 @@ class KrxParquetBarSource:
             self._load_one(instrument, query, available) for instrument in query.instruments
         )
 
-    def _load_one(
-        self, instrument: InstrumentId, query: BarQuery, files: list[Path]
-    ) -> LoadResult:
+    def _load_one(self, instrument: InstrumentId, query: BarQuery, files: list[Path]) -> LoadResult:
         rows: list[_TradeRow] = []
         for path in files:
             rows.extend(_read_rows(path, instrument.symbol, query.start, query.end))
@@ -157,3 +164,53 @@ def _first_duplicate_session(sorted_rows: list[_TradeRow]) -> _TradeRow | None:
         if previous.session == current.session:
             return current
     return None
+
+
+class KrxParquetCorporateActionSource:
+    """원장 시세 테이블의 `list_shrs`(상장주식수) 변화로 액면분할·병합을 검출한다.
+
+    검출 규칙은 `data.corporate_actions.detect_share_count_events`. 기간 필터는 사건 세션
+    기준이며, 직전 세션 행이 필요하므로 읽기는 기간 제한 없이 하고 결과만 자른다.
+    """
+
+    def __init__(self, root: Path) -> None:
+        self._root = root
+
+    def load_actions(self, query: CorporateActionQuery) -> CorporateActionResult:
+        available = [self._root / name for name in TRADES_FILES if (self._root / name).exists()]
+        if not available:
+            return CorporateActionResult(
+                actions=(),
+                status=LoadStatus.NO_DATA,
+                detail=f"no KRX trade parquet found — root={self._root} expected={TRADES_FILES}",
+            )
+        actions: list[CorporateActionEvent] = []
+        for instrument in query.instruments:
+            rows: list[ShareCountRow] = []
+            for path in available:
+                for record in _read_records(path, instrument.symbol, None, None, _SHARE_COLUMNS):
+                    rows.append(
+                        ShareCountRow(
+                            session=_as_date(record["bas_dd"]),
+                            listed_shares=_as_int(record["list_shrs"]),
+                            close=_as_int(record["tdd_clsprc"]),
+                            volume=_as_int(record["acc_trdvol"]),
+                        )
+                    )
+            if not rows:
+                return CorporateActionResult(
+                    actions=(),
+                    status=LoadStatus.NO_DATA,
+                    detail=(
+                        f"no rows for instrument — symbol={instrument.symbol} root={self._root} "
+                        f"files={[p.name for p in available]}"
+                    ),
+                )
+            rows.sort(key=lambda row: row.session)
+            actions.extend(
+                event
+                for event in detect_share_count_events(rows, instrument)
+                if query.includes(event.ts.date())
+            )
+        actions.sort(key=lambda event: (event.ts, event.instrument.symbol))
+        return CorporateActionResult(actions=tuple(actions), status=LoadStatus.OK)

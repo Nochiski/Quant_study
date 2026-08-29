@@ -203,7 +203,8 @@ def reference_engine_capabilities() -> EngineCapabilities:
     3단계의 NO_ACTION, SET_PORTFOLIO_TARGET, LIQUIDATE_POSITION, 4a의
     SET_POSITION_TARGET, ADJUST_POSITION, 4b의 SUBMIT_ORDER(LIMIT/STOP 기능 포함),
     4c의 CANCEL_ORDER, REPLACE_ORDER와 FILL/ORDER_UPDATE 이벤트 전달, 4d의
-    PARTIAL_FILL(참여율 캡·IOC/FOK), MARKET 이벤트, EverySession 일정만 IMPLEMENTED다.
+    PARTIAL_FILL(참여율 캡·IOC/FOK), D1의 CORPORATE_ACTION 전달, MARKET 이벤트,
+    EverySession 일정만 IMPLEMENTED다.
     나머지는 스키마만 정의된 NOT_IMPLEMENTED 상태로, handler와 테스트가 추가될 때 승격한다.
     """
     not_implemented_actions = {
@@ -242,11 +243,7 @@ def reference_engine_capabilities() -> EngineCapabilities:
         EventCapability(EventKind.TIMER, SupportLevel.NOT_IMPLEMENTED, "no timer scheduler in v1"),
         EventCapability(EventKind.FILL, SupportLevel.IMPLEMENTED),
         EventCapability(EventKind.ORDER_UPDATE, SupportLevel.IMPLEMENTED),
-        EventCapability(
-            EventKind.CORPORATE_ACTION,
-            SupportLevel.UNSUPPORTED,
-            "daily OHLCV feed has no corporate action data",
-        ),
+        EventCapability(EventKind.CORPORATE_ACTION, SupportLevel.IMPLEMENTED),
     )
     schedules = (
         ScheduleCapability(type(EverySession()).__name__, SupportLevel.IMPLEMENTED),

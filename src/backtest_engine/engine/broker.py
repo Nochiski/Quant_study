@@ -180,8 +180,18 @@ class BrokerSim:
         fill = self.fill(quote, open_order, bar, fill_id)
         return ExecutionOutcome(fill=fill, status=quote.status, detail=quote.detail)
 
-    def quote(self, open_order: OpenOrder, bar: Bar, buying_power: float) -> Quote:
-        """체결 없이 "이 세션에 얼마에 몇 주 체결되는가"만 정한다. quantity 0이면 체결 없음."""
+    def quote(
+        self,
+        open_order: OpenOrder,
+        bar: Bar,
+        buying_power: float,
+        held: Decimal = Decimal(0),
+    ) -> Quote:
+        """체결 없이 "이 세션에 얼마에 몇 주 체결되는가"만 정한다. quantity 0이면 체결 없음.
+
+        held는 이 세션에서 앞서 처리된 체결까지 반영한 현재 보유 수량(부호 있음). 매도 중
+        보유를 넘어 숏을 여는 부분은 매수와 같이 buying_power 캡을 받는다 (스펙 5 결정 1).
+        """
         order = open_order.order
         decision = execution_price(order, bar, open_order.triggered)
         if decision.price is None:
@@ -222,8 +232,18 @@ class BrokerSim:
         # 슬리피지는 실제 체결 수량에 의존하므로 유동성 캡 이후, 여력 캡 이전에 정한다.
         price, slip = self._slipped_price(order, bar, base_price, quantity)
 
-        if order.side is Side.BUY:
-            affordable = self._affordable_quantity(buying_power, price)
+        short_entry = Decimal(0)
+        if order.side is Side.SELL:
+            short_entry = quantity - max(held, Decimal(0))
+        if order.side is Side.BUY or short_entry > 0:
+            if order.side is Side.SELL:
+                # 보유분 매도는 무제한이고 그만큼 노출이 줄어 여력이 늘어난다. 숏 진입분만
+                # (청산 후 여력)으로 자른다.
+                closing = max(held, Decimal(0))
+                freed_power = buying_power + float(closing) * price
+                affordable = self._affordable_quantity(freed_power, price) + closing
+            else:
+                affordable = self._affordable_quantity(buying_power, price)
             if affordable <= 0:
                 return Quote(
                     order.order_id,

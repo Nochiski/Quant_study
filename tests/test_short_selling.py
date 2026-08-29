@@ -120,10 +120,9 @@ class TestShortAccounting:
         )
         portfolio.charge(cost)
         assert portfolio.cash == pytest.approx(9_999.91)
+        # 음수 금액은 CostAccrued 생성 시점에 거절된다 (Portfolio.charge까지 오지 않는다).
         with pytest.raises(ValueError, match="amount"):
-            portfolio.charge(
-                CostAccrued(ts=day(2), kind=CostKind.SHORT_BORROW, instrument=None, amount=-1.0)
-            )
+            CostAccrued(ts=day(2), kind=CostKind.SHORT_BORROW, instrument=None, amount=-1.0)
 
 
 # --- Router -------------------------------------------------------------------
@@ -305,3 +304,94 @@ class TestShortGolden:
         result = engine.run(ShortStrategy((target(-10), target(0))), DataFeed(BARS))
         assert engine.event_store.costs() == ()
         assert result.snapshots[1].cash == pytest.approx(11_000.0)
+
+
+# --- 리뷰 결함 회귀 (5단계) --------------------------------------------------------
+
+
+class TestReviewRegressions:
+    def test_weight_zero_from_long_never_flips_to_short(self) -> None:
+        """DEFECT-404: 숏 허용이어도 비중 0 정리는 반올림 오차로 숏을 열지 않는다."""
+        from tests.test_router import market
+
+        router = make_router(features=SHORT_FEATURES)
+        held10_marked_100 = portfolio_with(0.0, {INSTRUMENT: (10, 100.0)})
+        decision = StrategyDecision.of(
+            day(1), SetPositionTarget(target=WeightTarget(INSTRUMENT, 0.0), execution=policy())
+        )
+        # 종가 90 기준 1,000/90 = 11주지만 보유 10주까지만 판다.
+        (order,) = router.route(decision, "D-000001", held10_marked_100, market(90.0)).orders
+        assert (order.side, order.quantity) == (Side.SELL, Decimal(10))
+
+    def test_weight_flip_is_intentional_and_not_clamped(self) -> None:
+        from tests.test_router import market
+
+        router = make_router(features=SHORT_FEATURES)
+        held10 = portfolio_with(0.0, {INSTRUMENT: (10, 100.0)})
+        decision = StrategyDecision.of(
+            day(1), SetPositionTarget(target=WeightTarget(INSTRUMENT, -1.0), execution=policy())
+        )
+        (order,) = router.route(decision, "D-000001", held10, market(100.0)).orders
+        assert (order.side, order.quantity) == (Side.SELL, Decimal(20))
+
+    def test_short_entry_is_capped_by_buying_power(self) -> None:
+        """DEFECT-406: 공매도 진입도 레버리지 한도(여력)에 걸린다."""
+        bars = (
+            make_ohlc(day(1), INSTRUMENT, 100.0, 100.0, 100.0, 100.0, volume=10_000_000),
+            make_ohlc(day(2), INSTRUMENT, 100.0, 100.0, 100.0, 100.0, volume=10_000_000),
+        )
+        engine = BacktestEngine(RunConfig(run_id="short-cap", initial_cash=10_000.0, fee_bps=0.0))
+        result = engine.run(ShortStrategy((target(-1000),)), DataFeed(bars))
+        assert [int(f.quantity) for f in result.fills] == [100]
+        assert result.snapshots[-1].gross_exposure == pytest.approx(1.0)
+
+    def test_selling_held_shares_is_not_capped(self) -> None:
+        bars = (
+            make_ohlc(day(1), INSTRUMENT, 100.0, 100.0, 100.0, 100.0),
+            make_ohlc(day(2), INSTRUMENT, 100.0, 100.0, 100.0, 100.0),
+            make_ohlc(day(3), INSTRUMENT, 100.0, 100.0, 100.0, 100.0),
+        )
+        engine = BacktestEngine(RunConfig(run_id="sell-held", initial_cash=10_000.0, fee_bps=0.0))
+        # 100주 매수(전 현금) 후 150주 매도: 보유 100 청산으로 여력 10,000 → 숏 100까지 → 150 전량
+        result = engine.run(ShortStrategy((target(100), target(-50))), DataFeed(bars))
+        assert [(f.side, int(f.quantity)) for f in result.fills] == [
+            (Side.BUY, 100),
+            (Side.SELL, 150),
+        ]
+
+    def test_short_split_rounds_toward_zero(self) -> None:
+        """DEFECT-405: 숏 −7 × 1.5 = −10.5 → −10, 단주 0.5는 정산가로 환매(현금 차감)."""
+        from backtest_engine.types.events import CorporateActionEvent, CorporateActionType
+
+        portfolio = Portfolio(initial_cash=10_000.0, allow_short=True)
+        portfolio.apply(fill(Side.SELL, 7, 100.0))
+        action = CorporateActionEvent(
+            ts=day(2),
+            instrument=INSTRUMENT,
+            action_type=CorporateActionType.SPLIT,
+            ratio=Decimal("1.5"),
+            detail="t",
+        )
+        applied = portfolio.apply_corporate_action(action, 60.0)
+        assert applied is not None
+        assert applied.new_quantity == Decimal(-10)
+        assert applied.cash_paid == pytest.approx(-30.0)
+        assert portfolio.cash == pytest.approx(10_700.0 - 30.0)
+
+    def test_borrow_cost_can_trigger_wipeout_check(self) -> None:
+        """DEFECT-407: 비용 차감 후에 자본 잠식을 검사한다."""
+        from backtest_engine.errors import EquityWipedOut
+
+        bars = (
+            make_ohlc(day(1), INSTRUMENT, 100.0, 100.0, 100.0, 100.0),
+            make_ohlc(day(2), INSTRUMENT, 100.0, 100.0, 100.0, 100.0),
+            make_ohlc(day(3), INSTRUMENT, 100.0, 199.0, 100.0, 199.0),
+        )
+        # 숏 100주 @100 → equity 10,000; D3 종가 199 → equity 100; 1bp 차입비 19.9면 아직 양수
+        # 차입비를 세션당 1%로 올리면 199 → equity −99 → 잠식
+        config = RunConfig(
+            run_id="wipe", initial_cash=10_000.0, fee_bps=0.0, short_borrow_bps_annual=25_200.0
+        )
+        engine = BacktestEngine(config)
+        with pytest.raises(EquityWipedOut):
+            engine.run(ShortStrategy((target(-100),)), DataFeed(bars))

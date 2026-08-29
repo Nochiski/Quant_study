@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import ROUND_FLOOR, ROUND_HALF_EVEN, Decimal
+from decimal import ROUND_DOWN, ROUND_HALF_EVEN, Decimal
 
 from backtest_engine.errors import NegativeCashError, NegativePositionError
 from backtest_engine.types.events import (
@@ -47,8 +47,8 @@ class Portfolio:
     Args:
         initial_cash: 시작 현금.
         allow_short: True면 음수 수량(공매도)을 허용한다 (SHORT_SELLING 선언 전략).
-        allow_margin: True면 음수 현금을 허용하되 equity가 0 미만이 되는 체결은 거절한다
-            (MARGIN 선언 전략). 여력 상한은 브로커가 먼저 자른다.
+        allow_margin: True면 음수 현금을 허용한다 (MARGIN 선언 전략). 여력 상한은 브로커가
+            먼저 자르고, equity < 0 검사는 세션 종료에 엔진(EquityWipedOut)이 한다.
     """
 
     def __init__(
@@ -142,7 +142,9 @@ class Portfolio:
             )
         old_quantity = ledger.quantity
         scaled = scale_quantity(old_quantity, action.ratio)
-        new_quantity = scaled.quantize(Decimal(1), rounding=ROUND_FLOOR)
+        # 롱은 내림, 숏은 0 쪽으로 (−10.5 → −10): 단주는 정산가로 현금 정산되므로 |수량|이
+        # 이론값을 넘어선 안 된다.
+        new_quantity = scaled.quantize(Decimal(1), rounding=ROUND_DOWN)
         cash_paid = float(scaled - new_quantity) * settlement_price
         old_average = ledger.average_price
         new_average = old_average / float(action.ratio)

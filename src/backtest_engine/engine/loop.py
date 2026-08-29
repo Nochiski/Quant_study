@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from datetime import datetime
-from decimal import ROUND_FLOOR, Decimal
+from decimal import Decimal
 
 from backtest_engine.capability import (
     EngineCapabilities,
@@ -132,6 +132,9 @@ class _BuyingPower:
     @property
     def available(self) -> float:
         return self._leverage * self._equity - self._gross
+
+    def quantity_of(self, instrument: InstrumentId) -> Decimal:
+        return self._quantities.get(instrument, Decimal(0))
 
     def consume(self, fill: FillEvent) -> None:
         self.consume_quantity(fill.instrument, fill.side, fill.quantity, fill.price, fill.fee)
@@ -333,7 +336,12 @@ class BacktestEngine:
             self._process_group(run, group, snapshot, power, update)
         for entry in due:
             order = entry.order
-            quote = run.broker.quote(entry, snapshot.bar(order.instrument), power.available)
+            quote = run.broker.quote(
+                entry,
+                snapshot.bar(order.instrument),
+                power.available,
+                held=power.quantity_of(order.instrument),
+            )
             if quote.quantity > 0:
                 self._apply_quote(run, entry, quote, quote.quantity, snapshot, power, update)
             elif quote.status is ExecutionStatus.TRIGGERED_UNFILLED:
@@ -454,6 +462,12 @@ class BacktestEngine:
         if missing and policy is not GroupPolicy.BEST_EFFORT:
             cancel_all(f"leg without bar in session instruments={missing}")
             return
+        if policy is not GroupPolicy.BEST_EFFORT and len(entries) < len(group.order_ids):
+            # 라우팅 이후 leg가 취소·정정·자본변동으로 사라졌다 — 남은 leg만으로 판정하면
+            # "한쪽만 체결" 사고가 된다.
+            gone = sorted(set(group.order_ids) - {e.order_id for e in entries})
+            cancel_all(f"leg(s) no longer open before group execution missing={gone}")
+            return
 
         # 1) 견적 패스: 매도 leg 먼저, 매도 대금이 매수 leg 여력에 반영되도록 순차 소모.
         legs = sorted(
@@ -463,7 +477,12 @@ class BacktestEngine:
         checkpoint = power.checkpoint()
         quotes: list[tuple[OpenOrder, Quote]] = []
         for entry in legs:
-            quote = run.broker.quote(entry, snapshot.bar(entry.order.instrument), power.available)
+            quote = run.broker.quote(
+                entry,
+                snapshot.bar(entry.order.instrument),
+                power.available,
+                held=power.quantity_of(entry.order.instrument),
+            )
             quotes.append((entry, quote))
             if quote.quantity > 0:
                 order = entry.order
@@ -482,7 +501,10 @@ class BacktestEngine:
             for entry, quote in quotes:
                 if quote.quantity > 0:
                     self._apply_quote(run, entry, quote, quote.quantity, snapshot, power, update)
-            order_manager.drop_group(group.group_id)
+            # 잔량이 남은 leg(GTC)는 다음 세션에도 그룹 경로로 재시도한다 — 그룹을 버리면
+            # due()에서도 open_groups()에서도 보이지 않아 영영 체결되지 않는다.
+            if not order_manager.group_entries(group.group_id):
+                order_manager.drop_group(group.group_id)
             return
 
         if policy is GroupPolicy.ALL_OR_NONE:
@@ -499,13 +521,23 @@ class BacktestEngine:
             order_manager.drop_group(group.group_id)
             return
 
-        # PROPORTIONAL: 가장 낮은 체결 비율에 맞춰 전 leg 축소, 잔량은 취소.
-        scale = min((q.quantity / e.remaining for e, q in quotes), default=Decimal(0))
-        if scale <= 0:
+        # PROPORTIONAL: 가장 낮은 체결 비율 leg(j)에 맞춰 전 leg 축소, 잔량은 취소.
+        # 비율을 Decimal로 굴리면 1/3 같은 값이 제약 leg 자신을 0주로 만든다 — 정수 교차곱으로
+        # floor(remaining_i × q_j / remaining_j)를 정확히 계산한다.
+        tight_entry, tight_quote = min(
+            quotes, key=lambda item: item[1].quantity / item[0].remaining
+        )
+        if tight_quote.quantity <= 0:
             cancel_all("no leg fillable")
             return
-        for entry, quote in quotes:
-            quantity = (entry.remaining * scale).quantize(Decimal(1), rounding=ROUND_FLOOR)
+        scale = tight_quote.quantity / tight_entry.remaining
+        tight_remaining = tight_entry.remaining
+        # 체결이 remaining을 갱신하므로 수량은 전부 먼저 확정한다.
+        planned = [
+            (entry, quote, (entry.remaining * tight_quote.quantity) // tight_remaining)
+            for entry, quote in quotes
+        ]
+        for entry, quote, quantity in planned:
             if quantity > 0:
                 self._apply_quote(run, entry, quote, quantity, snapshot, power, update)
         for entry in order_manager.group_entries(group.group_id):
@@ -556,6 +588,10 @@ class BacktestEngine:
 
     def _on_session_close(self, run: _Run, snapshot: MarketSnapshot) -> None:
         run.portfolio.mark(snapshot)
+        # 세션 종료 평가 상태에서 차입·이자 비용을 발생시킨 뒤 자본 잠식을 검사한다.
+        for cost in session_costs(run.portfolio.snapshot(snapshot.ts), run.config):
+            run.portfolio.charge(cost)
+            run.store.append(cost.ts, RecordKind.COST, cost)
         marked = run.portfolio.snapshot(snapshot.ts)
         if marked.equity < 0:
             raise EquityWipedOut(
@@ -563,11 +599,7 @@ class BacktestEngine:
                 f"equity={marked.equity} cash={marked.cash} "
                 f"positions={[(p.instrument.symbol, str(p.quantity)) for p in marked.positions]}"
             )
-        # 세션 종료 평가 상태에서 차입·이자 비용을 발생시키고 그 뒤 스냅샷을 남긴다.
-        for cost in session_costs(run.portfolio.snapshot(snapshot.ts), run.config):
-            run.portfolio.charge(cost)
-            run.store.append(cost.ts, RecordKind.COST, cost)
-        run.store.append(snapshot.ts, RecordKind.SNAPSHOT, run.portfolio.snapshot(snapshot.ts))
+        run.store.append(snapshot.ts, RecordKind.SNAPSHOT, marked)
 
         if not calendar.matches(run.requirements.schedule, snapshot.ts):
             return

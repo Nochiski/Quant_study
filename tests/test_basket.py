@@ -256,3 +256,84 @@ class TestPairGolden:
             BasketStrategy((hold_b(10), pair(GroupPolicy.BEST_EFFORT))), DataFeed(BARS)
         )
         assert d3_fills(result) == [("000660", Side.SELL, 6), ("005930", Side.BUY, 3)]
+
+
+# --- 리뷰 결함 회귀 (5c) ---------------------------------------------------------------
+
+
+def gtc_leg(instrument: InstrumentId, side: Side, quantity: int) -> SubmitOrder:
+    core = OrderCore(instrument, side, Decimal(quantity), TimeInForce.GTC)
+    return SubmitOrder(request=MarketOrderRequest(core=core))
+
+
+class TestReviewRegressions:
+    def test_proportional_keeps_the_binding_leg_when_ratio_is_non_terminating(self) -> None:
+        """DEFECT-401: B 캡 1/3 → B 1주, A floor(10×1/3)=3주 (B가 0주가 되면 안 된다)."""
+        bars = (
+            make_ohlc(day(1), A, 100.0, 100.0, 100.0, 100.0, volume=1_000),
+            make_ohlc(day(1), B, 50.0, 50.0, 50.0, 50.0, volume=1_000),
+            make_ohlc(day(2), A, 100.0, 100.0, 100.0, 100.0, volume=1_000),
+            make_ohlc(day(2), B, 50.0, 50.0, 50.0, 50.0, volume=1_000),
+            make_ohlc(day(3), A, 100.0, 100.0, 100.0, 100.0, volume=1_000),
+            make_ohlc(day(3), B, 60.0, 60.0, 60.0, 60.0, volume=10),
+        )
+        basket = BasketAction(
+            legs=(market_leg(A, Side.BUY, 10), market_leg(B, Side.SELL, 3)),
+            group_policy=GroupPolicy.PROPORTIONAL,
+        )
+        engine = BacktestEngine(
+            RunConfig(run_id="prop", initial_cash=100_000.0, fee_bps=0.0), max_participation=0.1
+        )
+        result = engine.run(BasketStrategy((hold_b(3), basket)), DataFeed(bars))
+        assert d3_fills(result) == [("000660", Side.SELL, 1), ("005930", Side.BUY, 3)]
+
+    def test_best_effort_gtc_leg_is_retried_next_session(self) -> None:
+        """DEFECT-402/501: BEST_EFFORT의 GTC leg 잔량은 다음 세션에 이어서 체결된다."""
+        basket = BasketAction(
+            legs=(gtc_leg(A, Side.BUY, 10), gtc_leg(B, Side.SELL, 10)),
+            group_policy=GroupPolicy.BEST_EFFORT,
+        )
+        engine = BacktestEngine(
+            RunConfig(run_id="be-gtc", initial_cash=100_000.0, fee_bps=0.0), max_participation=0.1
+        )
+        result = engine.run(BasketStrategy((hold_b(10), basket)), DataFeed(BARS))
+        assert_transitions_valid(engine.event_store.order_updates())
+        assert [
+            (f.ts, f.instrument.symbol, int(f.quantity)) for f in result.fills if f.ts >= day(3)
+        ] == [
+            (day(3), "000660", 6),
+            (day(3), "005930", 10),
+            (day(4), "000660", 4),
+        ]
+        assert statuses(engine, "O-000003")[-1] is OrderStatus.FILLED
+
+    def test_all_or_none_cancels_when_a_leg_disappeared_before_execution(self) -> None:
+        """DEFECT-403: 체결 전에 leg가 사라지면 남은 leg만으로 AON을 판정하지 않는다."""
+        from backtest_engine.types.decision import StrategyDecision
+
+        class CancelOneLeg(BasketStrategy):
+            def on_event(self, ctx: StrategyContext, event: StrategyEvent) -> StrategyDecision:
+                if ctx.now == day(1):
+                    return StrategyDecision.of(ctx.now, hold_b(10))
+                if ctx.now == day(2):
+                    return StrategyDecision.of(ctx.now, pair(GroupPolicy.ALL_OR_NONE))
+                return StrategyDecision.no_action(ctx.now)
+
+        # D2 종가에 바스켓 제출 → D3 MARKET 전에 leg가 사라지는 경로: 자본변동으로 B leg 취소
+        from backtest_engine.types.events import CorporateActionEvent, CorporateActionType
+
+        split_b = CorporateActionEvent(
+            ts=day(3),
+            instrument=B,
+            action_type=CorporateActionType.SPLIT,
+            ratio=Decimal(2),
+            detail="t",
+        )
+        engine = BacktestEngine(
+            RunConfig(run_id="aon-gone", initial_cash=100_000.0, fee_bps=0.0), max_participation=0.1
+        )
+        result = engine.run(CancelOneLeg(()), DataFeed(BARS), corporate_actions=(split_b,))
+        assert d3_fills(result) == []
+        a_updates = [u for u in engine.event_store.order_updates() if u.order_id == "O-000002"]
+        assert [u.status for u in a_updates] == [OrderStatus.CANCELLED]
+        assert "no longer open" in (a_updates[0].detail or "")

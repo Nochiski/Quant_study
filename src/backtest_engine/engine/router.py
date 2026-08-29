@@ -332,7 +332,10 @@ class DecisionRouter:
                     )
                 target_notional = target.weight * portfolio.equity
                 delta = self._notional_to_delta(instrument, target_notional, portfolio, market)
-                return instrument, delta, True
+                held = portfolio.position_qty(instrument)
+                # 목표 부호가 보유 부호와 반대면 부호 전환이 의도된 것 — clamp하지 않는다.
+                flips = held != 0 and target_notional != 0 and (held > 0) != (target_notional > 0)
+                return instrument, delta, not flips
             case NotionalTarget():
                 self._check_currency(instrument, target.notional, decision_id)
                 if target.notional.amount < 0 and not self._short_allowed:
@@ -394,6 +397,13 @@ class DecisionRouter:
             return []
         side = Side.BUY if delta > 0 else Side.SELL
         quantity = abs(delta)
+        held = portfolio.position_qty(instrument)
+        if clamp_sell and self._short_allowed and held != 0 and (held > 0) != (delta > 0):
+            # 비중 목표의 반올림 오차로 포지션 부호가 뒤집히면 안 된다 (WeightTarget(0) → 잔여 숏).
+            # 목표가 반대 부호(의도된 전환)면 _target_delta가 clamp를 끄고 넘긴다.
+            quantity = min(quantity, abs(held))
+            if quantity <= 0:
+                return []
         if side is Side.SELL and not self._short_allowed:
             sellable = self._sellable(instrument, portfolio)
             if quantity > sellable:

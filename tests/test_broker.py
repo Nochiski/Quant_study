@@ -97,7 +97,7 @@ def test_fill_price_rule_table(
     _name: str, open_order: OpenOrder, expected_price: float | None
 ) -> None:
     outcome = BrokerSim(fee_bps=0.0).execute(
-        open_order, BAR, cash_available=1_000_000.0, fill_id="F-1"
+        open_order, BAR, buying_power=1_000_000.0, fill_id="F-1"
     )
     if expected_price is None:
         assert outcome.fill is None

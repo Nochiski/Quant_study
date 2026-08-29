@@ -17,6 +17,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from datetime import datetime
+from decimal import Decimal
 
 from backtest_engine.capability import (
     EngineCapabilities,
@@ -42,18 +43,25 @@ from backtest_engine.engine.queue import (
 )
 from backtest_engine.engine.router import DecisionRouter
 from backtest_engine.engine.store import DecisionRecord, EventStore, RecordKind
-from backtest_engine.errors import CorporateActionsNotProvided, CorporateActionWithoutBar
+from backtest_engine.errors import (
+    CorporateActionsNotProvided,
+    CorporateActionWithoutBar,
+    EquityWipedOut,
+    UndeclaredFeatureUsed,
+)
 from backtest_engine.ports.execution import SlippageModel
 from backtest_engine.ports.universe import UniverseResult
 from backtest_engine.types.events import (
     CorporateActionEvent,
     CorporateActionType,
+    FillEvent,
     OrderStatus,
     OrderUpdateEvent,
     StrategyEvent,
 )
 from backtest_engine.types.market import MarketSnapshot
 from backtest_engine.types.orders import OrderType, Side, TimeInForce
+from backtest_engine.types.portfolio import PortfolioSnapshot
 from backtest_engine.types.requirements import (
     EngineFeature,
     EventKind,
@@ -100,6 +108,39 @@ class _Run:
 
     def wants(self, kind: EventKind) -> bool:
         return kind in self.requirements.events
+
+    def wants_feature(self, feature: EngineFeature) -> bool:
+        return feature in self.requirements.features
+
+
+class _BuyingPower:
+    """한 세션 안에서 체결이 진행될 때의 매수 여력 = leverage × equity − 총노출.
+
+    MARGIN 없음(leverage 1.0, 롱 전용)이면 정확히 현금과 같다. 체결마다 수량 변화로
+    총노출을, 수수료로 equity를 갱신한다. 가격은 세션 시작 평가가 아니라 체결가를 쓴다.
+    """
+
+    def __init__(self, snapshot: PortfolioSnapshot, leverage: float) -> None:
+        self._leverage = leverage
+        self._equity = snapshot.equity
+        self._gross = sum(abs(p.market_value) for p in snapshot.positions)
+        self._quantities = {p.instrument: p.quantity for p in snapshot.positions}
+        self._marks = {p.instrument: p.market_price for p in snapshot.positions}
+
+    @property
+    def available(self) -> float:
+        return self._leverage * self._equity - self._gross
+
+    def consume(self, fill: FillEvent) -> None:
+        old = self._quantities.get(fill.instrument, Decimal(0))
+        signed = fill.quantity if fill.side is Side.BUY else -fill.quantity
+        new = old + signed
+        # 기존 노출은 세션 시작 평가가, 변화분은 체결가가 기준이다.
+        old_mark = self._marks.get(fill.instrument, fill.price)
+        self._gross += float(abs(new)) * fill.price - float(abs(old)) * old_mark
+        self._marks[fill.instrument] = fill.price
+        self._quantities[fill.instrument] = new
+        self._equity -= fill.fee
 
 
 class BacktestEngine:
@@ -168,6 +209,12 @@ class BacktestEngine:
         )
         self._event_store = run.store
         run.universe = universe
+        if self._config.max_gross_leverage > 1.0 and not run.wants_feature(EngineFeature.MARGIN):
+            raise UndeclaredFeatureUsed(
+                f"max_gross_leverage={self._config.max_gross_leverage} requires MARGIN feature "
+                f"declared in requirements() — run_id={self._config.run_id} "
+                f"declared={sorted(f.value for f in run.requirements.features)}"
+            )
         if corporate_actions is None:
             if run.wants(EventKind.CORPORATE_ACTION):
                 raise CorporateActionsNotProvided(
@@ -260,22 +307,18 @@ class BacktestEngine:
             order_manager.due(snapshot),
             key=lambda entry: (entry.order.side is not Side.SELL, entry.order_id),
         )
-        remaining_cash = run.portfolio.cash
+        power = _BuyingPower(run.portfolio.snapshot(snapshot.ts), run.config.max_gross_leverage)
         for entry in due:
             order = entry.order
             outcome = run.broker.execute(
                 entry,
                 snapshot.bar(order.instrument),
-                remaining_cash,
+                power.available,
                 order_manager.next_fill_id(),
             )
             if outcome.fill is not None:
                 fill = outcome.fill
-                notional = float(fill.quantity) * fill.price
-                if fill.side is Side.SELL:
-                    remaining_cash += notional - fill.fee
-                else:
-                    remaining_cash -= notional + fill.fee
+                power.consume(fill)
                 run.queue.push(fill.ts, EventPriority.FILL, FillOccurred(fill, snapshot))
                 if run.wants(EventKind.FILL):
                     # FILL 알림은 그 체결이 만든 ORDER_UPDATE 알림보다 먼저 큐에 실린다 (인과 순서).
@@ -385,6 +428,13 @@ class BacktestEngine:
 
     def _on_session_close(self, run: _Run, snapshot: MarketSnapshot) -> None:
         run.portfolio.mark(snapshot)
+        marked = run.portfolio.snapshot(snapshot.ts)
+        if marked.equity < 0:
+            raise EquityWipedOut(
+                f"equity fell below zero at session close — ts={snapshot.ts} "
+                f"equity={marked.equity} cash={marked.cash} "
+                f"positions={[(p.instrument.symbol, str(p.quantity)) for p in marked.positions]}"
+            )
         # 세션 종료 평가 상태에서 차입·이자 비용을 발생시키고 그 뒤 스냅샷을 남긴다.
         for cost in session_costs(run.portfolio.snapshot(snapshot.ts), run.config):
             run.portfolio.charge(cost)

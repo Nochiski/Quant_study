@@ -231,10 +231,10 @@ def reference_engine_capabilities() -> EngineCapabilities:
         FeatureCapability(EngineFeature.STOP_ORDER, SupportLevel.IMPLEMENTED),
         FeatureCapability(EngineFeature.PARTIAL_FILL, SupportLevel.IMPLEMENTED),
         FeatureCapability(EngineFeature.SHORT_SELLING, SupportLevel.IMPLEMENTED),
+        FeatureCapability(EngineFeature.MARGIN, SupportLevel.IMPLEMENTED),
     ) + tuple(
         FeatureCapability(feature, SupportLevel.NOT_IMPLEMENTED, reason)
         for feature, reason in {
-            EngineFeature.MARGIN: "roadmap step 5b — no margin accounting",
             EngineFeature.PROPORTIONAL_BASKET: "roadmap step 5c",
         }.items()
     )

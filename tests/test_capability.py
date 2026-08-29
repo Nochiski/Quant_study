@@ -164,6 +164,7 @@ def test_reference_capabilities_are_honest() -> None:
         EngineFeature.STOP_ORDER,
         EngineFeature.PARTIAL_FILL,
         EngineFeature.SHORT_SELLING,
+        EngineFeature.MARGIN,
     }
 
 

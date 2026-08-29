@@ -12,7 +12,8 @@
 - 유동성 캡 = floor(bar.volume × participation). participation은 주문을 만든
   Action의 ExecutionPolicy.max_participation이 있으면 그 값, 없으면 브로커 기본값
   (None = 무제한).
-- 매수는 현금 한도(수수료 포함)에도 걸린다 — MARGIN 미구현 상태의 회계 제약.
+- 매수는 매수 여력(수수료 포함)에도 걸린다. 여력은 호출 측이 준다: MARGIN 없음 = 현금,
+  MARGIN = max_gross_leverage × equity − 총노출.
 - IOC는 가능한 만큼, FOK는 전량 아니면 체결 없음. 잔량 처리(취소·이월)는 루프 책임.
 
 가격 규칙:
@@ -42,7 +43,7 @@ from backtest_engine.types.orders import OrderType, Side, TimeInForce
 
 class ExecutionStatus(Enum):
     FILLED = "filled"
-    CASH_LIMITED = "cash_limited"  # 현금 한도로 잔량 일부만 체결
+    CASH_LIMITED = "cash_limited"  # 매수 여력(현금/신용 한도)으로 잔량 일부만 체결
     LIQUIDITY_LIMITED = "liquidity_limited"  # 거래량 참여율 캡으로 잔량 일부만 체결
     REJECTED_NO_CASH = "rejected_no_cash"  # 1주도 살 수 없어 주문 전체 거절
     NOT_FILLED = "not_filled"  # 조건 미충족 또는 유동성 0, 주문은 대기 유지
@@ -152,13 +153,14 @@ class BrokerSim:
         self,
         open_order: OpenOrder,
         bar: Bar,
-        cash_available: float,
+        buying_power: float,
         fill_id: str,
     ) -> ExecutionOutcome:
         """대기 주문 하나를 해당 세션 bar로 체결 시도한다.
 
-        cash_available은 같은 세션에서 앞서 처리된 주문까지 반영한
-        사용 가능 현금이다 (매도 먼저, 매수 나중 규칙은 호출 측 책임).
+        buying_power는 같은 세션에서 앞서 처리된 주문까지 반영한 매수 여력이다
+        (MARGIN 없음: 현금, MARGIN: max_gross_leverage × equity − 총노출).
+        매도 먼저, 매수 나중 규칙은 호출 측 책임.
         """
         order = open_order.order
         decision = execution_price(order, bar, open_order.triggered)
@@ -198,7 +200,7 @@ class BrokerSim:
         price, slip = self._slipped_price(order, bar, base_price, quantity)
 
         if order.side is Side.BUY:
-            affordable = self._affordable_quantity(cash_available, price)
+            affordable = self._affordable_quantity(buying_power, price)
             if affordable <= 0:
                 return ExecutionOutcome(
                     fill=None,
@@ -206,16 +208,16 @@ class BrokerSim:
                     detail=(
                         f"cannot afford a single share — order_id={order.order_id} "
                         f"instrument={order.instrument.symbol} price={price} "
-                        f"cash_available={cash_available}"
+                        f"buying_power={buying_power}"
                     ),
                 )
             if affordable < quantity:
                 quantity = affordable
                 status = ExecutionStatus.CASH_LIMITED
                 detail = (
-                    f"buy capped by available cash — order_id={order.order_id} "
+                    f"buy capped by buying_power — order_id={order.order_id} "
                     f"instrument={order.instrument.symbol} remaining={open_order.remaining} "
-                    f"filled={quantity} price={price} cash_available={cash_available}"
+                    f"filled={quantity} price={price} buying_power={buying_power}"
                 )
 
         if order.time_in_force is TimeInForce.FOK and quantity < open_order.remaining:
@@ -269,9 +271,9 @@ class BrokerSim:
             price = min(price, limit) if order.side is Side.BUY else max(price, limit)
         return price, abs(price - base_price)
 
-    def _affordable_quantity(self, cash_available: float, price: float) -> Decimal:
-        """수수료까지 포함해 현금으로 살 수 있는 최대 정수 수량."""
-        if price <= 0 or cash_available <= 0:
+    def _affordable_quantity(self, buying_power: float, price: float) -> Decimal:
+        """수수료까지 포함해 여력으로 살 수 있는 최대 정수 수량."""
+        if price <= 0 or buying_power <= 0:
             return Decimal(0)
-        raw = cash_available / (price * (1.0 + self._fee_rate))
+        raw = buying_power / (price * (1.0 + self._fee_rate))
         return Decimal(raw).quantize(Decimal(1), rounding=ROUND_FLOOR)

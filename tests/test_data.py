@@ -6,9 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from backtest_engine.data.csv_loader import LoadStatus, OhlcPolicy, load_bars_csv
+from backtest_engine.adapters.csv_bars import load_bars_csv
 from backtest_engine.data.feed import DataFeed
 from backtest_engine.errors import TimeReversalError
+from backtest_engine.ports.market_data import LoadStatus, OhlcPolicy
 from tests.conftest import day, make_bar, make_instrument
 
 INSTRUMENT = make_instrument()

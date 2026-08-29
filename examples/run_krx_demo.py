@@ -37,6 +37,9 @@ def main(argv: list[str]) -> int:
     core = "python"
     if "--core" in args:
         index = args.index("--core")
+        if index + 1 >= len(args):
+            print("usage: --core <python|rust> — missing value after --core", file=sys.stderr)
+            return 2
         core = args[index + 1]
         del args[index : index + 2]
     root = Path(args[0]) if args else FIXTURE_DIR

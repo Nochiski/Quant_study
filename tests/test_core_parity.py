@@ -46,9 +46,8 @@ def core(request: pytest.FixtureRequest) -> str:
 # --- execution_price ------------------------------------------------------------
 
 
+@RUST_ONLY
 def test_rule_table_identical_across_cores() -> None:
-    if not core_available("rust"):
-        pytest.skip("backtest_core 확장 없음")
     python, rust = make_pricing("python"), make_pricing("rust")
     bar = make_ohlc(day(2), INSTRUMENT, 100.0, 110.0, 90.0, 105.0)
     for _name, open_order, _expected in RULE_TABLE:
@@ -57,9 +56,8 @@ def test_rule_table_identical_across_cores() -> None:
         ), _name
 
 
+@RUST_ONLY
 def test_floor_delta_shares_identical() -> None:
-    if not core_available("rust"):
-        pytest.skip("backtest_core 확장 없음")
     import backtest_core
 
     for notional, price in ((70_000.0, 9_999.0), (-450.0, 100.0), (0.0, 1.0), (1e12, 3.0)):
@@ -149,9 +147,8 @@ def scenario(portfolio: PortfolioLedger) -> list[tuple[object, ...]]:
     return trace
 
 
+@RUST_ONLY
 def test_portfolio_scenario_identical_across_cores() -> None:
-    if not core_available("rust"):
-        pytest.skip("backtest_core 확장 없음")
     python = scenario(make_portfolio("python", 100_000.0, allow_short=True, allow_margin=False))
     rust = scenario(make_portfolio("rust", 100_000.0, allow_short=True, allow_margin=False))
     assert python == rust
@@ -210,10 +207,9 @@ ENGINE_SCENARIOS = {
 }
 
 
+@RUST_ONLY
 @pytest.mark.parametrize("name", sorted(ENGINE_SCENARIOS))
 def test_engine_records_identical_across_cores(name: str) -> None:
-    if not core_available("rust"):
-        pytest.skip("backtest_core 확장 없음")
     python, rust = ENGINE_SCENARIOS[name]("python"), ENGINE_SCENARIOS[name]("rust")
     assert python.snapshots == rust.snapshots
     assert python.fills == rust.fills

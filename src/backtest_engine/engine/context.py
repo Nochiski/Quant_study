@@ -12,7 +12,13 @@ from decimal import Decimal
 
 import numpy as np
 
-from backtest_engine.errors import InsufficientHistoryError, UndeclaredDataAccess
+from backtest_engine.errors import (
+    InsufficientHistoryError,
+    UndeclaredDataAccess,
+    UniverseNotProvided,
+)
+from backtest_engine.ports.universe import UniverseResult
+from backtest_engine.types.events import OpenOrderSnapshot
 from backtest_engine.types.instruments import InstrumentId
 from backtest_engine.types.market import MarketSnapshot, PriceField, PriceWindow
 from backtest_engine.types.portfolio import PortfolioSnapshot
@@ -82,6 +88,8 @@ class EngineStrategyContext:
     snapshot: PortfolioSnapshot
     history_store: HistoryStore
     declared: frozenset[HistoryRequest] = field(default_factory=frozenset)
+    open_orders_snapshot: tuple[OpenOrderSnapshot, ...] = ()
+    universe_source: UniverseResult | None = None  # None = 제공 안 됨; 조회 시점에 계산
 
     def history(self, request: HistoryRequest) -> PriceWindow:
         if request not in self.declared:
@@ -104,3 +112,16 @@ class EngineStrategyContext:
 
     def portfolio_value(self) -> float:
         return self.snapshot.equity
+
+    def universe(self) -> frozenset[InstrumentId]:
+        if self.universe_source is None:
+            raise UniverseNotProvided(
+                f"ctx.universe() requires BacktestEngine.run(..., universe=...) — now={self.now}"
+            )
+        # 호출한 전략만 비용을 낸다 (세션당 O(memberships)).
+        return self.universe_source.members(self.now.date())
+
+    def open_orders(self, instrument: InstrumentId | None = None) -> tuple[OpenOrderSnapshot, ...]:
+        if instrument is None:
+            return self.open_orders_snapshot
+        return tuple(o for o in self.open_orders_snapshot if o.instrument == instrument)

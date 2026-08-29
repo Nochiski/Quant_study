@@ -91,11 +91,12 @@ def test_pairs_requirements_collect_all_violations() -> None:
     assert not report.ok
     names = {(violation.category, violation.name) for violation in report.violations}
     assert (ViolationCategory.ACTION, "basket") in names
-    assert (ViolationCategory.ACTION, "set_position_target") in names
     assert (ViolationCategory.FEATURE, "short_selling") in names
     assert (ViolationCategory.FEATURE, "proportional_basket") in names
+    # SET_POSITION_TARGET은 4a에서 승격됐으므로 위반이 아니다.
+    assert (ViolationCategory.ACTION, "set_position_target") not in names
     # 첫 위반에서 멈추지 않고 전부 수집한다.
-    assert len(report.violations) == 4
+    assert len(report.violations) == 3
 
 
 def test_month_end_schedule_not_implemented() -> None:
@@ -127,7 +128,7 @@ def test_prepare_strategy_passes_implemented_requirements() -> None:
 
 
 def test_reference_capabilities_are_honest() -> None:
-    """v1에서 IMPLEMENTED는 로드맵 3단계 범위뿐이어야 한다 (DEFINED ≠ IMPLEMENTED)."""
+    """IMPLEMENTED는 handler·테스트가 있는 범위뿐이어야 한다 (DEFINED ≠ IMPLEMENTED)."""
     capabilities = reference_engine_capabilities()
     implemented = {
         capability.kind
@@ -138,10 +139,33 @@ def test_reference_capabilities_are_honest() -> None:
         ActionKind.NO_ACTION,
         ActionKind.SET_PORTFOLIO_TARGET,
         ActionKind.LIQUIDATE_POSITION,
+        ActionKind.SET_POSITION_TARGET,
+        ActionKind.ADJUST_POSITION,
+        ActionKind.SUBMIT_ORDER,
+        ActionKind.CANCEL_ORDER,
+        ActionKind.REPLACE_ORDER,
     }
-    assert all(
-        capability.support is not SupportLevel.IMPLEMENTED for capability in capabilities.features
-    )
+    implemented_events = {
+        capability.kind
+        for capability in capabilities.events
+        if capability.support is SupportLevel.IMPLEMENTED
+    }
+    assert implemented_events == {
+        EventKind.MARKET,
+        EventKind.FILL,
+        EventKind.ORDER_UPDATE,
+        EventKind.CORPORATE_ACTION,
+    }
+    implemented_features = {
+        capability.feature
+        for capability in capabilities.features
+        if capability.support is SupportLevel.IMPLEMENTED
+    }
+    assert implemented_features == {
+        EngineFeature.LIMIT_ORDER,
+        EngineFeature.STOP_ORDER,
+        EngineFeature.PARTIAL_FILL,
+    }
 
 
 def test_every_action_kind_has_registered_capability() -> None:

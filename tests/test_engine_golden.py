@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 
 from backtest_engine import BacktestEngine, BacktestResult, RunConfig
@@ -17,9 +19,11 @@ from backtest_engine.data.feed import DataFeed
 from backtest_engine.errors import CapabilityNotImplemented, UndeclaredActionReturned
 from backtest_engine.types.actions import (
     ActionKind,
+    AdjustPosition,
     ExecutionPolicy,
     LiquidatePosition,
     LiquidationPersistence,
+    QuantityDelta,
     SetPortfolioTarget,
     StrategyAction,
     TargetScope,
@@ -106,6 +110,14 @@ def liquidate() -> StrategyAction:
     )
 
 
+def adjust_by(quantity: int) -> StrategyAction:
+    return AdjustPosition(
+        instrument=INSTRUMENT,
+        delta=QuantityDelta(Decimal(quantity)),
+        execution=ExecutionPolicy.market_next_open(),
+    )
+
+
 def run_golden() -> tuple[BacktestEngine, ScriptedStrategy, BacktestResult]:
     engine = BacktestEngine(RunConfig(run_id="golden", initial_cash=100_000.0, fee_bps=10.0))
     strategy = ScriptedStrategy(script=(target_70pct(), None, liquidate(), None))
@@ -176,20 +188,20 @@ class TestGoldenRun:
 class TestEngineContracts:
     def test_capability_gate_rejects_before_loop(self) -> None:
         engine = BacktestEngine(RunConfig(run_id="gate", initial_cash=100_000.0))
-        strategy = ScriptedStrategy(
-            script=(),
-            declared_actions=frozenset({ActionKind.BASKET}),
-        )
         # requirements에 미구현 BASKET + SHORT_SELLING을 요구하도록 재구성
-        base = strategy.requirements()
-        rejected = StrategyRequirements(
-            histories=base.histories,
-            schedule=base.schedule,
-            events=base.events,
-            actions=frozenset({ActionKind.BASKET}),
-            features=frozenset({EngineFeature.SHORT_SELLING}),
-        )
-        strategy.requirements = lambda: rejected  # type: ignore[method-assign]  # reason: 테스트 전용 requirements 교체
+
+        class Rejected(ScriptedStrategy):
+            def requirements(self) -> StrategyRequirements:
+                base = super().requirements()
+                return StrategyRequirements(
+                    histories=base.histories,
+                    schedule=base.schedule,
+                    events=base.events,
+                    actions=frozenset({ActionKind.BASKET}),
+                    features=frozenset({EngineFeature.SHORT_SELLING}),
+                )
+
+        strategy = Rejected(script=(), declared_actions=frozenset({ActionKind.BASKET}))
 
         with pytest.raises(CapabilityNotImplemented, match="short_selling"):
             engine.run(strategy, DataFeed(GOLDEN_BARS))
@@ -230,3 +242,35 @@ class TestEngineContracts:
         assert any(update.status is OrderStatus.PARTIALLY_FILLED for update in updates)
         # 잔여 수량은 이월되지 않는다 (DAY) — 이후 체결 없음
         assert len(result.fills) == 1
+
+
+class TestAdjustPositionGolden:
+    """4a 골든: AdjustPosition(+10) → (-4). fee_bps=10, 초기 현금 100,000.
+
+    D1 +10주 주문 → D2 시가 110 체결, 수수료 1.1 → 현금 98,898.9
+    D3 -4주 주문 → D4 시가 90 체결, 수수료 0.36 → 현금 99,258.54, 보유 6주
+    """
+
+    def _run(self) -> BacktestResult:
+        engine = BacktestEngine(RunConfig(run_id="adjust", initial_cash=100_000.0, fee_bps=10.0))
+        declared = frozenset({ActionKind.NO_ACTION, ActionKind.ADJUST_POSITION})
+        strategy = ScriptedStrategy(
+            script=(adjust_by(10), None, adjust_by(-4), None), declared_actions=declared
+        )
+        return engine.run(strategy, DataFeed(GOLDEN_BARS))
+
+    def test_fills_hand_computed(self) -> None:
+        result = self._run()
+        assert [(f.ts, f.side, int(f.quantity), f.price) for f in result.fills] == [
+            (day(2), Side.BUY, 10, 110.0),
+            (day(4), Side.SELL, 4, 90.0),
+        ]
+        assert result.fills[0].fee == pytest.approx(1.1)
+        assert result.fills[1].fee == pytest.approx(0.36)
+
+    def test_final_snapshot_hand_computed(self) -> None:
+        result = self._run()
+        final = result.snapshots[-1]
+        assert final.cash == pytest.approx(99_258.54)
+        assert int(final.position_qty(INSTRUMENT)) == 6
+        assert final.equity == pytest.approx(99_258.54 + 6 * 80.0)

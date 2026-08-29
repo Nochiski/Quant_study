@@ -18,8 +18,12 @@ from pathlib import Path
 from golden_cross import GoldenCrossConfig, GoldenCrossStrategy
 
 from backtest_engine import BacktestEngine, RunConfig
-from backtest_engine.adapters.krx_parquet import KrxParquetBarSource
+from backtest_engine.adapters.krx_parquet import (
+    KrxParquetBarSource,
+    KrxParquetCorporateActionSource,
+)
 from backtest_engine.data.feed import DataFeed
+from backtest_engine.ports.corporate_actions import CorporateActionQuery, CorporateActionSource
 from backtest_engine.ports.market_data import BarQuery, BarSource, OhlcPolicy
 from backtest_engine.types.instruments import AssetClass, InstrumentId
 
@@ -49,10 +53,26 @@ def main(argv: list[str]) -> int:
     if loaded.dropped_rows:
         print(f"[data prep] dropped {loaded.dropped_rows} halt rows (volume 0 / price 0)")
 
+    # 자본변동(액면분할 등)은 같은 원장에서 검출해 엔진에 넘긴다. 이 기간에는 사건이 없다.
+    action_source: CorporateActionSource = KrxParquetCorporateActionSource(root)
+    actions = action_source.load_actions(
+        CorporateActionQuery(instruments=(instrument,), start=query.start, end=query.end)
+    )
+    if not actions.ok:
+        print(
+            f"failed to load corporate actions: status={actions.status.value} "
+            f"detail={actions.detail}"
+        )
+        return 1
+    if actions.actions:
+        print(f"[data prep] {len(actions.actions)} corporate action(s) in period")
+
     feed = DataFeed(loaded.bars)
     config = RunConfig(run_id="demo-krx-005930-golden-cross", initial_cash=10_000_000, fee_bps=15)
     result = BacktestEngine(config).run(
-        GoldenCrossStrategy(GoldenCrossConfig(instrument=instrument)), feed
+        GoldenCrossStrategy(GoldenCrossConfig(instrument=instrument)),
+        feed,
+        corporate_actions=actions.actions,
     )
 
     first, last = result.snapshots[0], result.snapshots[-1]

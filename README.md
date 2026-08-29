@@ -9,10 +9,10 @@
 src/backtest_engine/
 ├─ types/          # 프로토콜 계약: Requirements, Event, Context, Decision, Action, serde
 ├─ capability.py   # DEFINED ≠ IMPLEMENTED — 실행 전 요구사항 협상과 거절
-├─ engine/         # reference engine: EventQueue, Router, BrokerSim, Portfolio, Metrics
-├─ ports/          # 헥사고날 포트: BarSource 프로토콜, BarQuery, LoadResult (도메인 소유)
-├─ adapters/       # 포트 구현: CSV(csv_bars), KRX 원장 parquet(krx_parquet)
-└─ data/           # 소스 무관 정제(cleaning), DataFeed (엔진 입력)
+├─ engine/         # reference engine: EventQueue, Router, OrderManager, BrokerSim, slippage, Portfolio, Metrics
+├─ ports/          # 헥사고날 포트: BarSource, CorporateActionSource, UniverseSource, SlippageModel
+├─ adapters/       # 포트 구현: CSV(csv_bars), sqlite(sqlite_bars), KRX 원장 parquet(krx_parquet)
+└─ data/           # 소스 무관 정제(cleaning)·자본변동 검출(corporate_actions), DataFeed
 examples/          # 골든크로스 예제 전략 + CSV / KRX parquet 데모
 scripts/           # 테스트 픽스처 재생성 등 유틸
 tests/             # 골든(손계산)·계약·상태 전이·직렬화·단위 테스트
@@ -51,18 +51,30 @@ Requirements → Capability 검증 → StrategyEvent + 읽기 전용 Context
 
 ## 현재 브랜치 구현 범위
 
-- 로드맵 3단계인 `NoAction`, `SetPortfolioTarget(WeightTarget)`,
-  `LiquidatePosition`, MARKET 이벤트와 `EverySession` 일정을 구현했다. 나머지
-  스키마는 정의만 되어 있으며 `reference_engine_capabilities()`에
-  `NOT_IMPLEMENTED`로 명시된다.
+- 로드맵 3단계(`NoAction`, `SetPortfolioTarget`, `LiquidatePosition`)에 더해 4단계
+  주문 생명주기를 구현했다 (`docs/superpowers/specs/2026-08-29-order-lifecycle-step4-design.md`):
+  - 4a `SetPositionTarget`(Weight/Quantity/Notional), `AdjustPosition`
+  - 4b `SubmitOrder`로 MARKET/LIMIT/STOP/STOP_LIMIT, DAY/GTC — 일봉 OHLC 기반 체결 규칙
+  - 4c `CancelOrder`/`ReplaceOrder`, `ctx.open_orders()`, 전략에 FILL/ORDER_UPDATE 전달
+  - 4d 거래량 참여율 부분체결, IOC/FOK, 슬리피지 포트(`NoSlippage`/`FixedBps`/`VolumeShare`)
+  남은 `NOT_IMPLEMENTED`는 5단계(Basket, 공매도, MARGIN)뿐이며
+  `reference_engine_capabilities()`에 명시된다. LIMIT/STOP·IOC/FOK·`max_participation`은
+  해당 `EngineFeature`를 `requirements()`에 선언한 전략만 쓸 수 있다.
 - 엔진 내부는 `(ts, priority, seq)`로 정렬되는 이벤트 큐 하나로 흐른다:
-  `MARKET(대기 주문 체결) → FILL(포트폴리오 반영) → SESSION_CLOSE(평가·전략 호출) → ORDER(주문 등록)`.
-  T 종가 판단은 T+1 시가에 체결된다.
+  `MARKET(대기 주문 체결) → FILL(포트폴리오 반영) → NOTIFY(전략 알림) → SESSION_CLOSE(평가·전략 호출) → ORDER(주문 등록)`.
+  T 종가 판단은 T+1 세션부터 체결된다. 주문 생성은 현금·보유를 바꾸지 않고,
+  미체결 주문은 DAY 만료·run 종료 시 반드시 `CANCELLED`로 기록된다.
 - 시장 데이터는 헥사고날 경계로 분리된다. 엔진·전략은 `ports.BarSource`가 돌려주는
   `LoadResult`와 `DataFeed`만 보고, 파일 형식·벤더 SDK·DB는 `adapters/`에만 존재한다.
   새 채널은 `load_bars(BarQuery) -> LoadResult` 하나를 구현하면 붙는다.
 - 정제(OHLC 정책·거래정지 제거·시간 역행 거절)는 `data/cleaning.py` 한 곳에서 하고,
   손댄 행 수는 항상 `repaired_rows`/`dropped_rows`로 보고한다 (silent 보정 금지).
+- 데이터 후속(D, `docs/superpowers/specs/2026-08-29-data-followups-design.md`): 원장의
+  상장주식수 변화로 액면분할·병합을 검출해 `run(corporate_actions=)`로 넘기면 엔진이 사건
+  세션 시작에 보유 수량·평균단가를 조정하고(단주는 시가 현금 정산) 대기 주문을 취소한다.
+  종목마스터 일별 스냅샷으로 만든 `UniverseResult`를 `run(universe=)`로 주면 전략이
+  `ctx.universe()`로 그 세션의 상장 종목만 본다(look-ahead 차단). 새 데이터 채널은
+  `tests/test_bar_source_contract.py`의 빌더 하나로 계약 전체를 통과해야 한다 (sqlite로 검증).
 
 ## 실행
 

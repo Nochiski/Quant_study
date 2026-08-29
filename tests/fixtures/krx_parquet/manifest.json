@@ -1,5 +1,5 @@
 {
-  "sliced_at": "2026-08-29T16:45:12",
+  "sliced_at": "2026-08-29T19:30:34",
   "source_dir": "quant-data-20260826",
   "tickers": {
     "005930": "삼성전자 — KOSPI 대형주, 2018-05 액면분할(50:1) 정지 구간 포함",
@@ -10,7 +10,9 @@
   },
   "files": {
     "krx_stk_bydd_trd.parquet": 9738,
-    "krx_ksq_bydd_trd.parquet": 5306
+    "krx_ksq_bydd_trd.parquet": 5306,
+    "krx_stk_isu_base_info.parquet": 9738,
+    "krx_ksq_isu_base_info.parquet": 5306
   },
   "source_manifest": {
     "build_id": "20260826T0930",

@@ -14,6 +14,7 @@ from backtest_engine.types.decision import StrategyDecision
 from backtest_engine.types.events import (
     CorporateActionApplied,
     CorporateActionEvent,
+    CostAccrued,
     FillEvent,
     OrderEvent,
     OrderUpdateEvent,
@@ -31,6 +32,7 @@ class RecordKind(Enum):
     SNAPSHOT = "snapshot"
     CORPORATE_ACTION = "corporate_action"  # 사건 도착 (적용 여부와 무관)
     CORPORATE_ACTION_APPLIED = "corporate_action_applied"  # 포지션에 실제 적용된 기록
+    COST = "cost"  # 차입·이자 등 Fill 없는 현금 차감
 
 
 @dataclass(frozen=True)
@@ -50,6 +52,7 @@ RecordPayload = (
     | PortfolioSnapshot
     | CorporateActionEvent
     | CorporateActionApplied
+    | CostAccrued
 )
 
 
@@ -109,3 +112,6 @@ class EventStore:
             for p in self._payloads(RecordKind.CORPORATE_ACTION_APPLIED)
             if isinstance(p, CorporateActionApplied)
         )
+
+    def costs(self) -> tuple[CostAccrued, ...]:
+        return tuple(p for p in self._payloads(RecordKind.COST) if isinstance(p, CostAccrued))

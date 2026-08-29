@@ -94,6 +94,7 @@ class DecisionRouter:
         self._order_manager = order_manager
         # 같은 Decision 안에서 이미 라우팅된 매도 수량 (종목별). route()마다 초기화.
         self._routed_sells: dict[InstrumentId, Decimal] = defaultdict(Decimal)
+        self._short_allowed = EngineFeature.SHORT_SELLING in declared_features
 
     def route(
         self,
@@ -273,7 +274,7 @@ class DecisionRouter:
         instrument = target.instrument
         match target:
             case WeightTarget():
-                if target.weight < 0:
+                if target.weight < 0 and not self._short_allowed:
                     raise UnsupportedActionValue(
                         f"negative target weight requires SHORT_SELLING feature "
                         f"(not implemented) — instrument={instrument.symbol} "
@@ -284,7 +285,7 @@ class DecisionRouter:
                 return instrument, delta, True
             case NotionalTarget():
                 self._check_currency(instrument, target.notional, decision_id)
-                if target.notional.amount < 0:
+                if target.notional.amount < 0 and not self._short_allowed:
                     raise UnsupportedActionValue(
                         f"negative target notional requires SHORT_SELLING feature "
                         f"(not implemented) — instrument={instrument.symbol} "
@@ -295,7 +296,7 @@ class DecisionRouter:
                 return instrument, delta, False
             case QuantityTarget():
                 self._check_integer(target.quantity, instrument, decision_id)
-                if target.quantity < 0:
+                if target.quantity < 0 and not self._short_allowed:
                     raise UnsupportedActionValue(
                         f"negative target quantity requires SHORT_SELLING feature "
                         f"(not implemented) — instrument={instrument.symbol} "
@@ -343,7 +344,7 @@ class DecisionRouter:
             return []
         side = Side.BUY if delta > 0 else Side.SELL
         quantity = abs(delta)
-        if side is Side.SELL:
+        if side is Side.SELL and not self._short_allowed:
             sellable = self._sellable(instrument, portfolio)
             if quantity > sellable:
                 if not clamp_sell:
@@ -399,7 +400,7 @@ class DecisionRouter:
                 decision_id,
             )
         self._check_integer(core.quantity, core.instrument, decision_id)
-        if core.side is Side.SELL:
+        if core.side is Side.SELL and not self._short_allowed:
             if core.quantity > self._sellable(core.instrument, portfolio):
                 self._raise_oversell(core.instrument, portfolio, core.quantity, decision_id)
             self._routed_sells[core.instrument] += core.quantity
@@ -490,18 +491,22 @@ class DecisionRouter:
         portfolio: PortfolioSnapshot,
         market: MarketSnapshot,
     ) -> list[OrderEvent]:
-        held = self._sellable(action.instrument, portfolio)
-        if held <= 0:
+        held = portfolio.position_qty(action.instrument)
+        if held > 0:
+            held = self._sellable(action.instrument, portfolio)
+            if held <= 0:
+                return []
+            self._routed_sells[action.instrument] += held
+        elif held == 0:
             return []
-        self._routed_sells[action.instrument] += held
         return [
             OrderEvent(
                 order_id=self._order_manager.next_order_id(),
                 decision_id=decision_id,
                 ts=market.ts,
                 instrument=action.instrument,
-                quantity=held,
-                side=Side.SELL,
+                quantity=abs(held),
+                side=Side.SELL if held > 0 else Side.BUY,  # 숏 포지션은 매수로 청산
                 source_action=action,
             )
         ]

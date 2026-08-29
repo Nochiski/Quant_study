@@ -27,6 +27,7 @@ from backtest_engine.data.feed import DataFeed
 from backtest_engine.engine import calendar
 from backtest_engine.engine.broker import BrokerSim, ExecutionStatus
 from backtest_engine.engine.context import EngineStrategyContext, HistoryStore
+from backtest_engine.engine.costs import session_costs
 from backtest_engine.engine.metrics import compute_metrics
 from backtest_engine.engine.orders import OrderManager
 from backtest_engine.engine.portfolio import Portfolio
@@ -53,7 +54,12 @@ from backtest_engine.types.events import (
 )
 from backtest_engine.types.market import MarketSnapshot
 from backtest_engine.types.orders import OrderType, Side, TimeInForce
-from backtest_engine.types.requirements import EventKind, HistoryRequest, StrategyRequirements
+from backtest_engine.types.requirements import (
+    EngineFeature,
+    EventKind,
+    HistoryRequest,
+    StrategyRequirements,
+)
 from backtest_engine.types.results import BacktestResult, RunConfig
 from backtest_engine.types.strategy import Strategy
 
@@ -76,7 +82,12 @@ class _Run:
         )
         self.declared: frozenset[HistoryRequest] = frozenset(requirements.histories)
         self.history_store = HistoryStore()
-        self.portfolio = Portfolio(config.initial_cash)
+        self.config = config
+        self.portfolio = Portfolio(
+            config.initial_cash,
+            allow_short=EngineFeature.SHORT_SELLING in requirements.features,
+            allow_margin=EngineFeature.MARGIN in requirements.features,
+        )
         self.order_manager = OrderManager()
         self.broker = BrokerSim(config.fee_bps, slippage, max_participation)
         self.router = DecisionRouter(
@@ -374,6 +385,10 @@ class BacktestEngine:
 
     def _on_session_close(self, run: _Run, snapshot: MarketSnapshot) -> None:
         run.portfolio.mark(snapshot)
+        # 세션 종료 평가 상태에서 차입·이자 비용을 발생시키고 그 뒤 스냅샷을 남긴다.
+        for cost in session_costs(run.portfolio.snapshot(snapshot.ts), run.config):
+            run.portfolio.charge(cost)
+            run.store.append(cost.ts, RecordKind.COST, cost)
         run.store.append(snapshot.ts, RecordKind.SNAPSHOT, run.portfolio.snapshot(snapshot.ts))
 
         if not calendar.matches(run.requirements.schedule, snapshot.ts):

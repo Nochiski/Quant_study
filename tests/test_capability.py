@@ -59,9 +59,7 @@ def pairs_requirements() -> StrategyRequirements:
         schedule=EverySession(),
         events=frozenset({EventKind.MARKET}),
         actions=frozenset({ActionKind.BASKET, ActionKind.SET_POSITION_TARGET}),
-        features=frozenset(
-            {EngineFeature.SHORT_SELLING, EngineFeature.PROPORTIONAL_BASKET}
-        ),
+        features=frozenset({EngineFeature.SHORT_SELLING, EngineFeature.PROPORTIONAL_BASKET}),
     )
 
 
@@ -91,12 +89,12 @@ def test_pairs_requirements_collect_all_violations() -> None:
     assert not report.ok
     names = {(violation.category, violation.name) for violation in report.violations}
     assert (ViolationCategory.ACTION, "basket") in names
-    assert (ViolationCategory.FEATURE, "short_selling") in names
     assert (ViolationCategory.FEATURE, "proportional_basket") in names
-    # SET_POSITION_TARGET은 4a에서 승격됐으므로 위반이 아니다.
+    # SET_POSITION_TARGET(4a)·SHORT_SELLING(5a)은 승격됐으므로 위반이 아니다.
     assert (ViolationCategory.ACTION, "set_position_target") not in names
+    assert (ViolationCategory.FEATURE, "short_selling") not in names
     # 첫 위반에서 멈추지 않고 전부 수집한다.
-    assert len(report.violations) == 3
+    assert len(report.violations) == 2
 
 
 def test_month_end_schedule_not_implemented() -> None:
@@ -117,7 +115,7 @@ def test_prepare_strategy_rejects_before_any_event() -> None:
         prepare_strategy(strategy, reference_engine_capabilities())
     message = str(excinfo.value)
     assert "basket" in message
-    assert "short_selling" in message
+    assert "proportional_basket" in message
     assert not strategy.on_event_called
 
 
@@ -165,6 +163,7 @@ def test_reference_capabilities_are_honest() -> None:
         EngineFeature.LIMIT_ORDER,
         EngineFeature.STOP_ORDER,
         EngineFeature.PARTIAL_FILL,
+        EngineFeature.SHORT_SELLING,
     }
 
 

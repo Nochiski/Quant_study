@@ -194,4 +194,27 @@ class FillEvent:
             )
 
 
+class CostKind(Enum):
+    SHORT_BORROW = "short_borrow"  # 숏 포지션 차입 비용 (세션 종료 평가액 기준)
+    MARGIN_INTEREST = "margin_interest"  # 음수 현금 이자 (세션 종료 잔액 기준)
+
+
+@dataclass(frozen=True)
+class CostAccrued:
+    """Fill 없이 현금을 줄이는 비용 발생 기록. 회계 재계산의 입력이다 (5단계)."""
+
+    ts: datetime
+    kind: CostKind
+    instrument: InstrumentId | None
+    amount: float  # 항상 > 0, 현금에서 차감
+
+    def __post_init__(self) -> None:
+        if self.amount <= 0:
+            raise ValueError(
+                f"cost amount must be > 0 — kind={self.kind.value} ts={self.ts} "
+                f"instrument={self.instrument.symbol if self.instrument else None} "
+                f"amount={self.amount}"
+            )
+
+
 StrategyEvent = MarketSnapshot | TimerEvent | FillEvent | OrderUpdateEvent | CorporateActionEvent

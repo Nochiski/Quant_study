@@ -13,13 +13,19 @@ class RunConfig:
     """한 번의 실행을 재현하는 데 필요한 엔진 설정.
 
     fee_bps: 체결 금액 대비 수수료 (basis point, 매수·매도 동일 적용).
-    annualization_days: 연율화 계수 (XKRX 거래일 기준 252).
+    annualization_days: 연율화 계수 (XKRX 거래일 기준 252). 비용 일할에도 쓴다.
+    short_borrow_bps_annual: 숏 평가액 대비 연 차입 비용 (bp). 세션마다 /annualization_days.
+    margin_interest_bps_annual: 음수 현금 대비 연 이자 (bp). MARGIN 선언 전략에만 의미 있다.
+    max_gross_leverage: 총노출/equity 상한. 1.0이면 현금 범위 매수(MARGIN 없음).
     """
 
     run_id: str
     initial_cash: float
     fee_bps: float = 0.0
     annualization_days: int = 252
+    short_borrow_bps_annual: float = 0.0
+    margin_interest_bps_annual: float = 0.0
+    max_gross_leverage: float = 1.0
 
     def __post_init__(self) -> None:
         if self.initial_cash <= 0:
@@ -28,6 +34,22 @@ class RunConfig:
             )
         if self.fee_bps < 0:
             raise ValueError(f"fee_bps must be >= 0 — run_id={self.run_id} fee_bps={self.fee_bps}")
+        for label, value in (
+            ("short_borrow_bps_annual", self.short_borrow_bps_annual),
+            ("margin_interest_bps_annual", self.margin_interest_bps_annual),
+        ):
+            if value < 0:
+                raise ValueError(f"{label} must be >= 0 — run_id={self.run_id} {label}={value}")
+        if self.max_gross_leverage < 1.0:
+            raise ValueError(
+                f"max_gross_leverage must be >= 1.0 — run_id={self.run_id} "
+                f"max_gross_leverage={self.max_gross_leverage}"
+            )
+        if self.annualization_days <= 0:
+            raise ValueError(
+                f"annualization_days must be > 0 — run_id={self.run_id} "
+                f"annualization_days={self.annualization_days}"
+            )
 
 
 @dataclass(frozen=True)

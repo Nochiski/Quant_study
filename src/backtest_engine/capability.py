@@ -208,7 +208,7 @@ def reference_engine_capabilities() -> EngineCapabilities:
     나머지는 스키마만 정의된 NOT_IMPLEMENTED 상태로, handler와 테스트가 추가될 때 승격한다.
     """
     not_implemented_actions = {
-        ActionKind.BASKET: "roadmap step 5",
+        ActionKind.BASKET: "roadmap step 5c",
     }
     implemented_actions = (
         ActionKind.NO_ACTION,
@@ -230,12 +230,12 @@ def reference_engine_capabilities() -> EngineCapabilities:
         FeatureCapability(EngineFeature.LIMIT_ORDER, SupportLevel.IMPLEMENTED),
         FeatureCapability(EngineFeature.STOP_ORDER, SupportLevel.IMPLEMENTED),
         FeatureCapability(EngineFeature.PARTIAL_FILL, SupportLevel.IMPLEMENTED),
+        FeatureCapability(EngineFeature.SHORT_SELLING, SupportLevel.IMPLEMENTED),
     ) + tuple(
         FeatureCapability(feature, SupportLevel.NOT_IMPLEMENTED, reason)
         for feature, reason in {
-            EngineFeature.SHORT_SELLING: "roadmap step 5",
-            EngineFeature.MARGIN: "roadmap step 5 — no margin accounting",
-            EngineFeature.PROPORTIONAL_BASKET: "roadmap step 5",
+            EngineFeature.MARGIN: "roadmap step 5b — no margin accounting",
+            EngineFeature.PROPORTIONAL_BASKET: "roadmap step 5c",
         }.items()
     )
     events = (

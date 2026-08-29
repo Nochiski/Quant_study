@@ -122,6 +122,16 @@
 - 계약 테스트 3어댑터 × 5시나리오 전부 통과. sqlite 고유: 테이블 없음 → NO_DATA, 컬럼 타입 오류 → FORMAT_ERROR.
 - 엔진·타입·data 패키지 diff 0을 리뷰에서 확인.
 
+## 구현 결과와 스펙 차이 (2026-08-29 구현 완료)
+
+- D1 포지션 조정 시 해당 종목의 평가 가격(mark)을 정산가(사건 세션 시가)로 교체한다 —
+  분할 전 종가로 평가하면 SESSION_CLOSE 전에 읽히는 equity가 왜곡되기 때문. 사건 ts가
+  feed 세션에 없으면 run 시작 전에 `CorporateActionWithoutBar`로 거절한다.
+- D2 `UniverseQuery.venue`는 어댑터가 `InstrumentId`를 만들 때 쓴다 (마스터에 거래소 코드가 없음).
+- D3 sqlite 어댑터는 `mode=ro` URI로 열어 없는 파일을 만들지 않는다. 중복 세션은 별도 검사
+  없이 `clean_raw_bars`의 역행 검사로 FORMAT_ERROR가 된다.
+- 픽스처 스모크는 `.claude/rules/testing.md`에 따라 값 단언 없이 "로드·실행이 되는지"만 본다.
+
 ## 다음 단계
 
 5단계 Basket·공매도·MARGIN (`2026-08-29-roadmap-overview.md`).

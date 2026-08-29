@@ -10,9 +10,9 @@ src/backtest_engine/
 ├─ types/          # 프로토콜 계약: Requirements, Event, Context, Decision, Action, serde
 ├─ capability.py   # DEFINED ≠ IMPLEMENTED — 실행 전 요구사항 협상과 거절
 ├─ engine/         # reference engine: EventQueue, Router, OrderManager, BrokerSim, slippage, Portfolio, Metrics
-├─ ports/          # 헥사고날 포트: BarSource(시장 데이터), SlippageModel(체결) — 도메인 소유
-├─ adapters/       # 포트 구현: CSV(csv_bars), KRX 원장 parquet(krx_parquet)
-└─ data/           # 소스 무관 정제(cleaning), DataFeed (엔진 입력)
+├─ ports/          # 헥사고날 포트: BarSource, CorporateActionSource, UniverseSource, SlippageModel
+├─ adapters/       # 포트 구현: CSV(csv_bars), sqlite(sqlite_bars), KRX 원장 parquet(krx_parquet)
+└─ data/           # 소스 무관 정제(cleaning)·자본변동 검출(corporate_actions), DataFeed
 examples/          # 골든크로스 예제 전략 + CSV / KRX parquet 데모
 scripts/           # 테스트 픽스처 재생성 등 유틸
 tests/             # 골든(손계산)·계약·상태 전이·직렬화·단위 테스트
@@ -69,6 +69,12 @@ Requirements → Capability 검증 → StrategyEvent + 읽기 전용 Context
   새 채널은 `load_bars(BarQuery) -> LoadResult` 하나를 구현하면 붙는다.
 - 정제(OHLC 정책·거래정지 제거·시간 역행 거절)는 `data/cleaning.py` 한 곳에서 하고,
   손댄 행 수는 항상 `repaired_rows`/`dropped_rows`로 보고한다 (silent 보정 금지).
+- 데이터 후속(D, `docs/superpowers/specs/2026-08-29-data-followups-design.md`): 원장의
+  상장주식수 변화로 액면분할·병합을 검출해 `run(corporate_actions=)`로 넘기면 엔진이 사건
+  세션 시작에 보유 수량·평균단가를 조정하고(단주는 시가 현금 정산) 대기 주문을 취소한다.
+  종목마스터 일별 스냅샷으로 만든 `UniverseResult`를 `run(universe=)`로 주면 전략이
+  `ctx.universe()`로 그 세션의 상장 종목만 본다(look-ahead 차단). 새 데이터 채널은
+  `tests/test_bar_source_contract.py`의 빌더 하나로 계약 전체를 통과해야 한다 (sqlite로 검증).
 
 ## 실행
 

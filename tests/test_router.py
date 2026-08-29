@@ -12,6 +12,7 @@ from backtest_engine.errors import (
     SchemaVersionMismatch,
     UndeclaredActionReturned,
     UndeclaredFeatureUsed,
+    UnknownOrderId,
     UnsupportedActionValue,
 )
 from backtest_engine.types.actions import (
@@ -27,6 +28,7 @@ from backtest_engine.types.actions import (
     NotionalTarget,
     QuantityDelta,
     QuantityTarget,
+    ReplaceOrder,
     SetPortfolioTarget,
     SetPositionTarget,
     StrategyAction,
@@ -35,7 +37,7 @@ from backtest_engine.types.actions import (
     WeightTarget,
 )
 from backtest_engine.types.decision import StrategyDecision
-from backtest_engine.types.events import OrderEvent
+from backtest_engine.types.events import OrderEvent, OrderStatus
 from backtest_engine.types.instruments import InstrumentId, Money
 from backtest_engine.types.market import MarketSnapshot
 from backtest_engine.types.orders import (
@@ -61,6 +63,8 @@ DECLARED = frozenset(
         ActionKind.SET_POSITION_TARGET,
         ActionKind.ADJUST_POSITION,
         ActionKind.SUBMIT_ORDER,
+        ActionKind.CANCEL_ORDER,
+        ActionKind.REPLACE_ORDER,
     }
 )
 DECLARED_FEATURES = frozenset({EngineFeature.LIMIT_ORDER, EngineFeature.STOP_ORDER})
@@ -132,8 +136,9 @@ def test_schema_version_mismatch_rejected() -> None:
 
 def test_undeclared_action_kind_rejected() -> None:
     decision = StrategyDecision.of(day(1), CancelOrder(order_id="O-000001"))
+    router = DecisionRouter(frozenset({ActionKind.NO_ACTION}), OrderManager())
     with pytest.raises(UndeclaredActionReturned, match="cancel_order"):
-        make_router().route(decision, "D-000001", portfolio_with(100_000), market())
+        router.route(decision, "D-000001", portfolio_with(100_000), market())
 
 
 def test_buy_quantity_floors_to_integer_shares() -> None:
@@ -364,7 +369,10 @@ def test_liquidation_sells_full_position_and_cancels_orders() -> None:
     portfolio = portfolio_with(0.0, {INSTRUMENT: (8, 100.0)})
     result = make_router(order_manager).route(decision, "D-000001", portfolio, market())
 
-    assert result.cancelled == (stale_order,)
+    assert [(u.order_id, u.status) for u in result.updates] == [
+        (stale_order.order_id, OrderStatus.CANCELLED)
+    ]
+    assert "LiquidatePosition" in (result.updates[0].detail or "")
     assert order_manager.open_orders() == ()
     assert len(result.orders) == 1
     assert result.orders[0].side is Side.SELL
@@ -442,4 +450,75 @@ def test_submit_sell_beyond_held_rejected() -> None:
 def test_ioc_fok_not_implemented_until_partial_fill(tif: TimeInForce) -> None:
     action = SubmitOrder(request=MarketOrderRequest(core=core(Side.BUY, tif=tif)))
     with pytest.raises(UnsupportedActionValue, match="PARTIAL_FILL"):
+        route_one(action, portfolio_with(100_000))
+
+
+# --- 4c: CancelOrder / ReplaceOrder -------------------------------------------
+
+
+def placed_manager(quantity: int = 3) -> tuple[OrderManager, OrderEvent]:
+    order_manager = OrderManager()
+    order = OrderEvent(
+        order_id=order_manager.next_order_id(),
+        decision_id="D-000000",
+        ts=day(1),
+        instrument=INSTRUMENT,
+        quantity=Decimal(quantity),
+        side=Side.BUY,
+        source_action=weight_decision(0.5).actions[0],
+    )
+    order_manager.place(order)
+    return order_manager, order
+
+
+def test_cancel_order_removes_from_queue_and_records_update() -> None:
+    order_manager, order = placed_manager()
+    decision = StrategyDecision.of(day(1), CancelOrder(order_id=order.order_id))
+    result = make_router(order_manager).route(
+        decision, "D-000001", portfolio_with(100_000), market()
+    )
+    assert result.orders == ()
+    assert [(u.order_id, u.status, u.ts) for u in result.updates] == [
+        (order.order_id, OrderStatus.CANCELLED, day(1))
+    ]
+    assert "D-000001" in (result.updates[0].detail or "")
+    assert order_manager.open_orders() == ()
+
+
+def test_cancel_unknown_order_id_aborts_run() -> None:
+    decision = StrategyDecision.of(day(1), CancelOrder(order_id="O-999999"))
+    with pytest.raises(UnknownOrderId, match="O-999999"):
+        make_router().route(decision, "D-000001", portfolio_with(100_000), market())
+
+
+def test_replace_order_records_replaced_and_issues_new_order() -> None:
+    order_manager, old = placed_manager()
+    action = ReplaceOrder(
+        order_id=old.order_id,
+        replacement=LimitOrderRequest(
+            core=core(Side.BUY, quantity=5, tif=TimeInForce.GTC), limit_price=Decimal(95)
+        ),
+    )
+    decision = StrategyDecision.of(day(1), action)
+    result = make_router(order_manager).route(
+        decision, "D-000001", portfolio_with(100_000), market()
+    )
+    (new,) = result.orders
+    assert new.order_id == "O-000002"
+    assert (new.order_type, new.limit_price, new.quantity) == (
+        OrderType.LIMIT,
+        Decimal(95),
+        Decimal(5),
+    )
+    assert new.source_action is action
+    assert [(u.order_id, u.status) for u in result.updates] == [
+        (old.order_id, OrderStatus.REPLACED)
+    ]
+    assert "O-000002" in (result.updates[0].detail or "")
+    assert order_manager.open_orders() == ()  # 새 주문은 큐 경유로 등록되므로 아직 없음
+
+
+def test_replace_unknown_order_id_aborts_run() -> None:
+    action = ReplaceOrder(order_id="O-424242", replacement=MarketOrderRequest(core=core(Side.BUY)))
+    with pytest.raises(UnknownOrderId, match="O-424242"):
         route_one(action, portfolio_with(100_000))

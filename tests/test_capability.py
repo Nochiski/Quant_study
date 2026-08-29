@@ -142,7 +142,15 @@ def test_reference_capabilities_are_honest() -> None:
         ActionKind.SET_POSITION_TARGET,
         ActionKind.ADJUST_POSITION,
         ActionKind.SUBMIT_ORDER,
+        ActionKind.CANCEL_ORDER,
+        ActionKind.REPLACE_ORDER,
     }
+    implemented_events = {
+        capability.kind
+        for capability in capabilities.events
+        if capability.support is SupportLevel.IMPLEMENTED
+    }
+    assert implemented_events == {EventKind.MARKET, EventKind.FILL, EventKind.ORDER_UPDATE}
     implemented_features = {
         capability.feature
         for capability in capabilities.features

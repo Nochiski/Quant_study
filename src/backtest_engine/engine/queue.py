@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import IntEnum
 
-from backtest_engine.types.events import FillEvent, OrderEvent
+from backtest_engine.types.events import FillEvent, OrderEvent, OrderUpdateEvent
 from backtest_engine.types.market import MarketSnapshot
 
 
@@ -21,6 +21,7 @@ class EventPriority(IntEnum):
 
     MARKET = 10  # 새 세션 시세 도착 → 대기 주문 체결 시도
     FILL = 20  # 체결 결과를 포트폴리오에 반영
+    NOTIFY = 25  # 전략이 선언한 Fill/OrderUpdate 알림 (모든 체결 반영 후)
     SESSION_CLOSE = 30  # 마감 평가, 스냅샷, 전략 호출
     ORDER = 40  # 전략 판단에서 나온 주문을 대기열에 등록
 
@@ -33,6 +34,15 @@ class MarketArrived:
 @dataclass(frozen=True)
 class FillOccurred:
     fill: FillEvent
+    snapshot: MarketSnapshot  # 체결이 일어난 세션 (알림 시 참조 가격용)
+
+
+@dataclass(frozen=True)
+class StrategyNotify:
+    """전략이 requirements().events에 선언한 이벤트를 전달한다."""
+
+    event: FillEvent | OrderUpdateEvent
+    snapshot: MarketSnapshot
 
 
 @dataclass(frozen=True)
@@ -45,7 +55,7 @@ class OrderPlaced:
     order: OrderEvent
 
 
-EngineQueueEvent = MarketArrived | FillOccurred | SessionClose | OrderPlaced
+EngineQueueEvent = MarketArrived | FillOccurred | StrategyNotify | SessionClose | OrderPlaced
 
 
 @dataclass(order=True)

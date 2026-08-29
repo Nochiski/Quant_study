@@ -202,12 +202,11 @@ def reference_engine_capabilities() -> EngineCapabilities:
 
     3단계의 NO_ACTION, SET_PORTFOLIO_TARGET, LIQUIDATE_POSITION, 4a의
     SET_POSITION_TARGET, ADJUST_POSITION, 4b의 SUBMIT_ORDER(LIMIT/STOP 기능 포함),
-    MARKET 이벤트, EverySession 일정만 IMPLEMENTED다. 나머지는 스키마만 정의된
+    4c의 CANCEL_ORDER, REPLACE_ORDER와 FILL/ORDER_UPDATE 이벤트 전달, MARKET 이벤트,
+    EverySession 일정만 IMPLEMENTED다. 나머지는 스키마만 정의된
     NOT_IMPLEMENTED 상태로, handler와 테스트가 추가될 때 승격한다.
     """
     not_implemented_actions = {
-        ActionKind.CANCEL_ORDER: "roadmap step 4c",
-        ActionKind.REPLACE_ORDER: "roadmap step 4c",
         ActionKind.BASKET: "roadmap step 5",
     }
     implemented_actions = (
@@ -217,6 +216,8 @@ def reference_engine_capabilities() -> EngineCapabilities:
         ActionKind.ADJUST_POSITION,
         ActionKind.LIQUIDATE_POSITION,
         ActionKind.SUBMIT_ORDER,
+        ActionKind.CANCEL_ORDER,
+        ActionKind.REPLACE_ORDER,
     )
     actions = tuple(
         ActionCapability(kind, SupportLevel.IMPLEMENTED) for kind in implemented_actions
@@ -239,14 +240,8 @@ def reference_engine_capabilities() -> EngineCapabilities:
     events = (
         EventCapability(EventKind.MARKET, SupportLevel.IMPLEMENTED),
         EventCapability(EventKind.TIMER, SupportLevel.NOT_IMPLEMENTED, "no timer scheduler in v1"),
-        EventCapability(
-            EventKind.FILL, SupportLevel.NOT_IMPLEMENTED, "fill delivery to strategy not wired"
-        ),
-        EventCapability(
-            EventKind.ORDER_UPDATE,
-            SupportLevel.NOT_IMPLEMENTED,
-            "order update delivery to strategy not wired",
-        ),
+        EventCapability(EventKind.FILL, SupportLevel.IMPLEMENTED),
+        EventCapability(EventKind.ORDER_UPDATE, SupportLevel.IMPLEMENTED),
         EventCapability(
             EventKind.CORPORATE_ACTION,
             SupportLevel.UNSUPPORTED,

@@ -5,7 +5,9 @@
 
 구현 범위 (Capability와 일치):
 - NoAction, SetPortfolioTarget, SetPositionTarget, AdjustPosition, LiquidatePosition,
-  SubmitOrder(MARKET/LIMIT/STOP/STOP_LIMIT, DAY/GTC).
+  SubmitOrder(MARKET/LIMIT/STOP/STOP_LIMIT, DAY/GTC), CancelOrder, ReplaceOrder.
+- 취소·정정은 대기열을 즉시 바꾸고 결과를 OrderUpdateEvent로 돌려준다. 모르는
+  order_id는 전략 버그이므로 UnknownOrderId로 run을 중단한다.
 - ExecutionPolicy는 MARKET 스타일만, 일봉 엔진이므로 NEXT_OPEN과
   NEXT_AVAILABLE 모두 "다음 세션 시가"를 뜻한다.
 
@@ -27,12 +29,14 @@ from backtest_engine.errors import (
     SchemaVersionMismatch,
     UndeclaredActionReturned,
     UndeclaredFeatureUsed,
+    UnknownOrderId,
     UnsupportedActionValue,
 )
 from backtest_engine.sizing import floor_delta_shares
 from backtest_engine.types.actions import (
     ActionKind,
     AdjustPosition,
+    CancelOrder,
     ExecutionPolicy,
     ExecutionStyle,
     LiquidatePosition,
@@ -42,6 +46,7 @@ from backtest_engine.types.actions import (
     PositionTarget,
     QuantityDelta,
     QuantityTarget,
+    ReplaceOrder,
     SetPortfolioTarget,
     SetPositionTarget,
     StrategyAction,
@@ -51,7 +56,7 @@ from backtest_engine.types.actions import (
     kind_of,
 )
 from backtest_engine.types.decision import SCHEMA_VERSION, StrategyDecision
-from backtest_engine.types.events import OrderEvent
+from backtest_engine.types.events import OrderEvent, OrderStatus, OrderUpdateEvent
 from backtest_engine.types.instruments import InstrumentId, Money
 from backtest_engine.types.market import MarketSnapshot
 from backtest_engine.types.orders import (
@@ -71,7 +76,7 @@ from backtest_engine.types.requirements import EngineFeature
 @dataclass(frozen=True)
 class RoutingResult:
     orders: tuple[OrderEvent, ...]
-    cancelled: tuple[OrderEvent, ...]
+    updates: tuple[OrderUpdateEvent, ...]  # 취소·정정으로 즉시 바뀐 기존 주문 상태
 
 
 class DecisionRouter:
@@ -99,7 +104,7 @@ class DecisionRouter:
             )
 
         orders: list[OrderEvent] = []
-        cancelled: list[OrderEvent] = []
+        updates: list[OrderUpdateEvent] = []
         for action in decision.actions:
             kind = kind_of(action)
             if kind not in self._declared_actions:
@@ -108,8 +113,8 @@ class DecisionRouter:
                     f"declared={sorted(k.value for k in self._declared_actions)} "
                     f"decision_id={decision_id} as_of={decision.as_of}"
                 )
-            orders.extend(self._route_action(action, decision_id, portfolio, market, cancelled))
-        return RoutingResult(orders=tuple(orders), cancelled=tuple(cancelled))
+            orders.extend(self._route_action(action, decision_id, portfolio, market, updates))
+        return RoutingResult(orders=tuple(orders), updates=tuple(updates))
 
     def _route_action(
         self,
@@ -117,7 +122,7 @@ class DecisionRouter:
         decision_id: str,
         portfolio: PortfolioSnapshot,
         market: MarketSnapshot,
-        cancelled: list[OrderEvent],
+        updates: list[OrderUpdateEvent],
     ) -> list[OrderEvent]:
         match action:
             case NoAction():
@@ -140,11 +145,53 @@ class DecisionRouter:
                     action.instrument, delta, False, action, decision_id, portfolio, market
                 )
             case SubmitOrder():
-                return self._submit_order(action, decision_id, portfolio, market)
+                return self._order_from_request(
+                    action.request, action, decision_id, portfolio, market
+                )
+            case CancelOrder():
+                self._take_open_order(action.order_id, decision_id)
+                updates.append(
+                    OrderUpdateEvent(
+                        ts=market.ts,
+                        order_id=action.order_id,
+                        status=OrderStatus.CANCELLED,
+                        detail=f"cancelled by strategy — decision_id={decision_id}",
+                    )
+                )
+                return []
+            case ReplaceOrder():
+                self._take_open_order(action.order_id, decision_id)
+                orders = self._order_from_request(
+                    action.replacement, action, decision_id, portfolio, market
+                )
+                updates.append(
+                    OrderUpdateEvent(
+                        ts=market.ts,
+                        order_id=action.order_id,
+                        status=OrderStatus.REPLACED,
+                        detail=(
+                            f"replaced by strategy — replaced_by={orders[0].order_id} "
+                            f"decision_id={decision_id}"
+                        ),
+                    )
+                )
+                return orders
             case LiquidatePosition():
                 self._check_execution(action.execution, decision_id)
                 if action.cancel_open_orders:
-                    cancelled.extend(self._order_manager.cancel_for_instrument(action.instrument))
+                    for stale in self._order_manager.cancel_for_instrument(action.instrument):
+                        updates.append(
+                            OrderUpdateEvent(
+                                ts=market.ts,
+                                order_id=stale.order_id,
+                                status=OrderStatus.CANCELLED,
+                                detail=(
+                                    f"cancelled by LiquidatePosition — "
+                                    f"instrument={action.instrument.symbol} "
+                                    f"decision_id={decision_id}"
+                                ),
+                            )
+                        )
                 return self._liquidation_orders(action, decision_id, portfolio, market)
             case _:
                 # prepare_strategy의 capability gate가 거절했어야 하는 경로다.
@@ -305,14 +352,23 @@ class DecisionRouter:
         OrderType.STOP_LIMIT: EngineFeature.STOP_ORDER,
     }
 
-    def _submit_order(
+    def _take_open_order(self, order_id: str, decision_id: str) -> None:
+        if self._order_manager.get(order_id) is None:
+            open_ids = [o.order_id for o in self._order_manager.open_orders()]
+            raise UnknownOrderId(
+                f"order is not open (unknown, filled, cancelled or expired) — "
+                f"order_id={order_id} open={open_ids} decision_id={decision_id}"
+            )
+        self._order_manager.remove(order_id)
+
+    def _order_from_request(
         self,
-        action: SubmitOrder,
+        request: OrderRequest,
+        action: SubmitOrder | ReplaceOrder,
         decision_id: str,
         portfolio: PortfolioSnapshot,
         market: MarketSnapshot,
     ) -> list[OrderEvent]:
-        request = action.request
         core = request.core
         order_type, limit_price, stop_price = self._describe_request(request)
         feature = self._FEATURE_FOR_TYPE.get(order_type)

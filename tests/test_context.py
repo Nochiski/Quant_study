@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 
 from backtest_engine.engine.context import EngineStrategyContext, HistoryStore
 from backtest_engine.errors import InsufficientHistoryError, UndeclaredDataAccess
+from backtest_engine.types.actions import NoAction
+from backtest_engine.types.events import OrderEvent
 from backtest_engine.types.market import PriceField
+from backtest_engine.types.orders import Side
 from backtest_engine.types.portfolio import PortfolioSnapshot
 from backtest_engine.types.requirements import HistoryRequest
 from tests.conftest import day, make_bar, make_instrument, make_snapshot
@@ -91,3 +96,35 @@ def test_portfolio_reads_come_from_snapshot() -> None:
     assert context.portfolio_value() == 1_000_000.0
     assert context.current_weight(INSTRUMENT) == 0.0
     assert context.position_qty(INSTRUMENT) == 0
+
+
+def _open_order(order_id: str, instrument=INSTRUMENT) -> OrderEvent:  # type: ignore[no-untyped-def]  # reason: 테스트 헬퍼, 기본값 표현용
+    return OrderEvent(
+        order_id=order_id,
+        decision_id="D-000001",
+        ts=day(1),
+        instrument=instrument,
+        quantity=Decimal(1),
+        side=Side.BUY,
+        source_action=NoAction(),
+    )
+
+
+def test_open_orders_returns_snapshot_filtered_by_instrument() -> None:
+    other = make_instrument("000660")
+    orders = (_open_order("O-000001"), _open_order("O-000002", other))
+    context = EngineStrategyContext(
+        now=day(3),
+        snapshot=empty_portfolio(3),
+        history_store=build_store(100, 101, 102),
+        declared=frozenset(),
+        open_orders_snapshot=orders,
+    )
+    assert context.open_orders() == orders
+    assert context.open_orders(other) == (orders[1],)
+    assert context.open_orders(make_instrument("999999")) == ()
+
+
+def test_open_orders_defaults_to_empty() -> None:
+    context = make_context(build_store(100), 1, declared=frozenset())
+    assert context.open_orders() == ()

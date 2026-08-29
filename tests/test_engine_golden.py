@@ -188,20 +188,20 @@ class TestGoldenRun:
 class TestEngineContracts:
     def test_capability_gate_rejects_before_loop(self) -> None:
         engine = BacktestEngine(RunConfig(run_id="gate", initial_cash=100_000.0))
-        strategy = ScriptedStrategy(
-            script=(),
-            declared_actions=frozenset({ActionKind.BASKET}),
-        )
         # requirements에 미구현 BASKET + SHORT_SELLING을 요구하도록 재구성
-        base = strategy.requirements()
-        rejected = StrategyRequirements(
-            histories=base.histories,
-            schedule=base.schedule,
-            events=base.events,
-            actions=frozenset({ActionKind.BASKET}),
-            features=frozenset({EngineFeature.SHORT_SELLING}),
-        )
-        strategy.requirements = lambda: rejected  # type: ignore[method-assign]  # reason: 테스트 전용 requirements 교체
+
+        class Rejected(ScriptedStrategy):
+            def requirements(self) -> StrategyRequirements:
+                base = super().requirements()
+                return StrategyRequirements(
+                    histories=base.histories,
+                    schedule=base.schedule,
+                    events=base.events,
+                    actions=frozenset({ActionKind.BASKET}),
+                    features=frozenset({EngineFeature.SHORT_SELLING}),
+                )
+
+        strategy = Rejected(script=(), declared_actions=frozenset({ActionKind.BASKET}))
 
         with pytest.raises(CapabilityNotImplemented, match="short_selling"):
             engine.run(strategy, DataFeed(GOLDEN_BARS))

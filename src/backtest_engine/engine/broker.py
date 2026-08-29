@@ -76,6 +76,8 @@ def execution_price(order: OrderEvent, bar: Bar, already_triggered: bool) -> Pri
         case OrderType.LIMIT:
             return PriceDecision(_limit_price(bar, float(_require(order.limit_price)), buy), False)
         case OrderType.STOP:
+            if already_triggered:  # 발동 후 잔량은 시장가로 취급한다 (부분체결 이월)
+                return PriceDecision(bar.open, False)
             return PriceDecision(_stop_price(bar, float(_require(order.stop_price)), buy), False)
         case OrderType.STOP_LIMIT:
             limit = float(_require(order.limit_price))
@@ -247,7 +249,9 @@ class BrokerSim:
             participation = self._max_participation
         if participation is None:
             return None
-        return Decimal(bar.volume * participation).quantize(Decimal(1), rounding=ROUND_FLOOR)
+        # float 곱셈(90 × 0.7 = 62.999…)이 floor를 한 주 깎지 않도록 Decimal로 정확히 계산한다.
+        cap = Decimal(bar.volume) * Decimal(str(participation))
+        return cap.quantize(Decimal(1), rounding=ROUND_FLOOR)
 
     def _slipped_price(
         self, order: OrderEvent, bar: Bar, base_price: float, quantity: Decimal

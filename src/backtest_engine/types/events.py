@@ -39,7 +39,7 @@ class OrderStatus(Enum):
 
 @dataclass(frozen=True)
 class OrderUpdateEvent:
-    """주문 상태 변화 통지. (스키마만 정의, v1 미전달)"""
+    """주문 상태 변화 통지. EventStore에 기록되고, ORDER_UPDATE를 선언한 전략에 전달된다 (4c)."""
 
     ts: datetime
     order_id: str

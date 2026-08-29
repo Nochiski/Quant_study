@@ -230,3 +230,12 @@ def test_fee_is_charged_on_slipped_notional() -> None:
 def test_invalid_participation_rejected() -> None:
     with pytest.raises(ValueError, match="max_participation"):
         BrokerSim(fee_bps=0.0, max_participation=1.5)
+
+
+def test_liquidity_cap_uses_exact_decimal_arithmetic() -> None:
+    """DEFECT-101: 90 × 0.7 = 63 (float 곱셈 62.999… 로 62가 되면 안 된다)."""
+    bar = make_ohlc(day(2), INSTRUMENT, 100.0, 110.0, 90.0, 105.0, volume=90)
+    broker = BrokerSim(fee_bps=0.0, max_participation=0.7)
+    outcome = broker.execute(order(OrderType.MARKET, B, quantity=1_000), bar, 1_000_000.0, "F-1")
+    assert outcome.fill is not None
+    assert outcome.fill.quantity == Decimal(63)

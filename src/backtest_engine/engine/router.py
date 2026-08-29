@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -91,6 +92,8 @@ class DecisionRouter:
         self._declared_actions = declared_actions
         self._declared_features = declared_features
         self._order_manager = order_manager
+        # 같은 Decision 안에서 이미 라우팅된 매도 수량 (종목별). route()마다 초기화.
+        self._routed_sells: dict[InstrumentId, Decimal] = defaultdict(Decimal)
 
     def route(
         self,
@@ -107,6 +110,7 @@ class DecisionRouter:
 
         orders: list[OrderEvent] = []
         updates: list[OrderUpdateEvent] = []
+        self._routed_sells = defaultdict(Decimal)
         for action in decision.actions:
             kind = kind_of(action)
             if kind not in self._declared_actions:
@@ -340,17 +344,14 @@ class DecisionRouter:
         side = Side.BUY if delta > 0 else Side.SELL
         quantity = abs(delta)
         if side is Side.SELL:
-            held = portfolio.position_qty(instrument)
-            if quantity > held:
+            sellable = self._sellable(instrument, portfolio)
+            if quantity > sellable:
                 if not clamp_sell:
-                    raise UnsupportedActionValue(
-                        f"resulting position would be negative — requires SHORT_SELLING "
-                        f"feature (not implemented) — instrument={instrument.symbol} "
-                        f"held={held} sell={quantity} decision_id={decision_id}"
-                    )
-                quantity = held
+                    self._raise_oversell(instrument, portfolio, quantity, decision_id)
+                quantity = sellable
             if quantity <= 0:
                 return []
+            self._routed_sells[instrument] += quantity
         return [
             OrderEvent(
                 order_id=self._order_manager.next_order_id(),
@@ -399,13 +400,9 @@ class DecisionRouter:
             )
         self._check_integer(core.quantity, core.instrument, decision_id)
         if core.side is Side.SELL:
-            held = portfolio.position_qty(core.instrument)
-            if core.quantity > held:
-                raise UnsupportedActionValue(
-                    f"resulting position would be negative — requires SHORT_SELLING "
-                    f"feature (not implemented) — instrument={core.instrument.symbol} "
-                    f"held={held} sell={core.quantity} decision_id={decision_id}"
-                )
+            if core.quantity > self._sellable(core.instrument, portfolio):
+                self._raise_oversell(core.instrument, portfolio, core.quantity, decision_id)
+            self._routed_sells[core.instrument] += core.quantity
         return [
             OrderEvent(
                 order_id=self._order_manager.next_order_id(),
@@ -436,6 +433,39 @@ class DecisionRouter:
             case StopLimitOrderRequest():
                 return OrderType.STOP_LIMIT, request.limit_price, request.stop_price
 
+    def _open_sell_quantity(self, instrument: InstrumentId) -> Decimal:
+        return sum(
+            (
+                entry.remaining
+                for entry in self._order_manager.open_entries()
+                if entry.order.instrument == instrument and entry.order.side is Side.SELL
+            ),
+            Decimal(0),
+        )
+
+    def _sellable(self, instrument: InstrumentId, portfolio: PortfolioSnapshot) -> Decimal:
+        """더 팔 수 있는 수량 = 보유 − 대기 매도 잔량 − 이 Decision에서 이미 라우팅된 매도."""
+        return (
+            portfolio.position_qty(instrument)
+            - self._open_sell_quantity(instrument)
+            - self._routed_sells[instrument]
+        )
+
+    def _raise_oversell(
+        self,
+        instrument: InstrumentId,
+        portfolio: PortfolioSnapshot,
+        quantity: Decimal,
+        decision_id: str,
+    ) -> None:
+        raise UnsupportedActionValue(
+            f"resulting position would be negative — requires SHORT_SELLING feature "
+            f"(not implemented) — instrument={instrument.symbol} "
+            f"held={portfolio.position_qty(instrument)} sell={quantity} "
+            f"already_routed={self._routed_sells[instrument]} "
+            f"open_sell={self._open_sell_quantity(instrument)} decision_id={decision_id}"
+        )
+
     @staticmethod
     def _check_integer(quantity: Decimal, instrument: InstrumentId, decision_id: str) -> None:
         if quantity != quantity.to_integral_value():
@@ -460,9 +490,10 @@ class DecisionRouter:
         portfolio: PortfolioSnapshot,
         market: MarketSnapshot,
     ) -> list[OrderEvent]:
-        held = portfolio.position_qty(action.instrument)
+        held = self._sellable(action.instrument, portfolio)
         if held <= 0:
             return []
+        self._routed_sells[action.instrument] += held
         return [
             OrderEvent(
                 order_id=self._order_manager.next_order_id(),

@@ -461,3 +461,86 @@ class TestSlippageAccounting:
         assert fill.price == pytest.approx(110.11)
         assert fill.slippage_per_share == pytest.approx(0.11)
         assert result.snapshots[-1].cash == pytest.approx(100_000.0 - 1_101.1)
+
+
+# --- 리뷰 결함 회귀 (4단계 리뷰) ------------------------------------------------
+
+
+class TestReviewRegressions:
+    def test_partially_filled_stop_keeps_trigger_state(self) -> None:
+        """DEFECT-001: 발동 후 부분체결된 STOP/STOP_LIMIT 잔량은 STOP 재평가 없이 체결된다."""
+        from backtest_engine.types.orders import StopLimitOrderRequest
+
+        bars = (
+            make_ohlc(day(1), INSTRUMENT, 100.0, 100.0, 100.0, 100.0, volume=1_000),
+            make_ohlc(day(2), INSTRUMENT, 110.0, 120.0, 105.0, 115.0, volume=1_000),
+            make_ohlc(day(3), INSTRUMENT, 90.0, 95.0, 85.0, 88.0, volume=1_000),
+            make_ohlc(day(4), INSTRUMENT, 90.0, 95.0, 85.0, 88.0, volume=1_000),
+        )
+        core = OrderCore(INSTRUMENT, Side.BUY, Decimal(250), TimeInForce.GTC)
+        stop_limit = submit(
+            StopLimitOrderRequest(core=core, stop_price=Decimal(105), limit_price=Decimal(120))
+        )
+        engine, result = run((stop_limit,), bars, max_participation=0.1)
+        # D2: 발동(110 ≥ 105) + 캡 100주. D3·D4: 발동 유지 → 지정가 120 이내 시가 90에 체결
+        assert [(f.ts, int(f.quantity), f.price) for f in result.fills] == [
+            (day(2), 100, 110.0),
+            (day(3), 100, 90.0),
+            (day(4), 50, 90.0),
+        ]
+        assert statuses_of(engine, "O-000001")[-1] is OrderStatus.FILLED
+
+    def test_partially_filled_plain_stop_fills_remainder_at_next_open(self) -> None:
+        bars = (
+            make_ohlc(day(1), INSTRUMENT, 100.0, 100.0, 100.0, 100.0, volume=1_000),
+            make_ohlc(day(2), INSTRUMENT, 110.0, 120.0, 105.0, 115.0, volume=1_000),
+            make_ohlc(day(3), INSTRUMENT, 90.0, 95.0, 85.0, 88.0, volume=1_000),
+        )
+        core = OrderCore(INSTRUMENT, Side.BUY, Decimal(150), TimeInForce.GTC)
+        stop = submit(StopOrderRequest(core=core, stop_price=Decimal(105)))
+        _, result = run((stop,), bars, max_participation=0.1)
+        assert [(f.ts, int(f.quantity), f.price) for f in result.fills] == [
+            (day(2), 100, 110.0),
+            (day(3), 50, 90.0),
+        ]
+
+    def test_two_sell_actions_in_one_decision_cannot_oversell(self) -> None:
+        """DEFECT-102: 같은 Decision의 매도 액션들은 보유 수량을 누적 차감해 검증한다."""
+        from backtest_engine.errors import UnsupportedActionValue
+        from backtest_engine.types.decision import StrategyDecision
+
+        class TwoSells(OrderScript):
+            def on_event(self, ctx: StrategyContext, event: StrategyEvent) -> StrategyDecision:
+                if ctx.now == day(1):
+                    return StrategyDecision.of(ctx.now, buy_shares(10))
+                if ctx.now == day(2):
+                    sell = OrderCore(INSTRUMENT, Side.SELL, Decimal(10), TimeInForce.GTC)
+                    return StrategyDecision(
+                        schema_version=1,
+                        as_of=ctx.now,
+                        actions=(
+                            submit(MarketOrderRequest(core=sell)),
+                            submit(MarketOrderRequest(core=sell)),
+                        ),
+                    )
+                return StrategyDecision.no_action(ctx.now)
+
+        engine = BacktestEngine(RunConfig(run_id="oversell", initial_cash=100_000.0))
+        with pytest.raises(UnsupportedActionValue, match="held=10 sell=10 already_routed=10"):
+            engine.run(TwoSells(()), DataFeed(BARS))
+
+    def test_open_sell_orders_count_against_held_quantity(self) -> None:
+        """대기 중인 매도 주문이 있으면 그만큼은 다시 팔 수 없다 (GTC 지정가 매도 + 시장가 매도)."""
+        from backtest_engine.errors import UnsupportedActionValue
+
+        def sell_limit_then_market() -> tuple[StrategyAction | None, ...]:
+            limit = OrderCore(INSTRUMENT, Side.SELL, Decimal(10), TimeInForce.GTC)
+            market = OrderCore(INSTRUMENT, Side.SELL, Decimal(10), TimeInForce.DAY)
+            return (
+                buy_shares(10),
+                submit(LimitOrderRequest(core=limit, limit_price=Decimal(500))),
+                submit(MarketOrderRequest(core=market)),
+            )
+
+        with pytest.raises(UnsupportedActionValue, match="open_sell=10"):
+            run(sell_limit_then_market())

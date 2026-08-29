@@ -40,7 +40,7 @@ from backtest_engine.engine.store import DecisionRecord, EventStore, RecordKind
 from backtest_engine.ports.execution import SlippageModel
 from backtest_engine.types.events import OrderStatus, OrderUpdateEvent, StrategyEvent
 from backtest_engine.types.market import MarketSnapshot
-from backtest_engine.types.orders import Side, TimeInForce
+from backtest_engine.types.orders import OrderType, Side, TimeInForce
 from backtest_engine.types.requirements import EventKind, HistoryRequest, StrategyRequirements
 from backtest_engine.types.results import BacktestResult, RunConfig
 from backtest_engine.types.strategy import Strategy
@@ -216,6 +216,12 @@ class BacktestEngine:
                 if left == 0:
                     update(order.order_id, OrderStatus.FILLED, None)
                 else:
+                    # STOP/STOP_LIMIT이 발동해 일부만 체결됐으면 잔량은 발동 상태를 유지한다.
+                    if (
+                        order.order_type in (OrderType.STOP, OrderType.STOP_LIMIT)
+                        and not entry.triggered
+                    ):
+                        order_manager.mark_triggered(order.order_id)
                     update(order.order_id, OrderStatus.PARTIALLY_FILLED, outcome.detail)
             elif outcome.status is ExecutionStatus.TRIGGERED_UNFILLED:
                 order_manager.mark_triggered(order.order_id)

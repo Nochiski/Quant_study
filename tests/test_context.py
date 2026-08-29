@@ -10,6 +10,7 @@ from backtest_engine.engine.context import EngineStrategyContext, HistoryStore
 from backtest_engine.errors import InsufficientHistoryError, UndeclaredDataAccess
 from backtest_engine.types.actions import NoAction
 from backtest_engine.types.events import OrderEvent
+from backtest_engine.types.instruments import InstrumentId
 from backtest_engine.types.market import PriceField
 from backtest_engine.types.orders import Side
 from backtest_engine.types.portfolio import PortfolioSnapshot
@@ -98,7 +99,7 @@ def test_portfolio_reads_come_from_snapshot() -> None:
     assert context.position_qty(INSTRUMENT) == 0
 
 
-def _open_order(order_id: str, instrument=INSTRUMENT) -> OrderEvent:  # type: ignore[no-untyped-def]  # reason: 테스트 헬퍼, 기본값 표현용
+def _open_order(order_id: str, instrument: InstrumentId = INSTRUMENT) -> OrderEvent:
     return OrderEvent(
         order_id=order_id,
         decision_id="D-000001",

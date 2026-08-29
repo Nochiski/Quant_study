@@ -94,6 +94,24 @@ Python 엔진은 4·5·D 단계로 방금 크게 바뀌었으므로 전부를 �
   시나리오, 기존 엔진 5시나리오 전부 비트 동일 (424 passed).
 - 성능(측정만): 슬라이스 1,619세션 — python 0.21s / rust 0.22s. 여전히 호출 단위 FFI가 지배.
 
+## 6c 구현 결과 (2026-08-29)
+
+- Rust `process_market(ts, entries, groups, bars, power, fee_rate, participation, slippage)`가 한
+  세션의 그룹 판정(BEST_EFFORT/AON/PROPORTIONAL) → 단일 주문(매도 먼저) → DAY/IOC/FOK 만료를
+  수행하고 **계획(ops)** — fill / update / trigger / remove / drop_group — 을 돌려준다.
+  Python `_on_market_rust`가 ops를 순서대로 OrderManager·큐·EventStore에 적용한다.
+  OrderManager(대기열 진실 원천)·라우터·전략 호출·자본변동 적용·비용·스냅샷은 Python에 남는다.
+- 슬리피지는 내장 3종만 Rust에서 계산한다; 커스텀 `SlippageModel`은 `core="rust"`에서
+  `CoreUnavailable`(run 시작 시). 진단 문자열까지 Python과 같게 만든다(`repr(float)`·리스트
+  표기, 잔량 갱신 전 detail, 취소 순서 = 라우팅 순).
+- 동일성: 주문 생명주기 11시나리오(GTC/DAY 지정가, STOP_LIMIT 부분체결, IOC/FOK, 여력·유동성
+  0 대기, 바스켓 3정책, 정지 세션 분할+대기 주문)의 EventStore 레코드 전체가 비트 동일 (436 passed).
+- 성능(측정만): 슬라이스 1,619세션 python 0.18s / rust 0.20s. 세션당 주문이 0~1개인 골든크로스
+  데모에서는 Rust로 옮긴 산술이 전체 시간의 극히 일부라 이득이 없다 — 남은 비용은 큐·전략 호출·
+  스냅샷 생성·EventStore(Python). 이득을 보려면 다종목·다주문 워크로드에서 재측정하거나 6d로
+  세션 루프 자체(큐·스냅샷)를 옮겨야 한다.
+
 ## 다음 단계
 
-6c 세션 루프(이벤트 큐·그룹 판정·자본변동 적용)를 세션 단위 배치로 옮긴다.
+6d(선택): 이벤트 큐·세션 종료·스냅샷 생성까지 Rust로 옮기고 Python 경계를 "전략 호출 배치"로
+줄인다. 착수 전 다종목(유니버스 100+) 벤치마크로 병목이 실제로 어디인지 측정한다.

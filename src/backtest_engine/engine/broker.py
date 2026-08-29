@@ -213,6 +213,10 @@ class BrokerSim:
         self._pricing: ExecutionPricing = pricing if pricing is not None else _DefaultPricing()
         self._quote_core: QuoteCore = quote_core if quote_core is not None else PythonQuoteCore()
 
+    @property
+    def fee_rate(self) -> float:
+        return self._fee_rate
+
     def fee_for(self, notional: float) -> float:
         return notional * self._fee_rate
 

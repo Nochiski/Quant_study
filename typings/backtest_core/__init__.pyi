@@ -64,3 +64,29 @@ class BuyingPower:
     def restore(
         self, state: tuple[float, float, list[tuple[str, int]], list[tuple[str, float]]]
     ) -> None: ...
+
+def process_market(
+    ts: str,
+    entries: list[
+        tuple[
+            str,
+            str,
+            str,
+            str,
+            str,
+            float | None,
+            float | None,
+            str,
+            int,
+            bool,
+            str | None,
+            str | None,
+        ]
+    ],
+    groups: list[tuple[str, str, list[str]]],
+    bars: dict[str, tuple[float, float, float, int]],
+    power: BuyingPower,
+    fee_rate: float,
+    default_participation: str | None,
+    slippage: tuple[str, float, float],
+) -> list[tuple[str, str, int, float, float, float, str]]: ...

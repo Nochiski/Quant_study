@@ -12,7 +12,7 @@ v1(1–3단계)·Zipline 대조·시장 데이터 포트가 끝난 시점에서 
 | 4 | `feat/order-lifecycle` | 구현 완료, 리뷰 중 |
 | D | `feat/data-followups` | 구현 완료, 리뷰 중 |
 | 5 | `feat/basket-short` | 구현 완료, 리뷰 중 |
-| 6a | `feat/rust-core` | 구현 완료 (6b·6c 후속) |
+| 6a·6b·6c | `feat/rust-core` | 구현 완료 (6d 선택: 큐·스냅샷 이전, 다종목 벤치마크 선행) |
 
 ## 순서와 의존
 

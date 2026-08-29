@@ -78,8 +78,10 @@ Requirements → Capability 검증 → StrategyEvent + 읽기 전용 Context
 - 6a Rust 코어(`docs/superpowers/specs/2026-08-29-rust-core-design.md`): `rust/backtest_core`
   (PyO3)가 체결 가격 규칙·수량 변환·포트폴리오 회계를 제공하고 `BacktestEngine(core="rust")`로
   켠다. Python 구현이 진실 원천이며 `tests/test_core_parity.py`가 두 코어의 결과를 레코드
-  단위로 고정한다(확장 없으면 skip). 세션 루프가 아직 Python이라 6a의 wall-clock은 같다
-  (슬라이스 1,619세션: python 0.42s / rust 0.43s) — 6b·6c에서 브로커 견적·세션 루프를 옮긴다.
+  단위로 고정한다(확장 없으면 skip). 6b(견적 산술·매수 여력)·6c(세션 MARKET 처리 계획)까지
+  옮겼고 주문 생명주기 11시나리오가 레코드 단위로 비트 동일하다. 골든크로스 데모(세션당 주문
+  0~1개)에서는 wall-clock 이득이 없다(python 0.18s / rust 0.20s) — 남은 비용은 Python 큐·전략
+  호출·스냅샷이며 다종목 워크로드 벤치마크가 6d의 선행 조건이다.
 - 데이터 후속(D, `docs/superpowers/specs/2026-08-29-data-followups-design.md`): 원장의
   상장주식수 변화로 액면분할·병합을 검출해 `run(corporate_actions=)`로 넘기면 엔진이 사건
   세션 시작에 보유 수량·평균단가를 조정하고(단주는 시가 현금 정산) 대기 주문을 취소한다.

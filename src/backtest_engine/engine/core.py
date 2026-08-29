@@ -23,7 +23,9 @@ from backtest_engine.engine.broker import (
 from backtest_engine.engine.portfolio import Portfolio as PythonPortfolio
 from backtest_engine.engine.portfolio import scale_quantity
 from backtest_engine.engine.pricing import PriceDecision, execution_price
+from backtest_engine.engine.slippage import FixedBpsSlippage, NoSlippage, VolumeShareSlippage
 from backtest_engine.errors import CoreUnavailable, NegativeCashError, NegativePositionError
+from backtest_engine.ports.execution import SlippageModel
 from backtest_engine.types.events import (
     CorporateActionApplied,
     CorporateActionEvent,
@@ -108,7 +110,7 @@ class RustPricing:
         return PriceDecision(price, triggered)
 
 
-def _key(instrument: InstrumentId) -> str:
+def instrument_key(instrument: InstrumentId) -> str:
     """InstrumentId의 모든 필드를 담는다 — 통화·자산군만 다른 종목이 합쳐지면 안 된다."""
     return (
         f"{instrument.venue}:{instrument.symbol}:{instrument.asset_class.value}:"
@@ -133,7 +135,7 @@ class RustPortfolio:
                 f"rust core supports integer share quantities only — fill_id={fill.fill_id} "
                 f"quantity={fill.quantity}"
             )
-        key = _key(fill.instrument)
+        key = instrument_key(fill.instrument)
         try:
             self._inner.apply(key, fill.side.value, int(fill.quantity), fill.price, fill.fee)
         except ValueError as error:
@@ -158,7 +160,7 @@ class RustPortfolio:
         settlement_price: float,
         settled_at: datetime | None = None,
     ) -> CorporateActionApplied | None:
-        key = _key(action.instrument)
+        key = instrument_key(action.instrument)
         old_quantity = Decimal(self._inner.held_qty(key))
         if old_quantity == 0:
             return None
@@ -189,16 +191,16 @@ class RustPortfolio:
         )
 
     def mark(self, snapshot: MarketSnapshot) -> None:
-        self._inner.mark([(_key(bar.instrument), bar.close) for bar in snapshot.bars])
+        self._inner.mark([(instrument_key(bar.instrument), bar.close) for bar in snapshot.bars])
         for bar in snapshot.bars:
-            self._instruments.setdefault(_key(bar.instrument), bar.instrument)
+            self._instruments.setdefault(instrument_key(bar.instrument), bar.instrument)
 
     @property
     def cash(self) -> float:
         return self._inner.cash
 
     def held_qty(self, instrument: InstrumentId) -> Decimal:
-        return Decimal(self._inner.held_qty(_key(instrument)))
+        return Decimal(self._inner.held_qty(instrument_key(instrument)))
 
     def snapshot(self, ts: datetime) -> PortfolioSnapshot:
         cash, rows, equity, gross_exposure = self._inner.snapshot()
@@ -289,12 +291,12 @@ class PythonBuyingPower:
 class RustBuyingPower:
     def __init__(self, snapshot: PortfolioSnapshot, leverage: float) -> None:
         core = importlib.import_module("backtest_core")
-        self._instruments = {_key(p.instrument): p.instrument for p in snapshot.positions}
+        self._instruments = {instrument_key(p.instrument): p.instrument for p in snapshot.positions}
         self._inner = core.BuyingPower(
             snapshot.equity,
             leverage,
             [
-                (_key(p.instrument), int(p.quantity), p.market_price, p.market_value)
+                (instrument_key(p.instrument), int(p.quantity), p.market_price, p.market_value)
                 for p in snapshot.positions
             ],
         )
@@ -304,7 +306,7 @@ class RustBuyingPower:
         return self._inner.available
 
     def quantity_of(self, instrument: InstrumentId) -> Decimal:
-        return Decimal(self._inner.quantity_of(_key(instrument)))
+        return Decimal(self._inner.quantity_of(instrument_key(instrument)))
 
     def consume(self, fill: FillEvent) -> None:
         self.consume_quantity(fill.instrument, fill.side, fill.quantity, fill.price, fill.fee)
@@ -312,14 +314,19 @@ class RustBuyingPower:
     def consume_quantity(
         self, instrument: InstrumentId, side: Side, quantity: Decimal, price: float, fee: float
     ) -> None:
-        self._instruments.setdefault(_key(instrument), instrument)
-        self._inner.consume(_key(instrument), side.value, int(quantity), price, fee)
+        self._instruments.setdefault(instrument_key(instrument), instrument)
+        self._inner.consume(instrument_key(instrument), side.value, int(quantity), price, fee)
 
     def checkpoint(self) -> object:
         return self._inner.checkpoint()
 
     def restore(self, state: object) -> None:
         self._inner.restore(state)
+
+    @property
+    def inner(self) -> object:
+        """Rust `process_market`에 그대로 넘기는 내부 누산기."""
+        return self._inner
 
 
 class RustQuoteCore:
@@ -354,6 +361,20 @@ class RustQuoteCore:
             fok,
         )
         return QuoteNumbers(price, Decimal(quantity), applied, ExecutionStatus(status))
+
+
+def slippage_config(model: SlippageModel) -> tuple[str, float, float]:
+    """Rust 코어가 아는 내장 슬리피지 모델만 설정 튜플로 바꾼다. 커스텀 모델은 Python 코어 전용."""
+    if isinstance(model, NoSlippage):
+        return ("none", 0.0, 0.0)
+    if isinstance(model, FixedBpsSlippage):
+        return ("fixed_bps", model.bps, 0.0)
+    if isinstance(model, VolumeShareSlippage):
+        return ("volume_share", model.volume_limit, model.price_impact)
+    raise CoreUnavailable(
+        f"rust core supports built-in slippage models only — got {type(model).__name__}; "
+        f'use core="python" for custom SlippageModel implementations'
+    )
 
 
 def make_quote_core(core: str) -> QuoteCore:

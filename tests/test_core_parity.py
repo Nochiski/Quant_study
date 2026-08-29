@@ -6,11 +6,12 @@ Rust 확장(`backtest_core`)이 설치돼 있지 않으면 rust 파라미터는 
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from decimal import Decimal
 
 import pytest
 
-from backtest_engine import BacktestEngine, RunConfig
+from backtest_engine import BacktestEngine, BacktestResult, RunConfig
 from backtest_engine.data.feed import DataFeed
 from backtest_engine.engine.core import (
     PortfolioLedger,
@@ -18,16 +19,25 @@ from backtest_engine.engine.core import (
     make_portfolio,
     make_pricing,
 )
+from backtest_engine.engine.slippage import FixedBpsSlippage
 from backtest_engine.errors import CoreUnavailable, NegativeCashError, NegativePositionError
 from backtest_engine.sizing import floor_delta_shares
+from backtest_engine.types.actions import BasketAction, GroupPolicy, StrategyAction
 from backtest_engine.types.events import (
     CorporateActionEvent,
     CorporateActionType,
     CostAccrued,
     CostKind,
     FillEvent,
+    OrderEvent,
 )
-from backtest_engine.types.orders import Side
+from backtest_engine.types.market import Bar
+from backtest_engine.types.orders import (
+    OrderCore,
+    Side,
+    StopLimitOrderRequest,
+    TimeInForce,
+)
 from tests import test_basket, test_corporate_action_engine, test_margin, test_short_selling
 from tests.conftest import day, make_bar, make_instrument, make_ohlc, make_snapshot
 from tests.test_broker import RULE_TABLE
@@ -354,3 +364,138 @@ def test_buying_power_identical_across_cores() -> None:
         values.append(power.available)
         trace.append(values)
     assert trace[0] == trace[1]
+
+
+# --- 6c: 세션 루프 — 주문 생명주기·바스켓·자본변동 시나리오를 두 코어로 실행 ---------------
+
+
+def _lifecycle(
+    core_name: str,
+    script: tuple[StrategyAction | None, ...],
+    bars: tuple[Bar, ...],
+    max_participation: float | None = None,
+) -> tuple[BacktestEngine, BacktestResult]:
+    from tests import test_order_lifecycle as lc
+
+    engine = BacktestEngine(
+        RunConfig(run_id="lc", initial_cash=100_000.0, fee_bps=10.0),
+        core=core_name,
+        max_participation=max_participation,
+        slippage=FixedBpsSlippage(bps=5.0),
+    )
+    return engine, engine.run(lc.OrderScript(script), DataFeed(bars))
+
+
+def _stop_bars() -> tuple[Bar, ...]:
+    return (
+        make_ohlc(day(1), INSTRUMENT, 100.0, 100.0, 100.0, 100.0, volume=1_000),
+        make_ohlc(day(2), INSTRUMENT, 110.0, 120.0, 105.0, 115.0, volume=1_000),
+        make_ohlc(day(3), INSTRUMENT, 90.0, 95.0, 85.0, 88.0, volume=1_000),
+        make_ohlc(day(4), INSTRUMENT, 90.0, 95.0, 85.0, 88.0, volume=1_000),
+    )
+
+
+def _stop_limit(quantity: int) -> StrategyAction:
+    from tests import test_order_lifecycle as lc
+
+    core = OrderCore(INSTRUMENT, Side.BUY, Decimal(quantity), TimeInForce.GTC)
+    return lc.submit(
+        StopLimitOrderRequest(core=core, stop_price=Decimal(105), limit_price=Decimal(120))
+    )
+
+
+def _basket(
+    core_name: str, policy: GroupPolicy, gtc: bool
+) -> tuple[BacktestEngine, BacktestResult]:
+    from tests import test_basket as tb
+
+    if gtc:
+        basket = BasketAction(
+            legs=(tb.gtc_leg(tb.A, Side.BUY, 10), tb.gtc_leg(tb.B, Side.SELL, 10)),
+            group_policy=policy,
+        )
+    else:
+        basket = tb.pair(policy)
+    engine = BacktestEngine(
+        RunConfig(run_id="bk", initial_cash=100_000.0, fee_bps=0.0),
+        core=core_name,
+        max_participation=0.1,
+    )
+    return engine, engine.run(tb.BasketStrategy((tb.hold_b(10), basket)), DataFeed(tb.BARS))
+
+
+def _halted_split(core_name: str) -> tuple[BacktestEngine, BacktestResult]:
+    from tests import test_corporate_action_engine as cae
+
+    bars = (
+        make_ohlc(day(1), INSTRUMENT, 100.0, 100.0, 100.0, 100.0),
+        make_ohlc(day(2), INSTRUMENT, 100.0, 106.0, 99.0, 105.0),
+        make_ohlc(day(4), INSTRUMENT, 20.0, 21.0, 20.0, 21.0),
+    )
+    engine = BacktestEngine(
+        RunConfig(run_id="split", initial_cash=10_000.0, fee_bps=0.0), core=core_name
+    )
+    strategy = cae.Strategy((cae.buy(7), cae.gtc_limit_buy(50.0)))
+    return engine, engine.run(strategy, DataFeed(bars), corporate_actions=(cae.split("5"),))
+
+
+def _session_scenarios() -> dict[str, Callable[[str], tuple[BacktestEngine, BacktestResult]]]:
+    from tests import test_order_lifecycle as lc
+
+    return {
+        "gtc_limit": lambda c: _lifecycle(c, (lc.limit_buy(95.0, TimeInForce.GTC),), lc.BARS),
+        "day_limit_expires": lambda c: _lifecycle(
+            c, (lc.limit_buy(95.0, TimeInForce.DAY),), lc.BARS
+        ),
+        "stop_limit_partial": lambda c: _lifecycle(c, (_stop_limit(250),), _stop_bars(), 0.1),
+        "ioc": lambda c: _lifecycle(c, (lc.market_buy(250, TimeInForce.IOC),), lc.BARS, 0.1),
+        "fok": lambda c: _lifecycle(c, (lc.market_buy(250, TimeInForce.FOK),), lc.BARS, 0.1),
+        "gtc_partial": lambda c: _lifecycle(
+            c, (lc.market_buy(250, TimeInForce.GTC),), lc.BARS, 0.1
+        ),
+        "no_cash_gtc": lambda c: _lifecycle(
+            c,
+            (lc.market_buy(2, TimeInForce.GTC),),
+            (
+                make_ohlc(day(1), INSTRUMENT, 100.0, 100.0, 100.0, 100.0),
+                make_ohlc(day(2), INSTRUMENT, 500.0, 500.0, 500.0, 500.0, volume=0),
+                make_ohlc(day(3), INSTRUMENT, 50.0, 50.0, 50.0, 50.0),
+            ),
+            0.1,
+        ),
+        "basket_best_effort_gtc": lambda c: _basket(c, GroupPolicy.BEST_EFFORT, True),
+        "basket_all_or_none": lambda c: _basket(c, GroupPolicy.ALL_OR_NONE, False),
+        "basket_proportional": lambda c: _basket(c, GroupPolicy.PROPORTIONAL, False),
+        "halted_split_with_open_order": _halted_split,
+    }
+
+
+def _records(engine: BacktestEngine) -> list[tuple[str, object]]:
+    return [(r.kind.value, r.payload) for r in engine.event_store.records]
+
+
+@RUST_ONLY
+@pytest.mark.parametrize("name", sorted(_session_scenarios()))
+def test_session_loop_records_identical_across_cores(name: str) -> None:
+    scenario = _session_scenarios()[name]
+    python_engine, python_result = scenario("python")
+    rust_engine, rust_result = scenario("rust")
+    assert python_result == rust_result
+    assert _records(python_engine) == _records(rust_engine)
+
+
+@RUST_ONLY
+def test_custom_slippage_model_requires_python_core() -> None:
+    class Custom:
+        def slippage_per_share(
+            self, order: OrderEvent, bar: Bar, base_price: float, quantity: Decimal
+        ) -> float:
+            return 0.0
+
+    from tests import test_order_lifecycle as lc
+
+    engine = BacktestEngine(
+        RunConfig(run_id="custom", initial_cash=1_000.0), core="rust", slippage=Custom()
+    )
+    with pytest.raises(CoreUnavailable, match="built-in slippage"):
+        engine.run(lc.OrderScript((None,)), DataFeed(lc.BARS))

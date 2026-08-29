@@ -14,6 +14,7 @@ EventStore에 자동으로 남는다.
 
 from __future__ import annotations
 
+import importlib
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from datetime import datetime
@@ -26,15 +27,18 @@ from backtest_engine.capability import (
 )
 from backtest_engine.data.feed import DataFeed
 from backtest_engine.engine import calendar
-from backtest_engine.engine.broker import BrokerSim, ExecutionStatus, Quote
+from backtest_engine.engine.broker import BrokerSim, ExecutionStatus, Quote, participation_of
 from backtest_engine.engine.context import EngineStrategyContext, HistoryStore
 from backtest_engine.engine.core import (
     BuyingPowerTracker,
     PortfolioLedger,
+    RustBuyingPower,
+    instrument_key,
     make_buying_power,
     make_portfolio,
     make_pricing,
     make_quote_core,
+    slippage_config,
 )
 from backtest_engine.engine.costs import session_costs
 from backtest_engine.engine.metrics import compute_metrics
@@ -49,8 +53,10 @@ from backtest_engine.engine.queue import (
     StrategyNotify,
 )
 from backtest_engine.engine.router import DecisionRouter
+from backtest_engine.engine.slippage import NoSlippage
 from backtest_engine.engine.store import DecisionRecord, EventStore, RecordKind
 from backtest_engine.errors import (
+    CoreUnavailable,
     CorporateActionsNotProvided,
     CorporateActionWithoutBar,
     EquityWipedOut,
@@ -62,6 +68,7 @@ from backtest_engine.types.actions import GroupPolicy
 from backtest_engine.types.events import (
     CorporateActionEvent,
     CorporateActionType,
+    FillEvent,
     OrderStatus,
     OrderUpdateEvent,
     StrategyEvent,
@@ -106,6 +113,10 @@ class _Run:
         )
         self.order_manager = OrderManager()
         self.core = core
+        self.slippage_model = slippage if slippage is not None else NoSlippage()
+        self.max_participation = max_participation
+        # Rust 코어는 내장 슬리피지만 지원한다 — 첫 세션이 아니라 run 시작에 거절한다.
+        self.rust_slippage = slippage_config(self.slippage_model) if core == "rust" else None
         self.broker = BrokerSim(
             config.fee_bps,
             slippage,
@@ -292,6 +303,11 @@ class BacktestEngine:
         for action in run.corporate_actions.get(snapshot.ts, ()):
             self._apply_corporate_action(run, action, snapshot, update)
 
+        if run.core == "rust":
+            self._on_market_rust(run, snapshot, update)
+            run.queue.push(snapshot.ts, EventPriority.SESSION_CLOSE, SessionClose(snapshot))
+            return
+
         # 매도 먼저 처리해 매수가 쓸 수 있는 현금을 확정한다 (결정론적 규칙).
         due = sorted(
             order_manager.due(snapshot),
@@ -355,6 +371,95 @@ class BacktestEngine:
             update(order.order_id, OrderStatus.CANCELLED, reason)
 
         run.queue.push(snapshot.ts, EventPriority.SESSION_CLOSE, SessionClose(snapshot))
+
+    def _on_market_rust(
+        self,
+        run: _Run,
+        snapshot: MarketSnapshot,
+        update: Callable[[str, OrderStatus, str | None], None],
+    ) -> None:
+        """세션 MARKET 처리를 Rust `process_market`에 맡기고 계획(ops)을 순서대로 적용한다."""
+        core = importlib.import_module("backtest_core")
+        order_manager = run.order_manager
+        power = make_buying_power(
+            run.core, run.portfolio.snapshot(snapshot.ts), run.config.max_gross_leverage
+        )
+        if not isinstance(power, RustBuyingPower):  # 코어가 rust면 항상 Rust 누산기다
+            raise CoreUnavailable("rust session core requires the rust buying-power tracker")
+        entries = []
+        for entry in order_manager.open_entries():
+            order = entry.order
+            override = participation_of(order)
+            entries.append(
+                (
+                    order.order_id,
+                    instrument_key(order.instrument),
+                    order.instrument.symbol,
+                    order.side.value,
+                    order.order_type.value,
+                    None if order.limit_price is None else float(order.limit_price),
+                    None if order.stop_price is None else float(order.stop_price),
+                    order.time_in_force.value,
+                    int(entry.remaining),
+                    entry.triggered,
+                    order.group_id,
+                    None if override is None else str(override),
+                )
+            )
+        groups = [
+            (g.group_id, g.policy.value, list(g.order_ids)) for g in order_manager.open_groups()
+        ]
+        bars = {
+            instrument_key(bar.instrument): (bar.open, bar.high, bar.low, bar.volume)
+            for bar in snapshot.bars
+        }
+        default = None if run.max_participation is None else str(run.max_participation)
+        ops = core.process_market(
+            str(snapshot.ts),
+            entries,
+            groups,
+            bars,
+            power.inner,
+            run.broker.fee_rate,
+            default,
+            run.rust_slippage,
+        )
+        for kind, order_id, quantity, price, slip, fee, payload in ops:
+            match kind:
+                case "fill":
+                    entry = order_manager.get(order_id)
+                    if entry is None:
+                        raise RuntimeError(
+                            f"rust core filled an order that is not open — order_id={order_id}"
+                        )
+                    fill = FillEvent(
+                        fill_id=order_manager.next_fill_id(),
+                        order_id=order_id,
+                        ts=snapshot.ts,
+                        instrument=entry.order.instrument,
+                        quantity=Decimal(quantity),
+                        side=entry.order.side,
+                        price=price,
+                        fee=fee,
+                        slippage_per_share=slip,
+                    )
+                    run.queue.push(fill.ts, EventPriority.FILL, FillOccurred(fill, snapshot))
+                    if run.wants(EventKind.FILL):
+                        run.queue.push(
+                            fill.ts, EventPriority.NOTIFY, StrategyNotify(fill, snapshot)
+                        )
+                    order_manager.settle(order_id, fill.quantity)
+                case "update":
+                    status_text, _, detail = payload.partition("|")
+                    update(order_id, OrderStatus(status_text), detail or None)
+                case "trigger":
+                    order_manager.mark_triggered(order_id)
+                case "remove":
+                    order_manager.remove(order_id)
+                case "drop_group":
+                    order_manager.drop_group(order_id)
+                case _:
+                    raise RuntimeError(f"unknown op from rust core — kind={kind!r}")
 
     @staticmethod
     def _settlement_session(feed: DataFeed, action: CorporateActionEvent) -> datetime:

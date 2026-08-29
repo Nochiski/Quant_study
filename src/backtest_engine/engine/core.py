@@ -111,11 +111,12 @@ class RustPricing:
         return PriceDecision(price, triggered)
 
 
-@functools.cache
+@functools.lru_cache(maxsize=65_536)
 def instrument_key(instrument: InstrumentId) -> str:
     """InstrumentId의 모든 필드를 담는다 — 통화·자산군만 다른 종목이 합쳐지면 안 된다.
 
-    InstrumentId는 불변·해시 가능하므로 프로세스 단위로 메모한다 (세션마다 종목 수만큼 호출).
+    InstrumentId는 불변·해시 가능하므로 메모한다 (세션마다 종목 수만큼 호출). 유니버스를
+    갈아끼우는 스윕에서 무한히 자라지 않도록 상한을 둔다.
     """
     return (
         f"{instrument.venue}:{instrument.symbol}:{instrument.asset_class.value}:"

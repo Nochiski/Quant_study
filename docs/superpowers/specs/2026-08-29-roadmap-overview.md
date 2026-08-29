@@ -12,7 +12,7 @@ v1(1–3단계)·Zipline 대조·시장 데이터 포트가 끝난 시점에서 
 | 4 | `feat/order-lifecycle` | 구현 완료, 리뷰 중 |
 | D | `feat/data-followups` | 구현 완료, 리뷰 중 |
 | 5 | `feat/basket-short` | 구현 완료, 리뷰 중 |
-| 6a·6b·6c·6d | `feat/rust-core` | 구현 완료 (6d: 다종목 벤치마크 결과 큐 이전 대신 값 타입 인덱싱 — 100종목 15.1s→4.2s) |
+| 6a·6b·6c·6d | `feat/rust-core` | 구현 완료 (6d: 다종목 벤치마크 결과 큐 이전 대신 값 타입 인덱싱 — 100종목 15.1s→2.1s) |
 
 ## 순서와 의존
 

@@ -81,8 +81,8 @@ Requirements → Capability 검증 → StrategyEvent + 읽기 전용 Context
   단위로 고정한다(확장 없으면 skip). 6b(견적 산술·매수 여력)·6c(세션 MARKET 처리 계획)까지
   옮겼고 주문 생명주기 11시나리오가 레코드 단위로 비트 동일하다. 6d는 다종목 벤치마크
   (`scripts/bench_universe.py`, 100종목·1,231세션·주문 23k)로 병목을 먼저 쟀다 — 큐가 아니라
-  스냅샷·포트폴리오의 선형 종목 조회였고, dict 인덱스·스냅샷 메모로 python 15.1s→4.2s,
-  rust 8.8s→3.3s. Rust 세션 루프 이전은 측정 결과로 닫았다.
+  스냅샷·포트폴리오의 선형 종목 조회였고, dict 인덱스·스냅샷 메모로 python 15.1s→2.1s,
+  rust 8.8s→1.9s. Rust 세션 루프 이전은 측정 결과로 닫았다.
 - 데이터 후속(D, `docs/superpowers/specs/2026-08-29-data-followups-design.md`): 원장의
   상장주식수 변화로 액면분할·병합을 검출해 `run(corporate_actions=)`로 넘기면 엔진이 사건
   세션 시작에 보유 수량·평균단가를 조정하고(단주는 시가 현금 정산) 대기 주문을 취소한다.

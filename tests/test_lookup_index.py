@@ -120,3 +120,89 @@ def test_portfolio_snapshot_is_reused_until_state_changes(core_name: str) -> Non
     assert changed is not first
     assert changed.position_qty(_inst("A")) == Decimal(2)
     assert changed.cash == 980.0
+
+
+def test_snapshots_stay_plain_dataclasses_for_asdict() -> None:
+    """조회 인덱스는 dataclass 필드가 아니어야 한다 — asdict/fields가 인덱스를 보면 안 된다."""
+    from dataclasses import asdict, fields
+
+    market = MarketSnapshot(ts=TS, bars=(_bar("A", 1.0),))
+    market.bar(_inst("A"))
+    assert [f.name for f in fields(market)] == ["ts", "bars"]
+    assert asdict(market)["bars"][0]["close"] == 1.0
+
+    position = Position(
+        instrument=_inst("A"),
+        quantity=Decimal(1),
+        average_price=1.0,
+        market_price=1.0,
+        market_value=1.0,
+        unrealized_pnl=0.0,
+    )
+    portfolio = PortfolioSnapshot(
+        ts=TS, cash=0.0, positions=(position,), equity=1.0, gross_exposure=1.0
+    )
+    portfolio.position(_inst("A"))
+    assert [f.name for f in fields(portfolio)] == [
+        "ts",
+        "cash",
+        "positions",
+        "equity",
+        "gross_exposure",
+    ]
+    assert asdict(portfolio)["positions"][0]["market_value"] == 1.0
+
+
+def test_portfolio_snapshot_rejects_duplicate_instruments() -> None:
+    position = Position(
+        instrument=_inst("A"),
+        quantity=Decimal(1),
+        average_price=1.0,
+        market_price=1.0,
+        market_value=1.0,
+        unrealized_pnl=0.0,
+    )
+    with pytest.raises(
+        ValueError, match="duplicate instrument in portfolio snapshot.*instrument=A"
+    ):
+        PortfolioSnapshot(
+            ts=TS, cash=0.0, positions=(position, position), equity=2.0, gross_exposure=1.0
+        )
+
+
+@pytest.mark.parametrize("core_name", ["python", "rust"])
+def test_portfolio_snapshot_memo_is_cleared_by_every_mutator(core_name: str) -> None:
+    from backtest_engine.engine.core import core_available, make_portfolio
+    from backtest_engine.types.events import CostAccrued, CostKind, FillEvent
+    from backtest_engine.types.orders import Side
+
+    if core_name == "rust" and not core_available("rust"):
+        pytest.skip("rust core not built")
+    portfolio = make_portfolio(core_name, 1_000.0, allow_short=False, allow_margin=False)
+    portfolio.mark(MarketSnapshot(ts=TS, bars=(_bar("A", 10.0),)))
+    portfolio.apply(
+        FillEvent(
+            ts=TS,
+            fill_id="f1",
+            order_id="o1",
+            instrument=_inst("A"),
+            side=Side.BUY,
+            quantity=Decimal(2),
+            price=10.0,
+            fee=0.0,
+            slippage_per_share=0.0,
+        )
+    )
+    before_charge = portfolio.snapshot(TS)
+    portfolio.charge(
+        CostAccrued(ts=TS, instrument=_inst("A"), kind=CostKind.SHORT_BORROW, amount=5.0)
+    )
+    after_charge = portfolio.snapshot(TS)
+    assert after_charge is not before_charge
+    assert after_charge.cash == before_charge.cash - 5.0
+
+    portfolio.mark(MarketSnapshot(ts=TS, bars=(_bar("A", 20.0),)))
+    after_mark = portfolio.snapshot(TS)
+    assert after_mark is not after_charge
+    assert after_mark.position_qty(_inst("A")) == Decimal(2)
+    assert after_mark.equity == after_charge.equity + 2 * 10.0

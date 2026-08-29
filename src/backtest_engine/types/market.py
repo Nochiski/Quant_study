@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import functools
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
@@ -66,26 +67,27 @@ class MarketSnapshot:
 
     ts: datetime
     bars: tuple[Bar, ...]
-    # 종목 → Bar 인덱스. 값 동등성·해시·repr에서 제외 (조회 전용, 유니버스 크기에 선형 조회 방지).
-    _by_instrument: dict[InstrumentId, Bar] = field(
-        init=False, repr=False, compare=False, hash=False
-    )
 
     def __post_init__(self) -> None:
-        index: dict[InstrumentId, Bar] = {}
+        seen: set[InstrumentId] = set()
         for bar in self.bars:
             if bar.ts != self.ts:
                 raise ValueError(
                     "all bars in a snapshot must share the snapshot ts — "
                     f"snapshot ts={self.ts} bar instrument={bar.instrument.symbol} bar ts={bar.ts}"
                 )
-            if bar.instrument in index:
+            if bar.instrument in seen:
                 raise ValueError(
                     f"duplicate instrument in snapshot — ts={self.ts} "
                     f"instrument={bar.instrument.symbol}"
                 )
-            index[bar.instrument] = bar
-        object.__setattr__(self, "_by_instrument", index)
+            seen.add(bar.instrument)
+
+    @functools.cached_property
+    def _by_instrument(self) -> dict[InstrumentId, Bar]:
+        # 종목 → Bar 인덱스 (유니버스 크기에 선형 조회 방지). dataclass 필드가 아니라 인스턴스
+        # __dict__에만 놓이므로 fields()/asdict/==/hash/repr 어디에도 나타나지 않는다.
+        return {bar.instrument: bar for bar in self.bars}
 
     def bar(self, instrument: InstrumentId) -> Bar:
         found = self._by_instrument.get(instrument)

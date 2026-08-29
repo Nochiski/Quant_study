@@ -148,34 +148,46 @@ Python 엔진은 4·5·D 단계로 방금 크게 바뀌었으므로 전부를 �
 큐·세션 종료는 전체의 10% 미만이었다. 6d로 계획했던 "큐·세션 종료·스냅샷 생성 Rust 이전"은
 병목이 아닌 곳을 옮기는 것이라 **하지 않는다**. 대신 동작 불변인 Python 인덱싱으로 병목을 제거했다.
 
-### 변경 (동작 불변 — `tests/test_core_parity.py`와 전체 452개 테스트, KRX 데모 골든 그대로)
+### 변경 (동작 불변 — `tests/test_core_parity.py`와 착수 전 448개 테스트 전부, KRX 데모 골든 그대로)
 
-- `MarketSnapshot`·`PortfolioSnapshot`: 종목 → Bar/Position dict 인덱스를 `__post_init__`에서
-  만든다(`field(init=False, compare=False, hash=False)` — 값 동등성·해시·repr 불변).
+- `MarketSnapshot`·`PortfolioSnapshot`: 종목 → Bar/Position dict 인덱스를 `functools.cached_property`로
+  첫 조회 때 만든다. dataclass 필드가 아니므로 `fields()`/`asdict`/`==`/`hash`/`repr`에 나타나지
+  않는다 (리뷰 DEFECT-001: 처음엔 `field(init=False, compare=False)`로 두었는데 `asdict`가
+  `dict[InstrumentId, …]` 키를 dict로 바꾸다 `TypeError` — 전략 작성자가 이벤트를 직렬화하면 죽는다).
 - `Portfolio.snapshot(ts)`(Python·Rust 양쪽): `(ts, snapshot)` 메모, 상태를 바꾸는 명령
   (`apply`/`charge`/`apply_corporate_action`/`mark`)마다 비운다. CQS 유지 — 조회는 몇 번 불러도 같다.
 - `HistoryStore`: 종목별 dict 안에 필드 시리즈를 두어 세션당 종목 수만큼만 해시한다.
-- `instrument_key`: `functools.cache` (InstrumentId는 불변·해시 가능).
+- `instrument_key`: `functools.lru_cache(maxsize=65_536)` (InstrumentId는 불변·해시 가능, 스윕에서 무한 성장 방지).
 
 ### 결과
 
 | 워크로드 | python 전 → 후 | rust 전 → 후 |
 |---|---|---|
-| 100종목·1,231세션·주문 23k | 15.1s → 4.2s | 8.8s → 3.3s |
-| 300종목·1,231세션·주문 63k | — → 13.0s | — → 10.7s |
+| 100종목·1,231세션·주문 23k | 15.1s → 2.1s | 8.8s → 1.9s |
+| 300종목·1,231세션·주문 63k | — → 5.8s | — → 5.7s |
 
 두 코어의 fills·orders·최종 equity는 종목 수와 무관하게 동일하다. 종목 수 3배에 시간 3.1배 —
-선형 스케일링. 남은 시간(100종목 rust 기준 프로파일 9.4s 중)은 전략 dispatch·라우터 2.4s,
-Python↔Rust 엔트리 마샬링 3.0s, 히스토리 append 1.6s, 스냅샷 2회/세션 1.6s, 큐 0.8s다 —
+선형 스케일링. 남은 시간(100종목 rust, 인덱스 즉시 생성 버전 프로파일 9.4s 중)은 전략 dispatch·
+라우터 2.4s, Python↔Rust 엔트리 마샬링 3.0s, 히스토리 append 1.6s, 스냅샷 2회/세션 1.6s, 큐 0.8s다 —
 전략이 Python 객체(MarketSnapshot·PortfolioSnapshot)를 받는 한 Rust로 더 옮겨도 이 몫은
 사라지지 않는다.
 
 ### 테스트·검증
 
 - `tests/test_lookup_index.py`: 인덱스 조회의 값 동등성(동일 값 다른 객체), 미존재 종목
-  진단, 인덱스가 스냅샷의 `==`/`hash`에 영향 없음, 히스토리 세션 축 정렬(결측 NaN), 스냅샷 메모가
+  진단, 인덱스가 스냅샷의 `==`/`hash`/`fields()`/`asdict`에 영향 없음, 히스토리 세션 축 정렬(결측 NaN), 스냅샷 메모가
   상태 변화(`apply`) 전까지만 같은 객체를 돌려주고 ts가 다르면 새로 만드는지 (python·rust 양쪽).
-- 회귀: 전체 테스트 454개 통과, `examples/run_krx_demo.py` 최종 equity 9,143,752 KRW·102/102 불변.
+- 회귀: 전체 테스트 458개 통과, `examples/run_krx_demo.py` 최종 equity 9,143,752 KRW·102/102 불변.
+
+### 6d 리뷰 반영 (Opus·Sonnet, 2026-08-29)
+
+- DEFECT-001: 인덱스를 dataclass 필드로 두면 `asdict`가 `TypeError` — `cached_property`로 이전
+  (`tests/test_lookup_index.py::test_snapshots_stay_plain_dataclasses_for_asdict`).
+- DEFECT-002: `PortfolioSnapshot`에 같은 종목이 두 번 들어오면 dict 인덱스가 마지막 값만 봐
+  first-wins였던 조회가 조용히 바뀐다 — `__post_init__`에서 중복을 `ValueError`로 막는다
+  (엔진 경로는 원장 키 유일성으로 도달 불가, 공개 생성자 방어).
+- 메모 무효화 테스트를 `charge`·`mark`까지 확장, 벤치마크 하네스의 O(N²) 종목 탐색(tuple→frozenset)·
+  `--core choices`·빈 결과 방어 보강 — 위 표의 수치는 보강 후 재측정값.
 
 ## 다음 단계
 

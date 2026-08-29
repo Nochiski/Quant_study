@@ -76,7 +76,8 @@ class HistoryStore:
         timestamps = tuple(self._sessions[index] for index in selected)
         matrix = np.full((len(selected), len(request.instruments)), np.nan, dtype=np.float64)
         for column, instrument in enumerate(request.instruments):
-            series = self._values.get(instrument, {}).get(request.field, [])
+            by_field = self._values.get(instrument)
+            series = by_field[request.field] if by_field is not None else []
             for row, index in enumerate(selected):
                 if index < len(series):
                     matrix[row, column] = series[index]

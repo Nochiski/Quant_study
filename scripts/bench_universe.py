@@ -48,7 +48,7 @@ class EqualWeightRebalance:
     def __init__(
         self, instruments: tuple[InstrumentId, ...], every: int, allocation: float
     ) -> None:
-        self._instruments = instruments
+        self._instruments = frozenset(instruments)
         self._every = every
         self._allocation = allocation
         self._calls = 0
@@ -85,7 +85,7 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root", type=Path)
     parser.add_argument("--instruments", type=int, default=100)
-    parser.add_argument("--core", default="python")
+    parser.add_argument("--core", choices=("python", "rust"), default="python")
     parser.add_argument("--every", type=int, default=5)
     parser.add_argument("--start", type=lambda s: date.fromisoformat(s), default=date(2020, 1, 1))
     parser.add_argument("--end", type=lambda s: date.fromisoformat(s), default=date(2024, 12, 31))
@@ -138,9 +138,10 @@ def main(argv: list[str]) -> int:
     else:
         result = engine.run(strategy, feed)
         elapsed = time.perf_counter() - started
+    final_equity = result.snapshots[-1].equity if result.snapshots else float("nan")
     print(
         f"elapsed={elapsed:.2f}s fills={len(result.fills)} orders={len(result.orders)} "
-        f"final_equity={result.snapshots[-1].equity:,.0f}"
+        f"final_equity={final_equity:,.0f}"
     )
     return 0
 

@@ -26,6 +26,14 @@ class UndeclaredActionReturned(EngineError):
     """requirements().actions에 선언하지 않은 ActionKind를 Decision으로 반환함."""
 
 
+class UndeclaredFeatureUsed(EngineError):
+    """requirements().features에 선언하지 않은 EngineFeature가 필요한 Action을 반환함."""
+
+
+class UnknownOrderId(EngineError):
+    """Cancel/Replace 대상 order_id가 대기 중인 주문이 아님 (없거나 이미 종료됨)."""
+
+
 class SchemaVersionMismatch(EngineError):
     """StrategyDecision.schema_version이 엔진이 아는 버전과 다름."""
 

@@ -32,6 +32,26 @@ def make_bar(
     )
 
 
+def make_ohlc(
+    ts: datetime,
+    instrument: InstrumentId,
+    open_price: float,
+    high: float,
+    low: float,
+    close_price: float,
+    volume: int = 1_000,
+) -> Bar:
+    return Bar(
+        ts=ts,
+        instrument=instrument,
+        open=open_price,
+        high=high,
+        low=low,
+        close=close_price,
+        volume=volume,
+    )
+
+
 def make_snapshot(ts: datetime, *bars: Bar) -> MarketSnapshot:
     return MarketSnapshot(ts=ts, bars=bars)
 

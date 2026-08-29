@@ -47,6 +47,7 @@ from backtest_engine.types.orders import (
     MarketOrderRequest,
     OrderCore,
     OrderRequest,
+    OrderType,
     Side,
     StopLimitOrderRequest,
     StopOrderRequest,
@@ -503,7 +504,17 @@ def order_event_to_dict(order: OrderEvent) -> Json:
         "quantity": str(order.quantity),
         "side": order.side.value,
         "source_action": action_to_dict(order.source_action),
+        "order_type": order.order_type.value,
+        "limit_price": None if order.limit_price is None else str(order.limit_price),
+        "stop_price": None if order.stop_price is None else str(order.stop_price),
+        "time_in_force": order.time_in_force.value,
     }
+
+
+def _optional_decimal(value: object, label: str) -> Decimal | None:
+    if value is None:
+        return None
+    return Decimal(_expect_str(value, label))
 
 
 def order_event_from_dict(data: object) -> OrderEvent:
@@ -516,6 +527,10 @@ def order_event_from_dict(data: object) -> OrderEvent:
         quantity=Decimal(_expect_str(obj["quantity"], "order_event.quantity")),
         side=Side(obj["side"]),
         source_action=action_from_dict(obj["source_action"]),
+        order_type=OrderType(obj.get("order_type", OrderType.MARKET.value)),
+        limit_price=_optional_decimal(obj.get("limit_price"), "order_event.limit_price"),
+        stop_price=_optional_decimal(obj.get("stop_price"), "order_event.stop_price"),
+        time_in_force=TimeInForce(obj.get("time_in_force", TimeInForce.DAY.value)),
     )
 
 

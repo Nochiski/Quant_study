@@ -200,13 +200,12 @@ def prepare_strategy(strategy: Strategy, capabilities: EngineCapabilities) -> Va
 def reference_engine_capabilities() -> EngineCapabilities:
     """Python reference engine v1의 정직한 구현 상태.
 
-    3단계의 NO_ACTION, SET_PORTFOLIO_TARGET, LIQUIDATE_POSITION과 4a의
-    SET_POSITION_TARGET, ADJUST_POSITION, MARKET 이벤트, EverySession 일정만
-    IMPLEMENTED다. 나머지는 스키마만 정의된 NOT_IMPLEMENTED 상태로, handler와
-    테스트가 추가될 때 승격한다.
+    3단계의 NO_ACTION, SET_PORTFOLIO_TARGET, LIQUIDATE_POSITION, 4a의
+    SET_POSITION_TARGET, ADJUST_POSITION, 4b의 SUBMIT_ORDER(LIMIT/STOP 기능 포함),
+    MARKET 이벤트, EverySession 일정만 IMPLEMENTED다. 나머지는 스키마만 정의된
+    NOT_IMPLEMENTED 상태로, handler와 테스트가 추가될 때 승격한다.
     """
     not_implemented_actions = {
-        ActionKind.SUBMIT_ORDER: "roadmap step 4b",
         ActionKind.CANCEL_ORDER: "roadmap step 4c",
         ActionKind.REPLACE_ORDER: "roadmap step 4c",
         ActionKind.BASKET: "roadmap step 5",
@@ -217,6 +216,7 @@ def reference_engine_capabilities() -> EngineCapabilities:
         ActionKind.SET_POSITION_TARGET,
         ActionKind.ADJUST_POSITION,
         ActionKind.LIQUIDATE_POSITION,
+        ActionKind.SUBMIT_ORDER,
     )
     actions = tuple(
         ActionCapability(kind, SupportLevel.IMPLEMENTED) for kind in implemented_actions
@@ -224,14 +224,15 @@ def reference_engine_capabilities() -> EngineCapabilities:
         ActionCapability(kind, SupportLevel.NOT_IMPLEMENTED, reason)
         for kind, reason in not_implemented_actions.items()
     )
-    features = tuple(
+    features = (
+        FeatureCapability(EngineFeature.LIMIT_ORDER, SupportLevel.IMPLEMENTED),
+        FeatureCapability(EngineFeature.STOP_ORDER, SupportLevel.IMPLEMENTED),
+    ) + tuple(
         FeatureCapability(feature, SupportLevel.NOT_IMPLEMENTED, reason)
         for feature, reason in {
             EngineFeature.SHORT_SELLING: "roadmap step 5",
             EngineFeature.MARGIN: "no margin accounting in v1",
             EngineFeature.PARTIAL_FILL: "roadmap step 4d — fills fully at next open",
-            EngineFeature.LIMIT_ORDER: "roadmap step 4b",
-            EngineFeature.STOP_ORDER: "roadmap step 4b",
             EngineFeature.PROPORTIONAL_BASKET: "roadmap step 5",
         }.items()
     )

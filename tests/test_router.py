@@ -11,11 +11,13 @@ from backtest_engine.engine.router import DecisionRouter
 from backtest_engine.errors import (
     SchemaVersionMismatch,
     UndeclaredActionReturned,
+    UndeclaredFeatureUsed,
     UnsupportedActionValue,
 )
 from backtest_engine.types.actions import (
     ActionKind,
     AdjustPosition,
+    CancelOrder,
     ExecutionPolicy,
     ExecutionStyle,
     ExecutionTiming,
@@ -37,12 +39,16 @@ from backtest_engine.types.events import OrderEvent
 from backtest_engine.types.instruments import InstrumentId, Money
 from backtest_engine.types.market import MarketSnapshot
 from backtest_engine.types.orders import (
+    LimitOrderRequest,
     MarketOrderRequest,
     OrderCore,
+    OrderType,
     Side,
+    StopLimitOrderRequest,
     TimeInForce,
 )
 from backtest_engine.types.portfolio import PortfolioSnapshot, Position
+from backtest_engine.types.requirements import EngineFeature
 from tests.conftest import day, make_bar, make_instrument, make_snapshot
 
 INSTRUMENT = make_instrument()
@@ -54,12 +60,17 @@ DECLARED = frozenset(
         ActionKind.LIQUIDATE_POSITION,
         ActionKind.SET_POSITION_TARGET,
         ActionKind.ADJUST_POSITION,
+        ActionKind.SUBMIT_ORDER,
     }
 )
+DECLARED_FEATURES = frozenset({EngineFeature.LIMIT_ORDER, EngineFeature.STOP_ORDER})
 
 
-def make_router(order_manager: OrderManager | None = None) -> DecisionRouter:
-    return DecisionRouter(DECLARED, order_manager or OrderManager())
+def make_router(
+    order_manager: OrderManager | None = None,
+    features: frozenset[EngineFeature] = DECLARED_FEATURES,
+) -> DecisionRouter:
+    return DecisionRouter(DECLARED, order_manager or OrderManager(), features)
 
 
 def krw(amount: float) -> Money:
@@ -90,7 +101,10 @@ def portfolio_with(
     )
     equity = cash + sum(position.market_value for position in positions)
     return PortfolioSnapshot(
-        ts=day(1), cash=cash, positions=positions, equity=equity,
+        ts=day(1),
+        cash=cash,
+        positions=positions,
+        equity=equity,
         gross_exposure=sum(p.market_value for p in positions) / equity if equity else 0.0,
     )
 
@@ -117,13 +131,8 @@ def test_schema_version_mismatch_rejected() -> None:
 
 
 def test_undeclared_action_kind_rejected() -> None:
-    order = SubmitOrder(
-        request=MarketOrderRequest(
-            core=OrderCore(INSTRUMENT, Side.BUY, Decimal(1), TimeInForce.DAY)
-        )
-    )
-    decision = StrategyDecision.of(day(1), order)
-    with pytest.raises(UndeclaredActionReturned, match="submit_order"):
+    decision = StrategyDecision.of(day(1), CancelOrder(order_id="O-000001"))
+    with pytest.raises(UndeclaredActionReturned, match="cancel_order"):
         make_router().route(decision, "D-000001", portfolio_with(100_000), market())
 
 
@@ -176,9 +185,7 @@ def test_patch_scope_ignores_unlisted_positions() -> None:
 
 def test_negative_weight_requires_short_selling() -> None:
     with pytest.raises(UnsupportedActionValue, match="SHORT_SELLING"):
-        make_router().route(
-            weight_decision(-0.3), "D-000001", portfolio_with(100_000), market()
-        )
+        make_router().route(weight_decision(-0.3), "D-000001", portfolio_with(100_000), market())
 
 
 def test_non_market_style_rejected() -> None:
@@ -376,3 +383,63 @@ def test_liquidation_of_flat_position_is_noop() -> None:
     )
     result = make_router().route(decision, "D-000001", portfolio_with(50_000), market())
     assert result.orders == ()
+
+
+# --- 4b: SubmitOrder ---------------------------------------------------------
+
+
+def core(side: Side, quantity: int = 10, tif: TimeInForce = TimeInForce.DAY) -> OrderCore:
+    return OrderCore(INSTRUMENT, side, Decimal(quantity), tif)
+
+
+def test_submit_limit_order_maps_fields_onto_order_event() -> None:
+    action = SubmitOrder(
+        request=LimitOrderRequest(core=core(Side.BUY, tif=TimeInForce.GTC), limit_price=Decimal(95))
+    )
+    (order,) = route_one(action, portfolio_with(100_000))
+    assert order.order_type is OrderType.LIMIT
+    assert order.limit_price == Decimal(95)
+    assert order.stop_price is None
+    assert order.time_in_force is TimeInForce.GTC
+    assert (order.side, order.quantity) == (Side.BUY, Decimal(10))
+    assert order.source_action is action
+
+
+def test_submit_stop_limit_order_keeps_both_prices() -> None:
+    action = SubmitOrder(
+        request=StopLimitOrderRequest(
+            core=core(Side.SELL), stop_price=Decimal(92), limit_price=Decimal(91)
+        )
+    )
+    (order,) = route_one(action, portfolio_with(0.0, {INSTRUMENT: (10, 100.0)}))
+    assert order.order_type is OrderType.STOP_LIMIT
+    assert (order.stop_price, order.limit_price) == (Decimal(92), Decimal(91))
+
+
+def test_submit_market_order_needs_no_feature() -> None:
+    action = SubmitOrder(request=MarketOrderRequest(core=core(Side.BUY)))
+    decision = StrategyDecision.of(day(1), action)
+    router = make_router(features=frozenset())
+    (order,) = router.route(decision, "D-000001", portfolio_with(100_000), market()).orders
+    assert order.order_type is OrderType.MARKET
+
+
+def test_limit_order_requires_declared_feature() -> None:
+    action = SubmitOrder(request=LimitOrderRequest(core=core(Side.BUY), limit_price=Decimal(95)))
+    decision = StrategyDecision.of(day(1), action)
+    router = make_router(features=frozenset())
+    with pytest.raises(UndeclaredFeatureUsed, match="limit_order"):
+        router.route(decision, "D-000001", portfolio_with(100_000), market())
+
+
+def test_submit_sell_beyond_held_rejected() -> None:
+    action = SubmitOrder(request=MarketOrderRequest(core=core(Side.SELL, quantity=11)))
+    with pytest.raises(UnsupportedActionValue, match="SHORT_SELLING"):
+        route_one(action, portfolio_with(0.0, {INSTRUMENT: (10, 100.0)}))
+
+
+@pytest.mark.parametrize("tif", [TimeInForce.IOC, TimeInForce.FOK])
+def test_ioc_fok_not_implemented_until_partial_fill(tif: TimeInForce) -> None:
+    action = SubmitOrder(request=MarketOrderRequest(core=core(Side.BUY, tif=tif)))
+    with pytest.raises(UnsupportedActionValue, match="PARTIAL_FILL"):
+        route_one(action, portfolio_with(100_000))

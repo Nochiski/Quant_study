@@ -4,7 +4,8 @@
 체결 가격·수수료 반영은 엔진 책임이다.
 
 구현 범위 (Capability와 일치):
-- NoAction, SetPortfolioTarget, SetPositionTarget, AdjustPosition, LiquidatePosition.
+- NoAction, SetPortfolioTarget, SetPositionTarget, AdjustPosition, LiquidatePosition,
+  SubmitOrder(MARKET/LIMIT/STOP/STOP_LIMIT, DAY/GTC).
 - ExecutionPolicy는 MARKET 스타일만, 일봉 엔진이므로 NEXT_OPEN과
   NEXT_AVAILABLE 모두 "다음 세션 시가"를 뜻한다.
 
@@ -25,6 +26,7 @@ from backtest_engine.errors import (
     CapabilityNotImplemented,
     SchemaVersionMismatch,
     UndeclaredActionReturned,
+    UndeclaredFeatureUsed,
     UnsupportedActionValue,
 )
 from backtest_engine.sizing import floor_delta_shares
@@ -43,6 +45,7 @@ from backtest_engine.types.actions import (
     SetPortfolioTarget,
     SetPositionTarget,
     StrategyAction,
+    SubmitOrder,
     TargetScope,
     WeightTarget,
     kind_of,
@@ -51,8 +54,18 @@ from backtest_engine.types.decision import SCHEMA_VERSION, StrategyDecision
 from backtest_engine.types.events import OrderEvent
 from backtest_engine.types.instruments import InstrumentId, Money
 from backtest_engine.types.market import MarketSnapshot
-from backtest_engine.types.orders import Side
+from backtest_engine.types.orders import (
+    LimitOrderRequest,
+    MarketOrderRequest,
+    OrderRequest,
+    OrderType,
+    Side,
+    StopLimitOrderRequest,
+    StopOrderRequest,
+    TimeInForce,
+)
 from backtest_engine.types.portfolio import PortfolioSnapshot
+from backtest_engine.types.requirements import EngineFeature
 
 
 @dataclass(frozen=True)
@@ -63,9 +76,13 @@ class RoutingResult:
 
 class DecisionRouter:
     def __init__(
-        self, declared_actions: frozenset[ActionKind], order_manager: OrderManager
+        self,
+        declared_actions: frozenset[ActionKind],
+        order_manager: OrderManager,
+        declared_features: frozenset[EngineFeature] = frozenset(),
     ) -> None:
         self._declared_actions = declared_actions
+        self._declared_features = declared_features
         self._order_manager = order_manager
 
     def route(
@@ -122,6 +139,8 @@ class DecisionRouter:
                 return self._delta_orders(
                     action.instrument, delta, False, action, decision_id, portfolio, market
                 )
+            case SubmitOrder():
+                return self._submit_order(action, decision_id, portfolio, market)
             case LiquidatePosition():
                 self._check_execution(action.execution, decision_id)
                 if action.cancel_open_orders:
@@ -279,6 +298,75 @@ class DecisionRouter:
                 source_action=action,
             )
         ]
+
+    _FEATURE_FOR_TYPE: dict[OrderType, EngineFeature] = {
+        OrderType.LIMIT: EngineFeature.LIMIT_ORDER,
+        OrderType.STOP: EngineFeature.STOP_ORDER,
+        OrderType.STOP_LIMIT: EngineFeature.STOP_ORDER,
+    }
+
+    def _submit_order(
+        self,
+        action: SubmitOrder,
+        decision_id: str,
+        portfolio: PortfolioSnapshot,
+        market: MarketSnapshot,
+    ) -> list[OrderEvent]:
+        request = action.request
+        core = request.core
+        order_type, limit_price, stop_price = self._describe_request(request)
+        feature = self._FEATURE_FOR_TYPE.get(order_type)
+        if feature is not None and feature not in self._declared_features:
+            raise UndeclaredFeatureUsed(
+                f"order type requires a feature not declared in requirements() — "
+                f"order_type={order_type.value} feature={feature.value} "
+                f"declared={sorted(f.value for f in self._declared_features)} "
+                f"decision_id={decision_id}"
+            )
+        if core.time_in_force in (TimeInForce.IOC, TimeInForce.FOK):
+            raise UnsupportedActionValue(
+                f"time_in_force={core.time_in_force.value} requires PARTIAL_FILL feature "
+                f"(not implemented) — instrument={core.instrument.symbol} "
+                f"decision_id={decision_id}"
+            )
+        self._check_integer(core.quantity, core.instrument, decision_id)
+        if core.side is Side.SELL:
+            held = portfolio.position_qty(core.instrument)
+            if core.quantity > held:
+                raise UnsupportedActionValue(
+                    f"resulting position would be negative — requires SHORT_SELLING "
+                    f"feature (not implemented) — instrument={core.instrument.symbol} "
+                    f"held={held} sell={core.quantity} decision_id={decision_id}"
+                )
+        return [
+            OrderEvent(
+                order_id=self._order_manager.next_order_id(),
+                decision_id=decision_id,
+                ts=market.ts,
+                instrument=core.instrument,
+                quantity=core.quantity,
+                side=core.side,
+                source_action=action,
+                order_type=order_type,
+                limit_price=limit_price,
+                stop_price=stop_price,
+                time_in_force=core.time_in_force,
+            )
+        ]
+
+    @staticmethod
+    def _describe_request(
+        request: OrderRequest,
+    ) -> tuple[OrderType, Decimal | None, Decimal | None]:
+        match request:
+            case MarketOrderRequest():
+                return OrderType.MARKET, None, None
+            case LimitOrderRequest():
+                return OrderType.LIMIT, request.limit_price, None
+            case StopOrderRequest():
+                return OrderType.STOP, None, request.stop_price
+            case StopLimitOrderRequest():
+                return OrderType.STOP_LIMIT, request.limit_price, request.stop_price
 
     @staticmethod
     def _check_integer(quantity: Decimal, instrument: InstrumentId, decision_id: str) -> None:

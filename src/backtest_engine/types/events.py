@@ -16,7 +16,7 @@ from enum import Enum
 from backtest_engine.types.actions import StrategyAction
 from backtest_engine.types.instruments import InstrumentId
 from backtest_engine.types.market import MarketSnapshot
-from backtest_engine.types.orders import Side
+from backtest_engine.types.orders import OrderType, Side, TimeInForce
 
 
 @dataclass(frozen=True)
@@ -29,6 +29,7 @@ class TimerEvent:
 
 class OrderStatus(Enum):
     NEW = "new"
+    TRIGGERED = "triggered"  # STOP_LIMIT이 발동했지만 지정가 미충족으로 대기 (4b 확장)
     PARTIALLY_FILLED = "partially_filled"
     FILLED = "filled"
     CANCELLED = "cancelled"
@@ -61,6 +62,9 @@ class OrderEvent:
 
     decision_id와 source_action을 남겨 어떤 전략 판단에서 나온 주문인지 추적한다.
     quantity는 항상 양수, 방향은 Side로만 표현한다.
+
+    order_type/limit_price/stop_price/time_in_force는 4b에서 추가된 평면 필드다.
+    기본값(MARKET/None/None/DAY)은 v1 주문과 같아 기존 생성 코드가 그대로 돈다.
     """
 
     order_id: str
@@ -70,6 +74,10 @@ class OrderEvent:
     quantity: Decimal
     side: Side
     source_action: StrategyAction
+    order_type: OrderType = OrderType.MARKET
+    limit_price: Decimal | None = None
+    stop_price: Decimal | None = None
+    time_in_force: TimeInForce = TimeInForce.DAY
 
     def __post_init__(self) -> None:
         if self.quantity <= 0:
@@ -77,6 +85,23 @@ class OrderEvent:
                 f"order quantity must be > 0 — order_id={self.order_id} "
                 f"instrument={self.instrument.symbol} quantity={self.quantity}"
             )
+        needs_limit = self.order_type in (OrderType.LIMIT, OrderType.STOP_LIMIT)
+        needs_stop = self.order_type in (OrderType.STOP, OrderType.STOP_LIMIT)
+        if needs_limit != (self.limit_price is not None):
+            raise ValueError(
+                f"limit_price must be set iff order type is LIMIT/STOP_LIMIT — "
+                f"order_id={self.order_id} order_type={self.order_type.value} "
+                f"limit_price={self.limit_price}"
+            )
+        if needs_stop != (self.stop_price is not None):
+            raise ValueError(
+                f"stop_price must be set iff order type is STOP/STOP_LIMIT — "
+                f"order_id={self.order_id} order_type={self.order_type.value} "
+                f"stop_price={self.stop_price}"
+            )
+        for label, price in (("limit_price", self.limit_price), ("stop_price", self.stop_price)):
+            if price is not None and price <= 0:
+                raise ValueError(f"{label} must be > 0 — order_id={self.order_id} {label}={price}")
 
 
 @dataclass(frozen=True)
@@ -115,6 +140,4 @@ class FillEvent:
             )
 
 
-StrategyEvent = (
-    MarketSnapshot | TimerEvent | FillEvent | OrderUpdateEvent | CorporateActionEvent
-)
+StrategyEvent = MarketSnapshot | TimerEvent | FillEvent | OrderUpdateEvent | CorporateActionEvent

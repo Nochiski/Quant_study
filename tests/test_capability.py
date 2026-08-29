@@ -141,10 +141,14 @@ def test_reference_capabilities_are_honest() -> None:
         ActionKind.LIQUIDATE_POSITION,
         ActionKind.SET_POSITION_TARGET,
         ActionKind.ADJUST_POSITION,
+        ActionKind.SUBMIT_ORDER,
     }
-    assert all(
-        capability.support is not SupportLevel.IMPLEMENTED for capability in capabilities.features
-    )
+    implemented_features = {
+        capability.feature
+        for capability in capabilities.features
+        if capability.support is SupportLevel.IMPLEMENTED
+    }
+    assert implemented_features == {EngineFeature.LIMIT_ORDER, EngineFeature.STOP_ORDER}
 
 
 def test_every_action_kind_has_registered_capability() -> None:

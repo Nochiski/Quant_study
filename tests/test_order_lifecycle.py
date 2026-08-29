@@ -1,0 +1,237 @@
+"""주문 생명주기 골든·상태 전이 테스트 (4b).
+
+시나리오는 전부 손계산이며, EventStore의 order_updates를 order_id별로 재생해
+허용 전이표 밖의 전이가 없는지도 검사한다.
+"""
+
+from __future__ import annotations
+
+from collections import defaultdict
+from decimal import Decimal
+
+import pytest
+
+from backtest_engine import BacktestEngine, BacktestResult, RunConfig
+from backtest_engine.data.feed import DataFeed
+from backtest_engine.types.actions import (
+    ActionKind,
+    ExecutionPolicy,
+    QuantityTarget,
+    SetPositionTarget,
+    StrategyAction,
+    SubmitOrder,
+)
+from backtest_engine.types.decision import StrategyDecision
+from backtest_engine.types.events import OrderStatus, OrderUpdateEvent, StrategyEvent
+from backtest_engine.types.market import Bar, PriceField
+from backtest_engine.types.orders import (
+    LimitOrderRequest,
+    OrderCore,
+    OrderRequest,
+    Side,
+    StopOrderRequest,
+    TimeInForce,
+)
+from backtest_engine.types.requirements import (
+    EngineFeature,
+    EventKind,
+    EverySession,
+    HistoryRequest,
+    StrategyRequirements,
+)
+from backtest_engine.types.strategy import StrategyContext
+from tests.conftest import day, make_instrument, make_ohlc
+
+INSTRUMENT = make_instrument()
+OTHER = make_instrument("000660")
+
+# D1 100 flat, D2 갭 상승, D3 저가 94까지 하락, D4 소폭 반등
+BARS: tuple[Bar, ...] = (
+    make_ohlc(day(1), INSTRUMENT, 100.0, 100.0, 100.0, 100.0),
+    make_ohlc(day(2), INSTRUMENT, 110.0, 120.0, 105.0, 115.0),
+    make_ohlc(day(3), INSTRUMENT, 100.0, 100.0, 94.0, 96.0),
+    make_ohlc(day(4), INSTRUMENT, 97.0, 99.0, 95.0, 98.0),
+)
+
+ALLOWED_TRANSITIONS: dict[OrderStatus | None, set[OrderStatus]] = {
+    None: {
+        OrderStatus.PARTIALLY_FILLED,
+        OrderStatus.FILLED,
+        OrderStatus.CANCELLED,
+        OrderStatus.TRIGGERED,
+        OrderStatus.REPLACED,
+        OrderStatus.REJECTED,
+    },
+    OrderStatus.TRIGGERED: {
+        OrderStatus.FILLED,
+        OrderStatus.PARTIALLY_FILLED,
+        OrderStatus.CANCELLED,
+        OrderStatus.REPLACED,
+    },
+    OrderStatus.PARTIALLY_FILLED: {
+        OrderStatus.PARTIALLY_FILLED,
+        OrderStatus.FILLED,
+        OrderStatus.CANCELLED,
+        OrderStatus.REPLACED,
+    },
+    OrderStatus.FILLED: set(),
+    OrderStatus.CANCELLED: set(),
+    OrderStatus.REJECTED: set(),
+    OrderStatus.REPLACED: set(),
+}
+
+
+def assert_transitions_valid(updates: tuple[OrderUpdateEvent, ...]) -> None:
+    by_order: dict[str, list[OrderStatus]] = defaultdict(list)
+    for update in updates:
+        by_order[update.order_id].append(update.status)
+    for order_id, statuses in by_order.items():
+        previous: OrderStatus | None = None
+        for status in statuses:
+            assert status in ALLOWED_TRANSITIONS[previous], (
+                f"illegal transition {previous} -> {status} for {order_id}: {statuses}"
+            )
+            previous = status
+
+
+def statuses_of(engine: BacktestEngine, order_id: str) -> list[OrderStatus]:
+    return [u.status for u in engine.event_store.order_updates() if u.order_id == order_id]
+
+
+class OrderScript:
+    """호출 순서대로 미리 정한 Action을 반환하는 주문 전략."""
+
+    def __init__(self, script: tuple[StrategyAction | None, ...]) -> None:
+        self._script = script
+        self._calls = 0
+
+    def requirements(self) -> StrategyRequirements:
+        return StrategyRequirements(
+            histories=(
+                HistoryRequest(instruments=(INSTRUMENT,), field=PriceField.CLOSE, lookback=1),
+            ),
+            schedule=EverySession(),
+            events=frozenset({EventKind.MARKET}),
+            actions=frozenset(
+                {ActionKind.NO_ACTION, ActionKind.SUBMIT_ORDER, ActionKind.SET_POSITION_TARGET}
+            ),
+            features=frozenset({EngineFeature.LIMIT_ORDER, EngineFeature.STOP_ORDER}),
+        )
+
+    def on_event(self, ctx: StrategyContext, event: StrategyEvent) -> StrategyDecision:
+        index = self._calls
+        self._calls += 1
+        action = self._script[index] if index < len(self._script) else None
+        if action is None:
+            return StrategyDecision.no_action(ctx.now)
+        return StrategyDecision.of(ctx.now, action)
+
+
+def submit(request: OrderRequest) -> SubmitOrder:
+    return SubmitOrder(request=request)
+
+
+def limit_buy(price: float, tif: TimeInForce, quantity: int = 10) -> SubmitOrder:
+    core = OrderCore(INSTRUMENT, Side.BUY, Decimal(quantity), tif)
+    return submit(LimitOrderRequest(core=core, limit_price=Decimal(str(price))))
+
+
+def stop_sell(price: float, tif: TimeInForce, quantity: int = 10) -> SubmitOrder:
+    core = OrderCore(INSTRUMENT, Side.SELL, Decimal(quantity), tif)
+    return submit(StopOrderRequest(core=core, stop_price=Decimal(str(price))))
+
+
+def buy_shares(quantity: int) -> SetPositionTarget:
+    return SetPositionTarget(
+        target=QuantityTarget(INSTRUMENT, Decimal(quantity)),
+        execution=ExecutionPolicy.market_next_open(),
+    )
+
+
+def run(
+    script: tuple[StrategyAction | None, ...], bars: tuple[Bar, ...] = BARS
+) -> tuple[BacktestEngine, BacktestResult]:
+    engine = BacktestEngine(RunConfig(run_id="lifecycle", initial_cash=100_000.0, fee_bps=0.0))
+    result = engine.run(OrderScript(script), DataFeed(bars))
+    assert_transitions_valid(engine.event_store.order_updates())
+    return engine, result
+
+
+class TestGtcLimit:
+    def test_fills_at_limit_when_low_touches_two_sessions_later(self) -> None:
+        engine, result = run((limit_buy(95.0, TimeInForce.GTC),))
+        assert [(f.ts, f.price, int(f.quantity)) for f in result.fills] == [(day(3), 95.0, 10)]
+        assert statuses_of(engine, "O-000001") == [OrderStatus.FILLED]
+        assert result.snapshots[-1].cash == pytest.approx(100_000.0 - 950.0)
+
+    def test_order_creation_does_not_touch_cash_or_position(self) -> None:
+        _, result = run((limit_buy(95.0, TimeInForce.GTC),))
+        d1, d2 = result.snapshots[0], result.snapshots[1]
+        assert d1.cash == d2.cash == 100_000.0
+        assert d1.positions == d2.positions == ()
+
+    def test_fill_happens_strictly_after_order(self) -> None:
+        _, result = run((limit_buy(95.0, TimeInForce.GTC),))
+        assert result.fills[0].ts > result.orders[0].ts
+
+    def test_unfilled_gtc_is_cancelled_when_run_ends(self) -> None:
+        engine, result = run((limit_buy(50.0, TimeInForce.GTC),))
+        assert result.fills == ()
+        updates = [u for u in engine.event_store.order_updates() if u.order_id == "O-000001"]
+        assert [u.status for u in updates] == [OrderStatus.CANCELLED]
+        assert updates[0].ts == day(4)
+        assert "run ended" in (updates[0].detail or "")
+
+    def test_gtc_survives_session_without_bar(self) -> None:
+        bars = (
+            make_ohlc(day(1), INSTRUMENT, 100.0, 100.0, 100.0, 100.0),
+            make_ohlc(day(2), OTHER, 50.0, 50.0, 50.0, 50.0),  # INSTRUMENT 거래정지
+            make_ohlc(day(3), INSTRUMENT, 100.0, 100.0, 94.0, 96.0),
+        )
+        engine, result = run((limit_buy(95.0, TimeInForce.GTC),), bars)
+        assert [(f.ts, f.price) for f in result.fills] == [(day(3), 95.0)]
+        assert statuses_of(engine, "O-000001") == [OrderStatus.FILLED]
+
+
+class TestDayLimit:
+    def test_unfilled_day_order_expires_same_session(self) -> None:
+        engine, result = run((limit_buy(95.0, TimeInForce.DAY),))
+        assert result.fills == ()
+        updates = [u for u in engine.event_store.order_updates() if u.order_id == "O-000001"]
+        assert [(u.ts, u.status) for u in updates] == [(day(2), OrderStatus.CANCELLED)]
+        assert "day order expired" in (updates[0].detail or "")
+
+    def test_day_order_without_bar_is_cancelled(self) -> None:
+        bars = (
+            make_ohlc(day(1), INSTRUMENT, 100.0, 100.0, 100.0, 100.0),
+            make_ohlc(day(2), OTHER, 50.0, 50.0, 50.0, 50.0),
+            make_ohlc(day(3), INSTRUMENT, 100.0, 100.0, 94.0, 96.0),
+        )
+        engine, result = run((limit_buy(95.0, TimeInForce.DAY),), bars)
+        assert result.fills == ()
+        assert statuses_of(engine, "O-000001") == [OrderStatus.CANCELLED]
+
+
+class TestStopSell:
+    def test_gap_down_through_stop_fills_at_open(self) -> None:
+        bars = (
+            make_ohlc(day(1), INSTRUMENT, 100.0, 100.0, 100.0, 100.0),
+            make_ohlc(day(2), INSTRUMENT, 110.0, 120.0, 105.0, 115.0),
+            make_ohlc(day(3), INSTRUMENT, 90.0, 95.0, 85.0, 88.0),  # 갭 하락
+        )
+        # D1: 10주 매수 → D2 시가 110 체결. D2: STOP 100 매도 → D3 시가 90 (갭) 체결.
+        engine, result = run((buy_shares(10), stop_sell(100.0, TimeInForce.GTC)), bars)
+        assert [(f.ts, f.side, f.price) for f in result.fills] == [
+            (day(2), Side.BUY, 110.0),
+            (day(3), Side.SELL, 90.0),
+        ]
+        assert statuses_of(engine, "O-000002") == [OrderStatus.FILLED]
+        final = result.snapshots[-1]
+        assert final.cash == pytest.approx(100_000.0 - 1_100.0 + 900.0)
+        assert final.position_qty(INSTRUMENT) == 0
+
+
+class TestMarketOrderRecordsFilled:
+    def test_full_fill_records_filled_update(self) -> None:
+        engine, _ = run((buy_shares(10),))
+        assert statuses_of(engine, "O-000001") == [OrderStatus.FILLED]

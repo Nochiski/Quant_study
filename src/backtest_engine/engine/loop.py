@@ -35,9 +35,9 @@ from backtest_engine.engine.queue import (
 )
 from backtest_engine.engine.router import DecisionRouter
 from backtest_engine.engine.store import DecisionRecord, EventStore, RecordKind
-from backtest_engine.types.events import OrderEvent, OrderStatus, OrderUpdateEvent
+from backtest_engine.types.events import OrderStatus, OrderUpdateEvent
 from backtest_engine.types.market import MarketSnapshot
-from backtest_engine.types.orders import Side
+from backtest_engine.types.orders import Side, TimeInForce
 from backtest_engine.types.requirements import HistoryRequest, Schedule
 from backtest_engine.types.results import BacktestResult, RunConfig
 from backtest_engine.types.strategy import Strategy
@@ -68,16 +68,14 @@ class BacktestEngine:
         # 1. Capability 검증은 첫 Bar를 읽기 전, 전략 등록 직후 수행한다.
         validated = prepare_strategy(strategy, self._capabilities)
         requirements = validated.requirements
-        warmup_sessions = max(
-            (request.lookback for request in requirements.histories), default=0
-        )
+        warmup_sessions = max((request.lookback for request in requirements.histories), default=0)
         declared = frozenset(requirements.histories)
 
         history_store = HistoryStore()
         portfolio = Portfolio(self._config.initial_cash)
         order_manager = OrderManager()
         broker = BrokerSim(self._config.fee_bps)
-        router = DecisionRouter(requirements.actions, order_manager)
+        router = DecisionRouter(requirements.actions, order_manager, requirements.features)
         store = EventStore()
         self._event_store = store
         queue = EventQueue()
@@ -113,6 +111,23 @@ class BacktestEngine:
                     order_manager.place(order)
                     store.append(order.ts, RecordKind.ORDER, order)
 
+        # 남은 GTC 주문은 결과에서 조용히 사라지지 않도록 취소로 기록한다.
+        for entry in order_manager.drain():
+            last_ts = feed.sessions[-1]  # 주문이 있다면 세션도 최소 하나 있다
+            store.append(
+                last_ts,
+                RecordKind.ORDER_UPDATE,
+                OrderUpdateEvent(
+                    ts=last_ts,
+                    order_id=entry.order_id,
+                    status=OrderStatus.CANCELLED,
+                    detail=(
+                        f"run ended with order still open — "
+                        f"instrument={entry.order.instrument.symbol} remaining={entry.remaining}"
+                    ),
+                ),
+            )
+
         snapshots = store.snapshots()
         return BacktestResult(
             run_id=self._config.run_id,
@@ -135,33 +150,23 @@ class BacktestEngine:
         history_store.append(snapshot)
         store.append(snapshot.ts, RecordKind.MARKET, snapshot)
 
-        pending = order_manager.pop_all()
-        executable: list[OrderEvent] = []
-        for order in pending:
-            if snapshot.has(order.instrument):
-                executable.append(order)
-            else:
-                # v1 주문은 전부 DAY: 이 세션에 거래할 수 없으면 취소된다.
-                store.append(
-                    snapshot.ts,
-                    RecordKind.ORDER_UPDATE,
-                    OrderUpdateEvent(
-                        ts=snapshot.ts,
-                        order_id=order.order_id,
-                        status=OrderStatus.CANCELLED,
-                        detail=(
-                            f"no bar for instrument in session — "
-                            f"instrument={order.instrument.symbol} ts={snapshot.ts}"
-                        ),
-                    ),
-                )
+        def update(order_id: str, status: OrderStatus, detail: str | None) -> None:
+            store.append(
+                snapshot.ts,
+                RecordKind.ORDER_UPDATE,
+                OrderUpdateEvent(ts=snapshot.ts, order_id=order_id, status=status, detail=detail),
+            )
 
         # 매도 먼저 처리해 매수가 쓸 수 있는 현금을 확정한다 (결정론적 규칙).
-        executable.sort(key=lambda order: (order.side is not Side.SELL, order.order_id))
+        due = sorted(
+            order_manager.due(snapshot),
+            key=lambda entry: (entry.order.side is not Side.SELL, entry.order_id),
+        )
         remaining_cash = portfolio.cash
-        for order in executable:
+        for entry in due:
+            order = entry.order
             outcome = broker.execute(
-                order,
+                entry,
                 snapshot.bar(order.instrument),
                 remaining_cash,
                 order_manager.next_fill_id(),
@@ -174,22 +179,40 @@ class BacktestEngine:
                 else:
                     remaining_cash -= notional + fill.fee
                 queue.push(fill.ts, EventPriority.FILL, FillOccurred(fill))
-            if outcome.status is not ExecutionStatus.FILLED:
-                status = (
-                    OrderStatus.PARTIALLY_FILLED
-                    if outcome.status is ExecutionStatus.CASH_LIMITED
-                    else OrderStatus.REJECTED
+                left = order_manager.settle(order.order_id, fill.quantity)
+                if left == 0:
+                    update(order.order_id, OrderStatus.FILLED, None)
+                else:
+                    update(order.order_id, OrderStatus.PARTIALLY_FILLED, outcome.detail)
+            elif outcome.status is ExecutionStatus.TRIGGERED_UNFILLED:
+                order_manager.mark_triggered(order.order_id)
+                update(
+                    order.order_id,
+                    OrderStatus.TRIGGERED,
+                    f"stop triggered, limit not met — instrument={order.instrument.symbol} "
+                    f"stop={order.stop_price} limit={order.limit_price} ts={snapshot.ts}",
                 )
-                store.append(
-                    snapshot.ts,
-                    RecordKind.ORDER_UPDATE,
-                    OrderUpdateEvent(
-                        ts=snapshot.ts,
-                        order_id=order.order_id,
-                        status=status,
-                        detail=outcome.detail,
-                    ),
+            elif outcome.status is ExecutionStatus.REJECTED_NO_CASH:
+                order_manager.remove(order.order_id)
+                update(order.order_id, OrderStatus.REJECTED, outcome.detail)
+
+        # DAY 주문은 이 세션이 지나면 소멸한다 — bar가 없어 시도조차 못 한 경우 포함.
+        for entry in order_manager.open_entries():
+            order = entry.order
+            if order.time_in_force is not TimeInForce.DAY:
+                continue
+            order_manager.remove(order.order_id)
+            if snapshot.has(order.instrument):
+                reason = (
+                    f"day order expired unfilled — instrument={order.instrument.symbol} "
+                    f"remaining={entry.remaining} ts={snapshot.ts}"
                 )
+            else:
+                reason = (
+                    f"no bar for instrument in session — "
+                    f"instrument={order.instrument.symbol} ts={snapshot.ts}"
+                )
+            update(order.order_id, OrderStatus.CANCELLED, reason)
 
         queue.push(snapshot.ts, EventPriority.SESSION_CLOSE, SessionClose(snapshot))
 

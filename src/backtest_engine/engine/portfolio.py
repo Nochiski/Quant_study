@@ -1,8 +1,8 @@
 """포트폴리오 원장.
 
-현금과 보유 수량은 FillEvent와 확인된 자본변동(CorporateActionApplied) 적용
-시점에만 변한다 — 주문 생성으로는 절대 변하지 않는다. Snapshot은 bars + fills +
-corporate actions applied만으로 재계산 가능해야 한다.
+현금과 보유 수량은 FillEvent, 확인된 자본변동(CorporateActionApplied), 비용 발생
+(CostAccrued) 적용 시점에만 변한다 — 주문 생성으로는 절대 변하지 않는다. Snapshot은
+bars + fills + corporate actions applied + costs만으로 재계산 가능해야 한다.
 
 명령(apply/mark)과 조회(snapshot/cash/held_qty)를 분리한다 (CQS).
 """
@@ -11,10 +11,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import ROUND_FLOOR, ROUND_HALF_EVEN, Decimal
+from decimal import ROUND_DOWN, ROUND_HALF_EVEN, Decimal
 
 from backtest_engine.errors import NegativeCashError, NegativePositionError
-from backtest_engine.types.events import CorporateActionApplied, CorporateActionEvent, FillEvent
+from backtest_engine.types.events import (
+    CorporateActionApplied,
+    CorporateActionEvent,
+    CostAccrued,
+    FillEvent,
+)
 from backtest_engine.types.instruments import InstrumentId
 from backtest_engine.types.market import MarketSnapshot
 from backtest_engine.types.orders import Side
@@ -38,58 +43,87 @@ def scale_quantity(quantity: Decimal, ratio: Decimal) -> Decimal:
 
 
 class Portfolio:
-    def __init__(self, initial_cash: float) -> None:
+    """
+    Args:
+        initial_cash: 시작 현금.
+        allow_short: True면 음수 수량(공매도)을 허용한다 (SHORT_SELLING 선언 전략).
+        allow_margin: True면 음수 현금을 허용한다 (MARGIN 선언 전략). 여력 상한은 브로커가
+            먼저 자르고, equity < 0 검사는 세션 종료에 엔진(EquityWipedOut)이 한다.
+    """
+
+    def __init__(
+        self, initial_cash: float, *, allow_short: bool = False, allow_margin: bool = False
+    ) -> None:
         self._cash = initial_cash
+        # (ts, snapshot) 메모. 상태를 바꾸는 명령마다 비운다 — 세션당 조회 4회가 매번
+        # 종목 수만큼 Position을 다시 만들지 않게.
+        self._snapshot_cache: tuple[datetime, PortfolioSnapshot] | None = None
         self._ledgers: dict[InstrumentId, _Ledger] = {}
         self._marks: dict[InstrumentId, float] = {}
+        self._allow_short = allow_short
+        self._allow_margin = allow_margin
 
     # --- 명령 ---------------------------------------------------------------
 
     def apply(self, fill: FillEvent) -> None:
-        """체결 결과만 상태에 반영한다. v1에서 수수료는 평균단가에 섞지 않고
-        cash에서 별도로 차감한다."""
+        """체결 결과만 상태에 반영한다. 수수료는 평균단가에 섞지 않고 cash에서 별도 차감한다.
+
+        평균단가 규칙: 같은 방향으로 늘리면 가중평균, 줄이면 유지, 0을 지나 방향이 바뀌면
+        체결가로 재설정 (롱 5주에서 8주 매도 → 숏 3주 @ 매도가).
+        """
         quantity = float(fill.quantity)
         notional = quantity * fill.price
         ledger = self._ledgers.get(fill.instrument)
+        old_quantity = ledger.quantity if ledger is not None else Decimal(0)
+        signed = fill.quantity if fill.side is Side.BUY else -fill.quantity
+        new_quantity = old_quantity + signed
 
+        if new_quantity < 0 and not self._allow_short:
+            raise NegativePositionError(
+                f"sell fill exceeds held quantity — fill_id={fill.fill_id} "
+                f"instrument={fill.instrument.symbol} sell={fill.quantity} held={old_quantity} "
+                f"(SHORT_SELLING not declared)"
+            )
         if fill.side is Side.BUY:
             new_cash = self._cash - notional - fill.fee
-            if new_cash < 0:
-                raise NegativeCashError(
-                    f"buy fill would make cash negative — fill_id={fill.fill_id} "
-                    f"instrument={fill.instrument.symbol} quantity={fill.quantity} "
-                    f"price={fill.price} fee={fill.fee} cash={self._cash}"
-                )
-            if ledger is None:
-                self._ledgers[fill.instrument] = _Ledger(
-                    quantity=fill.quantity, average_price=fill.price
-                )
-            else:
-                old_quantity = float(ledger.quantity)
-                new_quantity = old_quantity + quantity
-                ledger.average_price = (
-                    old_quantity * ledger.average_price + notional
-                ) / new_quantity
-                ledger.quantity += fill.quantity
-            self._cash = new_cash
         else:
-            held = ledger.quantity if ledger is not None else Decimal(0)
-            if fill.quantity > held:
-                raise NegativePositionError(
-                    f"sell fill exceeds held quantity — fill_id={fill.fill_id} "
-                    f"instrument={fill.instrument.symbol} sell={fill.quantity} held={held}"
-                )
-            if ledger is None:  # held == 0인 위 분기에서 이미 걸러짐, 타입 좁히기용
-                raise NegativePositionError(
-                    f"sell fill for instrument with no position — fill_id={fill.fill_id} "
-                    f"instrument={fill.instrument.symbol}"
-                )
-            ledger.quantity -= fill.quantity
-            self._cash += notional - fill.fee
-            if ledger.quantity == 0:
-                del self._ledgers[fill.instrument]
+            new_cash = self._cash + notional - fill.fee
+        if new_cash < 0 and not self._allow_margin:
+            raise NegativeCashError(
+                f"buy fill would make cash negative — fill_id={fill.fill_id} "
+                f"instrument={fill.instrument.symbol} quantity={fill.quantity} "
+                f"price={fill.price} fee={fill.fee} cash={self._cash} (MARGIN not declared)"
+            )
 
+        if new_quantity == 0:
+            self._ledgers.pop(fill.instrument, None)
+        else:
+            crossed = old_quantity == 0 or (old_quantity > 0) != (new_quantity > 0)
+            if ledger is None or crossed:
+                self._ledgers[fill.instrument] = _Ledger(
+                    quantity=new_quantity, average_price=fill.price
+                )
+            elif abs(new_quantity) > abs(old_quantity):
+                old_abs = float(abs(old_quantity))
+                ledger.average_price = (old_abs * ledger.average_price + notional) / float(
+                    abs(new_quantity)
+                )
+                ledger.quantity = new_quantity
+            else:
+                ledger.quantity = new_quantity
+        self._cash = new_cash
+        self._snapshot_cache = None
         self._marks.setdefault(fill.instrument, fill.price)
+
+    def charge(self, cost: CostAccrued) -> None:
+        """비용 발생(차입·이자)을 현금에서 차감한다. 기록은 호출 측(EventStore) 책임."""
+        if cost.amount <= 0:
+            raise ValueError(
+                f"cost amount must be > 0 — kind={cost.kind.value} ts={cost.ts} "
+                f"amount={cost.amount}"
+            )
+        self._cash -= cost.amount
+        self._snapshot_cache = None
 
     def apply_corporate_action(
         self,
@@ -113,12 +147,15 @@ class Portfolio:
             )
         old_quantity = ledger.quantity
         scaled = scale_quantity(old_quantity, action.ratio)
-        new_quantity = scaled.quantize(Decimal(1), rounding=ROUND_FLOOR)
+        # 롱은 내림, 숏은 0 쪽으로 (−10.5 → −10): 단주는 정산가로 현금 정산되므로 |수량|이
+        # 이론값을 넘어선 안 된다.
+        new_quantity = scaled.quantize(Decimal(1), rounding=ROUND_DOWN)
         cash_paid = float(scaled - new_quantity) * settlement_price
         old_average = ledger.average_price
         new_average = old_average / float(action.ratio)
 
         self._cash += cash_paid
+        self._snapshot_cache = None
         if new_quantity == 0:
             del self._ledgers[action.instrument]
         else:
@@ -141,6 +178,7 @@ class Portfolio:
         """현재 세션 종가로 평가 가격을 갱신한다."""
         for bar in snapshot.bars:
             self._marks[bar.instrument] = bar.close
+        self._snapshot_cache = None
 
     # --- 조회 ---------------------------------------------------------------
 
@@ -153,6 +191,13 @@ class Portfolio:
         return ledger.quantity if ledger is not None else Decimal(0)
 
     def snapshot(self, ts: datetime) -> PortfolioSnapshot:
+        if self._snapshot_cache is not None and self._snapshot_cache[0] == ts:
+            return self._snapshot_cache[1]
+        built = self._build_snapshot(ts)
+        self._snapshot_cache = (ts, built)
+        return built
+
+    def _build_snapshot(self, ts: datetime) -> PortfolioSnapshot:
         positions: list[Position] = []
         for instrument, ledger in self._ledgers.items():
             mark_price = self._marks[instrument]

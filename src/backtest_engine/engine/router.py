@@ -23,10 +23,10 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 
-from backtest_engine.engine.orders import OrderManager
+from backtest_engine.engine.orders import BasketGroup, OrderManager
 from backtest_engine.errors import (
     CapabilityNotImplemented,
     SchemaVersionMismatch,
@@ -39,9 +39,11 @@ from backtest_engine.sizing import floor_delta_shares
 from backtest_engine.types.actions import (
     ActionKind,
     AdjustPosition,
+    BasketAction,
     CancelOrder,
     ExecutionPolicy,
     ExecutionStyle,
+    GroupPolicy,
     LiquidatePosition,
     NoAction,
     NotionalDelta,
@@ -76,10 +78,26 @@ from backtest_engine.types.portfolio import PortfolioSnapshot
 from backtest_engine.types.requirements import EngineFeature
 
 
+def _time_in_force_of(action: StrategyAction) -> TimeInForce:
+    """목표·증감·청산 액션은 ExecutionPolicy의 TIF를 따른다 (Zipline 대조에서 드러난 결함:
+    GTC 정책인데 DAY 주문이 나가 참여율 캡 잔량이 이월되지 않았다)."""
+    match action:
+        case (
+            SetPortfolioTarget(execution=execution)
+            | SetPositionTarget(execution=execution)
+            | AdjustPosition(execution=execution)
+            | LiquidatePosition(execution=execution)
+        ):
+            return execution.time_in_force
+        case _:
+            return TimeInForce.DAY
+
+
 @dataclass(frozen=True)
 class RoutingResult:
     orders: tuple[OrderEvent, ...]
     updates: tuple[OrderUpdateEvent, ...]  # 취소·정정으로 즉시 바뀐 기존 주문 상태
+    groups: tuple[BasketGroup, ...] = ()  # BasketAction에서 만들어진 leg 그룹
 
 
 class DecisionRouter:
@@ -94,6 +112,7 @@ class DecisionRouter:
         self._order_manager = order_manager
         # 같은 Decision 안에서 이미 라우팅된 매도 수량 (종목별). route()마다 초기화.
         self._routed_sells: dict[InstrumentId, Decimal] = defaultdict(Decimal)
+        self._short_allowed = EngineFeature.SHORT_SELLING in declared_features
 
     def route(
         self,
@@ -111,6 +130,7 @@ class DecisionRouter:
         orders: list[OrderEvent] = []
         updates: list[OrderUpdateEvent] = []
         self._routed_sells = defaultdict(Decimal)
+        groups: list[BasketGroup] = []
         for action in decision.actions:
             kind = kind_of(action)
             if kind not in self._declared_actions:
@@ -119,8 +139,54 @@ class DecisionRouter:
                     f"declared={sorted(k.value for k in self._declared_actions)} "
                     f"decision_id={decision_id} as_of={decision.as_of}"
                 )
-            orders.extend(self._route_action(action, decision_id, portfolio, market, updates))
-        return RoutingResult(orders=tuple(orders), updates=tuple(updates))
+            if isinstance(action, BasketAction):
+                group, legs = self._basket(action, decision_id, portfolio, market, updates)
+                groups.append(group)
+                orders.extend(legs)
+            else:
+                orders.extend(self._route_action(action, decision_id, portfolio, market, updates))
+        return RoutingResult(orders=tuple(orders), updates=tuple(updates), groups=tuple(groups))
+
+    def _basket(
+        self,
+        action: BasketAction,
+        decision_id: str,
+        portfolio: PortfolioSnapshot,
+        market: MarketSnapshot,
+        updates: list[OrderUpdateEvent],
+    ) -> tuple[BasketGroup, list[OrderEvent]]:
+        if action.group_policy is GroupPolicy.PROPORTIONAL:
+            self._require_feature(
+                EngineFeature.PROPORTIONAL_BASKET,
+                f"group_policy={action.group_policy.value}",
+                decision_id,
+            )
+        seen: set[InstrumentId] = set()
+        for leg in action.legs:
+            instrument = (
+                leg.request.core.instrument
+                if isinstance(leg, SubmitOrder)
+                else (
+                    leg.target.instrument if isinstance(leg, SetPositionTarget) else leg.instrument
+                )
+            )
+            if instrument in seen:
+                raise ValueError(
+                    f"duplicate instrument in basket — instrument={instrument.symbol} "
+                    f"decision_id={decision_id}"
+                )
+            seen.add(instrument)
+        group_id = self._order_manager.next_group_id()
+        legs: list[OrderEvent] = []
+        for leg in action.legs:
+            for order in self._route_action(leg, decision_id, portfolio, market, updates):
+                legs.append(replace(order, group_id=group_id))
+        group = BasketGroup(
+            group_id=group_id,
+            policy=action.group_policy,
+            order_ids=tuple(order.order_id for order in legs),
+        )
+        return group, legs
 
     def _route_action(
         self,
@@ -273,7 +339,7 @@ class DecisionRouter:
         instrument = target.instrument
         match target:
             case WeightTarget():
-                if target.weight < 0:
+                if target.weight < 0 and not self._short_allowed:
                     raise UnsupportedActionValue(
                         f"negative target weight requires SHORT_SELLING feature "
                         f"(not implemented) — instrument={instrument.symbol} "
@@ -281,10 +347,13 @@ class DecisionRouter:
                     )
                 target_notional = target.weight * portfolio.equity
                 delta = self._notional_to_delta(instrument, target_notional, portfolio, market)
-                return instrument, delta, True
+                held = portfolio.position_qty(instrument)
+                # 목표 부호가 보유 부호와 반대면 부호 전환이 의도된 것 — clamp하지 않는다.
+                flips = held != 0 and target_notional != 0 and (held > 0) != (target_notional > 0)
+                return instrument, delta, not flips
             case NotionalTarget():
                 self._check_currency(instrument, target.notional, decision_id)
-                if target.notional.amount < 0:
+                if target.notional.amount < 0 and not self._short_allowed:
                     raise UnsupportedActionValue(
                         f"negative target notional requires SHORT_SELLING feature "
                         f"(not implemented) — instrument={instrument.symbol} "
@@ -295,7 +364,7 @@ class DecisionRouter:
                 return instrument, delta, False
             case QuantityTarget():
                 self._check_integer(target.quantity, instrument, decision_id)
-                if target.quantity < 0:
+                if target.quantity < 0 and not self._short_allowed:
                     raise UnsupportedActionValue(
                         f"negative target quantity requires SHORT_SELLING feature "
                         f"(not implemented) — instrument={instrument.symbol} "
@@ -343,7 +412,14 @@ class DecisionRouter:
             return []
         side = Side.BUY if delta > 0 else Side.SELL
         quantity = abs(delta)
-        if side is Side.SELL:
+        held = portfolio.position_qty(instrument)
+        if clamp_sell and self._short_allowed and held != 0 and (held > 0) != (delta > 0):
+            # 비중 목표의 반올림 오차로 포지션 부호가 뒤집히면 안 된다 (WeightTarget(0) → 잔여 숏).
+            # 목표가 반대 부호(의도된 전환)면 _target_delta가 clamp를 끄고 넘긴다.
+            quantity = min(quantity, abs(held))
+            if quantity <= 0:
+                return []
+        if side is Side.SELL and not self._short_allowed:
             sellable = self._sellable(instrument, portfolio)
             if quantity > sellable:
                 if not clamp_sell:
@@ -361,6 +437,7 @@ class DecisionRouter:
                 quantity=quantity,
                 side=side,
                 source_action=action,
+                time_in_force=_time_in_force_of(action),
             )
         ]
 
@@ -399,7 +476,7 @@ class DecisionRouter:
                 decision_id,
             )
         self._check_integer(core.quantity, core.instrument, decision_id)
-        if core.side is Side.SELL:
+        if core.side is Side.SELL and not self._short_allowed:
             if core.quantity > self._sellable(core.instrument, portfolio):
                 self._raise_oversell(core.instrument, portfolio, core.quantity, decision_id)
             self._routed_sells[core.instrument] += core.quantity
@@ -490,18 +567,23 @@ class DecisionRouter:
         portfolio: PortfolioSnapshot,
         market: MarketSnapshot,
     ) -> list[OrderEvent]:
-        held = self._sellable(action.instrument, portfolio)
-        if held <= 0:
+        held = portfolio.position_qty(action.instrument)
+        if held > 0:
+            held = self._sellable(action.instrument, portfolio)
+            if held <= 0:
+                return []
+            self._routed_sells[action.instrument] += held
+        elif held == 0:
             return []
-        self._routed_sells[action.instrument] += held
         return [
             OrderEvent(
                 order_id=self._order_manager.next_order_id(),
                 decision_id=decision_id,
                 ts=market.ts,
                 instrument=action.instrument,
-                quantity=held,
-                side=Side.SELL,
+                quantity=abs(held),
+                side=Side.SELL if held > 0 else Side.BUY,  # 숏 포지션은 매수로 청산
                 source_action=action,
+                time_in_force=action.execution.time_in_force,
             )
         ]

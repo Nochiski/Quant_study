@@ -79,10 +79,16 @@ dependencies = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "numpy", specifier = ">=1.26" }]
+requires-dist = [
+    { name = "numpy", specifier = ">=1.26" },
+    { name = "pyarrow", marker = "extra == 'parquet'", specifier = ">=15" },
+]
+provides-extras = ["parquet"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "maturin", specifier = ">=1.15.0" },
+    { name = "pyarrow", specifier = ">=25.0.1" },
     { name = "pyright", specifier = ">=1.1.380" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "ruff", specifier = ">=0.6" },

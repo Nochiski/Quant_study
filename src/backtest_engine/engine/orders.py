@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
+from backtest_engine.types.actions import GroupPolicy
 from backtest_engine.types.events import OpenOrderSnapshot, OrderEvent
 from backtest_engine.types.instruments import InstrumentId
 from backtest_engine.types.market import MarketSnapshot
@@ -34,12 +35,23 @@ class OpenOrder:
         return self.remaining < self.order.quantity
 
 
+@dataclass(frozen=True)
+class BasketGroup:
+    """같은 BasketAction에서 나온 leg 주문 묶음과 그룹 정책 (5c)."""
+
+    group_id: str
+    policy: GroupPolicy
+    order_ids: tuple[str, ...]
+
+
 class OrderManager:
     def __init__(self) -> None:
         self._decision_seq = 0
         self._order_seq = 0
         self._fill_seq = 0
+        self._group_seq = 0
         self._open: dict[str, OpenOrder] = {}
+        self._groups: dict[str, BasketGroup] = {}
 
     # --- 식별자 발급 ---------------------------------------------------------
 
@@ -54,6 +66,32 @@ class OrderManager:
     def next_fill_id(self) -> str:
         self._fill_seq += 1
         return f"F-{self._fill_seq:06d}"
+
+    def next_group_id(self) -> str:
+        self._group_seq += 1
+        return f"G-{self._group_seq:06d}"
+
+    # --- 바스켓 그룹 ----------------------------------------------------------
+
+    def register_group(self, group: BasketGroup) -> None:
+        if group.group_id in self._groups:
+            raise ValueError(f"duplicate basket group id — group_id={group.group_id}")
+        self._groups[group.group_id] = group
+
+    def open_groups(self) -> tuple[BasketGroup, ...]:
+        """대기 leg가 하나라도 남은 그룹."""
+        return tuple(
+            group
+            for group in self._groups.values()
+            if any(order_id in self._open for order_id in group.order_ids)
+        )
+
+    def group_entries(self, group_id: str) -> tuple[OpenOrder, ...]:
+        group = self._groups[group_id]
+        return tuple(self._open[o] for o in group.order_ids if o in self._open)
+
+    def drop_group(self, group_id: str) -> None:
+        self._groups.pop(group_id, None)
 
     # --- 대기열 --------------------------------------------------------------
 
@@ -79,8 +117,12 @@ class OrderManager:
         return self._open.get(order_id)
 
     def due(self, snapshot: MarketSnapshot) -> tuple[OpenOrder, ...]:
-        """이 세션에 거래 가능한(bar가 있는) 대기 주문."""
-        return tuple(entry for entry in self._open.values() if snapshot.has(entry.order.instrument))
+        """이 세션에 거래 가능한(bar가 있는) 단일 대기 주문. 바스켓 leg는 그룹 경로로 처리한다."""
+        return tuple(
+            entry
+            for entry in self._open.values()
+            if entry.order.group_id is None and snapshot.has(entry.order.instrument)
+        )
 
     def settle(self, order_id: str, filled: Decimal) -> Decimal:
         """체결 수량을 반영하고 잔량을 돌려준다. 잔량 0이면 대기열에서 제거."""

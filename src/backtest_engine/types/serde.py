@@ -508,6 +508,7 @@ def order_event_to_dict(order: OrderEvent) -> Json:
         "limit_price": None if order.limit_price is None else str(order.limit_price),
         "stop_price": None if order.stop_price is None else str(order.stop_price),
         "time_in_force": order.time_in_force.value,
+        "group_id": order.group_id,
     }
 
 
@@ -531,6 +532,11 @@ def order_event_from_dict(data: object) -> OrderEvent:
         limit_price=_optional_decimal(obj.get("limit_price"), "order_event.limit_price"),
         stop_price=_optional_decimal(obj.get("stop_price"), "order_event.stop_price"),
         time_in_force=TimeInForce(obj.get("time_in_force", TimeInForce.DAY.value)),
+        group_id=(
+            None
+            if obj.get("group_id") is None
+            else _expect_str(obj["group_id"], "order_event.group_id")
+        ),
     )
 
 

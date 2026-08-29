@@ -14,7 +14,7 @@ src/backtest_engine/
 ├─ adapters/       # 포트 구현: CSV(csv_bars), sqlite(sqlite_bars), KRX 원장 parquet(krx_parquet)
 └─ data/           # 소스 무관 정제(cleaning)·자본변동 검출(corporate_actions), DataFeed
 examples/          # 골든크로스 예제 전략 + CSV / KRX parquet 데모
-scripts/           # 테스트 픽스처 재생성 등 유틸
+scripts/           # 테스트 픽스처 재생성, 다종목 벤치마크 등 유틸
 tests/             # 골든(손계산)·계약·상태 전이·직렬화·단위 테스트
 tests/fixtures/    # KRX 원장 슬라이스 (종목 5개, 605KB) — 어댑터 스모크용
 2026-08-17/        # 설계 아티팩트와 Zipline 관찰용 앱 (기준 동작 비교용)
@@ -69,6 +69,20 @@ Requirements → Capability 검증 → StrategyEvent + 읽기 전용 Context
   새 채널은 `load_bars(BarQuery) -> LoadResult` 하나를 구현하면 붙는다.
 - 정제(OHLC 정책·거래정지 제거·시간 역행 거절)는 `data/cleaning.py` 한 곳에서 하고,
   손댄 행 수는 항상 `repaired_rows`/`dropped_rows`로 보고한다 (silent 보정 금지).
+- 5단계(`docs/superpowers/specs/2026-08-29-basket-short-margin-design.md`): `SHORT_SELLING`
+  선언 시 음수 포지션(방향 전환 시 평균단가 재설정)과 세션 종료 차입 비용, `MARGIN` 선언 시
+  매수 여력 = `max_gross_leverage × equity − 총노출`과 음수 현금 이자(둘 다 `CostAccrued`로
+  기록, equity < 0이면 `EquityWipedOut`), `BasketAction`은 leg를 함께 견적해 BEST_EFFORT /
+  ALL_OR_NONE / PROPORTIONAL로 판정한다. 이제 Action·Feature 축에 `NOT_IMPLEMENTED`가 없고
+  TIMER 이벤트·`MonthEndSession`만 남는다.
+- 6a Rust 코어(`docs/superpowers/specs/2026-08-29-rust-core-design.md`): `rust/backtest_core`
+  (PyO3)가 체결 가격 규칙·수량 변환·포트폴리오 회계를 제공하고 `BacktestEngine(core="rust")`로
+  켠다. Python 구현이 진실 원천이며 `tests/test_core_parity.py`가 두 코어의 결과를 레코드
+  단위로 고정한다(확장 없으면 skip). 6b(견적 산술·매수 여력)·6c(세션 MARKET 처리 계획)까지
+  옮겼고 주문 생명주기 11시나리오가 레코드 단위로 비트 동일하다. 6d는 다종목 벤치마크
+  (`scripts/bench_universe.py`, 100종목·1,231세션·주문 23k)로 병목을 먼저 쟀다 — 큐가 아니라
+  스냅샷·포트폴리오의 선형 종목 조회였고, dict 인덱스·스냅샷 메모로 python 15.1s→2.1s,
+  rust 8.8s→1.9s. Rust 세션 루프 이전은 측정 결과로 닫았다.
 - 데이터 후속(D, `docs/superpowers/specs/2026-08-29-data-followups-design.md`): 원장의
   상장주식수 변화로 액면분할·병합을 검출해 `run(corporate_actions=)`로 넘기면 엔진이 사건
   세션 시작에 보유 수량·평균단가를 조정하고(단주는 시가 현금 정산) 대기 주문을 취소한다.
@@ -86,9 +100,12 @@ uv run pyright src tests examples
 uv run python examples/run_demo.py      # PyKRX CSV(005930)로 골든크로스 백테스트
 uv run python examples/run_krx_demo.py  # KRX 원장 parquet 슬라이스로 동일 전략 실행
 uv run python examples/run_krx_demo.py <원장 디렉토리>   # quant-data 빌드 전체 대상
+uv run maturin develop --manifest-path rust/backtest_core/Cargo.toml --release  # Rust 코어(선택)
+uv run python examples/run_krx_demo.py --core rust      # Rust 코어로 같은 데모
 ```
 
 ## 검증: Zipline 대조
 
-엔진 회계는 Zipline과의 세션 단위 equity 대조로 검증됐다 (buy-hold 오차 0,
-골든크로스 최대 3e-16). 실행 방법과 리포트는 `tests/manual/README.md` 참고.
+엔진 회계는 Zipline과의 세션 단위 equity 대조로 검증됐다 — buy-hold, 골든크로스, 슬리피지
+(VolumeShare + 참여율 캡·GTC 이월), 공매도 buy-hold 네 시나리오 모두 최대 상대 오차 0
+(1,619세션, KRX 원장 슬라이스에서 생성한 CSV). 실행 방법과 리포트는 `tests/manual/README.md` 참고.

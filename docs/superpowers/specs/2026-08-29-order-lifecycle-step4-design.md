@@ -230,6 +230,23 @@ Capability를 IMPLEMENTED로 승격하는 것이다.
 - README "현재 브랜치 구현 범위" 갱신, `.claude/rules/`에 규칙 변경이 있으면 동반 갱신.
 - 발견된 결함은 `.claude/rules/pr-review.md`의 4요소 양식으로 PR body에 기록.
 
+## 구현 결과와 스펙 차이 (2026-08-29 구현 완료)
+
+구현하면서 확정·변경된 사항. 나머지는 스펙대로다.
+
+- 전략 알림은 큐에 `NOTIFY(25)` 우선순위를 추가해 전달한다 (FILL 20 → NOTIFY 25 →
+  SESSION_CLOSE 30). 한 세션의 체결이 전부 포트폴리오에 반영된 뒤 전략이 호출되도록
+  하기 위해서다. 알림은 `StrategyNotify(event, snapshot)` 큐 이벤트로 흐른다.
+- 라우터가 선언된 `EngineFeature`도 검사한다: LIMIT/STOP 종류 → `LIMIT_ORDER`/`STOP_ORDER`,
+  IOC/FOK·`max_participation` → `PARTIAL_FILL`. 미선언이면 `UndeclaredFeatureUsed`.
+  Capability 표가 IMPLEMENTED여도 전략이 선언하지 않은 기능은 쓸 수 없다.
+- 취소·정정 결과는 `RoutingResult.updates: tuple[OrderUpdateEvent, ...]`로 라우터가
+  직접 만든다 (기존 `cancelled: tuple[OrderEvent]` 대체).
+- 4d의 IOC/FOK는 4b에서 "거절"이 아니라 `PARTIAL_FILL` 미선언 거절로 구현됐고, 4d에서
+  기능 승격과 함께 열렸다.
+- 거래량 0 bar에서 참여율 캡이 0이면 체결 없이 대기(`NOT_FILLED`)한다. DAY면 당일 만료.
+- Zipline 슬리피지 대조는 보류 — 사유는 `tests/manual/README.md`.
+
 ## 다음 단계
 
 `2026-08-29-roadmap-overview.md` 참고: 데이터 측 후속(D) → 5단계 Basket·공매도 →

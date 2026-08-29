@@ -26,3 +26,15 @@ uv run python scripts/compare_engines.py
 - Zipline 캘린더는 XKRX 명시 (기본 XNYS는 한국 휴일을 세션으로 오처리).
 - 거래정지 행(가격 0)은 양쪽 모두 세션이 아닌 것으로 처리
   (커스텀: 로더 CLAMP drop / Zipline: 저장소가 0을 NaN으로 읽는 성질 이용).
+
+### 4단계(주문 생명주기) 이후의 대조 범위
+
+- 시장가·전량 체결 경로는 4단계 전후로 동일하다 (기본값 `NoSlippage`, 참여율 무제한).
+- **슬리피지 대조(보류)**: 스펙은 `VolumeShareSlippage(0.025, 0.1)`를 양쪽에 두고
+  대조하도록 계획했지만, Zipline의 `VolumeShareSlippage`는 다음 bar **종가** 기준
+  체결이라 하네스의 `NextBarOpenSlippage`처럼 시가 기준 변형을 별도로 정의해야 하고,
+  현재 이 저장소에는 대조용 원본 CSV(`data/raw`)가 없어 실행·검증할 수 없다.
+  원본 데이터가 준비되면 `NextBarOpenVolumeShareSlippage`를 추가해 시나리오를 확장한다.
+- 지정가·스톱은 Zipline이 종가 기준으로 발동을 판정해 규칙이 다르므로 대조 대상이
+  아니다. 이 경로는 `tests/test_broker.py`의 규칙표와 `tests/test_order_lifecycle.py`의
+  손계산 골든으로 검증한다.

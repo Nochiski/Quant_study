@@ -35,6 +35,9 @@ uv run python scripts/compare_engines.py
   체결이라 하네스의 `NextBarOpenSlippage`처럼 시가 기준 변형을 별도로 정의해야 하고,
   현재 이 저장소에는 대조용 원본 CSV(`data/raw`)가 없어 실행·검증할 수 없다.
   원본 데이터가 준비되면 `NextBarOpenVolumeShareSlippage`를 추가해 시나리오를 확장한다.
+- **공매도 대조(보류)**: 비중 −1.0 단일 종목 buy-hold를 양쪽에서 돌려 세션 equity를 대조하는
+  시나리오(`short-hold`)를 계획했으나 같은 이유(원본 CSV 부재)로 실행하지 못했다. Zipline은
+  공매도 회계를 기본 지원하므로 기준으로 쓸 수 있다.
 - 지정가·스톱은 Zipline이 종가 기준으로 발동을 판정해 규칙이 다르므로 대조 대상이
   아니다. 이 경로는 `tests/test_broker.py`의 규칙표와 `tests/test_order_lifecycle.py`의
   손계산 골든으로 검증한다.

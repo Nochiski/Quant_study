@@ -127,6 +127,20 @@
 - 공매도 buy-hold(비중 −1.0 단일 종목) 세션 equity 대조는 원본 CSV(`data/raw`)가 없어
   4d 슬리피지 대조와 같은 사유로 보류. 하네스 README에 시나리오 정의만 추가한다.
 
+## 구현 결과와 스펙 차이 (2026-08-29 구현 완료)
+
+- 매수 여력은 MARGIN 선언과 무관하게 항상 `leverage × equity − 총노출`로 계산한다
+  (`_BuyingPower`). 레버리지 1.0·롱 전용이면 현금과 정확히 같아 4단계 결과가 불변이고,
+  공매도만 선언한 전략은 `cash − 2×|숏 평가액|`이 여력이 된다(공매도 대금은 신용 없이 재사용 불가).
+  세션 안에서 체결가로 재평가되는 기존 보유분의 손익도 equity에 반영한다.
+- equity < 0 검사는 MARGIN 여부와 무관하게 세션 종료마다 한다 — 숏 스퀴즈로도 자본 잠식이 난다.
+- `max_gross_leverage > 1`인데 MARGIN 미선언이면 라우터가 아니라 `run()` 시작에서 거절한다.
+- Basket leg의 TIF는 정책에 따라 다르다: BEST_EFFORT는 leg 자체 TIF(GTC면 이월), ALL_OR_NONE·
+  PROPORTIONAL은 그 세션에 판정을 끝내고 잔량을 취소한다. 정책 판정 전 견적 패스는 매수 여력을
+  임시 소모했다가 되돌리고(`checkpoint`/`restore`), 실제 체결로 다시 소모한다.
+- `CostAccrued.instrument`는 MARGIN_INTEREST면 None.
+- Zipline 공매도 대조는 원본 CSV 부재로 보류 (4d 슬리피지와 같은 사유).
+
 ## 다음 단계
 
 6단계 Rust 포팅 (`2026-08-29-roadmap-overview.md`).

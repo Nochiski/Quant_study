@@ -69,6 +69,12 @@ Requirements → Capability 검증 → StrategyEvent + 읽기 전용 Context
   새 채널은 `load_bars(BarQuery) -> LoadResult` 하나를 구현하면 붙는다.
 - 정제(OHLC 정책·거래정지 제거·시간 역행 거절)는 `data/cleaning.py` 한 곳에서 하고,
   손댄 행 수는 항상 `repaired_rows`/`dropped_rows`로 보고한다 (silent 보정 금지).
+- 5단계(`docs/superpowers/specs/2026-08-29-basket-short-margin-design.md`): `SHORT_SELLING`
+  선언 시 음수 포지션(방향 전환 시 평균단가 재설정)과 세션 종료 차입 비용, `MARGIN` 선언 시
+  매수 여력 = `max_gross_leverage × equity − 총노출`과 음수 현금 이자(둘 다 `CostAccrued`로
+  기록, equity < 0이면 `EquityWipedOut`), `BasketAction`은 leg를 함께 견적해 BEST_EFFORT /
+  ALL_OR_NONE / PROPORTIONAL로 판정한다. 이제 Action·Feature 축에 `NOT_IMPLEMENTED`가 없고
+  TIMER 이벤트·`MonthEndSession`만 남는다.
 - 데이터 후속(D, `docs/superpowers/specs/2026-08-29-data-followups-design.md`): 원장의
   상장주식수 변화로 액면분할·병합을 검출해 `run(corporate_actions=)`로 넘기면 엔진이 사건
   세션 시작에 보유 수량·평균단가를 조정하고(단주는 시가 현금 정산) 대기 주문을 취소한다.

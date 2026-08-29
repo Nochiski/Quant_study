@@ -14,6 +14,7 @@ import pytest
 
 from backtest_engine import BacktestEngine, BacktestResult, RunConfig
 from backtest_engine.data.feed import DataFeed
+from backtest_engine.engine.slippage import FixedBpsSlippage
 from backtest_engine.types.actions import (
     ActionKind,
     CancelOrder,
@@ -119,7 +120,9 @@ class OrderScript:
             actions=frozenset(
                 {ActionKind.NO_ACTION, ActionKind.SUBMIT_ORDER, ActionKind.SET_POSITION_TARGET}
             ),
-            features=frozenset({EngineFeature.LIMIT_ORDER, EngineFeature.STOP_ORDER}),
+            features=frozenset(
+                {EngineFeature.LIMIT_ORDER, EngineFeature.STOP_ORDER, EngineFeature.PARTIAL_FILL}
+            ),
         )
 
     def on_event(self, ctx: StrategyContext, event: StrategyEvent) -> StrategyDecision:
@@ -153,9 +156,16 @@ def buy_shares(quantity: int) -> SetPositionTarget:
 
 
 def run(
-    script: tuple[StrategyAction | None, ...], bars: tuple[Bar, ...] = BARS
+    script: tuple[StrategyAction | None, ...],
+    bars: tuple[Bar, ...] = BARS,
+    max_participation: float | None = None,
+    slippage: FixedBpsSlippage | None = None,
 ) -> tuple[BacktestEngine, BacktestResult]:
-    engine = BacktestEngine(RunConfig(run_id="lifecycle", initial_cash=100_000.0, fee_bps=0.0))
+    engine = BacktestEngine(
+        RunConfig(run_id="lifecycle", initial_cash=100_000.0, fee_bps=0.0),
+        max_participation=max_participation,
+        slippage=slippage,
+    )
     result = engine.run(OrderScript(script), DataFeed(bars))
     assert_transitions_valid(engine.event_store.order_updates())
     return engine, result
@@ -390,3 +400,64 @@ class TestEventDelivery:
         )
         updates = [e for e in strategy.received if isinstance(e, OrderUpdateEvent)]
         assert [(u.ts, u.status) for u in updates] == [(day(2), OrderStatus.CANCELLED)]
+
+
+# --- 4d: 부분체결·IOC/FOK·슬리피지 --------------------------------------------
+
+
+def market_buy(quantity: int, tif: TimeInForce) -> SubmitOrder:
+    core = OrderCore(INSTRUMENT, Side.BUY, Decimal(quantity), tif)
+    return submit(MarketOrderRequest(core=core))
+
+
+class TestPartialFill:
+    def test_gtc_fills_across_sessions_until_complete(self) -> None:
+        # volume 1,000 × 10% = 100주/세션. 250주 → D2 100, D3 100, D4 50
+        engine, result = run((market_buy(250, TimeInForce.GTC),), max_participation=0.1)
+        assert [(f.ts, int(f.quantity), f.price) for f in result.fills] == [
+            (day(2), 100, 110.0),
+            (day(3), 100, 100.0),
+            (day(4), 50, 97.0),
+        ]
+        assert statuses_of(engine, "O-000001") == [
+            OrderStatus.PARTIALLY_FILLED,
+            OrderStatus.PARTIALLY_FILLED,
+            OrderStatus.FILLED,
+        ]
+        assert sum(f.quantity for f in result.fills) == Decimal(250)
+        assert result.snapshots[-1].position_qty(INSTRUMENT) == Decimal(250)
+
+    def test_ioc_fills_partially_then_cancels_remainder(self) -> None:
+        engine, result = run((market_buy(250, TimeInForce.IOC),), max_participation=0.1)
+        assert [(f.ts, int(f.quantity)) for f in result.fills] == [(day(2), 100)]
+        updates = [u for u in engine.event_store.order_updates() if u.order_id == "O-000001"]
+        assert [(u.ts, u.status) for u in updates] == [
+            (day(2), OrderStatus.PARTIALLY_FILLED),
+            (day(2), OrderStatus.CANCELLED),
+        ]
+        assert "remaining=150" in (updates[1].detail or "")
+
+    def test_fok_cancels_without_fill_when_liquidity_short(self) -> None:
+        engine, result = run((market_buy(250, TimeInForce.FOK),), max_participation=0.1)
+        assert result.fills == ()
+        updates = [u for u in engine.event_store.order_updates() if u.order_id == "O-000001"]
+        assert [(u.ts, u.status) for u in updates] == [(day(2), OrderStatus.CANCELLED)]
+        assert "fok" in (updates[0].detail or "").lower()
+
+    def test_day_order_partial_then_expires(self) -> None:
+        engine, result = run((market_buy(250, TimeInForce.DAY),), max_participation=0.1)
+        assert [(f.ts, int(f.quantity)) for f in result.fills] == [(day(2), 100)]
+        assert statuses_of(engine, "O-000001") == [
+            OrderStatus.PARTIALLY_FILLED,
+            OrderStatus.CANCELLED,
+        ]
+
+
+class TestSlippageAccounting:
+    def test_slipped_price_flows_into_cash(self) -> None:
+        # 10주 매수 D2 시가 110 + 10bp(0.11) = 110.11 → 현금 100,000 − 1,101.1
+        _, result = run((buy_shares(10),), slippage=FixedBpsSlippage(bps=10.0))
+        fill = result.fills[0]
+        assert fill.price == pytest.approx(110.11)
+        assert fill.slippage_per_share == pytest.approx(0.11)
+        assert result.snapshots[-1].cash == pytest.approx(100_000.0 - 1_101.1)

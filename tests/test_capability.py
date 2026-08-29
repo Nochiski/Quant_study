@@ -156,7 +156,11 @@ def test_reference_capabilities_are_honest() -> None:
         for capability in capabilities.features
         if capability.support is SupportLevel.IMPLEMENTED
     }
-    assert implemented_features == {EngineFeature.LIMIT_ORDER, EngineFeature.STOP_ORDER}
+    assert implemented_features == {
+        EngineFeature.LIMIT_ORDER,
+        EngineFeature.STOP_ORDER,
+        EngineFeature.PARTIAL_FILL,
+    }
 
 
 def test_every_action_kind_has_registered_capability() -> None:

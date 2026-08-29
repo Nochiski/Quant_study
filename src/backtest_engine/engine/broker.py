@@ -8,10 +8,16 @@
   기록하고 이후 세션부터 LIMIT으로 평가한다.
 낙관적 가정(장중 최유리가 체결)은 쓰지 않는다.
 
-회계 제약 (Capability에 반영):
-- 매수는 현금 한도에 걸리면 체결 수량이 줄 수 있다 — 유동성 부분체결이
-  아니라 MARGIN 미구현 상태에서 현금 초과 매수를 막는 규칙이다.
-- 슬리피지 모델 없음: slippage_per_share=0.0으로 기록만 한다 (4d에서 포트로 분리).
+수량 규칙:
+- 유동성 캡 = floor(bar.volume × participation). participation은 주문을 만든
+  Action의 ExecutionPolicy.max_participation이 있으면 그 값, 없으면 브로커 기본값
+  (None = 무제한).
+- 매수는 현금 한도(수수료 포함)에도 걸린다 — MARGIN 미구현 상태의 회계 제약.
+- IOC는 가능한 만큼, FOK는 전량 아니면 체결 없음. 잔량 처리(취소·이월)는 루프 책임.
+
+가격 규칙:
+- 체결가 = 규칙 가격 ± 슬리피지(매수 +, 매도 −). LIMIT/STOP_LIMIT은 지정가를
+  넘지 않도록 clip하고 기록 슬리피지도 clip 후 값으로 남긴다.
 """
 
 from __future__ import annotations
@@ -21,17 +27,27 @@ from decimal import ROUND_FLOOR, Decimal
 from enum import Enum
 
 from backtest_engine.engine.orders import OpenOrder
+from backtest_engine.engine.slippage import NoSlippage
+from backtest_engine.ports.execution import SlippageModel
+from backtest_engine.types.actions import (
+    AdjustPosition,
+    LiquidatePosition,
+    SetPortfolioTarget,
+    SetPositionTarget,
+)
 from backtest_engine.types.events import FillEvent, OrderEvent
 from backtest_engine.types.market import Bar
-from backtest_engine.types.orders import OrderType, Side
+from backtest_engine.types.orders import OrderType, Side, TimeInForce
 
 
 class ExecutionStatus(Enum):
     FILLED = "filled"
-    CASH_LIMITED = "cash_limited"  # 현금 한도로 주문 수량 일부만 체결
+    CASH_LIMITED = "cash_limited"  # 현금 한도로 잔량 일부만 체결
+    LIQUIDITY_LIMITED = "liquidity_limited"  # 거래량 참여율 캡으로 잔량 일부만 체결
     REJECTED_NO_CASH = "rejected_no_cash"  # 1주도 살 수 없어 주문 전체 거절
-    NOT_FILLED = "not_filled"  # 지정가·스톱 조건 미충족, 주문은 대기 유지
+    NOT_FILLED = "not_filled"  # 조건 미충족 또는 유동성 0, 주문은 대기 유지
     TRIGGERED_UNFILLED = "triggered_unfilled"  # STOP_LIMIT 발동했지만 지정가 미충족
+    FOK_REJECTED = "fok_rejected"  # FOK 전량 체결 불가
 
 
 @dataclass(frozen=True)
@@ -98,9 +114,34 @@ def _require(price: Decimal | None) -> Decimal:
     return price
 
 
+def participation_of(order: OrderEvent) -> float | None:
+    """주문을 만든 Action이 지정한 거래량 참여율. 없으면 None."""
+    match order.source_action:
+        case (
+            SetPortfolioTarget(execution=execution)
+            | SetPositionTarget(execution=execution)
+            | AdjustPosition(execution=execution)
+            | LiquidatePosition(execution=execution)
+        ):
+            return execution.max_participation
+        case _:
+            return None
+
+
 class BrokerSim:
-    def __init__(self, fee_bps: float) -> None:
+    def __init__(
+        self,
+        fee_bps: float,
+        slippage: SlippageModel | None = None,
+        max_participation: float | None = None,
+    ) -> None:
+        if max_participation is not None and not 0.0 < max_participation <= 1.0:
+            raise ValueError(
+                f"max_participation must be in (0, 1] — max_participation={max_participation}"
+            )
         self._fee_rate = fee_bps / 10_000.0
+        self._slippage: SlippageModel = slippage if slippage is not None else NoSlippage()
+        self._max_participation = max_participation
 
     def fee_for(self, notional: float) -> float:
         return notional * self._fee_rate
@@ -126,11 +167,35 @@ class BrokerSim:
                 else ExecutionStatus.NOT_FILLED
             )
             return ExecutionOutcome(fill=None, status=status)
-        price = decision.price
+        base_price = decision.price
 
-        if order.side is Side.SELL:
-            quantity = open_order.remaining
-        else:
+        quantity = open_order.remaining
+        status = ExecutionStatus.FILLED
+        detail: str | None = None
+
+        liquidity_cap = self._liquidity_cap(order, bar)
+        if liquidity_cap is not None and liquidity_cap < quantity:
+            if liquidity_cap <= 0:
+                return ExecutionOutcome(
+                    fill=None,
+                    status=ExecutionStatus.NOT_FILLED,
+                    detail=(
+                        f"no liquidity in session — order_id={order.order_id} "
+                        f"instrument={order.instrument.symbol} volume={bar.volume} ts={bar.ts}"
+                    ),
+                )
+            quantity = liquidity_cap
+            status = ExecutionStatus.LIQUIDITY_LIMITED
+            detail = (
+                f"fill capped by volume participation — order_id={order.order_id} "
+                f"instrument={order.instrument.symbol} remaining={open_order.remaining} "
+                f"cap={liquidity_cap} volume={bar.volume}"
+            )
+
+        # 슬리피지는 실제 체결 수량에 의존하므로 유동성 캡 이후, 현금 캡 이전에 정한다.
+        price, slip = self._slipped_price(order, bar, base_price, quantity)
+
+        if order.side is Side.BUY:
             affordable = self._affordable_quantity(cash_available, price)
             if affordable <= 0:
                 return ExecutionOutcome(
@@ -142,7 +207,25 @@ class BrokerSim:
                         f"cash_available={cash_available}"
                     ),
                 )
-            quantity = min(open_order.remaining, affordable)
+            if affordable < quantity:
+                quantity = affordable
+                status = ExecutionStatus.CASH_LIMITED
+                detail = (
+                    f"buy capped by available cash — order_id={order.order_id} "
+                    f"instrument={order.instrument.symbol} remaining={open_order.remaining} "
+                    f"filled={quantity} price={price} cash_available={cash_available}"
+                )
+
+        if order.time_in_force is TimeInForce.FOK and quantity < open_order.remaining:
+            return ExecutionOutcome(
+                fill=None,
+                status=ExecutionStatus.FOK_REJECTED,
+                detail=(
+                    f"FOK not fillable in full — order_id={order.order_id} "
+                    f"instrument={order.instrument.symbol} remaining={open_order.remaining} "
+                    f"fillable={quantity} ({detail})"
+                ),
+            )
 
         notional = float(quantity) * price
         fill = FillEvent(
@@ -154,19 +237,33 @@ class BrokerSim:
             side=order.side,
             price=price,
             fee=self.fee_for(notional),
-            slippage_per_share=0.0,
+            slippage_per_share=slip,
         )
-        if quantity < open_order.remaining:
-            return ExecutionOutcome(
-                fill=fill,
-                status=ExecutionStatus.CASH_LIMITED,
-                detail=(
-                    f"buy capped by available cash — order_id={order.order_id} "
-                    f"instrument={order.instrument.symbol} remaining={open_order.remaining} "
-                    f"filled={quantity} price={price} cash_available={cash_available}"
-                ),
+        return ExecutionOutcome(fill=fill, status=status, detail=detail)
+
+    def _liquidity_cap(self, order: OrderEvent, bar: Bar) -> Decimal | None:
+        participation = participation_of(order)
+        if participation is None:
+            participation = self._max_participation
+        if participation is None:
+            return None
+        return Decimal(bar.volume * participation).quantize(Decimal(1), rounding=ROUND_FLOOR)
+
+    def _slipped_price(
+        self, order: OrderEvent, bar: Bar, base_price: float, quantity: Decimal
+    ) -> tuple[float, float]:
+        slip = self._slippage.slippage_per_share(order, bar, base_price, quantity)
+        if slip < 0:
+            model = type(self._slippage).__name__
+            raise ValueError(
+                f"slippage model returned negative slippage — model={model} "
+                f"order_id={order.order_id} slip={slip}"
             )
-        return ExecutionOutcome(fill=fill, status=ExecutionStatus.FILLED)
+        price = base_price + slip if order.side is Side.BUY else base_price - slip
+        if order.limit_price is not None:
+            limit = float(order.limit_price)
+            price = min(price, limit) if order.side is Side.BUY else max(price, limit)
+        return price, abs(price - base_price)
 
     def _affordable_quantity(self, cash_available: float, price: float) -> Decimal:
         """수수료까지 포함해 현금으로 살 수 있는 최대 정수 수량."""

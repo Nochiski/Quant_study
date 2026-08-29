@@ -5,7 +5,9 @@
 
 구현 범위 (Capability와 일치):
 - NoAction, SetPortfolioTarget, SetPositionTarget, AdjustPosition, LiquidatePosition,
-  SubmitOrder(MARKET/LIMIT/STOP/STOP_LIMIT, DAY/GTC), CancelOrder, ReplaceOrder.
+  SubmitOrder(MARKET/LIMIT/STOP/STOP_LIMIT, DAY/GTC/IOC/FOK), CancelOrder, ReplaceOrder.
+- LIMIT/STOP 종류, IOC/FOK, max_participation은 해당 EngineFeature를 선언한 전략만
+  쓸 수 있다 (UndeclaredFeatureUsed).
 - 취소·정정은 대기열을 즉시 바꾸고 결과를 OrderUpdateEvent로 돌려준다. 모르는
   order_id는 전략 버그이므로 UnknownOrderId로 run을 중단한다.
 - ExecutionPolicy는 MARKET 스타일만, 일봉 엔진이므로 NEXT_OPEN과
@@ -207,9 +209,24 @@ class DecisionRouter:
                 f"decision_id={decision_id}, only MARKET is supported"
             )
         if execution.max_participation is not None:
-            raise UnsupportedActionValue(
-                f"max_participation requires PARTIAL_FILL feature (not implemented) — "
-                f"max_participation={execution.max_participation} decision_id={decision_id}"
+            self._require_feature(
+                EngineFeature.PARTIAL_FILL,
+                f"max_participation={execution.max_participation}",
+                decision_id,
+            )
+            if not 0.0 < execution.max_participation <= 1.0:
+                raise UnsupportedActionValue(
+                    f"max_participation must be in (0, 1] — "
+                    f"max_participation={execution.max_participation} decision_id={decision_id}"
+                )
+
+    def _require_feature(self, feature: EngineFeature, what: str, decision_id: str) -> None:
+        if feature not in self._declared_features:
+            raise UndeclaredFeatureUsed(
+                f"{what} requires a feature not declared in requirements() — "
+                f"feature={feature.value} "
+                f"declared={sorted(f.value for f in self._declared_features)} "
+                f"decision_id={decision_id}"
             )
 
     def _portfolio_target_orders(
@@ -372,18 +389,13 @@ class DecisionRouter:
         core = request.core
         order_type, limit_price, stop_price = self._describe_request(request)
         feature = self._FEATURE_FOR_TYPE.get(order_type)
-        if feature is not None and feature not in self._declared_features:
-            raise UndeclaredFeatureUsed(
-                f"order type requires a feature not declared in requirements() — "
-                f"order_type={order_type.value} feature={feature.value} "
-                f"declared={sorted(f.value for f in self._declared_features)} "
-                f"decision_id={decision_id}"
-            )
+        if feature is not None:
+            self._require_feature(feature, f"order_type={order_type.value}", decision_id)
         if core.time_in_force in (TimeInForce.IOC, TimeInForce.FOK):
-            raise UnsupportedActionValue(
-                f"time_in_force={core.time_in_force.value} requires PARTIAL_FILL feature "
-                f"(not implemented) — instrument={core.instrument.symbol} "
-                f"decision_id={decision_id}"
+            self._require_feature(
+                EngineFeature.PARTIAL_FILL,
+                f"time_in_force={core.time_in_force.value}",
+                decision_id,
             )
         self._check_integer(core.quantity, core.instrument, decision_id)
         if core.side is Side.SELL:

@@ -12,7 +12,16 @@ import pytest
 
 from backtest_engine.engine.broker import BrokerSim, ExecutionStatus
 from backtest_engine.engine.orders import OpenOrder
-from backtest_engine.types.actions import NoAction
+from backtest_engine.engine.slippage import FixedBpsSlippage
+from backtest_engine.types.actions import (
+    ExecutionPolicy,
+    ExecutionStyle,
+    ExecutionTiming,
+    NoAction,
+    QuantityTarget,
+    SetPositionTarget,
+    StrategyAction,
+)
 from backtest_engine.types.events import OrderEvent
 from backtest_engine.types.orders import OrderType, Side, TimeInForce
 from tests.conftest import day, make_instrument, make_ohlc
@@ -28,6 +37,8 @@ def order(
     stop: float | None = None,
     quantity: int = 10,
     triggered: bool = False,
+    tif: TimeInForce = TimeInForce.DAY,
+    source_action: StrategyAction | None = None,
 ) -> OpenOrder:
     event = OrderEvent(
         order_id="O-000001",
@@ -36,11 +47,11 @@ def order(
         instrument=INSTRUMENT,
         quantity=Decimal(quantity),
         side=side,
-        source_action=NoAction(),
+        source_action=source_action if source_action is not None else NoAction(),
         order_type=order_type,
         limit_price=None if limit is None else Decimal(str(limit)),
         stop_price=None if stop is None else Decimal(str(stop)),
-        time_in_force=TimeInForce.DAY,
+        time_in_force=tif,
     )
     return OpenOrder(order=event, remaining=Decimal(quantity), triggered=triggered)
 
@@ -123,3 +134,99 @@ def test_partial_remaining_is_executed_not_original_quantity() -> None:
     outcome = BrokerSim(fee_bps=0.0).execute(open_order, BAR, 1_000_000.0, "F-1")
     assert outcome.fill is not None
     assert outcome.fill.quantity == Decimal(3)
+
+
+# --- 4d: 유동성 참여율·슬리피지·IOC/FOK ------------------------------------------
+
+
+def test_participation_caps_fill_to_share_of_volume() -> None:
+    # volume 1,000 × 10% = 100주
+    broker = BrokerSim(fee_bps=0.0, max_participation=0.1)
+    outcome = broker.execute(order(OrderType.MARKET, B, quantity=500), BAR, 1_000_000.0, "F-1")
+    assert outcome.status is ExecutionStatus.LIQUIDITY_LIMITED
+    assert outcome.fill is not None
+    assert outcome.fill.quantity == Decimal(100)
+
+
+def test_zero_volume_bar_fills_nothing() -> None:
+    empty = make_ohlc(day(2), INSTRUMENT, 100.0, 110.0, 90.0, 105.0, volume=0)
+    broker = BrokerSim(fee_bps=0.0, max_participation=0.1)
+    outcome = broker.execute(order(OrderType.MARKET, B), empty, 1_000_000.0, "F-1")
+    assert outcome.fill is None
+    assert outcome.status is ExecutionStatus.NOT_FILLED
+
+
+def test_participation_and_cash_cap_take_the_smaller() -> None:
+    broker = BrokerSim(fee_bps=0.0, max_participation=0.1)  # 유동성 캡 100주
+    outcome = broker.execute(order(OrderType.MARKET, B, quantity=500), BAR, 5_000.0, "F-1")
+    assert outcome.fill is not None
+    assert outcome.fill.quantity == Decimal(50)  # 현금 5,000 / 100 = 50 < 100
+    assert outcome.status is ExecutionStatus.CASH_LIMITED
+
+
+def test_action_policy_participation_overrides_broker_default() -> None:
+    policy = ExecutionPolicy(
+        ExecutionStyle.MARKET, ExecutionTiming.NEXT_OPEN, TimeInForce.DAY, max_participation=0.05
+    )
+    action = SetPositionTarget(target=QuantityTarget(INSTRUMENT, Decimal(500)), execution=policy)
+    broker = BrokerSim(fee_bps=0.0, max_participation=0.5)
+    outcome = broker.execute(
+        order(OrderType.MARKET, B, quantity=500, source_action=action), BAR, 1_000_000.0, "F-1"
+    )
+    assert outcome.fill is not None
+    assert outcome.fill.quantity == Decimal(50)  # 1,000 × 5%
+
+
+def test_fok_not_fully_fillable_is_rejected_without_fill() -> None:
+    broker = BrokerSim(fee_bps=0.0, max_participation=0.1)
+    outcome = broker.execute(
+        order(OrderType.MARKET, B, quantity=500, tif=TimeInForce.FOK), BAR, 1_000_000.0, "F-1"
+    )
+    assert outcome.fill is None
+    assert outcome.status is ExecutionStatus.FOK_REJECTED
+    assert "fok" in (outcome.detail or "").lower()
+
+
+def test_ioc_fills_what_it_can() -> None:
+    broker = BrokerSim(fee_bps=0.0, max_participation=0.1)
+    outcome = broker.execute(
+        order(OrderType.MARKET, B, quantity=500, tif=TimeInForce.IOC), BAR, 1_000_000.0, "F-1"
+    )
+    assert outcome.fill is not None
+    assert outcome.fill.quantity == Decimal(100)
+
+
+def test_fixed_slippage_moves_market_fill_against_the_order() -> None:
+    broker = BrokerSim(fee_bps=0.0, slippage=FixedBpsSlippage(bps=10.0))
+    buy = broker.execute(order(OrderType.MARKET, B), BAR, 1_000_000.0, "F-1")
+    sell = broker.execute(order(OrderType.MARKET, SL), BAR, 1_000_000.0, "F-2")
+    assert buy.fill is not None and sell.fill is not None
+    assert buy.fill.price == pytest.approx(100.1)
+    assert buy.fill.slippage_per_share == pytest.approx(0.1)
+    assert sell.fill.price == pytest.approx(99.9)
+    assert sell.fill.slippage_per_share == pytest.approx(0.1)
+
+
+def test_limit_fill_never_worse_than_limit_after_slippage() -> None:
+    broker = BrokerSim(fee_bps=0.0, slippage=FixedBpsSlippage(bps=10.0))
+    # limit buy 95, 장중 체결가 95 + 0.095 슬리피지 → 95로 clip, 기록 슬리피지 0
+    outcome = broker.execute(order(L, B, limit=95), BAR, 1_000_000.0, "F-1")
+    assert outcome.fill is not None
+    assert outcome.fill.price == pytest.approx(95.0)
+    assert outcome.fill.slippage_per_share == pytest.approx(0.0)
+    # limit buy 105, 시가 100 체결 + 0.1 → 100.1 (limit 안이라 clip 없음)
+    outcome = broker.execute(order(L, B, limit=105), BAR, 1_000_000.0, "F-2")
+    assert outcome.fill is not None
+    assert outcome.fill.price == pytest.approx(100.1)
+
+
+def test_fee_is_charged_on_slipped_notional() -> None:
+    broker = BrokerSim(fee_bps=10.0, slippage=FixedBpsSlippage(bps=10.0))
+    outcome = broker.execute(order(OrderType.MARKET, B), BAR, 1_000_000.0, "F-1")
+    assert outcome.fill is not None
+    assert outcome.fill.fee == pytest.approx(10 * 100.1 * 0.001)
+
+
+def test_invalid_participation_rejected() -> None:
+    with pytest.raises(ValueError, match="max_participation"):
+        BrokerSim(fee_bps=0.0, max_participation=1.5)

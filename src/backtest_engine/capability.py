@@ -202,9 +202,9 @@ def reference_engine_capabilities() -> EngineCapabilities:
 
     3단계의 NO_ACTION, SET_PORTFOLIO_TARGET, LIQUIDATE_POSITION, 4a의
     SET_POSITION_TARGET, ADJUST_POSITION, 4b의 SUBMIT_ORDER(LIMIT/STOP 기능 포함),
-    4c의 CANCEL_ORDER, REPLACE_ORDER와 FILL/ORDER_UPDATE 이벤트 전달, MARKET 이벤트,
-    EverySession 일정만 IMPLEMENTED다. 나머지는 스키마만 정의된
-    NOT_IMPLEMENTED 상태로, handler와 테스트가 추가될 때 승격한다.
+    4c의 CANCEL_ORDER, REPLACE_ORDER와 FILL/ORDER_UPDATE 이벤트 전달, 4d의
+    PARTIAL_FILL(참여율 캡·IOC/FOK), MARKET 이벤트, EverySession 일정만 IMPLEMENTED다.
+    나머지는 스키마만 정의된 NOT_IMPLEMENTED 상태로, handler와 테스트가 추가될 때 승격한다.
     """
     not_implemented_actions = {
         ActionKind.BASKET: "roadmap step 5",
@@ -228,12 +228,12 @@ def reference_engine_capabilities() -> EngineCapabilities:
     features = (
         FeatureCapability(EngineFeature.LIMIT_ORDER, SupportLevel.IMPLEMENTED),
         FeatureCapability(EngineFeature.STOP_ORDER, SupportLevel.IMPLEMENTED),
+        FeatureCapability(EngineFeature.PARTIAL_FILL, SupportLevel.IMPLEMENTED),
     ) + tuple(
         FeatureCapability(feature, SupportLevel.NOT_IMPLEMENTED, reason)
         for feature, reason in {
             EngineFeature.SHORT_SELLING: "roadmap step 5",
-            EngineFeature.MARGIN: "no margin accounting in v1",
-            EngineFeature.PARTIAL_FILL: "roadmap step 4d — fills fully at next open",
+            EngineFeature.MARGIN: "roadmap step 5 — no margin accounting",
             EngineFeature.PROPORTIONAL_BASKET: "roadmap step 5",
         }.items()
     )

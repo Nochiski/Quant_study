@@ -37,6 +37,7 @@ from backtest_engine.engine.queue import (
 )
 from backtest_engine.engine.router import DecisionRouter
 from backtest_engine.engine.store import DecisionRecord, EventStore, RecordKind
+from backtest_engine.ports.execution import SlippageModel
 from backtest_engine.types.events import OrderStatus, OrderUpdateEvent, StrategyEvent
 from backtest_engine.types.market import MarketSnapshot
 from backtest_engine.types.orders import Side, TimeInForce
@@ -49,7 +50,12 @@ class _Run:
     """한 번의 run() 동안만 사는 컴포넌트 묶음. 엔진 인스턴스에 상태를 남기지 않는다."""
 
     def __init__(
-        self, config: RunConfig, strategy: Strategy, requirements: StrategyRequirements
+        self,
+        config: RunConfig,
+        strategy: Strategy,
+        requirements: StrategyRequirements,
+        slippage: SlippageModel | None,
+        max_participation: float | None,
     ) -> None:
         self.strategy = strategy
         self.requirements = requirements
@@ -60,7 +66,7 @@ class _Run:
         self.history_store = HistoryStore()
         self.portfolio = Portfolio(config.initial_cash)
         self.order_manager = OrderManager()
-        self.broker = BrokerSim(config.fee_bps)
+        self.broker = BrokerSim(config.fee_bps, slippage, max_participation)
         self.router = DecisionRouter(
             requirements.actions, self.order_manager, requirements.features
         )
@@ -72,11 +78,28 @@ class _Run:
 
 
 class BacktestEngine:
-    def __init__(self, config: RunConfig, capabilities: EngineCapabilities | None = None) -> None:
+    def __init__(
+        self,
+        config: RunConfig,
+        capabilities: EngineCapabilities | None = None,
+        *,
+        slippage: SlippageModel | None = None,
+        max_participation: float | None = None,
+    ) -> None:
+        """
+        Args:
+            config: 재현에 필요한 실행 설정 (초기 현금, 수수료 등).
+            capabilities: 엔진 구현 상태 표. 기본은 reference 엔진.
+            slippage: 체결가 슬리피지 모델. 기본 NoSlippage.
+            max_participation: 세션 거래량 대비 체결 상한 (0, 1]. None이면 무제한.
+                Action의 ExecutionPolicy.max_participation이 있으면 그 값이 우선한다.
+        """
         self._config = config
         self._capabilities = (
             capabilities if capabilities is not None else reference_engine_capabilities()
         )
+        self._slippage = slippage
+        self._max_participation = max_participation
         self._event_store: EventStore | None = None
 
     @property
@@ -95,7 +118,13 @@ class BacktestEngine:
     def run(self, strategy: Strategy, feed: DataFeed) -> BacktestResult:
         # 1. Capability 검증은 첫 Bar를 읽기 전, 전략 등록 직후 수행한다.
         validated = prepare_strategy(strategy, self._capabilities)
-        run = _Run(self._config, validated.strategy, validated.requirements)
+        run = _Run(
+            self._config,
+            validated.strategy,
+            validated.requirements,
+            self._slippage,
+            self._max_participation,
+        )
         self._event_store = run.store
 
         for snapshot in feed.snapshots():
@@ -199,17 +228,21 @@ class BacktestEngine:
             elif outcome.status is ExecutionStatus.REJECTED_NO_CASH:
                 order_manager.remove(order.order_id)
                 update(order.order_id, OrderStatus.REJECTED, outcome.detail)
+            elif outcome.status is ExecutionStatus.FOK_REJECTED:
+                order_manager.remove(order.order_id)
+                update(order.order_id, OrderStatus.CANCELLED, outcome.detail)
 
-        # DAY 주문은 이 세션이 지나면 소멸한다 — bar가 없어 시도조차 못 한 경우 포함.
+        # DAY/IOC/FOK 주문은 이 세션이 지나면 소멸한다 — bar가 없어 시도조차 못 한 경우 포함.
         for entry in order_manager.open_entries():
             order = entry.order
-            if order.time_in_force is not TimeInForce.DAY:
+            if order.time_in_force is TimeInForce.GTC:
                 continue
             order_manager.remove(order.order_id)
             if snapshot.has(order.instrument):
                 reason = (
-                    f"day order expired unfilled — instrument={order.instrument.symbol} "
-                    f"remaining={entry.remaining} ts={snapshot.ts}"
+                    f"{order.time_in_force.value} order expired unfilled — "
+                    f"instrument={order.instrument.symbol} remaining={entry.remaining} "
+                    f"ts={snapshot.ts}"
                 )
             else:
                 reason = (

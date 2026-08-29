@@ -5,6 +5,7 @@
 구체 구현은 `backtest_engine.adapters`에 둔다.
 """
 
+from backtest_engine.ports.execution import SlippageModel
 from backtest_engine.ports.market_data import (
     BarQuery,
     BarSource,
@@ -13,4 +14,4 @@ from backtest_engine.ports.market_data import (
     OhlcPolicy,
 )
 
-__all__ = ["BarQuery", "BarSource", "LoadResult", "LoadStatus", "OhlcPolicy"]
+__all__ = ["BarQuery", "BarSource", "LoadResult", "LoadStatus", "OhlcPolicy", "SlippageModel"]

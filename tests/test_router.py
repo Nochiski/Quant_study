@@ -447,10 +447,42 @@ def test_submit_sell_beyond_held_rejected() -> None:
 
 
 @pytest.mark.parametrize("tif", [TimeInForce.IOC, TimeInForce.FOK])
-def test_ioc_fok_not_implemented_until_partial_fill(tif: TimeInForce) -> None:
+def test_ioc_fok_require_partial_fill_feature(tif: TimeInForce) -> None:
     action = SubmitOrder(request=MarketOrderRequest(core=core(Side.BUY, tif=tif)))
-    with pytest.raises(UnsupportedActionValue, match="PARTIAL_FILL"):
+    with pytest.raises(UndeclaredFeatureUsed, match="partial_fill"):
         route_one(action, portfolio_with(100_000))
+    router = make_router(features=frozenset({EngineFeature.PARTIAL_FILL}))
+    decision = StrategyDecision.of(day(1), action)
+    (order,) = router.route(decision, "D-000001", portfolio_with(100_000), market()).orders
+    assert order.time_in_force is tif
+
+
+def test_max_participation_requires_partial_fill_feature() -> None:
+    policy = ExecutionPolicy(
+        ExecutionStyle.MARKET, ExecutionTiming.NEXT_OPEN, TimeInForce.DAY, max_participation=0.1
+    )
+    action = SetPositionTarget(target=QuantityTarget(INSTRUMENT, Decimal(1)), execution=policy)
+    with pytest.raises(UndeclaredFeatureUsed, match="partial_fill"):
+        route_one(action, portfolio_with(100_000))
+    router = make_router(features=frozenset({EngineFeature.PARTIAL_FILL}))
+    decision = StrategyDecision.of(day(1), action)
+    assert len(router.route(decision, "D-000001", portfolio_with(100_000), market()).orders) == 1
+
+
+@pytest.mark.parametrize("participation", [0.0, 1.5, -0.1])
+def test_out_of_range_participation_rejected(participation: float) -> None:
+    policy = ExecutionPolicy(
+        ExecutionStyle.MARKET,
+        ExecutionTiming.NEXT_OPEN,
+        TimeInForce.DAY,
+        max_participation=participation,
+    )
+    action = SetPositionTarget(target=QuantityTarget(INSTRUMENT, Decimal(1)), execution=policy)
+    router = make_router(features=frozenset({EngineFeature.PARTIAL_FILL}))
+    with pytest.raises(UnsupportedActionValue, match="max_participation"):
+        router.route(
+            StrategyDecision.of(day(1), action), "D-000001", portfolio_with(100_000), market()
+        )
 
 
 # --- 4c: CancelOrder / ReplaceOrder -------------------------------------------

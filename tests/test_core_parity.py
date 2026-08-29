@@ -698,3 +698,91 @@ def test_rejected_no_cash_gtc_waits_in_rust_session() -> None:
     assert traces[0] == traces[1]
     assert traces[0][0][0][1] is OrderStatus.OPEN
     assert "cannot afford" in (traces[0][0][0][2] or "")
+
+
+# --- 6c 리뷰(Opus) 반영 시나리오 -----------------------------------------------------
+
+
+def _best_effort_leg_missing_bar(core_name: str) -> tuple[BacktestEngine, BacktestResult]:
+    """DEFECT-801: BEST_EFFORT 그룹의 bar 결측 leg는 다음 세션에 이어서 체결된다."""
+    from tests import test_basket as tb
+
+    bars = tuple(b for b in tb.BARS if not (b.instrument == tb.B and b.ts == day(3)))
+    basket = BasketAction(
+        legs=(tb.gtc_leg(tb.A, Side.BUY, 10), tb.gtc_leg(tb.B, Side.SELL, 10)),
+        group_policy=GroupPolicy.BEST_EFFORT,
+    )
+    engine = BacktestEngine(
+        RunConfig(run_id="be-missing", initial_cash=100_000.0, fee_bps=0.0),
+        core=core_name,
+        max_participation=0.1,
+    )
+    return engine, engine.run(tb.BasketStrategy((tb.hold_b(10), basket)), DataFeed(bars))
+
+
+def _cash_limited_partial(core_name: str) -> tuple[BacktestEngine, BacktestResult]:
+    """DEFECT-802: CASH_LIMITED 진단의 buying_power는 체결 전 값."""
+    from tests import test_order_lifecycle as lc
+
+    engine = BacktestEngine(
+        RunConfig(run_id="cash-lim", initial_cash=1_000.0, fee_bps=10.0), core=core_name
+    )
+    return engine, engine.run(
+        lc.OrderScript((lc.market_buy(250, TimeInForce.GTC),)), DataFeed(lc.BARS)
+    )
+
+
+def _triggered_unfilled(core_name: str) -> tuple[BacktestEngine, BacktestResult]:
+    """DEFECT-803: TRIGGERED 진단의 stop/limit 표기 (Decimal 그대로)."""
+    from tests import test_order_lifecycle as lc
+
+    core = OrderCore(INSTRUMENT, Side.BUY, Decimal(10), TimeInForce.GTC)
+    action = lc.submit(
+        StopLimitOrderRequest(core=core, stop_price=Decimal("105.0"), limit_price=Decimal("106.50"))
+    )
+    engine = BacktestEngine(
+        RunConfig(run_id="trig", initial_cash=100_000.0, fee_bps=0.0), core=core_name
+    )
+    return engine, engine.run(lc.OrderScript((action,)), DataFeed(_stop_bars()))
+
+
+def _tiny_buying_power(core_name: str) -> tuple[BacktestEngine, BacktestResult]:
+    """DEFECT-804: 진단의 float 표기가 지수 범위에서도 Python repr과 같다."""
+    from tests import test_order_lifecycle as lc
+
+    bars = (
+        make_ohlc(day(1), INSTRUMENT, 100.0, 100.0, 100.0, 100.0),
+        make_ohlc(day(2), INSTRUMENT, 3.0, 3.0, 3.0, 3.0),
+        make_ohlc(day(3), INSTRUMENT, 1e6, 1e6, 1e6, 1e6),
+    )
+    engine = BacktestEngine(
+        RunConfig(run_id="tiny", initial_cash=2.000_01, fee_bps=0.0), core=core_name
+    )
+    return engine, engine.run(lc.OrderScript((lc.market_buy(5, TimeInForce.GTC),)), DataFeed(bars))
+
+
+_OPUS_SCENARIOS: dict[str, Callable[[str], tuple[BacktestEngine, BacktestResult]]] = {
+    "best_effort_leg_missing_bar": _best_effort_leg_missing_bar,
+    "cash_limited_partial": _cash_limited_partial,
+    "triggered_unfilled_stop_limit": _triggered_unfilled,
+    "tiny_buying_power_repr": _tiny_buying_power,
+}
+
+
+@RUST_ONLY
+@pytest.mark.parametrize("name", sorted(_OPUS_SCENARIOS))
+def test_opus_review_scenarios_identical_across_cores(name: str) -> None:
+    scenario = _OPUS_SCENARIOS[name]
+    python_engine, python_result = scenario("python")
+    rust_engine, rust_result = scenario("rust")
+    assert python_result == rust_result
+    assert _records(python_engine) == _records(rust_engine)
+
+
+def test_execution_policy_validates_participation() -> None:
+    from backtest_engine.types.actions import ExecutionPolicy, ExecutionStyle, ExecutionTiming
+
+    with pytest.raises(ValueError, match="max_participation"):
+        ExecutionPolicy(
+            ExecutionStyle.MARKET, ExecutionTiming.NEXT_OPEN, TimeInForce.DAY, max_participation=1.5
+        )

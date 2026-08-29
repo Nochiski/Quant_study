@@ -391,10 +391,15 @@ fn parse_decimal_ratio(text: &str) -> PyResult<(i128, i128)> {
         .parse::<i128>()
         .map_err(|_| PyValueError::new_err(format!("invalid decimal — text={text:?}")))?;
     let scale = frac_part.len() as i32 - exponent;
+    let overflow = || PyValueError::new_err(format!("decimal scale out of range — text={text:?}"));
     if scale >= 0 {
-        Ok((numerator, 10_i128.pow(scale as u32)))
+        let den = 10_i128.checked_pow(u32::try_from(scale).map_err(|_| overflow())?);
+        Ok((numerator, den.ok_or_else(overflow)?))
     } else {
-        Ok((numerator * 10_i128.pow((-scale) as u32), 1))
+        let factor = 10_i128
+            .checked_pow(u32::try_from(-scale).map_err(|_| overflow())?)
+            .ok_or_else(overflow)?;
+        Ok((numerator.checked_mul(factor).ok_or_else(overflow)?, 1))
     }
 }
 
@@ -407,7 +412,16 @@ fn liquidity_cap(volume: i64, participation: &str) -> PyResult<i64> {
             "participation must be >= 0 — participation={participation}"
         )));
     }
-    Ok(((volume as i128) * num / den) as i64)
+    let cap = (volume as i128).checked_mul(num).ok_or_else(|| {
+        PyValueError::new_err(format!(
+            "liquidity cap overflow — volume={volume} participation={participation}"
+        ))
+    })? / den;
+    i64::try_from(cap).map_err(|_| {
+        PyValueError::new_err(format!(
+            "liquidity cap out of i64 range — volume={volume} participation={participation}"
+        ))
+    })
 }
 
 /// 수수료 포함 여력으로 살 수 있는 최대 정수 수량 (Python `_affordable_quantity`와 동일 연산).
@@ -615,16 +629,19 @@ struct EntryIn {
     triggered: bool,
     group_id: Option<String>,
     participation: Option<String>,
+    limit_text: Option<String>, // Python str(Decimal) — 진단 문자열 전용
+    stop_text: Option<String>,
 }
 
+/// PyO3 튜플 변환은 12원소까지라 가격·표기 필드를 하위 튜플로 묶는다.
+type PriceFields = (Option<f64>, Option<f64>, Option<String>, Option<String>);
 type EntryTuple = (
     String,
     String,
     String,
     String,
     String,
-    Option<f64>,
-    Option<f64>,
+    PriceFields,
     String,
     i64,
     bool,
@@ -634,19 +651,22 @@ type EntryTuple = (
 
 impl EntryIn {
     fn from_tuple(t: EntryTuple) -> Self {
+        let (limit_price, stop_price, limit_text, stop_text) = t.5;
         Self {
             order_id: t.0,
             key: t.1,
             symbol: t.2,
             side: t.3,
             order_type: t.4,
-            limit_price: t.5,
-            stop_price: t.6,
-            tif: t.7,
-            remaining: t.8,
-            triggered: t.9,
-            group_id: t.10,
-            participation: t.11,
+            limit_price,
+            stop_price,
+            tif: t.6,
+            remaining: t.7,
+            triggered: t.8,
+            group_id: t.9,
+            participation: t.10,
+            limit_text,
+            stop_text,
         }
     }
 }
@@ -680,10 +700,34 @@ fn slippage_per_share(
 
 /// Python `repr(float)`와 같은 표기 (정수값은 `100000.0`).
 fn py_float(value: f64) -> String {
-    if value.is_finite() && value.fract() == 0.0 && value.abs() < 1e16 {
-        format!("{value:.1}")
+    if value.is_nan() {
+        return "nan".to_string();
+    }
+    if value.is_infinite() {
+        return if value > 0.0 { "inf" } else { "-inf" }.to_string();
+    }
+    if value == 0.0 {
+        return if value.is_sign_negative() {
+            "-0.0"
+        } else {
+            "0.0"
+        }
+        .to_string();
+    }
+    // Rust `{:e}`는 최단 왕복 자릿수를 주고 지수는 부호·자릿수 패딩이 없다 ("9.9e-6").
+    let sci = format!("{value:e}");
+    let (mantissa, exponent) = sci.split_once('e').unwrap_or((sci.as_str(), "0"));
+    let exponent: i32 = exponent.parse().unwrap_or(0);
+    if !(-4..16).contains(&exponent) {
+        // Python repr: 지수 표기, 부호 항상, 지수 두 자리 이상 (1e-05, 2e+16).
+        let sign = if exponent < 0 { '-' } else { '+' };
+        return format!("{mantissa}e{sign}{:02}", exponent.abs());
+    }
+    let plain = format!("{value}");
+    if plain.contains('.') {
+        plain
     } else {
-        format!("{value}")
+        format!("{plain}.0")
     }
 }
 
@@ -898,10 +942,10 @@ impl<'a> Session<'a> {
                 String::new(),
             ));
             let d = format!(
-                "stop triggered, limit not met — instrument={} stop={:?} limit={:?} ts={}",
+                "stop triggered, limit not met — instrument={} stop={} limit={} ts={}",
                 e.symbol,
-                e.stop_price.map(|p| p.to_string()).unwrap_or_default(),
-                e.limit_price.map(|p| p.to_string()).unwrap_or_default(),
+                e.stop_text.clone().unwrap_or_else(|| "None".to_string()),
+                e.limit_text.clone().unwrap_or_else(|| "None".to_string()),
                 self.ts
             );
             self.update(&e.order_id.clone(), "triggered", Some(d));
@@ -962,6 +1006,9 @@ impl<'a> Session<'a> {
         if legs.is_empty() {
             return Ok(());
         }
+        // Python group_entries()는 order_ids(라우팅) 순이다 — missing 리스트 표기도 그 순서.
+        legs.sort_by_key(|e| order_ids.iter().position(|id| *id == e.order_id));
+        let all_leg_ids: Vec<String> = legs.iter().map(|e| e.order_id.clone()).collect();
         let missing: Vec<String> = legs
             .iter()
             .filter(|e| !self.bars.contains_key(&e.key))
@@ -1031,7 +1078,12 @@ impl<'a> Session<'a> {
                     }
                 }
                 sync_back(entries, &legs);
-                if legs.iter().all(|e| e.remaining == 0) {
+                // bar가 없어 이번 세션에 건너뛴 leg도 그룹에 남아 있다 — 전체 leg 기준으로만 버린다.
+                let all_done = entries
+                    .iter()
+                    .filter(|e| all_leg_ids.contains(&e.order_id))
+                    .all(|e| e.remaining == 0);
+                if all_done {
                     self.ops.push((
                         "drop_group".into(),
                         group_id.into(),
@@ -1221,6 +1273,27 @@ fn backtest_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn py_float_matches_python_repr() {
+        assert_eq!(py_float(100000.0), "100000.0");
+        assert_eq!(py_float(110.055), "110.055");
+        assert_eq!(py_float(9.999999974752427e-06), "9.999999974752427e-06");
+        assert_eq!(py_float(2e16), "2e+16");
+        assert_eq!(py_float(1e-5), "1e-05");
+        assert_eq!(py_float(0.0001), "0.0001");
+        assert_eq!(py_float(f64::NAN), "nan");
+        assert_eq!(py_float(-0.0), "-0.0");
+    }
+
+    #[test]
+    fn decimal_ratio_and_cap_are_exact_and_checked() {
+        assert_eq!(liquidity_cap(90, "0.7").unwrap(), 63);
+        assert_eq!(liquidity_cap(1000, "7e-02").unwrap(), 70);
+        assert_eq!(liquidity_cap(1000, ".5").unwrap(), 500);
+        assert!(liquidity_cap(1000, "5e-324").is_err());
+        assert!(liquidity_cap(1000, "1e+40").is_err());
+    }
 
     #[test]
     fn limit_buy_rules() {

@@ -111,6 +111,14 @@ Python 엔진은 4·5·D 단계로 방금 크게 바뀌었으므로 전부를 �
   스냅샷 생성·EventStore(Python). 이득을 보려면 다종목·다주문 워크로드에서 재측정하거나 6d로
   세션 루프 자체(큐·스냅샷)를 옮겨야 한다.
 
+## 6b·6c 리뷰 반영 (2026-08-29)
+
+- BEST_EFFORT 그룹에 bar 결측 leg가 있어도 그룹을 버리지 않는다 (전체 leg 잔량 0일 때만).
+- 진단 문자열: 여력·잔량은 견적 시점 값, STOP/LIMIT 가격은 Python `str(Decimal)` 원문,
+  float는 Python `repr` 규칙(지수 표기·nan)으로 출력 — 새 시나리오 10종이 레코드 단위로 고정.
+- `parse_decimal_ratio`/`liquidity_cap`은 checked 산술(오버플로는 ValueError), `ExecutionPolicy`가
+  `max_participation ∈ (0, 1]`을 생성 시 검증.
+
 ## 다음 단계
 
 6d(선택): 이벤트 큐·세션 종료·스냅샷 생성까지 Rust로 옮기고 Python 경계를 "전략 호출 배치"로

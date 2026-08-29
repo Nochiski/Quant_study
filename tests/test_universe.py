@@ -212,3 +212,22 @@ def test_fixture_master_slice_smoke() -> None:
         date(first.last_session.year + 1, first.last_session.month, first.last_session.day)
     )
     assert result.instruments_active_between(first.first_session, first.last_session)
+
+
+class TestKrxUniverseGaps:
+    def test_gap_in_daily_snapshots_splits_interval(self, tmp_path: Path) -> None:
+        """DEFECT-209: 마스터에 다른 종목은 있는데 이 종목이 빠진 날은 구간을 끊는다."""
+        write_master(
+            tmp_path / KOSPI_MASTER_FILE,
+            [(d(n), "000660", "주권") for n in (1, 2, 3, 4, 5)]
+            + [(d(n), "005930", "주권") for n in (1, 2, 4, 5)],
+        )
+        result = KrxParquetUniverseSource(tmp_path).load_universe(UniverseQuery(venue="XKRX"))
+        intervals = [
+            (m.first_session, m.last_session)
+            for m in result.memberships
+            if m.instrument.symbol == "005930"
+        ]
+        assert intervals == [(d(1), d(2)), (d(4), d(5))]
+        assert make_instrument("005930") not in result.members(d(3))
+        assert make_instrument("000660") in result.members(d(3))

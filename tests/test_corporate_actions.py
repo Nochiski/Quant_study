@@ -193,3 +193,29 @@ def test_fixture_slice_split_period_runs_through_engine_smoke() -> None:
     )
     assert len(result.snapshots) == len(feed)
     assert result.snapshots[-1].equity > 0
+
+
+class TestKrxAdapterDuplicates:
+    def test_duplicate_session_across_files_is_format_error(self, tmp_path: Path) -> None:
+        """DEFECT-206: 두 시세 파일에 겹치는 세션은 예외가 아니라 FORMAT_ERROR."""
+        from backtest_engine.adapters.krx_parquet import KOSDAQ_TRADES_FILE
+
+        write_ledger(
+            tmp_path / KOSPI_TRADES_FILE,
+            [
+                (date(2020, 1, 2), "005930", 100, 10, 100),
+                (date(2020, 1, 3), "005930", 100, 10, 100),
+            ],
+        )
+        write_ledger(
+            tmp_path / KOSDAQ_TRADES_FILE,
+            [
+                (date(2020, 1, 3), "005930", 100, 10, 100),
+                (date(2020, 1, 6), "005930", 100, 10, 100),
+            ],
+        )
+        result = KrxParquetCorporateActionSource(tmp_path).load_actions(
+            CorporateActionQuery(instruments=(INSTRUMENT,))
+        )
+        assert result.status is LoadStatus.FORMAT_ERROR
+        assert "2020-01-03" in (result.detail or "")

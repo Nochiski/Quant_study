@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from datetime import date, datetime
 from pathlib import Path
 
@@ -46,7 +47,10 @@ class SqliteBarSource:
                 status=LoadStatus.NO_DATA,
                 detail=f"sqlite file not found — path={self._path}",
             )
-        with sqlite3.connect(f"file:{self._path}?mode=ro", uri=True) as connection:
+        # Path.as_uri()가 '#'·'%'·공백을 인코딩한다 (f-string URI는 fragment/디코딩으로 오작동).
+        # sqlite3의 with는 트랜잭션만 닫으므로 closing()으로 연결을 반납한다 (Windows 파일 락).
+        uri = f"{self._path.resolve().as_uri()}?mode=ro"
+        with closing(sqlite3.connect(uri, uri=True)) as connection:
             exists = connection.execute(
                 "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (self._table,)
             ).fetchone()

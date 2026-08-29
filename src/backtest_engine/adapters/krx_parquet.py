@@ -211,6 +211,18 @@ class KrxParquetCorporateActionSource:
                     ),
                 )
             rows.sort(key=lambda row: row.session)
+            duplicate = next(
+                (b for a, b in zip(rows, rows[1:], strict=False) if a.session == b.session), None
+            )
+            if duplicate is not None:
+                return CorporateActionResult(
+                    actions=(),
+                    status=LoadStatus.FORMAT_ERROR,
+                    detail=(
+                        f"duplicate session for instrument — symbol={instrument.symbol} "
+                        f"session={duplicate.session} files={[p.name for p in available]}"
+                    ),
+                )
             actions.extend(
                 event
                 for event in detect_share_count_events(rows, instrument)
@@ -255,7 +267,8 @@ class KrxParquetUniverseSource:
         if self._security_groups is not None:
             filters.append(("secugrp_nm", "in", sorted(self._security_groups)))
 
-        bounds: dict[str, tuple[date, date]] = {}
+        sessions_by_symbol: dict[str, set[date]] = {}
+        all_sessions: set[date] = set()
         for path in available:
             table = pq.read_table(path, columns=list(self._COLUMNS), filters=filters or None)
             for record in table.to_pylist():
@@ -267,9 +280,9 @@ class KrxParquetUniverseSource:
                         detail=f"isu_srt_cd must be str — file={path.name} got={symbol!r}",
                     )
                 session = _as_date(record["bas_dd_req"])
-                first, last = bounds.get(symbol, (session, session))
-                bounds[symbol] = (min(first, session), max(last, session))
-        if not bounds:
+                sessions_by_symbol.setdefault(symbol, set()).add(session)
+                all_sessions.add(session)
+        if not sessions_by_symbol:
             return UniverseResult(
                 memberships=(),
                 status=LoadStatus.NO_DATA,
@@ -278,14 +291,25 @@ class KrxParquetUniverseSource:
                     f"start={query.start} end={query.end} groups={self._security_groups}"
                 ),
             )
-        memberships = tuple(
-            Membership(
-                instrument=InstrumentId(
-                    venue=query.venue, symbol=symbol, asset_class=AssetClass.EQUITY, currency="KRW"
-                ),
-                first_session=first,
-                last_session=last,
+        # 마스터에 있는 날(all_sessions) 중 그 종목이 빠진 날이 있으면 구간을 끊는다 —
+        # 재상장·수집 누락을 하나의 구간으로 덮어쓰지 않는다 (연속 구간마다 Membership 하나).
+        calendar = sorted(all_sessions)
+        memberships: list[Membership] = []
+        for symbol, sessions in sorted(sessions_by_symbol.items()):
+            instrument = InstrumentId(
+                venue=query.venue, symbol=symbol, asset_class=AssetClass.EQUITY, currency="KRW"
             )
-            for symbol, (first, last) in sorted(bounds.items())
-        )
-        return UniverseResult(memberships=memberships, status=LoadStatus.OK)
+            start: date | None = None
+            previous: date | None = None
+            for session in calendar:
+                present = session in sessions
+                if present and start is None:
+                    start = session
+                if not present and start is not None and previous is not None:
+                    memberships.append(Membership(instrument, start, previous))
+                    start = None
+                if present:
+                    previous = session
+            if start is not None and previous is not None:
+                memberships.append(Membership(instrument, start, previous))
+        return UniverseResult(memberships=tuple(memberships), status=LoadStatus.OK)

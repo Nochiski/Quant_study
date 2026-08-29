@@ -10,6 +10,7 @@ from __future__ import annotations
 import csv
 import sqlite3
 from collections.abc import Callable
+from contextlib import closing
 from datetime import date
 from pathlib import Path
 
@@ -44,7 +45,7 @@ def build_csv(root: Path, rows: Rows) -> BarSource:
 
 def build_sqlite(root: Path, rows: Rows) -> BarSource:
     path = root / "bars.sqlite"
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection:
         connection.execute(
             "CREATE TABLE bars (symbol TEXT, session TEXT, open REAL, high REAL, "
             "low REAL, close REAL, volume INTEGER)"
@@ -57,6 +58,7 @@ def build_sqlite(root: Path, rows: Rows) -> BarSource:
                 for session, o, h, lo, c, v in symbol_rows
             ],
         )
+        connection.commit()
     return SqliteBarSource(path)
 
 
@@ -191,3 +193,30 @@ def test_sqlite_bad_session_text_is_format_error(tmp_path: Path) -> None:
     result = SqliteBarSource(path).load_bars(BarQuery(instruments=(A,)))
     assert result.status is LoadStatus.FORMAT_ERROR
     assert "not-a-date" in (result.detail or "")
+
+
+@pytest.mark.parametrize("name", ["hash#a.sqlite", "pct%20b.sqlite", "with space.sqlite"])
+def test_sqlite_path_with_uri_special_characters(tmp_path: Path, name: str) -> None:
+    """DEFECT-204: '#'·'%'·공백이 든 경로도 같은 파일을 연다."""
+    path = tmp_path / name
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute(
+            "CREATE TABLE bars (symbol TEXT, session TEXT, open REAL, high REAL, "
+            "low REAL, close REAL, volume INTEGER)"
+        )
+        connection.execute("INSERT INTO bars VALUES ('005930', '2026-08-01', 1, 2, 1, 2, 10)")
+        connection.commit()
+    result = SqliteBarSource(path).load_bars(BarQuery(instruments=(A,)))
+    assert result.ok, result.detail
+
+
+def test_sqlite_connection_is_closed_after_load(tmp_path: Path) -> None:
+    """DEFECT-205: 로드 후 파일 락이 남지 않는다 (삭제 가능)."""
+    source = build_sqlite(tmp_path, {"005930": NORMAL})
+    assert source.load_bars(BarQuery(instruments=(A,))).ok
+    (tmp_path / "bars.sqlite").unlink()
+
+
+def test_sqlite_table_name_must_be_identifier(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="identifier"):
+        SqliteBarSource(tmp_path / "x.sqlite", table="bars; DROP TABLE x")

@@ -313,3 +313,28 @@ class TestReviewRegressions:
         assert applied is not None
         assert applied.new_quantity == Decimal(10)
         assert applied.cash_paid == pytest.approx(0.0)
+
+    def test_share_count_change_keeps_open_orders(self) -> None:
+        """DEFECT-203: 가격 미확인 변화는 지정가 수준이 유효하므로 대기 주문을 취소하지 않는다."""
+        engine, _, result = run(
+            bars_with_split(100.0, 100.0),
+            (split("50", CorporateActionType.SHARE_COUNT_CHANGE),),
+            script=(buy(7), gtc_limit_buy(50.0)),
+        )
+        updates = [u for u in engine.event_store.order_updates() if u.order_id == "O-000002"]
+        assert all(
+            u.status is not OrderStatus.CANCELLED or "run ended" in (u.detail or "")
+            for u in updates
+        )
+        assert not any("corporate action" in (u.detail or "") for u in updates)
+
+    def test_declared_corporate_action_without_argument_is_rejected(self) -> None:
+        """DEFECT-207: 선언만 하고 사건을 안 넘기면 조용히 0건이 아니라 예외다."""
+        from backtest_engine.errors import CorporateActionsNotProvided
+
+        engine = BacktestEngine(RunConfig(run_id="split", initial_cash=10_000.0, fee_bps=0.0))
+        strategy = Strategy((None,), frozenset({EventKind.MARKET, EventKind.CORPORATE_ACTION}))
+        with pytest.raises(CorporateActionsNotProvided, match="corporate_actions"):
+            engine.run(strategy, DataFeed(bars_with_split(20.0, 21.0)))
+        # 선언하지 않은 전략은 생략해도 된다.
+        engine.run(Strategy((None,)), DataFeed(bars_with_split(20.0, 21.0)))

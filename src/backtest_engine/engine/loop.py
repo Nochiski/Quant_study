@@ -41,7 +41,7 @@ from backtest_engine.engine.queue import (
 )
 from backtest_engine.engine.router import DecisionRouter
 from backtest_engine.engine.store import DecisionRecord, EventStore, RecordKind
-from backtest_engine.errors import CorporateActionWithoutBar
+from backtest_engine.errors import CorporateActionsNotProvided, CorporateActionWithoutBar
 from backtest_engine.ports.execution import SlippageModel
 from backtest_engine.ports.universe import UniverseResult
 from backtest_engine.types.events import (
@@ -134,7 +134,7 @@ class BacktestEngine:
         strategy: Strategy,
         feed: DataFeed,
         *,
-        corporate_actions: Iterable[CorporateActionEvent] = (),
+        corporate_actions: Iterable[CorporateActionEvent] | None = None,
         universe: UniverseResult | None = None,
     ) -> BacktestResult:
         """
@@ -157,6 +157,14 @@ class BacktestEngine:
         )
         self._event_store = run.store
         run.universe = universe
+        if corporate_actions is None:
+            if run.wants(EventKind.CORPORATE_ACTION):
+                raise CorporateActionsNotProvided(
+                    f"strategy declared EventKind.CORPORATE_ACTION but run() got no "
+                    f"corporate_actions — run_id={self._config.run_id}; pass the port result "
+                    f"(possibly an empty tuple) explicitly"
+                )
+            corporate_actions = ()
         # 사건은 해당 종목이 실제로 거래되는 첫 세션(사건 세션 이후)에 적용한다 — 원장의
         # 분할 세션이 거래정지 행이라 feed에서 빠지는 경우 다음 거래일 시가로 정산한다.
         for action in corporate_actions:
@@ -337,8 +345,16 @@ class BacktestEngine:
     ) -> None:
         # _settlement_session이 bar 존재를 보장한다. 기록·적용 시각은 정산 세션이다.
         run.store.append(snapshot.ts, RecordKind.CORPORATE_ACTION, action)
+        confirmed = action.action_type in (
+            CorporateActionType.SPLIT,
+            CorporateActionType.REVERSE_SPLIT,
+        )
         remaining_by_id = {e.order_id: e.remaining for e in run.order_manager.open_entries()}
-        for stale in run.order_manager.cancel_for_instrument(action.instrument):
+        # 가격 수준이 무의미해지는 확인된 분할·병합만 대기 주문을 취소한다 (스펙 결정 3).
+        stale_orders = (
+            run.order_manager.cancel_for_instrument(action.instrument) if confirmed else ()
+        )
+        for stale in stale_orders:
             stale_remaining = remaining_by_id[stale.order_id]
             update(
                 stale.order_id,
@@ -347,7 +363,7 @@ class BacktestEngine:
                 f"action={action.action_type.value} ratio={action.ratio} "
                 f"event_ts={action.ts} settled_at={snapshot.ts} remaining={stale_remaining}",
             )
-        if action.action_type in (CorporateActionType.SPLIT, CorporateActionType.REVERSE_SPLIT):
+        if confirmed:
             applied = run.portfolio.apply_corporate_action(
                 action, snapshot.bar(action.instrument).open, settled_at=snapshot.ts
             )
@@ -378,9 +394,7 @@ class BacktestEngine:
             history_store=run.history_store,
             declared=run.declared,
             open_orders_snapshot=run.order_manager.open_orders(),
-            universe_members=(
-                run.universe.members(ts.date()) if run.universe is not None else None
-            ),
+            universe_source=run.universe,
         )
         decision = run.strategy.on_event(context, event)
         decision_id = run.order_manager.next_decision_id()

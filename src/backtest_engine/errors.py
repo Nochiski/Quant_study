@@ -42,6 +42,10 @@ class UniverseNotProvided(EngineError):
     """run()에 universe를 넘기지 않았는데 ctx.universe()를 조회함."""
 
 
+class CorporateActionsNotProvided(EngineError):
+    """CORPORATE_ACTION을 선언한 전략인데 run()에 corporate_actions가 없음 (조용한 0건 방지)."""
+
+
 class SchemaVersionMismatch(EngineError):
     """StrategyDecision.schema_version이 엔진이 아는 버전과 다름."""
 

@@ -14,6 +14,10 @@ EventStore에 자동으로 남는다.
 
 from __future__ import annotations
 
+from collections import defaultdict
+from collections.abc import Callable, Iterable
+from datetime import datetime
+
 from backtest_engine.capability import (
     EngineCapabilities,
     prepare_strategy,
@@ -37,8 +41,16 @@ from backtest_engine.engine.queue import (
 )
 from backtest_engine.engine.router import DecisionRouter
 from backtest_engine.engine.store import DecisionRecord, EventStore, RecordKind
+from backtest_engine.errors import CorporateActionsNotProvided, CorporateActionWithoutBar
 from backtest_engine.ports.execution import SlippageModel
-from backtest_engine.types.events import OrderStatus, OrderUpdateEvent, StrategyEvent
+from backtest_engine.ports.universe import UniverseResult
+from backtest_engine.types.events import (
+    CorporateActionEvent,
+    CorporateActionType,
+    OrderStatus,
+    OrderUpdateEvent,
+    StrategyEvent,
+)
 from backtest_engine.types.market import MarketSnapshot
 from backtest_engine.types.orders import OrderType, Side, TimeInForce
 from backtest_engine.types.requirements import EventKind, HistoryRequest, StrategyRequirements
@@ -72,6 +84,8 @@ class _Run:
         )
         self.store = EventStore()
         self.queue = EventQueue()
+        self.corporate_actions: dict[datetime, list[CorporateActionEvent]] = defaultdict(list)
+        self.universe: UniverseResult | None = None
 
     def wants(self, kind: EventKind) -> bool:
         return kind in self.requirements.events
@@ -115,7 +129,23 @@ class BacktestEngine:
             )
         return self._event_store
 
-    def run(self, strategy: Strategy, feed: DataFeed) -> BacktestResult:
+    def run(
+        self,
+        strategy: Strategy,
+        feed: DataFeed,
+        *,
+        corporate_actions: Iterable[CorporateActionEvent] | None = None,
+        universe: UniverseResult | None = None,
+    ) -> BacktestResult:
+        """
+        Args:
+            strategy: 실행할 전략. requirements()가 먼저 Capability 검증을 통과해야 한다.
+            feed: 세션순 MarketSnapshot 공급자.
+            corporate_actions: 기간 안의 자본변동 사건. 확인된 분할·병합(SPLIT/REVERSE_SPLIT)은
+                사건 세션 시작 시 보유 포지션에 적용되고, 모든 사건은 기록되며 선언한 전략에
+                전달된다. 사건 세션에 해당 종목 Bar가 없으면 CorporateActionWithoutBar.
+            universe: 세션별 상장 종목 구간. 주면 ctx.universe()가 그 세션 구성을 돌려준다.
+        """
         # 1. Capability 검증은 첫 Bar를 읽기 전, 전략 등록 직후 수행한다.
         validated = prepare_strategy(strategy, self._capabilities)
         run = _Run(
@@ -126,6 +156,20 @@ class BacktestEngine:
             self._max_participation,
         )
         self._event_store = run.store
+        run.universe = universe
+        if corporate_actions is None:
+            if run.wants(EventKind.CORPORATE_ACTION):
+                raise CorporateActionsNotProvided(
+                    f"strategy declared EventKind.CORPORATE_ACTION but run() got no "
+                    f"corporate_actions — run_id={self._config.run_id}; pass the port result "
+                    f"(possibly an empty tuple) explicitly"
+                )
+            corporate_actions = ()
+        # 사건은 해당 종목이 실제로 거래되는 첫 세션(사건 세션 이후)에 적용한다 — 원장의
+        # 분할 세션이 거래정지 행이라 feed에서 빠지는 경우 다음 거래일 시가로 정산한다.
+        for action in corporate_actions:
+            settle_ts = self._settlement_session(feed, action)
+            run.corporate_actions[settle_ts].append(action)
 
         for snapshot in feed.snapshots():
             run.queue.push(snapshot.ts, EventPriority.MARKET, MarketArrived(snapshot))
@@ -194,6 +238,11 @@ class BacktestEngine:
                 OrderUpdateEvent(ts=snapshot.ts, order_id=order_id, status=status, detail=detail),
                 snapshot,
             )
+
+        # 자본변동은 이 세션의 어떤 체결보다 먼저 적용한다 — 분할 후 가격으로 체결되는
+        # 주문이 분할 전 수량과 섞이면 안 된다.
+        for action in run.corporate_actions.get(snapshot.ts, ()):
+            self._apply_corporate_action(run, action, snapshot, update)
 
         # 매도 먼저 처리해 매수가 쓸 수 있는 현금을 확정한다 (결정론적 규칙).
         due = sorted(
@@ -275,6 +324,54 @@ class BacktestEngine:
 
         run.queue.push(snapshot.ts, EventPriority.SESSION_CLOSE, SessionClose(snapshot))
 
+    @staticmethod
+    def _settlement_session(feed: DataFeed, action: CorporateActionEvent) -> datetime:
+        for snapshot in feed.snapshots():
+            if snapshot.ts >= action.ts and snapshot.has(action.instrument):
+                return snapshot.ts
+        raise CorporateActionWithoutBar(
+            f"no traded session for instrument at or after corporate action — "
+            f"instrument={action.instrument.symbol} ts={action.ts} "
+            f"action={action.action_type.value} ratio={action.ratio} "
+            f"feed_sessions={len(feed)} last_session={feed.sessions[-1] if len(feed) else None}"
+        )
+
+    def _apply_corporate_action(
+        self,
+        run: _Run,
+        action: CorporateActionEvent,
+        snapshot: MarketSnapshot,
+        update: Callable[[str, OrderStatus, str | None], None],
+    ) -> None:
+        # _settlement_session이 bar 존재를 보장한다. 기록·적용 시각은 정산 세션이다.
+        run.store.append(snapshot.ts, RecordKind.CORPORATE_ACTION, action)
+        confirmed = action.action_type in (
+            CorporateActionType.SPLIT,
+            CorporateActionType.REVERSE_SPLIT,
+        )
+        remaining_by_id = {e.order_id: e.remaining for e in run.order_manager.open_entries()}
+        # 가격 수준이 무의미해지는 확인된 분할·병합만 대기 주문을 취소한다 (스펙 결정 3).
+        stale_orders = (
+            run.order_manager.cancel_for_instrument(action.instrument) if confirmed else ()
+        )
+        for stale in stale_orders:
+            stale_remaining = remaining_by_id[stale.order_id]
+            update(
+                stale.order_id,
+                OrderStatus.CANCELLED,
+                f"cancelled by corporate action — instrument={action.instrument.symbol} "
+                f"action={action.action_type.value} ratio={action.ratio} "
+                f"event_ts={action.ts} settled_at={snapshot.ts} remaining={stale_remaining}",
+            )
+        if confirmed:
+            applied = run.portfolio.apply_corporate_action(
+                action, snapshot.bar(action.instrument).open, settled_at=snapshot.ts
+            )
+            if applied is not None:
+                run.store.append(snapshot.ts, RecordKind.CORPORATE_ACTION_APPLIED, applied)
+        if run.wants(EventKind.CORPORATE_ACTION):
+            run.queue.push(snapshot.ts, EventPriority.NOTIFY, StrategyNotify(action, snapshot))
+
     def _on_session_close(self, run: _Run, snapshot: MarketSnapshot) -> None:
         run.portfolio.mark(snapshot)
         run.store.append(snapshot.ts, RecordKind.SNAPSHOT, run.portfolio.snapshot(snapshot.ts))
@@ -297,6 +394,7 @@ class BacktestEngine:
             history_store=run.history_store,
             declared=run.declared,
             open_orders_snapshot=run.order_manager.open_orders(),
+            universe_source=run.universe,
         )
         decision = run.strategy.on_event(context, event)
         decision_id = run.order_manager.next_decision_id()

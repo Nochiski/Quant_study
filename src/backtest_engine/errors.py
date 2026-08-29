@@ -34,6 +34,18 @@ class UnknownOrderId(EngineError):
     """Cancel/Replace 대상 order_id가 대기 중인 주문이 아님 (없거나 이미 종료됨)."""
 
 
+class CorporateActionWithoutBar(EngineError):
+    """자본변동 사건 세션에 해당 종목 Bar가 없어 단주 정산 가격을 정할 수 없음."""
+
+
+class UniverseNotProvided(EngineError):
+    """run()에 universe를 넘기지 않았는데 ctx.universe()를 조회함."""
+
+
+class CorporateActionsNotProvided(EngineError):
+    """CORPORATE_ACTION을 선언한 전략인데 run()에 corporate_actions가 없음 (조용한 0건 방지)."""
+
+
 class SchemaVersionMismatch(EngineError):
     """StrategyDecision.schema_version이 엔진이 아는 버전과 다름."""
 

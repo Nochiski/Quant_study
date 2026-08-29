@@ -5,6 +5,11 @@
 구체 구현은 `backtest_engine.adapters`에 둔다.
 """
 
+from backtest_engine.ports.corporate_actions import (
+    CorporateActionQuery,
+    CorporateActionResult,
+    CorporateActionSource,
+)
 from backtest_engine.ports.execution import SlippageModel
 from backtest_engine.ports.market_data import (
     BarQuery,
@@ -13,5 +18,25 @@ from backtest_engine.ports.market_data import (
     LoadStatus,
     OhlcPolicy,
 )
+from backtest_engine.ports.universe import (
+    Membership,
+    UniverseQuery,
+    UniverseResult,
+    UniverseSource,
+)
 
-__all__ = ["BarQuery", "BarSource", "LoadResult", "LoadStatus", "OhlcPolicy", "SlippageModel"]
+__all__ = [
+    "BarQuery",
+    "BarSource",
+    "CorporateActionQuery",
+    "CorporateActionResult",
+    "CorporateActionSource",
+    "LoadResult",
+    "LoadStatus",
+    "Membership",
+    "OhlcPolicy",
+    "SlippageModel",
+    "UniverseQuery",
+    "UniverseResult",
+    "UniverseSource",
+]

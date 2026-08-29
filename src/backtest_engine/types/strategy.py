@@ -41,6 +41,10 @@ class StrategyContext(Protocol):
 
     def portfolio_value(self) -> float: ...
 
+    def universe(self) -> frozenset[InstrumentId]:
+        """이 세션에 상장된 종목 집합. run()에 universe를 주지 않았으면 UniverseNotProvided."""
+        ...
+
     def open_orders(self, instrument: InstrumentId | None = None) -> tuple[OpenOrderSnapshot, ...]:
         """이 호출 시점에 대기 중인 주문과 잔량. Cancel/Replace의 order_id·수량 출처."""
         ...

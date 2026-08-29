@@ -8,6 +8,7 @@
 |---|---|
 | `krx_stk_bydd_trd.parquet` | KOSPI 일별시세 (005930 삼성전자, 000660 SK하이닉스, 008080 에스와이코퍼레이션) |
 | `krx_ksq_bydd_trd.parquet` | KOSDAQ 일별시세 (247540 에코프로비엠, 066970 엘앤에프) |
+| `krx_stk_isu_base_info.parquet` / `krx_ksq_isu_base_info.parquet` | 같은 5종목의 종목마스터 일별 스냅샷 (`bas_dd_req`마다 한 행, 6자리 코드는 `isu_srt_cd`) — 유니버스 포트용 |
 | `manifest.json` | 슬라이스 시각, 종목 선정 이유, 원본 `manifest.json` 사본 |
 
 종목 선정 이유는 `manifest.json`의 `tickers`에 있다. 요약:
@@ -21,6 +22,10 @@
 - 행이 날짜순이 아니다 → 어댑터가 정렬한다.
 - 거래정지 중에도 행이 존재하고 종가 표기가 종목마다 다르다(직전값 유지 / 1원) →
   어댑터는 `acc_trdvol = 0`을 유일한 정지 신호로 보고 해당 행을 제거하고 `dropped_rows`로 보고한다.
+- 상장주식수(`list_shrs`)가 있어 액면분할·병합은 `KrxParquetCorporateActionSource`가 검출한다
+  (삼성전자 2018-05-04 ×50). 가격 반비례가 확인되지 않는 변화는 `SHARE_COUNT_CHANGE`로만 알린다.
+- 종목마스터는 일별 스냅샷이라 "세션 d의 상장 종목 = `bas_dd_req == d`인 행"으로
+  `KrxParquetUniverseSource`가 look-ahead 없이 구간을 만든다 (에스와이코퍼레이션 2013-09-24 까지).
 - 배당·총수익·유니버스 플래그 없음. 상세는 원본 빌드의 `README.md` / `KNOWN_GAPS.md`.
 
 ## 재생성

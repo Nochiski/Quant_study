@@ -3,15 +3,22 @@
 전략은 원하는 상태만 말한다. 주문 수량 계산, 주문 가능 여부,
 체결 가격·수수료 반영은 엔진 책임이다.
 
-v1 구현 범위 (Capability와 일치):
-- NoAction, SetPortfolioTarget(WeightTarget), LiquidatePosition만 처리.
+구현 범위 (Capability와 일치):
+- NoAction, SetPortfolioTarget, SetPositionTarget, AdjustPosition, LiquidatePosition.
 - ExecutionPolicy는 MARKET 스타일만, 일봉 엔진이므로 NEXT_OPEN과
   NEXT_AVAILABLE 모두 "다음 세션 시가"를 뜻한다.
+
+수량 규칙:
+- 참조 가격은 판단 세션 종가. 금액→수량은 floor_delta_shares 한 곳에서 한다.
+- WeightTarget 매도는 비중 반올림 오차 때문에 보유 수량까지 clamp한다.
+- Quantity/Notional 타깃과 Delta는 전략이 명시한 수량이므로 clamp하지 않는다.
+  결과 포지션이 0 미만이면 SHORT_SELLING 미구현으로 거절한다.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 
 from backtest_engine.engine.orders import OrderManager
 from backtest_engine.errors import (
@@ -23,11 +30,18 @@ from backtest_engine.errors import (
 from backtest_engine.sizing import floor_delta_shares
 from backtest_engine.types.actions import (
     ActionKind,
+    AdjustPosition,
     ExecutionPolicy,
     ExecutionStyle,
     LiquidatePosition,
     NoAction,
+    NotionalDelta,
+    NotionalTarget,
+    PositionTarget,
+    QuantityDelta,
+    QuantityTarget,
     SetPortfolioTarget,
+    SetPositionTarget,
     StrategyAction,
     TargetScope,
     WeightTarget,
@@ -35,7 +49,7 @@ from backtest_engine.types.actions import (
 )
 from backtest_engine.types.decision import SCHEMA_VERSION, StrategyDecision
 from backtest_engine.types.events import OrderEvent
-from backtest_engine.types.instruments import InstrumentId
+from backtest_engine.types.instruments import InstrumentId, Money
 from backtest_engine.types.market import MarketSnapshot
 from backtest_engine.types.orders import Side
 from backtest_engine.types.portfolio import PortfolioSnapshot
@@ -94,6 +108,20 @@ class DecisionRouter:
             case SetPortfolioTarget():
                 self._check_execution(action.execution, decision_id)
                 return self._portfolio_target_orders(action, decision_id, portfolio, market)
+            case SetPositionTarget():
+                self._check_execution(action.execution, decision_id)
+                instrument, delta, clamp = self._target_delta(
+                    action.target, decision_id, portfolio, market
+                )
+                return self._delta_orders(
+                    instrument, delta, clamp, action, decision_id, portfolio, market
+                )
+            case AdjustPosition():
+                self._check_execution(action.execution, decision_id)
+                delta = self._adjust_delta(action, decision_id, market)
+                return self._delta_orders(
+                    action.instrument, delta, False, action, decision_id, portfolio, market
+                )
             case LiquidatePosition():
                 self._check_execution(action.execution, decision_id)
                 if action.cancel_open_orders:
@@ -125,58 +153,149 @@ class DecisionRouter:
         portfolio: PortfolioSnapshot,
         market: MarketSnapshot,
     ) -> list[OrderEvent]:
-        target_notionals: dict[InstrumentId, float] = {}
+        deltas: dict[InstrumentId, tuple[Decimal, bool]] = {}
         for target in action.targets:
-            if not isinstance(target, WeightTarget):
-                raise UnsupportedActionValue(
-                    f"only WeightTarget is implemented in v1 — got {type(target).__name__} "
-                    f"decision_id={decision_id}"
-                )
-            if target.weight < 0:
-                raise UnsupportedActionValue(
-                    f"negative target weight requires SHORT_SELLING feature (not implemented) — "
-                    f"instrument={target.instrument.symbol} weight={target.weight} "
-                    f"decision_id={decision_id}"
-                )
-            if target.instrument in target_notionals:
+            instrument, delta, clamp = self._target_delta(target, decision_id, portfolio, market)
+            if instrument in deltas:
                 raise ValueError(
                     f"duplicate instrument in portfolio target — "
-                    f"instrument={target.instrument.symbol} decision_id={decision_id}"
+                    f"instrument={instrument.symbol} decision_id={decision_id}"
                 )
-            target_notionals[target.instrument] = target.weight * portfolio.equity
+            deltas[instrument] = (delta, clamp)
 
         if action.scope is TargetScope.REPLACE:
             # 목록에 없는 기존 포지션은 0으로 본다.
             for position in portfolio.positions:
-                target_notionals.setdefault(position.instrument, 0.0)
+                deltas.setdefault(position.instrument, (-position.quantity, True))
 
         orders: list[OrderEvent] = []
-        for instrument, target_notional in target_notionals.items():
-            reference_price = market.bar(instrument).close
-            current_position = portfolio.position(instrument)
-            current_notional = current_position.market_value if current_position else 0.0
-            delta_notional = target_notional - current_notional
-            quantity = floor_delta_shares(delta_notional, reference_price)
-            if quantity <= 0:
-                continue
-            side = Side.BUY if delta_notional > 0 else Side.SELL
-            if side is Side.SELL:
-                held = portfolio.position_qty(instrument)
-                quantity = min(quantity, held)
-                if quantity <= 0:
-                    continue
-            orders.append(
-                OrderEvent(
-                    order_id=self._order_manager.next_order_id(),
-                    decision_id=decision_id,
-                    ts=market.ts,
-                    instrument=instrument,
-                    quantity=quantity,
-                    side=side,
-                    source_action=action,
-                )
+        for instrument, (delta, clamp) in deltas.items():
+            orders.extend(
+                self._delta_orders(instrument, delta, clamp, action, decision_id, portfolio, market)
             )
         return orders
+
+    def _target_delta(
+        self,
+        target: PositionTarget,
+        decision_id: str,
+        portfolio: PortfolioSnapshot,
+        market: MarketSnapshot,
+    ) -> tuple[InstrumentId, Decimal, bool]:
+        """목표 → (종목, 부호 있는 주식 수 변화량, 매도 clamp 허용 여부)."""
+        instrument = target.instrument
+        match target:
+            case WeightTarget():
+                if target.weight < 0:
+                    raise UnsupportedActionValue(
+                        f"negative target weight requires SHORT_SELLING feature "
+                        f"(not implemented) — instrument={instrument.symbol} "
+                        f"weight={target.weight} decision_id={decision_id}"
+                    )
+                target_notional = target.weight * portfolio.equity
+                delta = self._notional_to_delta(instrument, target_notional, portfolio, market)
+                return instrument, delta, True
+            case NotionalTarget():
+                self._check_currency(instrument, target.notional, decision_id)
+                if target.notional.amount < 0:
+                    raise UnsupportedActionValue(
+                        f"negative target notional requires SHORT_SELLING feature "
+                        f"(not implemented) — instrument={instrument.symbol} "
+                        f"notional={target.notional.amount} decision_id={decision_id}"
+                    )
+                target_notional = float(target.notional.amount)
+                delta = self._notional_to_delta(instrument, target_notional, portfolio, market)
+                return instrument, delta, False
+            case QuantityTarget():
+                self._check_integer(target.quantity, instrument, decision_id)
+                if target.quantity < 0:
+                    raise UnsupportedActionValue(
+                        f"negative target quantity requires SHORT_SELLING feature "
+                        f"(not implemented) — instrument={instrument.symbol} "
+                        f"quantity={target.quantity} decision_id={decision_id}"
+                    )
+                return instrument, target.quantity - portfolio.position_qty(instrument), False
+
+    def _adjust_delta(
+        self, action: AdjustPosition, decision_id: str, market: MarketSnapshot
+    ) -> Decimal:
+        match action.delta:
+            case QuantityDelta():
+                self._check_integer(action.delta.quantity, action.instrument, decision_id)
+                return action.delta.quantity
+            case NotionalDelta():
+                self._check_currency(action.instrument, action.delta.notional, decision_id)
+                notional = float(action.delta.notional.amount)
+                shares = floor_delta_shares(notional, market.bar(action.instrument).close)
+                return shares if notional >= 0 else -shares
+
+    def _notional_to_delta(
+        self,
+        instrument: InstrumentId,
+        target_notional: float,
+        portfolio: PortfolioSnapshot,
+        market: MarketSnapshot,
+    ) -> Decimal:
+        current_position = portfolio.position(instrument)
+        current_notional = current_position.market_value if current_position else 0.0
+        delta_notional = target_notional - current_notional
+        shares = floor_delta_shares(delta_notional, market.bar(instrument).close)
+        return shares if delta_notional >= 0 else -shares
+
+    def _delta_orders(
+        self,
+        instrument: InstrumentId,
+        delta: Decimal,
+        clamp_sell: bool,
+        action: StrategyAction,
+        decision_id: str,
+        portfolio: PortfolioSnapshot,
+        market: MarketSnapshot,
+    ) -> list[OrderEvent]:
+        if delta == 0:
+            return []
+        side = Side.BUY if delta > 0 else Side.SELL
+        quantity = abs(delta)
+        if side is Side.SELL:
+            held = portfolio.position_qty(instrument)
+            if quantity > held:
+                if not clamp_sell:
+                    raise UnsupportedActionValue(
+                        f"resulting position would be negative — requires SHORT_SELLING "
+                        f"feature (not implemented) — instrument={instrument.symbol} "
+                        f"held={held} sell={quantity} decision_id={decision_id}"
+                    )
+                quantity = held
+            if quantity <= 0:
+                return []
+        return [
+            OrderEvent(
+                order_id=self._order_manager.next_order_id(),
+                decision_id=decision_id,
+                ts=market.ts,
+                instrument=instrument,
+                quantity=quantity,
+                side=side,
+                source_action=action,
+            )
+        ]
+
+    @staticmethod
+    def _check_integer(quantity: Decimal, instrument: InstrumentId, decision_id: str) -> None:
+        if quantity != quantity.to_integral_value():
+            raise UnsupportedActionValue(
+                f"fractional shares not supported — quantity must be an integer, "
+                f"got {quantity} instrument={instrument.symbol} decision_id={decision_id}"
+            )
+
+    @staticmethod
+    def _check_currency(instrument: InstrumentId, money: Money, decision_id: str) -> None:
+        if money.currency != instrument.currency:
+            raise UnsupportedActionValue(
+                f"notional currency does not match instrument currency — "
+                f"notional={money.currency} instrument={instrument.symbol}/"
+                f"{instrument.currency} decision_id={decision_id}"
+            )
 
     def _liquidation_orders(
         self,

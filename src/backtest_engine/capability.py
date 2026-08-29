@@ -200,21 +200,22 @@ def prepare_strategy(strategy: Strategy, capabilities: EngineCapabilities) -> Va
 def reference_engine_capabilities() -> EngineCapabilities:
     """Python reference engine v1의 정직한 구현 상태.
 
-    로드맵 3단계 범위인 NO_ACTION, SET_PORTFOLIO_TARGET, LIQUIDATE_POSITION과
-    MARKET 이벤트, EverySession 일정만 IMPLEMENTED다. 나머지는 스키마만 정의된
-    NOT_IMPLEMENTED 상태로, handler와 테스트가 추가될 때 승격한다.
+    3단계의 NO_ACTION, SET_PORTFOLIO_TARGET, LIQUIDATE_POSITION과 4a의
+    SET_POSITION_TARGET, ADJUST_POSITION, MARKET 이벤트, EverySession 일정만
+    IMPLEMENTED다. 나머지는 스키마만 정의된 NOT_IMPLEMENTED 상태로, handler와
+    테스트가 추가될 때 승격한다.
     """
     not_implemented_actions = {
-        ActionKind.SET_POSITION_TARGET: "roadmap step 4",
-        ActionKind.ADJUST_POSITION: "roadmap step 4",
-        ActionKind.SUBMIT_ORDER: "roadmap step 4",
-        ActionKind.CANCEL_ORDER: "roadmap step 4",
-        ActionKind.REPLACE_ORDER: "roadmap step 4",
+        ActionKind.SUBMIT_ORDER: "roadmap step 4b",
+        ActionKind.CANCEL_ORDER: "roadmap step 4c",
+        ActionKind.REPLACE_ORDER: "roadmap step 4c",
         ActionKind.BASKET: "roadmap step 5",
     }
     implemented_actions = (
         ActionKind.NO_ACTION,
         ActionKind.SET_PORTFOLIO_TARGET,
+        ActionKind.SET_POSITION_TARGET,
+        ActionKind.ADJUST_POSITION,
         ActionKind.LIQUIDATE_POSITION,
     )
     actions = tuple(
@@ -228,9 +229,9 @@ def reference_engine_capabilities() -> EngineCapabilities:
         for feature, reason in {
             EngineFeature.SHORT_SELLING: "roadmap step 5",
             EngineFeature.MARGIN: "no margin accounting in v1",
-            EngineFeature.PARTIAL_FILL: "roadmap step 4 — v1 fills fully at next open",
-            EngineFeature.LIMIT_ORDER: "roadmap step 4",
-            EngineFeature.STOP_ORDER: "roadmap step 4",
+            EngineFeature.PARTIAL_FILL: "roadmap step 4d — fills fully at next open",
+            EngineFeature.LIMIT_ORDER: "roadmap step 4b",
+            EngineFeature.STOP_ORDER: "roadmap step 4b",
             EngineFeature.PROPORTIONAL_BASKET: "roadmap step 5",
         }.items()
     )

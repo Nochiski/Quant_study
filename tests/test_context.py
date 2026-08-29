@@ -9,7 +9,7 @@ import pytest
 from backtest_engine.engine.context import EngineStrategyContext, HistoryStore
 from backtest_engine.errors import InsufficientHistoryError, UndeclaredDataAccess
 from backtest_engine.types.actions import NoAction
-from backtest_engine.types.events import OrderEvent
+from backtest_engine.types.events import OpenOrderSnapshot, OrderEvent
 from backtest_engine.types.instruments import InstrumentId
 from backtest_engine.types.market import PriceField
 from backtest_engine.types.orders import Side
@@ -99,8 +99,8 @@ def test_portfolio_reads_come_from_snapshot() -> None:
     assert context.position_qty(INSTRUMENT) == 0
 
 
-def _open_order(order_id: str, instrument: InstrumentId = INSTRUMENT) -> OrderEvent:
-    return OrderEvent(
+def _open_order(order_id: str, instrument: InstrumentId = INSTRUMENT) -> OpenOrderSnapshot:
+    order = OrderEvent(
         order_id=order_id,
         decision_id="D-000001",
         ts=day(1),
@@ -109,6 +109,7 @@ def _open_order(order_id: str, instrument: InstrumentId = INSTRUMENT) -> OrderEv
         side=Side.BUY,
         source_action=NoAction(),
     )
+    return OpenOrderSnapshot(order=order, remaining=Decimal(1))
 
 
 def test_open_orders_returns_snapshot_filtered_by_instrument() -> None:

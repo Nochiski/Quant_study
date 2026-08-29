@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-from backtest_engine.types.events import OrderEvent
+from backtest_engine.types.events import OpenOrderSnapshot, OrderEvent
 from backtest_engine.types.instruments import InstrumentId
 from backtest_engine.types.market import MarketSnapshot
 
@@ -65,8 +65,12 @@ class OrderManager:
             )
         self._open[order.order_id] = OpenOrder(order=order, remaining=order.quantity)
 
-    def open_orders(self) -> tuple[OrderEvent, ...]:
-        return tuple(entry.order for entry in self._open.values())
+    def open_orders(self) -> tuple[OpenOrderSnapshot, ...]:
+        """대기 주문과 잔량 (전략이 Cancel/Replace 수량을 정할 때 잔량을 봐야 한다)."""
+        return tuple(
+            OpenOrderSnapshot(order=entry.order, remaining=entry.remaining)
+            for entry in self._open.values()
+        )
 
     def open_entries(self) -> tuple[OpenOrder, ...]:
         return tuple(self._open.values())

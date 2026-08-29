@@ -60,6 +60,7 @@ BARS: tuple[Bar, ...] = (
 
 ALLOWED_TRANSITIONS: dict[OrderStatus | None, set[OrderStatus]] = {
     None: {
+        OrderStatus.OPEN,
         OrderStatus.PARTIALLY_FILLED,
         OrderStatus.FILLED,
         OrderStatus.CANCELLED,
@@ -67,13 +68,23 @@ ALLOWED_TRANSITIONS: dict[OrderStatus | None, set[OrderStatus]] = {
         OrderStatus.REPLACED,
         OrderStatus.REJECTED,
     },
+    OrderStatus.OPEN: {
+        OrderStatus.OPEN,
+        OrderStatus.PARTIALLY_FILLED,
+        OrderStatus.FILLED,
+        OrderStatus.CANCELLED,
+        OrderStatus.TRIGGERED,
+        OrderStatus.REPLACED,
+    },
     OrderStatus.TRIGGERED: {
+        OrderStatus.OPEN,
         OrderStatus.FILLED,
         OrderStatus.PARTIALLY_FILLED,
         OrderStatus.CANCELLED,
         OrderStatus.REPLACED,
     },
     OrderStatus.PARTIALLY_FILLED: {
+        OrderStatus.OPEN,
         OrderStatus.PARTIALLY_FILLED,
         OrderStatus.FILLED,
         OrderStatus.CANCELLED,
@@ -194,7 +205,7 @@ class TestGtcLimit:
         updates = [u for u in engine.event_store.order_updates() if u.order_id == "O-000001"]
         assert [u.status for u in updates] == [OrderStatus.CANCELLED]
         assert updates[0].ts == day(4)
-        assert "run ended" in (updates[0].detail or "")
+        assert "run ended with GTC" in (updates[0].detail or "")
 
     def test_gtc_survives_session_without_bar(self) -> None:
         bars = (
@@ -544,3 +555,75 @@ class TestReviewRegressions:
 
         with pytest.raises(UnsupportedActionValue, match="open_sell=10"):
             run(sell_limit_then_market())
+
+    def test_open_orders_expose_remaining_after_partial_fill(self) -> None:
+        """DEFECT-003: 전략이 보는 대기 주문은 원 수량이 아니라 잔량이다."""
+        seen: list[tuple[str, Decimal]] = []
+
+        def handler(ctx: StrategyContext, event: StrategyEvent) -> StrategyAction | None:
+            seen.extend((o.order_id, o.remaining) for o in ctx.open_orders())
+            return market_buy(250, TimeInForce.GTC) if ctx.now == day(1) else None
+
+        engine = BacktestEngine(
+            RunConfig(run_id="remaining", initial_cash=100_000.0, fee_bps=0.0),
+            max_participation=0.1,
+        )
+        engine.run(CallbackStrategy(handler, frozenset({EventKind.MARKET})), DataFeed(BARS))
+        assert seen == [("O-000001", Decimal(150)), ("O-000001", Decimal(50))]
+
+    def test_gtc_buy_survives_session_it_cannot_afford(self) -> None:
+        """DEFECT-004/007: 여력 0·유동성 0 세션은 OPEN(사유)만 남기고 GTC는 대기한다."""
+        bars = (
+            make_ohlc(day(1), INSTRUMENT, 100.0, 100.0, 100.0, 100.0),
+            make_ohlc(day(2), INSTRUMENT, 500.0, 500.0, 500.0, 500.0),
+            make_ohlc(day(3), INSTRUMENT, 50.0, 50.0, 50.0, 50.0, volume=0),
+            make_ohlc(day(4), INSTRUMENT, 50.0, 50.0, 50.0, 50.0),
+        )
+        engine = BacktestEngine(
+            RunConfig(run_id="nocash", initial_cash=300.0, fee_bps=0.0), max_participation=0.1
+        )
+        result = engine.run(OrderScript((market_buy(2, TimeInForce.GTC),)), DataFeed(bars))
+        assert_transitions_valid(engine.event_store.order_updates())
+        updates = [u for u in engine.event_store.order_updates() if u.order_id == "O-000001"]
+        assert [(u.ts, u.status) for u in updates] == [
+            (day(2), OrderStatus.OPEN),
+            (day(3), OrderStatus.OPEN),
+            (day(4), OrderStatus.FILLED),
+        ]
+        assert "cannot afford" in (updates[0].detail or "")
+        assert "no liquidity" in (updates[1].detail or "")
+        assert [(f.ts, int(f.quantity), f.price) for f in result.fills] == [(day(4), 2, 50.0)]
+
+    def test_fill_notification_precedes_its_order_update(self) -> None:
+        """DEFECT-006: FILL 알림이 그 체결의 FILLED 알림보다 먼저 도착한다."""
+        _, strategy, _ = run_callback(
+            lambda ctx, event: buy_shares(10) if ctx.now == day(1) else None,
+            frozenset({EventKind.MARKET, EventKind.FILL, EventKind.ORDER_UPDATE}),
+        )
+        kinds = [type(e).__name__ for e in strategy.received if not isinstance(e, MarketSnapshot)]
+        assert kinds == ["FillEvent", "OrderUpdateEvent"]
+
+    def test_day_order_on_last_session_is_labelled_expired(self) -> None:
+        """DEFECT-008: 마지막 세션에 낸 DAY 주문은 'run ended'가 아니라 당일 만료다."""
+        bars = BARS[:2]
+        engine, _ = run((None, limit_buy(50.0, TimeInForce.DAY)), bars)
+        (update,) = [u for u in engine.event_store.order_updates() if u.order_id == "O-000001"]
+        assert update.status is OrderStatus.CANCELLED
+        assert "day order expired at last session" in (update.detail or "")
+
+    def test_sell_side_participation_cap_partial_fill(self) -> None:
+        bars = (
+            make_ohlc(day(1), INSTRUMENT, 100.0, 100.0, 100.0, 100.0),
+            make_ohlc(day(2), INSTRUMENT, 100.0, 100.0, 100.0, 100.0),
+            make_ohlc(day(3), INSTRUMENT, 100.0, 100.0, 100.0, 100.0, volume=40),
+            make_ohlc(day(4), INSTRUMENT, 100.0, 100.0, 100.0, 100.0),
+        )
+        sell = OrderCore(INSTRUMENT, Side.SELL, Decimal(10), TimeInForce.GTC)
+        _, result = run(
+            (buy_shares(10), submit(MarketOrderRequest(core=sell))), bars, max_participation=0.1
+        )
+        assert [(f.ts, f.side, int(f.quantity)) for f in result.fills] == [
+            (day(2), Side.BUY, 10),
+            (day(3), Side.SELL, 4),
+            (day(4), Side.SELL, 6),
+        ]

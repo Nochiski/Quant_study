@@ -138,10 +138,6 @@ class BacktestEngine:
                 case FillOccurred(fill=fill, snapshot=snapshot):
                     run.portfolio.apply(fill)
                     run.store.append(fill.ts, RecordKind.FILL, fill)
-                    if run.wants(EventKind.FILL):
-                        run.queue.push(
-                            fill.ts, EventPriority.NOTIFY, StrategyNotify(fill, snapshot)
-                        )
                 case StrategyNotify(event=strategy_event, snapshot=snapshot):
                     self._dispatch(run, strategy_event, snapshot)
                 case SessionClose(snapshot=snapshot):
@@ -150,9 +146,18 @@ class BacktestEngine:
                     run.order_manager.place(order)
                     run.store.append(order.ts, RecordKind.ORDER, order)
 
-        # 남은 GTC 주문은 결과에서 조용히 사라지지 않도록 취소로 기록한다.
-        for entry in run.order_manager.drain():
+        # 남은 주문은 결과에서 조용히 사라지지 않도록 취소로 기록한다. 마지막 세션에 낸
+        # DAY/IOC/FOK는 "당일 만료", GTC만 "run 종료"가 사유다.
+        remaining_entries = run.order_manager.drain()
+        if remaining_entries:
             last_ts = feed.sessions[-1]  # 주문이 있다면 세션도 최소 하나 있다
+        for entry in remaining_entries:
+            tif = entry.order.time_in_force
+            reason = (
+                "run ended with GTC order still open — "
+                if tif is TimeInForce.GTC
+                else f"{tif.value} order expired at last session — "
+            )
             run.store.append(
                 last_ts,
                 RecordKind.ORDER_UPDATE,
@@ -161,8 +166,8 @@ class BacktestEngine:
                     order_id=entry.order_id,
                     status=OrderStatus.CANCELLED,
                     detail=(
-                        f"run ended with order still open — "
-                        f"instrument={entry.order.instrument.symbol} remaining={entry.remaining}"
+                        f"{reason}instrument={entry.order.instrument.symbol} "
+                        f"remaining={entry.remaining}"
                     ),
                 ),
             )
@@ -212,6 +217,10 @@ class BacktestEngine:
                 else:
                     remaining_cash -= notional + fill.fee
                 run.queue.push(fill.ts, EventPriority.FILL, FillOccurred(fill, snapshot))
+                if run.wants(EventKind.FILL):
+                    # FILL 알림은 그 체결이 만든 ORDER_UPDATE 알림보다 먼저 큐에 실린다 (인과 순서).
+                    # NOTIFY(25) > FILL(20)이라 알림 시점엔 포트폴리오에 이미 반영돼 있다.
+                    run.queue.push(fill.ts, EventPriority.NOTIFY, StrategyNotify(fill, snapshot))
                 left = order_manager.settle(order.order_id, fill.quantity)
                 if left == 0:
                     update(order.order_id, OrderStatus.FILLED, None)
@@ -231,9 +240,16 @@ class BacktestEngine:
                     f"stop triggered, limit not met — instrument={order.instrument.symbol} "
                     f"stop={order.stop_price} limit={order.limit_price} ts={snapshot.ts}",
                 )
-            elif outcome.status is ExecutionStatus.REJECTED_NO_CASH:
-                order_manager.remove(order.order_id)
-                update(order.order_id, OrderStatus.REJECTED, outcome.detail)
+            elif (
+                outcome.status
+                in (
+                    ExecutionStatus.REJECTED_NO_CASH,
+                    ExecutionStatus.NOT_FILLED,
+                )
+                and outcome.detail is not None
+            ):
+                # 여력 0·유동성 0은 이 세션의 사정일 뿐이다 — 주문은 TIF대로 대기하고 사유만 남긴다.
+                update(order.order_id, OrderStatus.OPEN, outcome.detail)
             elif outcome.status is ExecutionStatus.FOK_REJECTED:
                 order_manager.remove(order.order_id)
                 update(order.order_id, OrderStatus.CANCELLED, outcome.detail)

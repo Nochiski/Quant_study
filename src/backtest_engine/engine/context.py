@@ -13,7 +13,7 @@ from decimal import Decimal
 import numpy as np
 
 from backtest_engine.errors import InsufficientHistoryError, UndeclaredDataAccess
-from backtest_engine.types.events import OrderEvent
+from backtest_engine.types.events import OpenOrderSnapshot
 from backtest_engine.types.instruments import InstrumentId
 from backtest_engine.types.market import MarketSnapshot, PriceField, PriceWindow
 from backtest_engine.types.portfolio import PortfolioSnapshot
@@ -83,7 +83,7 @@ class EngineStrategyContext:
     snapshot: PortfolioSnapshot
     history_store: HistoryStore
     declared: frozenset[HistoryRequest] = field(default_factory=frozenset)
-    open_orders_snapshot: tuple[OrderEvent, ...] = ()
+    open_orders_snapshot: tuple[OpenOrderSnapshot, ...] = ()
 
     def history(self, request: HistoryRequest) -> PriceWindow:
         if request not in self.declared:
@@ -107,7 +107,7 @@ class EngineStrategyContext:
     def portfolio_value(self) -> float:
         return self.snapshot.equity
 
-    def open_orders(self, instrument: InstrumentId | None = None) -> tuple[OrderEvent, ...]:
+    def open_orders(self, instrument: InstrumentId | None = None) -> tuple[OpenOrderSnapshot, ...]:
         if instrument is None:
             return self.open_orders_snapshot
         return tuple(o for o in self.open_orders_snapshot if o.instrument == instrument)

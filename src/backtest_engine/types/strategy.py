@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import Protocol
 
 from backtest_engine.types.decision import StrategyDecision
-from backtest_engine.types.events import OrderEvent, StrategyEvent
+from backtest_engine.types.events import OpenOrderSnapshot, StrategyEvent
 from backtest_engine.types.instruments import InstrumentId
 from backtest_engine.types.market import PriceWindow
 from backtest_engine.types.requirements import HistoryRequest, StrategyRequirements
@@ -41,8 +41,8 @@ class StrategyContext(Protocol):
 
     def portfolio_value(self) -> float: ...
 
-    def open_orders(self, instrument: InstrumentId | None = None) -> tuple[OrderEvent, ...]:
-        """이 호출 시점에 대기 중인(잔량 > 0) 주문. Cancel/Replace의 order_id 출처."""
+    def open_orders(self, instrument: InstrumentId | None = None) -> tuple[OpenOrderSnapshot, ...]:
+        """이 호출 시점에 대기 중인 주문과 잔량. Cancel/Replace의 order_id·수량 출처."""
         ...
 
 

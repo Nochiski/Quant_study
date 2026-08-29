@@ -30,6 +30,7 @@ class TimerEvent:
 class OrderStatus(Enum):
     NEW = "new"
     TRIGGERED = "triggered"  # STOP_LIMIT이 발동했지만 지정가 미충족으로 대기 (4b 확장)
+    OPEN = "open"  # 이 세션에 체결되지 못했지만 대기 유지 — 사유(유동성·여력)를 detail에 남김
     PARTIALLY_FILLED = "partially_filled"
     FILLED = "filled"
     CANCELLED = "cancelled"
@@ -102,6 +103,26 @@ class OrderEvent:
         for label, price in (("limit_price", self.limit_price), ("stop_price", self.stop_price)):
             if price is not None and price <= 0:
                 raise ValueError(f"{label} must be > 0 — order_id={self.order_id} {label}={price}")
+
+
+@dataclass(frozen=True)
+class OpenOrderSnapshot:
+    """전략에 보여주는 대기 주문: 원 주문과 현재 잔량. ctx.open_orders()의 원소."""
+
+    order: OrderEvent
+    remaining: Decimal
+
+    @property
+    def order_id(self) -> str:
+        return self.order.order_id
+
+    @property
+    def instrument(self) -> InstrumentId:
+        return self.order.instrument
+
+    @property
+    def side(self) -> Side:
+        return self.order.side
 
 
 @dataclass(frozen=True)

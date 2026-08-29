@@ -38,6 +38,10 @@ class CorporateActionWithoutBar(EngineError):
     """자본변동 사건 세션에 해당 종목 Bar가 없어 단주 정산 가격을 정할 수 없음."""
 
 
+class UniverseNotProvided(EngineError):
+    """run()에 universe를 넘기지 않았는데 ctx.universe()를 조회함."""
+
+
 class SchemaVersionMismatch(EngineError):
     """StrategyDecision.schema_version이 엔진이 아는 버전과 다름."""
 

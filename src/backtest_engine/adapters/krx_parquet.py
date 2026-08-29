@@ -21,12 +21,16 @@ from backtest_engine.data.cleaning import RawBar, clean_raw_bars, merge_results
 from backtest_engine.data.corporate_actions import ShareCountRow, detect_share_count_events
 from backtest_engine.ports.corporate_actions import CorporateActionQuery, CorporateActionResult
 from backtest_engine.ports.market_data import BarQuery, LoadResult, LoadStatus
+from backtest_engine.ports.universe import Membership, UniverseQuery, UniverseResult
 from backtest_engine.types.events import CorporateActionEvent
-from backtest_engine.types.instruments import InstrumentId
+from backtest_engine.types.instruments import AssetClass, InstrumentId
 
 KOSPI_TRADES_FILE = "krx_stk_bydd_trd.parquet"
 KOSDAQ_TRADES_FILE = "krx_ksq_bydd_trd.parquet"
 TRADES_FILES = (KOSPI_TRADES_FILE, KOSDAQ_TRADES_FILE)
+KOSPI_MASTER_FILE = "krx_stk_isu_base_info.parquet"
+KOSDAQ_MASTER_FILE = "krx_ksq_isu_base_info.parquet"
+MASTER_FILES = (KOSPI_MASTER_FILE, KOSDAQ_MASTER_FILE)
 
 _COLUMNS = ("bas_dd", "isu_cd", "tdd_opnprc", "tdd_hgprc", "tdd_lwprc", "tdd_clsprc", "acc_trdvol")
 _SHARE_COLUMNS = ("bas_dd", "isu_cd", "tdd_clsprc", "acc_trdvol", "list_shrs")
@@ -214,3 +218,74 @@ class KrxParquetCorporateActionSource:
             )
         actions.sort(key=lambda event: (event.ts, event.instrument.symbol))
         return CorporateActionResult(actions=tuple(actions), status=LoadStatus.OK)
+
+
+class KrxParquetUniverseSource:
+    """원장 종목마스터(`krx_*_isu_base_info`, 일별 스냅샷)에서 종목별 상장 구간을 만든다.
+
+    마스터는 `bas_dd_req`(기준일)마다 그날 상장된 종목 한 행씩이다. 종목별
+    min/max(bas_dd_req)가 구간이며, 기간 필터는 구간을 잘라낸다.
+
+    Args:
+        root: 마스터 parquet가 있는 디렉토리. 둘 중 존재하는 파일만 읽는다.
+        security_groups: `secugrp_nm`(증권군) 화이트리스트. None이면 전체.
+    """
+
+    _COLUMNS = ("bas_dd_req", "isu_srt_cd", "secugrp_nm")
+
+    def __init__(self, root: Path, security_groups: frozenset[str] | None = None) -> None:
+        self._root = root
+        self._security_groups = security_groups
+
+    def load_universe(self, query: UniverseQuery) -> UniverseResult:
+        import pyarrow.parquet as pq  # 어댑터 안에서만 import
+
+        available = [self._root / name for name in MASTER_FILES if (self._root / name).exists()]
+        if not available:
+            return UniverseResult(
+                memberships=(),
+                status=LoadStatus.NO_DATA,
+                detail=f"no KRX master parquet found — root={self._root} expected={MASTER_FILES}",
+            )
+        filters: list[tuple[str, str, object]] = []
+        if query.start is not None:
+            filters.append(("bas_dd_req", ">=", query.start))
+        if query.end is not None:
+            filters.append(("bas_dd_req", "<=", query.end))
+        if self._security_groups is not None:
+            filters.append(("secugrp_nm", "in", sorted(self._security_groups)))
+
+        bounds: dict[str, tuple[date, date]] = {}
+        for path in available:
+            table = pq.read_table(path, columns=list(self._COLUMNS), filters=filters or None)
+            for record in table.to_pylist():
+                symbol = record["isu_srt_cd"]
+                if not isinstance(symbol, str):
+                    return UniverseResult(
+                        memberships=(),
+                        status=LoadStatus.FORMAT_ERROR,
+                        detail=f"isu_srt_cd must be str — file={path.name} got={symbol!r}",
+                    )
+                session = _as_date(record["bas_dd_req"])
+                first, last = bounds.get(symbol, (session, session))
+                bounds[symbol] = (min(first, session), max(last, session))
+        if not bounds:
+            return UniverseResult(
+                memberships=(),
+                status=LoadStatus.NO_DATA,
+                detail=(
+                    f"no master rows — root={self._root} venue={query.venue} "
+                    f"start={query.start} end={query.end} groups={self._security_groups}"
+                ),
+            )
+        memberships = tuple(
+            Membership(
+                instrument=InstrumentId(
+                    venue=query.venue, symbol=symbol, asset_class=AssetClass.EQUITY, currency="KRW"
+                ),
+                first_session=first,
+                last_session=last,
+            )
+            for symbol, (first, last) in sorted(bounds.items())
+        )
+        return UniverseResult(memberships=memberships, status=LoadStatus.OK)

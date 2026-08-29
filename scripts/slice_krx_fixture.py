@@ -27,10 +27,18 @@ DEFAULT_TICKERS: dict[str, str] = {
     "066970": "엘앤에프 — KOSDAQ, 정상 케이스",
 }
 TRADE_FILES = ("krx_stk_bydd_trd.parquet", "krx_ksq_bydd_trd.parquet")
+# 종목마스터(일별 스냅샷)는 6자리 단축코드 컬럼이 isu_srt_cd다 (isu_cd는 ISIN).
+MASTER_FILES = ("krx_stk_isu_base_info.parquet", "krx_ksq_isu_base_info.parquet")
 
 
-def slice_file(source: Path, target: Path, tickers: list[str]) -> int:
-    sliced = pq.read_table(source, filters=[("isu_cd", "in", tickers)]).sort_by("bas_dd")
+def slice_file(
+    source: Path,
+    target: Path,
+    tickers: list[str],
+    symbol_column: str = "isu_cd",
+    sort_by: str = "bas_dd",
+) -> int:
+    sliced = pq.read_table(source, filters=[(symbol_column, "in", tickers)]).sort_by(sort_by)
     target.parent.mkdir(parents=True, exist_ok=True)
     pq.write_table(sliced, target, compression="zstd")
     return sliced.num_rows
@@ -67,6 +75,16 @@ def main(argv: list[str] | None = None) -> int:
             print(f"skip: file not found — path={source}", file=sys.stderr)
             continue
         rows = slice_file(source, out_dir / name, tickers)
+        files[name] = rows
+        print(f"{name}: {rows} rows -> {out_dir / name}")
+    for name in MASTER_FILES:
+        source = source_dir / name
+        if not source.exists():
+            print(f"skip: file not found — path={source}", file=sys.stderr)
+            continue
+        rows = slice_file(
+            source, out_dir / name, tickers, symbol_column="isu_srt_cd", sort_by="bas_dd_req"
+        )
         files[name] = rows
         print(f"{name}: {rows} rows -> {out_dir / name}")
     manifest["files"] = files

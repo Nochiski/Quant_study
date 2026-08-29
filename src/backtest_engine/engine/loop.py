@@ -43,6 +43,7 @@ from backtest_engine.engine.router import DecisionRouter
 from backtest_engine.engine.store import DecisionRecord, EventStore, RecordKind
 from backtest_engine.errors import CorporateActionWithoutBar
 from backtest_engine.ports.execution import SlippageModel
+from backtest_engine.ports.universe import UniverseResult
 from backtest_engine.types.events import (
     CorporateActionEvent,
     CorporateActionType,
@@ -84,6 +85,7 @@ class _Run:
         self.store = EventStore()
         self.queue = EventQueue()
         self.corporate_actions: dict[datetime, list[CorporateActionEvent]] = defaultdict(list)
+        self.universe: UniverseResult | None = None
 
     def wants(self, kind: EventKind) -> bool:
         return kind in self.requirements.events
@@ -133,6 +135,7 @@ class BacktestEngine:
         feed: DataFeed,
         *,
         corporate_actions: Iterable[CorporateActionEvent] = (),
+        universe: UniverseResult | None = None,
     ) -> BacktestResult:
         """
         Args:
@@ -141,6 +144,7 @@ class BacktestEngine:
             corporate_actions: 기간 안의 자본변동 사건. 확인된 분할·병합(SPLIT/REVERSE_SPLIT)은
                 사건 세션 시작 시 보유 포지션에 적용되고, 모든 사건은 기록되며 선언한 전략에
                 전달된다. 사건 세션에 해당 종목 Bar가 없으면 CorporateActionWithoutBar.
+            universe: 세션별 상장 종목 구간. 주면 ctx.universe()가 그 세션 구성을 돌려준다.
         """
         # 1. Capability 검증은 첫 Bar를 읽기 전, 전략 등록 직후 수행한다.
         validated = prepare_strategy(strategy, self._capabilities)
@@ -152,6 +156,7 @@ class BacktestEngine:
             self._max_participation,
         )
         self._event_store = run.store
+        run.universe = universe
         for action in corporate_actions:
             run.corporate_actions[action.ts].append(action)
         sessions = set(feed.sessions)
@@ -368,6 +373,9 @@ class BacktestEngine:
             history_store=run.history_store,
             declared=run.declared,
             open_orders_snapshot=run.order_manager.open_orders(),
+            universe_members=(
+                run.universe.members(ts.date()) if run.universe is not None else None
+            ),
         )
         decision = run.strategy.on_event(context, event)
         decision_id = run.order_manager.next_decision_id()

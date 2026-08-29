@@ -10,11 +10,12 @@ from __future__ import annotations
 import importlib
 import importlib.util
 from datetime import datetime
-from decimal import ROUND_FLOOR, Decimal
+from decimal import ROUND_DOWN, Decimal
 from typing import Protocol
 
 from backtest_engine.engine.broker import ExecutionPricing
 from backtest_engine.engine.portfolio import Portfolio as PythonPortfolio
+from backtest_engine.engine.portfolio import scale_quantity
 from backtest_engine.engine.pricing import PriceDecision, execution_price
 from backtest_engine.errors import CoreUnavailable, NegativeCashError, NegativePositionError
 from backtest_engine.types.events import (
@@ -39,7 +40,10 @@ class PortfolioLedger(Protocol):
     def charge(self, cost: CostAccrued) -> None: ...
 
     def apply_corporate_action(
-        self, action: CorporateActionEvent, settlement_price: float
+        self,
+        action: CorporateActionEvent,
+        settlement_price: float,
+        settled_at: datetime | None = None,
     ) -> CorporateActionApplied | None: ...
 
     def mark(self, snapshot: MarketSnapshot) -> None: ...
@@ -141,7 +145,10 @@ class RustPortfolio:
         self._inner.charge(cost.amount)
 
     def apply_corporate_action(
-        self, action: CorporateActionEvent, settlement_price: float
+        self,
+        action: CorporateActionEvent,
+        settlement_price: float,
+        settled_at: datetime | None = None,
     ) -> CorporateActionApplied | None:
         key = _key(action.instrument)
         old_quantity = Decimal(self._inner.held_qty(key))
@@ -155,8 +162,8 @@ class RustPortfolio:
         old_average = self._inner.average_price(key)
         if old_average is None:  # held_qty != 0이면 원장이 있으므로 방어용
             raise RuntimeError(f"rust portfolio has quantity without ledger — key={key}")
-        scaled = old_quantity * action.ratio
-        new_quantity = scaled.quantize(Decimal(1), rounding=ROUND_FLOOR)
+        scaled = scale_quantity(old_quantity, action.ratio)
+        new_quantity = scaled.quantize(Decimal(1), rounding=ROUND_DOWN)  # 숏은 0 쪽으로
         cash_paid = float(scaled - new_quantity) * settlement_price
         new_average = old_average / float(action.ratio)
         self._inner.apply_corporate_action(
@@ -164,7 +171,7 @@ class RustPortfolio:
         )
         self._sync_order(key)
         return CorporateActionApplied(
-            ts=action.ts,
+            ts=settled_at if settled_at is not None else action.ts,
             instrument=action.instrument,
             action=action,
             old_quantity=old_quantity,

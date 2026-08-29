@@ -55,6 +55,9 @@ class Portfolio:
         self, initial_cash: float, *, allow_short: bool = False, allow_margin: bool = False
     ) -> None:
         self._cash = initial_cash
+        # (ts, snapshot) 메모. 상태를 바꾸는 명령마다 비운다 — 세션당 조회 4회가 매번
+        # 종목 수만큼 Position을 다시 만들지 않게.
+        self._snapshot_cache: tuple[datetime, PortfolioSnapshot] | None = None
         self._ledgers: dict[InstrumentId, _Ledger] = {}
         self._marks: dict[InstrumentId, float] = {}
         self._allow_short = allow_short
@@ -109,6 +112,7 @@ class Portfolio:
             else:
                 ledger.quantity = new_quantity
         self._cash = new_cash
+        self._snapshot_cache = None
         self._marks.setdefault(fill.instrument, fill.price)
 
     def charge(self, cost: CostAccrued) -> None:
@@ -119,6 +123,7 @@ class Portfolio:
                 f"amount={cost.amount}"
             )
         self._cash -= cost.amount
+        self._snapshot_cache = None
 
     def apply_corporate_action(
         self,
@@ -150,6 +155,7 @@ class Portfolio:
         new_average = old_average / float(action.ratio)
 
         self._cash += cash_paid
+        self._snapshot_cache = None
         if new_quantity == 0:
             del self._ledgers[action.instrument]
         else:
@@ -172,6 +178,7 @@ class Portfolio:
         """현재 세션 종가로 평가 가격을 갱신한다."""
         for bar in snapshot.bars:
             self._marks[bar.instrument] = bar.close
+        self._snapshot_cache = None
 
     # --- 조회 ---------------------------------------------------------------
 
@@ -184,6 +191,13 @@ class Portfolio:
         return ledger.quantity if ledger is not None else Decimal(0)
 
     def snapshot(self, ts: datetime) -> PortfolioSnapshot:
+        if self._snapshot_cache is not None and self._snapshot_cache[0] == ts:
+            return self._snapshot_cache[1]
+        built = self._build_snapshot(ts)
+        self._snapshot_cache = (ts, built)
+        return built
+
+    def _build_snapshot(self, ts: datetime) -> PortfolioSnapshot:
         positions: list[Position] = []
         for instrument, ledger in self._ledgers.items():
             mark_price = self._marks[instrument]

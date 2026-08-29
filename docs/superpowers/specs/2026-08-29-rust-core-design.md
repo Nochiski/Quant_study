@@ -129,7 +129,55 @@ Python 엔진은 4·5·D 단계로 방금 크게 바뀌었으므로 전부를 �
   GTC 정책 잔량이 이월되지 않던 문제 (`tests/test_router.py::test_target_orders_carry_execution_policy_time_in_force`).
   상세는 `tests/manual/README.md`.
 
+## 6d 결과 (2026-08-29): 벤치마크가 가리킨 병목은 큐가 아니라 값 타입의 선형 조회였다
+
+스펙의 선행 조건대로 다종목 워크로드를 먼저 측정했다. `scripts/bench_universe.py <원장 디렉토리>`
+— 원장 마스터 캘린더 전 구간에 상장된 종목 N개, 2020-01-02→2024-12-30 1,231세션, 5세션마다
+동일 비중(총 0.9) `SetPortfolioTarget(REPLACE)` 리밸런싱, 수수료 15bp. 100종목이면 주문 23,048건.
+
+### 측정 (100종목, cProfile 누적 기준 상위)
+
+| 항목 | 착수 전 | 원인 |
+|---|---|---|
+| `InstrumentId.__eq__` | 6.5M(rust)~10M(python) 호출, 4.7~7.2s | `MarketSnapshot.bar/has`·`PortfolioSnapshot.position`이 tuple 선형 탐색 → 세션당 O(종목²) |
+| `Portfolio.snapshot` | 4,924회(세션당 4회), 2.9~5.3s | 매 조회마다 종목 수만큼 `Position` 재생성 |
+| `HistoryStore.append` | 3.5s | 종목×5필드마다 `(InstrumentId, PriceField)` 튜플 해시 |
+| `instrument_key` | 657k 호출, 1.2s | Rust 경계마다 문자열 포맷 |
+| 이벤트 큐 push/pop | 48k 호출, 0.8s | — |
+
+큐·세션 종료는 전체의 10% 미만이었다. 6d로 계획했던 "큐·세션 종료·스냅샷 생성 Rust 이전"은
+병목이 아닌 곳을 옮기는 것이라 **하지 않는다**. 대신 동작 불변인 Python 인덱싱으로 병목을 제거했다.
+
+### 변경 (동작 불변 — `tests/test_core_parity.py`와 전체 452개 테스트, KRX 데모 골든 그대로)
+
+- `MarketSnapshot`·`PortfolioSnapshot`: 종목 → Bar/Position dict 인덱스를 `__post_init__`에서
+  만든다(`field(init=False, compare=False, hash=False)` — 값 동등성·해시·repr 불변).
+- `Portfolio.snapshot(ts)`(Python·Rust 양쪽): `(ts, snapshot)` 메모, 상태를 바꾸는 명령
+  (`apply`/`charge`/`apply_corporate_action`/`mark`)마다 비운다. CQS 유지 — 조회는 몇 번 불러도 같다.
+- `HistoryStore`: 종목별 dict 안에 필드 시리즈를 두어 세션당 종목 수만큼만 해시한다.
+- `instrument_key`: `functools.cache` (InstrumentId는 불변·해시 가능).
+
+### 결과
+
+| 워크로드 | python 전 → 후 | rust 전 → 후 |
+|---|---|---|
+| 100종목·1,231세션·주문 23k | 15.1s → 4.2s | 8.8s → 3.3s |
+| 300종목·1,231세션·주문 63k | — → 13.0s | — → 10.7s |
+
+두 코어의 fills·orders·최종 equity는 종목 수와 무관하게 동일하다. 종목 수 3배에 시간 3.1배 —
+선형 스케일링. 남은 시간(100종목 rust 기준 프로파일 9.4s 중)은 전략 dispatch·라우터 2.4s,
+Python↔Rust 엔트리 마샬링 3.0s, 히스토리 append 1.6s, 스냅샷 2회/세션 1.6s, 큐 0.8s다 —
+전략이 Python 객체(MarketSnapshot·PortfolioSnapshot)를 받는 한 Rust로 더 옮겨도 이 몫은
+사라지지 않는다.
+
+### 테스트·검증
+
+- `tests/test_lookup_index.py`: 인덱스 조회의 값 동등성(동일 값 다른 객체), 미존재 종목
+  진단, 인덱스가 스냅샷의 `==`/`hash`에 영향 없음, 히스토리 세션 축 정렬(결측 NaN), 스냅샷 메모가
+  상태 변화(`apply`) 전까지만 같은 객체를 돌려주고 ts가 다르면 새로 만드는지 (python·rust 양쪽).
+- 회귀: 전체 테스트 454개 통과, `examples/run_krx_demo.py` 최종 equity 9,143,752 KRW·102/102 불변.
+
 ## 다음 단계
 
-6d(선택): 이벤트 큐·세션 종료·스냅샷 생성까지 Rust로 옮기고 Python 경계를 "전략 호출 배치"로
-줄인다. 착수 전 다종목(유니버스 100+) 벤치마크로 병목이 실제로 어디인지 측정한다.
+Rust 세션 루프 이전은 측정 결과로 닫는다. 더 줄이려면 전략 경계를 바꿔야 한다(예: 배치 이벤트·
+배열형 스냅샷) — 그것은 전략 API 변경이라 별도 스펙 대상이다.

@@ -7,6 +7,7 @@ Python 구현이 진실 원천이다. Rust 확장(`backtest_core`)은 선택 사
 
 from __future__ import annotations
 
+import functools
 import importlib
 import importlib.util
 from datetime import datetime
@@ -110,8 +111,12 @@ class RustPricing:
         return PriceDecision(price, triggered)
 
 
+@functools.cache
 def instrument_key(instrument: InstrumentId) -> str:
-    """InstrumentId의 모든 필드를 담는다 — 통화·자산군만 다른 종목이 합쳐지면 안 된다."""
+    """InstrumentId의 모든 필드를 담는다 — 통화·자산군만 다른 종목이 합쳐지면 안 된다.
+
+    InstrumentId는 불변·해시 가능하므로 프로세스 단위로 메모한다 (세션마다 종목 수만큼 호출).
+    """
     return (
         f"{instrument.venue}:{instrument.symbol}:{instrument.asset_class.value}:"
         f"{instrument.currency}"
@@ -128,6 +133,8 @@ class RustPortfolio:
         core = importlib.import_module("backtest_core")
         self._inner = core.Portfolio(initial_cash, allow_short, allow_margin)
         self._instruments: dict[str, InstrumentId] = {}
+        # (ts, snapshot) 메모 — Python Portfolio와 같은 규칙: 상태를 바꾸는 명령마다 비운다.
+        self._snapshot_cache: tuple[datetime, PortfolioSnapshot] | None = None
 
     def apply(self, fill: FillEvent) -> None:
         if fill.quantity != fill.quantity.to_integral_value():
@@ -150,9 +157,11 @@ class RustPortfolio:
                 ) from error
             raise
         self._instruments.setdefault(key, fill.instrument)
+        self._snapshot_cache = None
 
     def charge(self, cost: CostAccrued) -> None:
         self._inner.charge(cost.amount)
+        self._snapshot_cache = None
 
     def apply_corporate_action(
         self,
@@ -179,6 +188,7 @@ class RustPortfolio:
         self._inner.apply_corporate_action(
             key, int(new_quantity), new_average, cash_paid, settlement_price
         )
+        self._snapshot_cache = None
         return CorporateActionApplied(
             ts=settled_at if settled_at is not None else action.ts,
             instrument=action.instrument,
@@ -194,6 +204,7 @@ class RustPortfolio:
         self._inner.mark([(instrument_key(bar.instrument), bar.close) for bar in snapshot.bars])
         for bar in snapshot.bars:
             self._instruments.setdefault(instrument_key(bar.instrument), bar.instrument)
+        self._snapshot_cache = None
 
     @property
     def cash(self) -> float:
@@ -203,6 +214,13 @@ class RustPortfolio:
         return Decimal(self._inner.held_qty(instrument_key(instrument)))
 
     def snapshot(self, ts: datetime) -> PortfolioSnapshot:
+        if self._snapshot_cache is not None and self._snapshot_cache[0] == ts:
+            return self._snapshot_cache[1]
+        built = self._build_snapshot(ts)
+        self._snapshot_cache = (ts, built)
+        return built
+
+    def _build_snapshot(self, ts: datetime) -> PortfolioSnapshot:
         cash, rows, equity, gross_exposure = self._inner.snapshot()
         # Rust 원장이 삽입 순서를 보존하므로 행 순서가 곧 Python dict 순서다.
         positions = tuple(

@@ -6,7 +6,7 @@ Snapshot 자체를 수정하지 않는다 — 새 상태가 필요하면 다음 
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 
@@ -41,12 +41,18 @@ class PortfolioSnapshot:
     positions: tuple[Position, ...]
     equity: float
     gross_exposure: float
+    # 종목 → Position 인덱스. 값 동등성·해시·repr에서 제외 (조회 전용).
+    _by_instrument: dict[InstrumentId, Position] = field(
+        init=False, repr=False, compare=False, hash=False
+    )
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "_by_instrument", {position.instrument: position for position in self.positions}
+        )
 
     def position(self, instrument: InstrumentId) -> Position | None:
-        for candidate in self.positions:
-            if candidate.instrument == instrument:
-                return candidate
-        return None
+        return self._by_instrument.get(instrument)
 
     def position_qty(self, instrument: InstrumentId) -> Decimal:
         found = self.position(instrument)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
@@ -66,33 +66,38 @@ class MarketSnapshot:
 
     ts: datetime
     bars: tuple[Bar, ...]
+    # 종목 → Bar 인덱스. 값 동등성·해시·repr에서 제외 (조회 전용, 유니버스 크기에 선형 조회 방지).
+    _by_instrument: dict[InstrumentId, Bar] = field(
+        init=False, repr=False, compare=False, hash=False
+    )
 
     def __post_init__(self) -> None:
-        seen: set[InstrumentId] = set()
+        index: dict[InstrumentId, Bar] = {}
         for bar in self.bars:
             if bar.ts != self.ts:
                 raise ValueError(
                     "all bars in a snapshot must share the snapshot ts — "
                     f"snapshot ts={self.ts} bar instrument={bar.instrument.symbol} bar ts={bar.ts}"
                 )
-            if bar.instrument in seen:
+            if bar.instrument in index:
                 raise ValueError(
                     f"duplicate instrument in snapshot — ts={self.ts} "
                     f"instrument={bar.instrument.symbol}"
                 )
-            seen.add(bar.instrument)
+            index[bar.instrument] = bar
+        object.__setattr__(self, "_by_instrument", index)
 
     def bar(self, instrument: InstrumentId) -> Bar:
-        for candidate in self.bars:
-            if candidate.instrument == instrument:
-                return candidate
-        raise InstrumentNotInSnapshot(
-            f"instrument not in snapshot — ts={self.ts} requested={instrument.symbol} "
-            f"available={[b.instrument.symbol for b in self.bars]}"
-        )
+        found = self._by_instrument.get(instrument)
+        if found is None:
+            raise InstrumentNotInSnapshot(
+                f"instrument not in snapshot — ts={self.ts} requested={instrument.symbol} "
+                f"available={[b.instrument.symbol for b in self.bars]}"
+            )
+        return found
 
     def has(self, instrument: InstrumentId) -> bool:
-        return any(candidate.instrument == instrument for candidate in self.bars)
+        return instrument in self._by_instrument
 
 
 @dataclass(frozen=True, eq=False)  # ndarray 필드 → eq=False (원소별 __eq__ 모호성 회피)

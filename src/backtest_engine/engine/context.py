@@ -34,12 +34,17 @@ class HistoryStore:
 
     def __init__(self) -> None:
         self._sessions: list[datetime] = []
-        self._values: dict[tuple[InstrumentId, PriceField], list[float]] = {}
+        # 종목별로 필드 시리즈를 묶는다 — 세션마다 종목 수 × 5번 튜플 해시를 피한다.
+        self._values: dict[InstrumentId, dict[PriceField, list[float]]] = {}
 
     def append(self, snapshot: MarketSnapshot) -> None:
         self._sessions.append(snapshot.ts)
         row_index = len(self._sessions) - 1
         for bar in snapshot.bars:
+            by_field = self._values.get(bar.instrument)
+            if by_field is None:
+                by_field = {price_field: [] for price_field in PriceField}
+                self._values[bar.instrument] = by_field
             for price_field, value in (
                 (PriceField.OPEN, bar.open),
                 (PriceField.HIGH, bar.high),
@@ -47,10 +52,11 @@ class HistoryStore:
                 (PriceField.CLOSE, bar.close),
                 (PriceField.VOLUME, float(bar.volume)),
             ):
-                series = self._values.setdefault((bar.instrument, price_field), [])
+                series = by_field[price_field]
                 # 이 종목이 빠졌던 세션은 결측(NaN)으로 채워 세션 축을 정렬한다.
-                while len(series) < row_index:
-                    series.append(float("nan"))
+                missing = row_index - len(series)
+                if missing > 0:
+                    series.extend([float("nan")] * missing)
                 series.append(value)
 
     @property
@@ -70,7 +76,7 @@ class HistoryStore:
         timestamps = tuple(self._sessions[index] for index in selected)
         matrix = np.full((len(selected), len(request.instruments)), np.nan, dtype=np.float64)
         for column, instrument in enumerate(request.instruments):
-            series = self._values.get((instrument, request.field), [])
+            series = self._values.get(instrument, {}).get(request.field, [])
             for row, index in enumerate(selected):
                 if index < len(series):
                     matrix[row, column] = series[index]

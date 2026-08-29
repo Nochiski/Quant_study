@@ -10,7 +10,7 @@
 
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 
 // ---------------------------------------------------------------------------
 // 체결 가격 규칙 (broker.execution_price와 동일)
@@ -154,10 +154,23 @@ struct Ledger {
 #[pyclass]
 struct Portfolio {
     cash: f64,
-    ledgers: BTreeMap<String, Ledger>,
-    marks: BTreeMap<String, f64>,
+    /// Python dict와 같은 삽입 순서를 유지한다 — 스냅샷 순서와 equity 합산 순서가 여기에 의존한다.
+    ledgers: Vec<(String, Ledger)>,
+    marks: HashMap<String, f64>,
     allow_short: bool,
     allow_margin: bool,
+}
+
+impl Portfolio {
+    fn ledger_index(&self, key: &str) -> Option<usize> {
+        self.ledgers.iter().position(|(k, _)| k == key)
+    }
+
+    fn remove_ledger(&mut self, key: &str) {
+        if let Some(index) = self.ledger_index(key) {
+            self.ledgers.remove(index);
+        }
+    }
 }
 
 #[pymethods]
@@ -167,8 +180,8 @@ impl Portfolio {
     fn new(initial_cash: f64, allow_short: bool, allow_margin: bool) -> Self {
         Self {
             cash: initial_cash,
-            ledgers: BTreeMap::new(),
-            marks: BTreeMap::new(),
+            ledgers: Vec::new(),
+            marks: HashMap::new(),
             allow_short,
             allow_margin,
         }
@@ -200,7 +213,10 @@ impl Portfolio {
         }
         let qty_f = quantity as f64;
         let notional = qty_f * price;
-        let old_quantity = self.ledgers.get(key).map(|l| l.quantity).unwrap_or(0);
+        let old_quantity = self
+            .ledger_index(key)
+            .map(|i| self.ledgers[i].1.quantity)
+            .unwrap_or(0);
         let signed = if buy { quantity } else { -quantity };
         let new_quantity = old_quantity + signed;
 
@@ -222,11 +238,12 @@ impl Portfolio {
         }
 
         if new_quantity == 0 {
-            self.ledgers.remove(key);
+            self.remove_ledger(key);
         } else {
             let crossed = old_quantity == 0 || (old_quantity > 0) != (new_quantity > 0);
-            match self.ledgers.get_mut(key) {
-                Some(ledger) if !crossed => {
+            match self.ledger_index(key) {
+                Some(index) if !crossed => {
+                    let ledger = &mut self.ledgers[index].1;
                     if new_quantity.abs() > old_quantity.abs() {
                         let old_abs = old_quantity.abs() as f64;
                         ledger.average_price = (old_abs * ledger.average_price + notional)
@@ -234,15 +251,20 @@ impl Portfolio {
                     }
                     ledger.quantity = new_quantity;
                 }
-                _ => {
-                    self.ledgers.insert(
-                        key.to_string(),
-                        Ledger {
-                            quantity: new_quantity,
-                            average_price: price,
-                        },
-                    );
+                Some(index) => {
+                    // 방향 전환: Python은 dict 항목을 덮어쓰므로 위치는 유지된다.
+                    self.ledgers[index].1 = Ledger {
+                        quantity: new_quantity,
+                        average_price: price,
+                    };
                 }
+                None => self.ledgers.push((
+                    key.to_string(),
+                    Ledger {
+                        quantity: new_quantity,
+                        average_price: price,
+                    },
+                )),
             }
         }
         self.cash = new_cash;
@@ -278,15 +300,16 @@ impl Portfolio {
         }
         self.cash += cash_paid;
         if new_quantity == 0 {
-            self.ledgers.remove(key);
+            self.remove_ledger(key);
         } else {
-            self.ledgers.insert(
-                key.to_string(),
-                Ledger {
-                    quantity: new_quantity,
-                    average_price: new_average_price,
-                },
-            );
+            let ledger = Ledger {
+                quantity: new_quantity,
+                average_price: new_average_price,
+            };
+            match self.ledger_index(key) {
+                Some(index) => self.ledgers[index].1 = ledger,
+                None => self.ledgers.push((key.to_string(), ledger)),
+            }
         }
         self.marks.insert(key.to_string(), settlement_price);
         Ok(())
@@ -305,20 +328,23 @@ impl Portfolio {
     }
 
     fn held_qty(&self, key: &str) -> i64 {
-        self.ledgers.get(key).map(|l| l.quantity).unwrap_or(0)
+        self.ledger_index(key)
+            .map(|i| self.ledgers[i].1.quantity)
+            .unwrap_or(0)
     }
 
     fn average_price(&self, key: &str) -> Option<f64> {
-        self.ledgers.get(key).map(|l| l.average_price)
+        self.ledger_index(key)
+            .map(|i| self.ledgers[i].1.average_price)
     }
 
-    /// 스냅샷: `(cash, [(key, quantity, average_price, market_price, market_value, unrealized_pnl)], equity, gross_exposure)`.
-    /// Python 구현과 같은 순서(보유 등록 순)를 위해 삽입 순서를 별도로 보존하지 않고
-    /// 키 정렬 순서를 쓴다 — 어댑터가 Python 원장 순서와 맞추는 책임을 진다.
+    /// 스냅샷: `(cash, positions, equity, gross_exposure)`. 포지션은 원장 삽입 순서(Python dict와
+    /// 동일)이고, equity·gross는 Python의 `cash + sum(mv)` / `sum(|mv|)`와 같은 결합 순서로
+    /// 누산한다 (비트 동일성).
     fn snapshot(&self) -> PyResult<SnapshotTuple> {
         let mut positions = Vec::with_capacity(self.ledgers.len());
-        let mut equity = self.cash;
-        let mut gross = 0.0;
+        let mut total_value = 0.0_f64;
+        let mut gross = 0.0_f64;
         for (key, ledger) in &self.ledgers {
             let mark = *self.marks.get(key).ok_or_else(|| {
                 PyValueError::new_err(format!("no mark price for held instrument — key={key}"))
@@ -326,7 +352,7 @@ impl Portfolio {
             let qty_f = ledger.quantity as f64;
             let market_value = qty_f * mark;
             let unrealized = (mark - ledger.average_price) * qty_f;
-            equity += market_value;
+            total_value += market_value;
             gross += market_value.abs();
             positions.push((
                 key.clone(),
@@ -337,6 +363,7 @@ impl Portfolio {
                 unrealized,
             ));
         }
+        let equity = self.cash + total_value;
         let gross_exposure = if equity != 0.0 { gross / equity } else { 0.0 };
         Ok((self.cash, positions, equity, gross_exposure))
     }

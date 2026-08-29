@@ -215,3 +215,74 @@ def test_engine_records_identical_across_cores(name: str) -> None:
     assert python.fills == rust.fills
     assert python.orders == rust.orders
     assert python.metrics == rust.metrics
+
+
+@RUST_ONLY
+def test_multi_instrument_equity_is_bit_identical_in_insertion_order() -> None:
+    """DEFECT-601/602: 포지션 2개 이상에서 합산 결합 순서와 삽입 순서가 Python과 같아야 한다."""
+    a, b, c = make_instrument("005930"), make_instrument("000660"), make_instrument("247540")
+
+    def scenario(portfolio: PortfolioLedger) -> tuple[object, ...]:
+        fills = (
+            (c, 3, 0.1),
+            (b, 3, 7.3),
+            (a, 155, 395.4286729267503),
+            (b, 841, 536.3461223023825),
+        )
+        for seq, (instrument, quantity, price) in enumerate(fills, start=1):
+            portfolio.apply(
+                FillEvent(
+                    fill_id=f"F-{seq:06d}",
+                    order_id="O-000001",
+                    ts=day(1),
+                    instrument=instrument,
+                    quantity=Decimal(quantity),
+                    side=Side.BUY,
+                    price=price,
+                    fee=0.0,
+                    slippage_per_share=0.0,
+                )
+            )
+        portfolio.mark(
+            make_snapshot(
+                day(2),
+                make_bar(day(2), a, 49.23813720318554, 49.23813720318554),
+                make_bar(day(2), b, 366.32322799567294, 366.32322799567294),
+                make_bar(day(2), c, 0.30000000000000004, 0.30000000000000004),
+            )
+        )
+        s = portfolio.snapshot(day(2))
+        return (s.cash, s.equity, s.gross_exposure, tuple(p.instrument.symbol for p in s.positions))
+
+    python = scenario(make_portfolio("python", 3_305_944.3718483075, allow_short=True))
+    rust = scenario(make_portfolio("rust", 3_305_944.3718483075, allow_short=True))
+    assert python == rust
+
+
+@RUST_ONLY
+def test_instruments_differing_only_in_currency_are_distinct_positions() -> None:
+    """DEFECT-603: venue:symbol만으로 키를 만들면 통화가 다른 종목이 합쳐진다."""
+    from backtest_engine.types.instruments import AssetClass, InstrumentId
+
+    krw = InstrumentId(venue="XKRX", symbol="005930", asset_class=AssetClass.EQUITY, currency="KRW")
+    usd = InstrumentId(venue="XKRX", symbol="005930", asset_class=AssetClass.EQUITY, currency="USD")
+    results = []
+    for core_name in ("python", "rust"):
+        portfolio = make_portfolio(core_name, 1_000_000.0)
+        for seq, instrument in enumerate((krw, usd), start=1):
+            portfolio.apply(
+                FillEvent(
+                    fill_id=f"F-{seq:06d}",
+                    order_id="O-000001",
+                    ts=day(1),
+                    instrument=instrument,
+                    quantity=Decimal(10),
+                    side=Side.BUY,
+                    price=100.0,
+                    fee=0.0,
+                    slippage_per_share=0.0,
+                )
+            )
+        s = portfolio.snapshot(day(1))
+        results.append((len(s.positions), s.equity))
+    assert results[0] == results[1] == (2, 1_000_000.0)

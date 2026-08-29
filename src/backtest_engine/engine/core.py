@@ -102,21 +102,23 @@ class RustPricing:
 
 
 def _key(instrument: InstrumentId) -> str:
-    return f"{instrument.venue}:{instrument.symbol}"
+    """InstrumentId의 모든 필드를 담는다 — 통화·자산군만 다른 종목이 합쳐지면 안 된다."""
+    return (
+        f"{instrument.venue}:{instrument.symbol}:{instrument.asset_class.value}:"
+        f"{instrument.currency}"
+    )
 
 
 class RustPortfolio:
     """`backtest_core.Portfolio` 어댑터. 도메인 타입 변환·Decimal 산술·예외 매핑을 맡는다.
 
-    Python 원장은 dict 삽입 순서로 포지션을 나열하므로 같은 순서를 여기서 유지한다
-    (청산 후 재진입하면 맨 뒤로).
+    포지션 순서·equity 합산 순서는 Rust 원장이 Python dict와 같은 삽입 순서로 보존한다.
     """
 
     def __init__(self, initial_cash: float, *, allow_short: bool, allow_margin: bool) -> None:
         core = importlib.import_module("backtest_core")
         self._inner = core.Portfolio(initial_cash, allow_short, allow_margin)
         self._instruments: dict[str, InstrumentId] = {}
-        self._order: list[str] = []
 
     def apply(self, fill: FillEvent) -> None:
         if fill.quantity != fill.quantity.to_integral_value():
@@ -139,7 +141,6 @@ class RustPortfolio:
                 ) from error
             raise
         self._instruments.setdefault(key, fill.instrument)
-        self._sync_order(key)
 
     def charge(self, cost: CostAccrued) -> None:
         self._inner.charge(cost.amount)
@@ -169,7 +170,6 @@ class RustPortfolio:
         self._inner.apply_corporate_action(
             key, int(new_quantity), new_average, cash_paid, settlement_price
         )
-        self._sync_order(key)
         return CorporateActionApplied(
             ts=settled_at if settled_at is not None else action.ts,
             instrument=action.instrument,
@@ -195,29 +195,21 @@ class RustPortfolio:
 
     def snapshot(self, ts: datetime) -> PortfolioSnapshot:
         cash, rows, equity, gross_exposure = self._inner.snapshot()
-        by_key = {row[0]: row for row in rows}
+        # Rust 원장이 삽입 순서를 보존하므로 행 순서가 곧 Python dict 순서다.
         positions = tuple(
             Position(
                 instrument=self._instruments[key],
-                quantity=Decimal(by_key[key][1]),
-                average_price=by_key[key][2],
-                market_price=by_key[key][3],
-                market_value=by_key[key][4],
-                unrealized_pnl=by_key[key][5],
+                quantity=Decimal(quantity),
+                average_price=average_price,
+                market_price=market_price,
+                market_value=market_value,
+                unrealized_pnl=unrealized_pnl,
             )
-            for key in self._order
+            for key, quantity, average_price, market_price, market_value, unrealized_pnl in rows
         )
         return PortfolioSnapshot(
             ts=ts, cash=cash, positions=positions, equity=equity, gross_exposure=gross_exposure
         )
-
-    def _sync_order(self, key: str) -> None:
-        held = self._inner.held_qty(key)
-        if held == 0:
-            if key in self._order:
-                self._order.remove(key)
-        elif key not in self._order:
-            self._order.append(key)
 
 
 def make_pricing(core: str) -> ExecutionPricing:

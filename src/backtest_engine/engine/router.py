@@ -78,6 +78,21 @@ from backtest_engine.types.portfolio import PortfolioSnapshot
 from backtest_engine.types.requirements import EngineFeature
 
 
+def _time_in_force_of(action: StrategyAction) -> TimeInForce:
+    """목표·증감·청산 액션은 ExecutionPolicy의 TIF를 따른다 (Zipline 대조에서 드러난 결함:
+    GTC 정책인데 DAY 주문이 나가 참여율 캡 잔량이 이월되지 않았다)."""
+    match action:
+        case (
+            SetPortfolioTarget(execution=execution)
+            | SetPositionTarget(execution=execution)
+            | AdjustPosition(execution=execution)
+            | LiquidatePosition(execution=execution)
+        ):
+            return execution.time_in_force
+        case _:
+            return TimeInForce.DAY
+
+
 @dataclass(frozen=True)
 class RoutingResult:
     orders: tuple[OrderEvent, ...]
@@ -422,6 +437,7 @@ class DecisionRouter:
                 quantity=quantity,
                 side=side,
                 source_action=action,
+                time_in_force=_time_in_force_of(action),
             )
         ]
 
@@ -568,5 +584,6 @@ class DecisionRouter:
                 quantity=abs(held),
                 side=Side.SELL if held > 0 else Side.BUY,  # 숏 포지션은 매수로 청산
                 source_action=action,
+                time_in_force=action.execution.time_in_force,
             )
         ]

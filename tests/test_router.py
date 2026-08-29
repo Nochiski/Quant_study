@@ -550,3 +550,27 @@ def test_replace_unknown_order_id_aborts_run() -> None:
     action = ReplaceOrder(order_id="O-424242", replacement=MarketOrderRequest(core=core(Side.BUY)))
     with pytest.raises(UnknownOrderId, match="O-424242"):
         route_one(action, portfolio_with(100_000))
+
+
+def test_target_orders_carry_execution_policy_time_in_force() -> None:
+    """Zipline 대조에서 발견: GTC 정책 목표 주문이 DAY로 나가 참여율 캡 잔량이 이월되지 않았다."""
+    gtc = ExecutionPolicy(ExecutionStyle.MARKET, ExecutionTiming.NEXT_OPEN, TimeInForce.GTC)
+    target = SetPositionTarget(target=QuantityTarget(INSTRUMENT, Decimal(5)), execution=gtc)
+    (order,) = route_one(target, portfolio_with(100_000))
+    assert order.time_in_force is TimeInForce.GTC
+    liquidate = LiquidatePosition(
+        instrument=INSTRUMENT,
+        execution=gtc,
+        cancel_open_orders=False,
+        persistence=LiquidationPersistence.ONCE,
+    )
+    (order,) = route_one(liquidate, portfolio_with(0.0, {INSTRUMENT: (3, 100.0)}))
+    assert order.time_in_force is TimeInForce.GTC
+    (order,) = route_one(
+        SetPositionTarget(
+            target=QuantityTarget(INSTRUMENT, Decimal(5)),
+            execution=ExecutionPolicy.market_next_open(),
+        ),
+        portfolio_with(100_000),
+    )
+    assert order.time_in_force is TimeInForce.DAY

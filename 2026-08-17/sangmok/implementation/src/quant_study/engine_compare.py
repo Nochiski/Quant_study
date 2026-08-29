@@ -4,7 +4,10 @@
 - 판단: 세션 T 마감, 종가 기준. 체결: 다음 실제 세션 시가, 시장가 전량.
 - 수량: backtest_engine.sizing.floor_delta_shares (단일 진실 원천을 공유).
 - 수수료: 체결 금액 × fee_bps (Zipline은 PerDollar).
-- 슬리피지 없음.
+- 슬리피지: 기본 시나리오는 없음. `buy-hold-slippage`는 양쪽에 같은 거래량 비중 충격 모델
+  (share² × price_impact × price, share = min(체결량/거래량, volume_limit))을 두되 가격 기준은
+  다음 bar 시가로 통일한다 (Zipline 기본 VolumeShareSlippage는 종가 기준).
+- 공매도: `short-hold`는 비중 −allocation 단일 진입. 차입 비용 0 (Zipline도 없음).
 
 Zipline 쪽 차이 흡수:
 - FixedSlippage는 다음 bar 종가에 체결되므로, 다음 bar 시가에 체결하는
@@ -24,10 +27,13 @@ from enum import StrEnum
 import pandas as pd
 from backtest_engine import BacktestEngine, RunConfig
 from backtest_engine.data.feed import DataFeed
+from backtest_engine.engine.slippage import VolumeShareSlippage
 from backtest_engine.sizing import floor_delta_shares
 from backtest_engine.types.actions import (
     ActionKind,
     ExecutionPolicy,
+    ExecutionStyle,
+    ExecutionTiming,
     SetPortfolioTarget,
     TargetScope,
     WeightTarget,
@@ -36,7 +42,9 @@ from backtest_engine.types.decision import StrategyDecision
 from backtest_engine.types.events import StrategyEvent
 from backtest_engine.types.instruments import AssetClass, InstrumentId
 from backtest_engine.types.market import Bar, MarketSnapshot, PriceField
+from backtest_engine.types.orders import TimeInForce
 from backtest_engine.types.requirements import (
+    EngineFeature,
     EventKind,
     EverySession,
     HistoryRequest,
@@ -53,6 +61,8 @@ from zipline.utils.calendar_utils import get_calendar
 class CompareScenario(StrEnum):
     BUY_HOLD = "buy-hold"
     GOLDEN_CROSS = "golden-cross"
+    BUY_HOLD_SLIPPAGE = "buy-hold-slippage"  # 4d 슬리피지 모델 대조
+    SHORT_HOLD = "short-hold"  # 5a 공매도 회계 대조
 
 
 @dataclass(frozen=True)
@@ -63,6 +73,8 @@ class CompareParams:
     allocation: float = 0.7  # 1.0이면 수수료 때문에 현금 경계에서 두 엔진이 갈라진다
     capital_base_krw: float = 10_000_000.0
     fee_bps: float = 15.0
+    volume_limit: float = 0.025  # buy-hold-slippage: 세션 거래량 대비 체결 상한 = 참여율 캡
+    price_impact: float = 0.1
 
 
 # --- 커스텀 엔진 쪽 전략 ------------------------------------------------------
@@ -75,7 +87,7 @@ class EngineCompareStrategy:
         self._instrument = instrument
         self._scenario = scenario
         self._params = params
-        lookback = 1 if scenario is CompareScenario.BUY_HOLD else params.long_window_days
+        lookback = params.long_window_days if scenario is CompareScenario.GOLDEN_CROSS else 1
         self.prices = HistoryRequest(
             instruments=(instrument,), field=PriceField.CLOSE, lookback=lookback
         )
@@ -87,18 +99,31 @@ class EngineCompareStrategy:
             schedule=EverySession(),
             events=frozenset({EventKind.MARKET}),
             actions=frozenset({ActionKind.NO_ACTION, ActionKind.SET_PORTFOLIO_TARGET}),
-            features=frozenset(),
+            features=frozenset(
+                {EngineFeature.SHORT_SELLING}
+                if self._scenario is CompareScenario.SHORT_HOLD
+                else ()
+            )
+            | frozenset(
+                {EngineFeature.PARTIAL_FILL}
+                if self._scenario is CompareScenario.BUY_HOLD_SLIPPAGE
+                else ()
+            ),
         )
 
     def on_event(self, ctx: StrategyContext, event: StrategyEvent) -> StrategyDecision:
         if not isinstance(event, MarketSnapshot):
             return StrategyDecision.no_action(ctx.now, "market_event_only")
 
-        if self._scenario is CompareScenario.BUY_HOLD:
+        if self._scenario is not CompareScenario.GOLDEN_CROSS:
             if self._entered:
                 return StrategyDecision.no_action(ctx.now, "holding")
             self._entered = True
-            target_weight = self._params.allocation
+            target_weight = (
+                -self._params.allocation
+                if self._scenario is CompareScenario.SHORT_HOLD
+                else self._params.allocation
+            )
         else:
             closes = ctx.history(self.prices).column(self._instrument)
             short_ma = float(closes[-self._params.short_window_days :].mean())
@@ -110,10 +135,21 @@ class EngineCompareStrategy:
             SetPortfolioTarget(
                 targets=(WeightTarget(self._instrument, target_weight),),
                 scope=TargetScope.PATCH,
-                execution=ExecutionPolicy.market_next_open(),
+                execution=self._execution(),
             ),
             reason=self._scenario.value,
         )
+
+    def _execution(self) -> ExecutionPolicy:
+        if self._scenario is CompareScenario.BUY_HOLD_SLIPPAGE:
+            # Zipline VolumeShareSlippage처럼 세션 거래량 × volume_limit까지만 체결하고 잔량은 이월.
+            return ExecutionPolicy(
+                ExecutionStyle.MARKET,
+                ExecutionTiming.NEXT_OPEN,
+                TimeInForce.GTC,
+                max_participation=self._params.volume_limit,
+            )
+        return ExecutionPolicy.market_next_open()
 
 
 def run_engine_side(
@@ -121,12 +157,18 @@ def run_engine_side(
 ) -> dict[date, float]:
     """커스텀 엔진을 실행해 세션 날짜 → equity 매핑을 반환한다."""
     instrument = bars[0].instrument
+    slippage = (
+        VolumeShareSlippage(volume_limit=params.volume_limit, price_impact=params.price_impact)
+        if scenario is CompareScenario.BUY_HOLD_SLIPPAGE
+        else None
+    )
     engine = BacktestEngine(
         RunConfig(
             run_id=f"compare-{params.ticker}-{scenario.value}",
             initial_cash=params.capital_base_krw,
             fee_bps=params.fee_bps,
-        )
+        ),
+        slippage=slippage,
     )
     result = engine.run(EngineCompareStrategy(instrument, scenario, params), DataFeed(bars))
     return {snapshot.ts.date(): snapshot.equity for snapshot in result.snapshots}
@@ -139,6 +181,33 @@ def make_compare_instrument(ticker: str) -> InstrumentId:
 # --- Zipline 쪽 ---------------------------------------------------------------
 
 
+class NextBarOpenVolumeShareSlippage(SlippageModel):
+    """Zipline VolumeShareSlippage의 식을 다음 bar 시가 기준으로 적용한다.
+
+    체결량 = min(잔량, volume_limit × 거래량), 충격 = share² × price_impact × open
+    (share = 체결량 / 거래량). 커스텀 엔진의 VolumeShareSlippage + max_participation과 동일.
+    """
+
+    def __init__(self, volume_limit: float, price_impact: float) -> None:
+        super().__init__()
+        self._volume_limit = volume_limit
+        self._price_impact = price_impact
+
+    def process_order(self, data, order_obj):  # noqa: ANN001  # reason: zipline 콜백 시그니처
+        open_price = data.current(order_obj.asset, "open")
+        volume = data.current(order_obj.asset, "volume")
+        if open_price is None or math.isnan(open_price) or volume is None or math.isnan(volume):
+            raise LiquidityExceeded()
+        remaining = abs(order_obj.amount - order_obj.filled)
+        max_volume = int(volume * self._volume_limit)
+        fill = min(remaining, max_volume)
+        if fill <= 0:
+            raise LiquidityExceeded()
+        share = min(fill / volume, self._volume_limit)
+        impact = share * share * math.copysign(self._price_impact, order_obj.amount) * open_price
+        return open_price + impact, int(math.copysign(fill, order_obj.amount))
+
+
 class NextBarOpenSlippage(SlippageModel):
     """다음 bar의 시가에 전량 체결. 시가가 NaN인 캘린더 전용 세션은 미룬다."""
 
@@ -149,7 +218,9 @@ class NextBarOpenSlippage(SlippageModel):
         return open_price, order_obj.amount
 
 
-def make_compare_initialize(ticker: str, fee_bps: float):
+def make_compare_initialize(
+    ticker: str, fee_bps: float, scenario: CompareScenario, params: CompareParams
+):
     def initialize(context) -> None:  # noqa: ANN001  # reason: zipline 콜백 시그니처
         context.asset = symbol(ticker)
         context.entered = False
@@ -157,7 +228,12 @@ def make_compare_initialize(ticker: str, fee_bps: float):
         context.calendar_bars = 0
         set_benchmark(context.asset)
         set_commission(us_equities=commission.PerDollar(cost=fee_bps / 10_000))
-        set_slippage(us_equities=NextBarOpenSlippage())
+        if scenario is CompareScenario.BUY_HOLD_SLIPPAGE:
+            set_slippage(
+                us_equities=NextBarOpenVolumeShareSlippage(params.volume_limit, params.price_impact)
+            )
+        else:
+            set_slippage(us_equities=NextBarOpenSlippage())
 
     return initialize
 
@@ -177,11 +253,13 @@ def make_compare_handle_data(scenario: CompareScenario, params: CompareParams):
             # 커스텀 엔진 로더는 같은 행을 drop하므로 여기서도 세션이 아닌 것으로 본다.
             return
 
-        if scenario is CompareScenario.BUY_HOLD:
+        if scenario is not CompareScenario.GOLDEN_CROSS:
             if context.entered:
                 return
             context.entered = True
-            target_weight = params.allocation
+            target_weight = (
+                -params.allocation if scenario is CompareScenario.SHORT_HOLD else params.allocation
+            )
         else:
             window = data.history(
                 context.asset,
@@ -208,6 +286,8 @@ def make_compare_handle_data(scenario: CompareScenario, params: CompareParams):
             return
         if delta_notional > 0:
             order(context.asset, shares)
+        elif scenario is CompareScenario.SHORT_HOLD:
+            order(context.asset, -shares)  # 보유 없이 매도 = 공매도 진입
         else:
             sell_shares = min(shares, held)
             if sell_shares > 0:
@@ -229,7 +309,7 @@ def run_zipline_side(
         end=pd.Timestamp(frame.index.max()),
         # 기본값은 XNYS(뉴욕) 캘린더라 한국 휴일에 유령 세션이 생긴다.
         trading_calendar=get_calendar("XKRX"),
-        initialize=make_compare_initialize(params.ticker, params.fee_bps),
+        initialize=make_compare_initialize(params.ticker, params.fee_bps, scenario, params),
         handle_data=make_compare_handle_data(scenario, params),
         capital_base=params.capital_base_krw,
         data_frequency="daily",

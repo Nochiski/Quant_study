@@ -119,6 +119,16 @@ Python 엔진은 4·5·D 단계로 방금 크게 바뀌었으므로 전부를 �
 - `parse_decimal_ratio`/`liquidity_cap`은 checked 산술(오버플로는 ValueError), `ExecutionPolicy`가
   `max_participation ∈ (0, 1]`을 생성 시 검증.
 
+## Zipline 대조 확장 (2026-08-29, 4d·5a 스펙에서 보류했던 항목 해소)
+
+- 원본 CSV는 레포의 KRX 원장 슬라이스(005930, 2018-06-01→2024-12-30)에서 생성한다 — 외부 데이터 불필요.
+- 하네스에 `buy-hold-slippage`(VolumeShare 슬리피지 + 참여율 캡, GTC 이월)와 `short-hold`(비중 −0.7
+  공매도)를 추가. Zipline 쪽은 다음 bar 시가 기준 `NextBarOpenVolumeShareSlippage`로 정렬.
+- 결과: 4개 시나리오 모두 최대 상대 오차 0. 스트레스(캡 48주·충격 24%)도 0.
+- 부수 결함 수정: 라우터가 목표·증감·청산 주문에 `ExecutionPolicy.time_in_force`를 전달하지 않아
+  GTC 정책 잔량이 이월되지 않던 문제 (`tests/test_router.py::test_target_orders_carry_execution_policy_time_in_force`).
+  상세는 `tests/manual/README.md`.
+
 ## 다음 단계
 
 6d(선택): 이벤트 큐·세션 종료·스냅샷 생성까지 Rust로 옮기고 Python 경계를 "전략 호출 배치"로

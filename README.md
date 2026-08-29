@@ -105,5 +105,6 @@ uv run python examples/run_krx_demo.py --core rust      # Rust 코어로 같은 
 
 ## 검증: Zipline 대조
 
-엔진 회계는 Zipline과의 세션 단위 equity 대조로 검증됐다 (buy-hold 오차 0,
-골든크로스 최대 3e-16). 실행 방법과 리포트는 `tests/manual/README.md` 참고.
+엔진 회계는 Zipline과의 세션 단위 equity 대조로 검증됐다 — buy-hold, 골든크로스, 슬리피지
+(VolumeShare + 참여율 캡·GTC 이월), 공매도 buy-hold 네 시나리오 모두 최대 상대 오차 0
+(1,619세션, KRX 원장 슬라이스에서 생성한 CSV). 실행 방법과 리포트는 `tests/manual/README.md` 참고.

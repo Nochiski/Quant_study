@@ -63,6 +63,18 @@ class ExecutionOutcome:
 
 
 @dataclass(frozen=True)
+class Quote:
+    """체결 전 견적: 이 세션에 이 가격으로 이만큼 체결된다 (quantity 0 = 체결 없음)."""
+
+    order_id: str
+    price: float
+    quantity: Decimal
+    slippage_per_share: float
+    status: ExecutionStatus
+    detail: str | None
+
+
+@dataclass(frozen=True)
 class PriceDecision:
     price: float | None  # None이면 이 세션에 체결 없음
     triggered: bool  # STOP/STOP_LIMIT이 이 세션에 발동했는가
@@ -156,12 +168,20 @@ class BrokerSim:
         buying_power: float,
         fill_id: str,
     ) -> ExecutionOutcome:
-        """대기 주문 하나를 해당 세션 bar로 체결 시도한다.
+        """대기 주문 하나를 해당 세션 bar로 체결 시도한다 (quote → fill).
 
         buying_power는 같은 세션에서 앞서 처리된 주문까지 반영한 매수 여력이다
         (MARGIN 없음: 현금, MARGIN: max_gross_leverage × equity − 총노출).
         매도 먼저, 매수 나중 규칙은 호출 측 책임.
         """
+        quote = self.quote(open_order, bar, buying_power)
+        if quote.quantity <= 0:
+            return ExecutionOutcome(fill=None, status=quote.status, detail=quote.detail)
+        fill = self.fill(quote, open_order, bar, fill_id)
+        return ExecutionOutcome(fill=fill, status=quote.status, detail=quote.detail)
+
+    def quote(self, open_order: OpenOrder, bar: Bar, buying_power: float) -> Quote:
+        """체결 없이 "이 세션에 얼마에 몇 주 체결되는가"만 정한다. quantity 0이면 체결 없음."""
         order = open_order.order
         decision = execution_price(order, bar, open_order.triggered)
         if decision.price is None:
@@ -170,7 +190,7 @@ class BrokerSim:
                 if decision.triggered
                 else ExecutionStatus.NOT_FILLED
             )
-            return ExecutionOutcome(fill=None, status=status)
+            return Quote(order.order_id, 0.0, Decimal(0), 0.0, status, None)
         base_price = decision.price
 
         quantity = open_order.remaining
@@ -180,10 +200,13 @@ class BrokerSim:
         liquidity_cap = self._liquidity_cap(order, bar)
         if liquidity_cap is not None and liquidity_cap < quantity:
             if liquidity_cap <= 0:
-                return ExecutionOutcome(
-                    fill=None,
-                    status=ExecutionStatus.NOT_FILLED,
-                    detail=(
+                return Quote(
+                    order.order_id,
+                    base_price,
+                    Decimal(0),
+                    0.0,
+                    ExecutionStatus.NOT_FILLED,
+                    (
                         f"no liquidity in session — order_id={order.order_id} "
                         f"instrument={order.instrument.symbol} volume={bar.volume} ts={bar.ts}"
                     ),
@@ -196,16 +219,19 @@ class BrokerSim:
                 f"cap={liquidity_cap} volume={bar.volume}"
             )
 
-        # 슬리피지는 실제 체결 수량에 의존하므로 유동성 캡 이후, 현금 캡 이전에 정한다.
+        # 슬리피지는 실제 체결 수량에 의존하므로 유동성 캡 이후, 여력 캡 이전에 정한다.
         price, slip = self._slipped_price(order, bar, base_price, quantity)
 
         if order.side is Side.BUY:
             affordable = self._affordable_quantity(buying_power, price)
             if affordable <= 0:
-                return ExecutionOutcome(
-                    fill=None,
-                    status=ExecutionStatus.REJECTED_NO_CASH,
-                    detail=(
+                return Quote(
+                    order.order_id,
+                    price,
+                    Decimal(0),
+                    slip,
+                    ExecutionStatus.REJECTED_NO_CASH,
+                    (
                         f"cannot afford a single share — order_id={order.order_id} "
                         f"instrument={order.instrument.symbol} price={price} "
                         f"buying_power={buying_power}"
@@ -221,29 +247,48 @@ class BrokerSim:
                 )
 
         if order.time_in_force is TimeInForce.FOK and quantity < open_order.remaining:
-            return ExecutionOutcome(
-                fill=None,
-                status=ExecutionStatus.FOK_REJECTED,
-                detail=(
+            return Quote(
+                order.order_id,
+                price,
+                Decimal(0),
+                slip,
+                ExecutionStatus.FOK_REJECTED,
+                (
                     f"FOK not fillable in full — order_id={order.order_id} "
                     f"instrument={order.instrument.symbol} remaining={open_order.remaining} "
                     f"fillable={quantity} ({detail})"
                 ),
             )
+        return Quote(order.order_id, price, quantity, slip, status, detail)
 
-        notional = float(quantity) * price
-        fill = FillEvent(
+    def fill(
+        self,
+        quote: Quote,
+        open_order: OpenOrder,
+        bar: Bar,
+        fill_id: str,
+        quantity: Decimal | None = None,
+    ) -> FillEvent:
+        """견적을 체결 기록으로 만든다. quantity로 견적보다 적게(바스켓 비례 축소) 체결 가능."""
+        order = open_order.order
+        filled = quote.quantity if quantity is None else quantity
+        if filled <= 0 or filled > quote.quantity:
+            raise ValueError(
+                f"fill quantity must be within (0, quoted] — order_id={order.order_id} "
+                f"requested={filled} quoted={quote.quantity}"
+            )
+        notional = float(filled) * quote.price
+        return FillEvent(
             fill_id=fill_id,
             order_id=order.order_id,
             ts=bar.ts,
             instrument=order.instrument,
-            quantity=quantity,
+            quantity=filled,
             side=order.side,
-            price=price,
+            price=quote.price,
             fee=self.fee_for(notional),
-            slippage_per_share=slip,
+            slippage_per_share=quote.slippage_per_share,
         )
-        return ExecutionOutcome(fill=fill, status=status, detail=detail)
 
     def _liquidity_cap(self, order: OrderEvent, bar: Bar) -> Decimal | None:
         participation = participation_of(order)

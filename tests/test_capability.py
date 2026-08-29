@@ -84,15 +84,30 @@ def test_golden_cross_requirements_pass() -> None:
     assert report.violations == ()
 
 
-def test_pairs_requirements_collect_all_violations() -> None:
+def test_pairs_requirements_pass_after_step_5() -> None:
+    """설계 노트의 페어 전략 요구(BASKET·공매도·비례 체결)는 5단계 이후 전부 IMPLEMENTED다."""
     report = validate_requirements(pairs_requirements(), reference_engine_capabilities())
+    assert report.ok, report.violations
+
+
+def unsupported_requirements() -> StrategyRequirements:
+    """아직 NOT_IMPLEMENTED인 축(TIMER 이벤트, MonthEndSession)만 요구."""
+    base = golden_cross_requirements()
+    return StrategyRequirements(
+        histories=base.histories,
+        schedule=MonthEndSession(),
+        events=frozenset({EventKind.MARKET, EventKind.TIMER}),
+        actions=base.actions,
+        features=frozenset(),
+    )
+
+
+def test_unsupported_requirements_collect_all_violations() -> None:
+    report = validate_requirements(unsupported_requirements(), reference_engine_capabilities())
     assert not report.ok
     names = {(violation.category, violation.name) for violation in report.violations}
-    assert (ViolationCategory.ACTION, "basket") in names
-    assert (ViolationCategory.FEATURE, "proportional_basket") in names
-    # SET_POSITION_TARGET(4a)·SHORT_SELLING(5a)은 승격됐으므로 위반이 아니다.
-    assert (ViolationCategory.ACTION, "set_position_target") not in names
-    assert (ViolationCategory.FEATURE, "short_selling") not in names
+    assert (ViolationCategory.EVENT, "timer") in names
+    assert (ViolationCategory.SCHEDULE, "MonthEndSession") in names
     # 첫 위반에서 멈추지 않고 전부 수집한다.
     assert len(report.violations) == 2
 
@@ -110,12 +125,12 @@ def test_month_end_schedule_not_implemented() -> None:
 
 
 def test_prepare_strategy_rejects_before_any_event() -> None:
-    strategy = _RequirementsOnlyStrategy(pairs_requirements())
+    strategy = _RequirementsOnlyStrategy(unsupported_requirements())
     with pytest.raises(CapabilityNotImplemented) as excinfo:
         prepare_strategy(strategy, reference_engine_capabilities())
     message = str(excinfo.value)
-    assert "basket" in message
-    assert "proportional_basket" in message
+    assert "timer" in message
+    assert "MonthEndSession" in message
     assert not strategy.on_event_called
 
 
@@ -142,6 +157,7 @@ def test_reference_capabilities_are_honest() -> None:
         ActionKind.SUBMIT_ORDER,
         ActionKind.CANCEL_ORDER,
         ActionKind.REPLACE_ORDER,
+        ActionKind.BASKET,
     }
     implemented_events = {
         capability.kind
@@ -165,6 +181,7 @@ def test_reference_capabilities_are_honest() -> None:
         EngineFeature.PARTIAL_FILL,
         EngineFeature.SHORT_SELLING,
         EngineFeature.MARGIN,
+        EngineFeature.PROPORTIONAL_BASKET,
     }
 
 

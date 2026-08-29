@@ -23,10 +23,10 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 
-from backtest_engine.engine.orders import OrderManager
+from backtest_engine.engine.orders import BasketGroup, OrderManager
 from backtest_engine.errors import (
     CapabilityNotImplemented,
     SchemaVersionMismatch,
@@ -39,9 +39,11 @@ from backtest_engine.sizing import floor_delta_shares
 from backtest_engine.types.actions import (
     ActionKind,
     AdjustPosition,
+    BasketAction,
     CancelOrder,
     ExecutionPolicy,
     ExecutionStyle,
+    GroupPolicy,
     LiquidatePosition,
     NoAction,
     NotionalDelta,
@@ -80,6 +82,7 @@ from backtest_engine.types.requirements import EngineFeature
 class RoutingResult:
     orders: tuple[OrderEvent, ...]
     updates: tuple[OrderUpdateEvent, ...]  # 취소·정정으로 즉시 바뀐 기존 주문 상태
+    groups: tuple[BasketGroup, ...] = ()  # BasketAction에서 만들어진 leg 그룹
 
 
 class DecisionRouter:
@@ -112,6 +115,7 @@ class DecisionRouter:
         orders: list[OrderEvent] = []
         updates: list[OrderUpdateEvent] = []
         self._routed_sells = defaultdict(Decimal)
+        groups: list[BasketGroup] = []
         for action in decision.actions:
             kind = kind_of(action)
             if kind not in self._declared_actions:
@@ -120,8 +124,54 @@ class DecisionRouter:
                     f"declared={sorted(k.value for k in self._declared_actions)} "
                     f"decision_id={decision_id} as_of={decision.as_of}"
                 )
-            orders.extend(self._route_action(action, decision_id, portfolio, market, updates))
-        return RoutingResult(orders=tuple(orders), updates=tuple(updates))
+            if isinstance(action, BasketAction):
+                group, legs = self._basket(action, decision_id, portfolio, market, updates)
+                groups.append(group)
+                orders.extend(legs)
+            else:
+                orders.extend(self._route_action(action, decision_id, portfolio, market, updates))
+        return RoutingResult(orders=tuple(orders), updates=tuple(updates), groups=tuple(groups))
+
+    def _basket(
+        self,
+        action: BasketAction,
+        decision_id: str,
+        portfolio: PortfolioSnapshot,
+        market: MarketSnapshot,
+        updates: list[OrderUpdateEvent],
+    ) -> tuple[BasketGroup, list[OrderEvent]]:
+        if action.group_policy is GroupPolicy.PROPORTIONAL:
+            self._require_feature(
+                EngineFeature.PROPORTIONAL_BASKET,
+                f"group_policy={action.group_policy.value}",
+                decision_id,
+            )
+        seen: set[InstrumentId] = set()
+        for leg in action.legs:
+            instrument = (
+                leg.request.core.instrument
+                if isinstance(leg, SubmitOrder)
+                else (
+                    leg.target.instrument if isinstance(leg, SetPositionTarget) else leg.instrument
+                )
+            )
+            if instrument in seen:
+                raise ValueError(
+                    f"duplicate instrument in basket — instrument={instrument.symbol} "
+                    f"decision_id={decision_id}"
+                )
+            seen.add(instrument)
+        group_id = self._order_manager.next_group_id()
+        legs: list[OrderEvent] = []
+        for leg in action.legs:
+            for order in self._route_action(leg, decision_id, portfolio, market, updates):
+                legs.append(replace(order, group_id=group_id))
+        group = BasketGroup(
+            group_id=group_id,
+            policy=action.group_policy,
+            order_ids=tuple(order.order_id for order in legs),
+        )
+        return group, legs
 
     def _route_action(
         self,

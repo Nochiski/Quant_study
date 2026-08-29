@@ -34,7 +34,6 @@ from backtest_engine.types.events import OrderStatus, StrategyEvent
 from backtest_engine.types.market import Bar, PriceField
 from backtest_engine.types.orders import Side
 from backtest_engine.types.requirements import (
-    EngineFeature,
     EventKind,
     EverySession,
     HistoryRequest,
@@ -188,7 +187,7 @@ class TestGoldenRun:
 class TestEngineContracts:
     def test_capability_gate_rejects_before_loop(self) -> None:
         engine = BacktestEngine(RunConfig(run_id="gate", initial_cash=100_000.0))
-        # requirements에 미구현 BASKET + PROPORTIONAL_BASKET을 요구하도록 재구성
+        # 미구현 TIMER 이벤트를 요구하도록 재구성 (5단계 이후 남은 NOT_IMPLEMENTED 축)
 
         class Rejected(ScriptedStrategy):
             def requirements(self) -> StrategyRequirements:
@@ -196,14 +195,14 @@ class TestEngineContracts:
                 return StrategyRequirements(
                     histories=base.histories,
                     schedule=base.schedule,
-                    events=base.events,
-                    actions=frozenset({ActionKind.BASKET}),
-                    features=frozenset({EngineFeature.PROPORTIONAL_BASKET}),
+                    events=frozenset({EventKind.MARKET, EventKind.TIMER}),
+                    actions=base.actions,
+                    features=base.features,
                 )
 
-        strategy = Rejected(script=(), declared_actions=frozenset({ActionKind.BASKET}))
+        strategy = Rejected(script=())
 
-        with pytest.raises(CapabilityNotImplemented, match="proportional_basket"):
+        with pytest.raises(CapabilityNotImplemented, match="timer"):
             engine.run(strategy, DataFeed(GOLDEN_BARS))
         assert strategy.calls == 0  # 데이터 루프 전에 거절됐다
 

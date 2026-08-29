@@ -112,6 +112,7 @@ class OrderEvent:
     limit_price: Decimal | None = None
     stop_price: Decimal | None = None
     time_in_force: TimeInForce = TimeInForce.DAY
+    group_id: str | None = None  # BasketAction의 leg면 같은 그룹 id (5c)
 
     def __post_init__(self) -> None:
         if self.quantity <= 0:

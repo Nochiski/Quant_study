@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from datetime import datetime
-from decimal import Decimal
+from decimal import ROUND_FLOOR, Decimal
 
 from backtest_engine.capability import (
     EngineCapabilities,
@@ -26,11 +26,11 @@ from backtest_engine.capability import (
 )
 from backtest_engine.data.feed import DataFeed
 from backtest_engine.engine import calendar
-from backtest_engine.engine.broker import BrokerSim, ExecutionStatus
+from backtest_engine.engine.broker import BrokerSim, ExecutionStatus, Quote
 from backtest_engine.engine.context import EngineStrategyContext, HistoryStore
 from backtest_engine.engine.costs import session_costs
 from backtest_engine.engine.metrics import compute_metrics
-from backtest_engine.engine.orders import OrderManager
+from backtest_engine.engine.orders import BasketGroup, OpenOrder, OrderManager
 from backtest_engine.engine.portfolio import Portfolio
 from backtest_engine.engine.queue import (
     EventPriority,
@@ -51,6 +51,7 @@ from backtest_engine.errors import (
 )
 from backtest_engine.ports.execution import SlippageModel
 from backtest_engine.ports.universe import UniverseResult
+from backtest_engine.types.actions import GroupPolicy
 from backtest_engine.types.events import (
     CorporateActionEvent,
     CorporateActionType,
@@ -59,6 +60,7 @@ from backtest_engine.types.events import (
     OrderUpdateEvent,
     StrategyEvent,
 )
+from backtest_engine.types.instruments import InstrumentId
 from backtest_engine.types.market import MarketSnapshot
 from backtest_engine.types.orders import OrderType, Side, TimeInForce
 from backtest_engine.types.portfolio import PortfolioSnapshot
@@ -132,15 +134,33 @@ class _BuyingPower:
         return self._leverage * self._equity - self._gross
 
     def consume(self, fill: FillEvent) -> None:
-        old = self._quantities.get(fill.instrument, Decimal(0))
-        signed = fill.quantity if fill.side is Side.BUY else -fill.quantity
+        self.consume_quantity(fill.instrument, fill.side, fill.quantity, fill.price, fill.fee)
+
+    def consume_quantity(
+        self, instrument: InstrumentId, side: Side, quantity: Decimal, price: float, fee: float
+    ) -> None:
+        old = self._quantities.get(instrument, Decimal(0))
+        signed = quantity if side is Side.BUY else -quantity
         new = old + signed
-        # 기존 노출은 세션 시작 평가가, 변화분은 체결가가 기준이다.
-        old_mark = self._marks.get(fill.instrument, fill.price)
-        self._gross += float(abs(new)) * fill.price - float(abs(old)) * old_mark
-        self._marks[fill.instrument] = fill.price
-        self._quantities[fill.instrument] = new
-        self._equity -= fill.fee
+        # 기존 노출은 세션 시작 평가가, 변화분은 체결가가 기준이다. 체결가로 재평가되면
+        # 기존 보유분의 평가 손익만큼 equity도 움직인다 (equity = cash + Σ qty × mark).
+        old_mark = self._marks.get(instrument, price)
+        self._gross += float(abs(new)) * price - float(abs(old)) * old_mark
+        self._equity += float(old) * (price - old_mark) - fee
+        self._marks[instrument] = price
+        self._quantities[instrument] = new
+
+    def checkpoint(
+        self,
+    ) -> tuple[float, float, dict[InstrumentId, Decimal], dict[InstrumentId, float]]:
+        return self._equity, self._gross, dict(self._quantities), dict(self._marks)
+
+    def restore(
+        self, state: tuple[float, float, dict[InstrumentId, Decimal], dict[InstrumentId, float]]
+    ) -> None:
+        self._equity, self._gross, quantities, marks = state
+        self._quantities = dict(quantities)
+        self._marks = dict(marks)
 
 
 class BacktestEngine:
@@ -308,34 +328,15 @@ class BacktestEngine:
             key=lambda entry: (entry.order.side is not Side.SELL, entry.order_id),
         )
         power = _BuyingPower(run.portfolio.snapshot(snapshot.ts), run.config.max_gross_leverage)
+        # 바스켓 그룹은 leg를 함께 견적해 정책을 판정한 뒤 체결한다 (단일 주문보다 먼저).
+        for group in order_manager.open_groups():
+            self._process_group(run, group, snapshot, power, update)
         for entry in due:
             order = entry.order
-            outcome = run.broker.execute(
-                entry,
-                snapshot.bar(order.instrument),
-                power.available,
-                order_manager.next_fill_id(),
-            )
-            if outcome.fill is not None:
-                fill = outcome.fill
-                power.consume(fill)
-                run.queue.push(fill.ts, EventPriority.FILL, FillOccurred(fill, snapshot))
-                if run.wants(EventKind.FILL):
-                    # FILL 알림은 그 체결이 만든 ORDER_UPDATE 알림보다 먼저 큐에 실린다 (인과 순서).
-                    # NOTIFY(25) > FILL(20)이라 알림 시점엔 포트폴리오에 이미 반영돼 있다.
-                    run.queue.push(fill.ts, EventPriority.NOTIFY, StrategyNotify(fill, snapshot))
-                left = order_manager.settle(order.order_id, fill.quantity)
-                if left == 0:
-                    update(order.order_id, OrderStatus.FILLED, None)
-                else:
-                    # STOP/STOP_LIMIT이 발동해 일부만 체결됐으면 잔량은 발동 상태를 유지한다.
-                    if (
-                        order.order_type in (OrderType.STOP, OrderType.STOP_LIMIT)
-                        and not entry.triggered
-                    ):
-                        order_manager.mark_triggered(order.order_id)
-                    update(order.order_id, OrderStatus.PARTIALLY_FILLED, outcome.detail)
-            elif outcome.status is ExecutionStatus.TRIGGERED_UNFILLED:
+            quote = run.broker.quote(entry, snapshot.bar(order.instrument), power.available)
+            if quote.quantity > 0:
+                self._apply_quote(run, entry, quote, quote.quantity, snapshot, power, update)
+            elif quote.status is ExecutionStatus.TRIGGERED_UNFILLED:
                 order_manager.mark_triggered(order.order_id)
                 update(
                     order.order_id,
@@ -344,18 +345,18 @@ class BacktestEngine:
                     f"stop={order.stop_price} limit={order.limit_price} ts={snapshot.ts}",
                 )
             elif (
-                outcome.status
+                quote.status
                 in (
                     ExecutionStatus.REJECTED_NO_CASH,
                     ExecutionStatus.NOT_FILLED,
                 )
-                and outcome.detail is not None
+                and quote.detail is not None
             ):
                 # 여력 0·유동성 0은 이 세션의 사정일 뿐이다 — 주문은 TIF대로 대기하고 사유만 남긴다.
-                update(order.order_id, OrderStatus.OPEN, outcome.detail)
-            elif outcome.status is ExecutionStatus.FOK_REJECTED:
+                update(order.order_id, OrderStatus.OPEN, quote.detail)
+            elif quote.status is ExecutionStatus.FOK_REJECTED:
                 order_manager.remove(order.order_id)
-                update(order.order_id, OrderStatus.CANCELLED, outcome.detail)
+                update(order.order_id, OrderStatus.CANCELLED, quote.detail)
 
         # DAY/IOC/FOK 주문은 이 세션이 지나면 소멸한다 — bar가 없어 시도조차 못 한 경우 포함.
         for entry in order_manager.open_entries():
@@ -389,6 +390,133 @@ class BacktestEngine:
             f"action={action.action_type.value} ratio={action.ratio} "
             f"feed_sessions={len(feed)} last_session={feed.sessions[-1] if len(feed) else None}"
         )
+
+    def _apply_quote(
+        self,
+        run: _Run,
+        entry: OpenOrder,
+        quote: Quote,
+        quantity: Decimal,
+        snapshot: MarketSnapshot,
+        power: _BuyingPower,
+        update: Callable[[str, OrderStatus, str | None], None],
+    ) -> None:
+        """견적을 실제 체결로 확정한다: Fill 큐 적재, 잔량 갱신, 상태 기록, 여력 소모."""
+        order = entry.order
+        fill = run.broker.fill(
+            quote,
+            entry,
+            snapshot.bar(order.instrument),
+            run.order_manager.next_fill_id(),
+            quantity,
+        )
+        power.consume(fill)
+        run.queue.push(fill.ts, EventPriority.FILL, FillOccurred(fill, snapshot))
+        if run.wants(EventKind.FILL):
+            # FILL 알림은 그 체결이 만든 ORDER_UPDATE 알림보다 먼저 큐에 실린다 (인과 순서).
+            # NOTIFY(25) > FILL(20)이라 알림 시점엔 포트폴리오에 이미 반영돼 있다.
+            run.queue.push(fill.ts, EventPriority.NOTIFY, StrategyNotify(fill, snapshot))
+        left = run.order_manager.settle(order.order_id, fill.quantity)
+        if left == 0:
+            update(order.order_id, OrderStatus.FILLED, None)
+        else:
+            # STOP/STOP_LIMIT이 발동해 일부만 체결됐으면 잔량은 발동 상태를 유지한다.
+            if order.order_type in (OrderType.STOP, OrderType.STOP_LIMIT) and not entry.triggered:
+                run.order_manager.mark_triggered(order.order_id)
+            update(order.order_id, OrderStatus.PARTIALLY_FILLED, quote.detail)
+
+    def _process_group(
+        self,
+        run: _Run,
+        group: BasketGroup,
+        snapshot: MarketSnapshot,
+        power: _BuyingPower,
+        update: Callable[[str, OrderStatus, str | None], None],
+    ) -> None:
+        order_manager = run.order_manager
+        entries = order_manager.group_entries(group.group_id)
+        policy = group.policy
+
+        def cancel_all(reason: str) -> None:
+            for entry in entries:
+                order_manager.remove(entry.order_id)
+                update(
+                    entry.order_id,
+                    OrderStatus.CANCELLED,
+                    f"basket {policy.value} — {reason} group_id={group.group_id} "
+                    f"remaining={entry.remaining} ts={snapshot.ts}",
+                )
+            order_manager.drop_group(group.group_id)
+
+        missing = [
+            e.order.instrument.symbol for e in entries if not snapshot.has(e.order.instrument)
+        ]
+        if missing and policy is not GroupPolicy.BEST_EFFORT:
+            cancel_all(f"leg without bar in session instruments={missing}")
+            return
+
+        # 1) 견적 패스: 매도 leg 먼저, 매도 대금이 매수 leg 여력에 반영되도록 순차 소모.
+        legs = sorted(
+            (e for e in entries if snapshot.has(e.order.instrument)),
+            key=lambda e: (e.order.side is not Side.SELL, e.order_id),
+        )
+        checkpoint = power.checkpoint()
+        quotes: list[tuple[OpenOrder, Quote]] = []
+        for entry in legs:
+            quote = run.broker.quote(entry, snapshot.bar(entry.order.instrument), power.available)
+            quotes.append((entry, quote))
+            if quote.quantity > 0:
+                order = entry.order
+                notional = float(quote.quantity) * quote.price
+                power.consume_quantity(
+                    order.instrument,
+                    order.side,
+                    quote.quantity,
+                    quote.price,
+                    run.broker.fee_for(notional),
+                )
+        power.restore(checkpoint)
+
+        # 2) 정책 판정 후 실제 체결 (여력은 실제 체결로 다시 소모).
+        if policy is GroupPolicy.BEST_EFFORT:
+            for entry, quote in quotes:
+                if quote.quantity > 0:
+                    self._apply_quote(run, entry, quote, quote.quantity, snapshot, power, update)
+            order_manager.drop_group(group.group_id)
+            return
+
+        if policy is GroupPolicy.ALL_OR_NONE:
+            short = [
+                f"{e.order.instrument.symbol}:{q.quantity}/{e.remaining}"
+                for e, q in quotes
+                if q.quantity < e.remaining
+            ]
+            if short:
+                cancel_all(f"not fillable in full legs={short}")
+                return
+            for entry, quote in quotes:
+                self._apply_quote(run, entry, quote, quote.quantity, snapshot, power, update)
+            order_manager.drop_group(group.group_id)
+            return
+
+        # PROPORTIONAL: 가장 낮은 체결 비율에 맞춰 전 leg 축소, 잔량은 취소.
+        scale = min((q.quantity / e.remaining for e, q in quotes), default=Decimal(0))
+        if scale <= 0:
+            cancel_all("no leg fillable")
+            return
+        for entry, quote in quotes:
+            quantity = (entry.remaining * scale).quantize(Decimal(1), rounding=ROUND_FLOOR)
+            if quantity > 0:
+                self._apply_quote(run, entry, quote, quantity, snapshot, power, update)
+        for entry in order_manager.group_entries(group.group_id):
+            order_manager.remove(entry.order_id)
+            update(
+                entry.order_id,
+                OrderStatus.CANCELLED,
+                f"basket proportional remainder cancelled — scale={scale:.6f} "
+                f"group_id={group.group_id} remaining={entry.remaining} ts={snapshot.ts}",
+            )
+        order_manager.drop_group(group.group_id)
 
     def _apply_corporate_action(
         self,
@@ -468,6 +596,8 @@ class BacktestEngine:
         routing = run.router.route(decision, decision_id, portfolio_snapshot, market)
         for update in routing.updates:
             self._record_update(run, update, market)
+        for group in routing.groups:
+            run.order_manager.register_group(group)
         for order in routing.orders:
             run.queue.push(order.ts, EventPriority.ORDER, OrderPlaced(order))
 

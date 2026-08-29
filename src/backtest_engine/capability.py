@@ -207,9 +207,7 @@ def reference_engine_capabilities() -> EngineCapabilities:
     EverySession 일정만 IMPLEMENTED다.
     나머지는 스키마만 정의된 NOT_IMPLEMENTED 상태로, handler와 테스트가 추가될 때 승격한다.
     """
-    not_implemented_actions = {
-        ActionKind.BASKET: "roadmap step 5c",
-    }
+    not_implemented_actions: dict[ActionKind, str] = {}
     implemented_actions = (
         ActionKind.NO_ACTION,
         ActionKind.SET_PORTFOLIO_TARGET,
@@ -219,6 +217,7 @@ def reference_engine_capabilities() -> EngineCapabilities:
         ActionKind.SUBMIT_ORDER,
         ActionKind.CANCEL_ORDER,
         ActionKind.REPLACE_ORDER,
+        ActionKind.BASKET,
     )
     actions = tuple(
         ActionCapability(kind, SupportLevel.IMPLEMENTED) for kind in implemented_actions
@@ -232,11 +231,7 @@ def reference_engine_capabilities() -> EngineCapabilities:
         FeatureCapability(EngineFeature.PARTIAL_FILL, SupportLevel.IMPLEMENTED),
         FeatureCapability(EngineFeature.SHORT_SELLING, SupportLevel.IMPLEMENTED),
         FeatureCapability(EngineFeature.MARGIN, SupportLevel.IMPLEMENTED),
-    ) + tuple(
-        FeatureCapability(feature, SupportLevel.NOT_IMPLEMENTED, reason)
-        for feature, reason in {
-            EngineFeature.PROPORTIONAL_BASKET: "roadmap step 5c",
-        }.items()
+        FeatureCapability(EngineFeature.PROPORTIONAL_BASKET, SupportLevel.IMPLEMENTED),
     )
     events = (
         EventCapability(EventKind.MARKET, SupportLevel.IMPLEMENTED),

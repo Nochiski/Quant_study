@@ -286,3 +286,71 @@ def test_instruments_differing_only_in_currency_are_distinct_positions() -> None
         s = portfolio.snapshot(day(1))
         results.append((len(s.positions), s.equity))
     assert results[0] == results[1] == (2, 1_000_000.0)
+
+
+# --- 6b: 견적 산술 · 매수 여력 -------------------------------------------------------
+
+
+@RUST_ONLY
+@pytest.mark.parametrize("participation", [None, 0.7, 0.07, 0.29, 1.0])
+@pytest.mark.parametrize("buying_power", [0.0, 500.0, 6_499.0, 1e9])
+@pytest.mark.parametrize("held", [-30, 0, 5, 100])
+def test_quote_numbers_identical_across_cores(
+    participation: float | None, buying_power: float, held: int
+) -> None:
+    from backtest_engine.engine.core import make_quote_core
+
+    python, rust = make_quote_core("python"), make_quote_core("rust")
+    for side in Side:
+        for limit in (None, Decimal(95), Decimal(105)):
+            for fok in (False, True):
+                args = (
+                    side,
+                    100.0,
+                    Decimal(90),
+                    90,
+                    participation,
+                    0.1,
+                    limit,
+                    buying_power,
+                    Decimal(held),
+                    0.001,
+                    fok,
+                )
+                assert python.quote_numbers(*args) == rust.quote_numbers(*args), args
+
+
+@RUST_ONLY
+def test_buying_power_identical_across_cores() -> None:
+    from backtest_engine.engine.core import make_buying_power
+    from backtest_engine.types.portfolio import PortfolioSnapshot, Position
+
+    a, b = make_instrument("005930"), make_instrument("000660")
+    positions = (
+        Position(
+            a, Decimal(155), 395.4286729267503, 49.23813720318554, 155 * 49.23813720318554, 0.0
+        ),
+        Position(
+            b, Decimal(-841), 536.3461223023825, 366.32322799567294, -841 * 366.32322799567294, 0.0
+        ),
+    )
+    snapshot = PortfolioSnapshot(
+        ts=day(1), cash=3_305_944.3718483075, positions=positions, equity=1.0, gross_exposure=0.0
+    )
+    trace = []
+    for core_name in ("python", "rust"):
+        power = make_buying_power(core_name, snapshot, 2.0)
+        state = power.checkpoint()
+        steps = [
+            (a, Side.SELL, Decimal(200), 51.1, 1.3),
+            (b, Side.BUY, Decimal(900), 360.0, 0.0),
+            (make_instrument("247540"), Side.BUY, Decimal(7), 3.3, 0.01),
+        ]
+        values = []
+        for instrument, side, quantity, price, fee in steps:
+            power.consume_quantity(instrument, side, quantity, price, fee)
+            values.append((power.available, power.quantity_of(instrument)))
+        power.restore(state)
+        values.append(power.available)
+        trace.append(values)
+    assert trace[0] == trace[1]

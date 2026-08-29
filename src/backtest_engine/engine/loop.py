@@ -28,7 +28,14 @@ from backtest_engine.data.feed import DataFeed
 from backtest_engine.engine import calendar
 from backtest_engine.engine.broker import BrokerSim, ExecutionStatus, Quote
 from backtest_engine.engine.context import EngineStrategyContext, HistoryStore
-from backtest_engine.engine.core import PortfolioLedger, make_portfolio, make_pricing
+from backtest_engine.engine.core import (
+    BuyingPowerTracker,
+    PortfolioLedger,
+    make_buying_power,
+    make_portfolio,
+    make_pricing,
+    make_quote_core,
+)
 from backtest_engine.engine.costs import session_costs
 from backtest_engine.engine.metrics import compute_metrics
 from backtest_engine.engine.orders import BasketGroup, OpenOrder, OrderManager
@@ -55,15 +62,12 @@ from backtest_engine.types.actions import GroupPolicy
 from backtest_engine.types.events import (
     CorporateActionEvent,
     CorporateActionType,
-    FillEvent,
     OrderStatus,
     OrderUpdateEvent,
     StrategyEvent,
 )
-from backtest_engine.types.instruments import InstrumentId
 from backtest_engine.types.market import MarketSnapshot
 from backtest_engine.types.orders import OrderType, Side, TimeInForce
-from backtest_engine.types.portfolio import PortfolioSnapshot
 from backtest_engine.types.requirements import (
     EngineFeature,
     EventKind,
@@ -101,8 +105,13 @@ class _Run:
             allow_margin=EngineFeature.MARGIN in requirements.features,
         )
         self.order_manager = OrderManager()
+        self.core = core
         self.broker = BrokerSim(
-            config.fee_bps, slippage, max_participation, pricing=make_pricing(core)
+            config.fee_bps,
+            slippage,
+            max_participation,
+            pricing=make_pricing(core),
+            quote_core=make_quote_core(core),
         )
         self.router = DecisionRouter(
             requirements.actions, self.order_manager, requirements.features
@@ -117,57 +126,6 @@ class _Run:
 
     def wants_feature(self, feature: EngineFeature) -> bool:
         return feature in self.requirements.features
-
-
-class _BuyingPower:
-    """한 세션 안에서 체결이 진행될 때의 매수 여력 = leverage × equity − 총노출.
-
-    MARGIN 없음(leverage 1.0, 롱 전용)이면 정확히 현금과 같다. 체결마다 수량 변화로
-    총노출을, 수수료로 equity를 갱신한다. 가격은 세션 시작 평가가 아니라 체결가를 쓴다.
-    """
-
-    def __init__(self, snapshot: PortfolioSnapshot, leverage: float) -> None:
-        self._leverage = leverage
-        self._equity = snapshot.equity
-        self._gross = sum(abs(p.market_value) for p in snapshot.positions)
-        self._quantities = {p.instrument: p.quantity for p in snapshot.positions}
-        self._marks = {p.instrument: p.market_price for p in snapshot.positions}
-
-    @property
-    def available(self) -> float:
-        return self._leverage * self._equity - self._gross
-
-    def quantity_of(self, instrument: InstrumentId) -> Decimal:
-        return self._quantities.get(instrument, Decimal(0))
-
-    def consume(self, fill: FillEvent) -> None:
-        self.consume_quantity(fill.instrument, fill.side, fill.quantity, fill.price, fill.fee)
-
-    def consume_quantity(
-        self, instrument: InstrumentId, side: Side, quantity: Decimal, price: float, fee: float
-    ) -> None:
-        old = self._quantities.get(instrument, Decimal(0))
-        signed = quantity if side is Side.BUY else -quantity
-        new = old + signed
-        # 기존 노출은 세션 시작 평가가, 변화분은 체결가가 기준이다. 체결가로 재평가되면
-        # 기존 보유분의 평가 손익만큼 equity도 움직인다 (equity = cash + Σ qty × mark).
-        old_mark = self._marks.get(instrument, price)
-        self._gross += float(abs(new)) * price - float(abs(old)) * old_mark
-        self._equity += float(old) * (price - old_mark) - fee
-        self._marks[instrument] = price
-        self._quantities[instrument] = new
-
-    def checkpoint(
-        self,
-    ) -> tuple[float, float, dict[InstrumentId, Decimal], dict[InstrumentId, float]]:
-        return self._equity, self._gross, dict(self._quantities), dict(self._marks)
-
-    def restore(
-        self, state: tuple[float, float, dict[InstrumentId, Decimal], dict[InstrumentId, float]]
-    ) -> None:
-        self._equity, self._gross, quantities, marks = state
-        self._quantities = dict(quantities)
-        self._marks = dict(marks)
 
 
 class BacktestEngine:
@@ -339,7 +297,9 @@ class BacktestEngine:
             order_manager.due(snapshot),
             key=lambda entry: (entry.order.side is not Side.SELL, entry.order_id),
         )
-        power = _BuyingPower(run.portfolio.snapshot(snapshot.ts), run.config.max_gross_leverage)
+        power = make_buying_power(
+            run.core, run.portfolio.snapshot(snapshot.ts), run.config.max_gross_leverage
+        )
         # 바스켓 그룹은 leg를 함께 견적해 정책을 판정한 뒤 체결한다 (단일 주문보다 먼저).
         for group in order_manager.open_groups():
             self._process_group(run, group, snapshot, power, update)
@@ -415,7 +375,7 @@ class BacktestEngine:
         quote: Quote,
         quantity: Decimal,
         snapshot: MarketSnapshot,
-        power: _BuyingPower,
+        power: BuyingPowerTracker,
         update: Callable[[str, OrderStatus, str | None], None],
     ) -> None:
         """견적을 실제 체결로 확정한다: Fill 큐 적재, 잔량 갱신, 상태 기록, 여력 소모."""
@@ -447,7 +407,7 @@ class BacktestEngine:
         run: _Run,
         group: BasketGroup,
         snapshot: MarketSnapshot,
-        power: _BuyingPower,
+        power: BuyingPowerTracker,
         update: Callable[[str, OrderStatus, str | None], None],
     ) -> None:
         order_manager = run.order_manager

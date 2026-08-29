@@ -82,6 +82,18 @@ Python 엔진은 4·5·D 단계로 방금 크게 바뀌었으므로 전부를 �
   결정 2의 목표가 실제로 달성됐음을 테스트로 고정하는 편이 강하다. 다른 플랫폼·컴파일러에서
   깨지면 그때 연산 순서 차이를 찾아 고치는 것이 맞고, 허용오차로 덮지 않는다.
 
+## 6b 구현 결과 (2026-08-29)
+
+- Rust: `liquidity_cap(volume, participation_str)`(십진 문자열 정수 산술 = `Decimal(str(p))`),
+  `quote_numbers(...)`(유동성 캡 → 슬리피지·지정가 clip → 여력 캡(숏 진입분) → FOK),
+  `BuyingPower`(available/quantity_of/consume/checkpoint/restore).
+- Python: `BrokerSim.quote`를 수치 코어(`QuoteCore` 프로토콜, `PythonQuoteCore`)와 진단 문자열로
+  분리, `_BuyingPower`를 `engine/core.py`의 `PythonBuyingPower`/`RustBuyingPower`로 이동.
+  슬리피지 모델은 플러그인 포트라 Python에 남고 주당 값만 코어에 넘긴다.
+- 동일성: 견적 산술 격자(참여율 5 × 여력 4 × 보유 4 × 방향 2 × 지정가 3 × FOK 2), 여력 누산
+  시나리오, 기존 엔진 5시나리오 전부 비트 동일 (424 passed).
+- 성능(측정만): 슬라이스 1,619세션 — python 0.21s / rust 0.22s. 여전히 호출 단위 FFI가 지배.
+
 ## 다음 단계
 
-6b 브로커 견적·여력, 6c 세션 루프. 각각 같은 동일성 테스트를 확장한다.
+6c 세션 루프(이벤트 큐·그룹 판정·자본변동 적용)를 세션 단위 배치로 옮긴다.

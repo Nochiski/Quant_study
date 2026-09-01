@@ -7,9 +7,9 @@ use std::collections::HashMap;
 // ---------------------------------------------------------------------------
 
 /// 스냅샷 포지션 행: `(key, quantity, average_price, market_price, market_value, unrealized_pnl)`.
-type PositionRow = (String, i64, f64, f64, f64, f64);
+pub(crate) type PositionRow = (String, i64, f64, f64, f64, f64);
 /// 스냅샷: `(cash, positions, equity, gross_exposure)`.
-type SnapshotTuple = (f64, Vec<PositionRow>, f64, f64);
+pub(crate) type SnapshotTuple = (f64, Vec<PositionRow>, f64, f64);
 
 #[derive(Clone, Debug)]
 struct Ledger {
@@ -19,7 +19,7 @@ struct Ledger {
 
 /// 현금·보유 원장. Fill / 비용 / 자본변동 적용 시점에만 상태가 변한다.
 #[pyclass]
-struct Portfolio {
+pub(crate) struct Portfolio {
     cash: f64,
     /// Python dict와 같은 삽입 순서를 유지한다 — 스냅샷 순서와 equity 합산 순서가 여기에 의존한다.
     ledgers: Vec<(String, Ledger)>,
@@ -44,7 +44,7 @@ impl Portfolio {
 impl Portfolio {
     #[new]
     #[pyo3(signature = (initial_cash, allow_short=false, allow_margin=false))]
-    fn new(initial_cash: f64, allow_short: bool, allow_margin: bool) -> Self {
+    pub(crate) fn new(initial_cash: f64, allow_short: bool, allow_margin: bool) -> Self {
         Self {
             cash: initial_cash,
             ledgers: Vec::new(),
@@ -56,7 +56,7 @@ impl Portfolio {
 
     /// 체결 적용. 실패는 ValueError 메시지 접두어로 종류를 알린다:
     /// `negative_position:` / `negative_cash:` — Python 어댑터가 도메인 예외로 바꾼다.
-    fn apply(
+    pub(crate) fn apply(
         &mut self,
         key: &str,
         side: &str,
@@ -140,7 +140,7 @@ impl Portfolio {
     }
 
     /// 비용(차입·이자) 차감.
-    fn charge(&mut self, amount: f64) -> PyResult<()> {
+    pub(crate) fn charge(&mut self, amount: f64) -> PyResult<()> {
         if amount <= 0.0 {
             return Err(PyValueError::new_err(format!(
                 "cost amount must be > 0 — amount={amount}"
@@ -152,7 +152,7 @@ impl Portfolio {
 
     /// 자본변동 결과 적용. 산술(floor(qty×ratio), 단주 현금)은 Python 어댑터가 Decimal로 하고
     /// 여기는 새 수량·평균단가·현금 지급·정산가 마크만 반영한다.
-    fn apply_corporate_action(
+    pub(crate) fn apply_corporate_action(
         &mut self,
         key: &str,
         new_quantity: i64,
@@ -183,24 +183,24 @@ impl Portfolio {
     }
 
     /// 세션 종가로 평가 가격 갱신.
-    fn mark(&mut self, closes: Vec<(String, f64)>) {
+    pub(crate) fn mark(&mut self, closes: Vec<(String, f64)>) {
         for (key, close) in closes {
             self.marks.insert(key, close);
         }
     }
 
     #[getter]
-    fn cash(&self) -> f64 {
+    pub(crate) fn cash(&self) -> f64 {
         self.cash
     }
 
-    fn held_qty(&self, key: &str) -> i64 {
+    pub(crate) fn held_qty(&self, key: &str) -> i64 {
         self.ledger_index(key)
             .map(|i| self.ledgers[i].1.quantity)
             .unwrap_or(0)
     }
 
-    fn average_price(&self, key: &str) -> Option<f64> {
+    pub(crate) fn average_price(&self, key: &str) -> Option<f64> {
         self.ledger_index(key)
             .map(|i| self.ledgers[i].1.average_price)
     }
@@ -208,7 +208,7 @@ impl Portfolio {
     /// 스냅샷: `(cash, positions, equity, gross_exposure)`. 포지션은 원장 삽입 순서(Python dict와
     /// 동일)이고, equity·gross는 Python의 `cash + sum(mv)` / `sum(|mv|)`와 같은 결합 순서로
     /// 누산한다 (비트 동일성).
-    fn snapshot(&self) -> PyResult<SnapshotTuple> {
+    pub(crate) fn snapshot(&self) -> PyResult<SnapshotTuple> {
         let mut positions = Vec::with_capacity(self.ledgers.len());
         let mut total_value = 0.0_f64;
         let mut gross = 0.0_f64;

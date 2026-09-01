@@ -32,7 +32,7 @@ struct EntryIn {
 
 /// PyO3 튜플 변환은 12원소까지라 가격·표기 필드를 하위 튜플로 묶는다.
 type PriceFields = (Option<f64>, Option<f64>, Option<String>, Option<String>);
-type EntryTuple = (
+pub(crate) type EntryTuple = (
     String,
     String,
     String,
@@ -69,7 +69,7 @@ impl EntryIn {
 }
 
 /// bar: `(open, high, low, volume)`.
-type BarTuple = (f64, f64, f64, i64);
+pub(crate) type BarTuple = (f64, f64, f64, i64);
 
 /// 슬리피지 설정: `("none", 0, 0)` | `("fixed_bps", bps, 0)` | `("volume_share", volume_limit, price_impact)`.
 fn slippage_per_share(
@@ -138,7 +138,7 @@ fn py_list(items: &[String]) -> String {
 /// `("fill", order_id, quantity, price, slip, fee, "")`
 /// `("update", order_id, 0, 0, 0, 0, "status|detail")`
 /// `("trigger", order_id, ...)`, `("remove", order_id, ...)`, `("drop_group", group_id, ...)`
-type Op = (String, String, i64, f64, f64, f64, String);
+pub(crate) type Op = (String, String, i64, f64, f64, f64, String);
 
 struct Session<'a> {
     ts: &'a str,
@@ -363,7 +363,7 @@ impl<'a> Session<'a> {
 #[pyfunction]
 #[pyo3(signature = (ts, entries, groups, bars, power, fee_rate, default_participation, slippage))]
 #[allow(clippy::too_many_arguments)]
-fn process_market(
+pub(crate) fn process_market(
     ts: &str,
     entries: Vec<EntryTuple>,
     groups: Vec<(String, String, Vec<String>)>,

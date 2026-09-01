@@ -18,7 +18,7 @@ type PowerCheckpoint = (f64, f64, Vec<(String, i64)>, Vec<(String, f64)>);
 impl BuyingPower {
     /// positions: `(key, quantity, market_price, market_value)` — 스냅샷 포지션.
     #[new]
-    fn new(equity: f64, leverage: f64, positions: Vec<(String, i64, f64, f64)>) -> Self {
+    pub(crate) fn new(equity: f64, leverage: f64, positions: Vec<(String, i64, f64, f64)>) -> Self {
         let mut gross = 0.0_f64;
         let mut quantities = HashMap::new();
         let mut marks = HashMap::new();

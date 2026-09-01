@@ -6,7 +6,7 @@ use pyo3::prelude::*;
 // ---------------------------------------------------------------------------
 
 /// 십진 문자열(예: "0.07")을 (분자, 10^k 분모)로 파싱한다 — Python `Decimal(str(p))`와 동일 값.
-fn parse_decimal_ratio(text: &str) -> PyResult<(i128, i128)> {
+pub(crate) fn parse_decimal_ratio(text: &str) -> PyResult<(i128, i128)> {
     let trimmed = text.trim();
     let (mantissa, exponent) = match trimmed.split_once(['e', 'E']) {
         Some((m, e)) => (

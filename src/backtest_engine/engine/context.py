@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
+from typing import Any
 
 import numpy as np
 
@@ -81,6 +82,46 @@ class HistoryStore:
             for row, index in enumerate(selected):
                 if index < len(series):
                     matrix[row, column] = series[index]
+        return PriceWindow(timestamps=timestamps, instruments=request.instruments, values=matrix)
+
+
+class PersistentHistoryStore(HistoryStore):
+    """HistoryStore-compatible view backed by the Rust columnar feed."""
+
+    def __init__(self, runtime: Any) -> None:
+        self._runtime = runtime
+
+    def append(self, snapshot: MarketSnapshot) -> None:
+        # process_market_index() advances the authoritative Rust session cursor later in MARKET.
+        del snapshot
+
+    @property
+    def session_count(self) -> int:
+        return int(self._runtime.current_session_count())
+
+    def window(self, request: HistoryRequest, end: datetime) -> PriceWindow:
+        keys = [
+            f"{instrument.venue}:{instrument.symbol}:{instrument.asset_class.value}:"
+            f"{instrument.currency}"
+            for instrument in request.instruments
+        ]
+        try:
+            timestamp_texts, flat_values = self._runtime.history_window(
+                keys, request.field.value, request.lookback, str(end)
+            )
+        except ValueError as error:
+            message = str(error)
+            if message.startswith("insufficient_history:"):
+                detail = message.removeprefix("insufficient_history: ")
+                raise InsufficientHistoryError(
+                    f"not enough history — {detail} "
+                    f"instruments={[i.symbol for i in request.instruments]}"
+                ) from error
+            raise
+        timestamps = tuple(datetime.fromisoformat(text) for text in timestamp_texts)
+        matrix = np.asarray(flat_values, dtype=np.float64).reshape(
+            len(timestamps), len(request.instruments)
+        )
         return PriceWindow(timestamps=timestamps, instruments=request.instruments, values=matrix)
 
 

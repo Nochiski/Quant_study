@@ -6,8 +6,10 @@ Rust 확장(`backtest_core`)이 설치돼 있지 않으면 rust 파라미터는 
 
 from __future__ import annotations
 
+import random
 from collections.abc import Callable
 from decimal import Decimal
+from typing import Any
 
 import pytest
 
@@ -19,15 +21,36 @@ from backtest_engine.engine.core import (
     make_portfolio,
     make_pricing,
 )
+from backtest_engine.engine.router import DecisionRouter
 from backtest_engine.engine.slippage import FixedBpsSlippage
-from backtest_engine.errors import CoreUnavailable, NegativeCashError, NegativePositionError
+from backtest_engine.errors import (
+    CoreUnavailable,
+    NegativeCashError,
+    NegativePositionError,
+    SchemaVersionMismatch,
+    UndeclaredActionReturned,
+    UnknownOrderId,
+    UnsupportedActionValue,
+)
 from backtest_engine.sizing import floor_delta_shares
 from backtest_engine.types.actions import (
+    ActionKind,
+    AdjustPosition,
     BasketAction,
     CancelOrder,
+    ExecutionPolicy,
     GroupPolicy,
+    LiquidatePosition,
+    LiquidationPersistence,
+    QuantityDelta,
+    QuantityTarget,
     ReplaceOrder,
+    SetPortfolioTarget,
+    SetPositionTarget,
     StrategyAction,
+    SubmitOrder,
+    TargetScope,
+    WeightTarget,
 )
 from backtest_engine.types.decision import StrategyDecision
 from backtest_engine.types.events import (
@@ -40,24 +63,42 @@ from backtest_engine.types.events import (
     OrderStatus,
     StrategyEvent,
 )
-from backtest_engine.types.market import Bar, MarketSnapshot
+from backtest_engine.types.instruments import InstrumentId
+from backtest_engine.types.market import Bar, MarketSnapshot, PriceField
 from backtest_engine.types.orders import (
     LimitOrderRequest,
+    MarketOrderRequest,
     OrderCore,
     Side,
     StopLimitOrderRequest,
     TimeInForce,
 )
-from backtest_engine.types.requirements import EngineFeature, EventKind, StrategyRequirements
-from backtest_engine.types.strategy import StrategyContext
+from backtest_engine.types.requirements import (
+    EngineFeature,
+    EventKind,
+    EverySession,
+    HistoryRequest,
+    StrategyRequirements,
+)
+from backtest_engine.types.strategy import Strategy, StrategyContext
 from tests import test_basket, test_corporate_action_engine, test_margin, test_short_selling
 from tests.conftest import day, make_bar, make_instrument, make_ohlc, make_snapshot
 from tests.test_broker import RULE_TABLE
-from tests.test_engine_golden import GOLDEN_BARS, ScriptedStrategy, liquidate, target_70pct
+from tests.test_engine_golden import (
+    GOLDEN_BARS,
+    ScriptedStrategy,
+    adjust_by,
+    liquidate,
+    target_70pct,
+)
 
 INSTRUMENT = make_instrument()
 RUST_ONLY = pytest.mark.skipif(not core_available("rust"), reason="backtest_core 확장 없음")
-CORES = ["python", pytest.param("rust", marks=RUST_ONLY)]
+RUST_ENGINE_CORES = [
+    pytest.param("rust", marks=RUST_ONLY, id="rust"),
+    pytest.param("rust_persistent", marks=RUST_ONLY, id="rust_persistent"),
+]
+CORES = ["python", *RUST_ENGINE_CORES]
 
 
 @pytest.fixture(params=CORES)
@@ -169,10 +210,10 @@ def scenario(portfolio: PortfolioLedger) -> list[tuple[object, ...]]:
     return trace
 
 
-@RUST_ONLY
-def test_portfolio_scenario_identical_across_cores() -> None:
+@pytest.mark.parametrize("rust_core", RUST_ENGINE_CORES)
+def test_portfolio_scenario_identical_across_cores(rust_core: str) -> None:
     python = scenario(make_portfolio("python", 100_000.0, allow_short=True, allow_margin=False))
-    rust = scenario(make_portfolio("rust", 100_000.0, allow_short=True, allow_margin=False))
+    rust = scenario(make_portfolio(rust_core, 100_000.0, allow_short=True, allow_margin=False))
     assert python == rust
 
 
@@ -192,36 +233,57 @@ def test_unavailable_core_is_an_error_not_a_fallback() -> None:
 # --- Engine result diff ---------------------------------------------------------
 
 
+def _engine_scenario(
+    core: str,
+    config: RunConfig,
+    strategy: Strategy,
+    feed: DataFeed,
+    *,
+    max_participation: float | None = None,
+    corporate_actions: tuple[CorporateActionEvent, ...] | None = None,
+) -> tuple[BacktestEngine, BacktestResult]:
+    engine = BacktestEngine(config, core=core, max_participation=max_participation)
+    result = (
+        engine.run(strategy, feed)
+        if corporate_actions is None
+        else engine.run(strategy, feed, corporate_actions=corporate_actions)
+    )
+    return engine, result
+
+
 ENGINE_SCENARIOS = {
-    "golden": lambda core: BacktestEngine(
-        RunConfig(run_id="g", initial_cash=100_000.0, fee_bps=10.0), core=core
-    ).run(
-        ScriptedStrategy(script=(target_70pct(), None, liquidate(), None)), DataFeed(GOLDEN_BARS)
+    "golden": lambda core: _engine_scenario(
+        core,
+        RunConfig(run_id="g", initial_cash=100_000.0, fee_bps=10.0),
+        ScriptedStrategy(script=(target_70pct(), None, liquidate(), None)),
+        DataFeed(GOLDEN_BARS),
     ),
-    "short": lambda core: BacktestEngine(
+    "short": lambda core: _engine_scenario(
+        core,
         RunConfig(run_id="s", initial_cash=10_000.0, fee_bps=0.0, short_borrow_bps_annual=252.0),
-        core=core,
-    ).run(
         test_short_selling.ShortStrategy(
             (test_short_selling.target(-10), test_short_selling.target(0))
         ),
         DataFeed(test_short_selling.BARS),
     ),
-    "margin": lambda core: BacktestEngine(test_margin.config(), core=core).run(
+    "margin": lambda core: _engine_scenario(
+        core,
+        test_margin.config(),
         test_margin.MarginStrategy((test_margin.target(150), test_margin.target(0))),
         DataFeed(test_margin.BARS),
     ),
-    "basket": lambda core: BacktestEngine(
-        RunConfig(run_id="b", initial_cash=100_000.0, fee_bps=0.0), max_participation=0.1, core=core
-    ).run(
+    "basket": lambda core: _engine_scenario(
+        core,
+        RunConfig(run_id="b", initial_cash=100_000.0, fee_bps=0.0),
         test_basket.BasketStrategy(
             (test_basket.hold_b(10), test_basket.pair(test_basket.GroupPolicy.PROPORTIONAL))
         ),
         DataFeed(test_basket.BARS),
+        max_participation=0.1,
     ),
-    "split": lambda core: BacktestEngine(
-        RunConfig(run_id="c", initial_cash=10_000.0, fee_bps=0.0), core=core
-    ).run(
+    "split": lambda core: _engine_scenario(
+        core,
+        RunConfig(run_id="c", initial_cash=10_000.0, fee_bps=0.0),
         test_corporate_action_engine.Strategy((test_corporate_action_engine.buy(7),)),
         DataFeed(test_corporate_action_engine.bars_with_split(60.0, 70.0)),
         corporate_actions=(test_corporate_action_engine.split("1.5"),),
@@ -229,14 +291,17 @@ ENGINE_SCENARIOS = {
 }
 
 
-@RUST_ONLY
+@pytest.mark.parametrize("rust_core", RUST_ENGINE_CORES)
 @pytest.mark.parametrize("name", sorted(ENGINE_SCENARIOS))
-def test_engine_records_identical_across_cores(name: str) -> None:
-    python, rust = ENGINE_SCENARIOS[name]("python"), ENGINE_SCENARIOS[name]("rust")
-    assert python.snapshots == rust.snapshots
-    assert python.fills == rust.fills
-    assert python.orders == rust.orders
-    assert python.metrics == rust.metrics
+def test_engine_records_identical_across_cores(name: str, rust_core: str) -> None:
+    python_engine, python = ENGINE_SCENARIOS[name]("python")
+    rust_engine, rust = ENGINE_SCENARIOS[name](rust_core)
+    assert python == rust
+    assert python_engine.event_store.trace_bytes() == rust_engine.event_store.trace_bytes()
+    assert (
+        python_engine.event_store.decision_tape_bytes()
+        == rust_engine.event_store.decision_tape_bytes()
+    )
 
 
 @RUST_ONLY
@@ -486,18 +551,379 @@ def _records(engine: BacktestEngine) -> list[tuple[str, object]]:
     return [(r.kind.value, r.payload) for r in engine.event_store.records]
 
 
-@RUST_ONLY
+@pytest.mark.parametrize("rust_core", RUST_ENGINE_CORES)
 @pytest.mark.parametrize("name", sorted(_session_scenarios()))
-def test_session_loop_records_identical_across_cores(name: str) -> None:
+def test_session_loop_records_identical_across_cores(name: str, rust_core: str) -> None:
     scenario = _session_scenarios()[name]
     python_engine, python_result = scenario("python")
-    rust_engine, rust_result = scenario("rust")
+    rust_engine, rust_result = scenario(rust_core)
     assert python_result == rust_result
     assert _records(python_engine) == _records(rust_engine)
+    assert python_engine.event_store.trace_bytes() == rust_engine.event_store.trace_bytes()
+    assert (
+        python_engine.event_store.decision_tape_bytes()
+        == rust_engine.event_store.decision_tape_bytes()
+    )
+    assert python_engine.event_store.trace_bytes() == rust_engine.event_store.trace_bytes()
+    assert (
+        python_engine.event_store.decision_tape_bytes()
+        == rust_engine.event_store.decision_tape_bytes()
+    )
+
+
+@pytest.mark.parametrize("core_name", CORES)
+def test_trace_serialization_is_byte_stable(core_name: str) -> None:
+    scenario = _session_scenarios()["gtc_partial"]
+    first_engine, first_result = scenario(core_name)
+    second_engine, second_result = scenario(core_name)
+    assert first_result == second_result
+    assert first_engine.event_store.trace_bytes() == second_engine.event_store.trace_bytes()
+    assert (
+        first_engine.event_store.decision_tape_bytes()
+        == second_engine.event_store.decision_tape_bytes()
+    )
 
 
 @RUST_ONLY
-def test_custom_slippage_model_requires_python_core() -> None:
+def test_persistent_basic_targets_bypass_python_router(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected_python_route(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("persistent basic target unexpectedly used Python DecisionRouter")
+
+    monkeypatch.setattr(DecisionRouter, "route", unexpected_python_route)
+    engine = BacktestEngine(
+        RunConfig(run_id="persistent-router", initial_cash=100_000.0, fee_bps=10.0),
+        core="rust_persistent",
+    )
+    result = engine.run(
+        ScriptedStrategy(script=(target_70pct(), None, liquidate(), None)),
+        DataFeed(GOLDEN_BARS),
+    )
+    assert len(result.orders) == 2
+    assert len(result.fills) == 2
+
+    adjust_engine = BacktestEngine(
+        RunConfig(run_id="persistent-adjust", initial_cash=100_000.0, fee_bps=10.0),
+        core="rust_persistent",
+    )
+    adjust_result = adjust_engine.run(
+        ScriptedStrategy(
+            script=(adjust_by(10), None, adjust_by(-4), None),
+            declared_actions=frozenset({ActionKind.NO_ACTION, ActionKind.ADJUST_POSITION}),
+        ),
+        DataFeed(GOLDEN_BARS),
+    )
+    assert [int(fill.quantity) for fill in adjust_result.fills] == [10, 4]
+
+    _, lifecycle_result = _session_scenarios()["gtc_limit"]("rust_persistent")
+    assert lifecycle_result.orders[0].order_type.value == "limit"
+
+    replace_engine, replace_result = _cancel_replace("rust_persistent")
+    assert len(replace_result.orders) == 2
+    statuses = [update.status for update in replace_engine.event_store.order_updates()]
+    assert OrderStatus.REPLACED in statuses
+
+    _, basket_result = _basket("rust_persistent", GroupPolicy.PROPORTIONAL, False)
+    assert {order.group_id for order in basket_result.orders if order.group_id is not None} == {
+        "G-000001"
+    }
+
+
+class _RandomActionStrategy:
+    """All public action variants with deterministic randomized values."""
+
+    def __init__(self, seed: int, first: InstrumentId, second: InstrumentId) -> None:
+        self._rng = random.Random(seed)
+        self._first = first
+        self._second = second
+        self._calls = 0
+
+    def requirements(self) -> StrategyRequirements:
+        return StrategyRequirements(
+            histories=(),
+            schedule=EverySession(),
+            events=frozenset({EventKind.MARKET}),
+            actions=frozenset(ActionKind),
+            features=frozenset(
+                {EngineFeature.LIMIT_ORDER, EngineFeature.PROPORTIONAL_BASKET}
+            ),
+        )
+
+    @staticmethod
+    def _request(
+        instrument: InstrumentId,
+        quantity: int,
+        *,
+        limit: int | None = None,
+    ) -> MarketOrderRequest | LimitOrderRequest:
+        core = OrderCore(instrument, Side.BUY, Decimal(quantity), TimeInForce.GTC)
+        if limit is None:
+            return MarketOrderRequest(core)
+        return LimitOrderRequest(core, Decimal(limit))
+
+    def on_event(self, ctx: StrategyContext, event: StrategyEvent) -> StrategyDecision:
+        del event
+        phase = self._calls % 10
+        self._calls += 1
+        open_orders = ctx.open_orders()
+        if phase == 0:
+            action: StrategyAction = SubmitOrder(self._request(self._first, 2, limit=1))
+        elif phase == 1 and open_orders:
+            action = ReplaceOrder(
+                open_orders[0].order_id,
+                self._request(open_orders[0].instrument, 3, limit=2),
+            )
+        elif phase == 2 and open_orders:
+            action = CancelOrder(open_orders[0].order_id)
+        elif phase == 3:
+            action = SetPortfolioTarget(
+                targets=(WeightTarget(self._first, self._rng.choice((0.1, 0.25, 0.4))),),
+                scope=TargetScope.PATCH,
+                execution=ExecutionPolicy.market_next_open(),
+            )
+        elif phase == 4:
+            action = SetPositionTarget(
+                QuantityTarget(self._first, Decimal(self._rng.randrange(0, 12))),
+                ExecutionPolicy.market_next_open(),
+            )
+        elif phase == 5:
+            action = AdjustPosition(
+                self._first,
+                QuantityDelta(Decimal(self._rng.randrange(1, 4))),
+                ExecutionPolicy.market_next_open(),
+            )
+        elif phase == 6:
+            action = LiquidatePosition(
+                self._first,
+                ExecutionPolicy.market_next_available(),
+                True,
+                LiquidationPersistence.UNTIL_FLAT,
+            )
+        elif phase == 7:
+            action = BasketAction(
+                legs=(
+                    SubmitOrder(self._request(self._first, self._rng.randrange(1, 4))),
+                    SubmitOrder(self._request(self._second, self._rng.randrange(1, 4))),
+                ),
+                group_policy=self._rng.choice(tuple(GroupPolicy)),
+            )
+        elif phase == 9:
+            action = SubmitOrder(self._request(self._second, self._rng.randrange(1, 4)))
+        else:
+            return StrategyDecision.no_action(ctx.now, f"random_phase_{phase}")
+        return StrategyDecision.of(ctx.now, action, f"random_phase_{phase}")
+
+
+@RUST_ONLY
+@pytest.mark.parametrize("seed", range(10))
+def test_all_actions_randomized_trace_matches_persistent_rust(seed: int) -> None:
+    first, second = make_instrument("RND-A"), make_instrument("RND-B")
+    bars = tuple(
+        bar
+        for session in range(1, 21)
+        for bar in (
+            make_bar(day(session), first, 100.0 + session, 100.5 + session, volume=10_000),
+            make_bar(day(session), second, 80.0 + session, 80.5 + session, volume=10_000),
+        )
+    )
+
+    def run(core_name: str) -> tuple[BacktestEngine, BacktestResult]:
+        engine = BacktestEngine(
+            RunConfig(run_id=f"random-{seed}", initial_cash=1_000_000.0, fee_bps=10.0),
+            core=core_name,
+        )
+        result = engine.run(_RandomActionStrategy(seed, first, second), DataFeed(bars))
+        return engine, result
+
+    python_engine, python_result = run("python")
+    rust_engine, rust_result = run("rust_persistent")
+    assert python_result == rust_result
+    assert python_engine.event_store.trace_bytes() == rust_engine.event_store.trace_bytes()
+    assert (
+        python_engine.event_store.decision_tape_bytes()
+        == rust_engine.event_store.decision_tape_bytes()
+    )
+
+
+@RUST_ONLY
+def test_persistent_sends_one_decision_batch_per_callback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from backtest_engine.engine import loop as loop_module
+
+    real_factory = loop_module.make_persistent_runtime
+    proxies: list[Any] = []
+
+    class CountingRuntime:
+        def __init__(self, inner: Any) -> None:
+            self.inner = inner
+            self.route_calls = 0
+            self.load_feed_calls = 0
+            self.indexed_market_calls = 0
+            self.legacy_market_calls = 0
+
+        def load_feed(self, *args: object) -> object:
+            self.load_feed_calls += 1
+            return self.inner.load_feed(*args)
+
+        def route_basic_decision(self, *args: object) -> object:
+            self.route_calls += 1
+            return self.inner.route_basic_decision(*args)
+
+        def process_market_index(self, *args: object) -> object:
+            self.indexed_market_calls += 1
+            return self.inner.process_market_index(*args)
+
+        def process_market(self, *args: object) -> object:
+            self.legacy_market_calls += 1
+            return self.inner.process_market(*args)
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self.inner, name)
+
+    def counting_factory(*args: Any, **kwargs: Any) -> CountingRuntime:
+        proxy = CountingRuntime(real_factory(*args, **kwargs))
+        proxies.append(proxy)
+        return proxy
+
+    monkeypatch.setattr(loop_module, "make_persistent_runtime", counting_factory)
+    engine = BacktestEngine(
+        RunConfig(run_id="ffi-count", initial_cash=100_000.0), core="rust_persistent"
+    )
+    engine.run(
+        ScriptedStrategy(script=(target_70pct(), None, liquidate(), None)),
+        DataFeed(GOLDEN_BARS),
+    )
+    assert len(proxies) == 1
+    assert proxies[0].route_calls == len(engine.event_store.decision_tape)
+    assert proxies[0].load_feed_calls == 1
+    assert proxies[0].indexed_market_calls == len(GOLDEN_BARS)
+    assert proxies[0].legacy_market_calls == 0
+
+
+class _FaultStrategy:
+    def __init__(
+        self,
+        decision: StrategyDecision,
+        declared_actions: frozenset[ActionKind],
+    ) -> None:
+        self._decision = decision
+        self._declared_actions = declared_actions
+
+    def requirements(self) -> StrategyRequirements:
+        return StrategyRequirements(
+            histories=(),
+            schedule=EverySession(),
+            events=frozenset({EventKind.MARKET}),
+            actions=self._declared_actions,
+            features=frozenset(),
+        )
+
+    def on_event(self, ctx: StrategyContext, event: StrategyEvent) -> StrategyDecision:
+        del ctx, event
+        return self._decision
+
+
+@RUST_ONLY
+def test_persistent_router_error_type_order_and_trace_match_python() -> None:
+    negative_target = SetPositionTarget(
+        WeightTarget(INSTRUMENT, -0.25), ExecutionPolicy.market_next_open()
+    )
+    cases = (
+        (
+            StrategyDecision(schema_version=99, as_of=day(1), actions=()),
+            frozenset({ActionKind.NO_ACTION}),
+            SchemaVersionMismatch,
+        ),
+        (
+            StrategyDecision.of(day(1), CancelOrder("O-999999")),
+            frozenset({ActionKind.NO_ACTION}),
+            UndeclaredActionReturned,
+        ),
+        (
+            StrategyDecision.of(day(1), CancelOrder("O-999999")),
+            frozenset({ActionKind.NO_ACTION, ActionKind.CANCEL_ORDER}),
+            UnknownOrderId,
+        ),
+        (
+            StrategyDecision.of(day(1), negative_target),
+            frozenset({ActionKind.NO_ACTION, ActionKind.SET_POSITION_TARGET}),
+            UnsupportedActionValue,
+        ),
+    )
+    feed = DataFeed((make_bar(day(1), INSTRUMENT, 100.0, 100.0),))
+    for decision, declared, expected_type in cases:
+        failures: list[tuple[type[BaseException], str, bytes, bytes]] = []
+        for core_name in ("python", "rust_persistent"):
+            engine = BacktestEngine(
+                RunConfig(run_id="router-error", initial_cash=100_000.0), core=core_name
+            )
+            with pytest.raises(expected_type) as caught:
+                engine.run(_FaultStrategy(decision, declared), feed)
+            failures.append(
+                (
+                    type(caught.value),
+                    str(caught.value).partition(" — ")[0],
+                    engine.event_store.trace_bytes(),
+                    engine.event_store.decision_tape_bytes(),
+                )
+            )
+        assert failures[0] == failures[1]
+
+
+@RUST_ONLY
+def test_persistent_retained_context_history_keeps_end_and_nan_alignment() -> None:
+    import numpy as np
+
+    first, second = make_instrument("HIST-A"), make_instrument("HIST-B")
+    request = HistoryRequest((first, second), PriceField.CLOSE, 2)
+
+    class RetainsContexts:
+        def __init__(self) -> None:
+            self.contexts: list[StrategyContext] = []
+
+        def requirements(self) -> StrategyRequirements:
+            return StrategyRequirements(
+                histories=(request,),
+                schedule=EverySession(),
+                events=frozenset({EventKind.MARKET}),
+                actions=frozenset({ActionKind.NO_ACTION}),
+                features=frozenset(),
+            )
+
+        def on_event(self, ctx: StrategyContext, event: StrategyEvent) -> StrategyDecision:
+            del event
+            self.contexts.append(ctx)
+            return StrategyDecision.no_action(ctx.now)
+
+    bars = (
+        make_bar(day(1), first, 10.0, 11.0),
+        make_bar(day(1), second, 20.0, 21.0),
+        make_bar(day(2), first, 11.0, 12.0),
+        make_bar(day(3), first, 12.0, 13.0),
+        make_bar(day(3), second, 22.0, 23.0),
+    )
+    windows = []
+    for core_name in ("python", "rust_persistent"):
+        strategy = RetainsContexts()
+        BacktestEngine(
+            RunConfig(run_id="retained-history", initial_cash=10_000.0), core=core_name
+        ).run(strategy, DataFeed(bars))
+        assert len(strategy.contexts) == 2
+        first_window = strategy.contexts[0].history(request)
+        last_window = strategy.contexts[-1].history(request)
+        windows.append((first_window.timestamps, first_window.values.copy()))
+        assert first_window.timestamps == (day(1), day(2))
+        assert first_window.values[0, 1] == 21.0
+        assert np.isnan(first_window.values[1, 1])
+        assert last_window.timestamps == (day(2), day(3))
+    assert windows[0][0] == windows[1][0]
+    np.testing.assert_equal(windows[0][1], windows[1][1])
+
+
+@pytest.mark.parametrize("rust_core", RUST_ENGINE_CORES)
+def test_custom_slippage_model_requires_python_core(rust_core: str) -> None:
     class Custom:
         def slippage_per_share(
             self, order: OrderEvent, bar: Bar, base_price: float, quantity: Decimal
@@ -507,7 +933,7 @@ def test_custom_slippage_model_requires_python_core() -> None:
     from tests import test_order_lifecycle as lc
 
     engine = BacktestEngine(
-        RunConfig(run_id="custom", initial_cash=1_000.0), core="rust", slippage=Custom()
+        RunConfig(run_id="custom", initial_cash=1_000.0), core=rust_core, slippage=Custom()
     )
     with pytest.raises(CoreUnavailable, match="built-in slippage"):
         engine.run(lc.OrderScript((None,)), DataFeed(lc.BARS))
@@ -667,17 +1093,16 @@ _EXTRA_SCENARIOS: dict[str, Callable[[str], tuple[BacktestEngine, BacktestResult
 }
 
 
-@RUST_ONLY
+@pytest.mark.parametrize("rust_core", RUST_ENGINE_CORES)
 @pytest.mark.parametrize("name", sorted(_EXTRA_SCENARIOS))
-def test_extra_session_scenarios_identical_across_cores(name: str) -> None:
+def test_extra_session_scenarios_identical_across_cores(name: str, rust_core: str) -> None:
     scenario = _EXTRA_SCENARIOS[name]
     python_engine, python_result = scenario("python")
-    rust_engine, rust_result = scenario("rust")
+    rust_engine, rust_result = scenario(rust_core)
     assert python_result == rust_result
     assert _records(python_engine) == _records(rust_engine)
 
 
-@RUST_ONLY
 def test_rejected_no_cash_gtc_waits_in_rust_session() -> None:
     """리뷰 DEFECT-901: 여력 0(1주도 못 삼)이 실제로 REJECTED_NO_CASH → OPEN 경로를 탄다."""
     from tests import test_order_lifecycle as lc
@@ -688,14 +1113,14 @@ def test_rejected_no_cash_gtc_waits_in_rust_session() -> None:
         make_ohlc(day(3), INSTRUMENT, 50.0, 50.0, 50.0, 50.0),
     )
     traces = []
-    for core_name in ("python", "rust"):
+    for core_name in ("python", "rust", "rust_persistent"):
         engine = BacktestEngine(
             RunConfig(run_id="nocash", initial_cash=300.0, fee_bps=0.0), core=core_name
         )
         result = engine.run(lc.OrderScript((lc.market_buy(2, TimeInForce.GTC),)), DataFeed(bars))
         updates = [(u.ts, u.status, u.detail) for u in engine.event_store.order_updates()]
         traces.append((updates, [(f.ts, int(f.quantity)) for f in result.fills]))
-    assert traces[0] == traces[1]
+    assert traces[0] == traces[1] == traces[2]
     assert traces[0][0][0][1] is OrderStatus.OPEN
     assert "cannot afford" in (traces[0][0][0][2] or "")
 
@@ -769,12 +1194,12 @@ _OPUS_SCENARIOS: dict[str, Callable[[str], tuple[BacktestEngine, BacktestResult]
 }
 
 
-@RUST_ONLY
+@pytest.mark.parametrize("rust_core", RUST_ENGINE_CORES)
 @pytest.mark.parametrize("name", sorted(_OPUS_SCENARIOS))
-def test_opus_review_scenarios_identical_across_cores(name: str) -> None:
+def test_opus_review_scenarios_identical_across_cores(name: str, rust_core: str) -> None:
     scenario = _OPUS_SCENARIOS[name]
     python_engine, python_result = scenario("python")
-    rust_engine, rust_result = scenario("rust")
+    rust_engine, rust_result = scenario(rust_core)
     assert python_result == rust_result
     assert _records(python_engine) == _records(rust_engine)
 

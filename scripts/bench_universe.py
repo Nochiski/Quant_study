@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import argparse
 import cProfile
+import json
+import math
 import pstats
+import statistics
 import sys
 import time
 from datetime import date
@@ -31,8 +34,8 @@ from backtest_engine.types.actions import (
 )
 from backtest_engine.types.decision import StrategyDecision
 from backtest_engine.types.events import StrategyEvent
-from backtest_engine.types.instruments import InstrumentId
-from backtest_engine.types.market import MarketSnapshot, PriceField
+from backtest_engine.types.instruments import AssetClass, InstrumentId
+from backtest_engine.types.market import Bar, MarketSnapshot, PriceField
 from backtest_engine.types.requirements import (
     EventKind,
     EverySession,
@@ -81,12 +84,51 @@ class EqualWeightRebalance:
         )
 
 
+def synthetic_universe(
+    bars: tuple[Bar, ...], size: int
+) -> tuple[tuple[InstrumentId, ...], tuple[Bar, ...]]:
+    """Clone one complete price history into a deterministic order-heavy universe."""
+    by_instrument: dict[InstrumentId, list[Bar]] = {}
+    for bar in bars:
+        by_instrument.setdefault(bar.instrument, []).append(bar)
+    template = max(by_instrument.values(), key=len)
+    template.sort(key=lambda bar: bar.ts)
+    instruments = tuple(
+        InstrumentId("XKRX", f"SYN{i:06d}", AssetClass.EQUITY, "KRW") for i in range(size)
+    )
+    expanded = tuple(
+        Bar(
+            ts=bar.ts,
+            instrument=instrument,
+            open=bar.open * factor,
+            high=bar.high * factor,
+            low=bar.low * factor,
+            close=bar.close * factor,
+            volume=bar.volume,
+        )
+        for session_index, bar in enumerate(template)
+        for instrument_index, instrument in enumerate(instruments)
+        for factor in (
+            math.exp(0.10 * math.sin(session_index * 0.12 + instrument_index * 0.37)),
+        )
+    )
+    return instruments, expanded
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root", type=Path)
     parser.add_argument("--instruments", type=int, default=100)
-    parser.add_argument("--core", choices=("python", "rust"), default="python")
+    parser.add_argument(
+        "--core",
+        choices=("python", "rust", "rust_persistent", "all"),
+        default="python",
+    )
     parser.add_argument("--every", type=int, default=5)
+    parser.add_argument("--repeat", type=int, default=1)
+    parser.add_argument("--warmup", type=int, default=0)
+    parser.add_argument("--synthetic", action="store_true")
+    parser.add_argument("--json-out", type=Path)
     parser.add_argument("--start", type=lambda s: date.fromisoformat(s), default=date(2020, 1, 1))
     parser.add_argument("--end", type=lambda s: date.fromisoformat(s), default=date(2024, 12, 31))
     parser.add_argument("--profile", action="store_true")
@@ -115,34 +157,91 @@ def main(argv: list[str]) -> int:
     if not loaded.ok:
         print(f"bars load failed: {loaded.detail}")
         return 1
-    feed = DataFeed(loaded.bars)
+    bars = loaded.bars
+    if args.synthetic:
+        instruments, bars = synthetic_universe(bars, args.instruments)
+    feed = DataFeed(bars)
+    cores = ("python", "rust", "rust_persistent") if args.core == "all" else (args.core,)
     print(
         f"instruments={len(instruments)} sessions={len(feed)} "
-        f"bars={len(loaded.bars)} core={args.core}"
+        f"bars={len(bars)} cores={','.join(cores)} repeat={args.repeat} warmup={args.warmup}"
     )
 
-    engine = BacktestEngine(
-        RunConfig(run_id=f"bench-{args.core}", initial_cash=1_000_000_000, fee_bps=15),
-        core=args.core,
-    )
-    strategy = EqualWeightRebalance(instruments, args.every, 0.9)
-    started = time.perf_counter()
-    if args.profile:
-        profiler = cProfile.Profile()
-        profiler.enable()
-        result = engine.run(strategy, feed)
-        profiler.disable()
-        elapsed = time.perf_counter() - started
-        stats = pstats.Stats(profiler).sort_stats("cumulative")
-        stats.print_stats(25)
-    else:
+    def run_once(core: str) -> tuple[float, tuple[float, int, int]]:
+        engine = BacktestEngine(
+            RunConfig(run_id=f"bench-{core}", initial_cash=1_000_000_000, fee_bps=15),
+            core=core,
+        )
+        strategy = EqualWeightRebalance(instruments, args.every, 0.9)
+        profiler = cProfile.Profile() if args.profile else None
+        if profiler is not None:
+            profiler.enable()
+        started = time.perf_counter()
         result = engine.run(strategy, feed)
         elapsed = time.perf_counter() - started
-    final_equity = result.snapshots[-1].equity if result.snapshots else float("nan")
-    print(
-        f"elapsed={elapsed:.2f}s fills={len(result.fills)} orders={len(result.orders)} "
-        f"final_equity={final_equity:,.0f}"
-    )
+        if profiler is not None:
+            profiler.disable()
+            pstats.Stats(profiler).sort_stats("cumulative").print_stats(25)
+        final_equity = result.snapshots[-1].equity if result.snapshots else float("nan")
+        return elapsed, (final_equity, len(result.orders), len(result.fills))
+
+    for core in cores:
+        for _ in range(args.warmup):
+            run_once(core)
+
+    elapsed_by_core: dict[str, list[float]] = {core: [] for core in cores}
+    signature_by_core: dict[str, tuple[float, int, int]] = {}
+    for _ in range(args.repeat):
+        for core in cores:
+            elapsed, signature = run_once(core)
+            elapsed_by_core[core].append(elapsed)
+            previous = signature_by_core.setdefault(core, signature)
+            if previous != signature:
+                raise RuntimeError(
+                    f"non-deterministic result for {core}: {previous} != {signature}"
+                )
+
+    baseline = statistics.median(elapsed_by_core["python"]) if "python" in cores else None
+    payload: dict[str, object] = {
+        "workload": {
+            "instruments": len(instruments),
+            "sessions": len(feed),
+            "bars": len(bars),
+            "rebalance_every": args.every,
+            "synthetic": args.synthetic,
+            "repeat": args.repeat,
+            "warmup": args.warmup,
+        },
+        "cores": {},
+    }
+    core_payload = payload["cores"]
+    assert isinstance(core_payload, dict)
+    for core in cores:
+        samples = elapsed_by_core[core]
+        median = statistics.median(samples)
+        final_equity, orders, fills = signature_by_core[core]
+        speedup = baseline / median if baseline is not None else None
+        core_payload[core] = {
+            "samples_seconds": samples,
+            "median_seconds": median,
+            "speedup_vs_python": speedup,
+            "final_equity": final_equity,
+            "orders": orders,
+            "fills": fills,
+        }
+        speedup_text = f" speedup={speedup:.3f}x" if speedup is not None else ""
+        print(
+            f"core={core} median={median:.6f}s samples="
+            f"{','.join(f'{sample:.6f}' for sample in samples)}{speedup_text} "
+            f"orders={orders} fills={fills} final_equity={final_equity:,.0f}"
+        )
+
+    if len(signature_by_core) > 1 and len(set(signature_by_core.values())) != 1:
+        raise RuntimeError(f"core result mismatch: {signature_by_core}")
+    if args.json_out is not None:
+        args.json_out.parent.mkdir(parents=True, exist_ok=True)
+        args.json_out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        print(f"json={args.json_out}")
     return 0
 
 

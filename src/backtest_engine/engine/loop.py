@@ -19,6 +19,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable
 from datetime import datetime
 from decimal import Decimal
+from typing import Any
 
 from backtest_engine.capability import (
     EngineCapabilities,
@@ -28,13 +29,20 @@ from backtest_engine.capability import (
 from backtest_engine.data.feed import DataFeed
 from backtest_engine.engine import calendar
 from backtest_engine.engine.broker import BrokerSim, ExecutionStatus, Quote, participation_of
-from backtest_engine.engine.context import EngineStrategyContext, HistoryStore
+from backtest_engine.engine.context import (
+    EngineStrategyContext,
+    HistoryStore,
+    PersistentHistoryStore,
+)
 from backtest_engine.engine.core import (
     BuyingPowerTracker,
+    PersistentOrderManager,
+    PersistentPortfolio,
     PortfolioLedger,
     RustBuyingPower,
     instrument_key,
     make_buying_power,
+    make_persistent_runtime,
     make_portfolio,
     make_pricing,
     make_quote_core,
@@ -55,6 +63,7 @@ from backtest_engine.engine.queue import (
 from backtest_engine.engine.router import DecisionRouter
 from backtest_engine.engine.slippage import NoSlippage
 from backtest_engine.engine.store import DecisionRecord, EventStore, RecordKind
+from backtest_engine.engine.wire import route_basic_decision, supports_basic_decision
 from backtest_engine.errors import (
     CoreUnavailable,
     CorporateActionsNotProvided,
@@ -105,18 +114,42 @@ class _Run:
         self.declared: frozenset[HistoryRequest] = frozenset(requirements.histories)
         self.history_store = HistoryStore()
         self.config = config
-        self.portfolio: PortfolioLedger = make_portfolio(
-            core,
-            config.initial_cash,
-            allow_short=EngineFeature.SHORT_SELLING in requirements.features,
-            allow_margin=EngineFeature.MARGIN in requirements.features,
-        )
-        self.order_manager = OrderManager()
+        allow_short = EngineFeature.SHORT_SELLING in requirements.features
+        allow_margin = EngineFeature.MARGIN in requirements.features
+        self.persistent_runtime: Any | None = None
+        self.persistent_session_indices: dict[datetime, int] = {}
+        if core == "rust_persistent":
+            persistent_runtime = make_persistent_runtime(
+                config.initial_cash,
+                allow_short=allow_short,
+                allow_margin=allow_margin,
+                leverage=config.max_gross_leverage,
+            )
+            persistent_runtime.configure_router(
+                [action.value for action in requirements.actions],
+                [feature.value for feature in requirements.features],
+            )
+            self.persistent_runtime = persistent_runtime
+            self.history_store = PersistentHistoryStore(persistent_runtime)
+            self.portfolio = PersistentPortfolio(persistent_runtime)
+            self.order_manager = PersistentOrderManager(persistent_runtime)
+        else:
+            self.portfolio: PortfolioLedger = make_portfolio(
+                core,
+                config.initial_cash,
+                allow_short=allow_short,
+                allow_margin=allow_margin,
+            )
+            self.order_manager = OrderManager()
         self.core = core
         self.slippage_model = slippage if slippage is not None else NoSlippage()
         self.max_participation = max_participation
         # Rust 코어는 내장 슬리피지만 지원한다 — 첫 세션이 아니라 run 시작에 거절한다.
-        self.rust_slippage = slippage_config(self.slippage_model) if core == "rust" else None
+        self.rust_slippage = (
+            slippage_config(self.slippage_model)
+            if core in ("rust", "rust_persistent")
+            else None
+        )
         self.broker = BrokerSim(
             config.fee_bps,
             slippage,
@@ -124,8 +157,12 @@ class _Run:
             pricing=make_pricing(core),
             quote_core=make_quote_core(core),
         )
-        self.router = DecisionRouter(
-            requirements.actions, self.order_manager, requirements.features
+        self.router = (
+            None
+            if core == "rust_persistent"
+            else DecisionRouter(
+                requirements.actions, self.order_manager, requirements.features
+            )
         )
         self.store = EventStore()
         self.queue = EventQueue()
@@ -210,6 +247,8 @@ class BacktestEngine:
         )
         self._event_store = run.store
         run.universe = universe
+        if run.persistent_runtime is not None:
+            self._load_persistent_feed(run, feed)
         if self._config.max_gross_leverage > 1.0 and not run.wants_feature(EngineFeature.MARGIN):
             raise UndeclaredFeatureUsed(
                 f"max_gross_leverage={self._config.max_gross_leverage} requires MARGIN feature "
@@ -239,7 +278,8 @@ class BacktestEngine:
                 case MarketArrived(snapshot=snapshot):
                     self._on_market(run, snapshot)
                 case FillOccurred(fill=fill, snapshot=snapshot):
-                    run.portfolio.apply(fill)
+                    if run.core != "rust_persistent":
+                        run.portfolio.apply(fill)
                     run.store.append(fill.ts, RecordKind.FILL, fill)
                 case StrategyNotify(event=strategy_event, snapshot=snapshot):
                     self._dispatch(run, strategy_event, snapshot)
@@ -286,6 +326,56 @@ class BacktestEngine:
 
     # --- 세션 처리 -----------------------------------------------------------
 
+    @staticmethod
+    def _load_persistent_feed(run: _Run, feed: DataFeed) -> None:
+        runtime = run.persistent_runtime
+        portfolio = run.portfolio
+        if runtime is None or not isinstance(portfolio, PersistentPortfolio):
+            raise CoreUnavailable("persistent Rust feed requires its runtime and portfolio")
+        registry: dict[object, int] = {}
+        instruments = []
+        keys: list[str] = []
+        symbols: list[str] = []
+        sessions: list[str] = []
+        offsets = [0]
+        instrument_ids: list[int] = []
+        opens: list[float] = []
+        highs: list[float] = []
+        lows: list[float] = []
+        closes: list[float] = []
+        volumes: list[int] = []
+        for session_index, snapshot in enumerate(feed.snapshots()):
+            run.persistent_session_indices[snapshot.ts] = session_index
+            sessions.append(str(snapshot.ts))
+            for bar in snapshot.bars:
+                instrument_id = registry.get(bar.instrument)
+                if instrument_id is None:
+                    instrument_id = len(instruments)
+                    registry[bar.instrument] = instrument_id
+                    instruments.append(bar.instrument)
+                    keys.append(instrument_key(bar.instrument))
+                    symbols.append(bar.instrument.symbol)
+                instrument_ids.append(instrument_id)
+                opens.append(bar.open)
+                highs.append(bar.high)
+                lows.append(bar.low)
+                closes.append(bar.close)
+                volumes.append(bar.volume)
+            offsets.append(len(instrument_ids))
+        runtime.load_feed(
+            keys,
+            symbols,
+            sessions,
+            offsets,
+            instrument_ids,
+            opens,
+            highs,
+            lows,
+            closes,
+            volumes,
+        )
+        portfolio.register_instruments(tuple(instruments))
+
     def _on_market(self, run: _Run, snapshot: MarketSnapshot) -> None:
         run.history_store.append(snapshot)
         run.store.append(snapshot.ts, RecordKind.MARKET, snapshot)
@@ -302,6 +392,11 @@ class BacktestEngine:
         # 주문이 분할 전 수량과 섞이면 안 된다.
         for action in run.corporate_actions.get(snapshot.ts, ()):
             self._apply_corporate_action(run, action, snapshot, update)
+
+        if run.core == "rust_persistent":
+            self._on_market_persistent(run, snapshot, update)
+            run.queue.push(snapshot.ts, EventPriority.SESSION_CLOSE, SessionClose(snapshot))
+            return
 
         if run.core == "rust":
             self._on_market_rust(run, snapshot, update)
@@ -464,6 +559,55 @@ class BacktestEngine:
                     order_manager.drop_group(order_id)
                 case _:
                     raise RuntimeError(f"unknown op from rust core — kind={kind!r}")
+
+    def _on_market_persistent(
+        self,
+        run: _Run,
+        snapshot: MarketSnapshot,
+        update: Callable[[str, OrderStatus, str | None], None],
+    ) -> None:
+        """Rust runtime 내부의 persistent 주문·그룹 상태로 한 세션을 처리한다."""
+        runtime = run.persistent_runtime
+        order_manager = run.order_manager
+        if runtime is None or not isinstance(order_manager, PersistentOrderManager):
+            raise CoreUnavailable("persistent rust core requires its runtime and order manager")
+        default = None if run.max_participation is None else str(run.max_participation)
+        ops = runtime.process_market_index(
+            run.persistent_session_indices[snapshot.ts],
+            run.broker.fee_rate,
+            default,
+            run.rust_slippage,
+        )
+        for kind, order_id, quantity, price, slip, fee, payload in ops:
+            match kind:
+                case "fill":
+                    order = order_manager.order_event(order_id)
+                    fill = FillEvent(
+                        fill_id=payload,
+                        order_id=order_id,
+                        ts=snapshot.ts,
+                        instrument=order.instrument,
+                        quantity=Decimal(quantity),
+                        side=order.side,
+                        price=price,
+                        fee=fee,
+                        slippage_per_share=slip,
+                    )
+                    run.queue.push(fill.ts, EventPriority.FILL, FillOccurred(fill, snapshot))
+                    if run.wants(EventKind.FILL):
+                        run.queue.push(
+                            fill.ts, EventPriority.NOTIFY, StrategyNotify(fill, snapshot)
+                        )
+                case "update":
+                    status_text, _, detail = payload.partition("|")
+                    update(order_id, OrderStatus(status_text), detail or None)
+                case "trigger" | "remove" | "drop_group":
+                    # mutable 상태는 process_market 안에서 이미 Rust runtime에 적용됐다.
+                    pass
+                case _:
+                    raise RuntimeError(
+                        f"unknown op from persistent rust core — kind={kind!r}"
+                    )
 
     @staticmethod
     def _settlement_session(feed: DataFeed, action: CorporateActionEvent) -> datetime:
@@ -700,10 +844,27 @@ class BacktestEngine:
             universe_source=run.universe,
         )
         decision = run.strategy.on_event(context, event)
-        decision_id = run.order_manager.next_decision_id()
+        persistent_route = None
+        if run.persistent_runtime is not None and supports_basic_decision(decision):
+            persistent_route = route_basic_decision(
+                run.persistent_runtime, decision, portfolio_snapshot, market
+            )
+            decision_id = persistent_route.decision_id
+        else:
+            decision_id = run.order_manager.next_decision_id()
+        run.store.record_callback(event, decision_id, decision)
         run.store.append(ts, RecordKind.DECISION, DecisionRecord(decision_id, decision))
 
-        routing = run.router.route(decision, decision_id, portfolio_snapshot, market)
+        if persistent_route is not None:
+            if persistent_route.error is not None:
+                raise persistent_route.error
+            routing = persistent_route.routing
+        else:
+            if run.router is None:
+                raise RuntimeError(
+                    "persistent Rust router does not support a returned strategy action"
+                )
+            routing = run.router.route(decision, decision_id, portfolio_snapshot, market)
         for update in routing.updates:
             self._record_update(run, update, market)
         for group in routing.groups:

@@ -10,6 +10,9 @@
 
 mod buying_power;
 mod execution;
+mod feed;
+mod persistent;
+mod persistent_router;
 mod portfolio;
 mod quote;
 mod session;
@@ -19,6 +22,7 @@ use pyo3::prelude::*;
 #[pymodule]
 fn backtest_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     execution::register(m)?;
+    persistent::register(m)?;
     portfolio::register(m)?;
     quote::register(m)?;
     buying_power::register(m)?;

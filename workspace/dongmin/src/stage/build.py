@@ -62,12 +62,15 @@ class BuildResult:
         return self.status is BuildStatus.OK
 
 
-def normalize_text(s: str) -> str:
-    """§5 문자열 정규화 (D7 순서 고정): NFKC → 개행·탭 제거 → 연속공백 축약 → strip → 태그 제거."""
+def normalize_text(s: str, strip_tags: bool = False) -> str:
+    """§5 문자열 정규화(D7 순서): NFKC, 개행·탭 제거, 공백 축약, strip, 옵트인 태그 제거.
+
+    태그 제거는 옵트인 — DART 서술 컬럼의 `<주1>` 각주는 내용이다(5단계 리뷰 DEFECT-E2).
+    """
     t = unicodedata.normalize("NFKC", s)
     t = t.replace("\r", "").replace("\n", "").replace("\t", "")
     t = _SPACES_RE.sub(" ", t).strip()
-    return _TAG_RE.sub("", t).strip()
+    return _TAG_RE.sub("", t).strip() if strip_tags else t
 
 
 def _q(name: str) -> str:
@@ -89,10 +92,18 @@ def _signed(expr: str, policy: str) -> str:
     return expr
 
 
+def _zero_pred(raw: str) -> str:
+    """§5 '0' 결측 마커 — 원문 리터럴 '0'·'0.00'·'+0'·'00000000' 전부 (KIS 실측, 5단계 리뷰 K1)."""
+    return f"regexp_matches({raw}, '^[+-]?0+(\\.0+)?$')"
+
+
 def _cast_expr(c: ColumnRule, raw: str) -> str:
     """원장 VARCHAR → stage 타입. 실패는 NULL (miss_kind 가 cast_failed 로 기록)."""
     if c.kind in DATE_FORMATS:
-        return f"TRY_CAST(try_strptime(nullif({raw}, ''), '{DATE_FORMATS[c.kind]}') AS DATE)"
+        val = f"TRY_CAST(try_strptime(nullif({raw}, ''), '{DATE_FORMATS[c.kind]}') AS DATE)"
+        if c.zero_is_missing:
+            return f"CASE WHEN {_zero_pred(raw)} THEN NULL ELSE {val} END"
+        return val
     if c.kind == KIND_BOOL:
         return f"TRY_CAST({raw} AS BOOLEAN)"
     if c.kind == KIND_NUMERIC:
@@ -101,13 +112,13 @@ def _cast_expr(c: ColumnRule, raw: str) -> str:
             num = f"(TRY_CAST({num} AS DECIMAL(38,{c.scale})) * {c.unit_scale})"
         val = f"TRY_CAST({num} AS {c.decimal_type})"
         if c.zero_is_missing:
-            return f"CASE WHEN {raw} = '0' THEN NULL ELSE {val} END"
+            return f"CASE WHEN {_zero_pred(raw)} THEN NULL ELSE {val} END"
         return val
     return raw
 
 
 def _miss_kind_expr(c: ColumnRule, raw: str, staged: str) -> str:
-    zero = f"WHEN {raw} = '0' THEN 'ledger_zero' " if c.zero_is_missing else ""
+    zero = f"WHEN {_zero_pred(raw)} THEN 'ledger_zero' " if c.zero_is_missing else ""
     # 비키 날짜: 캐스트됐지만 범위 밖이라 NULL 이 된 셀 = out_of_range (G7 행 격리형)
     oor = (f"WHEN {_cast_expr(c, raw)} IS NOT NULL AND {staged} IS NULL THEN 'out_of_range' "
            if c.kind in DATE_FORMATS and not c.key else "")
@@ -141,8 +152,14 @@ def _union_sql(con: duckdb.DuckDBPyConnection, rule: TableRule) -> tuple[list[st
     return src_cols, " UNION ALL ".join(selects)
 
 
-def _load_norm_maps(con: duckdb.DuckDBPyConnection, rule: TableRule, src_view: str) -> None:
-    """정규화 대상 텍스트 컬럼의 distinct 값만 파이썬으로 정규화해 임시 매핑표로 올린다."""
+def _load_norm_maps(con: duckdb.DuckDBPyConnection, rule: TableRule, src_view: str,
+                    tmp_dir: Path) -> None:
+    """정규화 대상 텍스트 컬럼의 distinct 값만 파이썬으로 정규화해 임시 매핑표로 올린다.
+
+    적재는 JSON Lines → `read_json` (executemany 는 행마다 statement — §11 교훈 ⑥. disclosure
+    report_nm 은 distinct 값이 수십만이다).
+    """
+    tmp_dir.mkdir(parents=True, exist_ok=True)
     for c in rule.columns:
         if not c.normalize_text:
             continue
@@ -151,9 +168,16 @@ def _load_norm_maps(con: duckdb.DuckDBPyConnection, rule: TableRule, src_view: s
             f"SELECT DISTINCT {_q(c.src)} FROM {src_view} WHERE {_q(c.src)} IS NOT NULL"
         ).fetchall()]
         con.execute(f"CREATE OR REPLACE TEMP TABLE {tbl} (raw VARCHAR, norm VARCHAR)")
-        if vals:
-            con.executemany(f"INSERT INTO {tbl} VALUES (?, ?)",
-                            [(v, normalize_text(v)) for v in vals])
+        if not vals:
+            continue
+        jsonl = tmp_dir / f"norm__{c.src}.jsonl"
+        with open(jsonl, "w", encoding="utf-8") as f:
+            for v in vals:
+                f.write(json.dumps({"raw": v, "norm": normalize_text(v, c.strip_tags)},
+                                   ensure_ascii=False))
+                f.write("\n")
+        con.execute(f"INSERT INTO {tbl} SELECT raw, norm FROM read_json('{jsonl}', "
+                    f"format='newline_delimited', columns={{'raw': 'VARCHAR', 'norm': 'VARCHAR'}})")
 
 
 def _is_partitioned(rule: TableRule) -> bool:
@@ -196,7 +220,7 @@ def _stage_sql(rule: TableRule, src_view: str, src_cols: list[str],
                     + ", ".join(f"coalesce(s.{_q(c)}, '')" for c in payload) + "))")
     key_cols = rule.key_columns
     key_null = " OR ".join(f"{_q(c.name)} IS NULL" for c in key_cols) or "FALSE"
-    key_missing = " OR ".join(f"{_q(c.name)} = ''" for c in key_cols
+    key_missing = " OR ".join(f"{_q(c.name)} = ''" for c in key_cols if not c.blank_is_value
                               if c.kind == KIND_TEXT) or "FALSE"
     required_null = " OR ".join(f"{_q(c.name)} IS NULL" for c in rule.columns
                                 if c.required and not c.key) or "FALSE"
@@ -212,6 +236,10 @@ def _stage_sql(rule: TableRule, src_view: str, src_cols: list[str],
         part_sel, out_of_range = "", ""
     mk_cols = rule.castable_columns
     mk_struct = ", ".join(f"{_q(c.name)} := {_q('mk__' + c.name)}" for c in mk_cols)
+    # 캐스팅 대상 컬럼이 0개인 테이블(ws_coverage 등)은 빈 struct_pack() 이 duckdb 오류 —
+    # 스키마 통일을 위해 자리표시 필드 하나의 NULL STRUCT 를 낸다.
+    mk_expr = (f"struct_pack({mk_struct})" if mk_struct
+               else 'CAST(NULL AS STRUCT("_none" VARCHAR))')
     fail_list = ", ".join(f"CASE WHEN {_q('mk__' + c.name)} = 'cast_failed' THEN ['{c.name}'] "
                           f"ELSE []::VARCHAR[] END" for c in mk_cols)
     mk_sel = ", ".join(
@@ -231,7 +259,7 @@ WITH cast_ AS (
 ), flagged AS (
   SELECT m.*,
          flatten([{fail_list}]) AS _cast_fail_cols,
-         struct_pack({mk_struct}) AS miss_kind,
+         {mk_expr} AS miss_kind,
          CASE WHEN {key_null} THEN 'key_cast_failed'
               WHEN {key_missing} THEN 'key_missing'
               WHEN {required_null} THEN 'required_null'
@@ -315,7 +343,12 @@ def _available_sql(rule: TableRule, con: duckdb.DuckDBPyConnection,
     """(SELECT 절 조각, JOIN 절 조각). available_date·available_basis 두 컬럼을 낸다."""
     a = rule.available
     if a.kind == "column":
-        return f"{_q(str(a.column))} AS available_date, '{a.basis}' AS available_basis", ""
+        col = _q(str(a.column))
+        if a.fallback_column is None:
+            return f"{col} AS available_date, '{a.basis}' AS available_basis", ""
+        fb = _q(a.fallback_column)      # §6 v3 revision: collected_date NULL 행 → base_date/default
+        basis = f"CASE WHEN {col} IS NULL THEN 'default' ELSE '{a.basis}' END"
+        return f"COALESCE({col}, {fb}) AS available_date, {basis} AS available_basis", ""
     if a.kind == "lookup":
         if not (a.table and a.local_key and a.lookup_key and a.lookup_value):
             raise ValueError(f"incomplete lookup rule: table={rule.name} available={a}")
@@ -392,7 +425,7 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
         else:
             src_cols, union = _union_sql(con, rule)
             con.execute(f"CREATE OR REPLACE TEMP VIEW src_all AS {union}")
-        _load_norm_maps(con, rule, "src_all")
+        _load_norm_maps(con, rule, "src_all", tmp_root)
         con.execute("CREATE OR REPLACE TEMP TABLE stage_all AS "
                     + _stage_sql(rule, "src_all", src_cols, year_lo, year_hi,
                                  content_lo, content_hi))
@@ -479,7 +512,8 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
                 "src_bytes": sum(f.bytes for f in src_files),
                 "src_mtime": max((f.src_mtime for f in src_files), default=0.0),
                 "snapshot_id": snap.snapshot_id, "rules_version": RULES_VERSION,
-                "coverage_from": None, "version_loss_upstream": rule.write_mode != "append_only",
+                "coverage_from": rule.coverage_from,
+                "version_loss_upstream": rule.write_mode != "append_only",
                 "observed_date_exempt": rule.observed_src is None, "rcept_map_miss": lookup_miss,
                 "lag_known": rule.lag_known, "content_hash": content_hash, "gates": gate_dicts}
             _write_json(pdir / "_meta.json", meta)

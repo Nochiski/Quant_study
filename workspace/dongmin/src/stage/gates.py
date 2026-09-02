@@ -17,8 +17,9 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     "G7": 0.001,      # out_of_range 격리 비율 상한 (survey v2 후 확정, 기본 0.1%)
     "G9_close": 1.0,  # 종가 교차 일치율 하한 (SPEC 100.0000%)
 }
-YEAR_RANGE_OBSERVED = (2000, 1)   # 관측일 축 [2000, 현재+1] — 키/파티션 연도, 위반 = reject
-YEAR_RANGE_CONTENT = (1990, 40)   # 내용일 축 [1990, 현재+40] — 비키 날짜, 위반 = 셀 격리
+YEAR_RANGE_OBSERVED = (1999, 1)   # 관측일 축 [1999(DART 최초 공시), 현재+1] — 키/파티션, reject
+YEAR_RANGE_CONTENT = (1956, 40)   # 내용일 축 [1956(KRX 개장), 현재+40] — 비키 날짜, 위반 = 셀 격리
+                                  # 하한 1990 은 상장일 19750611 을 격리했다 (5단계 리뷰 DEFECT-A)
 
 
 class GateStatus(Enum):
@@ -188,6 +189,8 @@ def g5_regression_delta(ctx: GateContext) -> GateResult:
 def g6_version_keep(ctx: GateContext) -> GateResult:
     if ctx.rule.write_mode != "append_only":
         return GateResult("G6", GateStatus.SKIP, f"write_mode={ctx.rule.write_mode}", {})
+    if not ctx.rule.versioned:          # 콜·유닛 로그 — 같은 키가 하루에 여러 번이 정상 (D2)
+        return GateResult("G6", GateStatus.SKIP, "unversioned", {})
     keys = ", ".join(f'"{k}"' for k in ctx.rule.natural_key)
     n = _count(ctx.con, f"SELECT count(*) FROM (SELECT {keys}, observed_date, count(*) c "
                           f"FROM {ctx.stage_view} GROUP BY ALL HAVING c > 1)")

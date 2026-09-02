@@ -38,7 +38,7 @@ class ColumnRule:
     sign: str = "keep"          # abs | strip_plus | keep (§5 부호 정책)
     unit_scale: int | None = None   # 단위 스케일 (백만원 ×1_000_000 → _krw). 캐스트 전 곱
     expected_len: int | None = None
-    zero_is_missing: bool = False   # 원문 문자열 '0' → NULL + miss_kind=ledger_zero (KRX O/H/L)
+    zero_is_missing: bool = False   # 원문 '0'·'0.00'·'00000000' → NULL + ledger_zero (KRX OHL·KIS)
     normalize_text: bool = False    # §5 문자열 정규화 — 식별자·조인 키에는 금지
     strip_tags: bool = False        # 정규화 뒤 <…> 제거 — WISE 라벨만. DART '<주1>' 은 각주
     key: bool = False

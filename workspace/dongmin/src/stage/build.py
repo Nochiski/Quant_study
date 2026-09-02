@@ -92,10 +92,18 @@ def _signed(expr: str, policy: str) -> str:
     return expr
 
 
+def _zero_pred(raw: str) -> str:
+    """§5 '0' 결측 마커 — 원문 리터럴 '0'·'0.00'·'+0'·'00000000' 전부 (KIS 실측, 5단계 리뷰 K1)."""
+    return f"regexp_matches({raw}, '^[+-]?0+(\\.0+)?$')"
+
+
 def _cast_expr(c: ColumnRule, raw: str) -> str:
     """원장 VARCHAR → stage 타입. 실패는 NULL (miss_kind 가 cast_failed 로 기록)."""
     if c.kind in DATE_FORMATS:
-        return f"TRY_CAST(try_strptime(nullif({raw}, ''), '{DATE_FORMATS[c.kind]}') AS DATE)"
+        val = f"TRY_CAST(try_strptime(nullif({raw}, ''), '{DATE_FORMATS[c.kind]}') AS DATE)"
+        if c.zero_is_missing:
+            return f"CASE WHEN {_zero_pred(raw)} THEN NULL ELSE {val} END"
+        return val
     if c.kind == KIND_BOOL:
         return f"TRY_CAST({raw} AS BOOLEAN)"
     if c.kind == KIND_NUMERIC:
@@ -104,13 +112,13 @@ def _cast_expr(c: ColumnRule, raw: str) -> str:
             num = f"(TRY_CAST({num} AS DECIMAL(38,{c.scale})) * {c.unit_scale})"
         val = f"TRY_CAST({num} AS {c.decimal_type})"
         if c.zero_is_missing:
-            return f"CASE WHEN {raw} = '0' THEN NULL ELSE {val} END"
+            return f"CASE WHEN {_zero_pred(raw)} THEN NULL ELSE {val} END"
         return val
     return raw
 
 
 def _miss_kind_expr(c: ColumnRule, raw: str, staged: str) -> str:
-    zero = f"WHEN {raw} = '0' THEN 'ledger_zero' " if c.zero_is_missing else ""
+    zero = f"WHEN {_zero_pred(raw)} THEN 'ledger_zero' " if c.zero_is_missing else ""
     # 비키 날짜: 캐스트됐지만 범위 밖이라 NULL 이 된 셀 = out_of_range (G7 행 격리형)
     oor = (f"WHEN {_cast_expr(c, raw)} IS NOT NULL AND {staged} IS NULL THEN 'out_of_range' "
            if c.kind in DATE_FORMATS and not c.key else "")

@@ -79,3 +79,42 @@ def test_coverage_from_is_written_to_meta(tmp_path: Path) -> None:
     assert r.out_dir is not None
     meta = json.loads((r.out_dir / "_meta.json").read_text(encoding="utf-8"))
     assert meta["coverage_from"] == "2026-09-01"
+
+
+ZERO_RULE = model.TableRule(
+    name="stg_probe_zero",
+    sources=(model.SourceRef("x", "z", "z"),),
+    columns=(
+        model.ColumnRule("k", "k", model.KIND_TEXT, key=True),
+        model.ColumnRule("p", "price_krw", model.KIND_NUMERIC, 12, 2, zero_is_missing=True),
+        model.ColumnRule("d", "abol_date", model.KIND_DATE_YMD8, zero_is_missing=True),
+    ),
+    natural_key=("k",),
+    partition_class="whole", partition_expr=None, partition_src=None,
+    observed_src="collected_at", write_mode="append_only", fanout=1,
+    payload_exclude=("collected_at",), lag_known=False, available=model.AVAILABLE_NONE,
+)
+
+
+def test_zero_marker_matches_decimal_and_all_zero_date_literals(tmp_path: Path) -> None:
+    """KIS 결측 '0' 은 '0.00'(loan stck_prpr 281행)·'00000000'(stock_info 날짜 168셀)로도 온다."""
+    d = tmp_path / "raw"
+    d.mkdir()
+    con = sqlite3.connect(d / "x.db")
+    con.execute("CREATE TABLE z (k TEXT, p TEXT, d TEXT, collected_at TEXT)")
+    con.executemany("INSERT INTO z VALUES (?,?,?,?)", [
+        ("a", "0", "00000000", "2026-08-30T10:00:00"),
+        ("b", "0.00", "20200101", "2026-08-30T10:00:00"),
+        ("c", "0.50", "-", "2026-08-30T10:00:00"),
+    ])
+    con.commit()
+    con.close()
+    s = snapshot.make_snapshot({"x": d / "x.db"}, tmp_path / "snapshots", snapshot_id="s")
+    r = build.build_table(ZERO_RULE, s, tmp_path / "stage")
+    assert r.ok, [g for g in r.gates if g.status is gates.GateStatus.FAIL]
+    con2 = _read(tmp_path, r)
+    got = con2.execute("SELECT k, price_krw, miss_kind.price_krw, abol_date, miss_kind.abol_date "
+                       "FROM t ORDER BY k").fetchall()
+    assert got[0] == ("a", None, "ledger_zero", None, "ledger_zero")
+    assert (got[1][1], got[1][2], str(got[1][3])) == (None, "ledger_zero", "2020-01-01")
+    assert (str(got[2][1]), got[2][2], got[2][4]) == ("0.50", None, "ledger_dash")

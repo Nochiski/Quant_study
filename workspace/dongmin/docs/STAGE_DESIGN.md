@@ -190,14 +190,14 @@ KRX 가격(stg_price_daily)의 기준가/체결가 구분은 별도 컬럼 없�
 | stage | 원장 (ws_raw) | 키 · 파싱 규칙 |
 |---|---|---|
 | `stg_consensus_monthly` | ep=cF5001 + cF5002 (예외 e — outer join) | (ticker,fetched_date,target_period,**metric**,obs_month) — metric∈{eps,revenue} 없으면 chart1/chart2 가 같은 키 충돌(실측) · **날짜 라벨로 join — 인덱스 zip 금지**(축 길이 불일치 실측 09-02: chart1 기준 1,402/2,430=57.7%, chart2 기준 2,415/2,430 — v2.1 의 1,740 은 분자 정의 부재. EPS·매출이 한 달 어긋남) · 말미 관측점 중복 71% → 값 동일 검증 후 dedup+카운터 · `obs_label` 원문 보존(비월말 라벨 실재) · 무커버 프로브(cF5001 52.95%)는 **행 생성**(avg=NULL, close_price 실값 보존) — cF5002 빈 배열은 0행. G8 계상 규칙 명문 · zlib(`789C`)+이중 JSON — **양쪽 loads 에 parse_float=Decimal** · 내부 키명 ep 별 상이(select_item vs avg) — 파서 분기 · **v2.1 누락 필드 적재(v2.2)**: cF5001 `target_price`(8,360 blob 중 3,993 실값)·cF5002 `min_max` → `consensus_min`·`consensus_max` · **단위는 데이터 값**: cF5001 `select_item_unit`·cF5002 `item_unit`(EPS '원'·매출 '억원' 실측) → `unit` 컬럼 보존, 스케일 변환 금지 · `metric` 은 `select_item_name`/`item_name` 파싱('EPS'→eps, '매출액'→revenue, 그 외 `parse_failed`) — 실측 키셋: cF5001 {categories, close_price, select_item, select_item_name, select_item_unit, target_price} / cF5002 {avg, categories, item_name, item_unit, min_max} |
-| `stg_consensus_annual` / `_quarterly` | ep=c1050001_data, pkey='T2Y' / 'T2Q' | ticker,fetched_date,period |
-| `stg_consensus_matrix` | ep=c1050001_data, pkey GLOB 'T4:*' | ticker,fetched_date,target_period,acc_cd,lookback · `target_period` YYYYMM 문자열 보존(비12월 202605·202903 실재 — 연도 절삭 금지) · cmp_cd 비숫자 19종(`0004Y0` 등) — TEXT 유지 |
+| `stg_consensus_annual` / `_quarterly` | ep=c1050001_data, pkey='T2Y' / 'T2Q' | (ticker,fetched_date,**period_label**) — 라벨 원문 `'2022.12(A)'` 이 키, `period`(YYYYMM)·`period_kind`(A/E)는 파서 유도. **실측 09-02**: JsonData 7행/blob(5·6행 10 blob), 라벨 어휘 `9999.99(A|E)` 2종만, MAIN∈{IFRS연결·IFRS별도·GAAP개별}, 빈 blob 2. 값은 WISE 표시 단위(매출·영업이익·순이익 억원, EPS·BPS 원 — T4 `ACC_NM` '매출액(억원)' 실측) 그대로 — 데이터에 단위 컬럼이 없어 접미사·스케일 없음 |
+| `stg_consensus_matrix` | ep=c1050001_data, pkey GLOB 'T4:*' | ticker,fetched_date,target_period,acc_cd,lookback · `target_period` YYYYMM 문자열 보존(비12월 202605·202903 실재 — 연도 절삭 금지) · cmp_cd 비숫자 19종(`0004Y0` 등) — TEXT 유지 · **실측 09-02**: JsonData = 계정 9(610100 투자의견·121000 매출·121500 영업이익·122710 순이익·312000 EPS·382000 PER·314000 BPS·382400 PBR·211500 ROE) × `VAL1~5` → 45행/blob. 키 마지막 요소는 **`lookback_idx`**('1'~'5' 원문 인덱스) + `lookback` 라벨(current·1w·1m·3m·1y — v3 revision_compare 의 1w/1m/3m/1y 가 VAL2~5 와 대각 일치 667·674·699·709/1,844쌍, VAL1=현재) · `DT`→`base_date`(WISE 기준일, fetched_date 와 다름) · (cmp,fd)당 T4 blob 정확히 3 · 빈 JsonData 72 blob = 0행 |
 | (pkey='') | c1050001_data 목록 호출 | 파싱 입력으로 소비 — 별도 테이블 없음 |
-| `stg_analyst_summary` | c1010001 HTML | ticker,fetched_date — 추정기관수. G8 필수 |
-| `stg_fin_wise` | cF3002/4002 | ACCODE 기준 · Decimal(38,6) |
-| `stg_v3_revision_daily` 등 v3 4종 | v3_* | 정식 stage(결정 ⑤, **09-02 개정: 2026-04-03~09-02 동결 사본, 증분 없음**). 규칙 분해는 §6 |
-| `stg_wise_coverage` | ws_coverage | **이력 아님 — 종목당 1행 현재 상태**(실측 2,566행=2,566종목) → `status_current`·`checked_date_current`. 3분류 재료로 쓰려면 수집기를 append 이력으로 바꿔야 — stage 밖 이슈로 등록 |
-| `stg_calls_wise` | ws_call_log | 시계 컬럼 실명 `ts` |
+| `stg_analyst_summary` | c1010001 HTML | ticker,fetched_date — `id="cTB15"` 표 마지막 행(투자의견·목표주가(원)·EPS(원)·PER·추정기관수) + `[기준:YYYY.MM.DD]`→`base_date`(date_dot). **실측 09-02 모양 3종**(1,612 blob): 5셀 숫자 / 5셀 중 빈칸(`&nbsp;`·'' → blank) / 단일 셀 '최근N개월 이내에 제시된 의견이 없습니다'(346 → 값 NULL + `no_opinion_note`) · `<script>alert(…)` 리다이렉트 본문 1 blob = 데이터 없음(`n_no_data`, 실패 아님). G8 필수. 같은 HTML 의 `cTB24`(제공처별 목표가·투자의견·최종일자 목록)는 카탈로그 밖 — 후속 후보로 등록 |
+| `stg_fin_wise` | cF3002/4002 (pkey='Y') | **키 (ticker,fetched_date,ep,seq)** — seq = DATA 배열 위치. 실측 09-02: cF4002 는 같은 ACCODE 가 여러 P_ACCODE 아래 반복(1,614/1,614 blob)이라 ACCODE 는 키가 못 된다(cF3002 는 유일). 1행 = DATA 원소(wide): `val_1~6` ↔ 기간 라벨 `YYMM[0..5]`(`period_label_1~6` 행마다 병기 — 라벨 8 = 기간 6 + '전년대비(YoY)' 2), `val_q1·q2·q4·q5·q6`(라벨이 blob 에 없다 — QOQ/YOY 코멘트가 상대 위치만 말함 → 슬롯명 보존, 해석은 equity), 증감률 6·코멘트 4·POINT_CNT·FIN·FRQ. Decimal(38,6) — 값에 float 잔재(소수 10자리 `2589354.9400000004`) 실재, duckdb 캐스트가 6자리로 반올림 · DATA 행수 cF3002 244(1,552 blob)·cF4002 36, 빈 DATA 2 |
+| `stg_v3_revision_daily` 등 v3 4종 | v3_* | 정식 stage(결정 ⑤, **09-02 개정: 2026-04-03~09-02 동결 사본, 증분 없음**). 규칙 분해는 §6 · revision_daily 키 (ticker, date=base_date, target_period), available=`collected_date`(measured) → NULL 1,390행은 `AvailableRule.fallback_column=date`(default) + `coverage_degraded` · opinions 키 (ticker, date=snapshot_date) · annual 키 (sync_date, ticker, period, period_type, data_type) · compare 키 (sync_date, ticker, target_period), `opinion_*` 4컬럼 전행 NULL 실측 |
+| `stg_wise_coverage` | ws_coverage | **이력 아님 — 종목당 1행 현재 상태**(실측 2,566행=2,566종목) → `status_current`·`checked_date_current`. 3분류 재료로 쓰려면 수집기를 append 이력으로 바꿔야 — stage 밖 이슈로 등록 · `checked_date_current` = checked_at 의 KST 날짜(observed_date 와 같은 환산) |
+| `stg_calls_wise` | ws_call_log | 시계 컬럼 실명 `ts` · 키 (ts, ticker, ep, pkey) — `pkey=''`(목록 호출 6,844행)는 값이라 `blank_is_value` 로 key_missing 에서 제외 |
 
 **v3 편입 계약**(결정 ⑤, 09-02 개정): **동결 사본만.** sync_v3 는 2026-09-02 중단 —
 직접 수집 6종이 같은 값을 커버한다(analyst_count 는 c1010001 원문, opinion_score 는 flag=4
@@ -413,6 +413,11 @@ fin_raw 15.4M행 8키 GROUP BY 9초 · RSS 3.6GB → 6GB·3threads 성립. 풀 �
   blob 소스 계약: `BlobSource(db, table, eps, parser)` + `parsers.PARSERS`; 원장 실물 계약(G0)은 파서 입력 컬럼 6개.
 - 카탈로그 정정(§4 WISE): `stg_consensus_monthly` 키의 마지막 요소는 `obs_month` 가 아니라 **`obs_label`(원문 라벨)** 이고
   `obs_date`(DATE) 는 파생 비키 컬럼. 컬럼 종류 `date_iso`(fetched_date)·`date_slash`(라벨)·`bool` 추가, available_basis `measured`.
+
+**S4 구현 (09-03 로컬 TDD, 서버 실측은 5단계 풀 빌드에서) — WISE 잔여 11테이블** (`rules_wise.py` 12테이블 완성):
+- blob 구조 실측(09-02, 읽기 전용 스크립트): c1050001_data 는 zlib+JSON 한 겹 `{JsonData:[…]}`(T2Y/T2Q 7행, T4 계정 9×VAL5, pkey='' 목록 4행) · cF3002/4002 `{YYMM[8], DATA[244|36], FIN, FRQ}` · c1010001 zlib+HTML 85KB(`cTB15` 요약표 + `cTB24` 제공처별 표). 파서 4종 추가(`parse_consensus_annual/_quarterly/_matrix`, `parse_fin_wise`, `parse_analyst_summary`) — 같은 ep 의 다른 pkey 는 `n_skipped_pkey`, 빈 배열은 `n_empty`, alert 리다이렉트는 `n_no_data` 로 세고 실패로 치지 않는다(G8 parse_failed=0 유지).
+- 빌더 확장 3: `AvailableRule.fallback_column`(§6 v3 revision) · `ColumnRule.blank_is_value`(키 '' 인정) · 캐스팅 대상 컬럼 0개 테이블(ws_coverage)의 `miss_kind` = 자리표시 필드 하나의 NULL STRUCT(빈 `struct_pack()` 은 duckdb 오류).
+- 테스트 18(파서 4·선언 2·빌드 12) 추가, 전체 75 passed. 골든 픽스처는 unit_scale 컬럼이 없어 강제 대상 없음 — 서버 빌드 때 삼성전자 EPS·목표주가·추정기관수 22 를 회귀 고정값으로 추가 예정.
 
 ## 11. 결정 기록
 

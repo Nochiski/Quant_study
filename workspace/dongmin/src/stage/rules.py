@@ -206,7 +206,13 @@ STG_RCEPT_DT_MAP = TableRule(
 )
 
 # ── stg_fin (dart_fin_raw 28컬럼) — 골격 키 예외: ticker·date 없음, 키는 요청축 8컬럼 ─────────
-_AMT = dict(kind=KIND_NUMERIC, precision=38, scale=4)   # survey v2 전수: 정수 max 18·소수 2
+
+
+def _amt(src: str) -> ColumnRule:
+    """재무 금액 컬럼 — survey v2 전수: 정수 max 18·소수 2 → Decimal(38,4) (설계 확정)."""
+    return ColumnRule(src, src, KIND_NUMERIC, 38, 4)
+
+
 _SENTINEL = "-표준계정코드 미사용-"
 STG_FIN = TableRule(
     name="stg_fin",
@@ -227,15 +233,15 @@ STG_FIN = TableRule(
         ColumnRule("sj_nm", "sj_nm", KIND_TEXT, normalize_text=True),
         ColumnRule("account_nm", "account_nm", KIND_TEXT, normalize_text=True),
         ColumnRule("thstrm_nm", "thstrm_nm", KIND_TEXT, normalize_text=True),      # 날짜 파싱 금지
-        ColumnRule("thstrm_amount", "thstrm_amount", **_AMT),
-        ColumnRule("thstrm_add_amount", "thstrm_add_amount", **_AMT),
+        _amt("thstrm_amount"),
+        _amt("thstrm_add_amount"),
         ColumnRule("frmtrm_nm", "frmtrm_nm", KIND_TEXT, normalize_text=True),
-        ColumnRule("frmtrm_amount", "frmtrm_amount", **_AMT),
+        _amt("frmtrm_amount"),
         ColumnRule("frmtrm_q_nm", "frmtrm_q_nm", KIND_TEXT, normalize_text=True),
-        ColumnRule("frmtrm_q_amount", "frmtrm_q_amount", **_AMT),
-        ColumnRule("frmtrm_add_amount", "frmtrm_add_amount", **_AMT),
+        _amt("frmtrm_q_amount"),
+        _amt("frmtrm_add_amount"),
         ColumnRule("bfefrmtrm_nm", "bfefrmtrm_nm", KIND_TEXT, normalize_text=True),
-        ColumnRule("bfefrmtrm_amount", "bfefrmtrm_amount", **_AMT),
+        _amt("bfefrmtrm_amount"),
         ColumnRule("currency", "currency", KIND_TEXT),
     ),
     natural_key=("corp_code", "bsns_year", "reprt_code", "fs_div", "sj_div", "account_id",

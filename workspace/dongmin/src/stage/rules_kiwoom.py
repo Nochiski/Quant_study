@@ -238,6 +238,7 @@ STG_MASTER_DAILY = TableRule(
     lag_known=False,                     # 마스터 = 공표 시점 미상 (§6 주의)
     available=AvailableRule("column", column="date"),
     key_unique=True,                     # 원장 PK (snap_date, code) — master_daily.py DDL
+    coverage_from=MASTER_COVERAGE_FROM,  # §3 temporality ⓑ → _meta.json
     extras=(
         ExtraColumn("state_parts",
                     "CASE WHEN s.\"state\" IS NULL OR s.\"state\" = '' THEN NULL::VARCHAR[] "

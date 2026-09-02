@@ -254,14 +254,14 @@ def test_master_rules_are_a_snapshot_axis_without_current_suffixes() -> None:
     assert rule.partition_expr == "substr(snap_date, 1, 4)"
     assert not [c.name for c in rule.columns if c.name.endswith("_current")]   # §3 ⓑ
     assert rules_kiwoom.MASTER_COVERAGE_FROM == "2026-09-01"
+    assert rules_kiwoom.STG_MASTER_DAILY.coverage_from == "2026-09-01"
 
 
 def test_master_build_decomposes_state_and_audit_status(
     snap: snapshot.Snapshot, tmp_path: Path
 ) -> None:
-    # G7 임계 상향: 상장일 19750611 이 내용일 축 하한 1990 에 걸려 셀 격리된다 — 빌더 결함
     # (stg_listing_daily.list_date 와 같은 원인, 보고서 참조). 2행 픽스처라 비율이 0.5 다.
-    r = _build("stg_master_daily", snap, tmp_path, gate_thresholds={"G7": 0.6})
+    r = _build("stg_master_daily", snap, tmp_path)
     assert r.ok, _failed(r)
     con = _read(tmp_path, r)
     got = con.execute("SELECT ticker, state_parts, is_admin_issue, is_trade_halt, "
@@ -271,7 +271,7 @@ def test_master_build_decomposes_state_and_audit_status(
         ("005930", ["증거금100%", "신용가능", "대용가능"], False, False, False, 5_969_782_550)]
     assert next(g for g in r.gates if g.name == "G6").status is gates.GateStatus.SKIP
     assert con.execute("SELECT reg_date, miss_kind.reg_date FROM t WHERE ticker = '005930'"
-                       ).fetchone() == (None, "out_of_range")
+                       ).fetchone() == (date(1975, 6, 11), None)
 
 
 # ── stg_shards_kiwoom (ingest_shard) ──────────────────────────────────────────

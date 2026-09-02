@@ -62,7 +62,7 @@ ISU_ROWS_KSQ = [
      "KOSDAQ", "주권", "관리종목(소속부없음)", "보통주", "500.5", "89000000",
      "20260820", COLLECTED),
 ]
-# G2: PARVAL 비수치(무액면) 1행 · G7: 1990 이전 상장일 1행 — 둘 다 3행 픽스처라 비율이 크다
+# G2: PARVAL 비수치(무액면) 1행 — 3행 픽스처라 비율이 크다
 _LISTING_THRESHOLDS: dict[str, float] = {"G2": 0.5, "G7": 0.5}
 LOG_ROWS = [
     ("sto/stk_bydd_trd", "20260820", "944", "ok", None, COLLECTED),
@@ -220,19 +220,15 @@ def test_listing_build_flags_sect_tp_availability_per_market(
         (date(1999, 11, 10),)]
 
 
-def test_listing_build_isolates_a_pre_1990_list_date_as_out_of_range(
+def test_listing_build_keeps_a_pre_1990_list_date(
     snap: snapshot.Snapshot, tmp_path: Path
 ) -> None:
-    """G7 내용일 축 하한 1990 이 1990 이전 상장일을 셀 격리한다 — 빌더 임계 결함(보고서 참조).
-
-    삼성전자 상장일 19750611 은 원장의 정상값인데 NULL 이 된다. 규칙 선언이 아니라
-    `gates.YEAR_RANGE_CONTENT` 의 하한 문제라 여기서는 현재 동작을 고정만 해 둔다.
-    """
+    """내용일 축 하한 1956(KRX 개장) — 삼성전자 상장일 19750611 은 격리되지 않는다 (DEFECT-A)."""
     r = _build("stg_listing_daily", snap, tmp_path, gate_thresholds=_LISTING_THRESHOLDS)
     con = _read(tmp_path, r)
     assert con.execute("SELECT list_date, miss_kind.list_date FROM t WHERE ticker = '005930'"
-                       ).fetchone() == (None, "out_of_range")
-    assert next(g for g in r.gates if g.name == "G7").metrics["n_out_of_range_cells"] == 1
+                       ).fetchone() == (date(1975, 6, 11), None)
+    assert next(g for g in r.gates if g.name == "G7").metrics["n_out_of_range_cells"] == 0
 
 
 # ── stg_ingest_krx ─────────────────────────────────────────────────────────────

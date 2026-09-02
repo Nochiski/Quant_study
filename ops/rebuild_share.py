@@ -27,7 +27,8 @@ import duckdb
 KST = timezone(timedelta(hours=9))
 HOME = Path.home()
 RAW = HOME / "quant-ledger/data/raw"
-SHARE = HOME / "quant-ledger/share"
+# 공개 경로. /srv/quant-share 는 root 소유(chroot·웹루트 요구사항), share/ 만 kael 소유.
+SHARE = Path(os.environ.get("QUANT_SHARE_DIR", "/srv/quant-share/share"))
 KEEP_VERSIONS = 7
 
 # ── 타입 변환 헬퍼 ────────────────────────────────────────────────────────────

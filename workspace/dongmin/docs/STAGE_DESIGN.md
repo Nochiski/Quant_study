@@ -1,4 +1,4 @@
-# Stage 레이어 구현 설계 v2.1 (최종)
+# Stage 레이어 구현 설계 v2.2 (최종 검수 반영)
 
 > 2026-09-02. v2 를 Opus 5기 **2차 병렬 적대 리뷰**(전건 서버 실측 기반 — 기계검증·PIT재검·
 > 회귀검증·사실실측·구현시뮬레이션)로 재개정. 층 계약·실측 사실의 정본은 `STAGE_SPEC.md`.
@@ -12,6 +12,14 @@
 > ④ 중복 접기 = **payload 투영 동일** (바이트 동일 정의는 실측상 공집합)
 > ⑤ 카탈로그 실측 정정 — 지수 `IDX_NM`/`IDX_CLSS` · WISE ep 지도 · stg_fin 자연키 8컬럼
 > ⑥ 게이트 9→10종 (G9 교차 소스 회귀) + G5 Δ등식 + G7 축 분리
+>
+> v2.1 → v2.2 (2026-09-02 최종 검수 — 4축 병렬 적대 리뷰 + 지적 전건 서버 재측정. 치명 5·중요 10·경미 14·이관 3):
+> ⑦ `observed_date` 원천 확정 — **원장 시각은 전부 UTC 무표기**, 테이블별 `observed_src` 선언, 시각 컬럼 0 테이블은 면제 (§3)
+> ⑧ G7 범위 게이트 = **행 격리형**. 테이블 폐기 금지 — 원장에 dart_capital 2120~2923 7행·tsstk_dp 2106 1행 실재 (§9)
+> ⑨ survey v2 = **전수 스캔 + 어휘 측정, 캐스트 금지** — 표본 유래 범위 반증(whol_loan_gvrt −292~+333 → 전수 −594.76~+1120.92) (§5·§10)
+> ⑩ 파티션 61테이블 전수 선언 (§4-파티션) · 회귀 `baseline.json`·★ 목록 통합·게이트 상수 술어 병기 (§9)
+> ⑪ 카탈로그 보강 — WISE `target_price`·`min_max`·단위값, SPEC 규칙 4건 이식(천원·통화·감사의견·점표기), stg_fin 골격 키 예외, stg_credit available_date=deal_date, `ovr_shrts_qty_valid` equity 이관, `rcept_no[:8]` 폴백 폐기
+> ⑫ 산출물 스키마 3종·실패 처리·게이트 skip 판정 (§2·§9) · SPEC §7·§8 과의 관계 명시 (§10) · 이관 3건 인계 문장 (§0)
 
 ## 0. 범위
 
@@ -29,6 +37,14 @@
 - **KRX 2026-08-21~ 공백** — 상장·폐지가 이 구간에서 어떤 원장으로도 재구성 불가(실측:
   KIS 폐지 max 08-18 · DART 상장공시 0건). 백필은 일일 증분 때 소급(09-02 사용자 결정).
   그전까지 `universe_asof` 는 이 구간에서 `coverage_gap` 예외를 던진다 (§8)
+- **격자 채우기·결측 3분류(`src_omitted → 0 + flag`)** — equity. 캘린더×유니버스 조인이라 stage 가
+  할 수 없다. SPEC §5-3 의 레짐 편향 제거 장치는 equity 가 stage 의 `miss_kind`·수집 로그
+  (`stg_units_*`·`stg_shards_kiwoom`)를 재료로 구현한다. SPEC D3 의 `miss_kind` 는 이 3분류를 뜻했고
+  §3 의 `miss_kind` 는 셀 결측 원인이다 — 이름이 같고 개념이 다르므로 3분류 컬럼은 equity 에서 `fill_kind`
+- **공표 랙 판단** — 가격 외 소스(수급·외인·대차·공매도)의 available_date=내용일은 "공표 시점 미상"이지
+  "당일 공표 실증"이 아니다(§6 주의). 실제 공표 시점(관행 D+1)과 랙은 공개시점 대장·dataset_profile 이 정한다
+- **수집 크론의 배타 제어** — `daily_wise.sh`(06:00 KST) 크론에 `flock` 을 붙이는 것은 수집 운영 몫.
+  stage 는 스냅샷·WAL 전환의 실행 창과 락 파일만 정한다(§2)
 
 ## 1. 층 계약과 경계 원리
 
@@ -44,32 +60,42 @@
 | (d) 불변 참조표 룩업 | `corp_code↔ticker`(dart_corp_map — 시각 컬럼 0, 전량 재생성) · **`stg_rcept_dt_map`(rcept_no→rcept_dt, disclosure 유래 — 키당 값 불변)** | G0 선언 대조 |
 | (e) 동일 좌표 다중 blob 결합 | cF5001+cF5002 **outer join** (실측: 겹침 32,867 좌표 전수에서 select_item ≡ avg, 불일치 0). UNION 금지 — 같은 키 2행이 됨 | G8 좌표 합집합 등식 |
 
-`price_matches_krx` 컬럼(교차 정본 딱지)은 equity 몫. `price_basis` 는 stage — 단 **컬럼 단위**(§4-KIS).
+`price_matches_krx` 컬럼(교차 정본 딱지)은 equity 몫. `price_basis_*` 는 stage — 단 **컬럼 단위**(§4-KIS).
+KRX 가격(stg_price_daily)의 기준가/체결가 구분은 별도 컬럼 없이 **`volume=0` 로 판독**한다(SPEC §2-9 규칙의 v2.2 구체화 — 무거래일 종가는 보존).
 
 ## 2. 저장·커밋·빌드
 
-- **Parquet** (결정 ①). 원장 SQLite 유지. `.venv` 에 pyarrow·duckdb 설치가 선행 조건(승인 기수령)
+- **Parquet** (결정 ①). 원장 SQLite 유지. `.venv` 에 pyarrow·duckdb 설치가 선행 조건(승인 기수령 — 09-02 서버 실측: duckdb 1.5.5 만 있고 **pyarrow 미설치**. sqlite_scanner 확장은 `~/.duckdb/extensions` 로컬 캐시 있음)
 - **빌드 입력 동결**: 빌드 직전 `VACUUM INTO` 로 원장 스냅샷 사본을 뜨고 그 위에서만 빌드·게이트.
   근거(실측): 시각 술어(`W_now`)는 스냅샷이 못 된다 — 키움은 런 시작 시각을 전 행에 박아
   늦게 쓴 행이 이른 시각표를 달고, KRX 는 11.3M 행 전부가 3시간 창 안. wisereport.db 는
-  WAL 전환(06:00 데일리 크론과 읽기 충돌 방지 — 09-02 에 18:00→06:00)
+  WAL 전환(현재 저널 `delete` 실측 — 06:00 데일리 크론과 읽기 충돌 방지). **스냅샷·WAL 전환의 실행 창 = 06:30~익일 05:30 KST**(daily_wise 무동작), 빌드와 크론이 같은 락 파일 `/tmp/quant_ledger_raw.lock` 을 쓴다(크론 쪽 `flock` 부여는 수집 운영 — §0)
 - **버전 디렉토리 + manifest 포인터**: `stg_x/v=<빌드ID>/year=YYYY/part.parquet`.
   리더는 `MANIFEST.json`(최상위 인덱스) 경유 필수 — **맨 glob 금지 계약**
 - **커밋 입자 = 테이블**: 섀도 버전에 전 파티션 생성 → 게이트 전량 통과 → `MANIFEST.json`
-  을 `os.replace` 원자 교체(포인터 1회). 게이트 실패 = 새 버전 폐기, 구 버전 무손.
-  tmp 는 `data/stage/_tmp/`(테이블 밖) · 구버전 GC keep=3 · 동시 실행 금지 `flock -n`
-- **메타 = 파티션당 1파일**(`_meta.json`): 행수·게이트 결과·rules 버전·`src_bytes`·
-  `src_mtime`·`n_src`·스냅샷 ID·`coverage_from`
+  을 `os.replace` 원자 교체(포인터 1회 — **파일 교체에만 원자적이므로 디렉토리가 아니라 `MANIFEST.json` 을 바꾼다**). 게이트 실패 = 새 버전 폐기, 구 버전 무손.
+  tmp 는 `data/stage/_tmp/<빌드ID>/`(테이블 밖) · 구버전 GC keep=3 · 동시 실행 금지 `flock -n`
+- **실패 처리**: 게이트 실패 시 `_tmp/<빌드ID>/` 즉시 삭제, 판정은 `data/stage/_failed/<빌드ID>.json`
+  (게이트별 pass/fail/skip + reject 키 샘플 경로)에 남기고 stdout 요약. 알림 채널은 운영 몫. 실패 파일은 GC 대상 아님
+- **산출물 스키마 3종 + baseline** (v2.2):
+  - `MANIFEST.json`(테이블당 1) = {`table`, `current_build`, `keep`:3, `builds`:[{`build_id`, `snapshot_id`,
+    `rules_version`, `built_at_utc`, `partitions`:[{`path`, `n_rows`, `bytes`}], `gates`:{G0..G9: `pass`|`fail`|`skip(사유)`}}]}
+  - `_meta.json`(파티션당 1) = {`n_rows`, `n_src`, `fanout`, `n_dedup`, `n_reject`, `n_out_of_range`, `src_bytes`,
+    `src_mtime`, `snapshot_id`, `rules_version`, `coverage_from`, `version_loss_upstream`, `observed_date_exempt`,
+    `rcept_map_miss`, `gates`}
+  - reject parquet = `stg_x/v=<빌드ID>/_reject/part.parquet` — 원장 원문 전 컬럼(TEXT 그대로) + `reject_gate` + `reject_reason` + `_src`
+  - `data/stage/baseline.json` = 회귀 기준값 (§9). 게이트 상수는 전부 여기서 읽는다
 - **`partition_expr` 테이블별 필수 선언 — 클래스 3종** (실측: 관측일 축이 없는 테이블 실재):
   `date_axis`(내용일 연도 — 가격·수급 등) / `receipt_axis`(rcept 연도 — DART. `bsns_year`
-  금지: 접수지연 max 2,875일) / `whole`(단일 파티션 — 참조표·소형·관리)
+  금지: 접수지연 max 2,875일) / `whole`(단일 파티션 — 참조표·소형·관리). **61테이블 전수 선언은 §4-파티션 표**(v2.2 — v2.1 은 KRX 표에만 열이 있었다)
 - **일일 증분은 별도 설계**로 이관하되 실측 제약을 여기 기록한다: ⓐ 워터마크 해상도 —
-  kiwoom `collected_at` distinct 1(런 스탬프)·krx 전량 3시간 창 → 시각 워터마크 증분 불성립,
+  kiwoom `collected_at` distinct 2(런 스탬프 — 09-02 재측정, v2.1 의 1 은 구수치)·krx 전량 3시간 창 → 시각 워터마크 증분 불성립,
   수집 원장(ingest_log/shard) 기반 더티 판정으로 설계할 것. ⓑ 수집기 2줄 수정
   (kiwoom 행별 stamp·krx tz)은 증분 착수 전 필수 — **풀 빌드에는 스냅샷 동결로 충분**
-- **★백필 진행 중 테이블**(doc_index — 문서 수집 ~09-03)은 회귀 고정 제외, 완주 후 재측정.
-  `dart_fin_raw` 도 ★ — SPEC 의 "08-27 고정"은 실측 반증(collected_at max 08-30,
-  행수 15,375,024). DART 계열 회귀 수치는 빌드 시점에 재측정해 고정한다
+- **★(성장 중이었던) 테이블 — 통합 목록** (v2.2: SPEC ★=보조원장 6종, v2.1 ★=doc_index·fin_raw 로 교집합 0 이었다):
+  `doc_index`(문서 수집 ~09-04) · `dart_fin_raw`(SPEC 의 "08-27 고정"은 실측 반증 — collected_at max 08-30, 15,375,024행) ·
+  보조원장 6종(`adt_opinion` 변형 373→434 성장 실측) · `dart_disclosure`(09-02 02:23 스윕이 중복 그룹 129 추가) · DS005 15종(09-01 수집).
+  **09-02 daily_dart 제거로 doc_index 외엔 성장이 멈췄다** → 빌드 직전 1회 재측정으로 `baseline.json` 에 고정(§9)
 
 ## 3. 공통 골격
 
@@ -77,12 +103,24 @@
 |---|---|
 | `ticker` / `date` | 정규 키. date = 내용일(그 행이 어느 날 이야기인가), ISO DATE |
 | **`available_date`** | **사실 날짜만** [결정 ⑥]: 원장에 공개일 사실 컬럼이 실재하면 그것(게시일·결제일·수집일), 없으면 내용일. **랙·보수 버퍼를 더하지 않는다 — 판단은 엔진 설정** (`WHERE available_date <= :asof - :lag`). §6 |
-| `available_basis` | `measured`(원장 공개일 실재) / `derived`(참조표 유도) / `default`(내용일 대용) |
-| **`observed_date`** | 원장 `collected_at` 의 KST 날짜 — **전 테이블 필수.** 재수집 판본의 PIT 선택 축 (equity 가 (available_date, observed_date) 로 판본 선택. 실측: 이것 없이는 재수집 두 판본이 동일 좌표가 되어 선택 불능) |
+| `available_basis` | `measured`(원장 공개일 실재) / `derived`(참조표 유도) / `default`(내용일 대용 — 가격류는 당일 관측 실증, **그 외는 공표 시점 미상**) / `unknown`(참조표 미스 — available_date NULL, v2.2) |
+| **`observed_date`** | 원장 시각의 KST 날짜 — **전 테이블 필수, 원천은 테이블별 `observed_src` 선언**(아래 표). **원장 시각은 전부 UTC 무표기**(서버 TZ=UTC. 수집기가 `time.strftime`·`datetime.now()`·`utcnow()` 를 혼용하지만 전부 UTC) → **+9h 후 DATE**. 실측: KRX `collected_at` 08-23T15:23~18:41 = KST 08-24 — 앞 10자를 자르면 하루 이르다. 재수집 판본의 PIT 선택 축 (equity 가 (available_date, observed_date) 로 판본 선택. 실측: 이것 없이는 재수집 두 판본이 동일 좌표가 되어 선택 불능). upsert 소스(KRX·키움)는 값이 1~3개로 퇴화하지만 컬럼은 유지 |
 | `_src` | 원장 출처 (UNION 구분: stk/ksq, v1 등). **시장이전 22종목 실측 — (티커,일자) 단위 속성이지 티커 속성이 아님** (DISTINCT 매핑 조인 시 팬아웃 주의) |
 | `_src_flag` | `ok` / `partial` / `parse_failed` — `partial` 은 **캐스팅을 시도했다 실패한 행만** |
 | `_cast_fail_cols` | `list<string>` — cast_failed 컬럼명. 전 행 non-null(정상은 빈 리스트 — NULL 혼용 금지) |
-| **`miss_kind`** | 컬럼 단위 아님 — 값 없는 셀의 원인 분류를 캐스팅 로직이 기록: `ledger_blank`(원장 `''`) / `ledger_dash`(`'-'`) / `ledger_zero`(테이블별 재판정된 `'0'`) / `ledger_null` / `cast_failed`. 근거(실측): `bfefrmtrm_amount` 는 원장 NULL 988만+빈값 48.6만 = 64.3%가 정상 결측 — 이걸 실패로 세면 G2 임계가 무의미해짐 |
+| **`miss_kind`** | 컬럼 단위 아님 — 값 없는 셀의 원인 분류를 캐스팅 로직이 기록: `ledger_blank`(원장 `''`) / `ledger_dash`(`'-'`) / `ledger_zero`(테이블별 재판정된 `'0'`) / `ledger_null` / `cast_failed` / **`out_of_range`**(G7 격리 — v2.2). 근거(실측): `bfefrmtrm_amount` 는 원장 NULL 9,880,808+빈값 485,922 = 67.4%가 정상 결측(v2.1 의 64.3% 재측정) — 이걸 실패로 세면 G2 임계가 무의미해짐 |
+| `observed_n` | payload 접기로 합쳐진 원장 행수(접기 없음 = 1). 대표 `observed_date` 는 그룹 **min** (§5-중복) |
+
+- **`observed_src` — 원장 테이블별 시각 컬럼** (실측 09-02: `collected_at` 부재 14/61. rules 미선언 = G0 실패):
+
+  | 원천 | 테이블 |
+  |---|---|
+  | `collected_at` | KRX 8(ingest_log 포함) · 키움 6 · KIS 5 · DART 28 |
+  | `fetched_at` | ws_raw · doc_store |
+  | `checked_at` | ws_coverage |
+  | `copied_at` | v3_* 4종 (미러 시각. 내용 시각은 available_date 가 담당) |
+  | `ts` | kis_call_log · kis_ingest_log · dart_call_log · dart ingest_log · ws_call_log |
+  | **면제** | dart_corp_map — 시각 컬럼 0. `observed_date` NULL + `_meta.json` `observed_date_exempt=true` |
 
 - **`write_mode` — 원장 테이블별 필수 선언**: `append_only`(KIS·DART — row_hash PK) /
   `upsert`(KRX·키움 — `INSERT OR REPLACE`, 재수집이 과거를 덮음) / `first_write_wins`
@@ -104,9 +142,9 @@
 ### KRX (실물 8 → stage 5)
 | stage | 원장 | 키 | 파티션 | 비고 |
 |---|---|---|---|---|
-| `stg_price_daily` | stk_bydd + ksq_bydd (UNION — 17컬럼 완전 동일 실측) | ISU_CD,BAS_DD | year | 티커=`ISU_CD`(len 6 전수 — 6"문자", `0001A0` 실재: zfill/int 금지) · `market`=MKT_NM 승격(_src 와 동치 — G7 불변식) · **O/H/L=0→NULL 술어: 원문 문자열 `='0'`, 3컬럼 독립, 거래량 무결합**(실측: 패턴 000/111 뿐 — 동시성을 G7 불변식으로) · OHL=0∧거래량>0 = **125행**(stk 96+ksq 29, 회귀 고정. ETF 2 는 별도 — v2 의 127 은 합산 오기) · `SECT_TP_NM`: **stk 100% 빈값 / ksq 만 유효**(관리종목 160,632 실측) → 싣되 `sect_available` 불린 병기, 관리종목 필터 재료로 단독 사용 금지 |
+| `stg_price_daily` | stk_bydd + ksq_bydd (UNION — 17컬럼 완전 동일 실측) | ISU_CD,BAS_DD | year | 티커=`ISU_CD`(len 6 전수 — 6"문자", `0001A0` 실재: zfill/int 금지) · `market`=MKT_NM 승격(_src 와 동치 — G3 불변식) · **O/H/L=0→NULL 술어: 원문 문자열 `='0'`, 3컬럼 독립, 거래량 무결합**(실측: 패턴 000/111 뿐 — 동시성을 G3 불변식으로) · OHL=0∧거래량>0 = **125행**(stk 96+ksq 29, 회귀 고정. ETF 2 는 별도 — SPEC 의 127 은 ETF 포함 합계) · 기준가/체결가는 `volume=0` 로 판독(별도 price_basis 컬럼 없음 — §1) · `SECT_TP_NM`: **stk 100% 빈값 / ksq 만 유효**(관리종목 160,632 실측) → 싣되 `sect_available` 불린 병기, 관리종목 필터 재료로 단독 사용 금지 |
 | `stg_etf_price_daily` | etf_bydd | ISU_CD,BAS_DD | year | 불변식 상이 분리. OHL=0∧거래량>0 = 2행 |
-| `stg_index_daily` | kospi_dd + kosdaq_dd (UNION) | **IDX_CLSS,IDX_NM**,BAS_DD | year | **컬럼 실명 `IDX_NM`(`index_name` 은 유령 — v2 오기, 미조사 테이블에서 발생)** · `IDX_CLSS` 키 필수 — 업종지수명 20개가 양시장 중복(실측 81,880쌍 충돌) · 거래일 4,094 정확 일치 · 일당 KOSPI 47.8 + KOSDAQ 37.1 |
+| `stg_index_daily` | kospi_dd + kosdaq_dd (UNION) | **IDX_CLSS,IDX_NM**,BAS_DD | year | **컬럼 실명 `IDX_NM`(`index_name` 은 유령 — v2 오기, 미조사 테이블에서 발생)** · `IDX_CLSS` 키 필수 — 업종지수명 20개가 양시장 중복((IDX_NM,BAS_DD) 충돌쌍 실측 71,158 — 81,880 은 20×4,094 이론 상한) · 거래일 4,094 정확 일치 · 일당 KOSPI 47.8 + KOSDAQ 37.1 |
 | `stg_listing_daily` | stk_isu + ksq_isu (UNION) | ISU_SRT_CD,bas_dd_req | year | 티커=`ISU_SRT_CD`(len 6). **`ISU_CD` 는 12자리 ISIN — 실재하는 오답 컬럼, 티커 사용 절대 금지**(expected_len 게이트) · `PARVAL`→`par_value_krw`+`par_value_kind`(비수치 실측 97,996 — v2 의 105,570 정정) · 스냅샷은 **당일 상태**(실측: 삼성 20180504 이 이미 분할 후 — v2 의 "전일 확정치" 반증). 공표 시점 지식(T+1 08:00)은 카탈로그로 · 재상장 실증 2종 → universe_asof 복수 구간 |
 | `stg_ingest_krx` | krx.ingest_log | — | whole | 관리 — v2 의 고아 참조("아래") 해소, 정식 편입 |
 
@@ -114,7 +152,7 @@
 | stage | 원장 | 키 | 특이 |
 |---|---|---|---|
 | `stg_flow_daily_kiwoom` | ka10060 | ticker,dt / year | `cur_prc` **abs** · 투자자 13컬럼 keep+×1e6 · `acc_trde_prica`→`volume_shr`(오표기 — 실측 KRX 거래량과 99.9864% 일치) |
-| `stg_short_daily_kiwoom` | ka10014 | ticker,dt / year | `close_pric` **abs** · `ovr_shrts_qty`+`ovr_shrts_qty_valid`(77.7% 리셋) · 격자 빈 셀 3,090,809 = 행 생략 실증 — 3분류 재료 |
+| `stg_short_daily_kiwoom` | ka10014 | ticker,dt / year | `close_pric` **abs** · `shrts_trde_prica` **천원 → ×1,000 `_krw`**(SPEC §2-4, v2.1 누락) · `ovr_shrts_qty` 원문 keep — **`ovr_shrts_qty_valid` 는 stage 에서 제거**(77.7% 리셋 판정은 LAG 또는 shard 조인이 필요해 §1 1:1 원리 위반. equity 파생, 재료는 `stg_shards_kiwoom`) · 공매도 0인 날은 원장이 행을 생략한다 — 격자 채우기는 equity(§0) |
 | `stg_foreign_daily` | ka10008 | ticker,dt / year | `close_pric` **abs** · `poss_stkcnt` keep(음수 3 회귀) · `wght` **strip_plus**(SPEC §2-3 — v2 의 keep 은 인용 오류. 전수 실측: 비영 7,297,410행 — survey 표본치 [0,0] 은 오류, §11-N5) |
 | `stg_lending_daily` | ka20068 | ticker,dt / year | |
 | `stg_master_daily` | ka10099 | snap_date,code | **snap_date 축 누적 스냅샷 — `_current` 금지, `coverage_from=2026-09-01`** (§3-temporality ⓑ). auditInfo(관리·정지 상태의 유일한 시계열 재료)·state 분해 |
@@ -126,21 +164,21 @@
 | `stg_flow_split_daily` | kis_investor_flow | req_ticker,stck_bsop_date (중복 52,347 — 전건 2행) | 수정주가 포함 — 재수집 시 값 변동, observed_date 가 판본 축 |
 | `stg_short_daily_kis` | kis_short_sale | req_ticker,stck_bsop_date (중복 0) | `acml_*` 6컬럼 `acml_valid`(창 첫 행 리셋) |
 | `stg_loan_daily_kis` | kis_loan_trans | req_ticker,bsop_date (중복 0) | `rmnd_stcn` 음수 2,691 keep(회귀) |
-| `stg_credit_daily` | kis_credit_balance | req_ticker,deal_date (중복 566,795) | date=deal_date · `*_amt` 8컬럼 unit=unknown — `_krw` 금지 · **가격축 컬럼 단위 실측**: `stck_prpr`=수정종가(÷50 검증) / `stck_oprc·hgpr·lwpr`=**원주가(KRX 와 완전 일치, 5일 전수)** → `price_basis_close='adjusted_asof_collect'` / `price_basis_ohl='raw'` — **행 단위 라벨 금지**(v2 정정). OHL 은 교차검증·조정계수 재료로 사용 가능. 크로스 63.7% 는 유일한 수정주가 컬럼(prpr)만 대조한 결과였음 · 중복 566,795 = **req_d2 만 상이한 순수 재수집**(payload 접기 실증, §5) · `stck_prpr='0'` 561행 |
+| `stg_credit_daily` | kis_credit_balance | req_ticker,deal_date (중복 566,795) | date=deal_date · **available_date=deal_date(default) — `stlm_date` 는 컬럼 보존, 공개일이 아니라 결제일(내용 속성. v2.1 의 measured 는 오인, §6)** · `*_amt` 8컬럼 unit=unknown — `_krw` 금지 · **가격축 컬럼 단위 실측**: `stck_prpr`=수정종가(÷50 검증) / `stck_oprc·hgpr·lwpr`=**원주가(KRX 와 완전 일치, 5일 전수)** → `price_basis_close='adjusted_asof_collect'` / `price_basis_ohl='raw'` — **행 단위 라벨 금지**(v2 정정). OHL 은 교차검증·조정계수 재료로 사용 가능. 크로스 63.7% 는 유일한 수정주가 컬럼(prpr)만 대조한 결과였음 · 중복 566,795 = **req_d2 만 상이한 순수 재수집**(payload 접기 실증, §5) · `stck_prpr='0'` 561행 |
 | `stg_delisted_master` | kis_stock_info | req_ticker | pdno 12→6자리 · **상태 컬럼 전부 `_current` 강제**(admn_item_yn·tr_stop_yn·kospi200_item_yn 등 — 652행 전건 08-26 단일 조회 실측: 폐지 종목은 동결값·생존 종목은 현재값 혼재. kospi200 현재값의 과거 필터 사용 = look-ahead+생존편향) |
 | `stg_calls_kis` / `stg_units_kis` | kis_call_log / kis_ingest_log | — | 3분류 재료. 시계 컬럼 실명 `ts` |
 
 ### DART (실물 32 → stage 30 + 참조표 1)
 | stage | 원장 | 비고 |
 |---|---|---|
-| **`stg_rcept_dt_map`** | dart_disclosure 유래 (예외 d) | **(rcept_no → rcept_dt) 참조표.** 근거: `rcept_dt` 는 32테이블 중 **5개에만 실재**(disclosure·elestock±v1·majorstock±v1) — 나머지 21개 내용 테이블은 rcept_no 뿐. 접수번호 앞 8자리 대용은 gap 실측 −716~+359일이라 불가. 표본 9/9 전건 disclosure 에서 조인 성공. 미스 시 rcept_no[:8], basis=default. 키당 값 불변(append 만 됨) |
-| `stg_fin` | dart_fin_raw | **자연키 8컬럼 실측 확정: (req_corp_code, req_bsns_year, req_reprt_code, req_fs_div, sj_div, account_id, account_detail, ord)** — 15,375,024행 위반 0. account_detail 제외 시 878,156 위반·ord 제외 시 418,902(자본변동표 465만 행 오접힘 위험) · **키는 요청축**(응답축 bsns_year 불일치 120행 — `bsns_year_mismatch` 불린) · `account_detail` 원문 보존(키 구성원 — 변형 금지)+`account_detail_path` list 병기 · 금액 6컬럼 **wide 유지**(1:1 원리 — long 은 1→6 팬아웃) · 기간 라벨 4컬럼(`thstrm_nm` 등 841종)은 §5 문자열 정규화만, 날짜 파싱 금지(비12월 105사) · `account_id='-표준계정코드 미사용-'` 2,741,192행(17.8%) → `account_std=false` 불린, 표준계정 조인 금지 · Decimal(38,4)(실측: 총자릿수 max 18·소수 ≤2 — thstrm 기준, 나머지 5컬럼은 survey v2) · 파티션=rcept 연도(12파티션 합=행수 검증) · 정기 6종 `stlm_dt`=결산기준일 — **가용일 유도 금지**(KIS `stlm_date`=결제일과 이름 충돌 경고) |
-| `stg_dividend`~`stg_audit` 6종 | 정기 보조원장 6종 | se long 유지 |
+| **`stg_rcept_dt_map`** | dart_disclosure 유래 (예외 d) | **(rcept_no → rcept_dt) 참조표.** 근거: `rcept_dt` 는 32테이블 중 **5개에만 실재**(disclosure·elestock±v1·majorstock±v1) — 나머지 21개 내용 테이블은 rcept_no 뿐. 접수번호 앞 8자리는 gap 실측 −716~+359일(양수 = look-ahead 방향 3.28%)이라 대용 불가 → **미스 시 available_date=NULL, basis=`unknown`**(v2.1 의 rcept_no[:8] 폴백 폐기 — 같은 줄에서 불가라 하고 폴백으로 쓰던 자기모순). 실측 09-02: dart_fin_raw distinct rcept_no 95,199 전건 disclosure 에 존재(미스 0). 미스율은 `_meta.json` `rcept_map_miss` 에 기록, 0 초과 시 G0 경고. 키당 값 불변(append 만 됨) |
+| `stg_fin` | dart_fin_raw | **골격 키 예외: `ticker`·`date` 없음**(corp_code→ticker 는 우선주 1:N — 결합은 equity 의 corp_map 조인. 내용 축은 요청축 (req_bsns_year, req_reprt_code), available_date 는 rcept_dt_map) · `currency` 원문 + `is_krw` 불린(6통화, non-KRW 127,903행·35사 — 환산 금지, SPEC §2-16) · **자연키 8컬럼 실측 확정: (req_corp_code, req_bsns_year, req_reprt_code, req_fs_div, sj_div, account_id, account_detail, ord)** — 15,375,024행 위반 0. account_detail 제외 시 878,156 위반·ord 제외 시 418,902(자본변동표 465만 행 오접힘 위험) · **키는 요청축**(응답축 bsns_year 불일치 120행 — `bsns_year_mismatch` 불린) · `account_detail` 원문 보존(키 구성원 — 변형 금지)+`account_detail_path` list 병기 · 금액 6컬럼 **wide 유지**(1:1 원리 — long 은 1→6 팬아웃) · 기간 라벨 4컬럼(`thstrm_nm` 등 841종)은 §5 문자열 정규화만, 날짜 파싱 금지(비12월 105사) · `account_id='-표준계정코드 미사용-'` 2,741,192행(17.8%) → `account_std=false` 불린, 표준계정 조인 금지 · Decimal(38,4)(총자릿수 max 18·소수 ≤2 — thstrm 기준 **표본치**, 6컬럼 전부 survey v2 전수로 확정) · 파티션=rcept 연도(12파티션 합=행수 검증) · 정기 6종 `stlm_dt`=결산기준일 — **가용일 유도 금지**(KIS `stlm_date`=결제일과 이름 충돌 경고) |
+| `stg_dividend`~`stg_audit` 6종 | 정기 보조원장 6종 | se long 유지 · **날짜 포맷 테이블별 파서 선언**: `dart_capital.isu_dcrs_de` = `YYYY.MM.DD` 점표기(180,511행) + `'-'` 결측(8,274행 재측정) — 단일 파서 금지(SPEC §2-14) · 연도 오타 실재(2120·2121·2202·2923, 7행) → G7 행 격리 · `stg_audit.adt_opinion` 원문 보존 + `adt_opinion_class` categorize(§5 정규화 후 **`부적정` 선매칭 → `의견거절`/`한정` → `적정`**, 그 외 `other` — 변형 434종 실측 09-02, SPEC §2-13) · 집계행 `row_kind='aggregate'`(§5) |
 | `stg_holder_elestock` / `_majorstock` | elestock(+v1 UNION) / majorstock(+v1) | v1 전용 194행 구제 |
-| `stg_disclosure` | dart_disclosure | rm 분해 · `corp_cls_current`·`corp_name_current` · rcept_no 중복 **491**(v2 의 106 은 구수치 — ★원장 성장분) = 페이지 경계, payload 접기 대상 · `is_correction` 카테고라이즈(`[...정정]` 접두 — 정정 577,215건=16.8%) · rcept_dt 포맷 8자리(elestock/majorstock 은 10자리 — 파서 테이블별 선언) |
+| `stg_disclosure` | dart_disclosure | rm 분해 · `corp_cls_current`·`corp_name_current` · rcept_no 중복 그룹 **618 / 초과 행 620**(09-02 02:46 기준. 489 그룹은 스윕 전 = v2.1 의 491, 129 그룹은 09-02 스윕 추가분. **중복 지표 정의 = 그룹 수**) = 페이지 경계, payload 접기 대상 · `is_correction` 카테고라이즈(술어 `report_nm LIKE '[%정정]%'` — 577,072건=16.75%, 술어 병기) · rcept_dt 포맷 8자리(elestock/majorstock 은 10자리 — 파서 테이블별 선언) |
 | `stg_company` | dart_company | `acc_mt`(결산월) · `_current` 계열 · **rcept_no·rcept_dt 없음 — available_date 비부여** |
 | `stg_corp_map` | dart_corp_map | 예외 (d). 시각 컬럼 0 — 증분 제외·전량 재생성 |
-| `stg_event_*` 15종 | DS005 15종 | 한글 날짜 단일 포맷(`YYYY년 MM월 DD일` — 점표기·기간표기 0건 실측) · `'-'` 결측 마커 실재(cvbd pymd 229행) · **만기일 2053년 실재 — G7 내용일 축** · 키 rcept_no(유일성 전수 ✓) |
+| `stg_event_*` 15종 | DS005 15종 | 한글 날짜 단일 포맷(`YYYY년 MM월 DD일` — 정규 날짜컬럼 119개 전수 실측. 예외: `bnk_mngt_pcbg.mngt_pd` 는 기간표기 `'… ~ …'` 15행 — 텍스트 보존) · `'-'` 결측 마커 실재(cvbd pymd 229행) · **만기일 2053 실재 + 오타 2106(`tsstk_dp_decsn.dpprpd_bgd`, rcept_no 20160108000502) 실재 — G7 은 행 격리(§9)** · 키 rcept_no(유일성 전수 ✓) |
 | `stg_doc_index` | doc_store | 메타 인덱스(원장에 blob 없음 — ZIP 은 파일시스템). rcept_no 유일 · ★수집 중 |
 | `stg_calls_dart` / `stg_units_dart` | dart_call_log / ingest_log | 시계 컬럼 실명 `ts` — 3분류 재료 |
 
@@ -151,7 +189,7 @@
 
 | stage | 원장 (ws_raw) | 키 · 파싱 규칙 |
 |---|---|---|
-| `stg_consensus_monthly` | ep=cF5001 + cF5002 (예외 e — outer join) | (ticker,fetched_date,target_period,**metric**,obs_month) — metric∈{eps,revenue} 없으면 chart1/chart2 가 같은 키 충돌(실측) · **날짜 라벨로 join — 인덱스 zip 금지**(축 길이 불일치 1,740/2,430=72% 실측: EPS·매출이 한 달 어긋남) · 말미 관측점 중복 71% → 값 동일 검증 후 dedup+카운터 · `obs_label` 원문 보존(비월말 라벨 실재) · 무커버 프로브(cF5001 52.4%)는 **행 생성**(avg=NULL, close_price 실값 보존) — cF5002 빈 배열은 0행. G8 계상 규칙 명문 · zlib(`789C`)+이중 JSON — **양쪽 loads 에 parse_float=Decimal** · 내부 키명 ep 별 상이(select_item vs avg) — 파서 분기 |
+| `stg_consensus_monthly` | ep=cF5001 + cF5002 (예외 e — outer join) | (ticker,fetched_date,target_period,**metric**,obs_month) — metric∈{eps,revenue} 없으면 chart1/chart2 가 같은 키 충돌(실측) · **날짜 라벨로 join — 인덱스 zip 금지**(축 길이 불일치 실측 09-02: chart1 기준 1,402/2,430=57.7%, chart2 기준 2,415/2,430 — v2.1 의 1,740 은 분자 정의 부재. EPS·매출이 한 달 어긋남) · 말미 관측점 중복 71% → 값 동일 검증 후 dedup+카운터 · `obs_label` 원문 보존(비월말 라벨 실재) · 무커버 프로브(cF5001 52.95%)는 **행 생성**(avg=NULL, close_price 실값 보존) — cF5002 빈 배열은 0행. G8 계상 규칙 명문 · zlib(`789C`)+이중 JSON — **양쪽 loads 에 parse_float=Decimal** · 내부 키명 ep 별 상이(select_item vs avg) — 파서 분기 · **v2.1 누락 필드 적재(v2.2)**: cF5001 `target_price`(8,360 blob 중 3,993 실값)·cF5002 `min_max` → `consensus_min`·`consensus_max` · **단위는 데이터 값**: cF5001 `select_item_unit`·cF5002 `item_unit`(EPS '원'·매출 '억원' 실측) → `unit` 컬럼 보존, 스케일 변환 금지 · `metric` 은 `select_item_name`/`item_name` 파싱('EPS'→eps, '매출액'→revenue, 그 외 `parse_failed`) — 실측 키셋: cF5001 {categories, close_price, select_item, select_item_name, select_item_unit, target_price} / cF5002 {avg, categories, item_name, item_unit, min_max} |
 | `stg_consensus_annual` / `_quarterly` | ep=c1050001_data, pkey='T2Y' / 'T2Q' | ticker,fetched_date,period |
 | `stg_consensus_matrix` | ep=c1050001_data, pkey GLOB 'T4:*' | ticker,fetched_date,target_period,acc_cd,lookback · `target_period` YYYYMM 문자열 보존(비12월 202605·202903 실재 — 연도 절삭 금지) · cmp_cd 비숫자 19종(`0004Y0` 등) — TEXT 유지 |
 | (pkey='') | c1050001_data 목록 호출 | 파싱 입력으로 소비 — 별도 테이블 없음 |
@@ -165,9 +203,27 @@
 직접 수집 6종이 같은 값을 커버한다(analyst_count 는 c1010001 원문, opinion_score 는 flag=4
 매트릭스). v3_* 는 우리 수집 시작 전 구간(2026-04-03~09-02)의 과거분 공급원이며 이후 행이
 늘지 않는다(write_mode=first_write_wins 선언은 유지 — 상류 정정은 원장 단계에서 유실됨을
-명기). `base_date` 는 내용 기준일 라벨(실측: 비NULL 61,160행 전수에서 collected=base+1영업일
+명기). `base_date` 는 내용 기준일 라벨(실측 09-02: 비NULL 61,785행 전수에서 collected=base+1영업일
 100%). **annual·compare 는 sync_date 09-01·09-02 두 판본으로 끝.** WISE 자체 수집 6종은
 fetched_date 09-01 부터 매일 적립 — 그 이전 구간의 컨센서스는 v3 과거분뿐이다.
+
+### 파티션 선언 — 61테이블 전수 (v2.2)
+
+rules 의 `partition_class`·`partition_expr` 는 이 표와 일치해야 한다(G0). 표현식은 원장 컬럼명 기준 TEXT 앞 4자.
+
+| 클래스 | 표현식 | 테이블 |
+|---|---|---|
+| `date_axis` | `substr(BAS_DD,1,4)` | stg_price_daily · stg_etf_price_daily · stg_index_daily |
+| `date_axis` | `substr(bas_dd_req,1,4)` | stg_listing_daily |
+| `date_axis` | `substr(dt,1,4)` | stg_flow_daily_kiwoom · stg_short_daily_kiwoom · stg_foreign_daily · stg_lending_daily |
+| `date_axis` | `substr(snap_date,1,4)` | stg_master_daily |
+| `date_axis` | `substr(stck_bsop_date,1,4)` / `substr(bsop_date,1,4)` / `substr(deal_date,1,4)` | stg_flow_split_daily · stg_short_daily_kis / stg_loan_daily_kis / stg_credit_daily |
+| `date_axis` | `substr(fetched_date,1,4)` | stg_consensus_monthly · _annual · _quarterly · _matrix · stg_analyst_summary · stg_fin_wise |
+| `date_axis` | `substr(base_date,1,4)` / `substr(snapshot_date,1,4)` / `substr(sync_date,1,4)` | stg_v3_revision_daily / stg_v3_analyst_opinions / stg_v3_consensus_annual · stg_v3_revision_compare |
+| `receipt_axis` | **`substr(rcept_no,1,4)`** (`rcept_dt` 아님 — 136행 상이. 접수번호가 불변 키. stg_fin 실측 12파티션 2015~2026) | stg_fin · 보조원장 6종 · stg_holder_elestock · _majorstock · stg_disclosure · stg_event_* 15종 · stg_doc_index |
+| `whole` | — | stg_rcept_dt_map · stg_corp_map · stg_company · stg_delisted_master · stg_wise_coverage · stg_shards_kiwoom · stg_ingest_krx · stg_calls_kis · stg_units_kis · stg_calls_dart · stg_units_dart · stg_calls_wise |
+
+합계 5 + 6 + 7 + 31 + 12 = 61(참조표 stg_rcept_dt_map 포함).
 
 ## 5. 값 규칙
 
@@ -180,20 +236,26 @@ fetched_date 09-01 부터 매일 적립 — 그 이전 구간의 컨센서스는
   근거(실측): kis_credit 중복 566,795 전형 표본이 전 데이터 컬럼 동일·req_d2 만 상이 —
   "바이트 동일" 기준으로는 접힘 0건이라 ④ 의 목적 자체가 무효였음. payload 상이 =
   전 행 보존, 판본 좌표는 (available_date, observed_date) — **`is_latest`·`observed_seq`
-  는 stage 에 두지 않는다**(윈도우 연산 = §1 원리 위반 + 정렬 재료 부재로 비결정 실측)
+  는 stage 에 두지 않는다**(윈도우 연산 = §1 원리 위반 + 정렬 재료 부재로 비결정 실측).
+  **접힌 그룹의 대표 `observed_date` = min**(처음 관측된 날) + `observed_n`(접힌 행수) — v2.2.
+  max 를 쓰면 "08-25 에 알던 값"이 08-30 뒤로 밀려 PIT 결측을 만들고, 미지정이면 빌드마다 비결정.
+  실측 09-02: kis_credit 중복 566,795 = payload 26컬럼 동일 그룹 517,648/517,648, 접기 후 잔여 0
 - **문자열 정규화 — 텍스트 컬럼만**: NFKC → 개행·탭 제거 → 연속공백 축약 → strip + 태그 제거.
   **식별자·조인 키(account_id·corp_code·ticker·ISU_*)와 숫자 컬럼에는 적용 금지** —
   실측: 숫자 컬럼 1,607만 행에서 전각·유니코드 마이너스 0건(방어는 게이트로 —
   비ASCII 검출 시 실패), 반면 account_id 는 17.8%가 한글 센티널이라 무차별 NFKC 는 키 변형 위험
 - **숫자**: 콤마 제거 → 부호 정책 → **Decimal**. 컬럼별 (p,s) 필수 — **survey v2 가 유도
-  필드(max_int_digits·max_scale·has_comma·has_sign)를 제공하는 것이 선행 조건**(현 조사
-  JSON 엔 해당 필드 없음 + num_range 는 float64 유래라 2^53 초과 구간 자체 손실 — 실측).
+  필드(max_int_digits·max_scale·has_comma·has_sign)를 제공하는 것이 선행 조건. survey v2 는
+  전수 스캔 + 정규식 어휘 측정만, 캐스트 금지**(v2.2). 근거: 현 survey 는 rowid stride 12만 행 표본
+  (fin_raw 의 0.73%) + `float()` 캐스트 — (p,s)는 max 통계라 표본 유도는 반드시 과소.
+  실증 `whol_loan_gvrt` 표본 범위 −292~+333 vs 전수 −594.76~+1120.92, 범위 밖 259행. float 경유는
+  2^53 초과 366~380행의 자릿수 손실. 어휘 측정이면 G2 임계 ← survey ← 캐스팅 규칙의 순환이 끊긴다.
   오버플로 = 게이트 즉사. JSON 은 `parse_float=Decimal, parse_int=Decimal` — **이중 인코딩
   블록은 안쪽 loads 에도** (§4-WISE)
 - **부호 정책 3값** {abs, strip_plus, keep} — (table,column) 키. abs 실측 3컬럼(§4 키움).
   abs 컬럼은 원부호 `*_dir` 보존. 음수 회귀 고정: poss_stkcnt 3 · rmnd_stcn 2,691 ·
   whol_loan_gvrt 539 · **whol_stln_gvrt 1 (신규 고정)**
-- **비율**: `_pct` / `_ratio` 접미사. 실측 범위 주의: whol_loan_gvrt −292~+333 (0~100 가정 금지)
+- **비율**: `_pct` / `_ratio` 접미사. 실측 범위 주의: whol_loan_gvrt **−594.76~+1120.92**(전수 09-02 — v2.1 의 −292~+333 은 survey 표본치. 0~100 가정 금지)
 - **결측**: 값 NULL + `miss_kind` (§3). 마커 실측: `''`(DART 5.8%) · `'-'`(tesstk 80.8%,
   DS005 날짜 컬럼에도 실재) · `'0'`(KIS 만 결측 표현 — 테이블별 재판정) · 집계행
   (`'합계'`·`'계'`·`'총계'`)은 `row_kind='aggregate'` 카테고라이즈(실패 아님)
@@ -209,10 +271,15 @@ fetched_date 09-01 부터 매일 적립 — 그 이전 구간의 컨센서스는
 | 원장의 공개일 사실 | available_date | basis | 해당 |
 |---|---|---|---|
 | 없음 → 내용일 대용 | = `date` (내용일 그대로. 가격은 당일 실시간 관측 실증 — 교차 100%) | default (가격류는 measured 급 실증이나 라벨 통일) | 가격·지수·ETF·마스터·수급·외인·대차·공매도(거래 데이터 — **v2 의 "잔고 T+2" 클래스는 삭제: 양 테이블 전 컬럼 실측 결과 잔고 컬럼 0개**, 진짜 잔고는 SPEC §4 취득 불가) |
-| 결제일 실재 | = `stlm_date` (실측 매매일+2~12일, 행별 상이 — 위반 0) | measured | stg_credit |
-| 게시일 — 참조표 유도 | = `stg_rcept_dt_map[rcept_no]` (그대로 — max() 보정 등 판단 금지). 미스 시 rcept_no[:8] | derived / default | DART 내용 21테이블 + rcept_dt 보유 5테이블(직접) |
-| 수집일 실재 | = `fetched_date` (WISE — 06:00 수집이라는 지식은 카탈로그로) / `collected_date`(v3 revision — NULL 1,390행은 base_date, basis=default + `coverage_degraded` 불린: **실측 시리즈 최초 4거래일 100% 집중, 04-06·07 은 커버 15%·11% 붕괴**) / `snapshot_date`(v3 opinions) / `sync_date`(v3 annual·compare) | measured | WISE 6종 · v3 4종(4행 분해 — v2 의 "4종 일괄" 은 3종에 collected_date 부재로 불성립 실측) |
-| 비부여 | — | — | calls·units·shards·doc_index·coverage·corp_map·company |
+| 결제일만 실재(공개일 아님) | = `date`(=deal_date). `stlm_date`(매매일+2~12일, 위반 0)는 컬럼 보존 | default | stg_credit — v2.1 의 "stlm_date, measured" 는 결제일을 공개 사실로 오인(SPEC §2-8 도 "유도"라 했지 등치가 아님). 같은 행의 OHL 은 KRX 원주가 완전 일치라 deal_date 에 가용 — 행 단위 라벨이 컬럼 사실을 덮었다 |
+| 게시일 — 참조표 유도 | = `stg_rcept_dt_map[rcept_no]` (그대로 — max() 보정 등 판단 금지). **미스 시 NULL**(rcept_no[:8] 폴백 폐기 — gap 양수 3.28%, 최대 +359일 look-ahead 방향. 실측 09-02 미스 0) | derived / unknown | DART 내용 21테이블 + rcept_dt 보유 5테이블(직접, measured) |
+| 수집일 실재 | = `fetched_date` (WISE — 06:00 수집이라는 지식은 카탈로그로) / `collected_date`(v3 revision — NULL 1,390행은 base_date, basis=default + `coverage_degraded` 불린. 실측 collected=base+1영업일 100% 이므로 default 는 "사실 없음"이지 "당일 가용"이 아니다 — +1영업일은 dataset_profile 이 적용: **실측 시리즈 최초 4거래일 100% 집중, 04-06·07 은 커버 15%·11% 붕괴**) / `snapshot_date`(v3 opinions) / `sync_date`(v3 annual·compare) | measured | WISE 6종 · v3 4종(4행 분해 — v2 의 "4종 일괄" 은 3종에 collected_date 부재로 불성립 실측) |
+| 비부여 | — | — | calls·units·shards·doc_index·coverage·corp_map·company — 컬럼은 생성하되 NULL, basis NULL (parquet 스키마 통일) |
+
+> **주의 (v2.2 이관 3 의 인계)**: 위 표의 `default` 는 두 부류다. 가격·지수·ETF 는 "당일 실시간 관측 실증"이고,
+> 수급·외인·대차·공매도·마스터는 **"공표 시점 미상"**이다. 실제 공표(관행 D+1)와 랙은 dataset_profile 의
+> 몫이며 stage 는 여기서 판단하지 않는다(결정 ⑥). rules 는 테이블별 `lag_known: true|false` 를 선언해
+> `_meta.json` 에 실어 equity 가 lag 0 을 무심코 적용하지 못하게 한다 — 이것이 stage 에 남는 최소 장치.
 
 ## 7. 정정·판본
 
@@ -234,44 +301,66 @@ fetched_date 09-01 부터 매일 적립 — 그 이전 구간의 컨센서스는
 과거 시계열 전 카탈로그 부재(SECT_TP_NM stk 전건 빈값 실측 — §11 미결 해소. 09-01부터
 ka10099 로 적립) ⓑ 08-21~31 상장·폐지 재구성 불가.
 
-## 9. 게이트 — 10종, 하나라도 걸리면 그 테이블 버전 폐기
+## 9. 게이트 — 10종. 테이블 폐기형과 행 격리형을 구분한다 (v2.2)
+
+**폐기형**(실패 = 새 버전 폐기): G0·G1·G3·G4·G5·G6·G8·G9. **행 격리형**(범위 밖 행을 NULL+`miss_kind`+reject 로 격리, 비율 임계 초과 시에만 테이블 실패): G2·G7.
+**실행 불가 판정**: 조건이 안 되는 게이트는 `skip(사유)` 로 MANIFEST 에 기록하고 폐기하지 않는다 — G5 첫 빌드 `skip(no_baseline)` · G6 는 upsert/first_write_wins 소스 `skip(write_mode)` · G8 은 blob 테이블만 · G9 는 원장 직접 대조라 항상 실행.
 
 | # | 게이트 | 내용 |
 |---|---|---|
 | G0 | 선언 대조 | 원장 실물 vs rules diff=0 + **pragma 컬럼 실재 + expected_len 길이 분포** |
-| G1 | 행수 등식 | `stage = Σ(원장ᵢ×fanoutᵢ) − dedup(payload동일) − reject`. 각 항 독립 산출, 실패 시 reject parquet+키 샘플 |
-| G2 | 손실 임계 | **`miss_kind='cast_failed'` 만** 카운트 (원장 정상 결측 제외 — 64% 오염 방지). 임계 = survey v2 실측 |
+| G1 | 행수 등식 | `stage = Σ(원장ᵢ×fanoutᵢ) − dedup(payload동일) − reject`. 각 항 독립 산출, 실패 시 reject parquet+키 샘플. **fanout 은 rules 필수 필드**(1:1·UNION 테이블 = 1. blob 언네스트 테이블은 fanout 미정의 — **G8 이 G1 을 대체**) |
+| G2 | 손실 임계 | **`miss_kind='cast_failed'` 만** 카운트 (원장 정상 결측 제외 — 67% 오염 방지). 임계 = survey v2 실측(어휘 측정 기반 — §5). 행 격리형 |
 | G3 | 불변식 | stage 산출물에 duckdb DECIMAL 재작성 실행 (원장 문법·REAL 금지) |
-| G4 | 골든 픽스처 | 불변형/시변형 분리. 정정 반영: 회귀 **125**(price)+**2**(etf) · 정지행 125(OHL=0∧거래량>0 — DEFECT-001 계열) · 원주가 2,650,000 · abs 금지 3행 · **unit≠1 선언 전 컬럼에 픽스처 강제**(×1e6 오적용 = SPEC 최대 결함 클래스의 유일 방어) |
-| G5 | 회귀 Δ등식 | `Δstage = Δn_src×fanout − Δdedup − Δreject` — 설명 안 되는 증감 실패 (v2 의 "증가 허용"은 payload 접기 하에서 탐지력 상실 — 정정) · ★테이블 제외 |
+| G4 | 골든 픽스처 | 불변형/시변형 분리. 정정 반영: 회귀 **125**(price)+**2**(etf) · 정지행 125(OHL=0∧거래량>0 — DEFECT-001 계열) · 원주가 2,650,000 · abs 금지 3행 · **unit≠1 선언 전 컬럼에 픽스처 강제**(×1e6 오적용 = SPEC 최대 결함 클래스의 유일 방어). **픽스처 파일** = `data/stage/fixtures/<table>.json` [{`key`, `column`, `expect`, `measured_sql`, `measured_at`}] — 강제 주체는 `gates.py`(unit≠1 컬럼에 픽스처 없음 = G4 실패). WISE 처럼 단위가 데이터 값인 테이블은 `unit` 컬럼 분포 픽스처 |
+| G5 | 회귀 Δ등식 | `Δstage = Δn_src×fanout − Δdedup − Δreject` — 설명 안 되는 증감 실패 (v2 의 "증가 허용"은 payload 접기 하에서 탐지력 상실 — 정정). 기준 = MANIFEST `current_build` 의 `_meta.json`, **첫 빌드는 `skip(no_baseline)`** · 스냅샷 콘텐츠 해시(`src_bytes`·`src_mtime`)도 비교해 upsert 소스의 값 변경(n_src 불변)을 잡는다 |
 | G6 | 판본 보존 | (자연키, observed_date) 유일성 위반 0 + **자연키 중복 중 payload 동일 비율 기록**(임계 초과 = 재수집 잡음 과다) — **append_only 소스에만** (§3 write_mode) |
-| G7 | 범위 | **관측일 축**(BAS_DD·dt·deal_date·rcept) 연도 [2000, 현재+1] / **내용일 축**(만기·상환일 — pymd·*_edd) 연도 [1990, 현재+40] (실측: CB 만기 2053 정상값 — v2 단일 축은 테이블 통째 오폐기) · 부호 교차 · 비율 범위 |
+| G7 | 범위 — **행 격리형** | 범위 밖 값은 NULL + `miss_kind='out_of_range'` + reject 계상(원문 보존). 테이블 실패는 격리 비율 > 임계(기본 0.1%, survey v2 후 확정)일 때만. 축: **관측일**(BAS_DD·dt·deal_date·rcept) 연도 [2000, 현재+1] / **내용일**(만기·상환·증감자일 — pymd·*_edd·isu_dcrs_de) 연도 [1990, 현재+40] · 부호 교차 · 비율 범위. 실측: CB 만기 2053 정상 · **오타 2106(tsstk_dp)·2120~2923(dart_capital 7행) 실재** — v2.1 의 테이블 폐기형은 두 테이블을 영구 빌드 불가로 만들었다(v2 가 축 분리로 잡았다던 사고 클래스의 상한값 재발) |
 | G8 | 파싱 등식 | blob=parse_log ∧ Σn_rows=stage — **ep 별 분리 산출** + 조인 테이블은 좌표 합집합 등식 (예외 e) · coverage 급락 감지(v3 일별 행수 < 직전 중앙값 50% 플래그) |
-| G9 | **교차 소스 회귀** (신설) | 실측 확정 일치쌍의 재검: 종가 KRX=키움 100%(2,864,871행) · 거래량 99.9864% · 시총 항등식 — 빌드마다 재실행, 저하 = 실패 |
+| G9 | **교차 소스 회귀** | **원장 직접 대조**(stage 간 아님 — S1 단독 실행 가능): (stk_bydd ∪ ksq_bydd) ⋈ ka10060 ON (ISU_CD=ticker, BAS_DD=dt), `CAST(TDD_CLSPRC AS INT) = abs(CAST(cur_prc AS INT))` **7,537,984행 100.0000%**(v2.1 의 2,864,871 은 survey_cross 조인 수 — 09-02 재측정) · 거래량 `ACC_TRDVOL = acc_trde_prica` 99.9864% · `MKTCAP = TDD_CLSPRC × LIST_SHRS` 위반 0 — 기준값은 baseline.json, 저하 = 실패 |
+
+**회귀 baseline** (`data/stage/baseline.json`, v2.2): [{`table`, `metric`, `sql`, `value`, `measured_at`, `growing`(★)}].
+게이트 상수는 전부 여기서 읽는다 — **코드 하드코딩 금지**. 상수마다 조인 키·술어를 `sql` 에 병기해야 재현 가능하다
+(v2.1 의 상수 3개 — G9 2,864,871행, disclosure 중복 491, whol_loan_gvrt 범위 — 가 술어 없이 적혀 지금 원장과 달랐다).
+★ 목록은 §2 통합 목록. 갱신은 diff 를 커밋 메시지에 남기고 사람이 승인한다. "게이트가 깨졌다"와 "원장이 자랐다"는
+`baseline.json` 의 `measured_at` 과 `_meta.json` 의 `src_mtime` 으로 가른다.
 
 ## 10. 빌더
 
+**SPEC §7·§7-1·§8 과의 관계 (v2.2 명시)**: SPEC 의 구현 순서(krx→kis→kiwoom→dart)·기존 코드 판정·착수 전 필수
+수정 6건은 **sqlite `build_stage.py` 경로 기준**이다. v2.2 의 duckdb→parquet 빌더가 그 경로를 대체하므로 §8-1~4 는
+소멸하고, **§8-5(손실 카운터)·§8-6(폐기 행 계상)의 원칙만 G1·G2 로 승계**한다. `build_stage.py`·`build_panel.py`·
+`build_views.py` 는 파일럿으로 남기고 수정하지 않는다. `fin_map.py`(매핑 사전)·`build_bridge.py`(corp_ticker,
+isin8 추가)·`finalize.py` 의 `asof(year, acc_mt)` 로직만 재사용한다. 슬라이스 순서는 아래 하나다.
+
 ```
-stage/rules.py    선언 — 테이블별 {소스, 자연키, fanout, partition_class, dedup=payload_cols,
-                  write_mode, 컬럼맵[원명→정규명, expected_len, (p,s), sign_policy, unit,
-                  temporality, miss 마커]}
+stage/rules.py    선언 — 테이블별 {소스, 자연키, fanout, partition_class, partition_expr, observed_src,
+                  dedup=payload_cols, write_mode, lag_known, 컬럼맵[원명→정규명, expected_len, (p,s),
+                  sign_policy, unit|unit_src, temporality, miss 마커, date_format]}
 stage/build.py    duckdb 주엔진: ATTACH(READ_ONLY, 스냅샷 사본) → CAST DECIMAL → COPY TO parquet
-                  memory_limit 6GB · threads 3
+                  memory_limit 6GB · threads 3 · temp_directory data/stage/_tmp/spill
                   파이썬 보조 단계(듀얼 불가 변환): 한글날짜 · 파이프분해 · zlib+이중 JSON ·
                   **NFKC = pyarrow pc.utf8_normalize 벡터화** (duckdb 에 NFKC 부재 실측 —
                   v2 "인엔진 고정" 문구 폐기. 벤치: 벡터화 48초 vs 파이썬 루프 ~10분)
 stage/gates.py    G0~G9 · stg_parse_log · 원장 인덱스 부재(PK 오토인덱스뿐 실측) → 전량
                   스캔 전제로 벤치 산정
 ```
-착수 전 1개 연도 파티션 벤치(경과·최대 RSS) — 추정과 2배 이상 벌어지면 재검토.
-슬라이스: S1 `stg_price_daily` → S2 `stg_fin` → S3 `stg_consensus_monthly` → 잔여 확장.
+착수 전 벤치 = S1 풀 테이블(**다중 파티션 COPY 경로 포함** — 1개 연도만 재면 정작 위험한 경로를 안 잰다). 경과·최대 RSS 가
+추정과 1.3배 이상 벌어지면 재검토(v2.1 의 "2배"는 행수 추정 자체의 +26% 오차를 통과시켰다).
+자원 실측 09-02: 원장 전 테이블 **80,639,641행**(SPEC 의 64M 은 isu_base 9.2M·지수·WISE 누락) · 17.2GiB · 서버 CPU 4 ·
+RAM 15GB(available 13) · 디스크 여유 334GB. 벤치: KRX 3.77M행 TRY_CAST DECIMAL(38,4) 실패 0 · 123초 · RSS 70MB /
+fin_raw 15.4M행 8키 GROUP BY 9초 · RSS 3.6GB → 6GB·3threads 성립. 풀 빌드 추정은 행수 비례 ≈ 2.6시간, S1 벤치 후 확정.
+슬라이스: S1 `stg_price_daily` → **S1b `stg_rcept_dt_map`**(S2 의 available_date 가 의존) → S2 `stg_fin` → S3 `stg_consensus_monthly` → 잔여 확장.
 
 **착수 선행 조건 체크리스트**:
-1. `.venv` pyarrow·duckdb 설치 (승인 기수령)
-2. survey v2 — (p,s) 유도 필드 추가 + **미조사 16테이블 커버**(지수 2종 포함 — `index_name`
-   사고의 진원. "조사 안 된 테이블·컬럼 0개"가 완료 기준)
-3. `VACUUM INTO` 스냅샷 절차 + wisereport.db WAL 전환
-4. `dart_fin_raw` 등 ★테이블 회귀 수치 빌드 시점 재측정
+1. `.venv` pyarrow 설치 (승인 기수령. 09-02 서버 미설치 확인 — duckdb 1.5.5 만 있음)
+2. survey v2 — **전수 스캔·정규식 어휘 측정·캐스트 금지**(§5)로 (p,s) 유도 필드 추가 + **미조사 16테이블 커버**
+   (krx ingest_log·kospi_dd·kosdaq_dd / kiwoom ingest_shard / kis call_log·ingest_log / dart call_log·corp_map·
+   elestock_v1·majorstock_v1·doc_store·ingest_log / wise v3_revision_compare·ws_call_log·**ws_raw**·ws_run_log).
+   **ws_raw 최우선** — WISE stage 12테이블의 유일 입력인데 조사 0. 체크포인트 JSON 45개 삭제 후 재실행.
+   `targets.py` 를 `sqlite_master` 와 diff 해 "미조사 0개"를 기계 판정
+3. `VACUUM INTO` 스냅샷 절차 + wisereport.db WAL 전환 — 실행 창 06:30~익일 05:30 KST, 락 파일 공유(§2)
+4. ★테이블 재측정 → `baseline.json` 생성(§9). 게이트 상수마다 조인 키·술어 병기
 5. (일일 증분 전까지만) 수집기 2줄 수정 유예 가능 — 풀 빌드는 스냅샷으로 충분
 
 ## 11. 결정 기록
@@ -287,15 +376,18 @@ stage/gates.py    G0~G9 · stg_parse_log · 원장 인덱스 부재(PK 오토인
 | **⑦** | **가격 = 내용일 당일** ("당일치 바로 나오니까" — 실시간 관측 + 교차 100% 실증) | **09-02 사용자 확정** |
 | **⑧** | KRX 08-21~ 백필 보류 — 일일 증분 때 소급, 그전엔 coverage_gap 예외 | **09-02 사용자 결정** |
 | **⑨** | 운영 크론 정리 — `daily_dart.sh` 제거(stage 2·4 는 0콜, stage 3 은 013 재확인 39,055콜/일에 적재 0행, 스윕 미완 1창은 +3행 판정 문제) · `sync_v3` 중단 · **시계열 일일 증분은 미설계가 정상**(매일 도는 건 소멸성 소스 적립뿐) | **09-02 사용자 결정** |
+| **⑩** | **v2.2 최종 검수 반영** — `observed_src`·UTC 명시, G7 행 격리, survey v2 전수·어휘, 파티션 61 전수 선언, `baseline.json`, 카탈로그 보강(WISE target_price·min_max·단위값, SPEC 규칙 4건, stg_fin 키 예외, stg_credit=deal_date, ovr_shrts_qty_valid·격자·랙·크론 이관, rcept_no[:8] 폴백 폐기), 산출물 스키마·실패 처리·게이트 skip 판정, SPEC §7·§8 관계 | **09-02 검수** |
 | — | stage 1회 풀 빌드 → 증분은 별도 설계 · equity 는 stage 후 | 09-01 |
 
-**미결**: 컬럼별 (p,s) 최종값(survey v2 대기) · 수급·공매도의 실제 공표 시점(관행 D+1 —
+**미결**: 컬럼별 (p,s) 최종값과 G2·G7 임계(survey v2 대기) · 수급·공매도의 실제 공표 시점(관행 D+1 —
 프로브 실측은 일일 증분 트랙, 공개시점 대장에서). cF5003 어닝서프라이즈는 09-02 사용자 판단으로 제외.
 
-**크로스 대조 최종 실측 (09-01)**: 종가 KRX=키움 2,864,871행 100.0% · 거래량 99.9864% ·
+**크로스 대조 최종 실측 (09-02 재측정)**: 종가 KRX=키움 **7,537,984행** 100.0%(09-01 의 2,864,871 은 survey_cross 조인 수) · 거래량 99.9864% ·
 공매도 키움∩KIS 겹침 0(상보 유니버스) · 상장주식수 97.45%(차이 24건 전부 8/20~9/1 기업행위).
 
 **도구 교훈 (3건 — rules·gates 는 실행 전 컬럼 존재+길이 검증 필수)**:
 ① SQLite 큰따옴표 폴백 — 없는 컬럼명이 문자열 상수가 됨 (ISU_SRT_CD·close_pric 2회)
 ② **실재하는 오답 컬럼** — isu_base 의 `ISU_CD` 는 12자 ISIN: 존재 검증을 통과하는 더 나쁜 변종
 ③ **미조사 지대의 유령** — `index_name` 은 전수조사가 안 덮은 테이블에서 났다. 조사 커버리지 = 설계 신뢰의 상한
+④ **표본 유래 수치는 실측이 아니다** — survey 의 stride 표본 범위(−292~+333)를 전수 실측처럼 인용했다. 게이트 상수는 전수 술어가 병기된 것만 (v2.2)
+⑤ **게이트 상수와 문서 숫자는 정의를 함께 적는다** — "중복 491"은 그룹 수인지 초과 행수인지, "2,864,871행"은 어떤 조인인지 없어 재현이 안 됐다 (v2.2)

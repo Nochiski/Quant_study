@@ -353,7 +353,9 @@ fin_raw 15.4M행 8키 GROUP BY 9초 · RSS 3.6GB → 6GB·3threads 성립. 풀 �
 슬라이스: S1 `stg_price_daily` → **S1b `stg_rcept_dt_map`**(S2 의 available_date 가 의존) → S2 `stg_fin` → S3 `stg_consensus_monthly` → 잔여 확장.
 
 **착수 선행 조건 체크리스트**:
-1. `.venv` pyarrow 설치 (승인 기수령. 09-02 서버 미설치 확인 — duckdb 1.5.5 만 있음)
+1. ~~`.venv` pyarrow 설치~~ → **S1 실측으로 불필요해짐**: NFKC 는 텍스트 컬럼의 distinct 값만 파이썬
+   `unicodedata` 로 정규화해 임시 매핑표 조인(KRX 3컬럼 수천 값, ms 단위). parquet 읽기·쓰기는 duckdb 네이티브.
+   pyarrow 는 arrow/pandas 산출이 필요해질 때 설치
 2. ✅ **survey v2 완료 (09-02 16:28 KST, 1,617초, 61테이블·1,427컬럼, 커버리지 0/0 미조사)** — `survey/survey_v2.py`,
    산출 `survey_out/v2/`(테이블별 JSON·`ps_table.json`·`coverage.json`). 알려진 실측 13/13 재현(음수 회귀 4건·PARVAL 73,615·
    fin_raw 15,375,024행 등). 재무 금액 6컬럼 전수 (p,s) = **정수 18(bfefrmtrm 17)·소수 2 → Decimal(38,4) 확정**.
@@ -367,6 +369,20 @@ fin_raw 15.4M행 8키 GROUP BY 9초 · RSS 3.6GB → 6GB·3threads 성립. 풀 �
 3. `VACUUM INTO` 스냅샷 절차 + wisereport.db WAL 전환 — 실행 창 06:30~익일 05:30 KST, 락 파일 공유(§2)
 4. ★테이블 재측정 → `baseline.json` 생성(§9). 게이트 상수마다 조인 키·술어 병기
 5. (일일 증분 전까지만) 수집기 2줄 수정 유예 가능 — 풀 빌드는 스냅샷으로 충분
+
+**S1 완료 (09-02 17:56 KST) — `src/stage/` 빌더 뼈대 + `stg_price_daily` 서버 실측**:
+- 스냅샷 `VACUUM INTO` krx 4.01GB + kiwoom 3.26GB = 61초. 빌드 **9,201,516행 59초**(게이트 포함, 재현성 재빌드 58.8초),
+  최대 RSS **6.35GB**(memory_limit 6GB + 파이썬), threads 3. 산출 17 연도 파티션(2010~2026) **239MB**/빌드.
+- 게이트: G0·G1·G2·G3·G4(픽스처 4)·G7 pass, G9 pass — **KRX⋈키움 ka10060 7,537,984행 종가 100.0000% · 거래량 99.98642%**,
+  G5 는 첫 빌드 skip(no_baseline) → 두 번째 빌드 Δ=0 pass, G6·G8 skip(사유 기록). 첫 시도는 G4 만 실패했다 — 픽스처의
+  NULL 기대값을 문자열 'None' 으로 적은 코드 결함이라 테스트 추가 후 수정(JSON null = SQL NULL).
+- **재현성**: 같은 스냅샷 재빌드 content_hash `9201516:a111951402930d93` 동일. MANIFEST `current_build` 교체·keep=3 GC 동작.
+- 실측 확인: 삼성전자 2018-05-03 은 O/H/L 이 '0'(분할 전 정지일) → NULL + `miss_kind.open_krw='ledger_zero'`,
+  종가 2,650,000 보존. dedup 0·reject 0·cast_failed 0 — KRX 는 survey v2 예측대로 캐스팅 손실이 없다.
+- 읽는 쪽 주의: `read_parquet(..., hive_partitioning=true)` 로 `v=<build_id>/year=YYYY/` 를 읽으면 `v`·`year`
+  하이브 컬럼이 붙는다(파일 안에는 없음). 리더는 MANIFEST 의 `partitions[].path` 를 경유한다.
+- 구현 메모: duckdb 식별자는 대소문자 무시라 원장 `LIST_SHRS` 와 stage `list_shrs` 가 충돌 — 원장 컬럼은 `raw__` 접두로
+  분리. 골든 픽스처는 `src/stage/fixtures/<table>.json` 으로 코드와 함께 산다(data/ 아님). 임계 기본값 G2 0 · G7 0.1% · G9 종가 1.0.
 
 ## 11. 결정 기록
 

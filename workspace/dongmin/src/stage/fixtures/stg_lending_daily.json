@@ -1,0 +1,13 @@
+[
+ {
+  "key": {
+   "date": "2026-08-20",
+   "ticker": "005930"
+  },
+  "column": "remn_amt_krw",
+  "expect": "23460750000000",
+  "measured_sql": "SELECT \"remn_amt\" FROM ka20068_lending_balance WHERE \"ticker\"='005930' AND \"dt\"='20260820'",
+  "measured_at": "2026-09-03",
+  "note": "원문 '23460750' × 1000000 (SPEC §2-4)"
+ }
+]

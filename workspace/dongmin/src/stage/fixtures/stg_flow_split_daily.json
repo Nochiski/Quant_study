@@ -1,0 +1,145 @@
+[
+ {
+  "key": {
+   "ticker": "057050",
+   "date": "2026-06-23"
+  },
+  "column": "bank_ntby_tr_pbmn_krw",
+  "expect": "-439000000",
+  "measured_sql": "SELECT \"bank_ntby_tr_pbmn\" FROM kis_investor_flow WHERE \"req_ticker\"='057050' AND \"stck_bsop_date\"='20260623'",
+  "measured_at": "2026-09-03",
+  "note": "원문 '-439' × 1000000 (SPEC §2-4)"
+ },
+ {
+  "key": {
+   "ticker": "043090",
+   "date": "2026-08-07"
+  },
+  "column": "etc_corp_ntby_tr_pbmn_krw",
+  "expect": "59000000",
+  "measured_sql": "SELECT \"etc_corp_ntby_tr_pbmn\" FROM kis_investor_flow WHERE \"req_ticker\"='043090' AND \"stck_bsop_date\"='20260807'",
+  "measured_at": "2026-09-03",
+  "note": "원문 '59' × 1000000 (SPEC §2-4)"
+ },
+ {
+  "key": {
+   "ticker": "043090",
+   "date": "2026-08-07"
+  },
+  "column": "etc_ntby_tr_pbmn_krw",
+  "expect": "59000000",
+  "measured_sql": "SELECT \"etc_ntby_tr_pbmn\" FROM kis_investor_flow WHERE \"req_ticker\"='043090' AND \"stck_bsop_date\"='20260807'",
+  "measured_at": "2026-09-03",
+  "note": "원문 '59' × 1000000 (SPEC §2-4)"
+ },
+ {
+  "key": {
+   "ticker": "000030",
+   "date": "2018-12-07"
+  },
+  "column": "etc_orgt_ntby_tr_pbmn_krw",
+  "expect": "-122000000",
+  "measured_sql": "SELECT \"etc_orgt_ntby_tr_pbmn\" FROM kis_investor_flow WHERE \"req_ticker\"='000030' AND \"stck_bsop_date\"='20181207'",
+  "measured_at": "2026-09-03",
+  "note": "원문 '-122' × 1000000 (SPEC §2-4)"
+ },
+ {
+  "key": {
+   "ticker": "043090",
+   "date": "2026-08-07"
+  },
+  "column": "frgn_ntby_tr_pbmn_krw",
+  "expect": "-16000000",
+  "measured_sql": "SELECT \"frgn_ntby_tr_pbmn\" FROM kis_investor_flow WHERE \"req_ticker\"='043090' AND \"stck_bsop_date\"='20260807'",
+  "measured_at": "2026-09-03",
+  "note": "원문 '-16' × 1000000 (SPEC §2-4)"
+ },
+ {
+  "key": {
+   "ticker": "222160",
+   "date": "2026-06-26"
+  },
+  "column": "fund_ntby_tr_pbmn_krw",
+  "expect": "-3000000",
+  "measured_sql": "SELECT \"fund_ntby_tr_pbmn\" FROM kis_investor_flow WHERE \"req_ticker\"='222160' AND \"stck_bsop_date\"='20260626'",
+  "measured_at": "2026-09-03",
+  "note": "원문 '-3' × 1000000 (SPEC §2-4)"
+ },
+ {
+  "key": {
+   "ticker": "057050",
+   "date": "2026-06-25"
+  },
+  "column": "insu_ntby_tr_pbmn_krw",
+  "expect": "-21000000",
+  "measured_sql": "SELECT \"insu_ntby_tr_pbmn\" FROM kis_investor_flow WHERE \"req_ticker\"='057050' AND \"stck_bsop_date\"='20260625'",
+  "measured_at": "2026-09-03",
+  "note": "원문 '-21' × 1000000 (SPEC §2-4)"
+ },
+ {
+  "key": {
+   "ticker": "031440",
+   "date": "2026-07-15"
+  },
+  "column": "ivtr_ntby_tr_pbmn_krw",
+  "expect": "-3000000",
+  "measured_sql": "SELECT \"ivtr_ntby_tr_pbmn\" FROM kis_investor_flow WHERE \"req_ticker\"='031440' AND \"stck_bsop_date\"='20260715'",
+  "measured_at": "2026-09-03",
+  "note": "원문 '-3' × 1000000 (SPEC §2-4)"
+ },
+ {
+  "key": {
+   "ticker": "203690",
+   "date": "2026-06-30"
+  },
+  "column": "mrbn_ntby_tr_pbmn_krw",
+  "expect": "-39000000",
+  "measured_sql": "SELECT \"mrbn_ntby_tr_pbmn\" FROM kis_investor_flow WHERE \"req_ticker\"='203690' AND \"stck_bsop_date\"='20260630'",
+  "measured_at": "2026-09-03",
+  "note": "원문 '-39' × 1000000 (SPEC §2-4)"
+ },
+ {
+  "key": {
+   "ticker": "031440",
+   "date": "2026-07-20"
+  },
+  "column": "orgn_ntby_tr_pbmn_krw",
+  "expect": "8000000",
+  "measured_sql": "SELECT \"orgn_ntby_tr_pbmn\" FROM kis_investor_flow WHERE \"req_ticker\"='031440' AND \"stck_bsop_date\"='20260720'",
+  "measured_at": "2026-09-03",
+  "note": "원문 '8' × 1000000 (SPEC §2-4)"
+ },
+ {
+  "key": {
+   "ticker": "222160",
+   "date": "2026-06-26"
+  },
+  "column": "pe_fund_ntby_tr_pbmn_krw",
+  "expect": "-20000000",
+  "measured_sql": "SELECT \"pe_fund_ntby_tr_pbmn\" FROM kis_investor_flow WHERE \"req_ticker\"='222160' AND \"stck_bsop_date\"='20260626'",
+  "measured_at": "2026-09-03",
+  "note": "원문 '-20' × 1000000 (SPEC §2-4)"
+ },
+ {
+  "key": {
+   "ticker": "043090",
+   "date": "2026-08-07"
+  },
+  "column": "prsn_ntby_tr_pbmn_krw",
+  "expect": "-43000000",
+  "measured_sql": "SELECT \"prsn_ntby_tr_pbmn\" FROM kis_investor_flow WHERE \"req_ticker\"='043090' AND \"stck_bsop_date\"='20260807'",
+  "measured_at": "2026-09-03",
+  "note": "원문 '-43' × 1000000 (SPEC §2-4)"
+ },
+ {
+  "key": {
+   "ticker": "031440",
+   "date": "2026-07-20"
+  },
+  "column": "scrt_ntby_tr_pbmn_krw",
+  "expect": "8000000",
+  "measured_sql": "SELECT \"scrt_ntby_tr_pbmn\" FROM kis_investor_flow WHERE \"req_ticker\"='031440' AND \"stck_bsop_date\"='20260720'",
+  "measured_at": "2026-09-03",
+  "note": "원문 '8' × 1000000 (SPEC §2-4)"
+ }
+]

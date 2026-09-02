@@ -1,0 +1,145 @@
+[
+ {
+  "key": {
+   "date": "2018-12-07",
+   "ticker": "005930"
+  },
+  "column": "ind_invsr_krw",
+  "expect": "5812000000",
+  "measured_sql": "SELECT \"ind_invsr\" FROM ka10060_investor_flows WHERE \"ticker\"='005930' AND \"dt\"='20181207'",
+  "measured_at": "2026-09-03",
+  "note": "원문 '5812' × 1000000 (SPEC §2-4)"
+ },
+ {
+  "key": {
+   "date": "2018-12-07",
+   "ticker": "005930"
+  },
+  "column": "frgnr_invsr_krw",
+  "expect": "10200000000",
+  "measured_sql": "SELECT \"frgnr_invsr\" FROM ka10060_investor_flows WHERE \"ticker\"='005930' AND \"dt\"='20181207'",
+  "measured_at": "2026-09-03",
+  "note": "원문 '10200' × 1000000 (SPEC §2-4)"
+ },
+ {
+  "key": {
+   "date": "2018-12-07",
+   "ticker": "005930"
+  },
+  "column": "orgn_krw",
+  "expect": "-15773000000",
+  "measured_sql": "SELECT \"orgn\" FROM ka10060_investor_flows WHERE \"ticker\"='005930' AND \"dt\"='20181207'",
+  "measured_at": "2026-09-03",
+  "note": "원문 '-15773' × 1000000 (SPEC §2-4)"
+ },
+ {
+  "key": {
+   "date": "2018-12-07",
+   "ticker": "005930"
+  },
+  "column": "fnnc_invt_krw",
+  "expect": "31609000000",
+  "measured_sql": "SELECT \"fnnc_invt\" FROM ka10060_investor_flows WHERE \"ticker\"='005930' AND \"dt\"='20181207'",
+  "measured_at": "2026-09-03",
+  "note": "원문 '31609' × 1000000 (SPEC §2-4)"
+ },
+ {
+  "key": {
+   "date": "2018-12-07",
+   "ticker": "005930"
+  },
+  "column": "insrnc_krw",
+  "expect": "2351000000",
+  "measured_sql": "SELECT \"insrnc\" FROM ka10060_investor_flows WHERE \"ticker\"='005930' AND \"dt\"='20181207'",
+  "measured_at": "2026-09-03",
+  "note": "원문 '2351' × 1000000 (SPEC §2-4)"
+ },
+ {
+  "key": {
+   "date": "2018-12-07",
+   "ticker": "005930"
+  },
+  "column": "invtrt_krw",
+  "expect": "-509000000",
+  "measured_sql": "SELECT \"invtrt\" FROM ka10060_investor_flows WHERE \"ticker\"='005930' AND \"dt\"='20181207'",
+  "measured_at": "2026-09-03",
+  "note": "원문 '-509' × 1000000 (SPEC §2-4)"
+ },
+ {
+  "key": {
+   "date": "2018-12-07",
+   "ticker": "005930"
+  },
+  "column": "etc_fnnc_krw",
+  "expect": "2248000000",
+  "measured_sql": "SELECT \"etc_fnnc\" FROM ka10060_investor_flows WHERE \"ticker\"='005930' AND \"dt\"='20181207'",
+  "measured_at": "2026-09-03",
+  "note": "원문 '2248' × 1000000 (SPEC §2-4)"
+ },
+ {
+  "key": {
+   "date": "2018-12-07",
+   "ticker": "005930"
+  },
+  "column": "bank_krw",
+  "expect": "-33000000",
+  "measured_sql": "SELECT \"bank\" FROM ka10060_investor_flows WHERE \"ticker\"='005930' AND \"dt\"='20181207'",
+  "measured_at": "2026-09-03",
+  "note": "원문 '-33' × 1000000 (SPEC §2-4)"
+ },
+ {
+  "key": {
+   "date": "2018-12-07",
+   "ticker": "005930"
+  },
+  "column": "penfnd_etc_krw",
+  "expect": "-9470000000",
+  "measured_sql": "SELECT \"penfnd_etc\" FROM ka10060_investor_flows WHERE \"ticker\"='005930' AND \"dt\"='20181207'",
+  "measured_at": "2026-09-03",
+  "note": "원문 '-9470' × 1000000 (SPEC §2-4)"
+ },
+ {
+  "key": {
+   "date": "2018-12-07",
+   "ticker": "005930"
+  },
+  "column": "samo_fund_krw",
+  "expect": "-16815000000",
+  "measured_sql": "SELECT \"samo_fund\" FROM ka10060_investor_flows WHERE \"ticker\"='005930' AND \"dt\"='20181207'",
+  "measured_at": "2026-09-03",
+  "note": "원문 '-16815' × 1000000 (SPEC §2-4)"
+ },
+ {
+  "key": {
+   "date": "2018-12-07",
+   "ticker": "005930"
+  },
+  "column": "natn_krw",
+  "expect": "-25154000000",
+  "measured_sql": "SELECT \"natn\" FROM ka10060_investor_flows WHERE \"ticker\"='005930' AND \"dt\"='20181207'",
+  "measured_at": "2026-09-03",
+  "note": "원문 '-25154' × 1000000 (SPEC §2-4)"
+ },
+ {
+  "key": {
+   "date": "2018-12-07",
+   "ticker": "005930"
+  },
+  "column": "etc_corp_krw",
+  "expect": "-272000000",
+  "measured_sql": "SELECT \"etc_corp\" FROM ka10060_investor_flows WHERE \"ticker\"='005930' AND \"dt\"='20181207'",
+  "measured_at": "2026-09-03",
+  "note": "원문 '-272' × 1000000 (SPEC §2-4)"
+ },
+ {
+  "key": {
+   "date": "2018-12-07",
+   "ticker": "005930"
+  },
+  "column": "natfor_krw",
+  "expect": "33000000",
+  "measured_sql": "SELECT \"natfor\" FROM ka10060_investor_flows WHERE \"ticker\"='005930' AND \"dt\"='20181207'",
+  "measured_at": "2026-09-03",
+  "note": "원문 '33' × 1000000 (SPEC §2-4)"
+ }
+]

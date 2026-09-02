@@ -152,8 +152,14 @@ def _union_sql(con: duckdb.DuckDBPyConnection, rule: TableRule) -> tuple[list[st
     return src_cols, " UNION ALL ".join(selects)
 
 
-def _load_norm_maps(con: duckdb.DuckDBPyConnection, rule: TableRule, src_view: str) -> None:
-    """정규화 대상 텍스트 컬럼의 distinct 값만 파이썬으로 정규화해 임시 매핑표로 올린다."""
+def _load_norm_maps(con: duckdb.DuckDBPyConnection, rule: TableRule, src_view: str,
+                    tmp_dir: Path) -> None:
+    """정규화 대상 텍스트 컬럼의 distinct 값만 파이썬으로 정규화해 임시 매핑표로 올린다.
+
+    적재는 JSON Lines → `read_json` (executemany 는 행마다 statement — §11 교훈 ⑥. disclosure
+    report_nm 은 distinct 값이 수십만이다).
+    """
+    tmp_dir.mkdir(parents=True, exist_ok=True)
     for c in rule.columns:
         if not c.normalize_text:
             continue
@@ -162,9 +168,16 @@ def _load_norm_maps(con: duckdb.DuckDBPyConnection, rule: TableRule, src_view: s
             f"SELECT DISTINCT {_q(c.src)} FROM {src_view} WHERE {_q(c.src)} IS NOT NULL"
         ).fetchall()]
         con.execute(f"CREATE OR REPLACE TEMP TABLE {tbl} (raw VARCHAR, norm VARCHAR)")
-        if vals:
-            con.executemany(f"INSERT INTO {tbl} VALUES (?, ?)",
-                            [(v, normalize_text(v, c.strip_tags)) for v in vals])
+        if not vals:
+            continue
+        jsonl = tmp_dir / f"norm__{c.src}.jsonl"
+        with open(jsonl, "w", encoding="utf-8") as f:
+            for v in vals:
+                f.write(json.dumps({"raw": v, "norm": normalize_text(v, c.strip_tags)},
+                                   ensure_ascii=False))
+                f.write("\n")
+        con.execute(f"INSERT INTO {tbl} SELECT raw, norm FROM read_json('{jsonl}', "
+                    f"format='newline_delimited', columns={{'raw': 'VARCHAR', 'norm': 'VARCHAR'}})")
 
 
 def _is_partitioned(rule: TableRule) -> bool:
@@ -412,7 +425,7 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
         else:
             src_cols, union = _union_sql(con, rule)
             con.execute(f"CREATE OR REPLACE TEMP VIEW src_all AS {union}")
-        _load_norm_maps(con, rule, "src_all")
+        _load_norm_maps(con, rule, "src_all", tmp_root)
         con.execute("CREATE OR REPLACE TEMP TABLE stage_all AS "
                     + _stage_sql(rule, "src_all", src_cols, year_lo, year_hi,
                                  content_lo, content_hi))

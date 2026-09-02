@@ -38,8 +38,9 @@ _PRICE_UNION = (f"(SELECT {_PRICE_COLS} FROM krx.krx_stk_bydd_trd "
 _PRICE_JOIN = (f"FROM {_PRICE_UNION} p JOIN kiwoom.ka10060_investor_flows f "
                "ON f.ticker = p.ISU_CD AND f.dt = p.BAS_DD")
 _OHL_ZERO = "TDD_OPNPRC = '0' AND TRY_CAST(ACC_TRDVOL AS BIGINT) > 0"
-_SHARES_NUM = ("etc", "tesstk_co", "isu_stock_totqy", "redc", "now_to_isu", "profit_incnr",
-               "now_to_dcrs", "istc_totqy", "distb_stock_co", "rdmstk_repy")
+_SHARES_NUM = ("etc", "tesstk_co", "isu_stock_totqy", "redc", "now_to_isu_stock_totqy",
+               "profit_incnr", "now_to_dcrs_stock_totqy", "istc_totqy", "distb_stock_co",
+               "rdmstk_repy")   # dart_shares 실명 (survey v2)
 _SHARES_SQL = "SELECT " + " + ".join(
     f"count(*) FILTER (WHERE {c} <> '' AND {c} IS NOT NULL AND "
     f"TRY_CAST(replace({c}, ',', '') AS DECIMAL(38,4)) IS NULL)" for c in _SHARES_NUM

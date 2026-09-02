@@ -351,5 +351,5 @@ def test_kis_partition_declarations_match_the_design_table() -> None:
 
 def test_kis_tables_are_in_the_registry() -> None:
     names = {t.name for mod in (rules_krx, rules_kis, rules_dart, rules_wise) for t in mod.TABLES}
-    assert set(rules.RULES) == names
+    assert names <= set(rules.RULES)   # 다른 소스 모듈은 별도 PR
     assert {t.name for t in rules_kis.TABLES} == set(_LEDGER_COLUMN_COUNT)

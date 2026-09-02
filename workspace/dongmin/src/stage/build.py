@@ -405,7 +405,12 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
     tmp_table.mkdir(parents=True)
     spill = stage_root / "_tmp" / "spill"
     spill.mkdir(parents=True, exist_ok=True)
-    thresholds = {**gates.DEFAULT_THRESHOLDS, **(gate_thresholds or {})}
+    # 게이트 임계: 기본 ← baseline.json 의 테이블별 thresholds (§9) ← CLI override
+    bpath = baseline_path or (stage_root / "baseline.json")
+    baseline = (json.loads(bpath.read_text(encoding="utf-8")).get(rule.name)
+                if bpath.exists() else None)
+    base_thr = baseline.get("thresholds", {}) if isinstance(baseline, dict) else {}
+    thresholds = {**gates.DEFAULT_THRESHOLDS, **base_thr, **(gate_thresholds or {})}
     now_year = datetime.now(UTC).year
     year_lo, year_hi = gates.YEAR_RANGE_OBSERVED[0], now_year + gates.YEAR_RANGE_OBSERVED[1]
     content_lo, content_hi = gates.YEAR_RANGE_CONTENT[0], now_year + gates.YEAR_RANGE_CONTENT[1]
@@ -469,9 +474,6 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
 
         fpath = fixtures_path or (stage_root / "fixtures" / f"{rule.name}.json")
         fixtures = json.loads(fpath.read_text(encoding="utf-8")) if fpath.exists() else None
-        bpath = baseline_path or (stage_root / "baseline.json")
-        baseline = (json.loads(bpath.read_text(encoding="utf-8")).get(rule.name)
-                    if bpath.exists() else None)
         cross_alias = None
         if rule.cross_check and rule.cross_check.db in attached:
             cross_alias = rule.cross_check.db

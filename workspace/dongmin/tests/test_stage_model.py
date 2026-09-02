@@ -4,7 +4,17 @@ import sqlite3
 from pathlib import Path
 
 import duckdb
-from stage import build, gates, model, rules, rules_dart, rules_krx, rules_wise, snapshot
+from stage import (
+    build,
+    gates,
+    model,
+    rules,
+    rules_dart,
+    rules_kiwoom,
+    rules_krx,
+    rules_wise,
+    snapshot,
+)
 
 
 def _write(path: Path) -> None:
@@ -139,9 +149,15 @@ def test_g7_default_threshold_fails_on_isolated_cells(tmp_path: Path) -> None:
 
 
 def test_registry_assembles_per_source_modules() -> None:
-    names = {t.name for mod in (rules_krx, rules_dart, rules_wise) for t in mod.TABLES}
+    mods = (rules_krx, rules_kiwoom, rules_dart, rules_wise)
+    names = {t.name for mod in mods for t in mod.TABLES}
     assert set(rules.RULES) == names
     assert rules_krx.TABLES[0].name == "stg_price_daily"
+    assert {t.name for t in rules_krx.TABLES} >= {"stg_etf_price_daily", "stg_index_daily",
+                                                  "stg_listing_daily", "stg_ingest_krx"}
+    assert {t.name for t in rules_kiwoom.TABLES} == {
+        "stg_flow_daily_kiwoom", "stg_short_daily_kiwoom", "stg_foreign_daily",
+        "stg_lending_daily", "stg_master_daily", "stg_shards_kiwoom"}
     assert {t.name for t in rules_dart.TABLES} >= {"stg_rcept_dt_map", "stg_fin"}
     assert rules_wise.TABLES[0].name == "stg_consensus_monthly"
     assert model.RULES_VERSION == "2.2.3"

@@ -56,6 +56,7 @@ class GateContext:
     cross_alias: str | None                 # G9 원장 alias (미부착이면 None)
     current_year: int
     lookup_miss: int | None = None          # available lookup 미스 행수 (참조표 없는 테이블은 None)
+    parse_metrics: dict[str, object] | None = None   # blob 파서 계상 (blob 테이블 아니면 None)
 
 
 def _one(con: duckdb.DuckDBPyConnection, sql: str) -> tuple[object, ...]:
@@ -76,9 +77,12 @@ def g0_declaration(ctx: GateContext) -> GateResult:
         cols = {r[0] for r in ctx.con.execute(
             "SELECT column_name FROM duckdb_columns() WHERE database_name = ? AND table_name = ?",
             [s.db, s.table]).fetchall()}
-        need = {c.src for c in ctx.rule.columns}
-        if ctx.rule.observed_src:
-            need.add(ctx.rule.observed_src)
+        if ctx.rule.blob_source is not None:
+            need = set(ctx.rule.blob_source.required_columns)   # 파서 입력 컬럼이 원장 실물 계약
+        else:
+            need = {c.src for c in ctx.rule.columns}
+            if ctx.rule.observed_src:
+                need.add(ctx.rule.observed_src)
         missing += [f"{s.db}.{s.table}.{c}" for c in sorted(need - cols)]
     n_len = 0
     for c in ctx.rule.columns:
@@ -194,7 +198,21 @@ def g7_range(ctx: GateContext) -> GateResult:
 
 
 def g8_parse_equation(ctx: GateContext) -> GateResult:
-    return GateResult("G8", GateStatus.SKIP, "not_blob", {})
+    """blob 테이블: 파서 계상 등식 — 실패 0 · 5001≡5002 · 방출 행수 = 원장 행수(n_src)."""
+    pm = ctx.parse_metrics
+    if pm is None:
+        return GateResult("G8", GateStatus.SKIP, "not_blob", {})
+    emitted = int(str(pm.get("n_rows_emitted", 0)))
+    reasons: list[str] = []
+    if int(str(pm.get("n_parse_failed", 0))) > 0:
+        reasons.append(f"parse_failed={pm['n_parse_failed']}")
+    if int(str(pm.get("n_value_mismatch", 0))) > 0:
+        reasons.append(f"value_mismatch={pm['n_value_mismatch']}")
+    if emitted != ctx.n_src:
+        reasons.append(f"emitted {emitted} != n_src {ctx.n_src}")
+    ok = not reasons
+    return GateResult("G8", GateStatus.PASS if ok else GateStatus.FAIL,
+                      "파싱 등식 성립" if ok else "; ".join(reasons), dict(pm))
 
 
 def g9_cross_source(ctx: GateContext) -> GateResult:

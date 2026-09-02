@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-RULES_VERSION = "2.2.2"
+RULES_VERSION = "2.2.3"
 PS_HEADROOM_DIGITS = 2   # survey 최대 자릿수 + 2 (성장 여유). 초과 = cast_failed → G2
 
 KIND_TEXT = "text"
@@ -16,9 +16,11 @@ KIND_DATE_YMD8 = "date_yyyymmdd"
 KIND_DATE_ISO = "date_iso"          # YYYY-MM-DD
 KIND_DATE_SLASH = "date_slash"      # YYYY/MM/DD (WISE 관측 라벨)
 KIND_DATE_KOREAN = "date_korean"    # YYYY년 MM월 DD일 (DART DS005)
+KIND_DATE_DOT = "date_dot"          # YYYY.MM.DD (dart_capital.isu_dcrs_de — SPEC §2-14)
 KIND_BOOL = "bool"
 DATE_FORMATS: dict[str, str] = {KIND_DATE_YMD8: "%Y%m%d", KIND_DATE_ISO: "%Y-%m-%d",
-                                KIND_DATE_SLASH: "%Y/%m/%d", KIND_DATE_KOREAN: "%Y년 %m월 %d일"}
+                                KIND_DATE_SLASH: "%Y/%m/%d", KIND_DATE_KOREAN: "%Y년 %m월 %d일",
+                                KIND_DATE_DOT: "%Y.%m.%d"}
 
 
 def is_castable(kind: str) -> bool:

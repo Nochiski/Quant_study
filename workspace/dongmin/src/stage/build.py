@@ -124,6 +124,23 @@ def _source_columns(con: duckdb.DuckDBPyConnection, db: str, table: str) -> list
     return [r[0] for r in rows]
 
 
+def _union_sql(con: duckdb.DuckDBPyConnection, rule: TableRule) -> tuple[list[str], str]:
+    """원장 UNION 뷰 SQL. 컬럼 집합은 소스 순서의 합집합이고, 소스에 없는 컬럼은 NULL 패딩
+    (elestock ∪ elestock_v1 — v1 에는 row_hash·dup_seq·req_corp_code 가 없다). 규칙 컬럼의
+    실재는 G0 이 소스마다 검사한다."""
+    per_src = {(s.db, s.table): _source_columns(con, s.db, s.table) for s in rule.sources}
+    src_cols: list[str] = []
+    for cols in per_src.values():
+        src_cols.extend(c for c in cols if c not in src_cols)
+    selects = []
+    for s in rule.sources:
+        have = set(per_src[(s.db, s.table)])
+        sel = ", ".join(f"CAST({_q(c)} AS VARCHAR) AS {_q(c)}" if c in have
+                        else f"CAST(NULL AS VARCHAR) AS {_q(c)}" for c in src_cols)
+        selects.append(f"SELECT {sel}, '{s.src_tag}' AS _src FROM {_q(s.db)}.{_q(s.table)}")
+    return src_cols, " UNION ALL ".join(selects)
+
+
 def _load_norm_maps(con: duckdb.DuckDBPyConnection, rule: TableRule, src_view: str) -> None:
     """정규화 대상 텍스트 컬럼의 distinct 값만 파이썬으로 정규화해 임시 매핑표로 올린다."""
     for c in rule.columns:
@@ -373,10 +390,7 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
         if rule.blob_source is not None:
             src_cols, parse_metrics = _load_blob_source(con, rule, tmp_root)
         else:
-            src_cols = _source_columns(con, rule.sources[0].db, rule.sources[0].table)
-            union = " UNION ALL ".join(
-                "SELECT " + ", ".join(f"CAST({_q(c)} AS VARCHAR) AS {_q(c)}" for c in src_cols)
-                + f", '{s.src_tag}' AS _src FROM {_q(s.db)}.{_q(s.table)}" for s in rule.sources)
+            src_cols, union = _union_sql(con, rule)
             con.execute(f"CREATE OR REPLACE TEMP VIEW src_all AS {union}")
         _load_norm_maps(con, rule, "src_all")
         con.execute("CREATE OR REPLACE TEMP TABLE stage_all AS "

@@ -135,6 +135,15 @@ def g3_invariants(ctx: GateContext) -> GateResult:
 
 
 def g4_fixtures(ctx: GateContext) -> GateResult:
+    """골든 픽스처. unit_scale 선언 컬럼은 픽스처 없음 = 실패(§9 — ×1e6 오적용의 유일 방어)."""
+    covered = {str(fx["column"]) for fx in ctx.fixtures or ()}
+    uncovered = [c.name for c in ctx.rule.columns if c.unit_scale is not None
+                 and c.name not in covered]
+    if uncovered:
+        return GateResult("G4", GateStatus.FAIL,
+                          f"unit_scale column without fixture: {uncovered}",
+                          {"n_fixtures": len(ctx.fixtures or ()), "n_mismatch": 0,
+                           "unit_scale_uncovered": uncovered})
     if not ctx.fixtures:
         return GateResult("G4", GateStatus.SKIP, "no_fixtures", {})
     n_mismatch = 0

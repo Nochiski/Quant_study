@@ -216,15 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
-
-# 데이터/산출물 — 코드로 재현하고 git 에는 넣지 않는다
-**/data/
-*.csv
-*.parquet
-*.feather
-*.h5
-*.db
-!tests/fixtures/**/*.csv
+# Rust 코어 빌드 산출물
+rust/backtest_core/target/
+rust/backtest_core/uv.lock
+bash.exe.stackdump
 
 # ── 프로젝트 전용 ───────────────────────────────────────────
 # macOS
@@ -235,6 +230,16 @@ __marimo__/
 .kis_token.json
 .kw_token.json
 *.token
+
+# 데이터/산출물 — 코드로 재현하고 git 에는 넣지 않는다
+# (`**/data/` 는 쓰지 않는다 — src/backtest_engine/data/ 같은 패키지 디렉토리까지 가린다)
+*.csv
+*.parquet
+*.feather
+*.h5
+*.db
+!tests/fixtures/**/*.csv
+!tests/fixtures/**/*.parquet
 
 # 원장/파생 데이터 (서버가 정본, 로컬은 작업 사본)
 workspace/*/data/

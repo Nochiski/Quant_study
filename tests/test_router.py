@@ -11,43 +11,81 @@ from backtest_engine.engine.router import DecisionRouter
 from backtest_engine.errors import (
     SchemaVersionMismatch,
     UndeclaredActionReturned,
+    UndeclaredFeatureUsed,
+    UnknownOrderId,
     UnsupportedActionValue,
 )
 from backtest_engine.types.actions import (
     ActionKind,
+    AdjustPosition,
+    CancelOrder,
     ExecutionPolicy,
     ExecutionStyle,
     ExecutionTiming,
     LiquidatePosition,
     LiquidationPersistence,
+    NotionalDelta,
+    NotionalTarget,
+    QuantityDelta,
     QuantityTarget,
+    ReplaceOrder,
     SetPortfolioTarget,
+    SetPositionTarget,
+    StrategyAction,
     SubmitOrder,
     TargetScope,
     WeightTarget,
 )
 from backtest_engine.types.decision import StrategyDecision
-from backtest_engine.types.events import OrderEvent
-from backtest_engine.types.instruments import InstrumentId
+from backtest_engine.types.events import OrderEvent, OrderStatus
+from backtest_engine.types.instruments import InstrumentId, Money
 from backtest_engine.types.market import MarketSnapshot
 from backtest_engine.types.orders import (
+    LimitOrderRequest,
     MarketOrderRequest,
     OrderCore,
+    OrderType,
     Side,
+    StopLimitOrderRequest,
     TimeInForce,
 )
 from backtest_engine.types.portfolio import PortfolioSnapshot, Position
+from backtest_engine.types.requirements import EngineFeature
 from tests.conftest import day, make_bar, make_instrument, make_snapshot
 
 INSTRUMENT = make_instrument()
 OTHER = make_instrument("000660")
 DECLARED = frozenset(
-    {ActionKind.NO_ACTION, ActionKind.SET_PORTFOLIO_TARGET, ActionKind.LIQUIDATE_POSITION}
+    {
+        ActionKind.NO_ACTION,
+        ActionKind.SET_PORTFOLIO_TARGET,
+        ActionKind.LIQUIDATE_POSITION,
+        ActionKind.SET_POSITION_TARGET,
+        ActionKind.ADJUST_POSITION,
+        ActionKind.SUBMIT_ORDER,
+        ActionKind.CANCEL_ORDER,
+        ActionKind.REPLACE_ORDER,
+    }
 )
+DECLARED_FEATURES = frozenset({EngineFeature.LIMIT_ORDER, EngineFeature.STOP_ORDER})
 
 
-def make_router(order_manager: OrderManager | None = None) -> DecisionRouter:
-    return DecisionRouter(DECLARED, order_manager or OrderManager())
+def make_router(
+    order_manager: OrderManager | None = None,
+    features: frozenset[EngineFeature] = DECLARED_FEATURES,
+) -> DecisionRouter:
+    return DecisionRouter(DECLARED, order_manager or OrderManager(), features)
+
+
+def krw(amount: float) -> Money:
+    return Money(Decimal(str(amount)), "KRW")
+
+
+def route_one(
+    action: StrategyAction, portfolio: PortfolioSnapshot, price: float = 100.0
+) -> tuple[OrderEvent, ...]:
+    decision = StrategyDecision.of(day(1), action)
+    return make_router().route(decision, "D-000001", portfolio, market(price)).orders
 
 
 def portfolio_with(
@@ -67,7 +105,10 @@ def portfolio_with(
     )
     equity = cash + sum(position.market_value for position in positions)
     return PortfolioSnapshot(
-        ts=day(1), cash=cash, positions=positions, equity=equity,
+        ts=day(1),
+        cash=cash,
+        positions=positions,
+        equity=equity,
         gross_exposure=sum(p.market_value for p in positions) / equity if equity else 0.0,
     )
 
@@ -94,14 +135,10 @@ def test_schema_version_mismatch_rejected() -> None:
 
 
 def test_undeclared_action_kind_rejected() -> None:
-    order = SubmitOrder(
-        request=MarketOrderRequest(
-            core=OrderCore(INSTRUMENT, Side.BUY, Decimal(1), TimeInForce.DAY)
-        )
-    )
-    decision = StrategyDecision.of(day(1), order)
-    with pytest.raises(UndeclaredActionReturned, match="submit_order"):
-        make_router().route(decision, "D-000001", portfolio_with(100_000), market())
+    decision = StrategyDecision.of(day(1), CancelOrder(order_id="O-000001"))
+    router = DecisionRouter(frozenset({ActionKind.NO_ACTION}), OrderManager())
+    with pytest.raises(UndeclaredActionReturned, match="cancel_order"):
+        router.route(decision, "D-000001", portfolio_with(100_000), market())
 
 
 def test_buy_quantity_floors_to_integer_shares() -> None:
@@ -153,9 +190,7 @@ def test_patch_scope_ignores_unlisted_positions() -> None:
 
 def test_negative_weight_requires_short_selling() -> None:
     with pytest.raises(UnsupportedActionValue, match="SHORT_SELLING"):
-        make_router().route(
-            weight_decision(-0.3), "D-000001", portfolio_with(100_000), market()
-        )
+        make_router().route(weight_decision(-0.3), "D-000001", portfolio_with(100_000), market())
 
 
 def test_non_market_style_rejected() -> None:
@@ -173,17 +208,140 @@ def test_non_market_style_rejected() -> None:
         make_router().route(decision, "D-000001", portfolio_with(100_000), market())
 
 
-def test_quantity_target_not_implemented_in_v1() -> None:
+def test_portfolio_target_accepts_quantity_and_notional_targets() -> None:
+    # QuantityTarget 10주 (flat → BUY 10), NotionalTarget 3,000원 @100 (flat → BUY 30)
     decision = StrategyDecision.of(
         day(1),
         SetPortfolioTarget(
-            targets=(QuantityTarget(INSTRUMENT, Decimal(10)),),
+            targets=(
+                QuantityTarget(INSTRUMENT, Decimal(10)),
+                NotionalTarget(OTHER, krw(3_000)),
+            ),
             scope=TargetScope.PATCH,
             execution=ExecutionPolicy.market_next_open(),
         ),
     )
-    with pytest.raises(UnsupportedActionValue, match="WeightTarget"):
-        make_router().route(decision, "D-000001", portfolio_with(100_000), market())
+    snapshot = make_snapshot(
+        day(1),
+        make_bar(day(1), INSTRUMENT, 100.0, 100.0),
+        make_bar(day(1), OTHER, 100.0, 100.0),
+    )
+    orders = make_router().route(decision, "D-000001", portfolio_with(100_000), snapshot).orders
+    assert [(o.instrument, o.side, o.quantity) for o in orders] == [
+        (INSTRUMENT, Side.BUY, Decimal(10)),
+        (OTHER, Side.BUY, Decimal(30)),
+    ]
+
+
+# --- 4a: SetPositionTarget / AdjustPosition ----------------------------------
+
+
+def position_target(target: QuantityTarget | NotionalTarget | WeightTarget) -> SetPositionTarget:
+    return SetPositionTarget(target=target, execution=ExecutionPolicy.market_next_open())
+
+
+def adjust(delta: QuantityDelta | NotionalDelta) -> AdjustPosition:
+    return AdjustPosition(
+        instrument=INSTRUMENT, delta=delta, execution=ExecutionPolicy.market_next_open()
+    )
+
+
+@pytest.mark.parametrize(
+    ("held", "target", "expected"),
+    [
+        (0, 10, (Side.BUY, 10)),
+        (10, 4, (Side.SELL, 6)),
+        (10, 10, None),
+    ],
+)
+def test_quantity_target_orders_difference_from_held(
+    held: int, target: int, expected: tuple[Side, int] | None
+) -> None:
+    portfolio = portfolio_with(100_000, {INSTRUMENT: (held, 100.0)} if held else None)
+    orders = route_one(position_target(QuantityTarget(INSTRUMENT, Decimal(target))), portfolio)
+    if expected is None:
+        assert orders == ()
+    else:
+        assert [(o.side, o.quantity) for o in orders] == [(expected[0], Decimal(expected[1]))]
+
+
+def test_notional_target_uses_session_close_as_reference() -> None:
+    # 5,000원 목표 @ 종가 100 → 50주; 보유 60주면 10주 매도
+    orders = route_one(
+        position_target(NotionalTarget(INSTRUMENT, krw(5_000))), portfolio_with(100_000)
+    )
+    assert [(o.side, o.quantity) for o in orders] == [(Side.BUY, Decimal(50))]
+    orders = route_one(
+        position_target(NotionalTarget(INSTRUMENT, krw(5_000))),
+        portfolio_with(0.0, {INSTRUMENT: (60, 100.0)}),
+    )
+    assert [(o.side, o.quantity) for o in orders] == [(Side.SELL, Decimal(10))]
+
+
+def test_weight_position_target_matches_portfolio_target() -> None:
+    # 50% of 100,000 @ 100 → 500주
+    orders = route_one(position_target(WeightTarget(INSTRUMENT, 0.5)), portfolio_with(100_000))
+    assert [(o.side, o.quantity) for o in orders] == [(Side.BUY, Decimal(500))]
+
+
+def test_quantity_delta_adjusts_relative_to_held() -> None:
+    orders = route_one(adjust(QuantityDelta(Decimal(10))), portfolio_with(100_000))
+    assert [(o.side, o.quantity) for o in orders] == [(Side.BUY, Decimal(10))]
+    orders = route_one(
+        adjust(QuantityDelta(Decimal(-4))), portfolio_with(0.0, {INSTRUMENT: (10, 100.0)})
+    )
+    assert [(o.side, o.quantity) for o in orders] == [(Side.SELL, Decimal(4))]
+
+
+def test_notional_delta_floors_to_shares() -> None:
+    # -450원 @ 100 → 4.5주 → 4주 매도
+    orders = route_one(
+        adjust(NotionalDelta(krw(-450))), portfolio_with(0.0, {INSTRUMENT: (10, 100.0)})
+    )
+    assert [(o.side, o.quantity) for o in orders] == [(Side.SELL, Decimal(4))]
+
+
+def test_zero_delta_is_noop() -> None:
+    assert route_one(adjust(QuantityDelta(Decimal(0))), portfolio_with(100_000)) == ()
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        position_target(QuantityTarget(INSTRUMENT, Decimal(-10))),
+        adjust(QuantityDelta(Decimal(-8))),
+        adjust(NotionalDelta(krw(-800))),
+        position_target(NotionalTarget(INSTRUMENT, krw(-100))),
+    ],
+)
+def test_explicit_quantity_below_zero_is_rejected_not_clamped(action: StrategyAction) -> None:
+    portfolio = portfolio_with(0.0, {INSTRUMENT: (5, 100.0)})
+    with pytest.raises(UnsupportedActionValue, match="SHORT_SELLING"):
+        route_one(action, portfolio)
+
+
+def test_fractional_quantity_rejected() -> None:
+    with pytest.raises(UnsupportedActionValue, match="integer"):
+        route_one(
+            position_target(QuantityTarget(INSTRUMENT, Decimal("1.5"))), portfolio_with(100_000)
+        )
+
+
+def test_notional_currency_must_match_instrument() -> None:
+    with pytest.raises(UnsupportedActionValue, match="currency"):
+        route_one(
+            position_target(NotionalTarget(INSTRUMENT, Money(Decimal(100), "USD"))),
+            portfolio_with(100_000),
+        )
+
+
+def test_position_target_execution_policy_validated() -> None:
+    action = SetPositionTarget(
+        target=QuantityTarget(INSTRUMENT, Decimal(1)),
+        execution=ExecutionPolicy(ExecutionStyle.VWAP, ExecutionTiming.NEXT_OPEN, TimeInForce.DAY),
+    )
+    with pytest.raises(UnsupportedActionValue, match="style"):
+        route_one(action, portfolio_with(100_000))
 
 
 def test_liquidation_sells_full_position_and_cancels_orders() -> None:
@@ -211,7 +369,10 @@ def test_liquidation_sells_full_position_and_cancels_orders() -> None:
     portfolio = portfolio_with(0.0, {INSTRUMENT: (8, 100.0)})
     result = make_router(order_manager).route(decision, "D-000001", portfolio, market())
 
-    assert result.cancelled == (stale_order,)
+    assert [(u.order_id, u.status) for u in result.updates] == [
+        (stale_order.order_id, OrderStatus.CANCELLED)
+    ]
+    assert "LiquidatePosition" in (result.updates[0].detail or "")
     assert order_manager.open_orders() == ()
     assert len(result.orders) == 1
     assert result.orders[0].side is Side.SELL
@@ -230,3 +391,186 @@ def test_liquidation_of_flat_position_is_noop() -> None:
     )
     result = make_router().route(decision, "D-000001", portfolio_with(50_000), market())
     assert result.orders == ()
+
+
+# --- 4b: SubmitOrder ---------------------------------------------------------
+
+
+def core(side: Side, quantity: int = 10, tif: TimeInForce = TimeInForce.DAY) -> OrderCore:
+    return OrderCore(INSTRUMENT, side, Decimal(quantity), tif)
+
+
+def test_submit_limit_order_maps_fields_onto_order_event() -> None:
+    action = SubmitOrder(
+        request=LimitOrderRequest(core=core(Side.BUY, tif=TimeInForce.GTC), limit_price=Decimal(95))
+    )
+    (order,) = route_one(action, portfolio_with(100_000))
+    assert order.order_type is OrderType.LIMIT
+    assert order.limit_price == Decimal(95)
+    assert order.stop_price is None
+    assert order.time_in_force is TimeInForce.GTC
+    assert (order.side, order.quantity) == (Side.BUY, Decimal(10))
+    assert order.source_action is action
+
+
+def test_submit_stop_limit_order_keeps_both_prices() -> None:
+    action = SubmitOrder(
+        request=StopLimitOrderRequest(
+            core=core(Side.SELL), stop_price=Decimal(92), limit_price=Decimal(91)
+        )
+    )
+    (order,) = route_one(action, portfolio_with(0.0, {INSTRUMENT: (10, 100.0)}))
+    assert order.order_type is OrderType.STOP_LIMIT
+    assert (order.stop_price, order.limit_price) == (Decimal(92), Decimal(91))
+
+
+def test_submit_market_order_needs_no_feature() -> None:
+    action = SubmitOrder(request=MarketOrderRequest(core=core(Side.BUY)))
+    decision = StrategyDecision.of(day(1), action)
+    router = make_router(features=frozenset())
+    (order,) = router.route(decision, "D-000001", portfolio_with(100_000), market()).orders
+    assert order.order_type is OrderType.MARKET
+
+
+def test_limit_order_requires_declared_feature() -> None:
+    action = SubmitOrder(request=LimitOrderRequest(core=core(Side.BUY), limit_price=Decimal(95)))
+    decision = StrategyDecision.of(day(1), action)
+    router = make_router(features=frozenset())
+    with pytest.raises(UndeclaredFeatureUsed, match="limit_order"):
+        router.route(decision, "D-000001", portfolio_with(100_000), market())
+
+
+def test_submit_sell_beyond_held_rejected() -> None:
+    action = SubmitOrder(request=MarketOrderRequest(core=core(Side.SELL, quantity=11)))
+    with pytest.raises(UnsupportedActionValue, match="SHORT_SELLING"):
+        route_one(action, portfolio_with(0.0, {INSTRUMENT: (10, 100.0)}))
+
+
+@pytest.mark.parametrize("tif", [TimeInForce.IOC, TimeInForce.FOK])
+def test_ioc_fok_require_partial_fill_feature(tif: TimeInForce) -> None:
+    action = SubmitOrder(request=MarketOrderRequest(core=core(Side.BUY, tif=tif)))
+    with pytest.raises(UndeclaredFeatureUsed, match="partial_fill"):
+        route_one(action, portfolio_with(100_000))
+    router = make_router(features=frozenset({EngineFeature.PARTIAL_FILL}))
+    decision = StrategyDecision.of(day(1), action)
+    (order,) = router.route(decision, "D-000001", portfolio_with(100_000), market()).orders
+    assert order.time_in_force is tif
+
+
+def test_max_participation_requires_partial_fill_feature() -> None:
+    policy = ExecutionPolicy(
+        ExecutionStyle.MARKET, ExecutionTiming.NEXT_OPEN, TimeInForce.DAY, max_participation=0.1
+    )
+    action = SetPositionTarget(target=QuantityTarget(INSTRUMENT, Decimal(1)), execution=policy)
+    with pytest.raises(UndeclaredFeatureUsed, match="partial_fill"):
+        route_one(action, portfolio_with(100_000))
+    router = make_router(features=frozenset({EngineFeature.PARTIAL_FILL}))
+    decision = StrategyDecision.of(day(1), action)
+    assert len(router.route(decision, "D-000001", portfolio_with(100_000), market()).orders) == 1
+
+
+@pytest.mark.parametrize("participation", [0.0, 1.5, -0.1])
+def test_out_of_range_participation_rejected(participation: float) -> None:
+    # 범위 검증은 ExecutionPolicy 생성 시점에 이미 걸린다 (라우터 검증은 방어용으로 남아 있다).
+    with pytest.raises(ValueError, match="max_participation"):
+        ExecutionPolicy(
+            ExecutionStyle.MARKET,
+            ExecutionTiming.NEXT_OPEN,
+            TimeInForce.DAY,
+            max_participation=participation,
+        )
+
+
+# --- 4c: CancelOrder / ReplaceOrder -------------------------------------------
+
+
+def placed_manager(quantity: int = 3) -> tuple[OrderManager, OrderEvent]:
+    order_manager = OrderManager()
+    order = OrderEvent(
+        order_id=order_manager.next_order_id(),
+        decision_id="D-000000",
+        ts=day(1),
+        instrument=INSTRUMENT,
+        quantity=Decimal(quantity),
+        side=Side.BUY,
+        source_action=weight_decision(0.5).actions[0],
+    )
+    order_manager.place(order)
+    return order_manager, order
+
+
+def test_cancel_order_removes_from_queue_and_records_update() -> None:
+    order_manager, order = placed_manager()
+    decision = StrategyDecision.of(day(1), CancelOrder(order_id=order.order_id))
+    result = make_router(order_manager).route(
+        decision, "D-000001", portfolio_with(100_000), market()
+    )
+    assert result.orders == ()
+    assert [(u.order_id, u.status, u.ts) for u in result.updates] == [
+        (order.order_id, OrderStatus.CANCELLED, day(1))
+    ]
+    assert "D-000001" in (result.updates[0].detail or "")
+    assert order_manager.open_orders() == ()
+
+
+def test_cancel_unknown_order_id_aborts_run() -> None:
+    decision = StrategyDecision.of(day(1), CancelOrder(order_id="O-999999"))
+    with pytest.raises(UnknownOrderId, match="O-999999"):
+        make_router().route(decision, "D-000001", portfolio_with(100_000), market())
+
+
+def test_replace_order_records_replaced_and_issues_new_order() -> None:
+    order_manager, old = placed_manager()
+    action = ReplaceOrder(
+        order_id=old.order_id,
+        replacement=LimitOrderRequest(
+            core=core(Side.BUY, quantity=5, tif=TimeInForce.GTC), limit_price=Decimal(95)
+        ),
+    )
+    decision = StrategyDecision.of(day(1), action)
+    result = make_router(order_manager).route(
+        decision, "D-000001", portfolio_with(100_000), market()
+    )
+    (new,) = result.orders
+    assert new.order_id == "O-000002"
+    assert (new.order_type, new.limit_price, new.quantity) == (
+        OrderType.LIMIT,
+        Decimal(95),
+        Decimal(5),
+    )
+    assert new.source_action is action
+    assert [(u.order_id, u.status) for u in result.updates] == [
+        (old.order_id, OrderStatus.REPLACED)
+    ]
+    assert "O-000002" in (result.updates[0].detail or "")
+    assert order_manager.open_orders() == ()  # 새 주문은 큐 경유로 등록되므로 아직 없음
+
+
+def test_replace_unknown_order_id_aborts_run() -> None:
+    action = ReplaceOrder(order_id="O-424242", replacement=MarketOrderRequest(core=core(Side.BUY)))
+    with pytest.raises(UnknownOrderId, match="O-424242"):
+        route_one(action, portfolio_with(100_000))
+
+
+def test_target_orders_carry_execution_policy_time_in_force() -> None:
+    """Zipline 대조에서 발견: GTC 정책 목표 주문이 DAY로 나가 참여율 캡 잔량이 이월되지 않았다."""
+    gtc = ExecutionPolicy(ExecutionStyle.MARKET, ExecutionTiming.NEXT_OPEN, TimeInForce.GTC)
+    target = SetPositionTarget(target=QuantityTarget(INSTRUMENT, Decimal(5)), execution=gtc)
+    (order,) = route_one(target, portfolio_with(100_000))
+    assert order.time_in_force is TimeInForce.GTC
+    liquidate = LiquidatePosition(
+        instrument=INSTRUMENT,
+        execution=gtc,
+        cancel_open_orders=False,
+        persistence=LiquidationPersistence.ONCE,
+    )
+    (order,) = route_one(liquidate, portfolio_with(0.0, {INSTRUMENT: (3, 100.0)}))
+    assert order.time_in_force is TimeInForce.GTC
+    (order,) = route_one(
+        SetPositionTarget(
+            target=QuantityTarget(INSTRUMENT, Decimal(5)),
+            execution=ExecutionPolicy.market_next_open(),
+        ),
+        portfolio_with(100_000),
+    )
+    assert order.time_in_force is TimeInForce.DAY

@@ -14,6 +14,13 @@ class Side(Enum):
     SELL = "sell"
 
 
+class OrderType(Enum):
+    MARKET = "market"
+    LIMIT = "limit"
+    STOP = "stop"
+    STOP_LIMIT = "stop_limit"
+
+
 class TimeInForce(Enum):
     DAY = "day"
     GTC = "gtc"

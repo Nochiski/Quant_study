@@ -14,7 +14,8 @@ import json
 import sys
 from pathlib import Path
 
-from backtest_engine.data.csv_loader import OhlcPolicy, load_bars_csv
+from backtest_engine.adapters.csv_bars import load_bars_csv
+from backtest_engine.ports.market_data import OhlcPolicy
 from zipline.utils.calendar_utils import get_calendar as zipline_get_calendar
 
 from quant_study.compare_report import ScenarioComparison, render_html, to_json_payload
@@ -44,6 +45,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--allocation", type=float, default=0.7)
     parser.add_argument("--capital-base", type=float, default=10_000_000.0)
     parser.add_argument("--fee-bps", type=float, default=15.0)
+    parser.add_argument("--volume-limit", type=float, default=0.025)
+    parser.add_argument("--price-impact", type=float, default=0.1)
     parser.add_argument("--rel-tol", type=float, default=1e-6)
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
     return parser.parse_args()
@@ -58,6 +61,8 @@ def main() -> int:
         allocation=args.allocation,
         capital_base_krw=args.capital_base,
         fee_bps=args.fee_bps,
+        volume_limit=args.volume_limit,
+        price_impact=args.price_impact,
     )
 
     loaded = load_bars_csv(
@@ -76,8 +81,7 @@ def main() -> int:
     # 두 엔진이 서로 다른 종가 시계열을 보게 된다. 같은 캘린더로 교집합만 공급한다.
     calendar = zipline_get_calendar("XKRX")
     session_dates = {
-        ts.date()
-        for ts in calendar.sessions_in_range(frame.index.min(), frame.index.max())
+        ts.date() for ts in calendar.sessions_in_range(frame.index.min(), frame.index.max())
     }
     csv_only = [ts for ts in frame.index if ts.date() not in session_dates]
     if csv_only:
@@ -88,7 +92,7 @@ def main() -> int:
     comparisons: list[ScenarioComparison] = []
     with ZIPLINE_RUN_LOCK:
         environ = prepare_web_bundle(args.ticker, frame)
-        for scenario in (CompareScenario.BUY_HOLD, CompareScenario.GOLDEN_CROSS):
+        for scenario in CompareScenario:
             engine_curve = run_engine_side(bars, scenario, params)
             zipline_curve = run_zipline_side(frame, scenario, params, WEB_BUNDLE, environ)
             report = diff_equity_curves(engine_curve, zipline_curve, rel_tol=args.rel_tol)
@@ -104,7 +108,7 @@ def main() -> int:
 
     params_dict: dict[str, object] = {
         "ticker": params.ticker,
-        "csv": str(args.csv.relative_to(REPO_ROOT)),
+        "csv": str(args.csv.resolve().relative_to(REPO_ROOT)),
         "sessions": len(bars),
         "csv_only_sessions_dropped": len(csv_only),
         "short_window_days": params.short_window_days,
@@ -112,6 +116,8 @@ def main() -> int:
         "allocation": params.allocation,
         "capital_base_krw": params.capital_base_krw,
         "fee_bps": params.fee_bps,
+        "volume_limit": params.volume_limit,
+        "price_impact": params.price_impact,
         "rel_tol": args.rel_tol,
         "clamped_rows": loaded.repaired_rows,
         "halt_rows_dropped": loaded.dropped_rows,
@@ -120,9 +126,10 @@ def main() -> int:
     json_path = args.out_dir / "compare_results.json"
     html_path = args.out_dir / "compare_report.html"
     json_path.write_text(
-        json.dumps(to_json_payload(comparisons, params_dict), ensure_ascii=False, indent=2)
+        json.dumps(to_json_payload(comparisons, params_dict), ensure_ascii=False, indent=2),
+        encoding="utf-8",
     )
-    html_path.write_text(render_html(comparisons, params_dict))
+    html_path.write_text(render_html(comparisons, params_dict), encoding="utf-8")
     print(f"saved JSON report: {json_path}")
     print(f"saved HTML report: {html_path}")
 

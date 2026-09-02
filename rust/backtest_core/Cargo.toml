@@ -1,0 +1,12 @@
+[package]
+name = "backtest_core"
+version = "0.1.0"
+edition = "2021"
+description = "backtest_engine의 결정론적 코어(체결 가격 규칙, 수량 변환, 포트폴리오 회계) — PyO3 확장"
+
+[lib]
+name = "backtest_core"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.23", features = ["extension-module"] }

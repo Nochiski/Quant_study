@@ -36,6 +36,7 @@ from backtest_engine.types.orders import (
     LimitOrderRequest,
     MarketOrderRequest,
     OrderCore,
+    OrderType,
     Side,
     StopLimitOrderRequest,
     TimeInForce,
@@ -160,6 +161,42 @@ def test_order_and_fill_round_trip() -> None:
     )
     assert order_event_from_dict(order_event_to_dict(order)) == order
     assert fill_event_from_dict(fill_event_to_dict(fill)) == fill
+
+
+def test_order_event_round_trip_keeps_order_type_and_prices() -> None:
+    order = OrderEvent(
+        order_id="O-000002",
+        decision_id="D-000001",
+        ts=day(17),
+        instrument=INSTRUMENT,
+        quantity=Decimal(10),
+        side=Side.SELL,
+        source_action=ALL_ACTIONS[1],
+        order_type=OrderType.STOP_LIMIT,
+        limit_price=Decimal("91.5"),
+        stop_price=Decimal(92),
+        time_in_force=TimeInForce.GTC,
+    )
+    assert order_event_from_dict(order_event_to_dict(order)) == order
+
+
+def test_order_event_without_type_fields_defaults_to_market_day() -> None:
+    order = OrderEvent(
+        order_id="O-000001",
+        decision_id="D-000001",
+        ts=day(17),
+        instrument=INSTRUMENT,
+        quantity=Decimal(10),
+        side=Side.BUY,
+        source_action=ALL_ACTIONS[1],
+    )
+    data = order_event_to_dict(order)
+    assert isinstance(data, dict)
+    for key in ("order_type", "limit_price", "stop_price", "time_in_force"):
+        data.pop(key)
+    restored = order_event_from_dict(data)
+    assert restored.order_type is OrderType.MARKET
+    assert restored.time_in_force is TimeInForce.DAY
 
 
 def test_unknown_action_tag_rejected() -> None:

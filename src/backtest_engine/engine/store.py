@@ -11,7 +11,14 @@ from datetime import datetime
 from enum import Enum
 
 from backtest_engine.types.decision import StrategyDecision
-from backtest_engine.types.events import FillEvent, OrderEvent, OrderUpdateEvent
+from backtest_engine.types.events import (
+    CorporateActionApplied,
+    CorporateActionEvent,
+    CostAccrued,
+    FillEvent,
+    OrderEvent,
+    OrderUpdateEvent,
+)
 from backtest_engine.types.market import MarketSnapshot
 from backtest_engine.types.portfolio import PortfolioSnapshot
 
@@ -23,6 +30,9 @@ class RecordKind(Enum):
     ORDER_UPDATE = "order_update"
     FILL = "fill"
     SNAPSHOT = "snapshot"
+    CORPORATE_ACTION = "corporate_action"  # 사건 도착 (적용 여부와 무관)
+    CORPORATE_ACTION_APPLIED = "corporate_action_applied"  # 포지션에 실제 적용된 기록
+    COST = "cost"  # 차입·이자 등 Fill 없는 현금 차감
 
 
 @dataclass(frozen=True)
@@ -34,7 +44,15 @@ class DecisionRecord:
 
 
 RecordPayload = (
-    MarketSnapshot | DecisionRecord | OrderEvent | OrderUpdateEvent | FillEvent | PortfolioSnapshot
+    MarketSnapshot
+    | DecisionRecord
+    | OrderEvent
+    | OrderUpdateEvent
+    | FillEvent
+    | PortfolioSnapshot
+    | CorporateActionEvent
+    | CorporateActionApplied
+    | CostAccrued
 )
 
 
@@ -80,3 +98,20 @@ class EventStore:
         return tuple(
             p for p in self._payloads(RecordKind.SNAPSHOT) if isinstance(p, PortfolioSnapshot)
         )
+
+    def corporate_actions(self) -> tuple[CorporateActionEvent, ...]:
+        return tuple(
+            p
+            for p in self._payloads(RecordKind.CORPORATE_ACTION)
+            if isinstance(p, CorporateActionEvent)
+        )
+
+    def corporate_actions_applied(self) -> tuple[CorporateActionApplied, ...]:
+        return tuple(
+            p
+            for p in self._payloads(RecordKind.CORPORATE_ACTION_APPLIED)
+            if isinstance(p, CorporateActionApplied)
+        )
+
+    def costs(self) -> tuple[CostAccrued, ...]:
+        return tuple(p for p in self._payloads(RecordKind.COST) if isinstance(p, CostAccrued))

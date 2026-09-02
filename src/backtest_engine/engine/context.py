@@ -12,7 +12,13 @@ from decimal import Decimal
 
 import numpy as np
 
-from backtest_engine.errors import InsufficientHistoryError, UndeclaredDataAccess
+from backtest_engine.errors import (
+    InsufficientHistoryError,
+    UndeclaredDataAccess,
+    UniverseNotProvided,
+)
+from backtest_engine.ports.universe import UniverseResult
+from backtest_engine.types.events import OpenOrderSnapshot
 from backtest_engine.types.instruments import InstrumentId
 from backtest_engine.types.market import MarketSnapshot, PriceField, PriceWindow
 from backtest_engine.types.portfolio import PortfolioSnapshot
@@ -28,12 +34,17 @@ class HistoryStore:
 
     def __init__(self) -> None:
         self._sessions: list[datetime] = []
-        self._values: dict[tuple[InstrumentId, PriceField], list[float]] = {}
+        # 종목별로 필드 시리즈를 묶는다 — 세션마다 종목 수 × 5번 튜플 해시를 피한다.
+        self._values: dict[InstrumentId, dict[PriceField, list[float]]] = {}
 
     def append(self, snapshot: MarketSnapshot) -> None:
         self._sessions.append(snapshot.ts)
         row_index = len(self._sessions) - 1
         for bar in snapshot.bars:
+            by_field = self._values.get(bar.instrument)
+            if by_field is None:
+                by_field = {price_field: [] for price_field in PriceField}
+                self._values[bar.instrument] = by_field
             for price_field, value in (
                 (PriceField.OPEN, bar.open),
                 (PriceField.HIGH, bar.high),
@@ -41,10 +52,11 @@ class HistoryStore:
                 (PriceField.CLOSE, bar.close),
                 (PriceField.VOLUME, float(bar.volume)),
             ):
-                series = self._values.setdefault((bar.instrument, price_field), [])
+                series = by_field[price_field]
                 # 이 종목이 빠졌던 세션은 결측(NaN)으로 채워 세션 축을 정렬한다.
-                while len(series) < row_index:
-                    series.append(float("nan"))
+                missing = row_index - len(series)
+                if missing > 0:
+                    series.extend([float("nan")] * missing)
                 series.append(value)
 
     @property
@@ -64,7 +76,8 @@ class HistoryStore:
         timestamps = tuple(self._sessions[index] for index in selected)
         matrix = np.full((len(selected), len(request.instruments)), np.nan, dtype=np.float64)
         for column, instrument in enumerate(request.instruments):
-            series = self._values.get((instrument, request.field), [])
+            by_field = self._values.get(instrument)
+            series = by_field[request.field] if by_field is not None else []
             for row, index in enumerate(selected):
                 if index < len(series):
                     matrix[row, column] = series[index]
@@ -82,6 +95,8 @@ class EngineStrategyContext:
     snapshot: PortfolioSnapshot
     history_store: HistoryStore
     declared: frozenset[HistoryRequest] = field(default_factory=frozenset)
+    open_orders_snapshot: tuple[OpenOrderSnapshot, ...] = ()
+    universe_source: UniverseResult | None = None  # None = 제공 안 됨; 조회 시점에 계산
 
     def history(self, request: HistoryRequest) -> PriceWindow:
         if request not in self.declared:
@@ -104,3 +119,16 @@ class EngineStrategyContext:
 
     def portfolio_value(self) -> float:
         return self.snapshot.equity
+
+    def universe(self) -> frozenset[InstrumentId]:
+        if self.universe_source is None:
+            raise UniverseNotProvided(
+                f"ctx.universe() requires BacktestEngine.run(..., universe=...) — now={self.now}"
+            )
+        # 호출한 전략만 비용을 낸다 (세션당 O(memberships)).
+        return self.universe_source.members(self.now.date())
+
+    def open_orders(self, instrument: InstrumentId | None = None) -> tuple[OpenOrderSnapshot, ...]:
+        if instrument is None:
+            return self.open_orders_snapshot
+        return tuple(o for o in self.open_orders_snapshot if o.instrument == instrument)

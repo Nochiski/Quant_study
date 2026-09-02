@@ -1,0 +1,12 @@
+[
+ {"key": {"corp_code": "00126380", "bsns_year": "2024", "reprt_code": "11011", "fs_div": "CFS",
+          "sj_div": "IS", "account_id": "ifrs-full_Revenue", "account_detail": "-", "ord": "23"},
+  "column": "thstrm_amount", "expect": "300870903000000.0000",
+  "measured_sql": "SELECT thstrm_amount FROM dart_fin_raw WHERE req_corp_code='00126380' AND req_bsns_year='2024' AND req_reprt_code='11011' AND req_fs_div='CFS' AND sj_div='IS' AND account_id='ifrs-full_Revenue' AND account_detail='-' AND ord='23'",
+  "measured_at": "2026-09-02", "note": "삼성전자 FY2024 연결 매출 300.9조 — SPEC §2-7 검산 기준값, rcept_no 20250311001085"},
+ {"key": {"corp_code": "00126380", "bsns_year": "2024", "reprt_code": "11011", "fs_div": "CFS",
+          "sj_div": "IS", "account_id": "ifrs-full_Revenue", "account_detail": "-", "ord": "23"},
+  "column": "available_date", "expect": "2025-03-11",
+  "measured_sql": "SELECT rcept_dt FROM dart_disclosure WHERE rcept_no='20250311001085' LIMIT 1",
+  "measured_at": "2026-09-02", "note": "참조표 stg_rcept_dt_map 경유 derived"}
+]

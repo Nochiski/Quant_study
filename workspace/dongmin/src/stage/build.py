@@ -1,9 +1,10 @@
-"""stage 빌더 — 스냅샷 원장 → duckdb 변환 → 연도 파티션 parquet → 게이트 → MANIFEST 교체.
+"""stage 빌더 — 스냅샷 원장 → duckdb 변환 → 파티션 parquet → 게이트 → MANIFEST 교체.
 
 한 테이블의 흐름 (§2·§3·§5):
-  ATTACH(스냅샷, READ_ONLY) → 원장 UNION 뷰 → 캐스팅·결측 판정·정규화 → 격리(reject)·접기(dedup)
+  ATTACH(스냅샷, READ_ONLY) → 원장 UNION 뷰 → 캐스팅·결측 판정·정규화·파생 → 격리·접기
   → tmp 에 parquet → 게이트 G0~G9 → 통과: v=<build_id> 이동 + MANIFEST.json 교체
                                    → 실패: tmp 폐기 + _failed/<build_id>.json
+파티션 클래스: date_axis·receipt_axis = `year=YYYY/` 하이브 디렉토리, whole = `part0.parquet` 하나.
 """
 from __future__ import annotations
 
@@ -123,8 +124,8 @@ def _load_norm_maps(con: duckdb.DuckDBPyConnection, rule: TableRule, src_view: s
                             [(v, normalize_text(v)) for v in vals])
 
 
-def _key_date(rule: TableRule) -> str:
-    return next(c.name for c in rule.columns if c.key and c.kind == KIND_DATE_YMD8)
+def _is_partitioned(rule: TableRule) -> bool:
+    return rule.partition_class != "whole"
 
 
 def _stage_sql(rule: TableRule, src_view: str, src_cols: list[str],
@@ -141,19 +142,37 @@ def _stage_sql(rule: TableRule, src_view: str, src_cols: list[str],
             sel.append(f"{_cast_expr(c, raw)} AS {_q(c.name)}")
         if c.nonempty_flag:
             sel.append(f"({raw} IS NOT NULL AND {raw} <> '') AS {_q(c.nonempty_flag)}")
+    for e in rule.extras:
+        sel.append(f"{e.sql} AS {_q(e.name)}")
     if rule.observed_src:
         obs = f"CAST(TRY_CAST(s.{_q(rule.observed_src)} AS TIMESTAMP) + INTERVAL 9 HOUR AS DATE)"
         obs_raw = f", s.{_q(rule.observed_src)} AS s_observed_raw"
         order_obs = ", s_observed_raw"
     else:
         obs, obs_raw, order_obs = "CAST(NULL AS DATE)", "", ""
-    payload = [c for c in src_cols if c not in rule.payload_exclude
-               and not c.startswith("req_") and c not in ("row_hash", "dup_seq")]
+    if rule.payload_columns is not None:
+        payload = list(rule.payload_columns)
+    else:
+        payload = [c for c in src_cols if c not in rule.payload_exclude
+                   and not c.startswith("req_") and c not in ("row_hash", "dup_seq")]
     payload_hash = ("hash(concat_ws(chr(31), "
                     + ", ".join(f"coalesce(s.{_q(c)}, '')" for c in payload) + "))")
-    key_date = _key_date(rule)
-    key_text = [c.name for c in rule.columns if c.key and c.kind != KIND_DATE_YMD8]
-    key_missing = " OR ".join(f"{_q(k)} IS NULL OR {_q(k)} = ''" for k in key_text) or "FALSE"
+    key_cols = rule.key_columns
+    key_null = " OR ".join(f"{_q(c.name)} IS NULL" for c in key_cols) or "FALSE"
+    key_missing = " OR ".join(f"{_q(c.name)} = ''" for c in key_cols
+                              if c.kind not in (KIND_NUMERIC, KIND_DATE_YMD8)) or "FALSE"
+    required_null = " OR ".join(f"{_q(c.name)} IS NULL" for c in rule.columns
+                                if c.required and not c.key) or "FALSE"
+    if _is_partitioned(rule):
+        if rule.partition_expr is None or rule.partition_src is None:
+            raise ValueError(f"partitioned table needs partition_expr/partition_src: {rule.name}")
+        part = rule.partition_expr.replace(rule.partition_src, "s." + _q(rule.partition_src))
+        part_sel = f", {part} AS year"
+        out_of_range = (f"WHEN TRY_CAST(year AS INTEGER) IS NULL "
+                        f"OR TRY_CAST(year AS INTEGER) NOT BETWEEN {year_lo} AND {year_hi} "
+                        f"THEN 'out_of_range'")
+    else:
+        part_sel, out_of_range = "", ""
     mk_cols = rule.numeric_or_date_columns
     mk_struct = ", ".join(f"{_q(c.name)} := {_q('mk__' + c.name)}" for c in mk_cols)
     fail_list = ", ".join(f"CASE WHEN {_q('mk__' + c.name)} = 'cast_failed' THEN ['{c.name}'] "
@@ -164,12 +183,10 @@ def _stage_sql(rule: TableRule, src_view: str, src_cols: list[str],
     # 원장 컬럼은 raw__ 접두사로 분리 — duckdb 식별자는 대소문자 무시(LIST_SHRS = list_shrs)
     raw_sel = ", ".join(f"s.{_q(c)} AS {_q('raw__' + c)}" for c in src_cols)
     nk = ", ".join(_q(k) for k in rule.natural_key)
-    part = rule.partition_expr.replace(rule.date_axis_src, "s." + _q(rule.date_axis_src))
     return f"""
 WITH cast_ AS (
   SELECT {raw_sel}, s._src, {", ".join(sel)},
-         {obs} AS observed_date,
-         {part} AS year,
+         {obs} AS observed_date{part_sel},
          {payload_hash} AS payload_hash{obs_raw}
   FROM {src_view} s {" ".join(joins)}
 ), mk AS (
@@ -178,9 +195,10 @@ WITH cast_ AS (
   SELECT m.*,
          flatten([{fail_list}]) AS _cast_fail_cols,
          struct_pack({mk_struct}) AS miss_kind,
-         CASE WHEN {_q(key_date)} IS NULL THEN 'key_cast_failed'
+         CASE WHEN {key_null} THEN 'key_cast_failed'
               WHEN {key_missing} THEN 'key_missing'
-              WHEN year({_q(key_date)}) NOT BETWEEN {year_lo} AND {year_hi} THEN 'out_of_range'
+              WHEN {required_null} THEN 'required_null'
+              {out_of_range}
          END AS reject_reason
   FROM mk m
 )
@@ -198,6 +216,7 @@ def _output_columns(rule: TableRule) -> list[str]:
             cols.append(c.name)
         if c.nonempty_flag:
             cols.append(c.nonempty_flag)
+    cols.extend(e.name for e in rule.extras)
     return cols
 
 
@@ -245,6 +264,33 @@ def _attach(con: duckdb.DuckDBPyConnection, rule: TableRule, snap: Snapshot,
     return attached
 
 
+def _current_build_glob(stage_root: Path, table: str) -> str:
+    """참조 stage 테이블의 현재 빌드 parquet glob. 없으면 빌드 순서 오류 — 예외."""
+    m = manifest.load(stage_root / table / "MANIFEST.json")
+    if m.current_build is None:
+        raise FileNotFoundError(f"lookup table has no committed build — build it first: {table} "
+                                f"(stage_root={stage_root})")
+    return str(stage_root / table / f"v={m.current_build}" / "**" / "*.parquet")
+
+
+def _available_sql(rule: TableRule, con: duckdb.DuckDBPyConnection,
+                   stage_root: Path) -> tuple[str, str]:
+    """(SELECT 절 조각, JOIN 절 조각). available_date·available_basis 두 컬럼을 낸다."""
+    a = rule.available
+    if a.kind == "column":
+        return f"{_q(str(a.column))} AS available_date, 'default' AS available_basis", ""
+    if a.kind == "lookup":
+        if not (a.table and a.local_key and a.lookup_key and a.lookup_value):
+            raise ValueError(f"incomplete lookup rule: table={rule.name} available={a}")
+        glob = _current_build_glob(stage_root, a.table)
+        con.execute(f"CREATE OR REPLACE TEMP VIEW lk AS SELECT {_q(a.lookup_key)} AS k, "
+                    f"{_q(a.lookup_value)} AS v FROM read_parquet('{glob}')")
+        sel = ("lk.v AS available_date, "
+               "CASE WHEN lk.v IS NULL THEN 'unknown' ELSE 'derived' END AS available_basis")
+        return sel, f"LEFT JOIN lk ON lk.k = a.{_q(a.local_key)}"
+    return "CAST(NULL AS DATE) AS available_date, CAST(NULL AS VARCHAR) AS available_basis", ""
+
+
 def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str | None = None,
                 extra_ledgers: dict[str, Path] | None = None, fixtures_path: Path | None = None,
                 baseline_path: Path | None = None, gate_thresholds: dict[str, float] | None = None,
@@ -263,7 +309,7 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
     thresholds = {**gates.DEFAULT_THRESHOLDS, **(gate_thresholds or {})}
     now_year = datetime.now(UTC).year
     year_lo, year_hi = gates.YEAR_RANGE_OBSERVED[0], now_year + gates.YEAR_RANGE_OBSERVED[1]
-    key_date = _key_date(rule)
+    partitioned = _is_partitioned(rule)
 
     con = duckdb.connect()
     try:
@@ -272,6 +318,7 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
         con.execute(f"SET threads = {int(threads)}")
         con.execute(f"SET temp_directory = '{spill}'")
         attached = _attach(con, rule, snap, extra_ledgers or {})
+        avail_sel, avail_join = _available_sql(rule, con, stage_root)   # 참조표 부재는 여기서 예외
         src_cols = _source_columns(con, rule.sources[0].db, rule.sources[0].table)
         union = " UNION ALL ".join(
             "SELECT " + ", ".join(f"CAST({_q(c)} AS VARCHAR) AS {_q(c)}" for c in src_cols)
@@ -280,13 +327,13 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
         _load_norm_maps(con, rule, "src_all")
         con.execute("CREATE OR REPLACE TEMP TABLE stage_all AS "
                     + _stage_sql(rule, "src_all", src_cols, year_lo, year_hi))
-        out_cols = ", ".join(_q(c) for c in _output_columns(rule))
+        out_cols = ", ".join(f"a.{_q(c)}" for c in _output_columns(rule))
+        year_sel = ", a.year" if partitioned else ""
         con.execute(f"""CREATE OR REPLACE TEMP VIEW stage_ok AS
-            SELECT {out_cols}, {_q(key_date)} AS available_date, 'default' AS available_basis,
-                   observed_date, observed_n, _src,
-                   CASE WHEN len(_cast_fail_cols) > 0 THEN 'partial' ELSE 'ok' END AS _src_flag,
-                   _cast_fail_cols, miss_kind, year
-            FROM stage_all WHERE rn = 1 AND reject_reason IS NULL""")
+            SELECT {out_cols}, {avail_sel}, a.observed_date, a.observed_n, a._src,
+                   CASE WHEN len(a._cast_fail_cols) > 0 THEN 'partial' ELSE 'ok' END AS _src_flag,
+                   a._cast_fail_cols, a.miss_kind{year_sel}
+            FROM stage_all a {avail_join} WHERE a.rn = 1 AND a.reject_reason IS NULL""")
         raw_cols = ", ".join(f"{_q('raw__' + c)} AS {_q(c)}" for c in src_cols)
         con.execute(f"""CREATE OR REPLACE TEMP VIEW stage_rej AS
             SELECT {raw_cols}, _src, 'G7' AS reject_gate, reject_reason
@@ -294,16 +341,25 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
         n_src = _count(con, "SELECT count(*) FROM src_all")
         n_reject = _count(con, "SELECT count(*) FROM stage_rej")
         n_dedup = _count(con, "SELECT count(*) FROM stage_all WHERE rn > 1")
+        lookup_miss = None
+        if rule.available.kind == "lookup":
+            lookup_miss = _count(con, "SELECT count(*) FROM stage_ok "
+                                      "WHERE available_basis = 'unknown'")
 
         nk = ", ".join(_q(k) for k in rule.natural_key)
-        con.execute(f"COPY (SELECT * FROM stage_ok ORDER BY {nk}) TO '{tmp_table}' "
-                    "(FORMAT PARQUET, PARTITION_BY (year), OVERWRITE_OR_IGNORE, "
-                    "FILENAME_PATTERN 'part')")
+        if partitioned:
+            con.execute(f"COPY (SELECT * FROM stage_ok ORDER BY {nk}) TO '{tmp_table}' "
+                        "(FORMAT PARQUET, PARTITION_BY (year), OVERWRITE_OR_IGNORE, "
+                        "FILENAME_PATTERN 'part')")
+            glob = str(tmp_table / "year=*" / "*.parquet")
+        else:
+            con.execute(f"COPY (SELECT * FROM stage_ok ORDER BY {nk}) "
+                        f"TO '{tmp_table / 'part0.parquet'}' (FORMAT PARQUET)")
+            glob = str(tmp_table / "*.parquet")
         if n_reject:
             (tmp_table / "_reject").mkdir()
             rej = tmp_table / "_reject" / "part.parquet"
             con.execute(f"COPY (SELECT * FROM stage_rej) TO '{rej}' (FORMAT PARQUET)")
-        glob = str(tmp_table / "year=*" / "*.parquet")
         con.execute(f"CREATE OR REPLACE TEMP VIEW stage_pq AS "
                     f"SELECT * FROM read_parquet('{glob}', hive_partitioning=true)")
         n_stage = _count(con, "SELECT count(*) FROM stage_pq")
@@ -321,7 +377,8 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
             con=con, rule=rule, src_view="src_all", stage_view="stage_pq", reject_view="stage_rej",
             n_src=n_src, n_dedup=n_dedup, n_reject=n_reject, n_stage=n_stage,
             thresholds=thresholds, fixtures=fixtures, baseline=baseline,
-            previous_g1=_previous_g1(table_root), cross_alias=cross_alias, current_year=now_year)
+            previous_g1=_previous_g1(table_root), cross_alias=cross_alias, current_year=now_year,
+            lookup_miss=lookup_miss)
         results = gates.run_all(ctx)
         gate_dicts = [g.as_dict() for g in results]
         failed = [g for g in results if g.status is gates.GateStatus.FAIL]
@@ -336,23 +393,28 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
                                n_src, n_dedup, n_reject, content_hash, results,
                                round(time.time() - t0, 1), None, report)
 
-        parts = con.execute("SELECT year, count(*) FROM stage_pq GROUP BY 1 ORDER BY 1").fetchall()
+        if partitioned:
+            parts = con.execute("SELECT year, count(*) FROM stage_pq GROUP BY 1 ORDER BY 1"
+                                ).fetchall()
+            part_dirs = [(f"year={y}", int(n), tmp_table / f"year={y}") for y, n in parts]
+        else:
+            part_dirs = [("", n_stage, tmp_table)]
         src_files = [snap.files[s.db] for s in rule.sources if s.db in snap.files]
         g7 = next(g for g in results if g.name == "G7")
         partitions: list[dict[str, object]] = []
-        for year, n in parts:
+        for label, n, pdir in part_dirs:
             meta: dict[str, object] = {
-                "table": rule.name, "build_id": bid, "partition": f"year={year}",
-                "n_rows": int(n), "n_src": n_src, "fanout": rule.fanout, "n_dedup": n_dedup,
+                "table": rule.name, "build_id": bid, "partition": label or "whole",
+                "n_rows": n, "n_src": n_src, "fanout": rule.fanout, "n_dedup": n_dedup,
                 "n_reject": n_reject, "n_out_of_range": g7.metrics.get("n_out_of_range"),
                 "src_bytes": sum(f.bytes for f in src_files),
                 "src_mtime": max((f.src_mtime for f in src_files), default=0.0),
                 "snapshot_id": snap.snapshot_id, "rules_version": RULES_VERSION,
                 "coverage_from": None, "version_loss_upstream": rule.write_mode != "append_only",
-                "observed_date_exempt": rule.observed_src is None, "rcept_map_miss": None,
+                "observed_date_exempt": rule.observed_src is None, "rcept_map_miss": lookup_miss,
                 "lag_known": rule.lag_known, "content_hash": content_hash, "gates": gate_dicts}
-            _write_json(tmp_table / f"year={year}" / "_meta.json", meta)
-            partitions.append({"path": f"v={bid}/year={year}", "n_rows": int(n)})
+            _write_json(pdir / "_meta.json", meta)
+            partitions.append({"path": f"v={bid}" + (f"/{label}" if label else ""), "n_rows": n})
     finally:
         con.close()
 

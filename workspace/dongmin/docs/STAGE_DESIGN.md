@@ -433,6 +433,21 @@ fin_raw 15.4M행 8키 GROUP BY 9초 · RSS 3.6GB → 6GB·3threads 성립. 풀 �
   ③ `ka20068` `irds = cntrcnt − rpy` 위반 수 ④ G2 임계 후보: listing 0.80% · shares **11.44%**(etc 3,316 등 비숫자) · dividend 0.037% · hyslr `'#######'` 9행 · credit `prdy_ctrt` 465행 · delisted_master(K1 후 재측정) ⑤ G7: delisted_master `mfnd_end_dt` 비-(19|20) 5행.
 - 후속 후보(카탈로그 밖): c1010001 `cTB24` 제공처별 목표가 표 · G4 로 못 세는 카운트 회귀(ETF 정지행 2)는 baseline.json · v3 `induty_code` 등 코드 컬럼 정규화 해제.
 
+**6단계 풀 빌드 (09-03 KST 00:46~) — 61테이블 서버 실측** (`scripts/run_stage_all.sh`, 스냅샷 `snap_20260902T154207Z` = 5 DB 17GB, VACUUM INTO 약 6분):
+- **1차 패스**: 61테이블 1,368초(23분), 산출 3.0GB. **53 ok / 8 gate_failed** → 원인 실측·수정(PR #28·#29) 후 재빌드 전부 ok.
+  ① 보조원장 6종 G6 — 같은 접수번호 안에 구분 컬럼이 같은 복수 행(capital 27·hyslr 13·audit 4·tesstk 4·dividend 2·shares 2). DART 응답 행에 위치 식별자가 없어 원장 PK `row_hash` 를 키에 넣었다.
+  부작용 실측: 원장 `row_hash` 는 내용 해시가 아니라 행마다 다르므로 동일 payload 행도 접히지 않는다(dividend 접힘 36,930 → 0, tesstk 31,928 → 0, audit 11,488 → 0) — 원장이 이미 행을 구분한 것이라 stage 는 그대로 싣는다(1:1).
+  ② `stg_analyst_summary` G2 — WISE 가 EPS 음수면 PER 을 `N/A` 로 표기(98 blob) → blank 계상. ③ `stg_fin_wise` G8 — 무효 종목 082640 의 `DATA: null` → 빈 blob. ④ 빌더 — 전 행 reject 시 read_parquet 크래시 → 빈 빌드.
+  ⑤ dividend·shares·hyslr 의 G2 는 baseline 임계 없이는 통과 불가(survey 예측대로 비숫자 실재) — baseline.json 이 먼저 있어야 한다.
+- **시간**: fin 657초(RSS 6.2GB) · credit 211초 · flow_kiwoom 107초 · price 63초 · listing 54초 · flow_split 42초 · fin_wise 27초 · disclosure 21초 · 나머지 52테이블 합 90초.
+- **접힘(payload 동일)**: rcept_dt_map 620 · disclosure 417(전 컬럼 투영 — 참조표의 620 과 다름) · credit 566,795 · flow_split 52,347 · holder_elestock 32,347·majorstock 21,999(v1∪v2 동일 행) · calls_kis 2,655 · capital 2,053(row_hash 키 이전). reject 는 61테이블 전부 0.
+- **G7 격리 셀**: capital 15 · delisted_master 5 · tsstk_dp 1 — 전부 임계 내, 행 reject 0.
+- **G8 blob 계상**: monthly 13,202 blob → 222,499행(라벨 접힘 1,732·불일치 0·항목명 미상 1,856) · annual/quarterly 1,614 blob(빈 2) → 11,270 / 11,284 · matrix 4,842 blob(빈 72) → 214,650 · analyst 1,613 blob(no_data 1·무의견 346·N/A 98) → 1,612 · fin_wise 3,228 blob(빈 2) → 445,294.
+- **G4 골든 픽스처 38개 전부 일치**: price 4 · fin 2 · monthly 3 · 키움 15 · KIS 14(unit_scale ×1e6·×1e3 검증).
+- **baseline.json 28지표**(`python -m stage.baseline`, 09-03): 가격 교차 close 1.0 · volume 0.99986(조인 7,537,984) · 정지행 125 / ETF 2 · PARVAL 비수치 73,615 · 음수 poss_stkcnt 3 · rmnd_stcn 2,691 · whol_loan_gvrt 539(−594.76~1120.92) · whol_stln_gvrt 1 · credit 중복 그룹 517,648 · disclosure 3,444,518행·중복 618·정정 577,072 · fin 15,375,024·비KRW 132,355·bsns_year 불일치 120·표준계정 미사용 2,741,192 · rcept 참조표 미스 0 · audit 의견 434종 · capital 연도 오타 7 · tsstk_dp 2106 1 · ★ doc_index 106,065(99,172 → 수집 진행) · ★ monthly blob 13,202 · ★ analyst blob 1,613. 임계 7(listing G2 1%·shares 12%·dividend 0.1%·hyslr 0.01%·credit 0.01%·delisted_master G2 5%·G7 1%).
+- **2차 패스(같은 스냅샷 재빌드)**: 61/61 ok, 1,348초. content_hash 1차(수정 후 재빌드 포함) 대비 **60/60 동일**, G5 Δ=0 61테이블 전부 pass, G9 baseline(close 1.0·volume 0.99986) pass. MANIFEST keep=3 GC 동작(fin·price 3판, 재빌드 테이블 2판). 산출 4.4GB(3판본 누적), 디스크 여유 297GB. **stage 층 구현 완료 — equity 인계는 `docs/STAGE_HANDOFF.md`.**
+- 후속(코드 밖): baseline `stg_shares.non_numeric_cells` 술어가 `'-'` 를 셌다(655,481) → `'-'` 제외로 정정(PR 이후 재측정) · doc_index 는 수집 종료 후 재고정 · 매 빌드 전 `python -m stage.baseline` 로 ★ 재측정 후 사람이 승인.
+
 ## 11. 결정 기록
 
 | # | 결정 | 일자 |

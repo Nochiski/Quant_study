@@ -32,7 +32,7 @@ def main(argv: list[str] | None = None) -> int:
         snap = snapshot.load_snapshot(a.snapshot_root / a.snapshot_id)
     else:
         dbs = {s.db for s in rule.sources} | ({rule.cross_check.db} if rule.cross_check else set())
-        raw = {db: a.raw_dir / f"{db}.db" for db in sorted(dbs)}
+        raw = {db: a.raw_dir / rules.LEDGER_FILES[db] for db in sorted(dbs)}
         print(f"snapshot: VACUUM INTO {sorted(dbs)} → {a.snapshot_root}", flush=True)
         snap = snapshot.make_snapshot(raw, a.snapshot_root)
     print(f"snapshot={snap.snapshot_id} " + " ".join(

@@ -8,6 +8,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 RULES_VERSION = "2.2.1"
+# db alias → 원장 파일명. survey/targets.py DBS 와 같아야 한다(테스트 대조). wise 만 다르다.
+LEDGER_FILES: dict[str, str] = {"krx": "krx.db", "kiwoom": "kiwoom.db", "kis": "kis.db",
+                                "dart": "dart.db", "wise": "wisereport.db"}
 PS_HEADROOM_DIGITS = 2   # survey 최대 자릿수 + 2 (성장 여유). 초과 = cast_failed → G2
 
 KIND_TEXT = "text"

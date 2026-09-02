@@ -212,3 +212,12 @@ def test_build_g8_fails_on_value_mismatch_between_endpoints(tmp_path: Path) -> N
     r = _build(s, tmp_path)
     assert r.status is build.BuildStatus.GATE_FAILED
     assert _gate(r, "G8").metrics["n_value_mismatch"] == 1
+
+
+def test_ledger_file_map_matches_survey_targets() -> None:
+    """stage 의 db alias→파일 매핑은 survey targets.DBS 와 같아야 한다 (SoT 드리프트 감지)."""
+    import os
+
+    from targets import DBS
+
+    assert {k: os.path.basename(v) for k, v in DBS.items()} == rules.LEDGER_FILES

@@ -196,7 +196,7 @@ def _stage_sql(rule: TableRule, src_view: str, src_cols: list[str],
                     + ", ".join(f"coalesce(s.{_q(c)}, '')" for c in payload) + "))")
     key_cols = rule.key_columns
     key_null = " OR ".join(f"{_q(c.name)} IS NULL" for c in key_cols) or "FALSE"
-    key_missing = " OR ".join(f"{_q(c.name)} = ''" for c in key_cols
+    key_missing = " OR ".join(f"{_q(c.name)} = ''" for c in key_cols if not c.blank_is_value
                               if c.kind == KIND_TEXT) or "FALSE"
     required_null = " OR ".join(f"{_q(c.name)} IS NULL" for c in rule.columns
                                 if c.required and not c.key) or "FALSE"
@@ -212,6 +212,10 @@ def _stage_sql(rule: TableRule, src_view: str, src_cols: list[str],
         part_sel, out_of_range = "", ""
     mk_cols = rule.castable_columns
     mk_struct = ", ".join(f"{_q(c.name)} := {_q('mk__' + c.name)}" for c in mk_cols)
+    # 캐스팅 대상 컬럼이 0개인 테이블(ws_coverage 등)은 빈 struct_pack() 이 duckdb 오류 —
+    # 스키마 통일을 위해 자리표시 필드 하나의 NULL STRUCT 를 낸다.
+    mk_expr = (f"struct_pack({mk_struct})" if mk_struct
+               else 'CAST(NULL AS STRUCT("_none" VARCHAR))')
     fail_list = ", ".join(f"CASE WHEN {_q('mk__' + c.name)} = 'cast_failed' THEN ['{c.name}'] "
                           f"ELSE []::VARCHAR[] END" for c in mk_cols)
     mk_sel = ", ".join(
@@ -231,7 +235,7 @@ WITH cast_ AS (
 ), flagged AS (
   SELECT m.*,
          flatten([{fail_list}]) AS _cast_fail_cols,
-         struct_pack({mk_struct}) AS miss_kind,
+         {mk_expr} AS miss_kind,
          CASE WHEN {key_null} THEN 'key_cast_failed'
               WHEN {key_missing} THEN 'key_missing'
               WHEN {required_null} THEN 'required_null'
@@ -315,7 +319,12 @@ def _available_sql(rule: TableRule, con: duckdb.DuckDBPyConnection,
     """(SELECT 절 조각, JOIN 절 조각). available_date·available_basis 두 컬럼을 낸다."""
     a = rule.available
     if a.kind == "column":
-        return f"{_q(str(a.column))} AS available_date, '{a.basis}' AS available_basis", ""
+        col = _q(str(a.column))
+        if a.fallback_column is None:
+            return f"{col} AS available_date, '{a.basis}' AS available_basis", ""
+        fb = _q(a.fallback_column)      # §6 v3 revision: collected_date NULL 행 → base_date/default
+        basis = f"CASE WHEN {col} IS NULL THEN 'default' ELSE '{a.basis}' END"
+        return f"COALESCE({col}, {fb}) AS available_date, {basis} AS available_basis", ""
     if a.kind == "lookup":
         if not (a.table and a.local_key and a.lookup_key and a.lookup_value):
             raise ValueError(f"incomplete lookup rule: table={rule.name} available={a}")

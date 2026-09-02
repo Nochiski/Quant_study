@@ -43,6 +43,7 @@ class ColumnRule:
     key: bool = False
     required: bool = False          # 키는 아니지만 NULL 이면 행이 무의미 → reject(required_null)
     nonempty_flag: str | None = None  # 빈값 여부 불린 컬럼 병기 (예: sect_available)
+    blank_is_value: bool = False    # 키의 '' 를 값으로 인정(key_missing 아님) — ws_call_log.pkey
 
     @property
     def decimal_type(self) -> str:
@@ -111,6 +112,7 @@ class AvailableRule:
     lookup_key: str | None = None   # kind=lookup: 참조 테이블 키 컬럼
     lookup_value: str | None = None  # kind=lookup: 참조 테이블 날짜 컬럼
     basis: str = "default"          # kind=column: default(내용일 대용) | measured(수집일 등 실재)
+    fallback_column: str | None = None   # kind=column: column 이 NULL 이면 이 컬럼 + basis default
 
 
 AVAILABLE_NONE = AvailableRule("none")

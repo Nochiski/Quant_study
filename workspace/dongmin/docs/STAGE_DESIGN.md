@@ -384,6 +384,22 @@ fin_raw 15.4M행 8키 GROUP BY 9초 · RSS 3.6GB → 6GB·3threads 성립. 풀 �
 - 구현 메모: duckdb 식별자는 대소문자 무시라 원장 `LIST_SHRS` 와 stage `list_shrs` 가 충돌 — 원장 컬럼은 `raw__` 접두로
   분리. 골든 픽스처는 `src/stage/fixtures/<table>.json` 으로 코드와 함께 산다(data/ 아님). 임계 기본값 G2 0 · G7 0.1% · G9 종가 1.0.
 
+**S1b·S2 완료 (09-02 21:03 KST) — `stg_rcept_dt_map` + `stg_fin` 서버 실측** (스냅샷 dart.db 7.07GB VACUUM INTO ≈ 80초):
+- `stg_rcept_dt_map`(whole, `v=<id>/part0.parquet` 31MB): disclosure 3,444,518행 → **3,443,898행, dedup 620** — 페이지 경계 중복
+  620행(=그룹 618)이 (rcept_no, rcept_dt) payload 투영에서 정확히 접혔다. `key_uniqueness_violations` 0(rcept_no 당 rcept_dt 충돌 0 실측 재확인),
+  G6 pass(append_only), 빌드 8초, 재현성 해시 동일.
+- `stg_fin`(receipt_axis 12파티션 2015~2026, 295MB/빌드): **15,375,024행 677초**(1차) / 908초(재빌드, 스필 경합), RSS 6.86GB,
+  **duckdb 스필 15~18GB**. dedup 0·reject 0·cast_failed 0. `rcept_map_miss` **0** → available_date 전건 `derived`(참조표 폴백 미발동).
+  실측 재현: bsns_year 불일치 **120** · 표준계정 미사용 **2,741,192** · 비KRW **132,355**(survey v2 와 일치, SPEC 127,903 은 08-27 치) ·
+  thstrm 빈값 867,749. G4 픽스처 2/2(삼성전자 FY2024 연결 매출 300,870,903,000,000.0000 · available_date 2025-03-11).
+  두 번째 빌드 G5 Δ=0 pass, 재현성 해시 `15375024:692f16acca50779a` 동일.
+- **성능 후속(§10 미결 추가)**: stg_fin 은 `stage_all` 임시 테이블이 원장 28컬럼(`raw__`)을 윈도우 함수까지 끌고 가 스필이 크다.
+  개선안 — raw 컬럼은 payload_hash 계산 후 reject 출력용 키만 남기거나, rn 계산을 (키, payload_hash) 투영으로 분리해 조인.
+  잔여 DART 28테이블은 소형이라 영향 없고, 풀 빌드 추정에는 fin 15분을 반영한다.
+- 빌더 일반화: `partition_class=whole`(단일 parquet + `_meta.json` 1개), `AvailableRule`(column/lookup/none — lookup 은 참조 stage
+  테이블의 MANIFEST current_build 를 읽고 미빌드면 즉시 예외), `ExtraColumn`(같은 행 categorize), `required`(비키 NULL = reject),
+  `payload_columns` 명시 투영, `key_unique`(G3 집계). reject 사유 어휘: `key_cast_failed` · `key_missing` · `required_null` · `out_of_range`.
+
 ## 11. 결정 기록
 
 | # | 결정 | 일자 |
@@ -400,7 +416,7 @@ fin_raw 15.4M행 8키 GROUP BY 9초 · RSS 3.6GB → 6GB·3threads 성립. 풀 �
 | **⑩** | **v2.2 최종 검수 반영** — `observed_src`·UTC 명시, G7 행 격리, survey v2 전수·어휘, 파티션 61 전수 선언, `baseline.json`, 카탈로그 보강(WISE target_price·min_max·단위값, SPEC 규칙 4건, stg_fin 키 예외, stg_credit=deal_date, ovr_shrts_qty_valid·격자·랙·크론 이관, rcept_no[:8] 폴백 폐기), 산출물 스키마·실패 처리·게이트 skip 판정, SPEC §7·§8 관계 | **09-02 검수** |
 | — | stage 1회 풀 빌드 → 증분은 별도 설계 · equity 는 stage 후 | 09-01 |
 
-**미결**: 컬럼별 (p,s) 최종값과 G2·G7 임계(survey v2 대기) · 수급·공매도의 실제 공표 시점(관행 D+1 —
+**미결**: 컬럼별 (p,s) 최종값과 G2·G7 임계(survey v2 완료 — rules 반영은 테이블별 착수 시) · stg_fin 빌드 스필 최적화(§10 S2) · 수급·공매도의 실제 공표 시점(관행 D+1 —
 프로브 실측은 일일 증분 트랙, 공개시점 대장에서). cF5003 어닝서프라이즈는 09-02 사용자 판단으로 제외.
 
 **크로스 대조 최종 실측 (09-02 재측정)**: 종가 KRX=키움 **7,537,984행** 100.0%(09-01 의 2,864,871 은 survey_cross 조인 수) · 거래량 99.9864% ·

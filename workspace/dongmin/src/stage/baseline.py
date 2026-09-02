@@ -41,8 +41,8 @@ _OHL_ZERO = "TDD_OPNPRC = '0' AND TRY_CAST(ACC_TRDVOL AS BIGINT) > 0"
 _SHARES_NUM = ("etc", "tesstk_co", "isu_stock_totqy", "redc", "now_to_isu_stock_totqy",
                "profit_incnr", "now_to_dcrs_stock_totqy", "istc_totqy", "distb_stock_co",
                "rdmstk_repy")   # dart_shares 실명 (survey v2)
-_SHARES_SQL = "SELECT " + " + ".join(
-    f"count(*) FILTER (WHERE {c} <> '' AND {c} IS NOT NULL AND "
+_SHARES_SQL = "SELECT " + " + ".join(    # 결측 마커('', '-')는 비숫자가 아니다 (§5)
+    f"count(*) FILTER (WHERE {c} IS NOT NULL AND {c} NOT IN ('', '-') AND "
     f"TRY_CAST(replace({c}, ',', '') AS DECIMAL(38,4)) IS NULL)" for c in _SHARES_NUM
 ) + " FROM dart.dart_shares"
 

@@ -1,0 +1,14 @@
+[
+ {"key": {"ticker": "005930", "date": "2018-05-03"}, "column": "close_krw", "expect": "2650000",
+  "measured_sql": "SELECT TDD_CLSPRC FROM krx_stk_bydd_trd WHERE ISU_CD='005930' AND BAS_DD='20180503'",
+  "measured_at": "2026-08-28", "note": "삼성전자 50:1 액면분할 전일 — 원주가 무수정 실증 (SPEC §2-1)"},
+ {"key": {"ticker": "005930", "date": "2018-05-04"}, "column": "close_krw", "expect": "51900",
+  "measured_sql": "SELECT TDD_CLSPRC FROM krx_stk_bydd_trd WHERE ISU_CD='005930' AND BAS_DD='20180504'",
+  "measured_at": "2026-08-28", "note": "분할 당일 — 소급 조정 없음"},
+ {"key": {"ticker": "004200", "date": "2016-03-10"}, "column": "close_krw", "expect": "9000",
+  "measured_sql": "SELECT TDD_CLSPRC FROM krx_stk_bydd_trd WHERE ISU_CD='004200' AND BAS_DD='20160310'",
+  "measured_at": "2026-08-28", "note": "고려개발 감자 기준가 — 무거래일 종가 보존 (SPEC §2-9)"},
+ {"key": {"ticker": "004200", "date": "2016-03-10"}, "column": "open_krw", "expect": "None",
+  "measured_sql": "SELECT TDD_OPNPRC FROM krx_stk_bydd_trd WHERE ISU_CD='004200' AND BAS_DD='20160310'",
+  "measured_at": "2026-08-28", "note": "O/H/L '0' → NULL (miss_kind=ledger_zero)"}
+]

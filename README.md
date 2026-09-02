@@ -1,5 +1,7 @@
 # Quant_study
 
+퀀트 스터디 저장소. 데이터 수집·가공부터 백테스팅까지 각자 실습하고, 쓸 만한 코드는 공용으로 올려 함께 쓴다.
+
 이벤트 드리븐 백테스트 엔진을 직접 만드는 학습 리포. 설계 아티팩트(`2026-08-17/`의
 학습 노트)에서 고정한 전략 I/O 계약을 루트의 `backtest_engine` 패키지로 구현한다.
 
@@ -18,6 +20,8 @@ scripts/           # 테스트 픽스처 재생성, 다종목 벤치마크 등 �
 tests/             # 골든(손계산)·계약·상태 전이·직렬화·단위 테스트
 tests/fixtures/    # KRX 원장 슬라이스 (종목 5개, 605KB) — 어댑터 스모크용
 2026-08-17/        # 설계 아티팩트와 Zipline 관찰용 앱 (기준 동작 비교용)
+workspace/         # 개인 작업 공간 workspace/<이름>/ — docs·src 추적, data/·logs/ 는 git 제외
+ops/               # 서버 운영 스크립트 (공용)
 ```
 
 ## 설계 아티팩트 요약
@@ -109,3 +113,30 @@ uv run python examples/run_krx_demo.py --core rust      # Rust 코어로 같은 
 엔진 회계는 Zipline과의 세션 단위 equity 대조로 검증됐다 — buy-hold, 골든크로스, 슬리피지
 (VolumeShare + 참여율 캡·GTC 이월), 공매도 buy-hold 네 시나리오 모두 최대 상대 오차 0
 (1,619세션, KRX 원장 슬라이스에서 생성한 CSV). 실행 방법과 리포트는 `tests/manual/README.md` 참고.
+
+## 데이터
+
+원장(KRX·키움·KIS·DART·WISE 수집분)은 카엘 서버가 정본이다. 저장소에는 데이터를 넣지 않는다.
+공유 방식은 `docs/superpowers/specs/2026-08-25-quant-ledger-sharing-design.md`, 수집·stage 설계는
+`workspace/dongmin/docs/` 참고.
+
+## 작업 규칙
+
+1. **남의 `workspace/` 폴더는 건드리지 않는다.** 개인 공간 안에서는 구조도 스타일도 자유. 이것만 지키면 충돌이 날 일이 없다.
+2. **공용 영역 변경은 상의하거나 PR 로.** `.gitignore`, `.claude/rules/`, `README.md`, `src/`, `ops/`, `pyproject.toml` 이 해당된다.
+3. **데이터 파일은 커밋하지 않는다.** 시세 CSV·parquet 등은 `.gitignore` 에서 막아 두었다. 저장소에는 **데이터를 만들어 내는 스크립트**를 넣고, 데이터는 각자 로컬에서 재현한다.
+4. **API 토큰·키는 절대 커밋하지 않는다.** `*_token.json`, `*.token` 은 `.gitignore` 에서 막아 두었다.
+
+데이터를 둘 곳이 필요하면 `workspace/<이름>/data/` 를 쓰면 된다 — `workspace/*/data/` 규칙으로 이미 git 에서 제외된다. 손으로 계산할 수 있는 소형 테스트 픽스처만 `tests/fixtures/` 아래 CSV·parquet 으로 예외 허용.
+
+## 코딩 규칙
+
+`.claude/rules/` 에 정리되어 있다.
+
+| 파일 | 범위 | 내용 |
+|---|---|---|
+| `code-style.md` | `**/*.py` | 기존 헬퍼 재사용, 기능/정리 커밋 분리, ruff·pyright 게이트, 네이밍 |
+| `python.md` | `**/*.py` | 성공/실패는 튜플 대신 Result 값 타입으로 |
+| `error-messages.md` | `**/*.py` | 예외·로그에 재현 가능한 컨텍스트 포함 |
+| `testing.md` | `tests/`, `scripts/` | 산출물 파일 존재/내용을 단언하는 테스트 금지 |
+| `pr-review.md` | 전체 | PR 본문 양식, 결함 보고 4요소 |

@@ -1,0 +1,230 @@
+{
+ "db": "wise",
+ "table": "ws_run_log",
+ "n_rows": 2,
+ "columns": {
+  "run_at": {
+   "n_rows": 2,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 2,
+   "max_int_digits": 4,
+   "max_scale": 0,
+   "max_len": 19,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9999-99-99A99:99:99": 2
+   }
+  },
+  "mode": {
+   "n_rows": 2,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 2,
+   "max_int_digits": 0,
+   "max_scale": 0,
+   "max_len": 5,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "AAAA": 1,
+    "AAAAA": 1
+   }
+  },
+  "n_stocks": {
+   "n_rows": 2,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 4,
+   "max_scale": 0,
+   "max_len": 4,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "99": 1,
+    "9999": 1
+   }
+  },
+  "n_req": {
+   "n_rows": 2,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 5,
+   "max_scale": 0,
+   "max_len": 5,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9999": 1,
+    "99999": 1
+   }
+  },
+  "n_ok": {
+   "n_rows": 2,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 5,
+   "max_scale": 0,
+   "max_len": 5,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9999": 1,
+    "99999": 1
+   }
+  },
+  "n_bad": {
+   "n_rows": 2,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 1,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 1,
+   "max_scale": 0,
+   "max_len": 1,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9": 2
+   }
+  },
+  "bad_summary": {
+   "n_rows": 2,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 2,
+   "max_int_digits": 0,
+   "max_scale": 0,
+   "max_len": 20,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "{\"AAAAAAA_AAAAA\": 9}": 1,
+    "{}": 1
+   }
+  }
+ },
+ "elapsed_s": 0.06,
+ "ps": {
+  "run_at": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 2,
+   "n_nonnum": 2
+  },
+  "mode": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 2,
+   "n_nonnum": 2
+  },
+  "n_stocks": {
+   "kind": "numeric",
+   "precision": 4,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 2,
+   "n_nonnum": 0
+  },
+  "n_req": {
+   "kind": "numeric",
+   "precision": 5,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 2,
+   "n_nonnum": 0
+  },
+  "n_ok": {
+   "kind": "numeric",
+   "precision": 5,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 2,
+   "n_nonnum": 0
+  },
+  "n_bad": {
+   "kind": "numeric",
+   "precision": 1,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 2,
+   "n_nonnum": 0
+  },
+  "bad_summary": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 2,
+   "n_nonnum": 2
+  }
+ },
+ "method": {
+  "scan": "full",
+  "cast": "none",
+  "engine": "duckdb sqlite_scanner"
+ }
+}

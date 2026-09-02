@@ -1,0 +1,239 @@
+{
+ "db": "wise",
+ "table": "ws_call_log",
+ "n_rows": 31442,
+ "columns": {
+  "ts": {
+   "n_rows": 31442,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 31442,
+   "max_int_digits": 4,
+   "max_scale": 0,
+   "max_len": 19,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9999-99-99A99:99:99": 31442
+   }
+  },
+  "cmp_cd": {
+   "n_rows": 31442,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 206,
+   "max_int_digits": 6,
+   "max_scale": 0,
+   "max_len": 6,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "999999": 31236,
+    "9999A9": 206
+   }
+  },
+  "ep": {
+   "n_rows": 31442,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 31442,
+   "max_int_digits": 0,
+   "max_scale": 0,
+   "max_len": 13,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "AA9999": 16528,
+    "A9999999_AAAA": 13300,
+    "A9999999": 1614
+   }
+  },
+  "pkey": {
+   "n_rows": 31442,
+   "n_null": 0,
+   "n_blank": 6844,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 11298,
+   "max_int_digits": 6,
+   "max_scale": 0,
+   "max_len": 9,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "999999": 13300,
+    "A9:999999": 4842,
+    "A": 3228,
+    "A9A": 3228
+   }
+  },
+  "status": {
+   "n_rows": 31442,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 31442,
+   "max_int_digits": 0,
+   "max_scale": 0,
+   "max_len": 17,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "AA": 31441,
+    "AAA/AAAAAAA_AAAAA": 1
+   }
+  },
+  "bytes": {
+   "n_rows": 31442,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 6,
+   "max_scale": 0,
+   "max_len": 6,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9999": 18706,
+    "999": 7817,
+    "99999": 3276,
+    "999999": 1562,
+    "99": 81
+   }
+  },
+  "ms": {
+   "n_rows": 31442,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 4,
+   "max_scale": 0,
+   "max_len": 4,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "99": 25533,
+    "9": 5572,
+    "999": 335,
+    "9999": 2
+   }
+  }
+ },
+ "elapsed_s": 0.49,
+ "ps": {
+  "ts": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 31442,
+   "n_nonnum": 31442
+  },
+  "cmp_cd": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 31442,
+   "n_nonnum": 206
+  },
+  "ep": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 31442,
+   "n_nonnum": 31442
+  },
+  "pkey": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 24598,
+   "n_nonnum": 11298
+  },
+  "status": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 31442,
+   "n_nonnum": 31442
+  },
+  "bytes": {
+   "kind": "numeric",
+   "precision": 6,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 31442,
+   "n_nonnum": 0
+  },
+  "ms": {
+   "kind": "numeric",
+   "precision": 4,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 31442,
+   "n_nonnum": 0
+  }
+ },
+ "method": {
+  "scan": "full",
+  "cast": "none",
+  "engine": "duckdb sqlite_scanner"
+ }
+}

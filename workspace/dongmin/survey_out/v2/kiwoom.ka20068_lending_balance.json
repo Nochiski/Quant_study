@@ -1,0 +1,321 @@
+{
+ "db": "kiwoom",
+ "table": "ka20068_lending_balance",
+ "n_rows": 6988296,
+ "columns": {
+  "ticker": {
+   "n_rows": 6988296,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 7831,
+   "max_int_digits": 6,
+   "max_scale": 0,
+   "max_len": 6,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "999999": 6980465,
+    "9999A9": 7831
+   }
+  },
+  "dt": {
+   "n_rows": 6988296,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 8,
+   "max_scale": 0,
+   "max_len": 8,
+   "n_ymd8": 6988296,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "99999999": 6988296
+   }
+  },
+  "dbrt_trde_cntrcnt": {
+   "n_rows": 6988296,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 4726803,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 10,
+   "max_scale": 0,
+   "max_len": 10,
+   "n_ymd8": 4,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9": 4776596,
+    "9999": 790631,
+    "99999": 719821,
+    "999": 352926,
+    "999999": 179319,
+    "99": 158924,
+    "9999999": 9985,
+    "99999999": 93
+   }
+  },
+  "dbrt_trde_rpy": {
+   "n_rows": 6988296,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 4723666,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 10,
+   "max_scale": 0,
+   "max_len": 10,
+   "n_ymd8": 3,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9": 4783901,
+    "9999": 778587,
+    "99999": 698743,
+    "999": 378267,
+    "999999": 172560,
+    "99": 166620,
+    "9999999": 9518,
+    "99999999": 99
+   }
+  },
+  "dbrt_trde_irds": {
+   "n_rows": 6988296,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 4319569,
+   "n_comma": 0,
+   "n_neg": 1338339,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 10,
+   "max_scale": 0,
+   "max_len": 11,
+   "n_ymd8": 1,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9": 4349247,
+    "9999": 480388,
+    "-9999": 463083,
+    "99999": 420784,
+    "-99999": 395458,
+    "-999": 240788,
+    "999": 206795,
+    "-99": 105701
+   }
+  },
+  "rmnd": {
+   "n_rows": 6988296,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 561395,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 10,
+   "max_scale": 0,
+   "max_len": 10,
+   "n_ymd8": 4134,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "999999": 2967040,
+    "99999": 1723189,
+    "9999999": 1145017,
+    "9": 562973,
+    "9999": 413526,
+    "99999999": 84378,
+    "999": 73595,
+    "99": 17321
+   }
+  },
+  "remn_amt": {
+   "n_rows": 6988296,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 573442,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 8,
+   "max_scale": 0,
+   "max_len": 8,
+   "n_ymd8": 46,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9999": 2263217,
+    "999": 2169476,
+    "99999": 892781,
+    "9": 692313,
+    "99": 600517,
+    "999999": 340458,
+    "9999999": 29005,
+    "99999999": 529
+   }
+  },
+  "src_api": {
+   "n_rows": 6988296,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 6988296,
+   "max_int_digits": 0,
+   "max_scale": 0,
+   "max_len": 7,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "AA99999": 6988296
+   }
+  },
+  "collected_at": {
+   "n_rows": 6988296,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 6988296,
+   "max_int_digits": 4,
+   "max_scale": 0,
+   "max_len": 19,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9999-99-99A99:99:99": 6988296
+   }
+  }
+ },
+ "elapsed_s": 41.35,
+ "ps": {
+  "ticker": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 6988296,
+   "n_nonnum": 7831
+  },
+  "dt": {
+   "kind": "date_yyyymmdd",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 6988296,
+   "n_nonnum": 0
+  },
+  "dbrt_trde_cntrcnt": {
+   "kind": "numeric",
+   "precision": 10,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 6988296,
+   "n_nonnum": 0
+  },
+  "dbrt_trde_rpy": {
+   "kind": "numeric",
+   "precision": 10,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 6988296,
+   "n_nonnum": 0
+  },
+  "dbrt_trde_irds": {
+   "kind": "numeric",
+   "precision": 10,
+   "scale": 0,
+   "has_sign": true,
+   "has_comma": false,
+   "n_present": 6988296,
+   "n_nonnum": 0
+  },
+  "rmnd": {
+   "kind": "numeric",
+   "precision": 10,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 6988296,
+   "n_nonnum": 0
+  },
+  "remn_amt": {
+   "kind": "numeric",
+   "precision": 8,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 6988296,
+   "n_nonnum": 0
+  },
+  "src_api": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 6988296,
+   "n_nonnum": 6988296
+  },
+  "collected_at": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 6988296,
+   "n_nonnum": 6988296
+  }
+ },
+ "method": {
+  "scan": "full",
+  "cast": "none",
+  "engine": "duckdb sqlite_scanner"
+ }
+}

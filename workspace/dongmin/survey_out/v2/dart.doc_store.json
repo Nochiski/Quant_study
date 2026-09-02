@@ -1,0 +1,236 @@
+{
+ "db": "dart",
+ "table": "doc_store",
+ "n_rows": 99172,
+ "columns": {
+  "rcept_no": {
+   "n_rows": 99172,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 14,
+   "max_scale": 0,
+   "max_len": 14,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "99999999999999": 99172
+   }
+  },
+  "bytes": {
+   "n_rows": 99172,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 7,
+   "max_scale": 0,
+   "max_len": 7,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "999999": 83463,
+    "99999": 13290,
+    "9999": 1679,
+    "999": 619,
+    "9999999": 121
+   }
+  },
+  "sha256": {
+   "n_rows": 99172,
+   "n_null": 0,
+   "n_blank": 619,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 98553,
+   "max_int_digits": 22,
+   "max_scale": 0,
+   "max_len": 64,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9999A9A9999999A999999A99": 4,
+    "A99999999999999999999999": 4,
+    "A9A9A9AA9999999A9999999A": 4,
+    "9999999999999999999999A9": 3,
+    "999999999999999999A99A99": 3,
+    "99999999999999A999999999": 3,
+    "9999999999999A999A999999": 3,
+    "9999999999A9A9999AA9A999": 3
+   }
+  },
+  "n_files": {
+   "n_rows": 99172,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 619,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 1,
+   "max_scale": 0,
+   "max_len": 1,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9": 99172
+   }
+  },
+  "zip_ok": {
+   "n_rows": 99172,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 619,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 1,
+   "max_scale": 0,
+   "max_len": 1,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9": 99172
+   }
+  },
+  "http_status": {
+   "n_rows": 99172,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 98553,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 3,
+   "max_scale": 0,
+   "max_len": 3,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "999": 99172
+   }
+  },
+  "fetched_at": {
+   "n_rows": 99172,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 99172,
+   "max_int_digits": 4,
+   "max_scale": 0,
+   "max_len": 19,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9999-99-99A99:99:99": 99172
+   }
+  }
+ },
+ "elapsed_s": 3.3,
+ "ps": {
+  "rcept_no": {
+   "kind": "numeric",
+   "precision": 14,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 99172,
+   "n_nonnum": 0
+  },
+  "bytes": {
+   "kind": "numeric",
+   "precision": 7,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 99172,
+   "n_nonnum": 0
+  },
+  "sha256": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 98553,
+   "n_nonnum": 98553
+  },
+  "n_files": {
+   "kind": "numeric",
+   "precision": 1,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 99172,
+   "n_nonnum": 0
+  },
+  "zip_ok": {
+   "kind": "numeric",
+   "precision": 1,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 99172,
+   "n_nonnum": 0
+  },
+  "http_status": {
+   "kind": "numeric",
+   "precision": 3,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 99172,
+   "n_nonnum": 0
+  },
+  "fetched_at": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 99172,
+   "n_nonnum": 99172
+  }
+ },
+ "method": {
+  "scan": "full",
+  "cast": "none",
+  "engine": "duckdb sqlite_scanner"
+ }
+}

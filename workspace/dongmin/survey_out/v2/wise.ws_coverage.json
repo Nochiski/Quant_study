@@ -1,0 +1,107 @@
+{
+ "db": "wise",
+ "table": "ws_coverage",
+ "n_rows": 2566,
+ "columns": {
+  "cmp_cd": {
+   "n_rows": 2566,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 19,
+   "max_int_digits": 6,
+   "max_scale": 0,
+   "max_len": 6,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "999999": 2547,
+    "9999A9": 19
+   }
+  },
+  "status": {
+   "n_rows": 2566,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 2566,
+   "max_int_digits": 0,
+   "max_scale": 0,
+   "max_len": 7,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "AAAA": 1762,
+    "AAAAAAA": 804
+   }
+  },
+  "checked_at": {
+   "n_rows": 2566,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 2566,
+   "max_int_digits": 4,
+   "max_scale": 0,
+   "max_len": 19,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9999-99-99A99:99:99": 2566
+   }
+  }
+ },
+ "elapsed_s": 0.04,
+ "ps": {
+  "cmp_cd": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 2566,
+   "n_nonnum": 19
+  },
+  "status": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 2566,
+   "n_nonnum": 2566
+  },
+  "checked_at": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 2566,
+   "n_nonnum": 2566
+  }
+ },
+ "method": {
+  "scan": "full",
+  "cast": "none",
+  "engine": "duckdb sqlite_scanner"
+ }
+}

@@ -1,0 +1,590 @@
+{
+ "db": "kiwoom",
+ "table": "ka10099_stock_master",
+ "n_rows": 8614,
+ "columns": {
+  "snap_date": {
+   "n_rows": 8614,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 8,
+   "max_scale": 0,
+   "max_len": 8,
+   "n_ymd8": 8614,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "99999999": 8614
+   }
+  },
+  "mrkt_tp": {
+   "n_rows": 8614,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 4968,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 2,
+   "max_scale": 0,
+   "max_len": 2,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9": 4968,
+    "99": 3646
+   }
+  },
+  "code": {
+   "n_rows": 8614,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 766,
+   "max_int_digits": 6,
+   "max_scale": 0,
+   "max_len": 6,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "999999": 7848,
+    "9999A9": 718,
+    "99999A": 46,
+    "9999AA": 2
+   }
+  },
+  "name": {
+   "n_rows": 8614,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 8614,
+   "max_int_digits": 1,
+   "max_scale": 0,
+   "max_len": 37,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "가가가가": 1354,
+    "가가가가가": 948,
+    "가가가가가가": 676,
+    "가가가": 652,
+    "가가": 386,
+    "가가가가가가가": 344,
+    "가가가가가가가가": 160,
+    "AA가가가가": 80
+   }
+  },
+  "listCount": {
+   "n_rows": 8614,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 16,
+   "max_scale": 0,
+   "max_len": 16,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9999999999999999": 8614
+   }
+  },
+  "auditInfo": {
+   "n_rows": 8614,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 8614,
+   "max_int_digits": 0,
+   "max_scale": 0,
+   "max_len": 8,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "가가": 8037,
+    "가가가가": 505,
+    "가가가가가가가가": 72
+   }
+  },
+  "regDay": {
+   "n_rows": 8614,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 8,
+   "max_scale": 0,
+   "max_len": 8,
+   "n_ymd8": 8614,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "99999999": 8614
+   }
+  },
+  "lastPrice": {
+   "n_rows": 8614,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 3,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 8,
+   "max_scale": 0,
+   "max_len": 8,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "99999999": 8614
+   }
+  },
+  "state": {
+   "n_rows": 8614,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 8614,
+   "max_int_digits": 0,
+   "max_scale": 0,
+   "max_len": 21,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "가가가999%": 4077,
+    "가가가99%|가가가가|가가가가": 3768,
+    "가가가가": 346,
+    "가가가99%": 303,
+    "가가가999%|가가가가": 81,
+    "가가가99%|가가가가": 37,
+    "가가가99%|가가가가|가가가가|가가가가": 2
+   }
+  },
+  "marketCode": {
+   "n_rows": 8614,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 1836,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 2,
+   "max_scale": 0,
+   "max_len": 2,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "99": 4392,
+    "9": 4222
+   }
+  },
+  "marketName": {
+   "n_rows": 8614,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 8614,
+   "max_int_digits": 0,
+   "max_scale": 0,
+   "max_len": 9,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "가가가": 5482,
+    "AAA": 3062,
+    "가가": 46,
+    "AAA(가가가)": 16,
+    "가가가가가가가": 4,
+    "AAA(가가가가)": 2,
+    "가가가가가": 2
+   }
+  },
+  "upName": {
+   "n_rows": 8614,
+   "n_null": 0,
+   "n_blank": 3154,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 5460,
+   "max_int_digits": 0,
+   "max_scale": 0,
+   "max_len": 7,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "가가": 2142,
+    "가가/가가": 1608,
+    "AA 가가가": 508,
+    "가가가가가": 356,
+    "가가가가/가가": 284,
+    "가가/가가가가": 216,
+    "가가가/가가": 190,
+    "가가가": 126
+   }
+  },
+  "upSizeName": {
+   "n_rows": 8614,
+   "n_null": 0,
+   "n_blank": 3482,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 5132,
+   "max_int_digits": 0,
+   "max_scale": 0,
+   "max_len": 3,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "가가가": 5132
+   }
+  },
+  "companyClassName": {
+   "n_rows": 8614,
+   "n_null": 0,
+   "n_blank": 5305,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 3309,
+   "max_int_digits": 0,
+   "max_scale": 0,
+   "max_len": 5,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "가가가가": 2669,
+    "가가가가가": 510,
+    "가가": 130
+   }
+  },
+  "orderWarning": {
+   "n_rows": 8614,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 8547,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 1,
+   "max_scale": 0,
+   "max_len": 1,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9": 8614
+   }
+  },
+  "nxtEnable": {
+   "n_rows": 8614,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 8614,
+   "max_int_digits": 0,
+   "max_scale": 0,
+   "max_len": 1,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "A": 8614
+   }
+  },
+  "kind": {
+   "n_rows": 8614,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 8614,
+   "max_int_digits": 0,
+   "max_scale": 0,
+   "max_len": 1,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "A": 8614
+   }
+  },
+  "collected_at": {
+   "n_rows": 8614,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 8614,
+   "max_int_digits": 4,
+   "max_scale": 0,
+   "max_len": 19,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9999-99-99A99:99:99": 8614
+   }
+  }
+ },
+ "elapsed_s": 0.57,
+ "ps": {
+  "snap_date": {
+   "kind": "date_yyyymmdd",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 8614,
+   "n_nonnum": 0
+  },
+  "mrkt_tp": {
+   "kind": "numeric",
+   "precision": 2,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 8614,
+   "n_nonnum": 0
+  },
+  "code": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 8614,
+   "n_nonnum": 766
+  },
+  "name": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 8614,
+   "n_nonnum": 8614
+  },
+  "listCount": {
+   "kind": "numeric",
+   "precision": 16,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 8614,
+   "n_nonnum": 0
+  },
+  "auditInfo": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 8614,
+   "n_nonnum": 8614
+  },
+  "regDay": {
+   "kind": "date_yyyymmdd",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 8614,
+   "n_nonnum": 0
+  },
+  "lastPrice": {
+   "kind": "numeric",
+   "precision": 8,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 8614,
+   "n_nonnum": 0
+  },
+  "state": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 8614,
+   "n_nonnum": 8614
+  },
+  "marketCode": {
+   "kind": "numeric",
+   "precision": 2,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 8614,
+   "n_nonnum": 0
+  },
+  "marketName": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 8614,
+   "n_nonnum": 8614
+  },
+  "upName": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 5460,
+   "n_nonnum": 5460
+  },
+  "upSizeName": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 5132,
+   "n_nonnum": 5132
+  },
+  "companyClassName": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 3309,
+   "n_nonnum": 3309
+  },
+  "orderWarning": {
+   "kind": "numeric",
+   "precision": 1,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 8614,
+   "n_nonnum": 0
+  },
+  "nxtEnable": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 8614,
+   "n_nonnum": 8614
+  },
+  "kind": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 8614,
+   "n_nonnum": 8614
+  },
+  "collected_at": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 8614,
+   "n_nonnum": 8614
+  }
+ },
+ "method": {
+  "scan": "full",
+  "cast": "none",
+  "engine": "duckdb sqlite_scanner"
+ }
+}

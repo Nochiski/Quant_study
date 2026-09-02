@@ -1,0 +1,438 @@
+{
+ "db": "dart",
+ "table": "dart_bnk_mngt_pcbg",
+ "n_rows": 15,
+ "columns": {
+  "row_hash": {
+   "n_rows": 15,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 15,
+   "max_int_digits": 11,
+   "max_scale": 0,
+   "max_len": 32,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "99999999999AA999A99AAAA9": 1,
+    "999999A99AA9AA9A999AA999": 1,
+    "999A999A9A999999AA999AA9": 1,
+    "999AA9A99999A999AAA99999": 1,
+    "999AA9A9A999A99AAAA9A999": 1,
+    "999AAA9A9A99AA99999A9999": 1,
+    "999AAAA99AAA99A9A99AA99A": 1,
+    "99AAAAAA9A99999999AA999A": 1
+   }
+  },
+  "cfd": {
+   "n_rows": 15,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 15,
+   "max_int_digits": 4,
+   "max_scale": 0,
+   "max_len": 13,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 15,
+   "patterns": {
+    "9999가 99가 99가": 15
+   }
+  },
+  "corp_cls": {
+   "n_rows": 15,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 15,
+   "max_int_digits": 0,
+   "max_scale": 0,
+   "max_len": 1,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "A": 15
+   }
+  },
+  "corp_code": {
+   "n_rows": 15,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 8,
+   "max_scale": 0,
+   "max_len": 8,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "99999999": 15
+   }
+  },
+  "corp_name": {
+   "n_rows": 15,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 15,
+   "max_int_digits": 0,
+   "max_scale": 0,
+   "max_len": 7,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "가가가": 5,
+    "가가가가": 4,
+    "AAA가가가": 1,
+    "AA가가": 1,
+    "AA가가가": 1,
+    "AA가가가가가": 1,
+    "가가": 1,
+    "가가가가가": 1
+   }
+  },
+  "mngt_int": {
+   "n_rows": 15,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 15,
+   "max_int_digits": 0,
+   "max_scale": 0,
+   "max_len": 38,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "가가가가가가": 2,
+    " ㈜가가가 가가가가가가가가\n(가가가가가 : ": 1,
+    "(가)가가가 가가가가가가가가\n(가 가가가가 ": 1,
+    "(가)가가가 가가가가가가가가\n(가가가가가: ": 1,
+    "(가)가가가가 가가가가가가가가\n(가가가가가 ": 1,
+    "(가)가가가가가 가가가가가가가가가\n(가가가가": 1,
+    "(가)가가가가가가 가가가가가가가가가 \n(가가": 1,
+    "㈜가가가 가가가가가가가가\n(가가가가가 : 가": 1
+   }
+  },
+  "mngt_pcbg_dd": {
+   "n_rows": 15,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 15,
+   "max_int_digits": 4,
+   "max_scale": 0,
+   "max_len": 13,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 15,
+   "patterns": {
+    "9999가 99가 99가": 15
+   }
+  },
+  "mngt_pd": {
+   "n_rows": 15,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 1,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 14,
+   "max_int_digits": 4,
+   "max_scale": 0,
+   "max_len": 29,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9999가 99가 99가 ~ 9999가 99": 10,
+    "-": 1,
+    "9999가 .9가 9.가 ~ 9~99가 99": 1,
+    "9999가 가 가 99가 ~  99가가  ~": 1,
+    "9999가 가 가 99가 ~  99가가 ~9": 1,
+    "9999가 가 가 9가가 ~ 99가 가 ~ ": 1
+   }
+  },
+  "mngt_rs": {
+   "n_rows": 15,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 15,
+   "max_int_digits": 0,
+   "max_scale": 0,
+   "max_len": 25,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "가가가가가": 7,
+    "가가가가 가가 가 가가가가가가 가가가 가가": 2,
+    "가가가 가가가가가가 가가가가 가가가가가가 가": 1,
+    "가가가가 가가 가 가가가가가": 1,
+    "가가가가 가가 가 가가가가가 가가가 가가": 1,
+    "가가가가가 가 가가가가가가": 1,
+    "가가가가가가 가가 가 가가가가가": 1,
+    "가가가가가가가 가가가 가가": 1
+   }
+  },
+  "rcept_no": {
+   "n_rows": 15,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 14,
+   "max_scale": 0,
+   "max_len": 14,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "99999999999999": 15
+   }
+  },
+  "req_corp_code": {
+   "n_rows": 15,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 8,
+   "max_scale": 0,
+   "max_len": 8,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "99999999": 15
+   }
+  },
+  "dup_seq": {
+   "n_rows": 15,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 15,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 1,
+   "max_scale": 0,
+   "max_len": 1,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9": 15
+   }
+  },
+  "collected_at": {
+   "n_rows": 15,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 15,
+   "max_int_digits": 4,
+   "max_scale": 0,
+   "max_len": 19,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9999-99-99A99:99:99": 15
+   }
+  }
+ },
+ "elapsed_s": 0.17,
+ "ps": {
+  "row_hash": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 15,
+   "n_nonnum": 15
+  },
+  "cfd": {
+   "kind": "date_korean",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 15,
+   "n_nonnum": 15
+  },
+  "corp_cls": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 15,
+   "n_nonnum": 15
+  },
+  "corp_code": {
+   "kind": "numeric",
+   "precision": 8,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 15,
+   "n_nonnum": 0
+  },
+  "corp_name": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 15,
+   "n_nonnum": 15
+  },
+  "mngt_int": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 15,
+   "n_nonnum": 15
+  },
+  "mngt_pcbg_dd": {
+   "kind": "date_korean",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 15,
+   "n_nonnum": 15
+  },
+  "mngt_pd": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 14,
+   "n_nonnum": 14
+  },
+  "mngt_rs": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 15,
+   "n_nonnum": 15
+  },
+  "rcept_no": {
+   "kind": "numeric",
+   "precision": 14,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 15,
+   "n_nonnum": 0
+  },
+  "req_corp_code": {
+   "kind": "numeric",
+   "precision": 8,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 15,
+   "n_nonnum": 0
+  },
+  "dup_seq": {
+   "kind": "numeric",
+   "precision": 1,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 15,
+   "n_nonnum": 0
+  },
+  "collected_at": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 15,
+   "n_nonnum": 15
+  }
+ },
+ "method": {
+  "scan": "full",
+  "cast": "none",
+  "engine": "duckdb sqlite_scanner"
+ }
+}

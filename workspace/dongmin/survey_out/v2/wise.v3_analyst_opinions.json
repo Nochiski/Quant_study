@@ -1,0 +1,276 @@
+{
+ "db": "wise",
+ "table": "v3_analyst_opinions",
+ "n_rows": 254925,
+ "columns": {
+  "stock_code": {
+   "n_rows": 254925,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 2010,
+   "max_int_digits": 6,
+   "max_scale": 0,
+   "max_len": 6,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "999999": 252915,
+    "9999A9": 2010
+   }
+  },
+  "snapshot_date": {
+   "n_rows": 254925,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 254925,
+   "max_int_digits": 4,
+   "max_scale": 0,
+   "max_len": 10,
+   "n_ymd8": 0,
+   "n_iso": 254925,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9999-99-99": 254925
+   }
+  },
+  "opinion_score": {
+   "n_rows": 254925,
+   "n_null": 200594,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 1,
+   "max_scale": 2,
+   "max_len": 4,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9.9": 47482,
+    "9.99": 6849
+   }
+  },
+  "target_price": {
+   "n_rows": 254925,
+   "n_null": 200755,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 7,
+   "max_scale": 0,
+   "max_len": 7,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "99999": 31513,
+    "999999": 16431,
+    "9999": 5076,
+    "9999999": 1107,
+    "999": 43
+   }
+  },
+  "estimated_eps": {
+   "n_rows": 254925,
+   "n_null": 191432,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 4798,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 6,
+   "max_scale": 0,
+   "max_len": 6,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9999": 32058,
+    "999": 16565,
+    "99999": 8774,
+    "-999": 2523,
+    "-9999": 1579,
+    "99": 810,
+    "-99": 638,
+    "999999": 347
+   }
+  },
+  "estimated_per": {
+   "n_rows": 254925,
+   "n_null": 196230,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 5,
+   "max_scale": 2,
+   "max_len": 8,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "99.99": 30474,
+    "9.99": 19937,
+    "99.9": 3368,
+    "9.9": 2272,
+    "999.99": 2200,
+    "999.9": 234,
+    "9999.99": 141,
+    "99999.99": 52
+   }
+  },
+  "analyst_count": {
+   "n_rows": 254925,
+   "n_null": 200594,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 2,
+   "max_scale": 0,
+   "max_len": 2,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9": 40012,
+    "99": 14319
+   }
+  },
+  "copied_at": {
+   "n_rows": 254925,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 254925,
+   "max_int_digits": 4,
+   "max_scale": 0,
+   "max_len": 19,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9999-99-99A99:99:99": 254925
+   }
+  }
+ },
+ "elapsed_s": 1.52,
+ "ps": {
+  "stock_code": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 254925,
+   "n_nonnum": 2010
+  },
+  "snapshot_date": {
+   "kind": "date_iso",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 254925,
+   "n_nonnum": 254925
+  },
+  "opinion_score": {
+   "kind": "numeric",
+   "precision": 3,
+   "scale": 2,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 54331,
+   "n_nonnum": 0
+  },
+  "target_price": {
+   "kind": "numeric",
+   "precision": 7,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 54170,
+   "n_nonnum": 0
+  },
+  "estimated_eps": {
+   "kind": "numeric",
+   "precision": 6,
+   "scale": 0,
+   "has_sign": true,
+   "has_comma": false,
+   "n_present": 63493,
+   "n_nonnum": 0
+  },
+  "estimated_per": {
+   "kind": "numeric",
+   "precision": 7,
+   "scale": 2,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 58695,
+   "n_nonnum": 0
+  },
+  "analyst_count": {
+   "kind": "numeric",
+   "precision": 2,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 54331,
+   "n_nonnum": 0
+  },
+  "copied_at": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 254925,
+   "n_nonnum": 254925
+  }
+ },
+ "method": {
+  "scan": "full",
+  "cast": "none",
+  "engine": "duckdb sqlite_scanner"
+ }
+}

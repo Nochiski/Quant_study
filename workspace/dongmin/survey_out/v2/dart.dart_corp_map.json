@@ -1,0 +1,113 @@
+{
+ "db": "dart",
+ "table": "dart_corp_map",
+ "n_rows": 3478,
+ "columns": {
+  "stock_code": {
+   "n_rows": 3478,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 54,
+   "max_int_digits": 6,
+   "max_scale": 0,
+   "max_len": 6,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "999999": 3424,
+    "9999A9": 54
+   }
+  },
+  "corp_code": {
+   "n_rows": 3478,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 8,
+   "max_scale": 0,
+   "max_len": 8,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "99999999": 3478
+   }
+  },
+  "corp_name": {
+   "n_rows": 3478,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 3478,
+   "max_int_digits": 1,
+   "max_scale": 0,
+   "max_len": 33,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "가가가가": 797,
+    "가가가가가": 571,
+    "가가가가가가": 428,
+    "가가가": 385,
+    "가가": 228,
+    "가가가가가가가": 221,
+    "가가가가가가가가": 107,
+    "가가가가가가가가가": 46
+   }
+  }
+ },
+ "elapsed_s": 0.06,
+ "ps": {
+  "stock_code": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 3478,
+   "n_nonnum": 54
+  },
+  "corp_code": {
+   "kind": "numeric",
+   "precision": 8,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 3478,
+   "n_nonnum": 0
+  },
+  "corp_name": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 3478,
+   "n_nonnum": 3478
+  }
+ },
+ "method": {
+  "scan": "full",
+  "cast": "none",
+  "engine": "duckdb sqlite_scanner"
+ }
+}

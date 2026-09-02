@@ -1,0 +1,22 @@
+[
+ {
+  "concept": "종가 (KRX vs 키움)",
+  "error": "OperationalError('no such table: src.ka10060_investor_flows')"
+ },
+ {
+  "concept": "종가 (KRX vs KIS신용)",
+  "error": "OperationalError('no such table: src.kis_credit_balance')"
+ },
+ {
+  "concept": "거래량 (KRX vs 키움'대금'컬럼)",
+  "error": "OperationalError('no such table: src.ka10060_investor_flows')"
+ },
+ {
+  "concept": "공매도 수량 (키움 vs KIS)",
+  "error": "OperationalError('no such table: src.ka10014_short_selling')"
+ },
+ {
+  "concept": "상장주식수 (KRX 08-20 vs 키움마스터 최신)",
+  "error": "OperationalError('no such column: bas_dd_req')"
+ }
+]

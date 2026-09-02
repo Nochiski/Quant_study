@@ -107,14 +107,26 @@ def _kw_token(force=False):
     return _kw_tok
 
 def kiwoom(api_id, url, body, cont=None, next_key=None):
-    """반환: (json, headers)"""
-    h = {"Content-Type":"application/json;charset=UTF-8",
-         "authorization": f"Bearer {_kw_token()}", "api-id": api_id}
-    if cont: h["cont-yn"] = cont
-    if next_key: h["next-key"] = next_key
-    r = requests.post(f"{KW_BASE}{url}", json=body, headers=h, timeout=30)
-    time.sleep(0.25)
-    return r.json(), r.headers
+    """반환: (json, headers)
+
+    8005(토큰 무효)는 캐시의 expires_dt 가 아직 남았어도 서버가 먼저 폐기하면 나온다
+    (2026-09-02 실측: 만료 9시간 전에 8005 — 마스터 스냅샷 0행). expires_dt 만
+    믿으면 그날 관측이 통째로 유실되므로, 이 코드만 강제 재발급 후 1회 재시도한다.
+    """
+    def _call():
+        h = {"Content-Type":"application/json;charset=UTF-8",
+             "authorization": f"Bearer {_kw_token()}", "api-id": api_id}
+        if cont: h["cont-yn"] = cont
+        if next_key: h["next-key"] = next_key
+        r = requests.post(f"{KW_BASE}{url}", json=body, headers=h, timeout=30)
+        time.sleep(0.25)
+        return r.json(), r.headers
+
+    j, hdr = _call()
+    if j.get("return_code") == 3 and "8005" in str(j.get("return_msg", "")):
+        _kw_token(force=True)
+        j, hdr = _call()
+    return j, hdr
 
 # ── DART (키당 일 20,000콜 공식 한도) ─────────────────────────────
 # 키는 순차 폴백으로 쓴다. 병렬로 쏘지 않는 이유는 한 키가 막혔을 때

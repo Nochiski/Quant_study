@@ -130,7 +130,12 @@ STAGES  = {1: ["company"],
            3: ["dividend", "shares", "capital", "tesstk", "hyslr", "audit",
                "elestock", "majorstock"],
            4: ["tsstkAqDecsn", "piicDecsn", "cvbdIsDecsn",
-               "ctrcvsBgrq", "dfOcr", "dsRsOcr", "bnkMngtPcbg"]}
+               "ctrcvsBgrq", "dfOcr", "dsRsOcr", "bnkMngtPcbg"],
+           # 5차: 조정계수 검증축 (2026-08-31 실측 — 13개 후보 전건 status 000/013 유효).
+           # KRX 일별 마스터(PARVAL·LIST_SHRS)가 잡는 변화의 "원인·조건"을 대는 층이다.
+           # 감자는 전후 주식수·기준일이 직접 오므로 가격 역산 없이 계수가 확정된다.
+           5: ["fricDecsn", "pifricDecsn", "crDecsn", "cmpMgDecsn",
+               "cmpDvDecsn", "cmpDvmgDecsn", "stkExtrDecsn", "tsstkDpDecsn"]}
 
 # 엔드포인트 스펙. key = 자연키 컬럼(응답 필드명), axis = 수집 축
 SPEC = {
@@ -175,6 +180,24 @@ SPEC = {
                       key=["rcept_no"]),   # E07 해산사유 발생 (영업정지는 bsnSp — 별건)
  "bnkMngtPcbg":  dict(ep="bnkMngtPcbg.json",               tbl="dart_bnk_mngt_pcbg",  axis="corp_range",
                       key=["rcept_no"]),   # E07 채권은행 관리절차 개시
+
+ # ── DS005 5차: 조정계수·희석 이벤트 (CA-01 대체 — KIS ksdinfo 불요) ──────
+ "fricDecsn":    dict(ep="fricDecsn.json",                 tbl="dart_fric_decsn",     axis="corp_range",
+                      key=["rcept_no"]),   # 무상증자 결정
+ "pifricDecsn":  dict(ep="pifricDecsn.json",               tbl="dart_pifric_decsn",   axis="corp_range",
+                      key=["rcept_no"]),   # 유무상증자 결정
+ "crDecsn":      dict(ep="crDecsn.json",                   tbl="dart_cr_decsn",       axis="corp_range",
+                      key=["rcept_no"]),   # 감자 결정 — 전후 주식수·기준일 직접 수신
+ "cmpMgDecsn":   dict(ep="cmpMgDecsn.json",                tbl="dart_cmp_mg_decsn",   axis="corp_range",
+                      key=["rcept_no"]),   # 회사합병 결정 (합병비율 mg_rt)
+ "cmpDvDecsn":   dict(ep="cmpDvDecsn.json",                tbl="dart_cmp_dv_decsn",   axis="corp_range",
+                      key=["rcept_no"]),   # 회사분할 결정 (CA-02 인적분할 대응관계)
+ "cmpDvmgDecsn": dict(ep="cmpDvmgDecsn.json",              tbl="dart_cmp_dvmg_decsn", axis="corp_range",
+                      key=["rcept_no"]),   # 분할합병 결정
+ "stkExtrDecsn": dict(ep="stkExtrDecsn.json",              tbl="dart_stk_extr_decsn", axis="corp_range",
+                      key=["rcept_no"]),   # 주식교환·이전 결정
+ "tsstkDpDecsn": dict(ep="tsstkDpDecsn.json",              tbl="dart_tsstk_dp_decsn", axis="corp_range",
+                      key=["rcept_no"]),   # 자기주식 처분 결정 (E05 취득의 짝)
 }
 
 # ── 예산 (롤링 24h) ────────────────────────────────────────────
@@ -515,7 +538,7 @@ def main():
     ap.add_argument("--years", default="", help="미지정 시 2015~올해")
     ap.add_argument("--stage", type=int, default=0,
                     help="1=기업개황 2=재무제표 3=정기보고서 나머지 8종 "
-                         "4=DS005 주요사항보고서 7종 (0=전부)")
+                         "4=DS005 주요사항보고서 7종 5=DS005 조정계수 8종 (0=전부)")
     ap.add_argument("--only",  default="", help="엔드포인트 이름 쉼표구분(stage 보다 우선)")
     ap.add_argument("--quota-window", default="rolling", choices=("rolling", "midnight"),
                     help="한도 창. rolling=24시간(보수적) · midnight=KST 자정 리셋 가정")
@@ -580,8 +603,11 @@ def main():
     # 기본 상한은 작년이다. 올해 사업연도 정기보고서는 아직 제출 시점이 오지 않아
     # 전건 013 이 오고, 그게 ingest_log 에 no_data 로 종결 기록되면 내년에 실제
     # 공시가 올라와도 다시 부르지 않는다(DEFECT-B02 경로).
+    # range 끝값은 배타적이다 — +1 이 없으면 올해가 통째로 빠진다.
+    # 실측(2026-08-30): dart_fin_raw 의 bsns_year=2026 이 0행이었다. 2026 1분기(5월 접수)·
+    # 반기(8월 접수)가 존재하는데 요청 자체가 나가지 않았다.
     years = ([y.strip() for y in a.years.split(",") if y.strip()] if a.years
-             else [str(y) for y in range(2015, datetime.utcnow().year)])
+             else [str(y) for y in range(2015, datetime.utcnow().year + 1)])
 
     if a.only:
         # strip() 없이 매칭하면 "a, b" 의 뒤쪽이 조용히 탈락한다.

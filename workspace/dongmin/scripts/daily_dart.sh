@@ -1,5 +1,5 @@
 #!/bin/bash
-# 매일 KST 00:30 데일리 재기동 — DART 잔여 백필(stage 2 꼬리 → 3 → 스윕 → 4)을 완주할 때까지.
+# 매일 KST 00:01 데일리 재기동 — DART 잔여 백필(stage 2 꼬리 → 3 → 4 → 스윕)을 완주할 때까지.
 #   · 전날 프로세스를 안전 종료 후 새로 시작한다: budget_used 는 콜 로그 파생이라 자정에
 #     자동 리셋되지만, 프로세스 안의 blocked(접은 키 집합)는 재기동으로만 비워진다 (검토 C-D1)
 #   · 각 단계는 예산 소진·완료 시 스스로 종료. 전부 끝난 날은 전 단계가 즉시 무동작 통과
@@ -34,9 +34,9 @@ run "stage 2 잔여" .venv/bin/python src/backfill_dart.py --corps data/corps.tx
                    --reprt 11012,11013,11014 --years "$Y2" --quota-window midnight
 run "stage 3"      .venv/bin/python src/backfill_dart.py --corps data/corps.txt --stage 3 \
                    --quota-window midnight
-run "공시 스윕"     .venv/bin/python src/sweep_disclosure.py --quota-window midnight
 run "stage 4"      .venv/bin/python src/backfill_dart.py --corps data/corps.txt --stage 4 \
                    --quota-window midnight
+run "공시 스윕"     .venv/bin/python src/sweep_disclosure.py --quota-window midnight
 
 echo "──── 키별 소진 (KST 오늘) ────"
 timeout 90 sqlite3 "file:data/raw/dart.db?mode=ro" \

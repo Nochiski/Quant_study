@@ -38,11 +38,13 @@ class ColumnRule:
     sign: str = "keep"          # abs | strip_plus | keep (§5 부호 정책)
     unit_scale: int | None = None   # 단위 스케일 (백만원 ×1_000_000 → _krw). 캐스트 전 곱
     expected_len: int | None = None
-    zero_is_missing: bool = False   # 원문 문자열 '0' → NULL + miss_kind=ledger_zero (KRX O/H/L)
+    zero_is_missing: bool = False   # 원문 '0'·'0.00'·'00000000' → NULL + ledger_zero (KRX OHL·KIS)
     normalize_text: bool = False    # §5 문자열 정규화 — 식별자·조인 키에는 금지
+    strip_tags: bool = False        # 정규화 뒤 <…> 제거 — WISE 라벨만. DART '<주1>' 은 각주
     key: bool = False
     required: bool = False          # 키는 아니지만 NULL 이면 행이 무의미 → reject(required_null)
     nonempty_flag: str | None = None  # 빈값 여부 불린 컬럼 병기 (예: sect_available)
+    blank_is_value: bool = False    # 키의 '' 를 값으로 인정(key_missing 아님) — ws_call_log.pkey
 
     @property
     def decimal_type(self) -> str:
@@ -111,6 +113,7 @@ class AvailableRule:
     lookup_key: str | None = None   # kind=lookup: 참조 테이블 키 컬럼
     lookup_value: str | None = None  # kind=lookup: 참조 테이블 날짜 컬럼
     basis: str = "default"          # kind=column: default(내용일 대용) | measured(수집일 등 실재)
+    fallback_column: str | None = None   # kind=column: column 이 NULL 이면 이 컬럼 + basis default
 
 
 AVAILABLE_NONE = AvailableRule("none")
@@ -137,6 +140,8 @@ class TableRule:
     invariants: tuple[Invariant, ...] = ()
     cross_check: CrossCheck | None = None
     blob_source: BlobSource | None = None
+    coverage_from: str | None = None    # §3 temporality ⓑ — 누적 스냅샷 관측 시작일 (ka10099 09-01)
+    versioned: bool = True              # False = 판본 없는 로그(콜·유닛) → G6 skip(unversioned)
 
     def column(self, name: str) -> ColumnRule:
         for c in self.columns:

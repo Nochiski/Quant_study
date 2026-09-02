@@ -118,3 +118,50 @@ def test_zero_marker_matches_decimal_and_all_zero_date_literals(tmp_path: Path) 
     assert got[0] == ("a", None, "ledger_zero", None, "ledger_zero")
     assert (got[1][1], got[1][2], str(got[1][3])) == (None, "ledger_zero", "2020-01-01")
     assert (str(got[2][1]), got[2][2], got[2][4]) == ("0.50", None, "ledger_dash")
+
+
+def _log_rule(versioned: bool) -> model.TableRule:
+    return model.TableRule(
+        name="stg_probe_log",
+        sources=(model.SourceRef("x", "lg", "lg"),),
+        columns=(model.ColumnRule("ep", "endpoint", model.KIND_TEXT, key=True),
+                 model.ColumnRule("st", "status", model.KIND_TEXT),
+                 model.ColumnRule("d", "req_date", model.KIND_DATE_YMD8, key=True)),
+        natural_key=("endpoint", "req_date"),
+        partition_class="whole", partition_expr=None, partition_src=None,
+        observed_src="ts", write_mode="append_only", fanout=1, payload_exclude=("ts",),
+        lag_known=False, available=model.AVAILABLE_NONE, versioned=versioned,
+    )
+
+
+def _log_snap(tmp_path: Path) -> snapshot.Snapshot:
+    d = tmp_path / "raw"
+    d.mkdir()
+    con = sqlite3.connect(d / "x.db")
+    con.execute("CREATE TABLE lg (ep TEXT, st TEXT, d TEXT, ts TEXT)")
+    con.executemany("INSERT INTO lg VALUES (?,?,?,?)", [
+        ("list", "ok", "19990403", "2026-08-30T10:00:00"),      # 1999 관측일 — DART 최초 공시 연도
+        ("list", "empty", "19990403", "2026-08-30T10:00:05"),   # 같은 키·같은 관측일, 다른 payload
+    ])
+    con.commit()
+    con.close()
+    return snapshot.make_snapshot({"x": d / "x.db"}, tmp_path / "snapshots", snapshot_id="s")
+
+
+def test_unversioned_log_table_skips_g6_and_keeps_both_rows(tmp_path: Path) -> None:
+    """콜/유닛 로그는 판본 개념이 없다 — 같은 키가 하루에 여러 번 정상 (DART 리뷰 D2)."""
+    r = build.build_table(_log_rule(versioned=False), _log_snap(tmp_path), tmp_path / "stage")
+    assert r.ok, [g for g in r.gates if g.status is gates.GateStatus.FAIL]
+    assert r.n_rows == 2 and r.n_reject == 0
+    g6 = next(g for g in r.gates if g.name == "G6")
+    assert g6.status is gates.GateStatus.SKIP and g6.detail == "unversioned"
+
+
+def test_versioned_append_only_table_still_fails_g6_on_same_day_duplicates(tmp_path: Path) -> None:
+    r = build.build_table(_log_rule(versioned=True), _log_snap(tmp_path), tmp_path / "stage")
+    assert r.status is build.BuildStatus.GATE_FAILED
+    assert next(g for g in r.gates if g.name == "G6").status is gates.GateStatus.FAIL
+
+
+def test_observed_year_floor_admits_1999_dart_receipts() -> None:
+    assert gates.YEAR_RANGE_OBSERVED[0] == 1999          # 19990403000009 실재 (DART 리뷰 D4)

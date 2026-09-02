@@ -328,6 +328,7 @@ STG_CALLS_WISE = TableRule(
     payload_exclude=(),
     lag_known=False,
     available=AVAILABLE_NONE,
+    versioned=False,                     # 콜 로그 — 같은 키가 하루 여러 번, G6 skip
 )
 
 TABLES: tuple[TableRule, ...] = (

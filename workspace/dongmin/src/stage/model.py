@@ -141,6 +141,7 @@ class TableRule:
     cross_check: CrossCheck | None = None
     blob_source: BlobSource | None = None
     coverage_from: str | None = None    # §3 temporality ⓑ — 누적 스냅샷 관측 시작일 (ka10099 09-01)
+    versioned: bool = True              # False = 판본 없는 로그(콜·유닛) → G6 skip(unversioned)
 
     def column(self, name: str) -> ColumnRule:
         for c in self.columns:

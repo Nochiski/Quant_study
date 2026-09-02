@@ -95,7 +95,7 @@ def _failed(r: build.BuildResult) -> list[str]:
 @pytest.mark.parametrize("name", EVENT_NAMES)
 def test_every_event_table_shares_the_ds005_skeleton(name: str) -> None:
     rule = rules.RULES[name]
-    assert rule.natural_key == ("rcept_no",) and rule.key_unique is True
+    assert rule.natural_key == ("rcept_no",) and rule.key_unique is False   # append_only → G6 축
     assert rule.partition_class == "receipt_axis"
     assert rule.partition_expr == "substr(rcept_no, 1, 4)" and rule.partition_src == "rcept_no"
     assert rule.observed_src == "collected_at" and rule.write_mode == "append_only"
@@ -258,12 +258,13 @@ def test_cr_invariant_flags_a_reduction_that_increases_shares(tmp_path: Path) ->
     assert _gate(r, "G3").metrics["cr_shares_increase_violations"] == 1
 
 
-def test_duplicate_rcept_no_with_different_payload_fails_key_uniqueness(tmp_path: Path) -> None:
-    """재수집으로 corp_name 등이 바뀌면 같은 rcept_no 가 두 행이 되어 G3 가 테이블을 폐기한다."""
+def test_duplicate_rcept_no_with_different_payload_is_kept_as_a_version(tmp_path: Path) -> None:
+    """재수집으로 corp_name 등이 바뀌면 같은 rcept_no 가 두 판본 — §7 전 행 보존, G6 축은 통과."""
     rule = rules.RULES["stg_event_ds_rs_ocr"]
     rows = [_row(rule, R_OLD, ds_rs="해산사유 발생"),
             _row(rule, R_OLD, collected="2026-09-02T02:10:00", corp_name="삼성전자(정정)")]
     r = _build(rule, _snap(tmp_path, "ds", rule, rows), tmp_path)
-    assert r.status is build.BuildStatus.GATE_FAILED
-    assert _gate(r, "G3").metrics["key_uniqueness_violations"] == 1
+    assert r.ok, _failed(r)
+    assert r.n_rows == 2 and r.n_dedup == 0
+    assert _gate(r, "G3").status is gates.GateStatus.PASS   # key_unique 는 append_only 에 안 건다
     assert _gate(r, "G6").status is gates.GateStatus.PASS   # 관측일이 달라 판본 보존은 통과

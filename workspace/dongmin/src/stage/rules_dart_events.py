@@ -91,7 +91,7 @@ def _event(name: str, table: str, tag: str, columns: tuple[ColumnRule, ...],
         payload_exclude=_PAYLOAD_EXCLUDE,
         lag_known=False,             # 공개일은 참조표 유도(derived) — 랙 판단은 엔진 (§6)
         available=_AVAILABLE,
-        key_unique=True,             # rcept_no 중복 0 — census 실측 (10/10 엔드포인트)
+        key_unique=False,            # append_only: 재수집 판본은 G6 의 (키, observed_date) 축 (§7)
         invariants=invariants,
     )
 

@@ -301,9 +301,13 @@ def _available_sql(rule: TableRule, con: duckdb.DuckDBPyConnection,
     return "CAST(NULL AS DATE) AS available_date, CAST(NULL AS VARCHAR) AS available_basis", ""
 
 
-def _load_blob_source(con: duckdb.DuckDBPyConnection, rule: TableRule
+def _load_blob_source(con: duckdb.DuckDBPyConnection, rule: TableRule, tmp_dir: Path
                       ) -> tuple[list[str], dict[str, object]]:
-    """blob 원장을 파이썬 파서로 언네스트해 `src_all` 임시 테이블(전 컬럼 VARCHAR)로 올린다."""
+    """blob 원장을 파이썬 파서로 언네스트해 `src_all` 임시 테이블(전 컬럼 VARCHAR)로 올린다.
+
+    적재는 JSON Lines 파일 → `read_json` 한 번. duckdb executemany 는 행마다 statement 를 돌려
+    34만 행에 수십 분이 걸렸다(S3 서버 실측). JSON null 이 그대로 NULL 이라 ''/NULL 구분도 보존된다.
+    """
     bs = rule.blob_source
     if bs is None:
         raise ValueError(f"_load_blob_source called without blob_source: {rule.name}")
@@ -315,11 +319,14 @@ def _load_blob_source(con: duckdb.DuckDBPyConnection, rule: TableRule
                              bytes(r[4]) if r[4] is not None else b"", str(r[5])) for r in rows]
     res = parser(blobs)
     cols = list(res.columns)
-    con.execute(f"CREATE OR REPLACE TEMP TABLE src_all "
-                f"({', '.join(_q(c) + ' VARCHAR' for c in cols)}, _src VARCHAR)")
-    if res.rows:
-        con.executemany(f"INSERT INTO src_all VALUES ({', '.join('?' * (len(cols) + 1))})",
-                        [tuple(r[c] for c in cols) + (bs.table,) for r in res.rows])
+    jsonl = tmp_dir / "src_all.jsonl"
+    with open(jsonl, "w", encoding="utf-8") as f:
+        for r in res.rows:
+            f.write(json.dumps({c: r[c] for c in cols}, ensure_ascii=False))
+            f.write("\n")
+    schema = ", ".join(f"{_q(c)}: 'VARCHAR'" for c in cols)
+    con.execute(f"CREATE OR REPLACE TEMP TABLE src_all AS SELECT *, '{bs.table}' AS _src "
+                f"FROM read_json('{jsonl}', format='newline_delimited', columns={{{schema}}})")
     return cols, res.metrics
 
 
@@ -353,7 +360,7 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
         avail_sel, avail_join = _available_sql(rule, con, stage_root)   # 참조표 부재는 여기서 예외
         parse_metrics: dict[str, object] | None = None
         if rule.blob_source is not None:
-            src_cols, parse_metrics = _load_blob_source(con, rule)
+            src_cols, parse_metrics = _load_blob_source(con, rule, tmp_root)
         else:
             src_cols = _source_columns(con, rule.sources[0].db, rule.sources[0].table)
             union = " UNION ALL ".join(

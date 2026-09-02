@@ -53,7 +53,7 @@
 | DART | `stg_disclosure` | 3,444,101 | 3,444,518 | 417 | rm 8플래그 · `is_correction`(577,072) · `has_ticker` · 페이지 중복 417 접힘 |
 | DART | `stg_company` | 3,478 | 3,478 | 0 | `_current` 전부 · `est_dt` TEXT(1956 이전 설립 실재) · available 비부여 |
 | DART | `stg_corp_map` | 3,478 | 3,478 | 0 | 참조표 · observed_date 면제 |
-| DART | `stg_doc_index` | 106,065 | 106,065 | 0 | ZIP 메타 · ★ 수집 진행(106,065) |
+| DART | `stg_doc_index` | 174,309 | 174,309 | 0 | ZIP 메타 · 수집 종료(09-03 07:34 KST) · zip_ok=false 3,130 |
 | DART | `stg_calls_dart` | 555,294 | 555,294 | 0 | unversioned 로그 · 요청축 빈값 비키 |
 | DART | `stg_units_dart` | 346,342 | 346,342 | 0 | unversioned 로그 |
 | DS005 | `stg_event_bnk_mngt_pcbg` | 15 | 15 | 0 | DS005 · 키 rcept_no · 한글 날짜 · available=참조표 |
@@ -84,7 +84,7 @@
 | WISE | `stg_wise_coverage` | 2,566 | 2,566 | 0 | 종목당 1행 `status_current` · 이력 아님 |
 | WISE | `stg_calls_wise` | 31,442 | 31,442 | 0 | unversioned 로그 · `pkey=''` 키 인정 |
 
-합계 61테이블 · stage 84,296,127행 / 원장 84,973,307행(접힘 677,180) · reject 0 · 1차 패스 23분 · 같은 스냅샷 재빌드 content_hash 60/60 동일(G5 Δ=0). 게이트 판정은 각 테이블 `MANIFEST.json` 의 `builds[].gates`.
+합계 61테이블 · stage 84,364,371행 / 원장 85,041,551행(접힘 677,180 — doc_index 재빌드 반영) · reject 0 · 1차 패스 23분 · 같은 스냅샷 재빌드 content_hash 60/60 동일(G5 Δ=0). 게이트 판정은 각 테이블 `MANIFEST.json` 의 `builds[].gates`.
 
 
 ## 4. equity 가 판단해야 하는 것 (stage 는 안 한다)

@@ -21,7 +21,7 @@ from pathlib import Path
 import duckdb
 
 from . import gates, manifest, parsers
-from .rules import (
+from .model import (
     DATE_FORMATS,
     KIND_BOOL,
     KIND_NUMERIC,
@@ -97,6 +97,8 @@ def _cast_expr(c: ColumnRule, raw: str) -> str:
         return f"TRY_CAST({raw} AS BOOLEAN)"
     if c.kind == KIND_NUMERIC:
         num = _signed(f"replace({raw}, ',', '')", c.sign)
+        if c.unit_scale is not None:     # 캐스트 전에 곱한다 (§1 허용 변환 '단위 스케일')
+            num = f"(TRY_CAST({num} AS DECIMAL(38,{c.scale})) * {c.unit_scale})"
         val = f"TRY_CAST({num} AS {c.decimal_type})"
         if c.zero_is_missing:
             return f"CASE WHEN {raw} = '0' THEN NULL ELSE {val} END"
@@ -106,8 +108,11 @@ def _cast_expr(c: ColumnRule, raw: str) -> str:
 
 def _miss_kind_expr(c: ColumnRule, raw: str, staged: str) -> str:
     zero = f"WHEN {raw} = '0' THEN 'ledger_zero' " if c.zero_is_missing else ""
+    # 비키 날짜: 캐스트됐지만 범위 밖이라 NULL 이 된 셀 = out_of_range (G7 행 격리형)
+    oor = (f"WHEN {_cast_expr(c, raw)} IS NOT NULL AND {staged} IS NULL THEN 'out_of_range' "
+           if c.kind in DATE_FORMATS and not c.key else "")
     return (f"CASE WHEN {raw} IS NULL THEN 'ledger_null' WHEN {raw} = '' THEN 'ledger_blank' "
-            f"WHEN {raw} = '-' THEN 'ledger_dash' {zero}"
+            f"WHEN {raw} = '-' THEN 'ledger_dash' {zero}{oor}"
             f"WHEN {staged} IS NULL THEN 'cast_failed' END")
 
 
@@ -139,7 +144,7 @@ def _is_partitioned(rule: TableRule) -> bool:
 
 
 def _stage_sql(rule: TableRule, src_view: str, src_cols: list[str],
-               year_lo: int, year_hi: int) -> str:
+               year_lo: int, year_hi: int, content_lo: int, content_hi: int) -> str:
     sel: list[str] = []
     joins: list[str] = []
     for c in rule.columns:
@@ -148,6 +153,11 @@ def _stage_sql(rule: TableRule, src_view: str, src_cols: list[str],
             alias = f"nm_{c.src}"
             joins.append(f"LEFT JOIN {_q('norm__' + c.src)} {alias} ON {alias}.raw = {raw}")
             sel.append(f"coalesce({alias}.norm, {raw}) AS {_q(c.name)}")
+        elif c.kind in DATE_FORMATS and not c.key:
+            # 내용일 축 범위 [1990, 현재+40] 밖은 NULL 로 격리 (행은 유지 — G7 행 격리형)
+            x = _cast_expr(c, raw)
+            sel.append(f"CASE WHEN year({x}) BETWEEN {content_lo} AND {content_hi} THEN {x} END "
+                       f"AS {_q(c.name)}")
         else:
             sel.append(f"{_cast_expr(c, raw)} AS {_q(c.name)}")
         if c.nonempty_flag:
@@ -348,6 +358,7 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
     thresholds = {**gates.DEFAULT_THRESHOLDS, **(gate_thresholds or {})}
     now_year = datetime.now(UTC).year
     year_lo, year_hi = gates.YEAR_RANGE_OBSERVED[0], now_year + gates.YEAR_RANGE_OBSERVED[1]
+    content_lo, content_hi = gates.YEAR_RANGE_CONTENT[0], now_year + gates.YEAR_RANGE_CONTENT[1]
     partitioned = _is_partitioned(rule)
 
     con = duckdb.connect()
@@ -369,7 +380,8 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
             con.execute(f"CREATE OR REPLACE TEMP VIEW src_all AS {union}")
         _load_norm_maps(con, rule, "src_all")
         con.execute("CREATE OR REPLACE TEMP TABLE stage_all AS "
-                    + _stage_sql(rule, "src_all", src_cols, year_lo, year_hi))
+                    + _stage_sql(rule, "src_all", src_cols, year_lo, year_hi,
+                                 content_lo, content_hi))
         out_cols = ", ".join(f"a.{_q(c)}" for c in _output_columns(rule))
         year_sel = ", a.year" if partitioned else ""
         con.execute(f"""CREATE OR REPLACE TEMP VIEW stage_ok AS

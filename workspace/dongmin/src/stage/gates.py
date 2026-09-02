@@ -10,14 +10,15 @@ from enum import Enum
 
 import duckdb
 
-from .rules import CrossCheck, TableRule
+from .model import DATE_FORMATS, CrossCheck, TableRule
 
 DEFAULT_THRESHOLDS: dict[str, float] = {
     "G2": 0.0,        # cast_failed 행 비율 상한 (survey v2: 숫자 컬럼 비숫자 0 → 0)
     "G7": 0.001,      # out_of_range 격리 비율 상한 (survey v2 후 확정, 기본 0.1%)
     "G9_close": 1.0,  # 종가 교차 일치율 하한 (SPEC 100.0000%)
 }
-YEAR_RANGE_OBSERVED = (2000, 1)   # [2000, 현재+1]
+YEAR_RANGE_OBSERVED = (2000, 1)   # 관측일 축 [2000, 현재+1] — 키/파티션 연도, 위반 = reject
+YEAR_RANGE_CONTENT = (1990, 40)   # 내용일 축 [1990, 현재+40] — 비키 날짜, 위반 = 셀 격리
 
 
 class GateStatus(Enum):
@@ -186,15 +187,26 @@ def g6_version_keep(ctx: GateContext) -> GateResult:
 
 
 def g7_range(ctx: GateContext) -> GateResult:
-    n = _count(ctx.con, f"SELECT count(*) FROM {ctx.reject_view} "
-                          f"WHERE reject_reason = 'out_of_range'")
+    """행 격리형. 관측일 축 위반 = reject 행, 내용일 축 위반 = NULL 셀. 합산 비율로 임계 비교."""
+    n_rows = _count(ctx.con, f"SELECT count(*) FROM {ctx.reject_view} "
+                             f"WHERE reject_reason = 'out_of_range'")
+    date_cols = [c.name for c in ctx.rule.columns if c.kind in DATE_FORMATS and not c.key]
+    n_cells = 0
+    if date_cols:
+        terms = " + ".join(f"count(*) FILTER (WHERE miss_kind.\"{c}\" = 'out_of_range')"
+                           for c in date_cols)
+        n_cells = _count(ctx.con, f"SELECT {terms} FROM {ctx.stage_view}")
+    n = n_rows + n_cells
     ratio = n / ctx.n_src if ctx.n_src else 0.0
     lim = ctx.thresholds["G7"]
     ok = ratio <= lim
     lo, hi = YEAR_RANGE_OBSERVED[0], ctx.current_year + YEAR_RANGE_OBSERVED[1]
+    clo, chi = YEAR_RANGE_CONTENT[0], ctx.current_year + YEAR_RANGE_CONTENT[1]
     return GateResult("G7", GateStatus.PASS if ok else GateStatus.FAIL,
-                      f"out_of_range rows={n} ratio={ratio:.6f} limit={lim} year∈[{lo},{hi}]",
-                      {"n_out_of_range": n, "ratio": ratio, "limit": lim})
+                      f"out_of_range rows={n_rows} cells={n_cells} ratio={ratio:.6f} limit={lim} "
+                      f"observed∈[{lo},{hi}] content∈[{clo},{chi}]",
+                      {"n_out_of_range": n, "n_out_of_range_rows": n_rows,
+                       "n_out_of_range_cells": n_cells, "ratio": ratio, "limit": lim})
 
 
 def g8_parse_equation(ctx: GateContext) -> GateResult:

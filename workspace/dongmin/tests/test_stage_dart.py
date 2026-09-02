@@ -503,28 +503,19 @@ def test_disclosure_folds_page_boundary_duplicates_and_splits_the_rm_flags(
     assert none == ("", False, False, False, "E")
 
 
-def test_disclosure_rejects_the_1999_receipt_year_on_the_partition_axis(
+def test_disclosure_keeps_the_1999_receipt_year_on_the_partition_axis(
     stage: tuple[snapshot.Snapshot, Path]
 ) -> None:
-    """G7 관측일 축 하한 2000 이 DART 최초기 공시(1999)를 통째로 격리한다 — 빌더 상수 이슈."""
-    r = _build("stg_disclosure", stage, gate_thresholds={"G7": 0.5})
-    assert r.n_src == 5 and r.n_dedup == 1 and r.n_reject == 1 and r.n_rows == 3
-    assert _gate(r, "G7").metrics["n_out_of_range_rows"] == 1
+    """관측일 축 하한은 1999(DART 최초 공시 연도) — 1999 접수번호는 격리되지 않는다 (D4 수정)."""
+    r = _build("stg_disclosure", stage)
+    assert r.n_src == 5 and r.n_dedup == 1 and r.n_reject == 0 and r.n_rows == 4
+    assert _gate(r, "G7").metrics["n_out_of_range_rows"] == 0
     con = _read(stage, r)
-    assert con.execute(f"SELECT count(*) FROM t WHERE rcept_no = '{R_1999}'").fetchone() == (0,)
+    assert con.execute(f"SELECT count(*) FROM t WHERE rcept_no = '{R_1999}'").fetchone() == (1,)
 
 
 # ── stg_company / stg_corp_map ─────────────────────────────────────────────────────────────────
-# 두 테이블은 컬럼이 전부 TEXT(식별자·코드·이름)라 `castable_columns` 가 비고, 빌더가
-# `struct_pack()` 을 인자 0개로 부른다 → duckdb "Can't pack nothing into a struct".
-# 규칙이 아니라 build.py 의 결함이라 우회하지 않고 strict xfail 로 고정한다 — 빌더가 고쳐지면
-# XPASS 가 실패로 뜨면서 이 마커를 떼라고 알려준다. (PR 본문 DEFECT-D1)
-_ALL_TEXT_XFAIL = pytest.mark.xfail(
-    raises=duckdb.InvalidInputException, strict=True,
-    reason="build.py `_stage_sql`: 캐스팅 대상 컬럼 0 → struct_pack() 인자 0개")
-
-
-@_ALL_TEXT_XFAIL
+# 두 테이블은 컬럼이 전부 TEXT 라 캐스팅 대상이 0개 — miss_kind 는 자리표시 NULL STRUCT (#18, D1).
 def test_company_marks_refetched_state_columns_and_skips_available_date(
     stage: tuple[snapshot.Snapshot, Path]
 ) -> None:
@@ -541,7 +532,6 @@ def test_company_marks_refetched_state_columns_and_skips_available_date(
     assert delisted == ("0001A0", "E", "03")            # 티커에 문자 실재 — 숫자 캐스팅 금지
 
 
-@_ALL_TEXT_XFAIL
 def test_corp_map_has_no_clock_column_so_observed_date_is_null(
     stage: tuple[snapshot.Snapshot, Path]
 ) -> None:
@@ -567,7 +557,7 @@ def test_doc_index_folds_refetches_and_keeps_one_row_per_receipt(
     assert ok[4] == 2 and str(ok[5]) == "2026-08-30" and ok[6] is None
     fail = _one(con, f"SELECT sha256, zip_ok, http_status FROM t WHERE rcept_no = '{R_B}'")
     assert fail == ("", False, 404)
-    assert _gate(r, "G3").metrics["key_uniqueness_violations"] == 0
+    assert _gate(r, "G6").status is gates.GateStatus.PASS   # 재조회 판본 축 (§7)
 
 
 # ── stg_calls_dart / stg_units_dart ────────────────────────────────────────────────────────────

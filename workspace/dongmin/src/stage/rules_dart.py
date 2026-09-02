@@ -91,7 +91,7 @@ STG_FIN = TableRule(
     lag_known=False,                     # 공개일은 참조표(derived)
     available=AvailableRule("lookup", table="stg_rcept_dt_map", local_key="rcept_no",
                             lookup_key="rcept_no", lookup_value="rcept_dt"),
-    key_unique=True,                     # 실측: 8컬럼 자연키 위반 0 (15,375,024행)
+    key_unique=False,                    # append_only: 재수집 판본은 G6 축 (§7). S2 실측 위반 0
     extras=(
         ExtraColumn("bsns_year_mismatch", 's."req_bsns_year" <> s."bsns_year"'),
         ExtraColumn("account_std", f"s.\"account_id\" <> '{_SENTINEL}'"),
@@ -135,7 +135,7 @@ _RCEPT_LOOKUP = AvailableRule("lookup", table="stg_rcept_dt_map", local_key="rce
 
 def _row_kind(src: str) -> ExtraColumn:
     """집계행 카테고라이즈 (§5 · SPEC §2-13). 무필터 SUM 의 2~3중 계상을 막는 재료."""
-    return ExtraColumn("row_kind", f"CASE WHEN trim(s.\"{src}\") IN ('합계', '계', '총계') "
+    return ExtraColumn("row_kind", f"CASE WHEN trim(s.\"{src}\") IN ('합계', '계', '총계', '소계') "
                                    f"THEN 'aggregate' ELSE 'detail' END")
 
 
@@ -462,7 +462,7 @@ STG_DISCLOSURE = TableRule(
     payload_exclude=_LEDGER_META,
     lag_known=False,
     available=AvailableRule("column", column="rcept_dt", basis="measured"),
-    key_unique=True,         # S1b 실측: 페이지 중복 접기 후 rcept_no 충돌 0 (3,443,898행)
+    key_unique=False,        # append_only: 재수집 판본은 G6 축 (§7). S1b 실측 충돌 0
     extras=(
         ExtraColumn("is_correction", "s.\"report_nm\" LIKE '[%정정]%'"),
         *(ExtraColumn(name, f"contains(s.\"rm\", '{code}')") for name, code in _RM_CODES),
@@ -503,7 +503,7 @@ STG_COMPANY = TableRule(
     payload_exclude=_LEDGER_META,
     lag_known=False,
     available=AVAILABLE_NONE,
-    key_unique=True,         # 3,478행 = DART 유니버스 종목수, corp_code 당 1행 조회 산물
+    key_unique=False,        # append_only 재조회 판본은 G6 축 (§7). 3,478행 = 종목수
 )
 
 # ── stg_corp_map ← dart_corp_map (3,478행) ─────────────────────────────────────────────────────
@@ -554,7 +554,7 @@ STG_DOC_INDEX = TableRule(
     payload_exclude=("fetched_at",),
     lag_known=False,
     available=AVAILABLE_NONE,
-    key_unique=True,         # §4: rcept_no 유일
+    key_unique=False,        # append_only: 재수집 판본은 G6 축 (§7). §4 rcept_no 유일
 )
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -586,7 +586,8 @@ STG_CALLS_DART = TableRule(
     payload_exclude=(),
     lag_known=False,
     available=AVAILABLE_NONE,
-    key_unique=False,        # 호출 로그에 자연키가 없다 — 후보·G6 위험은 PR 본문
+    key_unique=False,        # 호출 로그에 자연키가 없다
+    versioned=False,         # 판본 없음 → G6 skip(unversioned)
 )
 
 STG_UNITS_DART = TableRule(
@@ -613,6 +614,7 @@ STG_UNITS_DART = TableRule(
     lag_known=False,
     available=AVAILABLE_NONE,
     key_unique=False,
+    versioned=False,         # 판본 없음 → G6 skip(unversioned)
 )
 
 TABLES: tuple[TableRule, ...] = (

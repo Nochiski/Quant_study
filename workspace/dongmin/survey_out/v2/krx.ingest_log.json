@@ -1,0 +1,202 @@
+{
+ "db": "krx",
+ "table": "ingest_log",
+ "n_rows": 30373,
+ "columns": {
+  "endpoint": {
+   "n_rows": 30373,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 30373,
+   "max_int_digits": 0,
+   "max_scale": 0,
+   "max_len": 21,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "AAA/AAA_AAAA_AAA": 13017,
+    "AAA/AAA_AAA_AAAA_AAAA": 8678,
+    "AAA/AAAAAA_AA_AAA": 4339,
+    "AAA/AAAAA_AA_AAA": 4339
+   }
+  },
+  "bas_dd": {
+   "n_rows": 30373,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 8,
+   "max_scale": 0,
+   "max_len": 8,
+   "n_ymd8": 30373,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "99999999": 30373
+   }
+  },
+  "n_rows": {
+   "n_rows": 30373,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 1715,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 4,
+   "max_scale": 0,
+   "max_len": 4,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "999": 11876,
+    "99": 8572,
+    "9999": 8210,
+    "9": 1715
+   }
+  },
+  "status": {
+   "n_rows": 30373,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 30373,
+   "max_int_digits": 0,
+   "max_scale": 0,
+   "max_len": 7,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "AA": 28658,
+    "AAAAAAA": 1715
+   }
+  },
+  "note": {
+   "n_rows": 30373,
+   "n_null": 28903,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 1470,
+   "max_int_digits": 0,
+   "max_scale": 0,
+   "max_len": 22,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "AAAAAAA AA AAAAA-AAAAA": 1470
+   }
+  },
+  "collected_at": {
+   "n_rows": 30373,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 30373,
+   "max_int_digits": 4,
+   "max_scale": 0,
+   "max_len": 19,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9999-99-99A99:99:99": 30373
+   }
+  }
+ },
+ "elapsed_s": 0.48,
+ "ps": {
+  "endpoint": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 30373,
+   "n_nonnum": 30373
+  },
+  "bas_dd": {
+   "kind": "date_yyyymmdd",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 30373,
+   "n_nonnum": 0
+  },
+  "n_rows": {
+   "kind": "numeric",
+   "precision": 4,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 30373,
+   "n_nonnum": 0
+  },
+  "status": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 30373,
+   "n_nonnum": 30373
+  },
+  "note": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 1470,
+   "n_nonnum": 1470
+  },
+  "collected_at": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 30373,
+   "n_nonnum": 30373
+  }
+ },
+ "method": {
+  "scan": "full",
+  "cast": "none",
+  "engine": "duckdb sqlite_scanner"
+ }
+}

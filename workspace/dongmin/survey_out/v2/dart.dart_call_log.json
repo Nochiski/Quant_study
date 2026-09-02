@@ -1,0 +1,304 @@
+{
+ "db": "dart",
+ "table": "dart_call_log",
+ "n_rows": 548401,
+ "columns": {
+  "endpoint": {
+   "n_rows": 548401,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 548401,
+   "max_int_digits": 0,
+   "max_scale": 0,
+   "max_len": 30,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "AAAAAAAAAAAAAAAAA.AAAA": 136798,
+    "AAAAAAAA.AAA": 99174,
+    "AAAAAAAAAA.AAAA": 86204,
+    "AAAAAAAAA.AAAA": 41846,
+    "AAAA.AAAA": 35657,
+    "AAAAAAAAAAAAAAAAAAAAAAAA": 34899,
+    "AAAAAAAAAAAAAAA.AAAA": 34887,
+    "AAAAAAAAAAAAAAAAAAA.AAAA": 34887
+   }
+  },
+  "corp_code": {
+   "n_rows": 548401,
+   "n_null": 0,
+   "n_blank": 134831,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 8,
+   "max_scale": 0,
+   "max_len": 8,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "99999999": 413570
+   }
+  },
+  "bsns_year": {
+   "n_rows": 548401,
+   "n_null": 67432,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 8,
+   "max_scale": 0,
+   "max_len": 8,
+   "n_ymd8": 35657,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9999": 445312,
+    "99999999": 35657
+   }
+  },
+  "reprt_code": {
+   "n_rows": 548401,
+   "n_null": 0,
+   "n_blank": 99174,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 8,
+   "max_scale": 0,
+   "max_len": 8,
+   "n_ymd8": 35657,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "99999": 413570,
+    "99999999": 35657
+   }
+  },
+  "fs_div": {
+   "n_rows": 548401,
+   "n_null": 276772,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 136798,
+   "max_int_digits": 14,
+   "max_scale": 0,
+   "max_len": 14,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "AAA": 136798,
+    "99999999999999": 99174,
+    "999": 28724,
+    "99": 6301,
+    "9": 632
+   }
+  },
+  "status": {
+   "n_rows": 548401,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 403133,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 3,
+   "max_int_digits": 3,
+   "max_scale": 0,
+   "max_len": 17,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "999": 548398,
+    "AAA/AAAA_AAAAAAAA": 2,
+    "AAA": 1
+   }
+  },
+  "n_rows": {
+   "n_rows": 548401,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 145268,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 4,
+   "max_scale": 0,
+   "max_len": 4,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9": 353166,
+    "999": 124719,
+    "99": 70514,
+    "9999": 2
+   }
+  },
+  "ts": {
+   "n_rows": 548401,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 548401,
+   "max_int_digits": 4,
+   "max_scale": 0,
+   "max_len": 19,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9999-99-99A99:99:99": 548401
+   }
+  },
+  "key_id": {
+   "n_rows": 548401,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 548401,
+   "max_int_digits": 0,
+   "max_scale": 0,
+   "max_len": 4,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "A9": 463997,
+    "AAAA": 84404
+   }
+  }
+ },
+ "elapsed_s": 4.65,
+ "ps": {
+  "endpoint": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 548401,
+   "n_nonnum": 548401
+  },
+  "corp_code": {
+   "kind": "numeric",
+   "precision": 8,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 413570,
+   "n_nonnum": 0
+  },
+  "bsns_year": {
+   "kind": "numeric",
+   "precision": 8,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 480969,
+   "n_nonnum": 0
+  },
+  "reprt_code": {
+   "kind": "numeric",
+   "precision": 8,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 449227,
+   "n_nonnum": 0
+  },
+  "fs_div": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 271629,
+   "n_nonnum": 136798
+  },
+  "status": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 548401,
+   "n_nonnum": 3
+  },
+  "n_rows": {
+   "kind": "numeric",
+   "precision": 4,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 548401,
+   "n_nonnum": 0
+  },
+  "ts": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 548401,
+   "n_nonnum": 548401
+  },
+  "key_id": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 548401,
+   "n_nonnum": 548401
+  }
+ },
+ "method": {
+  "scan": "full",
+  "cast": "none",
+  "engine": "duckdb sqlite_scanner"
+ }
+}

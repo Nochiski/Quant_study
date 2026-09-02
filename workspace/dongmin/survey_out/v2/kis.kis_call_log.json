@@ -1,0 +1,261 @@
+{
+ "db": "kis",
+ "table": "kis_call_log",
+ "n_rows": 357682,
+ "columns": {
+  "name": {
+   "n_rows": 357682,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 357682,
+   "max_int_digits": 0,
+   "max_scale": 0,
+   "max_len": 6,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "AAAAAA": 306385,
+    "AAAA": 40395,
+    "AAAAA": 10902
+   }
+  },
+  "ticker": {
+   "n_rows": 357682,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 134,
+   "max_int_digits": 6,
+   "max_scale": 0,
+   "max_len": 6,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "999999": 357548,
+    "9999A9": 134
+   }
+  },
+  "d1": {
+   "n_rows": 357682,
+   "n_null": 0,
+   "n_blank": 652,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 8,
+   "max_scale": 0,
+   "max_len": 8,
+   "n_ymd8": 357030,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "99999999": 357030
+   }
+  },
+  "d2": {
+   "n_rows": 357682,
+   "n_null": 0,
+   "n_blank": 652,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 8,
+   "max_scale": 0,
+   "max_len": 8,
+   "n_ymd8": 357030,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "99999999": 357030
+   }
+  },
+  "verdict": {
+   "n_rows": 357682,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 357682,
+   "max_int_digits": 0,
+   "max_scale": 0,
+   "max_len": 5,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "AA": 350943,
+    "AAAAA": 6739
+   }
+  },
+  "code": {
+   "n_rows": 357682,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 357682,
+   "max_int_digits": 0,
+   "max_scale": 0,
+   "max_len": 22,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "AAA99999": 357030,
+    "AAAA9999/AAA_AA_AAAAAA": 652
+   }
+  },
+  "n_rows": {
+   "n_rows": 357682,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 6739,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 0,
+   "max_int_digits": 2,
+   "max_scale": 0,
+   "max_len": 2,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "99": 349315,
+    "9": 8367
+   }
+  },
+  "ts": {
+   "n_rows": 357682,
+   "n_null": 0,
+   "n_blank": 0,
+   "n_dash": 0,
+   "n_zero": 0,
+   "n_comma": 0,
+   "n_neg": 0,
+   "n_plus": 0,
+   "n_nonnum": 357682,
+   "max_int_digits": 4,
+   "max_scale": 0,
+   "max_len": 19,
+   "n_ymd8": 0,
+   "n_iso": 0,
+   "n_dot": 0,
+   "n_kor": 0,
+   "patterns": {
+    "9999-99-99A99:99:99": 357682
+   }
+  }
+ },
+ "elapsed_s": 4.29,
+ "ps": {
+  "name": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 357682,
+   "n_nonnum": 357682
+  },
+  "ticker": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 357682,
+   "n_nonnum": 134
+  },
+  "d1": {
+   "kind": "date_yyyymmdd",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 357030,
+   "n_nonnum": 0
+  },
+  "d2": {
+   "kind": "date_yyyymmdd",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 357030,
+   "n_nonnum": 0
+  },
+  "verdict": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 357682,
+   "n_nonnum": 357682
+  },
+  "code": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 357682,
+   "n_nonnum": 357682
+  },
+  "n_rows": {
+   "kind": "numeric",
+   "precision": 2,
+   "scale": 0,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 357682,
+   "n_nonnum": 0
+  },
+  "ts": {
+   "kind": "text",
+   "precision": null,
+   "scale": null,
+   "has_sign": false,
+   "has_comma": false,
+   "n_present": 357682,
+   "n_nonnum": 357682
+  }
+ },
+ "method": {
+  "scan": "full",
+  "cast": "none",
+  "engine": "duckdb sqlite_scanner"
+ }
+}

@@ -1,0 +1,14 @@
+[
+ {"key": {"ticker": "005930", "fetched_date": "2026-09-01", "target_period": "202612", "metric": "eps", "obs_label": "2026/08/31"},
+  "column": "consensus", "expect": "48338.6400",
+  "measured_sql": "cF5001 body(005930, 202612, 2026-09-01).chart1.select_item[categories.index('2026/08/31')]",
+  "measured_at": "2026-09-02", "note": "삼성전자 FY2026E EPS 컨센서스 2026-08-31 관측점 (cF5002 avg 와 동일값 실측)"},
+ {"key": {"ticker": "005930", "fetched_date": "2026-09-01", "target_period": "202612", "metric": "eps", "obs_label": "2026/08/31"},
+  "column": "target_price_krw", "expect": "493958.00",
+  "measured_sql": "cF5001 body(005930, 202612, 2026-09-01).chart1.target_price[-1]",
+  "measured_at": "2026-09-02", "note": "목표주가 — v2.1 누락 필드, v2.2 적재"},
+ {"key": {"ticker": "005930", "fetched_date": "2026-09-01", "target_period": "202612", "metric": "revenue", "obs_label": "2026/08/31"},
+  "column": "unit", "expect": "억원",
+  "measured_sql": "cF5001 body(005930, 202612, 2026-09-01).chart2.select_item_unit",
+  "measured_at": "2026-09-02", "note": "단위는 데이터 값 — 스케일 변환 금지 (G4 unit 픽스처)"}
+]

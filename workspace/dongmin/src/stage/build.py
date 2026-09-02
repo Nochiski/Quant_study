@@ -20,8 +20,16 @@ from pathlib import Path
 
 import duckdb
 
-from . import gates, manifest
-from .rules import KIND_DATE_YMD8, KIND_NUMERIC, RULES_VERSION, ColumnRule, TableRule
+from . import gates, manifest, parsers
+from .rules import (
+    DATE_FORMATS,
+    KIND_BOOL,
+    KIND_NUMERIC,
+    KIND_TEXT,
+    RULES_VERSION,
+    ColumnRule,
+    TableRule,
+)
 from .snapshot import Snapshot
 
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -83,8 +91,10 @@ def _signed(expr: str, policy: str) -> str:
 
 def _cast_expr(c: ColumnRule, raw: str) -> str:
     """원장 VARCHAR → stage 타입. 실패는 NULL (miss_kind 가 cast_failed 로 기록)."""
-    if c.kind == KIND_DATE_YMD8:
-        return f"TRY_CAST(try_strptime(nullif({raw}, ''), '%Y%m%d') AS DATE)"
+    if c.kind in DATE_FORMATS:
+        return f"TRY_CAST(try_strptime(nullif({raw}, ''), '{DATE_FORMATS[c.kind]}') AS DATE)"
+    if c.kind == KIND_BOOL:
+        return f"TRY_CAST({raw} AS BOOLEAN)"
     if c.kind == KIND_NUMERIC:
         num = _signed(f"replace({raw}, ',', '')", c.sign)
         val = f"TRY_CAST({num} AS {c.decimal_type})"
@@ -134,7 +144,7 @@ def _stage_sql(rule: TableRule, src_view: str, src_cols: list[str],
     joins: list[str] = []
     for c in rule.columns:
         raw = f"s.{_q(c.src)}"
-        if c.kind not in (KIND_NUMERIC, KIND_DATE_YMD8) and c.normalize_text:
+        if c.kind == KIND_TEXT and c.normalize_text:
             alias = f"nm_{c.src}"
             joins.append(f"LEFT JOIN {_q('norm__' + c.src)} {alias} ON {alias}.raw = {raw}")
             sel.append(f"coalesce({alias}.norm, {raw}) AS {_q(c.name)}")
@@ -160,7 +170,7 @@ def _stage_sql(rule: TableRule, src_view: str, src_cols: list[str],
     key_cols = rule.key_columns
     key_null = " OR ".join(f"{_q(c.name)} IS NULL" for c in key_cols) or "FALSE"
     key_missing = " OR ".join(f"{_q(c.name)} = ''" for c in key_cols
-                              if c.kind not in (KIND_NUMERIC, KIND_DATE_YMD8)) or "FALSE"
+                              if c.kind == KIND_TEXT) or "FALSE"
     required_null = " OR ".join(f"{_q(c.name)} IS NULL" for c in rule.columns
                                 if c.required and not c.key) or "FALSE"
     if _is_partitioned(rule):
@@ -173,7 +183,7 @@ def _stage_sql(rule: TableRule, src_view: str, src_cols: list[str],
                         f"THEN 'out_of_range'")
     else:
         part_sel, out_of_range = "", ""
-    mk_cols = rule.numeric_or_date_columns
+    mk_cols = rule.castable_columns
     mk_struct = ", ".join(f"{_q(c.name)} := {_q('mk__' + c.name)}" for c in mk_cols)
     fail_list = ", ".join(f"CASE WHEN {_q('mk__' + c.name)} = 'cast_failed' THEN ['{c.name}'] "
                           f"ELSE []::VARCHAR[] END" for c in mk_cols)
@@ -278,7 +288,7 @@ def _available_sql(rule: TableRule, con: duckdb.DuckDBPyConnection,
     """(SELECT 절 조각, JOIN 절 조각). available_date·available_basis 두 컬럼을 낸다."""
     a = rule.available
     if a.kind == "column":
-        return f"{_q(str(a.column))} AS available_date, 'default' AS available_basis", ""
+        return f"{_q(str(a.column))} AS available_date, '{a.basis}' AS available_basis", ""
     if a.kind == "lookup":
         if not (a.table and a.local_key and a.lookup_key and a.lookup_value):
             raise ValueError(f"incomplete lookup rule: table={rule.name} available={a}")
@@ -289,6 +299,28 @@ def _available_sql(rule: TableRule, con: duckdb.DuckDBPyConnection,
                "CASE WHEN lk.v IS NULL THEN 'unknown' ELSE 'derived' END AS available_basis")
         return sel, f"LEFT JOIN lk ON lk.k = a.{_q(a.local_key)}"
     return "CAST(NULL AS DATE) AS available_date, CAST(NULL AS VARCHAR) AS available_basis", ""
+
+
+def _load_blob_source(con: duckdb.DuckDBPyConnection, rule: TableRule
+                      ) -> tuple[list[str], dict[str, object]]:
+    """blob 원장을 파이썬 파서로 언네스트해 `src_all` 임시 테이블(전 컬럼 VARCHAR)로 올린다."""
+    bs = rule.blob_source
+    if bs is None:
+        raise ValueError(f"_load_blob_source called without blob_source: {rule.name}")
+    parser = parsers.PARSERS[bs.parser]
+    eps = ", ".join(f"'{e}'" for e in bs.eps)
+    rows = con.execute(f"SELECT cmp_cd, ep, pkey, fetched_date, body, fetched_at "
+                       f"FROM {_q(bs.db)}.{_q(bs.table)} WHERE ep IN ({eps})").fetchall()
+    blobs = [parsers.RawBlob(str(r[0]), str(r[1]), str(r[2]), str(r[3]),
+                             bytes(r[4]) if r[4] is not None else b"", str(r[5])) for r in rows]
+    res = parser(blobs)
+    cols = list(res.columns)
+    con.execute(f"CREATE OR REPLACE TEMP TABLE src_all "
+                f"({', '.join(_q(c) + ' VARCHAR' for c in cols)}, _src VARCHAR)")
+    if res.rows:
+        con.executemany(f"INSERT INTO src_all VALUES ({', '.join('?' * (len(cols) + 1))})",
+                        [tuple(r[c] for c in cols) + (bs.table,) for r in res.rows])
+    return cols, res.metrics
 
 
 def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str | None = None,
@@ -319,11 +351,15 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
         con.execute(f"SET temp_directory = '{spill}'")
         attached = _attach(con, rule, snap, extra_ledgers or {})
         avail_sel, avail_join = _available_sql(rule, con, stage_root)   # 참조표 부재는 여기서 예외
-        src_cols = _source_columns(con, rule.sources[0].db, rule.sources[0].table)
-        union = " UNION ALL ".join(
-            "SELECT " + ", ".join(f"CAST({_q(c)} AS VARCHAR) AS {_q(c)}" for c in src_cols)
-            + f", '{s.src_tag}' AS _src FROM {_q(s.db)}.{_q(s.table)}" for s in rule.sources)
-        con.execute(f"CREATE OR REPLACE TEMP VIEW src_all AS {union}")
+        parse_metrics: dict[str, object] | None = None
+        if rule.blob_source is not None:
+            src_cols, parse_metrics = _load_blob_source(con, rule)
+        else:
+            src_cols = _source_columns(con, rule.sources[0].db, rule.sources[0].table)
+            union = " UNION ALL ".join(
+                "SELECT " + ", ".join(f"CAST({_q(c)} AS VARCHAR) AS {_q(c)}" for c in src_cols)
+                + f", '{s.src_tag}' AS _src FROM {_q(s.db)}.{_q(s.table)}" for s in rule.sources)
+            con.execute(f"CREATE OR REPLACE TEMP VIEW src_all AS {union}")
         _load_norm_maps(con, rule, "src_all")
         con.execute("CREATE OR REPLACE TEMP TABLE stage_all AS "
                     + _stage_sql(rule, "src_all", src_cols, year_lo, year_hi))
@@ -378,7 +414,7 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
             n_src=n_src, n_dedup=n_dedup, n_reject=n_reject, n_stage=n_stage,
             thresholds=thresholds, fixtures=fixtures, baseline=baseline,
             previous_g1=_previous_g1(table_root), cross_alias=cross_alias, current_year=now_year,
-            lookup_miss=lookup_miss)
+            lookup_miss=lookup_miss, parse_metrics=parse_metrics)
         results = gates.run_all(ctx)
         gate_dicts = [g.as_dict() for g in results]
         failed = [g for g in results if g.status is gates.GateStatus.FAIL]

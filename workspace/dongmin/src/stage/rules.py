@@ -13,6 +13,16 @@ PS_HEADROOM_DIGITS = 2   # survey 최대 자릿수 + 2 (성장 여유). 초과 =
 KIND_TEXT = "text"
 KIND_NUMERIC = "numeric"
 KIND_DATE_YMD8 = "date_yyyymmdd"
+KIND_DATE_ISO = "date_iso"          # YYYY-MM-DD
+KIND_DATE_SLASH = "date_slash"      # YYYY/MM/DD (WISE 관측 라벨)
+KIND_BOOL = "bool"
+DATE_FORMATS: dict[str, str] = {KIND_DATE_YMD8: "%Y%m%d", KIND_DATE_ISO: "%Y-%m-%d",
+                                KIND_DATE_SLASH: "%Y/%m/%d"}
+
+
+def is_castable(kind: str) -> bool:
+    """캐스팅(=miss_kind 기록) 대상 종류 — text 만 제외."""
+    return kind != KIND_TEXT
 
 
 @dataclass(frozen=True)
@@ -72,6 +82,18 @@ class CrossCheck:
 
 
 @dataclass(frozen=True)
+class BlobSource:
+    """§1 예외 (c)·(e) — 원장 blob 을 파이썬 파서로 N행 언네스트. sources[0] 이 원장(ATTACH·G0)."""
+
+    db: str
+    table: str
+    eps: tuple[str, ...]
+    parser: str                                  # parsers.PARSERS 키
+    required_columns: tuple[str, ...] = ("cmp_cd", "ep", "pkey", "fetched_date", "body",
+                                         "fetched_at")
+
+
+@dataclass(frozen=True)
 class AvailableRule:
     """available_date 부여 규칙 (§6).
 
@@ -84,6 +106,7 @@ class AvailableRule:
     local_key: str | None = None    # kind=lookup: 이 테이블의 조인 컬럼(stage 이름)
     lookup_key: str | None = None   # kind=lookup: 참조 테이블 키 컬럼
     lookup_value: str | None = None  # kind=lookup: 참조 테이블 날짜 컬럼
+    basis: str = "default"          # kind=column: default(내용일 대용) | measured(수집일 등 실재)
 
 
 AVAILABLE_NONE = AvailableRule("none")
@@ -109,6 +132,7 @@ class TableRule:
     extras: tuple[ExtraColumn, ...] = ()
     invariants: tuple[Invariant, ...] = ()
     cross_check: CrossCheck | None = None
+    blob_source: BlobSource | None = None
 
     def column(self, name: str) -> ColumnRule:
         for c in self.columns:
@@ -117,8 +141,8 @@ class TableRule:
         raise KeyError(f"no such stage column: table={self.name} column={name}")
 
     @property
-    def numeric_or_date_columns(self) -> tuple[ColumnRule, ...]:
-        return tuple(c for c in self.columns if c.kind in (KIND_NUMERIC, KIND_DATE_YMD8))
+    def castable_columns(self) -> tuple[ColumnRule, ...]:
+        return tuple(c for c in self.columns if is_castable(c.kind))
 
     @property
     def key_columns(self) -> tuple[ColumnRule, ...]:
@@ -270,4 +294,41 @@ STG_FIN = TableRule(
     ),
 )
 
-RULES: dict[str, TableRule] = {r.name: r for r in (STG_PRICE_DAILY, STG_RCEPT_DT_MAP, STG_FIN)}
+# ── stg_consensus_monthly (ws_raw cF5001+cF5002 blob 언네스트, §1 예외 c·e) ────────────────────
+_CONS_P, _CONS_S = 20, 4                 # 실측 EPS 5자리·매출(억원) 7자리 + 소수 2 → 여유
+STG_CONSENSUS_MONTHLY = TableRule(
+    name="stg_consensus_monthly",
+    sources=(SourceRef("wise", "ws_raw", "ws_raw"),),
+    columns=(
+        ColumnRule("cmp_cd", "ticker", KIND_TEXT, expected_len=6, key=True),
+        ColumnRule("fetched_date", "fetched_date", KIND_DATE_ISO, key=True),
+        ColumnRule("pkey", "target_period", KIND_TEXT, expected_len=6, key=True),
+        ColumnRule("metric", "metric", KIND_TEXT, key=True),          # eps | revenue | parse_failed
+        ColumnRule("obs_label", "obs_label", KIND_TEXT, key=True),    # 원문 라벨 보존
+        ColumnRule("obs_label", "obs_date", KIND_DATE_SLASH),
+        ColumnRule("unit", "unit", KIND_TEXT),                        # 데이터 값 — 스케일 변환 금지
+        ColumnRule("consensus", "consensus", KIND_NUMERIC, _CONS_P, _CONS_S),
+        ColumnRule("consensus_min", "consensus_min", KIND_NUMERIC, _CONS_P, _CONS_S),
+        ColumnRule("consensus_max", "consensus_max", KIND_NUMERIC, _CONS_P, _CONS_S),
+        ColumnRule("close_price_krw", "close_price_krw", KIND_NUMERIC, 14, 2),
+        ColumnRule("target_price_krw", "target_price_krw", KIND_NUMERIC, 14, 2),
+        ColumnRule("in_5001", "in_5001", KIND_BOOL),
+        ColumnRule("in_5002", "in_5002", KIND_BOOL),
+    ),
+    natural_key=("ticker", "fetched_date", "target_period", "metric", "obs_label"),
+    partition_class="date_axis",
+    partition_expr="substr(fetched_date, 1, 4)",
+    partition_src="fetched_date",
+    observed_src="fetched_at",
+    write_mode="append_only",
+    fanout=1,                            # 파서 출력 행 기준. blob→행 계상은 G8
+    payload_exclude=("fetched_at",),
+    lag_known=True,                      # 06:00 KST 수집 = 그날 장 시작 전 가용 (측정된 수집 시각)
+    available=AvailableRule("column", column="fetched_date", basis="measured"),
+    key_unique=True,
+    blob_source=BlobSource("wise", "ws_raw", ("cF5001", "cF5002"), "parse_consensus_monthly"),
+)
+
+RULES: dict[str, TableRule] = {
+    r.name: r for r in (STG_PRICE_DAILY, STG_RCEPT_DT_MAP, STG_FIN, STG_CONSENSUS_MONTHLY)
+}

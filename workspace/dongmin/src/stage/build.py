@@ -62,12 +62,15 @@ class BuildResult:
         return self.status is BuildStatus.OK
 
 
-def normalize_text(s: str) -> str:
-    """§5 문자열 정규화 (D7 순서 고정): NFKC → 개행·탭 제거 → 연속공백 축약 → strip → 태그 제거."""
+def normalize_text(s: str, strip_tags: bool = False) -> str:
+    """§5 문자열 정규화(D7 순서): NFKC, 개행·탭 제거, 공백 축약, strip, 옵트인 태그 제거.
+
+    태그 제거는 옵트인 — DART 서술 컬럼의 `<주1>` 각주는 내용이다(5단계 리뷰 DEFECT-E2).
+    """
     t = unicodedata.normalize("NFKC", s)
     t = t.replace("\r", "").replace("\n", "").replace("\t", "")
     t = _SPACES_RE.sub(" ", t).strip()
-    return _TAG_RE.sub("", t).strip()
+    return _TAG_RE.sub("", t).strip() if strip_tags else t
 
 
 def _q(name: str) -> str:
@@ -153,7 +156,7 @@ def _load_norm_maps(con: duckdb.DuckDBPyConnection, rule: TableRule, src_view: s
         con.execute(f"CREATE OR REPLACE TEMP TABLE {tbl} (raw VARCHAR, norm VARCHAR)")
         if vals:
             con.executemany(f"INSERT INTO {tbl} VALUES (?, ?)",
-                            [(v, normalize_text(v)) for v in vals])
+                            [(v, normalize_text(v, c.strip_tags)) for v in vals])
 
 
 def _is_partitioned(rule: TableRule) -> bool:
@@ -488,7 +491,8 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
                 "src_bytes": sum(f.bytes for f in src_files),
                 "src_mtime": max((f.src_mtime for f in src_files), default=0.0),
                 "snapshot_id": snap.snapshot_id, "rules_version": RULES_VERSION,
-                "coverage_from": None, "version_loss_upstream": rule.write_mode != "append_only",
+                "coverage_from": rule.coverage_from,
+                "version_loss_upstream": rule.write_mode != "append_only",
                 "observed_date_exempt": rule.observed_src is None, "rcept_map_miss": lookup_miss,
                 "lag_known": rule.lag_known, "content_hash": content_hash, "gates": gate_dicts}
             _write_json(pdir / "_meta.json", meta)

@@ -13,6 +13,7 @@ from datetime import datetime
 from enum import IntEnum
 from typing import Any
 
+from backtest_engine.engine.compact import CompactFill, CompactOrder
 from backtest_engine.types.events import (
     CorporateActionEvent,
     FillEvent,
@@ -61,7 +62,26 @@ class OrderPlaced:
     order: OrderEvent
 
 
-EngineQueueEvent = MarketArrived | FillOccurred | StrategyNotify | SessionClose | OrderPlaced
+@dataclass(frozen=True)
+class CompactFillOccurred:
+    fill: CompactFill
+    snapshot: MarketSnapshot
+
+
+@dataclass(frozen=True)
+class CompactOrderPlaced:
+    order: CompactOrder
+
+
+EngineQueueEvent = (
+    MarketArrived
+    | FillOccurred
+    | StrategyNotify
+    | SessionClose
+    | OrderPlaced
+    | CompactFillOccurred
+    | CompactOrderPlaced
+)
 
 
 @dataclass(order=True)

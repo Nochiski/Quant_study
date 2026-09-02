@@ -1,0 +1,58 @@
+{
+  "workload": {
+    "instruments": 100,
+    "sessions": 1231,
+    "bars": 123100,
+    "rebalance_every": 5,
+    "synthetic": true,
+    "repeat": 5,
+    "warmup": 1
+  },
+  "cores": {
+    "python": {
+      "samples_seconds": [
+        2.2232947000302374,
+        2.0725376000627875,
+        1.9937721001915634,
+        2.131069399882108,
+        2.0167127000167966
+      ],
+      "median_seconds": 2.0725376000627875,
+      "speedup_vs_python": 1.0,
+      "final_equity": 2321985873.9513392,
+      "orders": 22243,
+      "fills": 22155,
+      "process_peak_rss_bytes": 214511616
+    },
+    "rust": {
+      "samples_seconds": [
+        2.0417118002660573,
+        1.859621400013566,
+        1.9688411001116037,
+        2.072745000012219,
+        1.8714863997884095
+      ],
+      "median_seconds": 1.9688411001116037,
+      "speedup_vs_python": 1.0526688009231957,
+      "final_equity": 2321985873.9513392,
+      "orders": 22243,
+      "fills": 22155,
+      "process_peak_rss_bytes": 214511616
+    },
+    "rust_persistent": {
+      "samples_seconds": [
+        1.1394541002810001,
+        1.1912876996211708,
+        1.0930544002912939,
+        1.122537599876523,
+        1.1252268999814987
+      ],
+      "median_seconds": 1.1252268999814987,
+      "speedup_vs_python": 1.8418841569614668,
+      "final_equity": 2321985873.9513392,
+      "orders": 22243,
+      "fills": 22155,
+      "process_peak_rss_bytes": 214511616
+    }
+  }
+}

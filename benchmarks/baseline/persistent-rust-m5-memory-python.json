@@ -1,0 +1,24 @@
+{
+  "workload": {
+    "instruments": 100,
+    "sessions": 1231,
+    "bars": 123100,
+    "rebalance_every": 5,
+    "synthetic": true,
+    "repeat": 1,
+    "warmup": 0
+  },
+  "cores": {
+    "python": {
+      "samples_seconds": [
+        1.863700299989432
+      ],
+      "median_seconds": 1.863700299989432,
+      "speedup_vs_python": 1.0,
+      "final_equity": 2321985873.9513392,
+      "orders": 22243,
+      "fills": 22155,
+      "process_peak_rss_bytes": 177188864
+    }
+  }
+}

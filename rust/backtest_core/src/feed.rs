@@ -158,6 +158,15 @@ impl PersistentFeed {
         self.current_session.map_or(0, |index| index + 1)
     }
 
+    pub(crate) fn session_at(&self, index: usize) -> PyResult<&str> {
+        self.sessions.get(index).map(String::as_str).ok_or_else(|| {
+            PyIndexError::new_err(format!(
+                "feed session index out of range — index={index} sessions={}",
+                self.sessions.len()
+            ))
+        })
+    }
+
     pub(crate) fn schedule_matches(&self, schedule: &str) -> PyResult<bool> {
         let index = self.current_index()?;
         match schedule {

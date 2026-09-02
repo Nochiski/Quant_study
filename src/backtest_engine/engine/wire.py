@@ -6,6 +6,11 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, TypeAlias
 
+from backtest_engine.engine.compact import (
+    CompactOrder,
+    CompactOrderUpdate,
+    CompactRoutingResult,
+)
 from backtest_engine.engine.core import instrument_key
 from backtest_engine.engine.orders import BasketGroup
 from backtest_engine.engine.router import RoutingResult
@@ -91,7 +96,7 @@ DecisionWire: TypeAlias = tuple[int, str, str | None, list[ActionWire]]
 @dataclass(frozen=True)
 class PersistentRouteEnvelope:
     decision_id: str
-    routing: RoutingResult
+    routing: RoutingResult | CompactRoutingResult
     error: Exception | None
 
 
@@ -313,6 +318,28 @@ def route_basic_decision(
     decision_id, order_wires, update_wires, group_wires, error_wire = (
         runtime.route_basic_decision(decision_to_wire(decision))
     )
+    return _route_response_to_envelope(
+        decision_id,
+        order_wires,
+        update_wires,
+        group_wires,
+        error_wire,
+        decision,
+        portfolio,
+        market,
+    )
+
+
+def _route_response_to_envelope(
+    decision_id: str,
+    order_wires: list[tuple[Any, ...]],
+    update_wires: list[tuple[str, str, str]],
+    group_wires: list[tuple[str, str, list[str]]],
+    error_wire: tuple[str, str] | None,
+    decision: StrategyDecision,
+    portfolio: PortfolioSnapshot,
+    market: MarketSnapshot,
+) -> PersistentRouteEnvelope:
     if order_wires:
         instruments = {instrument_key(bar.instrument): bar.instrument for bar in market.bars}
         instruments.update(
@@ -380,5 +407,80 @@ def route_basic_decision(
     return PersistentRouteEnvelope(
         decision_id=decision_id,
         routing=RoutingResult(orders=orders, updates=updates, groups=groups),
+        error=_route_error(error_wire),
+    )
+
+
+def submit_basic_decision(
+    runtime: Any,
+    token: int,
+    decision: StrategyDecision,
+    portfolio: PortfolioSnapshot,
+    market: MarketSnapshot,
+) -> PersistentRouteEnvelope:
+    decision_id, order_wires, update_wires, group_wires, error_wire = runtime.submit_decision(
+        token, decision_to_wire(decision)
+    )
+    instruments = {instrument_key(bar.instrument): bar.instrument for bar in market.bars}
+    instruments.update(
+        {
+            instrument_key(position.instrument): position.instrument
+            for position in portfolio.positions
+        }
+    )
+    orders = tuple(
+        CompactOrder(
+            order_id=order_id,
+            decision_id=decision_id,
+            ts=market.ts,
+            instrument=instruments[key],
+            quantity=quantity,
+            side=Side(side),
+            source_action=(
+                decision.actions[action_index].legs[leg_index]
+                if isinstance(decision.actions[action_index], BasketAction)
+                and leg_index is not None
+                else decision.actions[action_index]
+            ),
+            order_type=OrderType(order_type),
+            limit_price=limit_price,
+            stop_price=stop_price,
+            time_in_force=TimeInForce(time_in_force),
+            group_id=group_id,
+        )
+        for (
+            order_id,
+            key,
+            quantity,
+            side,
+            order_type,
+            limit_price,
+            stop_price,
+            time_in_force,
+            group_id,
+            action_index,
+            leg_index,
+        ) in order_wires
+    )
+    updates = tuple(
+        CompactOrderUpdate(
+            ts=market.ts,
+            order_id=order_id,
+            status=OrderStatus(status),
+            detail=detail,
+        )
+        for order_id, status, detail in update_wires
+    )
+    groups = tuple(
+        BasketGroup(
+            group_id=group_id,
+            policy=GroupPolicy(policy),
+            order_ids=tuple(order_ids),
+        )
+        for group_id, policy, order_ids in group_wires
+    )
+    return PersistentRouteEnvelope(
+        decision_id=decision_id,
+        routing=CompactRoutingResult(orders=orders, updates=updates, groups=groups),
         error=_route_error(error_wire),
     )

@@ -18,10 +18,21 @@ def compute_metrics(
     fills: tuple[FillEvent, ...],
     annualization_days: int,
 ) -> PerformanceMetrics:
-    if not snapshots:
-        raise ValueError("cannot compute metrics from an empty run — snapshots=0")
+    return compute_metrics_from_values(
+        tuple(snapshot.equity for snapshot in snapshots),
+        sum(float(fill.quantity) * fill.price for fill in fills),
+        annualization_days,
+    )
 
-    equity = [snapshot.equity for snapshot in snapshots]
+
+def compute_metrics_from_values(
+    equity: tuple[float, ...],
+    traded_notional: float,
+    annualization_days: int,
+) -> PerformanceMetrics:
+    """Compute the public metrics from one result batch without Event allocation."""
+    if not equity:
+        raise ValueError("cannot compute metrics from an empty run — snapshots=0")
     total_return = equity[-1] / equity[0] - 1.0
 
     session_returns = [
@@ -58,7 +69,6 @@ def compute_metrics(
     calmar = cagr / abs(max_drawdown) if max_drawdown < 0 else None
 
     average_equity = sum(equity) / len(equity)
-    traded_notional = sum(float(fill.quantity) * fill.price for fill in fills)
     turnover = traded_notional / average_equity if average_equity > 0 else 0.0
 
     return PerformanceMetrics(

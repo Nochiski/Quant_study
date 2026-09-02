@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import cProfile
+import ctypes
 import json
 import math
 import pstats
@@ -43,6 +44,46 @@ from backtest_engine.types.requirements import (
     StrategyRequirements,
 )
 from backtest_engine.types.strategy import StrategyContext
+
+
+def peak_rss_bytes() -> int:
+    """Return this process's peak resident set size on Windows, Linux, and macOS."""
+    if sys.platform == "win32":
+        class ProcessMemoryCounters(ctypes.Structure):
+            _fields_ = [
+                ("cb", ctypes.c_ulong),
+                ("PageFaultCount", ctypes.c_ulong),
+                ("PeakWorkingSetSize", ctypes.c_size_t),
+                ("WorkingSetSize", ctypes.c_size_t),
+                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                ("PagefileUsage", ctypes.c_size_t),
+                ("PeakPagefileUsage", ctypes.c_size_t),
+            ]
+
+        counters = ProcessMemoryCounters()
+        counters.cb = ctypes.sizeof(counters)
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        psapi = ctypes.WinDLL("psapi", use_last_error=True)
+        kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+        psapi.GetProcessMemoryInfo.argtypes = (
+            ctypes.c_void_p,
+            ctypes.POINTER(ProcessMemoryCounters),
+            ctypes.c_ulong,
+        )
+        psapi.GetProcessMemoryInfo.restype = ctypes.c_int
+        current_process = kernel32.GetCurrentProcess()
+        ok = psapi.GetProcessMemoryInfo(current_process, ctypes.byref(counters), counters.cb)
+        if not ok:
+            raise OSError("GetProcessMemoryInfo failed")
+        return int(counters.PeakWorkingSetSize)
+
+    import resource
+
+    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return int(rss if sys.platform == "darwin" else rss * 1_024)
 
 
 class EqualWeightRebalance:
@@ -228,12 +269,14 @@ def main(argv: list[str]) -> int:
             "final_equity": final_equity,
             "orders": orders,
             "fills": fills,
+            "process_peak_rss_bytes": peak_rss_bytes(),
         }
         speedup_text = f" speedup={speedup:.3f}x" if speedup is not None else ""
         print(
             f"core={core} median={median:.6f}s samples="
             f"{','.join(f'{sample:.6f}' for sample in samples)}{speedup_text} "
-            f"orders={orders} fills={fills} final_equity={final_equity:,.0f}"
+            f"orders={orders} fills={fills} final_equity={final_equity:,.0f} "
+            f"process_peak_rss={peak_rss_bytes() / 1024 / 1024:.1f}MiB"
         )
 
     if len(signature_by_core) > 1 and len(set(signature_by_core.values())) != 1:

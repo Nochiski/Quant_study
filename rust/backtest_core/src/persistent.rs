@@ -1,4 +1,6 @@
 use crate::buying_power::BuyingPower;
+use crate::callback::CallbackFrame;
+use crate::compact_store::{AppendWire, CompactRecordStore, RecordWire};
 use crate::event_queue::NativeEventQueue;
 use crate::feed::PersistentFeed;
 use crate::persistent_router::{
@@ -10,6 +12,15 @@ use crate::session::{self, BarTuple, EntryTuple, Op};
 use pyo3::exceptions::{PyKeyError, PyValueError};
 use pyo3::prelude::*;
 use std::collections::HashMap;
+
+#[derive(Clone, Debug)]
+enum Lifecycle {
+    Ready,
+    Running,
+    AwaitingDecision(u64),
+    Failed,
+    Finished,
+}
 
 type GroupTuple = (String, String, Vec<String>);
 type OrderState = (String, i64, bool);
@@ -228,6 +239,10 @@ pub(crate) struct PersistentEngine {
     pending_orders: Vec<StoredOrder>,
     pending_groups: Vec<StoredGroup>,
     event_queue: NativeEventQueue,
+    lifecycle: Lifecycle,
+    callback_seq: u64,
+    failure_message: Option<String>,
+    record_store: CompactRecordStore,
     decision_seq: u64,
     order_seq: u64,
     fill_seq: u64,
@@ -403,6 +418,10 @@ impl PersistentEngine {
             pending_orders: Vec::new(),
             pending_groups: Vec::new(),
             event_queue: NativeEventQueue::default(),
+            lifecycle: Lifecycle::Ready,
+            callback_seq: 0,
+            failure_message: None,
+            record_store: CompactRecordStore::default(),
             decision_seq: 0,
             order_seq: 0,
             fill_seq: 0,
@@ -503,6 +522,151 @@ impl PersistentEngine {
         Ok((decision_id, orders, updates, groups, error))
     }
 
+    fn run_until_callback(
+        &mut self,
+        event_kind: &str,
+        session_index: usize,
+    ) -> PyResult<CallbackFrame> {
+        match self.lifecycle {
+            Lifecycle::AwaitingDecision(token) => {
+                return Err(PyValueError::new_err(format!(
+                    "callback already awaiting a decision — token={token}"
+                )))
+            }
+            Lifecycle::Failed => {
+                return Err(PyValueError::new_err(format!(
+                    "persistent runtime is failed — detail={:?}",
+                    self.failure_message
+                )))
+            }
+            Lifecycle::Finished => {
+                return Err(PyValueError::new_err(
+                    "persistent runtime is already finished",
+                ))
+            }
+            Lifecycle::Ready | Lifecycle::Running => {}
+        }
+        if !matches!(
+            event_kind,
+            "market" | "fill" | "order_update" | "corporate_action"
+        ) {
+            return Err(PyValueError::new_err(format!(
+                "unsupported callback event kind — kind={event_kind:?}"
+            )));
+        }
+        let ts = self
+            .feed
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?
+            .session_at(session_index)?
+            .to_string();
+        self.callback_seq = self.callback_seq.checked_add(1).ok_or_else(|| {
+            PyValueError::new_err("persistent callback token sequence exhausted u64")
+        })?;
+        let token = self.callback_seq;
+        self.lifecycle = Lifecycle::AwaitingDecision(token);
+        Ok(CallbackFrame {
+            token,
+            event_kind: event_kind.to_string(),
+            session_index,
+            ts,
+        })
+    }
+
+    fn submit_decision(&mut self, token: u64, decision: DecisionWire) -> PyResult<RouteResponse> {
+        match self.lifecycle {
+            Lifecycle::AwaitingDecision(expected) if token == expected => {}
+            Lifecycle::AwaitingDecision(expected) => {
+                return Err(PyValueError::new_err(format!(
+                    "stale callback token — expected={expected} got={token}"
+                )))
+            }
+            Lifecycle::Failed => {
+                return Err(PyValueError::new_err(format!(
+                    "persistent runtime is failed — detail={:?}",
+                    self.failure_message
+                )))
+            }
+            Lifecycle::Finished => {
+                return Err(PyValueError::new_err(
+                    "persistent runtime is already finished",
+                ))
+            }
+            Lifecycle::Ready | Lifecycle::Running => {
+                return Err(PyValueError::new_err(format!(
+                    "no callback is awaiting a decision — token={token}"
+                )))
+            }
+        }
+        match self.route_basic_decision(decision, None) {
+            Ok(response) => {
+                if response.4.is_some() {
+                    self.lifecycle = Lifecycle::Failed;
+                    self.failure_message = response.4.as_ref().map(|error| error.1.clone());
+                } else {
+                    self.lifecycle = Lifecycle::Running;
+                }
+                Ok(response)
+            }
+            Err(error) => {
+                self.lifecycle = Lifecycle::Failed;
+                self.failure_message = Some(error.to_string());
+                Err(error)
+            }
+        }
+    }
+
+    fn fail_callback(&mut self, token: u64, detail: String) -> PyResult<()> {
+        match self.lifecycle {
+            Lifecycle::AwaitingDecision(expected) if token == expected => {
+                self.lifecycle = Lifecycle::Failed;
+                self.failure_message = Some(detail);
+                Ok(())
+            }
+            Lifecycle::AwaitingDecision(expected) => Err(PyValueError::new_err(format!(
+                "stale callback token while failing — expected={expected} got={token}"
+            ))),
+            _ => Err(PyValueError::new_err(format!(
+                "cannot fail callback from lifecycle state {} — token={token}",
+                self.lifecycle_state()
+            ))),
+        }
+    }
+
+    fn finish_callbacks(&mut self) -> PyResult<()> {
+        match self.lifecycle {
+            Lifecycle::AwaitingDecision(token) => Err(PyValueError::new_err(format!(
+                "cannot finish while callback awaits a decision — token={token}"
+            ))),
+            Lifecycle::Failed => Err(PyValueError::new_err(format!(
+                "cannot finish failed persistent runtime — detail={:?}",
+                self.failure_message
+            ))),
+            Lifecycle::Finished => Err(PyValueError::new_err(
+                "persistent runtime finish called more than once",
+            )),
+            Lifecycle::Ready | Lifecycle::Running => {
+                self.lifecycle = Lifecycle::Finished;
+                Ok(())
+            }
+        }
+    }
+
+    fn lifecycle_state(&self) -> &'static str {
+        match self.lifecycle {
+            Lifecycle::Ready => "ready",
+            Lifecycle::Running => "running",
+            Lifecycle::AwaitingDecision(_) => "awaiting_decision",
+            Lifecycle::Failed => "failed",
+            Lifecycle::Finished => "finished",
+        }
+    }
+
+    #[getter]
+    fn failure_detail(&self) -> Option<String> {
+        self.failure_message.clone()
+    }
+
     fn activate_pending(&mut self) -> PyResult<()> {
         self.activate_pending_internal()
     }
@@ -517,6 +681,29 @@ impl PersistentEngine {
 
     fn queue_len(&self) -> usize {
         self.event_queue.len()
+    }
+
+    fn record_append(
+        &mut self,
+        timestamp_micros: i64,
+        kind: u8,
+        payload_token: u64,
+    ) -> PyResult<()> {
+        self.record_store
+            .append(timestamp_micros, kind, payload_token)
+    }
+
+    fn record_batch(&self) -> Vec<RecordWire> {
+        self.record_store.batch()
+    }
+
+    fn record_extend(&mut self, records: Vec<AppendWire>) -> PyResult<()> {
+        self.record_store.extend(records)
+    }
+
+    fn finish(&mut self) -> PyResult<Vec<RecordWire>> {
+        self.finish_callbacks()?;
+        self.record_store.finish()
     }
 
     fn next_decision_id(&mut self) -> String {

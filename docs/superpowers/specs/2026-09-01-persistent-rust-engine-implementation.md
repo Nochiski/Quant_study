@@ -1,7 +1,7 @@
 # Persistent Rust Engine 구현 계획
 
 작성일: 2026-09-01
-상태: 구현 진행 중 — M3 완료, M4 시작
+상태: 구현 진행 중 — M5 완료, M6 시작 대기
 목표 브랜치: `main`
 기준 커밋: `f93c4f5` (`refactor: split Rust backtest core into modules`)
 
@@ -43,22 +43,39 @@
   Python 대비 1.714배. orders/fills/final equity 동일.
 - 다음 재개 지점: M4 `CallbackFrame`과 token 기반 pull callback 상태 머신.
 
+## 2026-09-02 M4·M5 완료 체크포인트
+
+- 전체 체크리스트: 67개 중 61개 완료, 6개 남음.
+- M4 11개 항목 완료. Rust runtime이 token 기반 pull callback lifecycle을 소유하고,
+  stale/double submit을 거절하며 전략 예외 시 FAILED 상태와 partial trace를 보존.
+- `RustStrategyContext`가 callback 시점의 portfolio/open orders/history/universe view를 보존하며
+  MARKET/FILL/ORDER_UPDATE/CORPORATE_ACTION callback 패리티를 유지.
+- M5 7개 항목 완료. Rust append-only compact record index, 1,024건 record batch,
+  compact Order/Fill/OrderUpdate payload와 `finish()` 결과 batch를 추가.
+- `BacktestResult.orders`/`fills`는 최초 조회 시 공개 tuple로 materialize되고 metrics는 compact fill
+  batch에서 한 번 계산한다. `engine.event_store`의 기존 trace/typed query 동작은 유지.
+- 100종목 주문 집중 최신 측정: Python 2.072538초, persistent Rust 1.125227초,
+  Python 대비 1.842배. orders/fills/final equity 동일.
+- 격리 프로세스 peak RSS: Python 169.0 MiB, persistent Rust 197.5 MiB, 1.169배로
+  M5 허용 기준 1.25배 이하.
+- 다음 재개 지점: M6 panic→Python 예외 변환과 runtime poison hardening.
+
 ## 현재 재개 지점
 
 > 이 블록은 작업을 진행할 때마다 최신 상태로 덮어쓴다.
 
-- 현재 단계: M4 — Python 전략 callback 브리지
-- 현재 작업: `CallbackFrame`과 단조 증가 token 계약
-- 마지막 완료 항목: M3 native EventQueue 연결 및 전체 패리티 통과
-- 다음 작업: Rust callback lifecycle 상태와 stale/double submit 거절 구현
+- 현재 단계: M6 — 하드닝과 전환
+- 현재 작업: 시작 전
+- 마지막 완료 항목: M5 EventStore/result batch 및 lazy materialization
+- 다음 작업: Rust panic을 Python 예외로 변환하고 runtime poison 처리
 - 알려진 blocker: 없음
 - 작업 트리의 기존 사용자/선행 변경:
   - `docs/rust-python-benchmark-report.html` — 벤치마크 시각화 문서, 보존할 것
 - 마지막 검증:
   - `cargo clippy --manifest-path rust/backtest_core/Cargo.toml --all-targets -- -D warnings`
-  - `cargo test --manifest-path rust/backtest_core/Cargo.toml` — 12 passed
-  - `uv run pytest tests/test_core_parity.py -q` — 163 passed
-  - `uv run pytest -q` — 504 passed
+  - `cargo test --manifest-path rust/backtest_core/Cargo.toml` — 13 passed
+  - `uv run pytest tests/test_core_parity.py -q` — 166 passed
+  - `uv run pytest -q` — 507 passed
   - `uv run ruff check src tests scripts examples` — passed
   - `uv run pyright` — 0 errors
   - `uv run python scripts/bench_universe.py tests/fixtures/krx_parquet --instruments 100
@@ -82,6 +99,14 @@
   - M3 native EventQueue: `benchmarks/baseline/persistent-rust-m3-native-event-queue.json`
     - Python 1.996398초 / persistent Rust 1.164860초 — Python 대비 1.714배
     - Rust가 timestamp/priority/FIFO sequence heap을 소유하며 결과 signature가 동일
+  - M5 final: `benchmarks/baseline/persistent-rust-m5-final.json`
+    - Python 2.072538초 / current Rust 1.968841초 / persistent Rust 1.125227초
+    - persistent Rust는 Python 대비 1.842배, current Rust 대비 1.750배
+    - orders 22,243 / fills 22,155 / 최종 equity가 동일
+  - M5 isolated peak RSS:
+    - `benchmarks/baseline/persistent-rust-m5-memory-python.json` — 169.0 MiB
+    - `benchmarks/baseline/persistent-rust-m5-memory-rust.json` — 197.5 MiB
+    - persistent/Python = 1.169배, M5 gate 1.25배 이하 통과
 
 ## 문제 정의
 
@@ -255,17 +280,17 @@ Router는 이 단계에서 유지해 변경 폭을 제한한다.
 
 ### M4 — Python 전략 callback 브리지
 
-- [ ] `CallbackFrame`과 단조 증가 token 추가.
-- [ ] `run_until_callback()` 추가.
-- [ ] `submit_decision(token, decision)` 추가.
-- [ ] stale/double submit 거절.
-- [ ] MARKET, FILL, ORDER_UPDATE, CORPORATE_ACTION callback 지원.
-- [ ] Python `RustStrategyContext` 구현.
-- [ ] portfolio/current weight/position/cash 조회 지원.
-- [ ] open orders 조회 지원.
-- [ ] declared history window를 NumPy 배열로 반환.
-- [ ] universe membership 조회 지원.
-- [ ] 전략 예외 발생 시 runtime을 FAILED 상태로 전환하고 partial trace 보존.
+- [x] `CallbackFrame`과 단조 증가 token 추가.
+- [x] `run_until_callback()` 추가.
+- [x] `submit_decision(token, decision)` 추가.
+- [x] stale/double submit 거절.
+- [x] MARKET, FILL, ORDER_UPDATE, CORPORATE_ACTION callback 지원.
+- [x] Python `RustStrategyContext` 구현.
+- [x] portfolio/current weight/position/cash 조회 지원.
+- [x] open orders 조회 지원.
+- [x] declared history window를 NumPy 배열로 반환.
+- [x] universe membership 조회 지원.
+- [x] 전략 예외 발생 시 runtime을 FAILED 상태로 전환하고 partial trace 보존.
 
 완료 게이트:
 
@@ -275,19 +300,26 @@ Router는 이 단계에서 유지해 변경 폭을 제한한다.
 
 ### M5 — EventStore와 결과 배치
 
-- [ ] Rust compact Record 타입과 append-only store 추가.
-- [ ] MARKET/DECISION/ORDER/UPDATE/FILL/SNAPSHOT/CA/COST record 포팅.
-- [ ] 실행 중 Python Event 객체 생성을 제거.
-- [ ] `finish()` 결과 batch 추가.
-- [ ] Python BacktestResult/EventStore lazy materialization 어댑터 추가.
-- [ ] metrics Rust 계산 또는 결과 batch 기반 Python 일괄 계산.
-- [ ] 디버그 trace 모드 추가.
+- [x] Rust compact Record 타입과 append-only store 추가.
+- [x] MARKET/DECISION/ORDER/UPDATE/FILL/SNAPSHOT/CA/COST record 포팅.
+- [x] 실행 중 Python Event 객체 생성을 제거.
+- [x] `finish()` 결과 batch 추가.
+- [x] Python BacktestResult/EventStore lazy materialization 어댑터 추가.
+- [x] metrics Rust 계산 또는 결과 batch 기반 Python 일괄 계산.
+- [x] 디버그 trace 모드 추가.
 
 완료 게이트:
 
 - 실행 중 fill/order마다 Python 객체를 생성하지 않음.
 - 공개 `BacktestResult`와 `engine.event_store` 동작 호환.
 - Peak RSS가 Python reference의 1.25배 이하.
+
+검증 결과:
+
+- `CompactOrder`/`CompactFill`은 `finish()` 전 공개 Event를 만들지 않으며 결과 필드 최초 조회 시
+  기존 tuple 타입으로 materialize된다.
+- primitive `(seq, timestamp_micros, kind, payload_token)` debug trace가 전체 record 순서를 보존한다.
+- 100종목 주문 집중 벤치마크 1.842배, 격리 peak RSS 1.169배로 완료 게이트를 통과했다.
 
 ### M6 — 하드닝과 전환
 

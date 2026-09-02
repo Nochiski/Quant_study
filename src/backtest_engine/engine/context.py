@@ -6,6 +6,7 @@ ctx는 어디서나 접근하는 전역 변수가 아니라 엔진이 매 호출
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -13,6 +14,7 @@ from typing import Any
 
 import numpy as np
 
+from backtest_engine.engine.compact import CompactOrder
 from backtest_engine.errors import (
     InsufficientHistoryError,
     UndeclaredDataAccess,
@@ -173,3 +175,27 @@ class EngineStrategyContext:
         if instrument is None:
             return self.open_orders_snapshot
         return tuple(o for o in self.open_orders_snapshot if o.instrument == instrument)
+
+
+@dataclass(frozen=True, eq=False)
+class RustStrategyContext(EngineStrategyContext):
+    """Rust callback token에 묶인 전략 조회 뷰.
+
+    snapshot/open orders는 callback 생성 시점 값으로 고정되고 history는 `now`를 end로 사용해
+    context를 보관했다가 나중에 읽어도 미래 상태가 섞이지 않는다.
+    """
+
+    callback_token: int = 0
+    compact_open_orders: tuple[tuple[CompactOrder, int], ...] = ()
+
+    @functools.cached_property
+    def _lazy_open_orders(self) -> tuple[OpenOrderSnapshot, ...]:
+        return tuple(
+            OpenOrderSnapshot(order=order.materialize(), remaining=Decimal(remaining))
+            for order, remaining in self.compact_open_orders
+        )
+
+    def open_orders(self, instrument: InstrumentId | None = None) -> tuple[OpenOrderSnapshot, ...]:
+        if instrument is None:
+            return self._lazy_open_orders
+        return tuple(order for order in self._lazy_open_orders if order.instrument == instrument)

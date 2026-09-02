@@ -775,6 +775,10 @@ def test_persistent_sends_one_decision_batch_per_callback(
             self.route_calls += 1
             return self.inner.route_basic_decision(*args)
 
+        def submit_decision(self, *args: object) -> object:
+            self.route_calls += 1
+            return self.inner.submit_decision(*args)
+
         def process_market_index(self, *args: object) -> object:
             self.indexed_market_calls += 1
             return self.inner.process_market_index(*args)
@@ -819,6 +823,7 @@ def test_persistent_sends_one_decision_batch_per_callback(
     assert proxies[0].activate_pending_calls == 2
     assert proxies[0].place_order_calls == 0
     assert proxies[0].register_group_calls == 0
+    assert proxies[0].inner.lifecycle_state() == "finished"
 
 
 @RUST_ONLY
@@ -849,6 +854,151 @@ def test_persistent_event_queue_matches_timestamp_priority_and_fifo_order() -> N
         close,
         late,
     ]
+
+
+@RUST_ONLY
+def test_persistent_callback_tokens_reject_stale_and_double_submit() -> None:
+    from backtest_engine.engine.wire import decision_to_wire
+
+    runtime = make_persistent_runtime(
+        100_000.0, allow_short=False, allow_margin=False, leverage=1.0
+    )
+    runtime.configure_router([ActionKind.NO_ACTION.value], [])
+    runtime.load_feed(
+        ["XKRX:005930:equity:KRW"],
+        ["005930"],
+        [str(day(1))],
+        [0, 1],
+        [0],
+        [100.0],
+        [100.0],
+        [100.0],
+        [100.0],
+        [1_000],
+    )
+    runtime.process_market_index(0, 0.0, None, ("none", 0.0, 0.0))
+    frame = runtime.run_until_callback("market", 0)
+    assert frame.token == 1
+    assert frame.event_kind == "market"
+    assert frame.session_index == 0
+    decision = decision_to_wire(StrategyDecision.no_action(day(1), "token"))
+    with pytest.raises(ValueError, match="stale callback token"):
+        runtime.submit_decision(frame.token + 1, decision)
+    runtime.submit_decision(frame.token, decision)
+    with pytest.raises(ValueError, match="no callback is awaiting"):
+        runtime.submit_decision(frame.token, decision)
+
+
+@RUST_ONLY
+def test_persistent_strategy_exception_poison_runtime_and_preserves_partial_trace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from backtest_engine.engine import loop as loop_module
+    from backtest_engine.engine.store import RecordKind
+
+    real_factory = loop_module.make_persistent_runtime
+    runtimes: list[Any] = []
+
+    def capturing_factory(*args: Any, **kwargs: Any) -> Any:
+        runtime = real_factory(*args, **kwargs)
+        runtimes.append(runtime)
+        return runtime
+
+    class ExplodingStrategy:
+        def requirements(self) -> StrategyRequirements:
+            return StrategyRequirements(
+                histories=(),
+                schedule=EverySession(),
+                events=frozenset({EventKind.MARKET}),
+                actions=frozenset({ActionKind.NO_ACTION}),
+                features=frozenset(),
+            )
+
+        def on_event(self, ctx: StrategyContext, event: StrategyEvent) -> StrategyDecision:
+            from backtest_engine.engine.context import RustStrategyContext
+
+            assert isinstance(ctx, RustStrategyContext)
+            del event
+            raise RuntimeError("strategy exploded")
+
+    monkeypatch.setattr(loop_module, "make_persistent_runtime", capturing_factory)
+    engine = BacktestEngine(
+        RunConfig(run_id="callback-failure", initial_cash=100_000.0),
+        core="rust_persistent",
+    )
+    with pytest.raises(RuntimeError, match="strategy exploded"):
+        engine.run(ExplodingStrategy(), DataFeed(GOLDEN_BARS))
+    assert runtimes[0].lifecycle_state() == "failed"
+    assert runtimes[0].failure_detail == "RuntimeError: strategy exploded"
+    assert [record.kind for record in engine.event_store.records] == [
+        RecordKind.MARKET,
+        RecordKind.SNAPSHOT,
+    ]
+
+
+@RUST_ONLY
+def test_persistent_finish_keeps_order_fill_results_lazy_and_compact_traceable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from backtest_engine.engine.compact import CompactFill, CompactOrder
+    from backtest_engine.engine.store import PersistentEventStore, RecordKind
+
+    finished = False
+    materialized = {"order": 0, "fill": 0}
+    real_finish = PersistentEventStore.finish
+    real_order_materialize = CompactOrder.materialize
+    real_fill_materialize = CompactFill.materialize
+
+    def tracked_finish(store: PersistentEventStore) -> None:
+        nonlocal finished
+        real_finish(store)
+        finished = True
+
+    def tracked_order(order: CompactOrder) -> OrderEvent:
+        assert finished, "public OrderEvent was allocated before finish()"
+        materialized["order"] += 1
+        return real_order_materialize(order)
+
+    def tracked_fill(fill: CompactFill) -> FillEvent:
+        assert finished, "public FillEvent was allocated before finish()"
+        materialized["fill"] += 1
+        return real_fill_materialize(fill)
+
+    monkeypatch.setattr(PersistentEventStore, "finish", tracked_finish)
+    monkeypatch.setattr(CompactOrder, "materialize", tracked_order)
+    monkeypatch.setattr(CompactFill, "materialize", tracked_fill)
+
+    engine = BacktestEngine(
+        RunConfig(run_id="lazy-result", initial_cash=100_000.0, fee_bps=10.0),
+        core="rust_persistent",
+    )
+    result = engine.run(
+        ScriptedStrategy(script=(target_70pct(), None, liquidate(), None)),
+        DataFeed(GOLDEN_BARS),
+    )
+    assert materialized == {"order": 0, "fill": 0}
+
+    store = engine.event_store
+    assert isinstance(store, PersistentEventStore)
+    compact_trace = store.compact_trace()
+    assert [row[0] for row in compact_trace] == list(range(len(compact_trace)))
+    assert {
+        RecordKind.MARKET.value,
+        RecordKind.DECISION.value,
+        RecordKind.ORDER.value,
+        RecordKind.ORDER_UPDATE.value,
+        RecordKind.FILL.value,
+        RecordKind.SNAPSHOT.value,
+    }.issubset({row[2] for row in compact_trace})
+    assert materialized == {"order": 0, "fill": 0}
+
+    assert isinstance(result.orders, tuple)
+    assert materialized == {"order": 2, "fill": 0}
+    assert isinstance(result.fills, tuple)
+    assert materialized == {"order": 2, "fill": 2}
+    assert tuple(record.kind.value for record in store.records) == tuple(
+        row[2] for row in compact_trace
+    )
 
 
 class _FaultStrategy:

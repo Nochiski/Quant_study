@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from backtest_engine.types.events import FillEvent, OrderEvent
@@ -71,7 +72,7 @@ class PerformanceMetrics:
     turnover: float
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class BacktestResult:
     """한 번의 실행을 재현하고 분석하는 데 필요한 최종 출력 묶음.
 
@@ -83,3 +84,69 @@ class BacktestResult:
     orders: tuple[OrderEvent, ...]
     fills: tuple[FillEvent, ...]
     metrics: PerformanceMetrics
+
+    @classmethod
+    def lazy(
+        cls,
+        *,
+        run_id: str,
+        snapshots: tuple[PortfolioSnapshot, ...],
+        orders: Callable[[], tuple[OrderEvent, ...]],
+        fills: Callable[[], tuple[FillEvent, ...]],
+        metrics: PerformanceMetrics,
+    ) -> BacktestResult:
+        """Build a result whose order/fill tuples materialize on first access."""
+        return _LazyBacktestResult(run_id, snapshots, orders, fills, metrics)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, BacktestResult):
+            return NotImplemented
+        return (
+            self.run_id == other.run_id
+            and self.snapshots == other.snapshots
+            and self.orders == other.orders
+            and self.fills == other.fills
+            and self.metrics == other.metrics
+        )
+
+    def __hash__(self) -> int:
+        return hash((self.run_id, self.snapshots, self.orders, self.fills, self.metrics))
+
+
+class _LazyBacktestResult(BacktestResult):
+    _order_loader: Callable[[], tuple[OrderEvent, ...]]
+    _fill_loader: Callable[[], tuple[FillEvent, ...]]
+    _orders_cache: tuple[OrderEvent, ...] | None
+    _fills_cache: tuple[FillEvent, ...] | None
+
+    def __init__(
+        self,
+        run_id: str,
+        snapshots: tuple[PortfolioSnapshot, ...],
+        order_loader: Callable[[], tuple[OrderEvent, ...]],
+        fill_loader: Callable[[], tuple[FillEvent, ...]],
+        metrics: PerformanceMetrics,
+    ) -> None:
+        object.__setattr__(self, "run_id", run_id)
+        object.__setattr__(self, "snapshots", snapshots)
+        object.__setattr__(self, "metrics", metrics)
+        object.__setattr__(self, "_order_loader", order_loader)
+        object.__setattr__(self, "_fill_loader", fill_loader)
+        object.__setattr__(self, "_orders_cache", None)
+        object.__setattr__(self, "_fills_cache", None)
+
+    @property
+    def orders(self) -> tuple[OrderEvent, ...]:
+        cached = self._orders_cache
+        if cached is None:
+            cached = self._order_loader()
+            object.__setattr__(self, "_orders_cache", cached)
+        return cached
+
+    @property
+    def fills(self) -> tuple[FillEvent, ...]:
+        cached = self._fills_cache
+        if cached is None:
+            cached = self._fill_loader()
+            object.__setattr__(self, "_fills_cache", cached)
+        return cached

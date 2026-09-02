@@ -9,6 +9,8 @@
 //! 결과만 적용한다.
 
 mod buying_power;
+mod callback;
+mod compact_store;
 mod event_queue;
 mod execution;
 mod feed;
@@ -22,6 +24,7 @@ use pyo3::prelude::*;
 
 #[pymodule]
 fn backtest_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    callback::register(m)?;
     execution::register(m)?;
     persistent::register(m)?;
     portfolio::register(m)?;

@@ -12,8 +12,9 @@ from dataclasses import dataclass, fields, is_dataclass
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Any
+from typing import Any, cast
 
+from backtest_engine.engine.compact import CompactFill, CompactRecordPayload, materialize_payload
 from backtest_engine.types.decision import StrategyDecision
 from backtest_engine.types.events import (
     CorporateActionApplied,
@@ -38,6 +39,10 @@ class RecordKind(Enum):
     CORPORATE_ACTION = "corporate_action"  # 사건 도착 (적용 여부와 무관)
     CORPORATE_ACTION_APPLIED = "corporate_action_applied"  # 포지션에 실제 적용된 기록
     COST = "cost"  # 차입·이자 등 Fill 없는 현금 차감
+
+
+_RECORD_KINDS = tuple(RecordKind)
+_RECORD_KIND_CODES = {kind: code for code, kind in enumerate(_RECORD_KINDS)}
 
 
 @dataclass(frozen=True)
@@ -157,7 +162,7 @@ class EventStore:
 
     def normalized_trace(self) -> tuple[dict[str, Any], ...]:
         """Return an exact, stable shape suitable for snapshots and differential tests."""
-        return tuple(_normalized(record) for record in self._records)
+        return tuple(_normalized(record) for record in self.records)
 
     def trace_bytes(self) -> bytes:
         """Serialize the full EventStore trace deterministically."""
@@ -207,3 +212,132 @@ class EventStore:
 
     def costs(self) -> tuple[CostAccrued, ...]:
         return tuple(p for p in self._payloads(RecordKind.COST) if isinstance(p, CostAccrued))
+
+
+class PersistentEventStore(EventStore):
+    """Rust append-only index + Python lazy public-object materialization adapter."""
+
+    def __init__(self, runtime: Any) -> None:
+        self._runtime = runtime
+        self._payloads_by_token: dict[
+            int, tuple[datetime, RecordPayload | CompactRecordPayload]
+        ] = {}
+        self._payload_token = 0
+        self._records_cache: tuple[Record, ...] | None = None
+        self._payload_cache: dict[RecordKind, tuple[RecordPayload, ...]] = {}
+        self._finished_batch: list[tuple[int, int, int, int]] | None = None
+        self._pending_records: list[tuple[int, int, int]] = []
+        self._timestamp_cache: dict[datetime, int] = {}
+        self._decision_tape: list[DecisionTapeEntry] = []
+
+    @staticmethod
+    def _timestamp_micros(ts: datetime) -> int:
+        offset = ts.utcoffset()
+        normalized = ts if offset is None else ts - offset
+        return (
+            (
+                (
+                    (normalized.toordinal() * 24 + normalized.hour) * 60
+                    + normalized.minute
+                )
+                * 60
+                + normalized.second
+            )
+            * 1_000_000
+            + normalized.microsecond
+        )
+
+    def append(
+        self,
+        ts: datetime,
+        kind: RecordKind,
+        payload: RecordPayload | CompactRecordPayload,
+    ) -> None:
+        self._payload_token += 1
+        token = self._payload_token
+        timestamp_micros = self._timestamp_cache.get(ts)
+        if timestamp_micros is None:
+            timestamp_micros = self._timestamp_micros(ts)
+            self._timestamp_cache[ts] = timestamp_micros
+        self._pending_records.append((timestamp_micros, _RECORD_KIND_CODES[kind], token))
+        self._payloads_by_token[token] = (ts, payload)
+        self._records_cache = None
+        self._payload_cache.pop(kind, None)
+        if len(self._pending_records) >= 1_024:
+            self._flush()
+
+    def _flush(self) -> None:
+        if not self._pending_records:
+            return
+        self._runtime.record_extend(self._pending_records)
+        self._pending_records = []
+
+    @property
+    def records(self) -> tuple[Record, ...]:
+        if self._records_cache is None:
+            batch = self._batch()
+            self._records_cache = tuple(
+                Record(
+                    seq=seq,
+                    ts=self._payloads_by_token[token][0],
+                    kind=_RECORD_KINDS[kind_code],
+                    payload=self._materialize_token(token),
+                )
+                for seq, _timestamp_micros, kind_code, token in batch
+            )
+        return self._records_cache
+
+    def _batch(self) -> list[tuple[int, int, int, int]]:
+        self._flush()
+        return (
+            self._finished_batch
+            if self._finished_batch is not None
+            else self._runtime.record_batch()
+        )
+
+    def _materialize_token(self, token: int) -> RecordPayload:
+        ts, payload = self._payloads_by_token[token]
+        materialized = cast(RecordPayload, materialize_payload(payload))
+        if materialized is not payload:
+            # 결과와 EventStore가 동일 객체를 공유하도록 compact payload를 즉시 놓는다.
+            self._payloads_by_token[token] = (ts, materialized)
+        return materialized
+
+    def finish(self) -> None:
+        self._flush()
+        self._finished_batch = self._runtime.finish()
+        self._records_cache = None
+        self._payload_cache.clear()
+
+    def _payloads(self, kind: RecordKind) -> tuple[RecordPayload, ...]:
+        cached = self._payload_cache.get(kind)
+        if cached is None:
+            kind_code = _RECORD_KIND_CODES[kind]
+            cached = tuple(
+                self._materialize_token(token)
+                for _seq, _timestamp_micros, code, token in self._batch()
+                if code == kind_code
+            )
+            self._payload_cache[kind] = cached
+        return cached
+
+    def compact_trace(self) -> tuple[tuple[int, int, str, int], ...]:
+        """Return the primitive Rust record index for low-overhead debugging."""
+        return tuple(
+            (seq, timestamp_micros, _RECORD_KINDS[kind_code].value, token)
+            for seq, timestamp_micros, kind_code, token in self._batch()
+        )
+
+    def traded_notional(self) -> float:
+        """Sum fill notional directly from compact payloads for batch metrics."""
+        kind_code = _RECORD_KIND_CODES[RecordKind.FILL]
+        total = 0.0
+        for _seq, _timestamp_micros, code, token in self._batch():
+            if code != kind_code:
+                continue
+            payload = self._payloads_by_token[token][1]
+            if isinstance(payload, CompactFill):
+                total += payload.quantity * payload.price
+            elif isinstance(payload, FillEvent):
+                total += float(payload.quantity) * payload.price
+        return total

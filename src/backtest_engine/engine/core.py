@@ -21,6 +21,7 @@ from backtest_engine.engine.broker import (
     QuoteCore,
     QuoteNumbers,
 )
+from backtest_engine.engine.compact import CompactOrder
 from backtest_engine.engine.orders import BasketGroup, OpenOrder, OrderManager
 from backtest_engine.engine.portfolio import Portfolio as PythonPortfolio
 from backtest_engine.engine.portfolio import scale_quantity
@@ -413,7 +414,7 @@ class PersistentOrderManager(OrderManager):
 
     def __init__(self, runtime: Any) -> None:
         self._runtime = runtime
-        self._orders: dict[str, OrderEvent] = {}
+        self._orders: dict[str, CompactOrder] = {}
         self._has_pending = False
 
     def _states(self) -> dict[str, tuple[int, bool]]:
@@ -424,7 +425,7 @@ class PersistentOrderManager(OrderManager):
 
     def _entry(self, order_id: str, remaining: int, triggered: bool) -> OpenOrder:
         return OpenOrder(
-            order=self._orders[order_id],
+            order=self._orders[order_id].materialize(),
             remaining=Decimal(remaining),
             triggered=triggered,
         )
@@ -479,8 +480,26 @@ class PersistentOrderManager(OrderManager):
             )
         # mutable 주문은 route 호출에서 이미 Rust pending 영역에 저장됐다. 여기서는 공개
         # EventStore/context materialization에 필요한 immutable 객체만 기억한다.
+        self.place_compact(CompactOrder.from_event(order))
+
+    def place_compact(self, order: CompactOrder) -> None:
         self._orders[order.order_id] = order
         self._has_pending = True
+
+    def order_compact(self, order_id: str) -> CompactOrder:
+        return self._orders[order_id]
+
+    def compact_open_entries(self) -> tuple[tuple[CompactOrder, int, bool], ...]:
+        return tuple(
+            (self._orders[order_id], remaining, triggered)
+            for order_id, remaining, triggered in self._runtime.open_order_states()
+        )
+
+    def compact_open_orders(self) -> tuple[tuple[CompactOrder, int], ...]:
+        return tuple(
+            (order, remaining)
+            for order, remaining, _triggered in self.compact_open_entries()
+        )
 
     def open_orders(self) -> tuple[OpenOrderSnapshot, ...]:
         return tuple(
@@ -499,7 +518,7 @@ class PersistentOrderManager(OrderManager):
         return None if state is None else self._entry(order_id, *state)
 
     def order_event(self, order_id: str) -> OrderEvent:
-        return self._orders[order_id]
+        return self._orders[order_id].materialize()
 
     def settle(self, order_id: str, filled: Decimal) -> Decimal:
         if filled != filled.to_integral_value():
@@ -517,12 +536,29 @@ class PersistentOrderManager(OrderManager):
         return self._entry(order_id, remaining, triggered)
 
     def cancel_for_instrument(self, instrument: InstrumentId) -> tuple[OrderEvent, ...]:
+        return tuple(
+            order.materialize() for order in self.cancel_compact_for_instrument(instrument)
+        )
+
+    def cancel_compact_for_instrument(
+        self, instrument: InstrumentId
+    ) -> tuple[CompactOrder, ...]:
         order_ids = self._runtime.cancel_for_key(instrument_key(instrument))
         return tuple(self._orders[order_id] for order_id in order_ids)
 
     def drain(self) -> tuple[OpenOrder, ...]:
         return tuple(
-            self._entry(order_id, remaining, triggered)
+            OpenOrder(
+                order=order.materialize(),
+                remaining=Decimal(remaining),
+                triggered=triggered,
+            )
+            for order, remaining, triggered in self.drain_compact()
+        )
+
+    def drain_compact(self) -> tuple[tuple[CompactOrder, int, bool], ...]:
+        return tuple(
+            (self._orders[order_id], remaining, triggered)
             for order_id, remaining, triggered in self._runtime.drain_orders()
         )
 

@@ -29,10 +29,12 @@ from backtest_engine.capability import (
 from backtest_engine.data.feed import DataFeed
 from backtest_engine.engine import calendar
 from backtest_engine.engine.broker import BrokerSim, ExecutionStatus, Quote, participation_of
+from backtest_engine.engine.compact import CompactFill, CompactOrder, CompactOrderUpdate
 from backtest_engine.engine.context import (
     EngineStrategyContext,
     HistoryStore,
     PersistentHistoryStore,
+    RustStrategyContext,
 )
 from backtest_engine.engine.core import (
     BuyingPowerTracker,
@@ -49,9 +51,11 @@ from backtest_engine.engine.core import (
     slippage_config,
 )
 from backtest_engine.engine.costs import session_costs
-from backtest_engine.engine.metrics import compute_metrics
+from backtest_engine.engine.metrics import compute_metrics, compute_metrics_from_values
 from backtest_engine.engine.orders import BasketGroup, OpenOrder, OrderManager
 from backtest_engine.engine.queue import (
+    CompactFillOccurred,
+    CompactOrderPlaced,
     EventPriority,
     EventQueue,
     FillOccurred,
@@ -63,8 +67,13 @@ from backtest_engine.engine.queue import (
 )
 from backtest_engine.engine.router import DecisionRouter
 from backtest_engine.engine.slippage import NoSlippage
-from backtest_engine.engine.store import DecisionRecord, EventStore, RecordKind
-from backtest_engine.engine.wire import route_basic_decision, supports_basic_decision
+from backtest_engine.engine.store import (
+    DecisionRecord,
+    EventStore,
+    PersistentEventStore,
+    RecordKind,
+)
+from backtest_engine.engine.wire import submit_basic_decision, supports_basic_decision
 from backtest_engine.errors import (
     CoreUnavailable,
     CorporateActionsNotProvided,
@@ -85,6 +94,7 @@ from backtest_engine.types.events import (
 )
 from backtest_engine.types.market import MarketSnapshot
 from backtest_engine.types.orders import OrderType, Side, TimeInForce
+from backtest_engine.types.portfolio import PortfolioSnapshot
 from backtest_engine.types.requirements import (
     EngineFeature,
     EventKind,
@@ -165,7 +175,11 @@ class _Run:
                 requirements.actions, self.order_manager, requirements.features
             )
         )
-        self.store = EventStore()
+        self.store = (
+            PersistentEventStore(self.persistent_runtime)
+            if self.persistent_runtime is not None
+            else EventStore()
+        )
         self.queue = (
             PersistentEventQueue(self.persistent_runtime)
             if self.persistent_runtime is not None
@@ -300,6 +314,10 @@ class BacktestEngine:
                     if run.core != "rust_persistent":
                         run.portfolio.apply(fill)
                     run.store.append(fill.ts, RecordKind.FILL, fill)
+                case CompactFillOccurred(fill=fill, snapshot=_snapshot):
+                    if not isinstance(run.store, PersistentEventStore):
+                        raise RuntimeError("compact fill reached a non-persistent event store")
+                    run.store.append(fill.ts, RecordKind.FILL, fill)
                 case StrategyNotify(event=strategy_event, snapshot=snapshot):
                     self._dispatch(run, strategy_event, snapshot)
                 case SessionClose(snapshot=snapshot):
@@ -307,34 +325,83 @@ class BacktestEngine:
                 case OrderPlaced(order=order):
                     run.order_manager.place(order)
                     run.store.append(order.ts, RecordKind.ORDER, order)
+                case CompactOrderPlaced(order=order):
+                    if not isinstance(run.order_manager, PersistentOrderManager) or not isinstance(
+                        run.store, PersistentEventStore
+                    ):
+                        raise RuntimeError("compact order reached a non-persistent runtime")
+                    run.order_manager.place_compact(order)
+                    run.store.append(order.ts, RecordKind.ORDER, order)
 
         # 남은 주문은 결과에서 조용히 사라지지 않도록 취소로 기록한다. 마지막 세션에 낸
         # DAY/IOC/FOK는 "당일 만료", GTC만 "run 종료"가 사유다.
-        remaining_entries = run.order_manager.drain()
-        if remaining_entries:
-            last_ts = feed.sessions[-1]  # 주문이 있다면 세션도 최소 하나 있다
-        for entry in remaining_entries:
-            tif = entry.order.time_in_force
-            reason = (
-                "run ended with GTC order still open — "
-                if tif is TimeInForce.GTC
-                else f"{tif.value} order expired at last session — "
-            )
-            run.store.append(
-                last_ts,
-                RecordKind.ORDER_UPDATE,
-                OrderUpdateEvent(
-                    ts=last_ts,
-                    order_id=entry.order_id,
-                    status=OrderStatus.CANCELLED,
-                    detail=(
-                        f"{reason}instrument={entry.order.instrument.symbol} "
-                        f"remaining={entry.remaining}"
+        if isinstance(run.order_manager, PersistentOrderManager):
+            if not isinstance(run.store, PersistentEventStore):
+                raise RuntimeError("persistent order manager requires its compact event store")
+            remaining_compact = run.order_manager.drain_compact()
+            if remaining_compact:
+                last_ts = feed.sessions[-1]  # 주문이 있다면 세션도 최소 하나 있다
+            for order, remaining, _triggered in remaining_compact:
+                tif = order.time_in_force
+                reason = (
+                    "run ended with GTC order still open — "
+                    if tif is TimeInForce.GTC
+                    else f"{tif.value} order expired at last session — "
+                )
+                run.store.append(
+                    last_ts,
+                    RecordKind.ORDER_UPDATE,
+                    CompactOrderUpdate(
+                        ts=last_ts,
+                        order_id=order.order_id,
+                        status=OrderStatus.CANCELLED,
+                        detail=(
+                            f"{reason}instrument={order.instrument.symbol} "
+                            f"remaining={remaining}"
+                        ),
                     ),
-                ),
-            )
+                )
+        else:
+            remaining_entries = run.order_manager.drain()
+            if remaining_entries:
+                last_ts = feed.sessions[-1]
+            for entry in remaining_entries:
+                tif = entry.order.time_in_force
+                reason = (
+                    "run ended with GTC order still open — "
+                    if tif is TimeInForce.GTC
+                    else f"{tif.value} order expired at last session — "
+                )
+                run.store.append(
+                    last_ts,
+                    RecordKind.ORDER_UPDATE,
+                    OrderUpdateEvent(
+                        ts=last_ts,
+                        order_id=entry.order_id,
+                        status=OrderStatus.CANCELLED,
+                        detail=(
+                            f"{reason}instrument={entry.order.instrument.symbol} "
+                            f"remaining={entry.remaining}"
+                        ),
+                    ),
+                )
+
+        if isinstance(run.store, PersistentEventStore):
+            run.store.finish()
 
         snapshots = run.store.snapshots()
+        if isinstance(run.store, PersistentEventStore):
+            return BacktestResult.lazy(
+                run_id=self._config.run_id,
+                snapshots=snapshots,
+                orders=run.store.orders,
+                fills=run.store.fills,
+                metrics=compute_metrics_from_values(
+                    tuple(snapshot.equity for snapshot in snapshots),
+                    run.store.traded_notional(),
+                    self._config.annualization_days,
+                ),
+            )
         return BacktestResult(
             run_id=self._config.run_id,
             snapshots=snapshots,
@@ -401,11 +468,22 @@ class BacktestEngine:
         order_manager = run.order_manager
 
         def update(order_id: str, status: OrderStatus, detail: str | None) -> None:
-            self._record_update(
-                run,
-                OrderUpdateEvent(ts=snapshot.ts, order_id=order_id, status=status, detail=detail),
-                snapshot,
-            )
+            if isinstance(run.store, PersistentEventStore):
+                self._record_compact_update(
+                    run,
+                    CompactOrderUpdate(
+                        ts=snapshot.ts, order_id=order_id, status=status, detail=detail
+                    ),
+                    snapshot,
+                )
+            else:
+                self._record_update(
+                    run,
+                    OrderUpdateEvent(
+                        ts=snapshot.ts, order_id=order_id, status=status, detail=detail
+                    ),
+                    snapshot,
+                )
 
         # 자본변동은 이 세션의 어떤 체결보다 먼저 적용한다 — 분할 후 가격으로 체결되는
         # 주문이 분할 전 수량과 섞이면 안 된다.
@@ -604,22 +682,26 @@ class BacktestEngine:
         for kind, order_id, quantity, price, slip, fee, payload in ops:
             match kind:
                 case "fill":
-                    order = order_manager.order_event(order_id)
-                    fill = FillEvent(
+                    order = order_manager.order_compact(order_id)
+                    fill = CompactFill(
                         fill_id=payload,
                         order_id=order_id,
                         ts=snapshot.ts,
                         instrument=order.instrument,
-                        quantity=Decimal(quantity),
+                        quantity=quantity,
                         side=order.side,
                         price=price,
                         fee=fee,
                         slippage_per_share=slip,
                     )
-                    run.queue.push(fill.ts, EventPriority.FILL, FillOccurred(fill, snapshot))
+                    run.queue.push(
+                        fill.ts, EventPriority.FILL, CompactFillOccurred(fill, snapshot)
+                    )
                     if run.wants(EventKind.FILL):
                         run.queue.push(
-                            fill.ts, EventPriority.NOTIFY, StrategyNotify(fill, snapshot)
+                            fill.ts,
+                            EventPriority.NOTIFY,
+                            StrategyNotify(fill.materialize(), snapshot),
                         )
                 case "update":
                     status_text, _, detail = payload.partition("|")
@@ -808,11 +890,26 @@ class BacktestEngine:
             CorporateActionType.SPLIT,
             CorporateActionType.REVERSE_SPLIT,
         )
-        remaining_by_id = {e.order_id: e.remaining for e in run.order_manager.open_entries()}
+        if isinstance(run.order_manager, PersistentOrderManager):
+            remaining_by_id = {
+                order.order_id: Decimal(remaining)
+                for order, remaining, _triggered in run.order_manager.compact_open_entries()
+            }
+        else:
+            remaining_by_id = {
+                entry.order_id: entry.remaining for entry in run.order_manager.open_entries()
+            }
         # 가격 수준이 무의미해지는 확인된 분할·병합만 대기 주문을 취소한다 (스펙 결정 3).
-        stale_orders = (
-            run.order_manager.cancel_for_instrument(action.instrument) if confirmed else ()
-        )
+        if isinstance(run.order_manager, PersistentOrderManager):
+            stale_orders = (
+                run.order_manager.cancel_compact_for_instrument(action.instrument)
+                if confirmed
+                else ()
+            )
+        else:
+            stale_orders = (
+                run.order_manager.cancel_for_instrument(action.instrument) if confirmed else ()
+            )
         for stale in stale_orders:
             stale_remaining = remaining_by_id[stale.order_id]
             update(
@@ -856,29 +953,80 @@ class BacktestEngine:
 
         if not should_dispatch:
             return
-        self._dispatch(run, snapshot, snapshot)
+        self._dispatch(run, snapshot, snapshot, portfolio_snapshot=marked)
 
     # --- 전략 호출 -----------------------------------------------------------
 
-    def _dispatch(self, run: _Run, event: StrategyEvent, market: MarketSnapshot) -> None:
+    def _dispatch(
+        self,
+        run: _Run,
+        event: StrategyEvent,
+        market: MarketSnapshot,
+        *,
+        portfolio_snapshot: PortfolioSnapshot | None = None,
+    ) -> None:
         """전략을 한 번 호출하고 Decision을 라우팅해 주문·상태 변경을 큐에 싣는다."""
         if run.history_store.session_count < run.warmup_sessions:
             return
         ts = market.ts
-        portfolio_snapshot = run.portfolio.snapshot(ts)
-        context = EngineStrategyContext(
-            now=ts,
-            snapshot=portfolio_snapshot,
-            history_store=run.history_store,
-            declared=run.declared,
-            open_orders_snapshot=run.order_manager.open_orders(),
-            universe_source=run.universe,
-        )
-        decision = run.strategy.on_event(context, event)
+        if portfolio_snapshot is None:
+            portfolio_snapshot = run.portfolio.snapshot(ts)
+        if isinstance(run.order_manager, PersistentOrderManager):
+            open_orders_snapshot = ()
+            compact_open_orders = run.order_manager.compact_open_orders()
+        else:
+            open_orders_snapshot = run.order_manager.open_orders()
+            compact_open_orders = ()
+        callback_frame = None
+        if run.persistent_runtime is None:
+            context = EngineStrategyContext(
+                now=ts,
+                snapshot=portfolio_snapshot,
+                history_store=run.history_store,
+                declared=run.declared,
+                open_orders_snapshot=open_orders_snapshot,
+                universe_source=run.universe,
+            )
+        else:
+            callback_frame = run.persistent_runtime.run_until_callback(
+                self._callback_kind(event), run.persistent_session_indices[ts]
+            )
+            context = RustStrategyContext(
+                now=ts,
+                snapshot=portfolio_snapshot,
+                history_store=run.history_store,
+                declared=run.declared,
+                open_orders_snapshot=open_orders_snapshot,
+                universe_source=run.universe,
+                callback_token=callback_frame.token,
+                compact_open_orders=compact_open_orders,
+            )
+        try:
+            decision = run.strategy.on_event(context, event)
+        except BaseException as error:
+            if callback_frame is not None:
+                assert run.persistent_runtime is not None
+                run.persistent_runtime.fail_callback(
+                    callback_frame.token, f"{type(error).__name__}: {error}"
+                )
+            raise
         persistent_route = None
-        if run.persistent_runtime is not None and supports_basic_decision(decision):
-            persistent_route = route_basic_decision(
-                run.persistent_runtime, decision, portfolio_snapshot, market
+        if run.persistent_runtime is not None:
+            assert callback_frame is not None
+            if not supports_basic_decision(decision):
+                run.persistent_runtime.fail_callback(
+                    callback_frame.token,
+                    f"unsupported strategy decision — type={type(decision).__name__}",
+                )
+                raise RuntimeError(
+                    "persistent Rust router does not support a returned strategy action"
+                )
+            persistent_route = submit_basic_decision(
+                run.persistent_runtime,
+                callback_frame.token,
+                decision,
+                portfolio_snapshot,
+                market,
             )
             decision_id = persistent_route.decision_id
         else:
@@ -897,13 +1045,44 @@ class BacktestEngine:
                 )
             routing = run.router.route(decision, decision_id, portfolio_snapshot, market)
         for update in routing.updates:
-            self._record_update(run, update, market)
+            if isinstance(update, CompactOrderUpdate):
+                self._record_compact_update(run, update, market)
+            else:
+                self._record_update(run, update, market)
         for group in routing.groups:
             run.order_manager.register_group(group)
         for order in routing.orders:
-            run.queue.push(order.ts, EventPriority.ORDER, OrderPlaced(order))
+            if isinstance(order, CompactOrder):
+                run.queue.push(order.ts, EventPriority.ORDER, CompactOrderPlaced(order))
+            else:
+                run.queue.push(order.ts, EventPriority.ORDER, OrderPlaced(order))
+
+    @staticmethod
+    def _callback_kind(event: StrategyEvent) -> str:
+        if isinstance(event, MarketSnapshot):
+            return "market"
+        if isinstance(event, FillEvent):
+            return "fill"
+        if isinstance(event, OrderUpdateEvent):
+            return "order_update"
+        if isinstance(event, CorporateActionEvent):
+            return "corporate_action"
+        raise TypeError(f"unsupported strategy callback event — got {type(event).__name__}")
 
     def _record_update(self, run: _Run, update: OrderUpdateEvent, market: MarketSnapshot) -> None:
         run.store.append(update.ts, RecordKind.ORDER_UPDATE, update)
         if run.wants(EventKind.ORDER_UPDATE):
             run.queue.push(update.ts, EventPriority.NOTIFY, StrategyNotify(update, market))
+
+    def _record_compact_update(
+        self, run: _Run, update: CompactOrderUpdate, market: MarketSnapshot
+    ) -> None:
+        if not isinstance(run.store, PersistentEventStore):
+            raise RuntimeError("compact update reached a non-persistent event store")
+        run.store.append(update.ts, RecordKind.ORDER_UPDATE, update)
+        if run.wants(EventKind.ORDER_UPDATE):
+            run.queue.push(
+                update.ts,
+                EventPriority.NOTIFY,
+                StrategyNotify(update.materialize(), market),
+            )

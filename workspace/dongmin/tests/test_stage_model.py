@@ -151,8 +151,8 @@ def test_g7_default_threshold_fails_on_isolated_cells(tmp_path: Path) -> None:
 
 
 def test_registry_assembles_per_source_modules() -> None:
-    names = {t.name for mod in (rules_krx, rules_kiwoom, rules_kis, rules_dart, rules_dart_events, rules_wise)
-             for t in mod.TABLES}
+    mods = (rules_krx, rules_kiwoom, rules_kis, rules_dart, rules_dart_events, rules_wise)
+    names = {t.name for mod in mods for t in mod.TABLES}
     assert set(rules.RULES) == names
     assert rules_krx.TABLES[0].name == "stg_price_daily"
     assert {t.name for t in rules_krx.TABLES} >= {"stg_etf_price_daily", "stg_index_daily",

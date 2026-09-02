@@ -52,7 +52,7 @@
 - **빌드 입력 동결**: 빌드 직전 `VACUUM INTO` 로 원장 스냅샷 사본을 뜨고 그 위에서만 빌드·게이트.
   근거(실측): 시각 술어(`W_now`)는 스냅샷이 못 된다 — 키움은 런 시작 시각을 전 행에 박아
   늦게 쓴 행이 이른 시각표를 달고, KRX 는 11.3M 행 전부가 3시간 창 안. wisereport.db 는
-  WAL 전환(18:00 크론과 읽기 충돌 방지)
+  WAL 전환(06:00 데일리 크론과 읽기 충돌 방지 — 09-02 에 18:00→06:00)
 - **버전 디렉토리 + manifest 포인터**: `stg_x/v=<빌드ID>/year=YYYY/part.parquet`.
   리더는 `MANIFEST.json`(최상위 인덱스) 경유 필수 — **맨 glob 금지 계약**
 - **커밋 입자 = 테이블**: 섀도 버전에 전 파티션 생성 → 게이트 전량 통과 → `MANIFEST.json`
@@ -86,7 +86,7 @@
 
 - **`write_mode` — 원장 테이블별 필수 선언**: `append_only`(KIS·DART — row_hash PK) /
   `upsert`(KRX·키움 — `INSERT OR REPLACE`, 재수집이 과거를 덮음) / `first_write_wins`
-  (v3 미러·master_daily — `INSERT OR IGNORE`). 전 판본 보존 게이트(G6)는 append_only
+  (master_daily — `INSERT OR IGNORE`; v3 미러는 09-02 동결 후 쓰기 없음). 전 판본 보존 게이트(G6)는 append_only
   소스에만 유효 — 나머지는 `_meta.json` 에 `version_loss_upstream=true` 기록
 - **temporality 강제 — 2갈래** (실측 교정): ⓐ 재조회로 덮어써지는 단일 상태 = `_current`
   접미사 강제(`corp_cls_current`, kis_stock_info 의 상태 컬럼 전부, ws_coverage) —
@@ -157,15 +157,17 @@
 | (pkey='') | c1050001_data 목록 호출 | 파싱 입력으로 소비 — 별도 테이블 없음 |
 | `stg_analyst_summary` | c1010001 HTML | ticker,fetched_date — 추정기관수. G8 필수 |
 | `stg_fin_wise` | cF3002/4002 | ACCODE 기준 · Decimal(38,6) |
-| `stg_v3_revision_daily` 등 v3 4종 | v3_* | 정식 stage(결정 ⑤). 규칙 분해는 §6 |
+| `stg_v3_revision_daily` 등 v3 4종 | v3_* | 정식 stage(결정 ⑤, **09-02 개정: 2026-04-03~09-02 동결 사본, 증분 없음**). 규칙 분해는 §6 |
 | `stg_wise_coverage` | ws_coverage | **이력 아님 — 종목당 1행 현재 상태**(실측 2,566행=2,566종목) → `status_current`·`checked_date_current`. 3분류 재료로 쓰려면 수집기를 append 이력으로 바꿔야 — stage 밖 이슈로 등록 |
 | `stg_calls_wise` | ws_call_log | 시계 컬럼 실명 `ts` |
 
-**v3 편입 계약**(결정 ⑤ 유지): 병합 시점 동결 사본 + 이후 sync 는 `INSERT OR IGNORE`
-(write_mode=first_write_wins — 상류 정정은 원장 단계에서 유실됨을 명기). `base_date` 는
-내용 기준일 라벨(실측: 비NULL 61,160행 전수에서 collected=base+1영업일 100%).
-**annual·compare 는 sync_date 단일값(2026-09-01)으로 시작 — 이후 일일 sync 가 이력을
-쌓는다. 09-02 이전 백테스트 기여 0** (WISE 자체 수집 6종도 동일 — fetched_date 첫날 하나).
+**v3 편입 계약**(결정 ⑤, 09-02 개정): **동결 사본만.** sync_v3 는 2026-09-02 중단 —
+직접 수집 6종이 같은 값을 커버한다(analyst_count 는 c1010001 원문, opinion_score 는 flag=4
+매트릭스). v3_* 는 우리 수집 시작 전 구간(2026-04-03~09-02)의 과거분 공급원이며 이후 행이
+늘지 않는다(write_mode=first_write_wins 선언은 유지 — 상류 정정은 원장 단계에서 유실됨을
+명기). `base_date` 는 내용 기준일 라벨(실측: 비NULL 61,160행 전수에서 collected=base+1영업일
+100%). **annual·compare 는 sync_date 09-01·09-02 두 판본으로 끝.** WISE 자체 수집 6종은
+fetched_date 09-01 부터 매일 적립 — 그 이전 구간의 컨센서스는 v3 과거분뿐이다.
 
 ## 5. 값 규칙
 
@@ -209,7 +211,7 @@
 | 없음 → 내용일 대용 | = `date` (내용일 그대로. 가격은 당일 실시간 관측 실증 — 교차 100%) | default (가격류는 measured 급 실증이나 라벨 통일) | 가격·지수·ETF·마스터·수급·외인·대차·공매도(거래 데이터 — **v2 의 "잔고 T+2" 클래스는 삭제: 양 테이블 전 컬럼 실측 결과 잔고 컬럼 0개**, 진짜 잔고는 SPEC §4 취득 불가) |
 | 결제일 실재 | = `stlm_date` (실측 매매일+2~12일, 행별 상이 — 위반 0) | measured | stg_credit |
 | 게시일 — 참조표 유도 | = `stg_rcept_dt_map[rcept_no]` (그대로 — max() 보정 등 판단 금지). 미스 시 rcept_no[:8] | derived / default | DART 내용 21테이블 + rcept_dt 보유 5테이블(직접) |
-| 수집일 실재 | = `fetched_date` (WISE — 18:00 수집이라는 지식은 카탈로그로) / `collected_date`(v3 revision — NULL 1,390행은 base_date, basis=default + `coverage_degraded` 불린: **실측 시리즈 최초 4거래일 100% 집중, 04-06·07 은 커버 15%·11% 붕괴**) / `snapshot_date`(v3 opinions) / `sync_date`(v3 annual·compare) | measured | WISE 6종 · v3 4종(4행 분해 — v2 의 "4종 일괄" 은 3종에 collected_date 부재로 불성립 실측) |
+| 수집일 실재 | = `fetched_date` (WISE — 06:00 수집이라는 지식은 카탈로그로) / `collected_date`(v3 revision — NULL 1,390행은 base_date, basis=default + `coverage_degraded` 불린: **실측 시리즈 최초 4거래일 100% 집중, 04-06·07 은 커버 15%·11% 붕괴**) / `snapshot_date`(v3 opinions) / `sync_date`(v3 annual·compare) | measured | WISE 6종 · v3 4종(4행 분해 — v2 의 "4종 일괄" 은 3종에 collected_date 부재로 불성립 실측) |
 | 비부여 | — | — | calls·units·shards·doc_index·coverage·corp_map·company |
 
 ## 7. 정정·판본
@@ -280,14 +282,15 @@ stage/gates.py    G0~G9 · stg_parse_log · 원장 인덱스 부재(PK 오토인
 | ②′ | 결측 = NULL + `_src_flag` + `_cast_fail_cols` + **`miss_kind`** (v2.1 확장) | 09-01 / 09-02 |
 | ③′ | available_at → available_date (날짜 단위) | 09-01 사용자 확정 |
 | ④′ | 중복 = **payload 투영 동일만 접기** · 값 상이 전 행 보존 · **is_latest 는 stage 서 제거** (④ 의 목적 — 소급 주입 방지·전행 보존 — 을 지키는 투영 재정의. 리뷰 5기 수렴) | 09-01 승인 / 09-02 개정 |
-| ⑤ | v3 미러 = 정식 stage (팩터·백테스트 입력) — 4종 규칙 분해로 이행 | 09-01 사용자 확정 |
+| ⑤ | v3 미러 = 정식 stage (팩터·백테스트 입력) — 4종 규칙 분해로 이행. **09-02 개정: 일일 sync 중단, 2026-04-03~09-02 동결 사본만 편입** | 09-01 사용자 확정 / **09-02 개정** |
 | **⑥** | **available_date = 사실 날짜만. 랙·보수 버퍼 금지 — 판단은 엔진 설정, 공개시점 지식은 카탈로그(dataset_profile — equity·증분 트랙)** | **09-02 사용자 확정** |
 | **⑦** | **가격 = 내용일 당일** ("당일치 바로 나오니까" — 실시간 관측 + 교차 100% 실증) | **09-02 사용자 확정** |
 | **⑧** | KRX 08-21~ 백필 보류 — 일일 증분 때 소급, 그전엔 coverage_gap 예외 | **09-02 사용자 결정** |
+| **⑨** | 운영 크론 정리 — `daily_dart.sh` 제거(stage 2·4 는 0콜, stage 3 은 013 재확인 39,055콜/일에 적재 0행, 스윕 미완 1창은 +3행 판정 문제) · `sync_v3` 중단 · **시계열 일일 증분은 미설계가 정상**(매일 도는 건 소멸성 소스 적립뿐) | **09-02 사용자 결정** |
 | — | stage 1회 풀 빌드 → 증분은 별도 설계 · equity 는 stage 후 | 09-01 |
 
 **미결**: 컬럼별 (p,s) 최종값(survey v2 대기) · 수급·공매도의 실제 공표 시점(관행 D+1 —
-프로브 실측은 일일 증분 트랙, 공개시점 대장에서) · cF5003 어닝서프라이즈 엔드포인트.
+프로브 실측은 일일 증분 트랙, 공개시점 대장에서). cF5003 어닝서프라이즈는 09-02 사용자 판단으로 제외.
 
 **크로스 대조 최종 실측 (09-01)**: 종가 KRX=키움 2,864,871행 100.0% · 거래량 99.9864% ·
 공매도 키움∩KIS 겹침 0(상보 유니버스) · 상장주식수 97.45%(차이 24건 전부 8/20~9/1 기업행위).

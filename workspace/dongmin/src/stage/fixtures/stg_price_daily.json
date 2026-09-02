@@ -8,7 +8,7 @@
  {"key": {"ticker": "004200", "date": "2016-03-10"}, "column": "close_krw", "expect": "9000",
   "measured_sql": "SELECT TDD_CLSPRC FROM krx_stk_bydd_trd WHERE ISU_CD='004200' AND BAS_DD='20160310'",
   "measured_at": "2026-08-28", "note": "고려개발 감자 기준가 — 무거래일 종가 보존 (SPEC §2-9)"},
- {"key": {"ticker": "004200", "date": "2016-03-10"}, "column": "open_krw", "expect": "None",
+ {"key": {"ticker": "004200", "date": "2016-03-10"}, "column": "open_krw", "expect": null,
   "measured_sql": "SELECT TDD_OPNPRC FROM krx_stk_bydd_trd WHERE ISU_CD='004200' AND BAS_DD='20160310'",
   "measured_at": "2026-08-28", "note": "O/H/L '0' → NULL (miss_kind=ledger_zero)"}
 ]

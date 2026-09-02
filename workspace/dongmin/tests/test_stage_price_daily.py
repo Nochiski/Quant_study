@@ -270,3 +270,16 @@ def test_gate_g4_fixture_mismatch_fails_build(snap: snapshot.Snapshot, tmp_path:
     g = _gate(r, "G4")
     assert g.status is gates.GateStatus.FAIL
     assert g.metrics == {"n_fixtures": 2, "n_mismatch": 1}
+
+
+def test_gate_g4_fixture_null_expectation_matches_sql_null(
+    snap: snapshot.Snapshot, tmp_path: Path
+) -> None:
+    fx = tmp_path / "fixtures.json"
+    fx.write_text(json.dumps([
+        {"key": {"ticker": "004200", "date": "2016-03-10"}, "column": "open_krw", "expect": None},
+        {"key": {"ticker": "004200", "date": "2016-03-10"}, "column": "close_krw", "expect": None},
+    ]), encoding="utf-8")
+    r = _built(snap, tmp_path, fixtures_path=fx)
+    g = _gate(r, "G4")
+    assert g.metrics == {"n_fixtures": 2, "n_mismatch": 1}  # open NULL 일치, close 9000 ≠ NULL

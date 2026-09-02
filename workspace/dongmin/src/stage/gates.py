@@ -135,9 +135,12 @@ def g4_fixtures(ctx: GateContext) -> GateResult:
         row = ctx.con.execute(f'SELECT CAST("{col}" AS VARCHAR) FROM {ctx.stage_view} '
                               f"WHERE {where}").fetchone()
         got = None if row is None else row[0]
-        if got != str(fx["expect"]):
+        expect = fx["expect"]        # JSON null = SQL NULL 기대, 그 외는 문자열 비교
+        ok_one = (got is None and expect is None) or (
+            got is not None and expect is not None and str(got) == str(expect))
+        if not ok_one:
             n_mismatch += 1
-            detail.append(f"{key}.{col}: expected {fx['expect']!r} got {got!r}")
+            detail.append(f"{key}.{col}: expected {expect!r} got {got!r}")
     ok = n_mismatch == 0
     return GateResult("G4", GateStatus.PASS if ok else GateStatus.FAIL,
                       "골든 픽스처 일치" if ok else "; ".join(detail[:10]),

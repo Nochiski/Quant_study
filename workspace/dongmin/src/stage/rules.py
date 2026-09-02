@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-RULES_VERSION = "2.2.0"
+RULES_VERSION = "2.2.1"
 PS_HEADROOM_DIGITS = 2   # survey 최대 자릿수 + 2 (성장 여유). 초과 = cast_failed → G2
 
 KIND_TEXT = "text"
@@ -27,6 +27,7 @@ class ColumnRule:
     zero_is_missing: bool = False   # 원문 문자열 '0' → NULL + miss_kind=ledger_zero (KRX O/H/L)
     normalize_text: bool = False    # §5 문자열 정규화 — 식별자·조인 키에는 금지
     key: bool = False
+    required: bool = False          # 키는 아니지만 NULL 이면 행이 무의미 → reject(required_null)
     nonempty_flag: str | None = None  # 빈값 여부 불린 컬럼 병기 (예: sect_available)
 
     @property
@@ -34,6 +35,14 @@ class ColumnRule:
         if self.kind != KIND_NUMERIC or self.precision is None or self.scale is None:
             raise ValueError(f"decimal_type on non-numeric column: {self.name} kind={self.kind}")
         return f"DECIMAL({self.precision},{self.scale})"
+
+
+@dataclass(frozen=True)
+class ExtraColumn:
+    """categorize 파생 컬럼 — 같은 행의 원장 컬럼만 참조하는 SQL (`s."원장컬럼"`). §1 1:1 안."""
+
+    name: str
+    sql: str
 
 
 @dataclass(frozen=True)
@@ -63,19 +72,41 @@ class CrossCheck:
 
 
 @dataclass(frozen=True)
+class AvailableRule:
+    """available_date 부여 규칙 (§6).
+
+    column = 내용일 그대로(default) / lookup = 참조표(derived, 미스는 unknown+NULL) / none = 비부여.
+    """
+
+    kind: str                       # column | lookup | none
+    column: str | None = None       # kind=column: stage 컬럼명
+    table: str | None = None        # kind=lookup: 참조 stage 테이블
+    local_key: str | None = None    # kind=lookup: 이 테이블의 조인 컬럼(stage 이름)
+    lookup_key: str | None = None   # kind=lookup: 참조 테이블 키 컬럼
+    lookup_value: str | None = None  # kind=lookup: 참조 테이블 날짜 컬럼
+
+
+AVAILABLE_NONE = AvailableRule("none")
+
+
+@dataclass(frozen=True)
 class TableRule:
     name: str
     sources: tuple[SourceRef, ...]
     columns: tuple[ColumnRule, ...]
     natural_key: tuple[str, ...]        # stage 컬럼명
     partition_class: str                # date_axis | receipt_axis | whole
-    partition_expr: str                 # 원장 컬럼 기준 표현식 (§4-파티션)
+    partition_expr: str | None          # 원장 컬럼 기준 표현식 (§4-파티션). whole = None
+    partition_src: str | None           # partition_expr 가 참조하는 원장 컬럼
     observed_src: str | None            # 시각 컬럼 실명. None = 면제(corp_map)
     write_mode: str                     # append_only | upsert | first_write_wins
     fanout: int
-    payload_exclude: tuple[str, ...]    # payload 투영에서 빼는 원장 컬럼 (req_*·collected_at 등)
+    payload_exclude: tuple[str, ...]    # payload 투영에서 빼는 원장 컬럼 (req_* 는 항상 제외)
     lag_known: bool
-    date_axis_src: str                  # G7 관측일 축 원장 컬럼
+    available: AvailableRule
+    payload_columns: tuple[str, ...] | None = None   # 명시하면 이 원장 컬럼들만 payload
+    key_unique: bool = False            # G3: natural_key 유일성 (원장 실측으로 확정된 테이블만)
+    extras: tuple[ExtraColumn, ...] = ()
     invariants: tuple[Invariant, ...] = ()
     cross_check: CrossCheck | None = None
 
@@ -88,6 +119,10 @@ class TableRule:
     @property
     def numeric_or_date_columns(self) -> tuple[ColumnRule, ...]:
         return tuple(c for c in self.columns if c.kind in (KIND_NUMERIC, KIND_DATE_YMD8))
+
+    @property
+    def key_columns(self) -> tuple[ColumnRule, ...]:
+        return tuple(c for c in self.columns if c.key)
 
 
 def _p(survey_max_digits: int, scale: int = 0) -> tuple[int, int]:
@@ -125,12 +160,14 @@ STG_PRICE_DAILY = TableRule(
     natural_key=("ticker", "date"),
     partition_class="date_axis",
     partition_expr="substr(BAS_DD, 1, 4)",
+    partition_src="BAS_DD",
     observed_src="collected_at",
     write_mode="upsert",
     fanout=1,
     payload_exclude=("bas_dd_req", "collected_at"),
     lag_known=True,                      # 가격 = 당일 실시간 관측 실증 (결정 ⑦)
-    date_axis_src="BAS_DD",
+    available=AvailableRule("column", column="date"),
+    key_unique=True,                     # (ISU_CD, BAS_DD) 유일 — S1 실측 dedup 0
     invariants=(
         Invariant("mktcap", "mktcap_krw <> close_krw * list_shrs"),
         Invariant("market_src", "NOT ((market = 'KOSPI' AND _src = 'stk') "
@@ -146,4 +183,91 @@ STG_PRICE_DAILY = TableRule(
     ),
 )
 
-RULES: dict[str, TableRule] = {STG_PRICE_DAILY.name: STG_PRICE_DAILY}
+# ── stg_rcept_dt_map (참조표, §1 예외 d) — rcept_no → rcept_dt. disclosure 유래, 키당 값 불변 ──
+STG_RCEPT_DT_MAP = TableRule(
+    name="stg_rcept_dt_map",
+    sources=(SourceRef("dart", "dart_disclosure", "disclosure"),),
+    columns=(
+        ColumnRule("rcept_no", "rcept_no", KIND_TEXT, expected_len=14, key=True),
+        ColumnRule("rcept_dt", "rcept_dt", KIND_DATE_YMD8, required=True),
+    ),
+    natural_key=("rcept_no",),
+    partition_class="whole",
+    partition_expr=None,
+    partition_src=None,
+    observed_src="collected_at",
+    write_mode="append_only",
+    fanout=1,
+    payload_exclude=("row_hash", "dup_seq", "collected_at"),
+    lag_known=False,
+    available=AVAILABLE_NONE,            # 참조표 — available_date 비부여 (§6)
+    payload_columns=("rcept_no", "rcept_dt"),   # 페이지 경계 중복(618 그룹)은 이 투영에서 접힌다
+    key_unique=True,                     # 실측: rcept_no 당 distinct rcept_dt > 1 = 0
+)
+
+# ── stg_fin (dart_fin_raw 28컬럼) — 골격 키 예외: ticker·date 없음, 키는 요청축 8컬럼 ─────────
+
+
+def _amt(src: str) -> ColumnRule:
+    """재무 금액 컬럼 — survey v2 전수: 정수 max 18·소수 2 → Decimal(38,4) (설계 확정)."""
+    return ColumnRule(src, src, KIND_NUMERIC, 38, 4)
+
+
+_SENTINEL = "-표준계정코드 미사용-"
+STG_FIN = TableRule(
+    name="stg_fin",
+    sources=(SourceRef("dart", "dart_fin_raw", "fin"),),
+    columns=(
+        ColumnRule("req_corp_code", "corp_code", KIND_TEXT, expected_len=8, key=True),
+        ColumnRule("req_bsns_year", "bsns_year", KIND_TEXT, expected_len=4, key=True),
+        ColumnRule("req_reprt_code", "reprt_code", KIND_TEXT, expected_len=5, key=True),
+        ColumnRule("req_fs_div", "fs_div", KIND_TEXT, key=True),
+        ColumnRule("sj_div", "sj_div", KIND_TEXT, key=True),
+        ColumnRule("account_id", "account_id", KIND_TEXT, key=True),        # 원문 — 정규화 금지
+        ColumnRule("account_detail", "account_detail", KIND_TEXT, key=True),  # 원문 보존
+        ColumnRule("ord", "ord", KIND_NUMERIC, *_p(3), key=True),
+        ColumnRule("rcept_no", "rcept_no", KIND_TEXT, expected_len=14, required=True),
+        ColumnRule("corp_code", "corp_code_resp", KIND_TEXT),
+        ColumnRule("bsns_year", "bsns_year_resp", KIND_TEXT),
+        ColumnRule("reprt_code", "reprt_code_resp", KIND_TEXT),
+        ColumnRule("sj_nm", "sj_nm", KIND_TEXT, normalize_text=True),
+        ColumnRule("account_nm", "account_nm", KIND_TEXT, normalize_text=True),
+        ColumnRule("thstrm_nm", "thstrm_nm", KIND_TEXT, normalize_text=True),      # 날짜 파싱 금지
+        _amt("thstrm_amount"),
+        _amt("thstrm_add_amount"),
+        ColumnRule("frmtrm_nm", "frmtrm_nm", KIND_TEXT, normalize_text=True),
+        _amt("frmtrm_amount"),
+        ColumnRule("frmtrm_q_nm", "frmtrm_q_nm", KIND_TEXT, normalize_text=True),
+        _amt("frmtrm_q_amount"),
+        _amt("frmtrm_add_amount"),
+        ColumnRule("bfefrmtrm_nm", "bfefrmtrm_nm", KIND_TEXT, normalize_text=True),
+        _amt("bfefrmtrm_amount"),
+        ColumnRule("currency", "currency", KIND_TEXT),
+    ),
+    natural_key=("corp_code", "bsns_year", "reprt_code", "fs_div", "sj_div", "account_id",
+                 "account_detail", "ord"),
+    partition_class="receipt_axis",
+    partition_expr="substr(rcept_no, 1, 4)",
+    partition_src="rcept_no",
+    observed_src="collected_at",
+    write_mode="append_only",
+    fanout=1,
+    payload_exclude=("row_hash", "dup_seq", "collected_at"),
+    lag_known=False,                     # 공개일은 참조표(derived)
+    available=AvailableRule("lookup", table="stg_rcept_dt_map", local_key="rcept_no",
+                            lookup_key="rcept_no", lookup_value="rcept_dt"),
+    key_unique=True,                     # 실측: 8컬럼 자연키 위반 0 (15,375,024행)
+    extras=(
+        ExtraColumn("bsns_year_mismatch", 's."req_bsns_year" <> s."bsns_year"'),
+        ExtraColumn("account_std", f"s.\"account_id\" <> '{_SENTINEL}'"),
+        ExtraColumn("account_detail_path",
+                    "CASE WHEN s.\"account_detail\" IN ('-', '') THEN NULL::VARCHAR[] "
+                    "ELSE string_split(s.\"account_detail\", '|') END"),
+        ExtraColumn("is_krw", "s.\"currency\" = 'KRW'"),
+    ),
+    invariants=(
+        Invariant("currency_null", "currency IS NULL OR currency = ''"),
+    ),
+)
+
+RULES: dict[str, TableRule] = {r.name: r for r in (STG_PRICE_DAILY, STG_RCEPT_DT_MAP, STG_FIN)}

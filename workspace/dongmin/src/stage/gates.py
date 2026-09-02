@@ -55,6 +55,7 @@ class GateContext:
     previous_g1: dict[str, object] | None   # 직전 빌드의 G1 metrics (G5 기준)
     cross_alias: str | None                 # G9 원장 alias (미부착이면 None)
     current_year: int
+    lookup_miss: int | None = None          # available lookup 미스 행수 (참조표 없는 테이블은 None)
 
 
 def _one(con: duckdb.DuckDBPyConnection, sql: str) -> tuple[object, ...]:
@@ -85,9 +86,11 @@ def g0_declaration(ctx: GateContext) -> GateResult:
             n_len += _count(ctx.con, f'SELECT count(*) FROM {ctx.src_view} '
                                        f'WHERE length("{c.src}") <> {c.expected_len}')
     ok = not missing and n_len == 0
+    metrics: dict[str, object] = {"missing_columns": missing, "n_len_mismatch": n_len}
+    if ctx.lookup_miss is not None:
+        metrics["rcept_map_miss"] = ctx.lookup_miss   # 0 초과 = 경고(설계 §4) — 실패 아님
     return GateResult("G0", GateStatus.PASS if ok else GateStatus.FAIL,
-                      "선언 대조" if ok else f"missing={missing} len_mismatch={n_len}",
-                      {"missing_columns": missing, "n_len_mismatch": n_len})
+                      "선언 대조" if ok else f"missing={missing} len_mismatch={n_len}", metrics)
 
 
 def g1_row_equation(ctx: GateContext) -> GateResult:
@@ -116,6 +119,11 @@ def g3_invariants(ctx: GateContext) -> GateResult:
         n = _count(ctx.con, f"SELECT count(*) FROM {ctx.stage_view} "
                               f"WHERE {inv.violation_sql}")
         metrics[f"{inv.key}_violations"] = n
+    if ctx.rule.key_unique:
+        keys = ", ".join(f'"{k}"' for k in ctx.rule.natural_key)
+        metrics["key_uniqueness_violations"] = _count(
+            ctx.con, f"SELECT count(*) FROM (SELECT {keys}, count(*) c FROM {ctx.stage_view} "
+                     f"GROUP BY ALL HAVING c > 1)")
     bad = {k: v for k, v in metrics.items() if int(str(v)) > 0}
     return GateResult("G3", GateStatus.FAIL if bad else GateStatus.PASS,
                       f"violations={bad}" if bad else "불변식 전부 성립", metrics)

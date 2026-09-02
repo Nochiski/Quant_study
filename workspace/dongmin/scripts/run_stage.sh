@@ -13,7 +13,8 @@ echo "════ stage build ${TABLE} 시작 $(TZ=Asia/Seoul date '+%m-%d %H:%
 SNAP=$(grep -oE 'snapshot=snap_[0-9TZ]+' /tmp/stage_${TABLE}_run1.out | head -1 | cut -d= -f2)
 if [ -n "$SNAP" ]; then
   echo "──── 재현성: 같은 스냅샷 ${SNAP} 으로 재빌드 ────"
-  .venv/bin/python -m stage --table "$TABLE" --snapshot-id "$SNAP" "$@" 2>&1 | tee /tmp/stage_${TABLE}_run2.out | grep -E "^(ok|gate_failed)"
+  case " $* " in *" --snapshot-id "*) EXTRA=();; *) EXTRA=(--snapshot-id "$SNAP");; esac   # 중복 지정 방지
+  .venv/bin/python -m stage --table "$TABLE" "${EXTRA[@]}" "$@" 2>&1 | tee /tmp/stage_${TABLE}_run2.out | grep -E "^(ok|gate_failed)"
   H1=$(grep -oE 'hash=[0-9]+:[0-9a-f]+' /tmp/stage_${TABLE}_run1.out | head -1)
   H2=$(grep -oE 'hash=[0-9]+:[0-9a-f]+' /tmp/stage_${TABLE}_run2.out | head -1)
   [ "$H1" = "$H2" ] && echo "재현성 OK: $H1" || echo "재현성 FAIL: run1 $H1 / run2 $H2"

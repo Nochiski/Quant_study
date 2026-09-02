@@ -5,6 +5,7 @@
 """
 import json
 import sqlite3
+from datetime import date
 from pathlib import Path
 
 import duckdb
@@ -195,17 +196,15 @@ def test_loan_keeps_negative_balance_and_scales_million_won(tmp_path: Path) -> N
     assert con.execute("SELECT rmnd_stcn_shr, rmnd_amt_krw FROM t").fetchone() == (-2691, 3000000)
 
 
-def test_loan_zero_price_literal_is_not_yet_recognised_as_missing(tmp_path: Path) -> None:
-    """원장 리터럴은 '0.00' 인데 빌더의 zero_is_missing 은 `= '0'` 만 본다 — 현행 동작을 고정한다.
-
-    SPEC §2-10 은 이 281행을 진짜 결측으로 판정했다. 빌더가 고쳐지면 이 테스트가 먼저 깨진다.
-    """
+def test_loan_zero_price_literal_is_missing(tmp_path: Path) -> None:
+    """원장 리터럴 '0.00'(281행) 도 결측 마커다 — SPEC §2-10, 빌더 K1 수정 후 동작."""
     rule = rules_kis.STG_LOAN_DAILY_KIS
     a = {**_defaults(rule), "stck_prpr": "0.00", "rmnd_amt": "1"}
     r = _build(tmp_path, rule, [a])
     assert r.ok, _failed(r)
     con = _read(tmp_path, r)
-    assert con.execute("SELECT close_krw, miss_kind.close_krw FROM t").fetchone() == (0, None)
+    assert con.execute("SELECT close_krw, miss_kind.close_krw FROM t").fetchone() == (
+        None, "ledger_zero")
 
 
 # ── stg_credit_daily ─────────────────────────────────────────────────────────
@@ -274,23 +273,20 @@ def test_delisted_master_state_columns_carry_current_and_ticker_comes_from_pdno(
                                                 None, None)
 
 
-def test_delisted_master_zero_date_marker_is_counted_as_cast_failed(tmp_path: Path) -> None:
-    """KIS 날짜 결측 리터럴은 '00000000' 이라 zero_is_missing 의 `= '0'` 비교가 못 잡는다.
-
-    survey v2: dpsi_erlm_cncl_dt 141행 · scts_mket_lstg_abol_dt 27행. 현행 동작을 고정한다.
-    """
+def test_delisted_master_zero_date_marker_is_ledger_zero(tmp_path: Path) -> None:
+    """KIS 날짜 결측 리터럴 '00000000'(dpsi_erlm_cncl_dt 141행 등)은 ledger_zero 다."""
     rule = rules_kis.STG_DELISTED_MASTER
     a = {**_defaults(rule), "dpsi_erlm_cncl_dt": "00000000"}
-    r = _build(tmp_path, rule, [a], gate_thresholds={"G2": 1.0})
+    r = _build(tmp_path, rule, [a])
     assert r.ok, _failed(r)
     con = _read(tmp_path, r)
     assert con.execute("SELECT dpsi_erlm_cncl_dt, miss_kind.dpsi_erlm_cncl_dt, _src_flag "
-                       "FROM t").fetchone() == (None, "cast_failed", "partial")
+                       "FROM t").fetchone() == (None, "ledger_zero", "ok")
 
 
 # ── stg_calls_kis / stg_units_kis ────────────────────────────────────────────
-def test_calls_log_rejects_rows_without_a_request_window(tmp_path: Path) -> None:
-    """d1·d2 는 자연키인데 kis_stock_info 조회 652행에서 빈값 → key_cast_failed 격리."""
+def test_calls_log_keeps_rows_without_a_request_window(tmp_path: Path) -> None:
+    """d1·d2 는 비키 — kis_stock_info 조회 652행의 빈값은 ledger_blank 로 남고 행은 보존 (K2)."""
     rule = rules_kis.STG_CALLS_KIS
     ok_row = {**_defaults(rule), "verdict": "ok", "n_rows": "100", "code": "FHPST04",
               "d1": "20100101", "d2": "20100601"}
@@ -299,10 +295,12 @@ def test_calls_log_rejects_rows_without_a_request_window(tmp_path: Path) -> None
     info_row = {**ok_row, "d1": "", "d2": "", "code": "CTPF1002R/dom_st_search"}
     r = _build(tmp_path, rule, [ok_row, empty_row, info_row])
     assert r.ok, _failed(r)
-    assert (r.n_src, r.n_rows, r.n_reject) == (3, 2, 1)
+    assert (r.n_src, r.n_rows, r.n_reject) == (3, 3, 0)
     con = _read(tmp_path, r)
-    assert con.execute("SELECT verdict, n_rows FROM t ORDER BY window_from").fetchall() == [
-        ("ok", 100), ("empty", 0)]
+    assert con.execute("SELECT code, window_from, miss_kind.window_from FROM t "
+                       "WHERE verdict = 'ok' ORDER BY code").fetchall() == [
+        ("CTPF1002R/dom_st_search", None, "ledger_blank"), ("FHPST04", date(2010, 1, 1), None)]
+    assert next(g for g in r.gates if g.name == "G6").status is gates.GateStatus.SKIP
 
 
 def test_calls_log_verdict_vocabulary_is_a_gate(tmp_path: Path) -> None:

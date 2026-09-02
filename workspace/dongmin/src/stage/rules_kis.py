@@ -243,7 +243,7 @@ STG_SHORT_DAILY_KIS = TableRule(
     payload_exclude=(*_META, "req_d1", "req_d2", "req_name"),
     lag_known=False,
     available=AvailableRule("column", column="date"),
-    key_unique=True,                     # SPEC §2-12: 939,610 전건 자연키 유일 · 중복 0
+    key_unique=False,        # append_only: 재수집 판본은 G6 축 (§7)
     extras=(
         # 같은 행 비교만으로 창 경계를 판정한다 — LAG 금지(§1 1:1). req_d1 = 요청 창 시작일.
         # 창 첫 행(stck_bsop_date = req_d1)의 acml_* 는 직전 누적과 이어지지 않는다.
@@ -286,7 +286,7 @@ STG_LOAN_DAILY_KIS = TableRule(
     payload_exclude=(*_META, "req_d1", "req_d2", "req_name", "req_mrkt_div_cls_code"),
     lag_known=False,
     available=AvailableRule("column", column="date"),
-    key_unique=True,                     # SPEC §2-12: 493,445 전건 자연키 유일 · 중복 0
+    key_unique=False,        # append_only: 재수집 판본은 G6 축 (§7)
 )
 
 # ── stg_credit_daily (kis_credit_balance 33컬럼 = 데이터 26 + 수집 메타 7) ───────────────────
@@ -354,6 +354,7 @@ STG_CREDIT_DAILY = TableRule(
 # → 재조회하면 덮이는 속성에는 `_current` 를 강제한다 (§3 temporality ⓐ).
 # `_current` 미부여 = 발생 시점이 고정된 사실: 상장·폐지·설정·해지일, 발행가, 식별자.
 _STATE = "_current"
+# 날짜 컬럼 전부 zero_is_missing — KIS 결측 리터럴 '00000000' (K1, survey 168셀)
 STG_DELISTED_MASTER = TableRule(
     name="stg_delisted_master",
     sources=(SourceRef("kis", "kis_stock_info", "kis_stock_info"),),
@@ -418,8 +419,10 @@ STG_DELISTED_MASTER = TableRule(
         _price("thdt_clpr", f"thdt_clpr{_STATE}_krw", 7),
         _price("sbst_pric", f"sbst_pric{_STATE}_krw", 1),
         _price("thco_sbst_pric", f"thco_sbst_pric{_STATE}_krw", 6),
-        ColumnRule("clpr_chng_dt", f"clpr_chng_dt{_STATE}", KIND_DATE_YMD8),
-        ColumnRule("thco_sbst_pric_chng_dt", f"thco_sbst_pric_chng_dt{_STATE}", KIND_DATE_YMD8),
+        ColumnRule("clpr_chng_dt", f"clpr_chng_dt{_STATE}", KIND_DATE_YMD8,
+                   zero_is_missing=True),
+        ColumnRule("thco_sbst_pric_chng_dt", f"thco_sbst_pric_chng_dt{_STATE}", KIND_DATE_YMD8,
+                   zero_is_missing=True),
         # 규모 — 기업행위로 바뀌고 재조회로 덮인다
         _num("cpta", f"cpta{_STATE}_krw", 13),
         _num("lstg_cptl_amt", f"lstg_cptl_amt{_STATE}_krw", 13),
@@ -431,16 +434,26 @@ STG_DELISTED_MASTER = TableRule(
         # 발행 시점 고정 사실
         _num("issu_pric", "issu_pric_krw", 6),
         # 사건 날짜 — `_current` 미부여
-        ColumnRule("scts_mket_lstg_dt", "scts_mket_lstg_dt", KIND_DATE_YMD8),
-        ColumnRule("scts_mket_lstg_abol_dt", "scts_mket_lstg_abol_dt", KIND_DATE_YMD8),
-        ColumnRule("kosdaq_mket_lstg_dt", "kosdaq_mket_lstg_dt", KIND_DATE_YMD8),
-        ColumnRule("kosdaq_mket_lstg_abol_dt", "kosdaq_mket_lstg_abol_dt", KIND_DATE_YMD8),
-        ColumnRule("frbd_mket_lstg_dt", "frbd_mket_lstg_dt", KIND_DATE_YMD8),
-        ColumnRule("frbd_mket_lstg_abol_dt", "frbd_mket_lstg_abol_dt", KIND_DATE_YMD8),
-        ColumnRule("lstg_abol_dt", "lstg_abol_dt", KIND_DATE_YMD8),
-        ColumnRule("mfnd_opng_dt", "mfnd_opng_dt", KIND_DATE_YMD8),
-        ColumnRule("mfnd_end_dt", "mfnd_end_dt", KIND_DATE_YMD8),
-        ColumnRule("dpsi_erlm_cncl_dt", "dpsi_erlm_cncl_dt", KIND_DATE_YMD8),
+        ColumnRule("scts_mket_lstg_dt", "scts_mket_lstg_dt", KIND_DATE_YMD8,
+                   zero_is_missing=True),
+        ColumnRule("scts_mket_lstg_abol_dt", "scts_mket_lstg_abol_dt", KIND_DATE_YMD8,
+                   zero_is_missing=True),
+        ColumnRule("kosdaq_mket_lstg_dt", "kosdaq_mket_lstg_dt", KIND_DATE_YMD8,
+                   zero_is_missing=True),
+        ColumnRule("kosdaq_mket_lstg_abol_dt", "kosdaq_mket_lstg_abol_dt", KIND_DATE_YMD8,
+                   zero_is_missing=True),
+        ColumnRule("frbd_mket_lstg_dt", "frbd_mket_lstg_dt", KIND_DATE_YMD8,
+                   zero_is_missing=True),
+        ColumnRule("frbd_mket_lstg_abol_dt", "frbd_mket_lstg_abol_dt", KIND_DATE_YMD8,
+                   zero_is_missing=True),
+        ColumnRule("lstg_abol_dt", "lstg_abol_dt", KIND_DATE_YMD8,
+                   zero_is_missing=True),
+        ColumnRule("mfnd_opng_dt", "mfnd_opng_dt", KIND_DATE_YMD8,
+                   zero_is_missing=True),
+        ColumnRule("mfnd_end_dt", "mfnd_end_dt", KIND_DATE_YMD8,
+                   zero_is_missing=True),
+        ColumnRule("dpsi_erlm_cncl_dt", "dpsi_erlm_cncl_dt", KIND_DATE_YMD8,
+                   zero_is_missing=True),
     ),
     natural_key=("ticker",),
     partition_class="whole",
@@ -456,22 +469,22 @@ STG_DELISTED_MASTER = TableRule(
     # 같은 구조(종목당 1행 현재 상태)인 stg_company·stg_wise_coverage 와 동렬로 비부여한다.
     # "언제 알았나"는 observed_date(collected_at KST)가 담는다. §6 표 누락은 보고서 5.
     available=AVAILABLE_NONE,
-    key_unique=True,                     # 종목당 1콜 1행 (targets.py 자연키 후보 req_ticker)
+    key_unique=False,                     # 종목당 1콜 1행 (targets.py 자연키 후보 req_ticker)
     extras=(
         ExtraColumn("ticker_pdno", 'right(s."pdno", 6)'),
     ),
 )
 
 # ── stg_calls_kis / stg_units_kis (수집 로그 2종 — 3분류 재료, §4) ────────────────────────────
-# 원장에 행 식별자(row_hash·id)가 없다. `ts` 는 수집 시각이라 §3 이 KST DATE 로만 남기게 하므로
-# **데이터 컬럼 전체가 자연키**다. 같은 날 같은 내용의 재호출은 payload 접기로 observed_n 에
-# 합산된다. d1·d2 는 kis_stock_info 조회 652행에서 빈값 → 키 결함으로 격리된다 (보고서 5).
-_LOG_KEYS = ("dataset", "ticker", "window_from", "window_to")
+# 원장에 행 식별자(row_hash·id)가 없고 판본 개념도 없다(`versioned=False` → G6 skip). 키는 항상
+# 채워지는 데이터 컬럼만 — d1·d2 는 kis_stock_info 조회 652행에서 빈값이라 비키(ledger_blank)로
+# 보존한다(K2). 같은 날 같은 내용의 재호출은 payload 접기로 observed_n 에 합산된다.
+_LOG_KEYS = ("dataset", "ticker")
 _LOG_HEAD: tuple[ColumnRule, ...] = (
     ColumnRule("name", "dataset", KIND_TEXT, key=True),
     ColumnRule("ticker", "ticker", KIND_TEXT, expected_len=6, key=True),
-    ColumnRule("d1", "window_from", KIND_DATE_YMD8, key=True),
-    ColumnRule("d2", "window_to", KIND_DATE_YMD8, key=True),
+    ColumnRule("d1", "window_from", KIND_DATE_YMD8),
+    ColumnRule("d2", "window_to", KIND_DATE_YMD8),
 )
 
 STG_CALLS_KIS = TableRule(
@@ -493,7 +506,8 @@ STG_CALLS_KIS = TableRule(
     payload_exclude=("ts",),
     lag_known=False,
     available=AVAILABLE_NONE,
-    key_unique=False,                    # 같은 호출이 다른 날 반복되면 observed_date 로 갈린다
+    key_unique=False,
+    versioned=False,                     # 콜 로그 — 같은 키가 하루 여러 번, G6 skip
     invariants=(
         # SPEC §6 회귀 고정: 판정 ok 350,943 · empty 6,739 · 오류 0, n_rows='0' 6,739
         Invariant("verdict_vocab", "verdict NOT IN ('ok', 'empty')"),
@@ -520,6 +534,7 @@ STG_UNITS_KIS = TableRule(
     lag_known=False,
     available=AVAILABLE_NONE,
     key_unique=False,
+    versioned=False,                     # 유닛 로그 — G6 skip
     invariants=(
         # survey v2 실측: status 2어휘(2자 350,941 · 5자 4,086), n_rows='0' 4,086
         Invariant("status_vocab", "status NOT IN ('ok', 'empty')"),

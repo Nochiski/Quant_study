@@ -171,7 +171,7 @@ STG_DIVIDEND = TableRule(
 
 # ── stg_shares ← dart_shares (97,194행) ────────────────────────────────────────────────────────
 # 전 수량 컬럼이 주식수 → `_shr`. 콤마 표기 84~96%(SPEC §2-11)라 숫자 선언이 필수지만 각주
-# 문자열('주1)' 등 — survey 패턴)이 섞여 컬럼당 240~3,316행이 cast_failed 가 된다 (G2 보고).
+# 표기(survey 패턴 `가9)`·`(가9)`)가 섞여 컬럼당 240~3,316행이 cast_failed 가 된다 (G2 보고).
 # se='합계' 집계행 (SPEC §2-13) → row_kind.
 STG_SHARES = TableRule(
     name="stg_shares",

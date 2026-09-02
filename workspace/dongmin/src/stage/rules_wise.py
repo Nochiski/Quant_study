@@ -146,7 +146,8 @@ STG_FIN_WISE = _blob_table(
         ColumnRule("grp_typ", "grp_typ", KIND_NUMERIC, 3, 0),
         ColumnRule("unt_typ", "unt_typ", KIND_NUMERIC, 5, 0),
         ColumnRule("p_accode", "p_accode", KIND_TEXT),
-        *(ColumnRule(f"period_label_{i}", f"period_label_{i}", KIND_TEXT, normalize_text=True)
+        *(ColumnRule(f"period_label_{i}", f"period_label_{i}", KIND_TEXT, normalize_text=True,
+                     strip_tags=True)                                   # '<br />' 제거
           for i in range(1, 7)),
         *(_fw(f"val_{i}") for i in range(1, 7)),
         *(_fw(f"val_q{i}") for i in (1, 2, 4, 5, 6)),

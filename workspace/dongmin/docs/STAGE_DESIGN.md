@@ -129,7 +129,8 @@ KRX 가격(stg_price_daily)의 기준가/체결가 구분은 별도 컬럼 없�
 - **temporality 강제 — 2갈래** (실측 교정): ⓐ 재조회로 덮어써지는 단일 상태 = `_current`
   접미사 강제(`corp_cls_current`, kis_stock_info 의 상태 컬럼 전부, ws_coverage) —
   실측: corp_cls='E' 의 26%가 과거 상장사. ⓑ `snap_date`/`fetched_date` 축으로 누적되는
-  스냅샷 = `_current` **금지**, `coverage_from` 필수(ka10099 — 하루만 지나면 이름이 거짓이 됨)
+  스냅샷 = `_current` **금지**, `coverage_from` 필수(ka10099 — 하루만 지나면 이름이 거짓이 됨. rules 의
+  `TableRule.coverage_from` → `_meta.json`, 09-03)
 - 시각류는 KST 날짜로 변환해 DATE 로만 (결정 ③′ — 시각 해상도 폐기)
 
 ## 4. 테이블 카탈로그 — 실물 61 전수 대조 (2차 실측 정정 반영)
@@ -240,7 +241,8 @@ rules 의 `partition_class`·`partition_expr` 는 이 표와 일치해야 한다
   **접힌 그룹의 대표 `observed_date` = min**(처음 관측된 날) + `observed_n`(접힌 행수) — v2.2.
   max 를 쓰면 "08-25 에 알던 값"이 08-30 뒤로 밀려 PIT 결측을 만들고, 미지정이면 빌드마다 비결정.
   실측 09-02: kis_credit 중복 566,795 = payload 26컬럼 동일 그룹 517,648/517,648, 접기 후 잔여 0
-- **문자열 정규화 — 텍스트 컬럼만**: NFKC → 개행·탭 제거 → 연속공백 축약 → strip + 태그 제거.
+- **문자열 정규화 — 텍스트 컬럼만**: NFKC → 개행·탭 제거 → 연속공백 축약 → strip. **태그 제거는 컬럼별 옵트인(`strip_tags`)** —
+  WISE 라벨의 `<br />` 류만. DART 서술 컬럼의 `<주1>` 은 각주(내용)라 무차별 제거 = silent 손실(09-03 5단계 리뷰 정정).
   **식별자·조인 키(account_id·corp_code·ticker·ISU_*)와 숫자 컬럼에는 적용 금지** —
   실측: 숫자 컬럼 1,607만 행에서 전각·유니코드 마이너스 0건(방어는 게이트로 —
   비ASCII 검출 시 실패), 반면 account_id 는 17.8%가 한글 센티널이라 무차별 NFKC 는 키 변형 위험
@@ -315,7 +317,7 @@ ka10099 로 적립) ⓑ 08-21~31 상장·폐지 재구성 불가.
 | G4 | 골든 픽스처 | 불변형/시변형 분리. 정정 반영: 회귀 **125**(price)+**2**(etf) · 정지행 125(OHL=0∧거래량>0 — DEFECT-001 계열) · 원주가 2,650,000 · abs 금지 3행 · **unit≠1 선언 전 컬럼에 픽스처 강제**(×1e6 오적용 = SPEC 최대 결함 클래스의 유일 방어). **픽스처 파일** = `data/stage/fixtures/<table>.json` [{`key`, `column`, `expect`, `measured_sql`, `measured_at`}] — 강제 주체는 `gates.py`(unit≠1 컬럼에 픽스처 없음 = G4 실패). WISE 처럼 단위가 데이터 값인 테이블은 `unit` 컬럼 분포 픽스처 |
 | G5 | 회귀 Δ등식 | `Δstage = Δn_src×fanout − Δdedup − Δreject` — 설명 안 되는 증감 실패 (v2 의 "증가 허용"은 payload 접기 하에서 탐지력 상실 — 정정). 기준 = MANIFEST `current_build` 의 `_meta.json`, **첫 빌드는 `skip(no_baseline)`** · 스냅샷 콘텐츠 해시(`src_bytes`·`src_mtime`)도 비교해 upsert 소스의 값 변경(n_src 불변)을 잡는다 |
 | G6 | 판본 보존 | (자연키, observed_date) 유일성 위반 0 + **자연키 중복 중 payload 동일 비율 기록**(임계 초과 = 재수집 잡음 과다) — **append_only 소스에만** (§3 write_mode) |
-| G7 | 범위 — **행 격리형** | 범위 밖 값은 NULL + `miss_kind='out_of_range'` + reject 계상(원문 보존). 테이블 실패는 격리 비율 > 임계(기본 0.1%, survey v2 후 확정)일 때만. 축: **관측일**(BAS_DD·dt·deal_date·rcept) 연도 [2000, 현재+1] / **내용일**(만기·상환·증감자일 — pymd·*_edd·isu_dcrs_de) 연도 [1990, 현재+40] · 부호 교차 · 비율 범위. 실측: CB 만기 2053 정상 · **오타 2106(tsstk_dp)·2120~2923(dart_capital 7행) 실재** — v2.1 의 테이블 폐기형은 두 테이블을 영구 빌드 불가로 만들었다(v2 가 축 분리로 잡았다던 사고 클래스의 상한값 재발) |
+| G7 | 범위 — **행 격리형** | 범위 밖 값은 NULL + `miss_kind='out_of_range'` + reject 계상(원문 보존). 테이블 실패는 격리 비율 > 임계(기본 0.1%, survey v2 후 확정)일 때만. 축: **관측일**(BAS_DD·dt·deal_date·rcept) 연도 [2000, 현재+1] / **내용일**(만기·상환·증감자일·상장일 — pymd·*_edd·isu_dcrs_de·LIST_DD) 연도 **[1956(KRX 개장), 현재+40]**(09-03 정정: 하한 1990 은 삼성전자 상장일 19750611 을 격리했다) · 부호 교차 · 비율 범위. 실측: CB 만기 2053 정상 · **오타 2106(tsstk_dp)·2120~2923(dart_capital 7행) 실재** — v2.1 의 테이블 폐기형은 두 테이블을 영구 빌드 불가로 만들었다(v2 가 축 분리로 잡았다던 사고 클래스의 상한값 재발) |
 | G8 | 파싱 등식 | blob=parse_log ∧ Σn_rows=stage — **ep 별 분리 산출** + 조인 테이블은 좌표 합집합 등식 (예외 e) · coverage 급락 감지(v3 일별 행수 < 직전 중앙값 50% 플래그) |
 | G9 | **교차 소스 회귀** | **원장 직접 대조**(stage 간 아님 — S1 단독 실행 가능): (stk_bydd ∪ ksq_bydd) ⋈ ka10060 ON (ISU_CD=ticker, BAS_DD=dt), `CAST(TDD_CLSPRC AS INT) = abs(CAST(cur_prc AS INT))` **7,537,984행 100.0000%**(v2.1 의 2,864,871 은 survey_cross 조인 수 — 09-02 재측정) · 거래량 `ACC_TRDVOL = acc_trde_prica` 99.9864% · `MKTCAP = TDD_CLSPRC × LIST_SHRS` 위반 0 — 기준값은 baseline.json, 저하 = 실패 |
 

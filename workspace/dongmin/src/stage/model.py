@@ -40,6 +40,7 @@ class ColumnRule:
     expected_len: int | None = None
     zero_is_missing: bool = False   # 원문 문자열 '0' → NULL + miss_kind=ledger_zero (KRX O/H/L)
     normalize_text: bool = False    # §5 문자열 정규화 — 식별자·조인 키에는 금지
+    strip_tags: bool = False        # 정규화 뒤 <…> 제거 — WISE 라벨만. DART '<주1>' 은 각주
     key: bool = False
     required: bool = False          # 키는 아니지만 NULL 이면 행이 무의미 → reject(required_null)
     nonempty_flag: str | None = None  # 빈값 여부 불린 컬럼 병기 (예: sect_available)
@@ -139,6 +140,7 @@ class TableRule:
     invariants: tuple[Invariant, ...] = ()
     cross_check: CrossCheck | None = None
     blob_source: BlobSource | None = None
+    coverage_from: str | None = None    # §3 temporality ⓑ — 누적 스냅샷 관측 시작일 (ka10099 09-01)
 
     def column(self, name: str) -> ColumnRule:
         for c in self.columns:

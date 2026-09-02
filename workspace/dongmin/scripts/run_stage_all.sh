@@ -9,15 +9,8 @@ mkdir -p logs/stage_all
 SUM=logs/stage_all/summary.tsv
 [ -f "$SUM" ] || printf 'table\tstatus\trows\tsrc\tdedup\treject\telapsed_s\tfailed_gates\n' > "$SUM"
 
-# 테이블별 게이트 임계 — survey v2 실측(§10 5단계) 기준. 없으면 기본(G2 0 · G7 0.1%).
-declare -A G2 G7
-G2[stg_listing_daily]=0.01        # PARVAL 비수치 73,615/9.2M = 0.80%
-G2[stg_shares]=0.12               # 비숫자 11,115/97,194 = 11.44%
-G2[stg_dividend]=0.001            # 143/384,232
-G2[stg_hyslr]=0.0001              # '#######' 9/228,226
-G2[stg_credit_daily]=0.0001       # prdy_ctrt 465/8.97M
-G2[stg_delisted_master]=0.05      # K1 후 잔여(비-8자리 날짜 등) — 실측 후 확정
-G7[stg_delisted_master]=0.01      # mfnd_end_dt 비-(19|20) 5/652
+# 게이트 임계는 data/stage/baseline.json 의 테이블별 thresholds 에서 읽는다(§9) — 여기 하드코딩 금지.
+# 임시 override 가 필요하면 환경변수 STAGE_EXTRA='--g2 0.01' 로 전 테이블에 준다.
 
 ORDER=(stg_rcept_dt_map
   stg_price_daily stg_etf_price_daily stg_index_daily stg_listing_daily stg_ingest_krx
@@ -33,12 +26,10 @@ ORDER=(stg_rcept_dt_map
 if [ "$#" -gt 0 ]; then ORDER=("$@"); fi
 
 for T in "${ORDER[@]}"; do
-  EXTRA=()
-  [ -n "${G2[$T]:-}" ] && EXTRA+=(--g2 "${G2[$T]}")
-  [ -n "${G7[$T]:-}" ] && EXTRA+=(--g7 "${G7[$T]}")
   LOG=logs/stage_all/$T.log
-  echo "=== $T $(date -u +%FT%TZ) ${EXTRA[*]:-}" | tee "$LOG"
-  /usr/bin/time -v env PYTHONPATH=src .venv/bin/python -m stage --table "$T" --snapshot-id "$SNAP" "${EXTRA[@]}" >> "$LOG" 2>&1
+  echo "=== $T $(date -u +%FT%TZ) ${STAGE_EXTRA:-}" | tee "$LOG"
+  # shellcheck disable=SC2086  # reason: STAGE_EXTRA 는 의도적으로 단어 분리
+  /usr/bin/time -v env PYTHONPATH=src .venv/bin/python -m stage --table "$T" --snapshot-id "$SNAP" ${STAGE_EXTRA:-} >> "$LOG" 2>&1
   RC=$?
   LINE=$(grep -E '^(ok|gate_failed|error)' "$LOG" | tail -1)
   STATUS=$(echo "$LINE" | awk '{print $1}')

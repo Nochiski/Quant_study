@@ -116,7 +116,7 @@ STG_ETF_PRICE_DAILY = TableRule(
     payload_exclude=("bas_dd_req", "collected_at"),
     lag_known=True,                      # 가격류 — 당일 실시간 관측 (§6, 결정 ⑦)
     available=AvailableRule("column", column="date"),
-    key_unique=False,                    # 원장 PK 는 (bas_dd_req, ISU_CD) — BAS_DD 축 미실측
+    key_unique=True,                     # 서버 실측 09-03: 키 중복 0 (upsert 원장)
     invariants=(                         # survey v2 전수 n_neg=0 인 컬럼만
         Invariant("volume_negative", "volume_shr < 0"),
         Invariant("mktcap_negative", "mktcap_krw < 0"),
@@ -157,7 +157,7 @@ STG_INDEX_DAILY = TableRule(
     payload_exclude=("bas_dd_req", "collected_at"),
     lag_known=True,                      # 지수 = 가격류 (§6 주의 — 당일 실시간 관측)
     available=AvailableRule("column", column="date"),
-    key_unique=False,                    # 원장 PK 는 (bas_dd_req, IDX_NM) — BAS_DD 축 미실측
+    key_unique=True,                     # 서버 실측 09-03: 키 중복 0 (upsert 원장)
     invariants=(
         Invariant("volume_negative", "volume_shr < 0"),
         Invariant("mktcap_negative", "mktcap_krw < 0"),
@@ -201,7 +201,7 @@ STG_LISTING_DAILY = TableRule(
     payload_exclude=("collected_at",),   # bas_dd_req 는 키라 payload 에서 뺄 필요가 없다
     lag_known=False,                     # 마스터 = 공표 시점 미상 (§6 주의. T+1 08:00 은 카탈로그)
     available=AvailableRule("column", column="date"),
-    key_unique=False,                    # 원장 PK 는 (bas_dd_req, ISU_CD=ISIN) — 단축코드 축 미실측
+    key_unique=True,                     # 서버 실측 09-03: 키 중복 0 (upsert 원장)
     extras=(
         # 액면가 범주: 수치면 'numeric', 아니면 원문 어휘 그대로(원문 유실 방지 — §5 신뢰 불가 값)
         ExtraColumn("par_value_kind",

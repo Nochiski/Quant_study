@@ -1,0 +1,13 @@
+[
+ {
+  "key": {
+   "ticker": "299900",
+   "date": "2026-08-13"
+  },
+  "column": "rmnd_amt_krw",
+  "expect": "304000000",
+  "measured_sql": "SELECT \"rmnd_amt\" FROM kis_loan_trans WHERE \"req_ticker\"='299900' AND \"bsop_date\"='20260813'",
+  "measured_at": "2026-09-03",
+  "note": "원문 '304' × 1000000 (SPEC §2-4)"
+ }
+]

@@ -1,0 +1,13 @@
+[
+ {
+  "key": {
+   "date": "2026-08-20",
+   "ticker": "005930"
+  },
+  "column": "shrts_trde_prica_krw",
+  "expect": "371986192000",
+  "measured_sql": "SELECT \"shrts_trde_prica\" FROM ka10014_short_selling WHERE \"ticker\"='005930' AND \"dt\"='20260820'",
+  "measured_at": "2026-09-03",
+  "note": "원문 '371986192' × 1000 (SPEC §2-4)"
+ }
+]

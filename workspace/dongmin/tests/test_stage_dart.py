@@ -5,6 +5,7 @@
 v1∪v2 접기 · 페이지 경계 접기 · rm 분해 · 참조표 룩업)을 하나씩 건다.
 lookup available 테이블은 같은 stage 루트에 `stg_rcept_dt_map` 을 먼저 빌드해야 한다.
 """
+import hashlib
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -262,12 +263,24 @@ LEDGER: dict[str, list[Row]] = {
 }
 
 
+_HASH_META = ("row_hash", "dup_seq", "collected_at")
+
+
+def _with_hash(cols: list[str], row: Row) -> Row:
+    """원장 PK `row_hash` = 내용 해시(수집 메타 제외) — 수집기 규약을 픽스처에서 재현한다."""
+    if "row_hash" not in cols or row.get("row_hash"):
+        return row
+    content = "|".join(str(row.get(c) or "") for c in cols if c not in _HASH_META)
+    return {**row, "row_hash": hashlib.md5(content.encode("utf-8")).hexdigest()}
+
+
 def _write_dart(path: Path, ledger: dict[str, list[Row]]) -> None:
     con = sqlite3.connect(path)
     for table, cols in COLS.items():
         con.execute(f"CREATE TABLE {table} ({', '.join(c + ' TEXT' for c in cols)})")
         con.executemany(f"INSERT INTO {table} VALUES ({','.join('?' * len(cols))})",
-                        [tuple(row.get(c) for c in cols) for row in ledger.get(table, [])])
+                        [tuple(_with_hash(cols, row).get(c) for c in cols)
+                         for row in ledger.get(table, [])])
     con.commit()
     con.close()
 

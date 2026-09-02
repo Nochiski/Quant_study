@@ -169,12 +169,14 @@ def test_matrix_parser_unnests_val1_to_5_with_measured_lookback_labels() -> None
 
 def test_fin_wise_parser_keeps_one_row_per_data_entry_with_period_labels() -> None:
     body = _fin_blob([_fin_row("200000", "매출액(수익)"), _fin_row("200010", "*내수", "200000")])
+    null_data = _z({"YYMM": [], "DATA": None, "FIN": "IFRS별도", "FRQ": "연간"})   # 082640 실측
     res = parsers.parse_fin_wise([_blob("005930", "cF3002", "Y", body),
                                   _blob("005930", "cF4002", "Y", _fin_blob([])),
+                                  _blob("082640", "cF3002", "Y", null_data),
                                   _blob("000020", "cF3002", "Y", b"\x78\x9cbroken")])
-    assert res.metrics["n_rows_emitted"] == 2 and res.metrics["n_empty"] == 1
+    assert res.metrics["n_rows_emitted"] == 2 and res.metrics["n_empty"] == 2
     assert res.metrics["n_parse_failed"] == 1
-    assert res.metrics["n_blobs"] == {"cF3002": 2, "cF4002": 1}
+    assert res.metrics["n_blobs"] == {"cF3002": 3, "cF4002": 1}
     r = res.rows[0]
     assert (r["ep"], r["seq"], r["accode"], r["p_accode"]) == ("cF3002", "0", "200000", None)
     assert r["period_label_6"] == "2026/12(E)<br />(IFRS연결)"
@@ -185,13 +187,20 @@ def test_fin_wise_parser_keeps_one_row_per_data_entry_with_period_labels() -> No
     assert res.rows[1]["seq"] == "1" and res.rows[1]["p_accode"] == "200000"
 
 
+def by_ticker(res: parsers.ParseResult) -> dict[str, dict[str, str | None]]:
+    return {str(r["cmp_cd"]): r for r in res.rows}
+
+
 def test_analyst_summary_parser_handles_three_html_shapes_and_alert_body() -> None:
     blobs = [_blob("005930", "c1010001", "", _html(SAMSUNG_CELLS)),
              _blob("000250", "c1010001", "", _html("최근3개월 이내에 제시된 의견이 없습니다")),
              _blob("000020", "c1010001", "", _html(["&nbsp;", "", "999", "12.34", ""])),
+             _blob("000030", "c1010001", "", _html(["3.80", "1,000", "-120", "N/A", "3"])),
              _blob("082640", "c1010001", "", ALERT)]
     res = parsers.parse_analyst_summary(blobs)
-    assert res.metrics["n_rows_emitted"] == 3 and res.metrics["n_no_data"] == 1
+    assert res.metrics["n_rows_emitted"] == 4 and res.metrics["n_no_data"] == 1
+    assert res.metrics["n_na_cells"] == 1                       # PER 'N/A'(EPS 음수) → blank
+    assert by_ticker(res)["000030"]["per"] == ""
     assert res.metrics["n_parse_failed"] == 0 and res.metrics["n_no_opinion"] == 1
     by = {r["cmp_cd"]: r for r in res.rows}
     s = by["005930"]

@@ -454,23 +454,30 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
                                       "WHERE available_basis = 'unknown'")
 
         nk = ", ".join(_q(k) for k in rule.natural_key)
+        n_ok = _count(con, "SELECT count(*) FROM stage_ok")
         if partitioned:
-            con.execute(f"COPY (SELECT * FROM stage_ok ORDER BY {nk}) TO '{tmp_table}' "
-                        "(FORMAT PARQUET, PARTITION_BY (year), OVERWRITE_OR_IGNORE, "
-                        "FILENAME_PATTERN 'part')")
             glob = str(tmp_table / "year=*" / "*.parquet")
+            if n_ok:
+                con.execute(f"COPY (SELECT * FROM stage_ok ORDER BY {nk}) TO '{tmp_table}' "
+                            "(FORMAT PARQUET, PARTITION_BY (year), OVERWRITE_OR_IGNORE, "
+                            "FILENAME_PATTERN 'part')")
         else:
-            con.execute(f"COPY (SELECT * FROM stage_ok ORDER BY {nk}) "
-                        f"TO '{tmp_table / 'part0.parquet'}' (FORMAT PARQUET)")
             glob = str(tmp_table / "*.parquet")
+            if n_ok:
+                con.execute(f"COPY (SELECT * FROM stage_ok ORDER BY {nk}) "
+                            f"TO '{tmp_table / 'part0.parquet'}' (FORMAT PARQUET)")
         if n_reject:
             (tmp_table / "_reject").mkdir()
             rej = tmp_table / "_reject" / "part.parquet"
             con.execute(f"COPY (SELECT * FROM stage_rej) TO '{rej}' (FORMAT PARQUET)")
-        con.execute(f"CREATE OR REPLACE TEMP VIEW stage_pq AS "
-                    f"SELECT * FROM read_parquet('{glob}', hive_partitioning=true)")
+        if n_ok:
+            con.execute(f"CREATE OR REPLACE TEMP VIEW stage_pq AS "
+                        f"SELECT * FROM read_parquet('{glob}', hive_partitioning=true)")
+            content_hash = _content_hash(con, glob)
+        else:   # 전 행 reject — PARTITION_BY COPY 는 파일을 안 만들어 read_parquet 이 죽는다
+            con.execute("CREATE OR REPLACE TEMP VIEW stage_pq AS SELECT * FROM stage_ok")
+            content_hash = "0:empty"
         n_stage = _count(con, "SELECT count(*) FROM stage_pq")
-        content_hash = _content_hash(con, glob)
 
         fpath = fixtures_path or (stage_root / "fixtures" / f"{rule.name}.json")
         fixtures = json.loads(fpath.read_text(encoding="utf-8")) if fpath.exists() else None

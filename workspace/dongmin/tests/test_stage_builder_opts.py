@@ -165,3 +165,28 @@ def test_versioned_append_only_table_still_fails_g6_on_same_day_duplicates(tmp_p
 
 def test_observed_year_floor_admits_1999_dart_receipts() -> None:
     assert gates.YEAR_RANGE_OBSERVED[0] == 1999          # 19990403000009 실재 (DART 리뷰 D4)
+
+
+def test_build_with_every_row_rejected_yields_an_empty_build_not_a_crash(tmp_path: Path) -> None:
+    """전 행 reject 시 PARTITION_BY COPY 가 파일을 안 써 read_parquet 이 죽었다(1차 풀 빌드)."""
+    d = tmp_path / "raw"
+    d.mkdir()
+    con = sqlite3.connect(d / "x.db")
+    con.execute("CREATE TABLE z (k TEXT, p TEXT, d TEXT, collected_at TEXT)")
+    con.executemany("INSERT INTO z VALUES (?,?,?,?)", [
+        (None, "1", "20200101", "2026-08-30T10:00:00"),
+        ("", "2", "20200102", "2026-08-30T10:00:00")])
+    con.commit()
+    con.close()
+    rule = model.TableRule(
+        name="stg_probe_empty", sources=(model.SourceRef("x", "z", "z"),),
+        columns=(model.ColumnRule("k", "k", model.KIND_TEXT, key=True),
+                 model.ColumnRule("d", "date", model.KIND_DATE_YMD8, key=True),
+                 model.ColumnRule("p", "p", model.KIND_NUMERIC, 5, 0)),
+        natural_key=("k", "date"), partition_class="date_axis", partition_expr="substr(d, 1, 4)",
+        partition_src="d", observed_src="collected_at", write_mode="append_only", fanout=1,
+        payload_exclude=("collected_at",), lag_known=False, available=model.AVAILABLE_NONE)
+    s = snapshot.make_snapshot({"x": d / "x.db"}, tmp_path / "snapshots", snapshot_id="s")
+    r = build.build_table(rule, s, tmp_path / "stage")
+    assert r.ok, [g for g in r.gates if g.status is gates.GateStatus.FAIL]
+    assert (r.n_src, r.n_rows, r.n_reject, r.content_hash) == (2, 0, 2, "0:empty")

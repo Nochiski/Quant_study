@@ -179,9 +179,11 @@ def _decode_text(body: bytes | bytearray | memoryview) -> str:
 def _json_rows(body: bytes, key: str) -> tuple[dict[str, object] | None, list[object] | None]:
     """(최상위 dict, 행 리스트). 구조가 아니면 (None, None) — 호출자가 parse_failed 계상."""
     d = _decode_json(body)
-    if not isinstance(d, dict):
+    if not isinstance(d, dict) or key not in d:
         return None, None
-    rows = d.get(key)
+    rows = d[key]
+    if rows is None:                 # 키는 있고 값이 null — 데이터 없음(082640 실측) → 빈 blob
+        return d, []
     if not isinstance(rows, list):
         return None, None
     return d, list(rows)
@@ -397,9 +399,13 @@ _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s+")
 
 
+_NA_TOKENS = frozenset({"N/A", "n/a", "NA"})   # WISE 표기 결측 — PER 'N/A' 98 blob 실측
+
+
 def _cell_text(fragment: str) -> str:
-    """태그 제거 → 엔티티 해제(&nbsp; → 공백) → 공백 축약 → strip. 빈 셀 = ''(blank 계상)."""
-    return _WS_RE.sub(" ", html.unescape(_TAG_RE.sub(" ", fragment))).strip()
+    """태그 제거 → 엔티티 해제(&nbsp; → 공백) → 공백 축약 → strip. 빈 셀·'N/A' = ''(blank 계상)."""
+    t = _WS_RE.sub(" ", html.unescape(_TAG_RE.sub(" ", fragment))).strip()
+    return "" if t in _NA_TOKENS else t
 
 
 def parse_analyst_summary(blobs: Iterable[RawBlob]) -> ParseResult:
@@ -409,7 +415,7 @@ def parse_analyst_summary(blobs: Iterable[RawBlob]) -> ParseResult:
     의견이 없습니다'(346) → 값 NULL + no_opinion_note. `<script>alert(…)` 리다이렉트 본문(1)은
     데이터 없음(n_no_data, 실패 아님). 기준일은 '[기준:YYYY.MM.DD]'.
     """
-    n_blobs = n_no_data = n_failed = n_no_opinion = n_dup = 0
+    n_blobs = n_no_data = n_failed = n_no_opinion = n_dup = n_na = 0
     coords: dict[tuple[str, str], dict[str, str | None]] = {}
     for b in blobs:
         n_blobs += 1
@@ -435,6 +441,8 @@ def parse_analyst_summary(blobs: Iterable[RawBlob]) -> ParseResult:
             n_no_opinion += 1
             row["no_opinion_note"] = cells[0]
         elif len(cells) == 5:
+            n_na += sum(1 for td in _TD_RE.findall(trs[-1])
+                        if _TAG_RE.sub("", td).strip() in _NA_TOKENS)
             row.update(opinion_score=cells[0], target_price_krw=cells[1], eps_krw=cells[2],
                        per=cells[3], analyst_count=cells[4])
         else:
@@ -449,7 +457,7 @@ def parse_analyst_summary(blobs: Iterable[RawBlob]) -> ParseResult:
     return ParseResult(rows=out, columns=ANALYST_COLUMNS, metrics={
         "n_blobs": n_blobs, "n_no_data": n_no_data, "n_no_opinion": n_no_opinion,
         "n_rows_emitted": len(out), "n_parse_failed": n_failed, "n_value_mismatch": 0,
-        "n_dup_coords_folded": n_dup})
+        "n_dup_coords_folded": n_dup, "n_na_cells": n_na})
 
 
 PARSERS.update({

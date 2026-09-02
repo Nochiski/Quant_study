@@ -139,6 +139,10 @@ def _row_kind(src: str) -> ExtraColumn:
                                    f"THEN 'aggregate' ELSE 'detail' END")
 
 
+# 보조원장 6종 공통: 같은 접수번호 안에 구분 컬럼(se·stock_knd·nm·adtor…)이 같은 복수 행이
+# 실재한다(1차 풀 빌드 09-03 G6: capital 27·hyslr 13·audit 4·tesstk 4·dividend 2·shares 2).
+# 내용 컬럼만으로는 행 식별이 안 되므로 원장 PK `row_hash`(내용 해시)를 키에 넣는다 —
+# DART 응답 행에는 위치 식별자가 없다.
 # ── stg_dividend ← dart_dividend (384,232행) ───────────────────────────────────────────────────
 # se 는 단위 라벨을 품은 구분 문자열('(연결)당기순이익(백만원)'·'현금배당수익률(%)' 등 — survey
 # 패턴)이라 금액 3컬럼의 단위가 행마다 다르다 → 단위 접미사 금지, unit_scale 금지 (§5).
@@ -148,6 +152,7 @@ STG_DIVIDEND = TableRule(
     name="stg_dividend",
     sources=(SourceRef("dart", "dart_dividend", "dividend"),),
     columns=(
+        ColumnRule("row_hash", "row_hash", KIND_TEXT, expected_len=32, key=True),   # 원장 PK
         *_REQ_AXIS,
         ColumnRule("se", "se", KIND_TEXT, key=True),              # 구분 — 원문 보존(키 구성원)
         ColumnRule("stock_knd", "stock_knd", KIND_TEXT, key=True),  # '-' 270,320행은 그대로 둔다
@@ -156,7 +161,7 @@ STG_DIVIDEND = TableRule(
         ColumnRule("frmtrm", "frmtrm", KIND_NUMERIC, _DIV_P, _DIV_S),
         ColumnRule("lwfr", "lwfr", KIND_NUMERIC, _DIV_P, _DIV_S),
     ),
-    natural_key=("corp_code", "bsns_year", "reprt_code", "se", "stock_knd"),
+    natural_key=("row_hash", "corp_code", "bsns_year", "reprt_code", "se", "stock_knd"),
     partition_class="receipt_axis",
     partition_expr="substr(rcept_no, 1, 4)",
     partition_src="rcept_no",
@@ -177,6 +182,7 @@ STG_SHARES = TableRule(
     name="stg_shares",
     sources=(SourceRef("dart", "dart_shares", "shares"),),
     columns=(
+        ColumnRule("row_hash", "row_hash", KIND_TEXT, expected_len=32, key=True),   # 원장 PK
         *_REQ_AXIS,
         ColumnRule("se", "se", KIND_TEXT, key=True),               # 주식 종류 구분 + '합계'
         *_RESP_META,
@@ -193,7 +199,7 @@ STG_SHARES = TableRule(
         ColumnRule("tesstk_co", "tesstk_co_shr", KIND_NUMERIC, *p_headroom(13)),
         ColumnRule("distb_stock_co", "distb_stock_co_shr", KIND_NUMERIC, *p_headroom(15)),
     ),
-    natural_key=("corp_code", "bsns_year", "reprt_code", "se"),
+    natural_key=("row_hash", "corp_code", "bsns_year", "reprt_code", "se"),
     partition_class="receipt_axis",
     partition_expr="substr(rcept_no, 1, 4)",
     partition_src="rcept_no",
@@ -217,6 +223,7 @@ STG_CAPITAL = TableRule(
     name="stg_capital",
     sources=(SourceRef("dart", "dart_capital", "capital"),),
     columns=(
+        ColumnRule("row_hash", "row_hash", KIND_TEXT, expected_len=32, key=True),   # 원장 PK
         *_REQ_AXIS,
         ColumnRule("isu_dcrs_de", "isu_dcrs_de_raw", KIND_TEXT, key=True),
         ColumnRule("isu_dcrs_stle", "isu_dcrs_stle", KIND_TEXT, key=True),
@@ -229,7 +236,8 @@ STG_CAPITAL = TableRule(
         ColumnRule("isu_dcrs_mstvdv_fval_amount", "isu_dcrs_mstvdv_fval_amount_krw", KIND_NUMERIC,
                    *p_headroom(11)),
     ),
-    natural_key=("corp_code", "bsns_year", "reprt_code", "isu_dcrs_de_raw", "isu_dcrs_stle",
+    natural_key=("row_hash", "corp_code", "bsns_year", "reprt_code",
+                "isu_dcrs_de_raw", "isu_dcrs_stle",
                  "isu_dcrs_stock_knd"),
     partition_class="receipt_axis",
     partition_expr="substr(rcept_no, 1, 4)",
@@ -250,6 +258,7 @@ STG_TESSTK = TableRule(
     name="stg_tesstk",
     sources=(SourceRef("dart", "dart_tesstk", "tesstk"),),
     columns=(
+        ColumnRule("row_hash", "row_hash", KIND_TEXT, expected_len=32, key=True),   # 원장 PK
         *_REQ_AXIS,
         ColumnRule("acqs_mth1", "acqs_mth1", KIND_TEXT, key=True),
         ColumnRule("acqs_mth2", "acqs_mth2", KIND_TEXT, key=True),
@@ -263,7 +272,8 @@ STG_TESSTK = TableRule(
         ColumnRule("trmend_qy", "trmend_qy_shr", KIND_NUMERIC, *p_headroom(13)),
         ColumnRule("rm", "rm", KIND_TEXT, normalize_text=True),      # 비고 — 설명류
     ),
-    natural_key=("corp_code", "bsns_year", "reprt_code", "acqs_mth1", "acqs_mth2", "acqs_mth3",
+    natural_key=("row_hash", "corp_code", "bsns_year", "reprt_code",
+                "acqs_mth1", "acqs_mth2", "acqs_mth3",
                  "stock_knd"),
     partition_class="receipt_axis",
     partition_expr="substr(rcept_no, 1, 4)",
@@ -286,6 +296,7 @@ STG_HYSLR = TableRule(
     name="stg_hyslr",
     sources=(SourceRef("dart", "dart_hyslr", "hyslr"),),
     columns=(
+        ColumnRule("row_hash", "row_hash", KIND_TEXT, expected_len=32, key=True),   # 원장 PK
         *_REQ_AXIS,
         ColumnRule("nm", "nm", KIND_TEXT, key=True),                # 성명 — 키라 정규화 금지
         ColumnRule("stock_knd", "stock_knd", KIND_TEXT, key=True),
@@ -301,7 +312,7 @@ STG_HYSLR = TableRule(
                    _RT_P, _RT_S),
         ColumnRule("rm", "rm", KIND_TEXT, normalize_text=True),
     ),
-    natural_key=("corp_code", "bsns_year", "reprt_code", "nm", "stock_knd"),
+    natural_key=("row_hash", "corp_code", "bsns_year", "reprt_code", "nm", "stock_knd"),
     partition_class="receipt_axis",
     partition_expr="substr(rcept_no, 1, 4)",
     partition_src="rcept_no",
@@ -326,6 +337,7 @@ STG_AUDIT = TableRule(
     name="stg_audit",
     sources=(SourceRef("dart", "dart_audit", "audit"),),
     columns=(
+        ColumnRule("row_hash", "row_hash", KIND_TEXT, expected_len=32, key=True),   # 원장 PK
         *_REQ_AXIS,
         ColumnRule("bsns_year", "bsns_year_label", KIND_TEXT, key=True),
         *_RESP_META,
@@ -336,7 +348,7 @@ STG_AUDIT = TableRule(
         ColumnRule("emphs_matter", "emphs_matter", KIND_TEXT, normalize_text=True),
         ColumnRule("core_adt_matter", "core_adt_matter", KIND_TEXT, normalize_text=True),
     ),
-    natural_key=("corp_code", "bsns_year", "reprt_code", "bsns_year_label"),
+    natural_key=("row_hash", "corp_code", "bsns_year", "reprt_code", "bsns_year_label"),
     partition_class="receipt_axis",
     partition_expr="substr(rcept_no, 1, 4)",
     partition_src="rcept_no",

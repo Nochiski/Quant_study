@@ -400,6 +400,20 @@ fin_raw 15.4M행 8키 GROUP BY 9초 · RSS 3.6GB → 6GB·3threads 성립. 풀 �
   테이블의 MANIFEST current_build 를 읽고 미빌드면 즉시 예외), `ExtraColumn`(같은 행 categorize), `required`(비키 NULL = reject),
   `payload_columns` 명시 투영, `key_unique`(G3 집계). reject 사유 어휘: `key_cast_failed` · `key_missing` · `required_null` · `out_of_range`.
 
+**S3 완료 (09-02 23:10 KST) — `stg_consensus_monthly` 서버 실측** (첫 blob 테이블, §1 예외 c·e):
+- ws_raw cF5001 8,360 + cF5002 4,842 blob → **222,499행 5.9초**, RSS 665MB, 재현성 해시 동일. 파티션 `year=2026` 1개(수집 09-01·09-02).
+- G8 파싱 등식 pass: 셀 5001 216,978 + 5002 74,030 → 좌표 합집합 222,499 · **말미 라벨 중복 접기 1,732**(값 전부 동일) ·
+  **5001≡5002 불일치 0** · parse_failed 0 · 항목명 미상 1,856(전부 cF5002 빈 chart — 행 0, 설계 §4 실측치와 일치).
+- 좌표 분포: 5001만 148,469(무커버 프로브 + 5002 축 밖 라벨) · 양쪽 68,509 · 5002만 5,521. metric eps 111,384 / revenue 111,115,
+  단위 '원'/'억원' 데이터 값 그대로. 컨센서스 NULL 148,081(무커버) · 목표주가 NULL 140,051.
+- 리비전 실증: 삼성전자 202612 EPS 2026/08/31 관측점이 수집일 09-01 48,338.64 → 09-02 48,139.28, 목표주가 493,958 → 491,875 —
+  (ticker, fetched_date, target_period, metric, obs_label) 키가 일별 리비전 축을 그대로 보존한다.
+- **구현 교훈(§11 도구 교훈 ⑥)**: 파서 출력 34만 행을 duckdb `executemany` 로 넣으면 행마다 statement 를 돌려 5분+ 무응답 —
+  JSON Lines 파일 → `read_json(columns=VARCHAR…)` 한 번으로 6초. JSON null = SQL NULL 이라 ''/NULL 구분도 보존.
+  blob 소스 계약: `BlobSource(db, table, eps, parser)` + `parsers.PARSERS`; 원장 실물 계약(G0)은 파서 입력 컬럼 6개.
+- 카탈로그 정정(§4 WISE): `stg_consensus_monthly` 키의 마지막 요소는 `obs_month` 가 아니라 **`obs_label`(원문 라벨)** 이고
+  `obs_date`(DATE) 는 파생 비키 컬럼. 컬럼 종류 `date_iso`(fetched_date)·`date_slash`(라벨)·`bool` 추가, available_basis `measured`.
+
 ## 11. 결정 기록
 
 | # | 결정 | 일자 |
@@ -428,3 +442,4 @@ fin_raw 15.4M행 8키 GROUP BY 9초 · RSS 3.6GB → 6GB·3threads 성립. 풀 �
 ③ **미조사 지대의 유령** — `index_name` 은 전수조사가 안 덮은 테이블에서 났다. 조사 커버리지 = 설계 신뢰의 상한
 ④ **표본 유래 수치는 실측이 아니다** — survey 의 stride 표본 범위(−292~+333)를 전수 실측처럼 인용했다. 게이트 상수는 전수 술어가 병기된 것만 (v2.2)
 ⑤ **게이트 상수와 문서 숫자는 정의를 함께 적는다** — "중복 491"은 그룹 수인지 초과 행수인지, "2,864,871행"은 어떤 조인인지 없어 재현이 안 됐다 (v2.2)
+⑥ **duckdb executemany 금지** — 파서 출력은 JSON Lines 로 쓰고 `read_json` 한 번에 읽는다 (S3: 5분+ → 6초)

@@ -5,12 +5,12 @@
 """
 from __future__ import annotations
 
-from . import rules_dart, rules_kiwoom, rules_krx, rules_wise
+from . import rules_dart, rules_dart_events, rules_kiwoom, rules_krx, rules_wise
 from .model import TableRule
 
 # db alias → 원장 파일명. survey/targets.py DBS 와 같아야 한다(테스트 대조). wise 만 다르다.
 LEDGER_FILES: dict[str, str] = {"krx": "krx.db", "kiwoom": "kiwoom.db", "kis": "kis.db",
                                 "dart": "dart.db", "wise": "wisereport.db"}
 
-_MODULES = (rules_krx, rules_kiwoom, rules_dart, rules_wise)
+_MODULES = (rules_krx, rules_kiwoom, rules_dart, rules_dart_events, rules_wise)
 RULES: dict[str, TableRule] = {t.name: t for m in _MODULES for t in m.TABLES}

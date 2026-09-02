@@ -18,6 +18,7 @@ from backtest_engine.data.feed import DataFeed
 from backtest_engine.engine.core import (
     PortfolioLedger,
     core_available,
+    make_persistent_runtime,
     make_portfolio,
     make_pricing,
 )
@@ -762,6 +763,9 @@ def test_persistent_sends_one_decision_batch_per_callback(
             self.load_feed_calls = 0
             self.indexed_market_calls = 0
             self.legacy_market_calls = 0
+            self.activate_pending_calls = 0
+            self.place_order_calls = 0
+            self.register_group_calls = 0
 
         def load_feed(self, *args: object) -> object:
             self.load_feed_calls += 1
@@ -778,6 +782,18 @@ def test_persistent_sends_one_decision_batch_per_callback(
         def process_market(self, *args: object) -> object:
             self.legacy_market_calls += 1
             return self.inner.process_market(*args)
+
+        def activate_pending(self, *args: object) -> object:
+            self.activate_pending_calls += 1
+            return self.inner.activate_pending(*args)
+
+        def place_order(self, *args: object) -> object:
+            self.place_order_calls += 1
+            return self.inner.place_order(*args)
+
+        def register_group(self, *args: object) -> object:
+            self.register_group_calls += 1
+            return self.inner.register_group(*args)
 
         def __getattr__(self, name: str) -> Any:
             return getattr(self.inner, name)
@@ -800,6 +816,39 @@ def test_persistent_sends_one_decision_batch_per_callback(
     assert proxies[0].load_feed_calls == 1
     assert proxies[0].indexed_market_calls == len(GOLDEN_BARS)
     assert proxies[0].legacy_market_calls == 0
+    assert proxies[0].activate_pending_calls == 2
+    assert proxies[0].place_order_calls == 0
+    assert proxies[0].register_group_calls == 0
+
+
+@RUST_ONLY
+def test_persistent_event_queue_matches_timestamp_priority_and_fifo_order() -> None:
+    from backtest_engine.engine.queue import (
+        EventPriority,
+        MarketArrived,
+        PersistentEventQueue,
+        SessionClose,
+    )
+
+    runtime = make_persistent_runtime(
+        100_000.0, allow_short=False, allow_margin=False, leverage=1.0
+    )
+    queue = PersistentEventQueue(runtime)
+    late = MarketArrived(make_snapshot(day(2), make_bar(day(2), INSTRUMENT, 100.0, 100.0)))
+    close = SessionClose(make_snapshot(day(1), make_bar(day(1), INSTRUMENT, 100.0, 100.0)))
+    first = MarketArrived(make_snapshot(day(1), make_bar(day(1), INSTRUMENT, 100.0, 100.0)))
+    second = MarketArrived(make_snapshot(day(1), make_bar(day(1), INSTRUMENT, 101.0, 101.0)))
+    queue.push(day(2), EventPriority.MARKET, late)
+    queue.push(day(1), EventPriority.SESSION_CLOSE, close)
+    queue.push(day(1), EventPriority.MARKET, first)
+    queue.push(day(1), EventPriority.MARKET, second)
+    assert len(queue) == 4
+    assert [queue.pop(), queue.pop(), queue.pop(), queue.pop()] == [
+        first,
+        second,
+        close,
+        late,
+    ]
 
 
 class _FaultStrategy:

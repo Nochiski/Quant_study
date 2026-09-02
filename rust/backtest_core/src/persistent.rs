@@ -1,9 +1,11 @@
 use crate::buying_power::BuyingPower;
+use crate::event_queue::NativeEventQueue;
 use crate::feed::PersistentFeed;
 use crate::persistent_router::{
     self, CloseWire, DecisionWire, RouteError, RoutedGroup, RoutedOrder, RoutedUpdate, RouterConfig,
 };
 use crate::portfolio::{Portfolio, SnapshotTuple};
+use crate::quote::parse_decimal_ratio;
 use crate::session::{self, BarTuple, EntryTuple, Op};
 use pyo3::exceptions::{PyKeyError, PyValueError};
 use pyo3::prelude::*;
@@ -11,6 +13,8 @@ use std::collections::HashMap;
 
 type GroupTuple = (String, String, Vec<String>);
 type OrderState = (String, i64, bool);
+type CostTuple = (String, Option<String>, f64);
+type CorporateActionTuple = (i64, i64, f64, f64, f64);
 type RouteResponse = (
     String,
     Vec<RoutedOrder>,
@@ -18,6 +22,42 @@ type RouteResponse = (
     Vec<RoutedGroup>,
     Option<RouteError>,
 );
+
+fn scaled_corporate_action_quantity(quantity: i64, ratio: &str) -> PyResult<(i64, f64)> {
+    const QUANTUM: i128 = 1_000_000_000;
+    let (ratio_num, ratio_den) = parse_decimal_ratio(ratio)?;
+    if ratio_num <= 0 {
+        return Err(PyValueError::new_err(format!(
+            "corporate action ratio must be > 0 — ratio={ratio}"
+        )));
+    }
+    let scaled_numerator = i128::from(quantity)
+        .checked_mul(ratio_num)
+        .and_then(|value| value.checked_mul(QUANTUM))
+        .ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "corporate action quantity overflow — quantity={quantity} ratio={ratio}"
+            ))
+        })?;
+    let mut scaled_units = scaled_numerator / ratio_den;
+    let remainder = scaled_numerator % ratio_den;
+    let twice_remainder = remainder.abs().checked_mul(2).ok_or_else(|| {
+        PyValueError::new_err(format!(
+            "corporate action rounding overflow — quantity={quantity} ratio={ratio}"
+        ))
+    })?;
+    if twice_remainder > ratio_den || (twice_remainder == ratio_den && scaled_units.abs() % 2 == 1)
+    {
+        scaled_units += scaled_numerator.signum();
+    }
+    let new_quantity = i64::try_from(scaled_units / QUANTUM).map_err(|_| {
+        PyValueError::new_err(format!(
+            "corporate action quantity outside i64 range — quantity={quantity} ratio={ratio}"
+        ))
+    })?;
+    let fractional_units = scaled_units - i128::from(new_quantity) * QUANTUM;
+    Ok((new_quantity, fractional_units as f64 / QUANTUM as f64))
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct StoredOrder {
@@ -84,6 +124,79 @@ impl StoredOrder {
             self.participation.clone(),
         )
     }
+
+    fn from_routed(
+        value: &RoutedOrder,
+        decision: &DecisionWire,
+        fallback_symbol: Option<&str>,
+    ) -> PyResult<Self> {
+        let action = decision.3.get(value.9).ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "routed order action index out of range — order_id={} action_index={}",
+                value.0, value.9
+            ))
+        })?;
+        let (target, participation) = if let Some(leg_index) = value.10 {
+            let leg = action.5.get(leg_index).ok_or_else(|| {
+                PyValueError::new_err(format!(
+                    "routed order basket leg index out of range — order_id={} leg_index={leg_index}",
+                    value.0
+                ))
+            })?;
+            let target = leg
+                .1
+                .as_ref()
+                .or_else(|| leg.3.as_ref().map(|request| &request.1));
+            let participation = leg.2.as_ref().and_then(|execution| execution.3);
+            (target, participation)
+        } else {
+            let target = action
+                .4
+                .as_ref()
+                .map(|request| &request.1)
+                .or_else(|| action.1.iter().find(|target| target.1 == value.1));
+            let participation = action.3.as_ref().and_then(|execution| execution.3);
+            (target, participation)
+        };
+        let symbol = target
+            .map(|target| target.2.as_str())
+            .filter(|symbol| !symbol.is_empty())
+            .or(fallback_symbol)
+            .ok_or_else(|| {
+                PyValueError::new_err(format!(
+                    "routed order instrument metadata is missing — order_id={} key={}",
+                    value.0, value.1
+                ))
+            })?;
+        let parse_price = |name: &str, text: &Option<String>| -> PyResult<Option<f64>> {
+            text.as_ref()
+                .map(|raw| {
+                    raw.parse::<f64>().map_err(|_| {
+                        PyValueError::new_err(format!(
+                            "invalid routed order {name} — order_id={} value={raw:?}",
+                            value.0
+                        ))
+                    })
+                })
+                .transpose()
+        };
+        Ok(Self {
+            order_id: value.0.clone(),
+            key: value.1.clone(),
+            symbol: symbol.to_string(),
+            side: value.3.clone(),
+            order_type: value.4.clone(),
+            limit_price: parse_price("limit price", &value.5)?,
+            stop_price: parse_price("stop price", &value.6)?,
+            limit_text: value.5.clone(),
+            stop_text: value.6.clone(),
+            tif: value.7.clone(),
+            remaining: value.2,
+            triggered: false,
+            group_id: value.8.clone(),
+            participation: participation.map(|value| value.to_string()),
+        })
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -112,6 +225,9 @@ pub(crate) struct PersistentEngine {
     portfolio: Portfolio,
     orders: Vec<StoredOrder>,
     groups: Vec<StoredGroup>,
+    pending_orders: Vec<StoredOrder>,
+    pending_groups: Vec<StoredGroup>,
+    event_queue: NativeEventQueue,
     decision_seq: u64,
     order_seq: u64,
     fill_seq: u64,
@@ -237,6 +353,32 @@ impl PersistentEngine {
         self.apply_market_ops(&mut ops)?;
         Ok(ops)
     }
+
+    fn activate_pending_internal(&mut self) -> PyResult<()> {
+        if let Some(order) = self.pending_orders.iter().find(|pending| {
+            self.orders
+                .iter()
+                .any(|active| active.order_id == pending.order_id)
+        }) {
+            return Err(PyValueError::new_err(format!(
+                "duplicate pending order id — order_id={}",
+                order.order_id
+            )));
+        }
+        if let Some(group) = self.pending_groups.iter().find(|pending| {
+            self.groups
+                .iter()
+                .any(|active| active.group_id == pending.group_id)
+        }) {
+            return Err(PyValueError::new_err(format!(
+                "duplicate pending basket group id — group_id={}",
+                group.group_id
+            )));
+        }
+        self.orders.append(&mut self.pending_orders);
+        self.groups.append(&mut self.pending_groups);
+        Ok(())
+    }
 }
 
 #[pymethods]
@@ -258,6 +400,9 @@ impl PersistentEngine {
             portfolio: Portfolio::new(initial_cash, allow_short, allow_margin),
             orders: Vec::new(),
             groups: Vec::new(),
+            pending_orders: Vec::new(),
+            pending_groups: Vec::new(),
+            event_queue: NativeEventQueue::default(),
             decision_seq: 0,
             order_seq: 0,
             fill_seq: 0,
@@ -317,6 +462,11 @@ impl PersistentEngine {
                 .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?
                 .current_closes()?,
         };
+        let fallback_symbols: HashMap<_, _> = bars
+            .iter()
+            .map(|(key, (symbol, _))| (key.clone(), symbol.clone()))
+            .collect();
+        let decision_for_orders = decision.clone();
         let (orders, updates, groups, error) = persistent_router::route_basic_decision(
             &self.portfolio,
             &mut self.orders,
@@ -328,7 +478,45 @@ impl PersistentEngine {
             decision,
             bars,
         )?;
+        if error.is_none() {
+            let staged_orders = orders
+                .iter()
+                .map(|order| {
+                    StoredOrder::from_routed(
+                        order,
+                        &decision_for_orders,
+                        fallback_symbols.get(&order.1).map(String::as_str),
+                    )
+                })
+                .collect::<PyResult<Vec<_>>>()?;
+            let staged_groups: Vec<StoredGroup> = groups
+                .iter()
+                .map(|group| StoredGroup {
+                    group_id: group.0.clone(),
+                    policy: group.1.clone(),
+                    order_ids: group.2.clone(),
+                })
+                .collect();
+            self.pending_orders.extend(staged_orders);
+            self.pending_groups.extend(staged_groups);
+        }
         Ok((decision_id, orders, updates, groups, error))
+    }
+
+    fn activate_pending(&mut self) -> PyResult<()> {
+        self.activate_pending_internal()
+    }
+
+    fn queue_push(&mut self, timestamp_micros: i64, priority: u8, token: u64) -> PyResult<()> {
+        self.event_queue.push(timestamp_micros, priority, token)
+    }
+
+    fn queue_pop(&mut self) -> PyResult<u64> {
+        self.event_queue.pop()
+    }
+
+    fn queue_len(&self) -> usize {
+        self.event_queue.len()
     }
 
     fn next_decision_id(&mut self) -> String {
@@ -433,6 +621,7 @@ impl PersistentEngine {
     }
 
     fn drain_orders(&mut self) -> Vec<OrderState> {
+        self.orders.append(&mut self.pending_orders);
         self.orders
             .drain(..)
             .map(|order| (order.order_id, order.remaining, order.triggered))
@@ -480,12 +669,70 @@ impl PersistentEngine {
         Ok(())
     }
 
+    fn close_current_session(
+        &mut self,
+        schedule: &str,
+        short_borrow_bps_annual: f64,
+        margin_interest_bps_annual: f64,
+        annualization_days: u32,
+    ) -> PyResult<(bool, Vec<CostTuple>, SnapshotTuple)> {
+        if short_borrow_bps_annual < 0.0 || margin_interest_bps_annual < 0.0 {
+            return Err(PyValueError::new_err(format!(
+                "annual cost rates must be >= 0 — short_borrow_bps_annual={short_borrow_bps_annual} margin_interest_bps_annual={margin_interest_bps_annual}"
+            )));
+        }
+        if annualization_days == 0 {
+            return Err(PyValueError::new_err(
+                "annualization_days must be > 0 — annualization_days=0",
+            ));
+        }
+        let feed = self
+            .feed
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?;
+        let should_dispatch = feed.schedule_matches(schedule)?;
+        let marks = feed.current_marks()?;
+        self.portfolio.mark(marks);
+        let (cash, positions, _, _) = self.portfolio.snapshot()?;
+        let borrow_daily = short_borrow_bps_annual / 10_000.0 / f64::from(annualization_days);
+        let mut costs = Vec::new();
+        if borrow_daily > 0.0 {
+            for position in &positions {
+                if position.1 < 0 {
+                    let amount = position.4.abs() * borrow_daily;
+                    if amount > 0.0 {
+                        costs.push(("short_borrow".to_string(), Some(position.0.clone()), amount));
+                    }
+                }
+            }
+        }
+        let interest_daily = margin_interest_bps_annual / 10_000.0 / f64::from(annualization_days);
+        if interest_daily > 0.0 && cash < 0.0 {
+            let amount = -cash * interest_daily;
+            if amount > 0.0 {
+                costs.push(("margin_interest".to_string(), None, amount));
+            }
+        }
+        for cost in &costs {
+            self.portfolio.charge(cost.2)?;
+        }
+        Ok((should_dispatch, costs, self.portfolio.snapshot()?))
+    }
+
     fn current_session_count(&self) -> PyResult<usize> {
         Ok(self
             .feed
             .as_ref()
             .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?
             .current_session_count())
+    }
+
+    fn settlement_session_index(&self, key: &str, event_ts: &str) -> PyResult<Option<usize>> {
+        Ok(self
+            .feed
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?
+            .settlement_session_index(key, event_ts))
     }
 
     fn history_window(
@@ -533,6 +780,46 @@ impl PersistentEngine {
         )
     }
 
+    fn apply_corporate_action_ratio(
+        &mut self,
+        key: &str,
+        ratio: &str,
+        settlement_price: f64,
+    ) -> PyResult<Option<CorporateActionTuple>> {
+        let old_quantity = self.portfolio.held_qty(key);
+        if old_quantity == 0 {
+            return Ok(None);
+        }
+        if settlement_price <= 0.0 {
+            return Err(PyValueError::new_err(format!(
+                "corporate action settlement price must be > 0 — key={key} price={settlement_price}"
+            )));
+        }
+        let old_average = self.portfolio.average_price(key).ok_or_else(|| {
+            PyValueError::new_err(format!("portfolio quantity has no ledger — key={key}"))
+        })?;
+        let ratio_value = ratio.parse::<f64>().map_err(|_| {
+            PyValueError::new_err(format!("invalid corporate action ratio — ratio={ratio:?}"))
+        })?;
+        let (new_quantity, fractional) = scaled_corporate_action_quantity(old_quantity, ratio)?;
+        let cash_paid = fractional * settlement_price;
+        let new_average = old_average / ratio_value;
+        self.portfolio.apply_corporate_action(
+            key,
+            new_quantity,
+            new_average,
+            cash_paid,
+            settlement_price,
+        )?;
+        Ok(Some((
+            old_quantity,
+            new_quantity,
+            old_average,
+            new_average,
+            cash_paid,
+        )))
+    }
+
     fn mark(&mut self, closes: Vec<(String, f64)>) {
         self.portfolio.mark(closes);
     }
@@ -578,6 +865,19 @@ mod tests {
             None,
             None,
         )
+    }
+
+    #[test]
+    fn corporate_action_quantity_matches_decimal_quantize_then_truncate() {
+        let thirds = "0.3333333333333333333333333333";
+        assert_eq!(
+            scaled_corporate_action_quantity(30, thirds).unwrap(),
+            (10, 0.0)
+        );
+        assert_eq!(
+            scaled_corporate_action_quantity(-7, "1.5").unwrap(),
+            (-10, -0.5)
+        );
     }
 
     #[test]

@@ -1,7 +1,7 @@
 # Persistent Rust Engine 구현 계획
 
 작성일: 2026-09-01
-상태: 구현 진행 중 — M3 중간 체크포인트 저장
+상태: 구현 진행 중 — M3 완료, M4 시작
 목표 브랜치: `main`
 기준 커밋: `f93c4f5` (`refactor: split Rust backtest core into modules`)
 
@@ -30,22 +30,35 @@
 - 다음 재개 지점: route 결과의 신규 주문·그룹을 Rust에 staging한 뒤 다음 MARKET에서
   활성화하여 주문별 Python→Rust FFI를 제거하고, Rust EventQueue 이전을 계속한다.
 
+## 2026-09-02 M3 완료 체크포인트
+
+- 전체 체크리스트: 67개 중 43개 완료, 24개 남음.
+- M3 9개 항목 완료. feed, history, native EventQueue, session close/schedule,
+  corporate action, short borrow/margin interest가 persistent Rust runtime으로 이전됨.
+- route 결과의 주문·그룹을 Rust pending 영역에 저장하고 다음 MARKET에 일괄 활성화하여
+  주문 22,243건의 개별 `place_order` FFI와 그룹 등록 FFI를 제거.
+- Rust EventQueue가 `(UTC microsecond, priority, seq)` heap을 소유하고 Python typed payload는
+  M4/M5 전환 동안 token side table로 호환 유지.
+- 100종목 주문 집중 최신 측정: Python 1.996398초, persistent Rust 1.164860초,
+  Python 대비 1.714배. orders/fills/final equity 동일.
+- 다음 재개 지점: M4 `CallbackFrame`과 token 기반 pull callback 상태 머신.
+
 ## 현재 재개 지점
 
 > 이 블록은 작업을 진행할 때마다 최신 상태로 덮어쓴다.
 
-- 현재 단계: M3 — Feed, History, EventQueue 이전
-- 현재 작업: 주문별 FFI 제거를 위한 pending order/group 활성화와 Rust EventQueue 이전
-- 마지막 완료 항목: columnar feed·Rust history·내부 fill 회계 이전 및 100종목 1.719배 검증
-- 다음 작업: 신규 주문을 route 시 Rust에 staging하고 다음 MARKET에서 활성화
+- 현재 단계: M4 — Python 전략 callback 브리지
+- 현재 작업: `CallbackFrame`과 단조 증가 token 계약
+- 마지막 완료 항목: M3 native EventQueue 연결 및 전체 패리티 통과
+- 다음 작업: Rust callback lifecycle 상태와 stale/double submit 거절 구현
 - 알려진 blocker: 없음
 - 작업 트리의 기존 사용자/선행 변경:
   - `docs/rust-python-benchmark-report.html` — 벤치마크 시각화 문서, 보존할 것
 - 마지막 검증:
   - `cargo clippy --manifest-path rust/backtest_core/Cargo.toml --all-targets -- -D warnings`
-  - `cargo test --manifest-path rust/backtest_core/Cargo.toml` — 9 passed
-  - `uv run pytest tests/test_core_parity.py -q` — 162 passed
-  - `uv run pytest -q` — 503 passed
+  - `cargo test --manifest-path rust/backtest_core/Cargo.toml` — 12 passed
+  - `uv run pytest tests/test_core_parity.py -q` — 163 passed
+  - `uv run pytest -q` — 504 passed
   - `uv run ruff check src tests scripts examples` — passed
   - `uv run pyright` — 0 errors
   - `uv run python scripts/bench_universe.py tests/fixtures/krx_parquet --instruments 100
@@ -62,6 +75,13 @@
     - orders 22,243 / fills 22,155 / 최종 equity가 동일
   - 작은 fixture: `benchmarks/baseline/persistent-rust-m3-small.json`
     - Python 0.138627초 / persistent Rust 0.101595초 — Python 대비 1.365배, 회귀 없음
+  - M3 batched orders/costs: `benchmarks/baseline/persistent-rust-m3-batched-orders-costs.json`
+    - Python 1.969302초 / persistent Rust 1.259849초 — Python 대비 1.563배
+    - route가 주문·그룹을 Rust pending 영역에 staging하여 주문 22,243건의 개별 FFI를 제거
+    - orders 22,243 / fills 22,155 / 최종 equity가 동일
+  - M3 native EventQueue: `benchmarks/baseline/persistent-rust-m3-native-event-queue.json`
+    - Python 1.996398초 / persistent Rust 1.164860초 — Python 대비 1.714배
+    - Rust가 timestamp/priority/FIFO sequence heap을 소유하며 결과 signature가 동일
 
 ## 문제 정의
 
@@ -222,10 +242,10 @@ Router는 이 단계에서 유지해 변경 폭을 제한한다.
 - [x] 전체 feed를 실행 시작 시 한 번만 Rust로 전송.
 - [x] Rust HistoryStore와 결측 NaN 정렬 규칙 포팅.
 - [x] 선언된 HistoryRequest window 생성 포팅.
-- [ ] Rust EventQueue `(ts, priority, seq)` 포팅.
-- [ ] session close 평가와 schedule 판정 포팅.
-- [ ] corporate action settlement session과 적용 포팅.
-- [ ] short borrow/margin interest 비용 포팅.
+- [x] Rust EventQueue `(ts, priority, seq)` 포팅.
+- [x] session close 평가와 schedule 판정 포팅.
+- [x] corporate action settlement session과 적용 포팅.
+- [x] short borrow/margin interest 비용 포팅.
 
 완료 게이트:
 

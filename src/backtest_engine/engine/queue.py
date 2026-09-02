@@ -11,6 +11,7 @@ import heapq
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import IntEnum
+from typing import Any
 
 from backtest_engine.types.events import (
     CorporateActionEvent,
@@ -92,3 +93,45 @@ class EventQueue:
 
     def __len__(self) -> int:
         return len(self._heap)
+
+
+class PersistentEventQueue:
+    """정렬 heap/sequence는 Rust가, 전환 중인 typed payload는 Python이 소유한다."""
+
+    def __init__(self, runtime: Any) -> None:
+        self._runtime = runtime
+        self._payloads: dict[int, EngineQueueEvent] = {}
+        self._token = 0
+
+    @staticmethod
+    def _timestamp_micros(ts: datetime) -> int:
+        offset = ts.utcoffset()
+        normalized = ts if offset is None else ts - offset
+        return (
+            (
+                (
+                    (normalized.toordinal() * 24 + normalized.hour) * 60
+                    + normalized.minute
+                )
+                * 60
+                + normalized.second
+            )
+            * 1_000_000
+            + normalized.microsecond
+        )
+
+    def push(self, ts: datetime, priority: EventPriority, payload: EngineQueueEvent) -> None:
+        self._token += 1
+        token = self._token
+        self._runtime.queue_push(self._timestamp_micros(ts), int(priority), token)
+        self._payloads[token] = payload
+
+    def pop(self) -> EngineQueueEvent:
+        token = self._runtime.queue_pop()
+        return self._payloads.pop(token)
+
+    def __bool__(self) -> bool:
+        return bool(self._payloads)
+
+    def __len__(self) -> int:
+        return len(self._payloads)

@@ -20,7 +20,6 @@ from backtest_engine.engine.broker import (
     PythonQuoteCore,
     QuoteCore,
     QuoteNumbers,
-    participation_of,
 )
 from backtest_engine.engine.orders import BasketGroup, OpenOrder, OrderManager
 from backtest_engine.engine.portfolio import Portfolio as PythonPortfolio
@@ -34,6 +33,7 @@ from backtest_engine.types.events import (
     CorporateActionApplied,
     CorporateActionEvent,
     CostAccrued,
+    CostKind,
     FillEvent,
     OpenOrderSnapshot,
     OrderEvent,
@@ -42,6 +42,8 @@ from backtest_engine.types.instruments import InstrumentId
 from backtest_engine.types.market import Bar, MarketSnapshot
 from backtest_engine.types.orders import Side
 from backtest_engine.types.portfolio import PortfolioSnapshot, Position
+from backtest_engine.types.requirements import EverySession, MonthEndSession, Schedule
+from backtest_engine.types.results import RunConfig
 
 CORES = ("python", "rust", "rust_persistent")
 RUST_CORES = frozenset({"rust", "rust_persistent"})
@@ -303,16 +305,14 @@ class PersistentPortfolio:
                 f"corporate action settlement price must be > 0 — "
                 f"instrument={action.instrument.symbol} ts={action.ts} price={settlement_price}"
             )
-        old_average = self._inner.average_price(key)
-        if old_average is None:
-            raise RuntimeError(f"rust portfolio has quantity without ledger — key={key}")
-        scaled = scale_quantity(old_quantity, action.ratio)
-        new_quantity = scaled.quantize(Decimal(1), rounding=ROUND_DOWN)
-        cash_paid = float(scaled - new_quantity) * settlement_price
-        new_average = old_average / float(action.ratio)
-        self._inner.apply_corporate_action(
-            key, int(new_quantity), new_average, cash_paid, settlement_price
+        applied = self._inner.apply_corporate_action_ratio(
+            key, str(action.ratio), settlement_price
         )
+        if applied is None:
+            return None
+        old_quantity_raw, new_quantity_raw, old_average, new_average, cash_paid = applied
+        old_quantity = Decimal(old_quantity_raw)
+        new_quantity = Decimal(new_quantity_raw)
         self._snapshot_cache = None
         return CorporateActionApplied(
             ts=settled_at if settled_at is not None else action.ts,
@@ -345,6 +345,48 @@ class PersistentPortfolio:
         if self._snapshot_cache is not None and self._snapshot_cache[0] == ts:
             return self._snapshot_cache[1]
         cash, rows, equity, gross_exposure = self._inner.portfolio_snapshot()
+        built = self._snapshot_from_wire(ts, cash, rows, equity, gross_exposure)
+        self._snapshot_cache = (ts, built)
+        return built
+
+    def close_session(
+        self, ts: datetime, config: RunConfig, schedule: Schedule
+    ) -> tuple[bool, tuple[CostAccrued, ...], PortfolioSnapshot]:
+        """종가 평가와 세션 비용 차감을 Rust에서 한 번에 수행한다."""
+        if isinstance(schedule, EverySession):
+            schedule_wire = "every_session"
+        elif isinstance(schedule, MonthEndSession):
+            schedule_wire = "month_end"
+        else:
+            raise TypeError(f"unsupported persistent schedule — got {type(schedule).__name__}")
+        should_dispatch, cost_rows, snapshot_wire = self._inner.close_current_session(
+            schedule_wire,
+            config.short_borrow_bps_annual,
+            config.margin_interest_bps_annual,
+            config.annualization_days,
+        )
+        costs = tuple(
+            CostAccrued(
+                ts=ts,
+                kind=CostKind(kind),
+                instrument=None if key is None else self._instruments[key],
+                amount=amount,
+            )
+            for kind, key, amount in cost_rows
+        )
+        cash, rows, equity, gross_exposure = snapshot_wire
+        built = self._snapshot_from_wire(ts, cash, rows, equity, gross_exposure)
+        self._snapshot_cache = (ts, built)
+        return should_dispatch, costs, built
+
+    def _snapshot_from_wire(
+        self,
+        ts: datetime,
+        cash: float,
+        rows: list[tuple[str, int, float, float, float, float]],
+        equity: float,
+        gross_exposure: float,
+    ) -> PortfolioSnapshot:
         positions = tuple(
             Position(
                 instrument=self._instruments[key],
@@ -363,7 +405,6 @@ class PersistentPortfolio:
             equity=equity,
             gross_exposure=gross_exposure,
         )
-        self._snapshot_cache = (ts, built)
         return built
 
 
@@ -373,6 +414,7 @@ class PersistentOrderManager(OrderManager):
     def __init__(self, runtime: Any) -> None:
         self._runtime = runtime
         self._orders: dict[str, OrderEvent] = {}
+        self._has_pending = False
 
     def _states(self) -> dict[str, tuple[int, bool]]:
         return {
@@ -400,7 +442,16 @@ class PersistentOrderManager(OrderManager):
         return cast(str, self._runtime.next_group_id())
 
     def register_group(self, group: BasketGroup) -> None:
-        self._runtime.register_group(group.group_id, group.policy.value, list(group.order_ids))
+        # Rust Router가 그룹을 같은 route 호출 안에서 pending 상태로 저장한다.
+        del group
+        self._has_pending = True
+
+    def activate_pending(self) -> None:
+        """ORDER priority에서 노출된 주문을 다음 MARKET 직전에 Rust에서 일괄 활성화한다."""
+        if not self._has_pending:
+            return
+        self._runtime.activate_pending()
+        self._has_pending = False
 
     def open_groups(self) -> tuple[BasketGroup, ...]:
         return tuple(
@@ -426,28 +477,10 @@ class PersistentOrderManager(OrderManager):
                 f"rust core supports integer share quantities only — "
                 f"order_id={order.order_id} quantity={order.quantity}"
             )
-        override = participation_of(order)
-        self._runtime.place_order(
-            (
-                order.order_id,
-                instrument_key(order.instrument),
-                order.instrument.symbol,
-                order.side.value,
-                order.order_type.value,
-                (
-                    None if order.limit_price is None else float(order.limit_price),
-                    None if order.stop_price is None else float(order.stop_price),
-                    None if order.limit_price is None else str(order.limit_price),
-                    None if order.stop_price is None else str(order.stop_price),
-                ),
-                order.time_in_force.value,
-                int(order.quantity),
-                False,
-                order.group_id,
-                None if override is None else str(override),
-            )
-        )
+        # mutable 주문은 route 호출에서 이미 Rust pending 영역에 저장됐다. 여기서는 공개
+        # EventStore/context materialization에 필요한 immutable 객체만 기억한다.
         self._orders[order.order_id] = order
+        self._has_pending = True
 
     def open_orders(self) -> tuple[OpenOrderSnapshot, ...]:
         return tuple(

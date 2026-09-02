@@ -57,6 +57,7 @@ from backtest_engine.engine.queue import (
     FillOccurred,
     MarketArrived,
     OrderPlaced,
+    PersistentEventQueue,
     SessionClose,
     StrategyNotify,
 )
@@ -165,7 +166,11 @@ class _Run:
             )
         )
         self.store = EventStore()
-        self.queue = EventQueue()
+        self.queue = (
+            PersistentEventQueue(self.persistent_runtime)
+            if self.persistent_runtime is not None
+            else EventQueue()
+        )
         self.corporate_actions: dict[datetime, list[CorporateActionEvent]] = defaultdict(list)
         self.universe: UniverseResult | None = None
 
@@ -266,7 +271,21 @@ class BacktestEngine:
         # 사건은 해당 종목이 실제로 거래되는 첫 세션(사건 세션 이후)에 적용한다 — 원장의
         # 분할 세션이 거래정지 행이라 feed에서 빠지는 경우 다음 거래일 시가로 정산한다.
         for action in corporate_actions:
-            settle_ts = self._settlement_session(feed, action)
+            if run.persistent_runtime is None:
+                settle_ts = self._settlement_session(feed, action)
+            else:
+                session_index = run.persistent_runtime.settlement_session_index(
+                    instrument_key(action.instrument), str(action.ts)
+                )
+                if session_index is None:
+                    raise CorporateActionWithoutBar(
+                        f"no traded session for instrument at or after corporate action — "
+                        f"instrument={action.instrument.symbol} ts={action.ts} "
+                        f"action={action.action_type.value} ratio={action.ratio} "
+                        f"feed_sessions={len(feed)} "
+                        f"last_session={feed.sessions[-1] if len(feed) else None}"
+                    )
+                settle_ts = feed.sessions[session_index]
             run.corporate_actions[settle_ts].append(action)
 
         for snapshot in feed.snapshots():
@@ -390,6 +409,10 @@ class BacktestEngine:
 
         # 자본변동은 이 세션의 어떤 체결보다 먼저 적용한다 — 분할 후 가격으로 체결되는
         # 주문이 분할 전 수량과 섞이면 안 된다.
+        if isinstance(order_manager, PersistentOrderManager):
+            # 이전 세션 ORDER priority에서 공개된 주문을 일괄 활성화한다. 자본변동 취소가
+            # 해당 주문까지 볼 수 있어야 하므로 corporate action 처리보다 앞선다.
+            order_manager.activate_pending()
         for action in run.corporate_actions.get(snapshot.ts, ()):
             self._apply_corporate_action(run, action, snapshot, update)
 
@@ -809,12 +832,20 @@ class BacktestEngine:
             run.queue.push(snapshot.ts, EventPriority.NOTIFY, StrategyNotify(action, snapshot))
 
     def _on_session_close(self, run: _Run, snapshot: MarketSnapshot) -> None:
-        run.portfolio.mark(snapshot)
-        # 세션 종료 평가 상태에서 차입·이자 비용을 발생시킨 뒤 자본 잠식을 검사한다.
-        for cost in session_costs(run.portfolio.snapshot(snapshot.ts), run.config):
-            run.portfolio.charge(cost)
+        if isinstance(run.portfolio, PersistentPortfolio):
+            should_dispatch, costs, marked = run.portfolio.close_session(
+                snapshot.ts, run.config, run.requirements.schedule
+            )
+        else:
+            run.portfolio.mark(snapshot)
+            # 세션 종료 평가 상태에서 차입·이자 비용을 발생시킨 뒤 자본 잠식을 검사한다.
+            costs = session_costs(run.portfolio.snapshot(snapshot.ts), run.config)
+            for cost in costs:
+                run.portfolio.charge(cost)
+            marked = run.portfolio.snapshot(snapshot.ts)
+            should_dispatch = calendar.matches(run.requirements.schedule, snapshot.ts)
+        for cost in costs:
             run.store.append(cost.ts, RecordKind.COST, cost)
-        marked = run.portfolio.snapshot(snapshot.ts)
         if marked.equity < 0:
             raise EquityWipedOut(
                 f"equity fell below zero at session close — ts={snapshot.ts} "
@@ -823,7 +854,7 @@ class BacktestEngine:
             )
         run.store.append(snapshot.ts, RecordKind.SNAPSHOT, marked)
 
-        if not calendar.matches(run.requirements.schedule, snapshot.ts):
+        if not should_dispatch:
             return
         self._dispatch(run, snapshot, snapshot)
 

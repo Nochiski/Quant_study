@@ -158,6 +158,44 @@ impl PersistentFeed {
         self.current_session.map_or(0, |index| index + 1)
     }
 
+    pub(crate) fn schedule_matches(&self, schedule: &str) -> PyResult<bool> {
+        let index = self.current_index()?;
+        match schedule {
+            "every_session" => Ok(true),
+            "month_end" => {
+                let current_month = self.sessions[index].get(..7).ok_or_else(|| {
+                    PyValueError::new_err(format!(
+                        "session timestamp is not ISO-like — value={:?}",
+                        self.sessions[index]
+                    ))
+                })?;
+                let next_month = self
+                    .sessions
+                    .get(index + 1)
+                    .and_then(|session| session.get(..7));
+                Ok(next_month != Some(current_month))
+            }
+            other => Err(PyValueError::new_err(format!(
+                "unsupported persistent schedule — schedule={other:?}"
+            ))),
+        }
+    }
+
+    pub(crate) fn settlement_session_index(&self, key: &str, event_ts: &str) -> Option<usize> {
+        let instrument_id = self
+            .keys
+            .iter()
+            .position(|known| known == key)
+            .map(|index| index as u32)?;
+        let first = self
+            .sessions
+            .partition_point(|session| session.as_str() < event_ts);
+        (first..self.sessions.len()).find(|index| {
+            self.row_range(*index)
+                .any(|row| self.instrument_ids[row] == instrument_id)
+        })
+    }
+
     pub(crate) fn history_window(
         &self,
         keys: &[String],
@@ -236,5 +274,30 @@ mod tests {
         feed.set_current(1).unwrap();
         assert_eq!(feed.current_closes().unwrap()["B"], ("BBB".into(), 21.5));
         assert_eq!(feed.session_market(0).1.len(), 2);
+        assert_eq!(feed.settlement_session_index("A", "D1"), Some(0));
+        assert_eq!(feed.settlement_session_index("A", "D2"), None);
+        assert_eq!(feed.settlement_session_index("B", "D1.5"), Some(1));
+    }
+
+    #[test]
+    fn schedule_uses_the_next_trading_session_for_month_end() {
+        let mut feed = PersistentFeed::new(
+            vec!["A".into()],
+            vec!["AAA".into()],
+            vec!["2026-01-30 00:00:00".into(), "2026-02-02 00:00:00".into()],
+            vec![0, 1, 2],
+            vec![0, 0],
+            vec![10.0, 10.0],
+            vec![11.0, 11.0],
+            vec![9.0, 9.0],
+            vec![10.5, 10.5],
+            vec![100, 100],
+        )
+        .unwrap();
+        feed.set_current(0).unwrap();
+        assert!(feed.schedule_matches("every_session").unwrap());
+        assert!(feed.schedule_matches("month_end").unwrap());
+        feed.set_current(1).unwrap();
+        assert!(feed.schedule_matches("month_end").unwrap());
     }
 }

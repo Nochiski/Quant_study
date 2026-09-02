@@ -9,6 +9,7 @@
 //! 결과만 적용한다.
 
 mod buying_power;
+mod event_queue;
 mod execution;
 mod feed;
 mod persistent;

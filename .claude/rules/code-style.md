@@ -73,7 +73,7 @@ pyright 단독 type checker 기준 (mypy 미사용). 아래 우선순위로 타�
 stub 없는 lib(데이터 벤더 SDK, 브로커 API 클라이언트, 일부 지표 라이브러리 등)은 pyright가 `reportUnknownMemberType` / `reportAttributeAccessIssue` / `reportCallIssue` 등을 쏟아낸다. 다음 순으로 대응:
 
 1. **PyPI stub 패키지 우선** — `types-*` / `*-stubs` 가 있으면 dev 의존성으로 추가 (단, 사용자 확인 후)
-2. **로컬 stub 생성** — `pyright --createstub <module>` → `typings/<module>/` 에 보관, 실 사용 부분만 수동 보정
+2. **로컬 stub 생성** — `pyright --createstub <module>` → `backend/typings/<module>/` 에 보관, 실 사용 부분만 수동 보정
 3. **Typed wrapper helper 한 곳에 집중** — 호출처마다 ignore 흩뿌리지 말고 helper 함수/팩토리 1개에서만 처리
 4. **Protocol 래핑** — lib 일부 인터페이스만 추상화하면 충분할 때
 5. **최후의 수단**: 호출 사이트에 `# pyright: ignore[<rule>]  # reason: <lib명> stub 부재` — 그리고 후속 cleanup 백로그 추가

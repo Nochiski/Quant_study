@@ -89,7 +89,8 @@ def _require_core(core: str) -> None:
     if not core_available(core):
         raise CoreUnavailable(
             f"core extension not installed — core={core!r}; build with "
-            f"`uv run maturin develop --manifest-path rust/backtest_core/Cargo.toml --release`"
+            f"`uv run maturin develop --manifest-path "
+            f"rust/backtest_core/Cargo.toml --release` from the backend directory"
         )
 
 

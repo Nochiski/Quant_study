@@ -29,7 +29,7 @@ bootstrap ─> application + adapters
 - `adapters/outbound/<provider>`: application이 요구한 port를 DB/파일/엔진으로 구현한다.
   도메인 정책을 새로 판단하지 않는다.
 - `bootstrap`: concrete adapter를 선택하고 주입하는 유일한 composition root다.
-- 기존 `src/backtest_engine`/`rust/backtest_core`는 실행 커널이다. 접근은 향후
+- `backend/src/backtest_engine`/`backend/rust/backtest_core`는 실행 커널이다. 접근은 향후
   `adapters/outbound/backtest_engine`에서만 허용한다.
 
 ## 노드와 facade

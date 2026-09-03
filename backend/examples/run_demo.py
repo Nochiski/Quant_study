@@ -19,7 +19,7 @@ from backtest_engine.types.instruments import AssetClass, InstrumentId
 
 CSV_PATH = (
     Path(__file__).resolve().parent.parent
-    / "2026-08-17/sangmok/result/html/app/market_data/005930.csv"
+    / "reference/sangmok/result/html/app/market_data/005930.csv"
 )
 
 

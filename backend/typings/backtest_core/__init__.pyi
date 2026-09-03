@@ -1,4 +1,4 @@
-"""`backtest_core` (rust/backtest_core, PyO3 확장) 로컬 타입 스텁. 실 시그니처는 src/lib.rs."""
+"""`backtest_core` PyO3 확장 로컬 타입 스텁. 구현은 backend/rust/backtest_core/src/lib.rs."""
 
 __version__: str
 

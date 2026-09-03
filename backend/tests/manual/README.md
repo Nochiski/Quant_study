@@ -21,7 +21,7 @@ inst = InstrumentId(venue="XKRX", symbol="005930", asset_class=AssetClass.EQUITY
 res = KrxParquetBarSource(Path("tests/fixtures/krx_parquet")).load_bars(
     BarQuery(instruments=(inst,), start=date(2018, 6, 1), end=date(2024, 12, 31), ohlc_policy=OhlcPolicy.CLAMP)
 )
-out = Path("2026-08-17/sangmok/implementation/data/raw/005930.csv")
+out = Path("reference/sangmok/implementation/data/raw/005930.csv")
 out.parent.mkdir(parents=True, exist_ok=True)
 with out.open("w", newline="") as f:
     w = csv.writer(f)
@@ -31,7 +31,7 @@ with out.open("w", newline="") as f:
 EOF
 
 # 2) 대조 실행 (Zipline 환경)
-cd 2026-08-17/sangmok/implementation
+cd reference/sangmok/implementation
 uv sync
 uv run python scripts/compare_engines.py --csv data/raw/005930.csv
 ```
@@ -71,4 +71,4 @@ DAY 주문이 나가 캡 잔량이 이월되지 않음)을 잡아냈고, 같이 
   세션당 체결 상한 `volume_limit × 거래량`, 잔량은 다음 세션 이월(커스텀은 GTC + `max_participation`).
 - 지정가·스톱은 Zipline이 종가 기준으로 발동을 판정해 규칙이 다르므로 대조 대상이
   아니다. 이 경로는 `tests/test_broker.py`의 규칙표와 `tests/test_order_lifecycle.py`의
-  손계산 골든, 그리고 `tests/test_core_parity.py`(Python↔Rust 코어)로 검증한다.
+  손계산 골든, 그리고 `backend/tests/test_core_parity.py`(Python↔Rust 코어)로 검증한다.

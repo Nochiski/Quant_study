@@ -25,6 +25,7 @@ const ko = {
   "strategy.pipeline.portfolio": "3 포트폴리오",
   "strategy.pipeline.risk": "4 리스크",
   "strategy.pipeline.execution": "5 실행",
+  "strategy.pipeline.backtest": "6 백테스트",
   "dataset.workspace.kicker": "POINT-IN-TIME DATA",
   "dataset.workspace.title": "데이터 · 유니버스",
   "dataset.workspace.description":
@@ -216,6 +217,7 @@ export const messages = {
     "strategy.pipeline.portfolio": "3 Portfolio",
     "strategy.pipeline.risk": "4 Risk",
     "strategy.pipeline.execution": "5 Execution",
+    "strategy.pipeline.backtest": "6 Backtest",
     "dataset.workspace.kicker": "POINT-IN-TIME DATA",
     "dataset.workspace.title": "Data · Universe",
     "dataset.workspace.description":

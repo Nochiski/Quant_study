@@ -1,6 +1,216 @@
 {
   "components": {
     "schemas": {
+      "BacktestRunResult": {
+        "properties": {
+          "artifacts": {
+            "$ref": "#/components/schemas/RawArtifactBundle"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/RunManifest"
+          },
+          "metric_definitions": {
+            "items": {
+              "$ref": "#/components/schemas/MetricDefinition"
+            },
+            "title": "Metric Definitions",
+            "type": "array"
+          },
+          "metrics": {
+            "items": {
+              "$ref": "#/components/schemas/MetricValue"
+            },
+            "title": "Metrics",
+            "type": "array"
+          },
+          "series": {
+            "$ref": "#/components/schemas/BacktestSeries"
+          }
+        },
+        "required": [
+          "manifest",
+          "metric_definitions",
+          "metrics",
+          "series",
+          "artifacts"
+        ],
+        "title": "BacktestRunResult",
+        "type": "object"
+      },
+      "BacktestRunSpec": {
+        "properties": {
+          "annualization_days": {
+            "default": 252,
+            "title": "Annualization Days",
+            "type": "integer"
+          },
+          "benchmark_security_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Security Id"
+          },
+          "core": {
+            "$ref": "#/components/schemas/ExecutionCore",
+            "default": "rust"
+          },
+          "initial_cash": {
+            "default": 100000000.0,
+            "title": "Initial Cash",
+            "type": "number"
+          },
+          "metric_windows": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/MetricWindow"
+            },
+            "title": "Metric Windows",
+            "type": "array"
+          },
+          "strategy": {
+            "$ref": "#/components/schemas/StrategySpec"
+          }
+        },
+        "required": [
+          "strategy"
+        ],
+        "title": "BacktestRunSpec",
+        "type": "object"
+      },
+      "BacktestRunState": {
+        "properties": {
+          "artifact_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Sha256"
+          },
+          "artifact_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Uri"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "progress": {
+            "title": "Progress",
+            "type": "number"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "progress",
+          "stage",
+          "message",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "BacktestRunState",
+        "type": "object"
+      },
+      "BacktestSeries": {
+        "properties": {
+          "drawdown": {
+            "items": {
+              "$ref": "#/components/schemas/DrawdownPoint"
+            },
+            "title": "Drawdown",
+            "type": "array"
+          },
+          "equity": {
+            "items": {
+              "$ref": "#/components/schemas/EquityCurvePoint"
+            },
+            "title": "Equity",
+            "type": "array"
+          },
+          "monthly_returns": {
+            "items": {
+              "$ref": "#/components/schemas/MonthlyReturnPoint"
+            },
+            "title": "Monthly Returns",
+            "type": "array"
+          },
+          "rolling_sharpe": {
+            "items": {
+              "$ref": "#/components/schemas/RollingMetricPoint"
+            },
+            "title": "Rolling Sharpe",
+            "type": "array"
+          }
+        },
+        "required": [
+          "equity",
+          "drawdown",
+          "monthly_returns",
+          "rolling_sharpe"
+        ],
+        "title": "BacktestSeries",
+        "type": "object"
+      },
+      "BacktestStartResponse": {
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/BacktestRunState"
+          }
+        },
+        "required": [
+          "run"
+        ],
+        "title": "BacktestStartResponse",
+        "type": "object"
+      },
       "BinaryNode": {
         "properties": {
           "kind": {
@@ -452,6 +662,28 @@
         "title": "DataStep",
         "type": "object"
       },
+      "DataWarning": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/WarningSeverity",
+            "default": "warning"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "DataWarning",
+        "type": "object"
+      },
       "DatasetFieldProfile": {
         "properties": {
           "available_date_basis": {
@@ -540,6 +772,25 @@
           "as_of"
         ],
         "title": "DatasetRevision",
+        "type": "object"
+      },
+      "DrawdownPoint": {
+        "properties": {
+          "drawdown": {
+            "title": "Drawdown",
+            "type": "number"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "drawdown"
+        ],
+        "title": "DrawdownPoint",
         "type": "object"
       },
       "EligibilityRule": {
@@ -675,6 +926,37 @@
         "title": "EngineRequirementSummary",
         "type": "object"
       },
+      "EquityCurvePoint": {
+        "properties": {
+          "benchmark_equity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Equity"
+          },
+          "equity": {
+            "title": "Equity",
+            "type": "number"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "equity",
+          "benchmark_equity"
+        ],
+        "title": "EquityCurvePoint",
+        "type": "object"
+      },
       "ExclusionReason": {
         "enum": [
           "not_in_universe",
@@ -691,6 +973,14 @@
           "minimum_trade"
         ],
         "title": "ExclusionReason",
+        "type": "string"
+      },
+      "ExecutionCore": {
+        "enum": [
+          "rust",
+          "python"
+        ],
+        "title": "ExecutionCore",
         "type": "string"
       },
       "ExecutionStep": {
@@ -1905,6 +2195,185 @@
         "title": "Market",
         "type": "string"
       },
+      "MetricCategory": {
+        "enum": [
+          "return",
+          "risk",
+          "risk_adjusted",
+          "benchmark",
+          "trade",
+          "exposure",
+          "cost"
+        ],
+        "title": "MetricCategory",
+        "type": "string"
+      },
+      "MetricDefinition": {
+        "properties": {
+          "category": {
+            "$ref": "#/components/schemas/MetricCategory"
+          },
+          "higher_is_better": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Higher Is Better"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "metric_id": {
+            "title": "Metric Id",
+            "type": "string"
+          },
+          "nullable": {
+            "title": "Nullable",
+            "type": "boolean"
+          },
+          "precision": {
+            "default": 4,
+            "title": "Precision",
+            "type": "integer"
+          },
+          "unit": {
+            "$ref": "#/components/schemas/MetricUnit"
+          },
+          "version": {
+            "default": 1,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "metric_id",
+          "label",
+          "category",
+          "unit",
+          "higher_is_better",
+          "nullable"
+        ],
+        "title": "MetricDefinition",
+        "type": "object"
+      },
+      "MetricScope": {
+        "enum": [
+          "full",
+          "in_sample",
+          "validation",
+          "out_of_sample",
+          "window"
+        ],
+        "title": "MetricScope",
+        "type": "string"
+      },
+      "MetricUnit": {
+        "enum": [
+          "percent",
+          "ratio",
+          "count",
+          "sessions",
+          "currency"
+        ],
+        "title": "MetricUnit",
+        "type": "string"
+      },
+      "MetricValue": {
+        "properties": {
+          "metric_id": {
+            "title": "Metric Id",
+            "type": "string"
+          },
+          "sample_count": {
+            "title": "Sample Count",
+            "type": "integer"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/MetricScope"
+          },
+          "scope_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Label"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Reason"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "metric_id",
+          "value",
+          "scope",
+          "sample_count"
+        ],
+        "title": "MetricValue",
+        "type": "object"
+      },
+      "MetricWindow": {
+        "properties": {
+          "end": {
+            "format": "date",
+            "title": "End",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/MetricScope"
+          },
+          "start": {
+            "format": "date",
+            "title": "Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "start",
+          "end"
+        ],
+        "title": "MetricWindow",
+        "type": "object"
+      },
       "MissingPolicy": {
         "enum": [
           "drop",
@@ -1914,6 +2383,29 @@
         ],
         "title": "MissingPolicy",
         "type": "string"
+      },
+      "MonthlyReturnPoint": {
+        "properties": {
+          "month": {
+            "title": "Month",
+            "type": "integer"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          },
+          "year": {
+            "title": "Year",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "year",
+          "month",
+          "value"
+        ],
+        "title": "MonthlyReturnPoint",
+        "type": "object"
       },
       "NodeContract": {
         "properties": {
@@ -2139,6 +2631,344 @@
           }
         },
         "title": "PortfolioStep",
+        "type": "object"
+      },
+      "RawArtifactBundle": {
+        "properties": {
+          "costs": {
+            "items": {
+              "$ref": "#/components/schemas/RawCost"
+            },
+            "title": "Costs",
+            "type": "array"
+          },
+          "fills": {
+            "items": {
+              "$ref": "#/components/schemas/RawFill"
+            },
+            "title": "Fills",
+            "type": "array"
+          },
+          "orders": {
+            "items": {
+              "$ref": "#/components/schemas/RawOrder"
+            },
+            "title": "Orders",
+            "type": "array"
+          },
+          "positions": {
+            "items": {
+              "$ref": "#/components/schemas/RawPosition"
+            },
+            "title": "Positions",
+            "type": "array"
+          },
+          "schema_version": {
+            "default": "backtest-artifacts-v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "snapshots": {
+            "items": {
+              "$ref": "#/components/schemas/RawSnapshot"
+            },
+            "title": "Snapshots",
+            "type": "array"
+          },
+          "trades": {
+            "items": {
+              "$ref": "#/components/schemas/RawTrade"
+            },
+            "title": "Trades",
+            "type": "array"
+          }
+        },
+        "required": [
+          "snapshots",
+          "positions",
+          "orders",
+          "fills",
+          "costs",
+          "trades"
+        ],
+        "title": "RawArtifactBundle",
+        "type": "object"
+      },
+      "RawCost": {
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "number"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "security_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Security Id"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "kind",
+          "security_id",
+          "amount"
+        ],
+        "title": "RawCost",
+        "type": "object"
+      },
+      "RawFill": {
+        "properties": {
+          "fee": {
+            "title": "Fee",
+            "type": "number"
+          },
+          "fill_id": {
+            "title": "Fill Id",
+            "type": "string"
+          },
+          "order_id": {
+            "title": "Order Id",
+            "type": "string"
+          },
+          "price": {
+            "title": "Price",
+            "type": "number"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "string"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          },
+          "side": {
+            "title": "Side",
+            "type": "string"
+          },
+          "slippage_per_share": {
+            "title": "Slippage Per Share",
+            "type": "number"
+          }
+        },
+        "required": [
+          "fill_id",
+          "order_id",
+          "session",
+          "security_id",
+          "side",
+          "quantity",
+          "price",
+          "fee",
+          "slippage_per_share"
+        ],
+        "title": "RawFill",
+        "type": "object"
+      },
+      "RawOrder": {
+        "properties": {
+          "decision_id": {
+            "title": "Decision Id",
+            "type": "string"
+          },
+          "order_id": {
+            "title": "Order Id",
+            "type": "string"
+          },
+          "order_type": {
+            "title": "Order Type",
+            "type": "string"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "string"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          },
+          "side": {
+            "title": "Side",
+            "type": "string"
+          },
+          "time_in_force": {
+            "title": "Time In Force",
+            "type": "string"
+          }
+        },
+        "required": [
+          "order_id",
+          "decision_id",
+          "session",
+          "security_id",
+          "side",
+          "quantity",
+          "order_type",
+          "time_in_force"
+        ],
+        "title": "RawOrder",
+        "type": "object"
+      },
+      "RawPosition": {
+        "properties": {
+          "average_price": {
+            "title": "Average Price",
+            "type": "number"
+          },
+          "market_price": {
+            "title": "Market Price",
+            "type": "number"
+          },
+          "market_value": {
+            "title": "Market Value",
+            "type": "number"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "string"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          },
+          "unrealized_pnl": {
+            "title": "Unrealized Pnl",
+            "type": "number"
+          }
+        },
+        "required": [
+          "session",
+          "security_id",
+          "quantity",
+          "average_price",
+          "market_price",
+          "market_value",
+          "unrealized_pnl"
+        ],
+        "title": "RawPosition",
+        "type": "object"
+      },
+      "RawSnapshot": {
+        "properties": {
+          "cash": {
+            "title": "Cash",
+            "type": "number"
+          },
+          "equity": {
+            "title": "Equity",
+            "type": "number"
+          },
+          "gross_exposure": {
+            "title": "Gross Exposure",
+            "type": "number"
+          },
+          "net_exposure": {
+            "title": "Net Exposure",
+            "type": "number"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "cash",
+          "equity",
+          "gross_exposure",
+          "net_exposure"
+        ],
+        "title": "RawSnapshot",
+        "type": "object"
+      },
+      "RawTrade": {
+        "properties": {
+          "closed_on": {
+            "format": "date",
+            "title": "Closed On",
+            "type": "string"
+          },
+          "entry_price": {
+            "title": "Entry Price",
+            "type": "number"
+          },
+          "exit_price": {
+            "title": "Exit Price",
+            "type": "number"
+          },
+          "fees": {
+            "title": "Fees",
+            "type": "number"
+          },
+          "opened_on": {
+            "format": "date",
+            "title": "Opened On",
+            "type": "string"
+          },
+          "pnl": {
+            "title": "Pnl",
+            "type": "number"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "string"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "side": {
+            "title": "Side",
+            "type": "string"
+          },
+          "slippage_cost": {
+            "title": "Slippage Cost",
+            "type": "number"
+          }
+        },
+        "required": [
+          "security_id",
+          "opened_on",
+          "closed_on",
+          "side",
+          "quantity",
+          "entry_price",
+          "exit_price",
+          "pnl",
+          "fees",
+          "slippage_cost"
+        ],
+        "title": "RawTrade",
         "type": "object"
       },
       "RebalanceFrequency": {
@@ -2561,6 +3391,145 @@
         },
         "title": "RiskStep",
         "type": "object"
+      },
+      "RollingMetricPoint": {
+        "properties": {
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "session",
+          "value"
+        ],
+        "title": "RollingMetricPoint",
+        "type": "object"
+      },
+      "RunManifest": {
+        "properties": {
+          "annualization_days": {
+            "title": "Annualization Days",
+            "type": "integer"
+          },
+          "completed_at": {
+            "format": "date-time",
+            "title": "Completed At",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "data_snapshot_id": {
+            "title": "Data Snapshot Id",
+            "type": "string"
+          },
+          "engine_core": {
+            "$ref": "#/components/schemas/ExecutionCore"
+          },
+          "engine_version": {
+            "title": "Engine Version",
+            "type": "string"
+          },
+          "fee_bps": {
+            "title": "Fee Bps",
+            "type": "number"
+          },
+          "initial_cash": {
+            "title": "Initial Cash",
+            "type": "number"
+          },
+          "metric_registry_version": {
+            "title": "Metric Registry Version",
+            "type": "string"
+          },
+          "participation_rate": {
+            "title": "Participation Rate",
+            "type": "number"
+          },
+          "run_fingerprint": {
+            "title": "Run Fingerprint",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "run_spec": {
+            "$ref": "#/components/schemas/BacktestRunSpec"
+          },
+          "schema_version": {
+            "default": "backtest-run-v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "slippage_bps": {
+            "title": "Slippage Bps",
+            "type": "number"
+          },
+          "strategy_hash": {
+            "title": "Strategy Hash",
+            "type": "string"
+          },
+          "target_tape_hash": {
+            "title": "Target Tape Hash",
+            "type": "string"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/DataWarning"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "run_id",
+          "created_at",
+          "completed_at",
+          "engine_core",
+          "engine_version",
+          "run_fingerprint",
+          "run_spec",
+          "strategy_hash",
+          "data_snapshot_id",
+          "target_tape_hash",
+          "metric_registry_version",
+          "initial_cash",
+          "annualization_days",
+          "fee_bps",
+          "slippage_bps",
+          "participation_rate"
+        ],
+        "title": "RunManifest",
+        "type": "object"
+      },
+      "RunStatus": {
+        "enum": [
+          "queued",
+          "running",
+          "cancel_requested",
+          "cancelled",
+          "completed",
+          "failed"
+        ],
+        "title": "RunStatus",
+        "type": "string"
       },
       "SavedFactorNode": {
         "properties": {
@@ -3331,6 +4300,14 @@
         "title": "ValidationSeverity",
         "type": "string"
       },
+      "WarningSeverity": {
+        "enum": [
+          "info",
+          "warning"
+        ],
+        "title": "WarningSeverity",
+        "type": "string"
+      },
       "WeightingMethod": {
         "enum": [
           "equal",
@@ -3350,6 +4327,207 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/backtests": {
+      "post": {
+        "operationId": "startBacktest",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BacktestRunSpec"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestStartResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Backtest"
+      }
+    },
+    "/api/v1/backtests/{run_id}": {
+      "get": {
+        "operationId": "getBacktestStatus",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Backtest Status"
+      }
+    },
+    "/api/v1/backtests/{run_id}/cancel": {
+      "post": {
+        "operationId": "cancelBacktest",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Backtest"
+      }
+    },
+    "/api/v1/backtests/{run_id}/events": {
+      "get": {
+        "operationId": "streamBacktestEvents",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after_sequence",
+            "required": false,
+            "schema": {
+              "default": -1,
+              "minimum": -1,
+              "title": "After Sequence",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {}
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream Backtest Events"
+      }
+    },
+    "/api/v1/backtests/{run_id}/result": {
+      "get": {
+        "operationId": "getBacktestResult",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Backtest Result"
+      }
+    },
     "/api/v1/equity/catalog": {
       "get": {
         "operationId": "getEquityCatalog",

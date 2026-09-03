@@ -39,11 +39,13 @@ class BacktestEnginePortfolioAdapter:
             features.add(EngineFeature.SHORT_SELLING)
         if spec.risk.gross_exposure > 1.0:
             features.add(EngineFeature.MARGIN)
+        if spec.execution.participation_rate < 1.0:
+            features.add(EngineFeature.PARTIAL_FILL)
         return StrategyRequirements(
             histories=(),
             schedule=EverySession(),
             events=frozenset((EventKind.MARKET, EventKind.CORPORATE_ACTION)),
-            actions=frozenset((ActionKind.SET_PORTFOLIO_TARGET,)),
+            actions=frozenset((ActionKind.NO_ACTION, ActionKind.SET_PORTFOLIO_TARGET)),
             features=frozenset(features),
         )
 

@@ -1,9 +1,12 @@
 import { client } from "./generated/client.gen";
 import {
+  cancelBacktest,
   createStrategy,
   explainFactorGraph,
   getEquityCatalog,
   getFactorCatalog,
+  getBacktestResult,
+  getBacktestStatus,
   getStrategyTemplate,
   previewFactorGraph,
   previewPortfolio,
@@ -11,10 +14,15 @@ import {
   previewEquityPanel,
   previewEquityUniverse,
   reviseStrategy,
+  startBacktest,
   validateFactorGraph,
   validateStrategy,
 } from "./generated/sdk.gen";
 import type {
+  BacktestRunResult,
+  BacktestRunSpec,
+  BacktestRunState,
+  BacktestStartResponse,
   DataStep,
   DatasetFieldProfile,
   FactorCatalog,
@@ -30,6 +38,8 @@ import type {
   GetEquityCatalogData,
   GetFactorCatalogData,
   NodeContract,
+  MetricDefinition,
+  MetricValue,
   PortfolioPreview,
   PortfolioPreviewRequest,
   ResearchCatalog,
@@ -61,6 +71,26 @@ const requireData = <T>(data: T | undefined, context: string): T => {
 };
 
 export const strategyWorkbenchApi = {
+  async startBacktest(spec: BacktestRunSpec): Promise<BacktestStartResponse> {
+    const response = await startBacktest({ body: spec });
+    return requireData(response.data, "startBacktest");
+  },
+
+  async getBacktestStatus(runId: string): Promise<BacktestRunState> {
+    const response = await getBacktestStatus({ path: { run_id: runId } });
+    return requireData(response.data, "getBacktestStatus");
+  },
+
+  async getBacktestResult(runId: string): Promise<BacktestRunResult> {
+    const response = await getBacktestResult({ path: { run_id: runId } });
+    return requireData(response.data, "getBacktestResult");
+  },
+
+  async cancelBacktest(runId: string): Promise<BacktestRunState> {
+    const response = await cancelBacktest({ path: { run_id: runId } });
+    return requireData(response.data, "cancelBacktest");
+  },
+
   async getTemplate(): Promise<StrategySpec> {
     const response = await getStrategyTemplate();
     return requireData(response.data, "getStrategyTemplate");
@@ -157,6 +187,10 @@ export type EquityCatalogQuery = NonNullable<GetEquityCatalogData["query"]>;
 export type FactorCatalogQuery = NonNullable<GetFactorCatalogData["query"]>;
 
 export type {
+  BacktestRunResult,
+  BacktestRunSpec,
+  BacktestRunState,
+  BacktestStartResponse,
   DataStep,
   DatasetFieldProfile,
   FactorCatalog,
@@ -170,6 +204,8 @@ export type {
   FactorSignal,
   FactorValidationIssue,
   NodeContract,
+  MetricDefinition,
+  MetricValue,
   PortfolioPreview,
   PortfolioPreviewRequest,
   ResearchCatalog,

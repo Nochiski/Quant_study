@@ -1,12 +1,26 @@
 from __future__ import annotations
 
+import json
+import time
 from dataclasses import asdict, dataclass
 from typing import Annotated
 
 from fastapi import FastAPI, HTTPException, Query, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
+from strategy_workbench.application.backtest_run.facade.runs import (
+    BacktestResultNotReadyError,
+    BacktestRunNotFoundError,
+    BacktestRunResult,
+    BacktestRunService,
+    BacktestRunSpec,
+    BacktestRunState,
+    BacktestStartResponse,
+    InvalidBacktestRunError,
+    RunStatus,
+)
 from strategy_workbench.application.equity_workspace.facade.workspace import (
     EquityWorkspaceService,
     FieldCatalogQuery,
@@ -59,12 +73,20 @@ class ReviseStrategyRequest:
     spec: StrategySpec
 
 
+def _backtest_not_found(error: BacktestRunNotFoundError) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={"code": "backtest.run.not_found", "message": str(error)},
+    )
+
+
 def create_app(
     *,
     strategy_design: StrategyDesignService,
     equity_workspace: EquityWorkspaceService,
     factor_research: FactorResearchService,
     portfolio_design: PortfolioDesignService,
+    backtest_runs: BacktestRunService,
     allowed_origins: tuple[str, ...] = ("http://localhost:5173",),
 ) -> FastAPI:
     app = FastAPI(
@@ -83,6 +105,97 @@ def create_app(
     @app.get("/api/v1/health", operation_id="getHealth")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.post(
+        "/api/v1/backtests",
+        operation_id="startBacktest",
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    def start_backtest(spec: BacktestRunSpec) -> BacktestStartResponse:
+        try:
+            return backtest_runs.start(spec)
+        except InvalidBacktestRunError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={"code": "backtest.run.invalid", "message": str(error)},
+            ) from error
+
+    @app.get(
+        "/api/v1/backtests/{run_id}",
+        operation_id="getBacktestStatus",
+    )
+    def get_backtest_status(run_id: str) -> BacktestRunState:
+        try:
+            return backtest_runs.state(run_id)
+        except BacktestRunNotFoundError as error:
+            raise _backtest_not_found(error) from error
+
+    @app.get(
+        "/api/v1/backtests/{run_id}/result",
+        operation_id="getBacktestResult",
+    )
+    def get_backtest_result(run_id: str) -> BacktestRunResult:
+        try:
+            return backtest_runs.result(run_id)
+        except BacktestRunNotFoundError as error:
+            raise _backtest_not_found(error) from error
+        except BacktestResultNotReadyError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "backtest.result.not_ready", "message": str(error)},
+            ) from error
+
+    @app.post(
+        "/api/v1/backtests/{run_id}/cancel",
+        operation_id="cancelBacktest",
+    )
+    def cancel_backtest(run_id: str) -> BacktestRunState:
+        try:
+            return backtest_runs.cancel(run_id)
+        except BacktestRunNotFoundError as error:
+            raise _backtest_not_found(error) from error
+
+    @app.get(
+        "/api/v1/backtests/{run_id}/events",
+        operation_id="streamBacktestEvents",
+        response_class=StreamingResponse,
+        responses={200: {"content": {"text/event-stream": {}}}},
+    )
+    def stream_backtest_events(
+        run_id: str,
+        after_sequence: int = Query(default=-1, ge=-1),
+    ) -> StreamingResponse:
+        try:
+            backtest_runs.state(run_id)
+        except BacktestRunNotFoundError as error:
+            raise _backtest_not_found(error) from error
+
+        def event_stream():
+            sequence = after_sequence
+            while True:
+                events = backtest_runs.events(run_id, after_sequence=sequence)
+                for event in events:
+                    sequence = event.sequence
+                    payload = json.dumps(
+                        jsonable_encoder(asdict(event)),
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                    yield f"id: {event.sequence}\nevent: progress\ndata: {payload}\n\n"
+                state = backtest_runs.state(run_id)
+                if state.status in (
+                    RunStatus.COMPLETED,
+                    RunStatus.CANCELLED,
+                    RunStatus.FAILED,
+                ):
+                    break
+                time.sleep(0.05)
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     @app.post(
         "/api/v1/portfolio/preview",

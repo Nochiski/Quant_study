@@ -2,11 +2,11 @@
 
 > 작성: 2026-09-03
 >
-> 상태: M4 완료 — Portfolio pipeline/TargetTape 수직 슬라이스 완결
+> 상태: M5 완료 — Single backtest/전문 결과 화면 수직 슬라이스 완결
 >
-> 체크리스트: 150개 중 63개 완료, 87개 남음
+> 체크리스트: 150개 중 77개 완료, 73개 남음
 >
-> 다음 체크: M5-1 `domain.analytics` MetricDefinition/MetricRegistry 추가
+> 다음 체크: M6-1 `domain.experiment` SearchSpec/ParameterSpace/Constraint 추가
 > 진행 규칙: 구현·테스트·문서가 모두 끝난 항목만 `[x]`. 각 M 완료 시 이 머리말과 완료 기록을 갱신한다.
 
 ## 1. 결론
@@ -425,20 +425,20 @@ engine에서 동일하게 실행 준비된다.
 
 ### M5 — Single backtest + 전문 결과 화면
 
-- [ ] `domain.analytics` MetricDefinition/MetricRegistry 추가.
-- [ ] BacktestRunSpec과 Run Manifest 모델 추가.
-- [ ] Equity research data를 engine Bar/Universe/CorporateAction port로 잇는 adapter 추가.
-- [ ] TargetTapeStrategy→`BacktestEngine(core="rust")` executor 구현.
-- [ ] Python reference executor를 패리티/debug 선택지로 유지.
-- [ ] raw snapshot/order/fill/cost/position artifact schema 고정.
-- [ ] current 8개 지표를 registry versioned implementation으로 흡수.
-- [ ] MDD duration/recovery, benchmark, trade, exposure, cost 지표 확장.
-- [ ] `None`과 0, scope(full/IS/validation/OOS/window) 직렬화 계약 추가.
-- [ ] local artifact store와 atomic run commit 구현.
-- [ ] run start/status/result/cancel API와 SSE progress 추가.
-- [ ] Run Detail에 equity/drawdown/monthly/rolling/exposure/trades 차트 추가.
-- [ ] raw metric table과 manifest/data warning drawer 추가.
-- [ ] Python/Rust result·metric golden parity 테스트 추가.
+- [x] `domain.analytics` MetricDefinition/MetricRegistry 추가.
+- [x] BacktestRunSpec과 Run Manifest 모델 추가.
+- [x] Equity research data를 engine Bar/Universe/CorporateAction port로 잇는 adapter 추가.
+- [x] TargetTapeStrategy→`BacktestEngine(core="rust")` executor 구현.
+- [x] Python reference executor를 패리티/debug 선택지로 유지.
+- [x] raw snapshot/order/fill/cost/position artifact schema 고정.
+- [x] current 8개 지표를 registry versioned implementation으로 흡수.
+- [x] MDD duration/recovery, benchmark, trade, exposure, cost 지표 확장.
+- [x] `None`과 0, scope(full/IS/validation/OOS/window) 직렬화 계약 추가.
+- [x] local artifact store와 atomic run commit 구현.
+- [x] run start/status/result/cancel API와 SSE progress 추가.
+- [x] Run Detail에 equity/drawdown/monthly/rolling/exposure/trades 차트 추가.
+- [x] raw metric table과 manifest/data warning drawer 추가.
+- [x] Python/Rust result·metric golden parity 테스트 추가.
 
 완료 게이트: UI에서 single run을 실행하고 raw metrics와 모든 재현 가정을 확인할 수 있으며
 Python/Rust 결과가 같다.
@@ -635,6 +635,15 @@ Contract:
   요구사항을 실행 전에 협상해 `SetPortfolioTarget(REPLACE, next_open)`으로 변환한다. Builder에
   포트폴리오·리스크·실행 화면과 후보 score/target/exclusion preview를 추가하고 backend HTTP 및
   frontend MSW E2E로 T+1 경계를 고정했다.
+- 2026-09-03 — M5 완료: versioned `MetricRegistry`와 immutable `BacktestRunSpec`/manifest,
+  raw snapshot·position·order·fill·cost·trade artifact 계약을 추가했다. Equity mock의 OHLCV·universe·
+  corporate-action port가 `TargetTapeStrategy`를 Persistent Rust Engine 또는 Python reference core로
+  실행하고, 기존 8개 지표와 MDD 기간/회복·benchmark·trade·exposure·cost를 포함한 21개 지표를
+  같은 registry에서 산출한다. local store는 staging directory rename으로 JSON artifact를 원자
+  commit하며 `None`/0과 Full·IS·Validation·OOS·Window scope를 보존한다. start/status/result/cancel와
+  SSE progress API, Builder 6단계 run console, equity/drawdown/monthly/rolling Sharpe/exposure 차트,
+  거래 원장·raw metric table·manifest/data warning drawer를 연결했고 Python/Rust golden parity를
+  통합 테스트로 고정했다.
 
 체크 수는 이 문서의 완료/미완료 체크박스 기준으로 갱신한다. 설명 안의 예시 checkbox는 두지
 않아 수치가 실제 구현 단위와 일치하게 유지한다.

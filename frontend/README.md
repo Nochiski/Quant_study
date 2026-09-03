@@ -1,5 +1,16 @@
 # Strategy Workbench Frontend
 
+## M5 Backtest run · professional result
+
+Builder 6단계는 현재 `StrategySpec`을 generated SDK로 single run에 제출한다. 사용자는 기본
+Persistent Rust core와 패리티/debug용 Python reference, 초기 자본, benchmark, OOS 시작 구간을
+설정할 수 있다. 실행 상태는 backend run lifecycle에서 polling하고 완료 결과는 query cache가 소유한다.
+
+결과 화면은 backend `MetricRegistry` 응답을 그대로 사용해 equity/benchmark, drawdown,
+monthly return, rolling Sharpe, gross/net exposure와 closed trade를 표시한다. raw metric table은
+Full·IS·Validation·OOS·Window scope를 보존하고 `None`은 unavailable reason이 있는 N/A로,
+실제 0은 숫자로 구분한다. manifest drawer에서 engine/data/tape hash와 데이터 경고를 확인할 수 있다.
+
 ## M4 Portfolio · Risk · Execution
 
 Builder의 3~5단계는 동일한 `StrategySpec` draft에서 long/short와 N/percentile 선택,

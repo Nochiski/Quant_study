@@ -40,11 +40,17 @@ def test_requirements_are_negotiated_before_engine_execution() -> None:
     requirements = adapter.requirements(leveraged_long_short)
     compatibility = adapter.assess(leveraged_long_short)
 
-    assert requirements.features == frozenset((EngineFeature.SHORT_SELLING, EngineFeature.MARGIN))
+    assert requirements.features == frozenset(
+        (
+            EngineFeature.SHORT_SELLING,
+            EngineFeature.MARGIN,
+            EngineFeature.PARTIAL_FILL,
+        )
+    )
     assert compatibility.compatible
     assert compatibility.issues == ()
     assert compatibility.requirements.schedule == "EverySession"
-    assert compatibility.requirements.actions == ("set_portfolio_target",)
+    assert compatibility.requirements.actions == ("no_action", "set_portfolio_target")
 
 
 def test_target_frame_maps_to_replace_action_at_next_open() -> None:

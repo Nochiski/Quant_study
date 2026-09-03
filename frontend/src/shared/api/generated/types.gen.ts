@@ -5,6 +5,119 @@ export type ClientOptions = {
 };
 
 /**
+ * BacktestRunResult
+ */
+export type BacktestRunResult = {
+  artifacts: RawArtifactBundle;
+  manifest: RunManifest;
+  /**
+   * Metric Definitions
+   */
+  metric_definitions: Array<MetricDefinition>;
+  /**
+   * Metrics
+   */
+  metrics: Array<MetricValue>;
+  series: BacktestSeries;
+};
+
+/**
+ * BacktestRunSpec
+ */
+export type BacktestRunSpec = {
+  /**
+   * Annualization Days
+   */
+  annualization_days?: number;
+  /**
+   * Benchmark Security Id
+   */
+  benchmark_security_id?: string | null;
+  core?: ExecutionCore;
+  /**
+   * Initial Cash
+   */
+  initial_cash?: number;
+  /**
+   * Metric Windows
+   */
+  metric_windows?: Array<MetricWindow>;
+  strategy: StrategySpec;
+};
+
+/**
+ * BacktestRunState
+ */
+export type BacktestRunState = {
+  /**
+   * Artifact Sha256
+   */
+  artifact_sha256?: string | null;
+  /**
+   * Artifact Uri
+   */
+  artifact_uri?: string | null;
+  /**
+   * Created At
+   */
+  created_at: string;
+  /**
+   * Error
+   */
+  error?: string | null;
+  /**
+   * Message
+   */
+  message: string;
+  /**
+   * Progress
+   */
+  progress: number;
+  /**
+   * Run Id
+   */
+  run_id: string;
+  /**
+   * Stage
+   */
+  stage: string;
+  status: RunStatus;
+  /**
+   * Updated At
+   */
+  updated_at: string;
+};
+
+/**
+ * BacktestSeries
+ */
+export type BacktestSeries = {
+  /**
+   * Drawdown
+   */
+  drawdown: Array<DrawdownPoint>;
+  /**
+   * Equity
+   */
+  equity: Array<EquityCurvePoint>;
+  /**
+   * Monthly Returns
+   */
+  monthly_returns: Array<MonthlyReturnPoint>;
+  /**
+   * Rolling Sharpe
+   */
+  rolling_sharpe: Array<RollingMetricPoint>;
+};
+
+/**
+ * BacktestStartResponse
+ */
+export type BacktestStartResponse = {
+  run: BacktestRunState;
+};
+
+/**
  * BinaryNode
  */
 export type BinaryNode = {
@@ -280,6 +393,21 @@ export type DataStep = {
 };
 
 /**
+ * DataWarning
+ */
+export type DataWarning = {
+  /**
+   * Code
+   */
+  code: string;
+  /**
+   * Message
+   */
+  message: string;
+  severity?: WarningSeverity;
+};
+
+/**
  * DatasetFieldProfile
  */
 export type DatasetFieldProfile = {
@@ -343,6 +471,20 @@ export type DatasetRevision = {
    * Revision
    */
   revision: string;
+};
+
+/**
+ * DrawdownPoint
+ */
+export type DrawdownPoint = {
+  /**
+   * Drawdown
+   */
+  drawdown: number;
+  /**
+   * Session
+   */
+  session: string;
 };
 
 /**
@@ -430,6 +572,24 @@ export type EngineRequirementSummary = {
 };
 
 /**
+ * EquityCurvePoint
+ */
+export type EquityCurvePoint = {
+  /**
+   * Benchmark Equity
+   */
+  benchmark_equity: number | null;
+  /**
+   * Equity
+   */
+  equity: number;
+  /**
+   * Session
+   */
+  session: string;
+};
+
+/**
  * ExclusionReason
  */
 export type ExclusionReason =
@@ -445,6 +605,11 @@ export type ExclusionReason =
   | "missing_risk"
   | "turnover_buffer"
   | "minimum_trade";
+
+/**
+ * ExecutionCore
+ */
+export type ExecutionCore = "rust" | "python";
 
 /**
  * ExecutionStep
@@ -1177,9 +1342,129 @@ export type IntegerParameter = {
 export type Market = "KRX";
 
 /**
+ * MetricCategory
+ */
+export type MetricCategory =
+  | "return"
+  | "risk"
+  | "risk_adjusted"
+  | "benchmark"
+  | "trade"
+  | "exposure"
+  | "cost";
+
+/**
+ * MetricDefinition
+ */
+export type MetricDefinition = {
+  category: MetricCategory;
+  /**
+   * Higher Is Better
+   */
+  higher_is_better: boolean | null;
+  /**
+   * Label
+   */
+  label: string;
+  /**
+   * Metric Id
+   */
+  metric_id: string;
+  /**
+   * Nullable
+   */
+  nullable: boolean;
+  /**
+   * Precision
+   */
+  precision?: number;
+  unit: MetricUnit;
+  /**
+   * Version
+   */
+  version?: number;
+};
+
+/**
+ * MetricScope
+ */
+export type MetricScope =
+  "full" | "in_sample" | "validation" | "out_of_sample" | "window";
+
+/**
+ * MetricUnit
+ */
+export type MetricUnit =
+  "percent" | "ratio" | "count" | "sessions" | "currency";
+
+/**
+ * MetricValue
+ */
+export type MetricValue = {
+  /**
+   * Metric Id
+   */
+  metric_id: string;
+  /**
+   * Sample Count
+   */
+  sample_count: number;
+  scope: MetricScope;
+  /**
+   * Scope Label
+   */
+  scope_label?: string | null;
+  /**
+   * Unavailable Reason
+   */
+  unavailable_reason?: string | null;
+  /**
+   * Value
+   */
+  value: number | null;
+};
+
+/**
+ * MetricWindow
+ */
+export type MetricWindow = {
+  /**
+   * End
+   */
+  end: string;
+  /**
+   * Label
+   */
+  label?: string | null;
+  scope: MetricScope;
+  /**
+   * Start
+   */
+  start: string;
+};
+
+/**
  * MissingPolicy
  */
 export type MissingPolicy = "drop" | "keep" | "zero" | "cross_sectional_median";
+
+/**
+ * MonthlyReturnPoint
+ */
+export type MonthlyReturnPoint = {
+  /**
+   * Month
+   */
+  month: number;
+  /**
+   * Value
+   */
+  value: number;
+  /**
+   * Year
+   */
+  year: number;
+};
 
 /**
  * NodeContract
@@ -1327,6 +1612,248 @@ export type PortfolioStep = {
    */
   turnover_buffer_count?: number;
   weighting?: WeightingMethod;
+};
+
+/**
+ * RawArtifactBundle
+ */
+export type RawArtifactBundle = {
+  /**
+   * Costs
+   */
+  costs: Array<RawCost>;
+  /**
+   * Fills
+   */
+  fills: Array<RawFill>;
+  /**
+   * Orders
+   */
+  orders: Array<RawOrder>;
+  /**
+   * Positions
+   */
+  positions: Array<RawPosition>;
+  /**
+   * Schema Version
+   */
+  schema_version?: string;
+  /**
+   * Snapshots
+   */
+  snapshots: Array<RawSnapshot>;
+  /**
+   * Trades
+   */
+  trades: Array<RawTrade>;
+};
+
+/**
+ * RawCost
+ */
+export type RawCost = {
+  /**
+   * Amount
+   */
+  amount: number;
+  /**
+   * Kind
+   */
+  kind: string;
+  /**
+   * Security Id
+   */
+  security_id: string | null;
+  /**
+   * Session
+   */
+  session: string;
+};
+
+/**
+ * RawFill
+ */
+export type RawFill = {
+  /**
+   * Fee
+   */
+  fee: number;
+  /**
+   * Fill Id
+   */
+  fill_id: string;
+  /**
+   * Order Id
+   */
+  order_id: string;
+  /**
+   * Price
+   */
+  price: number;
+  /**
+   * Quantity
+   */
+  quantity: string;
+  /**
+   * Security Id
+   */
+  security_id: string;
+  /**
+   * Session
+   */
+  session: string;
+  /**
+   * Side
+   */
+  side: string;
+  /**
+   * Slippage Per Share
+   */
+  slippage_per_share: number;
+};
+
+/**
+ * RawOrder
+ */
+export type RawOrder = {
+  /**
+   * Decision Id
+   */
+  decision_id: string;
+  /**
+   * Order Id
+   */
+  order_id: string;
+  /**
+   * Order Type
+   */
+  order_type: string;
+  /**
+   * Quantity
+   */
+  quantity: string;
+  /**
+   * Security Id
+   */
+  security_id: string;
+  /**
+   * Session
+   */
+  session: string;
+  /**
+   * Side
+   */
+  side: string;
+  /**
+   * Time In Force
+   */
+  time_in_force: string;
+};
+
+/**
+ * RawPosition
+ */
+export type RawPosition = {
+  /**
+   * Average Price
+   */
+  average_price: number;
+  /**
+   * Market Price
+   */
+  market_price: number;
+  /**
+   * Market Value
+   */
+  market_value: number;
+  /**
+   * Quantity
+   */
+  quantity: string;
+  /**
+   * Security Id
+   */
+  security_id: string;
+  /**
+   * Session
+   */
+  session: string;
+  /**
+   * Unrealized Pnl
+   */
+  unrealized_pnl: number;
+};
+
+/**
+ * RawSnapshot
+ */
+export type RawSnapshot = {
+  /**
+   * Cash
+   */
+  cash: number;
+  /**
+   * Equity
+   */
+  equity: number;
+  /**
+   * Gross Exposure
+   */
+  gross_exposure: number;
+  /**
+   * Net Exposure
+   */
+  net_exposure: number;
+  /**
+   * Session
+   */
+  session: string;
+};
+
+/**
+ * RawTrade
+ */
+export type RawTrade = {
+  /**
+   * Closed On
+   */
+  closed_on: string;
+  /**
+   * Entry Price
+   */
+  entry_price: number;
+  /**
+   * Exit Price
+   */
+  exit_price: number;
+  /**
+   * Fees
+   */
+  fees: number;
+  /**
+   * Opened On
+   */
+  opened_on: string;
+  /**
+   * Pnl
+   */
+  pnl: number;
+  /**
+   * Quantity
+   */
+  quantity: string;
+  /**
+   * Security Id
+   */
+  security_id: string;
+  /**
+   * Side
+   */
+  side: string;
+  /**
+   * Slippage Cost
+   */
+  slippage_cost: number;
 };
 
 /**
@@ -1580,6 +2107,103 @@ export type RiskStep = {
    */
   sector_neutral?: boolean;
 };
+
+/**
+ * RollingMetricPoint
+ */
+export type RollingMetricPoint = {
+  /**
+   * Session
+   */
+  session: string;
+  /**
+   * Value
+   */
+  value: number | null;
+};
+
+/**
+ * RunManifest
+ */
+export type RunManifest = {
+  /**
+   * Annualization Days
+   */
+  annualization_days: number;
+  /**
+   * Completed At
+   */
+  completed_at: string;
+  /**
+   * Created At
+   */
+  created_at: string;
+  /**
+   * Data Snapshot Id
+   */
+  data_snapshot_id: string;
+  engine_core: ExecutionCore;
+  /**
+   * Engine Version
+   */
+  engine_version: string;
+  /**
+   * Fee Bps
+   */
+  fee_bps: number;
+  /**
+   * Initial Cash
+   */
+  initial_cash: number;
+  /**
+   * Metric Registry Version
+   */
+  metric_registry_version: string;
+  /**
+   * Participation Rate
+   */
+  participation_rate: number;
+  /**
+   * Run Fingerprint
+   */
+  run_fingerprint: string;
+  /**
+   * Run Id
+   */
+  run_id: string;
+  run_spec: BacktestRunSpec;
+  /**
+   * Schema Version
+   */
+  schema_version?: string;
+  /**
+   * Slippage Bps
+   */
+  slippage_bps: number;
+  /**
+   * Strategy Hash
+   */
+  strategy_hash: string;
+  /**
+   * Target Tape Hash
+   */
+  target_tape_hash: string;
+  /**
+   * Warnings
+   */
+  warnings?: Array<DataWarning>;
+};
+
+/**
+ * RunStatus
+ */
+export type RunStatus =
+  | "queued"
+  | "running"
+  | "cancel_requested"
+  | "cancelled"
+  | "completed"
+  | "failed";
 
 /**
  * SavedFactorNode
@@ -2059,9 +2683,170 @@ export type ValidationKind = "syntax" | "semantic" | "capability";
 export type ValidationSeverity = "error" | "warning";
 
 /**
+ * WarningSeverity
+ */
+export type WarningSeverity = "info" | "warning";
+
+/**
  * WeightingMethod
  */
 export type WeightingMethod = "equal" | "factor_score" | "rank" | "risk";
+
+export type StartBacktestData = {
+  body: BacktestRunSpec;
+  path?: never;
+  query?: never;
+  url: "/api/v1/backtests";
+};
+
+export type StartBacktestErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type StartBacktestError = StartBacktestErrors[keyof StartBacktestErrors];
+
+export type StartBacktestResponses = {
+  /**
+   * Successful Response
+   */
+  202: BacktestStartResponse;
+};
+
+export type StartBacktestResponse =
+  StartBacktestResponses[keyof StartBacktestResponses];
+
+export type GetBacktestStatusData = {
+  body?: never;
+  path: {
+    /**
+     * Run Id
+     */
+    run_id: string;
+  };
+  query?: never;
+  url: "/api/v1/backtests/{run_id}";
+};
+
+export type GetBacktestStatusErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetBacktestStatusError =
+  GetBacktestStatusErrors[keyof GetBacktestStatusErrors];
+
+export type GetBacktestStatusResponses = {
+  /**
+   * Successful Response
+   */
+  200: BacktestRunState;
+};
+
+export type GetBacktestStatusResponse =
+  GetBacktestStatusResponses[keyof GetBacktestStatusResponses];
+
+export type CancelBacktestData = {
+  body?: never;
+  path: {
+    /**
+     * Run Id
+     */
+    run_id: string;
+  };
+  query?: never;
+  url: "/api/v1/backtests/{run_id}/cancel";
+};
+
+export type CancelBacktestErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type CancelBacktestError =
+  CancelBacktestErrors[keyof CancelBacktestErrors];
+
+export type CancelBacktestResponses = {
+  /**
+   * Successful Response
+   */
+  200: BacktestRunState;
+};
+
+export type CancelBacktestResponse =
+  CancelBacktestResponses[keyof CancelBacktestResponses];
+
+export type StreamBacktestEventsData = {
+  body?: never;
+  path: {
+    /**
+     * Run Id
+     */
+    run_id: string;
+  };
+  query?: {
+    /**
+     * After Sequence
+     */
+    after_sequence?: number;
+  };
+  url: "/api/v1/backtests/{run_id}/events";
+};
+
+export type StreamBacktestEventsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type StreamBacktestEventsError =
+  StreamBacktestEventsErrors[keyof StreamBacktestEventsErrors];
+
+export type StreamBacktestEventsResponses = {
+  /**
+   * Successful Response
+   */
+  200: unknown;
+};
+
+export type GetBacktestResultData = {
+  body?: never;
+  path: {
+    /**
+     * Run Id
+     */
+    run_id: string;
+  };
+  query?: never;
+  url: "/api/v1/backtests/{run_id}/result";
+};
+
+export type GetBacktestResultErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetBacktestResultError =
+  GetBacktestResultErrors[keyof GetBacktestResultErrors];
+
+export type GetBacktestResultResponses = {
+  /**
+   * Successful Response
+   */
+  200: BacktestRunResult;
+};
+
+export type GetBacktestResultResponse =
+  GetBacktestResultResponses[keyof GetBacktestResultResponses];
 
 export type GetEquityCatalogData = {
   body?: never;

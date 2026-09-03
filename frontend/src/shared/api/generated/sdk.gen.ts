@@ -3,6 +3,9 @@
 import type { Client, Options as Options2, TDataShape } from "./client";
 import { client } from "./client.gen";
 import type {
+  CancelBacktestData,
+  CancelBacktestErrors,
+  CancelBacktestResponses,
   CreateStrategyData,
   CreateStrategyErrors,
   CreateStrategyResponses,
@@ -12,6 +15,12 @@ import type {
   ExplainStrategyData,
   ExplainStrategyErrors,
   ExplainStrategyResponses,
+  GetBacktestResultData,
+  GetBacktestResultErrors,
+  GetBacktestResultResponses,
+  GetBacktestStatusData,
+  GetBacktestStatusErrors,
+  GetBacktestStatusResponses,
   GetEquityCatalogData,
   GetEquityCatalogErrors,
   GetEquityCatalogResponses,
@@ -43,6 +52,12 @@ import type {
   ReviseStrategyData,
   ReviseStrategyErrors,
   ReviseStrategyResponses,
+  StartBacktestData,
+  StartBacktestErrors,
+  StartBacktestResponses,
+  StreamBacktestEventsData,
+  StreamBacktestEventsErrors,
+  StreamBacktestEventsResponses,
   ValidateFactorGraphData,
   ValidateFactorGraphErrors,
   ValidateFactorGraphResponses,
@@ -68,6 +83,73 @@ export type Options<
    */
   meta?: Record<string, unknown>;
 };
+
+/**
+ * Start Backtest
+ */
+export const startBacktest = <ThrowOnError extends boolean = false>(
+  options: Options<StartBacktestData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    StartBacktestResponses,
+    StartBacktestErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/backtests",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Get Backtest Status
+ */
+export const getBacktestStatus = <ThrowOnError extends boolean = false>(
+  options: Options<GetBacktestStatusData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetBacktestStatusResponses,
+    GetBacktestStatusErrors,
+    ThrowOnError
+  >({ url: "/api/v1/backtests/{run_id}", ...options });
+
+/**
+ * Cancel Backtest
+ */
+export const cancelBacktest = <ThrowOnError extends boolean = false>(
+  options: Options<CancelBacktestData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    CancelBacktestResponses,
+    CancelBacktestErrors,
+    ThrowOnError
+  >({ url: "/api/v1/backtests/{run_id}/cancel", ...options });
+
+/**
+ * Stream Backtest Events
+ */
+export const streamBacktestEvents = <ThrowOnError extends boolean = false>(
+  options: Options<StreamBacktestEventsData, ThrowOnError, unknown>,
+) =>
+  (options.client ?? client).sse.get<
+    StreamBacktestEventsResponses,
+    StreamBacktestEventsErrors,
+    ThrowOnError
+  >({ url: "/api/v1/backtests/{run_id}/events", ...options });
+
+/**
+ * Get Backtest Result
+ */
+export const getBacktestResult = <ThrowOnError extends boolean = false>(
+  options: Options<GetBacktestResultData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetBacktestResultResponses,
+    GetBacktestResultErrors,
+    ThrowOnError
+  >({ url: "/api/v1/backtests/{run_id}/result", ...options });
 
 /**
  * Equity Catalog

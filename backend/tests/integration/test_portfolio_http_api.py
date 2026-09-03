@@ -32,7 +32,10 @@ def test_portfolio_preview_returns_candidates_target_tape_and_engine_contract() 
     assert first.json() == second.json()
     payload = first.json()
     assert payload["engine"]["compatible"] is True
-    assert payload["engine"]["requirements"]["actions"] == ["set_portfolio_target"]
+    assert payload["engine"]["requirements"]["actions"] == [
+        "no_action",
+        "set_portfolio_target",
+    ]
     assert len(payload["tape"]["tape_hash"]) == 64
     assert payload["tape"]["frames"]
     assert payload["tape"]["frames"][0]["candidates"]

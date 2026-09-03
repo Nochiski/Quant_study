@@ -3,6 +3,12 @@ from __future__ import annotations
 import hashlib
 from datetime import date, timedelta
 
+from strategy_workbench.application.backtest_run.facade.ports import (
+    BacktestDataQuery,
+    BacktestDataset,
+    MarketBarRecord,
+    UniverseMembershipRecord,
+)
 from strategy_workbench.application.factor_research.facade.ports import (
     FactorObservationQuery,
 )
@@ -10,6 +16,7 @@ from strategy_workbench.application.portfolio_design.facade.ports import (
     PortfolioObservationQuery,
     PortfolioObservationSet,
 )
+from strategy_workbench.domain.backtest.facade.runs import DataWarning, WarningSeverity
 from strategy_workbench.domain.equity.facade.research_data import (
     DataLoadStatus,
     DatasetFieldProfile,
@@ -227,6 +234,67 @@ class MockEquityDataAdapter:
             data_snapshot_id=self._snapshot.snapshot_id,
             sessions=sessions,
             observations=observations,
+        )
+
+    def load_backtest_dataset(self, query: BacktestDataQuery) -> BacktestDataset:
+        """Generate deterministic OHLCV until the real Equity DB adapter is selected."""
+        sessions = _business_sessions(query.start, query.end)
+        if not sessions:
+            raise ValueError("mock backtest dataset requires at least one business session")
+        requested_ids = list(query.security_ids)
+        benchmark_id = query.benchmark_security_id or requested_ids[0]
+        if benchmark_id not in requested_ids:
+            requested_ids.append(benchmark_id)
+        security_ids = tuple(dict.fromkeys(requested_ids))
+        bars: list[MarketBarRecord] = []
+        for security_index, security_id in enumerate(security_ids):
+            stable = int.from_bytes(hashlib.sha256(security_id.encode("utf-8")).digest()[:2], "big")
+            base = 40_000.0 + security_index * 25_000.0 + stable % 5_000
+            previous_close = base
+            for session_index, session in enumerate(sessions):
+                cycle = ((session_index + stable) % 17 - 8) * 0.0008
+                trend = (security_index - 0.5) * 0.00015
+                open_price = previous_close * (1 + cycle * 0.35)
+                close_price = open_price * (1 + cycle + trend)
+                bars.append(
+                    MarketBarRecord(
+                        session=session,
+                        security_id=security_id,
+                        open=open_price,
+                        high=max(open_price, close_price) * 1.004,
+                        low=min(open_price, close_price) * 0.996,
+                        close=close_price,
+                        volume=1_000_000 + security_index * 250_000 + session_index * 100,
+                    )
+                )
+                previous_close = close_price
+        return BacktestDataset(
+            data_snapshot_id=self._snapshot.snapshot_id,
+            bars=tuple(bars),
+            memberships=tuple(
+                UniverseMembershipRecord(
+                    security_id=security_id,
+                    first_session=sessions[0],
+                    last_session=sessions[-1],
+                )
+                for security_id in security_ids
+            ),
+            corporate_actions=(),
+            benchmark_security_id=benchmark_id,
+            warnings=(
+                DataWarning(
+                    code="mock_equity_data",
+                    message=(
+                        "Deterministic mock OHLCV is active; replace the adapter for "
+                        "production research."
+                    ),
+                    severity=WarningSeverity.INFO,
+                ),
+                DataWarning(
+                    code="corporate_action_feed_empty",
+                    message="The mock run declares an empty corporate-action feed.",
+                ),
+            ),
         )
 
     def _cutoff(self, session: date, lag_sessions: int) -> date | None:

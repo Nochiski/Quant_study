@@ -1,5 +1,23 @@
 # Strategy Workbench Backend
 
+## M5 Single backtest + analytics
+
+`domain.analytics`의 `metric-registry-v1`이 기존 8개 성과 지표와 MDD 기간/회복,
+benchmark/excess return, 거래·노출·비용을 합친 21개 정의와 공식을 소유한다.
+`application.backtest_run`은 immutable `BacktestRunSpec`을 TargetTape로 컴파일하고 교체 가능한
+data/executor/artifact port만 호출한다. 기본 조립은 Equity mock → `TargetTapeStrategy` →
+Persistent Rust Engine → atomic local JSON artifact이며 Python reference core도 같은 계약으로 남긴다.
+
+- `POST /api/v1/backtests`: Rust/Python core, 초기 자본, benchmark, metric scope와 함께 실행 시작
+- `GET /api/v1/backtests/{run_id}`: 상태·진행률·artifact hash 조회
+- `GET /api/v1/backtests/{run_id}/events`: SSE progress stream
+- `GET /api/v1/backtests/{run_id}/result`: versioned metrics, 차트 series, raw artifact, manifest 조회
+- `POST /api/v1/backtests/{run_id}/cancel`: 협력적 취소 요청
+
+실제 Equity DB가 오면 `BacktestDataPort` 구현만 교체한다. domain/application과 engine executor는
+OHLCV·universe membership·corporate action의 중립 계약을 유지한다. 로컬 실행 artifact는
+`backend/.local/backtest-runs`에 저장되며 git에서 제외된다.
+
 ## M4 Portfolio pipeline + TargetTape
 
 `domain.portfolio`가 PIT eligibility, 합성 score/rank/regime, long-only/long-short 선택,
@@ -66,17 +84,22 @@ backend/
    │  └─ facade/research_data.py
    ├─ domain/strategy/                     # StrategySpec v1, hash, validation, explanation
    ├─ domain/portfolio/                    # TargetTape compiler와 portfolio policy
+   ├─ domain/analytics/                    # 21개 versioned metric 정의·공식
+   ├─ domain/backtest/                     # run/manifest/raw artifact 계약
    ├─ application/equity_workspace/        # 검색 catalog·universe/panel PIT preview
    │  ├─ ports/outgoing/equity_data.py     # EquityDataPort
    │  └─ facade/{ports,workspace}.py
    ├─ application/strategy_design/          # create/get/revise/validate/explain
    ├─ application/portfolio_design/         # portfolio preview use case와 outgoing ports
+   ├─ application/backtest_run/             # compile/run/status/result/cancel orchestration
    │  └─ ports/outgoing/strategy_repository.py
    ├─ adapters/inbound/http_api/            # FastAPI/OpenAPI wire adapter
    ├─ adapters/outbound/equity_mock/       # 결정적 in-memory Equity v0.2 mock
    │  └─ facade/provider.py
    ├─ adapters/outbound/strategy_memory/    # immutable revision 기준 adapter
    ├─ adapters/outbound/engine_portfolio/   # capability 협상과 target action 변환
+   ├─ adapters/outbound/backtest_engine/    # TargetTape → Rust/Python engine
+   ├─ adapters/outbound/artifact_local/     # atomic local result commit
    └─ bootstrap/                           # adapter 조립
       └─ facade/{container,http}.py
 ```

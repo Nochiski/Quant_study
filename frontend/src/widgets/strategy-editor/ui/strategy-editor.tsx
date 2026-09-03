@@ -9,6 +9,7 @@ import {
   useStrategyDraft,
 } from "../../../features/edit-strategy";
 import { ResearchDataSelector } from "../../../features/select-research-data";
+import { BacktestRunner } from "../../../features/run-backtest";
 import { t } from "../../../shared/config";
 
 const pipeline = [
@@ -17,12 +18,27 @@ const pipeline = [
   "strategy.pipeline.portfolio",
   "strategy.pipeline.risk",
   "strategy.pipeline.execution",
+  "strategy.pipeline.backtest",
 ] as const;
 
+type PipelineStep =
+  "data" | "factor" | "portfolio" | "risk" | "execution" | "backtest";
+
+const initialStep = (): PipelineStep => {
+  const query = new URLSearchParams(window.location.search);
+  if (query.has("run")) return "backtest";
+  const requested = query.get("step");
+  return requested === "data" ||
+    requested === "portfolio" ||
+    requested === "risk" ||
+    requested === "execution" ||
+    requested === "backtest"
+    ? requested
+    : "factor";
+};
+
 const StrategyEditorWorkbench = () => {
-  const [activeStep, setActiveStep] = useState<
-    "data" | "factor" | "portfolio" | "risk" | "execution"
-  >("factor");
+  const [activeStep, setActiveStep] = useState<PipelineStep>(initialStep);
   const { draft, update } = useStrategyDraft();
 
   return (
@@ -30,7 +46,14 @@ const StrategyEditorWorkbench = () => {
       <nav className="pipeline" aria-label="Strategy pipeline">
         {pipeline.map((key, index) => {
           const step = (
-            ["data", "factor", "portfolio", "risk", "execution"] as const
+            [
+              "data",
+              "factor",
+              "portfolio",
+              "risk",
+              "execution",
+              "backtest",
+            ] as const
           )[index];
           return (
             <button
@@ -60,8 +83,10 @@ const StrategyEditorWorkbench = () => {
         <PortfolioEditor />
       ) : activeStep === "risk" ? (
         <RiskEditor />
-      ) : (
+      ) : activeStep === "execution" ? (
         <ExecutionEditor />
+      ) : (
+        <BacktestRunner strategy={draft} />
       )}
     </div>
   );

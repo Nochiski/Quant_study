@@ -55,9 +55,7 @@ class MockEquityDataAdapter:
 
     @classmethod
     def demo(cls) -> MockEquityDataAdapter:
-        sessions = tuple(
-            date(2024, 1, day) for day in (2, 3, 4, 5, 8, 9, 10, 11, 12)
-        )
+        sessions = tuple(date(2024, 1, day) for day in (2, 3, 4, 5, 8, 9, 10, 11, 12))
         securities = (
             SecurityRef("sec-005930-1", "005930", "삼성전자", "XKRX"),
             SecurityRef("sec-000660-1", "000660", "SK하이닉스", "XKRX"),
@@ -239,9 +237,7 @@ class MockEquityDataAdapter:
 
     def load_panel(self, query: ResearchPanelQuery) -> ResearchPanelResult:
         profile_by_id = {profile.field_id: profile for profile in self._profiles}
-        known_security_ids = {
-            membership.security.security_id for membership in self._memberships
-        }
+        known_security_ids = {membership.security.security_id for membership in self._memberships}
         unknown_fields = sorted(set(query.field_ids) - set(profile_by_id))
         unknown_securities = sorted(set(query.security_ids) - known_security_ids)
         if unknown_fields or unknown_securities:

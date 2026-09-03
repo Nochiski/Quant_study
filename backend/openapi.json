@@ -1,0 +1,1640 @@
+{
+  "components": {
+    "schemas": {
+      "BinaryNode": {
+        "properties": {
+          "kind": {
+            "const": "binary",
+            "title": "Kind",
+            "type": "string"
+          },
+          "left_node_id": {
+            "title": "Left Node Id",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operator": {
+            "$ref": "#/components/schemas/BinaryOperator"
+          },
+          "right_node_id": {
+            "title": "Right Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "operator",
+          "left_node_id",
+          "right_node_id",
+          "kind"
+        ],
+        "title": "BinaryNode",
+        "type": "object"
+      },
+      "BinaryOperator": {
+        "enum": [
+          "add",
+          "subtract",
+          "multiply",
+          "divide"
+        ],
+        "title": "BinaryOperator",
+        "type": "string"
+      },
+      "CellKind": {
+        "description": "A numeric zero and unavailable data must never collapse into one value.",
+        "enum": [
+          "observed",
+          "source_omitted_zero",
+          "missing",
+          "not_collected",
+          "coverage_gap"
+        ],
+        "title": "CellKind",
+        "type": "string"
+      },
+      "ChoiceParameter": {
+        "properties": {
+          "choices": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "title": "Choices",
+            "type": "array"
+          },
+          "default": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              }
+            ],
+            "title": "Default"
+          },
+          "kind": {
+            "const": "choice",
+            "title": "Kind",
+            "type": "string"
+          },
+          "parameter_id": {
+            "title": "Parameter Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "parameter_id",
+          "default",
+          "choices",
+          "kind"
+        ],
+        "title": "ChoiceParameter",
+        "type": "object"
+      },
+      "ComparisonOperator": {
+        "enum": [
+          "gt",
+          "gte",
+          "lt",
+          "lte",
+          "eq"
+        ],
+        "title": "ComparisonOperator",
+        "type": "string"
+      },
+      "ConstantNode": {
+        "properties": {
+          "kind": {
+            "const": "constant",
+            "title": "Kind",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "node_id",
+          "value",
+          "kind"
+        ],
+        "title": "ConstantNode",
+        "type": "object"
+      },
+      "DataFrequency": {
+        "enum": [
+          "daily"
+        ],
+        "title": "DataFrequency",
+        "type": "string"
+      },
+      "DataLoadStatus": {
+        "enum": [
+          "ok",
+          "no_data",
+          "invalid_query"
+        ],
+        "title": "DataLoadStatus",
+        "type": "string"
+      },
+      "DataSnapshot": {
+        "properties": {
+          "built_at": {
+            "format": "date-time",
+            "title": "Built At",
+            "type": "string"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "title": "Snapshot Id",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "snapshot_id",
+          "schema_version",
+          "built_at",
+          "source"
+        ],
+        "title": "DataSnapshot",
+        "type": "object"
+      },
+      "DataStep": {
+        "properties": {
+          "end": {
+            "format": "date",
+            "title": "End",
+            "type": "string"
+          },
+          "frequency": {
+            "$ref": "#/components/schemas/DataFrequency",
+            "default": "daily"
+          },
+          "market": {
+            "$ref": "#/components/schemas/Market"
+          },
+          "start": {
+            "format": "date",
+            "title": "Start",
+            "type": "string"
+          },
+          "universe_id": {
+            "title": "Universe Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "market",
+          "start",
+          "end",
+          "universe_id"
+        ],
+        "title": "DataStep",
+        "type": "object"
+      },
+      "DatasetFieldProfile": {
+        "properties": {
+          "available_date_basis": {
+            "title": "Available Date Basis",
+            "type": "string"
+          },
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "field_id": {
+            "title": "Field Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "recommended_lag_sessions": {
+            "title": "Recommended Lag Sessions",
+            "type": "integer"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field_id",
+          "dataset_id",
+          "label",
+          "unit",
+          "available_date_basis",
+          "recommended_lag_sessions",
+          "description"
+        ],
+        "title": "DatasetFieldProfile",
+        "type": "object"
+      },
+      "EligibilityRule": {
+        "properties": {
+          "field_id": {
+            "title": "Field Id",
+            "type": "string"
+          },
+          "operator": {
+            "$ref": "#/components/schemas/ComparisonOperator"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "field_id",
+          "operator",
+          "value"
+        ],
+        "title": "EligibilityRule",
+        "type": "object"
+      },
+      "EligibilityStep": {
+        "properties": {
+          "rules": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/EligibilityRule"
+            },
+            "title": "Rules",
+            "type": "array"
+          }
+        },
+        "title": "EligibilityStep",
+        "type": "object"
+      },
+      "ExecutionStep": {
+        "properties": {
+          "fee_bps": {
+            "default": 15.0,
+            "title": "Fee Bps",
+            "type": "number"
+          },
+          "order_style": {
+            "$ref": "#/components/schemas/OrderStyle",
+            "default": "market"
+          },
+          "participation_rate": {
+            "default": 0.1,
+            "title": "Participation Rate",
+            "type": "number"
+          },
+          "slippage_bps": {
+            "default": 10.0,
+            "title": "Slippage Bps",
+            "type": "number"
+          },
+          "timing": {
+            "$ref": "#/components/schemas/ExecutionTiming",
+            "default": "next_open"
+          }
+        },
+        "title": "ExecutionStep",
+        "type": "object"
+      },
+      "ExecutionTiming": {
+        "enum": [
+          "next_open"
+        ],
+        "title": "ExecutionTiming",
+        "type": "string"
+      },
+      "FactorDirection": {
+        "enum": [
+          "high",
+          "low"
+        ],
+        "title": "FactorDirection",
+        "type": "string"
+      },
+      "FactorGraph": {
+        "properties": {
+          "nodes": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FieldNode"
+                },
+                {
+                  "$ref": "#/components/schemas/ConstantNode"
+                },
+                {
+                  "$ref": "#/components/schemas/ParameterNode"
+                },
+                {
+                  "$ref": "#/components/schemas/UnaryNode"
+                },
+                {
+                  "$ref": "#/components/schemas/BinaryNode"
+                }
+              ]
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "output_node_id": {
+            "title": "Output Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "nodes",
+          "output_node_id"
+        ],
+        "title": "FactorGraph",
+        "type": "object"
+      },
+      "FactorSignal": {
+        "properties": {
+          "direction": {
+            "$ref": "#/components/schemas/FactorDirection"
+          },
+          "factor_id": {
+            "title": "Factor Id",
+            "type": "string"
+          },
+          "graph": {
+            "$ref": "#/components/schemas/FactorGraph"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "weight": {
+            "title": "Weight",
+            "type": "number"
+          }
+        },
+        "required": [
+          "factor_id",
+          "label",
+          "direction",
+          "weight",
+          "graph"
+        ],
+        "title": "FactorSignal",
+        "type": "object"
+      },
+      "FactorStep": {
+        "properties": {
+          "factors": {
+            "items": {
+              "$ref": "#/components/schemas/FactorSignal"
+            },
+            "title": "Factors",
+            "type": "array"
+          }
+        },
+        "required": [
+          "factors"
+        ],
+        "title": "FactorStep",
+        "type": "object"
+      },
+      "FieldLag": {
+        "properties": {
+          "field_id": {
+            "title": "Field Id",
+            "type": "string"
+          },
+          "sessions": {
+            "title": "Sessions",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "field_id",
+          "sessions"
+        ],
+        "title": "FieldLag",
+        "type": "object"
+      },
+      "FieldNode": {
+        "properties": {
+          "field_id": {
+            "title": "Field Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "field",
+            "title": "Kind",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "field_id",
+          "kind"
+        ],
+        "title": "FieldNode",
+        "type": "object"
+      },
+      "FloatParameter": {
+        "properties": {
+          "default": {
+            "title": "Default",
+            "type": "number"
+          },
+          "kind": {
+            "const": "float",
+            "title": "Kind",
+            "type": "string"
+          },
+          "maximum": {
+            "title": "Maximum",
+            "type": "number"
+          },
+          "minimum": {
+            "title": "Minimum",
+            "type": "number"
+          },
+          "parameter_id": {
+            "title": "Parameter Id",
+            "type": "string"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step"
+          }
+        },
+        "required": [
+          "parameter_id",
+          "default",
+          "minimum",
+          "maximum",
+          "kind"
+        ],
+        "title": "FloatParameter",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "IntegerParameter": {
+        "properties": {
+          "default": {
+            "title": "Default",
+            "type": "integer"
+          },
+          "kind": {
+            "const": "integer",
+            "title": "Kind",
+            "type": "string"
+          },
+          "maximum": {
+            "title": "Maximum",
+            "type": "integer"
+          },
+          "minimum": {
+            "title": "Minimum",
+            "type": "integer"
+          },
+          "parameter_id": {
+            "title": "Parameter Id",
+            "type": "string"
+          },
+          "step": {
+            "default": 1,
+            "title": "Step",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "parameter_id",
+          "default",
+          "minimum",
+          "maximum",
+          "kind"
+        ],
+        "title": "IntegerParameter",
+        "type": "object"
+      },
+      "Market": {
+        "enum": [
+          "KRX"
+        ],
+        "title": "Market",
+        "type": "string"
+      },
+      "OrderStyle": {
+        "enum": [
+          "market"
+        ],
+        "title": "OrderStyle",
+        "type": "string"
+      },
+      "ParameterNode": {
+        "properties": {
+          "kind": {
+            "const": "parameter",
+            "title": "Kind",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "parameter_id": {
+            "title": "Parameter Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "parameter_id",
+          "kind"
+        ],
+        "title": "ParameterNode",
+        "type": "object"
+      },
+      "PortfolioSide": {
+        "enum": [
+          "long_only",
+          "long_short"
+        ],
+        "title": "PortfolioSide",
+        "type": "string"
+      },
+      "PortfolioStep": {
+        "properties": {
+          "rebalance": {
+            "$ref": "#/components/schemas/RebalanceFrequency",
+            "default": "monthly"
+          },
+          "selection_count": {
+            "default": 20,
+            "title": "Selection Count",
+            "type": "integer"
+          },
+          "side": {
+            "$ref": "#/components/schemas/PortfolioSide",
+            "default": "long_only"
+          },
+          "weighting": {
+            "$ref": "#/components/schemas/WeightingMethod",
+            "default": "equal"
+          }
+        },
+        "title": "PortfolioStep",
+        "type": "object"
+      },
+      "RebalanceFrequency": {
+        "enum": [
+          "weekly",
+          "monthly",
+          "quarterly"
+        ],
+        "title": "RebalanceFrequency",
+        "type": "string"
+      },
+      "ResearchCatalog": {
+        "properties": {
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/DatasetFieldProfile"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/DataSnapshot"
+          }
+        },
+        "required": [
+          "snapshot",
+          "fields"
+        ],
+        "title": "ResearchCatalog",
+        "type": "object"
+      },
+      "ResearchPanelCell": {
+        "properties": {
+          "as_of": {
+            "format": "date",
+            "title": "As Of",
+            "type": "string"
+          },
+          "available_date": {
+            "format": "date",
+            "title": "Available Date",
+            "type": "string"
+          },
+          "field_id": {
+            "title": "Field Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CellKind"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "source_effective_date": {
+            "format": "date",
+            "title": "Source Effective Date",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "as_of",
+          "security_id",
+          "field_id",
+          "source_effective_date",
+          "available_date",
+          "value",
+          "kind"
+        ],
+        "title": "ResearchPanelCell",
+        "type": "object"
+      },
+      "ResearchPanelQuery": {
+        "properties": {
+          "end": {
+            "format": "date",
+            "title": "End",
+            "type": "string"
+          },
+          "field_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Field Ids",
+            "type": "array"
+          },
+          "lag_overrides": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/FieldLag"
+            },
+            "title": "Lag Overrides",
+            "type": "array"
+          },
+          "security_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Security Ids",
+            "type": "array"
+          },
+          "start": {
+            "format": "date",
+            "title": "Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "security_ids",
+          "field_ids"
+        ],
+        "title": "ResearchPanelQuery",
+        "type": "object"
+      },
+      "ResearchPanelResult": {
+        "properties": {
+          "cells": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchPanelCell"
+            },
+            "title": "Cells",
+            "type": "array"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "snapshot_id": {
+            "title": "Snapshot Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DataLoadStatus"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "cells",
+          "status",
+          "snapshot_id"
+        ],
+        "title": "ResearchPanelResult",
+        "type": "object"
+      },
+      "ResearchPreview": {
+        "properties": {
+          "panel": {
+            "$ref": "#/components/schemas/ResearchPanelResult"
+          },
+          "universe": {
+            "$ref": "#/components/schemas/UniverseHistoryResult"
+          }
+        },
+        "required": [
+          "universe",
+          "panel"
+        ],
+        "title": "ResearchPreview",
+        "type": "object"
+      },
+      "ReviseStrategyRequest": {
+        "properties": {
+          "expected_revision": {
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/StrategySpec"
+          }
+        },
+        "required": [
+          "expected_revision",
+          "spec"
+        ],
+        "title": "ReviseStrategyRequest",
+        "type": "object"
+      },
+      "RiskStep": {
+        "properties": {
+          "gross_exposure": {
+            "default": 1.0,
+            "title": "Gross Exposure",
+            "type": "number"
+          },
+          "max_name_weight": {
+            "default": 0.1,
+            "title": "Max Name Weight",
+            "type": "number"
+          },
+          "max_sector_weight": {
+            "default": 0.3,
+            "title": "Max Sector Weight",
+            "type": "number"
+          },
+          "net_exposure": {
+            "default": 1.0,
+            "title": "Net Exposure",
+            "type": "number"
+          }
+        },
+        "title": "RiskStep",
+        "type": "object"
+      },
+      "SavedStrategy": {
+        "properties": {
+          "spec": {
+            "$ref": "#/components/schemas/StrategySpec"
+          },
+          "spec_hash": {
+            "title": "Spec Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "spec",
+          "spec_hash"
+        ],
+        "title": "SavedStrategy",
+        "type": "object"
+      },
+      "SecurityRef": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          },
+          "venue": {
+            "title": "Venue",
+            "type": "string"
+          }
+        },
+        "required": [
+          "security_id",
+          "ticker",
+          "name",
+          "venue"
+        ],
+        "title": "SecurityRef",
+        "type": "object"
+      },
+      "SignalMethod": {
+        "enum": [
+          "weighted_sum",
+          "rank_threshold"
+        ],
+        "title": "SignalMethod",
+        "type": "string"
+      },
+      "SignalStep": {
+        "properties": {
+          "entry_percentile": {
+            "default": 0.1,
+            "title": "Entry Percentile",
+            "type": "number"
+          },
+          "method": {
+            "$ref": "#/components/schemas/SignalMethod",
+            "default": "weighted_sum"
+          }
+        },
+        "title": "SignalStep",
+        "type": "object"
+      },
+      "StrategyExplanation": {
+        "properties": {
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/StrategyExplanationStep"
+            },
+            "title": "Steps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "steps"
+        ],
+        "title": "StrategyExplanation",
+        "type": "object"
+      },
+      "StrategyExplanationStep": {
+        "properties": {
+          "details": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Details",
+            "type": "array"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stage",
+          "summary",
+          "details"
+        ],
+        "title": "StrategyExplanationStep",
+        "type": "object"
+      },
+      "StrategyIdentity": {
+        "properties": {
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "schema_version": {
+            "default": "1.0",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "strategy_id",
+          "revision"
+        ],
+        "title": "StrategyIdentity",
+        "type": "object"
+      },
+      "StrategySpec": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DataStep"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "eligibility": {
+            "$ref": "#/components/schemas/EligibilityStep"
+          },
+          "execution": {
+            "$ref": "#/components/schemas/ExecutionStep"
+          },
+          "factors": {
+            "$ref": "#/components/schemas/FactorStep"
+          },
+          "identity": {
+            "$ref": "#/components/schemas/StrategyIdentity"
+          },
+          "parameters": {
+            "default": [],
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FloatParameter"
+                },
+                {
+                  "$ref": "#/components/schemas/IntegerParameter"
+                },
+                {
+                  "$ref": "#/components/schemas/ChoiceParameter"
+                }
+              ]
+            },
+            "title": "Parameters",
+            "type": "array"
+          },
+          "portfolio": {
+            "$ref": "#/components/schemas/PortfolioStep"
+          },
+          "risk": {
+            "$ref": "#/components/schemas/RiskStep"
+          },
+          "signal": {
+            "$ref": "#/components/schemas/SignalStep"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "identity",
+          "title",
+          "description",
+          "data",
+          "eligibility",
+          "factors",
+          "signal",
+          "portfolio",
+          "risk",
+          "execution"
+        ],
+        "title": "StrategySpec",
+        "type": "object"
+      },
+      "StrategyValidation": {
+        "properties": {
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationIssue"
+            },
+            "title": "Issues",
+            "type": "array"
+          },
+          "valid": {
+            "title": "Valid",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "valid",
+          "issues"
+        ],
+        "title": "StrategyValidation",
+        "type": "object"
+      },
+      "UnaryNode": {
+        "properties": {
+          "input_node_id": {
+            "title": "Input Node Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "unary",
+            "title": "Kind",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operator": {
+            "$ref": "#/components/schemas/UnaryOperator"
+          },
+          "periods": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Periods"
+          }
+        },
+        "required": [
+          "node_id",
+          "operator",
+          "input_node_id",
+          "kind"
+        ],
+        "title": "UnaryNode",
+        "type": "object"
+      },
+      "UnaryOperator": {
+        "enum": [
+          "negate",
+          "lag",
+          "rank",
+          "zscore"
+        ],
+        "title": "UnaryOperator",
+        "type": "string"
+      },
+      "UniverseHistoryResult": {
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/UniversePoint"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "snapshot_id": {
+            "title": "Snapshot Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DataLoadStatus"
+          }
+        },
+        "required": [
+          "points",
+          "status",
+          "snapshot_id"
+        ],
+        "title": "UniverseHistoryResult",
+        "type": "object"
+      },
+      "UniversePoint": {
+        "properties": {
+          "coverage": {
+            "$ref": "#/components/schemas/CellKind",
+            "default": "observed"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/SecurityRef"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "members"
+        ],
+        "title": "UniversePoint",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "ValidationIssue": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ValidationKind"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/ValidationSeverity",
+            "default": "error"
+          }
+        },
+        "required": [
+          "code",
+          "path",
+          "message",
+          "kind"
+        ],
+        "title": "ValidationIssue",
+        "type": "object"
+      },
+      "ValidationKind": {
+        "enum": [
+          "syntax",
+          "semantic",
+          "capability"
+        ],
+        "title": "ValidationKind",
+        "type": "string"
+      },
+      "ValidationSeverity": {
+        "enum": [
+          "error",
+          "warning"
+        ],
+        "title": "ValidationSeverity",
+        "type": "string"
+      },
+      "WeightingMethod": {
+        "enum": [
+          "equal",
+          "factor_score",
+          "rank"
+        ],
+        "title": "WeightingMethod",
+        "type": "string"
+      }
+    }
+  },
+  "info": {
+    "description": "No-code factor strategy design and backtest orchestration API.",
+    "title": "Quant Strategy Workbench API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/equity/catalog": {
+      "get": {
+        "operationId": "getEquityCatalog",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResearchCatalog"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Equity Catalog"
+      }
+    },
+    "/api/v1/equity/preview": {
+      "post": {
+        "operationId": "previewEquityData",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "venue",
+            "required": false,
+            "schema": {
+              "default": "XKRX",
+              "title": "Venue",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResearchPanelQuery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResearchPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Equity Preview"
+      }
+    },
+    "/api/v1/health": {
+      "get": {
+        "operationId": "getHealth",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Gethealth",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health"
+      }
+    },
+    "/api/v1/strategies": {
+      "post": {
+        "operationId": "createStrategy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StrategySpec"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedStrategy"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Strategy"
+      }
+    },
+    "/api/v1/strategies/explain": {
+      "post": {
+        "operationId": "explainStrategy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StrategySpec"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyExplanation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Explain Strategy"
+      }
+    },
+    "/api/v1/strategies/template": {
+      "get": {
+        "operationId": "getStrategyTemplate",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategySpec"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Strategy Template"
+      }
+    },
+    "/api/v1/strategies/validate": {
+      "post": {
+        "operationId": "validateStrategy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StrategySpec"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyValidation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Validate Strategy"
+      }
+    },
+    "/api/v1/strategies/{strategy_id}": {
+      "get": {
+        "operationId": "getStrategy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "revision",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Revision"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedStrategy"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Strategy"
+      }
+    },
+    "/api/v1/strategies/{strategy_id}/revisions": {
+      "post": {
+        "operationId": "reviseStrategy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviseStrategyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedStrategy"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revise Strategy"
+      }
+    }
+  }
+}

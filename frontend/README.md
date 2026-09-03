@@ -20,3 +20,22 @@ app -> pages -> widgets -> features -> entities -> shared
 
 초기 구현은 Quick Builder와 Advanced Graph가 같은 StrategySpec draft를 편집하게 한다.
 그래프 좌표·패널 열림 상태 같은 UI metadata는 spec과 분리한다.
+
+## 개발
+
+Node 22.18 이상을 기준으로 한다. backend가 실행 중일 때 Builder는
+`http://localhost:8000`의 Strategy template, validate, revision, Equity mock API를 호출한다.
+
+```powershell
+cd frontend
+npm ci
+npm run api:generate   # backend/openapi.json + shared/api/generated 갱신
+npm run dev
+npm run typecheck
+npm run lint
+npm run test
+npm run build
+```
+
+OpenAPI 생성물은 `src/shared/api/generated`에만 있고 앱 코드는 `shared/api` gateway를 통해서만
+접근한다. `npm run api:generate` 뒤 diff가 생기면 backend 계약과 생성물을 같은 변경으로 커밋한다.

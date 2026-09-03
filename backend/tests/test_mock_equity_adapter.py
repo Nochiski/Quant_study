@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 
 import pytest
+
 from strategy_workbench.bootstrap.facade.container import build_container
 from strategy_workbench.domain.equity.facade.research_data import (
     CellKind,

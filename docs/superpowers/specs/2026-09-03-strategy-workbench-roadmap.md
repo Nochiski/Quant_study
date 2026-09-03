@@ -2,11 +2,11 @@
 
 > 작성: 2026-09-03
 >
-> 상태: M0 진행 중 — 기반 규칙·폴더·Equity mock 첫 절단면 완료
+> 상태: M1 완료 — StrategySpec/OpenAPI/Builder 수직 슬라이스 완결
 >
-> 체크리스트: 150개 중 9개 완료, 141개 남음
+> 체크리스트: 150개 중 24개 완료, 126개 남음
 >
-> 다음 체크: M0-10 backend 독립 패키지 설정과 frontend toolchain 결정
+> 다음 체크: M2-1 mock field catalog 검색·필터·pagination 계약
 > 진행 규칙: 구현·테스트·문서가 모두 끝난 항목만 `[x]`. 각 M 완료 시 이 머리말과 완료 기록을 갱신한다.
 
 ## 1. 결론
@@ -23,7 +23,7 @@
 
 ## 2. 설계 입력과 현재 고정점
 
-- 실행 커널: `src/backtest_engine`의 `StrategyRequirements → StrategyEvent/Context →
+- 실행 커널: `backend/src/backtest_engine`의 `StrategyRequirements → StrategyEvent/Context →
   StrategyDecision → Action → Order/Fill/Portfolio` 계약.
 - 고성능 상태 owner: `core="rust"` Persistent Rust Engine. 주문·그룹·포트폴리오·queue·accounting
   mutable state는 Rust가 소유한다.
@@ -70,6 +70,8 @@ Rust event loop에 넣지 않고, 주문/포트폴리오 상태를 Python factor
 
 ```text
 backend/
+├─ src/backtest_engine/              # 검증된 Python 실행 커널 API
+├─ rust/backtest_core/               # Persistent Rust 구현
 ├─ src/strategy_workbench/
 │  ├─ domain/
 │  │  ├─ equity/                 # PIT query/result와 coverage 의미
@@ -110,14 +112,11 @@ frontend/
 │  └─ shared/                     # generated SDK/UI primitive/token/lib
 ├─ e2e/
 └─ README.md
-
-src/backtest_engine/              # 검증된 Python 실행 커널 API — 당장 이동하지 않음
-rust/backtest_core/               # Persistent Rust 구현
 ```
 
-기존 커널을 지금 `backend/` 아래로 대규모 이동하지 않는다. 먼저 backend가 facade adapter 하나로만
-커널을 소비하게 고정하고, 경로 이동은 기능 변경과 분리된 독립 refactor로 판단한다. 앱 코드에서
-커널 내부 deep import가 생기지 않는 것이 물리 위치보다 중요한 첫 게이트다.
+기존 Python/Rust 커널, 테스트, 예제, 벤치마크, 스크립트, reference 자료는 M0에서
+`backend/` 아래로 물리 이동했다. Strategy Workbench는 같은 폴더 안에서도 facade adapter 하나로만
+커널을 소비하며 앱 코드의 커널 내부 deep import는 architecture gate로 차단한다.
 
 ## 5. SoT 대장
 
@@ -343,27 +342,27 @@ Trial: QUEUED -> RUNNING -> COMPLETED | FAILED | PRUNED | CANCELLED
 - [x] `EquityDataPort`와 PIT query/result 타입 첫 버전 추가.
 - [x] revision/lag/zero/missing/coverage gap을 가진 deterministic mock adapter 연결.
 - [x] mock/architecture unit test 7개 통과.
-- [ ] backend 독립 package/test 설정과 root 커널 dependency 방식을 확정.
-- [ ] frontend React/TypeScript/Vite toolchain과 lint/boundaries plugin을 초기화.
-- [ ] CI에 backend architecture/test/lint와 frontend typecheck/lint/test job 추가.
+- [x] backend 독립 package/test 설정과 root 커널 dependency 방식을 확정.
+- [x] frontend React/TypeScript/Vite toolchain과 lint/boundaries plugin을 초기화.
+- [x] CI에 backend architecture/test/lint와 frontend typecheck/lint/test job 추가.
 
 완료 게이트: 새 코드의 물리 경로만 봐도 owner와 import 방향을 설명할 수 있고, 실제 DB 없이
 frontend가 mock catalog/preview를 호출할 수 있다.
 
 ### M1 — StrategySpec 계약 + Builder shell
 
-- [ ] backend `domain.strategy` 노드와 immutable StrategySpec v1 모델 추가.
-- [ ] Universe→Eligibility→Factor→Signal→Portfolio→Risk→Execution pipeline 타입 고정.
-- [ ] typed expression node union과 parameter reference 타입 고정.
-- [ ] canonical JSON serialization/hash와 revision identity 추가.
-- [ ] syntax/semantic/capability validation issue 모델 추가.
-- [ ] strategy create/get/revise/validate/explain application use case 추가.
-- [ ] in-memory strategy repository adapter와 contract test 추가.
-- [ ] HTTP adapter의 StrategySpec endpoint/OpenAPI 첫 절단면 추가.
-- [ ] generated TypeScript SDK를 `shared/api` 단일 gateway로 연결.
-- [ ] Strategy Builder page shell과 5단계 navigation 추가.
-- [ ] Quick/Advanced가 같은 draft object를 읽는 editor host 추가.
-- [ ] 저장 전/저장 후 revision, dirty state, validation panel UX 테스트 추가.
+- [x] backend `domain.strategy` 노드와 immutable StrategySpec v1 모델 추가.
+- [x] Universe→Eligibility→Factor→Signal→Portfolio→Risk→Execution pipeline 타입 고정.
+- [x] typed expression node union과 parameter reference 타입 고정.
+- [x] canonical JSON serialization/hash와 revision identity 추가.
+- [x] syntax/semantic/capability validation issue 모델 추가.
+- [x] strategy create/get/revise/validate/explain application use case 추가.
+- [x] in-memory strategy repository adapter와 contract test 추가.
+- [x] HTTP adapter의 StrategySpec endpoint/OpenAPI 첫 절단면 추가.
+- [x] generated TypeScript SDK를 `shared/api` 단일 gateway로 연결.
+- [x] Strategy Builder page shell과 5단계 navigation 추가.
+- [x] Quick/Advanced가 같은 draft object를 읽는 editor host 추가.
+- [x] 저장 전/저장 후 revision, dirty state, validation panel UX 테스트 추가.
 
 완료 게이트: 사용자가 빈 전략을 만들고 수정·검증·새 revision으로 저장하며, network payload와
 frontend 타입이 backend schema에서 생성된다.
@@ -552,14 +551,14 @@ graph와 식으로 제약 없이 확장하며 결과를 재현할 수 있다.
 Backend:
 
 ```powershell
-$env:PYTHONPATH = (Resolve-Path backend/src)
-uv run pytest backend/tests -q
-uv run ruff check backend/src backend/tests
-uv run pyright backend/src backend/tests
+cd backend
+uv sync --extra parquet
 uv run pytest -q
-cargo fmt --manifest-path rust/backtest_core/Cargo.toml -- --check
-cargo clippy --manifest-path rust/backtest_core/Cargo.toml --all-targets -- -D warnings
-cargo test --manifest-path rust/backtest_core/Cargo.toml
+uv run ruff check src tests examples scripts
+uv run pyright
+uv run cargo fmt --manifest-path rust/backtest_core/Cargo.toml -- --check
+uv run cargo clippy --manifest-path rust/backtest_core/Cargo.toml --all-targets -- -D warnings
+uv run cargo test --manifest-path rust/backtest_core/Cargo.toml
 ```
 
 Frontend toolchain 확정 후:
@@ -588,7 +587,7 @@ Contract:
   같은 port contract를 통과한 뒤 운영 adapter로 승격한다.
 - arbitrary Python factor/plugin은 표현력은 크지만 재현성·보안·자원 통제가 별도 문제다.
   typed DAG로 먼저 최대 범위를 제공하고 plugin sandbox는 독립 설계한다.
-- 기존 `src/backtest_engine`의 `backend/` 하위 물리 이동은 기능 개발과 섞지 않는다.
+- 커널의 물리 이동은 M0에서 완료했다. 이후 커널 경로와 앱 adapter 경계는 독립적으로 유지한다.
 
 ## 14. 완료 정의
 
@@ -609,6 +608,13 @@ Contract:
 - 2026-09-03 — M0 첫 절단면: backend/frontend 폴더, backend facade/`DEPENDS_ON` 규칙,
   frontend FSD/API-state/UI/test 규칙, EquityDataPort, deterministic PIT mock, architecture/contract
   테스트 7개 추가.
+- 2026-09-03 — 기존 Python/Rust 커널, 테스트, 예제, 스크립트, 벤치마크와 reference 자료를
+  `backend/` 아래로 물리 통합. 루트는 backend/frontend/docs와 저장소 운영 파일만 소유하도록 정리.
+- 2026-09-03 — M0 완료: backend 독립 uv package, React/TypeScript/Vite, 생성 OpenAPI SDK,
+  FSD boundaries lint, backend/frontend CI gate를 연결.
+- 2026-09-03 — M1 완료: immutable StrategySpec v1 typed DAG와 parameter contract, canonical hash,
+  validation/explanation, in-memory revision repository, FastAPI endpoint, Quick/Advanced 공유 draft,
+  dirty/validation/revision UX와 MSW wire 테스트를 추가.
 
 체크 수는 이 문서의 완료/미완료 체크박스 기준으로 갱신한다. 설명 안의 예시 checkbox는 두지
 않아 수치가 실제 구현 단위와 일치하게 유지한다.

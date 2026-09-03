@@ -75,9 +75,7 @@ class UniverseHistoryQuery:
 
     def __post_init__(self) -> None:
         if self.start > self.end:
-            raise ValueError(
-                f"universe start must be <= end — start={self.start} end={self.end}"
-            )
+            raise ValueError(f"universe start must be <= end — start={self.start} end={self.end}")
 
 
 @dataclass(frozen=True)

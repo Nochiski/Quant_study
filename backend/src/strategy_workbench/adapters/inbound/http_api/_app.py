@@ -16,6 +16,19 @@ from strategy_workbench.application.equity_workspace.facade.workspace import (
     ResearchPreview,
     UniversePreview,
 )
+from strategy_workbench.application.factor_research.facade.research import (
+    FactorAvailability,
+    FactorCatalog,
+    FactorCatalogQuery,
+    FactorCategory,
+    FactorExplanation,
+    FactorGraphRequest,
+    FactorGraphValidation,
+    FactorPreview,
+    FactorPreviewRequest,
+    FactorResearchService,
+    InvalidFactorRequestError,
+)
 from strategy_workbench.application.strategy_design.facade.design import (
     InvalidStrategyError,
     SavedStrategy,
@@ -44,6 +57,7 @@ def create_app(
     *,
     strategy_design: StrategyDesignService,
     equity_workspace: EquityWorkspaceService,
+    factor_research: FactorResearchService,
     allowed_origins: tuple[str, ...] = ("http://localhost:5173",),
 ) -> FastAPI:
     app = FastAPI(
@@ -106,6 +120,57 @@ def create_app(
     )
     def equity_preview(query: ResearchPanelQuery, venue: str = "XKRX") -> ResearchPreview:
         return equity_workspace.preview(query, venue=venue)
+
+    @app.get(
+        "/api/v1/factors/catalog",
+        operation_id="getFactorCatalog",
+    )
+    def factor_catalog(
+        search: str | None = Query(default=None, min_length=1),
+        category: Annotated[list[FactorCategory] | None, Query()] = None,
+        availability: Annotated[list[FactorAvailability] | None, Query()] = None,
+        page: int = Query(default=1, ge=1),
+        page_size: int = Query(default=20, ge=1, le=100),
+    ) -> FactorCatalog:
+        return factor_research.catalog(
+            FactorCatalogQuery(
+                search=search,
+                categories=tuple(category or ()),
+                availability=tuple(availability or ()),
+                page=page,
+                page_size=page_size,
+            )
+        )
+
+    @app.post(
+        "/api/v1/factors/validate",
+        operation_id="validateFactorGraph",
+    )
+    def validate_factor_graph(request: FactorGraphRequest) -> FactorGraphValidation:
+        return factor_research.validate(request)
+
+    @app.post(
+        "/api/v1/factors/explain",
+        operation_id="explainFactorGraph",
+    )
+    def explain_factor_graph(request: FactorGraphRequest) -> FactorExplanation:
+        return factor_research.explain(request)
+
+    @app.post(
+        "/api/v1/factors/preview",
+        operation_id="previewFactorGraph",
+    )
+    def preview_factor_graph(request: FactorPreviewRequest) -> FactorPreview:
+        try:
+            return factor_research.preview(request)
+        except InvalidFactorRequestError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "code": "factor.graph.invalid",
+                    "validation": jsonable_encoder(asdict(error.validation)),
+                },
+            ) from error
 
     @app.get(
         "/api/v1/strategies/template",

@@ -6,12 +6,18 @@ import type {
   CreateStrategyData,
   CreateStrategyErrors,
   CreateStrategyResponses,
+  ExplainFactorGraphData,
+  ExplainFactorGraphErrors,
+  ExplainFactorGraphResponses,
   ExplainStrategyData,
   ExplainStrategyErrors,
   ExplainStrategyResponses,
   GetEquityCatalogData,
   GetEquityCatalogErrors,
   GetEquityCatalogResponses,
+  GetFactorCatalogData,
+  GetFactorCatalogErrors,
+  GetFactorCatalogResponses,
   GetHealthData,
   GetHealthResponses,
   GetStrategyData,
@@ -28,9 +34,15 @@ import type {
   PreviewEquityUniverseData,
   PreviewEquityUniverseErrors,
   PreviewEquityUniverseResponses,
+  PreviewFactorGraphData,
+  PreviewFactorGraphErrors,
+  PreviewFactorGraphResponses,
   ReviseStrategyData,
   ReviseStrategyErrors,
   ReviseStrategyResponses,
+  ValidateFactorGraphData,
+  ValidateFactorGraphErrors,
+  ValidateFactorGraphResponses,
   ValidateStrategyData,
   ValidateStrategyErrors,
   ValidateStrategyResponses,
@@ -116,6 +128,75 @@ export const previewEquityUniverse = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     url: "/api/v1/equity/universe/preview",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Factor Catalog
+ */
+export const getFactorCatalog = <ThrowOnError extends boolean = false>(
+  options?: Options<GetFactorCatalogData, ThrowOnError>,
+) =>
+  (options?.client ?? client).get<
+    GetFactorCatalogResponses,
+    GetFactorCatalogErrors,
+    ThrowOnError
+  >({ url: "/api/v1/factors/catalog", ...options });
+
+/**
+ * Explain Factor Graph
+ */
+export const explainFactorGraph = <ThrowOnError extends boolean = false>(
+  options: Options<ExplainFactorGraphData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    ExplainFactorGraphResponses,
+    ExplainFactorGraphErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/factors/explain",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Preview Factor Graph
+ */
+export const previewFactorGraph = <ThrowOnError extends boolean = false>(
+  options: Options<PreviewFactorGraphData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    PreviewFactorGraphResponses,
+    PreviewFactorGraphErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/factors/preview",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Validate Factor Graph
+ */
+export const validateFactorGraph = <ThrowOnError extends boolean = false>(
+  options: Options<ValidateFactorGraphData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    ValidateFactorGraphResponses,
+    ValidateFactorGraphErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/factors/validate",
     ...options,
     headers: {
       "Content-Type": "application/json",

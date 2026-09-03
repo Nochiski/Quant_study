@@ -309,9 +309,251 @@ select {
   width: 100px;
 }
 
+.factor-editor {
+  display: grid;
+  gap: 28px;
+}
+
+.selected-factors,
+.factor-browser {
+  padding: 20px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-medium);
+  background: rgb(5 16 27 / 42%);
+}
+
+.selected-factors > header,
+.factor-browser > header,
+.factor-catalog-card__heading,
+.graph-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.selected-factors h2,
+.factor-browser h2 {
+  margin: 4px 0 0;
+  font-size: 20px;
+}
+
+.factor-browser header p {
+  margin: 5px 0 0;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.registry-badge,
+.selected-factors > header > span {
+  padding: 6px 9px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 999px;
+  color: var(--color-accent);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.selected-factors .factor-list {
+  grid-template-columns: 1fr;
+  margin-top: 16px;
+}
+
+.selected-factors .factor-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  align-items: start;
+  gap: 14px 20px;
+}
+
+.factor-card__identity {
+  display: grid;
+  gap: 5px;
+}
+
+.transform-chain {
+  color: var(--color-accent);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.transform-toolbar {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.transform-toolbar button,
+.factor-remove {
+  padding: 7px 9px;
+  border: 1px solid var(--color-line);
+  border-radius: 7px;
+  background: var(--color-panel-raised);
+  color: var(--color-muted);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.transform-toolbar button:hover {
+  border-color: var(--color-accent-strong);
+  color: var(--color-accent);
+}
+
+.transform-toolbar button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.factor-remove {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  border-color: rgb(255 120 120 / 35%);
+  color: var(--color-danger);
+}
+
+.factor-preview {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 10px;
+  padding-right: 110px;
+}
+
+.factor-preview .button {
+  width: fit-content;
+}
+
+.factor-metrics {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 7px;
+  margin: 0;
+}
+
+.factor-metrics div {
+  padding: 9px;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  background: var(--color-panel-raised);
+}
+
+.factor-metrics dt {
+  color: var(--color-muted);
+  font-size: 9px;
+}
+
+.factor-metrics dd {
+  margin: 4px 0 0;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.factor-search {
+  display: grid;
+  gap: 7px;
+  margin-top: 16px;
+  color: var(--color-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.factor-catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.factor-catalog-card {
+  display: grid;
+  gap: 9px;
+  padding: 14px;
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  background: var(--color-canvas);
+}
+
+.factor-catalog-card > strong {
+  font-size: 15px;
+}
+
+.factor-catalog-card > code {
+  color: var(--color-blue);
+  font-size: 10px;
+}
+
+.factor-catalog-card p {
+  min-height: 34px;
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.factor-category,
+.factor-preference {
+  padding: 4px 6px;
+  border-radius: 5px;
+  background: rgb(59 225 179 / 10%);
+  color: var(--color-accent);
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.factor-preference {
+  background: rgb(67 136 255 / 10%);
+  color: var(--color-blue);
+}
+
+.factor-catalog-card dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 0;
+}
+
+.factor-catalog-card dl div {
+  padding: 7px;
+  border-radius: 6px;
+  background: var(--color-panel-raised);
+}
+
+.factor-catalog-card dt {
+  color: var(--color-muted);
+  font-size: 9px;
+}
+
+.factor-catalog-card dd {
+  margin: 3px 0 0;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.factor-field-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.factor-field-tags code {
+  padding: 3px 5px;
+  border: 1px solid var(--color-line);
+  border-radius: 4px;
+  color: var(--color-muted);
+  font-size: 9px;
+}
+
 .graph-factor {
   max-width: 780px;
   margin: 0 auto;
+}
+
+.graph-factor + .graph-factor {
+  margin-top: 28px;
 }
 
 .graph-factor header {
@@ -344,14 +586,54 @@ select {
   border-left: 1px dashed var(--color-line-strong);
 }
 
+.graph-summary {
+  margin: 10px 4px 0;
+  color: var(--color-muted);
+  font-size: 11px;
+}
+
+.graph-summary .is-valid {
+  color: var(--color-accent);
+}
+
+.graph-summary .is-invalid,
+.graph-node__issue {
+  color: var(--color-danger);
+}
+
+.transform-toolbar--advanced {
+  margin: 12px 4px;
+}
+
 .graph-node {
   display: grid;
-  grid-template-columns: 30px 1fr auto;
+  grid-template-columns: 30px 1fr minmax(110px, auto);
   gap: 12px;
   padding: 13px 15px;
   border: 1px solid var(--color-line);
   border-radius: 10px;
   background: var(--color-canvas);
+}
+
+.graph-node--invalid {
+  border-color: var(--color-danger);
+}
+
+.graph-node__body,
+.graph-node__contract {
+  display: grid;
+  gap: 4px;
+}
+
+.graph-node__body > span,
+.graph-node__body small,
+.graph-node__contract {
+  color: var(--color-muted);
+  font-size: 10px;
+}
+
+.graph-node__contract {
+  justify-items: end;
 }
 
 .graph-node span {
@@ -754,6 +1036,14 @@ select {
   }
 
   .field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .factor-metrics {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .selected-factors .factor-card {
     grid-template-columns: 1fr;
   }
 

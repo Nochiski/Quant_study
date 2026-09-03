@@ -3,15 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from ._models import (
-    BinaryNode,
-    ChoiceParameter,
-    FloatParameter,
-    IntegerParameter,
-    ParameterNode,
-    StrategySpec,
-    UnaryNode,
+from strategy_workbench.domain.factor.facade.validation import (
+    FactorValidationSeverity,
+    validate_factor_graph,
 )
+
+from ._models import ChoiceParameter, FloatParameter, IntegerParameter, StrategySpec
 
 
 class ValidationKind(StrEnum):
@@ -41,12 +38,7 @@ class StrategyValidation:
 
 
 def _issue(code: str, path: str, message: str) -> ValidationIssue:
-    return ValidationIssue(
-        code=code,
-        path=path,
-        message=message,
-        kind=ValidationKind.SEMANTIC,
-    )
+    return ValidationIssue(code=code, path=path, message=message, kind=ValidationKind.SEMANTIC)
 
 
 def validate_strategy(spec: StrategySpec) -> StrategyValidation:
@@ -115,7 +107,6 @@ def validate_strategy(spec: StrategySpec) -> StrategyValidation:
                 "strategy.parameter.duplicate", "parameters", "파라미터 ID는 중복될 수 없습니다."
             )
         )
-    known_parameters = set(parameter_ids)
     for index, parameter in enumerate(spec.parameters):
         path = f"parameters.{index}"
         if isinstance(parameter, (FloatParameter, IntegerParameter)):
@@ -148,57 +139,34 @@ def validate_strategy(spec: StrategySpec) -> StrategyValidation:
         issues.append(
             _issue("strategy.factor.duplicate", "factors", "팩터 ID는 중복될 수 없습니다.")
         )
+    code_aliases = {
+        "factor.graph.duplicate_node": "strategy.expression.duplicate_node",
+        "factor.graph.output_missing": "strategy.expression.output_missing",
+        "factor.graph.input_missing": "strategy.expression.input_missing",
+        "factor.graph.parameter_missing": "strategy.expression.parameter_missing",
+        "factor.graph.lag_periods": "strategy.expression.lag_periods",
+    }
     for factor_index, factor in enumerate(spec.factors.factors):
         base = f"factors.factors.{factor_index}"
-        nodes = {node.node_id: node for node in factor.graph.nodes}
-        if len(nodes) != len(factor.graph.nodes):
-            issues.append(
-                _issue(
-                    "strategy.expression.duplicate_node",
-                    f"{base}.graph.nodes",
-                    "노드 ID는 중복될 수 없습니다.",
-                )
+        validation = validate_factor_graph(
+            factor.graph,
+            parameter_ids=tuple(parameter_ids),
+            factor_ids=tuple(factor_ids),
+        )
+        issues.extend(
+            ValidationIssue(
+                code=code_aliases.get(factor_issue.code, factor_issue.code),
+                path=f"{base}.graph.{factor_issue.path}",
+                message=factor_issue.message,
+                kind=ValidationKind.SEMANTIC,
+                severity=(
+                    ValidationSeverity.ERROR
+                    if factor_issue.severity is FactorValidationSeverity.ERROR
+                    else ValidationSeverity.WARNING
+                ),
             )
-        if factor.graph.output_node_id not in nodes:
-            issues.append(
-                _issue(
-                    "strategy.expression.output_missing",
-                    f"{base}.graph.output_node_id",
-                    "출력 노드를 찾을 수 없습니다.",
-                )
-            )
-        for node_index, node in enumerate(factor.graph.nodes):
-            node_path = f"{base}.graph.nodes.{node_index}"
-            references: tuple[str, ...] = ()
-            if isinstance(node, UnaryNode):
-                references = (node.input_node_id,)
-                if node.operator.value == "lag" and (node.periods is None or node.periods <= 0):
-                    issues.append(
-                        _issue(
-                            "strategy.expression.lag_periods",
-                            node_path,
-                            "lag 기간은 1 이상이어야 합니다.",
-                        )
-                    )
-            elif isinstance(node, BinaryNode):
-                references = (node.left_node_id, node.right_node_id)
-            elif isinstance(node, ParameterNode) and node.parameter_id not in known_parameters:
-                issues.append(
-                    _issue(
-                        "strategy.expression.parameter_missing",
-                        node_path,
-                        "참조한 파라미터를 찾을 수 없습니다.",
-                    )
-                )
-            for reference in references:
-                if reference not in nodes:
-                    issues.append(
-                        _issue(
-                            "strategy.expression.input_missing",
-                            node_path,
-                            f"입력 노드 {reference!r}를 찾을 수 없습니다.",
-                        )
-                    )
+            for factor_issue in validation.issues
+        )
 
     return StrategyValidation(
         valid=not any(issue.severity is ValidationSeverity.ERROR for issue in issues),

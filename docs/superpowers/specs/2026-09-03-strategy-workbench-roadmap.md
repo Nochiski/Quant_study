@@ -2,11 +2,11 @@
 
 > 작성: 2026-09-03
 >
-> 상태: M2 완료 — Equity catalog/PIT preview 수직 슬라이스 완결
+> 상태: M3 완료 — Factor Registry/조합 editor 수직 슬라이스 완결
 >
-> 체크리스트: 150개 중 35개 완료, 115개 남음
+> 체크리스트: 150개 중 50개 완료, 100개 남음
 >
-> 다음 체크: M3-1 `domain.factor`와 FactorDefinition/FactorRegistry SoT
+> 다음 체크: M4-1 eligibility filter와 point-in-time universe 결합
 > 진행 규칙: 구현·테스트·문서가 모두 끝난 항목만 `[x]`. 각 M 완료 시 이 머리말과 완료 기록을 갱신한다.
 
 ## 1. 결론
@@ -385,21 +385,21 @@ frontend 타입이 backend schema에서 생성된다.
 
 ### M3 — Factor Registry + 조합 editor
 
-- [ ] `domain.factor` 노드와 FactorDefinition/FactorRegistry SoT 추가.
-- [ ] `FACTORS.md` 50개 ID와 Equity field 요구사항 mapping 대장 작성.
-- [ ] 가격/재무/컨센서스/수급/공매도/신용/이벤트 mock factor subset 구현.
-- [ ] arithmetic/time-series/cross-sectional/group/conditional node 타입 추가.
-- [ ] DAG cycle/type/unit/min-history/missing-policy validator 구현.
-- [ ] winsorize/z-score/rank/neutralize/lag transform 구현.
-- [ ] parameter reference와 saved subgraph/factor reference 구현.
-- [ ] DAG→PIT execution plan compiler와 deterministic plan hash 추가.
-- [ ] factor matrix cache key에 data/factor/params/as-of fingerprint 포함.
-- [ ] IC/rank IC/quantile spread/coverage/turnover/decay 분석 구현.
-- [ ] factor catalog API와 validate/explain/preview API 추가.
-- [ ] `factor` entity와 factor browser/card UI 추가.
-- [ ] Quick transform chain/weight editor 추가.
-- [ ] Advanced typed node graph, port type, inline validation 추가.
-- [ ] Quick↔Advanced↔StrategySpec lossless property test 추가.
+- [x] `domain.factor` 노드와 FactorDefinition/FactorRegistry SoT 추가.
+- [x] `FACTORS.md` 50개 ID와 Equity field 요구사항 mapping 대장 작성.
+- [x] 가격/재무/컨센서스/수급/공매도/신용/이벤트 mock factor subset 구현.
+- [x] arithmetic/time-series/cross-sectional/group/conditional node 타입 추가.
+- [x] DAG cycle/type/unit/min-history/missing-policy validator 구현.
+- [x] winsorize/z-score/rank/neutralize/lag transform 구현.
+- [x] parameter reference와 saved subgraph/factor reference 구현.
+- [x] DAG→PIT execution plan compiler와 deterministic plan hash 추가.
+- [x] factor matrix cache key에 data/factor/params/as-of fingerprint 포함.
+- [x] IC/rank IC/quantile spread/coverage/turnover/decay 분석 구현.
+- [x] factor catalog API와 validate/explain/preview API 추가.
+- [x] `factor` entity와 factor browser/card UI 추가.
+- [x] Quick transform chain/weight editor 추가.
+- [x] Advanced typed node graph, port type, inline validation 추가.
+- [x] Quick↔Advanced↔StrategySpec lossless property test 추가.
 
 완료 게이트: 동일 spec/data snapshot이 동일 factor plan/value를 만들고, 두 UI 모드 사이 정보 손실이
 없다.
@@ -620,6 +620,13 @@ Contract:
   필드 근거와 lag를 선택하고 coverage/lag 위험을 명시적으로 확인하며, 실제 0·원천 생략 0·결측·
   미수집·coverage gap을 구분한다. 실제 backend mock HTTP 통합 테스트와 공개일 전 revision이
   노출되지 않는 UI→generated SDK→실제 FastAPI mock adapter E2E를 고정했다.
+- 2026-09-03 — M3 완료: 50개 versioned Factor Registry와 7개 카테고리별 실행 가능한 mock
+  graph를 추가했다. arithmetic/time-series/cross-sectional/group/conditional 표현식, cycle·type·
+  unit·history·missing 검증, PIT plan/hash/cache key, IC·Rank IC·quantile spread·coverage·turnover·
+  decay 분석을 backend SoT로 고정했다. Factor catalog/validate/explain/preview API와 Quick 팩터
+  탐색·가중치·5종 transform·진단, Advanced typed port/inline validation을 연결하고 두 편집 모드의
+  StrategySpec 무손실 속성을 테스트했다. Equity DB가 확정되기 전에는 같은 application port를
+  deterministic mock adapter가 구현한다.
 
 체크 수는 이 문서의 완료/미완료 체크박스 기준으로 갱신한다. 설명 안의 예시 checkbox는 두지
 않아 수치가 실제 구현 단위와 일치하게 유지한다.

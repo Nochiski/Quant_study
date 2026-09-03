@@ -1,7 +1,11 @@
 from __future__ import annotations
 
-from datetime import date
+import hashlib
+from datetime import date, timedelta
 
+from strategy_workbench.application.factor_research.facade.ports import (
+    FactorObservationQuery,
+)
 from strategy_workbench.domain.equity.facade.research_data import (
     DataLoadStatus,
     DatasetFieldProfile,
@@ -12,6 +16,10 @@ from strategy_workbench.domain.equity.facade.research_data import (
     UniverseHistoryQuery,
     UniverseHistoryResult,
     UniversePoint,
+)
+from strategy_workbench.domain.factor.facade.evaluation import (
+    FactorFieldValue,
+    FactorObservation,
 )
 
 from ._fixture import Membership, Observation, build_demo_fixture
@@ -137,6 +145,33 @@ class MockEquityDataAdapter:
             detail=None if cells else f"no mock panel cells — query={query}",
         )
 
+    def load_factor_observations(
+        self, query: FactorObservationQuery
+    ) -> tuple[FactorObservation, ...]:
+        """Generate a deterministic PIT-shaped factor panel behind the replaceable port."""
+        sessions = _factor_sessions(query)
+        security_ids = tuple(membership.security.security_id for membership in self._memberships)
+        return tuple(
+            FactorObservation(
+                as_of=session,
+                security_id=security_id,
+                fields=tuple(
+                    FactorFieldValue(
+                        field_id=field_id,
+                        value=_factor_field_value(
+                            field_id,
+                            security_index=security_index,
+                            session_index=session_index,
+                        ),
+                    )
+                    for field_id in query.required_field_ids
+                ),
+                forward_return=(security_index - 1) * 0.003 + ((session_index % 5) - 2) * 0.0002,
+            )
+            for session_index, session in enumerate(sessions)
+            for security_index, security_id in enumerate(security_ids)
+        )
+
     def _cutoff(self, session: date, lag_sessions: int) -> date | None:
         try:
             session_index = self._sessions.index(session)
@@ -166,3 +201,49 @@ class MockEquityDataAdapter:
             key=lambda observation: (observation.effective_date, observation.available_date),
             default=None,
         )
+
+
+def _factor_sessions(query: FactorObservationQuery) -> tuple[date, ...]:
+    requested: list[date] = []
+    cursor = query.start
+    while cursor <= query.end:
+        if cursor.weekday() < 5:
+            requested.append(cursor)
+        cursor += timedelta(days=1)
+    history: list[date] = []
+    cursor = query.start - timedelta(days=1)
+    while len(history) < max(query.minimum_history_sessions - 1, 0):
+        if cursor.weekday() < 5:
+            history.append(cursor)
+        cursor -= timedelta(days=1)
+    return tuple((*reversed(history), *requested))
+
+
+def _factor_field_value(
+    field_id: str,
+    *,
+    security_index: int,
+    session_index: int,
+) -> float | str:
+    if field_id.endswith("sector") or field_id.endswith("sector_code"):
+        return ("technology", "industrial", "consumer")[security_index % 3]
+    stable = int.from_bytes(hashlib.sha256(field_id.encode("utf-8")).digest()[:2], "big")
+    scale = 1 + stable % 17
+    trend = (session_index + 1) * (security_index + 1) * scale
+    if field_id == "price.close":
+        return 40_000.0 + security_index * 20_000.0 + trend
+    if field_id == "price.market_cap":
+        return 10_000_000_000.0 + security_index * 2_000_000_000.0 + trend * 10_000
+    if field_id == "financial.book_equity":
+        return 4_000_000_000.0 + security_index * 900_000_000.0 + trend * 1_000
+    if field_id == "consensus.forward_eps":
+        return 2_000.0 + security_index * 350.0 + trend * 0.2
+    if field_id == "flow.foreign_net_buy":
+        return (security_index - 1) * 100_000_000.0 + trend * 10_000
+    if field_id == "short.short_balance_ratio":
+        return 0.01 + security_index * 0.015 + (session_index % 7) * 0.0001
+    if field_id == "credit.margin_balance":
+        return 1_000_000_000.0 + security_index * 100_000_000.0 + trend * 1_000
+    if field_id == "event.earnings_surprise":
+        return (security_index - 1) * 0.05 + (session_index % 3) * 0.005
+    return float(stable + trend)

@@ -13,8 +13,12 @@ from strategy_workbench.application.equity_workspace.facade.ports import EquityD
 from strategy_workbench.application.equity_workspace.facade.workspace import (
     EquityWorkspaceService,
 )
+from strategy_workbench.application.factor_research.facade.research import (
+    FactorResearchService,
+)
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.application.strategy_design.facade.ports import StrategyRepositoryPort
+from strategy_workbench.domain.factor.facade.registry import build_default_factor_registry
 
 
 @dataclass(frozen=True)
@@ -23,6 +27,7 @@ class BackendContainer:
     equity_workspace: EquityWorkspaceService
     strategy_repository: StrategyRepositoryPort
     strategy_design: StrategyDesignService
+    factor_research: FactorResearchService
 
 
 def build_container(*, equity_adapter: str = "mock") -> BackendContainer:
@@ -41,4 +46,5 @@ def build_container(*, equity_adapter: str = "mock") -> BackendContainer:
             strategy_repository,
             new_id=lambda: str(uuid4()),
         ),
+        factor_research=FactorResearchService(build_default_factor_registry(), equity_data),
     )

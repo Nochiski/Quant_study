@@ -159,6 +159,33 @@ def build_demo_fixture() -> MockEquityFixture:
             ),
         ),
     )
+    profiles = (
+        *profiles,
+        _factor_field_profile(
+            field_id="short.short_balance_ratio",
+            dataset_id="short_daily",
+            label="Short balance ratio",
+            unit="ratio",
+            value_type=FieldValueType.RATIO,
+            coverage=full_coverage,
+        ),
+        _factor_field_profile(
+            field_id="credit.margin_balance",
+            dataset_id="credit_daily",
+            label="Margin balance",
+            unit="KRW",
+            value_type=FieldValueType.AMOUNT,
+            coverage=full_coverage,
+        ),
+        _factor_field_profile(
+            field_id="event.earnings_surprise",
+            dataset_id="event_pit",
+            label="Earnings surprise",
+            unit="ratio",
+            value_type=FieldValueType.RATIO,
+            coverage=full_coverage,
+        ),
+    )
     memberships = (
         Membership(securities[0], sessions[0], sessions[-1]),
         Membership(securities[1], sessions[0], sessions[-1]),
@@ -187,6 +214,30 @@ def build_demo_fixture() -> MockEquityFixture:
                         400_000_000_000_000.0
                         + security_index * 20_000_000_000_000.0
                         + index * 1_000_000_000.0,
+                        CellKind.OBSERVED,
+                    ),
+                    Observation(
+                        security.security_id,
+                        "short.short_balance_ratio",
+                        session,
+                        session,
+                        0.01 + security_index * 0.015 + index * 0.0001,
+                        CellKind.OBSERVED,
+                    ),
+                    Observation(
+                        security.security_id,
+                        "credit.margin_balance",
+                        session,
+                        session,
+                        1_000_000_000.0 + security_index * 100_000_000.0 + index * 1_000_000,
+                        CellKind.OBSERVED,
+                    ),
+                    Observation(
+                        security.security_id,
+                        "event.earnings_surprise",
+                        session,
+                        session,
+                        (security_index - 1) * 0.05 + (index % 3) * 0.005,
                         CellKind.OBSERVED,
                     ),
                 )
@@ -271,10 +322,38 @@ def build_demo_fixture() -> MockEquityFixture:
                 DatasetRevision("fin_std", "mock-r2", sessions[-1]),
                 DatasetRevision("consensus_daily", "mock-r4", sessions[-1]),
                 DatasetRevision("flow_daily", "mock-r1", sessions[-1]),
+                DatasetRevision("short_daily", "mock-r1", sessions[-1]),
+                DatasetRevision("credit_daily", "mock-r1", sessions[-1]),
+                DatasetRevision("event_pit", "mock-r1", sessions[-1]),
             ),
         ),
         sessions=sessions,
         profiles=profiles,
         memberships=memberships,
         observations=tuple(observations),
+    )
+
+
+def _factor_field_profile(
+    *,
+    field_id: str,
+    dataset_id: str,
+    label: str,
+    unit: str,
+    value_type: FieldValueType,
+    coverage: FieldCoverageCapability,
+) -> DatasetFieldProfile:
+    return DatasetFieldProfile(
+        field_id=field_id,
+        dataset_id=dataset_id,
+        label=label,
+        unit=unit,
+        value_type=value_type,
+        frequency="daily",
+        available_date_basis="point-in-time session fixture",
+        recommended_lag_sessions=0,
+        description="Deterministic mock subset for the replaceable Equity DB adapter.",
+        disclosure_basis="Mock PIT availability contract",
+        evidence="M3 factor research fixture",
+        coverage=coverage,
     )

@@ -1,5 +1,12 @@
 # Strategy Workbench Frontend
 
+## M3 Factor editor
+
+`entities/factor`는 generated OpenAPI 타입과 query를 통해 backend Factor Registry만 읽는다.
+Quick Builder는 팩터 탐색·추가, 가중치, Lag/Rank/Z-score/Winsorize/Neutralize 체인과 IC 계열
+진단을 제공한다. Advanced Graph는 동일한 `StrategySpec` graph를 typed input port, output
+type/unit, minimum history, inline validation과 함께 표시한다. 두 모드에 별도 수식이나 DTO는 없다.
+
 비개발자도 전략을 만들 수 있는 no-code UI다. 저장되는 전략의 의미는 백엔드의 버전된
 `StrategySpec`이 소유하며, 이 폴더는 편집 경험과 시각화만 소유한다.
 

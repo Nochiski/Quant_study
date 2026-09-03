@@ -1,18 +1,34 @@
 import { client } from "./generated/client.gen";
 import {
   createStrategy,
+  explainFactorGraph,
   getEquityCatalog,
+  getFactorCatalog,
   getStrategyTemplate,
+  previewFactorGraph,
   previewEquityData,
   previewEquityPanel,
   previewEquityUniverse,
   reviseStrategy,
+  validateFactorGraph,
   validateStrategy,
 } from "./generated/sdk.gen";
 import type {
   DataStep,
   DatasetFieldProfile,
+  FactorCatalog,
+  FactorDefinition,
+  FactorExplanation,
+  FactorGraph,
+  FactorGraphRequest,
+  FactorGraphValidation,
+  FactorPreview,
+  FactorPreviewRequest,
+  FactorSignal,
+  FactorValidationIssue,
   GetEquityCatalogData,
+  GetFactorCatalogData,
+  NodeContract,
   ResearchCatalog,
   ResearchPanelCell,
   ResearchPanelPreview,
@@ -74,6 +90,34 @@ export const strategyWorkbenchApi = {
     return requireData(response.data, "previewEquityData");
   },
 
+  async getFactorCatalog(
+    query: FactorCatalogQuery = {},
+  ): Promise<FactorCatalog> {
+    const response = await getFactorCatalog({ query });
+    return requireData(response.data, "getFactorCatalog");
+  },
+
+  async validateFactorGraph(
+    request: FactorGraphRequest,
+  ): Promise<FactorGraphValidation> {
+    const response = await validateFactorGraph({ body: request });
+    return requireData(response.data, "validateFactorGraph");
+  },
+
+  async explainFactorGraph(
+    request: FactorGraphRequest,
+  ): Promise<FactorExplanation> {
+    const response = await explainFactorGraph({ body: request });
+    return requireData(response.data, "explainFactorGraph");
+  },
+
+  async previewFactorGraph(
+    request: FactorPreviewRequest,
+  ): Promise<FactorPreview> {
+    const response = await previewFactorGraph({ body: request });
+    return requireData(response.data, "previewFactorGraph");
+  },
+
   async validate(spec: StrategySpec): Promise<StrategyValidation> {
     const response = await validateStrategy({ body: spec });
     return requireData(response.data, "validateStrategy");
@@ -100,10 +144,22 @@ export const strategyWorkbenchApi = {
 };
 
 export type EquityCatalogQuery = NonNullable<GetEquityCatalogData["query"]>;
+export type FactorCatalogQuery = NonNullable<GetFactorCatalogData["query"]>;
 
 export type {
   DataStep,
   DatasetFieldProfile,
+  FactorCatalog,
+  FactorDefinition,
+  FactorExplanation,
+  FactorGraph,
+  FactorGraphRequest,
+  FactorGraphValidation,
+  FactorPreview,
+  FactorPreviewRequest,
+  FactorSignal,
+  FactorValidationIssue,
+  NodeContract,
   ResearchCatalog,
   ResearchPanelCell,
   ResearchPanelPreview,

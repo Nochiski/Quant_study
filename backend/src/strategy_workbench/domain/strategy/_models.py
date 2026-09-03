@@ -5,6 +5,8 @@ from datetime import date
 from enum import StrEnum
 from typing import Literal, TypeAlias
 
+from strategy_workbench.domain.factor.facade.expression import FactorGraph
+
 
 class Market(StrEnum):
     KRX = "KRX"
@@ -20,20 +22,6 @@ class ComparisonOperator(StrEnum):
     LESS_THAN = "lt"
     LESS_THAN_OR_EQUAL = "lte"
     EQUAL = "eq"
-
-
-class UnaryOperator(StrEnum):
-    NEGATE = "negate"
-    LAG = "lag"
-    RANK = "rank"
-    ZSCORE = "zscore"
-
-
-class BinaryOperator(StrEnum):
-    ADD = "add"
-    SUBTRACT = "subtract"
-    MULTIPLY = "multiply"
-    DIVIDE = "divide"
 
 
 class FactorDirection(StrEnum):
@@ -97,54 +85,6 @@ class EligibilityRule:
 @dataclass(frozen=True)
 class EligibilityStep:
     rules: tuple[EligibilityRule, ...] = ()
-
-
-@dataclass(frozen=True)
-class FieldNode:
-    node_id: str
-    field_id: str
-    kind: Literal["field"]
-
-
-@dataclass(frozen=True)
-class ConstantNode:
-    node_id: str
-    value: float
-    kind: Literal["constant"]
-
-
-@dataclass(frozen=True)
-class ParameterNode:
-    node_id: str
-    parameter_id: str
-    kind: Literal["parameter"]
-
-
-@dataclass(frozen=True)
-class UnaryNode:
-    node_id: str
-    operator: UnaryOperator
-    input_node_id: str
-    kind: Literal["unary"]
-    periods: int | None = None
-
-
-@dataclass(frozen=True)
-class BinaryNode:
-    node_id: str
-    operator: BinaryOperator
-    left_node_id: str
-    right_node_id: str
-    kind: Literal["binary"]
-
-
-ExpressionNode: TypeAlias = FieldNode | ConstantNode | ParameterNode | UnaryNode | BinaryNode
-
-
-@dataclass(frozen=True)
-class FactorGraph:
-    nodes: tuple[ExpressionNode, ...]
-    output_node_id: str
 
 
 @dataclass(frozen=True)

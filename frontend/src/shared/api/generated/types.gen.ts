@@ -67,9 +67,58 @@ export type ChoiceParameter = {
 };
 
 /**
+ * ComparisonNode
+ */
+export type ComparisonNode = {
+  /**
+   * Kind
+   */
+  kind: "comparison";
+  /**
+   * Left Node Id
+   */
+  left_node_id: string;
+  /**
+   * Node Id
+   */
+  node_id: string;
+  operator: FactorComparisonOperator;
+  /**
+   * Right Node Id
+   */
+  right_node_id: string;
+};
+
+/**
  * ComparisonOperator
  */
 export type ComparisonOperator = "gt" | "gte" | "lt" | "lte" | "eq";
+
+/**
+ * ConditionalNode
+ */
+export type ConditionalNode = {
+  /**
+   * False Node Id
+   */
+  false_node_id: string;
+  /**
+   * Kind
+   */
+  kind: "conditional";
+  /**
+   * Node Id
+   */
+  node_id: string;
+  /**
+   * Predicate Node Id
+   */
+  predicate_node_id: string;
+  /**
+   * True Node Id
+   */
+  true_node_id: string;
+};
 
 /**
  * ConstantNode
@@ -88,6 +137,38 @@ export type ConstantNode = {
    */
   value: number;
 };
+
+/**
+ * CrossSectionalNode
+ */
+export type CrossSectionalNode = {
+  /**
+   * Input Node Id
+   */
+  input_node_id: string;
+  /**
+   * Kind
+   */
+  kind: "cross_sectional";
+  /**
+   * Lower Quantile
+   */
+  lower_quantile?: number;
+  /**
+   * Node Id
+   */
+  node_id: string;
+  operator: CrossSectionalOperator;
+  /**
+   * Upper Quantile
+   */
+  upper_quantile?: number;
+};
+
+/**
+ * CrossSectionalOperator
+ */
+export type CrossSectionalOperator = "rank" | "zscore" | "winsorize";
 
 /**
  * DataFrequency
@@ -267,24 +348,421 @@ export type ExecutionStep = {
 export type ExecutionTiming = "next_open";
 
 /**
+ * FactorAnalytics
+ */
+export type FactorAnalytics = {
+  /**
+   * Coverage
+   */
+  coverage: number;
+  /**
+   * Decay
+   */
+  decay: number | null;
+  /**
+   * Information Coefficient
+   */
+  information_coefficient: number | null;
+  /**
+   * Observation Count
+   */
+  observation_count: number;
+  /**
+   * Quantile Spread
+   */
+  quantile_spread: number | null;
+  /**
+   * Rank Information Coefficient
+   */
+  rank_information_coefficient: number | null;
+  /**
+   * Turnover
+   */
+  turnover: number | null;
+  /**
+   * Valid Count
+   */
+  valid_count: number;
+};
+
+/**
+ * FactorAvailability
+ */
+export type FactorAvailability = "implemented" | "catalog_only";
+
+/**
+ * FactorCatalog
+ */
+export type FactorCatalog = {
+  facets: FactorCatalogFacets;
+  /**
+   * Factors
+   */
+  factors: Array<FactorDefinition>;
+  /**
+   * Page
+   */
+  page: number;
+  /**
+   * Page Count
+   */
+  page_count: number;
+  /**
+   * Page Size
+   */
+  page_size: number;
+  /**
+   * Registry Version
+   */
+  registry_version: string;
+  /**
+   * Total
+   */
+  total: number;
+};
+
+/**
+ * FactorCatalogFacets
+ */
+export type FactorCatalogFacets = {
+  /**
+   * Availability
+   */
+  availability: Array<FactorAvailability>;
+  /**
+   * Categories
+   */
+  categories: Array<FactorCategory>;
+  /**
+   * Output Units
+   */
+  output_units: Array<string>;
+};
+
+/**
+ * FactorCategory
+ */
+export type FactorCategory =
+  "price" | "financial" | "consensus" | "flow" | "short" | "credit" | "event";
+
+/**
+ * FactorComparisonOperator
+ */
+export type FactorComparisonOperator = "gt" | "gte" | "lt" | "lte" | "eq";
+
+/**
+ * FactorDefinition
+ */
+export type FactorDefinition = {
+  availability: FactorAvailability;
+  category: FactorCategory;
+  default_graph: FactorGraph | null;
+  /**
+   * Description
+   */
+  description: string;
+  /**
+   * Factor Id
+   */
+  factor_id: string;
+  /**
+   * Label
+   */
+  label: string;
+  /**
+   * Minimum History Sessions
+   */
+  minimum_history_sessions: number;
+  missing_policy: MissingPolicy;
+  /**
+   * Output Unit
+   */
+  output_unit: string;
+  preference: FactorPreference;
+  /**
+   * Required Field Ids
+   */
+  required_field_ids: Array<string>;
+  /**
+   * Tags
+   */
+  tags?: Array<string>;
+};
+
+/**
  * FactorDirection
  */
 export type FactorDirection = "high" | "low";
 
 /**
+ * FactorEvaluation
+ */
+export type FactorEvaluation = {
+  /**
+   * Output Node Id
+   */
+  output_node_id: string;
+  /**
+   * Values
+   */
+  values: Array<FactorValue>;
+};
+
+/**
+ * FactorExecutionPlan
+ */
+export type FactorExecutionPlan = {
+  /**
+   * As Of Policy
+   */
+  as_of_policy?: string;
+  /**
+   * Graph Hash
+   */
+  graph_hash: string;
+  /**
+   * Minimum History Sessions
+   */
+  minimum_history_sessions: number;
+  /**
+   * Missing Policy
+   */
+  missing_policy: string;
+  /**
+   * Output Node Id
+   */
+  output_node_id: string;
+  /**
+   * Plan Hash
+   */
+  plan_hash: string;
+  /**
+   * Referenced Factor Ids
+   */
+  referenced_factor_ids: Array<string>;
+  /**
+   * Referenced Subgraph Ids
+   */
+  referenced_subgraph_ids: Array<string>;
+  /**
+   * Registry Version
+   */
+  registry_version: string;
+  /**
+   * Required Field Ids
+   */
+  required_field_ids: Array<string>;
+  /**
+   * Steps
+   */
+  steps: Array<FactorExecutionStep>;
+};
+
+/**
+ * FactorExecutionStep
+ */
+export type FactorExecutionStep = {
+  /**
+   * Input Node Ids
+   */
+  input_node_ids: Array<string>;
+  /**
+   * Minimum History Sessions
+   */
+  minimum_history_sessions: number;
+  /**
+   * Node Id
+   */
+  node_id: string;
+  /**
+   * Operation
+   */
+  operation: string;
+  /**
+   * Output Type
+   */
+  output_type: string;
+  /**
+   * Output Unit
+   */
+  output_unit: string;
+  /**
+   * Sequence
+   */
+  sequence: number;
+};
+
+/**
+ * FactorExplanation
+ */
+export type FactorExplanation = {
+  /**
+   * Narrative
+   */
+  narrative: Array<string>;
+  plan: FactorExecutionPlan | null;
+  validation: FactorGraphValidation;
+};
+
+/**
  * FactorGraph
  */
 export type FactorGraph = {
+  missing_policy?: MissingPolicy;
   /**
    * Nodes
    */
   nodes: Array<
-    FieldNode | ConstantNode | ParameterNode | UnaryNode | BinaryNode
+    | FieldNode
+    | ConstantNode
+    | ParameterNode
+    | UnaryNode
+    | BinaryNode
+    | TimeSeriesNode
+    | CrossSectionalNode
+    | GroupNode
+    | ComparisonNode
+    | ConditionalNode
+    | SavedFactorNode
+    | SavedSubgraphNode
   >;
   /**
    * Output Node Id
    */
   output_node_id: string;
+};
+
+/**
+ * FactorGraphRequest
+ */
+export type FactorGraphRequest = {
+  /**
+   * Factor Ids
+   */
+  factor_ids?: Array<string>;
+  /**
+   * Fields
+   */
+  fields?: Array<FieldMetadata>;
+  graph: FactorGraph;
+  /**
+   * Parameter Ids
+   */
+  parameter_ids?: Array<string>;
+  /**
+   * Subgraph Ids
+   */
+  subgraph_ids?: Array<string>;
+};
+
+/**
+ * FactorGraphValidation
+ */
+export type FactorGraphValidation = {
+  /**
+   * Issues
+   */
+  issues: Array<FactorValidationIssue>;
+  /**
+   * Minimum History Sessions
+   */
+  minimum_history_sessions: number;
+  /**
+   * Node Contracts
+   */
+  node_contracts: Array<NodeContract>;
+  /**
+   * Required Field Ids
+   */
+  required_field_ids: Array<string>;
+  /**
+   * Valid
+   */
+  valid: boolean;
+};
+
+/**
+ * FactorMatrixCacheKey
+ */
+export type FactorMatrixCacheKey = {
+  /**
+   * As Of End
+   */
+  as_of_end: string;
+  /**
+   * As Of Start
+   */
+  as_of_start: string;
+  /**
+   * Data Snapshot Id
+   */
+  data_snapshot_id: string;
+  /**
+   * Fingerprint
+   */
+  fingerprint: string;
+  /**
+   * Parameters
+   */
+  parameters: Array<ResolvedFactorParameter>;
+  /**
+   * Plan Hash
+   */
+  plan_hash: string;
+  /**
+   * Registry Version
+   */
+  registry_version: string;
+};
+
+/**
+ * FactorPreference
+ */
+export type FactorPreference = "high" | "low";
+
+/**
+ * FactorPreview
+ */
+export type FactorPreview = {
+  analytics: FactorAnalytics;
+  cache_key: FactorMatrixCacheKey;
+  evaluation: FactorEvaluation;
+  plan: FactorExecutionPlan;
+};
+
+/**
+ * FactorPreviewRequest
+ */
+export type FactorPreviewRequest = {
+  /**
+   * As Of End
+   */
+  as_of_end: string;
+  /**
+   * As Of Start
+   */
+  as_of_start: string;
+  /**
+   * Data Snapshot Id
+   */
+  data_snapshot_id: string;
+  /**
+   * Factor Ids
+   */
+  factor_ids?: Array<string>;
+  /**
+   * Fields
+   */
+  fields?: Array<FieldMetadata>;
+  graph: FactorGraph;
+  /**
+   * Parameters
+   */
+  parameters?: Array<ResolvedFactorParameter>;
+  /**
+   * Subgraph Ids
+   */
+  subgraph_ids?: Array<string>;
 };
 
 /**
@@ -315,6 +793,52 @@ export type FactorStep = {
    * Factors
    */
   factors: Array<FactorSignal>;
+};
+
+/**
+ * FactorValidationIssue
+ */
+export type FactorValidationIssue = {
+  /**
+   * Code
+   */
+  code: string;
+  /**
+   * Message
+   */
+  message: string;
+  /**
+   * Node Id
+   */
+  node_id: string | null;
+  /**
+   * Path
+   */
+  path: string;
+  severity?: FactorValidationSeverity;
+};
+
+/**
+ * FactorValidationSeverity
+ */
+export type FactorValidationSeverity = "error" | "warning";
+
+/**
+ * FactorValue
+ */
+export type FactorValue = {
+  /**
+   * As Of
+   */
+  as_of: string;
+  /**
+   * Security Id
+   */
+  security_id: string;
+  /**
+   * Value
+   */
+  value: number | null;
 };
 
 /**
@@ -384,6 +908,25 @@ export type FieldLag = {
 };
 
 /**
+ * FieldMetadata
+ */
+export type FieldMetadata = {
+  /**
+   * Available History Sessions
+   */
+  available_history_sessions?: number | null;
+  /**
+   * Field Id
+   */
+  field_id: string;
+  /**
+   * Unit
+   */
+  unit: string;
+  value_type?: NodeValueType;
+};
+
+/**
  * FieldNode
  */
 export type FieldNode = {
@@ -437,6 +980,34 @@ export type FloatParameter = {
 };
 
 /**
+ * GroupNode
+ */
+export type GroupNode = {
+  /**
+   * Group Field Id
+   */
+  group_field_id: string;
+  /**
+   * Input Node Id
+   */
+  input_node_id: string;
+  /**
+   * Kind
+   */
+  kind: "group";
+  /**
+   * Node Id
+   */
+  node_id: string;
+  operator: GroupOperator;
+};
+
+/**
+ * GroupOperator
+ */
+export type GroupOperator = "neutralize" | "rank";
+
+/**
  * HTTPValidationError
  */
 export type HttpValidationError = {
@@ -480,6 +1051,36 @@ export type IntegerParameter = {
  * Market
  */
 export type Market = "KRX";
+
+/**
+ * MissingPolicy
+ */
+export type MissingPolicy = "drop" | "keep" | "zero" | "cross_sectional_median";
+
+/**
+ * NodeContract
+ */
+export type NodeContract = {
+  /**
+   * Minimum History Sessions
+   */
+  minimum_history_sessions: number;
+  /**
+   * Node Id
+   */
+  node_id: string;
+  /**
+   * Unit
+   */
+  unit: string;
+  value_type: NodeValueType;
+};
+
+/**
+ * NodeValueType
+ */
+export type NodeValueType =
+  "numeric_series" | "boolean_series" | "group_series" | "scalar";
 
 /**
  * OrderStyle
@@ -757,6 +1358,20 @@ export type ResearchPreview = {
 export type ResearchWarningSeverity = "info" | "warning";
 
 /**
+ * ResolvedFactorParameter
+ */
+export type ResolvedFactorParameter = {
+  /**
+   * Parameter Id
+   */
+  parameter_id: string;
+  /**
+   * Value
+   */
+  value: number | number | string | boolean;
+};
+
+/**
  * ReviseStrategyRequest
  */
 export type ReviseStrategyRequest = {
@@ -790,6 +1405,24 @@ export type RiskStep = {
 };
 
 /**
+ * SavedFactorNode
+ */
+export type SavedFactorNode = {
+  /**
+   * Factor Id
+   */
+  factor_id: string;
+  /**
+   * Kind
+   */
+  kind: "saved_factor";
+  /**
+   * Node Id
+   */
+  node_id: string;
+};
+
+/**
  * SavedStrategy
  */
 export type SavedStrategy = {
@@ -798,6 +1431,24 @@ export type SavedStrategy = {
    * Spec Hash
    */
   spec_hash: string;
+};
+
+/**
+ * SavedSubgraphNode
+ */
+export type SavedSubgraphNode = {
+  /**
+   * Kind
+   */
+  kind: "saved_subgraph";
+  /**
+   * Node Id
+   */
+  node_id: string;
+  /**
+   * Subgraph Id
+   */
+  subgraph_id: string;
 };
 
 /**
@@ -925,6 +1576,39 @@ export type StrategyValidation = {
 };
 
 /**
+ * TimeSeriesNode
+ */
+export type TimeSeriesNode = {
+  /**
+   * Input Node Id
+   */
+  input_node_id: string;
+  /**
+   * Kind
+   */
+  kind: "time_series";
+  /**
+   * Lag
+   */
+  lag?: number;
+  /**
+   * Node Id
+   */
+  node_id: string;
+  operator: TimeSeriesOperator;
+  /**
+   * Window
+   */
+  window: number;
+};
+
+/**
+ * TimeSeriesOperator
+ */
+export type TimeSeriesOperator =
+  "mean" | "std" | "momentum" | "delta" | "min" | "max";
+
+/**
  * UnaryNode
  */
 export type UnaryNode = {
@@ -950,7 +1634,8 @@ export type UnaryNode = {
 /**
  * UnaryOperator
  */
-export type UnaryOperator = "negate" | "lag" | "rank" | "zscore";
+export type UnaryOperator =
+  "negate" | "lag" | "rank" | "zscore" | "winsorize" | "neutralize";
 
 /**
  * UniverseCoverageSummary
@@ -1250,6 +1935,135 @@ export type PreviewEquityUniverseResponses = {
 
 export type PreviewEquityUniverseResponse =
   PreviewEquityUniverseResponses[keyof PreviewEquityUniverseResponses];
+
+export type GetFactorCatalogData = {
+  body?: never;
+  path?: never;
+  query?: {
+    /**
+     * Search
+     */
+    search?: string | null;
+    /**
+     * Category
+     */
+    category?: Array<FactorCategory> | null;
+    /**
+     * Availability
+     */
+    availability?: Array<FactorAvailability> | null;
+    /**
+     * Page
+     */
+    page?: number;
+    /**
+     * Page Size
+     */
+    page_size?: number;
+  };
+  url: "/api/v1/factors/catalog";
+};
+
+export type GetFactorCatalogErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetFactorCatalogError =
+  GetFactorCatalogErrors[keyof GetFactorCatalogErrors];
+
+export type GetFactorCatalogResponses = {
+  /**
+   * Successful Response
+   */
+  200: FactorCatalog;
+};
+
+export type GetFactorCatalogResponse =
+  GetFactorCatalogResponses[keyof GetFactorCatalogResponses];
+
+export type ExplainFactorGraphData = {
+  body: FactorGraphRequest;
+  path?: never;
+  query?: never;
+  url: "/api/v1/factors/explain";
+};
+
+export type ExplainFactorGraphErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ExplainFactorGraphError =
+  ExplainFactorGraphErrors[keyof ExplainFactorGraphErrors];
+
+export type ExplainFactorGraphResponses = {
+  /**
+   * Successful Response
+   */
+  200: FactorExplanation;
+};
+
+export type ExplainFactorGraphResponse =
+  ExplainFactorGraphResponses[keyof ExplainFactorGraphResponses];
+
+export type PreviewFactorGraphData = {
+  body: FactorPreviewRequest;
+  path?: never;
+  query?: never;
+  url: "/api/v1/factors/preview";
+};
+
+export type PreviewFactorGraphErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type PreviewFactorGraphError =
+  PreviewFactorGraphErrors[keyof PreviewFactorGraphErrors];
+
+export type PreviewFactorGraphResponses = {
+  /**
+   * Successful Response
+   */
+  200: FactorPreview;
+};
+
+export type PreviewFactorGraphResponse =
+  PreviewFactorGraphResponses[keyof PreviewFactorGraphResponses];
+
+export type ValidateFactorGraphData = {
+  body: FactorGraphRequest;
+  path?: never;
+  query?: never;
+  url: "/api/v1/factors/validate";
+};
+
+export type ValidateFactorGraphErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ValidateFactorGraphError =
+  ValidateFactorGraphErrors[keyof ValidateFactorGraphErrors];
+
+export type ValidateFactorGraphResponses = {
+  /**
+   * Successful Response
+   */
+  200: FactorGraphValidation;
+};
+
+export type ValidateFactorGraphResponse =
+  ValidateFactorGraphResponses[keyof ValidateFactorGraphResponses];
 
 export type GetHealthData = {
   body?: never;

@@ -114,6 +114,39 @@
         "title": "ChoiceParameter",
         "type": "object"
       },
+      "ComparisonNode": {
+        "properties": {
+          "kind": {
+            "const": "comparison",
+            "title": "Kind",
+            "type": "string"
+          },
+          "left_node_id": {
+            "title": "Left Node Id",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operator": {
+            "$ref": "#/components/schemas/FactorComparisonOperator"
+          },
+          "right_node_id": {
+            "title": "Right Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "operator",
+          "left_node_id",
+          "right_node_id",
+          "kind"
+        ],
+        "title": "ComparisonNode",
+        "type": "object"
+      },
       "ComparisonOperator": {
         "enum": [
           "gt",
@@ -124,6 +157,40 @@
         ],
         "title": "ComparisonOperator",
         "type": "string"
+      },
+      "ConditionalNode": {
+        "properties": {
+          "false_node_id": {
+            "title": "False Node Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "conditional",
+            "title": "Kind",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "predicate_node_id": {
+            "title": "Predicate Node Id",
+            "type": "string"
+          },
+          "true_node_id": {
+            "title": "True Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "predicate_node_id",
+          "true_node_id",
+          "false_node_id",
+          "kind"
+        ],
+        "title": "ConditionalNode",
+        "type": "object"
       },
       "ConstantNode": {
         "properties": {
@@ -148,6 +215,53 @@
         ],
         "title": "ConstantNode",
         "type": "object"
+      },
+      "CrossSectionalNode": {
+        "properties": {
+          "input_node_id": {
+            "title": "Input Node Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "cross_sectional",
+            "title": "Kind",
+            "type": "string"
+          },
+          "lower_quantile": {
+            "default": 0.01,
+            "title": "Lower Quantile",
+            "type": "number"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operator": {
+            "$ref": "#/components/schemas/CrossSectionalOperator"
+          },
+          "upper_quantile": {
+            "default": 0.99,
+            "title": "Upper Quantile",
+            "type": "number"
+          }
+        },
+        "required": [
+          "node_id",
+          "operator",
+          "input_node_id",
+          "kind"
+        ],
+        "title": "CrossSectionalNode",
+        "type": "object"
+      },
+      "CrossSectionalOperator": {
+        "enum": [
+          "rank",
+          "zscore",
+          "winsorize"
+        ],
+        "title": "CrossSectionalOperator",
+        "type": "string"
       },
       "DataFrequency": {
         "enum": [
@@ -403,6 +517,274 @@
         "title": "ExecutionTiming",
         "type": "string"
       },
+      "FactorAnalytics": {
+        "properties": {
+          "coverage": {
+            "title": "Coverage",
+            "type": "number"
+          },
+          "decay": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decay"
+          },
+          "information_coefficient": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Information Coefficient"
+          },
+          "observation_count": {
+            "title": "Observation Count",
+            "type": "integer"
+          },
+          "quantile_spread": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantile Spread"
+          },
+          "rank_information_coefficient": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank Information Coefficient"
+          },
+          "turnover": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Turnover"
+          },
+          "valid_count": {
+            "title": "Valid Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "information_coefficient",
+          "rank_information_coefficient",
+          "quantile_spread",
+          "coverage",
+          "turnover",
+          "decay",
+          "observation_count",
+          "valid_count"
+        ],
+        "title": "FactorAnalytics",
+        "type": "object"
+      },
+      "FactorAvailability": {
+        "enum": [
+          "implemented",
+          "catalog_only"
+        ],
+        "title": "FactorAvailability",
+        "type": "string"
+      },
+      "FactorCatalog": {
+        "properties": {
+          "facets": {
+            "$ref": "#/components/schemas/FactorCatalogFacets"
+          },
+          "factors": {
+            "items": {
+              "$ref": "#/components/schemas/FactorDefinition"
+            },
+            "title": "Factors",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_count": {
+            "title": "Page Count",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "registry_version": {
+            "title": "Registry Version",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "registry_version",
+          "factors",
+          "total",
+          "page",
+          "page_size",
+          "page_count",
+          "facets"
+        ],
+        "title": "FactorCatalog",
+        "type": "object"
+      },
+      "FactorCatalogFacets": {
+        "properties": {
+          "availability": {
+            "items": {
+              "$ref": "#/components/schemas/FactorAvailability"
+            },
+            "title": "Availability",
+            "type": "array"
+          },
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/FactorCategory"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "output_units": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Output Units",
+            "type": "array"
+          }
+        },
+        "required": [
+          "categories",
+          "availability",
+          "output_units"
+        ],
+        "title": "FactorCatalogFacets",
+        "type": "object"
+      },
+      "FactorCategory": {
+        "enum": [
+          "price",
+          "financial",
+          "consensus",
+          "flow",
+          "short",
+          "credit",
+          "event"
+        ],
+        "title": "FactorCategory",
+        "type": "string"
+      },
+      "FactorComparisonOperator": {
+        "enum": [
+          "gt",
+          "gte",
+          "lt",
+          "lte",
+          "eq"
+        ],
+        "title": "FactorComparisonOperator",
+        "type": "string"
+      },
+      "FactorDefinition": {
+        "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/FactorAvailability"
+          },
+          "category": {
+            "$ref": "#/components/schemas/FactorCategory"
+          },
+          "default_graph": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FactorGraph"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "factor_id": {
+            "title": "Factor Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "minimum_history_sessions": {
+            "title": "Minimum History Sessions",
+            "type": "integer"
+          },
+          "missing_policy": {
+            "$ref": "#/components/schemas/MissingPolicy"
+          },
+          "output_unit": {
+            "title": "Output Unit",
+            "type": "string"
+          },
+          "preference": {
+            "$ref": "#/components/schemas/FactorPreference"
+          },
+          "required_field_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Field Ids",
+            "type": "array"
+          },
+          "tags": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "factor_id",
+          "label",
+          "description",
+          "category",
+          "preference",
+          "output_unit",
+          "required_field_ids",
+          "minimum_history_sessions",
+          "missing_policy",
+          "availability",
+          "default_graph"
+        ],
+        "title": "FactorDefinition",
+        "type": "object"
+      },
       "FactorDirection": {
         "enum": [
           "high",
@@ -411,8 +793,185 @@
         "title": "FactorDirection",
         "type": "string"
       },
+      "FactorEvaluation": {
+        "properties": {
+          "output_node_id": {
+            "title": "Output Node Id",
+            "type": "string"
+          },
+          "values": {
+            "items": {
+              "$ref": "#/components/schemas/FactorValue"
+            },
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "output_node_id",
+          "values"
+        ],
+        "title": "FactorEvaluation",
+        "type": "object"
+      },
+      "FactorExecutionPlan": {
+        "properties": {
+          "as_of_policy": {
+            "default": "available_date_lte_as_of",
+            "title": "As Of Policy",
+            "type": "string"
+          },
+          "graph_hash": {
+            "title": "Graph Hash",
+            "type": "string"
+          },
+          "minimum_history_sessions": {
+            "title": "Minimum History Sessions",
+            "type": "integer"
+          },
+          "missing_policy": {
+            "title": "Missing Policy",
+            "type": "string"
+          },
+          "output_node_id": {
+            "title": "Output Node Id",
+            "type": "string"
+          },
+          "plan_hash": {
+            "title": "Plan Hash",
+            "type": "string"
+          },
+          "referenced_factor_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Referenced Factor Ids",
+            "type": "array"
+          },
+          "referenced_subgraph_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Referenced Subgraph Ids",
+            "type": "array"
+          },
+          "registry_version": {
+            "title": "Registry Version",
+            "type": "string"
+          },
+          "required_field_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Field Ids",
+            "type": "array"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/FactorExecutionStep"
+            },
+            "title": "Steps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "graph_hash",
+          "plan_hash",
+          "registry_version",
+          "output_node_id",
+          "steps",
+          "required_field_ids",
+          "referenced_factor_ids",
+          "referenced_subgraph_ids",
+          "minimum_history_sessions",
+          "missing_policy"
+        ],
+        "title": "FactorExecutionPlan",
+        "type": "object"
+      },
+      "FactorExecutionStep": {
+        "properties": {
+          "input_node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Input Node Ids",
+            "type": "array"
+          },
+          "minimum_history_sessions": {
+            "title": "Minimum History Sessions",
+            "type": "integer"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operation": {
+            "title": "Operation",
+            "type": "string"
+          },
+          "output_type": {
+            "title": "Output Type",
+            "type": "string"
+          },
+          "output_unit": {
+            "title": "Output Unit",
+            "type": "string"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sequence",
+          "node_id",
+          "operation",
+          "input_node_ids",
+          "output_type",
+          "output_unit",
+          "minimum_history_sessions"
+        ],
+        "title": "FactorExecutionStep",
+        "type": "object"
+      },
+      "FactorExplanation": {
+        "properties": {
+          "narrative": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Narrative",
+            "type": "array"
+          },
+          "plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FactorExecutionPlan"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "validation": {
+            "$ref": "#/components/schemas/FactorGraphValidation"
+          }
+        },
+        "required": [
+          "validation",
+          "plan",
+          "narrative"
+        ],
+        "title": "FactorExplanation",
+        "type": "object"
+      },
       "FactorGraph": {
         "properties": {
+          "missing_policy": {
+            "$ref": "#/components/schemas/MissingPolicy",
+            "default": "drop"
+          },
           "nodes": {
             "items": {
               "anyOf": [
@@ -430,6 +989,27 @@
                 },
                 {
                   "$ref": "#/components/schemas/BinaryNode"
+                },
+                {
+                  "$ref": "#/components/schemas/TimeSeriesNode"
+                },
+                {
+                  "$ref": "#/components/schemas/CrossSectionalNode"
+                },
+                {
+                  "$ref": "#/components/schemas/GroupNode"
+                },
+                {
+                  "$ref": "#/components/schemas/ComparisonNode"
+                },
+                {
+                  "$ref": "#/components/schemas/ConditionalNode"
+                },
+                {
+                  "$ref": "#/components/schemas/SavedFactorNode"
+                },
+                {
+                  "$ref": "#/components/schemas/SavedSubgraphNode"
                 }
               ]
             },
@@ -446,6 +1026,233 @@
           "output_node_id"
         ],
         "title": "FactorGraph",
+        "type": "object"
+      },
+      "FactorGraphRequest": {
+        "properties": {
+          "factor_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Factor Ids",
+            "type": "array"
+          },
+          "fields": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/FieldMetadata"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "graph": {
+            "$ref": "#/components/schemas/FactorGraph"
+          },
+          "parameter_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Parameter Ids",
+            "type": "array"
+          },
+          "subgraph_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Subgraph Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "graph"
+        ],
+        "title": "FactorGraphRequest",
+        "type": "object"
+      },
+      "FactorGraphValidation": {
+        "properties": {
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/FactorValidationIssue"
+            },
+            "title": "Issues",
+            "type": "array"
+          },
+          "minimum_history_sessions": {
+            "title": "Minimum History Sessions",
+            "type": "integer"
+          },
+          "node_contracts": {
+            "items": {
+              "$ref": "#/components/schemas/NodeContract"
+            },
+            "title": "Node Contracts",
+            "type": "array"
+          },
+          "required_field_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Field Ids",
+            "type": "array"
+          },
+          "valid": {
+            "title": "Valid",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "valid",
+          "issues",
+          "node_contracts",
+          "minimum_history_sessions",
+          "required_field_ids"
+        ],
+        "title": "FactorGraphValidation",
+        "type": "object"
+      },
+      "FactorMatrixCacheKey": {
+        "properties": {
+          "as_of_end": {
+            "format": "date",
+            "title": "As Of End",
+            "type": "string"
+          },
+          "as_of_start": {
+            "format": "date",
+            "title": "As Of Start",
+            "type": "string"
+          },
+          "data_snapshot_id": {
+            "title": "Data Snapshot Id",
+            "type": "string"
+          },
+          "fingerprint": {
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "parameters": {
+            "items": {
+              "$ref": "#/components/schemas/ResolvedFactorParameter"
+            },
+            "title": "Parameters",
+            "type": "array"
+          },
+          "plan_hash": {
+            "title": "Plan Hash",
+            "type": "string"
+          },
+          "registry_version": {
+            "title": "Registry Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fingerprint",
+          "data_snapshot_id",
+          "plan_hash",
+          "registry_version",
+          "parameters",
+          "as_of_start",
+          "as_of_end"
+        ],
+        "title": "FactorMatrixCacheKey",
+        "type": "object"
+      },
+      "FactorPreference": {
+        "enum": [
+          "high",
+          "low"
+        ],
+        "title": "FactorPreference",
+        "type": "string"
+      },
+      "FactorPreview": {
+        "properties": {
+          "analytics": {
+            "$ref": "#/components/schemas/FactorAnalytics"
+          },
+          "cache_key": {
+            "$ref": "#/components/schemas/FactorMatrixCacheKey"
+          },
+          "evaluation": {
+            "$ref": "#/components/schemas/FactorEvaluation"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/FactorExecutionPlan"
+          }
+        },
+        "required": [
+          "plan",
+          "cache_key",
+          "evaluation",
+          "analytics"
+        ],
+        "title": "FactorPreview",
+        "type": "object"
+      },
+      "FactorPreviewRequest": {
+        "properties": {
+          "as_of_end": {
+            "format": "date",
+            "title": "As Of End",
+            "type": "string"
+          },
+          "as_of_start": {
+            "format": "date",
+            "title": "As Of Start",
+            "type": "string"
+          },
+          "data_snapshot_id": {
+            "title": "Data Snapshot Id",
+            "type": "string"
+          },
+          "factor_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Factor Ids",
+            "type": "array"
+          },
+          "fields": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/FieldMetadata"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "graph": {
+            "$ref": "#/components/schemas/FactorGraph"
+          },
+          "parameters": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResolvedFactorParameter"
+            },
+            "title": "Parameters",
+            "type": "array"
+          },
+          "subgraph_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Subgraph Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "graph",
+          "data_snapshot_id",
+          "as_of_start",
+          "as_of_end"
+        ],
+        "title": "FactorPreviewRequest",
         "type": "object"
       },
       "FactorSignal": {
@@ -493,6 +1300,84 @@
           "factors"
         ],
         "title": "FactorStep",
+        "type": "object"
+      },
+      "FactorValidationIssue": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/FactorValidationSeverity",
+            "default": "error"
+          }
+        },
+        "required": [
+          "code",
+          "node_id",
+          "path",
+          "message"
+        ],
+        "title": "FactorValidationIssue",
+        "type": "object"
+      },
+      "FactorValidationSeverity": {
+        "enum": [
+          "error",
+          "warning"
+        ],
+        "title": "FactorValidationSeverity",
+        "type": "string"
+      },
+      "FactorValue": {
+        "properties": {
+          "as_of": {
+            "format": "date",
+            "title": "As Of",
+            "type": "string"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "as_of",
+          "security_id",
+          "value"
+        ],
+        "title": "FactorValue",
         "type": "object"
       },
       "FieldCatalogFacets": {
@@ -596,6 +1481,39 @@
         "title": "FieldLag",
         "type": "object"
       },
+      "FieldMetadata": {
+        "properties": {
+          "available_history_sessions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Available History Sessions"
+          },
+          "field_id": {
+            "title": "Field Id",
+            "type": "string"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          },
+          "value_type": {
+            "$ref": "#/components/schemas/NodeValueType",
+            "default": "numeric_series"
+          }
+        },
+        "required": [
+          "field_id",
+          "unit"
+        ],
+        "title": "FieldMetadata",
+        "type": "object"
+      },
       "FieldNode": {
         "properties": {
           "field_id": {
@@ -675,6 +1593,47 @@
         "title": "FloatParameter",
         "type": "object"
       },
+      "GroupNode": {
+        "properties": {
+          "group_field_id": {
+            "title": "Group Field Id",
+            "type": "string"
+          },
+          "input_node_id": {
+            "title": "Input Node Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "group",
+            "title": "Kind",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operator": {
+            "$ref": "#/components/schemas/GroupOperator"
+          }
+        },
+        "required": [
+          "node_id",
+          "operator",
+          "input_node_id",
+          "group_field_id",
+          "kind"
+        ],
+        "title": "GroupNode",
+        "type": "object"
+      },
+      "GroupOperator": {
+        "enum": [
+          "neutralize",
+          "rank"
+        ],
+        "title": "GroupOperator",
+        "type": "string"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -732,6 +1691,53 @@
           "KRX"
         ],
         "title": "Market",
+        "type": "string"
+      },
+      "MissingPolicy": {
+        "enum": [
+          "drop",
+          "keep",
+          "zero",
+          "cross_sectional_median"
+        ],
+        "title": "MissingPolicy",
+        "type": "string"
+      },
+      "NodeContract": {
+        "properties": {
+          "minimum_history_sessions": {
+            "title": "Minimum History Sessions",
+            "type": "integer"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          },
+          "value_type": {
+            "$ref": "#/components/schemas/NodeValueType"
+          }
+        },
+        "required": [
+          "node_id",
+          "value_type",
+          "unit",
+          "minimum_history_sessions"
+        ],
+        "title": "NodeContract",
+        "type": "object"
+      },
+      "NodeValueType": {
+        "enum": [
+          "numeric_series",
+          "boolean_series",
+          "group_series",
+          "scalar"
+        ],
+        "title": "NodeValueType",
         "type": "string"
       },
       "OrderStyle": {
@@ -1174,6 +2180,37 @@
         "title": "ResearchWarningSeverity",
         "type": "string"
       },
+      "ResolvedFactorParameter": {
+        "properties": {
+          "parameter_id": {
+            "title": "Parameter Id",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "parameter_id",
+          "value"
+        ],
+        "title": "ResolvedFactorParameter",
+        "type": "object"
+      },
       "ReviseStrategyRequest": {
         "properties": {
           "expected_revision": {
@@ -1217,6 +2254,30 @@
         "title": "RiskStep",
         "type": "object"
       },
+      "SavedFactorNode": {
+        "properties": {
+          "factor_id": {
+            "title": "Factor Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "saved_factor",
+            "title": "Kind",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "factor_id",
+          "kind"
+        ],
+        "title": "SavedFactorNode",
+        "type": "object"
+      },
       "SavedStrategy": {
         "properties": {
           "spec": {
@@ -1232,6 +2293,30 @@
           "spec_hash"
         ],
         "title": "SavedStrategy",
+        "type": "object"
+      },
+      "SavedSubgraphNode": {
+        "properties": {
+          "kind": {
+            "const": "saved_subgraph",
+            "title": "Kind",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "subgraph_id": {
+            "title": "Subgraph Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "subgraph_id",
+          "kind"
+        ],
+        "title": "SavedSubgraphNode",
         "type": "object"
       },
       "SecurityRef": {
@@ -1439,6 +2524,56 @@
         "title": "StrategyValidation",
         "type": "object"
       },
+      "TimeSeriesNode": {
+        "properties": {
+          "input_node_id": {
+            "title": "Input Node Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "time_series",
+            "title": "Kind",
+            "type": "string"
+          },
+          "lag": {
+            "default": 0,
+            "title": "Lag",
+            "type": "integer"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operator": {
+            "$ref": "#/components/schemas/TimeSeriesOperator"
+          },
+          "window": {
+            "title": "Window",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "node_id",
+          "operator",
+          "input_node_id",
+          "window",
+          "kind"
+        ],
+        "title": "TimeSeriesNode",
+        "type": "object"
+      },
+      "TimeSeriesOperator": {
+        "enum": [
+          "mean",
+          "std",
+          "momentum",
+          "delta",
+          "min",
+          "max"
+        ],
+        "title": "TimeSeriesOperator",
+        "type": "string"
+      },
       "UnaryNode": {
         "properties": {
           "input_node_id": {
@@ -1483,7 +2618,9 @@
           "negate",
           "lag",
           "rank",
-          "zscore"
+          "zscore",
+          "winsorize",
+          "neutralize"
         ],
         "title": "UnaryOperator",
         "type": "string"
@@ -2010,6 +3147,228 @@
           }
         },
         "summary": "Equity Universe Preview"
+      }
+    },
+    "/api/v1/factors/catalog": {
+      "get": {
+        "operationId": "getFactorCatalog",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/components/schemas/FactorCategory"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
+            }
+          },
+          {
+            "in": "query",
+            "name": "availability",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/components/schemas/FactorAvailability"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Availability"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FactorCatalog"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Factor Catalog"
+      }
+    },
+    "/api/v1/factors/explain": {
+      "post": {
+        "operationId": "explainFactorGraph",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FactorGraphRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FactorExplanation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Explain Factor Graph"
+      }
+    },
+    "/api/v1/factors/preview": {
+      "post": {
+        "operationId": "previewFactorGraph",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FactorPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FactorPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Factor Graph"
+      }
+    },
+    "/api/v1/factors/validate": {
+      "post": {
+        "operationId": "validateFactorGraph",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FactorGraphRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FactorGraphValidation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Validate Factor Graph"
       }
     },
     "/api/v1/health": {

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
@@ -67,6 +67,135 @@ const server = setupServer(
   http.post("http://localhost:8000/api/v1/strategies/validate", () =>
     HttpResponse.json({ valid: true, issues: [] }),
   ),
+  http.get("http://localhost:8000/api/v1/equity/catalog", () =>
+    HttpResponse.json({
+      snapshot: {
+        snapshot_id: "mock-equity-v0.2-20260903",
+        schema_version: "equity-v0.2-mock",
+        built_at: "2026-09-03T00:00:00Z",
+        source: "test",
+        point_in_time: true,
+        dataset_revisions: [],
+      },
+      fields: [],
+      total: 0,
+      page: 1,
+      page_size: 1,
+      page_count: 0,
+      facets: { dataset_ids: [], units: [], frequencies: [] },
+    }),
+  ),
+  http.get("http://localhost:8000/api/v1/factors/catalog", () =>
+    HttpResponse.json({
+      registry_version: "factor-registry-v1",
+      factors: [
+        {
+          factor_id: "financial.book_to_market",
+          label: "Book to market",
+          description: "Point-in-time value factor",
+          category: "financial",
+          preference: "high",
+          output_unit: "ratio",
+          required_field_ids: ["financial.book_equity", "price.market_cap"],
+          minimum_history_sessions: 1,
+          missing_policy: "drop",
+          availability: "implemented",
+          default_graph: {
+            nodes: [
+              {
+                kind: "field",
+                node_id: "book",
+                field_id: "financial.book_equity",
+              },
+              { kind: "field", node_id: "cap", field_id: "price.market_cap" },
+              {
+                kind: "binary",
+                node_id: "ratio",
+                operator: "divide",
+                left_node_id: "book",
+                right_node_id: "cap",
+              },
+              {
+                kind: "cross_sectional",
+                node_id: "rank",
+                operator: "rank",
+                input_node_id: "ratio",
+              },
+            ],
+            output_node_id: "rank",
+            missing_policy: "drop",
+          },
+          tags: ["financial", "high"],
+        },
+      ],
+      total: 1,
+      page: 1,
+      page_size: 12,
+      page_count: 1,
+      facets: {
+        categories: ["financial"],
+        availability: ["implemented"],
+        output_units: ["ratio"],
+      },
+    }),
+  ),
+  http.post(
+    "http://localhost:8000/api/v1/factors/validate",
+    async ({ request }) => {
+      const body = (await request.json()) as {
+        graph: StrategySpec["factors"]["factors"][number]["graph"];
+      };
+      return HttpResponse.json({
+        valid: true,
+        issues: [],
+        node_contracts: body.graph.nodes.map((node) => ({
+          node_id: node.node_id,
+          value_type: "numeric_series",
+          unit: "ratio",
+          minimum_history_sessions: 1,
+        })),
+        minimum_history_sessions: 1,
+        required_field_ids: ["financial.book_equity", "price.market_cap"],
+      });
+    },
+  ),
+  http.post("http://localhost:8000/api/v1/factors/preview", () =>
+    HttpResponse.json({
+      plan: {
+        graph_hash: "a".repeat(64),
+        plan_hash: "b".repeat(64),
+        registry_version: "factor-registry-v1",
+        output_node_id: "rank_5",
+        steps: [],
+        required_field_ids: [],
+        referenced_factor_ids: [],
+        referenced_subgraph_ids: [],
+        minimum_history_sessions: 1,
+        missing_policy: "drop",
+        as_of_policy: "available_date_lte_as_of",
+      },
+      cache_key: {
+        fingerprint: "c".repeat(64),
+        data_snapshot_id: "mock-equity-v0.2-20260903",
+        plan_hash: "b".repeat(64),
+        registry_version: "factor-registry-v1",
+        parameters: [],
+        as_of_start: "2021-09-03",
+        as_of_end: "2026-09-03",
+      },
+      evaluation: { output_node_id: "rank_5", values: [] },
+      analytics: {
+        information_coefficient: 0.12,
+        rank_information_coefficient: 0.11,
+        quantile_spread: 0.03,
+        coverage: 0.98,
+        turnover: 0.22,
+        decay: 0.73,
+        observation_count: 100,
+        valid_count: 98,
+      },
+    }),
+  ),
   http.post("http://localhost:8000/api/v1/strategies", async ({ request }) => {
     lastCreateBody = (await request.json()) as StrategySpec;
     return HttpResponse.json(
@@ -88,10 +217,40 @@ const server = setupServer(
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
+  cleanup();
   server.resetHandlers();
   lastCreateBody = null;
 });
 afterAll(() => server.close());
+
+test("팩터를 찾아 변환한 뒤 모드 전환과 저장에도 같은 StrategySpec을 유지한다", async () => {
+  const user = userEvent.setup();
+  renderEditor();
+
+  expect(await screen.findByText("Book to market")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "전략에 추가" }));
+  const rankButtons = screen.getAllByRole("button", { name: "+ Rank" });
+  await user.click(rankButtons.at(-1)!);
+  expect(screen.getByText("Rank → Rank")).toBeInTheDocument();
+
+  await user.click(screen.getByRole("tab", { name: "Advanced Graph" }));
+  expect(await screen.findAllByText("유효한 typed DAG")).not.toHaveLength(0);
+  expect(screen.getAllByText("rank_5")).toHaveLength(2);
+
+  await user.click(screen.getByRole("tab", { name: "Quick Builder" }));
+  const diagnostics = screen.getAllByRole("button", { name: "팩터 진단 실행" });
+  await user.click(diagnostics.at(-1)!);
+  expect(await screen.findByText("0.1200")).toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: /저장/ }));
+  await waitFor(() => {
+    const savedFactor = lastCreateBody?.factors.factors.find(
+      (factor) => factor.factor_id === "financial.book_to_market",
+    );
+    expect(savedFactor?.graph.output_node_id).toBe("rank_5");
+    expect(savedFactor?.graph.nodes).toHaveLength(5);
+  });
+});
 
 const renderEditor = () => {
   const queryClient = new QueryClient({

@@ -1,0 +1,82 @@
+from __future__ import annotations
+
+from fastapi.testclient import TestClient
+
+from strategy_workbench.bootstrap.facade.http import build_http_app
+
+
+def test_factor_catalog_validate_and_explain_contract() -> None:
+    client = TestClient(build_http_app())
+    catalog_response = client.get(
+        "/api/v1/factors/catalog",
+        params={"availability": "implemented", "page_size": 100},
+    )
+
+    assert catalog_response.status_code == 200
+    catalog = catalog_response.json()
+    assert catalog["total"] == 7
+    assert len(catalog["facets"]["categories"]) == 7
+    factor = next(item for item in catalog["factors"] if item["category"] == "financial")
+    body = {"graph": factor["default_graph"]}
+
+    validation = client.post("/api/v1/factors/validate", json=body)
+    explanation = client.post("/api/v1/factors/explain", json=body)
+
+    assert validation.status_code == 200
+    assert validation.json()["valid"] is True
+    assert explanation.status_code == 200
+    assert explanation.json()["plan"]["as_of_policy"] == "available_date_lte_as_of"
+    assert len(explanation.json()["plan"]["plan_hash"]) == 64
+
+
+def test_factor_preview_is_deterministic_and_returns_research_diagnostics() -> None:
+    client = TestClient(build_http_app())
+    catalog = client.get(
+        "/api/v1/factors/catalog",
+        params={"search": "short.short_balance_ratio"},
+    ).json()
+    graph = catalog["factors"][0]["default_graph"]
+    body = {
+        "graph": graph,
+        "data_snapshot_id": "mock-equity-v0.2-20260903",
+        "as_of_start": "2024-01-02",
+        "as_of_end": "2024-01-10",
+    }
+
+    first = client.post("/api/v1/factors/preview", json=body)
+    second = client.post("/api/v1/factors/preview", json=body)
+
+    assert first.status_code == 200
+    assert first.json() == second.json()
+    payload = first.json()
+    assert payload["analytics"]["coverage"] == 1.0
+    assert payload["analytics"]["information_coefficient"] is not None
+    assert len(payload["cache_key"]["fingerprint"]) == 64
+    assert payload["evaluation"]["values"]
+
+
+def test_invalid_factor_preview_returns_structured_validation() -> None:
+    client = TestClient(build_http_app())
+    response = client.post(
+        "/api/v1/factors/preview",
+        json={
+            "graph": {
+                "nodes": [
+                    {
+                        "node_id": "cycle",
+                        "operator": "negate",
+                        "input_node_id": "cycle",
+                        "kind": "unary",
+                    }
+                ],
+                "output_node_id": "cycle",
+            },
+            "data_snapshot_id": "mock",
+            "as_of_start": "2024-01-02",
+            "as_of_end": "2024-01-03",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "factor.graph.invalid"
+    assert response.json()["detail"]["validation"]["issues"][0]["code"] == "factor.graph.cycle"

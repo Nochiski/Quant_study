@@ -18,8 +18,8 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     "G9_close": 1.0,  # 종가 교차 일치율 하한 (SPEC 100.0000%)
 }
 YEAR_RANGE_OBSERVED = (1999, 1)   # 관측일 축 [1999(DART 최초 공시), 현재+1] — 키/파티션, reject
-YEAR_RANGE_CONTENT = (1956, 40)   # 내용일 축 [1956(KRX 개장), 현재+40] — 비키 날짜, 위반 = 셀 격리
-                                  # 하한 1990 은 상장일 19750611 을 격리했다 (5단계 리뷰 DEFECT-A)
+YEAR_RANGE_CONTENT = (1900, 40)   # 내용일 축 [1900, 현재+40] — 비키 날짜, 위반 = 셀 격리
+                                  # 1990 은 상장일 1975 를, 1956 은 현물출자일 1952~54 를 격리했다
 
 
 class GateStatus(Enum):

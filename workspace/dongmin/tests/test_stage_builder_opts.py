@@ -1,7 +1,7 @@
 """빌더 옵션 3건 — 5단계 에이전트 리뷰(DART 이벤트·KRX/키움)에서 나온 결함의 재현·수정 테스트.
 
 - 정규화의 태그 제거는 옵트인(`strip_tags`): DART 서술 컬럼의 `<주1>` 각주는 태그가 아니다.
-- 내용일 하한 1990 은 상장일(삼성전자 19750611)을 격리한다 → KRX 개장 1956.
+- 내용일 하한 1990 은 상장일(삼성전자 19750611)을, 1956 은 현물출자일(1952~54)을 격리한다 → 1900.
 - `coverage_from`(§3 temporality ⓑ) 은 `_meta.json` 에 남아야 한다.
 """
 import json
@@ -18,7 +18,7 @@ def _write(path: Path) -> None:
     con.executemany("INSERT INTO t VALUES (?,?,?,?,?)", [
         ("a", "감자 사유 <주1> 참조", "2026/12(E)<br />(IFRS연결)", "19750611",
          "2026-08-30T10:00:00"),
-        ("b", "정상", "x", "19550101", "2026-08-30T10:00:00"),      # 1956 이전 → 격리
+        ("b", "정상", "x", "18991231", "2026-08-30T10:00:00"),      # 1900 이전 → 격리
     ])
     con.commit()
     con.close()
@@ -65,8 +65,8 @@ def test_normalize_text_keeps_angle_bracket_footnotes_unless_strip_tags(tmp_path
     assert lbl == "2026/12(E)(IFRS연결)"           # strip_tags 옵트인만 태그 제거
 
 
-def test_content_date_lower_bound_is_krx_opening_year(tmp_path: Path) -> None:
-    assert gates.YEAR_RANGE_CONTENT[0] == 1956
+def test_content_date_lower_bound_admits_founding_era_dates(tmp_path: Path) -> None:
+    assert gates.YEAR_RANGE_CONTENT[0] == 1900        # 현물출자일 1952~54 실재 (stg_capital)
     r = _built(tmp_path)
     con = _read(tmp_path, r)
     got = con.execute("SELECT k, list_date, miss_kind.list_date FROM t ORDER BY k").fetchall()

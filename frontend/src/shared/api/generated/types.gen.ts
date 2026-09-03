@@ -33,6 +33,54 @@ export type BinaryNode = {
 export type BinaryOperator = "add" | "subtract" | "multiply" | "divide";
 
 /**
+ * CandidateDecision
+ */
+export type CandidateDecision = {
+  /**
+   * As Of
+   */
+  as_of: string;
+  /**
+   * Composite Score
+   */
+  composite_score: number | null;
+  /**
+   * Eligible
+   */
+  eligible: boolean;
+  /**
+   * Exclusion Reasons
+   */
+  exclusion_reasons: Array<ExclusionReason>;
+  /**
+   * Rank
+   */
+  rank: number | null;
+  /**
+   * Sector Id
+   */
+  sector_id: string | null;
+  /**
+   * Security Id
+   */
+  security_id: string;
+  /**
+   * Selected
+   */
+  selected: boolean;
+  side: CandidateSide | null;
+  /**
+   * Target Weight
+   */
+  target_weight: number;
+};
+
+/**
+ * CandidateSide
+ */
+export type CandidateSide = "long" | "short";
+
+/**
  * CellKind
  *
  * A numeric zero and unavailable data must never collapse into one value.
@@ -321,6 +369,82 @@ export type EligibilityStep = {
    */
   rules?: Array<EligibilityRule>;
 };
+
+/**
+ * EngineCapabilityIssue
+ */
+export type EngineCapabilityIssue = {
+  /**
+   * Category
+   */
+  category: string;
+  /**
+   * Name
+   */
+  name: string;
+  /**
+   * Reason
+   */
+  reason: string | null;
+  /**
+   * Support
+   */
+  support: string;
+};
+
+/**
+ * EngineCompatibility
+ */
+export type EngineCompatibility = {
+  /**
+   * Compatible
+   */
+  compatible: boolean;
+  /**
+   * Issues
+   */
+  issues: Array<EngineCapabilityIssue>;
+  requirements: EngineRequirementSummary;
+};
+
+/**
+ * EngineRequirementSummary
+ */
+export type EngineRequirementSummary = {
+  /**
+   * Actions
+   */
+  actions: Array<string>;
+  /**
+   * Events
+   */
+  events: Array<string>;
+  /**
+   * Features
+   */
+  features: Array<string>;
+  /**
+   * Schedule
+   */
+  schedule: string;
+};
+
+/**
+ * ExclusionReason
+ */
+export type ExclusionReason =
+  | "not_in_universe"
+  | "future_data"
+  | "missing_eligibility"
+  | "eligibility_failed"
+  | "missing_factor"
+  | "score_threshold"
+  | "regime_blocked"
+  | "liquidity_failed"
+  | "outside_selection"
+  | "missing_risk"
+  | "turnover_buffer"
+  | "minimum_trade";
 
 /**
  * ExecutionStep
@@ -1144,6 +1268,21 @@ export type ParameterNode = {
 };
 
 /**
+ * PortfolioPreview
+ */
+export type PortfolioPreview = {
+  engine: EngineCompatibility;
+  tape: TargetTape;
+};
+
+/**
+ * PortfolioPreviewRequest
+ */
+export type PortfolioPreviewRequest = {
+  spec: StrategySpec;
+};
+
+/**
  * PortfolioSide
  */
 export type PortfolioSide = "long_only" | "long_short";
@@ -1152,19 +1291,49 @@ export type PortfolioSide = "long_only" | "long_short";
  * PortfolioStep
  */
 export type PortfolioStep = {
+  /**
+   * Liquidity Field Id
+   */
+  liquidity_field_id?: string | null;
+  /**
+   * Minimum Liquidity
+   */
+  minimum_liquidity?: number | null;
+  /**
+   * Minimum Trade Weight
+   */
+  minimum_trade_weight?: number;
   rebalance?: RebalanceFrequency;
+  /**
+   * Rebalance Every N Sessions
+   */
+  rebalance_every_n_sessions?: number;
   /**
    * Selection Count
    */
   selection_count?: number;
+  selection_method?: SelectionMethod;
+  /**
+   * Selection Percentile
+   */
+  selection_percentile?: number;
+  /**
+   * Short Selection Count
+   */
+  short_selection_count?: number;
   side?: PortfolioSide;
+  /**
+   * Turnover Buffer Count
+   */
+  turnover_buffer_count?: number;
   weighting?: WeightingMethod;
 };
 
 /**
  * RebalanceFrequency
  */
-export type RebalanceFrequency = "weekly" | "monthly" | "quarterly";
+export type RebalanceFrequency =
+  "every_n_sessions" | "weekly" | "monthly" | "quarterly";
 
 /**
  * ResearchCatalog
@@ -1402,6 +1571,14 @@ export type RiskStep = {
    * Net Exposure
    */
   net_exposure?: number;
+  /**
+   * Risk Field Id
+   */
+  risk_field_id?: string | null;
+  /**
+   * Sector Neutral
+   */
+  sector_neutral?: boolean;
 };
 
 /**
@@ -1474,6 +1651,11 @@ export type SecurityRef = {
 };
 
 /**
+ * SelectionMethod
+ */
+export type SelectionMethod = "top_n" | "percentile";
+
+/**
  * SignalMethod
  */
 export type SignalMethod = "weighted_sum" | "rank_threshold";
@@ -1487,6 +1669,18 @@ export type SignalStep = {
    */
   entry_percentile?: number;
   method?: SignalMethod;
+  /**
+   * Regime Field Id
+   */
+  regime_field_id?: string | null;
+  /**
+   * Regime Minimum
+   */
+  regime_minimum?: number | null;
+  /**
+   * Score Threshold
+   */
+  score_threshold?: number | null;
 };
 
 /**
@@ -1573,6 +1767,77 @@ export type StrategyValidation = {
    * Valid
    */
   valid: boolean;
+};
+
+/**
+ * TargetFrame
+ */
+export type TargetFrame = {
+  /**
+   * Candidates
+   */
+  candidates: Array<CandidateDecision>;
+  /**
+   * Execution On
+   */
+  execution_on: string;
+  /**
+   * Signal As Of
+   */
+  signal_as_of: string;
+  /**
+   * Targets
+   */
+  targets: Array<TargetPosition>;
+};
+
+/**
+ * TargetPosition
+ */
+export type TargetPosition = {
+  /**
+   * Composite Score
+   */
+  composite_score: number;
+  /**
+   * Rank
+   */
+  rank: number;
+  /**
+   * Security Id
+   */
+  security_id: string;
+  side: CandidateSide;
+  /**
+   * Weight
+   */
+  weight: number;
+};
+
+/**
+ * TargetTape
+ */
+export type TargetTape = {
+  /**
+   * Data Snapshot Id
+   */
+  data_snapshot_id: string;
+  /**
+   * Execution Timing
+   */
+  execution_timing?: string;
+  /**
+   * Frames
+   */
+  frames: Array<TargetFrame>;
+  /**
+   * Strategy Hash
+   */
+  strategy_hash: string;
+  /**
+   * Tape Hash
+   */
+  tape_hash: string;
 };
 
 /**
@@ -1796,7 +2061,7 @@ export type ValidationSeverity = "error" | "warning";
 /**
  * WeightingMethod
  */
-export type WeightingMethod = "equal" | "factor_score" | "rank";
+export type WeightingMethod = "equal" | "factor_score" | "rank" | "risk";
 
 export type GetEquityCatalogData = {
   body?: never;
@@ -2084,6 +2349,33 @@ export type GetHealthResponses = {
 };
 
 export type GetHealthResponse = GetHealthResponses[keyof GetHealthResponses];
+
+export type PreviewPortfolioData = {
+  body: PortfolioPreviewRequest;
+  path?: never;
+  query?: never;
+  url: "/api/v1/portfolio/preview";
+};
+
+export type PreviewPortfolioErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type PreviewPortfolioError =
+  PreviewPortfolioErrors[keyof PreviewPortfolioErrors];
+
+export type PreviewPortfolioResponses = {
+  /**
+   * Successful Response
+   */
+  200: PortfolioPreview;
+};
+
+export type PreviewPortfolioResponse =
+  PreviewPortfolioResponses[keyof PreviewPortfolioResponses];
 
 export type CreateStrategyData = {
   body: StrategySpec;

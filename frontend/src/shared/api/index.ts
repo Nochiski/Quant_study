@@ -16,6 +16,8 @@ export {
   type FactorSignal,
   type FactorValidationIssue,
   type NodeContract,
+  type PortfolioPreview,
+  type PortfolioPreviewRequest,
   type ResearchCatalog,
   type ResearchPanelCell,
   type ResearchPanelPreview,

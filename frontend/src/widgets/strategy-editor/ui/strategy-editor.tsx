@@ -1,6 +1,9 @@
 import { useState } from "react";
 
 import {
+  ExecutionEditor,
+  PortfolioEditor,
+  RiskEditor,
   StrategyDraftProvider,
   StrategyEditorWorkspace,
   useStrategyDraft,
@@ -17,20 +20,23 @@ const pipeline = [
 ] as const;
 
 const StrategyEditorWorkbench = () => {
-  const [activeStep, setActiveStep] = useState<"data" | "factor">("factor");
+  const [activeStep, setActiveStep] = useState<
+    "data" | "factor" | "portfolio" | "risk" | "execution"
+  >("factor");
   const { draft, update } = useStrategyDraft();
 
   return (
     <div className="workbench">
       <nav className="pipeline" aria-label="Strategy pipeline">
         {pipeline.map((key, index) => {
-          const step = index === 0 ? "data" : index === 1 ? "factor" : null;
+          const step = (
+            ["data", "factor", "portfolio", "risk", "execution"] as const
+          )[index];
           return (
             <button
               className={step === activeStep ? "is-active" : ""}
-              disabled={step === null}
               key={key}
-              onClick={() => step !== null && setActiveStep(step)}
+              onClick={() => setActiveStep(step)}
               type="button"
             >
               {t(key)}
@@ -48,8 +54,14 @@ const StrategyEditorWorkbench = () => {
           }
           value={draft.data}
         />
-      ) : (
+      ) : activeStep === "factor" ? (
         <StrategyEditorWorkspace />
+      ) : activeStep === "portfolio" ? (
+        <PortfolioEditor />
+      ) : activeStep === "risk" ? (
+        <RiskEditor />
+      ) : (
+        <ExecutionEditor />
       )}
     </div>
   );

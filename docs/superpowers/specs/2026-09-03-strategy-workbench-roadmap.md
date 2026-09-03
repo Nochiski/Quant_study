@@ -2,11 +2,11 @@
 
 > 작성: 2026-09-03
 >
-> 상태: M3 완료 — Factor Registry/조합 editor 수직 슬라이스 완결
+> 상태: M4 완료 — Portfolio pipeline/TargetTape 수직 슬라이스 완결
 >
-> 체크리스트: 150개 중 50개 완료, 100개 남음
+> 체크리스트: 150개 중 63개 완료, 87개 남음
 >
-> 다음 체크: M4-1 eligibility filter와 point-in-time universe 결합
+> 다음 체크: M5-1 `domain.analytics` MetricDefinition/MetricRegistry 추가
 > 진행 규칙: 구현·테스트·문서가 모두 끝난 항목만 `[x]`. 각 M 완료 시 이 머리말과 완료 기록을 갱신한다.
 
 ## 1. 결론
@@ -406,19 +406,19 @@ frontend 타입이 backend schema에서 생성된다.
 
 ### M4 — Portfolio pipeline + TargetTape
 
-- [ ] eligibility filter와 point-in-time universe 결합 구현.
-- [ ] composite score, rank, threshold, regime signal 구현.
-- [ ] top/bottom N·percentile, long-only/long-short 선택 구현.
-- [ ] equal/factor-score/rank/risk weight 구현.
-- [ ] gross/net/name/sector cap과 neutralization 구현.
-- [ ] turnover buffer, minimum trade/liquidity rule 구현.
-- [ ] every-N-session/weekly/month-end/quarterly rebalance calendar 구현.
-- [ ] pipeline 결과를 immutable TargetTape로 컴파일.
-- [ ] StrategyRequirements/SetPortfolioTarget로 변환하는 engine adapter 추가.
-- [ ] schedule/action/short/margin capability를 실행 전 협상.
-- [ ] Builder 포트폴리오·위험·실행 화면 추가.
-- [ ] 세션별 구성 종목/score/target/exclusion 이유 preview 추가.
-- [ ] T 종가 신호가 T+1 이전에 체결되지 않는 통합 E2E 추가.
+- [x] eligibility filter와 point-in-time universe 결합 구현.
+- [x] composite score, rank, threshold, regime signal 구현.
+- [x] top/bottom N·percentile, long-only/long-short 선택 구현.
+- [x] equal/factor-score/rank/risk weight 구현.
+- [x] gross/net/name/sector cap과 neutralization 구현.
+- [x] turnover buffer, minimum trade/liquidity rule 구현.
+- [x] every-N-session/weekly/month-end/quarterly rebalance calendar 구현.
+- [x] pipeline 결과를 immutable TargetTape로 컴파일.
+- [x] StrategyRequirements/SetPortfolioTarget로 변환하는 engine adapter 추가.
+- [x] schedule/action/short/margin capability를 실행 전 협상.
+- [x] Builder 포트폴리오·위험·실행 화면 추가.
+- [x] 세션별 구성 종목/score/target/exclusion 이유 preview 추가.
+- [x] T 종가 신호가 T+1 이전에 체결되지 않는 통합 E2E 추가.
 
 완료 게이트: 사용자가 만든 mock factor 전략이 설명 가능한 TargetTape가 되고 기존 Python/Rust
 engine에서 동일하게 실행 준비된다.
@@ -627,6 +627,14 @@ Contract:
   탐색·가중치·5종 transform·진단, Advanced typed port/inline validation을 연결하고 두 편집 모드의
   StrategySpec 무손실 속성을 테스트했다. Equity DB가 확정되기 전에는 같은 application port를
   deterministic mock adapter가 구현한다.
+- 2026-09-03 — M4 완료: `domain.portfolio`가 PIT eligibility, 합성 점수·순위·레짐,
+  long-only/long-short 선택, equal/factor/rank/risk 비중, gross/net/name/sector 제약,
+  neutralization, 유동성·회전율 규칙과 리밸런싱 달력을 소유한다. 결과는 snapshot/spec hash와
+  T 종가→T+1 실행일을 담은 immutable `TargetTape`로 컴파일된다. 미확정 Equity DB는 portfolio
+  observation port의 deterministic mock으로 연결하고, engine adapter가 schedule/action/short/margin
+  요구사항을 실행 전에 협상해 `SetPortfolioTarget(REPLACE, next_open)`으로 변환한다. Builder에
+  포트폴리오·리스크·실행 화면과 후보 score/target/exclusion preview를 추가하고 backend HTTP 및
+  frontend MSW E2E로 T+1 경계를 고정했다.
 
 체크 수는 이 문서의 완료/미완료 체크박스 기준으로 갱신한다. 설명 안의 예시 checkbox는 두지
 않아 수치가 실제 구현 단위와 일치하게 유지한다.

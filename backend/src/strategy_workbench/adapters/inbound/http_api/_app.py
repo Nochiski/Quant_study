@@ -29,6 +29,12 @@ from strategy_workbench.application.factor_research.facade.research import (
     FactorResearchService,
     InvalidFactorRequestError,
 )
+from strategy_workbench.application.portfolio_design.facade.design import (
+    InvalidPortfolioRequestError,
+    PortfolioDesignService,
+    PortfolioPreview,
+    PortfolioPreviewRequest,
+)
 from strategy_workbench.application.strategy_design.facade.design import (
     InvalidStrategyError,
     SavedStrategy,
@@ -58,6 +64,7 @@ def create_app(
     strategy_design: StrategyDesignService,
     equity_workspace: EquityWorkspaceService,
     factor_research: FactorResearchService,
+    portfolio_design: PortfolioDesignService,
     allowed_origins: tuple[str, ...] = ("http://localhost:5173",),
 ) -> FastAPI:
     app = FastAPI(
@@ -76,6 +83,22 @@ def create_app(
     @app.get("/api/v1/health", operation_id="getHealth")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.post(
+        "/api/v1/portfolio/preview",
+        operation_id="previewPortfolio",
+    )
+    def portfolio_preview(request: PortfolioPreviewRequest) -> PortfolioPreview:
+        try:
+            return portfolio_design.preview(request)
+        except InvalidPortfolioRequestError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "code": "portfolio.strategy.invalid",
+                    "validation": jsonable_encoder(asdict(error.validation)),
+                },
+            ) from error
 
     @app.get(
         "/api/v1/equity/catalog",

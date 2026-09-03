@@ -1,5 +1,16 @@
 # Strategy Workbench Backend
 
+## M4 Portfolio pipeline + TargetTape
+
+`domain.portfolio`가 PIT eligibility, 합성 score/rank/regime, long-only/long-short 선택,
+equal/factor-score/rank/risk weight, exposure cap·neutralization, turnover/liquidity와 리밸런싱
+달력을 소유한다. `application.portfolio_design`은 교체 가능한 observation/engine port만 알고,
+결과를 snapshot/spec/tape hash와 T 종가→T+1 실행일이 고정된 immutable `TargetTape`로 반환한다.
+
+- `POST /api/v1/portfolio/preview`: 세션별 후보, 편입·제외 이유, 목표 비중과 engine compatibility
+- `equity_mock`: 실제 Equity DB가 오기 전 portfolio observation port를 구현하는 deterministic adapter
+- `engine_portfolio`: `StrategyRequirements`를 사전 협상하고 `SetPortfolioTarget(REPLACE)`로 변환
+
 ## M3 Factor research surface
 
 `domain.factor`가 50개 factor ID, 표현식 타입, validation, PIT execution plan, hash/cache
@@ -54,15 +65,18 @@ backend/
    ├─ domain/equity/                       # PIT 데이터 값 타입과 query/result
    │  └─ facade/research_data.py
    ├─ domain/strategy/                     # StrategySpec v1, hash, validation, explanation
+   ├─ domain/portfolio/                    # TargetTape compiler와 portfolio policy
    ├─ application/equity_workspace/        # 검색 catalog·universe/panel PIT preview
    │  ├─ ports/outgoing/equity_data.py     # EquityDataPort
    │  └─ facade/{ports,workspace}.py
    ├─ application/strategy_design/          # create/get/revise/validate/explain
+   ├─ application/portfolio_design/         # portfolio preview use case와 outgoing ports
    │  └─ ports/outgoing/strategy_repository.py
    ├─ adapters/inbound/http_api/            # FastAPI/OpenAPI wire adapter
    ├─ adapters/outbound/equity_mock/       # 결정적 in-memory Equity v0.2 mock
    │  └─ facade/provider.py
    ├─ adapters/outbound/strategy_memory/    # immutable revision 기준 adapter
+   ├─ adapters/outbound/engine_portfolio/   # capability 협상과 target action 변환
    └─ bootstrap/                           # adapter 조립
       └─ facade/{container,http}.py
 ```

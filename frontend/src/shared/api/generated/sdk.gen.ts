@@ -37,6 +37,9 @@ import type {
   PreviewFactorGraphData,
   PreviewFactorGraphErrors,
   PreviewFactorGraphResponses,
+  PreviewPortfolioData,
+  PreviewPortfolioErrors,
+  PreviewPortfolioResponses,
   ReviseStrategyData,
   ReviseStrategyErrors,
   ReviseStrategyResponses,
@@ -213,6 +216,25 @@ export const getHealth = <ThrowOnError extends boolean = false>(
   (options?.client ?? client).get<GetHealthResponses, unknown, ThrowOnError>({
     url: "/api/v1/health",
     ...options,
+  });
+
+/**
+ * Portfolio Preview
+ */
+export const previewPortfolio = <ThrowOnError extends boolean = false>(
+  options: Options<PreviewPortfolioData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    PreviewPortfolioResponses,
+    PreviewPortfolioErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/portfolio/preview",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   });
 
 /**

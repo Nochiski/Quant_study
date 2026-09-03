@@ -43,9 +43,16 @@ class WeightingMethod(StrEnum):
     EQUAL = "equal"
     FACTOR_SCORE = "factor_score"
     RANK = "rank"
+    RISK = "risk"
+
+
+class SelectionMethod(StrEnum):
+    TOP_N = "top_n"
+    PERCENTILE = "percentile"
 
 
 class RebalanceFrequency(StrEnum):
+    EVERY_N_SESSIONS = "every_n_sessions"
     WEEKLY = "weekly"
     MONTHLY = "monthly"
     QUARTERLY = "quarterly"
@@ -105,6 +112,9 @@ class FactorStep:
 class SignalStep:
     method: SignalMethod = SignalMethod.WEIGHTED_SUM
     entry_percentile: float = 0.1
+    score_threshold: float | None = None
+    regime_field_id: str | None = None
+    regime_minimum: float | None = None
 
 
 @dataclass(frozen=True)
@@ -113,6 +123,14 @@ class PortfolioStep:
     selection_count: int = 20
     weighting: WeightingMethod = WeightingMethod.EQUAL
     rebalance: RebalanceFrequency = RebalanceFrequency.MONTHLY
+    selection_method: SelectionMethod = SelectionMethod.TOP_N
+    short_selection_count: int = 20
+    selection_percentile: float = 0.1
+    rebalance_every_n_sessions: int = 21
+    turnover_buffer_count: int = 0
+    minimum_trade_weight: float = 0.0
+    liquidity_field_id: str | None = None
+    minimum_liquidity: float | None = None
 
 
 @dataclass(frozen=True)
@@ -121,6 +139,8 @@ class RiskStep:
     net_exposure: float = 1.0
     max_name_weight: float = 0.1
     max_sector_weight: float = 0.3
+    sector_neutral: bool = False
+    risk_field_id: str | None = None
 
 
 @dataclass(frozen=True)

@@ -44,6 +44,103 @@
         "title": "BinaryOperator",
         "type": "string"
       },
+      "CandidateDecision": {
+        "properties": {
+          "as_of": {
+            "format": "date",
+            "title": "As Of",
+            "type": "string"
+          },
+          "composite_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Composite Score"
+          },
+          "eligible": {
+            "title": "Eligible",
+            "type": "boolean"
+          },
+          "exclusion_reasons": {
+            "items": {
+              "$ref": "#/components/schemas/ExclusionReason"
+            },
+            "title": "Exclusion Reasons",
+            "type": "array"
+          },
+          "rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank"
+          },
+          "sector_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector Id"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "selected": {
+            "title": "Selected",
+            "type": "boolean"
+          },
+          "side": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CandidateSide"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "target_weight": {
+            "title": "Target Weight",
+            "type": "number"
+          }
+        },
+        "required": [
+          "as_of",
+          "security_id",
+          "eligible",
+          "selected",
+          "composite_score",
+          "rank",
+          "side",
+          "target_weight",
+          "sector_id",
+          "exclusion_reasons"
+        ],
+        "title": "CandidateDecision",
+        "type": "object"
+      },
+      "CandidateSide": {
+        "enum": [
+          "long",
+          "short"
+        ],
+        "title": "CandidateSide",
+        "type": "string"
+      },
       "CellKind": {
         "description": "A numeric zero and unavailable data must never collapse into one value.",
         "enum": [
@@ -480,6 +577,121 @@
         },
         "title": "EligibilityStep",
         "type": "object"
+      },
+      "EngineCapabilityIssue": {
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "support": {
+            "title": "Support",
+            "type": "string"
+          }
+        },
+        "required": [
+          "category",
+          "name",
+          "support",
+          "reason"
+        ],
+        "title": "EngineCapabilityIssue",
+        "type": "object"
+      },
+      "EngineCompatibility": {
+        "properties": {
+          "compatible": {
+            "title": "Compatible",
+            "type": "boolean"
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/EngineCapabilityIssue"
+            },
+            "title": "Issues",
+            "type": "array"
+          },
+          "requirements": {
+            "$ref": "#/components/schemas/EngineRequirementSummary"
+          }
+        },
+        "required": [
+          "compatible",
+          "requirements",
+          "issues"
+        ],
+        "title": "EngineCompatibility",
+        "type": "object"
+      },
+      "EngineRequirementSummary": {
+        "properties": {
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "events": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "features": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Features",
+            "type": "array"
+          },
+          "schedule": {
+            "title": "Schedule",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schedule",
+          "actions",
+          "events",
+          "features"
+        ],
+        "title": "EngineRequirementSummary",
+        "type": "object"
+      },
+      "ExclusionReason": {
+        "enum": [
+          "not_in_universe",
+          "future_data",
+          "missing_eligibility",
+          "eligibility_failed",
+          "missing_factor",
+          "score_threshold",
+          "regime_blocked",
+          "liquidity_failed",
+          "outside_selection",
+          "missing_risk",
+          "turnover_buffer",
+          "minimum_trade"
+        ],
+        "title": "ExclusionReason",
+        "type": "string"
       },
       "ExecutionStep": {
         "properties": {
@@ -1819,6 +2031,34 @@
         "title": "ParameterNode",
         "type": "object"
       },
+      "PortfolioPreview": {
+        "properties": {
+          "engine": {
+            "$ref": "#/components/schemas/EngineCompatibility"
+          },
+          "tape": {
+            "$ref": "#/components/schemas/TargetTape"
+          }
+        },
+        "required": [
+          "tape",
+          "engine"
+        ],
+        "title": "PortfolioPreview",
+        "type": "object"
+      },
+      "PortfolioPreviewRequest": {
+        "properties": {
+          "spec": {
+            "$ref": "#/components/schemas/StrategySpec"
+          }
+        },
+        "required": [
+          "spec"
+        ],
+        "title": "PortfolioPreviewRequest",
+        "type": "object"
+      },
       "PortfolioSide": {
         "enum": [
           "long_only",
@@ -1829,18 +2069,69 @@
       },
       "PortfolioStep": {
         "properties": {
+          "liquidity_field_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Liquidity Field Id"
+          },
+          "minimum_liquidity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum Liquidity"
+          },
+          "minimum_trade_weight": {
+            "default": 0.0,
+            "title": "Minimum Trade Weight",
+            "type": "number"
+          },
           "rebalance": {
             "$ref": "#/components/schemas/RebalanceFrequency",
             "default": "monthly"
+          },
+          "rebalance_every_n_sessions": {
+            "default": 21,
+            "title": "Rebalance Every N Sessions",
+            "type": "integer"
           },
           "selection_count": {
             "default": 20,
             "title": "Selection Count",
             "type": "integer"
           },
+          "selection_method": {
+            "$ref": "#/components/schemas/SelectionMethod",
+            "default": "top_n"
+          },
+          "selection_percentile": {
+            "default": 0.1,
+            "title": "Selection Percentile",
+            "type": "number"
+          },
+          "short_selection_count": {
+            "default": 20,
+            "title": "Short Selection Count",
+            "type": "integer"
+          },
           "side": {
             "$ref": "#/components/schemas/PortfolioSide",
             "default": "long_only"
+          },
+          "turnover_buffer_count": {
+            "default": 0,
+            "title": "Turnover Buffer Count",
+            "type": "integer"
           },
           "weighting": {
             "$ref": "#/components/schemas/WeightingMethod",
@@ -1852,6 +2143,7 @@
       },
       "RebalanceFrequency": {
         "enum": [
+          "every_n_sessions",
           "weekly",
           "monthly",
           "quarterly"
@@ -2249,6 +2541,22 @@
             "default": 1.0,
             "title": "Net Exposure",
             "type": "number"
+          },
+          "risk_field_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk Field Id"
+          },
+          "sector_neutral": {
+            "default": false,
+            "title": "Sector Neutral",
+            "type": "boolean"
           }
         },
         "title": "RiskStep",
@@ -2347,6 +2655,14 @@
         "title": "SecurityRef",
         "type": "object"
       },
+      "SelectionMethod": {
+        "enum": [
+          "top_n",
+          "percentile"
+        ],
+        "title": "SelectionMethod",
+        "type": "string"
+      },
       "SignalMethod": {
         "enum": [
           "weighted_sum",
@@ -2365,6 +2681,39 @@
           "method": {
             "$ref": "#/components/schemas/SignalMethod",
             "default": "weighted_sum"
+          },
+          "regime_field_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regime Field Id"
+          },
+          "regime_minimum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regime Minimum"
+          },
+          "score_threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score Threshold"
           }
         },
         "title": "SignalStep",
@@ -2522,6 +2871,110 @@
           "issues"
         ],
         "title": "StrategyValidation",
+        "type": "object"
+      },
+      "TargetFrame": {
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/CandidateDecision"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "execution_on": {
+            "format": "date",
+            "title": "Execution On",
+            "type": "string"
+          },
+          "signal_as_of": {
+            "format": "date",
+            "title": "Signal As Of",
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/TargetPosition"
+            },
+            "title": "Targets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "signal_as_of",
+          "execution_on",
+          "targets",
+          "candidates"
+        ],
+        "title": "TargetFrame",
+        "type": "object"
+      },
+      "TargetPosition": {
+        "properties": {
+          "composite_score": {
+            "title": "Composite Score",
+            "type": "number"
+          },
+          "rank": {
+            "title": "Rank",
+            "type": "integer"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "side": {
+            "$ref": "#/components/schemas/CandidateSide"
+          },
+          "weight": {
+            "title": "Weight",
+            "type": "number"
+          }
+        },
+        "required": [
+          "security_id",
+          "weight",
+          "composite_score",
+          "rank",
+          "side"
+        ],
+        "title": "TargetPosition",
+        "type": "object"
+      },
+      "TargetTape": {
+        "properties": {
+          "data_snapshot_id": {
+            "title": "Data Snapshot Id",
+            "type": "string"
+          },
+          "execution_timing": {
+            "default": "next_open",
+            "title": "Execution Timing",
+            "type": "string"
+          },
+          "frames": {
+            "items": {
+              "$ref": "#/components/schemas/TargetFrame"
+            },
+            "title": "Frames",
+            "type": "array"
+          },
+          "strategy_hash": {
+            "title": "Strategy Hash",
+            "type": "string"
+          },
+          "tape_hash": {
+            "title": "Tape Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data_snapshot_id",
+          "strategy_hash",
+          "tape_hash",
+          "frames"
+        ],
+        "title": "TargetTape",
         "type": "object"
       },
       "TimeSeriesNode": {
@@ -2882,7 +3335,8 @@
         "enum": [
           "equal",
           "factor_score",
-          "rank"
+          "rank",
+          "risk"
         ],
         "title": "WeightingMethod",
         "type": "string"
@@ -3391,6 +3845,44 @@
           }
         },
         "summary": "Health"
+      }
+    },
+    "/api/v1/portfolio/preview": {
+      "post": {
+        "operationId": "previewPortfolio",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortfolioPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Portfolio Preview"
       }
     },
     "/api/v1/strategies": {

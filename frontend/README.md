@@ -1,5 +1,13 @@
 # Strategy Workbench Frontend
 
+## M4 Portfolio · Risk · Execution
+
+Builder의 3~5단계는 동일한 `StrategySpec` draft에서 long/short와 N/percentile 선택,
+4가지 weighting, eligibility·threshold·regime·liquidity·turnover, gross/net/name/sector 제약과
+거래 비용을 편집한다. `entities/portfolio`는 generated SDK로 backend TargetTape preview를 읽어
+세션별 score/rank/target/exclusion 이유와 engine capability를 표시한다. 화면은 target 비중을
+재계산하지 않으며 T 종가→T+1 시가 실행 계약을 그대로 보여준다.
+
 ## M3 Factor editor
 
 `entities/factor`는 generated OpenAPI 타입과 query를 통해 backend Factor Registry만 읽는다.

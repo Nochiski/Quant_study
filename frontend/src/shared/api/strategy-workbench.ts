@@ -6,6 +6,7 @@ import {
   getFactorCatalog,
   getStrategyTemplate,
   previewFactorGraph,
+  previewPortfolio,
   previewEquityData,
   previewEquityPanel,
   previewEquityUniverse,
@@ -29,6 +30,8 @@ import type {
   GetEquityCatalogData,
   GetFactorCatalogData,
   NodeContract,
+  PortfolioPreview,
+  PortfolioPreviewRequest,
   ResearchCatalog,
   ResearchPanelCell,
   ResearchPanelPreview,
@@ -118,6 +121,13 @@ export const strategyWorkbenchApi = {
     return requireData(response.data, "previewFactorGraph");
   },
 
+  async previewPortfolio(
+    request: PortfolioPreviewRequest,
+  ): Promise<PortfolioPreview> {
+    const response = await previewPortfolio({ body: request });
+    return requireData(response.data, "previewPortfolio");
+  },
+
   async validate(spec: StrategySpec): Promise<StrategyValidation> {
     const response = await validateStrategy({ body: spec });
     return requireData(response.data, "validateStrategy");
@@ -160,6 +170,8 @@ export type {
   FactorSignal,
   FactorValidationIssue,
   NodeContract,
+  PortfolioPreview,
+  PortfolioPreviewRequest,
   ResearchCatalog,
   ResearchPanelCell,
   ResearchPanelPreview,

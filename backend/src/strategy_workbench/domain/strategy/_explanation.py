@@ -35,7 +35,11 @@ def explain_strategy(spec: StrategySpec) -> StrategyExplanation:
                 "portfolio",
                 f"{spec.portfolio.side} · {spec.portfolio.selection_count}종목 · "
                 f"{spec.portfolio.rebalance}",
-                (f"가중 방식: {spec.portfolio.weighting}",),
+                (
+                    f"선택 방식: {spec.portfolio.selection_method}",
+                    f"가중 방식: {spec.portfolio.weighting}",
+                    f"최소 거래 비중: {spec.portfolio.minimum_trade_weight:.2%}",
+                ),
             ),
             StrategyExplanationStep(
                 "risk",
@@ -43,6 +47,7 @@ def explain_strategy(spec: StrategySpec) -> StrategyExplanation:
                 (
                     f"종목당 최대 {spec.risk.max_name_weight:.1%}",
                     f"섹터당 최대 {spec.risk.max_sector_weight:.1%}",
+                    f"섹터 중립: {spec.risk.sector_neutral}",
                 ),
             ),
             StrategyExplanationStep(

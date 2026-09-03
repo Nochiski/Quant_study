@@ -8,7 +8,14 @@ from strategy_workbench.domain.factor.facade.validation import (
     validate_factor_graph,
 )
 
-from ._models import ChoiceParameter, FloatParameter, IntegerParameter, StrategySpec
+from ._models import (
+    ChoiceParameter,
+    FloatParameter,
+    IntegerParameter,
+    PortfolioSide,
+    StrategySpec,
+    WeightingMethod,
+)
 
 
 class ValidationKind(StrEnum):
@@ -71,6 +78,62 @@ def validate_strategy(spec: StrategySpec) -> StrategyValidation:
                 "선택 종목 수는 1 이상이어야 합니다.",
             )
         )
+    if spec.portfolio.short_selection_count <= 0:
+        issues.append(
+            _issue(
+                "strategy.portfolio.short_selection_count",
+                "portfolio.short_selection_count",
+                "숏 선택 종목 수는 1 이상이어야 합니다.",
+            )
+        )
+    if not 0 < spec.portfolio.selection_percentile <= 0.5:
+        issues.append(
+            _issue(
+                "strategy.portfolio.selection_percentile",
+                "portfolio.selection_percentile",
+                "선택 분위수는 0보다 크고 0.5 이하여야 합니다.",
+            )
+        )
+    if spec.portfolio.rebalance_every_n_sessions <= 0:
+        issues.append(
+            _issue(
+                "strategy.portfolio.rebalance_every_n_sessions",
+                "portfolio.rebalance_every_n_sessions",
+                "리밸런싱 세션 간격은 1 이상이어야 합니다.",
+            )
+        )
+    if spec.portfolio.turnover_buffer_count < 0:
+        issues.append(
+            _issue(
+                "strategy.portfolio.turnover_buffer_count",
+                "portfolio.turnover_buffer_count",
+                "회전율 버퍼는 음수일 수 없습니다.",
+            )
+        )
+    if not 0 <= spec.portfolio.minimum_trade_weight <= 1:
+        issues.append(
+            _issue(
+                "strategy.portfolio.minimum_trade_weight",
+                "portfolio.minimum_trade_weight",
+                "최소 거래 비중은 0 이상 1 이하여야 합니다.",
+            )
+        )
+    if spec.portfolio.minimum_liquidity is not None and spec.portfolio.minimum_liquidity < 0:
+        issues.append(
+            _issue(
+                "strategy.portfolio.minimum_liquidity",
+                "portfolio.minimum_liquidity",
+                "최소 유동성은 음수일 수 없습니다.",
+            )
+        )
+    if spec.portfolio.minimum_liquidity is not None and spec.portfolio.liquidity_field_id is None:
+        issues.append(
+            _issue(
+                "strategy.portfolio.liquidity_field",
+                "portfolio.liquidity_field_id",
+                "최소 유동성을 쓰려면 유동성 필드를 지정해야 합니다.",
+            )
+        )
     if spec.risk.gross_exposure <= 0:
         issues.append(
             _issue(
@@ -79,12 +142,63 @@ def validate_strategy(spec: StrategySpec) -> StrategyValidation:
                 "총 익스포저는 0보다 커야 합니다.",
             )
         )
+    if abs(spec.risk.net_exposure) > spec.risk.gross_exposure:
+        issues.append(
+            _issue(
+                "strategy.risk.net_exposure",
+                "risk.net_exposure",
+                "순 익스포저 절댓값은 총 익스포저 이하여야 합니다.",
+            )
+        )
+    if (
+        spec.portfolio.side is PortfolioSide.LONG_ONLY
+        and spec.risk.net_exposure != spec.risk.gross_exposure
+    ):
+        issues.append(
+            _issue(
+                "strategy.risk.long_only_exposure",
+                "risk.net_exposure",
+                "롱온리 전략은 총 익스포저와 순 익스포저가 같아야 합니다.",
+            )
+        )
     if not 0 < spec.risk.max_name_weight <= 1:
         issues.append(
             _issue(
                 "strategy.risk.max_name_weight",
                 "risk.max_name_weight",
                 "종목 한도는 0보다 크고 1 이하여야 합니다.",
+            )
+        )
+    if not 0 < spec.risk.max_sector_weight <= 1:
+        issues.append(
+            _issue(
+                "strategy.risk.max_sector_weight",
+                "risk.max_sector_weight",
+                "섹터 한도는 0보다 크고 1 이하여야 합니다.",
+            )
+        )
+    if spec.portfolio.weighting is WeightingMethod.RISK and spec.risk.risk_field_id is None:
+        issues.append(
+            _issue(
+                "strategy.risk.risk_field",
+                "risk.risk_field_id",
+                "리스크 가중 방식을 쓰려면 리스크 필드를 지정해야 합니다.",
+            )
+        )
+    if spec.risk.sector_neutral and spec.portfolio.side is PortfolioSide.LONG_ONLY:
+        issues.append(
+            _issue(
+                "strategy.risk.sector_neutral_side",
+                "risk.sector_neutral",
+                "섹터 중립화는 롱숏 전략에서만 사용할 수 있습니다.",
+            )
+        )
+    if spec.signal.regime_field_id is None and spec.signal.regime_minimum is not None:
+        issues.append(
+            _issue(
+                "strategy.signal.regime_field",
+                "signal.regime_field_id",
+                "레짐 기준값을 쓰려면 레짐 필드를 지정해야 합니다.",
             )
         )
     if not 0 < spec.execution.participation_rate <= 1:

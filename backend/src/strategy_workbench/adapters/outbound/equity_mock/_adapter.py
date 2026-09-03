@@ -6,6 +6,10 @@ from datetime import date, timedelta
 from strategy_workbench.application.factor_research.facade.ports import (
     FactorObservationQuery,
 )
+from strategy_workbench.application.portfolio_design.facade.ports import (
+    PortfolioObservationQuery,
+    PortfolioObservationSet,
+)
 from strategy_workbench.domain.equity.facade.research_data import (
     DataLoadStatus,
     DatasetFieldProfile,
@@ -20,6 +24,11 @@ from strategy_workbench.domain.equity.facade.research_data import (
 from strategy_workbench.domain.factor.facade.evaluation import (
     FactorFieldValue,
     FactorObservation,
+)
+from strategy_workbench.domain.portfolio.facade.construction import (
+    PortfolioFactorValue,
+    PortfolioFieldValue,
+    PortfolioObservation,
 )
 
 from ._fixture import Membership, Observation, build_demo_fixture
@@ -172,6 +181,54 @@ class MockEquityDataAdapter:
             for security_index, security_id in enumerate(security_ids)
         )
 
+    def load_portfolio_observations(
+        self, query: PortfolioObservationQuery
+    ) -> PortfolioObservationSet:
+        """Return a deterministic PIT portfolio panel behind the future Equity DB port."""
+        sessions = _business_sessions(query.start, query.end)
+        security_ids = tuple(membership.security.security_id for membership in self._memberships)
+        observations = tuple(
+            PortfolioObservation(
+                as_of=session,
+                security_id=security_id,
+                # The generated research panel has its own deterministic PIT history:
+                # the third name enters after two sessions and never leaks backward.
+                universe_member=security_index < 2 or session_index >= 2,
+                factor_values=tuple(
+                    PortfolioFactorValue(
+                        factor_id=factor_id,
+                        value=_portfolio_factor_value(
+                            factor_id,
+                            security_index=security_index,
+                            session_index=session_index,
+                        ),
+                        available_date=session,
+                    )
+                    for factor_id in query.factor_ids
+                ),
+                fields=tuple(
+                    PortfolioFieldValue(
+                        field_id=field_id,
+                        value=_factor_field_value(
+                            field_id,
+                            security_index=security_index,
+                            session_index=session_index,
+                        ),
+                        available_date=session,
+                    )
+                    for field_id in query.field_ids
+                ),
+                sector_id=("technology", "industrial", "consumer")[security_index % 3],
+            )
+            for session_index, session in enumerate(sessions)
+            for security_index, security_id in enumerate(security_ids)
+        )
+        return PortfolioObservationSet(
+            data_snapshot_id=self._snapshot.snapshot_id,
+            sessions=sessions,
+            observations=observations,
+        )
+
     def _cutoff(self, session: date, lag_sessions: int) -> date | None:
         try:
             session_index = self._sessions.index(session)
@@ -204,12 +261,7 @@ class MockEquityDataAdapter:
 
 
 def _factor_sessions(query: FactorObservationQuery) -> tuple[date, ...]:
-    requested: list[date] = []
-    cursor = query.start
-    while cursor <= query.end:
-        if cursor.weekday() < 5:
-            requested.append(cursor)
-        cursor += timedelta(days=1)
+    requested = list(_business_sessions(query.start, query.end))
     history: list[date] = []
     cursor = query.start - timedelta(days=1)
     while len(history) < max(query.minimum_history_sessions - 1, 0):
@@ -217,6 +269,29 @@ def _factor_sessions(query: FactorObservationQuery) -> tuple[date, ...]:
             history.append(cursor)
         cursor -= timedelta(days=1)
     return tuple((*reversed(history), *requested))
+
+
+def _business_sessions(start: date, end: date) -> tuple[date, ...]:
+    sessions: list[date] = []
+    cursor = start
+    while cursor <= end:
+        if cursor.weekday() < 5:
+            sessions.append(cursor)
+        cursor += timedelta(days=1)
+    return tuple(sessions)
+
+
+def _portfolio_factor_value(
+    factor_id: str,
+    *,
+    security_index: int,
+    session_index: int,
+) -> float:
+    stable = int.from_bytes(hashlib.sha256(factor_id.encode("utf-8")).digest()[:2], "big")
+    direction = -1.0 if stable % 2 else 1.0
+    cross_section = (security_index - 1) * direction
+    time_component = ((session_index + stable) % 11 - 5) * 0.025
+    return cross_section + time_component
 
 
 def _factor_field_value(

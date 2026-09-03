@@ -15,6 +15,8 @@ src/backtest_engine/
 ├─ ports/          # 헥사고날 포트: BarSource, CorporateActionSource, UniverseSource, SlippageModel
 ├─ adapters/       # 포트 구현: CSV(csv_bars), sqlite(sqlite_bars), KRX 원장 parquet(krx_parquet)
 └─ data/           # 소스 무관 정제(cleaning)·자본변동 검출(corporate_actions), DataFeed
+backend/            # Strategy Workbench API: domain/application/adapters/bootstrap
+frontend/           # Strategy Workbench no-code UI: FSD app→pages→widgets→features→entities→shared
 examples/          # 골든크로스 예제 전략 + CSV / KRX parquet 데모
 scripts/           # 테스트 픽스처 재생성, 다종목 벤치마크 등 유틸
 tests/             # 골든(손계산)·계약·상태 전이·직렬화·단위 테스트
@@ -23,6 +25,11 @@ tests/fixtures/    # KRX 원장 슬라이스 (종목 5개, 605KB) — 어댑터 
 workspace/         # 개인 작업 공간 workspace/<이름>/ — docs·src 추적, data/·logs/ 는 git 제외
 ops/               # 서버 운영 스크립트 (공용)
 ```
+
+새 no-code 전략 생성 도구의 전체 계획과 체크리스트는
+[Strategy Workbench 구현 로드맵](docs/superpowers/specs/2026-09-03-strategy-workbench-roadmap.md)에 있다.
+Equity DB 계약이 확정되기 전에는 `backend`의 PIT mock adapter가 기준 구현이며, 실제 DB는 같은
+application port를 구현하는 outbound adapter로 교체한다.
 
 ## 설계 아티팩트 요약
 
@@ -141,3 +148,9 @@ uv run python examples/run_krx_demo.py --core rust      # Rust 코어로 같은 
 | `error-messages.md` | `**/*.py` | 예외·로그에 재현 가능한 컨텍스트 포함 |
 | `testing.md` | `tests/`, `scripts/` | 산출물 파일 존재/내용을 단언하는 테스트 금지 |
 | `pr-review.md` | 전체 | PR 본문 양식, 결함 보고 4요소 |
+| `backend-package-boundary.md` | `backend/**/*.py` | 헥사고날 방향, facade, `DEPENDS_ON`, mock adapter 경계 |
+| `strategy-workbench-sot.md` | `backend/`, `frontend/` | 전략·팩터·지표·상태의 단일 owner |
+| `frontend-fsd.md` | `frontend/src/` | FSD 단방향, slice 격리, public API |
+| `frontend-api-state.md` | frontend API/state | 생성 SDK, 서버·draft·UI 상태 소유권 |
+| `frontend-ui-quality.md` | frontend UI | primitive, token, 접근성, i18n, raw metric |
+| `frontend-testing.md` | frontend test/e2e | 사용자 동작·wire 경계 테스트 |

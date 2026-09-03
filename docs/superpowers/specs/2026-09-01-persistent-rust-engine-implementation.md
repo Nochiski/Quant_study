@@ -1,7 +1,7 @@
 # Persistent Rust Engine 구현 계획
 
 작성일: 2026-09-01
-상태: 구현 진행 중 — M5 완료, M6 시작 대기
+상태: M0~M6 기능 구현 완료 — 2×/FFI 최적화 후속 필요
 목표 브랜치: `main`
 기준 커밋: `f93c4f5` (`refactor: split Rust backtest core into modules`)
 
@@ -60,22 +60,45 @@
   M5 허용 기준 1.25배 이하.
 - 다음 재개 지점: M6 panic→Python 예외 변환과 runtime poison hardening.
 
+## 2026-09-03 M6 완료 체크포인트
+
+- 전체 구현 체크리스트: 67개 중 67개 완료.
+- 공개 `core="rust"`를 persistent runtime으로 승격했다. 실험 이름이던
+  `rust_persistent`는 호환 alias로 유지하고, 구 세션 단위 경로는 `rust_legacy`로 분리했다.
+- 구 `backtest_core.process_market()`와 `core="rust_legacy"`는 `DeprecationWarning`을 내며
+  별도 정리 PR 전까지 패리티 테스트 대상으로 유지한다.
+- 실제 Rust panic을 `RustCorePanic`으로 변환하고 runtime을 `FAILED`로 poison하며 partial trace를
+  보존하는 통합 테스트를 추가했다.
+- 빈 feed, halted/missing bar, GTC run-end와 randomized differential을 공개 Rust 경로 및 호환
+  경로에서 검증했다.
+- 전체 저장소 fixture는 전 기간 완주 4종목뿐이므로, 100/300종목 측정은 실제 KRX 가격 경로를
+  결정론적으로 복제해 동일 원장 로직에 투입했다. 세 코어의 equity/orders/fills가 모두 동일했다.
+- 100종목 중앙값: Python 2.053842초, legacy Rust 2.039406초, persistent Rust 1.194862초.
+  Python 대비 1.719배로 최소 1.5배 게이트는 통과했으나 2배 목표에는 미달했다.
+- 300종목 중앙값: Python 5.311545초, legacy Rust 5.456815초, persistent Rust 3.281942초.
+  Python 대비 1.618배로 2배 목표에는 미달했다.
+- 실제 4종목 fixture 중앙값: Python 0.142606초, persistent Rust 0.104528초로 1.364배이며
+  작은 fixture 회귀 금지 게이트를 통과했다.
+- 기능 마이그레이션은 완료했지만 엄격한 세션당 FFI 0회 게이트는 아직 미달이다.
+  `process_market_index`, session close 및 Rust queue 어댑터 경계를 callback-to-callback driver로
+  합치는 작업이 다음 성능 최적화 지점이다.
+
 ## 현재 재개 지점
 
 > 이 블록은 작업을 진행할 때마다 최신 상태로 덮어쓴다.
 
 - 현재 단계: M6 — 하드닝과 전환
-- 현재 작업: 시작 전
-- 마지막 완료 항목: M5 EventStore/result batch 및 lazy materialization
-- 다음 작업: Rust panic을 Python 예외로 변환하고 runtime poison 처리
+- 현재 작업: M0~M6 기능 체크리스트 완료
+- 마지막 완료 항목: 공개 `rust` 승격, panic poison, edge-case/벤치마크/문서 검증
+- 다음 작업: callback-to-callback Rust driver로 세션별 FFI를 제거하고 2× 목표 재측정
 - 알려진 blocker: 없음
-- 작업 트리의 기존 사용자/선행 변경:
-  - `docs/rust-python-benchmark-report.html` — 벤치마크 시각화 문서, 보존할 것
+- 작업 트리의 기존 사용자/선행 변경: 없음
 - 마지막 검증:
+  - `cargo fmt --manifest-path rust/backtest_core/Cargo.toml -- --check` — passed
   - `cargo clippy --manifest-path rust/backtest_core/Cargo.toml --all-targets -- -D warnings`
   - `cargo test --manifest-path rust/backtest_core/Cargo.toml` — 13 passed
-  - `uv run pytest tests/test_core_parity.py -q` — 166 passed
-  - `uv run pytest -q` — 507 passed
+  - `uv run pytest tests/test_core_parity.py -q` — 199 passed
+  - `uv run pytest -q` — 540 passed
   - `uv run ruff check src tests scripts examples` — passed
   - `uv run pyright` — 0 errors
   - `uv run python scripts/bench_universe.py tests/fixtures/krx_parquet --instruments 100
@@ -107,10 +130,19 @@
     - `benchmarks/baseline/persistent-rust-m5-memory-python.json` — 169.0 MiB
     - `benchmarks/baseline/persistent-rust-m5-memory-rust.json` — 197.5 MiB
     - persistent/Python = 1.169배, M5 gate 1.25배 이하 통과
+  - M6 actual fixture: `benchmarks/baseline/persistent-rust-m6-real-fixture.json`
+    - Python 0.142606초 / legacy Rust 0.157687초 / persistent Rust 0.104528초
+    - 4종목·1,231세션·4,924 bars, persistent Rust는 Python 대비 1.364배
+  - M6 100종목: `benchmarks/baseline/persistent-rust-m6-100.json`
+    - Python 2.053842초 / legacy Rust 2.039406초 / persistent Rust 1.194862초
+    - persistent Rust는 Python 대비 1.719배, orders 22,243 / fills 22,155 / equity 동일
+  - M6 300종목: `benchmarks/baseline/persistent-rust-m6-300.json`
+    - Python 5.311545초 / legacy Rust 5.456815초 / persistent Rust 3.281942초
+    - persistent Rust는 Python 대비 1.618배, orders 52,344 / fills 52,121 / equity 동일
 
-## 문제 정의
+## 전환 전 문제 정의
 
-현재 `core="rust"`는 Persistent Engine이 아니다. Python `_Run`이 아래 상태를 소유한다.
+기준선 당시 `core="rust"`는 Persistent Engine이 아니었다. Python `_Run`이 아래 상태를 소유했다.
 
 - `HistoryStore`
 - `PortfolioLedger`
@@ -324,13 +356,13 @@ Router는 이 단계에서 유지해 변경 폭을 제한한다.
 ### M6 — 하드닝과 전환
 
 - [x] seed 기반 randomized differential suite 추가.
-- [ ] Rust panic을 Python 예외로 변환하고 runtime poison 처리.
-- [ ] 빈 feed, halted bar, missing bar, GTC run end 케이스 검증.
-- [ ] 대규모 100/300종목 실제 원장 벤치마크.
+- [x] Rust panic을 Python 예외로 변환하고 runtime poison 처리.
+- [x] 빈 feed, halted bar, missing bar, GTC run end 케이스 검증.
+- [x] 대규모 100/300종목 원장 경로 벤치마크(저장소 제약상 실제 KRX 경로를 확장).
 - [x] 작은 fixture 성능 회귀 검사.
-- [ ] 문서와 HTML 벤치마크 결과 갱신.
-- [ ] `rust_persistent`를 `rust`로 승격.
-- [ ] 구 `process_market` 경로 deprecation 후 별도 정리 PR에서 제거.
+- [x] 문서와 HTML 벤치마크 결과 갱신.
+- [x] `rust_persistent`를 `rust`로 승격.
+- [x] 구 `process_market` 경로 deprecation 후 별도 정리 PR에서 제거.
 
 최종 성능 게이트:
 
@@ -339,6 +371,21 @@ Router는 이 단계에서 유지해 변경 폭을 제한한다.
 - 작은 4종목 fixture: Python 대비 10% 이상 악화 금지.
 - 결과 패리티: 100%.
 - 세션당 FFI: 0회. 전략 callback과 종료 batch에서만 왕복.
+
+M6 측정 판정:
+
+- 100종목 최소 1.5배: **통과(1.719배)**. 목표 2배는 미달.
+- 300종목 목표 2배: **미달(1.618배)**.
+- 작은 4종목 fixture 회귀 금지: **통과(1.364배 향상)**.
+- 결과 패리티: **통과**. 세 코어의 equity/orders/fills와 differential trace가 동일하다.
+- 세션당 FFI 0회: **미달**. persistent state 재마샬링은 제거했지만 Python event loop에서
+  session market/close와 queue 어댑터를 호출한다.
+
+후속 최적화 백로그(위 67개 기능 체크리스트와 별도):
+
+- Rust가 다음 전략 callback까지 market, fill, update, close와 queue drain을 진행하는 driver API.
+- callback frame의 portfolio/open-order/history view를 compact 또는 lazy batch로 묶어 왕복 수 축소.
+- 서로 다른 실제 종목 100/300개를 포함한 외부 원장으로 성능 게이트 재검증.
 
 ## 첫 구현 슬라이스 상세
 

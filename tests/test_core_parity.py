@@ -28,6 +28,7 @@ from backtest_engine.errors import (
     CoreUnavailable,
     NegativeCashError,
     NegativePositionError,
+    RustCorePanic,
     SchemaVersionMismatch,
     UndeclaredActionReturned,
     UnknownOrderId,
@@ -98,6 +99,14 @@ RUST_ONLY = pytest.mark.skipif(not core_available("rust"), reason="backtest_core
 RUST_ENGINE_CORES = [
     pytest.param("rust", marks=RUST_ONLY, id="rust"),
     pytest.param("rust_persistent", marks=RUST_ONLY, id="rust_persistent"),
+    pytest.param(
+        "rust_legacy",
+        marks=[
+            RUST_ONLY,
+            pytest.mark.filterwarnings("ignore:.*deprecated.*:DeprecationWarning"),
+        ],
+        id="rust_legacy",
+    ),
 ]
 CORES = ["python", *RUST_ENGINE_CORES]
 
@@ -748,7 +757,7 @@ def test_all_actions_randomized_trace_matches_persistent_rust(seed: int) -> None
 
 
 @RUST_ONLY
-def test_persistent_sends_one_decision_batch_per_callback(
+def test_promoted_rust_sends_one_decision_batch_per_callback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from backtest_engine.engine import loop as loop_module
@@ -809,7 +818,7 @@ def test_persistent_sends_one_decision_batch_per_callback(
 
     monkeypatch.setattr(loop_module, "make_persistent_runtime", counting_factory)
     engine = BacktestEngine(
-        RunConfig(run_id="ffi-count", initial_cash=100_000.0), core="rust_persistent"
+        RunConfig(run_id="ffi-count", initial_cash=100_000.0), core="rust"
     )
     engine.run(
         ScriptedStrategy(script=(target_70pct(), None, liquidate(), None)),
@@ -824,6 +833,66 @@ def test_persistent_sends_one_decision_batch_per_callback(
     assert proxies[0].place_order_calls == 0
     assert proxies[0].register_group_calls == 0
     assert proxies[0].inner.lifecycle_state() == "finished"
+
+
+@RUST_ONLY
+def test_rust_panic_becomes_engine_error_and_poisons_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from backtest_engine.engine import loop as loop_module
+    from backtest_engine.engine.store import RecordKind
+
+    real_factory = loop_module.make_persistent_runtime
+    runtimes: list[Any] = []
+
+    class PanicRuntime:
+        def __init__(self, inner: Any) -> None:
+            self.inner = inner
+
+        def process_market_index(self, *_args: object) -> object:
+            return self.inner._debug_force_panic()
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self.inner, name)
+
+    def panic_factory(*args: Any, **kwargs: Any) -> PanicRuntime:
+        runtime = PanicRuntime(real_factory(*args, **kwargs))
+        runtimes.append(runtime)
+        return runtime
+
+    monkeypatch.setattr(loop_module, "make_persistent_runtime", panic_factory)
+    engine = BacktestEngine(
+        RunConfig(run_id="rust-panic", initial_cash=100_000.0), core="rust"
+    )
+    with pytest.raises(RustCorePanic, match="forced persistent runtime panic"):
+        engine.run(ScriptedStrategy(script=(None,)), DataFeed(GOLDEN_BARS))
+
+    assert runtimes[0].inner.lifecycle_state() == "failed"
+    assert "Rust core panic" in runtimes[0].inner.failure_detail
+    assert [record.kind for record in engine.event_store.records] == [RecordKind.MARKET]
+
+
+@RUST_ONLY
+def test_legacy_rust_core_is_explicitly_deprecated() -> None:
+    engine = BacktestEngine(
+        RunConfig(run_id="legacy-rust", initial_cash=100_000.0), core="rust_legacy"
+    )
+    with pytest.warns(DeprecationWarning) as warnings_seen:
+        result = engine.run(ScriptedStrategy(script=(None,)), DataFeed(GOLDEN_BARS))
+    messages = {str(warning.message) for warning in warnings_seen}
+    assert any('use core="rust"' in message for message in messages)
+    assert any("process_market() is deprecated" in message for message in messages)
+    assert len(result.snapshots) == len(DataFeed(GOLDEN_BARS))
+
+
+@pytest.mark.parametrize("core_name", ["python", pytest.param("rust", marks=RUST_ONLY)])
+def test_empty_feed_fails_identically_after_clean_finish(core_name: str) -> None:
+    engine = BacktestEngine(
+        RunConfig(run_id="empty-feed", initial_cash=100_000.0), core=core_name
+    )
+    with pytest.raises(ValueError, match="cannot compute metrics from an empty run"):
+        engine.run(ScriptedStrategy(script=()), DataFeed(()))
+    assert engine.event_store.records == ()
 
 
 @RUST_ONLY

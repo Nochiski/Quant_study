@@ -355,7 +355,7 @@ impl PersistentEngine {
             .filter(|group| self.group_is_open(group))
             .map(StoredGroup::as_tuple)
             .collect();
-        let mut ops = session::process_market(
+        let mut ops = session::process_market_impl(
             ts,
             entries,
             groups,
@@ -665,6 +665,16 @@ impl PersistentEngine {
     #[getter]
     fn failure_detail(&self) -> Option<String> {
         self.failure_message.clone()
+    }
+
+    fn poison(&mut self, detail: String) {
+        self.lifecycle = Lifecycle::Failed;
+        self.failure_message = Some(detail);
+    }
+
+    #[doc(hidden)]
+    fn _debug_force_panic(&self) {
+        panic!("forced persistent runtime panic for boundary verification");
     }
 
     fn activate_pending(&mut self) -> PyResult<()> {

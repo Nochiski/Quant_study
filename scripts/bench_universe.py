@@ -1,10 +1,11 @@
-"""다종목 벤치마크: 유니버스 N종목 동일 비중 리밸런싱을 두 코어로 돌려 시간과 프로파일을 남긴다.
+"""다종목 벤치마크: 동일 비중 리밸런싱을 Python/legacy/persistent 코어로 비교한다.
 
-6d(세션 루프 Rust 이전)의 선행 조건 — 병목이 실제로 어디인지 측정한다.
+실제 KRX fixture 또는 그 가격 경로를 복제한 synthetic universe에서 실행 시간, 결과 signature,
+peak RSS와 raw sample을 기록한다.
 
 사용법:
     uv run python scripts/bench_universe.py <원장 디렉토리> --instruments 100 --core python
-    uv run python scripts/bench_universe.py <원장 디렉토리> --instruments 100 --core rust --profile
+    uv run python scripts/bench_universe.py <원장 디렉토리> --instruments 100 --core all --profile
 """
 
 from __future__ import annotations
@@ -162,7 +163,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--instruments", type=int, default=100)
     parser.add_argument(
         "--core",
-        choices=("python", "rust", "rust_persistent", "all"),
+        choices=("python", "rust", "rust_legacy", "rust_persistent", "all"),
         default="python",
     )
     parser.add_argument("--every", type=int, default=5)
@@ -202,7 +203,7 @@ def main(argv: list[str]) -> int:
     if args.synthetic:
         instruments, bars = synthetic_universe(bars, args.instruments)
     feed = DataFeed(bars)
-    cores = ("python", "rust", "rust_persistent") if args.core == "all" else (args.core,)
+    cores = ("python", "rust_legacy", "rust") if args.core == "all" else (args.core,)
     print(
         f"instruments={len(instruments)} sessions={len(feed)} "
         f"bars={len(bars)} cores={','.join(cores)} repeat={args.repeat} warmup={args.warmup}"

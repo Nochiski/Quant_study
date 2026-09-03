@@ -7,7 +7,7 @@
     uv sync --extra parquet
     uv run python examples/run_krx_demo.py                 # tests/fixtures/krx_parquet 슬라이스
     uv run python examples/run_krx_demo.py <원장 디렉토리>  # quant-data 빌드 전체
-    uv run python examples/run_krx_demo.py [<디렉토리>] --core rust_persistent
+    uv run python examples/run_krx_demo.py [<디렉토리>] --core rust
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ def main(argv: list[str]) -> int:
         index = args.index("--core")
         if index + 1 >= len(args):
             print(
-                "usage: --core <python|rust|rust_persistent> — missing value after --core",
+                "usage: --core <python|rust> — missing value after --core",
                 file=sys.stderr,
             )
             return 2

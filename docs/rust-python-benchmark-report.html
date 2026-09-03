@@ -217,6 +217,7 @@
 
     .engine-name { font-weight: 800; font-size: 15px; }
     .engine-name.python { color: var(--python); }
+    .engine-name.legacy { color: var(--violet); }
     .engine-name.rust { color: var(--rust); }
 
     .track {
@@ -240,6 +241,7 @@
     }
 
     .bar.python { background: linear-gradient(90deg, #e5a923, var(--python)); }
+    .bar.legacy { background: linear-gradient(90deg, #7457cf, var(--violet)); animation-delay: .08s; }
     .bar.rust { background: linear-gradient(90deg, #e24821, var(--rust)); animation-delay: .12s; }
 
     .bar::after {
@@ -524,14 +526,15 @@
   <main class="page">
     <header>
       <div>
-        <div class="eyebrow">Backtest Engine Performance Brief</div>
-        <h1>Rust는 빠르다.<br>하지만 지금은 <span style="color:var(--rust)">가운데만</span> Rust다.</h1>
-        <p class="lede">Python 이벤트 엔진에 Rust 체결 코어를 연결한 현재 구조의 실측 결과와, 성능 차이가 6.5%에 머무는 이유를 한 화면에 정리했습니다.</p>
+        <div class="eyebrow">Persistent Rust Engine · M6</div>
+        <h1>Rust는 이제<br><span style="color:var(--green)">엔진 전체의 상태</span>를 가진다.</h1>
+        <p class="lede">부분 세션 가속기를 persistent runtime으로 승격했습니다. 전략 API는 Python에 남고 주문·포지션·히스토리·라우팅·큐·회계 상태는 세션 사이에도 Rust에 유지됩니다.</p>
       </div>
       <div class="badges" aria-label="측정 조건">
-        <span class="badge good">✓ 결과 동일성 검증</span>
+        <span class="badge good">✓ 540 Python tests</span>
+        <span class="badge good">✓ 13 Rust tests</span>
         <span class="badge">Rust --release</span>
-        <span class="badge">2026-09-01</span>
+        <span class="badge">2026-09-03</span>
       </div>
     </header>
 
@@ -539,25 +542,30 @@
       <article class="card">
         <div class="section-title">
           <div>
-            <div class="metric-kicker">Order-heavy stress workload</div>
-            <h2>엔진 실행 시간 중앙값</h2>
+            <div class="metric-kicker">100 instruments · order-heavy</div>
+            <h2>승격 후 실행 시간 중앙값</h2>
           </div>
           <p>낮을수록 좋음</p>
         </div>
 
-        <div class="benchmark" role="img" aria-label="Python 2.826초, Rust 2.643초">
+        <div class="benchmark" role="img" aria-label="Python 2.054초, Legacy Rust 2.039초, Persistent Rust 1.195초">
           <div class="bench-row">
             <div class="engine-name python">Python</div>
-            <div class="track"><div class="bar python" style="--w:88.3%"></div></div>
-            <div class="bench-value">2.826s</div>
+            <div class="track"><div class="bar python" style="--w:100%"></div></div>
+            <div class="bench-value">2.054s</div>
+          </div>
+          <div class="bench-row">
+            <div class="engine-name legacy">Legacy</div>
+            <div class="track"><div class="bar legacy" style="--w:99.3%"></div></div>
+            <div class="bench-value">2.039s</div>
           </div>
           <div class="bench-row">
             <div class="engine-name rust">Rust</div>
-            <div class="track"><div class="bar rust" style="--w:82.6%"></div></div>
-            <div class="bench-value">2.643s</div>
+            <div class="track"><div class="bar rust" style="--w:58.2%"></div></div>
+            <div class="bench-value">1.195s</div>
           </div>
         </div>
-        <div class="axis"><span>0s</span><span>0.8s</span><span>1.6s</span><span>2.4s</span><span>3.2s</span></div>
+        <div class="axis"><span>0s</span><span>0.5s</span><span>1.0s</span><span>1.5s</span><span>2.1s</span></div>
 
         <div class="workload">
           <span>100 instruments</span>
@@ -569,11 +577,11 @@
       </article>
 
       <aside class="card">
-        <div class="metric-kicker">Median speedup</div>
-        <div class="big-number">1.07×</div>
-        <div class="result-copy">Rust가 중앙값 기준 <strong>6.48%</strong> 빠르게 완료했습니다.</div>
+        <div class="metric-kicker">Python 대비</div>
+        <div class="big-number">1.72×</div>
+        <div class="result-copy">Persistent Rust가 실행 시간을 <strong>41.8%</strong> 줄였습니다.</div>
         <div class="delta">
-          <div><span>절약 시간</span><strong>183ms</strong></div>
+          <div><span>절약 시간</span><strong>859ms</strong></div>
           <div><span>결과 차이</span><strong style="color:var(--green)">0</strong></div>
         </div>
         <div class="small-result">
@@ -584,128 +592,110 @@
       </aside>
     </section>
 
-    <section class="section card">
+    <section class="section card target">
       <div class="section-title">
         <div>
           <div class="metric-kicker">Current architecture</div>
-          <h2>왜 6.5%밖에 차이가 안 날까?</h2>
+          <h2>지금 실행되는 구조</h2>
         </div>
-        <p>Rust가 담당하는 구간은 전체 파이프라인의 일부</p>
+        <p>부분 가속기 → Persistent Rust Engine</p>
       </div>
 
-      <div class="current-flow" aria-label="현재 백테스트 실행 경로">
-        <div class="current-node">
-          <div class="current-node-head"><strong>Python Engine</strong><span class="scope">STATE</span></div>
-          <h3>세션과 시장 상태를 준비합니다.</h3>
-          <p>DataFeed를 읽고 이벤트 큐와 히스토리를 갱신합니다.</p>
-          <div class="current-chips"><span>DataFeed</span><span>Queue</span><span>History</span></div>
+      <div class="target-flow" aria-label="현재 persistent 백테스트 실행 경로">
+        <div class="target-node">
+          <h3>Python Strategy</h3>
+          <p>선언된 callback에서 전략 판단만 반환합니다.</p>
+          <div class="chips"><span>Requirements</span><span>Decision</span></div>
         </div>
         <div class="arrow">→</div>
-        <div class="current-node">
-          <div class="current-node-head"><strong>Python Strategy</strong><span class="scope">DECISION</span></div>
-          <h3>전략을 호출하고 주문을 만듭니다.</h3>
-          <p>스냅샷을 Python 객체로 전달해 목표와 실행 정책을 결정합니다.</p>
-          <div class="current-chips"><span>Dispatch</span><span>Router</span><span>Orders</span></div>
+        <div class="target-node core">
+          <h3 style="color:var(--green)">Persistent Rust Engine</h3>
+          <p>세션 사이 상태와 callback token lifecycle을 단일 소유합니다.</p>
+          <div class="chips"><span>Orders</span><span>Positions</span><span>History</span><span>Routing</span><span>Queue</span><span>Accounting</span></div>
         </div>
         <div class="arrow">→</div>
-        <div class="current-node rust">
-          <div class="current-node-head"><strong>Rust Session Core</strong><span class="scope">PARTIAL</span></div>
-          <h3>한 세션의 체결 계획만 계산합니다.</h3>
-          <p>마샬링된 주문과 Bar를 받아 op 목록을 반환합니다.</p>
-          <div class="current-chips"><span>Quote</span><span>Group</span><span>Fill Plan</span></div>
-        </div>
-        <div class="arrow">→</div>
-        <div class="current-node">
-          <div class="current-node-head"><strong>Python Apply</strong><span class="scope">RESULT</span></div>
-          <h3>op를 다시 Python 이벤트로 복원합니다.</h3>
-          <p>체결·회계·저장과 포트폴리오 스냅샷을 처리합니다.</p>
-          <div class="current-chips"><span>FillEvent</span><span>Accounting</span><span>EventStore</span></div>
+        <div class="target-node">
+          <h3>Python Result</h3>
+          <p>종료 batch를 받고 주문·체결을 요청 시점에 materialize합니다.</p>
+          <div class="chips"><span>Metrics</span><span>Lazy tuples</span><span>Trace</span></div>
         </div>
       </div>
 
-      <div class="current-steps" aria-label="현재 구조의 네 가지 성능 특성">
-        <div class="current-step"><span>STEP 1 · PYTHON</span><strong>세션마다 전략과 라우터 실행</strong></div>
-        <div class="current-step hot"><span>STEP 2 · FFI</span><strong>주문·Bar를 tuple/dict로 변환</strong></div>
-        <div class="current-step hot"><span>STEP 3 · RUST</span><strong>지속 상태 없이 한 세션만 계산</strong></div>
-        <div class="current-step"><span>STEP 4 · PYTHON</span><strong>op마다 객체·이벤트를 다시 생성</strong></div>
+      <div class="current-steps" aria-label="완료된 마이그레이션 단계">
+        <div class="current-step"><span>M1 · STATE</span><strong>주문·포트폴리오 지속 상태</strong></div>
+        <div class="current-step"><span>M2 · ROUTER</span><strong>Decision과 주문 lifecycle</strong></div>
+        <div class="current-step"><span>M3–M4 · LOOP</span><strong>Feed·History·Queue·Callback</strong></div>
+        <div class="current-step"><span>M5 · RESULT</span><strong>Compact store와 lazy batch</strong></div>
       </div>
 
-      <div class="insight"><strong>핵심:</strong> 세션마다 주문과 Bar를 Python tuple/dict로 만들고 Rust로 넘긴 뒤, 반환된 op를 다시 Python 이벤트로 복원합니다. Rust 계산 이득의 일부가 이 왕복 비용으로 상쇄됩니다.</div>
+      <div class="insight"><strong>승격:</strong> 이제 <code>BacktestEngine(..., core="rust")</code>가 persistent runtime을 선택합니다. 구 세션 코어는 <code>rust_legacy</code>로만 접근 가능하며 deprecation warning을 냅니다.</div>
     </section>
 
     <section class="section grid two-col">
       <article class="card">
         <div class="section-title">
           <div>
-            <div class="metric-kicker">Existing cProfile breakdown</div>
-            <h2>남아 있는 비용</h2>
+            <div class="metric-kicker">300 instruments · scaled KRX path</div>
+            <h2>규모를 3배로 키우면</h2>
           </div>
         </div>
-        <div class="donut-layout">
-          <div class="donut" role="img" aria-label="기존 프로파일 누적 비용 9.4초">
-            <div class="donut-center"><strong>9.4s</strong><span>누적 프로파일</span></div>
+        <div class="benchmark" role="img" aria-label="300종목 Python 5.312초, Legacy Rust 5.457초, Persistent Rust 3.282초">
+          <div class="bench-row">
+            <div class="engine-name python">Python</div>
+            <div class="track"><div class="bar python" style="--w:97.3%"></div></div>
+            <div class="bench-value">5.312s</div>
           </div>
-          <div class="legend">
-            <div class="legend-row" style="--c:var(--rust)"><i></i><span>Python↔Rust 마샬링</span><strong>3.0s</strong></div>
-            <div class="legend-row" style="--c:var(--violet)"><i></i><span>전략 dispatch·라우터</span><strong>2.4s</strong></div>
-            <div class="legend-row" style="--c:var(--cyan)"><i></i><span>히스토리 append</span><strong>1.6s</strong></div>
-            <div class="legend-row" style="--c:var(--green)"><i></i><span>포트폴리오 스냅샷</span><strong>1.6s</strong></div>
-            <div class="legend-row" style="--c:var(--pink)"><i></i><span>Python 이벤트 큐</span><strong>0.8s</strong></div>
+          <div class="bench-row">
+            <div class="engine-name legacy">Legacy</div>
+            <div class="track"><div class="bar legacy" style="--w:100%"></div></div>
+            <div class="bench-value">5.457s</div>
+          </div>
+          <div class="bench-row">
+            <div class="engine-name rust">Rust</div>
+            <div class="track"><div class="bar rust" style="--w:60.1%"></div></div>
+            <div class="bench-value">3.282s</div>
           </div>
         </div>
+        <div class="insight"><strong>결과:</strong> Python 대비 <strong>1.618×</strong>. 2× 목표에는 아직 19.1%의 실행 시간 절감이 더 필요하지만 최소 1.5× 게이트는 통과했습니다.</div>
       </article>
 
       <article class="card">
-        <div class="metric-kicker">Small real fixture</div>
-        <h2 style="margin:6px 0 8px">작은 작업은 사실상 동률</h2>
-        <p style="color:var(--muted);font-size:14px">4종목 fixture에서는 FFI 고정 비용이 계산 이득보다 커질 수 있습니다.</p>
+        <div class="metric-kicker">Compatibility & memory</div>
+        <h2 style="margin:6px 0 8px">공개 동작은 그대로</h2>
+        <p style="color:var(--muted);font-size:14px">전체 EventStore trace, ID, 오류 순서와 BacktestResult tuple API를 Python reference와 동일하게 유지합니다.</p>
         <div class="small-result">
-          <div><span>Python</span><strong style="color:var(--python)">0.1737s</strong></div>
-          <div><span>Rust</span><strong style="color:var(--rust)">0.1787s</strong></div>
-          <div><span>Rust 변화</span><strong>+2.9%</strong></div>
+          <div><span>Peak RSS 비율</span><strong style="color:var(--green)">1.169×</strong></div>
+          <div><span>허용 기준</span><strong>≤ 1.25×</strong></div>
+          <div><span>Trace 차이</span><strong style="color:var(--green)">0</strong></div>
         </div>
-        <div class="insight" style="margin-top:18px"><strong>해석:</strong> 현재 구조에서는 워크로드에 따라 대략 0~10% 차이가 자연스럽습니다. 중앙값 6.5%는 구조적 한계와 측정 편차를 함께 반영합니다.</div>
+        <div class="small-result">
+          <div><span>실제 fixture</span><strong>4종목</strong></div>
+          <div><span>Python</span><strong style="color:var(--python)">0.143s</strong></div>
+          <div><span>Rust</span><strong style="color:var(--rust)">0.105s</strong></div>
+        </div>
+        <div class="insight" style="margin-top:18px"><strong>데이터 범위:</strong> 저장소 fixture의 전 기간 완주 종목은 4개입니다. 100/300 수치는 실제 KRX 가격 경로를 결정론적으로 복제한 주문 집중 확장 부하입니다.</div>
       </article>
     </section>
 
-    <section class="section card target">
+    <section class="section card">
       <div class="section-title">
         <div>
-          <div class="metric-kicker">Target architecture</div>
-          <h2>2× 이상을 원한다면</h2>
+          <div class="metric-kicker">M6 hardening</div>
+          <h2>승격 전에 잠근 것</h2>
         </div>
-        <p>부분 가속기 → 지속 상태 Rust 엔진</p>
+        <p>실패도 결정론적으로</p>
       </div>
-
-      <div class="target-flow">
-        <div class="target-node">
-          <h3>Python</h3>
-          <p>전략 설정과 필요한 시점의 콜백만 담당합니다.</p>
-        </div>
-        <div class="arrow">→</div>
-        <div class="target-node core">
-          <h3 style="color:var(--green)">Persistent Rust Engine</h3>
-          <p>세션 사이에도 상태를 유지하고 여러 세션을 한 번에 처리합니다.</p>
-          <div class="chips"><span>Orders</span><span>Positions</span><span>History</span><span>Routing</span><span>Queue</span><span>Accounting</span></div>
-        </div>
-        <div class="arrow">→</div>
-        <div class="target-node">
-          <h3>Python</h3>
-          <p>체결·스냅샷을 일괄 수신해 분석과 리포트를 만듭니다.</p>
-        </div>
-      </div>
-
       <div class="facts">
-        <div class="fact"><span>Step 1</span><strong>Rust 상태를 세션 간 유지</strong></div>
-        <div class="fact"><span>Step 2</span><strong>여러 세션 배치 처리</strong></div>
-        <div class="fact"><span>Step 3</span><strong>이벤트를 묶어서 반환</strong></div>
-        <div class="fact"><span>Step 4</span><strong>전략 콜백 횟수 축소</strong></div>
+        <div class="fact"><span>Panic boundary</span><strong>RustCorePanic으로 변환</strong></div>
+        <div class="fact"><span>Poison</span><strong>FAILED + partial trace</strong></div>
+        <div class="fact"><span>Edge cases</span><strong>빈 feed·halt·missing·GTC</strong></div>
+        <div class="fact"><span>Fallback</span><strong>Python reference 유지</strong></div>
       </div>
     </section>
 
     <footer>
       <span>Ryzen 5 5600X · 16GB RAM · Python 3.11 · Rust 1.93 · Windows 10</span>
-      <span>engine.run() wall-clock · 데이터 로딩 제외 · commit f93c4f5</span>
+      <span>engine.run() wall-clock · 데이터 로딩 제외 · M6 promotion benchmark</span>
     </footer>
   </main>
 </body>

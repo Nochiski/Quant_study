@@ -1,7 +1,8 @@
 use crate::buying_power::BuyingPower;
 use crate::execution::execution_price;
 use crate::quote::{liquidity_cap, quote_numbers};
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyDeprecationWarning, PyValueError};
+use pyo3::ffi::c_str;
 use pyo3::prelude::*;
 use std::collections::HashMap;
 
@@ -360,10 +361,8 @@ impl<'a> Session<'a> {
 }
 
 /// 세션 MARKET 처리 계획. 그룹(순서대로) → 단일(매도 먼저, order_id 순) → DAY/IOC/FOK 만료.
-#[pyfunction]
-#[pyo3(signature = (ts, entries, groups, bars, power, fee_rate, default_participation, slippage))]
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn process_market(
+pub(crate) fn process_market_impl(
     ts: &str,
     entries: Vec<EntryTuple>,
     groups: Vec<(String, String, Vec<String>)>,
@@ -429,6 +428,38 @@ pub(crate) fn process_market(
         session.update(&e.order_id, "cancelled", Some(reason));
     }
     Ok(session.ops)
+}
+
+#[pyfunction]
+#[pyo3(signature = (ts, entries, groups, bars, power, fee_rate, default_participation, slippage))]
+#[allow(clippy::too_many_arguments)]
+fn process_market(
+    py: Python<'_>,
+    ts: &str,
+    entries: Vec<EntryTuple>,
+    groups: Vec<(String, String, Vec<String>)>,
+    bars: HashMap<String, BarTuple>,
+    power: &mut BuyingPower,
+    fee_rate: f64,
+    default_participation: Option<&str>,
+    slippage: (String, f64, f64),
+) -> PyResult<Vec<Op>> {
+    PyErr::warn(
+        py,
+        &py.get_type::<PyDeprecationWarning>(),
+        c_str!("backtest_core.process_market() is deprecated; use PersistentEngine"),
+        2,
+    )?;
+    process_market_impl(
+        ts,
+        entries,
+        groups,
+        bars,
+        power,
+        fee_rate,
+        default_participation,
+        slippage,
+    )
 }
 
 pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {

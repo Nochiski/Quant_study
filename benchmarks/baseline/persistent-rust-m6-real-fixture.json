@@ -1,0 +1,52 @@
+{
+  "workload": {
+    "instruments": 4,
+    "sessions": 1231,
+    "bars": 4924,
+    "rebalance_every": 5,
+    "synthetic": false,
+    "repeat": 3,
+    "warmup": 1
+  },
+  "cores": {
+    "python": {
+      "samples_seconds": [
+        0.19140810007229447,
+        0.142606099601835,
+        0.13819599989801645
+      ],
+      "median_seconds": 0.142606099601835,
+      "speedup_vs_python": 1.0,
+      "final_equity": 2739581587.6749997,
+      "orders": 982,
+      "fills": 978,
+      "process_peak_rss_bytes": 73150464
+    },
+    "rust_legacy": {
+      "samples_seconds": [
+        0.1638444997370243,
+        0.14605520013719797,
+        0.157687499653548
+      ],
+      "median_seconds": 0.157687499653548,
+      "speedup_vs_python": 0.904358937234416,
+      "final_equity": 2739581587.6749997,
+      "orders": 982,
+      "fills": 978,
+      "process_peak_rss_bytes": 73150464
+    },
+    "rust": {
+      "samples_seconds": [
+        0.10452840011566877,
+        0.09815589990466833,
+        0.12246139999479055
+      ],
+      "median_seconds": 0.10452840011566877,
+      "speedup_vs_python": 1.3642808982442123,
+      "final_equity": 2739581587.6749997,
+      "orders": 982,
+      "fills": 978,
+      "process_peak_rss_bytes": 73150464
+    }
+  }
+}

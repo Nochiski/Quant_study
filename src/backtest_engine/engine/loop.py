@@ -15,6 +15,7 @@ EventStore에 자동으로 남는다.
 from __future__ import annotations
 
 import importlib
+import warnings
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from datetime import datetime
@@ -37,6 +38,8 @@ from backtest_engine.engine.context import (
     RustStrategyContext,
 )
 from backtest_engine.engine.core import (
+    PERSISTENT_RUST_CORES,
+    RUST_CORES,
     BuyingPowerTracker,
     PersistentOrderManager,
     PersistentPortfolio,
@@ -79,6 +82,7 @@ from backtest_engine.errors import (
     CorporateActionsNotProvided,
     CorporateActionWithoutBar,
     EquityWipedOut,
+    RustCorePanic,
     UndeclaredFeatureUsed,
 )
 from backtest_engine.ports.execution import SlippageModel
@@ -129,7 +133,7 @@ class _Run:
         allow_margin = EngineFeature.MARGIN in requirements.features
         self.persistent_runtime: Any | None = None
         self.persistent_session_indices: dict[datetime, int] = {}
-        if core == "rust_persistent":
+        if core in PERSISTENT_RUST_CORES:
             persistent_runtime = make_persistent_runtime(
                 config.initial_cash,
                 allow_short=allow_short,
@@ -158,7 +162,7 @@ class _Run:
         # Rust 코어는 내장 슬리피지만 지원한다 — 첫 세션이 아니라 run 시작에 거절한다.
         self.rust_slippage = (
             slippage_config(self.slippage_model)
-            if core in ("rust", "rust_persistent")
+            if core in RUST_CORES
             else None
         )
         self.broker = BrokerSim(
@@ -170,7 +174,7 @@ class _Run:
         )
         self.router = (
             None
-            if core == "rust_persistent"
+            if core in PERSISTENT_RUST_CORES
             else DecisionRouter(
                 requirements.actions, self.order_manager, requirements.features
             )
@@ -212,8 +216,8 @@ class BacktestEngine:
             slippage: 체결가 슬리피지 모델. 기본 NoSlippage.
             max_participation: 세션 거래량 대비 체결 상한 (0, 1]. None이면 무제한.
                 Action의 ExecutionPolicy.max_participation이 있으면 그 값이 우선한다.
-            core: 체결 가격 규칙·포트폴리오 회계 구현. "python"(기본) 또는 "rust"
-                (backtest_core 확장 필요, 없으면 CoreUnavailable).
+            core: "python"(기본) 또는 persistent 엔진인 "rust". 전환 호환 alias는
+                "rust_persistent", 구 세션 코어는 deprecated "rust_legacy"다.
         """
         self._config = config
         self._capabilities = (
@@ -254,17 +258,55 @@ class BacktestEngine:
                 전달된다. 사건 세션에 해당 종목 Bar가 없으면 CorporateActionWithoutBar.
             universe: 세션별 상장 종목 구간. 주면 ctx.universe()가 그 세션 구성을 돌려준다.
         """
+        if self._core == "rust_legacy":
+            warnings.warn(
+                'core="rust_legacy" and backtest_core.process_market() are deprecated; '
+                'use core="rust"',
+                DeprecationWarning,
+                stacklevel=2,
+            )
         # 1. Capability 검증은 첫 Bar를 읽기 전, 전략 등록 직후 수행한다.
         validated = prepare_strategy(strategy, self._capabilities)
-        run = _Run(
-            self._config,
-            validated.strategy,
-            validated.requirements,
-            self._slippage,
-            self._max_participation,
-            self._core,
-        )
+        try:
+            run = _Run(
+                self._config,
+                validated.strategy,
+                validated.requirements,
+                self._slippage,
+                self._max_participation,
+                self._core,
+            )
+        except BaseException as error:
+            self._raise_if_rust_panic(error, None)
+            raise
         self._event_store = run.store
+        try:
+            return self._execute(run, feed, corporate_actions, universe)
+        except BaseException as error:
+            self._raise_if_rust_panic(error, run.persistent_runtime)
+            raise
+
+    @staticmethod
+    def _raise_if_rust_panic(error: BaseException, runtime: Any | None) -> None:
+        error_type = type(error)
+        if error_type.__name__ != "PanicException" or error_type.__module__ != "pyo3_runtime":
+            return
+        detail = f"Rust core panic — {error}"
+        if runtime is not None:
+            try:
+                runtime.poison(detail)
+            except BaseException:
+                # 원래 panic을 안정적인 엔진 예외로 바꾸는 것이 우선이다.
+                pass
+        raise RustCorePanic(detail) from error
+
+    def _execute(
+        self,
+        run: _Run,
+        feed: DataFeed,
+        corporate_actions: Iterable[CorporateActionEvent] | None,
+        universe: UniverseResult | None,
+    ) -> BacktestResult:
         run.universe = universe
         if run.persistent_runtime is not None:
             self._load_persistent_feed(run, feed)
@@ -311,7 +353,7 @@ class BacktestEngine:
                 case MarketArrived(snapshot=snapshot):
                     self._on_market(run, snapshot)
                 case FillOccurred(fill=fill, snapshot=snapshot):
-                    if run.core != "rust_persistent":
+                    if run.persistent_runtime is None:
                         run.portfolio.apply(fill)
                     run.store.append(fill.ts, RecordKind.FILL, fill)
                 case CompactFillOccurred(fill=fill, snapshot=_snapshot):
@@ -494,12 +536,12 @@ class BacktestEngine:
         for action in run.corporate_actions.get(snapshot.ts, ()):
             self._apply_corporate_action(run, action, snapshot, update)
 
-        if run.core == "rust_persistent":
+        if run.persistent_runtime is not None:
             self._on_market_persistent(run, snapshot, update)
             run.queue.push(snapshot.ts, EventPriority.SESSION_CLOSE, SessionClose(snapshot))
             return
 
-        if run.core == "rust":
+        if run.core == "rust_legacy":
             self._on_market_rust(run, snapshot, update)
             run.queue.push(snapshot.ts, EventPriority.SESSION_CLOSE, SessionClose(snapshot))
             return

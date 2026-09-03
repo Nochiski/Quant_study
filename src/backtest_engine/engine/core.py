@@ -46,8 +46,9 @@ from backtest_engine.types.portfolio import PortfolioSnapshot, Position
 from backtest_engine.types.requirements import EverySession, MonthEndSession, Schedule
 from backtest_engine.types.results import RunConfig
 
-CORES = ("python", "rust", "rust_persistent")
-RUST_CORES = frozenset({"rust", "rust_persistent"})
+CORES = ("python", "rust", "rust_legacy", "rust_persistent")
+RUST_CORES = frozenset({"rust", "rust_legacy", "rust_persistent"})
+PERSISTENT_RUST_CORES = frozenset({"rust", "rust_persistent"})
 
 
 class PortfolioLedger(Protocol):
@@ -754,9 +755,9 @@ def make_portfolio(
     core: str, initial_cash: float, *, allow_short: bool = False, allow_margin: bool = False
 ) -> PortfolioLedger:
     _require_core(core)
-    if core == "rust":
+    if core == "rust_legacy":
         return RustPortfolio(initial_cash, allow_short=allow_short, allow_margin=allow_margin)
-    if core == "rust_persistent":
+    if core in PERSISTENT_RUST_CORES:
         runtime = make_persistent_runtime(
             initial_cash,
             allow_short=allow_short,

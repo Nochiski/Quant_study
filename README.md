@@ -79,14 +79,15 @@ Requirements → Capability 검증 → StrategyEvent + 읽기 전용 Context
   기록, equity < 0이면 `EquityWipedOut`), `BasketAction`은 leg를 함께 견적해 BEST_EFFORT /
   ALL_OR_NONE / PROPORTIONAL로 판정한다. 이제 Action·Feature 축에 `NOT_IMPLEMENTED`가 없고
   TIMER 이벤트·`MonthEndSession`만 남는다.
-- 6a Rust 코어(`docs/superpowers/specs/2026-08-29-rust-core-design.md`): `rust/backtest_core`
-  (PyO3)가 체결 가격 규칙·수량 변환·포트폴리오 회계를 제공하고 `BacktestEngine(core="rust")`로
-  켠다. Python 구현이 진실 원천이며 `tests/test_core_parity.py`가 두 코어의 결과를 레코드
-  단위로 고정한다(확장 없으면 skip). 6b(견적 산술·매수 여력)·6c(세션 MARKET 처리 계획)까지
-  옮겼고 주문 생명주기 11시나리오가 레코드 단위로 비트 동일하다. 6d는 다종목 벤치마크
-  (`scripts/bench_universe.py`, 100종목·1,231세션·주문 23k)로 병목을 먼저 쟀다 — 큐가 아니라
-  스냅샷·포트폴리오의 선형 종목 조회였고, dict 인덱스·스냅샷 메모로 python 15.1s→2.1s,
-  rust 8.8s→1.9s. Rust 세션 루프 이전은 측정 결과로 닫았다.
+- Persistent Rust 엔진(`docs/superpowers/specs/2026-09-01-persistent-rust-engine-implementation.md`):
+  `BacktestEngine(core="rust")`는 세션 사이 주문·그룹·포트폴리오·feed/history·라우터·큐·callback
+  lifecycle·compact result store를 Rust 메모리에 유지한다. Python은 전략 callback과 공개 API를
+  담당하고 `BacktestResult.orders/fills`는 최초 조회 시 기존 tuple로 materialize된다. Python
+  reference와 전체 EventStore trace를 고정한 상태에서 100종목 주문 집중 부하는 1.719배,
+  300종목 확장 부하는 1.618배 빨랐다. `rust_persistent`는 전환 호환 alias이고, 구 세션 단위
+  구현은 `rust_legacy`로만 남아 deprecation warning을 낸다. 최소 1.5배 게이트는 통과했지만
+  2배와 세션당 FFI 0회는 후속 최적화 목표다. 측정과 구조는
+  [HTML 벤치마크 리포트](docs/rust-python-benchmark-report.html)에 시각화했다.
 - 데이터 후속(D, `docs/superpowers/specs/2026-08-29-data-followups-design.md`): 원장의
   상장주식수 변화로 액면분할·병합을 검출해 `run(corporate_actions=)`로 넘기면 엔진이 사건
   세션 시작에 보유 수량·평균단가를 조정하고(단주는 시가 현금 정산) 대기 주문을 취소한다.

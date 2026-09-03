@@ -54,6 +54,10 @@ class CoreUnavailable(EngineError):
     """요청한 코어(core="rust" 등)가 설치돼 있지 않거나 알 수 없는 이름. 조용한 fallback 금지."""
 
 
+class RustCorePanic(EngineError):
+    """Rust 경계의 panic을 runtime poison 후 정상 Python 예외로 변환한 오류."""
+
+
 class SchemaVersionMismatch(EngineError):
     """StrategyDecision.schema_version이 엔진이 아는 버전과 다름."""
 

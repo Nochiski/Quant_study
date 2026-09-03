@@ -18,8 +18,10 @@ app -> pages -> widgets -> features -> entities -> shared
 - 서버 데이터는 query cache가 소유하고, 저장된 응답을 client store에 복제하지 않는다.
 - frontend에서 지표·팩터·전략 의미를 다시 계산하지 않는다. 백엔드 응답을 표현한다.
 
-초기 구현은 Quick Builder와 Advanced Graph가 같은 StrategySpec draft를 편집하게 한다.
-그래프 좌표·패널 열림 상태 같은 UI metadata는 spec과 분리한다.
+Quick Builder와 Advanced Graph는 같은 StrategySpec draft를 편집한다. 데이터 단계는 backend
+catalog에서 필드의 단위·공개 시점·권장 lag·coverage·근거를 읽고, 실제 0·원천 생략 0·결측·
+미수집·coverage gap을 PIT panel에서 별도 상태로 표시한다. 그래프 좌표·패널 열림 상태 같은
+UI metadata는 spec과 분리한다.
 
 ## 개발
 
@@ -36,6 +38,9 @@ npm run lint
 npm run test
 npm run build
 ```
+
+`npm run test`에는 임의 포트의 실제 FastAPI 프로세스를 띄워 UI→generated SDK→PIT mock adapter를
+검증하는 E2E가 포함된다. 먼저 `backend`에서 `uv sync`를 실행해 `.venv`를 준비해야 한다.
 
 OpenAPI 생성물은 `src/shared/api/generated`에만 있고 앱 코드는 `shared/api` gateway를 통해서만
 접근한다. `npm run api:generate` 뒤 diff가 생기면 backend 계약과 생성물을 같은 변경으로 커밋한다.

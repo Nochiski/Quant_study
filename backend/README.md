@@ -40,7 +40,7 @@ backend/
    ├─ domain/equity/                       # PIT 데이터 값 타입과 query/result
    │  └─ facade/research_data.py
    ├─ domain/strategy/                     # StrategySpec v1, hash, validation, explanation
-   ├─ application/equity_workspace/        # 카탈로그·preview 유스케이스
+   ├─ application/equity_workspace/        # 검색 catalog·universe/panel PIT preview
    │  ├─ ports/outgoing/equity_data.py     # EquityDataPort
    │  └─ facade/{ports,workspace}.py
    ├─ application/strategy_design/          # create/get/revise/validate/explain
@@ -64,3 +64,12 @@ uv run pyright
 uv run uvicorn strategy_workbench.bootstrap.facade.http:app --reload
 uv run python scripts/export_openapi.py openapi.json
 ```
+
+Equity mock HTTP 계약은 다음 세 경로로 분리한다.
+
+- `GET /api/v1/equity/catalog`: 검색·dataset/unit/frequency 필터·pagination과 snapshot/field capability
+- `POST /api/v1/equity/universe/preview`: 과거 시점별 구성 종목과 세션 coverage summary
+- `POST /api/v1/equity/panel/preview`: row/column 제한, 비용 추정, PIT cell과 확인이 필요한 위험
+
+권장 lag보다 짧은 override와 불완전 coverage는 backend가 구조화된 warning으로 판정한다.
+확인 전에는 panel cell을 반환하지 않으므로 frontend가 같은 규칙을 복제하지 않는다.

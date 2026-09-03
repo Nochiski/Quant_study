@@ -6,33 +6,13 @@ import { useStrategyDraft } from "../model/strategy-draft-context";
 import { AdvancedGraph } from "./advanced-graph";
 import { QuickEditor } from "./quick-editor";
 
-const pipeline = [
-  "strategy.pipeline.data",
-  "strategy.pipeline.factor",
-  "strategy.pipeline.portfolio",
-  "strategy.pipeline.risk",
-  "strategy.pipeline.execution",
-] as const;
-
 export const StrategyEditorWorkspace = () => {
   const [mode, setMode] = useState<"quick" | "advanced">("quick");
   const { dirty, savedRevision, validation, pending, notice, validate, save } =
     useStrategyDraft();
 
   return (
-    <div className="workbench">
-      <nav className="pipeline" aria-label="Strategy pipeline">
-        {pipeline.map((key, index) => (
-          <button
-            className={index === 1 ? "is-active" : ""}
-            key={key}
-            type="button"
-          >
-            {t(key)}
-          </button>
-        ))}
-      </nav>
-
+    <div className="factor-workspace">
       <div className="editor-toolbar">
         <div className="mode-tabs" role="tablist" aria-label="Editor mode">
           <button

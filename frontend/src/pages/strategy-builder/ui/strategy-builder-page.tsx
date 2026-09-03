@@ -1,15 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
-
-import { strategyWorkbenchApi } from "../../../shared/api";
+import { useDatasetCatalog } from "../../../entities/dataset";
 import { t } from "../../../shared/config";
 import { StrategyEditor } from "../../../widgets/strategy-editor";
 
 export const StrategyBuilderPage = () => {
-  const catalog = useQuery({
-    queryKey: ["equity", "catalog"],
-    queryFn: strategyWorkbenchApi.getEquityCatalog,
-    staleTime: 60_000,
-  });
+  const catalog = useDatasetCatalog({ page_size: 1 });
 
   return (
     <main>
@@ -26,7 +20,7 @@ export const StrategyBuilderPage = () => {
           </div>
           <div>
             <dt>Equity mock</dt>
-            <dd>{catalog.data?.fields.length ?? "—"} fields</dd>
+            <dd>{catalog.data?.total ?? "—"} fields</dd>
           </div>
           <div>
             <dt>Execution</dt>

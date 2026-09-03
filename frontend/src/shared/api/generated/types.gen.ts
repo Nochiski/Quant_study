@@ -97,7 +97,8 @@ export type DataFrequency = "daily";
 /**
  * DataLoadStatus
  */
-export type DataLoadStatus = "ok" | "no_data" | "invalid_query";
+export type DataLoadStatus =
+  "ok" | "no_data" | "invalid_query" | "confirmation_required";
 
 /**
  * DataSnapshot
@@ -107,6 +108,14 @@ export type DataSnapshot = {
    * Built At
    */
   built_at: string;
+  /**
+   * Dataset Revisions
+   */
+  dataset_revisions: Array<DatasetRevision>;
+  /**
+   * Point In Time
+   */
+  point_in_time: boolean;
   /**
    * Schema Version
    */
@@ -149,6 +158,7 @@ export type DatasetFieldProfile = {
    * Available Date Basis
    */
   available_date_basis: string;
+  coverage: FieldCoverageCapability;
   /**
    * Dataset Id
    */
@@ -158,9 +168,21 @@ export type DatasetFieldProfile = {
    */
   description: string;
   /**
+   * Disclosure Basis
+   */
+  disclosure_basis: string;
+  /**
+   * Evidence
+   */
+  evidence: string;
+  /**
    * Field Id
    */
   field_id: string;
+  /**
+   * Frequency
+   */
+  frequency: string;
   /**
    * Label
    */
@@ -173,6 +195,25 @@ export type DatasetFieldProfile = {
    * Unit
    */
   unit: string;
+  value_type: FieldValueType;
+};
+
+/**
+ * DatasetRevision
+ */
+export type DatasetRevision = {
+  /**
+   * As Of
+   */
+  as_of: string;
+  /**
+   * Dataset Id
+   */
+  dataset_id: string;
+  /**
+   * Revision
+   */
+  revision: string;
 };
 
 /**
@@ -277,6 +318,58 @@ export type FactorStep = {
 };
 
 /**
+ * FieldCatalogFacets
+ */
+export type FieldCatalogFacets = {
+  /**
+   * Dataset Ids
+   */
+  dataset_ids: Array<string>;
+  /**
+   * Frequencies
+   */
+  frequencies: Array<string>;
+  /**
+   * Units
+   */
+  units: Array<string>;
+};
+
+/**
+ * FieldCoverageCapability
+ */
+export type FieldCoverageCapability = {
+  /**
+   * Ends On
+   */
+  ends_on: string;
+  /**
+   * Estimated Coverage Pct
+   */
+  estimated_coverage_pct: number;
+  /**
+   * Point In Time
+   */
+  point_in_time: boolean;
+  /**
+   * Requires Confirmation
+   */
+  requires_confirmation?: boolean;
+  /**
+   * Starts On
+   */
+  starts_on: string;
+  /**
+   * Supported Cell Kinds
+   */
+  supported_cell_kinds: Array<CellKind>;
+  /**
+   * Venues
+   */
+  venues: Array<string>;
+};
+
+/**
  * FieldLag
  */
 export type FieldLag = {
@@ -307,6 +400,11 @@ export type FieldNode = {
    */
   node_id: string;
 };
+
+/**
+ * FieldValueType
+ */
+export type FieldValueType = "price" | "amount" | "ratio" | "count";
 
 /**
  * FloatParameter
@@ -389,6 +487,44 @@ export type Market = "KRX";
 export type OrderStyle = "market";
 
 /**
+ * PanelPreviewCostEstimate
+ */
+export type PanelPreviewCostEstimate = {
+  /**
+   * Estimated Bytes
+   */
+  estimated_bytes: number;
+  /**
+   * Estimated Cells
+   */
+  estimated_cells: number;
+  /**
+   * Requested Columns
+   */
+  requested_columns: number;
+  /**
+   * Requested Rows
+   */
+  requested_rows: number;
+  /**
+   * Returned Cells
+   */
+  returned_cells: number;
+  /**
+   * Returned Columns
+   */
+  returned_columns: number;
+  /**
+   * Returned Rows
+   */
+  returned_rows: number;
+  /**
+   * Session Count
+   */
+  session_count: number;
+};
+
+/**
  * ParameterNode
  */
 export type ParameterNode = {
@@ -433,11 +569,55 @@ export type RebalanceFrequency = "weekly" | "monthly" | "quarterly";
  * ResearchCatalog
  */
 export type ResearchCatalog = {
+  facets: FieldCatalogFacets;
   /**
    * Fields
    */
   fields: Array<DatasetFieldProfile>;
+  /**
+   * Page
+   */
+  page: number;
+  /**
+   * Page Count
+   */
+  page_count: number;
+  /**
+   * Page Size
+   */
+  page_size: number;
   snapshot: DataSnapshot;
+  /**
+   * Total
+   */
+  total: number;
+};
+
+/**
+ * ResearchDataWarning
+ */
+export type ResearchDataWarning = {
+  /**
+   * Code
+   */
+  code: string;
+  /**
+   * Field Id
+   */
+  field_id: string | null;
+  /**
+   * Message
+   */
+  message: string;
+  /**
+   * Requires Confirmation
+   */
+  requires_confirmation: boolean;
+  severity: ResearchWarningSeverity;
+  /**
+   * Warning Id
+   */
+  warning_id: string;
 };
 
 /**
@@ -469,6 +649,49 @@ export type ResearchPanelCell = {
    * Value
    */
   value: number | null;
+};
+
+/**
+ * ResearchPanelPreview
+ */
+export type ResearchPanelPreview = {
+  /**
+   * Confirmation Required
+   */
+  confirmation_required: boolean;
+  cost: PanelPreviewCostEstimate;
+  panel: ResearchPanelResult;
+  /**
+   * Truncated
+   */
+  truncated: boolean;
+  /**
+   * Warnings
+   */
+  warnings: Array<ResearchDataWarning>;
+};
+
+/**
+ * ResearchPanelPreviewRequest
+ */
+export type ResearchPanelPreviewRequest = {
+  /**
+   * Column Limit
+   */
+  column_limit?: number;
+  /**
+   * Confirmed Warning Ids
+   */
+  confirmed_warning_ids?: Array<string>;
+  query: ResearchPanelQuery;
+  /**
+   * Row Limit
+   */
+  row_limit?: number;
+  /**
+   * Venue
+   */
+  venue?: string;
 };
 
 /**
@@ -527,6 +750,11 @@ export type ResearchPreview = {
   panel: ResearchPanelResult;
   universe: UniverseHistoryResult;
 };
+
+/**
+ * ResearchWarningSeverity
+ */
+export type ResearchWarningSeverity = "info" | "warning";
 
 /**
  * ReviseStrategyRequest
@@ -725,6 +953,62 @@ export type UnaryNode = {
 export type UnaryOperator = "negate" | "lag" | "rank" | "zscore";
 
 /**
+ * UniverseCoverageSummary
+ */
+export type UniverseCoverageSummary = {
+  /**
+   * Average Members
+   */
+  average_members: number;
+  /**
+   * Covered Session Count
+   */
+  covered_session_count: number;
+  /**
+   * First Session
+   */
+  first_session: string | null;
+  /**
+   * Gap Session Count
+   */
+  gap_session_count: number;
+  /**
+   * Last Session
+   */
+  last_session: string | null;
+  /**
+   * Maximum Members
+   */
+  maximum_members: number;
+  /**
+   * Minimum Members
+   */
+  minimum_members: number;
+  /**
+   * Session Count
+   */
+  session_count: number;
+};
+
+/**
+ * UniverseHistoryQuery
+ */
+export type UniverseHistoryQuery = {
+  /**
+   * End
+   */
+  end: string;
+  /**
+   * Start
+   */
+  start: string;
+  /**
+   * Venue
+   */
+  venue: string;
+};
+
+/**
  * UniverseHistoryResult
  */
 export type UniverseHistoryResult = {
@@ -756,6 +1040,14 @@ export type UniversePoint = {
    * Session
    */
   session: string;
+};
+
+/**
+ * UniversePreview
+ */
+export type UniversePreview = {
+  coverage: UniverseCoverageSummary;
+  universe: UniverseHistoryResult;
 };
 
 /**
@@ -824,9 +1116,44 @@ export type WeightingMethod = "equal" | "factor_score" | "rank";
 export type GetEquityCatalogData = {
   body?: never;
   path?: never;
-  query?: never;
+  query?: {
+    /**
+     * Search
+     */
+    search?: string | null;
+    /**
+     * Dataset Id
+     */
+    dataset_id?: Array<string> | null;
+    /**
+     * Unit
+     */
+    unit?: Array<string> | null;
+    /**
+     * Frequency
+     */
+    frequency?: Array<string> | null;
+    /**
+     * Page
+     */
+    page?: number;
+    /**
+     * Page Size
+     */
+    page_size?: number;
+  };
   url: "/api/v1/equity/catalog";
 };
+
+export type GetEquityCatalogErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetEquityCatalogError =
+  GetEquityCatalogErrors[keyof GetEquityCatalogErrors];
 
 export type GetEquityCatalogResponses = {
   /**
@@ -837,6 +1164,33 @@ export type GetEquityCatalogResponses = {
 
 export type GetEquityCatalogResponse =
   GetEquityCatalogResponses[keyof GetEquityCatalogResponses];
+
+export type PreviewEquityPanelData = {
+  body: ResearchPanelPreviewRequest;
+  path?: never;
+  query?: never;
+  url: "/api/v1/equity/panel/preview";
+};
+
+export type PreviewEquityPanelErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type PreviewEquityPanelError =
+  PreviewEquityPanelErrors[keyof PreviewEquityPanelErrors];
+
+export type PreviewEquityPanelResponses = {
+  /**
+   * Successful Response
+   */
+  200: ResearchPanelPreview;
+};
+
+export type PreviewEquityPanelResponse =
+  PreviewEquityPanelResponses[keyof PreviewEquityPanelResponses];
 
 export type PreviewEquityDataData = {
   body: ResearchPanelQuery;
@@ -869,6 +1223,33 @@ export type PreviewEquityDataResponses = {
 
 export type PreviewEquityDataResponse =
   PreviewEquityDataResponses[keyof PreviewEquityDataResponses];
+
+export type PreviewEquityUniverseData = {
+  body: UniverseHistoryQuery;
+  path?: never;
+  query?: never;
+  url: "/api/v1/equity/universe/preview";
+};
+
+export type PreviewEquityUniverseErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type PreviewEquityUniverseError =
+  PreviewEquityUniverseErrors[keyof PreviewEquityUniverseErrors];
+
+export type PreviewEquityUniverseResponses = {
+  /**
+   * Successful Response
+   */
+  200: UniversePreview;
+};
+
+export type PreviewEquityUniverseResponse =
+  PreviewEquityUniverseResponses[keyof PreviewEquityUniverseResponses];
 
 export type GetHealthData = {
   body?: never;

@@ -1,38 +1,20 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import date
 
 from strategy_workbench.domain.equity.facade.research_data import (
-    CellKind,
     DataLoadStatus,
     DatasetFieldProfile,
     DataSnapshot,
     ResearchPanelCell,
     ResearchPanelQuery,
     ResearchPanelResult,
-    SecurityRef,
     UniverseHistoryQuery,
     UniverseHistoryResult,
     UniversePoint,
 )
 
-
-@dataclass(frozen=True)
-class _Membership:
-    security: SecurityRef
-    first_session: date
-    last_session: date
-
-
-@dataclass(frozen=True)
-class _Observation:
-    security_id: str
-    field_id: str
-    effective_date: date
-    available_date: date
-    value: float | None
-    kind: CellKind
+from ._fixture import Membership, Observation, build_demo_fixture
 
 
 class MockEquityDataAdapter:
@@ -44,8 +26,8 @@ class MockEquityDataAdapter:
         snapshot: DataSnapshot,
         sessions: tuple[date, ...],
         profiles: tuple[DatasetFieldProfile, ...],
-        memberships: tuple[_Membership, ...],
-        observations: tuple[_Observation, ...],
+        memberships: tuple[Membership, ...],
+        observations: tuple[Observation, ...],
     ) -> None:
         self._snapshot = snapshot
         self._sessions = sessions
@@ -55,154 +37,13 @@ class MockEquityDataAdapter:
 
     @classmethod
     def demo(cls) -> MockEquityDataAdapter:
-        sessions = tuple(date(2024, 1, day) for day in (2, 3, 4, 5, 8, 9, 10, 11, 12))
-        securities = (
-            SecurityRef("sec-005930-1", "005930", "삼성전자", "XKRX"),
-            SecurityRef("sec-000660-1", "000660", "SK하이닉스", "XKRX"),
-            SecurityRef("sec-035420-1", "035420", "NAVER", "XKRX"),
-        )
-        profiles = (
-            DatasetFieldProfile(
-                "price.close",
-                "price_daily",
-                "종가",
-                "KRW",
-                "session close",
-                0,
-                "KRX 원주가. 조정값은 별도 factor로 적용한다.",
-            ),
-            DatasetFieldProfile(
-                "price.market_cap",
-                "price_daily",
-                "시가총액",
-                "KRW",
-                "next session knowledge",
-                1,
-                "당일 값이지만 기본 연구 랙은 1 session이다.",
-            ),
-            DatasetFieldProfile(
-                "financial.book_equity",
-                "fin_std",
-                "자본총계",
-                "KRW",
-                "filing available_date",
-                0,
-                "공시 available_date 이후에만 보인다.",
-            ),
-            DatasetFieldProfile(
-                "consensus.forward_eps",
-                "consensus_daily",
-                "12개월 선행 EPS",
-                "KRW/share",
-                "first_seen_fetched_date",
-                0,
-                "관측점의 최초 수집 판본과 이후 revision을 보존한다.",
-            ),
-            DatasetFieldProfile(
-                "flow.foreign_net_buy",
-                "flow_daily",
-                "외국인 순매수",
-                "KRW",
-                "session",
-                0,
-                "원천 생략 0과 미수집을 CellKind로 구분한다.",
-            ),
-        )
-        memberships = (
-            _Membership(securities[0], sessions[0], sessions[-1]),
-            _Membership(securities[1], sessions[0], sessions[-1]),
-            _Membership(securities[2], sessions[2], sessions[-2]),
-        )
-        observations: list[_Observation] = []
-        for index, session in enumerate(sessions):
-            for security_index, security in enumerate(securities):
-                if security_index == 2 and session < sessions[2]:
-                    continue
-                observations.extend(
-                    (
-                        _Observation(
-                            security.security_id,
-                            "price.close",
-                            session,
-                            session,
-                            70_000.0 + security_index * 40_000.0 + index * 500.0,
-                            CellKind.OBSERVED,
-                        ),
-                        _Observation(
-                            security.security_id,
-                            "price.market_cap",
-                            session,
-                            session,
-                            400_000_000_000_000.0
-                            + security_index * 20_000_000_000_000.0
-                            + index * 1_000_000_000.0,
-                            CellKind.OBSERVED,
-                        ),
-                    )
-                )
-        observations.extend(
-            (
-                _Observation(
-                    securities[0].security_id,
-                    "financial.book_equity",
-                    date(2023, 12, 31),
-                    sessions[2],
-                    363_000_000_000_000.0,
-                    CellKind.OBSERVED,
-                ),
-                _Observation(
-                    securities[0].security_id,
-                    "consensus.forward_eps",
-                    sessions[0],
-                    sessions[1],
-                    5_000.0,
-                    CellKind.OBSERVED,
-                ),
-                _Observation(
-                    securities[0].security_id,
-                    "consensus.forward_eps",
-                    sessions[0],
-                    sessions[3],
-                    5_400.0,
-                    CellKind.OBSERVED,
-                ),
-                _Observation(
-                    securities[0].security_id,
-                    "flow.foreign_net_buy",
-                    sessions[1],
-                    sessions[1],
-                    0.0,
-                    CellKind.SOURCE_OMITTED_ZERO,
-                ),
-                _Observation(
-                    securities[1].security_id,
-                    "flow.foreign_net_buy",
-                    sessions[1],
-                    sessions[1],
-                    None,
-                    CellKind.MISSING,
-                ),
-                _Observation(
-                    securities[2].security_id,
-                    "flow.foreign_net_buy",
-                    sessions[4],
-                    sessions[4],
-                    None,
-                    CellKind.COVERAGE_GAP,
-                ),
-            )
-        )
+        fixture = build_demo_fixture()
         return cls(
-            snapshot=DataSnapshot(
-                snapshot_id="mock-equity-v0.2-20260903",
-                schema_version="equity-v0.2-mock",
-                built_at=datetime(2026, 9, 3, tzinfo=UTC),
-                source="deterministic-memory-fixture",
-            ),
-            sessions=sessions,
-            profiles=profiles,
-            memberships=memberships,
-            observations=tuple(observations),
+            snapshot=fixture.snapshot,
+            sessions=fixture.sessions,
+            profiles=fixture.profiles,
+            memberships=fixture.memberships,
+            observations=fixture.observations,
         )
 
     def snapshot(self) -> DataSnapshot:
@@ -311,7 +152,7 @@ class MockEquityDataAdapter:
         field_id: str,
         as_of: date,
         available_cutoff: date,
-    ) -> _Observation | None:
+    ) -> Observation | None:
         candidates = (
             observation
             for observation in self._observations

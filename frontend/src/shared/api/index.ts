@@ -1,9 +1,18 @@
 export {
+  configureStrategyWorkbenchApi,
   strategyWorkbenchApi,
+  type DataStep,
+  type DatasetFieldProfile,
+  type EquityCatalogQuery,
   type ResearchCatalog,
+  type ResearchPanelCell,
+  type ResearchPanelPreview,
+  type ResearchPanelPreviewRequest,
   type ResearchPanelQuery,
   type ResearchPreview,
   type SavedStrategy,
   type StrategySpec,
   type StrategyValidation,
+  type UniverseHistoryQuery,
+  type UniversePreview,
 } from "./strategy-workbench";

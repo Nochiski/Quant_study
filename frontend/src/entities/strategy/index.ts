@@ -1,4 +1,5 @@
 export type {
+  DataStep,
   SavedStrategy,
   StrategySpec,
   StrategyValidation,

@@ -10,6 +10,7 @@ import type {
   ExplainStrategyErrors,
   ExplainStrategyResponses,
   GetEquityCatalogData,
+  GetEquityCatalogErrors,
   GetEquityCatalogResponses,
   GetHealthData,
   GetHealthResponses,
@@ -21,6 +22,12 @@ import type {
   PreviewEquityDataData,
   PreviewEquityDataErrors,
   PreviewEquityDataResponses,
+  PreviewEquityPanelData,
+  PreviewEquityPanelErrors,
+  PreviewEquityPanelResponses,
+  PreviewEquityUniverseData,
+  PreviewEquityUniverseErrors,
+  PreviewEquityUniverseResponses,
   ReviseStrategyData,
   ReviseStrategyErrors,
   ReviseStrategyResponses,
@@ -55,9 +62,28 @@ export const getEquityCatalog = <ThrowOnError extends boolean = false>(
 ) =>
   (options?.client ?? client).get<
     GetEquityCatalogResponses,
-    unknown,
+    GetEquityCatalogErrors,
     ThrowOnError
   >({ url: "/api/v1/equity/catalog", ...options });
+
+/**
+ * Equity Panel Preview
+ */
+export const previewEquityPanel = <ThrowOnError extends boolean = false>(
+  options: Options<PreviewEquityPanelData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    PreviewEquityPanelResponses,
+    PreviewEquityPanelErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/equity/panel/preview",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
 
 /**
  * Equity Preview
@@ -71,6 +97,25 @@ export const previewEquityData = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     url: "/api/v1/equity/preview",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Equity Universe Preview
+ */
+export const previewEquityUniverse = <ThrowOnError extends boolean = false>(
+  options: Options<PreviewEquityUniverseData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    PreviewEquityUniverseResponses,
+    PreviewEquityUniverseErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/equity/universe/preview",
     ...options,
     headers: {
       "Content-Type": "application/json",

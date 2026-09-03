@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from typing import Annotated
 
 from fastapi import FastAPI, HTTPException, Query, status
 from fastapi.encoders import jsonable_encoder
@@ -8,8 +9,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from strategy_workbench.application.equity_workspace.facade.workspace import (
     EquityWorkspaceService,
+    FieldCatalogQuery,
     ResearchCatalog,
+    ResearchPanelPreview,
+    ResearchPanelPreviewRequest,
     ResearchPreview,
+    UniversePreview,
 )
 from strategy_workbench.application.strategy_design.facade.design import (
     InvalidStrategyError,
@@ -20,7 +25,10 @@ from strategy_workbench.application.strategy_design.facade.ports import (
     StrategyNotFoundError,
     StrategyRevisionConflictError,
 )
-from strategy_workbench.domain.equity.facade.research_data import ResearchPanelQuery
+from strategy_workbench.domain.equity.facade.research_data import (
+    ResearchPanelQuery,
+    UniverseHistoryQuery,
+)
 from strategy_workbench.domain.strategy.facade.explanation import StrategyExplanation
 from strategy_workbench.domain.strategy.facade.specification import StrategySpec
 from strategy_workbench.domain.strategy.facade.validation import StrategyValidation
@@ -59,8 +67,38 @@ def create_app(
         "/api/v1/equity/catalog",
         operation_id="getEquityCatalog",
     )
-    def equity_catalog() -> ResearchCatalog:
-        return equity_workspace.catalog()
+    def equity_catalog(
+        search: str | None = Query(default=None, min_length=1),
+        dataset_id: Annotated[list[str] | None, Query()] = None,
+        unit: Annotated[list[str] | None, Query()] = None,
+        frequency: Annotated[list[str] | None, Query()] = None,
+        page: int = Query(default=1, ge=1),
+        page_size: int = Query(default=20, ge=1, le=100),
+    ) -> ResearchCatalog:
+        return equity_workspace.catalog(
+            FieldCatalogQuery(
+                search=search,
+                dataset_ids=tuple(dataset_id or ()),
+                units=tuple(unit or ()),
+                frequencies=tuple(frequency or ()),
+                page=page,
+                page_size=page_size,
+            )
+        )
+
+    @app.post(
+        "/api/v1/equity/universe/preview",
+        operation_id="previewEquityUniverse",
+    )
+    def equity_universe_preview(query: UniverseHistoryQuery) -> UniversePreview:
+        return equity_workspace.preview_universe(query)
+
+    @app.post(
+        "/api/v1/equity/panel/preview",
+        operation_id="previewEquityPanel",
+    )
+    def equity_panel_preview(request: ResearchPanelPreviewRequest) -> ResearchPanelPreview:
+        return equity_workspace.preview_panel(request)
 
     @app.post(
         "/api/v1/equity/preview",

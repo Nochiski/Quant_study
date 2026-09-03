@@ -2,11 +2,11 @@
 
 > 작성: 2026-09-03
 >
-> 상태: M1 완료 — StrategySpec/OpenAPI/Builder 수직 슬라이스 완결
+> 상태: M2 완료 — Equity catalog/PIT preview 수직 슬라이스 완결
 >
-> 체크리스트: 150개 중 24개 완료, 126개 남음
+> 체크리스트: 150개 중 35개 완료, 115개 남음
 >
-> 다음 체크: M2-1 mock field catalog 검색·필터·pagination 계약
+> 다음 체크: M3-1 `domain.factor`와 FactorDefinition/FactorRegistry SoT
 > 진행 규칙: 구현·테스트·문서가 모두 끝난 항목만 `[x]`. 각 M 완료 시 이 머리말과 완료 기록을 갱신한다.
 
 ## 1. 결론
@@ -369,17 +369,17 @@ frontend 타입이 backend schema에서 생성된다.
 
 ### M2 — Equity catalog/preview 수직 슬라이스
 
-- [ ] mock field catalog를 API로 노출하고 검색/필터/pagination 계약 추가.
-- [ ] 데이터 snapshot과 field별 unit/availability/lag/coverage capability 반환.
-- [ ] universe history preview API와 session coverage summary 추가.
-- [ ] panel preview API에 row/column limit와 cost estimate 추가.
-- [ ] `dataset` entity와 query keys/hooks 추가.
-- [ ] Builder 데이터/유니버스 화면 추가.
-- [ ] field tooltip에 내용일/공개일/권장 lag/근거 표시.
-- [ ] actual zero, missing, not-collected, coverage-gap 시각 구분 추가.
-- [ ] coverage 부족·lag override warning 확인 UX 추가.
-- [ ] mock MSW가 아닌 실제 backend mock adapter를 쓰는 통합 테스트 추가.
-- [ ] PIT revision이 공개일 전 UI preview에 나타나지 않는 E2E 추가.
+- [x] mock field catalog를 API로 노출하고 검색/필터/pagination 계약 추가.
+- [x] 데이터 snapshot과 field별 unit/availability/lag/coverage capability 반환.
+- [x] universe history preview API와 session coverage summary 추가.
+- [x] panel preview API에 row/column limit와 cost estimate 추가.
+- [x] `dataset` entity와 query keys/hooks 추가.
+- [x] Builder 데이터/유니버스 화면 추가.
+- [x] field tooltip에 내용일/공개일/권장 lag/근거 표시.
+- [x] actual zero, missing, not-collected, coverage-gap 시각 구분 추가.
+- [x] coverage 부족·lag override warning 확인 UX 추가.
+- [x] mock MSW가 아닌 실제 backend mock adapter를 쓰는 통합 테스트 추가.
+- [x] PIT revision이 공개일 전 UI preview에 나타나지 않는 E2E 추가.
 
 완료 게이트: 실제 Equity DB 없이 데이터 선택 UX와 PIT 설명을 끝까지 검증할 수 있다.
 
@@ -615,6 +615,11 @@ Contract:
 - 2026-09-03 — M1 완료: immutable StrategySpec v1 typed DAG와 parameter contract, canonical hash,
   validation/explanation, in-memory revision repository, FastAPI endpoint, Quick/Advanced 공유 draft,
   dirty/validation/revision UX와 MSW wire 테스트를 추가.
+- 2026-09-03 — M2 완료: 검색·필터·pagination field catalog, snapshot/field capability,
+  universe coverage와 제한·비용이 있는 PIT panel preview API를 추가. Builder 데이터 화면에서
+  필드 근거와 lag를 선택하고 coverage/lag 위험을 명시적으로 확인하며, 실제 0·원천 생략 0·결측·
+  미수집·coverage gap을 구분한다. 실제 backend mock HTTP 통합 테스트와 공개일 전 revision이
+  노출되지 않는 UI→generated SDK→실제 FastAPI mock adapter E2E를 고정했다.
 
 체크 수는 이 문서의 완료/미완료 체크박스 기준으로 갱신한다. 설명 안의 예시 checkbox는 두지
 않아 수치가 실제 구현 단위와 일치하게 유지한다.

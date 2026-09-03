@@ -160,7 +160,8 @@
         "enum": [
           "ok",
           "no_data",
-          "invalid_query"
+          "invalid_query",
+          "confirmation_required"
         ],
         "title": "DataLoadStatus",
         "type": "string"
@@ -171,6 +172,17 @@
             "format": "date-time",
             "title": "Built At",
             "type": "string"
+          },
+          "dataset_revisions": {
+            "items": {
+              "$ref": "#/components/schemas/DatasetRevision"
+            },
+            "title": "Dataset Revisions",
+            "type": "array"
+          },
+          "point_in_time": {
+            "title": "Point In Time",
+            "type": "boolean"
           },
           "schema_version": {
             "title": "Schema Version",
@@ -189,7 +201,9 @@
           "snapshot_id",
           "schema_version",
           "built_at",
-          "source"
+          "source",
+          "point_in_time",
+          "dataset_revisions"
         ],
         "title": "DataSnapshot",
         "type": "object"
@@ -233,6 +247,9 @@
             "title": "Available Date Basis",
             "type": "string"
           },
+          "coverage": {
+            "$ref": "#/components/schemas/FieldCoverageCapability"
+          },
           "dataset_id": {
             "title": "Dataset Id",
             "type": "string"
@@ -241,8 +258,20 @@
             "title": "Description",
             "type": "string"
           },
+          "disclosure_basis": {
+            "title": "Disclosure Basis",
+            "type": "string"
+          },
+          "evidence": {
+            "title": "Evidence",
+            "type": "string"
+          },
           "field_id": {
             "title": "Field Id",
+            "type": "string"
+          },
+          "frequency": {
+            "title": "Frequency",
             "type": "string"
           },
           "label": {
@@ -256,6 +285,9 @@
           "unit": {
             "title": "Unit",
             "type": "string"
+          },
+          "value_type": {
+            "$ref": "#/components/schemas/FieldValueType"
           }
         },
         "required": [
@@ -263,11 +295,40 @@
           "dataset_id",
           "label",
           "unit",
+          "value_type",
+          "frequency",
           "available_date_basis",
           "recommended_lag_sessions",
-          "description"
+          "description",
+          "disclosure_basis",
+          "evidence",
+          "coverage"
         ],
         "title": "DatasetFieldProfile",
+        "type": "object"
+      },
+      "DatasetRevision": {
+        "properties": {
+          "as_of": {
+            "format": "date",
+            "title": "As Of",
+            "type": "string"
+          },
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dataset_id",
+          "revision",
+          "as_of"
+        ],
+        "title": "DatasetRevision",
         "type": "object"
       },
       "EligibilityRule": {
@@ -434,6 +495,89 @@
         "title": "FactorStep",
         "type": "object"
       },
+      "FieldCatalogFacets": {
+        "properties": {
+          "dataset_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Dataset Ids",
+            "type": "array"
+          },
+          "frequencies": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Frequencies",
+            "type": "array"
+          },
+          "units": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Units",
+            "type": "array"
+          }
+        },
+        "required": [
+          "dataset_ids",
+          "units",
+          "frequencies"
+        ],
+        "title": "FieldCatalogFacets",
+        "type": "object"
+      },
+      "FieldCoverageCapability": {
+        "properties": {
+          "ends_on": {
+            "format": "date",
+            "title": "Ends On",
+            "type": "string"
+          },
+          "estimated_coverage_pct": {
+            "title": "Estimated Coverage Pct",
+            "type": "number"
+          },
+          "point_in_time": {
+            "title": "Point In Time",
+            "type": "boolean"
+          },
+          "requires_confirmation": {
+            "default": false,
+            "title": "Requires Confirmation",
+            "type": "boolean"
+          },
+          "starts_on": {
+            "format": "date",
+            "title": "Starts On",
+            "type": "string"
+          },
+          "supported_cell_kinds": {
+            "items": {
+              "$ref": "#/components/schemas/CellKind"
+            },
+            "title": "Supported Cell Kinds",
+            "type": "array"
+          },
+          "venues": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Venues",
+            "type": "array"
+          }
+        },
+        "required": [
+          "starts_on",
+          "ends_on",
+          "venues",
+          "estimated_coverage_pct",
+          "supported_cell_kinds",
+          "point_in_time"
+        ],
+        "title": "FieldCoverageCapability",
+        "type": "object"
+      },
       "FieldLag": {
         "properties": {
           "field_id": {
@@ -475,6 +619,16 @@
         ],
         "title": "FieldNode",
         "type": "object"
+      },
+      "FieldValueType": {
+        "enum": [
+          "price",
+          "amount",
+          "ratio",
+          "count"
+        ],
+        "title": "FieldValueType",
+        "type": "string"
       },
       "FloatParameter": {
         "properties": {
@@ -587,6 +741,54 @@
         "title": "OrderStyle",
         "type": "string"
       },
+      "PanelPreviewCostEstimate": {
+        "properties": {
+          "estimated_bytes": {
+            "title": "Estimated Bytes",
+            "type": "integer"
+          },
+          "estimated_cells": {
+            "title": "Estimated Cells",
+            "type": "integer"
+          },
+          "requested_columns": {
+            "title": "Requested Columns",
+            "type": "integer"
+          },
+          "requested_rows": {
+            "title": "Requested Rows",
+            "type": "integer"
+          },
+          "returned_cells": {
+            "title": "Returned Cells",
+            "type": "integer"
+          },
+          "returned_columns": {
+            "title": "Returned Columns",
+            "type": "integer"
+          },
+          "returned_rows": {
+            "title": "Returned Rows",
+            "type": "integer"
+          },
+          "session_count": {
+            "title": "Session Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "session_count",
+          "requested_rows",
+          "requested_columns",
+          "estimated_cells",
+          "estimated_bytes",
+          "returned_rows",
+          "returned_columns",
+          "returned_cells"
+        ],
+        "title": "PanelPreviewCostEstimate",
+        "type": "object"
+      },
       "ParameterNode": {
         "properties": {
           "kind": {
@@ -653,6 +855,9 @@
       },
       "ResearchCatalog": {
         "properties": {
+          "facets": {
+            "$ref": "#/components/schemas/FieldCatalogFacets"
+          },
           "fields": {
             "items": {
               "$ref": "#/components/schemas/DatasetFieldProfile"
@@ -660,15 +865,80 @@
             "title": "Fields",
             "type": "array"
           },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_count": {
+            "title": "Page Count",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
           "snapshot": {
             "$ref": "#/components/schemas/DataSnapshot"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
           }
         },
         "required": [
           "snapshot",
-          "fields"
+          "fields",
+          "total",
+          "page",
+          "page_size",
+          "page_count",
+          "facets"
         ],
         "title": "ResearchCatalog",
+        "type": "object"
+      },
+      "ResearchDataWarning": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "field_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field Id"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "requires_confirmation": {
+            "title": "Requires Confirmation",
+            "type": "boolean"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/ResearchWarningSeverity"
+          },
+          "warning_id": {
+            "title": "Warning Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "warning_id",
+          "code",
+          "message",
+          "severity",
+          "field_id",
+          "requires_confirmation"
+        ],
+        "title": "ResearchDataWarning",
         "type": "object"
       },
       "ResearchPanelCell": {
@@ -721,6 +991,75 @@
           "kind"
         ],
         "title": "ResearchPanelCell",
+        "type": "object"
+      },
+      "ResearchPanelPreview": {
+        "properties": {
+          "confirmation_required": {
+            "title": "Confirmation Required",
+            "type": "boolean"
+          },
+          "cost": {
+            "$ref": "#/components/schemas/PanelPreviewCostEstimate"
+          },
+          "panel": {
+            "$ref": "#/components/schemas/ResearchPanelResult"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchDataWarning"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "panel",
+          "cost",
+          "warnings",
+          "confirmation_required",
+          "truncated"
+        ],
+        "title": "ResearchPanelPreview",
+        "type": "object"
+      },
+      "ResearchPanelPreviewRequest": {
+        "properties": {
+          "column_limit": {
+            "default": 10,
+            "title": "Column Limit",
+            "type": "integer"
+          },
+          "confirmed_warning_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Confirmed Warning Ids",
+            "type": "array"
+          },
+          "query": {
+            "$ref": "#/components/schemas/ResearchPanelQuery"
+          },
+          "row_limit": {
+            "default": 50,
+            "title": "Row Limit",
+            "type": "integer"
+          },
+          "venue": {
+            "default": "XKRX",
+            "title": "Venue",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "ResearchPanelPreviewRequest",
         "type": "object"
       },
       "ResearchPanelQuery": {
@@ -826,6 +1165,14 @@
         ],
         "title": "ResearchPreview",
         "type": "object"
+      },
+      "ResearchWarningSeverity": {
+        "enum": [
+          "info",
+          "warning"
+        ],
+        "title": "ResearchWarningSeverity",
+        "type": "string"
       },
       "ReviseStrategyRequest": {
         "properties": {
@@ -1141,6 +1488,93 @@
         "title": "UnaryOperator",
         "type": "string"
       },
+      "UniverseCoverageSummary": {
+        "properties": {
+          "average_members": {
+            "title": "Average Members",
+            "type": "number"
+          },
+          "covered_session_count": {
+            "title": "Covered Session Count",
+            "type": "integer"
+          },
+          "first_session": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Session"
+          },
+          "gap_session_count": {
+            "title": "Gap Session Count",
+            "type": "integer"
+          },
+          "last_session": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Session"
+          },
+          "maximum_members": {
+            "title": "Maximum Members",
+            "type": "integer"
+          },
+          "minimum_members": {
+            "title": "Minimum Members",
+            "type": "integer"
+          },
+          "session_count": {
+            "title": "Session Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "session_count",
+          "covered_session_count",
+          "gap_session_count",
+          "first_session",
+          "last_session",
+          "minimum_members",
+          "maximum_members",
+          "average_members"
+        ],
+        "title": "UniverseCoverageSummary",
+        "type": "object"
+      },
+      "UniverseHistoryQuery": {
+        "properties": {
+          "end": {
+            "format": "date",
+            "title": "End",
+            "type": "string"
+          },
+          "start": {
+            "format": "date",
+            "title": "Start",
+            "type": "string"
+          },
+          "venue": {
+            "title": "Venue",
+            "type": "string"
+          }
+        },
+        "required": [
+          "venue",
+          "start",
+          "end"
+        ],
+        "title": "UniverseHistoryQuery",
+        "type": "object"
+      },
       "UniverseHistoryResult": {
         "properties": {
           "detail": {
@@ -1201,6 +1635,22 @@
           "members"
         ],
         "title": "UniversePoint",
+        "type": "object"
+      },
+      "UniversePreview": {
+        "properties": {
+          "coverage": {
+            "$ref": "#/components/schemas/UniverseCoverageSummary"
+          },
+          "universe": {
+            "$ref": "#/components/schemas/UniverseHistoryResult"
+          }
+        },
+        "required": [
+          "universe",
+          "coverage"
+        ],
+        "title": "UniversePreview",
         "type": "object"
       },
       "ValidationError": {
@@ -1312,6 +1762,105 @@
     "/api/v1/equity/catalog": {
       "get": {
         "operationId": "getEquityCatalog",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dataset_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dataset Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "unit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Unit"
+            }
+          },
+          {
+            "in": "query",
+            "name": "frequency",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Frequency"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -1322,9 +1871,57 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Equity Catalog"
+      }
+    },
+    "/api/v1/equity/panel/preview": {
+      "post": {
+        "operationId": "previewEquityPanel",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResearchPanelPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResearchPanelPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Equity Panel Preview"
       }
     },
     "/api/v1/equity/preview": {
@@ -1375,6 +1972,44 @@
           }
         },
         "summary": "Equity Preview"
+      }
+    },
+    "/api/v1/equity/universe/preview": {
+      "post": {
+        "operationId": "previewEquityUniverse",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UniverseHistoryQuery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UniversePreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Equity Universe Preview"
       }
     },
     "/api/v1/health": {

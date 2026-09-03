@@ -4,21 +4,35 @@ import {
   getEquityCatalog,
   getStrategyTemplate,
   previewEquityData,
+  previewEquityPanel,
+  previewEquityUniverse,
   reviseStrategy,
   validateStrategy,
 } from "./generated/sdk.gen";
 import type {
+  DataStep,
+  DatasetFieldProfile,
+  GetEquityCatalogData,
   ResearchCatalog,
+  ResearchPanelCell,
+  ResearchPanelPreview,
+  ResearchPanelPreviewRequest,
   ResearchPanelQuery,
   ResearchPreview,
   SavedStrategy,
   StrategySpec,
   StrategyValidation,
+  UniverseHistoryQuery,
+  UniversePreview,
 } from "./generated/types.gen";
 
-client.setConfig({
-  baseUrl: import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000",
-});
+export const configureStrategyWorkbenchApi = (baseUrl: string): void => {
+  client.setConfig({ baseUrl });
+};
+
+configureStrategyWorkbenchApi(
+  import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000",
+);
 
 const requireData = <T>(data: T | undefined, context: string): T => {
   if (data === undefined) {
@@ -33,9 +47,23 @@ export const strategyWorkbenchApi = {
     return requireData(response.data, "getStrategyTemplate");
   },
 
-  async getEquityCatalog(): Promise<ResearchCatalog> {
-    const response = await getEquityCatalog();
+  async getEquityCatalog(
+    query: EquityCatalogQuery = {},
+  ): Promise<ResearchCatalog> {
+    const response = await getEquityCatalog({ query });
     return requireData(response.data, "getEquityCatalog");
+  },
+
+  async previewUniverse(query: UniverseHistoryQuery): Promise<UniversePreview> {
+    const response = await previewEquityUniverse({ body: query });
+    return requireData(response.data, "previewEquityUniverse");
+  },
+
+  async previewPanel(
+    request: ResearchPanelPreviewRequest,
+  ): Promise<ResearchPanelPreview> {
+    const response = await previewEquityPanel({ body: request });
+    return requireData(response.data, "previewEquityPanel");
   },
 
   async previewEquity(
@@ -71,11 +99,20 @@ export const strategyWorkbenchApi = {
   },
 };
 
+export type EquityCatalogQuery = NonNullable<GetEquityCatalogData["query"]>;
+
 export type {
+  DataStep,
+  DatasetFieldProfile,
   ResearchCatalog,
+  ResearchPanelCell,
+  ResearchPanelPreview,
+  ResearchPanelPreviewRequest,
   ResearchPanelQuery,
   ResearchPreview,
   SavedStrategy,
   StrategySpec,
   StrategyValidation,
+  UniverseHistoryQuery,
+  UniversePreview,
 };

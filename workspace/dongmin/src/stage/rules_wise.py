@@ -8,6 +8,7 @@ from .model import (
     KIND_DATE_ISO,
     KIND_DATE_SLASH,
     KIND_DATE_YMD8,
+    KIND_DATE_YY_SLASH,
     KIND_NUMERIC,
     KIND_TEXT,
     AvailableRule,
@@ -184,6 +185,34 @@ STG_ANALYST_SUMMARY = _blob_table(
     "parse_analyst_summary", ("c1010001",),
 )
 
+# ── stg_analyst_broker (c1010001 HTML cTB24 — 제공처별 투자의견·목표주가) ────────────────────────
+# 의견 어휘는 실측 17종(09-03) — 대소문자·한/영 변형을 categorize 로 접고 원문은 보존한다.
+_OPINION_CLASS = (
+    "CASE WHEN upper(trim(s.\"{c}\")) IN ('BUY', '매수', 'STRONG BUY', 'OUTPERFORM', 'TRADING BUY')"
+    " THEN 'buy'"
+    " WHEN upper(trim(s.\"{c}\")) IN ('HOLD', '중립', '보유', 'NEUTRAL', 'MARKETPERFORM')"
+    " THEN 'hold'"
+    " WHEN upper(trim(s.\"{c}\")) IN ('SELL', '매도', 'UNDERPERFORM') THEN 'sell'"
+    " WHEN coalesce(trim(s.\"{c}\"), '') = '' THEN NULL ELSE 'other' END")
+STG_ANALYST_BROKER = _blob_table(
+    "stg_analyst_broker",
+    (
+        ColumnRule("cmp_cd", "ticker", KIND_TEXT, expected_len=6, key=True),
+        ColumnRule("fetched_date", "fetched_date", KIND_DATE_ISO, key=True),
+        ColumnRule("broker", "broker", KIND_TEXT, key=True),                 # 제공처 원문
+        ColumnRule("opinion_date", "opinion_date", KIND_DATE_YY_SLASH, key=True),   # 최종일자
+        ColumnRule("target_price_krw", "target_price_krw", KIND_NUMERIC, 14, 0),
+        ColumnRule("prev_target_price_krw", "prev_target_price_krw", KIND_NUMERIC, 14, 0),
+        ColumnRule("change_pct", "change_pct", KIND_NUMERIC, 10, 2),
+        ColumnRule("opinion", "opinion", KIND_TEXT),
+        ColumnRule("prev_opinion", "prev_opinion", KIND_TEXT),
+    ),
+    ("ticker", "fetched_date", "broker", "opinion_date"),
+    "parse_analyst_broker", ("c1010001",),
+    extras=(ExtraColumn("opinion_class", _OPINION_CLASS.format(c="opinion")),
+            ExtraColumn("prev_opinion_class", _OPINION_CLASS.format(c="prev_opinion"))),
+)
+
 # ── v3 미러 4종 — 2026-04-03~09-02 동결 사본 (결정 ⑤ 09-02 개정), 규칙 분해는 §6 ─────────────────
 _TICKER_KEY = ColumnRule("stock_code", "ticker", KIND_TEXT, expected_len=6, key=True)
 
@@ -333,6 +362,7 @@ STG_CALLS_WISE = TableRule(
 
 TABLES: tuple[TableRule, ...] = (
     STG_CONSENSUS_MONTHLY, STG_CONSENSUS_ANNUAL, STG_CONSENSUS_QUARTERLY, STG_CONSENSUS_MATRIX,
-    STG_ANALYST_SUMMARY, STG_FIN_WISE, STG_V3_REVISION_DAILY, STG_V3_ANALYST_OPINIONS,
+    STG_ANALYST_SUMMARY, STG_ANALYST_BROKER, STG_FIN_WISE, STG_V3_REVISION_DAILY,
+    STG_V3_ANALYST_OPINIONS,
     STG_V3_CONSENSUS_ANNUAL, STG_V3_REVISION_COMPARE, STG_WISE_COVERAGE, STG_CALLS_WISE,
 )

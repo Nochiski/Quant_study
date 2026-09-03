@@ -460,7 +460,69 @@ def parse_analyst_summary(blobs: Iterable[RawBlob]) -> ParseResult:
         "n_dup_coords_folded": n_dup, "n_na_cells": n_na})
 
 
+BROKER_COLUMNS: tuple[str, ...] = (
+    "cmp_cd", "fetched_date", "broker", "opinion_date", "target_price_krw", "prev_target_price_krw",
+    "change_pct", "opinion", "prev_opinion", "fetched_at",
+)
+_TB24_RE = re.compile(r'id="cTB24".*?</table>', re.S)
+_TBODY_RE = re.compile(r"<tbody>(.*?)</tbody>", re.S)
+
+
+def parse_analyst_broker(blobs: Iterable[RawBlob]) -> ParseResult:
+    """c1010001 HTML: `id="cTB24"` 제공처별 표 → 증권사 1행.
+
+    셀 7개(제공처·최종일자·목표가·직전목표가·변동률·투자의견·직전투자의견). 실측(09-03, 2,413 blob):
+    7셀 행 9,717 · '최근 3개월 이내에 제시된 의견이 없습니다' 단일 셀 866 blob ·
+    (제공처, 최종일자) blob 내 중복 0 · 날짜 전부 YY/MM/DD.
+    """
+    n_blobs = n_no_data = n_failed = n_no_opinion = n_dup = n_mismatch = 0
+    coords: dict[tuple[str, str, str, str], dict[str, str | None]] = {}
+    for b in blobs:
+        n_blobs += 1
+        try:
+            text = _decode_text(b.body)
+        except Exception:  # noqa: BLE001  # reason: blob 손상은 도메인 실패 → parse_failed 계상
+            n_failed += 1
+            continue
+        m = _TB24_RE.search(text)
+        if m is None:
+            if "alert(" in text and len(text) < 1000:
+                n_no_data += 1
+            else:
+                n_failed += 1
+            continue
+        body = _TBODY_RE.search(m.group(0))
+        trs = _TR_RE.findall(body.group(1) if body else m.group(0))
+        for tr in trs:
+            cells = [_cell_text(td) for td in _TD_RE.findall(tr)]
+            if len(cells) == 1:
+                n_no_opinion += 1
+                continue
+            if len(cells) != 7:
+                n_failed += 1
+                continue
+            row: dict[str, str | None] = dict.fromkeys(BROKER_COLUMNS)
+            row.update(cmp_cd=b.cmp_cd, fetched_date=b.fetched_date, broker=cells[0],
+                       opinion_date=cells[1], target_price_krw=cells[2],
+                       prev_target_price_krw=cells[3], change_pct=cells[4], opinion=cells[5],
+                       prev_opinion=cells[6], fetched_at=b.fetched_at)
+            key = (b.cmp_cd, b.fetched_date, cells[0], cells[1])
+            prev = coords.get(key)
+            if prev is not None:
+                n_dup += 1
+                if any(prev[c] != row[c] for c in BROKER_COLUMNS if c != "fetched_at"):
+                    n_mismatch += 1
+                continue
+            coords[key] = row
+    out = [coords[k] for k in sorted(coords)]
+    return ParseResult(rows=out, columns=BROKER_COLUMNS, metrics={
+        "n_blobs": n_blobs, "n_no_data": n_no_data, "n_no_opinion": n_no_opinion,
+        "n_rows_emitted": len(out), "n_parse_failed": n_failed, "n_dup_coords_folded": n_dup,
+        "n_value_mismatch": n_mismatch})
+
+
 PARSERS.update({
+    "parse_analyst_broker": parse_analyst_broker,
     "parse_consensus_annual": parse_consensus_annual,
     "parse_consensus_quarterly": parse_consensus_quarterly,
     "parse_consensus_matrix": parse_consensus_matrix,

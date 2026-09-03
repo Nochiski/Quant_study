@@ -76,6 +76,7 @@
 | WISE | `stg_consensus_quarterly` | 11,284 | 11,284 | 0 | T2Q · 동일 |
 | WISE | `stg_consensus_matrix` | 214,650 | 214,650 | 0 | T4 계정 9 × lookback 5(current·1w·1m·3m·1y 실측 대조) |
 | WISE | `stg_analyst_summary` | 1,612 | 1,612 | 0 | cTB15 요약행 · 무의견 346 · `N/A` blank |
+| WISE | `stg_analyst_broker` | 9,717 | 9,717 | 0 | cTB24 증권사별 목표가·의견(09-01~03) · `opinion_class` buy/hold/sell/other · 리비전 팩터 재료 |
 | WISE | `stg_fin_wise` | 445,294 | 445,294 | 0 | 키 (…,ep,seq) wide · `period_label_1~6` 병기 · `val_q*` 슬롯 라벨 없음 · Decimal(38,6) |
 | WISE | `stg_v3_revision_daily` | 63,175 | 63,175 | 0 | 동결 사본 · available=collected_date, NULL 은 base_date/default + `coverage_degraded` |
 | WISE | `stg_v3_analyst_opinions` | 254,925 | 254,925 | 0 | 동결 사본 · snapshot_date measured |
@@ -84,7 +85,7 @@
 | WISE | `stg_wise_coverage` | 2,566 | 2,566 | 0 | 종목당 1행 `status_current` · 이력 아님 |
 | WISE | `stg_calls_wise` | 31,442 | 31,442 | 0 | unversioned 로그 · `pkey=''` 키 인정 |
 
-합계 61테이블 · stage 84,364,371행 / 원장 85,041,551행(접힘 677,180 — doc_index 재빌드 반영) · reject 0 · 1차 패스 23분 · 같은 스냅샷 재빌드 content_hash 60/60 동일(G5 Δ=0). 게이트 판정은 각 테이블 `MANIFEST.json` 의 `builds[].gates`.
+합계 62테이블 · stage 84,374,088행 / 원장 85,051,268행(접힘 677,180 — doc_index 재빌드·analyst_broker 추가 반영) · reject 0 · 1차 패스 23분 · 같은 스냅샷 재빌드 content_hash 60/60 동일(G5 Δ=0). 게이트 판정은 각 테이블 `MANIFEST.json` 의 `builds[].gates`.
 
 
 ## 4. equity 가 판단해야 하는 것 (stage 는 안 한다)
@@ -100,4 +101,4 @@
 - 문서층 L1(ZIP 본문)·정정 체인 복원·공개시점 대장·일일 증분은 범위 밖. `ws_run_log` 미편입.
 - KRX 2026-08-21~ 상장·폐지 재구성 불가. 관리종목·거래정지 과거 시계열 부재(09-01 부터 `stg_master_daily`).
 - `stg_wise_coverage`·`stg_delisted_master`·`stg_company`·`stg_corp_map` 은 현재 상태(`_current`). 재조회가 덮는 소스(KRX·키움 upsert)는 판본이 1~3개로 퇴화.
-- 후속 후보: c1010001 `cTB24` 제공처별 목표가 표 · stg_fin 스필 최적화 · daily_wise flock · 통합 종목마스터 DB(사용자 보류).
+- 후속 후보: stg_fin 스필 최적화 · 통합 종목마스터 DB(사용자 보류). (cTB24 는 09-03 `stg_analyst_broker` 로 편입, daily_wise flock 은 불필요 판정)

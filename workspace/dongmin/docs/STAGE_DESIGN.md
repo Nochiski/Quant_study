@@ -136,7 +136,7 @@ KRX 가격(stg_price_daily)의 기준가/체결가 구분은 별도 컬럼 없�
 ## 4. 테이블 카탈로그 — 실물 61 전수 대조 (2차 실측 정정 반영)
 
 > **원장 61 = stage 편입 60 + 제외 1(ws_run_log).** 절별: KRX 8→5 · 키움 6→6 · KIS 7→7 ·
-> DART 32→30(+참조표 1) · WISE 8→12. G0 가 이 표와 실물의 diff 를 매 빌드 검사하며,
+> DART 32→30(+참조표 1) · WISE 8→13(09-03 `stg_analyst_broker` 편입 — cTB24). G0 가 이 표와 실물의 diff 를 매 빌드 검사하며,
 > **rules 의 모든 컬럼 참조는 `pragma_table_info` 선검증 + `expected_len` 검증** (큰따옴표
 > 폴백·실재-오답 컬럼 함정 방어 — §11 도구 교훈).
 
@@ -183,7 +183,7 @@ KRX 가격(stg_price_daily)의 기준가/체결가 구분은 별도 컬럼 없�
 | `stg_doc_index` | doc_store | 메타 인덱스(원장에 blob 없음 — ZIP 은 파일시스템). rcept_no 유일 · ★수집 중 |
 | `stg_calls_dart` / `stg_units_dart` | dart_call_log / ingest_log | 시계 컬럼 실명 `ts` — 3분류 재료 |
 
-### WISE (실물 8 → stage 12)
+### WISE (실물 8 → stage 13)
 > **ep 실물 어휘 6종 전부**: `c1010001`·`c1050001_data`·`cF3002`·`cF4002`·`cF5001`·`cF5002`.
 > **T2Y/T2Q/T4 는 ep 가 아니라 `c1050001_data` 의 `pkey` 값**이다 (v2 는 유령 ep 로 오기 —
 > 그대로 구현하면 컨센서스 3테이블의 원장이 존재하지 않아 G0 즉사).
@@ -194,7 +194,8 @@ KRX 가격(stg_price_daily)의 기준가/체결가 구분은 별도 컬럼 없�
 | `stg_consensus_annual` / `_quarterly` | ep=c1050001_data, pkey='T2Y' / 'T2Q' | (ticker,fetched_date,**period_label**) — 라벨 원문 `'2022.12(A)'` 이 키, `period`(YYYYMM)·`period_kind`(A/E)는 파서 유도. **실측 09-02**: JsonData 7행/blob(5·6행 10 blob), 라벨 어휘 `9999.99(A|E)` 2종만, MAIN∈{IFRS연결·IFRS별도·GAAP개별}, 빈 blob 2. 값은 WISE 표시 단위(매출·영업이익·순이익 억원, EPS·BPS 원 — T4 `ACC_NM` '매출액(억원)' 실측) 그대로 — 데이터에 단위 컬럼이 없어 접미사·스케일 없음 |
 | `stg_consensus_matrix` | ep=c1050001_data, pkey GLOB 'T4:*' | ticker,fetched_date,target_period,acc_cd,lookback · `target_period` YYYYMM 문자열 보존(비12월 202605·202903 실재 — 연도 절삭 금지) · cmp_cd 비숫자 19종(`0004Y0` 등) — TEXT 유지 · **실측 09-02**: JsonData = 계정 9(610100 투자의견·121000 매출·121500 영업이익·122710 순이익·312000 EPS·382000 PER·314000 BPS·382400 PBR·211500 ROE) × `VAL1~5` → 45행/blob. 키 마지막 요소는 **`lookback_idx`**('1'~'5' 원문 인덱스) + `lookback` 라벨(current·1w·1m·3m·1y — v3 revision_compare 의 1w/1m/3m/1y 가 VAL2~5 와 대각 일치 667·674·699·709/1,844쌍, VAL1=현재) · `DT`→`base_date`(WISE 기준일, fetched_date 와 다름) · (cmp,fd)당 T4 blob 정확히 3 · 빈 JsonData 72 blob = 0행 |
 | (pkey='') | c1050001_data 목록 호출 | 파싱 입력으로 소비 — 별도 테이블 없음 |
-| `stg_analyst_summary` | c1010001 HTML | ticker,fetched_date — `id="cTB15"` 표 마지막 행(투자의견·목표주가(원)·EPS(원)·PER·추정기관수) + `[기준:YYYY.MM.DD]`→`base_date`(date_dot). **실측 09-02 모양 3종**(1,612 blob): 5셀 숫자 / 5셀 중 빈칸(`&nbsp;`·'' → blank) / 단일 셀 '최근N개월 이내에 제시된 의견이 없습니다'(346 → 값 NULL + `no_opinion_note`) · `<script>alert(…)` 리다이렉트 본문 1 blob = 데이터 없음(`n_no_data`, 실패 아님). `PER='N/A'`(EPS 음수 — 98 blob 실측) 는 blank 로 계상(`n_na_cells`). G8 필수. 같은 HTML 의 `cTB24`(제공처별 목표가·투자의견·최종일자 목록)는 카탈로그 밖 — 후속 후보로 등록 |
+| `stg_analyst_summary` | c1010001 HTML | ticker,fetched_date — `id="cTB15"` 표 마지막 행(투자의견·목표주가(원)·EPS(원)·PER·추정기관수) + `[기준:YYYY.MM.DD]`→`base_date`(date_dot). **실측 09-02 모양 3종**(1,612 blob): 5셀 숫자 / 5셀 중 빈칸(`&nbsp;`·'' → blank) / 단일 셀 '최근N개월 이내에 제시된 의견이 없습니다'(346 → 값 NULL + `no_opinion_note`) · `<script>alert(…)` 리다이렉트 본문 1 blob = 데이터 없음(`n_no_data`, 실패 아님). `PER='N/A'`(EPS 음수 — 98 blob 실측) 는 blank 로 계상(`n_na_cells`). G8 필수. 같은 HTML 의 `cTB24` 는 아래 `stg_analyst_broker` 로 편입(09-03) |
+| `stg_analyst_broker` | c1010001 HTML `cTB24` (예외 c — 같은 blob 두 번째 표) | 키 (ticker,fetched_date,**broker**,opinion_date) — 제공처·최종일자(`YY/MM/DD`, `date_yy_slash`)·목표가·직전목표가·변동률·투자의견·직전투자의견. **실측 09-03(2,413 blob)**: 7셀 행 9,717(1~25행/blob), '최근 3개월 이내 의견 없음' 단일 셀 866 blob(0행), (제공처,최종일자) blob 내 중복 0 → key_unique. 의견 어휘 17종(BUY·Buy·매수·HOLD·중립·보유·Outperform·STRONG BUY·Trading BUY·매도·Underperform…) → 원문 보존 + `opinion_class`·`prev_opinion_class`(buy/hold/sell/other, 빈값 NULL) categorize. 목표가 빈값 72·변동률 빈값 523 = blank. 서버 빌드 1.4초, 픽스처 2(삼성 LS 26/08/31 450,000·buy) |
 | `stg_fin_wise` | cF3002/4002 (pkey='Y') | **키 (ticker,fetched_date,ep,seq)** — seq = DATA 배열 위치. 실측 09-02: cF4002 는 같은 ACCODE 가 여러 P_ACCODE 아래 반복(1,614/1,614 blob)이라 ACCODE 는 키가 못 된다(cF3002 는 유일). 1행 = DATA 원소(wide): `val_1~6` ↔ 기간 라벨 `YYMM[0..5]`(`period_label_1~6` 행마다 병기 — 라벨 8 = 기간 6 + '전년대비(YoY)' 2), `val_q1·q2·q4·q5·q6`(라벨이 blob 에 없다 — QOQ/YOY 코멘트가 상대 위치만 말함 → 슬롯명 보존, 해석은 equity), 증감률 6·코멘트 4·POINT_CNT·FIN·FRQ. Decimal(38,6) — 값에 float 잔재(소수 10자리 `2589354.9400000004`) 실재, duckdb 캐스트가 6자리로 반올림 · DATA 행수 cF3002 244(1,552 blob)·cF4002 36, 빈 DATA 2 · 082640(무효 종목)은 cF3002 `DATA: null`·cF4002 `YYMM: []` — 빈 blob(`n_empty`) |
 | `stg_v3_revision_daily` 등 v3 4종 | v3_* | 정식 stage(결정 ⑤, **09-02 개정: 2026-04-03~09-02 동결 사본, 증분 없음**). 규칙 분해는 §6 · revision_daily 키 (ticker, date=base_date, target_period), available=`collected_date`(measured) → NULL 1,390행은 `AvailableRule.fallback_column=date`(default) + `coverage_degraded` · opinions 키 (ticker, date=snapshot_date) · annual 키 (sync_date, ticker, period, period_type, data_type) · compare 키 (sync_date, ticker, target_period), `opinion_*` 4컬럼 전행 NULL 실측 |
 | `stg_wise_coverage` | ws_coverage | **이력 아님 — 종목당 1행 현재 상태**(실측 2,566행=2,566종목) → `status_current`·`checked_date_current`. 3분류 재료로 쓰려면 수집기를 append 이력으로 바꿔야 — stage 밖 이슈로 등록 · `checked_date_current` = checked_at 의 KST 날짜(observed_date 와 같은 환산) |
@@ -219,12 +220,12 @@ rules 의 `partition_class`·`partition_expr` 는 이 표와 일치해야 한다
 | `date_axis` | `substr(dt,1,4)` | stg_flow_daily_kiwoom · stg_short_daily_kiwoom · stg_foreign_daily · stg_lending_daily |
 | `date_axis` | `substr(snap_date,1,4)` | stg_master_daily |
 | `date_axis` | `substr(stck_bsop_date,1,4)` / `substr(bsop_date,1,4)` / `substr(deal_date,1,4)` | stg_flow_split_daily · stg_short_daily_kis / stg_loan_daily_kis / stg_credit_daily |
-| `date_axis` | `substr(fetched_date,1,4)` | stg_consensus_monthly · _annual · _quarterly · _matrix · stg_analyst_summary · stg_fin_wise |
+| `date_axis` | `substr(fetched_date,1,4)` | stg_consensus_monthly · _annual · _quarterly · _matrix · stg_analyst_summary · stg_analyst_broker · stg_fin_wise |
 | `date_axis` | `substr(base_date,1,4)` / `substr(snapshot_date,1,4)` / `substr(sync_date,1,4)` | stg_v3_revision_daily / stg_v3_analyst_opinions / stg_v3_consensus_annual · stg_v3_revision_compare |
 | `receipt_axis` | **`substr(rcept_no,1,4)`** (`rcept_dt` 아님 — 136행 상이. 접수번호가 불변 키. stg_fin 실측 12파티션 2015~2026) | stg_fin · 보조원장 6종 · stg_holder_elestock · _majorstock · stg_disclosure · stg_event_* 15종 · stg_doc_index |
 | `whole` | — | stg_rcept_dt_map · stg_corp_map · stg_company · stg_delisted_master · stg_wise_coverage · stg_shards_kiwoom · stg_ingest_krx · stg_calls_kis · stg_units_kis · stg_calls_dart · stg_units_dart · stg_calls_wise |
 
-합계 5 + 6 + 7 + 31 + 12 = 61(참조표 stg_rcept_dt_map 포함).
+합계 5 + 6 + 7 + 31 + 13 = 62(참조표 stg_rcept_dt_map 포함. 09-03 `stg_analyst_broker` 추가 — 원장 테이블은 그대로 61, ws_raw 한 원장이 stage 7테이블로 언네스트).
 
 ## 5. 값 규칙
 
@@ -446,7 +447,8 @@ fin_raw 15.4M행 8키 GROUP BY 9초 · RSS 3.6GB → 6GB·3threads 성립. 풀 �
 - **G4 골든 픽스처 38개 전부 일치**: price 4 · fin 2 · monthly 3 · 키움 15 · KIS 14(unit_scale ×1e6·×1e3 검증).
 - **baseline.json 28지표**(`python -m stage.baseline`, 09-03): 가격 교차 close 1.0 · volume 0.99986(조인 7,537,984) · 정지행 125 / ETF 2 · PARVAL 비수치 73,615 · 음수 poss_stkcnt 3 · rmnd_stcn 2,691 · whol_loan_gvrt 539(−594.76~1120.92) · whol_stln_gvrt 1 · credit 중복 그룹 517,648 · disclosure 3,444,518행·중복 618·정정 577,072 · fin 15,375,024·비KRW 132,355·bsns_year 불일치 120·표준계정 미사용 2,741,192 · rcept 참조표 미스 0 · audit 의견 434종 · capital 연도 오타 7 · tsstk_dp 2106 1 · ★ doc_index 106,065(99,172 → 수집 진행. **09-03 07:34 KST 수집 종료**: 대상 174,309 = 사업보고서 52,329 + 반기·분기 120,577, ZIP 저장 171,179 · 26.56GB · 2,499분, `http_status=014` 3,130건은 zip_ok=false 로 보존 → `stg_doc_index` 새 스냅샷 `snap_20260902T230100Z` 로 재빌드 174,309행, 해시 `174309:21fc3c3fa818f1c`) · ★ monthly blob 13,202 · ★ analyst blob 1,613. 임계 7(listing G2 1%·shares 12%·dividend 0.1%·hyslr 0.01%·credit 0.01%·delisted_master G2 5%·G7 1%).
 - **2차 패스(같은 스냅샷 재빌드)**: 61/61 ok, 1,348초. content_hash 1차(수정 후 재빌드 포함) 대비 **60/60 동일**, G5 Δ=0 61테이블 전부 pass, G9 baseline(close 1.0·volume 0.99986) pass. MANIFEST keep=3 GC 동작(fin·price 3판, 재빌드 테이블 2판). 산출 4.4GB(3판본 누적), 디스크 여유 297GB. **stage 층 구현 완료 — equity 인계는 `docs/STAGE_HANDOFF.md`.**
-- 후속(코드 밖): baseline `stg_shares.non_numeric_cells` 술어가 `'-'` 를 셌다(655,481) → `'-'` 제외로 정정(PR 이후 재측정) · doc_index 는 수집 종료 후 재고정 · 매 빌드 전 `python -m stage.baseline` 로 ★ 재측정 후 사람이 승인.
+- 후속(코드 밖): baseline `stg_shares.non_numeric_cells` 술어가 `'-'` 를 셌다(655,481) → `'-'` 제외로 정정·재측정 11,125 · doc_index 는 수집 종료 후 재고정 · 매 빌드 전 `python -m stage.baseline` 로 ★ 재측정 후 사람이 승인.
+- **09-03 추가 `stg_analyst_broker`(62번째)**: 사용자 결정으로 cTB24 편입. 새 wise 스냅샷 `snap_20260903T015712Z`(09-01~09-03) 빌드 9,717행·reject 0·G4 2/2·G8 pass(blob 2,413 = no_data 1 + 무의견 866 + 표 1,546). 파서 `parse_analyst_broker`, 날짜 종류 `date_yy_slash`(duckdb `%y`: 00~68 → 20xx).
 
 ## 11. 결정 기록
 

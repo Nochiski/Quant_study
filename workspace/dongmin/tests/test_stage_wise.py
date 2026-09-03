@@ -216,10 +216,11 @@ def test_analyst_summary_parser_handles_three_html_shapes_and_alert_body() -> No
 
 
 # ── 선언 ─────────────────────────────────────────────────────────────────────────────────────
-def test_rules_wise_declares_all_twelve_tables_per_design_section_4() -> None:
+def test_rules_wise_declares_all_thirteen_tables_per_design_section_4() -> None:
     names = {t.name for t in rules_wise.TABLES}
     assert names == {"stg_consensus_monthly", "stg_consensus_annual", "stg_consensus_quarterly",
-                     "stg_consensus_matrix", "stg_analyst_summary", "stg_fin_wise",
+                     "stg_consensus_matrix", "stg_analyst_summary", "stg_analyst_broker",
+                     "stg_fin_wise",
                      "stg_v3_revision_daily", "stg_v3_analyst_opinions", "stg_v3_consensus_annual",
                      "stg_v3_revision_compare", "stg_wise_coverage", "stg_calls_wise"}
     assert names <= set(rules.RULES)
@@ -409,3 +410,73 @@ def test_blob_tables_declare_measured_fetched_date_availability(name: str) -> No
     r = rules.RULES[name]
     assert r.available == model.AvailableRule("column", column="fetched_date", basis="measured")
     assert r.observed_src == "fetched_at" and r.blob_source is not None and r.key_unique
+
+
+# ── stg_analyst_broker (c1010001 cTB24 — 제공처별 투자의견·목표주가) ────────────────────────────
+def _html_broker(rows: list[list[str]] | None, base: str = "2026.09.01") -> bytes:
+    """cTB15 요약표 + cTB24 제공처별 표 (실물 구조 축약). rows=None → '의견 없음' 단일 셀."""
+    if rows is None:
+        body = ('<tr><td colspan="7" class="center">최근 3개월 이내에 제시된 의견이 없습니다.'
+                '</td></tr>')
+    else:
+        body = "".join("<tr>" + "".join(f'<td class="line">{c}</td>' for c in r) + "</tr>"
+                       for r in rows)
+    html = (
+        f'<html><body><p>[기준:{base}]</p><table id="cTB15"><tr><th>투자의견</th></tr>'
+        '<tr><td>4.05</td><td>487,045</td><td>48,339</td><td>5.40</td><td>22</td></tr></table>'
+        '<table class="gHead01 all-width" id="cTB24"><thead><tr><th>제공처</th><th>최종일자</th>'
+        '<th>목표가</th><th>직전목표가</th><th>변동률</th><th>투자의견</th><th>직전투자의견</th></tr></thead>'
+        f'<tbody>{body}</tbody></table></body></html>')
+    return zlib.compress(html.encode("utf-8"))
+
+
+SAMSUNG_BROKERS = [["LS", "26/08/31", "450,000", "400,000", "12.50", "Buy", "Buy"],
+                   ["미래에셋", "26/08/25", "370,000", "370,000", "0.00", "매수", "매수"],
+                   ["유진투자", "26/08/18", "560,000", "560,000", "0.00", "STRONG BUY",
+                    "STRONG BUY"],
+                   ["키움", "26/08/11", "", "", "", "HOLD", ""]]      # 목표가 없는 행(실측 72)
+
+
+def test_broker_parser_unnests_ctb24_rows_and_counts_no_opinion_blobs() -> None:
+    blobs = [_blob("005930", "c1010001", "", _html_broker(SAMSUNG_BROKERS)),
+             _blob("000250", "c1010001", "", _html_broker(None)),
+             _blob("082640", "c1010001", "", ALERT)]
+    res = parsers.parse_analyst_broker(blobs)
+    assert res.metrics["n_rows_emitted"] == 4 and res.metrics["n_no_opinion"] == 1
+    assert res.metrics["n_no_data"] == 1 and res.metrics["n_parse_failed"] == 0
+    r0 = res.rows[0]
+    assert (r0["cmp_cd"], r0["broker"], r0["opinion_date"], r0["target_price_krw"],
+            r0["prev_target_price_krw"], r0["change_pct"], r0["opinion"], r0["prev_opinion"]) == (
+        "005930", "LS", "26/08/31", "450,000", "400,000", "12.50", "Buy", "Buy")
+    assert res.rows[3]["target_price_krw"] == "" and res.rows[3]["prev_opinion"] == ""
+
+
+def test_rules_analyst_broker_declares_key_and_two_digit_year_dates() -> None:
+    r = rules.RULES["stg_analyst_broker"]
+    assert r.natural_key == ("ticker", "fetched_date", "broker", "opinion_date") and r.key_unique
+    assert r.column("opinion_date").kind == model.KIND_DATE_YY_SLASH
+    assert r.blob_source is not None and r.blob_source.parser == "parse_analyst_broker"
+    assert {e.name for e in r.extras} == {"opinion_class", "prev_opinion_class"}
+    assert len(rules_wise.TABLES) == 13
+
+
+def test_build_analyst_broker_parses_dates_and_classifies_opinions(tmp_path: Path) -> None:
+    rows = [_row("005930", "c1010001", "", _html_broker(SAMSUNG_BROKERS)),
+            _row("000250", "c1010001", "", _html_broker(None))]
+    r = _build("stg_analyst_broker", _snap(tmp_path, rows), tmp_path)
+    assert r.n_rows == 4
+    con = _read(tmp_path, r)
+    got = con.execute("SELECT broker, opinion_date, target_price_krw, change_pct, opinion,"
+                      " opinion_class, prev_opinion_class, miss_kind.target_price_krw,"
+                      " available_date, available_basis FROM t ORDER BY opinion_date DESC"
+                      ).fetchall()
+    ls = got[0]
+    assert (ls[0], str(ls[1]), ls[2], str(ls[3]), ls[4], ls[5], ls[6]) == (
+        "LS", "2026-08-31", 450000, "12.50", "Buy", "buy", "buy")
+    assert (got[2][0], got[2][5]) == ("유진투자", "buy")          # STRONG BUY → buy
+    kw = got[3]
+    assert (kw[0], kw[2], kw[7], kw[5], kw[6]) == (
+        "키움", None, "ledger_blank", "hold", None)
+    assert str(got[0][8]) == "2026-09-02" and got[0][9] == "measured"
+    g8 = next(g for g in r.gates if g.name == "G8")
+    assert g8.status is gates.GateStatus.PASS and g8.metrics["n_no_opinion"] == 1

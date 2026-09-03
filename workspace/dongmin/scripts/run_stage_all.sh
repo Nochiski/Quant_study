@@ -21,7 +21,7 @@ ORDER=(stg_rcept_dt_map
   stg_event_tsstk_aq stg_event_piic stg_event_cvbd_is stg_event_fric stg_event_pifric stg_event_cr stg_event_cmp_mg
   stg_event_cmp_dv stg_event_cmp_dvmg stg_event_stk_extr stg_event_tsstk_dp stg_event_ctrcvs_bgrq stg_event_df_ocr
   stg_event_ds_rs_ocr stg_event_bnk_mngt_pcbg
-  stg_consensus_monthly stg_consensus_annual stg_consensus_quarterly stg_consensus_matrix stg_analyst_summary stg_fin_wise
+  stg_consensus_monthly stg_consensus_annual stg_consensus_quarterly stg_consensus_matrix stg_analyst_summary stg_analyst_broker stg_fin_wise
   stg_v3_revision_daily stg_v3_analyst_opinions stg_v3_consensus_annual stg_v3_revision_compare stg_wise_coverage stg_calls_wise)
 if [ "$#" -gt 0 ]; then ORDER=("$@"); fi
 

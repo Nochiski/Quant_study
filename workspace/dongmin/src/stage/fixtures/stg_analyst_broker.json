@@ -1,0 +1,28 @@
+[
+ {
+  "key": {
+   "ticker": "005930",
+   "fetched_date": "2026-09-02",
+   "broker": "LS",
+   "opinion_date": "2026-08-31"
+  },
+  "column": "target_price_krw",
+  "expect": "450000",
+  "measured_sql": "cTB24 of ws_raw ep='c1010001' cmp_cd='005930' fetched_date='2026-09-02' → row LS 26/08/31 450,000 400,000 12.50 Buy Buy",
+  "measured_at": "2026-09-03",
+  "note": "제공처별 표 1행 원문 — 두 자리 연도 파싱·콤마 제거 검산"
+ },
+ {
+  "key": {
+   "ticker": "005930",
+   "fetched_date": "2026-09-02",
+   "broker": "LS",
+   "opinion_date": "2026-08-31"
+  },
+  "column": "opinion_class",
+  "expect": "buy",
+  "measured_sql": "동일 행 opinion='Buy'",
+  "measured_at": "2026-09-03",
+  "note": "어휘 categorize"
+ }
+]

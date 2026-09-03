@@ -166,6 +166,19 @@ TABLE-GROUP[@ACLASS="{XBRL}BS_S"]
 ### 1.11 성능 — 스트리밍 불필요
 Y510 XML 505건 653MB: 정제 7.45초 + expat 16.72초 = **문서당 48ms**, 최대 파일 15.5MB(전문 로드 시 텍스트 ~30MB). 전량 171,179건 ≈ 2.3시간(파싱만) → ZIP 해제·디코딩·산출 포함 ×1.5 ≈ 3.5시간 단일 코어, 3 워커 ≈ 1.2시간. 정정 문서만 재파싱은 17,603 × 50ms ≈ 15분. 킥오프의 "`iterparse` 스트리밍" 문구는 **문서 단위 전체 로드로 대체**(§5 ②) — 트리 전체가 있어야 `AASSOCNOTE`→하위 표 탐색이 단순하다. 관대한 대체 파서(`html.parser`, 순수 파이썬)는 같은 문서에 0.34초 — 실패분에만 쓴다.
 
+### 1.12 무손실 검증 — 텍스트·속성은 등식으로, 표 기하는 L1-2 요구로
+Y510 XML 505건에 대해 정제→expat 트리를 원문과 등식 비교(09-03):
+
+| 검증 | 술어 | 결과 |
+|---|---|---|
+| 텍스트 등식 | `"".join(root.itertext()).strip()` = 정제 원문에서 주석·선언·태그(`<[^>]+>`)를 지우고 `html.unescape` 한 문자열 `.strip()` | **505/505 동일** — 정제 5규칙(엔티티 치환·맨 `&`/`<` 이스케이프·속성 복구)은 글자를 하나도 바꾸지 않는다 |
+| 속성 수 등식 | 원문 시작 태그의 `name="…"` 수 = `Σ len(el.attrib)` | 505/505 에서 **정확히 1 차이** = 루트의 `xmlns:xsi` 를 ET 가 네임스페이스 선언으로 빼는 것(`noNamespaceSchemaLocation` 은 남음). 손실 아님 |
+| 디코딩 치환 | `errors='replace'` 경로 진입 문서 | 0/505 |
+| 태그 구조 | 화이트리스트 밖 토큰은 텍스트로 강등 | 텍스트로는 보존(위 등식에 포함)되지만 **구조는 잃는다**. 표본에서 강등된 토큰은 전부 본문 텍스트(≤2건/505)였고, 전량 census(G3) 가 새 태그를 잡는다 |
+| 재무표 셀 병합 | XBRL `TABLE-GROUP` 안 `TD/TH` 의 `ROWSPAN`·`COLSPAN` | **ROWSPAN 8,413 · COLSPAN 19,137 셀, 505 중 430 문서** — 분·반기 손익(`3개월/누적` 2단)·자본변동표(구성요소 2단)의 헤더. 트리는 속성을 그대로 갖고 있으므로 파싱 손실은 없지만, **L1-2 가 격자 전개 없이 열 순서로 기간을 붙이면 값이 옆 기간으로 밀린다** |
+
+따라서 L1-1 산출은 원문 대비 무손실이 등식으로 보장되고(G10 으로 매 문서 판정), 손실이 생길 수 있는 지점은 두 곳뿐이다: ① 화이트리스트 밖의 **진짜** 태그(구조 강등 — G3 어휘 게이트), ② L1-2 의 표 격자 전개(§3.4 요구 + G11). 원천 자체의 손실은 파서와 무관하게 존재한다 — ZIP 에 이미지 파일이 없어 `IMAGE/IMG` 는 참조만 남고, ZIP 없는 정정 2,975건은 원장으로 보완한다(§3.3).
+
 ## 2. 파서 계약
 
 ### 2.1 파이프라인 (문서 = ZIP 1개, 멤버마다 반복)
@@ -215,6 +228,7 @@ zipfile → 멤버 basename 매칭(role: main | audit(_00760) | audit_cons(_0076
 
 ### 3.4 `fin_asreported` (L1-2) — 1행 / (rcept_no, member, aclass_raw, row_ord, col_ord)
 `aclass_raw`(`{XBRL}IS_S1` 등 원문 — 키) · `stmt`(BS/IS/EF/CF/SA — ACLASS 의 문자 접두로 파생, `IS1/IS2/IS3` 는 전부 IS 이고 구분은 `aclass_raw`) · `scope`(C 연결 / S 별도 / U 미구분 — §1.9 규칙) · `stmt_title_raw` · `period_label`(열 라벨 원문 `제 54 기`) · `period_from`·`period_to`(헤더 표 파싱, NULL 허용) · `sub_label`(3개월/누적/NULL) · `row_ord` · `col_ord` · `account_raw`(원문, 번호 접두 보존) · `account_norm`(공백 제거·선행 번호/로마자/괄호 번호 제거·NFKC) · `value_raw` · `value_krw`(Decimal(38,4) = 숫자 × `unit_scale`; 콤마 제거·괄호 음수·`''`/`-` → NULL + `miss_kind`=blank/dash; 비KRW 단위면 NULL + `miss_kind`=non_krw) · `unit_raw`·`unit_scale`(`(단위 : 원)`→1, 천원→1e3, 백만원→1e6, 억원→1e8; 그 외·부재 → `unit_scale` NULL + `value_krw` NULL + `miss_kind`=unit_unknown)
+- **격자 전개 필수**: 헤더 표·본문 표 모두 `ROWSPAN/COLSPAN` 을 전개해 (row, col) 격자로 만든 뒤 열 라벨(기간·`3개월/누적`)을 붙인다(§1.12 — 505 중 430 문서에 병합 셀). `col_ord` 는 전개 후 열 번호.
 - 계정 표준화(`account_std`)는 싣지 않는다 — 원문 라벨이 as-reported 의 본질. 표준 매핑은 `src/fin_map.py` 재사용해 equity 에서.
 - **검산축(G9)**: 정정 없는 보고서(`rm` 에 `정` 없음)의 당기 값 ↔ `stg_fin.thstrm_amount`(같은 rcept_no, `account_norm` = `account_nm` 정규화 정확 일치, `stg_fin` 커버리지 2015~) 100% 일치. 정정 있는 원본은 불일치가 "정정 신호" 라 기대값이 다르다 — 두 집단으로 나눈다.
 
@@ -237,6 +251,8 @@ zipfile → 멤버 basename 매칭(role: main | audit(_00760) | audit_cons(_0076
 | G7 | 원장 교차 | 격리형 | `rm` 에 `정` 인 원본(전 연도·3종) 중 `correction_link.orig_rcept_no` 로 도달되는 비율 | ≥ 99% (2015~2024 사업보고서 6,156/6,162 = 99.9%, `[첨부정정]` 포함) |
 | G8 | XBRL 존재율 | 기록형 (L1-1a) | `doc_meta` 만으로 계산: `member_role=main` 사업보고서 중 `n_xbrl_groups ≥ 4` 비율, 연도·시장별 | 기록 → 2016~ ≥ 95% 예상, baseline. L1-2 범위(수기표 비중) 결정의 입력 |
 | G9 | 재무 교차(L1-2) | 격리형 | §3.4 분모(정정 없음 · 2015~ · `account_norm` 정확 일치 행) 의 `value_krw = thstrm_amount` 비율 | 100% · 2010~2014 는 `skip(no_stg_fin)` |
+| G10 | 텍스트 등식 | 폐기형 | 문서마다 §1.12 텍스트 등식 (lenient 경로 포함 — 대체 트리는 `strip` 대신 공백 정규화 후 비교) | 위반 0 (Y510: 505/505) |
+| G11 | 표 격자(L1-2) | 격리형 | `ROWSPAN/COLSPAN` 전개 후 모든 행의 폭 = 헤더 폭 · 값 셀은 span 없음 | 위반 행 격리, 비율 기록 → baseline |
 
 ## 5. 결정 요청 (권고안 — 승인 후 L1-1 착수)
 
@@ -257,9 +273,9 @@ zipfile → 멤버 basename 매칭(role: main | audit(_00760) | audit_cons(_0076
 
 | 단계 | 산출 | 게이트 | 비고 |
 |---|---|---|---|
-| L1-1a | `src/doc/vocab.py`·`sanitize.py`·`parse.py`(헤더·목차·CORRECTION 좌표·XBRL 그룹 좌표) + TDD(픽스처 = 표본에서 오린 XML 조각, 파일 의존 금지) | G0~G5 · G8 기록 · G3 census 표를 이 문서 §1.6 에 추기 | 전량 1회 실행 → `doc_meta`·`doc_section`·`doc_parse_log` |
+| L1-1a | `src/doc/vocab.py`·`sanitize.py`·`parse.py`(헤더·목차·CORRECTION 좌표·XBRL 그룹 좌표) + TDD(픽스처 = 표본에서 오린 XML 조각, 파일 의존 금지) | G0~G5·G10 · G8 기록 · G3 census 표를 이 문서 §1.6 에 추기 | 전량 1회 실행 → `doc_meta`·`doc_section`·`doc_parse_log` |
 | L1-1b | `correction_link` 빌더 — 원장 20,579 전건 + ZIP 있는 17,603 은 정정 문서만 **재파싱**(≈15분, §1.11)해 첫 장 텍스트 추출 | G6a·G6b·G7 · 분포 baseline | **equity 4단계 첫 고객** |
-| L1-2 | `fin_asreported`(XBRL 그룹 2표 파서 · 기간 라벨 · 단위 · 값) | G9 | 수기표는 `n_xbrl_groups=0` 존재만 |
+| L1-2 | `fin_asreported`(XBRL 그룹 2표 파서 · 격자 전개 · 기간 라벨 · 단위 · 값) | G9·G11 | 수기표는 `n_xbrl_groups=0` 존재만 |
 | L1-3 | 섹션 텍스트 parquet(사업의 개요·주석 `{XBRL}NT_*`) | 팩터 요구 확정 후 | HTML 주요사항보고서 소형 파서도 여기 |
 
 첫 세션(승인 후): `git checkout -b doc/l1-parse origin/main` → `src/doc/vocab.py` 상수 + 정제기 TDD(§2.2 다섯 규칙 각각 실패→통과) → 서버에서 `parse.py --sample` 로 S26 를 돌려 G4 픽스처 값 고정 → 전량 빌드.
@@ -271,6 +287,7 @@ zipfile → 멤버 basename 매칭(role: main | audit(_00760) | audit_cons(_0076
 | — | L1-0 표본 S26 + Y2040/Y510 + C340 실측 완료, 정제 5규칙·태그 41·세대 4 확정 | 09-03 |
 | — | 검수 1회 반영: `correction_link` 모집단 = 원장 전건(ZIP 무관), `candidate_status`·`date_check` 분리, G6·G7 상수 분자·분모 재도출, `fin_asreported` 키에 `aclass_raw`, `parse_mode` 어휘 4개, 정제 5규칙 명칭 통일, 표본 술어 §1.0 | 09-03 |
 | — | 검수 2회 반영: C340 을 원장 규칙만으로 재분류(339/340), `scope` 결정표, `filed_raw` 앵커, G2 보강 표본(S26), G5 입력 스냅샷 조건, G8 을 L1-1a 로, lenient 속성명 대문자화·최소 내용 조건, `date_check` `n/a`·`no_zip` 정의, HTML ZIP 산술 | 09-03 |
+| — | 무손실 검증 추가(§1.12): 텍스트 등식 505/505 · 속성 등식(네임스페이스 1 차이) · 재무표 병합 셀 430/505 → G10·G11, L1-2 격자 전개 요구 | 09-03 |
 | — | §5 ①~⑩ 권고안 승인 대기 | — |
 
 **교훈 (L1-0)**:

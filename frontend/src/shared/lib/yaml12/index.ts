@@ -15,3 +15,9 @@ export {
   type YamlCursorContext,
 } from "./cursor";
 export { CODEC_LIMITS } from "./limits";
+export {
+  decodePointerSegment,
+  escapePointerSegment,
+  pointerSegments,
+} from "./pointer";
+export { locatePointer } from "./source-map";

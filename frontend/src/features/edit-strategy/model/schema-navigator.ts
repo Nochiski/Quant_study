@@ -5,6 +5,11 @@
  * sibling `kind` value in the document, so a `kind` change re-selects the allowed fields.
  */
 
+import {
+  decodePointerSegment,
+  pointerSegments,
+} from "../../../shared/lib/yaml12";
+
 export type JsonSchema = Record<string, unknown>;
 
 export type ResolvedSchema = {
@@ -33,7 +38,7 @@ export const resolveRef = (root: JsonSchema, node: JsonSchema): JsonSchema => {
     let target: unknown = root;
     for (const segment of ref.slice(2).split("/")) {
       if (!isObject(target)) return current;
-      target = target[segment.replace(/~1/g, "/").replace(/~0/g, "~")];
+      target = target[decodePointerSegment(segment)];
     }
     if (!isObject(target)) return current;
     current = target;
@@ -106,11 +111,10 @@ const walk = (
   pointer: string,
   tree: unknown,
 ): { node: JsonSchema; value: unknown } | null => {
-  const segments = pointer === "" ? [] : pointer.slice(1).split("/");
+  const segments = pointerSegments(pointer);
   let current: JsonSchema = root;
   let value: unknown = tree;
-  for (const raw of segments) {
-    const segment = raw.replace(/~1/g, "/").replace(/~0/g, "~");
+  for (const segment of segments) {
     const here = resolveUnion(root, current, value);
     const node = here.node;
     if (node.type === "array" && isObject(node.items)) {
@@ -218,8 +222,7 @@ export const definingArrayFor = (
       if (option.schema["x-defines"] !== namespace) continue;
       const arrayPointer = `${ancestor}/${option.name}`;
       let value: unknown = tree;
-      for (const raw of arrayPointer.slice(1).split("/")) {
-        const segment = raw.replace(/~1/g, "/").replace(/~0/g, "~");
+      for (const segment of pointerSegments(arrayPointer)) {
         if (Array.isArray(value)) value = value[Number(segment)];
         else if (isObject(value)) value = value[segment];
         else {

@@ -14,6 +14,7 @@ import { t } from "../../../shared/config";
 import {
   describeYamlCursor,
   loadYaml12Mapping,
+  pointerSegments,
   templatePointer,
 } from "../../../shared/lib/yaml12";
 import type {
@@ -61,8 +62,7 @@ const treeFor = (text: string, state: DocumentState): unknown => {
 
 const valueAt = (tree: unknown, pointer: string): unknown => {
   let current = tree;
-  for (const raw of pointer === "" ? [] : pointer.slice(1).split("/")) {
-    const segment = raw.replace(/~1/g, "/").replace(/~0/g, "~");
+  for (const segment of pointerSegments(pointer)) {
     if (Array.isArray(current)) current = current[Number(segment)];
     else if (isRecord(current)) current = current[segment];
     else return undefined;

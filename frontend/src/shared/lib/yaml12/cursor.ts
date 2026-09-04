@@ -7,6 +7,8 @@
  * scalars are out of scope and simply yield no context.
  */
 
+import { escapePointerSegment } from "./pointer";
+
 export type YamlCursorContext = {
   /** "key": the cursor is typing a mapping key; "value": the scalar value of `key` (or of a sequence item). */
   mode: "key" | "value";
@@ -33,9 +35,6 @@ type Line = {
 };
 
 const KEY_RE = /^([^\s#:"'-][^:#]*?|"[^"]*"|'[^']*'):(?:\s|$)/;
-
-const escapePointer = (segment: string): string =>
-  segment.replace(/~/g, "~0").replace(/\//g, "~1");
 
 const unquote = (key: string): string =>
   (key.startsWith('"') && key.endsWith('"')) ||
@@ -104,7 +103,7 @@ const containerPointer = (
     if (owner !== null && line.indent === owner) {
       if (line.item) continue;
       if (line.key !== null) {
-        segments.unshift(escapePointer(line.key));
+        segments.unshift(escapePointerSegment(line.key));
         level = line.indent;
         owner = null;
       }
@@ -113,13 +112,13 @@ const containerPointer = (
     if (line.item && line.indent < level) {
       // `- key:` owns children deeper than its inner mapping; the item itself is one index.
       if (line.key !== null && line.innerIndent < level) {
-        segments.unshift(escapePointer(line.key));
+        segments.unshift(escapePointerSegment(line.key));
       }
       segments.unshift(String(itemIndex(lines, i)));
       level = line.indent;
       owner = line.indent;
     } else if (!line.item && line.indent < level && line.key !== null) {
-      segments.unshift(escapePointer(line.key));
+      segments.unshift(escapePointerSegment(line.key));
       level = line.indent;
       owner = null;
     }
@@ -232,7 +231,7 @@ export const describeYamlCursor = (
     }
     return {
       mode: "value",
-      pointer: `${container}/${escapePointer(key)}`,
+      pointer: `${container}/${escapePointerSegment(key)}`,
       key,
       prefix,
       from,

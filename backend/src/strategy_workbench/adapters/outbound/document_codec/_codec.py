@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import warnings
 from collections.abc import Iterator
 from typing import Any
 
@@ -100,7 +101,12 @@ class RuamelDocumentCodec:
             self._check_encodable(source)
             source_hash = source_hash_of(source)
             self._check_size(source)
-            json_tree = self._check_json_syntax(source) if format is SourceFormat.JSON else None
+            json_duplicates: list[str] = []
+            json_tree = (
+                self._check_json_syntax(source, json_duplicates)
+                if format is SourceFormat.JSON
+                else None
+            )
             loader = _loader()
             root = self._compose(source, loader)
             value_ranges: dict[str, SourceRange] = {}
@@ -113,7 +119,16 @@ class RuamelDocumentCodec:
                     "",
                     _range_of(root),
                 )
-            if json_tree is not None:
+            if json_duplicates:  # pragma: no cover - _walk reports located duplicates first
+                raise _Rejected("yaml.duplicate_key", f"duplicate key — key={json_duplicates[0]!r}")
+            if format is SourceFormat.JSON:
+                if not isinstance(json_tree, dict):
+                    raise _Rejected(
+                        "yaml.not_a_mapping",
+                        f"document root must be a mapping — got={type(json_tree).__name__}",
+                        "",
+                        _range_of(root),
+                    )
                 tree = json_tree  # values come from the JSON parser; ruamel only mapped ranges
         except _Rejected as rejected:
             return ParsedDocument(
@@ -167,22 +182,24 @@ class RuamelDocumentCodec:
                 f"source exceeds size limit — bytes={size} max_bytes={self._limits.max_bytes}",
             )
 
-    def _check_json_syntax(self, source: str) -> dict[str, Any]:
+    def _check_json_syntax(self, source: str, duplicates: list[str]) -> Any:
+        # reason: JSON value tree (dict/list/scalar) typed by json.loads
         def reject_constant(name: str) -> Any:  # reason: json hook signature
             raise ValueError(f"non-finite literal {name} is not valid JSON")
 
-        def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        def keep_first(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            # Duplicates are remembered here and reported by `_walk`, which knows the
+            # key's source range; keep-first so the tree shape stays deterministic.
             result: dict[str, Any] = {}
             for key, value in pairs:
                 if key in result:
-                    raise _Rejected("yaml.duplicate_key", f"duplicate key — key={key!r}")
+                    duplicates.append(key)
+                    continue
                 result[key] = value
             return result
 
         try:
-            tree = json.loads(
-                source, parse_constant=reject_constant, object_pairs_hook=reject_duplicates
-            )
+            tree = json.loads(source, parse_constant=reject_constant, object_pairs_hook=keep_first)
         except json.JSONDecodeError as error:
             position = SourcePosition(error.lineno - 1, error.colno - 1, error.pos)
             raise _Rejected(
@@ -198,16 +215,11 @@ class RuamelDocumentCodec:
                 "yaml.too_deep",
                 f"nesting exceeds limit — max_depth={self._limits.max_depth}",
             ) from error
-        if not isinstance(tree, dict):
-            raise _Rejected(
-                "yaml.not_a_mapping",
-                f"document root must be a mapping — got={type(tree).__name__}",
-            )
         return tree
 
     def _compose(self, source: str, loader: YAML) -> Node:
         try:
-            self._scan_policy(loader.scan(source), loader)
+            deferred = self._scan_policy(loader.scan(source), loader)
         except MarkedYAMLError as error:
             raise _Rejected(
                 "yaml.syntax", _marked_message(error), "", _mark_range(error)
@@ -215,7 +227,11 @@ class RuamelDocumentCodec:
         except YAMLError as error:
             raise _Rejected("yaml.syntax", f"invalid YAML — {error}") from error
         try:
-            root = loader.compose(source)
+            with warnings.catch_warnings():
+                # Policy violations (duplicate anchors, tags) are composed before being rejected
+                # below; ruamel's advisory warnings about them are not server log material.
+                warnings.simplefilter("ignore")
+                root = loader.compose(source)
         except ComposerError as error:
             if "single document" in str(error):
                 raise _Rejected(
@@ -237,13 +253,29 @@ class RuamelDocumentCodec:
             raise _Rejected(
                 "yaml.too_deep", f"nesting exceeds limit — max_depth={self._limits.max_depth}"
             ) from error
+        except Exception as error:  # noqa: BLE001  # reason: untrusted input must never raise
+            # ruamel's pure parser uses bare asserts (e.g. `%YAML 1.3` version setter); any
+            # non-YAMLError escaping compose is still a rejected document, not a server fault.
+            raise _Rejected(
+                "yaml.syntax",
+                f"invalid YAML — parser error {type(error).__name__}: {error}",
+            ) from error
+        if deferred is not None:
+            raise deferred  # policy violation reported only after compose found no syntax error
         if root is None:
             raise _Rejected("yaml.not_a_mapping", "document is empty — expected a mapping")
         return root
 
-    def _scan_policy(self, tokens: Iterator[object], loader: YAML) -> None:
-        """Streamed token policy; stops at the first violation so deep input never composes."""
+    def _scan_policy(self, tokens: Iterator[object], loader: YAML) -> _Rejected | None:
+        """Streamed token policy.
+
+        Depth violations stop immediately so deep input never composes. Other policy
+        violations are returned to the caller, which raises them only after compose succeeded,
+        so a syntax error anywhere in the document wins (ADR D2: reason order matches the
+        frontend parser, which reports syntax before directive/tag/anchor policy).
+        """
         depth = 0
+        first: _Rejected | None = None
         for token in tokens:
             if isinstance(token, _OPENING):
                 depth += 1
@@ -257,40 +289,44 @@ class RuamelDocumentCodec:
                     )
             elif isinstance(token, _CLOSING):
                 depth -= 1
+            elif first is not None:
+                continue
             elif isinstance(token, DirectiveToken):
-                raise _Rejected(
+                first = _Rejected(
                     "yaml.directive",
                     f"directives are not allowed — directive=%{token.name}",
                     "",
                     _token_range(token),
                 )
             elif isinstance(token, (AnchorToken, AliasToken)):
-                raise _Rejected(
+                first = _Rejected(
                     "yaml.anchor_or_alias",
                     f"anchors and aliases are not allowed — token={type(token).__name__}",
                     "",
                     _token_range(token),
                 )
             elif isinstance(token, TagToken):
-                raise _Rejected(
+                first = _Rejected(
                     "yaml.tag", f"tags are not allowed — tag={token.value}", "", _token_range(token)
                 )
             elif isinstance(token, ScalarToken) and token.plain:
                 tag = loader.resolver.resolve(ScalarNode, token.value, (True, False))
                 if tag == _MERGE_TAG:
-                    raise _Rejected(
+                    first = _Rejected(
                         "yaml.merge_key", "merge keys (<<) are not allowed", "", _token_range(token)
                     )
+                    continue
                 core_number = bool(_CORE_INT.match(token.value) or _CORE_FLOAT.match(token.value))
                 resolver_number = tag in _NUMBER_TAGS and not _NON_FINITE.match(token.value)
                 if resolver_number != core_number:
-                    raise _Rejected(
+                    first = _Rejected(
                         "yaml.non_core_number",
                         "number literal outside the YAML 1.2 core schema — "
                         f"scalar={token.value!r} (frontend and backend would disagree)",
                         "",
                         _token_range(token),
                     )
+        return first
 
     def _walk(
         self,
@@ -322,6 +358,8 @@ class RuamelDocumentCodec:
             result: dict[str, Any] = {}
             for key_node, value_node in node.value:
                 key = loader.constructor.construct_object(key_node, deep=True)
+                if isinstance(key, str):
+                    key = _merge_surrogates(key, pointer, key_node)
                 if not isinstance(key, str):
                     raise _Rejected(
                         "yaml.non_string_key",
@@ -351,6 +389,8 @@ class RuamelDocumentCodec:
             ]
         if isinstance(node, ScalarNode):
             value = loader.constructor.construct_object(node, deep=True)
+            if isinstance(value, str):
+                return _merge_surrogates(value, pointer, node)
             if isinstance(value, float) and not math.isfinite(value):
                 raise _Rejected(
                     "yaml.non_finite_number",
@@ -380,6 +420,22 @@ class RuamelDocumentCodec:
             pointer,
             _range_of(node),
         )
+
+
+def _merge_surrogates(value: str, pointer: str, node: Node) -> str:
+    """Escaped surrogate pairs (`\\ud83d\\ude00`) become one code point, as JSON.parse and
+    json.loads do; a lone surrogate is not encodable text and is rejected."""
+    if _SURROGATE.search(value) is None:
+        return value
+    try:
+        return value.encode("utf-16", "surrogatepass").decode("utf-16")
+    except UnicodeDecodeError as error:
+        raise _Rejected(
+            "yaml.syntax",
+            f"string contains an unpaired surrogate escape — pointer={pointer!r}",
+            pointer,
+            _range_of(node),
+        ) from error
 
 
 def _loader() -> YAML:

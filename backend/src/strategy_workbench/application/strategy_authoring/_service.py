@@ -11,7 +11,7 @@ WORKFLOW P1-03. Pipeline (authoring ADR D1/D4):
 exists; an invalid or stale document never yields something executable.
 
 The compiled spec carries the placeholder identity `draft/0` (`DRAFT_IDENTITY`): identity is
-excluded from `spec_hash`, and the save flow (P2-02) assigns the real strategy id / revision.
+excluded from `spec_hash`, and the save flow (P1-06/P1-07) assigns the real strategy id / revision.
 """
 
 from __future__ import annotations

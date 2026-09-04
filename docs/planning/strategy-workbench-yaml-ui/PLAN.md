@@ -4,7 +4,7 @@ project: yaml-strategy-workbench-ui
 project_status: IN_REVIEW
 current_phase: P2,P3
 current_pr: P2-01,P2-02,P2-03,P2-04,P3-01,P3-02,P3-03,P3-04,P3-05
-active_prs: [P2-01, P2-02, P2-03, P2-04, P3-01, P3-02, P3-03, P3-04, P3-05, P3-06]
+active_prs: [P2-01, P2-02, P2-03, P2-04, P3-01, P3-02, P3-03, P3-04, P3-05, P3-06, P3-07]
 parallel_window: [P2-01, P2-02, P2-03, P3-01, P3-02, P2-04, P3-03, P3-04, P3-05]
 last_updated: 2026-09-04T18:27:55+09:00
 planned_prs: 45
@@ -86,7 +86,7 @@ progress_percent: 38
 
 | 항목 | 값 |
 |---|---|
-| PR | Phase 1 전량 MERGED(7efe811). 진행 중: `P2-01`→`P2-02`→`P2-03`→`P3-01`→`P3-02`→`P2-04` (worktree `Quant_study-p2-01`, IN_REVIEW, P2-03 v3 시안 정합 반영 259b682 → P3-01 0925d1c → P3-02 429615b → P2-04 09ceacf → P3-03 380511a → P3-04 0a6b28c → P3-05 0fb303b → P3-06 7dcb3bf, main 7efe811 병합 포함), Phase 1.5 감사 후속 `feat/p1.5-05-audit-fixes` (worktree `Quant_study-p15-01`, 구현 서브에이전트), Phase 1 종료 SoT·책임분리 감사 |
+| PR | Phase 1 전량 MERGED(7efe811). 진행 중: `P2-01`→`P2-02`→`P2-03`→`P3-01`→`P3-02`→`P2-04` (worktree `Quant_study-p2-01`, IN_REVIEW, P2-03 v3 시안 정합 반영 259b682 → P3-01 0925d1c → P3-02 429615b → P2-04 09ceacf → P3-03 380511a → P3-04 0a6b28c → P3-05 0fb303b → P3-06 7dcb3bf → P3-07 8c3d074, main 7efe811 병합 포함), Phase 1.5 감사 후속 `feat/p1.5-05-audit-fixes` (worktree `Quant_study-p15-01`, 구현 서브에이전트), Phase 1 종료 SoT·책임분리 감사 |
 | Intent | P2-03: 시안(v3) 그대로의 IDE 프레임(top bar·title/meta·outline+snippets·editor tabs·계약·중간 결과). P3-01/02: YAML 1.2 document state machine + lazy CodeMirror 어댑터 |
 | Acceptance | 시안과 동일한 프레임, 접근성(탭·드로어·aria), 편집기 chunk ≤ 200 KB gzip, 게이트 clean |
 | Non-goals | 실제 계약/중간 결과 데이터 연결(P4·P5), P2-04 revision loader |
@@ -178,7 +178,7 @@ Phase exit:
 | [ ] | `P3-04` | Backend semantic diagnostic marker와 stale response 차단 | P3-03, P1-03 | `IN_REVIEW` | `review_p3_04` |
 | [ ] | `P3-05` | Dirty/base hash에 따른 saved reference 또는 inline draft Backtest | P3-04, P1-07, P1-09, P1.5-04, P2-04 | `IN_REVIEW` | `review_p3_05` |
 | [ ] | `P3-06` | Local autosave와 recovery 비교 | P3-05 | `IN_REVIEW` | `review_p3_06` |
-| [ ] | `P3-07` | 409 revision conflict에서 source 보존 | P3-05, P1-08 | `WAITING` | — |
+| [ ] | `P3-07` | 409 revision conflict에서 source 보존 | P3-05, P1-08 | `IN_REVIEW` | `review_p3_07` |
 
 Phase exit:
 
@@ -282,6 +282,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-04 KST | Claude | P3-07 착수·diff freeze 8c3d074 (branch `feat/p3-07-conflict-safety`, P3-06 위; 409 시 문서 보존, ConflictBanner(서버 최신/현재 기준 리비전, 서버본 열기 링크, 현재 문서 복사, Diff 열기→P1-08 semantic diff 표), strategyDiffQuery·diffStrategyRevisions 래퍼; vitest 176·typecheck·lint·build clean), review_p3_07(opus) 배정 → IN_REVIEW. Phase 3 PR 7/7 구현 완료, 리뷰·merge 대기 | 13.3 |
 | 2026-09-04 KST | Claude | P3-06 착수·diff freeze 7dcb3bf (branch `feat/p3-06-autosave-recovery`, P3-05 위; draft-store(localStorage, base key `strategyId@rev`/new, 손상·quota 내성), useAutosave(dirty 800ms 후 기록, 저장 성공 시 정리, 로드 시 원본과 다른 복구본 제안), RecoveryBanner(줄 diff 요약, 복구/삭제, schema 불일치 시 원문 다운로드), lineDiffSummary; vitest 175·typecheck·lint·build clean), review_p3_06(opus) 배정 → IN_REVIEW | 13.3 |
 | 2026-09-04 KST | Claude | P3-05 착수·diff freeze 0fb303b (branch `feat/p3-05-toolbar-cutover`, P3-04 위; 15 files +719/−33; DocumentToolbar(schema/source hash/spec hash·dirty·Validate/Save/Backtest), canSave는 현재 compile 성공 시만, decideBacktestSource(saved_revision ↔ inline_draft ↔ blocked), useRunBacktest→/research/backtests/$runId, IDE meta 확장, builder 문구 YAML-first; vitest 168·typecheck·lint·build clean), review_p3_05(opus) 배정 → IN_REVIEW | 13.3 |
 | 2026-09-04 KST | Claude | P3-04 착수·diff freeze 0a6b28c (branch `feat/p3-04-semantic-markers`, P3-03 위; compile debounce 300ms·AbortController·버전 불일치 응답 폐기, pointer→range(프론트 parse map→backend range→조상), 문제 목록(오류/경고 분리, 클릭 시 selection 이동), 전송 실패는 capability 진단; vitest 163 통과, 브라우저에서 compile 진단·completion 실동작 확인(backend CORS 5173)), review_p3_04(opus) 배정 → IN_REVIEW | 13.3 |

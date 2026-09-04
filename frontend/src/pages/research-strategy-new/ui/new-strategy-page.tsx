@@ -6,6 +6,7 @@ import {
   SourceEditor,
   saveStatusText,
   saveStatusTone,
+  useCompileDocument,
   useSaveDocument,
   useSchemaAssist,
   useStrategyDocument,
@@ -32,6 +33,7 @@ export const NewStrategyPage = () => {
   const [document, dispatch] = useStrategyDocument(NEW_DRAFT);
   const { save, status, canSave } = useSaveDocument(document, dispatch);
   const assist = useSchemaAssist(document);
+  useCompileDocument(document, dispatch);
 
   // If the user types while create is in flight, stay on this page and preserve the newer text.
   // A second save appends it to the newly created strategy; navigate only once the current text

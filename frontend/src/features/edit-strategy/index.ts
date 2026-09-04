@@ -31,6 +31,11 @@ export {
 } from "./model/use-save-document";
 export { saveStatusText, saveStatusTone } from "./model/save-status";
 export { useSchemaAssist, type SchemaAssist } from "./model/use-schema-assist";
+export {
+  toDocumentDiagnostics,
+  useCompileDocument,
+} from "./model/use-compile-document";
+export { DiagnosticsPanel } from "./ui/diagnostics-panel";
 export { SourceEditor } from "./ui/source-editor";
 export { SaveAction } from "./ui/save-action";
 export { DirtyLeaveGuard } from "./ui/dirty-leave-guard";

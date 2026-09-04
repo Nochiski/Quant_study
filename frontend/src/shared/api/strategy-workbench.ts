@@ -1,6 +1,7 @@
 import { client } from "./generated/client.gen";
 import {
   cancelBacktest,
+  compileStrategyDocument,
   createStrategy,
   createStrategyDocument,
   explainFactorGraph,
@@ -30,6 +31,8 @@ import type {
   BacktestRunSpec,
   BacktestRunState,
   BacktestStartResponse,
+  CompileRequest,
+  CompiledDocument,
   DataStep,
   DatasetFieldProfile,
   FactorCatalog,
@@ -61,6 +64,7 @@ import type {
   RevisionSummary,
   SaveDocumentRequest,
   SavedStrategy,
+  SourceDiagnostic,
   StrategyDocument,
   StrategyDocumentContractResponse,
   StrategyDocumentSchema,
@@ -257,6 +261,15 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "getStrategyDocument");
   },
 
+  /** Compile exact text; `signal` aborts a request the editor has already superseded. */
+  async compileStrategyDocument(
+    request: CompileRequest,
+    signal?: AbortSignal,
+  ): Promise<CompiledDocument> {
+    const response = await compileStrategyDocument({ body: request, signal });
+    return unwrap(response, "compileStrategyDocument");
+  },
+
   async getStrategyDocumentSchema(): Promise<StrategyDocumentSchema> {
     const response = await getStrategyDocumentSchema();
     return unwrap(response, "getStrategyDocumentSchema");
@@ -324,6 +337,8 @@ export type {
   BacktestRunSpec,
   BacktestRunState,
   BacktestStartResponse,
+  CompileRequest,
+  CompiledDocument,
   DataStep,
   DatasetFieldProfile,
   FactorCatalog,
@@ -353,6 +368,7 @@ export type {
   RevisionSummary,
   SaveDocumentRequest,
   SavedStrategy,
+  SourceDiagnostic,
   StrategyDocument,
   StrategyDocumentContractResponse,
   StrategyDocumentSchema,

@@ -8,6 +8,7 @@ import {
   SourceEditor,
   saveStatusText,
   saveStatusTone,
+  useCompileDocument,
   useSaveDocument,
   useSchemaAssist,
   useStrategyDocument,
@@ -47,6 +48,7 @@ export const StrategyRevisionPage = () => {
   const [document, dispatch] = useStrategyDocument(source);
   const { save, status, canSave } = useSaveDocument(document, dispatch);
   const assist = useSchemaAssist(document);
+  useCompileDocument(document, dispatch);
 
   // A save can complete while the user is still typing. Keep that newer text on the current
   // route and let the next save append from the updated base; only follow the revision when the

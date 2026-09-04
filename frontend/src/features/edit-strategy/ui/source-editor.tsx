@@ -13,8 +13,10 @@ import {
   currentDiagnostics,
   isSpecStale,
   type DocumentAction,
+  type DocumentDiagnostic,
   type DocumentState,
 } from "../model/document-state";
+import { DiagnosticsPanel } from "./diagnostics-panel";
 
 type SourceEditorProps = {
   state: DocumentState;
@@ -50,9 +52,10 @@ export const SourceEditor = ({
 }: SourceEditorProps) => {
   const handle = useRef<CodeEditorHandle>(null);
 
+  const documentDiagnostics = useMemo(() => currentDiagnostics(state), [state]);
   const diagnostics = useMemo<EditorDiagnostic[]>(
     () =>
-      currentDiagnostics(state)
+      documentDiagnostics
         .filter((d) => d.range !== null)
         .map((d) => ({
           from: d.range!.start.offset,
@@ -61,13 +64,29 @@ export const SourceEditor = ({
           message: d.message,
           code: d.code,
         })),
-    [state],
+    [documentDiagnostics],
   );
 
+  // Selecting a problem moves the editor to its range (WORKFLOW P3-04 acceptance). Clamp stale
+  // offsets defensively so an old range can never throw against shorter current text.
+  const selectDiagnostic = useCallback((diagnostic: DocumentDiagnostic) => {
+    const editor = handle.current;
+    if (!editor || diagnostic.range === null) return;
+    const length = editor.getText().length;
+    const from = Math.min(diagnostic.range.start.offset, length);
+    const to = Math.min(Math.max(diagnostic.range.end.offset, from), length);
+    editor.setSelection(from, to);
+    editor.scrollTo(from);
+    editor.focus();
+  }, []);
+
+  // The editor can only raise the composition flag from a change (`view.composing`); the DOM
+  // `compositionend` event is what lowers it, so a change delivered while an IME session is open
+  // never re-enables parsing early.
   const onChange = useCallback(
     (text: string, composing: boolean) => {
-      if (composing !== state.composing)
-        dispatch({ type: "composing", composing });
+      if (composing && !state.composing)
+        dispatch({ type: "composing", composing: true });
       dispatch({ type: "edit", source: text });
     },
     [dispatch, state.composing],
@@ -105,6 +124,19 @@ export const SourceEditor = ({
         diagnostics={diagnostics}
         completionSource={assist?.completionSource}
         hoverSource={assist?.hoverSource}
+      />
+      <DiagnosticsPanel
+        diagnostics={
+          documentDiagnostics.length > 0 || state.compiled === null
+            ? documentDiagnostics
+            : state.compiled.diagnostics
+        }
+        stale={
+          documentDiagnostics.length === 0 &&
+          state.compiled !== null &&
+          state.compiledVersion !== state.sourceVersion
+        }
+        onSelect={selectDiagnostic}
       />
     </div>
   );

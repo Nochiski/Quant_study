@@ -2,15 +2,15 @@
 plan_version: 2
 project: yaml-strategy-workbench-ui
 project_status: IN_REVIEW
-current_phase: P1
-current_pr: P1-02
-active_prs: [P1-02]
-parallel_window: [P1-02, P1-04]
-last_updated: 2026-09-04T15:10:18+09:00
+current_phase: P2,P3
+current_pr: P2-01,P2-02,P2-03,P3-01,P3-02
+active_prs: [P2-01, P2-02, P2-03, P3-01, P3-02]
+parallel_window: [P2-01, P2-02, P2-03, P3-01, P3-02]
+last_updated: 2026-09-04T17:39:46+09:00
 planned_prs: 45
-merged_prs: 7
-approved_prs: 7
-progress_percent: 16
+merged_prs: 17
+approved_prs: 17
+progress_percent: 38
 ---
 
 # YAML Strategy Workbench 실시간 진행 계획
@@ -23,12 +23,12 @@ progress_percent: 16
 | Field | Value |
 |---|---|
 | Project status | `IN_REVIEW` |
-| Current phase | `P1` |
-| Current/next PR | `P1-02` |
-| Active PR | `P1-02` |
-| Progress | `7 / 45 merged (16%)` |
-| Approved | `7 / 45` |
-| Aggregated at | `2026-09-04 15:10 KST` |
+| Current phase | `P2,P3` |
+| Current/next PR | `P2-01,P2-02,P2-03,P3-01,P3-02` |
+| Active PR | `P2-01, P2-02, P2-03, P3-01, P3-02` |
+| Progress | `17 / 45 merged (38%)` |
+| Approved | `17 / 45` |
+| Aggregated at | `2026-09-04 17:39 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -72,14 +72,14 @@ progress_percent: 16
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
 | P0 | Contract, product direction, tool choices | 4 | 4 | `MERGED` |
-| P1 | Backend Authoring Contract | 9 | 2 | `IN_REVIEW` |
-| P1.5 | Backtest Correctness Gate | 4 | 1 | `READY` |
-| P2 | App Shell and visual foundation | 4 | 0 | `READY` |
-| P3 | YAML Editor MVP | 7 | 0 | `WAITING` |
+| P1 | Backend Authoring Contract | 9 | 9 | `MERGED` |
+| P1.5 | Backtest Correctness Gate | 4 | 4 | `MERGED` |
+| P2 | App Shell and visual foundation | 4 | 0 | `IN_REVIEW` |
+| P3 | YAML Editor MVP | 7 | 0 | `IN_REVIEW` |
 | P4 | Outline, Contract, Projections | 8 | 0 | `WAITING` |
 | P5 | Truthful Trace UI | 3 | 0 | `WAITING` |
 | P6 | Professional release and migration | 6 | 0 | `WAITING` |
-| **Total** |  | **45** | **7** | **16%** |
+| **Total** |  | **45** | **17** | **38%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
@@ -282,6 +282,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-04 KST | Claude | active PR 상한 규칙 보완: `parallel_window`에 전부 나열된 stack은 한 line으로 보고 2개 제한 초과 허용(WORKFLOW 13절, update-plan-progress.ps1). P2/P3 stack 5개를 window로 선언 | 규칙 갱신 |
 | 2026-09-04 KST | Claude | P1-06(2차)·P1-09(2차) APPROVE 수신, 잔여 소항목 반영(54eb349) → P1-05~09 스택 main merge(7efe811, container 충돌 해소), MERGED. Phase 1 9/9 완료, Phase 1 종료 감사 착수. P2-03 시안(v3) 정합 반영(1814817·259b682) 후 재리뷰 요청, P3-01(0925d1c)·P3-02(429615b)에 전진 병합. Phase 1.5 감사 후속(D-001~007) 구현 서브에이전트 착수 | 13.6 merge gate |
 | 2026-09-04 KST | Claude | P1-02 APPROVE(4차 b4a34f6) → main merge(df32c09), P1-03 → main merge(90a14bc, container 충돌 해소), MERGED. main 607 passed(Rust core 제외), SDK clean. P1-05~09·P2-01~03·P3-01/02 리뷰 결과 수신 중(요약 재전송 요청) | 13.6 merge gate |
 | 2026-09-04 KST | Claude | P3-02 착수·diff freeze 579bce8 (branch `feat/p3-02-code-editor`, P3-01 위; CodeMirror 6 pin, editor chunk gzip 136 KB ≤ 200 KB 예산; typecheck·lint·vitest 124·build clean), review_p3_02(opus) 배정 → IN_REVIEW | 13.3 |

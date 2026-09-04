@@ -188,7 +188,7 @@ class _SchemaBuilder:
             constraint = self._constraints.get(child)
             if constraint is not None:
                 schema = {**schema, **_constraint_schema(constraint)}
-            for marker in ("catalog", "reference"):
+            for marker in ("catalog", "reference", "defines"):
                 if marker in field.metadata:
                     schema = {**schema, f"x-{marker}": field.metadata[marker]}
             properties[field.name] = schema

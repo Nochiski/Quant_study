@@ -82,7 +82,7 @@ const itemIndex = (lines: Line[], at: number): number => {
   for (let i = at - 1; i >= 0; i -= 1) {
     const line = lines[i];
     if (line.blank) continue;
-    if (line.indent < indent) break;
+    if (line.indent < indent || (line.indent === indent && !line.item)) break;
     if (line.indent === indent && line.item) index += 1;
   }
   return index;
@@ -93,12 +93,23 @@ const containerPointer = (
   lines: Line[],
   from: number,
   need: number,
+  ownerLevel: number | null = null,
 ): string => {
   const segments: string[] = [];
   let level = need;
-  for (let i = from; i >= 0 && level > 0; i -= 1) {
+  let owner = ownerLevel;
+  for (let i = from; i >= 0 && (level > 0 || owner !== null); i -= 1) {
     const line = lines[i];
     if (line.blank) continue;
+    if (owner !== null && line.indent === owner) {
+      if (line.item) continue;
+      if (line.key !== null) {
+        segments.unshift(escapePointer(line.key));
+        level = line.indent;
+        owner = null;
+      }
+      continue;
+    }
     if (line.item && line.indent < level) {
       // `- key:` owns children deeper than its inner mapping; the item itself is one index.
       if (line.key !== null && line.innerIndent < level) {
@@ -106,9 +117,11 @@ const containerPointer = (
       }
       segments.unshift(String(itemIndex(lines, i)));
       level = line.indent;
+      owner = line.indent;
     } else if (!line.item && line.indent < level && line.key !== null) {
       segments.unshift(escapePointer(line.key));
       level = line.indent;
+      owner = null;
     }
   }
   return segments.length === 0 ? "" : `/${segments.join("/")}`;
@@ -141,6 +154,31 @@ const siblingKeys = (lines: Line[], at: number, need: number): string[] => {
   return keys;
 };
 
+const inComment = (before: string): boolean => {
+  let quote: string | null = null;
+  for (let index = 0; index < before.length; index += 1) {
+    const character = before[index];
+    if (quote !== null) {
+      if (quote === '"' && character === "\\") {
+        index += 1;
+      } else if (
+        quote === "'" &&
+        character === "'" &&
+        before[index + 1] === "'"
+      ) {
+        index += 1;
+      } else if (character === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (character === '"' || character === "'") quote = character;
+    else if (character === "#" && (index === 0 || /\s/.test(before[index - 1])))
+      return true;
+  }
+  return false;
+};
+
 export const describeYamlCursor = (
   text: string,
   offset: number,
@@ -154,7 +192,7 @@ export const describeYamlCursor = (
   if (at < 0) return null;
   const line = lines[at];
   const before = line.text.slice(0, offset - line.start);
-  if (/(^|\s)#/.test(before)) return null;
+  if (inComment(before)) return null;
 
   // Inside the indentation: a new key at the cursor column.
   if (before.trim() === "") {
@@ -178,7 +216,7 @@ export const describeYamlCursor = (
     : line.indent;
   // An item line belongs to the sequence at its own indent; its keys live one level deeper.
   const container = item
-    ? `${containerPointer(lines, at - 1, line.indent)}/${itemIndex(lines, at)}`
+    ? `${containerPointer(lines, at - 1, line.indent, line.indent)}/${itemIndex(lines, at)}`
     : containerPointer(lines, at - 1, need);
 
   const valueMatch = /^([^\s#:"'-][^:#]*?|"[^"]*"|'[^']*'):(?:\s+(.*))?$/.exec(

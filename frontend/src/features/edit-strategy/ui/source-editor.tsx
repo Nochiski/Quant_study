@@ -13,8 +13,10 @@ import {
   currentDiagnostics,
   isSpecStale,
   type DocumentAction,
+  type DocumentDiagnostic,
   type DocumentState,
 } from "../model/document-state";
+import { DiagnosticsPanel } from "./diagnostics-panel";
 
 type SourceEditorProps = {
   state: DocumentState;
@@ -53,9 +55,10 @@ export const SourceEditor = ({
     Partial<Record<DocumentState["format"], unknown>>
   >({});
 
+  const documentDiagnostics = useMemo(() => currentDiagnostics(state), [state]);
   const diagnostics = useMemo<EditorDiagnostic[]>(
     () =>
-      currentDiagnostics(state)
+      documentDiagnostics
         .filter((d) => d.range !== null)
         .map((d) => ({
           from: d.range!.start.offset,
@@ -64,13 +67,27 @@ export const SourceEditor = ({
           message: d.message,
           code: d.code,
         })),
-    [state],
+    [documentDiagnostics],
   );
 
+  // Selecting a problem moves the editor to its range (WORKFLOW P3-04 acceptance).
+  const selectDiagnostic = useCallback((diagnostic: DocumentDiagnostic) => {
+    const editor = handle.current;
+    if (!editor || diagnostic.range === null) return;
+    const from = diagnostic.range.start.offset;
+    const to = Math.max(diagnostic.range.end.offset, from);
+    editor.setSelection(from, to);
+    editor.scrollTo(from);
+    editor.focus();
+  }, []);
+
+  // The editor can only raise the composition flag from a change (`view.composing`); the DOM
+  // `compositionend` event is what lowers it, so a change delivered while an IME session is open
+  // never re-enables parsing early.
   const onChange = useCallback(
     (text: string, composing: boolean) => {
-      if (composing !== state.composing)
-        dispatch({ type: "composing", composing });
+      if (composing && !state.composing)
+        dispatch({ type: "composing", composing: true });
       dispatch({ type: "edit", source: text });
     },
     [dispatch, state.composing],
@@ -119,6 +136,15 @@ export const SourceEditor = ({
         completionSource={assist?.completionSource}
         hoverSource={assist?.hoverSource}
         initialHistoryState={histories[state.format]}
+      />
+      <DiagnosticsPanel
+        diagnostics={
+          documentDiagnostics.length > 0 || state.compiled === null
+            ? documentDiagnostics
+            : state.compiled.diagnostics
+        }
+        stale={documentDiagnostics.length === 0 && isSpecStale(state)}
+        onSelect={selectDiagnostic}
       />
     </div>
   );

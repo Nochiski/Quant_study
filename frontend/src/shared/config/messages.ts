@@ -334,6 +334,14 @@ const ko = {
   "assist.catalog.subgraph": "저장된 서브그래프",
   "assist.reference.node": "같은 그래프의 노드",
   "assist.reference.parameter": "문서의 parameters",
+  "problems.title": "문제",
+  "problems.summary": "오류 {errors} · 경고 {warnings}",
+  "problems.error": "오류",
+  "problems.warning": "경고",
+  "problems.kind.syntax": "구문",
+  "problems.kind.structural": "구조",
+  "problems.kind.semantic": "검증",
+  "problems.kind.capability": "서버",
 } as const;
 
 export type MessageKey = keyof typeof ko;
@@ -677,6 +685,14 @@ export const messages = {
     "assist.catalog.subgraph": "saved subgraph",
     "assist.reference.node": "nodes of the same graph",
     "assist.reference.parameter": "the document's parameters",
+    "problems.title": "Problems",
+    "problems.summary": "{errors} errors · {warnings} warnings",
+    "problems.error": "Error",
+    "problems.warning": "Warning",
+    "problems.kind.syntax": "syntax",
+    "problems.kind.structural": "structure",
+    "problems.kind.semantic": "validation",
+    "problems.kind.capability": "server",
   } satisfies Record<MessageKey, string>,
 } as const;
 

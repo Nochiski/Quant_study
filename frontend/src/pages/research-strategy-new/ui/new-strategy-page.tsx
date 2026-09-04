@@ -5,6 +5,7 @@ import {
   SaveAction,
   SourceEditor,
   saveStatusText,
+  useCompileDocument,
   useSaveDocument,
   useSchemaAssist,
   useStrategyDocument,
@@ -31,6 +32,7 @@ export const NewStrategyPage = () => {
   const [document, dispatch] = useStrategyDocument(NEW_DRAFT);
   const { save, status, canSave } = useSaveDocument(document, dispatch);
   const assist = useSchemaAssist(document);
+  useCompileDocument(document, dispatch);
 
   useEffect(() => {
     if (document.strategyId === null || document.baseRevision === null) return;

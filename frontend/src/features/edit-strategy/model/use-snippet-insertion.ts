@@ -27,13 +27,24 @@ export type SnippetInsertion = {
   insert: (snippet: CanonicalSnippet) => void;
 };
 
+type ScopedFeedback = {
+  documentEpoch: number;
+  sourceStatus: SnippetCatalogSource["status"];
+  value: SnippetFeedback;
+};
+
+const IDLE_FEEDBACK: SnippetFeedback = { status: "idle" };
+
 /** Coordinates the editor command handle with pure schema projection and insertion planning. */
 export const useSnippetInsertion = (
   state: DocumentState,
   source: SnippetCatalogSource,
+  editorActive = true,
 ): SnippetInsertion => {
   const editor = useRef<CodeEditorHandle | null>(null);
-  const [feedback, setFeedback] = useState<SnippetFeedback>({ status: "idle" });
+  const [scopedFeedback, setScopedFeedback] = useState<ScopedFeedback | null>(
+    null,
+  );
   const snippets = useMemo(
     () => buildCanonicalSnippetCatalog(source),
     [source],
@@ -41,8 +52,26 @@ export const useSnippetInsertion = (
   const onEditorReady = useCallback((next: CodeEditorHandle | null): void => {
     editor.current = next;
   }, []);
+  const setFeedback = useCallback(
+    (value: SnippetFeedback): void => {
+      setScopedFeedback({
+        documentEpoch: state.documentEpoch,
+        sourceStatus: source.status,
+        value,
+      });
+    },
+    [source.status, state.documentEpoch],
+  );
   const insert = useCallback(
     (snippet: CanonicalSnippet): void => {
+      if (state.format !== "yaml" || !editorActive) {
+        setFeedback({
+          status: "error",
+          label: snippet.label,
+          reason: "yaml-only",
+        });
+        return;
+      }
       const current = editor.current;
       if (current === null) {
         setFeedback({
@@ -81,8 +110,14 @@ export const useSnippetInsertion = (
       current.focus();
       setFeedback({ status: "inserted", label: snippet.label });
     },
-    [state.composing, state.format],
+    [editorActive, setFeedback, state.composing, state.format],
   );
+
+  const feedback =
+    scopedFeedback?.documentEpoch === state.documentEpoch &&
+    scopedFeedback.sourceStatus === source.status
+      ? scopedFeedback.value
+      : IDLE_FEEDBACK;
 
   return {
     snippets,

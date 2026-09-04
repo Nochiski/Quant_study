@@ -4,13 +4,14 @@ import { t } from "../../../shared/config";
 import {
   SNIPPET_CATEGORIES,
   type CanonicalSnippet,
+  type SnippetCatalogSource,
 } from "../model/canonical-snippets";
 import type { SnippetFeedback } from "../model/use-snippet-insertion";
 import "./snippet-catalog.css";
 
 type SnippetCatalogProps = {
   snippets: readonly CanonicalSnippet[];
-  sourceStatus: "loading" | "ready" | "unavailable";
+  sourceStatus: SnippetCatalogSource["status"];
   feedback: SnippetFeedback;
   onInsert: (snippet: CanonicalSnippet) => void;
 };
@@ -41,6 +42,10 @@ export const SnippetCatalog = ({
       ) : sourceStatus === "unavailable" ? (
         <p className="snippet-catalog__state" role="alert">
           {t("snippet.unavailable")}
+        </p>
+      ) : sourceStatus === "incompatible" ? (
+        <p className="snippet-catalog__state" role="alert">
+          {t("snippet.incompatible")}
         </p>
       ) : (
         <div className="snippet-catalog__groups">

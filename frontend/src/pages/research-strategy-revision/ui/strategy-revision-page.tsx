@@ -99,7 +99,11 @@ export const StrategyRevisionPage = () => {
     selectedPointer: search.path,
     onSelectedPointer: selectPointer,
   });
-  const snippets = useSnippetInsertion(document, assist.snippetSource);
+  const snippets = useSnippetInsertion(
+    document,
+    assist.snippetSource,
+    view === stored.format,
+  );
   const onOutlineEditorReady = outline.onEditorReady;
   const onSnippetEditorReady = snippets.onEditorReady;
   const onEditorReady = useCallback(

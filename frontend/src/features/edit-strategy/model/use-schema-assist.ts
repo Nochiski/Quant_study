@@ -20,6 +20,7 @@ import type {
 import {
   buildCompletionSource,
   buildHoverSource,
+  factorCatalogCoherence,
   projectAssistMetadata,
   type AssistDeps,
 } from "./schema-assist";
@@ -103,23 +104,32 @@ export const useSchemaAssist = (state: DocumentState): SchemaAssist => {
     factors.isPending;
   const schemaVersion = schema.data?.schema_version ?? null;
   const runtimeSchema = (schemaData as JsonSchema | undefined) ?? null;
+  const snippetCoherence = factorCatalogCoherence(
+    schema.data ?? null,
+    contract.data ?? null,
+    factors.data ?? null,
+  );
   const snippetSource = useMemo<SnippetCatalogSource>(
     () => ({
       schema: assistMetadata.schema,
       factors: assistMetadata.catalogs.factors,
       status:
-        schema.isPending || contract.isPending || factors.isPending
-          ? "loading"
-          : assistMetadata.schema === null
-            ? "unavailable"
-            : "ready",
+        schema.isError || contract.isError || factors.isError
+          ? "unavailable"
+          : schema.isPending || contract.isPending || factors.isPending
+            ? "loading"
+            : snippetCoherence,
     }),
     [
       assistMetadata.catalogs.factors,
       assistMetadata.schema,
       contract.isPending,
+      contract.isError,
       factors.isPending,
+      factors.isError,
       schema.isPending,
+      schema.isError,
+      snippetCoherence,
     ],
   );
   const inspectorSource = useMemo<ContractInspectorSource>(

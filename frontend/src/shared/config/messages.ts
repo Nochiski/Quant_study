@@ -290,7 +290,10 @@ const ko = {
   "snippet.help":
     "빈 키 위치에서 추가합니다. 삽입 전 YAML 1.2 문법을 검사합니다.",
   "snippet.loading": "서버 스키마와 팩터 카탈로그를 불러오는 중입니다.",
-  "snippet.unavailable": "서버 스키마가 없어 안전한 스니펫을 만들 수 없습니다.",
+  "snippet.unavailable":
+    "서버 스키마·계약·팩터 카탈로그 메타데이터를 불러올 수 없어 스니펫을 차단했습니다.",
+  "snippet.incompatible":
+    "서버 스키마·계약·팩터 카탈로그 버전이 일치하지 않아 스니펫을 차단했습니다.",
   "snippet.empty": "현재 계약에 사용 가능한 항목이 없습니다.",
   "snippet.insert": "현재 커서에 삽입",
   "snippet.inserted": "삽입했고 YAML 문법 검사를 통과했습니다.",
@@ -858,7 +861,9 @@ export const messages = {
       "Insert at an empty key position. YAML 1.2 syntax is checked before editing.",
     "snippet.loading": "Loading the server schema and factor catalog.",
     "snippet.unavailable":
-      "The server schema is unavailable, so safe snippets cannot be built.",
+      "Snippets are blocked because required server schema, contract, or factor catalog metadata is unavailable.",
+    "snippet.incompatible":
+      "Snippets are blocked because the server schema, contract, and factor catalog versions do not match.",
     "snippet.empty": "No entry is available in the current contract.",
     "snippet.insert": "Insert at cursor",
     "snippet.inserted": "Inserted and passed the YAML syntax check.",

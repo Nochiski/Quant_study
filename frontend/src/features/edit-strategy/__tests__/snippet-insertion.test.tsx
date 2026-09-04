@@ -73,6 +73,52 @@ describe("snippet insertion coordinator", () => {
       reason: "composing",
     });
   });
+
+  it("reports YAML-only before consulting an unmounted projection editor", () => {
+    const state = initialDocumentState("yaml", "");
+    const { result } = renderHook(() =>
+      useSnippetInsertion(
+        state,
+        { schema: SIGNAL_SCHEMA, factors: [], status: "ready" },
+        false,
+      ),
+    );
+
+    act(() => result.current.insert(result.current.snippets[0]));
+
+    expect(result.current.feedback).toEqual({
+      status: "error",
+      label: "signal",
+      reason: "yaml-only",
+    });
+  });
+
+  it("clears feedback when the document epoch or source capability changes", () => {
+    const state = initialDocumentState("yaml", "");
+    const { result, rerender } = renderHook(
+      ({ documentEpoch, status }) =>
+        useSnippetInsertion(
+          { ...state, documentEpoch },
+          { schema: SIGNAL_SCHEMA, factors: [], status },
+        ),
+      {
+        initialProps: {
+          documentEpoch: 0,
+          status: "ready" as "ready" | "incompatible",
+        },
+      },
+    );
+    act(() => result.current.onEditorReady(editorHandle));
+    act(() => result.current.insert(result.current.snippets[0]));
+    expect(result.current.feedback.status).toBe("inserted");
+
+    rerender({ documentEpoch: 1, status: "ready" });
+    expect(result.current.feedback).toEqual({ status: "idle" });
+    act(() => result.current.insert(result.current.snippets[0]));
+    expect(result.current.feedback.status).toBe("inserted");
+    rerender({ documentEpoch: 1, status: "incompatible" });
+    expect(result.current.feedback).toEqual({ status: "idle" });
+  });
 });
 
 describe("SnippetCatalog", () => {
@@ -101,7 +147,8 @@ describe("SnippetCatalog", () => {
 
   it.each([
     ["loading", { status: "idle" }, "status", "불러오는 중"],
-    ["unavailable", { status: "idle" }, "alert", "서버 스키마가 없어"],
+    ["unavailable", { status: "idle" }, "alert", "메타데이터를 불러올 수 없어"],
+    ["incompatible", { status: "idle" }, "alert", "버전이 일치하지 않아"],
     [
       "ready",
       { status: "error", label: "signal", reason: "duplicate" },

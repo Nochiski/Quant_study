@@ -41,7 +41,7 @@ export type CanonicalSnippet = {
 export type SnippetCatalogSource = {
   schema: JsonSchema | null;
   factors: readonly FactorDefinition[];
-  status: "loading" | "ready" | "unavailable";
+  status: "loading" | "ready" | "unavailable" | "incompatible";
 };
 
 export type SnippetEdit = {

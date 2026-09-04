@@ -57,6 +57,23 @@ export type AssistDeps = {
 
 export type AssistMetadata = Omit<AssistDeps, "getState">;
 
+export type FactorCatalogCoherence = "ready" | "unavailable" | "incompatible";
+
+/** One compatibility decision shared by factor completion and canonical factor snippets. */
+export const factorCatalogCoherence = (
+  schema: StrategyDocumentSchema | null,
+  contract: StrategyDocumentContractResponse | null,
+  factorCatalog: FactorCatalog | null,
+): FactorCatalogCoherence => {
+  if (schema === null || contract === null || factorCatalog === null)
+    return "unavailable";
+  if (!isSchemaContractCompatible(schema, contract)) return "incompatible";
+  return factorCatalog.registry_version ===
+    contract.contract.factor_registry_version
+    ? "ready"
+    : "incompatible";
+};
+
 /**
  * Projects query responses into editor assistance without flattening their wire contracts.
  * A mismatched schema/contract pair degrades to schema-only keys/enums; contract metadata and
@@ -72,6 +89,8 @@ export const projectAssistMetadata = (
     contract !== null && isSchemaContractCompatible(schema, contract)
       ? contract.contract
       : null;
+  const coherentFactors =
+    factorCatalogCoherence(schema, contract, factorCatalog) === "ready";
   return {
     schema: (schema?.schema as JsonSchema | undefined) ?? null,
     contract: coherentContract?.fields ?? [],
@@ -83,11 +102,7 @@ export const projectAssistMetadata = (
           ? equityCatalog.fields
           : [],
       factors:
-        coherentContract !== null &&
-        factorCatalog?.registry_version ===
-          coherentContract.factor_registry_version
-          ? factorCatalog.factors
-          : [],
+        coherentFactors && factorCatalog !== null ? factorCatalog.factors : [],
     },
   };
 };

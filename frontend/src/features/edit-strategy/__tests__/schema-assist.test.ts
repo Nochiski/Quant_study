@@ -20,6 +20,7 @@ import {
   buildCompletionSource,
   buildHoverSource,
   describePointer,
+  factorCatalogCoherence,
   projectAssistMetadata,
   type AssistDeps,
 } from "../model/schema-assist";
@@ -207,6 +208,13 @@ describe("schema-driven completion", () => {
     expect(coherent.contract).toBe(CONTRACT);
     expect(coherent.catalogs.equityFields).toBe(FIELDS);
     expect(coherent.catalogs.factors).toBe(FACTORS);
+    expect(
+      factorCatalogCoherence(
+        schemaEnvelope("v1"),
+        contractEnvelope("v1"),
+        FACTOR_CATALOG,
+      ),
+    ).toBe("ready");
 
     const races = [
       [schemaEnvelope("v2", "2.0"), contractEnvelope("v1")],
@@ -223,7 +231,24 @@ describe("schema-driven completion", () => {
       expect(mismatched.contract).toEqual([]);
       expect(mismatched.catalogs.equityFields).toEqual([]);
       expect(mismatched.catalogs.factors).toEqual([]);
+      expect(factorCatalogCoherence(schema, contract, FACTOR_CATALOG)).toBe(
+        "incompatible",
+      );
     }
+
+    expect(
+      factorCatalogCoherence(schemaEnvelope("v1"), contractEnvelope("v1"), {
+        ...FACTOR_CATALOG,
+        registry_version: "factors-v2",
+      }),
+    ).toBe("incompatible");
+    expect(
+      factorCatalogCoherence(
+        schemaEnvelope("v1"),
+        contractEnvelope("v1"),
+        null,
+      ),
+    ).toBe("unavailable");
   });
 
   it("completes keys from the schema, minus the keys already present", async () => {

@@ -8,7 +8,7 @@ from strategy_workbench.domain.factor.facade.validation import (
     validate_factor_graph,
 )
 
-from ._constraints import STRATEGY_SCALAR_CONSTRAINTS, resolve_scalar
+from ._constraints import SEMANTIC_ONLY_CODES, STRATEGY_SCALAR_CONSTRAINTS, resolve_scalar
 from ._models import (
     ChoiceParameter,
     FloatParameter,
@@ -45,7 +45,15 @@ class StrategyValidation:
     issues: tuple[ValidationIssue, ...]
 
 
+_CATALOG_CODES = frozenset(constraint.code for constraint in STRATEGY_SCALAR_CONSTRAINTS)
+
+
 def _issue(code: str, path: str, message: str) -> ValidationIssue:
+    if code not in SEMANTIC_ONLY_CODES and code not in _CATALOG_CODES:
+        raise ValueError(
+            "validation code has no owner — add it to SEMANTIC_ONLY_CODES or the scalar catalog: "
+            f"code={code!r}"
+        )
     return ValidationIssue(code=code, path=path, message=message, kind=ValidationKind.SEMANTIC)
 
 

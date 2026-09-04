@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Literal, TypeAlias
+from typing import Literal, TypeAlias, get_args, get_type_hints
 
 
 class UnaryOperator(StrEnum):
@@ -194,19 +194,12 @@ class FactorGraph:
     missing_policy: MissingPolicy = MissingPolicy.DROP
 
 
-# `kind` discriminator → node type. The authoring schema (P1-05) and hydrate dispatch on this map;
-# no other layer restates the union.
+def _kind_of(node_type: type) -> str:
+    return get_args(get_type_hints(node_type)["kind"])[0]
+
+
+# `kind` discriminator → node type, derived from each node's `kind: Literal[...]` hint (the
+# only declaration). The authoring schema (P1-05) reads this map; nothing restates the union.
 EXPRESSION_NODE_KINDS: dict[str, type] = {
-    "field": FieldNode,
-    "constant": ConstantNode,
-    "parameter": ParameterNode,
-    "unary": UnaryNode,
-    "binary": BinaryNode,
-    "time_series": TimeSeriesNode,
-    "cross_sectional": CrossSectionalNode,
-    "group": GroupNode,
-    "comparison": ComparisonNode,
-    "conditional": ConditionalNode,
-    "saved_factor": SavedFactorNode,
-    "saved_subgraph": SavedSubgraphNode,
+    _kind_of(node_type): node_type for node_type in get_args(ExpressionNode)
 }

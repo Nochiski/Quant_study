@@ -61,7 +61,7 @@ def test_every_catalog_pointer_names_a_numeric_field_of_the_model() -> None:
         members = get_args(hint) if get_origin(hint) in (Union, types.UnionType) else (hint,)
         numeric = {member for member in members if member in (int, float)}
         assert numeric, f"{constraint.pointer} is not numeric: {hint!r}"
-        assert constraint.stage is AppliedStage(constraint.pointer.strip("/").split("/")[0])
+        assert isinstance(constraint.stage, AppliedStage)
         assert constraint.code.startswith("strategy.")
         assert constraint.message
 
@@ -78,6 +78,8 @@ def test_field_default_reads_the_dataclass_not_the_catalog() -> None:
     assert field_default("/portfolio/minimum_liquidity") is None
     with pytest.raises(KeyError, match="unknown authoring pointer"):
         field_default("/risk/nope")
+    with pytest.raises(KeyError, match="required field has no default"):
+        field_default("/data/universe_id")
 
 
 @pytest.mark.parametrize("constraint", STRATEGY_SCALAR_CONSTRAINTS, ids=lambda c: c.pointer)
@@ -161,3 +163,44 @@ def test_expression_node_kinds_cover_the_union_exactly() -> None:
     assert set(EXPRESSION_NODE_KINDS.values()) == members
     for kind, node_type in EXPRESSION_NODE_KINDS.items():
         assert _args(get_type_hints(node_type)["kind"]) == (kind,)
+
+
+def test_fee_and_slippage_report_one_issue_each_with_their_own_path() -> None:
+    spec = _template()
+    spec = replace(spec, execution=replace(spec.execution, fee_bps=-1.0, slippage_bps=-2.0))
+
+    issues = [i for i in validate_strategy(spec).issues if i.code == "strategy.execution.cost"]
+
+    assert [(i.path, i.message[:4]) for i in issues] == [
+        ("execution.fee_bps", "수수료는"),
+        ("execution.slippage_bps", "슬리피지"),
+    ]
+
+
+@pytest.mark.parametrize("constraint", STRATEGY_SCALAR_CONSTRAINTS, ids=lambda c: c.pointer)
+def test_nan_never_satisfies_a_bound(constraint: ScalarConstraint) -> None:
+    spec = _with_scalar(_template(), constraint.pointer, float("nan"))
+    assert constraint.code in {issue.code for issue in validate_strategy(spec).issues}
+
+
+def test_inclusive_minimum_boundaries_are_accepted() -> None:
+    spec = _template()
+    spec = replace(
+        spec,
+        portfolio=replace(
+            spec.portfolio, selection_count=1, minimum_trade_weight=0.0, turnover_buffer_count=0
+        ),
+        execution=replace(spec.execution, fee_bps=0.0, slippage_bps=0.0),
+    )
+    codes = {issue.code for issue in validate_strategy(spec).issues}
+    assert not codes & {
+        "strategy.portfolio.selection_count",
+        "strategy.portfolio.minimum_trade_weight",
+        "strategy.portfolio.turnover_buffer_count",
+        "strategy.execution.cost",
+    }
+
+
+def test_unowned_validation_code_is_a_programming_error() -> None:
+    with pytest.raises(ValueError, match="no owner"):
+        _validation._issue("strategy.bogus.code", "bogus", "x")

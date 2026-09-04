@@ -13,6 +13,7 @@ prove every validation code has exactly one owner.
 from __future__ import annotations
 
 import dataclasses
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -26,6 +27,8 @@ class ContractUnit(StrEnum):
     COUNT = "count"
     SESSIONS = "sessions"
     BASIS_POINTS = "bps"
+    # Compared against a referenced dataset field, so the unit is that field's unit.
+    FIELD = "field"
 
 
 class AppliedStage(StrEnum):
@@ -64,6 +67,8 @@ class ScalarConstraint:
         return self.pointer.strip("/").replace("/", ".")
 
     def satisfied_by(self, value: float | int) -> bool:
+        if isinstance(value, float) and math.isnan(value):
+            return False  # NaN satisfies no bound; never let it through as valid
         if self.minimum is not None:
             if self.exclusive_minimum and not value > self.minimum:
                 return False
@@ -159,8 +164,9 @@ STRATEGY_SCALAR_CONSTRAINTS: tuple[ScalarConstraint, ...] = (
     ScalarConstraint(
         pointer="/portfolio/minimum_liquidity",
         code="strategy.portfolio.minimum_liquidity",
-        stage=AppliedStage.PORTFOLIO,
-        unit=ContractUnit.RATIO,
+        # Applied while filtering candidates (eligibility), in the liquidity field's unit.
+        stage=AppliedStage.ELIGIBILITY,
+        unit=ContractUnit.FIELD,
         minimum=0.0,
         description_key="strategy.contract.portfolio.minimum_liquidity",
         message="최소 유동성은 음수일 수 없습니다.",
@@ -225,7 +231,7 @@ STRATEGY_SCALAR_CONSTRAINTS: tuple[ScalarConstraint, ...] = (
         minimum=0.0,
         example=15.0,
         description_key="strategy.contract.execution.fee_bps",
-        message="거래 비용은 음수일 수 없습니다.",
+        message="수수료는 0 이상의 숫자여야 합니다.",
     ),
     ScalarConstraint(
         pointer="/execution/slippage_bps",
@@ -236,7 +242,7 @@ STRATEGY_SCALAR_CONSTRAINTS: tuple[ScalarConstraint, ...] = (
         minimum=0.0,
         example=10.0,
         description_key="strategy.contract.execution.slippage_bps",
-        message="거래 비용은 음수일 수 없습니다.",
+        message="슬리피지는 0 이상의 숫자여야 합니다.",
     ),
 )
 
@@ -280,7 +286,8 @@ def field_default(pointer: str) -> object:
                 return field.default
             if field.default_factory is not dataclasses.MISSING:
                 return field.default_factory()
-            return None
+            # A required field has no default: never publish None as if it were one.
+            raise KeyError(f"required field has no default — pointer={pointer!r}")
     raise KeyError(f"unknown authoring pointer — pointer={pointer!r}")
 
 

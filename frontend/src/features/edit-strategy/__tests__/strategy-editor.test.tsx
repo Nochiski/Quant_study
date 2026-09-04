@@ -59,6 +59,8 @@ const template: StrategySpec = {
 };
 
 let lastCreateBody: StrategySpec | null = null;
+let lastPreviewBody: { expected_data_snapshot_id?: string | null } | null =
+  null;
 
 const server = setupServer(
   http.get("http://localhost:8000/api/v1/strategies/template", () =>
@@ -159,43 +161,49 @@ const server = setupServer(
       });
     },
   ),
-  http.post("http://localhost:8000/api/v1/factors/preview", () =>
-    HttpResponse.json({
-      plan: {
-        graph_hash: "a".repeat(64),
-        plan_hash: "b".repeat(64),
-        registry_version: "factor-registry-v1",
-        output_node_id: "rank_5",
-        steps: [],
-        required_field_ids: [],
-        referenced_factor_ids: [],
-        referenced_subgraph_ids: [],
-        minimum_history_sessions: 1,
-        missing_policy: "drop",
-        as_of_policy: "available_date_lte_as_of",
-      },
-      data_snapshot_id: "mock-equity-v0.2-20260903",
-      cache_key: {
-        fingerprint: "c".repeat(64),
+  http.post(
+    "http://localhost:8000/api/v1/factors/preview",
+    async ({ request }) => {
+      lastPreviewBody = (await request.json()) as {
+        expected_data_snapshot_id?: string | null;
+      };
+      return HttpResponse.json({
+        plan: {
+          graph_hash: "a".repeat(64),
+          plan_hash: "b".repeat(64),
+          registry_version: "factor-registry-v1",
+          output_node_id: "rank_5",
+          steps: [],
+          required_field_ids: [],
+          referenced_factor_ids: [],
+          referenced_subgraph_ids: [],
+          minimum_history_sessions: 1,
+          missing_policy: "drop",
+          as_of_policy: "available_date_lte_as_of",
+        },
         data_snapshot_id: "mock-equity-v0.2-20260903",
-        plan_hash: "b".repeat(64),
-        registry_version: "factor-registry-v1",
-        parameters: [],
-        as_of_start: "2021-09-03",
-        as_of_end: "2026-09-03",
-      },
-      evaluation: { output_node_id: "rank_5", values: [] },
-      analytics: {
-        information_coefficient: 0.12,
-        rank_information_coefficient: 0.11,
-        quantile_spread: 0.03,
-        coverage: 0.98,
-        turnover: 0.22,
-        decay: 0.73,
-        observation_count: 100,
-        valid_count: 98,
-      },
-    }),
+        cache_key: {
+          fingerprint: "c".repeat(64),
+          data_snapshot_id: "mock-equity-v0.2-20260903",
+          plan_hash: "b".repeat(64),
+          registry_version: "factor-registry-v1",
+          parameters: [],
+          as_of_start: "2021-09-03",
+          as_of_end: "2026-09-03",
+        },
+        evaluation: { output_node_id: "rank_5", values: [] },
+        analytics: {
+          information_coefficient: 0.12,
+          rank_information_coefficient: 0.11,
+          quantile_spread: 0.03,
+          coverage: 0.98,
+          turnover: 0.22,
+          decay: 0.73,
+          observation_count: 100,
+          valid_count: 98,
+        },
+      });
+    },
   ),
   http.post("http://localhost:8000/api/v1/strategies", async ({ request }) => {
     lastCreateBody = (await request.json()) as StrategySpec;
@@ -221,6 +229,7 @@ afterEach(() => {
   cleanup();
   server.resetHandlers();
   lastCreateBody = null;
+  lastPreviewBody = null;
 });
 afterAll(() => server.close());
 
@@ -242,6 +251,10 @@ test("팩터를 찾아 변환한 뒤 모드 전환과 저장에도 같은 Strate
   const diagnostics = screen.getAllByRole("button", { name: "팩터 진단 실행" });
   await user.click(diagnostics.at(-1)!);
   expect(await screen.findByText("0.1200")).toBeInTheDocument();
+  // provenance: the catalog snapshot travels as expected_data_snapshot_id (P1.5-01)
+  expect(lastPreviewBody?.expected_data_snapshot_id).toBe(
+    "mock-equity-v0.2-20260903",
+  );
 
   await user.click(screen.getByRole("button", { name: /저장/ }));
   await waitFor(() => {

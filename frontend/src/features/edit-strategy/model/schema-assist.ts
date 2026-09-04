@@ -24,6 +24,7 @@ import type {
 } from "../../../shared/ui/code-editor";
 import type { DocumentState } from "./document-state";
 import {
+  definingArrayFor,
   propertyOptions,
   schemaAt,
   typeLabel,
@@ -95,37 +96,35 @@ const referenceLabel = (reference: string): string => {
   }
 };
 
-/** Ids the document itself defines for a reference namespace, seen from `pointer`. */
+/**
+ * Ids the document defines for a reference namespace, seen from `pointer`: the nearest ancestor
+ * array the schema marks `x-defines: <namespace>` supplies them (its items carry
+ * `<namespace>_id`), and the item the pointer itself lives in is excluded (a node does not
+ * reference itself). Nothing here knows where nodes or parameters live in the document.
+ */
 const referenceIds = (
+  schema: JsonSchema,
   reference: string,
   pointer: string,
   tree: unknown,
 ): string[] => {
-  if (reference === "parameter") {
-    const parameters = valueAt(tree, "/parameters");
-    return Array.isArray(parameters)
-      ? parameters
-          .map((p) => (isRecord(p) ? p.parameter_id : undefined))
-          .filter((id): id is string => typeof id === "string")
-      : [];
-  }
-  if (reference === "node") {
-    const nodesIndex = pointer.lastIndexOf("/nodes/");
-    if (nodesIndex < 0) return [];
-    const nodes = valueAt(tree, pointer.slice(0, nodesIndex + "/nodes".length));
-    const self = pointer.slice(nodesIndex + "/nodes/".length).split("/")[0];
-    return Array.isArray(nodes)
-      ? nodes
-          .map((node, index) =>
-            isRecord(node) && String(index) !== self ? node.node_id : undefined,
-          )
-          .filter((id): id is string => typeof id === "string")
-      : [];
-  }
-  return [];
+  const defining = definingArrayFor(schema, pointer, reference, tree);
+  if (!defining) return [];
+  const selfPrefix = `${defining.pointer}/`;
+  const self = pointer.startsWith(selfPrefix)
+    ? pointer.slice(selfPrefix.length).split("/")[0]
+    : null;
+  return defining.items
+    .map((item, index) =>
+      isRecord(item) && String(index) !== self
+        ? item[`${reference}_id`]
+        : undefined,
+    )
+    .filter((id): id is string => typeof id === "string");
 };
 
 const identifierOptions = (
+  schema: JsonSchema,
   resolved: ResolvedSchema,
   pointer: string,
   tree: unknown,
@@ -153,7 +152,7 @@ const identifierOptions = (
   }
   const reference = resolved.node["x-reference"];
   if (typeof reference === "string") {
-    return referenceIds(reference, pointer, tree).map((id) => ({
+    return referenceIds(schema, reference, pointer, tree).map((id) => ({
       label: id,
       detail: referenceLabel(reference),
       type: "value",
@@ -210,6 +209,7 @@ export const buildCompletionSource =
       }
     }
     const identifiers = identifierOptions(
+      deps.schema,
       resolved,
       cursor.pointer,
       tree,
@@ -233,10 +233,10 @@ const contractFor = (
 ): FieldContract | undefined => {
   const template = templatePointer(pointer);
   const rows = contract.filter((row) => row.pointer === template);
+  // A union field with an unknown kind has no single truthful row: show none rather than
+  // another branch's unit/default as fact.
   return (
-    rows.find((row) => row.branch === kind) ??
-    rows.find((row) => !row.branch) ??
-    rows[0]
+    rows.find((row) => row.branch === kind) ?? rows.find((row) => !row.branch)
   );
 };
 

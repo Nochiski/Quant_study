@@ -388,6 +388,8 @@ const ko = {
   "conflict.diff.after": "이후",
   "save.blocked.syntax": "구문 오류가 있어 저장할 수 없습니다",
   "save.blocked.invalid": "검증 오류가 있어 저장할 수 없습니다",
+  "problems.compileUnavailable":
+    "검증 서버에 연결할 수 없어 이 텍스트를 확인하지 못했습니다. 잠시 후 '검증'을 다시 누르세요. ({detail})",
 } as const;
 
 export type MessageKey = keyof typeof ko;
@@ -787,6 +789,8 @@ export const messages = {
     "conflict.diff.after": "After",
     "save.blocked.syntax": "Cannot save: syntax error",
     "save.blocked.invalid": "Cannot save: validation errors",
+    "problems.compileUnavailable":
+      "The validation server could not be reached, so this text is unverified. Press Validate again shortly. ({detail})",
   } satisfies Record<MessageKey, string>,
 } as const;
 

@@ -218,6 +218,28 @@ describe("useCompileDocument", () => {
     );
   });
 
+  it("dims an error list that belongs to an older text and never navigates with its offsets", async () => {
+    const user = userEvent.setup();
+    const view = await mount('schema_version: "1.0"\ntitle: bad\n');
+    await screen.findByRole("button", { name: /title must not be empty/ });
+    // Shorter text while the recompile is pending: the old list is stale and not clickable.
+    type(view, "a: 1\n");
+    const stale = screen.getByRole("button", {
+      name: /title must not be empty/,
+    });
+    expect(stale).toBeDisabled();
+    expect(screen.getByRole("region", { name: "문제" })).toHaveTextContent(
+      "이전 결과",
+    );
+    await user.click(stale);
+    expect(view.state.doc.toString()).toBe("a: 1\n");
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: /title must not be empty/ }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
   it("reports a transport failure as a server problem without pretending validity", async () => {
     await mount("title: boom\n");
     await waitFor(() =>

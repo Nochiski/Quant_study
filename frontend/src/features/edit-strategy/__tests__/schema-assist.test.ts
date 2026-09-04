@@ -86,6 +86,7 @@ const YAML = [
   "            input_node_id: ",
   "          - node_id: unknown",
   "            ",
+  "        output_node_id: ",
   "parameters:",
   "  - parameter_id: lookback",
   "    kind: integer",
@@ -186,6 +187,17 @@ describe("schema-driven completion", () => {
       explicit: true,
     });
     expect(node!.options.map((o) => o.label)).toEqual(["px", "unknown"]);
+    // A reference outside the nodes array (the graph's output) resolves through x-defines too.
+    const output = await source({
+      text: YAML,
+      offset: offsetOf(YAML, "        output_node_id: "),
+      explicit: true,
+    });
+    expect(output!.options.map((o) => o.label)).toEqual([
+      "px",
+      "mom",
+      "unknown",
+    ]);
     const kind = await source({
       text: YAML,
       offset: offsetOf(YAML, "            kind: ") - 0,

@@ -297,7 +297,8 @@ def _identifier_markers(schema: dict[str, Any]) -> tuple[dict[str, str], dict[st
 
 def test_identifier_fields_declare_their_catalog_or_reference_namespace() -> None:
     """P3-03: an editor completes ids from the marker, never from a hand-written list."""
-    catalogs, references, unmarked = _identifier_markers(strategy_document_schema())
+    schema = strategy_document_schema()
+    catalogs, references, unmarked = _identifier_markers(schema)
     assert catalogs == {
         "#/$defs/DataStep/universe_id": "universe",
         "#/$defs/EligibilityRule/field_id": "equity-field",
@@ -310,6 +311,23 @@ def test_identifier_fields_declare_their_catalog_or_reference_namespace() -> Non
         "#/$defs/RiskStep/risk_field_id": "equity-field",
     }
     assert set(references.values()) == {"node", "parameter"}
+    # Every referenced namespace is declared by exactly one array whose items define `<ns>_id`.
+    defines = {
+        f"{path}/{name}": prop["x-defines"]
+        for path, node in [("", schema), *[(f"#/$defs/{n}", d) for n, d in schema["$defs"].items()]]
+        for name, prop in node.get("properties", {}).items()
+        if "x-defines" in prop
+    }
+    assert defines == {"/parameters": "parameter", "#/$defs/FactorGraph/nodes": "node"}
+    assert set(defines.values()) == set(references.values())
+    for path, namespace in defines.items():
+        container, name = path.rsplit("/", 1)
+        node = schema if container == "" else schema["$defs"][container.split("/")[-1]]
+        items = node["properties"][name]["items"]
+        members = items["oneOf"] if "oneOf" in items else [items]
+        for member in members:
+            definition = schema["$defs"][member["$ref"].split("/")[-1]]
+            assert f"{namespace}_id" in definition["properties"], (path, member)
     assert all(p.endswith("_node_id") for p, r in references.items() if r == "node")
     assert references["#/$defs/ParameterNode/parameter_id"] == "parameter"
     # The only unmarked ids are definitions (a node's own id, a user-named factor, a parameter

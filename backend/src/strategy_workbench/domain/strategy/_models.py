@@ -10,6 +10,7 @@ from strategy_workbench.domain.factor.facade.expression import FactorGraph
 # Editor metadata for identifier fields (see domain.factor._nodes for the node-side markers).
 CATALOG_UNIVERSE = {"catalog": "universe"}
 CATALOG_EQUITY_FIELD = {"catalog": "equity-field"}
+DEFINES_PARAMETER = {"defines": "parameter"}
 
 
 class Market(StrEnum):
@@ -202,4 +203,4 @@ class StrategySpec:
     portfolio: PortfolioStep
     risk: RiskStep
     execution: ExecutionStep
-    parameters: tuple[ParameterDefinition, ...] = ()
+    parameters: tuple[ParameterDefinition, ...] = field(default=(), metadata=DEFINES_PARAMETER)

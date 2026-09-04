@@ -14,8 +14,10 @@ Shape (JSON Schema 2020-12):
 - catalog bounds appear as `minimum`/`maximum`/`exclusiveMinimum`/`exclusiveMaximum`, contract
   metadata as `x-unit`, `x-display-unit`, `x-applied-stage`, `x-description-key`, `examples`;
 - identifier fields carry `x-catalog` (equity-field, factor, universe, subgraph: complete from
-  that catalog) or `x-reference` (node, parameter: complete from the document itself), read from
-  the dataclass field metadata declared next to the field (P3-03).
+  that catalog) or `x-reference` (node, parameter: complete from the document itself), and the
+  array that declares such a namespace carries `x-defines` (its items hold the
+  `<namespace>_id` definition); all read from the dataclass field metadata declared next to the
+  field (P3-03). An editor resolves a reference by walking up to the nearest `x-defines` array.
 """
 
 from __future__ import annotations
@@ -188,7 +190,7 @@ class _SchemaBuilder:
             constraint = self._constraints.get(child)
             if constraint is not None:
                 schema = {**schema, **_constraint_schema(constraint)}
-            for marker in ("catalog", "reference"):
+            for marker in ("catalog", "reference", "defines"):
                 if marker in field.metadata:
                     schema = {**schema, f"x-{marker}": field.metadata[marker]}
             properties[field.name] = schema

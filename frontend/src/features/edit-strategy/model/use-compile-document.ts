@@ -4,6 +4,7 @@ import {
   strategyWorkbenchApi,
   type SourceDiagnostic,
 } from "../../../shared/api";
+import { t } from "../../../shared/config";
 import { locateRange, type ParsedSource } from "../../../shared/lib/yaml12";
 import {
   shouldCompile,
@@ -20,6 +21,21 @@ const rangeFor = (
   diagnostic: SourceDiagnostic,
   parse: ParsedSource | null,
 ): DocumentDiagnostic["range"] => {
+  // A root-level problem ("X is required") is anchored on the first line, not underlined across
+  // the whole document.
+  if (diagnostic.pointer === "" && parse) {
+    const root = parse.valueRanges.get("");
+    if (root) {
+      const firstLineEnd = Math.max(
+        root.start.offset,
+        root.end.line > root.start.line ? root.start.offset : root.end.offset,
+      );
+      return {
+        start: root.start,
+        end: { ...root.start, offset: firstLineEnd },
+      };
+    }
+  }
   if (parse) {
     const exact =
       parse.valueRanges.get(diagnostic.pointer) ??
@@ -102,8 +118,9 @@ export const useCompileDocument = (
         .catch((error: unknown) => {
           if (controller.signal.aborted) return;
           if (forcedNow) setForced(null);
-          // Transport failure: the text stays "structurally-valid" and is retried on the next
-          // edit; the failure is surfaced as a capability diagnostic, not silently swallowed.
+          // Transport failure: no verdict exists for this text, so it is recorded as a
+          // capability error (the phase becomes semantic-invalid: nothing may be saved or run
+          // on an unverified document) and retried on the next edit or an explicit Validate.
           dispatch({
             type: "compiled",
             version,
@@ -118,8 +135,10 @@ export const useCompileDocument = (
                   kind: "capability",
                   severity: "error",
                   pointer: "",
-                  message:
+                  message: t("problems.compileUnavailable").replace(
+                    "{detail}",
                     error instanceof Error ? error.message : String(error),
+                  ),
                   range: null,
                 },
               ],

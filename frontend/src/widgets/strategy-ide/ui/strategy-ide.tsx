@@ -303,7 +303,7 @@ export const StrategyIde = ({
                         : section}
                     </span>
                     <span
-                      className="ide__section-status"
+                      className="ide__section-status ide__section-status--pending"
                       title={t("ide.section.pending")}
                     >
                       <span aria-hidden="true">○</span>

@@ -1,16 +1,16 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: APPROVED
-current_phase: P1,P2,P3
-current_pr: P1-10,P2-01,P2-02,P2-03,P2-04,P3-01,P3-02,P3-03,P3-04,P3-05,P3-06,P3-07
-active_prs: [P1-10, P2-01, P2-02, P2-03, P2-04, P3-01, P3-02, P3-03, P3-04, P3-05, P3-06, P3-07]
-parallel_window: [P2-01, P2-02, P2-03, P3-01, P3-02, P2-04, P3-03, P3-04, P3-05, P3-06, P3-07, P1-10]
-last_updated: 2026-09-04T20:06:03+09:00
+project_status: IN_REVIEW
+current_phase: P2,P3
+current_pr: P2-01,P2-02,P2-03,P2-04,P3-01,P3-02,P3-03,P3-04,P3-05,P3-06,P3-07
+active_prs: [P2-01, P2-02, P2-03, P2-04, P3-01, P3-02, P3-03, P3-04, P3-05, P3-06, P3-07]
+parallel_window: [P2-01, P2-02, P2-03, P3-01, P3-02, P2-04, P3-03, P3-04, P3-05, P3-06, P3-07]
+last_updated: 2026-09-04T20:23:35+09:00
 planned_prs: 47
-merged_prs: 18
+merged_prs: 19
 approved_prs: 19
-progress_percent: 38
+progress_percent: 40
 ---
 
 # YAML Strategy Workbench 실시간 진행 계획
@@ -22,13 +22,13 @@ progress_percent: 38
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `APPROVED` |
-| Current phase | `P1,P2,P3` |
-| Current/next PR | `P1-10,P2-01,P2-02,P2-03,P2-04,P3-01,P3-02,P3-03,P3-04,P3-05,P3-06,P3-07` |
-| Active PR | `P1-10, P2-01, P2-02, P2-03, P2-04, P3-01, P3-02, P3-03, P3-04, P3-05, P3-06, P3-07` |
-| Progress | `18 / 47 merged (38%)` |
+| Project status | `IN_REVIEW` |
+| Current phase | `P2,P3` |
+| Current/next PR | `P2-01,P2-02,P2-03,P2-04,P3-01,P3-02,P3-03,P3-04,P3-05,P3-06,P3-07` |
+| Active PR | `P2-01, P2-02, P2-03, P2-04, P3-01, P3-02, P3-03, P3-04, P3-05, P3-06, P3-07` |
+| Progress | `19 / 47 merged (40%)` |
 | Approved | `19 / 47` |
-| Aggregated at | `2026-09-04 20:06 KST` |
+| Aggregated at | `2026-09-04 20:23 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -72,14 +72,14 @@ progress_percent: 38
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
 | P0 | Contract, product direction, tool choices | 4 | 4 | `MERGED` |
-| P1 | Backend Authoring Contract | 10 | 9 | `APPROVED` |
+| P1 | Backend Authoring Contract | 10 | 10 | `MERGED` |
 | P1.5 | Backtest Correctness Gate | 5 | 5 | `MERGED` |
 | P2 | App Shell and visual foundation | 4 | 0 | `IN_REVIEW` |
 | P3 | YAML Editor MVP | 7 | 0 | `IN_REVIEW` |
 | P4 | Outline, Contract, Projections | 8 | 0 | `WAITING` |
 | P5 | Truthful Trace UI | 3 | 0 | `WAITING` |
 | P6 | Professional release and migration | 6 | 0 | `WAITING` |
-| **Total** |  | **47** | **18** | **38%** |
+| **Total** |  | **47** | **19** | **40%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
@@ -130,7 +130,7 @@ Phase exit:
 | [x] | `P1-07` | Document save/get/history API, generated SDK | P1-03, P1-06 | `MERGED` | `review_p1_07` |
 | [x] | `P1-08` | Canonical semantic revision diff API | P1-07 | `MERGED` | `review_p1_08` |
 | [x] | `P1-09` | Saved revision reference와 reproducible Backtest Run Manifest | P1-07 | `MERGED` | `review_p1_09` |
-| [ ] | `P1-10` | Phase 1 종료 감사 후속(상대 import 게이트, 코덱 코드 접두어, manifest hash 불변식, 문서) | P1-09 | `APPROVED` | `review_p1_10` APPROVE · [#50](https://github.com/Nochiski/Quant_study/pull/50) |
+| [x] | `P1-10` | Phase 1 종료 감사 후속(상대 import 게이트, 코덱 코드 접두어, manifest hash 불변식, 문서) | P1-09 | `MERGED` | `review_p1_10` APPROVE · [#50](https://github.com/Nochiski/Quant_study/pull/50) |
 
 Phase exit:
 
@@ -274,7 +274,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
-| P1-10 | audit·architecture·owner gate 228 passed | backend 883 passed, ruff, pyright, Rust 13·fmt·clippy; frontend typecheck·lint·vitest 80·build | 재생성 후 clean | 해당 없음 | 원격 재실행 대기 | 2026-09-04 |
+| P1-10 | audit·architecture·owner gate 228 passed | backend 883 passed, ruff, pyright, Rust 13·fmt·clippy; frontend typecheck·lint·vitest 80·build | 재생성 후 clean | 해당 없음 | [#50](https://github.com/Nochiski/Quant_study/pull/50) backend/frontend pass, MERGED | 2026-09-04 |
 | P1.5-05 | truthful pipeline·backtest HTTP 24 passed, CRLF/LF tracker 47 rows | backend 865 passed, ruff, pyright; frontend typecheck·lint·vitest 80·build | 재생성 후 clean | 해당 없음 | [#49](https://github.com/Nochiski/Quant_study/pull/49) backend/frontend pass, MERGED | 2026-09-04 |
 | P1-05~09 | schema/contract·repository 계약(뮤테이션)·document save/history/diff·fingerprint·reference HTTP | worktree pytest 649 passed(Rust core 제외), ruff, pyright; main merge(7efe811) 후 649 passed, vitest 80 | SDK 재생성 clean (c1f6b52; main에서는 LF/CRLF 차이만) | 해당 없음 | 로컬 (worktree) | 2026-09-04 |
 | P1-02 | codec 31 + manifest 43 + contract·domain·arch 144 passed | pytest 709 passed, ruff, pyright | 해당 없음 | 해당 없음 | 로컬 | 2026-09-04 |
@@ -292,6 +292,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-04 KST | Codex | #50 P1-10의 재리뷰·전체 로컬 게이트·원격 backend/frontend CI 통과 후 main 병합(3df3980). Phase 1을 10/10 완료로 확정 | 인수 후 merge gate |
 | 2026-09-04 KST | Codex | #49 CI·최종 재리뷰 통과 후 main 병합(1ffc0ff). P1-10을 latest main에 통합(d7fff5e), initializer 상대 import 우회 회귀와 owner gate를 재검토하여 `review_p1_10` APPROVE, backend 883·frontend 80 및 전체 게이트 통과 | 인수 후 merge gate |
 | 2026-09-04 KST | Codex | #49 P1.5-05를 latest main에 통합하며 saved/inline provenance와 raw observation warning을 함께 보존하도록 충돌 해소, Linux file URI를 손상시키던 artifact 존재 assertion을 wire 계약 검증으로 교체, PLAN tracker CRLF 지원. backend 865·frontend 80 및 전체 게이트 통과, `review_p15_05_merge` APPROVE | 인수 후 merge gate |
 | 2026-09-04 KST | Claude | 사용자 지시로 origin/main fast-forward push(c174452→73d812e) 후 리뷰 중 브랜치 12개를 Stacked PR로 공개: #38 P2-01 → #39 P2-02 → #40 P2-03 → #41 P3-01 → #42 P3-02 → #43 P2-04 → #44 P3-03 → #45 P3-04 → #46 P3-05 → #47 P3-06 → #48 P3-07(스택 끝, 리뷰 후속 수정 1eecbb2·8933bcc·9581811 포함), #49 P1.5-05(main 기준). P2-04·P3-01~04 REQUEST_CHANGES 수정 완료, 같은 리뷰어 재검토 요청. 게이트: typecheck·lint·vitest 187·build, backend 652 | 사용자 지시 |

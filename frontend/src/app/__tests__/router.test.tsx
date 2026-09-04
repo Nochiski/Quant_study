@@ -202,13 +202,9 @@ describe("App Shell routes", () => {
     expect(
       await screen.findByText("페이지를 찾을 수 없습니다"),
     ).toBeInTheDocument();
-    expect(screen.getByText("주문", { exact: false })).toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
-    expect(screen.getByText("주문", { exact: false })).toHaveTextContent(
-      "향후 제공, 사용 불가",
-    );
+    const orders = screen.getByText("주문").closest('[aria-disabled="true"]');
+    expect(orders).not.toBeNull();
+    expect(orders).toHaveTextContent("향후 제공, 사용 불가");
     cleanup();
     mount("/operations/orders", true);
     expect(

@@ -26,14 +26,17 @@ const matchMedia = (matches: boolean) =>
     })),
   );
 
-const mount = (props: Partial<Parameters<typeof StrategyIde>[0]> = {}) =>
-  render(
+const mount = (props: Partial<Parameters<typeof StrategyIde>[0]> = {}) => {
+  const { versionLabel = "v12", ...rest } = props;
+  return render(
     <StrategyIde
       title="새 전략"
+      versionLabel={versionLabel}
       editor={<textarea aria-label="source" />}
-      {...props}
+      {...rest}
     />,
   );
+};
 
 describe("StrategyIde", () => {
   it("shows the outline with every section including parameters and a single tablist", () => {
@@ -43,9 +46,14 @@ describe("StrategyIde", () => {
     const sections = within(outline)
       .getAllByRole("button")
       .map((b) => b.textContent);
-    expect(sections.some((text) => text?.includes("/parameters"))).toBe(true);
-    expect(sections.some((text) => text?.includes("/risk"))).toBe(true);
-    expect(screen.getAllByRole("tablist")).toHaveLength(1); // inspector tabs only, no stepper
+    expect(sections.some((text) => text?.includes("parameters"))).toBe(true);
+    expect(sections.some((text) => text?.includes("risk"))).toBe(true);
+    // view tabs + inspector tabs + results tabs; no Data→…→Execution stepper
+    expect(
+      new Set(
+        screen.getAllByRole("tablist").map((l) => l.getAttribute("aria-label")),
+      ),
+    ).toEqual(new Set(["표현 전환", "계약", "중간 결과"]));
     expect(screen.getByRole("region", { name: "편집기" })).toBeInTheDocument();
     expect(
       screen.getByRole("complementary", { name: "계약" }),
@@ -63,9 +71,9 @@ describe("StrategyIde", () => {
     const outline = screen.getByRole("navigation", { name: "전략 구조" });
     expect(
       within(outline).getByRole("button", { current: "location" }),
-    ).toHaveTextContent("/risk");
+    ).toHaveTextContent("risk");
     await user.click(
-      within(outline).getByRole("button", { name: /\/portfolio/ }),
+      within(outline).getByRole("button", { name: /portfolio/ }),
     );
     expect(onSelectSection).toHaveBeenCalledWith("portfolio");
   });
@@ -171,6 +179,41 @@ describe("StrategyIde", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("renders the concept frame: breadcrumb, run action, meta line, filterable outline, snippets", async () => {
+    matchMedia(false);
+    const user = userEvent.setup();
+    const onRunBacktest = vi.fn();
+    mount({
+      onRunBacktest,
+      saveStatus: "방금 저장됨",
+      meta: { author: "김연구" },
+    });
+    expect(
+      screen.getByRole("navigation", { name: "현재 위치" }),
+    ).toHaveTextContent(/새 전략 v12/);
+    expect(screen.getByText("방금 저장됨")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /백테스트 실행/ }));
+    expect(onRunBacktest).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("김연구")).toBeInTheDocument();
+    await user.type(
+      screen.getByRole("searchbox", { name: "전략 구조 필터" }),
+      "risk",
+    );
+    const outline = screen.getByRole("navigation", { name: "전략 구조" });
+    expect(
+      within(outline).getAllByRole("button", { name: /risk/ }),
+    ).toHaveLength(1);
+    expect(screen.getByRole("region", { name: "스니펫" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "YAML" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  });
+
   it("lets the placeholder inspector tabs switch panels", async () => {
     matchMedia(false);
     const user = userEvent.setup();
@@ -180,7 +223,7 @@ describe("StrategyIde", () => {
       "aria-selected",
       "true",
     );
-    for (const tab of screen.getAllByRole("tab")) {
+    for (const tab of screen.getAllByRole("tab", { selected: true })) {
       expect(
         document.getElementById(tab.getAttribute("aria-controls") ?? ""),
       ).not.toBeNull();

@@ -81,17 +81,27 @@ export const useAutosave = (
       : null;
 
   // Autosave the dirty text; clear the record when the base is saved successfully.
-  const previous = useRef({ key, dirty: state.dirty });
+  const previous = useRef({
+    key,
+    dirty: state.dirty,
+    documentEpoch: state.documentEpoch,
+  });
   useEffect(() => {
     const before = previous.current;
-    previous.current = { key, dirty: state.dirty };
+    previous.current = {
+      key,
+      dirty: state.dirty,
+      documentEpoch: state.documentEpoch,
+    };
     if (
-      before.key === key &&
+      before.documentEpoch === state.documentEpoch &&
       before.dirty &&
       !state.dirty &&
       state.savedSource === state.source
     ) {
-      clearDraft(storage, key);
+      // A successful save can advance the base revision, so remove the record stored under the
+      // pre-save base key. A document load changes the epoch and must keep its recovery record.
+      clearDraft(storage, before.key);
       setLastSavedAt(null);
       return;
     }
@@ -124,6 +134,7 @@ export const useAutosave = (
     state.baseRevision,
     state.baseSpecHash,
     state.savedSource,
+    state.documentEpoch,
     options.schemaVersion,
   ]);
 

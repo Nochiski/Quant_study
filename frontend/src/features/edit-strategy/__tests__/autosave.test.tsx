@@ -82,9 +82,11 @@ const Harness = ({
           dispatch({
             type: "saved",
             strategyId: "s1",
-            revision: 2,
-            specHash: "2".repeat(64),
+            revision: 3,
+            specHash: "3".repeat(64),
             source: state.source,
+            documentEpoch: state.documentEpoch,
+            sourceVersion: state.sourceVersion,
           })
         }
       >
@@ -169,6 +171,7 @@ describe("useAutosave", () => {
       expect(screen.getByTestId("dirty")).toHaveTextContent("false"),
     );
     expect(readDraft(storage, "s1@2")).toBeNull();
+    expect(readDraft(storage, "s1@3")).toBeNull();
     expect(screen.getByTestId("lastSaved")).toHaveTextContent("-");
   });
 

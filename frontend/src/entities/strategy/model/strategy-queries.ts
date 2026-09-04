@@ -27,6 +27,19 @@ export const strategyContractQuery = () =>
     staleTime: 5 * 60_000,
   });
 
+/** Two stored revisions never change, so their diff is immutable too. */
+export const strategyDiffQuery = (
+  strategyId: string,
+  base: number,
+  target: number,
+) =>
+  queryOptions({
+    queryKey: ["strategy", strategyId, "diff", base, target],
+    queryFn: () =>
+      strategyWorkbenchApi.diffStrategyRevisions(strategyId, base, target),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+
 /** The history grows with every save: refetched when used, invalidated by a successful save. */
 export const strategyRevisionsQuery = (strategyId: string) =>
   queryOptions({

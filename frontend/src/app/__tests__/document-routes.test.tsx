@@ -12,7 +12,15 @@ import {
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, delay, http } from "msw";
 import { setupServer } from "msw/node";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import { App } from "../app";
 
@@ -88,6 +96,30 @@ const acceptedRun = (runId = "run-7") => ({
 });
 
 const server = setupServer(
+  http.get(`${API}/api/v1/strategies/:strategyId/diff`, ({ request }) => {
+    const url = new URL(request.url);
+    return HttpResponse.json({
+      strategy_id: "s1",
+      base_revision: Number(url.searchParams.get("base")),
+      target_revision: Number(url.searchParams.get("target")),
+      base_spec_hash: "1".repeat(64),
+      target_spec_hash: "3".repeat(64),
+      changes: [
+        {
+          pointer: "/risk/max_name_weight",
+          kind: "changed",
+          before: 0.1,
+          after: 0.05,
+        },
+        {
+          pointer: "/description",
+          kind: "added",
+          before: null,
+          after: "서버에서 수정",
+        },
+      ],
+    });
+  }),
   http.post(`${API}/api/v1/strategy-documents/compile`, async ({ request }) => {
     const body = (await request.json()) as { source: string };
     const title = /title: (.*)/.exec(body.source)?.[1] ?? "";
@@ -193,7 +225,8 @@ const server = setupServer(
           {
             detail: {
               code: "strategy.revision_conflict",
-              message: "latest_revision=3",
+              message: "another author saved first",
+              latest_revision: 3,
             },
           },
           { status: 409 },
@@ -582,5 +615,185 @@ describe("backtest from the editor (P3-05)", () => {
       "/research/strategies/s1/revisions/1",
     );
     expect(screen.queryByText(/run-stale.*접수됨/)).not.toBeInTheDocument();
+  });
+});
+
+describe("revision conflict (P3-07)", () => {
+  it("keeps the text, names both revisions, and offers open / copy / diff", async () => {
+    const serverSource = `${STORED}description: 서버 최신\n`;
+    server.use(
+      http.get(
+        `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
+        ({ params }) =>
+          HttpResponse.json(
+            document(
+              String(params.strategyId),
+              Number(params.revision),
+              Number(params.revision) === 3 ? serverSource : STORED,
+            ),
+          ),
+      ),
+    );
+    const user = userEvent.setup();
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    const history = mount("/research/strategies/s1/revisions/1");
+    const view = await editor();
+    replaceText(view, `${STORED}description: 충돌\n`);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "리비전 저장" })).toBeEnabled(),
+    );
+    await user.click(screen.getByRole("button", { name: "리비전 저장" }));
+    const banner = await screen.findByRole("region", { name: "리비전 충돌" });
+    expect(banner).toHaveTextContent("서버 최신 v3 · 현재 기준 v1");
+    expect(view.state.doc.toString()).toBe(`${STORED}description: 충돌\n`);
+    expect(
+      within(banner).getByRole("link", { name: "서버본 열기 (v3)" }),
+    ).toHaveAttribute("href", "/research/strategies/s1/revisions/3");
+    await user.click(
+      within(banner).getByRole("button", { name: "현재 문서 복사" }),
+    );
+    expect(writeText).toHaveBeenCalledWith(`${STORED}description: 충돌\n`);
+    expect(await within(banner).findByRole("status")).toHaveTextContent(
+      "복사했습니다",
+    );
+    await user.click(within(banner).getByRole("button", { name: "Diff 열기" }));
+    expect(
+      await within(banner).findByText("v1 → v3 의미 변경"),
+    ).toBeInTheDocument();
+    expect(
+      within(banner).getByText("/risk/max_name_weight"),
+    ).toBeInTheDocument();
+    expect(within(banner).getByText('"서버에서 수정"')).toBeInTheDocument();
+    expect(within(banner).getByText("수정")).toBeInTheDocument();
+    expect(within(banner).getByText("추가")).toBeInTheDocument();
+    expect(history.location.pathname).toBe(
+      "/research/strategies/s1/revisions/1",
+    );
+
+    await user.click(
+      within(banner).getByRole("link", { name: "서버본 열기 (v3)" }),
+    );
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "나가기",
+      }),
+    );
+    await waitFor(() =>
+      expect(history.location.pathname).toBe(
+        "/research/strategies/s1/revisions/3",
+      ),
+    );
+    const serverView = await editor();
+    expect(serverView.state.doc.toString()).toBe(serverSource);
+    expect(
+      screen.queryByRole("region", { name: "리비전 충돌" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("drops a delayed 409 after the editor loads another revision", async () => {
+    server.use(
+      http.post(
+        `${API}/api/v1/strategy-documents/:strategyId/revisions`,
+        async () => {
+          await delay(200);
+          return HttpResponse.json(
+            {
+              detail: {
+                code: "strategy.revision_conflict",
+                message: "message wording is not an identity contract",
+                latest_revision: 3,
+              },
+            },
+            { status: 409 },
+          );
+        },
+      ),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/1");
+    const first = await editor();
+    replaceText(first, `${STORED}description: 이전 문서\n`);
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+    await user.click(saveButton());
+
+    history.push("/research/strategies/s1/revisions/2");
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "나가기",
+      }),
+    );
+    await waitFor(() =>
+      expect(history.location.pathname).toBe(
+        "/research/strategies/s1/revisions/2",
+      ),
+    );
+    const second = await editor();
+    expect(second.state.doc.toString()).toBe(STORED);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(
+      screen.queryByRole("region", { name: "리비전 충돌" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/^충돌:/)).not.toBeInTheDocument();
+  });
+
+  it("keeps recovery actions usable when clipboard and diff requests fail", async () => {
+    server.use(
+      http.get(`${API}/api/v1/strategies/:strategyId/diff`, () =>
+        HttpResponse.error(),
+      ),
+    );
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: vi.fn(() => Promise.reject(new Error("denied"))) },
+      configurable: true,
+    });
+    mount("/research/strategies/s1/revisions/1");
+    const view = await editor();
+    replaceText(view, `${STORED}description: 충돌\n`);
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+    await user.click(saveButton());
+    const banner = await screen.findByRole("region", { name: "리비전 충돌" });
+
+    await user.click(
+      within(banner).getByRole("button", { name: "현재 문서 복사" }),
+    );
+    expect(await within(banner).findByRole("status")).toHaveTextContent(
+      "복사할 수 없습니다",
+    );
+    await user.click(within(banner).getByRole("button", { name: "Diff 열기" }));
+    expect(
+      await within(banner).findByText("Diff를 불러올 수 없습니다."),
+    ).toBeInTheDocument();
+    expect(view.state.doc.toString()).toBe(`${STORED}description: 충돌\n`);
+  });
+});
+
+describe("dirty guard follow-ups (P2-04 review)", () => {
+  it("lets a same-route view switch through while dirty, and only prompts on a real leave", async () => {
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2");
+    const view = await editor();
+    replaceText(view, `${STORED}description: 편집 중\n`);
+    await user.click(screen.getByRole("tab", { name: "JSON" }));
+    await waitFor(() => expect(history.location.search).toContain("view=json"));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "JSON" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await user.click(screen.getByRole("link", { name: "기존 편집기" }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(globalThis.document.activeElement).toBe(
+      within(dialog).getByRole("button", { name: "머무르기" }),
+    );
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(history.location.pathname).toBe(
+      "/research/strategies/s1/revisions/2",
+    );
   });
 });

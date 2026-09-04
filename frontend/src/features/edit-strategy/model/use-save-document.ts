@@ -19,13 +19,20 @@ import {
 
 export type SaveStatus =
   | { kind: "idle" }
-  | { kind: "saving" }
-  | { kind: "saved"; document: StrategyDocument }
+  | { kind: "saving"; documentEpoch: number }
+  | { kind: "saved"; document: StrategyDocument; documentEpoch: number }
   /** Someone else stored a newer revision than the draft base (HTTP 409). */
-  | { kind: "conflict"; detail: string }
+  | {
+      kind: "conflict";
+      detail: string;
+      latestRevision: number | null;
+      strategyId: string | null;
+      baseRevision: number | null;
+      documentEpoch: number;
+    }
   /** The backend refused the text as a document (HTTP 422); the draft stays as typed. */
-  | { kind: "invalid"; detail: string }
-  | { kind: "failed"; detail: string };
+  | { kind: "invalid"; detail: string; documentEpoch: number }
+  | { kind: "failed"; detail: string; documentEpoch: number };
 
 type SaveSnapshot = {
   source: string;
@@ -71,7 +78,8 @@ export const useSaveDocument = (
             source: snapshot.source,
             expected_revision: snapshot.baseRevision,
           }),
-    onMutate: () => setStatus({ kind: "saving" }),
+    onMutate: (snapshot) =>
+      setStatus({ kind: "saving", documentEpoch: snapshot.documentEpoch }),
     onSuccess: (document, snapshot) => {
       queryClient.setQueryData(
         strategyDocumentQuery(document.strategy_id, document.revision).queryKey,
@@ -89,17 +97,33 @@ export const useSaveDocument = (
         documentEpoch: snapshot.documentEpoch,
         sourceVersion: snapshot.sourceVersion,
       });
-      setStatus({ kind: "saved", document });
+      setStatus({
+        kind: "saved",
+        document,
+        documentEpoch: snapshot.documentEpoch,
+      });
     },
-    onError: (error) => {
+    onError: (error, snapshot) => {
       if (error instanceof ApiRequestError && error.status === 409) {
-        setStatus({ kind: "conflict", detail: error.detail ?? "" });
+        setStatus({
+          kind: "conflict",
+          detail: error.detail ?? "",
+          latestRevision: error.latestRevision,
+          strategyId: snapshot.strategyId,
+          baseRevision: snapshot.baseRevision,
+          documentEpoch: snapshot.documentEpoch,
+        });
       } else if (error instanceof ApiRequestError && error.status === 422) {
-        setStatus({ kind: "invalid", detail: error.detail ?? "" });
+        setStatus({
+          kind: "invalid",
+          detail: error.detail ?? "",
+          documentEpoch: snapshot.documentEpoch,
+        });
       } else {
         setStatus({
           kind: "failed",
           detail: error instanceof Error ? error.message : String(error),
+          documentEpoch: snapshot.documentEpoch,
         });
       }
     },
@@ -118,5 +142,14 @@ export const useSaveDocument = (
     });
   }, [isPending, mutate, state]);
 
-  return { save, status, canSave: canSaveDocument(state) && !isPending };
+  const visibleStatus: SaveStatus =
+    status.kind === "idle" || status.documentEpoch === state.documentEpoch
+      ? status
+      : { kind: "idle" };
+
+  return {
+    save,
+    status: visibleStatus,
+    canSave: canSaveDocument(state) && !isPending,
+  };
 };

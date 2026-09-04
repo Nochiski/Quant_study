@@ -3,14 +3,14 @@ plan_version: 2
 project: yaml-strategy-workbench-ui
 project_status: IN_REVIEW
 current_phase: P3
-current_pr: P3-06,P3-07
-active_prs: [P3-06, P3-07]
-parallel_window: [P3-06, P3-07]
-last_updated: 2026-09-04T22:32:14+09:00
+current_pr: P3-07
+active_prs: [P3-07]
+parallel_window: [P3-07]
+last_updated: 2026-09-04T22:53:17+09:00
 planned_prs: 47
-merged_prs: 28
-approved_prs: 28
-progress_percent: 60
+merged_prs: 29
+approved_prs: 29
+progress_percent: 62
 ---
 
 # YAML Strategy Workbench 실시간 진행 계획
@@ -24,11 +24,11 @@ progress_percent: 60
 |---|---|
 | Project status | `IN_REVIEW` |
 | Current phase | `P3` |
-| Current/next PR | `P3-06,P3-07` |
-| Active PR | `P3-06, P3-07` |
-| Progress | `28 / 47 merged (60%)` |
-| Approved | `28 / 47` |
-| Aggregated at | `2026-09-04 22:32 KST` |
+| Current/next PR | `P3-07` |
+| Active PR | `P3-07` |
+| Progress | `29 / 47 merged (62%)` |
+| Approved | `29 / 47` |
+| Aggregated at | `2026-09-04 22:53 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -75,27 +75,27 @@ progress_percent: 60
 | P1 | Backend Authoring Contract | 10 | 10 | `MERGED` |
 | P1.5 | Backtest Correctness Gate | 5 | 5 | `MERGED` |
 | P2 | App Shell and visual foundation | 4 | 4 | `MERGED` |
-| P3 | YAML Editor MVP | 7 | 5 | `IN_REVIEW` |
+| P3 | YAML Editor MVP | 7 | 6 | `IN_REVIEW` |
 | P4 | Outline, Contract, Projections | 8 | 0 | `WAITING` |
 | P5 | Truthful Trace UI | 3 | 0 | `WAITING` |
 | P6 | Professional release and migration | 6 | 0 | `WAITING` |
-| **Total** |  | **47** | **28** | **60%** |
+| **Total** |  | **47** | **29** | **62%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
 
 | 항목 | 값 |
 |---|---|
-| PR | Phase 1 전량 MERGED(7efe811). 진행 중: `P2-01`→`P2-02`→`P2-03`→`P3-01`→`P3-02`→`P2-04` (worktree `Quant_study-p2-01`, IN_REVIEW, P2-03 v3 시안 정합 반영 259b682 → P3-01 0925d1c → P3-02 429615b → P2-04 09ceacf → P3-03 380511a → P3-04 0a6b28c → P3-05 0fb303b → P3-06 7dcb3bf → P3-07 8c3d074, main 7efe811 병합 포함), Phase 1.5 감사 후속 `feat/p1.5-05-audit-fixes` (worktree `Quant_study-p15-01`, 구현 서브에이전트), Phase 1 종료 SoT·책임분리 감사 |
-| Intent | P2-03: 시안(v3) 그대로의 IDE 프레임(top bar·title/meta·outline+snippets·editor tabs·계약·중간 결과). P3-01/02: YAML 1.2 document state machine + lazy CodeMirror 어댑터 |
-| Acceptance | 시안과 동일한 프레임, 접근성(탭·드로어·aria), 편집기 chunk ≤ 200 KB gzip, 게이트 clean |
-| Non-goals | 실제 계약/중간 결과 데이터 연결(P4·P5), P2-04 revision loader |
-| Branch/worktree | `feat/p2-01-theme-tokens`→`feat/p2-02-app-shell`→`feat/p2-03-ide-layout`→`feat/p3-01-document-state`→`feat/p3-02-code-editor` (worktree `Quant_study-p2-01`) |
-| Base SHA | `0db8e31` (main, P1-05~09 merge 전) |
-| Head SHA | P2-03 `259b682` / P3-01 `0925d1c` / P3-02 `429615b` |
-| Diff stat | P2-03 concept pass +시안 정합, P3-01 8 files +1075/−137, P3-02 CodeMirror 어댑터 |
-| Focused tests | strategy-ide widget 테스트, document-state·yaml12 parse, code-editor handle |
-| Full gate | P2-03 vitest 105 / P3-01 127 / P3-02 131, typecheck·lint·build clean. main: pytest 649 passed(Rust core 제외), ruff·pyright, SDK clean(LF/CRLF만), vitest 80 |
+| PR | `P3-07` revision conflict 안전 처리, [#48](https://github.com/Nochiski/Quant_study/pull/48) IN_REVIEW. P3-06은 #47로 main 병합(8b7b1a4) |
+| Intent | 409에서도 사용자 source를 보존하고 서버 revision·현재 base revision 및 서버본/복사/Diff 탈출구를 제공한다 |
+| Acceptance | 자동 merge 없이 충돌 원인을 명확히 표시하고, 각 액션이 최신 revision·현재 source·semantic diff의 단일 owner를 소비한다 |
+| Non-goals | 자동 merge와 conflict resolution 편집(P4-08), server draft/history(P6-02) |
+| Branch/worktree | `feat/p3-07-conflict-safety` (`Quant_study-p2-01`) |
+| Base SHA | `8b7b1a4` (P3-06 merge main) |
+| Head SHA | 기능 `0dcc883`, latest main 통합 `ce55705` |
+| Diff stat | main 대비 frontend 11 files +418/−1 |
+| Focused tests | document routes의 409 source 보존·서버본·복사·semantic diff 경로 |
+| Full gate | latest main 통합 후 재검증·독립 리뷰 예정 |
 
 ---
 
@@ -183,7 +183,7 @@ Phase exit:
 | [x] | `P3-03` | Runtime schema 구조 검증·completion·hover | P3-01, P3-02, P1-05 | `MERGED` | `review_p3_03` + `review_p3_03_latest` APPROVE · [#44](https://github.com/Nochiski/Quant_study/pull/44) |
 | [x] | `P3-04` | Backend semantic diagnostic marker와 stale response 차단 | P3-03, P1-03 | `MERGED` | `review_p3_04` + `review_p3_04_latest` APPROVE · [#45](https://github.com/Nochiski/Quant_study/pull/45) |
 | [x] | `P3-05` | Dirty/base hash에 따른 saved reference 또는 inline draft Backtest | P3-04, P1-07, P1-09, P1.5-04, P2-04 | `MERGED` | `review_p3_05` + `review_p3_05_latest` APPROVE · [#46](https://github.com/Nochiski/Quant_study/pull/46) |
-| [ ] | `P3-06` | Local autosave와 recovery 비교 | P3-05 | `IN_REVIEW` | `review_p3_06` · [#47](https://github.com/Nochiski/Quant_study/pull/47) |
+| [x] | `P3-06` | Local autosave와 recovery 비교 | P3-05 | `MERGED` | `review_p3_06` + `review_p3_06_latest` APPROVE · [#47](https://github.com/Nochiski/Quant_study/pull/47) |
 | [ ] | `P3-07` | 409 revision conflict에서 source 보존 | P3-05, P1-08 | `IN_REVIEW` | `review_p3_07` · [#48](https://github.com/Nochiski/Quant_study/pull/48) |
 
 Phase exit:
@@ -250,6 +250,7 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
+| P3-06 | `review_p3_06` + `review_p3_06_latest` | `4a3dc14` | `201479c` | APPROVE (저장 중 후속 편집의 pre-save key, 복구 identity fail-closed, diff baseline owner P1 3건 수정 후 승인) | 3 (해소) | 수동 원복 시 기존 autosave 잔존, 다중 탭 `new` key 조정, main bundle 경고는 후속 | 2026-09-04 |
 | P3-05 | `review_p3_05` + `review_p3_05_latest` | `0167fb9` | `b1c5c51` | APPROVE (saved/inline provenance와 invalid/stale 차단 재검토, dirty orphan run·stale route overwrite P1 2건 수정 후 승인) | 2 (해소) | 폐기된 응답의 서버 run은 향후 history에서 회수, disabled tooltip·transport 문구·main bundle은 후속 | 2026-09-04 |
 | P3-04 | `review_p3_04` + `review_p3_04_latest` | `20c1447` | `b5c37a6` | APPROVE (stale/error marker·selection clamp·IME·capability 상태 재검토, unknown-key가 value를 가리키던 P1 수정 후 승인) | 1 (해소) | backend code-point fallback의 UTF-16 변환, 전체 state effect의 abort/redebounce, main bundle 경고는 후속 | 2026-09-04 |
 | P3-03 | `review_p3_03` + `review_p3_03_latest` | `03600de` | `a76f3c4` | APPROVE (runtime schema SoT·x-defines, cursor→pointer, kind union, completion/hover와 IME/stale 처리 재검토) | 0 | catalog 100+ pagination, 배포 경계 schema/contract/catalog version 검증, flow/multiline YAML은 후속 | 2026-09-04 |
@@ -283,6 +284,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
+| P3-06 | autosave recovery·text diff 12 passed | frontend typecheck·lint·vitest 217·build | 해당 없음 | savedVersion 기반 old/new key 전환, identity 불명·불일치 raw-only, owner baseline·quota·키보드 스크롤 검토 | [#47](https://github.com/Nochiski/Quant_study/pull/47) 수정 후 backend/frontend 중복 실행 4개 pass, MERGED | 2026-09-04 |
 | P3-05 | backtest source·document route 13 passed | frontend typecheck·lint·vitest 205·build | 해당 없음 | dirty inline run 접수/머무르기/재열기, 중복 제출 차단, stale document 응답 폐기 검토 | [#46](https://github.com/Nochiski/Quant_study/pull/46) 수정 후 backend/frontend 중복 실행 4개 pass, MERGED | 2026-09-04 |
 | P3-04 | compile diagnostics 10 passed | frontend typecheck·lint·vitest 199·build | 해당 없음 | stale marker 비활성·범위 clamp·root anchor·unknown-key의 key range 이동 검토 | [#45](https://github.com/Nochiski/Quant_study/pull/45) 수정 후 backend/frontend 중복 실행 4개 pass, MERGED | 2026-09-04 |
 | P3-03 | backend schema 13, frontend schema/navigator/cursor 22 passed | backend ruff·pyright; frontend typecheck·lint·vitest 189·build | OpenAPI 및 runtime schema fixture 재생성 exact | output node·parameter reference scope, zero-indent sequence, IME/stale hover 검토 | [#44](https://github.com/Nochiski/Quant_study/pull/44) backend/frontend 중복 실행 4개 pass, MERGED | 2026-09-04 |
@@ -310,6 +312,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-04 KST | Codex | #47 P3-06 독립 리뷰에서 저장 중 추가 편집 old key, 복구 identity fail-open, diff baseline 이중 owner P1 3건을 발견. accepted save의 `savedVersion`을 정본으로 old key를 정리하고, schema/format/base/hash 완전 일치 restore 및 autosave-owned baseline으로 수정(201479c). 동일 리뷰어 blocker 0 재승인, frontend 217·build 및 원격 CI 4개 통과 후 main 병합(8b7b1a4) | 인수 후 merge gate·SoT/책임분리 |
 | 2026-09-04 KST | Codex | #46 P3-05 독립 리뷰에서 dirty inline orphan run과 stale 응답 route overwrite P1 2건을 발견. run 상태를 document epoch/version/pathname에 귀속하고 accepted run ID 재개·fresh save event 단회 소비로 수정(b1c5c51), 테스트 async budget도 shared owner로 통합(c063a4b). 동일 리뷰어 blocker 0 재승인, frontend 205·build 및 원격 CI 4개 통과 후 main 병합(4a3dc14) | 인수 후 merge gate·SoT/책임분리 |
 | 2026-09-04 KST | Codex | #45 P3-04 독립 리뷰에서 unknown-key가 값 범위를 가리키는 P1을 발견해 key range 우선과 회귀 테스트로 수정(b5c37a6). 동일 리뷰어 blocker 0 재승인, frontend 199·build 및 원격 CI 4개 통과 후 main 병합(0167fb9) | 인수 후 merge gate |
 | 2026-09-04 KST | Codex | #44 P3-03을 latest main 기준 독립 재검토하여 blocker 0, runtime schema/OpenAPI 정합과 backend 13·frontend 189 및 원격 CI 4개 통과 후 main 병합(20c1447) | 인수 후 merge gate |

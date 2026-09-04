@@ -1,5 +1,6 @@
 export {
   strategyContractQuery,
+  strategyDiffQuery,
   strategyDocumentQuery,
   strategyRevisionsQuery,
   strategySchemaQuery,

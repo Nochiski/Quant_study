@@ -40,7 +40,11 @@ class StrategyNotFoundError(LookupError):
 
 
 class StrategyRevisionConflictError(RuntimeError):
-    pass
+    """Optimistic revision conflict with the repository-owned latest revision, when known."""
+
+    def __init__(self, message: str, *, latest_revision: int | None = None) -> None:
+        super().__init__(message)
+        self.latest_revision = latest_revision
 
 
 class RevisionOrigin(StrEnum):

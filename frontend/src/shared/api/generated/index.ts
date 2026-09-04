@@ -305,6 +305,8 @@ export type {
   StrategyExplanationStep,
   StrategyIdentity,
   StrategyProvenance,
+  StrategyRevisionConflictDetail,
+  StrategyRevisionConflictResponse,
   StrategySourceKind,
   StrategySpec,
   StrategyValidation,

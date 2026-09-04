@@ -4,6 +4,7 @@ import {
   compileStrategyDocument,
   createStrategy,
   createStrategyDocument,
+  diffStrategyRevisions,
   explainFactorGraph,
   getEquityCatalog,
   getFactorCatalog,
@@ -35,6 +36,7 @@ import type {
   CompiledDocument,
   DataStep,
   DatasetFieldProfile,
+  DiffEntry,
   FactorCatalog,
   FactorDefinition,
   FactorExplanation,
@@ -62,6 +64,7 @@ import type {
   ResearchPanelQuery,
   ResearchPreview,
   ReviseDocumentRequest,
+  RevisionDiff,
   RevisionSummary,
   SaveDocumentRequest,
   SavedRevisionReference,
@@ -70,6 +73,7 @@ import type {
   StrategyDocument,
   StrategyDocumentContractResponse,
   StrategyDocumentSchema,
+  StrategyRevisionConflictDetail,
   StrategySpec,
   StrategyValidation,
   UniverseHistoryQuery,
@@ -92,8 +96,15 @@ export class ApiRequestError extends Error {
   readonly status: number;
   readonly code: string | undefined;
   readonly detail: string | undefined;
+  readonly latestRevision: number | null;
 
-  constructor(context: string, status: number, code?: string, detail?: string) {
+  constructor(
+    context: string,
+    status: number,
+    code?: string,
+    detail?: string,
+    latestRevision: number | null = null,
+  ) {
     super(
       `API request failed: ${context} status=${status} code=${code ?? "-"}`,
     );
@@ -101,6 +112,7 @@ export class ApiRequestError extends Error {
     this.status = status;
     this.code = code;
     this.detail = detail;
+    this.latestRevision = latestRevision;
   }
 }
 
@@ -126,17 +138,38 @@ const errorField = (
 const errorCode = (error: unknown): string | undefined =>
   errorField(error, "code");
 
+/** Runtime check at the HTTP boundary for the generated structured 409 detail. */
+const revisionConflictDetail = (
+  error: unknown,
+): StrategyRevisionConflictDetail | null => {
+  if (typeof error !== "object" || error === null || !("detail" in error))
+    return null;
+  const detail = (error as { detail: unknown }).detail;
+  if (typeof detail !== "object" || detail === null) return null;
+  const candidate = detail as Partial<StrategyRevisionConflictDetail>;
+  return candidate.code === "strategy.revision_conflict" &&
+    typeof candidate.message === "string" &&
+    (candidate.latest_revision === null ||
+      (typeof candidate.latest_revision === "number" &&
+        Number.isSafeInteger(candidate.latest_revision) &&
+        candidate.latest_revision > 0))
+    ? (candidate as StrategyRevisionConflictDetail)
+    : null;
+};
+
 /** Turns an SDK reply into data or a typed error; every document call goes through here. */
 const unwrap = <T>(
   response: { data?: T; error?: unknown; response?: { status: number } },
   context: string,
 ): T => {
   if (response.error !== undefined) {
+    const conflict = revisionConflictDetail(response.error);
     throw new ApiRequestError(
       context,
       response.response?.status ?? 0,
       errorCode(response.error),
       errorField(response.error, "message"),
+      conflict?.latest_revision ?? null,
     );
   }
   return requireData(response.data, context);
@@ -300,6 +333,19 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "reviseStrategyDocument");
   },
 
+  /** Semantic diff between two stored revisions (identity, comments, formatting invisible). */
+  async diffStrategyRevisions(
+    strategyId: string,
+    base: number,
+    target: number,
+  ): Promise<RevisionDiff> {
+    const response = await diffStrategyRevisions({
+      path: { strategy_id: strategyId },
+      query: { base, target },
+    });
+    return unwrap(response, "diffStrategyRevisions");
+  },
+
   async listStrategyRevisions(
     strategyId: string,
     page: { offset?: number; limit?: number } = {},
@@ -343,6 +389,7 @@ export type {
   CompiledDocument,
   DataStep,
   DatasetFieldProfile,
+  DiffEntry,
   FactorCatalog,
   FactorDefinition,
   FactorExplanation,
@@ -368,6 +415,7 @@ export type {
   ResearchPanelQuery,
   ResearchPreview,
   ReviseDocumentRequest,
+  RevisionDiff,
   RevisionSummary,
   SaveDocumentRequest,
   SavedRevisionReference,

@@ -140,7 +140,8 @@ class StrategyDesignService:
         if latest.source is not None:
             raise StrategyRevisionConflictError(
                 "strategy is authored as a document; revise it through the document API — "
-                f"strategy_id={strategy_id} latest_revision={latest.revision}"
+                f"strategy_id={strategy_id} latest_revision={latest.revision}",
+                latest_revision=latest.revision,
             )
         saved = replace(
             draft,

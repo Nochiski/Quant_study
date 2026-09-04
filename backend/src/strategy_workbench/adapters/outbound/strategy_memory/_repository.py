@@ -27,7 +27,8 @@ class InMemoryStrategyRepository:
         with self._lock:
             if record.strategy_id in self._items:
                 raise StrategyRevisionConflictError(
-                    f"strategy already exists — strategy_id={record.strategy_id}"
+                    f"strategy already exists — strategy_id={record.strategy_id}",
+                    latest_revision=self._items[record.strategy_id][-1].revision,
                 )
             if record.revision != 1:
                 raise StrategyRevisionConflictError(
@@ -54,12 +55,14 @@ class InMemoryStrategyRepository:
                 raise StrategyRevisionConflictError(
                     "strategy revision conflict — "
                     f"strategy_id={record.strategy_id} expected={expected_revision} "
-                    f"actual={actual_revision}"
+                    f"actual={actual_revision}",
+                    latest_revision=actual_revision,
                 )
             if record.revision != expected_revision + 1:
                 raise StrategyRevisionConflictError(
                     "next revision is not monotonic — "
-                    f"expected={expected_revision + 1} actual={record.revision}"
+                    f"expected={expected_revision + 1} actual={record.revision}",
+                    latest_revision=actual_revision,
                 )
             revisions.append(record)
 

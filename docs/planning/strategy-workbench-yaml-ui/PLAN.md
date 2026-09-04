@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: SELF_CHECK
+project_status: IN_REVIEW
 current_phase: P4
 current_pr: P4-10
 active_prs: [P4-10]
 parallel_window: [P4-10]
-last_updated: 2026-09-05T06:32:40+09:00
+last_updated: 2026-09-05T06:33:48+09:00
 planned_prs: 50
 merged_prs: 37
 approved_prs: 37
@@ -22,13 +22,13 @@ progress_percent: 74
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `SELF_CHECK` |
+| Project status | `IN_REVIEW` |
 | Current phase | `P4` |
 | Current/next PR | `P4-10` |
 | Active PR | `P4-10` |
 | Progress | `37 / 50 merged (74%)` |
 | Approved | `37 / 50` |
-| Aggregated at | `2026-09-05 06:32 KST` |
+| Aggregated at | `2026-09-05 06:33 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -76,7 +76,7 @@ progress_percent: 74
 | P1.5 | Backtest Correctness Gate | 5 | 5 | `MERGED` |
 | P2 | App Shell and visual foundation | 4 | 4 | `MERGED` |
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
-| P4 | Outline, Contract, Projections | 10 | 6 | `SELF_CHECK` |
+| P4 | Outline, Contract, Projections | 10 | 6 | `IN_REVIEW` |
 | P5 | Truthful Trace UI | 3 | 0 | `WAITING` |
 | P6 | Professional release and migration | 7 | 1 | `WAITING` |
 | **Total** |  | **50** | **37** | **74%** |
@@ -86,7 +86,7 @@ progress_percent: 74
 
 | 항목 | 값 |
 |---|---|
-| PR | `P4-10` Five-area snippet catalog UI와 page wiring SELF_CHECK |
+| PR | `P4-10` Five-area snippet catalog UI와 page wiring IN_REVIEW |
 | Intent | P4-05의 canonical snippet source/edit plan을 다섯 영역 UI에 표시하고 new/revision route의 동일 editor transaction에 연결한다 |
 | Acceptance | data/factor/signal/risk/execution 접근 가능 목록; loading/unavailable/empty와 삽입 성공·실패 피드백; cursor-local insertion·focus; new/revision 동일 동작; i18n·키보드 접근성 |
 | Non-goals | snippet 의미·필드·기본값 재계산(P4-05), expression DSL, graph 직접 편집(P4-07), semantic validation 복제, source 전체 재직렬화 |
@@ -205,7 +205,7 @@ Phase exit:
 | [ ] | `P4-07` | Read-only FactorGraph DAG projection | P4-01, P3-05 | `WAITING` | — |
 | [ ] | `P4-08` | Source/semantic/revision Diff와 conflict resolution | P1-08, P3-07 | `WAITING` | — |
 | [x] | `P4-09` | Execution Plan 표시와 YAML/graph selection 연동 | P4-04, P4-01 | `MERGED` | [#58](https://github.com/Nochiski/Quant_study/pull/58) · `review_p4_09` APPROVE · `8a2ebfc` |
-| [ ] | `P4-10` | Five-area snippet catalog UI와 new/revision page wiring | P4-05 | `SELF_CHECK` | [#60](https://github.com/Nochiski/Quant_study/pull/60) · 최종 리뷰 수정 `bb66833` 검증 완료, PR body 갱신 예정 |
+| [ ] | `P4-10` | Five-area snippet catalog UI와 new/revision page wiring | P4-05 | `IN_REVIEW` | [#60](https://github.com/Nochiski/Quant_study/pull/60) · 동일 `review_p4_10` 최종 재검토 중 (`bb66833`, PR body 갱신) |
 
 Phase exit:
 
@@ -331,6 +331,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | P4-10 PR #60 본문을 317 tests와 최신 diff breakdown·`제약사항` size exception으로 갱신하고 capability 왕복 fix `bb66833`을 동일 `review_p4_10` 최종 재검토로 보내기 위해 IN_REVIEW 전환 | WORKFLOW 12절 PR body gate·동일 reviewer final gate |
 | 2026-09-05 KST | Codex | P4-10 추가 P2를 `bb66833`에서 수정: document epoch와 source capability 전환마다 새 scope token을 발급해 ready→incompatible/loading→ready 복귀에도 과거 feedback이 재출현하지 않게 하고 왕복 회귀를 추가. focused 8, 전체 frontend 317·typecheck·lint·build 통과 후 SELF_CHECK 전환 | query lifecycle과 feedback 책임분리·동일 reviewer finding 회귀 |
 | 2026-09-05 KST | Codex | P4-10 재검토 중 capability가 ready→incompatible→ready로 왕복하면 status 문자열 scope만으로 과거 feedback이 되살아나는 P2와 PR 본문이 최초 309 tests·597줄 수치로 남아 WORKFLOW size exception을 충족하지 못한 문서 P1을 확인해 CHANGES_REQUESTED 전환 | transient query lifecycle 정확성·PR body merge gate·동일 reviewer 재검토 |
 | 2026-09-05 KST | Codex | P4-10 P1 1/P2 3 수정과 reviewer 요구 route 회귀를 `e50e8f4`에 고정하고 전체 frontend 317·generated clean을 확인해 동일 `review_p4_10` 재검토로 IN_REVIEW 전환 | blocking finding은 같은 reviewer만 재검토·diff freeze |

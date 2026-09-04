@@ -418,11 +418,56 @@ const parseJsonValues = (text: string, lines: LineIndex): unknown => {
 export const loadYaml12Mapping = (text: string): Record<string, unknown> => {
   const lines = new LineIndex(text);
   rejectText(text, lines, "yaml");
-  return composeDocument(text, lines).toJS() as Record<string, unknown>;
+  const tree = composeDocument(text, lines).toJS() as Record<string, unknown>;
+  rejectDecodedSurrogates(tree, "", lines);
+  return tree;
 };
 
 const LONE_SURROGATE =
   /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+const rejectDecodedSurrogates = (
+  value: unknown,
+  pointer: string,
+  lines: LineIndex,
+  valueRanges?: Map<string, SourceRange>,
+  keyRanges?: Map<string, SourceRange>,
+): void => {
+  if (typeof value === "string") {
+    if (LONE_SURROGATE.test(value)) {
+      throw new Yaml12Rejected(
+        "syntax",
+        `string contains an unpaired surrogate escape — pointer=${pointer}`,
+        valueRanges?.get(pointer) ?? lines.range(0, 0),
+      );
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) =>
+      rejectDecodedSurrogates(
+        item,
+        `${pointer}/${index}`,
+        lines,
+        valueRanges,
+        keyRanges,
+      ),
+    );
+    return;
+  }
+  if (typeof value !== "object" || value === null) return;
+  for (const [key, item] of Object.entries(value)) {
+    const child = `${pointer}/${escapePointer(key)}`;
+    if (LONE_SURROGATE.test(key)) {
+      throw new Yaml12Rejected(
+        "syntax",
+        `key contains an unpaired surrogate escape — pointer=${child}`,
+        keyRanges?.get(child) ?? lines.range(0, 0),
+      );
+    }
+    rejectDecodedSurrogates(item, child, lines, valueRanges, keyRanges);
+  }
+};
 /**
  * The `yaml` package accepts tabs in separation whitespace while ruamel's scanner rejects them.
  * Inspect CST whitespace tokens instead of the source text: tabs inside quoted or block scalars
@@ -508,6 +553,7 @@ export const parseSource = (
       keyRanges,
     );
     const tree = format === "json" ? jsonTree : doc.toJS();
+    rejectDecodedSurrogates(tree, "", lines, valueRanges, keyRanges);
     if (typeof tree !== "object" || tree === null || Array.isArray(tree)) {
       throw new Yaml12Rejected(
         "not_a_mapping",

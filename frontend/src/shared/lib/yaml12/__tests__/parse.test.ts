@@ -118,7 +118,7 @@ describe("parseSource", () => {
     if (json.status === "ok") expect(json.tree).toEqual({ a: 1, b: "x\ty" });
 
     const yaml = parseSource(
-      'double: "x:\ty"\nsingle: \'x:\ty\'\nblock: |\n  x:\ty\n',
+      "double: \"x:\ty\"\nsingle: 'x:\ty'\nblock: |\n  x:\ty\n",
       "yaml",
     );
     expect(yaml.status).toBe("ok");
@@ -128,6 +128,27 @@ describe("parseSource", () => {
         single: "x:\ty",
         block: "x:\ty\n",
       });
+    }
+  });
+
+  it("rejects decoded lone surrogates while accepting a valid escaped pair", () => {
+    for (const [source, format] of [
+      ['a: "\\ud800"\n', "yaml"],
+      ['"\\ud800": value\n', "yaml"],
+      ['{"a":"\\ud800"}', "json"],
+      ['{"\\ud800":"value"}', "json"],
+    ] as const) {
+      expect(parseSource(source, format).diagnostics[0]?.code).toBe(
+        "yaml.syntax",
+      );
+    }
+    for (const [source, format] of [
+      ['a: "\\ud83d\\ude00"\n', "yaml"],
+      ['{"a":"\\ud83d\\ude00"}', "json"],
+    ] as const) {
+      const parsed = parseSource(source, format);
+      expect(parsed.status).toBe("ok");
+      if (parsed.status === "ok") expect(parsed.tree.a).toBe("😀");
     }
   });
 

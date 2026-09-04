@@ -237,9 +237,77 @@ describe("document state machine", () => {
       revision: 4,
       specHash: "h2",
       source: "title: b\n",
+      documentEpoch: state.documentEpoch,
+      sourceVersion: state.sourceVersion,
     });
     expect(state.phase).toBe("saved");
     expect(state.dirty).toBe(false);
     expect(state.baseRevision).toBe(4);
+  });
+
+  it("rejects save responses from an older loaded document", () => {
+    let state = initialDocumentState("yaml", "");
+    state = run(state, {
+      type: "load",
+      format: "yaml",
+      source: "title: same\n",
+      strategyId: "A",
+      baseRevision: 1,
+      baseSpecHash: "hA1",
+    });
+    const request = {
+      documentEpoch: state.documentEpoch,
+      sourceVersion: state.sourceVersion,
+      source: state.source,
+    };
+    state = run(state, {
+      type: "load",
+      format: "yaml",
+      source: "title: same\n",
+      strategyId: "B",
+      baseRevision: 7,
+      baseSpecHash: "hB7",
+    });
+    const loadedB = state;
+    state = run(state, {
+      type: "saved",
+      strategyId: "A",
+      revision: 2,
+      specHash: "hA2",
+      ...request,
+    });
+    expect(state).toBe(loadedB);
+    expect(state.strategyId).toBe("B");
+    expect(state.baseRevision).toBe(7);
+  });
+
+  it("keeps edits made during an in-flight save dirty", () => {
+    let state = initialDocumentState("yaml", "");
+    state = run(state, {
+      type: "load",
+      format: "yaml",
+      source: "title: a\n",
+      strategyId: "s1",
+      baseRevision: 1,
+      baseSpecHash: "h1",
+    });
+    state = run(state, { type: "edit", source: "title: b\n" });
+    const request = {
+      documentEpoch: state.documentEpoch,
+      sourceVersion: state.sourceVersion,
+      source: state.source,
+    };
+    state = run(state, { type: "edit", source: "title: c\n" });
+    state = run(state, {
+      type: "saved",
+      strategyId: "s1",
+      revision: 2,
+      specHash: "h2",
+      ...request,
+    });
+    expect(state.source).toBe("title: c\n");
+    expect(state.savedSource).toBe("title: b\n");
+    expect(state.baseRevision).toBe(2);
+    expect(state.dirty).toBe(true);
   });
 });

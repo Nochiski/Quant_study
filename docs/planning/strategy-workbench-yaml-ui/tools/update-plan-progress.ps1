@@ -15,7 +15,7 @@ $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $original = [System.IO.File]::ReadAllText($resolvedPlanPath, $utf8NoBom)
 
 $prIdPattern = 'P\d+(?:\.\d+)?-\d{2}'
-$rowPattern = "(?m)^\| \[(?<checked>[ xX])\] \| ``(?<id>$prIdPattern)`` \| (?<title>.*?) \| (?<dependency>.*?) \| ``(?<status>[A-Z_]+)`` \| (?<review>.*?) \|[ \t]*$"
+$rowPattern = "(?m)^\| \[(?<checked>[ xX])\] \| ``(?<id>$prIdPattern)`` \| (?<title>.*?) \| (?<dependency>.*?) \| ``(?<status>[A-Z_]+)`` \| (?<review>.*?) \|[ \t\r]*$"
 $rowMatches = [regex]::Matches($original, $rowPattern)
 
 if ($rowMatches.Count -eq 0) {
@@ -87,8 +87,9 @@ $parallelIds = @(
         Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
 )
 
-if ($activeRows.Count -gt 2) {
-    throw "At most two active PRs are allowed; found $($activeRows.Count)"
+# More than two active PRs are allowed only as a declared stack (parallel_window lists every one).
+if ($activeRows.Count -gt 2 -and $parallelIds.Count -lt $activeRows.Count) {
+    throw "At most two active PRs are allowed unless parallel_window declares the stack; found $($activeRows.Count)"
 }
 if ($activeRows.Count -gt 1) {
     $activeIds = @($activeRows.Id | Sort-Object)

@@ -7,6 +7,8 @@ def build_http_app():  # type annotation is inferred from FastAPI factory at thi
     container = build_container()
     return create_app(
         strategy_design=container.strategy_design,
+        strategy_authoring=container.strategy_authoring,
+        strategy_documents=container.strategy_documents,
         equity_workspace=container.equity_workspace,
         factor_research=container.factor_research,
         portfolio_design=container.portfolio_design,

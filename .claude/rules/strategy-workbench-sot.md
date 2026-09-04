@@ -13,9 +13,12 @@ paths:
 
 | 사실 | 유일한 owner | 나머지 레이어 |
 |---|---|---|
-| 원천 값·공개 시점·coverage | Equity DB view + `dataset_profile` | port로 조회 |
+| 원천 값·공개 시점·coverage | Equity DB view + `dataset_profile` | `EquityDataPort`와 `RawObservationPort` 두 포트로 조회하며, 같은 셀에 같은 값·공개일을 답하는 것이 어댑터 계약이다 |
 | Equity 연결 계약 | backend application outbound port | adapter가 구현 |
 | 팩터 정의·방향·단위·입력 요구 | backend Factor Registry | UI는 catalog 표시 |
+| 팩터 **값** | `FactorGraph` 평가 (`domain/factor`) | 계산자는 `application/portfolio_design/_service.py` 하나뿐, 어댑터는 원천 필드만 답한다 |
+| 팩터 값의 공개일 | 그 팩터 plan이 읽는 필드들의 `available_date` 최댓값 | 컴파일러 FUTURE_DATA 가드가 그대로 읽는다 |
+| 리밸런싱 시점의 previous weight | `compile_target_tape`의 프레임 fold | 포트의 `previous_weight`는 첫 프레임 시드로만 쓰인다 |
 | 전략 의미 | immutable, versioned `StrategySpec` | YAML/JSON source를 서버가 compile, Form/Graph는 read-only projection (legacy Quick/Advanced는 migration 기간 유지) |
 | 파라미터 공간 | `SearchSpec` | trial은 해소된 값만 참조 |
 | 주문·체결·포트폴리오 mutable state | Persistent Rust Engine | Python/API는 명령·조회 |
@@ -27,6 +30,7 @@ paths:
 | 저장된 authoring source 텍스트·`source_hash` | strategy revision envelope (`source`, `source_hash`) | 서버는 exact text를 그대로 보관, UI는 표시·편집 시작점으로만 사용 |
 | YAML 1.2 허용/거부 집합 | `backend/tests/fixtures/strategy_documents/yaml12/manifest.json` | backend codec test와 frontend `yaml` cross-runtime test가 같은 manifest를 실행 |
 | 실행 차단(blocking) 판정 | backend compile diagnostics의 error severity | frontend syntax marker는 advisory, 실행 가능 여부를 판단하지 않음 |
+| authoring 진단 코드 | `strategy.*`는 domain 코드 레지스트리, `structure.*`는 domain hydrate, codec 코드(`document.*`/`yaml.*`/`<format>.syntax`)는 `ports/outgoing/document_codec.py` | frontend는 코드 → 메시지·마커 매핑만, 코드를 새로 만들지 않는다 |
 | URL 선택 상태(view/path/date/security) | TanStack Router search (`validateSearch`) | widget은 읽기만, 기본값은 URL에 쓰지 않음 |
 
 ## 금지

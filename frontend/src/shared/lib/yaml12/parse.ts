@@ -138,6 +138,9 @@ type Budget = { nodes: number };
 /** Depth is a streamed scanner guard in the backend, so it precedes all deferred policies. */
 const rejectDepth = (node: Node | null, lines: LineIndex, depth = 0): void => {
   if (!node) return;
+  // The streamed guard counts collection-opening tokens only. Scalar depth is checked later by
+  // the ordered tree walk, after deferred anchor/tag/number scanner policies have won.
+  if (!isMap(node) && !isSeq(node)) return;
   if (depth > CODEC_LIMITS.maxDepth) {
     throw new Yaml12Rejected(
       "too_deep",
@@ -150,7 +153,7 @@ const rejectDepth = (node: Node | null, lines: LineIndex, depth = 0): void => {
       rejectDepth(pair.key, lines, depth + 1);
       rejectDepth(pair.value, lines, depth + 1);
     }
-  } else if (isSeq(node)) {
+  } else {
     for (const item of node.items as (Node | null)[]) {
       rejectDepth(item, lines, depth + 1);
     }

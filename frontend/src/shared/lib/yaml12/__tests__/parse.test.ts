@@ -184,6 +184,29 @@ describe("parseSource", () => {
     }
   });
 
+  it("matches scanner-versus-tree depth ordering at 31/32/33 collections", () => {
+    const value = (depth: number) =>
+      `a: ${"[".repeat(depth)}x${"]".repeat(depth)}\nb: &anchor 1\n`;
+    expect(parseSource(value(31), "yaml").diagnostics[0]?.code).toBe(
+      "yaml.anchor_or_alias",
+    );
+    expect(parseSource(value(32), "yaml").diagnostics[0]?.code).toBe(
+      "yaml.anchor_or_alias",
+    );
+    expect(parseSource(value(33), "yaml").diagnostics[0]?.code).toBe(
+      "yaml.too_deep",
+    );
+
+    const key = (depth: number) =>
+      `? ${"[".repeat(depth)}x${"]".repeat(depth)}\n: value\n`;
+    expect(parseSource(key(32), "yaml").diagnostics[0]?.code).toBe(
+      "yaml.non_string_key",
+    );
+    expect(parseSource(key(33), "yaml").diagnostics[0]?.code).toBe(
+      "yaml.too_deep",
+    );
+  });
+
   it("rejects a raw lone surrogate before applying the byte limit", () => {
     const source = `${"a".repeat(512 * 1024)}\ud800`;
     expect(parseSource(source, "yaml").diagnostics[0]?.code).toBe(

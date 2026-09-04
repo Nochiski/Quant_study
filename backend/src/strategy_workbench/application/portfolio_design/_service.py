@@ -9,10 +9,12 @@ weighted, direction-signed sum the portfolio compiler derives from them. Backtes
 same TargetTape, so preview and backtest cannot diverge. No adapter is allowed to invent factor
 values.
 
-PIT enforcement is owned here: a raw field published after its `as_of` is an adapter contract
-violation and raises `LookAheadViolationError` (fail-closed, loud). Each factor value carries the
-latest publication date among the fields its plan reads, so the portfolio compiler's FUTURE_DATA
-guard stays meaningful.
+PIT enforcement is owned here, and it covers *dated* values only: a raw field published after its
+`as_of` is an adapter contract violation and raises `LookAheadViolationError` (fail-closed, loud).
+Each factor value carries the latest publication date among the fields its plan reads, so the
+portfolio compiler's FUTURE_DATA guard stays meaningful. `universe_member` and `sector_id` have no
+publication date, so no guard here or downstream can catch a retroactive membership or sector
+change; the observation adapter owns their as_of vintage (D-006).
 """
 
 from __future__ import annotations
@@ -42,8 +44,7 @@ from strategy_workbench.domain.portfolio.facade.construction import (
 from strategy_workbench.domain.strategy.facade.specification import StrategySpec
 from strategy_workbench.domain.strategy.facade.validation import (
     StrategyValidation,
-    ValidationIssue,
-    ValidationKind,
+    semantic_issue,
     validate_strategy,
 )
 
@@ -214,13 +215,13 @@ def _group_field_ids(graph: FactorGraph) -> set[str]:
 def _reject_saved_references(spec: StrategySpec, plans: dict[str, FactorExecutionPlan]) -> None:
     # TODO(PLAN P5-03): evaluate referenced factors/subgraphs in topological order instead.
     issues = tuple(
-        ValidationIssue(
-            code="strategy.expression.reference_unsupported",
-            path=f"factors.factors.{index}.graph",
-            message="저장된 팩터/서브그래프 참조는 아직 preview/backtest에서 계산되지 않습니다: "
+        # The domain owns the code registry; minting an issue here goes through the same gate.
+        semantic_issue(
+            "strategy.expression.reference_unsupported",
+            f"factors.factors.{index}.graph",
+            "저장된 팩터/서브그래프 참조는 아직 preview/backtest에서 계산되지 않습니다: "
             f"factor_ids={plan.referenced_factor_ids} "
             f"subgraph_ids={plan.referenced_subgraph_ids}",
-            kind=ValidationKind.SEMANTIC,
         )
         for index, factor in enumerate(spec.factors.factors)
         for plan in (plans[factor.factor_id],)

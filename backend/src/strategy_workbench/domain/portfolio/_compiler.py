@@ -186,6 +186,14 @@ def _compile_frame(
 
 
 def _score_candidate(spec: StrategySpec, observation: PortfolioObservation) -> CandidateDecision:
+    """Score one candidate. FUTURE_DATA covers dated values only.
+
+    Fields and factor values carry an `available_date`, so a value published after `as_of` is
+    excluded below. `universe_member` and `sector_id` carry none: a retroactive reconstitution or
+    sector reclassification passes this function unchallenged and reaches selection and the sector
+    exposure constraint (D-006). Answering both with the as_of vintage is the observation
+    adapter's contract, not something this compiler can verify.
+    """
     reasons: list[ExclusionReason] = []
     if not observation.universe_member:
         reasons.append(ExclusionReason.NOT_IN_UNIVERSE)

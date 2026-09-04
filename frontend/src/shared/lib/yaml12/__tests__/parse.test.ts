@@ -152,6 +152,68 @@ describe("parseSource", () => {
     }
   });
 
+  it.each([
+    ['a: "\\ud800"\nb: &x 1\n', "yaml.anchor_or_alias"],
+    ['a: "\\ud800"\nb: 1_000\n', "yaml.non_core_number"],
+    ['? ["\\ud800"]\n: value\n', "yaml.non_string_key"],
+    ['a: "\\ud800"\na: 2\n', "yaml.syntax"],
+    ['a: 1\na: "\\ud800"\n', "yaml.duplicate_key"],
+    ["a: &x 1\nb: !custom 2\n", "yaml.anchor_or_alias"],
+    ["a: 9007199254740993\na: 2\n", "yaml.integer_out_of_range"],
+    ["a: .nan\na: 2\n", "yaml.non_finite_number"],
+  ])(
+    "matches backend rejection order for combined policies: %s",
+    (source, code) => {
+      expect(parseSource(source, "yaml").diagnostics[0]?.code).toBe(code);
+    },
+  );
+
+  it("applies the global depth guard before later tree-policy errors", () => {
+    const deep = `${"a: {".repeat(33)}value${"}".repeat(33)}\nb: 9007199254740993\n`;
+    expect(parseSource(deep, "yaml").diagnostics[0]?.code).toBe(
+      "yaml.too_deep",
+    );
+    const deepKey = `? ${"[".repeat(33)}x${"]".repeat(33)}\n: value\n`;
+    expect(parseSource(deepKey, "yaml").diagnostics[0]?.code).toBe(
+      "yaml.too_deep",
+    );
+    for (const stream of [`${deep}---\nb: 2\n`, `b: 2\n---\n${deep}`]) {
+      expect(parseSource(stream, "yaml").diagnostics[0]?.code).toBe(
+        "yaml.too_deep",
+      );
+    }
+  });
+
+  it("matches scanner-versus-tree depth ordering at 31/32/33 collections", () => {
+    const value = (depth: number) =>
+      `a: ${"[".repeat(depth)}x${"]".repeat(depth)}\nb: &anchor 1\n`;
+    expect(parseSource(value(31), "yaml").diagnostics[0]?.code).toBe(
+      "yaml.anchor_or_alias",
+    );
+    expect(parseSource(value(32), "yaml").diagnostics[0]?.code).toBe(
+      "yaml.anchor_or_alias",
+    );
+    expect(parseSource(value(33), "yaml").diagnostics[0]?.code).toBe(
+      "yaml.too_deep",
+    );
+
+    const key = (depth: number) =>
+      `? ${"[".repeat(depth)}x${"]".repeat(depth)}\n: value\n`;
+    expect(parseSource(key(32), "yaml").diagnostics[0]?.code).toBe(
+      "yaml.non_string_key",
+    );
+    expect(parseSource(key(33), "yaml").diagnostics[0]?.code).toBe(
+      "yaml.too_deep",
+    );
+  });
+
+  it("rejects a raw lone surrogate before applying the byte limit", () => {
+    const source = `${"a".repeat(512 * 1024)}\ud800`;
+    expect(parseSource(source, "yaml").diagnostics[0]?.code).toBe(
+      "yaml.syntax",
+    );
+  });
+
   it("rejects tabs used as YAML separation whitespace", () => {
     for (const text of ["a: \tv\n", "a:\n\tv: 1\n", "a: foo\tbar\n"]) {
       expect(parseSource(text, "yaml").diagnostics[0]?.code).toBe(

@@ -22,9 +22,8 @@ from typing import Any
 import pytest
 from ruamel.yaml import YAML
 from ruamel.yaml.composer import ComposerError
-from ruamel.yaml.constructor import DuplicateKeyError
 from ruamel.yaml.error import YAMLError
-from ruamel.yaml.nodes import ScalarNode
+from ruamel.yaml.nodes import MappingNode, ScalarNode, SequenceNode
 from ruamel.yaml.tokens import (
     AliasToken,
     AnchorToken,
@@ -109,12 +108,47 @@ def _check_tree(value: object, pointer: str) -> None:
             _check_tree(item, f"{pointer}/{index}")
 
 
+def _merge_surrogates(value: str, pointer: str) -> str:
+    try:
+        return value.encode("utf-16-le", "surrogatepass").decode("utf-16-le")
+    except UnicodeDecodeError as error:
+        raise Yaml12Rejected(
+            "syntax", f"string contains an unpaired surrogate escape — pointer={pointer!r}"
+        ) from error
+
+
+def _walk_node(node: object, loader: YAML, pointer: str) -> object:
+    if isinstance(node, MappingNode):
+        result: dict[str, object] = {}
+        for key_node, value_node in node.value:
+            key = loader.constructor.construct_object(key_node, deep=True)
+            if isinstance(key, str):
+                key = _merge_surrogates(key, pointer)
+            if not isinstance(key, str):
+                raise Yaml12Rejected("non_string_key", f"pointer={pointer} key={key!r}")
+            child = f"{pointer}/{key}"
+            if key in result:
+                raise Yaml12Rejected("duplicate_key", f"pointer={child} key={key!r}")
+            result[key] = _walk_node(value_node, loader, child)
+        return result
+    if isinstance(node, SequenceNode):
+        return [
+            _walk_node(item, loader, f"{pointer}/{index}")
+            for index, item in enumerate(node.value)
+        ]
+    if isinstance(node, ScalarNode):
+        value = loader.constructor.construct_object(node, deep=True)
+        value = _merge_surrogates(value, pointer) if isinstance(value, str) else value
+        _check_tree(value, pointer)
+        return value
+    raise Yaml12Rejected("syntax", f"pointer={pointer} node={type(node).__name__}")
+
+
 def load_yaml12_mapping(text: str) -> dict[str, Any]:
     _scan_policy(text)
+    loader = _yaml()
     try:
-        loaded = _yaml().load(text)
-    except DuplicateKeyError as error:
-        raise Yaml12Rejected("duplicate_key", str(error).splitlines()[0]) from error
+        root = loader.compose(text)
     except ComposerError as error:
         # 임시 문자열 매칭. P1-02 codec은 compose_all 문서 수로 판정한다.
         if "single document" in str(error):
@@ -122,6 +156,9 @@ def load_yaml12_mapping(text: str) -> dict[str, Any]:
         raise Yaml12Rejected("syntax", str(error).splitlines()[0]) from error
     except YAMLError as error:
         raise Yaml12Rejected("syntax", str(error).splitlines()[0]) from error
+    if root is None:
+        raise Yaml12Rejected("not_a_mapping", "root=None")
+    loaded = _walk_node(root, loader, "")
     if not isinstance(loaded, dict):
         raise Yaml12Rejected("not_a_mapping", f"root={type(loaded).__name__}")
     _check_tree(loaded, "")

@@ -389,6 +389,12 @@
       "file": "rejected/escaped_lone_surrogate_key.yaml",
       "expect": "reject",
       "reason": "syntax"
+    },
+    {
+      "name": "dup_key_with_escaped_lone_surrogate",
+      "file": "rejected/dup_key_with_escaped_lone_surrogate.yaml",
+      "expect": "reject",
+      "reason": "syntax"
     }
   ]
 }

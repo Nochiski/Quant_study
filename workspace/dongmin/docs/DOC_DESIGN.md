@@ -339,14 +339,14 @@ stage 공통 게이트 **G0~G9 는 이름·뜻 그대로** 돈다(`gates.py run_
 | D1 | 건수 등식 | 폐기형 | 테이블마다 stage 행수 = 프리패스가 낸 행수(parse_log 집계) · rcept_no 마다 `stg_doc_meta` ≥1행 | 등식 |
 | D2 | 파싱 계상 | 폐기형+격리형 | 프리패스 문서 수 = ok+lenient+failed+html · `failed/(ok+lenient+failed)` | 등식 · ≤ 0.5% (Y510: 0/505) |
 | D3 | 태그·엔티티 어휘 폐쇄 | 폐기형 | 규칙 4 치환 토큰 중 문서 빈도 ≥1% 어휘 = 0 · `n_ent_other` 어휘 중 문서 빈도 ≥1% = 0 | 0 (Y510: 최대 2건/505) |
-| D4 | 골든 픽스처 | 폐기형 | S26 26건의 (gen, byte_enc, doc_acode, formula_version·date, toc_n, has_correction_page, n_xbrl_groups·xbrl_aclass, n_form_groups, period_from/to) → `src/stage/fixtures/stg_doc_meta.json` | 전부 일치 |
+| D4 | 골든 픽스처 | 폐기형 | S26 26건의 (gen, byte_enc, doc_acode, formula_version, toc_n, has_correction_page, n_xbrl_groups, period_from/to) → `src/stage/fixtures/stg_doc_meta.json`(234건, `scripts/doc_fixtures_from_sample.py`). 정의 주의: `toc_n` 은 `COVER-TITLE` 을 포함해 §1.1 표 + 1(= 그 멤버의 `stg_doc_section` 행수), `n_xbrl_groups` 는 문서 전체(§1.1 표는 재무제표 절 안만 — 2013-B 8 vs 6) | 전부 일치 (09-04 서버 S26 대조: 26/26) |
 | D5 | 재현성 보강 | 폐기형 | G5 에 더해 입력 스냅샷 해시를 `_meta.json` 에 기록; `stg_doc_meta`·`parse_log` 는 입력 같으면 Δ=0, 다르면 Δ행수 = 신규 멤버 수 | 등식(두 테이블만) |
-| D6 | 정정 첫 장 | 폐기형+기록형 | 폐기형: `[기재정정] ∧ zip_ok ∧ parse_mode∈{ok,lenient} ∧ main 존재` 인 문서의 `page_found` 위반 0 (C340: 339/339) · 기록형: `filed_date_status` 분포·해석률(C340 291/336) → baseline | 위반 0 · 기록 |
+| D6 | 정정 첫 장 | 기록형 (폐기형 항은 equity E-G6a) | stage 는 `member_role=main ∧ parse_mode∈{ok,lenient}` 문서의 첫 장 보유 수·`stg_doc_correction` 행수·`filed_date_status=parsed` 수를 `doc_checks` 로 기록한다. "`[기재정정]` 인데 첫 장 없음 = 0" 은 접두가 원장 `report_nm` 에만 있어 stage 문서 표만으로는 판정할 수 없으므로 equity 가 `stg_disclosure` 를 붙여 폐기형으로 판정(§8.1 E-G6a, C340: 339/339) | 기록 (해석률 기대 ≥ 291/336) |
 | D8 | XBRL 존재율 | 기록형 | `member_role=main` 사업보고서 중 `n_xbrl_groups ≥ 4` 비율, 연도·시장별 | 기록 (Y1676 사업보고서: 별도 0.76~0.96 전 연도, 연결 0.60~0.78 — §1.13) |
 | D9 | 재무 교차(P2) | 기록형→폐기형 | 정정 없는 보고서(원장 `rm` 에 `정` 없음)·2015~·`account_norm` 이 양쪽에 있는 행의 `value_krw = stg_fin.thstrm_amount` 비율. 불일치 행은 격리하지 않고(API 쪽이 restated 일 수 있음) 비율만 | 기록 → 임계 승인 후 폐기형(기대 100%) · 2010~2014 `skip(no_stg_fin)` |
 | D10 | 텍스트 등식 | 폐기형 | 문서마다 §1.12 등식(lenient 는 공백 정규화 후) | 위반 0 (Y510: 505/505) |
 | D11 | 표 격자(P2·P3) | 격리형 | 전개 후 모든 행 폭 = 헤더 폭 · 값 셀 span 없음 | 위반 행 격리, 비율 기록 → baseline |
-| D12 | 어휘 커버리지 | 기록형→폐기형 | 연도별 미등록 `ACLASS` 비율 · 미등록 `ACODE` 셀 비율 · `section_kind=NULL` 비율. 행은 원문 보존(격리 없음) | 기록 → 임계 승인 후 폐기형 (ACLASS 111종 전수 사전화 목표) |
+| D12 | 어휘 커버리지 | 기록형→폐기형 | 연도별 미등록 `ACLASS` 비율 · 미등록 `ACODE` 셀 비율 · `section_kind=NULL` 비율. 행은 원문 보존(격리 없음). P1 은 `doc_checks` 가 파싱 ok 멤버 중 미등록 태그 보유·lenient 수만 기록, ACLASS·ACODE 비율은 P2·P3 | 기록 → 임계 승인 후 폐기형 (ACLASS 111종 전수 사전화 목표) |
 | D13 | 교차 제출 삼각검증(P2) | 기록형→폐기형 | 쌍: 사업보고서 t(FY) 의 `period_slot=2` 값 = 같은 회사·`scope`·`stmt`·`account_norm` 의 직전 사업보고서 t−1(FY−1) `period_slot=1` 값; 분·반기는 같은 `sub_label` 끼리 전년 동기 보고서와. 정정 판정 = 양쪽 문서의 원장 `rm` 에 `정` 없음. 분모 = `account_norm` 이 양쪽에 있는 행(개명 계정은 분모 밖, 비율 기록) | 기록 → 100% 기대. 불일치 = 파싱 오류 또는 정정 신호 |
 | D14 | 서식표 교차(P3) | 기록형→폐기형 | §3.6 매핑별 API 보조원장 일치율(2015~) | 기록 → baseline |
 

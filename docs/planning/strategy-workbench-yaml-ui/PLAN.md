@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: IN_PROGRESS
+project_status: SELF_CHECK
 current_phase: P4
 current_pr: P4-03
 active_prs: [P4-03]
 parallel_window: [P4-03]
-last_updated: 2026-09-05T02:03:27+09:00
+last_updated: 2026-09-05T02:17:34+09:00
 planned_prs: 47
 merged_prs: 32
 approved_prs: 32
@@ -22,13 +22,13 @@ progress_percent: 68
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_PROGRESS` |
+| Project status | `SELF_CHECK` |
 | Current phase | `P4` |
 | Current/next PR | `P4-03` |
 | Active PR | `P4-03` |
 | Progress | `32 / 47 merged (68%)` |
 | Approved | `32 / 47` |
-| Aggregated at | `2026-09-05 02:03 KST` |
+| Aggregated at | `2026-09-05 02:17 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -76,7 +76,7 @@ progress_percent: 68
 | P1.5 | Backtest Correctness Gate | 5 | 5 | `MERGED` |
 | P2 | App Shell and visual foundation | 4 | 4 | `MERGED` |
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
-| P4 | Outline, Contract, Projections | 8 | 2 | `IN_PROGRESS` |
+| P4 | Outline, Contract, Projections | 8 | 2 | `SELF_CHECK` |
 | P5 | Truthful Trace UI | 3 | 0 | `WAITING` |
 | P6 | Professional release and migration | 6 | 0 | `WAITING` |
 | **Total** |  | **47** | **32** | **68%** |
@@ -86,16 +86,16 @@ progress_percent: 68
 
 | 항목 | 값 |
 |---|---|
-| PR | `P4-03` Problems panel, filter, editor jump — IN_PROGRESS |
+| PR | `P4-03` Problems panel, filter, editor jump — SELF_CHECK |
 | Intent | backend compile diagnostics 배열을 단일 SoT로 유지하고 frontend는 exact dedupe·filter·표시 projection과 editor navigation만 소유한다 |
 | Acceptance | syntax/structural/semantic/capability filter, error/warning 분리, problem 선택 시 editor jump, pointer/node ID 복사, 동일 diagnostic dedupe |
 | Non-goals | 진단 생성·우선순위 재판정, execution plan(P4-04), backend contract 변경, source mutation |
 | Branch/worktree | `feat/p4-03-problems-panel` (`Quant_study-p4-03`) |
 | Base SHA | `3284fe0` (P4-02 merge main) |
-| Head SHA | 구현 중 |
-| Diff stat | 구현 중 |
-| Focused tests | 구현 후 기록 |
-| Full gate | 구현 후 기록 |
+| Head SHA | `454282b` (implementation commit; self-check 진행) |
+| Diff stat | main 대비 8 files, +797/−81 (PLAN 1, projection·UI·CSS·i18n·tests 7) |
+| Focused tests | problem projection·panel·compile navigation 16 passed |
+| Full gate | frontend typecheck·lint·vitest 268·build 통과, editor chunk gzip 136.53 kB, `git diff --check` 통과 |
 
 ---
 
@@ -198,7 +198,7 @@ Phase exit:
 |---|---|---|---|---|---|
 | [x] | `P4-01` | Parameters를 포함한 Strategy Outline과 cursor 연동 | P3-03 | `MERGED` | [#52](https://github.com/Nochiski/Quant_study/pull/52) · `review_p4_01` APPROVE |
 | [x] | `P4-02` | Backend metadata 기반 Contract Inspector | P3-03, P1-05 | `MERGED` | [#53](https://github.com/Nochiski/Quant_study/pull/53) · `review_p4_02` APPROVE |
-| [ ] | `P4-03` | Problems panel, filter, editor jump | P3-04 | `IN_PROGRESS` | — |
+| [ ] | `P4-03` | Problems panel, filter, editor jump | P3-04 | `SELF_CHECK` | — |
 | [ ] | `P4-04` | Backend Execution Plan과 source/graph 연동 | P3-05 | `WAITING` | — |
 | [ ] | `P4-05` | Canonical node snippet insertion | P3-02, P1-05 | `WAITING` | — |
 | [ ] | `P4-06` | Read-only canonical JSON과 Form projection | P3-05 | `WAITING` | — |
@@ -287,6 +287,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
+| P4-03 | problem projection·panel·compile navigation 16 passed | frontend typecheck·lint·vitest 268·build | generated API 변경 없음 | 4종 toggle filter·error/warning section·정확한 dedupe·jump·pointer/node ID copy·stale/copy failure 접근성 검증 | 로컬 통과, 공개 PR 전 | 2026-09-05 |
 | P4-02 | Contract Inspector·schema assist·schema navigator·outline·IDE 56 passed | frontend typecheck·lint·vitest 262·build | generated API 변경 없음 | missing/unknown FactorNode·Parameter union·상이 requiredness와 이전 P1 4건 회귀를 독립 reviewer 재확인 | [#53](https://github.com/Nochiski/Quant_study/pull/53) latest backend/frontend 중복 CI 4개 pass, MERGED (`3284fe0`) | 2026-09-05 |
 | P4-01 | editor selection·outline projection/navigation·router·document route 38 passed | frontend typecheck·lint·vitest 232·build | 해당 없음 | runtime schema/source map/URL owner, exact sourceVersion·route selection 귀속, RFC 6901 검증, visible roving tabindex·ARIA ownership | [#52](https://github.com/Nochiski/Quant_study/pull/52) latest duplicate backend/frontend 4 pass, MERGED | 2026-09-05 |
 | P3-07 | backend conflict contract 16, frontend document routes 14 passed | backend ruff·pyright; frontend typecheck·lint·vitest 221·build | OpenAPI/generated SDK deterministic | source 보존, delayed 409 폐기, 서버본 실제 이동, copy/diff 실패, kind i18n 검토 | [#48](https://github.com/Nochiski/Quant_study/pull/48) 수정 후 backend/frontend 중복 실행 4개 pass, MERGED | 2026-09-04 |
@@ -318,6 +319,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | P4-03 구현을 `454282b`에 고정: backend/parser diagnostic을 재분류하지 않는 exact-dedupe projection, 4종 filter, error/warning section, editor jump, JSON Pointer/node ID copy와 stale·clipboard failure 접근성을 구현. focused 16·전체 268·typecheck·lint·build·diff-check 통과 후 SELF_CHECK로 전환 | diagnostic SoT·projection/navigation 책임분리·P4-03 acceptance |
 | 2026-09-05 KST | Codex | #53 P4-02를 독립 reviewer 승인과 latest backend/frontend CI 4개 통과 후 main에 병합(`3284fe0`). 최신 main에서 P4-03 전용 worktree를 만들고 Problems panel 구현을 시작 | 13.6 merge gate·진단 SoT/표시 projection 책임분리 |
 | 2026-09-05 KST | Codex | `review_p4_02` 4차 재검토에서 shared requiredness와 이전 P1 4건을 모두 실제 backend fixture·synthetic mismatch·Inspector/hover/completion 경로로 재확인해 APPROVE(P0 0/P1 0). focused 56·전체 262·typecheck·lint·build·PLAN·diff-check와 code HEAD 원격 CI 4개 통과를 확인하고 P4-02를 APPROVED로 전환 | 독립 reviewer 승인·SoT/책임분리·13.6 merge gate |
 | 2026-09-05 KST | Codex | 3차 리뷰의 shared requiredness P1을 `850bd91`에서 수정: navigator가 property schema와 별도로 모든 applicable branch의 required 합의를 `propertyRequired`에 보존하고, Contract projection은 branch-specific row가 없을 때 이 backend schema 값을 사용. FactorNode missing/unknown kind의 `/node_id`·`/kind`, Parameter union 공통 required 필드, branch별 required 불일치 synthetic schema와 hover를 회귀 테스트로 고정해 focused 56·전체 262·typecheck·lint·build 통과 후 동일 reviewer 4차 검토로 전환 | backend schema required SoT·공통/상이 required 분리·동일 reviewer 재검토 |

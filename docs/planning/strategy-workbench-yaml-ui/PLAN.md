@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: IN_REVIEW
+project_status: CHANGES_REQUESTED
 current_phase: P4
 current_pr: P4-04
 active_prs: [P4-04]
 parallel_window: [P4-04]
-last_updated: 2026-09-05T04:26:02+09:00
+last_updated: 2026-09-05T04:30:01+09:00
 planned_prs: 49
 merged_prs: 34
 approved_prs: 34
@@ -22,13 +22,13 @@ progress_percent: 69
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_REVIEW` |
+| Project status | `CHANGES_REQUESTED` |
 | Current phase | `P4` |
 | Current/next PR | `P4-04` |
 | Active PR | `P4-04` |
 | Progress | `34 / 49 merged (69%)` |
 | Approved | `34 / 49` |
-| Aggregated at | `2026-09-05 04:26 KST` |
+| Aggregated at | `2026-09-05 04:30 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -76,7 +76,7 @@ progress_percent: 69
 | P1.5 | Backtest Correctness Gate | 5 | 5 | `MERGED` |
 | P2 | App Shell and visual foundation | 4 | 4 | `MERGED` |
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
-| P4 | Outline, Contract, Projections | 9 | 3 | `IN_REVIEW` |
+| P4 | Outline, Contract, Projections | 9 | 3 | `CHANGES_REQUESTED` |
 | P5 | Truthful Trace UI | 3 | 0 | `WAITING` |
 | P6 | Professional release and migration | 7 | 1 | `WAITING` |
 | **Total** |  | **49** | **34** | **69%** |
@@ -86,7 +86,7 @@ progress_percent: 69
 
 | 항목 | 값 |
 |---|---|
-| PR | `P4-04` Backend Execution Plan query orchestration IN_REVIEW |
+| PR | `P4-04` Backend Execution Plan query orchestration CHANGES_REQUESTED |
 | Intent | current valid StrategySpec만 backend factor explain API로 보내고 schema/contract/catalog version과 응답 registry를 fail-closed로 묶는 query owner를 만든다 |
 | Acceptance | stale/invalid source 요청 금지; backend-owned field/group metadata resolution; 전체 factor graph에 parameter/factor ID 전달; AbortSignal·query identity; compiled/runtime schema와 request/response dataset·registry drift 차단; factor/node ↔ exact JSON Pointer mapping |
 | Non-goals | plan 시각 UI·page wiring(P4-09), graph 직접 편집, factor 값 계산·preview/trace, frontend plan/type/unit 재계산 |
@@ -199,7 +199,7 @@ Phase exit:
 | [x] | `P4-01` | Parameters를 포함한 Strategy Outline과 cursor 연동 | P3-03 | `MERGED` | [#52](https://github.com/Nochiski/Quant_study/pull/52) · `review_p4_01` APPROVE |
 | [x] | `P4-02` | Backend metadata 기반 Contract Inspector | P3-03, P1-05 | `MERGED` | [#53](https://github.com/Nochiski/Quant_study/pull/53) · `review_p4_02` APPROVE |
 | [x] | `P4-03` | Problems panel, filter, editor jump | P3-04 | `MERGED` | [#55](https://github.com/Nochiski/Quant_study/pull/55) · `review_p4_03` APPROVE |
-| [ ] | `P4-04` | Backend Execution Plan query·version gate·source mapping model | P3-05, P4-02 | `IN_REVIEW` | [#57](https://github.com/Nochiski/Quant_study/pull/57) · `review_p4_04` 3차 재검토 대기 |
+| [ ] | `P4-04` | Backend Execution Plan query·version gate·source mapping model | P3-05, P4-02 | `CHANGES_REQUESTED` | [#57](https://github.com/Nochiski/Quant_study/pull/57) · `review_p4_04` FactorSignal 비수치 output P1 수정 중 |
 | [ ] | `P4-05` | Canonical node snippet insertion | P3-02, P1-05 | `WAITING` | — |
 | [ ] | `P4-06` | Read-only canonical JSON과 Form projection | P3-05 | `WAITING` | — |
 | [ ] | `P4-07` | Read-only FactorGraph DAG projection | P4-01, P3-05 | `WAITING` | — |
@@ -326,6 +326,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | `review_p4_04` 3차 검토에서 이전 P1은 모두 해소됐으나 category/boolean graph output을 FactorSignal 최종 출력으로 사용하면 evaluator가 값을 `None`으로 바꾼 뒤 portfolio/backtest가 성공하는 P1을 재현. 범용 explain의 typed DAG 허용은 유지하고 실행 경계에서 numeric output만 owner 등록 semantic code로 차단하도록 CHANGES_REQUESTED 전환 | generic graph 설명과 executable FactorSignal 책임분리·의미 없는 성공 backtest fail-closed |
 | 2026-09-05 KST | Codex | P4-04 잔여 P1을 `a2fa034`에서 수정: PortfolioDesignService가 FactorResearch와 동일한 FactorMetadataPort를 명시적 dependency로 받아 모든 graph plan을 같은 snapshot/field contract로 compile하고 raw snapshot 불일치를 fail-closed. `classification.sector`를 공개 equity catalog·raw loader·factor metadata가 공유하는 category 선언으로 통합했으며 explain/portfolio plan exact parity, 숫자 group의 동일 오류 코드, sector group preview/backtest 성공, snapshot drift의 portfolio/backtest 차단을 회귀 테스트로 고정. backend 900·frontend 277 전체 gate와 generated deterministic 확인 후 동일 reviewer 3차 재검토로 전환 | metadata/catalog/loader 단일 SoT·application facade dependency 명시·실행 경로 책임분리·동일 reviewer re-review |
 | 2026-09-05 KST | Codex | `review_p4_04` 2차 검토에서 기존 P1 3건 중 2건 해소를 확인했으나 explain과 실제 portfolio/backtest가 서로 다른 field metadata로 plan을 compile해 unit/hash·group 승인 결과가 갈리는 P1 1건을 재현. CHANGES_REQUESTED로 되돌리고 동일 FactorMetadataSnapshot을 실행 compiler·raw loader까지 연결 예정 | Execution Plan과 실제 실행 path parity·truthful pipeline SoT |
 | 2026-09-05 KST | Codex | P4-04 P1 3건을 `f970dc6`에서 수정: backend FactorMetadataPort가 field/group contract와 snapshot을 원자적으로 resolve하고 group key를 plan required fields의 domain SoT에 포함; explain plan-null에도 registry/snapshot provenance 제공; frontend compiled/runtime schema 및 모든 response provenance를 차단. backend 897·frontend 277 전체 gate와 generated clean 후 같은 `review_p4_04` 재검토로 전환 | frontend 타입 추론 금지·metadata/provenance backend SoT·동일 reviewer re-review |

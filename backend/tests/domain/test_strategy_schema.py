@@ -271,3 +271,68 @@ def test_contract_rows_are_unique_per_pointer_and_branch() -> None:
     kinds = {row.branch for row in rows if row.pointer == "/factors/factors/*/graph/nodes/*/kind"}
     assert kinds == set(EXPRESSION_NODE_KINDS)
     assert {row.branch for row in rows if row.pointer == "/risk/max_name_weight"} == {None}
+
+
+def _identifier_markers(schema: dict[str, Any]) -> tuple[dict[str, str], dict[str, str], list[str]]:
+    """(x-catalog by path, x-reference by path, unmarked `*_id` string properties)."""
+    catalogs: dict[str, str] = {}
+    references: dict[str, str] = {}
+    unmarked: list[str] = []
+
+    def walk(node: dict[str, Any], path: str) -> None:
+        for name, prop in node.get("properties", {}).items():
+            here = f"{path}/{name}"
+            if "x-catalog" in prop:
+                catalogs[here] = prop["x-catalog"]
+            elif "x-reference" in prop:
+                references[here] = prop["x-reference"]
+            elif name.endswith("_id"):
+                unmarked.append(here)
+
+    walk(schema, "")
+    for name, definition in schema["$defs"].items():
+        walk(definition, f"#/$defs/{name}")
+    return catalogs, references, unmarked
+
+
+def test_identifier_fields_declare_their_catalog_or_reference_namespace() -> None:
+    """P3-03: an editor completes ids from the marker, never from a hand-written list."""
+    catalogs, references, unmarked = _identifier_markers(strategy_document_schema())
+    assert catalogs == {
+        "#/$defs/DataStep/universe_id": "universe",
+        "#/$defs/EligibilityRule/field_id": "equity-field",
+        "#/$defs/FieldNode/field_id": "equity-field",
+        "#/$defs/GroupNode/group_field_id": "equity-field",
+        "#/$defs/SavedFactorNode/factor_id": "factor",
+        "#/$defs/SavedSubgraphNode/subgraph_id": "subgraph",
+        "#/$defs/SignalStep/regime_field_id": "equity-field",
+        "#/$defs/PortfolioStep/liquidity_field_id": "equity-field",
+        "#/$defs/RiskStep/risk_field_id": "equity-field",
+    }
+    assert set(references.values()) == {"node", "parameter"}
+    assert all(p.endswith("_node_id") for p, r in references.items() if r == "node")
+    assert references["#/$defs/ParameterNode/parameter_id"] == "parameter"
+    # The only unmarked ids are definitions (a node's own id, a user-named factor), not lookups.
+    assert all(p.endswith("/node_id") or p == "#/$defs/FactorSignal/factor_id" for p in unmarked), (
+        unmarked
+    )
+
+
+def test_field_contracts_carry_the_identifier_markers() -> None:
+    contracts = {c.pointer: c for c in strategy_field_contracts()}
+    assert contracts["/eligibility/rules/*/field_id"].catalog == "equity-field"
+    assert contracts["/signal/regime_field_id"].catalog == "equity-field"  # nullable keeps it
+    assert contracts["/factors/factors/*/graph/nodes/*/factor_id"].catalog == "factor"
+    assert contracts["/factors/factors/*/graph/nodes/*/input_node_id"].reference == "node"
+    assert contracts["/factors/factors/*/graph/nodes/*/node_id"].catalog is None
+    assert contracts["/factors/factors/*/graph/nodes/*/node_id"].reference is None
+    assert contracts["/risk/max_name_weight"].catalog is None
+
+
+def test_runtime_schema_fixture_is_current() -> None:
+    """The frontend navigates the fixture copy in its own tests; it must equal the live schema."""
+    fixture = json.loads((FIXTURES / "runtime-schema.json").read_text(encoding="utf-8"))
+    assert fixture == strategy_document_schema(), (
+        "runtime-schema.json is stale; regenerate with: "
+        "uv run python tools/export_runtime_schema.py"
+    )

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from enum import StrEnum
 from typing import Literal, TypeAlias
 
 from strategy_workbench.domain.factor.facade.expression import FactorGraph
+
+# Editor metadata for identifier fields (see domain.factor._nodes for the node-side markers).
+CATALOG_UNIVERSE = {"catalog": "universe"}
+CATALOG_EQUITY_FIELD = {"catalog": "equity-field"}
 
 
 class Market(StrEnum):
@@ -78,13 +82,13 @@ class DataStep:
     market: Market
     start: date
     end: date
-    universe_id: str
+    universe_id: str = field(metadata=CATALOG_UNIVERSE)
     frequency: DataFrequency = DataFrequency.DAILY
 
 
 @dataclass(frozen=True)
 class EligibilityRule:
-    field_id: str
+    field_id: str = field(metadata=CATALOG_EQUITY_FIELD)
     operator: ComparisonOperator
     value: float
 
@@ -113,7 +117,7 @@ class SignalStep:
     method: SignalMethod = SignalMethod.WEIGHTED_SUM
     entry_percentile: float = 0.1
     score_threshold: float | None = None
-    regime_field_id: str | None = None
+    regime_field_id: str | None = field(default=None, metadata=CATALOG_EQUITY_FIELD)
     regime_minimum: float | None = None
 
 
@@ -129,7 +133,7 @@ class PortfolioStep:
     rebalance_every_n_sessions: int = 21
     turnover_buffer_count: int = 0
     minimum_trade_weight: float = 0.0
-    liquidity_field_id: str | None = None
+    liquidity_field_id: str | None = field(default=None, metadata=CATALOG_EQUITY_FIELD)
     minimum_liquidity: float | None = None
 
 
@@ -140,7 +144,7 @@ class RiskStep:
     max_name_weight: float = 0.1
     max_sector_weight: float = 0.3
     sector_neutral: bool = False
-    risk_field_id: str | None = None
+    risk_field_id: str | None = field(default=None, metadata=CATALOG_EQUITY_FIELD)
 
 
 @dataclass(frozen=True)

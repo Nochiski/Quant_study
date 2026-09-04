@@ -2112,6 +2112,17 @@
             ],
             "title": "Branch"
           },
+          "catalog": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalog"
+          },
           "const": {
             "anyOf": [
               {
@@ -2221,6 +2232,17 @@
           "pointer": {
             "title": "Pointer",
             "type": "string"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference"
           },
           "required": {
             "title": "Required",

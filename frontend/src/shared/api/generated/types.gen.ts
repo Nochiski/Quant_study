@@ -1271,6 +1271,10 @@ export type FieldContract = {
    */
   branch?: string | null;
   /**
+   * Catalog
+   */
+  catalog?: string | null;
+  /**
    * Const
    */
   const?: string | null;
@@ -1326,6 +1330,10 @@ export type FieldContract = {
    * Pointer
    */
   pointer: string;
+  /**
+   * Reference
+   */
+  reference?: string | null;
   /**
    * Required
    */

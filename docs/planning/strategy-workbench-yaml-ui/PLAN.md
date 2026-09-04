@@ -6,7 +6,7 @@ current_phase: P6
 current_pr: P6-07
 active_prs: [P6-07]
 parallel_window: [P6-07]
-last_updated: 2026-09-05T02:47:14+09:00
+last_updated: 2026-09-05T02:58:38+09:00
 planned_prs: 48
 merged_prs: 33
 approved_prs: 33
@@ -28,7 +28,7 @@ progress_percent: 69
 | Active PR | `P6-07` |
 | Progress | `33 / 48 merged (69%)` |
 | Approved | `33 / 48` |
-| Aggregated at | `2026-09-05 02:47 KST` |
+| Aggregated at | `2026-09-05 02:58 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -92,10 +92,10 @@ progress_percent: 69
 | Non-goals | production process manager, Docker, port 자동 할당, frontend/backend 동시 실행 명령, runtime dependency 재정의 |
 | Branch/worktree | `feat/p6-07-dev-entrypoints` (`Quant_study-p6-07`) |
 | Base SHA | `ebc16c2` (P4-03 merge main) |
-| Head SHA | `1648051` (code diff freeze; 이후 PLAN 상태 커밋만 허용) |
-| Diff stat | main 대비 15 files, +299/−38 (root/backend delegates·tests·lock·docs·PLAN/WORKFLOW) |
-| Focused tests | root delegate 4 + backend entrypoint/architecture 8 passed; root/backend help·HTTP smoke passed |
-| Full gate | backend pytest 896·ruff·pyright, frontend typecheck·lint·vitest 270·build, root ruff·pyright·lock·diff-check 통과 |
+| Head SHA | `8689075` (review P1 수정 code diff freeze; 이후 PLAN 상태 커밋만 허용) |
+| Diff stat | main 대비 17 files, +415/−38 (root/backend delegates·tests·CI·lock·docs·PLAN/WORKFLOW) |
+| Focused tests | root delegate 4 + 실제 HTTP smoke 1 + backend entrypoint/architecture 8 passed; root/backend help·수동 HTTP smoke passed |
+| Full gate | backend pytest 896·ruff·pyright, frontend typecheck·lint·vitest 270·build, root test 5·ruff·pyright·lock·diff-check 통과; root frontend/backend smoke를 CI에 연결 |
 
 ---
 
@@ -235,7 +235,7 @@ Phase exit:
 | [ ] | `P6-04` | Large spec 성능·접근성·i18n과 soft dark theme | P3-05, P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P5-03 | `WAITING` | — |
 | [ ] | `P6-05` | Playwright/visual regression infrastructure와 CI | P2-03, P3-05, P6-04 | `WAITING` | — |
 | [ ] | `P6-06` | 전체 E2E, migration gate, 조건부 legacy cleanup | P6-01, P6-02, P6-03, P6-04, P6-05 | `WAITING` | — |
-| [ ] | `P6-07` | Root frontend/backend development entrypoints | P0-02, P0-03 | `IN_REVIEW` | [#56](https://github.com/Nochiski/Quant_study/pull/56) · `review_p6_07` 검토 중 |
+| [ ] | `P6-07` | Root frontend/backend development entrypoints | P0-02, P0-03 | `IN_REVIEW` | [#56](https://github.com/Nochiski/Quant_study/pull/56) · `review_p6_07` P1 1건 수정 후 재검토 중 |
 
 Phase exit:
 
@@ -251,7 +251,7 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
-| P6-07 | `review_p6_07` | `ebc16c2` | `1648051` | PENDING | — | 독립 검토 중 | — |
+| P6-07 | `review_p6_07` | `ebc16c2` | `8689075` | REQUEST_CHANGES (CI 미연결 P1 1건 수정 후 재검토 중) | 1 (수정·재검토 중) | latest Linux CI에서 root console packaging·nested uv·실제 HTTP/종료를 확인해야 함 | 2026-09-05 |
 | P4-03 | `review_p4_03` | `3284fe0` | `752ed60` | APPROVE (initial P2 2건 선제 보강 후 동일 reviewer 재승인) | 0 | blocking code risk 없음 | 2026-09-05 |
 | P4-02 | `review_p4_02` | `3d7b996` | `850bd91` | APPROVE (REQUEST_CHANGES 3회, P1 누적 5건 수정 후 동일 reviewer 4차 승인) | 5 (해소) | catalog 첫 100건 선로딩은 P6 후속; union schema key order 차이는 보수적 branch-dependent로 fail-closed | 2026-09-05 |
 | P4-01 | `review_p4_01` | `30baf41` | `be8c183` | APPROVE (REQUEST_CHANGES 2회, P1 누적 6건 수정 후 동일 reviewer 3차 승인) | 6 (해소) | route identity 전환 1-frame·대형 spec 성능·초기 invalid 빈 outline은 비차단 후속 위험 | 2026-09-05 |
@@ -290,7 +290,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
-| P6-07 | root delegate 4 + backend entrypoint/architecture 8 passed | backend pytest 896·ruff·pyright; frontend typecheck·lint·vitest 270·build; root ruff·pyright·locks | generated API 변경 없음 | root `npm run dev` HTTP 200, root `uv run server --port 42810` health 200·reload·Ctrl+C, backend/root help 동일 | [#56](https://github.com/Nochiski/Quant_study/pull/56) 원격 CI·독립 review 대기 | 2026-09-05 |
+| P6-07 | root delegate 4 + 실제 server HTTP smoke 1 + backend entrypoint/architecture 8 passed | backend pytest 896·ruff·pyright; frontend typecheck·lint·vitest 270·build; root test 5·ruff·pyright·locks | generated API 변경 없음 | root `npm run dev` HTTP 200, root `uv run server --port 42810` health 200·reload·Ctrl+C, backend/root help 동일 | [#56](https://github.com/Nochiski/Quant_study/pull/56) 초기 CI 4 pass; `8689075`에서 root frontend/backend 계약 CI 추가 후 latest CI·동일 reviewer 재검토 대기 | 2026-09-05 |
 | P4-03 | problem projection·panel·compile navigation 18 passed | frontend typecheck·lint·vitest 270·build | generated API 변경 없음 | 4종 toggle filter·error/warning section·정확한 dedupe·jump·빈 root pointer·pointer/node ID copy·stale/copy race/failure 접근성 검증 | [#55](https://github.com/Nochiski/Quant_study/pull/55) latest backend/frontend 중복 CI 4개 pass, MERGED (`ebc16c2`) | 2026-09-05 |
 | P4-02 | Contract Inspector·schema assist·schema navigator·outline·IDE 56 passed | frontend typecheck·lint·vitest 262·build | generated API 변경 없음 | missing/unknown FactorNode·Parameter union·상이 requiredness와 이전 P1 4건 회귀를 독립 reviewer 재확인 | [#53](https://github.com/Nochiski/Quant_study/pull/53) latest backend/frontend 중복 CI 4개 pass, MERGED (`3284fe0`) | 2026-09-05 |
 | P4-01 | editor selection·outline projection/navigation·router·document route 38 passed | frontend typecheck·lint·vitest 232·build | 해당 없음 | runtime schema/source map/URL owner, exact sourceVersion·route selection 귀속, RFC 6901 검증, visible roving tabindex·ARIA ownership | [#52](https://github.com/Nochiski/Quant_study/pull/52) latest duplicate backend/frontend 4 pass, MERGED | 2026-09-05 |
@@ -323,6 +323,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | `review_p6_07`이 root lock·delegate test가 CI에서 수집되지 않고 실제 HTTP smoke가 자동화되지 않은 P1 1건을 확인. `8689075`에서 Linux CI에 root lock·unit·ruff·pyright와 실제 `uv run server` health 200 process smoke를 연결하고 root `npm run dev` Vite HTTP smoke도 함께 고정해 동일 reviewer 재검토로 전환 | 실제 명령 계약·cross-platform packaging 회귀 차단·동일 reviewer gate |
 | 2026-09-05 KST | Codex | P6-07 code diff를 `1648051`로 freeze하고 #56 공개. PLAN-only 상태 커밋 외 변경을 막고 `review_p6_07`에 root/backend entrypoint 계약, cross-platform process forwarding, packaging·lock·SoT/책임분리 독립 검토를 배정 | 13.2~13.4·PR별 독립 reviewer gate |
 | 2026-09-05 KST | Codex | P6-07 구현을 `1648051`에 고정: root npm은 frontend Vite에만 위임하고 root uv wrapper는 backend의 단일 server entrypoint로 args/stdin/out/exit를 전달. Uvicorn target·host·port·reload는 backend bootstrap만 소유. root/backend 명령 help, 실제 Vite HTTP 200, Uvicorn health 200·reload·Ctrl+C와 backend 896·frontend 270 전체 회귀를 확인해 SELF_CHECK로 전환 | Vite/Uvicorn 설정 SoT·root 경로 위임 책임·실제 process smoke |
 | 2026-09-05 KST | Codex | #55 P4-03을 독립 reviewer 최종 승인과 latest backend/frontend CI 4개 통과 후 main에 병합(`ebc16c2`). 사용자 요청의 root `npm run dev`·`uv run server`를 SoT 중복 없이 제공하기 위해 P6-07을 추가하고 전용 worktree에서 시작 | 13.6 merge gate·사용자 추가 범위·개발 진입점 책임분리 |

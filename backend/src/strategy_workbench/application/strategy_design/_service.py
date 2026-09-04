@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from strategy_workbench.domain.strategy.facade.explanation import (
     StrategyExplanation,
@@ -30,7 +30,12 @@ from strategy_workbench.domain.strategy.facade.validation import (
     validate_strategy,
 )
 
-from .ports.outgoing.strategy_repository import StrategyRepositoryPort
+from .ports.outgoing.strategy_repository import (
+    RevisionOrigin,
+    RevisionProvenance,
+    StrategyRepositoryPort,
+    StrategyRevisionRecord,
+)
 
 
 @dataclass(frozen=True)
@@ -52,10 +57,12 @@ class StrategyDesignService:
         *,
         new_id: Callable[[], str],
         today: Callable[[], date] = date.today,
+        now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._repository = repository
         self._new_id = new_id
         self._today = today
+        self._now = now
 
     def template(self) -> StrategySpec:
         end = self._today()
@@ -112,12 +119,13 @@ class StrategyDesignService:
                 schema_version=draft.identity.schema_version,
             ),
         )
-        self._repository.add(saved)
-        return SavedStrategy(saved, strategy_spec_hash(saved))
+        record = self._legacy_record(saved)
+        self._repository.add(record)
+        return SavedStrategy(record.spec, record.spec_hash)
 
     def get(self, strategy_id: str, revision: int | None = None) -> SavedStrategy:
-        spec = self._repository.get(strategy_id, revision)
-        return SavedStrategy(spec, strategy_spec_hash(spec))
+        record = self._repository.get(strategy_id, revision)
+        return SavedStrategy(record.spec, record.spec_hash)
 
     def revise(
         self,
@@ -135,8 +143,18 @@ class StrategyDesignService:
                 schema_version=draft.identity.schema_version,
             ),
         )
-        self._repository.append(saved, expected_revision=expected_revision)
-        return SavedStrategy(saved, strategy_spec_hash(saved))
+        record = self._legacy_record(saved)
+        self._repository.append(record, expected_revision=expected_revision)
+        return SavedStrategy(record.spec, record.spec_hash)
+
+    def _legacy_record(self, spec: StrategySpec) -> StrategyRevisionRecord:
+        """JSON spec API revisions carry no source text (authoring ADR D9 migration)."""
+        return StrategyRevisionRecord(
+            spec=spec,
+            spec_hash=strategy_spec_hash(spec),
+            source=None,
+            provenance=RevisionProvenance(RevisionOrigin.LEGACY_JSON, self._now()),
+        )
 
     @staticmethod
     def _require_valid(spec: StrategySpec) -> None:

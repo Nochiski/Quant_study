@@ -312,10 +312,12 @@ def test_identifier_fields_declare_their_catalog_or_reference_namespace() -> Non
     assert set(references.values()) == {"node", "parameter"}
     assert all(p.endswith("_node_id") for p, r in references.items() if r == "node")
     assert references["#/$defs/ParameterNode/parameter_id"] == "parameter"
-    # The only unmarked ids are definitions (a node's own id, a user-named factor), not lookups.
-    assert all(p.endswith("/node_id") or p == "#/$defs/FactorSignal/factor_id" for p in unmarked), (
-        unmarked
-    )
+    # The only unmarked ids are definitions (a node's own id, a user-named factor, a parameter
+    # declaration), never lookups into a catalog or into the document.
+    definitions = {"#/$defs/FactorSignal/factor_id"} | {
+        f"#/$defs/{name}Parameter/parameter_id" for name in ("Float", "Integer", "Choice")
+    }
+    assert all(p.endswith("/node_id") or p in definitions for p in unmarked), unmarked
 
 
 def test_field_contracts_carry_the_identifier_markers() -> None:

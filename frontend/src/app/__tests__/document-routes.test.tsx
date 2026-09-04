@@ -271,6 +271,7 @@ const replaceText = (view: EditorView, text: string) =>
 const saveButton = () =>
   within(globalThis.document.querySelector(".ide__editor-actions")!).getByRole(
     "button",
+    { name: "리비전 저장" },
   );
 
 const legacyLink = () =>

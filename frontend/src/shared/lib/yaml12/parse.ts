@@ -133,13 +133,53 @@ const errorRange = (
   error: { pos: [number, number] },
 ): SourceRange => lines.range(error.pos[0], error.pos[1]);
 
+type Budget = { nodes: number };
+
+/** Depth is a streamed scanner guard in the backend, so it precedes all deferred policies. */
+const rejectDepth = (node: Node | null, lines: LineIndex, depth = 0): void => {
+  if (!node) return;
+  if (depth > CODEC_LIMITS.maxDepth) {
+    throw new Yaml12Rejected(
+      "too_deep",
+      `depth=${depth} max_depth=${CODEC_LIMITS.maxDepth}`,
+      rangeOf(lines, node),
+    );
+  }
+  if (isMap(node)) {
+    for (const pair of node.items as Pair<Node, Node | null>[]) {
+      rejectDepth(pair.value, lines, depth + 1);
+    }
+  } else if (isSeq(node)) {
+    for (const item of node.items as (Node | null)[]) {
+      rejectDepth(item, lines, depth + 1);
+    }
+  }
+};
+
 /** Mirror the backend codec's node walk after all scanner policies have completed. */
 const rejectTreePolicy = (
   node: Node | null,
   lines: LineIndex,
   pointer = "",
+  depth = 0,
+  budget: Budget = { nodes: 0 },
 ): void => {
   if (!node) return;
+  budget.nodes += 1;
+  if (budget.nodes > CODEC_LIMITS.maxNodes) {
+    throw new Yaml12Rejected(
+      "too_many_nodes",
+      `nodes>${CODEC_LIMITS.maxNodes}`,
+      rangeOf(lines, node),
+    );
+  }
+  if (depth > CODEC_LIMITS.maxDepth) {
+    throw new Yaml12Rejected(
+      "too_deep",
+      `depth=${depth} max_depth=${CODEC_LIMITS.maxDepth}`,
+      rangeOf(lines, node),
+    );
+  }
   if (isMap(node)) {
     const seen = new Set<string>();
     for (const pair of node.items as Pair<Node, Node | null>[]) {
@@ -167,13 +207,13 @@ const rejectTreePolicy = (
         );
       }
       seen.add(key);
-      rejectTreePolicy(pair.value, lines, child);
+      rejectTreePolicy(pair.value, lines, child, depth + 1, budget);
     }
     return;
   }
   if (isSeq(node)) {
     (node.items as (Node | null)[]).forEach((item, index) =>
-      rejectTreePolicy(item, lines, `${pointer}/${index}`),
+      rejectTreePolicy(item, lines, `${pointer}/${index}`, depth + 1, budget),
     );
     return;
   }
@@ -211,6 +251,7 @@ const rejectPolicy = (doc: Document, lines: LineIndex): void => {
   // Same order as the backend: syntax → directive → tag → tree policy (anchor/alias, merge
   // key, non-string key, number shapes) → duplicate key. Duplicates are the *last* check so a
   // document that also breaks an earlier rule reports that rule, as the backend does.
+  rejectDepth(doc.contents as Node | null, lines);
   for (const error of doc.errors) {
     if (error.code !== "DUPLICATE_KEY") {
       throw new Yaml12Rejected(
@@ -238,15 +279,6 @@ const rejectPolicy = (doc: Document, lines: LineIndex): void => {
       `tag handles=${tagHandles.map(([h]) => h).join(",")}`,
       lines.range(0, 0),
     );
-  }
-  for (const warning of doc.warnings) {
-    if (warning.code === "TAG_RESOLVE_FAILED") {
-      throw new Yaml12Rejected(
-        "tag",
-        warning.message,
-        errorRange(lines, warning),
-      );
-    }
   }
   visit(doc, {
     Alias(_key, node) {
@@ -298,8 +330,6 @@ const rejectPolicy = (doc: Document, lines: LineIndex): void => {
   });
   rejectTreePolicy(doc.contents as Node | null, lines);
 };
-
-type Budget = { nodes: number };
 
 const collectRanges = (
   node: Node | null,
@@ -541,20 +571,20 @@ const rejectText = (
   lines: LineIndex,
   format: SourceFormat,
 ): void => {
-  const bytes = new TextEncoder().encode(text).length;
-  if (bytes > CODEC_LIMITS.maxBytes) {
-    throw new Yaml12Rejected(
-      "too_large",
-      `bytes=${bytes} max_bytes=${CODEC_LIMITS.maxBytes}`,
-      lines.range(0, 0),
-    );
-  }
   const surrogate = LONE_SURROGATE.exec(text);
   if (surrogate) {
     throw new Yaml12Rejected(
       "syntax",
       `source is not valid UTF-8 text — unpaired surrogate at offset ${surrogate.index}`,
       lines.range(surrogate.index, surrogate.index + 1),
+    );
+  }
+  const bytes = new TextEncoder().encode(text).length;
+  if (bytes > CODEC_LIMITS.maxBytes) {
+    throw new Yaml12Rejected(
+      "too_large",
+      `bytes=${bytes} max_bytes=${CODEC_LIMITS.maxBytes}`,
+      lines.range(0, 0),
     );
   }
   const tabOffset = format === "yaml" ? yamlWhitespaceTabOffset(text) : null;

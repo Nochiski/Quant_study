@@ -138,7 +138,9 @@ def _walk_node(node: object, loader: YAML, pointer: str) -> object:
         ]
     if isinstance(node, ScalarNode):
         value = loader.constructor.construct_object(node, deep=True)
-        return _merge_surrogates(value, pointer) if isinstance(value, str) else value
+        value = _merge_surrogates(value, pointer) if isinstance(value, str) else value
+        _check_tree(value, pointer)
+        return value
     raise Yaml12Rejected("syntax", f"pointer={pointer} node={type(node).__name__}")
 
 

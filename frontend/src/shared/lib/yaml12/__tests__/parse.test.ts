@@ -158,12 +158,29 @@ describe("parseSource", () => {
     ['? ["\\ud800"]\n: value\n', "yaml.non_string_key"],
     ['a: "\\ud800"\na: 2\n', "yaml.syntax"],
     ['a: 1\na: "\\ud800"\n', "yaml.duplicate_key"],
+    ["a: &x 1\nb: !custom 2\n", "yaml.anchor_or_alias"],
+    ["a: 9007199254740993\na: 2\n", "yaml.integer_out_of_range"],
+    ["a: .nan\na: 2\n", "yaml.non_finite_number"],
   ])(
     "matches backend rejection order for combined policies: %s",
     (source, code) => {
       expect(parseSource(source, "yaml").diagnostics[0]?.code).toBe(code);
     },
   );
+
+  it("applies the global depth guard before later tree-policy errors", () => {
+    const deep = `${"a: {".repeat(33)}value${"}".repeat(33)}\nb: 9007199254740993\n`;
+    expect(parseSource(deep, "yaml").diagnostics[0]?.code).toBe(
+      "yaml.too_deep",
+    );
+  });
+
+  it("rejects a raw lone surrogate before applying the byte limit", () => {
+    const source = `${"a".repeat(512 * 1024)}\ud800`;
+    expect(parseSource(source, "yaml").diagnostics[0]?.code).toBe(
+      "yaml.syntax",
+    );
+  });
 
   it("rejects tabs used as YAML separation whitespace", () => {
     for (const text of ["a: \tv\n", "a:\n\tv: 1\n", "a: foo\tbar\n"]) {

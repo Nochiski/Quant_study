@@ -4,6 +4,7 @@ import {
   compileStrategyDocument,
   createStrategy,
   createStrategyDocument,
+  diffStrategyRevisions,
   explainFactorGraph,
   getEquityCatalog,
   getFactorCatalog,
@@ -35,6 +36,7 @@ import type {
   CompiledDocument,
   DataStep,
   DatasetFieldProfile,
+  DiffEntry,
   FactorCatalog,
   FactorDefinition,
   FactorExplanation,
@@ -62,6 +64,7 @@ import type {
   ResearchPanelQuery,
   ResearchPreview,
   ReviseDocumentRequest,
+  RevisionDiff,
   RevisionSummary,
   SaveDocumentRequest,
   SavedRevisionReference,
@@ -300,6 +303,19 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "reviseStrategyDocument");
   },
 
+  /** Semantic diff between two stored revisions (identity, comments, formatting invisible). */
+  async diffStrategyRevisions(
+    strategyId: string,
+    base: number,
+    target: number,
+  ): Promise<RevisionDiff> {
+    const response = await diffStrategyRevisions({
+      path: { strategy_id: strategyId },
+      query: { base, target },
+    });
+    return unwrap(response, "diffStrategyRevisions");
+  },
+
   async listStrategyRevisions(
     strategyId: string,
     page: { offset?: number; limit?: number } = {},
@@ -343,6 +359,7 @@ export type {
   CompiledDocument,
   DataStep,
   DatasetFieldProfile,
+  DiffEntry,
   FactorCatalog,
   FactorDefinition,
   FactorExplanation,
@@ -368,6 +385,7 @@ export type {
   ResearchPanelQuery,
   ResearchPreview,
   ReviseDocumentRequest,
+  RevisionDiff,
   RevisionSummary,
   SaveDocumentRequest,
   SavedRevisionReference,

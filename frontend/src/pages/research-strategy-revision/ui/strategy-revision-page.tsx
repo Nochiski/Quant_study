@@ -3,6 +3,7 @@ import { useEffect, useMemo } from "react";
 
 import { strategyDocumentQuery } from "../../../entities/strategy";
 import {
+  ConflictBanner,
   DirtyLeaveGuard,
   DocumentToolbar,
   RecoveryBanner,
@@ -148,6 +149,14 @@ export const StrategyRevisionPage = () => {
                 {t("page.revision.viewPending")} ({requested.toUpperCase()})
               </p>
             )}
+            {status.kind === "conflict" && document.baseRevision !== null ? (
+              <ConflictBanner
+                strategyId={strategyId}
+                baseRevision={document.baseRevision}
+                detail={status.detail}
+                source={document.source}
+              />
+            ) : null}
             {autosave.recovery ? (
               <RecoveryBanner
                 recovery={autosave.recovery}

@@ -1,0 +1,6 @@
+factors:
+  - id: a
+    nodes: [1, 2, 3]
+  - id: b
+    nodes: []
+empty_map: {}

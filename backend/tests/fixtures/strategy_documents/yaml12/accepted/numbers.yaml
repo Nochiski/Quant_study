@@ -1,0 +1,6 @@
+one: 1
+float_one: 1.0
+sci: 1e-2
+neg: -0.5
+plus: +5
+big: 12345678901

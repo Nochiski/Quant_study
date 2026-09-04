@@ -1,0 +1,3 @@
+kind: Momentum
+side: LONG_ONLY
+method: weighted_sum

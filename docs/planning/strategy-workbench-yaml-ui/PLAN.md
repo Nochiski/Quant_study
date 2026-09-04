@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: CHANGES_REQUESTED
+project_status: SELF_CHECK
 current_phase: P4
 current_pr: P4-07
 active_prs: [P4-07]
 parallel_window: []
-last_updated: 2026-09-05T08:08:58+09:00
+last_updated: 2026-09-05T08:16:56+09:00
 planned_prs: 50
 merged_prs: 39
 approved_prs: 39
@@ -22,13 +22,13 @@ progress_percent: 78
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `CHANGES_REQUESTED` |
+| Project status | `SELF_CHECK` |
 | Current phase | `P4` |
 | Current/next PR | `P4-07` |
 | Active PR | `P4-07` |
 | Progress | `39 / 50 merged (78%)` |
 | Approved | `39 / 50` |
-| Aggregated at | `2026-09-05 08:08 KST` |
+| Aggregated at | `2026-09-05 08:16 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -76,7 +76,7 @@ progress_percent: 78
 | P1.5 | Backtest Correctness Gate | 5 | 5 | `MERGED` |
 | P2 | App Shell and visual foundation | 4 | 4 | `MERGED` |
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
-| P4 | Outline, Contract, Projections | 10 | 8 | `CHANGES_REQUESTED` |
+| P4 | Outline, Contract, Projections | 10 | 8 | `SELF_CHECK` |
 | P5 | Truthful Trace UI | 3 | 0 | `WAITING` |
 | P6 | Professional release and migration | 7 | 1 | `WAITING` |
 | **Total** |  | **50** | **39** | **78%** |
@@ -86,16 +86,16 @@ progress_percent: 78
 
 | 항목 | 값 |
 |---|---|
-| PR | `P4-07` Read-only FactorGraph DAG projection CHANGES_REQUESTED |
+| PR | `P4-07` Read-only FactorGraph DAG projection SELF_CHECK |
 | Intent | backend가 확정한 FactorGraph와 Execution Plan/diagnostic을 전문 트레이더용 DAG로 읽기 전용 투영한다 |
 | Acceptance | factor별 node/edge·output·branch/conditional/subgraph 표시; backend type/unit/issue provenance; graph node↔YAML JSON Pointer 양방향 선택; invalid/stale 실행 차단; new/revision parity |
 | Non-goals | graph 직접 편집, client graph validation/topological sort/type·unit 추론, trace 값(P5), source/semantic diff(P4-08) |
 | Branch/worktree | `feat/p4-07-factor-graph-projection` (`Quant_study-p4-07`) |
 | Base SHA | `f9a0e35` (P4-06 merge main) |
-| Head SHA | implementation `8f65c4f`; review HEAD `f09d94d` |
-| Diff stat | 16 files, +1711/-23 (production/model/UI 1066, tests 645; CSS 337 포함) |
-| Focused tests | FactorGraph model/UI·branch/subgraph·plan-null·pointer·execution gate·new/revision route 포함 61 passed |
-| Full gate | frontend 348 passed; typecheck·lint·production build; API/generated 변경 없음 |
+| Head SHA | implementation/fix `b8a29be`; 동일 reviewer 재검토 요청 전 |
+| Diff stat | implementation 16 files, +1948/-27 (production/model/UI 1231, tests 744; CSS 378 포함) |
+| Focused tests | FactorGraph model/UI·disconnected node·branch/subgraph·plan-null·same-pointer source 복귀·execution gate·new/revision route 포함 53 passed |
+| Full gate | frontend 350 passed; typecheck·lint·production build; API/generated 변경 없음 |
 
 ---
 
@@ -202,7 +202,7 @@ Phase exit:
 | [x] | `P4-04` | Backend Execution Plan query·version gate·source mapping model | P3-05, P4-02 | `MERGED` | [#57](https://github.com/Nochiski/Quant_study/pull/57) · `review_p4_04` APPROVE · `25d8b45` |
 | [x] | `P4-05` | Canonical node snippet insertion | P3-02, P1-05 | `MERGED` | [#59](https://github.com/Nochiski/Quant_study/pull/59) · `review_p4_05` APPROVE · `191b902` |
 | [x] | `P4-06` | Read-only canonical JSON과 Form projection | P3-05 | `MERGED` | [#61](https://github.com/Nochiski/Quant_study/pull/61) · `review_p4_06` APPROVE · `f9a0e35` |
-| [ ] | `P4-07` | Read-only FactorGraph DAG projection | P4-01, P3-05 | `CHANGES_REQUESTED` | `review_p4_07` P1 1/P2 1 수정 중 |
+| [ ] | `P4-07` | Read-only FactorGraph DAG projection | P4-01, P3-05 | `SELF_CHECK` | `review_p4_07` P1/P2 수정·회귀 검증 완료 |
 | [ ] | `P4-08` | Source/semantic/revision Diff와 conflict resolution | P1-08, P3-07 | `WAITING` | — |
 | [x] | `P4-09` | Execution Plan 표시와 YAML/graph selection 연동 | P4-04, P4-01 | `MERGED` | [#58](https://github.com/Nochiski/Quant_study/pull/58) · `review_p4_09` APPROVE · `8a2ebfc` |
 | [x] | `P4-10` | Five-area snippet catalog UI와 new/revision page wiring | P4-05 | `MERGED` | [#60](https://github.com/Nochiski/Quant_study/pull/60) · `review_p4_10` APPROVE · `20491b8` |
@@ -331,6 +331,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | P4-07 reviewer P1/P2를 `b8a29be`에서 수정. backend plan node는 plan 순서·contract를 유지하고 disconnected authored node는 validation contract만 쓰는 별도 미실행 영역에 보존했으며, projection이 명시적으로 source를 열 때만 same-pointer reveal을 요청해 일반 Form 왕복의 selection/history 보존과 hidden editor focus 금지를 함께 유지. focused 53, frontend 350·typecheck·lint·build 통과 후 SELF_CHECK 전환 | StrategySpec 완전성·backend SoT·명시적 source reveal 책임·회귀 검증 |
 | 2026-09-05 KST | Codex | `review_p4_07`이 P0 0/P1 1/P2 1로 REQUEST_CHANGES. backend plan이 output-reachable node만 포함하므로 valid graph의 disconnected authored node가 Graph에서 조용히 사라지는 StrategySpec 동등성 결함과, 동일 pointer의 YAML→Graph→source 복귀 시 route key가 남아 editor focus가 회복되지 않는 전이를 확인해 CHANGES_REQUESTED로 전환 | authored graph/plan 투영 구분·exact pointer completeness·projection/source focus lifecycle·동일 reviewer 재검토 |
 | 2026-09-05 KST | Codex | P4-07 [#62](https://github.com/Nochiski/Quant_study/pull/62)를 공개하고 implementation freeze `8f65c4f`·review HEAD `f09d94d`·1,711줄 size exception을 본문에 고정해 fresh review-only agent `review_p4_07` 검토로 IN_REVIEW 전환 | PR별 독립 reviewer 정확히 1명·13.3~13.4 review gate·12절 size exception |
 | 2026-09-05 KST | Codex | P4-07을 `8f65c4f`에 freeze: backend Execution Plan 순서·type/unit/history와 validation/compile diagnostic만 읽는 FactorGraph DAG, conditional의 predicate/true/false·saved subgraph·OUTPUT 표시, Graph↔source JSON Pointer 선택을 new/revision 양쪽에 연결. metadata-aware factor plan이 invalid/loading/incompatible이면 Backtest도 fail-closed. focused 61, frontend 348·typecheck·lint·build 통과 후 SELF_CHECK 전환. 1,711줄 중 테스트 645·독립 CSS 337이며 projection model/UI/route/run gate가 하나의 end-to-end acceptance라 12절 size exception 기록 | backend graph/plan/diagnostic SoT·projection/navigation/run 책임분리·P4-07 acceptance·12절 size exception |

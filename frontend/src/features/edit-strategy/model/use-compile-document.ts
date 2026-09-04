@@ -41,9 +41,13 @@ const rangeFor = (
     }
   }
   if (parse) {
+    // Unknown-key diagnostics identify the misspelled field itself. Other diagnostics describe
+    // the field's value, so prefer its value range while retaining a key-only fallback.
     const exact =
-      parse.valueRanges.get(diagnostic.pointer) ??
-      parse.keyRanges.get(diagnostic.pointer);
+      diagnostic.code === "structure.unknown_key"
+        ? parse.keyRanges.get(diagnostic.pointer)
+        : (parse.valueRanges.get(diagnostic.pointer) ??
+          parse.keyRanges.get(diagnostic.pointer));
     if (exact) return exact;
   }
   if (diagnostic.range) return diagnostic.range;

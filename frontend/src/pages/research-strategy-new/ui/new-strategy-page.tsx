@@ -111,10 +111,7 @@ export const NewStrategyPage = () => {
         editor={
           <>
             {autosave.recovery ? (
-              <RecoveryBanner
-                recovery={autosave.recovery}
-                original={document.savedSource ?? STARTER}
-              />
+              <RecoveryBanner recovery={autosave.recovery} />
             ) : null}
             <SourceEditor
               state={document}

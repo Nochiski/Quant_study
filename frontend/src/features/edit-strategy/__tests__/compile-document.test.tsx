@@ -284,6 +284,31 @@ describe("toDocumentDiagnostics", () => {
     });
   });
 
+  it("points an unknown-key diagnostic at the misspelled key, not its value", () => {
+    const text = "risk:\n  max_name_wieght: 0.05\n";
+    const parse = parseSource(text, "yaml");
+    const [diagnostic] = toDocumentDiagnostics(
+      [
+        {
+          code: "structure.unknown_key",
+          kind: "structural",
+          severity: "error",
+          pointer: "/risk/max_name_wieght",
+          message: "unknown key",
+          range: {
+            start: { line: 1, column: 2, offset: 8 },
+            end: { line: 1, column: 18, offset: 24 },
+          },
+        },
+      ],
+      parse,
+    );
+
+    expect(
+      text.slice(diagnostic.range!.start.offset, diagnostic.range!.end.offset),
+    ).toBe("max_name_wieght");
+  });
+
   it("anchors a root diagnostic at the start instead of marking the whole document", () => {
     const text = 'schema_version: "1.0"\ntitle: ok\n';
     const parse = parseSource(text, "yaml");

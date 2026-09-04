@@ -115,9 +115,16 @@ export const DocumentToolbar = ({
             }
             aria-busy={runStatus.kind === "starting" || undefined}
           >
-            {t("toolbar.backtest")}
+            {runStatus.kind === "accepted"
+              ? t("toolbar.run.open")
+              : t("toolbar.backtest")}
           </Button>
         </Tooltip>
+        {runStatus.kind === "accepted" ? (
+          <span className="doc-toolbar__run-status" role="status">
+            {t("toolbar.run.accepted").replace("{runId}", runStatus.runId)}
+          </span>
+        ) : null}
         {runStatus.kind === "failed" ? (
           <span className="doc-toolbar__error" role="alert">
             {t("toolbar.run.failed")}: {runStatus.detail}

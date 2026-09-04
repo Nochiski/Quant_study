@@ -27,4 +27,18 @@ describe("lineDiffSummary", () => {
     expect(many.added).toBe(10);
     expect(many.preview).toHaveLength(3);
   });
+
+  it("uses the bounded coarse summary beyond the quadratic table cap", () => {
+    const before = Array.from({ length: 2_001 }, (_, index) => `a${index}`).join(
+      "\n",
+    );
+    const after = Array.from({ length: 2_001 }, (_, index) => `b${index}`).join(
+      "\n",
+    );
+    expect(lineDiffSummary(before, after)).toEqual({
+      added: 2_001,
+      removed: 2_001,
+      preview: [],
+    });
+  });
 });

@@ -30,14 +30,33 @@ export const draftKey = (
     ? "new"
     : `${strategyId}@${baseRevision}`;
 
-const isRecord = (value: unknown): value is DraftRecord =>
-  typeof value === "object" &&
-  value !== null &&
-  typeof (value as DraftRecord).key === "string" &&
-  typeof (value as DraftRecord).source === "string" &&
-  ((value as DraftRecord).format === "yaml" ||
-    (value as DraftRecord).format === "json") &&
-  typeof (value as DraftRecord).savedAt === "string";
+const isNullableString = (value: unknown): value is string | null =>
+  value === null || typeof value === "string";
+
+const isRecord = (value: unknown): value is DraftRecord => {
+  if (typeof value !== "object" || value === null) return false;
+  const record = value as Record<keyof DraftRecord, unknown>;
+  const strategyId = record.strategyId;
+  const baseRevision = record.baseRevision;
+  if (
+    typeof record.key !== "string" ||
+    typeof record.source !== "string" ||
+    (record.format !== "yaml" && record.format !== "json") ||
+    !isNullableString(strategyId) ||
+    (baseRevision !== null &&
+      (typeof baseRevision !== "number" ||
+        !Number.isInteger(baseRevision) ||
+        baseRevision <= 0)) ||
+    (strategyId === null) !== (baseRevision === null) ||
+    strategyId === "" ||
+    !isNullableString(record.baseSpecHash) ||
+    !isNullableString(record.schemaVersion) ||
+    typeof record.savedAt !== "string"
+  ) {
+    return false;
+  }
+  return record.key === draftKey(strategyId, baseRevision);
+};
 
 export const defaultDraftStorage = (): DraftStorage | null => {
   try {

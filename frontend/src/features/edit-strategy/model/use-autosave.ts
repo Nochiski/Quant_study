@@ -15,8 +15,10 @@ const AUTOSAVE_DELAY_MS = 800;
 
 export type Recovery = {
   record: DraftRecord;
-  /** The recovered text targets another schema version: offer the raw text, not a restore. */
-  schemaMismatch: boolean;
+  /** The exact source this recovery was compared with. Autosave owns the diff baseline. */
+  original: string;
+  /** Restore is fail-closed until the complete draft/base contract is proven compatible. */
+  compatibility: "compatible" | "unverified" | "incompatible";
   restore: () => void;
   discard: () => void;
 };
@@ -54,7 +56,11 @@ export const useAutosave = (
   );
   const now = options.now ?? (() => new Date().toISOString());
   const key = draftKey(state.strategyId, state.baseRevision);
-  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const [lastWrite, setLastWrite] = useState<{
+    key: string;
+    savedAt: string;
+  } | null>(null);
+  const [writeAvailable, setWriteAvailable] = useState(storage !== null);
 
   // Recovery is judged once per base, against the text the base was loaded with. The judgement
   // is derived state keyed by the base (re-derived during render when the key changes), and a
@@ -63,47 +69,61 @@ export const useAutosave = (
     key,
     record: readDraft(storage, key),
     original: state.savedSource ?? state.source,
+    dismissed: false,
   }));
   if (judged.key !== key) {
     setJudged({
       key,
       record: readDraft(storage, key),
       original: state.savedSource ?? state.source,
+      dismissed: false,
     });
   }
-  const [dismissedKey, setDismissedKey] = useState<string | null>(null);
   const candidate =
     judged.key === key &&
     judged.record !== null &&
     judged.record.source !== judged.original &&
-    dismissedKey !== key
+    !judged.dismissed
       ? judged.record
       : null;
+
+  const compatibility: Recovery["compatibility"] =
+    options.schemaVersion === null || candidate?.schemaVersion === null
+      ? "unverified"
+      : candidate === null
+        ? "incompatible"
+        : candidate.schemaVersion === options.schemaVersion &&
+            candidate.format === state.format &&
+            candidate.strategyId === state.strategyId &&
+            candidate.baseRevision === state.baseRevision &&
+            candidate.baseSpecHash === state.baseSpecHash
+          ? "compatible"
+          : "incompatible";
 
   // Autosave the dirty text; clear the record when the base is saved successfully.
   const previous = useRef({
     key,
-    dirty: state.dirty,
     documentEpoch: state.documentEpoch,
+    savedVersion: state.savedVersion,
   });
   useEffect(() => {
     const before = previous.current;
     previous.current = {
       key,
-      dirty: state.dirty,
       documentEpoch: state.documentEpoch,
+      savedVersion: state.savedVersion,
     };
     if (
       before.documentEpoch === state.documentEpoch &&
-      before.dirty &&
-      !state.dirty &&
-      state.savedSource === state.source
+      state.savedVersion > before.savedVersion
     ) {
       // A successful save can advance the base revision, so remove the record stored under the
-      // pre-save base key. A document load changes the epoch and must keep its recovery record.
+      // pre-save base key even if later edits keep the document dirty. A document load changes
+      // the epoch and must keep its recovery record.
       clearDraft(storage, before.key);
-      setLastSavedAt(null);
-      return;
+      setLastWrite((current) =>
+        current?.key === before.key ? null : current,
+      );
     }
     if (!state.dirty || state.composing) return;
     const timer = setTimeout(() => {
@@ -118,7 +138,8 @@ export const useAutosave = (
         schemaVersion: options.schemaVersion,
         savedAt,
       });
-      if (written) setLastSavedAt(savedAt);
+      setWriteAvailable(written);
+      setLastWrite(written ? { key, savedAt } : null);
     }, AUTOSAVE_DELAY_MS);
     return () => clearTimeout(timer);
     // `now` is a stable option in practice; re-running on its identity would re-arm the timer.
@@ -134,19 +155,24 @@ export const useAutosave = (
     state.baseRevision,
     state.baseSpecHash,
     state.savedSource,
+    state.savedVersion,
     state.documentEpoch,
     options.schemaVersion,
   ]);
 
   const restore = useCallback(() => {
-    if (!candidate) return;
+    if (!candidate || compatibility !== "compatible") return;
     dispatch({ type: "edit", source: candidate.source });
-    setDismissedKey(key);
-  }, [candidate, dispatch, key]);
+    setJudged((current) =>
+      current.key === key ? { ...current, dismissed: true } : current,
+    );
+  }, [candidate, compatibility, dispatch, key]);
   const discard = useCallback(() => {
     if (!candidate) return;
     clearDraft(storage, key);
-    setDismissedKey(key);
+    setJudged((current) =>
+      current.key === key ? { ...current, dismissed: true } : current,
+    );
   }, [candidate, key, storage]);
 
   return useMemo<Autosave>(
@@ -154,17 +180,24 @@ export const useAutosave = (
       recovery: candidate
         ? {
             record: candidate,
-            schemaMismatch:
-              options.schemaVersion !== null &&
-              candidate.schemaVersion !== null &&
-              candidate.schemaVersion !== options.schemaVersion,
+            original: judged.original,
+            compatibility,
             restore,
             discard,
           }
         : null,
-      lastSavedAt,
-      available: storage !== null,
+      lastSavedAt: lastWrite?.key === key ? lastWrite.savedAt : null,
+      available: writeAvailable,
     }),
-    [candidate, options.schemaVersion, restore, discard, lastSavedAt, storage],
+    [
+      candidate,
+      judged.original,
+      compatibility,
+      restore,
+      discard,
+      lastWrite,
+      key,
+      writeAvailable,
+    ],
   );
 };

@@ -1,4 +1,5 @@
 export {
+  diagnosticCode,
   loadYaml12Mapping,
   locateRange,
   parseSource,

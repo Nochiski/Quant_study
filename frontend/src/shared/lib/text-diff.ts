@@ -20,9 +20,10 @@ export const lineDiffSummary = (
   const cols = b.length + 1;
   // Cap the quadratic table for very large texts: report counts from a coarse comparison.
   if (a.length * b.length > 4_000_000) {
-    const same = new Set(a);
-    const added = b.filter((line) => !same.has(line)).length;
-    const removed = a.filter((line) => !new Set(b).has(line)).length;
+    const beforeLines = new Set(a);
+    const afterLines = new Set(b);
+    const added = b.filter((line) => !beforeLines.has(line)).length;
+    const removed = a.filter((line) => !afterLines.has(line)).length;
     return { added, removed, preview: [] };
   }
   const table = new Uint32Array(rows * cols);

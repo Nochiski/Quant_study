@@ -75,6 +75,17 @@ const document = (
 const STORED = 'schema_version: "1.0"\ntitle: 퀄리티 모멘텀\n';
 const posted: unknown[] = [];
 const started: Record<string, unknown>[] = [];
+const acceptedRun = (runId = "run-7") => ({
+  run: {
+    run_id: runId,
+    status: "queued",
+    progress: 0,
+    stage: "queued",
+    message: "queued",
+    created_at: "2026-09-04T00:00:00Z",
+    updated_at: "2026-09-04T00:00:00Z",
+  },
+});
 
 const server = setupServer(
   http.post(`${API}/api/v1/strategy-documents/compile`, async ({ request }) => {
@@ -92,20 +103,7 @@ const server = setupServer(
   }),
   http.post(`${API}/api/v1/backtests`, async ({ request }) => {
     started.push((await request.json()) as Record<string, unknown>);
-    return HttpResponse.json(
-      {
-        run: {
-          run_id: "run-7",
-          status: "queued",
-          progress: 0,
-          stage: "queued",
-          message: "queued",
-          created_at: "2026-09-04T00:00:00Z",
-          updated_at: "2026-09-04T00:00:00Z",
-        },
-      },
-      { status: 202 },
-    );
+    return HttpResponse.json(acceptedRun(), { status: 202 });
   }),
   http.get(`${API}/api/v1/backtests/:runId`, ({ params }) =>
     HttpResponse.json({
@@ -512,7 +510,7 @@ describe("backtest from the editor (P3-05)", () => {
 
   it("runs an edited document as an inline draft with provenance, and never while invalid", async () => {
     const user = userEvent.setup();
-    mount("/research/strategies/s1/revisions/2");
+    const history = mount("/research/strategies/s1/revisions/2");
     const view = await editor();
     replaceText(view, `${STORED}description: 개정\n`);
     const run = screen.getByRole("button", { name: /백테스트 실행/ });
@@ -526,6 +524,23 @@ describe("backtest from the editor (P3-05)", () => {
         source_hash: "b".repeat(64),
       },
     });
+    const firstPrompt = await screen.findByRole("alertdialog");
+    await user.click(
+      within(firstPrompt).getByRole("button", { name: "머무르기" }),
+    );
+    expect(history.location.pathname).toBe(
+      "/research/strategies/s1/revisions/2",
+    );
+    expect(screen.getByText("백테스트 run-7 접수됨")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "백테스트 보기" }));
+    const secondPrompt = await screen.findByRole("alertdialog");
+    expect(started).toHaveLength(1);
+    await user.click(
+      within(secondPrompt).getByRole("button", { name: "나가기" }),
+    );
+    await waitFor(() =>
+      expect(history.location.pathname).toBe("/research/backtests/run-7"),
+    );
     cleanup();
     mount("/research/strategies/new");
     const fresh = await editor();
@@ -536,5 +551,36 @@ describe("backtest from the editor (P3-05)", () => {
       ).toBeDisabled(),
     );
     expect(screen.getByRole("button", { name: "리비전 저장" })).toBeDisabled();
+  });
+
+  it("does not let a run response from an older document replace the current route", async () => {
+    server.use(
+      http.post(`${API}/api/v1/backtests`, async ({ request }) => {
+        started.push((await request.json()) as Record<string, unknown>);
+        await delay(200);
+        return HttpResponse.json(acceptedRun("run-stale"), { status: 202 });
+      }),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2");
+    await editor();
+    const run = screen.getByRole("button", { name: /백테스트 실행/ });
+    await waitFor(() => expect(run).toBeEnabled());
+    await user.click(run);
+    await waitFor(() => expect(started).toHaveLength(1));
+
+    history.push("/research/strategies/s1/revisions/1");
+    await waitFor(() =>
+      expect(history.location.pathname).toBe(
+        "/research/strategies/s1/revisions/1",
+      ),
+    );
+    await editor();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(history.location.pathname).toBe(
+      "/research/strategies/s1/revisions/1",
+    );
+    expect(screen.queryByText(/run-stale.*접수됨/)).not.toBeInTheDocument();
   });
 });

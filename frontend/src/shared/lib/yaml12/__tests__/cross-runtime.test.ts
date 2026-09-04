@@ -12,7 +12,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { describe, expect, test } from "vitest";
-import { parseSource } from "..";
+import { diagnosticCode, parseSource } from "..";
 
 // fixture는 backend 디렉터리 한 곳에만 둔다 (ADR D3). cwd가 frontend/든 저장소 루트든 위로 올라가며 찾는다.
 const FIXTURE_RELATIVE = "backend/tests/fixtures/strategy_documents/yaml12";
@@ -58,6 +58,8 @@ describe("YAML 1.2 cross-runtime manifest", () => {
     if (item.expect !== "reject") throw new Error("unreachable");
     const parsed = parseSource(read(item.file), "yaml");
     expect(parsed.status).toBe("rejected");
-    expect(parsed.diagnostics[0]?.code).toBe(`yaml.${item.reason}`);
+    expect(parsed.diagnostics[0]?.code).toBe(
+      diagnosticCode(item.reason, "yaml"),
+    );
   });
 });

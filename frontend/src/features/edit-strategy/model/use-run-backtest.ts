@@ -1,7 +1,7 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { useStartBacktest } from "../../../entities/backtest";
-import { useNavigate } from "../../../shared/lib/router";
+import { useNavigate, useRouter } from "../../../shared/lib/router";
 import {
   decideBacktestSource,
   type BacktestSourceDecision,
@@ -9,7 +9,24 @@ import {
 import type { DocumentState } from "./document-state";
 
 export type RunBacktestStatus =
-  { kind: "idle" } | { kind: "starting" } | { kind: "failed"; detail: string };
+  | { kind: "idle" }
+  | { kind: "starting" }
+  | { kind: "accepted"; runId: string }
+  | { kind: "failed"; detail: string };
+
+type DocumentIdentity = Pick<DocumentState, "documentEpoch" | "sourceVersion">;
+
+type RunSnapshot = DocumentIdentity & { pathname: string };
+type OwnedRunStatus = DocumentIdentity & { status: RunBacktestStatus };
+
+const IDLE: RunBacktestStatus = { kind: "idle" };
+
+const sameDocument = (
+  left: DocumentIdentity,
+  right: DocumentIdentity,
+): boolean =>
+  left.documentEpoch === right.documentEpoch &&
+  left.sourceVersion === right.sourceVersion;
 
 /**
  * Starts a backtest from the editor and moves to the run page (WORKFLOW P3-05). The request
@@ -19,14 +36,51 @@ export type RunBacktestStatus =
  */
 export const useRunBacktest = (state: DocumentState) => {
   const navigate = useNavigate();
+  const router = useRouter();
   const start = useStartBacktest();
-  const [status, setStatus] = useState<RunBacktestStatus>({ kind: "idle" });
+  const [ownedStatus, setOwnedStatus] = useState<OwnedRunStatus | null>(null);
+  const latestDocument = useRef<DocumentIdentity>({
+    documentEpoch: state.documentEpoch,
+    sourceVersion: state.sourceVersion,
+  });
+  const activeRequest = useRef<symbol | null>(null);
+  useLayoutEffect(() => {
+    latestDocument.current = {
+      documentEpoch: state.documentEpoch,
+      sourceVersion: state.sourceVersion,
+    };
+  }, [state.documentEpoch, state.sourceVersion]);
   const decision = useMemo(() => decideBacktestSource(state), [state]);
+  const status =
+    ownedStatus !== null && sameDocument(ownedStatus, state)
+      ? ownedStatus.status
+      : IDLE;
 
   const { mutateAsync, isPending } = start;
   const run = useCallback(async () => {
-    if (decision.kind === "blocked" || isPending) return;
-    setStatus({ kind: "starting" });
+    if (status.kind === "accepted") {
+      await navigate({
+        to: "/research/backtests/$runId",
+        params: { runId: status.runId },
+      });
+      return;
+    }
+    if (
+      decision.kind === "blocked" ||
+      status.kind === "starting" ||
+      isPending ||
+      activeRequest.current !== null
+    )
+      return;
+    const snapshot: RunSnapshot = {
+      documentEpoch: state.documentEpoch,
+      sourceVersion: state.sourceVersion,
+      pathname: router.state.location.pathname,
+    };
+    const requestId = Symbol("backtest-request");
+    activeRequest.current = requestId;
+    setOwnedStatus({ ...snapshot, status: { kind: "starting" } });
+    let runId: string;
     try {
       const accepted = await mutateAsync({
         strategy_source:
@@ -34,24 +88,52 @@ export const useRunBacktest = (state: DocumentState) => {
             ? decision.reference
             : decision.draft,
       });
-      setStatus({ kind: "idle" });
-      await navigate({
-        to: "/research/backtests/$runId",
-        params: { runId: accepted.run.run_id },
-      });
+      runId = accepted.run.run_id;
     } catch (error) {
-      setStatus({
-        kind: "failed",
-        detail: error instanceof Error ? error.message : String(error),
-      });
+      if (
+        sameDocument(snapshot, latestDocument.current) &&
+        router.state.location.pathname === snapshot.pathname
+      ) {
+        setOwnedStatus({
+          ...snapshot,
+          status: {
+            kind: "failed",
+            detail: error instanceof Error ? error.message : String(error),
+          },
+        });
+      }
+      return;
+    } finally {
+      if (activeRequest.current === requestId) activeRequest.current = null;
     }
-  }, [decision, isPending, mutateAsync, navigate]);
+    // The request belongs to the exact text and route that submitted it. A response arriving
+    // after an edit or route change must not replace the user's newer screen or its status.
+    if (
+      !sameDocument(snapshot, latestDocument.current) ||
+      router.state.location.pathname !== snapshot.pathname
+    )
+      return;
+    setOwnedStatus({
+      ...snapshot,
+      status: { kind: "accepted", runId },
+    });
+    // Dirty inline drafts intentionally hit the leave guard here. If the user stays, the
+    // accepted run id remains owned by this document and pressing Backtest opens that run
+    // again without submitting a duplicate request.
+    await navigate({
+      to: "/research/backtests/$runId",
+      params: { runId },
+    });
+  }, [decision, isPending, mutateAsync, navigate, router, state, status]);
 
   return {
     run,
     decision,
     status,
-    canRun: decision.kind !== "blocked" && !isPending,
+    canRun:
+      (status.kind === "accepted" || decision.kind !== "blocked") &&
+      status.kind !== "starting" &&
+      !isPending,
   };
 };
 

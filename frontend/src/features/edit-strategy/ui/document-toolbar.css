@@ -43,3 +43,8 @@
   color: var(--status-error);
   font-size: var(--text-size-small);
 }
+
+.doc-toolbar__run-status {
+  color: var(--status-info);
+  font-size: var(--text-size-small);
+}

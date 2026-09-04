@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: IN_PROGRESS
+project_status: SELF_CHECK
 current_phase: P4
 current_pr: P4-07
 active_prs: [P4-07]
-parallel_window: [P4-06]
-last_updated: 2026-09-05T07:32:21+09:00
+parallel_window: []
+last_updated: 2026-09-05T07:58:02+09:00
 planned_prs: 50
 merged_prs: 39
 approved_prs: 39
@@ -22,13 +22,13 @@ progress_percent: 78
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_PROGRESS` |
+| Project status | `SELF_CHECK` |
 | Current phase | `P4` |
 | Current/next PR | `P4-07` |
 | Active PR | `P4-07` |
 | Progress | `39 / 50 merged (78%)` |
 | Approved | `39 / 50` |
-| Aggregated at | `2026-09-05 07:32 KST` |
+| Aggregated at | `2026-09-05 07:58 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -76,7 +76,7 @@ progress_percent: 78
 | P1.5 | Backtest Correctness Gate | 5 | 5 | `MERGED` |
 | P2 | App Shell and visual foundation | 4 | 4 | `MERGED` |
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
-| P4 | Outline, Contract, Projections | 10 | 8 | `IN_PROGRESS` |
+| P4 | Outline, Contract, Projections | 10 | 8 | `SELF_CHECK` |
 | P5 | Truthful Trace UI | 3 | 0 | `WAITING` |
 | P6 | Professional release and migration | 7 | 1 | `WAITING` |
 | **Total** |  | **50** | **39** | **78%** |
@@ -86,16 +86,16 @@ progress_percent: 78
 
 | 항목 | 값 |
 |---|---|
-| PR | `P4-07` Read-only FactorGraph DAG projection IN_PROGRESS |
+| PR | `P4-07` Read-only FactorGraph DAG projection SELF_CHECK |
 | Intent | backend가 확정한 FactorGraph와 Execution Plan/diagnostic을 전문 트레이더용 DAG로 읽기 전용 투영한다 |
 | Acceptance | factor별 node/edge·output·branch/conditional/subgraph 표시; backend type/unit/issue provenance; graph node↔YAML JSON Pointer 양방향 선택; invalid/stale 실행 차단; new/revision parity |
 | Non-goals | graph 직접 편집, client graph validation/topological sort/type·unit 추론, trace 값(P5), source/semantic diff(P4-08) |
 | Branch/worktree | `feat/p4-07-factor-graph-projection` (`Quant_study-p4-07`) |
 | Base SHA | `f9a0e35` (P4-06 merge main) |
-| Head SHA | 구현 전 |
-| Diff stat | 구현 전 |
-| Focused tests | graph projection·selection·state·new/revision route 예정 |
-| Full gate | 구현 후 frontend full·typecheck·lint·build·generated clean 예정 |
+| Head SHA | `8f65c4f` |
+| Diff stat | 16 files, +1711/-23 (production/model/UI 1066, tests 645; CSS 337 포함) |
+| Focused tests | FactorGraph model/UI·branch/subgraph·plan-null·pointer·execution gate·new/revision route 포함 61 passed |
+| Full gate | frontend 348 passed; typecheck·lint·production build; API/generated 변경 없음 |
 
 ---
 
@@ -202,7 +202,7 @@ Phase exit:
 | [x] | `P4-04` | Backend Execution Plan query·version gate·source mapping model | P3-05, P4-02 | `MERGED` | [#57](https://github.com/Nochiski/Quant_study/pull/57) · `review_p4_04` APPROVE · `25d8b45` |
 | [x] | `P4-05` | Canonical node snippet insertion | P3-02, P1-05 | `MERGED` | [#59](https://github.com/Nochiski/Quant_study/pull/59) · `review_p4_05` APPROVE · `191b902` |
 | [x] | `P4-06` | Read-only canonical JSON과 Form projection | P3-05 | `MERGED` | [#61](https://github.com/Nochiski/Quant_study/pull/61) · `review_p4_06` APPROVE · `f9a0e35` |
-| [ ] | `P4-07` | Read-only FactorGraph DAG projection | P4-01, P3-05 | `IN_PROGRESS` | 구현·self-check 중 |
+| [ ] | `P4-07` | Read-only FactorGraph DAG projection | P4-01, P3-05 | `SELF_CHECK` | code freeze `8f65c4f`; independent review 준비 |
 | [ ] | `P4-08` | Source/semantic/revision Diff와 conflict resolution | P1-08, P3-07 | `WAITING` | — |
 | [x] | `P4-09` | Execution Plan 표시와 YAML/graph selection 연동 | P4-04, P4-01 | `MERGED` | [#58](https://github.com/Nochiski/Quant_study/pull/58) · `review_p4_09` APPROVE · `8a2ebfc` |
 | [x] | `P4-10` | Five-area snippet catalog UI와 new/revision page wiring | P4-05 | `MERGED` | [#60](https://github.com/Nochiski/Quant_study/pull/60) · `review_p4_10` APPROVE · `20491b8` |
@@ -331,6 +331,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | P4-07을 `8f65c4f`에 freeze: backend Execution Plan 순서·type/unit/history와 validation/compile diagnostic만 읽는 FactorGraph DAG, conditional의 predicate/true/false·saved subgraph·OUTPUT 표시, Graph↔source JSON Pointer 선택을 new/revision 양쪽에 연결. metadata-aware factor plan이 invalid/loading/incompatible이면 Backtest도 fail-closed. focused 61, frontend 348·typecheck·lint·build 통과 후 SELF_CHECK 전환. 1,711줄 중 테스트 645·독립 CSS 337이며 projection model/UI/route/run gate가 하나의 end-to-end acceptance라 12절 size exception 기록 | backend graph/plan/diagnostic SoT·projection/navigation/run 책임분리·P4-07 acceptance·12절 size exception |
 | 2026-09-05 KST | Codex | #61 P4-06을 동일 reviewer APPROVE(P0/P1/P2 0), 최신 approval-doc HEAD CI 4/4 후 main에 병합(`f9a0e35`), 39/50(78%). 최신 main에서 P4-07 전용 worktree를 만들고 backend FactorGraph·Execution Plan·diagnostic만 읽는 DAG projection 구현을 시작 | 13.6 merge gate·graph/type/unit backend SoT·projection/edit 책임분리 |
 | 2026-09-05 KST | Codex | `review_p4_06` 최종 재검토가 completeness 단일 owner, 네 필드 누락 fail-closed, warning-only, exact backend canonical, draft identity 제거, document epoch/out-of-order, YAML/JSON source·view lifecycle과 실제 HEAD `63a2130` size breakdown을 재현하고 APPROVE(P0/P1/P2 0). 최신 원격 CI 4/4 통과로 APPROVED 전환 | 동일 reviewer 최종 승인·SoT/책임분리·latest CI/size gate |
 | 2026-09-05 KST | Codex | P4-06 P1 3/P2 1 수정 `2dac1c2`와 frontend 339 전체 gate를 동일 `review_p4_06` 재검토로 보내기 위해 IN_REVIEW 전환. PLAN의 Head는 implementation freeze, 실제 review HEAD·최종 diff는 push 뒤 PR #61 본문/체크에서 고정 | blocking finding은 같은 reviewer만 재검토·diff/size/CI gate |

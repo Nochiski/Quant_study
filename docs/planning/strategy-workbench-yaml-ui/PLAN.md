@@ -6,7 +6,7 @@ current_phase: P1
 current_pr: P1-01
 active_prs: [P1-01]
 parallel_window: [P1-01, P1.5-01]
-last_updated: 2026-09-04T14:07:56+09:00
+last_updated: 2026-09-04T14:31:21+09:00
 planned_prs: 45
 merged_prs: 4
 approved_prs: 4
@@ -28,7 +28,7 @@ progress_percent: 9
 | Active PR | `P1-01` |
 | Progress | `4 / 45 merged (9%)` |
 | Approved | `4 / 45` |
-| Aggregated at | `2026-09-04 14:07 KST` |
+| Aggregated at | `2026-09-04 14:31 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.

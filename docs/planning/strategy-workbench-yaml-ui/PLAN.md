@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: READY
+project_status: IN_REVIEW
 current_phase: P0
 current_pr: P0-01
-active_prs: []
+active_prs: [P0-01]
 parallel_window: []
-last_updated: 2026-09-04T13:00:38+09:00
+last_updated: 2026-09-04T13:10:49+09:00
 planned_prs: 45
 merged_prs: 0
 approved_prs: 0
@@ -22,13 +22,13 @@ progress_percent: 0
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `READY` |
+| Project status | `IN_REVIEW` |
 | Current phase | `P0` |
 | Current/next PR | `P0-01` |
-| Active PR | none |
+| Active PR | `P0-01` |
 | Progress | `0 / 45 merged (0%)` |
 | Approved | `0 / 45` |
-| Aggregated at | `2026-09-04 13:00 KST` |
+| Aggregated at | `2026-09-04 13:10 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -66,7 +66,7 @@ progress_percent: 0
 <!-- PLAN:PHASES:START -->
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
-| P0 | Contract, product direction, tool choices | 4 | 0 | `READY` |
+| P0 | Contract, product direction, tool choices | 4 | 0 | `IN_REVIEW` |
 | P1 | Backend Authoring Contract | 9 | 0 | `WAITING` |
 | P1.5 | Backtest Correctness Gate | 4 | 0 | `WAITING` |
 | P2 | App Shell and visual foundation | 4 | 0 | `WAITING` |
@@ -85,12 +85,12 @@ progress_percent: 0
 | Intent | verbose YAML 결정, YAML-first 제품 전환, roadmap/rules/tracker 관계를 ADR로 고정한다. |
 | Acceptance | DSL non-goal, no-code 범위 조정, Quick/Advanced deprecation 조건, roadmap/rules 갱신 |
 | Non-goals | editor/parser 설치, API 구현, UI 코드 변경 |
-| Branch/worktree | 미생성 |
-| Base SHA | 미기록 |
-| Head SHA | 미기록 |
-| Diff stat | 미기록 |
-| Focused tests | 미실행 |
-| Full gate | 미실행 |
+| Branch/worktree | `feat/p0-01-strategy-authoring-contract` (main 작업 트리) |
+| Base SHA | `c174452` |
+| Head SHA | `7123f0a` |
+| Diff stat | 11 files, +606/−24 (planning 패키지 제외; ADR 212, fixture 167, test 162, docs/rules 65) |
+| Focused tests | `uv run pytest -q tests/contract/test_strategy_authoring_fixtures.py` → 9 passed |
+| Full gate | pytest 608 passed · ruff clean · pyright 0 errors · 문서 링크 검증 (기존 결손 2건은 이 PR 이전부터 존재) |
 
 ---
 
@@ -98,7 +98,7 @@ progress_percent: 0
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P0-01` | Verbose source ADR, YAML-first 전환, roadmap/rules/tracker 정합화 | 없음 | `READY` | — |
+| [ ] | `P0-01` | Verbose source ADR, YAML-first 전환, roadmap/rules/tracker 정합화 | 없음 | `IN_REVIEW` | `review_p0_01` |
 | [ ] | `P0-02` | Monaco/CodeMirror frontend editor spike | P0-01 | `WAITING` | — |
 | [ ] | `P0-03` | Backend parser ADR와 YAML 1.2 cross-runtime fixture | P0-01 | `WAITING` | — |
 | [ ] | `P0-04` | Frontend router ADR와 direct-entry spike | P0-01 | `WAITING` | — |
@@ -250,6 +250,8 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-04 KST | Claude | P0-01 SELF_CHECK 통과, diff freeze(7123f0a), review_p0_01 배정 → IN_REVIEW | 13.3 diff freeze |
+| 2026-09-04 KST | Claude | P0-01 IN_PROGRESS 전환, 브랜치 생성, scope packet 작성 | 착수 |
 | 2026-09-04 KST | Codex | 완전한 YAML 예시, adapter-owned discriminator, dirty Backtest 규칙, router ADR, P6 visual dependency, dependency 검증 및 pointer 통일 반영 | 2차 계획 리뷰 |
 | 2026-09-04 KST | Codex | v1 verbose YAML 확정, YAML-first 전환과 roadmap/rules 정합화 PR 추가, parser spike 분리, constraint catalog owner 및 run manifest 추가, correctness를 Phase 1.5로 승격, P5를 trace UI로 축소, light-only 초기 theme, v2 시안과 자동 집계 도입 | 계획 리뷰 반영 |
 | 2026-09-04 KST | Codex | 최초 기획 폴더, UI 시안, workflow, 41개 PR tracker 생성 | 사용자 요청 |

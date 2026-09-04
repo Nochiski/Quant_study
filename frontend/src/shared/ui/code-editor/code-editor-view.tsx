@@ -22,6 +22,7 @@ import {
 import {
   linter,
   lintGutter,
+  lintKeymap,
   setDiagnostics,
   type Diagnostic,
 } from "@codemirror/lint";
@@ -56,15 +57,13 @@ const toCmDiagnostics = (
   items: EditorDiagnostic[],
   length: number,
 ): Diagnostic[] =>
-  items
-    .filter((item) => item.from <= length)
-    .map((item) => ({
-      from: Math.max(0, Math.min(item.from, length)),
-      to: Math.max(item.from, Math.min(item.to, length)),
-      severity: item.severity,
-      message: item.message,
-      source: item.code,
-    }));
+  items.map((item) => ({
+    from: Math.max(0, Math.min(item.from, length)),
+    to: Math.max(Math.min(item.from, length), Math.min(item.to, length)),
+    severity: item.severity,
+    message: item.message,
+    source: item.code,
+  }));
 
 const toCmCompletion =
   (source: EditorCompletionSource) => async (context: CompletionContext) => {
@@ -115,7 +114,22 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
     const languageCompartment = useRef(new Compartment());
     const readOnlyCompartment = useRef(new Compartment());
     const completionCompartment = useRef(new Compartment());
+    const labelCompartment = useRef(new Compartment());
     const extensionsRef = useRef<Extension[]>([]);
+    // Latest props, so a restored state is reconfigured to what the editor shows now, not to
+    // what it was created with.
+    const latest = useRef({
+      language,
+      readOnly,
+      completionSource,
+      ariaLabel,
+    });
+    latest.current = {
+      language,
+      readOnly,
+      completionSource,
+      ariaLabel,
+    };
 
     useEffect(() => {
       const parent = host.current;
@@ -145,6 +159,7 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
           ...historyKeymap,
           ...searchKeymap,
           ...foldKeymap,
+          ...lintKeymap,
           indentWithTab,
           {
             key: "Escape",
@@ -155,10 +170,12 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
             },
           },
         ]),
-        EditorView.contentAttributes.of({
-          "aria-label": ariaLabel,
-          "aria-multiline": "true",
-        }),
+        labelCompartment.current.of(
+          EditorView.contentAttributes.of({
+            "aria-label": ariaLabel,
+            "aria-multiline": "true",
+          }),
+        ),
         EditorView.domEventHandlers({
           compositionstart: () => {
             callbacks.current.onComposingChange?.(true);
@@ -222,8 +239,32 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
     }, [completionSource]);
 
     useEffect(() => {
+      view.current?.dispatch({
+        effects: labelCompartment.current.reconfigure(
+          EditorView.contentAttributes.of({
+            "aria-label": ariaLabel,
+            "aria-multiline": "true",
+          }),
+        ),
+      });
+    }, [ariaLabel]);
+
+    // Composition never outlives the editor: an unmount mid-IME would otherwise leave the
+    // document state parked in "composing" with no event to release it.
+    useEffect(
+      () => () => {
+        callbacks.current.onComposingChange?.(false);
+      },
+      [],
+    );
+
+    const lastDiagnostics = useRef<string>("");
+    useEffect(() => {
       const current = view.current;
       if (!current) return;
+      const key = JSON.stringify(diagnostics);
+      if (key === lastDiagnostics.current) return;
+      lastDiagnostics.current = key;
       current.dispatch(
         setDiagnostics(
           current.state,
@@ -291,6 +332,31 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
               HISTORY_FIELDS,
             ),
           );
+          // Serialised extensions carry mount-time compartment values; restore current props.
+          const props = latest.current;
+          current.dispatch({
+            effects: [
+              languageCompartment.current.reconfigure(
+                props.language === "json" ? json() : yaml(),
+              ),
+              readOnlyCompartment.current.reconfigure(
+                EditorState.readOnly.of(props.readOnly),
+              ),
+              completionCompartment.current.reconfigure(
+                props.completionSource
+                  ? autocompletion({
+                      override: [toCmCompletion(props.completionSource)],
+                    })
+                  : autocompletion(),
+              ),
+              labelCompartment.current.reconfigure(
+                EditorView.contentAttributes.of({
+                  "aria-label": props.ariaLabel,
+                  "aria-multiline": "true",
+                }),
+              ),
+            ],
+          });
         },
       }),
       [],

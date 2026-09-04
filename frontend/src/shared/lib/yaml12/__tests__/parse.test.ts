@@ -1,0 +1,231 @@
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { describe, expect, it } from "vitest";
+
+import { locateRange, parseSource } from "..";
+
+const FIXTURE_RELATIVE = "backend/tests/fixtures/strategy_documents";
+const findFixtures = (): string => {
+  let dir = process.cwd();
+  for (;;) {
+    const candidate = resolve(dir, FIXTURE_RELATIVE);
+    if (existsSync(candidate)) return candidate;
+    const parent = dirname(dir);
+    if (parent === dir)
+      throw new Error(`fixtures not found — from=${process.cwd()}`);
+    dir = parent;
+  }
+};
+const read = (file: string) =>
+  readFileSync(resolve(findFixtures(), file), "utf8");
+const slice = (
+  text: string,
+  range: { start: { offset: number }; end: { offset: number } },
+) => text.slice(range.start.offset, range.end.offset);
+
+describe("parseSource", () => {
+  it("maps every value and key of the golden YAML fixture to its exact text", () => {
+    const text = read("quality_momentum.yaml");
+    const parsed = parseSource(text, "yaml");
+    expect(parsed.status).toBe("ok");
+    if (parsed.status !== "ok") return;
+    expect(slice(text, parsed.valueRanges.get("/risk/max_name_weight")!)).toBe(
+      "0.05",
+    );
+    expect(slice(text, parsed.keyRanges.get("/risk/max_name_weight")!)).toBe(
+      "max_name_weight",
+    );
+    expect(
+      slice(
+        text,
+        parsed.valueRanges.get("/factors/factors/0/graph/nodes/1/window")!,
+      ),
+    ).toBe("252");
+    expect(parsed.valueRanges.get("/risk/max_name_weight")!.start).toEqual({
+      line: text
+        .split("\n")
+        .findIndex((line) => line.includes("max_name_weight")),
+      column: 19,
+      offset: text.indexOf("0.05"),
+    });
+    expect(parsed.tree.risk).toEqual({ max_name_weight: 0.05 });
+  });
+
+  it("gives the same tree for the JSON twin, taking values from JSON.parse", () => {
+    const yaml = parseSource(read("quality_momentum.yaml"), "yaml");
+    const json = parseSource(read("quality_momentum.json"), "json");
+    expect(json.status).toBe("ok");
+    if (yaml.status !== "ok" || json.status !== "ok") return;
+    expect(json.tree.title).toBe(yaml.tree.title);
+    expect(json.valueRanges.has("/risk/max_name_weight")).toBe(true);
+  });
+
+  it("locates a missing pointer at the nearest parent and an unknown key at its key", () => {
+    const text = read("quality_momentum.unknown_key.yaml");
+    const parsed = parseSource(text, "yaml");
+    expect(parsed.status).toBe("ok");
+    expect(slice(text, locateRange(parsed, "/risk/max_name_wieght")!)).toBe(
+      "0.05",
+    );
+    expect(locateRange(parsed, "/data/end_date")).toEqual(
+      parsed.valueRanges.get("/data"),
+    );
+    expect(locateRange(parsed, "/nowhere/deep")).toEqual(
+      parsed.valueRanges.get(""),
+    );
+  });
+
+  // Advisory positions (editor ADR D2): the `yaml` reader reports an unterminated quote where
+  // the stream ends and a second document at its content; the backend points at the opener.
+  it.each([
+    ['title: "unterminated\ndata:\n', "yaml.syntax", 2],
+    ["a: 1\na: 2\n", "document.duplicate_key", 1],
+    ["base: &b [1]\nc: *b\n", "yaml.anchor_or_alias", 0],
+    ["a: !custom 1\n", "yaml.tag", 0],
+    ["%YAML 1.1\n---\na: 1\n", "yaml.directive", 0],
+    ["a:\n  <<: {x: 1}\n", "yaml.merge_key", 1],
+    ["window: 1_000\n", "yaml.non_core_number", 0],
+    ["a: .nan\n", "document.non_finite_number", 0],
+    ["a: 9007199254740993\n", "document.integer_out_of_range", 0],
+    ["1: v\n", "document.non_string_key", 0],
+    ["a: 1\n---\nb: 2\n", "yaml.multiple_documents", 2],
+    ["- a\n", "document.not_a_mapping", 0],
+  ])("rejects %j with %s and a line", (text, code, line) => {
+    const parsed = parseSource(text, "yaml");
+    expect(parsed.status).toBe("rejected");
+    if (parsed.status !== "rejected") return;
+    expect(parsed.diagnostics[0].code).toBe(code);
+    expect(parsed.diagnostics[0].range?.start.line).toBe(line);
+  });
+
+  it("reports JSON syntax errors with their position and rejects NaN", () => {
+    const parsed = parseSource('{"a": 1,\n "b": }', "json");
+    expect(parsed.status).toBe("rejected");
+    if (parsed.status !== "rejected") return;
+    expect(parsed.diagnostics[0].code).toBe("json.syntax");
+    expect(parsed.diagnostics[0].range?.start.line).toBe(1);
+    expect(parseSource('{"a": NaN}', "json").diagnostics[0]?.code).toBe(
+      "json.syntax",
+    );
+    expect(parseSource("[1, 2]", "json").diagnostics[0]?.code).toBe(
+      "document.not_a_mapping",
+    );
+  });
+
+  it("accepts JSON whitespace tabs and YAML tabs inside scalar content", () => {
+    const json = parseSource('{"a":\t1,\n\t"b":"x\\ty"}', "json");
+    expect(json.status).toBe("ok");
+    if (json.status === "ok") expect(json.tree).toEqual({ a: 1, b: "x\ty" });
+
+    const yaml = parseSource(
+      "double: \"x:\ty\"\nsingle: 'x:\ty'\nblock: |\n  x:\ty\n",
+      "yaml",
+    );
+    expect(yaml.status).toBe("ok");
+    if (yaml.status === "ok") {
+      expect(yaml.tree).toEqual({
+        double: "x:\ty",
+        single: "x:\ty",
+        block: "x:\ty\n",
+      });
+    }
+  });
+
+  it("rejects decoded lone surrogates while accepting a valid escaped pair", () => {
+    for (const [source, format, code] of [
+      ['a: "\\ud800"\n', "yaml", "yaml.syntax"],
+      ['"\\ud800": value\n', "yaml", "yaml.syntax"],
+      ['{"a":"\\ud800"}', "json", "json.syntax"],
+      ['{"\\ud800":"value"}', "json", "json.syntax"],
+    ] as const) {
+      expect(parseSource(source, format).diagnostics[0]?.code).toBe(code);
+    }
+    for (const [source, format] of [
+      ['a: "\\ud83d\\ude00"\n', "yaml"],
+      ['{"a":"\\ud83d\\ude00"}', "json"],
+    ] as const) {
+      const parsed = parseSource(source, format);
+      expect(parsed.status).toBe("ok");
+      if (parsed.status === "ok") expect(parsed.tree.a).toBe("😀");
+    }
+  });
+
+  it.each([
+    ['a: "\\ud800"\nb: &x 1\n', "yaml.anchor_or_alias"],
+    ['a: "\\ud800"\nb: 1_000\n', "yaml.non_core_number"],
+    ['? ["\\ud800"]\n: value\n', "document.non_string_key"],
+    ['a: "\\ud800"\na: 2\n', "yaml.syntax"],
+    ['a: 1\na: "\\ud800"\n', "document.duplicate_key"],
+    ["a: &x 1\nb: !custom 2\n", "yaml.anchor_or_alias"],
+    ["a: 9007199254740993\na: 2\n", "document.integer_out_of_range"],
+    ["a: .nan\na: 2\n", "document.non_finite_number"],
+  ])(
+    "matches backend rejection order for combined policies: %s",
+    (source, code) => {
+      expect(parseSource(source, "yaml").diagnostics[0]?.code).toBe(code);
+    },
+  );
+
+  it("applies the global depth guard before later tree-policy errors", () => {
+    const deep = `${"a: {".repeat(33)}value${"}".repeat(33)}\nb: 9007199254740993\n`;
+    expect(parseSource(deep, "yaml").diagnostics[0]?.code).toBe(
+      "document.too_deep",
+    );
+    const deepKey = `? ${"[".repeat(33)}x${"]".repeat(33)}\n: value\n`;
+    expect(parseSource(deepKey, "yaml").diagnostics[0]?.code).toBe(
+      "document.too_deep",
+    );
+    for (const stream of [`${deep}---\nb: 2\n`, `b: 2\n---\n${deep}`]) {
+      expect(parseSource(stream, "yaml").diagnostics[0]?.code).toBe(
+        "document.too_deep",
+      );
+    }
+  });
+
+  it("matches scanner-versus-tree depth ordering at 31/32/33 collections", () => {
+    const value = (depth: number) =>
+      `a: ${"[".repeat(depth)}x${"]".repeat(depth)}\nb: &anchor 1\n`;
+    expect(parseSource(value(31), "yaml").diagnostics[0]?.code).toBe(
+      "yaml.anchor_or_alias",
+    );
+    expect(parseSource(value(32), "yaml").diagnostics[0]?.code).toBe(
+      "yaml.anchor_or_alias",
+    );
+    expect(parseSource(value(33), "yaml").diagnostics[0]?.code).toBe(
+      "document.too_deep",
+    );
+
+    const key = (depth: number) =>
+      `? ${"[".repeat(depth)}x${"]".repeat(depth)}\n: value\n`;
+    expect(parseSource(key(32), "yaml").diagnostics[0]?.code).toBe(
+      "document.non_string_key",
+    );
+    expect(parseSource(key(33), "yaml").diagnostics[0]?.code).toBe(
+      "document.too_deep",
+    );
+  });
+
+  it("rejects a raw lone surrogate before applying the byte limit", () => {
+    const source = `${"a".repeat(512 * 1024)}\ud800`;
+    expect(parseSource(source, "yaml").diagnostics[0]?.code).toBe(
+      "yaml.syntax",
+    );
+  });
+
+  it("rejects tabs used as YAML separation whitespace", () => {
+    for (const text of ["a: \tv\n", "a:\n\tv: 1\n", "a: foo\tbar\n"]) {
+      expect(parseSource(text, "yaml").diagnostics[0]?.code).toBe(
+        "yaml.syntax",
+      );
+    }
+  });
+
+  it("positions are UTF-16 code units so they match editor offsets", () => {
+    const text = 'title: "😀"\nrisk: 1\n';
+    const parsed = parseSource(text, "yaml");
+    if (parsed.status !== "ok") throw new Error("expected ok");
+    const risk = parsed.valueRanges.get("/risk")!;
+    expect(text.slice(risk.start.offset, risk.end.offset)).toBe("1");
+    expect(risk.start.line).toBe(1);
+  });
+});

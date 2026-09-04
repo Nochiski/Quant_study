@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Literal, TypeAlias
+from typing import Literal, TypeAlias, get_args, get_type_hints
 
 
 class UnaryOperator(StrEnum):
@@ -192,3 +192,14 @@ class FactorGraph:
     nodes: tuple[ExpressionNode, ...]
     output_node_id: str
     missing_policy: MissingPolicy = MissingPolicy.DROP
+
+
+def _kind_of(node_type: type) -> str:
+    return get_args(get_type_hints(node_type)["kind"])[0]
+
+
+# `kind` discriminator → node type, derived from each node's `kind: Literal[...]` hint (the
+# only declaration). The authoring schema (P1-05) reads this map; nothing restates the union.
+EXPRESSION_NODE_KINDS: dict[str, type] = {
+    _kind_of(node_type): node_type for node_type in get_args(ExpressionNode)
+}

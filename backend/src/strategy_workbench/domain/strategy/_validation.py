@@ -8,6 +8,7 @@ from strategy_workbench.domain.factor.facade.validation import (
     validate_factor_graph,
 )
 
+from ._constraints import SEMANTIC_ONLY_CODES, STRATEGY_SCALAR_CONSTRAINTS, resolve_scalar
 from ._models import (
     ChoiceParameter,
     FloatParameter,
@@ -44,7 +45,15 @@ class StrategyValidation:
     issues: tuple[ValidationIssue, ...]
 
 
+_CATALOG_CODES = frozenset(constraint.code for constraint in STRATEGY_SCALAR_CONSTRAINTS)
+
+
 def _issue(code: str, path: str, message: str) -> ValidationIssue:
+    if code not in SEMANTIC_ONLY_CODES and code not in _CATALOG_CODES:
+        raise ValueError(
+            "validation code has no owner — add it to SEMANTIC_ONLY_CODES or the scalar catalog: "
+            f"code={code!r}"
+        )
     return ValidationIssue(code=code, path=path, message=message, kind=ValidationKind.SEMANTIC)
 
 
@@ -62,84 +71,24 @@ def validate_strategy(spec: StrategySpec) -> StrategyValidation:
         )
     if not spec.factors.factors:
         issues.append(_issue("strategy.factor.required", "factors", "팩터를 하나 이상 추가하세요."))
-    if not 0 < spec.signal.entry_percentile <= 1:
-        issues.append(
-            _issue(
-                "strategy.signal.percentile",
-                "signal.entry_percentile",
-                "선택 비율은 0보다 크고 1 이하여야 합니다.",
+    # Scalar bounds are owned by the constraint catalog (P1-04); the schema API reads the same rows.
+    for constraint in STRATEGY_SCALAR_CONSTRAINTS:
+        value = resolve_scalar(spec, constraint.pointer)
+        if value is None:
+            continue
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            raise TypeError(
+                "scalar constraint applied to a non-numeric field — "
+                f"pointer={constraint.pointer!r} value={value!r}"
             )
-        )
-    if spec.portfolio.selection_count <= 0:
-        issues.append(
-            _issue(
-                "strategy.portfolio.selection_count",
-                "portfolio.selection_count",
-                "선택 종목 수는 1 이상이어야 합니다.",
-            )
-        )
-    if spec.portfolio.short_selection_count <= 0:
-        issues.append(
-            _issue(
-                "strategy.portfolio.short_selection_count",
-                "portfolio.short_selection_count",
-                "숏 선택 종목 수는 1 이상이어야 합니다.",
-            )
-        )
-    if not 0 < spec.portfolio.selection_percentile <= 0.5:
-        issues.append(
-            _issue(
-                "strategy.portfolio.selection_percentile",
-                "portfolio.selection_percentile",
-                "선택 분위수는 0보다 크고 0.5 이하여야 합니다.",
-            )
-        )
-    if spec.portfolio.rebalance_every_n_sessions <= 0:
-        issues.append(
-            _issue(
-                "strategy.portfolio.rebalance_every_n_sessions",
-                "portfolio.rebalance_every_n_sessions",
-                "리밸런싱 세션 간격은 1 이상이어야 합니다.",
-            )
-        )
-    if spec.portfolio.turnover_buffer_count < 0:
-        issues.append(
-            _issue(
-                "strategy.portfolio.turnover_buffer_count",
-                "portfolio.turnover_buffer_count",
-                "회전율 버퍼는 음수일 수 없습니다.",
-            )
-        )
-    if not 0 <= spec.portfolio.minimum_trade_weight <= 1:
-        issues.append(
-            _issue(
-                "strategy.portfolio.minimum_trade_weight",
-                "portfolio.minimum_trade_weight",
-                "최소 거래 비중은 0 이상 1 이하여야 합니다.",
-            )
-        )
-    if spec.portfolio.minimum_liquidity is not None and spec.portfolio.minimum_liquidity < 0:
-        issues.append(
-            _issue(
-                "strategy.portfolio.minimum_liquidity",
-                "portfolio.minimum_liquidity",
-                "최소 유동성은 음수일 수 없습니다.",
-            )
-        )
+        if not constraint.satisfied_by(value):
+            issues.append(_issue(constraint.code, constraint.path, constraint.message))
     if spec.portfolio.minimum_liquidity is not None and spec.portfolio.liquidity_field_id is None:
         issues.append(
             _issue(
                 "strategy.portfolio.liquidity_field",
                 "portfolio.liquidity_field_id",
                 "최소 유동성을 쓰려면 유동성 필드를 지정해야 합니다.",
-            )
-        )
-    if spec.risk.gross_exposure <= 0:
-        issues.append(
-            _issue(
-                "strategy.risk.gross_exposure",
-                "risk.gross_exposure",
-                "총 익스포저는 0보다 커야 합니다.",
             )
         )
     if abs(spec.risk.net_exposure) > spec.risk.gross_exposure:
@@ -159,22 +108,6 @@ def validate_strategy(spec: StrategySpec) -> StrategyValidation:
                 "strategy.risk.long_only_exposure",
                 "risk.net_exposure",
                 "롱온리 전략은 총 익스포저와 순 익스포저가 같아야 합니다.",
-            )
-        )
-    if not 0 < spec.risk.max_name_weight <= 1:
-        issues.append(
-            _issue(
-                "strategy.risk.max_name_weight",
-                "risk.max_name_weight",
-                "종목 한도는 0보다 크고 1 이하여야 합니다.",
-            )
-        )
-    if not 0 < spec.risk.max_sector_weight <= 1:
-        issues.append(
-            _issue(
-                "strategy.risk.max_sector_weight",
-                "risk.max_sector_weight",
-                "섹터 한도는 0보다 크고 1 이하여야 합니다.",
             )
         )
     if spec.portfolio.weighting is WeightingMethod.RISK and spec.risk.risk_field_id is None:
@@ -200,18 +133,6 @@ def validate_strategy(spec: StrategySpec) -> StrategyValidation:
                 "signal.regime_field_id",
                 "레짐 기준값을 쓰려면 레짐 필드를 지정해야 합니다.",
             )
-        )
-    if not 0 < spec.execution.participation_rate <= 1:
-        issues.append(
-            _issue(
-                "strategy.execution.participation",
-                "execution.participation_rate",
-                "참여율은 0보다 크고 1 이하여야 합니다.",
-            )
-        )
-    if spec.execution.fee_bps < 0 or spec.execution.slippage_bps < 0:
-        issues.append(
-            _issue("strategy.execution.cost", "execution", "거래 비용은 음수일 수 없습니다.")
         )
 
     parameter_ids = [parameter.parameter_id for parameter in spec.parameters]

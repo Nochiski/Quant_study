@@ -54,9 +54,7 @@ def _target_node(module: str, nodes: tuple[str, ...]) -> str | None:
 
 def _package_of(path: Path) -> str:
     """Dotted name of the package a source file lives in, used to resolve its relative imports."""
-    parts = path.relative_to(SRC_ROOT).parts
-    if path.name != "__init__.py":
-        parts = parts[:-1]
+    parts = path.relative_to(SRC_ROOT).parts[:-1]
     return ".".join((PACKAGE, *parts))
 
 
@@ -208,4 +206,27 @@ def test_relative_import_resolution_matches_the_absolute_spelling() -> None:
     assert _absolute_imports(path, source) == [
         (1, f"{PACKAGE}.application.portfolio_design._models"),
         (2, f"{PACKAGE}.application.portfolio_design.ports.outgoing.raw_observations"),
+    ]
+
+
+def test_relative_imports_from_package_initializers_cannot_bypass_the_gate() -> None:
+    """An ``__init__.py`` lives in its parent package, just like every other module file."""
+    roots = _node_roots()
+    dependencies = {
+        node: _read_depends_on(root / "facade" / "__init__.py") for node, root in roots.items()
+    }
+    path = SRC_ROOT / "application" / "strategy_design" / "facade" / "__init__.py"
+    source = (
+        "from ....adapters.outbound.strategy_memory._repository "
+        "import InMemoryStrategyRepository\n"
+    )
+
+    violations = _boundary_violations(path, source, roots, dependencies)
+
+    origin = path.relative_to(SRC_ROOT)
+    target = f"{PACKAGE}.adapters.outbound.strategy_memory._repository"
+    assert violations == [
+        f"{origin}:1: undeclared application.strategy_design -> "
+        f"adapters.outbound.strategy_memory ({target})",
+        f"{origin}:1: deep import into adapters.outbound.strategy_memory ({target})",
     ]

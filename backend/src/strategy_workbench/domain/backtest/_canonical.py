@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import date, datetime
 from enum import Enum
 
@@ -18,8 +18,10 @@ def backtest_run_fingerprint(
     metric_registry_version: str,
 ) -> str:
     """Identify every semantic input needed to reproduce one engine result."""
+    # How the strategy was referenced (saved revision id/hash, client source hash) is
+    # provenance, recorded in RunManifest.strategy_provenance; it is not an engine input.
     payload = {
-        "run_spec": asdict(spec),
+        "run_spec": asdict(replace(spec, strategy_source=None)),
         "data_snapshot_id": data_snapshot_id,
         "target_tape_hash": target_tape_hash,
         "engine_version": engine_version,

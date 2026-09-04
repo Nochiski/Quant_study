@@ -23,6 +23,14 @@ export type BacktestRunResult = {
 
 /**
  * BacktestRunSpec
+ *
+ * A request names its strategy once: `strategy` (legacy inline spec) or `strategy_source`.
+ *
+ * `strategy` stays for compatibility with the JSON editors; new callers use `strategy_source`
+ * so a run can name a saved revision (P1-09). The run service rejects a request carrying both
+ * or neither (one coded 422, `backtest.run.invalid`).
+ * After resolution the run spec stored in the manifest carries both: `strategy` is the exact
+ * spec that was executed and `strategy_source` says where it came from.
  */
 export type BacktestRunSpec = {
   /**
@@ -42,7 +50,11 @@ export type BacktestRunSpec = {
    * Metric Windows
    */
   metric_windows?: Array<MetricWindow>;
-  strategy: StrategySpec;
+  strategy?: StrategySpec | null;
+  /**
+   * Strategy Source
+   */
+  strategy_source?: SavedRevisionReference | InlineDraft | null;
 };
 
 /**
@@ -522,6 +534,36 @@ export type DiagnosticKind =
  * DiagnosticSeverity
  */
 export type DiagnosticSeverity = "error" | "warning";
+
+/**
+ * DiffEntry
+ *
+ * One leaf-level difference at a JSON Pointer of the canonical payload.
+ *
+ * `before`/`after` are JSON values (scalars, or a whole subtree when a key or array item was
+ * added/removed). `changed` never carries containers: nested differences are reported per
+ * leaf so an editor can highlight exact ranges.
+ */
+export type DiffEntry = {
+  /**
+   * After
+   */
+  after: unknown;
+  /**
+   * Before
+   */
+  before: unknown;
+  kind: DiffKind;
+  /**
+   * Pointer
+   */
+  pointer: string;
+};
+
+/**
+ * DiffKind
+ */
+export type DiffKind = "added" | "removed" | "changed";
 
 /**
  * DrawdownPoint
@@ -1209,6 +1251,96 @@ export type FieldCatalogFacets = {
 };
 
 /**
+ * FieldContract
+ *
+ * One scalar authoring path with everything an editor needs to explain it.
+ *
+ * `pointer` is a JSON Pointer template: array positions are written as an asterisk
+ * (for example the factor weight row is `/factors/factors/<asterisk>/weight`). Rows of a
+ * discriminated union share the pointer and differ by `branch` (the member's `kind`).
+ * Bounds and metadata come from the constraint catalog; type, enum, nullability, required
+ * and default come from the model.
+ */
+export type FieldContract = {
+  /**
+   * Applied Stage
+   */
+  applied_stage?: string | null;
+  /**
+   * Branch
+   */
+  branch?: string | null;
+  /**
+   * Const
+   */
+  const?: string | null;
+  /**
+   * Default
+   */
+  default?: unknown;
+  /**
+   * Description Key
+   */
+  description_key?: string | null;
+  /**
+   * Display Unit
+   */
+  display_unit?: string | null;
+  /**
+   * Enum
+   */
+  enum?: Array<string> | null;
+  /**
+   * Example
+   */
+  example?: unknown;
+  /**
+   * Exclusive Maximum
+   */
+  exclusive_maximum?: boolean;
+  /**
+   * Exclusive Minimum
+   */
+  exclusive_minimum?: boolean;
+  /**
+   * Format
+   */
+  format?: string | null;
+  /**
+   * Has Default
+   */
+  has_default?: boolean;
+  /**
+   * Maximum
+   */
+  maximum?: number | null;
+  /**
+   * Minimum
+   */
+  minimum?: number | null;
+  /**
+   * Nullable
+   */
+  nullable?: boolean;
+  /**
+   * Pointer
+   */
+  pointer: string;
+  /**
+   * Required
+   */
+  required: boolean;
+  /**
+   * Type
+   */
+  type: string;
+  /**
+   * Unit
+   */
+  unit?: string | null;
+};
+
+/**
  * FieldCoverageCapability
  */
 export type FieldCoverageCapability = {
@@ -1364,6 +1496,26 @@ export type HttpValidationError = {
    * Detail
    */
   detail?: Array<ValidationError>;
+};
+
+/**
+ * InlineDraft
+ *
+ * Run an unsaved spec (draft backtests only; never a deployment source).
+ *
+ * `source_hash` is client-asserted provenance: the server cannot verify it without the text
+ * and records it as given.
+ */
+export type InlineDraft = {
+  /**
+   * Kind
+   */
+  kind: "inline_draft";
+  /**
+   * Source Hash
+   */
+  source_hash?: string | null;
+  spec: StrategySpec;
 };
 
 /**
@@ -1555,6 +1707,28 @@ export type NodeValueType =
  * OrderStyle
  */
 export type OrderStyle = "market";
+
+/**
+ * Page
+ */
+export type PageRevisionSummary = {
+  /**
+   * Items
+   */
+  items: Array<RevisionSummary>;
+  /**
+   * Limit
+   */
+  limit: number;
+  /**
+   * Offset
+   */
+  offset: number;
+  /**
+   * Total
+   */
+  total: number;
+};
 
 /**
  * PanelPreviewCostEstimate
@@ -2128,6 +2302,21 @@ export type ResolvedFactorParameter = {
 };
 
 /**
+ * ReviseDocumentRequest
+ */
+export type ReviseDocumentRequest = {
+  /**
+   * Expected Revision
+   */
+  expected_revision: number;
+  format: SourceFormat;
+  /**
+   * Source
+   */
+  source: string;
+};
+
+/**
  * ReviseStrategyRequest
  */
 export type ReviseStrategyRequest = {
@@ -2136,6 +2325,78 @@ export type ReviseStrategyRequest = {
    */
   expected_revision: number;
   spec: StrategySpec;
+};
+
+/**
+ * RevisionDiff
+ *
+ * Semantic differences between two stored revisions of one strategy (P1-08).
+ *
+ * Computed over canonical payloads: identity, comments and formatting are invisible;
+ * equal `spec_hash` implies `changes == ()`.
+ */
+export type RevisionDiff = {
+  /**
+   * Base Revision
+   */
+  base_revision: number;
+  /**
+   * Base Spec Hash
+   */
+  base_spec_hash: string;
+  /**
+   * Changes
+   */
+  changes: Array<DiffEntry>;
+  /**
+   * Strategy Id
+   */
+  strategy_id: string;
+  /**
+   * Target Revision
+   */
+  target_revision: number;
+  /**
+   * Target Spec Hash
+   */
+  target_spec_hash: string;
+};
+
+/**
+ * RevisionOrigin
+ */
+export type RevisionOrigin = "document" | "legacy_json";
+
+/**
+ * RevisionSummary
+ */
+export type RevisionSummary = {
+  /**
+   * Change Note
+   */
+  change_note?: string | null;
+  /**
+   * Created At
+   */
+  created_at: string;
+  origin: RevisionOrigin;
+  /**
+   * Revision
+   */
+  revision: number;
+  source_format: SourceFormat | null;
+  /**
+   * Source Hash
+   */
+  source_hash: string | null;
+  /**
+   * Spec Hash
+   */
+  spec_hash: string;
+  /**
+   * Strategy Id
+   */
+  strategy_id: string;
 };
 
 /**
@@ -2244,6 +2505,7 @@ export type RunManifest = {
    * Strategy Hash
    */
   strategy_hash: string;
+  strategy_provenance: StrategyProvenance;
   /**
    * Target Tape Hash
    */
@@ -2266,6 +2528,17 @@ export type RunStatus =
   | "failed";
 
 /**
+ * SaveDocumentRequest
+ */
+export type SaveDocumentRequest = {
+  format: SourceFormat;
+  /**
+   * Source
+   */
+  source: string;
+};
+
+/**
  * SavedFactorNode
  */
 export type SavedFactorNode = {
@@ -2281,6 +2554,30 @@ export type SavedFactorNode = {
    * Node Id
    */
   node_id: string;
+};
+
+/**
+ * SavedRevisionReference
+ *
+ * Run a stored revision; the run fails before starting if the hash no longer matches.
+ */
+export type SavedRevisionReference = {
+  /**
+   * Expected Spec Hash
+   */
+  expected_spec_hash: string;
+  /**
+   * Kind
+   */
+  kind: "saved_revision";
+  /**
+   * Revision
+   */
+  revision: number;
+  /**
+   * Strategy Id
+   */
+  strategy_id: string;
 };
 
 /**
@@ -2435,6 +2732,126 @@ export type SourceRange = {
 };
 
 /**
+ * StrategyDocument
+ *
+ * A stored revision as an editor sees it: exact source plus what it compiles to.
+ *
+ * `generated` is True when the revision predates document authoring (legacy JSON API) and the
+ * source shown is a canonical JSON projection of the stored spec, not text an author wrote.
+ */
+export type StrategyDocument = {
+  /**
+   * Created At
+   */
+  created_at: string;
+  format: SourceFormat;
+  /**
+   * Generated
+   */
+  generated: boolean;
+  origin: RevisionOrigin;
+  /**
+   * Revision
+   */
+  revision: number;
+  /**
+   * Schema Version
+   */
+  schema_version: string;
+  /**
+   * Source
+   */
+  source: string;
+  /**
+   * Source Hash
+   */
+  source_hash: string;
+  spec: StrategySpec;
+  /**
+   * Spec Hash
+   */
+  spec_hash: string;
+  /**
+   * Strategy Id
+   */
+  strategy_id: string;
+};
+
+/**
+ * StrategyDocumentContract
+ *
+ * Per-field authoring contract plus the registry versions the schema was built against.
+ *
+ * `factor_registry_version` and `dataset_snapshot_id` identify the catalogs an editor should
+ * pair with this schema (field ids, factor ids); the HTTP layer adds their links.
+ */
+export type StrategyDocumentContract = {
+  /**
+   * Contract Hash
+   */
+  contract_hash: string;
+  /**
+   * Dataset Snapshot Id
+   */
+  dataset_snapshot_id: string;
+  /**
+   * Factor Registry Version
+   */
+  factor_registry_version: string;
+  /**
+   * Fields
+   */
+  fields: Array<FieldContract>;
+  /**
+   * Schema Hash
+   */
+  schema_hash: string;
+  /**
+   * Schema Version
+   */
+  schema_version: string;
+};
+
+/**
+ * StrategyDocumentContractResponse
+ *
+ * Wire envelope: the application contract plus the catalog links this API serves.
+ */
+export type StrategyDocumentContractResponse = {
+  contract: StrategyDocumentContract;
+  /**
+   * Equity Catalog Url
+   */
+  equity_catalog_url: string;
+  /**
+   * Factor Catalog Url
+   */
+  factor_catalog_url: string;
+};
+
+/**
+ * StrategyDocumentSchema
+ *
+ * Runtime JSON Schema of the authoring document; `schema_hash` is the ETag.
+ */
+export type StrategyDocumentSchema = {
+  /**
+   * Schema
+   */
+  schema: {
+    [key: string]: unknown;
+  };
+  /**
+   * Schema Hash
+   */
+  schema_hash: string;
+  /**
+   * Schema Version
+   */
+  schema_version: string;
+};
+
+/**
  * StrategyExplanation
  */
 export type StrategyExplanation = {
@@ -2479,6 +2896,40 @@ export type StrategyIdentity = {
    */
   strategy_id: string;
 };
+
+/**
+ * StrategyProvenance
+ *
+ * What exactly was run: recorded in the manifest so a result names its revision.
+ */
+export type StrategyProvenance = {
+  kind: StrategySourceKind;
+  /**
+   * Revision
+   */
+  revision?: number | null;
+  /**
+   * Schema Version
+   */
+  schema_version: string;
+  /**
+   * Source Hash
+   */
+  source_hash?: string | null;
+  /**
+   * Spec Hash
+   */
+  spec_hash: string;
+  /**
+   * Strategy Id
+   */
+  strategy_id?: string | null;
+};
+
+/**
+ * StrategySourceKind
+ */
+export type StrategySourceKind = "saved_revision" | "inline_draft";
 
 /**
  * StrategySpec
@@ -3427,6 +3878,88 @@ export type GetStrategyResponses = {
 export type GetStrategyResponse =
   GetStrategyResponses[keyof GetStrategyResponses];
 
+export type DiffStrategyRevisionsData = {
+  body?: never;
+  path: {
+    /**
+     * Strategy Id
+     */
+    strategy_id: string;
+  };
+  query: {
+    /**
+     * Base
+     */
+    base: number;
+    /**
+     * Target
+     */
+    target: number;
+  };
+  url: "/api/v1/strategies/{strategy_id}/diff";
+};
+
+export type DiffStrategyRevisionsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type DiffStrategyRevisionsError =
+  DiffStrategyRevisionsErrors[keyof DiffStrategyRevisionsErrors];
+
+export type DiffStrategyRevisionsResponses = {
+  /**
+   * Successful Response
+   */
+  200: RevisionDiff;
+};
+
+export type DiffStrategyRevisionsResponse =
+  DiffStrategyRevisionsResponses[keyof DiffStrategyRevisionsResponses];
+
+export type ListStrategyRevisionsData = {
+  body?: never;
+  path: {
+    /**
+     * Strategy Id
+     */
+    strategy_id: string;
+  };
+  query?: {
+    /**
+     * Offset
+     */
+    offset?: number;
+    /**
+     * Limit
+     */
+    limit?: number;
+  };
+  url: "/api/v1/strategies/{strategy_id}/revisions";
+};
+
+export type ListStrategyRevisionsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ListStrategyRevisionsError =
+  ListStrategyRevisionsErrors[keyof ListStrategyRevisionsErrors];
+
+export type ListStrategyRevisionsResponses = {
+  /**
+   * Successful Response
+   */
+  200: PageRevisionSummary;
+};
+
+export type ListStrategyRevisionsResponse =
+  ListStrategyRevisionsResponses[keyof ListStrategyRevisionsResponses];
+
 export type ReviseStrategyData = {
   body: ReviseStrategyRequest;
   path: {
@@ -3459,6 +3992,69 @@ export type ReviseStrategyResponses = {
 export type ReviseStrategyResponse =
   ReviseStrategyResponses[keyof ReviseStrategyResponses];
 
+export type GetStrategyDocumentData = {
+  body?: never;
+  path: {
+    /**
+     * Strategy Id
+     */
+    strategy_id: string;
+    /**
+     * Revision
+     */
+    revision: number;
+  };
+  query?: never;
+  url: "/api/v1/strategies/{strategy_id}/revisions/{revision}/document";
+};
+
+export type GetStrategyDocumentErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetStrategyDocumentError =
+  GetStrategyDocumentErrors[keyof GetStrategyDocumentErrors];
+
+export type GetStrategyDocumentResponses = {
+  /**
+   * Successful Response
+   */
+  200: StrategyDocument;
+};
+
+export type GetStrategyDocumentResponse =
+  GetStrategyDocumentResponses[keyof GetStrategyDocumentResponses];
+
+export type CreateStrategyDocumentData = {
+  body: SaveDocumentRequest;
+  path?: never;
+  query?: never;
+  url: "/api/v1/strategy-documents";
+};
+
+export type CreateStrategyDocumentErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type CreateStrategyDocumentError =
+  CreateStrategyDocumentErrors[keyof CreateStrategyDocumentErrors];
+
+export type CreateStrategyDocumentResponses = {
+  /**
+   * Successful Response
+   */
+  201: StrategyDocument;
+};
+
+export type CreateStrategyDocumentResponse =
+  CreateStrategyDocumentResponses[keyof CreateStrategyDocumentResponses];
+
 export type CompileStrategyDocumentData = {
   body: CompileRequest;
   path?: never;
@@ -3485,3 +4081,101 @@ export type CompileStrategyDocumentResponses = {
 
 export type CompileStrategyDocumentResponse =
   CompileStrategyDocumentResponses[keyof CompileStrategyDocumentResponses];
+
+export type GetStrategyDocumentContractData = {
+  body?: never;
+  headers?: {
+    /**
+     * If-None-Match
+     */
+    "if-none-match"?: string | null;
+  };
+  path?: never;
+  query?: never;
+  url: "/api/v1/strategy-documents/contract";
+};
+
+export type GetStrategyDocumentContractErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetStrategyDocumentContractError =
+  GetStrategyDocumentContractErrors[keyof GetStrategyDocumentContractErrors];
+
+export type GetStrategyDocumentContractResponses = {
+  /**
+   * Successful Response
+   */
+  200: StrategyDocumentContractResponse;
+};
+
+export type GetStrategyDocumentContractResponse =
+  GetStrategyDocumentContractResponses[keyof GetStrategyDocumentContractResponses];
+
+export type GetStrategyDocumentSchemaData = {
+  body?: never;
+  headers?: {
+    /**
+     * If-None-Match
+     */
+    "if-none-match"?: string | null;
+  };
+  path?: never;
+  query?: never;
+  url: "/api/v1/strategy-documents/schema";
+};
+
+export type GetStrategyDocumentSchemaErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetStrategyDocumentSchemaError =
+  GetStrategyDocumentSchemaErrors[keyof GetStrategyDocumentSchemaErrors];
+
+export type GetStrategyDocumentSchemaResponses = {
+  /**
+   * Successful Response
+   */
+  200: StrategyDocumentSchema;
+};
+
+export type GetStrategyDocumentSchemaResponse =
+  GetStrategyDocumentSchemaResponses[keyof GetStrategyDocumentSchemaResponses];
+
+export type ReviseStrategyDocumentData = {
+  body: ReviseDocumentRequest;
+  path: {
+    /**
+     * Strategy Id
+     */
+    strategy_id: string;
+  };
+  query?: never;
+  url: "/api/v1/strategy-documents/{strategy_id}/revisions";
+};
+
+export type ReviseStrategyDocumentErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ReviseStrategyDocumentError =
+  ReviseStrategyDocumentErrors[keyof ReviseStrategyDocumentErrors];
+
+export type ReviseStrategyDocumentResponses = {
+  /**
+   * Successful Response
+   */
+  201: StrategyDocument;
+};
+
+export type ReviseStrategyDocumentResponse =
+  ReviseStrategyDocumentResponses[keyof ReviseStrategyDocumentResponses];

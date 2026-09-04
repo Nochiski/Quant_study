@@ -11,16 +11,26 @@ that every diagnostic kind can be attached to a source range.
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
 
+from strategy_workbench.domain.strategy.facade.document import SourceFormat, source_hash_of
 
-class SourceFormat(StrEnum):
-    YAML = "yaml"
-    JSON = "json"
+__all__ = [
+    "CodecLimits",
+    "DiagnosticKind",
+    "DiagnosticSeverity",
+    "DocumentCodecPort",
+    "ParseStatus",
+    "ParsedDocument",
+    "SourceDiagnostic",
+    "SourceFormat",
+    "SourcePosition",
+    "SourceRange",
+    "source_hash_of",
+]
 
 
 class DiagnosticKind(StrEnum):
@@ -116,11 +126,6 @@ class ParsedDocument:
             if current in self.value_ranges:
                 return self.value_ranges[current]
         return self.value_ranges.get("")
-
-
-def source_hash_of(source: str) -> str:
-    """sha256 of the exact UTF-8 source text (comments and whitespace included)."""
-    return hashlib.sha256(source.encode("utf-8")).hexdigest()
 
 
 class DocumentCodecPort(Protocol):

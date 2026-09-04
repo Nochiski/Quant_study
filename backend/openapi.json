@@ -38,6 +38,7 @@
         "type": "object"
       },
       "BacktestRunSpec": {
+        "description": "A request names its strategy once: `strategy` (legacy inline spec) or `strategy_source`.\n\n`strategy` stays for compatibility with the JSON editors; new callers use `strategy_source`\nso a run can name a saved revision (P1-09). The run service rejects a request carrying both\nor neither (one coded 422, `backtest.run.invalid`).\nAfter resolution the run spec stored in the manifest carries both: `strategy` is the exact\nspec that was executed and `strategy_source` says where it came from.",
         "properties": {
           "annualization_days": {
             "default": 252,
@@ -73,12 +74,30 @@
             "type": "array"
           },
           "strategy": {
-            "$ref": "#/components/schemas/StrategySpec"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StrategySpec"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "strategy_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SavedRevisionReference"
+              },
+              {
+                "$ref": "#/components/schemas/InlineDraft"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy Source"
           }
         },
-        "required": [
-          "strategy"
-        ],
         "title": "BacktestRunSpec",
         "type": "object"
       },
@@ -879,6 +898,41 @@
           "warning"
         ],
         "title": "DiagnosticSeverity",
+        "type": "string"
+      },
+      "DiffEntry": {
+        "description": "One leaf-level difference at a JSON Pointer of the canonical payload.\n\n`before`/`after` are JSON values (scalars, or a whole subtree when a key or array item was\nadded/removed). `changed` never carries containers: nested differences are reported per\nleaf so an editor can highlight exact ranges.",
+        "properties": {
+          "after": {
+            "title": "After"
+          },
+          "before": {
+            "title": "Before"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/DiffKind"
+          },
+          "pointer": {
+            "title": "Pointer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pointer",
+          "kind",
+          "before",
+          "after"
+        ],
+        "title": "DiffEntry",
+        "type": "object"
+      },
+      "DiffKind": {
+        "enum": [
+          "added",
+          "removed",
+          "changed"
+        ],
+        "title": "DiffKind",
         "type": "string"
       },
       "DrawdownPoint": {
@@ -2033,6 +2087,169 @@
         "title": "FieldCatalogFacets",
         "type": "object"
       },
+      "FieldContract": {
+        "description": "One scalar authoring path with everything an editor needs to explain it.\n\n`pointer` is a JSON Pointer template: array positions are written as an asterisk\n(for example the factor weight row is `/factors/factors/<asterisk>/weight`). Rows of a\ndiscriminated union share the pointer and differ by `branch` (the member's `kind`).\nBounds and metadata come from the constraint catalog; type, enum, nullability, required\nand default come from the model.",
+        "properties": {
+          "applied_stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied Stage"
+          },
+          "branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Branch"
+          },
+          "const": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Const"
+          },
+          "default": {
+            "title": "Default"
+          },
+          "description_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description Key"
+          },
+          "display_unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Unit"
+          },
+          "enum": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enum"
+          },
+          "example": {
+            "title": "Example"
+          },
+          "exclusive_maximum": {
+            "default": false,
+            "title": "Exclusive Maximum",
+            "type": "boolean"
+          },
+          "exclusive_minimum": {
+            "default": false,
+            "title": "Exclusive Minimum",
+            "type": "boolean"
+          },
+          "format": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Format"
+          },
+          "has_default": {
+            "default": false,
+            "title": "Has Default",
+            "type": "boolean"
+          },
+          "maximum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maximum"
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum"
+          },
+          "nullable": {
+            "default": false,
+            "title": "Nullable",
+            "type": "boolean"
+          },
+          "pointer": {
+            "title": "Pointer",
+            "type": "string"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          }
+        },
+        "required": [
+          "pointer",
+          "type",
+          "required"
+        ],
+        "title": "FieldContract",
+        "type": "object"
+      },
       "FieldCoverageCapability": {
         "properties": {
           "ends_on": {
@@ -2266,6 +2483,36 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "InlineDraft": {
+        "description": "Run an unsaved spec (draft backtests only; never a deployment source).\n\n`source_hash` is client-asserted provenance: the server cannot verify it without the text\nand records it as given.",
+        "properties": {
+          "kind": {
+            "const": "inline_draft",
+            "title": "Kind",
+            "type": "string"
+          },
+          "source_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Hash"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/StrategySpec"
+          }
+        },
+        "required": [
+          "spec",
+          "kind"
+        ],
+        "title": "InlineDraft",
         "type": "object"
       },
       "IntegerParameter": {
@@ -2569,6 +2816,37 @@
         ],
         "title": "OrderStyle",
         "type": "string"
+      },
+      "Page_RevisionSummary_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RevisionSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "offset",
+          "limit"
+        ],
+        "title": "Page",
+        "type": "object"
       },
       "PanelPreviewCostEstimate": {
         "properties": {
@@ -3452,6 +3730,28 @@
         "title": "ResolvedFactorParameter",
         "type": "object"
       },
+      "ReviseDocumentRequest": {
+        "properties": {
+          "expected_revision": {
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "format": {
+            "$ref": "#/components/schemas/SourceFormat"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "format",
+          "expected_revision"
+        ],
+        "title": "ReviseDocumentRequest",
+        "type": "object"
+      },
       "ReviseStrategyRequest": {
         "properties": {
           "expected_revision": {
@@ -3467,6 +3767,123 @@
           "spec"
         ],
         "title": "ReviseStrategyRequest",
+        "type": "object"
+      },
+      "RevisionDiff": {
+        "description": "Semantic differences between two stored revisions of one strategy (P1-08).\n\nComputed over canonical payloads: identity, comments and formatting are invisible;\nequal `spec_hash` implies `changes == ()`.",
+        "properties": {
+          "base_revision": {
+            "title": "Base Revision",
+            "type": "integer"
+          },
+          "base_spec_hash": {
+            "title": "Base Spec Hash",
+            "type": "string"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/DiffEntry"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "string"
+          },
+          "target_revision": {
+            "title": "Target Revision",
+            "type": "integer"
+          },
+          "target_spec_hash": {
+            "title": "Target Spec Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "strategy_id",
+          "base_revision",
+          "target_revision",
+          "base_spec_hash",
+          "target_spec_hash",
+          "changes"
+        ],
+        "title": "RevisionDiff",
+        "type": "object"
+      },
+      "RevisionOrigin": {
+        "enum": [
+          "document",
+          "legacy_json"
+        ],
+        "title": "RevisionOrigin",
+        "type": "string"
+      },
+      "RevisionSummary": {
+        "properties": {
+          "change_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Note"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/RevisionOrigin"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "source_format": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceFormat"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Hash"
+          },
+          "spec_hash": {
+            "title": "Spec Hash",
+            "type": "string"
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "strategy_id",
+          "revision",
+          "spec_hash",
+          "origin",
+          "created_at",
+          "source_format",
+          "source_hash"
+        ],
+        "title": "RevisionSummary",
         "type": "object"
       },
       "RiskStep": {
@@ -3592,7 +4009,7 @@
             "$ref": "#/components/schemas/BacktestRunSpec"
           },
           "schema_version": {
-            "default": "backtest-run-v1",
+            "default": "backtest-run-v2",
             "title": "Schema Version",
             "type": "string"
           },
@@ -3603,6 +4020,9 @@
           "strategy_hash": {
             "title": "Strategy Hash",
             "type": "string"
+          },
+          "strategy_provenance": {
+            "$ref": "#/components/schemas/StrategyProvenance"
           },
           "target_tape_hash": {
             "title": "Target Tape Hash",
@@ -3633,7 +4053,8 @@
           "annualization_days",
           "fee_bps",
           "slippage_bps",
-          "participation_rate"
+          "participation_rate",
+          "strategy_provenance"
         ],
         "title": "RunManifest",
         "type": "object"
@@ -3649,6 +4070,23 @@
         ],
         "title": "RunStatus",
         "type": "string"
+      },
+      "SaveDocumentRequest": {
+        "properties": {
+          "format": {
+            "$ref": "#/components/schemas/SourceFormat"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "format"
+        ],
+        "title": "SaveDocumentRequest",
+        "type": "object"
       },
       "SavedFactorNode": {
         "properties": {
@@ -3672,6 +4110,36 @@
           "kind"
         ],
         "title": "SavedFactorNode",
+        "type": "object"
+      },
+      "SavedRevisionReference": {
+        "description": "Run a stored revision; the run fails before starting if the hash no longer matches.",
+        "properties": {
+          "expected_spec_hash": {
+            "title": "Expected Spec Hash",
+            "type": "string"
+          },
+          "kind": {
+            "const": "saved_revision",
+            "title": "Kind",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "strategy_id",
+          "revision",
+          "expected_spec_hash",
+          "kind"
+        ],
+        "title": "SavedRevisionReference",
         "type": "object"
       },
       "SavedStrategy": {
@@ -3908,6 +4376,158 @@
         "title": "SourceRange",
         "type": "object"
       },
+      "StrategyDocument": {
+        "description": "A stored revision as an editor sees it: exact source plus what it compiles to.\n\n`generated` is True when the revision predates document authoring (legacy JSON API) and the\nsource shown is a canonical JSON projection of the stored spec, not text an author wrote.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "format": {
+            "$ref": "#/components/schemas/SourceFormat"
+          },
+          "generated": {
+            "title": "Generated",
+            "type": "boolean"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/RevisionOrigin"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "source_hash": {
+            "title": "Source Hash",
+            "type": "string"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/StrategySpec"
+          },
+          "spec_hash": {
+            "title": "Spec Hash",
+            "type": "string"
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "strategy_id",
+          "revision",
+          "format",
+          "source",
+          "source_hash",
+          "spec",
+          "spec_hash",
+          "schema_version",
+          "origin",
+          "created_at",
+          "generated"
+        ],
+        "title": "StrategyDocument",
+        "type": "object"
+      },
+      "StrategyDocumentContract": {
+        "description": "Per-field authoring contract plus the registry versions the schema was built against.\n\n`factor_registry_version` and `dataset_snapshot_id` identify the catalogs an editor should\npair with this schema (field ids, factor ids); the HTTP layer adds their links.",
+        "properties": {
+          "contract_hash": {
+            "title": "Contract Hash",
+            "type": "string"
+          },
+          "dataset_snapshot_id": {
+            "title": "Dataset Snapshot Id",
+            "type": "string"
+          },
+          "factor_registry_version": {
+            "title": "Factor Registry Version",
+            "type": "string"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/FieldContract"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "schema_hash": {
+            "title": "Schema Hash",
+            "type": "string"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "schema_hash",
+          "contract_hash",
+          "factor_registry_version",
+          "dataset_snapshot_id",
+          "fields"
+        ],
+        "title": "StrategyDocumentContract",
+        "type": "object"
+      },
+      "StrategyDocumentContractResponse": {
+        "description": "Wire envelope: the application contract plus the catalog links this API serves.",
+        "properties": {
+          "contract": {
+            "$ref": "#/components/schemas/StrategyDocumentContract"
+          },
+          "equity_catalog_url": {
+            "title": "Equity Catalog Url",
+            "type": "string"
+          },
+          "factor_catalog_url": {
+            "title": "Factor Catalog Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "contract",
+          "factor_catalog_url",
+          "equity_catalog_url"
+        ],
+        "title": "StrategyDocumentContractResponse",
+        "type": "object"
+      },
+      "StrategyDocumentSchema": {
+        "description": "Runtime JSON Schema of the authoring document; `schema_hash` is the ETag.",
+        "properties": {
+          "schema": {
+            "additionalProperties": true,
+            "title": "Schema",
+            "type": "object"
+          },
+          "schema_hash": {
+            "title": "Schema Hash",
+            "type": "string"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "schema_hash",
+          "schema"
+        ],
+        "title": "StrategyDocumentSchema",
+        "type": "object"
+      },
       "StrategyExplanation": {
         "properties": {
           "steps": {
@@ -3972,6 +4592,70 @@
         ],
         "title": "StrategyIdentity",
         "type": "object"
+      },
+      "StrategyProvenance": {
+        "description": "What exactly was run: recorded in the manifest so a result names its revision.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/StrategySourceKind"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Hash"
+          },
+          "spec_hash": {
+            "title": "Spec Hash",
+            "type": "string"
+          },
+          "strategy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy Id"
+          }
+        },
+        "required": [
+          "kind",
+          "spec_hash",
+          "schema_version"
+        ],
+        "title": "StrategyProvenance",
+        "type": "object"
+      },
+      "StrategySourceKind": {
+        "enum": [
+          "saved_revision",
+          "inline_draft"
+        ],
+        "title": "StrategySourceKind",
+        "type": "string"
       },
       "StrategySpec": {
         "properties": {
@@ -5482,7 +6166,128 @@
         "summary": "Get Strategy"
       }
     },
+    "/api/v1/strategies/{strategy_id}/diff": {
+      "get": {
+        "description": "Semantic diff of two revisions over their canonical payloads (identity excluded).",
+        "operationId": "diffStrategyRevisions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "base",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Base",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "target",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Target",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevisionDiff"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Diff Strategy Revisions"
+      }
+    },
     "/api/v1/strategies/{strategy_id}/revisions": {
+      "get": {
+        "description": "Revision history, ascending by revision, paginated deterministically.",
+        "operationId": "listStrategyRevisions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_RevisionSummary_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Strategy Revisions"
+      },
       "post": {
         "operationId": "reviseStrategy",
         "parameters": [
@@ -5531,6 +6336,94 @@
         "summary": "Revise Strategy"
       }
     },
+    "/api/v1/strategies/{strategy_id}/revisions/{revision}/document": {
+      "get": {
+        "description": "Exact stored source of one revision (a generated projection for legacy ones).",
+        "operationId": "getStrategyDocument",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "revision",
+            "required": true,
+            "schema": {
+              "title": "Revision",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyDocument"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Strategy Document"
+      }
+    },
+    "/api/v1/strategy-documents": {
+      "post": {
+        "description": "Store a cleanly compiled exact source as revision 1 of a new strategy.",
+        "operationId": "createStrategyDocument",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveDocumentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyDocument"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Strategy Document"
+      }
+    },
     "/api/v1/strategy-documents/compile": {
       "post": {
         "description": "Compile YAML/JSON source into a StrategySpec with syntax/structural/semantic diagnostics.\n\n200 for every well-formed request envelope: the outcome is the diagnostic list, and\n`spec`/`spec_hash` are null while any error-severity diagnostic exists. Only a malformed\nenvelope (missing `source`, unknown `format`) is a 422.",
@@ -5568,6 +6461,156 @@
           }
         },
         "summary": "Compile Strategy Document"
+      }
+    },
+    "/api/v1/strategy-documents/contract": {
+      "get": {
+        "description": "Per-field authoring contract (type, enum, range, unit, default, example, stage)\nwith the factor/dataset registry versions and catalog links it pairs with.",
+        "operationId": "getStrategyDocumentContract",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "if-none-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyDocumentContractResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "304": {
+            "description": "Not modified (ETag matched If-None-Match)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Strategy Document Contract"
+      }
+    },
+    "/api/v1/strategy-documents/schema": {
+      "get": {
+        "description": "Runtime JSON Schema of the authoring document. ETag = schema hash (304 on match).",
+        "operationId": "getStrategyDocumentSchema",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "if-none-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyDocumentSchema"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "304": {
+            "description": "Not modified (ETag matched If-None-Match)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Strategy Document Schema"
+      }
+    },
+    "/api/v1/strategy-documents/{strategy_id}/revisions": {
+      "post": {
+        "description": "Store the next revision; 409 when `expected_revision` is stale.",
+        "operationId": "reviseStrategyDocument",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviseDocumentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyDocument"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revise Strategy Document"
       }
     }
   }

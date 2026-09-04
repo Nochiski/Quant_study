@@ -4,7 +4,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from strategy_workbench.domain.backtest.facade.runs import BacktestRunResult, BacktestRunSpec
+from strategy_workbench.domain.backtest.facade.runs import (
+    BacktestRunResult,
+    BacktestRunSpec,
+    StrategyProvenance,
+)
 from strategy_workbench.domain.portfolio.facade.construction import TargetTape
 
 from .backtest_data import BacktestDataset
@@ -16,9 +20,10 @@ CancellationCheck = Callable[[], bool]
 @dataclass(frozen=True)
 class BacktestExecutionRequest:
     run_id: str
-    spec: BacktestRunSpec
+    spec: BacktestRunSpec  # resolved: `strategy` is always set here
     target_tape: TargetTape
     dataset: BacktestDataset
+    strategy_provenance: StrategyProvenance
 
 
 class RunCancelledError(RuntimeError):

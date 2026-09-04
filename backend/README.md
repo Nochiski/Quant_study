@@ -8,7 +8,9 @@ benchmark/excess return, 거래·노출·비용을 합친 21개 정의와 공식
 data/executor/artifact port만 호출한다. 기본 조립은 Equity mock → `TargetTapeStrategy` →
 Persistent Rust Engine → atomic local JSON artifact이며 Python reference core도 같은 계약으로 남긴다.
 
-- `POST /api/v1/backtests`: Rust/Python core, 초기 자본, benchmark, metric scope와 함께 실행 시작
+- `POST /api/v1/backtests`: Rust/Python core, 초기 자본, benchmark, metric scope와 함께 실행 시작.
+  `strategy_source`로 저장 revision(`saved_revision`, spec_hash 대조) 또는 inline draft를 지정하고
+  manifest의 `strategy_provenance`에 출처를 기록 (기존 `strategy` inline도 유지)
 - `GET /api/v1/backtests/{run_id}`: 상태·진행률·artifact hash 조회
 - `GET /api/v1/backtests/{run_id}/events`: SSE progress stream
 - `GET /api/v1/backtests/{run_id}/result`: versioned metrics, 차트 series, raw artifact, manifest 조회

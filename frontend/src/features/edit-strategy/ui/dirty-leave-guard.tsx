@@ -6,12 +6,9 @@ import { Button } from "../../../shared/ui";
 import "./dirty-leave-guard.css";
 
 /**
- * Blocks leaving the page (and the browser's unload) while the draft has unsaved changes
- * (WORKFLOW P2-04). Only a change of pathname counts as leaving: same-route search changes (the
- * URL-owned view/path/asOf/security state) keep the page mounted and lose nothing, so they pass.
- * The prompt is an in-page alert dialog: Escape and "머무르기" keep the user here, Tab stays inside
- * the dialog, and "나가기" proceeds. The latest `dirty` is read at block time, never from a stale
- * closure, so a page that clears the flag right before navigating is not prompted.
+ * Blocks in-app navigation (and the browser's unload) while the draft has unsaved changes
+ * (WORKFLOW P2-04). The prompt is an in-page alert dialog so the wording is ours and testable;
+ * "머무르기" is the default action because leaving discards work.
  */
 export const DirtyLeaveGuard = ({ dirty }: { dirty: boolean }) => {
   const titleId = useId();
@@ -39,20 +36,16 @@ export const DirtyLeaveGuard = ({ dirty }: { dirty: boolean }) => {
       blocker.reset();
       return;
     }
-    if (event.key === "Tab") {
-      // Two buttons only: keep focus cycling between them.
-      const buttons = Array.from(
-        event.currentTarget.querySelectorAll<HTMLButtonElement>("button"),
-      );
-      const index = buttons.indexOf(
-        document.activeElement as HTMLButtonElement,
-      );
-      const nextIndex = event.shiftKey
-        ? (index - 1 + buttons.length) % buttons.length
-        : (index + 1) % buttons.length;
-      event.preventDefault();
-      buttons[nextIndex]?.focus();
-    }
+    if (event.key !== "Tab") return;
+    const buttons = Array.from(
+      event.currentTarget.querySelectorAll<HTMLButtonElement>("button"),
+    );
+    const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    const nextIndex = event.shiftKey
+      ? (index - 1 + buttons.length) % buttons.length
+      : (index + 1) % buttons.length;
+    event.preventDefault();
+    buttons[nextIndex]?.focus();
   };
   return (
     <div className="leave-guard">

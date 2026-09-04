@@ -15,7 +15,7 @@ $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $original = [System.IO.File]::ReadAllText($resolvedPlanPath, $utf8NoBom)
 
 $prIdPattern = 'P\d+(?:\.\d+)?-\d{2}'
-$rowPattern = "(?m)^\| \[(?<checked>[ xX])\] \| ``(?<id>$prIdPattern)`` \| (?<title>.*?) \| (?<dependency>.*?) \| ``(?<status>[A-Z_]+)`` \| (?<review>.*?) \|[ \t]*$"
+$rowPattern = "(?m)^\| \[(?<checked>[ xX])\] \| ``(?<id>$prIdPattern)`` \| (?<title>.*?) \| (?<dependency>.*?) \| ``(?<status>[A-Z_]+)`` \| (?<review>.*?) \|[ \t\r]*$"
 $rowMatches = [regex]::Matches($original, $rowPattern)
 
 if ($rowMatches.Count -eq 0) {

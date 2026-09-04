@@ -311,10 +311,12 @@ def test_identifier_fields_declare_their_catalog_or_reference_namespace() -> Non
         "#/$defs/RiskStep/risk_field_id": "equity-field",
     }
     assert set(references.values()) == {"node", "parameter"}
-    # Every referenced namespace is declared by exactly one array whose items define `<ns>_id`.
     defines = {
         f"{path}/{name}": prop["x-defines"]
-        for path, node in [("", schema), *[(f"#/$defs/{n}", d) for n, d in schema["$defs"].items()]]
+        for path, node in [
+            ("", schema),
+            *[(f"#/$defs/{name}", definition) for name, definition in schema["$defs"].items()],
+        ]
         for name, prop in node.get("properties", {}).items()
         if "x-defines" in prop
     }

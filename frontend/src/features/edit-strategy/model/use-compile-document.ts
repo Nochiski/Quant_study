@@ -21,18 +21,22 @@ const rangeFor = (
   diagnostic: SourceDiagnostic,
   parse: ParsedSource | null,
 ): DocumentDiagnostic["range"] => {
-  // A root-level problem ("X is required") is anchored on the first line, not underlined across
-  // the whole document.
+  // Missing root fields are anchored at the document start instead of underlining the entire
+  // document. The editor expands this one-character range when it renders the marker.
   if (diagnostic.pointer === "" && parse) {
     const root = parse.valueRanges.get("");
     if (root) {
-      const firstLineEnd = Math.max(
-        root.start.offset,
-        root.end.line > root.start.line ? root.start.offset : root.end.offset,
+      const width = Math.min(
+        1,
+        Math.max(0, root.end.offset - root.start.offset),
       );
       return {
         start: root.start,
-        end: { ...root.start, offset: firstLineEnd },
+        end: {
+          ...root.start,
+          column: root.start.column + width,
+          offset: root.start.offset + width,
+        },
       };
     }
   }
@@ -118,9 +122,8 @@ export const useCompileDocument = (
         .catch((error: unknown) => {
           if (controller.signal.aborted) return;
           if (forcedNow) setForced(null);
-          // Transport failure: no verdict exists for this text, so it is recorded as a
-          // capability error (the phase becomes semantic-invalid: nothing may be saved or run
-          // on an unverified document) and retried on the next edit or an explicit Validate.
+          // Transport failure: the text stays "structurally-valid" and is retried on the next
+          // edit; the failure is surfaced as a capability diagnostic, not silently swallowed.
           dispatch({
             type: "compiled",
             version,

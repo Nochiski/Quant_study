@@ -311,6 +311,8 @@ const ko = {
   "save.conflict":
     "충돌: 다른 곳에서 새 리비전이 저장되었습니다. 최신 리비전을 연 뒤 다시 저장하세요.",
   "save.invalid": "저장 실패: 문서 검증 오류",
+  "save.blocked.syntax": "구문 오류가 있어 저장할 수 없습니다",
+  "save.blocked.invalid": "검증 오류가 있어 저장할 수 없습니다",
   "save.failed": "저장 실패: 서버에 연결할 수 없습니다",
   "leave.title": "저장하지 않은 변경이 있습니다",
   "leave.description": "이 화면을 떠나면 편집 중인 내용이 사라집니다.",
@@ -386,10 +388,8 @@ const ko = {
   "conflict.diff.kind": "변경",
   "conflict.diff.before": "이전",
   "conflict.diff.after": "이후",
-  "save.blocked.syntax": "구문 오류가 있어 저장할 수 없습니다",
-  "save.blocked.invalid": "검증 오류가 있어 저장할 수 없습니다",
   "problems.compileUnavailable":
-    "검증 서버에 연결할 수 없어 이 텍스트를 확인하지 못했습니다. 잠시 후 '검증'을 다시 누르세요. ({detail})",
+    "검증 서버에 연결할 수 없어 이 텍스트를 확인하지 못했습니다. 잠시 후 다시 시도하세요. ({detail})",
 } as const;
 
 export type MessageKey = keyof typeof ko;
@@ -710,6 +710,8 @@ export const messages = {
     "save.conflict":
       "Conflict: a newer revision was saved elsewhere. Open the latest revision and save again.",
     "save.invalid": "Save failed: document validation error",
+    "save.blocked.syntax": "Cannot save: syntax error",
+    "save.blocked.invalid": "Cannot save: validation errors",
     "save.failed": "Save failed: the server could not be reached",
     "leave.title": "You have unsaved changes",
     "leave.description": "Leaving this screen discards what you are editing.",
@@ -787,10 +789,8 @@ export const messages = {
     "conflict.diff.kind": "Change",
     "conflict.diff.before": "Before",
     "conflict.diff.after": "After",
-    "save.blocked.syntax": "Cannot save: syntax error",
-    "save.blocked.invalid": "Cannot save: validation errors",
     "problems.compileUnavailable":
-      "The validation server could not be reached, so this text is unverified. Press Validate again shortly. ({detail})",
+      "The validation server could not be reached, so this text is unverified. Try again shortly. ({detail})",
   } satisfies Record<MessageKey, string>,
 } as const;
 

@@ -1796,10 +1796,20 @@ export type ParameterNode = {
 
 /**
  * PortfolioPreview
+ *
+ * The tape a run will consume, plus the caveats the observation source reported.
+ *
+ * `warnings` are the raw observation adapter's own messages, passed through verbatim. They ride
+ * into `RunManifest.warnings` so a caveat visible in the preview cannot disappear from the run
+ * that used the same data.
  */
 export type PortfolioPreview = {
   engine: EngineCompatibility;
   tape: TargetTape;
+  /**
+   * Warnings
+   */
+  warnings?: Array<string>;
 };
 
 /**
@@ -2453,6 +2463,11 @@ export type RollingMetricPoint = {
 
 /**
  * RunManifest
+ *
+ * What a finished run was made of.
+ *
+ * `strategy_hash` and `strategy_provenance.spec_hash` always carry the same value: one run
+ * executed one strategy.
  */
 export type RunManifest = {
   /**

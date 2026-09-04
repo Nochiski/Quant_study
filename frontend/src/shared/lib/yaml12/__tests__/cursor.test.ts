@@ -154,6 +154,18 @@ describe("describeYamlCursor", () => {
       pointer: "/title",
       prefix: "a # b",
     });
+    const escaped = String.raw`title: "a \" # b`;
+    expect(describeYamlCursor(escaped, escaped.length)).toMatchObject({
+      mode: "value",
+      pointer: "/title",
+      prefix: String.raw`a \" # b`,
+    });
+    const doubled = "title: 'a '' # b";
+    expect(describeYamlCursor(doubled, doubled.length)).toMatchObject({
+      mode: "value",
+      pointer: "/title",
+      prefix: "a '' # b",
+    });
   });
 
   it("yields nothing inside comments and for a bare dash", () => {

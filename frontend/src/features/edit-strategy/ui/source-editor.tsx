@@ -51,6 +51,7 @@ export const SourceEditor = ({
   assist,
 }: SourceEditorProps) => {
   const handle = useRef<CodeEditorHandle>(null);
+
   const documentDiagnostics = useMemo(() => currentDiagnostics(state), [state]);
   const diagnostics = useMemo<EditorDiagnostic[]>(
     () =>
@@ -66,8 +67,8 @@ export const SourceEditor = ({
     [documentDiagnostics],
   );
 
-  // Selecting a problem moves the editor to its range (WORKFLOW P3-04 acceptance). Offsets are
-  // clamped to the current text: a range from an older text must never throw.
+  // Selecting a problem moves the editor to its range (WORKFLOW P3-04 acceptance). Clamp stale
+  // offsets defensively so an old range can never throw against shorter current text.
   const selectDiagnostic = useCallback((diagnostic: DocumentDiagnostic) => {
     const editor = handle.current;
     if (!editor || diagnostic.range === null) return;
@@ -130,8 +131,6 @@ export const SourceEditor = ({
             ? documentDiagnostics
             : state.compiled.diagnostics
         }
-        // The last compile result belongs to another version of the text (whether or not it
-        // produced a spec): its list is shown dimmed and cannot be navigated.
         stale={
           documentDiagnostics.length === 0 &&
           state.compiled !== null &&

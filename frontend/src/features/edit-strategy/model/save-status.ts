@@ -30,7 +30,9 @@ export const saveStatusText = (
     state.dirty &&
     state.compiled !== null &&
     state.compiledVersion === state.sourceVersion &&
-    state.compiled.diagnostics.some((d) => d.severity === "error")
+    state.compiled.diagnostics.some(
+      (diagnostic) => diagnostic.severity === "error",
+    )
   )
     return t("save.blocked.invalid");
   if (state.dirty) return t("save.unsaved");
@@ -41,7 +43,6 @@ export const saveStatusText = (
   return t("page.newStrategy.draft");
 };
 
-/** Tone for the top-bar status icon: failures are errors, unsaved text is a warning. */
 export const saveStatusTone = (
   state: DocumentState,
   status: SaveStatus,
@@ -53,6 +54,15 @@ export const saveStatusTone = (
   )
     return "error";
   if (state.dirty && state.parse?.status === "rejected") return "error";
+  if (
+    state.dirty &&
+    state.compiled !== null &&
+    state.compiledVersion === state.sourceVersion &&
+    state.compiled.diagnostics.some(
+      (diagnostic) => diagnostic.severity === "error",
+    )
+  )
+    return "error";
   if (state.dirty) return "warn";
   return "ok";
 };

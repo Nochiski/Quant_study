@@ -18,9 +18,11 @@ import pytest
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
 )
+from strategy_workbench.application.portfolio_design import _service as _portfolio_service
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.domain.strategy import _validation
 from strategy_workbench.domain.strategy.facade.constraints import (
+    EXPRESSION_CODES,
     SEMANTIC_ONLY_CODES,
     STRATEGY_SCALAR_CONSTRAINTS,
     AppliedStage,
@@ -30,9 +32,19 @@ from strategy_workbench.domain.strategy.facade.constraints import (
     scalar_constraint_index,
 )
 from strategy_workbench.domain.strategy.facade.specification import StrategySpec
-from strategy_workbench.domain.strategy.facade.validation import validate_strategy
+from strategy_workbench.domain.strategy.facade.validation import (
+    semantic_issue,
+    validate_strategy,
+)
 
 VALIDATION_SOURCE = Path(_validation.__file__).read_text(encoding="utf-8")
+# Every layer that can mint a `strategy.*` code, not just the domain validator (D-007).
+CODE_PRODUCER_SOURCES = {
+    "domain/strategy/_validation.py": VALIDATION_SOURCE,
+    "application/portfolio_design/_service.py": Path(_portfolio_service.__file__).read_text(
+        encoding="utf-8"
+    ),
+}
 
 
 def _template() -> StrategySpec:
@@ -149,6 +161,22 @@ def test_every_validation_code_has_exactly_one_owner() -> None:
     assert emitted - aliases == SEMANTIC_ONLY_CODES, sorted(emitted - aliases - SEMANTIC_ONLY_CODES)
     assert not catalog_codes & SEMANTIC_ONLY_CODES
     assert not (emitted & catalog_codes), "scalar codes must not be hand-written in the validator"
+    assert not EXPRESSION_CODES & (SEMANTIC_ONLY_CODES | catalog_codes)
+
+
+def test_no_layer_mints_a_strategy_code_outside_the_registry() -> None:
+    """D-007: the application used to build ValidationIssue directly, bypassing the code gate."""
+    owned = SEMANTIC_ONLY_CODES | EXPRESSION_CODES | {c.code for c in STRATEGY_SCALAR_CONSTRAINTS}
+
+    for location, source in CODE_PRODUCER_SOURCES.items():
+        emitted = set(re.findall(r'"(strategy\.[a-z_.]+)"', source))
+        assert emitted <= owned, (location, sorted(emitted - owned))
+        # `semantic_issue` is the only place a ValidationIssue is built; it lives in the validator.
+        expected_constructions = 1 if source is VALIDATION_SOURCE else 0
+        assert source.count("ValidationIssue(") == expected_constructions, (
+            f"{location} constructs ValidationIssue directly — call semantic_issue() so the code "
+            "registry stays the single owner"
+        )
 
 
 def test_expression_node_kinds_cover_the_union_exactly() -> None:
@@ -203,4 +231,7 @@ def test_inclusive_minimum_boundaries_are_accepted() -> None:
 
 def test_unowned_validation_code_is_a_programming_error() -> None:
     with pytest.raises(ValueError, match="no owner"):
-        _validation._issue("strategy.bogus.code", "bogus", "x")
+        semantic_issue("strategy.bogus.code", "bogus", "x")
+
+    # Codes outside the `strategy.` namespace belong to another registry and pass through.
+    assert semantic_issue("factor.graph.other", "p", "x").code == "factor.graph.other"

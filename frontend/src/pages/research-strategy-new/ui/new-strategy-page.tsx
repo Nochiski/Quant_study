@@ -5,11 +5,9 @@ import {
   DocumentToolbar,
   RecoveryBanner,
   SourceEditor,
-  draftKey,
   saveStatusText,
   saveStatusTone,
   useAutosave,
-  writeDraft,
   useCompileDocument,
   useRunBacktest,
   useSaveDocument,
@@ -23,14 +21,6 @@ import { Badge } from "../../../shared/ui";
 import { StrategyIde } from "../../../widgets/strategy-ide";
 
 const STARTER = 'schema_version: "1.0"\ntitle: ""\n';
-const defaultDraftStorageForPage = () => {
-  try {
-    return typeof localStorage === "undefined" ? null : localStorage;
-  } catch {
-    return null;
-  }
-};
-
 const NEW_DRAFT: DocumentSource = {
   kind: "new",
   format: "yaml",
@@ -57,27 +47,21 @@ export const NewStrategyPage = () => {
       ? document.compiled
       : null;
 
-  // Create succeeded: the draft now has a base, so the URL moves to that revision (ADR D3).
-  // Text typed while the request was in flight is not lost: it is parked as the local draft of
-  // the new base (P3-06 recovery) before the page changes. `leaving` is derived, so the guard
-  // below already sees `dirty=false` (its own effect runs first) when the navigation fires: a
-  // save that just succeeded never triggers an "unsaved changes" prompt.
+  // If the user types while create is in flight, stay on this page and preserve the newer text.
+  // A second save appends it to the newly created strategy; navigate only once the current text
+  // is the saved base. This gives P2-04 lossless behavior without depending on P3-06 autosave.
   const leaving =
-    document.strategyId !== null && document.baseRevision !== null;
+    document.strategyId !== null &&
+    document.baseRevision !== null &&
+    !document.dirty;
+
   useEffect(() => {
-    if (document.strategyId === null || document.baseRevision === null) return;
-    if (document.dirty) {
-      writeDraft(defaultDraftStorageForPage(), {
-        key: draftKey(document.strategyId, document.baseRevision),
-        format: document.format,
-        source: document.source,
-        strategyId: document.strategyId,
-        baseRevision: document.baseRevision,
-        baseSpecHash: document.baseSpecHash,
-        schemaVersion: assist.schemaVersion,
-        savedAt: new Date().toISOString(),
-      });
-    }
+    if (
+      !leaving ||
+      document.strategyId === null ||
+      document.baseRevision === null
+    )
+      return;
     void navigate({
       to: "/research/strategies/$strategyId/revisions/$revision",
       params: {
@@ -92,16 +76,7 @@ export const NewStrategyPage = () => {
       },
       replace: true,
     });
-  }, [
-    document.strategyId,
-    document.baseRevision,
-    document.dirty,
-    document.format,
-    document.source,
-    document.baseSpecHash,
-    assist.schemaVersion,
-    navigate,
-  ]);
+  }, [leaving, document.strategyId, document.baseRevision, navigate]);
 
   return (
     <>
@@ -115,9 +90,9 @@ export const NewStrategyPage = () => {
           specHash: current?.specHash ?? null,
         }}
         saveStatus={saveStatusText(document, status)}
-        saveTone={saveStatusTone(document, status)}
         onRunBacktest={() => void backtest.run()}
         runDisabled={!backtest.canRun}
+        saveTone={saveStatusTone(document, status)}
         view={document.format}
         availableViews={[document.format]}
         editorActions={

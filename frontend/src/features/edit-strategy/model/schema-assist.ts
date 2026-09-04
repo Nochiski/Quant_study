@@ -96,12 +96,7 @@ const referenceLabel = (reference: string): string => {
   }
 };
 
-/**
- * Ids the document defines for a reference namespace, seen from `pointer`: the nearest ancestor
- * array the schema marks `x-defines: <namespace>` supplies them (its items carry
- * `<namespace>_id`), and the item the pointer itself lives in is excluded (a node does not
- * reference itself). Nothing here knows where nodes or parameters live in the document.
- */
+/** Ids supplied by the nearest schema-declared namespace array, excluding the current item. */
 const referenceIds = (
   schema: JsonSchema,
   reference: string,
@@ -233,8 +228,6 @@ const contractFor = (
 ): FieldContract | undefined => {
   const template = templatePointer(pointer);
   const rows = contract.filter((row) => row.pointer === template);
-  // A union field with an unknown kind has no single truthful row: show none rather than
-  // another branch's unit/default as fact.
   return (
     rows.find((row) => row.branch === kind) ?? rows.find((row) => !row.branch)
   );

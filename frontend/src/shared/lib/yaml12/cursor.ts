@@ -82,18 +82,13 @@ const itemIndex = (lines: Line[], at: number): number => {
   for (let i = at - 1; i >= 0; i -= 1) {
     const line = lines[i];
     if (line.blank) continue;
-    // A key at the same indent is the sequence's owner (`key:` followed by unindented items).
     if (line.indent < indent || (line.indent === indent && !line.item)) break;
     if (line.indent === indent && line.item) index += 1;
   }
   return index;
 };
 
-/**
- * Pointer of the container whose children sit at `need` spaces, reading upwards from `from`.
- * `ownerLevel` names an indent at which a key line owns a sequence whose items sit at that same
- * indent (`key:` / `- item`, the un-indented style); items at that indent are siblings.
- */
+/** Pointer of the container whose children sit at `need` spaces, reading upwards from `from`. */
 const containerPointer = (
   lines: Line[],
   from: number,
@@ -107,7 +102,7 @@ const containerPointer = (
     const line = lines[i];
     if (line.blank) continue;
     if (owner !== null && line.indent === owner) {
-      if (line.item) continue; // sibling item of the sequence being resolved
+      if (line.item) continue;
       if (line.key !== null) {
         segments.unshift(escapePointer(line.key));
         level = line.indent;
@@ -159,17 +154,27 @@ const siblingKeys = (lines: Line[], at: number, need: number): string[] => {
   return keys;
 };
 
-/** True when `before` (the text up to the cursor on its line) is inside a `#` comment. */
 const inComment = (before: string): boolean => {
   let quote: string | null = null;
-  for (let i = 0; i < before.length; i += 1) {
-    const ch = before[i];
+  for (let index = 0; index < before.length; index += 1) {
+    const character = before[index];
     if (quote !== null) {
-      if (ch === quote) quote = null;
+      if (quote === '"' && character === "\\") {
+        index += 1;
+      } else if (
+        quote === "'" &&
+        character === "'" &&
+        before[index + 1] === "'"
+      ) {
+        index += 1;
+      } else if (character === quote) {
+        quote = null;
+      }
       continue;
     }
-    if (ch === '"' || ch === "'") quote = ch;
-    else if (ch === "#" && (i === 0 || /\s/.test(before[i - 1]))) return true;
+    if (character === '"' || character === "'") quote = character;
+    else if (character === "#" && (index === 0 || /\s/.test(before[index - 1])))
+      return true;
   }
   return false;
 };

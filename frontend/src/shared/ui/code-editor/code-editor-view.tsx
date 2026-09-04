@@ -302,7 +302,7 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
       const current = view.current;
       if (!current) return;
       const key = JSON.stringify(diagnostics);
-      if (key === lastDiagnostics.current) return; // same markers: no lint transaction
+      if (key === lastDiagnostics.current) return;
       lastDiagnostics.current = key;
       current.dispatch(
         setDiagnostics(
@@ -371,8 +371,7 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
               HISTORY_FIELDS,
             ),
           );
-          // The serialised extensions carry the mount-time compartment values; put back what
-          // the props say now.
+          // Serialised extensions carry mount-time compartment values; restore current props.
           const props = latest.current;
           current.dispatch({
             effects: [

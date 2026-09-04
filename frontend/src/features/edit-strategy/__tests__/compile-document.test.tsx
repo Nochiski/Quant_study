@@ -218,21 +218,17 @@ describe("useCompileDocument", () => {
     );
   });
 
-  it("dims an error list that belongs to an older text and never navigates with its offsets", async () => {
-    const user = userEvent.setup();
+  it("disables an error list that belongs to an older text", async () => {
     const view = await mount('schema_version: "1.0"\ntitle: bad\n');
     await screen.findByRole("button", { name: /title must not be empty/ });
-    // Shorter text while the recompile is pending: the old list is stale and not clickable.
+
     type(view, "a: 1\n");
+
     const stale = screen.getByRole("button", {
       name: /title must not be empty/,
     });
     expect(stale).toBeDisabled();
-    expect(screen.getByRole("region", { name: "문제" })).toHaveTextContent(
-      "이전 결과",
-    );
-    await user.click(stale);
-    expect(view.state.doc.toString()).toBe("a: 1\n");
+    expect(stale.closest(".problems")).toHaveClass("problems--stale");
     await waitFor(() =>
       expect(
         screen.queryByRole("button", { name: /title must not be empty/ }),
@@ -286,5 +282,25 @@ describe("toDocumentDiagnostics", () => {
       start: { line: 0, column: 0, offset: 0 },
       end: { line: 0, column: 3, offset: 3 },
     });
+  });
+
+  it("anchors a root diagnostic at the start instead of marking the whole document", () => {
+    const text = 'schema_version: "1.0"\ntitle: ok\n';
+    const parse = parseSource(text, "yaml");
+    const [diagnostic] = toDocumentDiagnostics(
+      [
+        {
+          code: "required",
+          kind: "structural",
+          severity: "error",
+          pointer: "",
+          message: "data is required",
+          range: null,
+        },
+      ],
+      parse,
+    );
+    expect(diagnostic.range?.start.offset).toBe(0);
+    expect(diagnostic.range?.end.offset).toBe(1);
   });
 });

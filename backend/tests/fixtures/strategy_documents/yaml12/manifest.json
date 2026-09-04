@@ -132,6 +132,16 @@
       }
     },
     {
+      "name": "tabs_inside_scalar_content",
+      "file": "accepted/tabs_inside_scalar_content.yaml",
+      "expect": "accept",
+      "json": {
+        "double": "x:\ty",
+        "single": "x:\ty",
+        "block": "x:\ty\n"
+      }
+    },
+    {
       "name": "single_document_start_marker",
       "file": "accepted/single_document_start_marker.yaml",
       "expect": "accept",
@@ -365,6 +375,24 @@
     {
       "name": "tab_after_colon",
       "file": "rejected/tab_after_colon.yaml",
+      "expect": "reject",
+      "reason": "syntax"
+    },
+    {
+      "name": "escaped_lone_surrogate_value",
+      "file": "rejected/escaped_lone_surrogate_value.yaml",
+      "expect": "reject",
+      "reason": "syntax"
+    },
+    {
+      "name": "escaped_lone_surrogate_key",
+      "file": "rejected/escaped_lone_surrogate_key.yaml",
+      "expect": "reject",
+      "reason": "syntax"
+    },
+    {
+      "name": "dup_key_with_escaped_lone_surrogate",
+      "file": "rejected/dup_key_with_escaped_lone_surrogate.yaml",
       "expect": "reject",
       "reason": "syntax"
     }

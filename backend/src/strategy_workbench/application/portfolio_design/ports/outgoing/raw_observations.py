@@ -16,7 +16,12 @@ Contract:
 - `history_sessions_before_start` counts sessions strictly before `start` (as_of is not one of
   them). The adapter is responsible for field lag: a lagged field must still be present on the
   first history session when the source has data there.
-- `previous_weight` seeds the first frame only; later frames are owned by the portfolio compiler.
+- `previous_weight` is the book the strategy carries into the *first* rebalance frame. From
+  the second frame on the portfolio compiler folds the previous frame's targets forward and
+  ignores this value entirely, so an adapter that cannot answer returns 0.0 rather than a
+  guess. `universe_member` and `sector_id` have no `available_date`: answering them with the
+  as_of vintage (no retroactive reclassification or index reconstitution) is the adapter's
+  responsibility and the application layer cannot verify it.
 - Failures are values: `status != OK` with `detail` (unknown universe/field, no data), never a
   synthesised observation.
 """
@@ -80,8 +85,9 @@ class RawObservationSet:
     """Observations for `sessions` (in range) plus `history_sessions` warm-up before `start`.
 
     Observations are ordered by (as_of, security_id) and unique per pair; sessions ascend and
-    every history session precedes the first requested session. Any adapter gets these checks
-    for free through `__post_init__`.
+    every history session precedes the first requested session; every observation date is one of
+    the declared sessions or history sessions. Any adapter gets these checks for free through
+    `__post_init__`.
     """
 
     status: DataLoadStatus
@@ -114,6 +120,18 @@ class RawObservationSet:
             raise ValueError(
                 "raw observations must be ordered by (as_of, security_id) and unique — "
                 f"count={len(keys)}"
+            )
+        # The evaluator counts lag and rolling windows by row position, not by calendar, so an
+        # undeclared date silently shifts every window behind it (D-003). Fail closed instead.
+        declared = set(self.sessions) | set(self.history_sessions)
+        undeclared = sorted({item.as_of for item in self.observations} - declared)
+        if undeclared:
+            raise ValueError(
+                "raw observations carry dates that are neither a session nor warm-up history — "
+                f"undeclared={undeclared[:5]} undeclared_count={len(undeclared)} "
+                f"declared_sessions={len(self.sessions)} "
+                f"declared_history={len(self.history_sessions)} "
+                f"snapshot={self.data_snapshot_id!r}"
             )
 
 

@@ -17,7 +17,7 @@ import { BacktestRunPage } from "../../pages/research-backtest";
 import {
   STRATEGY_VIEWS,
   type StrategyView,
-} from "../../pages/research-strategy-revision";
+} from "../../pages/research-strategy-revision/model/strategy-views";
 import {
   NotFoundPage,
   RouteErrorPage,

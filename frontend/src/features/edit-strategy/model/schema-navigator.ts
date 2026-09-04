@@ -201,10 +201,7 @@ export const valueOptions = (resolved: ResolvedSchema): string[] => {
   return [];
 };
 
-/**
- * The array declaring `namespace` (`x-defines`) nearest to `pointer`, walking up its ancestors,
- * with the pointer of that array in the document. Null when no ancestor declares it.
- */
+/** The nearest ancestor array whose schema declares `x-defines: namespace`. */
 export const definingArrayFor = (
   root: JsonSchema,
   pointer: string,

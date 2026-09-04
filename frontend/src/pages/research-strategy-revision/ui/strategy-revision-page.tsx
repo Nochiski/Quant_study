@@ -63,14 +63,15 @@ export const StrategyRevisionPage = () => {
       ? document.compiled
       : null;
 
-  // A successful revise moves the URL to the new revision; the query cache already holds it and
-  // the page is not remounted, so the text (including edits made while saving) stays. `leaving`
-  // is derived from the URL lagging the base, so the guard sees `dirty=false` before the
-  // navigation fires: a save that just succeeded is not a "leave".
+  // A save can complete while the user is still typing. Keep that newer text on the current
+  // route and let the next save append from the updated base; only follow the revision when the
+  // current source is actually saved.
   const leaving =
     document.strategyId === strategyId &&
     document.baseRevision !== null &&
-    document.baseRevision !== Number(revision);
+    document.baseRevision !== Number(revision) &&
+    !document.dirty;
+
   useEffect(() => {
     if (!leaving || document.baseRevision === null) return;
     void navigate({
@@ -110,9 +111,9 @@ export const StrategyRevisionPage = () => {
           specHash: current?.specHash ?? null,
         }}
         saveStatus={saveStatusText(document, status)}
-        saveTone={saveStatusTone(document, status)}
         onRunBacktest={() => void backtest.run()}
         runDisabled={!backtest.canRun}
+        saveTone={saveStatusTone(document, status)}
         view={view}
         availableViews={availableViews}
         onViewChange={(next) =>

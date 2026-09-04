@@ -187,7 +187,6 @@ describe("schema-driven completion", () => {
       explicit: true,
     });
     expect(node!.options.map((o) => o.label)).toEqual(["px", "unknown"]);
-    // A reference outside the nodes array (the graph's output) resolves through x-defines too.
     const output = await source({
       text: YAML,
       offset: offsetOf(YAML, "        output_node_id: "),

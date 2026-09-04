@@ -1,0 +1,19 @@
+{
+  "name": "editor-bundle-spike",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:cm6lite": "vite build -c vite.cm6lite.mjs",
+    "build:cm6": "vite build -c vite.cm6.mjs",
+    "build:monaco": "vite build -c vite.monaco.mjs"
+  },
+  "devDependencies": {
+    "@codemirror/lang-yaml": "6.1.3",
+    "codemirror": "6.0.2",
+    "codemirror-json-schema": "0.8.1",
+    "monaco-editor": "0.52.2",
+    "monaco-yaml": "5.5.1",
+    "vite": "8.2.2",
+    "yaml": "2.9.0"
+  }
+}

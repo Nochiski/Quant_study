@@ -3,14 +3,14 @@ plan_version: 2
 project: yaml-strategy-workbench-ui
 project_status: IN_REVIEW
 current_phase: P0
-current_pr: P0-02,P0-03
-active_prs: [P0-02, P0-03]
-parallel_window: [P0-02, P0-03]
-last_updated: 2026-09-04T13:33:53+09:00
+current_pr: P0-03,P0-04
+active_prs: [P0-03, P0-04]
+parallel_window: [P0-03, P0-04]
+last_updated: 2026-09-04T13:40:02+09:00
 planned_prs: 45
-merged_prs: 1
-approved_prs: 1
-progress_percent: 2
+merged_prs: 2
+approved_prs: 2
+progress_percent: 4
 ---
 
 # YAML Strategy Workbench 실시간 진행 계획
@@ -24,11 +24,11 @@ progress_percent: 2
 |---|---|
 | Project status | `IN_REVIEW` |
 | Current phase | `P0` |
-| Current/next PR | `P0-02,P0-03` |
-| Active PR | `P0-02, P0-03` |
-| Progress | `1 / 45 merged (2%)` |
-| Approved | `1 / 45` |
-| Aggregated at | `2026-09-04 13:33 KST` |
+| Current/next PR | `P0-03,P0-04` |
+| Active PR | `P0-03, P0-04` |
+| Progress | `2 / 45 merged (4%)` |
+| Approved | `2 / 45` |
+| Aggregated at | `2026-09-04 13:40 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -68,7 +68,7 @@ progress_percent: 2
 <!-- PLAN:PHASES:START -->
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
-| P0 | Contract, product direction, tool choices | 4 | 1 | `IN_REVIEW` |
+| P0 | Contract, product direction, tool choices | 4 | 2 | `IN_REVIEW` |
 | P1 | Backend Authoring Contract | 9 | 0 | `READY` |
 | P1.5 | Backtest Correctness Gate | 4 | 0 | `READY` |
 | P2 | App Shell and visual foundation | 4 | 0 | `READY` |
@@ -76,22 +76,22 @@ progress_percent: 2
 | P4 | Outline, Contract, Projections | 8 | 0 | `WAITING` |
 | P5 | Truthful Trace UI | 3 | 0 | `WAITING` |
 | P6 | Professional release and migration | 6 | 0 | `WAITING` |
-| **Total** |  | **45** | **1** | **2%** |
+| **Total** |  | **45** | **2** | **4%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
 
 | 항목 | 값 |
 |---|---|
-| PR | `P0-02` + `P0-03` (병렬 window, P0-03은 worktree `Quant_study-p0-03`) |
-| Intent | P0-02: editor ADR(CodeMirror 6). P0-03: ruamel.yaml + YAML 1.2 cross-runtime manifest(12 accepted/16 rejected)와 양쪽 테스트 |
+| PR | `P0-03` (worktree `Quant_study-p0-03`, IN_REVIEW) + `P0-04` (병렬 window) |
+| Intent | P0-03: ruamel.yaml + YAML 1.2 cross-runtime manifest와 양쪽 테스트. P0-04: TanStack Router ADR와 route tree/blocker/loader 결정 |
 | Acceptance | 번들 크기·IME·schema completion 기준 비교표, 최종 선택과 rollback 방법, 이후 PR dependency 기록 |
 | Non-goals | editor 의존성 설치·UI 코드 변경 (P3-02), parser (P0-03), router (P0-04) |
-| Branch/worktree | `feat/p0-02-editor-spike` / `feat/p0-03-yaml-parser` |
+| Branch/worktree | `feat/p0-03-yaml-parser` / `feat/p0-04-router-adr` |
 | Base SHA | `38a2304` |
-| Head SHA | P0-02 `9093b1a` / P0-03 `4a59d17` |
-| Diff stat | P0-02 11 files +165 (ADR + spike 스크립트) / P0-03 35 files +578 (fixture 28개 포함) |
-| Focused tests | P0-02 링크 검증 / P0-03 backend 29 passed, frontend 28 passed |
+| Head SHA | P0-03 `4a59d17` / P0-04 미기록 |
+| Diff stat | P0-03 35 files +578 (fixture 28개 포함) / P0-04 미기록 |
+| Focused tests | P0-03 backend 29 passed, frontend 28 passed / P0-04 미실행 |
 | Full gate | P0-03 worktree: ruff·pyright clean, frontend typecheck·lint·65 tests·build OK. backend pytest는 worktree Rust 미빌드로 core_parity 3건 환경 실패 → merge 후 main 트리에서 재실행 |
 
 ---
@@ -101,9 +101,9 @@ progress_percent: 2
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [x] | `P0-01` | Verbose source ADR, YAML-first 전환, roadmap/rules/tracker 정합화 | 없음 | `MERGED` | `review_p0_01` APPROVE |
-| [ ] | `P0-02` | Monaco/CodeMirror frontend editor spike | P0-01 | `IN_REVIEW` | `review_p0_02` |
+| [x] | `P0-02` | Monaco/CodeMirror frontend editor spike | P0-01 | `MERGED` | `review_p0_02` APPROVE |
 | [ ] | `P0-03` | Backend parser ADR와 YAML 1.2 cross-runtime fixture | P0-01 | `IN_REVIEW` | `review_p0_03` |
-| [ ] | `P0-04` | Frontend router ADR와 direct-entry spike | P0-01 | `READY` | — |
+| [ ] | `P0-04` | Frontend router ADR와 direct-entry spike | P0-01 | `IN_PROGRESS` | — |
 
 Phase exit:
 
@@ -240,18 +240,21 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
+| P0-02 | `review_p0_02` | `38a2304` | `fc8023d` | APPROVE (1차 REQUEST_CHANGES: IME 서술·D2 경계 → 재검토) | 2 (해소) | 200 KB chunk 예산은 P3-02 측정; main-thread parse는 P3-01 debounce·P6-04 측정; monaco-yaml이 0.56+ 지원 시 IME 논거 약화 | 2026-09-04 |
 | P0-01 | `review_p0_01` | `c174452` | `b988984` | APPROVE (1차 REQUEST_CHANGES → 재검토) | 1 (해소) | unknown-key fail-closed는 P1-01 구현 전까지 계약만 고정; ParameterValue union hash 분기 P1-01; YAML 1.1/1.2 차이는 P0-03까지 미검출 | 2026-09-04 |
 
 ## 검증 기록
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
+| P0-02 | 문서 링크 검증 | 스파이크 3종 빌드 재현(reviewer) | 해당 없음 | 해당 없음 | 로컬 | 2026-09-04 |
 | P0-01 | contract 9 passed + 1 xfailed | pytest 608 + ruff + pyright | 해당 없음 (API 미변경) | 해당 없음 | 로컬 게이트 동일 범위 (원격 push 전) | 2026-09-04 |
 
 ## 변경 기록
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-04 KST | Claude | P0-02 APPROVE(fc8023d) → main merge, MERGED. P0-04 IN_PROGRESS로 병렬 window 교체 | 13.6 merge gate |
 | 2026-09-04 KST | Claude | P0-02(9093b1a)·P0-03(4a59d17) diff freeze, 병렬 window 선언, reviewer 각 1명 배정 → IN_REVIEW | 13.3 |
 | 2026-09-04 KST | Claude | P0-01 APPROVE → 로컬 main merge, MERGED. P0-02/03/04, P1-01, P1.5-01, P2-01 READY | 13.6 merge gate |
 | 2026-09-04 KST | Claude | review_p0_01 REQUEST_CHANGES(P1: unknown key 정책) 반영 → b988984, 같은 reviewer 재검토 요청 | 13.5 재검토 |

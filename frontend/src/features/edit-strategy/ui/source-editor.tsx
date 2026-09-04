@@ -17,6 +17,7 @@ import {
   type DocumentDiagnostic,
   type DocumentState,
 } from "../model/document-state";
+import { deduplicateDiagnostics } from "../model/problem-list";
 import { DiagnosticsPanel } from "./diagnostics-panel";
 
 type SourceEditorProps = {
@@ -66,7 +67,10 @@ export const SourceEditor = ({
     [onEditorReady],
   );
 
-  const documentDiagnostics = useMemo(() => currentDiagnostics(state), [state]);
+  const documentDiagnostics = useMemo(
+    () => deduplicateDiagnostics(currentDiagnostics(state)),
+    [state],
+  );
   const diagnostics = useMemo<EditorDiagnostic[]>(
     () =>
       documentDiagnostics

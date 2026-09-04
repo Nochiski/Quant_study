@@ -249,6 +249,11 @@ describe("document routes (P2-04)", () => {
 
   it("keeps edits typed during create and saves them before following the new revision", async () => {
     const user = userEvent.setup();
+    const revisionRequests: Array<{
+      expected_revision: number;
+      format: string;
+      source: string;
+    }> = [];
     server.use(
       http.post(`${API}/api/v1/strategy-documents`, async ({ request }) => {
         const body = (await request.json()) as { source: string };
@@ -262,8 +267,10 @@ describe("document routes (P2-04)", () => {
         async ({ request }) => {
           const body = (await request.json()) as {
             expected_revision: number;
+            format: string;
             source: string;
           };
+          revisionRequests.push(body);
           expect(body.expected_revision).toBe(1);
           return HttpResponse.json(document("s9", 2, body.source, "B"), {
             status: 201,
@@ -290,6 +297,9 @@ describe("document routes (P2-04)", () => {
       ),
     );
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(revisionRequests).toEqual([
+      { expected_revision: 1, format: "yaml", source: second },
+    ]);
   });
 
   it("keeps the draft and reports a validation failure without leaving the page", async () => {
@@ -344,6 +354,14 @@ describe("document routes (P2-04)", () => {
 
     await user.click(legacyLink());
     const dialog = await screen.findByRole("alertdialog");
+    expect(globalThis.document.activeElement).toBe(
+      within(dialog).getAllByRole("button")[0],
+    );
+    await user.keyboard("{Shift>}{Tab}{/Shift}");
+    expect(globalThis.document.activeElement).toBe(
+      within(dialog).getAllByRole("button")[1],
+    );
+    await user.keyboard("{Tab}");
     expect(globalThis.document.activeElement).toBe(
       within(dialog).getAllByRole("button")[0],
     );

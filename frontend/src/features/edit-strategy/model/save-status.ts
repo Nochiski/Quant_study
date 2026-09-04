@@ -54,6 +54,15 @@ export const saveStatusTone = (
   )
     return "error";
   if (state.dirty && state.parse?.status === "rejected") return "error";
+  if (
+    state.dirty &&
+    state.compiled !== null &&
+    state.compiledVersion === state.sourceVersion &&
+    state.compiled.diagnostics.some(
+      (diagnostic) => diagnostic.severity === "error",
+    )
+  )
+    return "error";
   if (state.dirty) return "warn";
   return "ok";
 };

@@ -269,6 +269,23 @@ SEMANTIC_ONLY_CODES: frozenset[str] = frozenset(
 )
 
 
+# Codes for FactorGraph expression issues. Two producers share them: the strategy validator
+# (aliasing `domain.factor` graph issues) and the portfolio pipeline, which rejects a graph it
+# cannot evaluate yet. They are listed apart from SEMANTIC_ONLY_CODES because they are not
+# "owned by the validator only" — the registry, not a call site, is what owns them.
+EXPRESSION_CODES: frozenset[str] = frozenset(
+    {
+        "strategy.expression.duplicate_node",
+        "strategy.expression.output_missing",
+        "strategy.expression.input_missing",
+        "strategy.expression.parameter_missing",
+        "strategy.expression.lag_periods",
+        "strategy.expression.parameter_type",
+        "strategy.expression.reference_unsupported",
+    }
+)
+
+
 def scalar_constraint_index() -> Mapping[str, ScalarConstraint]:
     return {constraint.pointer: constraint for constraint in STRATEGY_SCALAR_CONSTRAINTS}
 

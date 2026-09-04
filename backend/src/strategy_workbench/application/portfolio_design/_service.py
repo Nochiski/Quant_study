@@ -9,10 +9,12 @@ weighted, direction-signed sum the portfolio compiler derives from them. Backtes
 same TargetTape, so preview and backtest cannot diverge. No adapter is allowed to invent factor
 values.
 
-PIT enforcement is owned here: a raw field published after its `as_of` is an adapter contract
-violation and raises `LookAheadViolationError` (fail-closed, loud). Each factor value carries the
-latest publication date among the fields its plan reads, so the portfolio compiler's FUTURE_DATA
-guard stays meaningful.
+PIT enforcement is owned here, and it covers *dated* values only: a raw field published after its
+`as_of` is an adapter contract violation and raises `LookAheadViolationError` (fail-closed, loud).
+Each factor value carries the latest publication date among the fields its plan reads, so the
+portfolio compiler's FUTURE_DATA guard stays meaningful. `universe_member` and `sector_id` have no
+publication date, so no guard here or downstream can catch a retroactive membership or sector
+change; the observation adapter owns their as_of vintage (D-006).
 """
 
 from __future__ import annotations
@@ -42,8 +44,7 @@ from strategy_workbench.domain.portfolio.facade.construction import (
 from strategy_workbench.domain.strategy.facade.specification import StrategySpec
 from strategy_workbench.domain.strategy.facade.validation import (
     StrategyValidation,
-    ValidationIssue,
-    ValidationKind,
+    semantic_issue,
     validate_strategy,
 )
 
@@ -72,7 +73,15 @@ class RawObservationUnavailableError(RuntimeError):
         self.detail = detail
 
 
-class LookAheadViolationError(RuntimeError):
+class RawObservationContractError(RuntimeError):
+    """The observation adapter answered outside its declared contract.
+
+    Fail-loud on purpose and deliberately not mapped to an HTTP status: a contract violation is an
+    adapter bug, not a user input error, and answering 4xx would let a wrong tape look accepted.
+    """
+
+
+class LookAheadViolationError(RawObservationContractError):
     """An adapter returned a field published after the observation date (contract bug)."""
 
 
@@ -131,6 +140,7 @@ class PortfolioDesignService:
         )
         if not raw.ok:
             raise RawObservationUnavailableError(raw.status, raw.detail)
+        _reject_sessions_outside_strategy_range(raw, spec)
         factor_observations = tuple(_to_factor_observation(item) for item in raw.observations)
         parameters = tuple(
             ResolvedFactorParameter(parameter.parameter_id, parameter.default)
@@ -155,6 +165,7 @@ class PortfolioDesignService:
                 observations=observations,
             ),
             engine=self._engine_portfolio.assess(spec),
+            warnings=raw.warnings,
         )
         return PortfolioPipelineResult(
             data_snapshot_id=raw.data_snapshot_id,
@@ -204,13 +215,13 @@ def _group_field_ids(graph: FactorGraph) -> set[str]:
 def _reject_saved_references(spec: StrategySpec, plans: dict[str, FactorExecutionPlan]) -> None:
     # TODO(PLAN P5-03): evaluate referenced factors/subgraphs in topological order instead.
     issues = tuple(
-        ValidationIssue(
-            code="strategy.expression.reference_unsupported",
-            path=f"factors.factors.{index}.graph",
-            message="저장된 팩터/서브그래프 참조는 아직 preview/backtest에서 계산되지 않습니다: "
+        # The domain owns the code registry; minting an issue here goes through the same gate.
+        semantic_issue(
+            "strategy.expression.reference_unsupported",
+            f"factors.factors.{index}.graph",
+            "저장된 팩터/서브그래프 참조는 아직 preview/backtest에서 계산되지 않습니다: "
             f"factor_ids={plan.referenced_factor_ids} "
             f"subgraph_ids={plan.referenced_subgraph_ids}",
-            kind=ValidationKind.SEMANTIC,
         )
         for index, factor in enumerate(spec.factors.factors)
         for plan in (plans[factor.factor_id],)
@@ -218,6 +229,27 @@ def _reject_saved_references(spec: StrategySpec, plans: dict[str, FactorExecutio
     )
     if issues:
         raise InvalidPortfolioRequestError(StrategyValidation(valid=False, issues=issues))
+
+
+def _reject_sessions_outside_strategy_range(raw: RawObservationSet, spec: StrategySpec) -> None:
+    """Sessions must stay inside `spec.data.start..end` (fail-closed, D-004).
+
+    A wider answer is fail-open: `compile_target_tape` would emit frames whose execution date has
+    no bar in the backtest dataset, which `application/backtest_run` queries for the strategy
+    range alone.
+    """
+    outside = tuple(
+        session for session in raw.sessions if not spec.data.start <= session <= spec.data.end
+    )
+    if not outside:
+        return
+    raise RawObservationContractError(
+        "raw observation sessions fall outside the requested strategy range — "
+        f"expected={spec.data.start}..{spec.data.end} "
+        f"actual={raw.sessions[0]}..{raw.sessions[-1]} "
+        f"outside={outside[:5]} outside_count={len(outside)} "
+        f"universe_id={spec.data.universe_id!r} snapshot={raw.data_snapshot_id!r}"
+    )
 
 
 def _to_factor_observation(item: RawObservation) -> FactorObservation:
@@ -232,6 +264,9 @@ def _to_factor_observation(item: RawObservation) -> FactorObservation:
         as_of=item.as_of,
         security_id=item.security_id,
         fields=tuple(FactorFieldValue(field.field_id, field.value) for field in item.fields),
+        # Membership travels with the row so cross-sectional operators score members against
+        # members only (D-001); dropping non-members here would truncate time-series lookbacks.
+        universe_member=item.universe_member,
     )
 
 

@@ -239,3 +239,22 @@ def test_mock_synthetic_period_is_a_pure_function_of_the_date() -> None:
     assert set(a) <= set(b)
     assert all(a[key] == b[key] for key in a)
     assert any(not o.universe_member for o in a.values())  # membership churn is date-based
+
+
+def test_result_rejects_observations_on_undeclared_dates() -> None:
+    """D-003: an undeclared row would shift every lag/window behind it without a word."""
+    declared, stray = START, START + timedelta(days=1)
+    rows = (RawObservation(declared, "a", True, ()), RawObservation(stray, "a", True, ()))
+
+    with pytest.raises(ValueError, match="neither a session nor warm-up history"):
+        RawObservationSet(DataLoadStatus.OK, "snap", (declared,), (), rows)
+
+    accepted = RawObservationSet(DataLoadStatus.OK, "snap", (declared, stray), (), rows)
+    assert len(accepted.observations) == 2
+
+
+@pytest.mark.parametrize("adapter", ADAPTERS)
+def test_every_observation_date_is_declared(adapter: RawObservationPort) -> None:
+    result = adapter.load_raw_observations(_query(history=2))
+    declared = set(result.sessions) | set(result.history_sessions)
+    assert {observation.as_of for observation in result.observations} <= declared

@@ -8,5 +8,9 @@ description = "backtest_engine의 결정론적 코어(체결 가격 규칙, 수�
 name = "backtest_core"
 crate-type = ["cdylib", "rlib"]
 
+[features]
+default = ["extension-module"]
+extension-module = ["pyo3/extension-module"]
+
 [dependencies]
-pyo3 = { version = "0.23", features = ["extension-module"] }
+pyo3 = { version = "0.23" }

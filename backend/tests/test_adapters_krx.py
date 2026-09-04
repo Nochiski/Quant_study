@@ -126,9 +126,7 @@ class TestKrxParquetBarSource:
         write_trades(tmp_path / KOSPI_TRADES_FILE, [(d(2), "005930", 100, 110, 95, 105, 1000)])
         write_trades(tmp_path / KOSDAQ_TRADES_FILE, [(d(2), "247540", 50, 55, 45, 52, 500)])
         kosdaq = make_instrument("247540")
-        result = KrxParquetBarSource(tmp_path).load_bars(
-            BarQuery(instruments=(SAMSUNG, kosdaq))
-        )
+        result = KrxParquetBarSource(tmp_path).load_bars(BarQuery(instruments=(SAMSUNG, kosdaq)))
         assert result.ok
         assert {bar.instrument.symbol for bar in result.bars} == {"005930", "247540"}
 

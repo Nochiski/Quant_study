@@ -133,6 +133,11 @@ const deploymentsRoute = createRoute({
   path: "/deployments",
   component: () => <OperationsPlaceholderPage area={t("nav.deployments")} />,
 });
+const realtimeRoute = createRoute({
+  getParentRoute: () => operationsRoute,
+  path: "/realtime",
+  component: () => <OperationsPlaceholderPage area={t("nav.realtime")} />,
+});
 const ordersRoute = createRoute({
   getParentRoute: () => operationsRoute,
   path: "/orders",
@@ -157,6 +162,7 @@ const routeTree = rootRoute.addChildren([
   backtestRunRoute,
   operationsRoute.addChildren([
     deploymentsRoute,
+    realtimeRoute,
     ordersRoute,
     positionsRoute,
     riskRoute,

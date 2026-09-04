@@ -8,6 +8,7 @@ import type {
 } from "../../../shared/api";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import {
+  projectContractField,
   projectContractInspector,
   type ContractInspectorSource,
 } from "../model/contract-inspector";
@@ -184,6 +185,18 @@ const TREE = {
   },
 };
 
+const treeWithDraftNode = (node: Record<string, unknown>) => ({
+  ...TREE,
+  factors: {
+    factors: [
+      {
+        ...TREE.factors.factors[0],
+        graph: { nodes: [node], output_node_id: "draft" },
+      },
+    ],
+  },
+});
+
 describe("contract projection", () => {
   it("projects raw and display values, bounds, defaults and stage from one contract row", () => {
     const result = projectContractInspector(
@@ -217,6 +230,17 @@ describe("contract projection", () => {
     expect(result.field.example).toBeUndefined();
   });
 
+  it.each([false, 0, ""])("keeps the falsy wire example %j", (example) => {
+    const result = projectContractField(
+      { type: "object", properties: { value: { type: "string" } } },
+      [{ pointer: "/value", type: "string", required: false, example }],
+      "/value",
+      {},
+    );
+    expect(result?.hasExample).toBe(true);
+    expect(result?.example).toBe(example);
+  });
+
   it.each([undefined, "not_a_node_kind"])(
     "keeps an unresolved discriminator variant-based when document kind is %s",
     (kind) => {
@@ -224,20 +248,7 @@ describe("contract projection", () => {
         kind === undefined
           ? { node_id: "pending" }
           : { node_id: "pending", kind };
-      const pendingTree = {
-        ...TREE,
-        factors: {
-          factors: [
-            {
-              ...TREE.factors.factors[0],
-              graph: {
-                nodes: [pendingNode],
-                output_node_id: "pending",
-              },
-            },
-          ],
-        },
-      };
+      const pendingTree = treeWithDraftNode(pendingNode);
       const result = projectContractInspector(
         source(),
         "/factors/factors/0/graph/nodes/0/kind",
@@ -253,6 +264,48 @@ describe("contract projection", () => {
       );
       expect(result.field.hasConst).toBe(false);
       expect(result.field.constValue).toBeUndefined();
+    },
+  );
+
+  it.each([undefined, "not_a_node_kind"])(
+    "withholds branch-dependent field contracts when document kind is %s",
+    (kind) => {
+      const pendingTree = treeWithDraftNode({
+        node_id: "draft",
+        ...(kind === undefined ? {} : { kind }),
+        operator: "momentum",
+        field_id: "close",
+      });
+      const operator = projectContractInspector(
+        source(),
+        "/factors/factors/0/graph/nodes/0/operator",
+        pendingTree,
+        false,
+      );
+      expect(operator.status).toBe("ready");
+      if (operator.status !== "ready") return;
+      expect(operator.field.value.raw).toBe("momentum");
+      expect(operator.field.discriminator?.selected).toBeNull();
+      expect(operator.field.unresolvedBranches).toEqual(
+        expect.arrayContaining(["unary", "time_series"]),
+      );
+      expect(operator.field.type).toBeNull();
+      expect(operator.field.enumValues).toEqual([]);
+      expect(operator.field.required).toBeNull();
+      expect(operator.field.hasDefault).toBe(false);
+      expect(operator.field.catalog).toBeNull();
+
+      const fieldId = projectContractInspector(
+        source(),
+        "/factors/factors/0/graph/nodes/0/field_id",
+        pendingTree,
+        false,
+      );
+      expect(fieldId.status).toBe("ready");
+      if (fieldId.status !== "ready") return;
+      expect(fieldId.field.unresolvedBranches).toEqual(["field"]);
+      expect(fieldId.field.catalog).toBeNull();
+      expect(fieldId.catalog).toBeNull();
     },
   );
 
@@ -362,6 +415,27 @@ describe("contract projection", () => {
 });
 
 describe("ContractInspector UI", () => {
+  it("requires a kind before showing a branch-dependent field contract", () => {
+    render(
+      <ContractInspector
+        source={source()}
+        selectedPointer="/factors/factors/0/graph/nodes/0/operator"
+        tree={treeWithDraftNode({
+          node_id: "draft",
+          operator: "momentum",
+        })}
+        stale={false}
+      />,
+    );
+    expect(
+      screen.getByText(
+        "kind를 먼저 선택해야 이 필드의 계약을 확정할 수 있습니다.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("negate")).not.toBeInTheDocument();
+    expect(screen.queryByText("허용 값")).not.toBeInTheDocument();
+  });
+
   it("does not render a null wire example", () => {
     render(
       <ContractInspector

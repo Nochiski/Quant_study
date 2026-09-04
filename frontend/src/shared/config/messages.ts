@@ -304,7 +304,8 @@ const ko = {
   "contract.unknown": "선택한 경로는 현재 runtime schema에 없습니다.",
   "contract.stale": "구문 오류 전 마지막 정상 구조를 기준으로 표시 중",
   "contract.root": "문서 루트",
-  "contract.noScalar": "이 경로는 구조 노드이므로 scalar field contract가 없습니다.",
+  "contract.noScalar":
+    "이 경로는 구조 노드이므로 scalar field contract가 없습니다.",
   "contract.noValue": "현재 문서에 값이 없습니다.",
   "contract.templatePath": "계약 경로",
   "contract.nullable": "null 허용",
@@ -317,6 +318,8 @@ const ko = {
   "contract.discriminator": "Discriminator",
   "contract.variants": "분기",
   "contract.selectedBranch": "현재 분기",
+  "contract.branchRequired":
+    "kind를 먼저 선택해야 이 필드의 계약을 확정할 수 있습니다.",
   "contract.provenance": "계약 출처",
   "contract.schemaVersion": "스키마 버전",
   "contract.schemaHash": "스키마 해시",
@@ -328,9 +331,12 @@ const ko = {
   "contract.catalog.mismatch":
     "계약과 카탈로그 버전이 달라 상세 정보를 연결하지 않았습니다.",
   "contract.catalog.unselected": "현재 문서에 선택된 ID가 없습니다.",
-  "contract.catalog.notLoaded": "선택한 ID가 현재 로드된 카탈로그 페이지 밖에 있습니다.",
-  "contract.catalog.notFound": "현재 계약 버전의 카탈로그에서 ID를 찾지 못했습니다.",
-  "contract.catalog.unsupported": "이 카탈로그의 상세 조회 API는 아직 없습니다.",
+  "contract.catalog.notLoaded":
+    "선택한 ID가 현재 로드된 카탈로그 페이지 밖에 있습니다.",
+  "contract.catalog.notFound":
+    "현재 계약 버전의 카탈로그에서 ID를 찾지 못했습니다.",
+  "contract.catalog.unsupported":
+    "이 카탈로그의 상세 조회 API는 아직 없습니다.",
   "contract.fieldDetails": "데이터 필드 · PIT",
   "contract.factorDetails": "팩터 레지스트리",
   "contract.snapshot": "데이터 스냅샷",
@@ -357,7 +363,8 @@ const ko = {
   "contract.no": "아니요",
   "contract.sessions": "세션",
   "strategy.contract.signal.entry_percentile": "신호에서 선택할 상위 비율",
-  "strategy.contract.portfolio.selection_count": "롱 포트폴리오에 선택할 종목 수",
+  "strategy.contract.portfolio.selection_count":
+    "롱 포트폴리오에 선택할 종목 수",
   "strategy.contract.portfolio.short_selection_count":
     "숏 포트폴리오에 선택할 종목 수",
   "strategy.contract.portfolio.selection_percentile":
@@ -768,7 +775,8 @@ export const messages = {
     "ide.outline.tree": "StrategySpec document structure",
     "ide.outline.parsing": "Analysing the document structure.",
     "ide.outline.noMatches": "No matching path.",
-    "ide.outline.stale": "Showing the last valid structure before the syntax error.",
+    "ide.outline.stale":
+      "Showing the last valid structure before the syntax error.",
     "ide.outline.missing": "Not present in source yet",
     "ide.outline.arrayIndex": "Array index",
     "ide.section.identity": "Basics",
@@ -791,9 +799,11 @@ export const messages = {
     "contract.incompatible":
       "The schema and field contract versions differ, so this path cannot be explained safely.",
     "contract.unknown": "The selected path is not in the runtime schema.",
-    "contract.stale": "Showing the last valid structure from before the syntax error",
+    "contract.stale":
+      "Showing the last valid structure from before the syntax error",
     "contract.root": "Document root",
-    "contract.noScalar": "This is a structural node and has no scalar field contract.",
+    "contract.noScalar":
+      "This is a structural node and has no scalar field contract.",
     "contract.noValue": "The current document has no value here.",
     "contract.templatePath": "Contract path",
     "contract.nullable": "Nullable",
@@ -806,6 +816,8 @@ export const messages = {
     "contract.discriminator": "Discriminator",
     "contract.variants": "Branches",
     "contract.selectedBranch": "Active branch",
+    "contract.branchRequired":
+      "Select kind before using this field's contract.",
     "contract.provenance": "Contract provenance",
     "contract.schemaVersion": "Schema version",
     "contract.schemaHash": "Schema hash",
@@ -817,9 +829,12 @@ export const messages = {
     "contract.catalog.mismatch":
       "Catalog details were not joined because its version differs from the contract.",
     "contract.catalog.unselected": "No ID is selected in the current document.",
-    "contract.catalog.notLoaded": "The selected ID is outside the loaded catalog page.",
-    "contract.catalog.notFound": "The ID is not in this contract's catalog version.",
-    "contract.catalog.unsupported": "This catalog does not have a detail API yet.",
+    "contract.catalog.notLoaded":
+      "The selected ID is outside the loaded catalog page.",
+    "contract.catalog.notFound":
+      "The ID is not in this contract's catalog version.",
+    "contract.catalog.unsupported":
+      "This catalog does not have a detail API yet.",
     "contract.fieldDetails": "Dataset field · PIT",
     "contract.factorDetails": "Factor registry",
     "contract.snapshot": "Data snapshot",
@@ -845,8 +860,10 @@ export const messages = {
     "contract.yes": "Yes",
     "contract.no": "No",
     "contract.sessions": "sessions",
-    "strategy.contract.signal.entry_percentile": "Top fraction selected by the signal",
-    "strategy.contract.portfolio.selection_count": "Number of names in the long portfolio",
+    "strategy.contract.signal.entry_percentile":
+      "Top fraction selected by the signal",
+    "strategy.contract.portfolio.selection_count":
+      "Number of names in the long portfolio",
     "strategy.contract.portfolio.short_selection_count":
       "Number of names in the short portfolio",
     "strategy.contract.portfolio.selection_percentile":
@@ -860,12 +877,16 @@ export const messages = {
     "strategy.contract.portfolio.minimum_liquidity":
       "Minimum liquidity threshold applied to candidates",
     "strategy.contract.risk.gross_exposure": "Total portfolio gross exposure",
-    "strategy.contract.risk.max_name_weight": "Maximum target weight per security",
-    "strategy.contract.risk.max_sector_weight": "Maximum target weight per sector",
+    "strategy.contract.risk.max_name_weight":
+      "Maximum target weight per security",
+    "strategy.contract.risk.max_sector_weight":
+      "Maximum target weight per sector",
     "strategy.contract.execution.participation_rate":
       "Maximum order participation relative to market volume",
-    "strategy.contract.execution.fee_bps": "Fee assumption applied to notional traded",
-    "strategy.contract.execution.slippage_bps": "Execution price slippage assumption",
+    "strategy.contract.execution.fee_bps":
+      "Fee assumption applied to notional traded",
+    "strategy.contract.execution.slippage_bps":
+      "Execution price slippage assumption",
     "ide.debugger.tab.preview": "Value preview",
     "ide.debugger.tab.exposure": "Exposure",
     "ide.debugger.tab.orders": "Expected orders",

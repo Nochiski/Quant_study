@@ -81,6 +81,39 @@ describe("schema navigator", () => {
     expect(valueOptions(kind!)).toEqual(["field"]);
   });
 
+  it.each([undefined, "not_a_node_kind"])(
+    "marks branch-only and conflicting property schemas unresolved when kind is %s",
+    (kind) => {
+      const changed = structuredClone(DOCUMENT) as {
+        factors: { factors: { graph: { nodes: Record<string, unknown>[] } }[] };
+      };
+      changed.factors.factors[0].graph.nodes[0] = {
+        node_id: "draft",
+        ...(kind === undefined ? {} : { kind }),
+        operator: "momentum",
+        field_id: "close",
+      };
+      const base = "/factors/factors/0/graph/nodes/0";
+      const operator = schemaAt(SCHEMA, `${base}/operator`, changed);
+      expect(
+        operator?.propertyVariants?.map((variant) => variant.branch),
+      ).toEqual(expect.arrayContaining(["unary", "time_series"]));
+      expect(valueOptions(operator!)).toEqual([]);
+      const variantEnums = operator?.propertyVariants?.map(
+        (variant) => variant.schema.enum,
+      );
+      expect(
+        new Set(variantEnums?.map((values) => JSON.stringify(values))).size,
+      ).toBeGreaterThan(1);
+
+      const fieldId = schemaAt(SCHEMA, `${base}/field_id`, changed);
+      expect(
+        fieldId?.propertyVariants?.map((variant) => variant.branch),
+      ).toEqual(["field"]);
+      expect(valueOptions(fieldId!)).toEqual([]);
+    },
+  );
+
   it("enumerates enum, const and boolean values from the schema alone", () => {
     const operator = schemaAt(
       SCHEMA,

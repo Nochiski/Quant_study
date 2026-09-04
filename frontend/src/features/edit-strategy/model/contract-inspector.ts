@@ -58,7 +58,7 @@ export type ContractFieldProjection = {
   pointer: string;
   templatePointer: string;
   shape: "root" | "object" | "array" | "scalar";
-  type: string;
+  type: string | null;
   nullable: boolean;
   required: boolean | null;
   enumValues: readonly string[];
@@ -79,6 +79,8 @@ export type ContractFieldProjection = {
   reference: string | null;
   value: ContractValue;
   discriminator: ContractDiscriminator | null;
+  /** Branches that define this property differently; metadata is withheld until kind resolves. */
+  unresolvedBranches: readonly string[] | null;
 };
 
 export type ContractCatalogProjection =
@@ -290,44 +292,64 @@ export const projectContractField = (
   const selectedValue = valueAt(tree, pointer);
   const discriminator = nearestDiscriminator(schema, pointer, tree);
   const branch = discriminator?.selected ?? null;
-  const row = contractFor(contract, pointer, branch);
   const node = resolved.node;
-  const type = row?.type ?? schemaType(node);
-  const unit =
-    row?.unit ?? (typeof node["x-unit"] === "string" ? node["x-unit"] : null);
-  const displayUnit =
-    row?.display_unit ??
-    (typeof node["x-display-unit"] === "string"
-      ? node["x-display-unit"]
-      : null);
-  const hasDefault = row?.has_default === true || own(node, "default");
-  const defaultValue = row?.has_default === true ? row.default : node.default;
-  // The backend serializes an absent optional example as null. Keep null/undefined absent;
-  // false, zero and an empty string remain valid examples.
-  const contractExample = row?.example;
-  const schemaExample = Array.isArray(node.examples)
-    ? node.examples.find(
-        (candidate) => candidate !== null && candidate !== undefined,
-      )
-    : undefined;
-  const hasExample = contractExample != null || schemaExample !== undefined;
-  const example = contractExample != null ? contractExample : schemaExample;
   const discriminatorPointer = discriminator
     ? `${discriminator.ownerPointer}/${escapePointerSegment(discriminator.propertyName)}`
     : null;
   const unresolvedDiscriminatorProperty =
     discriminator?.selected === null && pointer === discriminatorPointer;
+  const branchDependent =
+    resolved.propertyVariants !== null && !unresolvedDiscriminatorProperty;
+  const unresolvedBranches = branchDependent
+    ? [...new Set(resolved.propertyVariants!.map((variant) => variant.branch))]
+    : null;
+  const row = branchDependent
+    ? undefined
+    : contractFor(contract, pointer, branch);
+  const type = branchDependent ? null : (row?.type ?? schemaType(node));
+  const unit = branchDependent
+    ? null
+    : (row?.unit ??
+      (typeof node["x-unit"] === "string" ? node["x-unit"] : null));
+  const displayUnit = branchDependent
+    ? null
+    : (row?.display_unit ??
+      (typeof node["x-display-unit"] === "string"
+        ? node["x-display-unit"]
+        : null));
+  const hasDefault =
+    !branchDependent && (row?.has_default === true || own(node, "default"));
+  const defaultValue = branchDependent
+    ? undefined
+    : row?.has_default === true
+      ? row.default
+      : node.default;
+  // The backend serializes an absent optional example as null. Keep null/undefined absent;
+  // false, zero and an empty string remain valid examples.
+  const contractExample = branchDependent ? undefined : row?.example;
+  const schemaExample =
+    !branchDependent && Array.isArray(node.examples)
+      ? node.examples.find(
+          (candidate) => candidate !== null && candidate !== undefined,
+        )
+      : undefined;
+  const hasExample = contractExample != null || schemaExample !== undefined;
+  const example = contractExample != null ? contractExample : schemaExample;
   // When no valid union branch is selected, the first branch's `kind` const is only a
   // traversal artifact. The discriminator variants are the actual contract at this point.
-  const enumValues = unresolvedDiscriminatorProperty
-    ? discriminator.variants
-    : (row?.enum ?? stringList(node.enum));
-  const hasConst = unresolvedDiscriminatorProperty
-    ? false
-    : row?.const != null || own(node, "const");
-  const constValue = unresolvedDiscriminatorProperty
-    ? undefined
-    : (row?.const ?? node.const);
+  const enumValues = branchDependent
+    ? []
+    : unresolvedDiscriminatorProperty
+      ? discriminator.variants
+      : (row?.enum ?? stringList(node.enum));
+  const hasConst =
+    !branchDependent &&
+    !unresolvedDiscriminatorProperty &&
+    (row?.const != null || own(node, "const"));
+  const constValue =
+    branchDependent || unresolvedDiscriminatorProperty
+      ? undefined
+      : (row?.const ?? node.const);
   const shape =
     pointer === ""
       ? "root"
@@ -341,37 +363,42 @@ export const projectContractField = (
     templatePointer: templatePointer(pointer),
     shape,
     type,
-    nullable: row?.nullable ?? resolved.nullable,
-    required: row ? row.required : null,
+    nullable: branchDependent ? false : (row?.nullable ?? resolved.nullable),
+    required: branchDependent ? null : row ? row.required : null,
     enumValues,
     constValue,
     hasConst,
     defaultValue,
     hasDefault,
-    minimum: lowerBound(row, node),
-    maximum: upperBound(row, node),
-    format:
-      row?.format ?? (typeof node.format === "string" ? node.format : null),
+    minimum: branchDependent ? null : lowerBound(row, node),
+    maximum: branchDependent ? null : upperBound(row, node),
+    format: branchDependent
+      ? null
+      : (row?.format ?? (typeof node.format === "string" ? node.format : null)),
     unit,
     displayUnit,
-    descriptionKey:
-      row?.description_key ??
-      (typeof node["x-description-key"] === "string"
-        ? node["x-description-key"]
-        : null),
+    descriptionKey: branchDependent
+      ? null
+      : (row?.description_key ??
+        (typeof node["x-description-key"] === "string"
+          ? node["x-description-key"]
+          : null)),
     example,
     hasExample,
-    appliedStage:
-      row?.applied_stage ??
-      (typeof node["x-applied-stage"] === "string"
-        ? node["x-applied-stage"]
-        : null),
-    catalog:
-      row?.catalog ??
-      (typeof node["x-catalog"] === "string" ? node["x-catalog"] : null),
-    reference:
-      row?.reference ??
-      (typeof node["x-reference"] === "string" ? node["x-reference"] : null),
+    appliedStage: branchDependent
+      ? null
+      : (row?.applied_stage ??
+        (typeof node["x-applied-stage"] === "string"
+          ? node["x-applied-stage"]
+          : null)),
+    catalog: branchDependent
+      ? null
+      : (row?.catalog ??
+        (typeof node["x-catalog"] === "string" ? node["x-catalog"] : null)),
+    reference: branchDependent
+      ? null
+      : (row?.reference ??
+        (typeof node["x-reference"] === "string" ? node["x-reference"] : null)),
     value: {
       present: selectedValue.present,
       raw: selectedValue.value,
@@ -383,6 +410,7 @@ export const projectContractField = (
         : null,
     },
     discriminator,
+    unresolvedBranches,
   };
 };
 

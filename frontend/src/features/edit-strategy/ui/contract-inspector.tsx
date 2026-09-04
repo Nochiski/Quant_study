@@ -24,7 +24,9 @@ const yesNo = (value: boolean): string =>
   value ? t("contract.yes") : t("contract.no");
 
 const shortHash = (value: string): ReactNode => (
-  <code title={value}>{value.length > 14 ? `${value.slice(0, 12)}…` : value}</code>
+  <code title={value}>
+    {value.length > 14 ? `${value.slice(0, 12)}…` : value}
+  </code>
 );
 
 const codeValue = (value: unknown): ReactNode => (
@@ -36,12 +38,8 @@ const boundText = (
   maximum: ContractBound | null,
 ): string =>
   [
-    minimum
-      ? `${minimum.inclusive ? "≥" : ">"} ${minimum.value}`
-      : null,
-    maximum
-      ? `${maximum.inclusive ? "≤" : "<"} ${maximum.value}`
-      : null,
+    minimum ? `${minimum.inclusive ? "≥" : ">"} ${minimum.value}` : null,
+    maximum ? `${maximum.inclusive ? "≤" : "<"} ${maximum.value}` : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -89,23 +87,35 @@ const CatalogDetails = ({
         <h3>{t("assist.source")}</h3>
         <Rows
           rows={[
-            [t("assist.source"), <code key="namespace">{catalog.namespace}</code>],
+            [
+              t("assist.source"),
+              <code key="namespace">{catalog.namespace}</code>,
+            ],
             [
               t("ide.inspector.storedValue"),
               catalog.id ? <code key="id">{catalog.id}</code> : EMPTY,
             ],
           ]}
         />
-        <p className="contract-inspector__notice">{statusMessage(catalog.status)}</p>
+        <p className="contract-inspector__notice">
+          {statusMessage(catalog.status)}
+        </p>
       </section>
     );
   }
 
   const versionRows: readonly [string, ReactNode][] = [
-    [t("contract.expectedVersion"), <code key="expected">{catalog.expectedVersion}</code>],
+    [
+      t("contract.expectedVersion"),
+      <code key="expected">{catalog.expectedVersion}</code>,
+    ],
     [
       t("contract.actualVersion"),
-      catalog.actualVersion ? <code key="actual">{catalog.actualVersion}</code> : EMPTY,
+      catalog.actualVersion ? (
+        <code key="actual">{catalog.actualVersion}</code>
+      ) : (
+        EMPTY
+      ),
     ],
   ];
   if (catalog.status !== "ready") {
@@ -119,7 +129,11 @@ const CatalogDetails = ({
         <Rows rows={versionRows} />
         <p
           className={`contract-inspector__notice${catalog.status === "mismatch" ? " contract-inspector__notice--warn" : ""}`}
-          role={catalog.status === "error" || catalog.status === "mismatch" ? "alert" : undefined}
+          role={
+            catalog.status === "error" || catalog.status === "mismatch"
+              ? "alert"
+              : undefined
+          }
         >
           {statusMessage(catalog.status)}
         </p>
@@ -143,7 +157,10 @@ const CatalogDetails = ({
         <Rows
           rows={[
             ...versionRows,
-            [t("dataset.catalog.dataset"), <code key="dataset">{field.dataset_id}</code>],
+            [
+              t("dataset.catalog.dataset"),
+              <code key="dataset">{field.dataset_id}</code>,
+            ],
             [t("contract.frequency"), field.frequency],
             [t("contract.valueType"), field.value_type],
             [t("ide.inspector.unit"), field.unit],
@@ -168,7 +185,10 @@ const CatalogDetails = ({
               field.coverage.supported_cell_kinds.join(", ") || EMPTY,
             ],
             [t("dataset.field.evidence"), field.evidence],
-            [t("contract.snapshot"), <code key="snapshot">{snapshot.snapshot_id}</code>],
+            [
+              t("contract.snapshot"),
+              <code key="snapshot">{snapshot.snapshot_id}</code>,
+            ],
             [t("contract.source"), snapshot.source],
             [t("contract.builtAt"), snapshot.built_at],
             [t("contract.datasetRevisions"), revisions || EMPTY],
@@ -231,13 +251,19 @@ export const ContractInspector = ({
     );
   if (projection.status === "unavailable")
     return (
-      <p className="contract-inspector__state contract-inspector__state--error" role="alert">
+      <p
+        className="contract-inspector__state contract-inspector__state--error"
+        role="alert"
+      >
         {t("contract.unavailable")}
       </p>
     );
   if (projection.status === "incompatible")
     return (
-      <div className="contract-inspector__state contract-inspector__state--error" role="alert">
+      <div
+        className="contract-inspector__state contract-inspector__state--error"
+        role="alert"
+      >
         <p>{t("contract.incompatible")}</p>
         <Rows
           rows={[
@@ -248,7 +274,8 @@ export const ContractInspector = ({
             [
               t("contract.schemaHash"),
               <span key="hashes">
-                {shortHash(projection.schemaHash)} / {shortHash(projection.contractSchemaHash)}
+                {shortHash(projection.schemaHash)} /{" "}
+                {shortHash(projection.contractSchemaHash)}
               </span>,
             ],
           ]}
@@ -272,18 +299,34 @@ export const ContractInspector = ({
       t("ide.inspector.path"),
       <code key="path">{field.pointer || t("contract.root")}</code>,
     ],
-    [t("contract.templatePath"), <code key="template">{field.templatePointer || "/"}</code>],
     [
-      t("assist.type"),
-      <span key="type" className="contract-inspector__inline-values">
-        <code>{field.type}</code>
-        {field.nullable ? <span>{t("contract.nullable")}</span> : null}
-        {field.required === null ? null : (
-          <span>{field.required ? t("assist.required") : t("assist.optional")}</span>
-        )}
-      </span>,
+      t("contract.templatePath"),
+      <code key="template">{field.templatePointer || "/"}</code>,
     ],
   ];
+  if (field.unresolvedBranches !== null) {
+    rows.push([
+      t("contract.variants"),
+      <span key="unresolved" className="contract-inspector__inline-values">
+        {field.unresolvedBranches.map((branch) => (
+          <code key={branch}>{branch}</code>
+        ))}
+      </span>,
+    ]);
+  } else {
+    rows.push([
+      t("assist.type"),
+      <span key="type" className="contract-inspector__inline-values">
+        <code>{field.type ?? EMPTY}</code>
+        {field.nullable ? <span>{t("contract.nullable")}</span> : null}
+        {field.required === null ? null : (
+          <span>
+            {field.required ? t("assist.required") : t("assist.optional")}
+          </span>
+        )}
+      </span>,
+    ]);
+  }
   if (field.shape === "scalar") {
     rows.push([
       t("ide.inspector.storedValue"),
@@ -299,7 +342,9 @@ export const ContractInspector = ({
     rows.push([
       t("contract.enum"),
       <span key="enum" className="contract-inspector__inline-values">
-        {field.enumValues.map((value) => <code key={value}>{value}</code>)}
+        {field.enumValues.map((value) => (
+          <code key={value}>{value}</code>
+        ))}
       </span>,
     ]);
   if (field.hasConst)
@@ -311,7 +356,8 @@ export const ContractInspector = ({
       t("contract.range"),
       <code key="range">{boundText(field.minimum, field.maximum)}</code>,
     ]);
-  if (field.format) rows.push([t("contract.format"), <code key="format">{field.format}</code>]);
+  if (field.format)
+    rows.push([t("contract.format"), <code key="format">{field.format}</code>]);
   if (field.unit)
     rows.push([
       t("ide.inspector.unit"),
@@ -323,22 +369,41 @@ export const ContractInspector = ({
   if (field.hasExample)
     rows.push([t("assist.example"), codeValue(field.example)]);
   if (field.appliedStage)
-    rows.push([t("ide.inspector.stage"), <code key="stage">{field.appliedStage}</code>]);
+    rows.push([
+      t("ide.inspector.stage"),
+      <code key="stage">{field.appliedStage}</code>,
+    ]);
   if (field.catalog)
     rows.push([t("assist.source"), <code key="catalog">{field.catalog}</code>]);
   if (field.reference)
-    rows.push([t("assist.source"), <code key="reference">{field.reference}</code>]);
+    rows.push([
+      t("assist.source"),
+      <code key="reference">{field.reference}</code>,
+    ]);
 
   return (
     <div className="contract-inspector">
       {projection.stale ? (
-        <p className="contract-inspector__notice contract-inspector__notice--warn" role="status">
+        <p
+          className="contract-inspector__notice contract-inspector__notice--warn"
+          role="status"
+        >
           {t("contract.stale")}
         </p>
       ) : null}
       <section className="contract-inspector__section">
-        <h3>{field.shape === "root" ? t("contract.root") : field.templatePointer}</h3>
+        <h3>
+          {field.shape === "root" ? t("contract.root") : field.templatePointer}
+        </h3>
         <Rows rows={rows} />
+        {field.unresolvedBranches !== null ? (
+          <p
+            className="contract-inspector__notice contract-inspector__notice--warn"
+            role="status"
+          >
+            {t("contract.branchRequired")}
+          </p>
+        ) : null}
         {field.shape !== "scalar" ? (
           <p className="contract-inspector__notice">{t("contract.noScalar")}</p>
         ) : null}
@@ -346,7 +411,9 @@ export const ContractInspector = ({
           <div className="contract-inspector__description">
             <strong>{t("contract.description")}</strong>
             <p>{description ?? field.descriptionKey}</p>
-            <code title={t("contract.descriptionKey")}>{field.descriptionKey}</code>
+            <code title={t("contract.descriptionKey")}>
+              {field.descriptionKey}
+            </code>
           </div>
         ) : null}
       </section>
@@ -366,7 +433,10 @@ export const ContractInspector = ({
               ],
               [
                 t("contract.variants"),
-                <span key="variants" className="contract-inspector__inline-values">
+                <span
+                  key="variants"
+                  className="contract-inspector__inline-values"
+                >
                   {field.discriminator.variants.map((variant) => (
                     <code key={variant}>{variant}</code>
                   ))}
@@ -385,15 +455,26 @@ export const ContractInspector = ({
         </section>
       ) : null}
 
-      {projection.catalog ? <CatalogDetails catalog={projection.catalog} /> : null}
+      {projection.catalog ? (
+        <CatalogDetails catalog={projection.catalog} />
+      ) : null}
 
       <section className="contract-inspector__section">
         <h3>{t("contract.provenance")}</h3>
         <Rows
           rows={[
-            [t("contract.schemaVersion"), <code key="version">{projection.provenance.schemaVersion}</code>],
-            [t("contract.schemaHash"), shortHash(projection.provenance.schemaHash)],
-            [t("contract.contractHash"), shortHash(projection.provenance.contractHash)],
+            [
+              t("contract.schemaVersion"),
+              <code key="version">{projection.provenance.schemaVersion}</code>,
+            ],
+            [
+              t("contract.schemaHash"),
+              shortHash(projection.provenance.schemaHash),
+            ],
+            [
+              t("contract.contractHash"),
+              shortHash(projection.provenance.contractHash),
+            ],
           ]}
         />
       </section>

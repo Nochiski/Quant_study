@@ -8,11 +8,7 @@ import {
   type PropertyOption,
 } from "./schema-navigator";
 
-export type StrategyOutlineNodeKind =
-  | "basics"
-  | "object"
-  | "array"
-  | "scalar";
+export type StrategyOutlineNodeKind = "basics" | "object" | "array" | "scalar";
 
 export type StrategyOutlineNode = {
   /** Render identity. Virtual groups do not pretend to be JSON Pointers. */
@@ -171,6 +167,7 @@ export const projectStrategyOutline = (
         schema: {},
         required: false,
         branch: null,
+        variants: null,
       });
     }
   }
@@ -178,7 +175,10 @@ export const projectStrategyOutline = (
   const basics: StrategyOutlineNode[] = [];
   const sections: StrategyOutlineNode[] = [];
   for (const option of byName.values()) {
-    const present = Object.prototype.hasOwnProperty.call(parsed.tree, option.name);
+    const present = Object.prototype.hasOwnProperty.call(
+      parsed.tree,
+      option.name,
+    );
     const value = parsed.tree[option.name];
     const pointer = `/${escapePointerSegment(option.name)}`;
     const node = buildNode(
@@ -220,13 +220,16 @@ export const findOutlineNode = (
       node.pointer === pointer ||
       (node.pointer !== "" && pointer.startsWith(`${node.pointer}/`))
     ) {
-      if (best === null || node.pointer.length > best.pointer.length) best = node;
+      if (best === null || node.pointer.length > best.pointer.length)
+        best = node;
     }
     for (const child of node.children) visit(child);
   };
   for (const node of nodes) visit(node);
   if (best !== null) return best;
-  return pointer === "" ? (nodes.find((node) => node.kind === "basics") ?? null) : null;
+  return pointer === ""
+    ? (nodes.find((node) => node.kind === "basics") ?? null)
+    : null;
 };
 
 export const outlineAncestorIds = (

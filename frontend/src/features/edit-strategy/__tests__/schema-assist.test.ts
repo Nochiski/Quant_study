@@ -268,6 +268,54 @@ describe("schema-driven completion", () => {
     ).toContain("종류=field");
   });
 
+  it.each([undefined, "not_a_node_kind"])(
+    "does not complete a branch-dependent value while kind is %s",
+    async (kind) => {
+      const kindLine = kind === undefined ? "" : `            kind: ${kind}\n`;
+      const operatorText = YAML.replace(
+        "          - node_id: unknown\n            ",
+        `          - node_id: unknown\n${kindLine}            operator: mom`,
+      );
+      const operator = await buildCompletionSource(
+        deps(stateFor(operatorText)),
+      )({
+        text: operatorText,
+        offset: offsetOf(operatorText, "            operator: mom"),
+        explicit: true,
+      });
+      expect(operator).toBeNull();
+
+      const fieldText = YAML.replace(
+        "          - node_id: unknown\n            ",
+        `          - node_id: unknown\n${kindLine}            field_id: clo`,
+      );
+      const field = await buildCompletionSource(deps(stateFor(fieldText)))({
+        text: fieldText,
+        offset:
+          fieldText.lastIndexOf("            field_id: clo") +
+          "            field_id: clo".length,
+        explicit: true,
+      });
+      expect(field).toBeNull();
+    },
+  );
+
+  it("restores branch-specific value completion after kind selects the branch", async () => {
+    const text = YAML.replace(
+      "            kind: time_series\n            input_node_id: ",
+      "            kind: time_series\n            operator: mom\n            input_node_id: ",
+    );
+    const result = await buildCompletionSource(deps(stateFor(text)))({
+      text,
+      offset: offsetOf(text, "            operator: mom"),
+      explicit: true,
+    });
+    expect(result?.options.map((option) => option.label)).toContain("momentum");
+    expect(result?.options.map((option) => option.label)).not.toContain(
+      "negate",
+    );
+  });
+
   it("completes identifier values from the catalog or namespace the schema names", async () => {
     const source = buildCompletionSource(deps(stateFor(YAML)));
     const field = await source({
@@ -340,6 +388,27 @@ describe("schema-driven hover", () => {
     expect(lines).not.toBeNull();
     expect(lines?.some((line) => line.startsWith("예시:"))).toBe(false);
   });
+
+  it.each([undefined, "not_a_node_kind"])(
+    "requires kind instead of describing an arbitrary operator branch when kind is %s",
+    (kind) => {
+      const kindLine = kind === undefined ? "" : `            kind: ${kind}\n`;
+      const text = YAML.replace(
+        "          - node_id: unknown\n            ",
+        `          - node_id: unknown\n${kindLine}            operator: momentum`,
+      );
+      const state = stateFor(text);
+      const lines = describePointer(
+        deps(state),
+        "/factors/factors/0/graph/nodes/2/operator",
+        state.parse!.tree,
+      );
+      expect(lines).toContain(
+        "kind를 먼저 선택해야 이 필드의 계약을 확정할 수 있습니다.",
+      );
+      expect(lines?.some((line) => line.startsWith("타입:"))).toBe(false);
+    },
+  );
 
   it("describes the field under the cursor from the contract row and the schema", () => {
     const text = YAML.replace(

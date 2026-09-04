@@ -206,24 +206,30 @@ export const buildCompletionSource =
     if (cursor.mode === "key") {
       const options = propertyOptions(deps.schema, resolved)
         .filter((option) => !cursor.siblings.includes(option.name))
-        .map<EditorCompletionOption>((option) => ({
-          label: option.name,
-          detail: [
-            typeLabel(option.schema),
-            option.required ? t("assist.required") : null,
-            option.branch ? `${t("assist.branch")}=${option.branch}` : null,
-          ]
-            .filter(Boolean)
-            .join(" · "),
-          type: "property",
-          apply:
-            option.schema.type === "object" ||
-            option.schema.type === "array" ||
-            option.schema.$ref !== undefined ||
-            option.schema.oneOf !== undefined
-              ? `${option.name}:`
-              : `${option.name}: `,
-        }));
+        .map<EditorCompletionOption>((option) => {
+          const branches =
+            option.variants?.map((variant) => variant.branch).join("|") ??
+            option.branch;
+          return {
+            label: option.name,
+            detail: [
+              option.variants === null ? typeLabel(option.schema) : null,
+              option.required ? t("assist.required") : null,
+              branches ? `${t("assist.branch")}=${branches}` : null,
+            ]
+              .filter(Boolean)
+              .join(" · "),
+            type: "property",
+            apply:
+              option.variants === null &&
+              (option.schema.type === "object" ||
+                option.schema.type === "array" ||
+                option.schema.$ref !== undefined ||
+                option.schema.oneOf !== undefined)
+                ? `${option.name}:`
+                : `${option.name}: `,
+          };
+        });
       return options.length ? { from: cursor.from, options } : null;
     }
 
@@ -237,6 +243,9 @@ export const buildCompletionSource =
         };
       }
     }
+    // The backend union has no active branch, so any value metadata here would come from an
+    // arbitrary member. Key completion above may still name and label the possible branches.
+    if (resolved.propertyVariants !== null) return null;
     const identifiers = identifierOptions(
       deps.schema,
       resolved,
@@ -265,6 +274,13 @@ export const describePointer = (
   const field = projectContractField(deps.schema, deps.contract, pointer, tree);
   if (field === null) return null;
   const lines = [field.templatePointer];
+  if (field.unresolvedBranches !== null) {
+    lines.push(t("contract.branchRequired"));
+    lines.push(
+      `${t("contract.variants")}: ${field.unresolvedBranches.join(", ")}`,
+    );
+    return lines;
+  }
   lines.push(
     `${t("assist.type")}: ${field.type}${field.nullable ? " | null" : ""}`,
   );

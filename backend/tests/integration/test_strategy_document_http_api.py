@@ -113,3 +113,115 @@ def test_existing_json_validation_api_is_unchanged() -> None:
         "valid": True,
         "issues": [],
     }
+
+
+def test_deep_nesting_is_a_diagnostic_not_a_server_error() -> None:
+    client = TestClient(build_http_app())
+    source = "a: " + "[" * 2000 + "]" * 2000 + "\n"
+
+    result = _compile(client, source)
+
+    assert result["spec"] is None
+    (diagnostic,) = result["diagnostics"]
+    assert diagnostic["code"] == "yaml.too_deep"
+    assert diagnostic["kind"] == "syntax"
+
+
+def test_every_semantic_issue_is_reported_together_with_its_own_pointer() -> None:
+    client = TestClient(build_http_app())
+    source = (
+        _source("quality_momentum.yaml")
+        .replace("max_name_weight: 0.05", "max_name_weight: 1.5")
+        .replace("selection_count: 20", "selection_count: 0")
+        .replace(
+            "parameters: []",
+            "parameters:\n"
+            "  - parameter_id: lookback\n"
+            "    default: 5.0\n"
+            "    minimum: 10.0\n"
+            "    maximum: 1.0\n"
+            "    kind: float\n",
+        )
+    )
+
+    result = _compile(client, source)
+
+    assert result["spec"] is None
+    by_code = {d["code"]: d for d in result["diagnostics"]}
+    assert set(by_code) >= {
+        "strategy.risk.max_name_weight",
+        "strategy.portfolio.selection_count",
+        "strategy.parameter.bounds",
+        "strategy.parameter.default",
+    }
+    assert by_code["strategy.parameter.bounds"]["pointer"] == "/parameters/0"
+    bounds = by_code["strategy.parameter.bounds"]["range"]
+    assert source.splitlines()[bounds["start"]["line"]].lstrip().startswith("- parameter_id")
+    assert all(d["severity"] == "error" for d in result["diagnostics"])
+    assert all(d["node_id"] is None for d in result["diagnostics"])
+
+
+def test_factor_graph_issue_names_the_node_and_points_into_the_graph() -> None:
+    client = TestClient(build_http_app())
+    source = _source("quality_momentum.yaml").replace("input_node_id: close", "input_node_id: nope")
+
+    result = _compile(client, source)
+
+    assert result["spec"] is None
+    graph_issues = [
+        d for d in result["diagnostics"] if d["pointer"].startswith("/factors/factors/0/graph")
+    ]
+    assert graph_issues, result["diagnostics"]
+    issue = next(d for d in graph_issues if d["code"] == "strategy.expression.input_missing")
+    assert issue["node_id"] == "mom_252"
+    assert issue["kind"] == "semantic"
+    assert issue["range"] is not None
+
+
+def test_semantic_range_for_a_parent_path_falls_back_to_the_parent_node() -> None:
+    client = TestClient(build_http_app())
+    source = _source("quality_momentum.yaml").replace(
+        "factors:\n  factors:\n    - factor_id: momentum",
+        "factors:\n  factors:\n    - factor_id: momentum",
+    )
+    # Duplicate the factor block so the strategy-level duplicate check fires on the `factors` parent.
+    lines = source.splitlines(keepends=True)
+    start = lines.index("factors:\n") + 2
+    end = lines.index("signal:\n")
+    source = "".join(lines[:end] + lines[start:end] + lines[end:])
+
+    result = _compile(client, source)
+
+    issue = next(d for d in result["diagnostics"] if d["code"] == "strategy.factor.duplicate")
+    assert issue["pointer"] == "/factors"
+    assert issue["range"]["start"]["line"] == source.splitlines().index("factors:") + 1
+
+
+def test_json_format_diagnostics_carry_json_ranges() -> None:
+    client = TestClient(build_http_app())
+    source = _source("quality_momentum.json").replace(
+        '"max_name_weight": 0.05', '"max_name_weight": 1.5'
+    )
+    assert source != _source("quality_momentum.json")
+
+    result = _compile(client, source, format="json")
+
+    (diagnostic,) = result["diagnostics"]
+    assert diagnostic["code"] == "strategy.risk.max_name_weight"
+    start, end = diagnostic["range"]["start"], diagnostic["range"]["end"]
+    assert source[start["offset"] : end["offset"]] == "1.5"
+
+
+def test_malformed_envelope_is_the_only_422() -> None:
+    client = TestClient(build_http_app())
+
+    assert (
+        client.post("/api/v1/strategy-documents/compile", json={"source": "a: 1"}).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            "/api/v1/strategy-documents/compile", json={"source": "a: 1", "format": "toml"}
+        ).status_code
+        == 422
+    )

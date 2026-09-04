@@ -9,6 +9,9 @@ WORKFLOW P1-03. Pipeline (authoring ADR D1/D4):
 
 `spec`, `canonical_json` and `spec_hash` are only returned when no error-severity diagnostic
 exists; an invalid or stale document never yields something executable.
+
+The compiled spec carries the placeholder identity `draft/0` (`DRAFT_IDENTITY`): identity is
+excluded from `spec_hash`, and the save flow (P2-02) assigns the real strategy id / revision.
 """
 
 from __future__ import annotations
@@ -35,6 +38,7 @@ from .ports.outgoing.document_codec import (
     ParsedDocument,
     SourceDiagnostic,
     SourceFormat,
+    SourceRange,
 )
 
 DRAFT_IDENTITY = StrategyIdentity(strategy_id="draft", revision=0)
@@ -80,6 +84,7 @@ class StrategyAuthoringService:
                     kind=DiagnosticKind.STRUCTURAL,
                     pointer=issue.pointer,
                     message=issue.message,
+                    severity=DiagnosticSeverity.ERROR,
                     range=_structural_range(parsed, issue.code, issue.pointer),
                 )
                 for issue in hydration.issues
@@ -100,6 +105,7 @@ class StrategyAuthoringService:
                     if issue.severity is ValidationSeverity.ERROR
                     else DiagnosticSeverity.WARNING
                 ),
+                node_id=issue.node_id,
             )
             for issue in validation.issues
         )
@@ -132,7 +138,7 @@ def _rejected(
     )
 
 
-def _structural_range(parsed: ParsedDocument, code: str, pointer: str):
+def _structural_range(parsed: ParsedDocument, code: str, pointer: str) -> SourceRange | None:
     # An unknown key exists in the source: point at the key itself, not its value.
     if code == "structure.unknown_key" and pointer in parsed.key_ranges:
         return parsed.key_ranges[pointer]

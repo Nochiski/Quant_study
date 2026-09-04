@@ -427,8 +427,9 @@ export const reviseStrategy = <ThrowOnError extends boolean = false>(
  *
  * Compile YAML/JSON source into a StrategySpec with syntax/structural/semantic diagnostics.
  *
- * Always 200: the outcome is the diagnostic list. `spec`/`spec_hash` are null while any
- * error-severity diagnostic exists.
+ * 200 for every well-formed request envelope: the outcome is the diagnostic list, and
+ * `spec`/`spec_hash` are null while any error-severity diagnostic exists. Only a malformed
+ * envelope (missing `source`, unknown `format`) is a 422.
  */
 export const compileStrategyDocument = <ThrowOnError extends boolean = false>(
   options: Options<CompileStrategyDocumentData, ThrowOnError>,

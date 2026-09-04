@@ -2359,6 +2359,11 @@ export type SignalStep = {
 
 /**
  * SourceDiagnostic
+ *
+ * One diagnostic. `severity` is always sent (no default) so the wire schema marks it required.
+ *
+ * `range` is None only when the source has no node to point at (empty document).
+ * `node_id` names the FactorGraph node a semantic issue is about, when known.
  */
 export type SourceDiagnostic = {
   /**
@@ -2371,11 +2376,15 @@ export type SourceDiagnostic = {
    */
   message: string;
   /**
+   * Node Id
+   */
+  node_id?: string | null;
+  /**
    * Pointer
    */
   pointer: string;
   range?: SourceRange | null;
-  severity?: DiagnosticSeverity;
+  severity: DiagnosticSeverity;
 };
 
 /**
@@ -2386,7 +2395,11 @@ export type SourceFormat = "yaml" | "json";
 /**
  * SourcePosition
  *
- * 0-based line/column and UTF-8 code point offset into the exact source text.
+ * 0-based line/column and offset into the exact source text.
+ *
+ * Units are Unicode code points (Python `str` indices). JavaScript editors count UTF-16 code
+ * units; astral characters (emoji) shift later columns by one per character, so the frontend
+ * converts at the wire boundary (P3-04). Korean text is BMP-only and unaffected.
  */
 export type SourcePosition = {
   /**
@@ -2769,6 +2782,10 @@ export type ValidationIssue = {
    * Message
    */
   message: string;
+  /**
+   * Node Id
+   */
+  node_id?: string | null;
   /**
    * Path
    */

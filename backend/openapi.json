@@ -3796,6 +3796,7 @@
         "type": "object"
       },
       "SourceDiagnostic": {
+        "description": "One diagnostic. `severity` is always sent (no default) so the wire schema marks it required.\n\n`range` is None only when the source has no node to point at (empty document).\n`node_id` names the FactorGraph node a semantic issue is about, when known.",
         "properties": {
           "code": {
             "title": "Code",
@@ -3807,6 +3808,17 @@
           "message": {
             "title": "Message",
             "type": "string"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
           },
           "pointer": {
             "title": "Pointer",
@@ -3823,15 +3835,15 @@
             ]
           },
           "severity": {
-            "$ref": "#/components/schemas/DiagnosticSeverity",
-            "default": "error"
+            "$ref": "#/components/schemas/DiagnosticSeverity"
           }
         },
         "required": [
           "code",
           "kind",
           "pointer",
-          "message"
+          "message",
+          "severity"
         ],
         "title": "SourceDiagnostic",
         "type": "object"
@@ -3845,7 +3857,7 @@
         "type": "string"
       },
       "SourcePosition": {
-        "description": "0-based line/column and UTF-8 code point offset into the exact source text.",
+        "description": "0-based line/column and offset into the exact source text.\n\nUnits are Unicode code points (Python `str` indices). JavaScript editors count UTF-16 code\nunits; astral characters (emoji) shift later columns by one per character, so the frontend\nconverts at the wire boundary (P3-04). Korean text is BMP-only and unaffected.",
         "properties": {
           "column": {
             "title": "Column",
@@ -4460,6 +4472,17 @@
           "message": {
             "title": "Message",
             "type": "string"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
           },
           "path": {
             "title": "Path",
@@ -5498,7 +5521,7 @@
     },
     "/api/v1/strategy-documents/compile": {
       "post": {
-        "description": "Compile YAML/JSON source into a StrategySpec with syntax/structural/semantic diagnostics.\n\nAlways 200: the outcome is the diagnostic list. `spec`/`spec_hash` are null while any\nerror-severity diagnostic exists.",
+        "description": "Compile YAML/JSON source into a StrategySpec with syntax/structural/semantic diagnostics.\n\n200 for every well-formed request envelope: the outcome is the diagnostic list, and\n`spec`/`spec_hash` are null while any error-severity diagnostic exists. Only a malformed\nenvelope (missing `source`, unknown `format`) is a 422.",
         "operationId": "compileStrategyDocument",
         "requestBody": {
           "content": {

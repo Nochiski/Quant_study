@@ -36,6 +36,7 @@ class ValidationIssue:
     message: str
     kind: ValidationKind
     severity: ValidationSeverity = ValidationSeverity.ERROR
+    node_id: str | None = None  # FactorGraph node the issue is about (graph issues only)
 
 
 @dataclass(frozen=True)
@@ -278,6 +279,7 @@ def validate_strategy(spec: StrategySpec) -> StrategyValidation:
                     if factor_issue.severity is FactorValidationSeverity.ERROR
                     else ValidationSeverity.WARNING
                 ),
+                node_id=factor_issue.node_id,
             )
             for factor_issue in validation.issues
         )

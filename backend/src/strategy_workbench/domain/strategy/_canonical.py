@@ -42,7 +42,8 @@ def _normalize_parameter_value(value: object) -> object:
 def _normalize_numbers(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _normalize_numbers(item) for key, item in value.items()}
-    if isinstance(value, list):
+    # asdict keeps dataclass tuple fields (rules, factors, nodes) as tuples: recurse into both.
+    if isinstance(value, (list, tuple)):
         return [_normalize_numbers(item) for item in value]
     if isinstance(value, float) and value == 0.0:
         return 0.0

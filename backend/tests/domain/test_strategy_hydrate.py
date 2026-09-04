@@ -172,6 +172,56 @@ def test_parameter_value_union_folds_integral_floats_but_keeps_bool_and_str() ->
     assert strategy_spec_hash(spec) == strategy_spec_hash(_hydrate_ok(variant))
 
 
+def test_negative_zero_inside_tuple_fields_hashes_like_zero() -> None:
+    document = _document()
+    document["factors"]["factors"][0]["weight"] = -0.0
+    document["eligibility"]["rules"] = [{"field_id": "x", "operator": "gt", "value": -0.0}]
+    document["factors"]["factors"][0]["graph"]["nodes"].append(
+        {"kind": "constant", "node_id": "zero", "value": -0.0}
+    )
+    positive = copy.deepcopy(document)
+    positive["factors"]["factors"][0]["weight"] = 0.0
+    positive["eligibility"]["rules"][0]["value"] = 0.0
+    positive["factors"]["factors"][0]["graph"]["nodes"][2]["value"] = 0.0
+
+    minus = _hydrate_ok(document)
+
+    assert strategy_spec_hash(minus) == strategy_spec_hash(_hydrate_ok(positive))
+    assert "-0.0" not in canonical_strategy_json(minus)
+
+
+def test_scientific_notation_hydrates_like_the_decimal_literal() -> None:
+    # JSON path; YAML `1e-2` depends on the YAML 1.2 codec (P0-03/P1-02) and is tested there.
+    document = _document()
+    document["risk"]["max_name_weight"] = 1e-2
+    decimal = copy.deepcopy(document)
+    decimal["risk"]["max_name_weight"] = 0.01
+
+    assert strategy_spec_hash(_hydrate_ok(document)) == strategy_spec_hash(_hydrate_ok(decimal))
+
+
+def test_datetime_on_a_date_field_and_huge_ints_fail_closed() -> None:
+    from datetime import datetime
+
+    document = _document()
+    document["data"]["start"] = datetime(2021, 1, 1)
+    document["risk"]["max_name_weight"] = 10**400
+
+    codes = _issue_codes(document)
+    assert ("structure.invalid_date", "/data/start") in codes
+    assert ("structure.type_mismatch", "/risk/max_name_weight") in codes
+
+
+def test_pointers_escape_rfc6901_tokens() -> None:
+    document = _document()
+    document["a/b"] = 1
+    document["~x"] = 1
+
+    codes = _issue_codes(document)
+    assert ("structure.unknown_key", "/a~1b") in codes
+    assert ("structure.unknown_key", "/~0x") in codes
+
+
 def test_canonical_payload_normalises_negative_zero_and_choice_values() -> None:
     spec = _hydrate_ok(_document())
     minus_zero = replace(

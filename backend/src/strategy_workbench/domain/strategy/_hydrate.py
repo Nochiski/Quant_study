@@ -17,7 +17,7 @@ import types
 import typing
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from enum import Enum, StrEnum
 from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
 
@@ -25,6 +25,8 @@ from ._models import StrategyIdentity, StrategySpec
 
 SUPPORTED_SCHEMA_VERSIONS: tuple[str, ...] = ("1.0",)
 
+# reason: sentinel shared by every hydrate branch; the walker is generic over dataclass hints,
+# so its intermediate values are `Any` until the top-level isinstance(StrategySpec) check.
 _MISSING: Any = object()
 
 
@@ -126,8 +128,18 @@ def hydrate_saved_strategy(document: Mapping[str, object]) -> StrategyHydration:
     return StrategyHydration(HydrationStatus.OK, spec, ())
 
 
+def _escape(key: str) -> str:
+    """RFC 6901 token escaping so `a/b` and `~x` keys stay unambiguous in pointers."""
+    return key.replace("~", "~0").replace("/", "~1")
+
+
+def _child(pointer: str, key: object) -> str:
+    return f"{pointer}/{_escape(str(key))}"
+
+
 def _issue(issues: list[StructuralIssue], code: str, pointer: str, message: str) -> Any:
-    issues.append(StructuralIssue(code, pointer or "/", message))
+    # RFC 6901: the empty pointer addresses the whole document.
+    issues.append(StructuralIssue(code, pointer, message))
     return _MISSING
 
 
@@ -177,7 +189,7 @@ def _hydrate_union(
                 return _issue(
                     issues,
                     "structure.missing_field",
-                    f"{pointer}/kind",
+                    _child(pointer, "kind"),
                     f"kind is required — allowed={sorted(k for k in kinds if k)}",
                 )
             member = kinds.get(kind if isinstance(kind, str) else None)
@@ -185,7 +197,7 @@ def _hydrate_union(
                 return _issue(
                     issues,
                     "structure.unknown_kind",
-                    f"{pointer}/kind",
+                    _child(pointer, "kind"),
                     f"unknown kind — got={kind!r} allowed={sorted(k for k in kinds if k)}",
                 )
             return _hydrate_dataclass(member, value, pointer, issues)
@@ -227,7 +239,7 @@ def _hydrate_sequence(
             f"expected a sequence, got {type(value).__name__}",
         )
     items = [
-        _hydrate(item_tp, item, f"{pointer}/{index}", issues) for index, item in enumerate(value)
+        _hydrate(item_tp, item, _child(pointer, index), issues) for index, item in enumerate(value)
     ]
     if any(item is _MISSING for item in items):
         return _MISSING
@@ -244,29 +256,28 @@ def _hydrate_dataclass(tp: type, value: object, pointer: str, issues: list[Struc
         )
     hints = get_type_hints(tp)
     fields = {field.name: field for field in dataclasses.fields(tp)}
+    failed = False
     for key in value:
         if key not in fields:
             _issue(
                 issues,
                 "structure.unknown_key",
-                f"{pointer}/{key}",
+                _child(pointer, key),
                 f"unknown key {key!r} — allowed={sorted(fields)}",
             )
+            failed = True
     kwargs: dict[str, Any] = {}
-    failed = False
     for name, field in fields.items():
         if name in value:
-            hydrated = _hydrate(hints[name], value[name], f"{pointer}/{name}", issues)
+            hydrated = _hydrate(hints[name], value[name], _child(pointer, name), issues)
             if hydrated is _MISSING:
                 failed = True
             else:
                 kwargs[name] = hydrated
         elif field.default is dataclasses.MISSING and field.default_factory is dataclasses.MISSING:
-            _issue(issues, "structure.missing_field", f"{pointer}/{name}", f"{name} is required")
+            _issue(issues, "structure.missing_field", _child(pointer, name), f"{name} is required")
             failed = True
-    if failed or any(issue.pointer.startswith(f"{pointer}/") for issue in issues if pointer == ""):
-        return _MISSING
-    if any(issue.pointer == f"{pointer}/{key}" for key in value for issue in issues):
+    if failed:
         return _MISSING
     return tp(**kwargs)
 
@@ -303,13 +314,22 @@ def _hydrate_scalar(tp: Any, value: object, pointer: str, issues: list[Structura
             return _issue(
                 issues, "structure.type_mismatch", pointer, f"expected float, got {value!r}"
             )
-        return float(value)
+        try:
+            return float(value)
+        except OverflowError:
+            return _issue(
+                issues,
+                "structure.type_mismatch",
+                pointer,
+                f"integer literal too large for float — digits={len(str(value))}",
+            )
     if tp is str:
         if isinstance(value, str):
             return value
         return _issue(issues, "structure.type_mismatch", pointer, f"expected str, got {value!r}")
     if tp is date:
-        if isinstance(value, date):
+        # datetime is a date subclass; a timestamp on a date field is a different value, not a date.
+        if isinstance(value, date) and not isinstance(value, datetime):
             return value
         if isinstance(value, str):
             try:

@@ -219,6 +219,21 @@ def test_yaml_escaped_surrogate_pairs_become_one_code_point_and_lone_ones_fail()
     assert "/\U0001f600" in key.value_ranges
 
 
+def test_parser_internal_errors_are_rejections_not_exceptions() -> None:
+    """ruamel asserts on `%YAML 1.3`; policy deferral means compose sees such documents."""
+    parsed = _codec().parse("%YAML 1.3\n---\na: 1\n", format=SourceFormat.YAML)
+
+    assert parsed.status is ParseStatus.REJECTED
+    assert parsed.diagnostics[0].code in {"yaml.syntax", "yaml.directive"}
+
+
+def test_duplicate_anchors_are_rejected_without_warnings(recwarn: pytest.WarningsRecorder) -> None:
+    parsed = _codec().parse("a: &x 1\nb: &x 2\n", format=SourceFormat.YAML)
+
+    assert parsed.diagnostics[0].code == "yaml.anchor_or_alias"
+    assert not [w for w in recwarn if "anchor" in str(w.message).lower()]
+
+
 def test_syntax_error_wins_over_an_earlier_policy_violation() -> None:
     parsed = _codec().parse('%YAML 1.2\n---\na: "unterminated\n', format=SourceFormat.YAML)
     assert parsed.diagnostics[0].code == "yaml.syntax"

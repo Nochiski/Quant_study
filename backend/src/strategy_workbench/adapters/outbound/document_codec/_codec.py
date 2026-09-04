@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import warnings
 from collections.abc import Iterator
 from typing import Any
 
@@ -226,7 +227,11 @@ class RuamelDocumentCodec:
         except YAMLError as error:
             raise _Rejected("yaml.syntax", f"invalid YAML — {error}") from error
         try:
-            root = loader.compose(source)
+            with warnings.catch_warnings():
+                # Policy violations (duplicate anchors, tags) are composed before being rejected
+                # below; ruamel's advisory warnings about them are not server log material.
+                warnings.simplefilter("ignore")
+                root = loader.compose(source)
         except ComposerError as error:
             if "single document" in str(error):
                 raise _Rejected(
@@ -247,6 +252,13 @@ class RuamelDocumentCodec:
         except RecursionError as error:  # pragma: no cover - scan depth guard runs first
             raise _Rejected(
                 "yaml.too_deep", f"nesting exceeds limit — max_depth={self._limits.max_depth}"
+            ) from error
+        except Exception as error:  # noqa: BLE001  # reason: untrusted input must never raise
+            # ruamel's pure parser uses bare asserts (e.g. `%YAML 1.3` version setter); any
+            # non-YAMLError escaping compose is still a rejected document, not a server fault.
+            raise _Rejected(
+                "yaml.syntax",
+                f"invalid YAML — parser error {type(error).__name__}: {error}",
             ) from error
         if deferred is not None:
             raise deferred  # policy violation reported only after compose found no syntax error

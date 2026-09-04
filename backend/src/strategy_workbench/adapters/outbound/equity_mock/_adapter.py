@@ -11,6 +11,7 @@ from strategy_workbench.application.backtest_run.facade.ports import (
 )
 from strategy_workbench.application.factor_research.facade.ports import (
     FactorObservationQuery,
+    FactorObservationSet,
 )
 from strategy_workbench.application.portfolio_design.facade.ports import (
     PortfolioObservationQuery,
@@ -161,13 +162,11 @@ class MockEquityDataAdapter:
             detail=None if cells else f"no mock panel cells — query={query}",
         )
 
-    def load_factor_observations(
-        self, query: FactorObservationQuery
-    ) -> tuple[FactorObservation, ...]:
+    def load_factor_observations(self, query: FactorObservationQuery) -> FactorObservationSet:
         """Generate a deterministic PIT-shaped factor panel behind the replaceable port."""
         sessions = _factor_sessions(query)
         security_ids = tuple(membership.security.security_id for membership in self._memberships)
-        return tuple(
+        observations = tuple(
             FactorObservation(
                 as_of=session,
                 security_id=security_id,
@@ -186,6 +185,9 @@ class MockEquityDataAdapter:
             )
             for session_index, session in enumerate(sessions)
             for security_index, security_id in enumerate(security_ids)
+        )
+        return FactorObservationSet(
+            data_snapshot_id=self._snapshot.snapshot_id, observations=observations
         )
 
     def load_portfolio_observations(

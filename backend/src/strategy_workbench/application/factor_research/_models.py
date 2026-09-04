@@ -32,10 +32,17 @@ class FactorExplanation:
 
 @dataclass(frozen=True)
 class FactorPreviewRequest:
+    """Preview request. The data snapshot is owned by the adapter (P1.5-01).
+
+    `expected_data_snapshot_id` is optional provenance the client saw in the catalog; when it
+    differs from the adapter's actual snapshot the preview fails closed instead of silently
+    computing against different data.
+    """
+
     graph: FactorGraph
-    data_snapshot_id: str
     as_of_start: date
     as_of_end: date
+    expected_data_snapshot_id: str | None = None
     fields: tuple[FieldMetadata, ...] = ()
     parameters: tuple[ResolvedFactorParameter, ...] = ()
     factor_ids: tuple[str, ...] = ()
@@ -44,6 +51,7 @@ class FactorPreviewRequest:
 
 @dataclass(frozen=True)
 class FactorPreview:
+    data_snapshot_id: str
     plan: FactorExecutionPlan
     cache_key: FactorMatrixCacheKey
     evaluation: FactorEvaluation

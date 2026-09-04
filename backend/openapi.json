@@ -1680,6 +1680,10 @@
           "cache_key": {
             "$ref": "#/components/schemas/FactorMatrixCacheKey"
           },
+          "data_snapshot_id": {
+            "title": "Data Snapshot Id",
+            "type": "string"
+          },
           "evaluation": {
             "$ref": "#/components/schemas/FactorEvaluation"
           },
@@ -1688,6 +1692,7 @@
           }
         },
         "required": [
+          "data_snapshot_id",
           "plan",
           "cache_key",
           "evaluation",
@@ -1697,6 +1702,7 @@
         "type": "object"
       },
       "FactorPreviewRequest": {
+        "description": "Preview request. The data snapshot is owned by the adapter (P1.5-01).\n\n`expected_data_snapshot_id` is optional provenance the client saw in the catalog; when it\ndiffers from the adapter's actual snapshot the preview fails closed instead of silently\ncomputing against different data.",
         "properties": {
           "as_of_end": {
             "format": "date",
@@ -1708,9 +1714,16 @@
             "title": "As Of Start",
             "type": "string"
           },
-          "data_snapshot_id": {
-            "title": "Data Snapshot Id",
-            "type": "string"
+          "expected_data_snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Data Snapshot Id"
           },
           "factor_ids": {
             "default": [],
@@ -1750,7 +1763,6 @@
         },
         "required": [
           "graph",
-          "data_snapshot_id",
           "as_of_start",
           "as_of_end"
         ],

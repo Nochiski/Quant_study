@@ -279,6 +279,75 @@ describe("Strategy Outline projection", () => {
     expect(onSelectedPointer).toHaveBeenLastCalledWith("/risk", "outline");
     expect(onSelectedPointer).toHaveBeenCalledTimes(3);
   });
+
+  it("lets an explicit route selection win and rejects skipped-version cursor offsets", () => {
+    const first = parsedState();
+    const secondSource = `${SOURCE}extra_one: true\n`;
+    const edited = documentReducer(first, {
+      type: "edit",
+      source: secondSource,
+    });
+    const second = documentReducer(edited, {
+      type: "parsed",
+      version: edited.sourceVersion,
+      result: parseSource(secondSource, "yaml"),
+    });
+    const onDirectRoute = vi.fn();
+    const direct = renderHook(
+      ({ state, selectedPointer }: {
+        state: DocumentState;
+        selectedPointer: string | undefined;
+      }) =>
+        useOutlineNavigation({
+          state,
+          schema: SCHEMA,
+          selectedPointer,
+          onSelectedPointer: onDirectRoute,
+        }),
+      { initialProps: { state: first, selectedPointer: "/title" } },
+    );
+    act(() =>
+      direct.result.current.onEditorSelectionChange({
+        from: secondSource.indexOf("extra_one"),
+        to: secondSource.indexOf("extra_one"),
+        documentChanged: true,
+      }),
+    );
+    direct.rerender({ state: second, selectedPointer: "/risk" });
+    expect(onDirectRoute).not.toHaveBeenCalled();
+    direct.unmount();
+
+    const thirdSource = `${secondSource}extra_two: true\n`;
+    const editedAgain = documentReducer(edited, {
+      type: "edit",
+      source: thirdSource,
+    });
+    const third = documentReducer(editedAgain, {
+      type: "parsed",
+      version: editedAgain.sourceVersion,
+      result: parseSource(thirdSource, "yaml"),
+    });
+    const onSkippedVersion = vi.fn();
+    const skipped = renderHook(
+      ({ state }: { state: DocumentState }) =>
+        useOutlineNavigation({
+          state,
+          schema: SCHEMA,
+          selectedPointer: "/title",
+          onSelectedPointer: onSkippedVersion,
+        }),
+      { initialProps: { state: first } },
+    );
+    act(() =>
+      skipped.result.current.onEditorSelectionChange({
+        from: secondSource.indexOf("extra_one"),
+        to: secondSource.indexOf("extra_one"),
+        documentChanged: true,
+      }),
+    );
+    skipped.rerender({ state: third });
+    expect(onSkippedVersion).not.toHaveBeenCalled();
+  });
 });
 
 describe("Strategy Outline tree", () => {

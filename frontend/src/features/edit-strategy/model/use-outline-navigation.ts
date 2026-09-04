@@ -54,7 +54,8 @@ export const useOutlineNavigation = ({
   const programmaticSelection = useRef(false);
   const pendingCursor = useRef<{
     documentEpoch: number;
-    minimumSourceVersion: number;
+    targetSourceVersion: number;
+    routePointer: string;
     selection: EditorSelection;
   } | null>(null);
   const routeSelectionKey = useRef<string | null>(null);
@@ -105,8 +106,9 @@ export const useOutlineNavigation = ({
       if (selection.documentChanged || current === null || current.stale) {
         pendingCursor.current = {
           documentEpoch: state.documentEpoch,
-          minimumSourceVersion:
+          targetSourceVersion:
             state.sourceVersion + (selection.documentChanged ? 1 : 0),
+          routePointer: normalizedPointer(selectedPointer),
           selection,
         };
         return;
@@ -118,7 +120,12 @@ export const useOutlineNavigation = ({
       cursorPublished.current = pointer;
       onSelectedPointer(pointer === "" ? undefined : pointer, "cursor");
     },
-    [onSelectedPointer, state.documentEpoch, state.sourceVersion],
+    [
+      onSelectedPointer,
+      selectedPointer,
+      state.documentEpoch,
+      state.sourceVersion,
+    ],
   );
 
   const onSelectOutlineNode = useCallback(
@@ -156,7 +163,15 @@ export const useOutlineNavigation = ({
       pendingCursor.current = null;
       return;
     }
-    if (snapshot.sourceVersion < pending.minimumSourceVersion) return;
+    if (pending.routePointer !== normalizedPointer(selectedPointer)) {
+      pendingCursor.current = null;
+      return;
+    }
+    if (snapshot.sourceVersion < pending.targetSourceVersion) return;
+    if (snapshot.sourceVersion !== pending.targetSourceVersion) {
+      pendingCursor.current = null;
+      return;
+    }
     pendingCursor.current = null;
     const pointer = locatePointer(snapshot.parsed, pending.selection.from);
     if (
@@ -166,7 +181,7 @@ export const useOutlineNavigation = ({
       return;
     cursorPublished.current = pointer;
     onSelectedPointer(pointer === "" ? undefined : pointer, "cursor");
-  }, [onSelectedPointer, snapshot]);
+  }, [onSelectedPointer, selectedPointer, snapshot]);
 
   // Direct links and browser back/forward also reveal their URL path. A path just published by
   // the cursor is already at the right place and must not expand its whole source range.

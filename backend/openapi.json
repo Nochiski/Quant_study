@@ -2033,6 +2033,158 @@
         "title": "FieldCatalogFacets",
         "type": "object"
       },
+      "FieldContract": {
+        "description": "One scalar authoring path with everything an editor needs to explain it.\n\n`pointer` is a JSON Pointer template: array positions are written as `*`\n(`/factors/factors/*/weight`). Bounds and metadata come from the constraint catalog;\ntype, enum, nullability, required and default come from the model.",
+        "properties": {
+          "applied_stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied Stage"
+          },
+          "const": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Const"
+          },
+          "default": {
+            "title": "Default"
+          },
+          "description_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description Key"
+          },
+          "display_unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Unit"
+          },
+          "enum": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enum"
+          },
+          "example": {
+            "title": "Example"
+          },
+          "exclusive_maximum": {
+            "default": false,
+            "title": "Exclusive Maximum",
+            "type": "boolean"
+          },
+          "exclusive_minimum": {
+            "default": false,
+            "title": "Exclusive Minimum",
+            "type": "boolean"
+          },
+          "format": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Format"
+          },
+          "has_default": {
+            "default": false,
+            "title": "Has Default",
+            "type": "boolean"
+          },
+          "maximum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maximum"
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum"
+          },
+          "nullable": {
+            "default": false,
+            "title": "Nullable",
+            "type": "boolean"
+          },
+          "pointer": {
+            "title": "Pointer",
+            "type": "string"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          }
+        },
+        "required": [
+          "pointer",
+          "type",
+          "required"
+        ],
+        "title": "FieldContract",
+        "type": "object"
+      },
       "FieldCoverageCapability": {
         "properties": {
           "ends_on": {
@@ -3908,6 +4060,91 @@
         "title": "SourceRange",
         "type": "object"
       },
+      "StrategyDocumentContract": {
+        "description": "Per-field authoring contract plus the registry versions the schema was built against.\n\n`factor_registry_version` and `dataset_snapshot_id` identify the catalogs an editor should\npair with this schema (field ids, factor ids); the HTTP layer adds their links.",
+        "properties": {
+          "dataset_snapshot_id": {
+            "title": "Dataset Snapshot Id",
+            "type": "string"
+          },
+          "factor_registry_version": {
+            "title": "Factor Registry Version",
+            "type": "string"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/FieldContract"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "schema_hash": {
+            "title": "Schema Hash",
+            "type": "string"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "schema_hash",
+          "factor_registry_version",
+          "dataset_snapshot_id",
+          "fields"
+        ],
+        "title": "StrategyDocumentContract",
+        "type": "object"
+      },
+      "StrategyDocumentContractResponse": {
+        "description": "Wire envelope: the application contract plus the catalog links this API serves.",
+        "properties": {
+          "contract": {
+            "$ref": "#/components/schemas/StrategyDocumentContract"
+          },
+          "equity_catalog_url": {
+            "title": "Equity Catalog Url",
+            "type": "string"
+          },
+          "factor_catalog_url": {
+            "title": "Factor Catalog Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "contract",
+          "factor_catalog_url",
+          "equity_catalog_url"
+        ],
+        "title": "StrategyDocumentContractResponse",
+        "type": "object"
+      },
+      "StrategyDocumentSchema": {
+        "description": "Runtime JSON Schema of the authoring document; `schema_hash` is the ETag.",
+        "properties": {
+          "schema": {
+            "additionalProperties": true,
+            "title": "Schema",
+            "type": "object"
+          },
+          "schema_hash": {
+            "title": "Schema Hash",
+            "type": "string"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "schema_hash",
+          "schema"
+        ],
+        "title": "StrategyDocumentSchema",
+        "type": "object"
+      },
       "StrategyExplanation": {
         "properties": {
           "steps": {
@@ -5568,6 +5805,72 @@
           }
         },
         "summary": "Compile Strategy Document"
+      }
+    },
+    "/api/v1/strategy-documents/contract": {
+      "get": {
+        "description": "Per-field authoring contract (type, enum, range, unit, default, example, stage)\nwith the factor/dataset registry versions and catalog links it pairs with.",
+        "operationId": "getStrategyDocumentContract",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyDocumentContractResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Strategy Document Contract"
+      }
+    },
+    "/api/v1/strategy-documents/schema": {
+      "get": {
+        "description": "Runtime JSON Schema of the authoring document. ETag = schema hash (304 on match).",
+        "operationId": "getStrategyDocumentSchema",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "if-none-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyDocumentSchema"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Strategy Document Schema"
       }
     }
   }

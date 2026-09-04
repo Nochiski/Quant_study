@@ -3,6 +3,8 @@ from strategy_workbench.application.strategy_authoring._service import (
     CompiledDocument,
     CompileRequest,
     StrategyAuthoringService,
+    StrategyDocumentContract,
+    StrategyDocumentSchema,
 )
 
 __all__ = [
@@ -10,4 +12,6 @@ __all__ = [
     "CompileRequest",
     "CompiledDocument",
     "StrategyAuthoringService",
+    "StrategyDocumentContract",
+    "StrategyDocumentSchema",
 ]

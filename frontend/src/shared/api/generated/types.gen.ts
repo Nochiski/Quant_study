@@ -1209,6 +1209,90 @@ export type FieldCatalogFacets = {
 };
 
 /**
+ * FieldContract
+ *
+ * One scalar authoring path with everything an editor needs to explain it.
+ *
+ * `pointer` is a JSON Pointer template: array positions are written as `*`
+ * (`/factors/factors*weight`). Bounds and metadata come from the constraint catalog;
+ * type, enum, nullability, required and default come from the model.
+ */
+export type FieldContract = {
+  /**
+   * Applied Stage
+   */
+  applied_stage?: string | null;
+  /**
+   * Const
+   */
+  const?: string | null;
+  /**
+   * Default
+   */
+  default?: unknown;
+  /**
+   * Description Key
+   */
+  description_key?: string | null;
+  /**
+   * Display Unit
+   */
+  display_unit?: string | null;
+  /**
+   * Enum
+   */
+  enum?: Array<string> | null;
+  /**
+   * Example
+   */
+  example?: unknown;
+  /**
+   * Exclusive Maximum
+   */
+  exclusive_maximum?: boolean;
+  /**
+   * Exclusive Minimum
+   */
+  exclusive_minimum?: boolean;
+  /**
+   * Format
+   */
+  format?: string | null;
+  /**
+   * Has Default
+   */
+  has_default?: boolean;
+  /**
+   * Maximum
+   */
+  maximum?: number | null;
+  /**
+   * Minimum
+   */
+  minimum?: number | null;
+  /**
+   * Nullable
+   */
+  nullable?: boolean;
+  /**
+   * Pointer
+   */
+  pointer: string;
+  /**
+   * Required
+   */
+  required: boolean;
+  /**
+   * Type
+   */
+  type: string;
+  /**
+   * Unit
+   */
+  unit?: string | null;
+};
+
+/**
  * FieldCoverageCapability
  */
 export type FieldCoverageCapability = {
@@ -2435,6 +2519,76 @@ export type SourceRange = {
 };
 
 /**
+ * StrategyDocumentContract
+ *
+ * Per-field authoring contract plus the registry versions the schema was built against.
+ *
+ * `factor_registry_version` and `dataset_snapshot_id` identify the catalogs an editor should
+ * pair with this schema (field ids, factor ids); the HTTP layer adds their links.
+ */
+export type StrategyDocumentContract = {
+  /**
+   * Dataset Snapshot Id
+   */
+  dataset_snapshot_id: string;
+  /**
+   * Factor Registry Version
+   */
+  factor_registry_version: string;
+  /**
+   * Fields
+   */
+  fields: Array<FieldContract>;
+  /**
+   * Schema Hash
+   */
+  schema_hash: string;
+  /**
+   * Schema Version
+   */
+  schema_version: string;
+};
+
+/**
+ * StrategyDocumentContractResponse
+ *
+ * Wire envelope: the application contract plus the catalog links this API serves.
+ */
+export type StrategyDocumentContractResponse = {
+  contract: StrategyDocumentContract;
+  /**
+   * Equity Catalog Url
+   */
+  equity_catalog_url: string;
+  /**
+   * Factor Catalog Url
+   */
+  factor_catalog_url: string;
+};
+
+/**
+ * StrategyDocumentSchema
+ *
+ * Runtime JSON Schema of the authoring document; `schema_hash` is the ETag.
+ */
+export type StrategyDocumentSchema = {
+  /**
+   * Schema
+   */
+  schema: {
+    [key: string]: unknown;
+  };
+  /**
+   * Schema Hash
+   */
+  schema_hash: string;
+  /**
+   * Schema Version
+   */
+  schema_version: string;
+};
+
+/**
  * StrategyExplanation
  */
 export type StrategyExplanation = {
@@ -3485,3 +3639,53 @@ export type CompileStrategyDocumentResponses = {
 
 export type CompileStrategyDocumentResponse =
   CompileStrategyDocumentResponses[keyof CompileStrategyDocumentResponses];
+
+export type GetStrategyDocumentContractData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/api/v1/strategy-documents/contract";
+};
+
+export type GetStrategyDocumentContractResponses = {
+  /**
+   * Successful Response
+   */
+  200: StrategyDocumentContractResponse;
+};
+
+export type GetStrategyDocumentContractResponse =
+  GetStrategyDocumentContractResponses[keyof GetStrategyDocumentContractResponses];
+
+export type GetStrategyDocumentSchemaData = {
+  body?: never;
+  headers?: {
+    /**
+     * If-None-Match
+     */
+    "if-none-match"?: string | null;
+  };
+  path?: never;
+  query?: never;
+  url: "/api/v1/strategy-documents/schema";
+};
+
+export type GetStrategyDocumentSchemaErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetStrategyDocumentSchemaError =
+  GetStrategyDocumentSchemaErrors[keyof GetStrategyDocumentSchemaErrors];
+
+export type GetStrategyDocumentSchemaResponses = {
+  /**
+   * Successful Response
+   */
+  200: StrategyDocumentSchema;
+};
+
+export type GetStrategyDocumentSchemaResponse =
+  GetStrategyDocumentSchemaResponses[keyof GetStrategyDocumentSchemaResponses];

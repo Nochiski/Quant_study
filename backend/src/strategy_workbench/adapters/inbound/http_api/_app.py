@@ -5,7 +5,7 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Annotated
 
-from fastapi import FastAPI, HTTPException, Query, status
+from fastapi import FastAPI, Header, HTTPException, Query, Response, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -54,6 +54,8 @@ from strategy_workbench.application.strategy_authoring.facade.authoring import (
     CompiledDocument,
     CompileRequest,
     StrategyAuthoringService,
+    StrategyDocumentContract,
+    StrategyDocumentSchema,
 )
 from strategy_workbench.application.strategy_design.facade.design import (
     InvalidStrategyError,
@@ -343,6 +345,38 @@ def create_app(
         return strategy_authoring.compile(request)
 
     @app.get(
+        "/api/v1/strategy-documents/schema",
+        operation_id="getStrategyDocumentSchema",
+        response_model=StrategyDocumentSchema,
+    )
+    def strategy_document_schema(
+        response: Response, if_none_match: Annotated[str | None, Header()] = None
+    ) -> StrategyDocumentSchema | Response:
+        """Runtime JSON Schema of the authoring document. ETag = schema hash (304 on match)."""
+        schema = strategy_authoring.schema()
+        etag = _etag(schema.schema_hash)
+        if if_none_match is not None and etag in _etags(if_none_match):
+            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
+        response.headers["ETag"] = etag
+        return schema
+
+    @app.get(
+        "/api/v1/strategy-documents/contract",
+        operation_id="getStrategyDocumentContract",
+    )
+    def strategy_document_contract(response: Response) -> StrategyDocumentContractResponse:
+        """Per-field authoring contract (type, enum, range, unit, default, example, stage)
+        with the factor/dataset registry versions and catalog links it pairs with.
+        """
+        contract = strategy_authoring.contract()
+        response.headers["ETag"] = _etag(contract.schema_hash)
+        return StrategyDocumentContractResponse(
+            contract=contract,
+            factor_catalog_url="/api/v1/factors/catalog",
+            equity_catalog_url="/api/v1/equity/catalog",
+        )
+
+    @app.get(
         "/api/v1/strategies/template",
         operation_id="getStrategyTemplate",
     )
@@ -428,3 +462,20 @@ def create_app(
             ) from error
 
     return app
+
+
+@dataclass(frozen=True)
+class StrategyDocumentContractResponse:
+    """Wire envelope: the application contract plus the catalog links this API serves."""
+
+    contract: StrategyDocumentContract
+    factor_catalog_url: str
+    equity_catalog_url: str
+
+
+def _etag(schema_hash: str) -> str:
+    return f'"{schema_hash}"'
+
+
+def _etags(header: str) -> set[str]:
+    return {item.strip().removeprefix("W/") for item in header.split(",")}

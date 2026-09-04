@@ -63,6 +63,7 @@ def build_container(
     strategy_repository = InMemoryStrategyRepository()
     portfolio_design = PortfolioDesignService(equity_data, engine_portfolio)
     metric_registry = build_default_metric_registry()
+    factor_registry = build_default_factor_registry()
     run_artifact_root = artifact_root or (
         Path(__file__).resolve().parents[3] / ".local" / "backtest-runs"
     )
@@ -74,8 +75,12 @@ def build_container(
             strategy_repository,
             new_id=lambda: str(uuid4()),
         ),
-        strategy_authoring=StrategyAuthoringService(RuamelDocumentCodec()),
-        factor_research=FactorResearchService(build_default_factor_registry(), equity_data),
+        strategy_authoring=StrategyAuthoringService(
+            RuamelDocumentCodec(),
+            factor_registry_version=factor_registry.version,
+            dataset_snapshot_id=equity_data.snapshot().snapshot_id,
+        ),
+        factor_research=FactorResearchService(factor_registry, equity_data),
         portfolio_design=portfolio_design,
         backtest_runs=BacktestRunService(
             portfolio_design,

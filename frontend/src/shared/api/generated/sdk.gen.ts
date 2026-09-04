@@ -33,6 +33,11 @@ import type {
   GetHealthData,
   GetHealthResponses,
   GetStrategyData,
+  GetStrategyDocumentContractData,
+  GetStrategyDocumentContractResponses,
+  GetStrategyDocumentSchemaData,
+  GetStrategyDocumentSchemaErrors,
+  GetStrategyDocumentSchemaResponses,
   GetStrategyErrors,
   GetStrategyResponses,
   GetStrategyTemplateData,
@@ -446,3 +451,34 @@ export const compileStrategyDocument = <ThrowOnError extends boolean = false>(
       ...options.headers,
     },
   });
+
+/**
+ * Strategy Document Contract
+ *
+ * Per-field authoring contract (type, enum, range, unit, default, example, stage)
+ * with the factor/dataset registry versions and catalog links it pairs with.
+ */
+export const getStrategyDocumentContract = <
+  ThrowOnError extends boolean = false,
+>(
+  options?: Options<GetStrategyDocumentContractData, ThrowOnError>,
+) =>
+  (options?.client ?? client).get<
+    GetStrategyDocumentContractResponses,
+    unknown,
+    ThrowOnError
+  >({ url: "/api/v1/strategy-documents/contract", ...options });
+
+/**
+ * Strategy Document Schema
+ *
+ * Runtime JSON Schema of the authoring document. ETag = schema hash (304 on match).
+ */
+export const getStrategyDocumentSchema = <ThrowOnError extends boolean = false>(
+  options?: Options<GetStrategyDocumentSchemaData, ThrowOnError>,
+) =>
+  (options?.client ?? client).get<
+    GetStrategyDocumentSchemaResponses,
+    GetStrategyDocumentSchemaErrors,
+    ThrowOnError
+  >({ url: "/api/v1/strategy-documents/schema", ...options });

@@ -42,7 +42,9 @@ def test_warning_only_validation_keeps_spec_and_hash(monkeypatch: pytest.MonkeyP
         "validate_strategy",
         lambda spec: StrategyValidation(valid=True, issues=(warning,)),
     )
-    service = StrategyAuthoringService(RuamelDocumentCodec())
+    service = StrategyAuthoringService(
+        RuamelDocumentCodec(), factor_registry_version="r", dataset_snapshot_id="s"
+    )
 
     compiled = service.compile(
         CompileRequest(

@@ -17,8 +17,16 @@ excluded from `spec_hash`, and the save flow (P2-02) assigns the real strategy i
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cached_property
+from typing import Any
 
 from strategy_workbench.domain.strategy.facade.document import hydrate_strategy_document
+from strategy_workbench.domain.strategy.facade.schema import (
+    FieldContract,
+    strategy_document_schema,
+    strategy_document_schema_hash,
+    strategy_field_contracts,
+)
 from strategy_workbench.domain.strategy.facade.specification import (
     StrategyIdentity,
     StrategySpec,
@@ -65,9 +73,65 @@ class CompiledDocument:
         return self.spec is not None
 
 
+@dataclass(frozen=True)
+class StrategyDocumentSchema:
+    """Runtime JSON Schema of the authoring document; `schema_hash` is the ETag."""
+
+    schema_version: str
+    schema_hash: str
+    schema: dict[str, Any]  # reason: JSON Schema is an open document, not a DTO
+
+
+@dataclass(frozen=True)
+class StrategyDocumentContract:
+    """Per-field authoring contract plus the registry versions the schema was built against.
+
+    `factor_registry_version` and `dataset_snapshot_id` identify the catalogs an editor should
+    pair with this schema (field ids, factor ids); the HTTP layer adds their links.
+    """
+
+    schema_version: str
+    schema_hash: str
+    factor_registry_version: str
+    dataset_snapshot_id: str
+    fields: tuple[FieldContract, ...]
+
+
 class StrategyAuthoringService:
-    def __init__(self, codec: DocumentCodecPort) -> None:
+    def __init__(
+        self,
+        codec: DocumentCodecPort,
+        *,
+        factor_registry_version: str,
+        dataset_snapshot_id: str,
+    ) -> None:
         self._codec = codec
+        self._factor_registry_version = factor_registry_version
+        self._dataset_snapshot_id = dataset_snapshot_id
+
+    @cached_property
+    def _schema(self) -> StrategyDocumentSchema:
+        schema = strategy_document_schema()
+        version = schema["properties"]["schema_version"]
+        return StrategyDocumentSchema(
+            schema_version=version.get("const") or max(version["enum"]),
+            schema_hash=strategy_document_schema_hash(schema),
+            schema=schema,
+        )
+
+    def schema(self) -> StrategyDocumentSchema:
+        """Runtime schema derived from the model and the constraint catalog (pure, cached)."""
+        return self._schema
+
+    def contract(self) -> StrategyDocumentContract:
+        schema = self._schema
+        return StrategyDocumentContract(
+            schema_version=schema.schema_version,
+            schema_hash=schema.schema_hash,
+            factor_registry_version=self._factor_registry_version,
+            dataset_snapshot_id=self._dataset_snapshot_id,
+            fields=strategy_field_contracts(),
+        )
 
     def compile(self, request: CompileRequest) -> CompiledDocument:
         parsed = self._codec.parse(request.source, format=request.format)

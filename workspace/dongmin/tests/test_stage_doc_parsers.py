@@ -288,6 +288,9 @@ def test_correction_page_absent_unparsed_and_calendar_invalid_dates() -> None:
     c2 = pd_.correction_page(_root(G1_HEAD.replace("{BODY}", typo)))
     assert c2 is not None and c2["filed_date"] is None and c2["filed_date_status"] == "unparsed"
     assert c2["filed_raw"] == "2020년 13월 45일"
+    five = CORR_G1.replace("2020년 03월 30일</P>", "20011년 5월 16일</P>", 1)   # 다섯 자리 연도
+    c3 = pd_.correction_page(_root(G1_HEAD.replace("{BODY}", five)))
+    assert c3 is not None and c3["filed_date"] is None and c3["filed_date_status"] == "unparsed"
 
 
 BODY_TABLES = ('<SECTION-1><TITLE ATOC="Y">I</TITLE>'

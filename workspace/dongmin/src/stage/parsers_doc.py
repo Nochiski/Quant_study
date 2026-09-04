@@ -20,7 +20,7 @@ from html.parser import HTMLParser
 
 from .doc_vocab import DocVocab
 
-PARSER_VERSION = "p1.3"     # 정제·파싱 규칙이 바뀌면 올린다 — 프리패스 summary.json 에 기록
+PARSER_VERSION = "p1.4"     # 정제·파싱 규칙이 바뀌면 올린다 — 프리패스 summary.json 에 기록
 STD_ENTITIES = frozenset({"amp", "lt", "gt", "quot", "apos"})
 
 
@@ -407,12 +407,17 @@ def _block_text(el: ET.Element) -> str:
 
 
 def _calendar_ymd(d: re.Match[str]) -> str | None:
-    """정규식 매치 → YYYYMMDD. 13월·45일 같은 오기(§1.7)는 None — G2 cast_failed 로 새지 않게."""
+    """정규식 매치 → YYYYMMDD. 13월·45일·`20011년`(→ 0011년) 같은 오기(§1.7)는 None —
+    G2 cast_failed 로 새지 않게. 연도는 1990~2099 만(Y2040 실측: 1건이 `110516` 으로 새었다).
+    """
     y, m, day = int(d.group(1)), int(d.group(2)), int(d.group(3))
+    if not 1990 <= y <= 2099:
+        return None
     try:
-        return dt.date(y, m, day).strftime("%Y%m%d")
+        dt.date(y, m, day)
     except ValueError:
         return None
+    return f"{y:04d}{m:02d}{day:02d}"
 
 
 def correction_page(root: ET.Element) -> dict[str, str | None] | None:

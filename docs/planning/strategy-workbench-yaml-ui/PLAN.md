@@ -3,10 +3,10 @@ plan_version: 2
 project: yaml-strategy-workbench-ui
 project_status: IN_REVIEW
 current_phase: P2,P3
-current_pr: P2-01,P2-02,P2-03,P3-01,P3-02
-active_prs: [P2-01, P2-02, P2-03, P3-01, P3-02]
-parallel_window: [P2-01, P2-02, P2-03, P3-01, P3-02]
-last_updated: 2026-09-04T17:39:46+09:00
+current_pr: P2-01,P2-02,P2-03,P2-04,P3-01,P3-02
+active_prs: [P2-01, P2-02, P2-03, P2-04, P3-01, P3-02]
+parallel_window: [P2-01, P2-02, P2-03, P3-01, P3-02, P2-04]
+last_updated: 2026-09-04T17:52:54+09:00
 planned_prs: 45
 merged_prs: 17
 approved_prs: 17
@@ -24,11 +24,11 @@ progress_percent: 38
 |---|---|
 | Project status | `IN_REVIEW` |
 | Current phase | `P2,P3` |
-| Current/next PR | `P2-01,P2-02,P2-03,P3-01,P3-02` |
-| Active PR | `P2-01, P2-02, P2-03, P3-01, P3-02` |
+| Current/next PR | `P2-01,P2-02,P2-03,P2-04,P3-01,P3-02` |
+| Active PR | `P2-01, P2-02, P2-03, P2-04, P3-01, P3-02` |
 | Progress | `17 / 45 merged (38%)` |
 | Approved | `17 / 45` |
-| Aggregated at | `2026-09-04 17:39 KST` |
+| Aggregated at | `2026-09-04 17:52 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -86,7 +86,7 @@ progress_percent: 38
 
 | 항목 | 값 |
 |---|---|
-| PR | Phase 1 전량 MERGED(7efe811). 진행 중: `P2-01`→`P2-02`→`P2-03`→`P3-01`→`P3-02` (worktree `Quant_study-p2-01`, IN_REVIEW, P2-03 v3 시안 정합 반영 259b682 → P3-01 0925d1c → P3-02 429615b), Phase 1.5 감사 후속 `feat/p1.5-05-audit-fixes` (worktree `Quant_study-p15-01`, 구현 서브에이전트), Phase 1 종료 SoT·책임분리 감사 |
+| PR | Phase 1 전량 MERGED(7efe811). 진행 중: `P2-01`→`P2-02`→`P2-03`→`P3-01`→`P3-02`→`P2-04` (worktree `Quant_study-p2-01`, IN_REVIEW, P2-03 v3 시안 정합 반영 259b682 → P3-01 0925d1c → P3-02 429615b → P2-04 09ceacf, main 7efe811 병합 포함), Phase 1.5 감사 후속 `feat/p1.5-05-audit-fixes` (worktree `Quant_study-p15-01`, 구현 서브에이전트), Phase 1 종료 SoT·책임분리 감사 |
 | Intent | P2-03: 시안(v3) 그대로의 IDE 프레임(top bar·title/meta·outline+snippets·editor tabs·계약·중간 결과). P3-01/02: YAML 1.2 document state machine + lazy CodeMirror 어댑터 |
 | Acceptance | 시안과 동일한 프레임, 접근성(탭·드로어·aria), 편집기 chunk ≤ 200 KB gzip, 게이트 clean |
 | Non-goals | 실제 계약/중간 결과 데이터 연결(P4·P5), P2-04 revision loader |
@@ -160,7 +160,7 @@ Phase exit:
 | [ ] | `P2-01` | 시안 기준 light theme token과 공통 UI primitive | P0-01 | `IN_REVIEW` | `review_p2_01` |
 | [ ] | `P2-02` | Router, research/operations namespace, App Shell | P0-04 | `IN_REVIEW` | `review_p2_02` |
 | [ ] | `P2-03` | Stepper를 제거한 resizable Strategy IDE layout | P2-01, P2-02 | `IN_REVIEW` | `review_p2_03` |
-| [ ] | `P2-04` | Revision-aware loader와 draft base 상태 | P1-07, P2-02 | `WAITING` | — |
+| [ ] | `P2-04` | Revision-aware loader와 draft base 상태 | P1-07, P2-02 | `IN_REVIEW` | `review_p2_04` |
 
 Phase exit:
 
@@ -282,6 +282,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-04 KST | Claude | P2-04 착수·diff freeze 09ceacf (branch `feat/p2-04-revision-loader`, P3-02 위 + main 7efe811 병합; 23 files +1029/−157; DocumentSource new/revision, document API wrapper·query, create/revise 저장(expected_revision, 409/422 상태), URL 전환, DirtyLeaveGuard(useBlocker), MSW 라우트 테스트 5건; typecheck·lint·vitest 136·build clean), review_p2_04(opus) 배정 → IN_REVIEW | 13.3 |
 | 2026-09-04 KST | Claude | active PR 상한 규칙 보완: `parallel_window`에 전부 나열된 stack은 한 line으로 보고 2개 제한 초과 허용(WORKFLOW 13절, update-plan-progress.ps1). P2/P3 stack 5개를 window로 선언 | 규칙 갱신 |
 | 2026-09-04 KST | Claude | P1-06(2차)·P1-09(2차) APPROVE 수신, 잔여 소항목 반영(54eb349) → P1-05~09 스택 main merge(7efe811, container 충돌 해소), MERGED. Phase 1 9/9 완료, Phase 1 종료 감사 착수. P2-03 시안(v3) 정합 반영(1814817·259b682) 후 재리뷰 요청, P3-01(0925d1c)·P3-02(429615b)에 전진 병합. Phase 1.5 감사 후속(D-001~007) 구현 서브에이전트 착수 | 13.6 merge gate |
 | 2026-09-04 KST | Claude | P1-02 APPROVE(4차 b4a34f6) → main merge(df32c09), P1-03 → main merge(90a14bc, container 충돌 해소), MERGED. main 607 passed(Rust core 제외), SDK clean. P1-05~09·P2-01~03·P3-01/02 리뷰 결과 수신 중(요약 재전송 요청) | 13.6 merge gate |

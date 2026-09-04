@@ -192,3 +192,21 @@ class FactorGraph:
     nodes: tuple[ExpressionNode, ...]
     output_node_id: str
     missing_policy: MissingPolicy = MissingPolicy.DROP
+
+
+# `kind` discriminator → node type. The authoring schema (P1-05) and hydrate dispatch on this map;
+# no other layer restates the union.
+EXPRESSION_NODE_KINDS: dict[str, type] = {
+    "field": FieldNode,
+    "constant": ConstantNode,
+    "parameter": ParameterNode,
+    "unary": UnaryNode,
+    "binary": BinaryNode,
+    "time_series": TimeSeriesNode,
+    "cross_sectional": CrossSectionalNode,
+    "group": GroupNode,
+    "comparison": ComparisonNode,
+    "conditional": ConditionalNode,
+    "saved_factor": SavedFactorNode,
+    "saved_subgraph": SavedSubgraphNode,
+}

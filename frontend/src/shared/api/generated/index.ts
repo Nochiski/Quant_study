@@ -167,6 +167,8 @@ export type {
   GetHealthResponses,
   GetStrategyData,
   GetStrategyDocumentContractData,
+  GetStrategyDocumentContractError,
+  GetStrategyDocumentContractErrors,
   GetStrategyDocumentContractResponse,
   GetStrategyDocumentContractResponses,
   GetStrategyDocumentData,

@@ -27,7 +27,8 @@ export type BacktestRunResult = {
  * A request names its strategy once: `strategy` (legacy inline spec) or `strategy_source`.
  *
  * `strategy` stays for compatibility with the JSON editors; new callers use `strategy_source`
- * so a run can name a saved revision (P1-09). The run service rejects a request carrying both.
+ * so a run can name a saved revision (P1-09). The run service rejects a request carrying both
+ * or neither (one coded 422, `backtest.run.invalid`).
  * After resolution the run spec stored in the manifest carries both: `strategy` is the exact
  * spec that was executed and `strategy_source` says where it came from.
  */
@@ -1254,15 +1255,21 @@ export type FieldCatalogFacets = {
  *
  * One scalar authoring path with everything an editor needs to explain it.
  *
- * `pointer` is a JSON Pointer template: array positions are written as `*`
- * (`/factors/factors*weight`). Bounds and metadata come from the constraint catalog;
- * type, enum, nullability, required and default come from the model.
+ * `pointer` is a JSON Pointer template: array positions are written as an asterisk
+ * (for example the factor weight row is `/factors/factors/<asterisk>/weight`). Rows of a
+ * discriminated union share the pointer and differ by `branch` (the member's `kind`).
+ * Bounds and metadata come from the constraint catalog; type, enum, nullability, required
+ * and default come from the model.
  */
 export type FieldContract = {
   /**
    * Applied Stage
    */
   applied_stage?: string | null;
+  /**
+   * Branch
+   */
+  branch?: string | null;
   /**
    * Const
    */
@@ -1495,6 +1502,9 @@ export type HttpValidationError = {
  * InlineDraft
  *
  * Run an unsaved spec (draft backtests only; never a deployment source).
+ *
+ * `source_hash` is client-asserted provenance: the server cannot verify it without the text
+ * and records it as given.
  */
 export type InlineDraft = {
   /**
@@ -2362,6 +2372,10 @@ export type RevisionOrigin = "document" | "legacy_json";
  */
 export type RevisionSummary = {
   /**
+   * Change Note
+   */
+  change_note?: string | null;
+  /**
    * Created At
    */
   created_at: string;
@@ -2772,6 +2786,10 @@ export type StrategyDocument = {
  * pair with this schema (field ids, factor ids); the HTTP layer adds their links.
  */
 export type StrategyDocumentContract = {
+  /**
+   * Contract Hash
+   */
+  contract_hash: string;
   /**
    * Dataset Snapshot Id
    */
@@ -4066,10 +4084,26 @@ export type CompileStrategyDocumentResponse =
 
 export type GetStrategyDocumentContractData = {
   body?: never;
+  headers?: {
+    /**
+     * If-None-Match
+     */
+    "if-none-match"?: string | null;
+  };
   path?: never;
   query?: never;
   url: "/api/v1/strategy-documents/contract";
 };
+
+export type GetStrategyDocumentContractErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetStrategyDocumentContractError =
+  GetStrategyDocumentContractErrors[keyof GetStrategyDocumentContractErrors];
 
 export type GetStrategyDocumentContractResponses = {
   /**

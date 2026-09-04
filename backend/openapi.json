@@ -38,7 +38,7 @@
         "type": "object"
       },
       "BacktestRunSpec": {
-        "description": "A request names its strategy once: `strategy` (legacy inline spec) or `strategy_source`.\n\n`strategy` stays for compatibility with the JSON editors; new callers use `strategy_source`\nso a run can name a saved revision (P1-09). The run service rejects a request carrying both.\nAfter resolution the run spec stored in the manifest carries both: `strategy` is the exact\nspec that was executed and `strategy_source` says where it came from.",
+        "description": "A request names its strategy once: `strategy` (legacy inline spec) or `strategy_source`.\n\n`strategy` stays for compatibility with the JSON editors; new callers use `strategy_source`\nso a run can name a saved revision (P1-09). The run service rejects a request carrying both\nor neither (one coded 422, `backtest.run.invalid`).\nAfter resolution the run spec stored in the manifest carries both: `strategy` is the exact\nspec that was executed and `strategy_source` says where it came from.",
         "properties": {
           "annualization_days": {
             "default": 252,
@@ -2088,7 +2088,7 @@
         "type": "object"
       },
       "FieldContract": {
-        "description": "One scalar authoring path with everything an editor needs to explain it.\n\n`pointer` is a JSON Pointer template: array positions are written as `*`\n(`/factors/factors/*/weight`). Bounds and metadata come from the constraint catalog;\ntype, enum, nullability, required and default come from the model.",
+        "description": "One scalar authoring path with everything an editor needs to explain it.\n\n`pointer` is a JSON Pointer template: array positions are written as an asterisk\n(for example the factor weight row is `/factors/factors/<asterisk>/weight`). Rows of a\ndiscriminated union share the pointer and differ by `branch` (the member's `kind`).\nBounds and metadata come from the constraint catalog; type, enum, nullability, required\nand default come from the model.",
         "properties": {
           "applied_stage": {
             "anyOf": [
@@ -2100,6 +2100,17 @@
               }
             ],
             "title": "Applied Stage"
+          },
+          "branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Branch"
           },
           "const": {
             "anyOf": [
@@ -2475,7 +2486,7 @@
         "type": "object"
       },
       "InlineDraft": {
-        "description": "Run an unsaved spec (draft backtests only; never a deployment source).",
+        "description": "Run an unsaved spec (draft backtests only; never a deployment source).\n\n`source_hash` is client-asserted provenance: the server cannot verify it without the text\nand records it as given.",
         "properties": {
           "kind": {
             "const": "inline_draft",
@@ -3810,6 +3821,17 @@
       },
       "RevisionSummary": {
         "properties": {
+          "change_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Note"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -4419,6 +4441,10 @@
       "StrategyDocumentContract": {
         "description": "Per-field authoring contract plus the registry versions the schema was built against.\n\n`factor_registry_version` and `dataset_snapshot_id` identify the catalogs an editor should\npair with this schema (field ids, factor ids); the HTTP layer adds their links.",
         "properties": {
+          "contract_hash": {
+            "title": "Contract Hash",
+            "type": "string"
+          },
           "dataset_snapshot_id": {
             "title": "Dataset Snapshot Id",
             "type": "string"
@@ -4446,6 +4472,7 @@
         "required": [
           "schema_version",
           "schema_hash",
+          "contract_hash",
           "factor_registry_version",
           "dataset_snapshot_id",
           "fields"
@@ -6440,6 +6467,24 @@
       "get": {
         "description": "Per-field authoring contract (type, enum, range, unit, default, example, stage)\nwith the factor/dataset registry versions and catalog links it pairs with.",
         "operationId": "getStrategyDocumentContract",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "if-none-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -6450,6 +6495,19 @@
               }
             },
             "description": "Successful Response"
+          },
+          "304": {
+            "description": "Not modified (ETag matched If-None-Match)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Strategy Document Contract"
@@ -6487,6 +6545,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "304": {
+            "description": "Not modified (ETag matched If-None-Match)"
           },
           "422": {
             "content": {

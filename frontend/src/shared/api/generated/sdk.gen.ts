@@ -40,6 +40,7 @@ import type {
   GetHealthResponses,
   GetStrategyData,
   GetStrategyDocumentContractData,
+  GetStrategyDocumentContractErrors,
   GetStrategyDocumentContractResponses,
   GetStrategyDocumentData,
   GetStrategyDocumentErrors,
@@ -546,7 +547,7 @@ export const getStrategyDocumentContract = <
 ) =>
   (options?.client ?? client).get<
     GetStrategyDocumentContractResponses,
-    unknown,
+    GetStrategyDocumentContractErrors,
     ThrowOnError
   >({ url: "/api/v1/strategy-documents/contract", ...options });
 

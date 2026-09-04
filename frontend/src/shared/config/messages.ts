@@ -368,8 +368,10 @@ const ko = {
   "recovery.title": "복구본",
   "recovery.savedAt": "로컬 저장",
   "recovery.diff": "서버 원본 대비 +{added} / −{removed} 줄",
-  "recovery.schemaMismatch":
-    "복구본의 schema {draft}이(가) 현재와 달라 편집기에 불러올 수 없습니다. 원문을 내려받으세요.",
+  "recovery.unverified":
+    "현재 schema 계약을 확인할 수 없어 안전하게 불러올 수 없습니다. 원문을 내려받으세요.",
+  "recovery.incompatible":
+    "복구본의 schema·형식 또는 기준 revision이 현재 문서와 달라 불러올 수 없습니다. 원문을 내려받으세요.",
   "recovery.restore": "복구본 불러오기",
   "recovery.discard": "복구본 삭제",
   "recovery.download": "원문 다운로드",
@@ -753,8 +755,10 @@ export const messages = {
     "recovery.title": "Recovered draft",
     "recovery.savedAt": "Saved locally",
     "recovery.diff": "+{added} / −{removed} lines vs the server original",
-    "recovery.schemaMismatch":
-      "The draft targets schema {draft}, not the current one, so it cannot be loaded into the editor. Download the raw text.",
+    "recovery.unverified":
+      "The current schema contract is unavailable, so this draft cannot be restored safely. Download the raw text.",
+    "recovery.incompatible":
+      "The draft schema, format, or base revision differs from this document. Download the raw text.",
     "recovery.restore": "Restore draft",
     "recovery.discard": "Discard draft",
     "recovery.download": "Download raw text",

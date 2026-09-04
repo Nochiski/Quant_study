@@ -6,11 +6,7 @@ import { Badge, Button } from "../../../shared/ui";
 import type { Recovery } from "../model/use-autosave";
 import "./recovery-banner.css";
 
-type RecoveryBannerProps = {
-  recovery: Recovery;
-  /** Text the base was loaded with (server original or starter). */
-  original: string;
-};
+type RecoveryBannerProps = { recovery: Recovery };
 
 const shortTime = (iso: string): string =>
   iso.length >= 16 ? `${iso.slice(0, 10)} ${iso.slice(11, 16)}` : iso;
@@ -24,8 +20,9 @@ const downloadHref = (source: string): string =>
  * restore or discard it, or — when it was written for another schema version — download the
  * raw text instead of loading it into an editor that would misread it.
  */
-export const RecoveryBanner = ({ recovery, original }: RecoveryBannerProps) => {
-  const { record, schemaMismatch, restore, discard } = recovery;
+export const RecoveryBanner = ({ recovery }: RecoveryBannerProps) => {
+  const { record, original, compatibility, restore, discard } = recovery;
+  const restorable = compatibility === "compatible";
   const diff = useMemo(
     () => lineDiffSummary(original, record.source),
     [original, record.source],
@@ -33,7 +30,7 @@ export const RecoveryBanner = ({ recovery, original }: RecoveryBannerProps) => {
   return (
     <section className="recovery" aria-label={t("recovery.title")}>
       <div className="recovery__summary">
-        <Badge tone={schemaMismatch ? "warn" : "info"}>
+        <Badge tone={restorable ? "info" : "warn"}>
           {t("recovery.title")}
         </Badge>
         <span>
@@ -44,20 +41,27 @@ export const RecoveryBanner = ({ recovery, original }: RecoveryBannerProps) => {
             .replace("{added}", String(diff.added))
             .replace("{removed}", String(diff.removed))}
         </span>
-        {schemaMismatch ? (
+        {restorable ? null : (
           <span className="recovery__mismatch">
-            {t("recovery.schemaMismatch").replace(
-              "{draft}",
-              record.schemaVersion ?? "?",
+            {t(
+              compatibility === "unverified"
+                ? "recovery.unverified"
+                : "recovery.incompatible",
             )}
           </span>
-        ) : null}
+        )}
       </div>
       {diff.preview.length > 0 ? (
-        <pre className="recovery__preview">{diff.preview.join("\n")}</pre>
+        <pre className="recovery__preview" tabIndex={0}>
+          {diff.preview.join("\n")}
+        </pre>
       ) : null}
       <div className="recovery__actions">
-        {schemaMismatch ? (
+        {restorable ? (
+          <Button size="small" tone="primary" onClick={restore}>
+            {t("recovery.restore")}
+          </Button>
+        ) : (
           <a
             className="ui-button ui-button--primary ui-button--small"
             href={downloadHref(record.source)}
@@ -65,10 +69,6 @@ export const RecoveryBanner = ({ recovery, original }: RecoveryBannerProps) => {
           >
             {t("recovery.download")}
           </a>
-        ) : (
-          <Button size="small" tone="primary" onClick={restore}>
-            {t("recovery.restore")}
-          </Button>
         )}
         <Button size="small" onClick={discard}>
           {t("recovery.discard")}

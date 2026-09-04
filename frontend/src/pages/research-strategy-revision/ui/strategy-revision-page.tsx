@@ -163,10 +163,7 @@ export const StrategyRevisionPage = () => {
               </p>
             )}
             {autosave.recovery ? (
-              <RecoveryBanner
-                recovery={autosave.recovery}
-                original={stored.source}
-              />
+              <RecoveryBanner recovery={autosave.recovery} />
             ) : null}
             {view === stored.format ? (
               <SourceEditor

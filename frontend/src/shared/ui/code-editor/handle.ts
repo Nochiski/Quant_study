@@ -40,6 +40,11 @@ export type EditorCompletionSource = (
   context: EditorCompletionContext,
 ) => EditorCompletionResult | null | Promise<EditorCompletionResult | null>;
 
+/** Plain-text hover card for the token spanning `from`..`to`; one line per entry. */
+export type EditorHover = { from: number; to: number; lines: string[] };
+
+export type EditorHoverSource = (offset: number) => EditorHover | null;
+
 export type CodeEditorHandle = {
   getText(): string;
   /** Replaces the whole document; history records it as one change. */
@@ -66,6 +71,7 @@ export type CodeEditorProps = {
   onEscape?: () => void;
   diagnostics?: EditorDiagnostic[];
   completionSource?: EditorCompletionSource;
+  hoverSource?: EditorHoverSource;
   readOnly?: boolean;
   /** Restores a previously captured opaque history state on mount. */
   initialHistoryState?: unknown;

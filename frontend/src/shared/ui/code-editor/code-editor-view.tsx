@@ -38,6 +38,7 @@ import {
   EditorView,
   highlightActiveLine,
   highlightActiveLineGutter,
+  hoverTooltip,
   keymap,
   lineNumbers,
 } from "@codemirror/view";
@@ -48,6 +49,7 @@ import type {
   CodeEditorProps,
   EditorCompletionSource,
   EditorDiagnostic,
+  EditorHoverSource,
 } from "./handle";
 import "./code-editor.css";
 
@@ -85,6 +87,30 @@ const toCmCompletion =
     };
   };
 
+const toCmHover = (source: EditorHoverSource) =>
+  hoverTooltip(
+    (_view, pos) => {
+      const hover = source(pos);
+      if (!hover) return null;
+      return {
+        pos: hover.from,
+        end: hover.to,
+        above: true,
+        create: () => {
+          const dom = document.createElement("div");
+          dom.className = "code-editor__hover";
+          for (const line of hover.lines) {
+            const row = document.createElement("div");
+            row.textContent = line;
+            dom.appendChild(row);
+          }
+          return { dom };
+        },
+      };
+    },
+    { hoverTime: 250 },
+  );
+
 /**
  * CodeMirror 6 implementation of the editor handle (loaded lazily by `CodeEditor`). Line numbers,
  * folding, search, bracket matching, indentation, undo/redo, lint gutter, Korean IME via the
@@ -102,6 +128,7 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
       onEscape,
       diagnostics = [],
       completionSource,
+      hoverSource,
       readOnly = false,
       initialHistoryState,
     },
@@ -114,6 +141,7 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
     const languageCompartment = useRef(new Compartment());
     const readOnlyCompartment = useRef(new Compartment());
     const completionCompartment = useRef(new Compartment());
+    const hoverCompartment = useRef(new Compartment());
     const labelCompartment = useRef(new Compartment());
     const extensionsRef = useRef<Extension[]>([]);
     // Latest props, so a restored state is reconfigured to what the editor shows now, not to
@@ -122,12 +150,14 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
       language,
       readOnly,
       completionSource,
+      hoverSource,
       ariaLabel,
     });
     latest.current = {
       language,
       readOnly,
       completionSource,
+      hoverSource,
       ariaLabel,
     };
 
@@ -154,6 +184,7 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
             ? autocompletion({ override: [toCmCompletion(completionSource)] })
             : autocompletion(),
         ),
+        hoverCompartment.current.of(hoverSource ? toCmHover(hoverSource) : []),
         keymap.of([
           ...defaultKeymap,
           ...historyKeymap,
@@ -237,6 +268,14 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
         ),
       });
     }, [completionSource]);
+
+    useEffect(() => {
+      view.current?.dispatch({
+        effects: hoverCompartment.current.reconfigure(
+          hoverSource ? toCmHover(hoverSource) : [],
+        ),
+      });
+    }, [hoverSource]);
 
     useEffect(() => {
       view.current?.dispatch({
@@ -348,6 +387,9 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
                       override: [toCmCompletion(props.completionSource)],
                     })
                   : autocompletion(),
+              ),
+              hoverCompartment.current.reconfigure(
+                props.hoverSource ? toCmHover(props.hoverSource) : [],
               ),
               labelCompartment.current.reconfigure(
                 EditorView.contentAttributes.of({

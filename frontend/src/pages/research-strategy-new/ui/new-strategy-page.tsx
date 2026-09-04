@@ -7,6 +7,7 @@ import {
   saveStatusText,
   saveStatusTone,
   useSaveDocument,
+  useSchemaAssist,
   useStrategyDocument,
   type DocumentSource,
 } from "../../../features/edit-strategy";
@@ -30,6 +31,7 @@ export const NewStrategyPage = () => {
   const navigate = useNavigate();
   const [document, dispatch] = useStrategyDocument(NEW_DRAFT);
   const { save, status, canSave } = useSaveDocument(document, dispatch);
+  const assist = useSchemaAssist(document);
 
   // If the user types while create is in flight, stay on this page and preserve the newer text.
   // A second save appends it to the newly created strategy; navigate only once the current text
@@ -79,7 +81,9 @@ export const NewStrategyPage = () => {
             onSave={save}
           />
         }
-        editor={<SourceEditor state={document} dispatch={dispatch} />}
+        editor={
+          <SourceEditor state={document} dispatch={dispatch} assist={assist} />
+        }
         runDisabled
       />
       <DirtyLeaveGuard dirty={document.dirty && !leaving} />

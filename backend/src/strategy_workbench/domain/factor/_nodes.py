@@ -1,8 +1,19 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Literal, TypeAlias, get_args, get_type_hints
+
+# Editor metadata the runtime schema (domain.strategy._schema) turns into `x-catalog` /
+# `x-reference`: which catalog or document-internal namespace an identifier resolves in. The
+# engine never reads it; it exists so no client keeps a hand-written list of which ids are which.
+CATALOG_EQUITY_FIELD = {"catalog": "equity-field"}
+CATALOG_FACTOR = {"catalog": "factor"}
+CATALOG_SUBGRAPH = {"catalog": "subgraph"}
+REFERENCE_NODE = {"reference": "node"}
+REFERENCE_PARAMETER = {"reference": "parameter"}
+# The array that declares a namespace; its items carry the `<namespace>_id` definition.
+DEFINES_NODE = {"defines": "node"}
 
 
 class UnaryOperator(StrEnum):
@@ -74,7 +85,7 @@ class FieldMetadata:
 @dataclass(frozen=True)
 class FieldNode:
     node_id: str
-    field_id: str
+    field_id: str = field(metadata=CATALOG_EQUITY_FIELD)
     kind: Literal["field"]
 
 
@@ -88,7 +99,7 @@ class ConstantNode:
 @dataclass(frozen=True)
 class ParameterNode:
     node_id: str
-    parameter_id: str
+    parameter_id: str = field(metadata=REFERENCE_PARAMETER)
     kind: Literal["parameter"]
 
 
@@ -96,7 +107,7 @@ class ParameterNode:
 class UnaryNode:
     node_id: str
     operator: UnaryOperator
-    input_node_id: str
+    input_node_id: str = field(metadata=REFERENCE_NODE)
     kind: Literal["unary"]
     periods: int | None = None
 
@@ -105,8 +116,8 @@ class UnaryNode:
 class BinaryNode:
     node_id: str
     operator: BinaryOperator
-    left_node_id: str
-    right_node_id: str
+    left_node_id: str = field(metadata=REFERENCE_NODE)
+    right_node_id: str = field(metadata=REFERENCE_NODE)
     kind: Literal["binary"]
 
 
@@ -114,7 +125,7 @@ class BinaryNode:
 class TimeSeriesNode:
     node_id: str
     operator: TimeSeriesOperator
-    input_node_id: str
+    input_node_id: str = field(metadata=REFERENCE_NODE)
     window: int
     kind: Literal["time_series"]
     lag: int = 0
@@ -124,7 +135,7 @@ class TimeSeriesNode:
 class CrossSectionalNode:
     node_id: str
     operator: CrossSectionalOperator
-    input_node_id: str
+    input_node_id: str = field(metadata=REFERENCE_NODE)
     kind: Literal["cross_sectional"]
     lower_quantile: float = 0.01
     upper_quantile: float = 0.99
@@ -134,8 +145,8 @@ class CrossSectionalNode:
 class GroupNode:
     node_id: str
     operator: GroupOperator
-    input_node_id: str
-    group_field_id: str
+    input_node_id: str = field(metadata=REFERENCE_NODE)
+    group_field_id: str = field(metadata=CATALOG_EQUITY_FIELD)
     kind: Literal["group"]
 
 
@@ -143,31 +154,31 @@ class GroupNode:
 class ComparisonNode:
     node_id: str
     operator: FactorComparisonOperator
-    left_node_id: str
-    right_node_id: str
+    left_node_id: str = field(metadata=REFERENCE_NODE)
+    right_node_id: str = field(metadata=REFERENCE_NODE)
     kind: Literal["comparison"]
 
 
 @dataclass(frozen=True)
 class ConditionalNode:
     node_id: str
-    predicate_node_id: str
-    true_node_id: str
-    false_node_id: str
+    predicate_node_id: str = field(metadata=REFERENCE_NODE)
+    true_node_id: str = field(metadata=REFERENCE_NODE)
+    false_node_id: str = field(metadata=REFERENCE_NODE)
     kind: Literal["conditional"]
 
 
 @dataclass(frozen=True)
 class SavedFactorNode:
     node_id: str
-    factor_id: str
+    factor_id: str = field(metadata=CATALOG_FACTOR)
     kind: Literal["saved_factor"]
 
 
 @dataclass(frozen=True)
 class SavedSubgraphNode:
     node_id: str
-    subgraph_id: str
+    subgraph_id: str = field(metadata=CATALOG_SUBGRAPH)
     kind: Literal["saved_subgraph"]
 
 
@@ -189,8 +200,8 @@ ExpressionNode: TypeAlias = (
 
 @dataclass(frozen=True)
 class FactorGraph:
-    nodes: tuple[ExpressionNode, ...]
-    output_node_id: str
+    nodes: tuple[ExpressionNode, ...] = field(metadata=DEFINES_NODE)
+    output_node_id: str = field(metadata=REFERENCE_NODE)
     missing_policy: MissingPolicy = MissingPolicy.DROP
 
 

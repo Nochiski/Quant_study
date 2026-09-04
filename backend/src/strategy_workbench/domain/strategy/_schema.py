@@ -12,7 +12,10 @@ Shape (JSON Schema 2020-12):
 - one `$defs` entry per dataclass, named after the class; discriminated unions (`kind`
   Literal) become `oneOf` over `$ref`s whose `kind` property is a `const`;
 - catalog bounds appear as `minimum`/`maximum`/`exclusiveMinimum`/`exclusiveMaximum`, contract
-  metadata as `x-unit`, `x-display-unit`, `x-applied-stage`, `x-description-key`, `examples`.
+  metadata as `x-unit`, `x-display-unit`, `x-applied-stage`, `x-description-key`, `examples`;
+- identifier fields carry `x-catalog` (equity-field, factor, universe, subgraph: complete from
+  that catalog) or `x-reference` (node, parameter: complete from the document itself), read from
+  the dataclass field metadata declared next to the field (P3-03).
 """
 
 from __future__ import annotations
@@ -56,6 +59,8 @@ class FieldContract:
     enum: tuple[str, ...] | None = None
     const: str | None = None
     format: str | None = None
+    catalog: str | None = None  # `x-catalog`: catalog the identifier completes from
+    reference: str | None = None  # `x-reference`: document-internal namespace of the identifier
     minimum: float | None = None
     maximum: float | None = None
     exclusive_minimum: bool = False
@@ -183,6 +188,9 @@ class _SchemaBuilder:
             constraint = self._constraints.get(child)
             if constraint is not None:
                 schema = {**schema, **_constraint_schema(constraint)}
+            for marker in ("catalog", "reference", "defines"):
+                if marker in field.metadata:
+                    schema = {**schema, f"x-{marker}": field.metadata[marker]}
             properties[field.name] = schema
             self._record_contract(child, hints[field.name], schema, has_default, default, branch)
         return {
@@ -225,6 +233,8 @@ class _SchemaBuilder:
                 enum=tuple(inner["enum"]) if "enum" in inner else None,
                 const=inner.get("const"),
                 format=inner.get("format"),
+                catalog=schema.get("x-catalog"),
+                reference=schema.get("x-reference"),
                 minimum=constraint.minimum if constraint else None,
                 maximum=constraint.maximum if constraint else None,
                 exclusive_minimum=constraint.exclusive_minimum if constraint else False,

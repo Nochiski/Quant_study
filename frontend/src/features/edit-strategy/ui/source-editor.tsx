@@ -5,7 +5,9 @@ import { Badge } from "../../../shared/ui";
 import {
   CodeEditor,
   type CodeEditorHandle,
+  type EditorCompletionSource,
   type EditorDiagnostic,
+  type EditorHoverSource,
 } from "../../../shared/ui/code-editor";
 import {
   currentDiagnostics,
@@ -17,6 +19,11 @@ import {
 type SourceEditorProps = {
   state: DocumentState;
   dispatch: (action: DocumentAction) => void;
+  /** Schema-driven completion and hover (P3-03); absent in tests and before the schema loads. */
+  assist?: {
+    completionSource?: EditorCompletionSource;
+    hoverSource?: EditorHoverSource;
+  };
 };
 
 const PHASE_TONE = {
@@ -36,7 +43,11 @@ const PHASE_TONE = {
  * is never remounted on a format switch — the language is reconfigured in place — so the undo
  * history survives the switch (editor ADR D3).
  */
-export const SourceEditor = ({ state, dispatch }: SourceEditorProps) => {
+export const SourceEditor = ({
+  state,
+  dispatch,
+  assist,
+}: SourceEditorProps) => {
   const handle = useRef<CodeEditorHandle>(null);
 
   const diagnostics = useMemo<EditorDiagnostic[]>(
@@ -92,6 +103,8 @@ export const SourceEditor = ({ state, dispatch }: SourceEditorProps) => {
         onChange={onChange}
         onComposingChange={onComposingChange}
         diagnostics={diagnostics}
+        completionSource={assist?.completionSource}
+        hoverSource={assist?.hoverSource}
       />
     </div>
   );

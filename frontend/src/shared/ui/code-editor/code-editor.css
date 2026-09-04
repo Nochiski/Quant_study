@@ -68,3 +68,14 @@
   color: var(--text-subtle);
   font-size: var(--text-size-small);
 }
+
+.code-editor__hover {
+  max-width: 420px;
+  padding: var(--space-2) var(--space-3);
+  font: 12px/1.5 var(--font-mono, ui-monospace, monospace);
+  white-space: pre-wrap;
+}
+
+.code-editor__hover > div:first-child {
+  font-weight: 700;
+}

@@ -9,4 +9,9 @@ export {
   type SourcePosition,
   type SourceRange,
 } from "./parse";
+export {
+  describeYamlCursor,
+  templatePointer,
+  type YamlCursorContext,
+} from "./cursor";
 export { CODEC_LIMITS } from "./limits";

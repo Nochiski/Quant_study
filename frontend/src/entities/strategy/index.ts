@@ -1,6 +1,8 @@
 export {
+  strategyContractQuery,
   strategyDocumentQuery,
   strategyRevisionsQuery,
+  strategySchemaQuery,
 } from "./model/strategy-queries";
 export type { RevisionSummary, StrategyDocument } from "../../shared/api";
 export type {

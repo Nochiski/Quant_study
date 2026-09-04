@@ -9,6 +9,7 @@ import {
   saveStatusText,
   saveStatusTone,
   useSaveDocument,
+  useSchemaAssist,
   useStrategyDocument,
   type DocumentSource,
 } from "../../../features/edit-strategy";
@@ -45,6 +46,7 @@ export const StrategyRevisionPage = () => {
   );
   const [document, dispatch] = useStrategyDocument(source);
   const { save, status, canSave } = useSaveDocument(document, dispatch);
+  const assist = useSchemaAssist(document);
 
   // A save can complete while the user is still typing. Keep that newer text on the current
   // route and let the next save append from the updated base; only follow the revision when the
@@ -118,7 +120,11 @@ export const StrategyRevisionPage = () => {
               </p>
             )}
             {view === stored.format ? (
-              <SourceEditor state={document} dispatch={dispatch} />
+              <SourceEditor
+                state={document}
+                dispatch={dispatch}
+                assist={assist}
+              />
             ) : (
               <pre
                 className="page-state"

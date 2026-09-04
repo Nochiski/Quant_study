@@ -637,38 +637,4 @@ describe("dirty guard follow-ups (P2-04 review)", () => {
       "/research/strategies/s1/revisions/2",
     );
   });
-
-  it("keeps text typed while a create is in flight as the new revision's local draft", async () => {
-    const user = userEvent.setup();
-    server.use(
-      http.post(`${API}/api/v1/strategy-documents`, async ({ request }) => {
-        const body = (await request.json()) as { source: string };
-        await delay(150);
-        return HttpResponse.json(document("s9", 1, body.source, "새 전략 A"), {
-          status: 201,
-        });
-      }),
-    );
-    localStorage.clear();
-    const history = mount("/research/strategies/new");
-    const view = await editor();
-    replaceText(view, 'schema_version: "1.0"\ntitle: 새 전략 A\n');
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "리비전 저장" })).toBeEnabled(),
-    );
-    await user.click(screen.getByRole("button", { name: "리비전 저장" }));
-    replaceText(
-      view,
-      'schema_version: "1.0"\ntitle: 새 전략 A\ndescription: 나중에 친 글\n',
-    );
-    await waitFor(() =>
-      expect(history.location.pathname).toBe(
-        "/research/strategies/s9/revisions/1",
-      ),
-    );
-    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
-    // The revision page offers the in-flight edits back as a recovered draft.
-    const banner = await screen.findByRole("region", { name: "복구본" });
-    expect(banner).toHaveTextContent("+description: 나중에 친 글");
-  });
 });

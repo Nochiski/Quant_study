@@ -5,6 +5,7 @@ import {
   SaveAction,
   SourceEditor,
   saveStatusText,
+  saveStatusTone,
   useSaveDocument,
   useStrategyDocument,
   type DocumentSource,
@@ -30,8 +31,21 @@ export const NewStrategyPage = () => {
   const [document, dispatch] = useStrategyDocument(NEW_DRAFT);
   const { save, status, canSave } = useSaveDocument(document, dispatch);
 
+  // If the user types while create is in flight, stay on this page and preserve the newer text.
+  // A second save appends it to the newly created strategy; navigate only once the current text
+  // is the saved base. This gives P2-04 lossless behavior without depending on P3-06 autosave.
+  const leaving =
+    document.strategyId !== null &&
+    document.baseRevision !== null &&
+    !document.dirty;
+
   useEffect(() => {
-    if (document.strategyId === null || document.baseRevision === null) return;
+    if (
+      !leaving ||
+      document.strategyId === null ||
+      document.baseRevision === null
+    )
+      return;
     void navigate({
       to: "/research/strategies/$strategyId/revisions/$revision",
       params: {
@@ -46,7 +60,7 @@ export const NewStrategyPage = () => {
       },
       replace: true,
     });
-  }, [document.strategyId, document.baseRevision, navigate]);
+  }, [leaving, document.strategyId, document.baseRevision, navigate]);
 
   return (
     <>
@@ -55,6 +69,7 @@ export const NewStrategyPage = () => {
         versionLabel={t("page.newStrategy.draft")}
         badges={<Badge tone="info">{t("page.newStrategy.draft")}</Badge>}
         saveStatus={saveStatusText(document, status)}
+        saveTone={saveStatusTone(document, status)}
         view={document.format}
         availableViews={[document.format]}
         editorActions={
@@ -67,7 +82,7 @@ export const NewStrategyPage = () => {
         editor={<SourceEditor state={document} dispatch={dispatch} />}
         runDisabled
       />
-      <DirtyLeaveGuard dirty={document.dirty} />
+      <DirtyLeaveGuard dirty={document.dirty && !leaving} />
     </>
   );
 };

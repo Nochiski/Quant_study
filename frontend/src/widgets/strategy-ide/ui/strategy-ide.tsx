@@ -33,6 +33,7 @@ export type StrategyIdeProps = {
   meta?: { author?: string; createdAt?: string; updatedAt?: string };
   /** Save status text in the top bar, e.g. "방금 저장됨". */
   saveStatus?: string;
+  saveTone?: "ok" | "warn" | "error";
   onRunBacktest?: () => void;
   runDisabled?: boolean;
   /** The source editor slot (P3). */
@@ -70,6 +71,7 @@ export const StrategyIde = ({
   badges,
   meta,
   saveStatus,
+  saveTone = "ok",
   onRunBacktest,
   runDisabled = false,
   editor,
@@ -175,7 +177,10 @@ export const StrategyIde = ({
         <div className="ide__topbar-status" role="status">
           {saveStatus ? (
             <>
-              <span aria-hidden="true">✓</span> {saveStatus}
+              <span aria-hidden="true">
+                {saveTone === "error" ? "✕" : saveTone === "warn" ? "!" : "✓"}
+              </span>{" "}
+              {saveStatus}
             </>
           ) : null}
         </div>
@@ -479,9 +484,7 @@ const InspectorPlaceholder = () => {
                   </div>
                 ))}
               </dl>
-              <div className="ide__card">
-                {t("ide.placeholder")}
-              </div>
+              <div className="ide__card">{t("ide.placeholder")}</div>
               <button type="button" className="ide__link" disabled>
                 {t("ide.inspector.fullSchema")} ↗
               </button>

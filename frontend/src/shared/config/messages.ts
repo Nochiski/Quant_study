@@ -295,10 +295,95 @@ const ko = {
   "ide.inspector.displayValue": "표시 값",
   "ide.inspector.default": "기본값",
   "ide.inspector.meaning": "의미",
-  "ide.inspector.meaningSample": "종목별 최대 목표 비중 한도",
-  "ide.inspector.stageSample": "주문 생성 전",
   "ide.inspector.checkPassed": "타입 · 단위 검증 통과",
   "ide.inspector.fullSchema": "전체 스키마 보기",
+  "contract.loading": "계약 메타데이터를 불러오는 중입니다.",
+  "contract.unavailable": "계약 메타데이터를 불러오지 못했습니다.",
+  "contract.incompatible":
+    "스키마와 필드 계약의 버전이 달라 안전하게 설명할 수 없습니다.",
+  "contract.unknown": "선택한 경로는 현재 runtime schema에 없습니다.",
+  "contract.stale": "구문 오류 전 마지막 정상 구조를 기준으로 표시 중",
+  "contract.root": "문서 루트",
+  "contract.noScalar":
+    "이 경로는 구조 노드이므로 scalar field contract가 없습니다.",
+  "contract.noValue": "현재 문서에 값이 없습니다.",
+  "contract.templatePath": "계약 경로",
+  "contract.nullable": "null 허용",
+  "contract.enum": "허용 값",
+  "contract.const": "고정 값",
+  "contract.range": "범위",
+  "contract.format": "포맷",
+  "contract.description": "설명",
+  "contract.descriptionKey": "설명 키",
+  "contract.discriminator": "Discriminator",
+  "contract.variants": "분기",
+  "contract.selectedBranch": "현재 분기",
+  "contract.branchRequired":
+    "kind를 먼저 선택해야 이 필드의 계약을 확정할 수 있습니다.",
+  "contract.provenance": "계약 출처",
+  "contract.schemaVersion": "스키마 버전",
+  "contract.schemaHash": "스키마 해시",
+  "contract.contractHash": "계약 해시",
+  "contract.expectedVersion": "계약 기준 버전",
+  "contract.actualVersion": "조회된 버전",
+  "contract.catalog.loading": "카탈로그를 불러오는 중입니다.",
+  "contract.catalog.error": "카탈로그를 불러오지 못했습니다.",
+  "contract.catalog.mismatch":
+    "계약과 카탈로그 버전이 달라 상세 정보를 연결하지 않았습니다.",
+  "contract.catalog.unselected": "현재 문서에 선택된 ID가 없습니다.",
+  "contract.catalog.notLoaded":
+    "선택한 ID가 현재 로드된 카탈로그 페이지 밖에 있습니다.",
+  "contract.catalog.notFound":
+    "현재 계약 버전의 카탈로그에서 ID를 찾지 못했습니다.",
+  "contract.catalog.unsupported":
+    "이 카탈로그의 상세 조회 API는 아직 없습니다.",
+  "contract.fieldDetails": "데이터 필드 · PIT",
+  "contract.factorDetails": "팩터 레지스트리",
+  "contract.snapshot": "데이터 스냅샷",
+  "contract.registryVersion": "레지스트리 버전",
+  "contract.category": "분류",
+  "contract.availability": "가용 상태",
+  "contract.outputUnit": "출력 단위",
+  "contract.preference": "선호 방향",
+  "contract.missingPolicy": "결측 정책",
+  "contract.minimumHistory": "최소 이력",
+  "contract.requiredFields": "필수 필드",
+  "contract.tags": "태그",
+  "contract.frequency": "빈도",
+  "contract.valueType": "값 타입",
+  "contract.pointInTime": "Point-in-time",
+  "contract.coverage": "커버리지",
+  "contract.window": "가용 구간",
+  "contract.venues": "거래소",
+  "contract.cellKinds": "셀 상태",
+  "contract.source": "스냅샷 원천",
+  "contract.builtAt": "스냅샷 생성",
+  "contract.datasetRevisions": "데이터셋 리비전",
+  "contract.yes": "예",
+  "contract.no": "아니요",
+  "contract.sessions": "세션",
+  "strategy.contract.signal.entry_percentile": "신호에서 선택할 상위 비율",
+  "strategy.contract.portfolio.selection_count":
+    "롱 포트폴리오에 선택할 종목 수",
+  "strategy.contract.portfolio.short_selection_count":
+    "숏 포트폴리오에 선택할 종목 수",
+  "strategy.contract.portfolio.selection_percentile":
+    "롱·숏 포트폴리오에서 선택할 꼬리 비율",
+  "strategy.contract.portfolio.rebalance_every_n_sessions":
+    "세션 수 기준 리밸런싱 간격",
+  "strategy.contract.portfolio.turnover_buffer_count":
+    "불필요한 교체를 줄이는 종목 수 버퍼",
+  "strategy.contract.portfolio.minimum_trade_weight":
+    "주문을 만들기 위한 최소 목표 비중 변화",
+  "strategy.contract.portfolio.minimum_liquidity":
+    "후보 종목에 적용하는 최소 유동성 기준",
+  "strategy.contract.risk.gross_exposure": "포트폴리오 총 익스포저",
+  "strategy.contract.risk.max_name_weight": "종목별 최대 목표 비중 한도",
+  "strategy.contract.risk.max_sector_weight": "섹터별 최대 목표 비중 한도",
+  "strategy.contract.execution.participation_rate":
+    "시장 거래량 대비 최대 주문 참여율",
+  "strategy.contract.execution.fee_bps": "체결 금액에 적용할 수수료 가정",
+  "strategy.contract.execution.slippage_bps": "체결 가격의 슬리피지 가정",
   "ide.debugger.tab.preview": "값 미리보기",
   "ide.debugger.tab.exposure": "노출",
   "ide.debugger.tab.orders": "주문 예상",
@@ -690,7 +775,8 @@ export const messages = {
     "ide.outline.tree": "StrategySpec document structure",
     "ide.outline.parsing": "Analysing the document structure.",
     "ide.outline.noMatches": "No matching path.",
-    "ide.outline.stale": "Showing the last valid structure before the syntax error.",
+    "ide.outline.stale":
+      "Showing the last valid structure before the syntax error.",
     "ide.outline.missing": "Not present in source yet",
     "ide.outline.arrayIndex": "Array index",
     "ide.section.identity": "Basics",
@@ -706,10 +792,101 @@ export const messages = {
     "ide.inspector.displayValue": "Display value",
     "ide.inspector.default": "Default",
     "ide.inspector.meaning": "Meaning",
-    "ide.inspector.meaningSample": "Maximum target weight per security",
-    "ide.inspector.stageSample": "Before order generation",
     "ide.inspector.checkPassed": "Type · unit check passed",
     "ide.inspector.fullSchema": "View full schema",
+    "contract.loading": "Loading contract metadata.",
+    "contract.unavailable": "Contract metadata could not be loaded.",
+    "contract.incompatible":
+      "The schema and field contract versions differ, so this path cannot be explained safely.",
+    "contract.unknown": "The selected path is not in the runtime schema.",
+    "contract.stale":
+      "Showing the last valid structure from before the syntax error",
+    "contract.root": "Document root",
+    "contract.noScalar":
+      "This is a structural node and has no scalar field contract.",
+    "contract.noValue": "The current document has no value here.",
+    "contract.templatePath": "Contract path",
+    "contract.nullable": "Nullable",
+    "contract.enum": "Allowed values",
+    "contract.const": "Constant",
+    "contract.range": "Range",
+    "contract.format": "Format",
+    "contract.description": "Description",
+    "contract.descriptionKey": "Description key",
+    "contract.discriminator": "Discriminator",
+    "contract.variants": "Branches",
+    "contract.selectedBranch": "Active branch",
+    "contract.branchRequired":
+      "Select kind before using this field's contract.",
+    "contract.provenance": "Contract provenance",
+    "contract.schemaVersion": "Schema version",
+    "contract.schemaHash": "Schema hash",
+    "contract.contractHash": "Contract hash",
+    "contract.expectedVersion": "Contract version",
+    "contract.actualVersion": "Loaded version",
+    "contract.catalog.loading": "Loading the catalog.",
+    "contract.catalog.error": "The catalog could not be loaded.",
+    "contract.catalog.mismatch":
+      "Catalog details were not joined because its version differs from the contract.",
+    "contract.catalog.unselected": "No ID is selected in the current document.",
+    "contract.catalog.notLoaded":
+      "The selected ID is outside the loaded catalog page.",
+    "contract.catalog.notFound":
+      "The ID is not in this contract's catalog version.",
+    "contract.catalog.unsupported":
+      "This catalog does not have a detail API yet.",
+    "contract.fieldDetails": "Dataset field · PIT",
+    "contract.factorDetails": "Factor registry",
+    "contract.snapshot": "Data snapshot",
+    "contract.registryVersion": "Registry version",
+    "contract.category": "Category",
+    "contract.availability": "Availability",
+    "contract.outputUnit": "Output unit",
+    "contract.preference": "Preference",
+    "contract.missingPolicy": "Missing policy",
+    "contract.minimumHistory": "Minimum history",
+    "contract.requiredFields": "Required fields",
+    "contract.tags": "Tags",
+    "contract.frequency": "Frequency",
+    "contract.valueType": "Value type",
+    "contract.pointInTime": "Point-in-time",
+    "contract.coverage": "Coverage",
+    "contract.window": "Available range",
+    "contract.venues": "Venues",
+    "contract.cellKinds": "Cell states",
+    "contract.source": "Snapshot source",
+    "contract.builtAt": "Snapshot built",
+    "contract.datasetRevisions": "Dataset revisions",
+    "contract.yes": "Yes",
+    "contract.no": "No",
+    "contract.sessions": "sessions",
+    "strategy.contract.signal.entry_percentile":
+      "Top fraction selected by the signal",
+    "strategy.contract.portfolio.selection_count":
+      "Number of names in the long portfolio",
+    "strategy.contract.portfolio.short_selection_count":
+      "Number of names in the short portfolio",
+    "strategy.contract.portfolio.selection_percentile":
+      "Tail fraction selected for the long and short portfolios",
+    "strategy.contract.portfolio.rebalance_every_n_sessions":
+      "Rebalance interval measured in sessions",
+    "strategy.contract.portfolio.turnover_buffer_count":
+      "Name-count buffer that suppresses unnecessary replacement",
+    "strategy.contract.portfolio.minimum_trade_weight":
+      "Minimum target-weight change required to create an order",
+    "strategy.contract.portfolio.minimum_liquidity":
+      "Minimum liquidity threshold applied to candidates",
+    "strategy.contract.risk.gross_exposure": "Total portfolio gross exposure",
+    "strategy.contract.risk.max_name_weight":
+      "Maximum target weight per security",
+    "strategy.contract.risk.max_sector_weight":
+      "Maximum target weight per sector",
+    "strategy.contract.execution.participation_rate":
+      "Maximum order participation relative to market volume",
+    "strategy.contract.execution.fee_bps":
+      "Fee assumption applied to notional traded",
+    "strategy.contract.execution.slippage_bps":
+      "Execution price slippage assumption",
     "ide.debugger.tab.preview": "Value preview",
     "ide.debugger.tab.exposure": "Exposure",
     "ide.debugger.tab.orders": "Expected orders",
@@ -821,3 +998,9 @@ export const messages = {
 } as const;
 
 export const t = (key: MessageKey): string => messages.ko[key];
+
+/** Resolve a backend-provided description key without pretending an unknown key is translated. */
+export const tOptional = (key: string): string | null =>
+  Object.prototype.hasOwnProperty.call(messages.ko, key)
+    ? messages.ko[key as MessageKey]
+    : null;

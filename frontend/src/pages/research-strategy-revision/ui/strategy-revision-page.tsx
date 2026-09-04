@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { strategyDocumentQuery } from "../../../entities/strategy";
 import {
+  ContractInspector,
   ConflictBanner,
   DirtyLeaveGuard,
   DocumentToolbar,
@@ -188,6 +189,14 @@ export const StrategyRevisionPage = () => {
             selectedPointer={search.path}
             onSelect={outline.onSelectOutlineNode}
             onCollapse={outline.onCollapseOutlineNode}
+          />
+        }
+        inspector={
+          <ContractInspector
+            source={assist.inspectorSource}
+            selectedPointer={search.path}
+            tree={outline.snapshot?.parsed.tree}
+            stale={outline.snapshot?.stale ?? false}
           />
         }
         editor={

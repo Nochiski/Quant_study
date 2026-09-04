@@ -130,7 +130,9 @@ export const StrategyIde = ({
           {t("ide.collapseInspector")}
         </Button>
       </header>
-      {inspector ?? <InspectorPlaceholder />}
+      {inspector ?? (
+        <p className="ide__outline-placeholder">{t("ide.placeholder")}</p>
+      )}
     </aside>
   );
 
@@ -416,70 +418,6 @@ export const StrategyIde = ({
 
 const capitalize = (value: string) =>
   value.charAt(0).toUpperCase() + value.slice(1);
-
-const INSPECTOR_TABS = [
-  { id: "schema", label: t("ide.inspector.schema") },
-  { id: "errors", label: t("ide.inspector.errors") },
-  { id: "plan", label: t("ide.inspector.plan") },
-] as const;
-
-type InspectorTab = (typeof INSPECTOR_TABS)[number]["id"];
-
-/** Shape of the concept's contract panel; real rows arrive with P4-02. */
-const InspectorPlaceholder = () => {
-  const idBase = useId();
-  const [tab, setTab] = useState<InspectorTab>("schema");
-  const rows: [string, ReactNode][] = [
-    [t("ide.inspector.path"), <code key="path">/risk/max_name_weight</code>],
-    [t("ide.inspector.storedValue"), "0.05"],
-    [t("ide.inspector.displayValue"), "5%"],
-    [t("ide.inspector.unit"), "ratio"],
-    [t("ide.inspector.default"), "—"],
-    [t("ide.inspector.meaning"), t("ide.inspector.meaningSample")],
-    [t("ide.inspector.stage"), t("ide.inspector.stageSample")],
-  ];
-  return (
-    <div className="ide__inspector-body">
-      <Tabs
-        label={t("ide.inspector")}
-        items={INSPECTOR_TABS}
-        value={tab}
-        onChange={setTab}
-        idBase={idBase}
-      />
-      {INSPECTOR_TABS.map((item) => (
-        <div
-          key={item.id}
-          id={panelId(idBase, item.id)}
-          role="tabpanel"
-          aria-labelledby={tabId(idBase, item.id)}
-          hidden={item.id !== tab}
-          className="ide__inspector-panel"
-        >
-          {item.id === "schema" ? (
-            <>
-              <dl className="ide__contract">
-                {rows.map(([label, value]) => (
-                  <div key={label}>
-                    <dt>{label}</dt>
-                    <dd>{value}</dd>
-                  </div>
-                ))}
-              </dl>
-              <div className="ide__card">{t("ide.placeholder")}</div>
-              <button type="button" className="ide__link" disabled>
-                {t("ide.inspector.fullSchema")} ↗
-              </button>
-            </>
-          ) : (
-            <p className="text-small">{t("ide.placeholder")}</p>
-          )}
-        </div>
-      ))}
-      <p className="text-small ide__sample-note">{t("ide.placeholder")}</p>
-    </div>
-  );
-};
 
 const RESULT_TABS = [
   { id: "preview", label: t("ide.debugger.tab.preview") },

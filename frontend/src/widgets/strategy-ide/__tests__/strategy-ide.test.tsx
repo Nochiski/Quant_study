@@ -83,12 +83,13 @@ describe("StrategyIde", () => {
     expect(within(outline).getByRole("tree")).toHaveTextContent(
       "parametersrisk",
     );
-    // view tabs + inspector tabs + results tabs; no Data→…→Execution stepper
+    // Projection views + results tabs; the caller owns inspector content and there is no
+    // Data→…→Execution stepper.
     expect(
       new Set(
         screen.getAllByRole("tablist").map((l) => l.getAttribute("aria-label")),
       ),
-    ).toEqual(new Set(["표현 전환", "계약", "중간 결과"]));
+    ).toEqual(new Set(["표현 전환", "중간 결과"]));
     expect(screen.getByRole("region", { name: "편집기" })).toBeInTheDocument();
     expect(
       screen.getByRole("complementary", { name: "계약" }),
@@ -255,20 +256,12 @@ describe("StrategyIde", () => {
     );
   });
 
-  it("lets the placeholder inspector tabs switch panels", async () => {
+  it("renders caller-owned inspector content without sample contract values", () => {
     matchMedia(false);
-    const user = userEvent.setup();
-    mount();
-    await user.click(screen.getByRole("tab", { name: "오류" }));
-    expect(screen.getByRole("tab", { name: "오류" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    for (const tab of screen.getAllByRole("tab", { selected: true })) {
-      expect(
-        document.getElementById(tab.getAttribute("aria-controls") ?? ""),
-      ).not.toBeNull();
-    }
+    mount({ inspector: <div>runtime contract projection</div> });
+    const inspector = screen.getByRole("complementary", { name: "계약" });
+    expect(inspector).toHaveTextContent("runtime contract projection");
+    expect(inspector).not.toHaveTextContent("/risk/max_name_weight");
   });
 
   it("connects every tab to a labelled panel", () => {

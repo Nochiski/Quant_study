@@ -62,6 +62,14 @@ export { RecoveryBanner } from "./ui/recovery-banner";
 export { ConflictBanner } from "./ui/conflict-banner";
 export { SourceEditor } from "./ui/source-editor";
 export { StrategyOutline } from "./ui/strategy-outline";
+export { ContractInspector } from "./ui/contract-inspector";
+export {
+  projectContractField,
+  projectContractInspector,
+  type ContractFieldProjection,
+  type ContractInspectorProjection,
+  type ContractInspectorSource,
+} from "./model/contract-inspector";
 export {
   useOutlineNavigation,
   type StrategyOutlineNavigation,

@@ -7,15 +7,17 @@
  */
 import type {
   DatasetFieldProfile,
+  FactorCatalog,
   FactorDefinition,
   FieldContract,
+  ResearchCatalog,
+  StrategyDocumentContractResponse,
+  StrategyDocumentSchema,
 } from "../../../shared/api";
 import { t } from "../../../shared/config";
 import {
   describeYamlCursor,
   loadYaml12Mapping,
-  pointerSegments,
-  templatePointer,
 } from "../../../shared/lib/yaml12";
 import type {
   EditorCompletionOption,
@@ -24,6 +26,11 @@ import type {
   EditorHoverSource,
 } from "../../../shared/ui/code-editor";
 import type { DocumentState } from "./document-state";
+import {
+  formatContractValue,
+  isSchemaContractCompatible,
+  projectContractField,
+} from "./contract-inspector";
 import {
   definingArrayFor,
   propertyOptions,
@@ -48,6 +55,43 @@ export type AssistDeps = {
   getState: () => DocumentState;
 };
 
+export type AssistMetadata = Omit<AssistDeps, "getState">;
+
+/**
+ * Projects query responses into editor assistance without flattening their wire contracts.
+ * A mismatched schema/contract pair degrades to schema-only keys/enums; contract metadata and
+ * contract-pinned catalogs stay unavailable until the coherent pair arrives.
+ */
+export const projectAssistMetadata = (
+  schema: StrategyDocumentSchema | null,
+  contract: StrategyDocumentContractResponse | null,
+  equityCatalog: ResearchCatalog | null,
+  factorCatalog: FactorCatalog | null,
+): AssistMetadata => {
+  const coherentContract =
+    contract !== null && isSchemaContractCompatible(schema, contract)
+      ? contract.contract
+      : null;
+  return {
+    schema: (schema?.schema as JsonSchema | undefined) ?? null,
+    contract: coherentContract?.fields ?? [],
+    catalogs: {
+      equityFields:
+        coherentContract !== null &&
+        equityCatalog?.snapshot?.snapshot_id ===
+          coherentContract.dataset_snapshot_id
+          ? equityCatalog.fields
+          : [],
+      factors:
+        coherentContract !== null &&
+        factorCatalog?.registry_version ===
+          coherentContract.factor_registry_version
+          ? factorCatalog.factors
+          : [],
+    },
+  };
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -58,16 +102,6 @@ const treeFor = (text: string, state: DocumentState): unknown => {
   } catch {
     return state.parse?.status === "ok" ? state.parse.tree : null;
   }
-};
-
-const valueAt = (tree: unknown, pointer: string): unknown => {
-  let current = tree;
-  for (const segment of pointerSegments(pointer)) {
-    if (Array.isArray(current)) current = current[Number(segment)];
-    else if (isRecord(current)) current = current[segment];
-    else return undefined;
-  }
-  return current;
 };
 
 const catalogLabel = (catalog: string): string => {
@@ -172,24 +206,30 @@ export const buildCompletionSource =
     if (cursor.mode === "key") {
       const options = propertyOptions(deps.schema, resolved)
         .filter((option) => !cursor.siblings.includes(option.name))
-        .map<EditorCompletionOption>((option) => ({
-          label: option.name,
-          detail: [
-            typeLabel(option.schema),
-            option.required ? t("assist.required") : null,
-            option.branch ? `${t("assist.branch")}=${option.branch}` : null,
-          ]
-            .filter(Boolean)
-            .join(" · "),
-          type: "property",
-          apply:
-            option.schema.type === "object" ||
-            option.schema.type === "array" ||
-            option.schema.$ref !== undefined ||
-            option.schema.oneOf !== undefined
-              ? `${option.name}:`
-              : `${option.name}: `,
-        }));
+        .map<EditorCompletionOption>((option) => {
+          const branches =
+            option.variants?.map((variant) => variant.branch).join("|") ??
+            option.branch;
+          return {
+            label: option.name,
+            detail: [
+              option.variants === null ? typeLabel(option.schema) : null,
+              option.required ? t("assist.required") : null,
+              branches ? `${t("assist.branch")}=${branches}` : null,
+            ]
+              .filter(Boolean)
+              .join(" · "),
+            type: "property",
+            apply:
+              option.variants === null &&
+              (option.schema.type === "object" ||
+                option.schema.type === "array" ||
+                option.schema.$ref !== undefined ||
+                option.schema.oneOf !== undefined)
+                ? `${option.name}:`
+                : `${option.name}: `,
+          };
+        });
       return options.length ? { from: cursor.from, options } : null;
     }
 
@@ -203,6 +243,9 @@ export const buildCompletionSource =
         };
       }
     }
+    // The backend union has no active branch, so any value metadata here would come from an
+    // arbitrary member. Key completion above may still name and label the possible branches.
+    if (resolved.propertyVariants !== null) return null;
     const identifiers = identifierOptions(
       deps.schema,
       resolved,
@@ -221,21 +264,6 @@ export const buildCompletionSource =
     return values.length ? { from: cursor.from, options: values } : null;
   };
 
-const contractFor = (
-  contract: readonly FieldContract[],
-  pointer: string,
-  kind: string | null,
-): FieldContract | undefined => {
-  const template = templatePointer(pointer);
-  const rows = contract.filter((row) => row.pointer === template);
-  return (
-    rows.find((row) => row.branch === kind) ?? rows.find((row) => !row.branch)
-  );
-};
-
-const formatValue = (value: unknown): string =>
-  typeof value === "string" ? value : JSON.stringify(value);
-
 /** Hover lines for a pointer: the contract row when there is one, else the schema node. */
 export const describePointer = (
   deps: Pick<AssistDeps, "schema" | "contract">,
@@ -243,39 +271,40 @@ export const describePointer = (
   tree: unknown,
 ): string[] | null => {
   if (deps.schema === null) return null;
-  const resolved = schemaAt(deps.schema, pointer, tree);
-  if (!resolved) return null;
-  const parentValue = valueAt(tree, pointer.slice(0, pointer.lastIndexOf("/")));
-  const kind =
-    isRecord(parentValue) && typeof parentValue.kind === "string"
-      ? parentValue.kind
-      : null;
-  const row = contractFor(deps.contract, pointer, kind);
-  const node = resolved.node;
-  const lines = [templatePointer(pointer)];
-  lines.push(
-    `${t("assist.type")}: ${typeLabel(node)}${resolved.nullable ? " | null" : ""}`,
-  );
-  lines.push(
-    (row?.required ?? false) ? t("assist.required") : t("assist.optional"),
-  );
-  if (row?.has_default)
-    lines.push(`${t("assist.default")}: ${formatValue(row.default)}`);
-  if (row?.unit) {
+  const field = projectContractField(deps.schema, deps.contract, pointer, tree);
+  if (field === null) return null;
+  const lines = [field.templatePointer];
+  if (field.unresolvedBranches !== null) {
+    lines.push(t("contract.branchRequired"));
     lines.push(
-      `${t("assist.unit")}: ${row.unit}${row.display_unit ? ` (${t("assist.displayUnit")} ${row.display_unit})` : ""}`,
+      `${t("contract.variants")}: ${field.unresolvedBranches.join(", ")}`,
+    );
+    return lines;
+  }
+  lines.push(
+    `${t("assist.type")}: ${field.type}${field.nullable ? " | null" : ""}`,
+  );
+  if (field.required !== null)
+    lines.push(field.required ? t("assist.required") : t("assist.optional"));
+  if (field.hasDefault)
+    lines.push(
+      `${t("assist.default")}: ${formatContractValue(field.defaultValue) ?? "—"}`,
+    );
+  if (field.unit) {
+    lines.push(
+      `${t("assist.unit")}: ${field.unit}${field.displayUnit ? ` (${t("assist.displayUnit")} ${field.displayUnit})` : ""}`,
     );
   }
-  if (row?.applied_stage)
-    lines.push(`${t("assist.stage")}: ${row.applied_stage}`);
-  if (row?.example !== undefined && row.example !== null)
-    lines.push(`${t("assist.example")}: ${formatValue(row.example)}`);
-  const catalog = node["x-catalog"];
-  if (typeof catalog === "string")
-    lines.push(`${t("assist.source")}: ${catalogLabel(catalog)}`);
-  const reference = node["x-reference"];
-  if (typeof reference === "string")
-    lines.push(`${t("assist.source")}: ${referenceLabel(reference)}`);
+  if (field.appliedStage)
+    lines.push(`${t("assist.stage")}: ${field.appliedStage}`);
+  if (field.hasExample)
+    lines.push(
+      `${t("assist.example")}: ${formatContractValue(field.example) ?? "—"}`,
+    );
+  if (field.catalog)
+    lines.push(`${t("assist.source")}: ${catalogLabel(field.catalog)}`);
+  if (field.reference)
+    lines.push(`${t("assist.source")}: ${referenceLabel(field.reference)}`);
   return lines;
 };
 

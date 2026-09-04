@@ -17,14 +17,32 @@ export type ResolvedSchema = {
   nullable: boolean;
   /** Set when the node is a discriminated union the document does not resolve (no `kind`). */
   branches: { kind: string; node: JsonSchema }[] | null;
+  /** Set when this property has no single safe schema until a union branch is selected. */
+  propertyVariants: PropertyVariant[] | null;
+  /** Requiredness shared by every applicable backend schema branch, else unknown. */
+  propertyRequired: boolean | null;
+};
+
+export type PropertyVariant = {
+  branch: string;
+  schema: JsonSchema;
+  required: boolean;
 };
 
 export type PropertyOption = {
   name: string;
   schema: JsonSchema;
-  required: boolean;
+  required: boolean | null;
   /** Union member this property belongs to when the union is unresolved. */
   branch: string | null;
+  /** Branch contracts when availability, requiredness or schema differs. */
+  variants: PropertyVariant[] | null;
+};
+
+export type DiscriminatorInfo = {
+  propertyName: string;
+  variants: string[];
+  selected: string | null;
 };
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -88,7 +106,13 @@ const resolveUnion = (
   const members = Array.isArray(base.node.oneOf)
     ? base.node.oneOf.filter(isObject)
     : null;
-  if (!members) return { ...base, branches: null };
+  if (!members)
+    return {
+      ...base,
+      branches: null,
+      propertyVariants: null,
+      propertyRequired: null,
+    };
   const branches = members.map((member) => ({
     kind: kindOf(root, member) ?? "",
     node: resolveRef(root, member),
@@ -98,8 +122,20 @@ const resolveUnion = (
   const chosen =
     kind === null ? undefined : branches.find((b) => b.kind === kind);
   if (chosen)
-    return { node: chosen.node, nullable: base.nullable, branches: null };
-  return { node: base.node, nullable: base.nullable, branches };
+    return {
+      node: chosen.node,
+      nullable: base.nullable,
+      branches: null,
+      propertyVariants: null,
+      propertyRequired: null,
+    };
+  return {
+    node: base.node,
+    nullable: base.nullable,
+    branches,
+    propertyVariants: null,
+    propertyRequired: null,
+  };
 };
 
 /**
@@ -110,26 +146,46 @@ const walk = (
   root: JsonSchema,
   pointer: string,
   tree: unknown,
-): { node: JsonSchema; value: unknown } | null => {
+): {
+  node: JsonSchema;
+  value: unknown;
+  propertyVariants: PropertyVariant[] | null;
+  propertyRequired: boolean | null;
+} | null => {
   const segments = pointerSegments(pointer);
   let current: JsonSchema = root;
   let value: unknown = tree;
-  for (const segment of segments) {
+  let propertyRequired: boolean | null = null;
+  for (const [index, segment] of segments.entries()) {
     const here = resolveUnion(root, current, value);
     const node = here.node;
     if (node.type === "array" && isObject(node.items)) {
       if (!/^\d+$/.test(segment)) return null;
       current = node.items;
       value = Array.isArray(value) ? value[Number(segment)] : undefined;
+      propertyRequired = null;
       continue;
     }
     const properties = collectProperties(root, here);
     const property = properties.find((p) => p.name === segment);
     if (!property) return null;
+    const childValue = isObject(value) ? value[segment] : undefined;
+    if (property.variants !== null) {
+      // Traversing deeper would arbitrarily choose a branch-specific shape. The exact property
+      // itself remains selectable so consumers can explain why `kind` must be chosen first.
+      if (index !== segments.length - 1) return null;
+      return {
+        node: property.schema,
+        value: childValue,
+        propertyVariants: property.variants,
+        propertyRequired: property.required,
+      };
+    }
     current = property.schema;
-    value = isObject(value) ? value[segment] : undefined;
+    value = childValue;
+    propertyRequired = property.required;
   }
-  return { node: current, value };
+  return { node: current, value, propertyVariants: null, propertyRequired };
 };
 
 export const schemaAt = (
@@ -138,7 +194,19 @@ export const schemaAt = (
   tree: unknown,
 ): ResolvedSchema | null => {
   const end = walk(root, pointer, tree);
-  return end ? resolveUnion(root, end.node, end.value) : null;
+  if (end === null) return null;
+  if (end.propertyVariants !== null)
+    return {
+      node: end.node,
+      nullable: false,
+      branches: null,
+      propertyVariants: end.propertyVariants,
+      propertyRequired: end.propertyRequired,
+    };
+  return {
+    ...resolveUnion(root, end.node, end.value),
+    propertyRequired: end.propertyRequired,
+  };
 };
 
 /** Every `kind` a union at `pointer` accepts, ignoring the kind the document currently holds. */
@@ -152,6 +220,47 @@ export const unionKindsAt = (
   return resolved?.branches
     ? resolved.branches.map((b) => b.kind).filter((k) => k !== "")
     : [];
+};
+
+/** Discriminator contract at a path, including the active document branch when present. */
+export const discriminatorAt = (
+  root: JsonSchema,
+  pointer: string,
+  tree: unknown,
+): DiscriminatorInfo | null => {
+  const end = walk(root, pointer, tree);
+  if (end === null) return null;
+  const base = unwrapNullable(root, end.node);
+  if (!Array.isArray(base.node.oneOf)) return null;
+  const discriminator = isObject(base.node.discriminator)
+    ? base.node.discriminator
+    : null;
+  if (!discriminator || typeof discriminator.propertyName !== "string")
+    return null;
+  const propertyName = discriminator.propertyName;
+  const variants = base.node.oneOf
+    .filter(isObject)
+    .map((member) => {
+      const branch = resolveRef(root, member);
+      const properties = isObject(branch.properties) ? branch.properties : {};
+      const discriminatorProperty = isObject(properties[propertyName])
+        ? properties[propertyName]
+        : null;
+      return discriminatorProperty?.const;
+    })
+    .filter((value): value is string => typeof value === "string");
+  if (variants.length === 0) return null;
+  const documentKind =
+    isObject(end.value) && typeof end.value[propertyName] === "string"
+      ? end.value[propertyName]
+      : null;
+  // An unknown value does not select a branch. The raw document value is still available
+  // through the field projection, while union metadata remains explicitly unresolved.
+  const selected =
+    documentKind !== null && variants.includes(documentKind)
+      ? documentKind
+      : null;
+  return { propertyName, variants, selected };
 };
 
 const collectProperties = (
@@ -168,23 +277,56 @@ const collectProperties = (
         schema,
         required: required.includes(name),
         branch,
+        variants: null,
       }));
   };
   if (resolved.branches === null) return fromNode(resolved.node, null);
-  const seen = new Map<string, PropertyOption & { kinds: string[] }>();
+  const seen = new Map<
+    string,
+    {
+      name: string;
+      variants: PropertyVariant[];
+    }
+  >();
   for (const branch of resolved.branches) {
     for (const option of fromNode(resolveRef(root, branch.node), branch.kind)) {
       const existing = seen.get(option.name);
-      if (existing) existing.kinds.push(branch.kind);
-      else seen.set(option.name, { ...option, kinds: [branch.kind] });
+      const variant = {
+        branch: branch.kind,
+        schema: option.schema,
+        required: option.required,
+      };
+      if (existing) existing.variants.push(variant);
+      else seen.set(option.name, { name: option.name, variants: [variant] });
     }
   }
-  // A property every branch shares (node_id, the `kind` discriminator) is not branch-specific.
+  const sameSchema = (left: JsonSchema, right: JsonSchema): boolean =>
+    JSON.stringify(resolveRef(root, left)) ===
+    JSON.stringify(resolveRef(root, right));
+  // A property is branch-independent only when every branch declares the same schema and
+  // requiredness. Keeping the first schema for any other case would fabricate a contract.
   const total = resolved.branches.length;
-  return [...seen.values()].map(({ kinds, ...option }) => ({
-    ...option,
-    branch: kinds.length === total ? null : kinds.join("|"),
-  }));
+  return [...seen.values()].map(({ name, variants }) => {
+    const first = variants[0];
+    const commonRequired =
+      variants.length === total &&
+      variants.every((variant) => variant.required === first.required)
+        ? first.required
+        : null;
+    const shared =
+      commonRequired !== null &&
+      variants.every((variant) => sameSchema(variant.schema, first.schema));
+    return {
+      name,
+      schema: first.schema,
+      required: commonRequired,
+      branch:
+        variants.length === total
+          ? null
+          : variants.map((variant) => variant.branch).join("|"),
+      variants: shared ? null : variants,
+    };
+  });
 };
 
 /** Properties a mapping at this schema node may contain (union → every branch, labelled). */
@@ -195,6 +337,7 @@ export const propertyOptions = (
 
 /** Scalar values the schema itself enumerates: enum, const, booleans, union kinds. */
 export const valueOptions = (resolved: ResolvedSchema): string[] => {
+  if (resolved.propertyVariants !== null) return [];
   const node = resolved.node;
   if (Array.isArray(node.enum)) return node.enum.map(String);
   if (node.const !== undefined) return [String(node.const)];

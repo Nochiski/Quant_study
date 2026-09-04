@@ -184,6 +184,13 @@ const ko = {
   "execution.slippage": "슬리피지 (bps)",
   "execution.lookAhead":
     "T일 종가로 만든 타깃은 T+1 세션이 열리기 전에는 주문으로 변환되지 않습니다.",
+  "ui.tabs.view": "표현 전환",
+  "ui.splitHandle.resize": "패널 크기 조절",
+  "ui.emptyState.noStrategies": "저장된 전략이 없습니다",
+  "ui.status.ok": "정상",
+  "ui.status.warn": "주의",
+  "ui.status.error": "오류",
+  "ui.status.info": "안내",
 } as const;
 
 export type MessageKey = keyof typeof ko;
@@ -377,6 +384,13 @@ export const messages = {
     "execution.slippage": "Slippage (bps)",
     "execution.lookAhead":
       "A target built with the T close cannot become an order before the T+1 session opens.",
+    "ui.tabs.view": "Switch view",
+    "ui.splitHandle.resize": "Resize panel",
+    "ui.emptyState.noStrategies": "No saved strategies",
+    "ui.status.ok": "OK",
+    "ui.status.warn": "Warning",
+    "ui.status.error": "Error",
+    "ui.status.info": "Info",
   } satisfies Record<MessageKey, string>,
 } as const;
 

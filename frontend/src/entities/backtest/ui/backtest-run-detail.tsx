@@ -186,12 +186,12 @@ export const BacktestRunDetail = ({
           series={[
             {
               label: "Strategy",
-              color: "#3be1b3",
+              color: "var(--chart-series-1)",
               values: result.series.equity.map((item) => item.equity),
             },
             {
               label: "Benchmark",
-              color: "#4388ff",
+              color: "var(--chart-series-2)",
               values: result.series.equity.map((item) => item.benchmark_equity),
             },
           ]}
@@ -201,7 +201,7 @@ export const BacktestRunDetail = ({
           series={[
             {
               label: "Drawdown",
-              color: "#ff7878",
+              color: "var(--chart-series-3)",
               values: result.series.drawdown.map((item) => item.drawdown),
             },
           ]}
@@ -211,7 +211,7 @@ export const BacktestRunDetail = ({
           series={[
             {
               label: "Rolling Sharpe",
-              color: "#b69cff",
+              color: "var(--chart-series-4)",
               values: result.series.rolling_sharpe.map((item) => item.value),
             },
           ]}
@@ -221,14 +221,14 @@ export const BacktestRunDetail = ({
           series={[
             {
               label: "Gross",
-              color: "#65c7ff",
+              color: "var(--chart-series-5)",
               values: result.artifacts.snapshots.map(
                 (item) => item.gross_exposure,
               ),
             },
             {
               label: "Net",
-              color: "#f4c35b",
+              color: "var(--chart-series-6)",
               values: result.artifacts.snapshots.map(
                 (item) => item.net_exposure,
               ),

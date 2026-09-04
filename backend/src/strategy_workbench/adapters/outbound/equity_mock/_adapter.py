@@ -16,6 +16,10 @@ from strategy_workbench.application.factor_research.facade.ports import (
 from strategy_workbench.application.portfolio_design.facade.ports import (
     PortfolioObservationQuery,
     PortfolioObservationSet,
+    RawFieldValue,
+    RawObservation,
+    RawObservationQuery,
+    RawObservationSet,
 )
 from strategy_workbench.domain.backtest.facade.runs import DataWarning, WarningSeverity
 from strategy_workbench.domain.equity.facade.research_data import (
@@ -238,6 +242,64 @@ class MockEquityDataAdapter:
             observations=observations,
         )
 
+    def load_raw_observations(self, query: RawObservationQuery) -> RawObservationSet:
+        """Raw PIT panel for the truthful pipeline (P1.5-03): fields, membership, sector, history.
+
+        A field observed at session i becomes available at session i + lag (the profile's
+        recommended lag), so the value visible at `as_of` is the one effective `lag` sessions
+        earlier and `available_date` is `as_of` itself. Values that would only become available
+        after `as_of` are omitted, never leaked.
+        """
+        history, requested = _sessions_with_history(
+            query.start, query.end, query.minimum_history_sessions
+        )
+        sessions = history + requested
+        # Contract ordering: (as_of, security_id) ascending, independent of fixture order.
+        security_ids = tuple(
+            sorted(membership.security.security_id for membership in self._memberships)
+        )
+        lag_by_field = {
+            profile.field_id: profile.recommended_lag_sessions for profile in self._profiles
+        }
+        observations: list[RawObservation] = []
+        for session_index, session in enumerate(sessions):
+            requested_index = session_index - len(history)
+            for security_index, security_id in enumerate(security_ids):
+                fields: list[RawFieldValue] = []
+                for field_id in query.field_ids:
+                    effective_index = session_index - lag_by_field.get(field_id, 0)
+                    if effective_index < 0:
+                        continue  # not yet available at this session: omitted, not defaulted
+                    fields.append(
+                        RawFieldValue(
+                            field_id=field_id,
+                            value=_factor_field_value(
+                                field_id,
+                                security_index=security_index,
+                                session_index=effective_index,
+                            ),
+                            available_date=session,
+                        )
+                    )
+                observations.append(
+                    RawObservation(
+                        as_of=session,
+                        security_id=security_id,
+                        # Same deterministic PIT membership story as the portfolio panel: the
+                        # third name enters after two requested sessions and never leaks backward.
+                        universe_member=security_index < 2 or requested_index >= 2,
+                        fields=tuple(fields),
+                        sector_id=("technology", "industrial", "consumer")[security_index % 3],
+                        previous_weight=0.0,
+                    )
+                )
+        return RawObservationSet(
+            data_snapshot_id=self._snapshot.snapshot_id,
+            sessions=requested,
+            history_sessions=history,
+            observations=tuple(observations),
+        )
+
     def load_backtest_dataset(self, query: BacktestDataQuery) -> BacktestDataset:
         """Generate deterministic OHLCV until the real Equity DB adapter is selected."""
         sessions = _business_sessions(query.start, query.end)
@@ -339,6 +401,20 @@ def _factor_sessions(query: FactorObservationQuery) -> tuple[date, ...]:
             history.append(cursor)
         cursor -= timedelta(days=1)
     return tuple((*reversed(history), *requested))
+
+
+def _sessions_with_history(
+    start: date, end: date, history_sessions: int
+) -> tuple[tuple[date, ...], tuple[date, ...]]:
+    """Business sessions in [start, end] plus `history_sessions` business days before start."""
+    history: list[date] = []
+    cursor = start - timedelta(days=1)
+    while len(history) < history_sessions:
+        if cursor.weekday() < 5:
+            history.append(cursor)
+        cursor -= timedelta(days=1)
+    history.reverse()
+    return tuple(history), _business_sessions(start, end)
 
 
 def _business_sessions(start: date, end: date) -> tuple[date, ...]:

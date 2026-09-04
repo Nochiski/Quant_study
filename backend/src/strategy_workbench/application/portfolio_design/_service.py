@@ -33,6 +33,7 @@ from strategy_workbench.domain.factor.facade.evaluation import (
     FactorValue,
     evaluate_factor_graph,
 )
+from strategy_workbench.domain.factor.facade.expression import NodeValueType
 from strategy_workbench.domain.factor.facade.planning import (
     FactorExecutionPlan,
     InvalidFactorGraphError,
@@ -160,6 +161,7 @@ class PortfolioDesignService:
             )
         )
         plans = self._plans(spec, metadata)
+        _reject_non_numeric_factor_outputs(spec, plans)
         _reject_saved_references(spec, plans)
         raw = self._observation_source.load_raw_observations(
             RawObservationQuery(
@@ -286,6 +288,33 @@ def _reject_saved_references(spec: StrategySpec, plans: dict[str, FactorExecutio
         for index, factor in enumerate(spec.factors.factors)
         for plan in (plans[factor.factor_id],)
         if plan.referenced_factor_ids or plan.referenced_subgraph_ids
+    )
+    if issues:
+        raise InvalidPortfolioRequestError(StrategyValidation(valid=False, issues=issues))
+
+
+def _reject_non_numeric_factor_outputs(
+    spec: StrategySpec, plans: dict[str, FactorExecutionPlan]
+) -> None:
+    """A FactorSignal is a per-security score, not an arbitrary typed expression.
+
+    Generic factor explain remains free to describe scalar, boolean, and group outputs. The
+    executable portfolio boundary accepts only numeric series: group/boolean values are not
+    scores, and a scalar cannot distinguish securities. This check must inspect the compiled plan
+    so it consumes the same metadata-derived contract as execution.
+    """
+    issues = tuple(
+        semantic_issue(
+            "strategy.expression.output_type",
+            f"factors.factors.{factor_index}.graph.output_node_id",
+            "FactorSignal output must be numeric_series for portfolio/backtest execution: "
+            f"actual={output.output_type!r}",
+            node_id=plan.output_node_id,
+        )
+        for factor_index, factor in enumerate(spec.factors.factors)
+        for plan in (plans[factor.factor_id],)
+        for output in (next(step for step in plan.steps if step.node_id == plan.output_node_id),)
+        if output.output_type != NodeValueType.NUMERIC_SERIES.value
     )
     if issues:
         raise InvalidPortfolioRequestError(StrategyValidation(valid=False, issues=issues))

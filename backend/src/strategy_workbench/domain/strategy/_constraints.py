@@ -282,6 +282,7 @@ EXPRESSION_CODES: frozenset[str] = frozenset(
         "strategy.expression.lag_periods",
         "strategy.expression.parameter_type",
         "strategy.expression.reference_unsupported",
+        "strategy.expression.output_type",
     }
 )
 

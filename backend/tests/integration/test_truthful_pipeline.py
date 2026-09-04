@@ -248,6 +248,88 @@ def test_group_field_contract_is_shared_by_explain_portfolio_and_backtest() -> N
     assert explain_valid.status_code == preview_valid.status_code == 200
     assert explain_valid.json()["validation"]["valid"] is True
     assert backtest_valid.status_code == 202, backtest_valid.text
+    run_id = backtest_valid.json()["run"]["run_id"]
+    state: dict[str, Any] = {}
+    for _ in range(200):
+        state = client.get(f"/api/v1/backtests/{run_id}").json()
+        if state["status"] in {"completed", "failed", "cancelled"}:
+            break
+        time.sleep(0.025)
+    assert state["status"] == "completed", state
+    result = client.get(f"/api/v1/backtests/{run_id}/result")
+    assert result.status_code == 200
+    assert (
+        result.json()["manifest"]["target_tape_hash"] == preview_valid.json()["tape"]["tape_hash"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("graph", "output_type"),
+    (
+        (
+            {
+                "nodes": [
+                    {
+                        "node_id": "sector",
+                        "field_id": "classification.sector",
+                        "kind": "field",
+                    }
+                ],
+                "output_node_id": "sector",
+                "missing_policy": "drop",
+            },
+            "group_series",
+        ),
+        (
+            {
+                "nodes": [
+                    {"node_id": "close", "field_id": "price.close", "kind": "field"},
+                    {"node_id": "zero", "value": 0.0, "kind": "constant"},
+                    {
+                        "node_id": "positive",
+                        "operator": "gt",
+                        "left_node_id": "close",
+                        "right_node_id": "zero",
+                        "kind": "comparison",
+                    },
+                ],
+                "output_node_id": "positive",
+                "missing_policy": "drop",
+            },
+            "boolean_series",
+        ),
+        (
+            {
+                "nodes": [{"node_id": "constant", "value": 1.0, "kind": "constant"}],
+                "output_node_id": "constant",
+                "missing_policy": "drop",
+            },
+            "scalar",
+        ),
+    ),
+)
+def test_non_numeric_factor_signal_output_is_explainable_but_not_executable(
+    graph: dict[str, Any], output_type: str
+) -> None:
+    client = TestClient(build_http_app())
+    template = client.get("/api/v1/strategies/template").json()
+    factor = template["factors"]["factors"][0]
+    spec = {**template, "factors": {"factors": [{**factor, "graph": graph}]}}
+
+    explanation = client.post("/api/v1/factors/explain", json={"graph": graph})
+    preview = client.post("/api/v1/portfolio/preview", json={"spec": spec})
+    backtest = client.post("/api/v1/backtests", json={"strategy": spec, "core": "python"})
+
+    assert explanation.status_code == 200
+    assert explanation.json()["validation"]["valid"] is True
+    assert explanation.json()["plan"]["steps"][-1]["output_type"] == output_type
+    assert preview.status_code == backtest.status_code == 422
+    for response in (preview, backtest):
+        detail = response.json()["detail"]
+        assert detail["code"] == "portfolio.strategy.invalid"
+        assert {item["code"] for item in detail["validation"]["issues"]} == {
+            "strategy.expression.output_type"
+        }
 
 
 class _DriftedMetadata:

@@ -943,6 +943,21 @@ Phase 5 종료 기준:
 
 위 시나리오가 통과한 뒤 P0-01에서 승인한 YAML-first 전환과 migration acceptance를 확인한다. Quick/Advanced editor 삭제는 roadmap·규칙 갱신과 사용자 migration 조건이 모두 충족된 경우에만 별도 cleanup commit으로 수행한다. 조건이 충족되지 않으면 legacy route를 유지하고 제거 작업은 별도 initiative로 넘긴다.
 
+### P6-07 — Root development entrypoints
+
+저장소 루트의 개발 명령은 실행 위치만 위임한다. frontend Vite 설정은
+`frontend/package.json`, backend ASGI target·host·port·reload 설정은 backend bootstrap이
+각각 단일 owner다. 루트 wrapper가 이 설정이나 runtime dependency를 복제하지 않는다.
+
+Acceptance:
+
+- 저장소 루트의 `npm run dev`가 `frontend`의 Vite 개발 서버를 실행한다.
+- 저장소 루트와 `backend` 디렉터리 모두에서 `uv run server`가 같은 FastAPI/Uvicorn
+  development server를 실행한다.
+- 각 명령은 표준 입출력과 종료 신호를 하위 프로세스에 전달하고 non-zero 종료를 숨기지 않는다.
+- README quick start와 실제 HTTP smoke test가 명령 계약을 고정한다.
+- production process manager, Docker, 양쪽 서버 동시 실행은 이 PR의 범위가 아니다.
+
 Phase 6 종료 기준:
 
 - latest main에서 backend/frontend CI와 browser E2E가 모두 통과한다.

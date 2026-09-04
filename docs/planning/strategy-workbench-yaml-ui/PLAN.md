@@ -1,16 +1,16 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: APPROVED
-current_phase: P4
-current_pr: P4-03
-active_prs: [P4-03]
-parallel_window: [P4-03]
-last_updated: 2026-09-05T02:27:12+09:00
-planned_prs: 47
-merged_prs: 32
+project_status: IN_PROGRESS
+current_phase: P6
+current_pr: P6-07
+active_prs: [P6-07]
+parallel_window: [P6-07]
+last_updated: 2026-09-05T02:32:33+09:00
+planned_prs: 48
+merged_prs: 33
 approved_prs: 33
-progress_percent: 68
+progress_percent: 69
 ---
 
 # YAML Strategy Workbench 실시간 진행 계획
@@ -22,13 +22,13 @@ progress_percent: 68
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `APPROVED` |
-| Current phase | `P4` |
-| Current/next PR | `P4-03` |
-| Active PR | `P4-03` |
-| Progress | `32 / 47 merged (68%)` |
-| Approved | `33 / 47` |
-| Aggregated at | `2026-09-05 02:27 KST` |
+| Project status | `IN_PROGRESS` |
+| Current phase | `P6` |
+| Current/next PR | `P6-07` |
+| Active PR | `P6-07` |
+| Progress | `33 / 48 merged (69%)` |
+| Approved | `33 / 48` |
+| Aggregated at | `2026-09-05 02:32 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -76,26 +76,26 @@ progress_percent: 68
 | P1.5 | Backtest Correctness Gate | 5 | 5 | `MERGED` |
 | P2 | App Shell and visual foundation | 4 | 4 | `MERGED` |
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
-| P4 | Outline, Contract, Projections | 8 | 2 | `APPROVED` |
+| P4 | Outline, Contract, Projections | 8 | 3 | `WAITING` |
 | P5 | Truthful Trace UI | 3 | 0 | `WAITING` |
-| P6 | Professional release and migration | 6 | 0 | `WAITING` |
-| **Total** |  | **47** | **32** | **68%** |
+| P6 | Professional release and migration | 7 | 0 | `IN_PROGRESS` |
+| **Total** |  | **48** | **33** | **69%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
 
 | 항목 | 값 |
 |---|---|
-| PR | `P4-03` Problems panel, filter, editor jump, [#55](https://github.com/Nochiski/Quant_study/pull/55) APPROVED |
-| Intent | backend compile diagnostics 배열을 단일 SoT로 유지하고 frontend는 exact dedupe·filter·표시 projection과 editor navigation만 소유한다 |
-| Acceptance | syntax/structural/semantic/capability filter, error/warning 분리, problem 선택 시 editor jump, pointer/node ID 복사, 동일 diagnostic dedupe |
-| Non-goals | 진단 생성·우선순위 재판정, execution plan(P4-04), backend contract 변경, source mutation |
-| Branch/worktree | `feat/p4-03-problems-panel` (`Quant_study-p4-03`) |
-| Base SHA | `3284fe0` (P4-02 merge main) |
-| Head SHA | `752ed60` (initial APPROVE의 P2 hardening 포함 code diff freeze; 이후 PLAN 상태 커밋만 허용) |
-| Diff stat | main 대비 8 files, +871/−81 (PLAN 1, projection·UI·CSS·i18n·tests 7) |
-| Focused tests | problem projection·panel·compile navigation 18 passed |
-| Full gate | frontend typecheck·lint·vitest 270·build 통과, editor chunk gzip 136.53 kB, `git diff --check` 통과 |
+| PR | `P6-07` Root development entrypoints — IN_PROGRESS |
+| Intent | 저장소 루트 명령은 경로 위임만 담당하고 Vite/Uvicorn 실행 설정은 각 frontend/backend owner 한 곳에 유지한다 |
+| Acceptance | root `npm run dev` → frontend Vite, root·backend `uv run server` → FastAPI/Uvicorn reload server, 인자·stdio·종료 신호 전달, 문서·smoke test |
+| Non-goals | production process manager, Docker, port 자동 할당, frontend/backend 동시 실행 명령, runtime dependency 재정의 |
+| Branch/worktree | `feat/p6-07-dev-entrypoints` (`Quant_study-p6-07`) |
+| Base SHA | `ebc16c2` (P4-03 merge main) |
+| Head SHA | 구현 중 |
+| Diff stat | 구현 중 |
+| Focused tests | 구현 후 기록 |
+| Full gate | 구현 후 기록 |
 
 ---
 
@@ -198,7 +198,7 @@ Phase exit:
 |---|---|---|---|---|---|
 | [x] | `P4-01` | Parameters를 포함한 Strategy Outline과 cursor 연동 | P3-03 | `MERGED` | [#52](https://github.com/Nochiski/Quant_study/pull/52) · `review_p4_01` APPROVE |
 | [x] | `P4-02` | Backend metadata 기반 Contract Inspector | P3-03, P1-05 | `MERGED` | [#53](https://github.com/Nochiski/Quant_study/pull/53) · `review_p4_02` APPROVE |
-| [ ] | `P4-03` | Problems panel, filter, editor jump | P3-04 | `APPROVED` | [#55](https://github.com/Nochiski/Quant_study/pull/55) · `review_p4_03` APPROVE |
+| [x] | `P4-03` | Problems panel, filter, editor jump | P3-04 | `MERGED` | [#55](https://github.com/Nochiski/Quant_study/pull/55) · `review_p4_03` APPROVE |
 | [ ] | `P4-04` | Backend Execution Plan과 source/graph 연동 | P3-05 | `WAITING` | — |
 | [ ] | `P4-05` | Canonical node snippet insertion | P3-02, P1-05 | `WAITING` | — |
 | [ ] | `P4-06` | Read-only canonical JSON과 Form projection | P3-05 | `WAITING` | — |
@@ -235,6 +235,7 @@ Phase exit:
 | [ ] | `P6-04` | Large spec 성능·접근성·i18n과 soft dark theme | P3-05, P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P5-03 | `WAITING` | — |
 | [ ] | `P6-05` | Playwright/visual regression infrastructure와 CI | P2-03, P3-05, P6-04 | `WAITING` | — |
 | [ ] | `P6-06` | 전체 E2E, migration gate, 조건부 legacy cleanup | P6-01, P6-02, P6-03, P6-04, P6-05 | `WAITING` | — |
+| [ ] | `P6-07` | Root frontend/backend development entrypoints | P0-02, P0-03 | `IN_PROGRESS` | — |
 
 Phase exit:
 
@@ -288,7 +289,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
-| P4-03 | problem projection·panel·compile navigation 18 passed | frontend typecheck·lint·vitest 270·build | generated API 변경 없음 | 4종 toggle filter·error/warning section·정확한 dedupe·jump·빈 root pointer·pointer/node ID copy·stale/copy race/failure 접근성 검증 | [#55](https://github.com/Nochiski/Quant_study/pull/55) code HEAD reviewer 승인; 최신 PLAN-only CI merge gate 대기 | 2026-09-05 |
+| P4-03 | problem projection·panel·compile navigation 18 passed | frontend typecheck·lint·vitest 270·build | generated API 변경 없음 | 4종 toggle filter·error/warning section·정확한 dedupe·jump·빈 root pointer·pointer/node ID copy·stale/copy race/failure 접근성 검증 | [#55](https://github.com/Nochiski/Quant_study/pull/55) latest backend/frontend 중복 CI 4개 pass, MERGED (`ebc16c2`) | 2026-09-05 |
 | P4-02 | Contract Inspector·schema assist·schema navigator·outline·IDE 56 passed | frontend typecheck·lint·vitest 262·build | generated API 변경 없음 | missing/unknown FactorNode·Parameter union·상이 requiredness와 이전 P1 4건 회귀를 독립 reviewer 재확인 | [#53](https://github.com/Nochiski/Quant_study/pull/53) latest backend/frontend 중복 CI 4개 pass, MERGED (`3284fe0`) | 2026-09-05 |
 | P4-01 | editor selection·outline projection/navigation·router·document route 38 passed | frontend typecheck·lint·vitest 232·build | 해당 없음 | runtime schema/source map/URL owner, exact sourceVersion·route selection 귀속, RFC 6901 검증, visible roving tabindex·ARIA ownership | [#52](https://github.com/Nochiski/Quant_study/pull/52) latest duplicate backend/frontend 4 pass, MERGED | 2026-09-05 |
 | P3-07 | backend conflict contract 16, frontend document routes 14 passed | backend ruff·pyright; frontend typecheck·lint·vitest 221·build | OpenAPI/generated SDK deterministic | source 보존, delayed 409 폐기, 서버본 실제 이동, copy/diff 실패, kind i18n 검토 | [#48](https://github.com/Nochiski/Quant_study/pull/48) 수정 후 backend/frontend 중복 실행 4개 pass, MERGED | 2026-09-04 |
@@ -320,6 +321,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | #55 P4-03을 독립 reviewer 최종 승인과 latest backend/frontend CI 4개 통과 후 main에 병합(`ebc16c2`). 사용자 요청의 root `npm run dev`·`uv run server`를 SoT 중복 없이 제공하기 위해 P6-07을 추가하고 전용 worktree에서 시작 | 13.6 merge gate·사용자 추가 범위·개발 진입점 책임분리 |
 | 2026-09-05 KST | Codex | `review_p4_03` 재검토가 root pointer 원본/표시 분리와 clipboard request ordering, 이전 acceptance 회귀를 확인해 최종 APPROVE(P0 0/P1 0). P4-03을 APPROVED로 전환하고 최신 HEAD CI merge gate 확인 단계로 이동 | 동일 reviewer 승인·SoT/책임분리·13.6 merge gate |
 | 2026-09-05 KST | Codex | `review_p4_03`이 P0 0/P1 0으로 APPROVE. 비차단 P2도 `752ed60`에서 선제 보강하여 빈 root JSON Pointer를 `"" (문서 루트)`로 정확히 표시·복사하고 request sequence로 늦은 clipboard 응답의 최신 상태 덮어쓰기를 차단. focused 18·전체 270·typecheck·lint·build 통과 후 동일 reviewer 재검토 요청 | 정확한 pointer 의미·async UI 최신 요청 owner·동일 reviewer 재검토 |
 | 2026-09-05 KST | Codex | P4-03 code diff를 `454282b`로 freeze하고 #55 공개. PLAN-only 상태 커밋 외 변경을 막고 `review_p4_03`에 SoT·책임분리·dedupe·stale·clipboard·접근성·P3-04 회귀 독립 검토를 배정 | 13.2~13.4·PR별 독립 reviewer gate |

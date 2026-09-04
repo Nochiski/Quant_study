@@ -42,7 +42,9 @@ def test_warning_only_validation_keeps_spec_and_hash(monkeypatch: pytest.MonkeyP
         "validate_strategy",
         lambda spec: StrategyValidation(valid=True, issues=(warning,)),
     )
-    service = StrategyAuthoringService(RuamelDocumentCodec())
+    service = StrategyAuthoringService(
+        RuamelDocumentCodec(), factor_registry_version="r", dataset_snapshot_id=lambda: "s"
+    )
 
     compiled = service.compile(
         CompileRequest(
@@ -57,3 +59,16 @@ def test_warning_only_validation_keeps_spec_and_hash(monkeypatch: pytest.MonkeyP
     assert diagnostic.node_id == "mom_252"
     assert diagnostic.pointer == "/factors/factors/0/graph/nodes/1"
     assert diagnostic.range is not None
+
+
+def test_contract_reads_the_dataset_snapshot_per_call() -> None:
+    snapshots = iter(["snap-1", "snap-2"])
+    service = StrategyAuthoringService(
+        RuamelDocumentCodec(),
+        factor_registry_version="r",
+        dataset_snapshot_id=lambda: next(snapshots),
+    )
+    first, second = service.contract(), service.contract()
+    assert (first.dataset_snapshot_id, second.dataset_snapshot_id) == ("snap-1", "snap-2")
+    assert first.contract_hash != second.contract_hash
+    assert first.schema_hash == second.schema_hash

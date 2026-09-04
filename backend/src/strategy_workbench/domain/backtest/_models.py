@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import StrEnum
+from typing import Literal, TypeAlias
 
 from strategy_workbench.domain.analytics.facade.metrics import (
     DrawdownPoint,
@@ -49,9 +50,62 @@ class MetricWindow:
             raise ValueError("metric window start must be before or equal to end")
 
 
+class StrategySourceKind(StrEnum):
+    SAVED_REVISION = "saved_revision"
+    INLINE_DRAFT = "inline_draft"
+
+
+@dataclass(frozen=True)
+class SavedRevisionReference:
+    """Run a stored revision; the run fails before starting if the hash no longer matches."""
+
+    strategy_id: str
+    revision: int
+    expected_spec_hash: str
+    kind: Literal["saved_revision"]
+
+
+@dataclass(frozen=True)
+class InlineDraft:
+    """Run an unsaved spec (draft backtests only; never a deployment source).
+
+    `source_hash` is client-asserted provenance: the server cannot verify it without the text
+    and records it as given.
+    """
+
+    spec: StrategySpec
+    kind: Literal["inline_draft"]
+    source_hash: str | None = None
+
+
+StrategySource: TypeAlias = SavedRevisionReference | InlineDraft
+
+
+@dataclass(frozen=True)
+class StrategyProvenance:
+    """What exactly was run: recorded in the manifest so a result names its revision."""
+
+    kind: StrategySourceKind
+    spec_hash: str
+    schema_version: str
+    strategy_id: str | None = None
+    revision: int | None = None
+    source_hash: str | None = None
+
+
 @dataclass(frozen=True)
 class BacktestRunSpec:
-    strategy: StrategySpec
+    """A request names its strategy once: `strategy` (legacy inline spec) or `strategy_source`.
+
+    `strategy` stays for compatibility with the JSON editors; new callers use `strategy_source`
+    so a run can name a saved revision (P1-09). The run service rejects a request carrying both
+    or neither (one coded 422, `backtest.run.invalid`).
+    After resolution the run spec stored in the manifest carries both: `strategy` is the exact
+    spec that was executed and `strategy_source` says where it came from.
+    """
+
+    strategy: StrategySpec | None = None
+    strategy_source: StrategySource | None = None
     core: ExecutionCore = ExecutionCore.RUST
     initial_cash: float = 100_000_000.0
     benchmark_security_id: str | None = None
@@ -90,8 +144,9 @@ class RunManifest:
     fee_bps: float
     slippage_bps: float
     participation_rate: float
+    strategy_provenance: StrategyProvenance
     warnings: tuple[DataWarning, ...] = ()
-    schema_version: str = "backtest-run-v1"
+    schema_version: str = "backtest-run-v2"
 
 
 @dataclass(frozen=True)

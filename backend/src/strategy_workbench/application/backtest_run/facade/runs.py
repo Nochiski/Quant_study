@@ -3,14 +3,21 @@ from strategy_workbench.application.backtest_run._service import (
     BacktestRunNotFoundError,
     BacktestRunService,
     InvalidBacktestRunError,
+    StaleStrategyReferenceError,
+    StrategyReferenceNotFoundError,
 )
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunResult,
     BacktestRunSpec,
     BacktestRunState,
     BacktestStartResponse,
+    InlineDraft,
     RunProgressEvent,
     RunStatus,
+    SavedRevisionReference,
+    StrategyProvenance,
+    StrategySource,
+    StrategySourceKind,
 )
 
 __all__ = [
@@ -21,7 +28,14 @@ __all__ = [
     "BacktestRunSpec",
     "BacktestRunState",
     "BacktestStartResponse",
+    "InlineDraft",
     "InvalidBacktestRunError",
     "RunProgressEvent",
     "RunStatus",
+    "SavedRevisionReference",
+    "StaleStrategyReferenceError",
+    "StrategyProvenance",
+    "StrategyReferenceNotFoundError",
+    "StrategySource",
+    "StrategySourceKind",
 ]

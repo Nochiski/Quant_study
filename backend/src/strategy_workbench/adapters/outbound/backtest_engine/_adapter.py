@@ -102,6 +102,12 @@ class BacktestEngineExecutorAdapter:
     ) -> BacktestRunResult:
         if request.dataset.data_snapshot_id != request.target_tape.data_snapshot_id:
             raise ValueError("dataset snapshot does not match the compiled target tape")
+        strategy = request.spec.strategy
+        if strategy is None:
+            raise ValueError(
+                "execution request must carry a resolved strategy — "
+                f"run_id={request.run_id} provenance={request.strategy_provenance.kind.value}"
+            )
         self._check_cancelled(cancelled)
         started_at = datetime.now(UTC)
         progress(0.35, "engine.prepare", "Preparing market feed and strategy")
@@ -142,16 +148,16 @@ class BacktestEngineExecutorAdapter:
             RunConfig(
                 run_id=request.run_id,
                 initial_cash=request.spec.initial_cash,
-                fee_bps=request.spec.strategy.execution.fee_bps,
+                fee_bps=strategy.execution.fee_bps,
                 annualization_days=request.spec.annualization_days,
-                max_gross_leverage=max(1.0, request.spec.strategy.risk.gross_exposure),
+                max_gross_leverage=max(1.0, strategy.risk.gross_exposure),
             ),
-            slippage=FixedBpsSlippage(request.spec.strategy.execution.slippage_bps),
-            max_participation=request.spec.strategy.execution.participation_rate,
+            slippage=FixedBpsSlippage(strategy.execution.slippage_bps),
+            max_participation=strategy.execution.participation_rate,
             core=request.spec.core.value,
         )
         result = engine.run(
-            TargetTapeStrategy(request.spec.strategy, request.target_tape, self._portfolio_bridge),
+            TargetTapeStrategy(strategy, request.target_tape, self._portfolio_bridge),
             DataFeed(bars),
             corporate_actions=corporate_actions,
             universe=universe,
@@ -236,9 +242,10 @@ class BacktestEngineExecutorAdapter:
                 metric_registry_version=self._registry.version,
                 initial_cash=request.spec.initial_cash,
                 annualization_days=request.spec.annualization_days,
-                fee_bps=request.spec.strategy.execution.fee_bps,
-                slippage_bps=request.spec.strategy.execution.slippage_bps,
-                participation_rate=request.spec.strategy.execution.participation_rate,
+                fee_bps=strategy.execution.fee_bps,
+                slippage_bps=strategy.execution.slippage_bps,
+                participation_rate=strategy.execution.participation_rate,
+                strategy_provenance=request.strategy_provenance,
                 warnings=request.dataset.warnings,
             ),
             metric_definitions=self._registry.definitions(),

@@ -1,16 +1,16 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: IN_REVIEW
-current_phase: P1
-current_pr: P1-02
-active_prs: [P1-02]
-parallel_window: [P1-02, P1-04]
-last_updated: 2026-09-04T15:10:18+09:00
-planned_prs: 45
-merged_prs: 7
-approved_prs: 7
-progress_percent: 16
+project_status: IN_PROGRESS
+current_phase: P1,P1.5,P2,P3
+current_pr: P1-10,P1.5-05,P2-01,P2-02,P2-03,P2-04,P3-01,P3-02,P3-03,P3-04,P3-05,P3-06,P3-07
+active_prs: [P1-10, P1.5-05, P2-01, P2-02, P2-03, P2-04, P3-01, P3-02, P3-03, P3-04, P3-05, P3-06, P3-07]
+parallel_window: [P2-01, P2-02, P2-03, P3-01, P3-02, P2-04, P3-03, P3-04, P3-05, P3-06, P3-07, P1.5-05, P1-10]
+last_updated: 2026-09-04T19:16:42+09:00
+planned_prs: 47
+merged_prs: 17
+approved_prs: 17
+progress_percent: 36
 ---
 
 # YAML Strategy Workbench 실시간 진행 계획
@@ -22,13 +22,13 @@ progress_percent: 16
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_REVIEW` |
-| Current phase | `P1` |
-| Current/next PR | `P1-02` |
-| Active PR | `P1-02` |
-| Progress | `7 / 45 merged (16%)` |
-| Approved | `7 / 45` |
-| Aggregated at | `2026-09-04 15:10 KST` |
+| Project status | `IN_PROGRESS` |
+| Current phase | `P1,P1.5,P2,P3` |
+| Current/next PR | `P1-10,P1.5-05,P2-01,P2-02,P2-03,P2-04,P3-01,P3-02,P3-03,P3-04,P3-05,P3-06,P3-07` |
+| Active PR | `P1-10, P1.5-05, P2-01, P2-02, P2-03, P2-04, P3-01, P3-02, P3-03, P3-04, P3-05, P3-06, P3-07` |
+| Progress | `17 / 47 merged (36%)` |
+| Approved | `17 / 47` |
+| Aggregated at | `2026-09-04 19:16 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -72,30 +72,30 @@ progress_percent: 16
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
 | P0 | Contract, product direction, tool choices | 4 | 4 | `MERGED` |
-| P1 | Backend Authoring Contract | 9 | 2 | `IN_REVIEW` |
-| P1.5 | Backtest Correctness Gate | 4 | 1 | `READY` |
-| P2 | App Shell and visual foundation | 4 | 0 | `READY` |
-| P3 | YAML Editor MVP | 7 | 0 | `WAITING` |
+| P1 | Backend Authoring Contract | 10 | 9 | `IN_PROGRESS` |
+| P1.5 | Backtest Correctness Gate | 5 | 4 | `IN_REVIEW` |
+| P2 | App Shell and visual foundation | 4 | 0 | `IN_REVIEW` |
+| P3 | YAML Editor MVP | 7 | 0 | `IN_REVIEW` |
 | P4 | Outline, Contract, Projections | 8 | 0 | `WAITING` |
 | P5 | Truthful Trace UI | 3 | 0 | `WAITING` |
 | P6 | Professional release and migration | 6 | 0 | `WAITING` |
-| **Total** |  | **45** | **7** | **16%** |
+| **Total** |  | **47** | **17** | **36%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
 
 | 항목 | 값 |
 |---|---|
-| PR | `P1-02`→…→`P1-09` stack (main 트리 + worktrees `Quant_study-p1-05`, `Quant_study-p1-06`; P1-02 4차 확인 대기, P1-03 APPROVED, P1-05~09 IN_REVIEW) + `P2-01`→`P2-02`→`P2-03`→`P3-01`→`P3-02` (worktree `Quant_study-p2-01`, IN_REVIEW) |
-| Intent | P1-02: DocumentCodecPort + ruamel codec(source map, 정책 거부, 제한), manifest를 codec으로 검증. P1-04: scalar constraint catalog 단일 owner, validator가 catalog 소비, EXPRESSION_NODE_KINDS |
-| Acceptance | 번들 크기·IME·schema completion 기준 비교표, 최종 선택과 rollback 방법, 이후 PR dependency 기록 |
-| Non-goals | editor 의존성 설치·UI 코드 변경 (P3-02), parser (P0-03), router (P0-04) |
-| Branch/worktree | `feat/p1-02-yaml-codec` (main 트리, P1-01 위 stack) / `feat/p1-04-constraint-catalog` (worktree, P1-01 위 stack) |
-| Base SHA | `38a2304` |
-| Head SHA | P1-02 `4090661` (base b1096c6) / P1-04 `3ae1efc` (base c997e52) |
-| Diff stat | P1-02 12 files +716/−114 / P1-04 6 files +506/−100 |
-| Focused tests | P1-02 codec 25 + manifest 44 + contract·domain·arch 146 / P1-04 constraints 35 + domain·http 24 |
-| Full gate | P1-02: main 트리 pytest 698 passed(Rust 포함), ruff·pyright clean. P1-04: worktree 505 passed(Rust 의존 2 파일 deselect), ruff·pyright clean. merge 후 main(worktree) contract·domain·arch·http 117 passed |
+| PR | Phase 1 전량 MERGED(7efe811). 진행 중: `P2-01`→`P2-02`→`P2-03`→`P3-01`→`P3-02`→`P2-04` (worktree `Quant_study-p2-01`, IN_REVIEW, P2-03 v3 시안 정합 반영 259b682 → P3-01 0925d1c → P3-02 429615b → P2-04 09ceacf → P3-03 380511a → P3-04 0a6b28c → P3-05 0fb303b → P3-06 7dcb3bf → P3-07 8c3d074, main 7efe811 병합 포함), Phase 1.5 감사 후속 `feat/p1.5-05-audit-fixes` (worktree `Quant_study-p15-01`, 구현 서브에이전트), Phase 1 종료 SoT·책임분리 감사 |
+| Intent | P2-03: 시안(v3) 그대로의 IDE 프레임(top bar·title/meta·outline+snippets·editor tabs·계약·중간 결과). P3-01/02: YAML 1.2 document state machine + lazy CodeMirror 어댑터 |
+| Acceptance | 시안과 동일한 프레임, 접근성(탭·드로어·aria), 편집기 chunk ≤ 200 KB gzip, 게이트 clean |
+| Non-goals | 실제 계약/중간 결과 데이터 연결(P4·P5), P2-04 revision loader |
+| Branch/worktree | `feat/p2-01-theme-tokens`→`feat/p2-02-app-shell`→`feat/p2-03-ide-layout`→`feat/p3-01-document-state`→`feat/p3-02-code-editor` (worktree `Quant_study-p2-01`) |
+| Base SHA | `0db8e31` (main, P1-05~09 merge 전) |
+| Head SHA | P2-03 `259b682` / P3-01 `0925d1c` / P3-02 `429615b` |
+| Diff stat | P2-03 concept pass +시안 정합, P3-01 8 files +1075/−137, P3-02 CodeMirror 어댑터 |
+| Focused tests | strategy-ide widget 테스트, document-state·yaml12 parse, code-editor handle |
+| Full gate | P2-03 vitest 105 / P3-01 127 / P3-02 131, typecheck·lint·build clean. main: pytest 649 passed(Rust core 제외), ruff·pyright, SDK clean(LF/CRLF만), vitest 80 |
 
 ---
 
@@ -125,11 +125,12 @@ Phase exit:
 | [x] | `P1-02` | 안전한 YAML/JSON codec과 source map | P0-03, P1-01 | `MERGED` | `review_p1_02` APPROVE |
 | [x] | `P1-03` | Compile API와 통합 diagnostic, generated SDK | P1-02 | `MERGED` | `review_p1_03` APPROVE |
 | [x] | `P1-04` | Constraint catalog와 adapter-owned discriminator, domain Pydantic 금지 | P1-01 | `MERGED` | `review_p1_04` APPROVE |
-| [ ] | `P1-05` | Discriminator가 포함된 runtime schema/contract API | P1-04 | `IN_REVIEW` | `review_p1_05` |
-| [ ] | `P1-06` | Revision source envelope, list/history repository port와 contract test | P1-01, P1-02 | `IN_REVIEW` | `review_p1_06` |
-| [ ] | `P1-07` | Document save/get/history API, generated SDK | P1-03, P1-06 | `IN_REVIEW` | `review_p1_07` |
-| [ ] | `P1-08` | Canonical semantic revision diff API | P1-07 | `IN_REVIEW` | `review_p1_08` |
-| [ ] | `P1-09` | Saved revision reference와 reproducible Backtest Run Manifest | P1-07 | `IN_REVIEW` | `review_p1_09` |
+| [x] | `P1-05` | Discriminator가 포함된 runtime schema/contract API | P1-04 | `MERGED` | `review_p1_05` |
+| [x] | `P1-06` | Revision source envelope, list/history repository port와 contract test | P1-01, P1-02 | `MERGED` | `review_p1_06` |
+| [x] | `P1-07` | Document save/get/history API, generated SDK | P1-03, P1-06 | `MERGED` | `review_p1_07` |
+| [x] | `P1-08` | Canonical semantic revision diff API | P1-07 | `MERGED` | `review_p1_08` |
+| [x] | `P1-09` | Saved revision reference와 reproducible Backtest Run Manifest | P1-07 | `MERGED` | `review_p1_09` |
+| [ ] | `P1-10` | Phase 1 종료 감사 후속(상대 import 게이트, 코덱 코드 접두어, manifest hash 불변식, 문서) | P1-09 | `IN_PROGRESS` | — |
 
 Phase exit:
 
@@ -146,6 +147,7 @@ Phase exit:
 | [x] | `P1.5-02` | Bounded Factor evaluation projection과 parity test | P1.5-01 | `MERGED` | `review_p15_02` APPROVE |
 | [x] | `P1.5-03` | Raw PIT observation port | P1.5-01 | `MERGED` | `review_p15_03` APPROVE |
 | [x] | `P1.5-04` | 실제 FactorGraph 기반 preview/backtest TargetTape pipeline | P1.5-02, P1.5-03 | `MERGED` | `review_p15_04` APPROVE |
+| [ ] | `P1.5-05` | Phase 1.5 SoT 감사 후속(D-001~D-007, 문서 6건) | P1.5-04 | `IN_REVIEW` | `review_p15_05` · [#49](https://github.com/Nochiski/Quant_study/pull/49) |
 
 Phase exit:
 
@@ -160,10 +162,10 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P2-01` | 시안 기준 light theme token과 공통 UI primitive | P0-01 | `IN_REVIEW` | `review_p2_01` |
-| [ ] | `P2-02` | Router, research/operations namespace, App Shell | P0-04 | `IN_REVIEW` | `review_p2_02` |
-| [ ] | `P2-03` | Stepper를 제거한 resizable Strategy IDE layout | P2-01, P2-02 | `IN_REVIEW` | `review_p2_03` |
-| [ ] | `P2-04` | Revision-aware loader와 draft base 상태 | P1-07, P2-02 | `WAITING` | — |
+| [ ] | `P2-01` | 시안 기준 light theme token과 공통 UI primitive | P0-01 | `IN_REVIEW` | `review_p2_01` · [#38](https://github.com/Nochiski/Quant_study/pull/38) |
+| [ ] | `P2-02` | Router, research/operations namespace, App Shell | P0-04 | `IN_REVIEW` | `review_p2_02` · [#39](https://github.com/Nochiski/Quant_study/pull/39) |
+| [ ] | `P2-03` | Stepper를 제거한 resizable Strategy IDE layout | P2-01, P2-02 | `IN_REVIEW` | `review_p2_03` · [#40](https://github.com/Nochiski/Quant_study/pull/40) |
+| [ ] | `P2-04` | Revision-aware loader와 draft base 상태 | P1-07, P2-02 | `IN_REVIEW` | `review_p2_04` · [#43](https://github.com/Nochiski/Quant_study/pull/43) |
 
 Phase exit:
 
@@ -175,13 +177,13 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P3-01` | YAML 1.2 document state machine과 CST path index | P0-03, P1-03, P1-05 | `IN_REVIEW` | `review_p3_01` |
-| [ ] | `P3-02` | Lazy code editor adapter와 worker lifecycle | P0-02, P2-03 | `IN_REVIEW` | `review_p3_02` |
-| [ ] | `P3-03` | Runtime schema 구조 검증·completion·hover | P3-01, P3-02, P1-05 | `WAITING` | — |
-| [ ] | `P3-04` | Backend semantic diagnostic marker와 stale response 차단 | P3-03, P1-03 | `WAITING` | — |
-| [ ] | `P3-05` | Dirty/base hash에 따른 saved reference 또는 inline draft Backtest | P3-04, P1-07, P1-09, P1.5-04, P2-04 | `WAITING` | — |
-| [ ] | `P3-06` | Local autosave와 recovery 비교 | P3-05 | `WAITING` | — |
-| [ ] | `P3-07` | 409 revision conflict에서 source 보존 | P3-05, P1-08 | `WAITING` | — |
+| [ ] | `P3-01` | YAML 1.2 document state machine과 CST path index | P0-03, P1-03, P1-05 | `IN_REVIEW` | `review_p3_01` · [#41](https://github.com/Nochiski/Quant_study/pull/41) |
+| [ ] | `P3-02` | Lazy code editor adapter와 worker lifecycle | P0-02, P2-03 | `IN_REVIEW` | `review_p3_02` · [#42](https://github.com/Nochiski/Quant_study/pull/42) |
+| [ ] | `P3-03` | Runtime schema 구조 검증·completion·hover | P3-01, P3-02, P1-05 | `IN_REVIEW` | `review_p3_03` · [#44](https://github.com/Nochiski/Quant_study/pull/44) |
+| [ ] | `P3-04` | Backend semantic diagnostic marker와 stale response 차단 | P3-03, P1-03 | `IN_REVIEW` | `review_p3_04` · [#45](https://github.com/Nochiski/Quant_study/pull/45) |
+| [ ] | `P3-05` | Dirty/base hash에 따른 saved reference 또는 inline draft Backtest | P3-04, P1-07, P1-09, P1.5-04, P2-04 | `IN_REVIEW` | `review_p3_05` · [#46](https://github.com/Nochiski/Quant_study/pull/46) |
+| [ ] | `P3-06` | Local autosave와 recovery 비교 | P3-05 | `IN_REVIEW` | `review_p3_06` · [#47](https://github.com/Nochiski/Quant_study/pull/47) |
+| [ ] | `P3-07` | 409 revision conflict에서 source 보존 | P3-05, P1-08 | `IN_REVIEW` | `review_p3_07` · [#48](https://github.com/Nochiski/Quant_study/pull/48) |
 
 Phase exit:
 
@@ -247,6 +249,11 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
+| P1-09 | `review_p1_09` | `5d05646` | `54eb349` | APPROVE (1차 REQUEST_CHANGES: 지문에 provenance 포함 → 2차 APPROVE, 422 형태 통일·InlineDraft source_hash 계약 명시) | 1 (해소) | inline source_hash는 서버 검증 불가(계약 명시, 배포 정책이 신뢰 금지), 응답 strategy 영구 nullable, union discriminator 미적용(FastAPI dataclass 제약) | 2026-09-04 |
+| P1-08 | `review_p1_08` | `844d932` | `54eb349` | APPROVE (테스트 보강 반영) | 0 | diff 404가 OpenAPI에 미기재, 대용량 diff 상한 없음(P6) | 2026-09-04 |
+| P1-07 | `review_p1_07` | `c85f786` | `54eb349` | APPROVE (P2 반영) | 0 | list_strategies 라우트 미노출(P2-04에서 추가), 문서 전략 legacy revise가 stale과 같은 409 코드(전용 코드 후속) | 2026-09-04 |
+| P1-06 | `review_p1_06` | `4722fae` | `54eb349` | APPROVE (1차 REQUEST_CHANGES: contract test 검출력 부족 B1·B2 → 2차 APPROVE, 뮤테이션 7종 중 7종 검출) | 2 (해소) | source↔spec 짝짓기는 docstring 규율(문서 use case만 생성), timezone 정규화는 adapter 책임(P6-01) | 2026-09-04 |
+| P1-05 | `review_p1_05` | `6490fb7` | `54eb349` | APPROVE (P2 4건 반영: contract_hash, branch, 304 `*`, 상수) | 0 | schema는 dataclass 힌트 파생이라 pydantic 검증과의 drift는 architecture test로만 감시 | 2026-09-04 |
 | P1-02 | `review_p1_02` | `b1096c6` | `b4a34f6` | APPROVE (1차 REQUEST_CHANGES P1 RecursionError 누수·compose 후 node 제한 → 2차 P2 surrogate/JSON dup 위치 → 3차 P1 %YAML 1.3 AssertionError → 4차 APPROVE) | 2 (해소) | pure Python ruamel 처리량(15.5k줄 2.4 s)은 P1-03 latency 예산, offset 단위 변환은 P3-04, compose가 정책 위반 문서까지 도는 구조는 except Exception 안전망으로 닫음 | 2026-09-04 |
 | P1.5-04 | `review_p15_04` | `17d13df` | `b843d29` | APPROVE (1차 REQUEST_CHANGES: 빈 frame parity·look-ahead guard 제거 → 2차 APPROVE, P2 backtests route 422 매핑은 b843d29에서 수정) | 2 (해소) | hand-computed golden 없음(self-consistency만), lag는 adapter 계약 위임, cross-sectional op가 비회원 포함(P1.5-05에서 해소, D-001), per-factor full-panel 평가 비용(P6-04), reference_unsupported 코드 owner 서술(P1.5-05에서 해소, D-007) | 2026-09-04 |
 | P1.5-03 | `review_p15_03` | `0cc578d` | `69516ba` | APPROVE (1차 REQUEST_CHANGES: universe 식별자 부재·실패 채널 없음/미지 field 합성 → 2차 APPROVE) | 2 (해소) | fixture↔synthetic 경계 불연속(mock 전용, docstring 명시), fixture 휴장일 시 빈 세션, CellKind 5종이 None으로 병합(계약 명시) | 2026-09-04 |
@@ -264,6 +271,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
+| P1-05~09 | schema/contract·repository 계약(뮤테이션)·document save/history/diff·fingerprint·reference HTTP | worktree pytest 649 passed(Rust core 제외), ruff, pyright; main merge(7efe811) 후 649 passed, vitest 80 | SDK 재생성 clean (c1f6b52; main에서는 LF/CRLF 차이만) | 해당 없음 | 로컬 (worktree) | 2026-09-04 |
 | P1-02 | codec 31 + manifest 43 + contract·domain·arch 144 passed | pytest 709 passed, ruff, pyright | 해당 없음 | 해당 없음 | 로컬 | 2026-09-04 |
 | P1.5-02/03/04 | trace 13 + raw port contract 16 + pipeline 13 passed | worktree pytest 559 passed(Rust core 제외), main merge 후 559 passed, ruff, pyright | 해당 없음 (응답 스키마 미변경, 422 코드 additive) | 해당 없음 | 로컬 (worktree) | 2026-09-04 |
 | P1-03 | compile HTTP 12 + authoring service 1 passed | pytest 717 passed, ruff, pyright, frontend typecheck·lint | SDK 재생성 clean (severity required, node_id 추가) | 해당 없음 | 로컬 | 2026-09-04 |
@@ -279,6 +287,15 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-04 KST | Claude | 사용자 지시로 origin/main fast-forward push(c174452→73d812e) 후 리뷰 중 브랜치 12개를 Stacked PR로 공개: #38 P2-01 → #39 P2-02 → #40 P2-03 → #41 P3-01 → #42 P3-02 → #43 P2-04 → #44 P3-03 → #45 P3-04 → #46 P3-05 → #47 P3-06 → #48 P3-07(스택 끝, 리뷰 후속 수정 1eecbb2·8933bcc·9581811 포함), #49 P1.5-05(main 기준). P2-04·P3-01~04 REQUEST_CHANGES 수정 완료, 같은 리뷰어 재검토 요청. 게이트: typecheck·lint·vitest 187·build, backend 652 | 사용자 지시 |
+| 2026-09-04 KST | Claude | P3-07 착수·diff freeze 8c3d074 (branch `feat/p3-07-conflict-safety`, P3-06 위; 409 시 문서 보존, ConflictBanner(서버 최신/현재 기준 리비전, 서버본 열기 링크, 현재 문서 복사, Diff 열기→P1-08 semantic diff 표), strategyDiffQuery·diffStrategyRevisions 래퍼; vitest 176·typecheck·lint·build clean), review_p3_07(opus) 배정 → IN_REVIEW. Phase 3 PR 7/7 구현 완료, 리뷰·merge 대기 | 13.3 |
+| 2026-09-04 KST | Claude | P3-06 착수·diff freeze 7dcb3bf (branch `feat/p3-06-autosave-recovery`, P3-05 위; draft-store(localStorage, base key `strategyId@rev`/new, 손상·quota 내성), useAutosave(dirty 800ms 후 기록, 저장 성공 시 정리, 로드 시 원본과 다른 복구본 제안), RecoveryBanner(줄 diff 요약, 복구/삭제, schema 불일치 시 원문 다운로드), lineDiffSummary; vitest 175·typecheck·lint·build clean), review_p3_06(opus) 배정 → IN_REVIEW | 13.3 |
+| 2026-09-04 KST | Claude | P3-05 착수·diff freeze 0fb303b (branch `feat/p3-05-toolbar-cutover`, P3-04 위; 15 files +719/−33; DocumentToolbar(schema/source hash/spec hash·dirty·Validate/Save/Backtest), canSave는 현재 compile 성공 시만, decideBacktestSource(saved_revision ↔ inline_draft ↔ blocked), useRunBacktest→/research/backtests/$runId, IDE meta 확장, builder 문구 YAML-first; vitest 168·typecheck·lint·build clean), review_p3_05(opus) 배정 → IN_REVIEW | 13.3 |
+| 2026-09-04 KST | Claude | P3-04 착수·diff freeze 0a6b28c (branch `feat/p3-04-semantic-markers`, P3-03 위; compile debounce 300ms·AbortController·버전 불일치 응답 폐기, pointer→range(프론트 parse map→backend range→조상), 문제 목록(오류/경고 분리, 클릭 시 selection 이동), 전송 실패는 capability 진단; vitest 163 통과, 브라우저에서 compile 진단·completion 실동작 확인(backend CORS 5173)), review_p3_04(opus) 배정 → IN_REVIEW | 13.3 |
+| 2026-09-04 KST | Claude | P3-03 착수·diff freeze 380511a (branch `feat/p3-03-schema-assist`, P2-04 위; backend: id 필드 dataclass metadata → 스키마 `x-catalog`/`x-reference`, FieldContract.catalog/reference, runtime-schema.json 골든 fixture + export 도구, pytest 652; frontend: cursor→pointer, schema navigator(kind union), completion/hover 소스, hoverTooltip, 카탈로그 쿼리; typecheck·lint·vitest 156·build clean), review_p3_03(opus) 배정 → IN_REVIEW | 13.3 |
+| 2026-09-04 KST | Claude | P2-04 착수·diff freeze 09ceacf (branch `feat/p2-04-revision-loader`, P3-02 위 + main 7efe811 병합; 23 files +1029/−157; DocumentSource new/revision, document API wrapper·query, create/revise 저장(expected_revision, 409/422 상태), URL 전환, DirtyLeaveGuard(useBlocker), MSW 라우트 테스트 5건; typecheck·lint·vitest 136·build clean), review_p2_04(opus) 배정 → IN_REVIEW | 13.3 |
+| 2026-09-04 KST | Claude | active PR 상한 규칙 보완: `parallel_window`에 전부 나열된 stack은 한 line으로 보고 2개 제한 초과 허용(WORKFLOW 13절, update-plan-progress.ps1). P2/P3 stack 5개를 window로 선언 | 규칙 갱신 |
+| 2026-09-04 KST | Claude | P1-06(2차)·P1-09(2차) APPROVE 수신, 잔여 소항목 반영(54eb349) → P1-05~09 스택 main merge(7efe811, container 충돌 해소), MERGED. Phase 1 9/9 완료, Phase 1 종료 감사 착수. P2-03 시안(v3) 정합 반영(1814817·259b682) 후 재리뷰 요청, P3-01(0925d1c)·P3-02(429615b)에 전진 병합. Phase 1.5 감사 후속(D-001~007) 구현 서브에이전트 착수 | 13.6 merge gate |
 | 2026-09-04 KST | Claude | P1-02 APPROVE(4차 b4a34f6) → main merge(df32c09), P1-03 → main merge(90a14bc, container 충돌 해소), MERGED. main 607 passed(Rust core 제외), SDK clean. P1-05~09·P2-01~03·P3-01/02 리뷰 결과 수신 중(요약 재전송 요청) | 13.6 merge gate |
 | 2026-09-04 KST | Claude | P3-02 착수·diff freeze 579bce8 (branch `feat/p3-02-code-editor`, P3-01 위; CodeMirror 6 pin, editor chunk gzip 136 KB ≤ 200 KB 예산; typecheck·lint·vitest 124·build clean), review_p3_02(opus) 배정 → IN_REVIEW | 13.3 |
 | 2026-09-04 KST | Claude | P3-01 착수·diff freeze eebf6e3 (branch `feat/p3-01-document-state`, P2-03 위; 8 files +1075/−137; typecheck·lint·vitest 120·build clean), review_p3_01(opus) 배정 → IN_REVIEW | 13.3 |

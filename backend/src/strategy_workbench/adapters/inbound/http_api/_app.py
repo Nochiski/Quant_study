@@ -5,7 +5,7 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Annotated
 
-from fastapi import FastAPI, HTTPException, Query, status
+from fastapi import FastAPI, Header, HTTPException, Query, Response, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -20,6 +20,8 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestStartResponse,
     InvalidBacktestRunError,
     RunStatus,
+    StaleStrategyReferenceError,
+    StrategyReferenceNotFoundError,
 )
 from strategy_workbench.application.equity_workspace.facade.workspace import (
     EquityWorkspaceService,
@@ -54,7 +56,15 @@ from strategy_workbench.application.portfolio_design.facade.design import (
 from strategy_workbench.application.strategy_authoring.facade.authoring import (
     CompiledDocument,
     CompileRequest,
+    InvalidStrategyDocumentError,
+    ReviseDocumentRequest,
+    RevisionDiff,
+    SaveDocumentRequest,
     StrategyAuthoringService,
+    StrategyDocument,
+    StrategyDocumentContract,
+    StrategyDocumentSchema,
+    StrategyDocumentService,
 )
 from strategy_workbench.application.strategy_design.facade.design import (
     InvalidStrategyError,
@@ -62,6 +72,9 @@ from strategy_workbench.application.strategy_design.facade.design import (
     StrategyDesignService,
 )
 from strategy_workbench.application.strategy_design.facade.ports import (
+    Page,
+    PageRequest,
+    RevisionSummary,
     StrategyNotFoundError,
     StrategyRevisionConflictError,
 )
@@ -72,6 +85,9 @@ from strategy_workbench.domain.equity.facade.research_data import (
 from strategy_workbench.domain.strategy.facade.explanation import StrategyExplanation
 from strategy_workbench.domain.strategy.facade.specification import StrategySpec
 from strategy_workbench.domain.strategy.facade.validation import StrategyValidation
+
+EQUITY_CATALOG_PATH = "/api/v1/equity/catalog"
+FACTOR_CATALOG_PATH = "/api/v1/factors/catalog"
 
 
 @dataclass(frozen=True)
@@ -91,6 +107,7 @@ def create_app(
     *,
     strategy_design: StrategyDesignService,
     strategy_authoring: StrategyAuthoringService,
+    strategy_documents: StrategyDocumentService,
     equity_workspace: EquityWorkspaceService,
     factor_research: FactorResearchService,
     portfolio_design: PortfolioDesignService,
@@ -131,6 +148,17 @@ def create_app(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail={"code": "backtest.run.invalid", "message": str(error)},
             ) from error
+        except StrategyReferenceNotFoundError as error:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "backtest.strategy.not_found", "message": str(error)},
+            ) from error
+        except StaleStrategyReferenceError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "backtest.strategy.stale", "message": str(error)},
+            ) from error
+
         except (InvalidPortfolioRequestError, RawObservationUnavailableError) as error:
             raise _portfolio_http_error(error) from error
 
@@ -222,7 +250,7 @@ def create_app(
             raise _portfolio_http_error(error) from error
 
     @app.get(
-        "/api/v1/equity/catalog",
+        EQUITY_CATALOG_PATH,
         operation_id="getEquityCatalog",
     )
     def equity_catalog(
@@ -266,7 +294,7 @@ def create_app(
         return equity_workspace.preview(query, venue=venue)
 
     @app.get(
-        "/api/v1/factors/catalog",
+        FACTOR_CATALOG_PATH,
         operation_id="getFactorCatalog",
     )
     def factor_catalog(
@@ -338,6 +366,120 @@ def create_app(
         envelope (missing `source`, unknown `format`) is a 422.
         """
         return strategy_authoring.compile(request)
+
+    @app.post(
+        "/api/v1/strategy-documents",
+        operation_id="createStrategyDocument",
+        status_code=status.HTTP_201_CREATED,
+    )
+    def create_strategy_document(request: SaveDocumentRequest) -> StrategyDocument:
+        """Store a cleanly compiled exact source as revision 1 of a new strategy."""
+        try:
+            return strategy_documents.save(request)
+        except InvalidStrategyDocumentError as error:
+            raise _invalid_document(error) from error
+
+    @app.post(
+        "/api/v1/strategy-documents/{strategy_id}/revisions",
+        operation_id="reviseStrategyDocument",
+        status_code=status.HTTP_201_CREATED,
+    )
+    def revise_strategy_document(
+        strategy_id: str, request: ReviseDocumentRequest
+    ) -> StrategyDocument:
+        """Store the next revision; 409 when `expected_revision` is stale."""
+        try:
+            return strategy_documents.revise(strategy_id, request)
+        except InvalidStrategyDocumentError as error:
+            raise _invalid_document(error) from error
+        except StrategyNotFoundError as error:
+            raise _strategy_not_found(error) from error
+        except StrategyRevisionConflictError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "strategy.revision_conflict", "message": str(error)},
+            ) from error
+
+    @app.get(
+        "/api/v1/strategies/{strategy_id}/revisions",
+        operation_id="listStrategyRevisions",
+    )
+    def list_strategy_revisions(
+        strategy_id: str,
+        offset: int = Query(default=0, ge=0),
+        limit: int = Query(default=50, ge=1, le=PageRequest.MAX_LIMIT),
+    ) -> Page[RevisionSummary]:
+        """Revision history, ascending by revision, paginated deterministically."""
+        try:
+            return strategy_documents.history(strategy_id, PageRequest(offset, limit))
+        except StrategyNotFoundError as error:
+            raise _strategy_not_found(error) from error
+
+    @app.get(
+        "/api/v1/strategies/{strategy_id}/diff",
+        operation_id="diffStrategyRevisions",
+    )
+    def diff_strategy_revisions(
+        strategy_id: str,
+        base: int = Query(ge=1),
+        target: int = Query(ge=1),
+    ) -> RevisionDiff:
+        """Semantic diff of two revisions over their canonical payloads (identity excluded)."""
+        try:
+            return strategy_documents.diff(strategy_id, base, target)
+        except StrategyNotFoundError as error:
+            raise _strategy_not_found(error) from error
+
+    @app.get(
+        "/api/v1/strategies/{strategy_id}/revisions/{revision}/document",
+        operation_id="getStrategyDocument",
+    )
+    def get_strategy_document(strategy_id: str, revision: int) -> StrategyDocument:
+        """Exact stored source of one revision (a generated projection for legacy ones)."""
+        try:
+            return strategy_documents.get(strategy_id, revision)
+        except StrategyNotFoundError as error:
+            raise _strategy_not_found(error) from error
+
+    @app.get(
+        "/api/v1/strategy-documents/schema",
+        operation_id="getStrategyDocumentSchema",
+        response_model=StrategyDocumentSchema,
+        responses={304: {"description": "Not modified (ETag matched If-None-Match)"}},
+    )
+    def strategy_document_schema(
+        response: Response, if_none_match: Annotated[str | None, Header()] = None
+    ) -> StrategyDocumentSchema | Response:
+        """Runtime JSON Schema of the authoring document. ETag = schema hash (304 on match)."""
+        schema = strategy_authoring.schema()
+        etag = _etag(schema.schema_hash)
+        if if_none_match is not None and _matches(if_none_match, etag):
+            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
+        response.headers["ETag"] = etag
+        return schema
+
+    @app.get(
+        "/api/v1/strategy-documents/contract",
+        operation_id="getStrategyDocumentContract",
+        response_model=StrategyDocumentContractResponse,
+        responses={304: {"description": "Not modified (ETag matched If-None-Match)"}},
+    )
+    def strategy_document_contract(
+        response: Response, if_none_match: Annotated[str | None, Header()] = None
+    ) -> StrategyDocumentContractResponse | Response:
+        """Per-field authoring contract (type, enum, range, unit, default, example, stage)
+        with the factor/dataset registry versions and catalog links it pairs with.
+        """
+        contract = strategy_authoring.contract()
+        etag = _etag(contract.contract_hash)
+        if if_none_match is not None and _matches(if_none_match, etag):
+            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
+        response.headers["ETag"] = etag
+        return StrategyDocumentContractResponse(
+            contract=contract,
+            factor_catalog_url=FACTOR_CATALOG_PATH,
+            equity_catalog_url=EQUITY_CATALOG_PATH,
+        )
 
     @app.get(
         "/api/v1/strategies/template",
@@ -425,6 +567,46 @@ def create_app(
             ) from error
 
     return app
+
+
+@dataclass(frozen=True)
+class StrategyDocumentContractResponse:
+    """Wire envelope: the application contract plus the catalog links this API serves."""
+
+    contract: StrategyDocumentContract
+    factor_catalog_url: str
+    equity_catalog_url: str
+
+
+def _etag(schema_hash: str) -> str:
+    return f'"{schema_hash}"'
+
+
+def _matches(if_none_match: str, etag: str) -> bool:
+    """RFC 9110 §13.1.2: `*` matches any current representation; weak tags compare by value."""
+    if if_none_match.strip() == "*":
+        return True
+    return etag in {item.strip().removeprefix("W/") for item in if_none_match.split(",")}
+
+
+def _strategy_not_found(error: StrategyNotFoundError) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={"code": "strategy.not_found", "message": str(error)},
+    )
+
+
+def _invalid_document(error: InvalidStrategyDocumentError) -> HTTPException:
+    compiled = error.compiled
+    return HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail={
+            "code": "strategy_document.invalid",
+            "source_hash": compiled.source_hash,
+            "schema_version": compiled.schema_version,
+            "diagnostics": jsonable_encoder([asdict(d) for d in compiled.diagnostics]),
+        },
+    )
 
 
 def _portfolio_http_error(

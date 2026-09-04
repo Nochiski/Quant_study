@@ -16,7 +16,12 @@ Contract:
 - `history_sessions_before_start` counts sessions strictly before `start` (as_of is not one of
   them). The adapter is responsible for field lag: a lagged field must still be present on the
   first history session when the source has data there.
-- `previous_weight` seeds the first frame only; later frames are owned by the portfolio compiler.
+- `previous_weight` is the book the strategy carries into the *first* rebalance frame. From
+  the second frame on the portfolio compiler folds the previous frame's targets forward and
+  ignores this value entirely, so an adapter that cannot answer returns 0.0 rather than a
+  guess. `universe_member` and `sector_id` have no `available_date`: answering them with the
+  as_of vintage (no retroactive reclassification or index reconstitution) is the adapter's
+  responsibility and the application layer cannot verify it.
 - Failures are values: `status != OK` with `detail` (unknown universe/field, no data), never a
   synthesised observation.
 """

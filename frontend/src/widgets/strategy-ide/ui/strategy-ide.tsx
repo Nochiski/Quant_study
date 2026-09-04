@@ -44,6 +44,8 @@ export type StrategyIdeProps = {
   editor: ReactNode;
   /** Strategy document outline projection (P4-01). */
   outline?: ReactNode;
+  /** P4-10 catalog UI; the P4-05 feature model owns schema projection and insertion. */
+  snippets?: ReactNode;
   /** Editor toolbar actions (format / validate) rendered in the editor header. */
   editorActions?: ReactNode;
   view?: SourceView;
@@ -79,6 +81,7 @@ export const StrategyIde = ({
   runDisabled = false,
   editor,
   outline,
+  snippets,
   editorActions,
   view = "yaml",
   onViewChange,
@@ -302,21 +305,23 @@ export const StrategyIde = ({
           </nav>
           <section className="ide__snippets" aria-label={t("ide.snippets")}>
             <h2 className="ide__snippets-title">{t("ide.snippets")}</h2>
-            <ul className="ide__snippet-list">
-              {(["field", "transform", "risk"] as const).map((snippet) => (
-                <li key={snippet}>
-                  <button type="button" className="ide__snippet" disabled>
-                    <span aria-hidden="true">
-                      {snippet === "transform" ? "ƒx" : "▢"}
-                    </span>
-                    <span>{t(`ide.snippet.${snippet}`)}</span>
-                    <span className="ide__snippet-plus" aria-hidden="true">
-                      +
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+            {snippets ?? (
+              <ul className="ide__snippet-list">
+                {(["field", "transform", "risk"] as const).map((snippet) => (
+                  <li key={snippet}>
+                    <button type="button" className="ide__snippet" disabled>
+                      <span aria-hidden="true">
+                        {snippet === "transform" ? "ƒx" : "▢"}
+                      </span>
+                      <span>{t(`ide.snippet.${snippet}`)}</span>
+                      <span className="ide__snippet-plus" aria-hidden="true">
+                        +
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
         </div>
         {layout.outlineOpen ? (

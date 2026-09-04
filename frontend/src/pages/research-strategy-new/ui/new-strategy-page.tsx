@@ -6,6 +6,7 @@ import {
   DocumentToolbar,
   ExecutionPlanPanel,
   RecoveryBanner,
+  SnippetCatalog,
   SourceEditor,
   StrategyOutline,
   saveStatusText,
@@ -17,12 +18,13 @@ import {
   useSaveDocument,
   useSchemaAssist,
   useOutlineNavigation,
+  useSnippetInsertion,
   useStrategyDocument,
   type DocumentSource,
 } from "../../../features/edit-strategy";
 import { t } from "../../../shared/config";
 import { useNavigate, useSearch } from "../../../shared/lib/router";
-import { Badge } from "../../../shared/ui";
+import { Badge, type CodeEditorHandle } from "../../../shared/ui";
 import { StrategyIde } from "../../../widgets/strategy-ide";
 
 const STARTER = 'schema_version: "1.0"\ntitle: ""\n';
@@ -70,6 +72,16 @@ export const NewStrategyPage = () => {
     selectedPointer: search.path,
     onSelectedPointer: selectPointer,
   });
+  const snippets = useSnippetInsertion(document, assist.snippetSource);
+  const onOutlineEditorReady = outline.onEditorReady;
+  const onSnippetEditorReady = snippets.onEditorReady;
+  const onEditorReady = useCallback(
+    (editor: CodeEditorHandle | null): void => {
+      onOutlineEditorReady(editor);
+      onSnippetEditorReady(editor);
+    },
+    [onOutlineEditorReady, onSnippetEditorReady],
+  );
 
   // If the user types while create is in flight, stay on this page and preserve the newer text.
   // A second save appends it to the newly created strategy; navigate only once the current text
@@ -140,6 +152,14 @@ export const NewStrategyPage = () => {
             onCollapse={outline.onCollapseOutlineNode}
           />
         }
+        snippets={
+          <SnippetCatalog
+            snippets={snippets.snippets}
+            sourceStatus={snippets.sourceStatus}
+            feedback={snippets.feedback}
+            onInsert={snippets.insert}
+          />
+        }
         inspector={
           <ContractInspector
             source={assist.inspectorSource}
@@ -164,7 +184,7 @@ export const NewStrategyPage = () => {
               state={document}
               dispatch={dispatch}
               assist={assist}
-              onEditorReady={outline.onEditorReady}
+              onEditorReady={onEditorReady}
               onSelectionChange={outline.onEditorSelectionChange}
             />
           </>

@@ -1,4 +1,6 @@
 import { EditorView } from "@codemirror/view";
+import { undo } from "@codemirror/commands";
+import { Transaction } from "@codemirror/state";
 import { QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import {
@@ -22,6 +24,7 @@ import {
   vi,
 } from "vitest";
 
+import { readBackendFixture } from "../../shared/testing/backend-fixtures";
 import { App } from "../app";
 
 const API = "http://localhost:8000";
@@ -81,6 +84,42 @@ const document = (
 });
 
 const STORED = 'schema_version: "1.0"\ntitle: 퀄리티 모멘텀\n';
+const SIGNAL_SCHEMA_RESPONSE = {
+  schema: {
+    type: "object",
+    properties: {
+      signal: {
+        type: "object",
+        properties: {
+          method: { type: "string", default: "weighted_sum" },
+        },
+      },
+    },
+    additionalProperties: false,
+  },
+  schema_hash: "h".repeat(64),
+  schema_version: "1.0",
+};
+const RUNTIME_SCHEMA = JSON.parse(
+  readBackendFixture("strategy_documents/runtime-schema.json"),
+) as Record<string, unknown>;
+const FACTOR = {
+  availability: "implemented",
+  category: "price",
+  default_graph: {
+    nodes: [{ kind: "field", node_id: "px", field_id: "price.close" }],
+    output_node_id: "px",
+    missing_policy: "drop",
+  },
+  description: "Server factor",
+  factor_id: "server.momentum",
+  label: "Server momentum",
+  minimum_history_sessions: 1,
+  missing_policy: "drop",
+  output_unit: "score",
+  preference: "high",
+  required_field_ids: ["price.close"],
+};
 const posted: unknown[] = [];
 const started: Record<string, unknown>[] = [];
 const acceptedRun = (runId = "run-7") => ({
@@ -311,6 +350,193 @@ const legacyLink = () =>
   )!;
 
 describe("document routes (P2-04)", () => {
+  it.each([
+    ["/research/strategies/new", 'schema_version: "1.0"\ntitle: ""\n'],
+    ["/research/strategies/s1/revisions/2", STORED],
+  ])("wires a runtime-schema snippet through %s", async (route, prefix) => {
+    server.use(
+      http.get(`${API}/api/v1/strategy-documents/schema`, () =>
+        HttpResponse.json(SIGNAL_SCHEMA_RESPONSE),
+      ),
+    );
+    const user = userEvent.setup();
+    mount(route);
+    const view = await editor();
+    act(() => view.dispatch({ selection: { anchor: view.state.doc.length } }));
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "signal · 현재 커서에 삽입",
+      }),
+    );
+
+    expect(view.state.doc.toString()).toBe(
+      `${prefix}signal:\n  method: weighted_sum`,
+    );
+    expect(
+      screen.getByText(/YAML 문법 검사를 통과했습니다/),
+    ).toBeInTheDocument();
+    expect(view.hasFocus).toBe(true);
+    expect(screen.getByText("저장되지 않은 변경")).toBeInTheDocument();
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+
+    act(() =>
+      view.dispatch({
+        changes: { from: view.state.doc.length, insert: "\n" },
+        selection: { anchor: view.state.doc.length + 1 },
+        annotations: Transaction.addToHistory.of(false),
+      }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "signal · 현재 커서에 삽입" }),
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "같은 항목이 이미 존재합니다",
+    );
+    expect(view.state.doc.toString()).toBe(
+      `${prefix}signal:\n  method: weighted_sum\n`,
+    );
+
+    act(() =>
+      view.dispatch({
+        changes: {
+          from: view.state.doc.length - 1,
+          to: view.state.doc.length,
+        },
+        annotations: Transaction.addToHistory.of(false),
+      }),
+    );
+    act(() => expect(undo(view)).toBe(true));
+    expect(view.state.doc.toString()).toBe(prefix);
+  });
+
+  it("reports YAML-only from a JSON projection instead of an editor lifecycle error", async () => {
+    server.use(
+      http.get(`${API}/api/v1/strategy-documents/schema`, () =>
+        HttpResponse.json(SIGNAL_SCHEMA_RESPONSE),
+      ),
+    );
+    const user = userEvent.setup();
+    mount("/research/strategies/s1/revisions/2?view=json");
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "signal · 현재 커서에 삽입",
+      }),
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "YAML 편집 화면에서만 사용할 수 있습니다",
+    );
+    expect(
+      screen.queryByText(/아직 준비되지 않았습니다/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps invalid route source untouched when insertion preflight fails", async () => {
+    server.use(
+      http.get(`${API}/api/v1/strategy-documents/schema`, () =>
+        HttpResponse.json(SIGNAL_SCHEMA_RESPONSE),
+      ),
+    );
+    const user = userEvent.setup();
+    mount("/research/strategies/new");
+    const view = await editor();
+    const invalid = "title: [broken\n\n";
+    replaceText(view, invalid);
+    act(() => view.dispatch({ selection: { anchor: view.state.doc.length } }));
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "signal · 현재 커서에 삽입",
+      }),
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "YAML 1.2 문법을 통과하지 않아 변경하지 않았습니다",
+    );
+    expect(view.state.doc.toString()).toBe(invalid);
+  });
+
+  it("inserts and duplicate-checks a backend-owned factor graph on the real route", async () => {
+    server.use(
+      http.get(`${API}/api/v1/strategy-documents/schema`, () =>
+        HttpResponse.json({
+          schema: RUNTIME_SCHEMA,
+          schema_hash: "h".repeat(64),
+          schema_version: "1.0",
+        }),
+      ),
+      http.get(`${API}/api/v1/factors/catalog`, () =>
+        HttpResponse.json({
+          facets: {},
+          factors: [FACTOR],
+          page: 1,
+          page_count: 1,
+          page_size: 100,
+          registry_version: "v1",
+          total: 1,
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    mount("/research/strategies/new");
+    const view = await editor();
+    act(() => view.dispatch({ selection: { anchor: view.state.doc.length } }));
+
+    const insert = await screen.findByRole("button", {
+      name: "Server momentum · 현재 커서에 삽입",
+    });
+    await user.click(insert);
+    expect(view.state.doc.toString()).toContain("factor_id: server.momentum");
+    expect(view.state.doc.toString()).toContain("field_id: price.close");
+
+    await user.click(insert);
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "같은 항목이 이미 존재합니다",
+    );
+  });
+
+  it("fails closed when a required snippet metadata query fails", async () => {
+    server.use(
+      http.get(`${API}/api/v1/strategy-documents/contract`, () =>
+        HttpResponse.json({ detail: "unavailable" }, { status: 503 }),
+      ),
+    );
+    mount("/research/strategies/new");
+
+    expect(
+      await screen.findByText(/메타데이터를 불러올 수 없어 스니펫을 차단/),
+    ).toHaveAttribute("role", "alert");
+    expect(
+      screen.queryByRole("button", { name: /현재 커서에 삽입/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("fails closed when the factor catalog generation mismatches the contract", async () => {
+    server.use(
+      http.get(`${API}/api/v1/factors/catalog`, () =>
+        HttpResponse.json({
+          facets: {},
+          factors: [],
+          page: 1,
+          page_count: 0,
+          page_size: 100,
+          registry_version: "v2",
+          total: 0,
+        }),
+      ),
+    );
+    mount("/research/strategies/new");
+
+    expect(
+      await screen.findByText(/계약·팩터 카탈로그 버전이 일치하지 않아/),
+    ).toHaveAttribute("role", "alert");
+    expect(
+      screen.queryByRole("button", { name: /현재 커서에 삽입/ }),
+    ).not.toBeInTheDocument();
+  });
+
   it("loads the exact stored source of a revision into the editor as the draft base", async () => {
     mount("/research/strategies/s1/revisions/2?view=diff");
     expect(

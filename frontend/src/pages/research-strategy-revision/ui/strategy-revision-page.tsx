@@ -9,6 +9,7 @@ import {
   DocumentToolbar,
   ExecutionPlanPanel,
   RecoveryBanner,
+  SnippetCatalog,
   SourceEditor,
   StrategyOutline,
   saveStatusText,
@@ -20,12 +21,13 @@ import {
   useSaveDocument,
   useSchemaAssist,
   useOutlineNavigation,
+  useSnippetInsertion,
   useStrategyDocument,
   type DocumentSource,
 } from "../../../features/edit-strategy";
 import { t } from "../../../shared/config";
 import { useNavigate, useParams, useSearch } from "../../../shared/lib/router";
-import { Badge } from "../../../shared/ui";
+import { Badge, type CodeEditorHandle } from "../../../shared/ui";
 import { StrategyIde } from "../../../widgets/strategy-ide";
 import { PROJECTION_VIEWS, type StrategyView } from "../model/strategy-views";
 
@@ -97,6 +99,20 @@ export const StrategyRevisionPage = () => {
     selectedPointer: search.path,
     onSelectedPointer: selectPointer,
   });
+  const snippets = useSnippetInsertion(
+    document,
+    assist.snippetSource,
+    view === stored.format,
+  );
+  const onOutlineEditorReady = outline.onEditorReady;
+  const onSnippetEditorReady = snippets.onEditorReady;
+  const onEditorReady = useCallback(
+    (editor: CodeEditorHandle | null): void => {
+      onOutlineEditorReady(editor);
+      onSnippetEditorReady(editor);
+    },
+    [onOutlineEditorReady, onSnippetEditorReady],
+  );
 
   // A save can complete while the user is still typing. Keep that newer text on the current
   // route and let the next save append from the updated base; only follow the revision when the
@@ -194,6 +210,14 @@ export const StrategyRevisionPage = () => {
             onCollapse={outline.onCollapseOutlineNode}
           />
         }
+        snippets={
+          <SnippetCatalog
+            snippets={snippets.snippets}
+            sourceStatus={snippets.sourceStatus}
+            feedback={snippets.feedback}
+            onInsert={snippets.insert}
+          />
+        }
         inspector={
           <ContractInspector
             source={assist.inspectorSource}
@@ -235,7 +259,7 @@ export const StrategyRevisionPage = () => {
                 state={document}
                 dispatch={dispatch}
                 assist={assist}
-                onEditorReady={outline.onEditorReady}
+                onEditorReady={onEditorReady}
                 onSelectionChange={outline.onEditorSelectionChange}
               />
             ) : (

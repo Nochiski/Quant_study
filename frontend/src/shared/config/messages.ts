@@ -287,6 +287,31 @@ const ko = {
   "ide.snippet.field": "필드 노드 추가",
   "ide.snippet.transform": "변환 노드 추가",
   "ide.snippet.risk": "리스크 제한",
+  "snippet.help":
+    "빈 키 위치에서 추가합니다. 삽입 전 YAML 1.2 문법을 검사합니다.",
+  "snippet.loading": "서버 스키마와 팩터 카탈로그를 불러오는 중입니다.",
+  "snippet.unavailable":
+    "서버 스키마·계약·팩터 카탈로그 메타데이터를 불러올 수 없어 스니펫을 차단했습니다.",
+  "snippet.incompatible":
+    "서버 스키마·계약·팩터 카탈로그 버전이 일치하지 않아 스니펫을 차단했습니다.",
+  "snippet.empty": "현재 계약에 사용 가능한 항목이 없습니다.",
+  "snippet.insert": "현재 커서에 삽입",
+  "snippet.inserted": "삽입했고 YAML 문법 검사를 통과했습니다.",
+  "snippet.category.data": "데이터",
+  "snippet.category.factor": "팩터",
+  "snippet.category.signal": "신호",
+  "snippet.category.risk": "리스크",
+  "snippet.category.execution": "실행",
+  "snippet.error.yaml-only": "YAML 편집 화면에서만 사용할 수 있습니다.",
+  "snippet.error.selection":
+    "선택 영역을 해제하고 빈 키 위치에 커서를 놓으세요.",
+  "snippet.error.cursor-context":
+    "이 위치에는 해당 스니펫을 삽입할 수 없습니다.",
+  "snippet.error.duplicate": "같은 항목이 이미 존재합니다.",
+  "snippet.error.parse":
+    "삽입 결과가 YAML 1.2 문법을 통과하지 않아 변경하지 않았습니다.",
+  "snippet.error.editor-unavailable": "소스 편집기가 아직 준비되지 않았습니다.",
+  "snippet.error.composing": "한글 입력을 마친 뒤 다시 삽입하세요.",
   "ide.editor.verbose": "verbose",
   "ide.editor.format": "포맷",
   "ide.editor.validate": "검증",
@@ -832,6 +857,32 @@ export const messages = {
     "ide.snippet.field": "Add field node",
     "ide.snippet.transform": "Add transform node",
     "ide.snippet.risk": "Risk limit",
+    "snippet.help":
+      "Insert at an empty key position. YAML 1.2 syntax is checked before editing.",
+    "snippet.loading": "Loading the server schema and factor catalog.",
+    "snippet.unavailable":
+      "Snippets are blocked because required server schema, contract, or factor catalog metadata is unavailable.",
+    "snippet.incompatible":
+      "Snippets are blocked because the server schema, contract, and factor catalog versions do not match.",
+    "snippet.empty": "No entry is available in the current contract.",
+    "snippet.insert": "Insert at cursor",
+    "snippet.inserted": "Inserted and passed the YAML syntax check.",
+    "snippet.category.data": "Data",
+    "snippet.category.factor": "Factor",
+    "snippet.category.signal": "Signal",
+    "snippet.category.risk": "Risk",
+    "snippet.category.execution": "Execution",
+    "snippet.error.yaml-only":
+      "Snippets are available only in the YAML editor.",
+    "snippet.error.selection":
+      "Clear the selection and place the cursor at an empty key position.",
+    "snippet.error.cursor-context":
+      "This snippet cannot be inserted at the current position.",
+    "snippet.error.duplicate": "That item already exists.",
+    "snippet.error.parse":
+      "The result failed the YAML 1.2 syntax check, so nothing was changed.",
+    "snippet.error.editor-unavailable": "The source editor is not ready yet.",
+    "snippet.error.composing": "Finish the IME composition and try again.",
     "ide.editor.verbose": "verbose",
     "ide.editor.format": "Format",
     "ide.editor.validate": "Validate",

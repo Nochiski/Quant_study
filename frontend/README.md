@@ -1,5 +1,10 @@
 # Strategy Workbench Frontend
 
+> 2026-09-04부터 전략 authoring은 verbose YAML/JSON source editor로 전환 중이다
+> ([ADR](../docs/superpowers/specs/2026-09-04-strategy-authoring-contract-adr.md),
+> [PLAN.md](../docs/planning/strategy-workbench-yaml-ui/PLAN.md)). 아래 M3~M5 설명의
+> Quick Builder/Advanced Graph는 migration 기간 legacy route로 유지되는 현행 화면이다.
+
 ## M5 Backtest run · professional result
 
 Builder 6단계는 현재 `StrategySpec`을 generated SDK로 single run에 제출한다. 사용자는 기본
@@ -26,8 +31,8 @@ Quick Builder는 팩터 탐색·추가, 가중치, Lag/Rank/Z-score/Winsorize/Ne
 진단을 제공한다. Advanced Graph는 동일한 `StrategySpec` graph를 typed input port, output
 type/unit, minimum history, inline validation과 함께 표시한다. 두 모드에 별도 수식이나 DTO는 없다.
 
-비개발자도 전략을 만들 수 있는 no-code UI다. 저장되는 전략의 의미는 백엔드의 버전된
-`StrategySpec`이 소유하며, 이 폴더는 편집 경험과 시각화만 소유한다.
+저장되는 전략의 의미는 백엔드의 버전된 `StrategySpec`이 소유하며, 이 폴더는 편집 경험과
+시각화만 소유한다. YAML-first 전환 후 Form/Graph는 read-only projection이 된다.
 
 ## FSD 의존성 방향
 
@@ -44,7 +49,7 @@ app -> pages -> widgets -> features -> entities -> shared
 - 서버 데이터는 query cache가 소유하고, 저장된 응답을 client store에 복제하지 않는다.
 - frontend에서 지표·팩터·전략 의미를 다시 계산하지 않는다. 백엔드 응답을 표현한다.
 
-Quick Builder와 Advanced Graph는 같은 StrategySpec draft를 편집한다. 데이터 단계는 backend
+legacy Quick Builder와 Advanced Graph는 같은 StrategySpec draft를 편집한다. 데이터 단계는 backend
 catalog에서 필드의 단위·공개 시점·권장 lag·coverage·근거를 읽고, 실제 0·원천 생략 0·결측·
 미수집·coverage gap을 PIT panel에서 별도 상태로 표시한다. 그래프 좌표·패널 열림 상태 같은
 UI metadata는 spec과 분리한다.

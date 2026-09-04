@@ -16,8 +16,9 @@ paths:
   우회하면 컴포넌트 접근성을 먼저 고친다.
 - 상호작용이나 조건 분기가 없는 단순 존재 테스트는 만들지 않는다.
 - API 모듈 자체를 mock하지 않고 MSW로 wire 요청·응답·오류를 검증한다.
-- Quick Builder ↔ Advanced Graph ↔ StrategySpec round-trip은 property/generative test로
-  lossless를 검증한다.
+- YAML/JSON source ↔ StrategySpec ↔ projection(JSON/Form/Graph/Diff) round-trip은
+  property/generative test로 lossless를 검증한다. legacy Quick/Advanced 편집기는 유지 기간 동안 기존
+  round-trip test를 그대로 유지한다.
 - UI/API/i18n 변경 시 관련 Playwright spec의 test id, 문구, API path 영향을 검색하고 함께
   수정한다.
 - mock 성공 경로뿐 아니라 PIT 경고, invalid spec, failed/pruned trial, cancellation, 부분 결과

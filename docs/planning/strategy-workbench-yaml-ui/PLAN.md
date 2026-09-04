@@ -125,7 +125,7 @@ Phase exit:
 | [ ] | `P1-02` | 안전한 YAML/JSON codec과 source map | P0-03, P1-01 | `IN_REVIEW` | `review_p1_02` |
 | [ ] | `P1-03` | Compile API와 통합 diagnostic, generated SDK | P1-02 | `IN_REVIEW` | `review_p1_03` (2차) |
 | [x] | `P1-04` | Constraint catalog와 adapter-owned discriminator, domain Pydantic 금지 | P1-01 | `MERGED` | `review_p1_04` APPROVE |
-| [ ] | `P1-05` | Discriminator가 포함된 runtime schema/contract API | P1-04 | `IN_PROGRESS` | — |
+| [ ] | `P1-05` | Discriminator가 포함된 runtime schema/contract API | P1-04 | `IN_REVIEW` | `review_p1_05` |
 | [ ] | `P1-06` | Revision source envelope, list/history repository port와 contract test | P1-01, P1-02 | `WAITING` | — |
 | [ ] | `P1-07` | Document save/get/history API, generated SDK | P1-03, P1-06 | `WAITING` | — |
 | [ ] | `P1-08` | Canonical semantic revision diff API | P1-07 | `WAITING` | — |
@@ -268,6 +268,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-04 KST | Claude | P1-05 diff freeze aef2a53 (base 6490fb7, 13 files +1316/−5; backend 579 passed, ruff, pyright, SDK clean), review_p1_05(opus) 배정 → IN_REVIEW | 13.3 |
 | 2026-09-04 KST | Claude | P1-05 IN_PROGRESS (worktree `Quant_study-p1-05`, P1-03 stack + main). P1.5-02 APPROVE(3c846f2, stack 대기), P1.5-03/04 2차 리뷰(69516ba) 요청, P1-02 2차 수정(54d734c) 요청, P1-03 2차 리뷰 대기 | 13.3 |
 | 2026-09-04 KST | Claude | P1-04 APPROVE(93d5625) → main merge(b7a3ce8), MERGED. P1-05 READY. P1-02 2차 REQUEST_CHANGES(P2 2건: YAML escape surrogate, JSON duplicate key 위치) 수정 중; P1-03 재검토 대기; P1.5-03/04 REQUEST_CHANGES(P1 각 2건) 수정 착수 | 13.6 merge gate |
 | 2026-09-04 KST | Claude | P1-01(881c38e)·P1.5-01(cae73fb) APPROVE → main merge, MERGED. P1-02(4090661)·P1-04(3ae1efc) IN_REVIEW 병렬 window. Phase 0 SoT 감사 보고 대기 중 | 13.6 merge gate |

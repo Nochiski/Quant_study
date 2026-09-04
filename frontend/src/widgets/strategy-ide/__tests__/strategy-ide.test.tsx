@@ -78,6 +78,10 @@ describe("StrategyIde", () => {
       .map((b) => b.textContent);
     expect(sections.some((text) => text?.includes("parameters"))).toBe(true);
     expect(sections.some((text) => text?.includes("risk"))).toBe(true);
+    expect(
+      outline.querySelectorAll(".ide__section-status--pending"),
+    ).toHaveLength(outline.querySelectorAll(".ide__section").length);
+    expect(outline.querySelector(".ide__section-status--ok")).toBeNull();
     // view tabs + inspector tabs + results tabs; no Data→…→Execution stepper
     expect(
       new Set(

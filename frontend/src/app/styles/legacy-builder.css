@@ -499,6 +499,7 @@ select {
   padding: 5px 8px;
   border-radius: 6px;
   background: var(--color-accent-strong);
+  color: var(--text-on-accent);
   font-size: var(--text-size-small);
   text-transform: uppercase;
 }

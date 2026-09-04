@@ -10,7 +10,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { HttpResponse, http } from "msw";
+import { HttpResponse, delay, http } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
@@ -268,6 +268,17 @@ const replaceText = (view: EditorView, text: string) =>
     });
   });
 
+const saveButton = () =>
+  within(globalThis.document.querySelector(".ide__editor-actions")!).getByRole(
+    "button",
+    { name: "리비전 저장" },
+  );
+
+const legacyLink = () =>
+  globalThis.document.querySelector<HTMLAnchorElement>(
+    'a[href="/legacy/builder"]',
+  )!;
+
 describe("document routes (P2-04)", () => {
   it("loads the exact stored source of a revision into the editor as the draft base", async () => {
     mount("/research/strategies/s1/revisions/2?view=diff");
@@ -313,6 +324,61 @@ describe("document routes (P2-04)", () => {
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
   });
 
+  it("keeps edits typed during create and saves them before following the new revision", async () => {
+    const user = userEvent.setup();
+    const revisionRequests: Array<{
+      expected_revision: number;
+      format: string;
+      source: string;
+    }> = [];
+    server.use(
+      http.post(`${API}/api/v1/strategy-documents`, async ({ request }) => {
+        const body = (await request.json()) as { source: string };
+        await delay(100);
+        return HttpResponse.json(document("s9", 1, body.source, "A"), {
+          status: 201,
+        });
+      }),
+      http.post(
+        `${API}/api/v1/strategy-documents/:strategyId/revisions`,
+        async ({ request }) => {
+          const body = (await request.json()) as {
+            expected_revision: number;
+            format: string;
+            source: string;
+          };
+          revisionRequests.push(body);
+          expect(body.expected_revision).toBe(1);
+          return HttpResponse.json(document("s9", 2, body.source, "B"), {
+            status: 201,
+          });
+        },
+      ),
+    );
+    const history = mount("/research/strategies/new");
+    const view = await editor();
+    const first = 'schema_version: "1.0"\ntitle: A\n';
+    const second = `${first}description: typed while saving\n`;
+    replaceText(view, first);
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+    await user.click(saveButton());
+    replaceText(view, second);
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+    expect(history.location.pathname).toBe("/research/strategies/new");
+    expect(view.state.doc.toString()).toBe(second);
+
+    await user.click(saveButton());
+    await waitFor(() =>
+      expect(history.location.pathname).toBe(
+        "/research/strategies/s9/revisions/2",
+      ),
+    );
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(revisionRequests).toEqual([
+      { expected_revision: 1, format: "yaml", source: second },
+    ]);
+  });
+
   it("keeps the draft and reports a validation failure without leaving the page", async () => {
     const user = userEvent.setup();
     const history = mount("/research/strategies/new");
@@ -350,6 +416,36 @@ describe("document routes (P2-04)", () => {
     );
     await waitFor(() =>
       expect(history.location.pathname).toBe("/legacy/builder"),
+    );
+  });
+
+  it("allows a same-page view switch while dirty but guards a real leave", async () => {
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2");
+    const view = await editor();
+    replaceText(view, `${STORED}description: dirty\n`);
+
+    await user.click(screen.getByRole("tab", { name: "JSON" }));
+    await waitFor(() => expect(history.location.search).toContain("view=json"));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+
+    await user.click(legacyLink());
+    const dialog = await screen.findByRole("alertdialog");
+    expect(globalThis.document.activeElement).toBe(
+      within(dialog).getAllByRole("button")[0],
+    );
+    await user.keyboard("{Shift>}{Tab}{/Shift}");
+    expect(globalThis.document.activeElement).toBe(
+      within(dialog).getAllByRole("button")[1],
+    );
+    await user.keyboard("{Tab}");
+    expect(globalThis.document.activeElement).toBe(
+      within(dialog).getAllByRole("button")[0],
+    );
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(history.location.pathname).toBe(
+      "/research/strategies/s1/revisions/2",
     );
   });
 

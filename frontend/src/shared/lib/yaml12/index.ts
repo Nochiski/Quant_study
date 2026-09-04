@@ -2,7 +2,6 @@ export {
   loadYaml12Mapping,
   locateRange,
   parseSource,
-  Yaml12Rejected,
   type ParseDiagnostic,
   type ParsedSource,
   type SourceFormat,
@@ -14,3 +13,4 @@ export {
   templatePointer,
   type YamlCursorContext,
 } from "./cursor";
+export { CODEC_LIMITS } from "./limits";

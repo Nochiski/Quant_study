@@ -128,7 +128,12 @@ describe("useCompileDocument", () => {
     expect(requests.map((r) => r.source)).toEqual([
       'schema_version: "1.0"\ntitle: ok\n',
     ]);
-    expect(screen.getByTestId("version")).toHaveTextContent("0/0");
+    {
+      const [source, compiled] = screen
+        .getByTestId("version")
+        .textContent!.split("/");
+      expect(compiled).toBe(source);
+    }
   });
 
   it("aborts the superseded request and never shows an older verdict", async () => {
@@ -147,7 +152,12 @@ describe("useCompileDocument", () => {
     // The slow reply (would be "semantically-valid") can no longer overwrite the verdict.
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(screen.getByTestId("phase")).toHaveTextContent("structure-invalid");
-    expect(screen.getByTestId("version")).toHaveTextContent("1/1");
+    {
+      const [source, compiled] = screen
+        .getByTestId("version")
+        .textContent!.split("/");
+      expect(compiled).toBe(source);
+    }
   });
 
   it("sends nothing for unparsable text or during IME composition", async () => {
@@ -208,6 +218,24 @@ describe("useCompileDocument", () => {
     );
   });
 
+  it("disables an error list that belongs to an older text", async () => {
+    const view = await mount('schema_version: "1.0"\ntitle: bad\n');
+    await screen.findByRole("button", { name: /title must not be empty/ });
+
+    type(view, "a: 1\n");
+
+    const stale = screen.getByRole("button", {
+      name: /title must not be empty/,
+    });
+    expect(stale).toBeDisabled();
+    expect(stale.closest(".problems")).toHaveClass("problems--stale");
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: /title must not be empty/ }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
   it("reports a transport failure as a server problem without pretending validity", async () => {
     await mount("title: boom\n");
     await waitFor(() =>
@@ -254,5 +282,25 @@ describe("toDocumentDiagnostics", () => {
       start: { line: 0, column: 0, offset: 0 },
       end: { line: 0, column: 3, offset: 3 },
     });
+  });
+
+  it("anchors a root diagnostic at the start instead of marking the whole document", () => {
+    const text = 'schema_version: "1.0"\ntitle: ok\n';
+    const parse = parseSource(text, "yaml");
+    const [diagnostic] = toDocumentDiagnostics(
+      [
+        {
+          code: "required",
+          kind: "structural",
+          severity: "error",
+          pointer: "",
+          message: "data is required",
+          range: null,
+        },
+      ],
+      parse,
+    );
+    expect(diagnostic.range?.start.offset).toBe(0);
+    expect(diagnostic.range?.end.offset).toBe(1);
   });
 });

@@ -12,7 +12,11 @@ export const saveStatusText = (
   status: SaveStatus,
 ): string => {
   if (status.kind === "saving") return t("save.saving");
-  if (status.kind === "conflict") return t("save.conflict");
+  if (status.kind === "conflict") {
+    return status.detail
+      ? `${t("save.conflict")} (${status.detail})`
+      : t("save.conflict");
+  }
   if (status.kind === "invalid") {
     return status.detail
       ? `${t("save.invalid")}: ${status.detail}`
@@ -20,10 +24,45 @@ export const saveStatusText = (
   }
   if (status.kind === "failed") return t("save.failed");
   if (state.source.trim().length === 0) return t("save.empty");
+  if (state.dirty && state.parse?.status === "rejected")
+    return t("save.blocked.syntax");
+  if (
+    state.dirty &&
+    state.compiled !== null &&
+    state.compiledVersion === state.sourceVersion &&
+    state.compiled.diagnostics.some(
+      (diagnostic) => diagnostic.severity === "error",
+    )
+  )
+    return t("save.blocked.invalid");
   if (state.dirty) return t("save.unsaved");
   if (status.kind === "saved") return t("ide.savedJustNow");
   if (state.baseRevision !== null) {
     return `${t("save.savedRevision")} v${state.baseRevision}`;
   }
   return t("page.newStrategy.draft");
+};
+
+export const saveStatusTone = (
+  state: DocumentState,
+  status: SaveStatus,
+): "ok" | "warn" | "error" => {
+  if (
+    status.kind === "conflict" ||
+    status.kind === "invalid" ||
+    status.kind === "failed"
+  )
+    return "error";
+  if (state.dirty && state.parse?.status === "rejected") return "error";
+  if (
+    state.dirty &&
+    state.compiled !== null &&
+    state.compiledVersion === state.sourceVersion &&
+    state.compiled.diagnostics.some(
+      (diagnostic) => diagnostic.severity === "error",
+    )
+  )
+    return "error";
+  if (state.dirty) return "warn";
+  return "ok";
 };

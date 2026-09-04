@@ -12,6 +12,8 @@ CATALOG_FACTOR = {"catalog": "factor"}
 CATALOG_SUBGRAPH = {"catalog": "subgraph"}
 REFERENCE_NODE = {"reference": "node"}
 REFERENCE_PARAMETER = {"reference": "parameter"}
+# The array that declares a namespace; its items carry the `<namespace>_id` definition.
+DEFINES_NODE = {"defines": "node"}
 
 
 class UnaryOperator(StrEnum):
@@ -198,7 +200,7 @@ ExpressionNode: TypeAlias = (
 
 @dataclass(frozen=True)
 class FactorGraph:
-    nodes: tuple[ExpressionNode, ...]
+    nodes: tuple[ExpressionNode, ...] = field(metadata=DEFINES_NODE)
     output_node_id: str = field(metadata=REFERENCE_NODE)
     missing_policy: MissingPolicy = MissingPolicy.DROP
 

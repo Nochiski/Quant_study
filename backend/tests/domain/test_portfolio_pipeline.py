@@ -356,3 +356,54 @@ def test_long_only_and_sector_neutral_exposure_semantics_are_validated() -> None
 
     assert "strategy.risk.long_only_exposure" in codes
     assert "strategy.risk.sector_neutral_side" in codes
+
+
+_FOLD_DAYS = (date(2026, 1, 2), date(2026, 1, 5), date(2026, 1, 6))
+
+
+def _fold_spec():
+    spec = _spec()
+    return replace(
+        spec,
+        portfolio=replace(spec.portfolio, selection_count=1, turnover_buffer_count=1),
+    )
+
+
+def test_previous_weight_folds_forward_from_the_previous_frame() -> None:
+    """D-002: the book a frame carries in is the previous frame's targets, not the port value."""
+    observations = (
+        _observation(_FOLD_DAYS[0], "a", 2.0),
+        _observation(_FOLD_DAYS[0], "b", 1.0),
+        _observation(_FOLD_DAYS[1], "a", 1.0),
+        _observation(_FOLD_DAYS[1], "b", 2.0),
+        _observation(_FOLD_DAYS[2], "a", 1.0),
+        _observation(_FOLD_DAYS[2], "b", 2.0),
+    )
+
+    frames = _compile(_fold_spec(), observations, sessions=_FOLD_DAYS).frames
+
+    assert len(frames) == 2
+    assert {target.security_id for target in frames[0].targets} == {"a"}
+    # "a" fell to rank 2 but is still held, so the turnover buffer must retain it.
+    held = {item.security_id: item for item in frames[1].candidates}
+    assert ExclusionReason.TURNOVER_BUFFER in held["a"].exclusion_reasons
+    assert {target.security_id for target in frames[1].targets} == {"a", "b"}
+
+
+def test_only_the_first_frame_reads_the_adapter_seed() -> None:
+    """A `previous_weight` on a later frame's observations is stale and must be ignored."""
+    observations = (
+        _observation(_FOLD_DAYS[0], "a", 3.0),
+        _observation(_FOLD_DAYS[0], "b", 2.0, previous_weight=0.5),
+        _observation(_FOLD_DAYS[0], "c", 1.0),
+        _observation(_FOLD_DAYS[1], "a", 3.0),
+        _observation(_FOLD_DAYS[1], "b", 2.0),
+        _observation(_FOLD_DAYS[1], "c", 1.0, previous_weight=0.5),
+    )
+
+    frames = _compile(_fold_spec(), observations, sessions=_FOLD_DAYS).frames
+
+    # Frame 0 honours the seed: "b" is rank 2 but held, so the buffer keeps it.
+    assert {target.security_id for target in frames[0].targets} == {"a", "b"}
+    # Frame 1 reads the folded book ("a", "b"), never "c"'s stale seed.
+    assert {target.security_id for target in frames[1].targets} == {"a", "b"}

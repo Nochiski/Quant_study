@@ -2,7 +2,14 @@ import { useEffect, useId, useState, type ReactNode } from "react";
 
 import { t } from "../../../shared/config";
 import { useMediaQuery } from "../../../shared/lib/media";
-import { Badge, Button, SplitHandle, Tabs, panelId } from "../../../shared/ui";
+import {
+  Badge,
+  Button,
+  SplitHandle,
+  Tabs,
+  panelId,
+  tabId,
+} from "../../../shared/ui";
 import {
   OUTLINE_SECTIONS,
   type OutlineSection,
@@ -34,6 +41,7 @@ export type StrategyIdeProps = {
   };
   /** Save status text in the top bar, e.g. "방금 저장됨". */
   saveStatus?: string;
+  saveTone?: "ok" | "warn" | "error";
   onRunBacktest?: () => void;
   runDisabled?: boolean;
   /** The source editor slot (P3). */
@@ -71,6 +79,7 @@ export const StrategyIde = ({
   badges,
   meta,
   saveStatus,
+  saveTone = "ok",
   onRunBacktest,
   runDisabled = false,
   editor,
@@ -98,6 +107,10 @@ export const StrategyIde = ({
   const [filter, setFilter] = useState("");
 
   useEffect(() => {
+    if (narrow) close(["inspectorOpen", "debuggerOpen"]);
+  }, [narrow, close]);
+
+  useEffect(() => {
     if (!narrow) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") close(["inspectorOpen", "debuggerOpen"]);
@@ -106,9 +119,11 @@ export const StrategyIde = ({
     return () => window.removeEventListener("keydown", onKey);
   }, [narrow, close]);
 
-  const sections = OUTLINE_SECTIONS.filter((section) =>
-    section.includes(filter.trim().toLowerCase()),
-  );
+  const query = filter.trim().toLocaleLowerCase();
+  const sections = OUTLINE_SECTIONS.filter((section) => {
+    const label = section === "identity" ? t("ide.section.identity") : section;
+    return `${section} ${label}`.toLocaleLowerCase().includes(query);
+  });
 
   const inspectorNode = (
     <aside
@@ -170,7 +185,10 @@ export const StrategyIde = ({
         <div className="ide__topbar-status" role="status">
           {saveStatus ? (
             <>
-              <span aria-hidden="true">✓</span> {saveStatus}
+              <span aria-hidden="true">
+                {saveTone === "error" ? "✕" : saveTone === "warn" ? "!" : "✓"}
+              </span>{" "}
+              {saveStatus}
             </>
           ) : null}
         </div>
@@ -388,13 +406,18 @@ export const StrategyIde = ({
               value={view}
               onChange={(next) => onViewChange?.(next)}
             />
-            <div
-              id={panelId(ids.views, view)}
-              role="tabpanel"
-              className="ide__editor-panel"
-            >
-              {editor}
-            </div>
+            {VIEWS.map((id) => (
+              <div
+                key={id}
+                id={panelId(ids.views, id)}
+                role="tabpanel"
+                aria-labelledby={tabId(ids.views, id)}
+                className="ide__editor-panel"
+                hidden={id !== view}
+              >
+                {id === view ? editor : null}
+              </div>
+            ))}
           </section>
           {!narrow && layout.debuggerOpen ? (
             <SplitHandle
@@ -481,6 +504,7 @@ const InspectorPlaceholder = () => {
           key={item.id}
           id={panelId(idBase, item.id)}
           role="tabpanel"
+          aria-labelledby={tabId(idBase, item.id)}
           hidden={item.id !== tab}
           className="ide__inspector-panel"
         >
@@ -494,10 +518,7 @@ const InspectorPlaceholder = () => {
                   </div>
                 ))}
               </dl>
-              <div className="ide__card ide__card--ok" role="status">
-                <span aria-hidden="true">✓</span>{" "}
-                {t("ide.inspector.checkPassed")}
-              </div>
+              <div className="ide__card">{t("ide.placeholder")}</div>
               <button type="button" className="ide__link" disabled>
                 {t("ide.inspector.fullSchema")} ↗
               </button>
@@ -553,12 +574,8 @@ const DebuggerPlaceholder = () => {
             <strong className="ide__value--ok">5.0%</strong>
           </span>
         </p>
-        <div className="ide__card ide__card--ok" role="status">
-          <span aria-hidden="true">✓</span>{" "}
-          <strong>{t("ide.debugger.pitPassed")}</strong>
-          <span className="ide__card-detail">
-            {t("ide.debugger.pitDetail")}
-          </span>
+        <div className="ide__card">
+          <span>{t("ide.placeholder")}</span>
         </div>
         <p className="text-small ide__sample-note">{t("ide.placeholder")}</p>
       </div>
@@ -575,10 +592,14 @@ const DebuggerPlaceholder = () => {
             key={item.id}
             id={panelId(idBase, item.id)}
             role="tabpanel"
+            aria-labelledby={tabId(idBase, item.id)}
             hidden={item.id !== tab}
           >
             {item.id === "preview" ? (
               <table className="ide__table">
+                <caption className="ide__sample-note">
+                  {t("ide.placeholder")}
+                </caption>
                 <thead>
                   <tr>
                     <th scope="col">{t("ide.debugger.security")}</th>

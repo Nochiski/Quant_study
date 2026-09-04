@@ -201,6 +201,41 @@ export const valueOptions = (resolved: ResolvedSchema): string[] => {
   return [];
 };
 
+/** The nearest ancestor array whose schema declares `x-defines: namespace`. */
+export const definingArrayFor = (
+  root: JsonSchema,
+  pointer: string,
+  namespace: string,
+  tree: unknown,
+): { pointer: string; items: unknown[] } | null => {
+  const segments = pointer === "" ? [] : pointer.slice(1).split("/");
+  for (let depth = segments.length - 1; depth >= 0; depth -= 1) {
+    const ancestor =
+      depth === 0 ? "" : `/${segments.slice(0, depth).join("/")}`;
+    const resolved = schemaAt(root, ancestor, tree);
+    if (!resolved) continue;
+    for (const option of collectProperties(root, resolved)) {
+      if (option.schema["x-defines"] !== namespace) continue;
+      const arrayPointer = `${ancestor}/${option.name}`;
+      let value: unknown = tree;
+      for (const raw of arrayPointer.slice(1).split("/")) {
+        const segment = raw.replace(/~1/g, "/").replace(/~0/g, "~");
+        if (Array.isArray(value)) value = value[Number(segment)];
+        else if (isObject(value)) value = value[segment];
+        else {
+          value = undefined;
+          break;
+        }
+      }
+      return {
+        pointer: arrayPointer,
+        items: Array.isArray(value) ? value : [],
+      };
+    }
+  }
+  return null;
+};
+
 /** Short type label for completion details: `string`, `number ≥0 ≤1`, `enum(a|b)`, `object`. */
 export const typeLabel = (node: JsonSchema): string => {
   if (Array.isArray(node.enum))

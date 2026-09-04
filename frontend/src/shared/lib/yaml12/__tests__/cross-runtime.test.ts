@@ -12,7 +12,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { describe, expect, test } from "vitest";
-import { loadYaml12Mapping, Yaml12Rejected } from "..";
+import { parseSource } from "..";
 
 // fixture는 backend 디렉터리 한 곳에만 둔다 (ADR D3). cwd가 frontend/든 저장소 루트든 위로 올라가며 찾는다.
 const FIXTURE_RELATIVE = "backend/tests/fixtures/strategy_documents/yaml12";
@@ -48,20 +48,16 @@ describe("YAML 1.2 cross-runtime manifest", () => {
 
   test.each(accepted)("accepted: $name", (item) => {
     if (item.expect !== "accept") throw new Error("unreachable");
-    const loaded = loadYaml12Mapping(read(item.file));
+    const parsed = parseSource(read(item.file), "yaml");
+    expect(parsed.status).toBe("ok");
     // JSON 호환 tree가 계약이다. `-0`은 JSON round-trip에서 `0`이 되며 backend도 -0.0 == 0.0으로 본다.
-    expect(JSON.parse(JSON.stringify(loaded))).toEqual(item.json);
+    expect(JSON.parse(JSON.stringify(parsed.tree))).toEqual(item.json);
   });
 
   test.each(rejected)("rejected: $name → $reason", (item) => {
     if (item.expect !== "reject") throw new Error("unreachable");
-    let reason: string | null = null;
-    try {
-      loadYaml12Mapping(read(item.file));
-    } catch (error) {
-      if (!(error instanceof Yaml12Rejected)) throw error;
-      reason = error.reason;
-    }
-    expect(reason).toBe(item.reason);
+    const parsed = parseSource(read(item.file), "yaml");
+    expect(parsed.status).toBe("rejected");
+    expect(parsed.diagnostics[0]?.code).toBe(`yaml.${item.reason}`);
   });
 });

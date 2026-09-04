@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { t } from "../../../shared/config";
 import { Badge } from "../../../shared/ui";
@@ -41,8 +41,9 @@ const PHASE_TONE = {
 
 /**
  * Binds the domain-neutral editor to the document state machine (P3-01 → P3-02): text edits and
- * IME composition flow into the reducer, current diagnostics flow back as markers, and the undo
- * history is kept per format so switching YAML/JSON views does not lose it (editor ADR D3).
+ * IME composition flow into the reducer and current diagnostics flow back as markers. The editor
+ * is never remounted on a format switch — the language is reconfigured in place — so the undo
+ * history survives the switch (editor ADR D3).
  */
 export const SourceEditor = ({
   state,
@@ -50,10 +51,6 @@ export const SourceEditor = ({
   assist,
 }: SourceEditorProps) => {
   const handle = useRef<CodeEditorHandle>(null);
-  // Undo history per format, captured when a format's editor unmounts (view switch).
-  const [histories, setHistories] = useState<
-    Partial<Record<DocumentState["format"], unknown>>
-  >({});
 
   const documentDiagnostics = useMemo(() => currentDiagnostics(state), [state]);
   const diagnostics = useMemo<EditorDiagnostic[]>(
@@ -70,12 +67,14 @@ export const SourceEditor = ({
     [documentDiagnostics],
   );
 
-  // Selecting a problem moves the editor to its range (WORKFLOW P3-04 acceptance).
+  // Selecting a problem moves the editor to its range (WORKFLOW P3-04 acceptance). Clamp stale
+  // offsets defensively so an old range can never throw against shorter current text.
   const selectDiagnostic = useCallback((diagnostic: DocumentDiagnostic) => {
     const editor = handle.current;
     if (!editor || diagnostic.range === null) return;
-    const from = diagnostic.range.start.offset;
-    const to = Math.max(diagnostic.range.end.offset, from);
+    const length = editor.getText().length;
+    const from = Math.min(diagnostic.range.start.offset, length);
+    const to = Math.min(Math.max(diagnostic.range.end.offset, from), length);
     editor.setSelection(from, to);
     editor.scrollTo(from);
     editor.focus();
@@ -102,15 +101,6 @@ export const SourceEditor = ({
     handle.current?.setText(state.source);
   }, [state.source]);
 
-  useEffect(() => {
-    const format = state.format;
-    const editor = handle.current;
-    return () => {
-      const snapshot = editor?.getHistoryState();
-      setHistories((previous) => ({ ...previous, [format]: snapshot }));
-    };
-  }, [state.format]);
-
   return (
     <div className="source-editor">
       <div className="source-editor__status">
@@ -125,7 +115,6 @@ export const SourceEditor = ({
         ) : null}
       </div>
       <CodeEditor
-        key={state.format}
         ref={handle}
         value={state.source}
         language={state.format}
@@ -135,7 +124,6 @@ export const SourceEditor = ({
         diagnostics={diagnostics}
         completionSource={assist?.completionSource}
         hoverSource={assist?.hoverSource}
-        initialHistoryState={histories[state.format]}
       />
       <DiagnosticsPanel
         diagnostics={
@@ -143,7 +131,11 @@ export const SourceEditor = ({
             ? documentDiagnostics
             : state.compiled.diagnostics
         }
-        stale={documentDiagnostics.length === 0 && isSpecStale(state)}
+        stale={
+          documentDiagnostics.length === 0 &&
+          state.compiled !== null &&
+          state.compiledVersion !== state.sourceVersion
+        }
         onSelect={selectDiagnostic}
       />
     </div>

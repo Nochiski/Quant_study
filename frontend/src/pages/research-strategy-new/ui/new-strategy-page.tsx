@@ -20,7 +20,9 @@ export const NewStrategyPage = () => {
       versionLabel={t("page.newStrategy.draft")}
       badges={<Badge tone="info">{t("page.newStrategy.draft")}</Badge>}
       view={document.format}
-      availableViews={["yaml", "json"]}
+      // JSON projection/editing arrives with the revision-aware document loader. Until then,
+      // exposing an enabled tab without a view transition is a broken control.
+      availableViews={["yaml"]}
       editor={<SourceEditor state={document} dispatch={dispatch} />}
     />
   );

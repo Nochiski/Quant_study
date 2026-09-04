@@ -49,7 +49,9 @@ def load_bars_csv(
             return LoadResult(
                 bars=(),
                 status=LoadStatus.FORMAT_ERROR,
-                detail=(f"unexpected header — path={path} expected={EXPECTED_HEADER} got={header}"),
+                detail=(
+                    f"unexpected header — path={path} expected={EXPECTED_HEADER} got={header}"
+                ),
             )
 
         rows: list[RawBar] = []
@@ -69,7 +71,8 @@ def load_bars_csv(
                     bars=(),
                     status=LoadStatus.FORMAT_ERROR,
                     detail=(
-                        f"invalid row — path={path} line={line_number} row={row!r} error={error!r}"
+                        f"invalid row — path={path} line={line_number} row={row!r} "
+                        f"error={error!r}"
                     ),
                 )
             if (start is not None and raw.ts < start) or (end is not None and raw.ts > end):
@@ -81,7 +84,8 @@ def load_bars_csv(
             bars=(),
             status=LoadStatus.NO_DATA,
             detail=(
-                f"no data rows — path={path} instrument={instrument.symbol} start={start} end={end}"
+                f"no data rows — path={path} instrument={instrument.symbol} "
+                f"start={start} end={end}"
             ),
         )
     return clean_raw_bars(rows, instrument, ohlc_policy, source=str(path))

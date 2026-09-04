@@ -147,5 +147,8 @@ def test_rejected_documents_fail_closed_with_expected_reason(case: dict[str, Any
 
 def test_manifest_covers_every_fixture_file() -> None:
     listed = {case["file"] for case in MANIFEST["cases"]}
-    on_disk = {path.relative_to(FIXTURES).as_posix() for path in FIXTURES.glob("*/*.yaml")}
+    on_disk = {
+        path.relative_to(FIXTURES).as_posix()
+        for path in FIXTURES.glob("*/*.yaml")
+    }
     assert listed == on_disk

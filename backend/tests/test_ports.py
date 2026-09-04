@@ -83,7 +83,9 @@ class TestCleanRawBars:
         rows = [raw(3, 100, 110, 95, 105), raw(4, 105, 105, 105, 105, 0)]
         kept = clean_raw_bars(rows, INSTRUMENT, OhlcPolicy.STRICT, "src")
         assert kept.ok and len(kept.bars) == 2 and kept.dropped_rows == 0
-        dropped = clean_raw_bars(rows, INSTRUMENT, OhlcPolicy.STRICT, "src", drop_zero_volume=True)
+        dropped = clean_raw_bars(
+            rows, INSTRUMENT, OhlcPolicy.STRICT, "src", drop_zero_volume=True
+        )
         assert dropped.ok and len(dropped.bars) == 1 and dropped.dropped_rows == 1
 
     def test_time_reversal_is_format_error_even_for_dropped_rows(self) -> None:
@@ -97,7 +99,9 @@ class TestCleanRawBars:
         assert result.detail is not None and "strictly increasing" in result.detail
 
     def test_all_rows_dropped_is_no_data(self) -> None:
-        result = clean_raw_bars([raw(3, 0, 0, 0, 0, 0)], INSTRUMENT, OhlcPolicy.CLAMP, "src")
+        result = clean_raw_bars(
+            [raw(3, 0, 0, 0, 0, 0)], INSTRUMENT, OhlcPolicy.CLAMP, "src"
+        )
         assert result.status is LoadStatus.NO_DATA
         assert result.detail is not None and "dropped=1" in result.detail
 

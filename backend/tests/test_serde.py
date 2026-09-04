@@ -127,7 +127,9 @@ def test_decision_round_trip_preserves_schema_version() -> None:
 
 def test_requirements_round_trip() -> None:
     requirements = StrategyRequirements(
-        histories=(HistoryRequest(instruments=(INSTRUMENT,), field=PriceField.CLOSE, lookback=60),),
+        histories=(
+            HistoryRequest(instruments=(INSTRUMENT,), field=PriceField.CLOSE, lookback=60),
+        ),
         schedule=EverySession(),
         events=frozenset({EventKind.MARKET, EventKind.FILL}),
         actions=frozenset({ActionKind.NO_ACTION, ActionKind.BASKET}),

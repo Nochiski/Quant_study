@@ -53,7 +53,9 @@ class TestMarketSnapshot:
     def test_mixed_timestamps_rejected(self) -> None:
         instrument = make_instrument()
         with pytest.raises(ValueError, match="share the snapshot ts"):
-            MarketSnapshot(ts=day(1), bars=(make_bar(day(2), instrument, 100.0, 100.0),))
+            MarketSnapshot(
+                ts=day(1), bars=(make_bar(day(2), instrument, 100.0, 100.0),)
+            )
 
     def test_duplicate_instrument_rejected(self) -> None:
         instrument = make_instrument()

@@ -272,7 +272,9 @@ class PersistentPortfolio:
             )
         key = instrument_key(fill.instrument)
         try:
-            self._inner.apply_fill(key, fill.side.value, int(fill.quantity), fill.price, fill.fee)
+            self._inner.apply_fill(
+                key, fill.side.value, int(fill.quantity), fill.price, fill.fee
+            )
         except ValueError as error:
             message = str(error)
             if message.startswith("negative_position:"):
@@ -306,7 +308,9 @@ class PersistentPortfolio:
                 f"corporate action settlement price must be > 0 — "
                 f"instrument={action.instrument.symbol} ts={action.ts} price={settlement_price}"
             )
-        applied = self._inner.apply_corporate_action_ratio(key, str(action.ratio), settlement_price)
+        applied = self._inner.apply_corporate_action_ratio(
+            key, str(action.ratio), settlement_price
+        )
         if applied is None:
             return None
         old_quantity_raw, new_quantity_raw, old_average, new_average, cash_paid = applied
@@ -495,7 +499,8 @@ class PersistentOrderManager(OrderManager):
 
     def compact_open_orders(self) -> tuple[tuple[CompactOrder, int], ...]:
         return tuple(
-            (order, remaining) for order, remaining, _triggered in self.compact_open_entries()
+            (order, remaining)
+            for order, remaining, _triggered in self.compact_open_entries()
         )
 
     def open_orders(self) -> tuple[OpenOrderSnapshot, ...]:
@@ -537,7 +542,9 @@ class PersistentOrderManager(OrderManager):
             order.materialize() for order in self.cancel_compact_for_instrument(instrument)
         )
 
-    def cancel_compact_for_instrument(self, instrument: InstrumentId) -> tuple[CompactOrder, ...]:
+    def cancel_compact_for_instrument(
+        self, instrument: InstrumentId
+    ) -> tuple[CompactOrder, ...]:
         order_ids = self._runtime.cancel_for_key(instrument_key(instrument))
         return tuple(self._orders[order_id] for order_id in order_ids)
 

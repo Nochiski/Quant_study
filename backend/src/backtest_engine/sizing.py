@@ -20,4 +20,6 @@ def floor_delta_shares(delta_notional: float, reference_price: float) -> Decimal
             f"reference price must be > 0 — reference_price={reference_price} "
             f"delta_notional={delta_notional}"
         )
-    return Decimal(abs(delta_notional) / reference_price).quantize(Decimal(1), rounding=ROUND_FLOOR)
+    return Decimal(abs(delta_notional) / reference_price).quantize(
+        Decimal(1), rounding=ROUND_FLOOR
+    )

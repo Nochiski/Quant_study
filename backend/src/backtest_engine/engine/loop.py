@@ -160,7 +160,11 @@ class _Run:
         self.slippage_model = slippage if slippage is not None else NoSlippage()
         self.max_participation = max_participation
         # Rust 코어는 내장 슬리피지만 지원한다 — 첫 세션이 아니라 run 시작에 거절한다.
-        self.rust_slippage = slippage_config(self.slippage_model) if core in RUST_CORES else None
+        self.rust_slippage = (
+            slippage_config(self.slippage_model)
+            if core in RUST_CORES
+            else None
+        )
         self.broker = BrokerSim(
             config.fee_bps,
             slippage,
@@ -171,7 +175,9 @@ class _Run:
         self.router = (
             None
             if core in PERSISTENT_RUST_CORES
-            else DecisionRouter(requirements.actions, self.order_manager, requirements.features)
+            else DecisionRouter(
+                requirements.actions, self.order_manager, requirements.features
+            )
         )
         self.store = (
             PersistentEventStore(self.persistent_runtime)
@@ -392,7 +398,8 @@ class BacktestEngine:
                         order_id=order.order_id,
                         status=OrderStatus.CANCELLED,
                         detail=(
-                            f"{reason}instrument={order.instrument.symbol} remaining={remaining}"
+                            f"{reason}instrument={order.instrument.symbol} "
+                            f"remaining={remaining}"
                         ),
                     ),
                 )
@@ -729,7 +736,9 @@ class BacktestEngine:
                         fee=fee,
                         slippage_per_share=slip,
                     )
-                    run.queue.push(fill.ts, EventPriority.FILL, CompactFillOccurred(fill, snapshot))
+                    run.queue.push(
+                        fill.ts, EventPriority.FILL, CompactFillOccurred(fill, snapshot)
+                    )
                     if run.wants(EventKind.FILL):
                         run.queue.push(
                             fill.ts,
@@ -743,7 +752,9 @@ class BacktestEngine:
                     # mutable 상태는 process_market 안에서 이미 Rust runtime에 적용됐다.
                     pass
                 case _:
-                    raise RuntimeError(f"unknown op from persistent rust core — kind={kind!r}")
+                    raise RuntimeError(
+                        f"unknown op from persistent rust core — kind={kind!r}"
+                    )
 
     @staticmethod
     def _settlement_session(feed: DataFeed, action: CorporateActionEvent) -> datetime:

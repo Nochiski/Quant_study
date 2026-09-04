@@ -69,4 +69,6 @@ class StopLimitOrderRequest:
     limit_price: Decimal
 
 
-OrderRequest = MarketOrderRequest | LimitOrderRequest | StopOrderRequest | StopLimitOrderRequest
+OrderRequest = (
+    MarketOrderRequest | LimitOrderRequest | StopOrderRequest | StopLimitOrderRequest
+)

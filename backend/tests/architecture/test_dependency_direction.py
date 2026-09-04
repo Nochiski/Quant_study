@@ -34,7 +34,9 @@ def _read_depends_on(init_file: Path) -> tuple[str, ...]:
 
 def _owner(path: Path, roots: dict[str, Path]) -> str | None:
     candidates = [
-        (node, root) for node, root in roots.items() if path == root or root in path.parents
+        (node, root)
+        for node, root in roots.items()
+        if path == root or root in path.parents
     ]
     if not candidates:
         return None
@@ -47,7 +49,9 @@ def _target_node(module: str, nodes: tuple[str, ...]) -> str | None:
         return None
     local_module = module.removeprefix(prefix)
     candidates = [
-        node for node in nodes if local_module == node or local_module.startswith(f"{node}.")
+        node
+        for node in nodes
+        if local_module == node or local_module.startswith(f"{node}.")
     ]
     return max(candidates, key=len, default=None)
 
@@ -66,7 +70,8 @@ def _absolute_imports(path: Path) -> list[tuple[int, str]]:
 def test_declared_dependency_graph_is_acyclic() -> None:
     roots = _node_roots()
     dependencies = {
-        node: _read_depends_on(root / "facade" / "__init__.py") for node, root in roots.items()
+        node: _read_depends_on(root / "facade" / "__init__.py")
+        for node, root in roots.items()
     }
     assert set(dependencies) == set(roots)
     for node, allowed in dependencies.items():
@@ -93,7 +98,8 @@ def test_cross_node_imports_are_declared_and_use_facades() -> None:
     roots = _node_roots()
     nodes = tuple(roots)
     dependencies = {
-        node: _read_depends_on(root / "facade" / "__init__.py") for node, root in roots.items()
+        node: _read_depends_on(root / "facade" / "__init__.py")
+        for node, root in roots.items()
     }
     violations: list[str] = []
     for path in SRC_ROOT.rglob("*.py"):

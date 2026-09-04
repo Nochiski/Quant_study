@@ -7,7 +7,9 @@ from backtest_engine.types.market import Bar, MarketSnapshot
 
 
 def make_instrument(symbol: str = "005930") -> InstrumentId:
-    return InstrumentId(venue="XKRX", symbol=symbol, asset_class=AssetClass.EQUITY, currency="KRW")
+    return InstrumentId(
+        venue="XKRX", symbol=symbol, asset_class=AssetClass.EQUITY, currency="KRW"
+    )
 
 
 def make_bar(

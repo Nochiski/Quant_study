@@ -15,7 +15,9 @@ from tests.conftest import day, make_bar, make_instrument, make_snapshot
 INSTRUMENT = make_instrument()
 
 
-def fill(side: Side, quantity: int, price: float, fee: float = 0.0, fill_seq: int = 1) -> FillEvent:
+def fill(
+    side: Side, quantity: int, price: float, fee: float = 0.0, fill_seq: int = 1
+) -> FillEvent:
     return FillEvent(
         fill_id=f"F-{fill_seq:06d}",
         order_id="O-000001",

@@ -143,7 +143,7 @@
       "name": "underscore_digits",
       "file": "rejected/underscore_digits.yaml",
       "expect": "reject",
-      "reason": "ambiguous_number_underscore"
+      "reason": "non_core_number"
     },
     {
       "name": "not_a_number",
@@ -234,6 +234,79 @@
       "file": "rejected/syntax_error.yaml",
       "expect": "reject",
       "reason": "syntax"
+    },
+    {
+      "name": "negative_zero",
+      "file": "accepted/negative_zero.yaml",
+      "expect": "accept",
+      "json": {
+        "a": 0.0,
+        "b": 0
+      }
+    },
+    {
+      "name": "enum_case_stays_string",
+      "file": "accepted/enum_case_stays_string.yaml",
+      "expect": "accept",
+      "json": {
+        "kind": "Momentum",
+        "side": "LONG_ONLY",
+        "method": "weighted_sum"
+      }
+    },
+    {
+      "name": "merge_key_inline_map",
+      "file": "rejected/merge_key_inline_map.yaml",
+      "expect": "reject",
+      "reason": "merge_key"
+    },
+    {
+      "name": "merge_key_root",
+      "file": "rejected/merge_key_root.yaml",
+      "expect": "reject",
+      "reason": "merge_key"
+    },
+    {
+      "name": "underscore_float",
+      "file": "rejected/underscore_float.yaml",
+      "expect": "reject",
+      "reason": "non_core_number"
+    },
+    {
+      "name": "underscore_exponent",
+      "file": "rejected/underscore_exponent.yaml",
+      "expect": "reject",
+      "reason": "non_core_number"
+    },
+    {
+      "name": "underscore_hex",
+      "file": "rejected/underscore_hex.yaml",
+      "expect": "reject",
+      "reason": "non_core_number"
+    },
+    {
+      "name": "trailing_underscore",
+      "file": "rejected/trailing_underscore.yaml",
+      "expect": "reject",
+      "reason": "non_core_number"
+    },
+    {
+      "name": "binary_literal",
+      "file": "rejected/binary_literal.yaml",
+      "expect": "reject",
+      "reason": "non_core_number"
+    },
+    {
+      "name": "tag_directive",
+      "file": "rejected/tag_directive.yaml",
+      "expect": "reject",
+      "reason": "directive"
+    },
+    {
+      "name": "integer_out_of_range",
+      "file": "rejected/integer_out_of_range.yaml",
+      "expect": "reject",
+      "reason": "integer_out_of_range"
     }
   ]
 }

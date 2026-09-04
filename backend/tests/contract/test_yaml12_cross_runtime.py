@@ -24,6 +24,7 @@ from ruamel.yaml import YAML
 from ruamel.yaml.composer import ComposerError
 from ruamel.yaml.constructor import DuplicateKeyError
 from ruamel.yaml.error import YAMLError
+from ruamel.yaml.nodes import ScalarNode
 from ruamel.yaml.tokens import (
     AliasToken,
     AnchorToken,
@@ -35,8 +36,15 @@ from ruamel.yaml.tokens import (
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents" / "yaml12"
 MANIFEST = json.loads((FIXTURES / "manifest.json").read_text(encoding="utf-8"))
 
-_UNDERSCORE_NUMBER = re.compile(r"^[+-]?[0-9][0-9_]*[0-9]$")
 _TIMESTAMP_TAG = "tag:yaml.org,2002:timestamp"
+_MERGE_TAG = "tag:yaml.org,2002:merge"
+_NUMBER_TAGS = ("tag:yaml.org,2002:int", "tag:yaml.org,2002:float")
+# YAML 1.2 core schema 숫자 표기. ruamel resolver는 1.1 잔재(`_` 구분자, `0b`)도 숫자로 읽지만
+# frontend(`yaml` core schema)는 문자열로 읽으므로 core 밖 표기는 거부한다.
+_CORE_INT = re.compile(r"^(?:[-+]?[0-9]+|0o[0-7]+|0x[0-9a-fA-F]+)$")
+_CORE_FLOAT = re.compile(r"^[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?$")
+_MAX_SAFE_INTEGER = 2**53 - 1  # frontend Number.isSafeInteger와 맞춘다.
+_NON_FINITE = re.compile(r"^(?:[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))$")
 
 
 class Yaml12Rejected(Exception):
@@ -66,18 +74,23 @@ def _scan_policy(text: str) -> None:
             raise Yaml12Rejected("anchor_or_alias", f"token={type(token).__name__}")
         if isinstance(token, TagToken):
             raise Yaml12Rejected("tag", f"tag={token.value}")
-        if (
-            isinstance(token, ScalarToken)
-            and token.plain
-            and "_" in token.value
-            and _UNDERSCORE_NUMBER.match(token.value)
-        ):
-            raise Yaml12Rejected("ambiguous_number_underscore", f"scalar={token.value!r}")
+        if isinstance(token, ScalarToken) and token.plain:
+            tag = loader.resolver.resolve(ScalarNode, token.value, (True, False))
+            if tag == _MERGE_TAG:
+                raise Yaml12Rejected("merge_key", f"scalar={token.value!r}")
+            if (
+                tag in _NUMBER_TAGS
+                and not _NON_FINITE.match(token.value)
+                and not (_CORE_INT.match(token.value) or _CORE_FLOAT.match(token.value))
+            ):
+                raise Yaml12Rejected("non_core_number", f"scalar={token.value!r}")
 
 
 def _check_tree(value: object, pointer: str) -> None:
     if isinstance(value, float) and not math.isfinite(value):
         raise Yaml12Rejected("non_finite_number", f"pointer={pointer} value={value!r}")
+    if isinstance(value, int) and not isinstance(value, bool) and abs(value) > _MAX_SAFE_INTEGER:
+        raise Yaml12Rejected("integer_out_of_range", f"pointer={pointer} value={value!r}")
     if isinstance(value, dict):
         for key, item in value.items():
             if not isinstance(key, str):
@@ -95,6 +108,7 @@ def load_yaml12_mapping(text: str) -> dict[str, Any]:
     except DuplicateKeyError as error:
         raise Yaml12Rejected("duplicate_key", str(error).splitlines()[0]) from error
     except ComposerError as error:
+        # 임시 문자열 매칭. P1-02 codec은 compose_all 문서 수로 판정한다.
         if "single document" in str(error):
             raise Yaml12Rejected("multiple_documents", str(error).splitlines()[0]) from error
         raise Yaml12Rejected("syntax", str(error).splitlines()[0]) from error

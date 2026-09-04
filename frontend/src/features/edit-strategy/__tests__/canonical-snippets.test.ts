@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { FactorDefinition } from "../../../shared/api";
+import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import {
   buildCanonicalSnippetCatalog,
   planSnippetEdit,
@@ -8,75 +9,9 @@ import {
 } from "../model/canonical-snippets";
 import type { JsonSchema } from "../model/schema-navigator";
 
-const SCHEMA: JsonSchema = {
-  type: "object",
-  properties: {
-    data: { $ref: "#/$defs/DataStep" },
-    factors: { $ref: "#/$defs/FactorStep" },
-    signal: { $ref: "#/$defs/SignalStep" },
-    risk: { $ref: "#/$defs/RiskStep" },
-    execution: { $ref: "#/$defs/ExecutionStep" },
-  },
-  $defs: {
-    DataStep: {
-      type: "object",
-      properties: {
-        market: { type: "string", enum: ["TEST"] },
-        start: { type: "string", format: "date" },
-        end: { type: "string", format: "date" },
-        universe_id: { type: "string", "x-catalog": "universe" },
-        frequency: { type: "string", default: "weekly" },
-      },
-      required: ["market", "start", "end", "universe_id"],
-    },
-    FactorStep: {
-      type: "object",
-      properties: {
-        factors: { type: "array", items: { $ref: "#/$defs/FactorSignal" } },
-      },
-      required: ["factors"],
-    },
-    FactorSignal: {
-      type: "object",
-      properties: {
-        factor_id: { type: "string" },
-        label: { type: "string" },
-        direction: { type: "string", enum: ["low", "high"] },
-        weight: { type: "number" },
-        graph: {
-          type: "object",
-          properties: {
-            nodes: { type: "array", items: { type: "object" } },
-            output_node_id: { type: "string" },
-          },
-          required: ["nodes", "output_node_id"],
-        },
-      },
-      required: ["factor_id", "label", "direction", "weight", "graph"],
-    },
-    SignalStep: {
-      type: "object",
-      properties: {
-        method: { type: "string", default: "rank_threshold" },
-        entry_percentile: { type: "number", default: 0.23 },
-      },
-    },
-    RiskStep: {
-      type: "object",
-      properties: {
-        max_name_weight: { type: "number", default: 0.27 },
-        sector_neutral: { type: "boolean", default: true },
-      },
-    },
-    ExecutionStep: {
-      type: "object",
-      properties: {
-        timing: { type: "string", default: "test_open" },
-        fee_bps: { type: "number", default: 7.5 },
-      },
-    },
-  },
-};
+const SCHEMA = JSON.parse(
+  readBackendFixture("strategy_documents/runtime-schema.json"),
+) as JsonSchema;
 
 const FACTOR: FactorDefinition = {
   availability: "implemented",
@@ -105,27 +40,34 @@ const findSnippet = (
   return snippet;
 };
 
+const catalog = (
+  schema: JsonSchema = SCHEMA,
+  factors: readonly FactorDefinition[] = [FACTOR],
+  status: "loading" | "ready" | "unavailable" = "ready",
+): CanonicalSnippet[] =>
+  buildCanonicalSnippetCatalog({ schema, factors, status });
+
 describe("canonical StrategySpec snippets", () => {
   it("projects all five areas, defaults and factor graphs only from backend contracts", () => {
-    const snippets = buildCanonicalSnippetCatalog(SCHEMA, [FACTOR]);
+    const snippets = catalog();
 
     expect(new Set(snippets.map((snippet) => snippet.category))).toEqual(
       new Set(["data", "factor", "signal", "risk", "execution"]),
     );
     expect(findSnippet(snippets, "section:data").value).toEqual({
-      market: "TEST",
+      market: "KRX",
       start: "",
       end: "",
       universe_id: "",
-      frequency: "weekly",
+      frequency: "daily",
     });
-    expect(findSnippet(snippets, "section:risk").value).toEqual({
-      max_name_weight: 0.27,
-      sector_neutral: true,
+    expect(findSnippet(snippets, "section:risk").value).toMatchObject({
+      max_name_weight: 0.1,
+      sector_neutral: false,
     });
-    expect(findSnippet(snippets, "section:execution").value).toEqual({
-      timing: "test_open",
-      fee_bps: 7.5,
+    expect(findSnippet(snippets, "section:execution").value).toMatchObject({
+      timing: "next_open",
+      fee_bps: 15,
     });
     expect(findSnippet(snippets, "factor:server.momentum").value).toEqual({
       factor_id: "server.momentum",
@@ -136,11 +78,47 @@ describe("canonical StrategySpec snippets", () => {
     });
   });
 
-  it("replaces a partial root key and validates the complete next YAML document", () => {
-    const snippet = findSnippet(
-      buildCanonicalSnippetCatalog(SCHEMA, [FACTOR]),
-      "section:signal",
+  it("fails closed for catalog-only, missing graph and incomplete authoring metadata", () => {
+    const unavailable = [
+      { ...FACTOR, availability: "catalog_only" as const },
+      { ...FACTOR, factor_id: "missing-graph", default_graph: null },
+    ];
+    expect(
+      catalog(SCHEMA, unavailable).filter(
+        (snippet) => snippet.kind === "factor",
+      ),
+    ).toEqual([]);
+
+    const broken = structuredClone(SCHEMA);
+    const defs = broken.$defs as Record<string, JsonSchema>;
+    const properties = defs.FactorSignal.properties as Record<
+      string,
+      JsonSchema
+    >;
+    delete properties.weight["x-authoring-default"];
+    expect(catalog(broken).some((snippet) => snippet.kind === "factor")).toBe(
+      false,
     );
+  });
+
+  it("skips a recursive schema branch instead of crashing catalog projection", () => {
+    const recursive: JsonSchema = {
+      type: "object",
+      properties: { risk: { $ref: "#/$defs/Loop" } },
+      $defs: {
+        Loop: {
+          type: "object",
+          properties: { self: { $ref: "#/$defs/Loop" } },
+          required: ["self"],
+        },
+      },
+    };
+    expect(catalog(recursive)).toEqual([]);
+    expect(catalog(SCHEMA, [FACTOR], "loading")).toEqual([]);
+  });
+
+  it("replaces a partial root key and validates the complete next YAML document", () => {
+    const snippet = findSnippet(catalog(), "section:signal");
     const source = 'schema_version: "1.0"\nsig';
     const result = planSnippetEdit(
       source,
@@ -152,7 +130,7 @@ describe("canonical StrategySpec snippets", () => {
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
     expect(result.edit.nextSource).toBe(
-      'schema_version: "1.0"\nsignal:\n  method: rank_threshold\n  entry_percentile: 0.23',
+      'schema_version: "1.0"\nsignal:\n  method: weighted_sum\n  entry_percentile: 0.1\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null',
     );
     expect(result.edit).toMatchObject({
       from: source.length - 3,
@@ -160,11 +138,41 @@ describe("canonical StrategySpec snippets", () => {
     });
   });
 
-  it("inserts a catalog factor as an indented array item at the cursor", () => {
-    const snippet = findSnippet(
-      buildCanonicalSnippetCatalog(SCHEMA, [FACTOR]),
-      "factor:server.momentum",
+  it("rejects a duplicate catalog factor without becoming a semantic validator", () => {
+    const snippet = findSnippet(catalog(), "factor:server.momentum");
+    const source =
+      "factors:\n  factors:\n    - factor_id: server.momentum\n    ";
+    expect(
+      planSnippetEdit(
+        source,
+        "yaml",
+        { from: source.length, to: source.length },
+        snippet,
+      ),
+    ).toEqual({ status: "error", reason: "duplicate" });
+  });
+
+  it.each([
+    ['schema_version: "1.0"\r\nsig\r\nrisk: {}\r\n', "\r\nrisk: {}\r\n"],
+    ['schema_version: "1.0"\r\nsig', ""],
+    ['schema_version: "1.0"\r\nsig\r\n\r\nrisk: {}', "\r\n\r\nrisk: {}"],
+  ])("preserves CRLF at a partial-key boundary", (source, suffix) => {
+    const snippet = findSnippet(catalog(), "section:signal");
+    const cursor = source.indexOf("sig") + 3;
+    const result = planSnippetEdit(
+      source,
+      "yaml",
+      { from: cursor, to: cursor },
+      snippet,
     );
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.edit.nextSource.endsWith(suffix)).toBe(true);
+    expect(result.edit.nextSource.replaceAll("\r\n", "")).not.toContain("\n");
+  });
+
+  it("inserts a catalog factor as an indented array item at the cursor", () => {
+    const snippet = findSnippet(catalog(), "factor:server.momentum");
     const source = 'schema_version: "1.0"\nfactors:\n  factors:\n    ';
     const result = planSnippetEdit(
       source,
@@ -185,10 +193,7 @@ describe("canonical StrategySpec snippets", () => {
   });
 
   it("fails without mutation for duplicate, selected, JSON and unsafe cursor contexts", () => {
-    const snippet = findSnippet(
-      buildCanonicalSnippetCatalog(SCHEMA, [FACTOR]),
-      "section:data",
-    );
+    const snippet = findSnippet(catalog(), "section:data");
     const duplicate = "data:\n  market: TEST\n";
     expect(
       planSnippetEdit(
@@ -199,6 +204,14 @@ describe("canonical StrategySpec snippets", () => {
       ),
     ).toEqual({ status: "error", reason: "duplicate" });
     expect(planSnippetEdit("", "yaml", { from: 0, to: 1 }, snippet)).toEqual({
+      status: "error",
+      reason: "selection",
+    });
+    expect(planSnippetEdit("", "yaml", { from: 1, to: 1 }, snippet)).toEqual({
+      status: "error",
+      reason: "selection",
+    });
+    expect(planSnippetEdit("", "yaml", { from: -1, to: -1 }, snippet)).toEqual({
       status: "error",
       reason: "selection",
     });

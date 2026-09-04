@@ -621,23 +621,29 @@
       "title": "FactorSignal",
       "properties": {
         "factor_id": {
-          "type": "string"
+          "type": "string",
+          "x-authoring-source": "factor_id",
+          "x-authoring-identity": true
         },
         "label": {
-          "type": "string"
+          "type": "string",
+          "x-authoring-source": "label"
         },
         "direction": {
           "type": "string",
           "enum": [
             "high",
             "low"
-          ]
+          ],
+          "x-authoring-source": "preference"
         },
         "weight": {
-          "type": "number"
+          "type": "number",
+          "x-authoring-default": 1.0
         },
         "graph": {
-          "$ref": "#/$defs/FactorGraph"
+          "$ref": "#/$defs/FactorGraph",
+          "x-authoring-source": "default_graph"
         }
       },
       "required": [

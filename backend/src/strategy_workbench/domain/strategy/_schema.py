@@ -16,6 +16,8 @@ Shape (JSON Schema 2020-12):
 - identifier fields carry `x-catalog` (equity-field, factor, universe, subgraph: complete from
   that catalog) or `x-reference` (node, parameter: complete from the document itself), read from
   the dataclass field metadata declared next to the field (P3-03).
+- required factor authoring fields carry `x-authoring-source` or `x-authoring-default`; this lets
+  clients project a catalog row without duplicating FactorSignal field names or starter values.
 """
 
 from __future__ import annotations
@@ -188,9 +190,16 @@ class _SchemaBuilder:
             constraint = self._constraints.get(child)
             if constraint is not None:
                 schema = {**schema, **_constraint_schema(constraint)}
-            for marker in ("catalog", "reference", "defines"):
+            for marker in (
+                "catalog",
+                "reference",
+                "defines",
+                "authoring-source",
+                "authoring-default",
+                "authoring-identity",
+            ):
                 if marker in field.metadata:
-                    schema = {**schema, f"x-{marker}": field.metadata[marker]}
+                    schema = {**schema, f"x-{marker}": _json_value(field.metadata[marker])}
             properties[field.name] = schema
             self._record_contract(child, hints[field.name], schema, has_default, default, branch)
         return {

@@ -1,3 +1,4 @@
+import { undo } from "@codemirror/commands";
 import { EditorView } from "@codemirror/view";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { createRef } from "react";
@@ -72,9 +73,19 @@ describe("CodeEditor", () => {
     });
   });
 
-  it("applies a range edit and its selection as one editor transaction", async () => {
+  it("isolates a range edit and its selection as one undoable transaction", async () => {
     const onSelectionChange = vi.fn();
     const { ref, onChange } = await mount({ onSelectionChange });
+    const content = document.querySelector<HTMLElement>(".cm-content");
+    const view = content ? EditorView.findFromDOM(content) : null;
+    expect(view).not.toBeNull();
+    act(() =>
+      view!.dispatch({
+        changes: { from: 7, to: 10, insert: "sig" },
+        selection: { anchor: 10 },
+        userEvent: "input.type",
+      }),
+    );
 
     act(() =>
       ref.current?.replaceRange(7, 10, '"changed"', {
@@ -90,6 +101,9 @@ describe("CodeEditor", () => {
       to: 16,
       documentChanged: true,
     });
+    act(() => expect(undo(view!)).toBe(true));
+    expect(ref.current?.getText()).toBe("title: sig\n");
+    expect(ref.current?.getSelection()).toEqual({ from: 10, to: 10 });
   });
 
   it("mirrors IME composition and marks diagnostics", async () => {

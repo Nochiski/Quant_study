@@ -8,6 +8,7 @@ import {
   historyField,
   historyKeymap,
   indentWithTab,
+  isolateHistory,
 } from "@codemirror/commands";
 import { json } from "@codemirror/lang-json";
 import { yaml } from "@codemirror/lang-yaml";
@@ -363,6 +364,7 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
           current.dispatch({
             changes: { from: safeFrom, to: safeTo, insert: text },
             selection: nextSelection,
+            annotations: isolateHistory.of("full"),
           });
         },
         getSelection: () => {

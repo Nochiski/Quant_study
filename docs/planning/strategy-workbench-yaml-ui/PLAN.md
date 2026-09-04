@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: SELF_CHECK
+project_status: IN_REVIEW
 current_phase: P4
 current_pr: P4-05
 active_prs: [P4-05]
 parallel_window: [P4-05]
-last_updated: 2026-09-05T05:21:24+09:00
+last_updated: 2026-09-05T05:22:28+09:00
 planned_prs: 50
 merged_prs: 36
 approved_prs: 36
@@ -22,13 +22,13 @@ progress_percent: 72
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `SELF_CHECK` |
+| Project status | `IN_REVIEW` |
 | Current phase | `P4` |
 | Current/next PR | `P4-05` |
 | Active PR | `P4-05` |
 | Progress | `36 / 50 merged (72%)` |
 | Approved | `36 / 50` |
-| Aggregated at | `2026-09-05 05:21 KST` |
+| Aggregated at | `2026-09-05 05:22 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -76,7 +76,7 @@ progress_percent: 72
 | P1.5 | Backtest Correctness Gate | 5 | 5 | `MERGED` |
 | P2 | App Shell and visual foundation | 4 | 4 | `MERGED` |
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
-| P4 | Outline, Contract, Projections | 10 | 5 | `SELF_CHECK` |
+| P4 | Outline, Contract, Projections | 10 | 5 | `IN_REVIEW` |
 | P5 | Truthful Trace UI | 3 | 0 | `WAITING` |
 | P6 | Professional release and migration | 7 | 1 | `WAITING` |
 | **Total** |  | **50** | **36** | **72%** |
@@ -86,7 +86,7 @@ progress_percent: 72
 
 | 항목 | 값 |
 |---|---|
-| PR | `P4-05` Canonical snippet model and editor transaction SELF_CHECK |
+| PR | `P4-05` Canonical snippet model and editor transaction IN_REVIEW |
 | Intent | backend runtime schema/catalog에서 canonical data/factor/signal/risk/execution snippet edit을 파생하고 editor-agnostic 단일 transaction 계약으로 안전하게 적용할 기반을 만든다 |
 | Acceptance | schema/default/enum과 coherent factor graph 무복제 projection; cursor 위치·indentation 인식; 문자열 append가 아닌 CodeMirror range transaction; 전체 YAML 1.2 parse preflight; undo/selection 보존 |
 | Non-goals | 카탈로그 표시·page wiring(P4-10), expression DSL, graph 직접 편집(P4-07), source 전체 재직렬화, frontend 수기 StrategySpec 모델 |
@@ -200,7 +200,7 @@ Phase exit:
 | [x] | `P4-02` | Backend metadata 기반 Contract Inspector | P3-03, P1-05 | `MERGED` | [#53](https://github.com/Nochiski/Quant_study/pull/53) · `review_p4_02` APPROVE |
 | [x] | `P4-03` | Problems panel, filter, editor jump | P3-04 | `MERGED` | [#55](https://github.com/Nochiski/Quant_study/pull/55) · `review_p4_03` APPROVE |
 | [x] | `P4-04` | Backend Execution Plan query·version gate·source mapping model | P3-05, P4-02 | `MERGED` | [#57](https://github.com/Nochiski/Quant_study/pull/57) · `review_p4_04` APPROVE · `25d8b45` |
-| [ ] | `P4-05` | Canonical node snippet insertion | P3-02, P1-05 | `SELF_CHECK` | code freeze `d3068fc` |
+| [ ] | `P4-05` | Canonical node snippet insertion | P3-02, P1-05 | `IN_REVIEW` | [#59](https://github.com/Nochiski/Quant_study/pull/59) · `review_p4_05` 검토 중 |
 | [ ] | `P4-06` | Read-only canonical JSON과 Form projection | P3-05 | `WAITING` | — |
 | [ ] | `P4-07` | Read-only FactorGraph DAG projection | P4-01, P3-05 | `WAITING` | — |
 | [ ] | `P4-08` | Source/semantic/revision Diff와 conflict resolution | P1-08, P3-07 | `WAITING` | — |
@@ -294,7 +294,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
-| P4-05 | canonical snippet·CodeEditor transaction·outline 16 passed | frontend typecheck·lint·vitest 296·build; editor gzip 136.61 KB | generated API 변경 없음 | schema enum/default와 factor graph projection, partial root key·factor array indentation, duplicate/selection/JSON/context fail-safe, single edit-owned selection 검증 | PR/reviewer 대기 | 2026-09-05 |
+| P4-05 | canonical snippet·CodeEditor transaction·outline 16 passed | frontend typecheck·lint·vitest 296·build; editor gzip 136.61 KB | generated API 변경 없음 | schema enum/default와 factor graph projection, partial root key·factor array indentation, duplicate/selection/JSON/context fail-safe, single edit-owned selection 검증 | [#59](https://github.com/Nochiski/Quant_study/pull/59) reviewer/CI 대기 | 2026-09-05 |
 | P4-09 | execution query·panel projection 21 passed; reviewer focused 46 passed | frontend typecheck·lint·vitest 291·build; real backend PIT E2E 포함 | generated API 변경 없음 | backend step 순서·input/output type/unit·history·registry/dataset·fingerprint 표시, 모든 blocked/loading/error/incompatible/invalid 상태, factor/node/input pointer와 route selection 검증 | [#58](https://github.com/Nochiski/Quant_study/pull/58) `review_p4_09` APPROVE, latest CI 4/4 pass, MERGED (`8a2ebfc`) | 2026-09-05 |
 | P4-04 | backend factor HTTP·truthful pipeline·raw port·equity HTTP 47, frontend orchestration 7 passed | backend 903·Ruff·Pyright; frontend 277·typecheck·lint·build | OpenAPI/SDK 재생성 deterministic·clean | explain↔portfolio plan 전체 동등성, 공개 category catalog↔raw loader, 숫자 group 동일 코드 거부, sector group completed/tape hash, metadata/raw snapshot mismatch, category·boolean·scalar output 실행 차단까지 검증 | [#57](https://github.com/Nochiski/Quant_study/pull/57) 동일 reviewer APPROVE, latest CI 4/4 pass, MERGED (`25d8b45`) | 2026-09-05 |
 | P6-07 | root delegate 4 + 실제 server HTTP smoke 1 + backend entrypoint/architecture 8 passed | backend pytest 896·ruff·pyright; frontend typecheck·lint·vitest 270·build; root test 5·ruff·pyright·locks | generated API 변경 없음 | root `npm run dev` HTTP 200, root `uv run server --port 42810` health 200·reload·Ctrl+C, backend/root help 동일 | [#56](https://github.com/Nochiski/Quant_study/pull/56) latest backend/frontend 중복 CI 4 pass, reviewer 최종 APPROVE, MERGED (`84d7c88`) | 2026-09-05 |
@@ -330,6 +330,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | P4-05 #59를 공개하고 code freeze `d3068fc`를 fresh review-only agent `review_p4_05`에 전달하기 위해 IN_REVIEW로 전환. 리뷰 중 core 구현 diff를 고정하며 blocking finding은 같은 reviewer에게 재검토 요청 예정 | PR별 독립 reviewer 정확히 1명·13.3~13.4 review gate |
 | 2026-09-05 KST | Codex | P4-05 core를 `d3068fc`에 freeze. runtime schema의 property/default/enum과 caller가 제공한 coherent factor catalog graph만 투영하고, root partial key·기존 factor array의 cursor indentation을 보존한 전체 YAML 1.2 preflight edit을 editor-agnostic 단일 transaction으로 적용. focused 16, frontend 296, typecheck·lint·build 통과 후 SELF_CHECK 전환 | schema/factor SoT·projection/edit/editor 책임분리·600줄 gate·P4-05 acceptance |
 | 2026-09-05 KST | Codex | P4-05 초기 diff가 UI/page까지 포함해 1,250줄이 된 것을 self-check에서 확인. P4-05를 schema/catalog projection·cursor/indent edit plan·YAML preflight·editor transaction core 584줄로 고정하고, 사용자 표시·page composition·i18n은 P4-10으로 분리해 총 50 PR로 조정 | PR 600줄 원칙·snippet 의미와 표시/페이지 책임분리·독립 review 검출력 |
 | 2026-09-05 KST | Codex | #58 P4-09를 독립 reviewer 승인과 latest PLAN-only HEAD backend/frontend CI 통과 후 main에 병합(`8a2ebfc`), 36/49(73%). 최신 main에서 P4-05 전용 worktree를 만들고 backend runtime schema/catalog를 SoT로 하는 canonical snippet transaction 구현을 시작 | 13.6 merge gate·schema/catalog SoT·editor transaction 책임분리 |

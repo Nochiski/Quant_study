@@ -1,4 +1,7 @@
-"""P1-04 constraint catalog: one owner for scalar bounds shared by validation and contract schema."""
+"""P1-04 constraint catalog.
+
+One owner for scalar bounds, shared by semantic validation and the contract schema.
+"""
 
 from __future__ import annotations
 

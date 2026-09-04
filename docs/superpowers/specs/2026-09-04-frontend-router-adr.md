@@ -59,6 +59,10 @@ TanStack Query 통합(`loader`에서 `queryClient.ensureQueryData`)과 error bou
 - 기본값은 URL에 쓰지 않는다. `validateSearch`는 기본값을 채우지 않고 page가 읽을 때
   `search.view ?? "yaml"`로 적용한다. 기본값을 채우면 `/research/strategies/new` 같은 모든 공유 링크가
   mount 시 `?view=yaml…`로 확장(replace)된다.
+- `validateSearch`는 **멱등**이어야 한다. router는 검증된 search에 `validateSearch`를 다시 적용한다
+  (Transitioner mount의 `_includeValidateSearch`, navigate의 `buildLocation`). `run: search.run !== undefined`
+  같은 boolean 기본값은 두 번째 적용에서 `false`→`true`로 뒤집히고 URL에 `run=false`를 쓴다. 없는 값은
+  `undefined`로 돌려준다. legacy page는 `query.get("run") === "true"`로 읽는다 (P2-02 메모).
 - `loaderDeps`에 view/path/asOf/security를 넣지 않는다. match id는 `route.id + path + loaderDepsHash`라
   search-only 변경이 page remount와 loader 재실행을 일으키지 않게 한다.
 

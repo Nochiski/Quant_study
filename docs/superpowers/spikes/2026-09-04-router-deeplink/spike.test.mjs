@@ -40,9 +40,11 @@ const buildRouter = (initial) => {
   const legacy = createRoute({
     getParentRoute: () => root,
     path: "/legacy/builder",
+    // 멱등이어야 한다: router가 검증된 search에 validateSearch를 다시 적용한다. boolean 기본값(false)을
+    // 돌려주면 `run=false`가 URL에 쓰이고, legacy 편집기는 `query.has("run")`으로 판정해 backtest step으로 튄다.
     validateSearch: (search) => ({
       step: typeof search.step === "string" ? search.step : undefined,
-      run: search.run !== undefined,
+      run: search.run !== undefined ? true : undefined,
     }),
   });
   const newStrategy = createRoute({
@@ -137,6 +139,9 @@ test("legacy entry keeps its query and back/forward works on memory history", as
   router.history.forward();
   await router.load();
   assert.equal(router.state.location.pathname, "/research/backtests/r1");
+  // 기본값은 URL에 쓰지 않는다: `run` 없이 진입하면 `run=false`가 생기면 안 된다 (ADR D1).
+  await router.navigate({ to: "/legacy/builder", search: { step: "portfolio", run: undefined } });
+  assert.equal(router.state.location.searchStr, "?step=portfolio");
 });
 
 test("index beforeLoad redirects bare / to the new strategy route", () => {

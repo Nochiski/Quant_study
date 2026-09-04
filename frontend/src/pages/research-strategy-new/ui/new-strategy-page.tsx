@@ -1,29 +1,88 @@
+import { useEffect } from "react";
+
 import {
+  DirtyLeaveGuard,
+  SaveAction,
   SourceEditor,
+  saveStatusText,
+  saveStatusTone,
+  useSaveDocument,
   useStrategyDocument,
+  type DocumentSource,
 } from "../../../features/edit-strategy";
 import { t } from "../../../shared/config";
+import { useNavigate } from "../../../shared/lib/router";
 import { Badge } from "../../../shared/ui";
 import { StrategyIde } from "../../../widgets/strategy-ide";
 
 const STARTER = 'schema_version: "1.0"\ntitle: ""\n';
+const NEW_DRAFT: DocumentSource = {
+  kind: "new",
+  format: "yaml",
+  source: STARTER,
+};
 
 /**
- * New-strategy entry: the concept frame with the source editor bound to the document state
- * machine. The revision-aware loader (P2-04) and toolbar/save (P3-05) build on this.
+ * New-strategy entry (WORKFLOW P2-04): a draft with no base. Saving creates the strategy, after
+ * which the URL moves to revision 1 so a reload lands on the saved document (router ADR D3).
  */
 export const NewStrategyPage = () => {
-  const [document, dispatch] = useStrategyDocument("yaml", STARTER);
+  const navigate = useNavigate();
+  const [document, dispatch] = useStrategyDocument(NEW_DRAFT);
+  const { save, status, canSave } = useSaveDocument(document, dispatch);
+
+  // If the user types while create is in flight, stay on this page and preserve the newer text.
+  // A second save appends it to the newly created strategy; navigate only once the current text
+  // is the saved base. This gives P2-04 lossless behavior without depending on P3-06 autosave.
+  const leaving =
+    document.strategyId !== null &&
+    document.baseRevision !== null &&
+    !document.dirty;
+
+  useEffect(() => {
+    if (
+      !leaving ||
+      document.strategyId === null ||
+      document.baseRevision === null
+    )
+      return;
+    void navigate({
+      to: "/research/strategies/$strategyId/revisions/$revision",
+      params: {
+        strategyId: document.strategyId,
+        revision: String(document.baseRevision),
+      },
+      search: {
+        view: undefined,
+        path: undefined,
+        asOf: undefined,
+        security: undefined,
+      },
+      replace: true,
+    });
+  }, [leaving, document.strategyId, document.baseRevision, navigate]);
+
   return (
-    <StrategyIde
-      title={t("page.newStrategy.title")}
-      versionLabel={t("page.newStrategy.draft")}
-      badges={<Badge tone="info">{t("page.newStrategy.draft")}</Badge>}
-      view={document.format}
-      // JSON projection/editing arrives with the revision-aware document loader. Until then,
-      // exposing an enabled tab without a view transition is a broken control.
-      availableViews={["yaml"]}
-      editor={<SourceEditor state={document} dispatch={dispatch} />}
-    />
+    <>
+      <StrategyIde
+        title={t("page.newStrategy.title")}
+        versionLabel={t("page.newStrategy.draft")}
+        badges={<Badge tone="info">{t("page.newStrategy.draft")}</Badge>}
+        saveStatus={saveStatusText(document, status)}
+        saveTone={saveStatusTone(document, status)}
+        view={document.format}
+        availableViews={[document.format]}
+        editorActions={
+          <SaveAction
+            canSave={canSave}
+            saving={status.kind === "saving"}
+            onSave={save}
+          />
+        }
+        editor={<SourceEditor state={document} dispatch={dispatch} />}
+        runDisabled
+      />
+      <DirtyLeaveGuard dirty={document.dirty && !leaving} />
+    </>
   );
 };

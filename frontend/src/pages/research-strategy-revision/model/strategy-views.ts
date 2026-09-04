@@ -8,7 +8,11 @@ export const STRATEGY_VIEWS = [
 ] as const;
 export type StrategyView = (typeof STRATEGY_VIEWS)[number];
 
-/** Views the page can actually render today; the rest arrive with P3/P4. */
-export const IMPLEMENTED_VIEWS = [
+/**
+ * Views the revision page can render today: the stored source and its JSON projection.
+ * Form, graph and diff arrive with P4.
+ */
+export const PROJECTION_VIEWS = [
+  "yaml",
   "json",
 ] as const satisfies readonly StrategyView[];

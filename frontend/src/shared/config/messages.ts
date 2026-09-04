@@ -303,6 +303,23 @@ const ko = {
   "ide.debugger.difference": "차이",
   "ide.debugger.pitPassed": "PIT 검증 통과",
   "ide.debugger.pitDetail": "분포, 결측, 극단값 검증을 통과했습니다.",
+  "save.action": "저장",
+  "save.saving": "저장 중…",
+  "save.unsaved": "저장되지 않은 변경",
+  "save.empty": "비어 있음",
+  "save.savedRevision": "저장됨",
+  "save.conflict":
+    "충돌: 다른 곳에서 새 리비전이 저장되었습니다. 최신 리비전을 연 뒤 다시 저장하세요.",
+  "save.invalid": "저장 실패: 문서 검증 오류",
+  "save.blocked.syntax": "구문 오류가 있어 저장할 수 없습니다",
+  "save.blocked.invalid": "검증 오류가 있어 저장할 수 없습니다",
+  "save.failed": "저장 실패: 서버에 연결할 수 없습니다",
+  "leave.title": "저장하지 않은 변경이 있습니다",
+  "leave.description": "이 화면을 떠나면 편집 중인 내용이 사라집니다.",
+  "leave.stay": "머무르기",
+  "leave.leave": "나가기",
+  "page.revision.untitled": "제목 없는 전략",
+  "page.revision.generated": "legacy JSON에서 생성된 문서",
 } as const;
 
 export type MessageKey = keyof typeof ko;
@@ -615,6 +632,23 @@ export const messages = {
     "ide.debugger.pitPassed": "PIT check passed",
     "ide.debugger.pitDetail":
       "Distribution, missing values and outliers checked.",
+    "save.action": "Save",
+    "save.saving": "Saving…",
+    "save.unsaved": "Unsaved changes",
+    "save.empty": "Empty",
+    "save.savedRevision": "Saved",
+    "save.conflict":
+      "Conflict: a newer revision was saved elsewhere. Open the latest revision and save again.",
+    "save.invalid": "Save failed: document validation error",
+    "save.blocked.syntax": "Cannot save: syntax error",
+    "save.blocked.invalid": "Cannot save: validation errors",
+    "save.failed": "Save failed: the server could not be reached",
+    "leave.title": "You have unsaved changes",
+    "leave.description": "Leaving this screen discards what you are editing.",
+    "leave.stay": "Stay",
+    "leave.leave": "Leave",
+    "page.revision.untitled": "Untitled strategy",
+    "page.revision.generated": "Generated from legacy JSON",
   } satisfies Record<MessageKey, string>,
 } as const;
 

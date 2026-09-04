@@ -53,20 +53,38 @@ const spec = (revision: number, title: string) => ({
   parameters: [],
 });
 
+const document = (revision: number, title: string) => ({
+  strategy_id: "s1",
+  revision,
+  schema_version: "1.0",
+  format: "yaml",
+  source: `schema_version: "1.0"
+title: ${title}
+`,
+  source_hash: "b".repeat(64),
+  spec: spec(revision, title),
+  spec_hash: "a".repeat(64),
+  origin: "document",
+  generated: false,
+  created_at: "2026-09-04T00:00:00+00:00",
+});
+
 const server = setupServer(
-  http.get(`${API}/api/v1/strategies/:strategyId`, ({ params, request }) => {
-    const revision = Number(new URL(request.url).searchParams.get("revision"));
-    if (params.strategyId !== "s1" || revision > 2) {
+  http.get(
+    `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
+    ({ params }) => {
+      const revision = Number(params.revision);
+      if (params.strategyId !== "s1" || revision > 2) {
+        return HttpResponse.json(
+          { detail: { code: "strategy.not_found", message: "missing" } },
+          { status: 404 },
+        );
+      }
       return HttpResponse.json(
-        { detail: { code: "strategy.not_found", message: "missing" } },
-        { status: 404 },
+        document(revision, `퀄리티 모멘텀 v${revision}`),
       );
-    }
-    return HttpResponse.json({
-      spec: spec(revision, `퀄리티 모멘텀 v${revision}`),
-      spec_hash: "a".repeat(64),
-    });
-  }),
+    },
+  ),
   http.get(`${API}/api/v1/backtests/:runId`, ({ params }) =>
     HttpResponse.json({
       run_id: params.runId,
@@ -152,13 +170,14 @@ describe("App Shell routes", () => {
     expect(
       await screen.findByRole("heading", { name: "퀄리티 모멘텀 v2" }),
     ).toBeInTheDocument();
-    // The diff view is not implemented yet: JSON is shown, the URL keeps the request, a notice says so.
-    expect(screen.getByRole("tab", { name: "JSON" })).toHaveAttribute(
+    // The diff view is not implemented yet: the stored YAML is shown, the URL keeps the request,
+    // a notice says so.
+    expect(screen.getByRole("tab", { name: "YAML" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
-    expect(screen.getByRole("status")).toHaveTextContent("DIFF");
-    expect(screen.getByRole("tabpanel")).toBeInTheDocument();
+    expect(screen.getByText(/DIFF/)).toBeInTheDocument();
+    expect(screen.getAllByRole("tabpanel").length).toBeGreaterThan(0);
     expect(history.location.search).toContain("view=diff");
     expect(history.location.search).toContain("path=%2Frisk");
   });
@@ -167,7 +186,7 @@ describe("App Shell routes", () => {
     const history = mount("/research/strategies/s1/revisions/1?view=bogus");
     await screen.findByRole("heading", { name: "퀄리티 모멘텀 v1" });
     await waitFor(() => expect(history.location.search).not.toContain("view"));
-    expect(screen.getByRole("tab", { name: "JSON" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "YAML" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
@@ -207,16 +226,16 @@ describe("App Shell routes", () => {
 
   it("shows loading inside the shell and a localised error with a way back on 500", async () => {
     server.use(
-      http.get(`${API}/api/v1/strategies/:strategyId`, async ({ request }) => {
-        await delay(300);
-        if (new URL(request.url).searchParams.get("revision") === "2") {
-          return HttpResponse.json({ detail: "boom" }, { status: 500 });
-        }
-        return HttpResponse.json({
-          spec: spec(1, "느린 전략"),
-          spec_hash: "b".repeat(64),
-        });
-      }),
+      http.get(
+        `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
+        async ({ params }) => {
+          await delay(300);
+          if (params.revision === "2") {
+            return HttpResponse.json({ detail: "boom" }, { status: 500 });
+          }
+          return HttpResponse.json(document(1, "느린 전략"));
+        },
+      ),
     );
     mount("/research/strategies/s1/revisions/1");
     expect(await screen.findByRole("status")).toHaveTextContent("불러오는 중");

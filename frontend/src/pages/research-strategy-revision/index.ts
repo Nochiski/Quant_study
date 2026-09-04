@@ -1,5 +1,5 @@
 export {
-  IMPLEMENTED_VIEWS,
+  PROJECTION_VIEWS,
   STRATEGY_VIEWS,
   type StrategyView,
 } from "./model/strategy-views";

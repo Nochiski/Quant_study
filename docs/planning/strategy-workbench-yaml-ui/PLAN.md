@@ -3,14 +3,14 @@ plan_version: 2
 project: yaml-strategy-workbench-ui
 project_status: IN_REVIEW
 current_phase: P2,P3
-current_pr: P2-04,P3-02,P3-03,P3-04,P3-05,P3-06,P3-07
-active_prs: [P2-04, P3-02, P3-03, P3-04, P3-05, P3-06, P3-07]
-parallel_window: [P3-02, P2-04, P3-03, P3-04, P3-05, P3-06, P3-07]
-last_updated: 2026-09-04T21:20:11+09:00
+current_pr: P2-04,P3-03,P3-04,P3-05,P3-06,P3-07
+active_prs: [P2-04, P3-03, P3-04, P3-05, P3-06, P3-07]
+parallel_window: [P2-04, P3-03, P3-04, P3-05, P3-06, P3-07]
+last_updated: 2026-09-04T21:30:32+09:00
 planned_prs: 47
-merged_prs: 23
-approved_prs: 23
-progress_percent: 49
+merged_prs: 24
+approved_prs: 24
+progress_percent: 51
 ---
 
 # YAML Strategy Workbench 실시간 진행 계획
@@ -24,11 +24,11 @@ progress_percent: 49
 |---|---|
 | Project status | `IN_REVIEW` |
 | Current phase | `P2,P3` |
-| Current/next PR | `P2-04,P3-02,P3-03,P3-04,P3-05,P3-06,P3-07` |
-| Active PR | `P2-04, P3-02, P3-03, P3-04, P3-05, P3-06, P3-07` |
-| Progress | `23 / 47 merged (49%)` |
-| Approved | `23 / 47` |
-| Aggregated at | `2026-09-04 21:20 KST` |
+| Current/next PR | `P2-04,P3-03,P3-04,P3-05,P3-06,P3-07` |
+| Active PR | `P2-04, P3-03, P3-04, P3-05, P3-06, P3-07` |
+| Progress | `24 / 47 merged (51%)` |
+| Approved | `24 / 47` |
+| Aggregated at | `2026-09-04 21:30 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -75,11 +75,11 @@ progress_percent: 49
 | P1 | Backend Authoring Contract | 10 | 10 | `MERGED` |
 | P1.5 | Backtest Correctness Gate | 5 | 5 | `MERGED` |
 | P2 | App Shell and visual foundation | 4 | 3 | `IN_REVIEW` |
-| P3 | YAML Editor MVP | 7 | 1 | `IN_REVIEW` |
+| P3 | YAML Editor MVP | 7 | 2 | `IN_REVIEW` |
 | P4 | Outline, Contract, Projections | 8 | 0 | `WAITING` |
 | P5 | Truthful Trace UI | 3 | 0 | `WAITING` |
 | P6 | Professional release and migration | 6 | 0 | `WAITING` |
-| **Total** |  | **47** | **23** | **49%** |
+| **Total** |  | **47** | **24** | **51%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
@@ -179,7 +179,7 @@ Phase exit:
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [x] | `P3-01` | YAML 1.2 document state machine과 CST path index | P0-03, P1-03, P1-05 | `MERGED` | `review_p3_01` + `review_p3_01_final` APPROVE · [#41](https://github.com/Nochiski/Quant_study/pull/41) |
-| [ ] | `P3-02` | Lazy code editor adapter와 worker lifecycle | P0-02, P2-03 | `IN_REVIEW` | `review_p3_02` · [#42](https://github.com/Nochiski/Quant_study/pull/42) |
+| [x] | `P3-02` | Lazy code editor adapter와 worker lifecycle | P0-02, P2-03 | `MERGED` | `review_p3_02` + `review_p3_02_final` APPROVE · [#42](https://github.com/Nochiski/Quant_study/pull/42) |
 | [ ] | `P3-03` | Runtime schema 구조 검증·completion·hover | P3-01, P3-02, P1-05 | `IN_REVIEW` | `review_p3_03` · [#44](https://github.com/Nochiski/Quant_study/pull/44) |
 | [ ] | `P3-04` | Backend semantic diagnostic marker와 stale response 차단 | P3-03, P1-03 | `IN_REVIEW` | `review_p3_04` · [#45](https://github.com/Nochiski/Quant_study/pull/45) |
 | [ ] | `P3-05` | Dirty/base hash에 따른 saved reference 또는 inline draft Backtest | P3-04, P1-07, P1-09, P1.5-04, P2-04 | `IN_REVIEW` | `review_p3_05` · [#46](https://github.com/Nochiski/Quant_study/pull/46) |
@@ -250,6 +250,7 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
+| P3-02 | `review_p3_02` + `review_p3_02_final` | `d52885b` | `21ba0fa` | APPROVE (latest main 기준 lazy CodeMirror·설정 compartment·history·IME·diagnostic clamp·번들 예산 재검토) | 0 | 실제 브라우저 IME/Android EditContext E2E, entry chunk 500 kB 경고, selection clamp는 후속 추적 | 2026-09-04 |
 | P3-01 | `review_p3_01` + `review_p3_01_final` | `f5c4309` | `8b49212` | APPROVE (backend와 diagnostic code owner 정합화 후 문서 epoch/version·IME·stale 응답 재검토) | 0 | 큰 문서 동기 parse 비용, reason 집합의 cross-runtime drift 방지 강화는 P6-04 후속 | 2026-09-04 |
 | P2-03 | `review_p2_03` + `review_p2_03_final` | `2d7bcb5` | `7aa7e10` | APPROVE (좁은 화면 nav 시각 상태·ARIA 정합, outline pending 중립색 재검토) | 0 | 실제 브라우저 viewport·시각 회귀와 panel preference 영속성은 P6-03~P6-05 | 2026-09-04 |
 | P2-02 | `review_p2_02` + `review_p2_02_final` | `08726e3` | `49495fd` | APPROVE (latest main 기준 router·App Shell·접근성 재검토) | 0 | hard-reload fallback은 배포 E2E, revision safe-integer 상한 후속 가능 | 2026-09-04 |
@@ -278,6 +279,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
+| P3-02 | CodeMirror adapter 4 passed | frontend typecheck·lint·vitest 160·build | 해당 없음 | lazy load·undo history·IME cleanup·Escape/Tab/ARIA 검토, editor gzip 136.37 kB | [#42](https://github.com/Nochiski/Quant_study/pull/42) backend/frontend 중복 실행 4개 pass, MERGED | 2026-09-04 |
 | P3-01 | YAML parse·cross-runtime·document-state 91 passed, backend codec parity 101 passed | frontend typecheck·lint·vitest 156·build | 해당 없음 | IME·stale parse/compile/save 상태 전이 검토 | [#41](https://github.com/Nochiski/Quant_study/pull/41) backend/frontend 중복 실행 4개 pass, MERGED | 2026-09-04 |
 | P2-03 | responsive App Shell·Strategy IDE 18 passed | frontend typecheck·lint·vitest 108·build | 해당 없음 | 1279px 이하 초기 축소·토글 복원, pending 중립색 확인 | [#40](https://github.com/Nochiski/Quant_study/pull/40) backend/frontend 중복 실행 4개 pass, MERGED | 2026-09-04 |
 | P2-02 | router 8 passed | frontend typecheck·lint·vitest 98·build | 해당 없음 | direct entry·legacy redirect·operations flag 확인 | [#39](https://github.com/Nochiski/Quant_study/pull/39) backend/frontend 중복 실행 4개 pass, MERGED | 2026-09-04 |
@@ -300,6 +302,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-04 KST | Codex | #42 P3-02를 latest main 기준 독립 재검토하여 blocker 0, frontend 160·build와 원격 CI 4개, editor gzip 136.37 kB 예산 통과 후 main 병합(0b89cfd) | 인수 후 merge gate |
 | 2026-09-04 KST | Codex | #41 P3-01의 frontend parser diagnostic code를 backend wire owner(`document.*`/`yaml.*`/format syntax)와 정합화. 동일 리뷰어 재검토 blocker 0, frontend 156·backend codec parity 101·원격 CI 4개 통과 후 main 병합(d52885b) | 인수 후 merge gate |
 | 2026-09-04 KST | Codex | #40 P2-03의 responsive nav 상태·ARIA 불일치와 가짜 성공색을 수정하고 동일 리뷰어 재검토 blocker 0, frontend 108·build와 원격 CI 4개 통과 후 main 병합(f5c4309) | 인수 후 merge gate |
 | 2026-09-04 KST | Codex | #39 P2-02를 main 대상으로 전환해 독립 재리뷰 blocker 0, frontend 98·build와 원격 CI 4개 통과 후 main 병합(2d7bcb5) | 인수 후 merge gate |

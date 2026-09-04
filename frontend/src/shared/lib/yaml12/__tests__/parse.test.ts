@@ -152,6 +152,19 @@ describe("parseSource", () => {
     }
   });
 
+  it.each([
+    ['a: "\\ud800"\nb: &x 1\n', "yaml.anchor_or_alias"],
+    ['a: "\\ud800"\nb: 1_000\n', "yaml.non_core_number"],
+    ['? ["\\ud800"]\n: value\n', "yaml.non_string_key"],
+    ['a: "\\ud800"\na: 2\n', "yaml.syntax"],
+    ['a: 1\na: "\\ud800"\n', "yaml.duplicate_key"],
+  ])(
+    "matches backend rejection order for combined policies: %s",
+    (source, code) => {
+      expect(parseSource(source, "yaml").diagnostics[0]?.code).toBe(code);
+    },
+  );
+
   it("rejects tabs used as YAML separation whitespace", () => {
     for (const text of ["a: \tv\n", "a:\n\tv: 1\n", "a: foo\tbar\n"]) {
       expect(parseSource(text, "yaml").diagnostics[0]?.code).toBe(

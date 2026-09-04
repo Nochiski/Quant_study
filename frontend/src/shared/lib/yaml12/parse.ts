@@ -133,6 +133,80 @@ const errorRange = (
   error: { pos: [number, number] },
 ): SourceRange => lines.range(error.pos[0], error.pos[1]);
 
+/** Mirror the backend codec's node walk after all scanner policies have completed. */
+const rejectTreePolicy = (
+  node: Node | null,
+  lines: LineIndex,
+  pointer = "",
+): void => {
+  if (!node) return;
+  if (isMap(node)) {
+    const seen = new Set<string>();
+    for (const pair of node.items as Pair<Node, Node | null>[]) {
+      if (!isScalar(pair.key) || typeof pair.key.value !== "string") {
+        throw new Yaml12Rejected(
+          "non_string_key",
+          `key=${String(pair.key)}`,
+          rangeOf(lines, pair.key as Node),
+        );
+      }
+      const key = pair.key.value;
+      const child = `${pointer}/${escapePointer(key)}`;
+      if (LONE_SURROGATE.test(key)) {
+        throw new Yaml12Rejected(
+          "syntax",
+          `key contains an unpaired surrogate escape — pointer=${child}`,
+          rangeOf(lines, pair.key),
+        );
+      }
+      if (seen.has(key)) {
+        throw new Yaml12Rejected(
+          "duplicate_key",
+          `duplicate key — key=${key}`,
+          rangeOf(lines, pair.key),
+        );
+      }
+      seen.add(key);
+      rejectTreePolicy(pair.value, lines, child);
+    }
+    return;
+  }
+  if (isSeq(node)) {
+    (node.items as (Node | null)[]).forEach((item, index) =>
+      rejectTreePolicy(item, lines, `${pointer}/${index}`),
+    );
+    return;
+  }
+  if (!isScalar(node)) return;
+  if (typeof node.value === "string" && LONE_SURROGATE.test(node.value)) {
+    throw new Yaml12Rejected(
+      "syntax",
+      `string contains an unpaired surrogate escape — pointer=${pointer}`,
+      rangeOf(lines, node),
+    );
+  }
+  if (typeof node.value === "number" && !Number.isFinite(node.value)) {
+    throw new Yaml12Rejected(
+      "non_finite_number",
+      `value=${String(node.value)}`,
+      rangeOf(lines, node),
+    );
+  }
+  if (
+    typeof node.value === "number" &&
+    node.source !== undefined &&
+    node.type === "PLAIN" &&
+    CORE_INT.test(node.source) &&
+    !Number.isSafeInteger(node.value)
+  ) {
+    throw new Yaml12Rejected(
+      "integer_out_of_range",
+      `value=${String(node.value)}`,
+      rangeOf(lines, node),
+    );
+  }
+};
+
 const rejectPolicy = (doc: Document, lines: LineIndex): void => {
   // Same order as the backend: syntax → directive → tag → tree policy (anchor/alias, merge
   // key, non-string key, number shapes) → duplicate key. Duplicates are the *last* check so a
@@ -201,13 +275,6 @@ const rejectPolicy = (doc: Document, lines: LineIndex): void => {
     Scalar(_key, node) {
       rejectAnchorOrTag(lines, node);
       const source = node.source;
-      if (typeof node.value === "string" && LONE_SURROGATE.test(node.value)) {
-        throw new Yaml12Rejected(
-          "syntax",
-          "string contains an unpaired surrogate escape",
-          rangeOf(lines, node),
-        );
-      }
       if (node.type === "PLAIN" && source === "<<") {
         throw new Yaml12Rejected(
           "merge_key",
@@ -227,47 +294,9 @@ const rejectPolicy = (doc: Document, lines: LineIndex): void => {
           );
         }
       }
-      if (typeof node.value === "number" && !Number.isFinite(node.value)) {
-        throw new Yaml12Rejected(
-          "non_finite_number",
-          `value=${String(node.value)}`,
-          rangeOf(lines, node),
-        );
-      }
-      if (
-        typeof node.value === "number" &&
-        source !== undefined &&
-        node.type === "PLAIN" &&
-        CORE_INT.test(source) &&
-        !Number.isSafeInteger(node.value)
-      ) {
-        throw new Yaml12Rejected(
-          "integer_out_of_range",
-          `value=${String(node.value)}`,
-          rangeOf(lines, node),
-        );
-      }
     },
   });
-  // Walk-level rule, after every scan-level rule above (backend `_walk` order).
-  visit(doc, {
-    Pair(_key, pair) {
-      if (!isScalar(pair.key) || typeof pair.key.value !== "string") {
-        throw new Yaml12Rejected(
-          "non_string_key",
-          `key=${String(pair.key)}`,
-          rangeOf(lines, pair.key as Node),
-        );
-      }
-    },
-  });
-  for (const error of doc.errors) {
-    throw new Yaml12Rejected(
-      "duplicate_key",
-      error.message,
-      errorRange(lines, error),
-    );
-  }
+  rejectTreePolicy(doc.contents as Node | null, lines);
 };
 
 type Budget = { nodes: number };

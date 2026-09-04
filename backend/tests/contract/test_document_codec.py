@@ -172,9 +172,26 @@ def test_json_syntax_errors_report_json_positions() -> None:
     assert (diagnostic.range.start.line, diagnostic.range.start.column) == (1, 6)
 
 
-def test_json_duplicate_keys_are_rejected_like_yaml() -> None:
-    parsed = _codec().parse('{"a": 1, "a": 2}', format=SourceFormat.JSON)
-    assert parsed.diagnostics[0].code == "yaml.duplicate_key"
+def test_json_duplicate_keys_are_rejected_with_the_second_key_range() -> None:
+    source = '{"a": 1,\n "a": 2}'
+    parsed = _codec().parse(source, format=SourceFormat.JSON)
+
+    (diagnostic,) = parsed.diagnostics
+    assert diagnostic.code == "yaml.duplicate_key"
+    assert diagnostic.pointer == "/a"
+    assert diagnostic.range is not None
+    assert (diagnostic.range.start.line, diagnostic.range.start.column) == (1, 1)
+
+    nested = _codec().parse('{"x": {"a": 1, "b": 2, "a": 3}}', format=SourceFormat.JSON)
+    assert nested.diagnostics[0].pointer == "/x/a"
+
+
+def test_json_non_mapping_root_keeps_the_root_range() -> None:
+    parsed = _codec().parse("[1, 2]", format=SourceFormat.JSON)
+
+    assert parsed.diagnostics[0].code == "yaml.not_a_mapping"
+    assert parsed.diagnostics[0].range is not None
+    assert parsed.diagnostics[0].range.start.column == 0
 
 
 def test_json_values_come_from_the_json_parser_not_ruamel() -> None:
@@ -184,6 +201,30 @@ def test_json_values_come_from_the_json_parser_not_ruamel() -> None:
     escaped = _codec().parse('{"title": "x\\ud83d\\ude00y"}', format=SourceFormat.JSON)
     assert escaped.ok and escaped.tree is not None
     assert escaped.tree["title"] == "x\U0001f600y"  # one astral code point, not two surrogates
+
+
+def test_yaml_escaped_surrogate_pairs_become_one_code_point_and_lone_ones_fail() -> None:
+    paired = _codec().parse('title: "x\\ud83d\\ude00y"\n', format=SourceFormat.YAML)
+    assert paired.ok and paired.tree is not None
+    assert paired.tree["title"] == "x\U0001f600y"
+
+    lone = _codec().parse('title: "x\\ud83dy"\n', format=SourceFormat.YAML)
+    assert lone.status is ParseStatus.REJECTED
+    assert lone.diagnostics[0].code == "yaml.syntax"
+    assert lone.diagnostics[0].pointer == "/title"
+
+    key = _codec().parse('"\\ud83d\\ude00": 1\n', format=SourceFormat.YAML)
+    assert key.ok and key.tree is not None
+    assert set(key.tree) == {"\U0001f600"}
+    assert "/\U0001f600" in key.value_ranges
+
+
+def test_syntax_error_wins_over_an_earlier_policy_violation() -> None:
+    parsed = _codec().parse('%YAML 1.2\n---\na: "unterminated\n', format=SourceFormat.YAML)
+    assert parsed.diagnostics[0].code == "yaml.syntax"
+
+    tagged = _codec().parse("a: !custom 1\nb: [1, 2\n", format=SourceFormat.YAML)
+    assert tagged.diagnostics[0].code == "yaml.syntax"
 
 
 def test_unpaired_surrogates_in_source_are_rejected_not_raised() -> None:

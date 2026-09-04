@@ -1,15 +1,15 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: IN_REVIEW
+project_status: APPROVED
 current_phase: P4
 current_pr: P4-01
 active_prs: [P4-01]
 parallel_window: [P4-01]
-last_updated: 2026-09-05T00:28:15+09:00
+last_updated: 2026-09-05T00:30:33+09:00
 planned_prs: 47
 merged_prs: 30
-approved_prs: 30
+approved_prs: 31
 progress_percent: 64
 ---
 
@@ -22,13 +22,13 @@ progress_percent: 64
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_REVIEW` |
+| Project status | `APPROVED` |
 | Current phase | `P4` |
 | Current/next PR | `P4-01` |
 | Active PR | `P4-01` |
 | Progress | `30 / 47 merged (64%)` |
-| Approved | `30 / 47` |
-| Aggregated at | `2026-09-05 00:28 KST` |
+| Approved | `31 / 47` |
+| Aggregated at | `2026-09-05 00:30 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -76,7 +76,7 @@ progress_percent: 64
 | P1.5 | Backtest Correctness Gate | 5 | 5 | `MERGED` |
 | P2 | App Shell and visual foundation | 4 | 4 | `MERGED` |
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
-| P4 | Outline, Contract, Projections | 8 | 0 | `IN_REVIEW` |
+| P4 | Outline, Contract, Projections | 8 | 0 | `APPROVED` |
 | P5 | Truthful Trace UI | 3 | 0 | `WAITING` |
 | P6 | Professional release and migration | 6 | 0 | `WAITING` |
 | **Total** |  | **47** | **30** | **64%** |
@@ -86,7 +86,7 @@ progress_percent: 64
 
 | 항목 | 값 |
 |---|---|
-| PR | `P4-01` Strategy Outline과 cursor 양방향 연동, [#52](https://github.com/Nochiski/Quant_study/pull/52) IN_REVIEW |
+| PR | `P4-01` Strategy Outline과 cursor 양방향 연동, [#52](https://github.com/Nochiski/Quant_study/pull/52) APPROVED |
 | Intent | runtime source path index를 소비해 parameters를 포함한 전체 전략 tree를 만들고 tree↔editor selection을 한 owner로 연결한다 |
 | Acceptance | parse error 중 가능한 subtree 유지, array index와 node ID 구분, ARIA tree keyboard navigation, 기존 editor undo/source 보존 |
 | Non-goals | Contract metadata(P4-02), Problems filter(P4-03), Graph 편집(P4-07) |
@@ -196,7 +196,7 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P4-01` | Parameters를 포함한 Strategy Outline과 cursor 연동 | P3-03 | `IN_REVIEW` | [#52](https://github.com/Nochiski/Quant_study/pull/52) · `review_p4_01` |
+| [ ] | `P4-01` | Parameters를 포함한 Strategy Outline과 cursor 연동 | P3-03 | `APPROVED` | [#52](https://github.com/Nochiski/Quant_study/pull/52) · `review_p4_01` APPROVE |
 | [ ] | `P4-02` | Backend metadata 기반 Contract Inspector | P3-03, P1-05 | `WAITING` | — |
 | [ ] | `P4-03` | Problems panel, filter, editor jump | P3-04 | `WAITING` | — |
 | [ ] | `P4-04` | Backend Execution Plan과 source/graph 연동 | P3-05 | `WAITING` | — |
@@ -250,7 +250,7 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
-| P4-01 | `review_p4_01` | `30baf41` | `be8c183` | REQUEST_CHANGES 2회 → IN_REVIEW (P1 누적 6건 수정, 동일 reviewer 3차 검토 대기) | 6 (수정, 재검토 대기) | route identity 전환 1-frame·대형 spec 성능·초기 invalid 빈 outline은 비차단 후속 위험 | 2026-09-05 |
+| P4-01 | `review_p4_01` | `30baf41` | `be8c183` | APPROVE (REQUEST_CHANGES 2회, P1 누적 6건 수정 후 동일 reviewer 3차 승인) | 6 (해소) | route identity 전환 1-frame·대형 spec 성능·초기 invalid 빈 outline은 비차단 후속 위험 | 2026-09-05 |
 | P3-07 | `review_p3_07` + `review_p3_07_latest` | `8b7b1a4` | `c1951b6` | APPROVE (stale conflict identity와 latest revision 이중 추론 P1 2건을 structured contract 단방향으로 수정 후 승인) | 2 (해소) | malformed/null latest revision은 fail-closed, 대형 diff 렌더링은 P4-08에서 보강 | 2026-09-04 |
 | P3-06 | `review_p3_06` + `review_p3_06_latest` | `4a3dc14` | `201479c` | APPROVE (저장 중 후속 편집의 pre-save key, 복구 identity fail-closed, diff baseline owner P1 3건 수정 후 승인) | 3 (해소) | 수동 원복 시 기존 autosave 잔존, 다중 탭 `new` key 조정, main bundle 경고는 후속 | 2026-09-04 |
 | P3-05 | `review_p3_05` + `review_p3_05_latest` | `0167fb9` | `b1c5c51` | APPROVE (saved/inline provenance와 invalid/stale 차단 재검토, dirty orphan run·stale route overwrite P1 2건 수정 후 승인) | 2 (해소) | 폐기된 응답의 서버 run은 향후 history에서 회수, disabled tooltip·transport 문구·main bundle은 후속 | 2026-09-04 |
@@ -316,6 +316,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | `review_p4_01` 3차 재검토에서 pending cursor의 documentEpoch·routePointer·targetSourceVersion exact match와 이전 P1 5건을 모두 재확인하여 APPROVE, P0/P1 0 판정. P4-01을 APPROVED로 전환하고 최신 원격 CI merge gate 확인 차수로 진입 | 독립 reviewer 승인·13.6 merge gate |
 | 2026-09-05 KST | Codex | P4-01 2차 리뷰의 남은 P1 1건을 `be8c183`에서 수정: pending edit cursor를 캡처 당시 URL path와 정확한 target sourceVersion에 귀속하고, direct URL/back-forward가 같은 commit에 도착하거나 parser debounce가 version을 건너뛰면 오래된 offset을 폐기. 재현 2경로를 hook test로 고정하고 focused 38·전체 frontend 232·typecheck·lint·build 통과 후 동일 reviewer 3차 검토로 전환 | URL selection SoT·document identity·동일 reviewer 재검토 |
 | 2026-09-05 KST | Codex | `review_p4_01`이 P1 5건을 발견: collection/root selection 재발행, edit cursor stale path, collapse focus·roving tabindex·ARIA ownership, frontend `_id` identity 추론, malformed JSON Pointer 보존. `75570fb`에서 programmatic transaction 1회 소비·fresh sourceVersion parse 후 cursor 재매핑·collapse origin 분리·visible tree roving·treeitem/group 포함 관계·`x-defines` 전용 identity·shared RFC 6901 validator로 모두 수정. focused 37, 전체 frontend 231, typecheck·lint·build 통과 후 동일 reviewer 재검토 차수로 전환 | 13.3·SoT/책임분리·동일 reviewer 재검토 |
 | 2026-09-04 KST | Codex | P4-01 구현을 `bc84510`으로 freeze하고 #52 공개: backend runtime schema와 parser source map을 정본으로 하는 Strategy Outline, URL-owned JSON Pointer↔CodeMirror 양방향 연결, same-epoch 오류 보존, schema `x-defines` 기반 index/semantic ID 분리, ARIA tree keyboard 구현. frontend 227·build 통과 후 `review_p4_01` 독립 리뷰 배정 | 13.3·SoT/책임분리 |

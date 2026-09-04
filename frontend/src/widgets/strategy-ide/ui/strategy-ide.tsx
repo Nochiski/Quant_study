@@ -42,6 +42,10 @@ export type StrategyIdeProps = {
   runDisabled?: boolean;
   /** The source editor slot (P3). */
   editor: ReactNode;
+  /** Source tab whose editor must stay mounted while read-only projections are selected. */
+  sourceView?: "yaml" | "json";
+  /** Stable read-only tab content keyed by representation. */
+  projections?: Partial<Record<SourceView, ReactNode>>;
   /** Strategy document outline projection (P4-01). */
   outline?: ReactNode;
   /** P4-10 catalog UI; the P4-05 feature model owns schema projection and insertion. */
@@ -80,6 +84,8 @@ export const StrategyIde = ({
   onRunBacktest,
   runDisabled = false,
   editor,
+  sourceView,
+  projections,
   outline,
   snippets,
   editorActions,
@@ -370,7 +376,13 @@ export const StrategyIde = ({
                 className="ide__editor-panel"
                 hidden={id !== view}
               >
-                {id === view ? editor : null}
+                {sourceView === undefined
+                  ? id === view
+                    ? editor
+                    : null
+                  : id === sourceView
+                    ? editor
+                    : projections?.[id]}
               </div>
             ))}
           </section>

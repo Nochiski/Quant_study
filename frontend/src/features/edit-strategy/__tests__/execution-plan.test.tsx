@@ -166,6 +166,7 @@ const currentState = (): DocumentState => ({
   compiledVersion: 2,
   compiled: {
     spec: SPEC,
+    canonicalJson: JSON.stringify(SPEC),
     specHash: "s".repeat(64),
     schemaVersion: "1.0",
     sourceHash: "x".repeat(64),
@@ -284,6 +285,14 @@ describe("execution plan orchestration", () => {
     expect(prepareExecutionPlans(stale, METADATA)).toEqual({
       status: "blocked",
       reason: "stale",
+    });
+    const incomplete = {
+      ...currentState(),
+      compiled: { ...currentState().compiled!, canonicalJson: null },
+    };
+    expect(prepareExecutionPlans(incomplete, METADATA)).toEqual({
+      status: "blocked",
+      reason: "invalid",
     });
     expect(
       prepareExecutionPlans(currentState(), {

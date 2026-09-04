@@ -1,5 +1,5 @@
 import type { InlineDraft, SavedRevisionReference } from "../../../shared/api";
-import { currentSpec, type DocumentState } from "./document-state";
+import { currentCompile, type DocumentState } from "./document-state";
 
 /**
  * What a backtest started from this editor would run (WORKFLOW P3-05):
@@ -27,12 +27,8 @@ export const decideBacktestSource = (
   const compiledIsCurrent =
     state.compiled !== null && state.compiledVersion === state.sourceVersion;
   if (!compiledIsCurrent) return { kind: "blocked", reason: "stale" };
-  const spec = currentSpec(state);
-  if (
-    spec === null ||
-    state.compiled === null ||
-    state.compiled.specHash === null
-  ) {
+  const compiled = currentCompile(state);
+  if (compiled === null) {
     return { kind: "blocked", reason: "invalid" };
   }
   if (
@@ -40,7 +36,7 @@ export const decideBacktestSource = (
     state.strategyId !== null &&
     state.baseRevision !== null &&
     state.baseSpecHash !== null &&
-    state.compiled.specHash === state.baseSpecHash
+    compiled.specHash === state.baseSpecHash
   ) {
     return {
       kind: "saved_revision",
@@ -56,8 +52,8 @@ export const decideBacktestSource = (
     kind: "inline_draft",
     draft: {
       kind: "inline_draft",
-      spec,
-      source_hash: state.compiled.sourceHash || null,
+      spec: compiled.spec,
+      source_hash: compiled.sourceHash || null,
     },
   };
 };

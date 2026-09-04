@@ -1,4 +1,4 @@
-/** Representations of one StrategySpec (authoring ADR D6); selection lives in the URL. */
+/** Representations of one StrategySpec; the active view is route-owned URL state. */
 export const STRATEGY_VIEWS = [
   "yaml",
   "json",
@@ -6,13 +6,12 @@ export const STRATEGY_VIEWS = [
   "graph",
   "diff",
 ] as const;
+
 export type StrategyView = (typeof STRATEGY_VIEWS)[number];
 
-/**
- * Views the revision page can render today: the stored source and its JSON projection.
- * Form, graph and diff arrive with P4.
- */
+/** Source plus the read-only projections available after P4-06. */
 export const PROJECTION_VIEWS = [
   "yaml",
   "json",
+  "form",
 ] as const satisfies readonly StrategyView[];

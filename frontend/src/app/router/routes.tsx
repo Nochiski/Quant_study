@@ -11,13 +11,13 @@ import {
 } from "@tanstack/react-router";
 
 import { strategyDocumentQuery } from "../../entities/strategy";
-import { ApiRequestError } from "../../shared/api";
-import { OperationsPlaceholderPage } from "../../pages/operations-placeholder";
-import { BacktestRunPage } from "../../pages/research-backtest";
 import {
   STRATEGY_VIEWS,
   type StrategyView,
-} from "../../pages/research-strategy-revision/model/strategy-views";
+} from "../../features/edit-strategy";
+import { ApiRequestError } from "../../shared/api";
+import { OperationsPlaceholderPage } from "../../pages/operations-placeholder";
+import { BacktestRunPage } from "../../pages/research-backtest";
 import {
   NotFoundPage,
   RouteErrorPage,
@@ -58,8 +58,7 @@ const strategyDocumentSearch = (
         ? path
         : undefined,
     asOf: typeof search.asOf === "string" ? search.asOf : undefined,
-    security:
-      typeof search.security === "string" ? search.security : undefined,
+    security: typeof search.security === "string" ? search.security : undefined,
   };
 };
 
@@ -104,7 +103,11 @@ const indexRoute = createRoute({
     if (search.step !== undefined || search.run !== undefined) {
       throw redirect({ to: "/legacy/builder", search, replace: true });
     }
-    throw redirect({ to: "/research/strategies/new", search: {}, replace: true });
+    throw redirect({
+      to: "/research/strategies/new",
+      search: {},
+      replace: true,
+    });
   },
 });
 

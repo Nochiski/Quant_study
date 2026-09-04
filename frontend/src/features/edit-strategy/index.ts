@@ -6,18 +6,30 @@ export { RiskEditor } from "./ui/risk-editor";
 export { ExecutionEditor } from "./ui/execution-editor";
 export {
   currentDiagnostics,
+  currentCompile,
   currentSpec,
   documentReducer,
   initialDocumentState,
   isSpecStale,
+  isCompleteCompileOutcome,
   shouldCompile,
   shouldParse,
   type CompileOutcome,
+  type CompleteCompileOutcome,
   type DocumentAction,
   type DocumentDiagnostic,
   type DocumentPhase,
   type DocumentState,
 } from "./model/document-state";
+export {
+  PROJECTION_VIEWS,
+  STRATEGY_VIEWS,
+  type StrategyView,
+} from "./model/strategy-views";
+export {
+  projectStrategySpec,
+  type StrategyProjection,
+} from "./model/strategy-projection";
 export { useStrategyDocument } from "./model/use-strategy-document";
 export {
   documentSourceKey,
@@ -65,6 +77,7 @@ export { StrategyOutline } from "./ui/strategy-outline";
 export { ContractInspector } from "./ui/contract-inspector";
 export { ExecutionPlanPanel } from "./ui/execution-plan-panel";
 export { SnippetCatalog } from "./ui/snippet-catalog";
+export { StrategyProjectionPanel } from "./ui/strategy-projection-panel";
 export {
   projectContractField,
   projectContractInspector,

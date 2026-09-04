@@ -86,7 +86,7 @@ progress_percent: 16
 
 | 항목 | 값 |
 |---|---|
-| PR | `P1-02`→…→`P1-09` stack (main 트리 + worktrees `Quant_study-p1-05`, `Quant_study-p1-06`; P1-02 4차 확인 대기, P1-03 APPROVED, P1-05~09 IN_REVIEW) + `P2-01`→`P2-02`→`P2-03`→`P3-01` (worktree `Quant_study-p2-01`, IN_REVIEW) |
+| PR | `P1-02`→…→`P1-09` stack (main 트리 + worktrees `Quant_study-p1-05`, `Quant_study-p1-06`; P1-02 4차 확인 대기, P1-03 APPROVED, P1-05~09 IN_REVIEW) + `P2-01`→`P2-02`→`P2-03`→`P3-01`→`P3-02` (worktree `Quant_study-p2-01`, IN_REVIEW) |
 | Intent | P1-02: DocumentCodecPort + ruamel codec(source map, 정책 거부, 제한), manifest를 codec으로 검증. P1-04: scalar constraint catalog 단일 owner, validator가 catalog 소비, EXPRESSION_NODE_KINDS |
 | Acceptance | 번들 크기·IME·schema completion 기준 비교표, 최종 선택과 rollback 방법, 이후 PR dependency 기록 |
 | Non-goals | editor 의존성 설치·UI 코드 변경 (P3-02), parser (P0-03), router (P0-04) |
@@ -173,7 +173,7 @@ Phase exit:
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [ ] | `P3-01` | YAML 1.2 document state machine과 CST path index | P0-03, P1-03, P1-05 | `IN_REVIEW` | `review_p3_01` |
-| [ ] | `P3-02` | Lazy code editor adapter와 worker lifecycle | P0-02, P2-03 | `WAITING` | — |
+| [ ] | `P3-02` | Lazy code editor adapter와 worker lifecycle | P0-02, P2-03 | `IN_REVIEW` | `review_p3_02` |
 | [ ] | `P3-03` | Runtime schema 구조 검증·completion·hover | P3-01, P3-02, P1-05 | `WAITING` | — |
 | [ ] | `P3-04` | Backend semantic diagnostic marker와 stale response 차단 | P3-03, P1-03 | `WAITING` | — |
 | [ ] | `P3-05` | Dirty/base hash에 따른 saved reference 또는 inline draft Backtest | P3-04, P1-07, P1-09, P1.5-04, P2-04 | `WAITING` | — |
@@ -274,6 +274,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-04 KST | Claude | P3-02 착수·diff freeze 579bce8 (branch `feat/p3-02-code-editor`, P3-01 위; CodeMirror 6 pin, editor chunk gzip 136 KB ≤ 200 KB 예산; typecheck·lint·vitest 124·build clean), review_p3_02(opus) 배정 → IN_REVIEW | 13.3 |
 | 2026-09-04 KST | Claude | P3-01 착수·diff freeze eebf6e3 (branch `feat/p3-01-document-state`, P2-03 위; 8 files +1075/−137; typecheck·lint·vitest 120·build clean), review_p3_01(opus) 배정 → IN_REVIEW | 13.3 |
 | 2026-09-04 KST | Claude | P2-03 착수·diff freeze (branch `feat/p2-03-ide-layout`, P2-02 위; typecheck·lint·vitest 98·build clean), review_p2_03(opus) 배정 → IN_REVIEW | 13.3 |
 | 2026-09-04 KST | Claude | P2-02 착수·diff freeze 9cab283 (branch `feat/p2-02-app-shell`, P2-01 위; 29 files +1118/−16; typecheck·lint·vitest 94·build clean; @tanstack/react-router 1.170.32 추가), review_p2_02(opus) 배정 → IN_REVIEW | 13.3 |

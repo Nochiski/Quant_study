@@ -9,6 +9,7 @@ import {
   RecoveryBanner,
   SourceEditor,
   saveStatusText,
+  saveStatusTone,
   useAutosave,
   useCompileDocument,
   useRunBacktest,
@@ -62,28 +63,23 @@ export const StrategyRevisionPage = () => {
       ? document.compiled
       : null;
 
+  // A successful revise moves the URL to the new revision; the query cache already holds it and
+  // the page is not remounted, so the text (including edits made while saving) stays. `leaving`
+  // is derived from the URL lagging the base, so the guard sees `dirty=false` before the
+  // navigation fires: a save that just succeeded is not a "leave".
+  const leaving =
+    document.strategyId === strategyId &&
+    document.baseRevision !== null &&
+    document.baseRevision !== Number(revision);
   useEffect(() => {
-    if (
-      document.strategyId !== strategyId ||
-      document.baseRevision === null ||
-      document.baseRevision === Number(revision)
-    ) {
-      return;
-    }
+    if (!leaving || document.baseRevision === null) return;
     void navigate({
       to: ROUTE,
       params: { strategyId, revision: String(document.baseRevision) },
       search: { ...search },
       replace: true,
     });
-  }, [
-    document.strategyId,
-    document.baseRevision,
-    strategyId,
-    revision,
-    search,
-    navigate,
-  ]);
+  }, [leaving, document.baseRevision, strategyId, search, navigate]);
 
   const availableViews: readonly StrategyView[] =
     stored.format === "yaml" ? PROJECTION_VIEWS : ["json"];
@@ -114,6 +110,7 @@ export const StrategyRevisionPage = () => {
           specHash: current?.specHash ?? null,
         }}
         saveStatus={saveStatusText(document, status)}
+        saveTone={saveStatusTone(document, status)}
         onRunBacktest={() => void backtest.run()}
         runDisabled={!backtest.canRun}
         view={view}
@@ -180,7 +177,7 @@ export const StrategyRevisionPage = () => {
           </>
         }
       />
-      <DirtyLeaveGuard dirty={document.dirty} />
+      <DirtyLeaveGuard dirty={document.dirty && !leaving} />
     </>
   );
 };

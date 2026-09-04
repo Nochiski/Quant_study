@@ -386,6 +386,8 @@ const ko = {
   "conflict.diff.kind": "변경",
   "conflict.diff.before": "이전",
   "conflict.diff.after": "이후",
+  "save.blocked.syntax": "구문 오류가 있어 저장할 수 없습니다",
+  "save.blocked.invalid": "검증 오류가 있어 저장할 수 없습니다",
 } as const;
 
 export type MessageKey = keyof typeof ko;
@@ -783,6 +785,8 @@ export const messages = {
     "conflict.diff.kind": "Change",
     "conflict.diff.before": "Before",
     "conflict.diff.after": "After",
+    "save.blocked.syntax": "Cannot save: syntax error",
+    "save.blocked.invalid": "Cannot save: validation errors",
   } satisfies Record<MessageKey, string>,
 } as const;
 

@@ -34,6 +34,8 @@ export type StrategyIdeProps = {
   };
   /** Save status text in the top bar, e.g. "방금 저장됨". */
   saveStatus?: string;
+  /** Tone of that status: decides the icon in front of it (default ok). */
+  saveTone?: "ok" | "warn" | "error";
   onRunBacktest?: () => void;
   runDisabled?: boolean;
   /** The source editor slot (P3). */
@@ -71,6 +73,7 @@ export const StrategyIde = ({
   badges,
   meta,
   saveStatus,
+  saveTone = "ok",
   onRunBacktest,
   runDisabled = false,
   editor,
@@ -170,7 +173,10 @@ export const StrategyIde = ({
         <div className="ide__topbar-status" role="status">
           {saveStatus ? (
             <>
-              <span aria-hidden="true">✓</span> {saveStatus}
+              <span aria-hidden="true">
+                {saveTone === "error" ? "✕" : saveTone === "warn" ? "!" : "✓"}
+              </span>{" "}
+              {saveStatus}
             </>
           ) : null}
         </div>

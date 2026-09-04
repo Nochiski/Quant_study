@@ -10,7 +10,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { HttpResponse, http } from "msw";
+import { HttpResponse, delay, http } from "msw";
 import { setupServer } from "msw/node";
 import {
   afterAll,
@@ -514,5 +514,65 @@ describe("revision conflict (P3-07)", () => {
     expect(history.location.pathname).toBe(
       "/research/strategies/s1/revisions/1",
     );
+  });
+});
+
+describe("dirty guard follow-ups (P2-04 review)", () => {
+  it("lets a same-route view switch through while dirty, and only prompts on a real leave", async () => {
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2");
+    const view = await editor();
+    replaceText(view, `${STORED}description: 편집 중\n`);
+    await user.click(screen.getByRole("tab", { name: "JSON" }));
+    await waitFor(() => expect(history.location.search).toContain("view=json"));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "JSON" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await user.click(screen.getByRole("link", { name: "기존 편집기" }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(globalThis.document.activeElement).toBe(
+      within(dialog).getByRole("button", { name: "머무르기" }),
+    );
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(history.location.pathname).toBe(
+      "/research/strategies/s1/revisions/2",
+    );
+  });
+
+  it("keeps text typed while a create is in flight as the new revision's local draft", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post(`${API}/api/v1/strategy-documents`, async ({ request }) => {
+        const body = (await request.json()) as { source: string };
+        await delay(150);
+        return HttpResponse.json(document("s9", 1, body.source, "새 전략 A"), {
+          status: 201,
+        });
+      }),
+    );
+    localStorage.clear();
+    const history = mount("/research/strategies/new");
+    const view = await editor();
+    replaceText(view, 'schema_version: "1.0"\ntitle: 새 전략 A\n');
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "리비전 저장" })).toBeEnabled(),
+    );
+    await user.click(screen.getByRole("button", { name: "리비전 저장" }));
+    replaceText(
+      view,
+      'schema_version: "1.0"\ntitle: 새 전략 A\ndescription: 나중에 친 글\n',
+    );
+    await waitFor(() =>
+      expect(history.location.pathname).toBe(
+        "/research/strategies/s9/revisions/1",
+      ),
+    );
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    // The revision page offers the in-flight edits back as a recovered draft.
+    const banner = await screen.findByRole("region", { name: "복구본" });
+    expect(banner).toHaveTextContent("+description: 나중에 친 글");
   });
 });

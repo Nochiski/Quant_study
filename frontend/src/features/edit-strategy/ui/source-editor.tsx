@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { t } from "../../../shared/config";
 import { Badge } from "../../../shared/ui";
@@ -37,9 +37,10 @@ const PHASE_TONE = {
  */
 export const SourceEditor = ({ state, dispatch }: SourceEditorProps) => {
   const handle = useRef<CodeEditorHandle>(null);
-  const histories = useRef<Partial<Record<DocumentState["format"], unknown>>>(
-    {},
-  );
+  // Undo history per format, captured when a format's editor unmounts (view switch).
+  const [histories, setHistories] = useState<
+    Partial<Record<DocumentState["format"], unknown>>
+  >({});
 
   const diagnostics = useMemo<EditorDiagnostic[]>(
     () =>
@@ -75,8 +76,10 @@ export const SourceEditor = ({ state, dispatch }: SourceEditorProps) => {
 
   useEffect(() => {
     const format = state.format;
+    const editor = handle.current;
     return () => {
-      histories.current[format] = handle.current?.getHistoryState();
+      const snapshot = editor?.getHistoryState();
+      setHistories((previous) => ({ ...previous, [format]: snapshot }));
     };
   }, [state.format]);
 
@@ -102,7 +105,7 @@ export const SourceEditor = ({ state, dispatch }: SourceEditorProps) => {
         onChange={onChange}
         onComposingChange={onComposingChange}
         diagnostics={diagnostics}
-        initialHistoryState={histories.current[state.format]}
+        initialHistoryState={histories[state.format]}
       />
     </div>
   );

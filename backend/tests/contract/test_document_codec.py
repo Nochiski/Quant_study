@@ -1,0 +1,200 @@
+"""P1-02 document codec contract.
+
+exact source hash, JSON-compatible tree, source map and fail-closed policy.
+ADR: docs/superpowers/specs/2026-09-04-yaml-parser-adr.md
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from pathlib import Path
+
+import pytest
+
+from strategy_workbench.adapters.outbound.document_codec.facade.codec import RuamelDocumentCodec
+from strategy_workbench.application.strategy_authoring.facade.ports import (
+    CodecLimits,
+    DiagnosticKind,
+    ParseStatus,
+    SourceFormat,
+)
+from strategy_workbench.domain.strategy.facade.document import hydrate_strategy_document
+from strategy_workbench.domain.strategy.facade.specification import (
+    StrategyIdentity,
+    strategy_spec_hash,
+)
+
+FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
+QUALITY_MOMENTUM_SPEC_HASH = "9eb6872a3ca250dfb78b0887e5b236a98b24fb2ccdf2d6af0540218d49e998fe"
+
+
+def _source(name: str) -> str:
+    return (FIXTURES / name).read_text(encoding="utf-8")
+
+
+def _codec(**limits: int) -> RuamelDocumentCodec:
+    return RuamelDocumentCodec(CodecLimits(**limits) if limits else None)
+
+
+def test_yaml_with_comments_parses_to_the_same_tree_as_json() -> None:
+    codec = _codec()
+    yaml_doc = codec.parse(_source("quality_momentum.yaml"), format=SourceFormat.YAML)
+    json_doc = codec.parse(_source("quality_momentum.json"), format=SourceFormat.JSON)
+
+    assert yaml_doc.ok and json_doc.ok
+    assert yaml_doc.tree is not None and json_doc.tree is not None
+    yaml_tree = json.loads(json.dumps(yaml_doc.tree))
+    assert yaml_tree["risk"] == {"max_name_weight": 0.05}
+    assert yaml_tree["factors"]["factors"][0]["graph"]["nodes"][1]["window"] == 252
+    # The JSON twin spells some defaults out; both hydrate to the same spec hash below.
+    assert yaml_doc.tree["title"] == json_doc.tree["title"]
+
+
+def test_codec_output_hydrates_to_the_golden_spec_hash() -> None:
+    codec = _codec()
+    identity = StrategyIdentity("draft", 0)
+    for name, fmt in [
+        ("quality_momentum.yaml", SourceFormat.YAML),
+        ("quality_momentum.json", SourceFormat.JSON),
+    ]:
+        parsed = codec.parse(_source(name), format=fmt)
+        assert parsed.tree is not None
+        hydrated = hydrate_strategy_document(parsed.tree, identity=identity)
+        assert hydrated.ok and hydrated.spec is not None, hydrated.issues
+        assert strategy_spec_hash(hydrated.spec) == QUALITY_MOMENTUM_SPEC_HASH
+
+
+def test_source_hash_is_the_exact_text_and_comments_change_it() -> None:
+    codec = _codec()
+    text = _source("quality_momentum.yaml")
+    parsed = codec.parse(text, format=SourceFormat.YAML)
+    assert parsed.source_hash == hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    with_comment = codec.parse(text + "# trailing comment\n", format=SourceFormat.YAML)
+    assert with_comment.source_hash != parsed.source_hash
+    assert with_comment.tree == parsed.tree
+
+
+def test_source_map_points_at_the_exact_scalar_and_key() -> None:
+    text = _source("quality_momentum.yaml")
+    parsed = _codec().parse(text, format=SourceFormat.YAML)
+    lines = text.splitlines()
+
+    value_range = parsed.locate("/risk/max_name_weight")
+    assert value_range is not None
+    line = lines[value_range.start.line]
+    assert line[value_range.start.column : value_range.end.column] == "0.05"
+    assert text[value_range.start.offset : value_range.end.offset] == "0.05"
+
+    key_range = parsed.key_ranges["/risk/max_name_weight"]
+    assert lines[key_range.start.line][key_range.start.column : key_range.end.column] == (
+        "max_name_weight"
+    )
+
+    node_range = parsed.locate("/factors/factors/0/graph/nodes/1/window")
+    assert node_range is not None
+    assert text[node_range.start.offset : node_range.end.offset] == "252"
+
+
+def test_missing_pointer_falls_back_to_the_nearest_parent_range() -> None:
+    parsed = _codec().parse(_source("quality_momentum.yaml"), format=SourceFormat.YAML)
+
+    assert parsed.locate("/data/end_date") == parsed.value_ranges["/data"]
+    assert (
+        parsed.locate("/factors/factors/0/graph/nodes/9/kind")
+        == parsed.value_ranges["/factors/factors/0/graph/nodes"]
+    )
+    assert parsed.locate("/nowhere/deep") == parsed.value_ranges[""]
+
+
+def test_structural_issue_pointers_resolve_to_source_ranges() -> None:
+    text = _source("quality_momentum.unknown_key.yaml")
+    parsed = _codec().parse(text, format=SourceFormat.YAML)
+    assert parsed.tree is not None
+
+    hydrated = hydrate_strategy_document(parsed.tree, identity=StrategyIdentity("draft", 0))
+
+    assert not hydrated.ok
+    (issue,) = hydrated.issues
+    assert issue.pointer == "/risk/max_name_wieght"
+    # An unknown key exists in the source: the value range is located, the key range names it.
+    located = parsed.locate(issue.pointer)
+    assert located is not None
+    assert text[located.start.offset : located.end.offset] == "0.05"
+    key = parsed.key_ranges[issue.pointer]
+    assert text[key.start.offset : key.end.offset] == "max_name_wieght"
+
+
+@pytest.mark.parametrize(
+    ("text", "code", "line", "column"),
+    [
+        ('title: "unterminated\ndata:\n', "yaml.syntax", 0, 7),
+        ("a: [1, 2\nb: 3\n", "yaml.syntax", 0, 3),
+        ("a: 1\na: 2\n", "yaml.duplicate_key", 1, 0),
+        ("base: &b [1]\nc: *b\n", "yaml.anchor_or_alias", 0, 6),
+        ("a: !custom 1\n", "yaml.tag", 0, 3),
+        ("%YAML 1.1\n---\na: 1\n", "yaml.directive", 0, 0),
+        ("a:\n  <<: {x: 1}\n", "yaml.merge_key", 1, 2),
+        ("window: 1_000\n", "yaml.non_core_number", 0, 8),
+        ("a: .nan\n", "yaml.non_finite_number", 0, 3),
+        ("a: 9007199254740993\n", "yaml.integer_out_of_range", 0, 3),
+        ("1: v\n", "yaml.non_string_key", 0, 0),
+        ("a: 1\n---\nb: 2\n", "yaml.multiple_documents", 0, 0),
+        ("- a\n", "yaml.not_a_mapping", 0, 0),
+    ],
+)
+def test_rejections_carry_code_and_position(text: str, code: str, line: int, column: int) -> None:
+    parsed = _codec().parse(text, format=SourceFormat.YAML)
+
+    assert parsed.status is ParseStatus.REJECTED
+    assert parsed.tree is None
+    (diagnostic,) = parsed.diagnostics
+    assert diagnostic.code == code
+    assert diagnostic.kind is DiagnosticKind.SYNTAX
+    assert diagnostic.range is not None
+    assert (diagnostic.range.start.line, diagnostic.range.start.column) == (line, column)
+
+
+def test_empty_document_is_rejected_without_a_range() -> None:
+    parsed = _codec().parse("", format=SourceFormat.YAML)
+    assert parsed.status is ParseStatus.REJECTED
+    assert parsed.diagnostics[0].code == "yaml.not_a_mapping"
+
+
+def test_json_syntax_errors_report_json_positions() -> None:
+    parsed = _codec().parse('{"a": 1,\n "b": }', format=SourceFormat.JSON)
+
+    assert parsed.status is ParseStatus.REJECTED
+    (diagnostic,) = parsed.diagnostics
+    assert diagnostic.code == "json.syntax"
+    assert diagnostic.range is not None
+    assert (diagnostic.range.start.line, diagnostic.range.start.column) == (1, 6)
+
+
+def test_json_duplicate_keys_are_rejected_like_yaml() -> None:
+    parsed = _codec().parse('{"a": 1, "a": 2}', format=SourceFormat.JSON)
+    assert parsed.diagnostics[0].code == "yaml.duplicate_key"
+    assert parsed.diagnostics[0].pointer == "/a"
+
+
+def test_resource_limits_fail_closed() -> None:
+    assert _codec(max_bytes=8).parse("title: 'x'\n", format=SourceFormat.YAML).diagnostics[
+        0
+    ].code == ("yaml.too_large")
+    deep = (
+        "a: " * 0 + "a:\n" + "".join("  " * i + "b:\n" for i in range(1, 6)) + "  " * 6 + "c: 1\n"
+    )
+    assert _codec(max_depth=3).parse(deep, format=SourceFormat.YAML).diagnostics[0].code == (
+        "yaml.too_deep"
+    )
+    many = "\n".join(f"k{i}: {i}" for i in range(50)) + "\n"
+    assert _codec(max_nodes=20).parse(many, format=SourceFormat.YAML).diagnostics[0].code == (
+        "yaml.too_many_nodes"
+    )
+
+
+def test_pointer_keys_are_rfc6901_escaped() -> None:
+    parsed = _codec().parse('"a/b": 1\n"~x": 2\n', format=SourceFormat.YAML)
+    assert parsed.ok
+    assert set(parsed.value_ranges) == {"", "/a~1b", "/~0x"}

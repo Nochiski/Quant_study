@@ -1,0 +1,93 @@
+/*
+ * Semantic theme tokens (WORKFLOW P2-01). One light, neutral theme matching the v3 concept.
+ * Components use only semantic names (surface / border / text / accent / status / focus);
+ * raw colours live here and nowhere else. The `--color-*` aliases at the bottom keep the legacy
+ * Quick/Advanced builder stylesheet working until P6-06 removes it.
+ */
+:root {
+  color-scheme: light;
+
+  /* surfaces */
+  --surface-canvas: #f4f6f8;
+  --surface-panel: #ffffff;
+  --surface-raised: #f9fafb;
+  --surface-subtle: #eef2f5;
+  --surface-inverse: #1c2430;
+
+  /* borders */
+  --border: #d9dee5;
+  --border-strong: #b8c1cc;
+  --border-inverse: #3a4657;
+
+  /* text */
+  --text: #1c2430;
+  --text-muted: #5b6675;
+  --text-subtle: #8a94a3;
+  --text-on-accent: #ffffff;
+  --text-inverse: #f4f6f8;
+
+  /* accent (teal from the concept) */
+  --accent: #0e8074;
+  --accent-hover: #0b6a60;
+  --accent-soft: #e3f4f1;
+  --accent-border: #9fd6cc;
+
+  /* status — every status also carries a text/glyph marker in the UI, never colour alone */
+  --status-ok: #1f8f5f;
+  --status-ok-soft: #e4f5ec;
+  --status-warn: #c2620f;
+  --status-warn-soft: #fbeddc;
+  --status-error: #c0392b;
+  --status-error-soft: #fbe7e5;
+  --status-error-border: #efb3ad;
+  --status-info: #2e6fd6;
+  --status-info-soft: #e6eefc;
+
+  /* focus */
+  --focus-ring: #2e6fd6;
+  --focus-ring-offset: 2px;
+
+  /* typography: body 14px, secondary text never below 12px */
+  --font-sans:
+    Inter, Pretendard, ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono:
+    "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono",
+    monospace;
+  --text-size-body: 14px;
+  --text-size-small: 12px;
+  --text-size-title: 20px;
+  --text-size-display: 28px;
+  --line-height-body: 1.5;
+
+  /* shape and elevation */
+  --radius-small: 6px;
+  --radius-medium: 8px;
+  --radius-large: 12px;
+  --shadow-panel: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 10%);
+  --shadow-popover: 0 8px 24px rgb(16 24 40 / 16%);
+
+  /* spacing scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* legacy aliases (Quick/Advanced builder stylesheet, removed in P6-06) */
+  --color-canvas: var(--surface-canvas);
+  --color-panel: var(--surface-panel);
+  --color-panel-raised: var(--surface-raised);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+  --color-text: var(--text);
+  --color-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-hover);
+  --color-blue: var(--status-info);
+  --color-danger: var(--status-error);
+  --color-warning: var(--status-warn);
+  --color-violet: #6b5bd2;
+  --color-sky: var(--status-info);
+}

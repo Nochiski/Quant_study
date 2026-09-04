@@ -113,7 +113,7 @@ S26 의 XML 24건: 정제 없음 → 24건 전부 실패(`&cr;` 미정의 엔티
 | 비표준 엔티티 `&cr;` (줄바꿈) | `<P>&cr;&cr;</P>` | 373건 | `&#10;` 치환. 그 외 엔티티는 HTML 문서의 `&nbsp;` 3건뿐 |
 | 맨 `&` | `R&D`, `People & Technology` | 문서당 0~21 | `&amp;` |
 | 맨 `<` — 태그 아닌 꺾쇠 | `<당기말>`, `<메리츠화재>`, `<MS AR 사업>`, `<CP>` | 문서당 0~213 | **태그 화이트리스트(§1.6) 밖이면 `&lt;`**. "`<`+영문자 = 태그" 규칙은 `<MS AR 사업>`·`<CP>` 에서 실패했다 |
-| 속성 따옴표 오류 | `<TE ENG=""Maximum exposure…">` | 1건 (Y2040 전량: 284건, 2025~2026 편집기) | 세 꼴 — a) `=""X"`·`=""X""`·`="" X""`·`="" X"` → `="X"` b) `="X""` → `="X"` c) 값 안의 홑 `"` → `&quot;` (빈 속성 `X="" Y="v"` 는 건드리지 않음 — 첫 규칙이 2024 분기 1건을 새로 깨뜨렸다). 전량에서 a·b·c 로 284건 중 276건이 expat 통과, 7건 lenient |
+| 속성 따옴표 오류 | `<TE ENG=""Maximum exposure…">` | 1건 (Y2040 전량: 284건, 2025~2026 편집기) | 세 꼴 — a) `=""X"`·`=""X""`·`="" X""`·`="" X"` → `="X"` b) `="X""` → `="X"` c) 값 안의 `"` 전부 → `&quot;` (닫는 따옴표는 뒤에 `>`·`/>`·`NAME=` 이 오는 것뿐 — `ENG="JV "UZAUTO-INZI" LLC"` 같은 2개 이상 포함) (빈 속성 `X="" Y="v"` 는 건드리지 않음 — 첫 규칙이 2024 분기 1건을 새로 깨뜨렸다). 전량 2차: a·b·c 로 284건 전부 expat 통과 |
 | 제어문자 | — | 0 | 제거 규칙만 둔다 |
 §2.2 정제 5규칙 적용 후 **505/505 expat 파싱 성공**(정제 7.45초 + 파싱 16.72초 / 653MB). `xml.etree.XMLParser.entity` 로 엔티티를 넘기는 방법은 expat 이 DTD 없는 문서의 미정의 엔티티를 먼저 거부해 동작하지 않는다(교훈 ③).
 
@@ -184,7 +184,7 @@ Y510 XML 505건에 대해 정제→expat 트리를 원문과 등식 비교(09-03
 
 | 검증 | 술어 | 결과 |
 |---|---|---|
-| 텍스트 등식 | `"".join(root.itertext()).strip()` = 정제 원문에서 주석·선언·태그(따옴표 안 `>` 를 태그 끝으로 보지 않는 정규식)를 지우고 `html.unescape` 한 뒤 CRLF→LF(expat 의 XML 줄끝 정규화와 같게) 한 문자열 `.strip()` — 전량(Y2040)에서 단순 `<[^>]+>` 와 미정규화가 23건을 거짓 위반으로 만들어 고쳤다 | **505/505 동일** — 정제 5규칙(엔티티 치환·맨 `&`/`<` 이스케이프·속성 복구)은 글자를 하나도 바꾸지 않는다 |
+| 텍스트 등식 | `"".join(root.itertext()).strip()` = 정제 원문에서 주석·선언·태그(따옴표 안 `>` 를 태그 끝으로 보지 않는 정규식)를 지우고 `html.unescape` 하기 **전에** CRLF·CR→LF(expat 의 XML 줄끝 정규화와 같게 — `&#13;` 참조로 들어온 CR 은 expat 도 남기므로 unescape 뒤에 하면 안 된다) 한 문자열 `.strip()` — 전량(Y2040)에서 단순 `<[^>]+>` 와 미정규화가 23건, 정규화 순서가 67건을 거짓 위반으로 만들어 고쳤다 | **505/505 동일** — 정제 5규칙(엔티티 치환·맨 `&`/`<` 이스케이프·속성 복구)은 글자를 하나도 바꾸지 않는다 |
 | 속성 수 등식 | 원문 시작 태그의 `name="…"` 수 = `Σ len(el.attrib)` | 505/505 에서 **정확히 1 차이** = 루트의 `xmlns:xsi` 를 ET 가 네임스페이스 선언으로 빼는 것(`noNamespaceSchemaLocation` 은 남음). 손실 아님 |
 | 디코딩 치환 | `errors='replace'` 경로 진입 문서 | 0/505 |
 | 태그 구조 | 화이트리스트 밖 토큰은 텍스트로 강등 | 텍스트로는 보존(위 등식에 포함)되지만 **구조는 잃는다**. 표본에서 강등된 토큰은 전부 본문 텍스트(≤2건/505)였고, 전량 census(G3) 가 새 태그를 잡는다 |
@@ -261,7 +261,7 @@ FileSource(doc_store 스냅샷 → zip 경로)                     ← BlobSourc
 2. `&name;` — 표준 5개 유지 · `cr` → `&#10;` · 그 외 → `[&name;]` 문자열 보존 + `n_ent_other`(G3)
 3. `&` 뒤에 `(amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);` 가 아니면 `&amp;` → `n_bare_amp`
 4. `<` 뒤가 `/?(화이트리스트 41)(?=[\s/>])` · `!` · `?` 가 아니면 `&lt;` → `n_bare_lt` + 치환 토큰 어휘(§1.6 정규식)
-5. 속성 따옴표 복구 세 꼴(§1.5) — a) `=""([^"<>=]*)""?(?=[\s/>])` → `="\1"` b) `(?<==")([^"<>=]+)""(?=[\s/>])` → `\1"` c) `="([^"<>=]*)"([^"<>=\s/][^"<>=]*)"(?=[\s/>])` → `="\1&quot;\2"` → 합계 `n_attr_repair`
+5. 속성 따옴표 복구 세 꼴(§1.5) — a) `=""([^"<>=]*)""?(?=[\s/>])` → `="\1"` b) `(?<==")([^"<>=]+)""(?=[\s/>])` → `\1"` c) `="((?:[^"<>]|"(?!END))+)"(?=END)`, `END = \s*(?:/?>|[A-Za-z][\w:.-]*=)` — 값 안의 `"` 를 전부 `&quot;` 로 → 합계 `n_attr_repair`. `&quot;` 는 트리에서 `"` 로 돌아오므로 본문에 잘못 걸려도 무손실
 
 ### 2.4 어휘 사전 — 코드가 아니라 데이터 (`src/stage/doc_vocab/`)
 | 파일 | 내용 | 생성 | 미등록 처리 |
@@ -277,7 +277,7 @@ FileSource(doc_store 스냅샷 → zip 경로)                     ← BlobSourc
 ### 2.5 코드 배치와 빌더 변경 4건 (결정 ⑧)
 `src/stage/rules_doc.py`(7테이블 선언 — `partition_class`·자연키·컬럼맵·(p,s)·miss 마커) · `src/stage/parsers_doc.py`(정제·파서·격자 전개·`parse_document`) · `src/stage/doc_prepass.py`(아래 ①) · `src/stage/doc_vocab/*.json` · `src/stage/fixtures/stg_doc_*.json`(D4) · `survey/doc_census.py`. `manifest.py`·`baseline.py`·`snapshot.py` 는 그대로. 테스트는 표본에서 오린 XML 조각 픽스처(파일 의존 금지, `testing.md`).
 현 빌더는 **테이블 1개 = 파서 1회 = `src_all` 1개**(`build.py` `build_table`, `__main__.py` 테이블당 1회)이고 G1 은 `n_src × fanout` 등식, G8 은 `n_parse_failed=0 ∧ emitted=n_src` 등식이며, 전 행을 `stage_all` 하나에 넣고 윈도우 함수를 돈다. 문서는 ZIP 1개가 7테이블에 서로 다른 수의 행을 내므로 그대로는 안 맞는다. 필요한 변경:
-1. **파싱 프리패스(`doc_prepass.py`)**: 스냅샷의 ZIP 을 한 번만 파싱해 테이블 × 연도 샤드 JSON Lines 를 `data/stage/_tmp/doc/<snapshot>/<table>/year=YYYY.jsonl` 에 캐시(관측일 `fetched_at` 을 행 컬럼으로 주입). `FileSource` 는 이 캐시를 가리키는 소스다 — 테이블 빌드가 4~7회 돌아도 ZIP 은 1회만 연다. 캐시는 빌드 완료 후 삭제(keep 0), 크기 약 44GB(P2 포함) 는 `_tmp` 에 여유 확인.
+1. **파싱 프리패스(`doc_prepass.py`)**: 스냅샷의 ZIP 을 한 번만 파싱해 테이블 × 연도 샤드 JSON Lines 를 `data/stage/_tmp/doc/<snapshot>/<table>/year=YYYY_qN.jsonl` 에 캐시(관측일 `fetched_at` 을 행 컬럼으로 주입). `FileSource` 는 이 캐시를 가리키는 소스다 — 테이블 빌드가 4~7회 돌아도 ZIP 은 1회만 연다. 캐시는 빌드 완료 후 삭제(keep 0), 크기 약 44GB(P2 포함) 는 `_tmp` 에 여유 확인.
 2. **문서 전용 등식**: G1 을 `stage 행수 = 프리패스가 그 테이블에 낸 행수(parse_log 집계)` 로, G8 을 `프리패스 문서 수 = ok+lenient+failed+html` 로 대체(D1·D2). 파싱 실패는 예외가 아니라 `parse_log` 행이므로 G8 의 `n_parse_failed=0` 은 항상 성립.
 3. **연도 샤드 빌드**: `stg_fin_asreported`·`stg_doc_form_cell`·`stg_doc_table` 은 `stage_all` 한 번이 아니라 연도 샤드 루프(샤드마다 CAST→게이트→COPY, MANIFEST 는 마지막에 원자 교체). stg_fin 1,540만 행에 스필 15~18GB 였으므로 2.2억 행은 샤드 없이는 디스크(여유 297GB)를 넘긴다.
 4. **`observed_src=column`**: `fetched_at` 이 원장 테이블이 아니라 프리패스 행 컬럼에서 온다(`AvailableRule` 은 lookup 그대로).

@@ -14,8 +14,6 @@ import { t } from "../../../shared/config";
 import {
   describeYamlCursor,
   loadYaml12Mapping,
-  pointerSegments,
-  templatePointer,
 } from "../../../shared/lib/yaml12";
 import type {
   EditorCompletionOption,
@@ -24,6 +22,10 @@ import type {
   EditorHoverSource,
 } from "../../../shared/ui/code-editor";
 import type { DocumentState } from "./document-state";
+import {
+  formatContractValue,
+  projectContractField,
+} from "./contract-inspector";
 import {
   definingArrayFor,
   propertyOptions,
@@ -58,16 +60,6 @@ const treeFor = (text: string, state: DocumentState): unknown => {
   } catch {
     return state.parse?.status === "ok" ? state.parse.tree : null;
   }
-};
-
-const valueAt = (tree: unknown, pointer: string): unknown => {
-  let current = tree;
-  for (const segment of pointerSegments(pointer)) {
-    if (Array.isArray(current)) current = current[Number(segment)];
-    else if (isRecord(current)) current = current[segment];
-    else return undefined;
-  }
-  return current;
 };
 
 const catalogLabel = (catalog: string): string => {
@@ -221,21 +213,6 @@ export const buildCompletionSource =
     return values.length ? { from: cursor.from, options: values } : null;
   };
 
-const contractFor = (
-  contract: readonly FieldContract[],
-  pointer: string,
-  kind: string | null,
-): FieldContract | undefined => {
-  const template = templatePointer(pointer);
-  const rows = contract.filter((row) => row.pointer === template);
-  return (
-    rows.find((row) => row.branch === kind) ?? rows.find((row) => !row.branch)
-  );
-};
-
-const formatValue = (value: unknown): string =>
-  typeof value === "string" ? value : JSON.stringify(value);
-
 /** Hover lines for a pointer: the contract row when there is one, else the schema node. */
 export const describePointer = (
   deps: Pick<AssistDeps, "schema" | "contract">,
@@ -243,39 +220,33 @@ export const describePointer = (
   tree: unknown,
 ): string[] | null => {
   if (deps.schema === null) return null;
-  const resolved = schemaAt(deps.schema, pointer, tree);
-  if (!resolved) return null;
-  const parentValue = valueAt(tree, pointer.slice(0, pointer.lastIndexOf("/")));
-  const kind =
-    isRecord(parentValue) && typeof parentValue.kind === "string"
-      ? parentValue.kind
-      : null;
-  const row = contractFor(deps.contract, pointer, kind);
-  const node = resolved.node;
-  const lines = [templatePointer(pointer)];
+  const field = projectContractField(deps.schema, deps.contract, pointer, tree);
+  if (field === null) return null;
+  const lines = [field.templatePointer];
   lines.push(
-    `${t("assist.type")}: ${typeLabel(node)}${resolved.nullable ? " | null" : ""}`,
+    `${t("assist.type")}: ${field.type}${field.nullable ? " | null" : ""}`,
   );
-  lines.push(
-    (row?.required ?? false) ? t("assist.required") : t("assist.optional"),
-  );
-  if (row?.has_default)
-    lines.push(`${t("assist.default")}: ${formatValue(row.default)}`);
-  if (row?.unit) {
+  if (field.required !== null)
+    lines.push(field.required ? t("assist.required") : t("assist.optional"));
+  if (field.hasDefault)
     lines.push(
-      `${t("assist.unit")}: ${row.unit}${row.display_unit ? ` (${t("assist.displayUnit")} ${row.display_unit})` : ""}`,
+      `${t("assist.default")}: ${formatContractValue(field.defaultValue) ?? "—"}`,
+    );
+  if (field.unit) {
+    lines.push(
+      `${t("assist.unit")}: ${field.unit}${field.displayUnit ? ` (${t("assist.displayUnit")} ${field.displayUnit})` : ""}`,
     );
   }
-  if (row?.applied_stage)
-    lines.push(`${t("assist.stage")}: ${row.applied_stage}`);
-  if (row?.example !== undefined && row.example !== null)
-    lines.push(`${t("assist.example")}: ${formatValue(row.example)}`);
-  const catalog = node["x-catalog"];
-  if (typeof catalog === "string")
-    lines.push(`${t("assist.source")}: ${catalogLabel(catalog)}`);
-  const reference = node["x-reference"];
-  if (typeof reference === "string")
-    lines.push(`${t("assist.source")}: ${referenceLabel(reference)}`);
+  if (field.appliedStage)
+    lines.push(`${t("assist.stage")}: ${field.appliedStage}`);
+  if (field.hasExample)
+    lines.push(
+      `${t("assist.example")}: ${formatContractValue(field.example) ?? "—"}`,
+    );
+  if (field.catalog)
+    lines.push(`${t("assist.source")}: ${catalogLabel(field.catalog)}`);
+  if (field.reference)
+    lines.push(`${t("assist.source")}: ${referenceLabel(field.reference)}`);
   return lines;
 };
 

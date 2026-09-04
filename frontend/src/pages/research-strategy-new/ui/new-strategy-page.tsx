@@ -1,6 +1,7 @@
 import { useCallback, useEffect } from "react";
 
 import {
+  ContractInspector,
   DirtyLeaveGuard,
   DocumentToolbar,
   RecoveryBanner,
@@ -134,6 +135,14 @@ export const NewStrategyPage = () => {
             selectedPointer={search.path}
             onSelect={outline.onSelectOutlineNode}
             onCollapse={outline.onCollapseOutlineNode}
+          />
+        }
+        inspector={
+          <ContractInspector
+            source={assist.inspectorSource}
+            selectedPointer={search.path}
+            tree={outline.snapshot?.parsed.tree}
+            stale={outline.snapshot?.stale ?? false}
           />
         }
         editor={

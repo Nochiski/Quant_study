@@ -12,6 +12,10 @@ import type {
   EditorHoverSource,
 } from "../../../shared/ui/code-editor";
 import type { DocumentState } from "./document-state";
+import type {
+  ContractInspectorSource,
+  ContractResourceState,
+} from "./contract-inspector";
 import {
   buildCompletionSource,
   buildHoverSource,
@@ -28,10 +32,19 @@ export type SchemaAssist = {
   schemaVersion: string | null;
   /** Backend-owned runtime schema used by read-only projections such as the outline. */
   schema: JsonSchema | null;
+  /** Same query-owned metadata, exposed intact for the read-only Contract Inspector. */
+  inspectorSource: ContractInspectorSource;
 };
 
 /** One page holds every mock field/factor today; a larger catalog is paged by search (P6). */
 const CATALOG_PAGE = { page_size: 100 } as const;
+
+const resourceState = (
+  pending: boolean,
+  error: boolean,
+  hasData: boolean,
+): ContractResourceState =>
+  hasData ? "ready" : pending ? "loading" : error ? "error" : "error";
 
 /**
  * Binds the schema-driven editor assistance to live data: runtime schema and contract (P1-05)
@@ -53,9 +66,19 @@ export const useSchemaAssist = (state: DocumentState): SchemaAssist => {
     getState: () => state,
   });
   const schemaData = schema.data?.schema;
-  const contractRows = contract.data?.contract.fields;
-  const fieldRows = fields.data?.fields;
-  const factorRows = factors.data?.factors;
+  const contractData = contract.data?.contract;
+  const contractRows = contractData?.fields;
+  // Completion must not silently pair an older contract with a newer catalog response.
+  const fieldRows =
+    contractData &&
+    fields.data?.snapshot?.snapshot_id === contractData.dataset_snapshot_id
+      ? fields.data.fields
+      : undefined;
+  const factorRows =
+    contractData &&
+    factors.data?.registry_version === contractData.factor_registry_version
+      ? factors.data.factors
+      : undefined;
   useEffect(() => {
     latest.current = {
       schema: (schemaData as JsonSchema | undefined) ?? null,
@@ -80,6 +103,53 @@ export const useSchemaAssist = (state: DocumentState): SchemaAssist => {
     factors.isPending;
   const schemaVersion = schema.data?.schema_version ?? null;
   const runtimeSchema = (schemaData as JsonSchema | undefined) ?? null;
+  const inspectorSource = useMemo<ContractInspectorSource>(
+    () => ({
+      schema: schema.data
+        ? schema.data
+        : null,
+      contract: contract.data ?? null,
+      equityCatalog: fields.data ?? null,
+      factorCatalog: factors.data ?? null,
+      state: {
+        schema: resourceState(
+          schema.isPending,
+          schema.isError,
+          schema.data !== undefined,
+        ),
+        contract: resourceState(
+          contract.isPending,
+          contract.isError,
+          contractData !== undefined,
+        ),
+        equityCatalog: resourceState(
+          fields.isPending,
+          fields.isError,
+          fields.data !== undefined,
+        ),
+        factorCatalog: resourceState(
+          factors.isPending,
+          factors.isError,
+          factors.data !== undefined,
+        ),
+      },
+    }),
+    [
+      contract.isError,
+      contract.isPending,
+      contract.data,
+      contractData,
+      factors.data,
+      factors.isError,
+      factors.isPending,
+      fields.data,
+      fields.isError,
+      fields.isPending,
+      schema.data,
+      schema.isError,
+      schema.isPending,
+    ],
+  );
   return useMemo(
     () => ({
       completionSource,
@@ -87,7 +157,15 @@ export const useSchemaAssist = (state: DocumentState): SchemaAssist => {
       loading,
       schemaVersion,
       schema: runtimeSchema,
+      inspectorSource,
     }),
-    [completionSource, hoverSource, loading, schemaVersion, runtimeSchema],
+    [
+      completionSource,
+      hoverSource,
+      inspectorSource,
+      loading,
+      schemaVersion,
+      runtimeSchema,
+    ],
   );
 };

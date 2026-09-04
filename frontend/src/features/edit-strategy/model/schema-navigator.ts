@@ -27,6 +27,12 @@ export type PropertyOption = {
   branch: string | null;
 };
 
+export type DiscriminatorInfo = {
+  propertyName: string;
+  variants: string[];
+  selected: string | null;
+};
+
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -152,6 +158,41 @@ export const unionKindsAt = (
   return resolved?.branches
     ? resolved.branches.map((b) => b.kind).filter((k) => k !== "")
     : [];
+};
+
+/** Discriminator contract at a path, including the active document branch when present. */
+export const discriminatorAt = (
+  root: JsonSchema,
+  pointer: string,
+  tree: unknown,
+): DiscriminatorInfo | null => {
+  const end = walk(root, pointer, tree);
+  if (end === null) return null;
+  const base = unwrapNullable(root, end.node);
+  if (!Array.isArray(base.node.oneOf)) return null;
+  const discriminator = isObject(base.node.discriminator)
+    ? base.node.discriminator
+    : null;
+  if (!discriminator || typeof discriminator.propertyName !== "string")
+    return null;
+  const propertyName = discriminator.propertyName;
+  const variants = base.node.oneOf
+    .filter(isObject)
+    .map((member) => {
+      const branch = resolveRef(root, member);
+      const properties = isObject(branch.properties) ? branch.properties : {};
+      const discriminatorProperty = isObject(properties[propertyName])
+        ? properties[propertyName]
+        : null;
+      return discriminatorProperty?.const;
+    })
+    .filter((value): value is string => typeof value === "string");
+  if (variants.length === 0) return null;
+  const selected =
+    isObject(end.value) && typeof end.value[propertyName] === "string"
+      ? end.value[propertyName]
+      : null;
+  return { propertyName, variants, selected };
 };
 
 const collectProperties = (

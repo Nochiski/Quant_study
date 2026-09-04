@@ -215,7 +215,7 @@ def test_mock_lag_shifts_availability_by_whole_sessions() -> None:
     plain = _index(demo.load_raw_observations(query))
     shifted = _index(lagged.load_raw_observations(query))
 
-    def close(index: dict[tuple[date, str], RawObservation], as_of: date, security: str):
+    def close(index: dict[tuple[date, str], RawObservation], as_of: date, security: str) -> object:
         return next(
             (f.value for f in index[(as_of, security)].fields if f.field_id == "price.close"), None
         )

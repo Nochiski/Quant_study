@@ -200,7 +200,8 @@ class MockEquityDataAdapter:
         cell. Outside the calendar the mock synthesises a deterministic series keyed by the
         absolute business-day index (never by the query window), lagged by the field profile's
         recommended lag; `available_date` is the session the value became visible. Membership is a
-        function of (security, date) only.
+        function of (security, date) only. The synthetic series is not continuous with the fixture
+        values at the calendar boundary (a mock data-quality artifact, deterministic either way).
         """
         venue = _MOCK_UNIVERSES.get((query.market, query.universe_id))
         profile_by_id = {profile.field_id: profile for profile in self._profiles}

@@ -308,6 +308,37 @@ def test_unknown_universe_is_a_422_with_the_adapter_detail() -> None:
     assert "nope.universe" in detail["detail"]
 
 
+def test_backtest_route_rejects_what_preview_rejects_with_the_same_codes() -> None:
+    client = TestClient(build_http_app())
+    template = client.get("/api/v1/strategies/template").json()
+    unknown_universe = {**template, "data": {**template["data"], "universe_id": "nope.universe"}}
+    first_factor = template["factors"]["factors"][0]
+    referencing = {
+        **first_factor,
+        "factor_id": "twin",
+        "graph": {
+            "nodes": [
+                {"node_id": "ref", "factor_id": first_factor["factor_id"], "kind": "saved_factor"}
+            ],
+            "output_node_id": "ref",
+            "missing_policy": first_factor["graph"]["missing_policy"],
+        },
+    }
+    saved_reference = {
+        **template,
+        "factors": {"factors": [first_factor, referencing]},
+    }
+
+    for spec, code in (
+        (unknown_universe, "portfolio.data.unavailable"),
+        (saved_reference, "portfolio.strategy.invalid"),
+    ):
+        preview = client.post("/api/v1/portfolio/preview", json={"spec": spec})
+        run = client.post("/api/v1/backtests", json={"strategy": spec, "core": "python"})
+        assert preview.status_code == 422 and run.status_code == 422, (preview.text, run.text)
+        assert preview.json()["detail"]["code"] == run.json()["detail"]["code"] == code
+
+
 def test_unknown_universe_raises_a_typed_error_in_the_service() -> None:
     spec = replace(_spec(), data=replace(_spec().data, universe_id="nope.universe"))
     with pytest.raises(RawObservationUnavailableError, match="nope.universe"):

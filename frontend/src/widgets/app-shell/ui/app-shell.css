@@ -1,0 +1,122 @@
+.app-shell {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  min-height: 100vh;
+  background: var(--surface-canvas);
+}
+
+.app-shell__skip {
+  position: absolute;
+  left: var(--space-2);
+  top: var(--space-2);
+  z-index: 30;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-medium);
+  background: var(--surface-panel);
+  color: var(--text);
+  transform: translateY(-200%);
+}
+
+.app-shell__skip:focus-visible {
+  transform: none;
+}
+
+.app-shell__nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-3);
+  border-right: 1px solid var(--border);
+  background: var(--surface-panel);
+}
+
+.app-shell__brand {
+  margin-bottom: var(--space-4);
+  font-size: var(--text-size-body);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.app-shell__group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 var(--space-1);
+  color: var(--text-subtle);
+  font-size: var(--text-size-small);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.app-shell__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.app-shell__link {
+  display: block;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-medium);
+  color: var(--text-muted);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+a.app-shell__link:hover {
+  background: var(--surface-subtle);
+  color: var(--text);
+}
+
+.app-shell__link[aria-current="page"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.app-shell__link--disabled {
+  color: var(--text-subtle);
+  cursor: not-allowed;
+}
+
+.app-shell__main {
+  min-width: 0;
+  padding: var(--space-5);
+}
+
+.app-shell__main:focus {
+  outline: none;
+}
+
+.page-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.page-header h1 {
+  margin: 0;
+  font-size: var(--text-size-title);
+  letter-spacing: -0.01em;
+}
+
+.page-state {
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-large);
+  background: var(--surface-panel);
+  color: var(--text-muted);
+}
+
+.page-state--error {
+  border-color: var(--status-error-border);
+  background: var(--status-error-soft);
+  color: var(--status-error);
+}
+
+@media (max-width: 1279px) {
+  .app-shell {
+    grid-template-columns: 160px minmax(0, 1fr);
+  }
+}

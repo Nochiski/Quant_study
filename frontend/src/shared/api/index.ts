@@ -1,4 +1,5 @@
 export {
+  ApiRequestError,
   configureStrategyWorkbenchApi,
   strategyWorkbenchApi,
   type BacktestRunResult,

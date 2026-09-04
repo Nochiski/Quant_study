@@ -1,3 +1,4 @@
+export { strategyRevisionQuery } from "./model/strategy-queries";
 export type {
   DataStep,
   SavedStrategy,

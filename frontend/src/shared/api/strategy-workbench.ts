@@ -6,6 +6,7 @@ import {
   getEquityCatalog,
   getFactorCatalog,
   getBacktestResult,
+  getStrategy,
   getBacktestStatus,
   getStrategyTemplate,
   previewFactorGraph,
@@ -63,11 +64,35 @@ configureStrategyWorkbenchApi(
   import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000",
 );
 
+/** A non-2xx reply the caller can branch on (404 → route not-found, 409 → conflict UI). */
+export class ApiRequestError extends Error {
+  readonly status: number;
+  readonly code: string | undefined;
+
+  constructor(context: string, status: number, code?: string) {
+    super(
+      `API request failed: ${context} status=${status} code=${code ?? "-"}`,
+    );
+    this.name = "ApiRequestError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
 const requireData = <T>(data: T | undefined, context: string): T => {
   if (data === undefined) {
     throw new Error(`API response did not contain data: ${context}`);
   }
   return data;
+};
+
+const errorCode = (error: unknown): string | undefined => {
+  if (typeof error !== "object" || error === null || !("detail" in error))
+    return undefined;
+  const detail = (error as { detail: unknown }).detail;
+  return typeof detail === "object" && detail !== null && "code" in detail
+    ? String((detail as { code: unknown }).code)
+    : undefined;
 };
 
 export const strategyWorkbenchApi = {
@@ -161,6 +186,24 @@ export const strategyWorkbenchApi = {
   async validate(spec: StrategySpec): Promise<StrategyValidation> {
     const response = await validateStrategy({ body: spec });
     return requireData(response.data, "validateStrategy");
+  },
+
+  async getStrategy(
+    strategyId: string,
+    revision?: number,
+  ): Promise<SavedStrategy> {
+    const response = await getStrategy({
+      path: { strategy_id: strategyId },
+      query: revision === undefined ? undefined : { revision },
+    });
+    if (response.error !== undefined) {
+      throw new ApiRequestError(
+        "getStrategy",
+        response.response?.status ?? 0,
+        errorCode(response.error),
+      );
+    }
+    return requireData(response.data, "getStrategy");
   },
 
   async create(spec: StrategySpec): Promise<SavedStrategy> {

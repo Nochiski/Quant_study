@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -25,6 +26,35 @@ const matchMedia = (matches: boolean) =>
       removeEventListener: vi.fn(),
     })),
   );
+
+const controlledMatchMedia = (initial: boolean) => {
+  let matches = initial;
+  const listeners = new Set<(event: MediaQueryListEvent) => void>();
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn().mockImplementation((query: string) => ({
+      get matches() {
+        return matches;
+      },
+      media: query,
+      addEventListener: (
+        _type: "change",
+        listener: (event: MediaQueryListEvent) => void,
+      ) => listeners.add(listener),
+      removeEventListener: (
+        _type: "change",
+        listener: (event: MediaQueryListEvent) => void,
+      ) => listeners.delete(listener),
+    })),
+  );
+  return {
+    setMatches(next: boolean) {
+      matches = next;
+      const event = { matches: next } as MediaQueryListEvent;
+      listeners.forEach((listener) => listener(event));
+    },
+  };
+};
 
 const mount = (props: Partial<Parameters<typeof StrategyIde>[0]> = {}) => {
   const { versionLabel = "v12", ...rest } = props;
@@ -179,6 +209,32 @@ describe("StrategyIde", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("closes wide panels when the viewport becomes narrow", () => {
+    const media = controlledMatchMedia(false);
+    mount();
+    expect(
+      screen.getByRole("complementary", { name: "계약" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "중간 결과" }),
+    ).toBeInTheDocument();
+
+    act(() => media.setMatches(true));
+
+    expect(
+      screen.getByRole("button", { name: "계약", expanded: false }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "중간 결과", expanded: false }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("complementary", { name: "계약" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("region", { name: "중간 결과" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("renders the concept frame: breadcrumb, run action, meta line, filterable outline, snippets", async () => {
     matchMedia(false);
     const user = userEvent.setup();
@@ -203,6 +259,14 @@ describe("StrategyIde", () => {
     expect(
       within(outline).getAllByRole("button", { name: /risk/ }),
     ).toHaveLength(1);
+    await user.clear(screen.getByRole("searchbox", { name: "전략 구조 필터" }));
+    await user.type(
+      screen.getByRole("searchbox", { name: "전략 구조 필터" }),
+      "기본",
+    );
+    expect(
+      within(outline).getByRole("button", { name: /기본 정보/ }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "스니펫" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "YAML" })).toHaveAttribute(
       "aria-selected",
@@ -227,6 +291,20 @@ describe("StrategyIde", () => {
       expect(
         document.getElementById(tab.getAttribute("aria-controls") ?? ""),
       ).not.toBeNull();
+    }
+  });
+
+  it("connects every tab to a labelled panel", () => {
+    matchMedia(false);
+    mount({ availableViews: ["yaml", "json"] });
+
+    for (const tab of screen.getAllByRole("tab")) {
+      const panel = document.getElementById(
+        tab.getAttribute("aria-controls") ?? "",
+      );
+      expect(panel).not.toBeNull();
+      expect(panel).toHaveAttribute("role", "tabpanel");
+      expect(panel).toHaveAttribute("aria-labelledby", tab.id);
     }
   });
 });

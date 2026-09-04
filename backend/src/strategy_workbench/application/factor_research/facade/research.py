@@ -11,6 +11,7 @@ from strategy_workbench.application.factor_research._models import (
 )
 from strategy_workbench.application.factor_research._service import (
     FactorResearchService,
+    FactorSnapshotMismatchError,
     InvalidFactorRequestError,
 )
 from strategy_workbench.domain.factor.facade.registry import (
@@ -31,5 +32,6 @@ __all__ = [
     "FactorPreview",
     "FactorPreviewRequest",
     "FactorResearchService",
+    "FactorSnapshotMismatchError",
     "InvalidFactorRequestError",
 ]

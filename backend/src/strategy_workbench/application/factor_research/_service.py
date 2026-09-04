@@ -29,6 +29,18 @@ from .ports.outgoing.factor_observations import (
 )
 
 
+class FactorSnapshotMismatchError(ValueError):
+    """The client expected a different data snapshot than the adapter actually serves."""
+
+    def __init__(self, *, expected: str, actual: str) -> None:
+        super().__init__(
+            f"factor preview snapshot mismatch — expected_data_snapshot_id={expected!r} "
+            f"actual_data_snapshot_id={actual!r}"
+        )
+        self.expected = expected
+        self.actual = actual
+
+
 class InvalidFactorRequestError(ValueError):
     def __init__(self, validation: FactorGraphValidation) -> None:
         super().__init__("factor request contains an invalid graph")
@@ -96,7 +108,7 @@ class FactorResearchService:
             )
         except InvalidFactorGraphError as error:
             raise InvalidFactorRequestError(error.validation) from error
-        observations = self._observation_source.load_factor_observations(
+        observation_set = self._observation_source.load_factor_observations(
             FactorObservationQuery(
                 required_field_ids=plan.required_field_ids,
                 start=request.as_of_start,
@@ -104,6 +116,15 @@ class FactorResearchService:
                 minimum_history_sessions=plan.minimum_history_sessions,
             )
         )
+        if (
+            request.expected_data_snapshot_id is not None
+            and request.expected_data_snapshot_id != observation_set.data_snapshot_id
+        ):
+            raise FactorSnapshotMismatchError(
+                expected=request.expected_data_snapshot_id,
+                actual=observation_set.data_snapshot_id,
+            )
+        observations = observation_set.observations
         full_evaluation = evaluate_factor_graph(
             request.graph,
             observations=observations,
@@ -123,7 +144,7 @@ class FactorResearchService:
             if request.as_of_start <= observation.as_of <= request.as_of_end
         )
         cache_key = build_factor_matrix_cache_key(
-            data_snapshot_id=request.data_snapshot_id,
+            data_snapshot_id=observation_set.data_snapshot_id,
             plan_hash=plan.plan_hash,
             registry_version=self._registry.version,
             parameters=request.parameters,
@@ -131,6 +152,7 @@ class FactorResearchService:
             as_of_end=request.as_of_end,
         )
         return FactorPreview(
+            data_snapshot_id=observation_set.data_snapshot_id,
             plan=plan,
             cache_key=cache_key,
             evaluation=evaluation,

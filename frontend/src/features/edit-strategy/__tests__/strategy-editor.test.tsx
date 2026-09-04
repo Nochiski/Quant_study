@@ -174,6 +174,7 @@ const server = setupServer(
         missing_policy: "drop",
         as_of_policy: "available_date_lte_as_of",
       },
+      data_snapshot_id: "mock-equity-v0.2-20260903",
       cache_key: {
         fingerprint: "c".repeat(64),
         data_snapshot_id: "mock-equity-v0.2-20260903",

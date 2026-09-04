@@ -50,7 +50,8 @@ const FactorPreviewControl = ({
           snapshotId !== undefined &&
           preview.mutate({
             graph: factor.graph,
-            data_snapshot_id: snapshotId,
+            // provenance only: the backend adapter owns the snapshot and fails closed on mismatch
+            expected_data_snapshot_id: snapshotId,
             as_of_start: start,
             as_of_end: end,
           })

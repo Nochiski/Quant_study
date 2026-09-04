@@ -1,82 +1,139 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { useId } from "react";
+import { useEffect, useMemo } from "react";
 
-import { strategyRevisionQuery } from "../../../entities/strategy";
+import { strategyDocumentQuery } from "../../../entities/strategy";
+import {
+  DirtyLeaveGuard,
+  SaveAction,
+  SourceEditor,
+  saveStatusText,
+  useSaveDocument,
+  useStrategyDocument,
+  type DocumentSource,
+} from "../../../features/edit-strategy";
 import { t } from "../../../shared/config";
 import { useNavigate, useParams, useSearch } from "../../../shared/lib/router";
-import { Badge, Tabs, panelId } from "../../../shared/ui";
-import {
-  IMPLEMENTED_VIEWS,
-  STRATEGY_VIEWS,
-  type StrategyView,
-} from "../model/strategy-views";
+import { Badge } from "../../../shared/ui";
+import { StrategyIde } from "../../../widgets/strategy-ide";
+import { PROJECTION_VIEWS, type StrategyView } from "../model/strategy-views";
 
-const VIEW_ITEMS = STRATEGY_VIEWS.map((id) => ({
-  id,
-  label: id.toUpperCase(),
-  disabled: !(IMPLEMENTED_VIEWS as readonly string[]).includes(id),
-}));
+const ROUTE = "/research/strategies/$strategyId/revisions/$revision";
+
+/** ISO timestamp → "YYYY-MM-DD HH:MM" without locale surprises. */
+const shortTimestamp = (iso: string): string =>
+  iso.length >= 16 ? `${iso.slice(0, 10)} ${iso.slice(11, 16)}` : iso;
 
 /**
- * Saved revision entry. Data comes from the query cache the route loader warmed up (ADR D4);
- * the selected view lives in the URL search and never blocks navigation (ADR D3). A URL naming
- * a view that is not implemented yet shows the JSON projection with a notice instead of an
- * empty, unreachable tab.
+ * Saved revision entry (WORKFLOW P2-04). The exact stored document comes from the query cache
+ * the route loader warmed up (ADR D4) and becomes the draft base. Saving appends the next
+ * revision and the URL follows it. The selected view lives in the URL search and never blocks
+ * navigation (ADR D3): the stored format is edited in place, JSON is a read-only projection of
+ * the base spec, and a view that is not implemented yet falls back to the stored format with a
+ * notice instead of an empty tab.
  */
 export const StrategyRevisionPage = () => {
-  const { strategyId, revision } = useParams({
-    from: "/research/strategies/$strategyId/revisions/$revision",
-  });
-  const search = useSearch({
-    from: "/research/strategies/$strategyId/revisions/$revision",
-  });
+  const { strategyId, revision } = useParams({ from: ROUTE });
+  const search = useSearch({ from: ROUTE });
   const navigate = useNavigate();
-  const idBase = useId();
-  const { data } = useSuspenseQuery(
-    strategyRevisionQuery(strategyId, Number(revision)),
+  const { data: stored } = useSuspenseQuery(
+    strategyDocumentQuery(strategyId, Number(revision)),
   );
-  const requested: StrategyView = search.view ?? "json";
-  const implemented = (IMPLEMENTED_VIEWS as readonly string[]).includes(
-    requested,
+  const source = useMemo<DocumentSource>(
+    () => ({ kind: "revision", document: stored }),
+    [stored],
   );
-  const view: StrategyView = implemented ? requested : "json";
+  const [document, dispatch] = useStrategyDocument(source);
+  const { save, status, canSave } = useSaveDocument(document, dispatch);
+
+  useEffect(() => {
+    if (
+      document.strategyId !== strategyId ||
+      document.baseRevision === null ||
+      document.baseRevision === Number(revision)
+    ) {
+      return;
+    }
+    void navigate({
+      to: ROUTE,
+      params: { strategyId, revision: String(document.baseRevision) },
+      search: { ...search },
+      replace: true,
+    });
+  }, [
+    document.strategyId,
+    document.baseRevision,
+    strategyId,
+    revision,
+    search,
+    navigate,
+  ]);
+
+  const availableViews: readonly StrategyView[] =
+    stored.format === "yaml" ? PROJECTION_VIEWS : ["json"];
+  const requested: StrategyView = search.view ?? stored.format;
+  const implemented = availableViews.includes(requested);
+  const view: StrategyView = implemented ? requested : stored.format;
+  const title = stored.spec.title || t("page.revision.untitled");
 
   return (
     <>
-      <header className="page-header">
-        <h1>{data.spec.title}</h1>
-        <Badge tone="accent">
-          {t("page.revision.label")} {data.spec.identity.revision}
-        </Badge>
-        <code title={data.spec_hash}>{data.spec_hash.slice(0, 12)}…</code>
-      </header>
-      <Tabs
-        label={t("ui.tabs.view")}
-        items={VIEW_ITEMS}
-        value={view}
-        idBase={idBase}
-        onChange={(next) =>
-          navigate({
-            to: "/research/strategies/$strategyId/revisions/$revision",
+      <StrategyIde
+        title={title}
+        versionLabel={`v${stored.revision}`}
+        badges={
+          <>
+            <Badge tone="accent">
+              {t("page.revision.label")} {stored.revision}
+            </Badge>
+            {stored.generated ? (
+              <Badge tone="neutral">{t("page.revision.generated")}</Badge>
+            ) : null}
+          </>
+        }
+        meta={{ createdAt: shortTimestamp(stored.created_at) }}
+        saveStatus={saveStatusText(document, status)}
+        view={view}
+        availableViews={availableViews}
+        onViewChange={(next) =>
+          void navigate({
+            to: ROUTE,
             params: { strategyId, revision },
-            search: { ...search, view: next === "json" ? undefined : next },
+            search: {
+              ...search,
+              view: next === stored.format ? undefined : next,
+            },
             replace: true,
           })
         }
+        editorActions={
+          <SaveAction
+            canSave={canSave}
+            saving={status.kind === "saving"}
+            onSave={save}
+          />
+        }
+        editor={
+          <>
+            {implemented ? null : (
+              <p className="page-state" role="status">
+                {t("page.revision.viewPending")} ({requested.toUpperCase()})
+              </p>
+            )}
+            {view === stored.format ? (
+              <SourceEditor state={document} dispatch={dispatch} />
+            ) : (
+              <pre
+                className="page-state"
+                aria-label={t("page.revision.jsonProjection")}
+              >
+                {JSON.stringify(stored.spec, null, 2)}
+              </pre>
+            )}
+          </>
+        }
+        runDisabled
       />
-      {implemented ? null : (
-        <p className="page-state" role="status">
-          {t("page.revision.viewPending")} ({requested.toUpperCase()})
-        </p>
-      )}
-      <pre
-        id={panelId(idBase, view)}
-        role="tabpanel"
-        className="page-state"
-        aria-label={t("page.revision.jsonProjection")}
-      >
-        {JSON.stringify(data.spec, null, 2)}
-      </pre>
+      <DirtyLeaveGuard dirty={document.dirty} />
     </>
   );
 };

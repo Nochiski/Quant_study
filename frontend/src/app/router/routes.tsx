@@ -9,7 +9,7 @@ import {
   type RouterHistory,
 } from "@tanstack/react-router";
 
-import { strategyRevisionQuery } from "../../entities/strategy";
+import { strategyDocumentQuery } from "../../entities/strategy";
 import { ApiRequestError } from "../../shared/api";
 import { OperationsPlaceholderPage } from "../../pages/operations-placeholder";
 import { BacktestRunPage } from "../../pages/research-backtest";
@@ -102,7 +102,7 @@ const strategyRevisionRoute = createRoute({
     const revision = Number(params.revision);
     try {
       await context.queryClient.ensureQueryData(
-        strategyRevisionQuery(params.strategyId, revision),
+        strategyDocumentQuery(params.strategyId, revision),
       );
     } catch (error) {
       if (error instanceof ApiRequestError && error.status === 404)

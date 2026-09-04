@@ -1,4 +1,8 @@
-export { strategyRevisionQuery } from "./model/strategy-queries";
+export {
+  strategyDocumentQuery,
+  strategyRevisionsQuery,
+} from "./model/strategy-queries";
+export type { RevisionSummary, StrategyDocument } from "../../shared/api";
 export type {
   DataStep,
   SavedStrategy,

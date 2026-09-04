@@ -1,0 +1,315 @@
+import { EditorView } from "@codemirror/view";
+import { QueryClient } from "@tanstack/react-query";
+import { createMemoryHistory } from "@tanstack/react-router";
+import {
+  act,
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { HttpResponse, http } from "msw";
+import { setupServer } from "msw/node";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+
+import { App } from "../app";
+
+const API = "http://localhost:8000";
+
+const spec = (strategyId: string, revision: number, title: string) => ({
+  identity: { strategy_id: strategyId, revision, schema_version: "1.0" },
+  title,
+  description: "",
+  data: {
+    market: "KRX",
+    start: "2021-09-03",
+    end: "2026-09-03",
+    universe_id: "krx.common-stock",
+    frequency: "daily",
+  },
+  eligibility: { rules: [] },
+  factors: { factors: [] },
+  signal: { method: "weighted_sum", entry_percentile: 0.1 },
+  portfolio: {
+    side: "long_only",
+    selection_count: 20,
+    weighting: "equal",
+    rebalance: "monthly",
+  },
+  risk: {
+    gross_exposure: 1,
+    net_exposure: 1,
+    max_name_weight: 0.1,
+    max_sector_weight: 0.3,
+  },
+  execution: {
+    timing: "next_open",
+    order_style: "market",
+    fee_bps: 15,
+    slippage_bps: 10,
+  },
+  parameters: [],
+});
+
+const document = (
+  strategyId: string,
+  revision: number,
+  source: string,
+  title = "퀄리티 모멘텀",
+) => ({
+  strategy_id: strategyId,
+  revision,
+  schema_version: "1.0",
+  format: "yaml",
+  source,
+  source_hash: "b".repeat(64),
+  spec: spec(strategyId, revision, title),
+  spec_hash: `${revision}`.repeat(64).slice(0, 64),
+  origin: "document",
+  generated: false,
+  created_at: "2026-09-04T09:30:00+00:00",
+});
+
+const STORED = 'schema_version: "1.0"\ntitle: 퀄리티 모멘텀\n';
+const posted: unknown[] = [];
+
+const server = setupServer(
+  http.get(
+    `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
+    ({ params }) => {
+      const revision = Number(params.revision);
+      if (params.strategyId !== "s1" || revision > 2) {
+        return HttpResponse.json(
+          { detail: { code: "strategy.not_found", message: "missing" } },
+          { status: 404 },
+        );
+      }
+      return HttpResponse.json(document("s1", revision, STORED));
+    },
+  ),
+  http.post(`${API}/api/v1/strategy-documents`, async ({ request }) => {
+    const body = (await request.json()) as { format: string; source: string };
+    posted.push(body);
+    if (body.source.includes("bad")) {
+      return HttpResponse.json(
+        {
+          detail: {
+            code: "strategy.document.invalid",
+            message: "title must not be empty",
+          },
+        },
+        { status: 422 },
+      );
+    }
+    return HttpResponse.json(document("s9", 1, body.source, "새 전략 A"), {
+      status: 201,
+    });
+  }),
+  http.post(
+    `${API}/api/v1/strategy-documents/:strategyId/revisions`,
+    async ({ params, request }) => {
+      const body = (await request.json()) as {
+        expected_revision: number;
+        source: string;
+      };
+      posted.push(body);
+      if (body.expected_revision !== 2) {
+        return HttpResponse.json(
+          {
+            detail: {
+              code: "strategy.revision_conflict",
+              message: "latest_revision=3",
+            },
+          },
+          { status: 409 },
+        );
+      }
+      return HttpResponse.json(
+        document(String(params.strategyId), 3, body.source),
+        { status: 201 },
+      );
+    },
+  ),
+  http.get(`${API}/api/v1/strategies/:strategyId/revisions`, () =>
+    HttpResponse.json({ items: [], offset: 0, limit: 50, total: 0 }),
+  ),
+  http.get(`${API}/api/v1/equity/catalog`, () =>
+    HttpResponse.json({
+      total: 0,
+      page: 1,
+      page_size: 1,
+      page_count: 0,
+      fields: [],
+      facets: {},
+    }),
+  ),
+  http.get(`${API}/api/v1/strategies/template`, () =>
+    HttpResponse.json(spec("", 0, "새 팩터 전략")),
+  ),
+);
+
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+afterEach(() => {
+  cleanup();
+  server.resetHandlers();
+  posted.length = 0;
+});
+afterAll(() => server.close());
+
+const mount = (initial: string) => {
+  const history = createMemoryHistory({ initialEntries: [initial] });
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: 0 } },
+  });
+  render(
+    <App
+      history={history}
+      queryClient={queryClient}
+      operationsEnabled={false}
+    />,
+  );
+  return history;
+};
+
+/** Waits for the lazy CodeMirror editor and returns its view for programmatic edits. */
+const editor = async () => {
+  await screen.findByRole("textbox", { name: "편집기" });
+  let view: EditorView | null = null;
+  await waitFor(() => {
+    const content = globalThis.document.querySelector(".cm-content");
+    view = content ? EditorView.findFromDOM(content as HTMLElement) : null;
+    expect(view).not.toBeNull();
+  });
+  return view as unknown as EditorView;
+};
+
+const replaceText = (view: EditorView, text: string) =>
+  act(() => {
+    view.dispatch({
+      changes: { from: 0, to: view.state.doc.length, insert: text },
+    });
+  });
+
+describe("document routes (P2-04)", () => {
+  it("loads the exact stored source of a revision into the editor as the draft base", async () => {
+    mount("/research/strategies/s1/revisions/2?view=diff");
+    expect(
+      await screen.findByRole("heading", { name: "퀄리티 모멘텀" }),
+    ).toBeInTheDocument();
+    const view = await editor();
+    expect(view.state.doc.toString()).toBe(STORED);
+    // The stored format is the editable view; DIFF is not implemented, so it falls back with a notice.
+    expect(screen.getByRole("tab", { name: "YAML" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByText(/DIFF/)).toBeInTheDocument();
+    expect(screen.getByText("저장됨 v2")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "저장" })).toBeDisabled();
+    expect(screen.getByText("2026-09-04 09:30")).toBeInTheDocument();
+  });
+
+  it("creates a strategy from the new draft and moves the URL to revision 1", async () => {
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/new");
+    const view = await editor();
+    expect(screen.getAllByText("초안").length).toBeGreaterThan(0);
+    replaceText(view, 'schema_version: "1.0"\ntitle: 새 전략 A\n');
+    expect(screen.getByText("저장되지 않은 변경")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "저장" })).toBeEnabled(),
+    );
+    await user.click(screen.getByRole("button", { name: "저장" }));
+    await waitFor(() =>
+      expect(history.location.pathname).toBe(
+        "/research/strategies/s9/revisions/1",
+      ),
+    );
+    expect(posted).toEqual([
+      { format: "yaml", source: 'schema_version: "1.0"\ntitle: 새 전략 A\n' },
+    ]);
+    // The revision page opens from the cache the save filled: no extra document fetch, no prompt.
+    expect(
+      await screen.findByRole("heading", { name: "새 전략 A" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
+
+  it("keeps the draft and reports a validation failure without leaving the page", async () => {
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/new");
+    const view = await editor();
+    replaceText(view, "title: bad\n");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "저장" })).toBeEnabled(),
+    );
+    await user.click(screen.getByRole("button", { name: "저장" }));
+    expect(
+      await screen.findByText(
+        "저장 실패: 문서 검증 오류: title must not be empty",
+      ),
+    ).toBeInTheDocument();
+    expect(history.location.pathname).toBe("/research/strategies/new");
+    expect(view.state.doc.toString()).toBe("title: bad\n");
+  });
+
+  it("blocks leaving a dirty draft until the user chooses, then lets them go", async () => {
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/new");
+    const view = await editor();
+    replaceText(view, "title: 임시\n");
+    await user.click(screen.getByRole("link", { name: "기존 편집기" }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog).toHaveTextContent("저장하지 않은 변경이 있습니다");
+    await user.click(within(dialog).getByRole("button", { name: "머무르기" }));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(history.location.pathname).toBe("/research/strategies/new");
+    await user.click(screen.getByRole("link", { name: "기존 편집기" }));
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "나가기",
+      }),
+    );
+    await waitFor(() =>
+      expect(history.location.pathname).toBe("/legacy/builder"),
+    );
+  });
+
+  it("appends the next revision from a saved base and surfaces a stale-base conflict", async () => {
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2");
+    const view = await editor();
+    replaceText(view, `${STORED}description: 개정\n`);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "저장" })).toBeEnabled(),
+    );
+    await user.click(screen.getByRole("button", { name: "저장" }));
+    await waitFor(() =>
+      expect(history.location.pathname).toBe(
+        "/research/strategies/s1/revisions/3",
+      ),
+    );
+    expect(posted).toEqual([
+      {
+        format: "yaml",
+        source: `${STORED}description: 개정\n`,
+        expected_revision: 2,
+      },
+    ]);
+    expect(await screen.findByText("방금 저장됨")).toBeInTheDocument();
+
+    // Someone else saved revision 4 meanwhile: revising from base 3 is refused, the draft stays.
+    cleanup();
+    mount("/research/strategies/s1/revisions/1");
+    const second = await editor();
+    replaceText(second, `${STORED}description: 충돌\n`);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "저장" })).toBeEnabled(),
+    );
+    await user.click(screen.getByRole("button", { name: "저장" }));
+    expect(await screen.findByText(/^충돌:/)).toBeInTheDocument();
+    expect(second.state.doc.toString()).toBe(`${STORED}description: 충돌\n`);
+  });
+});

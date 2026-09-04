@@ -19,4 +19,17 @@ export {
   type DocumentState,
 } from "./model/document-state";
 export { useStrategyDocument } from "./model/use-strategy-document";
+export {
+  documentSourceKey,
+  loadAction,
+  type DocumentSource,
+} from "./model/document-source";
+export {
+  canSaveDocument,
+  useSaveDocument,
+  type SaveStatus,
+} from "./model/use-save-document";
+export { saveStatusText } from "./model/save-status";
 export { SourceEditor } from "./ui/source-editor";
+export { SaveAction } from "./ui/save-action";
+export { DirtyLeaveGuard } from "./ui/dirty-leave-guard";

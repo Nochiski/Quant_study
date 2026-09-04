@@ -2,12 +2,15 @@ import { client } from "./generated/client.gen";
 import {
   cancelBacktest,
   createStrategy,
+  createStrategyDocument,
   explainFactorGraph,
   getEquityCatalog,
   getFactorCatalog,
   getBacktestResult,
   getStrategy,
+  getStrategyDocument,
   getBacktestStatus,
+  listStrategyRevisions,
   getStrategyTemplate,
   previewFactorGraph,
   previewPortfolio,
@@ -15,6 +18,7 @@ import {
   previewEquityPanel,
   previewEquityUniverse,
   reviseStrategy,
+  reviseStrategyDocument,
   startBacktest,
   validateFactorGraph,
   validateStrategy,
@@ -41,6 +45,7 @@ import type {
   NodeContract,
   MetricDefinition,
   MetricValue,
+  PageRevisionSummary,
   PortfolioPreview,
   PortfolioPreviewRequest,
   ResearchCatalog,
@@ -49,7 +54,11 @@ import type {
   ResearchPanelPreviewRequest,
   ResearchPanelQuery,
   ResearchPreview,
+  ReviseDocumentRequest,
+  RevisionSummary,
+  SaveDocumentRequest,
   SavedStrategy,
+  StrategyDocument,
   StrategySpec,
   StrategyValidation,
   UniverseHistoryQuery,
@@ -64,18 +73,23 @@ configureStrategyWorkbenchApi(
   import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000",
 );
 
-/** A non-2xx reply the caller can branch on (404 → route not-found, 409 → conflict UI). */
+/**
+ * A non-2xx reply the caller can branch on (404 → route not-found, 409 → conflict UI, 422 →
+ * invalid document). `detail` is the server's human-readable message, when it sent one.
+ */
 export class ApiRequestError extends Error {
   readonly status: number;
   readonly code: string | undefined;
+  readonly detail: string | undefined;
 
-  constructor(context: string, status: number, code?: string) {
+  constructor(context: string, status: number, code?: string, detail?: string) {
     super(
       `API request failed: ${context} status=${status} code=${code ?? "-"}`,
     );
     this.name = "ApiRequestError";
     this.status = status;
     this.code = code;
+    this.detail = detail;
   }
 }
 
@@ -86,13 +100,35 @@ const requireData = <T>(data: T | undefined, context: string): T => {
   return data;
 };
 
-const errorCode = (error: unknown): string | undefined => {
+const errorField = (
+  error: unknown,
+  field: "code" | "message",
+): string | undefined => {
   if (typeof error !== "object" || error === null || !("detail" in error))
     return undefined;
   const detail = (error as { detail: unknown }).detail;
-  return typeof detail === "object" && detail !== null && "code" in detail
-    ? String((detail as { code: unknown }).code)
+  return typeof detail === "object" && detail !== null && field in detail
+    ? String((detail as Record<string, unknown>)[field])
     : undefined;
+};
+
+const errorCode = (error: unknown): string | undefined =>
+  errorField(error, "code");
+
+/** Turns an SDK reply into data or a typed error; every document call goes through here. */
+const unwrap = <T>(
+  response: { data?: T; error?: unknown; response?: { status: number } },
+  context: string,
+): T => {
+  if (response.error !== undefined) {
+    throw new ApiRequestError(
+      context,
+      response.response?.status ?? 0,
+      errorCode(response.error),
+      errorField(response.error, "message"),
+    );
+  }
+  return requireData(response.data, context);
 };
 
 export const strategyWorkbenchApi = {
@@ -206,6 +242,45 @@ export const strategyWorkbenchApi = {
     return requireData(response.data, "getStrategy");
   },
 
+  async getStrategyDocument(
+    strategyId: string,
+    revision: number,
+  ): Promise<StrategyDocument> {
+    const response = await getStrategyDocument({
+      path: { strategy_id: strategyId, revision },
+    });
+    return unwrap(response, "getStrategyDocument");
+  },
+
+  async createStrategyDocument(
+    request: SaveDocumentRequest,
+  ): Promise<StrategyDocument> {
+    const response = await createStrategyDocument({ body: request });
+    return unwrap(response, "createStrategyDocument");
+  },
+
+  async reviseStrategyDocument(
+    strategyId: string,
+    request: ReviseDocumentRequest,
+  ): Promise<StrategyDocument> {
+    const response = await reviseStrategyDocument({
+      path: { strategy_id: strategyId },
+      body: request,
+    });
+    return unwrap(response, "reviseStrategyDocument");
+  },
+
+  async listStrategyRevisions(
+    strategyId: string,
+    page: { offset?: number; limit?: number } = {},
+  ): Promise<PageRevisionSummary> {
+    const response = await listStrategyRevisions({
+      path: { strategy_id: strategyId },
+      query: page,
+    });
+    return unwrap(response, "listStrategyRevisions");
+  },
+
   async create(spec: StrategySpec): Promise<SavedStrategy> {
     const response = await createStrategy({ body: spec });
     return requireData(response.data, "createStrategy");
@@ -249,6 +324,7 @@ export type {
   NodeContract,
   MetricDefinition,
   MetricValue,
+  PageRevisionSummary,
   PortfolioPreview,
   PortfolioPreviewRequest,
   ResearchCatalog,
@@ -257,7 +333,11 @@ export type {
   ResearchPanelPreviewRequest,
   ResearchPanelQuery,
   ResearchPreview,
+  ReviseDocumentRequest,
+  RevisionSummary,
+  SaveDocumentRequest,
   SavedStrategy,
+  StrategyDocument,
   StrategySpec,
   StrategyValidation,
   UniverseHistoryQuery,

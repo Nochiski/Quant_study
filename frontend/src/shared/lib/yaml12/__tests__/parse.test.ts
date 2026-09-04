@@ -79,17 +79,17 @@ describe("parseSource", () => {
   // the stream ends and a second document at its content; the backend points at the opener.
   it.each([
     ['title: "unterminated\ndata:\n', "yaml.syntax", 2],
-    ["a: 1\na: 2\n", "yaml.duplicate_key", 1],
+    ["a: 1\na: 2\n", "document.duplicate_key", 1],
     ["base: &b [1]\nc: *b\n", "yaml.anchor_or_alias", 0],
     ["a: !custom 1\n", "yaml.tag", 0],
     ["%YAML 1.1\n---\na: 1\n", "yaml.directive", 0],
     ["a:\n  <<: {x: 1}\n", "yaml.merge_key", 1],
     ["window: 1_000\n", "yaml.non_core_number", 0],
-    ["a: .nan\n", "yaml.non_finite_number", 0],
-    ["a: 9007199254740993\n", "yaml.integer_out_of_range", 0],
-    ["1: v\n", "yaml.non_string_key", 0],
+    ["a: .nan\n", "document.non_finite_number", 0],
+    ["a: 9007199254740993\n", "document.integer_out_of_range", 0],
+    ["1: v\n", "document.non_string_key", 0],
     ["a: 1\n---\nb: 2\n", "yaml.multiple_documents", 2],
-    ["- a\n", "yaml.not_a_mapping", 0],
+    ["- a\n", "document.not_a_mapping", 0],
   ])("rejects %j with %s and a line", (text, code, line) => {
     const parsed = parseSource(text, "yaml");
     expect(parsed.status).toBe("rejected");
@@ -108,7 +108,7 @@ describe("parseSource", () => {
       "json.syntax",
     );
     expect(parseSource("[1, 2]", "json").diagnostics[0]?.code).toBe(
-      "yaml.not_a_mapping",
+      "document.not_a_mapping",
     );
   });
 
@@ -132,15 +132,13 @@ describe("parseSource", () => {
   });
 
   it("rejects decoded lone surrogates while accepting a valid escaped pair", () => {
-    for (const [source, format] of [
-      ['a: "\\ud800"\n', "yaml"],
-      ['"\\ud800": value\n', "yaml"],
-      ['{"a":"\\ud800"}', "json"],
-      ['{"\\ud800":"value"}', "json"],
+    for (const [source, format, code] of [
+      ['a: "\\ud800"\n', "yaml", "yaml.syntax"],
+      ['"\\ud800": value\n', "yaml", "yaml.syntax"],
+      ['{"a":"\\ud800"}', "json", "json.syntax"],
+      ['{"\\ud800":"value"}', "json", "json.syntax"],
     ] as const) {
-      expect(parseSource(source, format).diagnostics[0]?.code).toBe(
-        "yaml.syntax",
-      );
+      expect(parseSource(source, format).diagnostics[0]?.code).toBe(code);
     }
     for (const [source, format] of [
       ['a: "\\ud83d\\ude00"\n', "yaml"],
@@ -155,12 +153,12 @@ describe("parseSource", () => {
   it.each([
     ['a: "\\ud800"\nb: &x 1\n', "yaml.anchor_or_alias"],
     ['a: "\\ud800"\nb: 1_000\n', "yaml.non_core_number"],
-    ['? ["\\ud800"]\n: value\n', "yaml.non_string_key"],
+    ['? ["\\ud800"]\n: value\n', "document.non_string_key"],
     ['a: "\\ud800"\na: 2\n', "yaml.syntax"],
-    ['a: 1\na: "\\ud800"\n', "yaml.duplicate_key"],
+    ['a: 1\na: "\\ud800"\n', "document.duplicate_key"],
     ["a: &x 1\nb: !custom 2\n", "yaml.anchor_or_alias"],
-    ["a: 9007199254740993\na: 2\n", "yaml.integer_out_of_range"],
-    ["a: .nan\na: 2\n", "yaml.non_finite_number"],
+    ["a: 9007199254740993\na: 2\n", "document.integer_out_of_range"],
+    ["a: .nan\na: 2\n", "document.non_finite_number"],
   ])(
     "matches backend rejection order for combined policies: %s",
     (source, code) => {
@@ -171,15 +169,15 @@ describe("parseSource", () => {
   it("applies the global depth guard before later tree-policy errors", () => {
     const deep = `${"a: {".repeat(33)}value${"}".repeat(33)}\nb: 9007199254740993\n`;
     expect(parseSource(deep, "yaml").diagnostics[0]?.code).toBe(
-      "yaml.too_deep",
+      "document.too_deep",
     );
     const deepKey = `? ${"[".repeat(33)}x${"]".repeat(33)}\n: value\n`;
     expect(parseSource(deepKey, "yaml").diagnostics[0]?.code).toBe(
-      "yaml.too_deep",
+      "document.too_deep",
     );
     for (const stream of [`${deep}---\nb: 2\n`, `b: 2\n---\n${deep}`]) {
       expect(parseSource(stream, "yaml").diagnostics[0]?.code).toBe(
-        "yaml.too_deep",
+        "document.too_deep",
       );
     }
   });
@@ -194,16 +192,16 @@ describe("parseSource", () => {
       "yaml.anchor_or_alias",
     );
     expect(parseSource(value(33), "yaml").diagnostics[0]?.code).toBe(
-      "yaml.too_deep",
+      "document.too_deep",
     );
 
     const key = (depth: number) =>
       `? ${"[".repeat(depth)}x${"]".repeat(depth)}\n: value\n`;
     expect(parseSource(key(32), "yaml").diagnostics[0]?.code).toBe(
-      "yaml.non_string_key",
+      "document.non_string_key",
     );
     expect(parseSource(key(33), "yaml").diagnostics[0]?.code).toBe(
-      "yaml.too_deep",
+      "document.too_deep",
     );
   });
 

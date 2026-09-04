@@ -21,6 +21,7 @@ import sqlite3
 import sys
 import zipfile
 from collections import Counter
+from collections.abc import Iterator
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -222,18 +223,30 @@ def run(db: Path, docs_dir: Path, cache_root: Path, snapshot_id: str, workers: i
     return summary
 
 
-def _doc_stats(rows: parsers_doc.DocRows) -> tuple[str, set[str], set[str], int]:
-    """문서 1건의 (mode, unknown_tags, other_entities, text_equal 위반 수)."""
-    tags: set[str] = set()
-    for r in rows.parse_log:
-        tags.update(json.loads(r["unknown_tags"] or "[]"))
-    ents: set[str] = set()
-    n_eq = 0
-    for m in rows.meta:
-        if m.get("text_equal") == "false":
-            n_eq += 1
-        ents.update(json.loads(m.get("other_entities") or "[]"))
-    return _doc_mode(rows), tags, ents, n_eq
+def _count_lines(path: Path) -> int:
+    n = 0
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            n += chunk.count(b"\n")
+    return n
+
+
+def _iter_docs(files: list[Path]) -> Iterator[list[dict[str, str | None]]]:
+    """샤드 파일을 스트리밍하며 같은 접수번호의 연속 행을 묶어 낸다(문서 행은 샤드 안에서 연속)."""
+    for f in files:
+        cur: str | None = None
+        rows: list[dict[str, str | None]] = []
+        for line in open(f, encoding="utf-8"):
+            if not line.strip():
+                continue
+            r = json.loads(line)
+            if r["rcept_no"] != cur and rows:
+                yield rows
+                rows = []
+            cur = r["rcept_no"]
+            rows.append(r)
+        if rows:
+            yield rows
 
 
 def summarize_from_cache(cache: Path, snapshot_id: str, input_hash: str, n_missing: int,
@@ -241,38 +254,40 @@ def summarize_from_cache(cache: Path, snapshot_id: str, input_hash: str, n_missi
                          ) -> tuple[PrepassSummary, dict[str, object]]:
     """캐시 파일만으로 summary 를 다시 집계한다 — `run()` 의 ShardResult 집계와 같은 값이어야 한다.
 
-    문서 = parse_log 의 접수번호. ZIP 열기 실패 문서(member_name '' · error BadZipFile)는 D0 로 세고
-    모드 집계에서 뺀다. n_missing(캐시에 행이 없는 문서)은 입력 집합이 같으므로 이전 summary 값.
+    메모리 O(1): parse_log·meta 는 문서 단위로 스트리밍하고(section 790만 행은 줄 수만 센다), 문서를
+    한꺼번에 올리지 않는다(첫 판은 전부 올려 서버 RAM 15GB 를 넘겼다). 문서 = parse_log 의 접수번호.
+    ZIP 열기 실패(member_name '' · BadZipFile)는 D0 로 세고 모드 집계에서 뺀다. n_missing 은 입력이
+    같으므로 이전 summary 값을 받는다.
     """
-    by_doc: dict[str, parsers_doc.DocRows] = {}
-    for t, attr in _ROWS_ATTR.items():
-        for f in sorted((cache / t).glob("year=*.jsonl")):
-            for line in open(f, encoding="utf-8"):
-                if not line.strip():
-                    continue
-                r = json.loads(line)
-                doc = by_doc.setdefault(str(r["rcept_no"]), parsers_doc.DocRows())
-                getattr(doc, attr).append(r)
-    modes: Counter[str] = Counter()
     tables: Counter[str] = Counter()
+    for t in TABLES:
+        for f in sorted((cache / t).glob("year=*.jsonl")):
+            tables[t] += _count_lines(f)
+    modes: Counter[str] = Counter()
     unknown: Counter[str] = Counter()
     ents: Counter[str] = Counter()
     n_docs = n_open_failed = n_eq = 0
-    for rows in by_doc.values():
-        for t, attr in _ROWS_ATTR.items():
-            tables[t] += len(getattr(rows, attr))
+    for rows in _iter_docs(sorted((cache / "stg_doc_parse_log").glob("year=*.jsonl"))):
         if any(r.get("member_name") == "" and str(r.get("error") or "").startswith("BadZipFile")
-               for r in rows.parse_log):
+               for r in rows):
             n_open_failed += 1
             continue
         n_docs += 1
-        mode, tags, es, eq = _doc_stats(rows)
-        modes[mode] += 1
+        doc = parsers_doc.DocRows(parse_log=rows)
+        modes[_doc_mode(doc)] += 1
+        tags: set[str] = set()
+        for r in rows:
+            tags.update(json.loads(r["unknown_tags"] or "[]"))
         for tag in tags:
             unknown[tag] += 1
+    for rows in _iter_docs(sorted((cache / "stg_doc_meta").glob("year=*.jsonl"))):
+        es: set[str] = set()
+        for m in rows:
+            if m.get("text_equal") == "false":
+                n_eq += 1
+            es.update(json.loads(m.get("other_entities") or "[]"))
         for e in es:
             ents[e] += 1
-        n_eq += eq
     return _judge(snapshot_id, input_hash, n_docs, modes, tables, unknown, ents, n_missing,
                   n_open_failed, n_eq, [], d2_limit, d3_limit)
 

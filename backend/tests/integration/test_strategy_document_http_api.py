@@ -180,11 +180,8 @@ def test_factor_graph_issue_names_the_node_and_points_into_the_graph() -> None:
 
 def test_semantic_range_for_a_parent_path_falls_back_to_the_parent_node() -> None:
     client = TestClient(build_http_app())
-    source = _source("quality_momentum.yaml").replace(
-        "factors:\n  factors:\n    - factor_id: momentum",
-        "factors:\n  factors:\n    - factor_id: momentum",
-    )
-    # Duplicate the factor block so the strategy-level duplicate check fires on the `factors` parent.
+    source = _source("quality_momentum.yaml")
+    # Duplicate the factor block: the strategy-level duplicate check fires on `factors`.
     lines = source.splitlines(keepends=True)
     start = lines.index("factors:\n") + 2
     end = lines.index("signal:\n")

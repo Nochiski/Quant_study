@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: IN_PROGRESS
+project_status: SELF_CHECK
 current_phase: P4
 current_pr: P4-06
 active_prs: [P4-06]
 parallel_window: [P4-06]
-last_updated: 2026-09-05T06:41:36+09:00
+last_updated: 2026-09-05T07:04:11+09:00
 planned_prs: 50
 merged_prs: 38
 approved_prs: 38
@@ -22,13 +22,13 @@ progress_percent: 76
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_PROGRESS` |
+| Project status | `SELF_CHECK` |
 | Current phase | `P4` |
 | Current/next PR | `P4-06` |
 | Active PR | `P4-06` |
 | Progress | `38 / 50 merged (76%)` |
 | Approved | `38 / 50` |
-| Aggregated at | `2026-09-05 06:41 KST` |
+| Aggregated at | `2026-09-05 07:04 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -76,7 +76,7 @@ progress_percent: 76
 | P1.5 | Backtest Correctness Gate | 5 | 5 | `MERGED` |
 | P2 | App Shell and visual foundation | 4 | 4 | `MERGED` |
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
-| P4 | Outline, Contract, Projections | 10 | 7 | `IN_PROGRESS` |
+| P4 | Outline, Contract, Projections | 10 | 7 | `SELF_CHECK` |
 | P5 | Truthful Trace UI | 3 | 0 | `WAITING` |
 | P6 | Professional release and migration | 7 | 1 | `WAITING` |
 | **Total** |  | **50** | **38** | **76%** |
@@ -86,16 +86,16 @@ progress_percent: 76
 
 | 항목 | 값 |
 |---|---|
-| PR | `P4-06` Read-only canonical JSON과 Form projection IN_PROGRESS |
+| PR | `P4-06` Read-only canonical JSON과 Form projection SELF_CHECK |
 | Intent | 현재 backend compile이 확정한 StrategySpec을 JSON과 전문 트레이더용 요약 Form으로 읽기 전용 투영한다 |
 | Acceptance | current valid canonical JSON; metadata/data/portfolio/risk/execution Form; invalid source의 last-valid stale 표시; view 전환 뒤 source·selection·undo 보존; new/revision 동일 동작 |
 | Non-goals | Form 편집·전체 재직렬화, YAML comment/order 변경, Graph(P4-07), Diff(P4-08), validation/hash 계산 복제 |
 | Branch/worktree | `feat/p4-06-json-form-projections` (`Quant_study-p4-06`) |
 | Base SHA | `20491b8` (P4-10 merge main) |
-| Head SHA | 구현 전 |
-| Diff stat | 구현 전 |
-| Focused tests | projection model·view lifecycle·new/revision route 예정 |
-| Full gate | 구현 후 frontend full·typecheck·lint·build·generated clean 예정 |
+| Head SHA | `84dadf0` |
+| Diff stat | 19 files, +860/-51; backend canonical SoT·editor lifecycle·new/revision/JSON source가 하나의 acceptance여서 12절 size exception |
+| Focused tests | projection model·document epoch·YAML/JSON source·view lifecycle·new/revision route 54 passed |
+| Full gate | frontend 329 passed; typecheck·lint·build; OpenAPI/generated SDK semantic clean |
 
 ---
 
@@ -201,7 +201,7 @@ Phase exit:
 | [x] | `P4-03` | Problems panel, filter, editor jump | P3-04 | `MERGED` | [#55](https://github.com/Nochiski/Quant_study/pull/55) · `review_p4_03` APPROVE |
 | [x] | `P4-04` | Backend Execution Plan query·version gate·source mapping model | P3-05, P4-02 | `MERGED` | [#57](https://github.com/Nochiski/Quant_study/pull/57) · `review_p4_04` APPROVE · `25d8b45` |
 | [x] | `P4-05` | Canonical node snippet insertion | P3-02, P1-05 | `MERGED` | [#59](https://github.com/Nochiski/Quant_study/pull/59) · `review_p4_05` APPROVE · `191b902` |
-| [ ] | `P4-06` | Read-only canonical JSON과 Form projection | P3-05 | `IN_PROGRESS` | 구현·self-check 중 |
+| [ ] | `P4-06` | Read-only canonical JSON과 Form projection | P3-05 | `SELF_CHECK` | code freeze `84dadf0`; author gate 통과 |
 | [ ] | `P4-07` | Read-only FactorGraph DAG projection | P4-01, P3-05 | `WAITING` | — |
 | [ ] | `P4-08` | Source/semantic/revision Diff와 conflict resolution | P1-08, P3-07 | `WAITING` | — |
 | [x] | `P4-09` | Execution Plan 표시와 YAML/graph selection 연동 | P4-04, P4-01 | `MERGED` | [#58](https://github.com/Nochiski/Quant_study/pull/58) · `review_p4_09` APPROVE · `8a2ebfc` |
@@ -331,6 +331,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | P4-06 구현을 `84dadf0`에 freeze: backend compile의 canonical JSON·StrategySpec만 읽는 JSON/Form projection, same-document last-valid stale 표시, 저장 revision seed, YAML/JSON source view와 CodeMirror의 source·selection·undo 보존을 new/revision 양쪽에 연결. focused 54·frontend 329·typecheck·lint·build·generated clean 후 SELF_CHECK 전환. 총 860줄은 production/i18n 약 500줄과 state·route·접근성 회귀 약 360줄이며 projection·editor lifecycle을 분리하면 acceptance가 검증되지 않아 12절 size exception 기록 | canonical/hash backend SoT·projection/edit/view 책임분리·P4-06 acceptance·12절 size exception |
 | 2026-09-05 KST | Codex | #60 P4-10을 동일 reviewer APPROVE(P0/P1/P2 0), 최신 승인 문서 HEAD CI 4/4 후 main에 병합(`20491b8`), 38/50(76%). 최신 main에서 P4-06 전용 worktree를 만들고 backend compile 결과만 읽는 canonical JSON·Form projection 구현을 시작 | 13.6 merge gate·backend semantic SoT·projection/edit 책임분리 |
 | 2026-09-05 KST | Codex | `review_p4_10` 최종 재검토가 metadata coherence, query fail-closed, JSON 경계, feedback capability 왕복, 실제 route factor/parse/dirty/focus/undo와 PR body size gate를 모두 재현하고 APPROVE(P0/P1/P2 0). reviewed HEAD CI 4/4 통과로 APPROVED 전환 | 동일 reviewer 최종 승인·review/size/CI gate |
 | 2026-09-05 KST | Codex | P4-10 PR #60 본문을 317 tests와 최신 diff breakdown·`제약사항` size exception으로 갱신하고 capability 왕복 fix `bb66833`을 동일 `review_p4_10` 최종 재검토로 보내기 위해 IN_REVIEW 전환 | WORKFLOW 12절 PR body gate·동일 reviewer final gate |

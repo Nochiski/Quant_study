@@ -157,10 +157,10 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P2-01` | 시안 기준 light theme token과 공통 UI primitive | P0-01 | `IN_REVIEW` | `review_p2_01` |
-| [ ] | `P2-02` | Router, research/operations namespace, App Shell | P0-04 | `IN_REVIEW` | `review_p2_02` |
-| [ ] | `P2-03` | Stepper를 제거한 resizable Strategy IDE layout | P2-01, P2-02 | `IN_REVIEW` | `review_p2_03` |
-| [ ] | `P2-04` | Revision-aware loader와 draft base 상태 | P1-07, P2-02 | `IN_REVIEW` | `review_p2_04` |
+| [ ] | `P2-01` | 시안 기준 light theme token과 공통 UI primitive | P0-01 | `IN_REVIEW` | `review_p2_01` · [#38](https://github.com/Nochiski/Quant_study/pull/38) |
+| [ ] | `P2-02` | Router, research/operations namespace, App Shell | P0-04 | `IN_REVIEW` | `review_p2_02` · [#39](https://github.com/Nochiski/Quant_study/pull/39) |
+| [ ] | `P2-03` | Stepper를 제거한 resizable Strategy IDE layout | P2-01, P2-02 | `IN_REVIEW` | `review_p2_03` · [#40](https://github.com/Nochiski/Quant_study/pull/40) |
+| [ ] | `P2-04` | Revision-aware loader와 draft base 상태 | P1-07, P2-02 | `IN_REVIEW` | `review_p2_04` · [#43](https://github.com/Nochiski/Quant_study/pull/43) |
 
 Phase exit:
 
@@ -172,13 +172,13 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P3-01` | YAML 1.2 document state machine과 CST path index | P0-03, P1-03, P1-05 | `IN_REVIEW` | `review_p3_01` |
-| [ ] | `P3-02` | Lazy code editor adapter와 worker lifecycle | P0-02, P2-03 | `IN_REVIEW` | `review_p3_02` |
-| [ ] | `P3-03` | Runtime schema 구조 검증·completion·hover | P3-01, P3-02, P1-05 | `IN_REVIEW` | `review_p3_03` |
-| [ ] | `P3-04` | Backend semantic diagnostic marker와 stale response 차단 | P3-03, P1-03 | `IN_REVIEW` | `review_p3_04` |
-| [ ] | `P3-05` | Dirty/base hash에 따른 saved reference 또는 inline draft Backtest | P3-04, P1-07, P1-09, P1.5-04, P2-04 | `IN_REVIEW` | `review_p3_05` |
-| [ ] | `P3-06` | Local autosave와 recovery 비교 | P3-05 | `IN_REVIEW` | `review_p3_06` |
-| [ ] | `P3-07` | 409 revision conflict에서 source 보존 | P3-05, P1-08 | `IN_REVIEW` | `review_p3_07` |
+| [ ] | `P3-01` | YAML 1.2 document state machine과 CST path index | P0-03, P1-03, P1-05 | `IN_REVIEW` | `review_p3_01` · [#41](https://github.com/Nochiski/Quant_study/pull/41) |
+| [ ] | `P3-02` | Lazy code editor adapter와 worker lifecycle | P0-02, P2-03 | `IN_REVIEW` | `review_p3_02` · [#42](https://github.com/Nochiski/Quant_study/pull/42) |
+| [ ] | `P3-03` | Runtime schema 구조 검증·completion·hover | P3-01, P3-02, P1-05 | `IN_REVIEW` | `review_p3_03` · [#44](https://github.com/Nochiski/Quant_study/pull/44) |
+| [ ] | `P3-04` | Backend semantic diagnostic marker와 stale response 차단 | P3-03, P1-03 | `IN_REVIEW` | `review_p3_04` · [#45](https://github.com/Nochiski/Quant_study/pull/45) |
+| [ ] | `P3-05` | Dirty/base hash에 따른 saved reference 또는 inline draft Backtest | P3-04, P1-07, P1-09, P1.5-04, P2-04 | `IN_REVIEW` | `review_p3_05` · [#46](https://github.com/Nochiski/Quant_study/pull/46) |
+| [ ] | `P3-06` | Local autosave와 recovery 비교 | P3-05 | `IN_REVIEW` | `review_p3_06` · [#47](https://github.com/Nochiski/Quant_study/pull/47) |
+| [ ] | `P3-07` | 409 revision conflict에서 source 보존 | P3-05, P1-08 | `IN_REVIEW` | `review_p3_07` · [#48](https://github.com/Nochiski/Quant_study/pull/48) |
 
 Phase exit:
 
@@ -282,6 +282,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-04 KST | Claude | 사용자 지시로 origin/main fast-forward push(c174452→73d812e) 후 리뷰 중 브랜치 12개를 Stacked PR로 공개: #38 P2-01 → #39 P2-02 → #40 P2-03 → #41 P3-01 → #42 P3-02 → #43 P2-04 → #44 P3-03 → #45 P3-04 → #46 P3-05 → #47 P3-06 → #48 P3-07(스택 끝, 리뷰 후속 수정 1eecbb2·8933bcc·9581811 포함), #49 P1.5-05(main 기준). P2-04·P3-01~04 REQUEST_CHANGES 수정 완료, 같은 리뷰어 재검토 요청. 게이트: typecheck·lint·vitest 187·build, backend 652 | 사용자 지시 |
 | 2026-09-04 KST | Claude | P3-07 착수·diff freeze 8c3d074 (branch `feat/p3-07-conflict-safety`, P3-06 위; 409 시 문서 보존, ConflictBanner(서버 최신/현재 기준 리비전, 서버본 열기 링크, 현재 문서 복사, Diff 열기→P1-08 semantic diff 표), strategyDiffQuery·diffStrategyRevisions 래퍼; vitest 176·typecheck·lint·build clean), review_p3_07(opus) 배정 → IN_REVIEW. Phase 3 PR 7/7 구현 완료, 리뷰·merge 대기 | 13.3 |
 | 2026-09-04 KST | Claude | P3-06 착수·diff freeze 7dcb3bf (branch `feat/p3-06-autosave-recovery`, P3-05 위; draft-store(localStorage, base key `strategyId@rev`/new, 손상·quota 내성), useAutosave(dirty 800ms 후 기록, 저장 성공 시 정리, 로드 시 원본과 다른 복구본 제안), RecoveryBanner(줄 diff 요약, 복구/삭제, schema 불일치 시 원문 다운로드), lineDiffSummary; vitest 175·typecheck·lint·build clean), review_p3_06(opus) 배정 → IN_REVIEW | 13.3 |
 | 2026-09-04 KST | Claude | P3-05 착수·diff freeze 0fb303b (branch `feat/p3-05-toolbar-cutover`, P3-04 위; 15 files +719/−33; DocumentToolbar(schema/source hash/spec hash·dirty·Validate/Save/Backtest), canSave는 현재 compile 성공 시만, decideBacktestSource(saved_revision ↔ inline_draft ↔ blocked), useRunBacktest→/research/backtests/$runId, IDE meta 확장, builder 문구 YAML-first; vitest 168·typecheck·lint·build clean), review_p3_05(opus) 배정 → IN_REVIEW | 13.3 |

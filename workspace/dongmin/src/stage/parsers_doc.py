@@ -50,10 +50,13 @@ _BARE_AMP_RE = re.compile(r"&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)")
 _TOKEN_RE = re.compile(r"<(/?)([A-Za-z][A-Za-z0-9:_.-]*)")     # §1.6 Name 토큰 정의
 # 규칙 5 — 속성 따옴표 복구(Y510·Y2040 실측 세 꼴). 값 클래스가 `=` 를 막아 빈 속성은 안 건드린다.
 #  a) `=""값"` · `=""값""` · `="" 값""` · `="" 값"` → `="값"`   b) `="값""` → `="값"`
-#  c) 값 안의 홑 `"` — `="X("Y)"` → `="X(&quot;Y)"` (태영건설 4건)
+#  c) 값 안의 `"` — 닫는 따옴표는 뒤에 `>`·`/>`·다음 속성(`NAME=`)이 오는 것뿐이고, 그 앞의 `"` 는
+#     전부 값의 일부 → `&quot;` (`="JV "UZAUTO-INZI" LLC"` → `="JV &quot;UZAUTO-INZI&quot; LLC"`).
+#     `&quot;` 는 트리에서 다시 `"` 가 되므로 본문에 잘못 걸려도 글자는 안 바뀐다(D10 이 보증).
 _ATTR_REPAIR_RE = re.compile(r'=""([^"<>=]*)""?(?=[\s/>])')
 _ATTR_REPAIR2_RE = re.compile(r'(?<==")([^"<>=]+)""(?=[\s/>])')
-_ATTR_REPAIR3_RE = re.compile(r'="([^"<>=]*)"([^"<>=\s/][^"<>=]*)"(?=[\s/>])')
+_ATTR_END = r'\s*(?:/?>|[A-Za-z][\w:.-]*=)'
+_ATTR_VAL_RE = re.compile(rf'="((?:[^"<>]|"(?!{_ATTR_END}))+)"(?={_ATTR_END})')
 
 
 @dataclass(frozen=True)
@@ -98,7 +101,17 @@ def sanitize(text: str, tags: frozenset[str]) -> Sanitized:
     t, n_lt = tag_re.subn("&lt;", t)
     t, n_attr = _ATTR_REPAIR_RE.subn(r'="\1"', t)
     t, n_attr2 = _ATTR_REPAIR2_RE.subn(r'\1"', t)
-    t, n_attr3 = _ATTR_REPAIR3_RE.subn(r'="\1&quot;\2"', t)
+    n_attr3 = 0
+
+    def inner_quotes(m: re.Match[str]) -> str:
+        nonlocal n_attr3
+        v = m.group(1)
+        if '"' not in v:
+            return m.group(0)
+        n_attr3 += 1
+        return '="' + v.replace('"', "&quot;") + '"'
+
+    t = _ATTR_VAL_RE.sub(inner_quotes, t)
     return Sanitized(t, n_ctrl, sum(others.values()), n_amp, n_lt, n_attr + n_attr2 + n_attr3,
                      tuple(sorted(unknown)), tuple(sorted(others)))
 
@@ -490,10 +503,11 @@ class DocRows:
 def text_equal(sanitized: str, root: ET.Element, lenient: bool) -> bool:
     """§1.12 텍스트 등식 — 트리 텍스트 = 정제 원문에서 주석·선언·태그를 지우고 unescape 한 것.
 
-    expat 은 XML 규격대로 CRLF·CR 을 LF 로 정규화하므로 기대값도 같이 정규화한다(Y2040 실측: 23건).
+    expat 은 XML 규격대로 원문의 CRLF·CR 을 LF 로 정규화하지만 `&#13;` 참조로 들어온 CR 은 남긴다
+    (Y2040 실측: 각 23건·67건). 그래서 줄끝 정규화를 먼저, 참조 해석(unescape)을 나중에 한다.
     """
     stripped = _ANY_TAG_RE.sub("", _PI_RE.sub("", _COMMENT_RE.sub("", sanitized)))
-    expected = _EOL_RE.sub("\n", html.unescape(stripped))
+    expected = html.unescape(_EOL_RE.sub("\n", stripped))
     got = "".join(root.itertext())
     if lenient:
         return " ".join(expected.split()) == " ".join(got.split())

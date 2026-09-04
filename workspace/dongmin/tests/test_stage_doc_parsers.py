@@ -65,6 +65,11 @@ def test_sanitize_repairs_doubled_closing_quote_too() -> None:
     ('<TE ENG=""Maximum exposure">v</TE>', '<TE ENG="Maximum exposure">v</TE>'),
     ('<TD ENG="NYU 1ST CO.,LTD.("Investor)" WIDTH="291">x</TD>',
      '<TD ENG="NYU 1ST CO.,LTD.(&quot;Investor)" WIDTH="291">x</TD>'),
+    ('<TH ENG="JV "UZAUTO-INZI" LLC">JV "UZAUTO-INZI" LLC</TH>',
+     '<TH ENG="JV &quot;UZAUTO-INZI&quot; LLC">JV "UZAUTO-INZI" LLC</TH>'),
+    ('<TE ENG="x ("a" b) c"  as shown)" VALIGN="M">v</TE>',
+     '<TE ENG="x (&quot;a&quot; b) c&quot;  as shown)" VALIGN="M">v</TE>'),
+    ('<TE A="p" B="q"/>', '<TE A="p" B="q"/>'),
     ('<TU AUNIT="" WIDTH="5"/>', '<TU AUNIT="" WIDTH="5"/>'),          # 빈 속성은 그대로
     ('<TD W=""><P>x</P></TD>', '<TD W=""><P>x</P></TD>'),
     ('<TD A="x" B="y">a "b" c</TD>', '<TD A="x" B="y">a "b" c</TD>'),   # 정상 속성·본문 따옴표
@@ -309,7 +314,7 @@ def test_text_equal_survives_gt_inside_attributes_and_crlf_line_ends() -> None:
     # 전량 실측(D10 위반 23건): 속성값 안의 `>` 와 CRLF 줄끝은 트리가 아니라 검증기 쪽 문제였다
     xml = DOC_MIN.replace("<TD>x</TD>", '<TD ATITLE="5. 실적-<Life Science>" W="1">x</TD>')
     xml = xml.replace("<TITLE ATOC=\"Y\">I. 회사의 개요</TITLE>",
-                      "<TITLE ATOC=\"Y\">I. 회사의\r\n개요</TITLE>")
+                      "<TITLE ATOC=\"Y\">I. 회사의\r\n개요&#13;\n(2010)</TITLE>")   # 참조 CR 유지
     san = pd_.sanitize(xml, V.tags)
     r = pd_.parse_tree(san.text, V.tags)
     assert r.mode is pd_.ParseMode.OK and r.root is not None

@@ -54,7 +54,7 @@ def test_prepass_writes_jsonl_per_table_and_year_with_summary(tmp_path: Path) ->
                         "stg_doc_parse_log": 3}
     assert len(s.input_hash) == 16
     cache = tmp_path / "cache" / "snap_t"
-    meta_2020 = (cache / "stg_doc_meta" / "year=2020.jsonl").read_text().splitlines()
+    meta_2020 = (cache / "stg_doc_meta" / "year=2020_q1.jsonl").read_text().splitlines()
     assert len(meta_2020) == 2 and json.loads(meta_2020[1])["member_role"] == "main"
     summary = json.loads((cache / "summary.json").read_text())
     assert summary["tables"]["stg_doc_section"] == 8 and summary["d10_text_equal_violations"] == 0
@@ -95,4 +95,4 @@ def test_prepass_clears_stale_shards_and_honours_rcept_list(tmp_path: Path) -> N
                         rcept_list={"20200327001141"})
     assert s.n_docs == 1 and s.modes == {"ok": 1}
     assert not (cache / "stg_doc_meta" / "year=1999.jsonl").exists()
-    assert not (cache / "stg_doc_meta" / "year=2024.jsonl").exists()   # 목록 밖 연도는 샤드 없음
+    assert not (cache / "stg_doc_meta" / "year=2024_q1.jsonl").exists()   # 목록 밖은 샤드 없음

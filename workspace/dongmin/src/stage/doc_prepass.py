@@ -1,6 +1,6 @@
 """문서 프리패스 — 스냅샷 doc_store(zip_ok=1) 의 ZIP 을 한 번만 파싱해 테이블×연도 JSON Lines 캐시.
 
-산출: <cache_root>/<snapshot_id>/<table>/year=YYYY.jsonl + summary.json (DOC_DESIGN §2.2·§2.5 ①).
+산출: <cache_root>/<snapshot_id>/<table>/year=YYYY_qN.jsonl + summary.json (DOC_DESIGN §2.2·§2.5 ①).
 게이트 D0(ZIP 부재·열기 실패 0)·D2(문서 단위 파싱 실패율)·D3(어휘 폐쇄)·D10(텍스트 등식) 을
 여기서 판정한다. 문서 단위 = ZIP 1개, 문서의 parse_mode = main 멤버(없으면 첫 멤버)의 것.
 CLI: PYTHONPATH=src python -m stage.doc_prepass --snapshot-id S [--workers 3] [--years 2020,2021]
@@ -30,7 +30,7 @@ _ROLE_PRIORITY = {"main": 0, "audit_cons": 1, "audit": 2, "other": 3}
 
 @dataclass
 class ShardResult:
-    year: str
+    shard: str                           # 접수 연도×분기 (`2024_q1`)
     n_docs: int = 0
     n_zip_missing: int = 0
     n_zip_open_failed: int = 0
@@ -58,8 +58,14 @@ class PrepassSummary:
     detail: str
 
 
-def _docs_by_year(db: Path, years: set[str] | None,
-                  rcept_list: set[str] | None) -> dict[str, list[tuple[str, str]]]:
+def _shard_of(rcept_no: str) -> str:
+    """접수 연도×분기(`2024_q1`). 연도 단위면 큰 연도가 끝에 홀로 남아 워커가 논다."""
+    q = (int(rcept_no[4:6]) - 1) // 3 + 1
+    return f"{rcept_no[:4]}_q{q}"
+
+
+def _docs_by_shard(db: Path, years: set[str] | None,
+                   rcept_list: set[str] | None) -> dict[str, list[tuple[str, str]]]:
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     try:
         rows = con.execute("SELECT rcept_no, fetched_at FROM doc_store WHERE zip_ok = 1 "
@@ -73,7 +79,7 @@ def _docs_by_year(db: Path, years: set[str] | None,
             continue
         if rcept_list is not None and str(rno) not in rcept_list:
             continue
-        out.setdefault(y, []).append((str(rno), str(at)))
+        out.setdefault(_shard_of(str(rno)), []).append((str(rno), str(at)))
     return out
 
 
@@ -83,13 +89,13 @@ def _doc_mode(rows: parsers_doc.DocRows) -> str:
 
 
 def _run_shard(args: tuple[str, list[tuple[str, str]], Path, Path]) -> ShardResult:
-    year, docs, docs_dir, cache = args
+    shard, docs, docs_dir, cache = args
     vocab: DocVocab = load_vocab()
-    res = ShardResult(year)
-    files = {t: open(cache / t / f"year={year}.jsonl", "w", encoding="utf-8") for t in TABLES}
+    res = ShardResult(shard)
+    files = {t: open(cache / t / f"year={shard}.jsonl", "w", encoding="utf-8") for t in TABLES}
     try:
         for rno, fetched_at in docs:
-            path = docs_dir / year / f"{rno}.zip"
+            path = docs_dir / rno[:4] / f"{rno}.zip"
             if not path.exists():
                 res.n_zip_missing += 1
                 res.missing.append(rno)
@@ -139,12 +145,12 @@ def run(db: Path, docs_dir: Path, cache_root: Path, snapshot_id: str, workers: i
     """프리패스 실행. 결과는 값(PrepassSummary.status)으로, 예외는 환경 오류에만."""
     cache = cache_root / snapshot_id
     _clear_cache(cache)
-    by_year = _docs_by_year(db, years, rcept_list)
+    by_shard = _docs_by_shard(db, years, rcept_list)
     if limit_per_year is not None:
-        by_year = {y: d[:limit_per_year] for y, d in by_year.items()}
-    all_rno = sorted(r for docs in by_year.values() for r, _ in docs)
+        by_shard = {k: d[:limit_per_year] for k, d in by_shard.items()}
+    all_rno = sorted(r for docs in by_shard.values() for r, _ in docs)
     input_hash = hashlib.sha256("\n".join(all_rno).encode()).hexdigest()[:16]
-    jobs = [(y, d, docs_dir, cache) for y, d in sorted(by_year.items())]
+    jobs = [(k, d, docs_dir, cache) for k, d in sorted(by_shard.items())]
     if workers <= 1:
         results = [_run_shard(j) for j in jobs]
     else:

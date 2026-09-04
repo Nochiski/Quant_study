@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: CHANGES_REQUESTED
+project_status: SELF_CHECK
 current_phase: P4
 current_pr: P4-10
 active_prs: [P4-10]
 parallel_window: [P4-10]
-last_updated: 2026-09-05T06:13:06+09:00
+last_updated: 2026-09-05T06:25:04+09:00
 planned_prs: 50
 merged_prs: 37
 approved_prs: 37
@@ -22,13 +22,13 @@ progress_percent: 74
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `CHANGES_REQUESTED` |
+| Project status | `SELF_CHECK` |
 | Current phase | `P4` |
 | Current/next PR | `P4-10` |
 | Active PR | `P4-10` |
 | Progress | `37 / 50 merged (74%)` |
 | Approved | `37 / 50` |
-| Aggregated at | `2026-09-05 06:13 KST` |
+| Aggregated at | `2026-09-05 06:25 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -76,7 +76,7 @@ progress_percent: 74
 | P1.5 | Backtest Correctness Gate | 5 | 5 | `MERGED` |
 | P2 | App Shell and visual foundation | 4 | 4 | `MERGED` |
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
-| P4 | Outline, Contract, Projections | 10 | 6 | `CHANGES_REQUESTED` |
+| P4 | Outline, Contract, Projections | 10 | 6 | `SELF_CHECK` |
 | P5 | Truthful Trace UI | 3 | 0 | `WAITING` |
 | P6 | Professional release and migration | 7 | 1 | `WAITING` |
 | **Total** |  | **50** | **37** | **74%** |
@@ -86,16 +86,16 @@ progress_percent: 74
 
 | 항목 | 값 |
 |---|---|
-| PR | `P4-10` Five-area snippet catalog UI와 page wiring CHANGES_REQUESTED |
+| PR | `P4-10` Five-area snippet catalog UI와 page wiring SELF_CHECK |
 | Intent | P4-05의 canonical snippet source/edit plan을 다섯 영역 UI에 표시하고 new/revision route의 동일 editor transaction에 연결한다 |
 | Acceptance | data/factor/signal/risk/execution 접근 가능 목록; loading/unavailable/empty와 삽입 성공·실패 피드백; cursor-local insertion·focus; new/revision 동일 동작; i18n·키보드 접근성 |
 | Non-goals | snippet 의미·필드·기본값 재계산(P4-05), expression DSL, graph 직접 편집(P4-07), semantic validation 복제, source 전체 재직렬화 |
 | Branch/worktree | `feat/p4-10-snippet-catalog` (`Quant_study-p4-10`) |
 | Base SHA | `191b902` (P4-05 merge main) |
-| Head SHA | `0004e49` (code freeze) |
-| Diff stat | 12 files, +597/-19 (production/i18n 429, tests 168). 600줄 이내 |
-| Focused tests | snippet hook/UI 5, new/revision document route 19 passed |
-| Full gate | frontend 309·typecheck·lint·build; real-backend PIT 포함; editor gzip 136.63 KB |
+| Head SHA | `e50e8f4` (review fixes) |
+| Diff stat | 16 files, +964/-52 (production/i18n 509, tests 423, PLAN 32). reviewer 요구 회귀 8건으로 총량 예외; production은 600줄 이내 |
+| Focused tests | schema coherence·snippet hook/UI·new/revision route 47 passed |
+| Full gate | frontend 317·typecheck·lint·build; real-backend PIT 포함; generated API deterministic clean; editor gzip 136.63 KB |
 
 ---
 
@@ -205,7 +205,7 @@ Phase exit:
 | [ ] | `P4-07` | Read-only FactorGraph DAG projection | P4-01, P3-05 | `WAITING` | — |
 | [ ] | `P4-08` | Source/semantic/revision Diff와 conflict resolution | P1-08, P3-07 | `WAITING` | — |
 | [x] | `P4-09` | Execution Plan 표시와 YAML/graph selection 연동 | P4-04, P4-01 | `MERGED` | [#58](https://github.com/Nochiski/Quant_study/pull/58) · `review_p4_09` APPROVE · `8a2ebfc` |
-| [ ] | `P4-10` | Five-area snippet catalog UI와 new/revision page wiring | P4-05 | `CHANGES_REQUESTED` | [#60](https://github.com/Nochiski/Quant_study/pull/60) · `review_p4_10` REQUEST_CHANGES (P1 1/P2 3) |
+| [ ] | `P4-10` | Five-area snippet catalog UI와 new/revision page wiring | P4-05 | `SELF_CHECK` | [#60](https://github.com/Nochiski/Quant_study/pull/60) · 리뷰 수정 `e50e8f4` 검증 완료 |
 
 Phase exit:
 
@@ -294,7 +294,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
-| P4-10 | snippet insertion hook/UI 5, new/revision document route 19 passed | frontend typecheck·lint·vitest 309·build; real-backend PIT 포함; editor gzip 136.63 KB | generated API 변경 없음 | 1차 리뷰에서 metadata error/hash·registry mismatch를 empty-ready로 오인하는 P1과 JSON view 이유·feedback epoch·route 경계 테스트 P2 재현 | [#60](https://github.com/Nochiski/Quant_study/pull/60) `review_p4_10` REQUEST_CHANGES, latest CI 4/4 pass | 2026-09-05 |
+| P4-10 | schema coherence·snippet hook/UI·new/revision route 47 passed | frontend typecheck·lint·vitest 317·build; real-backend PIT 포함; editor gzip 136.63 KB | OpenAPI/SDK 재생성 deterministic·semantic diff clean | metadata query 오류는 unavailable, schema/contract hash·registry 세대 불일치는 incompatible로 fail-closed; JSON projection YAML-only, feedback epoch, 실제 factor graph 삽입·중복·syntax 무변경·dirty compile·focus·단일 undo 검증 | [#60](https://github.com/Nochiski/Quant_study/pull/60) 리뷰 수정 `e50e8f4`, latest CI 대기 | 2026-09-05 |
 | P4-05 | backend schema 14, canonical snippet·CodeEditor transaction·outline 22 passed | backend 904·Ruff·Pyright; frontend typecheck·lint·vitest 302·build; editor gzip 136.63 KB | OpenAPI/SDK 재생성 deterministic·clean, runtime schema fixture 갱신 | backend `x-authoring-*` mapping만으로 factor preset을 투영하고 loading/catalog-only/null graph/incomplete metadata를 fail-closed; 동일 factor 무변경, CRLF 중간·EOF·빈 줄, selection bounds, recursive/oversized schema, isolated undo를 reviewer가 재현 | [#59](https://github.com/Nochiski/Quant_study/pull/59) `review_p4_05` APPROVE, latest HEAD CI 4/4 pass, MERGED (`191b902`) | 2026-09-05 |
 | P4-09 | execution query·panel projection 21 passed; reviewer focused 46 passed | frontend typecheck·lint·vitest 291·build; real backend PIT E2E 포함 | generated API 변경 없음 | backend step 순서·input/output type/unit·history·registry/dataset·fingerprint 표시, 모든 blocked/loading/error/incompatible/invalid 상태, factor/node/input pointer와 route selection 검증 | [#58](https://github.com/Nochiski/Quant_study/pull/58) `review_p4_09` APPROVE, latest CI 4/4 pass, MERGED (`8a2ebfc`) | 2026-09-05 |
 | P4-04 | backend factor HTTP·truthful pipeline·raw port·equity HTTP 47, frontend orchestration 7 passed | backend 903·Ruff·Pyright; frontend 277·typecheck·lint·build | OpenAPI/SDK 재생성 deterministic·clean | explain↔portfolio plan 전체 동등성, 공개 category catalog↔raw loader, 숫자 group 동일 코드 거부, sector group completed/tape hash, metadata/raw snapshot mismatch, category·boolean·scalar output 실행 차단까지 검증 | [#57](https://github.com/Nochiski/Quant_study/pull/57) 동일 reviewer APPROVE, latest CI 4/4 pass, MERGED (`25d8b45`) | 2026-09-05 |
@@ -331,6 +331,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | P4-10 리뷰 수정 `e50e8f4`: schema-assist가 factor catalog coherence를 단일 판정하고 query 오류와 schema/contract hash·registry 세대 불일치를 각각 unavailable/incompatible로 fail-closed. snippet feedback을 document epoch/source capability에 귀속하고 JSON projection은 YAML-only로 명시. 실제 route factor 삽입·중복·syntax 무변경·dirty compile·focus·isolated undo 포함 47 focused, frontend 317 전체·typecheck·lint·build·generated clean 후 SELF_CHECK 전환. 리뷰 요구 회귀 8건으로 총 964줄이나 production/i18n 509줄이고 나머지는 tests 423·PLAN 32라 size exception 기록 | schema/contract/catalog coherence SoT·query/projection/hook/page 책임분리·review finding 회귀 고정 |
 | 2026-09-05 KST | Codex | `review_p4_10`이 P0 0/P1 1/P2 3으로 REQUEST_CHANGES. schema만 성공한 metadata query 오류·schema/contract hash 또는 registry 세대 불일치를 ready empty로 오인하는 상태 계약을 blocking으로 확인. JSON projection의 실패 이유, feedback document epoch, route factor/dirty/undo 경계도 함께 수정하기 위해 CHANGES_REQUESTED 전환 | coherent metadata 상태·전문 사용자 오류 투명성·view/document lifecycle 책임 |
 | 2026-09-05 KST | Codex | P4-10 #60을 공개하고 code freeze `0004e49`를 fresh review-only agent `review_p4_10`에 전달하기 위해 IN_REVIEW 전환. blocking finding은 같은 reviewer에게만 재검토 요청하며 구현 diff를 고정 | PR별 독립 reviewer 정확히 1명·13.3~13.4 review gate |
 | 2026-09-05 KST | Codex | P4-10 UI를 `0004e49`에 freeze: P4-05의 status-gated catalog/edit plan을 hook이 CodeEditor transaction에 연결하고 5영역 목록·상태·접근 가능한 feedback을 new/revision 양쪽에 합성. 중복 kind 라벨을 제거해 시각 소음을 줄였으며 focused 24·frontend 309·typecheck·lint·build 통과 후 SELF_CHECK 전환 | P4-05 SoT 무복제·query/hook/UI/page 책임분리·600줄 gate·전문 사용자 keyboard/IME UX |

@@ -3,14 +3,14 @@ plan_version: 2
 project: yaml-strategy-workbench-ui
 project_status: IN_REVIEW
 current_phase: P2,P3
-current_pr: P2-02,P2-03,P2-04,P3-01,P3-02,P3-03,P3-04,P3-05,P3-06,P3-07
-active_prs: [P2-02, P2-03, P2-04, P3-01, P3-02, P3-03, P3-04, P3-05, P3-06, P3-07]
-parallel_window: [P2-02, P2-03, P3-01, P3-02, P2-04, P3-03, P3-04, P3-05, P3-06, P3-07]
-last_updated: 2026-09-04T20:33:21+09:00
+current_pr: P2-03,P2-04,P3-01,P3-02,P3-03,P3-04,P3-05,P3-06,P3-07
+active_prs: [P2-03, P2-04, P3-01, P3-02, P3-03, P3-04, P3-05, P3-06, P3-07]
+parallel_window: [P2-03, P3-01, P3-02, P2-04, P3-03, P3-04, P3-05, P3-06, P3-07]
+last_updated: 2026-09-04T20:42:39+09:00
 planned_prs: 47
-merged_prs: 20
-approved_prs: 20
-progress_percent: 43
+merged_prs: 21
+approved_prs: 21
+progress_percent: 45
 ---
 
 # YAML Strategy Workbench 실시간 진행 계획
@@ -24,11 +24,11 @@ progress_percent: 43
 |---|---|
 | Project status | `IN_REVIEW` |
 | Current phase | `P2,P3` |
-| Current/next PR | `P2-02,P2-03,P2-04,P3-01,P3-02,P3-03,P3-04,P3-05,P3-06,P3-07` |
-| Active PR | `P2-02, P2-03, P2-04, P3-01, P3-02, P3-03, P3-04, P3-05, P3-06, P3-07` |
-| Progress | `20 / 47 merged (43%)` |
-| Approved | `20 / 47` |
-| Aggregated at | `2026-09-04 20:33 KST` |
+| Current/next PR | `P2-03,P2-04,P3-01,P3-02,P3-03,P3-04,P3-05,P3-06,P3-07` |
+| Active PR | `P2-03, P2-04, P3-01, P3-02, P3-03, P3-04, P3-05, P3-06, P3-07` |
+| Progress | `21 / 47 merged (45%)` |
+| Approved | `21 / 47` |
+| Aggregated at | `2026-09-04 20:42 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -74,12 +74,12 @@ progress_percent: 43
 | P0 | Contract, product direction, tool choices | 4 | 4 | `MERGED` |
 | P1 | Backend Authoring Contract | 10 | 10 | `MERGED` |
 | P1.5 | Backtest Correctness Gate | 5 | 5 | `MERGED` |
-| P2 | App Shell and visual foundation | 4 | 1 | `IN_REVIEW` |
+| P2 | App Shell and visual foundation | 4 | 2 | `IN_REVIEW` |
 | P3 | YAML Editor MVP | 7 | 0 | `IN_REVIEW` |
 | P4 | Outline, Contract, Projections | 8 | 0 | `WAITING` |
 | P5 | Truthful Trace UI | 3 | 0 | `WAITING` |
 | P6 | Professional release and migration | 6 | 0 | `WAITING` |
-| **Total** |  | **47** | **20** | **43%** |
+| **Total** |  | **47** | **21** | **45%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
@@ -164,7 +164,7 @@ Phase exit:
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [x] | `P2-01` | 시안 기준 light theme token과 공통 UI primitive | P0-01 | `MERGED` | `review_p2_01` + `review_p2_01_fix` APPROVE · [#38](https://github.com/Nochiski/Quant_study/pull/38) |
-| [ ] | `P2-02` | Router, research/operations namespace, App Shell | P0-04 | `IN_REVIEW` | `review_p2_02` · [#39](https://github.com/Nochiski/Quant_study/pull/39) |
+| [x] | `P2-02` | Router, research/operations namespace, App Shell | P0-04 | `MERGED` | `review_p2_02` + `review_p2_02_final` APPROVE · [#39](https://github.com/Nochiski/Quant_study/pull/39) |
 | [ ] | `P2-03` | Stepper를 제거한 resizable Strategy IDE layout | P2-01, P2-02 | `IN_REVIEW` | `review_p2_03` · [#40](https://github.com/Nochiski/Quant_study/pull/40) |
 | [ ] | `P2-04` | Revision-aware loader와 draft base 상태 | P1-07, P2-02 | `IN_REVIEW` | `review_p2_04` · [#43](https://github.com/Nochiski/Quant_study/pull/43) |
 
@@ -250,6 +250,7 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
+| P2-02 | `review_p2_02` + `review_p2_02_final` | `08726e3` | `49495fd` | APPROVE (latest main 기준 router·App Shell·접근성 재검토) | 0 | hard-reload fallback은 배포 E2E, revision safe-integer 상한 후속 가능 | 2026-09-04 |
 | P2-01 | `review_p2_01` + `review_p2_01_fix` | `3df3980` | `1c2d5e5` | APPROVE (direction badge 대비 9.08:1 보강, latest main 통합 후 재검증) | 0 | 다크 테마는 P6-04 범위 | 2026-09-04 |
 | P1-10 | `review_p1_10` | `7efe811` | `d7fff5e` | APPROVE (상대 import initializer 우회 수정 및 #49/#51 main 통합 재검토) | 0 | 전체 backend는 Rust extension 빌드 후 검증해야 함(CI와 로컬 883개 통과) | 2026-09-04 |
 | P1.5-05 | `review_p15_05` + `review_p15_05_merge` | `0db8e31` | `060c918` | APPROVE (D-001~D-007 감사 후속 및 latest main 통합 재검토) | 0 | saved provenance+raw warning 결합 전용 테스트 없음(각 경로와 조립 코드로 검증), carried target은 executed book이 아님 | 2026-09-04 |
@@ -275,6 +276,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
+| P2-02 | router 8 passed | frontend typecheck·lint·vitest 98·build | 해당 없음 | direct entry·legacy redirect·operations flag 확인 | [#39](https://github.com/Nochiski/Quant_study/pull/39) backend/frontend 중복 실행 4개 pass, MERGED | 2026-09-04 |
 | P2-01 | shared UI primitive·theme 회귀 | frontend typecheck·lint·vitest 90·build | 해당 없음 | direction badge 대비 9.08:1 | [#38](https://github.com/Nochiski/Quant_study/pull/38) backend/frontend 중복 실행 4개 pass, MERGED | 2026-09-04 |
 | P1-10 | audit·architecture·owner gate 228 passed | backend 883 passed, ruff, pyright, Rust 13·fmt·clippy; frontend typecheck·lint·vitest 80·build | 재생성 후 clean | 해당 없음 | [#50](https://github.com/Nochiski/Quant_study/pull/50) backend/frontend pass, MERGED | 2026-09-04 |
 | P1.5-05 | truthful pipeline·backtest HTTP 24 passed, CRLF/LF tracker 47 rows | backend 865 passed, ruff, pyright; frontend typecheck·lint·vitest 80·build | 재생성 후 clean | 해당 없음 | [#49](https://github.com/Nochiski/Quant_study/pull/49) backend/frontend pass, MERGED | 2026-09-04 |
@@ -294,6 +296,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-04 KST | Codex | #39 P2-02를 main 대상으로 전환해 독립 재리뷰 blocker 0, frontend 98·build와 원격 CI 4개 통과 후 main 병합(2d7bcb5) | 인수 후 merge gate |
 | 2026-09-04 KST | Codex | #38 P2-01을 latest main에 통합하고 direction badge 대비를 9.08:1로 보강. 독립 재리뷰 blocker 0, frontend 90·build와 원격 CI 4개 통과 후 main 병합(08726e3) | 인수 후 merge gate |
 | 2026-09-04 KST | Codex | #50 P1-10의 재리뷰·전체 로컬 게이트·원격 backend/frontend CI 통과 후 main 병합(3df3980). Phase 1을 10/10 완료로 확정 | 인수 후 merge gate |
 | 2026-09-04 KST | Codex | #49 CI·최종 재리뷰 통과 후 main 병합(1ffc0ff). P1-10을 latest main에 통합(d7fff5e), initializer 상대 import 우회 회귀와 owner gate를 재검토하여 `review_p1_10` APPROVE, backend 883·frontend 80 및 전체 게이트 통과 | 인수 후 merge gate |

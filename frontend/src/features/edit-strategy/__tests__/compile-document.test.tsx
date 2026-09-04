@@ -128,7 +128,12 @@ describe("useCompileDocument", () => {
     expect(requests.map((r) => r.source)).toEqual([
       'schema_version: "1.0"\ntitle: ok\n',
     ]);
-    expect(screen.getByTestId("version")).toHaveTextContent("0/0");
+    {
+      const [source, compiled] = screen
+        .getByTestId("version")
+        .textContent!.split("/");
+      expect(compiled).toBe(source);
+    }
   });
 
   it("aborts the superseded request and never shows an older verdict", async () => {
@@ -147,7 +152,12 @@ describe("useCompileDocument", () => {
     // The slow reply (would be "semantically-valid") can no longer overwrite the verdict.
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(screen.getByTestId("phase")).toHaveTextContent("structure-invalid");
-    expect(screen.getByTestId("version")).toHaveTextContent("1/1");
+    {
+      const [source, compiled] = screen
+        .getByTestId("version")
+        .textContent!.split("/");
+      expect(compiled).toBe(source);
+    }
   });
 
   it("sends nothing for unparsable text or during IME composition", async () => {

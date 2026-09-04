@@ -3,6 +3,7 @@ import {
   createRootRouteWithContext,
   createRoute,
   createRouter,
+  lazyRouteComponent,
   notFound,
   Outlet,
   redirect,
@@ -13,10 +14,8 @@ import { strategyDocumentQuery } from "../../entities/strategy";
 import { ApiRequestError } from "../../shared/api";
 import { OperationsPlaceholderPage } from "../../pages/operations-placeholder";
 import { BacktestRunPage } from "../../pages/research-backtest";
-import { NewStrategyPage } from "../../pages/research-strategy-new";
 import {
   STRATEGY_VIEWS,
-  StrategyRevisionPage,
   type StrategyView,
 } from "../../pages/research-strategy-revision";
 import {
@@ -46,6 +45,17 @@ const legacySearch = (search: Record<string, unknown>): LegacySearch => ({
   // `run` carries a run id (legacy `?run=<id>`); bare `?run` stays an empty string.
   run: search.run === undefined ? undefined : String(search.run),
 });
+
+// The editor pages (parser, CodeMirror, schema assist) are the heavy part of the app; they load
+// on first navigation so the entry chunk stays small (editor ADR D1).
+const NewStrategyPage = lazyRouteComponent(
+  () => import("../../pages/research-strategy-new"),
+  "NewStrategyPage",
+);
+const StrategyRevisionPage = lazyRouteComponent(
+  () => import("../../pages/research-strategy-revision"),
+  "StrategyRevisionPage",
+);
 
 const rootRoute = createRootRouteWithContext<RouterContext>()({
   component: () => {

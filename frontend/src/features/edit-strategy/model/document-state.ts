@@ -127,6 +127,12 @@ export const documentReducer = (
     case "load":
       return {
         ...initialDocumentState(action.format, action.source),
+        // Never reuse a version number: a reply still in flight for the previous document
+        // (parsed/compiled for version N) must not be absorbed by the new one.
+        sourceVersion: state.sourceVersion + 1,
+        // Everything below the new version belongs to the previous document.
+        parsedVersion: state.sourceVersion,
+        compiledVersion: state.sourceVersion,
         strategyId: action.strategyId,
         baseRevision: action.baseRevision,
         baseSpecHash: action.baseSpecHash,
@@ -152,10 +158,13 @@ export const documentReducer = (
       return {
         ...state,
         composing: action.composing,
-        // Leaving composition with an unparsed version lets the parser run.
+        // Leaving composition with an unparsed version lets the parser run; entering it parks
+        // an unparsed version back in "editing" (nothing is being parsed meanwhile).
         phase:
-          !action.composing && state.parsedVersion !== state.sourceVersion
-            ? "parsing"
+          state.parsedVersion !== state.sourceVersion
+            ? action.composing
+              ? "editing"
+              : "parsing"
             : state.phase,
       };
     case "parsed": {
@@ -171,7 +180,13 @@ export const documentReducer = (
       };
     }
     case "compiled": {
-      if (action.version !== state.sourceVersion) return state; // out-of-order reply discarded
+      // A reply older than what is held, or for a version this document never had, is dropped.
+      // A reply for a version between the held one and the current text is recorded (it is the
+      // freshest spec available, shown as stale) without touching the phase of the current text;
+      // a reply for the held version again is an explicit recompile and replaces it.
+      const current = action.version === state.sourceVersion;
+      if (action.version > state.sourceVersion) return state; // a version this text never had
+      if (!current && action.version <= state.compiledVersion) return state; // older than held
       const saved =
         state.baseSpecHash !== null &&
         action.outcome.specHash === state.baseSpecHash &&
@@ -180,7 +195,7 @@ export const documentReducer = (
         ...state,
         compiled: action.outcome,
         compiledVersion: action.version,
-        phase: phaseFromCompile(action.outcome, saved),
+        phase: current ? phaseFromCompile(action.outcome, saved) : state.phase,
       };
     }
     case "saved":

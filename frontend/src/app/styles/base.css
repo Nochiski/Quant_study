@@ -3,9 +3,14 @@
   box-sizing: border-box;
 }
 
+/* The HTML hidden attribute wins over any display rule (panels, drawers, tabpanels). */
+[hidden] {
+  display: none !important;
+}
+
 html {
   font-family: var(--font-sans);
-  font-size: var(--text-size-body);
+  font-size: 100%;
   line-height: var(--line-height-body);
   color: var(--text);
   background: var(--surface-canvas);
@@ -14,6 +19,7 @@ html {
 
 body {
   margin: 0;
+  font-size: var(--text-size-body);
   min-width: 320px;
   min-height: 100vh;
   background: var(--surface-canvas);
@@ -39,6 +45,18 @@ samp {
 small,
 .text-small {
   font-size: var(--text-size-small);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 :focus-visible {

@@ -44,6 +44,16 @@ export const BacktestRunPage = () => {
       <p className="page-state">
         {state.stage} · {Math.round(state.progress * 100)}% · {state.message}
       </p>
+      {completed && result.isPending ? (
+        <p className="page-state" role="status">
+          {t("page.loading")}
+        </p>
+      ) : null}
+      {result.isError ? (
+        <p className="page-state page-state--error" role="alert">
+          {t("page.backtest.resultError")}
+        </p>
+      ) : null}
       {result.data ? <BacktestRunDetail result={result.data} /> : null}
     </>
   );

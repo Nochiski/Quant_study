@@ -7,10 +7,6 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   size?: "small" | "medium";
 };
 
-/**
- * Legacy class names (`button button--primary`) stay on the element so the Quick/Advanced
- * builder stylesheet keeps working until P6-06; the `ui-button` classes are the tokenised look.
- */
 export const Button = ({
   tone = "secondary",
   size = "medium",
@@ -21,8 +17,6 @@ export const Button = ({
   <button
     type={type}
     className={[
-      "button",
-      `button--${tone}`,
       "ui-button",
       `ui-button--${tone}`,
       size === "small" ? "ui-button--small" : "",

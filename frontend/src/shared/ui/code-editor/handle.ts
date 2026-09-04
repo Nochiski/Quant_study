@@ -56,6 +56,13 @@ export type CodeEditorHandle = {
   getText(): string;
   /** Replaces the whole document; history records it as one change. */
   setText(text: string): void;
+  /** Applies one range replacement and optional selection as a single undoable transaction. */
+  replaceRange(
+    from: number,
+    to: number,
+    text: string,
+    selection?: { from: number; to?: number },
+  ): void;
   getSelection(): { from: number; to: number };
   setSelection(from: number, to?: number): void;
   offsetToPosition(offset: number): EditorPosition;

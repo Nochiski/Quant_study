@@ -72,6 +72,26 @@ describe("CodeEditor", () => {
     });
   });
 
+  it("applies a range edit and its selection as one editor transaction", async () => {
+    const onSelectionChange = vi.fn();
+    const { ref, onChange } = await mount({ onSelectionChange });
+
+    act(() =>
+      ref.current?.replaceRange(7, 10, '"changed"', {
+        from: 16,
+      }),
+    );
+
+    expect(ref.current?.getText()).toBe('title: "changed"\n');
+    expect(ref.current?.getSelection()).toEqual({ from: 16, to: 16 });
+    expect(onChange).toHaveBeenLastCalledWith('title: "changed"\n', false);
+    expect(onSelectionChange).toHaveBeenLastCalledWith({
+      from: 16,
+      to: 16,
+      documentChanged: true,
+    });
+  });
+
   it("mirrors IME composition and marks diagnostics", async () => {
     const onComposingChange = vi.fn();
     const { ref } = await mount({

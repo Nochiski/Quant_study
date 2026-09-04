@@ -344,6 +344,27 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
             changes: { from: 0, to: current.state.doc.length, insert: text },
           });
         },
+        replaceRange: (from, to, text, selection) => {
+          const current = view.current;
+          if (!current) return;
+          const length = current.state.doc.length;
+          const safeFrom = Math.max(0, Math.min(from, length));
+          const safeTo = Math.max(safeFrom, Math.min(to, length));
+          const nextLength = length - (safeTo - safeFrom) + text.length;
+          const nextSelection = selection
+            ? EditorSelection.single(
+                Math.max(0, Math.min(selection.from, nextLength)),
+                Math.max(
+                  0,
+                  Math.min(selection.to ?? selection.from, nextLength),
+                ),
+              )
+            : undefined;
+          current.dispatch({
+            changes: { from: safeFrom, to: safeTo, insert: text },
+            selection: nextSelection,
+          });
+        },
         getSelection: () => {
           const range = view.current?.state.selection.main;
           return range

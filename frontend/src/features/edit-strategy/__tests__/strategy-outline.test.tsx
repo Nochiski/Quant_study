@@ -197,7 +197,9 @@ describe("Strategy Outline projection", () => {
     });
     rerender({ state: rejected });
     expect(result.current?.stale).toBe(true);
-    expect(findOutlineNode(result.current?.nodes ?? [], "/risk")).not.toBeNull();
+    expect(
+      findOutlineNode(result.current?.nodes ?? [], "/risk"),
+    ).not.toBeNull();
 
     const anotherDocument = documentReducer(rejected, {
       type: "load",
@@ -227,6 +229,7 @@ describe("Strategy Outline projection", () => {
     const editor: CodeEditorHandle = {
       getText: () => editorSource,
       setText: vi.fn(),
+      replaceRange: vi.fn(),
       getSelection: () => ({ from: 0, to: 0 }),
       setSelection: (from, to = from) =>
         result.current.onEditorSelectionChange({
@@ -294,7 +297,10 @@ describe("Strategy Outline projection", () => {
     });
     const onDirectRoute = vi.fn();
     const direct = renderHook(
-      ({ state, selectedPointer }: {
+      ({
+        state,
+        selectedPointer,
+      }: {
         state: DocumentState;
         selectedPointer: string | undefined;
       }) =>

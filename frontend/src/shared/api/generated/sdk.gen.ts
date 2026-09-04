@@ -10,6 +10,9 @@ import type {
   CompileStrategyDocumentErrors,
   CompileStrategyDocumentResponses,
   CreateStrategyData,
+  CreateStrategyDocumentData,
+  CreateStrategyDocumentErrors,
+  CreateStrategyDocumentResponses,
   CreateStrategyErrors,
   CreateStrategyResponses,
   ExplainFactorGraphData,
@@ -35,6 +38,9 @@ import type {
   GetStrategyData,
   GetStrategyDocumentContractData,
   GetStrategyDocumentContractResponses,
+  GetStrategyDocumentData,
+  GetStrategyDocumentErrors,
+  GetStrategyDocumentResponses,
   GetStrategyDocumentSchemaData,
   GetStrategyDocumentSchemaErrors,
   GetStrategyDocumentSchemaResponses,
@@ -42,6 +48,9 @@ import type {
   GetStrategyResponses,
   GetStrategyTemplateData,
   GetStrategyTemplateResponses,
+  ListStrategyRevisionsData,
+  ListStrategyRevisionsErrors,
+  ListStrategyRevisionsResponses,
   PreviewEquityDataData,
   PreviewEquityDataErrors,
   PreviewEquityDataResponses,
@@ -58,6 +67,9 @@ import type {
   PreviewPortfolioErrors,
   PreviewPortfolioResponses,
   ReviseStrategyData,
+  ReviseStrategyDocumentData,
+  ReviseStrategyDocumentErrors,
+  ReviseStrategyDocumentResponses,
   ReviseStrategyErrors,
   ReviseStrategyResponses,
   StartBacktestData,
@@ -409,6 +421,20 @@ export const getStrategy = <ThrowOnError extends boolean = false>(
   >({ url: "/api/v1/strategies/{strategy_id}", ...options });
 
 /**
+ * List Strategy Revisions
+ *
+ * Revision history, ascending by revision, paginated deterministically.
+ */
+export const listStrategyRevisions = <ThrowOnError extends boolean = false>(
+  options: Options<ListStrategyRevisionsData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    ListStrategyRevisionsResponses,
+    ListStrategyRevisionsErrors,
+    ThrowOnError
+  >({ url: "/api/v1/strategies/{strategy_id}/revisions", ...options });
+
+/**
  * Revise Strategy
  */
 export const reviseStrategy = <ThrowOnError extends boolean = false>(
@@ -420,6 +446,44 @@ export const reviseStrategy = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     url: "/api/v1/strategies/{strategy_id}/revisions",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Get Strategy Document
+ *
+ * Exact stored source of one revision (a generated projection for legacy ones).
+ */
+export const getStrategyDocument = <ThrowOnError extends boolean = false>(
+  options: Options<GetStrategyDocumentData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetStrategyDocumentResponses,
+    GetStrategyDocumentErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/strategies/{strategy_id}/revisions/{revision}/document",
+    ...options,
+  });
+
+/**
+ * Create Strategy Document
+ *
+ * Store a cleanly compiled exact source as revision 1 of a new strategy.
+ */
+export const createStrategyDocument = <ThrowOnError extends boolean = false>(
+  options: Options<CreateStrategyDocumentData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    CreateStrategyDocumentResponses,
+    CreateStrategyDocumentErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/strategy-documents",
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -482,3 +546,24 @@ export const getStrategyDocumentSchema = <ThrowOnError extends boolean = false>(
     GetStrategyDocumentSchemaErrors,
     ThrowOnError
   >({ url: "/api/v1/strategy-documents/schema", ...options });
+
+/**
+ * Revise Strategy Document
+ *
+ * Store the next revision; 409 when `expected_revision` is stale.
+ */
+export const reviseStrategyDocument = <ThrowOnError extends boolean = false>(
+  options: Options<ReviseStrategyDocumentData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    ReviseStrategyDocumentResponses,
+    ReviseStrategyDocumentErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/strategy-documents/{strategy_id}/revisions",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });

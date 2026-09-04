@@ -29,6 +29,7 @@ from strategy_workbench.application.factor_research.facade.research import (
 from strategy_workbench.application.portfolio_design.facade.design import PortfolioDesignService
 from strategy_workbench.application.strategy_authoring.facade.authoring import (
     StrategyAuthoringService,
+    StrategyDocumentService,
 )
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.application.strategy_design.facade.ports import StrategyRepositoryPort
@@ -43,6 +44,7 @@ class BackendContainer:
     strategy_repository: StrategyRepositoryPort
     strategy_design: StrategyDesignService
     strategy_authoring: StrategyAuthoringService
+    strategy_documents: StrategyDocumentService
     factor_research: FactorResearchService
     portfolio_design: PortfolioDesignService
     backtest_runs: BacktestRunService
@@ -64,6 +66,11 @@ def build_container(
     portfolio_design = PortfolioDesignService(equity_data, engine_portfolio)
     metric_registry = build_default_metric_registry()
     factor_registry = build_default_factor_registry()
+    strategy_authoring = StrategyAuthoringService(
+        RuamelDocumentCodec(),
+        factor_registry_version=factor_registry.version,
+        dataset_snapshot_id=equity_data.snapshot().snapshot_id,
+    )
     run_artifact_root = artifact_root or (
         Path(__file__).resolve().parents[3] / ".local" / "backtest-runs"
     )
@@ -75,10 +82,9 @@ def build_container(
             strategy_repository,
             new_id=lambda: str(uuid4()),
         ),
-        strategy_authoring=StrategyAuthoringService(
-            RuamelDocumentCodec(),
-            factor_registry_version=factor_registry.version,
-            dataset_snapshot_id=equity_data.snapshot().snapshot_id,
+        strategy_authoring=strategy_authoring,
+        strategy_documents=StrategyDocumentService(
+            strategy_authoring, strategy_repository, new_id=lambda: str(uuid4())
         ),
         factor_research=FactorResearchService(factor_registry, equity_data),
         portfolio_design=portfolio_design,

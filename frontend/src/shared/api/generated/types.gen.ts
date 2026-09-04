@@ -1641,6 +1641,28 @@ export type NodeValueType =
 export type OrderStyle = "market";
 
 /**
+ * Page
+ */
+export type PageRevisionSummary = {
+  /**
+   * Items
+   */
+  items: Array<RevisionSummary>;
+  /**
+   * Limit
+   */
+  limit: number;
+  /**
+   * Offset
+   */
+  offset: number;
+  /**
+   * Total
+   */
+  total: number;
+};
+
+/**
  * PanelPreviewCostEstimate
  */
 export type PanelPreviewCostEstimate = {
@@ -2212,6 +2234,21 @@ export type ResolvedFactorParameter = {
 };
 
 /**
+ * ReviseDocumentRequest
+ */
+export type ReviseDocumentRequest = {
+  /**
+   * Expected Revision
+   */
+  expected_revision: number;
+  format: SourceFormat;
+  /**
+   * Source
+   */
+  source: string;
+};
+
+/**
  * ReviseStrategyRequest
  */
 export type ReviseStrategyRequest = {
@@ -2220,6 +2257,39 @@ export type ReviseStrategyRequest = {
    */
   expected_revision: number;
   spec: StrategySpec;
+};
+
+/**
+ * RevisionOrigin
+ */
+export type RevisionOrigin = "document" | "legacy_json";
+
+/**
+ * RevisionSummary
+ */
+export type RevisionSummary = {
+  /**
+   * Created At
+   */
+  created_at: string;
+  origin: RevisionOrigin;
+  /**
+   * Revision
+   */
+  revision: number;
+  source_format: SourceFormat | null;
+  /**
+   * Source Hash
+   */
+  source_hash: string | null;
+  /**
+   * Spec Hash
+   */
+  spec_hash: string;
+  /**
+   * Strategy Id
+   */
+  strategy_id: string;
 };
 
 /**
@@ -2348,6 +2418,17 @@ export type RunStatus =
   | "cancelled"
   | "completed"
   | "failed";
+
+/**
+ * SaveDocumentRequest
+ */
+export type SaveDocumentRequest = {
+  format: SourceFormat;
+  /**
+   * Source
+   */
+  source: string;
+};
 
 /**
  * SavedFactorNode
@@ -2516,6 +2597,52 @@ export type SourcePosition = {
 export type SourceRange = {
   end: SourcePosition;
   start: SourcePosition;
+};
+
+/**
+ * StrategyDocument
+ *
+ * A stored revision as an editor sees it: exact source plus what it compiles to.
+ *
+ * `generated` is True when the revision predates document authoring (legacy JSON API) and the
+ * source shown is a canonical JSON projection of the stored spec, not text an author wrote.
+ */
+export type StrategyDocument = {
+  /**
+   * Created At
+   */
+  created_at: string;
+  format: SourceFormat;
+  /**
+   * Generated
+   */
+  generated: boolean;
+  origin: RevisionOrigin;
+  /**
+   * Revision
+   */
+  revision: number;
+  /**
+   * Schema Version
+   */
+  schema_version: string;
+  /**
+   * Source
+   */
+  source: string;
+  /**
+   * Source Hash
+   */
+  source_hash: string;
+  spec: StrategySpec;
+  /**
+   * Spec Hash
+   */
+  spec_hash: string;
+  /**
+   * Strategy Id
+   */
+  strategy_id: string;
 };
 
 /**
@@ -3581,6 +3708,47 @@ export type GetStrategyResponses = {
 export type GetStrategyResponse =
   GetStrategyResponses[keyof GetStrategyResponses];
 
+export type ListStrategyRevisionsData = {
+  body?: never;
+  path: {
+    /**
+     * Strategy Id
+     */
+    strategy_id: string;
+  };
+  query?: {
+    /**
+     * Offset
+     */
+    offset?: number;
+    /**
+     * Limit
+     */
+    limit?: number;
+  };
+  url: "/api/v1/strategies/{strategy_id}/revisions";
+};
+
+export type ListStrategyRevisionsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ListStrategyRevisionsError =
+  ListStrategyRevisionsErrors[keyof ListStrategyRevisionsErrors];
+
+export type ListStrategyRevisionsResponses = {
+  /**
+   * Successful Response
+   */
+  200: PageRevisionSummary;
+};
+
+export type ListStrategyRevisionsResponse =
+  ListStrategyRevisionsResponses[keyof ListStrategyRevisionsResponses];
+
 export type ReviseStrategyData = {
   body: ReviseStrategyRequest;
   path: {
@@ -3612,6 +3780,69 @@ export type ReviseStrategyResponses = {
 
 export type ReviseStrategyResponse =
   ReviseStrategyResponses[keyof ReviseStrategyResponses];
+
+export type GetStrategyDocumentData = {
+  body?: never;
+  path: {
+    /**
+     * Strategy Id
+     */
+    strategy_id: string;
+    /**
+     * Revision
+     */
+    revision: number;
+  };
+  query?: never;
+  url: "/api/v1/strategies/{strategy_id}/revisions/{revision}/document";
+};
+
+export type GetStrategyDocumentErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetStrategyDocumentError =
+  GetStrategyDocumentErrors[keyof GetStrategyDocumentErrors];
+
+export type GetStrategyDocumentResponses = {
+  /**
+   * Successful Response
+   */
+  200: StrategyDocument;
+};
+
+export type GetStrategyDocumentResponse =
+  GetStrategyDocumentResponses[keyof GetStrategyDocumentResponses];
+
+export type CreateStrategyDocumentData = {
+  body: SaveDocumentRequest;
+  path?: never;
+  query?: never;
+  url: "/api/v1/strategy-documents";
+};
+
+export type CreateStrategyDocumentErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type CreateStrategyDocumentError =
+  CreateStrategyDocumentErrors[keyof CreateStrategyDocumentErrors];
+
+export type CreateStrategyDocumentResponses = {
+  /**
+   * Successful Response
+   */
+  201: StrategyDocument;
+};
+
+export type CreateStrategyDocumentResponse =
+  CreateStrategyDocumentResponses[keyof CreateStrategyDocumentResponses];
 
 export type CompileStrategyDocumentData = {
   body: CompileRequest;
@@ -3689,3 +3920,35 @@ export type GetStrategyDocumentSchemaResponses = {
 
 export type GetStrategyDocumentSchemaResponse =
   GetStrategyDocumentSchemaResponses[keyof GetStrategyDocumentSchemaResponses];
+
+export type ReviseStrategyDocumentData = {
+  body: ReviseDocumentRequest;
+  path: {
+    /**
+     * Strategy Id
+     */
+    strategy_id: string;
+  };
+  query?: never;
+  url: "/api/v1/strategy-documents/{strategy_id}/revisions";
+};
+
+export type ReviseStrategyDocumentErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ReviseStrategyDocumentError =
+  ReviseStrategyDocumentErrors[keyof ReviseStrategyDocumentErrors];
+
+export type ReviseStrategyDocumentResponses = {
+  /**
+   * Successful Response
+   */
+  201: StrategyDocument;
+};
+
+export type ReviseStrategyDocumentResponse =
+  ReviseStrategyDocumentResponses[keyof ReviseStrategyDocumentResponses];

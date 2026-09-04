@@ -53,9 +53,14 @@ from strategy_workbench.application.portfolio_design.facade.design import (
 from strategy_workbench.application.strategy_authoring.facade.authoring import (
     CompiledDocument,
     CompileRequest,
+    InvalidStrategyDocumentError,
+    ReviseDocumentRequest,
+    SaveDocumentRequest,
     StrategyAuthoringService,
+    StrategyDocument,
     StrategyDocumentContract,
     StrategyDocumentSchema,
+    StrategyDocumentService,
 )
 from strategy_workbench.application.strategy_design.facade.design import (
     InvalidStrategyError,
@@ -63,6 +68,9 @@ from strategy_workbench.application.strategy_design.facade.design import (
     StrategyDesignService,
 )
 from strategy_workbench.application.strategy_design.facade.ports import (
+    Page,
+    PageRequest,
+    RevisionSummary,
     StrategyNotFoundError,
     StrategyRevisionConflictError,
 )
@@ -92,6 +100,7 @@ def create_app(
     *,
     strategy_design: StrategyDesignService,
     strategy_authoring: StrategyAuthoringService,
+    strategy_documents: StrategyDocumentService,
     equity_workspace: EquityWorkspaceService,
     factor_research: FactorResearchService,
     portfolio_design: PortfolioDesignService,
@@ -344,6 +353,65 @@ def create_app(
         """
         return strategy_authoring.compile(request)
 
+    @app.post(
+        "/api/v1/strategy-documents",
+        operation_id="createStrategyDocument",
+        status_code=status.HTTP_201_CREATED,
+    )
+    def create_strategy_document(request: SaveDocumentRequest) -> StrategyDocument:
+        """Store a cleanly compiled exact source as revision 1 of a new strategy."""
+        try:
+            return strategy_documents.save(request)
+        except InvalidStrategyDocumentError as error:
+            raise _invalid_document(error) from error
+
+    @app.post(
+        "/api/v1/strategy-documents/{strategy_id}/revisions",
+        operation_id="reviseStrategyDocument",
+        status_code=status.HTTP_201_CREATED,
+    )
+    def revise_strategy_document(
+        strategy_id: str, request: ReviseDocumentRequest
+    ) -> StrategyDocument:
+        """Store the next revision; 409 when `expected_revision` is stale."""
+        try:
+            return strategy_documents.revise(strategy_id, request)
+        except InvalidStrategyDocumentError as error:
+            raise _invalid_document(error) from error
+        except StrategyNotFoundError as error:
+            raise _strategy_not_found(error) from error
+        except StrategyRevisionConflictError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "strategy.revision_conflict", "message": str(error)},
+            ) from error
+
+    @app.get(
+        "/api/v1/strategies/{strategy_id}/revisions",
+        operation_id="listStrategyRevisions",
+    )
+    def list_strategy_revisions(
+        strategy_id: str,
+        offset: int = Query(default=0, ge=0),
+        limit: int = Query(default=50, ge=1, le=PageRequest.MAX_LIMIT),
+    ) -> Page[RevisionSummary]:
+        """Revision history, ascending by revision, paginated deterministically."""
+        try:
+            return strategy_documents.history(strategy_id, PageRequest(offset, limit))
+        except StrategyNotFoundError as error:
+            raise _strategy_not_found(error) from error
+
+    @app.get(
+        "/api/v1/strategies/{strategy_id}/revisions/{revision}/document",
+        operation_id="getStrategyDocument",
+    )
+    def get_strategy_document(strategy_id: str, revision: int) -> StrategyDocument:
+        """Exact stored source of one revision (a generated projection for legacy ones)."""
+        try:
+            return strategy_documents.get(strategy_id, revision)
+        except StrategyNotFoundError as error:
+            raise _strategy_not_found(error) from error
+
     @app.get(
         "/api/v1/strategy-documents/schema",
         operation_id="getStrategyDocumentSchema",
@@ -479,3 +547,23 @@ def _etag(schema_hash: str) -> str:
 
 def _etags(header: str) -> set[str]:
     return {item.strip().removeprefix("W/") for item in header.split(",")}
+
+
+def _strategy_not_found(error: StrategyNotFoundError) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={"code": "strategy.not_found", "message": str(error)},
+    )
+
+
+def _invalid_document(error: InvalidStrategyDocumentError) -> HTTPException:
+    compiled = error.compiled
+    return HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail={
+            "code": "strategy_document.invalid",
+            "source_hash": compiled.source_hash,
+            "schema_version": compiled.schema_version,
+            "diagnostics": jsonable_encoder([asdict(d) for d in compiled.diagnostics]),
+        },
+    )

@@ -389,6 +389,17 @@ describe("schema-driven hover", () => {
     expect(lines?.some((line) => line.startsWith("예시:"))).toBe(false);
   });
 
+  it("keeps requiredness shared by every unresolved union branch", () => {
+    const state = stateFor(YAML);
+    for (const pointer of [
+      "/factors/factors/0/graph/nodes/2/node_id",
+      "/factors/factors/0/graph/nodes/2/kind",
+    ]) {
+      const lines = describePointer(deps(state), pointer, state.parse!.tree);
+      expect(lines).toContain("필수");
+    }
+  });
+
   it.each([undefined, "not_a_node_kind"])(
     "requires kind instead of describing an arbitrary operator branch when kind is %s",
     (kind) => {

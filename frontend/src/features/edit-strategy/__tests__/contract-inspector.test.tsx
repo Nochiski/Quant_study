@@ -262,8 +262,49 @@ describe("contract projection", () => {
       expect(result.field.enumValues).toEqual(
         result.field.discriminator?.variants,
       );
+      expect(result.field.required).toBe(true);
       expect(result.field.hasConst).toBe(false);
       expect(result.field.constValue).toBeUndefined();
+
+      const nodeId = projectContractInspector(
+        source(),
+        "/factors/factors/0/graph/nodes/0/node_id",
+        pendingTree,
+        false,
+      );
+      expect(nodeId.status).toBe("ready");
+      if (nodeId.status === "ready") {
+        expect(nodeId.field.required).toBe(true);
+        expect(nodeId.field.unresolvedBranches).toBeNull();
+      }
+    },
+  );
+
+  it.each([undefined, "not_a_parameter_kind"])(
+    "keeps shared Parameter fields required while kind is %s",
+    (kind) => {
+      const parameterTree = {
+        ...TREE,
+        parameters: [
+          {
+            parameter_id: "lookback",
+            ...(kind === undefined ? {} : { kind }),
+          },
+        ],
+      };
+      for (const pointer of [
+        "/parameters/0/parameter_id",
+        "/parameters/0/kind",
+      ]) {
+        const result = projectContractInspector(
+          source(),
+          pointer,
+          parameterTree,
+          false,
+        );
+        expect(result.status).toBe("ready");
+        if (result.status === "ready") expect(result.field.required).toBe(true);
+      }
     },
   );
 

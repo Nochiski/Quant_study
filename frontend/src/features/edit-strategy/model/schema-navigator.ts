@@ -19,6 +19,8 @@ export type ResolvedSchema = {
   branches: { kind: string; node: JsonSchema }[] | null;
   /** Set when this property has no single safe schema until a union branch is selected. */
   propertyVariants: PropertyVariant[] | null;
+  /** Requiredness shared by every applicable backend schema branch, else unknown. */
+  propertyRequired: boolean | null;
 };
 
 export type PropertyVariant = {
@@ -30,7 +32,7 @@ export type PropertyVariant = {
 export type PropertyOption = {
   name: string;
   schema: JsonSchema;
-  required: boolean;
+  required: boolean | null;
   /** Union member this property belongs to when the union is unresolved. */
   branch: string | null;
   /** Branch contracts when availability, requiredness or schema differs. */
@@ -104,7 +106,13 @@ const resolveUnion = (
   const members = Array.isArray(base.node.oneOf)
     ? base.node.oneOf.filter(isObject)
     : null;
-  if (!members) return { ...base, branches: null, propertyVariants: null };
+  if (!members)
+    return {
+      ...base,
+      branches: null,
+      propertyVariants: null,
+      propertyRequired: null,
+    };
   const branches = members.map((member) => ({
     kind: kindOf(root, member) ?? "",
     node: resolveRef(root, member),
@@ -119,12 +127,14 @@ const resolveUnion = (
       nullable: base.nullable,
       branches: null,
       propertyVariants: null,
+      propertyRequired: null,
     };
   return {
     node: base.node,
     nullable: base.nullable,
     branches,
     propertyVariants: null,
+    propertyRequired: null,
   };
 };
 
@@ -140,10 +150,12 @@ const walk = (
   node: JsonSchema;
   value: unknown;
   propertyVariants: PropertyVariant[] | null;
+  propertyRequired: boolean | null;
 } | null => {
   const segments = pointerSegments(pointer);
   let current: JsonSchema = root;
   let value: unknown = tree;
+  let propertyRequired: boolean | null = null;
   for (const [index, segment] of segments.entries()) {
     const here = resolveUnion(root, current, value);
     const node = here.node;
@@ -151,6 +163,7 @@ const walk = (
       if (!/^\d+$/.test(segment)) return null;
       current = node.items;
       value = Array.isArray(value) ? value[Number(segment)] : undefined;
+      propertyRequired = null;
       continue;
     }
     const properties = collectProperties(root, here);
@@ -165,12 +178,14 @@ const walk = (
         node: property.schema,
         value: childValue,
         propertyVariants: property.variants,
+        propertyRequired: property.required,
       };
     }
     current = property.schema;
     value = childValue;
+    propertyRequired = property.required;
   }
-  return { node: current, value, propertyVariants: null };
+  return { node: current, value, propertyVariants: null, propertyRequired };
 };
 
 export const schemaAt = (
@@ -186,8 +201,12 @@ export const schemaAt = (
       nullable: false,
       branches: null,
       propertyVariants: end.propertyVariants,
+      propertyRequired: end.propertyRequired,
     };
-  return resolveUnion(root, end.node, end.value);
+  return {
+    ...resolveUnion(root, end.node, end.value),
+    propertyRequired: end.propertyRequired,
+  };
 };
 
 /** Every `kind` a union at `pointer` accepts, ignoring the kind the document currently holds. */
@@ -289,17 +308,18 @@ const collectProperties = (
   const total = resolved.branches.length;
   return [...seen.values()].map(({ name, variants }) => {
     const first = variants[0];
-    const shared =
+    const commonRequired =
       variants.length === total &&
-      variants.every(
-        (variant) =>
-          variant.required === first.required &&
-          sameSchema(variant.schema, first.schema),
-      );
+      variants.every((variant) => variant.required === first.required)
+        ? first.required
+        : null;
+    const shared =
+      commonRequired !== null &&
+      variants.every((variant) => sameSchema(variant.schema, first.schema));
     return {
       name,
       schema: first.schema,
-      required: shared ? first.required : false,
+      required: commonRequired,
       branch:
         variants.length === total
           ? null

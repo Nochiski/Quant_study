@@ -364,7 +364,11 @@ export const projectContractField = (
     shape,
     type,
     nullable: branchDependent ? false : (row?.nullable ?? resolved.nullable),
-    required: branchDependent ? null : row ? row.required : null,
+    required: branchDependent
+      ? null
+      : row
+        ? row.required
+        : resolved.propertyRequired,
     enumValues,
     constValue,
     hasConst,

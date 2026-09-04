@@ -162,13 +162,17 @@ const server = setupServer(
   http.post(`${API}/api/v1/strategy-documents/compile`, async ({ request }) => {
     const body = (await request.json()) as { source: string };
     const title = /title: (.*)/.exec(body.source)?.[1] ?? "";
-    const compiledSpec = spec("s1", 2, title);
+    const compiledSpec = spec("draft", 0, title);
+    const { identity, ...canonicalSpec } = compiledSpec;
     return HttpResponse.json({
       format: "yaml",
       source_hash: "b".repeat(64),
       schema_version: "1.0",
       spec: compiledSpec,
-      canonical_json: JSON.stringify(compiledSpec),
+      canonical_json: JSON.stringify({
+        ...canonicalSpec,
+        schema_version: identity.schema_version,
+      }),
       spec_hash: body.source === STORED ? "2".repeat(64) : "9".repeat(64),
       diagnostics: [],
     });
@@ -849,7 +853,9 @@ describe("StrategySpec JSON and Form projections (P4-06)", () => {
       await user.click(screen.getByRole("tab", { name: "JSON" }));
       const json = await screen.findByLabelText("StrategySpec JSON");
       await waitFor(() => expect(json).toBeVisible());
-      expect(within(json).getByText(/"market": "KRX"/)).toBeInTheDocument();
+      expect(json.textContent).toContain('"market":"KRX"');
+      expect(json.textContent).toContain('"schema_version":"1.0"');
+      expect(json.textContent).not.toContain("identity");
       expect(within(json).getByText("현재 문서")).toBeInTheDocument();
 
       await user.click(screen.getByRole("tab", { name: "Form" }));
@@ -857,6 +863,8 @@ describe("StrategySpec JSON and Form projections (P4-06)", () => {
       await waitFor(() => expect(form).toBeVisible());
       expect(within(form).getByText('"KRX"')).toBeInTheDocument();
       expect(within(form).getByText("15")).toBeInTheDocument();
+      expect(within(form).queryByText("strategy_id")).not.toBeInTheDocument();
+      expect(within(form).queryByText("revision")).not.toBeInTheDocument();
       expect(within(form).queryByRole("textbox")).not.toBeInTheDocument();
     },
   );

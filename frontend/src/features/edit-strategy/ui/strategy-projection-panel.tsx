@@ -33,7 +33,6 @@ export const StrategyProjectionPanel = ({
       values: {
         title: projection.spec.title,
         description: projection.spec.description,
-        ...projection.spec.identity,
       },
     },
     { id: "data", values: projection.spec.data },

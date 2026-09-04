@@ -9,6 +9,7 @@ import {
   type CompileOutcome,
   type DocumentState,
 } from "../model/document-state";
+import { canSaveDocument } from "../model/use-save-document";
 
 const SPEC = { title: "t" } as unknown as StrategySpec;
 const BASE_HASH = "b".repeat(64);
@@ -133,4 +134,25 @@ describe("decideBacktestSource", () => {
       reason: "composing",
     });
   });
+
+  it.each(["spec", "canonicalJson", "specHash", "schemaVersion"] as const)(
+    "blocks Save and Backtest when a current compile omits %s",
+    (field) => {
+      const edited = documentReducer(loaded(true), {
+        type: "edit",
+        source: `${TEXT}description: changed\n`,
+      });
+      const incomplete = {
+        ...outcome("c".repeat(64)),
+        [field]: null,
+      } as CompileOutcome;
+      const state = compiled(parsed(edited), incomplete);
+
+      expect(canSaveDocument(state)).toBe(false);
+      expect(decideBacktestSource(state)).toEqual({
+        kind: "blocked",
+        reason: "invalid",
+      });
+    },
+  );
 });

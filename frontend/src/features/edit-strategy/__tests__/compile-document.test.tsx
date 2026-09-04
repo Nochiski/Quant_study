@@ -24,7 +24,9 @@ const compiled = (
   source_hash: "s".repeat(64),
   schema_version: "1.0",
   spec: diagnostics.some((d) => d.severity === "error") ? null : spec,
-  canonical_json: null,
+  canonical_json: diagnostics.some((d) => d.severity === "error")
+    ? null
+    : '{"schema_version":"1.0","title":"ok"}',
   spec_hash: diagnostics.some((d) => d.severity === "error")
     ? null
     : "h".repeat(64),
@@ -67,6 +69,12 @@ const server = setupServer(
           },
         ]),
       );
+    }
+    if (body.source.includes("incomplete")) {
+      return HttpResponse.json({
+        ...compiled(body.source),
+        canonical_json: null,
+      });
     }
     if (body.source.includes("boom")) return HttpResponse.error();
     return HttpResponse.json(compiled(body.source));
@@ -134,6 +142,15 @@ describe("useCompileDocument", () => {
         .textContent!.split("/");
       expect(compiled).toBe(source);
     }
+  });
+
+  it("fails closed when the wire response is missing a canonical payload", async () => {
+    await mount('schema_version: "1.0"\ntitle: incomplete\n');
+    await waitFor(() =>
+      expect(screen.getByTestId("phase")).toHaveTextContent(
+        "structure-invalid",
+      ),
+    );
   });
 
   it("aborts the superseded request and never shows an older verdict", async () => {

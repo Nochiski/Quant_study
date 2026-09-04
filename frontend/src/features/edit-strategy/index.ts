@@ -6,13 +6,16 @@ export { RiskEditor } from "./ui/risk-editor";
 export { ExecutionEditor } from "./ui/execution-editor";
 export {
   currentDiagnostics,
+  currentCompile,
   currentSpec,
   documentReducer,
   initialDocumentState,
   isSpecStale,
+  isCompleteCompileOutcome,
   shouldCompile,
   shouldParse,
   type CompileOutcome,
+  type CompleteCompileOutcome,
   type DocumentAction,
   type DocumentDiagnostic,
   type DocumentPhase,
@@ -26,7 +29,6 @@ export {
 export {
   projectStrategySpec,
   type StrategyProjection,
-  type StrategyProjectionSeed,
 } from "./model/strategy-projection";
 export { useStrategyDocument } from "./model/use-strategy-document";
 export {

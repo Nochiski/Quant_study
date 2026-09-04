@@ -73,13 +73,7 @@ export const StrategyRevisionPage = () => {
     document.compiledVersion === document.sourceVersion
       ? document.compiled
       : null;
-  const projection = projectStrategySpec(document, {
-    strategyId: stored.strategy_id,
-    revision: stored.revision,
-    spec: stored.spec,
-    specHash: stored.spec_hash,
-    schemaVersion: stored.schema_version,
-  });
+  const projection = projectStrategySpec(document);
   const availableViews: readonly StrategyView[] =
     stored.format === "yaml" ? PROJECTION_VIEWS : ["json", "form"];
   const requested: StrategyView = search.view ?? stored.format;

@@ -77,7 +77,7 @@ const server = setupServer(
       source_hash: "b".repeat(64),
       schema_version: "1.0",
       spec: spec(1, "퀄리티 모멘텀 v1"),
-      canonical_json: null,
+      canonical_json: '{"schema_version":"1.0","title":"퀄리티 모멘텀 v1"}',
       spec_hash: "a".repeat(64),
       diagnostics: [],
       echo: body.source,

@@ -51,6 +51,24 @@ export type CompileOutcome = {
   diagnostics: DocumentDiagnostic[];
 };
 
+/** One indivisible successful backend compile; every Save/Run/Debug/projection gate shares it. */
+export type CompleteCompileOutcome = CompileOutcome & {
+  spec: StrategySpec;
+  canonicalJson: string;
+  specHash: string;
+  schemaVersion: string;
+};
+
+export const isCompleteCompileOutcome = (
+  outcome: CompileOutcome | null,
+): outcome is CompleteCompileOutcome =>
+  outcome !== null &&
+  outcome.spec !== null &&
+  outcome.canonicalJson !== null &&
+  outcome.specHash !== null &&
+  outcome.schemaVersion !== null &&
+  !outcome.diagnostics.some((diagnostic) => diagnostic.severity === "error");
+
 export type DocumentState = {
   format: SourceFormat;
   source: string;
@@ -67,7 +85,7 @@ export type DocumentState = {
   /** Last error-free backend compile in this document epoch, retained for stale projections. */
   lastValidCompiled: {
     version: number;
-    outcome: CompileOutcome;
+    outcome: CompleteCompileOutcome;
   } | null;
   compiled: CompileOutcome | null;
   compiledVersion: number;
@@ -135,7 +153,7 @@ const phaseFromCompile = (
   if (errors.some((d) => d.kind === "syntax")) return "syntax-invalid";
   if (errors.some((d) => d.kind === "structural")) return "structure-invalid";
   if (errors.length > 0) return "semantic-invalid";
-  if (outcome.spec === null) return "structure-invalid";
+  if (!isCompleteCompileOutcome(outcome)) return "structure-invalid";
   return saved ? "saved" : "semantically-valid";
 };
 
@@ -218,20 +236,15 @@ export const documentReducer = (
         state.baseSpecHash !== null &&
         action.outcome.specHash === state.baseSpecHash &&
         !state.dirty;
-      const valid =
-        action.outcome.spec !== null &&
-        action.outcome.canonicalJson !== null &&
-        action.outcome.specHash !== null &&
-        action.outcome.schemaVersion !== null &&
-        !action.outcome.diagnostics.some(
-          (diagnostic) => diagnostic.severity === "error",
-        );
+      const complete = isCompleteCompileOutcome(action.outcome)
+        ? action.outcome
+        : null;
       return {
         ...state,
         compiled: action.outcome,
         compiledVersion: action.version,
-        lastValidCompiled: valid
-          ? { version: action.version, outcome: action.outcome }
+        lastValidCompiled: complete
+          ? { version: action.version, outcome: complete }
           : state.lastValidCompiled,
         phase: current ? phaseFromCompile(action.outcome, saved) : state.phase,
       };
@@ -256,8 +269,7 @@ export const documentReducer = (
         savedVersion: action.sourceVersion,
         dirty: action.source !== state.source,
         phase:
-          action.source === state.source &&
-          state.compiledVersion === state.sourceVersion
+          action.source === state.source && currentCompile(state) !== null
             ? "saved"
             : state.phase,
       };
@@ -280,13 +292,17 @@ export const isSpecStale = (state: DocumentState): boolean =>
   state.compiled?.spec != null && state.compiledVersion !== state.sourceVersion;
 
 /** A spec safe to execute: current, compiled without errors. */
-export const currentSpec = (state: DocumentState): StrategySpec | null =>
+export const currentCompile = (
+  state: DocumentState,
+): CompleteCompileOutcome | null =>
   state.compiled !== null &&
   state.compiledVersion === state.sourceVersion &&
-  state.compiled.spec !== null &&
-  !state.compiled.diagnostics.some((d) => d.severity === "error")
-    ? state.compiled.spec
+  isCompleteCompileOutcome(state.compiled)
+    ? state.compiled
     : null;
+
+export const currentSpec = (state: DocumentState): StrategySpec | null =>
+  currentCompile(state)?.spec ?? null;
 
 /** Diagnostics for the current text: parser syntax markers now, backend markers once compiled. */
 export const currentDiagnostics = (

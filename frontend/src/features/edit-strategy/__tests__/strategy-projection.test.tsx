@@ -10,10 +10,7 @@ import {
   type CompileOutcome,
   type DocumentState,
 } from "../model/document-state";
-import {
-  projectStrategySpec,
-  type StrategyProjectionSeed,
-} from "../model/strategy-projection";
+import { projectStrategySpec } from "../model/strategy-projection";
 import { StrategyProjectionPanel } from "../ui/strategy-projection-panel";
 
 afterEach(cleanup);
@@ -26,7 +23,10 @@ const SPEC = {
   ...authored,
   identity: { strategy_id: "s1", revision: 2, schema_version: "1.0" },
 } as unknown as StrategySpec;
-const CANONICAL = JSON.stringify(SPEC);
+// Exact representative bytes returned by backend canonical_strategy_json: root schema version,
+// no storage identity, sorted keys, and Python float lexical forms preserved.
+const CANONICAL =
+  '{"execution":{"fee_bps":15.0},"risk":{"minimum_trade_weight":0.0},"schema_version":"1.0"}';
 
 const outcome = (valid = true): CompileOutcome => ({
   spec: valid ? SPEC : null,
@@ -77,10 +77,12 @@ describe("StrategySpec projection model", () => {
       schemaVersion: "1.0",
       stale: false,
     });
-    if (projection.status === "ready")
-      expect(projection.canonicalJson).toBe(
-        JSON.stringify(JSON.parse(CANONICAL), null, 2),
-      );
+    if (projection.status === "ready") {
+      expect(projection.canonicalJson).toBe(CANONICAL);
+      expect(projection.canonicalJson).toContain('"schema_version":"1.0"');
+      expect(projection.canonicalJson).toContain('"fee_bps":15.0');
+      expect(projection.canonicalJson).not.toContain("identity");
+    }
   });
 
   it("fails closed instead of manufacturing canonical JSON on the client", () => {
@@ -134,37 +136,16 @@ describe("StrategySpec projection model", () => {
     });
   });
 
-  it("uses only a matching immutable revision seed and makes it stale after an edit", () => {
-    const seed: StrategyProjectionSeed = {
-      strategyId: "s1",
-      revision: 2,
-      spec: SPEC,
-      specHash: "a".repeat(64),
-      schemaVersion: "1.0",
-    };
-    let state = documentReducer(initialDocumentState(), {
+  it("does not manufacture a projection from an uncompiled saved revision", () => {
+    const state = documentReducer(initialDocumentState(), {
       type: "load",
       format: "yaml",
       source: "title: saved\n",
       strategyId: "s1",
       baseRevision: 2,
-      baseSpecHash: seed.specHash,
+      baseSpecHash: "a".repeat(64),
     });
-    expect(projectStrategySpec(state, seed)).toMatchObject({
-      status: "ready",
-      stale: false,
-    });
-    state = documentReducer(state, {
-      type: "edit",
-      source: "title: changed\n",
-    });
-    expect(projectStrategySpec(state, seed)).toMatchObject({
-      status: "ready",
-      stale: true,
-    });
-    expect(
-      projectStrategySpec(state, { ...seed, strategyId: "another" }),
-    ).toEqual({ status: "unavailable" });
+    expect(projectStrategySpec(state)).toEqual({ status: "unavailable" });
   });
 });
 
@@ -189,6 +170,8 @@ describe("StrategySpec projection UI", () => {
       ).toBeInTheDocument();
     expect(screen.getByText("max_name_weight")).toBeInTheDocument();
     expect(screen.getByText("0.05")).toBeInTheDocument();
+    expect(screen.queryByText("strategy_id")).not.toBeInTheDocument();
+    expect(screen.queryByText("revision")).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
 
@@ -200,9 +183,11 @@ describe("StrategySpec projection UI", () => {
         view="json"
       />,
     );
+    const region = screen.getByRole("region", { name: "StrategySpec JSON" });
+    expect(region).toHaveTextContent("STALE");
     expect(
-      screen.getByRole("region", { name: "StrategySpec JSON" }),
-    ).toHaveTextContent("STALE");
+      region.querySelector(".strategy-projection__json")?.textContent,
+    ).toBe(CANONICAL);
     expect(screen.getByRole("status")).toHaveTextContent(
       "저장·실행에는 사용되지 않습니다",
     );

@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 import { parseSource } from "../../../shared/lib/yaml12";
 import {
   currentDiagnostics,
+  currentCompile,
   currentSpec,
   documentReducer,
   initialDocumentState,
   isSpecStale,
+  isCompleteCompileOutcome,
   shouldCompile,
   shouldParse,
   type CompileOutcome,
@@ -72,6 +74,50 @@ describe("document state machine", () => {
     expect(state.phase).toBe("semantically-valid");
     expect(currentSpec(state)).toBe(spec);
     expect(shouldCompile(state)).toBe(false);
+  });
+
+  it.each(["spec", "canonicalJson", "specHash", "schemaVersion"] as const)(
+    "fails closed when a compile response omits %s",
+    (field) => {
+      const incomplete = { ...okOutcome(), [field]: null } as CompileOutcome;
+      const state = run(initialDocumentState("yaml", "title: a\n"), {
+        type: "compiled",
+        version: 0,
+        outcome: incomplete,
+      });
+
+      expect(isCompleteCompileOutcome(incomplete)).toBe(false);
+      expect(state.phase).toBe("structure-invalid");
+      expect(state.lastValidCompiled).toBeNull();
+      expect(currentCompile(state)).toBeNull();
+      expect(currentSpec(state)).toBeNull();
+    },
+  );
+
+  it("accepts a complete warning-only backend compile", () => {
+    const warning: CompileOutcome = {
+      ...okOutcome(),
+      diagnostics: [
+        {
+          code: "strategy.warning",
+          kind: "semantic",
+          severity: "warning",
+          pointer: "/risk/max_name_weight",
+          message: "review this value",
+          range: null,
+        },
+      ],
+    };
+    const state = run(initialDocumentState("yaml", "title: a\n"), {
+      type: "compiled",
+      version: 0,
+      outcome: warning,
+    });
+
+    expect(isCompleteCompileOutcome(warning)).toBe(true);
+    expect(state.phase).toBe("semantically-valid");
+    expect(currentCompile(state)).toBe(warning);
+    expect(state.lastValidCompiled?.outcome).toBe(warning);
   });
 
   it("keeps the last compiled spec as stale when a later edit fails to parse", () => {

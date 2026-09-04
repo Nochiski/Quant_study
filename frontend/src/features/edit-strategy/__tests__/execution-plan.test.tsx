@@ -286,6 +286,14 @@ describe("execution plan orchestration", () => {
       status: "blocked",
       reason: "stale",
     });
+    const incomplete = {
+      ...currentState(),
+      compiled: { ...currentState().compiled!, canonicalJson: null },
+    };
+    expect(prepareExecutionPlans(incomplete, METADATA)).toEqual({
+      status: "blocked",
+      reason: "invalid",
+    });
     expect(
       prepareExecutionPlans(currentState(), {
         ...METADATA,

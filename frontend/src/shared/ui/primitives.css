@@ -69,6 +69,7 @@
 
 .ui-tab {
   position: relative;
+  white-space: nowrap;
   padding: var(--space-2) var(--space-3);
   border: 0;
   border-bottom: 2px solid transparent;

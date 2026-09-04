@@ -3,6 +3,11 @@
   box-sizing: border-box;
 }
 
+/* The HTML hidden attribute wins over any display rule (panels, drawers, tabpanels). */
+[hidden] {
+  display: none !important;
+}
+
 html {
   font-family: var(--font-sans);
   font-size: 100%;

@@ -389,7 +389,7 @@
 /* intermediate results */
 .ide__results {
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
   gap: var(--space-4);
   flex: 1;
   min-height: 0;
@@ -443,6 +443,7 @@
 
 .ide__results-table {
   min-width: 0;
+  overflow-x: auto;
 }
 
 .ide__table {

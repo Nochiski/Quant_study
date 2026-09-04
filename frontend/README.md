@@ -40,7 +40,8 @@ type/unit, minimum history, inline validation과 함께 표시한다. 두 모드
   token(`--surface-*`, `--border*`, `--text*`, `--accent*`, `--status-*`, `--focus-ring`)만 쓴다. 본문 14px,
   보조 정보는 12px 아래로 내려가지 않는다.
 - `src/app/styles/base.css`는 reset·타이포·focus-visible, `legacy-builder.css`는 Quick/Advanced 편집기
-  스타일이다(P6-06에서 제거). `--color-*`는 legacy alias이며 새 코드에서 쓰지 않는다.
+  스타일이다(P6-06에서 제거). `--color-*`는 legacy alias이며 새 코드에서 쓰지 않는다. legacy 스타일은
+  `ui-*` 클래스를 건드리지 않는다(cascade 충돌 금지). 차트 색은 `--chart-series-*`만 쓴다.
 - `src/shared/ui`: `Button`, `Tabs`, `Badge`, `Tooltip`, `EmptyState`, `SplitHandle`. 상태는 색과 함께
   글리프/문구로 표시하고, Tabs·SplitHandle은 키보드로 조작한다. 문구는 `shared/config/messages.ts`에 ko/en을
   함께 추가한다.

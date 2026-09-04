@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { useDatasetCatalog } from "../../../entities/dataset";
 import { useFactorCatalog } from "../../../entities/factor";
@@ -12,7 +12,11 @@ import type {
   EditorHoverSource,
 } from "../../../shared/ui/code-editor";
 import type { DocumentState } from "./document-state";
-import { buildCompletionSource, buildHoverSource } from "./schema-assist";
+import {
+  buildCompletionSource,
+  buildHoverSource,
+  type AssistDeps,
+} from "./schema-assist";
 import type { JsonSchema } from "./schema-navigator";
 
 export type SchemaAssist = {
@@ -31,47 +35,47 @@ const CATALOG_PAGE = { page_size: 100 } as const;
  * state through a ref, so the editor keeps one stable function per data change.
  */
 export const useSchemaAssist = (state: DocumentState): SchemaAssist => {
-  // A stable holder the sources read at call time (after commit), so the editor keeps one
-  // function per data change instead of re-registering on every keystroke.
-  const [latest] = useState(() => ({ state }));
-  useEffect(() => {
-    latest.state = state;
-  }, [latest, state]);
-  const getState = useCallback(() => latest.state, [latest]);
   const schema = useQuery(strategySchemaQuery());
   const contract = useQuery(strategyContractQuery());
   const fields = useDatasetCatalog(CATALOG_PAGE);
   const factors = useFactorCatalog(CATALOG_PAGE);
 
+  // The sources are two stable functions the editor registers once; they read the latest
+  // document state and data through refs at call time (after commit), never during render.
+  const latest = useRef<AssistDeps>({
+    schema: null,
+    contract: [],
+    catalogs: { equityFields: [], factors: [] },
+    getState: () => state,
+  });
   const schemaData = schema.data?.schema;
   const contractRows = contract.data?.contract.fields;
   const fieldRows = fields.data?.fields;
   const factorRows = factors.data?.factors;
-  return useMemo(() => {
-    const deps = {
+  useEffect(() => {
+    latest.current = {
       schema: (schemaData as JsonSchema | undefined) ?? null,
       contract: contractRows ?? [],
       catalogs: { equityFields: fieldRows ?? [], factors: factorRows ?? [] },
-      getState,
+      getState: () => state,
     };
-    return {
-      completionSource: buildCompletionSource(deps),
-      hoverSource: buildHoverSource(deps),
-      loading:
-        schema.isPending ||
-        contract.isPending ||
-        fields.isPending ||
-        factors.isPending,
-    };
-  }, [
-    getState,
-    schemaData,
-    contractRows,
-    fieldRows,
-    factorRows,
-    schema.isPending,
-    contract.isPending,
-    fields.isPending,
-    factors.isPending,
-  ]);
+  }, [schemaData, contractRows, fieldRows, factorRows, state]);
+
+  const completionSource = useCallback<EditorCompletionSource>(
+    (context) => buildCompletionSource(latest.current)(context),
+    [],
+  );
+  const hoverSource = useCallback<EditorHoverSource>(
+    (offset) => buildHoverSource(latest.current)(offset),
+    [],
+  );
+  const loading =
+    schema.isPending ||
+    contract.isPending ||
+    fields.isPending ||
+    factors.isPending;
+  return useMemo(
+    () => ({ completionSource, hoverSource, loading }),
+    [completionSource, hoverSource, loading],
+  );
 };

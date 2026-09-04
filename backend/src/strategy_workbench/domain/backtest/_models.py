@@ -128,6 +128,15 @@ class DataWarning:
 
 @dataclass(frozen=True)
 class RunManifest:
+    """What a finished run was made of.
+
+    `strategy_hash` and `strategy_provenance.spec_hash` name the same strategy but come from
+    different producers — the first is the compiler's, carried on the TargetTape; the second is
+    the application's, recorded when the run request was resolved. They agree only while both
+    sides hash the same spec, so the invariant below states it instead of leaving a manifest free
+    to carry two different hashes for one run (DEFECT-105).
+    """
+
     run_id: str
     created_at: datetime
     completed_at: datetime
@@ -147,6 +156,17 @@ class RunManifest:
     strategy_provenance: StrategyProvenance
     warnings: tuple[DataWarning, ...] = ()
     schema_version: str = "backtest-run-v2"
+
+    def __post_init__(self) -> None:
+        if self.strategy_hash != self.strategy_provenance.spec_hash:
+            raise ValueError(
+                "manifest records two strategies for one run — "
+                f"run_id={self.run_id} target_tape.strategy_hash={self.strategy_hash} "
+                f"provenance.spec_hash={self.strategy_provenance.spec_hash} "
+                f"provenance.kind={self.strategy_provenance.kind.value} "
+                f"strategy_id={self.strategy_provenance.strategy_id} "
+                f"revision={self.strategy_provenance.revision}"
+            )
 
 
 @dataclass(frozen=True)

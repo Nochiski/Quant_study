@@ -1,0 +1,6 @@
+# header
+title: "x"  # trailing
+
+risk:
+  # inner
+  max_name_weight: 0.05

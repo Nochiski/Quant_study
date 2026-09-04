@@ -16,7 +16,8 @@
   "dependencies": {
     "@tanstack/react-query": "^5.102.8",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "yaml": "2.9.0"
   },
   "devDependencies": {
     "@boundaries/eslint-plugin": "^7.2.0",

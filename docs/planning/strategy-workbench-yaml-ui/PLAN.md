@@ -2,15 +2,15 @@
 plan_version: 2
 project: yaml-strategy-workbench-ui
 project_status: IN_REVIEW
-current_phase: P0,P1
-current_pr: P0-03,P1-01
-active_prs: [P0-03, P1-01]
-parallel_window: [P0-03, P1-01]
-last_updated: 2026-09-04T14:00:32+09:00
+current_phase: P1
+current_pr: P1-01
+active_prs: [P1-01]
+parallel_window: [P1-01, P1.5-01]
+last_updated: 2026-09-04T14:07:56+09:00
 planned_prs: 45
-merged_prs: 3
-approved_prs: 3
-progress_percent: 7
+merged_prs: 4
+approved_prs: 4
+progress_percent: 9
 ---
 
 # YAML Strategy Workbench 실시간 진행 계획
@@ -23,12 +23,12 @@ progress_percent: 7
 | Field | Value |
 |---|---|
 | Project status | `IN_REVIEW` |
-| Current phase | `P0,P1` |
-| Current/next PR | `P0-03,P1-01` |
-| Active PR | `P0-03, P1-01` |
-| Progress | `3 / 45 merged (7%)` |
-| Approved | `3 / 45` |
-| Aggregated at | `2026-09-04 14:00 KST` |
+| Current phase | `P1` |
+| Current/next PR | `P1-01` |
+| Active PR | `P1-01` |
+| Progress | `4 / 45 merged (9%)` |
+| Approved | `4 / 45` |
+| Aggregated at | `2026-09-04 14:07 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -71,31 +71,31 @@ progress_percent: 7
 <!-- PLAN:PHASES:START -->
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
-| P0 | Contract, product direction, tool choices | 4 | 3 | `IN_REVIEW` |
-| P1 | Backend Authoring Contract | 9 | 0 | `IN_PROGRESS` |
+| P0 | Contract, product direction, tool choices | 4 | 4 | `MERGED` |
+| P1 | Backend Authoring Contract | 9 | 0 | `IN_REVIEW` |
 | P1.5 | Backtest Correctness Gate | 4 | 0 | `READY` |
 | P2 | App Shell and visual foundation | 4 | 0 | `READY` |
 | P3 | YAML Editor MVP | 7 | 0 | `WAITING` |
 | P4 | Outline, Contract, Projections | 8 | 0 | `WAITING` |
 | P5 | Truthful Trace UI | 3 | 0 | `WAITING` |
 | P6 | Professional release and migration | 6 | 0 | `WAITING` |
-| **Total** |  | **45** | **3** | **7%** |
+| **Total** |  | **45** | **4** | **9%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
 
 | 항목 | 값 |
 |---|---|
-| PR | `P0-03` (worktree `Quant_study-p0-03`, IN_REVIEW 3차) + `P1-01` (병렬 window) |
-| Intent | P0-03: YAML 1.2 cross-runtime 계약. P1-01: identity-free canonical payload ↔ typed StrategySpec hydrate(unknown key fail-closed, ParameterValue coercion, -0.0 정규화), 기존 hash golden |
+| PR | `P1-01` (IN_REVIEW) + `P1.5-01` (병렬 window, 착수 예정) |
+| Intent | P1-01: typed hydrate(unknown key fail-closed, ParameterValue coercion, -0.0 정규화). P1.5-01: client가 snapshot ID를 정하지 않고 adapter가 실제 snapshot을 반환, mismatch fail-closed |
 | Acceptance | 번들 크기·IME·schema completion 기준 비교표, 최종 선택과 rollback 방법, 이후 PR dependency 기록 |
 | Non-goals | editor 의존성 설치·UI 코드 변경 (P3-02), parser (P0-03), router (P0-04) |
-| Branch/worktree | `feat/p0-03-yaml-parser` / `feat/p1-01-typed-hydrate` |
+| Branch/worktree | `feat/p1-01-typed-hydrate` (main 트리) / `feat/p1.5-01-snapshot-provenance` (worktree) |
 | Base SHA | `38a2304` |
-| Head SHA | P0-03 `e346a7c` / P1-01 미기록 |
-| Diff stat | P0-03 3차 (fixture 42개) / P1-01 미기록 |
-| Focused tests | P0-03 backend 43, frontend 42 / P1-01 미실행 |
-| Full gate | P0-03 worktree: ruff·pyright clean, frontend typecheck·lint·65 tests·build OK. backend pytest는 worktree Rust 미빌드로 core_parity 3건 환경 실패 → merge 후 main 트리에서 재실행 |
+| Head SHA | P1-01 `c3c4158` / P1.5-01 미기록 |
+| Diff stat | P1-01 5 files +643 (hydrate 300, tests 300) / P1.5-01 미기록 |
+| Focused tests | P1-01 hydrate 15 + contract 10 + architecture / P1.5-01 미실행 |
+| Full gate | P1-01: pytest 626 passed, ruff clean, pyright 0 errors. P0-03 merge 후 main 트리 전체 게이트는 Phase 0 종료 점검에서 재실행 |
 
 ---
 
@@ -105,22 +105,23 @@ progress_percent: 7
 |---|---|---|---|---|---|
 | [x] | `P0-01` | Verbose source ADR, YAML-first 전환, roadmap/rules/tracker 정합화 | 없음 | `MERGED` | `review_p0_01` APPROVE |
 | [x] | `P0-02` | Monaco/CodeMirror frontend editor spike | P0-01 | `MERGED` | `review_p0_02` APPROVE |
-| [ ] | `P0-03` | Backend parser ADR와 YAML 1.2 cross-runtime fixture | P0-01 | `IN_REVIEW` | `review_p0_03` |
+| [x] | `P0-03` | Backend parser ADR와 YAML 1.2 cross-runtime fixture | P0-01 | `MERGED` | `review_p0_03` APPROVE |
 | [x] | `P0-04` | Frontend router ADR와 direct-entry spike | P0-01 | `MERGED` | `review_p0_04` APPROVE |
 
 Phase exit:
 
-- [ ] DSL·단위 sugar가 v1 non-goal로 명시되었다.
-- [ ] WORKFLOW 2.2의 YAML 예시가 완전한 golden compile fixture로 등록되었다.
-- [ ] YAML-first 전환과 no-code 범위가 roadmap/rules에 반영되었다.
-- [ ] Frontend editor와 backend YAML 1.2 parser가 결정되었다.
-- [ ] Frontend router와 route composition이 결정되었다.
+- [x] DSL·단위 sugar가 v1 non-goal로 명시되었다.
+- [x] WORKFLOW 2.2의 YAML 예시가 완전한 golden compile fixture로 등록되었다.
+- [x] YAML-first 전환과 no-code 범위가 roadmap/rules에 반영되었다.
+- [x] Frontend editor와 backend YAML 1.2 parser가 결정되었다.
+- [x] Frontend router와 route composition이 결정되었다.
+- [ ] Phase 종료 SoT·책임분리 점검 서브에이전트 결과 기록 (사용자 지시, 2026-09-04)
 
 ## P1 — Backend Authoring Contract
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P1-01` | Typed canonical hydrate와 numeric/date/enum hash fixture | P0-01 | `IN_PROGRESS` | — |
+| [ ] | `P1-01` | Typed canonical hydrate와 numeric/date/enum hash fixture | P0-01 | `IN_REVIEW` | `review_p1_01` |
 | [ ] | `P1-02` | 안전한 YAML/JSON codec과 source map | P0-03, P1-01 | `WAITING` | — |
 | [ ] | `P1-03` | Compile API와 통합 diagnostic, generated SDK | P1-02 | `WAITING` | — |
 | [ ] | `P1-04` | Constraint catalog와 adapter-owned discriminator, domain Pydantic 금지 | P1-01 | `WAITING` | — |
@@ -243,6 +244,7 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
+| P0-03 | `review_p0_03` | `38a2304` | `bc7e8a6` | APPROVE (1차 P0 gitignore·P1 merge key·P1 non-core number, 2차 P1 `.5e3` → 3차) | 4 (해소) | tab/`\0`/CR/`%TAG !!` backend-narrower(fail-closed), 복수 위반 reason 순서는 P1-02 | 2026-09-04 |
 | P0-04 | `review_p0_04` | `c814758` | `70dae8d` | APPROVE (1차 REQUEST_CHANGES: blocker 술어·legacy redirect·정규화 경로, 2차 P2 run 기본값 → 3차) | 1 (해소) | blocker/errorComponent/ensureQueryData 동작은 P2-02/P2-04 렌더 테스트 필수 | 2026-09-04 |
 | P0-02 | `review_p0_02` | `38a2304` | `fc8023d` | APPROVE (1차 REQUEST_CHANGES: IME 서술·D2 경계 → 재검토) | 2 (해소) | 200 KB chunk 예산은 P3-02 측정; main-thread parse는 P3-01 debounce·P6-04 측정; monaco-yaml이 0.56+ 지원 시 IME 논거 약화 | 2026-09-04 |
 | P0-01 | `review_p0_01` | `c174452` | `b988984` | APPROVE (1차 REQUEST_CHANGES → 재검토) | 1 (해소) | unknown-key fail-closed는 P1-01 구현 전까지 계약만 고정; ParameterValue union hash 분기 P1-01; YAML 1.1/1.2 차이는 P0-03까지 미검출 | 2026-09-04 |
@@ -251,6 +253,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
+| P0-03 | backend 44 passed, frontend 43 passed | ruff·pyright·typecheck·lint·build | 해당 없음 | 해당 없음 | 로컬 (worktree) | 2026-09-04 |
 | P0-04 | 스파이크 node --test 8 passed | 링크 검증 | 해당 없음 | 해당 없음 | 로컬 | 2026-09-04 |
 | P0-02 | 문서 링크 검증 | 스파이크 3종 빌드 재현(reviewer) | 해당 없음 | 해당 없음 | 로컬 | 2026-09-04 |
 | P0-01 | contract 9 passed + 1 xfailed | pytest 608 + ruff + pyright | 해당 없음 (API 미변경) | 해당 없음 | 로컬 게이트 동일 범위 (원격 push 전) | 2026-09-04 |
@@ -259,6 +262,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-04 KST | Claude | P0-03 APPROVE(bc7e8a6) → main merge, MERGED. Phase 0 PR 4/4 merge, 종료 점검 서브에이전트 착수. P1-01(c3c4158) IN_REVIEW, P1.5-01 병렬 window | 13.6 merge gate |
 | 2026-09-04 KST | Claude | P0-04 APPROVE(70dae8d) → main merge, MERGED. P1-01 IN_PROGRESS로 병렬 window 교체 | 13.6 merge gate |
 | 2026-09-04 KST | Claude | P0-04(36d61b7) diff freeze, review_p0_04 배정 → IN_REVIEW | 13.3 |
 | 2026-09-04 KST | Claude | P0-02 APPROVE(fc8023d) → main merge, MERGED. P0-04 IN_PROGRESS로 병렬 window 교체 | 13.6 merge gate |

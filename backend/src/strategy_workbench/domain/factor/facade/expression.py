@@ -1,4 +1,5 @@
 from strategy_workbench.domain.factor._nodes import (
+    EXPRESSION_NODE_KINDS,
     BinaryNode,
     BinaryOperator,
     ComparisonNode,
@@ -25,6 +26,7 @@ from strategy_workbench.domain.factor._nodes import (
 )
 
 __all__ = [
+    "EXPRESSION_NODE_KINDS",
     "BinaryNode",
     "BinaryOperator",
     "ComparisonNode",

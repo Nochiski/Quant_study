@@ -3,14 +3,14 @@ plan_version: 2
 project: yaml-strategy-workbench-ui
 project_status: IN_REVIEW
 current_phase: P1
-current_pr: P1-02,P1-04
-active_prs: [P1-02, P1-04]
+current_pr: P1-02
+active_prs: [P1-02]
 parallel_window: [P1-02, P1-04]
-last_updated: 2026-09-04T14:31:58+09:00
+last_updated: 2026-09-04T15:10:18+09:00
 planned_prs: 45
-merged_prs: 6
-approved_prs: 6
-progress_percent: 13
+merged_prs: 7
+approved_prs: 7
+progress_percent: 16
 ---
 
 # YAML Strategy Workbench 실시간 진행 계획
@@ -24,11 +24,11 @@ progress_percent: 13
 |---|---|
 | Project status | `IN_REVIEW` |
 | Current phase | `P1` |
-| Current/next PR | `P1-02,P1-04` |
-| Active PR | `P1-02, P1-04` |
-| Progress | `6 / 45 merged (13%)` |
-| Approved | `6 / 45` |
-| Aggregated at | `2026-09-04 14:31 KST` |
+| Current/next PR | `P1-02` |
+| Active PR | `P1-02` |
+| Progress | `7 / 45 merged (16%)` |
+| Approved | `7 / 45` |
+| Aggregated at | `2026-09-04 15:10 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -72,21 +72,21 @@ progress_percent: 13
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
 | P0 | Contract, product direction, tool choices | 4 | 4 | `MERGED` |
-| P1 | Backend Authoring Contract | 9 | 1 | `IN_REVIEW` |
+| P1 | Backend Authoring Contract | 9 | 2 | `IN_REVIEW` |
 | P1.5 | Backtest Correctness Gate | 4 | 1 | `READY` |
 | P2 | App Shell and visual foundation | 4 | 0 | `READY` |
 | P3 | YAML Editor MVP | 7 | 0 | `WAITING` |
 | P4 | Outline, Contract, Projections | 8 | 0 | `WAITING` |
 | P5 | Truthful Trace UI | 3 | 0 | `WAITING` |
 | P6 | Professional release and migration | 6 | 0 | `WAITING` |
-| **Total** |  | **45** | **6** | **13%** |
+| **Total** |  | **45** | **7** | **16%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
 
 | 항목 | 값 |
 |---|---|
-| PR | `P1-02` (main 트리, IN_REVIEW) + `P1-04` (worktree `Quant_study-p1-04`, IN_REVIEW) |
+| PR | `P1-02`→`P1-03` stack (main 트리, IN_REVIEW) + `P1.5-02/03/04` stack (worktree `Quant_study-p15-01`, CHANGES_REQUESTED) |
 | Intent | P1-02: DocumentCodecPort + ruamel codec(source map, 정책 거부, 제한), manifest를 codec으로 검증. P1-04: scalar constraint catalog 단일 owner, validator가 catalog 소비, EXPRESSION_NODE_KINDS |
 | Acceptance | 번들 크기·IME·schema completion 기준 비교표, 최종 선택과 rollback 방법, 이후 PR dependency 기록 |
 | Non-goals | editor 의존성 설치·UI 코드 변경 (P3-02), parser (P0-03), router (P0-04) |
@@ -115,7 +115,7 @@ Phase exit:
 - [x] YAML-first 전환과 no-code 범위가 roadmap/rules에 반영되었다.
 - [x] Frontend editor와 backend YAML 1.2 parser가 결정되었다.
 - [x] Frontend router와 route composition이 결정되었다.
-- [ ] Phase 종료 SoT·책임분리 점검 서브에이전트 결과 기록 (사용자 지시, 2026-09-04)
+- [x] Phase 종료 SoT·책임분리 점검 서브에이전트 결과 기록 (사용자 지시, 2026-09-04) — 2026-09-04 audit: 결함 0, 문서 액션은 `.claude/rules/strategy-workbench-sot.md` 4행 추가, WORKFLOW 2.6/P1-01/P1-02, roadmap 5·7.1·9.1, `frontend-testing.md` manifest 규칙으로 반영
 
 ## P1 — Backend Authoring Contract
 
@@ -124,8 +124,8 @@ Phase exit:
 | [x] | `P1-01` | Typed canonical hydrate와 numeric/date/enum hash fixture | P0-01 | `MERGED` | `review_p1_01` APPROVE |
 | [ ] | `P1-02` | 안전한 YAML/JSON codec과 source map | P0-03, P1-01 | `IN_REVIEW` | `review_p1_02` |
 | [ ] | `P1-03` | Compile API와 통합 diagnostic, generated SDK | P1-02 | `WAITING` | — |
-| [ ] | `P1-04` | Constraint catalog와 adapter-owned discriminator, domain Pydantic 금지 | P1-01 | `IN_REVIEW` | `review_p1_04` |
-| [ ] | `P1-05` | Discriminator가 포함된 runtime schema/contract API | P1-04 | `WAITING` | — |
+| [x] | `P1-04` | Constraint catalog와 adapter-owned discriminator, domain Pydantic 금지 | P1-01 | `MERGED` | `review_p1_04` APPROVE |
+| [ ] | `P1-05` | Discriminator가 포함된 runtime schema/contract API | P1-04 | `READY` | — |
 | [ ] | `P1-06` | Revision source envelope, list/history repository port와 contract test | P1-01, P1-02 | `WAITING` | — |
 | [ ] | `P1-07` | Document save/get/history API, generated SDK | P1-03, P1-06 | `WAITING` | — |
 | [ ] | `P1-08` | Canonical semantic revision diff API | P1-07 | `WAITING` | — |
@@ -244,6 +244,7 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
+| P1-04 | `review_p1_04` | `c997e52` | `93d5625` | APPROVE (1차 APPROVE w/ P2: cost path 분할·NaN·EXPRESSION_NODE_KINDS 파생·pydantic 게이트 → 재검토 APPROVE) | 0 | `_kind_of` helper 2개(P1-05에서 통합), description_key 4-segment 네이밍 결정(P1-05 전), PR body에 wire path/NaN/PyYAML 게이트 근거 기재 | 2026-09-04 |
 | P1.5-01 | `review_p15_01` | `1e28d73` | `cae73fb` | APPROVE | 0 | 409 시 frontend 복구 UX 없음(후속), 검사 순서 단위 테스트 없음, backtest adapter snapshot 메시지 cleanup | 2026-09-04 |
 | P1-01 | `review_p1_01` | `8a824ab` | `881c38e` | APPROVE (1차 REQUEST_CHANGES: -0.0 tuple 정규화 → 재검토) | 1 (해소) | NaN/inf는 hash 시점 ValueError(P1-03 compile 경계에서 처리), YAML 1e-2는 P1-02 codec 소관, choice integral float fold | 2026-09-04 |
 | P0-03 | `review_p0_03` | `38a2304` | `bc7e8a6` | APPROVE (1차 P0 gitignore·P1 merge key·P1 non-core number, 2차 P1 `.5e3` → 3차) | 4 (해소) | tab/`\0`/CR/`%TAG !!` backend-narrower(fail-closed), 복수 위반 reason 순서는 P1-02 | 2026-09-04 |
@@ -255,6 +256,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
+| P1-04 | constraints 35 + domain·architecture·http 110 passed | worktree pytest 170(reviewer) / main merge 후 525 passed(Rust core 제외), ruff, pyright | 해당 없음 (API 미변경; issues[].path 분할은 기존 스키마 내) | 해당 없음 | 로컬 (worktree) | 2026-09-04 |
 | P1.5-01 | backend factor 13 passed, frontend 80 passed | ruff·pyright·typecheck·lint·build·SDK clean | SDK 재생성 clean | 해당 없음 | 로컬 (worktree) | 2026-09-04 |
 | P1-01 | hydrate 19 + contract 10 passed | pytest 630 passed, ruff, pyright | 해당 없음 | 해당 없음 | 로컬 | 2026-09-04 |
 | P0-03 | backend 44 passed, frontend 43 passed | ruff·pyright·typecheck·lint·build | 해당 없음 | 해당 없음 | 로컬 (worktree) | 2026-09-04 |
@@ -266,6 +268,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-04 KST | Claude | P1-04 APPROVE(93d5625) → main merge(b7a3ce8), MERGED. P1-05 READY. P1-02 2차 REQUEST_CHANGES(P2 2건: YAML escape surrogate, JSON duplicate key 위치) 수정 중; P1-03 재검토 대기; P1.5-03/04 REQUEST_CHANGES(P1 각 2건) 수정 착수 | 13.6 merge gate |
 | 2026-09-04 KST | Claude | P1-01(881c38e)·P1.5-01(cae73fb) APPROVE → main merge, MERGED. P1-02(4090661)·P1-04(3ae1efc) IN_REVIEW 병렬 window. Phase 0 SoT 감사 보고 대기 중 | 13.6 merge gate |
 | 2026-09-04 KST | Claude | P0-03 APPROVE(bc7e8a6) → main merge, MERGED. Phase 0 PR 4/4 merge, 종료 점검 서브에이전트 착수. P1-01(c3c4158) IN_REVIEW, P1.5-01 병렬 window | 13.6 merge gate |
 | 2026-09-04 KST | Claude | P0-04 APPROVE(70dae8d) → main merge, MERGED. P1-01 IN_PROGRESS로 병렬 window 교체 | 13.6 merge gate |
@@ -298,3 +301,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File docs/planning/strategy-workb
 ```
 
 Reviewer는 이 파일을 수정하지 않는다. 구현 책임자가 reviewer verdict와 CI 결과를 반영한다.
+
+CI 게이트(WORKFLOW 12절 9번)는 origin push 전까지 로컬에서 같은 범위의 게이트(backend pytest/ruff/pyright,
+frontend typecheck/lint/vitest/build, generated diff clean)로 대체한다. push 시점에 원격 CI 결과를
+`CI` 열에 소급 기록한다. (2026-09-04 결정)

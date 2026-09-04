@@ -5,9 +5,11 @@ import { strategyDocumentQuery } from "../../../entities/strategy";
 import {
   DirtyLeaveGuard,
   DocumentToolbar,
+  RecoveryBanner,
   SourceEditor,
   saveStatusText,
   saveStatusTone,
+  useAutosave,
   useCompileDocument,
   useRunBacktest,
   useSaveDocument,
@@ -51,6 +53,9 @@ export const StrategyRevisionPage = () => {
   const assist = useSchemaAssist(document);
   const { validateNow, validating } = useCompileDocument(document, dispatch);
   const backtest = useRunBacktest(document);
+  const autosave = useAutosave(document, dispatch, {
+    schemaVersion: assist.schemaVersion,
+  });
   const current =
     document.compiled !== null &&
     document.compiledVersion === document.sourceVersion
@@ -157,6 +162,9 @@ export const StrategyRevisionPage = () => {
                 {t("page.revision.viewPending")} ({requested.toUpperCase()})
               </p>
             )}
+            {autosave.recovery ? (
+              <RecoveryBanner recovery={autosave.recovery} />
+            ) : null}
             {view === stored.format ? (
               <SourceEditor
                 state={document}

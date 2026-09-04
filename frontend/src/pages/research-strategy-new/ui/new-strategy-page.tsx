@@ -3,9 +3,11 @@ import { useEffect } from "react";
 import {
   DirtyLeaveGuard,
   DocumentToolbar,
+  RecoveryBanner,
   SourceEditor,
   saveStatusText,
   saveStatusTone,
+  useAutosave,
   useCompileDocument,
   useRunBacktest,
   useSaveDocument,
@@ -36,6 +38,9 @@ export const NewStrategyPage = () => {
   const assist = useSchemaAssist(document);
   const { validateNow, validating } = useCompileDocument(document, dispatch);
   const backtest = useRunBacktest(document);
+  const autosave = useAutosave(document, dispatch, {
+    schemaVersion: assist.schemaVersion,
+  });
   const current =
     document.compiled !== null &&
     document.compiledVersion === document.sourceVersion
@@ -104,7 +109,16 @@ export const NewStrategyPage = () => {
           />
         }
         editor={
-          <SourceEditor state={document} dispatch={dispatch} assist={assist} />
+          <>
+            {autosave.recovery ? (
+              <RecoveryBanner recovery={autosave.recovery} />
+            ) : null}
+            <SourceEditor
+              state={document}
+              dispatch={dispatch}
+              assist={assist}
+            />
+          </>
         }
       />
       <DirtyLeaveGuard dirty={document.dirty && !leaving} />

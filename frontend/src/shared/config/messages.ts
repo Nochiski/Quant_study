@@ -365,6 +365,16 @@ const ko = {
   "ide.meta.schemaVersion": "schema",
   "ide.meta.sourceHash": "source hash",
   "ide.meta.specHash": "spec hash",
+  "recovery.title": "복구본",
+  "recovery.savedAt": "로컬 저장",
+  "recovery.diff": "서버 원본 대비 +{added} / −{removed} 줄",
+  "recovery.unverified":
+    "현재 schema 계약을 확인할 수 없어 안전하게 불러올 수 없습니다. 원문을 내려받으세요.",
+  "recovery.incompatible":
+    "복구본의 schema·형식 또는 기준 revision이 현재 문서와 달라 불러올 수 없습니다. 원문을 내려받으세요.",
+  "recovery.restore": "복구본 불러오기",
+  "recovery.discard": "복구본 삭제",
+  "recovery.download": "원문 다운로드",
   "problems.compileUnavailable":
     "검증 서버에 연결할 수 없어 이 텍스트를 확인하지 못했습니다. 잠시 후 다시 시도하세요. ({detail})",
 } as const;
@@ -742,6 +752,16 @@ export const messages = {
     "ide.meta.schemaVersion": "schema",
     "ide.meta.sourceHash": "source hash",
     "ide.meta.specHash": "spec hash",
+    "recovery.title": "Recovered draft",
+    "recovery.savedAt": "Saved locally",
+    "recovery.diff": "+{added} / −{removed} lines vs the server original",
+    "recovery.unverified":
+      "The current schema contract is unavailable, so this draft cannot be restored safely. Download the raw text.",
+    "recovery.incompatible":
+      "The draft schema, format, or base revision differs from this document. Download the raw text.",
+    "recovery.restore": "Restore draft",
+    "recovery.discard": "Discard draft",
+    "recovery.download": "Download raw text",
     "problems.compileUnavailable":
       "The validation server could not be reached, so this text is unverified. Try again shortly. ({detail})",
   } satisfies Record<MessageKey, string>,

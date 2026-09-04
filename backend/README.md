@@ -114,7 +114,7 @@ uv sync --extra parquet
 uv run pytest -q
 uv run ruff check src tests examples scripts
 uv run pyright
-uv run uvicorn strategy_workbench.bootstrap.facade.http:app --reload
+uv run server
 uv run python scripts/export_openapi.py openapi.json
 ```
 

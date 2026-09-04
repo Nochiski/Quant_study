@@ -121,15 +121,18 @@ uv run python examples/run_krx_demo.py --core rust      # Rust 코어로 같은 
 Strategy Workbench 개발 서버:
 
 ```bash
-cd backend
-uv run uvicorn strategy_workbench.bootstrap.facade.http:app --reload
+# 저장소 루트 · 터미널 1
+uv run server
 
-# 다른 터미널
-cd frontend
-npm ci
-npm run api:generate
+# 저장소 루트 · 터미널 2
+npm ci --prefix frontend
 npm run dev
 ```
+
+`uv run server`는 backend의 FastAPI/Uvicorn 개발 서버(`127.0.0.1:8000`, reload)를,
+`npm run dev`는 frontend의 Vite 개발 서버(`localhost:5173`)를 실행한다. 백엔드 옵션은
+그대로 전달된다(예: `uv run server --port 8123`). 기존처럼 `backend`와 `frontend`
+디렉터리 안에서 각각 실행해도 같은 owner의 설정을 사용한다.
 
 ## 검증: Zipline 대조
 

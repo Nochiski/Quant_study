@@ -28,8 +28,7 @@ export type SnippetInsertion = {
 };
 
 type ScopedFeedback = {
-  documentEpoch: number;
-  sourceStatus: SnippetCatalogSource["status"];
+  scope: object;
   value: SnippetFeedback;
 };
 
@@ -45,6 +44,12 @@ export const useSnippetInsertion = (
   const [scopedFeedback, setScopedFeedback] = useState<ScopedFeedback | null>(
     null,
   );
+  // A fresh token for every capability transition prevents ready -> unavailable -> ready from
+  // reviving feedback that belonged to the first ready interval.
+  const feedbackScope = useMemo(
+    () => ({ documentEpoch: state.documentEpoch, status: source.status }),
+    [source.status, state.documentEpoch],
+  );
   const snippets = useMemo(
     () => buildCanonicalSnippetCatalog(source),
     [source],
@@ -55,12 +60,11 @@ export const useSnippetInsertion = (
   const setFeedback = useCallback(
     (value: SnippetFeedback): void => {
       setScopedFeedback({
-        documentEpoch: state.documentEpoch,
-        sourceStatus: source.status,
+        scope: feedbackScope,
         value,
       });
     },
-    [source.status, state.documentEpoch],
+    [feedbackScope],
   );
   const insert = useCallback(
     (snippet: CanonicalSnippet): void => {
@@ -114,8 +118,7 @@ export const useSnippetInsertion = (
   );
 
   const feedback =
-    scopedFeedback?.documentEpoch === state.documentEpoch &&
-    scopedFeedback.sourceStatus === source.status
+    scopedFeedback?.scope === feedbackScope
       ? scopedFeedback.value
       : IDLE_FEEDBACK;
 

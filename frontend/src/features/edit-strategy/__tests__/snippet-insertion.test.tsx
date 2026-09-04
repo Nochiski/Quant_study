@@ -118,6 +118,8 @@ describe("snippet insertion coordinator", () => {
     expect(result.current.feedback.status).toBe("inserted");
     rerender({ documentEpoch: 1, status: "incompatible" });
     expect(result.current.feedback).toEqual({ status: "idle" });
+    rerender({ documentEpoch: 1, status: "ready" });
+    expect(result.current.feedback).toEqual({ status: "idle" });
   });
 });
 

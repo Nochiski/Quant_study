@@ -232,6 +232,9 @@ def _to_factor_observation(item: RawObservation) -> FactorObservation:
         as_of=item.as_of,
         security_id=item.security_id,
         fields=tuple(FactorFieldValue(field.field_id, field.value) for field in item.fields),
+        # Membership travels with the row so cross-sectional operators score members against
+        # members only (D-001); dropping non-members here would truncate time-series lookbacks.
+        universe_member=item.universe_member,
     )
 
 

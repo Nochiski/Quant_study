@@ -51,6 +51,8 @@ from strategy_workbench.domain.factor.facade.expression import (
     SavedFactorNode,
     TimeSeriesNode,
     TimeSeriesOperator,
+    UnaryNode,
+    UnaryOperator,
 )
 from strategy_workbench.domain.factor.facade.trace import trace_factor_graph
 from strategy_workbench.domain.portfolio.facade.construction import ExclusionReason
@@ -364,3 +366,73 @@ def test_backtest_consumes_the_same_truthful_tape_as_preview() -> None:
     # The run consumed the very tape the preview showed: same hash, same adapter snapshot.
     assert manifest["target_tape_hash"] == preview["tape"]["tape_hash"]
     assert manifest["data_snapshot_id"] == preview["tape"]["data_snapshot_id"]
+
+
+class _NonMemberNoisePort:
+    """Adds one *non-member* row per session carrying an extreme value (D-001 probe).
+
+    A correct pipeline scores members against members only, so every member's factor value and
+    composite score must be byte-identical to the run without these rows.
+    """
+
+    def __init__(self, value: float = 1e6) -> None:
+        self._value = value
+
+    def load_raw_observations(self, query: RawObservationQuery) -> RawObservationSet:
+        result = MockEquityDataAdapter.demo().load_raw_observations(query)
+        template = result.observations[0]
+        extra = tuple(
+            replace(
+                template,
+                as_of=as_of,
+                security_id="zzz.outsider",
+                universe_member=False,
+                fields=tuple(
+                    replace(f, value=self._value, available_date=as_of) for f in template.fields
+                ),
+                previous_weight=0.0,
+            )
+            for as_of in sorted({o.as_of for o in result.observations})
+        )
+        merged = tuple(
+            sorted((*result.observations, *extra), key=lambda o: (o.as_of, o.security_id))
+        )
+        return replace(result, observations=merged)
+
+
+def test_non_members_do_not_enter_the_member_cross_section() -> None:
+    zscored = replace(
+        _momentum(),
+        graph=FactorGraph(
+            nodes=(
+                FieldNode("close", "price.close", "field"),
+                UnaryNode("z", UnaryOperator.ZSCORE, "close", "unary"),
+            ),
+            output_node_id="z",
+        ),
+    )
+    spec = _spec(zscored)
+
+    clean = _service().run_pipeline(PortfolioPreviewRequest(spec))
+    noisy = _service(_NonMemberNoisePort()).run_pipeline(PortfolioPreviewRequest(spec))
+
+    def member_values(result: object) -> dict[tuple[date, str], float | None]:
+        return {
+            (o.as_of, o.security_id): o.factor_values[0].value
+            for o in result.observations  # pyright: ignore[reportAttributeAccessIssue]  # reason: PortfolioPipelineResult
+            if o.universe_member
+        }
+
+    assert member_values(clean), "the probe ran on an empty member panel"
+    assert member_values(noisy) == member_values(clean)
+
+    # The extra row is recorded as a NOT_IN_UNIVERSE candidate, so the tape hash legitimately
+    # differs; what must not move is the selection and the weights.
+    def targets(result: object) -> list[tuple[date, tuple[object, ...]]]:
+        return [
+            (frame.signal_as_of, tuple((t.security_id, t.weight) for t in frame.targets))
+            for frame in result.preview.tape.frames  # pyright: ignore[reportAttributeAccessIssue]  # reason: PortfolioPipelineResult
+        ]
+
+    assert any(entry[1] for entry in targets(clean)), "the probe produced no targets"
+    assert targets(noisy) == targets(clean)

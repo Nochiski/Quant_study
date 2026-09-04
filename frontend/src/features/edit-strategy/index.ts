@@ -63,6 +63,7 @@ export { ConflictBanner } from "./ui/conflict-banner";
 export { SourceEditor } from "./ui/source-editor";
 export { StrategyOutline } from "./ui/strategy-outline";
 export { ContractInspector } from "./ui/contract-inspector";
+export { ExecutionPlanPanel } from "./ui/execution-plan-panel";
 export {
   projectContractField,
   projectContractInspector,

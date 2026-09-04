@@ -22,6 +22,13 @@ jobs:
       - run: uv sync --locked --extra parquet
       - run: uv run maturin develop --manifest-path rust/backtest_core/Cargo.toml --release
       - run: uv run pytest -q
+      - name: Verify root server contract
+        working-directory: .
+        run: |
+          uv lock --check
+          uv run --locked python -m unittest discover -s tools/tests -p 'test_*.py'
+          uv run --project backend ruff check tools
+          uv run --project backend pyright tools
       - run: uv run ruff check src tests examples scripts
       - run: uv run pyright
       - run: cargo fmt --manifest-path rust/backtest_core/Cargo.toml -- --check
@@ -54,3 +61,22 @@ jobs:
       - run: npm run lint
       - run: npm run test
       - run: npm run build
+      - name: Verify root frontend contract
+        working-directory: .
+        shell: bash
+        run: |
+          npm ci
+          setsid npm run dev -- --host 127.0.0.1 --port 41730 > "$RUNNER_TEMP/root-vite.log" 2>&1 &
+          dev_pid=$!
+          trap 'kill -INT -- -"$dev_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:41730/ > /dev/null; then
+              exit 0
+            fi
+            if ! kill -0 "$dev_pid" 2>/dev/null; then
+              break
+            fi
+            sleep 0.25
+          done
+          cat "$RUNNER_TEMP/root-vite.log"
+          exit 1

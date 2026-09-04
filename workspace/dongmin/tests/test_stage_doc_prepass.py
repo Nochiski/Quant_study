@@ -5,6 +5,7 @@ import sqlite3
 import zipfile
 from pathlib import Path
 
+import pytest
 from stage import doc_prepass
 from test_stage_doc_parsers import AUDIT_XML, FULL_G1, HTML_DOC
 
@@ -96,3 +97,45 @@ def test_prepass_clears_stale_shards_and_honours_rcept_list(tmp_path: Path) -> N
     assert s.n_docs == 1 and s.modes == {"ok": 1}
     assert not (cache / "stg_doc_meta" / "year=1999.jsonl").exists()
     assert not (cache / "stg_doc_meta" / "year=2024_q1.jsonl").exists()   # 목록 밖은 샤드 없음
+
+
+def test_scan_lists_documents_whose_text_matches(tmp_path: Path) -> None:
+    docs, db = _setup(tmp_path)
+    assert doc_prepass.scan(db, docs, r"감사보고서", workers=1) == ["20200327001141"]
+    assert doc_prepass.scan(db, docs, r"주식분할결정", workers=1) == ["20240311901285"]
+    assert doc_prepass.scan(db, docs, r"없는말", workers=1) == []
+
+
+def test_summarize_from_cache_agrees_with_run(tmp_path: Path) -> None:
+    docs, db = _setup(tmp_path)
+    s = doc_prepass.run(db, docs, tmp_path / "cache", snapshot_id="snap_t", workers=1)
+    s2, extra = doc_prepass.summarize_from_cache(tmp_path / "cache" / "snap_t", "snap_t",
+                                                 s.input_hash, s.d0_zip_missing)
+    assert (s2.n_docs, s2.modes, s2.tables, s2.status) == (s.n_docs, s.modes, s.tables, s.status)
+    assert s2.d10_text_equal_violations == s.d10_text_equal_violations
+    assert "unknown_tags_top" in extra
+
+
+def test_repair_replaces_only_listed_documents_and_recomputes_summary(tmp_path: Path) -> None:
+    docs, db = _setup(tmp_path)
+    cache = tmp_path / "cache"
+    s0 = doc_prepass.run(db, docs, cache, snapshot_id="snap_t", workers=1)
+    # 2020 문서에 절을 하나 더 넣어 "파서/원문이 바뀐" 상황을 만든다
+    xml = FULL_G1.replace("</BODY>", '<SECTION-1><TITLE ATOC="Y">새 절</TITLE></SECTION-1></BODY>')
+    (docs / "2020" / "20200327001141.zip").write_bytes(
+        _zip({"20200327001141_00760.xml": AUDIT_XML.encode("cp949"),
+              "20200327001141.xml": xml.encode("cp949")}))
+    s1 = doc_prepass.repair(db, docs, cache, "snap_t", {"20200327001141"}, workers=1)
+    assert s1.tables["stg_doc_section"] == s0.tables["stg_doc_section"] + 1
+    assert s1.tables["stg_doc_meta"] == 3 and s1.n_docs == 2 and s1.modes == {"ok": 1, "html": 1}
+    assert s1.input_hash == s0.input_hash and len(s1.repairs) == 1
+    assert s1.repairs[0]["n_docs"] == 1 and s1.status == "ok"
+    html_rows = (cache / "snap_t" / "stg_doc_meta" / "year=2024_q1.jsonl").read_text().splitlines()
+    assert len(html_rows) == 1                                   # 목록 밖 문서는 그대로
+    sec = (cache / "snap_t" / "stg_doc_section" / "year=2020_q1.jsonl").read_text().splitlines()
+    assert sum(1 for line in sec if "새 절" in line) == 1
+    assert not (cache / "snap_t" / "_repair").exists()
+    summary = json.loads((cache / "snap_t" / "summary.json").read_text())
+    assert summary["repairs"][0]["parser_version"] and summary["tables"] == s1.tables
+    with pytest.raises(ValueError, match="outside"):
+        doc_prepass.repair(db, docs, cache, "snap_t", {"20240100000000"}, workers=1)

@@ -20,6 +20,7 @@ from html.parser import HTMLParser
 
 from .doc_vocab import DocVocab
 
+PARSER_VERSION = "p1.3"     # 정제·파싱 규칙이 바뀌면 올린다 — 프리패스 summary.json 에 기록
 STD_ENTITIES = frozenset({"amp", "lt", "gt", "quot", "apos"})
 
 

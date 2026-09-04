@@ -646,10 +646,11 @@ editing
 
 도메인 중립 wrapper만 `shared/ui`, StrategySpec 연결은 `features/edit-strategy`에 둔다.
 
-### P3-03 — 구조 검증과 자동완성
+### P3-03 — Schema 탐색 completion·hover
 
-- backend runtime schema 기반 completion/hover
-- required/type/enum marker
+- backend runtime schema 기반 completion/hover (`$ref`/`oneOf` + `kind` discriminator 해소)
+- required/type/enum/unknown-key marker는 frontend가 계산하지 않고 P3-04 backend diagnostic이 붙인다 (editor ADR D2)
+- 한글 조합 중(`view.composing`)에는 parse/backend 호출을 보류한다
 - Factor `kind` 변경에 따른 허용 field 변경
 - Dataset field와 Factor Registry completion
 - frontend 수기 허용 목록 금지
@@ -667,6 +668,7 @@ Acceptance:
 - 응답 역전 시 오래된 diagnostic이 나타나지 않는다.
 - invalid source에서 preview 요청이 나가지 않는다.
 - 문제 선택 시 정확한 source 위치로 이동한다.
+- 한글 조합 중에는 backend validate를 호출하지 않는다.
 
 ### P3-05 — Toolbar·Save·Backtest cutover
 

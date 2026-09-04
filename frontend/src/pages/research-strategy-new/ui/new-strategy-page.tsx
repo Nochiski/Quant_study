@@ -5,12 +5,14 @@ import {
   DirtyLeaveGuard,
   DocumentToolbar,
   ExecutionPlanPanel,
+  FactorGraphPanel,
   RecoveryBanner,
   SnippetCatalog,
   SourceEditor,
   StrategyProjectionPanel,
   StrategyOutline,
   PROJECTION_VIEWS,
+  currentDiagnostics,
   projectStrategySpec,
   saveStatusText,
   saveStatusTone,
@@ -50,11 +52,11 @@ export const NewStrategyPage = () => {
   const { save, status, canSave } = useSaveDocument(document, dispatch);
   const assist = useSchemaAssist(document);
   const { validateNow, validating } = useCompileDocument(document, dispatch);
-  const backtest = useRunBacktest(document);
   const autosave = useAutosave(document, dispatch, {
     schemaVersion: assist.schemaVersion,
   });
   const executionPlans = useExecutionPlans(document, assist.inspectorSource);
+  const backtest = useRunBacktest(document, executionPlans);
   const current =
     document.compiled !== null &&
     document.compiledVersion === document.sourceVersion
@@ -66,10 +68,17 @@ export const NewStrategyPage = () => {
   const implemented = availableViews.includes(requested);
   const view: StrategyView = implemented ? requested : document.format;
   const selectPointer = useCallback(
-    (path: string | undefined) => {
+    (
+      path: string | undefined,
+      origin: "cursor" | "outline" | "outline-collapse" | "graph" = "outline",
+    ) => {
       void navigate({
         to: ROUTE,
-        search: { ...search, path, view: undefined },
+        search: {
+          ...search,
+          path,
+          view: origin === "outline" ? undefined : search.view,
+        },
         replace: true,
       });
     },
@@ -78,6 +87,7 @@ export const NewStrategyPage = () => {
   const outline = useOutlineNavigation({
     state: document,
     schema: assist.schema,
+    revealSelectedPointer: view === document.format,
     selectedPointer: search.path,
     onSelectedPointer: selectPointer,
   });
@@ -171,6 +181,15 @@ export const NewStrategyPage = () => {
         projections={{
           json: <StrategyProjectionPanel projection={projection} view="json" />,
           form: <StrategyProjectionPanel projection={projection} view="form" />,
+          graph: (
+            <FactorGraphPanel
+              state={executionPlans}
+              diagnostics={currentDiagnostics(document)}
+              selectedPointer={search.path}
+              onSelectPointer={(pointer) => selectPointer(pointer, "graph")}
+              onOpenSource={(pointer) => selectPointer(pointer, "outline")}
+            />
+          ),
         }}
         outline={
           <StrategyOutline
@@ -200,7 +219,7 @@ export const NewStrategyPage = () => {
           <ExecutionPlanPanel
             state={executionPlans}
             selectedPointer={search.path}
-            onSelectPointer={selectPointer}
+            onSelectPointer={(pointer) => selectPointer(pointer, "outline")}
           />
         }
         editor={

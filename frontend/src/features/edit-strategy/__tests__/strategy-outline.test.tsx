@@ -283,6 +283,47 @@ describe("Strategy Outline projection", () => {
     expect(onSelectedPointer).toHaveBeenCalledTimes(3);
   });
 
+  it("does not focus a hidden source editor until a projection opens that pointer", () => {
+    const focus = vi.fn();
+    const setSelection = vi.fn();
+    const scrollTo = vi.fn();
+    const onSelectedPointer = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ revealSelectedPointer }: { revealSelectedPointer: boolean }) =>
+        useOutlineNavigation({
+          state: parsedState(),
+          schema: SCHEMA,
+          revealSelectedPointer,
+          selectedPointer: "/risk/max_name_weight",
+          onSelectedPointer,
+        }),
+      { initialProps: { revealSelectedPointer: false } },
+    );
+    const editor: CodeEditorHandle = {
+      getText: () => SOURCE,
+      setText: vi.fn(),
+      replaceRange: vi.fn(),
+      getSelection: () => ({ from: 0, to: 0 }),
+      setSelection,
+      offsetToPosition: () => ({ line: 0, column: 0 }),
+      positionToOffset: () => 0,
+      scrollTo,
+      focus,
+      getHistoryState: () => null,
+      restoreHistoryState: vi.fn(),
+    };
+
+    act(() => result.current.onEditorReady(editor));
+    expect(focus).not.toHaveBeenCalled();
+    expect(setSelection).not.toHaveBeenCalled();
+
+    rerender({ revealSelectedPointer: true });
+    expect(focus).toHaveBeenCalledTimes(1);
+    expect(setSelection).toHaveBeenCalledTimes(1);
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+    expect(onSelectedPointer).not.toHaveBeenCalled();
+  });
+
   it("lets an explicit route selection win and rejects skipped-version cursor offsets", () => {
     const first = parsedState();
     const secondSource = `${SOURCE}extra_one: true\n`;

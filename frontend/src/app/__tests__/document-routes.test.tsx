@@ -84,6 +84,56 @@ const document = (
 });
 
 const STORED = 'schema_version: "1.0"\ntitle: 퀄리티 모멘텀\n';
+const GRAPH_SOURCE = `schema_version: "1.0"
+title: 그래프 전략
+factors:
+  factors:
+    - factor_id: momentum
+      label: 모멘텀
+      weight: 1.0
+      direction: high
+      graph:
+        nodes:
+          - node_id: close
+            kind: field
+            field_id: price.close
+          - node_id: mom_252
+            kind: time_series
+            operator: momentum
+            input_node_id: close
+            window: 252
+            lag: 0
+        output_node_id: mom_252
+        missing_policy: drop
+`;
+const graphSpec = (strategyId: string, revision: number) => ({
+  ...spec(strategyId, revision, "그래프 전략"),
+  factors: {
+    factors: [
+      {
+        factor_id: "momentum",
+        label: "모멘텀",
+        weight: 1,
+        direction: "high",
+        graph: {
+          nodes: [
+            { node_id: "close", kind: "field", field_id: "price.close" },
+            {
+              node_id: "mom_252",
+              kind: "time_series",
+              operator: "momentum",
+              input_node_id: "close",
+              window: 252,
+              lag: 0,
+            },
+          ],
+          output_node_id: "mom_252",
+          missing_policy: "drop",
+        },
+      },
+    ],
+  },
+});
 const SIGNAL_SCHEMA_RESPONSE = {
   schema: {
     type: "object",
@@ -122,6 +172,7 @@ const FACTOR = {
 };
 const posted: unknown[] = [];
 const started: Record<string, unknown>[] = [];
+const explainedGraphs: unknown[] = [];
 const acceptedRun = (runId = "run-7") => ({
   run: {
     run_id: runId,
@@ -306,6 +357,7 @@ afterEach(() => {
   server.resetHandlers();
   posted.length = 0;
   started.length = 0;
+  explainedGraphs.length = 0;
 });
 afterAll(() => server.close());
 
@@ -957,6 +1009,184 @@ describe("StrategySpec JSON and Form projections (P4-06)", () => {
     for (const run of screen.getAllByRole("button", { name: /백테스트 실행/ }))
       expect(run).toBeDisabled();
   });
+});
+
+describe("FactorGraph read-only projection (P4-07)", () => {
+  const graphHandlers = () => [
+    http.post(
+      `${API}/api/v1/strategy-documents/compile`,
+      () => {
+        const compiledSpec = graphSpec("draft", 0);
+        const { identity, ...canonicalSpec } = compiledSpec;
+        return HttpResponse.json({
+          format: "yaml",
+          source_hash: "b".repeat(64),
+          schema_version: "1.0",
+          spec: compiledSpec,
+          canonical_json: JSON.stringify({
+            ...canonicalSpec,
+            schema_version: identity.schema_version,
+          }),
+          spec_hash: "7".repeat(64),
+          diagnostics: [],
+        });
+      },
+    ),
+    http.get(`${API}/api/v1/strategy-documents/schema`, () =>
+      HttpResponse.json({
+        schema: RUNTIME_SCHEMA,
+        schema_hash: "h".repeat(64),
+        schema_version: "1.0",
+      }),
+    ),
+    http.get(`${API}/api/v1/equity/catalog`, () =>
+      HttpResponse.json({
+        snapshot: {
+          snapshot_id: "snap",
+          schema_version: "1.0",
+          built_at: "2026-09-05T00:00:00Z",
+          source: "route-test",
+          point_in_time: true,
+          dataset_revisions: [],
+        },
+        total: 0,
+        page: 1,
+        page_size: 100,
+        page_count: 0,
+        fields: [],
+        facets: { dataset_ids: [], units: [], frequencies: [] },
+      }),
+    ),
+    http.post(`${API}/api/v1/factors/explain`, async ({ request }) => {
+      explainedGraphs.push(await request.json());
+      return HttpResponse.json({
+        registry_version: "v1",
+        data_snapshot_id: "snap",
+        narrative: [],
+        validation: {
+          valid: true,
+          issues: [],
+          node_contracts: [
+            {
+              node_id: "close",
+              value_type: "numeric_series",
+              unit: "KRW",
+              minimum_history_sessions: 1,
+            },
+            {
+              node_id: "mom_252",
+              value_type: "numeric_series",
+              unit: "ratio",
+              minimum_history_sessions: 252,
+            },
+          ],
+          minimum_history_sessions: 252,
+          required_field_ids: ["price.close"],
+        },
+        plan: {
+          graph_hash: "g".repeat(64),
+          plan_hash: "p".repeat(64),
+          registry_version: "v1",
+          output_node_id: "mom_252",
+          steps: [
+            {
+              sequence: 1,
+              node_id: "close",
+              operation: "field",
+              input_node_ids: [],
+              output_type: "numeric_series",
+              output_unit: "KRW",
+              minimum_history_sessions: 1,
+            },
+            {
+              sequence: 2,
+              node_id: "mom_252",
+              operation: "time_series.momentum",
+              input_node_ids: ["close"],
+              output_type: "numeric_series",
+              output_unit: "ratio",
+              minimum_history_sessions: 252,
+            },
+          ],
+          required_field_ids: ["price.close"],
+          referenced_factor_ids: [],
+          referenced_subgraph_ids: [],
+          minimum_history_sessions: 252,
+          missing_policy: "drop",
+          as_of_policy: "available_date_lte_as_of",
+        },
+      });
+    }),
+  ];
+
+  it.each(["/research/strategies/new", "/research/strategies/s1/revisions/2"])(
+    "renders the same backend-owned DAG on %s",
+    async (route) => {
+      server.use(...graphHandlers());
+      const user = userEvent.setup();
+      mount(`${route}?view=graph`);
+      await screen.findByLabelText("FactorGraph DAG");
+      await waitFor(() => expect(explainedGraphs).toHaveLength(1));
+      const node = await screen.findByRole("button", {
+        name: "그래프 노드 선택: mom_252",
+      });
+      const graph = screen.getByLabelText("FactorGraph DAG");
+      expect(within(graph).getByText("time_series.momentum")).toBeVisible();
+      expect(
+        within(graph).getAllByText("numeric_series").length,
+      ).toBeGreaterThan(0);
+      expect(within(graph).getAllByText("ratio").length).toBeGreaterThan(0);
+      expect(within(graph).getAllByText("252 세션").length).toBeGreaterThan(0);
+      await user.click(node);
+    },
+    15_000,
+  );
+
+  it("keeps graph selection in the URL, then opens the exact YAML node", async () => {
+    server.use(
+      ...graphHandlers(),
+      http.get(
+        `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
+        () =>
+          HttpResponse.json({
+            ...document("s1", 2, GRAPH_SOURCE, "그래프 전략"),
+            spec: graphSpec("s1", 2),
+          }),
+      ),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2?view=graph");
+    await screen.findByLabelText("FactorGraph DAG");
+    const node = await screen.findByRole("button", {
+      name: "그래프 노드 선택: mom_252",
+    });
+    await user.click(node);
+    await waitFor(() => {
+      expect(history.location.search).toContain("view=graph");
+      expect(history.location.search).toContain(
+        "path=%2Ffactors%2Ffactors%2F0%2Fgraph%2Fnodes%2F1",
+      );
+    });
+
+    const nodeCard = globalThis.document.querySelector(
+      '[data-node-id="mom_252"]',
+    );
+    await user.click(
+      within(nodeCard as HTMLElement).getByText("소스에서 열기"),
+    );
+    await waitFor(() =>
+      expect(history.location.search).not.toContain("view=graph"),
+    );
+    const view = await editor();
+    await waitFor(() =>
+      expect(
+        view.state.sliceDoc(
+          view.state.selection.main.from,
+          view.state.selection.main.to,
+        ),
+      ).toContain("node_id: mom_252"),
+    );
+  }, 15_000);
 });
 
 describe("backtest from the editor (P3-05)", () => {

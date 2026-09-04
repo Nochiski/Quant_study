@@ -9,9 +9,10 @@ export const STRATEGY_VIEWS = [
 
 export type StrategyView = (typeof STRATEGY_VIEWS)[number];
 
-/** Source plus the read-only projections available after P4-06. */
+/** Source plus the read-only projections available through P4-07. */
 export const PROJECTION_VIEWS = [
   "yaml",
   "json",
   "form",
+  "graph",
 ] as const satisfies readonly StrategyView[];

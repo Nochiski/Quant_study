@@ -1,0 +1,337 @@
+.factor-graph,
+.factor-graph__state {
+  min-height: 100%;
+  padding: var(--space-4);
+  color: var(--text);
+}
+
+.factor-graph {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+  background:
+    linear-gradient(
+      color-mix(in srgb, var(--border) 55%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--border) 55%, transparent) 1px,
+      transparent 1px
+    ),
+    var(--surface-canvas);
+  background-size: 24px 24px;
+}
+
+.factor-graph__toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-large);
+  background: color-mix(in srgb, var(--surface-panel) 94%, transparent);
+}
+
+.factor-graph__toolbar > div,
+.factor-graph__toolbar label {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.factor-graph__toolbar > div span,
+.factor-graph__toolbar label span {
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.factor-graph__toolbar label {
+  min-width: min(360px, 50%);
+}
+
+.factor-graph__toolbar select {
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-panel);
+  color: var(--text);
+  font: inherit;
+}
+
+.factor-graph__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-large);
+  background: var(--surface-panel);
+}
+
+.factor-graph__summary div {
+  display: grid;
+  gap: 2px;
+}
+
+.factor-graph__summary dt {
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.factor-graph__summary dd {
+  margin: 0;
+  font-size: var(--text-size-small);
+}
+
+.factor-graph__canvas {
+  min-width: 0;
+  padding: var(--space-4);
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-large);
+  background: color-mix(in srgb, var(--surface-canvas) 88%, transparent);
+}
+
+.factor-graph__canvas:focus-visible,
+.factor-graph button:focus-visible,
+.factor-graph select:focus-visible,
+.factor-graph__state button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.factor-graph__canvas > ol {
+  display: grid;
+  grid-auto-columns: minmax(250px, 1fr);
+  grid-auto-flow: column;
+  gap: var(--space-4);
+  min-width: max-content;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.factor-graph__node {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto auto 1fr auto auto;
+  gap: var(--space-3);
+  width: 250px;
+  min-height: 270px;
+  padding: var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-large);
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-panel);
+}
+
+.factor-graph__node[data-selected="true"] {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 2px var(--accent-soft),
+    var(--shadow-panel);
+}
+
+.factor-graph__node--conditional {
+  border-style: double;
+  border-width: 3px;
+}
+
+.factor-graph__node--saved_factor,
+.factor-graph__node--saved_subgraph {
+  background: color-mix(
+    in srgb,
+    var(--status-info-soft) 25%,
+    var(--surface-panel)
+  );
+}
+
+.factor-graph__node > header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: start;
+}
+
+.factor-graph__sequence {
+  color: var(--text-subtle);
+  font-family: var(--font-mono);
+  font-size: var(--text-size-small);
+}
+
+.factor-graph__node-select {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.factor-graph__node-select strong,
+.factor-graph__node-select code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.factor-graph__node-select code {
+  color: var(--accent);
+  font-size: var(--text-size-small);
+}
+
+.factor-graph__inputs > span,
+.factor-graph__root {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.factor-graph__inputs ul,
+.factor-graph__node-issues,
+.factor-graph__diagnostics {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.factor-graph__inputs li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.factor-graph__edge {
+  color: var(--accent);
+}
+
+.factor-graph__inputs button {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface-raised);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.factor-graph__inputs button:disabled {
+  cursor: not-allowed;
+}
+
+.factor-graph__inputs button > span,
+.factor-graph__inputs small {
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.factor-graph__details {
+  display: grid;
+  gap: var(--space-1);
+  align-content: start;
+  margin: 0;
+}
+
+.factor-graph__details div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.factor-graph__details dt {
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.factor-graph__details dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--text-size-small);
+  text-align: right;
+}
+
+.factor-graph__node > footer {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border);
+}
+
+.factor-graph__contract {
+  display: grid;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.factor-graph__node > footer button,
+.factor-graph__state button,
+.factor-graph__diagnostics button {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface-raised);
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--text-size-small);
+  cursor: pointer;
+}
+
+.factor-graph__node-issues li,
+.factor-graph__diagnostics li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.factor-graph__node-issues {
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--status-error);
+}
+
+.factor-graph__diagnostics {
+  padding: var(--space-3);
+  border: 1px solid var(--status-error);
+  border-radius: var(--radius-medium);
+  background: var(--status-error-soft);
+}
+
+.factor-graph__state {
+  color: var(--text-muted);
+}
+
+.factor-graph__state > p {
+  max-width: 70ch;
+}
+
+@media (max-width: 760px) {
+  .factor-graph__toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .factor-graph__toolbar label {
+    min-width: 0;
+  }
+}

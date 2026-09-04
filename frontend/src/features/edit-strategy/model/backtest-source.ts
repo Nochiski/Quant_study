@@ -1,5 +1,6 @@
 import type { InlineDraft, SavedRevisionReference } from "../../../shared/api";
 import { currentCompile, type DocumentState } from "./document-state";
+import type { ExecutionPlansState } from "./use-execution-plans";
 
 /**
  * What a backtest started from this editor would run (WORKFLOW P3-05):
@@ -16,7 +17,10 @@ import { currentCompile, type DocumentState } from "./document-state";
 export type BacktestSourceDecision =
   | { kind: "saved_revision"; reference: SavedRevisionReference }
   | { kind: "inline_draft"; draft: InlineDraft }
-  | { kind: "blocked"; reason: "empty" | "invalid" | "stale" | "composing" };
+  | {
+      kind: "blocked";
+      reason: "empty" | "invalid" | "stale" | "composing" | "factor-plan";
+    };
 
 export const decideBacktestSource = (
   state: DocumentState,
@@ -56,4 +60,25 @@ export const decideBacktestSource = (
       source_hash: compiled.sourceHash || null,
     },
   };
+};
+
+/**
+ * Adds the metadata-aware FactorGraph gate to a document-owned source decision. A strategy with
+ * factors runs only after the backend explain contract returns one valid execution plan per
+ * factor. Empty-factor documents preserve the existing source decision.
+ */
+export const gateBacktestSourceWithFactorPlans = (
+  decision: BacktestSourceDecision,
+  plans: ExecutionPlansState,
+): BacktestSourceDecision => {
+  if (decision.kind === "blocked" || plans.status === "empty") return decision;
+  if (
+    plans.status === "ready" &&
+    plans.factors.every(
+      (factor) =>
+        factor.explanation.validation.valid && factor.explanation.plan !== null,
+    )
+  )
+    return decision;
+  return { kind: "blocked", reason: "factor-plan" };
 };

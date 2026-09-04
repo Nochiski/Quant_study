@@ -173,6 +173,15 @@ describe("parseSource", () => {
     expect(parseSource(deep, "yaml").diagnostics[0]?.code).toBe(
       "yaml.too_deep",
     );
+    const deepKey = `? ${"[".repeat(33)}x${"]".repeat(33)}\n: value\n`;
+    expect(parseSource(deepKey, "yaml").diagnostics[0]?.code).toBe(
+      "yaml.too_deep",
+    );
+    for (const stream of [`${deep}---\nb: 2\n`, `b: 2\n---\n${deep}`]) {
+      expect(parseSource(stream, "yaml").diagnostics[0]?.code).toBe(
+        "yaml.too_deep",
+      );
+    }
   });
 
   it("rejects a raw lone surrogate before applying the byte limit", () => {

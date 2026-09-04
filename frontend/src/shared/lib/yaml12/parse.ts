@@ -147,6 +147,7 @@ const rejectDepth = (node: Node | null, lines: LineIndex, depth = 0): void => {
   }
   if (isMap(node)) {
     for (const pair of node.items as Pair<Node, Node | null>[]) {
+      rejectDepth(pair.key, lines, depth + 1);
       rejectDepth(pair.value, lines, depth + 1);
     }
   } else if (isSeq(node)) {
@@ -251,7 +252,6 @@ const rejectPolicy = (doc: Document, lines: LineIndex): void => {
   // Same order as the backend: syntax → directive → tag → tree policy (anchor/alias, merge
   // key, non-string key, number shapes) → duplicate key. Duplicates are the *last* check so a
   // document that also breaks an earlier rule reports that rule, as the backend does.
-  rejectDepth(doc.contents as Node | null, lines);
   for (const error of doc.errors) {
     if (error.code !== "DUPLICATE_KEY") {
       throw new Yaml12Rejected(
@@ -398,6 +398,11 @@ const composeDocument = (text: string, lines: LineIndex): Document => {
   });
   if (docs.length === 0) {
     throw new Yaml12Rejected("not_a_mapping", "root=empty");
+  }
+  // The backend scanner sees every document and enforces depth before composition decides that
+  // the stream contains more than one document.
+  for (const candidate of docs) {
+    rejectDepth(candidate.contents as Node | null, lines);
   }
   if (docs.length > 1) {
     throw new Yaml12Rejected(

@@ -49,6 +49,33 @@ def test_sanitize_repairs_doubled_attribute_quote_but_leaves_empty_attributes() 
     assert s.n_attr_repair == 1
 
 
+def test_sanitize_repairs_doubled_closing_quote_too() -> None:
+    # Y2040 실측(한진 2026 사업보고서): `ATITLE="...shares"" VALIGN=` — 닫는 따옴표가 겹친 형태
+    s = pd_.sanitize('<TD ATITLE="preferred shares"" VALIGN="MIDDLE" W=""><P>a="b"" c</P>', V.tags)
+    assert s.text == '<TD ATITLE="preferred shares" VALIGN="MIDDLE" W=""><P>a="b" c</P>'
+    assert s.n_attr_repair == 2          # 본문 텍스트의 같은 꼴도 바뀌지만 D10 이 잡는다
+
+
+@pytest.mark.parametrize("broken,fixed", [
+    ('<TE ENG="" Hyosung Vietnam Co., Ltd."" VALIGN="M">v</TE>',
+     '<TE ENG=" Hyosung Vietnam Co., Ltd." VALIGN="M">v</TE>'),
+    ('<TE ENG="" KDB General Loan" VALIGN="M"/>', '<TE ENG=" KDB General Loan" VALIGN="M"/>'),
+    ('<TH ENG="" Kookmin Bank Member">국민은행</TH>',
+     '<TH ENG=" Kookmin Bank Member">국민은행</TH>'),
+    ('<TE ENG=""Maximum exposure">v</TE>', '<TE ENG="Maximum exposure">v</TE>'),
+    ('<TD ENG="NYU 1ST CO.,LTD.("Investor)" WIDTH="291">x</TD>',
+     '<TD ENG="NYU 1ST CO.,LTD.(&quot;Investor)" WIDTH="291">x</TD>'),
+    ('<TU AUNIT="" WIDTH="5"/>', '<TU AUNIT="" WIDTH="5"/>'),          # 빈 속성은 그대로
+    ('<TD W=""><P>x</P></TD>', '<TD W=""><P>x</P></TD>'),
+    ('<TD A="x" B="y">a "b" c</TD>', '<TD A="x" B="y">a "b" c</TD>'),   # 정상 속성·본문 따옴표
+])
+def test_sanitize_attribute_quote_repair_forms_seen_in_2025_2026(broken: str, fixed: str) -> None:
+    s = pd_.sanitize(broken, V.tags)
+    assert s.text == fixed
+    doc = f'<DOCUMENT><BODY><TITLE ATOC="Y">t</TITLE>{s.text}</BODY></DOCUMENT>'
+    assert pd_.parse_tree(doc, V.tags).mode is pd_.ParseMode.OK
+
+
 def test_sanitize_strips_control_characters() -> None:
     s = pd_.sanitize("<P>a\x0bb\x1fc</P>", V.tags)
     assert s.text == "<P>abc</P>" and s.n_ctrl == 2
@@ -135,6 +162,7 @@ def test_member_role_and_html_detection() -> None:
     assert pd_.member_role("20200327001141.xml", "20200327001141") == "main"
     assert pd_.member_role("/20160329000533_00760.xml", "20160329000533") == "audit"
     assert pd_.member_role("20200327001141_00761.xml", "20200327001141") == "audit_cons"
+    assert pd_.member_role("_20240430000953.xml", "20240430000953") == "main"   # 실측 1건
     assert pd_.member_role("readme.txt", "20200327001141") == "other"
     assert pd_.is_html("<html>\n <head>") and not pd_.is_html(G1_HEAD)
 
@@ -275,6 +303,18 @@ def test_table_census_counts_by_kind_and_lists_class_names() -> None:
     assert json.loads(c["xbrl_aclass"] or "[]") == ["{XBRL}BS_S", "{XBRL}IS_S1"]
     assert json.loads(c["form_aclass"] or "[]") == ["COVER", "TOT_STK"]
     assert str(c["n_elements"]).isdigit() and c["toc_n"] == "2"      # COVER-TITLE + I
+
+
+def test_text_equal_survives_gt_inside_attributes_and_crlf_line_ends() -> None:
+    # 전량 실측(D10 위반 23건): 속성값 안의 `>` 와 CRLF 줄끝은 트리가 아니라 검증기 쪽 문제였다
+    xml = DOC_MIN.replace("<TD>x</TD>", '<TD ATITLE="5. 실적-<Life Science>" W="1">x</TD>')
+    xml = xml.replace("<TITLE ATOC=\"Y\">I. 회사의 개요</TITLE>",
+                      "<TITLE ATOC=\"Y\">I. 회사의\r\n개요</TITLE>")
+    san = pd_.sanitize(xml, V.tags)
+    r = pd_.parse_tree(san.text, V.tags)
+    assert r.mode is pd_.ParseMode.OK and r.root is not None
+    assert pd_.text_equal(san.text, r.root, lenient=False)
+    assert pd_.text_of(_find(r.root, ".//TD")) == "x"
 
 
 def _zip(members: dict[str, bytes], dirs: tuple[str, ...] = ()) -> bytes:

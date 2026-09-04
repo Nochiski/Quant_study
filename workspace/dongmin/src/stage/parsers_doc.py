@@ -48,7 +48,12 @@ _CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 _ENT_RE = re.compile(r"&([A-Za-z][\w.-]*);")
 _BARE_AMP_RE = re.compile(r"&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)")
 _TOKEN_RE = re.compile(r"<(/?)([A-Za-z][A-Za-z0-9:_.-]*)")     # §1.6 Name 토큰 정의
-_ATTR_REPAIR_RE = re.compile(r'=""(?=[^\s"<>])([^"<>=]*)"')
+# 규칙 5 — 속성 따옴표 복구(Y510·Y2040 실측 세 꼴). 값 클래스가 `=` 를 막아 빈 속성은 안 건드린다.
+#  a) `=""값"` · `=""값""` · `="" 값""` · `="" 값"` → `="값"`   b) `="값""` → `="값"`
+#  c) 값 안의 홑 `"` — `="X("Y)"` → `="X(&quot;Y)"` (태영건설 4건)
+_ATTR_REPAIR_RE = re.compile(r'=""([^"<>=]*)""?(?=[\s/>])')
+_ATTR_REPAIR2_RE = re.compile(r'(?<==")([^"<>=]+)""(?=[\s/>])')
+_ATTR_REPAIR3_RE = re.compile(r'="([^"<>=]*)"([^"<>=\s/][^"<>=]*)"(?=[\s/>])')
 
 
 @dataclass(frozen=True)
@@ -92,7 +97,9 @@ def sanitize(text: str, tags: frozenset[str]) -> Sanitized:
             unknown[tok.group(2)] += 1
     t, n_lt = tag_re.subn("&lt;", t)
     t, n_attr = _ATTR_REPAIR_RE.subn(r'="\1"', t)
-    return Sanitized(t, n_ctrl, sum(others.values()), n_amp, n_lt, n_attr,
+    t, n_attr2 = _ATTR_REPAIR2_RE.subn(r'\1"', t)
+    t, n_attr3 = _ATTR_REPAIR3_RE.subn(r'="\1&quot;\2"', t)
+    return Sanitized(t, n_ctrl, sum(others.values()), n_amp, n_lt, n_attr + n_attr2 + n_attr3,
                      tuple(sorted(unknown)), tuple(sorted(others)))
 
 
@@ -199,7 +206,7 @@ def parse_tree(text: str, tags: frozenset[str]) -> TreeResult:
 
 
 _HTML_RE = re.compile(r"<html[\s>]", re.I)
-_MEMBER_RE = re.compile(r"^(\d{14})(?:_(\d{5}))?\.xml$")
+_MEMBER_RE = re.compile(r"^_?(\d{14})(?:_(\d{5}))?\.xml$")   # `_` 접두 1건(Y2040 실측) 허용
 _ROLE_BY_SUFFIX = {None: "main", "00760": "audit", "00761": "audit_cons"}
 
 
@@ -467,7 +474,8 @@ def table_census(root: ET.Element) -> dict[str, str | None]:
 
 _COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 _PI_RE = re.compile(r"<\?.*?\?>", re.S)
-_ANY_TAG_RE = re.compile(r"<[^>]+>")
+_ANY_TAG_RE = re.compile(r"""<(?:[^>"']|"[^"]*"|'[^']*')*>""")   # 따옴표 안 `>` 는 태그 끝이 아니다
+_EOL_RE = re.compile(r"\r\n?")
 
 
 @dataclass
@@ -480,9 +488,12 @@ class DocRows:
 
 
 def text_equal(sanitized: str, root: ET.Element, lenient: bool) -> bool:
-    """§1.12 텍스트 등식 — 트리 텍스트 = 정제 원문에서 주석·선언·태그를 지우고 unescape 한 것."""
+    """§1.12 텍스트 등식 — 트리 텍스트 = 정제 원문에서 주석·선언·태그를 지우고 unescape 한 것.
+
+    expat 은 XML 규격대로 CRLF·CR 을 LF 로 정규화하므로 기대값도 같이 정규화한다(Y2040 실측: 23건).
+    """
     stripped = _ANY_TAG_RE.sub("", _PI_RE.sub("", _COMMENT_RE.sub("", sanitized)))
-    expected = html.unescape(stripped)
+    expected = _EOL_RE.sub("\n", html.unescape(stripped))
     got = "".join(root.itertext())
     if lenient:
         return " ".join(expected.split()) == " ".join(got.split())

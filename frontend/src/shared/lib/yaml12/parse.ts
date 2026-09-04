@@ -14,6 +14,7 @@
  * Structural and semantic diagnostics come from the backend compile API (editor ADR D2).
  */
 import { CODEC_LIMITS } from "./limits";
+import { escapePointerSegment } from "./pointer";
 import {
   Parser,
   isAlias,
@@ -113,9 +114,6 @@ const RUAMEL_MISSES_FLOAT = /^[-+]?\.[0-9]+[eE][0-9]+$/;
 const DEFAULT_TAG_HANDLES: Record<string, string> = {
   "!!": "tag:yaml.org,2002:",
 };
-
-const escapePointer = (key: string) =>
-  key.replace(/~/g, "~0").replace(/\//g, "~1");
 
 class LineIndex {
   private readonly starts: number[] = [0];
@@ -229,7 +227,7 @@ const rejectTreePolicy = (
         );
       }
       const key = pair.key.value;
-      const child = `${pointer}/${escapePointer(key)}`;
+      const child = `${pointer}/${escapePointerSegment(key)}`;
       if (LONE_SURROGATE.test(key)) {
         throw new Yaml12Rejected(
           "syntax",
@@ -398,7 +396,7 @@ const collectRanges = (
   if (isMap(node)) {
     for (const pair of node.items as Pair<Node, Node | null>[]) {
       if (!isScalar(pair.key) || typeof pair.key.value !== "string") continue;
-      const child = `${pointer}/${escapePointer(pair.key.value)}`;
+      const child = `${pointer}/${escapePointerSegment(pair.key.value)}`;
       const keyRange = rangeOf(lines, pair.key);
       if (keyRange) keyRanges.set(child, keyRange);
       collectRanges(
@@ -565,7 +563,7 @@ const rejectDecodedSurrogates = (
   }
   if (typeof value !== "object" || value === null) return;
   for (const [key, item] of Object.entries(value)) {
-    const child = `${pointer}/${escapePointer(key)}`;
+    const child = `${pointer}/${escapePointerSegment(key)}`;
     if (LONE_SURROGATE.test(key)) {
       throw new Yaml12Rejected(
         "syntax",

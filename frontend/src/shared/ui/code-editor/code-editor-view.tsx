@@ -124,6 +124,7 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
       language,
       ariaLabel,
       onChange,
+      onSelectionChange,
       onComposingChange,
       onEscape,
       diagnostics = [],
@@ -136,8 +137,18 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
   ) {
     const host = useRef<HTMLDivElement>(null);
     const view = useRef<EditorView | null>(null);
-    const callbacks = useRef({ onChange, onComposingChange, onEscape });
-    callbacks.current = { onChange, onComposingChange, onEscape };
+    const callbacks = useRef({
+      onChange,
+      onSelectionChange,
+      onComposingChange,
+      onEscape,
+    });
+    callbacks.current = {
+      onChange,
+      onSelectionChange,
+      onComposingChange,
+      onEscape,
+    };
     const languageCompartment = useRef(new Compartment());
     const readOnlyCompartment = useRef(new Compartment());
     const completionCompartment = useRef(new Compartment());
@@ -221,6 +232,16 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
               update.state.doc.toString(),
               update.view.composing,
             );
+          }
+          // Report edit-owned cursor movement as mechanical editor state. The feature boundary
+          // waits for that sourceVersion's parser map before assigning StrategySpec meaning.
+          if (update.selectionSet) {
+            const selection = update.state.selection.main;
+            callbacks.current.onSelectionChange?.({
+              from: selection.from,
+              to: selection.to,
+              documentChanged: update.docChanged,
+            });
           }
         }),
       ];

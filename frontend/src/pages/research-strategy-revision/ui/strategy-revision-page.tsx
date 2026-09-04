@@ -1,5 +1,5 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { strategyDocumentQuery } from "../../../entities/strategy";
 import {
@@ -8,6 +8,7 @@ import {
   DocumentToolbar,
   RecoveryBanner,
   SourceEditor,
+  StrategyOutline,
   saveStatusText,
   saveStatusTone,
   useAutosave,
@@ -15,6 +16,7 @@ import {
   useRunBacktest,
   useSaveDocument,
   useSchemaAssist,
+  useOutlineNavigation,
   useStrategyDocument,
   type DocumentSource,
 } from "../../../features/edit-strategy";
@@ -62,6 +64,35 @@ export const StrategyRevisionPage = () => {
     document.compiledVersion === document.sourceVersion
       ? document.compiled
       : null;
+  const availableViews: readonly StrategyView[] =
+    stored.format === "yaml" ? PROJECTION_VIEWS : ["json"];
+  const requested: StrategyView = search.view ?? stored.format;
+  const implemented = availableViews.includes(requested);
+  const view: StrategyView = implemented ? requested : stored.format;
+  const selectPointer = useCallback(
+    (
+      path: string | undefined,
+      origin: "cursor" | "outline" | "outline-collapse",
+    ) => {
+      void navigate({
+        to: ROUTE,
+        params: { strategyId, revision },
+        search: {
+          ...search,
+          path,
+          view: origin === "outline" ? undefined : search.view,
+        },
+        replace: true,
+      });
+    },
+    [navigate, revision, search, strategyId],
+  );
+  const outline = useOutlineNavigation({
+    state: document,
+    schema: assist.schema,
+    selectedPointer: search.path,
+    onSelectedPointer: selectPointer,
+  });
 
   // A save can complete while the user is still typing. Keep that newer text on the current
   // route and let the next save append from the updated base; only follow the revision when the
@@ -98,11 +129,6 @@ export const StrategyRevisionPage = () => {
     navigate,
   ]);
 
-  const availableViews: readonly StrategyView[] =
-    stored.format === "yaml" ? PROJECTION_VIEWS : ["json"];
-  const requested: StrategyView = search.view ?? stored.format;
-  const implemented = availableViews.includes(requested);
-  const view: StrategyView = implemented ? requested : stored.format;
   const title = stored.spec.title || t("page.revision.untitled");
 
   return (
@@ -156,6 +182,14 @@ export const StrategyRevisionPage = () => {
             runStatus={backtest.status}
           />
         }
+        outline={
+          <StrategyOutline
+            snapshot={outline.snapshot}
+            selectedPointer={search.path}
+            onSelect={outline.onSelectOutlineNode}
+            onCollapse={outline.onCollapseOutlineNode}
+          />
+        }
         editor={
           <>
             {implemented ? null : (
@@ -182,6 +216,8 @@ export const StrategyRevisionPage = () => {
                 state={document}
                 dispatch={dispatch}
                 assist={assist}
+                onEditorReady={outline.onEditorReady}
+                onSelectionChange={outline.onEditorSelectionChange}
               />
             ) : (
               <pre

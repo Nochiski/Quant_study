@@ -69,6 +69,7 @@ export const AppShell = ({ operationsEnabled, children }: AppShellProps) => {
               {item.to ? (
                 <Link
                   to={item.to}
+                  search={{}}
                   className="app-shell__link"
                   activeProps={{ "aria-current": "page" }}
                 >

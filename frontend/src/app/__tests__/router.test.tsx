@@ -70,6 +70,19 @@ title: ${title}
 });
 
 const server = setupServer(
+  http.post(`${API}/api/v1/strategy-documents/compile`, async ({ request }) => {
+    const body = (await request.json()) as { source: string };
+    return HttpResponse.json({
+      format: "yaml",
+      source_hash: "b".repeat(64),
+      schema_version: "1.0",
+      spec: spec(1, "퀄리티 모멘텀 v1"),
+      canonical_json: null,
+      spec_hash: "a".repeat(64),
+      diagnostics: [],
+      echo: body.source,
+    });
+  }),
   http.get(`${API}/api/v1/strategy-documents/schema`, () =>
     HttpResponse.json({
       schema: { type: "object", properties: {}, additionalProperties: false },
@@ -222,6 +235,35 @@ describe("App Shell routes", () => {
       "aria-selected",
       "true",
     );
+  });
+
+  it("normalizes malformed pointers and preserves escaped RFC 6901 paths", async () => {
+    const malformed = mount(
+      "/research/strategies/s1/revisions/1?path=%2Ffoo~2bar",
+    );
+    await screen.findByRole("heading", { name: "퀄리티 모멘텀 v1" });
+    await waitFor(() =>
+      expect(malformed.location.search).not.toContain("path="),
+    );
+
+    cleanup();
+    const history = mount("/research/strategies/s1/revisions/1");
+    await screen.findByRole("heading", { name: "퀄리티 모멘텀 v1" });
+    history.push(
+      "/research/strategies/s1/revisions/1?path=%2Ffoo~1bar~0baz",
+    );
+    await waitFor(() =>
+      expect(history.location.search).toContain("path=%2Ffoo~1bar~0baz"),
+    );
+    history.push("/research/strategies/s1/revisions/1?path=%2Frisk");
+    await waitFor(() => expect(history.location.search).toContain("%2Frisk"));
+
+    history.back();
+    await waitFor(() =>
+      expect(history.location.search).toContain("path=%2Ffoo~1bar~0baz"),
+    );
+    history.forward();
+    await waitFor(() => expect(history.location.search).toContain("%2Frisk"));
   });
 
   it("shows the not-found state for an unknown revision and for an unknown path", async () => {

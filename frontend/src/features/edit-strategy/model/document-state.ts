@@ -57,6 +57,11 @@ export type DocumentState = {
   composing: boolean;
   parse: ParsedSource | null;
   parsedVersion: number;
+  /** Last accepted parse in this document epoch, retained only for stale read-only projections. */
+  lastValidParse: {
+    version: number;
+    result: Extract<ParsedSource, { status: "ok" }>;
+  } | null;
   compiled: CompileOutcome | null;
   compiledVersion: number;
   baseRevision: number | null;
@@ -102,6 +107,7 @@ export const initialDocumentState = (
   composing: false,
   parse: null,
   parsedVersion: -1,
+  lastValidParse: null,
   compiled: null,
   compiledVersion: -1,
   baseRevision: null,
@@ -182,6 +188,10 @@ export const documentReducer = (
         ...state,
         parse: action.result,
         parsedVersion: action.version,
+        lastValidParse:
+          action.result.status === "ok"
+            ? { version: action.version, result: action.result }
+            : state.lastValidParse,
         phase:
           action.result.status === "ok"
             ? "structurally-valid"

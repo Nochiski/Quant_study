@@ -1,10 +1,11 @@
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 
 import {
   DirtyLeaveGuard,
   DocumentToolbar,
   RecoveryBanner,
   SourceEditor,
+  StrategyOutline,
   saveStatusText,
   saveStatusTone,
   useAutosave,
@@ -12,15 +13,17 @@ import {
   useRunBacktest,
   useSaveDocument,
   useSchemaAssist,
+  useOutlineNavigation,
   useStrategyDocument,
   type DocumentSource,
 } from "../../../features/edit-strategy";
 import { t } from "../../../shared/config";
-import { useNavigate } from "../../../shared/lib/router";
+import { useNavigate, useSearch } from "../../../shared/lib/router";
 import { Badge } from "../../../shared/ui";
 import { StrategyIde } from "../../../widgets/strategy-ide";
 
 const STARTER = 'schema_version: "1.0"\ntitle: ""\n';
+const ROUTE = "/research/strategies/new";
 const NEW_DRAFT: DocumentSource = {
   kind: "new",
   format: "yaml",
@@ -33,6 +36,7 @@ const NEW_DRAFT: DocumentSource = {
  */
 export const NewStrategyPage = () => {
   const navigate = useNavigate();
+  const search = useSearch({ from: ROUTE });
   const [document, dispatch] = useStrategyDocument(NEW_DRAFT);
   const { save, status, canSave } = useSaveDocument(document, dispatch);
   const assist = useSchemaAssist(document);
@@ -46,6 +50,22 @@ export const NewStrategyPage = () => {
     document.compiledVersion === document.sourceVersion
       ? document.compiled
       : null;
+  const selectPointer = useCallback(
+    (path: string | undefined) => {
+      void navigate({
+        to: ROUTE,
+        search: { ...search, path },
+        replace: true,
+      });
+    },
+    [navigate, search],
+  );
+  const outline = useOutlineNavigation({
+    state: document,
+    schema: assist.schema,
+    selectedPointer: search.path,
+    onSelectedPointer: selectPointer,
+  });
 
   // If the user types while create is in flight, stay on this page and preserve the newer text.
   // A second save appends it to the newly created strategy; navigate only once the current text
@@ -108,6 +128,14 @@ export const NewStrategyPage = () => {
             runStatus={backtest.status}
           />
         }
+        outline={
+          <StrategyOutline
+            snapshot={outline.snapshot}
+            selectedPointer={search.path}
+            onSelect={outline.onSelectOutlineNode}
+            onCollapse={outline.onCollapseOutlineNode}
+          />
+        }
         editor={
           <>
             {autosave.recovery ? (
@@ -117,6 +145,8 @@ export const NewStrategyPage = () => {
               state={document}
               dispatch={dispatch}
               assist={assist}
+              onEditorReady={outline.onEditorReady}
+              onSelectionChange={outline.onEditorSelectionChange}
             />
           </>
         }

@@ -6,7 +6,7 @@ current_phase: P0
 current_pr: P0-03,P0-04
 active_prs: [P0-03, P0-04]
 parallel_window: [P0-03, P0-04]
-last_updated: 2026-09-04T13:40:02+09:00
+last_updated: 2026-09-04T13:44:05+09:00
 planned_prs: 45
 merged_prs: 2
 approved_prs: 2
@@ -28,7 +28,7 @@ progress_percent: 4
 | Active PR | `P0-03, P0-04` |
 | Progress | `2 / 45 merged (4%)` |
 | Approved | `2 / 45` |
-| Aggregated at | `2026-09-04 13:40 KST` |
+| Aggregated at | `2026-09-04 13:44 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -89,9 +89,9 @@ progress_percent: 4
 | Non-goals | editor 의존성 설치·UI 코드 변경 (P3-02), parser (P0-03), router (P0-04) |
 | Branch/worktree | `feat/p0-03-yaml-parser` / `feat/p0-04-router-adr` |
 | Base SHA | `38a2304` |
-| Head SHA | P0-03 `4a59d17` / P0-04 미기록 |
-| Diff stat | P0-03 35 files +578 (fixture 28개 포함) / P0-04 미기록 |
-| Focused tests | P0-03 backend 29 passed, frontend 28 passed / P0-04 미실행 |
+| Head SHA | P0-03 `4a59d17` / P0-04 `36d61b7` |
+| Diff stat | P0-03 35 files +578 (fixture 28개 포함) / P0-04 6 files +460 (ADR + node --test 스파이크, lockfile) |
+| Focused tests | P0-03 backend 29 passed, frontend 28 passed / P0-04 스파이크 7 passed, 링크 검증 |
 | Full gate | P0-03 worktree: ruff·pyright clean, frontend typecheck·lint·65 tests·build OK. backend pytest는 worktree Rust 미빌드로 core_parity 3건 환경 실패 → merge 후 main 트리에서 재실행 |
 
 ---
@@ -103,7 +103,7 @@ progress_percent: 4
 | [x] | `P0-01` | Verbose source ADR, YAML-first 전환, roadmap/rules/tracker 정합화 | 없음 | `MERGED` | `review_p0_01` APPROVE |
 | [x] | `P0-02` | Monaco/CodeMirror frontend editor spike | P0-01 | `MERGED` | `review_p0_02` APPROVE |
 | [ ] | `P0-03` | Backend parser ADR와 YAML 1.2 cross-runtime fixture | P0-01 | `IN_REVIEW` | `review_p0_03` |
-| [ ] | `P0-04` | Frontend router ADR와 direct-entry spike | P0-01 | `IN_PROGRESS` | — |
+| [ ] | `P0-04` | Frontend router ADR와 direct-entry spike | P0-01 | `IN_REVIEW` | `review_p0_04` |
 
 Phase exit:
 
@@ -254,6 +254,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-04 KST | Claude | P0-04(36d61b7) diff freeze, review_p0_04 배정 → IN_REVIEW | 13.3 |
 | 2026-09-04 KST | Claude | P0-02 APPROVE(fc8023d) → main merge, MERGED. P0-04 IN_PROGRESS로 병렬 window 교체 | 13.6 merge gate |
 | 2026-09-04 KST | Claude | P0-02(9093b1a)·P0-03(4a59d17) diff freeze, 병렬 window 선언, reviewer 각 1명 배정 → IN_REVIEW | 13.3 |
 | 2026-09-04 KST | Claude | P0-01 APPROVE → 로컬 main merge, MERGED. P0-02/03/04, P1-01, P1.5-01, P2-01 READY | 13.6 merge gate |

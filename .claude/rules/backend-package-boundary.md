@@ -55,6 +55,10 @@ bootstrap ─> application + adapters
 - 실제 DB가 와도 domain/application을 DB 스키마에 맞춰 바꾸지 않는다. 새
   `adapters/outbound/equity_duckdb`가 port에 맞춘다.
 - 설정한 adapter가 없거나 실패하면 mock으로 조용히 fallback하지 않는다.
+- mock의 raw PIT port(`load_raw_observations`)는 fixture 달력 안에서는 `load_panel`과 같은
+  Observation 행·PIT cut-off를 읽고, 달력 밖에서는 절대 영업일 index 기반 synthetic 시계열을
+  만든다. 두 경우 모두 (security, date)만의 함수이며 query window에 의존하지 않는다. 실패는
+  `status`/`detail` 값으로 돌려주고 미지 field·universe를 합성하지 않는다.
 
 ## 강제 게이트
 

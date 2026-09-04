@@ -198,7 +198,7 @@ def test_duplicate_rows_fail_closed_before_evaluation() -> None:
     graph, panel = _graph(), _panel()
     duplicated = panel + (_observation(DAYS[1], "a", 99.0),)
 
-    with pytest.raises(ValueError, match="unique \(as_of, security_id\)"):
+    with pytest.raises(ValueError, match=r"unique \(as_of, security_id\)"):
         trace_factor_graph(graph, observations=duplicated)
 
 

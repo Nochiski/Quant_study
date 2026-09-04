@@ -8,18 +8,22 @@ from strategy_workbench.application.portfolio_design._models import (
 from strategy_workbench.application.portfolio_design._service import (
     FactorEvaluationRecord,
     InvalidPortfolioRequestError,
+    LookAheadViolationError,
     PortfolioDesignService,
     PortfolioPipelineResult,
+    RawObservationUnavailableError,
 )
 
 __all__ = [
-    "FactorEvaluationRecord",
-    "PortfolioPipelineResult",
     "EngineCapabilityIssue",
     "EngineCompatibility",
     "EngineRequirementSummary",
+    "FactorEvaluationRecord",
     "InvalidPortfolioRequestError",
+    "LookAheadViolationError",
     "PortfolioDesignService",
+    "PortfolioPipelineResult",
     "PortfolioPreview",
     "PortfolioPreviewRequest",
+    "RawObservationUnavailableError",
 ]

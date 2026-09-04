@@ -65,9 +65,7 @@ class BarQuery:
         if not self.instruments:
             raise ValueError("BarQuery requires at least one instrument — got empty tuple")
         if self.start is not None and self.end is not None and self.start > self.end:
-            raise ValueError(
-                f"BarQuery start must be <= end — start={self.start} end={self.end}"
-            )
+            raise ValueError(f"BarQuery start must be <= end — start={self.start} end={self.end}")
         seen = set()
         for instrument in self.instruments:
             if instrument in seen:

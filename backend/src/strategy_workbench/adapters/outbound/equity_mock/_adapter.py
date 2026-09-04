@@ -38,6 +38,11 @@ from strategy_workbench.domain.factor.facade.evaluation import (
 
 from ._fixture import Membership, Observation, build_demo_fixture
 
+_MOCK_EPOCH = date(2000, 1, 3)  # Monday
+_MOCK_SECTORS = ("technology", "industrial", "consumer")
+# (market, universe_id) -> venue the fixture memberships are keyed by.
+_MOCK_UNIVERSES: dict[tuple[str, str], str] = {("KRX", "krx.common-stock"): "XKRX"}
+
 
 class MockEquityDataAdapter:
     """Small but adversarial Equity v0.2 fixture with vintages, lags, and gaps."""
@@ -188,62 +193,122 @@ class MockEquityDataAdapter:
         )
 
     def load_raw_observations(self, query: RawObservationQuery) -> RawObservationSet:
-        """Raw PIT panel for the truthful pipeline (P1.5-03): fields, membership, sector, history.
+        """Raw PIT panel for the truthful pipeline (P1.5-03).
 
-        A field observed at session i becomes available at session i + lag (the profile's
-        recommended lag), so the value visible at `as_of` is the one effective `lag` sessions
-        earlier and `available_date` is `as_of` itself. Values that would only become available
-        after `as_of` are omitted, never leaked.
+        Inside the fixture calendar every value comes from the same fixture `Observation` rows and
+        the same PIT cut-off as `load_panel`, so Data workspace and Portfolio preview agree cell by
+        cell. Outside the calendar the mock synthesises a deterministic series keyed by the
+        absolute business-day index (never by the query window), lagged by the field profile's
+        recommended lag; `available_date` is the session the value became visible. Membership is a
+        function of (security, date) only.
         """
+        venue = _MOCK_UNIVERSES.get((query.market, query.universe_id))
+        profile_by_id = {profile.field_id: profile for profile in self._profiles}
+        unknown_fields = sorted(set(query.field_ids) - set(profile_by_id))
+        if venue is None or unknown_fields:
+            return RawObservationSet(
+                status=DataLoadStatus.INVALID_QUERY,
+                data_snapshot_id=self._snapshot.snapshot_id,
+                sessions=(),
+                history_sessions=(),
+                observations=(),
+                detail=(
+                    "unknown mock raw observation identifiers — "
+                    f"market={query.market!r} universe_id={query.universe_id!r} "
+                    f"supported={sorted(_MOCK_UNIVERSES)} unknown_fields={unknown_fields}"
+                ),
+            )
         history, requested = _sessions_with_history(
-            query.start, query.end, query.minimum_history_sessions
+            query.start, query.end, query.history_sessions_before_start
         )
-        sessions = history + requested
-        # Contract ordering: (as_of, security_id) ascending, independent of fixture order.
-        security_ids = tuple(
-            sorted(membership.security.security_id for membership in self._memberships)
-        )
-        lag_by_field = {
-            profile.field_id: profile.recommended_lag_sessions for profile in self._profiles
-        }
+        # Fixture order drives the synthetic seed and sector so values never remap when the
+        # output ordering changes; the output itself is sorted by (as_of, security_id).
+        memberships = [m for m in self._memberships if m.security.venue == venue]
+        warnings: set[str] = set()
         observations: list[RawObservation] = []
-        for session_index, session in enumerate(sessions):
-            requested_index = session_index - len(history)
-            for security_index, security_id in enumerate(security_ids):
+        for session in history + requested:
+            for security_index, membership in enumerate(memberships):
+                security_id = membership.security.security_id
                 fields: list[RawFieldValue] = []
                 for field_id in query.field_ids:
-                    effective_index = session_index - lag_by_field.get(field_id, 0)
-                    if effective_index < 0:
-                        continue  # not yet available at this session: omitted, not defaulted
-                    fields.append(
-                        RawFieldValue(
-                            field_id=field_id,
-                            value=_factor_field_value(
-                                field_id,
-                                security_index=security_index,
-                                session_index=effective_index,
-                            ),
-                            available_date=session,
-                        )
+                    raw = self._raw_field(
+                        security_id=security_id,
+                        security_index=security_index,
+                        field_id=field_id,
+                        session=session,
+                        lag_sessions=profile_by_id[field_id].recommended_lag_sessions,
+                        warnings=warnings,
                     )
+                    if raw is not None:
+                        fields.append(raw)
                 observations.append(
                     RawObservation(
                         as_of=session,
                         security_id=security_id,
-                        # Same deterministic PIT membership story as the portfolio panel: the
-                        # third name enters after two requested sessions and never leaks backward.
-                        universe_member=security_index < 2 or requested_index >= 2,
+                        universe_member=self._member(membership, security_index, session),
                         fields=tuple(fields),
-                        sector_id=("technology", "industrial", "consumer")[security_index % 3],
+                        sector_id=_MOCK_SECTORS[security_index % len(_MOCK_SECTORS)],
                         previous_weight=0.0,
                     )
                 )
+        observations.sort(key=lambda item: (item.as_of, item.security_id))
         return RawObservationSet(
+            status=DataLoadStatus.OK if observations else DataLoadStatus.NO_DATA,
             data_snapshot_id=self._snapshot.snapshot_id,
             sessions=requested,
             history_sessions=history,
             observations=tuple(observations),
+            detail=None if observations else f"no mock raw observations — query={query}",
+            warnings=tuple(sorted(warnings)),
         )
+
+    def _raw_field(
+        self,
+        *,
+        security_id: str,
+        security_index: int,
+        field_id: str,
+        session: date,
+        lag_sessions: int,
+        warnings: set[str],
+    ) -> RawFieldValue | None:
+        if self._sessions[0] <= session <= self._sessions[-1]:
+            if session not in self._sessions:
+                return None  # a non-trading day inside the fixture calendar
+            cutoff = self._cutoff(session, lag_sessions)
+            if cutoff is None:
+                warnings.add(
+                    f"insufficient mock calendar for lag — field_id={field_id} as_of={session}"
+                )
+                return None
+            candidate = self._latest_observation(
+                security_id=security_id,
+                field_id=field_id,
+                as_of=session,
+                available_cutoff=cutoff,
+            )
+            if candidate is None:
+                return None
+            return RawFieldValue(
+                field_id=field_id, value=candidate.value, available_date=candidate.available_date
+            )
+        effective_index = _business_day_index(session) - lag_sessions
+        return RawFieldValue(
+            field_id=field_id,
+            value=_factor_field_value(
+                field_id, security_index=security_index, session_index=effective_index
+            ),
+            available_date=session,
+        )
+
+    def _member(self, membership: Membership, security_index: int, session: date) -> bool:
+        if self._sessions[0] <= session <= self._sessions[-1]:
+            return membership.first_session <= session <= membership.last_session
+        # Synthetic period: the third name and beyond sit out the first two sessions of every
+        # month. A pure function of the date, so the same (security, date) never flips.
+        if security_index < 2:
+            return True
+        return _business_day_index(session) - _business_day_index(session.replace(day=1)) >= 2
 
     def load_backtest_dataset(self, query: BacktestDataQuery) -> BacktestDataset:
         """Generate deterministic OHLCV until the real Equity DB adapter is selected."""
@@ -360,6 +425,13 @@ def _sessions_with_history(
         cursor -= timedelta(days=1)
     history.reverse()
     return tuple(history), _business_sessions(start, end)
+
+
+def _business_day_index(session: date) -> int:
+    """Weekday count from a fixed Monday epoch: the mock's absolute session clock."""
+    days = (session - _MOCK_EPOCH).days
+    weeks, remainder = divmod(days, 7)
+    return weeks * 5 + min(remainder, 5)
 
 
 def _business_sessions(start: date, end: date) -> tuple[date, ...]:

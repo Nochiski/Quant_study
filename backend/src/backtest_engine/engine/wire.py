@@ -273,9 +273,7 @@ def decision_to_wire(decision: StrategyDecision) -> DecisionWire:
         elif isinstance(action, CancelOrder):
             actions.append((kind, [], action.order_id, None, None, []))
         elif isinstance(action, ReplaceOrder):
-            actions.append(
-                (kind, [], action.order_id, None, _request_wire(action.replacement), [])
-            )
+            actions.append((kind, [], action.order_id, None, _request_wire(action.replacement), []))
         elif isinstance(action, BasketAction):
             actions.append(
                 (
@@ -315,8 +313,8 @@ def route_basic_decision(
     portfolio: PortfolioSnapshot,
     market: MarketSnapshot,
 ) -> PersistentRouteEnvelope:
-    decision_id, order_wires, update_wires, group_wires, error_wire = (
-        runtime.route_basic_decision(decision_to_wire(decision))
+    decision_id, order_wires, update_wires, group_wires, error_wire = runtime.route_basic_decision(
+        decision_to_wire(decision)
     )
     return _route_response_to_envelope(
         decision_id,
@@ -370,17 +368,17 @@ def _route_response_to_envelope(
             )
             built_orders.append(
                 OrderEvent(
-                order_id=order_id,
-                decision_id=decision_id,
-                ts=market.ts,
-                instrument=instruments[key],
-                quantity=Decimal(quantity),
-                side=Side(side),
+                    order_id=order_id,
+                    decision_id=decision_id,
+                    ts=market.ts,
+                    instrument=instruments[key],
+                    quantity=Decimal(quantity),
+                    side=Side(side),
                     source_action=source_action,
-                order_type=OrderType(order_type),
-                limit_price=None if limit_price is None else Decimal(limit_price),
-                stop_price=None if stop_price is None else Decimal(stop_price),
-                time_in_force=TimeInForce(time_in_force),
+                    order_type=OrderType(order_type),
+                    limit_price=None if limit_price is None else Decimal(limit_price),
+                    stop_price=None if stop_price is None else Decimal(stop_price),
+                    time_in_force=TimeInForce(time_in_force),
                     group_id=group_id,
                 )
             )

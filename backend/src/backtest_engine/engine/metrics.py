@@ -35,9 +35,7 @@ def compute_metrics_from_values(
         raise ValueError("cannot compute metrics from an empty run — snapshots=0")
     total_return = equity[-1] / equity[0] - 1.0
 
-    session_returns = [
-        equity[index] / equity[index - 1] - 1.0 for index in range(1, len(equity))
-    ]
+    session_returns = [equity[index] / equity[index - 1] - 1.0 for index in range(1, len(equity))]
     n_returns = len(session_returns)
 
     years = n_returns / annualization_days if n_returns > 0 else 0.0

@@ -8,19 +8,26 @@ Factor values in every CandidateDecision are FactorGraph outputs; the composite 
 weighted, direction-signed sum the portfolio compiler derives from them. Backtest runs consume the
 same TargetTape, so preview and backtest cannot diverge. No adapter is allowed to invent factor
 values.
+
+PIT enforcement is owned here: a raw field published after its `as_of` is an adapter contract
+violation and raises `LookAheadViolationError` (fail-closed, loud). Each factor value carries the
+latest publication date among the fields its plan reads, so the portfolio compiler's FUTURE_DATA
+guard stays meaningful.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 
+from strategy_workbench.domain.equity.facade.research_data import DataLoadStatus
 from strategy_workbench.domain.factor.facade.evaluation import (
     FactorFieldValue,
     FactorObservation,
     FactorValue,
     evaluate_factor_graph,
 )
-from strategy_workbench.domain.factor.facade.expression import FactorGraph, FieldNode, GroupNode
+from strategy_workbench.domain.factor.facade.expression import FactorGraph, GroupNode
 from strategy_workbench.domain.factor.facade.planning import (
     FactorExecutionPlan,
     ResolvedFactorParameter,
@@ -35,6 +42,8 @@ from strategy_workbench.domain.portfolio.facade.construction import (
 from strategy_workbench.domain.strategy.facade.specification import StrategySpec
 from strategy_workbench.domain.strategy.facade.validation import (
     StrategyValidation,
+    ValidationIssue,
+    ValidationKind,
     validate_strategy,
 )
 
@@ -52,6 +61,19 @@ class InvalidPortfolioRequestError(ValueError):
     def __init__(self, validation: StrategyValidation) -> None:
         super().__init__("portfolio preview requires a valid StrategySpec")
         self.validation = validation
+
+
+class RawObservationUnavailableError(RuntimeError):
+    """The observation source could not serve the query (unknown universe/field, no data)."""
+
+    def __init__(self, status: DataLoadStatus, detail: str | None) -> None:
+        super().__init__(f"raw observations unavailable — status={status.value} detail={detail}")
+        self.status = status
+        self.detail = detail
+
+
+class LookAheadViolationError(RuntimeError):
+    """An adapter returned a field published after the observation date (contract bug)."""
 
 
 @dataclass(frozen=True)
@@ -93,16 +115,22 @@ class PortfolioDesignService:
             raise InvalidPortfolioRequestError(validation)
 
         plans = self._plans(spec)
+        _reject_saved_references(spec, plans)
         raw = self._observation_source.load_raw_observations(
             RawObservationQuery(
+                market=spec.data.market.value,
+                universe_id=spec.data.universe_id,
                 start=spec.data.start,
                 end=spec.data.end,
                 field_ids=_required_field_ids(spec, plans),
-                minimum_history_sessions=max(
-                    (plan.minimum_history_sessions for plan in plans.values()), default=0
+                # Plans count as_of itself; the port counts sessions strictly before start.
+                history_sessions_before_start=max(
+                    (plan.minimum_history_sessions - 1 for plan in plans.values()), default=0
                 ),
             )
         )
+        if not raw.ok:
+            raise RawObservationUnavailableError(raw.status, raw.detail)
         factor_observations = tuple(_to_factor_observation(item) for item in raw.observations)
         parameters = tuple(
             ResolvedFactorParameter(parameter.parameter_id, parameter.default)
@@ -170,14 +198,36 @@ def _required_field_ids(
 
 
 def _group_field_ids(graph: FactorGraph) -> set[str]:
-    return {
-        node.group_field_id
-        for node in graph.nodes
-        if isinstance(node, GroupNode) and not isinstance(node, FieldNode)
-    }
+    return {node.group_field_id for node in graph.nodes if isinstance(node, GroupNode)}
+
+
+def _reject_saved_references(spec: StrategySpec, plans: dict[str, FactorExecutionPlan]) -> None:
+    # TODO(PLAN P5-03): evaluate referenced factors/subgraphs in topological order instead.
+    issues = tuple(
+        ValidationIssue(
+            code="strategy.expression.reference_unsupported",
+            path=f"factors.factors.{index}.graph",
+            message="저장된 팩터/서브그래프 참조는 아직 preview/backtest에서 계산되지 않습니다: "
+            f"factor_ids={plan.referenced_factor_ids} "
+            f"subgraph_ids={plan.referenced_subgraph_ids}",
+            kind=ValidationKind.SEMANTIC,
+        )
+        for index, factor in enumerate(spec.factors.factors)
+        for plan in (plans[factor.factor_id],)
+        if plan.referenced_factor_ids or plan.referenced_subgraph_ids
+    )
+    if issues:
+        raise InvalidPortfolioRequestError(StrategyValidation(valid=False, issues=issues))
 
 
 def _to_factor_observation(item: RawObservation) -> FactorObservation:
+    for field in item.fields:
+        if field.available_date > item.as_of:
+            raise LookAheadViolationError(
+                "raw field published after its observation date — "
+                f"field_id={field.field_id!r} security_id={item.security_id!r} "
+                f"as_of={item.as_of} available_date={field.available_date}"
+            )
     return FactorObservation(
         as_of=item.as_of,
         security_id=item.security_id,
@@ -189,7 +239,7 @@ def _to_portfolio_observations(
     raw: RawObservationSet, evaluations: tuple[FactorEvaluationRecord, ...]
 ) -> tuple[PortfolioObservation, ...]:
     in_range = set(raw.sessions)
-    values_by_key: dict[tuple[str, object, str], float | None] = {}
+    values_by_key: dict[tuple[str, date, str], float | None] = {}
     for record in evaluations:
         for value in record.values:
             values_by_key[(record.factor_id, value.as_of, value.security_id)] = value.value
@@ -202,7 +252,7 @@ def _to_portfolio_observations(
                 PortfolioFactorValue(
                     factor_id=record.factor_id,
                     value=values_by_key.get((record.factor_id, item.as_of, item.security_id)),
-                    available_date=item.as_of,
+                    available_date=_latest_input_publication(item, record.plan),
                 )
                 for record in evaluations
             ),
@@ -215,4 +265,13 @@ def _to_portfolio_observations(
         )
         for item in raw.observations
         if item.as_of in in_range
+    )
+
+
+def _latest_input_publication(item: RawObservation, plan: FactorExecutionPlan) -> date:
+    """Publication date of the factor value: the latest among the fields its plan reads."""
+    required = set(plan.required_field_ids)
+    return max(
+        (field.available_date for field in item.fields if field.field_id in required),
+        default=item.as_of,
     )

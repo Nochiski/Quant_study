@@ -128,17 +128,9 @@ class PersistentEventQueue:
         offset = ts.utcoffset()
         normalized = ts if offset is None else ts - offset
         return (
-            (
-                (
-                    (normalized.toordinal() * 24 + normalized.hour) * 60
-                    + normalized.minute
-                )
-                * 60
-                + normalized.second
-            )
-            * 1_000_000
-            + normalized.microsecond
-        )
+            ((normalized.toordinal() * 24 + normalized.hour) * 60 + normalized.minute) * 60
+            + normalized.second
+        ) * 1_000_000 + normalized.microsecond
 
     def push(self, ts: datetime, priority: EventPriority, payload: EngineQueueEvent) -> None:
         self._token += 1

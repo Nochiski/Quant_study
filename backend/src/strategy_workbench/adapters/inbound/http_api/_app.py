@@ -49,6 +49,7 @@ from strategy_workbench.application.portfolio_design.facade.design import (
     PortfolioDesignService,
     PortfolioPreview,
     PortfolioPreviewRequest,
+    RawObservationUnavailableError,
 )
 from strategy_workbench.application.strategy_design.facade.design import (
     InvalidStrategyError,
@@ -211,6 +212,15 @@ def create_app(
                 detail={
                     "code": "portfolio.strategy.invalid",
                     "validation": jsonable_encoder(asdict(error.validation)),
+                },
+            ) from error
+        except RawObservationUnavailableError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "code": "portfolio.data.unavailable",
+                    "status": error.status.value,
+                    "detail": error.detail,
                 },
             ) from error
 

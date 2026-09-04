@@ -100,13 +100,16 @@ export const StrategyOutline = ({
   const selected = snapshot
     ? findOutlineNode(snapshot.nodes, selectedPointer ?? "")
     : null;
-  const automaticallyExpanded = useMemo(() => {
-    const result = new Set(snapshot?.nodes.map((node) => node.id) ?? []);
-    if (snapshot && selected) {
-      for (const id of outlineAncestorIds(snapshot.nodes, selected.id))
-        result.add(id);
-    }
-    return result;
+  const rootIds = useMemo(
+    () => new Set(snapshot?.nodes.map((node) => node.id) ?? []),
+    [snapshot],
+  );
+  const selectedAncestorIds = useMemo(() => {
+    return new Set(
+      snapshot && selected
+        ? outlineAncestorIds(snapshot.nodes, selected.id)
+        : [],
+    );
   }, [selected, snapshot]);
   const activeTabId = containsId(nodes, focusedId)
     ? focusedId
@@ -156,14 +159,17 @@ export const StrategyOutline = ({
         break;
       }
       case "ArrowRight":
-        if (node.children.length === 0) break;
         event.preventDefault();
+        if (node.children.length === 0) break;
         if (!open) toggle(node.id, open);
         else groupChild(event.currentTarget)?.focus();
         break;
       case "ArrowLeft":
         event.preventDefault();
-        if (open && node.children.length > 0) toggle(node.id, open);
+        if (open && node.children.length > 0) {
+          onSelect(node);
+          toggle(node.id, open);
+        }
         else parentItem(event.currentTarget)?.focus();
         break;
       case "Enter":
@@ -179,7 +185,9 @@ export const StrategyOutline = ({
     const configured = expansionOverrides.get(node.id);
     const open =
       hasChildren &&
-      (query !== "" || (configured ?? automaticallyExpanded.has(node.id)));
+      (query !== "" ||
+        selectedAncestorIds.has(node.id) ||
+        (configured ?? rootIds.has(node.id)));
     const isSelected = selected?.id === node.id;
     const tabIndex = activeTabId === node.id ? 0 : -1;
     return (
@@ -201,6 +209,7 @@ export const StrategyOutline = ({
             setFocusedId(node.id);
             const target = event.target as HTMLElement;
             if (hasChildren && target.dataset.disclosure === "true") {
+              if (open) onSelect(node);
               toggle(node.id, open);
               return;
             }

@@ -208,7 +208,7 @@ describe("Strategy Outline tree", () => {
   it("selects by JSON Pointer and supports ARIA tree keyboard navigation", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
-    render(
+    const view = render(
       <StrategyOutline
         snapshot={snapshot()}
         selectedPointer="/risk"
@@ -228,6 +228,28 @@ describe("Strategy Outline tree", () => {
     expect(document.activeElement).toHaveAccessibleName("max_name_weight");
     await user.keyboard("{ArrowLeft}");
     expect(document.activeElement).toBe(risk);
+    await user.keyboard("{ArrowLeft}");
+    expect(risk).toHaveAttribute("aria-expanded", "false");
+    expect(onSelect).toHaveBeenLastCalledWith(
+      expect.objectContaining({ pointer: "/risk" }),
+    );
+
+    view.rerender(
+      <StrategyOutline
+        snapshot={snapshot()}
+        selectedPointer="/risk/max_name_weight"
+        onSelect={onSelect}
+      />,
+    );
+    expect(risk).toHaveAttribute("aria-expanded", "true");
+    expect(
+      within(tree).getByRole("treeitem", {
+        name: "max_name_weight",
+        selected: true,
+      }),
+    ).toBeVisible();
+
+    risk.focus();
     await user.keyboard("{End}");
     expect(document.activeElement).toHaveAccessibleName("parameters");
     await user.keyboard("{Home}");

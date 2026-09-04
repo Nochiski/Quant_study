@@ -465,6 +465,95 @@
         "title": "ComparisonOperator",
         "type": "string"
       },
+      "CompileRequest": {
+        "properties": {
+          "format": {
+            "$ref": "#/components/schemas/SourceFormat"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "format"
+        ],
+        "title": "CompileRequest",
+        "type": "object"
+      },
+      "CompiledDocument": {
+        "properties": {
+          "canonical_json": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Json"
+          },
+          "diagnostics": {
+            "items": {
+              "$ref": "#/components/schemas/SourceDiagnostic"
+            },
+            "title": "Diagnostics",
+            "type": "array"
+          },
+          "format": {
+            "$ref": "#/components/schemas/SourceFormat"
+          },
+          "schema_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Version"
+          },
+          "source_hash": {
+            "title": "Source Hash",
+            "type": "string"
+          },
+          "spec": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StrategySpec"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "spec_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spec Hash"
+          }
+        },
+        "required": [
+          "format",
+          "source_hash",
+          "schema_version",
+          "spec",
+          "canonical_json",
+          "spec_hash",
+          "diagnostics"
+        ],
+        "title": "CompiledDocument",
+        "type": "object"
+      },
       "ConditionalNode": {
         "properties": {
           "false_node_id": {
@@ -773,6 +862,24 @@
         ],
         "title": "DatasetRevision",
         "type": "object"
+      },
+      "DiagnosticKind": {
+        "enum": [
+          "syntax",
+          "structural",
+          "semantic",
+          "capability"
+        ],
+        "title": "DiagnosticKind",
+        "type": "string"
+      },
+      "DiagnosticSeverity": {
+        "enum": [
+          "error",
+          "warning"
+        ],
+        "title": "DiagnosticSeverity",
+        "type": "string"
       },
       "DrawdownPoint": {
         "properties": {
@@ -3700,6 +3807,107 @@
         "title": "SignalStep",
         "type": "object"
       },
+      "SourceDiagnostic": {
+        "description": "One diagnostic. `severity` is always sent (no default) so the wire schema marks it required.\n\n`range` is None only when the source has no node to point at (empty document).\n`node_id` names the FactorGraph node a semantic issue is about, when known.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/DiagnosticKind"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "pointer": {
+            "title": "Pointer",
+            "type": "string"
+          },
+          "range": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "severity": {
+            "$ref": "#/components/schemas/DiagnosticSeverity"
+          }
+        },
+        "required": [
+          "code",
+          "kind",
+          "pointer",
+          "message",
+          "severity"
+        ],
+        "title": "SourceDiagnostic",
+        "type": "object"
+      },
+      "SourceFormat": {
+        "enum": [
+          "yaml",
+          "json"
+        ],
+        "title": "SourceFormat",
+        "type": "string"
+      },
+      "SourcePosition": {
+        "description": "0-based line/column and offset into the exact source text.\n\nUnits are Unicode code points (Python `str` indices). JavaScript editors count UTF-16 code\nunits; astral characters (emoji) shift later columns by one per character, so the frontend\nconverts at the wire boundary (P3-04). Korean text is BMP-only and unaffected.",
+        "properties": {
+          "column": {
+            "title": "Column",
+            "type": "integer"
+          },
+          "line": {
+            "title": "Line",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "line",
+          "column",
+          "offset"
+        ],
+        "title": "SourcePosition",
+        "type": "object"
+      },
+      "SourceRange": {
+        "properties": {
+          "end": {
+            "$ref": "#/components/schemas/SourcePosition"
+          },
+          "start": {
+            "$ref": "#/components/schemas/SourcePosition"
+          }
+        },
+        "required": [
+          "start",
+          "end"
+        ],
+        "title": "SourceRange",
+        "type": "object"
+      },
       "StrategyExplanation": {
         "properties": {
           "steps": {
@@ -4277,6 +4485,17 @@
             "title": "Message",
             "type": "string"
           },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
           "path": {
             "title": "Path",
             "type": "string"
@@ -4333,7 +4552,7 @@
     }
   },
   "info": {
-    "description": "No-code factor strategy design and backtest orchestration API.",
+    "description": "YAML-first factor strategy authoring, validation and backtest orchestration API. StrategySpec is the execution source of truth; YAML/JSON documents are compiled by the server.",
     "title": "Quant Strategy Workbench API",
     "version": "0.1.0"
   },
@@ -5310,6 +5529,45 @@
           }
         },
         "summary": "Revise Strategy"
+      }
+    },
+    "/api/v1/strategy-documents/compile": {
+      "post": {
+        "description": "Compile YAML/JSON source into a StrategySpec with syntax/structural/semantic diagnostics.\n\n200 for every well-formed request envelope: the outcome is the diagnostic list, and\n`spec`/`spec_hash` are null while any error-severity diagnostic exists. Only a malformed\nenvelope (missing `source`, unknown `format`) is a 422.",
+        "operationId": "compileStrategyDocument",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompiledDocument"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Compile Strategy Document"
       }
     }
   }

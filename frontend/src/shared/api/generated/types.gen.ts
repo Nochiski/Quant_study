@@ -256,6 +256,45 @@ export type ComparisonNode = {
 export type ComparisonOperator = "gt" | "gte" | "lt" | "lte" | "eq";
 
 /**
+ * CompileRequest
+ */
+export type CompileRequest = {
+  format: SourceFormat;
+  /**
+   * Source
+   */
+  source: string;
+};
+
+/**
+ * CompiledDocument
+ */
+export type CompiledDocument = {
+  /**
+   * Canonical Json
+   */
+  canonical_json: string | null;
+  /**
+   * Diagnostics
+   */
+  diagnostics: Array<SourceDiagnostic>;
+  format: SourceFormat;
+  /**
+   * Schema Version
+   */
+  schema_version: string | null;
+  /**
+   * Source Hash
+   */
+  source_hash: string;
+  spec: StrategySpec | null;
+  /**
+   * Spec Hash
+   */
+  spec_hash: string | null;
+};
+
+/**
  * ConditionalNode
  */
 export type ConditionalNode = {
@@ -472,6 +511,17 @@ export type DatasetRevision = {
    */
   revision: string;
 };
+
+/**
+ * DiagnosticKind
+ */
+export type DiagnosticKind =
+  "syntax" | "structural" | "semantic" | "capability";
+
+/**
+ * DiagnosticSeverity
+ */
+export type DiagnosticSeverity = "error" | "warning";
 
 /**
  * DrawdownPoint
@@ -2318,6 +2368,73 @@ export type SignalStep = {
 };
 
 /**
+ * SourceDiagnostic
+ *
+ * One diagnostic. `severity` is always sent (no default) so the wire schema marks it required.
+ *
+ * `range` is None only when the source has no node to point at (empty document).
+ * `node_id` names the FactorGraph node a semantic issue is about, when known.
+ */
+export type SourceDiagnostic = {
+  /**
+   * Code
+   */
+  code: string;
+  kind: DiagnosticKind;
+  /**
+   * Message
+   */
+  message: string;
+  /**
+   * Node Id
+   */
+  node_id?: string | null;
+  /**
+   * Pointer
+   */
+  pointer: string;
+  range?: SourceRange | null;
+  severity: DiagnosticSeverity;
+};
+
+/**
+ * SourceFormat
+ */
+export type SourceFormat = "yaml" | "json";
+
+/**
+ * SourcePosition
+ *
+ * 0-based line/column and offset into the exact source text.
+ *
+ * Units are Unicode code points (Python `str` indices). JavaScript editors count UTF-16 code
+ * units; astral characters (emoji) shift later columns by one per character, so the frontend
+ * converts at the wire boundary (P3-04). Korean text is BMP-only and unaffected.
+ */
+export type SourcePosition = {
+  /**
+   * Column
+   */
+  column: number;
+  /**
+   * Line
+   */
+  line: number;
+  /**
+   * Offset
+   */
+  offset: number;
+};
+
+/**
+ * SourceRange
+ */
+export type SourceRange = {
+  end: SourcePosition;
+  start: SourcePosition;
+};
+
+/**
  * StrategyExplanation
  */
 export type StrategyExplanation = {
@@ -2675,6 +2792,10 @@ export type ValidationIssue = {
    * Message
    */
   message: string;
+  /**
+   * Node Id
+   */
+  node_id?: string | null;
   /**
    * Path
    */
@@ -3337,3 +3458,30 @@ export type ReviseStrategyResponses = {
 
 export type ReviseStrategyResponse =
   ReviseStrategyResponses[keyof ReviseStrategyResponses];
+
+export type CompileStrategyDocumentData = {
+  body: CompileRequest;
+  path?: never;
+  query?: never;
+  url: "/api/v1/strategy-documents/compile";
+};
+
+export type CompileStrategyDocumentErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type CompileStrategyDocumentError =
+  CompileStrategyDocumentErrors[keyof CompileStrategyDocumentErrors];
+
+export type CompileStrategyDocumentResponses = {
+  /**
+   * Successful Response
+   */
+  200: CompiledDocument;
+};
+
+export type CompileStrategyDocumentResponse =
+  CompileStrategyDocumentResponses[keyof CompileStrategyDocumentResponses];

@@ -7,6 +7,7 @@ import {
   ConflictBanner,
   DirtyLeaveGuard,
   DocumentToolbar,
+  ExecutionPlanPanel,
   RecoveryBanner,
   SourceEditor,
   StrategyOutline,
@@ -14,6 +15,7 @@ import {
   saveStatusTone,
   useAutosave,
   useCompileDocument,
+  useExecutionPlans,
   useRunBacktest,
   useSaveDocument,
   useSchemaAssist,
@@ -60,6 +62,7 @@ export const StrategyRevisionPage = () => {
   const autosave = useAutosave(document, dispatch, {
     schemaVersion: assist.schemaVersion,
   });
+  const executionPlans = useExecutionPlans(document, assist.inspectorSource);
   const current =
     document.compiled !== null &&
     document.compiledVersion === document.sourceVersion
@@ -197,6 +200,13 @@ export const StrategyRevisionPage = () => {
             selectedPointer={search.path}
             tree={outline.snapshot?.parsed.tree}
             stale={outline.snapshot?.stale ?? false}
+          />
+        }
+        debugger={
+          <ExecutionPlanPanel
+            state={executionPlans}
+            selectedPointer={search.path}
+            onSelectPointer={(pointer) => selectPointer(pointer, "outline")}
           />
         }
         editor={

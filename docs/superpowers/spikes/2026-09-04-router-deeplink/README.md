@@ -10,6 +10,7 @@ npm ci
 npm test
 ```
 
-관찰된 제약: `validateSearch`가 URL과 다른 값을 돌려주는 경우(정규화)와 `beforeLoad`의 `redirect()`는
-`RouterProvider`가 후속 navigate를 수행한다. 렌더러 없는 스파이크에서는 `router.navigate()`로 같은 경로를
-탄다. `node_modules/`는 커밋하지 않고 `package-lock.json`은 커밋한다.
+관찰: `validateSearch`가 URL과 다른 값을 돌려주는 경우(정규화)와 `beforeLoad`의 `redirect()`는 실제 앱에서
+`RouterProvider`(Transitioner mount replace / `followRedirect`, 둘 다 `ignoreBlocker: true`)가 후속
+navigate를 수행한다. 렌더러 없는 스파이크에서는 `router.navigate()`(in-app `buildLocation` 정규화 경로)와
+`beforeLoad`가 throw한 redirect 값 검사로 대체한다. `node_modules/`는 커밋하지 않고 `package-lock.json`은 커밋한다.

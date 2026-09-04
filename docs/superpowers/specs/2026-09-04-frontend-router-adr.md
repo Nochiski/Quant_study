@@ -19,7 +19,7 @@ namespace, dirty navigation blocker, view/path/date query 복원을 요구한다
 | 기준 | `@tanstack/react-router` 1.170 | `react-router` 8.3 |
 |---|---|---|
 | 타입 안전 path/search params | 내장 (`validateSearch`, 라우트별 typed search) | path만 타입 추론, search는 수동 |
-| dirty navigation blocker | `useBlocker({ shouldBlockFn })` (react-router 패키지 d.ts 확인) | `useBlocker` (data router 필요) |
+| dirty navigation blocker | `useBlocker({ shouldBlockFn, enableBeforeUnload })` (`@tanstack/react-router` d.ts 확인) | `useBlocker` (data router 필요) |
 | TanStack Query 통합 | `loader`에서 `queryClient.ensureQueryData`, 같은 생태계 | 가능하나 별도 패턴 |
 | lazy route | `createLazyRoute` / `lazyRouteComponent` | `lazy()` |
 | not-found/error boundary | route별 `notFoundComponent`, `errorComponent` | `errorElement` |
@@ -34,11 +34,11 @@ namespace, dirty navigation blocker, view/path/date query 복원을 요구한다
 | 검증 항목 (WORKFLOW P0-04) | 결과 |
 |---|---|
 | `/research/strategies/$strategyId/revisions/$revision` direct entry | params·typed search(`view`, `path`, `asOf`)·loader data 복원 |
-| query parameter의 view/path 복원 | `validateSearch`가 잘못된 `view=bogus`를 `yaml`로 정규화하고 URL을 `?view=yaml`로 다시 씀 |
+| query parameter의 view/path 복원 | `validateSearch`가 잘못된 `view=bogus`를 제거(undefined)하고 router가 URL을 다시 씀. 스파이크는 in-app `navigate()` 경로(`buildLocation` 정규화)로 관찰. direct entry에서는 `RouterProvider`의 Transitioner가 mount 시 `replace: true, ignoreBlocker: true`로 같은 정규화를 수행한다 |
 | loader `notFound()` | root match의 `error.isNotFound`로 노출 → route `notFoundComponent`가 렌더 |
 | 알 수 없는 path | root만 match → root `notFoundComponent`(global not-found) |
-| 기존 single-page entry | `/legacy/builder?step=portfolio&run=true`가 query를 typed search로 유지, memory history back/forward 동작 |
-| redirect | `redirect({ to })`는 `isRedirect`인 값을 throw. `beforeLoad` redirect와 search 정규화의 후속 navigate는 `RouterProvider`가 수행 (스파이크는 `router.navigate()`로 대체) |
+| 기존 single-page entry | `/?step=portfolio&run`의 `beforeLoad`가 search를 유지한 `redirect({ to: "/legacy/builder", search })`를 throw. `/legacy/builder?step=portfolio&run=true`는 typed search 유지, memory history back/forward 동작 |
+| redirect | `redirect({ to, search })`는 `isRedirect`인 값을 throw. `beforeLoad` redirect는 `load-client`의 `followRedirect`가 `replace: true, ignoreBlocker: true`로 따라가며 provider의 history 구독이 후속 load를 만든다. 렌더러 없는 스파이크는 throw된 값과 `router.navigate()`로 대체 |
 | lazy route | `lazyRouteComponent`가 `preload()` 전까지 import를 지연 |
 | dirty navigation blocker | `useBlocker` export 확인. 동작 검증은 P2-04 vitest(렌더 필요) |
 
@@ -54,8 +54,13 @@ TanStack Query 통합(`loader`에서 `queryClient.ensureQueryData`)과 error bou
 - route tree는 `src/app/router/`가 소유한다. 각 route component는 `pages/<slice>` public API에서만
   import한다. `pages`는 router hook을 `shared/lib/router`의 얇은 re-export로 쓴다.
 - search params는 route마다 `validateSearch`로 typed schema를 선언한다. view/path/date/security
-  selection(WORKFLOW 2.6의 "URL 소유 상태")은 여기서 복원된다. 잘못된 값은 throw하지 않고 기본값으로
-  정규화한다(router가 URL을 다시 쓴다). 공유 링크가 깨지지 않게 하기 위해서다.
+  selection(WORKFLOW 2.6의 "URL 소유 상태")은 여기서 복원된다. 잘못된 값은 throw하지 않고 **제거**한다
+  (`undefined`). router가 URL을 다시 쓰므로 공유 링크가 깨지지 않는다.
+- 기본값은 URL에 쓰지 않는다. `validateSearch`는 기본값을 채우지 않고 page가 읽을 때
+  `search.view ?? "yaml"`로 적용한다. 기본값을 채우면 `/research/strategies/new` 같은 모든 공유 링크가
+  mount 시 `?view=yaml…`로 확장(replace)된다.
+- `loaderDeps`에 view/path/asOf/security를 넣지 않는다. match id는 `route.id + path + loaderDepsHash`라
+  search-only 변경이 page remount와 loader 재실행을 일으키지 않게 한다.
 
 ### D2. Route tree (P2-02)
 
@@ -66,22 +71,40 @@ TanStack Query 통합(`loader`에서 `queryClient.ensureQueryData`)과 error bou
   /strategies/$strategyId/revisions/$revision
   /backtests/$runId
 /legacy/builder                     ← 기존 StrategyBuilderPage (migration 기간)
-/operations/*                       ← feature flag 뒤, placeholder page (ADR P0-01 D8·14절)
+/operations/*                       ← feature flag 뒤, placeholder page (ADR P0-01 D8, WORKFLOW 15절)
 ```
 
-- 기존 진입 `/?step=...`, `/?run`은 `/legacy/builder`로 query를 유지하며 redirect한다.
-- `/operations/*`는 `VITE_ENABLE_OPERATIONS` 가 truthy일 때만 route가 등록된다.
+- 기존 진입 `/?step=...`, `/?run`은 `/legacy/builder`로 query를 유지하며 redirect한다. WORKFLOW P2-02의
+  "기존 진입 URL은 새 전략 route로 redirect"를 이렇게 구체화한 이유: P0-01 D8/D9가 Quick/Advanced를
+  migration 기간 legacy route로 유지하기로 했고, 현재 `strategy-editor.tsx`는 mount 시
+  `window.location.search`의 `step`/`run`을 읽으므로 query를 보존한 redirect가 기존 북마크와 호환된다.
+  query 없는 `/`만 `/research/strategies/new`로 간다. P6-06에서 legacy를 제거하면 `/legacy/builder`는
+  `/research/strategies/new`로 redirect한다 (WORKFLOW P2-02 bullet 갱신).
+- `/operations/*`는 항상 route tree에 등록하고, `VITE_ENABLE_OPERATIONS`가 truthy가 아니면 `beforeLoad`에서
+  `notFound()`를 던진다. route 등록을 flag로 조건화하면 빌드마다 route tree 타입이 달라진다.
 
 ### D3. Dirty navigation
 
-- `features/edit-strategy` document state의 `dirty`를 `useBlocker({ shouldBlockFn })`로 route leave에
-  연결한다. blocker UI는 `shared/ui` dialog primitive를 쓴다.
-- browser reload/close는 `beforeunload`를 함께 건다.
+- `features/edit-strategy` document state의 `dirty`를 `useBlocker`로 route leave에 연결한다. blocker UI는
+  `shared/ui` dialog primitive를 쓴다.
+- 술어: `shouldBlockFn: ({ current, next }) => dirty && current.pathname !== next.pathname`. **search-only
+  변경(view/path/asOf/security 선택)은 차단하지 않는다.** `@tanstack/history`의 `tryNavigation`은
+  PUSH/REPLACE 모두에서 blocker를 부르고 same-route search 변경도 `shouldBlockFn`에 넘어오므로
+  `() => dirty`로 쓰면 dirty인 동안 outline·view·날짜 선택이 매번 dialog에 막힌다.
+- 저장 성공 후 revision URL 전환(P2-04)은 `savedSource`/`dirty=false` 반영 전에 navigate가 호출될 수
+  있으므로 `navigate({ ..., ignoreBlocker: true })`로 수행한다.
+- browser reload/close는 `useBlocker`의 `enableBeforeUnload: () => dirty`로 처리한다. 별도 `beforeunload`
+  listener를 걸면 dialog가 두 번 뜬다.
+- search 정규화 replace와 `beforeLoad` redirect는 router가 `ignoreBlocker: true`로 수행하므로 blocker를
+  오발동시키지 않는다.
 
 ### D4. Loader와 Query cache
 
-- saved revision route의 `loader`는 `queryClient.ensureQueryData(strategyRevisionQuery(id, rev))`만
-  호출한다. 응답은 query cache가 소유하고 loader 반환값을 store에 복제하지 않는다.
+- saved revision route의 `loader`는 `queryClient.ensureQueryData(strategyRevisionQuery(id, rev))`로
+  warm-up만 하고 데이터를 반환하지 않는다. page는 `useSuspenseQuery(strategyRevisionQuery(...))`로 읽고
+  `useLoaderData`를 쓰지 않는다. `ensureQueryData`는 stale이어도 재요청하지 않으므로 loader 반환값을
+  읽으면 409 conflict 후 refetch(P3-07)가 화면에 반영되지 않는다. staleTime 정책은 query options가
+  소유한다.
 - not-found(404)는 route `notFoundComponent`, 그 외 오류는 `errorComponent`로 구분한다.
 
 ## 4. 대안
@@ -92,5 +115,7 @@ TanStack Query 통합(`loader`에서 `queryClient.ensureQueryData`)과 error bou
 
 ## 5. Rollback
 
-route tree와 hook re-export가 `app/router/`와 `shared/lib/router`에 국한되므로, 문제 시 두 위치만
-react-router로 바꾼다. `pages` 컴포넌트는 router에 직접 의존하지 않는다.
+route tree와 hook 진입점이 `app/router/`와 `shared/lib/router`에 국한되어 교체 범위를 찾기 쉽다.
+`useSearch({ from })`, `useBlocker({ shouldBlockFn })`, `loader`는 react-router에 같은 시그니처가 없으므로
+호출처(page·feature)도 함께 바뀐다. `shared/lib/router`의 re-export는 위임 함수가 아니라 import 경계이며
+도메인 무관이라 shared 배치가 적합하다.

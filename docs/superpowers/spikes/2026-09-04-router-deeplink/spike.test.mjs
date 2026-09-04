@@ -1,8 +1,9 @@
 // P0-04 deep-link spike: React 렌더링 없이 router core만으로 route tree, typed search 정규화, loader,
 // notFound, lazy component, redirect/blocker API를 확인한다. ADR: ../../specs/2026-09-04-frontend-router-adr.md
 //
-// 관찰된 제약: search 정규화(validateSearch가 URL과 다른 값을 돌려줌)와 beforeLoad redirect는 RouterProvider의
-// Transitioner가 후속 navigate를 수행한다. 렌더러 없는 이 스파이크에서는 `router.navigate()`로 같은 경로를 탄다.
+// search 정규화(validateSearch가 URL과 다른 값을 돌려줌)와 beforeLoad redirect는 실제 앱에서 RouterProvider가
+// (Transitioner mount replace / followRedirect, ignoreBlocker) 후속 navigate를 수행한다. 렌더러 없는 이
+// 스파이크에서는 in-app `router.navigate()` 경로와 beforeLoad가 throw한 redirect 값으로 검증한다.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
@@ -24,7 +25,15 @@ const buildRouter = (initial) => {
   const index = createRoute({
     getParentRoute: () => root,
     path: "/",
-    beforeLoad: () => {
+    validateSearch: (search) => ({
+      step: typeof search.step === "string" ? search.step : undefined,
+      run: search.run !== undefined ? true : undefined,
+    }),
+    beforeLoad: ({ search }) => {
+      // 기존 single-page 북마크(`/?step=`, `/?run`)는 query를 유지한 채 legacy route로 보낸다 (ADR D2).
+      if (search.step !== undefined || search.run !== undefined) {
+        throw redirect({ to: "/legacy/builder", search });
+      }
       throw redirect({ to: "/research/strategies/new" });
     },
   });
@@ -44,8 +53,9 @@ const buildRouter = (initial) => {
   const revision = createRoute({
     getParentRoute: () => root,
     path: "/research/strategies/$strategyId/revisions/$revision",
+    // 잘못된 값은 제거하고 기본값은 URL에 쓰지 않는다 (ADR D1). page가 `view ?? "yaml"`로 읽는다.
     validateSearch: (search) => ({
-      view: views.includes(search.view) ? search.view : "yaml",
+      view: views.includes(search.view) ? search.view : undefined,
       path: typeof search.path === "string" ? search.path : undefined,
       asOf: typeof search.asOf === "string" ? search.asOf : undefined,
     }),
@@ -80,7 +90,7 @@ test("revision deep link restores typed search params, params and loader data", 
   assert.deepEqual(match.loaderData, { strategyId: "abc", revision: 3 });
 });
 
-test("invalid view is normalised to yaml and written back to the URL", async () => {
+test("invalid view is dropped and the URL is rewritten without it", async () => {
   const router = buildRouter("/research/strategies/abc/revisions/1?view=yaml");
   await router.load();
   await router.navigate({
@@ -88,8 +98,8 @@ test("invalid view is normalised to yaml and written back to the URL", async () 
     params: { strategyId: "abc", revision: "2" },
     search: { view: "bogus" },
   });
-  assert.equal(leaf(router).search.view, "yaml");
-  assert.equal(router.state.location.searchStr, "?view=yaml");
+  assert.equal(leaf(router).search.view, undefined);
+  assert.equal(router.state.location.searchStr, "");
 });
 
 test("loader notFound surfaces as a notFound error on the root match", async () => {
@@ -114,7 +124,8 @@ test("unknown path matches only the root route (global not-found)", async () => 
 });
 
 test("legacy entry keeps its query and back/forward works on memory history", async () => {
-  // `run`만 있는 URL은 validateSearch가 `run=true`로 정규화하므로(스파이크 제약) 정규화된 형태로 진입한다.
+  // `run`만 있는 URL은 validateSearch가 `run=true`로 정규화한다(실제 앱은 Transitioner가 replace). 렌더러 없는
+  // 스파이크는 정규화된 형태로 직접 진입한다.
   const router = buildRouter("/legacy/builder?step=portfolio&run=true");
   await router.load();
   assert.deepEqual(leaf(router).search, { step: "portfolio", run: true });
@@ -128,16 +139,32 @@ test("legacy entry keeps its query and back/forward works on memory history", as
   assert.equal(router.state.location.pathname, "/research/backtests/r1");
 });
 
-test("redirect() produces a router redirect the provider follows; blocker hook exists", () => {
+test("index beforeLoad redirects bare / to the new strategy route", () => {
+  const router = buildRouter("/");
+  const index = router.routesById["/"];
   let thrown;
   try {
-    throw redirect({ to: "/research/strategies/new" });
+    index.options.beforeLoad({ search: { step: undefined, run: undefined } });
   } catch (error) {
     thrown = error;
   }
   assert.ok(isRedirect(thrown));
   assert.equal(thrown.options.to, "/research/strategies/new");
   assert.equal(typeof useBlocker, "function");
+});
+
+test("index beforeLoad keeps legacy query when redirecting /?step=&run to /legacy/builder", () => {
+  const router = buildRouter("/?step=portfolio&run=true");
+  const index = router.routesById["/"];
+  let thrown;
+  try {
+    index.options.beforeLoad({ search: { step: "portfolio", run: true } });
+  } catch (error) {
+    thrown = error;
+  }
+  assert.ok(isRedirect(thrown));
+  assert.equal(thrown.options.to, "/legacy/builder");
+  assert.deepEqual(thrown.options.search, { step: "portfolio", run: true });
 });
 
 test("lazyRouteComponent defers the import until preload/render", async () => {

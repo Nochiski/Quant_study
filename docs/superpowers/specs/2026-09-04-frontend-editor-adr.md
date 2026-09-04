@@ -22,7 +22,7 @@ completion 품질을 함께 보라고 한다.
 |---|---|---|---|---|
 | CodeMirror 6 `basicSetup` + `@codemirror/lang-yaml` 6.1.3 + `yaml` 2.9.0 | 517 KB | 164 KB | 164 KB | worker 없음, 단일 chunk |
 | 위 + `codemirror-json-schema` 0.8.1 | 897 KB | 293 KB | 316 KB | shiki, markdown-it, json-schema-library를 끌고 옴 |
-| `monaco-editor` 0.52.2 + `monaco-yaml` 5.5.1 | 3,288 KB (main) + worker 2개 1,260 KB | 약 1,270 KB | 약 1,340 KB | 언어 모드 lazy chunk 약 90개 포함. CSS 133 KB, codicon 80 KB 별도 |
+| `monaco-editor` 0.52.2 + `monaco-yaml` 5.5.1 | 3,288 KB (main) + worker 2개 1,260 KB | 약 1,210 KB (CSS·codicon 포함 시 약 1,270) | 약 1,340 KB | 언어 모드 lazy chunk 약 90개 포함. CSS 133 KB, codicon 80 KB는 JS 컬럼에서 제외 |
 | `monaco-editor` 0.55.1 + `monaco-yaml` 5.5.1 | 3,749 KB (main) | 958 KB | — | 빌드 성공. 0.52.2보다 큼 |
 | `monaco-editor` 0.56.0 + `monaco-yaml` 5.5.1 | 빌드 실패 | — | — | 아래 원인 |
 
@@ -103,7 +103,7 @@ completion/hover(P3-03)"로 읽는다 (WORKFLOW P3-03 갱신).
 
 ## 4. 대안
 
-- **Monaco + monaco-yaml**: schema completion이 가장 완성도 높지만 gzip 약 1.3 MB, worker 3개, textarea
+- **Monaco + monaco-yaml**: schema completion이 가장 완성도 높지만 gzip 약 1.3 MB, worker 2개, textarea
   기반 IME 이슈, monaco ≥ 0.56 exports map 미지원. 기각. monaco-yaml이 0.56+를 지원하면 IME 논거는
   약해지고 번들 8배 차이가 주된 근거로 남는다.
 - **CodeMirror 6 + codemirror-json-schema**: 빠르게 붙지만 chunk 2배와 validation 엔진 중복(D2 위반).

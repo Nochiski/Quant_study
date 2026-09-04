@@ -632,6 +632,7 @@ editing
 - source CST 기반 path/range index
 - P0-03에서 고정한 YAML 1.2 core schema와 cross-runtime fixture 사용
 - parse 실패 시 compiled spec을 덮어쓰지 않음
+- parse trigger는 editor의 `view.composing`이 false일 때만 실행 (한글 조합 중 보류)
 - stale spec은 명시적 badge와 함께 조회만 가능
 - source format은 YAML 또는 JSON 중 하나
 

@@ -377,6 +377,18 @@
       "file": "rejected/tab_after_colon.yaml",
       "expect": "reject",
       "reason": "syntax"
+    },
+    {
+      "name": "escaped_lone_surrogate_value",
+      "file": "rejected/escaped_lone_surrogate_value.yaml",
+      "expect": "reject",
+      "reason": "syntax"
+    },
+    {
+      "name": "escaped_lone_surrogate_key",
+      "file": "rejected/escaped_lone_surrogate_key.yaml",
+      "expect": "reject",
+      "reason": "syntax"
     }
   ]
 }

@@ -87,6 +87,13 @@ def _scan_policy(text: str) -> None:
 
 
 def _check_tree(value: object, pointer: str) -> None:
+    if isinstance(value, str):
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError as error:
+            raise Yaml12Rejected(
+                "syntax", f"string contains an unpaired surrogate escape — pointer={pointer!r}"
+            ) from error
     if isinstance(value, float) and not math.isfinite(value):
         raise Yaml12Rejected("non_finite_number", f"pointer={pointer} value={value!r}")
     if isinstance(value, int) and not isinstance(value, bool) and abs(value) > _MAX_SAFE_INTEGER:
@@ -95,6 +102,7 @@ def _check_tree(value: object, pointer: str) -> None:
         for key, item in value.items():
             if not isinstance(key, str):
                 raise Yaml12Rejected("non_string_key", f"pointer={pointer} key={key!r}")
+            _check_tree(key, f"{pointer}/{key}")
             _check_tree(item, f"{pointer}/{key}")
     elif isinstance(value, list):
         for index, item in enumerate(value):

@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: SELF_CHECK
+project_status: IN_REVIEW
 current_phase: P4
 current_pr: P4-09
 active_prs: [P4-09]
 parallel_window: [P4-09]
-last_updated: 2026-09-05T04:48:12+09:00
+last_updated: 2026-09-05T04:48:55+09:00
 planned_prs: 49
 merged_prs: 35
 approved_prs: 35
@@ -22,7 +22,7 @@ progress_percent: 71
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `SELF_CHECK` |
+| Project status | `IN_REVIEW` |
 | Current phase | `P4` |
 | Current/next PR | `P4-09` |
 | Active PR | `P4-09` |
@@ -76,7 +76,7 @@ progress_percent: 71
 | P1.5 | Backtest Correctness Gate | 5 | 5 | `MERGED` |
 | P2 | App Shell and visual foundation | 4 | 4 | `MERGED` |
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
-| P4 | Outline, Contract, Projections | 9 | 4 | `SELF_CHECK` |
+| P4 | Outline, Contract, Projections | 9 | 4 | `IN_REVIEW` |
 | P5 | Truthful Trace UI | 3 | 0 | `WAITING` |
 | P6 | Professional release and migration | 7 | 1 | `WAITING` |
 | **Total** |  | **49** | **35** | **71%** |
@@ -86,7 +86,7 @@ progress_percent: 71
 
 | 항목 | 값 |
 |---|---|
-| PR | `P4-09` Execution Plan projection SELF_CHECK |
+| PR | `P4-09` Execution Plan projection IN_REVIEW |
 | Intent | P4-04 query가 반환한 backend-owned plan을 IDE 하단에 표시하고 factor/node 선택을 exact YAML pointer navigation과 연결한다 |
 | Acceptance | factor별 topological step·input/output type/unit·minimum history·plan fingerprint 표시; pending/error/stale/empty 상태; factor와 node 선택 시 source jump; keyboard/accessibility; frontend 재계산 금지 |
 | Non-goals | plan query/version gate(P4-04), graph 직접 편집(P4-07), factor 값·trace(P5), backend plan 재컴파일 또는 type/unit 추론 |
@@ -204,7 +204,7 @@ Phase exit:
 | [ ] | `P4-06` | Read-only canonical JSON과 Form projection | P3-05 | `WAITING` | — |
 | [ ] | `P4-07` | Read-only FactorGraph DAG projection | P4-01, P3-05 | `WAITING` | — |
 | [ ] | `P4-08` | Source/semantic/revision Diff와 conflict resolution | P1-08, P3-07 | `WAITING` | — |
-| [ ] | `P4-09` | Execution Plan 표시와 YAML/graph selection 연동 | P4-04, P4-01 | `SELF_CHECK` | `review_p4_09` 예정 |
+| [ ] | `P4-09` | Execution Plan 표시와 YAML/graph selection 연동 | P4-04, P4-01 | `IN_REVIEW` | [#58](https://github.com/Nochiski/Quant_study/pull/58) · `review_p4_09` 검토 중 |
 
 Phase exit:
 
@@ -292,7 +292,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
-| P4-09 | execution query·panel projection 21 passed | frontend typecheck·lint·vitest 291·build; real backend PIT E2E 포함 | generated API 변경 없음 | backend step 순서·input/output type/unit·history·registry/dataset·fingerprint 표시, 모든 blocked/loading/error/incompatible/invalid 상태, factor/node/input pointer와 route selection 검증 | PR/CI 대기 | 2026-09-05 |
+| P4-09 | execution query·panel projection 21 passed | frontend typecheck·lint·vitest 291·build; real backend PIT E2E 포함 | generated API 변경 없음 | backend step 순서·input/output type/unit·history·registry/dataset·fingerprint 표시, 모든 blocked/loading/error/incompatible/invalid 상태, factor/node/input pointer와 route selection 검증 | [#58](https://github.com/Nochiski/Quant_study/pull/58) reviewer/CI 대기 | 2026-09-05 |
 | P4-04 | backend factor HTTP·truthful pipeline·raw port·equity HTTP 47, frontend orchestration 7 passed | backend 903·Ruff·Pyright; frontend 277·typecheck·lint·build | OpenAPI/SDK 재생성 deterministic·clean | explain↔portfolio plan 전체 동등성, 공개 category catalog↔raw loader, 숫자 group 동일 코드 거부, sector group completed/tape hash, metadata/raw snapshot mismatch, category·boolean·scalar output 실행 차단까지 검증 | [#57](https://github.com/Nochiski/Quant_study/pull/57) 동일 reviewer APPROVE, latest CI 4/4 pass, MERGED (`25d8b45`) | 2026-09-05 |
 | P6-07 | root delegate 4 + 실제 server HTTP smoke 1 + backend entrypoint/architecture 8 passed | backend pytest 896·ruff·pyright; frontend typecheck·lint·vitest 270·build; root test 5·ruff·pyright·locks | generated API 변경 없음 | root `npm run dev` HTTP 200, root `uv run server --port 42810` health 200·reload·Ctrl+C, backend/root help 동일 | [#56](https://github.com/Nochiski/Quant_study/pull/56) latest backend/frontend 중복 CI 4 pass, reviewer 최종 APPROVE, MERGED (`84d7c88`) | 2026-09-05 |
 | P4-03 | problem projection·panel·compile navigation 18 passed | frontend typecheck·lint·vitest 270·build | generated API 변경 없음 | 4종 toggle filter·error/warning section·정확한 dedupe·jump·빈 root pointer·pointer/node ID copy·stale/copy race/failure 접근성 검증 | [#55](https://github.com/Nochiski/Quant_study/pull/55) latest backend/frontend 중복 CI 4개 pass, MERGED (`ebc16c2`) | 2026-09-05 |
@@ -327,6 +327,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | P4-09 #58을 공개하고 code freeze `160fad4`를 fresh review-only agent `review_p4_09`에 전달하기 위해 IN_REVIEW로 전환. 리뷰 중 구현 diff를 고정하고 blocking finding은 같은 reviewer에게 재검토 요청 예정 | PR별 독립 reviewer 정확히 1명·13.3~13.4 review gate |
 | 2026-09-05 KST | Codex | P4-09 UI를 `160fad4`에 고정: P4-04 query의 plan step만 사용해 topological order·input/output type/unit·history·registry/dataset·graph/plan hash를 표시하고 factor/node/input 선택을 exact pointer로 연결. stale/invalid/pending/loading/error/incompatible/plan-null 상태에서 이전 plan을 숨기며 new/revision page에 동일 projection을 합성. focused 21·frontend 291·typecheck·lint·build 통과 후 SELF_CHECK 전환. 806줄은 상태·접근성 회귀 14개와 component/page composition이 하나의 독립 acceptance라 600줄 예외 기록 | backend plan SoT·표시/query/page 책임분리·P4-09 acceptance·12절 size exception |
 | 2026-09-05 KST | Codex | #57 P4-04를 동일 reviewer 최종 승인과 latest HEAD CI 4/4 통과 후 main에 병합(`25d8b45`), 35/49(71%). 최신 main에서 P4-09 전용 worktree를 만들고 보관한 Execution Plan UI projection을 query SoT에 연결하는 구현을 시작 | 13.6 merge gate·backend plan 표시 SoT·query/UI 책임분리 |
 | 2026-09-05 KST | Codex | `review_p4_04` 4차 재검토가 이전 P1 전부 해소와 FactorSignal numeric output gate의 SoT/책임분리를 확인해 APPROVE(P0 0/P1 0). 비차단 P2 validate provenance는 실행 권한을 주지 않는 view-only stale window로 후속 범위에 남기고 P4-04를 APPROVED·latest CI merge gate로 전환 | 동일 reviewer 최종 승인·실행 경로 fail-closed·13.6 merge gate |

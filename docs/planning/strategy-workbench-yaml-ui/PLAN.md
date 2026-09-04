@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: READY
+project_status: IN_PROGRESS
 current_phase: P0
 current_pr: P0-02
-active_prs: []
+active_prs: [P0-02]
 parallel_window: []
-last_updated: 2026-09-04T13:24:33+09:00
+last_updated: 2026-09-04T13:25:16+09:00
 planned_prs: 45
 merged_prs: 1
 approved_prs: 1
@@ -22,13 +22,13 @@ progress_percent: 2
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `READY` |
+| Project status | `IN_PROGRESS` |
 | Current phase | `P0` |
 | Current/next PR | `P0-02` |
-| Active PR | none |
+| Active PR | `P0-02` |
 | Progress | `1 / 45 merged (2%)` |
 | Approved | `1 / 45` |
-| Aggregated at | `2026-09-04 13:24 KST` |
+| Aggregated at | `2026-09-04 13:25 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -68,7 +68,7 @@ progress_percent: 2
 <!-- PLAN:PHASES:START -->
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
-| P0 | Contract, product direction, tool choices | 4 | 1 | `READY` |
+| P0 | Contract, product direction, tool choices | 4 | 1 | `IN_PROGRESS` |
 | P1 | Backend Authoring Contract | 9 | 0 | `READY` |
 | P1.5 | Backtest Correctness Gate | 4 | 0 | `READY` |
 | P2 | App Shell and visual foundation | 4 | 0 | `READY` |
@@ -87,8 +87,8 @@ progress_percent: 2
 | Intent | Monaco와 CodeMirror 6를 실제 fixture로 비교해 frontend source editor를 ADR로 확정한다. |
 | Acceptance | 번들 크기·IME·schema completion 기준 비교표, 최종 선택과 rollback 방법, 이후 PR dependency 기록 |
 | Non-goals | editor 의존성 설치·UI 코드 변경 (P3-02), parser (P0-03), router (P0-04) |
-| Branch/worktree | 미생성 |
-| Base SHA | 미기록 |
+| Branch/worktree | `feat/p0-02-editor-spike` |
+| Base SHA | `38a2304` |
 | Head SHA | 미기록 |
 | Diff stat | 미기록 |
 | Focused tests | 미실행 |
@@ -101,7 +101,7 @@ progress_percent: 2
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [x] | `P0-01` | Verbose source ADR, YAML-first 전환, roadmap/rules/tracker 정합화 | 없음 | `MERGED` | `review_p0_01` APPROVE |
-| [ ] | `P0-02` | Monaco/CodeMirror frontend editor spike | P0-01 | `READY` | — |
+| [ ] | `P0-02` | Monaco/CodeMirror frontend editor spike | P0-01 | `IN_PROGRESS` | — |
 | [ ] | `P0-03` | Backend parser ADR와 YAML 1.2 cross-runtime fixture | P0-01 | `READY` | — |
 | [ ] | `P0-04` | Frontend router ADR와 direct-entry spike | P0-01 | `READY` | — |
 
@@ -252,6 +252,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-04 KST | Claude | P0-02 IN_PROGRESS, 브랜치 생성 | 착수 |
 | 2026-09-04 KST | Claude | P0-01 APPROVE → 로컬 main merge, MERGED. P0-02/03/04, P1-01, P1.5-01, P2-01 READY | 13.6 merge gate |
 | 2026-09-04 KST | Claude | review_p0_01 REQUEST_CHANGES(P1: unknown key 정책) 반영 → b988984, 같은 reviewer 재검토 요청 | 13.5 재검토 |
 | 2026-09-04 KST | Claude | P0-01 SELF_CHECK 통과, diff freeze(7123f0a), review_p0_01 배정 → IN_REVIEW | 13.3 diff freeze |

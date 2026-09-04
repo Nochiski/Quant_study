@@ -9,7 +9,7 @@ ADR: docs/superpowers/specs/2026-09-04-strategy-authoring-contract-adr.md
 - identity를 제외한 canonical round-trip이 보존된다.
 - 기존 hash 알고리즘은 바뀌지 않는다 (template golden).
 - 구문이 깨진 source는 StrategySpec이 되지 않는다 (fail-closed).
-- unknown key는 structural fail-closed다 (P1-01 구현 전까지 strict xfail로 계약만 고정).
+- unknown key는 structural fail-closed다 (P1-01 domain hydrate).
 
 YAML loader는 P1-02 codec이 생기기 전까지의 임시 수단으로 `yaml.safe_load`(dev group의 pyyaml)를
 쓴다.
@@ -27,12 +27,15 @@ from typing import Any
 
 import pytest
 import yaml
-from pydantic import TypeAdapter, ValidationError
 
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
 )
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
+from strategy_workbench.domain.strategy.facade.document import (
+    hydrate_saved_strategy,
+    hydrate_strategy_document,
+)
 from strategy_workbench.domain.strategy.facade.specification import (
     StrategyIdentity,
     StrategySpec,
@@ -51,8 +54,6 @@ TEMPLATE_SPEC_HASH_2026_09_03 = "d6c0e1da4b05490bfa94b3b4c0c605fd4d6bca625f44d06
 
 DRAFT_IDENTITY = StrategyIdentity(strategy_id="draft", revision=0)
 
-_spec_adapter: TypeAdapter[StrategySpec] = TypeAdapter(StrategySpec)
-
 
 def _read(name: str) -> str:
     return (FIXTURES / name).read_text(encoding="utf-8")
@@ -70,22 +71,23 @@ def _load_json(name: str) -> dict[str, Any]:
     return loaded
 
 
+class StructuralError(ValueError):
+    pass
+
+
 def hydrate_authoring_document(
     document: dict[str, Any], identity: StrategyIdentity = DRAFT_IDENTITY
 ) -> StrategySpec:
-    """identity-free authoring payload에 revision envelope identity를 주입해 typed spec을 만든다.
+    """identity-free authoring payload를 domain typed hydrate로 StrategySpec으로 만든다.
 
-    P1-01이 이 역할을 domain hydrate로 옮긴다. untyped dict를 직접 canonical JSON으로
-    직렬화하는 경로를 만들지 않기 위해 반드시 typed StrategySpec을 거친다.
+    구조 오류가 있으면 StructuralError로 fail-closed한다.
     """
-    payload = dict(document)
-    schema_version = payload.pop("schema_version")
-    payload["identity"] = {
-        "strategy_id": identity.strategy_id,
-        "revision": identity.revision,
-        "schema_version": schema_version,
-    }
-    return _spec_adapter.validate_python(payload)
+    result = hydrate_strategy_document(document, identity=identity)
+    if not result.ok or result.spec is None:
+        raise StructuralError(
+            f"structural issues — {[(issue.code, issue.pointer) for issue in result.issues]}"
+        )
+    return result.spec
 
 
 def _template(today: date = date(2026, 9, 3)) -> StrategySpec:
@@ -114,7 +116,9 @@ def test_same_meaning_sources_share_one_spec_hash(name: str) -> None:
         spec = hydrate_authoring_document(_load_yaml(name))
     elif name.endswith(".legacy.json"):
         # legacy JSON은 identity를 문서 안에 가진 현행 API payload다.
-        spec = _spec_adapter.validate_python(_load_json(name))
+        legacy = hydrate_saved_strategy(_load_json(name))
+        assert legacy.ok and legacy.spec is not None
+        spec = legacy.spec
         assert spec.identity == StrategyIdentity("strategy-legacy", 3)
     else:
         spec = hydrate_authoring_document(_load_json(name))
@@ -166,17 +170,13 @@ def test_structurally_invalid_document_fails_closed() -> None:
     document = _load_yaml("quality_momentum.yaml")
     del document["data"]["start"]
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(StructuralError, match="structure.missing_field"):
         hydrate_authoring_document(document)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="ADR D4: unknown key는 structural fail-closed다. P1-01 hydrate 구현 시 xfail 제거.",
-)
 def test_unknown_key_fails_closed() -> None:
     """`risk.max_name_wieght` 오타가 default 0.1로 조용히 대체되면 안 된다."""
     document = _load_yaml("quality_momentum.unknown_key.yaml")
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(StructuralError, match="/risk/max_name_wieght"):
         hydrate_authoring_document(document)

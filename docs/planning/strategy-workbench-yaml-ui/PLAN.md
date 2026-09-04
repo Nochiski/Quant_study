@@ -1,16 +1,16 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: IN_REVIEW
+project_status: READY
 current_phase: P0
-current_pr: P0-01
-active_prs: [P0-01]
+current_pr: P0-02
+active_prs: []
 parallel_window: []
-last_updated: 2026-09-04T13:22:26+09:00
+last_updated: 2026-09-04T13:24:33+09:00
 planned_prs: 45
-merged_prs: 0
-approved_prs: 0
-progress_percent: 0
+merged_prs: 1
+approved_prs: 1
+progress_percent: 2
 ---
 
 # YAML Strategy Workbench 실시간 진행 계획
@@ -22,13 +22,13 @@ progress_percent: 0
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_REVIEW` |
+| Project status | `READY` |
 | Current phase | `P0` |
-| Current/next PR | `P0-01` |
-| Active PR | `P0-01` |
-| Progress | `0 / 45 merged (0%)` |
-| Approved | `0 / 45` |
-| Aggregated at | `2026-09-04 13:22 KST` |
+| Current/next PR | `P0-02` |
+| Active PR | none |
+| Progress | `1 / 45 merged (2%)` |
+| Approved | `1 / 45` |
+| Aggregated at | `2026-09-04 13:24 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -68,31 +68,31 @@ progress_percent: 0
 <!-- PLAN:PHASES:START -->
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
-| P0 | Contract, product direction, tool choices | 4 | 0 | `IN_REVIEW` |
-| P1 | Backend Authoring Contract | 9 | 0 | `WAITING` |
-| P1.5 | Backtest Correctness Gate | 4 | 0 | `WAITING` |
-| P2 | App Shell and visual foundation | 4 | 0 | `WAITING` |
+| P0 | Contract, product direction, tool choices | 4 | 1 | `READY` |
+| P1 | Backend Authoring Contract | 9 | 0 | `READY` |
+| P1.5 | Backtest Correctness Gate | 4 | 0 | `READY` |
+| P2 | App Shell and visual foundation | 4 | 0 | `READY` |
 | P3 | YAML Editor MVP | 7 | 0 | `WAITING` |
 | P4 | Outline, Contract, Projections | 8 | 0 | `WAITING` |
 | P5 | Truthful Trace UI | 3 | 0 | `WAITING` |
 | P6 | Professional release and migration | 6 | 0 | `WAITING` |
-| **Total** |  | **45** | **0** | **0%** |
+| **Total** |  | **45** | **1** | **2%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
 
 | 항목 | 값 |
 |---|---|
-| PR | `P0-01` |
-| Intent | verbose YAML 결정, YAML-first 제품 전환, roadmap/rules/tracker 관계를 ADR로 고정한다. |
-| Acceptance | DSL non-goal, no-code 범위 조정, Quick/Advanced deprecation 조건, roadmap/rules 갱신 |
-| Non-goals | editor/parser 설치, API 구현, UI 코드 변경 |
-| Branch/worktree | `feat/p0-01-strategy-authoring-contract` (main 작업 트리) |
-| Base SHA | `c174452` |
-| Head SHA | `b988984` (재검토) |
-| Diff stat | 15 files, +690/−26 (planning 패키지 제외; ADR·fixture·test가 대부분, pyyaml dev dep lock 포함) |
-| Focused tests | `uv run pytest -q tests/contract/test_strategy_authoring_fixtures.py` → 9 passed, 1 xfailed(strict, unknown key 계약) |
-| Full gate | pytest 608 passed + 1 xfailed · ruff clean · pyright 0 errors · 문서 링크 검증 (기존 결손 2건은 이 PR 이전부터 존재) |
+| PR | `P0-02` |
+| Intent | Monaco와 CodeMirror 6를 실제 fixture로 비교해 frontend source editor를 ADR로 확정한다. |
+| Acceptance | 번들 크기·IME·schema completion 기준 비교표, 최종 선택과 rollback 방법, 이후 PR dependency 기록 |
+| Non-goals | editor 의존성 설치·UI 코드 변경 (P3-02), parser (P0-03), router (P0-04) |
+| Branch/worktree | 미생성 |
+| Base SHA | 미기록 |
+| Head SHA | 미기록 |
+| Diff stat | 미기록 |
+| Focused tests | 미실행 |
+| Full gate | 미실행 |
 
 ---
 
@@ -100,10 +100,10 @@ progress_percent: 0
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P0-01` | Verbose source ADR, YAML-first 전환, roadmap/rules/tracker 정합화 | 없음 | `IN_REVIEW` | `review_p0_01` |
-| [ ] | `P0-02` | Monaco/CodeMirror frontend editor spike | P0-01 | `WAITING` | — |
-| [ ] | `P0-03` | Backend parser ADR와 YAML 1.2 cross-runtime fixture | P0-01 | `WAITING` | — |
-| [ ] | `P0-04` | Frontend router ADR와 direct-entry spike | P0-01 | `WAITING` | — |
+| [x] | `P0-01` | Verbose source ADR, YAML-first 전환, roadmap/rules/tracker 정합화 | 없음 | `MERGED` | `review_p0_01` APPROVE |
+| [ ] | `P0-02` | Monaco/CodeMirror frontend editor spike | P0-01 | `READY` | — |
+| [ ] | `P0-03` | Backend parser ADR와 YAML 1.2 cross-runtime fixture | P0-01 | `READY` | — |
+| [ ] | `P0-04` | Frontend router ADR와 direct-entry spike | P0-01 | `READY` | — |
 
 Phase exit:
 
@@ -117,7 +117,7 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P1-01` | Typed canonical hydrate와 numeric/date/enum hash fixture | P0-01 | `WAITING` | — |
+| [ ] | `P1-01` | Typed canonical hydrate와 numeric/date/enum hash fixture | P0-01 | `READY` | — |
 | [ ] | `P1-02` | 안전한 YAML/JSON codec과 source map | P0-03, P1-01 | `WAITING` | — |
 | [ ] | `P1-03` | Compile API와 통합 diagnostic, generated SDK | P1-02 | `WAITING` | — |
 | [ ] | `P1-04` | Constraint catalog와 adapter-owned discriminator, domain Pydantic 금지 | P1-01 | `WAITING` | — |
@@ -138,7 +138,7 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P1.5-01` | Adapter-owned snapshot provenance와 cache key | P0-01 | `WAITING` | — |
+| [ ] | `P1.5-01` | Adapter-owned snapshot provenance와 cache key | P0-01 | `READY` | — |
 | [ ] | `P1.5-02` | Bounded Factor evaluation projection과 parity test | P1.5-01 | `WAITING` | — |
 | [ ] | `P1.5-03` | Raw PIT observation port | P1.5-01 | `WAITING` | — |
 | [ ] | `P1.5-04` | 실제 FactorGraph 기반 preview/backtest TargetTape pipeline | P1.5-02, P1.5-03 | `WAITING` | — |
@@ -153,7 +153,7 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P2-01` | 시안 기준 light theme token과 공통 UI primitive | P0-01 | `WAITING` | — |
+| [ ] | `P2-01` | 시안 기준 light theme token과 공통 UI primitive | P0-01 | `READY` | — |
 | [ ] | `P2-02` | Router, research/operations namespace, App Shell | P0-04 | `WAITING` | — |
 | [ ] | `P2-03` | Stepper를 제거한 resizable Strategy IDE layout | P2-01, P2-02 | `WAITING` | — |
 | [ ] | `P2-04` | Revision-aware loader와 draft base 상태 | P1-07, P2-02 | `WAITING` | — |
@@ -240,18 +240,19 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
-| — | — | — | — | — | — | — | — |
+| P0-01 | `review_p0_01` | `c174452` | `b988984` | APPROVE (1차 REQUEST_CHANGES → 재검토) | 1 (해소) | unknown-key fail-closed는 P1-01 구현 전까지 계약만 고정; ParameterValue union hash 분기 P1-01; YAML 1.1/1.2 차이는 P0-03까지 미검출 | 2026-09-04 |
 
 ## 검증 기록
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
-| — | — | — | — | — | — | — |
+| P0-01 | contract 9 passed + 1 xfailed | pytest 608 + ruff + pyright | 해당 없음 (API 미변경) | 해당 없음 | 로컬 게이트 동일 범위 (원격 push 전) | 2026-09-04 |
 
 ## 변경 기록
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-04 KST | Claude | P0-01 APPROVE → 로컬 main merge, MERGED. P0-02/03/04, P1-01, P1.5-01, P2-01 READY | 13.6 merge gate |
 | 2026-09-04 KST | Claude | review_p0_01 REQUEST_CHANGES(P1: unknown key 정책) 반영 → b988984, 같은 reviewer 재검토 요청 | 13.5 재검토 |
 | 2026-09-04 KST | Claude | P0-01 SELF_CHECK 통과, diff freeze(7123f0a), review_p0_01 배정 → IN_REVIEW | 13.3 diff freeze |
 | 2026-09-04 KST | Claude | P0-01 IN_PROGRESS 전환, 브랜치 생성, scope packet 작성 | 착수 |

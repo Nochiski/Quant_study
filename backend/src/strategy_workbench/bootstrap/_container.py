@@ -8,6 +8,7 @@ from strategy_workbench.adapters.outbound.artifact_local.facade.store import Loc
 from strategy_workbench.adapters.outbound.backtest_engine.facade.executor import (
     BacktestEngineExecutorAdapter,
 )
+from strategy_workbench.adapters.outbound.document_codec.facade.codec import RuamelDocumentCodec
 from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import (
     BacktestEnginePortfolioAdapter,
 )
@@ -26,6 +27,9 @@ from strategy_workbench.application.factor_research.facade.research import (
     FactorResearchService,
 )
 from strategy_workbench.application.portfolio_design.facade.design import PortfolioDesignService
+from strategy_workbench.application.strategy_authoring.facade.authoring import (
+    StrategyAuthoringService,
+)
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.application.strategy_design.facade.ports import StrategyRepositoryPort
 from strategy_workbench.domain.analytics.facade.metrics import build_default_metric_registry
@@ -38,6 +42,7 @@ class BackendContainer:
     equity_workspace: EquityWorkspaceService
     strategy_repository: StrategyRepositoryPort
     strategy_design: StrategyDesignService
+    strategy_authoring: StrategyAuthoringService
     factor_research: FactorResearchService
     portfolio_design: PortfolioDesignService
     backtest_runs: BacktestRunService
@@ -69,6 +74,7 @@ def build_container(
             strategy_repository,
             new_id=lambda: str(uuid4()),
         ),
+        strategy_authoring=StrategyAuthoringService(RuamelDocumentCodec()),
         factor_research=FactorResearchService(build_default_factor_registry(), equity_data),
         portfolio_design=portfolio_design,
         backtest_runs=BacktestRunService(

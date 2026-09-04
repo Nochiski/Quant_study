@@ -465,6 +465,95 @@
         "title": "ComparisonOperator",
         "type": "string"
       },
+      "CompileRequest": {
+        "properties": {
+          "format": {
+            "$ref": "#/components/schemas/SourceFormat"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "format"
+        ],
+        "title": "CompileRequest",
+        "type": "object"
+      },
+      "CompiledDocument": {
+        "properties": {
+          "canonical_json": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Json"
+          },
+          "diagnostics": {
+            "items": {
+              "$ref": "#/components/schemas/SourceDiagnostic"
+            },
+            "title": "Diagnostics",
+            "type": "array"
+          },
+          "format": {
+            "$ref": "#/components/schemas/SourceFormat"
+          },
+          "schema_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Version"
+          },
+          "source_hash": {
+            "title": "Source Hash",
+            "type": "string"
+          },
+          "spec": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StrategySpec"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "spec_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spec Hash"
+          }
+        },
+        "required": [
+          "format",
+          "source_hash",
+          "schema_version",
+          "spec",
+          "canonical_json",
+          "spec_hash",
+          "diagnostics"
+        ],
+        "title": "CompiledDocument",
+        "type": "object"
+      },
       "ConditionalNode": {
         "properties": {
           "false_node_id": {
@@ -773,6 +862,24 @@
         ],
         "title": "DatasetRevision",
         "type": "object"
+      },
+      "DiagnosticKind": {
+        "enum": [
+          "syntax",
+          "structural",
+          "semantic",
+          "capability"
+        ],
+        "title": "DiagnosticKind",
+        "type": "string"
+      },
+      "DiagnosticSeverity": {
+        "enum": [
+          "error",
+          "warning"
+        ],
+        "title": "DiagnosticSeverity",
+        "type": "string"
       },
       "DrawdownPoint": {
         "properties": {
@@ -3688,6 +3795,95 @@
         "title": "SignalStep",
         "type": "object"
       },
+      "SourceDiagnostic": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/DiagnosticKind"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "pointer": {
+            "title": "Pointer",
+            "type": "string"
+          },
+          "range": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "severity": {
+            "$ref": "#/components/schemas/DiagnosticSeverity",
+            "default": "error"
+          }
+        },
+        "required": [
+          "code",
+          "kind",
+          "pointer",
+          "message"
+        ],
+        "title": "SourceDiagnostic",
+        "type": "object"
+      },
+      "SourceFormat": {
+        "enum": [
+          "yaml",
+          "json"
+        ],
+        "title": "SourceFormat",
+        "type": "string"
+      },
+      "SourcePosition": {
+        "description": "0-based line/column and UTF-8 code point offset into the exact source text.",
+        "properties": {
+          "column": {
+            "title": "Column",
+            "type": "integer"
+          },
+          "line": {
+            "title": "Line",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "line",
+          "column",
+          "offset"
+        ],
+        "title": "SourcePosition",
+        "type": "object"
+      },
+      "SourceRange": {
+        "properties": {
+          "end": {
+            "$ref": "#/components/schemas/SourcePosition"
+          },
+          "start": {
+            "$ref": "#/components/schemas/SourcePosition"
+          }
+        },
+        "required": [
+          "start",
+          "end"
+        ],
+        "title": "SourceRange",
+        "type": "object"
+      },
       "StrategyExplanation": {
         "properties": {
           "steps": {
@@ -4321,7 +4517,7 @@
     }
   },
   "info": {
-    "description": "No-code factor strategy design and backtest orchestration API.",
+    "description": "YAML-first factor strategy authoring, validation and backtest orchestration API. StrategySpec is the execution source of truth; YAML/JSON documents are compiled by the server.",
     "title": "Quant Strategy Workbench API",
     "version": "0.1.0"
   },
@@ -5298,6 +5494,45 @@
           }
         },
         "summary": "Revise Strategy"
+      }
+    },
+    "/api/v1/strategy-documents/compile": {
+      "post": {
+        "description": "Compile YAML/JSON source into a StrategySpec with syntax/structural/semantic diagnostics.\n\nAlways 200: the outcome is the diagnostic list. `spec`/`spec_hash` are null while any\nerror-severity diagnostic exists.",
+        "operationId": "compileStrategyDocument",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompiledDocument"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Compile Strategy Document"
       }
     }
   }

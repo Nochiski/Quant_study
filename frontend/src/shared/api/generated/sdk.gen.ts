@@ -6,6 +6,9 @@ import type {
   CancelBacktestData,
   CancelBacktestErrors,
   CancelBacktestResponses,
+  CompileStrategyDocumentData,
+  CompileStrategyDocumentErrors,
+  CompileStrategyDocumentResponses,
   CreateStrategyData,
   CreateStrategyErrors,
   CreateStrategyResponses,
@@ -412,6 +415,30 @@ export const reviseStrategy = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     url: "/api/v1/strategies/{strategy_id}/revisions",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Compile Strategy Document
+ *
+ * Compile YAML/JSON source into a StrategySpec with syntax/structural/semantic diagnostics.
+ *
+ * Always 200: the outcome is the diagnostic list. `spec`/`spec_hash` are null while any
+ * error-severity diagnostic exists.
+ */
+export const compileStrategyDocument = <ThrowOnError extends boolean = false>(
+  options: Options<CompileStrategyDocumentData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    CompileStrategyDocumentResponses,
+    CompileStrategyDocumentErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/strategy-documents/compile",
     ...options,
     headers: {
       "Content-Type": "application/json",

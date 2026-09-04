@@ -49,6 +49,11 @@ from strategy_workbench.application.portfolio_design.facade.design import (
     PortfolioPreview,
     PortfolioPreviewRequest,
 )
+from strategy_workbench.application.strategy_authoring.facade.authoring import (
+    CompiledDocument,
+    CompileRequest,
+    StrategyAuthoringService,
+)
 from strategy_workbench.application.strategy_design.facade.design import (
     InvalidStrategyError,
     SavedStrategy,
@@ -83,6 +88,7 @@ def _backtest_not_found(error: BacktestRunNotFoundError) -> HTTPException:
 def create_app(
     *,
     strategy_design: StrategyDesignService,
+    strategy_authoring: StrategyAuthoringService,
     equity_workspace: EquityWorkspaceService,
     factor_research: FactorResearchService,
     portfolio_design: PortfolioDesignService,
@@ -92,7 +98,11 @@ def create_app(
     app = FastAPI(
         title="Quant Strategy Workbench API",
         version="0.1.0",
-        description="No-code factor strategy design and backtest orchestration API.",
+        description=(
+            "YAML-first factor strategy authoring, validation and backtest orchestration API. "
+            "StrategySpec is the execution source of truth; YAML/JSON documents are compiled by "
+            "the server."
+        ),
     )
     app.add_middleware(
         CORSMiddleware,
@@ -307,6 +317,18 @@ def create_app(
                     "validation": jsonable_encoder(asdict(error.validation)),
                 },
             ) from error
+
+    @app.post(
+        "/api/v1/strategy-documents/compile",
+        operation_id="compileStrategyDocument",
+    )
+    def compile_strategy_document(request: CompileRequest) -> CompiledDocument:
+        """Compile YAML/JSON source into a StrategySpec with syntax/structural/semantic diagnostics.
+
+        Always 200: the outcome is the diagnostic list. `spec`/`spec_hash` are null while any
+        error-severity diagnostic exists.
+        """
+        return strategy_authoring.compile(request)
 
     @app.get(
         "/api/v1/strategies/template",

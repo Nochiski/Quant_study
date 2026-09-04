@@ -34,5 +34,5 @@ app -> pages -> widgets -> features -> entities -> shared
   때 함께 지울 코드라면 owner slice로 내린다.
 - 복수 entity 조합은 widget/page가 한다. feature가 다른 feature를 import하지 않는다.
 
-향후 `eslint-plugin-boundaries`로 레이어 방향, 같은 레이어 격리, public API 우회를 CI에서
-강제한다. 린터 도입 전에도 이 규칙은 신규 코드에 즉시 적용한다.
+`eslint-plugin-boundaries`가 레이어 방향, 같은 레이어 격리, public API 우회를 `npm run lint`에서
+강제한다. 린터 예외를 추가하지 말고 owner slice를 다시 설계한다.

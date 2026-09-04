@@ -138,7 +138,8 @@ AND semantic blocking error == 0
 |---|---|
 | YAML/JSON source, undo history, parse 상태 | `features/edit-strategy` |
 | 저장 전략, revision, schema, preview, trace | React Query cache |
-| 선택 view/path/date/security, 패널 크기 | workbench widget 및 URL |
+| 선택 view/path/date/security | URL search (TanStack Router `validateSearch`, P0-04 ADR) |
+| 패널 크기 | workbench widget local state |
 | theme, panel preference, 장애 복구본 | local persistence |
 | canonical JSON/hash, semantic validation, 계산값 | backend |
 
@@ -276,12 +277,15 @@ Acceptance:
 - 현재 배열 순서 semantics를 그대로 유지한다.
 - `1`/`1.0`, `15`/`15.0`, `1e-2`, ISO date 문자열, enum case fixture를 통과한다.
 - untyped dict를 직접 canonical JSON으로 직렬화하는 우회 경로가 없다.
+- unknown key는 depth와 무관하게 structural fail-closed다 (P0-01 ADR D5).
 
 ### P1-02 — 안전한 YAML/JSON codec
 
 - YAML 1.2 단일 document
 - duplicate key, custom tag, merge key 차단
-- alias, bytes, depth, node count 제한
+- anchor/alias 거부; bytes/depth/node count 제한 (compose 전 scan 단계에서 fail-closed)
+- codec은 untyped tree + JSON Pointer source map만 만든다 (`DocumentCodecPort`); typed hydrate는 domain
+- PyYAML `import yaml` 금지 architecture test (ruamel.yaml YAML 1.2 loader만 허용)
 - non-finite number와 비문자열 key 차단
 - JSON Pointer ↔ line/column/offset source map
 - exact UTF-8 source 보존

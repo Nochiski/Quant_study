@@ -15,9 +15,18 @@ class FactorObservationQuery:
     minimum_history_sessions: int
 
 
+@dataclass(frozen=True)
+class FactorObservationSet:
+    """Observations plus the snapshot they were read from.
+
+    The adapter owns `data_snapshot_id`; clients never choose it (P1.5-01).
+    """
+
+    data_snapshot_id: str
+    observations: tuple[FactorObservation, ...]
+
+
 class FactorObservationPort(Protocol):
     """PIT observations used by preview; the future Equity DB adapter implements this."""
 
-    def load_factor_observations(
-        self, query: FactorObservationQuery
-    ) -> tuple[FactorObservation, ...]: ...
+    def load_factor_observations(self, query: FactorObservationQuery) -> FactorObservationSet: ...

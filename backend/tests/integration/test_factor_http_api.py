@@ -38,7 +38,6 @@ def test_factor_preview_is_deterministic_and_returns_research_diagnostics() -> N
     graph = catalog["factors"][0]["default_graph"]
     body = {
         "graph": graph,
-        "data_snapshot_id": "mock-equity-v0.2-20260903",
         "as_of_start": "2024-01-02",
         "as_of_end": "2024-01-10",
     }
@@ -49,6 +48,9 @@ def test_factor_preview_is_deterministic_and_returns_research_diagnostics() -> N
     assert first.status_code == 200
     assert first.json() == second.json()
     payload = first.json()
+    # The adapter, not the client, names the snapshot; the cache key carries the same id.
+    assert payload["data_snapshot_id"] == "mock-equity-v0.2-20260903"
+    assert payload["cache_key"]["data_snapshot_id"] == payload["data_snapshot_id"]
     assert payload["analytics"]["coverage"] == 1.0
     assert payload["analytics"]["information_coefficient"] is not None
     assert len(payload["cache_key"]["fingerprint"]) == 64
@@ -71,7 +73,6 @@ def test_invalid_factor_preview_returns_structured_validation() -> None:
                 ],
                 "output_node_id": "cycle",
             },
-            "data_snapshot_id": "mock",
             "as_of_start": "2024-01-02",
             "as_of_end": "2024-01-03",
         },
@@ -80,3 +81,31 @@ def test_invalid_factor_preview_returns_structured_validation() -> None:
     assert response.status_code == 422
     assert response.json()["detail"]["code"] == "factor.graph.invalid"
     assert response.json()["detail"]["validation"]["issues"][0]["code"] == "factor.graph.cycle"
+
+
+def test_factor_preview_fails_closed_when_the_expected_snapshot_differs() -> None:
+    client = TestClient(build_http_app())
+    catalog = client.get(
+        "/api/v1/factors/catalog",
+        params={"search": "short.short_balance_ratio"},
+    ).json()
+    body = {
+        "graph": catalog["factors"][0]["default_graph"],
+        "expected_data_snapshot_id": "stale-snapshot-from-an-old-catalog",
+        "as_of_start": "2024-01-02",
+        "as_of_end": "2024-01-10",
+    }
+
+    response = client.post("/api/v1/factors/preview", json=body)
+
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["code"] == "factor.snapshot_mismatch"
+    assert detail["expected_data_snapshot_id"] == "stale-snapshot-from-an-old-catalog"
+    assert detail["actual_data_snapshot_id"] == "mock-equity-v0.2-20260903"
+
+    matching = client.post(
+        "/api/v1/factors/preview",
+        json=body | {"expected_data_snapshot_id": "mock-equity-v0.2-20260903"},
+    )
+    assert matching.status_code == 200

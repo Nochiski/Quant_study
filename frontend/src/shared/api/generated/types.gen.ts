@@ -1065,12 +1065,22 @@ export type FactorPreference = "high" | "low";
 export type FactorPreview = {
   analytics: FactorAnalytics;
   cache_key: FactorMatrixCacheKey;
+  /**
+   * Data Snapshot Id
+   */
+  data_snapshot_id: string;
   evaluation: FactorEvaluation;
   plan: FactorExecutionPlan;
 };
 
 /**
  * FactorPreviewRequest
+ *
+ * Preview request. The data snapshot is owned by the adapter (P1.5-01).
+ *
+ * `expected_data_snapshot_id` is optional provenance the client saw in the catalog; when it
+ * differs from the adapter's actual snapshot the preview fails closed instead of silently
+ * computing against different data.
  */
 export type FactorPreviewRequest = {
   /**
@@ -1082,9 +1092,9 @@ export type FactorPreviewRequest = {
    */
   as_of_start: string;
   /**
-   * Data Snapshot Id
+   * Expected Data Snapshot Id
    */
-  data_snapshot_id: string;
+  expected_data_snapshot_id?: string | null;
   /**
    * Factor Ids
    */

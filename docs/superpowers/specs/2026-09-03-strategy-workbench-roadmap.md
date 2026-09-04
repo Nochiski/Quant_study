@@ -133,7 +133,7 @@ frontend/
 | raw equity 값·공개 시점·coverage | Equity DB view + `dataset_profile` | data snapshot/build ID | Equity adapter |
 | Equity 조회 의미 | `EquityDataPort` | port version | mock/DuckDB adapter |
 | 팩터 식·방향·단위·입력·결측 정책 | Factor Registry | `factor_id@version` | catalog, compiler, UI |
-| 전략 의미 | immutable `StrategySpec` revision | schema version + canonical hash | 두 editor, compiler |
+| 전략 의미 | immutable `StrategySpec` revision | schema version + canonical hash | source editor, projection view, compiler (legacy editor는 migration 기간) |
 | 탐색 공간 | `SearchSpec` | schema version + hash | planner/optimizer |
 | 해소된 한 후보 | `ResolvedStrategySpec` | base hash + params hash | factor compiler |
 | 세션별 목표 비중 | `TargetTape` derived artifact | input fingerprint | engine adapter |
@@ -170,8 +170,10 @@ execution plan, TargetTape, metric view, composite score, cache는 모두 파생
 `StrategySpec`은 UI form JSON이 아니라 버전된 typed AST/DAG다.
 
 ```text
-identity
-  strategy_id, revision, schema_version, title, description
+identity (revision envelope가 소유, spec_hash 제외)
+  strategy_id, revision
+schema_version (document top-level)
+title, description (document)
 data
   market, date range, universe, eligibility, dataset lag overrides
 signal
@@ -285,7 +287,8 @@ raw metrics를 숨기거나 “최고 전략”을 자동 확정하지 않는다
 
 ### 9.1 Strategy Builder
 
-왼쪽 단계 rail과 중앙 editor, 오른쪽 항상 보이는 Validation/Estimate panel로 구성한다.
+왼쪽 outline(문서 섹션 탐색, 상단 중복 stepper 없음)과 중앙 editor, 오른쪽 항상 보이는
+Validation/Estimate panel로 구성한다. 아래 번호는 outline 섹션이지 wizard 단계가 아니다.
 
 1. 데이터/유니버스: 시장, 기간, 상장/관리/유동성/시총 필터, coverage와 available-date 설명.
 2. 팩터: catalog 검색, factor card, 방향/단위/coverage, transform chain, 조합 weight.

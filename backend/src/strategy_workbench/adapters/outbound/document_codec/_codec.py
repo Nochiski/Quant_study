@@ -3,14 +3,17 @@
 Implements the parser ADR (docs/superpowers/specs/2026-09-04-yaml-parser-adr.md):
 
 - pure YAML 1.2 safe loader, timestamps kept as strings;
-- scan-level policy: directives, anchors/aliases, tags, merge keys and numbers outside the YAML 1.2
-  core schema are rejected before composing;
+- scan-level policy (streamed, before any recursive compose): directives, anchors/aliases, tags,
+  merge keys, numbers outside the YAML 1.2 core schema, and nesting deeper than the limit;
 - compose-level policy: duplicate keys, non-string keys, non-finite numbers, integers beyond
-  Number.isSafeInteger, non-mapping roots, depth/node/byte limits;
+  Number.isSafeInteger, non-mapping roots, node/byte limits, unpaired surrogates;
+- JSON sources: `json.loads` provides positioned syntax errors, rejects NaN/Infinity and duplicate
+  keys, and its value tree is the one returned; ruamel only contributes the source map so the two
+  parsers can never disagree on values;
 - every accepted node gets a JSON Pointer → SourceRange entry, keys included.
 
 The same reason codes as the cross-runtime manifest are exposed as `yaml.<reason>`; JSON documents
-add `json.syntax`.
+add `json.syntax`. Untrusted input never raises out of `parse()`: every rejection is a diagnostic.
 """
 
 from __future__ import annotations
@@ -18,7 +21,7 @@ from __future__ import annotations
 import json
 import math
 import re
-from collections.abc import Iterable
+from collections.abc import Iterator
 from typing import Any
 
 from ruamel.yaml import YAML
@@ -28,7 +31,14 @@ from ruamel.yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 from ruamel.yaml.tokens import (
     AliasToken,
     AnchorToken,
+    BlockEndToken,
+    BlockMappingStartToken,
+    BlockSequenceStartToken,
     DirectiveToken,
+    FlowMappingEndToken,
+    FlowMappingStartToken,
+    FlowSequenceEndToken,
+    FlowSequenceStartToken,
     ScalarToken,
     TagToken,
 )
@@ -36,6 +46,7 @@ from ruamel.yaml.tokens import (
 from strategy_workbench.application.strategy_authoring.facade.ports import (
     CodecLimits,
     DiagnosticKind,
+    DiagnosticSeverity,
     ParsedDocument,
     ParseStatus,
     SourceDiagnostic,
@@ -47,12 +58,19 @@ from strategy_workbench.application.strategy_authoring.facade.ports import (
 
 _TIMESTAMP_TAG = "tag:yaml.org,2002:timestamp"
 _MERGE_TAG = "tag:yaml.org,2002:merge"
-_STR_TAG = "tag:yaml.org,2002:str"
 _NUMBER_TAGS = ("tag:yaml.org,2002:int", "tag:yaml.org,2002:float")
 _CORE_INT = re.compile(r"^(?:[-+]?[0-9]+|0o[0-7]+|0x[0-9a-fA-F]+)$")
 _CORE_FLOAT = re.compile(r"^[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?$")
 _NON_FINITE = re.compile(r"^(?:[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))$")
+_SURROGATE = re.compile("[\ud800-\udfff]")
 _MAX_SAFE_INTEGER = 2**53 - 1
+_OPENING = (
+    BlockMappingStartToken,
+    BlockSequenceStartToken,
+    FlowMappingStartToken,
+    FlowSequenceStartToken,
+)
+_CLOSING = (BlockEndToken, FlowMappingEndToken, FlowSequenceEndToken)
 
 
 class _Rejected(Exception):
@@ -65,6 +83,10 @@ class _Rejected(Exception):
         self.range = range_
 
 
+class _Counter:
+    nodes: int = 0
+
+
 def _escape(key: str) -> str:
     return key.replace("~", "~0").replace("/", "~1")
 
@@ -74,16 +96,16 @@ class RuamelDocumentCodec:
         self._limits = limits or CodecLimits()
 
     def parse(self, source: str, *, format: SourceFormat) -> ParsedDocument:
-        source_hash = source_hash_of(source)
         try:
+            self._check_encodable(source)
+            source_hash = source_hash_of(source)
             self._check_size(source)
-            if format is SourceFormat.JSON:
-                self._check_json_syntax(source)
-            root = self._compose(source)
+            json_tree = self._check_json_syntax(source) if format is SourceFormat.JSON else None
+            loader = _loader()
+            root = self._compose(source, loader)
             value_ranges: dict[str, SourceRange] = {}
             key_ranges: dict[str, SourceRange] = {}
-            counter = _Counter()
-            tree = self._walk(root, "", 0, value_ranges, key_ranges, counter)
+            tree = self._walk(root, "", 0, value_ranges, key_ranges, _Counter(), loader)
             if not isinstance(tree, dict):
                 raise _Rejected(
                     "yaml.not_a_mapping",
@@ -91,11 +113,13 @@ class RuamelDocumentCodec:
                     "",
                     _range_of(root),
                 )
+            if json_tree is not None:
+                tree = json_tree  # values come from the JSON parser; ruamel only mapped ranges
         except _Rejected as rejected:
             return ParsedDocument(
                 status=ParseStatus.REJECTED,
                 format=format,
-                source_hash=source_hash,
+                source_hash=_safe_hash(source),
                 tree=None,
                 value_ranges={},
                 key_ranges={},
@@ -105,6 +129,7 @@ class RuamelDocumentCodec:
                         kind=DiagnosticKind.SYNTAX,
                         pointer=rejected.pointer,
                         message=str(rejected),
+                        severity=DiagnosticSeverity.ERROR,
                         range=rejected.range,
                     ),
                 ),
@@ -121,6 +146,19 @@ class RuamelDocumentCodec:
 
     # -- stages -------------------------------------------------------------------------------
 
+    @staticmethod
+    def _check_encodable(source: str) -> None:
+        match = _SURROGATE.search(source)
+        if match is not None:
+            position = _offset_position(source, match.start())
+            raise _Rejected(
+                "yaml.syntax",
+                "source is not valid UTF-8 text — unpaired surrogate "
+                f"at line={position.line + 1} column={position.column + 1}",
+                "",
+                SourceRange(position, position),
+            )
+
     def _check_size(self, source: str) -> None:
         size = len(source.encode("utf-8"))
         if size > self._limits.max_bytes:
@@ -129,41 +167,62 @@ class RuamelDocumentCodec:
                 f"source exceeds size limit — bytes={size} max_bytes={self._limits.max_bytes}",
             )
 
-    @staticmethod
-    def _check_json_syntax(source: str) -> None:
+    def _check_json_syntax(self, source: str) -> dict[str, Any]:
+        def reject_constant(name: str) -> Any:  # reason: json hook signature
+            raise ValueError(f"non-finite literal {name} is not valid JSON")
+
+        def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            result: dict[str, Any] = {}
+            for key, value in pairs:
+                if key in result:
+                    raise _Rejected("yaml.duplicate_key", f"duplicate key — key={key!r}")
+                result[key] = value
+            return result
+
         try:
-            json.loads(source)
+            tree = json.loads(
+                source, parse_constant=reject_constant, object_pairs_hook=reject_duplicates
+            )
         except json.JSONDecodeError as error:
             position = SourcePosition(error.lineno - 1, error.colno - 1, error.pos)
             raise _Rejected(
                 "json.syntax",
-                f"invalid JSON — {error.msg} at line={error.lineno} column={error.colno}",
+                f"invalid JSON — {error.msg} (line={error.lineno} column={error.colno})",
                 "",
                 SourceRange(position, position),
             ) from error
+        except ValueError as error:
+            raise _Rejected("json.syntax", f"invalid JSON — {error}") from error
         except RecursionError as error:
-            raise _Rejected("yaml.too_deep", "invalid JSON — nesting too deep") from error
+            raise _Rejected(
+                "yaml.too_deep",
+                f"nesting exceeds limit — max_depth={self._limits.max_depth}",
+            ) from error
+        if not isinstance(tree, dict):
+            raise _Rejected(
+                "yaml.not_a_mapping",
+                f"document root must be a mapping — got={type(tree).__name__}",
+            )
+        return tree
 
-    def _compose(self, source: str) -> Node:
-        loader = _loader()
+    def _compose(self, source: str, loader: YAML) -> Node:
         try:
-            tokens = list(loader.scan(source))
+            self._scan_policy(loader.scan(source), loader)
         except MarkedYAMLError as error:
             raise _Rejected(
                 "yaml.syntax", _marked_message(error), "", _mark_range(error)
             ) from error
         except YAMLError as error:
             raise _Rejected("yaml.syntax", f"invalid YAML — {error}") from error
-        _scan_policy(tokens, loader)
         try:
-            root = _loader().compose(source)
+            root = loader.compose(source)
         except ComposerError as error:
             if "single document" in str(error):
                 raise _Rejected(
                     "yaml.multiple_documents",
                     "source must contain exactly one YAML document",
                     "",
-                    _mark_range(error),
+                    _problem_range(error),
                 ) from error
             raise _Rejected(
                 "yaml.syntax", _marked_message(error), "", _mark_range(error)
@@ -174,9 +233,64 @@ class RuamelDocumentCodec:
             ) from error
         except YAMLError as error:
             raise _Rejected("yaml.syntax", f"invalid YAML — {error}") from error
+        except RecursionError as error:  # pragma: no cover - scan depth guard runs first
+            raise _Rejected(
+                "yaml.too_deep", f"nesting exceeds limit — max_depth={self._limits.max_depth}"
+            ) from error
         if root is None:
             raise _Rejected("yaml.not_a_mapping", "document is empty — expected a mapping")
         return root
+
+    def _scan_policy(self, tokens: Iterator[object], loader: YAML) -> None:
+        """Streamed token policy; stops at the first violation so deep input never composes."""
+        depth = 0
+        for token in tokens:
+            if isinstance(token, _OPENING):
+                depth += 1
+                if depth > self._limits.max_depth + 1:
+                    raise _Rejected(
+                        "yaml.too_deep",
+                        f"nesting exceeds limit — depth={depth - 1} "
+                        f"max_depth={self._limits.max_depth}",
+                        "",
+                        _token_range(token),
+                    )
+            elif isinstance(token, _CLOSING):
+                depth -= 1
+            elif isinstance(token, DirectiveToken):
+                raise _Rejected(
+                    "yaml.directive",
+                    f"directives are not allowed — directive=%{token.name}",
+                    "",
+                    _token_range(token),
+                )
+            elif isinstance(token, (AnchorToken, AliasToken)):
+                raise _Rejected(
+                    "yaml.anchor_or_alias",
+                    f"anchors and aliases are not allowed — token={type(token).__name__}",
+                    "",
+                    _token_range(token),
+                )
+            elif isinstance(token, TagToken):
+                raise _Rejected(
+                    "yaml.tag", f"tags are not allowed — tag={token.value}", "", _token_range(token)
+                )
+            elif isinstance(token, ScalarToken) and token.plain:
+                tag = loader.resolver.resolve(ScalarNode, token.value, (True, False))
+                if tag == _MERGE_TAG:
+                    raise _Rejected(
+                        "yaml.merge_key", "merge keys (<<) are not allowed", "", _token_range(token)
+                    )
+                core_number = bool(_CORE_INT.match(token.value) or _CORE_FLOAT.match(token.value))
+                resolver_number = tag in _NUMBER_TAGS and not _NON_FINITE.match(token.value)
+                if resolver_number != core_number:
+                    raise _Rejected(
+                        "yaml.non_core_number",
+                        "number literal outside the YAML 1.2 core schema — "
+                        f"scalar={token.value!r} (frontend and backend would disagree)",
+                        "",
+                        _token_range(token),
+                    )
 
     def _walk(
         self,
@@ -186,7 +300,8 @@ class RuamelDocumentCodec:
         value_ranges: dict[str, SourceRange],
         key_ranges: dict[str, SourceRange],
         counter: _Counter,
-    ) -> Any:
+        loader: YAML,
+    ) -> Any:  # reason: JSON-compatible tree (dict/list/scalar) built generically from ruamel nodes
         counter.nodes += 1
         if counter.nodes > self._limits.max_nodes:
             raise _Rejected(
@@ -206,7 +321,7 @@ class RuamelDocumentCodec:
         if isinstance(node, MappingNode):
             result: dict[str, Any] = {}
             for key_node, value_node in node.value:
-                key = _loader().constructor.construct_object(key_node, deep=True)
+                key = loader.constructor.construct_object(key_node, deep=True)
                 if not isinstance(key, str):
                     raise _Rejected(
                         "yaml.non_string_key",
@@ -224,16 +339,18 @@ class RuamelDocumentCodec:
                     )
                 key_ranges[child] = _range_of(key_node)
                 result[key] = self._walk(
-                    value_node, child, depth + 1, value_ranges, key_ranges, counter
+                    value_node, child, depth + 1, value_ranges, key_ranges, counter, loader
                 )
             return result
         if isinstance(node, SequenceNode):
             return [
-                self._walk(item, f"{pointer}/{index}", depth + 1, value_ranges, key_ranges, counter)
+                self._walk(
+                    item, f"{pointer}/{index}", depth + 1, value_ranges, key_ranges, counter, loader
+                )
                 for index, item in enumerate(node.value)
             ]
         if isinstance(node, ScalarNode):
-            value = _loader().constructor.construct_object(node, deep=True)
+            value = loader.constructor.construct_object(node, deep=True)
             if isinstance(value, float) and not math.isfinite(value):
                 raise _Rejected(
                     "yaml.non_finite_number",
@@ -265,10 +382,6 @@ class RuamelDocumentCodec:
         )
 
 
-class _Counter:
-    nodes: int = 0
-
-
 def _loader() -> YAML:
     loader = YAML(typ="safe", pure=True)
     loader.version = (1, 2)
@@ -276,45 +389,20 @@ def _loader() -> YAML:
     return loader
 
 
-def _scan_policy(tokens: Iterable[object], loader: YAML) -> None:
-    for token in tokens:
-        if isinstance(token, DirectiveToken):
-            raise _Rejected(
-                "yaml.directive",
-                f"directives are not allowed — directive=%{token.name}",
-                "",
-                _token_range(token),
-            )
-        if isinstance(token, (AnchorToken, AliasToken)):
-            raise _Rejected(
-                "yaml.anchor_or_alias",
-                f"anchors and aliases are not allowed — token={type(token).__name__}",
-                "",
-                _token_range(token),
-            )
-        if isinstance(token, TagToken):
-            raise _Rejected(
-                "yaml.tag", f"tags are not allowed — tag={token.value}", "", _token_range(token)
-            )
-        if isinstance(token, ScalarToken) and token.plain:
-            tag = loader.resolver.resolve(ScalarNode, token.value, (True, False))
-            if tag == _MERGE_TAG:
-                raise _Rejected(
-                    "yaml.merge_key", "merge keys (<<) are not allowed", "", _token_range(token)
-                )
-            core_number = bool(_CORE_INT.match(token.value) or _CORE_FLOAT.match(token.value))
-            resolver_number = tag in _NUMBER_TAGS and not _NON_FINITE.match(token.value)
-            if resolver_number != core_number:
-                raise _Rejected(
-                    "yaml.non_core_number",
-                    "number literal outside the YAML 1.2 core schema — "
-                    f"scalar={token.value!r} (frontend and backend would disagree)",
-                    "",
-                    _token_range(token),
-                )
+def _safe_hash(source: str) -> str:
+    try:
+        return source_hash_of(source)
+    except UnicodeEncodeError:
+        return source_hash_of(source.encode("utf-8", "replace").decode("utf-8"))
 
 
-def _position(mark: Any) -> SourcePosition:
+def _offset_position(source: str, offset: int) -> SourcePosition:
+    line = source.count("\n", 0, offset)
+    column = offset - (source.rfind("\n", 0, offset) + 1)
+    return SourcePosition(line=line, column=column, offset=offset)
+
+
+def _position(mark: Any) -> SourcePosition:  # reason: ruamel Mark objects are untyped
     return SourcePosition(line=mark.line, column=mark.column, offset=mark.index)
 
 
@@ -322,8 +410,16 @@ def _range_of(node: Node) -> SourceRange:
     return SourceRange(_position(node.start_mark), _position(node.end_mark))
 
 
-def _token_range(token: Any) -> SourceRange:
+def _token_range(token: Any) -> SourceRange:  # reason: ruamel Token objects are untyped
     return SourceRange(_position(token.start_mark), _position(token.end_mark))
+
+
+def _problem_range(error: MarkedYAMLError) -> SourceRange | None:
+    mark = error.problem_mark or error.context_mark
+    if mark is None:
+        return None
+    position = _position(mark)
+    return SourceRange(position, position)
 
 
 def _mark_range(error: MarkedYAMLError) -> SourceRange | None:

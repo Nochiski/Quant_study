@@ -37,7 +37,12 @@ class DiagnosticSeverity(StrEnum):
 
 @dataclass(frozen=True)
 class SourcePosition:
-    """0-based line/column and UTF-8 code point offset into the exact source text."""
+    """0-based line/column and offset into the exact source text.
+
+    Units are Unicode code points (Python `str` indices). JavaScript editors count UTF-16 code
+    units; astral characters (emoji) shift later columns by one per character, so the frontend
+    converts at the wire boundary (P3-04). Korean text is BMP-only and unaffected.
+    """
 
     line: int
     column: int
@@ -52,12 +57,19 @@ class SourceRange:
 
 @dataclass(frozen=True)
 class SourceDiagnostic:
+    """One diagnostic. `severity` is always sent (no default) so the wire schema marks it required.
+
+    `range` is None only when the source has no node to point at (empty document).
+    `node_id` names the FactorGraph node a semantic issue is about, when known.
+    """
+
     code: str
     kind: DiagnosticKind
     pointer: str
     message: str
+    severity: DiagnosticSeverity
     range: SourceRange | None = None
-    severity: DiagnosticSeverity = DiagnosticSeverity.ERROR
+    node_id: str | None = None
 
 
 class ParseStatus(StrEnum):

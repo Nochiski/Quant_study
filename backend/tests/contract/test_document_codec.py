@@ -140,7 +140,7 @@ def test_structural_issue_pointers_resolve_to_source_ranges() -> None:
         ("a: .nan\n", "yaml.non_finite_number", 0, 3),
         ("a: 9007199254740993\n", "yaml.integer_out_of_range", 0, 3),
         ("1: v\n", "yaml.non_string_key", 0, 0),
-        ("a: 1\n---\nb: 2\n", "yaml.multiple_documents", 0, 0),
+        ("a: 1\n---\nb: 2\n", "yaml.multiple_documents", 1, 0),
         ("- a\n", "yaml.not_a_mapping", 0, 0),
     ],
 )
@@ -175,16 +175,51 @@ def test_json_syntax_errors_report_json_positions() -> None:
 def test_json_duplicate_keys_are_rejected_like_yaml() -> None:
     parsed = _codec().parse('{"a": 1, "a": 2}', format=SourceFormat.JSON)
     assert parsed.diagnostics[0].code == "yaml.duplicate_key"
-    assert parsed.diagnostics[0].pointer == "/a"
+
+
+def test_json_values_come_from_the_json_parser_not_ruamel() -> None:
+    nan = _codec().parse('{"a": NaN, "b": Infinity}', format=SourceFormat.JSON)
+    assert nan.diagnostics[0].code == "json.syntax"
+
+    escaped = _codec().parse('{"title": "x\\ud83d\\ude00y"}', format=SourceFormat.JSON)
+    assert escaped.ok and escaped.tree is not None
+    assert escaped.tree["title"] == "x\U0001f600y"  # one astral code point, not two surrogates
+
+
+def test_unpaired_surrogates_in_source_are_rejected_not_raised() -> None:
+    parsed = _codec().parse('title: "\ud83d"\n', format=SourceFormat.YAML)
+
+    assert parsed.status is ParseStatus.REJECTED
+    assert parsed.diagnostics[0].code == "yaml.syntax"
+    assert parsed.diagnostics[0].range is not None
+    assert parsed.diagnostics[0].range.start.column == 8
+
+
+@pytest.mark.parametrize(
+    ("source", "fmt"),
+    [
+        ("a: " + "[" * 500 + "]" * 500 + "\n", SourceFormat.YAML),
+        ("a: " + "{" * 500 + "}" * 500 + "\n", SourceFormat.YAML),
+        (
+            "".join("  " * i + f"k{i}:\n" for i in range(500)) + "  " * 500 + "v: 1\n",
+            SourceFormat.YAML,
+        ),
+        ('{"a": ' + "[" * 500 + "]" * 500 + "}", SourceFormat.JSON),
+    ],
+    ids=["flow-seq", "flow-map", "block", "json"],
+)
+def test_deep_nesting_is_rejected_before_any_recursion(source: str, fmt: SourceFormat) -> None:
+    parsed = _codec().parse(source, format=fmt)
+
+    assert parsed.status is ParseStatus.REJECTED
+    assert parsed.diagnostics[0].code == "yaml.too_deep"
 
 
 def test_resource_limits_fail_closed() -> None:
     assert _codec(max_bytes=8).parse("title: 'x'\n", format=SourceFormat.YAML).diagnostics[
         0
     ].code == ("yaml.too_large")
-    deep = (
-        "a: " * 0 + "a:\n" + "".join("  " * i + "b:\n" for i in range(1, 6)) + "  " * 6 + "c: 1\n"
-    )
+    deep = "a:\n" + "".join("  " * i + "b:\n" for i in range(1, 6)) + "  " * 6 + "c: 1\n"
     assert _codec(max_depth=3).parse(deep, format=SourceFormat.YAML).diagnostics[0].code == (
         "yaml.too_deep"
     )

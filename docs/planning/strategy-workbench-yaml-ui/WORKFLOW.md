@@ -500,7 +500,9 @@ Phase 1 종료 기준:
 
 Acceptance:
 
-- 미래 공개 데이터가 preview/backtest에 나타나지 않는다.
+- 미래 공개 **필드** 데이터가 preview/backtest에 나타나지 않는다. `sector_id`·
+  `universe_member`는 공개일이 없어 가드 범위 밖이며 as_of vintage는 어댑터 책임이다
+  (D-006).
 - mock과 향후 production adapter가 같은 port contract를 통과한다.
 
 ### P1.5-04 — Truthful preview/backtest pipeline

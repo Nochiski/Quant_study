@@ -36,5 +36,13 @@ class PortfolioPreviewRequest:
 
 @dataclass(frozen=True)
 class PortfolioPreview:
+    """The tape a run will consume, plus the caveats the observation source reported.
+
+    `warnings` are the raw observation adapter's own messages, passed through verbatim. They ride
+    into `RunManifest.warnings` so a caveat visible in the preview cannot disappear from the run
+    that used the same data.
+    """
+
     tape: TargetTape
     engine: EngineCompatibility
+    warnings: tuple[str, ...] = ()

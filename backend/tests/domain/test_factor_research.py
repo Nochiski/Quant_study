@@ -236,3 +236,70 @@ def test_factor_analytics_exposes_professional_diagnostics_explicitly() -> None:
     assert analytics.coverage == 1.0
     assert analytics.turnover == 0.0
     assert analytics.decay == pytest.approx(1.0)
+
+
+def _member_row(day: int, security: str, value: float, *, member: bool) -> FactorObservation:
+    return FactorObservation(
+        as_of=date(2024, 1, day),
+        security_id=security,
+        fields=(FactorFieldValue("value", value), FactorFieldValue("sector", "A")),
+        universe_member=member,
+    )
+
+
+def test_cross_sectional_operators_ignore_non_members(
+    # D-001 regression: a delisted / removed name must not move a member's z-score or rank.
+) -> None:
+    graph = FactorGraph(
+        nodes=(
+            FieldNode("source", "value", "field"),
+            CrossSectionalNode("z", CrossSectionalOperator.ZSCORE, "source", "cross_sectional"),
+        ),
+        output_node_id="z",
+    )
+    members = (_member_row(2, "s1", 2.0, member=True), _member_row(2, "s2", 1.0, member=True))
+    with_outsider = (*members, _member_row(2, "s3", 100.0, member=False))
+
+    alone = {
+        v.security_id: v.value for v in evaluate_factor_graph(graph, observations=members).values
+    }
+    mixed = {
+        v.security_id: v.value
+        for v in evaluate_factor_graph(graph, observations=with_outsider).values
+    }
+
+    assert alone == {"s1": 1.0, "s2": -1.0}
+    assert mixed["s1"] == alone["s1"] and mixed["s2"] == alone["s2"]
+    assert mixed["s3"] == 0.0  # non-members form their own cross-section, kept positionally
+
+
+def test_rank_group_and_median_fill_all_use_the_member_peer_group() -> None:
+    """Every peer-group operator shares the `(as_of, universe_member)` key, not just zscore."""
+    members = (_member_row(2, "s1", 4.0, member=True), _member_row(2, "s2", 2.0, member=True))
+    outsider = _member_row(2, "s3", 999.0, member=False)
+    missing_member = FactorObservation(
+        as_of=date(2024, 1, 2),
+        security_id="s4",
+        fields=(FactorFieldValue("sector", "A"),),
+        universe_member=True,
+    )
+
+    def outputs(node: object, observations: tuple[FactorObservation, ...]) -> dict[str, object]:
+        graph = FactorGraph(
+            nodes=(FieldNode("source", "value", "field"), node),  # pyright: ignore[reportArgumentType]  # reason: parametrised over node kinds
+            output_node_id="out",
+            missing_policy=MissingPolicy.CROSS_SECTIONAL_MEDIAN,
+        )
+        return {
+            v.security_id: v.value
+            for v in evaluate_factor_graph(graph, observations=observations).values
+        }
+
+    for node in (
+        CrossSectionalNode("out", CrossSectionalOperator.RANK, "source", "cross_sectional"),
+        UnaryNode("out", UnaryOperator.NEUTRALIZE, "source", "unary"),
+        GroupNode("out", GroupOperator.NEUTRALIZE, "source", "sector", "group"),
+    ):
+        alone = outputs(node, (*members, missing_member))
+        mixed = outputs(node, (*members, missing_member, outsider))
+        assert {key: mixed[key] for key in alone} == alone, node

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from collections.abc import Mapping
 from dataclasses import asdict, replace
 from datetime import date
 from enum import Enum
@@ -49,10 +50,23 @@ def compile_target_tape(
         seen.add(key)
         by_date.setdefault(observation.as_of, []).append(observation)
 
-    frames = tuple(
-        _compile_frame(spec, signal_as_of, execution_on, tuple(by_date.get(signal_as_of, ())))
-        for signal_as_of, execution_on in _rebalance_pairs(spec, ordered_sessions)
-    )
+    compiled: list[TargetFrame] = []
+    # The book is folded frame by frame: the compiler owns `previous_weight` from the second
+    # rebalance on, and `PortfolioObservation.previous_weight` seeds only the first (D-002).
+    carried: dict[str, float] | None = None
+    for signal_as_of, execution_on in _rebalance_pairs(spec, ordered_sessions):
+        frame_observations = tuple(by_date.get(signal_as_of, ()))
+        previous_weights = (
+            {item.security_id: item.previous_weight for item in frame_observations}
+            if carried is None
+            else carried
+        )
+        frame = _compile_frame(
+            spec, signal_as_of, execution_on, frame_observations, previous_weights
+        )
+        compiled.append(frame)
+        carried = {target.security_id: target.weight for target in frame.targets}
+    frames = tuple(compiled)
     strategy_hash = strategy_spec_hash(spec)
     payload = {
         "data_snapshot_id": data_snapshot_id,
@@ -103,7 +117,9 @@ def _compile_frame(
     signal_as_of: date,
     execution_on: date,
     observations: tuple[PortfolioObservation, ...],
+    previous_weights: Mapping[str, float],
 ) -> TargetFrame:
+    """One rebalance. `previous_weights` is the book carried in, never read off observations."""
     decisions = [_score_candidate(spec, observation) for observation in observations]
     ranked = sorted(
         (decision for decision in decisions if decision.eligible),
@@ -124,7 +140,7 @@ def _compile_frame(
     buffer_retained = _apply_turnover_buffer(
         spec,
         ranked,
-        observations_by_id,
+        previous_weights,
         long_ids=long_ids,
         short_ids=short_ids,
         long_count=long_count,
@@ -134,13 +150,14 @@ def _compile_frame(
         spec,
         ranked,
         observations_by_id,
+        previous_weights,
         long_ids=long_ids,
         short_ids=short_ids,
     )
     decisions = [
         _finalize_decision(
             decision,
-            observations_by_id[decision.security_id],
+            previous_weights.get(decision.security_id, 0.0),
             long_ids,
             short_ids,
             weights,
@@ -169,6 +186,14 @@ def _compile_frame(
 
 
 def _score_candidate(spec: StrategySpec, observation: PortfolioObservation) -> CandidateDecision:
+    """Score one candidate. FUTURE_DATA covers dated values only.
+
+    Fields and factor values carry an `available_date`, so a value published after `as_of` is
+    excluded below. `universe_member` and `sector_id` carry none: a retroactive reconstitution or
+    sector reclassification passes this function unchallenged and reaches selection and the sector
+    exposure constraint (D-006). Answering both with the as_of vintage is the observation
+    adapter's contract, not something this compiler can verify.
+    """
     reasons: list[ExclusionReason] = []
     if not observation.universe_member:
         reasons.append(ExclusionReason.NOT_IN_UNIVERSE)
@@ -260,7 +285,7 @@ def _selection_counts(spec: StrategySpec, eligible_count: int) -> tuple[int, int
 def _apply_turnover_buffer(
     spec: StrategySpec,
     ranked: list[CandidateDecision],
-    observations: dict[str, PortfolioObservation],
+    previous_weights: Mapping[str, float],
     *,
     long_ids: set[str],
     short_ids: set[str],
@@ -272,7 +297,7 @@ def _apply_turnover_buffer(
     if buffer_count == 0:
         return retained
     for index, candidate in enumerate(ranked):
-        previous = observations[candidate.security_id].previous_weight
+        previous = previous_weights.get(candidate.security_id, 0.0)
         if previous > 0 and index < long_count + buffer_count:
             if candidate.security_id not in long_ids:
                 retained.add(candidate.security_id)
@@ -295,6 +320,7 @@ def _target_weights(
     spec: StrategySpec,
     ranked: list[CandidateDecision],
     observations: dict[str, PortfolioObservation],
+    previous_weights: Mapping[str, float],
     *,
     long_ids: set[str],
     short_ids: set[str],
@@ -321,21 +347,22 @@ def _target_weights(
             ).items()
         }
     )
-    for security_id, observation in observations.items():
+    for security_id in observations:
         proposed = weights.get(security_id, 0.0)
-        sign_compatible = (security_id in long_ids and observation.previous_weight >= 0) or (
-            security_id in short_ids and observation.previous_weight <= 0
+        previous = previous_weights.get(security_id, 0.0)
+        sign_compatible = (security_id in long_ids and previous >= 0) or (
+            security_id in short_ids and previous <= 0
         )
-        within_name_cap = abs(observation.previous_weight) <= spec.risk.max_name_weight
+        within_name_cap = abs(previous) <= spec.risk.max_name_weight
         if (
             sign_compatible
             and within_name_cap
-            and abs(proposed - observation.previous_weight) < spec.portfolio.minimum_trade_weight
+            and abs(proposed - previous) < spec.portfolio.minimum_trade_weight
         ):
-            if proposed != observation.previous_weight:
+            if proposed != previous:
                 reasons[security_id] = ExclusionReason.MINIMUM_TRADE
-            if observation.previous_weight != 0:
-                weights[security_id] = observation.previous_weight
+            if previous != 0:
+                weights[security_id] = previous
     weights = _apply_sector_constraints(spec, weights, observations)
     return _apply_side_budgets(weights, long_budget, short_budget), reasons
 
@@ -439,7 +466,7 @@ def _apply_sector_constraints(
 
 def _finalize_decision(
     decision: CandidateDecision,
-    observation: PortfolioObservation,
+    previous_weight: float,
     long_ids: set[str],
     short_ids: set[str],
     weights: dict[str, float],
@@ -462,11 +489,9 @@ def _finalize_decision(
     weight_reason = weight_reasons.get(decision.security_id)
     if weight_reason is not None:
         reasons.append(weight_reason)
-        selected = (
-            weight_reason is ExclusionReason.MINIMUM_TRADE and observation.previous_weight != 0
-        )
+        selected = weight_reason is ExclusionReason.MINIMUM_TRADE and previous_weight != 0
         if selected:
-            side = CandidateSide.LONG if observation.previous_weight > 0 else CandidateSide.SHORT
+            side = CandidateSide.LONG if previous_weight > 0 else CandidateSide.SHORT
     return replace(
         decision,
         selected=selected,

@@ -54,7 +54,9 @@ bootstrap ─> application + adapters
 
 ## Equity adapter
 
-- 계약 SoT는 `application/equity_workspace/ports/outgoing/equity_data.py`다.
+- 조회 계약 SoT는 `application/equity_workspace/ports/outgoing/equity_data.py`다. raw PIT
+  관측 계약은 `application/portfolio_design/ports/outgoing/raw_observations.py`가 별도로
+  소유하며, 두 포트는 같은 셀에 같은 값·공개일을 답해야 한다.
 - 현재 기준 구현은 `adapters/outbound/equity_mock`이다. fixture는 결정적이고
   PIT available-date, revision, recommended lag, 실제 0/결측/미수집/coverage gap을 구분한다.
 - 실제 DB가 와도 domain/application을 DB 스키마에 맞춰 바꾸지 않는다. 새

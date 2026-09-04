@@ -3,6 +3,7 @@ from strategy_workbench.domain.strategy._validation import (
     ValidationIssue,
     ValidationKind,
     ValidationSeverity,
+    semantic_issue,
     validate_strategy,
 )
 
@@ -11,5 +12,6 @@ __all__ = [
     "ValidationIssue",
     "ValidationKind",
     "ValidationSeverity",
+    "semantic_issue",
     "validate_strategy",
 ]

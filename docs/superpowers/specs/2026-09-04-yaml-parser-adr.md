@@ -24,7 +24,7 @@ PyYAML 6.0.3(YAML 1.1), ruamel.yaml 0.19.1(`typ="safe", pure=True`, `version=(1,
 | `yes` / `no` / `on` / `off` | bool | str | str | 1.1 금지, 문자열로 허용 |
 | `010` / `0o10` / `0x1F` | int 8 / 8 / 31 | int 10 / 8 / 31 | number 10 / 8 / 31 | 1.2 core 그대로 허용 |
 | `1_000`, `1_000.5`, `1_0e3`, `0x1_F`, `1_`, `0b1010` | int/float | **int/float (1.1 잔재 허용)** | **string** | 양쪽 불일치 → `non_core_number` 거부 (resolver 숫자 판정 ≠ core schema regex) |
-| `.5e3`, `-.5E3` (선행 `.` + 지수) | float | **str** (resolver float regex 누락) | number | 역방향 불일치 → `non_core_number` 거부 |
+| `.5e3`, `-.5E3` (선행 `.` + 부호 없는 지수) | float | **str** (resolver 선행 `.` 분기는 부호 있는 지수만 float) | number | 역방향 불일치 → `non_core_number` 거부. `.5e+3`, `.5e-3`은 양쪽 float로 허용 |
 | `a: <<` (value 위치 plain `<<`) | merge | resolver merge tag → 거부 | string | frontend도 위치 무관 `merge_key` 거부로 대칭 |
 | `1e16`, `1e300` | float | float | number | 허용. 정수 범위 검사는 core int 표기에만 적용 |
 | `1e-2` | **str** | float 0.01 | number 0.01 | 1.1 금지, 허용 |
@@ -71,7 +71,7 @@ PyYAML 6.0.3(YAML 1.1), ruamel.yaml 0.19.1(`typ="safe", pure=True`, `version=(1,
   `0o[0-7]+`, `0x[0-9a-fA-F]+`, `[-+]?(\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?`)가 **어느 방향으로든**
   어긋나는 plain scalar를 `non_core_number`로 거부한다 (`1_000.5`: resolver 숫자·core 아님, `.5e3`: resolver
   문자열·core 숫자). frontend는 대칭으로 ruamel 1.2 resolver의 int/float 모양(`_`, `0b`)에 맞고 core에 맞지
-  않는 scalar와 `[-+]?\.[0-9]+[eE][-+]?[0-9]+`를 거부한다. P1-02 codec은 resolver 자체를 core schema
+  않는 scalar와 `[-+]?\.[0-9]+[eE][0-9]+`(선행 `.` + 부호 없는 지수)를 거부한다. P1-02 codec은 resolver 자체를 core schema
   regex로 교체하는 것이 근본 해결이다.
 - merge key: plain `<<`는 key·value 위치 무관하게 `merge_key`로 거부한다 (ruamel resolver는 모든 plain `<<`에
   merge tag를 주고 key 위치에서는 병합, `yaml`은 문자열). quoted `"<<"`는 양쪽 문자열이라 허용.
@@ -92,7 +92,7 @@ PyYAML 6.0.3(YAML 1.1), ruamel.yaml 0.19.1(`typ="safe", pure=True`, `version=(1,
 ### D3. Cross-runtime fixture는 양쪽 테스트가 같은 파일을 읽는다
 
 - `backend/tests/fixtures/strategy_documents/yaml12/manifest.json`이 case 목록의 SoT다. 각 case는
-  `accepted/*.yaml` + 기대 JSON 또는 `rejected/*.yaml` + 기대 reason code를 가진다 (15 accepted, 27
+  `accepted/*.yaml` + 기대 JSON 또는 `rejected/*.yaml` + 기대 reason code를 가진다 (16 accepted, 27
   rejected). manifest에 없는 fixture 파일은 backend 테스트가 실패시킨다. `.gitattributes`가 이 fixture를
   LF로 고정해 P1-02의 exact source hash 검증이 체크아웃 설정에 흔들리지 않게 한다.
 - backend: `backend/tests/contract/test_yaml12_cross_runtime.py`가 ruamel 기반 임시 loader로 manifest를

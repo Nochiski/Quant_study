@@ -39,7 +39,6 @@ MANIFEST = json.loads((FIXTURES / "manifest.json").read_text(encoding="utf-8"))
 _TIMESTAMP_TAG = "tag:yaml.org,2002:timestamp"
 _MERGE_TAG = "tag:yaml.org,2002:merge"
 _NUMBER_TAGS = ("tag:yaml.org,2002:int", "tag:yaml.org,2002:float")
-_STR_TAG = "tag:yaml.org,2002:str"
 # YAML 1.2 core schema 숫자 표기. ruamel resolver는 1.1 잔재(`_` 구분자, `0b`)도 숫자로 읽지만
 # frontend(`yaml` core schema)는 문자열로 읽으므로 core 밖 표기는 거부한다.
 _CORE_INT = re.compile(r"^(?:[-+]?[0-9]+|0o[0-7]+|0x[0-9a-fA-F]+)$")
@@ -83,9 +82,7 @@ def _scan_policy(text: str) -> None:
             resolver_number = tag in _NUMBER_TAGS and not _NON_FINITE.match(token.value)
             # resolver 판정과 core schema가 어느 방향으로든 어긋나면 frontend(core)와 tree가 갈린다.
             # 예: `1_000.5`(resolver float, core 아님), `.5e3`(resolver str, core float).
-            if resolver_number != is_core_number and not (
-                tag == _STR_TAG and not is_core_number
-            ):
+            if resolver_number != is_core_number:
                 raise Yaml12Rejected("non_core_number", f"scalar={token.value!r} tag={tag}")
 
 

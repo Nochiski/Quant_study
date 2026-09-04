@@ -328,6 +328,15 @@
       "file": "rejected/merge_key_as_value.yaml",
       "expect": "reject",
       "reason": "merge_key"
+    },
+    {
+      "name": "leading_dot_signed_exponent",
+      "file": "accepted/leading_dot_signed_exponent.yaml",
+      "expect": "accept",
+      "json": {
+        "a": 500.0,
+        "b": -0.0005
+      }
     }
   ]
 }

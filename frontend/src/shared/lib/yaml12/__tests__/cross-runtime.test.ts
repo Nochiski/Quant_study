@@ -61,9 +61,9 @@ const RUAMEL_FLOAT =
   /^[-+]?(?:[0-9][0-9_]*\.[0-9_]*(?:[eE][-+]?[0-9]+)?|[0-9][0-9_]*[eE][-+]?[0-9]+|\.[0-9_]+(?:[eE][-+]?[0-9]+)?)$/;
 const CORE_INT = /^(?:[-+]?[0-9]+|0o[0-7]+|0x[0-9a-fA-F]+)$/;
 const CORE_FLOAT = /^[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?$/;
-// ruamel 1.2 resolver의 float regex는 `.5e3`(선행 `.` + 지수)를 빠뜨려 문자열로 읽는다. core에는 맞으므로
-// frontend가 숫자로 읽는 역방향 불일치. 양쪽 모두 non_core_number로 거부한다.
-const RUAMEL_MISSES_FLOAT = /^[-+]?\.[0-9]+[eE][-+]?[0-9]+$/;
+// ruamel 1.2 resolver의 float regex는 선행 `.` 분기에서 부호 없는 지수(`.5e3`)를 빠뜨려 문자열로 읽는다
+// (`.5e+3`은 float). core에는 맞으므로 frontend가 숫자로 읽는 역방향 불일치. 양쪽 모두 거부한다.
+const RUAMEL_MISSES_FLOAT = /^[-+]?\.[0-9]+[eE][0-9]+$/;
 const DEFAULT_TAG_HANDLES: Record<string, string> = { "!!": "tag:yaml.org,2002:" };
 
 const rejectAnchorOrTag = (

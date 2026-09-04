@@ -467,3 +467,71 @@ def test_the_widened_window_would_otherwise_have_produced_extra_frames() -> None
         )
     )
     assert any(session > spec.data.end for session in widened.sessions)
+
+
+_WARNING_START = date(2024, 1, 2)  # the mock lacks calendar for the market-cap lag here
+
+
+def test_raw_observation_warnings_reach_the_preview() -> None:
+    """D-005: the adapter's caveats are part of the answer, not something the service drops."""
+    spec = _spec()
+    spec = replace(spec, data=replace(spec.data, start=_WARNING_START))
+
+    preview = _service().preview(PortfolioPreviewRequest(spec))
+
+    assert any("insufficient mock calendar for lag" in item for item in preview.warnings)
+
+
+def test_preview_warnings_are_recorded_in_the_run_manifest() -> None:
+    client = TestClient(build_http_app())
+    template = client.get("/api/v1/strategies/template").json()
+    close_factor = template["factors"]["factors"][0]
+    spec = {
+        **template,
+        "data": {
+            **template["data"],
+            "start": _WARNING_START.isoformat(),
+            "end": WINDOW[1].isoformat(),
+        },
+        "factors": {
+            "factors": [
+                close_factor,
+                {
+                    **close_factor,
+                    "factor_id": "size",
+                    "graph": {
+                        **close_factor["graph"],
+                        "nodes": [
+                            {"node_id": "cap", "field_id": "price.market_cap", "kind": "field"}
+                        ],
+                        "output_node_id": "cap",
+                    },
+                },
+            ]
+        },
+        "portfolio": {
+            **template["portfolio"],
+            "rebalance": "every_n_sessions",
+            "rebalance_every_n_sessions": 1,
+        },
+    }
+
+    preview = client.post("/api/v1/portfolio/preview", json={"spec": spec})
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["warnings"], "the probe strategy produced no adapter warning"
+
+    accepted = client.post("/api/v1/backtests", json={"strategy": spec, "core": "python"})
+    assert accepted.status_code == 202, accepted.text
+    run_id = accepted.json()["run"]["run_id"]
+    state: dict[str, object] = {}
+    for _ in range(400):
+        state = client.get(f"/api/v1/backtests/{run_id}").json()
+        if state["status"] in {"completed", "failed", "cancelled"}:
+            break
+        time.sleep(0.025)
+    assert state["status"] == "completed", state
+
+    manifest = client.get(f"/api/v1/backtests/{run_id}/result").json()["manifest"]
+    recorded = {item["code"]: item["message"] for item in manifest["warnings"]}
+    assert "portfolio.raw_observation" in recorded
+    assert recorded["portfolio.raw_observation"] in preview.json()["warnings"]

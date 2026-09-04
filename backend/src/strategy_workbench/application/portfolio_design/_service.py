@@ -164,6 +164,7 @@ class PortfolioDesignService:
                 observations=observations,
             ),
             engine=self._engine_portfolio.assess(spec),
+            warnings=raw.warnings,
         )
         return PortfolioPipelineResult(
             data_snapshot_id=raw.data_snapshot_id,

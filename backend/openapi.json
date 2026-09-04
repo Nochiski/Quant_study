@@ -2643,12 +2643,21 @@
         "type": "object"
       },
       "PortfolioPreview": {
+        "description": "The tape a run will consume, plus the caveats the observation source reported.\n\n`warnings` are the raw observation adapter's own messages, passed through verbatim. They ride\ninto `RunManifest.warnings` so a caveat visible in the preview cannot disappear from the run\nthat used the same data.",
         "properties": {
           "engine": {
             "$ref": "#/components/schemas/EngineCompatibility"
           },
           "tape": {
             "$ref": "#/components/schemas/TargetTape"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
           }
         },
         "required": [

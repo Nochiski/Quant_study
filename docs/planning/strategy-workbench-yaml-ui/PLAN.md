@@ -6,7 +6,7 @@ current_phase: P4
 current_pr: P4-01
 active_prs: [P4-01]
 parallel_window: [P4-01]
-last_updated: 2026-09-04T23:47:51+09:00
+last_updated: 2026-09-05T00:15:55+09:00
 planned_prs: 47
 merged_prs: 30
 approved_prs: 30
@@ -28,7 +28,7 @@ progress_percent: 64
 | Active PR | `P4-01` |
 | Progress | `30 / 47 merged (64%)` |
 | Approved | `30 / 47` |
-| Aggregated at | `2026-09-04 23:47 KST` |
+| Aggregated at | `2026-09-05 00:15 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -92,10 +92,10 @@ progress_percent: 64
 | Non-goals | Contract metadata(P4-02), Problems filter(P4-03), Graph 편집(P4-07) |
 | Branch/worktree | `feat/p4-01-strategy-outline` (`Quant_study-p4-01`) |
 | Base SHA | `30baf41` (P3-07 merge main) |
-| Head SHA | `bc84510` (code diff freeze; PLAN 상태 커밋 제외) |
+| Head SHA | `75570fb` (P1 5건 수정 code diff freeze; PLAN 상태 커밋 제외) |
 | Diff stat | main 대비 35 files, +1505/−248 (지원 refactor 별도 commit, editor/router/tree interaction은 원자적 owner chain) |
-| Focused tests | outline projection·stale epoch·ARIA keyboard·source map·document route 56 passed |
-| Full gate | frontend typecheck·lint·vitest 227·build 통과, editor chunk gzip 136.52 kB, `git diff --check` 통과 |
+| Focused tests | editor selection·outline projection/navigation·router·document route 37 passed |
+| Full gate | frontend typecheck·lint·vitest 231·build 통과, editor chunk gzip 136.53 kB, `git diff --check` 통과 |
 
 ---
 
@@ -250,7 +250,7 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
-| P4-01 | `review_p4_01` | `30baf41` | `bc84510` | IN_REVIEW | — | reviewer 판정 대기 | 2026-09-04 |
+| P4-01 | `review_p4_01` | `30baf41` | `75570fb` | REQUEST_CHANGES → IN_REVIEW (P1 5건 수정, 동일 reviewer 재검토 대기) | 5 (수정, 재검토 대기) | route identity 전환 1-frame·대형 spec 성능·초기 invalid 빈 outline은 비차단 후속 위험 | 2026-09-05 |
 | P3-07 | `review_p3_07` + `review_p3_07_latest` | `8b7b1a4` | `c1951b6` | APPROVE (stale conflict identity와 latest revision 이중 추론 P1 2건을 structured contract 단방향으로 수정 후 승인) | 2 (해소) | malformed/null latest revision은 fail-closed, 대형 diff 렌더링은 P4-08에서 보강 | 2026-09-04 |
 | P3-06 | `review_p3_06` + `review_p3_06_latest` | `4a3dc14` | `201479c` | APPROVE (저장 중 후속 편집의 pre-save key, 복구 identity fail-closed, diff baseline owner P1 3건 수정 후 승인) | 3 (해소) | 수동 원복 시 기존 autosave 잔존, 다중 탭 `new` key 조정, main bundle 경고는 후속 | 2026-09-04 |
 | P3-05 | `review_p3_05` + `review_p3_05_latest` | `0167fb9` | `b1c5c51` | APPROVE (saved/inline provenance와 invalid/stale 차단 재검토, dirty orphan run·stale route overwrite P1 2건 수정 후 승인) | 2 (해소) | 폐기된 응답의 서버 run은 향후 history에서 회수, disabled tooltip·transport 문구·main bundle은 후속 | 2026-09-04 |
@@ -286,7 +286,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
-| P4-01 | outline projection·stale epoch·ARIA keyboard·source map·document route 56 passed | frontend typecheck·lint·vitest 227·build | 해당 없음 | runtime schema/source map/URL owner 분리, JSON→source 원자 전환, index와 semantic ID 접근성 라벨 검토 | [#52](https://github.com/Nochiski/Quant_study/pull/52) 실행 중 | 2026-09-04 |
+| P4-01 | editor selection·outline projection/navigation·router·document route 37 passed | frontend typecheck·lint·vitest 231·build | 해당 없음 | runtime schema/source map/URL owner, edit 후 fresh-map 재매핑, RFC 6901 검증, visible roving tabindex·ARIA ownership | [#52](https://github.com/Nochiski/Quant_study/pull/52) latest push CI 대기 | 2026-09-05 |
 | P3-07 | backend conflict contract 16, frontend document routes 14 passed | backend ruff·pyright; frontend typecheck·lint·vitest 221·build | OpenAPI/generated SDK deterministic | source 보존, delayed 409 폐기, 서버본 실제 이동, copy/diff 실패, kind i18n 검토 | [#48](https://github.com/Nochiski/Quant_study/pull/48) 수정 후 backend/frontend 중복 실행 4개 pass, MERGED | 2026-09-04 |
 | P3-06 | autosave recovery·text diff 12 passed | frontend typecheck·lint·vitest 217·build | 해당 없음 | savedVersion 기반 old/new key 전환, identity 불명·불일치 raw-only, owner baseline·quota·키보드 스크롤 검토 | [#47](https://github.com/Nochiski/Quant_study/pull/47) 수정 후 backend/frontend 중복 실행 4개 pass, MERGED | 2026-09-04 |
 | P3-05 | backtest source·document route 13 passed | frontend typecheck·lint·vitest 205·build | 해당 없음 | dirty inline run 접수/머무르기/재열기, 중복 제출 차단, stale document 응답 폐기 검토 | [#46](https://github.com/Nochiski/Quant_study/pull/46) 수정 후 backend/frontend 중복 실행 4개 pass, MERGED | 2026-09-04 |
@@ -316,6 +316,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | `review_p4_01`이 P1 5건을 발견: collection/root selection 재발행, edit cursor stale path, collapse focus·roving tabindex·ARIA ownership, frontend `_id` identity 추론, malformed JSON Pointer 보존. `75570fb`에서 programmatic transaction 1회 소비·fresh sourceVersion parse 후 cursor 재매핑·collapse origin 분리·visible tree roving·treeitem/group 포함 관계·`x-defines` 전용 identity·shared RFC 6901 validator로 모두 수정. focused 37, 전체 frontend 231, typecheck·lint·build 통과 후 동일 reviewer 재검토 차수로 전환 | 13.3·SoT/책임분리·동일 reviewer 재검토 |
 | 2026-09-04 KST | Codex | P4-01 구현을 `bc84510`으로 freeze하고 #52 공개: backend runtime schema와 parser source map을 정본으로 하는 Strategy Outline, URL-owned JSON Pointer↔CodeMirror 양방향 연결, same-epoch 오류 보존, schema `x-defines` 기반 index/semantic ID 분리, ARIA tree keyboard 구현. frontend 227·build 통과 후 `review_p4_01` 독립 리뷰 배정 | 13.3·SoT/책임분리 |
 | 2026-09-04 KST | Codex | #48 P3-07 독립 리뷰에서 stale 409 document 오염과 human message/`history.total` 최신 revision 이중 추론 P1 2건을 발견. repository-owned `latest_revision`을 exception→HTTP model→OpenAPI/SDK→UI로 단방향 연결하고 save status를 document epoch에 귀속(c1951b6). 동일 리뷰어 blocker 0 재승인, frontend 221·backend 게이트 및 원격 CI 4개 통과 후 main 병합(30baf41), Phase 3 종료 | 인수 후 merge gate·SoT/책임분리 |
 | 2026-09-04 KST | Codex | #47 P3-06 독립 리뷰에서 저장 중 추가 편집 old key, 복구 identity fail-open, diff baseline 이중 owner P1 3건을 발견. accepted save의 `savedVersion`을 정본으로 old key를 정리하고, schema/format/base/hash 완전 일치 restore 및 autosave-owned baseline으로 수정(201479c). 동일 리뷰어 blocker 0 재승인, frontend 217·build 및 원격 CI 4개 통과 후 main 병합(8b7b1a4) | 인수 후 merge gate·SoT/책임분리 |

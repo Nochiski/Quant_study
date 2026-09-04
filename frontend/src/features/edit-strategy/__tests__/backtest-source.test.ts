@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import type { StrategySpec } from "../../../shared/api";
 import { parseSource } from "../../../shared/lib/yaml12";
-import { decideBacktestSource } from "../model/backtest-source";
+import {
+  decideBacktestSource,
+  gateBacktestSourceWithFactorPlans,
+  type BacktestSourceDecision,
+} from "../model/backtest-source";
 import {
   documentReducer,
   initialDocumentState,
@@ -10,6 +14,7 @@ import {
   type DocumentState,
 } from "../model/document-state";
 import { canSaveDocument } from "../model/use-save-document";
+import type { ExecutionPlansState } from "../model/use-execution-plans";
 
 const SPEC = { title: "t" } as unknown as StrategySpec;
 const BASE_HASH = "b".repeat(64);
@@ -155,4 +160,46 @@ describe("decideBacktestSource", () => {
       });
     },
   );
+
+  it("blocks factor strategies until every backend execution plan is valid", () => {
+    const decision: BacktestSourceDecision = {
+      kind: "inline_draft",
+      draft: {
+        kind: "inline_draft",
+        spec: SPEC,
+        source_hash: "s".repeat(64),
+      },
+    };
+    expect(
+      gateBacktestSourceWithFactorPlans(decision, { status: "loading" }),
+    ).toEqual({ kind: "blocked", reason: "factor-plan" });
+    expect(
+      gateBacktestSourceWithFactorPlans(decision, {
+        status: "ready",
+        expectedRegistryVersion: "registry-v1",
+        expectedDataSnapshotId: "dataset-v1",
+        factors: [
+          {
+            explanation: {
+              validation: { valid: false },
+              plan: null,
+            },
+          },
+        ],
+      } as ExecutionPlansState),
+    ).toEqual({ kind: "blocked", reason: "factor-plan" });
+    expect(
+      gateBacktestSourceWithFactorPlans(decision, { status: "empty" }),
+    ).toBe(decision);
+
+    const validPlans = {
+      status: "ready",
+      factors: [
+        { explanation: { validation: { valid: true }, plan: { steps: [] } } },
+      ],
+    } as unknown as ExecutionPlansState;
+    expect(gateBacktestSourceWithFactorPlans(decision, validPlans)).toBe(
+      decision,
+    );
+  });
 });

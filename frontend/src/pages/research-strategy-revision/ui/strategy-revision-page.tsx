@@ -8,12 +8,14 @@ import {
   DirtyLeaveGuard,
   DocumentToolbar,
   ExecutionPlanPanel,
+  FactorGraphPanel,
   RecoveryBanner,
   SnippetCatalog,
   SourceEditor,
   StrategyProjectionPanel,
   StrategyOutline,
   PROJECTION_VIEWS,
+  currentDiagnostics,
   projectStrategySpec,
   saveStatusText,
   saveStatusTone,
@@ -63,11 +65,11 @@ export const StrategyRevisionPage = () => {
   const { save, status, canSave } = useSaveDocument(document, dispatch);
   const assist = useSchemaAssist(document);
   const { validateNow, validating } = useCompileDocument(document, dispatch);
-  const backtest = useRunBacktest(document);
   const autosave = useAutosave(document, dispatch, {
     schemaVersion: assist.schemaVersion,
   });
   const executionPlans = useExecutionPlans(document, assist.inspectorSource);
+  const backtest = useRunBacktest(document, executionPlans);
   const current =
     document.compiled !== null &&
     document.compiledVersion === document.sourceVersion
@@ -75,14 +77,14 @@ export const StrategyRevisionPage = () => {
       : null;
   const projection = projectStrategySpec(document);
   const availableViews: readonly StrategyView[] =
-    stored.format === "yaml" ? PROJECTION_VIEWS : ["json", "form"];
+    stored.format === "yaml" ? PROJECTION_VIEWS : ["json", "form", "graph"];
   const requested: StrategyView = search.view ?? stored.format;
   const implemented = availableViews.includes(requested);
   const view: StrategyView = implemented ? requested : stored.format;
   const selectPointer = useCallback(
     (
       path: string | undefined,
-      origin: "cursor" | "outline" | "outline-collapse",
+      origin: "cursor" | "outline" | "outline-collapse" | "graph",
     ) => {
       void navigate({
         to: ROUTE,
@@ -100,6 +102,7 @@ export const StrategyRevisionPage = () => {
   const outline = useOutlineNavigation({
     state: document,
     schema: assist.schema,
+    revealSelectedPointer: view === stored.format,
     selectedPointer: search.path,
     onSelectedPointer: selectPointer,
   });
@@ -213,6 +216,18 @@ export const StrategyRevisionPage = () => {
               <StrategyProjectionPanel projection={projection} view="json" />
             ) : undefined,
           form: <StrategyProjectionPanel projection={projection} view="form" />,
+          graph: (
+            <FactorGraphPanel
+              state={executionPlans}
+              diagnostics={currentDiagnostics(document)}
+              selectedPointer={search.path}
+              onSelectPointer={(pointer) => selectPointer(pointer, "graph")}
+              onOpenSource={(pointer) => {
+                outline.requestSourceReveal(pointer);
+                selectPointer(pointer, "outline");
+              }}
+            />
+          ),
         }}
         outline={
           <StrategyOutline

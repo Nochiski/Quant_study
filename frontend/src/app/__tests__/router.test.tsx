@@ -282,10 +282,7 @@ describe("App Shell routes", () => {
     expect(history.location.pathname).toBe("/research/strategies/new");
     expect(screen.getByRole("tab", { name: "JSON" })).toBeEnabled();
     expect(screen.getByRole("tab", { name: "Form" })).toBeEnabled();
-    expect(screen.getByRole("tab", { name: "Graph" })).toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
+    expect(screen.getByRole("tab", { name: "Graph" })).toBeEnabled();
   });
 
   it("keeps legacy bookmarks on the legacy builder with their query and run id", async () => {

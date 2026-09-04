@@ -283,6 +283,59 @@ describe("Strategy Outline projection", () => {
     expect(onSelectedPointer).toHaveBeenCalledTimes(3);
   });
 
+  it("restores the same route pointer after a projection without focusing the hidden editor", () => {
+    const focus = vi.fn();
+    const setSelection = vi.fn();
+    const scrollTo = vi.fn();
+    const onSelectedPointer = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ revealSelectedPointer }: { revealSelectedPointer: boolean }) =>
+        useOutlineNavigation({
+          state: parsedState(),
+          schema: SCHEMA,
+          revealSelectedPointer,
+          selectedPointer: "/risk/max_name_weight",
+          onSelectedPointer,
+        }),
+      { initialProps: { revealSelectedPointer: true } },
+    );
+    const editor: CodeEditorHandle = {
+      getText: () => SOURCE,
+      setText: vi.fn(),
+      replaceRange: vi.fn(),
+      getSelection: () => ({ from: 0, to: 0 }),
+      setSelection,
+      offsetToPosition: () => ({ line: 0, column: 0 }),
+      positionToOffset: () => 0,
+      scrollTo,
+      focus,
+      getHistoryState: () => null,
+      restoreHistoryState: vi.fn(),
+    };
+
+    act(() => result.current.onEditorReady(editor));
+    expect(focus).toHaveBeenCalledTimes(1);
+    expect(setSelection).toHaveBeenCalledTimes(1);
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+
+    rerender({ revealSelectedPointer: false });
+    const risk = findOutlineNode(result.current.snapshot?.nodes ?? [], "/risk");
+    expect(risk).not.toBeNull();
+    act(() => result.current.onSelectOutlineNode(risk!));
+    expect(onSelectedPointer).toHaveBeenLastCalledWith("/risk", "outline");
+    expect(focus).toHaveBeenCalledTimes(1);
+    expect(setSelection).toHaveBeenCalledTimes(1);
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+
+    // The URL still owns the original pointer. Returning to source must reveal it again even
+    // though document epoch and route pointer are identical to the first source render.
+    act(() => result.current.requestSourceReveal("/risk/max_name_weight"));
+    rerender({ revealSelectedPointer: true });
+    expect(focus).toHaveBeenCalledTimes(2);
+    expect(setSelection).toHaveBeenCalledTimes(2);
+    expect(scrollTo).toHaveBeenCalledTimes(2);
+  });
+
   it("lets an explicit route selection win and rejects skipped-version cursor offsets", () => {
     const first = parsedState();
     const secondSource = `${SOURCE}extra_one: true\n`;

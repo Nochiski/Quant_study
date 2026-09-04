@@ -50,6 +50,7 @@ export {
 export { DiagnosticsPanel } from "./ui/diagnostics-panel";
 export {
   decideBacktestSource,
+  gateBacktestSourceWithFactorPlans,
   type BacktestSourceDecision,
 } from "./model/backtest-source";
 export {
@@ -76,6 +77,7 @@ export { SourceEditor } from "./ui/source-editor";
 export { StrategyOutline } from "./ui/strategy-outline";
 export { ContractInspector } from "./ui/contract-inspector";
 export { ExecutionPlanPanel } from "./ui/execution-plan-panel";
+export { FactorGraphPanel } from "./ui/factor-graph-panel";
 export { SnippetCatalog } from "./ui/snippet-catalog";
 export { StrategyProjectionPanel } from "./ui/strategy-projection-panel";
 export {
@@ -115,5 +117,13 @@ export {
   type FactorPlanRequest,
   type PlannedFactor,
 } from "./model/use-execution-plans";
+export {
+  projectFactorGraphs,
+  type FactorGraphProjection,
+  type GraphFactorProjection,
+  type GraphInputProjection,
+  type GraphNodeDetail,
+  type GraphNodeProjection,
+} from "./model/factor-graph-projection";
 export { SaveAction } from "./ui/save-action";
 export { DirtyLeaveGuard } from "./ui/dirty-leave-guard";

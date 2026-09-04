@@ -4,9 +4,11 @@ import { useStartBacktest } from "../../../entities/backtest";
 import { useNavigate, useRouter } from "../../../shared/lib/router";
 import {
   decideBacktestSource,
+  gateBacktestSourceWithFactorPlans,
   type BacktestSourceDecision,
 } from "./backtest-source";
 import type { DocumentState } from "./document-state";
+import type { ExecutionPlansState } from "./use-execution-plans";
 
 export type RunBacktestStatus =
   | { kind: "idle" }
@@ -34,7 +36,10 @@ const sameDocument = (
  * provenance — never a bare spec, so the run manifest always records where the spec came from.
  * A blocked decision never starts a run.
  */
-export const useRunBacktest = (state: DocumentState) => {
+export const useRunBacktest = (
+  state: DocumentState,
+  executionPlans: ExecutionPlansState,
+) => {
   const navigate = useNavigate();
   const router = useRouter();
   const start = useStartBacktest();
@@ -50,7 +55,14 @@ export const useRunBacktest = (state: DocumentState) => {
       sourceVersion: state.sourceVersion,
     };
   }, [state.documentEpoch, state.sourceVersion]);
-  const decision = useMemo(() => decideBacktestSource(state), [state]);
+  const decision = useMemo(
+    () =>
+      gateBacktestSourceWithFactorPlans(
+        decideBacktestSource(state),
+        executionPlans,
+      ),
+    [executionPlans, state],
+  );
   const status =
     ownedStatus !== null && sameDocument(ownedStatus, state)
       ? ownedStatus.status

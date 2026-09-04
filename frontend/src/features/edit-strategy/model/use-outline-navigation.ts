@@ -7,10 +7,7 @@ import type {
 } from "../../../shared/ui/code-editor";
 import type { DocumentState } from "./document-state";
 import type { JsonSchema } from "./schema-navigator";
-import {
-  findOutlineNode,
-  type StrategyOutlineNode,
-} from "./strategy-outline";
+import { findOutlineNode, type StrategyOutlineNode } from "./strategy-outline";
 import {
   useStrategyOutline,
   type StrategyOutlineSnapshot,
@@ -19,6 +16,8 @@ import {
 type OutlineNavigationOptions = {
   state: DocumentState;
   schema: JsonSchema | null;
+  /** False while a read-only projection is visible; hidden editors must never steal focus. */
+  revealSelectedPointer?: boolean;
   /** URL-owned JSON Pointer. Undefined is the root/default and must not be written to the URL. */
   selectedPointer: string | undefined;
   onSelectedPointer: (
@@ -33,14 +32,17 @@ export type StrategyOutlineNavigation = {
   onEditorSelectionChange: (selection: EditorSelection) => void;
   onSelectOutlineNode: (node: StrategyOutlineNode) => void;
   onCollapseOutlineNode: (node: StrategyOutlineNode) => void;
+  requestSourceReveal: (pointer: string) => void;
 };
 
-const normalizedPointer = (pointer: string | undefined): string => pointer ?? "";
+const normalizedPointer = (pointer: string | undefined): string =>
+  pointer ?? "";
 
 /** Owns the bidirectional source ↔ outline interaction; the page only persists path in the URL. */
 export const useOutlineNavigation = ({
   state,
   schema,
+  revealSelectedPointer = true,
   selectedPointer,
   onSelectedPointer,
 }: OutlineNavigationOptions): StrategyOutlineNavigation => {
@@ -70,7 +72,8 @@ export const useOutlineNavigation = ({
     if (!currentEditor || !currentSnapshot) return false;
     const node = findOutlineNode(currentSnapshot.nodes, pointer);
     const range =
-      node?.range ?? locateRange(currentSnapshot.parsed, node?.pointer ?? pointer);
+      node?.range ??
+      locateRange(currentSnapshot.parsed, node?.pointer ?? pointer);
     if (range === null) return false;
     const length = currentEditor.getText().length;
     const from = Math.min(range.start.offset, length);
@@ -89,11 +92,11 @@ export const useOutlineNavigation = ({
   const onEditorReady = useCallback(
     (next: CodeEditorHandle | null): void => {
       editor.current = next;
-      if (next === null) return;
+      if (next === null || !revealSelectedPointer) return;
       const pointer = pendingReveal.current;
       if (pointer !== null && reveal(pointer)) pendingReveal.current = null;
     },
-    [reveal],
+    [reveal, revealSelectedPointer],
   );
 
   const onEditorSelectionChange = useCallback(
@@ -134,9 +137,11 @@ export const useOutlineNavigation = ({
       pendingCursor.current = null;
       pendingReveal.current = pointer;
       onSelectedPointer(pointer === "" ? undefined : pointer, "outline");
-      if (reveal(pointer)) pendingReveal.current = null;
+      if (revealSelectedPointer && reveal(pointer)) {
+        pendingReveal.current = null;
+      }
     },
-    [onSelectedPointer, reveal],
+    [onSelectedPointer, reveal, revealSelectedPointer],
   );
 
   const onCollapseOutlineNode = useCallback(
@@ -153,6 +158,11 @@ export const useOutlineNavigation = ({
     },
     [onSelectedPointer],
   );
+
+  const requestSourceReveal = useCallback((pointer: string): void => {
+    pendingCursor.current = null;
+    pendingReveal.current = pointer;
+  }, []);
 
   // Text edits move the cursor before their parser-owned source map exists. Publish only after
   // the matching document has a current successful parse; the newest pending cursor wins.
@@ -186,6 +196,10 @@ export const useOutlineNavigation = ({
   // Direct links and browser back/forward also reveal their URL path. A path just published by
   // the cursor is already at the right place and must not expand its whole source range.
   useEffect(() => {
+    if (!revealSelectedPointer) {
+      pendingReveal.current = null;
+      return;
+    }
     const pointer = normalizedPointer(selectedPointer);
     const key = `${state.documentEpoch}:${pointer}`;
     if (routeSelectionKey.current !== key) {
@@ -213,7 +227,13 @@ export const useOutlineNavigation = ({
     }
     const pending = pendingReveal.current;
     if (pending !== null && reveal(pending)) pendingReveal.current = null;
-  }, [selectedPointer, state.documentEpoch, snapshot, reveal]);
+  }, [
+    revealSelectedPointer,
+    selectedPointer,
+    state.documentEpoch,
+    snapshot,
+    reveal,
+  ]);
 
   return {
     snapshot,
@@ -221,5 +241,6 @@ export const useOutlineNavigation = ({
     onEditorSelectionChange,
     onSelectOutlineNode,
     onCollapseOutlineNode,
+    requestSourceReveal,
   };
 };

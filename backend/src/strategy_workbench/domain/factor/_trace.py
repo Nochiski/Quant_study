@@ -65,6 +65,13 @@ class TraceSelection:
 
 @dataclass(frozen=True)
 class TracedValue:
+    """One (as_of, security) row of a node.
+
+    `inputs` are the dependency values on the same row; time-series windows are not expanded
+    (the status explains warm-up). Saved references that exist but hold None also report
+    `reference_missing` until P5-03 splits source-omitted from missing.
+    """
+
     as_of: date
     security_id: str
     value: FactorComputedValue
@@ -103,15 +110,17 @@ def trace_factor_graph(
     if bounds.max_rows <= 0:
         raise ValueError(f"trace max_rows must be positive — max_rows={bounds.max_rows}")
     nodes = {node.node_id: node for node in graph.nodes}
-    computed = _compute_nodes(graph, observations=observations, parameters=parameters)
     order = _topological_order(graph.output_node_id, nodes)
-    wanted_nodes = order if bounds.node_ids is None else [n for n in order if n in bounds.node_ids]
-    unknown = set(bounds.node_ids or ()) - set(nodes)
+    # Validate the selection before any evaluation: unknown or unreachable nodes are caller errors.
+    unknown = set(bounds.node_ids or ()) - set(order)
     if unknown:
         raise ValueError(
-            f"trace selection references unknown nodes — node_ids={sorted(unknown)!r} "
-            f"known={sorted(nodes)!r}"
+            "trace selection references nodes that are unknown or not reachable from the output — "
+            f"node_ids={sorted(unknown)!r} reachable={list(order)!r}"
         )
+    _require_unique_rows(observations)
+    computed = _compute_nodes(graph, observations=observations, parameters=parameters)
+    wanted_nodes = order if bounds.node_ids is None else [n for n in order if n in bounds.node_ids]
 
     positions = _positions(observations, bounds)
     by_security = _indices_by_security(observations)
@@ -119,6 +128,9 @@ def trace_factor_graph(
     truncated = False
     traced_nodes: list[NodeTrace] = []
     for node_id in wanted_nodes:
+        if positions and row_count >= bounds.max_rows:
+            truncated = True  # no empty trailing NodeTrace: a capped node is simply absent
+            break
         node = nodes[node_id]
         values = computed[node_id]
         input_ids = tuple(node_dependencies(node))
@@ -157,6 +169,22 @@ def trace_factor_graph(
         row_count=row_count,
         truncated=truncated,
     )
+
+
+def _require_unique_rows(observations: tuple[FactorObservation, ...]) -> None:
+    """(as_of, security_id) must be unique: the evaluator's time-series order depends on it."""
+    seen: set[tuple[date, str]] = set()
+    duplicates: set[tuple[date, str]] = set()
+    for observation in observations:
+        key = (observation.as_of, observation.security_id)
+        if key in seen:
+            duplicates.add(key)
+        seen.add(key)
+    if duplicates:
+        raise ValueError(
+            "trace requires unique (as_of, security_id) observations — "
+            f"duplicates={sorted(duplicates)!r} count={len(duplicates)}"
+        )
 
 
 def _positions(observations: tuple[FactorObservation, ...], bounds: TraceSelection) -> list[int]:

@@ -172,7 +172,7 @@ def test_selection_bounds_nodes_securities_dates_and_rows() -> None:
     assert [node.node_id for node in capped.nodes] == ["close"]
     assert len(capped.nodes[0].values) == 5
 
-    with pytest.raises(ValueError, match="unknown nodes"):
+    with pytest.raises(ValueError, match="unknown or not reachable"):
         trace_factor_graph(graph, observations=panel, selection=TraceSelection(node_ids=("nope",)))
     with pytest.raises(ValueError, match="max_rows must be positive"):
         trace_factor_graph(graph, observations=panel, selection=TraceSelection(max_rows=0))
@@ -184,3 +184,31 @@ def test_trace_is_deterministic_across_calls_and_input_order() -> None:
     second = trace_factor_graph(graph, observations=tuple(reversed(panel)))
 
     assert first == second
+
+
+def test_exact_cap_boundary_does_not_emit_an_empty_trailing_node() -> None:
+    graph, panel = _graph(), _panel()
+    capped = trace_factor_graph(graph, observations=panel, selection=TraceSelection(max_rows=8))
+
+    assert [node.node_id for node in capped.nodes] == ["close"]
+    assert capped.truncated and capped.row_count == 8
+
+
+def test_duplicate_rows_fail_closed_before_evaluation() -> None:
+    graph, panel = _graph(), _panel()
+    duplicated = panel + (_observation(DAYS[1], "a", 99.0),)
+
+    with pytest.raises(ValueError, match="unique \(as_of, security_id\)"):
+        trace_factor_graph(graph, observations=duplicated)
+
+
+def test_unreachable_node_selection_is_an_error_not_an_empty_trace() -> None:
+    graph = _graph()
+    orphaned = FactorGraph(
+        nodes=graph.nodes + (FieldNode("orphan", "price.close", "field"),),
+        output_node_id=graph.output_node_id,
+    )
+    with pytest.raises(ValueError, match="not reachable"):
+        trace_factor_graph(
+            orphaned, observations=_panel(), selection=TraceSelection(node_ids=("orphan",))
+        )

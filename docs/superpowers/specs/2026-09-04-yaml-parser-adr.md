@@ -23,7 +23,10 @@ PyYAML 6.0.3(YAML 1.1), ruamel.yaml 0.19.1(`typ="safe", pure=True`, `version=(1,
 |---|---|---|---|---|
 | `yes` / `no` / `on` / `off` | bool | str | str | 1.1 금지, 문자열로 허용 |
 | `010` / `0o10` / `0x1F` | int 8 / 8 / 31 | int 10 / 8 / 31 | number 10 / 8 / 31 | 1.2 core 그대로 허용 |
-| `1_000`, `1_000.5`, `1_0e3`, `0x1_F`, `1_`, `0b1010` | int/float | **int/float (1.1 잔재 허용)** | **string** | 양쪽 불일치 → `non_core_number` 거부 (ruamel resolver가 숫자로 판정했는데 core schema regex에 맞지 않으면) |
+| `1_000`, `1_000.5`, `1_0e3`, `0x1_F`, `1_`, `0b1010` | int/float | **int/float (1.1 잔재 허용)** | **string** | 양쪽 불일치 → `non_core_number` 거부 (resolver 숫자 판정 ≠ core schema regex) |
+| `.5e3`, `-.5E3` (선행 `.` + 지수) | float | **str** (resolver float regex 누락) | number | 역방향 불일치 → `non_core_number` 거부 |
+| `a: <<` (value 위치 plain `<<`) | merge | resolver merge tag → 거부 | string | frontend도 위치 무관 `merge_key` 거부로 대칭 |
+| `1e16`, `1e300` | float | float | number | 허용. 정수 범위 검사는 core int 표기에만 적용 |
 | `1e-2` | **str** | float 0.01 | number 0.01 | 1.1 금지, 허용 |
 | `2021-01-01` (plain) | date | **date** | string | backend timestamp constructor를 문자열로 교체 → 양쪽 string |
 | `-0.0` | float -0.0 | float -0.0 | number -0 | 허용. canonical `-0.0`→`0.0` 정규화는 P1-01 |
@@ -36,7 +39,7 @@ PyYAML 6.0.3(YAML 1.1), ruamel.yaml 0.19.1(`typ="safe", pure=True`, `version=(1,
 | `%YAML 1.1` / `%TAG` directive | 1.1 해석 | DirectiveToken | `directives.yaml.explicit` / `directives.tags` | `directive` 거부 |
 | `9007199254740993` (2^53 초과) | int | int 정확 | **number 반올림** | `integer_out_of_range` 거부 (`\|n\| < 2^53`, `Number.isSafeInteger`) |
 | `-0.0` / `-0` | float/int | -0.0 / 0 | -0 / 0 | 허용. JSON 호환 tree 비교(`-0` → `0`), canonical 정규화는 P1-01 |
-| `a:\tb`, `"\\0"` escape, CR 단독 줄바꿈 | — | **syntax 거부** | 허용 | backend가 더 좁은 accept 집합. fail-closed라 corrupt는 없고 frontend syntax marker는 advisory(P0-02 D2) |
+| `a:\tb`, `"\\0"` escape, CR 단독 줄바꿈, `%TAG !!` 동일 prefix 재선언 | — | **syntax/directive 거부** | 허용 | backend가 더 좁은 accept 집합. fail-closed라 corrupt는 없고 frontend 판정은 표시용일 뿐 실행 gate가 아니다(P0-01 D1) |
 | 다중 document | 오류 | ComposerError | 2 documents | `multiple_documents` 거부 |
 | `1: v` / `? [1,2]` key | int / tuple key | int / tuple key | `"1"` / `"[ 1, 2 ]"` 문자열화 | 양쪽 불일치 → `non_string_key` 거부 |
 | 빈 문서 / scalar / sequence root | None / str / list | None / str / list | no doc / string / array | `not_a_mapping` 거부 |
@@ -64,18 +67,23 @@ PyYAML 6.0.3(YAML 1.1), ruamel.yaml 0.19.1(`typ="safe", pure=True`, `version=(1,
 - duplicate key, 비문자열 key, 비어 있지 않은 complex key
 - plain scalar timestamp: backend는 timestamp constructor를 문자열 반환으로 교체해 frontend와 같은
   string tree를 만든다. quoted/plain 어느 쪽이든 typed hydrate가 `date`로 변환한다.
-- core schema 밖 숫자 표기: backend는 ruamel resolver가 `int`/`float` tag로 판정한 plain scalar가 YAML 1.2
-  core schema regex(`[-+]?[0-9]+`, `0o[0-7]+`, `0x[0-9a-fA-F]+`,
-  `[-+]?(\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?`)에 맞지 않으면 `non_core_number`로 거부한다.
-  frontend는 대칭으로 ruamel 1.2 resolver의 int/float 모양(`_` 구분자, `0b`)에 맞고 core regex에 맞지
-  않는 plain scalar를 거부한다.
-- merge key: plain `<<` key는 alias 유무와 무관하게 `merge_key`로 거부한다 (ruamel은 병합, `yaml`은 문자열 key).
-- 정수 범위: plain 정수는 `|n| < 2^53` (`Number.isSafeInteger`). 초과는 `integer_out_of_range`.
+- 숫자 판정 불일치: backend는 ruamel resolver의 int/float 판정과 YAML 1.2 core schema regex(`[-+]?[0-9]+`,
+  `0o[0-7]+`, `0x[0-9a-fA-F]+`, `[-+]?(\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?`)가 **어느 방향으로든**
+  어긋나는 plain scalar를 `non_core_number`로 거부한다 (`1_000.5`: resolver 숫자·core 아님, `.5e3`: resolver
+  문자열·core 숫자). frontend는 대칭으로 ruamel 1.2 resolver의 int/float 모양(`_`, `0b`)에 맞고 core에 맞지
+  않는 scalar와 `[-+]?\.[0-9]+[eE][-+]?[0-9]+`를 거부한다. P1-02 codec은 resolver 자체를 core schema
+  regex로 교체하는 것이 근본 해결이다.
+- merge key: plain `<<`는 key·value 위치 무관하게 `merge_key`로 거부한다 (ruamel resolver는 모든 plain `<<`에
+  merge tag를 주고 key 위치에서는 병합, `yaml`은 문자열). quoted `"<<"`는 양쪽 문자열이라 허용.
+- 정수 범위: core int 표기의 plain 정수는 `|n| < 2^53` (`Number.isSafeInteger`). 초과는
+  `integer_out_of_range`. float 표기(`1e16`)에는 적용하지 않는다.
 - 정책 거부 reason code: `syntax`, `directive`, `anchor_or_alias`, `tag`, `merge_key`, `non_core_number`,
   `duplicate_key`, `multiple_documents`, `non_string_key`, `non_finite_number`, `integer_out_of_range`,
   `not_a_mapping`. P1-02 diagnostic `code`는 이 reason을 `yaml.<reason>`으로 노출한다.
-- 복수 위반 문서의 reason 우선순위: 두 loader는 syntax → directive → tag → duplicate → tree 순서를 맞추되,
-  multiple_documents는 frontend가 먼저 잡는다. 최종 우선순위는 P1-02 diagnostic 설계에서 확정한다.
+- 복수 위반 문서의 reason 우선순위: syntax → directive 순서는 일치한다. anchor/merge/non_core_number는
+  backend가 scan 단계에서 duplicate보다 먼저 잡고 frontend는 duplicate 뒤 visit에서 잡는다.
+  not_a_mapping도 backend가 tree 검사보다 먼저, frontend가 뒤에 잡는다. multiple_documents는 frontend가
+  먼저 잡는다. 단일 위반 fixture에서는 reason이 같으며 최종 우선순위는 P1-02 diagnostic 설계에서 확정한다.
 - backend가 더 좁게 거부하는 문법(`:` 뒤 tab, `\0` escape, CR 단독 줄바꿈)은 fail-closed이며 frontend
   syntax marker가 advisory인 이상 corrupt가 아니다. P1-02가 codec diagnostic으로 노출한다.
 - `.nan`, `.inf`, `-.inf` 와 non-finite float
@@ -84,7 +92,7 @@ PyYAML 6.0.3(YAML 1.1), ruamel.yaml 0.19.1(`typ="safe", pure=True`, `version=(1,
 ### D3. Cross-runtime fixture는 양쪽 테스트가 같은 파일을 읽는다
 
 - `backend/tests/fixtures/strategy_documents/yaml12/manifest.json`이 case 목록의 SoT다. 각 case는
-  `accepted/*.yaml` + 기대 JSON 또는 `rejected/*.yaml` + 기대 reason code를 가진다 (14 accepted, 25
+  `accepted/*.yaml` + 기대 JSON 또는 `rejected/*.yaml` + 기대 reason code를 가진다 (15 accepted, 27
   rejected). manifest에 없는 fixture 파일은 backend 테스트가 실패시킨다. `.gitattributes`가 이 fixture를
   LF로 고정해 P1-02의 exact source hash 검증이 체크아웃 설정에 흔들리지 않게 한다.
 - backend: `backend/tests/contract/test_yaml12_cross_runtime.py`가 ruamel 기반 임시 loader로 manifest를

@@ -307,6 +307,27 @@
       "file": "rejected/integer_out_of_range.yaml",
       "expect": "reject",
       "reason": "integer_out_of_range"
+    },
+    {
+      "name": "large_float_exponent",
+      "file": "accepted/large_float_exponent.yaml",
+      "expect": "accept",
+      "json": {
+        "a": 1e+16,
+        "b": 1e+300
+      }
+    },
+    {
+      "name": "leading_dot_exponent",
+      "file": "rejected/leading_dot_exponent.yaml",
+      "expect": "reject",
+      "reason": "non_core_number"
+    },
+    {
+      "name": "merge_key_as_value",
+      "file": "rejected/merge_key_as_value.yaml",
+      "expect": "reject",
+      "reason": "merge_key"
     }
   ]
 }

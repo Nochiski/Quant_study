@@ -61,6 +61,9 @@ const RUAMEL_FLOAT =
   /^[-+]?(?:[0-9][0-9_]*\.[0-9_]*(?:[eE][-+]?[0-9]+)?|[0-9][0-9_]*[eE][-+]?[0-9]+|\.[0-9_]+(?:[eE][-+]?[0-9]+)?)$/;
 const CORE_INT = /^(?:[-+]?[0-9]+|0o[0-7]+|0x[0-9a-fA-F]+)$/;
 const CORE_FLOAT = /^[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?$/;
+// ruamel 1.2 resolver의 float regex는 `.5e3`(선행 `.` + 지수)를 빠뜨려 문자열로 읽는다. core에는 맞으므로
+// frontend가 숫자로 읽는 역방향 불일치. 양쪽 모두 non_core_number로 거부한다.
+const RUAMEL_MISSES_FLOAT = /^[-+]?\.[0-9]+[eE][-+]?[0-9]+$/;
 const DEFAULT_TAG_HANDLES: Record<string, string> = { "!!": "tag:yaml.org,2002:" };
 
 const rejectAnchorOrTag = (
@@ -116,20 +119,25 @@ const rejectPolicy = (doc: Document): void => {
     Scalar(_key, node) {
       rejectAnchorOrTag(node.anchor, node.tag);
       const source = node.source;
-      if (
-        source !== undefined &&
-        node.type === "PLAIN" &&
-        (RUAMEL_INT.test(source) || RUAMEL_FLOAT.test(source)) &&
-        !(CORE_INT.test(source) || CORE_FLOAT.test(source))
-      ) {
-        throw new Yaml12Rejected("non_core_number", `scalar=${source}`);
+      if (node.type === "PLAIN" && source === "<<") {
+        throw new Yaml12Rejected("merge_key", "scalar=<<");
+      }
+      if (source !== undefined && node.type === "PLAIN") {
+        const ruamelNumber = RUAMEL_INT.test(source) || RUAMEL_FLOAT.test(source);
+        const coreNumber = CORE_INT.test(source) || CORE_FLOAT.test(source);
+        if ((ruamelNumber && !coreNumber) || RUAMEL_MISSES_FLOAT.test(source)) {
+          throw new Yaml12Rejected("non_core_number", `scalar=${source}`);
+        }
       }
       if (typeof node.value === "number" && !Number.isFinite(node.value)) {
         throw new Yaml12Rejected("non_finite_number", `value=${String(node.value)}`);
       }
+      // 정수 범위 검사는 정수 표기(core int)에만 적용한다. JS는 `1e16`도 정수로 보기 때문이다.
       if (
         typeof node.value === "number" &&
-        Number.isInteger(node.value) &&
+        source !== undefined &&
+        node.type === "PLAIN" &&
+        CORE_INT.test(source) &&
         !Number.isSafeInteger(node.value)
       ) {
         throw new Yaml12Rejected("integer_out_of_range", `value=${String(node.value)}`);

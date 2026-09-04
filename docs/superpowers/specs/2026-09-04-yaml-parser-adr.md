@@ -79,7 +79,9 @@ PyYAML 6.0.3(YAML 1.1), ruamel.yaml 0.19.1(`typ="safe", pure=True`, `version=(1,
   `integer_out_of_range`. float 표기(`1e16`)에는 적용하지 않는다.
 - 정책 거부 reason code: `syntax`, `directive`, `anchor_or_alias`, `tag`, `merge_key`, `non_core_number`,
   `duplicate_key`, `multiple_documents`, `non_string_key`, `non_finite_number`, `integer_out_of_range`,
-  `not_a_mapping`. P1-02 diagnostic `code`는 이 reason을 `yaml.<reason>`으로 노출한다.
+  `not_a_mapping`. P1-02 diagnostic `code`의 접두어는 port가 정한다 — 두 포맷에 똑같이 적용되는 정책은
+  `document.<reason>`, YAML 문법에만 있는 구성물은 `yaml.<reason>`, syntax는 파싱 포맷을 단다
+  (`ports/outgoing/document_codec.py`, DEFECT-103).
 - 복수 위반 문서의 reason 우선순위: syntax → directive 순서는 일치한다. anchor/merge/non_core_number는
   backend가 scan 단계에서 duplicate보다 먼저 잡고 frontend는 duplicate 뒤 visit에서 잡는다.
   not_a_mapping도 backend가 tree 검사보다 먼저, frontend가 뒤에 잡는다. multiple_documents는 frontend가

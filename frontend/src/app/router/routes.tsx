@@ -38,12 +38,13 @@ const isView = (value: unknown): value is StrategyView =>
   typeof value === "string" &&
   (STRATEGY_VIEWS as readonly string[]).includes(value);
 
-type LegacySearch = { step?: string; run?: true };
+type LegacySearch = { step?: string; run?: string };
 
 /** Idempotent: invalid values are dropped, defaults are never written to the URL (ADR D1). */
 const legacySearch = (search: Record<string, unknown>): LegacySearch => ({
   step: typeof search.step === "string" ? search.step : undefined,
-  run: search.run !== undefined ? true : undefined,
+  // `run` carries a run id (legacy `?run=<id>`); bare `?run` stays an empty string.
+  run: search.run === undefined ? undefined : String(search.run),
 });
 
 const rootRoute = createRootRouteWithContext<RouterContext>()({
@@ -97,8 +98,8 @@ const strategyRevisionRoute = createRoute({
   }),
   // Warm-up only (ADR D4): the page reads through useSuspenseQuery, never useLoaderData.
   loader: async ({ context, params }) => {
+    if (!/^[1-9]\d*$/.test(params.revision)) throw notFound();
     const revision = Number(params.revision);
-    if (!Number.isInteger(revision) || revision < 1) throw notFound();
     try {
       await context.queryClient.ensureQueryData(
         strategyRevisionQuery(params.strategyId, revision),
@@ -170,6 +171,9 @@ export const createAppRouter = (
     routeTree,
     context,
     history,
+    defaultPendingComponent: RoutePendingPage,
+    defaultErrorComponent: RouteErrorPage,
+    defaultNotFoundComponent: NotFoundPage,
     defaultPreload: "intent",
     defaultPendingMs: 200,
     scrollRestoration: true,

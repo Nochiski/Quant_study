@@ -211,7 +211,6 @@ const ko = {
   "page.notFound.action": "새 전략으로 이동",
   "page.newStrategy.title": "새 전략",
   "page.newStrategy.draft": "초안",
-  "page.newStrategy.placeholderTitle": "YAML 편집기는 준비 중입니다",
   "page.newStrategy.placeholder":
     "Phase 3에서 source editor가 이 자리에 들어옵니다. 그때까지는 기존 편집기를 사용하세요.",
   "page.revision.label": "리비전",
@@ -226,6 +225,9 @@ const ko = {
   "ide.inspector": "계약",
   "ide.debugger": "중간 결과",
   "ide.collapse": "접기",
+  "ide.collapseOutline": "전략 구조 접기",
+  "ide.collapseInspector": "계약 접기",
+  "ide.collapseDebugger": "중간 결과 접기",
   "ide.resizeOutline": "전략 구조 크기 조절",
   "ide.resizeInspector": "계약 크기 조절",
   "ide.resizeDebugger": "중간 결과 크기 조절",
@@ -241,6 +243,12 @@ const ko = {
   "ide.debugger.before": "제한 전",
   "ide.debugger.after": "제한 후",
   "ide.debugger.status": "상태",
+  "nav.operations.unavailable": "향후 제공, 사용 불가",
+  "page.error.description":
+    "잠시 후 다시 시도하거나 새 전략 화면으로 이동하세요.",
+  "page.error.retry": "다시 시도",
+  "page.revision.viewPending": "이 표현은 아직 제공되지 않아 JSON을 표시합니다",
+  "page.backtest.resultError": "백테스트 결과를 불러올 수 없습니다.",
 } as const;
 
 export type MessageKey = keyof typeof ko;
@@ -461,7 +469,6 @@ export const messages = {
     "page.notFound.action": "Go to new strategy",
     "page.newStrategy.title": "New strategy",
     "page.newStrategy.draft": "Draft",
-    "page.newStrategy.placeholderTitle": "The YAML editor is on its way",
     "page.newStrategy.placeholder":
       "The source editor arrives in Phase 3. Use the legacy builder until then.",
     "page.revision.label": "Revision",
@@ -476,6 +483,9 @@ export const messages = {
     "ide.inspector": "Contract",
     "ide.debugger": "Intermediate results",
     "ide.collapse": "Collapse",
+    "ide.collapseOutline": "Collapse outline",
+    "ide.collapseInspector": "Collapse contract panel",
+    "ide.collapseDebugger": "Collapse intermediate results",
     "ide.resizeOutline": "Resize outline",
     "ide.resizeInspector": "Resize contract panel",
     "ide.resizeDebugger": "Resize intermediate results",
@@ -491,6 +501,12 @@ export const messages = {
     "ide.debugger.before": "Before cap",
     "ide.debugger.after": "After cap",
     "ide.debugger.status": "Status",
+    "nav.operations.unavailable": "coming later, not available",
+    "page.error.description":
+      "Try again in a moment or go to the new strategy screen.",
+    "page.error.retry": "Retry",
+    "page.revision.viewPending": "This view is not available yet; showing JSON",
+    "page.backtest.resultError": "The backtest result could not be loaded.",
   } satisfies Record<MessageKey, string>,
 } as const;
 

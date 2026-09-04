@@ -87,7 +87,7 @@
   color: var(--accent);
 }
 
-.ui-tab:disabled {
+.ui-tab[aria-disabled="true"] {
   cursor: not-allowed;
   opacity: 0.5;
 }
@@ -236,4 +236,37 @@
 .ui-split-handle--horizontal .ui-split-handle__grip {
   width: 24px;
   height: 2px;
+}
+
+/* Page-level states shared by every page slice */
+.page-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.page-header h1 {
+  margin: 0;
+  font-size: var(--text-size-title);
+  letter-spacing: -0.01em;
+}
+
+.page-state {
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-large);
+  background: var(--surface-panel);
+  color: var(--text-muted);
+}
+
+.page-state--error {
+  border-color: var(--status-error-border);
+  background: var(--status-error-soft);
+  color: var(--status-error);
+}
+
+.page-state__actions {
+  display: flex;
+  gap: var(--space-2);
 }

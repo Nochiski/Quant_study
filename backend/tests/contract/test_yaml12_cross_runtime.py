@@ -74,6 +74,13 @@ def _scan_policy(text: str) -> None:
             raise Yaml12Rejected("anchor_or_alias", f"token={type(token).__name__}")
         if isinstance(token, TagToken):
             raise Yaml12Rejected("tag", f"tag={token.value}")
+        if isinstance(token, ScalarToken):
+            try:
+                token.value.encode("utf-8")
+            except UnicodeEncodeError as error:
+                raise Yaml12Rejected(
+                    "syntax", "scalar contains an unpaired surrogate escape"
+                ) from error
         if isinstance(token, ScalarToken) and token.plain:
             tag = loader.resolver.resolve(ScalarNode, token.value, (True, False))
             if tag == _MERGE_TAG:

@@ -201,6 +201,13 @@ const rejectPolicy = (doc: Document, lines: LineIndex): void => {
     Scalar(_key, node) {
       rejectAnchorOrTag(lines, node);
       const source = node.source;
+      if (typeof node.value === "string" && LONE_SURROGATE.test(node.value)) {
+        throw new Yaml12Rejected(
+          "syntax",
+          "string contains an unpaired surrogate escape",
+          rangeOf(lines, node),
+        );
+      }
       if (node.type === "PLAIN" && source === "<<") {
         throw new Yaml12Rejected(
           "merge_key",

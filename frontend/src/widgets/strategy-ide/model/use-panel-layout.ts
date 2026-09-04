@@ -54,11 +54,6 @@ const reduce = (state: PanelLayout, action: Action): PanelLayout => {
         (next, panel) => ({ ...next, [panel]: false }),
         state,
       );
-    case "close":
-      return action.panels.reduce(
-        (next, panel) => ({ ...next, [panel]: false }),
-        state,
-      );
   }
 };
 

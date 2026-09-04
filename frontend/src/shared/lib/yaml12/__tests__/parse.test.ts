@@ -112,6 +112,116 @@ describe("parseSource", () => {
     );
   });
 
+  it("accepts JSON whitespace tabs and YAML tabs inside scalar content", () => {
+    const json = parseSource('{"a":\t1,\n\t"b":"x\\ty"}', "json");
+    expect(json.status).toBe("ok");
+    if (json.status === "ok") expect(json.tree).toEqual({ a: 1, b: "x\ty" });
+
+    const yaml = parseSource(
+      "double: \"x:\ty\"\nsingle: 'x:\ty'\nblock: |\n  x:\ty\n",
+      "yaml",
+    );
+    expect(yaml.status).toBe("ok");
+    if (yaml.status === "ok") {
+      expect(yaml.tree).toEqual({
+        double: "x:\ty",
+        single: "x:\ty",
+        block: "x:\ty\n",
+      });
+    }
+  });
+
+  it("rejects decoded lone surrogates while accepting a valid escaped pair", () => {
+    for (const [source, format] of [
+      ['a: "\\ud800"\n', "yaml"],
+      ['"\\ud800": value\n', "yaml"],
+      ['{"a":"\\ud800"}', "json"],
+      ['{"\\ud800":"value"}', "json"],
+    ] as const) {
+      expect(parseSource(source, format).diagnostics[0]?.code).toBe(
+        "yaml.syntax",
+      );
+    }
+    for (const [source, format] of [
+      ['a: "\\ud83d\\ude00"\n', "yaml"],
+      ['{"a":"\\ud83d\\ude00"}', "json"],
+    ] as const) {
+      const parsed = parseSource(source, format);
+      expect(parsed.status).toBe("ok");
+      if (parsed.status === "ok") expect(parsed.tree.a).toBe("😀");
+    }
+  });
+
+  it.each([
+    ['a: "\\ud800"\nb: &x 1\n', "yaml.anchor_or_alias"],
+    ['a: "\\ud800"\nb: 1_000\n', "yaml.non_core_number"],
+    ['? ["\\ud800"]\n: value\n', "yaml.non_string_key"],
+    ['a: "\\ud800"\na: 2\n', "yaml.syntax"],
+    ['a: 1\na: "\\ud800"\n', "yaml.duplicate_key"],
+    ["a: &x 1\nb: !custom 2\n", "yaml.anchor_or_alias"],
+    ["a: 9007199254740993\na: 2\n", "yaml.integer_out_of_range"],
+    ["a: .nan\na: 2\n", "yaml.non_finite_number"],
+  ])(
+    "matches backend rejection order for combined policies: %s",
+    (source, code) => {
+      expect(parseSource(source, "yaml").diagnostics[0]?.code).toBe(code);
+    },
+  );
+
+  it("applies the global depth guard before later tree-policy errors", () => {
+    const deep = `${"a: {".repeat(33)}value${"}".repeat(33)}\nb: 9007199254740993\n`;
+    expect(parseSource(deep, "yaml").diagnostics[0]?.code).toBe(
+      "yaml.too_deep",
+    );
+    const deepKey = `? ${"[".repeat(33)}x${"]".repeat(33)}\n: value\n`;
+    expect(parseSource(deepKey, "yaml").diagnostics[0]?.code).toBe(
+      "yaml.too_deep",
+    );
+    for (const stream of [`${deep}---\nb: 2\n`, `b: 2\n---\n${deep}`]) {
+      expect(parseSource(stream, "yaml").diagnostics[0]?.code).toBe(
+        "yaml.too_deep",
+      );
+    }
+  });
+
+  it("matches scanner-versus-tree depth ordering at 31/32/33 collections", () => {
+    const value = (depth: number) =>
+      `a: ${"[".repeat(depth)}x${"]".repeat(depth)}\nb: &anchor 1\n`;
+    expect(parseSource(value(31), "yaml").diagnostics[0]?.code).toBe(
+      "yaml.anchor_or_alias",
+    );
+    expect(parseSource(value(32), "yaml").diagnostics[0]?.code).toBe(
+      "yaml.anchor_or_alias",
+    );
+    expect(parseSource(value(33), "yaml").diagnostics[0]?.code).toBe(
+      "yaml.too_deep",
+    );
+
+    const key = (depth: number) =>
+      `? ${"[".repeat(depth)}x${"]".repeat(depth)}\n: value\n`;
+    expect(parseSource(key(32), "yaml").diagnostics[0]?.code).toBe(
+      "yaml.non_string_key",
+    );
+    expect(parseSource(key(33), "yaml").diagnostics[0]?.code).toBe(
+      "yaml.too_deep",
+    );
+  });
+
+  it("rejects a raw lone surrogate before applying the byte limit", () => {
+    const source = `${"a".repeat(512 * 1024)}\ud800`;
+    expect(parseSource(source, "yaml").diagnostics[0]?.code).toBe(
+      "yaml.syntax",
+    );
+  });
+
+  it("rejects tabs used as YAML separation whitespace", () => {
+    for (const text of ["a: \tv\n", "a:\n\tv: 1\n", "a: foo\tbar\n"]) {
+      expect(parseSource(text, "yaml").diagnostics[0]?.code).toBe(
+        "yaml.syntax",
+      );
+    }
+  });
+
   it("positions are UTF-16 code units so they match editor offsets", () => {
     const text = 'title: "😀"\nrisk: 1\n';
     const parsed = parseSource(text, "yaml");

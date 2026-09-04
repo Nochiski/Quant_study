@@ -4,7 +4,8 @@ ADR: docs/superpowers/specs/2026-09-04-yaml-parser-adr.md
 
 `tests/fixtures/strategy_documents/yaml12/manifest.json`의 case를 backend codec
 (`adapters.outbound.document_codec`, ruamel.yaml YAML 1.2 pure safe loader)으로 읽어 accepted case는
-기대 JSON과 같은 typed tree를, rejected case는 기대 reason code(`yaml.<reason>`)를 내는지 검증한다.
+기대 JSON과 같은 typed tree를, rejected case는 기대 reason을 내는지 검증한다. manifest가 담는 것은
+prefix 없는 reason이며 wire code는 port(`diagnostic_code`)가 정한다 (DEFECT-103).
 frontend는 같은 manifest를 `yaml` npm으로 검증한다
 (`frontend/src/shared/lib/yaml12/__tests__/cross-runtime.test.ts`).
 """
@@ -18,7 +19,10 @@ from typing import Any
 import pytest
 
 from strategy_workbench.adapters.outbound.document_codec.facade.codec import RuamelDocumentCodec
-from strategy_workbench.application.strategy_authoring.facade.ports import SourceFormat
+from strategy_workbench.application.strategy_authoring.facade.ports import (
+    SourceFormat,
+    diagnostic_code,
+)
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents" / "yaml12"
 MANIFEST = json.loads((FIXTURES / "manifest.json").read_text(encoding="utf-8"))
@@ -50,7 +54,7 @@ def test_rejected_documents_fail_closed_with_expected_reason(case: dict[str, Any
     assert not parsed.ok
     assert parsed.tree is None
     (diagnostic,) = parsed.diagnostics
-    assert diagnostic.code == f"yaml.{case['reason']}"
+    assert diagnostic.code == diagnostic_code(case["reason"], SourceFormat.YAML)
 
 
 def test_manifest_covers_every_fixture_file() -> None:

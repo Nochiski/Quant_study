@@ -7,6 +7,7 @@ import {
   SaveAction,
   SourceEditor,
   saveStatusText,
+  saveStatusTone,
   useSaveDocument,
   useSchemaAssist,
   useStrategyDocument,
@@ -47,28 +48,24 @@ export const StrategyRevisionPage = () => {
   const { save, status, canSave } = useSaveDocument(document, dispatch);
   const assist = useSchemaAssist(document);
 
+  // A save can complete while the user is still typing. Keep that newer text on the current
+  // route and let the next save append from the updated base; only follow the revision when the
+  // current source is actually saved.
+  const leaving =
+    document.strategyId === strategyId &&
+    document.baseRevision !== null &&
+    document.baseRevision !== Number(revision) &&
+    !document.dirty;
+
   useEffect(() => {
-    if (
-      document.strategyId !== strategyId ||
-      document.baseRevision === null ||
-      document.baseRevision === Number(revision)
-    ) {
-      return;
-    }
+    if (!leaving || document.baseRevision === null) return;
     void navigate({
       to: ROUTE,
       params: { strategyId, revision: String(document.baseRevision) },
       search: { ...search },
       replace: true,
     });
-  }, [
-    document.strategyId,
-    document.baseRevision,
-    strategyId,
-    revision,
-    search,
-    navigate,
-  ]);
+  }, [leaving, document.baseRevision, strategyId, search, navigate]);
 
   const availableViews: readonly StrategyView[] =
     stored.format === "yaml" ? PROJECTION_VIEWS : ["json"];
@@ -94,6 +91,7 @@ export const StrategyRevisionPage = () => {
         }
         meta={{ createdAt: shortTimestamp(stored.created_at) }}
         saveStatus={saveStatusText(document, status)}
+        saveTone={saveStatusTone(document, status)}
         view={view}
         availableViews={availableViews}
         onViewChange={(next) =>
@@ -139,7 +137,7 @@ export const StrategyRevisionPage = () => {
         }
         runDisabled
       />
-      <DirtyLeaveGuard dirty={document.dirty} />
+      <DirtyLeaveGuard dirty={document.dirty && !leaving} />
     </>
   );
 };

@@ -28,6 +28,8 @@ type SaveSnapshot = {
   format: SourceFormat;
   strategyId: string | null;
   baseRevision: number | null;
+  documentEpoch: number;
+  sourceVersion: number;
 };
 
 /** Save is meaningful only for a dirty, non-empty, syntactically parsed text outside IME input. */
@@ -64,7 +66,7 @@ export const useSaveDocument = (
             expected_revision: snapshot.baseRevision,
           }),
     onMutate: () => setStatus({ kind: "saving" }),
-    onSuccess: (document) => {
+    onSuccess: (document, snapshot) => {
       queryClient.setQueryData(
         strategyDocumentQuery(document.strategy_id, document.revision).queryKey,
         document,
@@ -78,6 +80,8 @@ export const useSaveDocument = (
         revision: document.revision,
         specHash: document.spec_hash,
         source: document.source,
+        documentEpoch: snapshot.documentEpoch,
+        sourceVersion: snapshot.sourceVersion,
       });
       setStatus({ kind: "saved", document });
     },
@@ -103,6 +107,8 @@ export const useSaveDocument = (
       format: state.format,
       strategyId: state.strategyId,
       baseRevision: state.baseRevision,
+      documentEpoch: state.documentEpoch,
+      sourceVersion: state.sourceVersion,
     });
   }, [isPending, mutate, state]);
 

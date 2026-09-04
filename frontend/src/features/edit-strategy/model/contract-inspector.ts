@@ -13,14 +13,11 @@ import type {
   StrategyDocumentSchema,
 } from "../../../shared/api";
 import {
+  escapePointerSegment,
   pointerSegments,
   templatePointer,
 } from "../../../shared/lib/yaml12";
-import {
-  discriminatorAt,
-  schemaAt,
-  type JsonSchema,
-} from "./schema-navigator";
+import { discriminatorAt, schemaAt, type JsonSchema } from "./schema-navigator";
 
 export type ContractResourceState = "loading" | "ready" | "error";
 
@@ -164,6 +161,18 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const own = (value: object, key: string): boolean =>
   Object.prototype.hasOwnProperty.call(value, key);
 
+/** One compatibility decision shared by every schema + contract consumer. */
+export const isSchemaContractCompatible = (
+  schema: StrategyDocumentSchema | null | undefined,
+  contract: StrategyDocumentContractResponse | null | undefined,
+): boolean =>
+  schema !== null &&
+  schema !== undefined &&
+  contract !== null &&
+  contract !== undefined &&
+  schema.schema_hash === contract.contract.schema_hash &&
+  schema.schema_version === contract.contract.schema_version;
+
 export const valueAt = (
   tree: unknown,
   pointer: string,
@@ -261,7 +270,8 @@ const nearestDiscriminator = (
 ): ContractDiscriminator | null => {
   const encodedSegments = pointer === "" ? [] : pointer.slice(1).split("/");
   for (let depth = encodedSegments.length; depth >= 0; depth -= 1) {
-    const ownerPointer = depth === 0 ? "" : `/${encodedSegments.slice(0, depth).join("/")}`;
+    const ownerPointer =
+      depth === 0 ? "" : `/${encodedSegments.slice(0, depth).join("/")}`;
     const found = discriminatorAt(schema, ownerPointer, tree);
     if (found !== null) return { ownerPointer, ...found };
   }
@@ -283,7 +293,8 @@ export const projectContractField = (
   const row = contractFor(contract, pointer, branch);
   const node = resolved.node;
   const type = row?.type ?? schemaType(node);
-  const unit = row?.unit ?? (typeof node["x-unit"] === "string" ? node["x-unit"] : null);
+  const unit =
+    row?.unit ?? (typeof node["x-unit"] === "string" ? node["x-unit"] : null);
   const displayUnit =
     row?.display_unit ??
     (typeof node["x-display-unit"] === "string"
@@ -291,18 +302,32 @@ export const projectContractField = (
       : null);
   const hasDefault = row?.has_default === true || own(node, "default");
   const defaultValue = row?.has_default === true ? row.default : node.default;
-  const hasExample =
-    row?.example !== undefined ||
-    (Array.isArray(node.examples) && node.examples.length > 0);
-  const example =
-    row?.example !== undefined
-      ? row.example
-      : Array.isArray(node.examples)
-        ? node.examples[0]
-        : undefined;
-  const enumValues = row?.enum ?? stringList(node.enum);
-  const hasConst = row?.const != null || own(node, "const");
-  const constValue = row?.const ?? node.const;
+  // The backend serializes an absent optional example as null. Keep null/undefined absent;
+  // false, zero and an empty string remain valid examples.
+  const contractExample = row?.example;
+  const schemaExample = Array.isArray(node.examples)
+    ? node.examples.find(
+        (candidate) => candidate !== null && candidate !== undefined,
+      )
+    : undefined;
+  const hasExample = contractExample != null || schemaExample !== undefined;
+  const example = contractExample != null ? contractExample : schemaExample;
+  const discriminatorPointer = discriminator
+    ? `${discriminator.ownerPointer}/${escapePointerSegment(discriminator.propertyName)}`
+    : null;
+  const unresolvedDiscriminatorProperty =
+    discriminator?.selected === null && pointer === discriminatorPointer;
+  // When no valid union branch is selected, the first branch's `kind` const is only a
+  // traversal artifact. The discriminator variants are the actual contract at this point.
+  const enumValues = unresolvedDiscriminatorProperty
+    ? discriminator.variants
+    : (row?.enum ?? stringList(node.enum));
+  const hasConst = unresolvedDiscriminatorProperty
+    ? false
+    : row?.const != null || own(node, "const");
+  const constValue = unresolvedDiscriminatorProperty
+    ? undefined
+    : (row?.const ?? node.const);
   const shape =
     pointer === ""
       ? "root"
@@ -325,7 +350,8 @@ export const projectContractField = (
     hasDefault,
     minimum: lowerBound(row, node),
     maximum: upperBound(row, node),
-    format: row?.format ?? (typeof node.format === "string" ? node.format : null),
+    format:
+      row?.format ?? (typeof node.format === "string" ? node.format : null),
     unit,
     displayUnit,
     descriptionKey:
@@ -345,9 +371,7 @@ export const projectContractField = (
       (typeof node["x-catalog"] === "string" ? node["x-catalog"] : null),
     reference:
       row?.reference ??
-      (typeof node["x-reference"] === "string"
-        ? node["x-reference"]
-        : null),
+      (typeof node["x-reference"] === "string" ? node["x-reference"] : null),
     value: {
       present: selectedValue.present,
       raw: selectedValue.value,
@@ -376,10 +400,7 @@ const catalogProjection = (
   if (field.catalog === "equity-field") {
     const expectedVersion = source.contract!.contract.dataset_snapshot_id;
     const actualVersion = source.equityCatalog?.snapshot?.snapshot_id ?? null;
-    if (
-      source.state.equityCatalog !== "ready" ||
-      source.equityCatalog === null
-    )
+    if (source.state.equityCatalog !== "ready" || source.equityCatalog === null)
       return {
         kind: "equity-field",
         status:
@@ -438,10 +459,7 @@ const catalogProjection = (
   if (field.catalog === "factor") {
     const expectedVersion = source.contract!.contract.factor_registry_version;
     const actualVersion = source.factorCatalog?.registry_version ?? null;
-    if (
-      source.state.factorCatalog !== "ready" ||
-      source.factorCatalog === null
-    )
+    if (source.state.factorCatalog !== "ready" || source.factorCatalog === null)
       return {
         kind: "factor",
         status:
@@ -516,10 +534,7 @@ export const projectContractInspector = (
       ? { status: "loading" }
       : { status: "unavailable" };
   }
-  if (
-    source.schema.schema_hash !== source.contract.contract.schema_hash ||
-    source.schema.schema_version !== source.contract.contract.schema_version
-  ) {
+  if (!isSchemaContractCompatible(source.schema, source.contract)) {
     return {
       status: "incompatible",
       schemaHash: source.schema.schema_hash,

@@ -22,6 +22,12 @@ const SCHEMA = JSON.parse(
 
 const CONTRACT: FieldContract[] = [
   {
+    pointer: "/title",
+    type: "string",
+    required: true,
+    example: null,
+  },
+  {
     pointer: "/risk/max_name_weight",
     type: "number",
     required: false,
@@ -156,6 +162,7 @@ const source = (
 
 const TREE = {
   schema_version: "1.0",
+  title: "테스트 전략",
   risk: { max_name_weight: 0.05 },
   factors: {
     factors: [
@@ -202,6 +209,53 @@ describe("contract projection", () => {
     );
   });
 
+  it("treats the wire contract's null example as absent", () => {
+    const result = projectContractInspector(source(), "/title", TREE, false);
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") return;
+    expect(result.field.hasExample).toBe(false);
+    expect(result.field.example).toBeUndefined();
+  });
+
+  it.each([undefined, "not_a_node_kind"])(
+    "keeps an unresolved discriminator variant-based when document kind is %s",
+    (kind) => {
+      const pendingNode =
+        kind === undefined
+          ? { node_id: "pending" }
+          : { node_id: "pending", kind };
+      const pendingTree = {
+        ...TREE,
+        factors: {
+          factors: [
+            {
+              ...TREE.factors.factors[0],
+              graph: {
+                nodes: [pendingNode],
+                output_node_id: "pending",
+              },
+            },
+          ],
+        },
+      };
+      const result = projectContractInspector(
+        source(),
+        "/factors/factors/0/graph/nodes/0/kind",
+        pendingTree,
+        false,
+      );
+      expect(result.status).toBe("ready");
+      if (result.status !== "ready") return;
+      expect(result.field.discriminator?.selected).toBeNull();
+      expect(result.field.discriminator?.variants).toContain("field");
+      expect(result.field.enumValues).toEqual(
+        result.field.discriminator?.variants,
+      );
+      expect(result.field.hasConst).toBe(false);
+      expect(result.field.constValue).toBeUndefined();
+    },
+  );
+
   it("joins a field only to the contract-pinned snapshot and exposes PIT metadata", () => {
     const result = projectContractInspector(
       source(),
@@ -222,7 +276,11 @@ describe("contract projection", () => {
       id: "close",
       actualVersion: "dataset-snapshot-v1",
     });
-    if (result.catalog?.kind !== "equity-field" || result.catalog.status !== "ready") return;
+    if (
+      result.catalog?.kind !== "equity-field" ||
+      result.catalog.status !== "ready"
+    )
+      return;
     expect(result.catalog.field.coverage.point_in_time).toBe(true);
     expect(result.catalog.snapshot.dataset_revisions[0].revision).toBe("r12");
   });
@@ -304,6 +362,18 @@ describe("contract projection", () => {
 });
 
 describe("ContractInspector UI", () => {
+  it("does not render a null wire example", () => {
+    render(
+      <ContractInspector
+        source={source()}
+        selectedPointer="/title"
+        tree={TREE}
+        stale={false}
+      />,
+    );
+    expect(screen.queryByText("예시")).not.toBeInTheDocument();
+  });
+
   it("renders localized backend description and raw/display values without sample metadata", () => {
     render(
       <ContractInspector
@@ -332,7 +402,9 @@ describe("ContractInspector UI", () => {
     );
     expect(screen.getByText("데이터 필드 · PIT")).toBeInTheDocument();
     expect(screen.getByText("KRX daily close")).toBeInTheDocument();
-    expect(screen.getAllByText("dataset-snapshot-v1").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("dataset-snapshot-v1").length).toBeGreaterThan(
+      0,
+    );
     expect(screen.getAllByText("field").length).toBeGreaterThanOrEqual(2);
   });
 });

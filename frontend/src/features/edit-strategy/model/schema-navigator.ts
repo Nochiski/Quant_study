@@ -188,9 +188,15 @@ export const discriminatorAt = (
     })
     .filter((value): value is string => typeof value === "string");
   if (variants.length === 0) return null;
-  const selected =
+  const documentKind =
     isObject(end.value) && typeof end.value[propertyName] === "string"
       ? end.value[propertyName]
+      : null;
+  // An unknown value does not select a branch. The raw document value is still available
+  // through the field projection, while union metadata remains explicitly unresolved.
+  const selected =
+    documentKind !== null && variants.includes(documentKind)
+      ? documentKind
       : null;
   return { propertyName, variants, selected };
 };

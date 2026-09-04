@@ -7,8 +7,12 @@
  */
 import type {
   DatasetFieldProfile,
+  FactorCatalog,
   FactorDefinition,
   FieldContract,
+  ResearchCatalog,
+  StrategyDocumentContractResponse,
+  StrategyDocumentSchema,
 } from "../../../shared/api";
 import { t } from "../../../shared/config";
 import {
@@ -24,6 +28,7 @@ import type {
 import type { DocumentState } from "./document-state";
 import {
   formatContractValue,
+  isSchemaContractCompatible,
   projectContractField,
 } from "./contract-inspector";
 import {
@@ -48,6 +53,43 @@ export type AssistDeps = {
   catalogs: AssistCatalogs;
   /** Latest document state (a ref read at call time, never a stale closure). */
   getState: () => DocumentState;
+};
+
+export type AssistMetadata = Omit<AssistDeps, "getState">;
+
+/**
+ * Projects query responses into editor assistance without flattening their wire contracts.
+ * A mismatched schema/contract pair degrades to schema-only keys/enums; contract metadata and
+ * contract-pinned catalogs stay unavailable until the coherent pair arrives.
+ */
+export const projectAssistMetadata = (
+  schema: StrategyDocumentSchema | null,
+  contract: StrategyDocumentContractResponse | null,
+  equityCatalog: ResearchCatalog | null,
+  factorCatalog: FactorCatalog | null,
+): AssistMetadata => {
+  const coherentContract =
+    contract !== null && isSchemaContractCompatible(schema, contract)
+      ? contract.contract
+      : null;
+  return {
+    schema: (schema?.schema as JsonSchema | undefined) ?? null,
+    contract: coherentContract?.fields ?? [],
+    catalogs: {
+      equityFields:
+        coherentContract !== null &&
+        equityCatalog?.snapshot?.snapshot_id ===
+          coherentContract.dataset_snapshot_id
+          ? equityCatalog.fields
+          : [],
+      factors:
+        coherentContract !== null &&
+        factorCatalog?.registry_version ===
+          coherentContract.factor_registry_version
+          ? factorCatalog.factors
+          : [],
+    },
+  };
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

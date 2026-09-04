@@ -19,6 +19,7 @@ import type {
 import {
   buildCompletionSource,
   buildHoverSource,
+  projectAssistMetadata,
   type AssistDeps,
 } from "./schema-assist";
 import type { JsonSchema } from "./schema-navigator";
@@ -67,26 +68,22 @@ export const useSchemaAssist = (state: DocumentState): SchemaAssist => {
   });
   const schemaData = schema.data?.schema;
   const contractData = contract.data?.contract;
-  const contractRows = contractData?.fields;
-  // Completion must not silently pair an older contract with a newer catalog response.
-  const fieldRows =
-    contractData &&
-    fields.data?.snapshot?.snapshot_id === contractData.dataset_snapshot_id
-      ? fields.data.fields
-      : undefined;
-  const factorRows =
-    contractData &&
-    factors.data?.registry_version === contractData.factor_registry_version
-      ? factors.data.factors
-      : undefined;
+  const assistMetadata = useMemo(
+    () =>
+      projectAssistMetadata(
+        schema.data ?? null,
+        contract.data ?? null,
+        fields.data ?? null,
+        factors.data ?? null,
+      ),
+    [schema.data, contract.data, fields.data, factors.data],
+  );
   useEffect(() => {
     latest.current = {
-      schema: (schemaData as JsonSchema | undefined) ?? null,
-      contract: contractRows ?? [],
-      catalogs: { equityFields: fieldRows ?? [], factors: factorRows ?? [] },
+      ...assistMetadata,
       getState: () => state,
     };
-  }, [schemaData, contractRows, fieldRows, factorRows, state]);
+  }, [assistMetadata, state]);
 
   const completionSource = useCallback<EditorCompletionSource>(
     (context) => buildCompletionSource(latest.current)(context),
@@ -105,9 +102,7 @@ export const useSchemaAssist = (state: DocumentState): SchemaAssist => {
   const runtimeSchema = (schemaData as JsonSchema | undefined) ?? null;
   const inspectorSource = useMemo<ContractInspectorSource>(
     () => ({
-      schema: schema.data
-        ? schema.data
-        : null,
+      schema: schema.data ? schema.data : null,
       contract: contract.data ?? null,
       equityCatalog: fields.data ?? null,
       factorCatalog: factors.data ?? null,

@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import type {
   DatasetFieldProfile,
+  FactorCatalog,
   FactorDefinition,
   FieldContract,
+  ResearchCatalog,
+  StrategyDocumentContractResponse,
+  StrategyDocumentSchema,
 } from "../../../shared/api";
 import { parseSource } from "../../../shared/lib/yaml12";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
@@ -16,6 +20,7 @@ import {
   buildCompletionSource,
   buildHoverSource,
   describePointer,
+  projectAssistMetadata,
   type AssistDeps,
 } from "../model/schema-assist";
 import type { JsonSchema } from "../model/schema-navigator";
@@ -25,6 +30,12 @@ const SCHEMA = JSON.parse(
 ) as JsonSchema;
 
 const CONTRACT: FieldContract[] = [
+  {
+    pointer: "/title",
+    type: "string",
+    required: true,
+    example: null,
+  },
   {
     pointer: "/risk/max_name_weight",
     type: "number",
@@ -67,6 +78,62 @@ const FIELDS = [
 const FACTORS = [
   { factor_id: "quality_roe", label: "ROE", description: "자기자본이익률" },
 ] as FactorDefinition[];
+
+const EQUITY_CATALOG: ResearchCatalog = {
+  facets: { dataset_ids: ["prices"], frequencies: ["daily"], units: ["KRW"] },
+  fields: FIELDS,
+  page: 1,
+  page_count: 1,
+  page_size: 100,
+  snapshot: {
+    built_at: "2026-09-05T00:00:00Z",
+    dataset_revisions: [],
+    point_in_time: true,
+    schema_version: "1",
+    snapshot_id: "dataset-v1",
+    source: "test",
+  },
+  total: FIELDS.length,
+};
+
+const FACTOR_CATALOG: FactorCatalog = {
+  facets: {
+    availability: ["implemented"],
+    categories: ["price"],
+    output_units: ["score"],
+  },
+  factors: FACTORS,
+  page: 1,
+  page_count: 1,
+  page_size: 100,
+  registry_version: "factors-v1",
+  total: FACTORS.length,
+};
+
+const schemaEnvelope = (
+  schemaHash: string,
+  schemaVersion = "1.0",
+): StrategyDocumentSchema => ({
+  schema: SCHEMA,
+  schema_hash: schemaHash,
+  schema_version: schemaVersion,
+});
+
+const contractEnvelope = (
+  schemaHash: string,
+  schemaVersion = "1.0",
+): StrategyDocumentContractResponse => ({
+  contract: {
+    contract_hash: `contract-${schemaHash}`,
+    dataset_snapshot_id: "dataset-v1",
+    factor_registry_version: "factors-v1",
+    fields: CONTRACT,
+    schema_hash: schemaHash,
+    schema_version: schemaVersion,
+  },
+  equity_catalog_url: "/api/v1/equity/catalog",
+  factor_catalog_url: "/api/v1/factors/catalog",
+});
 
 const YAML = [
   'schema_version: "1.0"',
@@ -130,6 +197,35 @@ const offsetOf = (text: string, needle: string, after = 0): number => {
 };
 
 describe("schema-driven completion", () => {
+  it("drops contract metadata and pinned catalogs for either schema-contract arrival race", () => {
+    const coherent = projectAssistMetadata(
+      schemaEnvelope("v1"),
+      contractEnvelope("v1"),
+      EQUITY_CATALOG,
+      FACTOR_CATALOG,
+    );
+    expect(coherent.contract).toBe(CONTRACT);
+    expect(coherent.catalogs.equityFields).toBe(FIELDS);
+    expect(coherent.catalogs.factors).toBe(FACTORS);
+
+    const races = [
+      [schemaEnvelope("v2", "2.0"), contractEnvelope("v1")],
+      [schemaEnvelope("v1"), contractEnvelope("v2", "2.0")],
+    ] as const;
+    for (const [schema, contract] of races) {
+      const mismatched = projectAssistMetadata(
+        schema,
+        contract,
+        EQUITY_CATALOG,
+        FACTOR_CATALOG,
+      );
+      expect(mismatched.schema).toBe(SCHEMA);
+      expect(mismatched.contract).toEqual([]);
+      expect(mismatched.catalogs.equityFields).toEqual([]);
+      expect(mismatched.catalogs.factors).toEqual([]);
+    }
+  });
+
   it("completes keys from the schema, minus the keys already present", async () => {
     const text = `${YAML.replace("  gross_exposure: 1", "  gross_exposure: 1\n  max")}`;
     const source = buildCompletionSource(deps(stateFor(text)));
@@ -235,6 +331,16 @@ describe("schema-driven completion", () => {
 });
 
 describe("schema-driven hover", () => {
+  it("does not describe a null wire example", () => {
+    const lines = describePointer(
+      deps(stateFor(YAML)),
+      "/title",
+      stateFor(YAML).parse!.tree,
+    );
+    expect(lines).not.toBeNull();
+    expect(lines?.some((line) => line.startsWith("예시:"))).toBe(false);
+  });
+
   it("describes the field under the cursor from the contract row and the schema", () => {
     const text = YAML.replace(
       "  gross_exposure: 1",

@@ -351,6 +351,24 @@ def test_field_contracts_carry_the_identifier_markers() -> None:
     assert contracts["/risk/max_name_weight"].catalog is None
 
 
+def test_factor_authoring_mapping_is_owned_by_the_runtime_schema() -> None:
+    properties = strategy_document_schema()["$defs"]["FactorSignal"]["properties"]
+    assert {
+        name: {
+            key: value
+            for key, value in schema.items()
+            if key.startswith("x-authoring-")
+        }
+        for name, schema in properties.items()
+    } == {
+        "factor_id": {"x-authoring-source": "factor_id", "x-authoring-identity": True},
+        "label": {"x-authoring-source": "label"},
+        "direction": {"x-authoring-source": "preference"},
+        "weight": {"x-authoring-default": 1.0},
+        "graph": {"x-authoring-source": "default_graph"},
+    }
+
+
 def test_runtime_schema_fixture_is_current() -> None:
     """The frontend navigates the fixture copy in its own tests; it must equal the live schema."""
     fixture = json.loads((FIXTURES / "runtime-schema.json").read_text(encoding="utf-8"))

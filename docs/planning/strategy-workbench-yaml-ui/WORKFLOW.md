@@ -781,12 +781,20 @@ Phase 3 종료 기준:
 - cache/plan fingerprint
 - source 또는 graph node와 selection 연동
 
-### P4-05 — Snippets
+### P4-05 — Canonical snippet model and editor transaction
 
-- data/factor/signal/risk/execution snippet catalog
-- 문자열 append 대신 editor transaction으로 삽입
-- cursor 위치와 YAML indentation 인식
-- 삽입 직후 parse 검증
+- backend runtime schema와 coherent factor catalog에서 data/factor/signal/risk/execution snippet 값을 파생
+- frontend 수기 StrategySpec shape·enum·default·factor graph 금지
+- cursor 위치와 YAML indentation을 인식한 range edit plan
+- 전체 next source의 YAML 1.2 parse preflight
+- 문자열 append 대신 editor-agnostic 단일 undoable transaction으로 삽입
+
+### P4-10 — Snippet catalog UI and page wiring
+
+- five-area snippet catalog를 left IDE panel에 표시
+- new/revision source editor와 같은 transaction coordinator를 합성
+- loading/unavailable/success/failure와 IME 차단 피드백
+- keyboard/accessibility와 실제 route integration 검증
 
 ### P4-06 — JSON·Form projection
 

@@ -13,6 +13,14 @@ CATALOG_EQUITY_FIELD = {"catalog": "equity-field"}
 DEFINES_PARAMETER = {"defines": "parameter"}
 
 
+def _factor_authoring(source: str, *, identity: bool = False) -> dict[str, object]:
+    """Describe how a catalog row supplies one required FactorSignal authoring value."""
+    metadata: dict[str, object] = {"authoring-source": source}
+    if identity:
+        metadata["authoring-identity"] = True
+    return metadata
+
+
 class Market(StrEnum):
     KRX = "KRX"
 
@@ -101,11 +109,11 @@ class EligibilityStep:
 
 @dataclass(frozen=True)
 class FactorSignal:
-    factor_id: str
-    label: str
-    direction: FactorDirection
-    weight: float
-    graph: FactorGraph
+    factor_id: str = field(metadata=_factor_authoring("factor_id", identity=True))
+    label: str = field(metadata=_factor_authoring("label"))
+    direction: FactorDirection = field(metadata=_factor_authoring("preference"))
+    weight: float = field(metadata={"authoring-default": 1.0})
+    graph: FactorGraph = field(metadata=_factor_authoring("default_graph"))
 
 
 @dataclass(frozen=True)

@@ -55,6 +55,7 @@ from strategy_workbench.application.strategy_authoring.facade.authoring import (
     CompileRequest,
     InvalidStrategyDocumentError,
     ReviseDocumentRequest,
+    RevisionDiff,
     SaveDocumentRequest,
     StrategyAuthoringService,
     StrategyDocument,
@@ -398,6 +399,21 @@ def create_app(
         """Revision history, ascending by revision, paginated deterministically."""
         try:
             return strategy_documents.history(strategy_id, PageRequest(offset, limit))
+        except StrategyNotFoundError as error:
+            raise _strategy_not_found(error) from error
+
+    @app.get(
+        "/api/v1/strategies/{strategy_id}/diff",
+        operation_id="diffStrategyRevisions",
+    )
+    def diff_strategy_revisions(
+        strategy_id: str,
+        base: int = Query(ge=1),
+        target: int = Query(ge=1),
+    ) -> RevisionDiff:
+        """Semantic diff of two revisions over their canonical payloads (identity excluded)."""
+        try:
+            return strategy_documents.diff(strategy_id, base, target)
         except StrategyNotFoundError as error:
             raise _strategy_not_found(error) from error
 

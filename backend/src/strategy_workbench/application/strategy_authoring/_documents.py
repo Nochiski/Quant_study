@@ -24,6 +24,7 @@ from strategy_workbench.application.strategy_design.facade.ports import (
     StrategyRevisionRecord,
     StrategySummary,
 )
+from strategy_workbench.domain.strategy.facade.diff import DiffEntry, diff_strategy_specs
 from strategy_workbench.domain.strategy.facade.specification import (
     StrategyIdentity,
     StrategySpec,
@@ -66,6 +67,22 @@ class StrategyDocument:
     origin: RevisionOrigin
     created_at: datetime
     generated: bool
+
+
+@dataclass(frozen=True)
+class RevisionDiff:
+    """Semantic differences between two stored revisions of one strategy (P1-08).
+
+    Computed over canonical payloads: identity, comments and formatting are invisible;
+    equal `spec_hash` implies `changes == ()`.
+    """
+
+    strategy_id: str
+    base_revision: int
+    target_revision: int
+    base_spec_hash: str
+    target_spec_hash: str
+    changes: tuple[DiffEntry, ...]
 
 
 class InvalidStrategyDocumentError(ValueError):
@@ -115,6 +132,18 @@ class StrategyDocumentService:
 
     def list_strategies(self, page: PageRequest) -> Page[StrategySummary]:
         return self._repository.list_strategies(page)
+
+    def diff(self, strategy_id: str, base_revision: int, target_revision: int) -> RevisionDiff:
+        base = self._repository.get(strategy_id, base_revision)
+        target = self._repository.get(strategy_id, target_revision)
+        return RevisionDiff(
+            strategy_id=strategy_id,
+            base_revision=base.revision,
+            target_revision=target.revision,
+            base_spec_hash=base.spec_hash,
+            target_spec_hash=target.spec_hash,
+            changes=diff_strategy_specs(base.spec, target.spec),
+        )
 
     def _record(
         self, source: str, format: SourceFormat, identity: StrategyIdentity

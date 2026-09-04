@@ -881,6 +881,41 @@
         "title": "DiagnosticSeverity",
         "type": "string"
       },
+      "DiffEntry": {
+        "description": "One leaf-level difference at a JSON Pointer of the canonical payload.\n\n`before`/`after` are JSON values (scalars, or a whole subtree when a key or array item was\nadded/removed). `changed` never carries containers: nested differences are reported per\nleaf so an editor can highlight exact ranges.",
+        "properties": {
+          "after": {
+            "title": "After"
+          },
+          "before": {
+            "title": "Before"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/DiffKind"
+          },
+          "pointer": {
+            "title": "Pointer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pointer",
+          "kind",
+          "before",
+          "after"
+        ],
+        "title": "DiffEntry",
+        "type": "object"
+      },
+      "DiffKind": {
+        "enum": [
+          "added",
+          "removed",
+          "changed"
+        ],
+        "title": "DiffKind",
+        "type": "string"
+      },
       "DrawdownPoint": {
         "properties": {
           "drawdown": {
@@ -3674,6 +3709,48 @@
         "title": "ReviseStrategyRequest",
         "type": "object"
       },
+      "RevisionDiff": {
+        "description": "Semantic differences between two stored revisions of one strategy (P1-08).\n\nComputed over canonical payloads: identity, comments and formatting are invisible;\nequal `spec_hash` implies `changes == ()`.",
+        "properties": {
+          "base_revision": {
+            "title": "Base Revision",
+            "type": "integer"
+          },
+          "base_spec_hash": {
+            "title": "Base Spec Hash",
+            "type": "string"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/DiffEntry"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "string"
+          },
+          "target_revision": {
+            "title": "Target Revision",
+            "type": "integer"
+          },
+          "target_spec_hash": {
+            "title": "Target Spec Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "strategy_id",
+          "base_revision",
+          "target_revision",
+          "base_spec_hash",
+          "target_spec_hash",
+          "changes"
+        ],
+        "title": "RevisionDiff",
+        "type": "object"
+      },
       "RevisionOrigin": {
         "enum": [
           "document",
@@ -5913,6 +5990,66 @@
           }
         },
         "summary": "Get Strategy"
+      }
+    },
+    "/api/v1/strategies/{strategy_id}/diff": {
+      "get": {
+        "description": "Semantic diff of two revisions over their canonical payloads (identity excluded).",
+        "operationId": "diffStrategyRevisions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "base",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Base",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "target",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Target",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevisionDiff"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Diff Strategy Revisions"
       }
     },
     "/api/v1/strategies/{strategy_id}/revisions": {

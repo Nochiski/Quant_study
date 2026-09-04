@@ -1,6 +1,7 @@
 from strategy_workbench.application.strategy_authoring._documents import (
     InvalidStrategyDocumentError,
     ReviseDocumentRequest,
+    RevisionDiff,
     SaveDocumentRequest,
     StrategyDocument,
     StrategyDocumentService,
@@ -20,6 +21,7 @@ __all__ = [
     "CompiledDocument",
     "InvalidStrategyDocumentError",
     "ReviseDocumentRequest",
+    "RevisionDiff",
     "SaveDocumentRequest",
     "StrategyDocument",
     "StrategyAuthoringService",

@@ -524,6 +524,36 @@ export type DiagnosticKind =
 export type DiagnosticSeverity = "error" | "warning";
 
 /**
+ * DiffEntry
+ *
+ * One leaf-level difference at a JSON Pointer of the canonical payload.
+ *
+ * `before`/`after` are JSON values (scalars, or a whole subtree when a key or array item was
+ * added/removed). `changed` never carries containers: nested differences are reported per
+ * leaf so an editor can highlight exact ranges.
+ */
+export type DiffEntry = {
+  /**
+   * After
+   */
+  after: unknown;
+  /**
+   * Before
+   */
+  before: unknown;
+  kind: DiffKind;
+  /**
+   * Pointer
+   */
+  pointer: string;
+};
+
+/**
+ * DiffKind
+ */
+export type DiffKind = "added" | "removed" | "changed";
+
+/**
  * DrawdownPoint
  */
 export type DrawdownPoint = {
@@ -2260,6 +2290,41 @@ export type ReviseStrategyRequest = {
 };
 
 /**
+ * RevisionDiff
+ *
+ * Semantic differences between two stored revisions of one strategy (P1-08).
+ *
+ * Computed over canonical payloads: identity, comments and formatting are invisible;
+ * equal `spec_hash` implies `changes == ()`.
+ */
+export type RevisionDiff = {
+  /**
+   * Base Revision
+   */
+  base_revision: number;
+  /**
+   * Base Spec Hash
+   */
+  base_spec_hash: string;
+  /**
+   * Changes
+   */
+  changes: Array<DiffEntry>;
+  /**
+   * Strategy Id
+   */
+  strategy_id: string;
+  /**
+   * Target Revision
+   */
+  target_revision: number;
+  /**
+   * Target Spec Hash
+   */
+  target_spec_hash: string;
+};
+
+/**
  * RevisionOrigin
  */
 export type RevisionOrigin = "document" | "legacy_json";
@@ -3707,6 +3772,47 @@ export type GetStrategyResponses = {
 
 export type GetStrategyResponse =
   GetStrategyResponses[keyof GetStrategyResponses];
+
+export type DiffStrategyRevisionsData = {
+  body?: never;
+  path: {
+    /**
+     * Strategy Id
+     */
+    strategy_id: string;
+  };
+  query: {
+    /**
+     * Base
+     */
+    base: number;
+    /**
+     * Target
+     */
+    target: number;
+  };
+  url: "/api/v1/strategies/{strategy_id}/diff";
+};
+
+export type DiffStrategyRevisionsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type DiffStrategyRevisionsError =
+  DiffStrategyRevisionsErrors[keyof DiffStrategyRevisionsErrors];
+
+export type DiffStrategyRevisionsResponses = {
+  /**
+   * Successful Response
+   */
+  200: RevisionDiff;
+};
+
+export type DiffStrategyRevisionsResponse =
+  DiffStrategyRevisionsResponses[keyof DiffStrategyRevisionsResponses];
 
 export type ListStrategyRevisionsData = {
   body?: never;

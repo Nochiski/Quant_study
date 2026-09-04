@@ -15,6 +15,9 @@ import type {
   CreateStrategyDocumentResponses,
   CreateStrategyErrors,
   CreateStrategyResponses,
+  DiffStrategyRevisionsData,
+  DiffStrategyRevisionsErrors,
+  DiffStrategyRevisionsResponses,
   ExplainFactorGraphData,
   ExplainFactorGraphErrors,
   ExplainFactorGraphResponses,
@@ -419,6 +422,20 @@ export const getStrategy = <ThrowOnError extends boolean = false>(
     GetStrategyErrors,
     ThrowOnError
   >({ url: "/api/v1/strategies/{strategy_id}", ...options });
+
+/**
+ * Diff Strategy Revisions
+ *
+ * Semantic diff of two revisions over their canonical payloads (identity excluded).
+ */
+export const diffStrategyRevisions = <ThrowOnError extends boolean = false>(
+  options: Options<DiffStrategyRevisionsData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    DiffStrategyRevisionsResponses,
+    DiffStrategyRevisionsErrors,
+    ThrowOnError
+  >({ url: "/api/v1/strategies/{strategy_id}/diff", ...options });
 
 /**
  * List Strategy Revisions

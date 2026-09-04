@@ -1,16 +1,16 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: IN_REVIEW
-current_phase: P2,P3
-current_pr: P2-01,P2-02,P2-03,P2-04,P3-01,P3-02,P3-03,P3-04,P3-05
-active_prs: [P2-01, P2-02, P2-03, P2-04, P3-01, P3-02, P3-03, P3-04, P3-05, P3-06, P3-07]
-parallel_window: [P2-01, P2-02, P2-03, P3-01, P3-02, P2-04, P3-03, P3-04, P3-05]
-last_updated: 2026-09-04T18:27:55+09:00
-planned_prs: 45
+project_status: IN_PROGRESS
+current_phase: P1,P1.5,P2,P3
+current_pr: P1-10,P1.5-05,P2-01,P2-02,P2-03,P2-04,P3-01,P3-02,P3-03,P3-04,P3-05,P3-06,P3-07
+active_prs: [P1-10, P1.5-05, P2-01, P2-02, P2-03, P2-04, P3-01, P3-02, P3-03, P3-04, P3-05, P3-06, P3-07]
+parallel_window: [P2-01, P2-02, P2-03, P3-01, P3-02, P2-04, P3-03, P3-04, P3-05, P3-06, P3-07, P1.5-05, P1-10]
+last_updated: 2026-09-04T19:00:31+09:00
+planned_prs: 47
 merged_prs: 17
 approved_prs: 17
-progress_percent: 38
+progress_percent: 36
 ---
 
 # YAML Strategy Workbench 실시간 진행 계획
@@ -22,13 +22,13 @@ progress_percent: 38
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_REVIEW` |
-| Current phase | `P2,P3` |
-| Current/next PR | `P2-01,P2-02,P2-03,P2-04,P3-01,P3-02,P3-03,P3-04,P3-05` |
-| Active PR | `P2-01, P2-02, P2-03, P2-04, P3-01, P3-02, P3-03, P3-04, P3-05` |
-| Progress | `17 / 45 merged (38%)` |
-| Approved | `17 / 45` |
-| Aggregated at | `2026-09-04 18:27 KST` |
+| Project status | `IN_PROGRESS` |
+| Current phase | `P1,P1.5,P2,P3` |
+| Current/next PR | `P1-10,P1.5-05,P2-01,P2-02,P2-03,P2-04,P3-01,P3-02,P3-03,P3-04,P3-05,P3-06,P3-07` |
+| Active PR | `P1-10, P1.5-05, P2-01, P2-02, P2-03, P2-04, P3-01, P3-02, P3-03, P3-04, P3-05, P3-06, P3-07` |
+| Progress | `17 / 47 merged (36%)` |
+| Approved | `17 / 47` |
+| Aggregated at | `2026-09-04 19:00 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -72,14 +72,14 @@ progress_percent: 38
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
 | P0 | Contract, product direction, tool choices | 4 | 4 | `MERGED` |
-| P1 | Backend Authoring Contract | 9 | 9 | `MERGED` |
-| P1.5 | Backtest Correctness Gate | 4 | 4 | `MERGED` |
+| P1 | Backend Authoring Contract | 10 | 9 | `IN_PROGRESS` |
+| P1.5 | Backtest Correctness Gate | 5 | 4 | `IN_REVIEW` |
 | P2 | App Shell and visual foundation | 4 | 0 | `IN_REVIEW` |
 | P3 | YAML Editor MVP | 7 | 0 | `IN_REVIEW` |
 | P4 | Outline, Contract, Projections | 8 | 0 | `WAITING` |
 | P5 | Truthful Trace UI | 3 | 0 | `WAITING` |
 | P6 | Professional release and migration | 6 | 0 | `WAITING` |
-| **Total** |  | **45** | **17** | **38%** |
+| **Total** |  | **47** | **17** | **36%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
@@ -130,6 +130,7 @@ Phase exit:
 | [x] | `P1-07` | Document save/get/history API, generated SDK | P1-03, P1-06 | `MERGED` | `review_p1_07` |
 | [x] | `P1-08` | Canonical semantic revision diff API | P1-07 | `MERGED` | `review_p1_08` |
 | [x] | `P1-09` | Saved revision reference와 reproducible Backtest Run Manifest | P1-07 | `MERGED` | `review_p1_09` |
+| [ ] | `P1-10` | Phase 1 종료 감사 후속(상대 import 게이트, 코덱 코드 접두어, manifest hash 불변식, 문서) | P1-09 | `IN_PROGRESS` | — |
 
 Phase exit:
 
@@ -146,6 +147,7 @@ Phase exit:
 | [x] | `P1.5-02` | Bounded Factor evaluation projection과 parity test | P1.5-01 | `MERGED` | `review_p15_02` APPROVE |
 | [x] | `P1.5-03` | Raw PIT observation port | P1.5-01 | `MERGED` | `review_p15_03` APPROVE |
 | [x] | `P1.5-04` | 실제 FactorGraph 기반 preview/backtest TargetTape pipeline | P1.5-02, P1.5-03 | `MERGED` | `review_p15_04` APPROVE |
+| [ ] | `P1.5-05` | Phase 1.5 SoT 감사 후속(D-001~D-007, 문서 6건) | P1.5-04 | `IN_REVIEW` | `review_p15_05` · [#49](https://github.com/Nochiski/Quant_study/pull/49) |
 
 Phase exit:
 

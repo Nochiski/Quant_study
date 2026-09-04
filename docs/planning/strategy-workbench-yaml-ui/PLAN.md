@@ -6,10 +6,10 @@ current_phase: P1,P1.5,P2,P3
 current_pr: P1-10,P1.5-05,P2-01,P2-02,P2-03,P2-04,P3-01,P3-02,P3-03,P3-04,P3-05,P3-06,P3-07
 active_prs: [P1-10, P1.5-05, P2-01, P2-02, P2-03, P2-04, P3-01, P3-02, P3-03, P3-04, P3-05, P3-06, P3-07]
 parallel_window: [P2-01, P2-02, P2-03, P3-01, P3-02, P2-04, P3-03, P3-04, P3-05, P3-06, P3-07, P1.5-05, P1-10]
-last_updated: 2026-09-04T19:16:42+09:00
+last_updated: 2026-09-04T19:24:35+09:00
 planned_prs: 47
 merged_prs: 17
-approved_prs: 17
+approved_prs: 18
 progress_percent: 36
 ---
 
@@ -27,8 +27,8 @@ progress_percent: 36
 | Current/next PR | `P1-10,P1.5-05,P2-01,P2-02,P2-03,P2-04,P3-01,P3-02,P3-03,P3-04,P3-05,P3-06,P3-07` |
 | Active PR | `P1-10, P1.5-05, P2-01, P2-02, P2-03, P2-04, P3-01, P3-02, P3-03, P3-04, P3-05, P3-06, P3-07` |
 | Progress | `17 / 47 merged (36%)` |
-| Approved | `17 / 47` |
-| Aggregated at | `2026-09-04 19:16 KST` |
+| Approved | `18 / 47` |
+| Aggregated at | `2026-09-04 19:24 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -73,7 +73,7 @@ progress_percent: 36
 |---|---|---:|---:|---|
 | P0 | Contract, product direction, tool choices | 4 | 4 | `MERGED` |
 | P1 | Backend Authoring Contract | 10 | 9 | `IN_PROGRESS` |
-| P1.5 | Backtest Correctness Gate | 5 | 4 | `IN_REVIEW` |
+| P1.5 | Backtest Correctness Gate | 5 | 4 | `APPROVED` |
 | P2 | App Shell and visual foundation | 4 | 0 | `IN_REVIEW` |
 | P3 | YAML Editor MVP | 7 | 0 | `IN_REVIEW` |
 | P4 | Outline, Contract, Projections | 8 | 0 | `WAITING` |
@@ -147,7 +147,7 @@ Phase exit:
 | [x] | `P1.5-02` | Bounded Factor evaluation projection과 parity test | P1.5-01 | `MERGED` | `review_p15_02` APPROVE |
 | [x] | `P1.5-03` | Raw PIT observation port | P1.5-01 | `MERGED` | `review_p15_03` APPROVE |
 | [x] | `P1.5-04` | 실제 FactorGraph 기반 preview/backtest TargetTape pipeline | P1.5-02, P1.5-03 | `MERGED` | `review_p15_04` APPROVE |
-| [ ] | `P1.5-05` | Phase 1.5 SoT 감사 후속(D-001~D-007, 문서 6건) | P1.5-04 | `IN_REVIEW` | `review_p15_05` · [#49](https://github.com/Nochiski/Quant_study/pull/49) |
+| [ ] | `P1.5-05` | Phase 1.5 SoT 감사 후속(D-001~D-007, 문서 6건) | P1.5-04 | `APPROVED` | `review_p15_05` APPROVE · `review_p15_05_merge` APPROVE · [#49](https://github.com/Nochiski/Quant_study/pull/49) |
 
 Phase exit:
 
@@ -249,6 +249,7 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
+| P1.5-05 | `review_p15_05` + `review_p15_05_merge` | `0db8e31` | `65c48e0` | APPROVE (D-001~D-007 감사 후속 및 main 충돌 해소 재검토) | 0 | saved provenance+raw warning 결합 전용 테스트 없음(각 경로와 조립 코드로 검증), carried target은 executed book이 아님 | 2026-09-04 |
 | P1-09 | `review_p1_09` | `5d05646` | `54eb349` | APPROVE (1차 REQUEST_CHANGES: 지문에 provenance 포함 → 2차 APPROVE, 422 형태 통일·InlineDraft source_hash 계약 명시) | 1 (해소) | inline source_hash는 서버 검증 불가(계약 명시, 배포 정책이 신뢰 금지), 응답 strategy 영구 nullable, union discriminator 미적용(FastAPI dataclass 제약) | 2026-09-04 |
 | P1-08 | `review_p1_08` | `844d932` | `54eb349` | APPROVE (테스트 보강 반영) | 0 | diff 404가 OpenAPI에 미기재, 대용량 diff 상한 없음(P6) | 2026-09-04 |
 | P1-07 | `review_p1_07` | `c85f786` | `54eb349` | APPROVE (P2 반영) | 0 | list_strategies 라우트 미노출(P2-04에서 추가), 문서 전략 legacy revise가 stale과 같은 409 코드(전용 코드 후속) | 2026-09-04 |
@@ -271,6 +272,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
+| P1.5-05 | truthful pipeline·backtest HTTP 24 passed, CRLF/LF tracker 47 rows | backend 865 passed, ruff, pyright; frontend typecheck·lint·vitest 80·build | 재생성 후 clean | 해당 없음 | 로컬, 원격 재실행 대기 | 2026-09-04 |
 | P1-05~09 | schema/contract·repository 계약(뮤테이션)·document save/history/diff·fingerprint·reference HTTP | worktree pytest 649 passed(Rust core 제외), ruff, pyright; main merge(7efe811) 후 649 passed, vitest 80 | SDK 재생성 clean (c1f6b52; main에서는 LF/CRLF 차이만) | 해당 없음 | 로컬 (worktree) | 2026-09-04 |
 | P1-02 | codec 31 + manifest 43 + contract·domain·arch 144 passed | pytest 709 passed, ruff, pyright | 해당 없음 | 해당 없음 | 로컬 | 2026-09-04 |
 | P1.5-02/03/04 | trace 13 + raw port contract 16 + pipeline 13 passed | worktree pytest 559 passed(Rust core 제외), main merge 후 559 passed, ruff, pyright | 해당 없음 (응답 스키마 미변경, 422 코드 additive) | 해당 없음 | 로컬 (worktree) | 2026-09-04 |
@@ -287,6 +289,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-04 KST | Codex | #49 P1.5-05를 latest main에 통합하며 saved/inline provenance와 raw observation warning을 함께 보존하도록 충돌 해소, Linux file URI를 손상시키던 artifact 존재 assertion을 wire 계약 검증으로 교체, PLAN tracker CRLF 지원. backend 865·frontend 80 및 전체 게이트 통과, `review_p15_05_merge` APPROVE | 인수 후 merge gate |
 | 2026-09-04 KST | Claude | 사용자 지시로 origin/main fast-forward push(c174452→73d812e) 후 리뷰 중 브랜치 12개를 Stacked PR로 공개: #38 P2-01 → #39 P2-02 → #40 P2-03 → #41 P3-01 → #42 P3-02 → #43 P2-04 → #44 P3-03 → #45 P3-04 → #46 P3-05 → #47 P3-06 → #48 P3-07(스택 끝, 리뷰 후속 수정 1eecbb2·8933bcc·9581811 포함), #49 P1.5-05(main 기준). P2-04·P3-01~04 REQUEST_CHANGES 수정 완료, 같은 리뷰어 재검토 요청. 게이트: typecheck·lint·vitest 187·build, backend 652 | 사용자 지시 |
 | 2026-09-04 KST | Claude | P3-07 착수·diff freeze 8c3d074 (branch `feat/p3-07-conflict-safety`, P3-06 위; 409 시 문서 보존, ConflictBanner(서버 최신/현재 기준 리비전, 서버본 열기 링크, 현재 문서 복사, Diff 열기→P1-08 semantic diff 표), strategyDiffQuery·diffStrategyRevisions 래퍼; vitest 176·typecheck·lint·build clean), review_p3_07(opus) 배정 → IN_REVIEW. Phase 3 PR 7/7 구현 완료, 리뷰·merge 대기 | 13.3 |
 | 2026-09-04 KST | Claude | P3-06 착수·diff freeze 7dcb3bf (branch `feat/p3-06-autosave-recovery`, P3-05 위; draft-store(localStorage, base key `strategyId@rev`/new, 손상·quota 내성), useAutosave(dirty 800ms 후 기록, 저장 성공 시 정리, 로드 시 원본과 다른 복구본 제안), RecoveryBanner(줄 diff 요약, 복구/삭제, schema 불일치 시 원문 다운로드), lineDiffSummary; vitest 175·typecheck·lint·build clean), review_p3_06(opus) 배정 → IN_REVIEW | 13.3 |

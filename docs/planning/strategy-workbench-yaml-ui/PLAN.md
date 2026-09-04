@@ -133,10 +133,11 @@ Phase exit:
 
 Phase exit:
 
-- [ ] Source compile → save → get → recompile 후 source/spec hash가 보존된다.
-- [ ] Validation과 schema metadata가 같은 constraint declaration에서 파생된다.
-- [ ] Backtest result가 resolved strategy revision/hash 또는 inline provenance를 기록한다.
-- [ ] OpenAPI generated tree가 clean하다.
+- [x] Source compile → save → get → recompile 후 source/spec hash가 보존된다. (`test_strategy_document_save_http_api.py`: YAML→JSON revise까지 같은 `spec_hash`, CRLF 바이트 보존)
+- [x] Validation과 schema metadata가 같은 constraint declaration에서 파생된다. (scalar는 `_constraints.py` 카탈로그 한 곳. cross-field·graph 코드는 감사 시점에 DEFECT-102(owner 게이트 우회)였고 `feat/p1.5-05-audit-fixes`의 `EXPRESSION_CODES` + `semantic_issue()`로 해소 — 그 브랜치가 병합되어야 성립한다)
+- [x] Backtest result가 resolved strategy revision/hash 또는 inline provenance를 기록한다. (`RunManifest.strategy_provenance`, P1-10에서 `strategy_hash`와의 일치 불변식 추가)
+- [x] OpenAPI generated tree가 clean하다. (`npm run api:generate` 후 `git diff --ignore-cr-at-eol` 빈 diffstat)
+- [x] Phase 종료 SoT·책임분리 점검 서브에이전트 결과 기록 (사용자 지시, 2026-09-04) — 2026-09-04 audit: PASS_WITH_ACTIONS, High 2(DEFECT-101/102) Medium 1(DEFECT-103) Low 2(DEFECT-104/105). DEFECT-101/103/105와 문서 액션 5건은 `P1-10`, DEFECT-102는 `feat/p1.5-05-audit-fixes`, DEFECT-104는 `P4-02` 소관
 
 ## P1.5 — Backtest Correctness Gate
 

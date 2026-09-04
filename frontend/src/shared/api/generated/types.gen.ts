@@ -2445,6 +2445,11 @@ export type RollingMetricPoint = {
 
 /**
  * RunManifest
+ *
+ * What a finished run was made of.
+ *
+ * `strategy_hash` and `strategy_provenance.spec_hash` always carry the same value: one run
+ * executed one strategy.
  */
 export type RunManifest = {
   /**

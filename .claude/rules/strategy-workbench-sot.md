@@ -27,6 +27,7 @@ paths:
 | 저장된 authoring source 텍스트·`source_hash` | strategy revision envelope (`source`, `source_hash`) | 서버는 exact text를 그대로 보관, UI는 표시·편집 시작점으로만 사용 |
 | YAML 1.2 허용/거부 집합 | `backend/tests/fixtures/strategy_documents/yaml12/manifest.json` | backend codec test와 frontend `yaml` cross-runtime test가 같은 manifest를 실행 |
 | 실행 차단(blocking) 판정 | backend compile diagnostics의 error severity | frontend syntax marker는 advisory, 실행 가능 여부를 판단하지 않음 |
+| authoring 진단 코드 | `strategy.*`는 domain 코드 레지스트리, `structure.*`는 domain hydrate, codec 코드(`document.*`/`yaml.*`/`<format>.syntax`)는 `ports/outgoing/document_codec.py` | frontend는 코드 → 메시지·마커 매핑만, 코드를 새로 만들지 않는다 |
 | URL 선택 상태(view/path/date/security) | TanStack Router search (`validateSearch`) | widget은 읽기만, 기본값은 URL에 쓰지 않음 |
 
 ## 금지

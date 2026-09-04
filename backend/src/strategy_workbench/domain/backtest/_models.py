@@ -130,11 +130,8 @@ class DataWarning:
 class RunManifest:
     """What a finished run was made of.
 
-    `strategy_hash` and `strategy_provenance.spec_hash` name the same strategy but come from
-    different producers — the first is the compiler's, carried on the TargetTape; the second is
-    the application's, recorded when the run request was resolved. They agree only while both
-    sides hash the same spec, so the invariant below states it instead of leaving a manifest free
-    to carry two different hashes for one run (DEFECT-105).
+    `strategy_hash` and `strategy_provenance.spec_hash` always carry the same value: one run
+    executed one strategy.
     """
 
     run_id: str
@@ -158,6 +155,10 @@ class RunManifest:
     schema_version: str = "backtest-run-v2"
 
     def __post_init__(self) -> None:
+        # The two fields have different producers — `strategy_hash` is the compiler's, carried on
+        # the TargetTape, and `spec_hash` is the application's, recorded when the run request was
+        # resolved. Nothing but this check keeps a manifest from naming two strategies for one run
+        # if the spec handed to the two sides ever diverges (DEFECT-105).
         if self.strategy_hash != self.strategy_provenance.spec_hash:
             raise ValueError(
                 "manifest records two strategies for one run — "

@@ -86,7 +86,7 @@ progress_percent: 16
 
 | 항목 | 값 |
 |---|---|
-| PR | `P1-02`→`P1-03`→`P1-05`→`P1-06`→`P1-07` stack (main 트리 + worktrees `Quant_study-p1-05`, `Quant_study-p1-06`; P1-02 4차 확인 대기, P1-03 APPROVED, P1-05/06/07 IN_REVIEW) |
+| PR | `P1-02`→`P1-03`→`P1-05`→`P1-06`→`P1-07`→`P1-08` stack (main 트리 + worktrees `Quant_study-p1-05`, `Quant_study-p1-06`; P1-02 4차 확인 대기, P1-03 APPROVED, P1-05/06/07/08 IN_REVIEW) |
 | Intent | P1-02: DocumentCodecPort + ruamel codec(source map, 정책 거부, 제한), manifest를 codec으로 검증. P1-04: scalar constraint catalog 단일 owner, validator가 catalog 소비, EXPRESSION_NODE_KINDS |
 | Acceptance | 번들 크기·IME·schema completion 기준 비교표, 최종 선택과 rollback 방법, 이후 PR dependency 기록 |
 | Non-goals | editor 의존성 설치·UI 코드 변경 (P3-02), parser (P0-03), router (P0-04) |
@@ -128,7 +128,7 @@ Phase exit:
 | [ ] | `P1-05` | Discriminator가 포함된 runtime schema/contract API | P1-04 | `IN_REVIEW` | `review_p1_05` |
 | [ ] | `P1-06` | Revision source envelope, list/history repository port와 contract test | P1-01, P1-02 | `IN_REVIEW` | `review_p1_06` |
 | [ ] | `P1-07` | Document save/get/history API, generated SDK | P1-03, P1-06 | `IN_REVIEW` | `review_p1_07` |
-| [ ] | `P1-08` | Canonical semantic revision diff API | P1-07 | `WAITING` | — |
+| [ ] | `P1-08` | Canonical semantic revision diff API | P1-07 | `IN_REVIEW` | `review_p1_08` |
 | [ ] | `P1-09` | Saved revision reference와 reproducible Backtest Run Manifest | P1-07 | `WAITING` | — |
 
 Phase exit:
@@ -274,6 +274,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-04 KST | Claude | P1-08 착수·diff freeze 5d05646 (branch `feat/p1-08-semantic-diff`, P1-07 stack 위; 11 files +583; backend 596 passed, ruff, pyright, SDK·typecheck·lint clean), review_p1_08(opus) 배정 → IN_REVIEW | 13.3 |
 | 2026-09-04 KST | Claude | P1-07 착수·diff freeze 844d932 (branch `feat/p1-07-document-api`, P1-06 stack 위; 12 files +1185/−7; backend 591 passed, ruff, pyright, SDK 재생성·typecheck·lint clean), review_p1_07(opus) 배정 → IN_REVIEW | 13.3 |
 | 2026-09-04 KST | Claude | P1-06 착수·diff freeze c85f786 (worktree `Quant_study-p1-06`, P1-05 stack 위; 8 files +495/−69; backend 588 passed, ruff, pyright, SDK 변경 없음), review_p1_06(opus) 배정 → IN_REVIEW. P1-02 4차 수정(b4a34f6) 확인 대기 | 13.3 |
 | 2026-09-04 KST | Claude | P1.5-02/03/04 APPROVE → main merge(a2e4996), MERGED, Phase 1.5 종료 기준 3항 체크, Phase 1.5 SoT·책임분리 감사 서브에이전트 착수. P1-03 APPROVE(13db6bd) → APPROVED(P1-02 3차 수정 대기). P1-02 3차 REQUEST_CHANGES(%YAML 1.3 AssertionError) 수정 | 13.6 merge gate |

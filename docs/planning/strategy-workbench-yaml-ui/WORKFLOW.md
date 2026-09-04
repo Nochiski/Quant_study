@@ -561,8 +561,12 @@ P0-04에서 선택한 router와 route composition을 구현한다.
 /operations/risk
 ```
 
-- 운영 route는 실제 기능 전까지 feature flag 뒤에 둔다.
-- 기존 진입 URL은 새 전략 route로 redirect한다.
+- 운영 route는 항상 등록하되 실제 기능 전까지 feature flag가 꺼져 있으면 `beforeLoad`에서 not-found로 처리한다.
+- 기존 진입 URL: query 없는 `/`는 `/research/strategies/new`로, `/?step=`·`/?run`은 query를 유지한 채
+  `/legacy/builder`로 redirect한다 (router ADR D2). P6-06 legacy 제거 후에는 `/legacy/builder`도
+  `/research/strategies/new`로 redirect한다.
+- dirty navigation blocker는 pathname이 바뀌는 이동만 차단하고 search-only 변경(view/path/date 선택)은
+  차단하지 않는다 (router ADR D3).
 - app은 router/provider만 소유하고 page는 FSD public API를 사용한다.
 
 Acceptance:

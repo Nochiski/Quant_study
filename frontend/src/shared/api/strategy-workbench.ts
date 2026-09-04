@@ -244,8 +244,9 @@ export const strategyWorkbenchApi = {
 
   async explainFactorGraph(
     request: FactorGraphRequest,
+    signal?: AbortSignal,
   ): Promise<FactorExplanation> {
-    const response = await explainFactorGraph({ body: request });
+    const response = await explainFactorGraph({ body: request, signal });
     return requireData(response.data, "explainFactorGraph");
   },
 

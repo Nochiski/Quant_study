@@ -6,7 +6,7 @@ current_phase: P0
 current_pr: P0-01
 active_prs: [P0-01]
 parallel_window: []
-last_updated: 2026-09-04T13:10:49+09:00
+last_updated: 2026-09-04T13:22:26+09:00
 planned_prs: 45
 merged_prs: 0
 approved_prs: 0
@@ -28,7 +28,7 @@ progress_percent: 0
 | Active PR | `P0-01` |
 | Progress | `0 / 45 merged (0%)` |
 | Approved | `0 / 45` |
-| Aggregated at | `2026-09-04 13:10 KST` |
+| Aggregated at | `2026-09-04 13:22 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -42,6 +42,8 @@ progress_percent: 0
 - Quick/Advanced 삭제는 P0-01의 roadmap/rule 변경과 migration acceptance가 끝난 뒤에만 가능하다.
 - 현재 synthetic factor 경로는 UI 디버거가 아니라 backtest correctness 결함으로 분류하여 Phase 1.5에서 먼저 수정한다.
 - Domain은 Pydantic을 import하지 않고 inbound schema adapter가 기존 domain union에 discriminator annotation을 제공한다.
+- source의 unknown key는 모든 depth에서 structural blocking error로 fail-closed한다 (P1-01 구현).
+- i18n 문구 갱신은 P0-01이 아니라 P3-05 cutover에서 한다.
 - Dirty가 아니고 base revision/hash가 일치할 때만 saved revision backtest를 사용하며, 나머지 valid/current 문서는 inline draft provenance를 사용한다.
 
 ## 상태 값
@@ -87,10 +89,10 @@ progress_percent: 0
 | Non-goals | editor/parser 설치, API 구현, UI 코드 변경 |
 | Branch/worktree | `feat/p0-01-strategy-authoring-contract` (main 작업 트리) |
 | Base SHA | `c174452` |
-| Head SHA | `7123f0a` |
-| Diff stat | 11 files, +606/−24 (planning 패키지 제외; ADR 212, fixture 167, test 162, docs/rules 65) |
-| Focused tests | `uv run pytest -q tests/contract/test_strategy_authoring_fixtures.py` → 9 passed |
-| Full gate | pytest 608 passed · ruff clean · pyright 0 errors · 문서 링크 검증 (기존 결손 2건은 이 PR 이전부터 존재) |
+| Head SHA | `b988984` (재검토) |
+| Diff stat | 15 files, +690/−26 (planning 패키지 제외; ADR·fixture·test가 대부분, pyyaml dev dep lock 포함) |
+| Focused tests | `uv run pytest -q tests/contract/test_strategy_authoring_fixtures.py` → 9 passed, 1 xfailed(strict, unknown key 계약) |
+| Full gate | pytest 608 passed + 1 xfailed · ruff clean · pyright 0 errors · 문서 링크 검증 (기존 결손 2건은 이 PR 이전부터 존재) |
 
 ---
 
@@ -250,6 +252,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-04 KST | Claude | review_p0_01 REQUEST_CHANGES(P1: unknown key 정책) 반영 → b988984, 같은 reviewer 재검토 요청 | 13.5 재검토 |
 | 2026-09-04 KST | Claude | P0-01 SELF_CHECK 통과, diff freeze(7123f0a), review_p0_01 배정 → IN_REVIEW | 13.3 diff freeze |
 | 2026-09-04 KST | Claude | P0-01 IN_PROGRESS 전환, 브랜치 생성, scope packet 작성 | 착수 |
 | 2026-09-04 KST | Codex | 완전한 YAML 예시, adapter-owned discriminator, dirty Backtest 규칙, router ADR, P6 visual dependency, dependency 검증 및 pointer 통일 반영 | 2차 계획 리뷰 |

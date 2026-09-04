@@ -1,4 +1,10 @@
 import "@testing-library/jest-dom/vitest";
+import { configure } from "@testing-library/react";
+
+// One test-infrastructure owner sets the async budget for CodeMirror route tests. The product
+// deliberately debounces parse/compile requests, and cold CI workers also load the editor chunk;
+// feature tests should wait on observable state instead of duplicating per-call timeouts.
+configure({ asyncUtilTimeout: 5_000 });
 
 // jsdom has no layout: CodeMirror needs these to measure the viewport, and any test that mounts
 // a page with the source editor (router tests included) goes through this setup.

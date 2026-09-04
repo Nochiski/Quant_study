@@ -1,14 +1,15 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 import { strategyDocumentQuery } from "../../../entities/strategy";
 import {
   DirtyLeaveGuard,
-  SaveAction,
+  DocumentToolbar,
   SourceEditor,
   saveStatusText,
   saveStatusTone,
   useCompileDocument,
+  useRunBacktest,
   useSaveDocument,
   useSchemaAssist,
   useStrategyDocument,
@@ -48,26 +49,48 @@ export const StrategyRevisionPage = () => {
   const [document, dispatch] = useStrategyDocument(source);
   const { save, status, canSave } = useSaveDocument(document, dispatch);
   const assist = useSchemaAssist(document);
-  useCompileDocument(document, dispatch);
+  const { validateNow, validating } = useCompileDocument(document, dispatch);
+  const backtest = useRunBacktest(document);
+  const current =
+    document.compiled !== null &&
+    document.compiledVersion === document.sourceVersion
+      ? document.compiled
+      : null;
 
   // A save can complete while the user is still typing. Keep that newer text on the current
   // route and let the next save append from the updated base; only follow the revision when the
   // current source is actually saved.
-  const leaving =
-    document.strategyId === strategyId &&
-    document.baseRevision !== null &&
-    document.baseRevision !== Number(revision) &&
-    !document.dirty;
+  const followedSave = useRef(status.kind === "saved" ? status.document : null);
 
   useEffect(() => {
-    if (!leaving || document.baseRevision === null) return;
+    if (
+      status.kind !== "saved" ||
+      followedSave.current === status.document ||
+      document.strategyId !== strategyId ||
+      document.baseRevision === null ||
+      document.baseRevision === Number(revision) ||
+      document.dirty
+    )
+      return;
+    // A route/base mismatch can also mean the user intentionally opened another revision.
+    // Follow only the fresh save event once; the URL is not derived from reducer lag alone.
+    followedSave.current = status.document;
     void navigate({
       to: ROUTE,
       params: { strategyId, revision: String(document.baseRevision) },
       search: { ...search },
       replace: true,
     });
-  }, [leaving, document.baseRevision, strategyId, search, navigate]);
+  }, [
+    document.strategyId,
+    document.baseRevision,
+    document.dirty,
+    status,
+    strategyId,
+    revision,
+    search,
+    navigate,
+  ]);
 
   const availableViews: readonly StrategyView[] =
     stored.format === "yaml" ? PROJECTION_VIEWS : ["json"];
@@ -91,8 +114,15 @@ export const StrategyRevisionPage = () => {
             ) : null}
           </>
         }
-        meta={{ createdAt: shortTimestamp(stored.created_at) }}
+        meta={{
+          createdAt: shortTimestamp(stored.created_at),
+          schemaVersion: current?.schemaVersion ?? stored.schema_version,
+          sourceHash: current?.sourceHash ?? stored.source_hash,
+          specHash: current?.specHash ?? null,
+        }}
         saveStatus={saveStatusText(document, status)}
+        onRunBacktest={() => void backtest.run()}
+        runDisabled={!backtest.canRun}
         saveTone={saveStatusTone(document, status)}
         view={view}
         availableViews={availableViews}
@@ -108,10 +138,16 @@ export const StrategyRevisionPage = () => {
           })
         }
         editorActions={
-          <SaveAction
+          <DocumentToolbar
+            state={document}
+            onValidate={validateNow}
+            validating={validating}
+            onSave={save}
             canSave={canSave}
             saving={status.kind === "saving"}
-            onSave={save}
+            onRun={() => void backtest.run()}
+            decision={backtest.decision}
+            runStatus={backtest.status}
           />
         }
         editor={
@@ -137,9 +173,8 @@ export const StrategyRevisionPage = () => {
             )}
           </>
         }
-        runDisabled
       />
-      <DirtyLeaveGuard dirty={document.dirty && !leaving} />
+      <DirtyLeaveGuard dirty={document.dirty} />
     </>
   );
 };

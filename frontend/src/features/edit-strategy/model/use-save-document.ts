@@ -11,7 +11,11 @@ import {
   type StrategyDocument,
 } from "../../../shared/api";
 import type { SourceFormat } from "../../../shared/lib/yaml12";
-import type { DocumentAction, DocumentState } from "./document-state";
+import {
+  currentSpec,
+  type DocumentAction,
+  type DocumentState,
+} from "./document-state";
 
 export type SaveStatus =
   | { kind: "idle" }
@@ -32,13 +36,15 @@ type SaveSnapshot = {
   sourceVersion: number;
 };
 
-/** Save is meaningful only for a dirty, non-empty, syntactically parsed text outside IME input. */
+/**
+ * Save is meaningful only for a dirty, non-empty text whose current version the backend compiled
+ * without errors (WORKFLOW P3-05: Save is disabled while the document is invalid or stale).
+ */
 export const canSaveDocument = (state: DocumentState): boolean =>
   state.dirty &&
   !state.composing &&
   state.source.trim().length > 0 &&
-  state.parsedVersion === state.sourceVersion &&
-  state.parse?.status === "ok";
+  currentSpec(state) !== null;
 
 /**
  * Save the draft as a document: a draft without a base creates a strategy (revision 1), a draft

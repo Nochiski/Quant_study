@@ -30,7 +30,15 @@ export type StrategyIdeProps = {
   /** Header badges next to the title (draft/revision markers). */
   badges?: ReactNode;
   /** Meta line under the title: author, created, updated. Missing values render as "—". */
-  meta?: { author?: string; createdAt?: string; updatedAt?: string };
+  meta?: {
+    author?: string;
+    createdAt?: string;
+    updatedAt?: string;
+    /** Backend-reported identity of the current text (P3-05); never computed client-side. */
+    schemaVersion?: string | null;
+    sourceHash?: string | null;
+    specHash?: string | null;
+  };
   /** Save status text in the top bar, e.g. "방금 저장됨". */
   saveStatus?: string;
   saveTone?: "ok" | "warn" | "error";
@@ -249,6 +257,32 @@ export const StrategyIde = ({
             <dt>{t("ide.meta.updatedAt")}</dt>
             <dd>{meta?.updatedAt ?? "—"}</dd>
           </div>
+          {meta?.schemaVersion !== undefined ? (
+            <div>
+              <dt>{t("ide.meta.schemaVersion")}</dt>
+              <dd>{meta.schemaVersion ?? "—"}</dd>
+            </div>
+          ) : null}
+          {meta?.sourceHash !== undefined ? (
+            <div>
+              <dt>{t("ide.meta.sourceHash")}</dt>
+              <dd>
+                <code title={meta.sourceHash ?? undefined}>
+                  {meta.sourceHash ? `${meta.sourceHash.slice(0, 12)}…` : "—"}
+                </code>
+              </dd>
+            </div>
+          ) : null}
+          {meta?.specHash !== undefined ? (
+            <div>
+              <dt>{t("ide.meta.specHash")}</dt>
+              <dd>
+                <code title={meta.specHash ?? undefined}>
+                  {meta.specHash ? `${meta.specHash.slice(0, 12)}…` : "—"}
+                </code>
+              </dd>
+            </div>
+          ) : null}
         </dl>
       </header>
 

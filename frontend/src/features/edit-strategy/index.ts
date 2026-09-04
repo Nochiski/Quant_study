@@ -36,6 +36,15 @@ export {
   useCompileDocument,
 } from "./model/use-compile-document";
 export { DiagnosticsPanel } from "./ui/diagnostics-panel";
+export {
+  decideBacktestSource,
+  type BacktestSourceDecision,
+} from "./model/backtest-source";
+export {
+  useRunBacktest,
+  type RunBacktestStatus,
+} from "./model/use-run-backtest";
+export { DocumentToolbar } from "./ui/document-toolbar";
 export { SourceEditor } from "./ui/source-editor";
 export { SaveAction } from "./ui/save-action";
 export { DirtyLeaveGuard } from "./ui/dirty-leave-guard";

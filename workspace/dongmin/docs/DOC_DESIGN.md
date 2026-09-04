@@ -81,7 +81,18 @@
 
 - **G1 `dart3.xsd` + `DOCUMENT-HEADER`** (2010~2021): `DOCUMENT > DOCUMENT-HEADER{DOCUMENT-NAME, FORMULA-VERSION, COMPANY-NAME, SUMMARY/EXTRACTION} + BODY > INSERTION > LIBRARY > (CORRECTION | SECTION-2 …)`. 재무제표는 `SECTION-1/INSERTION/LIBRARY/…/TABLE-GROUP`.
 - **G2 `dart3.xsd` 평면** (2021~2023): 헤더 래퍼 없이 `DOCUMENT-NAME` 등이 `DOCUMENT` 직계. 2021 은 94:26 혼재 — **연도가 아니라 문서 단위로 판정**.
-- **G3 `dart4.xsd`** (2024~, FV 5.5~6.7): `BODY[@ATOCID]`, `TITLE[@ATOCID]` 목차 ID 추가, `INSERTION` 없이 `SECTION-1/LIBRARY/SECTION-2`, `SECTION-3` 등장, 재무제표 `TABLE-GROUP` 안에 `TITLE[@ATOC="Y"]`("2-1. 연결 재무상태표"), 목차 수 56~62(G1 28~34).
+- **G3 `dart4.xsd`** (2024-02~, FV 5.5~6.7): `BODY[@ATOCID]`, `TITLE[@ATOCID]` 목차 ID 추가, `INSERTION` 없이 `SECTION-1/LIBRARY/SECTION-2`, 재무제표 `TABLE-GROUP` 안에 `TITLE[@ATOC="Y"]`("2-1. 연결 재무상태표"), 목차 수 56~62(G1 28~34, G2 52). `SECTION-3`·`XII. 상세표`·사업의 내용 하위 7절(`L-0-2-n`)은 G3 가 아니라 **2021-08 서식 개정(FV 4.5)** 부터다(아래 전환표).
+- **구조 전환 시점 (Y1676: 연 100건 × 접수월, `FORMULA-VERSION ADATE` = 서식 개정일)**:
+
+| 접수월 | 개정일(FV) | 바뀐 것 | 표본 실측 |
+|---|---|---|---|
+| 2011-03 | 2011-02-01 (1.3) | 서식표(`TE`/`TU` 코드 셀) 대량 도입 — K-IFRS 첫 사업보고서 | 문서당 서식 그룹 중앙값 4 → 15, `TE` 60 → 544 |
+| 2015-03 | 2015-03-03 (2.5) | 재무제표 위치 `XI. 재무제표 등`(D-0-11-0-0) → `III-2 연결`·`III-4 별도`(D-0-3-2-0/4-0) | 2014-12 까지 XI 0.9~1.0 → 2015-03 III 0.95 |
+| 2021-08 | 2021-07-16 (4.5) | 사업의 내용 7개 하위 절(`L-0-2-n`), `SECTION-3`, `XII. 상세표`(`TTL_APPENDIX`) | 세 지표 모두 0 → 0.95 |
+| 2021-11 | (같은 4.5) | `DOCUMENT-HEADER` 래퍼 제거(G1 → G2) | 헤더 없음 0 → 1.00 |
+| 2024-02 | 2023-12-29 (5.5) | `dart4.xsd`, `ATOCID`(G2 → G3), 코드 셀 증가 | `TE` 중앙값 1,911 → 2,703 |
+| 2025-03~ | 2024-12-31 (6.1) | 주석의 XBRL 그룹(`{XBRL}NT_*`) 점진 도입 | 문서 비율 0.12(2024-03) → 0.25~0.32(2025) → 0.43~0.50(2026) |
+개정일 어휘는 2009-04-08 부터 2026-07-23 까지 40종(FV 1.0~6.7) — 세대(G1/G2/G3) 판정과 별개로 `formula_date` 를 `doc_meta` 에 싣는 이유.
 - **H HTML** (전 연도 산재, 주요사항보고서): `<html><head><meta charset=euc-kr>` 선언이지만 바이트는 연도 따라 cp949/utf-8. `<title>회사/주식분할결정/(날짜)…</title>`, `<table>` 1개, `&nbsp;` 사용. 정기보고서 아님.
 - FORMULA-VERSION 은 1.0(2009-04) → 6.7(2026) 단조 증가. 세대 판정 키는 (xsd, 헤더 래퍼 유무, `<html`) 3개면 충분하고 FV 는 기록만.
 

@@ -1,0 +1,4 @@
+double: "x:	y"
+single: 'x:	y'
+block: |
+  x:	y

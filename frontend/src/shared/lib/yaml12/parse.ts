@@ -12,7 +12,9 @@
  * This parser only reports *syntax and policy* rejections (`yaml.<reason>`, `json.syntax`).
  * Structural and semantic diagnostics come from the backend compile API (editor ADR D2).
  */
+import { CODEC_LIMITS } from "./limits";
 import {
+  Parser,
   isAlias,
   isMap,
   isScalar,
@@ -132,7 +134,9 @@ const errorRange = (
 ): SourceRange => lines.range(error.pos[0], error.pos[1]);
 
 const rejectPolicy = (doc: Document, lines: LineIndex): void => {
-  // Same order as the backend: syntax → directive → tag → duplicate key → tree policy.
+  // Same order as the backend: syntax → directive → tag → tree policy (anchor/alias, merge
+  // key, non-string key, number shapes) → duplicate key. Duplicates are the *last* check so a
+  // document that also breaks an earlier rule reports that rule, as the backend does.
   for (const error of doc.errors) {
     if (error.code !== "DUPLICATE_KEY") {
       throw new Yaml12Rejected(
@@ -170,13 +174,6 @@ const rejectPolicy = (doc: Document, lines: LineIndex): void => {
       );
     }
   }
-  for (const error of doc.errors) {
-    throw new Yaml12Rejected(
-      "duplicate_key",
-      error.message,
-      errorRange(lines, error),
-    );
-  }
   visit(doc, {
     Alias(_key, node) {
       throw new Yaml12Rejected(
@@ -189,14 +186,11 @@ const rejectPolicy = (doc: Document, lines: LineIndex): void => {
       rejectAnchorOrTag(lines, node);
     },
     Pair(_key, pair) {
-      if (!isScalar(pair.key) || typeof pair.key.value !== "string") {
-        throw new Yaml12Rejected(
-          "non_string_key",
-          `key=${String(pair.key)}`,
-          rangeOf(lines, pair.key as Node),
-        );
-      }
-      if (pair.key.type === "PLAIN" && pair.key.value === "<<") {
+      if (
+        isScalar(pair.key) &&
+        pair.key.type === "PLAIN" &&
+        pair.key.value === "<<"
+      ) {
         throw new Yaml12Rejected(
           "merge_key",
           "key=<<",
@@ -248,7 +242,28 @@ const rejectPolicy = (doc: Document, lines: LineIndex): void => {
       }
     },
   });
+  // Walk-level rule, after every scan-level rule above (backend `_walk` order).
+  visit(doc, {
+    Pair(_key, pair) {
+      if (!isScalar(pair.key) || typeof pair.key.value !== "string") {
+        throw new Yaml12Rejected(
+          "non_string_key",
+          `key=${String(pair.key)}`,
+          rangeOf(lines, pair.key as Node),
+        );
+      }
+    },
+  });
+  for (const error of doc.errors) {
+    throw new Yaml12Rejected(
+      "duplicate_key",
+      error.message,
+      errorRange(lines, error),
+    );
+  }
 };
+
+type Budget = { nodes: number };
 
 const collectRanges = (
   node: Node | null,
@@ -256,9 +271,26 @@ const collectRanges = (
   lines: LineIndex,
   valueRanges: Map<string, SourceRange>,
   keyRanges: Map<string, SourceRange>,
+  depth = 0,
+  budget: Budget = { nodes: 0 },
 ): void => {
   if (!node) return;
   const range = rangeOf(lines, node);
+  if (depth > CODEC_LIMITS.maxDepth) {
+    throw new Yaml12Rejected(
+      "too_deep",
+      `depth=${depth} max_depth=${CODEC_LIMITS.maxDepth}`,
+      range,
+    );
+  }
+  budget.nodes += 1;
+  if (budget.nodes > CODEC_LIMITS.maxNodes) {
+    throw new Yaml12Rejected(
+      "too_many_nodes",
+      `nodes>${CODEC_LIMITS.maxNodes}`,
+      range,
+    );
+  }
   if (range) valueRanges.set(pointer, range);
   if (isMap(node)) {
     for (const pair of node.items as Pair<Node, Node | null>[]) {
@@ -266,11 +298,27 @@ const collectRanges = (
       const child = `${pointer}/${escapePointer(pair.key.value)}`;
       const keyRange = rangeOf(lines, pair.key);
       if (keyRange) keyRanges.set(child, keyRange);
-      collectRanges(pair.value, child, lines, valueRanges, keyRanges);
+      collectRanges(
+        pair.value,
+        child,
+        lines,
+        valueRanges,
+        keyRanges,
+        depth + 1,
+        budget,
+      );
     }
   } else if (isSeq(node)) {
     (node.items as (Node | null)[]).forEach((item, index) => {
-      collectRanges(item, `${pointer}/${index}`, lines, valueRanges, keyRanges);
+      collectRanges(
+        item,
+        `${pointer}/${index}`,
+        lines,
+        valueRanges,
+        keyRanges,
+        depth + 1,
+        budget,
+      );
     });
   }
 };
@@ -312,6 +360,8 @@ const composeDocument = (text: string, lines: LineIndex): Document => {
 };
 
 const JSON_POSITION = /position (\d+)/;
+const JSON_PROBE_LIMIT = 32;
+const JSON_PROBE_MAX_LENGTH = 64 * 1024;
 
 /** Where the JSON text stops being valid: V8 says so in the message; otherwise the YAML reader
  * of the same text (JSON is YAML) locates the syntax error. */
@@ -330,11 +380,14 @@ const jsonErrorRange = (
     return lines.range(offset, offset);
   }
   const token = JSON_TOKEN.exec(message)?.[1];
-  if (token !== undefined) {
+  // Each probe re-parses a prefix, so the search is bounded: at most JSON_PROBE_LIMIT candidates
+  // and only for texts under JSON_PROBE_MAX_LENGTH; beyond that the position is "end of text".
+  if (token !== undefined && text.length <= JSON_PROBE_MAX_LENGTH) {
+    let probes = 0;
     for (
       let index = text.indexOf(token);
-      index >= 0;
-      index = text.indexOf(token, index + 1)
+      index >= 0 && probes < JSON_PROBE_LIMIT;
+      index = text.indexOf(token, index + 1), probes += 1
     ) {
       try {
         JSON.parse(text.slice(0, index));
@@ -361,10 +414,76 @@ const parseJsonValues = (text: string, lines: LineIndex): unknown => {
   }
 };
 
-/** Legacy helper kept for the cross-runtime manifest test: tree only, throws on rejection. */
+/** Tree only, throws `Yaml12Rejected`: used where a best-effort tree of a draft is enough. */
 export const loadYaml12Mapping = (text: string): Record<string, unknown> => {
   const lines = new LineIndex(text);
+  rejectText(text, lines, "yaml");
   return composeDocument(text, lines).toJS() as Record<string, unknown>;
+};
+
+const LONE_SURROGATE =
+  /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+/**
+ * The `yaml` package accepts tabs in separation whitespace while ruamel's scanner rejects them.
+ * Inspect CST whitespace tokens instead of the source text: tabs inside quoted or block scalars
+ * belong to scalar tokens and are valid YAML content, not indentation/separation.
+ */
+const yamlWhitespaceTabOffset = (text: string): number | null => {
+  const pending: unknown[] = [...new Parser().parse(text)];
+  const seen = new WeakSet<object>();
+  while (pending.length > 0) {
+    const candidate = pending.pop();
+    if (typeof candidate !== "object" || candidate === null) continue;
+    if (seen.has(candidate)) continue;
+    seen.add(candidate);
+    const token = candidate as Record<string, unknown>;
+    if (
+      (token.type === "space" || token.type === "scalar") &&
+      typeof token.source === "string"
+    ) {
+      const index = token.source.indexOf("\t");
+      if (index >= 0 && typeof token.offset === "number") {
+        return token.offset + index;
+      }
+    }
+    for (const value of Object.values(token)) {
+      if (Array.isArray(value)) pending.push(...value);
+      else if (typeof value === "object" && value !== null) pending.push(value);
+    }
+  }
+  return null;
+};
+
+/** Text-level policy the backend applies before parsing (`_check_encodable`, `CodecLimits`). */
+const rejectText = (
+  text: string,
+  lines: LineIndex,
+  format: SourceFormat,
+): void => {
+  const bytes = new TextEncoder().encode(text).length;
+  if (bytes > CODEC_LIMITS.maxBytes) {
+    throw new Yaml12Rejected(
+      "too_large",
+      `bytes=${bytes} max_bytes=${CODEC_LIMITS.maxBytes}`,
+      lines.range(0, 0),
+    );
+  }
+  const surrogate = LONE_SURROGATE.exec(text);
+  if (surrogate) {
+    throw new Yaml12Rejected(
+      "syntax",
+      `source is not valid UTF-8 text — unpaired surrogate at offset ${surrogate.index}`,
+      lines.range(surrogate.index, surrogate.index + 1),
+    );
+  }
+  const tabOffset = format === "yaml" ? yamlWhitespaceTabOffset(text) : null;
+  if (tabOffset !== null) {
+    throw new Yaml12Rejected(
+      "syntax",
+      "found character '\\t' that cannot start any token",
+      lines.range(tabOffset, tabOffset + 1),
+    );
+  }
 };
 
 export const parseSource = (
@@ -375,6 +494,7 @@ export const parseSource = (
   const valueRanges = new Map<string, SourceRange>();
   const keyRanges = new Map<string, SourceRange>();
   try {
+    rejectText(text, lines, format);
     // JSON values come from JSON.parse (never from the YAML reading of the same text); the YAML
     // parse of the JSON text only contributes the source map, as in the backend codec.
     const jsonTree =

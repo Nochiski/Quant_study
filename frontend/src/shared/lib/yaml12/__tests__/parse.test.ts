@@ -112,6 +112,33 @@ describe("parseSource", () => {
     );
   });
 
+  it("accepts JSON whitespace tabs and YAML tabs inside scalar content", () => {
+    const json = parseSource('{"a":\t1,\n\t"b":"x\\ty"}', "json");
+    expect(json.status).toBe("ok");
+    if (json.status === "ok") expect(json.tree).toEqual({ a: 1, b: "x\ty" });
+
+    const yaml = parseSource(
+      'double: "x:\ty"\nsingle: \'x:\ty\'\nblock: |\n  x:\ty\n',
+      "yaml",
+    );
+    expect(yaml.status).toBe("ok");
+    if (yaml.status === "ok") {
+      expect(yaml.tree).toEqual({
+        double: "x:\ty",
+        single: "x:\ty",
+        block: "x:\ty\n",
+      });
+    }
+  });
+
+  it("rejects tabs used as YAML separation whitespace", () => {
+    for (const text of ["a: \tv\n", "a:\n\tv: 1\n", "a: foo\tbar\n"]) {
+      expect(parseSource(text, "yaml").diagnostics[0]?.code).toBe(
+        "yaml.syntax",
+      );
+    }
+  });
+
   it("positions are UTF-16 code units so they match editor offsets", () => {
     const text = 'title: "😀"\nrisk: 1\n';
     const parsed = parseSource(text, "yaml");

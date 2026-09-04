@@ -9,7 +9,7 @@
 .ide__topbar {
   position: sticky;
   top: 0;
-  z-index: 10;
+  z-index: 16;
   display: flex;
   align-items: center;
   gap: var(--space-4);

@@ -11,6 +11,7 @@ from stage import (
     rules,
     rules_dart,
     rules_dart_events,
+    rules_doc,
     rules_kis,
     rules_kiwoom,
     rules_krx,
@@ -151,7 +152,8 @@ def test_g7_default_threshold_fails_on_isolated_cells(tmp_path: Path) -> None:
 
 
 def test_registry_assembles_per_source_modules() -> None:
-    mods = (rules_krx, rules_kiwoom, rules_kis, rules_dart, rules_dart_events, rules_wise)
+    mods = (rules_krx, rules_kiwoom, rules_kis, rules_dart, rules_dart_events, rules_wise,
+            rules_doc)
     names = {t.name for mod in mods for t in mod.TABLES}
     assert set(rules.RULES) == names
     assert rules_krx.TABLES[0].name == "stg_price_daily"

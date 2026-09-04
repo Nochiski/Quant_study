@@ -390,6 +390,33 @@ def _load_blob_source(con: duckdb.DuckDBPyConnection, rule: TableRule, tmp_dir: 
     return cols, res.metrics
 
 
+def _load_file_source(con: duckdb.DuckDBPyConnection, rule: TableRule, snap: Snapshot,
+                      stage_root: Path) -> tuple[list[str], dict[str, object]]:
+    """doc_prepass 캐시(JSONL) → `src_all`. 캐시가 없으면 프리패스를 먼저 돌리라는 예외."""
+    fs = rule.file_source
+    if fs is None:
+        raise ValueError(f"_load_file_source called without file_source: {rule.name}")
+    cache = stage_root / "_tmp" / "doc" / snap.snapshot_id
+    summary_path = cache / "summary.json"
+    if not summary_path.exists():
+        raise FileNotFoundError(
+            f"doc prepass cache not found — run `python -m stage.doc_prepass --snapshot-id "
+            f"{snap.snapshot_id}` first: expected {summary_path}")
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    if summary.get("status") != "ok":
+        raise RuntimeError(f"doc prepass gate_failed for snapshot={snap.snapshot_id}: "
+                           f"{summary.get('detail')}")
+    glob = str(cache / fs.table / "year=*.jsonl")
+    schema = ", ".join(f"{_q(c)}: 'VARCHAR'" for c in fs.columns)
+    con.execute(f"CREATE OR REPLACE TEMP TABLE src_all AS SELECT *, 'doc_zip' AS _src "
+                f"FROM read_json('{glob}', format='newline_delimited', columns={{{schema}}}, "
+                f"union_by_name=false)")
+    emitted = int(summary["tables"].get(fs.table, 0))
+    return list(fs.columns), {"n_rows_emitted": emitted, "n_parse_failed": 0,
+                              "n_docs": summary.get("n_docs"), "modes": summary.get("modes"),
+                              "input_hash": summary.get("input_hash")}     # D5 — _meta.json
+
+
 def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str | None = None,
                 extra_ledgers: dict[str, Path] | None = None, fixtures_path: Path | None = None,
                 baseline_path: Path | None = None, gate_thresholds: dict[str, float] | None = None,
@@ -425,7 +452,9 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
         attached = _attach(con, rule, snap, extra_ledgers or {})
         avail_sel, avail_join = _available_sql(rule, con, stage_root)   # 참조표 부재는 여기서 예외
         parse_metrics: dict[str, object] | None = None
-        if rule.blob_source is not None:
+        if rule.file_source is not None:
+            src_cols, parse_metrics = _load_file_source(con, rule, snap, stage_root)
+        elif rule.blob_source is not None:
             src_cols, parse_metrics = _load_blob_source(con, rule, tmp_root)
         else:
             src_cols, union = _union_sql(con, rule)
@@ -524,7 +553,9 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
                 "coverage_from": rule.coverage_from,
                 "version_loss_upstream": rule.write_mode != "append_only",
                 "observed_date_exempt": rule.observed_src is None, "rcept_map_miss": lookup_miss,
-                "lag_known": rule.lag_known, "content_hash": content_hash, "gates": gate_dicts}
+                "lag_known": rule.lag_known, "content_hash": content_hash,
+                "doc_input_hash": (parse_metrics or {}).get("input_hash"),   # D5 (문서층만)
+                "gates": gate_dicts}
             _write_json(pdir / "_meta.json", meta)
             partitions.append({"path": f"v={bid}" + (f"/{label}" if label else ""), "n_rows": n})
     finally:

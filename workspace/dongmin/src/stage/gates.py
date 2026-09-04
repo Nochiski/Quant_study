@@ -79,7 +79,9 @@ def g0_declaration(ctx: GateContext) -> GateResult:
         cols = {r[0] for r in ctx.con.execute(
             "SELECT column_name FROM duckdb_columns() WHERE database_name = ? AND table_name = ?",
             [s.db, s.table]).fetchall()}
-        if ctx.rule.blob_source is not None:
+        if ctx.rule.file_source is not None:
+            need = set(ctx.rule.file_source.required_columns)   # doc_store 실물 계약
+        elif ctx.rule.blob_source is not None:
             need = set(ctx.rule.blob_source.required_columns)   # 파서 입력 컬럼이 원장 실물 계약
         else:
             need = {c.src for c in ctx.rule.columns}

@@ -28,8 +28,12 @@ M1~M5까지 Strategy Workbench는 Quick Builder와 Advanced Graph라는 두 no-c
 - YAML과 JSON은 사람이 작성하는 source다. 저장·실행 시 서버가 source를 parse → typed
   `StrategySpec`으로 hydrate → semantic validation → canonical JSON → `spec_hash` 순서로 다시
   compile한다. 프론트가 계산한 spec이나 hash는 표시용으로도 신뢰하지 않는다.
-- untyped dict를 typed 모델 없이 canonical JSON으로 직렬화하는 경로는 만들지 않는다. `1`/`1.0`,
-  `15`/`15.0`, 날짜 문자열, enum 문자열은 typed hydrate가 정규화하므로 같은 hash가 나온다.
+- untyped dict를 typed 모델 없이 canonical JSON으로 직렬화하는 경로는 만들지 않는다. typed
+  `float`/`int`/`date`/enum 필드에서는 `1`/`1.0`, `15`/`15.0`, 날짜 문자열, enum 문자열이 typed
+  hydrate로 정규화되어 같은 hash가 나온다.
+- `ParameterValue`(`float | int | str | bool`) union은 입력 타입이 보존되어 `1`과 `1.0`이 다른 hash를
+  낸다. P1-01이 선언된 `kind`를 기준으로 coercion 규칙을 정하고 choice/int/float parameter
+  fixture로 고정한다. 그 전까지 이 union은 "같은 의미 = 같은 hash" 보장 범위 밖이다.
 
 ### D2. v1 authoring 문법은 canonical verbose YAML/JSON이다
 
@@ -81,6 +85,11 @@ AND structural blocking error == 0
 AND semantic blocking error == 0
 ```
 
+- blocking error의 정의: `syntax`는 parse 실패, `structural`은 typed hydrate 실패(필수 필드 누락,
+  타입 불일치, 지원하지 않는 `schema_version`, 그리고 **모든 depth의 unknown key**), `semantic`은
+  `validate_strategy` error다. unknown key는 오타(`max_name_wieght`)가 default 값으로 조용히
+  대체되는 것을 막기 위해 JSON Pointer 위치와 함께 fail-closed한다. 현행 pydantic 경로는 extra key를
+  무시하므로 P1-01 hydrate가 이 규칙을 구현한다.
 - `lastValidSpec`은 stale 상태를 명시한 조회 전용이다. invalid 또는 stale source에서 과거 spec을
   몰래 실행하지 않는다.
 - Backtest는 dirty가 아니고 base revision과 `expected_spec_hash`가 일치할 때만 saved revision
@@ -153,11 +162,15 @@ AND semantic blocking error == 0
 |---|---|
 | `.claude/rules/strategy-workbench-sot.md` | 전략 의미 row와 금지 항목을 source/projection 표현으로 갱신 |
 | `.claude/rules/frontend-testing.md` | round-trip property test 대상을 source ↔ StrategySpec ↔ projection으로 갱신 |
-| `README.md`, `frontend/README.md` | no-code 표현을 YAML-first + legacy no-code 유지로 갱신 |
+| `README.md`, `frontend/README.md`, `backend/FACTORS.md` | no-code 표현을 YAML-first + legacy no-code 유지로 갱신 |
 | 로드맵 | 결론·시스템 한 컷·7.1·9.1·M8 gate·완료 정의 갱신, 16절에서 이 tracker 링크 |
 
 i18n 문구(`builder.subtitle` 등)는 legacy 편집기가 아직 기본 화면이므로 이 PR에서 바꾸지 않는다.
-P3-05 YAML route cutover에서 ko/en을 함께 갱신한다.
+P3-05 YAML route cutover에서 ko/en을 함께 갱신한다 (WORKFLOW P3-05 acceptance에 반영).
+
+알려진 잔존 표현: HTTP API 설명 문자열(`adapters/inbound/http_api/_app.py`의 "No-code factor
+strategy design")과 그로부터 생성된 `backend/openapi.json`은 API 코드 변경이 non-goal이므로 P1-03에서
+갱신한다. 로드맵 M3~M5 완료 기록의 Quick/Advanced 표현은 이력이므로 유지한다.
 
 ## 4. Acceptance fixture
 
@@ -169,6 +182,7 @@ P3-05 YAML route cutover에서 ko/en을 함께 갱신한다.
 | `quality_momentum.json` | 같은 의미의 JSON. key order 다름, 일부 default 명시, `fee_bps: 15` int |
 | `quality_momentum.legacy.json` | identity를 문서 안에 가진 현행 API payload |
 | `quality_momentum.invalid.yaml` | 구문 오류. StrategySpec이 되면 안 된다 |
+| `quality_momentum.unknown_key.yaml` | `risk.max_name_wieght` 오타. structural fail-closed 대상 (P1-01 구현 전까지 strict xfail) |
 
 `backend/tests/contract/test_strategy_authoring_fixtures.py`가 검증하는 것:
 
@@ -178,6 +192,8 @@ P3-05 YAML route cutover에서 ko/en을 함께 갱신한다.
 - identity 외 canonical round-trip이 보존된다.
 - `template()` hash golden이 유지된다 (알고리즘 불변).
 - 구문 오류·필수 필드 누락은 fail-closed다.
+- unknown key는 fail-closed다. 현행 pydantic 경로는 이를 무시하므로 `strict xfail`로 계약을 고정하고
+  P1-01이 xfail을 제거한다.
 
 YAML loader는 P1-02 codec 전까지 `yaml.safe_load`를 임시로 쓴다. fixture는 YAML 1.1 implicit
 typing을 피하도록 날짜·버전을 quoted string으로 적으며, P0-03이 cross-runtime fixture로 대체한다.
@@ -189,7 +205,7 @@ typing을 피하도록 날짜·버전을 quoted string으로 적으며, P0-03이
 - 표현식 문자열 DSL, 단위 literal, YAML anchor/alias/merge key/custom tag
 - Form/Graph에서 source로의 편집
 - 자동 merge, 다중 사용자 실시간 편집
-- live trading, deployment, order routing (WORKFLOW 14절 경계만 유지)
+- live trading, deployment, order routing (WORKFLOW 15절 경계만 유지)
 
 비기능:
 

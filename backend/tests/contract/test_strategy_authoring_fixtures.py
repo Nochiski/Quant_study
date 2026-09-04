@@ -9,8 +9,10 @@ ADR: docs/superpowers/specs/2026-09-04-strategy-authoring-contract-adr.md
 - identity를 제외한 canonical round-trip이 보존된다.
 - 기존 hash 알고리즘은 바뀌지 않는다 (template golden).
 - 구문이 깨진 source는 StrategySpec이 되지 않는다 (fail-closed).
+- unknown key는 structural fail-closed다 (P1-01 구현 전까지 strict xfail로 계약만 고정).
 
-YAML loader는 P1-02 codec이 생기기 전까지의 임시 수단으로 `yaml.safe_load`를 쓴다.
+YAML loader는 P1-02 codec이 생기기 전까지의 임시 수단으로 `yaml.safe_load`(dev group의 pyyaml)를
+쓴다.
 fixture는 YAML 1.1 implicit typing에 걸리지 않도록 모든 날짜·버전을 quoted string으로 적는다.
 P0-03 cross-runtime fixture와 P1-02 codec이 이 loader를 대체한다.
 """
@@ -41,8 +43,10 @@ from strategy_workbench.domain.strategy.facade.specification import (
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
 
 # 같은 의미의 YAML/JSON/legacy JSON fixture가 공유하는 canonical hash.
+# 재생성: strategy_spec_hash(hydrate_authoring_document(yaml.safe_load(quality_momentum.yaml)))
 QUALITY_MOMENTUM_SPEC_HASH = "9eb6872a3ca250dfb78b0887e5b236a98b24fb2ccdf2d6af0540218d49e998fe"
 # StrategyDesignService.template()의 2026-09-03 기준 hash. 알고리즘 변경 감지용 golden.
+# 재생성: strategy_spec_hash(_template()) — 값이 바뀌면 hash 알고리즘이 바뀐 것이다.
 TEMPLATE_SPEC_HASH_2026_09_03 = "d6c0e1da4b05490bfa94b3b4c0c605fd4d6bca625f44d06c577b181f7911f2d4"
 
 DRAFT_IDENTITY = StrategyIdentity(strategy_id="draft", revision=0)
@@ -150,6 +154,10 @@ def test_existing_hash_algorithm_is_unchanged() -> None:
 
 
 def test_syntax_invalid_yaml_never_becomes_a_spec() -> None:
+    """fixture sanity check.
+
+    P1-02 codec이 syntax diagnostic으로 대체할 때까지 loader 실패만 확인한다.
+    """
     with pytest.raises(yaml.YAMLError):
         _load_yaml("quality_momentum.invalid.yaml")
 
@@ -157,6 +165,18 @@ def test_syntax_invalid_yaml_never_becomes_a_spec() -> None:
 def test_structurally_invalid_document_fails_closed() -> None:
     document = _load_yaml("quality_momentum.yaml")
     del document["data"]["start"]
+
+    with pytest.raises(ValidationError):
+        hydrate_authoring_document(document)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="ADR D4: unknown key는 structural fail-closed다. P1-01 hydrate 구현 시 xfail 제거.",
+)
+def test_unknown_key_fails_closed() -> None:
+    """`risk.max_name_wieght` 오타가 default 0.1로 조용히 대체되면 안 된다."""
+    document = _load_yaml("quality_momentum.unknown_key.yaml")
 
     with pytest.raises(ValidationError):
         hydrate_authoring_document(document)

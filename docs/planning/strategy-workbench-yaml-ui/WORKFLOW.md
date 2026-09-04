@@ -95,7 +95,7 @@ parameters: []
 - parameter search와 실험 실행은 source를 다시 편집하지 않고 UI에서 수행할 수 있어야 한다.
 - Form/Graph v1은 projection이며 새로운 편집 SoT가 아니다.
 - Quick/Advanced UI는 P0-01에서 deprecation 정책을 명시하고, migration acceptance가 끝나기 전에는 삭제하지 않는다.
-- P0-01은 roadmap M6~M10의 순서와 완료 정의, `strategy-workbench-sot.md`, `frontend-testing.md`, README와 i18n 문구를 함께 갱신한다.
+- P0-01은 roadmap M6~M10의 순서와 완료 정의, `strategy-workbench-sot.md`, `frontend-testing.md`, README를 함께 갱신한다. i18n 문구는 legacy 편집기가 기본 화면인 동안 유지하고 P3-05 cutover에서 ko/en을 갱신한다.
 - 상위 제품 milestone의 SoT는 기존 roadmap이다. 이 문서와 `PLAN.md`는 본 initiative의 구현 범위와 PR 상태만 소유하며, roadmap은 상세 체크리스트를 복제하지 않고 `PLAN.md`를 링크한다.
 
 ### 2.4 Revision 저장 단위
@@ -183,7 +183,7 @@ P0-01 이후 P1-01과 Phase 1.5의 독립 PR을 먼저 병행할 수 있다. 기
 - YAML-first 전문 사용자 제품 전환과 Quick/Advanced deprecation 정책
 - roadmap M6~M10과 본 initiative의 선후 관계
 - roadmap을 product milestone SoT, `PLAN.md`를 initiative delivery SoT로 지정
-- `strategy-workbench-sot.md`, `frontend-testing.md`, README, i18n의 충돌 규칙 갱신
+- `strategy-workbench-sot.md`, `frontend-testing.md`, README의 충돌 규칙 갱신 (i18n 문구는 P3-05)
 
 완료 조건:
 
@@ -689,6 +689,7 @@ Acceptance:
 - invalid/stale이면 saved reference fallback 없이 실행을 차단한다.
 - backend canonical hash만 표시한다.
 - invalid/stale document에서 Save·Run·Debug가 비활성화된다.
+- Quick/Advanced를 전제한 ko/en 문구(`builder.subtitle` 등)를 YAML-first 표현으로 함께 갱신한다.
 - Phase 1.5 correctness parity가 완료되지 않으면 YAML route의 Backtest 정식 cutover를 허용하지 않는다.
 
 ### P3-06 — Local autosave와 recovery

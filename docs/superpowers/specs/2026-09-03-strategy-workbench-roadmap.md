@@ -6,7 +6,8 @@
 >
 > 체크리스트: 150개 중 77개 완료, 73개 남음
 >
-> 다음 체크: M6-1 `domain.experiment` SearchSpec/ParameterSpace/Constraint 추가
+> 다음 체크: YAML-first initiative Phase 1.5(backtest correctness gate) 완료 후 M6-1 `domain.experiment`
+> SearchSpec/ParameterSpace/Constraint 추가
 >
 > 진행 중 initiative: YAML-first authoring 전환 — PR 단위 상태는
 > [docs/planning/strategy-workbench-yaml-ui/PLAN.md](../../planning/strategy-workbench-yaml-ui/PLAN.md)만

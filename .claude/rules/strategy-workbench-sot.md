@@ -14,7 +14,7 @@ paths:
 | 원천 값·공개 시점·coverage | Equity DB view + `dataset_profile` | port로 조회 |
 | Equity 연결 계약 | backend application outbound port | adapter가 구현 |
 | 팩터 정의·방향·단위·입력 요구 | backend Factor Registry | UI는 catalog 표시 |
-| 전략 의미 | immutable, versioned `StrategySpec` | Quick/Advanced UI가 같은 draft 편집 |
+| 전략 의미 | immutable, versioned `StrategySpec` | YAML/JSON source를 서버가 compile, Form/Graph는 read-only projection (legacy Quick/Advanced는 migration 기간 유지) |
 | 파라미터 공간 | `SearchSpec` | trial은 해소된 값만 참조 |
 | 주문·체결·포트폴리오 mutable state | Persistent Rust Engine | Python/API는 명령·조회 |
 | 지표 공식·방향·단위 | backend Metric Registry | UI는 raw metric 표시·포맷 |
@@ -28,8 +28,11 @@ paths:
 - frontend에 팩터 공식, 지표 공식, 전략 validation 규칙, 서버 status transition을 복제하지 않는다.
 - 저장된 서버 응답을 Redux/Zustand 같은 client store에 한 벌 더 두지 않는다.
 - 파생 가능한 값, 실행 plan, generated code, composite score를 원본으로 저장하지 않는다.
-- StrategySpec을 화면별 별도 포맷으로 만들지 않는다. Quick Builder와 Advanced Graph는 동일한
-  AST/DAG를 lossless round-trip해야 한다.
+- StrategySpec을 화면별 별도 포맷으로 만들지 않는다. YAML/JSON source ↔ StrategySpec ↔
+  JSON/Form/Graph/Diff projection은 같은 `spec_hash`로 lossless round-trip해야 한다. 표현식 문자열
+  DSL과 단위 literal은 v1 범위가 아니다 (`docs/superpowers/specs/2026-09-04-strategy-authoring-contract-adr.md`).
+- canonical `spec_hash`와 semantic validation은 backend 응답만 신뢰한다. frontend가 만든 spec이나
+  hash를 표시·실행에 쓰지 않는다.
 - 캐시를 SoT로 취급하지 않는다. 캐시 키는 입력 spec hash, 데이터 snapshot, registry/engine
   version, cost model, seed를 모두 포함한다.
 - 실패·pruned trial을 결과에서 지우지 않는다. 전체 trial 수와 실패 이유는 audit 대상이다.

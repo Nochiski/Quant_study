@@ -7,6 +7,10 @@
 > 체크리스트: 150개 중 77개 완료, 73개 남음
 >
 > 다음 체크: M6-1 `domain.experiment` SearchSpec/ParameterSpace/Constraint 추가
+>
+> 진행 중 initiative: YAML-first authoring 전환 — PR 단위 상태는
+> [docs/planning/strategy-workbench-yaml-ui/PLAN.md](../../planning/strategy-workbench-yaml-ui/PLAN.md)만
+> 추적한다 (16절 참고).
 > 진행 규칙: 구현·테스트·문서가 모두 끝난 항목만 `[x]`. 각 M 완료 시 이 머리말과 완료 기록을 갱신한다.
 
 ## 1. 결론
@@ -14,9 +18,12 @@
 재료는 충분하다. 추가 기능 아이디어보다 먼저 고정해야 할 것은 사실의 owner, import 방향,
 재현 가능한 실행 단위다. 제품은 아래 한 문장으로 설계한다.
 
-> Quick Builder와 Advanced Graph가 동일한 `StrategySpec`을 편집하고, backend가 이를
+> 전문 트레이더가 verbose YAML/JSON source로 `StrategySpec`을 작성하고, backend가 이를
 > PIT factor plan과 target tape로 컴파일한 뒤 Persistent Rust Engine으로 실행하며, 모든
-> 후보를 원시 지표·데이터 판본·실험 이력과 함께 비교하는 전문가용 no-code 연구 도구.
+> 후보를 원시 지표·데이터 판본·실험 이력과 함께 비교하는 전문가용 연구 도구.
+>
+> (2026-09-04 개정: Quick Builder/Advanced Graph no-code 편집기는 legacy route로 유지되며
+> 삭제 조건은 [Strategy Authoring Contract ADR](./2026-09-04-strategy-authoring-contract-adr.md) D9.)
 
 백엔드와 UX를 별도 단계로 만들지 않는다. 각 마일스톤은 항상
 `domain contract → application/API → 화면 → 사용자 시나리오 테스트`까지 닫는 수직 슬라이스다.
@@ -42,9 +49,9 @@
 
 ```text
 Frontend
-  Quick Builder ─┐
-                 ├─ edit same StrategySpec draft ── generated OpenAPI SDK
-  Advanced Graph ┘                                  │
+  YAML/JSON source editor ─ compile ─ StrategySpec ── generated OpenAPI SDK
+  JSON/Form/Graph/Diff (read-only projection) ┘       │
+  (legacy Quick/Advanced: migration 기간 별도 route)  │
                                                     ▼
 Backend inbound adapter                         HTTP + SSE
                                                     │
@@ -191,9 +198,10 @@ parameters
 DAG cycle, unit mismatch, division risk, insufficient history, unavailable dataset은 실행 전 validation
 issue로 반환한다. UI는 그 issue를 node와 field에 연결해 보여준다.
 
-Quick Builder는 허용된 subgraph를 form으로 편집한다. Advanced Graph는 전체 DAG를 편집한다.
-Quick에서 표현할 수 없는 graph를 열면 읽기 전용 요약이나 Advanced 전환을 제안하며 정보를
-잘라서 저장하지 않는다.
+v1 authoring은 canonical field name과 raw value를 그대로 쓰는 verbose YAML/JSON source다. Form과
+Graph는 현재 valid spec을 읽는 projection이며 새 편집 모델이 아니다. legacy Quick Builder는 허용된
+subgraph를 form으로, Advanced Graph는 전체 DAG를 편집하지만 migration 기간에만 유지된다
+(ADR D2, D5, D9).
 
 ### 7.2 SearchSpec과 trial identity
 
@@ -284,7 +292,8 @@ raw metrics를 숨기거나 “최고 전략”을 자동 확정하지 않는다
 4. 위험/실행: 노출 cap, sector neutral, turnover buffer, 비용·슬리피지·지연·참여율.
 5. 파라미터: 탐색 대상 토글, 범위/분포/step, constraint, 예상 trial/time/memory.
 
-Quick/Advanced toggle은 페이지 이동이 아니라 같은 draft의 표현 전환이다. 우측 panel은
+YAML/JSON/Form/Graph/Diff view 전환은 페이지 이동이 아니라 같은 source의 표현 전환이며 source와
+undo history를 보존한다. 우측 panel은
 backend `/validate`, `/explain`, `/estimate` 결과를 표시하며 error는 실행을 막고 warning은 사용자가
 확인한 기록을 남긴다.
 
@@ -502,8 +511,9 @@ Python/Rust 결과가 같다.
 - [ ] draft autosave/recovery와 server revision conflict UX 구현.
 - [ ] 임의 Python plugin은 sandbox/reproducibility 별도 spec 전까지 제외.
 
-완료 게이트: 코드를 몰라도 대부분의 cross-sectional 전략을 만들 수 있고, 전문 사용자는 typed
-graph와 식으로 제약 없이 확장하며 결과를 재현할 수 있다.
+완료 게이트: 전략 정의는 verbose source로 작성하되 parameter search와 실험 실행은 source를 다시
+편집하지 않고 UI에서 수행할 수 있고, 전문 사용자는 typed graph와 식으로 제약 없이 확장하며 결과를
+재현할 수 있다 (2026-09-04 ADR D8로 조정).
 
 ### M9 — 실제 Equity DuckDB adapter 전환
 
@@ -598,7 +608,7 @@ Contract:
 - 실제 Equity DB 교체가 adapter 변경으로 끝난다.
 - factor 계산, 실험 계획, 실행 상태, metric 계산의 owner가 겹치지 않는다.
 - 모든 후보는 raw metrics, 실패 trial, 비용, split, data/engine/registry version과 함께 남는다.
-- Quick/Advanced 편집이 lossless이고 전문 표현력을 막지 않는다.
+- source ↔ StrategySpec ↔ projection round-trip이 lossless이고 전문 표현력을 막지 않는다.
 - Persistent Rust Engine이 execution state를 계속 단독 소유한다.
 - import 방향과 public surface 위반이 CI에서 실패한다.
 - mock, Python reference, Rust, 실제 Equity adapter에 대한 계약/패리티/재현성 검증이 통과한다.
@@ -647,3 +657,21 @@ Contract:
 
 체크 수는 이 문서의 완료/미완료 체크박스 기준으로 갱신한다. 설명 안의 예시 checkbox는 두지
 않아 수치가 실제 구현 단위와 일치하게 유지한다.
+
+## 16. YAML-first authoring initiative와 M6~M10의 선후 관계
+
+2026-09-04 [Strategy Authoring Contract ADR](./2026-09-04-strategy-authoring-contract-adr.md)로
+authoring 방식을 verbose YAML/JSON source로 전환했다. 이 initiative의 Phase/PR 범위는
+[WORKFLOW.md](../../planning/strategy-workbench-yaml-ui/WORKFLOW.md), PR 진행 상태는
+[PLAN.md](../../planning/strategy-workbench-yaml-ui/PLAN.md)가 소유한다. 이 로드맵은 PR 단위
+상태를 복제하지 않는다.
+
+- 이 로드맵은 product milestone SoT로 남는다. M6~M10의 순서와 완료 게이트는 유지한다.
+- initiative Phase 1.5(backtest correctness gate)는 M6 parameter search보다 먼저 끝나야 한다.
+  현재 portfolio preview/backtest가 FactorGraph 대신 factor ID 기반 synthetic 값을 쓰는 결함을
+  제거한다.
+- M6 parameter search UI는 initiative Phase 3(YAML MVP) 이후 YAML route 위에 연결한다.
+- M8 항목 중 revision history/diff, autosave/recovery, revision conflict, keyboard navigation은
+  initiative P1-08, P3-06, P3-07, P4-08, P6-02, P6-03이 먼저 제공하며, 해당 PR merge 시 M8
+  체크박스를 갱신한다. custom formula editor(표현식 DSL)는 initiative v1 non-goal이며 M8에 남는다.
+- Quick/Advanced 편집기 삭제는 ADR D9 조건이 모두 충족될 때만 initiative P6-06에서 수행한다.

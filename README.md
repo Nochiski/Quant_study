@@ -2,7 +2,7 @@
 
 퀀트 스터디 저장소. 데이터 수집·가공부터 백테스팅까지 각자 실습하고, 쓸 만한 코드는 공용으로 올려 함께 쓴다.
 
-이벤트 드리븐 백테스트 엔진과 no-code Strategy Workbench를 만드는 학습 리포. 설계 아티팩트
+이벤트 드리븐 백테스트 엔진과 YAML-first Strategy Workbench를 만드는 학습 리포. 설계 아티팩트
 (`backend/reference/`의 학습 노트)에서 고정한 전략 I/O 계약을 backend의
 `backtest_engine` 패키지로 구현한다.
 
@@ -11,20 +11,24 @@
 ```
 backend/
 ├─ src/backtest_engine/     # Python API/reference engine: types, engine, ports, adapters, data
-├─ src/strategy_workbench/  # no-code backend: domain→application→adapters, bootstrap 조립
+├─ src/strategy_workbench/  # workbench backend: domain→application→adapters, bootstrap 조립
 ├─ rust/backtest_core/      # Persistent Rust Engine
 ├─ tests/                   # engine/workbench/architecture 계약 테스트와 소형 fixture
 ├─ examples/                # 골든크로스 CSV/KRX parquet 데모
 ├─ scripts/                 # fixture 재생성·다종목 벤치마크
 ├─ benchmarks/              # 성능 측정 baseline
 └─ reference/               # 2026-08-17 설계·Zipline 관찰 아카이브
-frontend/                   # no-code UI: FSD app→pages→widgets→features→entities→shared
+frontend/                   # workbench UI: FSD app→pages→widgets→features→entities→shared
 docs/                       # 공용 설계·로드맵·리포트
 workspace/         # 개인 작업 공간 workspace/<이름>/ — docs·src 추적, data/·logs/ 는 git 제외
 ```
 
-새 no-code 전략 생성 도구의 전체 계획과 체크리스트는
+Strategy Workbench의 전체 계획과 체크리스트는
 [Strategy Workbench 구현 로드맵](docs/superpowers/specs/2026-09-03-strategy-workbench-roadmap.md)에 있다.
+전략 authoring은 verbose YAML/JSON source로 전환 중이며 계약은
+[Strategy Authoring Contract ADR](docs/superpowers/specs/2026-09-04-strategy-authoring-contract-adr.md),
+PR 진행은 [docs/planning/strategy-workbench-yaml-ui/PLAN.md](docs/planning/strategy-workbench-yaml-ui/PLAN.md)가
+추적한다. 기존 Quick/Advanced no-code 편집기는 migration 기간 legacy route로 유지된다.
 Equity DB 계약이 확정되기 전에는 `backend`의 PIT mock adapter가 기준 구현이며, 실제 DB는 같은
 application port를 구현하는 outbound adapter로 교체한다.
 

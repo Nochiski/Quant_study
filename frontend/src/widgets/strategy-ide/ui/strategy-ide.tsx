@@ -298,7 +298,7 @@ export const StrategyIde = ({
                         : section}
                     </span>
                     <span
-                      className="ide__section-status"
+                      className="ide__section-status ide__section-status--pending"
                       title={t("ide.section.pending")}
                     >
                       <span aria-hidden="true">○</span>
@@ -479,9 +479,7 @@ const InspectorPlaceholder = () => {
                   </div>
                 ))}
               </dl>
-              <div className="ide__card">
-                {t("ide.placeholder")}
-              </div>
+              <div className="ide__card">{t("ide.placeholder")}</div>
               <button type="button" className="ide__link" disabled>
                 {t("ide.inspector.fullSchema")} ↗
               </button>

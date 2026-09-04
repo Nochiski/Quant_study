@@ -22,26 +22,34 @@
   /* text */
   --text: #1c2430;
   --text-muted: #5b6675;
-  --text-subtle: #8a94a3;
+  --text-subtle: #66717f;
   --text-on-accent: #ffffff;
   --text-inverse: #f4f6f8;
 
   /* accent (teal from the concept) */
-  --accent: #0e8074;
-  --accent-hover: #0b6a60;
+  --accent: #0b6a60;
+  --accent-hover: #085249;
   --accent-soft: #e3f4f1;
   --accent-border: #9fd6cc;
 
   /* status — every status also carries a text/glyph marker in the UI, never colour alone */
-  --status-ok: #1f8f5f;
+  --status-ok: #166a3f;
   --status-ok-soft: #e4f5ec;
-  --status-warn: #c2620f;
+  --status-warn: #a24f08;
   --status-warn-soft: #fbeddc;
   --status-error: #c0392b;
   --status-error-soft: #fbe7e5;
   --status-error-border: #efb3ad;
-  --status-info: #2e6fd6;
+  --status-info: #2258b8;
   --status-info-soft: #e6eefc;
+
+  /* chart series on the light canvas (>= 3:1 for lines, legend text uses the same ink) */
+  --chart-series-1: #0b6a60;
+  --chart-series-2: #2258b8;
+  --chart-series-3: #c0392b;
+  --chart-series-4: #6b5bd2;
+  --chart-series-5: #1f6f9a;
+  --chart-series-6: #a24f08;
 
   /* focus */
   --focus-ring: #2e6fd6;
@@ -88,6 +96,6 @@
   --color-blue: var(--status-info);
   --color-danger: var(--status-error);
   --color-warning: var(--status-warn);
-  --color-violet: #6b5bd2;
+  --color-violet: var(--chart-series-4);
   --color-sky: var(--status-info);
 }

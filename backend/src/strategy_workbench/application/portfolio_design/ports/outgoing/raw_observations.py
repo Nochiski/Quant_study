@@ -85,8 +85,9 @@ class RawObservationSet:
     """Observations for `sessions` (in range) plus `history_sessions` warm-up before `start`.
 
     Observations are ordered by (as_of, security_id) and unique per pair; sessions ascend and
-    every history session precedes the first requested session. Any adapter gets these checks
-    for free through `__post_init__`.
+    every history session precedes the first requested session; every observation date is one of
+    the declared sessions or history sessions. Any adapter gets these checks for free through
+    `__post_init__`.
     """
 
     status: DataLoadStatus
@@ -119,6 +120,18 @@ class RawObservationSet:
             raise ValueError(
                 "raw observations must be ordered by (as_of, security_id) and unique — "
                 f"count={len(keys)}"
+            )
+        # The evaluator counts lag and rolling windows by row position, not by calendar, so an
+        # undeclared date silently shifts every window behind it (D-003). Fail closed instead.
+        declared = set(self.sessions) | set(self.history_sessions)
+        undeclared = sorted({item.as_of for item in self.observations} - declared)
+        if undeclared:
+            raise ValueError(
+                "raw observations carry dates that are neither a session nor warm-up history — "
+                f"undeclared={undeclared[:5]} undeclared_count={len(undeclared)} "
+                f"declared_sessions={len(self.sessions)} "
+                f"declared_history={len(self.history_sessions)} "
+                f"snapshot={self.data_snapshot_id!r}"
             )
 
 

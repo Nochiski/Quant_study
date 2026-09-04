@@ -28,6 +28,7 @@ from strategy_workbench.application.portfolio_design.facade.design import (
     LookAheadViolationError,
     PortfolioDesignService,
     PortfolioPreviewRequest,
+    RawObservationContractError,
     RawObservationUnavailableError,
 )
 from strategy_workbench.application.portfolio_design.facade.ports import (
@@ -436,3 +437,33 @@ def test_non_members_do_not_enter_the_member_cross_section() -> None:
 
     assert any(entry[1] for entry in targets(clean)), "the probe produced no targets"
     assert targets(noisy) == targets(clean)
+
+
+class _WideRangePort:
+    """Adapter that answers a wider window than asked (D-004 probe)."""
+
+    def load_raw_observations(self, query: RawObservationQuery) -> RawObservationSet:
+        widened = replace(query, end=query.end + timedelta(days=14))
+        return MockEquityDataAdapter.demo().load_raw_observations(widened)
+
+
+def test_sessions_outside_the_strategy_range_fail_closed() -> None:
+    spec = _spec()
+    with pytest.raises(RawObservationContractError, match="outside the requested strategy range"):
+        _service(_WideRangePort()).run_pipeline(PortfolioPreviewRequest(spec))
+
+
+def test_the_widened_window_would_otherwise_have_produced_extra_frames() -> None:
+    """The probe is not vacuous: without the guard the wider answer reaches the compiler."""
+    spec = _spec()
+    widened = MockEquityDataAdapter.demo().load_raw_observations(
+        RawObservationQuery(
+            market="KRX",
+            universe_id="krx.common-stock",
+            start=spec.data.start,
+            end=spec.data.end + timedelta(days=14),
+            field_ids=("price.close", "price.market_cap"),
+            history_sessions_before_start=2,
+        )
+    )
+    assert any(session > spec.data.end for session in widened.sessions)

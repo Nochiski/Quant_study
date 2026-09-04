@@ -72,7 +72,15 @@ class RawObservationUnavailableError(RuntimeError):
         self.detail = detail
 
 
-class LookAheadViolationError(RuntimeError):
+class RawObservationContractError(RuntimeError):
+    """The observation adapter answered outside its declared contract.
+
+    Fail-loud on purpose and deliberately not mapped to an HTTP status: a contract violation is an
+    adapter bug, not a user input error, and answering 4xx would let a wrong tape look accepted.
+    """
+
+
+class LookAheadViolationError(RawObservationContractError):
     """An adapter returned a field published after the observation date (contract bug)."""
 
 
@@ -131,6 +139,7 @@ class PortfolioDesignService:
         )
         if not raw.ok:
             raise RawObservationUnavailableError(raw.status, raw.detail)
+        _reject_sessions_outside_strategy_range(raw, spec)
         factor_observations = tuple(_to_factor_observation(item) for item in raw.observations)
         parameters = tuple(
             ResolvedFactorParameter(parameter.parameter_id, parameter.default)
@@ -218,6 +227,27 @@ def _reject_saved_references(spec: StrategySpec, plans: dict[str, FactorExecutio
     )
     if issues:
         raise InvalidPortfolioRequestError(StrategyValidation(valid=False, issues=issues))
+
+
+def _reject_sessions_outside_strategy_range(raw: RawObservationSet, spec: StrategySpec) -> None:
+    """Sessions must stay inside `spec.data.start..end` (fail-closed, D-004).
+
+    A wider answer is fail-open: `compile_target_tape` would emit frames whose execution date has
+    no bar in the backtest dataset, which `application/backtest_run` queries for the strategy
+    range alone.
+    """
+    outside = tuple(
+        session for session in raw.sessions if not spec.data.start <= session <= spec.data.end
+    )
+    if not outside:
+        return
+    raise RawObservationContractError(
+        "raw observation sessions fall outside the requested strategy range — "
+        f"expected={spec.data.start}..{spec.data.end} "
+        f"actual={raw.sessions[0]}..{raw.sessions[-1]} "
+        f"outside={outside[:5]} outside_count={len(outside)} "
+        f"universe_id={spec.data.universe_id!r} snapshot={raw.data_snapshot_id!r}"
+    )
 
 
 def _to_factor_observation(item: RawObservation) -> FactorObservation:

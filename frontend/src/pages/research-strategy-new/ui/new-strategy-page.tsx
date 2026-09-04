@@ -6,6 +6,7 @@ import {
   SourceEditor,
   saveStatusText,
   useSaveDocument,
+  useSchemaAssist,
   useStrategyDocument,
   type DocumentSource,
 } from "../../../features/edit-strategy";
@@ -29,6 +30,7 @@ export const NewStrategyPage = () => {
   const navigate = useNavigate();
   const [document, dispatch] = useStrategyDocument(NEW_DRAFT);
   const { save, status, canSave } = useSaveDocument(document, dispatch);
+  const assist = useSchemaAssist(document);
 
   useEffect(() => {
     if (document.strategyId === null || document.baseRevision === null) return;
@@ -64,7 +66,9 @@ export const NewStrategyPage = () => {
             onSave={save}
           />
         }
-        editor={<SourceEditor state={document} dispatch={dispatch} />}
+        editor={
+          <SourceEditor state={document} dispatch={dispatch} assist={assist} />
+        }
         runDisabled
       />
       <DirtyLeaveGuard dirty={document.dirty} />

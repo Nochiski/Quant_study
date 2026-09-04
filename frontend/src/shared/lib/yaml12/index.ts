@@ -9,3 +9,8 @@ export {
   type SourcePosition,
   type SourceRange,
 } from "./parse";
+export {
+  describeYamlCursor,
+  templatePointer,
+  type YamlCursorContext,
+} from "./cursor";

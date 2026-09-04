@@ -8,6 +8,7 @@ import {
   SourceEditor,
   saveStatusText,
   useSaveDocument,
+  useSchemaAssist,
   useStrategyDocument,
   type DocumentSource,
 } from "../../../features/edit-strategy";
@@ -44,6 +45,7 @@ export const StrategyRevisionPage = () => {
   );
   const [document, dispatch] = useStrategyDocument(source);
   const { save, status, canSave } = useSaveDocument(document, dispatch);
+  const assist = useSchemaAssist(document);
 
   useEffect(() => {
     if (
@@ -120,7 +122,11 @@ export const StrategyRevisionPage = () => {
               </p>
             )}
             {view === stored.format ? (
-              <SourceEditor state={document} dispatch={dispatch} />
+              <SourceEditor
+                state={document}
+                dispatch={dispatch}
+                assist={assist}
+              />
             ) : (
               <pre
                 className="page-state"

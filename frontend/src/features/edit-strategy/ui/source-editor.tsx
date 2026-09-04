@@ -5,7 +5,9 @@ import { Badge } from "../../../shared/ui";
 import {
   CodeEditor,
   type CodeEditorHandle,
+  type EditorCompletionSource,
   type EditorDiagnostic,
+  type EditorHoverSource,
 } from "../../../shared/ui/code-editor";
 import {
   currentDiagnostics,
@@ -17,6 +19,11 @@ import {
 type SourceEditorProps = {
   state: DocumentState;
   dispatch: (action: DocumentAction) => void;
+  /** Schema-driven completion and hover (P3-03); absent in tests and before the schema loads. */
+  assist?: {
+    completionSource?: EditorCompletionSource;
+    hoverSource?: EditorHoverSource;
+  };
 };
 
 const PHASE_TONE = {
@@ -35,7 +42,11 @@ const PHASE_TONE = {
  * IME composition flow into the reducer, current diagnostics flow back as markers, and the undo
  * history is kept per format so switching YAML/JSON views does not lose it (editor ADR D3).
  */
-export const SourceEditor = ({ state, dispatch }: SourceEditorProps) => {
+export const SourceEditor = ({
+  state,
+  dispatch,
+  assist,
+}: SourceEditorProps) => {
   const handle = useRef<CodeEditorHandle>(null);
   // Undo history per format, captured when a format's editor unmounts (view switch).
   const [histories, setHistories] = useState<
@@ -105,6 +116,8 @@ export const SourceEditor = ({ state, dispatch }: SourceEditorProps) => {
         onChange={onChange}
         onComposingChange={onComposingChange}
         diagnostics={diagnostics}
+        completionSource={assist?.completionSource}
+        hoverSource={assist?.hoverSource}
         initialHistoryState={histories[state.format]}
       />
     </div>

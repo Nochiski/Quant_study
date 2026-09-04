@@ -7,6 +7,8 @@ export type {
   EditorCompletionResult,
   EditorCompletionSource,
   EditorDiagnostic,
+  EditorHover,
+  EditorHoverSource,
   EditorLanguage,
   EditorPosition,
   EditorSeverity,

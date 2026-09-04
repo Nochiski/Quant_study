@@ -9,6 +9,8 @@ import {
   getBacktestResult,
   getStrategy,
   getStrategyDocument,
+  getStrategyDocumentContract,
+  getStrategyDocumentSchema,
   getBacktestStatus,
   listStrategyRevisions,
   getStrategyTemplate,
@@ -40,6 +42,7 @@ import type {
   FactorPreviewRequest,
   FactorSignal,
   FactorValidationIssue,
+  FieldContract,
   GetEquityCatalogData,
   GetFactorCatalogData,
   NodeContract,
@@ -59,6 +62,8 @@ import type {
   SaveDocumentRequest,
   SavedStrategy,
   StrategyDocument,
+  StrategyDocumentContractResponse,
+  StrategyDocumentSchema,
   StrategySpec,
   StrategyValidation,
   UniverseHistoryQuery,
@@ -252,6 +257,16 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "getStrategyDocument");
   },
 
+  async getStrategyDocumentSchema(): Promise<StrategyDocumentSchema> {
+    const response = await getStrategyDocumentSchema();
+    return unwrap(response, "getStrategyDocumentSchema");
+  },
+
+  async getStrategyDocumentContract(): Promise<StrategyDocumentContractResponse> {
+    const response = await getStrategyDocumentContract();
+    return unwrap(response, "getStrategyDocumentContract");
+  },
+
   async createStrategyDocument(
     request: SaveDocumentRequest,
   ): Promise<StrategyDocument> {
@@ -321,6 +336,7 @@ export type {
   FactorPreviewRequest,
   FactorSignal,
   FactorValidationIssue,
+  FieldContract,
   NodeContract,
   MetricDefinition,
   MetricValue,
@@ -338,6 +354,8 @@ export type {
   SaveDocumentRequest,
   SavedStrategy,
   StrategyDocument,
+  StrategyDocumentContractResponse,
+  StrategyDocumentSchema,
   StrategySpec,
   StrategyValidation,
   UniverseHistoryQuery,

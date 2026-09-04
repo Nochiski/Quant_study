@@ -62,6 +62,38 @@ title: ${title}
 });
 
 const server = setupServer(
+  http.get(`${API}/api/v1/strategy-documents/schema`, () =>
+    HttpResponse.json({
+      schema: { type: "object", properties: {}, additionalProperties: false },
+      schema_hash: "h".repeat(64),
+      schema_version: "1.0",
+    }),
+  ),
+  http.get(`${API}/api/v1/strategy-documents/contract`, () =>
+    HttpResponse.json({
+      contract: {
+        contract_hash: "c".repeat(64),
+        dataset_snapshot_id: "snap",
+        factor_registry_version: "v1",
+        fields: [],
+        schema_hash: "h".repeat(64),
+        schema_version: "1.0",
+      },
+      equity_catalog_url: "/api/v1/equity/catalog",
+      factor_catalog_url: "/api/v1/factors/catalog",
+    }),
+  ),
+  http.get(`${API}/api/v1/factors/catalog`, () =>
+    HttpResponse.json({
+      facets: {},
+      factors: [],
+      page: 1,
+      page_count: 0,
+      page_size: 100,
+      registry_version: "v1",
+      total: 0,
+    }),
+  ),
   http.get(
     `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
     ({ params }) => {

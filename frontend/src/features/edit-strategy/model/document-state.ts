@@ -52,6 +52,7 @@ export type CompileOutcome = {
 export type DocumentState = {
   format: SourceFormat;
   source: string;
+  documentEpoch: number;
   sourceVersion: number;
   composing: boolean;
   parse: ParsedSource | null;
@@ -61,6 +62,7 @@ export type DocumentState = {
   baseRevision: number | null;
   baseSpecHash: string | null;
   savedSource: string | null;
+  savedVersion: number;
   strategyId: string | null;
   dirty: boolean;
   phase: DocumentPhase;
@@ -85,6 +87,8 @@ export type DocumentAction =
       revision: number;
       specHash: string;
       source: string;
+      documentEpoch: number;
+      sourceVersion: number;
     };
 
 export const initialDocumentState = (
@@ -93,6 +97,7 @@ export const initialDocumentState = (
 ): DocumentState => ({
   format,
   source,
+  documentEpoch: 0,
   sourceVersion: 0,
   composing: false,
   parse: null,
@@ -102,6 +107,7 @@ export const initialDocumentState = (
   baseRevision: null,
   baseSpecHash: null,
   savedSource: null,
+  savedVersion: -1,
   strategyId: null,
   dirty: false,
   phase: "editing",
@@ -127,10 +133,19 @@ export const documentReducer = (
     case "load":
       return {
         ...initialDocumentState(action.format, action.source),
+        // Never reuse a version number: a reply still in flight for the previous document
+        // (parsed/compiled for version N) must not be absorbed by the new one.
+        documentEpoch: state.documentEpoch + 1,
+        sourceVersion: state.sourceVersion + 1,
+        // Everything below the new version belongs to the previous document.
+        parsedVersion: state.sourceVersion,
+        compiledVersion: state.sourceVersion,
         strategyId: action.strategyId,
         baseRevision: action.baseRevision,
         baseSpecHash: action.baseSpecHash,
         savedSource: action.baseRevision === null ? null : action.source,
+        savedVersion:
+          action.baseRevision === null ? -1 : state.sourceVersion + 1,
         dirty: false,
         phase: "editing",
       };
@@ -152,10 +167,13 @@ export const documentReducer = (
       return {
         ...state,
         composing: action.composing,
-        // Leaving composition with an unparsed version lets the parser run.
+        // Leaving composition with an unparsed version lets the parser run; entering it parks
+        // an unparsed version back in "editing" (nothing is being parsed meanwhile).
         phase:
-          !action.composing && state.parsedVersion !== state.sourceVersion
-            ? "parsing"
+          state.parsedVersion !== state.sourceVersion
+            ? action.composing
+              ? "editing"
+              : "parsing"
             : state.phase,
       };
     case "parsed": {
@@ -171,7 +189,13 @@ export const documentReducer = (
       };
     }
     case "compiled": {
-      if (action.version !== state.sourceVersion) return state; // out-of-order reply discarded
+      // A reply older than what is held, or for a version this document never had, is dropped.
+      // A reply for a version between the held one and the current text is recorded (it is the
+      // freshest spec available, shown as stale) without touching the phase of the current text;
+      // a reply for the held version again is an explicit recompile and replaces it.
+      const current = action.version === state.sourceVersion;
+      if (action.version > state.sourceVersion) return state; // a version this text never had
+      if (!current && action.version <= state.compiledVersion) return state; // older than held
       const saved =
         state.baseSpecHash !== null &&
         action.outcome.specHash === state.baseSpecHash &&
@@ -180,16 +204,27 @@ export const documentReducer = (
         ...state,
         compiled: action.outcome,
         compiledVersion: action.version,
-        phase: phaseFromCompile(action.outcome, saved),
+        phase: current ? phaseFromCompile(action.outcome, saved) : state.phase,
       };
     }
     case "saved":
+      // A save response is valid only for the document instance that issued it. Within that
+      // document, a response for an older source may establish the base while later edits remain
+      // dirty, but it cannot overwrite a newer save that has already completed.
+      if (
+        action.documentEpoch !== state.documentEpoch ||
+        action.sourceVersion > state.sourceVersion ||
+        action.sourceVersion < state.savedVersion
+      ) {
+        return state;
+      }
       return {
         ...state,
         strategyId: action.strategyId,
         baseRevision: action.revision,
         baseSpecHash: action.specHash,
         savedSource: action.source,
+        savedVersion: action.sourceVersion,
         dirty: action.source !== state.source,
         phase:
           action.source === state.source &&

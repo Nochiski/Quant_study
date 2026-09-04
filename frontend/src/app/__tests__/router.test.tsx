@@ -172,6 +172,10 @@ describe("App Shell routes", () => {
     const history = mount("/");
     await screen.findByRole("heading", { name: "새 전략" });
     expect(history.location.pathname).toBe("/research/strategies/new");
+    expect(screen.getByRole("tab", { name: "JSON" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
   });
 
   it("keeps legacy bookmarks on the legacy builder with their query and run id", async () => {

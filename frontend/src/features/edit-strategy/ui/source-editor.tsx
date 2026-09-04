@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { t } from "../../../shared/config";
 import { Badge } from "../../../shared/ui";
@@ -32,15 +32,12 @@ const PHASE_TONE = {
 
 /**
  * Binds the domain-neutral editor to the document state machine (P3-01 → P3-02): text edits and
- * IME composition flow into the reducer, current diagnostics flow back as markers, and the undo
- * history is kept per format so switching YAML/JSON views does not lose it (editor ADR D3).
+ * IME composition flow into the reducer and current diagnostics flow back as markers. The editor
+ * is never remounted on a format switch — the language is reconfigured in place — so the undo
+ * history survives the switch (editor ADR D3).
  */
 export const SourceEditor = ({ state, dispatch }: SourceEditorProps) => {
   const handle = useRef<CodeEditorHandle>(null);
-  // Undo history per format, captured when a format's editor unmounts (view switch).
-  const [histories, setHistories] = useState<
-    Partial<Record<DocumentState["format"], unknown>>
-  >({});
 
   const diagnostics = useMemo<EditorDiagnostic[]>(
     () =>
@@ -74,15 +71,6 @@ export const SourceEditor = ({ state, dispatch }: SourceEditorProps) => {
     handle.current?.setText(state.source);
   }, [state.source]);
 
-  useEffect(() => {
-    const format = state.format;
-    const editor = handle.current;
-    return () => {
-      const snapshot = editor?.getHistoryState();
-      setHistories((previous) => ({ ...previous, [format]: snapshot }));
-    };
-  }, [state.format]);
-
   return (
     <div className="source-editor">
       <div className="source-editor__status">
@@ -97,7 +85,6 @@ export const SourceEditor = ({ state, dispatch }: SourceEditorProps) => {
         ) : null}
       </div>
       <CodeEditor
-        key={state.format}
         ref={handle}
         value={state.source}
         language={state.format}
@@ -105,7 +92,6 @@ export const SourceEditor = ({ state, dispatch }: SourceEditorProps) => {
         onChange={onChange}
         onComposingChange={onComposingChange}
         diagnostics={diagnostics}
-        initialHistoryState={histories[state.format]}
       />
     </div>
   );

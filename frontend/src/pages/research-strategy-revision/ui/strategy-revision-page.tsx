@@ -70,7 +70,10 @@ export const StrategyRevisionPage = () => {
   const implemented = availableViews.includes(requested);
   const view: StrategyView = implemented ? requested : stored.format;
   const selectPointer = useCallback(
-    (path: string | undefined, origin: "cursor" | "outline") => {
+    (
+      path: string | undefined,
+      origin: "cursor" | "outline" | "outline-collapse",
+    ) => {
       void navigate({
         to: ROUTE,
         params: { strategyId, revision },
@@ -184,6 +187,7 @@ export const StrategyRevisionPage = () => {
             snapshot={outline.snapshot}
             selectedPointer={search.path}
             onSelect={outline.onSelectOutlineNode}
+            onCollapse={outline.onCollapseOutlineNode}
           />
         }
         editor={

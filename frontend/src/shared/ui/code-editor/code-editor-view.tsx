@@ -233,14 +233,14 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
               update.view.composing,
             );
           }
-          // A document edit also moves the selection, but its source map belongs to the previous
-          // text until parsing completes. Only selection-only transactions can be mapped without
-          // briefly publishing the wrong JSON Pointer.
-          if (update.selectionSet && !update.docChanged) {
+          // Report edit-owned cursor movement as mechanical editor state. The feature boundary
+          // waits for that sourceVersion's parser map before assigning StrategySpec meaning.
+          if (update.selectionSet) {
             const selection = update.state.selection.main;
             callbacks.current.onSelectionChange?.({
               from: selection.from,
               to: selection.to,
+              documentChanged: update.docChanged,
             });
           }
         }),

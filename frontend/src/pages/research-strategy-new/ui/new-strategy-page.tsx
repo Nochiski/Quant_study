@@ -133,6 +133,7 @@ export const NewStrategyPage = () => {
             snapshot={outline.snapshot}
             selectedPointer={search.path}
             onSelect={outline.onSelectOutlineNode}
+            onCollapse={outline.onCollapseOutlineNode}
           />
         }
         editor={

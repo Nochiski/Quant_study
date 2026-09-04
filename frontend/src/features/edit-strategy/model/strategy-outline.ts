@@ -66,14 +66,9 @@ const identityFor = (
     const value = item[`${defined}_id`];
     if (typeof value === "string") return { namespace: defined, value };
   }
-  // Arrays without a declared namespace can still have one unambiguous identifier. Never pick
-  // between multiple `*_id` fields: an input reference must not masquerade as the item's ID.
-  const candidates = Object.entries(item).flatMap(([key, value]) =>
-    key.endsWith("_id") && typeof value === "string"
-      ? [{ namespace: key.slice(0, -3), value }]
-      : [],
-  );
-  return candidates.length === 1 ? candidates[0] : null;
+  // A suffix is not semantics: field_id and universe_id are catalog references in several
+  // collections. Only backend-owned runtime-schema metadata may declare item identity.
+  return null;
 };
 
 const childSchema = (

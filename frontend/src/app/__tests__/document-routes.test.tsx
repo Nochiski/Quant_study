@@ -518,6 +518,33 @@ describe("document routes (P2-04)", () => {
 });
 
 describe("Strategy Outline route integration (P4-01)", () => {
+  it("maps an edit-owned cursor only after the new source parse is current", async () => {
+    const history = mount("/research/strategies/s1/revisions/2");
+    const view = await editor();
+    await screen.findByRole("tree", { name: "StrategySpec 문서 구조" });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(history.location.search).not.toContain("path=");
+
+    const addition = "description: 새 설명\n";
+    const from = view.state.doc.length;
+    act(() => {
+      view.dispatch({
+        changes: { from, insert: addition },
+        selection: { anchor: from + addition.indexOf("새 설명") + 1 },
+      });
+    });
+
+    await waitFor(() =>
+      expect(history.location.search).toContain("path=%2Fdescription"),
+    );
+    expect(
+      screen.getByRole("treeitem", {
+        name: "description",
+        selected: true,
+      }),
+    ).toBeInTheDocument();
+  });
+
   it("keeps URL path, tree selection and source selection in sync through parse errors", async () => {
     const user = userEvent.setup();
     const history = mount("/research/strategies/s1/revisions/2");

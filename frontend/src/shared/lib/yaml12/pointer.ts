@@ -7,3 +7,7 @@ export const decodePointerSegment = (segment: string): string =>
 
 export const pointerSegments = (pointer: string): string[] =>
   pointer === "" ? [] : pointer.slice(1).split("/").map(decodePointerSegment);
+
+/** RFC 6901 JSON Pointer syntax. URI decoding remains the router's responsibility. */
+export const isJsonPointer = (pointer: string): boolean =>
+  pointer === "" || /^(?:\/(?:[^~]|~[01])*)+$/.test(pointer);

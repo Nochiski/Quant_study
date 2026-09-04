@@ -17,7 +17,12 @@ export type EditorDiagnostic = {
 
 export type EditorPosition = { line: number; column: number };
 
-export type EditorSelection = { from: number; to: number };
+export type EditorSelection = {
+  from: number;
+  to: number;
+  /** True when the selection belongs to the same transaction as a document edit. */
+  documentChanged: boolean;
+};
 
 export type EditorCompletionOption = {
   label: string;
@@ -68,7 +73,7 @@ export type CodeEditorProps = {
   language: EditorLanguage;
   ariaLabel: string;
   onChange: (text: string, composing: boolean) => void;
-  /** Fires for cursor/selection-only transactions, in UTF-16 document offsets. */
+  /** Fires for selection transactions in UTF-16 offsets; consumers gate edits on a fresh map. */
   onSelectionChange?: (selection: EditorSelection) => void;
   /** Mirrors the editor's IME composition state (`view.composing`). */
   onComposingChange?: (composing: boolean) => void;

@@ -19,6 +19,7 @@ type StrategyOutlineProps = {
   snapshot: StrategyOutlineSnapshot | null;
   selectedPointer: string | undefined;
   onSelect: (node: StrategyOutlineNode) => void;
+  onCollapse: (node: StrategyOutlineNode) => void;
 };
 
 const visibleLabel = (node: StrategyOutlineNode): string =>
@@ -52,39 +53,25 @@ const filterNodes = (
   });
 };
 
-const containsId = (
-  nodes: readonly StrategyOutlineNode[],
-  id: string | null,
-): boolean =>
-  id !== null &&
-  nodes.some(
-    (node) => node.id === id || containsId(node.children, id),
-  );
-
 const groupChild = (item: HTMLElement): HTMLElement | null => {
-  const container = item.parentElement;
-  if (!container) return null;
-  const group = Array.from(container.children).find(
+  const group = Array.from(item.children).find(
     (child) => child.getAttribute("role") === "group",
   );
   return group?.querySelector<HTMLElement>('[role="treeitem"]') ?? null;
 };
 
 const parentItem = (item: HTMLElement): HTMLElement | null => {
-  const group = item.parentElement?.parentElement;
+  const group = item.parentElement;
   if (group?.getAttribute("role") !== "group") return null;
-  const parentContainer = group.parentElement;
-  return (
-    Array.from(parentContainer?.children ?? []).find(
-      (child) => child.getAttribute("role") === "treeitem",
-    ) as HTMLElement | undefined
-  ) ?? null;
+  const parent = group.parentElement;
+  return parent?.getAttribute("role") === "treeitem" ? parent : null;
 };
 
 export const StrategyOutline = ({
   snapshot,
   selectedPointer,
   onSelect,
+  onCollapse,
 }: StrategyOutlineProps) => {
   const tree = useRef<HTMLUListElement>(null);
   const [filter, setFilter] = useState("");
@@ -111,9 +98,30 @@ export const StrategyOutline = ({
         : [],
     );
   }, [selected, snapshot]);
-  const activeTabId = containsId(nodes, focusedId)
+  const visibility = useMemo(() => {
+    const visibleIds = new Set<string>();
+    const openIds = new Set<string>();
+    const visit = (items: readonly StrategyOutlineNode[]): void => {
+      for (const node of items) {
+        visibleIds.add(node.id);
+        const configured = expansionOverrides.get(node.id);
+        const open =
+          node.children.length > 0 &&
+          (query !== "" ||
+            selectedAncestorIds.has(node.id) ||
+            (configured ?? rootIds.has(node.id)));
+        if (open) {
+          openIds.add(node.id);
+          visit(node.children);
+        }
+      }
+    };
+    visit(nodes);
+    return { visibleIds, openIds };
+  }, [expansionOverrides, nodes, query, rootIds, selectedAncestorIds]);
+  const activeTabId = visibility.visibleIds.has(focusedId ?? "")
     ? focusedId
-    : selected && containsId(nodes, selected.id)
+    : selected && visibility.visibleIds.has(selected.id)
       ? selected.id
       : (nodes[0]?.id ?? null);
 
@@ -133,10 +141,11 @@ export const StrategyOutline = ({
   };
 
   const onKeyDown = (
-    event: KeyboardEvent<HTMLButtonElement>,
+    event: KeyboardEvent<HTMLLIElement>,
     node: StrategyOutlineNode,
     open: boolean,
   ): void => {
+    if (event.currentTarget !== event.target) return;
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
@@ -167,7 +176,7 @@ export const StrategyOutline = ({
       case "ArrowLeft":
         event.preventDefault();
         if (open && node.children.length > 0) {
-          onSelect(node);
+          onCollapse(node);
           toggle(node.id, open);
         }
         else parentItem(event.currentTarget)?.focus();
@@ -182,40 +191,40 @@ export const StrategyOutline = ({
 
   const renderNode = (node: StrategyOutlineNode, level = 1) => {
     const hasChildren = node.children.length > 0;
-    const configured = expansionOverrides.get(node.id);
-    const open =
-      hasChildren &&
-      (query !== "" ||
-        selectedAncestorIds.has(node.id) ||
-        (configured ?? rootIds.has(node.id)));
+    const open = visibility.openIds.has(node.id);
     const isSelected = selected?.id === node.id;
     const tabIndex = activeTabId === node.id ? 0 : -1;
     return (
-      <li key={node.id} role="none">
-        <button
-          type="button"
-          role="treeitem"
-          className="strategy-outline__item"
-          aria-expanded={hasChildren ? open : undefined}
-          aria-selected={isSelected}
-          aria-label={accessibleLabel(node)}
-          aria-level={level}
-          data-present={node.present ? "true" : "false"}
-          tabIndex={tabIndex}
-          title={node.pointer || "/"}
-          onFocus={() => setFocusedId(node.id)}
-          onKeyDown={(event) => onKeyDown(event, node, open)}
-          onClick={(event: MouseEvent<HTMLButtonElement>) => {
-            setFocusedId(node.id);
-            const target = event.target as HTMLElement;
-            if (hasChildren && target.dataset.disclosure === "true") {
-              if (open) onSelect(node);
-              toggle(node.id, open);
-              return;
-            }
-            onSelect(node);
-          }}
-        >
+      <li
+        key={node.id}
+        role="treeitem"
+        className="strategy-outline__item"
+        aria-expanded={hasChildren ? open : undefined}
+        aria-selected={isSelected}
+        aria-label={accessibleLabel(node)}
+        aria-level={level}
+        data-present={node.present ? "true" : "false"}
+        tabIndex={tabIndex}
+        title={node.pointer || "/"}
+        onFocus={(event) => {
+          if (event.currentTarget === event.target) setFocusedId(node.id);
+        }}
+        onKeyDown={(event) => onKeyDown(event, node, open)}
+        onClick={(event: MouseEvent<HTMLLIElement>) => {
+          const target = event.target as HTMLElement;
+          if (target.closest('[role="treeitem"]') !== event.currentTarget)
+            return;
+          setFocusedId(node.id);
+          event.currentTarget.focus();
+          if (hasChildren && target.dataset.disclosure === "true") {
+            if (open) onCollapse(node);
+            toggle(node.id, open);
+            return;
+          }
+          onSelect(node);
+        }}
+      >
+        <div className="strategy-outline__item-row">
           <span
             className="strategy-outline__disclosure"
             data-disclosure="true"
@@ -239,7 +248,7 @@ export const StrategyOutline = ({
               ○
             </span>
           ) : null}
-        </button>
+        </div>
         {open ? (
           <ul role="group" className="strategy-outline__group">
             {node.children.map((child) => renderNode(child, level + 1))}

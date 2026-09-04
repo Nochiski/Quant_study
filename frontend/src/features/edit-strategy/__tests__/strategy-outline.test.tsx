@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   render,
   renderHook,
@@ -9,6 +10,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { parseSource } from "../../../shared/lib/yaml12";
+import type { CodeEditorHandle } from "../../../shared/ui/code-editor";
 import {
   documentReducer,
   initialDocumentState,
@@ -20,6 +22,7 @@ import {
   projectStrategyOutline,
 } from "../model/strategy-outline";
 import { useStrategyOutline } from "../model/use-strategy-outline";
+import { useOutlineNavigation } from "../model/use-outline-navigation";
 import { StrategyOutline } from "../ui/strategy-outline";
 
 afterEach(cleanup);
@@ -35,7 +38,18 @@ const SCHEMA: JsonSchema = {
       type: "object",
       properties: { market: { type: "string" } },
     },
-    eligibility: objectSection,
+    eligibility: {
+      type: "object",
+      properties: {
+        rules: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { field_id: { type: "string" } },
+          },
+        },
+      },
+    },
     factors: {
       type: "object",
       properties: {
@@ -88,7 +102,9 @@ const SOURCE = [
   'description: ""',
   "data:",
   "  market: KRX",
-  "eligibility: {}",
+  "eligibility:",
+  "  rules:",
+  "    - field_id: price.close",
   "factors:",
   "  factors:",
   "    - factor_id: momentum",
@@ -129,7 +145,7 @@ const parsedState = (): DocumentState => {
 };
 
 describe("Strategy Outline projection", () => {
-  it("derives all root sections from the runtime schema and keeps array index separate from node ID", () => {
+  it("derives root sections and uses only schema-owned semantic identities", () => {
     const result = parsed();
     const nodes = projectStrategyOutline(result, SCHEMA);
     expect(nodes.map((node) => node.label)).toEqual([
@@ -146,7 +162,7 @@ describe("Strategy Outline projection", () => {
     const factor = findOutlineNode(nodes, "/factors/factors/0");
     expect(factor).toMatchObject({
       arrayIndex: 0,
-      semanticIdentity: { namespace: "factor", value: "momentum" },
+      semanticIdentity: null,
     });
     const node = findOutlineNode(nodes, "/factors/factors/0/graph/nodes/0");
     expect(node).toMatchObject({
@@ -154,6 +170,10 @@ describe("Strategy Outline projection", () => {
       pointer: "/factors/factors/0/graph/nodes/0",
       arrayIndex: 0,
       semanticIdentity: { namespace: "node", value: "close" },
+    });
+    expect(findOutlineNode(nodes, "/eligibility/rules/0")).toMatchObject({
+      arrayIndex: 0,
+      semanticIdentity: null,
     });
   });
 
@@ -190,6 +210,75 @@ describe("Strategy Outline projection", () => {
     rerender({ state: anotherDocument });
     expect(result.current).toBeNull();
   });
+
+  it("does not publish implicit-root or programmatic collection selections back to the URL", () => {
+    const onSelectedPointer = vi.fn();
+    let editorSource = SOURCE;
+    const { result, rerender } = renderHook(
+      ({ state }: { state: DocumentState }) =>
+        useOutlineNavigation({
+          state,
+          schema: SCHEMA,
+          selectedPointer: undefined,
+          onSelectedPointer,
+        }),
+      { initialProps: { state: parsedState() } },
+    );
+    const editor: CodeEditorHandle = {
+      getText: () => editorSource,
+      setText: vi.fn(),
+      getSelection: () => ({ from: 0, to: 0 }),
+      setSelection: (from, to = from) =>
+        result.current.onEditorSelectionChange({
+          from,
+          to,
+          documentChanged: false,
+        }),
+      offsetToPosition: () => ({ line: 0, column: 0 }),
+      positionToOffset: () => 0,
+      scrollTo: vi.fn(),
+      focus: vi.fn(),
+      getHistoryState: () => null,
+      restoreHistoryState: vi.fn(),
+    };
+
+    act(() => result.current.onEditorReady(editor));
+    expect(onSelectedPointer).not.toHaveBeenCalled();
+
+    const risk = findOutlineNode(result.current.snapshot?.nodes ?? [], "/risk");
+    expect(risk).not.toBeNull();
+    act(() => result.current.onSelectOutlineNode(risk!));
+    expect(onSelectedPointer.mock.calls).toEqual([["/risk", "outline"]]);
+
+    const basics = findOutlineNode(result.current.snapshot?.nodes ?? [], "");
+    expect(basics).not.toBeNull();
+    act(() => result.current.onSelectOutlineNode(basics!));
+    expect(onSelectedPointer).toHaveBeenLastCalledWith(undefined, "outline");
+
+    editorSource = 'schema_version: "1.0"\ntitle: minimal\n';
+    const loaded = documentReducer(parsedState(), {
+      type: "load",
+      format: "yaml",
+      source: editorSource,
+      strategyId: "s2",
+      baseRevision: 1,
+      baseSpecHash: "b".repeat(64),
+    });
+    const missingState = documentReducer(loaded, {
+      type: "parsed",
+      version: loaded.sourceVersion,
+      result: parseSource(editorSource, "yaml"),
+    });
+    rerender({ state: missingState });
+    const missingRisk = findOutlineNode(
+      result.current.snapshot?.nodes ?? [],
+      "/risk",
+    );
+    expect(missingRisk).toMatchObject({ present: false, range: null });
+    act(() => result.current.onSelectOutlineNode(missingRisk!));
+    expect(onSelectedPointer).toHaveBeenLastCalledWith("/risk", "outline");
+    expect(onSelectedPointer).toHaveBeenCalledTimes(3);
+  });
 });
 
 describe("Strategy Outline tree", () => {
@@ -208,11 +297,13 @@ describe("Strategy Outline tree", () => {
   it("selects by JSON Pointer and supports ARIA tree keyboard navigation", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
+    const onCollapse = vi.fn();
     const view = render(
       <StrategyOutline
         snapshot={snapshot()}
         selectedPointer="/risk"
         onSelect={onSelect}
+        onCollapse={onCollapse}
       />,
     );
     const tree = screen.getByRole("tree", {
@@ -230,15 +321,17 @@ describe("Strategy Outline tree", () => {
     expect(document.activeElement).toBe(risk);
     await user.keyboard("{ArrowLeft}");
     expect(risk).toHaveAttribute("aria-expanded", "false");
-    expect(onSelect).toHaveBeenLastCalledWith(
+    expect(onCollapse).toHaveBeenLastCalledWith(
       expect.objectContaining({ pointer: "/risk" }),
     );
+    expect(document.activeElement).toBe(risk);
 
     view.rerender(
       <StrategyOutline
         snapshot={snapshot()}
         selectedPointer="/risk/max_name_weight"
         onSelect={onSelect}
+        onCollapse={onCollapse}
       />,
     );
     expect(risk).toHaveAttribute("aria-expanded", "true");
@@ -248,6 +341,18 @@ describe("Strategy Outline tree", () => {
         selected: true,
       }),
     ).toBeVisible();
+    await user.click(
+      risk.querySelector<HTMLElement>('[data-disclosure="true"]')!,
+    );
+    expect(onCollapse).toHaveBeenLastCalledWith(
+      expect.objectContaining({ pointer: "/risk" }),
+    );
+    expect(document.activeElement).toBe(risk);
+    const riskValue = within(tree).getByRole("treeitem", {
+      name: "max_name_weight",
+    });
+    expect(riskValue.parentElement).toHaveAttribute("role", "group");
+    expect(riskValue.parentElement?.parentElement).toBe(risk);
 
     risk.focus();
     await user.keyboard("{End}");
@@ -262,11 +367,12 @@ describe("Strategy Outline tree", () => {
 
   it("shows technical index and semantic node identity as distinct labels and filters ancestors", async () => {
     const user = userEvent.setup();
-    render(
+    const view = render(
       <StrategyOutline
         snapshot={snapshot()}
         selectedPointer="/factors/factors/0/graph/nodes/0"
         onSelect={vi.fn()}
+        onCollapse={vi.fn()}
       />,
     );
     expect(
@@ -275,6 +381,24 @@ describe("Strategy Outline tree", () => {
         selected: true,
       }),
     ).toHaveAttribute("title", "/factors/factors/0/graph/nodes/0");
+    screen
+      .getByRole("treeitem", {
+        name: "배열 인덱스 0, node_id close",
+      })
+      .focus();
+    view.rerender(
+      <StrategyOutline
+        snapshot={snapshot()}
+        selectedPointer="/risk/max_name_weight"
+        onSelect={vi.fn()}
+        onCollapse={vi.fn()}
+      />,
+    );
+    const tabbable = Array.from(
+      screen.getByRole("tree").querySelectorAll('[role="treeitem"]'),
+    ).filter((item) => item.getAttribute("tabindex") === "0");
+    expect(tabbable).toHaveLength(1);
+    expect(tabbable[0]).toHaveAccessibleName("max_name_weight");
 
     await user.type(
       screen.getByRole("searchbox", { name: "전략 구조 필터" }),

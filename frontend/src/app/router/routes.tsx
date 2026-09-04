@@ -25,6 +25,7 @@ import {
 } from "../../pages/route-states";
 import { StrategyBuilderPage } from "../../pages/strategy-builder";
 import { t } from "../../shared/config";
+import { isJsonPointer } from "../../shared/lib/yaml12";
 import { AppShell } from "../../widgets/app-shell";
 
 /** Everything routes can read without importing the app: query cache and feature flags. */
@@ -48,12 +49,19 @@ type StrategyDocumentSearch = {
 /** Selection/projection state for every StrategySpec authoring route. */
 const strategyDocumentSearch = (
   search: Record<string, unknown>,
-): StrategyDocumentSearch => ({
-  view: isView(search.view) ? search.view : undefined,
-  path: typeof search.path === "string" ? search.path : undefined,
-  asOf: typeof search.asOf === "string" ? search.asOf : undefined,
-  security: typeof search.security === "string" ? search.security : undefined,
-});
+): StrategyDocumentSearch => {
+  const path = typeof search.path === "string" ? search.path : undefined;
+  return {
+    view: isView(search.view) ? search.view : undefined,
+    path:
+      path !== undefined && path !== "" && isJsonPointer(path)
+        ? path
+        : undefined,
+    asOf: typeof search.asOf === "string" ? search.asOf : undefined,
+    security:
+      typeof search.security === "string" ? search.security : undefined,
+  };
+};
 
 /** Idempotent: invalid values are dropped, defaults are never written to the URL (ADR D1). */
 const legacySearch = (search: Record<string, unknown>): LegacySearch => ({

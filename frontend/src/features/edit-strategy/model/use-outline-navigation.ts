@@ -23,7 +23,7 @@ type OutlineNavigationOptions = {
   selectedPointer: string | undefined;
   onSelectedPointer: (
     pointer: string | undefined,
-    origin: "cursor" | "outline",
+    origin: "cursor" | "outline" | "outline-collapse",
   ) => void;
 };
 
@@ -32,6 +32,7 @@ export type StrategyOutlineNavigation = {
   onEditorReady: (editor: CodeEditorHandle | null) => void;
   onEditorSelectionChange: (selection: EditorSelection) => void;
   onSelectOutlineNode: (node: StrategyOutlineNode) => void;
+  onCollapseOutlineNode: (node: StrategyOutlineNode) => void;
 };
 
 const normalizedPointer = (pointer: string | undefined): string => pointer ?? "";
@@ -49,7 +50,13 @@ export const useOutlineNavigation = ({
   const latestSelected = useRef(selectedPointer);
   const pendingReveal = useRef<string | null>(null);
   const cursorPublished = useRef<string | null>(null);
-  const programmaticSelection = useRef<string | null>(null);
+  const collapsePublished = useRef<string | null>(null);
+  const programmaticSelection = useRef(false);
+  const pendingCursor = useRef<{
+    documentEpoch: number;
+    minimumSourceVersion: number;
+    selection: EditorSelection;
+  } | null>(null);
   const routeSelectionKey = useRef<string | null>(null);
   useEffect(() => {
     latestSnapshot.current = snapshot;
@@ -67,8 +74,12 @@ export const useOutlineNavigation = ({
     const length = currentEditor.getText().length;
     const from = Math.min(range.start.offset, length);
     const to = Math.min(Math.max(range.end.offset, from), length);
-    programmaticSelection.current = pointer;
+    programmaticSelection.current = true;
     currentEditor.setSelection(from, to);
+    // CodeMirror dispatch is synchronous. Clear the guard here as well in case setting an
+    // already-equal range produces no selection transaction; the next real cursor move must
+    // never be swallowed.
+    programmaticSelection.current = false;
     currentEditor.scrollTo(from);
     currentEditor.focus();
     return true;
@@ -87,30 +98,75 @@ export const useOutlineNavigation = ({
   const onEditorSelectionChange = useCallback(
     (selection: EditorSelection): void => {
       const current = latestSnapshot.current;
-      if (current === null || current.stale) return;
+      if (programmaticSelection.current) {
+        programmaticSelection.current = false;
+        return;
+      }
+      if (selection.documentChanged || current === null || current.stale) {
+        pendingCursor.current = {
+          documentEpoch: state.documentEpoch,
+          minimumSourceVersion:
+            state.sourceVersion + (selection.documentChanged ? 1 : 0),
+          selection,
+        };
+        return;
+      }
+      pendingCursor.current = null;
       const pointer = locatePointer(current.parsed, selection.from);
       if (pointer === null) return;
-      if (programmaticSelection.current !== null) {
-        const expected = programmaticSelection.current;
-        programmaticSelection.current = null;
-        if (expected === pointer) return;
-      }
       if (pointer === normalizedPointer(latestSelected.current)) return;
       cursorPublished.current = pointer;
       onSelectedPointer(pointer === "" ? undefined : pointer, "cursor");
     },
-    [onSelectedPointer],
+    [onSelectedPointer, state.documentEpoch, state.sourceVersion],
   );
 
   const onSelectOutlineNode = useCallback(
     (node: StrategyOutlineNode): void => {
       const pointer = node.pointer;
+      pendingCursor.current = null;
       pendingReveal.current = pointer;
       onSelectedPointer(pointer === "" ? undefined : pointer, "outline");
       if (reveal(pointer)) pendingReveal.current = null;
     },
     [onSelectedPointer, reveal],
   );
+
+  const onCollapseOutlineNode = useCallback(
+    (node: StrategyOutlineNode): void => {
+      const pointer = node.pointer;
+      pendingCursor.current = null;
+      pendingReveal.current = null;
+      if (pointer === normalizedPointer(latestSelected.current)) return;
+      collapsePublished.current = pointer;
+      onSelectedPointer(
+        pointer === "" ? undefined : pointer,
+        "outline-collapse",
+      );
+    },
+    [onSelectedPointer],
+  );
+
+  // Text edits move the cursor before their parser-owned source map exists. Publish only after
+  // the matching document has a current successful parse; the newest pending cursor wins.
+  useEffect(() => {
+    const pending = pendingCursor.current;
+    if (pending === null || snapshot === null || snapshot.stale) return;
+    if (pending.documentEpoch !== snapshot.documentEpoch) {
+      pendingCursor.current = null;
+      return;
+    }
+    if (snapshot.sourceVersion < pending.minimumSourceVersion) return;
+    pendingCursor.current = null;
+    const pointer = locatePointer(snapshot.parsed, pending.selection.from);
+    if (
+      pointer === null ||
+      pointer === normalizedPointer(latestSelected.current)
+    )
+      return;
+    cursorPublished.current = pointer;
+    onSelectedPointer(pointer === "" ? undefined : pointer, "cursor");
+  }, [onSelectedPointer, snapshot]);
 
   // Direct links and browser back/forward also reveal their URL path. A path just published by
   // the cursor is already at the right place and must not expand its whole source range.
@@ -119,11 +175,25 @@ export const useOutlineNavigation = ({
     const key = `${state.documentEpoch}:${pointer}`;
     if (routeSelectionKey.current !== key) {
       routeSelectionKey.current = key;
+      // An absent path is the URL default, not an instruction to select the entire document.
+      // Outline clicks on the virtual root reveal it directly in onSelectOutlineNode.
+      if (selectedPointer === undefined) {
+        pendingReveal.current = null;
+        cursorPublished.current = null;
+        collapsePublished.current = null;
+        return;
+      }
       if (cursorPublished.current === pointer) {
         cursorPublished.current = null;
         pendingReveal.current = null;
         return;
       }
+      if (collapsePublished.current === pointer) {
+        collapsePublished.current = null;
+        pendingReveal.current = null;
+        return;
+      }
+      pendingCursor.current = null;
       pendingReveal.current = pointer;
     }
     const pending = pendingReveal.current;
@@ -135,5 +205,6 @@ export const useOutlineNavigation = ({
     onEditorReady,
     onEditorSelectionChange,
     onSelectOutlineNode,
+    onCollapseOutlineNode,
   };
 };

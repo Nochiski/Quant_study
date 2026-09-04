@@ -11,6 +11,7 @@ from strategy_workbench.application.portfolio_design._service import (
     LookAheadViolationError,
     PortfolioDesignService,
     PortfolioPipelineResult,
+    RawObservationContractError,
     RawObservationUnavailableError,
 )
 
@@ -25,5 +26,6 @@ __all__ = [
     "PortfolioPipelineResult",
     "PortfolioPreview",
     "PortfolioPreviewRequest",
+    "RawObservationContractError",
     "RawObservationUnavailableError",
 ]

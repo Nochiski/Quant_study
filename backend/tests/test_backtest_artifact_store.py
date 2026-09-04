@@ -25,6 +25,8 @@ from strategy_workbench.domain.backtest.facade.runs import (
     RawArtifactBundle,
     RawSnapshot,
     RunManifest,
+    StrategyProvenance,
+    StrategySourceKind,
 )
 
 
@@ -55,6 +57,9 @@ def _result() -> BacktestRunResult:
             fee_bps=0.0,
             slippage_bps=0.0,
             participation_rate=1.0,
+            strategy_provenance=StrategyProvenance(
+                StrategySourceKind.INLINE_DRAFT, "strategy", "1.0"
+            ),
         ),
         metric_definitions=registry.definitions(),
         metrics=(

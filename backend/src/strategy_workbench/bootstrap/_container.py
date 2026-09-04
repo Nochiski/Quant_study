@@ -8,6 +8,7 @@ from strategy_workbench.adapters.outbound.artifact_local.facade.store import Loc
 from strategy_workbench.adapters.outbound.backtest_engine.facade.executor import (
     BacktestEngineExecutorAdapter,
 )
+from strategy_workbench.adapters.outbound.document_codec.facade.codec import RuamelDocumentCodec
 from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import (
     BacktestEnginePortfolioAdapter,
 )
@@ -26,6 +27,10 @@ from strategy_workbench.application.factor_research.facade.research import (
     FactorResearchService,
 )
 from strategy_workbench.application.portfolio_design.facade.design import PortfolioDesignService
+from strategy_workbench.application.strategy_authoring.facade.authoring import (
+    StrategyAuthoringService,
+    StrategyDocumentService,
+)
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.application.strategy_design.facade.ports import StrategyRepositoryPort
 from strategy_workbench.domain.analytics.facade.metrics import build_default_metric_registry
@@ -38,6 +43,8 @@ class BackendContainer:
     equity_workspace: EquityWorkspaceService
     strategy_repository: StrategyRepositoryPort
     strategy_design: StrategyDesignService
+    strategy_authoring: StrategyAuthoringService
+    strategy_documents: StrategyDocumentService
     factor_research: FactorResearchService
     portfolio_design: PortfolioDesignService
     backtest_runs: BacktestRunService
@@ -61,6 +68,11 @@ def build_container(
         equity_data, engine_portfolio, factor_registry_version=factor_registry.version
     )
     metric_registry = build_default_metric_registry()
+    strategy_authoring = StrategyAuthoringService(
+        RuamelDocumentCodec(),
+        factor_registry_version=factor_registry.version,
+        dataset_snapshot_id=lambda: equity_data.snapshot().snapshot_id,
+    )
     run_artifact_root = artifact_root or (
         Path(__file__).resolve().parents[3] / ".local" / "backtest-runs"
     )
@@ -72,10 +84,15 @@ def build_container(
             strategy_repository,
             new_id=lambda: str(uuid4()),
         ),
+        strategy_authoring=strategy_authoring,
+        strategy_documents=StrategyDocumentService(
+            strategy_authoring, strategy_repository, new_id=lambda: str(uuid4())
+        ),
         factor_research=FactorResearchService(factor_registry, equity_data),
         portfolio_design=portfolio_design,
         backtest_runs=BacktestRunService(
             portfolio_design,
+            strategy_repository,
             equity_data,
             BacktestEngineExecutorAdapter(metric_registry),
             LocalArtifactStore(run_artifact_root),

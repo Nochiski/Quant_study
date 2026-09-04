@@ -49,11 +49,22 @@ class FactorReferenceValue:
 
 @dataclass(frozen=True)
 class FactorObservation:
+    """One (as_of, security) row of raw inputs.
+
+    `universe_member` narrows every cross-sectional peer group: rank / zscore / winsorize /
+    neutralize / cross-sectional-median fill compare a row only against rows sharing its
+    `(as_of, universe_member)`. A row that left the universe on `as_of` must therefore not move a
+    member's rank or z-score. Time-series operators still see the security's whole row history, so
+    membership churn never truncates a lookback window. Callers that have no universe concept
+    (pure factor research over a fixed panel) leave the default and get one cross-section per date.
+    """
+
     as_of: date
     security_id: str
     fields: tuple[FactorFieldValue, ...]
     references: tuple[FactorReferenceValue, ...] = ()
     forward_return: float | None = None
+    universe_member: bool = True
 
 
 @dataclass(frozen=True)
@@ -182,7 +193,7 @@ def _field_values(
     if missing_policy is MissingPolicy.ZERO:
         return [0.0 if value is None else value for value in raw]
     if missing_policy is MissingPolicy.CROSS_SECTIONAL_MEDIAN:
-        by_date = _indices_by_date(observations)
+        by_date = _cross_section_indices(observations)
         result = list(raw)
         for indices in by_date.values():
             available = [value for index in indices if (value := raw[index]) is not None]
@@ -280,7 +291,7 @@ def _cross_sectional_demean(
     observations: tuple[FactorObservation, ...],
 ) -> list[FactorComputedValue]:
     result: list[FactorComputedValue] = [None] * len(values)
-    for indices in _indices_by_date(observations).values():
+    for indices in _cross_section_indices(observations).values():
         numeric = [
             (index, number)
             for index in indices
@@ -328,7 +339,7 @@ def _cross_sectional(
     observations: tuple[FactorObservation, ...],
 ) -> list[FactorComputedValue]:
     result: list[FactorComputedValue] = [None] * len(values)
-    for indices in _indices_by_date(observations).values():
+    for indices in _cross_section_indices(observations).values():
         numeric = [
             (index, number)
             for index in indices
@@ -361,14 +372,15 @@ def _group_transform(
     values: list[FactorComputedValue],
     observations: tuple[FactorObservation, ...],
 ) -> list[FactorComputedValue]:
-    grouped: dict[tuple[date, str], list[int]] = {}
+    grouped: dict[tuple[date, bool, str], list[int]] = {}
     for index, observation in enumerate(observations):
         group = next(
             (field.value for field in observation.fields if field.field_id == node.group_field_id),
             None,
         )
         if isinstance(group, str):
-            grouped.setdefault((observation.as_of, group), []).append(index)
+            key = (observation.as_of, observation.universe_member, group)
+            grouped.setdefault(key, []).append(index)
     result: list[FactorComputedValue] = [None] * len(values)
     for indices in grouped.values():
         numeric = [
@@ -401,10 +413,18 @@ def _lag(
     return result
 
 
-def _indices_by_date(observations: tuple[FactorObservation, ...]) -> dict[date, list[int]]:
-    grouped: dict[date, list[int]] = {}
+def _cross_section_indices(
+    observations: tuple[FactorObservation, ...],
+) -> dict[tuple[date, bool], list[int]]:
+    """Peer groups for cross-sectional operators: one group per (as_of, universe_member).
+
+    Membership is part of the key so a non-member row cannot enter a member's cross-section
+    (D-001). Non-members are still grouped among themselves, which keeps the result list aligned
+    with `observations` positionally; the portfolio compiler drops those rows afterwards.
+    """
+    grouped: dict[tuple[date, bool], list[int]] = {}
     for index, observation in enumerate(observations):
-        grouped.setdefault(observation.as_of, []).append(index)
+        grouped.setdefault((observation.as_of, observation.universe_member), []).append(index)
     return grouped
 
 

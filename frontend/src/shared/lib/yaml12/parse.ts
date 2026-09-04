@@ -9,7 +9,8 @@
  * Positions are 0-based line/column/offset in UTF-16 code units (JavaScript string indices).
  * Backend positions are Unicode code points; the wire boundary converts (P3-04).
  *
- * This parser only reports *syntax and policy* rejections (`yaml.<reason>`, `json.syntax`).
+ * This parser only reports syntax and policy rejections. Codes name the rule owner exactly like
+ * the backend wire contract: `<format>.syntax`, `document.<reason>`, or `yaml.<reason>`.
  * Structural and semantic diagnostics come from the backend compile API (editor ADR D2).
  */
 import { CODEC_LIMITS } from "./limits";
@@ -27,6 +28,39 @@ import {
 } from "yaml";
 
 export type SourceFormat = "yaml" | "json";
+
+const DOCUMENT_POLICY_REASONS = new Set([
+  "too_large",
+  "too_deep",
+  "too_many_nodes",
+  "not_a_mapping",
+  "duplicate_key",
+  "non_string_key",
+  "non_finite_number",
+  "integer_out_of_range",
+]);
+
+const YAML_GRAMMAR_REASONS = new Set([
+  "directive",
+  "anchor_or_alias",
+  "tag",
+  "merge_key",
+  "non_core_number",
+  "multiple_documents",
+]);
+
+/** The frontend equivalent of the backend DocumentCodec port's `diagnostic_code`. */
+export const diagnosticCode = (
+  reason: string,
+  format: SourceFormat,
+): string => {
+  if (reason === "syntax") return `${format}.syntax`;
+  if (DOCUMENT_POLICY_REASONS.has(reason)) return `document.${reason}`;
+  if (YAML_GRAMMAR_REASONS.has(reason)) return `yaml.${reason}`;
+  throw new Error(
+    `rejection reason has no owner: reason=${reason} format=${format}`,
+  );
+};
 
 export type SourcePosition = { line: number; column: number; offset: number };
 export type SourceRange = { start: SourcePosition; end: SourcePosition };
@@ -481,7 +515,7 @@ const parseJsonValues = (text: string, lines: LineIndex): unknown => {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Yaml12Rejected(
-      "json.syntax",
+      "syntax",
       message,
       jsonErrorRange(text, message, lines),
     );
@@ -645,8 +679,7 @@ export const parseSource = (
     };
   } catch (error) {
     if (!(error instanceof Yaml12Rejected)) throw error;
-    const code =
-      error.reason === "json.syntax" ? "json.syntax" : `yaml.${error.reason}`;
+    const code = diagnosticCode(error.reason, format);
     return {
       status: "rejected",
       format,

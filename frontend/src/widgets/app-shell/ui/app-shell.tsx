@@ -1,6 +1,7 @@
 import { useId, useState, type ReactNode } from "react";
 
 import { t } from "../../../shared/config";
+import { useMediaQuery } from "../../../shared/lib/media";
 import { Link } from "../../../shared/lib/router";
 import { Badge, Button } from "../../../shared/ui";
 import "./app-shell.css";
@@ -37,7 +38,9 @@ const OPERATIONS = [
  */
 export const AppShell = ({ operationsEnabled, children }: AppShellProps) => {
   const operationsId = useId();
-  const [collapsed, setCollapsed] = useState(false);
+  const compactViewport = useMediaQuery("(max-width: 1279px)");
+  const [manualCollapsed, setManualCollapsed] = useState<boolean | null>(null);
+  const collapsed = manualCollapsed ?? compactViewport;
   const unavailable = t("nav.operations.unavailable");
   const disabledItem = (label: string, icon: string) => (
     <span
@@ -125,7 +128,7 @@ export const AppShell = ({ operationsEnabled, children }: AppShellProps) => {
             size="small"
             tone="ghost"
             aria-expanded={!collapsed}
-            onClick={() => setCollapsed((value) => !value)}
+            onClick={() => setManualCollapsed(!collapsed)}
           >
             <span aria-hidden="true">{collapsed ? "»" : "«"}</span>
             <span className="sr-only">

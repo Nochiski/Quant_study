@@ -43,6 +43,8 @@ export type DocumentDiagnostic = {
 /** What the backend compile call answered for one `sourceVersion`. */
 export type CompileOutcome = {
   spec: StrategySpec | null;
+  /** Exact canonical bytes from the backend; null whenever compilation has blocking errors. */
+  canonicalJson: string | null;
   specHash: string | null;
   schemaVersion: string | null;
   sourceHash: string;
@@ -61,6 +63,11 @@ export type DocumentState = {
   lastValidParse: {
     version: number;
     result: Extract<ParsedSource, { status: "ok" }>;
+  } | null;
+  /** Last error-free backend compile in this document epoch, retained for stale projections. */
+  lastValidCompiled: {
+    version: number;
+    outcome: CompileOutcome;
   } | null;
   compiled: CompileOutcome | null;
   compiledVersion: number;
@@ -108,6 +115,7 @@ export const initialDocumentState = (
   parse: null,
   parsedVersion: -1,
   lastValidParse: null,
+  lastValidCompiled: null,
   compiled: null,
   compiledVersion: -1,
   baseRevision: null,
@@ -210,10 +218,21 @@ export const documentReducer = (
         state.baseSpecHash !== null &&
         action.outcome.specHash === state.baseSpecHash &&
         !state.dirty;
+      const valid =
+        action.outcome.spec !== null &&
+        action.outcome.canonicalJson !== null &&
+        action.outcome.specHash !== null &&
+        action.outcome.schemaVersion !== null &&
+        !action.outcome.diagnostics.some(
+          (diagnostic) => diagnostic.severity === "error",
+        );
       return {
         ...state,
         compiled: action.outcome,
         compiledVersion: action.version,
+        lastValidCompiled: valid
+          ? { version: action.version, outcome: action.outcome }
+          : state.lastValidCompiled,
         phase: current ? phaseFromCompile(action.outcome, saved) : state.phase,
       };
     }

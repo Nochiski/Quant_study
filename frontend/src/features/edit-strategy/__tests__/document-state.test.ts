@@ -17,6 +17,7 @@ const spec = { title: "x" } as unknown as CompileOutcome["spec"];
 
 const okOutcome = (hash = "h1"): CompileOutcome => ({
   spec,
+  canonicalJson: '{"title":"x"}',
   specHash: hash,
   schemaVersion: "1.0",
   sourceHash: "s",
@@ -25,6 +26,7 @@ const okOutcome = (hash = "h1"): CompileOutcome => ({
 
 const withErrors = (kind: "structural" | "semantic"): CompileOutcome => ({
   spec: null,
+  canonicalJson: null,
   specHash: null,
   schemaVersion: "1.0",
   sourceHash: "s",
@@ -168,6 +170,27 @@ describe("document state machine", () => {
     });
     expect(state).toBe(before);
     expect(currentSpec(state)).toBeNull();
+  });
+
+  it("drops the last valid compile when a different document is loaded", () => {
+    let state = initialDocumentState("yaml", "title: A\n");
+    state = run(state, {
+      type: "compiled",
+      version: state.sourceVersion,
+      outcome: okOutcome("hA"),
+    });
+    expect(state.lastValidCompiled?.outcome.specHash).toBe("hA");
+
+    state = run(state, {
+      type: "load",
+      format: "yaml",
+      source: "title: B\n",
+      strategyId: "B",
+      baseRevision: 1,
+      baseSpecHash: "hB",
+    });
+    expect(state.lastValidCompiled).toBeNull();
+    expect(state.compiled).toBeNull();
   });
 
   it("does not parse while an IME composition is active and resumes after it ends", () => {

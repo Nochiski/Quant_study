@@ -115,6 +115,7 @@ export const useCompileDocument = (
           if (controller.signal.aborted) return;
           const outcome: CompileOutcome = {
             spec: compiled.spec,
+            canonicalJson: compiled.canonical_json,
             specHash: compiled.spec_hash,
             schemaVersion: compiled.schema_version,
             sourceHash: compiled.source_hash,
@@ -133,6 +134,7 @@ export const useCompileDocument = (
             version,
             outcome: {
               spec: null,
+              canonicalJson: null,
               specHash: null,
               schemaVersion: null,
               sourceHash: "",

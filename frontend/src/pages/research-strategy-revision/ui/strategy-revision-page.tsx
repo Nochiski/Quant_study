@@ -11,7 +11,10 @@ import {
   RecoveryBanner,
   SnippetCatalog,
   SourceEditor,
+  StrategyProjectionPanel,
   StrategyOutline,
+  PROJECTION_VIEWS,
+  projectStrategySpec,
   saveStatusText,
   saveStatusTone,
   useAutosave,
@@ -24,12 +27,12 @@ import {
   useSnippetInsertion,
   useStrategyDocument,
   type DocumentSource,
+  type StrategyView,
 } from "../../../features/edit-strategy";
 import { t } from "../../../shared/config";
 import { useNavigate, useParams, useSearch } from "../../../shared/lib/router";
 import { Badge, type CodeEditorHandle } from "../../../shared/ui";
 import { StrategyIde } from "../../../widgets/strategy-ide";
-import { PROJECTION_VIEWS, type StrategyView } from "../model/strategy-views";
 
 const ROUTE = "/research/strategies/$strategyId/revisions/$revision";
 
@@ -41,9 +44,9 @@ const shortTimestamp = (iso: string): string =>
  * Saved revision entry (WORKFLOW P2-04). The exact stored document comes from the query cache
  * the route loader warmed up (ADR D4) and becomes the draft base. Saving appends the next
  * revision and the URL follows it. The selected view lives in the URL search and never blocks
- * navigation (ADR D3): the stored format is edited in place, JSON is a read-only projection of
- * the base spec, and a view that is not implemented yet falls back to the stored format with a
- * notice instead of an empty tab.
+ * navigation (ADR D3): the stored format is edited in place, JSON/Form are read-only projections
+ * of the current backend compile (or an explicitly stale same-document fallback), and a view that
+ * is not implemented yet falls back to the stored format with a notice instead of an empty tab.
  */
 export const StrategyRevisionPage = () => {
   const { strategyId, revision } = useParams({ from: ROUTE });
@@ -70,8 +73,15 @@ export const StrategyRevisionPage = () => {
     document.compiledVersion === document.sourceVersion
       ? document.compiled
       : null;
+  const projection = projectStrategySpec(document, {
+    strategyId: stored.strategy_id,
+    revision: stored.revision,
+    spec: stored.spec,
+    specHash: stored.spec_hash,
+    schemaVersion: stored.schema_version,
+  });
   const availableViews: readonly StrategyView[] =
-    stored.format === "yaml" ? PROJECTION_VIEWS : ["json"];
+    stored.format === "yaml" ? PROJECTION_VIEWS : ["json", "form"];
   const requested: StrategyView = search.view ?? stored.format;
   const implemented = availableViews.includes(requested);
   const view: StrategyView = implemented ? requested : stored.format;
@@ -177,6 +187,7 @@ export const StrategyRevisionPage = () => {
         runDisabled={!backtest.canRun}
         saveTone={saveStatusTone(document, status)}
         view={view}
+        sourceView={stored.format}
         availableViews={availableViews}
         onViewChange={(next) =>
           void navigate({
@@ -202,6 +213,13 @@ export const StrategyRevisionPage = () => {
             runStatus={backtest.status}
           />
         }
+        projections={{
+          json:
+            stored.format === "yaml" ? (
+              <StrategyProjectionPanel projection={projection} view="json" />
+            ) : undefined,
+          form: <StrategyProjectionPanel projection={projection} view="form" />,
+        }}
         outline={
           <StrategyOutline
             snapshot={outline.snapshot}
@@ -254,22 +272,13 @@ export const StrategyRevisionPage = () => {
             {autosave.recovery ? (
               <RecoveryBanner recovery={autosave.recovery} />
             ) : null}
-            {view === stored.format ? (
-              <SourceEditor
-                state={document}
-                dispatch={dispatch}
-                assist={assist}
-                onEditorReady={onEditorReady}
-                onSelectionChange={outline.onEditorSelectionChange}
-              />
-            ) : (
-              <pre
-                className="page-state"
-                aria-label={t("page.revision.jsonProjection")}
-              >
-                {JSON.stringify(stored.spec, null, 2)}
-              </pre>
-            )}
+            <SourceEditor
+              state={document}
+              dispatch={dispatch}
+              assist={assist}
+              onEditorReady={onEditorReady}
+              onSelectionChange={outline.onEditorSelectionChange}
+            />
           </>
         }
       />

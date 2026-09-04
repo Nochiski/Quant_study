@@ -249,9 +249,7 @@ describe("App Shell routes", () => {
     cleanup();
     const history = mount("/research/strategies/s1/revisions/1");
     await screen.findByRole("heading", { name: "퀄리티 모멘텀 v1" });
-    history.push(
-      "/research/strategies/s1/revisions/1?path=%2Ffoo~1bar~0baz",
-    );
+    history.push("/research/strategies/s1/revisions/1?path=%2Ffoo~1bar~0baz");
     await waitFor(() =>
       expect(history.location.search).toContain("path=%2Ffoo~1bar~0baz"),
     );
@@ -282,7 +280,9 @@ describe("App Shell routes", () => {
     const history = mount("/");
     await screen.findByRole("heading", { name: "새 전략" });
     expect(history.location.pathname).toBe("/research/strategies/new");
-    expect(screen.getByRole("tab", { name: "JSON" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "JSON" })).toBeEnabled();
+    expect(screen.getByRole("tab", { name: "Form" })).toBeEnabled();
+    expect(screen.getByRole("tab", { name: "Graph" })).toHaveAttribute(
       "aria-disabled",
       "true",
     );

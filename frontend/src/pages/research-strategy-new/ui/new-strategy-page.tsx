@@ -8,7 +8,10 @@ import {
   RecoveryBanner,
   SnippetCatalog,
   SourceEditor,
+  StrategyProjectionPanel,
   StrategyOutline,
+  PROJECTION_VIEWS,
+  projectStrategySpec,
   saveStatusText,
   saveStatusTone,
   useAutosave,
@@ -21,6 +24,7 @@ import {
   useSnippetInsertion,
   useStrategyDocument,
   type DocumentSource,
+  type StrategyView,
 } from "../../../features/edit-strategy";
 import { t } from "../../../shared/config";
 import { useNavigate, useSearch } from "../../../shared/lib/router";
@@ -56,11 +60,16 @@ export const NewStrategyPage = () => {
     document.compiledVersion === document.sourceVersion
       ? document.compiled
       : null;
+  const projection = projectStrategySpec(document);
+  const availableViews: readonly StrategyView[] = PROJECTION_VIEWS;
+  const requested: StrategyView = search.view ?? document.format;
+  const implemented = availableViews.includes(requested);
+  const view: StrategyView = implemented ? requested : document.format;
   const selectPointer = useCallback(
     (path: string | undefined) => {
       void navigate({
         to: ROUTE,
-        search: { ...search, path },
+        search: { ...search, path, view: undefined },
         replace: true,
       });
     },
@@ -72,7 +81,11 @@ export const NewStrategyPage = () => {
     selectedPointer: search.path,
     onSelectedPointer: selectPointer,
   });
-  const snippets = useSnippetInsertion(document, assist.snippetSource);
+  const snippets = useSnippetInsertion(
+    document,
+    assist.snippetSource,
+    view === document.format,
+  );
   const onOutlineEditorReady = outline.onEditorReady;
   const onSnippetEditorReady = snippets.onEditorReady;
   const onEditorReady = useCallback(
@@ -129,8 +142,19 @@ export const NewStrategyPage = () => {
         onRunBacktest={() => void backtest.run()}
         runDisabled={!backtest.canRun}
         saveTone={saveStatusTone(document, status)}
-        view={document.format}
-        availableViews={[document.format]}
+        view={view}
+        sourceView={document.format}
+        availableViews={availableViews}
+        onViewChange={(next) =>
+          void navigate({
+            to: ROUTE,
+            search: {
+              ...search,
+              view: next === document.format ? undefined : next,
+            },
+            replace: true,
+          })
+        }
         editorActions={
           <DocumentToolbar
             state={document}
@@ -144,6 +168,10 @@ export const NewStrategyPage = () => {
             runStatus={backtest.status}
           />
         }
+        projections={{
+          json: <StrategyProjectionPanel projection={projection} view="json" />,
+          form: <StrategyProjectionPanel projection={projection} view="form" />,
+        }}
         outline={
           <StrategyOutline
             snapshot={outline.snapshot}
@@ -177,6 +205,11 @@ export const NewStrategyPage = () => {
         }
         editor={
           <>
+            {implemented ? null : (
+              <p className="page-state" role="status">
+                {t("page.revision.viewPending")} ({requested.toUpperCase()})
+              </p>
+            )}
             {autosave.recovery ? (
               <RecoveryBanner recovery={autosave.recovery} />
             ) : null}

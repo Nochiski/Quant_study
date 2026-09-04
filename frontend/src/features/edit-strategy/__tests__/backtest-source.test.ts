@@ -16,6 +16,7 @@ const TEXT = 'schema_version: "1.0"\ntitle: t\n';
 
 const outcome = (specHash: string | null, errors = false): CompileOutcome => ({
   spec: errors ? null : SPEC,
+  canonicalJson: errors ? null : JSON.stringify(SPEC),
   specHash,
   schemaVersion: "1.0",
   sourceHash: "s".repeat(64),

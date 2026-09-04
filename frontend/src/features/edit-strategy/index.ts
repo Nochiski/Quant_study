@@ -18,6 +18,16 @@ export {
   type DocumentPhase,
   type DocumentState,
 } from "./model/document-state";
+export {
+  PROJECTION_VIEWS,
+  STRATEGY_VIEWS,
+  type StrategyView,
+} from "./model/strategy-views";
+export {
+  projectStrategySpec,
+  type StrategyProjection,
+  type StrategyProjectionSeed,
+} from "./model/strategy-projection";
 export { useStrategyDocument } from "./model/use-strategy-document";
 export {
   documentSourceKey,
@@ -65,6 +75,7 @@ export { StrategyOutline } from "./ui/strategy-outline";
 export { ContractInspector } from "./ui/contract-inspector";
 export { ExecutionPlanPanel } from "./ui/execution-plan-panel";
 export { SnippetCatalog } from "./ui/snippet-catalog";
+export { StrategyProjectionPanel } from "./ui/strategy-projection-panel";
 export {
   projectContractField,
   projectContractInspector,

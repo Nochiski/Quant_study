@@ -162,12 +162,13 @@ const server = setupServer(
   http.post(`${API}/api/v1/strategy-documents/compile`, async ({ request }) => {
     const body = (await request.json()) as { source: string };
     const title = /title: (.*)/.exec(body.source)?.[1] ?? "";
+    const compiledSpec = spec("s1", 2, title);
     return HttpResponse.json({
       format: "yaml",
       source_hash: "b".repeat(64),
       schema_version: "1.0",
-      spec: spec("s1", 2, title),
-      canonical_json: null,
+      spec: compiledSpec,
+      canonical_json: JSON.stringify(compiledSpec),
       spec_hash: body.source === STORED ? "2".repeat(64) : "9".repeat(64),
       diagnostics: [],
     });
@@ -834,6 +835,119 @@ describe("Strategy Outline route integration (P4-01)", () => {
         ),
       ).toBe("퀄리티 모멘텀"),
     );
+  });
+});
+
+describe("StrategySpec JSON and Form projections (P4-06)", () => {
+  it.each(["/research/strategies/new", "/research/strategies/s1/revisions/2"])(
+    "shows the same backend-owned projections on %s",
+    async (route) => {
+      const user = userEvent.setup();
+      mount(route);
+      await editor();
+
+      await user.click(screen.getByRole("tab", { name: "JSON" }));
+      const json = await screen.findByLabelText("StrategySpec JSON");
+      await waitFor(() => expect(json).toBeVisible());
+      expect(within(json).getByText(/"market": "KRX"/)).toBeInTheDocument();
+      expect(within(json).getByText("현재 문서")).toBeInTheDocument();
+
+      await user.click(screen.getByRole("tab", { name: "Form" }));
+      const form = await screen.findByLabelText("StrategySpec 요약 Form");
+      await waitFor(() => expect(form).toBeVisible());
+      expect(within(form).getByText('"KRX"')).toBeInTheDocument();
+      expect(within(form).getByText("15")).toBeInTheDocument();
+      expect(within(form).queryByRole("textbox")).not.toBeInTheDocument();
+    },
+  );
+
+  it("keeps the exact source, selection, editor identity and undo history across views", async () => {
+    const user = userEvent.setup();
+    mount("/research/strategies/s1/revisions/2");
+    const view = await editor();
+    const edited = `${STORED}description: tab-preserved\n`;
+    replaceText(view, edited);
+    act(() =>
+      view.dispatch({
+        selection: { anchor: edited.indexOf("tab-preserved") + 3 },
+        annotations: Transaction.addToHistory.of(false),
+      }),
+    );
+    const selection = view.state.selection.main.anchor;
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+
+    await user.click(screen.getByRole("tab", { name: "Form" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("StrategySpec 요약 Form")).toBeVisible(),
+    );
+    const hiddenContent = globalThis.document.querySelector(".cm-content");
+    expect(hiddenContent).not.toBeNull();
+    expect(EditorView.findFromDOM(hiddenContent as HTMLElement)).toBe(view);
+    expect(view.state.doc.toString()).toBe(edited);
+    expect(view.state.selection.main.anchor).toBe(selection);
+
+    await user.click(screen.getByRole("tab", { name: "YAML" }));
+    await waitFor(() =>
+      expect(globalThis.document.querySelector(".cm-content")).toBeVisible(),
+    );
+    expect(
+      EditorView.findFromDOM(globalThis.document.querySelector(".cm-content")!),
+    ).toBe(view);
+    expect(view.state.doc.toString()).toBe(edited);
+    expect(view.state.selection.main.anchor).toBe(selection);
+    act(() => expect(undo(view)).toBe(true));
+    expect(view.state.doc.toString()).toBe(STORED);
+  });
+
+  it("keeps a stored JSON document as the editable source while Form stays read-only", async () => {
+    const jsonSource = '{"schema_version":"1.0","title":"JSON source"}';
+    server.use(
+      http.get(
+        `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
+        () =>
+          HttpResponse.json({
+            ...document("s1", 2, jsonSource, "JSON source"),
+            format: "json",
+          }),
+      ),
+    );
+    const user = userEvent.setup();
+    mount("/research/strategies/s1/revisions/2");
+    const view = await editor();
+    expect(view.state.doc.toString()).toBe(jsonSource);
+    expect(screen.getByRole("tab", { name: "JSON" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    await user.click(screen.getByRole("tab", { name: "Form" }));
+    const form = await screen.findByLabelText("StrategySpec 요약 Form");
+    expect(form).toBeVisible();
+    expect(within(form).queryByRole("textbox")).not.toBeInTheDocument();
+    expect(view.state.doc.toString()).toBe(jsonSource);
+
+    await user.click(screen.getByRole("tab", { name: "JSON" }));
+    expect(view.state.doc.toString()).toBe(jsonSource);
+  });
+
+  it("labels the same-document last valid projection stale and never enables execution", async () => {
+    const user = userEvent.setup();
+    mount("/research/strategies/s1/revisions/2");
+    const view = await editor();
+    replaceText(view, 'schema_version: "1.0"\ntitle: last-valid\n');
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+
+    replaceText(view, 'schema_version: "1.0"\ntitle: [broken\n');
+    await user.click(screen.getByRole("tab", { name: "Form" }));
+    const form = await screen.findByLabelText("StrategySpec 요약 Form");
+    expect(within(form).getByText("STALE")).toBeInTheDocument();
+    expect(within(form).getByText('"last-valid"')).toBeInTheDocument();
+    expect(within(form).getByRole("status")).toHaveTextContent(
+      "저장·실행에는 사용되지 않습니다",
+    );
+    expect(saveButton()).toBeDisabled();
+    for (const run of screen.getAllByRole("button", { name: /백테스트 실행/ }))
+      expect(run).toBeDisabled();
   });
 });
 

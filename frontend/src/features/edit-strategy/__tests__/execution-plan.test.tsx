@@ -166,6 +166,7 @@ const currentState = (): DocumentState => ({
   compiledVersion: 2,
   compiled: {
     spec: SPEC,
+    canonicalJson: JSON.stringify(SPEC),
     specHash: "s".repeat(64),
     schemaVersion: "1.0",
     sourceHash: "x".repeat(64),

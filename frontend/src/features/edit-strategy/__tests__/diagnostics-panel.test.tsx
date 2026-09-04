@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -167,6 +167,70 @@ describe("DiagnosticsPanel", () => {
     expect(copy).toBeEnabled();
     await user.click(copy);
     expect(writeText).toHaveBeenCalledWith(problem.pointer);
+  });
+
+  it("renders the empty root pointer explicitly and copies its exact empty value", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    render(
+      <DiagnosticsPanel
+        diagnostics={[located({ pointer: "", nodeId: null })]}
+        stale={false}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    const copy = screen.getByRole("button", {
+      name: 'JSON Pointer 복사: "" (문서 루트)',
+    });
+    expect(screen.getByRole("region", { name: "문제" })).toHaveTextContent(
+      '"" (문서 루트)',
+    );
+    await user.click(copy);
+    expect(writeText).toHaveBeenCalledWith("");
+  });
+
+  it("keeps clipboard feedback owned by the latest copy request", async () => {
+    const user = userEvent.setup();
+    let rejectPointer!: (reason?: unknown) => void;
+    let resolveNode!: () => void;
+    const pointerCopy = new Promise<void>((_, reject) => {
+      rejectPointer = reject;
+    });
+    const nodeCopy = new Promise<void>((resolve) => {
+      resolveNode = resolve;
+    });
+    const problem = located();
+    Object.defineProperty(navigator, "clipboard", {
+      value: {
+        writeText: vi.fn((value: string) =>
+          value === problem.pointer ? pointerCopy : nodeCopy,
+        ),
+      },
+      configurable: true,
+    });
+    render(
+      <DiagnosticsPanel
+        diagnostics={[problem]}
+        stale={false}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /JSON Pointer 복사/ }));
+    await user.click(screen.getByRole("button", { name: /노드 ID 복사/ }));
+    await act(async () => resolveNode());
+    expect(screen.getAllByRole("status").at(-1)).toHaveTextContent(
+      `노드 ID ${problem.nodeId!} 복사됨`,
+    );
+    await act(async () => rejectPointer(new Error("late failure")));
+    expect(screen.getAllByRole("status").at(-1)).toHaveTextContent(
+      `노드 ID ${problem.nodeId!} 복사됨`,
+    );
   });
 
   it("announces clipboard failures", async () => {

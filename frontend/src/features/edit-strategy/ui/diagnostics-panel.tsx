@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import { t, type MessageKey } from "../../../shared/config";
 import type {
@@ -47,7 +47,8 @@ const ProblemRow = ({
   const position = diagnostic.range
     ? `${diagnostic.range.start.line + 1}:${diagnostic.range.start.column + 1}`
     : null;
-  const pointerLabel = diagnostic.pointer || "/";
+  const pointerLabel =
+    diagnostic.pointer === "" ? t("problems.rootPointer") : diagnostic.pointer;
   const nodeId = diagnostic.nodeId;
   const severityLabel =
     diagnostic.severity === "error"
@@ -121,6 +122,7 @@ export const DiagnosticsPanel = ({
     DEFAULT_PROBLEM_FILTERS,
   );
   const [copyState, setCopyState] = useState<CopyState>({ status: "idle" });
+  const copyRequest = useRef(0);
   const projection = useMemo(
     () => projectProblems(diagnostics, filters),
     [diagnostics, filters],
@@ -132,11 +134,13 @@ export const DiagnosticsPanel = ({
     setFilters((current) => ({ ...current, [kind]: !current[kind] }));
   };
   const copy = async (value: string, label: string) => {
+    const request = ++copyRequest.current;
     try {
       await navigator.clipboard.writeText(value);
-      setCopyState({ status: "done", label });
+      if (request === copyRequest.current)
+        setCopyState({ status: "done", label });
     } catch {
-      setCopyState({ status: "failed" });
+      if (request === copyRequest.current) setCopyState({ status: "failed" });
     }
   };
   const sections = [

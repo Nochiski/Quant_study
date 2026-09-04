@@ -1116,6 +1116,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File docs/planning/strategy-workb
 - active status는 `IN_PROGRESS`, `SELF_CHECK`, `IN_REVIEW`, `CHANGES_REQUESTED`, `APPROVED`다.
 - 기본 active PR은 하나다.
 - Phase 1과 Phase 1.5의 병렬 window처럼 `PLAN.md`에 명시되고 별도 worktree를 쓰는 경우 최대 두 개까지 허용한다.
+- 같은 worktree 위에 순서대로 쌓인 stack(예: P2-01→P2-02→P2-03→P3-01→P3-02)은 `parallel_window`에 전부 나열했을 때 한 line으로 보고 두 개 제한을 넘겨 리뷰를 병행할 수 있다. merge는 stack 아래부터 순서대로 하며, 아래 PR이 CHANGES_REQUESTED가 되면 위 PR로 전진 병합한다.
 - reviewer는 tracker를 수정하지 않고 구현 책임자가 verdict와 CI 결과를 반영한다.
 
 ## 14. Phase 종료 Gate

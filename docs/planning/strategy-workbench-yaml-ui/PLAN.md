@@ -115,7 +115,7 @@ Phase exit:
 - [x] YAML-first 전환과 no-code 범위가 roadmap/rules에 반영되었다.
 - [x] Frontend editor와 backend YAML 1.2 parser가 결정되었다.
 - [x] Frontend router와 route composition이 결정되었다.
-- [ ] Phase 종료 SoT·책임분리 점검 서브에이전트 결과 기록 (사용자 지시, 2026-09-04)
+- [x] Phase 종료 SoT·책임분리 점검 서브에이전트 결과 기록 (사용자 지시, 2026-09-04) — 2026-09-04 audit: 결함 0, 문서 액션은 `.claude/rules/strategy-workbench-sot.md` 4행 추가, WORKFLOW 2.6/P1-01/P1-02, roadmap 5·7.1·9.1, `frontend-testing.md` manifest 규칙으로 반영
 
 ## P1 — Backend Authoring Contract
 
@@ -298,3 +298,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File docs/planning/strategy-workb
 ```
 
 Reviewer는 이 파일을 수정하지 않는다. 구현 책임자가 reviewer verdict와 CI 결과를 반영한다.
+
+CI 게이트(WORKFLOW 12절 9번)는 origin push 전까지 로컬에서 같은 범위의 게이트(backend pytest/ruff/pyright,
+frontend typecheck/lint/vitest/build, generated diff clean)로 대체한다. push 시점에 원격 CI 결과를
+`CI` 열에 소급 기록한다. (2026-09-04 결정)

@@ -3,6 +3,8 @@ paths:
   - "backend/**"
   - "frontend/**"
   - "docs/superpowers/specs/*strategy-workbench*"
+  - "docs/superpowers/specs/2026-09-04-*-adr.md"
+  - "docs/planning/strategy-workbench-yaml-ui/**"
 ---
 
 # Strategy Workbench의 사실은 한 곳만 소유한다
@@ -22,6 +24,10 @@ paths:
 | 실험·trial 상태 | Experiment Repository | UI는 query cache로 구독 |
 | 후보 선택 | 명시적인 사용자 selection record | composite score는 view일 뿐 |
 | 미저장 편집 상태·그래프 좌표 | frontend feature/local UI state | 서버 정본으로 승격 금지 |
+| 저장된 authoring source 텍스트·`source_hash` | strategy revision envelope (`source`, `source_hash`) | 서버는 exact text를 그대로 보관, UI는 표시·편집 시작점으로만 사용 |
+| YAML 1.2 허용/거부 집합 | `backend/tests/fixtures/strategy_documents/yaml12/manifest.json` | backend codec test와 frontend `yaml` cross-runtime test가 같은 manifest를 실행 |
+| 실행 차단(blocking) 판정 | backend compile diagnostics의 error severity | frontend syntax marker는 advisory, 실행 가능 여부를 판단하지 않음 |
+| URL 선택 상태(view/path/date/security) | TanStack Router search (`validateSearch`) | widget은 읽기만, 기본값은 URL에 쓰지 않음 |
 
 ## 금지
 

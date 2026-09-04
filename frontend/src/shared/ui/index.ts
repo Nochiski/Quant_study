@@ -7,3 +7,4 @@ export { SplitHandle } from "./split-handle";
 export { panelId, tabId } from "./tab-ids";
 export { Tabs, type TabItem } from "./tabs";
 export { Tooltip } from "./tooltip";
+export type { CodeEditorHandle } from "./code-editor";

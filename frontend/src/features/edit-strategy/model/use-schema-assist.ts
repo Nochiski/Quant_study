@@ -11,6 +11,7 @@ import type {
   EditorCompletionSource,
   EditorHoverSource,
 } from "../../../shared/ui/code-editor";
+import type { SnippetCatalogSource } from "./canonical-snippets";
 import type { DocumentState } from "./document-state";
 import type {
   ContractInspectorSource,
@@ -35,6 +36,8 @@ export type SchemaAssist = {
   schema: JsonSchema | null;
   /** Same query-owned metadata, exposed intact for the read-only Contract Inspector. */
   inspectorSource: ContractInspectorSource;
+  /** Runtime-schema projection plus only the factor catalog pinned to that contract version. */
+  snippetSource: SnippetCatalogSource;
 };
 
 /** One page holds every mock field/factor today; a larger catalog is paged by search (P6). */
@@ -100,6 +103,25 @@ export const useSchemaAssist = (state: DocumentState): SchemaAssist => {
     factors.isPending;
   const schemaVersion = schema.data?.schema_version ?? null;
   const runtimeSchema = (schemaData as JsonSchema | undefined) ?? null;
+  const snippetSource = useMemo<SnippetCatalogSource>(
+    () => ({
+      schema: assistMetadata.schema,
+      factors: assistMetadata.catalogs.factors,
+      status:
+        schema.isPending || contract.isPending || factors.isPending
+          ? "loading"
+          : assistMetadata.schema === null
+            ? "unavailable"
+            : "ready",
+    }),
+    [
+      assistMetadata.catalogs.factors,
+      assistMetadata.schema,
+      contract.isPending,
+      factors.isPending,
+      schema.isPending,
+    ],
+  );
   const inspectorSource = useMemo<ContractInspectorSource>(
     () => ({
       schema: schema.data ? schema.data : null,
@@ -153,6 +175,7 @@ export const useSchemaAssist = (state: DocumentState): SchemaAssist => {
       schemaVersion,
       schema: runtimeSchema,
       inspectorSource,
+      snippetSource,
     }),
     [
       completionSource,
@@ -160,6 +183,7 @@ export const useSchemaAssist = (state: DocumentState): SchemaAssist => {
       inspectorSource,
       loading,
       schemaVersion,
+      snippetSource,
       runtimeSchema,
     ],
   );

@@ -311,6 +311,49 @@ const legacyLink = () =>
   )!;
 
 describe("document routes (P2-04)", () => {
+  it.each([
+    ["/research/strategies/new", 'schema_version: "1.0"\ntitle: ""\n'],
+    ["/research/strategies/s1/revisions/2", STORED],
+  ])("wires a runtime-schema snippet through %s", async (route, prefix) => {
+    server.use(
+      http.get(`${API}/api/v1/strategy-documents/schema`, () =>
+        HttpResponse.json({
+          schema: {
+            type: "object",
+            properties: {
+              signal: {
+                type: "object",
+                properties: {
+                  method: { type: "string", default: "weighted_sum" },
+                },
+              },
+            },
+            additionalProperties: false,
+          },
+          schema_hash: "h".repeat(64),
+          schema_version: "1.0",
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    mount(route);
+    const view = await editor();
+    act(() => view.dispatch({ selection: { anchor: view.state.doc.length } }));
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "signal · 현재 커서에 삽입",
+      }),
+    );
+
+    expect(view.state.doc.toString()).toBe(
+      `${prefix}signal:\n  method: weighted_sum`,
+    );
+    expect(
+      screen.getByText(/YAML 문법 검사를 통과했습니다/),
+    ).toBeInTheDocument();
+  });
+
   it("loads the exact stored source of a revision into the editor as the draft base", async () => {
     mount("/research/strategies/s1/revisions/2?view=diff");
     expect(

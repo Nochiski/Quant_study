@@ -64,6 +64,7 @@ export { SourceEditor } from "./ui/source-editor";
 export { StrategyOutline } from "./ui/strategy-outline";
 export { ContractInspector } from "./ui/contract-inspector";
 export { ExecutionPlanPanel } from "./ui/execution-plan-panel";
+export { SnippetCatalog } from "./ui/snippet-catalog";
 export {
   projectContractField,
   projectContractInspector,
@@ -75,6 +76,21 @@ export {
   useOutlineNavigation,
   type StrategyOutlineNavigation,
 } from "./model/use-outline-navigation";
+export {
+  useSnippetInsertion,
+  type SnippetFeedback,
+  type SnippetInsertion,
+} from "./model/use-snippet-insertion";
+export {
+  buildCanonicalSnippetCatalog,
+  planSnippetEdit,
+  SNIPPET_CATEGORIES,
+  type CanonicalSnippet,
+  type SnippetCatalogSource,
+  type SnippetCategory,
+  type SnippetEditFailure,
+  type SnippetEditResult,
+} from "./model/canonical-snippets";
 export {
   factorIndexAtPointer,
   factorNodePointer,

@@ -263,8 +263,8 @@
   flex: 1;
 }
 
-.ide__section-status {
-  color: var(--status-ok);
+.ide__section-status--pending {
+  color: var(--text-subtle);
 }
 
 /* snippets */

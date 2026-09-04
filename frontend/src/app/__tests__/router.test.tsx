@@ -4,7 +4,15 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, delay, http } from "msw";
 import { setupServer } from "msw/node";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import { App } from "../app";
 
@@ -108,6 +116,7 @@ beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
   cleanup();
   server.resetHandlers();
+  vi.unstubAllGlobals();
 });
 afterAll(() => server.close());
 
@@ -127,6 +136,33 @@ const mount = (initial: string, operationsEnabled = false) => {
 };
 
 describe("App Shell routes", () => {
+  it("starts compact on a narrow viewport and lets the control visibly expand it", async () => {
+    const list = {
+      matches: true,
+      media: "(max-width: 1279px)",
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    };
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => list),
+    );
+    const user = userEvent.setup();
+    mount("/research/strategies/new");
+    await waitFor(() =>
+      expect(globalThis.document.querySelector(".app-shell")).not.toBeNull(),
+    );
+    const shell = globalThis.document.querySelector(".app-shell")!;
+    const button = globalThis.document.querySelector<HTMLButtonElement>(
+      ".app-shell__collapse button",
+    )!;
+    expect(shell).toHaveClass("app-shell--collapsed");
+    expect(button).toHaveAttribute("aria-expanded", "false");
+    await user.click(button);
+    expect(shell).not.toHaveClass("app-shell--collapsed");
+    expect(button).toHaveAttribute("aria-expanded", "true");
+  });
+
   it("opens a saved revision directly and restores the typed view from the URL", async () => {
     const history = mount(
       "/research/strategies/s1/revisions/2?view=diff&path=%2Frisk",

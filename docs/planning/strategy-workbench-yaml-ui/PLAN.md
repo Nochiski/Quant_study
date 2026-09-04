@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: CHANGES_REQUESTED
+project_status: SELF_CHECK
 current_phase: P4
 current_pr: P4-06
 active_prs: [P4-06]
 parallel_window: [P4-06]
-last_updated: 2026-09-05T07:14:39+09:00
+last_updated: 2026-09-05T07:23:06+09:00
 planned_prs: 50
 merged_prs: 38
 approved_prs: 38
@@ -22,13 +22,13 @@ progress_percent: 76
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `CHANGES_REQUESTED` |
+| Project status | `SELF_CHECK` |
 | Current phase | `P4` |
 | Current/next PR | `P4-06` |
 | Active PR | `P4-06` |
 | Progress | `38 / 50 merged (76%)` |
 | Approved | `38 / 50` |
-| Aggregated at | `2026-09-05 07:14 KST` |
+| Aggregated at | `2026-09-05 07:23 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -76,7 +76,7 @@ progress_percent: 76
 | P1.5 | Backtest Correctness Gate | 5 | 5 | `MERGED` |
 | P2 | App Shell and visual foundation | 4 | 4 | `MERGED` |
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
-| P4 | Outline, Contract, Projections | 10 | 7 | `CHANGES_REQUESTED` |
+| P4 | Outline, Contract, Projections | 10 | 7 | `SELF_CHECK` |
 | P5 | Truthful Trace UI | 3 | 0 | `WAITING` |
 | P6 | Professional release and migration | 7 | 1 | `WAITING` |
 | **Total** |  | **50** | **38** | **76%** |
@@ -86,16 +86,16 @@ progress_percent: 76
 
 | 항목 | 값 |
 |---|---|
-| PR | `P4-06` Read-only canonical JSON과 Form projection CHANGES_REQUESTED |
+| PR | `P4-06` Read-only canonical JSON과 Form projection SELF_CHECK |
 | Intent | 현재 backend compile이 확정한 StrategySpec을 JSON과 전문 트레이더용 요약 Form으로 읽기 전용 투영한다 |
 | Acceptance | current valid canonical JSON; metadata/data/portfolio/risk/execution Form; invalid source의 last-valid stale 표시; view 전환 뒤 source·selection·undo 보존; new/revision 동일 동작 |
 | Non-goals | Form 편집·전체 재직렬화, YAML comment/order 변경, Graph(P4-07), Diff(P4-08), validation/hash 계산 복제 |
 | Branch/worktree | `feat/p4-06-json-form-projections` (`Quant_study-p4-06`) |
 | Base SHA | `20491b8` (P4-10 merge main) |
-| Head SHA | review HEAD `8cccace`; 수정 중 |
-| Diff stat | review HEAD 20 files, +890/-78; 최종 freeze 뒤 재산정 |
-| Focused tests | projection model·document epoch·YAML/JSON source·view lifecycle·new/revision route 54 passed |
-| Full gate | frontend 329 passed; typecheck·lint·build; OpenAPI/generated SDK semantic clean |
+| Head SHA | review fix freeze `2dac1c2` |
+| Diff stat | code 21 files, +924/-70; production/i18n +471/-62, tests +453/-8; 12절 size exception |
+| Focused tests | completeness·Save/Run/Plan·exact canonical·projection·YAML/JSON lifecycle·routes 84 passed |
+| Full gate | frontend 339 passed; typecheck·lint·build; OpenAPI/generated SDK semantic clean |
 
 ---
 
@@ -201,7 +201,7 @@ Phase exit:
 | [x] | `P4-03` | Problems panel, filter, editor jump | P3-04 | `MERGED` | [#55](https://github.com/Nochiski/Quant_study/pull/55) · `review_p4_03` APPROVE |
 | [x] | `P4-04` | Backend Execution Plan query·version gate·source mapping model | P3-05, P4-02 | `MERGED` | [#57](https://github.com/Nochiski/Quant_study/pull/57) · `review_p4_04` APPROVE · `25d8b45` |
 | [x] | `P4-05` | Canonical node snippet insertion | P3-02, P1-05 | `MERGED` | [#59](https://github.com/Nochiski/Quant_study/pull/59) · `review_p4_05` APPROVE · `191b902` |
-| [ ] | `P4-06` | Read-only canonical JSON과 Form projection | P3-05 | `CHANGES_REQUESTED` | [#61](https://github.com/Nochiski/Quant_study/pull/61) · P1 3/P2 1 수정 중 |
+| [ ] | `P4-06` | Read-only canonical JSON과 Form projection | P3-05 | `SELF_CHECK` | [#61](https://github.com/Nochiski/Quant_study/pull/61) · fix freeze `2dac1c2`; 재검토 준비 |
 | [ ] | `P4-07` | Read-only FactorGraph DAG projection | P4-01, P3-05 | `WAITING` | — |
 | [ ] | `P4-08` | Source/semantic/revision Diff와 conflict resolution | P1-08, P3-07 | `WAITING` | — |
 | [x] | `P4-09` | Execution Plan 표시와 YAML/graph selection 연동 | P4-04, P4-01 | `MERGED` | [#58](https://github.com/Nochiski/Quant_study/pull/58) · `review_p4_09` APPROVE · `8a2ebfc` |
@@ -331,6 +331,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | P4-06 review fix `2dac1c2`: `isCompleteCompileOutcome/currentCompile`을 completeness 단일 owner로 두어 spec·canonical·hash·schema 누락 시 phase·Save·Backtest·Execution Plan·projection을 전부 차단. JSON은 backend bytes를 무변형 표시하고 saved seed 직렬화를 제거했으며 Form에서 draft/0 identity를 숨김. 필드별 누락·warning-only·actual canonical shape·route mock 회귀 포함 focused 84, frontend 339·typecheck·lint·build·generated clean 후 SELF_CHECK 전환 | P1 3/P2 1 전부 회귀 고정·canonical SoT·document/projection/route 책임분리 |
 | 2026-09-05 KST | Codex | `review_p4_06`이 P0 0/P1 3/P2 1로 REQUEST_CHANGES. canonical 누락 compile을 projection만 막고 Save·Backtest·Execution Plan은 허용하는 completeness 판정 drift, backend canonical의 parse/stringify 및 saved seed 재생성, review HEAD/size 기록 불일치와 revision Form의 draft/0 identity 노출을 확인해 CHANGES_REQUESTED 전환 | compile completeness 단일 SoT·canonical bytes 무변형·revision provenance·정확한 freeze gate |
 | 2026-09-05 KST | Codex | P4-06 PR [#61](https://github.com/Nochiski/Quant_study/pull/61)을 공개하고 code freeze `84dadf0`, 전체 frontend 329 tests와 20 files +889/-78 size breakdown을 본문에 고정해 fresh review-only agent `review_p4_06` 검토로 IN_REVIEW 전환 | PR별 독립 reviewer 정확히 1명·13.3~13.4 review gate·12절 size exception |
 | 2026-09-05 KST | Codex | P4-06 구현을 `84dadf0`에 freeze: backend compile의 canonical JSON·StrategySpec만 읽는 JSON/Form projection, same-document last-valid stale 표시, 저장 revision seed, YAML/JSON source view와 CodeMirror의 source·selection·undo 보존을 new/revision 양쪽에 연결. focused 54·frontend 329·typecheck·lint·build·generated clean 후 SELF_CHECK 전환. 총 860줄은 production/i18n 약 500줄과 state·route·접근성 회귀 약 360줄이며 projection·editor lifecycle을 분리하면 acceptance가 검증되지 않아 12절 size exception 기록 | canonical/hash backend SoT·projection/edit/view 책임분리·P4-06 acceptance·12절 size exception |

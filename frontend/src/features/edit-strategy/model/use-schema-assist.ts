@@ -24,6 +24,8 @@ export type SchemaAssist = {
   hoverSource: EditorHoverSource;
   /** True while any of the schema, contract or catalogs is still loading. */
   loading: boolean;
+  /** Schema version the runtime schema declares; null until loaded. */
+  schemaVersion: string | null;
 };
 
 /** One page holds every mock field/factor today; a larger catalog is paged by search (P6). */
@@ -74,8 +76,9 @@ export const useSchemaAssist = (state: DocumentState): SchemaAssist => {
     contract.isPending ||
     fields.isPending ||
     factors.isPending;
+  const schemaVersion = schema.data?.schema_version ?? null;
   return useMemo(
-    () => ({ completionSource, hoverSource, loading }),
-    [completionSource, hoverSource, loading],
+    () => ({ completionSource, hoverSource, loading, schemaVersion }),
+    [completionSource, hoverSource, loading, schemaVersion],
   );
 };

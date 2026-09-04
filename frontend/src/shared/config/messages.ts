@@ -361,6 +361,14 @@ const ko = {
   "ide.meta.schemaVersion": "schema",
   "ide.meta.sourceHash": "source hash",
   "ide.meta.specHash": "spec hash",
+  "recovery.title": "복구본",
+  "recovery.savedAt": "로컬 저장",
+  "recovery.diff": "서버 원본 대비 +{added} / −{removed} 줄",
+  "recovery.schemaMismatch":
+    "복구본의 schema {draft}이(가) 현재와 달라 편집기에 불러올 수 없습니다. 원문을 내려받으세요.",
+  "recovery.restore": "복구본 불러오기",
+  "recovery.discard": "복구본 삭제",
+  "recovery.download": "원문 다운로드",
 } as const;
 
 export type MessageKey = keyof typeof ko;
@@ -732,6 +740,14 @@ export const messages = {
     "ide.meta.schemaVersion": "schema",
     "ide.meta.sourceHash": "source hash",
     "ide.meta.specHash": "spec hash",
+    "recovery.title": "Recovered draft",
+    "recovery.savedAt": "Saved locally",
+    "recovery.diff": "+{added} / −{removed} lines vs the server original",
+    "recovery.schemaMismatch":
+      "The draft targets schema {draft}, not the current one, so it cannot be loaded into the editor. Download the raw text.",
+    "recovery.restore": "Restore draft",
+    "recovery.discard": "Discard draft",
+    "recovery.download": "Download raw text",
   } satisfies Record<MessageKey, string>,
 } as const;
 

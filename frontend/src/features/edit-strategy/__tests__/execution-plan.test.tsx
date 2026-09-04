@@ -182,6 +182,8 @@ const explanation = (graph: FactorGraphRequest["graph"]): FactorExplanation => {
     minimum_history_sessions: index === 0 ? 1 : 252,
   }));
   return {
+    registry_version: "registry-v1",
+    data_snapshot_id: "dataset-v1",
     validation: {
       valid: true,
       issues: [],
@@ -259,11 +261,8 @@ describe("execution plan orchestration", () => {
     expect(requests[0]).toMatchObject({
       parameter_ids: [],
       factor_ids: ["momentum", "quality"],
-      fields: [
-        { field_id: "price.close", unit: "KRW" },
-        { field_id: "financial.book_equity", unit: "KRW" },
-      ],
     });
+    expect(requests[0]).not.toHaveProperty("fields");
     expect(requests.map((request) => request.graph.output_node_id)).toEqual([
       "mom_252",
       "book",
@@ -276,7 +275,7 @@ describe("execution plan orchestration", () => {
     }
   });
 
-  it("blocks stale specs, incomplete catalogs and every metadata version drift", () => {
+  it("blocks stale specs and every input metadata version drift", () => {
     const stale = {
       ...currentState(),
       sourceVersion: 3,
@@ -315,30 +314,48 @@ describe("execution plan orchestration", () => {
         },
       }),
     ).toMatchObject({ status: "incompatible", resource: "dataset" });
-    expect(
-      prepareExecutionPlans(currentState(), {
-        ...METADATA,
-        equityCatalog: {
-          ...EQUITY_CATALOG,
-          fields: EQUITY_CATALOG.fields.slice(0, 1),
-          page_count: 2,
+    const nextRuntime: ContractInspectorSource = {
+      ...METADATA,
+      schema: {
+        ...METADATA.schema!,
+        schema_hash: "schema-v2",
+        schema_version: "2.0",
+      },
+      contract: {
+        ...METADATA.contract!,
+        contract: {
+          ...METADATA.contract!.contract,
+          schema_hash: "schema-v2",
+          schema_version: "2.0",
         },
-      }),
-    ).toEqual({
-      status: "metadata-incomplete",
-      resource: "equity-catalog",
-      missingIds: ["financial.book_equity"],
+      },
+    };
+    expect(prepareExecutionPlans(currentState(), nextRuntime)).toMatchObject({
+      status: "incompatible",
+      resource: "schema-contract",
+      expected: "2.0",
+      actual: "1.0:1.0",
     });
+    const { result } = renderHook(
+      () => useExecutionPlans(currentState(), nextRuntime),
+      { wrapper: wrapper() },
+    );
+    expect(result.current).toMatchObject({
+      status: "incompatible",
+      resource: "schema-contract",
+    });
+    expect(requests).toHaveLength(0);
   });
 
-  it("fails closed when the explain response was compiled by another registry", async () => {
+  it("checks response provenance even when no plan was produced", async () => {
     server.use(
       http.post(`${API}/api/v1/factors/explain`, async ({ request }) => {
         const body = (await request.json()) as FactorGraphRequest;
         const payload = explanation(body.graph);
         return HttpResponse.json({
           ...payload,
-          plan: { ...payload.plan!, registry_version: "registry-v2" },
+          registry_version: "registry-v2",
+          plan: null,
         });
       }),
     );
@@ -355,6 +372,59 @@ describe("execution plan orchestration", () => {
         actual: "registry-v2",
       }),
     );
+  });
+
+  it("fails closed when backend field metadata came from another dataset", async () => {
+    server.use(
+      http.post(`${API}/api/v1/factors/explain`, async ({ request }) => {
+        const body = (await request.json()) as FactorGraphRequest;
+        return HttpResponse.json({
+          ...explanation(body.graph),
+          data_snapshot_id: "dataset-v2",
+        });
+      }),
+    );
+    const { result } = renderHook(
+      () => useExecutionPlans(currentState(), METADATA),
+      { wrapper: wrapper() },
+    );
+
+    await waitFor(() =>
+      expect(result.current).toMatchObject({
+        status: "incompatible",
+        resource: "dataset",
+        expected: "dataset-v1",
+        actual: "dataset-v2",
+      }),
+    );
+  });
+
+  it("does not start a network request for a current invalid document", () => {
+    const state = {
+      ...currentState(),
+      compiled: {
+        ...currentState().compiled!,
+        spec: null,
+        specHash: null,
+        diagnostics: [
+          {
+            code: "strategy.invalid",
+            kind: "semantic" as const,
+            severity: "error" as const,
+            pointer: "/factors",
+            message: "invalid",
+            range: null,
+          },
+        ],
+      },
+      phase: "semantic-invalid" as const,
+    };
+    const { result } = renderHook(() => useExecutionPlans(state, METADATA), {
+      wrapper: wrapper(),
+    });
+
+    expect(result.current).toEqual({ status: "blocked", reason: "invalid" });
+    expect(requests).toHaveLength(0);
   });
 
   it("cancels in-flight explain requests when the current spec becomes stale", async () => {

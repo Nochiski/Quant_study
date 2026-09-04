@@ -13,6 +13,7 @@ from strategy_workbench.domain.factor.facade.planning import (
 from strategy_workbench.domain.factor.facade.registry import FactorRegistry
 from strategy_workbench.domain.factor.facade.validation import (
     FactorGraphValidation,
+    required_field_ids,
     validate_factor_graph,
 )
 
@@ -23,6 +24,7 @@ from ._models import (
     FactorPreview,
     FactorPreviewRequest,
 )
+from .ports.outgoing.factor_metadata import FactorMetadataPort, FactorMetadataSnapshot
 from .ports.outgoing.factor_observations import (
     FactorObservationPort,
     FactorObservationQuery,
@@ -30,7 +32,7 @@ from .ports.outgoing.factor_observations import (
 
 
 class FactorSnapshotMismatchError(ValueError):
-    """The client expected a different data snapshot than the adapter actually serves."""
+    """Expected factor metadata or client provenance differs from observation data."""
 
     def __init__(self, *, expected: str, actual: str) -> None:
         super().__init__(
@@ -51,27 +53,40 @@ class FactorResearchService:
     def __init__(
         self,
         registry: FactorRegistry,
+        metadata_source: FactorMetadataPort,
         observation_source: FactorObservationPort,
     ) -> None:
         self._registry = registry
+        self._metadata_source = metadata_source
         self._observation_source = observation_source
 
     def catalog(self, query: FactorCatalogQuery | None = None) -> FactorCatalog:
         return build_factor_catalog(self._registry, query or FactorCatalogQuery())
 
     def validate(self, request: FactorGraphRequest) -> FactorGraphValidation:
-        return validate_factor_graph(
+        validation, _fields = self._validate_request(request)
+        return validation
+
+    def _validate_request(
+        self, request: FactorGraphRequest
+    ) -> tuple[FactorGraphValidation, FactorMetadataSnapshot]:
+        metadata = self._metadata_source.resolve_factor_fields(required_field_ids(request.graph))
+        validation = validate_factor_graph(
             request.graph,
-            fields=request.fields,
+            fields=metadata.fields,
             parameter_ids=request.parameter_ids,
             factor_ids=self._known_factor_ids(request.factor_ids),
             subgraph_ids=request.subgraph_ids,
+            require_field_metadata=True,
         )
+        return validation, metadata
 
     def explain(self, request: FactorGraphRequest) -> FactorExplanation:
-        validation = self.validate(request)
+        validation, metadata = self._validate_request(request)
         if not validation.valid:
             return FactorExplanation(
+                registry_version=self._registry.version,
+                data_snapshot_id=metadata.data_snapshot_id,
                 validation=validation,
                 plan=None,
                 narrative=("Resolve validation errors before compiling the PIT plan.",),
@@ -79,12 +94,14 @@ class FactorResearchService:
         plan = compile_factor_plan(
             request.graph,
             registry_version=self._registry.version,
-            fields=request.fields,
+            fields=metadata.fields,
             parameter_ids=request.parameter_ids,
             factor_ids=self._known_factor_ids(request.factor_ids),
             subgraph_ids=request.subgraph_ids,
         )
         return FactorExplanation(
+            registry_version=self._registry.version,
+            data_snapshot_id=metadata.data_snapshot_id,
             validation=validation,
             plan=plan,
             narrative=(
@@ -97,11 +114,22 @@ class FactorResearchService:
 
     def preview(self, request: FactorPreviewRequest) -> FactorPreview:
         parameter_ids = tuple(item.parameter_id for item in request.parameters)
+        metadata = self._metadata_source.resolve_factor_fields(required_field_ids(request.graph))
+        validation = validate_factor_graph(
+            request.graph,
+            fields=metadata.fields,
+            parameter_ids=parameter_ids,
+            factor_ids=self._known_factor_ids(request.factor_ids),
+            subgraph_ids=request.subgraph_ids,
+            require_field_metadata=True,
+        )
+        if not validation.valid:
+            raise InvalidFactorRequestError(validation)
         try:
             plan = compile_factor_plan(
                 request.graph,
                 registry_version=self._registry.version,
-                fields=request.fields,
+                fields=metadata.fields,
                 parameter_ids=parameter_ids,
                 factor_ids=self._known_factor_ids(request.factor_ids),
                 subgraph_ids=request.subgraph_ids,
@@ -116,6 +144,11 @@ class FactorResearchService:
                 minimum_history_sessions=plan.minimum_history_sessions,
             )
         )
+        if observation_set.data_snapshot_id != metadata.data_snapshot_id:
+            raise FactorSnapshotMismatchError(
+                expected=metadata.data_snapshot_id,
+                actual=observation_set.data_snapshot_id,
+            )
         if (
             request.expected_data_snapshot_id is not None
             and request.expected_data_snapshot_id != observation_set.data_snapshot_id

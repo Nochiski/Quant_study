@@ -70,6 +70,17 @@ def node_dependencies(node: ExpressionNode) -> tuple[str, ...]:
     return ()
 
 
+def required_field_ids(graph: FactorGraph) -> tuple[str, ...]:
+    """Return every observation field the graph reads, including grouping keys."""
+    field_ids: set[str] = set()
+    for node in graph.nodes:
+        if isinstance(node, FieldNode):
+            field_ids.add(node.field_id)
+        elif isinstance(node, GroupNode):
+            field_ids.add(node.group_field_id)
+    return tuple(sorted(field_ids))
+
+
 def validate_factor_graph(
     graph: FactorGraph,
     *,
@@ -77,6 +88,7 @@ def validate_factor_graph(
     parameter_ids: tuple[str, ...] = (),
     factor_ids: tuple[str, ...] = (),
     subgraph_ids: tuple[str, ...] = (),
+    require_field_metadata: bool = False,
 ) -> FactorGraphValidation:
     issues: list[FactorValidationIssue] = []
     nodes = {node.node_id: node for node in graph.nodes}
@@ -116,7 +128,11 @@ def validate_factor_graph(
                         f"node_id={node.node_id!r} input={dependency!r}",
                     )
                 )
-        if isinstance(node, FieldNode) and fields and node.field_id not in field_by_id:
+        if (
+            isinstance(node, FieldNode)
+            and (fields or require_field_metadata)
+            and node.field_id not in field_by_id
+        ):
             issues.append(
                 _issue(
                     "factor.graph.field_missing",
@@ -207,7 +223,12 @@ def validate_factor_graph(
             node = nodes[node_id]
             for dependency in node_dependencies(node):
                 infer(dependency)
-            contract, contract_issues = _infer_contract(node, contracts, field_by_id)
+            contract, contract_issues = _infer_contract(
+                node,
+                contracts,
+                field_by_id,
+                require_field_metadata=require_field_metadata,
+            )
             contracts[node.node_id] = contract
             issues.extend(contract_issues)
 
@@ -216,9 +237,7 @@ def validate_factor_graph(
 
     output_contract = contracts.get(graph.output_node_id)
     minimum_history = output_contract.minimum_history_sessions if output_contract else 0
-    required_fields = tuple(
-        sorted({node.field_id for node in graph.nodes if isinstance(node, FieldNode)})
-    )
+    required_fields = required_field_ids(graph)
     for field_id in required_fields:
         metadata = field_by_id.get(field_id)
         if (
@@ -269,6 +288,8 @@ def _infer_contract(
     node: ExpressionNode,
     contracts: dict[str, NodeContract],
     fields: dict[str, FieldMetadata],
+    *,
+    require_field_metadata: bool,
 ) -> tuple[NodeContract, tuple[FactorValidationIssue, ...]]:
     dependencies = [contracts[dependency] for dependency in node_dependencies(node)]
     issues: list[FactorValidationIssue] = []
@@ -400,7 +421,7 @@ def _infer_contract(
             value_type = NodeValueType.NUMERIC_SERIES
         if isinstance(node, GroupNode):
             group_metadata = fields.get(node.group_field_id)
-            if fields and group_metadata is None:
+            if (fields or require_field_metadata) and group_metadata is None:
                 issues.append(
                     _issue(
                         "factor.graph.group_field_missing",

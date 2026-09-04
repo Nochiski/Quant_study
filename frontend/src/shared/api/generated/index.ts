@@ -138,7 +138,6 @@ export type {
   FieldContract,
   FieldCoverageCapability,
   FieldLag,
-  FieldMetadata,
   FieldNode,
   FieldValueType,
   FloatParameter,

@@ -88,7 +88,11 @@ def build_container(
         strategy_documents=StrategyDocumentService(
             strategy_authoring, strategy_repository, new_id=lambda: str(uuid4())
         ),
-        factor_research=FactorResearchService(factor_registry, equity_data),
+        factor_research=FactorResearchService(
+            factor_registry,
+            metadata_source=equity_data,
+            observation_source=equity_data,
+        ),
         portfolio_design=portfolio_design,
         backtest_runs=BacktestRunService(
             portfolio_design,

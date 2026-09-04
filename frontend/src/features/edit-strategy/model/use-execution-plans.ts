@@ -33,11 +33,6 @@ export type ExecutionPlansState =
   | { status: "metadata-loading" }
   | { status: "metadata-unavailable" }
   | {
-      status: "metadata-incomplete";
-      resource: "equity-catalog";
-      missingIds: string[];
-    }
-  | {
       status: "incompatible";
       resource: "schema-contract" | "dataset" | "factor-registry";
       expected: string;
@@ -48,6 +43,7 @@ export type ExecutionPlansState =
   | {
       status: "ready";
       expectedRegistryVersion: string;
+      expectedDataSnapshotId: string;
       factors: PlannedFactor[];
     };
 
@@ -56,6 +52,7 @@ type PreparedPlans =
   | {
       status: "prepared";
       expectedRegistryVersion: string;
+      expectedDataSnapshotId: string;
       requests: FactorPlanRequest[];
     };
 
@@ -74,9 +71,9 @@ const blockedReason = (
 };
 
 /**
- * Turns one current backend-compiled StrategySpec into factor explain requests. Catalog values
- * only provide backend-owned field metadata; plan order, contracts, history and hashes still
- * come exclusively from the factor explain endpoint.
+ * Turns one current backend-compiled StrategySpec into factor explain requests. Catalogs pin
+ * the expected dataset and registry generations; the backend resolves field metadata and owns
+ * plan order, contracts, history and hashes.
  */
 export const prepareExecutionPlans = (
   state: DocumentState,
@@ -97,6 +94,19 @@ export const prepareExecutionPlans = (
       resource: "schema-contract",
       expected: `${source.schema.schema_version}:${source.schema.schema_hash}`,
       actual: `${source.contract.contract.schema_version}:${source.contract.contract.schema_hash}`,
+    };
+  }
+  const runtimeSchemaVersion = source.schema.schema_version;
+  const compiledSchemaVersion = state.compiled?.schemaVersion ?? null;
+  if (
+    compiledSchemaVersion !== runtimeSchemaVersion ||
+    spec.identity.schema_version !== runtimeSchemaVersion
+  ) {
+    return {
+      status: "incompatible",
+      resource: "schema-contract",
+      expected: runtimeSchemaVersion,
+      actual: `${compiledSchemaVersion ?? "missing"}:${spec.identity.schema_version}`,
     };
   }
   if (source.equityCatalog === null || source.factorCatalog === null) {
@@ -124,44 +134,15 @@ export const prepareExecutionPlans = (
       actual: registryVersion,
     };
   }
-  const availableFieldIds = new Set(
-    source.equityCatalog.fields.map((field) => field.field_id),
-  );
-  const referencedFieldIds = new Set(
-    spec.factors.factors.flatMap((factor) =>
-      factor.graph.nodes.flatMap((node) => {
-        if (node.kind === "field") return [node.field_id];
-        if (node.kind === "group") return [node.group_field_id];
-        return [];
-      }),
-    ),
-  );
-  const missingIds = [...referencedFieldIds]
-    .filter((fieldId) => !availableFieldIds.has(fieldId))
-    .sort();
-  if (missingIds.length > 0) {
-    return {
-      status: "metadata-incomplete",
-      resource: "equity-catalog",
-      missingIds,
-    };
-  }
   return {
     status: "prepared",
     expectedRegistryVersion: registryVersion,
-    requests: buildFactorPlanRequests(spec, source),
+    expectedDataSnapshotId: datasetVersion,
+    requests: buildFactorPlanRequests(spec),
   };
 };
 
-const buildFactorPlanRequests = (
-  spec: StrategySpec,
-  source: ContractInspectorSource,
-): FactorPlanRequest[] => {
-  const fields =
-    source.equityCatalog?.fields.map((field) => ({
-      field_id: field.field_id,
-      unit: field.unit,
-    })) ?? [];
+const buildFactorPlanRequests = (spec: StrategySpec): FactorPlanRequest[] => {
   const parameterIds = (spec.parameters ?? []).map(
     (parameter) => parameter.parameter_id,
   );
@@ -172,7 +153,6 @@ const buildFactorPlanRequests = (
     label: factor.label,
     request: {
       graph: factor.graph,
-      fields,
       parameter_ids: parameterIds,
       factor_ids: factorIds,
       subgraph_ids: [],
@@ -223,12 +203,15 @@ export const useExecutionPlans = (
   const requests = prepared.status === "prepared" ? prepared.requests : [];
   const expectedRegistryVersion =
     prepared.status === "prepared" ? prepared.expectedRegistryVersion : null;
+  const expectedDataSnapshotId =
+    prepared.status === "prepared" ? prepared.expectedDataSnapshotId : null;
   const queries = useQueries({
     queries: requests.map((item) => ({
       queryKey: [
         "factor",
         "explanation",
         expectedRegistryVersion,
+        expectedDataSnapshotId,
         item.request,
       ] as const,
       queryFn: ({ signal }: { signal: AbortSignal }) =>
@@ -239,7 +222,6 @@ export const useExecutionPlans = (
 
   return useMemo(() => {
     if (prepared.status !== "prepared") return prepared;
-    if (queries.some((query) => query.isPending)) return { status: "loading" };
     const failed = queries.find((query) => query.isError);
     if (failed !== undefined) {
       return {
@@ -250,6 +232,7 @@ export const useExecutionPlans = (
             : "factor explain request failed",
       };
     }
+    if (queries.some((query) => query.isPending)) return { status: "loading" };
     if (queries.some((query) => query.data === undefined))
       return { status: "loading" };
     const factors = prepared.requests.map((request, index) => ({
@@ -258,21 +241,41 @@ export const useExecutionPlans = (
     }));
     const drifted = factors.find(
       (factor) =>
-        factor.explanation.plan !== null &&
-        factor.explanation.plan.registry_version !==
-          prepared.expectedRegistryVersion,
+        factor.explanation.registry_version !==
+          prepared.expectedRegistryVersion ||
+        (factor.explanation.plan !== null &&
+          factor.explanation.plan.registry_version !==
+            prepared.expectedRegistryVersion),
     );
-    if (drifted !== undefined && drifted.explanation.plan !== null) {
+    if (drifted !== undefined) {
+      const actualRegistryVersion =
+        drifted.explanation.registry_version !==
+        prepared.expectedRegistryVersion
+          ? drifted.explanation.registry_version
+          : (drifted.explanation.plan?.registry_version ?? null);
       return {
         status: "incompatible",
         resource: "factor-registry",
         expected: prepared.expectedRegistryVersion,
-        actual: drifted.explanation.plan.registry_version,
+        actual: actualRegistryVersion,
+      };
+    }
+    const datasetDrifted = factors.find(
+      (factor) =>
+        factor.explanation.data_snapshot_id !== prepared.expectedDataSnapshotId,
+    );
+    if (datasetDrifted !== undefined) {
+      return {
+        status: "incompatible",
+        resource: "dataset",
+        expected: prepared.expectedDataSnapshotId,
+        actual: datasetDrifted.explanation.data_snapshot_id,
       };
     }
     return {
       status: "ready",
       expectedRegistryVersion: prepared.expectedRegistryVersion,
+      expectedDataSnapshotId: prepared.expectedDataSnapshotId,
       factors,
     };
   }, [prepared, queries]);

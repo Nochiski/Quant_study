@@ -25,8 +25,63 @@ def test_factor_catalog_validate_and_explain_contract() -> None:
     assert validation.status_code == 200
     assert validation.json()["valid"] is True
     assert explanation.status_code == 200
+    assert explanation.json()["registry_version"] == catalog["registry_version"]
+    assert explanation.json()["data_snapshot_id"] == "mock-equity-v0.2-20260903"
     assert explanation.json()["plan"]["as_of_policy"] == "available_date_lte_as_of"
     assert len(explanation.json()["plan"]["plan_hash"]) == 64
+
+
+def test_explain_resolves_numeric_and_group_metadata_inside_the_backend() -> None:
+    client = TestClient(build_http_app())
+    graph = {
+        "nodes": [
+            {"node_id": "close", "field_id": "price.close", "kind": "field"},
+            {
+                "node_id": "neutral",
+                "operator": "neutralize",
+                "input_node_id": "close",
+                "group_field_id": "classification.sector",
+                "kind": "group",
+            },
+        ],
+        "output_node_id": "neutral",
+    }
+
+    valid = client.post("/api/v1/factors/explain", json={"graph": graph})
+    invalid = client.post(
+        "/api/v1/factors/explain",
+        json={
+            "graph": graph
+            | {
+                "nodes": [
+                    graph["nodes"][0],
+                    graph["nodes"][1] | {"group_field_id": "price.market_cap"},
+                ]
+            },
+            # Legacy/untrusted client metadata cannot override the backend data adapter.
+            "fields": [
+                {
+                    "field_id": "price.market_cap",
+                    "unit": "category",
+                    "value_type": "group_series",
+                }
+            ],
+        },
+    )
+
+    assert valid.status_code == 200
+    assert valid.json()["validation"]["valid"] is True
+    assert valid.json()["plan"] is not None
+    assert valid.json()["plan"]["required_field_ids"] == [
+        "classification.sector",
+        "price.close",
+    ]
+    assert invalid.status_code == 200
+    assert invalid.json()["plan"] is None
+    assert invalid.json()["registry_version"] == "factor-registry-v1"
+    assert {issue["code"] for issue in invalid.json()["validation"]["issues"]} == {
+        "factor.graph.group_field_type"
+    }
 
 
 def test_factor_preview_is_deterministic_and_returns_research_diagnostics() -> None:

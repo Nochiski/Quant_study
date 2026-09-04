@@ -1600,6 +1600,10 @@
       },
       "FactorExplanation": {
         "properties": {
+          "data_snapshot_id": {
+            "title": "Data Snapshot Id",
+            "type": "string"
+          },
           "narrative": {
             "items": {
               "type": "string"
@@ -1617,11 +1621,17 @@
               }
             ]
           },
+          "registry_version": {
+            "title": "Registry Version",
+            "type": "string"
+          },
           "validation": {
             "$ref": "#/components/schemas/FactorGraphValidation"
           }
         },
         "required": [
+          "registry_version",
+          "data_snapshot_id",
           "validation",
           "plan",
           "narrative"
@@ -1699,14 +1709,6 @@
               "type": "string"
             },
             "title": "Factor Ids",
-            "type": "array"
-          },
-          "fields": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/FieldMetadata"
-            },
-            "title": "Fields",
             "type": "array"
           },
           "graph": {
@@ -1892,14 +1894,6 @@
               "type": "string"
             },
             "title": "Factor Ids",
-            "type": "array"
-          },
-          "fields": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/FieldMetadata"
-            },
-            "title": "Fields",
             "type": "array"
           },
           "graph": {
@@ -2339,39 +2333,6 @@
           "sessions"
         ],
         "title": "FieldLag",
-        "type": "object"
-      },
-      "FieldMetadata": {
-        "properties": {
-          "available_history_sessions": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Available History Sessions"
-          },
-          "field_id": {
-            "title": "Field Id",
-            "type": "string"
-          },
-          "unit": {
-            "title": "Unit",
-            "type": "string"
-          },
-          "value_type": {
-            "$ref": "#/components/schemas/NodeValueType",
-            "default": "numeric_series"
-          }
-        },
-        "required": [
-          "field_id",
-          "unit"
-        ],
-        "title": "FieldMetadata",
         "type": "object"
       },
       "FieldNode": {

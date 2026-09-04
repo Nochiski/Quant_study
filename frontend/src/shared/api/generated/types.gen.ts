@@ -978,10 +978,18 @@ export type FactorExecutionStep = {
  */
 export type FactorExplanation = {
   /**
+   * Data Snapshot Id
+   */
+  data_snapshot_id: string;
+  /**
    * Narrative
    */
   narrative: Array<string>;
   plan: FactorExecutionPlan | null;
+  /**
+   * Registry Version
+   */
+  registry_version: string;
   validation: FactorGraphValidation;
 };
 
@@ -1021,10 +1029,6 @@ export type FactorGraphRequest = {
    * Factor Ids
    */
   factor_ids?: Array<string>;
-  /**
-   * Fields
-   */
-  fields?: Array<FieldMetadata>;
   graph: FactorGraph;
   /**
    * Parameter Ids
@@ -1141,10 +1145,6 @@ export type FactorPreviewRequest = {
    * Factor Ids
    */
   factor_ids?: Array<string>;
-  /**
-   * Fields
-   */
-  fields?: Array<FieldMetadata>;
   graph: FactorGraph;
   /**
    * Parameters
@@ -1394,25 +1394,6 @@ export type FieldLag = {
    * Sessions
    */
   sessions: number;
-};
-
-/**
- * FieldMetadata
- */
-export type FieldMetadata = {
-  /**
-   * Available History Sessions
-   */
-  available_history_sessions?: number | null;
-  /**
-   * Field Id
-   */
-  field_id: string;
-  /**
-   * Unit
-   */
-  unit: string;
-  value_type?: NodeValueType;
 };
 
 /**

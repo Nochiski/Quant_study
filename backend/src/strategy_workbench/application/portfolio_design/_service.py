@@ -29,7 +29,6 @@ from strategy_workbench.domain.factor.facade.evaluation import (
     FactorValue,
     evaluate_factor_graph,
 )
-from strategy_workbench.domain.factor.facade.expression import FactorGraph, GroupNode
 from strategy_workbench.domain.factor.facade.planning import (
     FactorExecutionPlan,
     ResolvedFactorParameter,
@@ -203,13 +202,7 @@ def _required_field_ids(
     )
     for plan in plans.values():
         fields.update(plan.required_field_ids)
-    for factor in spec.factors.factors:
-        fields.update(_group_field_ids(factor.graph))
     return tuple(sorted(fields))
-
-
-def _group_field_ids(graph: FactorGraph) -> set[str]:
-    return {node.group_field_id for node in graph.nodes if isinstance(node, GroupNode)}
 
 
 def _reject_saved_references(spec: StrategySpec, plans: dict[str, FactorExecutionPlan]) -> None:

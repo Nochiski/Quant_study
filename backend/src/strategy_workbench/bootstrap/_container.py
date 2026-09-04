@@ -71,7 +71,7 @@ def build_container(
     strategy_authoring = StrategyAuthoringService(
         RuamelDocumentCodec(),
         factor_registry_version=factor_registry.version,
-        dataset_snapshot_id=equity_data.snapshot().snapshot_id,
+        dataset_snapshot_id=lambda: equity_data.snapshot().snapshot_id,
     )
     run_artifact_root = artifact_root or (
         Path(__file__).resolve().parents[3] / ".local" / "backtest-runs"

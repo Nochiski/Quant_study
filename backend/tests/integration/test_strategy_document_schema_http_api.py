@@ -70,3 +70,21 @@ def test_contract_endpoint_pairs_fields_with_registry_versions_and_links() -> No
     assert row["minimum"] == 0 and row["default"] == 15.0 and row["example"] == 15.0
     assert by_pointer["/data/start"]["format"] == "date"
     assert by_pointer["/portfolio/rebalance"]["enum"]
+
+
+def test_contract_etag_covers_registry_pairing_and_honours_if_none_match() -> None:
+    client = TestClient(build_http_app())
+
+    schema = client.get("/api/v1/strategy-documents/schema")
+    contract = client.get("/api/v1/strategy-documents/contract")
+
+    assert contract.headers["ETag"] != schema.headers["ETag"]
+    assert (
+        contract.json()["contract"]["contract_hash"] != contract.json()["contract"]["schema_hash"]
+    )
+    cached = client.get(
+        "/api/v1/strategy-documents/contract", headers={"If-None-Match": contract.headers["ETag"]}
+    )
+    assert cached.status_code == 304
+    star = client.get("/api/v1/strategy-documents/schema", headers={"If-None-Match": "*"})
+    assert star.status_code == 304

@@ -5,6 +5,8 @@ StrategySpec: the typed spec (execution SoT), its `spec_hash`, the exact authori
 with its format and `source_hash` when the revision came from a document, and provenance.
 
 - Revisions are immutable: revision N never changes after revision N+1 exists.
+- A DOCUMENT record's `spec` must be what its `source` compiles to. Only the document use case
+  builds such records, from a compile result of that exact text; never pair them by hand.
 - `source is None` marks a legacy revision created through the JSON spec API; the document API
   (P1-07) regenerates a canonical source for it and reports the provenance.
 - Identity (`strategy_id`, `revision`) lives on the spec's `StrategyIdentity`; it is assigned by
@@ -22,7 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Generic, Protocol, TypeVar
+from typing import ClassVar, Generic, Protocol, TypeVar
 
 from strategy_workbench.domain.strategy.facade.document import SourceFormat, source_hash_of
 from strategy_workbench.domain.strategy.facade.specification import (
@@ -55,6 +57,8 @@ class RevisionSource:
     source_hash: str
 
     def __post_init__(self) -> None:
+        if not self.text.strip():
+            raise ValueError(f"revision source text must not be empty — format={self.format.value}")
         expected = source_hash_of(self.text)
         if self.source_hash != expected:
             raise ValueError(
@@ -65,8 +69,11 @@ class RevisionSource:
 
 @dataclass(frozen=True)
 class RevisionProvenance:
+    """Adapters normalise clocks with `astimezone(UTC)` before building a record."""
+
     origin: RevisionOrigin
     created_at: datetime
+    change_note: str | None = None
 
     def __post_init__(self) -> None:
         if self.created_at.tzinfo is None or self.created_at.utcoffset() != UTC.utcoffset(None):
@@ -117,7 +124,7 @@ class StrategyRevisionRecord:
 class PageRequest:
     offset: int = 0
     limit: int = 50
-    MAX_LIMIT = 500
+    MAX_LIMIT: ClassVar[int] = 500
 
     def __post_init__(self) -> None:
         if self.offset < 0 or not 1 <= self.limit <= self.MAX_LIMIT:
@@ -153,6 +160,7 @@ class RevisionSummary:
     created_at: datetime
     source_format: SourceFormat | None
     source_hash: str | None
+    change_note: str | None = None
 
 
 class StrategyRepositoryPort(Protocol):

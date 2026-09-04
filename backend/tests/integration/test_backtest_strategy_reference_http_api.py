@@ -98,9 +98,6 @@ def test_stale_or_missing_reference_fails_before_a_run_exists() -> None:
     assert missing.status_code == 404
     assert missing.json()["detail"]["code"] == "backtest.strategy.not_found"
 
-    # Nothing was accepted: no run ids exist for the failed requests.
-    assert client.get("/api/v1/backtests/does-not-exist").status_code == 404
-
 
 def test_inline_draft_and_legacy_inline_spec_record_inline_provenance() -> None:
     client = TestClient(build_http_app())
@@ -138,3 +135,53 @@ def test_inline_draft_and_legacy_inline_spec_record_inline_provenance() -> None:
     )
     neither = client.post("/api/v1/backtests", json={"core": "python"})
     assert both.status_code == 422 and neither.status_code == 422
+
+
+def test_both_and_neither_return_the_same_error_shape() -> None:
+    client = TestClient(build_http_app())
+    template = client.get("/api/v1/strategies/template").json()
+
+    both = client.post(
+        "/api/v1/backtests",
+        json={
+            "strategy": template,
+            "strategy_source": {"kind": "inline_draft", "spec": template},
+            "core": "python",
+        },
+    )
+    neither = client.post("/api/v1/backtests", json={"core": "python"})
+
+    for response in (both, neither):
+        assert response.status_code == 422, response.text
+        assert response.json()["detail"]["code"] == "backtest.run.invalid"
+        assert "strategy" in response.json()["detail"]["message"]
+
+
+def test_reference_to_another_revisions_hash_is_stale() -> None:
+    client = TestClient(build_http_app())
+    document = _saved_template(client)
+    revised = client.post(
+        f"/api/v1/strategy-documents/{document['strategy_id']}/revisions",
+        json={
+            "source": json.dumps(
+                {**json.loads(document["source"]), "title": "v2"}, ensure_ascii=False
+            ),
+            "format": "json",
+            "expected_revision": 1,
+        },
+    ).json()
+    assert revised["spec_hash"] != document["spec_hash"]
+
+    stale = client.post(
+        "/api/v1/backtests",
+        json={
+            "strategy_source": {
+                "kind": "saved_revision",
+                "strategy_id": document["strategy_id"],
+                "revision": 1,
+                "expected_spec_hash": revised["spec_hash"],
+            },
+            "core": "python",
+        },
+    )
+    assert stale.status_code == 409 and stale.json()["detail"]["code"] == "backtest.strategy.stale"

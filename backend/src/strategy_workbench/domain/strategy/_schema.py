@@ -28,7 +28,7 @@ from enum import Enum
 from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
 
 from ._constraints import ScalarConstraint, scalar_constraint_index
-from ._hydrate import SUPPORTED_SCHEMA_VERSIONS
+from ._hydrate import SUPPORTED_SCHEMA_VERSIONS, _kind_of
 from ._models import StrategySpec
 
 SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
@@ -39,14 +39,17 @@ DOCUMENT_TITLE = "StrategyDocument"
 class FieldContract:
     """One scalar authoring path with everything an editor needs to explain it.
 
-    `pointer` is a JSON Pointer template: array positions are written as `*`
-    (`/factors/factors/*/weight`). Bounds and metadata come from the constraint catalog;
-    type, enum, nullability, required and default come from the model.
+    `pointer` is a JSON Pointer template: array positions are written as an asterisk
+    (for example the factor weight row is `/factors/factors/<asterisk>/weight`). Rows of a
+    discriminated union share the pointer and differ by `branch` (the member's `kind`).
+    Bounds and metadata come from the constraint catalog; type, enum, nullability, required
+    and default come from the model.
     """
 
     pointer: str
     type: str
     required: bool
+    branch: str | None = None  # `kind` of the union member owning this row, if any
     nullable: bool = False
     default: object = None
     has_default: bool = False
@@ -144,7 +147,10 @@ class _SchemaBuilder:
         elif len(others) == 1:
             schema = self.schema_of(others[0], pointer)
         else:
-            json_types = sorted({_scalar_schema(m)["type"] for m in others} - {"integer"})
+            json_types = {_scalar_schema(m)["type"] for m in others}
+            if "number" in json_types:
+                json_types.discard("integer")  # every integer is a number
+            json_types = sorted(json_types)
             schema = {"type": json_types}
         if nullable:
             schema = {"anyOf": [schema, {"type": "null"}]}
@@ -161,6 +167,7 @@ class _SchemaBuilder:
         self, tp: type, pointer: str, *, exclude: tuple[str, ...] = ()
     ) -> dict[str, Any]:
         hints = get_type_hints(tp)
+        branch = _kind_of(tp)
         properties: dict[str, Any] = {}
         required: list[str] = []
         for field in dataclasses.fields(tp):
@@ -177,7 +184,7 @@ class _SchemaBuilder:
             if constraint is not None:
                 schema = {**schema, **_constraint_schema(constraint)}
             properties[field.name] = schema
-            self._record_contract(child, hints[field.name], schema, has_default, default)
+            self._record_contract(child, hints[field.name], schema, has_default, default, branch)
         return {
             "type": "object",
             "title": tp.__name__,
@@ -189,7 +196,13 @@ class _SchemaBuilder:
     # -- contracts ----------------------------------------------------------------------------
 
     def _record_contract(
-        self, pointer: str, tp: Any, schema: dict[str, Any], has_default: bool, default: object
+        self,
+        pointer: str,
+        tp: Any,
+        schema: dict[str, Any],
+        has_default: bool,
+        default: object,
+        branch: str | None,
     ) -> None:
         origin = get_origin(tp)
         members = get_args(tp) if origin is Union or origin is types.UnionType else (tp,)
@@ -203,6 +216,7 @@ class _SchemaBuilder:
         self.contracts.append(
             FieldContract(
                 pointer=pointer,
+                branch=branch,
                 type="|".join(json_type) if isinstance(json_type, list) else str(json_type),
                 required="default" not in schema,
                 nullable=nullable,
@@ -236,7 +250,7 @@ def _scalar_schema(tp: Any) -> dict[str, Any]:
     if tp is str:
         return {"type": "string"}
     if tp is date:
-        return {"type": "string", "format": "date"}
+        return {"type": "string", "format": "date", "pattern": r"^\d{4}-\d{2}-\d{2}$"}
     raise TypeError(f"unsupported schema type — type={tp!r}")  # pragma: no cover
 
 
@@ -288,10 +302,3 @@ def _json_value(value: object) -> Any:
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         return {f.name: _json_value(getattr(value, f.name)) for f in dataclasses.fields(value)}
     return value
-
-
-def _kind_of(tp: type) -> str | None:
-    hint = get_type_hints(tp).get("kind")
-    if hint is not None and get_origin(hint) is Literal:
-        return str(get_args(hint)[0])
-    return None

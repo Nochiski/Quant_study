@@ -204,7 +204,11 @@ def test_schema_properties_are_exactly_the_model_fields_and_nothing_is_hand_writ
     assert schema["required"][0] == "schema_version"
     assert schema["additionalProperties"] is False
     data = schema["$defs"]["DataStep"]
-    assert data["properties"]["start"] == {"type": "string", "format": "date"}
+    assert data["properties"]["start"] == {
+        "type": "string",
+        "format": "date",
+        "pattern": r"^\d{4}-\d{2}-\d{2}$",
+    }
     assert data["properties"]["market"] == {"type": "string", "enum": ["KRX"]}
     assert data["required"] == ["market", "start", "end", "universe_id"]
 
@@ -240,3 +244,30 @@ def test_field_contracts_cover_every_scalar_path_with_catalog_metadata() -> None
     for constraint in STRATEGY_SCALAR_CONSTRAINTS:
         assert constraint.pointer in contracts, constraint.pointer
     assert all(isinstance(c, FieldContract) for c in contracts.values())
+
+
+def test_scalar_unions_keep_integer_unless_number_is_present() -> None:
+    from dataclasses import dataclass
+
+    from strategy_workbench.domain.strategy import _schema
+
+    @dataclass(frozen=True)
+    class Probe:
+        int_or_str: int | str
+        bool_or_int: bool | int
+        number_union: float | int | str
+
+    builder = _schema._SchemaBuilder({})  # pyright: ignore[reportPrivateUsage]  # reason: unit
+    schema = builder.dataclass_schema(Probe, "")
+    assert schema["properties"]["int_or_str"] == {"type": ["integer", "string"]}
+    assert schema["properties"]["bool_or_int"] == {"type": ["boolean", "integer"]}
+    assert schema["properties"]["number_union"] == {"type": ["number", "string"]}
+
+
+def test_contract_rows_are_unique_per_pointer_and_branch() -> None:
+    rows = strategy_field_contracts()
+    keys = [(row.pointer, row.branch) for row in rows]
+    assert len(keys) == len(set(keys))
+    kinds = {row.branch for row in rows if row.pointer == "/factors/factors/*/graph/nodes/*/kind"}
+    assert kinds == set(EXPRESSION_NODE_KINDS)
+    assert {row.branch for row in rows if row.pointer == "/risk/max_name_weight"} == {None}

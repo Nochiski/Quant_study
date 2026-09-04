@@ -131,3 +131,59 @@ def test_legacy_json_revision_returns_a_generated_document_with_provenance() -> 
     history = client.get(f"/api/v1/strategies/{strategy_id}/revisions").json()
     assert history["items"][0]["origin"] == "legacy_json"
     assert history["items"][0]["source_hash"] is None
+
+
+def test_legacy_revise_of_a_document_strategy_is_refused() -> None:
+    client = TestClient(build_http_app())
+    created = client.post(
+        "/api/v1/strategy-documents",
+        json={"source": _source("quality_momentum.yaml"), "format": "yaml"},
+    ).json()
+    strategy_id = created["strategy_id"]
+
+    response = client.post(
+        f"/api/v1/strategies/{strategy_id}/revisions",
+        json={"expected_revision": 1, "spec": created["spec"]},
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["code"] == "strategy.revision_conflict"
+    history = client.get(f"/api/v1/strategies/{strategy_id}/revisions").json()
+    assert [item["origin"] for item in history["items"]] == ["document"]
+
+
+def test_source_carrying_identity_is_rejected_and_missing_strategy_is_404() -> None:
+    client = TestClient(build_http_app())
+    with_identity = (
+        _source("quality_momentum.yaml") + "identity:\n  strategy_id: x\n  revision: 9\n"
+    )
+
+    invalid = client.post(
+        "/api/v1/strategy-documents", json={"source": with_identity, "format": "yaml"}
+    )
+    assert invalid.status_code == 422
+    assert invalid.json()["detail"]["diagnostics"][0]["pointer"] == "/identity"
+
+    missing = client.post(
+        "/api/v1/strategy-documents/nope/revisions",
+        json={"source": _source("quality_momentum.yaml"), "format": "yaml", "expected_revision": 1},
+    )
+    assert missing.status_code == 404 and missing.json()["detail"]["code"] == "strategy.not_found"
+
+
+def test_exact_bytes_round_trip_including_crlf_and_no_trailing_newline() -> None:
+    client = TestClient(build_http_app())
+    source = _source("quality_momentum.yaml").replace("\n", "\r\n").rstrip("\r\n")
+
+    created = client.post("/api/v1/strategy-documents", json={"source": source, "format": "yaml"})
+    assert created.status_code == 201, created.text
+    strategy_id = created.json()["strategy_id"]
+    fetched = client.get(f"/api/v1/strategies/{strategy_id}/revisions/1/document").json()
+
+    assert fetched["source"] == source
+    assert fetched["source_hash"] == _sha(source)
+    assert fetched["spec_hash"] == GOLDEN_SPEC_HASH
+    assert (
+        client.get(f"/api/v1/strategies/{strategy_id}/revisions", params={"limit": 501}).status_code
+        == 422
+    )

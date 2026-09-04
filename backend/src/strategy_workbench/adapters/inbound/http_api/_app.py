@@ -86,6 +86,9 @@ from strategy_workbench.domain.strategy.facade.explanation import StrategyExplan
 from strategy_workbench.domain.strategy.facade.specification import StrategySpec
 from strategy_workbench.domain.strategy.facade.validation import StrategyValidation
 
+EQUITY_CATALOG_PATH = "/api/v1/equity/catalog"
+FACTOR_CATALOG_PATH = "/api/v1/factors/catalog"
+
 
 @dataclass(frozen=True)
 class ReviseStrategyRequest:
@@ -247,7 +250,7 @@ def create_app(
             raise _portfolio_http_error(error) from error
 
     @app.get(
-        "/api/v1/equity/catalog",
+        EQUITY_CATALOG_PATH,
         operation_id="getEquityCatalog",
     )
     def equity_catalog(
@@ -291,7 +294,7 @@ def create_app(
         return equity_workspace.preview(query, venue=venue)
 
     @app.get(
-        "/api/v1/factors/catalog",
+        FACTOR_CATALOG_PATH,
         operation_id="getFactorCatalog",
     )
     def factor_catalog(
@@ -442,6 +445,7 @@ def create_app(
         "/api/v1/strategy-documents/schema",
         operation_id="getStrategyDocumentSchema",
         response_model=StrategyDocumentSchema,
+        responses={304: {"description": "Not modified (ETag matched If-None-Match)"}},
     )
     def strategy_document_schema(
         response: Response, if_none_match: Annotated[str | None, Header()] = None
@@ -449,7 +453,7 @@ def create_app(
         """Runtime JSON Schema of the authoring document. ETag = schema hash (304 on match)."""
         schema = strategy_authoring.schema()
         etag = _etag(schema.schema_hash)
-        if if_none_match is not None and etag in _etags(if_none_match):
+        if if_none_match is not None and _matches(if_none_match, etag):
             return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
         response.headers["ETag"] = etag
         return schema
@@ -457,17 +461,24 @@ def create_app(
     @app.get(
         "/api/v1/strategy-documents/contract",
         operation_id="getStrategyDocumentContract",
+        response_model=StrategyDocumentContractResponse,
+        responses={304: {"description": "Not modified (ETag matched If-None-Match)"}},
     )
-    def strategy_document_contract(response: Response) -> StrategyDocumentContractResponse:
+    def strategy_document_contract(
+        response: Response, if_none_match: Annotated[str | None, Header()] = None
+    ) -> StrategyDocumentContractResponse | Response:
         """Per-field authoring contract (type, enum, range, unit, default, example, stage)
         with the factor/dataset registry versions and catalog links it pairs with.
         """
         contract = strategy_authoring.contract()
-        response.headers["ETag"] = _etag(contract.schema_hash)
+        etag = _etag(contract.contract_hash)
+        if if_none_match is not None and _matches(if_none_match, etag):
+            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
+        response.headers["ETag"] = etag
         return StrategyDocumentContractResponse(
             contract=contract,
-            factor_catalog_url="/api/v1/factors/catalog",
-            equity_catalog_url="/api/v1/equity/catalog",
+            factor_catalog_url=FACTOR_CATALOG_PATH,
+            equity_catalog_url=EQUITY_CATALOG_PATH,
         )
 
     @app.get(
@@ -571,8 +582,11 @@ def _etag(schema_hash: str) -> str:
     return f'"{schema_hash}"'
 
 
-def _etags(header: str) -> set[str]:
-    return {item.strip().removeprefix("W/") for item in header.split(",")}
+def _matches(if_none_match: str, etag: str) -> bool:
+    """RFC 9110 §13.1.2: `*` matches any current representation; weak tags compare by value."""
+    if if_none_match.strip() == "*":
+        return True
+    return etag in {item.strip().removeprefix("W/") for item in if_none_match.split(",")}
 
 
 def _strategy_not_found(error: StrategyNotFoundError) -> HTTPException:

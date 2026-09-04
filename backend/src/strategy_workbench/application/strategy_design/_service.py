@@ -34,6 +34,7 @@ from .ports.outgoing.strategy_repository import (
     RevisionOrigin,
     RevisionProvenance,
     StrategyRepositoryPort,
+    StrategyRevisionConflictError,
     StrategyRevisionRecord,
 )
 
@@ -135,6 +136,12 @@ class StrategyDesignService:
         expected_revision: int,
     ) -> SavedStrategy:
         self._require_valid(draft)
+        latest = self._repository.get(strategy_id)
+        if latest.source is not None:
+            raise StrategyRevisionConflictError(
+                "strategy is authored as a document; revise it through the document API — "
+                f"strategy_id={strategy_id} latest_revision={latest.revision}"
+            )
         saved = replace(
             draft,
             identity=StrategyIdentity(

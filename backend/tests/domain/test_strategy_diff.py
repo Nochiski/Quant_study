@@ -102,7 +102,7 @@ def test_array_items_are_positional_and_added_or_removed_as_subtrees() -> None:
 
 def test_comment_only_source_changes_are_invisible_to_the_diff() -> None:
     authoring = StrategyAuthoringService(
-        RuamelDocumentCodec(), factor_registry_version="r", dataset_snapshot_id="s"
+        RuamelDocumentCodec(), factor_registry_version="r", dataset_snapshot_id=lambda: "s"
     )
     text = (FIXTURES / "quality_momentum.yaml").read_text(encoding="utf-8")
     base = authoring.compile(CompileRequest(text, SourceFormat.YAML)).spec
@@ -118,3 +118,43 @@ def test_comment_only_source_changes_are_invisible_to_the_diff() -> None:
 
     assert diff_strategy_specs(base, commented) == ()
     assert diff_strategy_specs(base, as_json) == ()
+
+
+def test_equal_values_of_different_json_types_are_changes() -> None:
+    from strategy_workbench.domain.strategy.facade.specification import (
+        ChoiceParameter,
+        strategy_spec_hash,
+    )
+
+    base = replace(_template(), parameters=(ChoiceParameter("p", True, (True, False), "choice"),))
+    target = replace(_template(), parameters=(ChoiceParameter("p", 1, (1, 0), "choice"),))
+
+    assert strategy_spec_hash(base) != strategy_spec_hash(target)
+    entries = diff_strategy_specs(base, target)
+    assert DiffEntry("/parameters/0/default", DiffKind.CHANGED, True, 1) in entries
+    assert all(entry.kind is DiffKind.CHANGED for entry in entries)
+
+
+def test_parameter_kind_change_reports_added_and_removed_keys() -> None:
+    from strategy_workbench.domain.strategy.facade.specification import ChoiceParameter
+
+    base = replace(_template(), parameters=(FloatParameter("p", 20.0, 5.0, 60.0, "float"),))
+    target = replace(_template(), parameters=(ChoiceParameter("p", 20, (20, 40), "choice"),))
+
+    entries = diff_strategy_specs(base, target)
+    assert {(e.pointer, e.kind) for e in entries} == {
+        ("/parameters/0/choices", DiffKind.ADDED),
+        ("/parameters/0/default", DiffKind.CHANGED),
+        ("/parameters/0/kind", DiffKind.CHANGED),
+        ("/parameters/0/maximum", DiffKind.REMOVED),
+        ("/parameters/0/minimum", DiffKind.REMOVED),
+        ("/parameters/0/step", DiffKind.REMOVED),
+    }
+
+
+def test_pointer_tokens_are_rfc6901_escaped() -> None:
+    from strategy_workbench.domain.strategy import _diff
+
+    entries: list[DiffEntry] = []
+    _diff._walk({"a/b": 1, "c~d": 2}, {"a/b": 2, "c~d": 2}, "", entries)  # pyright: ignore[reportPrivateUsage]  # reason: unit
+    assert [e.pointer for e in entries] == ["/a~1b"]

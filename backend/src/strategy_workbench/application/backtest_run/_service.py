@@ -169,6 +169,10 @@ class BacktestRunService:
     def _resolve(self, request: BacktestRunSpec) -> tuple[BacktestRunSpec, StrategyProvenance]:
         """Turn the request into a run spec whose `strategy` is the exact spec to execute."""
         source = request.strategy_source
+        if request.strategy is None and source is None:
+            raise InvalidBacktestRunError(
+                "run request must name its strategy — neither strategy nor strategy_source given"
+            )
         if request.strategy is not None and source is not None:
             raise InvalidBacktestRunError(
                 "run request must name its strategy once — both strategy and strategy_source given"

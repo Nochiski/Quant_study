@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -49,7 +49,7 @@ ADAPTERS = [pytest.param(factory, id=factory.__name__) for factory in REPOSITORI
 
 def _authoring() -> StrategyAuthoringService:
     return StrategyAuthoringService(
-        RuamelDocumentCodec(), factor_registry_version="r", dataset_snapshot_id="s"
+        RuamelDocumentCodec(), factor_registry_version="r", dataset_snapshot_id=lambda: "s"
     )
 
 
@@ -213,3 +213,48 @@ def test_record_invariants_fail_closed() -> None:
         RevisionProvenance(RevisionOrigin.LEGACY_JSON, datetime(2026, 9, 4))
     with pytest.raises(ValueError, match="page request out of range"):
         PageRequest(limit=0)
+
+
+@pytest.mark.parametrize("factory", ADAPTERS)
+def test_history_exposes_document_source_provenance(
+    factory: Callable[[], StrategyRepositoryPort],
+) -> None:
+    repository = factory()
+    text = (FIXTURES / "quality_momentum.yaml").read_text(encoding="utf-8")
+    repository.add(_document(text, "d1", 1))
+    repository.append(_legacy(_template(), "d1", 2), expected_revision=1)
+
+    first, second = repository.history("d1", PageRequest()).items
+    assert first.origin is RevisionOrigin.DOCUMENT
+    assert first.source_format is SourceFormat.YAML
+    assert first.source_hash == source_hash_of(text)
+    assert first.spec_hash == GOLDEN_SPEC_HASH
+    assert second.origin is RevisionOrigin.LEGACY_JSON and second.source_hash is None
+
+
+@pytest.mark.parametrize("factory", ADAPTERS)
+def test_strategy_summary_is_derived_from_the_latest_revision(
+    factory: Callable[[], StrategyRepositoryPort],
+) -> None:
+    repository = factory()
+    template = _template()
+    repository.add(_legacy(replace(template, title="t-s1-r1"), "s1", 1, at=T0.replace(minute=1)))
+    repository.append(
+        _legacy(replace(template, title="t-s1-r2"), "s1", 2, at=T0.replace(minute=2)),
+        expected_revision=1,
+    )
+
+    (summary,) = repository.list_strategies(PageRequest()).items
+    assert summary.title == "t-s1-r2"
+    assert summary.latest_revision == 2
+    assert summary.updated_at == T0.replace(minute=2)
+    assert summary.spec_hash == repository.get("s1").spec_hash != repository.get("s1", 1).spec_hash
+
+
+def test_revision_source_rejects_empty_text_and_provenance_carries_a_change_note() -> None:
+    with pytest.raises(ValueError, match="must not be empty"):
+        RevisionSource(SourceFormat.YAML, "   \n", source_hash_of("   \n"))
+    provenance = RevisionProvenance(RevisionOrigin.LEGACY_JSON, T0, change_note="tighter cap")
+    assert provenance.change_note == "tighter cap"
+    with pytest.raises(ValueError, match="timezone-aware UTC"):
+        RevisionProvenance(RevisionOrigin.LEGACY_JSON, T0.astimezone(timezone(timedelta(hours=9))))

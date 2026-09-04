@@ -67,7 +67,11 @@ class SavedRevisionReference:
 
 @dataclass(frozen=True)
 class InlineDraft:
-    """Run an unsaved spec (draft backtests only; never a deployment source)."""
+    """Run an unsaved spec (draft backtests only; never a deployment source).
+
+    `source_hash` is client-asserted provenance: the server cannot verify it without the text
+    and records it as given.
+    """
 
     spec: StrategySpec
     kind: Literal["inline_draft"]
@@ -94,7 +98,8 @@ class BacktestRunSpec:
     """A request names its strategy once: `strategy` (legacy inline spec) or `strategy_source`.
 
     `strategy` stays for compatibility with the JSON editors; new callers use `strategy_source`
-    so a run can name a saved revision (P1-09). The run service rejects a request carrying both.
+    so a run can name a saved revision (P1-09). The run service rejects a request carrying both
+    or neither (one coded 422, `backtest.run.invalid`).
     After resolution the run spec stored in the manifest carries both: `strategy` is the exact
     spec that was executed and `strategy_source` says where it came from.
     """
@@ -108,8 +113,6 @@ class BacktestRunSpec:
     metric_windows: tuple[MetricWindow, ...] = ()
 
     def __post_init__(self) -> None:
-        if self.strategy is None and self.strategy_source is None:
-            raise ValueError("strategy (legacy inline) or strategy_source is required")
         if self.initial_cash <= 0:
             raise ValueError("initial_cash must be positive")
         if self.annualization_days <= 0:

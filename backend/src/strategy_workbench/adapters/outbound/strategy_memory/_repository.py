@@ -88,6 +88,7 @@ class InMemoryStrategyRepository:
                     created_at=record.provenance.created_at,
                     source_format=record.source.format if record.source else None,
                     source_hash=record.source.source_hash if record.source else None,
+                    change_note=record.provenance.change_note,
                 )
                 for record in self._revisions(strategy_id)
             ]

@@ -51,6 +51,7 @@ from strategy_workbench.application.portfolio_design.facade.design import (
     PortfolioDesignService,
     PortfolioPreview,
     PortfolioPreviewRequest,
+    RawObservationUnavailableError,
 )
 from strategy_workbench.application.strategy_authoring.facade.authoring import (
     CompiledDocument,
@@ -155,6 +156,9 @@ def create_app(
                 detail={"code": "backtest.strategy.stale", "message": str(error)},
             ) from error
 
+        except (InvalidPortfolioRequestError, RawObservationUnavailableError) as error:
+            raise _portfolio_http_error(error) from error
+
     @app.get(
         "/api/v1/backtests/{run_id}",
         operation_id="getBacktestStatus",
@@ -239,14 +243,8 @@ def create_app(
     def portfolio_preview(request: PortfolioPreviewRequest) -> PortfolioPreview:
         try:
             return portfolio_design.preview(request)
-        except InvalidPortfolioRequestError as error:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail={
-                    "code": "portfolio.strategy.invalid",
-                    "validation": jsonable_encoder(asdict(error.validation)),
-                },
-            ) from error
+        except (InvalidPortfolioRequestError, RawObservationUnavailableError) as error:
+            raise _portfolio_http_error(error) from error
 
     @app.get(
         "/api/v1/equity/catalog",
@@ -595,3 +593,21 @@ def _invalid_document(error: InvalidStrategyDocumentError) -> HTTPException:
             "diagnostics": jsonable_encoder([asdict(d) for d in compiled.diagnostics]),
         },
     )
+
+
+def _portfolio_http_error(
+    error: InvalidPortfolioRequestError | RawObservationUnavailableError,
+) -> HTTPException:
+    """Same coded 422 for the preview and backtest routes: the pipeline rejected the request."""
+    if isinstance(error, InvalidPortfolioRequestError):
+        detail: dict[str, object] = {
+            "code": "portfolio.strategy.invalid",
+            "validation": jsonable_encoder(asdict(error.validation)),
+        }
+    else:
+        detail = {
+            "code": "portfolio.data.unavailable",
+            "status": error.status.value,
+            "detail": error.detail,
+        }
+    return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=detail)

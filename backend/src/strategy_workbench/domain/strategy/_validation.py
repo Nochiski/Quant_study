@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
+from strategy_workbench.domain.factor.facade.expression import ParameterNode
 from strategy_workbench.domain.factor.facade.validation import (
     FactorValidationSeverity,
     validate_factor_graph,
@@ -56,6 +57,10 @@ def _issue(code: str, path: str, message: str) -> ValidationIssue:
             f"code={code!r}"
         )
     return ValidationIssue(code=code, path=path, message=message, kind=ValidationKind.SEMANTIC)
+
+
+def _is_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def validate_strategy(spec: StrategySpec) -> StrategyValidation:
@@ -182,8 +187,29 @@ def validate_strategy(spec: StrategySpec) -> StrategyValidation:
         "factor.graph.parameter_missing": "strategy.expression.parameter_missing",
         "factor.graph.lag_periods": "strategy.expression.lag_periods",
     }
+    numeric_parameter_ids = {
+        parameter.parameter_id
+        for parameter in spec.parameters
+        if not isinstance(parameter, ChoiceParameter)
+        or all(_is_number(choice) for choice in (parameter.default, *parameter.choices))
+    }
     for factor_index, factor in enumerate(spec.factors.factors):
         base = f"factors.factors.{factor_index}"
+        for node_index, node in enumerate(factor.graph.nodes):
+            if (
+                isinstance(node, ParameterNode)
+                and node.parameter_id in parameter_ids
+                and node.parameter_id not in numeric_parameter_ids
+            ):
+                issues.append(
+                    ValidationIssue(
+                        code="strategy.expression.parameter_type",
+                        path=f"{base}.graph.nodes.{node_index}",
+                        message="팩터 그래프의 파라미터 노드는 숫자 파라미터만 참조할 수 있습니다: "
+                        f"parameter_id={node.parameter_id!r}",
+                        kind=ValidationKind.SEMANTIC,
+                    )
+                )
         validation = validate_factor_graph(
             factor.graph,
             parameter_ids=tuple(parameter_ids),

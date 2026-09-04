@@ -75,6 +75,32 @@ def evaluate_factor_graph(
     observations: tuple[FactorObservation, ...],
     parameters: tuple[ResolvedFactorParameter, ...] = (),
 ) -> FactorEvaluation:
+    computed = _compute_nodes(graph, observations=observations, parameters=parameters)
+    raw_output = computed[graph.output_node_id]
+    output = tuple(
+        FactorValue(
+            as_of=observation.as_of,
+            security_id=observation.security_id,
+            value=float(value)
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
+            else None,
+        )
+        for observation, value in zip(observations, raw_output, strict=True)
+    )
+    return FactorEvaluation(output_node_id=graph.output_node_id, values=output)
+
+
+def _compute_nodes(
+    graph: FactorGraph,
+    *,
+    observations: tuple[FactorObservation, ...],
+    parameters: tuple[ResolvedFactorParameter, ...] = (),
+) -> dict[str, list[FactorComputedValue]]:
+    """Evaluate every node reachable from the output once; the cache is the single value source.
+
+    `evaluate_factor_graph` returns the output node; `_trace.trace_factor_graph` projects the whole
+    cache. Both read the same lists so trace values equal evaluation values by construction.
+    """
     nodes = {node.node_id: node for node in graph.nodes}
     parameter_values = {parameter.parameter_id: parameter.value for parameter in parameters}
     computed: dict[str, list[FactorComputedValue]] = {}
@@ -135,18 +161,8 @@ def evaluate_factor_graph(
         computed[node_id] = values
         return values
 
-    raw_output = evaluate(graph.output_node_id)
-    output = tuple(
-        FactorValue(
-            as_of=observation.as_of,
-            security_id=observation.security_id,
-            value=float(value)
-            if isinstance(value, (int, float)) and not isinstance(value, bool)
-            else None,
-        )
-        for observation, value in zip(observations, raw_output, strict=True)
-    )
-    return FactorEvaluation(output_node_id=graph.output_node_id, values=output)
+    evaluate(graph.output_node_id)
+    return computed
 
 
 def _field_values(

@@ -63,9 +63,11 @@ def build_container(
     equity_data = MockEquityDataAdapter.demo()
     engine_portfolio = BacktestEnginePortfolioAdapter()
     strategy_repository = InMemoryStrategyRepository()
-    portfolio_design = PortfolioDesignService(equity_data, engine_portfolio)
-    metric_registry = build_default_metric_registry()
     factor_registry = build_default_factor_registry()
+    portfolio_design = PortfolioDesignService(
+        equity_data, engine_portfolio, factor_registry_version=factor_registry.version
+    )
+    metric_registry = build_default_metric_registry()
     strategy_authoring = StrategyAuthoringService(
         RuamelDocumentCodec(),
         factor_registry_version=factor_registry.version,

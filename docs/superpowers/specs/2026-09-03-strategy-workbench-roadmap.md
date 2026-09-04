@@ -132,6 +132,7 @@ frontend/
 |---|---|---|---|
 | raw equity 값·공개 시점·coverage | Equity DB view + `dataset_profile` | data snapshot/build ID | Equity adapter |
 | Equity 조회 의미 | `EquityDataPort` | port version | mock/DuckDB adapter |
+| raw PIT 관측(원천 필드·공개일·멤버십·섹터) | `RawObservationPort` (`application/portfolio_design`) | port version | mock/DuckDB adapter |
 | 팩터 식·방향·단위·입력·결측 정책 | Factor Registry | `factor_id@version` | catalog, compiler, UI |
 | 전략 의미 | immutable `StrategySpec` revision | schema version + canonical hash | source editor, projection view, compiler (legacy editor는 migration 기간) |
 | 탐색 공간 | `SearchSpec` | schema version + hash | planner/optimizer |
@@ -143,6 +144,12 @@ frontend/
 | experiment/trial lifecycle | Experiment Repository | monotonic event/revision | worker/SSE/UI |
 | 최종 후보 선택 | user selection record | strategy revision + trial ID | compare UI |
 | 미저장 draft·그래프 좌표 | frontend feature/local state | draft ID | editor only |
+
+두 Equity port는 같은 셀에 같은 답을 해야 한다: `EquityDataPort`와 `RawObservationPort`가
+같은 (security, date, field)에 대해 같은 값과 같은 `available_date`를 돌려주는 것이 어댑터
+계약이며, `backend/tests/contract/test_raw_observation_port.py`가 이를 셀 단위로 강제한다.
+`universe_member`와 `sector_id`에는 공개일이 없으므로 as_of vintage로 답할 책임도 어댑터에
+있고 application은 검증하지 못한다.
 
 두 위치를 동시에 고쳐야 같은 의미가 유지된다면 SoT 위반이다. generated OpenAPI/TypeScript,
 execution plan, TargetTape, metric view, composite score, cache는 모두 파생물이다.

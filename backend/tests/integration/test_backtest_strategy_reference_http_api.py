@@ -65,7 +65,9 @@ def test_run_by_saved_revision_records_the_exact_revision_in_the_manifest() -> N
         "revision": 1,
         "source_hash": document["source_hash"],
     }
+    # DEFECT-105: the tape's hash and the provenance hash have different producers.
     assert manifest["strategy_hash"] == document["spec_hash"]
+    assert manifest["strategy_hash"] == manifest["strategy_provenance"]["spec_hash"]
     assert manifest["run_spec"]["strategy"]["identity"]["strategy_id"] == document["strategy_id"]
     assert manifest["run_spec"]["strategy_source"] == reference
     assert manifest["schema_version"] == "backtest-run-v2"

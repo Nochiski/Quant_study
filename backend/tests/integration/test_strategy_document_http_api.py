@@ -123,7 +123,7 @@ def test_deep_nesting_is_a_diagnostic_not_a_server_error() -> None:
 
     assert result["spec"] is None
     (diagnostic,) = result["diagnostics"]
-    assert diagnostic["code"] == "yaml.too_deep"
+    assert diagnostic["code"] == "document.too_deep"
     assert diagnostic["kind"] == "syntax"
 
 

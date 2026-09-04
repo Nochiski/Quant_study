@@ -66,11 +66,11 @@ jobs:
         shell: bash
         run: |
           npm ci
-          setsid npm run dev -- --host 127.0.0.1 --port 41730 > "$RUNNER_TEMP/root-vite.log" 2>&1 &
+          setsid npm run dev -- --host 127.0.0.1 --port 41730 --strictPort > "$RUNNER_TEMP/root-vite.log" 2>&1 &
           dev_pid=$!
           trap 'kill -INT -- -"$dev_pid" 2>/dev/null || true' EXIT
           for attempt in {1..60}; do
-            if curl --fail --silent http://127.0.0.1:41730/ > /dev/null; then
+            if curl --fail --silent http://127.0.0.1:41730/ | grep --fixed-strings --quiet '<div id="root"></div>'; then
               exit 0
             fi
             if ! kill -0 "$dev_pid" 2>/dev/null; then

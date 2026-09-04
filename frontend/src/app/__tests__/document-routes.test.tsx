@@ -74,8 +74,51 @@ const document = (
 
 const STORED = 'schema_version: "1.0"\ntitle: 퀄리티 모멘텀\n';
 const posted: unknown[] = [];
+const started: Record<string, unknown>[] = [];
 
 const server = setupServer(
+  http.post(`${API}/api/v1/strategy-documents/compile`, async ({ request }) => {
+    const body = (await request.json()) as { source: string };
+    const title = /title: (.*)/.exec(body.source)?.[1] ?? "";
+    return HttpResponse.json({
+      format: "yaml",
+      source_hash: "b".repeat(64),
+      schema_version: "1.0",
+      spec: spec("s1", 2, title),
+      canonical_json: null,
+      spec_hash: body.source === STORED ? "2".repeat(64) : "9".repeat(64),
+      diagnostics: [],
+    });
+  }),
+  http.post(`${API}/api/v1/backtests`, async ({ request }) => {
+    started.push((await request.json()) as Record<string, unknown>);
+    return HttpResponse.json(
+      {
+        run: {
+          run_id: "run-7",
+          status: "queued",
+          progress: 0,
+          stage: "queued",
+          message: "queued",
+          created_at: "2026-09-04T00:00:00Z",
+          updated_at: "2026-09-04T00:00:00Z",
+        },
+      },
+      { status: 202 },
+    );
+  }),
+  http.get(`${API}/api/v1/backtests/:runId`, ({ params }) =>
+    HttpResponse.json({
+      run_id: params.runId,
+      status: "completed",
+      progress: 1,
+      stage: "done",
+      message: "Run completed",
+      created_at: "2026-09-04T00:00:00Z",
+      updated_at: "2026-09-04T00:00:01Z",
+    }),
+  ),
+  http.get(`${API}/api/v1/backtests/:runId/result`, () => HttpResponse.error()),
   http.get(`${API}/api/v1/strategy-documents/schema`, () =>
     HttpResponse.json({
       schema: { type: "object", properties: {}, additionalProperties: false },
@@ -187,6 +230,7 @@ afterEach(() => {
   cleanup();
   server.resetHandlers();
   posted.length = 0;
+  started.length = 0;
 });
 afterAll(() => server.close());
 
@@ -239,7 +283,7 @@ describe("document routes (P2-04)", () => {
     );
     expect(screen.getByText(/DIFF/)).toBeInTheDocument();
     expect(screen.getByText("저장됨 v2")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "저장" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "리비전 저장" })).toBeDisabled();
     expect(screen.getByText("2026-09-04 09:30")).toBeInTheDocument();
   });
 
@@ -251,9 +295,9 @@ describe("document routes (P2-04)", () => {
     replaceText(view, 'schema_version: "1.0"\ntitle: 새 전략 A\n');
     expect(screen.getByText("저장되지 않은 변경")).toBeInTheDocument();
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "저장" })).toBeEnabled(),
+      expect(screen.getByRole("button", { name: "리비전 저장" })).toBeEnabled(),
     );
-    await user.click(screen.getByRole("button", { name: "저장" }));
+    await user.click(screen.getByRole("button", { name: "리비전 저장" }));
     await waitFor(() =>
       expect(history.location.pathname).toBe(
         "/research/strategies/s9/revisions/1",
@@ -275,9 +319,9 @@ describe("document routes (P2-04)", () => {
     const view = await editor();
     replaceText(view, "title: bad\n");
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "저장" })).toBeEnabled(),
+      expect(screen.getByRole("button", { name: "리비전 저장" })).toBeEnabled(),
     );
-    await user.click(screen.getByRole("button", { name: "저장" }));
+    await user.click(screen.getByRole("button", { name: "리비전 저장" }));
     expect(
       await screen.findByText(
         "저장 실패: 문서 검증 오류: title must not be empty",
@@ -315,9 +359,9 @@ describe("document routes (P2-04)", () => {
     const view = await editor();
     replaceText(view, `${STORED}description: 개정\n`);
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "저장" })).toBeEnabled(),
+      expect(screen.getByRole("button", { name: "리비전 저장" })).toBeEnabled(),
     );
-    await user.click(screen.getByRole("button", { name: "저장" }));
+    await user.click(screen.getByRole("button", { name: "리비전 저장" }));
     await waitFor(() =>
       expect(history.location.pathname).toBe(
         "/research/strategies/s1/revisions/3",
@@ -338,10 +382,63 @@ describe("document routes (P2-04)", () => {
     const second = await editor();
     replaceText(second, `${STORED}description: 충돌\n`);
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "저장" })).toBeEnabled(),
+      expect(screen.getByRole("button", { name: "리비전 저장" })).toBeEnabled(),
     );
-    await user.click(screen.getByRole("button", { name: "저장" }));
+    await user.click(screen.getByRole("button", { name: "리비전 저장" }));
     expect(await screen.findByText(/^충돌:/)).toBeInTheDocument();
     expect(second.state.doc.toString()).toBe(`${STORED}description: 충돌\n`);
+  });
+});
+
+describe("backtest from the editor (P3-05)", () => {
+  it("runs a clean saved revision by reference and moves to the run page", async () => {
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2");
+    await editor();
+    const run = screen.getByRole("button", { name: /백테스트 실행/ });
+    await waitFor(() => expect(run).toBeEnabled());
+    expect(screen.getAllByText("2".repeat(12) + "…").length).toBeGreaterThan(0); // backend spec hash
+    await user.click(run);
+    await waitFor(() =>
+      expect(history.location.pathname).toBe("/research/backtests/run-7"),
+    );
+    expect(started).toEqual([
+      {
+        strategy_source: {
+          kind: "saved_revision",
+          strategy_id: "s1",
+          revision: 2,
+          expected_spec_hash: "2".repeat(64),
+        },
+      },
+    ]);
+  });
+
+  it("runs an edited document as an inline draft with provenance, and never while invalid", async () => {
+    const user = userEvent.setup();
+    mount("/research/strategies/s1/revisions/2");
+    const view = await editor();
+    replaceText(view, `${STORED}description: 개정\n`);
+    const run = screen.getByRole("button", { name: /백테스트 실행/ });
+    await waitFor(() => expect(run).toBeEnabled());
+    await user.click(run);
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]).toEqual({
+      strategy_source: {
+        kind: "inline_draft",
+        spec: expect.objectContaining({ title: "퀄리티 모멘텀" }),
+        source_hash: "b".repeat(64),
+      },
+    });
+    cleanup();
+    mount("/research/strategies/new");
+    const fresh = await editor();
+    replaceText(fresh, "title: [broken\n");
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /백테스트 실행/ }),
+      ).toBeDisabled(),
+    );
+    expect(screen.getByRole("button", { name: "리비전 저장" })).toBeDisabled();
   });
 });

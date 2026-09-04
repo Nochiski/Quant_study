@@ -4,10 +4,11 @@ import { useEffect, useMemo } from "react";
 import { strategyDocumentQuery } from "../../../entities/strategy";
 import {
   DirtyLeaveGuard,
-  SaveAction,
+  DocumentToolbar,
   SourceEditor,
   saveStatusText,
   useCompileDocument,
+  useRunBacktest,
   useSaveDocument,
   useSchemaAssist,
   useStrategyDocument,
@@ -47,7 +48,13 @@ export const StrategyRevisionPage = () => {
   const [document, dispatch] = useStrategyDocument(source);
   const { save, status, canSave } = useSaveDocument(document, dispatch);
   const assist = useSchemaAssist(document);
-  useCompileDocument(document, dispatch);
+  const { validateNow, validating } = useCompileDocument(document, dispatch);
+  const backtest = useRunBacktest(document);
+  const current =
+    document.compiled !== null &&
+    document.compiledVersion === document.sourceVersion
+      ? document.compiled
+      : null;
 
   useEffect(() => {
     if (
@@ -94,8 +101,15 @@ export const StrategyRevisionPage = () => {
             ) : null}
           </>
         }
-        meta={{ createdAt: shortTimestamp(stored.created_at) }}
+        meta={{
+          createdAt: shortTimestamp(stored.created_at),
+          schemaVersion: current?.schemaVersion ?? stored.schema_version,
+          sourceHash: current?.sourceHash ?? stored.source_hash,
+          specHash: current?.specHash ?? null,
+        }}
         saveStatus={saveStatusText(document, status)}
+        onRunBacktest={() => void backtest.run()}
+        runDisabled={!backtest.canRun}
         view={view}
         availableViews={availableViews}
         onViewChange={(next) =>
@@ -110,10 +124,16 @@ export const StrategyRevisionPage = () => {
           })
         }
         editorActions={
-          <SaveAction
+          <DocumentToolbar
+            state={document}
+            onValidate={validateNow}
+            validating={validating}
+            onSave={save}
             canSave={canSave}
             saving={status.kind === "saving"}
-            onSave={save}
+            onRun={() => void backtest.run()}
+            decision={backtest.decision}
+            runStatus={backtest.status}
           />
         }
         editor={
@@ -139,7 +159,6 @@ export const StrategyRevisionPage = () => {
             )}
           </>
         }
-        runDisabled
       />
       <DirtyLeaveGuard dirty={document.dirty} />
     </>

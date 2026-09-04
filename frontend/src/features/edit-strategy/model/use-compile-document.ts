@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
   strategyWorkbenchApi,
@@ -59,9 +59,27 @@ export const toDocumentDiagnostics = (
 export const useCompileDocument = (
   state: DocumentState,
   dispatch: (action: DocumentAction) => void,
-): void => {
+) => {
+  // Explicit "Validate" (toolbar): recompile the current version even if it was compiled
+  // already, e.g. after a transport failure. Bumping the nonce re-runs the effect below.
+  const [forced, setForced] = useState<{
+    version: number;
+    nonce: number;
+  } | null>(null);
+  const validateNow = useCallback(() => {
+    setForced((previous) => ({
+      version: state.sourceVersion,
+      nonce: (previous?.nonce ?? 0) + 1,
+    }));
+  }, [state.sourceVersion]);
+  const forcedNow = forced !== null && forced.version === state.sourceVersion;
+  const canForce =
+    !state.composing &&
+    state.parsedVersion === state.sourceVersion &&
+    state.parse?.status === "ok";
+
   useEffect(() => {
-    if (!shouldCompile(state)) return;
+    if (!shouldCompile(state) && !(forcedNow && canForce)) return;
     const version = state.sourceVersion;
     const request = { format: state.format, source: state.source };
     const parse = state.parse;
@@ -79,9 +97,11 @@ export const useCompileDocument = (
             diagnostics: toDocumentDiagnostics(compiled.diagnostics, parse),
           };
           dispatch({ type: "compiled", version, outcome });
+          if (forcedNow) setForced(null); // the forced compile is consumed by its reply
         })
         .catch((error: unknown) => {
           if (controller.signal.aborted) return;
+          if (forcedNow) setForced(null);
           // Transport failure: the text stays "structurally-valid" and is retried on the next
           // edit; the failure is surfaced as a capability diagnostic, not silently swallowed.
           dispatch({
@@ -111,5 +131,12 @@ export const useCompileDocument = (
       clearTimeout(timer);
       controller.abort();
     };
-  }, [state, dispatch]);
+  }, [state, dispatch, forcedNow, canForce, forced?.nonce]);
+
+  const validating =
+    !state.composing &&
+    state.parse?.status === "ok" &&
+    state.parsedVersion === state.sourceVersion &&
+    (state.compiledVersion !== state.sourceVersion || forcedNow);
+  return { validateNow, validating };
 };

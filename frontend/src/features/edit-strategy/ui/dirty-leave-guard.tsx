@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useEffect, useId, useRef } from "react";
 
 import { t } from "../../../shared/config";
 import { useBlocker } from "../../../shared/lib/router";
@@ -13,13 +13,40 @@ import "./dirty-leave-guard.css";
 export const DirtyLeaveGuard = ({ dirty }: { dirty: boolean }) => {
   const titleId = useId();
   const descriptionId = useId();
+  const latestDirty = useRef(dirty);
+  useEffect(() => {
+    latestDirty.current = dirty;
+  }, [dirty]);
   const blocker = useBlocker({
-    shouldBlockFn: () => dirty,
-    enableBeforeUnload: () => dirty,
+    shouldBlockFn: ({ current, next }) =>
+      latestDirty.current && current.pathname !== next.pathname,
+    enableBeforeUnload: () => latestDirty.current,
     disabled: !dirty,
     withResolver: true,
   });
+  const stayButton = useRef<HTMLButtonElement>(null);
+  const blocked = blocker.status === "blocked";
+  useEffect(() => {
+    if (blocked) stayButton.current?.focus();
+  }, [blocked]);
   if (blocker.status !== "blocked") return null;
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      blocker.reset();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const buttons = Array.from(
+      event.currentTarget.querySelectorAll<HTMLButtonElement>("button"),
+    );
+    const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    const nextIndex = event.shiftKey
+      ? (index - 1 + buttons.length) % buttons.length
+      : (index + 1) % buttons.length;
+    event.preventDefault();
+    buttons[nextIndex]?.focus();
+  };
   return (
     <div className="leave-guard">
       <div
@@ -28,13 +55,14 @@ export const DirtyLeaveGuard = ({ dirty }: { dirty: boolean }) => {
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={descriptionId}
+        onKeyDown={onKeyDown}
       >
         <p id={titleId} className="leave-guard__title">
           {t("leave.title")}
         </p>
         <p id={descriptionId}>{t("leave.description")}</p>
         <p className="leave-guard__actions">
-          <Button tone="primary" autoFocus onClick={blocker.reset}>
+          <Button ref={stayButton} tone="primary" onClick={blocker.reset}>
             {t("leave.stay")}
           </Button>
           <Button onClick={blocker.proceed}>{t("leave.leave")}</Button>

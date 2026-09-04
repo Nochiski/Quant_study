@@ -1,4 +1,7 @@
 from strategy_workbench.application.strategy_authoring.ports.outgoing.document_codec import (
+    DOCUMENT_POLICY_REASONS,
+    SYNTAX_REASON,
+    YAML_GRAMMAR_REASONS,
     CodecLimits,
     DiagnosticKind,
     DiagnosticSeverity,
@@ -9,10 +12,15 @@ from strategy_workbench.application.strategy_authoring.ports.outgoing.document_c
     SourceFormat,
     SourcePosition,
     SourceRange,
+    diagnostic_code,
+    diagnostic_codes,
     source_hash_of,
 )
 
 __all__ = [
+    "DOCUMENT_POLICY_REASONS",
+    "SYNTAX_REASON",
+    "YAML_GRAMMAR_REASONS",
     "CodecLimits",
     "DiagnosticKind",
     "DiagnosticSeverity",
@@ -23,5 +31,7 @@ __all__ = [
     "SourceFormat",
     "SourcePosition",
     "SourceRange",
+    "diagnostic_code",
+    "diagnostic_codes",
     "source_hash_of",
 ]

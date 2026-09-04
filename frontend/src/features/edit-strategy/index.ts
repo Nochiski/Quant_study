@@ -29,7 +29,7 @@ export {
   useSaveDocument,
   type SaveStatus,
 } from "./model/use-save-document";
-export { saveStatusText } from "./model/save-status";
+export { saveStatusText, saveStatusTone } from "./model/save-status";
 export { useSchemaAssist, type SchemaAssist } from "./model/use-schema-assist";
 export {
   toDocumentDiagnostics,

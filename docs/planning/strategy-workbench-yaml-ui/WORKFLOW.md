@@ -352,9 +352,14 @@ scalar field constraint와 UI contract metadata의 owner를 backend domain의 �
 - scalar validator와 schema extension이 같은 declaration을 소비한다.
 - cross-field와 graph semantic constraint는 기존 domain validator가 소유하되 노출 가능한 contract code를 연결한다.
 - domain은 Pydantic을 import하지 않고 stdlib dataclass/type metadata를 유지한다.
-- inbound schema adapter가 기존 domain `ExpressionNode` union을 `Annotated[..., Field(discriminator="kind")]`로 감싼 transport/schema alias를 소유한다.
-- 이 alias는 domain dataclass를 참조할 뿐 field를 복제하지 않으므로 hand-written DTO로 취급하지 않는다.
-- `FactorNode` union은 위 adapter alias를 통해 `kind` discriminator가 있는 typed authoring boundary로 노출한다.
+- (구현 결과, 최초 계획과 다름) inbound schema adapter의 transport alias는 만들지 않았다.
+  `kind` → node type 매핑의 owner는 domain `EXPRESSION_NODE_KINDS`(`domain/factor/_nodes.py`)이고,
+  runtime JSON Schema의 `discriminator`는 domain schema builder(`domain/strategy/_schema.py`)가
+  union member의 `kind: Literal[...]`에서 직접 만든다. Pydantic `Annotated[..., Field(...)]`
+  alias는 없다.
+- 어느 쪽도 domain dataclass의 field를 복제하지 않으므로 hand-written DTO로 취급하지 않는다.
+- `FactorNode` union은 `kind` literal union으로 노출되어 SDK가 narrowing할 수 있다. OpenAPI
+  문서에는 `discriminator`가 0개이고 runtime schema 응답에만 있다.
 - schema 응답에 range/unit을 별도 hand-written table로 복제하지 않는다.
 
 Acceptance:
@@ -363,7 +368,8 @@ Acceptance:
 - 모든 scalar validation code가 constraint catalog 또는 명시적 semantic-only 목록에 속한다.
 - FactorNode schema에 `kind` discriminator와 variant별 required field가 존재한다.
 - architecture test가 domain/application의 Pydantic import를 금지한다.
-- adapter alias의 variant 집합과 domain `ExpressionNode` union의 variant 집합이 같다는 parity test가 있다.
+- `EXPRESSION_NODE_KINDS`와 domain `ExpressionNode` union의 variant 집합이 같다는 parity test가
+  있다 (`tests/domain/test_strategy_constraints.py::test_expression_node_kinds_cover_the_union_exactly`).
 
 ### P1-05 — Runtime Schema·Contract API
 
@@ -494,7 +500,9 @@ Phase 1 종료 기준:
 
 Acceptance:
 
-- 미래 공개 데이터가 preview/backtest에 나타나지 않는다.
+- 미래 공개 **필드** 데이터가 preview/backtest에 나타나지 않는다. `sector_id`·
+  `universe_member`는 공개일이 없어 가드 범위 밖이며 as_of vintage는 어댑터 책임이다
+  (D-006).
 - mock과 향후 production adapter가 같은 port contract를 통과한다.
 
 ### P1.5-04 — Truthful preview/backtest pipeline

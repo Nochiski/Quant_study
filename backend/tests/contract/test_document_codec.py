@@ -14,10 +14,13 @@ import pytest
 
 from strategy_workbench.adapters.outbound.document_codec.facade.codec import RuamelDocumentCodec
 from strategy_workbench.application.strategy_authoring.facade.ports import (
+    YAML_GRAMMAR_REASONS,
     CodecLimits,
     DiagnosticKind,
     ParseStatus,
     SourceFormat,
+    diagnostic_code,
+    diagnostic_codes,
 )
 from strategy_workbench.domain.strategy.facade.document import hydrate_strategy_document
 from strategy_workbench.domain.strategy.facade.specification import (
@@ -31,6 +34,9 @@ QUALITY_MOMENTUM_SPEC_HASH = "9eb6872a3ca250dfb78b0887e5b236a98b24fb2ccdf2d6af05
 
 def _source(name: str) -> str:
     return (FIXTURES / name).read_text(encoding="utf-8")
+
+
+YAML_CODES = frozenset(f"yaml.{reason}" for reason in YAML_GRAMMAR_REASONS)
 
 
 def _codec(**limits: int) -> RuamelDocumentCodec:
@@ -131,17 +137,17 @@ def test_structural_issue_pointers_resolve_to_source_ranges() -> None:
     [
         ('title: "unterminated\ndata:\n', "yaml.syntax", 0, 7),
         ("a: [1, 2\nb: 3\n", "yaml.syntax", 0, 3),
-        ("a: 1\na: 2\n", "yaml.duplicate_key", 1, 0),
+        ("a: 1\na: 2\n", "document.duplicate_key", 1, 0),
         ("base: &b [1]\nc: *b\n", "yaml.anchor_or_alias", 0, 6),
         ("a: !custom 1\n", "yaml.tag", 0, 3),
         ("%YAML 1.1\n---\na: 1\n", "yaml.directive", 0, 0),
         ("a:\n  <<: {x: 1}\n", "yaml.merge_key", 1, 2),
         ("window: 1_000\n", "yaml.non_core_number", 0, 8),
-        ("a: .nan\n", "yaml.non_finite_number", 0, 3),
-        ("a: 9007199254740993\n", "yaml.integer_out_of_range", 0, 3),
-        ("1: v\n", "yaml.non_string_key", 0, 0),
+        ("a: .nan\n", "document.non_finite_number", 0, 3),
+        ("a: 9007199254740993\n", "document.integer_out_of_range", 0, 3),
+        ("1: v\n", "document.non_string_key", 0, 0),
         ("a: 1\n---\nb: 2\n", "yaml.multiple_documents", 1, 0),
-        ("- a\n", "yaml.not_a_mapping", 0, 0),
+        ("- a\n", "document.not_a_mapping", 0, 0),
     ],
 )
 def test_rejections_carry_code_and_position(text: str, code: str, line: int, column: int) -> None:
@@ -159,7 +165,7 @@ def test_rejections_carry_code_and_position(text: str, code: str, line: int, col
 def test_empty_document_is_rejected_without_a_range() -> None:
     parsed = _codec().parse("", format=SourceFormat.YAML)
     assert parsed.status is ParseStatus.REJECTED
-    assert parsed.diagnostics[0].code == "yaml.not_a_mapping"
+    assert parsed.diagnostics[0].code == "document.not_a_mapping"
 
 
 def test_json_syntax_errors_report_json_positions() -> None:
@@ -177,7 +183,7 @@ def test_json_duplicate_keys_are_rejected_with_the_second_key_range() -> None:
     parsed = _codec().parse(source, format=SourceFormat.JSON)
 
     (diagnostic,) = parsed.diagnostics
-    assert diagnostic.code == "yaml.duplicate_key"
+    assert diagnostic.code == "document.duplicate_key"
     assert diagnostic.pointer == "/a"
     assert diagnostic.range is not None
     assert (diagnostic.range.start.line, diagnostic.range.start.column) == (1, 1)
@@ -189,7 +195,7 @@ def test_json_duplicate_keys_are_rejected_with_the_second_key_range() -> None:
 def test_json_non_mapping_root_keeps_the_root_range() -> None:
     parsed = _codec().parse("[1, 2]", format=SourceFormat.JSON)
 
-    assert parsed.diagnostics[0].code == "yaml.not_a_mapping"
+    assert parsed.diagnostics[0].code == "document.not_a_mapping"
     assert parsed.diagnostics[0].range is not None
     assert parsed.diagnostics[0].range.start.column == 0
 
@@ -268,20 +274,20 @@ def test_deep_nesting_is_rejected_before_any_recursion(source: str, fmt: SourceF
     parsed = _codec().parse(source, format=fmt)
 
     assert parsed.status is ParseStatus.REJECTED
-    assert parsed.diagnostics[0].code == "yaml.too_deep"
+    assert parsed.diagnostics[0].code == "document.too_deep"
 
 
 def test_resource_limits_fail_closed() -> None:
     assert _codec(max_bytes=8).parse("title: 'x'\n", format=SourceFormat.YAML).diagnostics[
         0
-    ].code == ("yaml.too_large")
+    ].code == ("document.too_large")
     deep = "a:\n" + "".join("  " * i + "b:\n" for i in range(1, 6)) + "  " * 6 + "c: 1\n"
     assert _codec(max_depth=3).parse(deep, format=SourceFormat.YAML).diagnostics[0].code == (
-        "yaml.too_deep"
+        "document.too_deep"
     )
     many = "\n".join(f"k{i}: {i}" for i in range(50)) + "\n"
     assert _codec(max_nodes=20).parse(many, format=SourceFormat.YAML).diagnostics[0].code == (
-        "yaml.too_many_nodes"
+        "document.too_many_nodes"
     )
 
 
@@ -289,3 +295,67 @@ def test_pointer_keys_are_rfc6901_escaped() -> None:
     parsed = _codec().parse('"a/b": 1\n"~x": 2\n', format=SourceFormat.YAML)
     assert parsed.ok
     assert set(parsed.value_ranges) == {"", "/a~1b", "/~0x"}
+
+
+@pytest.mark.parametrize(
+    ("source", "format", "code"),
+    [
+        ("{" + '"a":{' * 40 + "}" + "}" * 40, SourceFormat.JSON, "document.too_deep"),
+        ('{"a":1,"a":2}', SourceFormat.JSON, "document.duplicate_key"),
+        ("[1, 2]", SourceFormat.JSON, "document.not_a_mapping"),
+        ('{"a": 9007199254740993}', SourceFormat.JSON, "document.integer_out_of_range"),
+        ('{"a": NaN}', SourceFormat.JSON, "json.syntax"),
+        ('{"a": "\ud800"}', SourceFormat.JSON, "json.syntax"),
+        ("a: 1\na: 2\n", SourceFormat.YAML, "document.duplicate_key"),
+        ("- a\n", SourceFormat.YAML, "document.not_a_mapping"),
+        ("a: !custom 1\n", SourceFormat.YAML, "yaml.tag"),
+        ("a: [1, 2\n", SourceFormat.YAML, "yaml.syntax"),
+    ],
+)
+def test_the_format_decides_the_code_prefix(source: str, format: SourceFormat, code: str) -> None:
+    """DEFECT-103: a JSON document used to be told `yaml.too_deep` because ruamel walks both
+    formats. Policy shared by both formats is `document.*`; only YAML grammar keeps `yaml.*`."""
+    parsed = _codec().parse(source, format=format)
+
+    (diagnostic,) = parsed.diagnostics
+    assert diagnostic.code == code
+
+
+@pytest.mark.parametrize("format", list(SourceFormat), ids=lambda item: item.value)
+def test_every_reported_code_is_declared_by_the_port(format: SourceFormat) -> None:
+    """The port owns the code set, so a consumer can enumerate it before calling parse."""
+    declared = diagnostic_codes(format)
+    assert {code for code in declared if code.startswith("yaml.")} == (
+        set() if format is SourceFormat.JSON else {"yaml.syntax"} | YAML_CODES
+    )
+
+    sources = [
+        "",
+        "- a\n",
+        '{"a":1,"a":2}',
+        "{" + '"a":{' * 40 + "}" + "}" * 40,
+        '{"a": 9007199254740993}',
+        '{"a": }',
+        "a: !custom 1\n",
+        "a: &b 1\nc: *b\n",
+        "%YAML 1.1\n---\na: 1\n",
+        "a:\n  <<: {x: 1}\n",
+        "window: 1_000\n",
+        "a: .nan\n",
+        "1: v\n",
+        "a: 1\n---\nb: 2\n",
+        "x" * 600_000,
+    ]
+    reported = {
+        diagnostic.code
+        for source in sources
+        for diagnostic in _codec().parse(source, format=format).diagnostics
+    }
+
+    assert reported, "no rejection reproduced — the probe stopped exercising the codec"
+    assert reported <= declared, sorted(reported - declared)
+
+
+def test_an_unregistered_reason_cannot_become_a_code() -> None:
+    with pytest.raises(ValueError, match="rejection reason has no owner"):
+        diagnostic_code("smuggled_probe", SourceFormat.YAML)

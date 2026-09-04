@@ -1,4 +1,4 @@
-import { t } from "../../../shared/config";
+import { t, type MessageKey } from "../../../shared/config";
 import type { DocumentDiagnostic } from "../model/document-state";
 import "./diagnostics-panel.css";
 
@@ -9,7 +9,7 @@ type DiagnosticsPanelProps = {
   onSelect: (diagnostic: DocumentDiagnostic) => void;
 };
 
-const KIND_LABEL: Record<DocumentDiagnostic["kind"], string> = {
+const KIND_LABEL: Record<DocumentDiagnostic["kind"], MessageKey> = {
   syntax: "problems.kind.syntax",
   structural: "problems.kind.structural",
   semantic: "problems.kind.semantic",
@@ -60,7 +60,7 @@ export const DiagnosticsPanel = ({
                     : t("problems.warning")}
                 </span>
                 <span className="problems__kind">
-                  {t(KIND_LABEL[diagnostic.kind] as Parameters<typeof t>[0])}
+                  {t(KIND_LABEL[diagnostic.kind])}
                 </span>
                 <span className="problems__message">{diagnostic.message}</span>
                 <code className="problems__where">

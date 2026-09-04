@@ -4,6 +4,7 @@ import {
   strategyWorkbenchApi,
   type SourceDiagnostic,
 } from "../../../shared/api";
+import { t } from "../../../shared/config";
 import { locateRange, type ParsedSource } from "../../../shared/lib/yaml12";
 import {
   shouldCompile,
@@ -20,6 +21,25 @@ const rangeFor = (
   diagnostic: SourceDiagnostic,
   parse: ParsedSource | null,
 ): DocumentDiagnostic["range"] => {
+  // Missing root fields are anchored at the document start instead of underlining the entire
+  // document. The editor expands this one-character range when it renders the marker.
+  if (diagnostic.pointer === "" && parse) {
+    const root = parse.valueRanges.get("");
+    if (root) {
+      const width = Math.min(
+        1,
+        Math.max(0, root.end.offset - root.start.offset),
+      );
+      return {
+        start: root.start,
+        end: {
+          ...root.start,
+          column: root.start.column + width,
+          offset: root.start.offset + width,
+        },
+      };
+    }
+  }
   if (parse) {
     const exact =
       parse.valueRanges.get(diagnostic.pointer) ??
@@ -118,8 +138,10 @@ export const useCompileDocument = (
                   kind: "capability",
                   severity: "error",
                   pointer: "",
-                  message:
+                  message: t("problems.compileUnavailable").replace(
+                    "{detail}",
                     error instanceof Error ? error.message : String(error),
+                  ),
                   range: null,
                 },
               ],

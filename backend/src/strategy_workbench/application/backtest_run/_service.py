@@ -18,12 +18,14 @@ from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunSpec,
     BacktestRunState,
     BacktestStartResponse,
+    DataWarning,
     InlineDraft,
     RunProgressEvent,
     RunStatus,
     SavedRevisionReference,
     StrategyProvenance,
     StrategySourceKind,
+    WarningSeverity,
 )
 from strategy_workbench.domain.portfolio.facade.construction import TargetTape
 from strategy_workbench.domain.strategy.facade.specification import strategy_spec_hash
@@ -122,7 +124,7 @@ class BacktestRunService:
             self._emit(record, RunStatus.QUEUED, 0.0, "queued", "Run accepted")
         Thread(
             target=self._run,
-            args=(run_id, spec, portfolio.tape, provenance),
+            args=(run_id, spec, portfolio.tape, provenance, portfolio.warnings),
             name=f"backtest-{run_id}",
             daemon=True,
         ).start()
@@ -220,6 +222,7 @@ class BacktestRunService:
         spec: BacktestRunSpec,
         tape: TargetTape,
         provenance: StrategyProvenance,
+        observation_warnings: tuple[str, ...] = (),
     ) -> None:
         record = self._record(run_id)
         strategy = spec.strategy
@@ -239,6 +242,12 @@ class BacktestRunService:
                     security_ids=security_ids,
                     benchmark_security_id=spec.benchmark_security_id,
                 )
+            )
+            # The preview's caveats travel with the data they describe, so the manifest records
+            # every warning the run was built on, not just the market-data ones.
+            dataset = replace(
+                dataset,
+                warnings=(*_as_data_warnings(observation_warnings), *dataset.warnings),
             )
             self._raise_if_cancelled(record)
             self._update(record, RunStatus.RUNNING, 0.25, "engine", "Running backtest engine")
@@ -346,3 +355,15 @@ class BacktestRunService:
     def _raise_if_cancelled(record: _RunRecord) -> None:
         if record.cancellation.is_set():
             raise RunCancelledError("run cancelled")
+
+
+def _as_data_warnings(messages: tuple[str, ...]) -> tuple[DataWarning, ...]:
+    """Raw observation warnings as manifest rows, under one code so their origin stays readable."""
+    return tuple(
+        DataWarning(
+            code="portfolio.raw_observation",
+            message=message,
+            severity=WarningSeverity.WARNING,
+        )
+        for message in messages
+    )

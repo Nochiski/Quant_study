@@ -53,7 +53,8 @@
           "propertyName": "kind"
         }
       },
-      "default": []
+      "default": [],
+      "x-defines": "parameter"
     }
   },
   "required": [
@@ -591,7 +592,8 @@
             "discriminator": {
               "propertyName": "kind"
             }
-          }
+          },
+          "x-defines": "node"
         },
         "output_node_id": {
           "type": "string",

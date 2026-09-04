@@ -2,7 +2,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { HttpResponse, http } from "msw";
+import { HttpResponse, delay, http } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
@@ -86,7 +86,7 @@ const server = setupServer(
   ),
 );
 
-beforeAll(() => server.listen({ onUnhandledRequest: "bypass" }));
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
   cleanup();
   server.resetHandlers();
@@ -116,10 +116,13 @@ describe("App Shell routes", () => {
     expect(
       await screen.findByRole("heading", { name: "퀄리티 모멘텀 v2" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "DIFF" })).toHaveAttribute(
+    // The diff view is not implemented yet: JSON is shown, the URL keeps the request, a notice says so.
+    expect(screen.getByRole("tab", { name: "JSON" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
+    expect(screen.getByRole("status")).toHaveTextContent("DIFF");
+    expect(screen.getByRole("tabpanel")).toBeInTheDocument();
     expect(history.location.search).toContain("view=diff");
     expect(history.location.search).toContain("path=%2Frisk");
   });
@@ -152,14 +155,46 @@ describe("App Shell routes", () => {
     expect(history.location.pathname).toBe("/research/strategies/new");
   });
 
-  it("keeps legacy bookmarks on the legacy builder with their query", async () => {
-    const history = mount("/?step=portfolio&run");
+  it("keeps legacy bookmarks on the legacy builder with their query and run id", async () => {
+    const history = mount("/?step=portfolio&run=bt-42");
     await waitFor(() =>
       expect(history.location.pathname).toBe("/legacy/builder"),
     );
     expect(history.location.search).toContain("step=portfolio");
-    expect(history.location.search).toContain("run=true");
-    expect(history.location.search).not.toContain("run=false");
+    expect(history.location.search).toContain("run=bt-42");
+    expect(screen.getAllByRole("main")).toHaveLength(1);
+  });
+
+  it("shows loading inside the shell and a localised error with a way back on 500", async () => {
+    server.use(
+      http.get(`${API}/api/v1/strategies/:strategyId`, async ({ request }) => {
+        await delay(300);
+        if (new URL(request.url).searchParams.get("revision") === "2") {
+          return HttpResponse.json({ detail: "boom" }, { status: 500 });
+        }
+        return HttpResponse.json({
+          spec: spec(1, "느린 전략"),
+          spec_hash: "b".repeat(64),
+        });
+      }),
+    );
+    mount("/research/strategies/s1/revisions/1");
+    expect(await screen.findByRole("status")).toHaveTextContent("불러오는 중");
+    expect(
+      screen.getByRole("navigation", { name: "주 메뉴" }),
+    ).toBeInTheDocument();
+    await screen.findByRole("heading", { name: "느린 전략" });
+    cleanup();
+    mount("/research/strategies/s1/revisions/2");
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("페이지를 표시할 수 없습니다");
+    expect(alert).not.toHaveTextContent("API request failed");
+    expect(
+      screen.getByRole("navigation", { name: "주 메뉴" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "새 전략으로 이동" }),
+    ).toBeInTheDocument();
   });
 
   it("hides operations behind the flag and never renders them as live controls", async () => {
@@ -167,7 +202,13 @@ describe("App Shell routes", () => {
     expect(
       await screen.findByText("페이지를 찾을 수 없습니다"),
     ).toBeInTheDocument();
-    expect(screen.getByText("주문")).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText("주문", { exact: false })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    expect(screen.getByText("주문", { exact: false })).toHaveTextContent(
+      "향후 제공, 사용 불가",
+    );
     cleanup();
     mount("/operations/orders", true);
     expect(

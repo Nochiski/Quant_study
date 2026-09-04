@@ -7,3 +7,8 @@ export const STRATEGY_VIEWS = [
   "diff",
 ] as const;
 export type StrategyView = (typeof STRATEGY_VIEWS)[number];
+
+/** Views the page can actually render today; the rest arrive with P3/P4. */
+export const IMPLEMENTED_VIEWS = [
+  "json",
+] as const satisfies readonly StrategyView[];

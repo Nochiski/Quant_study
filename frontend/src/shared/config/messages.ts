@@ -221,6 +221,12 @@ const ko = {
   "page.operations.placeholderTitle": "운영 기능은 아직 제공되지 않습니다",
   "page.operations.placeholder":
     "이 화면은 주문·포지션·리스크 기능의 자리만 잡아 둔 것이며 실제 거래를 수행하지 않습니다.",
+  "nav.operations.unavailable": "향후 제공, 사용 불가",
+  "page.error.description":
+    "잠시 후 다시 시도하거나 새 전략 화면으로 이동하세요.",
+  "page.error.retry": "다시 시도",
+  "page.revision.viewPending": "이 표현은 아직 제공되지 않아 JSON을 표시합니다",
+  "page.backtest.resultError": "백테스트 결과를 불러올 수 없습니다.",
 } as const;
 
 export type MessageKey = keyof typeof ko;
@@ -451,6 +457,12 @@ export const messages = {
     "page.operations.placeholderTitle": "Operations are not available yet",
     "page.operations.placeholder":
       "This screen only reserves the place for orders, positions and risk; it does not trade.",
+    "nav.operations.unavailable": "coming later, not available",
+    "page.error.description":
+      "Try again in a moment or go to the new strategy screen.",
+    "page.error.retry": "Retry",
+    "page.revision.viewPending": "This view is not available yet; showing JSON",
+    "page.backtest.resultError": "The backtest result could not be loaded.",
   } satisfies Record<MessageKey, string>,
 } as const;
 

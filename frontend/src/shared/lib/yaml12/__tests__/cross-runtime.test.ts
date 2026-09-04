@@ -30,7 +30,10 @@ const findFixtures = (): string => {
     const candidate = resolve(dir, FIXTURE_RELATIVE);
     if (existsSync(candidate)) return candidate;
     const parent = dirname(dir);
-    if (parent === dir) throw new Error(`fixtures not found — from=${process.cwd()} want=${FIXTURE_RELATIVE}`);
+    if (parent === dir)
+      throw new Error(
+        `fixtures not found — from=${process.cwd()} want=${FIXTURE_RELATIVE}`,
+      );
     dir = parent;
   }
 };
@@ -60,11 +63,14 @@ const RUAMEL_INT =
 const RUAMEL_FLOAT =
   /^[-+]?(?:[0-9][0-9_]*\.[0-9_]*(?:[eE][-+]?[0-9]+)?|[0-9][0-9_]*[eE][-+]?[0-9]+|\.[0-9_]+(?:[eE][-+]?[0-9]+)?)$/;
 const CORE_INT = /^(?:[-+]?[0-9]+|0o[0-7]+|0x[0-9a-fA-F]+)$/;
-const CORE_FLOAT = /^[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?$/;
+const CORE_FLOAT =
+  /^[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?$/;
 // ruamel 1.2 resolver의 float regex는 선행 `.` 분기에서 부호 없는 지수(`.5e3`)를 빠뜨려 문자열로 읽는다
 // (`.5e+3`은 float). core에는 맞으므로 frontend가 숫자로 읽는 역방향 불일치. 양쪽 모두 거부한다.
 const RUAMEL_MISSES_FLOAT = /^[-+]?\.[0-9]+[eE][0-9]+$/;
-const DEFAULT_TAG_HANDLES: Record<string, string> = { "!!": "tag:yaml.org,2002:" };
+const DEFAULT_TAG_HANDLES: Record<string, string> = {
+  "!!": "tag:yaml.org,2002:",
+};
 
 const rejectAnchorOrTag = (
   anchor: string | undefined,
@@ -86,11 +92,21 @@ const rejectPolicy = (doc: Document): void => {
     }
   }
   if (doc.directives?.yaml.explicit) {
-    throw new Yaml12Rejected("directive", `yaml=${doc.directives.yaml.version}`);
+    throw new Yaml12Rejected(
+      "directive",
+      `yaml=${doc.directives.yaml.version}`,
+    );
   }
   const tagHandles = Object.entries(doc.directives?.tags ?? {});
-  if (tagHandles.some(([handle, prefix]) => DEFAULT_TAG_HANDLES[handle] !== prefix)) {
-    throw new Yaml12Rejected("directive", `tag handles=${tagHandles.map(([h]) => h).join(",")}`);
+  if (
+    tagHandles.some(
+      ([handle, prefix]) => DEFAULT_TAG_HANDLES[handle] !== prefix,
+    )
+  ) {
+    throw new Yaml12Rejected(
+      "directive",
+      `tag handles=${tagHandles.map(([h]) => h).join(",")}`,
+    );
   }
   for (const warning of doc.warnings) {
     if (warning.code === "TAG_RESOLVE_FAILED") {
@@ -123,14 +139,18 @@ const rejectPolicy = (doc: Document): void => {
         throw new Yaml12Rejected("merge_key", "scalar=<<");
       }
       if (source !== undefined && node.type === "PLAIN") {
-        const ruamelNumber = RUAMEL_INT.test(source) || RUAMEL_FLOAT.test(source);
+        const ruamelNumber =
+          RUAMEL_INT.test(source) || RUAMEL_FLOAT.test(source);
         const coreNumber = CORE_INT.test(source) || CORE_FLOAT.test(source);
         if ((ruamelNumber && !coreNumber) || RUAMEL_MISSES_FLOAT.test(source)) {
           throw new Yaml12Rejected("non_core_number", `scalar=${source}`);
         }
       }
       if (typeof node.value === "number" && !Number.isFinite(node.value)) {
-        throw new Yaml12Rejected("non_finite_number", `value=${String(node.value)}`);
+        throw new Yaml12Rejected(
+          "non_finite_number",
+          `value=${String(node.value)}`,
+        );
       }
       // 정수 범위 검사는 정수 표기(core int)에만 적용한다. JS는 `1e16`도 정수로 보기 때문이다.
       if (
@@ -140,7 +160,10 @@ const rejectPolicy = (doc: Document): void => {
         CORE_INT.test(source) &&
         !Number.isSafeInteger(node.value)
       ) {
-        throw new Yaml12Rejected("integer_out_of_range", `value=${String(node.value)}`);
+        throw new Yaml12Rejected(
+          "integer_out_of_range",
+          `value=${String(node.value)}`,
+        );
       }
     },
   });
@@ -165,7 +188,10 @@ export const loadYaml12Mapping = (text: string): Record<string, unknown> => {
   }
   rejectPolicy(doc);
   if (!isMap(doc.contents)) {
-    throw new Yaml12Rejected("not_a_mapping", `root=${doc.contents?.constructor.name ?? "null"}`);
+    throw new Yaml12Rejected(
+      "not_a_mapping",
+      `root=${doc.contents?.constructor.name ?? "null"}`,
+    );
   }
   return doc.toJS() as Record<string, unknown>;
 };

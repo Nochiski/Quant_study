@@ -46,6 +46,11 @@ type/unit, minimum history, inline validation과 함께 표시한다. 두 모드
   글리프/문구로 표시하고, Tabs·SplitHandle은 키보드로 조작한다. 문구는 `shared/config/messages.ts`에 ko/en을
   함께 추가한다.
 
+## 환경 변수
+
+- `VITE_API_BASE_URL`: backend 주소 (기본 `http://localhost:8000`).
+- `VITE_ENABLE_OPERATIONS`: 정확히 `true`일 때만 `/operations/*` placeholder route를 노출한다. 그 외 값은 not-found.
+
 ## FSD 의존성 방향
 
 ```text

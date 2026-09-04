@@ -530,10 +530,7 @@ def create_app(
         try:
             return strategy_design.get(strategy_id, revision)
         except StrategyNotFoundError as error:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"code": "strategy.not_found", "message": str(error)},
-            ) from error
+            raise _strategy_not_found(error) from error
 
     @app.post(
         "/api/v1/strategies/{strategy_id}/revisions",
@@ -556,10 +553,7 @@ def create_app(
                 },
             ) from error
         except StrategyNotFoundError as error:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"code": "strategy.not_found", "message": str(error)},
-            ) from error
+            raise _strategy_not_found(error) from error
         except StrategyRevisionConflictError as error:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,

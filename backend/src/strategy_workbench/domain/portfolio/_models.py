@@ -44,6 +44,18 @@ class PortfolioFactorValue:
 
 @dataclass(frozen=True)
 class PortfolioObservation:
+    """One (as_of, security) row the compiler scores.
+
+    `universe_member` and `sector_id` carry no publication date, so the FUTURE_DATA guard cannot
+    reach them: both are point-in-time facts the observation adapter owns (see the
+    `RawObservationPort` contract). A retroactive index reconstitution or sector reclassification
+    is therefore invisible here and shows up as silent look-ahead in selection and in the sector
+    exposure constraint.
+
+    `previous_weight` seeds the *first* rebalance frame only. Later frames read the book that
+    `compile_target_tape` folds forward from the previous frame's targets, not this field.
+    """
+
     as_of: date
     security_id: str
     universe_member: bool

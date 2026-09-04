@@ -123,6 +123,51 @@ describe("describeYamlCursor", () => {
     });
   });
 
+  it("resolves sequences whose items sit at the owner key's indent", () => {
+    const zero = "parameters:\n- parameter_id: x\n  ki";
+    expect(describeYamlCursor(zero, zero.length)).toMatchObject({
+      mode: "key",
+      pointer: "/parameters/0",
+      prefix: "ki",
+      siblings: ["parameter_id"],
+    });
+    const tags = "tags:\n- a\n- b";
+    expect(describeYamlCursor(tags, tags.length)).toMatchObject({
+      mode: "value",
+      pointer: "/tags/1",
+      prefix: "b",
+    });
+    const nested =
+      "factors:\n  factors:\n  - factor_id: m\n    graph:\n      nodes:\n      - node_id: a\n      - node_id: b\n        ki";
+    expect(describeYamlCursor(nested, nested.length)).toMatchObject({
+      mode: "key",
+      pointer: "/factors/factors/0/graph/nodes/1",
+      prefix: "ki",
+      siblings: ["node_id"],
+    });
+  });
+
+  it("does not mistake a '#' inside quotes for a comment", () => {
+    const quoted = 'title: "a # b';
+    expect(describeYamlCursor(quoted, quoted.length)).toMatchObject({
+      mode: "value",
+      pointer: "/title",
+      prefix: "a # b",
+    });
+    const escaped = String.raw`title: "a \" # b`;
+    expect(describeYamlCursor(escaped, escaped.length)).toMatchObject({
+      mode: "value",
+      pointer: "/title",
+      prefix: String.raw`a \" # b`,
+    });
+    const doubled = "title: 'a '' # b";
+    expect(describeYamlCursor(doubled, doubled.length)).toMatchObject({
+      mode: "value",
+      pointer: "/title",
+      prefix: "a '' # b",
+    });
+  });
+
   it("yields nothing inside comments and for a bare dash", () => {
     const comment = "title: a # no";
     expect(describeYamlCursor(comment, comment.length)).toBeNull();

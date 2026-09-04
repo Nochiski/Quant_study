@@ -7,6 +7,9 @@ ADR: docs/superpowers/specs/2026-09-04-yaml-parser-adr.md (D1-D3),
 The codec never builds a StrategySpec; it only produces the untyped tree, JSON Pointer ranges and
 syntax/policy diagnostics. Typed hydrate (domain.strategy) and semantic validation run afterwards so
 that every diagnostic kind can be attached to a source range.
+
+Diagnostic codes are declared here, not in the adapter, so a consumer can enumerate what a given
+format may return before it ever calls `parse` — see `diagnostic_code` below.
 """
 
 from __future__ import annotations
@@ -19,6 +22,9 @@ from typing import Protocol
 from strategy_workbench.domain.strategy.facade.document import SourceFormat, source_hash_of
 
 __all__ = [
+    "DOCUMENT_POLICY_REASONS",
+    "SYNTAX_REASON",
+    "YAML_GRAMMAR_REASONS",
     "CodecLimits",
     "DiagnosticKind",
     "DiagnosticSeverity",
@@ -29,8 +35,70 @@ __all__ = [
     "SourceFormat",
     "SourcePosition",
     "SourceRange",
+    "diagnostic_code",
+    "diagnostic_codes",
     "source_hash_of",
 ]
+
+# Rejection reasons, owned here rather than by whichever adapter detects them (DEFECT-103).
+#
+# The prefix names the rule that fired, not the parser that noticed it. A JSON document used to
+# come back with `yaml.too_deep` / `yaml.duplicate_key` / `yaml.not_a_mapping` because the ruamel
+# adapter walks both formats, which left a consumer no way to know which codes a `format=json`
+# parse can produce. Policy that reads the same in both formats is therefore `document.<reason>`,
+# constructs that exist only in YAML source stay `yaml.<reason>`, and a syntax error carries the
+# format that failed to parse. Reason names are the cross-runtime vocabulary shared with
+# `tests/fixtures/strategy_documents/yaml12/manifest.json`; only the prefix is decided here.
+
+SYNTAX_REASON = "syntax"
+
+DOCUMENT_POLICY_REASONS: frozenset[str] = frozenset(
+    {
+        "too_large",
+        "too_deep",
+        "too_many_nodes",
+        "not_a_mapping",
+        "duplicate_key",
+        "non_string_key",
+        "non_finite_number",
+        "integer_out_of_range",
+    }
+)
+
+YAML_GRAMMAR_REASONS: frozenset[str] = frozenset(
+    {
+        "directive",
+        "anchor_or_alias",
+        "tag",
+        "merge_key",
+        "non_core_number",
+        "multiple_documents",
+    }
+)
+
+
+def diagnostic_code(reason: str, format: SourceFormat) -> str:
+    """Wire code for a rejection reason. The only sanctioned way to mint a codec diagnostic code."""
+    if reason == SYNTAX_REASON:
+        return f"{format.value}.{SYNTAX_REASON}"
+    if reason in DOCUMENT_POLICY_REASONS:
+        return f"document.{reason}"
+    if reason in YAML_GRAMMAR_REASONS:
+        # Only reachable for YAML sources — a JSON document has no directive, anchor or tag to
+        # reject — so the code names the grammar, not the parse format.
+        return f"yaml.{reason}"
+    raise ValueError(
+        "rejection reason has no owner — add it to DOCUMENT_POLICY_REASONS or "
+        f"YAML_GRAMMAR_REASONS: reason={reason!r} format={format.value!r}"
+    )
+
+
+def diagnostic_codes(format: SourceFormat) -> frozenset[str]:
+    """Every code `DocumentCodecPort.parse` may report for a document of this format."""
+    reasons = DOCUMENT_POLICY_REASONS | {SYNTAX_REASON}
+    if format is SourceFormat.YAML:
+        reasons |= YAML_GRAMMAR_REASONS
+    return frozenset(diagnostic_code(reason, format) for reason in reasons)
 
 
 class DiagnosticKind(StrEnum):

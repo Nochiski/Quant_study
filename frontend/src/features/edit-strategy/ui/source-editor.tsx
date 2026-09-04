@@ -67,12 +67,14 @@ export const SourceEditor = ({
     [documentDiagnostics],
   );
 
-  // Selecting a problem moves the editor to its range (WORKFLOW P3-04 acceptance).
+  // Selecting a problem moves the editor to its range (WORKFLOW P3-04 acceptance). Clamp stale
+  // offsets defensively so an old range can never throw against shorter current text.
   const selectDiagnostic = useCallback((diagnostic: DocumentDiagnostic) => {
     const editor = handle.current;
     if (!editor || diagnostic.range === null) return;
-    const from = diagnostic.range.start.offset;
-    const to = Math.max(diagnostic.range.end.offset, from);
+    const length = editor.getText().length;
+    const from = Math.min(diagnostic.range.start.offset, length);
+    const to = Math.min(Math.max(diagnostic.range.end.offset, from), length);
     editor.setSelection(from, to);
     editor.scrollTo(from);
     editor.focus();
@@ -129,7 +131,11 @@ export const SourceEditor = ({
             ? documentDiagnostics
             : state.compiled.diagnostics
         }
-        stale={documentDiagnostics.length === 0 && isSpecStale(state)}
+        stale={
+          documentDiagnostics.length === 0 &&
+          state.compiled !== null &&
+          state.compiledVersion !== state.sourceVersion
+        }
         onSelect={selectDiagnostic}
       />
     </div>

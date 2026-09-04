@@ -344,6 +344,8 @@ const ko = {
   "problems.kind.structural": "구조",
   "problems.kind.semantic": "검증",
   "problems.kind.capability": "서버",
+  "problems.compileUnavailable":
+    "검증 서버에 연결할 수 없어 이 텍스트를 확인하지 못했습니다. 잠시 후 다시 시도하세요. ({detail})",
 } as const;
 
 export type MessageKey = keyof typeof ko;
@@ -697,6 +699,8 @@ export const messages = {
     "problems.kind.structural": "structure",
     "problems.kind.semantic": "validation",
     "problems.kind.capability": "server",
+    "problems.compileUnavailable":
+      "The validation server could not be reached, so this text is unverified. Try again shortly. ({detail})",
   } satisfies Record<MessageKey, string>,
 } as const;
 

@@ -92,6 +92,7 @@ def test_stale_expected_revision_is_409_and_invalid_source_is_422_with_diagnosti
     assert (
         stale.status_code == 409 and stale.json()["detail"]["code"] == "strategy.revision_conflict"
     )
+    assert stale.json()["detail"]["latest_revision"] == 1
 
     invalid = client.post(
         "/api/v1/strategy-documents",
@@ -148,6 +149,7 @@ def test_legacy_revise_of_a_document_strategy_is_refused() -> None:
 
     assert response.status_code == 409, response.text
     assert response.json()["detail"]["code"] == "strategy.revision_conflict"
+    assert response.json()["detail"]["latest_revision"] == 1
     history = client.get(f"/api/v1/strategies/{strategy_id}/revisions").json()
     assert [item["origin"] for item in history["items"]] == ["document"]
 

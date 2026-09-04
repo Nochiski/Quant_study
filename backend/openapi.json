@@ -4681,6 +4681,48 @@
         "title": "StrategyProvenance",
         "type": "object"
       },
+      "StrategyRevisionConflictDetail": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "latest_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Revision"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "latest_revision"
+        ],
+        "title": "StrategyRevisionConflictDetail",
+        "type": "object"
+      },
+      "StrategyRevisionConflictResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/StrategyRevisionConflictDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "StrategyRevisionConflictResponse",
+        "type": "object"
+      },
       "StrategySourceKind": {
         "enum": [
           "saved_revision",
@@ -6354,6 +6396,16 @@
             },
             "description": "Successful Response"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyRevisionConflictResponse"
+                }
+              }
+            },
+            "description": "The expected revision is stale or the authoring mode conflicts"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -6630,6 +6682,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyRevisionConflictResponse"
+                }
+              }
+            },
+            "description": "The expected revision is stale"
           },
           "422": {
             "content": {

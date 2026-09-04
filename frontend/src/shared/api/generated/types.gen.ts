@@ -2950,6 +2950,31 @@ export type StrategyProvenance = {
 };
 
 /**
+ * StrategyRevisionConflictDetail
+ */
+export type StrategyRevisionConflictDetail = {
+  /**
+   * Code
+   */
+  code: string;
+  /**
+   * Latest Revision
+   */
+  latest_revision: number | null;
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * StrategyRevisionConflictResponse
+ */
+export type StrategyRevisionConflictResponse = {
+  detail: StrategyRevisionConflictDetail;
+};
+
+/**
  * StrategySourceKind
  */
 export type StrategySourceKind = "saved_revision" | "inline_draft";
@@ -3997,6 +4022,10 @@ export type ReviseStrategyData = {
 
 export type ReviseStrategyErrors = {
   /**
+   * The expected revision is stale or the authoring mode conflicts
+   */
+  409: StrategyRevisionConflictResponse;
+  /**
    * Validation Error
    */
   422: HttpValidationError;
@@ -4184,6 +4213,10 @@ export type ReviseStrategyDocumentData = {
 };
 
 export type ReviseStrategyDocumentErrors = {
+  /**
+   * The expected revision is stale
+   */
+  409: StrategyRevisionConflictResponse;
   /**
    * Validation Error
    */

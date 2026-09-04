@@ -137,14 +137,20 @@ def test_stale_expected_revision_conflicts(factory) -> None:
     template = _template()
     repository.add(_legacy(template, "s1", 1))
 
-    with pytest.raises(StrategyRevisionConflictError, match="expected=0 actual=1"):
+    with pytest.raises(
+        StrategyRevisionConflictError, match="expected=0 actual=1"
+    ) as stale:
         repository.append(_legacy(template, "s1", 2), expected_revision=0)
-    with pytest.raises(StrategyRevisionConflictError, match="not monotonic"):
+    assert stale.value.latest_revision == 1
+    with pytest.raises(StrategyRevisionConflictError, match="not monotonic") as monotonic:
         repository.append(_legacy(template, "s1", 3), expected_revision=1)
-    with pytest.raises(StrategyRevisionConflictError, match="already exists"):
+    assert monotonic.value.latest_revision == 1
+    with pytest.raises(StrategyRevisionConflictError, match="already exists") as exists:
         repository.add(_legacy(template, "s1", 1))
-    with pytest.raises(StrategyRevisionConflictError, match="first revision must be 1"):
+    assert exists.value.latest_revision == 1
+    with pytest.raises(StrategyRevisionConflictError, match="first revision must be 1") as first:
         repository.add(_legacy(template, "s2", 2))
+    assert first.value.latest_revision is None
 
 
 @pytest.mark.parametrize("factory", ADAPTERS)

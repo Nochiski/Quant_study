@@ -1,29 +1,31 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
-import {
-  strategyDiffQuery,
-  strategyRevisionsQuery,
-} from "../../../entities/strategy";
+import { strategyDiffQuery } from "../../../entities/strategy";
 import type { DiffEntry } from "../../../shared/api";
 import { t } from "../../../shared/config";
 import { Link } from "../../../shared/lib/router";
 import { Badge, Button } from "../../../shared/ui";
-import { latestRevisionFromDetail } from "../model/conflict";
 import "./conflict-banner.css";
 
 type ConflictBannerProps = {
   strategyId: string;
   /** Revision the draft was based on. */
   baseRevision: number;
-  /** Server message from the 409 reply. */
-  detail: string;
+  /** Structured latest revision from the backend 409 contract. */
+  latestRevision: number;
   /** The user's current text, preserved verbatim. */
   source: string;
 };
 
 const render = (value: unknown): string =>
   value === undefined ? "—" : JSON.stringify(value);
+
+const DIFF_KIND_MESSAGE = {
+  added: "conflict.diff.added",
+  removed: "conflict.diff.removed",
+  changed: "conflict.diff.changed",
+} as const;
 
 const DiffList = ({ entries }: { entries: DiffEntry[] }) =>
   entries.length === 0 ? (
@@ -44,7 +46,7 @@ const DiffList = ({ entries }: { entries: DiffEntry[] }) =>
             <td>
               <code>{entry.pointer}</code>
             </td>
-            <td>{entry.kind}</td>
+            <td>{t(DIFF_KIND_MESSAGE[entry.kind])}</td>
             <td>
               <code>{render(entry.before)}</code>
             </td>
@@ -61,26 +63,19 @@ const DiffList = ({ entries }: { entries: DiffEntry[] }) =>
  * Shown when a save was refused because the server holds a newer revision (409). The draft
  * text stays as typed; the banner names both revisions and offers exactly three ways out —
  * open the server version, copy the current text, or look at the semantic diff between the
- * base and the server revision. No automatic merge exists before the diff screen (P4-05).
+ * base and the server revision. No automatic merge exists before conflict resolution (P4-08).
  */
 export const ConflictBanner = ({
   strategyId,
   baseRevision,
-  detail,
+  latestRevision,
   source,
 }: ConflictBannerProps) => {
-  const history = useQuery({
-    ...strategyRevisionsQuery(strategyId),
-    enabled: latestRevisionFromDetail(detail) === null,
-  });
-  const latest =
-    latestRevisionFromDetail(detail) ??
-    (history.data ? Math.max(history.data.total, baseRevision) : null);
   const [diffOpen, setDiffOpen] = useState(false);
   const [copied, setCopied] = useState<"idle" | "done" | "failed">("idle");
   const diff = useQuery({
-    ...strategyDiffQuery(strategyId, baseRevision, latest ?? baseRevision),
-    enabled: diffOpen && latest !== null && latest !== baseRevision,
+    ...strategyDiffQuery(strategyId, baseRevision, latestRevision),
+    enabled: diffOpen && latestRevision !== baseRevision,
   });
 
   const copy = async () => {
@@ -98,27 +93,28 @@ export const ConflictBanner = ({
         <Badge tone="error">{t("conflict.title")}</Badge>
         <span>
           {t("conflict.revisions")
-            .replace("{server}", latest === null ? "?" : `v${latest}`)
+            .replace("{server}", `v${latestRevision}`)
             .replace("{base}", `v${baseRevision}`)}
         </span>
         <span className="conflict__note">{t("conflict.note")}</span>
       </div>
       <div className="conflict__actions">
-        {latest !== null ? (
-          <Link
-            className="ui-button ui-button--primary ui-button--small"
-            to="/research/strategies/$strategyId/revisions/$revision"
-            params={{ strategyId, revision: String(latest) }}
-            search={{
-              view: undefined,
-              path: undefined,
-              asOf: undefined,
-              security: undefined,
-            }}
-          >
-            {t("conflict.openServer").replace("{server}", `v${latest}`)}
-          </Link>
-        ) : null}
+        <Link
+          className="ui-button ui-button--primary ui-button--small"
+          to="/research/strategies/$strategyId/revisions/$revision"
+          params={{ strategyId, revision: String(latestRevision) }}
+          search={{
+            view: undefined,
+            path: undefined,
+            asOf: undefined,
+            security: undefined,
+          }}
+        >
+          {t("conflict.openServer").replace(
+            "{server}",
+            `v${latestRevision}`,
+          )}
+        </Link>
         <Button size="small" onClick={() => void copy()}>
           {t("conflict.copy")}
         </Button>
@@ -132,7 +128,7 @@ export const ConflictBanner = ({
           size="small"
           onClick={() => setDiffOpen((open) => !open)}
           aria-expanded={diffOpen}
-          disabled={latest === null || latest === baseRevision}
+          disabled={latestRevision === baseRevision}
         >
           {diffOpen ? t("conflict.closeDiff") : t("conflict.openDiff")}
         </Button>

@@ -390,6 +390,9 @@ const ko = {
   "conflict.diff.error": "Diff를 불러올 수 없습니다.",
   "conflict.diff.pointer": "경로",
   "conflict.diff.kind": "변경",
+  "conflict.diff.added": "추가",
+  "conflict.diff.removed": "삭제",
+  "conflict.diff.changed": "수정",
   "conflict.diff.before": "이전",
   "conflict.diff.after": "이후",
   "problems.compileUnavailable":
@@ -795,6 +798,9 @@ export const messages = {
     "conflict.diff.error": "The diff could not be loaded.",
     "conflict.diff.pointer": "Path",
     "conflict.diff.kind": "Change",
+    "conflict.diff.added": "Added",
+    "conflict.diff.removed": "Removed",
+    "conflict.diff.changed": "Changed",
     "conflict.diff.before": "Before",
     "conflict.diff.after": "After",
     "problems.compileUnavailable":

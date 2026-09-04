@@ -61,6 +61,6 @@
 }
 
 .conflict__diff code {
-  font-size: 11px;
+  font-size: var(--text-size-small);
   word-break: break-all;
 }

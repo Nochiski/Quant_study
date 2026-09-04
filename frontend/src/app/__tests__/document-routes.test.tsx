@@ -225,7 +225,8 @@ const server = setupServer(
           {
             detail: {
               code: "strategy.revision_conflict",
-              message: "latest_revision=3",
+              message: "another author saved first",
+              latest_revision: 3,
             },
           },
           { status: 409 },
@@ -619,6 +620,20 @@ describe("backtest from the editor (P3-05)", () => {
 
 describe("revision conflict (P3-07)", () => {
   it("keeps the text, names both revisions, and offers open / copy / diff", async () => {
+    const serverSource = `${STORED}description: 서버 최신\n`;
+    server.use(
+      http.get(
+        `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
+        ({ params }) =>
+          HttpResponse.json(
+            document(
+              String(params.strategyId),
+              Number(params.revision),
+              Number(params.revision) === 3 ? serverSource : STORED,
+            ),
+          ),
+      ),
+    );
     const user = userEvent.setup();
     const writeText = vi.fn(() => Promise.resolve());
     Object.defineProperty(navigator, "clipboard", {
@@ -653,9 +668,107 @@ describe("revision conflict (P3-07)", () => {
       within(banner).getByText("/risk/max_name_weight"),
     ).toBeInTheDocument();
     expect(within(banner).getByText('"서버에서 수정"')).toBeInTheDocument();
+    expect(within(banner).getByText("수정")).toBeInTheDocument();
+    expect(within(banner).getByText("추가")).toBeInTheDocument();
     expect(history.location.pathname).toBe(
       "/research/strategies/s1/revisions/1",
     );
+
+    await user.click(
+      within(banner).getByRole("link", { name: "서버본 열기 (v3)" }),
+    );
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "나가기",
+      }),
+    );
+    await waitFor(() =>
+      expect(history.location.pathname).toBe(
+        "/research/strategies/s1/revisions/3",
+      ),
+    );
+    const serverView = await editor();
+    expect(serverView.state.doc.toString()).toBe(serverSource);
+    expect(
+      screen.queryByRole("region", { name: "리비전 충돌" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("drops a delayed 409 after the editor loads another revision", async () => {
+    server.use(
+      http.post(
+        `${API}/api/v1/strategy-documents/:strategyId/revisions`,
+        async () => {
+          await delay(200);
+          return HttpResponse.json(
+            {
+              detail: {
+                code: "strategy.revision_conflict",
+                message: "message wording is not an identity contract",
+                latest_revision: 3,
+              },
+            },
+            { status: 409 },
+          );
+        },
+      ),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/1");
+    const first = await editor();
+    replaceText(first, `${STORED}description: 이전 문서\n`);
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+    await user.click(saveButton());
+
+    history.push("/research/strategies/s1/revisions/2");
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "나가기",
+      }),
+    );
+    await waitFor(() =>
+      expect(history.location.pathname).toBe(
+        "/research/strategies/s1/revisions/2",
+      ),
+    );
+    const second = await editor();
+    expect(second.state.doc.toString()).toBe(STORED);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(
+      screen.queryByRole("region", { name: "리비전 충돌" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/^충돌:/)).not.toBeInTheDocument();
+  });
+
+  it("keeps recovery actions usable when clipboard and diff requests fail", async () => {
+    server.use(
+      http.get(`${API}/api/v1/strategies/:strategyId/diff`, () =>
+        HttpResponse.error(),
+      ),
+    );
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: vi.fn(() => Promise.reject(new Error("denied"))) },
+      configurable: true,
+    });
+    mount("/research/strategies/s1/revisions/1");
+    const view = await editor();
+    replaceText(view, `${STORED}description: 충돌\n`);
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+    await user.click(saveButton());
+    const banner = await screen.findByRole("region", { name: "리비전 충돌" });
+
+    await user.click(
+      within(banner).getByRole("button", { name: "현재 문서 복사" }),
+    );
+    expect(await within(banner).findByRole("status")).toHaveTextContent(
+      "복사할 수 없습니다",
+    );
+    await user.click(within(banner).getByRole("button", { name: "Diff 열기" }));
+    expect(
+      await within(banner).findByText("Diff를 불러올 수 없습니다."),
+    ).toBeInTheDocument();
+    expect(view.state.doc.toString()).toBe(`${STORED}description: 충돌\n`);
   });
 });
 

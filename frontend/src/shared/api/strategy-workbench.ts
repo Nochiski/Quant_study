@@ -73,6 +73,7 @@ import type {
   StrategyDocument,
   StrategyDocumentContractResponse,
   StrategyDocumentSchema,
+  StrategyRevisionConflictDetail,
   StrategySpec,
   StrategyValidation,
   UniverseHistoryQuery,
@@ -95,8 +96,15 @@ export class ApiRequestError extends Error {
   readonly status: number;
   readonly code: string | undefined;
   readonly detail: string | undefined;
+  readonly latestRevision: number | null;
 
-  constructor(context: string, status: number, code?: string, detail?: string) {
+  constructor(
+    context: string,
+    status: number,
+    code?: string,
+    detail?: string,
+    latestRevision: number | null = null,
+  ) {
     super(
       `API request failed: ${context} status=${status} code=${code ?? "-"}`,
     );
@@ -104,6 +112,7 @@ export class ApiRequestError extends Error {
     this.status = status;
     this.code = code;
     this.detail = detail;
+    this.latestRevision = latestRevision;
   }
 }
 
@@ -129,17 +138,38 @@ const errorField = (
 const errorCode = (error: unknown): string | undefined =>
   errorField(error, "code");
 
+/** Runtime check at the HTTP boundary for the generated structured 409 detail. */
+const revisionConflictDetail = (
+  error: unknown,
+): StrategyRevisionConflictDetail | null => {
+  if (typeof error !== "object" || error === null || !("detail" in error))
+    return null;
+  const detail = (error as { detail: unknown }).detail;
+  if (typeof detail !== "object" || detail === null) return null;
+  const candidate = detail as Partial<StrategyRevisionConflictDetail>;
+  return candidate.code === "strategy.revision_conflict" &&
+    typeof candidate.message === "string" &&
+    (candidate.latest_revision === null ||
+      (typeof candidate.latest_revision === "number" &&
+        Number.isSafeInteger(candidate.latest_revision) &&
+        candidate.latest_revision > 0))
+    ? (candidate as StrategyRevisionConflictDetail)
+    : null;
+};
+
 /** Turns an SDK reply into data or a typed error; every document call goes through here. */
 const unwrap = <T>(
   response: { data?: T; error?: unknown; response?: { status: number } },
   context: string,
 ): T => {
   if (response.error !== undefined) {
+    const conflict = revisionConflictDetail(response.error);
     throw new ApiRequestError(
       context,
       response.response?.status ?? 0,
       errorCode(response.error),
       errorField(response.error, "message"),
+      conflict?.latest_revision ?? null,
     );
   }
   return requireData(response.data, context);

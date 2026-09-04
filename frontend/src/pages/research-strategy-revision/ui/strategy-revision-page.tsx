@@ -163,11 +163,14 @@ export const StrategyRevisionPage = () => {
                 {t("page.revision.viewPending")} ({requested.toUpperCase()})
               </p>
             )}
-            {status.kind === "conflict" && document.baseRevision !== null ? (
+            {status.kind === "conflict" &&
+            status.strategyId !== null &&
+            status.baseRevision !== null &&
+            status.latestRevision !== null ? (
               <ConflictBanner
-                strategyId={strategyId}
-                baseRevision={document.baseRevision}
-                detail={status.detail}
+                strategyId={status.strategyId}
+                baseRevision={status.baseRevision}
+                latestRevision={status.latestRevision}
                 source={document.source}
               />
             ) : null}

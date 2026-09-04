@@ -96,6 +96,30 @@ class ReviseStrategyRequest:
     spec: StrategySpec
 
 
+@dataclass(frozen=True)
+class StrategyRevisionConflictDetail:
+    code: str
+    message: str
+    latest_revision: int | None
+
+
+@dataclass(frozen=True)
+class StrategyRevisionConflictResponse:
+    detail: StrategyRevisionConflictDetail
+
+
+def _revision_conflict(error: StrategyRevisionConflictError) -> HTTPException:
+    detail = StrategyRevisionConflictDetail(
+        code="strategy.revision_conflict",
+        message=str(error),
+        latest_revision=error.latest_revision,
+    )
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=asdict(detail),
+    )
+
+
 def _backtest_not_found(error: BacktestRunNotFoundError) -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
@@ -383,6 +407,12 @@ def create_app(
         "/api/v1/strategy-documents/{strategy_id}/revisions",
         operation_id="reviseStrategyDocument",
         status_code=status.HTTP_201_CREATED,
+        responses={
+            409: {
+                "model": StrategyRevisionConflictResponse,
+                "description": "The expected revision is stale",
+            }
+        },
     )
     def revise_strategy_document(
         strategy_id: str, request: ReviseDocumentRequest
@@ -395,10 +425,7 @@ def create_app(
         except StrategyNotFoundError as error:
             raise _strategy_not_found(error) from error
         except StrategyRevisionConflictError as error:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={"code": "strategy.revision_conflict", "message": str(error)},
-            ) from error
+            raise _revision_conflict(error) from error
 
     @app.get(
         "/api/v1/strategies/{strategy_id}/revisions",
@@ -536,6 +563,12 @@ def create_app(
         "/api/v1/strategies/{strategy_id}/revisions",
         operation_id="reviseStrategy",
         status_code=status.HTTP_201_CREATED,
+        responses={
+            409: {
+                "model": StrategyRevisionConflictResponse,
+                "description": "The expected revision is stale or the authoring mode conflicts",
+            }
+        },
     )
     def revise_strategy(strategy_id: str, request: ReviseStrategyRequest) -> SavedStrategy:
         try:
@@ -555,10 +588,7 @@ def create_app(
         except StrategyNotFoundError as error:
             raise _strategy_not_found(error) from error
         except StrategyRevisionConflictError as error:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={"code": "strategy.revision_conflict", "message": str(error)},
-            ) from error
+            raise _revision_conflict(error) from error
 
     return app
 

@@ -60,7 +60,6 @@ export {
 } from "./model/draft-store";
 export { RecoveryBanner } from "./ui/recovery-banner";
 export { ConflictBanner } from "./ui/conflict-banner";
-export { latestRevisionFromDetail } from "./model/conflict";
 export { SourceEditor } from "./ui/source-editor";
 export { SaveAction } from "./ui/save-action";
 export { DirtyLeaveGuard } from "./ui/dirty-leave-guard";

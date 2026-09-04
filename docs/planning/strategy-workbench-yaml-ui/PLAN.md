@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: IN_REVIEW
+project_status: CHANGES_REQUESTED
 current_phase: P4
 current_pr: P4-04
 active_prs: [P4-04]
 parallel_window: [P4-04]
-last_updated: 2026-09-05T03:43:04+09:00
+last_updated: 2026-09-05T03:49:24+09:00
 planned_prs: 49
 merged_prs: 34
 approved_prs: 34
@@ -22,13 +22,13 @@ progress_percent: 69
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_REVIEW` |
+| Project status | `CHANGES_REQUESTED` |
 | Current phase | `P4` |
 | Current/next PR | `P4-04` |
 | Active PR | `P4-04` |
 | Progress | `34 / 49 merged (69%)` |
 | Approved | `34 / 49` |
-| Aggregated at | `2026-09-05 03:43 KST` |
+| Aggregated at | `2026-09-05 03:49 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -76,7 +76,7 @@ progress_percent: 69
 | P1.5 | Backtest Correctness Gate | 5 | 5 | `MERGED` |
 | P2 | App Shell and visual foundation | 4 | 4 | `MERGED` |
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
-| P4 | Outline, Contract, Projections | 9 | 3 | `IN_REVIEW` |
+| P4 | Outline, Contract, Projections | 9 | 3 | `CHANGES_REQUESTED` |
 | P5 | Truthful Trace UI | 3 | 0 | `WAITING` |
 | P6 | Professional release and migration | 7 | 1 | `WAITING` |
 | **Total** |  | **49** | **34** | **69%** |
@@ -86,7 +86,7 @@ progress_percent: 69
 
 | 항목 | 값 |
 |---|---|
-| PR | `P4-04` Backend Execution Plan query orchestration IN_REVIEW |
+| PR | `P4-04` Backend Execution Plan query orchestration CHANGES_REQUESTED |
 | Intent | current valid StrategySpec만 backend factor explain API로 보내고 schema/contract/catalog version과 응답 registry를 fail-closed로 묶는 query owner를 만든다 |
 | Acceptance | stale/invalid source 요청 금지; 전체 factor graph에 field metadata·parameter/factor ID 전달; AbortSignal·query identity; schema/dataset/registry drift 차단; factor/node ↔ exact JSON Pointer mapping |
 | Non-goals | plan 시각 UI·page wiring(P4-09), graph 직접 편집, factor 값 계산·preview/trace, frontend plan/type/unit 재계산 |
@@ -199,7 +199,7 @@ Phase exit:
 | [x] | `P4-01` | Parameters를 포함한 Strategy Outline과 cursor 연동 | P3-03 | `MERGED` | [#52](https://github.com/Nochiski/Quant_study/pull/52) · `review_p4_01` APPROVE |
 | [x] | `P4-02` | Backend metadata 기반 Contract Inspector | P3-03, P1-05 | `MERGED` | [#53](https://github.com/Nochiski/Quant_study/pull/53) · `review_p4_02` APPROVE |
 | [x] | `P4-03` | Problems panel, filter, editor jump | P3-04 | `MERGED` | [#55](https://github.com/Nochiski/Quant_study/pull/55) · `review_p4_03` APPROVE |
-| [ ] | `P4-04` | Backend Execution Plan query·version gate·source mapping model | P3-05, P4-02 | `IN_REVIEW` | [#57](https://github.com/Nochiski/Quant_study/pull/57) · `review_p4_04` reviewing |
+| [ ] | `P4-04` | Backend Execution Plan query·version gate·source mapping model | P3-05, P4-02 | `CHANGES_REQUESTED` | [#57](https://github.com/Nochiski/Quant_study/pull/57) · `review_p4_04` P1 3건 수정 중 |
 | [ ] | `P4-05` | Canonical node snippet insertion | P3-02, P1-05 | `WAITING` | — |
 | [ ] | `P4-06` | Read-only canonical JSON과 Form projection | P3-05 | `WAITING` | — |
 | [ ] | `P4-07` | Read-only FactorGraph DAG projection | P4-01, P3-05 | `WAITING` | — |
@@ -326,6 +326,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | `review_p4_04`이 P1 3건(group metadata를 equity catalog로 표현 불가, plan-null 응답 registry provenance 부재, compiled spec/runtime schema 세대 미결합)을 확인해 CHANGES_REQUESTED로 전환. frontend 추론을 만들지 않고 backend-owned metadata·response contract와 schema gate를 수정한 뒤 같은 reviewer에게 재검토 예정 | SoT·모든 canonical graph 지원·response provenance·동일 reviewer gate |
 | 2026-09-05 KST | Codex | P4-04 #57을 공개하고 code freeze `24f7c22`를 fresh review-only agent `review_p4_04`에 전달하기 위해 IN_REVIEW로 전환. 리뷰 중 구현 diff는 고정하며 수정이 필요하면 같은 reviewer에게 재검토를 요청 | PR별 독립 reviewer 정확히 1명·13.3~13.4 review gate |
 | 2026-09-05 KST | Codex | P4-04 code를 `24f7c22`에 고정. current valid spec만 전체 factor explain query로 만들고 schema/contract/dataset/registry coherence, catalog completeness, response registry drift, AbortSignal, exact pointer mapping을 fail-closed로 검증. focused 5·frontend 전체 275·typecheck·lint·build를 통과해 SELF_CHECK로 전환 | backend plan/type/unit/hash SoT·invalid/stale 실행 금지·query cancellation·13.2 self-check |
 | 2026-09-05 KST | Codex | P4-04 구현을 query orchestration/version gate/source mapping model(P4-04)과 실제 Execution Plan panel/page wiring(P4-09)으로 분할. 단일 PR 예상 diff가 600줄을 넘고 query correctness와 표시 책임을 독립 검토할 수 있어 총 49 PR로 조정 | 12절 PR 크기 규칙·query/UI 책임분리·독립 review 검출력 |

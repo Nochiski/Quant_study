@@ -11,6 +11,7 @@ export {
   useBlocker,
   useNavigate,
   useParams,
+  useRouter,
   useRouterState,
   useSearch,
 } from "@tanstack/react-router";

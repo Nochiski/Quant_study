@@ -6,7 +6,7 @@ export const StrategyBuilderPage = () => {
   const catalog = useDatasetCatalog({ page_size: 1 });
 
   return (
-    <main>
+    <div className="legacy-builder">
       <header className="hero">
         <div>
           <span className="eyebrow">{t("builder.eyebrow")}</span>
@@ -29,6 +29,6 @@ export const StrategyBuilderPage = () => {
         </dl>
       </header>
       <StrategyEditor />
-    </main>
+    </div>
   );
 };

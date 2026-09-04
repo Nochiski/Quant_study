@@ -22,6 +22,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
+from strategy_workbench.application.factor_research.facade.ports import (
+    FactorMetadataPort,
+    FactorMetadataSnapshot,
+)
 from strategy_workbench.domain.equity.facade.research_data import DataLoadStatus
 from strategy_workbench.domain.factor.facade.evaluation import (
     FactorFieldValue,
@@ -31,8 +35,15 @@ from strategy_workbench.domain.factor.facade.evaluation import (
 )
 from strategy_workbench.domain.factor.facade.planning import (
     FactorExecutionPlan,
+    InvalidFactorGraphError,
     ResolvedFactorParameter,
     compile_factor_plan,
+)
+from strategy_workbench.domain.factor.facade.validation import (
+    FactorValidationSeverity,
+)
+from strategy_workbench.domain.factor.facade.validation import (
+    required_field_ids as factor_required_field_ids,
 )
 from strategy_workbench.domain.portfolio.facade.construction import (
     PortfolioFactorValue,
@@ -43,6 +54,7 @@ from strategy_workbench.domain.portfolio.facade.construction import (
 from strategy_workbench.domain.strategy.facade.specification import StrategySpec
 from strategy_workbench.domain.strategy.facade.validation import (
     StrategyValidation,
+    ValidationSeverity,
     semantic_issue,
     validate_strategy,
 )
@@ -84,6 +96,18 @@ class LookAheadViolationError(RawObservationContractError):
     """An adapter returned a field published after the observation date (contract bug)."""
 
 
+class PortfolioSnapshotMismatchError(RawObservationContractError):
+    """Factor contracts and raw values came from different dataset snapshots."""
+
+    def __init__(self, *, expected: str, actual: str) -> None:
+        super().__init__(
+            "portfolio metadata/raw observation snapshot mismatch ??"
+            f"expected_data_snapshot_id={expected!r} actual_data_snapshot_id={actual!r}"
+        )
+        self.expected = expected
+        self.actual = actual
+
+
 @dataclass(frozen=True)
 class FactorEvaluationRecord:
     """One factor's plan and evaluated values, kept for parity checks and the debug trace."""
@@ -107,10 +131,12 @@ class PortfolioDesignService:
         observation_source: RawObservationPort,
         engine_portfolio: EnginePortfolioPort,
         *,
+        factor_metadata: FactorMetadataPort,
         factor_registry_version: str,
     ) -> None:
         self._observation_source = observation_source
         self._engine_portfolio = engine_portfolio
+        self._factor_metadata = factor_metadata
         self._factor_registry_version = factor_registry_version
 
     def preview(self, request: PortfolioPreviewRequest) -> PortfolioPreview:
@@ -122,7 +148,18 @@ class PortfolioDesignService:
         if not validation.valid:
             raise InvalidPortfolioRequestError(validation)
 
-        plans = self._plans(spec)
+        metadata = self._factor_metadata.resolve_factor_fields(
+            tuple(
+                sorted(
+                    {
+                        field_id
+                        for factor in spec.factors.factors
+                        for field_id in factor_required_field_ids(factor.graph)
+                    }
+                )
+            )
+        )
+        plans = self._plans(spec, metadata)
         _reject_saved_references(spec, plans)
         raw = self._observation_source.load_raw_observations(
             RawObservationQuery(
@@ -139,6 +176,11 @@ class PortfolioDesignService:
         )
         if not raw.ok:
             raise RawObservationUnavailableError(raw.status, raw.detail)
+        if raw.data_snapshot_id != metadata.data_snapshot_id:
+            raise PortfolioSnapshotMismatchError(
+                expected=metadata.data_snapshot_id,
+                actual=raw.data_snapshot_id,
+            )
         _reject_sessions_outside_strategy_range(raw, spec)
         factor_observations = tuple(_to_factor_observation(item) for item in raw.observations)
         parameters = tuple(
@@ -173,18 +215,43 @@ class PortfolioDesignService:
             preview=preview,
         )
 
-    def _plans(self, spec: StrategySpec) -> dict[str, FactorExecutionPlan]:
+    def _plans(
+        self, spec: StrategySpec, metadata: FactorMetadataSnapshot
+    ) -> dict[str, FactorExecutionPlan]:
         parameter_ids = tuple(parameter.parameter_id for parameter in spec.parameters)
         factor_ids = tuple(factor.factor_id for factor in spec.factors.factors)
-        return {
-            factor.factor_id: compile_factor_plan(
-                factor.graph,
-                registry_version=self._factor_registry_version,
-                parameter_ids=parameter_ids,
-                factor_ids=factor_ids,
+        plans: dict[str, FactorExecutionPlan] = {}
+        issues = []
+        for factor_index, factor in enumerate(spec.factors.factors):
+            try:
+                plans[factor.factor_id] = compile_factor_plan(
+                    factor.graph,
+                    registry_version=self._factor_registry_version,
+                    fields=metadata.fields,
+                    parameter_ids=parameter_ids,
+                    factor_ids=factor_ids,
+                    require_field_metadata=True,
+                )
+            except InvalidFactorGraphError as error:
+                issues.extend(
+                    semantic_issue(
+                        factor_issue.code,
+                        f"factors.factors.{factor_index}.graph.{factor_issue.path}",
+                        factor_issue.message,
+                        severity=(
+                            ValidationSeverity.ERROR
+                            if factor_issue.severity is FactorValidationSeverity.ERROR
+                            else ValidationSeverity.WARNING
+                        ),
+                        node_id=factor_issue.node_id,
+                    )
+                    for factor_issue in error.validation.issues
+                )
+        if issues:
+            raise InvalidPortfolioRequestError(
+                StrategyValidation(valid=False, issues=tuple(issues))
             )
-            for factor in spec.factors.factors
-        }
+        return plans
 
 
 def _required_field_ids(

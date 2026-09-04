@@ -65,7 +65,10 @@ def build_container(
     strategy_repository = InMemoryStrategyRepository()
     factor_registry = build_default_factor_registry()
     portfolio_design = PortfolioDesignService(
-        equity_data, engine_portfolio, factor_registry_version=factor_registry.version
+        equity_data,
+        engine_portfolio,
+        factor_metadata=equity_data,
+        factor_registry_version=factor_registry.version,
     )
     metric_registry = build_default_metric_registry()
     strategy_authoring = StrategyAuthoringService(

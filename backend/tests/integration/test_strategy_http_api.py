@@ -49,9 +49,14 @@ def test_http_adapter_exposes_real_mock_equity_catalog() -> None:
     assert {field["field_id"] for field in payload["fields"]} >= {
         "price.close",
         "financial.book_equity",
+        "classification.sector",
     }
+    sector = next(
+        field for field in payload["fields"] if field["field_id"] == "classification.sector"
+    )
+    assert sector["value_type"] == "category"
     assert payload["snapshot"]["point_in_time"] is True
-    assert payload["total"] == 8
+    assert payload["total"] == 9
 
 
 def test_equity_catalog_filters_and_paginates_over_http() -> None:

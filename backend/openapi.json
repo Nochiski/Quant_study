@@ -2364,7 +2364,8 @@
           "price",
           "amount",
           "ratio",
-          "count"
+          "count",
+          "category"
         ],
         "title": "FieldValueType",
         "type": "string"
@@ -3490,6 +3491,12 @@
             "anyOf": [
               {
                 "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
               },
               {
                 "type": "null"

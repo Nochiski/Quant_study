@@ -1417,7 +1417,8 @@ export type FieldNode = {
 /**
  * FieldValueType
  */
-export type FieldValueType = "price" | "amount" | "ratio" | "count";
+export type FieldValueType =
+  "price" | "amount" | "ratio" | "count" | "category";
 
 /**
  * FloatParameter
@@ -2178,7 +2179,7 @@ export type ResearchPanelCell = {
   /**
    * Value
    */
-  value: number | null;
+  value: number | string | boolean | null;
 };
 
 /**

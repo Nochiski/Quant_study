@@ -10,10 +10,16 @@ from __future__ import annotations
 import time
 from dataclasses import replace
 from datetime import date, timedelta
+from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
+from strategy_workbench.adapters.outbound.artifact_local.facade.store import LocalArtifactStore
+from strategy_workbench.adapters.outbound.backtest_engine.facade.executor import (
+    BacktestEngineExecutorAdapter,
+)
 from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import (
     BacktestEnginePortfolioAdapter,
 )
@@ -23,11 +29,24 @@ from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
 )
+from strategy_workbench.application.backtest_run.facade.runs import (
+    BacktestRunService,
+    BacktestRunSpec,
+)
+from strategy_workbench.application.factor_research.facade.ports import (
+    FactorMetadataPort,
+    FactorMetadataSnapshot,
+)
+from strategy_workbench.application.factor_research.facade.research import (
+    FactorGraphRequest,
+    FactorResearchService,
+)
 from strategy_workbench.application.portfolio_design.facade.design import (
     InvalidPortfolioRequestError,
     LookAheadViolationError,
     PortfolioDesignService,
     PortfolioPreviewRequest,
+    PortfolioSnapshotMismatchError,
     RawObservationContractError,
     RawObservationUnavailableError,
 )
@@ -38,6 +57,8 @@ from strategy_workbench.application.portfolio_design.facade.ports import (
 )
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.bootstrap.facade.http import build_http_app
+from strategy_workbench.domain.analytics.facade.metrics import build_default_metric_registry
+from strategy_workbench.domain.backtest.facade.runs import ExecutionCore
 from strategy_workbench.domain.factor.facade.evaluation import (
     FactorFieldValue,
     FactorObservation,
@@ -55,6 +76,7 @@ from strategy_workbench.domain.factor.facade.expression import (
     UnaryNode,
     UnaryOperator,
 )
+from strategy_workbench.domain.factor.facade.registry import build_default_factor_registry
 from strategy_workbench.domain.factor.facade.trace import trace_factor_graph
 from strategy_workbench.domain.portfolio.facade.construction import ExclusionReason
 from strategy_workbench.domain.strategy.facade.specification import (
@@ -119,11 +141,17 @@ def _spec(*factors: FactorSignal) -> StrategySpec:
     )
 
 
-def _service(source: RawObservationPort | None = None) -> PortfolioDesignService:
+def _service(
+    source: RawObservationPort | None = None,
+    *,
+    metadata: FactorMetadataPort | None = None,
+    registry_version: str = "test-registry",
+) -> PortfolioDesignService:
     return PortfolioDesignService(
         source or MockEquityDataAdapter.demo(),
         BacktestEnginePortfolioAdapter(),
-        factor_registry_version="test-registry",
+        factor_metadata=metadata or MockEquityDataAdapter.demo(),
+        factor_registry_version=registry_version,
     )
 
 
@@ -147,6 +175,109 @@ def test_candidate_factor_values_equal_factor_graph_outputs() -> None:
     assert any(
         v.value is not None for v in by_factor["momentum_3"].values if v.as_of == first.as_of
     )
+
+
+def test_explain_and_portfolio_compile_identical_plans_from_one_metadata_contract() -> None:
+    adapter = MockEquityDataAdapter.demo()
+    registry = build_default_factor_registry()
+    spec = _spec()
+    research = FactorResearchService(registry, adapter, adapter)
+    result = _service(adapter, metadata=adapter, registry_version=registry.version).run_pipeline(
+        PortfolioPreviewRequest(spec)
+    )
+
+    factor_ids = tuple(factor.factor_id for factor in spec.factors.factors)
+    plans = {record.factor_id: record.plan for record in result.factor_evaluations}
+    for factor in spec.factors.factors:
+        explanation = research.explain(
+            FactorGraphRequest(
+                graph=factor.graph,
+                parameter_ids=tuple(parameter.parameter_id for parameter in spec.parameters),
+                factor_ids=factor_ids,
+            )
+        )
+        assert explanation.validation.valid
+        assert explanation.data_snapshot_id == result.data_snapshot_id
+        assert explanation.plan == plans[factor.factor_id]
+
+
+def test_group_field_contract_is_shared_by_explain_portfolio_and_backtest() -> None:
+    client = TestClient(build_http_app())
+    template = client.get("/api/v1/strategies/template").json()
+
+    def request_spec(group_field_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        factor = template["factors"]["factors"][0]
+        graph = {
+            "nodes": [
+                {"node_id": "close", "field_id": "price.close", "kind": "field"},
+                {
+                    "node_id": "neutral",
+                    "operator": "neutralize",
+                    "input_node_id": "close",
+                    "group_field_id": group_field_id,
+                    "kind": "group",
+                },
+            ],
+            "output_node_id": "neutral",
+            "missing_policy": "drop",
+        }
+        return ({**template, "factors": {"factors": [{**factor, "graph": graph}]}}, graph)
+
+    invalid_spec, invalid_graph = request_spec("price.market_cap")
+    explain_invalid = client.post("/api/v1/factors/explain", json={"graph": invalid_graph})
+    preview_invalid = client.post("/api/v1/portfolio/preview", json={"spec": invalid_spec})
+    backtest_invalid = client.post(
+        "/api/v1/backtests", json={"strategy": invalid_spec, "core": "python"}
+    )
+    assert explain_invalid.status_code == 200
+    assert preview_invalid.status_code == backtest_invalid.status_code == 422
+    assert {item["code"] for item in explain_invalid.json()["validation"]["issues"]} == {
+        "factor.graph.group_field_type"
+    }
+    for response in (preview_invalid, backtest_invalid):
+        assert {item["code"] for item in response.json()["detail"]["validation"]["issues"]} == {
+            "factor.graph.group_field_type"
+        }
+
+    valid_spec, valid_graph = request_spec("classification.sector")
+    explain_valid = client.post("/api/v1/factors/explain", json={"graph": valid_graph})
+    preview_valid = client.post("/api/v1/portfolio/preview", json={"spec": valid_spec})
+    backtest_valid = client.post(
+        "/api/v1/backtests", json={"strategy": valid_spec, "core": "python"}
+    )
+    assert explain_valid.status_code == preview_valid.status_code == 200
+    assert explain_valid.json()["validation"]["valid"] is True
+    assert backtest_valid.status_code == 202, backtest_valid.text
+
+
+class _DriftedMetadata:
+    def __init__(self, source: FactorMetadataPort) -> None:
+        self._source = source
+
+    def resolve_factor_fields(self, field_ids: tuple[str, ...]) -> FactorMetadataSnapshot:
+        return replace(
+            self._source.resolve_factor_fields(field_ids),
+            data_snapshot_id="stale-metadata-snapshot",
+        )
+
+
+def test_metadata_raw_snapshot_mismatch_blocks_portfolio_and_backtest(tmp_path: Path) -> None:
+    adapter = MockEquityDataAdapter.demo()
+    portfolio = _service(adapter, metadata=_DriftedMetadata(adapter))
+    spec = _spec()
+    with pytest.raises(PortfolioSnapshotMismatchError, match="snapshot mismatch"):
+        portfolio.preview(PortfolioPreviewRequest(spec))
+
+    backtests = BacktestRunService(
+        portfolio,
+        InMemoryStrategyRepository(),
+        adapter,
+        BacktestEngineExecutorAdapter(build_default_metric_registry()),
+        LocalArtifactStore(tmp_path),
+        new_id=lambda: "must-not-start",
+    )
+    with pytest.raises(PortfolioSnapshotMismatchError, match="snapshot mismatch"):
+        backtests.start(BacktestRunSpec(strategy=spec, core=ExecutionCore.PYTHON))
 
 
 def test_composite_score_is_the_direction_signed_weighted_sum_of_graph_outputs() -> None:

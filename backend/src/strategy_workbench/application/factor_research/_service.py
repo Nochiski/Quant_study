@@ -98,6 +98,7 @@ class FactorResearchService:
             parameter_ids=request.parameter_ids,
             factor_ids=self._known_factor_ids(request.factor_ids),
             subgraph_ids=request.subgraph_ids,
+            require_field_metadata=True,
         )
         return FactorExplanation(
             registry_version=self._registry.version,
@@ -133,6 +134,7 @@ class FactorResearchService:
                 parameter_ids=parameter_ids,
                 factor_ids=self._known_factor_ids(request.factor_ids),
                 subgraph_ids=request.subgraph_ids,
+                require_field_metadata=True,
             )
         except InvalidFactorGraphError as error:
             raise InvalidFactorRequestError(error.validation) from error

@@ -25,6 +25,7 @@ from strategy_workbench.domain.equity.facade.research_data import (
     DataLoadStatus,
     DatasetFieldProfile,
     DataSnapshot,
+    FieldValueType,
     ResearchPanelCell,
     ResearchPanelQuery,
     ResearchPanelResult,
@@ -87,24 +88,19 @@ class MockEquityDataAdapter:
     def resolve_factor_fields(self, field_ids: tuple[str, ...]) -> FactorMetadataSnapshot:
         """Resolve graph field contracts inside the data adapter, never in the browser."""
         profile_by_id = {profile.field_id: profile for profile in self._profiles}
-        group_fields = {"classification.sector", "sector"}
         fields: list[FieldMetadata] = []
         for field_id in field_ids:
             profile = profile_by_id.get(field_id)
-            if field_id in group_fields:
-                fields.append(
-                    FieldMetadata(
-                        field_id=field_id,
-                        unit="category",
-                        value_type=NodeValueType.GROUP_SERIES,
-                    )
-                )
-            elif profile is not None:
+            if profile is not None:
                 fields.append(
                     FieldMetadata(
                         field_id=field_id,
                         unit=profile.unit,
-                        value_type=NodeValueType.NUMERIC_SERIES,
+                        value_type=(
+                            NodeValueType.GROUP_SERIES
+                            if profile.value_type is FieldValueType.CATEGORY
+                            else NodeValueType.NUMERIC_SERIES
+                        ),
                     )
                 )
         return FactorMetadataSnapshot(

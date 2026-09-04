@@ -655,9 +655,7 @@ class _RandomActionStrategy:
             schedule=EverySession(),
             events=frozenset({EventKind.MARKET}),
             actions=frozenset(ActionKind),
-            features=frozenset(
-                {EngineFeature.LIMIT_ORDER, EngineFeature.PROPORTIONAL_BASKET}
-            ),
+            features=frozenset({EngineFeature.LIMIT_ORDER, EngineFeature.PROPORTIONAL_BASKET}),
         )
 
     @staticmethod
@@ -817,9 +815,7 @@ def test_promoted_rust_sends_one_decision_batch_per_callback(
         return proxy
 
     monkeypatch.setattr(loop_module, "make_persistent_runtime", counting_factory)
-    engine = BacktestEngine(
-        RunConfig(run_id="ffi-count", initial_cash=100_000.0), core="rust"
-    )
+    engine = BacktestEngine(RunConfig(run_id="ffi-count", initial_cash=100_000.0), core="rust")
     engine.run(
         ScriptedStrategy(script=(target_70pct(), None, liquidate(), None)),
         DataFeed(GOLDEN_BARS),
@@ -861,9 +857,7 @@ def test_rust_panic_becomes_engine_error_and_poisons_runtime(
         return runtime
 
     monkeypatch.setattr(loop_module, "make_persistent_runtime", panic_factory)
-    engine = BacktestEngine(
-        RunConfig(run_id="rust-panic", initial_cash=100_000.0), core="rust"
-    )
+    engine = BacktestEngine(RunConfig(run_id="rust-panic", initial_cash=100_000.0), core="rust")
     with pytest.raises(RustCorePanic, match="forced persistent runtime panic"):
         engine.run(ScriptedStrategy(script=(None,)), DataFeed(GOLDEN_BARS))
 
@@ -887,9 +881,7 @@ def test_legacy_rust_core_is_explicitly_deprecated() -> None:
 
 @pytest.mark.parametrize("core_name", ["python", pytest.param("rust", marks=RUST_ONLY)])
 def test_empty_feed_fails_identically_after_clean_finish(core_name: str) -> None:
-    engine = BacktestEngine(
-        RunConfig(run_id="empty-feed", initial_cash=100_000.0), core=core_name
-    )
+    engine = BacktestEngine(RunConfig(run_id="empty-feed", initial_cash=100_000.0), core=core_name)
     with pytest.raises(ValueError, match="cannot compute metrics from an empty run"):
         engine.run(ScriptedStrategy(script=()), DataFeed(()))
     assert engine.event_store.records == ()

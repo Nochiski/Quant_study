@@ -101,7 +101,15 @@ const result: BacktestRunResult = {
     fee_bps: 15,
     slippage_bps: 10,
     participation_rate: 0.1,
-    schema_version: "backtest-run-v1",
+    strategy_provenance: {
+      kind: "inline_draft",
+      spec_hash: "a".repeat(64),
+      schema_version: "1.0",
+      strategy_id: null,
+      revision: null,
+      source_hash: null,
+    },
+    schema_version: "backtest-run-v2",
     warnings: [
       {
         code: "mock_equity_data",

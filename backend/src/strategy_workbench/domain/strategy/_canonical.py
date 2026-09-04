@@ -50,13 +50,18 @@ def _normalize_numbers(value: Any) -> Any:
     return value
 
 
-def canonical_strategy_json(spec: StrategySpec) -> str:
+def canonical_strategy_json(spec: StrategySpec, *, indent: int | None = None) -> str:
+    """Canonical JSON text; compact for hashing, `indent` for a human-readable document.
+
+    Both forms carry the same payload and key order, so `indent` never changes meaning.
+    """
     return json.dumps(
         canonical_strategy_payload(spec),
         ensure_ascii=False,
         allow_nan=False,
         sort_keys=True,
-        separators=(",", ":"),
+        separators=(",", ":") if indent is None else (",", ": "),
+        indent=indent,
         default=_json_default,
     )
 

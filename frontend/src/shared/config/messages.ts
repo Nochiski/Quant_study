@@ -241,6 +241,19 @@ const ko = {
   "ide.debugger.before": "제한 전",
   "ide.debugger.after": "제한 후",
   "ide.debugger.status": "상태",
+  "editor.loading": "편집기를 불러오는 중입니다.",
+  "editor.keyboardHint":
+    "Tab 키는 들여쓰기입니다. Esc 키로 편집기를 벗어납니다.",
+  "document.phase.editing": "편집 중",
+  "document.phase.parsing": "구문 분석 중",
+  "document.phase.syntax-invalid": "구문 오류",
+  "document.phase.structure-invalid": "구조 오류",
+  "document.phase.semantic-invalid": "검증 오류",
+  "document.phase.structurally-valid": "구문 통과",
+  "document.phase.semantically-valid": "검증 통과",
+  "document.phase.saved": "저장됨",
+  "document.stale": "이전 결과(현재 텍스트와 다름)",
+  "document.composing": "한글 조합 중",
 } as const;
 
 export type MessageKey = keyof typeof ko;
@@ -491,6 +504,18 @@ export const messages = {
     "ide.debugger.before": "Before cap",
     "ide.debugger.after": "After cap",
     "ide.debugger.status": "Status",
+    "editor.loading": "Loading the editor…",
+    "editor.keyboardHint": "Tab indents. Press Esc to leave the editor.",
+    "document.phase.editing": "Editing",
+    "document.phase.parsing": "Parsing",
+    "document.phase.syntax-invalid": "Syntax error",
+    "document.phase.structure-invalid": "Structure error",
+    "document.phase.semantic-invalid": "Validation error",
+    "document.phase.structurally-valid": "Syntax OK",
+    "document.phase.semantically-valid": "Validated",
+    "document.phase.saved": "Saved",
+    "document.stale": "Stale result (differs from the text)",
+    "document.composing": "Composing (IME)",
   } satisfies Record<MessageKey, string>,
 } as const;
 

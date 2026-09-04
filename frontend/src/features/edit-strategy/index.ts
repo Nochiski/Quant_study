@@ -19,3 +19,4 @@ export {
   type DocumentState,
 } from "./model/document-state";
 export { useStrategyDocument } from "./model/use-strategy-document";
+export { SourceEditor } from "./ui/source-editor";

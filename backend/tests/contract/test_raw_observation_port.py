@@ -31,7 +31,12 @@ from strategy_workbench.domain.equity.facade.research_data import (
 
 START, END = date(2024, 1, 8), date(2024, 1, 12)
 MARKET, UNIVERSE = "KRX", "krx.common-stock"
-FIELDS = ("price.close", "price.market_cap", "financial.book_equity")
+FIELDS = (
+    "price.close",
+    "price.market_cap",
+    "financial.book_equity",
+    "classification.sector",
+)
 
 ADAPTERS = [pytest.param(MockEquityDataAdapter.demo(), id="mock")]
 

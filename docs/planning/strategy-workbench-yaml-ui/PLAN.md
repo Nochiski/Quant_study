@@ -2,14 +2,14 @@
 plan_version: 2
 project: yaml-strategy-workbench-ui
 project_status: APPROVED
-current_phase: P6
-current_pr: P6-07
-active_prs: [P6-07]
-parallel_window: [P6-07]
-last_updated: 2026-09-05T03:06:43+09:00
-planned_prs: 48
-merged_prs: 33
-approved_prs: 34
+current_phase: P4
+current_pr: P4-04
+active_prs: [P4-04]
+parallel_window: [P4-04]
+last_updated: 2026-09-05T04:36:09+09:00
+planned_prs: 49
+merged_prs: 34
+approved_prs: 35
 progress_percent: 69
 ---
 
@@ -23,12 +23,12 @@ progress_percent: 69
 | Field | Value |
 |---|---|
 | Project status | `APPROVED` |
-| Current phase | `P6` |
-| Current/next PR | `P6-07` |
-| Active PR | `P6-07` |
-| Progress | `33 / 48 merged (69%)` |
-| Approved | `34 / 48` |
-| Aggregated at | `2026-09-05 03:06 KST` |
+| Current phase | `P4` |
+| Current/next PR | `P4-04` |
+| Active PR | `P4-04` |
+| Progress | `34 / 49 merged (69%)` |
+| Approved | `35 / 49` |
+| Aggregated at | `2026-09-05 04:36 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -76,26 +76,26 @@ progress_percent: 69
 | P1.5 | Backtest Correctness Gate | 5 | 5 | `MERGED` |
 | P2 | App Shell and visual foundation | 4 | 4 | `MERGED` |
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
-| P4 | Outline, Contract, Projections | 8 | 3 | `WAITING` |
+| P4 | Outline, Contract, Projections | 9 | 3 | `APPROVED` |
 | P5 | Truthful Trace UI | 3 | 0 | `WAITING` |
-| P6 | Professional release and migration | 7 | 0 | `APPROVED` |
-| **Total** |  | **48** | **33** | **69%** |
+| P6 | Professional release and migration | 7 | 1 | `WAITING` |
+| **Total** |  | **49** | **34** | **69%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
 
 | 항목 | 값 |
 |---|---|
-| PR | `P6-07` Root development entrypoints, [#56](https://github.com/Nochiski/Quant_study/pull/56) APPROVED |
-| Intent | 저장소 루트 명령은 경로 위임만 담당하고 Vite/Uvicorn 실행 설정은 각 frontend/backend owner 한 곳에 유지한다 |
-| Acceptance | root `npm run dev` → frontend Vite, root·backend `uv run server` → FastAPI/Uvicorn reload server, stdio·종료 신호 전달, 문서·smoke test |
-| Non-goals | production process manager, Docker, port 자동 할당, frontend/backend 동시 실행 명령, runtime dependency 재정의 |
-| Branch/worktree | `feat/p6-07-dev-entrypoints` (`Quant_study-p6-07`) |
-| Base SHA | `ebc16c2` (P4-03 merge main) |
-| Head SHA | `2e53089` (review P1·P2 보강 code diff freeze; 이후 PLAN 상태 커밋만 허용) |
-| Diff stat | main 대비 17 files, +416/−38 (root/backend delegates·tests·CI·lock·docs·PLAN/WORKFLOW) |
-| Focused tests | root delegate 4 + 실제 HTTP smoke 1 + backend entrypoint/architecture 8 passed; root/backend help·수동 HTTP smoke passed |
-| Full gate | backend pytest 896·ruff·pyright, frontend typecheck·lint·vitest 270·build, root test 5·ruff·pyright·lock·diff-check 통과; root frontend/backend smoke를 CI에 연결 |
+| PR | `P4-04` Backend Execution Plan query orchestration APPROVED |
+| Intent | current valid StrategySpec만 backend factor explain API로 보내고 schema/contract/catalog version과 응답 registry를 fail-closed로 묶는 query owner를 만든다 |
+| Acceptance | stale/invalid source 요청 금지; backend-owned field/group metadata resolution; 전체 factor graph에 parameter/factor ID 전달; AbortSignal·query identity; compiled/runtime schema와 request/response dataset·registry drift 차단; factor/node ↔ exact JSON Pointer mapping |
+| Non-goals | plan 시각 UI·page wiring(P4-09), graph 직접 편집, factor 값 계산·preview/trace, frontend plan/type/unit 재계산 |
+| Branch/worktree | `feat/p4-04-execution-plan` (`Quant_study-p4-04`) |
+| Base SHA | `84d7c88` (P6-07 merge main) |
+| Head SHA | `70aeba8` (FactorSignal numeric output gate code freeze) |
+| Diff stat | handwritten 25 files, +1355/-37; generated OpenAPI/SDK 제외. P4-09 UI는 분리했고 reviewer가 요구한 metadata/provenance 및 truthful execution parity는 안전한 query의 선행조건이라 같은 PR에 유지 |
+| Focused tests | backend factor HTTP·truthful pipeline·raw port·equity HTTP 47 passed; frontend execution orchestration 7 passed |
+| Full gate | backend 903·Ruff·Pyright; frontend 277·typecheck·lint·build; OpenAPI/SDK deterministic·clean |
 
 ---
 
@@ -199,11 +199,12 @@ Phase exit:
 | [x] | `P4-01` | Parameters를 포함한 Strategy Outline과 cursor 연동 | P3-03 | `MERGED` | [#52](https://github.com/Nochiski/Quant_study/pull/52) · `review_p4_01` APPROVE |
 | [x] | `P4-02` | Backend metadata 기반 Contract Inspector | P3-03, P1-05 | `MERGED` | [#53](https://github.com/Nochiski/Quant_study/pull/53) · `review_p4_02` APPROVE |
 | [x] | `P4-03` | Problems panel, filter, editor jump | P3-04 | `MERGED` | [#55](https://github.com/Nochiski/Quant_study/pull/55) · `review_p4_03` APPROVE |
-| [ ] | `P4-04` | Backend Execution Plan과 source/graph 연동 | P3-05 | `WAITING` | — |
+| [ ] | `P4-04` | Backend Execution Plan query·version gate·source mapping model | P3-05, P4-02 | `APPROVED` | [#57](https://github.com/Nochiski/Quant_study/pull/57) · `review_p4_04` APPROVE (P0 0/P1 0), latest CI 대기 |
 | [ ] | `P4-05` | Canonical node snippet insertion | P3-02, P1-05 | `WAITING` | — |
 | [ ] | `P4-06` | Read-only canonical JSON과 Form projection | P3-05 | `WAITING` | — |
 | [ ] | `P4-07` | Read-only FactorGraph DAG projection | P4-01, P3-05 | `WAITING` | — |
 | [ ] | `P4-08` | Source/semantic/revision Diff와 conflict resolution | P1-08, P3-07 | `WAITING` | — |
+| [ ] | `P4-09` | Execution Plan 표시와 YAML/graph selection 연동 | P4-04, P4-01 | `WAITING` | — |
 
 Phase exit:
 
@@ -231,11 +232,11 @@ Phase exit:
 |---|---|---|---|---|---|
 | [ ] | `P6-01` | SQLite persistent strategy revision repository | P1-07 | `WAITING` | — |
 | [ ] | `P6-02` | Server draft, strategy/revision/backtest history UI | P6-01, P3-06, P4-08 | `WAITING` | — |
-| [ ] | `P6-03` | Keyboard workflow와 Command Palette | P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P5-03 | `WAITING` | — |
-| [ ] | `P6-04` | Large spec 성능·접근성·i18n과 soft dark theme | P3-05, P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P5-03 | `WAITING` | — |
+| [ ] | `P6-03` | Keyboard workflow와 Command Palette | P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P5-03 | `WAITING` | — |
+| [ ] | `P6-04` | Large spec 성능·접근성·i18n과 soft dark theme | P3-05, P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P5-03 | `WAITING` | — |
 | [ ] | `P6-05` | Playwright/visual regression infrastructure와 CI | P2-03, P3-05, P6-04 | `WAITING` | — |
 | [ ] | `P6-06` | 전체 browser E2E·실구동 시나리오 검증, migration gate, 조건부 legacy cleanup | P6-01, P6-02, P6-03, P6-04, P6-05 | `WAITING` | — |
-| [ ] | `P6-07` | Root frontend/backend development entrypoints | P0-02, P0-03 | `APPROVED` | [#56](https://github.com/Nochiski/Quant_study/pull/56) · `review_p6_07` APPROVE |
+| [x] | `P6-07` | Root frontend/backend development entrypoints | P0-02, P0-03 | `MERGED` | [#56](https://github.com/Nochiski/Quant_study/pull/56) · `review_p6_07` APPROVE |
 
 Phase exit:
 
@@ -291,7 +292,8 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
-| P6-07 | root delegate 4 + 실제 server HTTP smoke 1 + backend entrypoint/architecture 8 passed | backend pytest 896·ruff·pyright; frontend typecheck·lint·vitest 270·build; root test 5·ruff·pyright·locks | generated API 변경 없음 | root `npm run dev` HTTP 200, root `uv run server --port 42810` health 200·reload·Ctrl+C, backend/root help 동일 | [#56](https://github.com/Nochiski/Quant_study/pull/56) latest backend/frontend 중복 CI 4 pass, reviewer 최종 APPROVE | 2026-09-05 |
+| P4-04 | backend factor HTTP·truthful pipeline·raw port·equity HTTP 47, frontend orchestration 7 passed | backend 903·Ruff·Pyright; frontend 277·typecheck·lint·build | OpenAPI/SDK 재생성 deterministic·clean | explain↔portfolio plan 전체 동등성, 공개 category catalog↔raw loader, 숫자 group 동일 코드 거부, sector group completed/tape hash, metadata/raw snapshot mismatch, category·boolean·scalar output 실행 차단까지 검증 | [#57](https://github.com/Nochiski/Quant_study/pull/57) 동일 reviewer APPROVE, latest CI 4개 완료 대기 | 2026-09-05 |
+| P6-07 | root delegate 4 + 실제 server HTTP smoke 1 + backend entrypoint/architecture 8 passed | backend pytest 896·ruff·pyright; frontend typecheck·lint·vitest 270·build; root test 5·ruff·pyright·locks | generated API 변경 없음 | root `npm run dev` HTTP 200, root `uv run server --port 42810` health 200·reload·Ctrl+C, backend/root help 동일 | [#56](https://github.com/Nochiski/Quant_study/pull/56) latest backend/frontend 중복 CI 4 pass, reviewer 최종 APPROVE, MERGED (`84d7c88`) | 2026-09-05 |
 | P4-03 | problem projection·panel·compile navigation 18 passed | frontend typecheck·lint·vitest 270·build | generated API 변경 없음 | 4종 toggle filter·error/warning section·정확한 dedupe·jump·빈 root pointer·pointer/node ID copy·stale/copy race/failure 접근성 검증 | [#55](https://github.com/Nochiski/Quant_study/pull/55) latest backend/frontend 중복 CI 4개 pass, MERGED (`ebc16c2`) | 2026-09-05 |
 | P4-02 | Contract Inspector·schema assist·schema navigator·outline·IDE 56 passed | frontend typecheck·lint·vitest 262·build | generated API 변경 없음 | missing/unknown FactorNode·Parameter union·상이 requiredness와 이전 P1 4건 회귀를 독립 reviewer 재확인 | [#53](https://github.com/Nochiski/Quant_study/pull/53) latest backend/frontend 중복 CI 4개 pass, MERGED (`3284fe0`) | 2026-09-05 |
 | P4-01 | editor selection·outline projection/navigation·router·document route 38 passed | frontend typecheck·lint·vitest 232·build | 해당 없음 | runtime schema/source map/URL owner, exact sourceVersion·route selection 귀속, RFC 6901 검증, visible roving tabindex·ARIA ownership | [#52](https://github.com/Nochiski/Quant_study/pull/52) latest duplicate backend/frontend 4 pass, MERGED | 2026-09-05 |
@@ -324,6 +326,17 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | `review_p4_04` 4차 재검토가 이전 P1 전부 해소와 FactorSignal numeric output gate의 SoT/책임분리를 확인해 APPROVE(P0 0/P1 0). 비차단 P2 validate provenance는 실행 권한을 주지 않는 view-only stale window로 후속 범위에 남기고 P4-04를 APPROVED·latest CI merge gate로 전환 | 동일 reviewer 최종 승인·실행 경로 fail-closed·13.6 merge gate |
+| 2026-09-05 KST | Codex | P4-04 추가 P1을 `70aeba8`에서 수정: generic explain은 group/boolean/scalar typed plan을 유지하되 executable FactorSignal 경계는 종목별 점수인 numeric_series만 허용하고 owner registry의 `strategy.expression.output_type`으로 portfolio/backtest를 동일 차단. 세 비수치 타입 422와 유효 sector group backtest COMPLETED·preview tape hash 일치를 고정해 backend 903 전체 gate 후 동일 reviewer 4차 재검토로 전환 | 범용 DAG와 실행 가능 signal 책임분리·semantic code 단일 owner·silent empty backtest 차단 |
+| 2026-09-05 KST | Codex | `review_p4_04` 3차 검토에서 이전 P1은 모두 해소됐으나 category/boolean graph output을 FactorSignal 최종 출력으로 사용하면 evaluator가 값을 `None`으로 바꾼 뒤 portfolio/backtest가 성공하는 P1을 재현. 범용 explain의 typed DAG 허용은 유지하고 실행 경계에서 numeric output만 owner 등록 semantic code로 차단하도록 CHANGES_REQUESTED 전환 | generic graph 설명과 executable FactorSignal 책임분리·의미 없는 성공 backtest fail-closed |
+| 2026-09-05 KST | Codex | P4-04 잔여 P1을 `a2fa034`에서 수정: PortfolioDesignService가 FactorResearch와 동일한 FactorMetadataPort를 명시적 dependency로 받아 모든 graph plan을 같은 snapshot/field contract로 compile하고 raw snapshot 불일치를 fail-closed. `classification.sector`를 공개 equity catalog·raw loader·factor metadata가 공유하는 category 선언으로 통합했으며 explain/portfolio plan exact parity, 숫자 group의 동일 오류 코드, sector group preview/backtest 성공, snapshot drift의 portfolio/backtest 차단을 회귀 테스트로 고정. backend 900·frontend 277 전체 gate와 generated deterministic 확인 후 동일 reviewer 3차 재검토로 전환 | metadata/catalog/loader 단일 SoT·application facade dependency 명시·실행 경로 책임분리·동일 reviewer re-review |
+| 2026-09-05 KST | Codex | `review_p4_04` 2차 검토에서 기존 P1 3건 중 2건 해소를 확인했으나 explain과 실제 portfolio/backtest가 서로 다른 field metadata로 plan을 compile해 unit/hash·group 승인 결과가 갈리는 P1 1건을 재현. CHANGES_REQUESTED로 되돌리고 동일 FactorMetadataSnapshot을 실행 compiler·raw loader까지 연결 예정 | Execution Plan과 실제 실행 path parity·truthful pipeline SoT |
+| 2026-09-05 KST | Codex | P4-04 P1 3건을 `f970dc6`에서 수정: backend FactorMetadataPort가 field/group contract와 snapshot을 원자적으로 resolve하고 group key를 plan required fields의 domain SoT에 포함; explain plan-null에도 registry/snapshot provenance 제공; frontend compiled/runtime schema 및 모든 response provenance를 차단. backend 897·frontend 277 전체 gate와 generated clean 후 같은 `review_p4_04` 재검토로 전환 | frontend 타입 추론 금지·metadata/provenance backend SoT·동일 reviewer re-review |
+| 2026-09-05 KST | Codex | `review_p4_04`이 P1 3건(group metadata를 equity catalog로 표현 불가, plan-null 응답 registry provenance 부재, compiled spec/runtime schema 세대 미결합)을 확인해 CHANGES_REQUESTED로 전환. frontend 추론을 만들지 않고 backend-owned metadata·response contract와 schema gate를 수정한 뒤 같은 reviewer에게 재검토 예정 | SoT·모든 canonical graph 지원·response provenance·동일 reviewer gate |
+| 2026-09-05 KST | Codex | P4-04 #57을 공개하고 code freeze `24f7c22`를 fresh review-only agent `review_p4_04`에 전달하기 위해 IN_REVIEW로 전환. 리뷰 중 구현 diff는 고정하며 수정이 필요하면 같은 reviewer에게 재검토를 요청 | PR별 독립 reviewer 정확히 1명·13.3~13.4 review gate |
+| 2026-09-05 KST | Codex | P4-04 code를 `24f7c22`에 고정. current valid spec만 전체 factor explain query로 만들고 schema/contract/dataset/registry coherence, catalog completeness, response registry drift, AbortSignal, exact pointer mapping을 fail-closed로 검증. focused 5·frontend 전체 275·typecheck·lint·build를 통과해 SELF_CHECK로 전환 | backend plan/type/unit/hash SoT·invalid/stale 실행 금지·query cancellation·13.2 self-check |
+| 2026-09-05 KST | Codex | P4-04 구현을 query orchestration/version gate/source mapping model(P4-04)과 실제 Execution Plan panel/page wiring(P4-09)으로 분할. 단일 PR 예상 diff가 600줄을 넘고 query correctness와 표시 책임을 독립 검토할 수 있어 총 49 PR로 조정 | 12절 PR 크기 규칙·query/UI 책임분리·독립 review 검출력 |
+| 2026-09-05 KST | Codex | #56 P6-07을 동일 reviewer 최종 승인과 latest CI 4/4 통과 후 main에 병합(`84d7c88`), 34/48(71%). 최신 main에서 P4-04 전용 worktree를 만들고 backend factor compiler를 SoT로 하는 Execution Plan·source node selection projection 구현을 시작 | 13.6 merge gate·plan/type/unit 재계산 금지·책임분리 |
 | 2026-09-05 KST | Codex | `review_p6_07` 최종 재확인이 P1 해소와 strictPort·앱 HTML marker 보강을 확인해 APPROVE(P0 0/P1 0)를 유지했고 최신 PLAN-only HEAD 원격 CI 4/4도 통과. P6-07을 APPROVED로 전환해 merge gate에 진입 | 동일 reviewer 최종 승인·latest CI·13.6 merge gate |
 | 2026-09-05 KST | Codex | 사용자 요청에 따라 P6-06/Phase 6 완료 조건에 backend+frontend 실제 동시 구동, 전략 생성·오류 유도/수정·저장/복구·백테스트·trace/risk·history/diff 실사용 시나리오와 실행 보고서를 추가. P6-07 reviewer APPROVE 후 비차단 P2도 `2e53089`에서 Vite `--strictPort`와 앱 root HTML marker로 보강해 false-positive를 차단하고 최종 재확인으로 전환 | 사용자 최종 E2E 요구·실행 증거·smoke identity |
 | 2026-09-05 KST | Codex | `review_p6_07`이 root lock·delegate test가 CI에서 수집되지 않고 실제 HTTP smoke가 자동화되지 않은 P1 1건을 확인. `8689075`에서 Linux CI에 root lock·unit·ruff·pyright와 실제 `uv run server` health 200 process smoke를 연결하고 root `npm run dev` Vite HTTP smoke도 함께 고정해 동일 reviewer 재검토로 전환 | 실제 명령 계약·cross-platform packaging 회귀 차단·동일 reviewer gate |

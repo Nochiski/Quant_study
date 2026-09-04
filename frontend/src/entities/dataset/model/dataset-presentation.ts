@@ -23,9 +23,11 @@ export const presentResearchCell = (
       displayValue:
         cell.value === null
           ? "—"
-          : new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 2 }).format(
-              cell.value,
-            ),
+          : typeof cell.value === "number"
+            ? new Intl.NumberFormat("ko-KR", {
+                maximumFractionDigits: 2,
+              }).format(cell.value)
+            : String(cell.value),
     };
   }
   if (cell.kind === "source_omitted_zero") {

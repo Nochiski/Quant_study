@@ -74,5 +74,16 @@ export {
   useOutlineNavigation,
   type StrategyOutlineNavigation,
 } from "./model/use-outline-navigation";
+export {
+  factorIndexAtPointer,
+  factorNodePointer,
+  nodePointerById,
+  pointerSelectsNode,
+  prepareExecutionPlans,
+  useExecutionPlans,
+  type ExecutionPlansState,
+  type FactorPlanRequest,
+  type PlannedFactor,
+} from "./model/use-execution-plans";
 export { SaveAction } from "./ui/save-action";
 export { DirtyLeaveGuard } from "./ui/dirty-leave-guard";

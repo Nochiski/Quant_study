@@ -27,7 +27,7 @@ class Observation:
     field_id: str
     effective_date: date
     available_date: date
-    value: float | None
+    value: float | str | bool | None
     kind: CellKind
 
 
@@ -162,6 +162,14 @@ def build_demo_fixture() -> MockEquityFixture:
     profiles = (
         *profiles,
         _factor_field_profile(
+            field_id="classification.sector",
+            dataset_id="classification_pit",
+            label="Sector classification",
+            unit="category",
+            value_type=FieldValueType.CATEGORY,
+            coverage=full_coverage,
+        ),
+        _factor_field_profile(
             field_id="short.short_balance_ratio",
             dataset_id="short_daily",
             label="Short balance ratio",
@@ -238,6 +246,14 @@ def build_demo_fixture() -> MockEquityFixture:
                         session,
                         session,
                         (security_index - 1) * 0.05 + (index % 3) * 0.005,
+                        CellKind.OBSERVED,
+                    ),
+                    Observation(
+                        security.security_id,
+                        "classification.sector",
+                        session,
+                        session,
+                        ("technology", "industrial", "consumer")[security_index % 3],
                         CellKind.OBSERVED,
                     ),
                 )
@@ -325,6 +341,7 @@ def build_demo_fixture() -> MockEquityFixture:
                 DatasetRevision("short_daily", "mock-r1", sessions[-1]),
                 DatasetRevision("credit_daily", "mock-r1", sessions[-1]),
                 DatasetRevision("event_pit", "mock-r1", sessions[-1]),
+                DatasetRevision("classification_pit", "mock-r1", sessions[-1]),
             ),
         ),
         sessions=sessions,

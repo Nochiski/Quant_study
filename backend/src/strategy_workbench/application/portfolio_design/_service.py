@@ -22,6 +22,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
+from strategy_workbench.application.factor_research.facade.ports import (
+    FactorMetadataPort,
+    FactorMetadataSnapshot,
+)
 from strategy_workbench.domain.equity.facade.research_data import DataLoadStatus
 from strategy_workbench.domain.factor.facade.evaluation import (
     FactorFieldValue,
@@ -29,11 +33,18 @@ from strategy_workbench.domain.factor.facade.evaluation import (
     FactorValue,
     evaluate_factor_graph,
 )
-from strategy_workbench.domain.factor.facade.expression import FactorGraph, GroupNode
+from strategy_workbench.domain.factor.facade.expression import NodeValueType
 from strategy_workbench.domain.factor.facade.planning import (
     FactorExecutionPlan,
+    InvalidFactorGraphError,
     ResolvedFactorParameter,
     compile_factor_plan,
+)
+from strategy_workbench.domain.factor.facade.validation import (
+    FactorValidationSeverity,
+)
+from strategy_workbench.domain.factor.facade.validation import (
+    required_field_ids as factor_required_field_ids,
 )
 from strategy_workbench.domain.portfolio.facade.construction import (
     PortfolioFactorValue,
@@ -44,6 +55,7 @@ from strategy_workbench.domain.portfolio.facade.construction import (
 from strategy_workbench.domain.strategy.facade.specification import StrategySpec
 from strategy_workbench.domain.strategy.facade.validation import (
     StrategyValidation,
+    ValidationSeverity,
     semantic_issue,
     validate_strategy,
 )
@@ -85,6 +97,18 @@ class LookAheadViolationError(RawObservationContractError):
     """An adapter returned a field published after the observation date (contract bug)."""
 
 
+class PortfolioSnapshotMismatchError(RawObservationContractError):
+    """Factor contracts and raw values came from different dataset snapshots."""
+
+    def __init__(self, *, expected: str, actual: str) -> None:
+        super().__init__(
+            "portfolio metadata/raw observation snapshot mismatch ??"
+            f"expected_data_snapshot_id={expected!r} actual_data_snapshot_id={actual!r}"
+        )
+        self.expected = expected
+        self.actual = actual
+
+
 @dataclass(frozen=True)
 class FactorEvaluationRecord:
     """One factor's plan and evaluated values, kept for parity checks and the debug trace."""
@@ -108,10 +132,12 @@ class PortfolioDesignService:
         observation_source: RawObservationPort,
         engine_portfolio: EnginePortfolioPort,
         *,
+        factor_metadata: FactorMetadataPort,
         factor_registry_version: str,
     ) -> None:
         self._observation_source = observation_source
         self._engine_portfolio = engine_portfolio
+        self._factor_metadata = factor_metadata
         self._factor_registry_version = factor_registry_version
 
     def preview(self, request: PortfolioPreviewRequest) -> PortfolioPreview:
@@ -123,7 +149,19 @@ class PortfolioDesignService:
         if not validation.valid:
             raise InvalidPortfolioRequestError(validation)
 
-        plans = self._plans(spec)
+        metadata = self._factor_metadata.resolve_factor_fields(
+            tuple(
+                sorted(
+                    {
+                        field_id
+                        for factor in spec.factors.factors
+                        for field_id in factor_required_field_ids(factor.graph)
+                    }
+                )
+            )
+        )
+        plans = self._plans(spec, metadata)
+        _reject_non_numeric_factor_outputs(spec, plans)
         _reject_saved_references(spec, plans)
         raw = self._observation_source.load_raw_observations(
             RawObservationQuery(
@@ -140,6 +178,11 @@ class PortfolioDesignService:
         )
         if not raw.ok:
             raise RawObservationUnavailableError(raw.status, raw.detail)
+        if raw.data_snapshot_id != metadata.data_snapshot_id:
+            raise PortfolioSnapshotMismatchError(
+                expected=metadata.data_snapshot_id,
+                actual=raw.data_snapshot_id,
+            )
         _reject_sessions_outside_strategy_range(raw, spec)
         factor_observations = tuple(_to_factor_observation(item) for item in raw.observations)
         parameters = tuple(
@@ -174,18 +217,43 @@ class PortfolioDesignService:
             preview=preview,
         )
 
-    def _plans(self, spec: StrategySpec) -> dict[str, FactorExecutionPlan]:
+    def _plans(
+        self, spec: StrategySpec, metadata: FactorMetadataSnapshot
+    ) -> dict[str, FactorExecutionPlan]:
         parameter_ids = tuple(parameter.parameter_id for parameter in spec.parameters)
         factor_ids = tuple(factor.factor_id for factor in spec.factors.factors)
-        return {
-            factor.factor_id: compile_factor_plan(
-                factor.graph,
-                registry_version=self._factor_registry_version,
-                parameter_ids=parameter_ids,
-                factor_ids=factor_ids,
+        plans: dict[str, FactorExecutionPlan] = {}
+        issues = []
+        for factor_index, factor in enumerate(spec.factors.factors):
+            try:
+                plans[factor.factor_id] = compile_factor_plan(
+                    factor.graph,
+                    registry_version=self._factor_registry_version,
+                    fields=metadata.fields,
+                    parameter_ids=parameter_ids,
+                    factor_ids=factor_ids,
+                    require_field_metadata=True,
+                )
+            except InvalidFactorGraphError as error:
+                issues.extend(
+                    semantic_issue(
+                        factor_issue.code,
+                        f"factors.factors.{factor_index}.graph.{factor_issue.path}",
+                        factor_issue.message,
+                        severity=(
+                            ValidationSeverity.ERROR
+                            if factor_issue.severity is FactorValidationSeverity.ERROR
+                            else ValidationSeverity.WARNING
+                        ),
+                        node_id=factor_issue.node_id,
+                    )
+                    for factor_issue in error.validation.issues
+                )
+        if issues:
+            raise InvalidPortfolioRequestError(
+                StrategyValidation(valid=False, issues=tuple(issues))
             )
-            for factor in spec.factors.factors
-        }
+        return plans
 
 
 def _required_field_ids(
@@ -203,13 +271,7 @@ def _required_field_ids(
     )
     for plan in plans.values():
         fields.update(plan.required_field_ids)
-    for factor in spec.factors.factors:
-        fields.update(_group_field_ids(factor.graph))
     return tuple(sorted(fields))
-
-
-def _group_field_ids(graph: FactorGraph) -> set[str]:
-    return {node.group_field_id for node in graph.nodes if isinstance(node, GroupNode)}
 
 
 def _reject_saved_references(spec: StrategySpec, plans: dict[str, FactorExecutionPlan]) -> None:
@@ -226,6 +288,33 @@ def _reject_saved_references(spec: StrategySpec, plans: dict[str, FactorExecutio
         for index, factor in enumerate(spec.factors.factors)
         for plan in (plans[factor.factor_id],)
         if plan.referenced_factor_ids or plan.referenced_subgraph_ids
+    )
+    if issues:
+        raise InvalidPortfolioRequestError(StrategyValidation(valid=False, issues=issues))
+
+
+def _reject_non_numeric_factor_outputs(
+    spec: StrategySpec, plans: dict[str, FactorExecutionPlan]
+) -> None:
+    """A FactorSignal is a per-security score, not an arbitrary typed expression.
+
+    Generic factor explain remains free to describe scalar, boolean, and group outputs. The
+    executable portfolio boundary accepts only numeric series: group/boolean values are not
+    scores, and a scalar cannot distinguish securities. This check must inspect the compiled plan
+    so it consumes the same metadata-derived contract as execution.
+    """
+    issues = tuple(
+        semantic_issue(
+            "strategy.expression.output_type",
+            f"factors.factors.{factor_index}.graph.output_node_id",
+            "FactorSignal output must be numeric_series for portfolio/backtest execution: "
+            f"actual={output.output_type!r}",
+            node_id=plan.output_node_id,
+        )
+        for factor_index, factor in enumerate(spec.factors.factors)
+        for plan in (plans[factor.factor_id],)
+        for output in (next(step for step in plan.steps if step.node_id == plan.output_node_id),)
+        if output.output_type != NodeValueType.NUMERIC_SERIES.value
     )
     if issues:
         raise InvalidPortfolioRequestError(StrategyValidation(valid=False, issues=issues))

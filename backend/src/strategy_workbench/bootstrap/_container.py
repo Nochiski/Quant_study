@@ -65,7 +65,10 @@ def build_container(
     strategy_repository = InMemoryStrategyRepository()
     factor_registry = build_default_factor_registry()
     portfolio_design = PortfolioDesignService(
-        equity_data, engine_portfolio, factor_registry_version=factor_registry.version
+        equity_data,
+        engine_portfolio,
+        factor_metadata=equity_data,
+        factor_registry_version=factor_registry.version,
     )
     metric_registry = build_default_metric_registry()
     strategy_authoring = StrategyAuthoringService(
@@ -88,7 +91,11 @@ def build_container(
         strategy_documents=StrategyDocumentService(
             strategy_authoring, strategy_repository, new_id=lambda: str(uuid4())
         ),
-        factor_research=FactorResearchService(factor_registry, equity_data),
+        factor_research=FactorResearchService(
+            factor_registry,
+            metadata_source=equity_data,
+            observation_source=equity_data,
+        ),
         portfolio_design=portfolio_design,
         backtest_runs=BacktestRunService(
             portfolio_design,

@@ -762,7 +762,17 @@ Phase 3 종료 기준:
 - pointer/node ID 복사
 - 동일 diagnostic 중복 제거
 
-### P4-04 — Execution Plan
+### P4-04 — Execution Plan query orchestration
+
+- current valid StrategySpec만 backend factor explain API에 전달
+- compiled/runtime schema와 request/response dataset·factor-registry version coherence를 fail-closed로 확인
+- 모든 factor query의 identity와 cancellation을 일관되게 관리
+- field/group metadata는 backend data adapter가 resolve하고 browser metadata 입력은 신뢰하지 않음
+- plan 유무와 무관하게 backend registry/dataset provenance를 응답
+- plan, type, unit, history, fingerprint는 backend 응답을 SoT로 유지
+- factor/node와 exact JSON Pointer 사이의 source mapping 제공
+
+### P4-09 — Execution Plan projection
 
 - backend factor explain/plan 표시
 - topological order

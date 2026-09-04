@@ -34,7 +34,7 @@ def _cell_value(
     ]
     assert len(matching) == 1
     value = matching[0].value
-    assert value is not None
+    assert isinstance(value, (int, float)) and not isinstance(value, bool)
     return value
 
 

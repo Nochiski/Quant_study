@@ -10,6 +10,7 @@ from strategy_workbench.application.backtest_run.facade.ports import (
     UniverseMembershipRecord,
 )
 from strategy_workbench.application.factor_research.facade.ports import (
+    FactorMetadataSnapshot,
     FactorObservationQuery,
     FactorObservationSet,
 )
@@ -24,6 +25,7 @@ from strategy_workbench.domain.equity.facade.research_data import (
     DataLoadStatus,
     DatasetFieldProfile,
     DataSnapshot,
+    FieldValueType,
     ResearchPanelCell,
     ResearchPanelQuery,
     ResearchPanelResult,
@@ -34,6 +36,10 @@ from strategy_workbench.domain.equity.facade.research_data import (
 from strategy_workbench.domain.factor.facade.evaluation import (
     FactorFieldValue,
     FactorObservation,
+)
+from strategy_workbench.domain.factor.facade.expression import (
+    FieldMetadata,
+    NodeValueType,
 )
 
 from ._fixture import Membership, Observation, build_demo_fixture
@@ -78,6 +84,29 @@ class MockEquityDataAdapter:
 
     def list_fields(self) -> tuple[DatasetFieldProfile, ...]:
         return self._profiles
+
+    def resolve_factor_fields(self, field_ids: tuple[str, ...]) -> FactorMetadataSnapshot:
+        """Resolve graph field contracts inside the data adapter, never in the browser."""
+        profile_by_id = {profile.field_id: profile for profile in self._profiles}
+        fields: list[FieldMetadata] = []
+        for field_id in field_ids:
+            profile = profile_by_id.get(field_id)
+            if profile is not None:
+                fields.append(
+                    FieldMetadata(
+                        field_id=field_id,
+                        unit=profile.unit,
+                        value_type=(
+                            NodeValueType.GROUP_SERIES
+                            if profile.value_type is FieldValueType.CATEGORY
+                            else NodeValueType.NUMERIC_SERIES
+                        ),
+                    )
+                )
+        return FactorMetadataSnapshot(
+            data_snapshot_id=self._snapshot.snapshot_id,
+            fields=tuple(fields),
+        )
 
     def load_universe(self, query: UniverseHistoryQuery) -> UniverseHistoryResult:
         sessions = tuple(

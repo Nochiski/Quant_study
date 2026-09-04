@@ -92,6 +92,7 @@ def compile_factor_plan(
     parameter_ids: tuple[str, ...] = (),
     factor_ids: tuple[str, ...] = (),
     subgraph_ids: tuple[str, ...] = (),
+    require_field_metadata: bool = False,
 ) -> FactorExecutionPlan:
     validation = validate_factor_graph(
         graph,
@@ -99,6 +100,7 @@ def compile_factor_plan(
         parameter_ids=parameter_ids,
         factor_ids=factor_ids,
         subgraph_ids=subgraph_ids,
+        require_field_metadata=require_field_metadata,
     )
     if not validation.valid:
         raise InvalidFactorGraphError(validation)

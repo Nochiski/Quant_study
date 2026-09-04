@@ -4,6 +4,7 @@ from strategy_workbench.domain.factor._validation import (
     FactorValidationSeverity,
     NodeContract,
     node_dependencies,
+    required_field_ids,
     validate_factor_graph,
 )
 
@@ -13,5 +14,6 @@ __all__ = [
     "FactorValidationSeverity",
     "NodeContract",
     "node_dependencies",
+    "required_field_ids",
     "validate_factor_graph",
 ]

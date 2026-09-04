@@ -27,6 +27,7 @@ class FieldValueType(Enum):
     AMOUNT = "amount"
     RATIO = "ratio"
     COUNT = "count"
+    CATEGORY = "category"
 
 
 @dataclass(frozen=True)
@@ -180,7 +181,7 @@ class ResearchPanelCell:
     field_id: str
     source_effective_date: date
     available_date: date
-    value: float | None
+    value: float | str | bool | None
     kind: CellKind
 
     def __post_init__(self) -> None:

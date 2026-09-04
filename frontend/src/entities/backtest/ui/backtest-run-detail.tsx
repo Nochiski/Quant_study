@@ -377,7 +377,15 @@ export const BacktestRunDetail = ({
             </div>
             <div>
               <dt>Strategy</dt>
-              <dd>{result.manifest.run_spec.strategy.title}</dd>
+              <dd>{result.manifest.run_spec.strategy?.title ?? "—"}</dd>
+            </div>
+            <div>
+              <dt>Strategy source</dt>
+              <dd title={result.manifest.strategy_provenance.spec_hash}>
+                {result.manifest.strategy_provenance.kind === "saved_revision"
+                  ? `${result.manifest.strategy_provenance.strategy_id} r${result.manifest.strategy_provenance.revision}`
+                  : "inline draft"}
+              </dd>
             </div>
             <div>
               <dt>Strategy hash</dt>

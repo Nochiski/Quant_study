@@ -20,6 +20,8 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestStartResponse,
     InvalidBacktestRunError,
     RunStatus,
+    StaleStrategyReferenceError,
+    StrategyReferenceNotFoundError,
 )
 from strategy_workbench.application.equity_workspace.facade.workspace import (
     EquityWorkspaceService,
@@ -141,6 +143,16 @@ def create_app(
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail={"code": "backtest.run.invalid", "message": str(error)},
+            ) from error
+        except StrategyReferenceNotFoundError as error:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "backtest.strategy.not_found", "message": str(error)},
+            ) from error
+        except StaleStrategyReferenceError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "backtest.strategy.stale", "message": str(error)},
             ) from error
 
     @app.get(

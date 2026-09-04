@@ -23,6 +23,13 @@ export type BacktestRunResult = {
 
 /**
  * BacktestRunSpec
+ *
+ * A request names its strategy once: `strategy` (legacy inline spec) or `strategy_source`.
+ *
+ * `strategy` stays for compatibility with the JSON editors; new callers use `strategy_source`
+ * so a run can name a saved revision (P1-09). The run service rejects a request carrying both.
+ * After resolution the run spec stored in the manifest carries both: `strategy` is the exact
+ * spec that was executed and `strategy_source` says where it came from.
  */
 export type BacktestRunSpec = {
   /**
@@ -42,7 +49,11 @@ export type BacktestRunSpec = {
    * Metric Windows
    */
   metric_windows?: Array<MetricWindow>;
-  strategy: StrategySpec;
+  strategy?: StrategySpec | null;
+  /**
+   * Strategy Source
+   */
+  strategy_source?: SavedRevisionReference | InlineDraft | null;
 };
 
 /**
@@ -1481,6 +1492,23 @@ export type HttpValidationError = {
 };
 
 /**
+ * InlineDraft
+ *
+ * Run an unsaved spec (draft backtests only; never a deployment source).
+ */
+export type InlineDraft = {
+  /**
+   * Kind
+   */
+  kind: "inline_draft";
+  /**
+   * Source Hash
+   */
+  source_hash?: string | null;
+  spec: StrategySpec;
+};
+
+/**
  * IntegerParameter
  */
 export type IntegerParameter = {
@@ -2463,6 +2491,7 @@ export type RunManifest = {
    * Strategy Hash
    */
   strategy_hash: string;
+  strategy_provenance: StrategyProvenance;
   /**
    * Target Tape Hash
    */
@@ -2511,6 +2540,30 @@ export type SavedFactorNode = {
    * Node Id
    */
   node_id: string;
+};
+
+/**
+ * SavedRevisionReference
+ *
+ * Run a stored revision; the run fails before starting if the hash no longer matches.
+ */
+export type SavedRevisionReference = {
+  /**
+   * Expected Spec Hash
+   */
+  expected_spec_hash: string;
+  /**
+   * Kind
+   */
+  kind: "saved_revision";
+  /**
+   * Revision
+   */
+  revision: number;
+  /**
+   * Strategy Id
+   */
+  strategy_id: string;
 };
 
 /**
@@ -2825,6 +2878,40 @@ export type StrategyIdentity = {
    */
   strategy_id: string;
 };
+
+/**
+ * StrategyProvenance
+ *
+ * What exactly was run: recorded in the manifest so a result names its revision.
+ */
+export type StrategyProvenance = {
+  kind: StrategySourceKind;
+  /**
+   * Revision
+   */
+  revision?: number | null;
+  /**
+   * Schema Version
+   */
+  schema_version: string;
+  /**
+   * Source Hash
+   */
+  source_hash?: string | null;
+  /**
+   * Spec Hash
+   */
+  spec_hash: string;
+  /**
+   * Strategy Id
+   */
+  strategy_id?: string | null;
+};
+
+/**
+ * StrategySourceKind
+ */
+export type StrategySourceKind = "saved_revision" | "inline_draft";
 
 /**
  * StrategySpec

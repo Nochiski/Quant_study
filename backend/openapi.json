@@ -38,6 +38,7 @@
         "type": "object"
       },
       "BacktestRunSpec": {
+        "description": "A request names its strategy once: `strategy` (legacy inline spec) or `strategy_source`.\n\n`strategy` stays for compatibility with the JSON editors; new callers use `strategy_source`\nso a run can name a saved revision (P1-09). The run service rejects a request carrying both.\nAfter resolution the run spec stored in the manifest carries both: `strategy` is the exact\nspec that was executed and `strategy_source` says where it came from.",
         "properties": {
           "annualization_days": {
             "default": 252,
@@ -73,12 +74,30 @@
             "type": "array"
           },
           "strategy": {
-            "$ref": "#/components/schemas/StrategySpec"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StrategySpec"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "strategy_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SavedRevisionReference"
+              },
+              {
+                "$ref": "#/components/schemas/InlineDraft"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy Source"
           }
         },
-        "required": [
-          "strategy"
-        ],
         "title": "BacktestRunSpec",
         "type": "object"
       },
@@ -2455,6 +2474,36 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "InlineDraft": {
+        "description": "Run an unsaved spec (draft backtests only; never a deployment source).",
+        "properties": {
+          "kind": {
+            "const": "inline_draft",
+            "title": "Kind",
+            "type": "string"
+          },
+          "source_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Hash"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/StrategySpec"
+          }
+        },
+        "required": [
+          "spec",
+          "kind"
+        ],
+        "title": "InlineDraft",
+        "type": "object"
+      },
       "IntegerParameter": {
         "properties": {
           "default": {
@@ -3938,7 +3987,7 @@
             "$ref": "#/components/schemas/BacktestRunSpec"
           },
           "schema_version": {
-            "default": "backtest-run-v1",
+            "default": "backtest-run-v2",
             "title": "Schema Version",
             "type": "string"
           },
@@ -3949,6 +3998,9 @@
           "strategy_hash": {
             "title": "Strategy Hash",
             "type": "string"
+          },
+          "strategy_provenance": {
+            "$ref": "#/components/schemas/StrategyProvenance"
           },
           "target_tape_hash": {
             "title": "Target Tape Hash",
@@ -3979,7 +4031,8 @@
           "annualization_days",
           "fee_bps",
           "slippage_bps",
-          "participation_rate"
+          "participation_rate",
+          "strategy_provenance"
         ],
         "title": "RunManifest",
         "type": "object"
@@ -4035,6 +4088,36 @@
           "kind"
         ],
         "title": "SavedFactorNode",
+        "type": "object"
+      },
+      "SavedRevisionReference": {
+        "description": "Run a stored revision; the run fails before starting if the hash no longer matches.",
+        "properties": {
+          "expected_spec_hash": {
+            "title": "Expected Spec Hash",
+            "type": "string"
+          },
+          "kind": {
+            "const": "saved_revision",
+            "title": "Kind",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "strategy_id",
+          "revision",
+          "expected_spec_hash",
+          "kind"
+        ],
+        "title": "SavedRevisionReference",
         "type": "object"
       },
       "SavedStrategy": {
@@ -4482,6 +4565,70 @@
         ],
         "title": "StrategyIdentity",
         "type": "object"
+      },
+      "StrategyProvenance": {
+        "description": "What exactly was run: recorded in the manifest so a result names its revision.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/StrategySourceKind"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Hash"
+          },
+          "spec_hash": {
+            "title": "Spec Hash",
+            "type": "string"
+          },
+          "strategy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy Id"
+          }
+        },
+        "required": [
+          "kind",
+          "spec_hash",
+          "schema_version"
+        ],
+        "title": "StrategyProvenance",
+        "type": "object"
+      },
+      "StrategySourceKind": {
+        "enum": [
+          "saved_revision",
+          "inline_draft"
+        ],
+        "title": "StrategySourceKind",
+        "type": "string"
       },
       "StrategySpec": {
         "properties": {

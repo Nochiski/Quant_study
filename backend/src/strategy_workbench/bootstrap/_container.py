@@ -90,6 +90,7 @@ def build_container(
         portfolio_design=portfolio_design,
         backtest_runs=BacktestRunService(
             portfolio_design,
+            strategy_repository,
             equity_data,
             BacktestEngineExecutorAdapter(metric_registry),
             LocalArtifactStore(run_artifact_root),

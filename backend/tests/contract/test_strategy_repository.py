@@ -69,7 +69,9 @@ def _legacy(spec: StrategySpec, strategy_id: str, revision: int, at: datetime = 
     )
 
 
-def _document(text: str, strategy_id: str, revision: int, at: datetime = T0):
+def _document(
+    text: str, strategy_id: str, revision: int, at: datetime = T0, change_note: str | None = None
+):
     compiled = _authoring().compile(CompileRequest(text, SourceFormat.YAML))
     assert compiled.ok and compiled.spec is not None and compiled.spec_hash is not None
     saved = replace(compiled.spec, identity=StrategyIdentity(strategy_id, revision))
@@ -77,7 +79,7 @@ def _document(text: str, strategy_id: str, revision: int, at: datetime = T0):
         spec=saved,
         spec_hash=compiled.spec_hash,
         source=RevisionSource(SourceFormat.YAML, text, compiled.source_hash),
-        provenance=RevisionProvenance(RevisionOrigin.DOCUMENT, at),
+        provenance=RevisionProvenance(RevisionOrigin.DOCUMENT, at, change_note=change_note),
     )
 
 
@@ -221,11 +223,12 @@ def test_history_exposes_document_source_provenance(
 ) -> None:
     repository = factory()
     text = (FIXTURES / "quality_momentum.yaml").read_text(encoding="utf-8")
-    repository.add(_document(text, "d1", 1))
+    repository.add(_document(text, "d1", 1, change_note="initial import"))
     repository.append(_legacy(_template(), "d1", 2), expected_revision=1)
 
     first, second = repository.history("d1", PageRequest()).items
     assert first.origin is RevisionOrigin.DOCUMENT
+    assert first.change_note == "initial import" and second.change_note is None
     assert first.source_format is SourceFormat.YAML
     assert first.source_hash == source_hash_of(text)
     assert first.spec_hash == GOLDEN_SPEC_HASH

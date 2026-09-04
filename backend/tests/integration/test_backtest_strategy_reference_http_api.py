@@ -125,17 +125,6 @@ def test_inline_draft_and_legacy_inline_spec_record_inline_provenance() -> None:
         assert provenance["source_hash"] == source_hash
         assert provenance["spec_hash"]
 
-    both = client.post(
-        "/api/v1/backtests",
-        json={
-            "strategy": template,
-            "strategy_source": {"kind": "inline_draft", "spec": template},
-            "core": "python",
-        },
-    )
-    neither = client.post("/api/v1/backtests", json={"core": "python"})
-    assert both.status_code == 422 and neither.status_code == 422
-
 
 def test_both_and_neither_return_the_same_error_shape() -> None:
     client = TestClient(build_http_app())

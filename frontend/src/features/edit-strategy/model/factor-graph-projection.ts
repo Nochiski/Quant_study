@@ -21,7 +21,8 @@ export type GraphInputProjection = {
 };
 
 export type GraphNodeProjection = {
-  sequence: number;
+  sequence: number | null;
+  planned: boolean;
   nodeId: string;
   kind: FactorNode["kind"] | "unknown";
   operation: string;
@@ -157,19 +158,9 @@ const projectFactor = (factor: PlannedFactor): GraphFactorProjection => {
     (plan?.steps ?? []).map((step) => [step.node_id, step]),
   );
 
-  const nodes: GraphNodeProjection[] = (
-    plan?.steps ??
-    graph.nodes.map((node, index) => ({
-      sequence: index + 1,
-      node_id: node.node_id,
-      operation: authoredOperation(node),
-      input_node_ids: authoredInputs(node).map((input) => input.nodeId),
-      output_type: contractById.get(node.node_id)?.value_type ?? null,
-      output_unit: contractById.get(node.node_id)?.unit ?? null,
-      minimum_history_sessions:
-        contractById.get(node.node_id)?.minimum_history_sessions ?? null,
-    }))
-  ).map((step) => {
+  const projectPlannedNode = (
+    step: NonNullable<typeof plan>["steps"][number],
+  ): GraphNodeProjection => {
     const authored = authoredById.get(step.node_id);
     const authoredInputPorts =
       authored === undefined ? [] : authoredInputs(authored);
@@ -195,6 +186,7 @@ const projectFactor = (factor: PlannedFactor): GraphFactorProjection => {
     });
     return {
       sequence: step.sequence,
+      planned: true,
       nodeId: step.node_id,
       kind: authored?.kind ?? "unknown",
       operation: step.operation,
@@ -207,7 +199,40 @@ const projectFactor = (factor: PlannedFactor): GraphFactorProjection => {
       details: nodeDetails(authored),
       issues: issuesById.get(step.node_id) ?? [],
     };
-  });
+  };
+
+  const plannedNodes = (plan?.steps ?? []).map(projectPlannedNode);
+  const plannedNodeIds = new Set(plannedNodes.map((node) => node.nodeId));
+  const unplannedNodes = graph.nodes
+    .filter((node) => !plannedNodeIds.has(node.node_id))
+    .map((node): GraphNodeProjection => {
+      const contract = contractById.get(node.node_id);
+      return {
+        sequence: null,
+        planned: false,
+        nodeId: node.node_id,
+        kind: node.kind,
+        operation: authoredOperation(node),
+        pointer: nodePointerById(factor, node.node_id),
+        inputs: authoredInputs(node).map((input) => {
+          const inputContract = contractById.get(input.nodeId);
+          return {
+            nodeId: input.nodeId,
+            role: input.role,
+            pointer: nodePointerById(factor, input.nodeId),
+            outputType: inputContract?.value_type ?? null,
+            outputUnit: inputContract?.unit ?? null,
+          };
+        }),
+        outputType: contract?.value_type ?? null,
+        outputUnit: contract?.unit ?? null,
+        minimumHistorySessions: contract?.minimum_history_sessions ?? null,
+        isOutput: node.node_id === graph.output_node_id,
+        details: nodeDetails(node),
+        issues: issuesById.get(node.node_id) ?? [],
+      };
+    });
+  const nodes = [...plannedNodes, ...unplannedNodes];
 
   return {
     factorIndex: factor.factorIndex,
@@ -226,9 +251,9 @@ const projectFactor = (factor: PlannedFactor): GraphFactorProjection => {
 };
 
 /**
- * Pure read-only projection. It never validates, sorts or infers contracts: plan order and
- * contracts come from the backend, while a plan-less graph keeps authored order and only uses
- * backend validation contracts/issues.
+ * Pure read-only projection. It never validates, sorts or infers contracts: executable nodes
+ * preserve backend plan order/contracts. Authored nodes outside that plan remain visible in
+ * authored order and use only backend validation contracts/issues.
  */
 export const projectFactorGraphs = (
   state: ExecutionPlansState,

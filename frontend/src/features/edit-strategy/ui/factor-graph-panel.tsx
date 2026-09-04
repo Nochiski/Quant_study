@@ -162,10 +162,13 @@ const GraphNode = ({
       aria-current={selected ? "true" : undefined}
       data-selected={selected || undefined}
       data-node-id={node.nodeId}
+      data-planned={node.planned}
     >
       <header>
         <span className="factor-graph__sequence">
-          {String(node.sequence).padStart(2, "0")}
+          {node.sequence === null
+            ? "—"
+            : String(node.sequence).padStart(2, "0")}
         </span>
         <button
           type="button"
@@ -178,6 +181,9 @@ const GraphNode = ({
           <code>{node.operation}</code>
         </button>
         {node.isOutput ? <Badge tone="accent">OUTPUT</Badge> : null}
+        {!node.planned ? (
+          <Badge tone="warn">{t("graph.notExecuted")}</Badge>
+        ) : null}
       </header>
 
       {node.inputs.length > 0 ? (
@@ -302,6 +308,8 @@ export const FactorGraphPanel = ({
   const graphLevelIssues = factor.issues.filter(
     (issue) => issue.node_id === null,
   );
+  const plannedNodes = factor.nodes.filter((node) => node.planned);
+  const unplannedNodes = factor.nodes.filter((node) => !node.planned);
 
   return (
     <section className="factor-graph" aria-label={t("graph.title")}>
@@ -348,19 +356,44 @@ export const FactorGraphPanel = ({
         </ul>
       ) : null}
 
-      <div className="factor-graph__canvas" tabIndex={0}>
-        <ol aria-label={t("graph.dag")}>
-          {factor.nodes.map((node) => (
-            <GraphNode
-              key={`${node.sequence}:${node.nodeId}`}
-              node={node}
-              selectedPointer={selectedPointer}
-              onSelectPointer={onSelectPointer}
-              onOpenSource={onOpenSource}
-            />
-          ))}
-        </ol>
-      </div>
+      {plannedNodes.length > 0 ? (
+        <div className="factor-graph__canvas" tabIndex={0}>
+          <ol aria-label={t("graph.dag")}>
+            {plannedNodes.map((node) => (
+              <GraphNode
+                key={`${node.sequence}:${node.nodeId}`}
+                node={node}
+                selectedPointer={selectedPointer}
+                onSelectPointer={onSelectPointer}
+                onOpenSource={onOpenSource}
+              />
+            ))}
+          </ol>
+        </div>
+      ) : null}
+
+      {unplannedNodes.length > 0 ? (
+        <section
+          className="factor-graph__unplanned"
+          aria-label={t("graph.unplannedTitle")}
+        >
+          <header>
+            <strong>{t("graph.unplannedTitle")}</strong>
+            <span>{t("graph.unplannedDescription")}</span>
+          </header>
+          <ol aria-label={t("graph.unplannedTitle")}>
+            {unplannedNodes.map((node) => (
+              <GraphNode
+                key={`unplanned:${node.nodeId}`}
+                node={node}
+                selectedPointer={selectedPointer}
+                onSelectPointer={onSelectPointer}
+                onOpenSource={onOpenSource}
+              />
+            ))}
+          </ol>
+        </section>
+      ) : null}
     </section>
   );
 };

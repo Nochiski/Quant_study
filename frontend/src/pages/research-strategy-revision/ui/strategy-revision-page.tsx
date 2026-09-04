@@ -222,7 +222,10 @@ export const StrategyRevisionPage = () => {
               diagnostics={currentDiagnostics(document)}
               selectedPointer={search.path}
               onSelectPointer={(pointer) => selectPointer(pointer, "graph")}
-              onOpenSource={(pointer) => selectPointer(pointer, "outline")}
+              onOpenSource={(pointer) => {
+                outline.requestSourceReveal(pointer);
+                selectPointer(pointer, "outline");
+              }}
             />
           ),
         }}

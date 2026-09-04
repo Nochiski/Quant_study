@@ -283,7 +283,7 @@ describe("Strategy Outline projection", () => {
     expect(onSelectedPointer).toHaveBeenCalledTimes(3);
   });
 
-  it("does not focus a hidden source editor until a projection opens that pointer", () => {
+  it("restores the same route pointer after a projection without focusing the hidden editor", () => {
     const focus = vi.fn();
     const setSelection = vi.fn();
     const scrollTo = vi.fn();
@@ -297,7 +297,7 @@ describe("Strategy Outline projection", () => {
           selectedPointer: "/risk/max_name_weight",
           onSelectedPointer,
         }),
-      { initialProps: { revealSelectedPointer: false } },
+      { initialProps: { revealSelectedPointer: true } },
     );
     const editor: CodeEditorHandle = {
       getText: () => SOURCE,
@@ -314,14 +314,26 @@ describe("Strategy Outline projection", () => {
     };
 
     act(() => result.current.onEditorReady(editor));
-    expect(focus).not.toHaveBeenCalled();
-    expect(setSelection).not.toHaveBeenCalled();
-
-    rerender({ revealSelectedPointer: true });
     expect(focus).toHaveBeenCalledTimes(1);
     expect(setSelection).toHaveBeenCalledTimes(1);
     expect(scrollTo).toHaveBeenCalledTimes(1);
-    expect(onSelectedPointer).not.toHaveBeenCalled();
+
+    rerender({ revealSelectedPointer: false });
+    const risk = findOutlineNode(result.current.snapshot?.nodes ?? [], "/risk");
+    expect(risk).not.toBeNull();
+    act(() => result.current.onSelectOutlineNode(risk!));
+    expect(onSelectedPointer).toHaveBeenLastCalledWith("/risk", "outline");
+    expect(focus).toHaveBeenCalledTimes(1);
+    expect(setSelection).toHaveBeenCalledTimes(1);
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+
+    // The URL still owns the original pointer. Returning to source must reveal it again even
+    // though document epoch and route pointer are identical to the first source render.
+    act(() => result.current.requestSourceReveal("/risk/max_name_weight"));
+    rerender({ revealSelectedPointer: true });
+    expect(focus).toHaveBeenCalledTimes(2);
+    expect(setSelection).toHaveBeenCalledTimes(2);
+    expect(scrollTo).toHaveBeenCalledTimes(2);
   });
 
   it("lets an explicit route selection win and rejects skipped-version cursor offsets", () => {

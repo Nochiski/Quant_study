@@ -340,6 +340,10 @@ const ko = {
   "graph.selectNode": "그래프 노드 선택: {node}",
   "graph.selectInput": "{role} 입력 노드 선택: {node}",
   "graph.missingInput": "입력 누락",
+  "graph.notExecuted": "미실행",
+  "graph.unplannedTitle": "실행 계획에 포함되지 않은 정의",
+  "graph.unplannedDescription":
+    "StrategySpec에는 존재하지만 backend execution plan에 포함되지 않아 실행되지 않습니다.",
   "graph.openSource": "소스에서 열기",
   "ide.editor.verbose": "verbose",
   "ide.editor.format": "포맷",
@@ -942,6 +946,10 @@ export const messages = {
     "graph.selectNode": "Select graph node: {node}",
     "graph.selectInput": "Select {role} input node: {node}",
     "graph.missingInput": "Missing input",
+    "graph.notExecuted": "NOT EXECUTED",
+    "graph.unplannedTitle": "Definitions outside the execution plan",
+    "graph.unplannedDescription":
+      "These nodes exist in StrategySpec but are not included in the backend execution plan and will not execute.",
     "graph.openSource": "Open source",
     "ide.editor.verbose": "verbose",
     "ide.editor.format": "Format",

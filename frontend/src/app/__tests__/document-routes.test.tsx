@@ -1155,7 +1155,20 @@ describe("FactorGraph read-only projection (P4-07)", () => {
       ),
     );
     const user = userEvent.setup();
-    const history = mount("/research/strategies/s1/revisions/2?view=graph");
+    const nodePath = "%2Ffactors%2Ffactors%2F0%2Fgraph%2Fnodes%2F1";
+    const history = mount(
+      `/research/strategies/s1/revisions/2?path=${nodePath}`,
+    );
+    const sourceView = await editor();
+    await waitFor(() =>
+      expect(
+        sourceView.state.sliceDoc(
+          sourceView.state.selection.main.from,
+          sourceView.state.selection.main.to,
+        ),
+      ).toContain("node_id: mom_252"),
+    );
+    await user.click(screen.getByRole("tab", { name: "Graph" }));
     await screen.findByLabelText("FactorGraph DAG");
     const node = await screen.findByRole("button", {
       name: "그래프 노드 선택: mom_252",

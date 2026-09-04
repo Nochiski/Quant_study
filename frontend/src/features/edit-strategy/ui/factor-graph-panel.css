@@ -116,6 +116,47 @@
   list-style: none;
 }
 
+.factor-graph__unplanned {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  overflow-x: auto;
+  border: 1px solid var(--status-warn);
+  border-radius: var(--radius-large);
+  background: color-mix(
+    in srgb,
+    var(--status-warn-soft) 55%,
+    var(--surface-canvas)
+  );
+}
+
+.factor-graph__unplanned > header {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.factor-graph__unplanned > header span {
+  max-width: 78ch;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.factor-graph__unplanned > ol {
+  display: grid;
+  grid-auto-columns: minmax(250px, 1fr);
+  grid-auto-flow: column;
+  gap: var(--space-4);
+  min-width: max-content;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.factor-graph__node[data-planned="false"] {
+  border-color: var(--status-warn);
+  box-shadow: none;
+}
+
 .factor-graph__node {
   position: relative;
   display: grid;

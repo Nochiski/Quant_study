@@ -32,6 +32,7 @@ export type StrategyOutlineNavigation = {
   onEditorSelectionChange: (selection: EditorSelection) => void;
   onSelectOutlineNode: (node: StrategyOutlineNode) => void;
   onCollapseOutlineNode: (node: StrategyOutlineNode) => void;
+  requestSourceReveal: (pointer: string) => void;
 };
 
 const normalizedPointer = (pointer: string | undefined): string =>
@@ -91,11 +92,11 @@ export const useOutlineNavigation = ({
   const onEditorReady = useCallback(
     (next: CodeEditorHandle | null): void => {
       editor.current = next;
-      if (next === null) return;
+      if (next === null || !revealSelectedPointer) return;
       const pointer = pendingReveal.current;
       if (pointer !== null && reveal(pointer)) pendingReveal.current = null;
     },
-    [reveal],
+    [reveal, revealSelectedPointer],
   );
 
   const onEditorSelectionChange = useCallback(
@@ -136,9 +137,11 @@ export const useOutlineNavigation = ({
       pendingCursor.current = null;
       pendingReveal.current = pointer;
       onSelectedPointer(pointer === "" ? undefined : pointer, "outline");
-      if (reveal(pointer)) pendingReveal.current = null;
+      if (revealSelectedPointer && reveal(pointer)) {
+        pendingReveal.current = null;
+      }
     },
-    [onSelectedPointer, reveal],
+    [onSelectedPointer, reveal, revealSelectedPointer],
   );
 
   const onCollapseOutlineNode = useCallback(
@@ -155,6 +158,11 @@ export const useOutlineNavigation = ({
     },
     [onSelectedPointer],
   );
+
+  const requestSourceReveal = useCallback((pointer: string): void => {
+    pendingCursor.current = null;
+    pendingReveal.current = pointer;
+  }, []);
 
   // Text edits move the cursor before their parser-owned source map exists. Publish only after
   // the matching document has a current successful parse; the newest pending cursor wins.
@@ -233,5 +241,6 @@ export const useOutlineNavigation = ({
     onEditorSelectionChange,
     onSelectOutlineNode,
     onCollapseOutlineNode,
+    requestSourceReveal,
   };
 };

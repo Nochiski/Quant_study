@@ -155,6 +155,29 @@ const readyState = (): ExecutionPlansState => ({
   factors: [plannedFactor()],
 });
 
+const disconnectedReadyState = (): ExecutionPlansState => {
+  const graphWithOrphan: FactorGraphRequest["graph"] = {
+    ...graph,
+    nodes: [
+      ...graph.nodes,
+      { node_id: "orphan", kind: "field", field_id: "price.open" },
+    ],
+  };
+  const graphExplanation = explanation();
+  graphExplanation.validation.node_contracts.push({
+    node_id: "orphan",
+    value_type: "numeric_series",
+    unit: "KRW",
+    minimum_history_sessions: 1,
+  });
+  return {
+    status: "ready",
+    expectedRegistryVersion: "factor-registry-v7",
+    expectedDataSnapshotId: "krx-pit-2026-09-01",
+    factors: [plannedFactor(graphWithOrphan, graphExplanation)],
+  };
+};
+
 describe("FactorGraph projection", () => {
   it("keeps backend plan order, contracts and branch roles while mapping authored pointers", () => {
     const projection = projectFactorGraphs(readyState());
@@ -169,6 +192,7 @@ describe("FactorGraph projection", () => {
       "signal",
     ]);
     expect(factor.nodes[0]).toMatchObject({
+      planned: true,
       pointer: "/factors/factors/0/graph/nodes/1",
       outputType: "numeric_series",
       outputUnit: "KRW",
@@ -183,6 +207,30 @@ describe("FactorGraph projection", () => {
       { label: "subgraph_id", value: "sector-neutral-v2" },
     ]);
     expect(factor.nodes[4].isOutput).toBe(true);
+  });
+
+  it("keeps disconnected authored nodes visible outside the backend execution plan", () => {
+    const projection = projectFactorGraphs(disconnectedReadyState());
+    if (projection.status !== "ready") throw new Error("fixture must be ready");
+
+    const factor = projection.factors[0];
+    expect(factor.nodes.map((node) => node.nodeId)).toEqual([
+      "close",
+      "zero",
+      "positive",
+      "neutralized_value",
+      "signal",
+      "orphan",
+    ]);
+    expect(factor.nodes[5]).toMatchObject({
+      nodeId: "orphan",
+      planned: false,
+      sequence: null,
+      pointer: "/factors/factors/0/graph/nodes/5",
+      outputType: "numeric_series",
+      outputUnit: "KRW",
+      minimumHistorySessions: 1,
+    });
   });
 
   it("keeps plan-less graphs in authored order and uses only backend validation contracts", () => {
@@ -211,6 +259,9 @@ describe("FactorGraph projection", () => {
     expect(projection.factors[0].valid).toBe(false);
     expect(projection.factors[0].nodes.map((node) => node.nodeId)).toEqual(
       graph.nodes.map((node) => node.node_id),
+    );
+    expect(projection.factors[0].nodes.every((node) => !node.planned)).toBe(
+      true,
     );
     expect(projection.factors[0].nodes[0].issues[0].code).toBe(
       "factor.graph.cycle",
@@ -303,6 +354,41 @@ describe("FactorGraphPanel", () => {
     await user.click(screen.getByRole("button", { name: "소스에서 열기" }));
     expect(onOpenSource).toHaveBeenCalledWith(
       "/factors/factors/0/graph/nodes/2/input_node_id",
+    );
+  });
+
+  it("separates disconnected definitions and preserves their exact source pointer", async () => {
+    const user = userEvent.setup();
+    const onSelectPointer = vi.fn();
+    const onOpenSource = vi.fn();
+    render(
+      <FactorGraphPanel
+        state={disconnectedReadyState()}
+        diagnostics={[]}
+        onSelectPointer={onSelectPointer}
+        onOpenSource={onOpenSource}
+      />,
+    );
+
+    const unplanned = screen.getByRole("region", {
+      name: "실행 계획에 포함되지 않은 정의",
+    });
+    const orphan = within(unplanned).getByRole("listitem");
+    expect(orphan).toHaveAttribute("data-node-id", "orphan");
+    expect(within(orphan).getByText("미실행")).toBeInTheDocument();
+    expect(within(orphan).getByText("price.open")).toBeInTheDocument();
+
+    await user.click(
+      within(orphan).getByRole("button", {
+        name: "그래프 노드 선택: orphan",
+      }),
+    );
+    expect(onSelectPointer).toHaveBeenLastCalledWith(
+      "/factors/factors/0/graph/nodes/5",
+    );
+    await user.click(within(orphan).getByText("소스에서 열기"));
+    expect(onOpenSource).toHaveBeenLastCalledWith(
+      "/factors/factors/0/graph/nodes/5",
     );
   });
 });

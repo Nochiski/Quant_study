@@ -11,10 +11,6 @@ import {
   tabId,
 } from "../../../shared/ui";
 import {
-  OUTLINE_SECTIONS,
-  type OutlineSection,
-} from "../model/outline-sections";
-import {
   DEFAULT_LAYOUT,
   PANEL_BOUNDS,
   usePanelLayout,
@@ -46,6 +42,8 @@ export type StrategyIdeProps = {
   runDisabled?: boolean;
   /** The source editor slot (P3). */
   editor: ReactNode;
+  /** Strategy document outline projection (P4-01). */
+  outline?: ReactNode;
   /** Editor toolbar actions (format / validate) rendered in the editor header. */
   editorActions?: ReactNode;
   view?: SourceView;
@@ -56,9 +54,6 @@ export type StrategyIdeProps = {
   inspector?: ReactNode;
   /** Intermediate Debugger slot (P5); placeholder until then. */
   debugger?: ReactNode;
-  /** Section shown as current in the outline (URL-owned by the page later). */
-  currentSection?: OutlineSection;
-  onSelectSection?: (section: OutlineSection) => void;
 };
 
 const NARROW_QUERY = "(max-width: 1279px)";
@@ -83,14 +78,13 @@ export const StrategyIde = ({
   onRunBacktest,
   runDisabled = false,
   editor,
+  outline,
   editorActions,
   view = "yaml",
   onViewChange,
   availableViews = ["yaml"],
   inspector,
   debugger: debuggerPanel,
-  currentSection,
-  onSelectSection,
 }: StrategyIdeProps) => {
   const narrow = useMediaQuery(NARROW_QUERY);
   const { layout, resize, toggle, close } = usePanelLayout(
@@ -104,7 +98,6 @@ export const StrategyIde = ({
     debugger: useId(),
     views: useId(),
   };
-  const [filter, setFilter] = useState("");
 
   useEffect(() => {
     if (narrow) close(["inspectorOpen", "debuggerOpen"]);
@@ -118,12 +111,6 @@ export const StrategyIde = ({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [narrow, close]);
-
-  const query = filter.trim().toLocaleLowerCase();
-  const sections = OUTLINE_SECTIONS.filter((section) => {
-    const label = section === "identity" ? t("ide.section.identity") : section;
-    return `${section} ${label}`.toLocaleLowerCase().includes(query);
-  });
 
   const inspectorNode = (
     <aside
@@ -307,48 +294,9 @@ export const StrategyIde = ({
                 {t("ide.collapseOutline")}
               </Button>
             </header>
-            <div className="ide__filter">
-              <input
-                type="search"
-                className="ide__filter-input"
-                aria-label={t("ide.outline.filter")}
-                placeholder={t("ide.outline.filterPlaceholder")}
-                value={filter}
-                onChange={(event) => setFilter(event.target.value)}
-              />
-            </div>
-            <ul className="ide__sections">
-              {sections.map((section) => (
-                <li key={section}>
-                  <button
-                    type="button"
-                    className="ide__section"
-                    aria-current={
-                      section === currentSection ? "location" : undefined
-                    }
-                    onClick={() => onSelectSection?.(section)}
-                  >
-                    <span className="ide__section-chevron" aria-hidden="true">
-                      ›
-                    </span>
-                    <span className="ide__section-name">
-                      {section === "identity"
-                        ? t("ide.section.identity")
-                        : section}
-                    </span>
-                    <span
-                      className="ide__section-status ide__section-status--pending"
-                      title={t("ide.section.pending")}
-                    >
-                      <span aria-hidden="true">○</span>
-                      <span className="sr-only">
-                        {t("ide.section.pending")}
-                      </span>
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+            {outline ?? (
+              <p className="ide__outline-placeholder">{t("ide.placeholder")}</p>
+            )}
           </nav>
           <section className="ide__snippets" aria-label={t("ide.snippets")}>
             <h2 className="ide__snippets-title">{t("ide.snippets")}</h2>

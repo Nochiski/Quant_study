@@ -69,19 +69,20 @@ const mount = (props: Partial<Parameters<typeof StrategyIde>[0]> = {}) => {
 };
 
 describe("StrategyIde", () => {
-  it("shows the outline with every section including parameters and a single tablist", () => {
+  it("renders the outline slot and a single set of projection tabs", () => {
     matchMedia(false);
-    mount();
+    mount({
+      outline: (
+        <ul role="tree" aria-label="StrategySpec document structure">
+          <li role="treeitem">parameters</li>
+          <li role="treeitem">risk</li>
+        </ul>
+      ),
+    });
     const outline = screen.getByRole("navigation", { name: "전략 구조" });
-    const sections = within(outline)
-      .getAllByRole("button")
-      .map((b) => b.textContent);
-    expect(sections.some((text) => text?.includes("parameters"))).toBe(true);
-    expect(sections.some((text) => text?.includes("risk"))).toBe(true);
-    expect(
-      outline.querySelectorAll(".ide__section-status--pending"),
-    ).toHaveLength(outline.querySelectorAll(".ide__section").length);
-    expect(outline.querySelector(".ide__section-status--ok")).toBeNull();
+    expect(within(outline).getByRole("tree")).toHaveTextContent(
+      "parametersrisk",
+    );
     // view tabs + inspector tabs + results tabs; no Data→…→Execution stepper
     expect(
       new Set(
@@ -95,21 +96,6 @@ describe("StrategyIde", () => {
     expect(
       screen.getByRole("region", { name: "중간 결과" }),
     ).toBeInTheDocument();
-  });
-
-  it("marks the current section and reports selection", async () => {
-    matchMedia(false);
-    const user = userEvent.setup();
-    const onSelectSection = vi.fn();
-    mount({ currentSection: "risk", onSelectSection });
-    const outline = screen.getByRole("navigation", { name: "전략 구조" });
-    expect(
-      within(outline).getByRole("button", { current: "location" }),
-    ).toHaveTextContent("risk");
-    await user.click(
-      within(outline).getByRole("button", { name: /portfolio/ }),
-    );
-    expect(onSelectSection).toHaveBeenCalledWith("portfolio");
   });
 
   it("resizes every panel linearly by keyboard and pointer, inverting the right/bottom panes", async () => {
@@ -239,7 +225,7 @@ describe("StrategyIde", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("renders the concept frame: breadcrumb, run action, meta line, filterable outline, snippets", async () => {
+  it("renders the concept frame: breadcrumb, run action, meta line, outline and snippets", async () => {
     matchMedia(false);
     const user = userEvent.setup();
     const onRunBacktest = vi.fn();
@@ -255,21 +241,8 @@ describe("StrategyIde", () => {
     await user.click(screen.getByRole("button", { name: /백테스트 실행/ }));
     expect(onRunBacktest).toHaveBeenCalledTimes(1);
     expect(screen.getByText("김연구")).toBeInTheDocument();
-    await user.type(
-      screen.getByRole("searchbox", { name: "전략 구조 필터" }),
-      "risk",
-    );
-    const outline = screen.getByRole("navigation", { name: "전략 구조" });
     expect(
-      within(outline).getAllByRole("button", { name: /risk/ }),
-    ).toHaveLength(1);
-    await user.clear(screen.getByRole("searchbox", { name: "전략 구조 필터" }));
-    await user.type(
-      screen.getByRole("searchbox", { name: "전략 구조 필터" }),
-      "기본",
-    );
-    expect(
-      within(outline).getByRole("button", { name: /기본 정보/ }),
+      screen.getByRole("navigation", { name: "전략 구조" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "스니펫" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "YAML" })).toHaveAttribute(

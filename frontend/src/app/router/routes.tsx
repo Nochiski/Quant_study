@@ -38,6 +38,22 @@ const isView = (value: unknown): value is StrategyView =>
   (STRATEGY_VIEWS as readonly string[]).includes(value);
 
 type LegacySearch = { step?: string; run?: string };
+type StrategyDocumentSearch = {
+  view?: StrategyView;
+  path?: string;
+  asOf?: string;
+  security?: string;
+};
+
+/** Selection/projection state for every StrategySpec authoring route. */
+const strategyDocumentSearch = (
+  search: Record<string, unknown>,
+): StrategyDocumentSearch => ({
+  view: isView(search.view) ? search.view : undefined,
+  path: typeof search.path === "string" ? search.path : undefined,
+  asOf: typeof search.asOf === "string" ? search.asOf : undefined,
+  security: typeof search.security === "string" ? search.security : undefined,
+});
 
 /** Idempotent: invalid values are dropped, defaults are never written to the URL (ADR D1). */
 const legacySearch = (search: Record<string, unknown>): LegacySearch => ({
@@ -80,7 +96,7 @@ const indexRoute = createRoute({
     if (search.step !== undefined || search.run !== undefined) {
       throw redirect({ to: "/legacy/builder", search, replace: true });
     }
-    throw redirect({ to: "/research/strategies/new", replace: true });
+    throw redirect({ to: "/research/strategies/new", search: {}, replace: true });
   },
 });
 
@@ -94,18 +110,14 @@ const legacyBuilderRoute = createRoute({
 const newStrategyRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/research/strategies/new",
+  validateSearch: strategyDocumentSearch,
   component: NewStrategyPage,
 });
 
 const strategyRevisionRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/research/strategies/$strategyId/revisions/$revision",
-  validateSearch: (search: Record<string, unknown>) => ({
-    view: isView(search.view) ? search.view : undefined,
-    path: typeof search.path === "string" ? search.path : undefined,
-    asOf: typeof search.asOf === "string" ? search.asOf : undefined,
-    security: typeof search.security === "string" ? search.security : undefined,
-  }),
+  validateSearch: strategyDocumentSearch,
   // Warm-up only (ADR D4): the page reads through useSuspenseQuery, never useLoaderData.
   loader: async ({ context, params }) => {
     if (!/^[1-9]\d*$/.test(params.revision)) throw notFound();

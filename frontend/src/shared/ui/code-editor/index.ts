@@ -11,5 +11,6 @@ export type {
   EditorHoverSource,
   EditorLanguage,
   EditorPosition,
+  EditorSelection,
   EditorSeverity,
 } from "./handle";

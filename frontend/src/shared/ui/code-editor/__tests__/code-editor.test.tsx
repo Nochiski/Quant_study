@@ -37,13 +37,15 @@ describe("CodeEditor", () => {
   });
 
   it("reports text changes made through the handle and maps offsets to positions", async () => {
-    const { ref, onChange } = await mount();
+    const onSelectionChange = vi.fn();
+    const { ref, onChange } = await mount({ onSelectionChange });
     act(() => ref.current?.setText("a: 1\nb: 2\n"));
     expect(onChange).toHaveBeenLastCalledWith("a: 1\nb: 2\n", false);
     expect(ref.current?.offsetToPosition(6)).toEqual({ line: 1, column: 1 });
     expect(ref.current?.positionToOffset({ line: 1, column: 1 })).toBe(6);
     act(() => ref.current?.setSelection(2, 4));
     expect(ref.current?.getSelection()).toEqual({ from: 2, to: 4 });
+    expect(onSelectionChange).toHaveBeenLastCalledWith({ from: 2, to: 4 });
   });
 
   it("mirrors IME composition and marks diagnostics", async () => {

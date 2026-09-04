@@ -517,6 +517,73 @@ describe("document routes (P2-04)", () => {
   });
 });
 
+describe("Strategy Outline route integration (P4-01)", () => {
+  it("keeps URL path, tree selection and source selection in sync through parse errors", async () => {
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2");
+    const view = await editor();
+    const tree = await screen.findByRole("tree", {
+      name: "StrategySpec 문서 구조",
+    });
+    const title = within(tree).getByRole("treeitem", { name: "title" });
+
+    await user.click(title);
+    await waitFor(() =>
+      expect(history.location.search).toContain("path=%2Ftitle"),
+    );
+    const selectedText = view.state.sliceDoc(
+      view.state.selection.main.from,
+      view.state.selection.main.to,
+    );
+    expect(selectedText).toBe("퀄리티 모멘텀");
+
+    act(() => {
+      const offset = view.state.doc.toString().indexOf("schema_version") + 2;
+      view.dispatch({ selection: { anchor: offset } });
+    });
+    await waitFor(() =>
+      expect(history.location.search).toContain("path=%2Fschema_version"),
+    );
+    expect(
+      within(tree).getByRole("treeitem", {
+        name: "schema_version",
+        selected: true,
+      }),
+    ).toBeInTheDocument();
+
+    replaceText(view, `${STORED}broken: [\n`);
+    expect(
+      await screen.findByText("문법 오류 전 마지막 정상 구조를 표시합니다."),
+    ).toBeInTheDocument();
+    expect(within(tree).getByRole("treeitem", { name: "title" })).toBeVisible();
+  });
+
+  it("switches a read-only projection to source and reveals the selected path atomically", async () => {
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2?view=json");
+    expect(
+      await screen.findByLabelText("StrategySpec JSON"),
+    ).toBeInTheDocument();
+    const tree = await screen.findByRole("tree", {
+      name: "StrategySpec 문서 구조",
+    });
+    await user.click(within(tree).getByRole("treeitem", { name: "title" }));
+    await waitFor(() => {
+      expect(history.location.search).toContain("path=%2Ftitle");
+      expect(history.location.search).not.toContain("view=json");
+    });
+    const view = await editor();
+    await waitFor(() =>
+      expect(
+        view.state.sliceDoc(
+          view.state.selection.main.from,
+          view.state.selection.main.to,
+        ),
+      ).toBe("퀄리티 모멘텀"),
+    );
+  });
+});
+
 describe("backtest from the editor (P3-05)", () => {
   it("runs a clean saved revision by reference and moves to the run page", async () => {
     const user = userEvent.setup();

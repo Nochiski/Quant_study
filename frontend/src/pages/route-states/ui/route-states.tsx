@@ -11,6 +11,7 @@ export const NotFoundPage = () => (
     action={
       <Link
         to="/research/strategies/new"
+        search={{}}
         className="ui-button ui-button--primary"
       >
         {t("page.notFound.action")}
@@ -37,6 +38,7 @@ export const RouteErrorPage = ({ error }: { error: unknown }) => {
         </Button>
         <Link
           to="/research/strategies/new"
+          search={{}}
           className="ui-button ui-button--secondary"
         >
           {t("page.notFound.action")}

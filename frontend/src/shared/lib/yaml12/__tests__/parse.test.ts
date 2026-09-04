@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { locateRange, parseSource } from "..";
+import { locatePointer, locateRange, parseSource } from "..";
 
 const FIXTURE_RELATIVE = "backend/tests/fixtures/strategy_documents";
 const findFixtures = (): string => {
@@ -227,5 +227,18 @@ describe("parseSource", () => {
     const risk = parsed.valueRanges.get("/risk")!;
     expect(text.slice(risk.start.offset, risk.end.offset)).toBe("1");
     expect(risk.start.line).toBe(1);
+  });
+
+  it("maps a cursor offset back to the deepest key or value JSON Pointer", () => {
+    const text = "risk:\n  max_name_weight: 0.05\n";
+    const parsed = parseSource(text, "yaml");
+    if (parsed.status !== "ok") throw new Error("expected ok");
+    expect(locatePointer(parsed, text.indexOf("max_name_weight") + 3)).toBe(
+      "/risk/max_name_weight",
+    );
+    expect(locatePointer(parsed, text.indexOf("0.05") + 2)).toBe(
+      "/risk/max_name_weight",
+    );
+    expect(locatePointer(parsed, text.indexOf("risk") + 1)).toBe("/risk");
   });
 });

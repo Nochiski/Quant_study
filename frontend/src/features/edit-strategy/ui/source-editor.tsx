@@ -8,6 +8,7 @@ import {
   type EditorCompletionSource,
   type EditorDiagnostic,
   type EditorHoverSource,
+  type EditorSelection,
 } from "../../../shared/ui/code-editor";
 import {
   currentDiagnostics,
@@ -26,6 +27,10 @@ type SourceEditorProps = {
     completionSource?: EditorCompletionSource;
     hoverSource?: EditorHoverSource;
   };
+  /** Exposes only the editor-agnostic command handle for cross-panel navigation. */
+  onEditorReady?: (editor: CodeEditorHandle | null) => void;
+  /** Reports cursor/selection-only movement for JSON Pointer projection. */
+  onSelectionChange?: (selection: EditorSelection) => void;
 };
 
 const PHASE_TONE = {
@@ -49,8 +54,17 @@ export const SourceEditor = ({
   state,
   dispatch,
   assist,
+  onEditorReady,
+  onSelectionChange,
 }: SourceEditorProps) => {
   const handle = useRef<CodeEditorHandle>(null);
+  const bindHandle = useCallback(
+    (editor: CodeEditorHandle | null) => {
+      handle.current = editor;
+      onEditorReady?.(editor);
+    },
+    [onEditorReady],
+  );
 
   const documentDiagnostics = useMemo(() => currentDiagnostics(state), [state]);
   const diagnostics = useMemo<EditorDiagnostic[]>(
@@ -115,11 +129,12 @@ export const SourceEditor = ({
         ) : null}
       </div>
       <CodeEditor
-        ref={handle}
+        ref={bindHandle}
         value={state.source}
         language={state.format}
         ariaLabel={t("ide.editor")}
         onChange={onChange}
+        onSelectionChange={onSelectionChange}
         onComposingChange={onComposingChange}
         diagnostics={diagnostics}
         completionSource={assist?.completionSource}

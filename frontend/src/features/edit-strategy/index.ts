@@ -61,5 +61,10 @@ export {
 export { RecoveryBanner } from "./ui/recovery-banner";
 export { ConflictBanner } from "./ui/conflict-banner";
 export { SourceEditor } from "./ui/source-editor";
+export { StrategyOutline } from "./ui/strategy-outline";
+export {
+  useOutlineNavigation,
+  type StrategyOutlineNavigation,
+} from "./model/use-outline-navigation";
 export { SaveAction } from "./ui/save-action";
 export { DirtyLeaveGuard } from "./ui/dirty-leave-guard";

@@ -26,6 +26,8 @@ export type SchemaAssist = {
   loading: boolean;
   /** Schema version the runtime schema declares; null until loaded. */
   schemaVersion: string | null;
+  /** Backend-owned runtime schema used by read-only projections such as the outline. */
+  schema: JsonSchema | null;
 };
 
 /** One page holds every mock field/factor today; a larger catalog is paged by search (P6). */
@@ -77,8 +79,15 @@ export const useSchemaAssist = (state: DocumentState): SchemaAssist => {
     fields.isPending ||
     factors.isPending;
   const schemaVersion = schema.data?.schema_version ?? null;
+  const runtimeSchema = (schemaData as JsonSchema | undefined) ?? null;
   return useMemo(
-    () => ({ completionSource, hoverSource, loading, schemaVersion }),
-    [completionSource, hoverSource, loading, schemaVersion],
+    () => ({
+      completionSource,
+      hoverSource,
+      loading,
+      schemaVersion,
+      schema: runtimeSchema,
+    }),
+    [completionSource, hoverSource, loading, schemaVersion, runtimeSchema],
   );
 };

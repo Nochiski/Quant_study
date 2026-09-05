@@ -160,6 +160,7 @@ def test_sql파일에_상수_하드코딩_없음() -> None:
     allowed = {"0", "1", "2", "-1"}          # 인덱스·부호·span_seq 초기값만
     for p in sorted(SQL_DIR.glob("*.sql")):
         text = re.sub(r"--[^\n]*", "", p.read_text(encoding="utf-8"))
+        text = re.sub(r"'[^']*'", "''", text)     # 문자열 리터럴('2우선주' 어휘)은 상수가 아니다
         nums = set(re.findall(r"(?<![\w.])\d+(?:\.\d+)?", text))
         assert nums <= allowed, f"{p.name}: 하드코딩 상수 {sorted(nums - allowed)}"
 

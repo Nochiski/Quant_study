@@ -146,6 +146,8 @@ def test_범위_밖_행은_격리도_산출도_아니고_metric에만_남는다(
     assert x["n_pool_by_scope_source"]["pre_listing"] == {"capital": 6}
     assert x["n_pool_by_scope_source"]["unlisted_class"] == {"capital": 6}
     assert x["class_unknown_kinds"] == []
+    # 절단본 MVP 행의 종류는 보통주·우선주·상환전환우선주뿐 — 전부 정규 표기, unknown 0
+    assert x["n_class_unknown_mvp"] == 0 and x["n_class_mapped_by_alias"] == 0
     assert x["n_out_off_calendar"] == 0 and x["n_out_pre_listing"] == 0
     assert built.n_reject == 0 and _gate(built, "EG7").metrics["reject_by_reason"] == {}
     assert not [e for e in events if e.startswith(("000030:", "0001A0:"))]
@@ -268,13 +270,27 @@ def test_같은_inputs_재빌드는_파티션_해시가_같다(built: build.Buil
 # ── 선언 대조 ────────────────────────────────────────────────────────────────
 
 def test_주식종류_어휘는_rules_선언과_SQL_리터럴이_같다() -> None:
-    """종류 매핑의 정본은 rules_s05 튜플 — `.sql` 의 IN 리스트가 어긋나면 여기서 잡힌다."""
+    """종류 대응표의 정본은 rules_s05 튜플 — `.sql` 의 IN 리스트가 어긋나면 여기서 잡힌다.
+
+    리터럴 안에 괄호('보통주(*1)')가 있으므로 따옴표 단위로 읽는다. 대응은 명시 문자열뿐이라
+    표에 공백 변형이 없고(정규화는 stage 몫), 정규 표기 9종은 표 안에 있어야 한다.
+    """
     text = re.sub(r"--[^\n]*", "", CORP_EVENT.sql_path.read_text(encoding="utf-8"))
-    lists = [tuple(re.findall(r"'([^']+)'", m))
-             for m in re.findall(r"isu_dcrs_stock_knd IN \(([^)]*)\)", text)]
+    lists = [tuple(re.findall(r"'([^']+)'", m)) for m in re.findall(
+        r"trim\(isu_dcrs_stock_knd\) IN \(((?:\s*'[^']*',?)+)\s*\)", text)]
     assert lists == [rules_s05.COMMON_KINDS, rules_s05.PREFERRED_KINDS, rules_s05.UNLISTED_KINDS]
-    assert not set(rules_s05.COMMON_KINDS) & set(rules_s05.PREFERRED_KINDS)
-    assert not set(rules_s05.PREFERRED_KINDS) & set(rules_s05.UNLISTED_KINDS)
+    assert rules_s05.KNOWN_KINDS == (rules_s05.COMMON_KINDS + rules_s05.PREFERRED_KINDS
+                                     + rules_s05.UNLISTED_KINDS)
+    assert len(set(rules_s05.KNOWN_KINDS)) == len(rules_s05.KNOWN_KINDS)   # 중복·교차 없음
+    assert all(k == k.strip() and k for k in rules_s05.KNOWN_KINDS)
+    assert set(rules_s05.CANONICAL_KINDS) <= set(rules_s05.KNOWN_KINDS)
+    assert len(rules_s05.COMMON_KINDS) == 43 and len(rules_s05.PREFERRED_KINDS) == 34
+    assert len(rules_s05.UNLISTED_KINDS) == 93
+    for kind, cls in (("보퉁주", "common"), ("2우선주", "preferred"), ("RCPS", "unlisted")):
+        assert kind in getattr(rules_s05, f"{cls.upper()}_KINDS")
+    for kind in ("〃", "-", "보통주/우선주", "보통주,전환우선주", "종류주식", "종류주",
+                 "의결권 있는 주식", "합계"):
+        assert kind not in rules_s05.KNOWN_KINDS                          # 모호 → unknown
 
 
 def test_EG1_우변은_SQL의_pool_CTE를_재사용한다() -> None:
@@ -405,6 +421,7 @@ def test_손픽스처_FX_2_003과_범위_밖_4종과_격리_3종(tmp_path: Path,
     assert x["n_pool_by_scope_source"]["unlisted_class"] == {"capital": 1, "event_fric": 1}
     assert x["n_pool_by_scope_source"]["pre_listing"] == {"event_fric": 1}
     assert x["class_unknown_kinds"] == ["-"]
+    assert x["n_class_unknown_mvp"] == 1 and x["n_class_mapped_by_alias"] == 0
     assert x["n_src_by_source"] == {"event_fric": 4, "event_pifric": 1, "event_cr": 3,
                                     "capital": 2, "krx_listing": 2}
     assert x["n_raw_rows_by_source"]["event_fric"] == 6 and x["n_dedup"] == 1
@@ -424,6 +441,63 @@ def test_손픽스처_FX_2_003과_범위_밖_4종과_격리_3종(tmp_path: Path,
     assert rej == {("000660:bonus:2021-06-09", "ratio_unparsed"),
                    ("000660:bonus:-", "effective_unresolved"),
                    ("-:capred:2013-07-01", "ticker_unresolved")}
+
+
+# ── 종류 어휘 대응표: 별칭 → 폐쇄 어휘, 모호한 것은 unknown ────────────────────
+
+def _capital_kind_row(kind: str, day: date) -> dict[str, object]:
+    """삼성전자(00126380, 상장 보통주 005930 · 우선주 005935)의 무상감자 자본변동 손 행 1개."""
+    return {"rcept_no": "20200330000201", "corp_code": "00126380", "isu_dcrs_de": day,
+            "isu_dcrs_stle": "무상감자", "isu_dcrs_stock_knd": kind,
+            "available_date": date(2020, 3, 30), "available_basis": "derived"}
+
+
+HAND_CAPITAL_KINDS: list[dict[str, object]] = [
+    _capital_kind_row("보퉁주", date(2019, 6, 14)),      # 오타 → common → 005930
+    _capital_kind_row("2우선주", date(2019, 6, 14)),     # 번호 우선주 → preferred → 005935
+    _capital_kind_row("RCPS", date(2019, 6, 14)),        # 비상장 종류 → unlisted_class
+    _capital_kind_row("〃", date(2019, 6, 14)),          # 위와 같음 표시 → unknown(앞 행 참조 없음)
+    _capital_kind_row("  보통주  ", date(2019, 6, 21)),  # 옛 절단본 공백 방어 trim → common
+]
+
+HAND_KIND_FIXTURES: list[dict[str, object]] = [
+    {"case": f"hand-kind-{eid}", "key": {"event_id": eid}, "column": "source", "expect": "capital",
+     "expect_source": "hand", "fixture_class": "positive", "source": "hand — 종류 별칭 대응표"}
+    for eid in ("005930:capred:2019-06-14", "005935:capred:2019-06-14", "005930:capred:2019-06-21")
+]
+
+
+def test_종류_별칭은_대응표로_매핑되고_모호하면_unknown(tmp_path: Path, make_stage_tree) -> None:
+    """`stg_capital` 만 손 트리로 바꾼다(나머지는 절단본). pool = capital 5 + cr 3 + pifric 1 +
+    krx 2 = 11 · 범위 밖 2(RCPS unlisted_class · '〃' class_unknown) · 후보 9 → dedup 0 · 격리 0 ·
+    산출 9. '〃' 는 바로 앞 행이 RCPS 여도 앞 행을 참조하지 않는다."""
+    stage_root = tmp_path / "stage"
+    stage_root.mkdir()
+    for d in STAGE_SLICE.iterdir():
+        if d.is_dir() and d.name != "stg_capital":
+            os.symlink(d, stage_root / d.name)
+    make_stage_tree(tmp_path, "stg_capital", HAND_CAPITAL_KINDS, "receipt_axis",
+                    build_id="b_hand_knd")
+    fx = tmp_path / "corp_event.json"
+    fx.write_text(json.dumps(HAND_KIND_FIXTURES, ensure_ascii=False), encoding="utf-8")
+    r = _build_chain(stage_root, tmp_path / "equity", _seed(), fixtures_path=fx)
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    assert r.n_rows == 9 and r.n_reject == 0
+    x = _gate(r, "EG3_corp_event").metrics
+    assert x["n_pool_by_scope"] == {"in_scope": 9, "unlisted_class": 1, "class_unknown": 1}
+    assert x["n_pool_by_scope_source"]["unlisted_class"] == {"capital": 1}
+    assert x["n_pool_by_scope_source"]["class_unknown"] == {"capital": 1}
+    assert x["class_unknown_kinds"] == ["〃"] and x["n_class_unknown_mvp"] == 1
+    assert x["n_class_mapped_by_alias"] == 2            # 보퉁주 · 2우선주 (RCPS·보통주는 정규 표기)
+    assert x["n_src_by_source"]["capital"] == 3 and x["n_dedup"] == 0
+    assert r.out_dir is not None
+    ev = {str(e["event_id"]): e for e in _rows(r.out_dir)}
+    cap = {e for e, row in ev.items() if row["source"] == "capital"}
+    assert cap == {"005930:capred:2019-06-14", "005935:capred:2019-06-14",
+                   "005930:capred:2019-06-21"}
+    for eid in cap:
+        assert ev[eid]["corp_code"] == "00126380" and ev[eid]["ratio"] is None
+        assert ev[eid]["announce_date"] == date(2020, 3, 30) and ev[eid]["n_src_rows"] == 1
 
 
 # ── KRX 원천: 유형은 주식수 비 방향, 주식수 불변 액면 변경은 이벤트가 아니다 ──────────

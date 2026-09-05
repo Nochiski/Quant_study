@@ -8,8 +8,10 @@ MVP 범위는 `split`·`reverse_split`·`bonus`·`capred` 4종이다. `event_typ
 조정할 가격이 없는 사건은 **범위 밖**(scope_out) 이라 격리도 산출도 아니다 — 서버 1차 빌드
 (09-05)에서 사업보고서 증자(감자)현황이 창립 이래(1963~) 이력을 회고 기재해 격리 8,834 / 산출
 3,865 로 EG7 이 깨진 것이 근거. 범위 밖 4종(`SCOPE_OUT_VOCAB`)은 EG3_corp_event 기록형 metric.
-`stg_capital.isu_dcrs_stock_knd` 종류 어휘는 아래 튜플이 정본이고 `.sql` 의 IN 리터럴이 그것을
-그대로 옮긴다(tests 가 대조). 보통주 계열인데 상장 보통주가 없을 때만 `ticker_unresolved` 격리.
+`stg_capital.isu_dcrs_stock_knd` 종류 어휘는 아래 **대응표 튜플**이 정본이고 `.sql` 의 IN 리터럴이
+그것을 그대로 옮긴다(tests 가 대조) — 오타·동의어·표기 변형을 명시적 문자열로 폐쇄 어휘에 대응하고
+모호한 것은 unknown 에 남긴다(공백·개행 정규화는 stage PR #70 몫). 보통주 계열인데 상장 보통주가
+없을 때만 `ticker_unresolved` 격리.
 
 EG1 우변은 GATES §3-⑨ 의 `_reg_corp_event_source` 역할을 하는 `SOURCES` 등록표 — **`.sql` 의
 pool CTE(마커 앞부분)를 그대로 재사용**해 `scope_out IS NULL` 인 후보 행수를 원천별로 센다.
@@ -60,13 +62,97 @@ RATIO_ABOVE_ONE: tuple[str, ...] = ("split", "bonus")
 RATIO_BELOW_ONE: tuple[str, ...] = ("reverse_split", "capred")
 TICKER_LEN = 6
 
-# `stg_capital.isu_dcrs_stock_knd` 종류 어휘 — 서버 실측(09-05, MVP 유형 행): 보통주 20,820 ·
-# 우선주 2,252 · 보통주식 336 · 상환전환우선주 213 · 전환상환우선주 110 · 전환우선주 100 · '-' 63 ·
-# 기명식보통주 56 · 우선주식 56 · RCPS 43. 보통주 계열 → 상장 보통주 leg, 우선주 계열 → 상장 우선주
-# leg(없으면 unlisted_class), 비상장 종류 → unlisted_class, 그 외('-' 포함) → class_unknown.
-COMMON_KINDS: tuple[str, ...] = ("보통주", "보통주식", "기명식보통주")
-PREFERRED_KINDS: tuple[str, ...] = ("우선주", "우선주식")
-UNLISTED_KINDS: tuple[str, ...] = ("상환전환우선주", "전환상환우선주", "전환우선주", "RCPS")
+# ── `stg_capital.isu_dcrs_stock_knd` 종류 어휘 대응표 (S05 후속, 09-05) ─────────────────
+# 자유 텍스트(서버 새 판본 b_20260905T105922_786120Z 어휘 249종) → 폐쇄 어휘 common · preferred ·
+# unlisted · unknown. **명시적 문자열만** 대응한다(패턴 매칭 없음 — `.sql` 의 IN 리터럴과 tests 가
+# 대조). 앞뒤 공백·개행·NFKC 는 stage 가 정규화했고(PR #70) `.sql` 의 trim 은 옛 절단본 방어용이다.
+# 판정 원칙:
+#   common    머리 명사가 보통주 하나 — 표기 변형(기명식·주식·띄어쓰기·'보통' 약칭), 한 음절
+#             오타·탈자(이 열에서 보통주 외 해석이 없다), 각주 표시((*1)·(주1)·주1)), 사건·방향
+#             수식어(발행·무상증자·차감·(-)·일반공모·KDR). 의결권 수식어는 보통주 토큰이 있을 때만.
+#   preferred 상장 가능한 종류주 — 우선주 표기 변형, 1우·2우·3우·제N종·제N회·A/B/C·3우B 의
+#             번호·회차·구형/신형 표기(법인의 상장 우선주 leg 전부에 붙는다; 없으면 unlisted_class),
+#             '종류주식(우선주)'·'우선주(종류주)' 처럼 우선주로 특정된 것, 결정공시 어휘 '기타주식'
+#             (DART 정의 = 보통주 외 주식 → `.sql` 의 estk leg 와 같은 규칙).
+#   unlisted  상환·전환 조항이 있는 비상장 종류주 — 상환전환우선주(RCPS)·전환상환우선주·전환우선주
+#             (CPS)·상환우선주·전환주와 그 번호·종·회차·괄호 설명·오타 변형. 두 종류를 함께 적어도
+#             둘 다 비상장이면(3,4우선주 · 제1종 및 제2종) 결과가 같으므로 unlisted.
+#   unknown   모호한 것 전부 — '〃'(앞 행 참조는 하지 않는다) · '-' · 복수 종류('보통주/우선주',
+#             '보통주, 전환우선주') · 종류 불명('종류주식'·'종류주'·'혼합주'·'A종 종류주식') ·
+#             보통주 토큰 없는 의결권 표현('의결권 있는 주식' — RCPS 도 의결권이 있을 수 있다) ·
+#             집계 행(합계·계·총발행 주식수·'보통주 합계') · 사건·증권 이름(무상증자·전환사채·
+#             신주인수권·주식매수선택권·KDR) · 전환 기술('전환상환우선주 보통주 전환') · 숫자 ·
+#             잘린 것('보통주,'·'3우선주(전환)'·법인명 붙은 것).
+# 서버 실측(MVP 유형 행, 새 판본): 정규 표기 보통주 20,872 · 우선주 2,263 · 상환전환우선주 237 ·
+# 전환상환우선주 114 · 전환우선주 100 · RCPS 43. 대응표 밖(unknown)에 남는 MVP 행 253(옛 어휘 9종
+# 기준 605) — '-' 63 · 종류주식 43 · 종류주 38 · '〃' 22 · '보통주/우선주' 12 가 대부분.
+COMMON_KINDS: tuple[str, ...] = (
+    # 정규 · 표기 변형
+    "보통주", "보통주식", "기명식보통주", "기명식 보통주", "기명식보통주식", "기명식 보통주식",
+    "보 통 주", "보통",
+    # 의결권 수식어 — 보통주 토큰이 함께 있는 것만
+    "의결권이 있는 보통주", "의결권 있는 보통주", "의결권있는주식(보통주)",
+    # 한 음절 오타 · 탈자
+    "보퉁주", "보통부", "부통주", "보톧주", "보통중", "보통즈", "보통투", "보동주", "보통수",
+    "보총주", "보통주시", "통주",
+    # 각주 표시
+    "보통주(*1)", "보통주(*2)", "보통주(*3)", "보통주(*4)", "보통주(*5)", "보통주*1)", "보통주*3)",
+    "보통주(주1)", "보통주(주3)", "보통주 (주1)", "보통주 (주2)", "보통주주1)", "보통주주2)",
+    "보통주주3)",
+    # 사건 · 방향 수식어 — 종류는 보통주 하나
+    "보통주 발행", "보통주 무상증자", "보통주(차감)", "보통주(-)", "보통주(일반공모)",
+    "보통주(KDR)",
+)
+PREFERRED_KINDS: tuple[str, ...] = (
+    # 정규 · 표기 변형 · 우선주로 특정된 것
+    "우선주", "우선주식", "기명식우선주", "기명식 우선주", "기명식 우선주식", "우 선 주", "우선",
+    "우선주(종류주)", "종류주식(우선주)", "의결권이 없는 우선주", "기타주식",
+    # 번호 · 회차 · 구형/신형 표기(1우 · 2우B · 3우B 계열)
+    "1우선주", "2우선주", "3우선주", "제1우선주", "제3우선주", "제1종 우선주", "제2종 우선주",
+    "제1종우선주", "제2종우선주", "제2회우선주식", "제3회우선주식", "우선주A", "우선주B",
+    "우선주C", "3우B", "종류주식(1우선주)", "종류주식(2우선주)",
+    # 각주 · 방향 표시
+    "우선주(*)", "우선주*1)", "우선주주3)", "우선주주4)", "우선주주5)", "우선주(감소)",
+)
+UNLISTED_KINDS: tuple[str, ...] = (
+    # 상환전환우선주(RCPS) 계열
+    "상환전환우선주", "상환전환 우선주", "상환 전환 우선주", "상환전환우선주식", "(상환전환우선주)",
+    "상환전환우선주(*1)", "상환전환우선주(제1종)", "상환전환우선주(제2종)",
+    "제1종 상환전환우선주", "제2종 상환전환우선주", "제1종 상환전환우선주 (주1)",
+    "제1종 상환전환우선주 (주2)", "기명식 상환전환우선주", "기명식 상환전환우선주(제1종)",
+    "의결권 있는 상환전환우선주", "의결권 있는상환전환우선주", "의결권 없는 상환전환우선주",
+    "상환전환우선주(상환 및 전환에 관하여 특수한 정함이있는 주식이며, 의결권이 있음)",
+    "상환전환우선주(상환 및 전환에 관하여 특수한 정함이 있는 주식으로 의결권이 있음)",
+    "상환전환우선주(상환 및 전환에 관하여 특수한 정함이있는 주식으로 의결권이 있음)",
+    "상환전환1우선주", "상환전환2우선주", "상환전환3우선주", "상환전환4우선주", "상환전환5우선주",
+    "상환전환6우선주", "상환전환7우선주", "상환전환8우선주", "상환전환9우선주", "상환전환3,4우선주",
+    "상환전환우선주2", "제일상환전환우선주", "제이상환전환우선주", "제삼상환전환우선주",
+    "제사상환전환우선주", "제일상환 전환우선주", "제이상환 전환우선주", "제삼상환 전환우선주",
+    "제사상환 전환우선주", "상환전환종류주", "상환전환종류주식", "상환전환주",
+    "전환상환우선주 및상환우선주",
+    "RCPS", "RCPS1", "RCPS2", "RCPS3", "RCPS4", "RCPS5", "RCPS6", "RCPS7", "RCPS8", "RCPS9",
+    "RCPS 1종", "RCPS 2종", "RCPS 3종", "RCPS 4종", "RCPS 5종", "RCPS 6종", "RCPS(제1종)",
+    "RCPS(제2종)", "RCPS (제1종 및 제2종", "우선주(RCPS)",
+    # 전환상환우선주 계열
+    "전환상환우선주", "전환상환 우선주", "전환상환우선주식", "전환상환우선주(-)", "전환상환3우선주",
+    "기명식전환상환2종우선주",
+    # 전환우선주(CPS) 계열
+    "전환우선주", "전환 우선주", "기명식 전환우선주", "전환우선주(감소)", "전환우선주(*1)",
+    "전환우선주(*)",
+    "전환우선주(전환에 관하여 특수한 정함이있는 주식이며, 의결권이 있음)",
+    "전환우선주(전환에 관하여 특수한 정함이 있는 주식이며, 의결권이 있음)",
+    "전환우선주2(전환에 관하여 특수한 정함이 있는 주식이며, 의결권이 있음)",
+    "제1종전환우선주", "제2종전환우선주", "제3종전환우선주", "제4종전환우선주", "제5종전환우선주",
+    "제6종전환우선주", "제오전환우선주", "제육전환우선주", "제칠전환우선주", "제팔전환우선주",
+    "제구전환우선주", "CPS", "CPS 7종",
+    # 상환우선주 · 전환주
+    "상환우선주", "전환주",
+)
+# 정규 표기 — 종류(instrument)당 하나. 이 밖의 대응은 별칭이고 EG3_corp_event 가
+# `n_class_mapped_by_alias` 로 센다(별칭 비중이 갑자기 늘면 원천 서식 변화 신호).
+CANONICAL_KINDS: tuple[str, ...] = ("보통주", "우선주", "상환전환우선주", "전환상환우선주",
+                                    "전환우선주", "상환우선주", "전환주", "RCPS", "CPS")
+KNOWN_KINDS: tuple[str, ...] = COMMON_KINDS + PREFERRED_KINDS + UNLISTED_KINDS
 
 # ── 모집단 SQL 재사용 (sql/corp_event.sql 의 pool CTE 까지) ───────────────────
 _POOL_MARKER = "-- ==== eg1:"
@@ -149,7 +235,6 @@ def _scope_counts(ctx: EquityGateContext) -> dict[str, dict[str, int]]:
 def eg3_corp_event(ctx: EquityGateContext) -> GateResult:
     """EG3-P07·P13 + GATES §3-⑨ dedup 재계산 + 범위 밖·원천별 행수·n_dedup 기록."""
     v = ctx.out_view
-    known_kinds = _vocab_sql(COMMON_KINDS + PREFERRED_KINDS + UNLISTED_KINDS)
     checks = {
         "n_event_type_outside_vocab": _outside_vocab(ctx, "event_type", EVENT_TYPE_VOCAB),
         "n_event_type_outside_mvp": _outside_vocab(ctx, "event_type", MVP_EVENT_TYPES),
@@ -201,10 +286,16 @@ def eg3_corp_event(ctx: EquityGateContext) -> GateResult:
                              "ON a.ticker = b.ticker AND a.event_type = b.event_type "
                              "AND a.source <> b.source AND a.effective_date < b.effective_date "
                              f"AND date_diff('day', a.effective_date, b.effective_date) <= {w}")
-    unknown_kinds = [str(r[0]) for r in ctx.con.execute(
-        "SELECT coalesce(isu_dcrs_stock_knd, '<NULL>') AS k, count(*) AS c FROM stg_capital "
-        f"WHERE ({_CAPITAL_MVP_PREDICATE}) AND coalesce(isu_dcrs_stock_knd, '<NULL>') "
-        f"NOT IN ({known_kinds}) GROUP BY 1 ORDER BY c DESC, k").fetchall()]
+    # 종류 어휘 대응표 밖의 문자열(MVP 유형 행) — 새 문자열이 늘면 여기서 보인다. trim 은 `.sql` 과
+    # 같은 방어(정규화 자체는 stage 몫).
+    kind_rows = ctx.con.execute(
+        "SELECT coalesce(trim(isu_dcrs_stock_knd), '<NULL>') AS k, count(*) AS c "
+        f"FROM stg_capital WHERE {_CAPITAL_MVP_PREDICATE} GROUP BY 1 ORDER BY c DESC, k"
+    ).fetchall()
+    unknown_kinds = [str(k) for k, _ in kind_rows if str(k) not in KNOWN_KINDS]
+    n_class_unknown_mvp = sum(int(str(c)) for k, c in kind_rows if str(k) not in KNOWN_KINDS)
+    n_class_mapped_by_alias = sum(int(str(c)) for k, c in kind_rows
+                                  if str(k) in KNOWN_KINDS and str(k) not in CANONICAL_KINDS)
     metrics: dict[str, object] = {
         "n_src_by_source": src_counts, "n_src_total": sum(src_counts.values()),
         "n_raw_rows_by_source": raw_counts,
@@ -223,6 +314,8 @@ def eg3_corp_event(ctx: EquityGateContext) -> GateResult:
                  f'FROM "{v}"'),
         "n_near_dup_cross_source": n_near_dup, "near_dup_window_days": window,
         "class_unknown_kinds": unknown_kinds,
+        "n_class_unknown_mvp": n_class_unknown_mvp,
+        "n_class_mapped_by_alias": n_class_mapped_by_alias,
         "reject_by_reason": dict(ctx.reject_by_reason),
         "event_type_vocab": list(EVENT_TYPE_VOCAB), "mvp_event_types": list(MVP_EVENT_TYPES),
         "scope_out_vocab": list(SCOPE_OUT_VOCAB),
@@ -287,6 +380,7 @@ TABLES: tuple[EquityTable, ...] = (CORP_EVENT,)
 BASELINE_SEED = Path(__file__).parent / "baseline_seed_s05.json"
 """이 슬라이스가 요구하는 상수의 초기값(절단본 실측). 승인 뒤 `baseline.json` 에 병합한다."""
 
-__all__ = ["BASELINE_SEED", "COMMON_KINDS", "CORP_EVENT", "EVENT_TYPE_VOCAB", "MVP_EVENT_TYPES",
-           "PREFERRED_KINDS", "RATIO_ABOVE_ONE", "RATIO_BELOW_ONE", "RAW_SOURCE_ROWS",
-           "SCOPE_OUT_VOCAB", "SOURCES", "TABLES", "UNLISTED_KINDS", "pool_sql"]
+__all__ = ["BASELINE_SEED", "CANONICAL_KINDS", "COMMON_KINDS", "CORP_EVENT", "EVENT_TYPE_VOCAB",
+           "KNOWN_KINDS", "MVP_EVENT_TYPES", "PREFERRED_KINDS", "RATIO_ABOVE_ONE",
+           "RATIO_BELOW_ONE", "RAW_SOURCE_ROWS", "SCOPE_OUT_VOCAB", "SOURCES", "TABLES",
+           "UNLISTED_KINDS", "pool_sql"]

@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: IN_REVIEW
+project_status: CHANGES_REQUESTED
 current_phase: P4
 current_pr: P4-08
 active_prs: [P4-08]
 parallel_window: []
-last_updated: 2026-09-05T09:05:08+09:00
+last_updated: 2026-09-05T09:16:23+09:00
 planned_prs: 50
 merged_prs: 40
 approved_prs: 40
@@ -22,13 +22,13 @@ progress_percent: 80
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_REVIEW` |
+| Project status | `CHANGES_REQUESTED` |
 | Current phase | `P4` |
 | Current/next PR | `P4-08` |
 | Active PR | `P4-08` |
 | Progress | `40 / 50 merged (80%)` |
 | Approved | `40 / 50` |
-| Aggregated at | `2026-09-05 09:05 KST` |
+| Aggregated at | `2026-09-05 09:16 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -76,7 +76,7 @@ progress_percent: 80
 | P1.5 | Backtest Correctness Gate | 5 | 5 | `MERGED` |
 | P2 | App Shell and visual foundation | 4 | 4 | `MERGED` |
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
-| P4 | Outline, Contract, Projections | 10 | 9 | `IN_REVIEW` |
+| P4 | Outline, Contract, Projections | 10 | 9 | `CHANGES_REQUESTED` |
 | P5 | Truthful Trace UI | 3 | 0 | `WAITING` |
 | P6 | Professional release and migration | 7 | 1 | `WAITING` |
 | **Total** |  | **50** | **40** | **80%** |
@@ -86,7 +86,7 @@ progress_percent: 80
 
 | 항목 | 값 |
 |---|---|
-| PR | `P4-08` Source/semantic/revision Diff와 conflict resolution IN_REVIEW |
+| PR | `P4-08` Source/semantic/revision Diff와 conflict resolution CHANGES_REQUESTED |
 | Intent | 같은 StrategySpec의 원문 변화와 backend canonical 의미 변화를 분리해 보여주고 revision/409 conflict 결정을 안전하게 완료한다 |
 | Acceptance | source text diff; backend canonical semantic diff; revision-to-revision diff; invalid source는 text-only; comment-only는 semantic change 없음; 409에서 server revision으로 이동하거나 현재 변경 복사 후 새 revision 작성; new/revision URL·pointer parity |
 | Non-goals | 자동 3-way merge, 임의 client semantic normalization, 대용량 diff virtualization(P6-04), server draft/history(P6-02) |
@@ -203,7 +203,7 @@ Phase exit:
 | [x] | `P4-05` | Canonical node snippet insertion | P3-02, P1-05 | `MERGED` | [#59](https://github.com/Nochiski/Quant_study/pull/59) · `review_p4_05` APPROVE · `191b902` |
 | [x] | `P4-06` | Read-only canonical JSON과 Form projection | P3-05 | `MERGED` | [#61](https://github.com/Nochiski/Quant_study/pull/61) · `review_p4_06` APPROVE · `f9a0e35` |
 | [x] | `P4-07` | Read-only FactorGraph DAG projection | P4-01, P3-05 | `MERGED` | [#62](https://github.com/Nochiski/Quant_study/pull/62) · `review_p4_07` APPROVE · `bdee3f7` |
-| [ ] | `P4-08` | Source/semantic/revision Diff와 conflict resolution | P1-08, P3-07 | `IN_REVIEW` | [#63](https://github.com/Nochiski/Quant_study/pull/63) · `review_p4_08` 검토 중 · freeze `7543cc9` |
+| [ ] | `P4-08` | Source/semantic/revision Diff와 conflict resolution | P1-08, P3-07 | `CHANGES_REQUESTED` | [#63](https://github.com/Nochiski/Quant_study/pull/63) · `review_p4_08` P1 2/P2 3 수정 중 |
 | [x] | `P4-09` | Execution Plan 표시와 YAML/graph selection 연동 | P4-04, P4-01 | `MERGED` | [#58](https://github.com/Nochiski/Quant_study/pull/58) · `review_p4_09` APPROVE · `8a2ebfc` |
 | [x] | `P4-10` | Five-area snippet catalog UI와 new/revision page wiring | P4-05 | `MERGED` | [#60](https://github.com/Nochiski/Quant_study/pull/60) · `review_p4_10` APPROVE · `20491b8` |
 
@@ -254,6 +254,7 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
+| P4-08 | `review_p4_08` | `bdee3f7` | `7d46f22` | REQUEST_CHANGES (save hash/canonical 결합·exact EOF/large duplicate diff P1 2, baseline retry·51+ revision·hidden conflict recovery P2 3) | 2 (미해소) | new starter source의 clean badge 문구는 비차단 후속 | 2026-09-05 |
 | P4-07 | `review_p4_07` | `f9a0e35` | `380d583` | APPROVE (REQUEST_CHANGES P1 1/P2 1 해소 후 동일 reviewer 재승인) | 0 | saved JSON Graph↔source browser 통합과 대형 DAG 시각·키보드 UX는 P6 E2E/성능·접근성에서 확인 | 2026-09-05 |
 | P4-09 | `review_p4_09` | `25d8b45` | `160fad4` | APPROVE | 0 | factor 보유 실제 route→URL→editor reveal/focus 통합 테스트와 plan-null registry/data provenance 표시를 후속 보강 | 2026-09-05 |
 | P6-07 | `review_p6_07` | `ebc16c2` | `2e53089` | APPROVE (REQUEST_CHANGES P1 1건 해소, 비차단 P2 보강 후 재승인) | 1 (해소) | blocking risk 없음 | 2026-09-05 |
@@ -334,6 +335,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | `review_p4_08`이 P0 0/P1 2/P2 3으로 REQUEST_CHANGES. save 응답 hash와 이전 compile canonical 결합, EOF/대형 중복 source diff의 false zero를 blocking으로 확인했고 baseline transient retry, 51+ revision 현재 target, 비-YAML view의 409 recovery 노출도 같은 reviewer loop에서 함께 수정하기 위해 CHANGES_REQUESTED 전환 | backend canonical/hash 짝 SoT·exact source truth·retry/revision/view lifecycle 책임·동일 reviewer 재검토 |
 | 2026-09-05 KST | Codex | P4-08 [#63](https://github.com/Nochiski/Quant_study/pull/63)을 공개하고 implementation freeze `7543cc9`, review transition HEAD `ce1813c`, 22 files +1,576/-131 size exception과 frontend 361 전체 gate를 본문에 고정해 fresh review-only agent `review_p4_08` 검토로 IN_REVIEW 전환 | PR별 독립 reviewer 정확히 1명·13.3~13.4 review gate·12절 size exception |
 | 2026-09-05 KST | Codex | P4-08을 `7543cc9`에 freeze: exact source changed-line Diff와 backend canonical payload 전용 semantic projection, revision-to-revision source/API semantic 비교, invalid text-only, comment-only zero semantic, 409 server 이동·copy·현재 전체 문서 새 revision 작성을 new/revision route에 연결. 편집이 초기 compile을 추월해도 별도 base-compiled action이 현재 verdict를 바꾸지 않고 exact saved canonical만 채운다. focused 79, frontend 361·typecheck·lint·build 통과. 총 1,707 churn/22 files 중 테스트 505이며 shared model/table·document lifecycle·route conflict가 단일 acceptance라 12절 size exception 기록 | source text/backend canonical SoT 분리·document/query/projection/UI 책임분리·P4-08 acceptance·12절 size exception |
 | 2026-09-05 KST | Codex | #62 P4-07을 동일 reviewer APPROVE(P0/P1/P2 0), 최신 approval-doc HEAD CI 4/4 후 main에 병합(`bdee3f7`), 40/50(80%). 최신 main에서 P4-08 전용 worktree를 만들고 source text/backend canonical semantic/revision diff와 안전한 conflict resolution 구현을 시작 | 13.6 merge gate·text/canonical SoT 분리·revision conflict 책임 |

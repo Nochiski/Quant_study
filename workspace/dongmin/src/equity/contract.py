@@ -392,6 +392,16 @@ def egc04_actions_equal_factors(ctx: _Ctx) -> GateResult:
                     f"FROM {src} ORDER BY 1, 2")
     expected = {(str(t), _as_date(d), float(str(sf)), str(eid))
                 for t, eid, _, d, sf, ok in rows if ok is True}
+    # 어댑터는 기업행위를 그 종목의 상장 구간(Membership) 안에서만 방출한다 — 커널은 구간 밖에
+    # 포지션을 가질 수 없다. 구간 밖 apply_date 행(폐지 뒤 회고 기재 등)은 비교 모집단에서 빼고
+    # 건수만 남긴다(서버 실측 09-05: 5건, 예 000360 2018-08-09 소각 감자).
+    spans: dict[str, list[tuple[date, date]]] = {}
+    span_src = ctx.source("security_span")
+    for t, a, b in ctx.rows(f"SELECT ticker, first_date, last_date FROM {span_src}"):
+        spans.setdefault(str(t), []).append((_as_date(a), _as_date(b)))
+    outside = sorted(x for x in expected
+                     if not any(a <= x[1] <= b for a, b in spans.get(x[0], [])))
+    expected -= set(outside)
     not_ok_ids = {str(eid) for _, eid, _, _, _, ok in rows if ok is not True}
     type_of = {str(eid): str(et) for _, eid, et, _, _, _ in rows}
     tickers = sorted({str(r[0]) for r in rows})
@@ -417,6 +427,8 @@ def egc04_actions_equal_factors(ctx: _Ctx) -> GateResult:
         "n_ok": len(expected), "n_actions": len(got), "n_only_adapter": len(only_adapter),
         "n_only_factor": len(only_factor), "n_not_ok_emitted": n_not_ok_emitted,
         "by_type": by_type,
+        "n_factor_outside_span": len(outside),
+        "factor_outside_span": [f"{t} {d} {r} {e}" for t, d, r, e in outside[:SAMPLE_ROWS]],
         "only_adapter": [f"{t} {d} {r} {e}" for t, d, r, e in only_adapter[:SAMPLE_ROWS]],
         "only_factor": [f"{t} {d} {r} {e}" for t, d, r, e in only_factor[:SAMPLE_ROWS]]}
     ok = not only_adapter and not only_factor and n_not_ok_emitted == 0

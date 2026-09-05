@@ -84,3 +84,32 @@ def test_gate는_커밋이_없으면_예외(tmp_path: Path, make_stage_tree) -> 
     base, _ = _env(tmp_path, make_stage_tree)
     with pytest.raises(FileNotFoundError, match="no committed build to re-adjudicate"):
         main([*base, "gate", "sample_table"])
+
+
+def test_gate는_빌드와_같은_const를_만든다(tmp_path: Path, make_stage_tree, capsys) -> None:
+    """EG1 우변·extra_gates 가 `_const` 를 읽는 테이블(S05 corp_event 의 pool CTE)은 재판정 때도
+    같은 상수가 있어야 한다 — 없으면 Binder 오류로 `gate` 가 죽는다."""
+    from equity import rules_sample
+    from equity.model import EquityTable, register
+
+    base, eq = _env(tmp_path, make_stage_tree)
+    sql = tmp_path / "const_gate_table.sql"
+    sql.write_text("SELECT s.*, NULL::VARCHAR AS reject_reason FROM stg_sample s "
+                   "CROSS JOIN _const c WHERE s.k >= c.k_min", encoding="utf-8")
+    if "const_gate_table" not in RULES:
+        register(EquityTable(**{
+            **rules_sample.SAMPLE_TABLE.__dict__, "name": "const_gate_table",
+            "consts": ("k_min",), "sql_path": sql,
+            "eg1_rhs_sql": "SELECT count(*) FROM stg_sample s CROSS JOIN _const c "
+                           "WHERE s.k >= c.k_min"}))
+    bl = tmp_path / "baseline.json"
+    bl.write_text(json.dumps({"const_gate_table": {"k_min": 2}}), encoding="utf-8")
+    (eq / "fixtures" / "const_gate_table.json").write_text(json.dumps(
+        [{"case": "k2", "key": {"k": "2"}, "column": "val", "expect": "b", "source": "hand"}]),
+        encoding="utf-8")
+    assert main([*base, "--baseline", str(bl), "build", "const_gate_table",
+                 "--build-id", "b_c1"]) == 0
+    assert "ok table=const_gate_table" in capsys.readouterr().out
+    assert main([*base, "--baseline", str(bl), "gate", "const_gate_table"]) == 0
+    out = capsys.readouterr().out
+    assert "ok table=const_gate_table" in out and "'lhs': 2, 'rhs': 2" in out

@@ -6,7 +6,8 @@
 --   event_pifric 유무상증자 결정의 무상 부분(DS005) → bonus
 --   event_cr     감자 결정(DS005)                → capred
 --   capital      정기보고서 증자(감자)현황(비집계) → bonus(무상증자) · capred(감자)
---   krx_listing  KRX 액면가 변경일(par_value_krw 가 직전 거래일과 다름) → split · reverse_split
+--   krx_listing  KRX 액면가 변경일(par_value_krw 가 직전 거래일과 다름 = 트리거) → 주식수 비 방향으로
+--                split(ratio > 1) · reverse_split(ratio < 1); 주식수 불변(|ratio−1| ≤ tol)은 제외
 --
 -- 법인 → 티커 전개: corp_ticker 로 corp_code 의 상장 종류주를 편다. 결정공시·자본변동은 주식 종류
 -- 축(보통주 / 기타·우선주)을 따로 싣고 있으므로 class-row 단위로 전개한다 —
@@ -23,6 +24,7 @@
 --                    계열인데 법인에 상장 우선주가 없음, 결정공시의 기타주식도 같은 규칙)
 --   class_unknown    종류 어휘 밖('-' 포함) — 어느 티커의 사건인지 정할 수 없다
 --   pre_listing      티커는 있으나 효력일이 그 티커의 security_span 첫 존재일 이전
+--   krx_par_only     KRX 액면가 변경인데 주식수가 사실상 불변(|ratio−1| ≤ krx_share_change_tol)
 -- 범위 안 후보만 격리 판정을 받는다: ticker_unresolved(보통주 계열인데 상장 보통주 없음) ·
 -- effective_unresolved(기준일 없음) · ratio_unparsed · effective_before_announce(사건 단위 —
 -- 가장 이른 announce 기준, 아래 judged CTE).
@@ -36,6 +38,7 @@
 --   split·reverse_split : KRX 액면가가 바뀐 날 = 변경상장일(정지 해제 첫 거래일). 005930 2018-05-04.
 -- ratio = share_factor = 이벤트 후 주식수 / 이벤트 전 주식수 (1주 기준). 50:1 분할 50 · 무상증자
 --   1주당 0.2 배정 1.2 · 10:1 감자 0.1. price_factor 는 S06 이 정한다(감자는 두 축 상이, FX-2-004).
+--   방향 불변식(EG3_corp_event, 원천 무관): split·bonus → ratio > 1, reverse_split·capred → ratio < 1.
 --   자본변동(capital) 행은 전 주식수를 싣지 않아 ratio NULL 이다("결측은 결측", 원칙 ④) —
 --   결정공시와 접히면 결정공시의 ratio 가 남는다.
 -- announce_date = DART rcept_dt(stage available_date; 참조표 미스는 rcept_no 앞 8자리 접수일자로
@@ -154,8 +157,15 @@ listing AS (
     WINDOW w AS (PARTITION BY ticker ORDER BY date)
 ),
 krx AS (
+    -- 액면가 변화는 **탐지 트리거**일 뿐이고 유형은 주식수 비 방향이다: ratio > 1 → split,
+    -- ratio < 1 → reverse_split. 경제적으로는 감자 뒤 액면 변경(007195 2013-05-24: 액면 5,000 → 1,000
+    -- 인데 주식수 27,011 → 22,505)이어도 가격 조정 축은 주식수 비(share_factor)로 같다 — 액면가
+    -- 방향으로 유형을 매기면 "split 인데 계수 < 1" 모순이 S07 계약(EGC-04)에서 거절된다.
+    -- 주식수가 사실상 그대로인 액면 변경(|ratio − 1| ≤ krx_share_change_tol, 단주·소각 잡음)은
+    -- 이벤트가 아니다 → pool 에서 scope_out = 'krx_par_only'.
     SELECT l.ticker, ct.corp_code, 'krx_listing' AS source,
-           CASE WHEN l.par_value_krw < l.prev_par THEN 'split' ELSE 'reverse_split' END AS event_type,
+           CASE WHEN l.prev_shrs > 0 AND l.list_shrs < l.prev_shrs THEN 'reverse_split'
+                ELSE 'split' END AS event_type,
            'common' AS cls, l.date AS basis_date,
            CASE WHEN l.prev_shrs > 0 THEN l.list_shrs / l.prev_shrs END AS ratio,
            TRUE AS ratio_given, NULL::VARCHAR AS rcept_no,
@@ -171,7 +181,10 @@ krx AS (
 -- ── 모집단(pool) + 범위 판정 ─────────────────────────────────────────────────
 pool AS (
     SELECT p.*,
-           CASE WHEN p.source <> 'krx_listing' AND p.basis_date IS NOT NULL
+           CASE WHEN p.source = 'krx_listing' AND p.ratio IS NOT NULL
+                     AND abs(p.ratio - 1) <= k.krx_share_change_tol
+                     THEN 'krx_par_only'
+                WHEN p.source <> 'krx_listing' AND p.basis_date IS NOT NULL
                      AND (p.effective_date IS NULL
                           OR p.effective_date < b.cal_min OR p.effective_date > b.cal_max)
                      THEN 'out_of_calendar'
@@ -190,6 +203,7 @@ pool AS (
         FROM krx
     ) p
     CROSS JOIN cal_bounds b
+    CROSS JOIN _const k
     LEFT JOIN first_listed fl ON fl.ticker = p.ticker
 )
 -- ==== eg1: 여기까지가 모집단(pool). rules_s05 가 이 앞부분을 EG1 우변·범위 metric 에 재사용한다 ====

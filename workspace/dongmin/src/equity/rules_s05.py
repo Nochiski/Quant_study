@@ -19,8 +19,12 @@ pool CTE(마커 앞부분)를 그대로 재사용**해 `scope_out IS NULL` 인 �
 건수는 EG3_corp_event 의 metric `n_dedup` 이 낸다.
 
 테이블 특화 술어 EG3_corp_event: 어휘 폐쇄(event_type·effective_basis·source) · 티커 폭 ·
-dedup 축 재계산(n_dup = 0) · ratio 양수 · KRX 행 announce = effective · event_id 결정성 ·
-**산출 행이 캘린더 밖·상장 전이 아님(독립 재검사)**. 근접 중복(같은 티커·유형이
+dedup 축 재계산(n_dup = 0) · ratio 양수 · **방향 불변식**(split·bonus → ratio > 1,
+reverse_split·capred → ratio < 1 — 서버 실측 007195 2013-05-24 액면 5,000→1,000 인데
+주식수 ×0.833 이 'split' 로 나가 S07 EGC-04 에서 거절된 사고의 회귀 게이트; KRX 유형은 주식수
+비 방향으로 매기고 액면가 변화는 트리거일 뿐, 주식수 불변 액면 변경은 `krx_par_only` 로 범위 밖)
+· KRX 행 announce = effective · event_id 결정성 · **산출 행이 캘린더 밖·상장 전이 아님(독립
+재검사)**. 근접 중복(같은 티커·유형이
 `near_dup_window_days` 안에 다른 원천으로 2건)은 기록형 — 절단본 실측: 우양에이치씨 2018 감자가
 결정공시 cr_std 2018-10-12 · 자본변동 isu_dcrs_de 2018-10-13 으로 하루 어긋나 2행이 된다.
 EG8-P04(기준가≠전일종가 recall)는 `price_daily` 가 필요하므로 S06 이후에 붙는다.
@@ -50,7 +54,10 @@ REJECT_REASONS: tuple[str, ...] = ("ticker_unresolved", "effective_unresolved", 
                                    "effective_before_announce")
 # 범위 밖 사유(격리 아님, 기록형) — sql/corp_event.sql pool.scope_out
 SCOPE_OUT_VOCAB: tuple[str, ...] = ("out_of_calendar", "unlisted_class", "class_unknown",
-                                    "pre_listing")
+                                    "pre_listing", "krx_par_only")
+# 방향 불변식(EG3_corp_event 폐기형, 원천 무관): ratio 는 주식수 배수이므로 유형이 방향을 못 박는다.
+RATIO_ABOVE_ONE: tuple[str, ...] = ("split", "bonus")
+RATIO_BELOW_ONE: tuple[str, ...] = ("reverse_split", "capred")
 TICKER_LEN = 6
 
 # `stg_capital.isu_dcrs_stock_knd` 종류 어휘 — 서버 실측(09-05, MVP 유형 행): 보통주 20,820 ·
@@ -157,6 +164,12 @@ def eg3_corp_event(ctx: EquityGateContext) -> GateResult:
                              f'count(*) AS c FROM "{v}" GROUP BY ALL HAVING c > 1)'),
         "n_ratio_nonpositive": _n(ctx, f'SELECT count(*) FROM "{v}" '
                                        "WHERE ratio IS NOT NULL AND ratio <= 0"),
+        # 방향 불변식 — 서버 실측 007195:split:2013-05-24 share_factor 0.833(액면 5,000→1,000 인데
+        # 주식수 27,011→22,505)이 S07 EGC-04 에서 format_error 로 거절된 사고의 회귀 게이트
+        "n_direction_violation": _n(
+            ctx, f'SELECT count(*) FROM "{v}" WHERE ratio IS NOT NULL AND ('
+                 f"(event_type IN ({_vocab_sql(RATIO_ABOVE_ONE)}) AND ratio <= 1) OR "
+                 f"(event_type IN ({_vocab_sql(RATIO_BELOW_ONE)}) AND ratio >= 1))"),
         "n_krx_announce_ne_effective": _n(
             ctx, f'SELECT count(*) FROM "{v}" WHERE source = \'krx_listing\' '
                  "AND (announce_date <> effective_date "
@@ -197,6 +210,8 @@ def eg3_corp_event(ctx: EquityGateContext) -> GateResult:
         "n_raw_rows_by_source": raw_counts,
         "n_pool_by_scope": {k: sum(d.values()) for k, d in scope.items()},
         "n_pool_by_scope_source": scope,
+        "n_krx_par_only": sum(scope.get("krx_par_only", {}).values()),
+        "krx_share_change_tol": ctx.baseline.get(ctx.rule.name, "krx_share_change_tol"),
         "n_dedup": _n(ctx, f'SELECT coalesce(sum(n_src_rows - 1), 0) FROM "{v}"'),
         "n_out_by_source": _counts(ctx, "source"),
         "n_by_event_type": _counts(ctx, "event_type"),
@@ -262,7 +277,7 @@ CORP_EVENT = register(EquityTable(
     available_basis=("derived", "default"),
     content_date_column="announce_date",
     reject_reasons=REJECT_REASONS,
-    consts=("effective_before_announce_max_days",),
+    consts=("effective_before_announce_max_days", "krx_share_change_tol"),
     extra_gates=(eg3_corp_event,),
 ))
 
@@ -272,5 +287,5 @@ BASELINE_SEED = Path(__file__).parent / "baseline_seed_s05.json"
 """이 슬라이스가 요구하는 상수의 초기값(절단본 실측). 승인 뒤 `baseline.json` 에 병합한다."""
 
 __all__ = ["BASELINE_SEED", "COMMON_KINDS", "CORP_EVENT", "EVENT_TYPE_VOCAB", "MVP_EVENT_TYPES",
-           "PREFERRED_KINDS", "RAW_SOURCE_ROWS", "SCOPE_OUT_VOCAB", "SOURCES", "TABLES",
-           "UNLISTED_KINDS", "pool_sql"]
+           "PREFERRED_KINDS", "RATIO_ABOVE_ONE", "RATIO_BELOW_ONE", "RAW_SOURCE_ROWS",
+           "SCOPE_OUT_VOCAB", "SOURCES", "TABLES", "UNLISTED_KINDS", "pool_sql"]

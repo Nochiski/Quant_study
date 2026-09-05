@@ -424,3 +424,123 @@ def test_손픽스처_FX_2_003과_범위_밖_4종과_격리_3종(tmp_path: Path,
     assert rej == {("000660:bonus:2021-06-09", "ratio_unparsed"),
                    ("000660:bonus:-", "effective_unresolved"),
                    ("-:capred:2013-07-01", "ticker_unresolved")}
+
+
+# ── KRX 원천: 유형은 주식수 비 방향, 주식수 불변 액면 변경은 이벤트가 아니다 ──────────
+
+_DART_EMPTY: dict[str, str] = {
+    "stg_event_fric": ("rcept_no VARCHAR, corp_code VARCHAR, nstk_asstd DATE, "
+                       "nstk_ascnt_ps_ostk_ratio DECIMAL(14,10), nstk_ascnt_ps_estk_ratio "
+                       "DECIMAL(5,2), nstk_ostk_cnt DECIMAL(11,0), nstk_estk_cnt DECIMAL(10,0), "
+                       "bfic_tisstk_ostk DECIMAL(11,0), available_date DATE, "
+                       "available_basis VARCHAR"),
+    "stg_event_pifric": ("rcept_no VARCHAR, corp_code VARCHAR, fric_nstk_asstd DATE, "
+                         "fric_nstk_ascnt_ps_ostk_ratio DECIMAL(13,10), "
+                         "fric_nstk_ascnt_ps_estk_ratio DECIMAL(11,8), fric_nstk_ostk_cnt "
+                         "DECIMAL(10,0), fric_nstk_estk_cnt DECIMAL(8,0), fric_bfic_tisstk_ostk "
+                         "DECIMAL(11,0), available_date DATE, available_basis VARCHAR"),
+    "stg_event_cr": ("rcept_no VARCHAR, corp_code VARCHAR, cr_std DATE, bfcr_tisstk_ostk "
+                     "DECIMAL(12,0), atcr_tisstk_ostk DECIMAL(11,0), cr_rt_ostk_pct "
+                     "DECIMAL(15,10), bfcr_tisstk_estk DECIMAL(10,0), atcr_tisstk_estk "
+                     "DECIMAL(10,0), cr_rt_estk_pct DECIMAL(8,3), crstk_estk_cnt DECIMAL(10,0), "
+                     "available_date DATE, available_basis VARCHAR"),
+    "stg_capital": ("rcept_no VARCHAR, corp_code VARCHAR, isu_dcrs_de DATE, isu_dcrs_stle "
+                    "VARCHAR, isu_dcrs_stock_knd VARCHAR, available_date DATE, "
+                    "available_basis VARCHAR"),
+}
+
+# (ticker, 전일 액면, 당일 액면, 전일 주식수, 당일 주식수) — 2013-05-23 → 05-24
+KRX_HAND: list[tuple[str, int, int, int, int]] = [
+    ("007195", 5000, 1000, 27011, 22505),     # 서버 실측: 액면↓인데 주식수 ×0.833 → reverse_split
+    ("041450", 5000, 500, 1000, 515),         # 서버 실측 0.515 → reverse_split
+    ("000001", 5000, 500, 1000, 10000),       # 진짜 액면분할 ×10 → split
+    ("025620", 5000, 500, 100000, 99991),     # 서버 실측 0.99991 → 주식수 불변 = 이벤트 아님
+    ("000002", 5000, 500, 1000, 1000),        # ratio 정확히 1 → 이벤트 아님
+    ("000003", 5000, 500, 0, 1000),           # 전일 주식수 0 → ratio NULL → ratio_unparsed
+    ("000004", 500, 500, 1000, 2000),         # 액면 불변 → 트리거 없음 → pool 밖
+]
+
+
+def _krx_harness(tol: float) -> duckdb.DuckDBPyConnection:
+    """`.sql` 이 읽는 뷰를 손 테이블로 만든 in-memory duckdb — KRX 분류 규칙만 따로 본다."""
+    con = duckdb.connect()
+    con.execute("CREATE TABLE trading_calendar AS SELECT date, lag(date) OVER (ORDER BY date) "
+                "AS prev_td FROM (VALUES (DATE '2013-05-22'), (DATE '2013-05-23'), "
+                "(DATE '2013-05-24'), (DATE '2013-05-27')) t(date)")
+    tickers = ", ".join(f"('{t}')" for t, *_ in KRX_HAND)
+    con.execute(f"CREATE TABLE security_span AS SELECT ticker, DATE '2013-05-22' AS first_date "
+                f"FROM (VALUES {tickers}) t(ticker)")
+    con.execute(f"CREATE TABLE corp_ticker AS SELECT ticker, 'KR7' || substr(ticker, 1, 5) AS "
+                f"isin8, '0' || ticker || '0' AS corp_code, TRUE AS is_common "
+                f"FROM (VALUES {tickers}) t(ticker)")
+    con.execute("CREATE TABLE stg_listing_daily(ticker VARCHAR, date DATE, par_value_krw "
+                "DECIMAL(9,2), list_shrs DECIMAL(12,0), available_basis VARCHAR)")
+    for t, par0, par1, shr0, shr1 in KRX_HAND:
+        con.execute("INSERT INTO stg_listing_daily VALUES (?, DATE '2013-05-23', ?, ?, 'default'), "
+                    "(?, DATE '2013-05-24', ?, ?, 'default')", [t, par0, shr0, t, par1, shr1])
+    for name, cols in _DART_EMPTY.items():
+        con.execute(f"CREATE TABLE {name}({cols})")
+    con.execute(f"CREATE TABLE _const AS SELECT 2555 AS effective_before_announce_max_days, "
+                f"{tol!r} AS krx_share_change_tol")
+    return con
+
+
+def test_KRX_유형은_주식수_비_방향이고_주식수_불변_액면_변경은_범위_밖(tmp_path: Path) -> None:
+    con = _krx_harness(0.001)
+    try:
+        pool = {str(t): (str(ty), r, s) for t, ty, r, s in con.execute(rules_s05.pool_sql(
+            "ticker, event_type, ratio, scope_out FROM pool ORDER BY ticker")).fetchall()}
+        assert set(pool) == {"007195", "041450", "000001", "025620", "000002", "000003"}
+        assert pool["007195"] == ("reverse_split", 22505 / 27011, None)   # 액면↓ 라도 주식수↓
+        assert pool["041450"] == ("reverse_split", 0.515, None)
+        assert pool["000001"] == ("split", 10.0, None)
+        # 범위 밖 행의 라벨도 주식수 방향(99,991 < 100,000 → reverse_split)이지만 후보가 아니다
+        assert pool["025620"] == ("reverse_split", 99991 / 100000, "krx_par_only")
+        assert pool["000002"] == ("split", 1.0, "krx_par_only")
+        assert pool["000003"][1] is None and pool["000003"][2] is None
+        body = CORP_EVENT.sql_path.read_text(encoding="utf-8").strip().rstrip(";")
+        out = {str(e): (str(ty), r, rej) for e, ty, r, rej in con.execute(
+            f"SELECT event_id, event_type, ratio, reject_reason FROM ({body}) ORDER BY 1"
+        ).fetchall()}
+        assert out["007195:reverse_split:2013-05-24"] == ("reverse_split", 22505 / 27011, None)
+        assert out["000001:split:2013-05-24"] == ("split", 10.0, None)
+        assert out["000003:split:2013-05-24"][2] == "ratio_unparsed"
+        assert not [e for e in out if e.startswith(("025620:", "000002:", "000004:"))]
+    finally:
+        con.close()
+
+
+def test_krx_share_change_tol_이_0이면_단주_차이도_이벤트로_남는다() -> None:
+    """임계가 baseline 상수임을 확인 — 0 이면 025620(0.99991) 이 reverse_split 후보가 된다."""
+    con = _krx_harness(0.0)
+    try:
+        pool = {str(t): (str(ty), s) for t, ty, s in con.execute(rules_s05.pool_sql(
+            "ticker, event_type, scope_out FROM pool ORDER BY ticker")).fetchall()}
+        assert pool["025620"] == ("reverse_split", None)
+        assert pool["000002"] == ("split", "krx_par_only")     # ratio 정확히 1 은 여전히 제외
+    finally:
+        con.close()
+
+
+def test_방향_불변식_위반이면_EG3_corp_event가_폐기한다(tmp_path: Path) -> None:
+    """005930 액면분할의 ratio 를 0.5 로 뒤집는다 — 'split 인데 계수 < 1' 은 S07 EGC-04 가 거절하던
+    모순이라 corp_event 단계에서 폐기해야 한다."""
+    body = CORP_EVENT.sql_path.read_text(encoding="utf-8").strip().rstrip(";")
+    p = tmp_path / "corp_event_flipped.sql"
+    cols = ", ".join(c for c in CORP_EVENT.columns if c != "ratio")
+    p.write_text(f"""
+        WITH base AS (SELECT * FROM ({body}))
+        SELECT {cols},
+               CASE WHEN event_id = '005930:split:2018-05-04' THEN CAST(0.5 AS DOUBLE)
+                    ELSE ratio END AS ratio,
+               reject_reason
+        FROM base""", encoding="utf-8")
+    rule = EquityTable(**{**CORP_EVENT.__dict__, "name": "corp_event_flipped", "sql_path": p})
+    bl = _seed()
+    r = _build_chain(STAGE_SLICE, tmp_path / "equity",
+                     Baseline({**bl.data, rule.name: bl.table("corp_event")}), rule=rule)
+    assert r.status is build.BuildStatus.GATE_FAILED
+    g = _gate(r, "EG3_corp_event")
+    assert g.status is GateStatus.FAIL and g.metrics["n_direction_violation"] == 1
+    assert "n_direction_violation=1" in g.detail
+    assert _gate(r, "EG4").detail == "upstream_failed"

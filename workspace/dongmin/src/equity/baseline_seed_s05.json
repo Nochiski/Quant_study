@@ -4,6 +4,7 @@
  "corp_event": {
   "effective_before_announce_max_days": 2555,
   "near_dup_window_days": 5,
+  "krx_share_change_tol": 0.001,
   "thresholds": {
    "EG7": 0.0
   }
@@ -32,6 +33,17 @@
    "growing": false,
    "used_by": "EG3_corp_event metric n_near_dup_cross_source (기록형)",
    "note": "convention. 같은 (ticker, event_type) 이 다른 원천에서 이 일수 안에 두 번 나오면 정확 축 dedup 이 놓친 같은 사건일 가능성이 높다 — 절단본 실측 1건(101970 capred: 결정공시 cr_std 2018-10-12 vs 자본변동 isu_dcrs_de 2018-10-13). 판정하지 않고 기록만 한다(GATES §0-1 기록형)."
+  },
+  {
+   "table": "corp_event",
+   "metric": "krx_share_change_tol",
+   "inputs": {},
+   "sql": null,
+   "value": 0.001,
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "used_by": "sql/corp_event.sql pool.scope_out='krx_par_only' · EG3_corp_event metric n_krx_par_only",
+   "note": "convention(오케스트레이터 제안 1e-3). KRX 액면가 변경일에 주식수 비 |ratio−1| 가 이 안이면 단주·소각 잡음뿐인 액면 변경이라 이벤트가 아니다(서버 실측 025620 2015-08-31 0.99991 · 094860·052300·072520·086830 0.9999999). S06 factor_source='no_share_change' 78건이 이 제외로 사라져야 정상. 진짜 분할·병합의 |ratio−1| 은 0.2 이상이라 여유가 크다."
   },
   {
    "table": "corp_event",

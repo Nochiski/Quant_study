@@ -82,9 +82,13 @@ def _cmd_gate(a: argparse.Namespace) -> int:
     meta_path = table_root / str(rec.partitions[0]["path"]) / "_meta.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
     reasons = meta.get("n_reject_by_reason") or {}
+    bl = baseline_mod.load(a.baseline or baseline_mod.path_for(a.root))
     con = duckdb.connect()
     try:
         inputs.create_views(con, pinned, {t: list(rule.declared_columns(t)) for t in rule.inputs})
+        # 게이트 SQL(EG1 우변·extra_gates)이 빌드 때와 같은 `_const` 를 볼 수 있어야 재판정이 된다
+        # — S05 corp_event 의 EG1 우변이 pool CTE(krx_share_change_tol) 를 재사용한다.
+        build.make_consts(con, rule, bl)
         # `v=<build_id>` 도 하이브 컬럼으로 붙는다 — 선언 스키마 대조를 위해 걷어낸다.
         con.execute("CREATE OR REPLACE TEMP VIEW out_pq AS SELECT * EXCLUDE (v) FROM "
                     f"read_parquet('{glob}', hive_partitioning=true)")
@@ -100,8 +104,7 @@ def _cmd_gate(a: argparse.Namespace) -> int:
             inputs=dict(rec.inputs),
             partition_hashes={str(p["path"]).split("/", 1)[1] if "/" in str(p["path"]) else "whole":
                               str(p.get("content_hash", "")) for p in rec.partitions},
-            baseline=baseline_mod.load(a.baseline or baseline_mod.path_for(a.root)),
-            previous=prev, fixtures=gates.load_fixtures(rule.name, a.root))
+            baseline=bl, previous=prev, fixtures=gates.load_fixtures(rule.name, a.root))
         results = gates.run_all(ctx)
     finally:
         con.close()

@@ -11,7 +11,8 @@ from strategy_workbench.application.strategy_design.facade.ports import (
 )
 from strategy_workbench.domain.factor.facade.trace import TraceSelection
 from strategy_workbench.domain.portfolio.facade.construction import (
-    PortfolioObservation,
+    PortfolioConstructionTrace,
+    PortfolioTraceSelection,
     TargetFrame,
 )
 from strategy_workbench.domain.strategy.facade.provenance import (
@@ -40,6 +41,7 @@ from ._trace_models import (
     StrategyTraceResponse,
     StrategyTraceRow,
 )
+from .ports.outgoing.raw_observations import RawObservation
 
 MAX_RAW_ROWS = 2_000
 
@@ -112,6 +114,11 @@ class StrategyTraceService:
                 options=PortfolioPipelineOptions(
                     trace_factor_id=request.factor_id,
                     trace_selection=selection,
+                    construction_trace_selection=PortfolioTraceSelection(
+                        as_of=request.as_of,
+                        security_ids=tuple(sorted(request.security_ids)),
+                        include_order_delta=request.starting_holdings is not None,
+                    ),
                     starting_holdings=request.starting_holdings,
                     require_engine_compatible=True,
                 ),
@@ -168,12 +175,15 @@ class StrategyTraceService:
                 )
         rows = tuple(rows_list)
         page_rows = rows[request.offset : request.offset + request.limit]
-        raw, raw_truncated = _raw_projection(pipeline.observations, request, cancelled=cancelled)
+        raw, raw_truncated = _raw_projection(
+            pipeline.raw_observations, request, cancelled=cancelled
+        )
         _raise_if_cancelled(cancelled)
         target = _target_projection(
             pipeline.preview.tape.frames,
             request.as_of,
             set(request.security_ids),
+            pipeline.construction_trace,
             cancelled=cancelled,
         )
         return StrategyTraceResponse(
@@ -231,7 +241,7 @@ class StrategyTraceService:
 
 
 def _raw_projection(
-    observations: tuple[PortfolioObservation, ...],
+    observations: tuple[RawObservation, ...],
     request: StrategyTraceRequest,
     *,
     cancelled: Callable[[], bool] = lambda: False,
@@ -259,6 +269,7 @@ def _raw_projection(
                     field_id=field.field_id,
                     value=field.value,
                     available_date=field.available_date,
+                    kind=field.kind,
                 )
             )
         if len(rows) > MAX_RAW_ROWS:
@@ -270,6 +281,7 @@ def _target_projection(
     frames: tuple[TargetFrame, ...],
     as_of: date,
     security_ids: set[str],
+    construction_trace: PortfolioConstructionTrace | None,
     *,
     cancelled: Callable[[], bool] = lambda: False,
 ) -> StrategyTargetTrace | None:
@@ -277,6 +289,10 @@ def _target_projection(
     frame = next((item for item in frames if item.signal_as_of == as_of), None)
     if frame is None:
         return None
+    if construction_trace is None or construction_trace.signal_as_of != as_of:
+        raise RuntimeError(
+            f"portfolio compiler omitted the requested construction trace — as_of={as_of}"
+        )
     targets = []
     for index, item in enumerate(frame.targets):
         if index % 128 == 0:
@@ -294,6 +310,9 @@ def _target_projection(
         execution_on=frame.execution_on,
         targets=tuple(targets),
         candidates=tuple(candidates),
+        construction=tuple(
+            item for item in construction_trace.candidates if item.security_id in security_ids
+        ),
     )
 
 

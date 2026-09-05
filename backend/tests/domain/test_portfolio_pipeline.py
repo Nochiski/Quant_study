@@ -15,12 +15,16 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.domain.portfolio.facade.construction import (
     ExclusionReason,
+    FactorContributionStatus,
     NonFinitePortfolioCalculationError,
+    PortfolioConstraintEffect,
     PortfolioFactorValue,
     PortfolioFieldValue,
     PortfolioObservation,
+    PortfolioTraceSelection,
     compile_rebalance_schedule,
     compile_target_tape,
+    compile_target_tape_with_trace,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
     ComparisonOperator,
@@ -351,6 +355,113 @@ def test_target_tape_hash_is_immutable_and_snapshot_sensitive() -> None:
     assert first == second
     assert first.tape_hash == second.tape_hash
     assert first.tape_hash != different_snapshot.tape_hash
+
+
+def test_construction_trace_is_out_of_band_and_contributions_sum_to_the_same_score() -> None:
+    spec = _spec()
+    original = spec.factors.factors[0]
+    second = replace(original, factor_id="second", weight=3.0)
+    first = replace(original, weight=1.0)
+    spec = replace(
+        spec,
+        factors=replace(spec.factors, factors=(first, second)),
+        portfolio=replace(
+            spec.portfolio, selection_count=2, weighting=WeightingMethod.FACTOR_SCORE
+        ),
+        risk=replace(spec.risk, max_name_weight=0.6),
+    )
+    day = date(2026, 1, 2)
+    observations = (
+        replace(
+            _observation(day, "a", 4.0),
+            factor_values=(
+                PortfolioFactorValue("price.close", 4.0, day),
+                PortfolioFactorValue("second", 2.0, day),
+            ),
+        ),
+        replace(
+            _observation(day, "b", 1.0),
+            factor_values=(
+                PortfolioFactorValue("price.close", 1.0, day),
+                PortfolioFactorValue("second", 1.0, day),
+            ),
+        ),
+    )
+    kwargs = {
+        "data_snapshot_id": "snapshot-1",
+        "sessions": (day, day + timedelta(days=1)),
+        "observations": observations,
+    }
+
+    plain = compile_target_tape(spec, **kwargs)
+    traced = compile_target_tape_with_trace(
+        spec,
+        **kwargs,
+        trace_selection=PortfolioTraceSelection(day, ("a", "b")),
+    )
+
+    assert traced.tape == plain
+    assert traced.tape.tape_hash == plain.tape_hash
+    assert traced.trace is not None
+    by_id = {item.security_id: item for item in traced.trace.candidates}
+    for candidate in by_id.values():
+        contributions = candidate.factor_contributions
+        assert all(item.status is FactorContributionStatus.OK for item in contributions)
+        assert sum(item.normalized_contribution or 0.0 for item in contributions) == pytest.approx(
+            candidate.composite_score
+        )
+    assert by_id["a"].unconstrained_target_weight == pytest.approx(5 / 7)
+    assert by_id["a"].constrained_target_weight == pytest.approx(0.6)
+    assert by_id["a"].constraint_effect is PortfolioConstraintEffect.ADJUSTED
+    assert by_id["a"].previous_weight is None
+    assert by_id["a"].estimated_order_delta is None
+
+
+def test_construction_trace_explains_missing_future_removed_and_explicit_order_delta() -> None:
+    spec = replace(
+        _spec(),
+        portfolio=replace(_spec().portfolio, side=PortfolioSide.LONG_SHORT),
+        risk=replace(
+            _spec().risk,
+            gross_exposure=1.0,
+            net_exposure=0.0,
+            sector_neutral=True,
+        ),
+    )
+    day = date(2026, 1, 2)
+    observations = (
+        _observation(day, "long", 2.0, sector_id="long-only", previous_weight=0.2),
+        _observation(day, "short", -2.0, sector_id="short-only", previous_weight=-0.1),
+        _observation(day, "missing", None, sector_id="missing"),
+        _observation(
+            day,
+            "future",
+            1.0,
+            available_date=day + timedelta(days=1),
+            sector_id="future",
+        ),
+    )
+
+    result = compile_target_tape_with_trace(
+        spec,
+        data_snapshot_id="snapshot-1",
+        sessions=(day, day + timedelta(days=1)),
+        observations=observations,
+        trace_selection=PortfolioTraceSelection(
+            day,
+            tuple(item.security_id for item in observations),
+            include_order_delta=True,
+        ),
+    )
+
+    assert result.trace is not None
+    by_id = {item.security_id: item for item in result.trace.candidates}
+    assert by_id["missing"].factor_contributions[0].status is FactorContributionStatus.MISSING
+    assert by_id["future"].factor_contributions[0].status is FactorContributionStatus.FUTURE_DATA
+    assert by_id["long"].constraint_effect is PortfolioConstraintEffect.REMOVED
+    assert by_id["short"].constraint_effect is PortfolioConstraintEffect.REMOVED
+    assert by_id["long"].previous_weight == pytest.approx(0.2)
+    assert by_id["long"].estimated_order_delta == pytest.approx(-0.2)
 
 
 def test_target_tape_hash_preserves_the_pre_cancellation_byte_contract() -> None:

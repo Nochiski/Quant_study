@@ -30,6 +30,7 @@ from strategy_workbench.application.portfolio_design.ports.outgoing import (
     raw_observations as raw_observation_module,
 )
 from strategy_workbench.domain.equity.facade.research_data import (
+    CellKind,
     DataLoadStatus,
     ResearchPanelQuery,
 )
@@ -200,6 +201,35 @@ def test_raw_port_and_research_panel_agree_cell_by_cell(adapter: MockEquityDataA
     for key, field in raw_cells.items():
         assert field.value == cells[key].value, key
         assert field.available_date == cells[key].available_date, key
+        assert field.kind is cells[key].kind, key
+
+
+def test_raw_port_preserves_every_equity_cell_kind_without_collapsing_zero_and_missing() -> None:
+    adapter = MockEquityDataAdapter.demo()
+    raw = adapter.load_raw_observations(
+        _query(
+            start=date(2024, 1, 3),
+            end=date(2024, 1, 8),
+            fields=("flow.foreign_net_buy",),
+        )
+    )
+    cells = {
+        (item.as_of, item.security_id): field for item in raw.observations for field in item.fields
+    }
+
+    actual_zero = cells[(date(2024, 1, 3), "sec-005930-1")]
+    missing = cells[(date(2024, 1, 3), "sec-000660-1")]
+    omitted_zero = cells[(date(2024, 1, 4), "sec-005930-1")]
+    not_collected = cells[(date(2024, 1, 4), "sec-000660-1")]
+    coverage_gap = cells[(date(2024, 1, 8), "sec-035420-1")]
+    assert (actual_zero.value, actual_zero.kind) == (0.0, CellKind.OBSERVED)
+    assert (omitted_zero.value, omitted_zero.kind) == (
+        0.0,
+        CellKind.SOURCE_OMITTED_ZERO,
+    )
+    assert (missing.value, missing.kind) == (None, CellKind.MISSING)
+    assert (not_collected.value, not_collected.kind) == (None, CellKind.NOT_COLLECTED)
+    assert (coverage_gap.value, coverage_gap.kind) == (None, CellKind.COVERAGE_GAP)
 
 
 def test_query_rejects_inverted_range_negative_history_and_missing_universe() -> None:

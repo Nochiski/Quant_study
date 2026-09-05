@@ -90,6 +90,8 @@ export const useStrategyTrace = (
     enabled: false,
     retry: false,
     staleTime: Number.POSITIVE_INFINITY,
+    // Linked traces are deliberately larger than the P5-02 single-node response.
+    gcTime: 60_000,
   });
 
   const run = useCallback(async (): Promise<void> => {

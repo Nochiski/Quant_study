@@ -6,9 +6,11 @@ from dataclasses import dataclass
 from datetime import date
 from typing import ClassVar, TypeAlias
 
+from strategy_workbench.domain.equity.facade.research_data import CellKind
 from strategy_workbench.domain.factor.facade.trace import TraceValueStatus
 from strategy_workbench.domain.portfolio.facade.construction import (
     CandidateDecision,
+    PortfolioCandidateTrace,
     TargetPosition,
 )
 from strategy_workbench.domain.strategy.facade.provenance import (
@@ -110,6 +112,7 @@ class RawStrategyTraceRow:
     field_id: str
     value: float | str | bool | None
     available_date: date
+    kind: CellKind
 
 
 @dataclass(frozen=True)
@@ -118,6 +121,7 @@ class StrategyTargetTrace:
     execution_on: date
     targets: tuple[TargetPosition, ...]
     candidates: tuple[CandidateDecision, ...]
+    construction: tuple[PortfolioCandidateTrace, ...]
 
 
 @dataclass(frozen=True)

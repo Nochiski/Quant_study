@@ -41,7 +41,7 @@ from dataclasses import InitVar, dataclass
 from datetime import date
 from typing import Protocol, TypeVar, runtime_checkable
 
-from strategy_workbench.domain.equity.facade.research_data import DataLoadStatus
+from strategy_workbench.domain.equity.facade.research_data import CellKind, DataLoadStatus
 
 RawFieldValueType = float | str | bool | None
 _T = TypeVar("_T")
@@ -103,6 +103,22 @@ class RawFieldValue:
     field_id: str
     value: RawFieldValueType
     available_date: date
+    kind: CellKind = CellKind.OBSERVED
+
+    def __post_init__(self) -> None:
+        if self.kind in (CellKind.OBSERVED, CellKind.SOURCE_OMITTED_ZERO):
+            if self.value is None:
+                raise RawObservationContractViolation(
+                    "observed raw field requires a value — "
+                    f"field_id={self.field_id!r} available_date={self.available_date} "
+                    f"kind={self.kind.value!r}"
+                )
+        elif self.value is not None:
+            raise RawObservationContractViolation(
+                "unavailable raw field must not carry a value — "
+                f"field_id={self.field_id!r} available_date={self.available_date} "
+                f"kind={self.kind.value!r} value={self.value!r}"
+            )
 
 
 @dataclass(frozen=True)

@@ -20,6 +20,15 @@ from strategy_workbench.domain.strategy.facade.specification import (
     strategy_spec_hash,
 )
 
+from ._construction_trace import (
+    FactorContributionStatus,
+    FactorContributionTrace,
+    PortfolioCandidateTrace,
+    PortfolioConstraintEffect,
+    PortfolioConstructionTrace,
+    PortfolioTraceSelection,
+    TargetTapeTraceResult,
+)
 from ._models import (
     CandidateDecision,
     CandidateSide,
@@ -98,6 +107,50 @@ def compile_target_tape(
     schedule: PortfolioRebalanceSchedule | None = None,
     checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> TargetTape:
+    """Compile the canonical executable tape without retaining an audit projection."""
+    return _compile_target_tape(
+        spec,
+        data_snapshot_id=data_snapshot_id,
+        sessions=sessions,
+        observations=observations,
+        schedule=schedule,
+        trace_selection=None,
+        checkpoint=checkpoint,
+    ).tape
+
+
+def compile_target_tape_with_trace(
+    spec: StrategySpec,
+    *,
+    data_snapshot_id: str,
+    sessions: tuple[date, ...],
+    observations: tuple[PortfolioObservation, ...],
+    trace_selection: PortfolioTraceSelection,
+    schedule: PortfolioRebalanceSchedule | None = None,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
+) -> TargetTapeTraceResult:
+    """Compile once and return an out-of-band audit from that same calculation."""
+    return _compile_target_tape(
+        spec,
+        data_snapshot_id=data_snapshot_id,
+        sessions=sessions,
+        observations=observations,
+        schedule=schedule,
+        trace_selection=trace_selection,
+        checkpoint=checkpoint,
+    )
+
+
+def _compile_target_tape(
+    spec: StrategySpec,
+    *,
+    data_snapshot_id: str,
+    sessions: tuple[date, ...],
+    observations: tuple[PortfolioObservation, ...],
+    schedule: PortfolioRebalanceSchedule | None,
+    trace_selection: PortfolioTraceSelection | None,
+    checkpoint: Callable[[], None],
+) -> TargetTapeTraceResult:
     prepared_schedule = schedule or compile_rebalance_schedule(
         spec, sessions, checkpoint=checkpoint
     )
@@ -120,6 +173,7 @@ def compile_target_tape(
         by_date.setdefault(observation.as_of, []).append(observation)
 
     compiled: list[TargetFrame] = []
+    construction_trace: PortfolioConstructionTrace | None = None
     # The book is folded frame by frame: the compiler owns `previous_weight` from the second
     # rebalance on, and `PortfolioObservation.previous_weight` seeds only the first (D-002).
     carried: dict[str, float] | None = None
@@ -133,14 +187,26 @@ def compile_target_tape(
             if carried is None
             else carried
         )
-        frame = _compile_frame(
+        selected_ids = (
+            set(trace_selection.security_ids)
+            if trace_selection is not None and trace_selection.as_of == signal_as_of
+            else None
+        )
+        frame_result = _compile_frame(
             spec,
             signal_as_of,
             execution_on,
             frame_observations,
             previous_weights,
+            trace_security_ids=selected_ids,
+            include_order_delta=(
+                trace_selection is not None
+                and selected_ids is not None
+                and trace_selection.include_order_delta
+            ),
             checkpoint=checkpoint,
         )
+        frame = frame_result.frame
         _require_finite_tree(
             frame,
             stage="frame",
@@ -148,6 +214,18 @@ def compile_target_tape(
             checkpoint=checkpoint,
         )
         compiled.append(frame)
+        if selected_ids is not None:
+            construction_trace = PortfolioConstructionTrace(
+                signal_as_of=signal_as_of,
+                execution_on=execution_on,
+                candidates=frame_result.trace_candidates,
+            )
+            _require_finite_tree(
+                construction_trace,
+                stage="construction_trace",
+                context=f"signal_as_of={signal_as_of} execution_on={execution_on}",
+                checkpoint=checkpoint,
+            )
         carried = {
             target.security_id: target.weight for target in _checkpointed(frame.targets, checkpoint)
         }
@@ -161,12 +239,15 @@ def compile_target_tape(
         "frames": _canonical_payload(frames, checkpoint=checkpoint),
     }
     tape_hash = _hash_payload(payload, checkpoint=checkpoint)
-    return TargetTape(
-        data_snapshot_id=data_snapshot_id,
-        strategy_hash=strategy_hash,
-        tape_hash=tape_hash,
-        frames=frames,
-        execution_timing=spec.execution.timing.value,
+    return TargetTapeTraceResult(
+        tape=TargetTape(
+            data_snapshot_id=data_snapshot_id,
+            strategy_hash=strategy_hash,
+            tape_hash=tape_hash,
+            frames=frames,
+            execution_timing=spec.execution.timing.value,
+        ),
+        trace=construction_trace,
     )
 
 
@@ -203,6 +284,25 @@ def _rebalance_pairs(
     return tuple(pairs)
 
 
+@dataclass(frozen=True)
+class _ScoredCandidate:
+    decision: CandidateDecision
+    contributions: tuple[FactorContributionTrace, ...]
+
+
+@dataclass(frozen=True)
+class _TargetWeightResult:
+    constrained: dict[str, float]
+    unconstrained: dict[str, float]
+    reasons: dict[str, ExclusionReason]
+
+
+@dataclass(frozen=True)
+class _FrameCompilation:
+    frame: TargetFrame
+    trace_candidates: tuple[PortfolioCandidateTrace, ...] = ()
+
+
 def _compile_frame(
     spec: StrategySpec,
     signal_as_of: date,
@@ -210,13 +310,25 @@ def _compile_frame(
     observations: tuple[PortfolioObservation, ...],
     previous_weights: Mapping[str, float],
     *,
+    trace_security_ids: set[str] | None = None,
+    include_order_delta: bool = False,
     checkpoint: Callable[[], None] = _noop_checkpoint,
-) -> TargetFrame:
+) -> _FrameCompilation:
     """One rebalance. `previous_weights` is the book carried in, never read off observations."""
-    decisions = [
-        _score_candidate(spec, observation)
+    scored = [
+        _score_candidate(
+            spec,
+            observation,
+            include_trace=(
+                trace_security_ids is not None and observation.security_id in trace_security_ids
+            ),
+        )
         for observation in _checkpointed(observations, checkpoint)
     ]
+    contributions_by_id = {
+        item.decision.security_id: item.contributions for item in _checkpointed(scored, checkpoint)
+    }
+    decisions = [item.decision for item in _checkpointed(scored, checkpoint)]
     ranked = sorted(
         (decision for decision in _checkpointed(decisions, checkpoint) if decision.eligible),
         key=lambda item: (-(item.composite_score or 0.0), item.security_id),
@@ -249,7 +361,7 @@ def _compile_frame(
         short_count=short_count,
         checkpoint=checkpoint,
     )
-    weights, weight_reasons = _target_weights(
+    weight_result = _target_weights(
         spec,
         ranked,
         observations_by_id,
@@ -264,8 +376,8 @@ def _compile_frame(
             previous_weights.get(decision.security_id, 0.0),
             long_ids,
             short_ids,
-            weights,
-            weight_reasons,
+            weight_result.constrained,
+            weight_result.reasons,
             buffer_retained,
         )
         for decision in _checkpointed(decisions, checkpoint)
@@ -283,15 +395,39 @@ def _compile_frame(
         )
         if decision.selected and decision.target_weight != 0
     )
-    return TargetFrame(
-        signal_as_of=signal_as_of,
-        execution_on=execution_on,
-        targets=targets,
-        candidates=tuple(sorted(decisions, key=lambda item: item.security_id)),
+    ordered_decisions = tuple(sorted(decisions, key=lambda item: item.security_id))
+    trace_candidates = (
+        tuple(
+            _candidate_trace(
+                decision,
+                contributions_by_id[decision.security_id],
+                previous_weights.get(decision.security_id, 0.0),
+                weight_result.unconstrained.get(decision.security_id),
+                include_order_delta=include_order_delta,
+            )
+            for decision in _checkpointed(ordered_decisions, checkpoint)
+            if decision.security_id in trace_security_ids
+        )
+        if trace_security_ids is not None
+        else ()
+    )
+    return _FrameCompilation(
+        frame=TargetFrame(
+            signal_as_of=signal_as_of,
+            execution_on=execution_on,
+            targets=targets,
+            candidates=ordered_decisions,
+        ),
+        trace_candidates=trace_candidates,
     )
 
 
-def _score_candidate(spec: StrategySpec, observation: PortfolioObservation) -> CandidateDecision:
+def _score_candidate(
+    spec: StrategySpec,
+    observation: PortfolioObservation,
+    *,
+    include_trace: bool,
+) -> _ScoredCandidate:
     """Score one candidate. FUTURE_DATA covers dated values only.
 
     Fields and factor values carry an `available_date`, so a value published after `as_of` is
@@ -334,10 +470,23 @@ def _score_candidate(spec: StrategySpec, observation: PortfolioObservation) -> C
     factors = {item.factor_id: item for item in observation.factor_values}
     score = 0.0
     denominator = 0.0
+    contributions: list[FactorContributionTrace] = []
     for factor in spec.factors.factors:
         value = factors.get(factor.factor_id)
         if value is None or value.value is None:
             reasons.append(ExclusionReason.MISSING_FACTOR)
+            if include_trace:
+                contributions.append(
+                    FactorContributionTrace(
+                        factor_id=factor.factor_id,
+                        value=None,
+                        configured_weight=factor.weight,
+                        direction=factor.direction,
+                        weighted_value=None,
+                        normalized_contribution=None,
+                        status=FactorContributionStatus.MISSING,
+                    )
+                )
             continue
         if not _number(value.value):
             raise NonFinitePortfolioCalculationError(
@@ -350,10 +499,32 @@ def _score_candidate(spec: StrategySpec, observation: PortfolioObservation) -> C
             )
         if value.available_date > observation.as_of:
             reasons.append(ExclusionReason.FUTURE_DATA)
+            if include_trace:
+                contributions.append(
+                    FactorContributionTrace(
+                        factor_id=factor.factor_id,
+                        value=value.value,
+                        configured_weight=factor.weight,
+                        direction=factor.direction,
+                        weighted_value=None,
+                        normalized_contribution=None,
+                        status=FactorContributionStatus.FUTURE_DATA,
+                    )
+                )
             continue
         direction = 1.0 if factor.direction is FactorDirection.HIGH else -1.0
+        weighted_value = _finite(
+            direction * factor.weight * value.value,
+            # Preserve the executable compiler's historical failure code/stage: the term is part
+            # of the same composite-score operation, merely retained for the audit projection.
+            stage="composite_score",
+            context=(
+                f"as_of={observation.as_of} security_id={observation.security_id!r} "
+                f"factor_id={factor.factor_id!r}"
+            ),
+        )
         score = _finite(
-            score + direction * factor.weight * value.value,
+            score + weighted_value,
             stage="composite_score",
             context=(
                 f"as_of={observation.as_of} security_id={observation.security_id!r} "
@@ -365,6 +536,18 @@ def _score_candidate(spec: StrategySpec, observation: PortfolioObservation) -> C
             stage="composite_denominator",
             context=f"security_id={observation.security_id!r}",
         )
+        if include_trace:
+            contributions.append(
+                FactorContributionTrace(
+                    factor_id=factor.factor_id,
+                    value=value.value,
+                    configured_weight=factor.weight,
+                    direction=factor.direction,
+                    weighted_value=weighted_value,
+                    normalized_contribution=None,
+                    status=FactorContributionStatus.OK,
+                )
+            )
     composite_score = (
         _finite(
             score / denominator,
@@ -392,17 +575,90 @@ def _score_candidate(spec: StrategySpec, observation: PortfolioObservation) -> C
         ExclusionReason.REGIME_BLOCKED,
         ExclusionReason.LIQUIDITY_FAILED,
     }
-    return CandidateDecision(
-        as_of=observation.as_of,
-        security_id=observation.security_id,
-        eligible=not any(reason in blocking for reason in reasons),
-        selected=False,
-        composite_score=composite_score,
-        rank=None,
-        side=None,
-        target_weight=0.0,
-        sector_id=observation.sector_id,
-        exclusion_reasons=tuple(dict.fromkeys(reasons)),
+    normalized = tuple(
+        replace(
+            item,
+            normalized_contribution=(
+                _finite(
+                    item.weighted_value / denominator,
+                    stage="factor_contribution",
+                    context=(
+                        f"as_of={observation.as_of} security_id={observation.security_id!r} "
+                        f"factor_id={item.factor_id!r}"
+                    ),
+                )
+                if denominator and item.weighted_value is not None
+                else None
+            ),
+        )
+        for item in contributions
+    )
+    return _ScoredCandidate(
+        decision=CandidateDecision(
+            as_of=observation.as_of,
+            security_id=observation.security_id,
+            eligible=not any(reason in blocking for reason in reasons),
+            selected=False,
+            composite_score=composite_score,
+            rank=None,
+            side=None,
+            target_weight=0.0,
+            sector_id=observation.sector_id,
+            exclusion_reasons=tuple(dict.fromkeys(reasons)),
+        ),
+        contributions=normalized,
+    )
+
+
+def _candidate_trace(
+    decision: CandidateDecision,
+    contributions: tuple[FactorContributionTrace, ...],
+    previous_weight: float,
+    unconstrained_weight: float | None,
+    *,
+    include_order_delta: bool,
+) -> PortfolioCandidateTrace:
+    if decision.side is None:
+        constraint_effect = PortfolioConstraintEffect.NOT_SELECTED
+    elif (
+        not decision.selected
+        or unconstrained_weight is None
+        or (unconstrained_weight != 0 and decision.target_weight == 0)
+    ):
+        constraint_effect = PortfolioConstraintEffect.REMOVED
+    elif math.isclose(
+        unconstrained_weight,
+        decision.target_weight,
+        rel_tol=1e-12,
+        abs_tol=1e-15,
+    ):
+        constraint_effect = PortfolioConstraintEffect.UNCHANGED
+    else:
+        constraint_effect = PortfolioConstraintEffect.ADJUSTED
+    estimated_delta = (
+        _finite(
+            decision.target_weight - previous_weight,
+            stage="estimated_order_delta",
+            context=(f"as_of={decision.as_of} security_id={decision.security_id!r}"),
+        )
+        if include_order_delta
+        else None
+    )
+    return PortfolioCandidateTrace(
+        as_of=decision.as_of,
+        security_id=decision.security_id,
+        factor_contributions=contributions,
+        composite_score=decision.composite_score,
+        rank=decision.rank,
+        eligible=decision.eligible,
+        selected=decision.selected,
+        side=decision.side,
+        unconstrained_target_weight=unconstrained_weight,
+        constrained_target_weight=decision.target_weight,
+        previous_weight=previous_weight if include_order_delta else None,
+        estimated_order_delta=estimated_delta,
+        constraint_effect=constraint_effect,
+        exclusion_reasons=decision.exclusion_reasons,
     )
 
 
@@ -460,7 +716,7 @@ def _target_weights(
     long_ids: set[str],
     short_ids: set[str],
     checkpoint: Callable[[], None] = _noop_checkpoint,
-) -> tuple[dict[str, float], dict[str, ExclusionReason]]:
+) -> _TargetWeightResult:
     long_budget = (
         (spec.risk.gross_exposure + spec.risk.net_exposure) / 2
         if spec.portfolio.side is PortfolioSide.LONG_SHORT
@@ -482,6 +738,15 @@ def _target_weights(
         short_ids,
         reasons,
         checkpoint=checkpoint,
+    )
+    unconstrained = _proportional_allocate(long_scores, long_budget, checkpoint=checkpoint)
+    unconstrained.update(
+        {
+            security_id: -weight
+            for security_id, weight in _proportional_allocate(
+                short_scores, short_budget, checkpoint=checkpoint
+            ).items()
+        }
     )
     weights = _capped_allocate(
         long_scores, long_budget, spec.risk.max_name_weight, checkpoint=checkpoint
@@ -514,9 +779,10 @@ def _target_weights(
             if previous != 0:
                 weights[security_id] = previous
     weights = _apply_sector_constraints(spec, weights, observations, checkpoint=checkpoint)
-    return (
-        _apply_side_budgets(weights, long_budget, short_budget, checkpoint=checkpoint),
-        reasons,
+    return _TargetWeightResult(
+        constrained=_apply_side_budgets(weights, long_budget, short_budget, checkpoint=checkpoint),
+        unconstrained=unconstrained,
+        reasons=reasons,
     )
 
 
@@ -571,6 +837,32 @@ def _weight_scores(
             context=f"security_id={candidate.security_id!r} weighting={spec.portfolio.weighting}",
         )
     return scores
+
+
+def _proportional_allocate(
+    scores: dict[str, float],
+    budget: float,
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
+) -> dict[str, float]:
+    """Allocate before name/sector/min-trade constraints using the exact weight scores."""
+    if not scores or budget <= 0:
+        return {security_id: 0.0 for security_id in scores}
+    denominator = _finite(
+        sum(score for score in _checkpointed(scores.values(), checkpoint)),
+        stage="unconstrained_allocation_denominator",
+        context=f"count={len(scores)} budget={budget!r}",
+    )
+    if denominator <= 0:
+        return {security_id: 0.0 for security_id in scores}
+    return {
+        security_id: _finite(
+            budget * score / denominator,
+            stage="unconstrained_allocation",
+            context=f"security_id={security_id!r} budget={budget!r}",
+        )
+        for security_id, score in _checkpointed(scores.items(), checkpoint)
+    }
 
 
 def _capped_allocate(

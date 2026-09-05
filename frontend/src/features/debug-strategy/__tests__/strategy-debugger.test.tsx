@@ -1,5 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, delay, http } from "msw";
 import { setupServer } from "msw/node";
@@ -152,6 +159,60 @@ const traceResponse = (): StrategyTraceResponse => ({
         rank: 1,
       },
     ],
+    construction: [
+      {
+        as_of: "2026-08-31",
+        security_id: "sec-a",
+        factor_contributions: [
+          {
+            factor_id: "momentum",
+            value: 0.42,
+            configured_weight: 1,
+            direction: "high",
+            weighted_value: 0.42,
+            normalized_contribution: 0.42,
+            status: "ok",
+          },
+        ],
+        composite_score: 0.42,
+        rank: 1,
+        eligible: true,
+        selected: true,
+        side: "long",
+        unconstrained_target_weight: 0.05,
+        constrained_target_weight: 0.035,
+        previous_weight: null,
+        estimated_order_delta: null,
+        constraint_effect: "adjusted",
+        exclusion_reasons: [],
+      },
+      {
+        as_of: "2026-08-31",
+        security_id: "sec-b",
+        factor_contributions: [
+          {
+            factor_id: "momentum",
+            value: null,
+            configured_weight: 1,
+            direction: "high",
+            weighted_value: null,
+            normalized_contribution: null,
+            status: "missing",
+          },
+        ],
+        composite_score: null,
+        rank: null,
+        eligible: false,
+        selected: false,
+        side: null,
+        unconstrained_target_weight: null,
+        constrained_target_weight: 0,
+        previous_weight: null,
+        estimated_order_delta: null,
+        constraint_effect: "not_selected",
+        exclusion_reasons: ["missing_factor"],
+      },
+    ],
   },
 });
 
@@ -200,19 +261,23 @@ describe("StrategyDebugger", () => {
     renderDebugger(<StrategyDebugger {...props()} />);
 
     await user.click(screen.getByRole("button", { name: "추적 실행" }));
-    expect(await screen.findAllByText("0.42")).toHaveLength(2);
+    expect(await screen.findAllByText("0.42")).toHaveLength(3);
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
       as_of: "2026-08-31",
       security_ids: ["sec-a", "sec-b"],
       factor_id: "momentum",
       node_ids: ["ranked"],
-      include_raw: false,
+      include_raw: true,
       limit: 2,
       strategy_source: { kind: "inline_draft", source_hash: "source-hash" },
     });
     expect(screen.getByText("3.50%")).toBeInTheDocument();
     expect(screen.getByText("missing_factor")).toBeInTheDocument();
+    expect(screen.getAllByText("1 원시 데이터")).toHaveLength(2);
+    expect(screen.getAllByText("7 위험 제약 후")).toHaveLength(2);
+    expect(screen.queryByText("8 주문 차이 추정")).not.toBeInTheDocument();
+    expect(screen.queryByText(/실제 주문이 아닙니다/)).not.toBeInTheDocument();
     expect(screen.getByText("snapshot-v1")).toBeInTheDocument();
     expect(screen.getByTitle("plan-hash")).toHaveTextContent("plan-hash");
 
@@ -221,6 +286,116 @@ describe("StrategyDebugger", () => {
     expect(screen.getByText("missing_input")).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "실행 계획" }));
     expect(screen.getByText("backend execution plan")).toBeInTheDocument();
+  });
+
+  it("keeps the selected-node views pinned while the linked request includes every node", async () => {
+    const expandedContext = context();
+    expandedContext.factors[0]!.nodes.unshift({
+      nodeId: "close",
+      operation: "field",
+      pointer: "/factors/factors/0/graph/nodes/0",
+    });
+    server.use(
+      http.post(`${API}/api/v1/strategies/debug/trace`, () => {
+        const payload = traceResponse();
+        payload.trace = {
+          ...payload.trace,
+          rows: [
+            {
+              node_id: "close",
+              operation: "field",
+              as_of: "2026-08-31",
+              security_id: "sec-a",
+              value: 123,
+              status: "ok",
+              inputs: [],
+            },
+            {
+              node_id: "close",
+              operation: "field",
+              as_of: "2026-08-31",
+              security_id: "sec-b",
+              value: 456,
+              status: "ok",
+              inputs: [],
+            },
+            ...payload.trace.rows,
+          ],
+          limit: 4,
+          returned: 4,
+        };
+        return HttpResponse.json(payload);
+      }),
+    );
+    const user = userEvent.setup();
+    renderDebugger(<StrategyDebugger {...props(expandedContext)} />);
+
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    await screen.findByText("123");
+    await user.click(screen.getByRole("tab", { name: "TargetTape" }));
+    const targetPanel = screen.getByRole("tabpanel", { name: "TargetTape" });
+    expect(within(targetPanel).queryByText("123")).not.toBeInTheDocument();
+    expect(within(targetPanel).getAllByText("0.42")).toHaveLength(2);
+
+    await user.click(screen.getByRole("tab", { name: "선택 노드" }));
+    const nodePanel = screen.getByRole("tabpanel", { name: "선택 노드" });
+    expect(within(nodePanel).queryByText("field")).not.toBeInTheDocument();
+    expect(within(nodePanel).getAllByText("cross_sectional.rank")).toHaveLength(
+      2,
+    );
+  });
+
+  it("shows raw cell semantics and only requests order deltas for an explicit opening book", async () => {
+    server.use(
+      http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
+        const received = (await request.json()) as StrategyTraceRequest;
+        requests.push(received);
+        const payload = traceResponse();
+        payload.raw = [
+          {
+            as_of: "2026-08-31",
+            security_id: "sec-a",
+            field_id: "flow.foreign_net_buy",
+            value: 0,
+            available_date: "2026-08-31",
+            kind: "source_omitted_zero",
+          },
+        ];
+        payload.target!.construction = payload.target!.construction.map(
+          (row) => ({
+            ...row,
+            previous_weight: row.security_id === "sec-a" ? 0.1 : 0,
+            estimated_order_delta: row.security_id === "sec-a" ? -0.065 : 0,
+          }),
+        );
+        return HttpResponse.json(payload);
+      }),
+    );
+    const user = userEvent.setup();
+    renderDebugger(<StrategyDebugger {...props()} />);
+
+    await user.type(
+      screen.getByRole("textbox", { name: /시작 보유 비중/ }),
+      "sec-a=0.1 sec-b=0",
+    );
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+
+    expect(await screen.findByText("source_omitted_zero")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        (_content, element) =>
+          element?.classList.contains("strategy-debugger__stage-primary") ===
+            true && element.textContent?.includes("-6.50%") === true,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("8 주문 차이 추정")).toHaveLength(2);
+    expect(screen.getAllByText(/실제 주문이 아닙니다/)).toHaveLength(2);
+    expect(requests[0]?.starting_holdings).toEqual([
+      { security_id: "sec-a", weight: 0.1 },
+      { security_id: "sec-b", weight: 0 },
+    ]);
+    await user.click(screen.getByRole("tab", { name: "원시 데이터" }));
+    expect(screen.getByText("flow.foreign_net_buy")).toBeInTheDocument();
   });
 
   it("refetches the same exact owner through the query cache", async () => {

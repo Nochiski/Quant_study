@@ -4,10 +4,12 @@ import type { StrategySpec, StrategyTraceResponse } from "../../../shared/api";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import {
   parseSecurityIds,
+  parseStartingHoldings,
   prepareStrategyTrace,
   responseMatchesStrategyTrace,
   type StrategyDebuggerContext,
 } from "../model/strategy-trace";
+import { projectLinkedTraceRows } from "../model/linked-trace";
 import { projectTargetTapeRows } from "../model/target-tape";
 
 const SPEC = JSON.parse(
@@ -98,6 +100,34 @@ const response = (): StrategyTraceResponse => ({
       },
     ],
     targets: [],
+    construction: [
+      {
+        as_of: "2026-08-31",
+        security_id: "sec-a",
+        factor_contributions: [
+          {
+            factor_id: "momentum",
+            value: 0,
+            configured_weight: 1,
+            direction: "high",
+            weighted_value: 0,
+            normalized_contribution: 0,
+            status: "ok",
+          },
+        ],
+        composite_score: 0,
+        rank: 1,
+        eligible: true,
+        selected: true,
+        side: "long",
+        unconstrained_target_weight: 0,
+        constrained_target_weight: 0,
+        previous_weight: null,
+        estimated_order_delta: null,
+        constraint_effect: "unchanged",
+        exclusion_reasons: [],
+      },
+    ],
   },
 });
 
@@ -108,7 +138,13 @@ describe("strategy trace request contract", () => {
       "sec-a",
       "sec-c",
     ]);
-    const prepared = prepareStrategyTrace(context(), {
+    const expanded = context();
+    expanded.factors[0]!.nodes.unshift({
+      nodeId: "close",
+      operation: "field",
+      pointer: "/factors/factors/0/graph/nodes/0",
+    });
+    const prepared = prepareStrategyTrace(expanded, {
       asOf: "2026-08-31",
       security: "sec-b, sec-a, sec-b",
       factorId: "momentum",
@@ -120,11 +156,40 @@ describe("strategy trace request contract", () => {
         as_of: "2026-08-31",
         security_ids: ["sec-b", "sec-a"],
         factor_id: "momentum",
-        node_ids: ["ranked"],
-        include_raw: false,
+        node_ids: ["close", "ranked"],
+        include_raw: true,
         offset: 0,
-        limit: 2,
+        limit: 4,
       },
+    });
+  });
+
+  it("distinguishes source-owned, flat and explicit opening books", () => {
+    expect(parseStartingHoldings(" ")).toEqual({ kind: "source" });
+    expect(parseStartingHoldings("flat")).toEqual({
+      kind: "explicit",
+      holdings: [],
+    });
+    expect(parseStartingHoldings("sec-a=0.2, sec-b=-1e-1")).toEqual({
+      kind: "explicit",
+      holdings: [
+        { security_id: "sec-a", weight: 0.2 },
+        { security_id: "sec-b", weight: -0.1 },
+      ],
+    });
+    expect(parseStartingHoldings("sec-a=0.2 sec-a=0.3")).toEqual({
+      kind: "invalid",
+    });
+    const flat = prepareStrategyTrace(context(), {
+      asOf: "2026-08-31",
+      security: "sec-a",
+      factorId: "momentum",
+      nodeId: "ranked",
+      startingHoldings: "flat",
+    });
+    expect(flat).toMatchObject({
+      kind: "ready",
+      request: { starting_holdings: [] },
     });
   });
 
@@ -228,6 +293,47 @@ describe("strategy trace request contract", () => {
           ],
         },
       },
+      {
+        raw: [
+          {
+            as_of: "2026-08-31",
+            security_id: "other",
+            field_id: "price.close",
+            value: 1,
+            available_date: "2026-08-31",
+            kind: "observed" as const,
+          },
+        ],
+      },
+      {
+        target: {
+          ...response().target!,
+          construction: [
+            {
+              ...response().target!.construction[0]!,
+              security_id: "other",
+            },
+          ],
+        },
+      },
+      {
+        target: {
+          ...response().target!,
+          construction: [
+            {
+              ...response().target!.construction[0]!,
+              composite_score: 0.5,
+            },
+          ],
+        },
+      },
+      {
+        target: {
+          ...response().target!,
+          candidates: [],
+          construction: [],
+        },
+      },
     ]) {
       expect(
         responseMatchesStrategyTrace(prepared, { ...response(), ...mismatch }),
@@ -258,6 +364,29 @@ describe("strategy trace request contract", () => {
         targetWeight: null,
         nodeValue: null,
         nodeStatus: null,
+      },
+    ]);
+  });
+
+  it("joins the linked trace by server identities without recalculating values", () => {
+    const payload = response();
+    payload.raw = [
+      {
+        as_of: "2026-08-31",
+        security_id: "sec-a",
+        field_id: "flow.foreign_net_buy",
+        value: 0,
+        available_date: "2026-08-31",
+        kind: "source_omitted_zero",
+      },
+    ];
+
+    expect(projectLinkedTraceRows(payload)).toEqual([
+      {
+        securityId: "sec-a",
+        raw: payload.raw,
+        nodes: payload.trace.rows,
+        construction: payload.target!.construction[0],
       },
     ]);
   });

@@ -35,6 +35,8 @@ from strategy_workbench.application.portfolio_design.facade.design import (
     TraceObservationCapabilityError,
 )
 from strategy_workbench.application.portfolio_design.facade.ports import (
+    RawFieldValue,
+    RawObservation,
     RawObservationQuery,
     RawObservationSet,
 )
@@ -49,10 +51,7 @@ from strategy_workbench.application.strategy_design.facade.design import Strateg
 from strategy_workbench.domain.factor.facade.evaluation import FactorEvaluation, FactorValue
 from strategy_workbench.domain.factor.facade.expression import ConstantNode
 from strategy_workbench.domain.factor.facade.trace import TraceSelection
-from strategy_workbench.domain.portfolio.facade.construction import (
-    PortfolioFieldValue,
-    PortfolioObservation,
-)
+from strategy_workbench.domain.portfolio.facade.construction import PortfolioTraceSelection
 from strategy_workbench.domain.strategy.facade.provenance import InlineDraft
 from strategy_workbench.domain.strategy.facade.specification import (
     ChoiceParameter,
@@ -514,6 +513,51 @@ def test_trace_scope_cancellation_stops_after_first_observation() -> None:
     assert consumed == 1
 
 
+def test_trace_scope_validates_each_requested_date_security_pair() -> None:
+    spec = _spec()
+    raw = MockEquityDataAdapter.demo().load_raw_observations(
+        RawObservationQuery(
+            market=spec.data.market.value,
+            universe_id=spec.data.universe_id,
+            start=spec.data.start,
+            end=spec.data.end,
+            field_ids=("price.close",),
+        )
+    )
+    first, second = raw.sessions[:2]
+    security_id = "sec-005930-1"
+    sparse = replace(
+        raw,
+        observations=tuple(
+            observation
+            for observation in raw.observations
+            if not (observation.as_of == first and observation.security_id == security_id)
+        ),
+    )
+    options = PortfolioPipelineOptions(
+        trace_factor_id=spec.factors.factors[0].factor_id,
+        trace_selection=TraceSelection(
+            as_of=(first,),
+            security_ids=(security_id,),
+        ),
+        construction_trace_selection=PortfolioTraceSelection(
+            as_of=second,
+            security_ids=(security_id,),
+        ),
+    )
+
+    with pytest.raises(
+        portfolio_module.InvalidPortfolioTraceSelectionError,
+        match="scope='factor'.*date_security_pairs",
+    ):
+        portfolio_module._validate_loaded_trace_scope(
+            options,
+            sparse,
+            first_signal_as_of=first,
+            checkpoint=lambda: None,
+        )
+
+
 def test_factor_output_cancellation_stops_before_target_and_projection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -600,13 +644,12 @@ def test_factor_evaluator_checkpoint_stops_before_target_tape(monkeypatch) -> No
 
 def test_raw_projection_stops_at_one_lookahead_row_and_reports_truncation() -> None:
     request = replace(_request(_spec()), include_raw=True)
-    observation = PortfolioObservation(
+    observation = RawObservation(
         as_of=request.as_of,
         security_id=request.security_ids[0],
         universe_member=True,
-        factor_values=(),
         fields=tuple(
-            PortfolioFieldValue(f"field.{index:04d}", float(index), request.as_of)
+            RawFieldValue(f"field.{index:04d}", float(index), request.as_of)
             for index in range(trace_module.MAX_RAW_ROWS + 1)
         ),
     )

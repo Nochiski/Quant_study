@@ -1207,6 +1207,7 @@ describe("FactorGraph read-only projection (P4-07)", () => {
       http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
         const body = (await request.json()) as Record<string, unknown> & {
           as_of: string;
+          node_ids: string[];
           security_ids: string[];
         };
         tracedStrategies.push(body);
@@ -1229,18 +1230,22 @@ describe("FactorGraph read-only projection (P4-07)", () => {
           raw_truncated: false,
           warnings: [],
           trace: {
-            rows: body.security_ids.map((securityId) => ({
-              node_id: "mom_252",
-              operation: "time_series.momentum",
-              as_of: body.as_of,
-              security_id: securityId,
-              value: 0.2,
-              status: "ok",
-              inputs: [{ node_id: "close", value: 10 }],
-            })),
+            rows: body.node_ids.flatMap((nodeId) =>
+              body.security_ids.map((securityId) => ({
+                node_id: nodeId,
+                operation:
+                  nodeId === "close" ? "field" : "time_series.momentum",
+                as_of: body.as_of,
+                security_id: securityId,
+                value: nodeId === "close" ? 10 : 0.2,
+                status: "ok",
+                inputs:
+                  nodeId === "close" ? [] : [{ node_id: "close", value: 10 }],
+              })),
+            ),
             offset: 0,
-            limit: body.security_ids.length,
-            returned: body.security_ids.length,
+            limit: body.security_ids.length * body.node_ids.length,
+            returned: body.security_ids.length * body.node_ids.length,
             has_more: false,
           },
           target: {
@@ -1265,6 +1270,32 @@ describe("FactorGraph read-only projection (P4-07)", () => {
               composite_score: 0.2,
               rank: index + 1,
             })),
+            construction: body.security_ids.map((securityId, index) => ({
+              as_of: body.as_of,
+              security_id: securityId,
+              factor_contributions: [
+                {
+                  factor_id: "momentum",
+                  value: 0.2,
+                  configured_weight: 1,
+                  direction: "high",
+                  weighted_value: 0.2,
+                  normalized_contribution: 0.2,
+                  status: "ok",
+                },
+              ],
+              composite_score: 0.2,
+              rank: index + 1,
+              eligible: true,
+              selected: true,
+              side: "long",
+              unconstrained_target_weight: 0.05,
+              constrained_target_weight: 0.05,
+              previous_weight: null,
+              estimated_order_delta: null,
+              constraint_effect: "unchanged",
+              exclusion_reasons: [],
+            })),
           },
         });
       }),
@@ -1284,13 +1315,13 @@ describe("FactorGraph read-only projection (P4-07)", () => {
       expect(history.location.search).toContain("security=sec-a%2C+sec-b"),
     );
 
-    expect(await screen.findAllByText("5.00%")).toHaveLength(2);
+    expect(await screen.findAllByText("5.00%")).toHaveLength(4);
     expect(tracedStrategies).toHaveLength(1);
     expect(tracedStrategies[0]).toMatchObject({
       as_of: "2026-09-03",
       security_ids: ["sec-a", "sec-b"],
       factor_id: "momentum",
-      node_ids: ["mom_252"],
+      node_ids: ["close", "mom_252"],
       strategy_source: {
         kind: "inline_draft",
         source_hash: "b".repeat(64),
@@ -1314,6 +1345,7 @@ describe("FactorGraph read-only projection (P4-07)", () => {
       http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
         const body = (await request.json()) as Record<string, unknown> & {
           as_of: string;
+          node_ids: string[];
           security_ids: string[];
         };
         tracedStrategies.push(body);
@@ -1336,18 +1368,22 @@ describe("FactorGraph read-only projection (P4-07)", () => {
           raw_truncated: false,
           warnings: [],
           trace: {
-            rows: body.security_ids.map((securityId) => ({
-              node_id: "mom_252",
-              operation: "time_series.momentum",
-              as_of: body.as_of,
-              security_id: securityId,
-              value: 0.2,
-              status: "ok",
-              inputs: [],
-            })),
+            rows: body.node_ids.flatMap((nodeId) =>
+              body.security_ids.map((securityId) => ({
+                node_id: nodeId,
+                operation:
+                  nodeId === "close" ? "field" : "time_series.momentum",
+                as_of: body.as_of,
+                security_id: securityId,
+                value: nodeId === "close" ? 10 : 0.2,
+                status: "ok",
+                inputs:
+                  nodeId === "close" ? [] : [{ node_id: "close", value: 10 }],
+              })),
+            ),
             offset: 0,
-            limit: body.security_ids.length,
-            returned: body.security_ids.length,
+            limit: body.security_ids.length * body.node_ids.length,
+            returned: body.security_ids.length * body.node_ids.length,
             has_more: false,
           },
           target: {
@@ -1365,7 +1401,39 @@ describe("FactorGraph read-only projection (P4-07)", () => {
               exclusion_reasons: [],
               target_weight: 0.05,
             })),
-            targets: [],
+            targets: body.security_ids.map((securityId) => ({
+              security_id: securityId,
+              side: "long",
+              weight: 0.05,
+              composite_score: 0.2,
+              rank: 1,
+            })),
+            construction: body.security_ids.map((securityId) => ({
+              as_of: body.as_of,
+              security_id: securityId,
+              factor_contributions: [
+                {
+                  factor_id: "momentum",
+                  value: 0.2,
+                  configured_weight: 1,
+                  direction: "high",
+                  weighted_value: 0.2,
+                  normalized_contribution: 0.2,
+                  status: "ok",
+                },
+              ],
+              composite_score: 0.2,
+              rank: 1,
+              eligible: true,
+              selected: true,
+              side: "long",
+              unconstrained_target_weight: 0.05,
+              constrained_target_weight: 0.05,
+              previous_weight: null,
+              estimated_order_delta: null,
+              constraint_effect: "unchanged",
+              exclusion_reasons: [],
+            })),
           },
         });
       }),
@@ -1386,11 +1454,11 @@ describe("FactorGraph read-only projection (P4-07)", () => {
       "mom_252",
     );
     await user.click(screen.getByRole("button", { name: "추적 실행" }));
-    expect(await screen.findByText("5.00%")).toBeInTheDocument();
+    expect(await screen.findAllByText("5.00%")).toHaveLength(2);
     expect(tracedStrategies[0]).toMatchObject({
       as_of: "2026-08-31",
       security_ids: ["sec-r"],
-      node_ids: ["mom_252"],
+      node_ids: ["close", "mom_252"],
       strategy_source: {
         kind: "saved_revision",
         strategy_id: "s1",

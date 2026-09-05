@@ -23,6 +23,7 @@ from strategy_workbench.application.portfolio_design.facade.ports import (
 )
 from strategy_workbench.domain.backtest.facade.runs import DataWarning, WarningSeverity
 from strategy_workbench.domain.equity.facade.research_data import (
+    CellKind,
     DataLoadStatus,
     DatasetFieldProfile,
     DataSnapshot,
@@ -339,7 +340,10 @@ class MockEquityDataAdapter:
             if candidate is None:
                 return None
             return RawFieldValue(
-                field_id=field_id, value=candidate.value, available_date=candidate.available_date
+                field_id=field_id,
+                value=candidate.value,
+                available_date=candidate.available_date,
+                kind=candidate.kind,
             )
         effective_index = _business_day_index(session) - lag_sessions
         return RawFieldValue(
@@ -348,6 +352,7 @@ class MockEquityDataAdapter:
                 field_id, security_index=security_index, session_index=effective_index
             ),
             available_date=session,
+            kind=CellKind.OBSERVED,
         )
 
     def _member(self, membership: Membership, security_index: int, session: date) -> bool:

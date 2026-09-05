@@ -84,6 +84,7 @@ def test_inline_trace_matches_preview_target_and_is_deterministic() -> None:
         request["security_ids"]
     )
     assert payload["raw"] and payload["raw_truncated"] is False
+    assert {row["kind"] for row in payload["raw"]} == {"observed"}
 
     factor = spec["factors"]["factors"][0]
     explained = client.post(
@@ -109,8 +110,19 @@ def test_inline_trace_matches_preview_target_and_is_deterministic() -> None:
     assert payload["target"]["candidates"] == expected_candidates
     assert payload["target"]["targets"] == expected_targets
     by_security = {item["security_id"]: item for item in expected_candidates}
+    construction = {item["security_id"]: item for item in payload["target"]["construction"]}
+    assert set(construction) == set(request["security_ids"])
     for row in payload["trace"]["rows"]:
         assert row["value"] == by_security[row["security_id"]]["composite_score"]
+    for security_id, row in construction.items():
+        candidate = by_security[security_id]
+        assert row["composite_score"] == candidate["composite_score"]
+        assert row["constrained_target_weight"] == candidate["target_weight"]
+        assert sum(
+            item["normalized_contribution"] or 0.0 for item in row["factor_contributions"]
+        ) == pytest.approx(row["composite_score"])
+        assert row["previous_weight"] is None
+        assert row["estimated_order_delta"] is None
 
 
 def test_trace_page_is_stable_and_bounded() -> None:
@@ -173,6 +185,20 @@ def test_starting_holdings_change_the_actual_target_and_unknown_holding_is_rejec
     assert {item["security_id"] for item in seeded_book.json()["target"]["targets"]} == set(
         security_ids
     )
+    empty_construction = empty_book.json()["target"]["construction"]
+    seeded_construction = seeded_book.json()["target"]["construction"]
+    assert all(item["previous_weight"] == 0.0 for item in empty_construction)
+    assert all(
+        item["estimated_order_delta"]
+        == pytest.approx(item["constrained_target_weight"] - item["previous_weight"])
+        for item in empty_construction
+    )
+    assert all(item["previous_weight"] == pytest.approx(0.1) for item in seeded_construction)
+    assert all(
+        item["estimated_order_delta"]
+        == pytest.approx(item["constrained_target_weight"] - item["previous_weight"])
+        for item in seeded_construction
+    )
 
     unknown = client.post(
         "/api/v1/strategies/debug/trace",
@@ -183,6 +209,66 @@ def test_starting_holdings_change_the_actual_target_and_unknown_holding_is_rejec
     )
     assert unknown.status_code == 422
     assert unknown.json()["detail"]["code"] == "trace.request.invalid"
+
+
+def test_trace_preserves_raw_zero_missing_collection_and_coverage_semantics() -> None:
+    client = TestClient(build_http_app())
+    spec = client.get("/api/v1/strategies/template").json()
+    spec["data"].update({"start": "2024-01-03", "end": "2024-01-09"})
+    spec["portfolio"].update({"rebalance": "every_n_sessions", "rebalance_every_n_sessions": 1})
+    factor = spec["factors"]["factors"][0]
+    factor["graph"] = {
+        "nodes": [
+            {
+                "node_id": "foreign-flow",
+                "field_id": "flow.foreign_net_buy",
+                "kind": "field",
+            }
+        ],
+        "output_node_id": "foreign-flow",
+        "missing_policy": "drop",
+    }
+    base = {
+        "strategy_source": {"kind": "inline_draft", "spec": spec},
+        "factor_id": factor["factor_id"],
+        "node_ids": ["foreign-flow"],
+        "include_raw": True,
+    }
+    scopes = (
+        ("2024-01-03", ["sec-005930-1", "sec-000660-1"]),
+        ("2024-01-04", ["sec-005930-1", "sec-000660-1"]),
+        ("2024-01-08", ["sec-035420-1"]),
+    )
+    raw_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    for as_of, security_ids in scopes:
+        response = client.post(
+            "/api/v1/strategies/debug/trace",
+            json={**base, "as_of": as_of, "security_ids": security_ids},
+        )
+        assert response.status_code == 200, response.text
+        for row in response.json()["raw"]:
+            raw_by_key[(row["as_of"], row["security_id"])] = row
+
+    assert (
+        raw_by_key[("2024-01-03", "sec-005930-1")]["value"],
+        raw_by_key[("2024-01-03", "sec-005930-1")]["kind"],
+    ) == (0.0, "observed")
+    assert (
+        raw_by_key[("2024-01-03", "sec-000660-1")]["value"],
+        raw_by_key[("2024-01-03", "sec-000660-1")]["kind"],
+    ) == (None, "missing")
+    assert (
+        raw_by_key[("2024-01-04", "sec-005930-1")]["value"],
+        raw_by_key[("2024-01-04", "sec-005930-1")]["kind"],
+    ) == (0.0, "source_omitted_zero")
+    assert (
+        raw_by_key[("2024-01-04", "sec-000660-1")]["value"],
+        raw_by_key[("2024-01-04", "sec-000660-1")]["kind"],
+    ) == (None, "not_collected")
+    assert (
+        raw_by_key[("2024-01-08", "sec-035420-1")]["value"],
+        raw_by_key[("2024-01-08", "sec-035420-1")]["kind"],
+    ) == (None, "coverage_gap")
 
 
 def test_saved_revision_trace_is_hash_guarded_and_errors_are_structured() -> None:

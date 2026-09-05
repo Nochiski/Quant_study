@@ -43,12 +43,13 @@ export type StrategyTraceSelection = {
   security: string;
   factorId: string;
   nodeId: string;
+  startingHoldings?: string;
 };
 
 export type PreparedStrategyTrace =
   | {
       kind: "blocked";
-      reason: "document" | "date" | "security" | "factor" | "node";
+      reason: "document" | "date" | "security" | "factor" | "node" | "holdings";
     }
   | {
       kind: "ready";
@@ -82,6 +83,39 @@ export const parseSecurityIds = (value: string): string[] => {
   return [...unique];
 };
 
+export type ParsedStartingHoldings =
+  | { kind: "source" }
+  | {
+      kind: "explicit";
+      holdings: NonNullable<StrategyTraceRequest["starting_holdings"]>;
+    }
+  | { kind: "invalid" };
+
+/** Blank preserves the adapter book; `flat`/`[]` explicitly declares an empty opening book. */
+export const parseStartingHoldings = (
+  value: string | undefined,
+): ParsedStartingHoldings => {
+  const source = value?.trim() ?? "";
+  if (source === "") return { kind: "source" };
+  if (source.toLowerCase() === "flat" || source === "[]")
+    return { kind: "explicit", holdings: [] };
+  const holdings: NonNullable<StrategyTraceRequest["starting_holdings"]> = [];
+  const seen = new Set<string>();
+  for (const entry of source.split(/[\s,]+/u)) {
+    const match =
+      /^([^=]+)=([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)$/iu.exec(entry);
+    if (match === null) return { kind: "invalid" };
+    const securityId = match[1]?.trim() ?? "";
+    const weight = Number(match[2]);
+    if (securityId === "" || seen.has(securityId) || !Number.isFinite(weight))
+      return { kind: "invalid" };
+    seen.add(securityId);
+    holdings.push({ security_id: securityId, weight });
+  }
+  if (holdings.length > 100) return { kind: "invalid" };
+  return { kind: "explicit", holdings };
+};
+
 export const prepareStrategyTrace = (
   context: StrategyDebuggerContext | null,
   selection: StrategyTraceSelection,
@@ -97,17 +131,25 @@ export const prepareStrategyTrace = (
   if (factor === undefined) return { kind: "blocked", reason: "factor" };
   if (!factor.nodes.some((node) => node.nodeId === selection.nodeId))
     return { kind: "blocked", reason: "node" };
+  const startingHoldings = parseStartingHoldings(selection.startingHoldings);
+  if (startingHoldings.kind === "invalid")
+    return { kind: "blocked", reason: "holdings" };
+
+  const nodeIds = factor.nodes.map((node) => node.nodeId);
 
   const request: StrategyTraceRequest = {
     strategy_source: context.strategySource,
     as_of: selection.asOf,
     security_ids: securityIds,
     factor_id: factor.factorId,
-    node_ids: [selection.nodeId],
-    include_raw: false,
+    node_ids: nodeIds,
+    include_raw: true,
     offset: 0,
-    // One selected node produces at most one row per requested security.
-    limit: securityIds.length,
+    // The server may truncate a very large graph/scope, but the request itself stays bounded.
+    limit: Math.min(nodeIds.length * securityIds.length, 500),
+    ...(startingHoldings.kind === "explicit"
+      ? { starting_holdings: startingHoldings.holdings }
+      : {}),
   };
   const sourceOwner =
     request.strategy_source.kind === "saved_revision"
@@ -135,6 +177,10 @@ export const prepareStrategyTrace = (
       request.security_ids,
       request.factor_id,
       request.node_ids,
+      request.include_raw,
+      request.starting_holdings ?? null,
+      request.offset,
+      request.limit,
     ]),
     request,
     expected: {
@@ -167,6 +213,78 @@ const sameSourceProvenance = (
   );
 };
 
+const indexUniqueBySecurity = <Row extends { security_id: string }>(
+  rows: Row[],
+): Map<string, Row> | null => {
+  const indexed = new Map<string, Row>();
+  for (const row of rows) {
+    if (indexed.has(row.security_id)) return null;
+    indexed.set(row.security_id, row);
+  }
+  return indexed;
+};
+
+const sameExclusionReasons = (left: string[], right: string[]): boolean =>
+  left.length === right.length &&
+  left.every((reason, index) => reason === right[index]);
+
+const targetProjectionMatches = (
+  target: NonNullable<StrategyTraceResponse["target"]>,
+  requestedSecurities: Set<string>,
+  expectsOrderDelta: boolean,
+): boolean => {
+  const candidates = indexUniqueBySecurity(target.candidates);
+  const construction = indexUniqueBySecurity(target.construction);
+  const targets = indexUniqueBySecurity(target.targets);
+  if (candidates === null || construction === null || targets === null)
+    return false;
+  if (
+    candidates.size !== requestedSecurities.size ||
+    construction.size !== requestedSecurities.size
+  )
+    return false;
+
+  for (const securityId of requestedSecurities) {
+    const candidate = candidates.get(securityId);
+    const audit = construction.get(securityId);
+    if (
+      candidate === undefined ||
+      audit === undefined ||
+      candidate.as_of !== target.signal_as_of ||
+      audit.as_of !== target.signal_as_of ||
+      candidate.composite_score !== audit.composite_score ||
+      candidate.rank !== audit.rank ||
+      candidate.eligible !== audit.eligible ||
+      candidate.selected !== audit.selected ||
+      candidate.side !== audit.side ||
+      candidate.target_weight !== audit.constrained_target_weight ||
+      !sameExclusionReasons(
+        candidate.exclusion_reasons,
+        audit.exclusion_reasons,
+      ) ||
+      (expectsOrderDelta
+        ? audit.previous_weight === null || audit.estimated_order_delta === null
+        : audit.previous_weight !== null ||
+          audit.estimated_order_delta !== null)
+    )
+      return false;
+
+    const targetPosition = targets.get(securityId);
+    const shouldHaveTarget =
+      audit.selected && audit.constrained_target_weight !== 0;
+    if (shouldHaveTarget !== (targetPosition !== undefined)) return false;
+    if (
+      targetPosition !== undefined &&
+      (targetPosition.weight !== audit.constrained_target_weight ||
+        targetPosition.composite_score !== audit.composite_score ||
+        targetPosition.rank !== audit.rank ||
+        targetPosition.side !== audit.side)
+    )
+      return false;
+  }
+  return targets.size <= requestedSecurities.size;
+};
+
 /** Fail closed before a response can replace the current debugger projection. */
 export const responseMatchesStrategyTrace = (
   prepared: Extract<PreparedStrategyTrace, { kind: "ready" }>,
@@ -175,6 +293,7 @@ export const responseMatchesStrategyTrace = (
   const request = prepared.request;
   const requestedSecurities = new Set(request.security_ids);
   const requestedNodes = new Set(request.node_ids ?? []);
+  const expectsOrderDelta = request.starting_holdings != null;
   return (
     response.spec_hash === prepared.expected.specHash &&
     response.provenance.spec_hash === prepared.expected.specHash &&
@@ -193,15 +312,16 @@ export const responseMatchesStrategyTrace = (
         requestedSecurities.has(row.security_id) &&
         requestedNodes.has(row.node_id),
     ) &&
+    response.raw.every(
+      (row) =>
+        row.as_of === request.as_of && requestedSecurities.has(row.security_id),
+    ) &&
     (response.target === null ||
       (response.target.signal_as_of === request.as_of &&
-        response.target.candidates.every(
-          (row) =>
-            requestedSecurities.has(row.security_id) &&
-            row.as_of === request.as_of,
-        ) &&
-        response.target.targets.every((row) =>
-          requestedSecurities.has(row.security_id),
+        targetProjectionMatches(
+          response.target,
+          requestedSecurities,
+          expectsOrderDelta,
         )))
   );
 };

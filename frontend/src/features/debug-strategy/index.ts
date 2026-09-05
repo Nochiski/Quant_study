@@ -1,6 +1,11 @@
 export {
+  projectLinkedTraceRows,
+  type LinkedTraceRow,
+} from "./model/linked-trace";
+export {
   parseSecurityIds,
   prepareStrategyTrace,
+  parseStartingHoldings,
   responseMatchesStrategyTrace,
   type PreparedStrategyTrace,
   type StrategyDebuggerContext,

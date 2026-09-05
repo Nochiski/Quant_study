@@ -55,11 +55,13 @@ from strategy_workbench.domain.factor.facade.validation import (
 )
 from strategy_workbench.domain.portfolio.facade.construction import (
     NonFinitePortfolioCalculationError,
+    PortfolioConstructionTrace,
     PortfolioFactorValue,
     PortfolioFieldValue,
     PortfolioObservation,
     compile_rebalance_schedule,
     compile_target_tape,
+    compile_target_tape_with_trace,
 )
 from strategy_workbench.domain.strategy.facade.specification import StrategySpec
 from strategy_workbench.domain.strategy.facade.validation import (
@@ -172,7 +174,9 @@ class FactorEvaluationRecord:
 class PortfolioPipelineResult:
     data_snapshot_id: str
     factor_evaluations: tuple[FactorEvaluationRecord, ...]
+    raw_observations: tuple[RawObservation, ...]
     observations: tuple[PortfolioObservation, ...]
+    construction_trace: PortfolioConstructionTrace | None
     preview: PortfolioPreview
 
 
@@ -214,7 +218,11 @@ class PortfolioDesignService:
         engine = self._engine_portfolio.assess(spec)
         if pipeline_options.require_engine_compatible and not engine.compatible:
             raise IncompatiblePortfolioRequestError(engine)
-        if pipeline_options.trace_selection is not None and not isinstance(
+        trace_requested = (
+            pipeline_options.trace_selection is not None
+            or pipeline_options.construction_trace_selection is not None
+        )
+        if trace_requested and not isinstance(
             self._observation_source, CancellableRawObservationPort
         ):
             raise TraceObservationCapabilityError(type(self._observation_source).__name__)
@@ -336,14 +344,28 @@ class PortfolioDesignService:
         )
         checkpoint()
         try:
-            tape = compile_target_tape(
-                spec,
-                data_snapshot_id=raw.data_snapshot_id,
-                sessions=raw.sessions,
-                observations=observations,
-                schedule=schedule,
-                checkpoint=checkpoint,
-            )
+            if pipeline_options.construction_trace_selection is None:
+                tape = compile_target_tape(
+                    spec,
+                    data_snapshot_id=raw.data_snapshot_id,
+                    sessions=raw.sessions,
+                    observations=observations,
+                    schedule=schedule,
+                    checkpoint=checkpoint,
+                )
+                construction_trace = None
+            else:
+                compiled = compile_target_tape_with_trace(
+                    spec,
+                    data_snapshot_id=raw.data_snapshot_id,
+                    sessions=raw.sessions,
+                    observations=observations,
+                    schedule=schedule,
+                    trace_selection=pipeline_options.construction_trace_selection,
+                    checkpoint=checkpoint,
+                )
+                tape = compiled.tape
+                construction_trace = compiled.trace
         except NonFinitePortfolioCalculationError as error:
             issue = semantic_issue(
                 "strategy.expression.calculation_non_finite",
@@ -361,7 +383,9 @@ class PortfolioDesignService:
         return PortfolioPipelineResult(
             data_snapshot_id=raw.data_snapshot_id,
             factor_evaluations=evaluation_records,
+            raw_observations=raw.observations,
             observations=observations,
+            construction_trace=construction_trace,
             preview=preview,
         )
 
@@ -457,27 +481,60 @@ def _validate_loaded_trace_scope(
     with an unknown identifier. Absence of the row is an invalid scope, not a successful missing
     value: missing fields on a present row remain represented by the trace value status.
     """
-    selection = options.trace_selection
-    if selection is None:
+    factor_selection = options.trace_selection
+    construction_selection = options.construction_trace_selection
+    if factor_selection is None and construction_selection is None:
         return
-    selected_dates = set(_checkpointed(selection.as_of or (), checkpoint))
+    scopes = []
+    if factor_selection is not None:
+        scopes.append(
+            (
+                "factor",
+                tuple(_checkpointed(factor_selection.as_of or (), checkpoint)),
+                tuple(_checkpointed(factor_selection.security_ids or (), checkpoint)),
+            )
+        )
+    if construction_selection is not None:
+        scopes.append(
+            (
+                "construction",
+                (construction_selection.as_of,),
+                tuple(_checkpointed(construction_selection.security_ids, checkpoint)),
+            )
+        )
+    selected_dates = {selected_date for _, dates, _ in scopes for selected_date in dates}
     missing_sessions = selected_dates - set(_checkpointed(raw.sessions, checkpoint))
     if missing_sessions:
         raise InvalidPortfolioTraceSelectionError(
             "trace as_of dates are not trading sessions in the selected snapshot — "
             f"as_of={sorted(missing_sessions)!r} snapshot={raw.data_snapshot_id!r}"
         )
-    if selected_dates and selection.security_ids:
-        observed_ids = {
-            item.security_id
-            for item in _checkpointed(raw.observations, checkpoint)
-            if item.as_of in selected_dates
+
+    if any(security_ids for _, _, security_ids in scopes):
+        observed_pairs = {
+            (item.as_of, item.security_id) for item in _checkpointed(raw.observations, checkpoint)
         }
-        unmatched = set(selection.security_ids) - observed_ids
-        if unmatched:
+        observed_ids = {security_id for _, security_id in observed_pairs}
+        for scope_name, dates, security_ids in scopes:
+            if not security_ids:
+                continue
+            missing_pairs = (
+                {
+                    (selected_date, security_id)
+                    for selected_date in dates
+                    for security_id in security_ids
+                }
+                - observed_pairs
+                if dates
+                else set()
+            )
+            unmatched = set(security_ids) - observed_ids if not dates else set()
+            if not missing_pairs and not unmatched:
+                continue
             raise InvalidPortfolioTraceSelectionError(
                 "trace security ids have no observation rows at the selected as_of — "
-                f"security_ids={sorted(unmatched)!r} as_of={sorted(selected_dates)!r} "
+                f"scope={scope_name!r} security_ids={sorted(unmatched)!r} "
+                f"date_security_pairs={sorted(missing_pairs)!r} "
                 f"snapshot={raw.data_snapshot_id!r}"
             )
     if options.starting_holdings:

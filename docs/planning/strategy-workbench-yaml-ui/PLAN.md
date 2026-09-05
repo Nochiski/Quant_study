@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: IN_REVIEW
+project_status: CHANGES_REQUESTED
 current_phase: P6
 current_pr: P6-08,P6-09,P6-03,P6-04,P6-05
 active_prs: [P6-03, P6-04, P6-05, P6-08, P6-09]
 parallel_window: [P6-08, P6-09, P6-03, P6-04, P6-05]
-last_updated: 2026-09-06T05:38:41+09:00
+last_updated: 2026-09-06T05:52:19+09:00
 planned_prs: 52
 merged_prs: 46
 approved_prs: 50
@@ -22,13 +22,13 @@ progress_percent: 88
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_REVIEW` |
+| Project status | `CHANGES_REQUESTED` |
 | Current phase | `P6` |
 | Current/next PR | `P6-08,P6-09,P6-03,P6-04,P6-05` |
 | Active PR | `P6-03, P6-04, P6-05, P6-08, P6-09` |
 | Progress | `46 / 52 merged (88%)` |
 | Approved | `50 / 52` |
-| Aggregated at | `2026-09-06 05:38 KST` |
+| Aggregated at | `2026-09-06 05:52 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -78,7 +78,7 @@ progress_percent: 88
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
 | P4 | Outline, Contract, Projections | 10 | 10 | `MERGED` |
 | P5 | Truthful Trace UI | 3 | 3 | `MERGED` |
-| P6 | Professional release and migration | 9 | 3 | `IN_REVIEW` |
+| P6 | Professional release and migration | 9 | 3 | `CHANGES_REQUESTED` |
 | **Total** |  | **52** | **46** | **88%** |
 <!-- PLAN:PHASES:END -->
 
@@ -235,7 +235,7 @@ Phase exit:
 | [x] | `P6-02` | Server draft persistence/CAS/recovery UI | P6-01, P3-06, P4-08 | `MERGED` | [#72](https://github.com/Nochiski/Quant_study/pull/72) · `review_p6_02` APPROVE |
 | [ ] | `P6-03` | Keyboard workflow와 Command Palette | P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `APPROVED` | [#76](https://github.com/Nochiski/Quant_study/pull/76) · `review_p6_03` APPROVE, P0/P1/P2 0 · CI billing 차단 |
 | [ ] | `P6-04` | Large/hostile spec 성능·접근성·i18n과 soft dark theme (`$ref`-only cycle fail-closed 포함) | P3-05, P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `APPROVED` | [#77](https://github.com/Nochiski/Quant_study/pull/77) · `review_p6_04` APPROVE, P0/P1/P2 0 · CI billing 차단 |
-| [ ] | `P6-05` | Playwright/visual regression infrastructure와 CI | P2-03, P3-05, P6-04 | `IN_REVIEW` | [#78](https://github.com/Nochiski/Quant_study/pull/78) · `review_p6_05` P1 2/P2 2 수정 `82953d5`, 동일 reviewer 재검토 중; CI billing 차단 |
+| [ ] | `P6-05` | Playwright/visual regression infrastructure와 CI | P2-03, P3-05, P6-04 | `CHANGES_REQUESTED` | [#78](https://github.com/Nochiski/Quant_study/pull/78) · `review_p6_05` 2차 P1 1: CodeMirror computed font·실 face 검증; CI billing 차단 |
 | [ ] | `P6-06` | 전체 browser E2E·실구동 시나리오 검증, migration gate, 조건부 legacy cleanup | P6-01, P6-02, P6-03, P6-04, P6-05, P6-08, P6-09 | `WAITING` | — |
 | [x] | `P6-07` | Root frontend/backend development entrypoints | P0-02, P0-03 | `MERGED` | [#56](https://github.com/Nochiski/Quant_study/pull/56) · `review_p6_07` APPROVE |
 | [ ] | `P6-08` | Strategy list와 revision history routed UI | P6-01, P6-02, P3-06, P4-08 | `APPROVED` | [#74](https://github.com/Nochiski/Quant_study/pull/74) · `review_p6_08` APPROVE, P0/P1/P2 0; CI billing 차단 |
@@ -256,7 +256,7 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
-| P6-05 | `review_p6_05` | `c6182e9` | `3295f6e` | IN_REVIEW (최초 P1 2/P2 2 수정 후 동일 reviewer) | 2 (폐쇄 검증 중) | Windows 2025 strict CI는 billing 해제 후 green 필수; exact webfont·runner generation·unique runtime cleanup·late final status·Node 22 contract 재검토 | 2026-09-06 |
+| P6-05 | `review_p6_05` | `c6182e9` | `5d91bf8` | REQUEST_CHANGES (최초 P1 2/P2 2 폐쇄, 2차 visual P1 1) | 1 | CodeMirror 기본 CSS가 mono token을 덮고 `fonts.check()`가 missing face도 통과; computed family·loaded face·woff 200과 PNG 재생성 필요. Windows 2025 CI는 billing 해제 후 green 필수 | 2026-09-06 |
 | P6-04 | `review_p6_04` | `e84bd7e` | `7b532a9` | APPROVE (최초 P1 2/P2 1과 2차 P1 1/P2 1을 동일 reviewer가 폐쇄; 최종 P0/P1/P2 0) | 0 | 실제 Safari/browser IME·viewport와 committed visual baseline은 P6-05~06, transitive editor chunk 합산, CI billing은 외부 merge blocker | 2026-09-06 |
 | P6-03 | `review_p6_03` | `db076ea` | `76023db` | APPROVE (최초 P1 3/P2 4와 2차 신규 P1 1을 동일 reviewer가 hostile 재현·폐쇄; 최종 P0/P1/P2 0) | 4 (해소) | 실제 Safari IME·browser viewport/focus는 P6-05~06, entry chunk 500 kB 경고와 500-node 입력 성능은 P6-04 범위; merge 전 green CI 필수 | 2026-09-06 |
 | P6-09 | `review_p6_09` | `f760a5b` | `74ebae0` | APPROVE (최초 P2 canonical pagination 1건을 동일 reviewer가 세 endpoint hostile matrix로 폐쇄; 최종 P0/P1/P2 0) | 0 | process restart/multi-worker history 공유, client-asserted inline `source_hash`, 실제 browser E2E는 P6-06 범위 | 2026-09-06 |
@@ -308,7 +308,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
-| P6-05 | actual FastAPI+production preview Playwright fix run 24/24(update·strict·clean strict); network-idle 후 lazy 1회·required response 전체 200·failed request 0; exact webfont 로드 | clean npm ci 400/취약점 0; frontend Vitest 474·main/E2E typecheck·lint·build(editor 131.94KiB); root 6; reviewer backend 1,118·Rust 13; PLAN/diff-check | OpenAPI/SDK 기존 diff 0; backend wire/domain 미변경 | unique temp runtime은 성공·의도적 실패 후 artifact/listener 0; bundled-font PNG 4개를 직접 열어 1440/1920 light/dark 확인 | [#78](https://github.com/Nochiski/Quant_study/pull/78) Windows 2025·Node 22.18 고정; Actions 6 jobs step 0 billing/spending-limit, green gate 유지 | 2026-09-06 |
+| P6-05 | actual FastAPI+production preview Playwright fix run 24/24(update·strict·clean strict); network-idle 후 lazy 1회·required response 전체 200·failed request 0; exact webfont 로드 | clean npm ci 400/취약점 0; frontend Vitest 474·main/E2E typecheck·lint·build(editor 131.94KiB); root 6; reviewer backend 1,118·Rust 13; PLAN/diff-check | OpenAPI/SDK 기존 diff 0; backend wire/domain 미변경 | unique temp runtime 성공·timeout 실패·Ctrl+C·반복 실행 후 artifact/listener/process 0과 Node/lifecycle P1/P2는 폐쇄. reviewer production probe에서 `.cm-content` computed font가 host `monospace`, `fonts.check()` missing-face false positive를 재현해 visual P1 수정 중 | [#78](https://github.com/Nochiski/Quant_study/pull/78) Windows 2025·Node 22.18 고정; Actions 6 jobs step 0 billing/spending-limit, green gate 유지 | 2026-09-06 |
 | P6-04 | author 9 files 117, reviewer 500-node 10/10; fix trace/virtual 21 + reversed mixed-status PLAN fixture 1; 500-node·3,000-line real CodeMirror p95 <16 ms/folding/search; hostile recursive/missing/external `$ref` fail-closed | frontend 474·typecheck·lint·changed-file Prettier·build; backend 1,118·Rust 13·root 6; Ruff·Pyright·cargo fmt/clippy·diff-check | OpenAPI/SDK 재생성 후 semantic diff 0 | root `npm run dev`·`uv run server` 5173/8000 health 200; Chrome 1440×900·1920×1080 light/dark; 실제 Tab이 virtual table/security/node에 진입해 Home/End off-DOM server row와 sentinel을 표시하고 nested outer scroll을 보존 | [#77](https://github.com/Nochiski/Quant_study/pull/77) `review_p6_04` APPROVE P0/P1/P2 0; Actions 4 jobs 모두 step 0 billing/spending-limit 실패, green gate 유지 | 2026-09-06 |
 | P6-03 | final reviewer palette/IDE 2 files 30; 이전 review-fix 4 files 97 + professional route matrix 11 passed | frontend 455·backend 1,118·Rust 13·root 5; typecheck·lint·changed-file Prettier·build·Ruff·Pyright·cargo fmt/clippy | OpenAPI/SDK 재생성 후 tracked content diff 0 | 실제 root backend 42813 health 200·Vite 42814 direct new route 200; current identity/IME/action gate와 함께 narrow drawer 위 palette close-button Escape가 modal 경계에서 소비되고 drawer/focus가 보존됨을 독립 재검증 | [#76](https://github.com/Nochiski/Quant_study/pull/76) `review_p6_03` APPROVE P0/P1/P2 0; Actions billing으로 step 전 실패, green gate 유지 | 2026-09-06 |
 | P6-09 | author backend history/reference/status 13·frontend router+document route 64; reviewer backend 20 + hostile probes | backend 1,118·frontend 427·Rust 13·root 5; Ruff·Pyright·typecheck·lint·changed-file Prettier·build·cargo fmt/clippy | OpenAPI/SDK 재생성 전후 diff hash `0d80043b706914d479227815fc732c5754340202` 동일; reviewer runtime/tracked 214 schemas 일치 | saved/inline provenance, exact strategy filter, 26개 page/out-of-range 복구, nonterminal→terminal polling stop, late cache 폐기와 세 endpoint noncanonical integer 422·MAX bounds를 검증; 실제 browser는 P6-06 범위 | [#75](https://github.com/Nochiski/Quant_study/pull/75) `review_p6_09` APPROVE P0/P1/P2 0; Actions billing으로 step 전 실패 | 2026-09-06 |
@@ -357,6 +357,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-06 KST | Codex | 동일 reviewer `review_p6_05`의 2차 검토에서 최초 P1 2/P2 2의 runtime directory cleanup, unmanaged invocation, network-idle 이후 final response, Node 22 parity는 모두 폐쇄됐으나 visual P1 1건으로 REQUEST_CHANGES했다. production probe에서 body는 bundled sans를 쓰지만 CodeMirror `.cm-content`는 자체 `monospace` 규칙이 token 상속을 덮고, `document.fonts.check()`는 missing family도 true라 현재 assertion이 fallback을 놓친다. editor/scroller에 mono token을 직접 적용하고 computed family·`fonts.load()` face·woff2 200을 검증한 네 baseline을 재생성한 뒤 같은 reviewer에게 재검토받는다 | strict pixel input의 실제 computed style SoT·false-positive 차단·same-reviewer loop |
 | 2026-09-06 KST | Codex | P6-05 fix `82953d5`와 self-check `3295f6e`를 push하고 #78 전체 diff·finding 폐쇄·검증 증거를 동기화한다. 최초 fresh reviewer `review_p6_05` 한 명에게 exact webfont/Windows generation의 pixel input, unique temp runtime의 성공·실패 cleanup, network-idle 후 final status, Node 22 parity와 최신 전체 diff의 신규 회귀를 재검토받도록 IN_REVIEW로 전환한다 | 13.3 latest diff freeze·13.4 same-reviewer finding loop·reviewer 중복 생성 금지 |
 | 2026-09-06 KST | Codex | P6-05 review fix `82953d5`: exact Noto Sans KR/JetBrains Mono webfont와 `windows-2025`로 visual input을 고정하고 4 PNG를 재생성했다. Node type을 CI runtime 22.18.0으로 맞추고, atomic unique temp directory를 생성하는 runner가 Playwright 성공·실패 후 SQLite/WAL/SHM을 포함한 directory를 안전 검증 후 삭제하며 unmanaged 직접 실행을 거부한다. network-idle 후 lazy chunk exact 1·required API 모든 status 200·failed request 0을 최종 단언한다. update/strict/clean strict 24, Vitest 474, typecheck 2종·lint·build·root 6을 통과하고 성공·의도적 실패 모두 artifact/listener 0을 확인해 SELF_CHECK로 전환한다 | 최초 reviewer P1 2/P2 2 폐쇄·visual input SoT·DB lifetime owner·late false-positive 차단·runtime/type parity |
 | 2026-09-06 KST | Codex | P6-05 [#78](https://github.com/Nochiski/Quant_study/pull/78)을 parent `feat/p6-04-hardening` 대상으로 열고 base `c6182e9`, author freeze `adf0cd6`, review diff 14 files +317/-22와 exact dependency/실서버/4 PNG/runner boundary/CI scope를 본문에 고정한다. fresh review-only agent `review_p6_05` 한 명에게 Playwright server lifecycle·isolation·worker/lazy/resource assertions, Windows strict baseline portability, Vitest 분리, Actions failure artifact, SoT/FSD 책임분리와 최신 전체 diff를 독립 검토받도록 IN_REVIEW로 전환한다. Actions 6 jobs는 모두 step 0에서 billing/spending-limit annotation으로 실패해 merge gate를 우회하지 않는다 | 13.3 actual diff freeze·13.4 PR별 fresh reviewer 정확히 1명·stack 순차 merge gate·CI 비우회 |

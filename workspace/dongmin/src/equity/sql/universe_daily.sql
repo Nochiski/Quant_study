@@ -89,6 +89,8 @@ ca_win AS (
     JOIN cal ca ON ca.date = a.apply_date
     JOIN cal c  ON c.td_seq BETWEEN ca.td_seq - k.corp_action_lookahead_sessions
                                AND ca.td_seq + k.corp_action_lookback_sessions
+    -- 가격만 바뀐 기준가 사건(배당락·권리락, S06-2 unknown_price_only)은 거래정지를 동반하지 않는다 → 창 밖
+    WHERE a.event_type <> 'unknown_price_only'
 ),
 sig_raw AS (
     SELECT ticker, rcept_dt,

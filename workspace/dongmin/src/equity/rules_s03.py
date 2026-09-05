@@ -311,7 +311,8 @@ def _reason_checks(ctx: EquityGateContext, k: int, lb: int, la: int,
           SELECT DISTINCT a.ticker, c.td_seq
           FROM adj_factor a
           JOIN cal ap ON ap.date = a.apply_date
-          JOIN cal c  ON c.td_seq BETWEEN ap.td_seq - {la} AND ap.td_seq + {lb}),
+          JOIN cal c  ON c.td_seq BETWEEN ap.td_seq - {la} AND ap.td_seq + {lb}
+          WHERE a.event_type <> 'unknown_price_only'),
         g AS (
           SELECT u.date, u.ticker, u.status, u.halt_state, u.liquidation_window, u.admin_state,
                  u.signal_admin, u.no_trade_run, u.no_trade_reason,
@@ -356,7 +357,7 @@ def _reason_checks(ctx: EquityGateContext, k: int, lb: int, la: int,
     n_apply, n_apply_not_ok, n_apply_off_cal = _row(ctx, """
         SELECT count(*), count(*) FILTER (WHERE NOT factor_ok),
                count(*) FILTER (WHERE apply_date NOT IN (SELECT date FROM trading_calendar))
-        FROM adj_factor""")
+        FROM adj_factor WHERE event_type <> 'unknown_price_only'""")
     checks = {
         "n_no_trade_reason_outside_vocab": _outside_vocab(ctx, "no_trade_reason",
                                                           NO_TRADE_REASON_VOCAB),

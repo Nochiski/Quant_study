@@ -174,7 +174,7 @@
   display: grid;
   place-items: start center;
   padding: min(14vh, 120px) var(--space-4) var(--space-4);
-  background: rgb(28 36 48 / 32%);
+  background: var(--overlay-scrim);
 }
 
 .ui-command-palette {

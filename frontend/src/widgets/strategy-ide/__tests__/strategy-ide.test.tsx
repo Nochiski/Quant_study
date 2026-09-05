@@ -4,9 +4,11 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThemePreferenceProvider } from "../../../shared/lib/theme";
@@ -74,6 +76,25 @@ const mount = (props: Partial<Parameters<typeof StrategyIde>[0]> = {}) => {
         {...rest}
       />
     </ThemePreferenceProvider>,
+  );
+};
+
+const StatefulViewIde = () => {
+  const [view, setView] =
+    useState<NonNullable<Parameters<typeof StrategyIde>[0]["view"]>>("yaml");
+  return (
+    <ThemePreferenceProvider>
+      <StrategyIde
+        title="새 전략"
+        versionLabel="초안"
+        editor={<textarea aria-label="source" />}
+        sourceView="yaml"
+        projections={{ json: <div>JSON projection</div> }}
+        view={view}
+        onViewChange={setView}
+        availableViews={["yaml", "json"]}
+      />
+    </ThemePreferenceProvider>
   );
 };
 
@@ -394,6 +415,65 @@ describe("StrategyIde", () => {
     await user.keyboard("{Enter}");
     expect(document.documentElement).toHaveAttribute("data-theme", "dark");
     expect(localStorage.getItem("quant-workbench.theme.v1")).toContain("dark");
+  });
+
+  it("ignores repeated palette shortcuts and resets every closed session", async () => {
+    matchMedia(false);
+    const user = userEvent.setup();
+    mount();
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    const search = screen.getByRole("combobox");
+    await user.type(search, "닫기 계약");
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true, repeat: true });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    expect(screen.getByRole("combobox")).toHaveValue("");
+  });
+
+  it("moves focus to view tabs for palette and Alt navigation", async () => {
+    matchMedia(false);
+    const user = userEvent.setup();
+    render(<StatefulViewIde />);
+    const source = screen.getByRole("textbox", { name: "source" });
+    source.focus();
+
+    fireEvent.keyDown(window, { key: "2", altKey: true });
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: "JSON" })).toHaveFocus(),
+    );
+
+    await user.click(screen.getByRole("tab", { name: "YAML" }));
+    source.focus();
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    await user.type(screen.getByRole("combobox"), "표현 열기 JSON");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: "JSON" })).toHaveFocus(),
+    );
+    expect(source.closest('[role="tabpanel"]')).toHaveAttribute("hidden");
+  });
+
+  it("moves focus from a hidden panel command to its restore toggle", async () => {
+    matchMedia(false);
+    const user = userEvent.setup();
+    mount();
+    const collapse = screen.getByRole("button", { name: "계약 접기" });
+    collapse.focus();
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    await user.type(screen.getByRole("combobox"), "닫기 계약");
+    await user.keyboard("{Enter}");
+
+    const restore = screen.getByRole("button", {
+      name: "계약",
+      expanded: false,
+    });
+    await waitFor(() => expect(restore).toHaveFocus());
   });
 
   it("persists bounded panel sizes and rejects hostile stored layouts", async () => {

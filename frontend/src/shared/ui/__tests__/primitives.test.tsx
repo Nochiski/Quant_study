@@ -301,6 +301,11 @@ describe("CommandPalette", () => {
     await user.type(search, "name cap");
     expect(screen.getAllByRole("option")).toHaveLength(1);
     fireEvent.keyDown(search, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(search, {
+      key: "Enter",
+      isComposing: false,
+      keyCode: 229,
+    });
     expect(execute).not.toHaveBeenCalled();
     await user.keyboard("{Enter}");
 
@@ -326,11 +331,63 @@ describe("CommandPalette", () => {
     const reopenedSearch = screen.getByRole("combobox", {
       name: "Search commands",
     });
+    expect(reopenedSearch).toHaveValue("");
     await user.keyboard("{Shift>}{Tab}{/Shift}");
     expect(screen.getByRole("button", { name: "Close" })).toHaveFocus();
     await user.keyboard("{Tab}");
     expect(reopenedSearch).toHaveFocus();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("keeps a long list's active descendant in view", () => {
+    const previous = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollIntoView",
+    );
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    try {
+      render(
+        <CommandPalette
+          open
+          label="Command palette"
+          searchLabel="Search commands"
+          searchPlaceholder="Path or command"
+          emptyLabel="No commands"
+          closeLabel="Close"
+          onClose={vi.fn()}
+          commands={Array.from({ length: 40 }, (_, index) => ({
+            id: `command-${index}`,
+            group: "Action",
+            label: `Command ${index}`,
+            execute: vi.fn(),
+          }))}
+        />,
+      );
+      const search = screen.getByRole("combobox", { name: "Search commands" });
+      scrollIntoView.mockClear();
+
+      fireEvent.keyDown(search, { key: "End" });
+
+      expect(
+        screen.getByRole("option", { name: /Command 39/ }),
+      ).toHaveAttribute("aria-selected", "true");
+      expect(scrollIntoView).toHaveBeenLastCalledWith({ block: "nearest" });
+    } finally {
+      if (previous) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "scrollIntoView",
+          previous,
+        );
+      } else {
+        delete (HTMLElement.prototype as { scrollIntoView?: unknown })
+          .scrollIntoView;
+      }
+    }
   });
 });

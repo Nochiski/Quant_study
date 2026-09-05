@@ -13,6 +13,7 @@
   --surface-raised: #f9fafb;
   --surface-subtle: #eef2f5;
   --surface-inverse: #1c2430;
+  --overlay-scrim: rgb(28 36 48 / 32%);
 
   /* borders */
   --border: #d9dee5;

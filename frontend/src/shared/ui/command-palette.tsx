@@ -15,6 +15,8 @@ export type CommandPaletteItem = {
   keywords?: readonly string[];
   shortcut?: string;
   disabled?: boolean;
+  /** Logical focus destination after an executing command changes or hides the current UI. */
+  focusAfterExecute?: () => HTMLElement | null;
   execute: () => void;
 };
 
@@ -54,9 +56,15 @@ const nextEnabled = (
   return -1;
 };
 
-/** Domain-free command chooser. Callers own command meaning, availability and search data. */
-export const CommandPalette = ({
-  open,
+const canRestoreFocus = (element: HTMLElement | null): element is HTMLElement =>
+  element !== null &&
+  element.isConnected &&
+  element.closest("[hidden], [aria-hidden='true']") === null &&
+  !element.matches(":disabled");
+
+type OpenCommandPaletteProps = Omit<CommandPaletteProps, "open">;
+
+const OpenCommandPalette = ({
   label,
   searchLabel,
   searchPlaceholder,
@@ -64,11 +72,12 @@ export const CommandPalette = ({
   closeLabel,
   commands,
   onClose,
-}: CommandPaletteProps) => {
+}: OpenCommandPaletteProps) => {
   const id = useId();
   const input = useRef<HTMLInputElement>(null);
   const close = useRef<HTMLButtonElement>(null);
   const restoreFocus = useRef<HTMLElement | null>(null);
+  const focusAfterClose = useRef<(() => HTMLElement | null) | null>(null);
   const [query, setQuery] = useState("");
   const filtered = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
@@ -77,32 +86,44 @@ export const CommandPalette = ({
       : commands.filter((command) => searchable(command).includes(needle));
   }, [commands, query]);
   const [active, setActive] = useState(-1);
-
-  useEffect(() => {
-    if (!open) return;
-    restoreFocus.current = document.activeElement as HTMLElement | null;
-    queueMicrotask(() => input.current?.focus());
-    return () => restoreFocus.current?.focus();
-  }, [open]);
-
-  if (!open) return null;
   const activeIndex =
     active >= 0 && active < filtered.length && !filtered[active]?.disabled
       ? active
       : nextEnabled(filtered, -1, 1);
+
+  useEffect(() => {
+    restoreFocus.current = document.activeElement as HTMLElement | null;
+    queueMicrotask(() => input.current?.focus());
+    return () => {
+      queueMicrotask(() => {
+        const requested = focusAfterClose.current?.() ?? null;
+        if (canRestoreFocus(requested)) requested.focus();
+        else if (canRestoreFocus(restoreFocus.current))
+          restoreFocus.current.focus();
+      });
+    };
+  }, []);
+
+  useEffect(() => {
+    if (activeIndex < 0) return;
+    document
+      .getElementById(`${id}-option-${activeIndex}`)
+      ?.scrollIntoView?.({ block: "nearest" });
+  }, [activeIndex, id]);
+
   const closePalette = (): void => {
-    setQuery("");
-    setActive(-1);
     onClose();
   };
   const execute = (index: number): void => {
     const command = filtered[index];
     if (!command || command.disabled) return;
+    focusAfterClose.current = command.focusAfterExecute ?? null;
     command.execute();
     closePalette();
   };
   const onInputKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
-    if (event.nativeEvent.isComposing) return;
+    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)
+      return;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       setActive(
@@ -218,3 +239,7 @@ export const CommandPalette = ({
     </div>
   );
 };
+
+/** Domain-free command chooser. Callers own command meaning, availability and search data. */
+export const CommandPalette = ({ open, ...props }: CommandPaletteProps) =>
+  open ? <OpenCommandPalette {...props} /> : null;

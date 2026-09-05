@@ -1,4 +1,11 @@
-import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import type { StrategyOutlineSymbol } from "../../../features/edit-strategy";
 import { t } from "../../../shared/config";
@@ -120,12 +127,22 @@ export const StrategyIde = ({
       ? { ...DEFAULT_LAYOUT, inspectorOpen: false, debuggerOpen: false }
       : DEFAULT_LAYOUT,
   );
+  const outlineId = useId();
+  const inspectorId = useId();
+  const debuggerId = useId();
+  const viewTabsId = useId();
   const ids = {
-    outline: useId(),
-    inspector: useId(),
-    debugger: useId(),
-    views: useId(),
+    outline: outlineId,
+    inspector: inspectorId,
+    debugger: debuggerId,
+    views: viewTabsId,
   };
+  const outlineRestore = useRef<HTMLButtonElement>(null);
+  const inspectorRestore = useRef<HTMLButtonElement>(null);
+  const debuggerRestore = useRef<HTMLButtonElement>(null);
+  const outlineCollapse = useRef<HTMLButtonElement>(null);
+  const inspectorCollapse = useRef<HTMLButtonElement>(null);
+  const debuggerCollapse = useRef<HTMLButtonElement>(null);
   const theme = useThemePreference();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const commands = useMemo<CommandPaletteItem[]>(() => {
@@ -161,24 +178,40 @@ export const StrategyIde = ({
       label: `${t("command.openView")} ${id.toUpperCase()}`,
       description: id === view ? t("command.current") : undefined,
       shortcut: `Alt ${index + 1}`,
-      disabled: !availableViews.includes(id),
+      disabled: !availableViews.includes(id) || !onViewChange,
+      focusAfterExecute: () => document.getElementById(tabId(viewTabsId, id)),
       execute: () => onViewChange?.(id),
     }));
     const panelCommands: CommandPaletteItem[] = [
-      ["outline", "outlineOpen"],
-      ["inspector", "inspectorOpen"],
-      ["debugger", "debuggerOpen"],
-    ].map(([name, key]) => {
-      const panel = key as "outlineOpen" | "inspectorOpen" | "debuggerOpen";
-      return {
-        id: `panel.${name}`,
+      {
+        id: "panel.outline",
         group: t("command.group.panel"),
-        label: `${layout[panel] ? t("command.hide") : t("command.show")} ${t(
-          `ide.${name}` as "ide.outline" | "ide.inspector" | "ide.debugger",
-        )}`,
-        execute: () => toggle(panel),
-      };
-    });
+        label: `${layout.outlineOpen ? t("command.hide") : t("command.show")} ${t("ide.outline")}`,
+        focusAfterExecute: () =>
+          layout.outlineOpen ? outlineRestore.current : outlineCollapse.current,
+        execute: () => toggle("outlineOpen"),
+      },
+      {
+        id: "panel.inspector",
+        group: t("command.group.panel"),
+        label: `${layout.inspectorOpen ? t("command.hide") : t("command.show")} ${t("ide.inspector")}`,
+        focusAfterExecute: () =>
+          layout.inspectorOpen
+            ? inspectorRestore.current
+            : inspectorCollapse.current,
+        execute: () => toggle("inspectorOpen"),
+      },
+      {
+        id: "panel.debugger",
+        group: t("command.group.panel"),
+        label: `${layout.debuggerOpen ? t("command.hide") : t("command.show")} ${t("ide.debugger")}`,
+        focusAfterExecute: () =>
+          layout.debuggerOpen
+            ? debuggerRestore.current
+            : debuggerCollapse.current,
+        execute: () => toggle("debuggerOpen"),
+      },
+    ];
     const themeCommands: CommandPaletteItem[] = (
       ["system", "light", "dark"] as const
     ).map((preference) => ({
@@ -221,6 +254,7 @@ export const StrategyIde = ({
     toggle,
     validateDisabled,
     view,
+    viewTabsId,
   ]);
 
   useEffect(() => {
@@ -243,6 +277,7 @@ export const StrategyIde = ({
       const key = event.key.toLowerCase();
       if (modifier && key === "k") {
         event.preventDefault();
+        if (event.repeat) return;
         setPaletteOpen((open) => !open);
         return;
       }
@@ -258,9 +293,18 @@ export const StrategyIde = ({
         } else if (!validateDisabled) onValidate?.();
       } else if (event.altKey && !modifier && /^[1-5]$/.test(event.key)) {
         const next = VIEWS[Number(event.key) - 1];
-        if (!next || !availableViews.includes(next)) return;
+        if (
+          event.repeat ||
+          !next ||
+          !availableViews.includes(next) ||
+          !onViewChange
+        )
+          return;
         event.preventDefault();
-        onViewChange?.(next);
+        onViewChange(next);
+        queueMicrotask(() =>
+          document.getElementById(tabId(viewTabsId, next))?.focus(),
+        );
       }
     };
     window.addEventListener("keydown", onKey);
@@ -275,6 +319,7 @@ export const StrategyIde = ({
     runDisabled,
     saveDisabled,
     validateDisabled,
+    viewTabsId,
   ]);
 
   const inspectorNode = (
@@ -288,9 +333,13 @@ export const StrategyIde = ({
       <header className="ide__panel-header">
         <h2>{t("ide.inspector")}</h2>
         <Button
+          ref={inspectorCollapse}
           size="small"
           tone="ghost"
-          onClick={() => toggle("inspectorOpen")}
+          onClick={() => {
+            toggle("inspectorOpen");
+            queueMicrotask(() => inspectorRestore.current?.focus());
+          }}
         >
           {t("ide.collapseInspector")}
         </Button>
@@ -312,9 +361,13 @@ export const StrategyIde = ({
       <header className="ide__panel-header">
         <h2>{t("ide.debugger")}</h2>
         <Button
+          ref={debuggerCollapse}
           size="small"
           tone="ghost"
-          onClick={() => toggle("debuggerOpen")}
+          onClick={() => {
+            toggle("debuggerOpen");
+            queueMicrotask(() => debuggerRestore.current?.focus());
+          }}
         >
           {t("ide.collapseDebugger")}
         </Button>
@@ -358,8 +411,12 @@ export const StrategyIde = ({
           </Button>
           {!layout.outlineOpen ? (
             <Button
+              ref={outlineRestore}
               size="small"
-              onClick={() => toggle("outlineOpen")}
+              onClick={() => {
+                toggle("outlineOpen");
+                queueMicrotask(() => outlineCollapse.current?.focus());
+              }}
               aria-controls={ids.outline}
               aria-expanded={false}
             >
@@ -368,8 +425,12 @@ export const StrategyIde = ({
           ) : null}
           {narrow || !layout.inspectorOpen ? (
             <Button
+              ref={inspectorRestore}
               size="small"
-              onClick={() => toggle("inspectorOpen")}
+              onClick={() => {
+                toggle("inspectorOpen");
+                queueMicrotask(() => inspectorCollapse.current?.focus());
+              }}
               aria-controls={ids.inspector}
               aria-expanded={layout.inspectorOpen}
             >
@@ -378,8 +439,12 @@ export const StrategyIde = ({
           ) : null}
           {narrow || !layout.debuggerOpen ? (
             <Button
+              ref={debuggerRestore}
               size="small"
-              onClick={() => toggle("debuggerOpen")}
+              onClick={() => {
+                toggle("debuggerOpen");
+                queueMicrotask(() => debuggerCollapse.current?.focus());
+              }}
               aria-controls={ids.debugger}
               aria-expanded={layout.debuggerOpen}
             >
@@ -466,9 +531,13 @@ export const StrategyIde = ({
             <header className="ide__panel-header">
               <h2>{t("ide.outline")}</h2>
               <Button
+                ref={outlineCollapse}
                 size="small"
                 tone="ghost"
-                onClick={() => toggle("outlineOpen")}
+                onClick={() => {
+                  toggle("outlineOpen");
+                  queueMicrotask(() => outlineRestore.current?.focus());
+                }}
               >
                 {t("ide.collapseOutline")}
               </Button>

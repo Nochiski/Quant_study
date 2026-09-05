@@ -70,7 +70,7 @@
 
 **`corp_ticker`** (S01) — grain `ticker` · whole — isin8 KR7 만 그룹(3,438 그룹 전부 보통주 1, P11) · 비KR7 40티커 단독 · `link_basis ∈ {isin8, corp_map, none}`. EG1 = `security` 행수.
 
-**`trading_calendar`** (S02) — grain `date` · whole — `stg_index_daily` distinct date(4,094) ∪ gap 축(`stg_flow_split_daily`·`stg_credit_daily` date > backfill_end). 컬럼 `date`·`prev_td`·`next_td`·`calendar_source`. 어댑터의 `sessions` 축.
+**`trading_calendar`** (S02) — grain `date` · whole — `stg_index_daily` distinct date(4,094, 2010-01-04~2026-08-20). **gap 축 없음** — 09-05 실측(P16): 08-20 이후 date 를 가진 stage 팩트는 `stg_master_daily` 스냅샷(09-01·09-02)뿐이고 flow_split·credit·short_kis·loan_kis 는 08-14~08-18 에서 끝난다. `backfill_end` = 2026-08-20(baseline). 컬럼 `date`·`prev_td`·`next_td`. 어댑터의 `sessions` 축. EG1 = 4,094 = `stg_index_daily` distinct date.
 
 **`index_daily`** (S02) — grain (`index_class`, `index_name`, `date`) · date_axis — `stg_index_daily` 1:1(컬럼 실명 `close_idx` 등). 어댑터는 `idx:코스피`·`idx:코스닥`·`idx:코스피 200`·`idx:코스닥 150` 예약 `security_id` 로 `benchmark.close` 를 낸다. EG1 = 347,821.
 
@@ -186,8 +186,8 @@ v_firm_mktcap(d)                                              -- Σ 종류주 �
 | 3 | FACTORS 정본 54 + 레지스트리 50 대응(`factor_readiness`) | 평면 F## | — | 확정 |
 | 4 | 유니버스 사실+상태 + `universe_policy` 보관 | 파일럿 플래그 | P6·P12 | 확정 |
 | 5 | **커널 3포트 + 워크벤치 5포트, 단일 어댑터** | v1.1 "팩터층 주입" | `application/*/ports/outgoing/*.py` 실재, `build_container(equity_adapter="mock")`, contract `ADAPTERS` | 확정(재기술) |
-| 6 | `price.close` 원주가 · `price.adj_close` 조정가 두 필드 | 원주가만 | 분할 구간 모멘텀 오류가 게이트를 통과 | 승인 요청 |
-| 7 | backend optional-dependency `equity=["duckdb>=1.5"]`(워크벤치 어댑터) | pyarrow 패널(성능 미확인) | 카탈로그 매크로 호출 | 승인 요청 |
+| 6 | `price.close` 원주가 · `price.adj_close` 조정가 두 필드 | 원주가만 | 분할 구간 모멘텀 오류가 게이트를 통과 | 확정(09-05) |
+| 7 | backend optional-dependency `equity=["duckdb>=1.5"]`(워크벤치 어댑터, S21 반영) | pyarrow 패널(성능 미확인) | 카탈로그 매크로 호출 | 확정(09-05) |
 
 ---
 
@@ -197,6 +197,7 @@ v_firm_mktcap(d)                                              -- Σ 종류주 �
 |---|---|---|
 | P13 | 문서 원본 재무표 | ZIP 본문에 재무제표 표 값 존재(부방 2024.12 원본·정정) |
 | P14 | 문서층 P1 테이블 | `stg_doc_meta` 242,196(main 170,762: 분기 77,516·사업 51,063·반기 40,332; `period_from` 채움 168,938 = 파싱 ok 전건; XBRL 그룹 ≥1 153,970, 연도별 86.7~97.5%) · `stg_doc_section` 7,929,624(`fin` 252,238 = '4. 재무제표' 126,124 + '2. 연결재무제표' 126,112, XBRL 그룹 844,438) · `stg_doc_correction` 17,600(filed parsed 15,225 / unparsed 2,375; 재무 항목 포함 2,238; (corp, kind, filed_date) 조인 유일 14,026 / 0 1,199) · `stg_doc_parse_log` 242,196 · 정정 정기보고서 접수 24,285 |
+| P16 | 08-20 이후 date | `stg_master_daily` max 2026-09-02(스냅샷 2일) · `stg_flow_split_daily` 08-14 · `stg_credit_daily` 08-18 · `stg_short_daily_kis`·`stg_loan_daily_kis` 08-14 · `stg_price_daily` 08-20 → 캘린더 gap 축 폐기 |
 | P15 | 소비자 계약 | 워크벤치 포트 `EquityDataPort`·`RawObservationPort`·`FactorObservationPort`·`FactorMetadataPort`·`BacktestDataPort` · `build_container(equity_adapter="mock")` 외 거절 · contract `ADAPTERS=[mock]`, `UNIVERSE="krx.common-stock"`, `MARKET="KRX"` · 레지스트리 50 팩터 · field_id 42 · mock 프로필 `recommended_lag_sessions` |
 
 ---

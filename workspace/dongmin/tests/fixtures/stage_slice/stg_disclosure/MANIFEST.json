@@ -1,0 +1,173 @@
+{
+ "table": "stg_disclosure",
+ "current_build": "b_20260902T164444_231463Z",
+ "keep": 3,
+ "builds": [
+  {
+   "build_id": "b_20260902T164444_231463Z",
+   "snapshot_id": "snap_20260902T154207Z",
+   "rules_version": "2.2.3",
+   "built_at_utc": "2026-09-02T16:45:05+00:00",
+   "n_rows": 676,
+   "content_hash": "3444101:e70d1968926b6bcb",
+   "partitions": [
+    {
+     "path": "v=b_20260902T164444_231463Z/year=2010",
+     "n_rows": 31
+    },
+    {
+     "path": "v=b_20260902T164444_231463Z/year=2011",
+     "n_rows": 33
+    },
+    {
+     "path": "v=b_20260902T164444_231463Z/year=2012",
+     "n_rows": 40
+    },
+    {
+     "path": "v=b_20260902T164444_231463Z/year=2013",
+     "n_rows": 52
+    },
+    {
+     "path": "v=b_20260902T164444_231463Z/year=2014",
+     "n_rows": 49
+    },
+    {
+     "path": "v=b_20260902T164444_231463Z/year=2015",
+     "n_rows": 50
+    },
+    {
+     "path": "v=b_20260902T164444_231463Z/year=2016",
+     "n_rows": 51
+    },
+    {
+     "path": "v=b_20260902T164444_231463Z/year=2017",
+     "n_rows": 35
+    },
+    {
+     "path": "v=b_20260902T164444_231463Z/year=2018",
+     "n_rows": 36
+    },
+    {
+     "path": "v=b_20260902T164444_231463Z/year=2019",
+     "n_rows": 37
+    },
+    {
+     "path": "v=b_20260902T164444_231463Z/year=2020",
+     "n_rows": 41
+    },
+    {
+     "path": "v=b_20260902T164444_231463Z/year=2021",
+     "n_rows": 39
+    },
+    {
+     "path": "v=b_20260902T164444_231463Z/year=2022",
+     "n_rows": 41
+    },
+    {
+     "path": "v=b_20260902T164444_231463Z/year=2023",
+     "n_rows": 38
+    },
+    {
+     "path": "v=b_20260902T164444_231463Z/year=2024",
+     "n_rows": 37
+    },
+    {
+     "path": "v=b_20260902T164444_231463Z/year=2025",
+     "n_rows": 36
+    },
+    {
+     "path": "v=b_20260902T164444_231463Z/year=2026",
+     "n_rows": 30
+    }
+   ],
+   "gates": [
+    {
+     "name": "G0",
+     "status": "pass",
+     "detail": "선언 대조",
+     "metrics": {
+      "missing_columns": [],
+      "n_len_mismatch": 0
+     }
+    },
+    {
+     "name": "G1",
+     "status": "pass",
+     "detail": "stage=3444101 expected=3444101",
+     "metrics": {
+      "n_src": 3444518,
+      "fanout": 1,
+      "n_dedup": 417,
+      "n_reject": 0,
+      "n_stage": 3444101
+     }
+    },
+    {
+     "name": "G2",
+     "status": "pass",
+     "detail": "cast_failed rows=0 ratio=0.000000 limit=0.0",
+     "metrics": {
+      "n_partial": 0,
+      "ratio": 0.0,
+      "limit": 0.0
+     }
+    },
+    {
+     "name": "G3",
+     "status": "pass",
+     "detail": "불변식 전부 성립",
+     "metrics": {}
+    },
+    {
+     "name": "G4",
+     "status": "skip",
+     "detail": "no_fixtures",
+     "metrics": {}
+    },
+    {
+     "name": "G5",
+     "status": "pass",
+     "detail": "Δstage=0 expected=0",
+     "metrics": {
+      "d_src": 0,
+      "d_dedup": 0,
+      "d_reject": 0,
+      "d_stage": 0
+     }
+    },
+    {
+     "name": "G6",
+     "status": "pass",
+     "detail": "(natural_key, observed_date) duplicates=0",
+     "metrics": {
+      "n_dup": 0
+     }
+    },
+    {
+     "name": "G7",
+     "status": "pass",
+     "detail": "out_of_range rows=0 cells=0 ratio=0.000000 limit=0.001 observed∈[1999,2027] content∈[1956,2066]",
+     "metrics": {
+      "n_out_of_range": 0,
+      "n_out_of_range_rows": 0,
+      "n_out_of_range_cells": 0,
+      "ratio": 0.0,
+      "limit": 0.001
+     }
+    },
+    {
+     "name": "G8",
+     "status": "skip",
+     "detail": "not_blob",
+     "metrics": {}
+    },
+    {
+     "name": "G9",
+     "status": "skip",
+     "detail": "no_cross_check",
+     "metrics": {}
+    }
+   ]
+  }
+ ]
+}

@@ -2,7 +2,7 @@
 
 > stage(사실) 위에 equity(구조 정책)를 쌓아 **팩터 재료**와 **백테스트 PIT 패널**을 만드는 전 과정을 슬라이스·게이트로 고정한다.
 > 근거: `EQUITY_KICKOFF.md` · `EQUITY_DESIGN.md` v1.2 · `EQUITY_GATES.md` v1.0(게이트 사양) · `EQUITY_FIELD_MAP.md` v1.0(소비자 필드 계약) · `STAGE_HANDOFF.md` · `DOC_DESIGN.md` v1.1(문서층, `origin/stage/doc-p1`) · `backend/`(워크벤치·엔진 코드).
-> v1.1 → v1.2 변경 근거는 `reviews/2026-09-05-equity-*.md` 4건(제안서)과 §8 검수 기록. **결정 5개는 사용자가 "작업 진행"으로 확정, 결정 6·7 은 이 판에서 신설(승인 요청)**.
+> v1.1 → v1.2 변경 근거는 `reviews/2026-09-05-equity-*.md` 4건(제안서)과 §8 검수 기록. **결정 1~7 전부 사용자 확정(09-05 "권고사항으로 작업 모두 진행")**.
 
 ---
 
@@ -98,7 +98,7 @@ EG0 입력 고정 · EG1 격자 등식(`− n_dedup − Σ n_reject` 일반형, 
 |---|---|---|---|---|---|
 | **S00** | 계약 문서·환경 | `EQUITY_FIELD_MAP.md`·DESIGN v1.2·GATES v1.0·FACTORS 정정·`check_field_map.py` · 로컬 duckdb 환경(`uv run --with duckdb`) · 서버 `data/equity/` 생성 | 제안서 4건 | — | — |
 | **S01** | 법인·종목 식별 | `corp`·`security`·`corp_ticker` | `stg_corp_map`·`stg_company`·`stg_listing_daily`·`stg_etf_price_daily`·`stg_delisted_master` | — | S00 |
-| **S02** | 캘린더·구간·지수 | `security_span`·`trading_calendar`·`index_daily` + `asof_sample` 등재 | S01 + `stg_index_daily`·gap 축 | — | S01 |
+| **S02** | 캘린더·구간·지수 | `security_span`·`trading_calendar`·`index_daily` + `asof_sample`·`backfill_end` 등재 | S01 + `stg_index_daily`(gap 축 없음, P16) | — | S01 |
 | **S03** | 유니버스(존재·상태) | `universe_daily` v1(`status`·`market`·`sec_type`·`halt_state`·`admin_state`·`liquidation_window`·`signal_*`) · `universe_policy` 스키마+`all` | S02 + `stg_listing_daily`·`stg_master_daily`·`stg_disclosure` | ∥ 4A | S02 |
 | **S04** | 가격 정본 | `price_daily` | S02·S03 + `stg_price_daily`·`stg_etf_price_daily`·`stg_listing_daily` | ∥ S05 | S03 |
 | **S05** | 기업행위 | `corp_event` | `stg_event_*`·`stg_capital`·`stg_disclosure` 락일·배당결정 · KRX 주식수 변화 | ∥ S04 | S03 |
@@ -155,7 +155,7 @@ S00·S01·S02·S03·S04·S05(축소: split·bonus·capred 만)·S06·S03B·S07 +
 | 단계 | DoD (술어 ID 는 GATES) |
 |---|---|
 | S00 | `check_field_map.py` 집합 차 0 ∧ GAP 21건 전부 슬라이스 배정 ∧ 결정 5·6·7 확정 표기 |
-| 1단계 S01~S03 | EG1 7식 ∧ 폐지 전부 `delist_date`(EG3-P10) ∧ KR7 isin8 그룹당 보통주 1 ∧ span 비중첩·Σ n_days 등식 ∧ 캘린더 = 4,094 + gap ∧ `induty_code` 공란 0 ∧ `halt_state` 열린 구간 0 ∧ `asof_sample` 등재 |
+| 1단계 S01~S03 | EG1 7식 ∧ 폐지 전부 `delist_date`(EG3-P10) ∧ KR7 isin8 그룹당 보통주 1 ∧ span 비중첩·Σ n_days 등식 ∧ 캘린더 = 4,094 ∧ `induty_code` 공란 0 ∧ `halt_state` 열린 구간 0 ∧ `asof_sample` 등재 |
 | 2단계 S04~S06·S03B | `price_daily` = 10,890,251 ∧ 시총 불변 `price×share=1` 위반 0 ∧ `v_firm_mktcap` 독립 재계산 일치 ∧ 분할일 가격·거래량 점프 ≤ baseline ∧ EG20 원주가 불변 ∧ EG11 뷰 결정성 |
 | S07 | `BUILDERS['equity_duckdb']` 등록 후 `backend/tests/test_bar_source_contract.py` 전량 green ∧ EG-C ①②③④⑤⑩ ∧ 폐지 20종목 포함 BarQuery OK·반환 = 요청 |
 | 3단계 S08~S10 | 격자 등식 ∧ 미수집→0 행 0(로그 축 독립 재판정) ∧ evidence_rate ≥ baseline ∧ 커버율↔시장수익률 상관 ≤ baseline ∧ 12주체 합 항등(kiwoom) ∧ 겹침 0 ∧ pre_calendar 격리 건수 = 실측 |
@@ -198,8 +198,8 @@ S00·S01·S02·S03·S04·S05(축소: split·bonus·capred 만)·S06·S03B·S07 +
 |---|---|---|
 | 1~4 | 산출 형식 · 판본·게이트 · 팩터 ID 54 · 유니버스 정책표 | 확정(09-05 "작업 진행") |
 | 5 | **엔진 커널 3포트 + 워크벤치 5포트, 단일 어댑터 `equity_duckdb`**(v1.1 의 "팩터층 주입" 폐기) | 확정(재기술) |
-| **6** | `price.close` = 원주가 · `price.adj_close` = as-of 조정가 두 필드 제공. 레지스트리의 수익률·모멘텀·변동성 팩터가 `adj_close` 를 쓰도록 워크벤치 이슈 발행 | **승인 요청** |
-| **7** | 워크벤치 어댑터는 duckdb 필요 → `backend` optional-dependency `equity = ["duckdb>=1.5"]` 추가(코드 규칙 "새 라이브러리 금지" 예외). 커널 어댑터(S07)는 pyarrow 로 새 의존성 0 | **승인 요청** |
+| **6** | `price.close` = 원주가 · `price.adj_close` = as-of 조정가 두 필드 제공. 레지스트리의 수익률·모멘텀·변동성 팩터가 `adj_close` 를 쓰도록 워크벤치 이슈 발행 | **확정(09-05)** |
+| **7** | 워크벤치 어댑터는 duckdb 필요 → `backend` optional-dependency `equity = ["duckdb>=1.5"]` 추가(코드 규칙 "새 라이브러리 금지" 예외, S21 에서 반영). 커널 어댑터(S07)는 pyarrow 로 새 의존성 0 | **확정(09-05)** |
 
 ---
 

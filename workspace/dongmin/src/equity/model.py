@@ -20,7 +20,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
 
     ExtraGate = Callable[[EquityGateContext], GateResult]
 
-RULES_VERSION = "e1.0.0"                # BuildRecord.rules_version 에 실린다
+RULES_VERSION = "e1.1.0"                # BuildRecord.rules_version 에 실린다
 
 # DESIGN §1 — stage 4종 + equity 신설 convention
 BASIS_VOCAB: tuple[str, ...] = ("measured", "derived", "convention", "default", "unknown")

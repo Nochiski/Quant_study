@@ -13,7 +13,7 @@ import pytest
 from equity import gates, inputs
 from equity.baseline import Baseline
 from equity.gates import EquityGateContext, GateStatus, SkipGate
-from equity.model import AVAILABLE_NONE, EquityTable
+from equity.model import AVAILABLE_NONE, RULES_VERSION, EquityTable
 from stage.gates import GateResult
 from stage.manifest import BuildRecord
 
@@ -265,8 +265,9 @@ def test_eg4_필수키_빠진_픽스처는_예외(con: duckdb.DuckDBPyConnection
 
 
 # ── EG5a ─────────────────────────────────────────────────────────────────────
-def _record(build_id: str, inputs_map: dict[str, str], h: str) -> BuildRecord:
-    return BuildRecord(build_id=build_id, snapshot_id="", rules_version="e1.0.0",
+def _record(build_id: str, inputs_map: dict[str, str], h: str,
+            rules_version: str = RULES_VERSION) -> BuildRecord:
+    return BuildRecord(build_id=build_id, snapshot_id="", rules_version=rules_version,
                        built_at_utc="2026-09-05T00:00:00+00:00", n_rows=2, content_hash=h,
                        partitions=[{"path": f"v={build_id}", "n_rows": 2, "content_hash": h}],
                        inputs=inputs_map)
@@ -292,6 +293,14 @@ def test_eg5a_해시가_바뀌면_fail(con: duckdb.DuckDBPyConnection) -> None:
                                         inputs={"stg_sample": "s1"},
                                         partition_hashes={"whole": "2:aa"}))
     assert r.status is GateStatus.FAIL and r.metrics["n_changed_partitions"] == 1
+
+
+def test_eg5a_규칙_판본이_바뀌면_skip_rules_changed(con: duckdb.DuckDBPyConnection) -> None:
+    prev = _record("b1", {"stg_sample": "s1"}, "2:ff", rules_version="e0.0.0")
+    r = gates.eg5a_reproducibility(_ctx(con, _rule(), previous=prev,
+                                        inputs={"stg_sample": "s1"},
+                                        partition_hashes={"whole": "2:aa"}))
+    assert r.status is GateStatus.SKIP and r.detail == "rules_changed"
 
 
 def test_eg5a_inputs가_바뀌면_skip(con: duckdb.DuckDBPyConnection) -> None:

@@ -24,7 +24,7 @@ from stage.manifest import BuildRecord
 
 from . import inputs as inputs_mod
 from .baseline import Baseline
-from .model import EquityTable
+from .model import RULES_VERSION, EquityTable
 
 DEFAULT_THRESHOLDS: dict[str, float] = {
     "EG7": 0.001,     # 격리 비율 상한 — stage DEFAULT_THRESHOLDS["G7"] 초기값 계승 (GATES §1 EG7)
@@ -35,7 +35,7 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
 SKIP_REASONS: tuple[str, ...] = (
     "no_baseline", "no_fixtures", "no_cross_source", "no_multi_version", "declaration_table",
     "not_grid", "no_coverage", "not_built", "dimension_table", "upstream_failed",
-    "no_previous_build", "inputs_changed", "no_previous_snapshot",
+    "no_previous_build", "inputs_changed", "no_previous_snapshot", "rules_changed",
 )
 
 
@@ -322,6 +322,13 @@ def eg5a_reproducibility(ctx: EquityGateContext) -> GateResult:
     if prev is None:
         return GateResult("EG5a", GateStatus.SKIP, "no_previous_build",
                           {"partition_hashes": dict(ctx.partition_hashes)})
+    if prev.rules_version != RULES_VERSION:
+        # 규칙(SQL·게이트)이 바뀐 빌드는 같은 inputs 여도 산출이 달라지는 것이 정상이다 —
+        # 비교 대상은 같은 규칙 판본의 직전 빌드뿐이다(09-05 corp_event 4차에서 실측).
+        return GateResult("EG5a", GateStatus.SKIP, "rules_changed",
+                          {"previous_rules_version": prev.rules_version,
+                           "rules_version": RULES_VERSION,
+                           "partition_hashes": dict(ctx.partition_hashes)})
     if dict(prev.inputs) != dict(ctx.inputs):
         return GateResult("EG5a", GateStatus.SKIP, "inputs_changed",
                           {"previous_inputs": dict(prev.inputs), "inputs": dict(ctx.inputs),

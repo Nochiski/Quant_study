@@ -1,16 +1,16 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: APPROVED
-current_phase: P4
-current_pr: P4-08
-active_prs: [P4-08]
+project_status: IN_PROGRESS
+current_phase: P5
+current_pr: P5-01
+active_prs: [P5-01]
 parallel_window: []
-last_updated: 2026-09-05T10:03:23+09:00
+last_updated: 2026-09-05T10:15:03+09:00
 planned_prs: 50
-merged_prs: 40
+merged_prs: 41
 approved_prs: 41
-progress_percent: 80
+progress_percent: 82
 ---
 
 # YAML Strategy Workbench 실시간 진행 계획
@@ -22,13 +22,13 @@ progress_percent: 80
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `APPROVED` |
-| Current phase | `P4` |
-| Current/next PR | `P4-08` |
-| Active PR | `P4-08` |
-| Progress | `40 / 50 merged (80%)` |
+| Project status | `IN_PROGRESS` |
+| Current phase | `P5` |
+| Current/next PR | `P5-01` |
+| Active PR | `P5-01` |
+| Progress | `41 / 50 merged (82%)` |
 | Approved | `41 / 50` |
-| Aggregated at | `2026-09-05 10:03 KST` |
+| Aggregated at | `2026-09-05 10:15 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -76,26 +76,26 @@ progress_percent: 80
 | P1.5 | Backtest Correctness Gate | 5 | 5 | `MERGED` |
 | P2 | App Shell and visual foundation | 4 | 4 | `MERGED` |
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
-| P4 | Outline, Contract, Projections | 10 | 9 | `APPROVED` |
-| P5 | Truthful Trace UI | 3 | 0 | `WAITING` |
+| P4 | Outline, Contract, Projections | 10 | 10 | `MERGED` |
+| P5 | Truthful Trace UI | 3 | 0 | `IN_PROGRESS` |
 | P6 | Professional release and migration | 7 | 1 | `WAITING` |
-| **Total** |  | **50** | **40** | **80%** |
+| **Total** |  | **50** | **41** | **82%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
 
 | 항목 | 값 |
 |---|---|
-| PR | `P4-08` Source/semantic/revision Diff와 conflict resolution APPROVED |
-| Intent | 같은 StrategySpec의 원문 변화와 backend canonical 의미 변화를 분리해 보여주고 revision/409 conflict 결정을 안전하게 완료한다 |
-| Acceptance | source text diff; backend canonical semantic diff; revision-to-revision diff; invalid source는 text-only; comment-only는 semantic change 없음; 409에서 server revision으로 이동하거나 현재 변경 복사 후 새 revision 작성; new/revision URL·pointer parity |
-| Non-goals | 자동 3-way merge, 임의 client semantic normalization, 대용량 diff virtualization(P6-04), server draft/history(P6-02) |
-| Branch/worktree | `feat/p4-08-diff-view` (`Quant_study-p4-08`) |
-| Base SHA | `bdee3f7` (P4-07 merge main) |
-| Head SHA | `9b29220` review-fix freeze |
-| Diff stat | 28 files, +2,130/-177 (test churn 883, reusable Diff model/table·route/state·CSS·i18n); source/canonical/revision/conflict와 동일 reviewer 회귀가 하나의 end-to-end acceptance라 12절 size exception |
-| Focused tests | reviewer 회귀 5 files 75 passed; compile/document/route lifecycle 3 files 66 passed |
-| Full gate | frontend typecheck·lint·vitest 368·build; real-backend PIT E2E 포함; backend Ruff; OpenAPI/SDK 재생성 clean |
+| PR | `P5-01` Correctness pipeline을 조회하는 scoped trace API IN_PROGRESS |
+| Intent | 기존 truthful portfolio pipeline과 factor evaluator를 단일 계산 owner로 재사용해 전문 사용자가 제한된 date/security/factor/node trace를 provenance와 함께 조회하게 한다 |
+| Acceptance | `POST /api/v1/strategies/debug/trace`; inline draft 또는 saved revision; as-of/security/factor/node/raw/starting holdings scope; deterministic ordering; row/page cap; cancellation; 계산 전 invalid/capability diagnostic; `spec_hash/snapshot_id/registry_version/plan_hash` provenance |
+| Non-goals | 별도 factor 계산기, frontend Debugger shell(P5-02), full linked trace/risk/order projection(P5-03), persistent strategy repository(P6-01) |
+| Branch/worktree | `feat/p5-01-scoped-trace-api` (`Quant_study-p5-01`) |
+| Base SHA | `5a242ec` (P4-08 merge main) |
+| Head SHA | 구현 전 |
+| Diff stat | 구현 후 기록 |
+| Focused tests | 구현 후 기록 |
+| Full gate | 구현 후 기록 |
 
 ---
 
@@ -203,21 +203,21 @@ Phase exit:
 | [x] | `P4-05` | Canonical node snippet insertion | P3-02, P1-05 | `MERGED` | [#59](https://github.com/Nochiski/Quant_study/pull/59) · `review_p4_05` APPROVE · `191b902` |
 | [x] | `P4-06` | Read-only canonical JSON과 Form projection | P3-05 | `MERGED` | [#61](https://github.com/Nochiski/Quant_study/pull/61) · `review_p4_06` APPROVE · `f9a0e35` |
 | [x] | `P4-07` | Read-only FactorGraph DAG projection | P4-01, P3-05 | `MERGED` | [#62](https://github.com/Nochiski/Quant_study/pull/62) · `review_p4_07` APPROVE · `bdee3f7` |
-| [ ] | `P4-08` | Source/semantic/revision Diff와 conflict resolution | P1-08, P3-07 | `APPROVED` | [#63](https://github.com/Nochiski/Quant_study/pull/63) · `review_p4_08` APPROVE (P1 2/P2 3 해소) · latest CI 4/4 |
+| [x] | `P4-08` | Source/semantic/revision Diff와 conflict resolution | P1-08, P3-07 | `MERGED` | [#63](https://github.com/Nochiski/Quant_study/pull/63) · `review_p4_08` APPROVE (P1 2/P2 3 해소) · `5a242ec` |
 | [x] | `P4-09` | Execution Plan 표시와 YAML/graph selection 연동 | P4-04, P4-01 | `MERGED` | [#58](https://github.com/Nochiski/Quant_study/pull/58) · `review_p4_09` APPROVE · `8a2ebfc` |
 | [x] | `P4-10` | Five-area snippet catalog UI와 new/revision page wiring | P4-05 | `MERGED` | [#60](https://github.com/Nochiski/Quant_study/pull/60) · `review_p4_10` APPROVE · `20491b8` |
 
 Phase exit:
 
-- [ ] 상단 중복 stepper 없이 left/center/right IDE 영역이 완성되었다.
-- [ ] Outline에 parameters가 포함되었다.
-- [ ] YAML/JSON/Form/Graph/Diff가 같은 StrategySpec을 표현한다.
+- [x] 상단 중복 stepper 없이 left/center/right IDE 영역이 완성되었다.
+- [x] Outline에 parameters가 포함되었다.
+- [x] YAML/JSON/Form/Graph/Diff가 같은 StrategySpec을 표현한다.
 
 ## P5 — 실제 계산 Trace UI
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P5-01` | Correctness pipeline을 조회하는 scoped trace API | P1.5-04, P1-03 | `WAITING` | — |
+| [ ] | `P5-01` | Correctness pipeline을 조회하는 scoped trace API | P1.5-04, P1-03 | `IN_PROGRESS` | branch `feat/p5-01-scoped-trace-api` · base `5a242ec` |
 | [ ] | `P5-02` | Date/security/node 선택 Debugger shell | P3-05, P5-01, P2-03 | `WAITING` | — |
 | [ ] | `P5-03` | Raw→Target trace, risk before/after, order delta estimate | P4-01, P4-07, P5-02 | `WAITING` | — |
 
@@ -335,6 +335,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | P4-08 PR #63 최신 approval-doc HEAD `983b5f4` CI 4/4 통과 후 merge commit `5a242ec`로 순차 머지하고 main fast-forward. Phase 4 exit을 닫고 메인 기준 `feat/p5-01-scoped-trace-api` 전용 worktree에서 P5-01 IN_PROGRESS 전환 | 13.5 merge gate·단일 active PR·truthful pipeline SoT |
 | 2026-09-05 KST | Codex | 동일 reviewer `review_p4_08`이 review HEAD `684dc69`에서 최초 P1 2/P2 3과 new-draft badge 해소를 재현하고 APPROVE(P0/P1/P2 0). reviewer focused 75·frontend 전체 368·typecheck·lint·build, PLAN consistency, 원격 CI 4/4 통과를 확인해 APPROVED 전환 | 13.5 approval gate·same-reviewer 재승인·backend canonical/hash SoT·latest CI |
 | 2026-09-05 KST | Codex | P4-08 review-fix code freeze `9b29220`, 최신 검증과 28 files +2,129/-177 size exception을 PR #63 본문에 반영하고 최초 검토자 `review_p4_08`에게 P1 2/P2 3 동일 reviewer 재검토를 요청하기 위해 IN_REVIEW 전환 | 13.4 same-reviewer fix loop·최신 evidence·PR body merge gate |
 | 2026-09-05 KST | Codex | P4-08 review fix `9b29220`: Save snapshot의 source/spec_hash/canonical을 한 쌍으로 검증하고 불일치 시 current 또는 saved baseline을 backend 재compile할 때까지 Save/Run/Diff를 fail-closed. baseline 실패는 다음 edit와 명시 검증으로 재시도한다. exact EOF marker와 대형 duplicate/reorder 상한 diff, current revision을 포함하는 50개 history page, 모든 projection 위의 409 recovery notice, new draft 중립 badge를 회귀로 고정. reviewer 회귀 75·compile/document/route 66·frontend 전체 368·typecheck·lint·build·backend Ruff·generated clean 후 SELF_CHECK 전환 | backend canonical/hash SoT·document/query/diff/shell 책임분리·P1 2/P2 3 전부 회귀 고정·동일 reviewer 재검토 |

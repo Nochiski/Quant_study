@@ -248,4 +248,7 @@ bash.exe.stackdump
 workspace/*/data/
 workspace/*/logs/
 workspace/*/scratchpad/
+database/data/
+database/logs/
+database/scratchpad/
 backend/.local/

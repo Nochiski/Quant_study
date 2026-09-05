@@ -20,6 +20,7 @@ backend/
 └─ reference/               # 2026-08-17 설계·Zipline 관찰 아카이브
 frontend/                   # workbench UI: FSD app→pages→widgets→features→entities→shared
 docs/                       # 공용 설계·로드맵·리포트
+database/                   # 원장 수집(KRX·키움·KIS·DART·WISE)·stage·문서층 파이프라인 — src·docs·tests 추적, data/·logs/ 는 git 제외
 workspace/         # 개인 작업 공간 workspace/<이름>/ — docs·src 추적, data/·logs/ 는 git 제외
 ```
 
@@ -145,7 +146,7 @@ npm run dev
 
 원장(KRX·키움·KIS·DART·WISE 수집분)은 카엘 서버가 정본이다. 저장소에는 데이터를 넣지 않는다.
 공유 방식은 `docs/superpowers/specs/2026-08-25-quant-ledger-sharing-design.md`, 수집·stage 설계는
-`workspace/dongmin/docs/` 참고.
+`database/README.md` 참고.
 
 ## 작업 규칙
 
@@ -155,7 +156,7 @@ npm run dev
 3. **데이터 파일은 커밋하지 않는다.** 시세 CSV·parquet 등은 `.gitignore` 에서 막아 두었다. 저장소에는 **데이터를 만들어 내는 스크립트**를 넣고, 데이터는 각자 로컬에서 재현한다.
 4. **API 토큰·키는 절대 커밋하지 않는다.** `*_token.json`, `*.token` 은 `.gitignore` 에서 막아 두었다.
 
-데이터를 둘 곳이 필요하면 `workspace/<이름>/data/` 를 쓰면 된다 — `workspace/*/data/` 규칙으로
+데이터를 둘 곳이 필요하면 `workspace/<이름>/data/` 를 쓰면 된다(DB 파이프라인은 `database/data/`) — `workspace/*/data/`·`database/data/` 규칙으로
 이미 git 에서 제외된다. 손으로 계산할 수 있는 소형 테스트 픽스처만
 `backend/tests/fixtures/` 아래 CSV·parquet 으로 예외 허용.
 

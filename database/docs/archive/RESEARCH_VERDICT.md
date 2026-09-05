@@ -177,7 +177,7 @@ equity/*.parquet  ← 통합층. 매일 전량 리빌드. 백테스트는 이것
 이 문서의 모든 수치는 **우리 파일럿 데이터**로 직접 측정했다. 웹 자료의 벤치마크(1.1B rows 택시 데이터 등)는 규모가 100배 이상 달라 판정에 쓰지 않았다.
 
 **A-1. 데이터**
-- 원본: `/Users/claudeoscarmonet/Desktop/Quant_study/workspace/dongmin/data/pilot/panel_full_1y.csv` — 672,910행 × 33컬럼, CSV 160MB (실데이터, 1년)
+- 원본: `/Users/claudeoscarmonet/Desktop/Quant_study/database/data/pilot/panel_full_1y.csv` — 672,910행 × 33컬럼, CSV 160MB (실데이터, 1년)
 - 16.6년 시뮬레이션: 위를 연도 오프셋으로 17배 복제 → **11,439,470행** (목표 936만 행보다 22% 큰 보수적 규모)
 - 하드웨어: 로컬 macOS, DuckDB threads=8, SQLite 3.39.4 / DuckDB 1.5.5 / pyarrow 24.0.0
 

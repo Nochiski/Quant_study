@@ -6,7 +6,7 @@
 
 ## 0. 현재 상태
 - stage: 62테이블(원장 61 + `stg_analyst_broker`) 서버 풀 빌드 2회 통과, 재현성 확인. 산출 `~/quant-ledger/data/stage/<table>/MANIFEST.json`,
-  회귀 기준 `data/stage/baseline.json`. 코드 `workspace/dongmin/src/stage/`, 테스트 194, PR #14~#34, main 이 정본.
+  회귀 기준 `data/stage/baseline.json`. 코드 `database/src/stage/`, 테스트 194, PR #14~#34, main 이 정본.
 - equity 산출은 `~/quant-ledger/data/equity/` 로 분리한다. stage 는 읽기 전용(MANIFEST 경유, 맨 glob 금지).
 - 워크플로우는 stage 와 동일: 설계 1회 적대적 검수 → 슬라이스별 짧은 브랜치·TDD(손계산 픽스처) → 서버 실측(읽기 전용 스크립트는 scp 후 `.venv/bin/python`) → 문서 §기록 → PR self-merge → 브랜치 삭제. 배포는 rsync.
 

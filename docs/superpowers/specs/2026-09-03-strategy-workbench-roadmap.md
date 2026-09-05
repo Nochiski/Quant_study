@@ -38,9 +38,9 @@
 - 현재 지표: `PerformanceMetrics`의 total return, CAGR, volatility, Sharpe, Sortino, MDD,
   Calmar, turnover. 전문 후보 비교에 필요한 지표는 아직 부족하다.
 - 데이터 계획: Equity ERD v0.1의 14개 테이블과 PIT `available_date` 원칙. 최신 인계 문서는
-  `workspace/dongmin/docs/EQUITY_KICKOFF.md`의 v0.2 개정 사항(`security_span`, `coverage_gap`,
+  `database/docs/EQUITY_KICKOFF.md`의 v0.2 개정 사항(`security_span`, `coverage_gap`,
   consensus vintage, `disclosure_version`, broker opinion)을 우선한다.
-- 팩터 재료: `workspace/dongmin/docs/FACTORS.md`의 50개 팩터 후보. 이 문서는 재료 대장이며
+- 팩터 재료: `database/docs/FACTORS.md`의 50개 팩터 후보. 이 문서는 재료 대장이며
   실행 시맨틱 SoT는 이후 backend Factor Registry로 승격한다.
 - 구조 참고: Library.michelo 리팩토링 보드와 `.claude/rules/package-boundary.md`의
   노드별 facade/`DEPENDS_ON`/DAG gate.

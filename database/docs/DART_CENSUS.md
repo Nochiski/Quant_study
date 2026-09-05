@@ -1,7 +1,7 @@
 # DART OpenAPI 전수조사 종합 — 수집 범위 확정
 
 작성 2026-08-24
-근거: 6개 카테고리 개별 전수조사 (`dart_census_DS001.md` ~ `dart_census_DS006.md`)
+근거: 6개 카테고리 개별 전수조사 (`archive/dart_census_DS001.md` ~ `archive/dart_census_DS006.md`)
 **본 종합 작업의 DART 실사용 콜: 0.** 6개 조사 문서와 `DART_DESIGN.md`·`COLLECT_PLAN.md`·`DATA_CATALOG.md` 대조만 수행했다.
 
 ---
@@ -209,7 +209,7 @@
   - 없으면 **인적분할 보유자 수익률을 어떤 가격 기반 정의로도 구성 불가**(카탈로그 실증: 000070 저장값 −10.03% vs 진실 −20.73% vs 주식수비 −45.73% — 셋 다 다르다).
   - `mgRs.mg_rt`(합병비율)·`aprskh_plnprc`(주식매수청구 예정가격)는 CA-01 `merger-split` 의 독립 검증축.
 - **콜**: `3 × N = 10,023` (**0.51일**). DS006 도 날짜 상한 없음 — 1콜 = 구간 전체 이력(11.6년 1콜 실측).
-- **없으면**: CA-02 가 KIS 단일 소스 + 미검증 필드에 매달린다. `E2E_VERDICT.md` DEFECT-E02 가 교차대조 층에서만 잡혔던 전례가 있다.
+- **없으면**: CA-02 가 KIS 단일 소스 + 미검증 필드에 매달린다. `archive/E2E_VERDICT.md` DEFECT-E02 가 교차대조 층에서만 잡혔던 전례가 있다.
 
 ### N5. `xbrlTaxonomy` 21콜 — 계정 마스터 【1회성 · 압도적 가성비】
 

@@ -1,0 +1,152 @@
+# 금리인상기 방어형 밸류·퀄리티 (Rate-Hike Defensive Value)
+#
+# 금리가 오르면 (1) 할인율 상승으로 먼 미래 현금흐름에 의존하는 장기 듀레이션 성장주의 가치가
+# 가장 크게 깎이고, (2) 조달비용 상승으로 신용(빚투) 포지션이 청산 압력을 받으며, (3) 원화 약세로
+# 외국인 자금이 이탈한다. 이 전략은 그 세 경로에 각각 대응하는 팩터로 종목을 고른다.
+#   1. 장부가/시총(B/M)   - 듀레이션이 짧은 저평가 종목 (섹터 내 순위로 섹터 베팅 제거)
+#   2. 선행 EPS 모멘텀     - 멀티플이 눌려도 이익 추정치가 올라가는 종목
+#   3. 외국인 순매수 강도  - 외국인 이탈 국면에서도 자금이 들어오는 종목
+#   4. 신용잔고 증가율     - 빚투가 늘어난 종목은 회피 (direction: low)
+#
+# 한계: Equity 카탈로그에 금리 매크로 필드가 없어 금리 국면을 감지해 전환하지는 못한다.
+# 금리인상기에 유리한 팩터 조합으로 고정 틸트하는 전략이며, 데이터 구간은 한국은행 인상
+# 사이클(2021-08 첫 인상) 시작부터 3.5% 고점을 유지한 마지막 달(2024-09, 첫 인하 직전)까지다.
+schema_version: "1.0"
+title: "금리인상기 방어형 밸류·퀄리티"
+description: "저평가(B/M)·이익 추정 상향·외국인 매수·신용잔고 축소 종목을 월간 리밸런싱으로 담는 롱온리 전략. 금리 상승기의 멀티플 압축·신용 청산·외국인 이탈 위험을 회피하도록 설계."
+data:
+  market: KRX
+  start: "2021-08-02"
+  end: "2024-09-30"
+  universe_id: krx.common-stock
+  frequency: daily
+eligibility:
+  # 실데이터 어댑터 연결 시 아래 시가총액 하한(5,000억 원)을 켠다. 금리 상승기 유동성 위축에서
+  # 소형주를 피하기 위한 규칙이다. 현재 mock 어댑터는 시총이 100억 원대라 켜면 전 종목이 걸러진다.
+  # rules:
+  #   - field_id: price.market_cap
+  #     operator: gte
+  #     value: 500000000000
+  rules: []
+factors:
+  factors:
+    - factor_id: value_btm
+      label: "장부가/시총 (섹터 내 순위)"
+      direction: high
+      weight: 0.35
+      graph:
+        nodes:
+          - node_id: book
+            field_id: financial.book_equity
+            kind: field
+          - node_id: cap
+            field_id: price.market_cap
+            kind: field
+          - node_id: btm
+            operator: divide
+            left_node_id: book
+            right_node_id: cap
+            kind: binary
+          - node_id: btm_sector_rank
+            operator: rank
+            input_node_id: btm
+            group_field_id: classification.sector
+            kind: group
+        output_node_id: btm_sector_rank
+        missing_policy: drop
+    - factor_id: eps_resilience
+      label: "선행 EPS 20세션 모멘텀"
+      direction: high
+      weight: 0.25
+      graph:
+        nodes:
+          - node_id: eps
+            field_id: consensus.forward_eps
+            kind: field
+          - node_id: eps_mom
+            operator: momentum
+            input_node_id: eps
+            window: 20
+            kind: time_series
+          - node_id: eps_rank
+            operator: rank
+            input_node_id: eps_mom
+            kind: cross_sectional
+        output_node_id: eps_rank
+        missing_policy: drop
+    - factor_id: foreign_flow
+      label: "외국인 순매수 20세션 평균 / 시총"
+      direction: high
+      weight: 0.20
+      graph:
+        nodes:
+          - node_id: flow
+            field_id: flow.foreign_net_buy
+            kind: field
+          - node_id: flow_mean
+            operator: mean
+            input_node_id: flow
+            window: 20
+            kind: time_series
+          - node_id: cap
+            field_id: price.market_cap
+            kind: field
+          - node_id: flow_intensity
+            operator: divide
+            left_node_id: flow_mean
+            right_node_id: cap
+            kind: binary
+          - node_id: flow_rank
+            operator: rank
+            input_node_id: flow_intensity
+            kind: cross_sectional
+        output_node_id: flow_rank
+        missing_policy: drop
+    - factor_id: margin_unwind
+      label: "신용잔고 20세션 증감 / 시총 (낮을수록 선호)"
+      direction: low
+      weight: 0.20
+      graph:
+        nodes:
+          - node_id: margin
+            field_id: credit.margin_balance
+            kind: field
+          - node_id: margin_delta
+            operator: delta
+            input_node_id: margin
+            window: 20
+            kind: time_series
+          - node_id: cap
+            field_id: price.market_cap
+            kind: field
+          - node_id: margin_change
+            operator: divide
+            left_node_id: margin_delta
+            right_node_id: cap
+            kind: binary
+          - node_id: margin_rank
+            operator: rank
+            input_node_id: margin_change
+            kind: cross_sectional
+        output_node_id: margin_rank
+        missing_policy: drop
+signal:
+  method: weighted_sum
+portfolio:
+  side: long_only
+  selection_count: 20
+  weighting: equal
+  rebalance: monthly
+  selection_method: top_n
+  turnover_buffer_count: 5
+risk:
+  gross_exposure: 1.0
+  net_exposure: 1.0
+  max_name_weight: 0.07
+  max_sector_weight: 0.30
+execution:
+  timing: next_open
+  order_style: market
+  fee_bps: 15.0
+  slippage_bps: 10.0
+parameters: []

@@ -1,0 +1,137 @@
+[
+ {"case": "FX-1-S01-sec-001", "key": {"ticker": "005930"}, "column": "sec_type",
+  "expect": "common", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — stg_listing_daily 최신 행 secugrp='주권' ∧ stkcert_tp='보통주'",
+  "note": "삼성전자 본주"},
+
+ {"case": "FX-1-S01-sec-002", "key": {"ticker": "005935"}, "column": "sec_type",
+  "expect": "preferred", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — stkcert_tp='구형우선주'",
+  "note": "삼성전자 1우선주"},
+
+ {"case": "FX-1-S01-sec-003", "key": {"ticker": "003547"}, "column": "sec_type",
+  "expect": "preferred", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — stkcert_tp='신형우선주'",
+  "note": "구형·신형 둘 다 preferred 로 접힌다"},
+
+ {"case": "FX-1-S01-sec-004", "key": {"ticker": "069500"}, "column": "sec_type",
+  "expect": "etf", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — stg_etf_price_daily 원천 (listing 에 없다)",
+  "note": "KODEX 200"},
+
+ {"case": "FX-1-S01-sec-005", "key": {"ticker": "069500"}, "column": "list_date",
+  "expect": null, "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — ETF 원천에 상장일 컬럼이 없다",
+  "note": "결측은 결측 (원칙 6 ④) — 0 이나 임의 날짜로 채우지 않는다"},
+
+ {"case": "FX-1-S01-sec-006", "key": {"ticker": "069500"}, "column": "list_date_basis",
+  "expect": "unknown", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — DESIGN §1 basis 어휘",
+  "note": "list_date NULL 의 사유를 basis 로 고지"},
+
+ {"case": "FX-1-S01-sec-007", "key": {"ticker": "069500"}, "column": "corp_code",
+  "expect": null, "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — stg_corp_map 에 069500 없음",
+  "note": "ETF 는 DART 법인이 아니다"},
+
+ {"case": "FX-1-005a", "key": {"ticker": "900050"}, "column": "sec_type",
+  "expect": "foreign", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — secugrp='외국주권'",
+  "note": "중국원양자원 — 비KR7(HK0) 외국주권"},
+
+ {"case": "FX-1-005b", "key": {"ticker": "900060"}, "column": "sec_type",
+  "expect": "foreign", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — secugrp='외국주권' (stkcert_tp 는 '보통주' 지만 common 아님)",
+  "note": "secugrp 가 '주권' 이 아니면 common 분기에 걸리지 않는다"},
+
+ {"case": "FX-1-006", "key": {"ticker": "0001A0"}, "column": "sec_type",
+  "expect": "common", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — 덕양에너젠. 티커를 정수 캐스팅하면 이 행이 사라진다",
+  "note": "GATES §4 FX-1-006 — 문자 티커 유지의 유일 방어"},
+
+ {"case": "FX-1-006b", "key": {"ticker": "0001A0"}, "column": "isin",
+  "expect": "KR70001A0001", "expect_source": "stage:stg_listing_daily.isin",
+  "fixture_class": "positive",
+  "source": "hand — 최신 행 isin",
+  "note": "ISIN 에도 문자가 들어간다"},
+
+ {"case": "FX-1-S01-sec-008", "key": {"ticker": "005930"}, "column": "list_date",
+  "expect": "1975-06-11", "expect_source": "stage:stg_listing_daily.list_date",
+  "fixture_class": "positive",
+  "source": "hand — 최신 행 list_date",
+  "note": "캘린더 하한(2010) 이전 상장일도 그대로 싣는다"},
+
+ {"case": "FX-1-S01-sec-009", "key": {"ticker": "101970"}, "column": "list_date",
+  "expect": "2025-03-28", "expect_source": "stage:stg_listing_daily.list_date",
+  "fixture_class": "positive",
+  "source": "hand — 재상장 종목. list_date 2개(2012-07-26·2025-03-28) 중 최신 행 값",
+  "note": "재상장 구간 축은 security_span(S02) 이 갖는다"},
+
+ {"case": "FX-1-S01-sec-010", "key": {"ticker": "036220"}, "column": "name_current",
+  "expect": "오상헬스케어", "expect_source": "stage:stg_listing_daily.name",
+  "fixture_class": "positive",
+  "source": "hand — 최신 행 이름(과거 '인포피아')",
+  "note": "사명 변경은 최신 행 기준"},
+
+ {"case": "FX-1-007a", "key": {"ticker": "000030"}, "column": "delist_date_krx",
+  "expect": "2019-02-13", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — listing 마지막 존재일 2019-02-12, stg_index_daily 다음 거래일 2019-02-13",
+  "note": "우리은행 지주 전환 폐지"},
+
+ {"case": "FX-1-007b", "key": {"ticker": "000030"}, "column": "delist_date_kis",
+  "expect": "2019-02-13", "expect_source": "stage:stg_delisted_master.lstg_abol_dt",
+  "fixture_class": "positive",
+  "source": "hand — KIS 원자료 값",
+  "note": "대조축"},
+
+ {"case": "FX-1-007c", "key": {"ticker": "000030"}, "column": "delist_conflict",
+  "expect": "false", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — 두 축이 같다",
+  "note": "다르면 true 이고 EG3-P11 이 건수를 본다"},
+
+ {"case": "FX-1-007d", "key": {"ticker": "000030"}, "column": "delist_date",
+  "expect": "2019-02-13", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — KRX 우선 (DESIGN §1 정본 우선순위)",
+  "note": "coalesce(krx, kis)"},
+
+ {"case": "FX-1-007e", "key": {"ticker": "000030"}, "column": "delist_date_basis",
+  "expect": "derived", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — listing 소멸에서 유도",
+  "note": "KIS 축만 있을 때는 'measured'"},
+
+ {"case": "FX-1-S01-sec-011", "key": {"ticker": "900050"}, "column": "delist_date",
+  "expect": "2017-09-27", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — 마지막 존재일 2017-09-26 → 다음 거래일",
+  "note": "폐지 외국주권"},
+
+ {"case": "FX-1-S01-sec-012", "key": {"ticker": "900060"}, "column": "delist_date",
+  "expect": "2013-10-11", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — 마지막 존재일 2013-10-10 → 다음 거래일",
+  "note": "폐지 외국주권 2"},
+
+ {"case": "FX-1-S01-sec-013", "key": {"ticker": "036220"}, "column": "delist_date",
+  "expect": null, "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — 마지막 존재일 2026-08-20 = backfill_end → 생존",
+  "note": "백필 상한을 폐지로 오독하면 전 종목이 폐지된다"},
+
+ {"case": "FX-1-S01-sec-014", "key": {"ticker": "036220"}, "column": "delist_date_basis",
+  "expect": "unknown", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — 두 축 모두 없음",
+  "note": "생존 종목의 basis"},
+
+ {"case": "FX-1-S01-sec-015", "key": {"ticker": "101970"}, "column": "delist_date",
+  "expect": null, "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — 마지막 존재일 2026-08-20",
+  "note": "재상장 종목도 생존"},
+
+ {"case": "FX-1-S01-sec-016", "key": {"ticker": "005930"}, "column": "corp_code",
+  "expect": "00126380", "expect_source": "stage:stg_corp_map.corp_code",
+  "fixture_class": "positive",
+  "source": "hand — corp_map 직접 매핑",
+  "note": "security 는 corp_map 직접 매핑만 쓴다 — 종류주 묶기는 corp_ticker 의 일"},
+
+ {"case": "FX-1-S01-sec-017", "key": {"ticker": "005935"}, "column": "corp_code",
+  "expect": null, "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — corp_map 에 우선주 티커가 없다",
+  "note": "우선주의 법인 링크는 corp_ticker.corp_code(isin8) 가 준다"}
+]

@@ -1,0 +1,46 @@
+{
+ "corp": {
+  "financial_ksic_prefix": "64,65,66"
+ },
+ "security": {
+  "backfill_end": "2026-08-20"
+ },
+ "corp_ticker": {
+  "isin8_len": 8
+ },
+ "_measured": [
+  {
+   "table": "corp",
+   "metric": "financial_ksic_prefix",
+   "value": "64,65,66",
+   "kind": "convention",
+   "sql": null,
+   "inputs": {},
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "note": "KSIC 대분류 K(금융·보험) 중분류 64 금융업 · 65 보험·연금 · 66 금융지원서비스. EQUITY_DESIGN v1.2 §4-1 induty_class 규칙. 쉼표 구분 문자열로 싣고 SQL 이 str_split 으로 푼다"
+  },
+  {
+   "table": "security",
+   "metric": "backfill_end",
+   "value": "2026-08-20",
+   "kind": "measured",
+   "sql": "SELECT max(date) FROM stg_index_daily",
+   "inputs": {},
+   "measured_at": "2026-09-05",
+   "growing": true,
+   "note": "백필 상한 거래일. 이 날까지 listing/etf 행이 있는 종목은 '아직 살아 있다' — delist_date_krx NULL·basis unknown. EQUITY_DESIGN v1.2 §4-1·§10 P16. trading_calendar.backfill_end(S02)와 같은 값이어야 한다"
+  },
+  {
+   "table": "corp_ticker",
+   "metric": "isin8_len",
+   "value": 8,
+   "kind": "convention",
+   "sql": null,
+   "inputs": {},
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "note": "ISIN 12자 중 국가코드(2) + 발행사 식별 6자리 = 앞 8자가 법인 그룹 축. EQUITY_DESIGN v1.2 §4-1 isin8 = substr(isin,1,8)"
+  }
+ ]
+}

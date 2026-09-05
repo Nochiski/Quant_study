@@ -1297,6 +1297,140 @@ describe("FactorGraph read-only projection (P4-07)", () => {
       },
     });
   }, 15_000);
+
+  it("restores revision trace scope from history and sends the saved revision source", async () => {
+    const specHash = "7".repeat(64);
+    server.use(
+      ...graphHandlers(),
+      http.get(
+        `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
+        () =>
+          HttpResponse.json({
+            ...document("s1", 2, GRAPH_SOURCE, "그래프 전략"),
+            spec: graphSpec("s1", 2),
+            spec_hash: specHash,
+          }),
+      ),
+      http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown> & {
+          as_of: string;
+          security_ids: string[];
+        };
+        tracedStrategies.push(body);
+        return HttpResponse.json({
+          spec_hash: specHash,
+          snapshot_id: "snap",
+          registry_version: "v1",
+          plan_hash: "p".repeat(64),
+          factor_id: "momentum",
+          as_of: body.as_of,
+          provenance: {
+            kind: "saved_revision",
+            schema_version: "1.0",
+            spec_hash: specHash,
+            source_hash: "b".repeat(64),
+            strategy_id: "s1",
+            revision: 2,
+          },
+          raw: [],
+          raw_truncated: false,
+          warnings: [],
+          trace: {
+            rows: body.security_ids.map((securityId) => ({
+              node_id: "mom_252",
+              operation: "time_series.momentum",
+              as_of: body.as_of,
+              security_id: securityId,
+              value: 0.2,
+              status: "ok",
+              inputs: [],
+            })),
+            offset: 0,
+            limit: body.security_ids.length,
+            returned: body.security_ids.length,
+            has_more: false,
+          },
+          target: {
+            signal_as_of: body.as_of,
+            execution_on: "2026-09-01",
+            candidates: body.security_ids.map((securityId) => ({
+              as_of: body.as_of,
+              security_id: securityId,
+              sector_id: null,
+              eligible: true,
+              composite_score: 0.2,
+              rank: 1,
+              selected: true,
+              side: "long",
+              exclusion_reasons: [],
+              target_weight: 0.05,
+            })),
+            targets: [],
+          },
+        });
+      }),
+    );
+    const nodePath = "%2Ffactors%2Ffactors%2F0%2Fgraph%2Fnodes%2F1";
+    const initial = `/research/strategies/s1/revisions/2?asOf=2026-08-31&security=sec-r&path=${nodePath}`;
+    const history = mount(initial);
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "추적 실행" })).toBeEnabled(),
+    );
+    expect(screen.getByLabelText("기준일")).toHaveValue("2026-08-31");
+    expect(screen.getByRole("textbox", { name: "종목 ID" })).toHaveValue(
+      "sec-r",
+    );
+    expect(screen.getByRole("combobox", { name: "노드" })).toHaveValue(
+      "mom_252",
+    );
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    expect(await screen.findByText("5.00%")).toBeInTheDocument();
+    expect(tracedStrategies[0]).toMatchObject({
+      as_of: "2026-08-31",
+      security_ids: ["sec-r"],
+      node_ids: ["mom_252"],
+      strategy_source: {
+        kind: "saved_revision",
+        strategy_id: "s1",
+        revision: 2,
+        expected_spec_hash: specHash,
+      },
+    });
+
+    act(() => {
+      history.push(
+        `/research/strategies/s1/revisions/2?asOf=2026-08-30&security=sec-next&path=%2Ffactors%2Ffactors%2F0%2Fgraph%2Fnodes%2F0`,
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByLabelText("기준일")).toHaveValue("2026-08-30");
+      expect(screen.getByRole("textbox", { name: "종목 ID" })).toHaveValue(
+        "sec-next",
+      );
+      expect(screen.getByRole("combobox", { name: "노드" })).toHaveValue(
+        "close",
+      );
+    });
+
+    act(() => history.back());
+    await waitFor(() => {
+      expect(screen.getByLabelText("기준일")).toHaveValue("2026-08-31");
+      expect(screen.getByRole("textbox", { name: "종목 ID" })).toHaveValue(
+        "sec-r",
+      );
+      expect(screen.getByRole("combobox", { name: "노드" })).toHaveValue(
+        "mom_252",
+      );
+    });
+    act(() => history.forward());
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: "종목 ID" })).toHaveValue(
+        "sec-next",
+      ),
+    );
+  }, 15_000);
 });
 
 describe("StrategySpec Diff projection (P4-08)", () => {

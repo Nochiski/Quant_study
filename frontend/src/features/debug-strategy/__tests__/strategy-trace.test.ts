@@ -128,6 +128,29 @@ describe("strategy trace request contract", () => {
     });
   });
 
+  it("uses execution-source identity even when document and fingerprint identity stay unchanged", () => {
+    const selection = {
+      asOf: "2026-08-31",
+      security: "sec-a",
+      factorId: "momentum",
+      nodeId: "ranked",
+    };
+    const inline = prepareStrategyTrace(context(), selection);
+    const savedContext = context();
+    savedContext.strategySource = {
+      kind: "saved_revision",
+      strategy_id: "strategy-1",
+      revision: 3,
+      expected_spec_hash: savedContext.specHash,
+    };
+    const saved = prepareStrategyTrace(savedContext, selection);
+
+    expect(inline.kind).toBe("ready");
+    expect(saved.kind).toBe("ready");
+    if (inline.kind !== "ready" || saved.kind !== "ready") return;
+    expect(saved.ownerKey).not.toBe(inline.ownerKey);
+  });
+
   it.each([
     [
       "date",

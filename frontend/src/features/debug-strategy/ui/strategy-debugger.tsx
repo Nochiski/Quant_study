@@ -95,7 +95,7 @@ const StateNotice = ({ state }: { state: StrategyTraceState }) => {
 };
 
 const TargetResult = ({ state }: { state: StrategyTraceState }) => {
-  if (state.kind !== "success") return <StateNotice state={state} />;
+  if (state.kind !== "success") return null;
   if (state.response.target === null)
     return (
       <div className="strategy-debugger__state" role="status">
@@ -178,7 +178,7 @@ const TargetResult = ({ state }: { state: StrategyTraceState }) => {
 };
 
 const NodeResult = ({ state }: { state: StrategyTraceState }) => {
-  if (state.kind !== "success") return <StateNotice state={state} />;
+  if (state.kind !== "success") return null;
   if (state.response.trace.rows.length === 0)
     return (
       <div className="strategy-debugger__state" role="status">
@@ -475,6 +475,8 @@ export const StrategyDebugger = ({
           ))}
         </ul>
       ) : null}
+
+      <StateNotice state={trace.state} />
 
       <div className="strategy-debugger__results">
         <Tabs

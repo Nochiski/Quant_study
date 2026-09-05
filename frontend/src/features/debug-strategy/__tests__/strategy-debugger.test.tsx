@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, delay, http } from "msw";
@@ -11,6 +12,7 @@ import {
   it,
   vi,
 } from "vitest";
+import type { ReactElement, ReactNode } from "react";
 
 import {
   strategyWorkbenchApi,
@@ -56,6 +58,16 @@ const context = (sourceVersion = 3): StrategyDebuggerContext => ({
       ],
     },
   ],
+});
+
+const savedContext = (): StrategyDebuggerContext => ({
+  ...context(),
+  strategySource: {
+    kind: "saved_revision",
+    strategy_id: "strategy-1",
+    revision: 7,
+    expected_spec_hash: "spec-hash",
+  },
 });
 
 const traceResponse = (): StrategyTraceResponse => ({
@@ -171,10 +183,21 @@ const props = (debugContext: StrategyDebuggerContext | null = context()) => ({
   executionPlan: <div>backend execution plan</div>,
 });
 
+const renderDebugger = (ui: ReactElement) => {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(ui, {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    ),
+  });
+};
+
 describe("StrategyDebugger", () => {
   it("uses the generated trace contract and prioritizes exact TargetTape fields", async () => {
     const user = userEvent.setup();
-    render(<StrategyDebugger {...props()} />);
+    renderDebugger(<StrategyDebugger {...props()} />);
 
     await user.click(screen.getByRole("button", { name: "추적 실행" }));
     expect(await screen.findAllByText("0.42")).toHaveLength(2);
@@ -200,8 +223,35 @@ describe("StrategyDebugger", () => {
     expect(screen.getByText("backend execution plan")).toBeInTheDocument();
   });
 
+  it("refetches the same exact owner through the query cache", async () => {
+    const user = userEvent.setup();
+    renderDebugger(<StrategyDebugger {...props()} />);
+
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    expect(await screen.findByText("3.50%")).toBeInTheDocument();
+    expect(requests).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(await screen.findByText("3.50%")).toBeInTheDocument();
+  });
+
+  it("hides an inline success as soon as the same document becomes a saved source", async () => {
+    const user = userEvent.setup();
+    const view = renderDebugger(<StrategyDebugger {...props()} />);
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    expect(await screen.findByText("3.50%")).toBeInTheDocument();
+
+    view.rerender(<StrategyDebugger {...props(savedContext())} />);
+
+    expect(screen.getByText("저장 리비전")).toBeInTheDocument();
+    expect(screen.queryByText("3.50%")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/범위를 선택한 뒤 추적을 실행/),
+    ).toBeInTheDocument();
+  });
+
   it("never requests an invalid or stale document", () => {
-    render(<StrategyDebugger {...props(null)} />);
+    renderDebugger(<StrategyDebugger {...props(null)} />);
     expect(screen.getByRole("button", { name: "추적 실행" })).toBeDisabled();
     expect(
       screen.getByText(/현재 문서가 아직 실행 가능한 StrategySpec이 아닙니다/),
@@ -216,11 +266,13 @@ describe("StrategyDebugger", () => {
       ),
     );
     const user = userEvent.setup();
-    render(<StrategyDebugger {...props()} />);
+    renderDebugger(<StrategyDebugger {...props()} />);
+    await user.click(screen.getByRole("tab", { name: "실행 계획" }));
     await user.click(screen.getByRole("button", { name: "추적 실행" }));
     expect(
       await screen.findByText(/fingerprint가 다른 응답을 폐기/),
     ).toBeInTheDocument();
+    expect(screen.getByText("backend execution plan")).toBeInTheDocument();
     expect(screen.queryByText("3.50%")).not.toBeInTheDocument();
   });
 
@@ -239,10 +291,12 @@ describe("StrategyDebugger", () => {
       ),
     );
     const user = userEvent.setup();
-    render(<StrategyDebugger {...props()} />);
+    renderDebugger(<StrategyDebugger {...props()} />);
+    await user.click(screen.getByRole("tab", { name: "실행 계획" }));
     await user.click(screen.getByRole("button", { name: "추적 실행" }));
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("security id is unknown");
+    expect(screen.getByText("backend execution plan")).toBeInTheDocument();
   });
 
   it("renders a real empty TargetTape state without treating it as an error", async () => {
@@ -252,7 +306,7 @@ describe("StrategyDebugger", () => {
       ),
     );
     const user = userEvent.setup();
-    render(<StrategyDebugger {...props()} />);
+    renderDebugger(<StrategyDebugger {...props()} />);
     await user.click(screen.getByRole("button", { name: "추적 실행" }));
     expect(
       await screen.findByText("선택한 기준일에는 TargetTape frame이 없습니다."),
@@ -283,7 +337,7 @@ describe("StrategyDebugger", () => {
         },
       ],
     });
-    render(
+    renderDebugger(
       <StrategyDebugger
         {...props(expanded)}
         onSelectPointer={onSelectPointer}
@@ -306,7 +360,7 @@ describe("StrategyDebugger", () => {
     );
   });
 
-  it("drops a late response after sourceVersion changes even if transport ignores abort", async () => {
+  it("drops a late inline response after the same document becomes a saved source", async () => {
     let resolve: ((value: StrategyTraceResponse) => void) | undefined;
     vi.spyOn(strategyWorkbenchApi, "traceStrategy").mockReturnValue(
       new Promise((done) => {
@@ -314,17 +368,18 @@ describe("StrategyDebugger", () => {
       }),
     );
     const user = userEvent.setup();
-    const view = render(<StrategyDebugger {...props(context(3))} />);
+    const view = renderDebugger(<StrategyDebugger {...props(context())} />);
     await user.click(screen.getByRole("button", { name: "추적 실행" }));
     expect(screen.getByText(/실제 TargetTape 계산 경로/)).toBeInTheDocument();
 
-    view.rerender(<StrategyDebugger {...props(context(4))} />);
+    view.rerender(<StrategyDebugger {...props(savedContext())} />);
     await act(async () => resolve?.(traceResponse()));
     await waitFor(() =>
       expect(
         screen.getByText(/범위를 선택한 뒤 추적을 실행/),
       ).toBeInTheDocument(),
     );
+    expect(screen.getByText("저장 리비전")).toBeInTheDocument();
     expect(screen.queryByText("3.50%")).not.toBeInTheDocument();
   });
 
@@ -336,10 +391,12 @@ describe("StrategyDebugger", () => {
       }),
     );
     const user = userEvent.setup();
-    render(<StrategyDebugger {...props()} />);
+    renderDebugger(<StrategyDebugger {...props()} />);
+    await user.click(screen.getByRole("tab", { name: "실행 계획" }));
     await user.click(screen.getByRole("button", { name: "추적 실행" }));
     await user.click(screen.getByRole("button", { name: "취소" }));
     expect(screen.getByText("추적 요청을 취소했습니다.")).toBeInTheDocument();
+    expect(screen.getByText("backend execution plan")).toBeInTheDocument();
     expect(screen.queryByText("3.50%")).not.toBeInTheDocument();
   });
 });

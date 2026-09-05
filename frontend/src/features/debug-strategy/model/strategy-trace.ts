@@ -109,6 +109,18 @@ export const prepareStrategyTrace = (
     // One selected node produces at most one row per requested security.
     limit: securityIds.length,
   };
+  const sourceOwner =
+    request.strategy_source.kind === "saved_revision"
+      ? [
+          request.strategy_source.kind,
+          request.strategy_source.strategy_id,
+          request.strategy_source.revision,
+          request.strategy_source.expected_spec_hash,
+        ]
+      : [
+          request.strategy_source.kind,
+          request.strategy_source.source_hash ?? null,
+        ];
   return {
     kind: "ready",
     ownerKey: JSON.stringify([
@@ -118,6 +130,7 @@ export const prepareStrategyTrace = (
       context.expectedSnapshotId,
       context.expectedRegistryVersion,
       factor.expectedPlanHash,
+      sourceOwner,
       request.as_of,
       request.security_ids,
       request.factor_id,

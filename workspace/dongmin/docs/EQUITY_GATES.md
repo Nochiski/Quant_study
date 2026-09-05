@@ -1827,3 +1827,16 @@ workspace/dongmin/src/equity/
 | 기록형 | `apply_offset_sessions_max` | + `apply_offset_sessions_max_individual`(자기 창 기준, ≤ window 여야 한다) · `apply_offset_sessions_max_combined`(성분 창 기준). 기존 max 는 combined 포함 실측 그대로 | 지시 |
 | 합성 테스트 | — | 명목 세션 20(감자)·50(액면병합), 세션 70 에 ×4 한 번 → 둘 다 combined @70(앞 멤버 오프셋 50), EG3 pass·`n_apply_outside_window` 0·max 50/개별 0/성분 50 · 점프 95(성분 창 [15, 90] 밖) → 성분 전체 no_price_match · 성분 행을 `price_matched` 로 위장 → EG3 FAIL(창 밖 1 + 같은 날 개별 1) | `test_합성_명목일이_떨어진_성분_*` |
 | 절단본 | combined 0 | 변화 없음(ok 3 nominal · EG8 3차 수치 동일) | DESIGN §10 P23 |
+**S21 축소 정정 — 워크벤치 어댑터 · contract `ADAPTERS` · MVP-B 백테스트 (2026-09-05, 절단본 실측 → `backend/src/strategy_workbench/adapters/outbound/equity_duckdb/`)**
+
+| 항목 | 초안(WORKFLOW §3-5·§4 DoD) | 정정 | 근거 |
+|---|---|---|---|
+| S21 축소 범위 | `RawObservationPort` 만 | 5포트 전부(필드는 3) — `build_container`·`BacktestRunService` 가 `EquityDataPort`·`FactorMetadataPort`·`FactorObservationPort`·`BacktestDataPort` 를 함께 요구한다. stub 아님(같은 패널 코어) | DESIGN §7 표 |
+| contract `ADAPTERS` | `[mock]` | `[mock, equity_duckdb]` — 어댑터 id 를 매개변수화하고 `adapter` fixture(indirect)가 세운다. 각 어댑터는 `FIELDS` 중 `list_fields()` 가 선언한 부분집합으로 답한다(equity 는 `price.close`·`price.market_cap`); `sector_id` 단언은 `classification.sector` 제공 여부에 따른다. 손 픽스처 `backend/tests/equity_fixture.build_workbench_root`(카탈로그 매크로는 픽스처 안 `CREATE MACRO`, `equity.views` 템플릿 사본) | `backend/tests/contract/test_raw_observation_port.py` 27 pass |
+| DoD "미지원 필드 `unavailable` 명시" | `list_fields()` 에 `unavailable` 표시 | `DatasetFieldProfile` 에 상태 컬럼이 없어 목록 밖 + 질의 시 `INVALID_QUERY`(detail `unavailable field_id … supported=[…]`) 로 명시. mock 폴백 없음 | 도메인 무수정 원칙 |
+| DoD "같은 셀에 같은 값·공개일" | — | `test_raw_port_and_research_panel_agree_cell_by_cell` 이 equity 어댑터에서도 pass | 위 |
+| DoD "`build_container(equity_adapter="duckdb")` 부팅" | — | `equity_root` 인자 추가(없으면 ValueError, 미지 어댑터는 unsupported). `test_container_boots_with_the_duckdb_adapter` | `bootstrap/_container.py` |
+| EG-C ⑥~⑨ | S21 | 미실행 — 필드 3 축소라 재무·컨센서스 항이 없다. 본판(S19·S20 뒤)에서 | — |
+| MVP-B 재현(`tape_hash` 동일) | S22 | 같은 snapshot·spec 에서 `tape_hash` 결정적(P25: adj `75aa2447…`, raw `a8df8452…`). 재현 2회는 S22 | DESIGN §10 P25 |
+| 커널 정지 세션 | — | `TargetTapeStrategy.on_event` 가 bar 없는 목표를 보유 유지/건너뛰기(`no_bar=[…]` reason). 커널 정책이 생기면 되돌린다 | `backend/tests/test_target_tape_strategy.py` |
+| 워밍업 부족 | — | start 앞 캘린더가 요청 워밍업보다 짧으면 잘라내고 `warnings` 로 알린다(NO_DATA 아님) — 첫 유효 스코어가 늦어질 뿐 값을 합성하지 않는다 | 어댑터 `_window` |

@@ -118,7 +118,7 @@ EG0 입력 고정 · EG1 격자 등식(`− n_dedup − Σ n_reject` 일반형, 
 | **S18** | 의견·목표가 | `opinion_daily`·`opinion_broker_daily` | `stg_analyst_summary/broker`·`stg_v3_analyst_opinions`·`stg_wise_coverage` | ∥ | S01 |
 | **S19** | 공개시점 대장 | `dataset_profile`(field_id · `recommended_lag_sessions` · `supported_cell_kinds` · `point_in_time` · `coverage_*` · `coverage_by_mktcap_quintile`) | 전 슬라이스 `_meta` | — | S08~S18 |
 | **S20** | **팩터 준비도** | `factor_readiness`(54행: id·required_columns·status ready/blocked·reason·owner·first_usable_date) + **EG10** | S19 + `FACTORS.md` + `backend/FACTORS.md` + `EQUITY_FIELD_MAP.md` | — | S19 |
-| **S21** | **워크벤치 어댑터** | `adapters/outbound/equity_duckdb`(5포트) · contract suite `ADAPTERS` 매개변수화 · `build_container(equity_adapter="duckdb")` | S07·S19·S20 | — | S20 |
+| **S21** | **워크벤치 어댑터** | `adapters/outbound/equity_duckdb`(5포트) · contract suite `ADAPTERS` 매개변수화 · `build_container(equity_adapter="duckdb")`. **축소판 구현(09-05, MVP-B)**: 필드 3(`price.close`·`price.market_cap`·`price.adj_close`) 위에 5포트 전부(컨테이너·파이프라인이 요구) · contract `ADAPTERS=[mock, equity_duckdb]` green · `build_container(equity_adapter="duckdb", equity_root=…)` · `scripts/run_mvp_backtest.py` 로 절단본 백테스트 1회 완주(DESIGN §7·§10 P25). 남은 것(S19·S20 뒤 본판): 나머지 필드 39 · `dataset_profile` 랙 · `sector_id` · 서버 실측 | S07·S03B(축소) / S19·S20(본판) | — | S07(축소) · S20(본판) |
 | **S22** | 마무리·인계 | `baseline.json` 고정 · `EQUITY_HANDOFF.md` · 재현성 2회 · MVP-B 백테스트 재현 | 전부 | — | S21 |
 
 병렬 최대 폭: S03B 뒤 6갈래(S08·S09·S10·S11+S12·S15+S16·S17+S18). 서버 빌드는 `flock` 직렬(RAM 15GB), 병렬은 픽스처·TDD·로컬 빌드까지.
@@ -145,6 +145,8 @@ T0 인프라(`equity/model.py`·`inputs.py`(resolve·pin·create_views·declared
 ### 3-5. MVP 경로 (MVP-B, 권고)
 
 S00·S01·S02·S03·S04·S05(축소: split·bonus·capred 만)·S06·S03B·S07 + S21 축소(`RawObservationPort` 만, 필드 `price.close`·`price.adj_close`·`price.market_cap`) → 워크벤치 파이프라인으로 `price.momentum_12_1` 월간 리밸런싱 백테스트 1회(2011-01~2026-08-20). 한계(명시): 팩터 7개(M·R 군) · PR 수익률 · 섹터 중립화 불가 · 유니버스 `all` 만 · rights/spinoff 불연속은 실현손익 · 2026-08-21 이후 불가. 되돌리기 비싼 결정은 `security_id`·`universe_id` 어휘뿐(FIELD_MAP §1).
+
+**정정(S21 실측, 09-05)**: ① "`RawObservationPort` 만" 은 성립하지 않는다 — `build_container` 와 `BacktestRunService` 가 `EquityDataPort`(snapshot·list_fields·load_universe·load_panel)·`FactorMetadataPort`(그래프 컴파일)·`FactorObservationPort`(타입 계약)·`BacktestDataPort`(bar·구간·사건 피드)를 함께 요구하므로 5포트를 같은 패널 코어 위에 구현했다(필드는 3 그대로). ② "유니버스 `all` 만" 도 철회 — S03B 정책표가 있어 `krx.common-stock`(계약 기본값)·`krx.investable` 이 정책 driven 으로 풀린다. ③ 레지스트리 그래프는 `price.close` 를 요구하므로(#64) `scripts/run_mvp_backtest.py` 가 FieldNode 만 `price.adj_close` 로 바꿔 돌린다(`--price-field price.close` 로 원주가 비교 run). ④ 커널이 bar 없는 세션(정지)의 비중 목표를 수량화하지 못해 워크벤치 `TargetTapeStrategy` 에 보유 유지/건너뛰기 규칙을 넣었다(DESIGN §7 엔진 측 한계). ⑤ 워밍업 273세션(252+21)은 2011-01-03 앞 캘린더(2010-01-04~, 247세션)보다 길어 어댑터가 잘라내고 경고를 남긴다 — 첫 유효 스코어는 2011-02 부터. 실행·수치는 DESIGN §10 P25.
 
 ---
 
@@ -199,7 +201,7 @@ S00·S01·S02·S03·S04·S05(축소: split·bonus·capred 만)·S06·S03B·S07 +
 | 1~4 | 산출 형식 · 판본·게이트 · 팩터 ID 54 · 유니버스 정책표 | 확정(09-05 "작업 진행") |
 | 5 | **엔진 커널 3포트 + 워크벤치 5포트, 단일 어댑터 `equity_duckdb`**(v1.1 의 "팩터층 주입" 폐기) | 확정(재기술) |
 | **6** | `price.close` = 원주가 · `price.adj_close` = as-of 조정가 두 필드 제공. 레지스트리의 수익률·모멘텀·변동성 팩터가 `adj_close` 를 쓰도록 워크벤치 이슈 발행 | **확정(09-05)** |
-| **7** | 워크벤치 어댑터는 duckdb 필요 → `backend` optional-dependency `equity = ["duckdb>=1.5"]` 추가(코드 규칙 "새 라이브러리 금지" 예외, S21 에서 반영). 커널 어댑터(S07)는 pyarrow 로 새 의존성 0 | **확정(09-05)** |
+| **7** | 워크벤치 어댑터는 duckdb 필요 → `backend` optional-dependency `equity = ["duckdb>=1.5"]` 추가(코드 규칙 "새 라이브러리 금지" 예외, S21 에서 반영). 커널 어댑터(S07)는 pyarrow 로 새 의존성 0 | **확정(09-05) · 반영(S21 축소 — `backend/pyproject.toml`·`uv.lock` duckdb 1.5.5·CI `uv sync --extra parquet --extra equity`)** |
 
 ---
 

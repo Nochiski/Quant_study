@@ -26,7 +26,7 @@
 | `price.close` | `price_daily.close`(원주가) | **부분** | **핵심 충돌**: registry `price.momentum_12_1` 은 조정가를 전제한다. 원주가를 그대로 주면 분할 구간 모멘텀이 틀린다. **해소안: `price.close`(원주가) + `price.adj_close`(`v_adj_price`, base = query.end) 2필드로 분리하고 엔진 registry 의 가격 그래프를 `price.adj_close` 로 바꾸는 이슈를 엔진 저장소에 발행** |
 | `price.open` | `price_daily.open` | **부분** | NULL 유지 정책 · `Bar.open` 은 필수·>0 (GAP-14) |
 | `price.volume` | `price_daily.volume_shr` / `v_adj_volume` | 지원 | 조정 여부 명시 필요 |
-| `price.market_cap` | `price_daily.mktcap_krw` / `v_firm_mktcap` | 지원 | 랙 1세션(익일 지식) |
+| `price.market_cap` | `price_daily.mktcap_krw` / `v_firm_mktcap` | 지원 | 랙 1세션(익일 지식) — **S21 축소 어댑터는 0**(`price_daily.available_date = date`, 종가와 같은 시점 확정; `dataset_profile`(S19)에서 확정, DESIGN §11) |
 | `price.shares_outstanding` | `price_daily.shares_out` | 지원 | |
 | `price.trading_value` | `price_daily.value_krw` | 지원 | |
 | `benchmark.close` | `index_daily.close_idx` | **미지원(현 설계)** | GAP-09 — security 축이 아님 |
@@ -66,6 +66,7 @@
 ## 3. 집계
 
 - 지원 17 · 부분 15 · 미지원 9 · 미확인 1 (2026-09-05, 슬라이스 착수 전 판정).
+- **S21 축소 어댑터(09-05)가 실제로 내는 field_id 는 3** — `price.close`·`price.market_cap`·`price.adj_close`(equity 내부 스코프, 위 표 밖). 나머지 39 는 `list_fields()` 에 없고 질의하면 `INVALID_QUERY`(detail `unavailable`)다. `price.adj_close` 의 base 는 질의 창의 마지막 세션(`v_adj_price(as_of := end)`)이며 수준값은 PIT 가 아니고 비율만 PIT 다(DESIGN §7·§11). 레지스트리 가격 팩터가 `price.close` 를 요구하는 충돌(#64)은 미해결 — `scripts/run_mvp_backtest.py` 는 FieldNode 를 `price.adj_close` 로 바꿔 돈다.
 - 미지원 9 는 원천 부재(대량매매·반대매매·담보·잠정실적·지수구성 PIT·텍스트 감성·매출총이익·차입금 계열)로, 어댑터 `list_fields()` 가 `unavailable` 로 답한다. 레지스트리 50 팩터 중 이 필드에 걸린 팩터는 `factor_readiness.status='blocked'`.
 - `financial.gross_profit` 은 `fin_map.py` 에 `gross_profit` 항목이 있으므로 4단계 계정 매트릭스에 추가하면 **지원**으로 바뀐다(S12 첫 작업에서 판정).
 

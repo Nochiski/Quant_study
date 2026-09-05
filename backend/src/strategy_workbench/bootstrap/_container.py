@@ -12,6 +12,9 @@ from strategy_workbench.adapters.outbound.document_codec.facade.codec import Rua
 from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import (
     BacktestEnginePortfolioAdapter,
 )
+from strategy_workbench.adapters.outbound.equity_duckdb.facade.provider import (
+    EquityDuckdbAdapter,
+)
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
     MockEquityDataAdapter,
 )
@@ -50,17 +53,35 @@ class BackendContainer:
     backtest_runs: BacktestRunService
 
 
+EQUITY_ADAPTERS = ("mock", "duckdb")
+
+
 def build_container(
     *,
     equity_adapter: str = "mock",
     artifact_root: Path | None = None,
+    equity_root: Path | None = None,
 ) -> BackendContainer:
-    """Build one explicit dependency graph; unknown adapters fail instead of falling back."""
-    if equity_adapter != "mock":
+    """Build one explicit dependency graph; unknown adapters fail instead of falling back.
+
+    `equity_adapter="duckdb"` reads the equity layer at `equity_root` (S21); it needs the
+    `equity` optional extra (duckdb) and fails loudly when the root or the extra is missing.
+    """
+    equity_data: MockEquityDataAdapter | EquityDuckdbAdapter
+    if equity_adapter == "mock":
+        equity_data = MockEquityDataAdapter.demo()
+    elif equity_adapter == "duckdb":
+        if equity_root is None:
+            raise ValueError(
+                "equity_adapter='duckdb' requires equity_root — "
+                "pass the directory holding <table>/MANIFEST.json and equity.duckdb"
+            )
+        equity_data = EquityDuckdbAdapter(equity_root)
+    else:
         raise ValueError(
-            f"unsupported equity adapter — equity_adapter={equity_adapter!r} available=('mock',)"
+            f"unsupported equity adapter — equity_adapter={equity_adapter!r} "
+            f"available={EQUITY_ADAPTERS}"
         )
-    equity_data = MockEquityDataAdapter.demo()
     engine_portfolio = BacktestEnginePortfolioAdapter()
     strategy_repository = InMemoryStrategyRepository()
     factor_registry = build_default_factor_registry()

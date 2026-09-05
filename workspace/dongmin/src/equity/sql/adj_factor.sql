@@ -406,7 +406,9 @@ SELECT
     CASE WHEN o.factor_source = 'mktcap_neutral' THEN o.sf_raw ELSE 1 END             AS share_factor,
     o.factor_source,
     (o.factor_source = 'mktcap_neutral')                                             AS factor_ok,
-    CASE WHEN o.is_new THEN nx.date ELSE least(o.announce_date, nx.date) END         AS available_date,
+    -- 캘린더 마지막 세션의 기준가 사건은 다음 세션이 없다(서버 09-05 EG2 NULL 1) → 적용일(당일)로.
+    coalesce(CASE WHEN o.is_new THEN nx.date ELSE least(o.announce_date, nx.date) END,
+             o.apply_date)                                                            AS available_date,
     'derived'                                                                        AS available_basis,
     NULL::VARCHAR                                                                    AS reject_reason
 FROM out_all o

@@ -98,6 +98,43 @@ const server = setupServer(
     `${API}/api/v1/strategy-drafts/:draftId`,
     () => new HttpResponse(null, { status: 204 }),
   ),
+  http.get(`${API}/api/v1/strategies`, ({ request }) => {
+    const url = new URL(request.url);
+    const offset = Number(url.searchParams.get("offset") ?? 0);
+    const limit = Number(url.searchParams.get("limit") ?? 20);
+    const items = [
+      {
+        strategy_id: "s1",
+        latest_revision: 2,
+        title: "Alpha strategy",
+        spec_hash: "a".repeat(64),
+        updated_at: "2026-09-05T00:00:00Z",
+      },
+    ];
+    return HttpResponse.json({
+      items: offset === 0 ? items : [],
+      total: items.length,
+      offset,
+      limit,
+    });
+  }),
+  http.get(`${API}/api/v1/strategies/:strategyId/revisions`, ({ params }) =>
+    HttpResponse.json({
+      items: [1, 2].map((revision) => ({
+        strategy_id: params.strategyId,
+        revision,
+        spec_hash: `${revision}`.repeat(64).slice(0, 64),
+        source_hash: "b".repeat(64),
+        source_format: "yaml",
+        origin: "document",
+        change_note: null,
+        created_at: `2026-09-0${revision}T00:00:00Z`,
+      })),
+      total: 2,
+      offset: 0,
+      limit: 20,
+    }),
+  ),
   http.post(`${API}/api/v1/strategy-documents/compile`, async ({ request }) => {
     const body = (await request.json()) as { source: string };
     return HttpResponse.json({
@@ -371,6 +408,62 @@ describe("App Shell routes", () => {
     );
   });
 
+  it("browses saved strategies and opens immutable revision history", async () => {
+    const user = userEvent.setup();
+    mount("/research/strategies");
+    expect(
+      await screen.findByRole("heading", { name: "전략 이력" }),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("Alpha strategy")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "최신본 열기" })).toHaveAttribute(
+      "href",
+      "/research/strategies/s1/revisions/2",
+    );
+    await user.click(screen.getByRole("button", { name: "Revision 펼치기" }));
+    expect(await screen.findByText("저장 revision 목록")).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "편집" })).toHaveLength(2);
+    expect(screen.getAllByRole("link", { name: "Diff" })[0]).toHaveAttribute(
+      "href",
+      expect.stringContaining("view=diff"),
+    );
+  });
+
+  it("canonicalizes malformed and out-of-range strategy list offsets", async () => {
+    const beyond = mount("/research/strategies?offset=20");
+    expect(await screen.findByText("Alpha strategy")).toBeInTheDocument();
+    await waitFor(() => expect(beyond.location.search).toBe(""));
+
+    cleanup();
+    const malformed = mount("/research/strategies?offset=1e2");
+    expect(await screen.findByText("Alpha strategy")).toBeInTheDocument();
+    await waitFor(() => expect(malformed.location.search).toBe(""));
+  });
+
+  it("shows explicit loading, empty, and error states for strategy history", async () => {
+    server.use(
+      http.get(`${API}/api/v1/strategies`, async () => {
+        await delay(250);
+        return HttpResponse.json({ items: [], total: 0, offset: 0, limit: 20 });
+      }),
+    );
+    mount("/research/strategies");
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "불러오는 중입니다",
+    );
+    expect(
+      await screen.findByText("저장된 전략이 없습니다"),
+    ).toBeInTheDocument();
+
+    cleanup();
+    server.use(
+      http.get(`${API}/api/v1/strategies`, () => HttpResponse.error()),
+    );
+    mount("/research/strategies");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "전략 목록을 불러올 수 없습니다",
+    );
+  });
+
   it("supports back and forward between routes", async () => {
     const user = userEvent.setup();
     const history = mount("/research/backtests/run-1");
@@ -378,7 +471,7 @@ describe("App Shell routes", () => {
       await screen.findByRole("heading", { name: "백테스트 실행" }),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("link", { name: "전략" }));
-    await screen.findByRole("heading", { name: "새 전략" });
+    await screen.findByRole("heading", { name: "전략 이력" });
     history.back();
     await waitFor(() =>
       expect(history.location.pathname).toBe("/research/backtests/run-1"),
@@ -388,7 +481,7 @@ describe("App Shell routes", () => {
     ).toBeInTheDocument();
     history.forward();
     await waitFor(() =>
-      expect(history.location.pathname).toBe("/research/strategies/new"),
+      expect(history.location.pathname).toBe("/research/strategies"),
     );
   });
 });

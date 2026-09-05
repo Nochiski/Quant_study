@@ -1,4 +1,5 @@
 export {
+  strategiesQuery,
   strategyContractQuery,
   strategyDiffQuery,
   strategyDocumentQuery,
@@ -6,7 +7,12 @@ export {
   strategyRevisionsQuery,
   strategySchemaQuery,
 } from "./model/strategy-queries";
-export type { RevisionSummary, StrategyDocument } from "../../shared/api";
+export type {
+  PageStrategySummary,
+  RevisionSummary,
+  StrategyDocument,
+  StrategySummary,
+} from "../../shared/api";
 export type {
   DataStep,
   SavedStrategy,

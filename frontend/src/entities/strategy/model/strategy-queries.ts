@@ -2,6 +2,14 @@ import { queryOptions } from "@tanstack/react-query";
 
 import { strategyWorkbenchApi } from "../../../shared/api";
 
+export const strategiesQuery = (
+  page: { offset?: number; limit?: number } = {},
+) =>
+  queryOptions({
+    queryKey: ["strategies", page.offset ?? 0, page.limit ?? 50],
+    queryFn: () => strategyWorkbenchApi.listStrategies(page),
+  });
+
 /** A saved revision's exact document is immutable, so it never goes stale once loaded. */
 export const strategyDocumentQuery = (strategyId: string, revision: number) =>
   queryOptions({

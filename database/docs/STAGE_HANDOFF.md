@@ -6,6 +6,7 @@
 - 위치: 서버 `~/quant-ledger/data/stage/<table>/`. **`MANIFEST.json` 경유 필수** — `current_build` 의 `partitions[].path` 만 읽는다. 맨 glob 금지(구버전 `v=…` 디렉토리가 keep=3 으로 공존한다).
 - 파티션: `date_axis`·`receipt_axis` 는 `v=<build>/year=YYYY/*.parquet`, `whole` 은 `v=<build>/part0.parquet`. `read_parquet(..., hive_partitioning=true)` 로 읽으면 `v`·`year` 하이브 컬럼이 붙는다(파일 안에는 없음).
 - 판정: `_meta.json`(파티션당) 의 `gates`·`n_reject`·`rcept_map_miss`·`coverage_from`·`version_loss_upstream`·`observed_date_exempt`. reject 행은 `v=<build>/_reject/part.parquet`(원문 TEXT + `reject_reason`).
+- **equity 가 import 하는 stage 심볼(09-05 합의)**: `stage.manifest`(`BuildRecord`·`load`·`commit` — `BuildRecord.inputs` 는 equity 전용, stage 빌드는 빈 dict) · `stage.gates`(`GateResult`·`GateStatus`) · `stage.baseline.write`. 이 셋의 시그니처 변경은 equity 세션에 통지. 서버 배포는 main 의 `database/src/stage` 를 rsync 하므로 서버 파일 직접 수정은 다음 배포에 사라진다 — 변경은 main 으로.
 - 회귀 기준: `data/stage/baseline.json` — `{table: {metric: value, thresholds}}` + `_measured[]`(SQL·measured_at·growing).
 
 ## 2. 공통 골격 (모든 테이블)

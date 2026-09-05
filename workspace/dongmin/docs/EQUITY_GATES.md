@@ -1698,3 +1698,15 @@ workspace/dongmin/src/equity/
 | §2 매트릭스 7·8행 · FX-1-017 (S03 구현, 09-05) | 7행 픽스처 `006,011,012,013,014` · 8행 `FX-1-015` · FX-1-017 키 (`liquid`, 1) | §4 카탈로그와 어긋났다 — FX-1-012(`no_trade_run`)는 S03B 컬럼, FX-1-015 는 KOSDAQ 관리종목(`universe_daily`), 정책표 픽스처는 FX-1-017. v1.2 가 S03 을 `all` 만으로 좁혔으므로 FX-1-017 키는 (`all`, 1) | WORKFLOW v1.2 §3-1 S03/S03B 분리 |
 | EG3-P09 (S03 구현, 09-05) | 술어 그대로 | 술어는 유지하되 실효 범위를 명시 — `end_reason ∈ {delisted, coverage_gap}` 끝의 열린 정지는 정상(재거래 없음 930·현재 정지 중)이라 술어 밖이고 `n_halt_open_at_delist`·`n_halt_open_at_coverage_end` 로 기록. 술어가 잡는 것은 `data_gap` 끝뿐이며 부정 픽스처는 합성 `security_span` 입력의 `end_reason='data_gap'` | `rules_s03.eg3_universe` · `tests/test_equity_s03_universe.py` |
 
+**S04 `price_daily` 구현 정정 (2026-09-05, `rules_s04.py`)**
+
+| 항목 | 초안 | 정정 | 근거 |
+|---|---|---|---|
+| EG7-P01 술어 | `close <= 0 ∨ (open ≤ 0 ∧ open IS NOT NULL) …`(말줄임) | `close ≤ 0 ∨ open ≤ 0 ∨ high ≤ 0 ∨ low ≤ 0` (NULL 은 위반 아님 — stage 가 O/H/L '0' 을 이미 NULL 로 둔다) → `_reject/nonpositive_price/`. 격리 사유 `off_calendar`(`trading_calendar` 에 없는 date) 추가 | stage `rules_krx` O/H/L `zero_is_missing` · 절단본 `close ≤ 0` 0건 |
+| §3-⑧ 두 번째 식(교집합 0) | 별도 SQL | 프레임 EG1 은 등식 1개만 받는다. 두 원천을 **UNION ALL(dedup 없음)** 하므로 겹치면 키 중복이 되어 EG3-P01 이 먼저 폐기하고, 명시 건수는 `EG3_price_daily.n_src_overlap` 이 싣는다(EG3 뒤에 돌아 겹침 시 `skip(upstream_failed)`). 절단본 교집합 0 | `tests/test_equity_s04_price.py::test_두_원천이_겹치면_키_중복으로_EG3가_폐기한다` |
+| EG20 술어 | `close`·`volume_shr` 2축 | `open`·`high`·`low`·`value_krw` 까지 6축(원칙 ② 는 OHLC 전부). 컬럼별 건수 `n_<col>_changed` 를 metrics 에, 하나라도 >0 이면 FAIL. 어느 원천에도 없는 산출 행은 coalesce NULL 로 같이 잡힌다 | 분할 전 `close/50` 주입 → 2,060행 FAIL, 다른 축 0 |
+| EG8-P01(`krx_kis_close_ratio` 대조) | 첫 빌드 `skip(no_baseline)` | **S04 미구현** — 독립 KIS 가격 stage 테이블이 없고 누적계수(S06)가 있어야 대조가 된다. S06 이후 `adj_factor` 와 함께 붙인다. `_meta` 에 EG8 항목 자체가 없다(skip 도 아님) | DESIGN §4-2 (`krx_kis_close_ratio` 컬럼 삭제) |
+| FX-2-005 · FX-2-006 키 | "ETF 1종 1일" · "`volume_shr=0` 인 날 1" | (`069500`, 2010-01-04) · (`000030`, 2019-01-09, 폐지 전 거래정지 22일 중 첫날). FX-2-002 는 (`005930`, 2018-05-03·05-04) 쌍 — 05-03 은 `volume_shr=0`(분할 정지)이라 `reference` 이기도 하다 | `src/equity/fixtures/price_daily.json` |
+| `_meta` 기록형 | `open IS NULL ∧ volume>0`(GAP-14)만 | `EG3_price_daily.metrics` 에 GAP-14 + `n_off_calendar`·`n_nonpositive_price`·`n_price_kind_null`·`n_shares_out_null_stock`·`n_par_value_null_stock`·`n_mktcap_stage_mismatch`·`n_shares_out_stage_mismatch`·`n_reference_with_value`. 전부 통과 조건 아님 — 서버 실측 뒤 승격 판단 | GATES §0-1 기록형 |
+| baseline 상수 | — | S04 는 새 상수 없음(`baseline_seed_s04.json` 이 이유를 기록). EG7 비율은 코드 기본값, 2회차 이관은 오케스트레이터 | §1 EG7 |
+

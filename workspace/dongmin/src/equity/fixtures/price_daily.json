@@ -1,0 +1,125 @@
+[
+ {"case": "fx2_002_split_eve_close_unadjusted",
+  "key": {"ticker": "005930", "date": "2018-05-03"}, "column": "close", "expect": "2650000",
+  "source": "stage:stg_price_daily.close_krw — 절단본 원자료 1행 그대로 (stage FX stg_price_daily.json 과 같은 값)",
+  "expect_source": "stage:stg_price_daily.close_krw", "fixture_class": "positive",
+  "note": "FX-2-002. 삼성전자 50:1 액면분할 전일. 수정주가를 넣으면 53,000 언저리가 된다 — 원칙 ② 위반은 여기서 잡힌다"},
+
+ {"case": "fx2_002_split_day_close_unadjusted",
+  "key": {"ticker": "005930", "date": "2018-05-04"}, "column": "close", "expect": "51900",
+  "source": "stage:stg_price_daily.close_krw — 절단본 원자료. 분할 당일, 소급 조정 없음",
+  "expect_source": "stage:stg_price_daily.close_krw", "fixture_class": "positive",
+  "note": "앞 행과 짝. 2,650,000 → 51,900 의 불연속이 그대로 남아야 S06 계수가 설 자리가 있다"},
+
+ {"case": "fx2_002_split_eve_shares_out",
+  "key": {"ticker": "005930", "date": "2018-05-03"}, "column": "shares_out", "expect": "128386494",
+  "source": "stage:stg_listing_daily.list_shrs — 절단본 같은 날 listing 원장 (가격 원장 list_shrs 와 동일값)",
+  "expect_source": "stage:stg_listing_daily.list_shrs", "fixture_class": "positive"},
+
+ {"case": "fx2_002_split_day_shares_out",
+  "key": {"ticker": "005930", "date": "2018-05-04"}, "column": "shares_out", "expect": "6419324700",
+  "source": "stage:stg_listing_daily.list_shrs — 절단본 같은 날 listing 원장. 128,386,494 × 50",
+  "expect_source": "stage:stg_listing_daily.list_shrs", "fixture_class": "positive",
+  "note": "주식수는 분할 당일부터 50배. 전일 값을 이월(forward-fill)하면 여기서 어긋난다"},
+
+ {"case": "fx2_002_split_eve_par_value",
+  "key": {"ticker": "005930", "date": "2018-05-03"}, "column": "par_value_krw", "expect": "5000.00",
+  "source": "stage:stg_listing_daily.par_value_krw — 절단본 같은 날 listing 원장. DECIMAL(9,2) 문자열 그대로",
+  "expect_source": "stage:stg_listing_daily.par_value_krw", "fixture_class": "positive"},
+
+ {"case": "fx2_002_split_day_par_value",
+  "key": {"ticker": "005930", "date": "2018-05-04"}, "column": "par_value_krw", "expect": "100.00",
+  "source": "stage:stg_listing_daily.par_value_krw — 절단본 같은 날 listing 원장. 액면 5,000 → 100",
+  "expect_source": "stage:stg_listing_daily.par_value_krw", "fixture_class": "positive"},
+
+ {"case": "fx2_002_split_eve_mktcap",
+  "key": {"ticker": "005930", "date": "2018-05-03"}, "column": "mktcap_krw", "expect": "340224209100000",
+  "source": "hand — 2,650,000 × 128,386,494 = 340,224,209,100,000 (절단본 stg_price_daily.mktcap_krw 와 같은 값)",
+  "expect_source": "hand", "fixture_class": "positive",
+  "note": "DECIMAL(18,0) 무손실. DOUBLE 로 곱하면 15자리에서 끝이 흔들린다"},
+
+ {"case": "fx2_002_split_eve_volume_is_zero",
+  "key": {"ticker": "005930", "date": "2018-05-03"}, "column": "volume_shr", "expect": "0",
+  "source": "stage:stg_price_daily.volume_shr — 절단본 원자료. 분할 준비 거래정지(04-30~05-03) 마지막 날",
+  "expect_source": "stage:stg_price_daily.volume_shr", "fixture_class": "positive"},
+
+ {"case": "fx2_002_split_eve_is_reference",
+  "key": {"ticker": "005930", "date": "2018-05-03"}, "column": "price_kind", "expect": "reference",
+  "source": "hand — volume_shr = 0 → 'reference'. 정지 중에도 KRX 는 기준가(직전 종가)를 싣는다",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "fx2_005_etf_close",
+  "key": {"ticker": "069500", "date": "2010-01-04"}, "column": "close", "expect": "22710",
+  "source": "stage:stg_etf_price_daily.close_krw — 절단본 원자료 (KODEX 200 첫 거래일)",
+  "expect_source": "stage:stg_etf_price_daily.close_krw", "fixture_class": "positive",
+  "note": "FX-2-005. ETF 가 같은 테이블에 실린다 — 합집합을 빠뜨리면 이 행 자체가 없다"},
+
+ {"case": "fx2_005_etf_price_kind",
+  "key": {"ticker": "069500", "date": "2010-01-04"}, "column": "price_kind", "expect": "trade",
+  "source": "hand — 절단본 volume_shr 883,268 > 0",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "fx2_005_etf_volume",
+  "key": {"ticker": "069500", "date": "2010-01-04"}, "column": "volume_shr", "expect": "883268",
+  "source": "stage:stg_etf_price_daily.volume_shr — 절단본 원자료",
+  "expect_source": "stage:stg_etf_price_daily.volume_shr", "fixture_class": "positive"},
+
+ {"case": "fx2_005_etf_value",
+  "key": {"ticker": "069500", "date": "2010-01-04"}, "column": "value_krw", "expect": "20030894705",
+  "source": "stage:stg_etf_price_daily.value_krw — 절단본 원자료",
+  "expect_source": "stage:stg_etf_price_daily.value_krw", "fixture_class": "positive"},
+
+ {"case": "fx2_005_etf_shares_out_from_etf_ledger",
+  "key": {"ticker": "069500", "date": "2010-01-04"}, "column": "shares_out", "expect": "57300000",
+  "source": "stage:stg_etf_price_daily.list_shrs — ETF 는 listing 원장에 없어 ETF 원장의 상장좌수",
+  "expect_source": "stage:stg_etf_price_daily.list_shrs", "fixture_class": "positive"},
+
+ {"case": "fx2_005_etf_par_value_is_null",
+  "key": {"ticker": "069500", "date": "2010-01-04"}, "column": "par_value_krw", "expect": null,
+  "source": "hand — ETF 는 액면 개념이 없고 listing 원장에도 없다(P8: 0건). 결측은 결측",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "fx2_005_etf_mktcap",
+  "key": {"ticker": "069500", "date": "2010-01-04"}, "column": "mktcap_krw", "expect": "1301283000000",
+  "source": "hand — 22,710 × 57,300,000 = 1,301,283,000,000 (절단본 stg_etf_price_daily.mktcap_krw 와 같은 값)",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "fx2_006_no_trade_day_is_reference",
+  "key": {"ticker": "000030", "date": "2019-01-09"}, "column": "price_kind", "expect": "reference",
+  "source": "hand — 절단본 volume_shr = 0 (우리은행 폐지 전 거래정지 구간 2019-01-09 ~ 02-12, 22일)",
+  "expect_source": "hand", "fixture_class": "positive",
+  "note": "FX-2-006. 무거래일을 행에서 지우면 폐지 직전 20영업일이 사라진다(EG15 의 생존편향)"},
+
+ {"case": "fx2_006_no_trade_day_close_preserved",
+  "key": {"ticker": "000030", "date": "2019-01-09"}, "column": "close", "expect": "14800",
+  "source": "stage:stg_price_daily.close_krw — 절단본 원자료. 무거래일에도 기준가가 실린다",
+  "expect_source": "stage:stg_price_daily.close_krw", "fixture_class": "positive",
+  "note": "종가 보존 — 0 이나 NULL 로 바꾸면 EG7 이 격리하거나 수익률이 -100% 가 된다"},
+
+ {"case": "fx2_006_no_trade_day_open_is_null",
+  "key": {"ticker": "000030", "date": "2019-01-09"}, "column": "open", "expect": null,
+  "source": "stage:stg_price_daily.open_krw — 절단본 원자료 NULL (KRX '0' → stage miss_kind=ledger_zero)",
+  "expect_source": "stage:stg_price_daily.open_krw", "fixture_class": "positive",
+  "note": "결측은 결측(원칙 ④). close 로 채우면 GAP-14 의 Bar.open>0 문제를 데이터가 숨긴다"},
+
+ {"case": "no_par_value_stock_is_null",
+  "key": {"ticker": "900050", "date": "2010-01-04"}, "column": "par_value_krw", "expect": null,
+  "source": "stage:stg_listing_daily.par_value_krw — 절단본 원자료 NULL (par_value_kind='무액면', 1,916행 전부)",
+  "expect_source": "stage:stg_listing_daily.par_value_krw", "fixture_class": "positive"},
+
+ {"case": "no_par_value_stock_mktcap",
+  "key": {"ticker": "900050", "date": "2010-01-04"}, "column": "mktcap_krw", "expect": "573926856040",
+  "source": "hand — 7,720 × 74,342,857 = 573,926,856,040 (절단본 stg_price_daily.mktcap_krw 와 같은 값)",
+  "expect_source": "hand", "fixture_class": "positive",
+  "note": "액면이 없어도 주식수는 있다 — par NULL 을 이유로 시총까지 NULL 로 만들면 안 된다"},
+
+ {"case": "pit_available_date",
+  "key": {"ticker": "005930", "date": "2018-05-03"}, "column": "available_date", "expect": "2018-05-03",
+  "source": "hand — available_rule 'column:date'",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "pit_available_basis",
+  "key": {"ticker": "005930", "date": "2018-05-03"}, "column": "available_basis", "expect": "default",
+  "source": "hand — DESIGN §1 basis 어휘. stage stg_price_daily 도 전 행 'default'",
+  "expect_source": "hand", "fixture_class": "positive"}
+]

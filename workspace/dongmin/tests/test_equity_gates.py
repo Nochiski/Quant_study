@@ -145,6 +145,14 @@ def test_eg1_등식_없으면_fail(con: duckdb.DuckDBPyConnection) -> None:
     assert r.status is GateStatus.FAIL and "착수 금지" in r.detail
 
 
+def test_eg1_선언표는_skip_declaration_table(con: duckdb.DuckDBPyConnection) -> None:
+    """등식 SQL 이 비어 있어도 선언표(`declaration_table=True`)는 착수 금지가 아니라 skip 이다."""
+    r = gates.eg1_equation(_ctx(con, _rule(declaration_table=True, eg1_lhs_sql="",
+                                           eg1_rhs_sql="")))
+    assert r.status is GateStatus.SKIP and r.detail == "declaration_table"
+    assert r.metrics == {"n_out": 2, "n_reject": 0}
+
+
 def test_eg1_행수_한개_모자라면_fail(con: duckdb.DuckDBPyConnection) -> None:
     r = gates.eg1_equation(_ctx(con, _rule(eg1_rhs_sql="SELECT 3")))
     assert r.status is GateStatus.FAIL

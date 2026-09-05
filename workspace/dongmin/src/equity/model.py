@@ -55,6 +55,9 @@ class EquityTable:
     reject_reasons: tuple[str, ...] = ()        # `_reject/` 로 나갈 사유 어휘 (EG3 폐쇄)
     consts: tuple[str, ...] = ()                # baseline 에서 `_const` 로 주입할 metric 키
     extra_gates: tuple[ExtraGate, ...] = ()     # 테이블 특화 술어 (EG6·EG8·EG9·EG10~)
+    declaration_table: bool = False
+    """행수 등식이 정의되지 않는 선언표(`universe_policy`·`dataset_profile`) — EG1 은
+    `skip(declaration_table)` (GATES §0-2·§2). 등식 SQL 은 비워 둔다."""
 
     def __post_init__(self) -> None:
         if not self.name:

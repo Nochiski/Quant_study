@@ -1,0 +1,36 @@
+{
+ "_seed": "S03 (universe_daily · universe_policy) 가 요구하는 baseline 상수. 오케스트레이터가 data/equity/baseline.json 에 병합한다. 둘 다 산출 규칙 상수(GATES §5-B8 의 no_trade_run_k 와 같은 부류)라 게이트 임계가 아니다.",
+ "measured_at": "2026-09-05",
+ "universe_daily": {
+  "admin_window_td": 365
+ },
+ "universe_policy": {
+  "version": "s03-v1"
+ },
+ "_measured": [
+  {
+   "table": "universe_daily",
+   "metric": "admin_window_td",
+   "value": 365,
+   "kind": "convention",
+   "sql": null,
+   "inputs": {},
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "used_by": "sql/universe_daily.sql admin_state (KOSPI·소속부 공란 행의 derived_kospi_window)",
+   "note": "DESIGN v1.2 §4-1 「KOSPI = 지정 신호 365거래일 창」. 관리종목 해제 공시가 3건뿐이라(P12) 종료 사건이 없어 창 길이로 닫는다 — 창 안은 [지정일, 지정일 + 364 거래일]. 값을 바꾸면 KOSPI admin_state 이력이 통째로 바뀌므로 재빌드 전 사람 승인."
+  },
+  {
+   "table": "universe_policy",
+   "metric": "version",
+   "value": "s03-v1",
+   "kind": "convention",
+   "sql": null,
+   "inputs": {},
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "used_by": "sql/universe_policy.sql version 컬럼",
+   "note": "정책 집합 판본. 행이 늘거나(S03B investable·liquid) 임계가 바뀌면 올린다. baseline 은 게이트 상수 전용(EQD-10)이지만 SQL 이 문자열 리터럴 없이 판본을 실을 통로가 _const 뿐이라 여기 둔다."
+  }
+ ]
+}

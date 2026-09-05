@@ -184,7 +184,14 @@ def eg7_range(ctx: EquityGateContext) -> GateResult:
 
 
 def eg1_equation(ctx: EquityGateContext) -> GateResult:
-    """EG1 — `count(out) = <선언 우변> − Σ n_reject`. 등식이 없는 테이블은 착수 금지(FAIL)."""
+    """EG1 — `count(out) = <선언 우변> − Σ n_reject`. 등식이 없는 테이블은 착수 금지(FAIL).
+
+    선언표(`declaration_table=True`)만 예외 — 행수 등식이 정의되지 않으므로
+    `skip(declaration_table)` (GATES §0-2). 행수는 metrics 에 남긴다.
+    """
+    if ctx.rule.declaration_table:
+        return GateResult("EG1", GateStatus.SKIP, "declaration_table",
+                          {"n_out": ctx.n_out, "n_reject": ctx.n_reject})
     if not ctx.rule.eg1_lhs_sql.strip() or not ctx.rule.eg1_rhs_sql.strip():
         return GateResult("EG1", GateStatus.FAIL,
                           f"등식 미선언 — 표에 등식이 없는 테이블은 착수 금지: "

@@ -842,8 +842,8 @@ WHERE g.${VALUE_COL} = 0
 | 4 | `corp_ticker` | 1 | ● | ●(§3-④) | — 비팩트 | ●(P01,P02,P07) | ●(FX-1-003,005) | ●(a) | skip(no_multi_version) | ● | — | skip(not_grid) | — |
 | 5 | `trading_calendar` | 1 | ● | ●(§3-⑤) | — 비팩트 | ●(P01) | ●(FX-1-009) | ●(a) | skip(no_multi_version) | ● | — | skip(not_grid) | — |
 | 6 | `index_daily` | 1 | ● | ●(§3-⑥) | ●(P01–P04) | ●(P01) | ●(FX-1-010) | ●(a) | skip(no_multi_version) | ● | skip(no_cross_source) | skip(not_grid) | — |
-| 7 | `universe_daily` | 1 | ● | ●(§3-⑦) | ●(P01–P04) | ●(P01,P07,P09) | ●(FX-1-006,011,012,013,014) | ●(a,c) | skip(no_multi_version) | ● | ●(P08 경유) | skip(not_grid) | ●②⑤⑩ |
-| 8 | `universe_policy` | 1 | ● | skip(declaration_table) | — 비팩트 | ●(P01) | ●(FX-1-015) | ●(a) | skip(no_multi_version) | ● | — | skip(not_grid) | — |
+| 7 | `universe_daily` | 1 | ● | ●(§3-⑦) | ●(P01–P04) | ●(P01,P07,P09,P13) | ●(FX-1-006,011,013,014,015,016 — 012 는 S03B) | ●(a,c) | skip(no_multi_version) | ● | ●(P08 경유) | skip(not_grid) | ●②⑤⑩ |
+| 8 | `universe_policy` | 1 | ● | skip(declaration_table) | — 비팩트 | ●(P01,P13) | ●(FX-1-017) | ●(a) | skip(no_multi_version) | ● | — | skip(not_grid) | — |
 | 9 | `price_daily` | 2 | ● | ●(§3-⑧) | ●(P01–P04) | ●(P01,P07) | ●(FX-2-001,002,005,006) | ●(a) | skip(no_multi_version) | ●(P01) | ●(P01) | skip(not_grid) | ●①⑤⑩ |
 | 10 | `corp_event` | 2 | ● | ●(§3-⑨) | ●(P01–P04, 축=announce) | ●(P01,P07,P13) | ●(FX-2-003,008) | ●(a) | skip(no_multi_version) | ●(P08) | ●(P04) | skip(not_grid) | ●④ |
 | 11 | `adj_factor` | 2 | ● | ●(§3-⑩) | ●(P01–P04, 축=announce) | ●(P01,P04,P13) | ●(FX-2-001,003,004,007) | ●(a) | skip(no_multi_version) | ●(P02) | ●(P01,P02,P03) | skip(not_grid) | ●④ |
@@ -949,21 +949,14 @@ SELECT (SELECT count(*) FROM index_daily)
 
 ### ⑦ `universe_daily`
 ```sql
-WITH be AS (SELECT bl_date('trading_calendar','backfill_end') AS d),
-     in_span AS (
-       SELECT s.ticker, c.date
-       FROM security_span s
-       JOIN trading_calendar c ON c.date BETWEEN s.first_date AND s.last_date
-       WHERE c.date <= (SELECT d FROM be)),
-     gap_cells AS (
-       SELECT a.ticker, c.date
-       FROM trading_calendar c
-       CROSS JOIN (SELECT DISTINCT ticker FROM security_span
-                   WHERE last_date = (SELECT d FROM be)) a
-       WHERE c.date > (SELECT d FROM be))
+-- v1.0 정정(§9): coverage_gap 행을 만들지 않으므로(DESIGN v1.2 GAP-21) gap_cells 항이 없다.
+-- 캘린더에 gap 축이 없어(P16) 캘린더 max = backfill_end 이고 '≤ backfill_end' 는 항등이다.
+-- 우변은 S02 가 저장한 n_days 의 합 — 격자 조인을 다시 세면 항진명제라 쓰지 않는다.
 SELECT (SELECT count(*) FROM universe_daily)
-     - ((SELECT count(*) FROM in_span) + (SELECT count(*) FROM gap_cells)
+     - ((SELECT coalesce(sum(n_days), 0) FROM security_span)
         - eg1_tail('universe_daily')) AS delta;
+-- 구현: rules_s03.UNIVERSE_DAILY.eg1_rhs_sql. 두 입력 판본이 어긋나면(구간이 캘린더보다 길다)
+-- 격자가 작아져 delta < 0 으로 깨진다 — 의도된 실패.
 ```
 
 ### ⑧ `price_daily`
@@ -1177,13 +1170,13 @@ SELECT (SELECT count(*) FROM opinion_broker_daily)
 | FX-1-008 | `security_span` | 폐지 1종 | `last_date`, `end_reason` | stage:`stg_listing_daily` 마지막 존재일 | `end_reason='delisted'`, `last_date` = 마지막 존재일 |
 | FX-1-009 | `trading_calendar` | `date` = 연휴 직후 1일 | `prev_td` | stage:`stg_index_daily` | 직전 거래일 |
 | FX-1-010 | `index_daily` | (`코스피`, 고정일) | `close_idx` | stage:`stg_index_daily.close_idx` | 1:1 사본 |
-| FX-1-011 | `universe_daily` | 2026-08-21 이후 1일 × 1종 | `status` | hand | `coverage_gap` |
+| FX-1-011 | `universe_daily` | backfill_end × 살아있는 1종(005930) + 그 다음 날 | `status` | hand | backfill_end 행 `listed`, 2026-08-21 행 **부재**(NULL 기대) — coverage_gap 행을 만들지 않는다(§9 정정, GAP-21) |
 | FX-1-012 | `universe_daily` | 무거래 연속 종목 1 | `no_trade_run` | hand(가격 행 카운트) | 직전 무거래 연속 거래일 수 |
 | FX-1-013 | `universe_daily` | 정지 지정 → 거래 재개 사례 1 | `halt_state` at 지정일·재개일 | doc:DESIGN §10 P6·P12 | 지정일 true, 첫 `volume>0` 일 false |
 | FX-1-014 | `universe_daily` | 정지+해제 동일일 1 (1,214 중) | `halt_state`, `signal_halt`, `signal_halt_release` | doc:P12 | 당일 양쪽 신호 true, `halt_state` 규칙대로 |
 | FX-1-015 | `universe_daily` | KOSDAQ 관리종목 소속부 1 | `admin_state`, `admin_state_basis` | stage:`stg_listing_daily.sect_tp` | true / `measured` |
 | FX-1-016 | `universe_daily` | 정리매매 개시 1 (349 중) | `liquidation_window` | doc:P6 | 개시일~`delist_date` true |
-| FX-1-017 | `universe_policy` | (`liquid`, 1) | `predicate`, `threshold_kind` | doc:1단계 실측 기록 | 선언표 1행 존재 |
+| FX-1-017 | `universe_policy` | (`all`, 1) | `predicate`, `threshold_kind`, `universe_id` | hand | 선언표 `all` 1행(`TRUE`·`flag`·`krx.all`). `liquid` 행은 S03B 임계 등재 뒤(§9 정정) |
 
 ### 2단계
 
@@ -1701,4 +1694,7 @@ workspace/dongmin/src/equity/
 | §8-5 엔진 의존 | 미결 | 같은 저장소(위 A13) | — |
 | §8-6 뷰 게이트 실행 주체 | 미결 | 채택 — 7단계 카탈로그 생성 단계에서 실행, 실패 시 카탈로그(`equity.duckdb`)만 교체하지 않고 테이블은 유지. 카탈로그 없는 상태는 소비 불가로 간주 | 카탈로그는 파생물 |
 | EG10 이름 | 팩터 재료 커버율 | **팩터 준비도** — `factor_readiness` 테이블(54행)을 6단계 산출로 두고 EG10 이 그 표를 판정 | WORKFLOW v1.2 S20 |
+| §3-⑦ · FX-1-011 (S03 구현, 09-05) | EG1 우변에 `gap_cells`(backfill_end 이후 × 활성 티커) 항, FX-1-011 은 2026-08-21 행 `status='coverage_gap'` | **coverage_gap 행 폐기** — DESIGN v1.2 §4-1(GAP-21: 만들고 소비를 금지하는 데이터)과 P16(캘린더 gap 축 없음)에 맞춰 ⑦ = Σ `security_span.n_days`, FX-1-011 = backfill_end 행 `listed` + 다음 날 행 부재 | `rules_s03.UNIVERSE_DAILY.eg1_rhs_sql` · `fixtures/universe_daily.json` |
+| §2 매트릭스 7·8행 · FX-1-017 (S03 구현, 09-05) | 7행 픽스처 `006,011,012,013,014` · 8행 `FX-1-015` · FX-1-017 키 (`liquid`, 1) | §4 카탈로그와 어긋났다 — FX-1-012(`no_trade_run`)는 S03B 컬럼, FX-1-015 는 KOSDAQ 관리종목(`universe_daily`), 정책표 픽스처는 FX-1-017. v1.2 가 S03 을 `all` 만으로 좁혔으므로 FX-1-017 키는 (`all`, 1) | WORKFLOW v1.2 §3-1 S03/S03B 분리 |
+| EG3-P09 (S03 구현, 09-05) | 술어 그대로 | 술어는 유지하되 실효 범위를 명시 — `end_reason ∈ {delisted, coverage_gap}` 끝의 열린 정지는 정상(재거래 없음 930·현재 정지 중)이라 술어 밖이고 `n_halt_open_at_delist`·`n_halt_open_at_coverage_end` 로 기록. 술어가 잡는 것은 `data_gap` 끝뿐이며 부정 픽스처는 합성 `security_span` 입력의 `end_reason='data_gap'` | `rules_s03.eg3_universe` · `tests/test_equity_s03_universe.py` |
 

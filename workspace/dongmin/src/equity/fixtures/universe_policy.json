@@ -1,0 +1,27 @@
+[
+ {"case": "FX-1-017",
+  "key": {"policy": "all", "rule_seq": "1"}, "column": "predicate", "expect": "TRUE",
+  "source": "hand — S03 은 스키마 + 'all' 1행(DESIGN v1.2 §4-1). 임계 등재는 S03B 실측 후",
+  "expect_source": "hand", "fixture_class": "positive",
+  "note": "GATES §4 는 ('liquid', 1) 로 적었으나 v1.2 가 S03 을 'all' 만으로 좁혔다(§9 정정). liquid 행은 S03B 에서 이 파일에 추가"},
+
+ {"case": "FX-1-017b",
+  "key": {"policy": "all", "rule_seq": "1"}, "column": "threshold_kind", "expect": "flag",
+  "source": "hand — 임계 없는 정책은 flag",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "FX-1-017c",
+  "key": {"policy": "all", "rule_seq": "1"}, "column": "threshold_value", "expect": null,
+  "source": "hand — flag 는 임계값이 없다(EG3_policy 정합 술어)",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "FX-1-017d",
+  "key": {"policy": "all", "rule_seq": "1"}, "column": "universe_id", "expect": "krx.all",
+  "source": "hand — FIELD_MAP §1 universe_id 어휘 'krx.' || policy",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "FX-1-017e",
+  "key": {"policy": "all", "rule_seq": "1"}, "column": "measured_at", "expect": null,
+  "source": "hand — 잰 임계가 없으니 잰 날도 없다",
+  "expect_source": "hand", "fixture_class": "positive"}
+]

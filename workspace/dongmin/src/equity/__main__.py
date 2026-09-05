@@ -26,6 +26,7 @@ from . import (
     inputs,
     rules_s01,  # noqa: F401  # reason: 등록 부작용 — S01 corp·security·corp_ticker
     rules_s02,  # noqa: F401  # reason: 등록 부작용 — S02 캘린더·구간·지수
+    rules_s03,  # noqa: F401  # reason: 등록 부작용 — S03 유니버스 존재·상태·정책
     rules_sample,  # noqa: F401  # reason: T0 샘플 테이블
 )
 from .model import RULES

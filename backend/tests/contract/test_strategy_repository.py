@@ -139,6 +139,20 @@ def _drop_revision_guards(connection: sqlite3.Connection) -> None:
     connection.execute("DROP TRIGGER strategy_revisions_immutable_delete")
 
 
+def _revision_guard_sql(connection: sqlite3.Connection) -> tuple[str, ...]:
+    rows = connection.execute(
+        """
+        SELECT sql
+        FROM sqlite_schema
+        WHERE type = 'trigger' AND name GLOB 'strategy_revisions_immutable_*'
+        ORDER BY name COLLATE BINARY
+        """
+    ).fetchall()
+    statements = tuple(row[0] for row in rows if isinstance(row[0], str))
+    assert len(statements) == 2
+    return statements
+
+
 def test_revision_source_is_immutable_after_the_next_revision(factory: RepositoryFactory) -> None:
     repository = factory()
     text = (FIXTURES / "quality_momentum.yaml").read_text(encoding="utf-8")
@@ -506,6 +520,69 @@ def test_sqlite_rejects_a_damaged_revision_chain_before_every_materialization_or
             repository.append(_legacy(template, "damaged", 4), expected_revision=3)
 
 
+@pytest.mark.parametrize("operation", ("reopen", "get", "list", "history", "append"))
+def test_sqlite_rejects_a_real_number_that_replaces_an_integer_revision(
+    tmp_path: Path, operation: str
+) -> None:
+    path = tmp_path / f"real-revision-{operation}.sqlite3"
+    repository = _sqlite(path)
+    template = _template()
+    for revision in range(1, 4):
+        record = _legacy(template, "real-revision", revision)
+        if revision == 1:
+            repository.add(record)
+        else:
+            repository.append(record, expected_revision=revision - 1)
+
+    with sqlite3.connect(path) as connection:
+        guard_sql = _revision_guard_sql(connection)
+        _drop_revision_guards(connection)
+        connection.execute("PRAGMA ignore_check_constraints = ON")
+        connection.execute(
+            "UPDATE strategy_revisions SET revision = 2.5 "
+            "WHERE strategy_id = 'real-revision' AND revision = 2"
+        )
+        for statement in guard_sql:
+            connection.execute(statement)
+        connection.execute("PRAGMA ignore_check_constraints = OFF")
+        assert connection.execute(
+            "SELECT typeof(revision) FROM strategy_revisions WHERE revision = 2.5"
+        ).fetchone() == ("real",)
+
+    with pytest.raises(StrategyRepositoryStorageError, match="non_integer=1"):
+        if operation == "reopen":
+            repository.close()
+            _sqlite(path)
+        elif operation == "get":
+            repository.get("real-revision")
+        elif operation == "list":
+            repository.list_strategies(PageRequest())
+        elif operation == "history":
+            repository.history("real-revision", PageRequest())
+        else:
+            repository.append(_legacy(template, "real-revision", 4), expected_revision=3)
+
+
+@pytest.mark.parametrize(
+    "statement",
+    (
+        "UPDATE strategy_revisions SET revision = 1.5 WHERE strategy_id = 'typed'",
+        "UPDATE strategy_heads SET latest_revision = 1.5 WHERE strategy_id = 'typed'",
+    ),
+)
+def test_sqlite_schema_requires_integer_storage_for_revision_counters(
+    tmp_path: Path, statement: str
+) -> None:
+    path = tmp_path / "typed-revision.sqlite3"
+    repository = _sqlite(path)
+    repository.add(_legacy(_template(), "typed", 1))
+
+    with sqlite3.connect(path) as connection:
+        _drop_revision_guards(connection)
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
+            connection.execute(statement)
+
+
 def test_sqlite_schema_migration_is_idempotent_and_rejects_future_versions(
     tmp_path: Path,
 ) -> None:
@@ -587,6 +664,39 @@ def test_sqlite_rejects_matching_columns_when_constraints_or_storage_shape_diffe
             )
             """
         )
+
+    with pytest.raises(StrategyRepositoryStorageError, match="schema does not match"):
+        _sqlite(path)
+
+
+@pytest.mark.parametrize(
+    ("object_name", "original", "replacement"),
+    (
+        ("strategy_revisions", "('yaml', 'json')", "('YAML', 'JSON')"),
+        (
+            "strategy_revisions_immutable_update",
+            "strategy revisions are immutable",
+            "strategy  revisions are immutable",
+        ),
+    ),
+)
+def test_sqlite_manifest_preserves_quoted_literal_case_and_whitespace(
+    tmp_path: Path, object_name: str, original: str, replacement: str
+) -> None:
+    path = tmp_path / f"literal-{object_name}.sqlite3"
+    _sqlite(path).close()
+    with sqlite3.connect(path) as connection:
+        row = connection.execute(
+            "SELECT sql FROM sqlite_schema WHERE name = ?", (object_name,)
+        ).fetchone()
+        assert row is not None and isinstance(row[0], str) and original in row[0]
+        changed_sql = row[0].replace(original, replacement)
+        connection.execute("PRAGMA writable_schema = ON")
+        connection.execute(
+            "UPDATE sqlite_schema SET sql = ? WHERE name = ?",
+            (changed_sql, object_name),
+        )
+        connection.execute("PRAGMA writable_schema = OFF")
 
     with pytest.raises(StrategyRepositoryStorageError, match="schema does not match"):
         _sqlite(path)

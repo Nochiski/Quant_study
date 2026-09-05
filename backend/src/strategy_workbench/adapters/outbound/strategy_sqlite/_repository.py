@@ -227,6 +227,14 @@ class SQLiteStrategyRepository:
     def _prepare_database(self, connection: sqlite3.Connection) -> None:
         try:
             migrate_schema(connection)
+            connection.execute("BEGIN")
+            try:
+                self._audit_all_revision_chains(connection)
+            except Exception:
+                connection.rollback()
+                raise
+            else:
+                connection.commit()
         except StrategyRepositoryStorageError:
             raise
         except sqlite3.DatabaseError as error:
@@ -324,12 +332,20 @@ class SQLiteStrategyRepository:
         self, connection: sqlite3.Connection, strategy_id: str
     ) -> int | None:
         head = connection.execute(
-            "SELECT latest_revision FROM strategy_heads WHERE strategy_id = ?",
+            """
+            SELECT latest_revision, typeof(latest_revision)
+            FROM strategy_heads
+            WHERE strategy_id = ?
+            """,
             (strategy_id,),
         ).fetchone()
         aggregate = connection.execute(
             """
-            SELECT COUNT(*), MIN(revision), MAX(revision)
+            SELECT
+                COUNT(*),
+                MIN(revision),
+                MAX(revision),
+                SUM(CASE WHEN typeof(revision) = 'integer' THEN 0 ELSE 1 END)
             FROM strategy_revisions
             WHERE strategy_id = ?
             """,
@@ -340,23 +356,28 @@ class SQLiteStrategyRepository:
             return None
 
         latest = head[0] if head is not None else None
+        head_storage = head[1] if head is not None else None
         minimum = aggregate[1] if aggregate is not None else None
         maximum = aggregate[2] if aggregate is not None else None
+        non_integer_revisions = aggregate[3] if aggregate is not None else None
         if (
             not isinstance(latest, int)
             or isinstance(latest, bool)
+            or head_storage != "integer"
             or not isinstance(minimum, int)
             or isinstance(minimum, bool)
             or not isinstance(maximum, int)
             or isinstance(maximum, bool)
+            or non_integer_revisions != 0
             or minimum != 1
             or maximum != latest
             or count != latest
         ):
             raise StrategyRepositoryStorageError(
                 "stored strategy revision chain failed integrity validation -- "
-                f"strategy_id={strategy_id} head={latest!r} count={count} "
-                f"min={minimum!r} max={maximum!r}"
+                f"strategy_id={strategy_id} head={latest!r} "
+                f"head_storage={head_storage!r} count={count} min={minimum!r} "
+                f"max={maximum!r} non_integer={non_integer_revisions!r}"
             )
         return latest
 

@@ -14,7 +14,9 @@ _V1_SCHEMA_OBJECTS = (
         """
         CREATE TABLE strategy_heads (
             strategy_id TEXT NOT NULL COLLATE BINARY PRIMARY KEY,
-            latest_revision INTEGER NOT NULL CHECK (latest_revision >= 1)
+            latest_revision INTEGER NOT NULL CHECK (
+                typeof(latest_revision) = 'integer' AND latest_revision >= 1
+            )
         ) WITHOUT ROWID
         """,
     ),
@@ -24,7 +26,9 @@ _V1_SCHEMA_OBJECTS = (
         """
         CREATE TABLE strategy_revisions (
             strategy_id TEXT NOT NULL COLLATE BINARY,
-            revision INTEGER NOT NULL CHECK (revision >= 1),
+            revision INTEGER NOT NULL CHECK (
+                typeof(revision) = 'integer' AND revision >= 1
+            ),
             schema_version TEXT NOT NULL,
             spec_json TEXT NOT NULL,
             spec_hash TEXT NOT NULL CHECK (length(spec_hash) = 64),
@@ -169,4 +173,7 @@ def _validate_v1_manifest(connection: sqlite3.Connection) -> None:
 
 
 def _normalise_sql(statement: str) -> str:
-    return " ".join(statement.casefold().split())
+    # sqlite_schema preserves the submitted DDL after trimming its outer whitespace. Compare
+    # that representation exactly: case and whitespace inside quoted literals are data, not
+    # formatting, and may change a CHECK constraint or trigger's behaviour.
+    return statement.strip()

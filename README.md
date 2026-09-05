@@ -133,7 +133,9 @@ npm run dev
 `uv run server`는 backend의 FastAPI/Uvicorn 개발 서버(`127.0.0.1:8000`, reload)를,
 `npm run dev`는 frontend의 Vite 개발 서버(`localhost:5173`)를 실행한다. 백엔드 옵션은
 그대로 전달된다(예: `uv run server --port 8123`). 기존처럼 `backend`와 `frontend`
-디렉터리 안에서 각각 실행해도 같은 owner의 설정을 사용한다.
+디렉터리 안에서 각각 실행해도 같은 owner의 설정을 사용한다. 서버가 저장한 전략 revision은
+기본적으로 `backend/.local/strategy-revisions.sqlite3`에 유지된다. 다른 위치가 필요하면 서버
+시작 전에 `STRATEGY_WORKBENCH_DB_PATH`를 설정한다.
 
 ## 검증: Zipline 대조
 

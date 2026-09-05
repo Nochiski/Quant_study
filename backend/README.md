@@ -111,10 +111,11 @@ backend/
    ├─ adapters/inbound/http_api/            # FastAPI/OpenAPI wire adapter
    ├─ adapters/outbound/equity_mock/       # 결정적 in-memory Equity v0.2 mock
    │  └─ facade/provider.py
-   ├─ adapters/outbound/strategy_memory/    # immutable revision 기준 adapter
+   ├─ adapters/outbound/strategy_memory/    # contract reference/test adapter
    ├─ adapters/outbound/engine_portfolio/   # capability 협상과 target action 변환
    ├─ adapters/outbound/backtest_engine/    # TargetTape → Rust/Python engine
    ├─ adapters/outbound/artifact_local/     # atomic local result commit
+   ├─ adapters/outbound/strategy_sqlite/    # durable immutable strategy revisions
    └─ bootstrap/                           # adapter 조립
       └─ facade/{container,http}.py
 ```
@@ -130,6 +131,10 @@ uv run pyright
 uv run server
 uv run python scripts/export_openapi.py openapi.json
 ```
+
+`uv run server`의 전략 revision 저장소는 기본적으로 `.local/strategy-revisions.sqlite3`이며
+프로세스를 재시작해도 원문·hash·provenance를 복원한다. 배포별 저장 위치는
+`STRATEGY_WORKBENCH_DB_PATH` 환경 변수로 지정할 수 있다.
 
 Equity mock HTTP 계약은 다음 세 경로로 분리한다.
 

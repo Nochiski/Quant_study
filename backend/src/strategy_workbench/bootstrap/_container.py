@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
@@ -15,8 +16,8 @@ from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import 
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
     MockEquityDataAdapter,
 )
-from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
-    InMemoryStrategyRepository,
+from strategy_workbench.adapters.outbound.strategy_sqlite.facade.repository import (
+    SQLiteStrategyRepository,
 )
 from strategy_workbench.application.backtest_run.facade.runs import BacktestRunService
 from strategy_workbench.application.equity_workspace.facade.ports import EquityDataPort
@@ -29,9 +30,11 @@ from strategy_workbench.application.factor_research.facade.research import (
 from strategy_workbench.application.portfolio_design.facade.design import PortfolioDesignService
 from strategy_workbench.application.portfolio_design.facade.trace import StrategyTraceService
 from strategy_workbench.application.strategy_authoring.facade.authoring import (
+    CompileRequest,
     StrategyAuthoringService,
     StrategyDocumentService,
 )
+from strategy_workbench.application.strategy_authoring.facade.ports import SourceFormat
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.application.strategy_design.facade.ports import StrategyRepositoryPort
 from strategy_workbench.domain.analytics.facade.metrics import build_default_metric_registry
@@ -56,15 +59,19 @@ def build_container(
     *,
     equity_adapter: str = "mock",
     artifact_root: Path | None = None,
+    strategy_repository_path: str | Path | None = None,
 ) -> BackendContainer:
-    """Build one explicit dependency graph; unknown adapters fail instead of falling back."""
+    """Build one dependency graph; ``None`` selects isolated in-memory SQLite for tests.
+
+    The HTTP runtime supplies a durable file path explicitly. This keeps test application
+    factories isolated while both environments exercise the same persistent adapter contract.
+    """
     if equity_adapter != "mock":
         raise ValueError(
             f"unsupported equity adapter — equity_adapter={equity_adapter!r} available=('mock',)"
         )
     equity_data = MockEquityDataAdapter.demo()
     engine_portfolio = BacktestEnginePortfolioAdapter()
-    strategy_repository = InMemoryStrategyRepository()
     factor_registry = build_default_factor_registry()
     portfolio_design = PortfolioDesignService(
         equity_data,
@@ -77,6 +84,10 @@ def build_container(
         RuamelDocumentCodec(),
         factor_registry_version=factor_registry.version,
         dataset_snapshot_id=lambda: equity_data.snapshot().snapshot_id,
+    )
+    strategy_repository = SQLiteStrategyRepository(
+        strategy_repository_path,
+        source_spec_hash=_source_spec_hash_resolver(strategy_authoring),
     )
     run_artifact_root = artifact_root or (
         Path(__file__).resolve().parents[3] / ".local" / "backtest-runs"
@@ -110,3 +121,20 @@ def build_container(
             new_id=lambda: str(uuid4()),
         ),
     )
+
+
+def _source_spec_hash_resolver(
+    strategy_authoring: StrategyAuthoringService,
+) -> Callable[[str, SourceFormat], str]:
+    """Adapt the authoring compile contract to storage integrity without copying its rules."""
+
+    def resolve(source: str, format: SourceFormat) -> str:
+        compiled = strategy_authoring.compile(CompileRequest(source, format))
+        if compiled.spec_hash is None:
+            diagnostics = ", ".join(
+                f"{diagnostic.code}@{diagnostic.pointer}" for diagnostic in compiled.diagnostics[:5]
+            )
+            raise ValueError(f"stored source no longer compiles -- {diagnostics}")
+        return compiled.spec_hash
+
+    return resolve

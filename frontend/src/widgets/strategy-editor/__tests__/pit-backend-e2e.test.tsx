@@ -1,7 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { platform } from "node:os";
+import { rmSync } from "node:fs";
+import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
-import { cwd, pid } from "node:process";
+import { cwd, env, pid } from "node:process";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
@@ -19,6 +20,7 @@ const pythonExecutable = join(
 );
 const port = 42_000 + (pid % 1_000);
 const baseUrl = `http://127.0.0.1:${port}`;
+const strategyDatabase = join(tmpdir(), `strategy-workbench-pit-${pid}-${Date.now()}.sqlite3`);
 let backend: ChildProcessWithoutNullStreams;
 let backendOutput = "";
 
@@ -45,7 +47,8 @@ beforeAll(async () => {
     [
       "-m",
       "uvicorn",
-      "strategy_workbench.bootstrap.facade.http:app",
+      "strategy_workbench.bootstrap.facade.http:build_runtime_http_app",
+      "--factory",
       "--host",
       "127.0.0.1",
       "--port",
@@ -53,7 +56,10 @@ beforeAll(async () => {
       "--log-level",
       "warning",
     ],
-    { cwd: backendDirectory },
+    {
+      cwd: backendDirectory,
+      env: { ...env, STRATEGY_WORKBENCH_DB_PATH: strategyDatabase },
+    },
   );
   backend.stdout.on("data", (chunk: Buffer) => {
     backendOutput += chunk.toString();
@@ -65,8 +71,16 @@ beforeAll(async () => {
   await waitForBackend();
 }, 15_000);
 
-afterAll(() => {
-  backend.kill();
+afterAll(async () => {
+  if (backend.exitCode === null) {
+    backend.kill();
+    await new Promise<void>((resolve) => {
+      backend.once("exit", () => resolve());
+    });
+  }
+  for (const suffix of ["", "-shm", "-wal"]) {
+    rmSync(`${strategyDatabase}${suffix}`, { force: true });
+  }
 });
 
 test("UI preview가 실제 backend mock의 공개 전 consensus revision을 숨긴다", async () => {

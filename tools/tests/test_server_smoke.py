@@ -5,6 +5,7 @@ import os
 import signal
 import socket
 import subprocess
+import tempfile
 import time
 import unittest
 import urllib.error
@@ -39,6 +40,12 @@ class RootServerSmokeTest(unittest.TestCase):
     def test_root_entrypoint_serves_health_over_http(self) -> None:
         root = Path(__file__).resolve().parents[2]
         port = _available_port()
+        runtime_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(runtime_directory.cleanup)
+        environment = os.environ.copy()
+        environment["STRATEGY_WORKBENCH_DB_PATH"] = str(
+            Path(runtime_directory.name) / "strategy-revisions.sqlite3"
+        )
         process = subprocess.Popen(
             [
                 "uv",
@@ -55,6 +62,7 @@ class RootServerSmokeTest(unittest.TestCase):
             creationflags=(
                 subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
             ),
+            env=environment,
         )
         response_body: dict[str, str] | None = None
         deadline = time.monotonic() + 30

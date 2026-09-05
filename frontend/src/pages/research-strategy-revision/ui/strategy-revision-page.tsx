@@ -13,6 +13,7 @@ import {
   SnippetCatalog,
   SourceEditor,
   StrategyProjectionPanel,
+  StrategyDiffPanel,
   StrategyOutline,
   PROJECTION_VIEWS,
   currentDiagnostics,
@@ -62,7 +63,13 @@ export const StrategyRevisionPage = () => {
     [stored],
   );
   const [document, dispatch] = useStrategyDocument(source);
-  const { save, status, canSave } = useSaveDocument(document, dispatch);
+  const {
+    save,
+    status,
+    canSave,
+    createRevisionFromConflict,
+    canCreateRevisionFromConflict,
+  } = useSaveDocument(document, dispatch);
   const assist = useSchemaAssist(document);
   const { validateNow, validating } = useCompileDocument(document, dispatch);
   const autosave = useAutosave(document, dispatch, {
@@ -77,7 +84,9 @@ export const StrategyRevisionPage = () => {
       : null;
   const projection = projectStrategySpec(document);
   const availableViews: readonly StrategyView[] =
-    stored.format === "yaml" ? PROJECTION_VIEWS : ["json", "form", "graph"];
+    stored.format === "yaml"
+      ? PROJECTION_VIEWS
+      : ["json", "form", "graph", "diff"];
   const requested: StrategyView = search.view ?? stored.format;
   const implemented = availableViews.includes(requested);
   const view: StrategyView = implemented ? requested : stored.format;
@@ -228,7 +237,32 @@ export const StrategyRevisionPage = () => {
               }}
             />
           ),
+          diff: (
+            <StrategyDiffPanel
+              state={document}
+              active={view === "diff"}
+              revision={{
+                strategyId,
+                currentRevision: Number(revision),
+              }}
+            />
+          ),
         }}
+        notice={
+          status.kind === "conflict" &&
+          status.strategyId !== null &&
+          status.baseRevision !== null &&
+          status.latestRevision !== null ? (
+            <ConflictBanner
+              strategyId={status.strategyId}
+              baseRevision={status.baseRevision}
+              latestRevision={status.latestRevision}
+              source={document.source}
+              onCreateRevision={createRevisionFromConflict}
+              canCreateRevision={canCreateRevisionFromConflict}
+            />
+          ) : undefined
+        }
         outline={
           <StrategyOutline
             snapshot={outline.snapshot}
@@ -267,17 +301,6 @@ export const StrategyRevisionPage = () => {
                 {t("page.revision.viewPending")} ({requested.toUpperCase()})
               </p>
             )}
-            {status.kind === "conflict" &&
-            status.strategyId !== null &&
-            status.baseRevision !== null &&
-            status.latestRevision !== null ? (
-              <ConflictBanner
-                strategyId={status.strategyId}
-                baseRevision={status.baseRevision}
-                latestRevision={status.latestRevision}
-                source={document.source}
-              />
-            ) : null}
             {autosave.recovery ? (
               <RecoveryBanner recovery={autosave.recovery} />
             ) : null}

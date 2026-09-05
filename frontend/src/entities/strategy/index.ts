@@ -2,6 +2,7 @@ export {
   strategyContractQuery,
   strategyDiffQuery,
   strategyDocumentQuery,
+  strategyRevisionsKey,
   strategyRevisionsQuery,
   strategySchemaQuery,
 } from "./model/strategy-queries";

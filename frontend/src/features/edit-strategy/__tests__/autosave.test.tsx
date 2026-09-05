@@ -65,6 +65,7 @@ const Harness = ({
     source: string;
     documentEpoch: number;
     sourceVersion: number;
+    canonicalJson: string;
   } | null>(null);
   const autosave = useAutosave(state, dispatch, {
     schemaVersion,
@@ -91,6 +92,7 @@ const Harness = ({
             strategyId: "s1",
             revision: 3,
             specHash: "3".repeat(64),
+            canonicalJson: '{"title":"edited"}',
             source: state.source,
             documentEpoch: state.documentEpoch,
             sourceVersion: state.sourceVersion,
@@ -106,6 +108,7 @@ const Harness = ({
             source: state.source,
             documentEpoch: state.documentEpoch,
             sourceVersion: state.sourceVersion,
+            canonicalJson: '{"title":"captured"}',
           };
         }}
       >
@@ -235,9 +238,7 @@ describe("useAutosave", () => {
 
     await waitFor(() => expect(readDraft(storage, "s1@2")).toBeNull());
     expect(screen.getByTestId("dirty")).toHaveTextContent("true");
-    await waitFor(() =>
-      expect(readDraft(storage, "s1@3")?.source).toBe(later),
-    );
+    await waitFor(() => expect(readDraft(storage, "s1@3")?.source).toBe(later));
   });
 
   it("offers a differing local draft on load with a diff summary, restores it, or discards it", async () => {

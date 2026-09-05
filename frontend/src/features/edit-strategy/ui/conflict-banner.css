@@ -45,22 +45,3 @@
   color: var(--text-muted);
   font-size: var(--text-size-small);
 }
-
-.conflict__diff {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--text-size-small);
-}
-
-.conflict__diff th,
-.conflict__diff td {
-  padding: var(--space-1) var(--space-2);
-  border-bottom: 1px solid var(--border);
-  text-align: left;
-  vertical-align: top;
-}
-
-.conflict__diff code {
-  font-size: var(--text-size-small);
-  word-break: break-all;
-}

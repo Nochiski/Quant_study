@@ -1,0 +1,34 @@
+.semantic-diff__scroll {
+  max-width: 100%;
+  overflow: auto;
+}
+
+.semantic-diff__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-size-small);
+}
+
+.semantic-diff__table th,
+.semantic-diff__table td {
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.semantic-diff__table th {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.semantic-diff__table code {
+  font-size: var(--text-size-small);
+  overflow-wrap: anywhere;
+}
+
+.semantic-diff__empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}

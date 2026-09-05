@@ -595,18 +595,19 @@ describe("document routes (P2-04)", () => {
   });
 
   it("loads the exact stored source of a revision into the editor as the draft base", async () => {
+    const user = userEvent.setup();
     mount("/research/strategies/s1/revisions/2?view=diff");
     expect(
       await screen.findByRole("heading", { name: "퀄리티 모멘텀" }),
     ).toBeInTheDocument();
-    const view = await editor();
-    expect(view.state.doc.toString()).toBe(STORED);
-    // The stored format is the editable view; DIFF is not implemented, so it falls back with a notice.
-    expect(screen.getByRole("tab", { name: "YAML" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
-    expect(screen.getByText(/DIFF/)).toBeInTheDocument();
+    expect(screen.getByLabelText("StrategySpec Diff")).toBeVisible();
+    await user.click(screen.getByRole("tab", { name: "YAML" }));
+    const view = await editor();
+    expect(view.state.doc.toString()).toBe(STORED);
     expect(screen.getByText("저장됨 v2")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "리비전 저장" })).toBeDisabled();
     expect(screen.getByText("2026-09-04 09:30")).toBeInTheDocument();
@@ -1013,25 +1014,22 @@ describe("StrategySpec JSON and Form projections (P4-06)", () => {
 
 describe("FactorGraph read-only projection (P4-07)", () => {
   const graphHandlers = () => [
-    http.post(
-      `${API}/api/v1/strategy-documents/compile`,
-      () => {
-        const compiledSpec = graphSpec("draft", 0);
-        const { identity, ...canonicalSpec } = compiledSpec;
-        return HttpResponse.json({
-          format: "yaml",
-          source_hash: "b".repeat(64),
-          schema_version: "1.0",
-          spec: compiledSpec,
-          canonical_json: JSON.stringify({
-            ...canonicalSpec,
-            schema_version: identity.schema_version,
-          }),
-          spec_hash: "7".repeat(64),
-          diagnostics: [],
-        });
-      },
-    ),
+    http.post(`${API}/api/v1/strategy-documents/compile`, () => {
+      const compiledSpec = graphSpec("draft", 0);
+      const { identity, ...canonicalSpec } = compiledSpec;
+      return HttpResponse.json({
+        format: "yaml",
+        source_hash: "b".repeat(64),
+        schema_version: "1.0",
+        spec: compiledSpec,
+        canonical_json: JSON.stringify({
+          ...canonicalSpec,
+          schema_version: identity.schema_version,
+        }),
+        spec_hash: "7".repeat(64),
+        diagnostics: [],
+      });
+    }),
     http.get(`${API}/api/v1/strategy-documents/schema`, () =>
       HttpResponse.json({
         schema: RUNTIME_SCHEMA,
@@ -1202,6 +1200,350 @@ describe("FactorGraph read-only projection (P4-07)", () => {
   }, 15_000);
 });
 
+describe("StrategySpec Diff projection (P4-08)", () => {
+  it("separates comment-only source changes from backend-proven semantic changes and stays text-only when invalid", async () => {
+    server.use(
+      http.post(
+        `${API}/api/v1/strategy-documents/compile`,
+        async ({ request }) => {
+          const body = (await request.json()) as { source: string };
+          const title = /title: ([^\n]*)/.exec(body.source)?.[1] ?? "";
+          const compiledSpec = spec("draft", 0, title);
+          const { identity, ...canonicalSpec } = compiledSpec;
+          return HttpResponse.json({
+            format: "yaml",
+            source_hash: "b".repeat(64),
+            schema_version: "1.0",
+            spec: compiledSpec,
+            canonical_json: JSON.stringify({
+              ...canonicalSpec,
+              schema_version: identity.schema_version,
+            }),
+            spec_hash:
+              title === "퀄리티 모멘텀" ? "2".repeat(64) : "9".repeat(64),
+            diagnostics: [],
+          });
+        },
+      ),
+    );
+    const user = userEvent.setup();
+    mount("/research/strategies/s1/revisions/2");
+    const view = await editor();
+    replaceText(view, `${STORED}# research note\n`);
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+
+    await user.click(screen.getByRole("tab", { name: "Diff" }));
+    const panel = await screen.findByLabelText("StrategySpec Diff");
+    expect(within(panel).getByText("+1 / −0 변경 항목")).toBeInTheDocument();
+    expect(within(panel).getByText("# research note")).toBeInTheDocument();
+    expect(
+      within(panel).getByText("의미 변경이 없습니다 (같은 spec hash)."),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "YAML" }));
+    const invalidView = await editor();
+    replaceText(invalidView, 'schema_version: "1.0"\ntitle: "broken\n');
+    await waitFor(() => expect(saveButton()).toBeDisabled());
+    await user.click(screen.getByRole("tab", { name: "Diff" }));
+    const invalidPanel = await screen.findByLabelText("StrategySpec Diff");
+    expect(
+      await within(invalidPanel).findByText(
+        "현재 원문이 유효하게 compile되지 않아 원문 Diff만 제공합니다.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(invalidPanel).getByText("+1 / −1 변경 항목"),
+    ).toBeInTheDocument();
+  });
+
+  it("compares exact stored sources and backend semantic revision diff", async () => {
+    const revisionSource = (revision: number) =>
+      revision === 1
+        ? 'schema_version: "1.0"\ntitle: 이전 전략\n'
+        : revision === 3
+          ? `${STORED}description: 서버 최신\n`
+          : STORED;
+    server.use(
+      http.get(`${API}/api/v1/strategies/:strategyId/revisions`, () =>
+        HttpResponse.json({
+          items: [1, 2, 3].map((revision) => ({
+            strategy_id: "s1",
+            revision,
+            spec_hash: String(revision).repeat(64).slice(0, 64),
+            source_hash: "b".repeat(64),
+            source_format: "yaml",
+            origin: "document",
+            change_note: null,
+            created_at: `2026-09-0${revision}T09:30:00+00:00`,
+          })),
+          offset: 0,
+          limit: 50,
+          total: 3,
+        }),
+      ),
+      http.get(
+        `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
+        ({ params }) => {
+          const revision = Number(params.revision);
+          return HttpResponse.json(
+            document("s1", revision, revisionSource(revision)),
+          );
+        },
+      ),
+    );
+
+    mount("/research/strategies/s1/revisions/2?view=diff");
+    const panel = await screen.findByLabelText("StrategySpec Diff");
+    const base = await within(panel).findByRole("combobox", {
+      name: "기준 revision",
+    });
+    const target = within(panel).getByRole("combobox", {
+      name: "대상 revision",
+    });
+    expect(base).toHaveValue("1");
+    expect(target).toHaveValue("2");
+    expect(
+      await within(panel).findByText("title: 이전 전략"),
+    ).toBeInTheDocument();
+    expect(within(panel).getByText("title: 퀄리티 모멘텀")).toBeInTheDocument();
+    expect(
+      await within(panel).findByText("/risk/max_name_weight"),
+    ).toBeInTheDocument();
+    expect(within(panel).getByText('"서버에서 수정"')).toBeInTheDocument();
+  });
+
+  it("recompiles a saved source when Save returns a different spec hash", async () => {
+    const savedSource = `${STORED}description: saved\n`;
+    const currentSource = `${STORED}description: after\n`;
+    const preSaveHash = "a".repeat(64);
+    const savedHash = "c".repeat(64);
+    const currentHash = "d".repeat(64);
+    const compileSources: string[] = [];
+    let saveCompleted = false;
+    server.use(
+      http.post(
+        `${API}/api/v1/strategy-documents/compile`,
+        async ({ request }) => {
+          const body = (await request.json()) as { source: string };
+          compileSources.push(body.source);
+          const title = /title: ([^\n]*)/.exec(body.source)?.[1] ?? "";
+          const compiledSpec = spec("draft", 0, title);
+          const semantic =
+            body.source === currentSource
+              ? { deployment: "B", description: "after" }
+              : body.source === savedSource
+                ? {
+                    deployment: saveCompleted ? "B" : "A",
+                    description: "saved",
+                  }
+                : { deployment: "base", description: "stored" };
+          const specHash =
+            body.source === currentSource
+              ? currentHash
+              : body.source === savedSource
+                ? saveCompleted
+                  ? savedHash
+                  : preSaveHash
+                : "2".repeat(64);
+          return HttpResponse.json({
+            format: "yaml",
+            source_hash: "b".repeat(64),
+            schema_version: "1.0",
+            spec: compiledSpec,
+            canonical_json: JSON.stringify(semantic),
+            spec_hash: specHash,
+            diagnostics: [],
+          });
+        },
+      ),
+      http.post(
+        `${API}/api/v1/strategy-documents/:strategyId/revisions`,
+        async ({ params, request }) => {
+          const body = (await request.json()) as { source: string };
+          await delay(450);
+          saveCompleted = true;
+          return HttpResponse.json(
+            {
+              ...document(String(params.strategyId), 3, body.source),
+              spec_hash: savedHash,
+            },
+            { status: 201 },
+          );
+        },
+      ),
+    );
+
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2");
+    const view = await editor();
+    replaceText(view, savedSource);
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+    await user.click(saveButton());
+
+    // Keep typing while Save is in flight. The route must stay on the dirty draft while the
+    // exact source returned by Save is recompiled as its new immutable semantic baseline.
+    replaceText(view, currentSource);
+    await waitFor(() => expect(saveButton()).toBeEnabled(), { timeout: 4_000 });
+    expect(history.location.pathname).toBe(
+      "/research/strategies/s1/revisions/2",
+    );
+
+    await user.click(screen.getByRole("tab", { name: "Diff" }));
+    const panel = await screen.findByLabelText("StrategySpec Diff");
+    expect(await within(panel).findByText("/description")).toBeInTheDocument();
+    expect(within(panel).getByText('"saved"')).toBeInTheDocument();
+    expect(within(panel).getByText('"after"')).toBeInTheDocument();
+    expect(within(panel).queryByText("/deployment")).not.toBeInTheDocument();
+    expect(
+      compileSources.filter((source) => source === savedSource),
+    ).toHaveLength(2);
+  }, 10_000);
+
+  it("retries a transient saved-baseline failure on the next edit", async () => {
+    let allowBaselineSuccess = false;
+    let baselineAttempts = 0;
+    server.use(
+      http.post(
+        `${API}/api/v1/strategy-documents/compile`,
+        async ({ request }) => {
+          const body = (await request.json()) as { source: string };
+          if (body.source === STORED) {
+            baselineAttempts += 1;
+            if (!allowBaselineSuccess) {
+              return HttpResponse.json(
+                { detail: "temporary baseline outage" },
+                { status: 503 },
+              );
+            }
+          }
+          const title = /title: ([^\n]*)/.exec(body.source)?.[1] ?? "";
+          const compiledSpec = spec("draft", 0, title);
+          return HttpResponse.json({
+            format: "yaml",
+            source_hash: "b".repeat(64),
+            schema_version: "1.0",
+            spec: compiledSpec,
+            canonical_json: '{"schema_version":"1.0","title":"same"}',
+            spec_hash: "2".repeat(64),
+            diagnostics: [],
+          });
+        },
+      ),
+    );
+
+    const user = userEvent.setup();
+    mount("/research/strategies/s1/revisions/2");
+    const view = await editor();
+    replaceText(view, `${STORED}# first edit\n`);
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+    await user.click(screen.getByRole("tab", { name: "Diff" }));
+    const panel = await screen.findByLabelText("StrategySpec Diff");
+    expect(
+      await within(panel).findByText("저장본 canonical 기준을 검증 중입니다."),
+    ).toBeInTheDocument();
+    const failedAttempts = baselineAttempts;
+    expect(failedAttempts).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("button", { name: "검증" }));
+    await waitFor(() =>
+      expect(baselineAttempts).toBeGreaterThan(failedAttempts),
+    );
+    const explicitRetryAttempts = baselineAttempts;
+
+    allowBaselineSuccess = true;
+    await user.click(screen.getByRole("tab", { name: "YAML" }));
+    const currentView = await editor();
+    replaceText(currentView, `${STORED}# second edit\n`);
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+    await user.click(screen.getByRole("tab", { name: "Diff" }));
+    const retriedPanel = await screen.findByLabelText("StrategySpec Diff");
+    expect(
+      await within(retriedPanel).findByText(
+        "의미 변경이 없습니다 (같은 spec hash).",
+      ),
+    ).toBeInTheDocument();
+    expect(baselineAttempts).toBeGreaterThan(explicitRetryAttempts);
+  }, 10_000);
+
+  it("loads the bounded history page that contains a route beyond revision 50", async () => {
+    let historyOffset: string | null = null;
+    let historyLimit: string | null = null;
+    let requestedPair: [string | null, string | null] | null = null;
+    server.use(
+      http.get(
+        `${API}/api/v1/strategies/:strategyId/revisions`,
+        ({ request }) => {
+          const url = new URL(request.url);
+          historyOffset = url.searchParams.get("offset");
+          historyLimit = url.searchParams.get("limit");
+          const offset = Number(historyOffset ?? 0);
+          return HttpResponse.json({
+            items: Array.from({ length: 50 }, (_, index) => {
+              const revision = offset + index + 1;
+              return {
+                strategy_id: "s1",
+                revision,
+                spec_hash: String(revision).repeat(64).slice(0, 64),
+                source_hash: "b".repeat(64),
+                source_format: "yaml",
+                origin: "document",
+                change_note: null,
+                created_at: "2026-09-05T09:30:00+00:00",
+              };
+            }),
+            offset,
+            limit: 50,
+            total: 51,
+          });
+        },
+      ),
+      http.get(
+        `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
+        ({ params }) => {
+          const revision = Number(params.revision);
+          return HttpResponse.json(
+            document(
+              String(params.strategyId),
+              revision,
+              `schema_version: "1.0"\ntitle: revision ${revision}\n`,
+              `revision ${revision}`,
+            ),
+          );
+        },
+      ),
+      http.get(`${API}/api/v1/strategies/:strategyId/diff`, ({ request }) => {
+        const url = new URL(request.url);
+        requestedPair = [
+          url.searchParams.get("base"),
+          url.searchParams.get("target"),
+        ];
+        return HttpResponse.json({
+          strategy_id: "s1",
+          base_revision: Number(requestedPair[0]),
+          target_revision: Number(requestedPair[1]),
+          base_spec_hash: "5".repeat(64),
+          target_spec_hash: "6".repeat(64),
+          changes: [],
+        });
+      }),
+    );
+
+    mount("/research/strategies/s1/revisions/51?view=diff");
+    const panel = await screen.findByLabelText("StrategySpec Diff");
+    const base = await within(panel).findByRole("combobox", {
+      name: "기준 revision",
+    });
+    const target = within(panel).getByRole("combobox", {
+      name: "대상 revision",
+    });
+    expect(historyOffset).toBe("1");
+    expect(historyLimit).toBe("50");
+    expect(base).toHaveValue("50");
+    expect(target).toHaveValue("51");
+    await waitFor(() => expect(requestedPair).toEqual(["50", "51"]));
+  });
+});
+
 describe("backtest from the editor (P3-05)", () => {
   it("runs a clean saved revision by reference and moves to the run page", async () => {
     const user = userEvent.setup();
@@ -1304,6 +1646,32 @@ describe("backtest from the editor (P3-05)", () => {
 });
 
 describe("revision conflict (P3-07)", () => {
+  it("keeps the conflict recovery notice visible from the Diff view", async () => {
+    const user = userEvent.setup();
+    mount("/research/strategies/s1/revisions/1");
+    const view = await editor();
+    replaceText(view, `${STORED}description: 충돌\n`);
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+    await user.click(screen.getByRole("tab", { name: "Diff" }));
+    expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await user.click(saveButton());
+
+    const banner = await screen.findByRole("region", { name: "리비전 충돌" });
+    expect(
+      within(banner).getByText("서버 최신 v3 · 현재 기준 v1"),
+    ).toBeVisible();
+    expect(
+      within(banner).getByRole("button", { name: "현재 문서 복사" }),
+    ).toBeVisible();
+    expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
   it("keeps the text, names both revisions, and offers open / copy / diff", async () => {
     const serverSource = `${STORED}description: 서버 최신\n`;
     server.use(
@@ -1423,6 +1791,60 @@ describe("revision conflict (P3-07)", () => {
       screen.queryByRole("region", { name: "리비전 충돌" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText(/^충돌:/)).not.toBeInTheDocument();
+  });
+
+  it("explicitly publishes the preserved whole document after the latest immutable revision", async () => {
+    const expectedRevisions: number[] = [];
+    server.use(
+      http.post(
+        `${API}/api/v1/strategy-documents/:strategyId/revisions`,
+        async ({ params, request }) => {
+          const body = (await request.json()) as {
+            expected_revision: number;
+            source: string;
+          };
+          expectedRevisions.push(body.expected_revision);
+          if (body.expected_revision === 1) {
+            return HttpResponse.json(
+              {
+                detail: {
+                  code: "strategy.revision_conflict",
+                  message: "another author saved first",
+                  latest_revision: 3,
+                },
+              },
+              { status: 409 },
+            );
+          }
+          return HttpResponse.json(
+            document(String(params.strategyId), 4, body.source),
+            { status: 201 },
+          );
+        },
+      ),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/1");
+    const view = await editor();
+    const preserved = `${STORED}description: 내 전체 문서\n`;
+    replaceText(view, preserved);
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+    await user.click(saveButton());
+
+    const banner = await screen.findByRole("region", { name: "리비전 충돌" });
+    expect(banner).toHaveTextContent("자동 병합은 제공하지 않습니다");
+    await user.click(
+      within(banner).getByRole("button", {
+        name: "현재 전체 문서로 v4 생성",
+      }),
+    );
+    await waitFor(() =>
+      expect(history.location.pathname).toBe(
+        "/research/strategies/s1/revisions/4",
+      ),
+    );
+    expect(expectedRevisions).toEqual([1, 3]);
+    expect(view.state.doc.toString()).toBe(preserved);
   });
 
   it("keeps recovery actions usable when clipboard and diff requests fail", async () => {

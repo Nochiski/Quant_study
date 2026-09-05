@@ -46,6 +46,8 @@ export type StrategyIdeProps = {
   sourceView?: "yaml" | "json";
   /** Stable read-only tab content keyed by representation. */
   projections?: Partial<Record<SourceView, ReactNode>>;
+  /** Document-level recovery or warning UI that must remain visible across every view. */
+  notice?: ReactNode;
   /** Strategy document outline projection (P4-01). */
   outline?: ReactNode;
   /** P4-10 catalog UI; the P4-05 feature model owns schema projection and insertion. */
@@ -86,6 +88,7 @@ export const StrategyIde = ({
   editor,
   sourceView,
   projections,
+  notice,
   outline,
   snippets,
   editorActions,
@@ -283,6 +286,8 @@ export const StrategyIde = ({
           ) : null}
         </dl>
       </header>
+
+      {notice ? <div className="ide__notice">{notice}</div> : null}
 
       <div className="ide__body">
         <div

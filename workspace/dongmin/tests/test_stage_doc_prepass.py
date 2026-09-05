@@ -6,8 +6,9 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from stage import doc_prepass
 from test_stage_doc_parsers import AUDIT_XML, FULL_G1, HTML_DOC
+
+from stage import doc_prepass
 
 
 def _zip(members: dict[str, bytes]) -> bytes:

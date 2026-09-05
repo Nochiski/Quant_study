@@ -2,8 +2,9 @@
 import json
 from pathlib import Path
 
-from stage import build, doc_checks, rules
 from test_stage_doc_build import _prepared
+
+from stage import build, doc_checks, rules
 
 
 def test_checks_report_correction_page_xbrl_share_and_vocab_coverage(tmp_path: Path) -> None:

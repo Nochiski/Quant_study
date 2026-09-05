@@ -5,8 +5,9 @@ from pathlib import Path
 
 import duckdb
 import pytest
-from stage import build, doc_prepass, gates, rules, snapshot
 from test_stage_doc_prepass import _setup
+
+from stage import build, doc_prepass, gates, rules, snapshot
 
 DISC_COLS = ["row_hash", "corp_cls", "corp_code", "corp_name", "flr_nm", "rcept_dt", "rcept_no",
              "report_nm", "rm", "stock_code", "req_bgn_de", "req_end_de", "req_page_no", "dup_seq",

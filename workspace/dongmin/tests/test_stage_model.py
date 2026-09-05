@@ -4,6 +4,7 @@ import sqlite3
 from pathlib import Path
 
 import duckdb
+
 from stage import (
     build,
     gates,

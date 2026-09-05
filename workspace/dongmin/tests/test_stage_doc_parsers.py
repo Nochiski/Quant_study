@@ -5,6 +5,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 import pytest
+
 from stage import doc_vocab
 from stage import parsers_doc as pd_
 

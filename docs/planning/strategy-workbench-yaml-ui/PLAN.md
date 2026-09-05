@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: APPROVED
+project_status: IN_PROGRESS
 current_phase: P6
-current_pr: P6-08,P6-09
-active_prs: [P6-08, P6-09]
-parallel_window: [P6-08, P6-09]
-last_updated: 2026-09-06T01:22:46+09:00
+current_pr: P6-03,P6-08,P6-09
+active_prs: [P6-03, P6-08, P6-09]
+parallel_window: [P6-08, P6-09, P6-03]
+last_updated: 2026-09-06T01:26:01+09:00
 planned_prs: 52
 merged_prs: 46
 approved_prs: 48
@@ -22,13 +22,13 @@ progress_percent: 88
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `APPROVED` |
+| Project status | `IN_PROGRESS` |
 | Current phase | `P6` |
-| Current/next PR | `P6-08,P6-09` |
-| Active PR | `P6-08, P6-09` |
+| Current/next PR | `P6-03,P6-08,P6-09` |
+| Active PR | `P6-03, P6-08, P6-09` |
 | Progress | `46 / 52 merged (88%)` |
 | Approved | `48 / 52` |
-| Aggregated at | `2026-09-06 01:22 KST` |
+| Aggregated at | `2026-09-06 01:26 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -78,7 +78,7 @@ progress_percent: 88
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
 | P4 | Outline, Contract, Projections | 10 | 10 | `MERGED` |
 | P5 | Truthful Trace UI | 3 | 3 | `MERGED` |
-| P6 | Professional release and migration | 9 | 3 | `APPROVED` |
+| P6 | Professional release and migration | 9 | 3 | `IN_PROGRESS` |
 | **Total** |  | **52** | **46** | **88%** |
 <!-- PLAN:PHASES:END -->
 
@@ -86,16 +86,16 @@ progress_percent: 88
 
 | 항목 | 값 |
 |---|---|
-| PR | `P6-09` [#75](https://github.com/Nochiski/Quant_study/pull/75) Backtest run history routed UI와 provenance APPROVED (stacked; CI billing blocked) |
-| Intent | process-lifetime BacktestRunService의 실제 lifecycle/provenance를 read-only history로 투영해 전문 사용자가 run을 최신순 탐색하고 saved/inline 실행 근거를 확인한 뒤 detail route로 복귀하게 한다 |
-| Acceptance | newest-first deterministic pagination과 strategy filter; saved/inline의 strategy/revision/spec/schema/source hash를 명시적으로 분리 표시; nonterminal row만 polling하고 terminal-only page는 멈춤; run detail direct link; loading·empty·error·out-of-range URL canonical recovery; OpenAPI/generated/backend/frontend 계약 동기화 |
-| Non-goals | run 영속화·삭제·재시작 복구, 새로운 backtest 실행 의미, 결과/trace 화면 변경, strategy history 변경, legacy editor 제거 |
-| Branch/worktree | `feat/p6-09-backtest-history` (`Quant_study-p6-09`), base branch `feat/p6-08-strategy-history` |
-| Base SHA | `f760a5b` (P6-08 approved docs HEAD; #74 merge 후 main에 순차 rebase/base 전환) |
-| Head SHA | `74ebae0` final review freeze (`eeabb69` implementation, `d670c61` pagination fix) |
-| Diff stat | base 대비 22 files +1,228/-30 (OpenAPI/generated 211줄, tests와 hostile contract 보강 포함; 단일 API→query→route vertical slice와 공용 pagination wire guard로 12절 size exception) |
-| Focused tests | author backend history/reference/status 13·frontend router+document route 64; reviewer backend 20과 세 endpoint hostile lexical/bounds matrix |
-| Full gate | backend 1,118·frontend 427·Rust 13·root 5; Ruff·Pyright·typecheck·lint·changed-file Prettier·build·cargo fmt/clippy 통과; runtime/tracked OpenAPI 214 schemas 일치; 기존 Vite 500 kB chunk warning만 유지 |
+| PR | `P6-03` Keyboard workflow와 Command Palette IN_PROGRESS (stacked on approved P6-09; CI billing blocked) |
+| Intent | 전문 사용자가 마우스 없이 현재 StrategySpec을 검증·저장·백테스트하고 표현·패널·문서 symbol을 탐색하며 workspace 선호를 복구하게 한다 |
+| Acceptance | 접근 가능한 command palette와 IME-safe 단축키; Validate/Save/Backtest의 기존 gate 재사용; 사용 가능한 view와 세 IDE panel 전환; 현재 outline의 path·semantic symbol 검색 후 source reveal; panel size와 light/dark/system theme preference의 versioned local persistence 및 hostile storage fail-closed; new/revision route 통합 |
+| Non-goals | soft dark 색상 token 자체(P6-04), palette 밖 전역 앱 검색, 서버 동기화 preference, 브라우저 E2E/visual baseline(P6-05~06), legacy editor 제거 |
+| Branch/worktree | `feat/p6-03-keyboard-palette` (`Quant_study-p6-03`), base branch `feat/p6-09-backtest-history` |
+| Base SHA | `db076ea` (P6-09 approval-doc HEAD; #74→#75 순차 merge 후 base 전환) |
+| Head SHA | 구현 중 |
+| Diff stat | 구현 후 기록 |
+| Focused tests | command filtering/keyboard/focus, action gates, view/panel/symbol commands, preference parser/persistence, new/revision route 통합 예정 |
+| Full gate | frontend 전체·typecheck·lint·Prettier·build와 기존 backend/Rust/root 회귀 예정 |
 
 ---
 
@@ -233,7 +233,7 @@ Phase exit:
 |---|---|---|---|---|---|
 | [x] | `P6-01` | SQLite persistent strategy revision repository | P1-07 | `MERGED` | [#69](https://github.com/Nochiski/Quant_study/pull/69) · `review_p6_01` APPROVE |
 | [x] | `P6-02` | Server draft persistence/CAS/recovery UI | P6-01, P3-06, P4-08 | `MERGED` | [#72](https://github.com/Nochiski/Quant_study/pull/72) · `review_p6_02` APPROVE |
-| [ ] | `P6-03` | Keyboard workflow와 Command Palette | P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `WAITING` | — |
+| [ ] | `P6-03` | Keyboard workflow와 Command Palette | P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `IN_PROGRESS` | stacked on [#75](https://github.com/Nochiski/Quant_study/pull/75) |
 | [ ] | `P6-04` | Large/hostile spec 성능·접근성·i18n과 soft dark theme (`$ref`-only cycle fail-closed 포함) | P3-05, P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `WAITING` | — |
 | [ ] | `P6-05` | Playwright/visual regression infrastructure와 CI | P2-03, P3-05, P6-04 | `WAITING` | — |
 | [ ] | `P6-06` | 전체 browser E2E·실구동 시나리오 검증, migration gate, 조건부 legacy cleanup | P6-01, P6-02, P6-03, P6-04, P6-05, P6-08, P6-09 | `WAITING` | — |
@@ -351,6 +351,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-06 KST | Codex | P6-09 승인 HEAD `db076ea` 위에 P6-03 전용 branch/worktree를 만들고 IN_PROGRESS로 전환했다. 공용 palette UI는 검색·키보드·focus만, IDE widget은 view/panel과 local panel-size state만, document page는 기존 validate/save/backtest gate와 outline symbol→URL/source reveal 조립만 소유한다. theme preference는 versioned local contract로 분리하고 실제 dark token은 P6-04에 남긴다 | stacked 진행 규칙·action SoT 재사용·FSD/상태 책임분리·P6-03/P6-04 경계 |
 | 2026-09-06 KST | Codex | 동일 reviewer `review_p6_09`이 final reviewed HEAD `74ebae0`에서 최초 pagination P2 폐쇄와 최신 전체 diff의 새 P0/P1/P2 0을 확인해 APPROVE했다. backend 20, 세 endpoint의 float-like·선행 0·부호·공백/제어문자·밑줄·지수·Unicode 숫자 hostile matrix, bounds/MAX, runtime/tracked OpenAPI 214 schemas를 독립 재현했다. process-lifetime/multi-worker와 inline source hash 신뢰 경계, 실제 browser 검증은 명시된 P6-06 residual로 유지하고 P6-09를 APPROVED로 전환한다 | same-reviewer final approval·blocking 0·wire/domain SoT 감사 |
 | 2026-09-06 KST | Codex | P6-09 수정·self-check 증거를 review HEAD `74ebae0`에 동결하고 최초 검토자 `review_p6_09`에게 P2 폐쇄 여부 재검토를 요청한다. 검토 범위는 공용 validator가 세 endpoint에 빠짐없이 적용됐는지, hostile lexical forms와 bounds, OpenAPI/도메인 SoT, 새 회귀 테스트의 실효성이다 | 13.3 diff freeze·13.5 same-reviewer fix loop |
 | 2026-09-06 KST | Codex | P6-09 리뷰 수정 `d670c61`에서 inbound HTTP 공용 canonical unsigned-decimal validator를 추가하고 backtest/strategy/revision 세 목록에 동일 적용했다. wire lexical grammar는 inbound adapter, 범위 상수·불변식은 `PageRequest`가 계속 소유한다. `1.0`, `01`, `+1`, 공백, `9_0`은 세 경로 모두 422이며 0·양의 십진수·MAX safe bounds는 통과한다. OpenAPI `integer`와 `minimum/maximum`은 무변경이고 focused 4, 전체 backend 1,118, Ruff·Pyright를 통과해 SELF_CHECK로 전환한다 | reviewer P2 폐쇄·wire/domain SoT 책임분리·generated contract deterministic |

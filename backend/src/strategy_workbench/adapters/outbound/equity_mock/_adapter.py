@@ -245,6 +245,7 @@ class MockEquityDataAdapter:
         function of (security, date) only. The synthetic series is not continuous with the fixture
         values at the calendar boundary (a mock data-quality artifact, deterministic either way).
         """
+        checkpoint()
         venue = _MOCK_UNIVERSES.get((query.market, query.universe_id))
         profile_by_id = {profile.field_id: profile for profile in self._profiles}
         unknown_fields = sorted(set(query.field_ids) - set(profile_by_id))
@@ -260,6 +261,7 @@ class MockEquityDataAdapter:
                     f"market={query.market!r} universe_id={query.universe_id!r} "
                     f"supported={sorted(_MOCK_UNIVERSES)} unknown_fields={unknown_fields}"
                 ),
+                validation_checkpoint=checkpoint,
             )
         history, requested = _sessions_with_history(
             query.start, query.end, query.history_sessions_before_start
@@ -306,6 +308,7 @@ class MockEquityDataAdapter:
             observations=tuple(observations),
             detail=None if observations else f"no mock raw observations — query={query}",
             warnings=tuple(sorted(warnings)),
+            validation_checkpoint=checkpoint,
         )
 
     def _raw_field(

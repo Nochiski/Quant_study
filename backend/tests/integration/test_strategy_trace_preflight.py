@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import date
 from threading import Event
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -27,10 +29,15 @@ from strategy_workbench.application.portfolio_design.facade.design import (
     IncompatiblePortfolioRequestError,
     InvalidPortfolioRequestError,
     PortfolioDesignService,
+    PortfolioPipelineCancelledError,
+    PortfolioPipelineOptions,
     PortfolioStartingHolding,
     TraceObservationCapabilityError,
 )
-from strategy_workbench.application.portfolio_design.facade.ports import RawObservationQuery
+from strategy_workbench.application.portfolio_design.facade.ports import (
+    RawObservationQuery,
+    RawObservationSet,
+)
 from strategy_workbench.application.portfolio_design.facade.trace import (
     InvalidStrategyTraceRequestError,
     StrategyTraceCancelledError,
@@ -39,7 +46,9 @@ from strategy_workbench.application.portfolio_design.facade.trace import (
     StrategyTraceService,
 )
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
+from strategy_workbench.domain.factor.facade.evaluation import FactorEvaluation, FactorValue
 from strategy_workbench.domain.factor.facade.expression import ConstantNode
+from strategy_workbench.domain.factor.facade.trace import TraceSelection
 from strategy_workbench.domain.portfolio.facade.construction import (
     PortfolioFieldValue,
     PortfolioObservation,
@@ -408,6 +417,153 @@ def test_raw_port_checkpoint_interrupts_loading() -> None:
     with pytest.raises(StrategyTraceCancelledError, match="cancelled"):
         service.trace(_request(_spec()), cancelled=stop.is_set)
     assert source.raw_called is True
+
+
+def test_raw_numeric_validation_cancellation_stops_before_factor_evaluation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from strategy_workbench.application.portfolio_design.ports.outgoing import (
+        raw_observations as raw_observation_module,
+    )
+
+    stop = Event()
+    numeric_checks = 0
+    original = raw_observation_module._finite_number
+
+    def latch_on_first_numeric(value: object) -> bool:
+        nonlocal numeric_checks
+        numeric_checks += 1
+        stop.set()
+        return original(value)
+
+    def fail_later_stage(*args, **kwargs):
+        raise AssertionError("factor and TargetTape stages must not start after raw cancellation")
+
+    monkeypatch.setattr(raw_observation_module, "_finite_number", latch_on_first_numeric)
+    monkeypatch.setattr(portfolio_module, "evaluate_factor_graph", fail_later_stage)
+    monkeypatch.setattr(portfolio_module, "evaluate_factor_graph_with_trace", fail_later_stage)
+    monkeypatch.setattr(portfolio_module, "compile_target_tape", fail_later_stage)
+    source = MockEquityDataAdapter.demo()
+    service = StrategyTraceService(
+        PortfolioDesignService(
+            source,
+            BacktestEnginePortfolioAdapter(),
+            factor_metadata=source,
+            factor_registry_version="factor-registry-v1",
+        ),
+        InMemoryStrategyRepository(),
+    )
+
+    with pytest.raises(StrategyTraceCancelledError, match="cancelled"):
+        service.trace(_request(_spec()), cancelled=stop.is_set)
+
+    assert numeric_checks == 1
+
+
+def test_trace_scope_cancellation_stops_after_first_observation() -> None:
+    spec = _spec()
+    source = MockEquityDataAdapter.demo()
+    raw = source.load_raw_observations(
+        RawObservationQuery(
+            market=spec.data.market.value,
+            universe_id=spec.data.universe_id,
+            start=spec.data.start,
+            end=spec.data.end,
+            field_ids=("price.close",),
+        )
+    )
+    stop = Event()
+    consumed = 0
+
+    def latching_observations():
+        nonlocal consumed
+        for observation in raw.observations:
+            consumed += 1
+            if consumed == 1:
+                stop.set()
+            yield observation
+
+    scoped_raw = cast(
+        RawObservationSet,
+        SimpleNamespace(
+            sessions=raw.sessions,
+            observations=latching_observations(),
+            data_snapshot_id=raw.data_snapshot_id,
+        ),
+    )
+    options = PortfolioPipelineOptions(
+        trace_factor_id=spec.factors.factors[0].factor_id,
+        trace_selection=TraceSelection(
+            as_of=(spec.data.end,),
+            security_ids=("sec-005930-1",),
+        ),
+    )
+
+    def checkpoint() -> None:
+        if stop.is_set():
+            raise PortfolioPipelineCancelledError("cancelled in trace scope")
+
+    with pytest.raises(PortfolioPipelineCancelledError, match="trace scope"):
+        portfolio_module._validate_loaded_trace_scope(
+            options,
+            scoped_raw,
+            first_signal_as_of=spec.data.end,
+            checkpoint=checkpoint,
+        )
+
+    assert consumed == 1
+
+
+def test_factor_output_cancellation_stops_before_target_and_projection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = _spec()
+    factor = spec.factors.factors[0]
+    stop = Event()
+    consumed = 0
+
+    def latching_values():
+        nonlocal consumed
+        for index in range(1_000):
+            consumed += 1
+            if consumed == 1:
+                stop.set()
+            yield FactorValue(spec.data.end, f"security-{index:04d}", float(index))
+
+    def evaluate_with_latching_values(*args, **kwargs):
+        return (
+            FactorEvaluation(
+                factor.graph.output_node_id,
+                cast(tuple[FactorValue, ...], latching_values()),
+            ),
+            None,
+        )
+
+    def fail_later_stage(*args, **kwargs):
+        raise AssertionError("TargetTape and trace projection must not start after cancellation")
+
+    monkeypatch.setattr(
+        portfolio_module,
+        "evaluate_factor_graph_with_trace",
+        evaluate_with_latching_values,
+    )
+    monkeypatch.setattr(portfolio_module, "compile_target_tape", fail_later_stage)
+    monkeypatch.setattr(trace_module, "_raw_projection", fail_later_stage)
+    source = MockEquityDataAdapter.demo()
+    service = StrategyTraceService(
+        PortfolioDesignService(
+            source,
+            BacktestEnginePortfolioAdapter(),
+            factor_metadata=source,
+            factor_registry_version="factor-registry-v1",
+        ),
+        InMemoryStrategyRepository(),
+    )
+
+    with pytest.raises(StrategyTraceCancelledError, match="cancelled"):
+        service.trace(_request(spec), cancelled=stop.is_set)
+
+    assert consumed == 1
 
 
 def test_factor_evaluator_checkpoint_stops_before_target_tape(monkeypatch) -> None:

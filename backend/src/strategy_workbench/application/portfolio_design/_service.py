@@ -255,7 +255,7 @@ class PortfolioDesignService:
                 raw = self._observation_source.load_raw_observations(raw_query)
             # Normal construction already validates the immutable value. Recheck at the consumer
             # boundary so a foreign/stale adapter cannot bypass the current port contract.
-            raw.validate_contract()
+            raw.validate_contract(checkpoint=checkpoint)
         except RawObservationContractViolation as error:
             raise RawObservationContractError(str(error)) from error
         checkpoint()
@@ -266,16 +266,18 @@ class PortfolioDesignService:
                 expected=metadata.data_snapshot_id,
                 actual=raw.data_snapshot_id,
             )
-        _reject_sessions_outside_strategy_range(raw, spec)
+        _reject_sessions_outside_strategy_range(raw, spec, checkpoint=checkpoint)
         schedule = compile_rebalance_schedule(spec, raw.sessions, checkpoint=checkpoint)
         _validate_loaded_trace_scope(
             pipeline_options,
             raw,
             first_signal_as_of=schedule.first_signal_as_of,
+            checkpoint=checkpoint,
         )
         checkpoint()
         factor_observations = tuple(
-            _to_factor_observation(item) for item in _checkpointed(raw.observations, checkpoint)
+            _to_factor_observation(item, checkpoint=checkpoint)
+            for item in _checkpointed(raw.observations, checkpoint)
         )
         parameters = tuple(
             ResolvedFactorParameter(parameter.parameter_id, parameter.default)
@@ -447,6 +449,7 @@ def _validate_loaded_trace_scope(
     raw: RawObservationSet,
     *,
     first_signal_as_of: date | None,
+    checkpoint: Callable[[], None],
 ) -> None:
     """Reject an untraceable date/security scope before any FactorGraph calculation.
 
@@ -457,8 +460,8 @@ def _validate_loaded_trace_scope(
     selection = options.trace_selection
     if selection is None:
         return
-    selected_dates = set(selection.as_of or ())
-    missing_sessions = selected_dates - set(raw.sessions)
+    selected_dates = set(_checkpointed(selection.as_of or (), checkpoint))
+    missing_sessions = selected_dates - set(_checkpointed(raw.sessions, checkpoint))
     if missing_sessions:
         raise InvalidPortfolioTraceSelectionError(
             "trace as_of dates are not trading sessions in the selected snapshot — "
@@ -466,7 +469,9 @@ def _validate_loaded_trace_scope(
         )
     if selected_dates and selection.security_ids:
         observed_ids = {
-            item.security_id for item in raw.observations if item.as_of in selected_dates
+            item.security_id
+            for item in _checkpointed(raw.observations, checkpoint)
+            if item.as_of in selected_dates
         }
         unmatched = set(selection.security_ids) - observed_ids
         if unmatched:
@@ -482,10 +487,12 @@ def _validate_loaded_trace_scope(
                 f"snapshot={raw.data_snapshot_id!r}"
             )
         observed_ids = {
-            item.security_id for item in raw.observations if item.as_of == first_signal_as_of
+            item.security_id
+            for item in _checkpointed(raw.observations, checkpoint)
+            if item.as_of == first_signal_as_of
         }
         unmatched_holdings = {
-            holding.security_id for holding in options.starting_holdings
+            holding.security_id for holding in _checkpointed(options.starting_holdings, checkpoint)
         } - observed_ids
         if unmatched_holdings:
             raise InvalidPortfolioTraceSelectionError(
@@ -553,7 +560,12 @@ def _reject_non_numeric_factor_outputs(
         raise InvalidPortfolioRequestError(StrategyValidation(valid=False, issues=issues))
 
 
-def _reject_sessions_outside_strategy_range(raw: RawObservationSet, spec: StrategySpec) -> None:
+def _reject_sessions_outside_strategy_range(
+    raw: RawObservationSet,
+    spec: StrategySpec,
+    *,
+    checkpoint: Callable[[], None],
+) -> None:
     """Sessions must stay inside `spec.data.start..end` (fail-closed, D-004).
 
     A wider answer is fail-open: `compile_target_tape` would emit frames whose execution date has
@@ -561,7 +573,9 @@ def _reject_sessions_outside_strategy_range(raw: RawObservationSet, spec: Strate
     range alone.
     """
     outside = tuple(
-        session for session in raw.sessions if not spec.data.start <= session <= spec.data.end
+        session
+        for session in _checkpointed(raw.sessions, checkpoint)
+        if not spec.data.start <= session <= spec.data.end
     )
     if not outside:
         return
@@ -574,8 +588,10 @@ def _reject_sessions_outside_strategy_range(raw: RawObservationSet, spec: Strate
     )
 
 
-def _to_factor_observation(item: RawObservation) -> FactorObservation:
-    for field in item.fields:
+def _to_factor_observation(
+    item: RawObservation, *, checkpoint: Callable[[], None]
+) -> FactorObservation:
+    for field in _checkpointed(item.fields, checkpoint):
         if field.available_date > item.as_of:
             raise LookAheadViolationError(
                 "raw field published after its observation date — "
@@ -585,7 +601,10 @@ def _to_factor_observation(item: RawObservation) -> FactorObservation:
     return FactorObservation(
         as_of=item.as_of,
         security_id=item.security_id,
-        fields=tuple(FactorFieldValue(field.field_id, field.value) for field in item.fields),
+        fields=tuple(
+            FactorFieldValue(field.field_id, field.value)
+            for field in _checkpointed(item.fields, checkpoint)
+        ),
         # Membership travels with the row so cross-sectional operators score members against
         # members only (D-001); dropping non-members here would truncate time-series lookbacks.
         universe_member=item.universe_member,
@@ -599,15 +618,18 @@ def _to_portfolio_observations(
     *,
     checkpoint: Callable[[], None] = lambda: None,
 ) -> tuple[PortfolioObservation, ...]:
-    in_range = set(raw.sessions)
+    in_range = set(_checkpointed(raw.sessions, checkpoint))
     values_by_key: dict[tuple[str, date, str], float | None] = {}
-    for record in evaluations:
-        for value in record.values:
+    for record in _checkpointed(evaluations, checkpoint):
+        for value in _checkpointed(record.values, checkpoint):
             values_by_key[(record.factor_id, value.as_of, value.security_id)] = value.value
     opening_weights = (
         None
         if starting_holdings is None
-        else {holding.security_id: holding.weight for holding in starting_holdings}
+        else {
+            holding.security_id: holding.weight
+            for holding in _checkpointed(starting_holdings, checkpoint)
+        }
     )
     return tuple(
         PortfolioObservation(
@@ -618,13 +640,15 @@ def _to_portfolio_observations(
                 PortfolioFactorValue(
                     factor_id=record.factor_id,
                     value=values_by_key.get((record.factor_id, item.as_of, item.security_id)),
-                    available_date=_latest_input_publication(item, record.plan),
+                    available_date=_latest_input_publication(
+                        item, record.plan, checkpoint=checkpoint
+                    ),
                 )
-                for record in evaluations
+                for record in _checkpointed(evaluations, checkpoint)
             ),
             fields=tuple(
                 PortfolioFieldValue(field.field_id, field.value, field.available_date)
-                for field in item.fields
+                for field in _checkpointed(item.fields, checkpoint)
             ),
             sector_id=item.sector_id,
             previous_weight=(
@@ -638,10 +662,19 @@ def _to_portfolio_observations(
     )
 
 
-def _latest_input_publication(item: RawObservation, plan: FactorExecutionPlan) -> date:
+def _latest_input_publication(
+    item: RawObservation,
+    plan: FactorExecutionPlan,
+    *,
+    checkpoint: Callable[[], None],
+) -> date:
     """Publication date of the factor value: the latest among the fields its plan reads."""
     required = set(plan.required_field_ids)
     return max(
-        (field.available_date for field in item.fields if field.field_id in required),
+        (
+            field.available_date
+            for field in _checkpointed(item.fields, checkpoint)
+            if field.field_id in required
+        ),
         default=item.as_of,
     )

@@ -26,6 +26,9 @@ from strategy_workbench.application.portfolio_design.facade.ports import (
     RawObservationQuery,
     RawObservationSet,
 )
+from strategy_workbench.application.portfolio_design.ports.outgoing import (
+    raw_observations as raw_observation_module,
+)
 from strategy_workbench.domain.equity.facade.research_data import (
     DataLoadStatus,
     ResearchPanelQuery,
@@ -296,6 +299,56 @@ def test_result_rejects_every_non_finite_raw_number(value: float) -> None:
             (),
             (RawObservation(START, "a", True, (), previous_weight=value),),
         )
+
+
+@pytest.mark.parametrize("consumer_revalidation", [False, True])
+def test_raw_contract_validation_cancels_after_first_numeric_check(
+    monkeypatch: pytest.MonkeyPatch, consumer_revalidation: bool
+) -> None:
+    rows = tuple(
+        RawObservation(
+            START,
+            f"security-{index:04d}",
+            True,
+            (RawFieldValue("price.close", float(index), START),),
+        )
+        for index in range(1_000)
+    )
+    existing = (
+        RawObservationSet(DataLoadStatus.OK, "snap", (START,), (), rows)
+        if consumer_revalidation
+        else None
+    )
+    stopped = False
+    numeric_checks = 0
+    original = raw_observation_module._finite_number
+
+    def latch_on_first_numeric(value: object) -> bool:
+        nonlocal numeric_checks, stopped
+        numeric_checks += 1
+        stopped = True
+        return original(value)
+
+    def checkpoint() -> None:
+        if stopped:
+            raise RuntimeError("cancelled during raw contract validation")
+
+    monkeypatch.setattr(raw_observation_module, "_finite_number", latch_on_first_numeric)
+
+    with pytest.raises(RuntimeError, match="cancelled during raw contract validation"):
+        if existing is None:
+            RawObservationSet(
+                DataLoadStatus.OK,
+                "snap",
+                (START,),
+                (),
+                rows,
+                validation_checkpoint=checkpoint,
+            )
+        else:
+            existing.validate_contract(checkpoint=checkpoint)
+
+    assert numeric_checks == 1
 
 
 @pytest.mark.parametrize("adapter", ADAPTERS)

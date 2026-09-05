@@ -21,6 +21,17 @@ class InvalidStrategyDraftError(ValueError):
     pass
 
 
+def _utf8_bytes(value: str, field: str) -> bytes:
+    """Validate text at the application persistence boundary, before any adapter sees it."""
+
+    try:
+        return value.encode("utf-8")
+    except UnicodeEncodeError as error:
+        raise InvalidStrategyDraftError(
+            f"draft {field} must be representable as valid UTF-8 text"
+        ) from error
+
+
 class StrategyDraftService:
     """Preserve invalid or valid editor source without becoming a compile authority."""
 
@@ -39,9 +50,11 @@ class StrategyDraftService:
 
     def get(self, draft_id: str) -> StrategyDraft:
         try:
-            draft = self._repository.get(validate_draft_id(draft_id))
+            validated_id = validate_draft_id(draft_id)
         except ValueError as error:
             raise InvalidStrategyDraftError(str(error)) from error
+        _utf8_bytes(validated_id, "draft_id")
+        draft = self._repository.get(validated_id)
         self._validate_base(
             SaveStrategyDraftRequest(
                 expected_version=draft.version,
@@ -60,12 +73,13 @@ class StrategyDraftService:
             validated_id = validate_draft_id(draft_id)
         except ValueError as error:
             raise InvalidStrategyDraftError(str(error)) from error
-        try:
-            source_bytes = len(request.source.encode("utf-8"))
-        except UnicodeEncodeError as error:
-            raise InvalidStrategyDraftError(
-                "draft source must be representable as valid UTF-8 text"
-            ) from error
+        _utf8_bytes(validated_id, "draft_id")
+        source_bytes = len(_utf8_bytes(request.source, "source"))
+        _utf8_bytes(request.schema_version, "schema_version")
+        if request.strategy_id is not None:
+            _utf8_bytes(request.strategy_id, "strategy_id")
+        if request.base_spec_hash is not None:
+            _utf8_bytes(request.base_spec_hash, "base_spec_hash")
         if source_bytes > self._max_source_bytes:
             raise InvalidStrategyDraftError(
                 "draft source exceeds authoring limit -- "
@@ -102,6 +116,7 @@ class StrategyDraftService:
                 raise ValueError("expected_version must be an integer >= 1")
         except ValueError as error:
             raise InvalidStrategyDraftError(str(error)) from error
+        _utf8_bytes(validated_id, "draft_id")
         self._repository.delete(validated_id, expected_version=expected_version)
 
     def _validate_base(self, request: SaveStrategyDraftRequest) -> None:

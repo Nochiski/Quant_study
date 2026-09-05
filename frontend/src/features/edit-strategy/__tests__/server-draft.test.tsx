@@ -23,6 +23,7 @@ import { useServerDraft } from "../model/use-server-draft";
 import { ServerDraftBanner } from "../ui/server-draft-banner";
 
 const DRAFT_ID = "draft-0123456789abcdef0123456789abcdef";
+const NEXT_DRAFT_ID = `revision:s1:2:${"c".repeat(64)}`;
 const BASE = 'schema_version: "1.0"\ntitle: base\n';
 const SPEC_HASH = "a".repeat(64);
 
@@ -49,10 +50,16 @@ const initial = {
   phase: "saved" as const,
 };
 
-const Harness = () => {
+const Harness = ({
+  rotateDraftOnSave = false,
+}: {
+  rotateDraftOnSave?: boolean;
+}) => {
   const [state, dispatch] = useReducer(documentReducer, initial);
+  const draftId =
+    rotateDraftOnSave && state.baseRevision === 2 ? NEXT_DRAFT_ID : DRAFT_ID;
   const sync = useServerDraft(state, dispatch, {
-    draftId: DRAFT_ID,
+    draftId,
     schemaVersion: "1.0",
     delayMs: 5,
   });
@@ -94,13 +101,13 @@ const Harness = () => {
   );
 };
 
-const mount = () => {
+const mount = (rotateDraftOnSave = false) => {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   render(
     <QueryClientProvider client={client}>
-      <Harness />
+      <Harness rotateDraftOnSave={rotateDraftOnSave} />
     </QueryClientProvider>,
   );
 };
@@ -286,6 +293,43 @@ describe("server draft CAS", () => {
     await screen.findByText("서버 초안 동기화됨");
     fireEvent.click(
       screen.getByRole("button", { name: "Commit immutable revision" }),
+    );
+
+    await waitFor(() => expect(remove).toHaveBeenCalledWith(DRAFT_ID, 1));
+  });
+
+  it("retires an old draft when its PUT finishes after an immutable revision save", async () => {
+    vi.spyOn(strategyWorkbenchApi, "getStrategyDraft").mockRejectedValue(
+      new ApiRequestError("get", 404, "strategy.draft.not_found"),
+    );
+    let resolveWrite: ((draft: StrategyDraft) => void) | undefined;
+    const inFlight = new Promise<StrategyDraft>((resolve) => {
+      resolveWrite = resolve;
+    });
+    const save = vi
+      .spyOn(strategyWorkbenchApi, "saveStrategyDraft")
+      .mockReturnValue(inFlight);
+    const remove = vi
+      .spyOn(strategyWorkbenchApi, "deleteStrategyDraft")
+      .mockResolvedValue();
+    mount(true);
+    await screen.findByText(t("draft.server.synced"));
+
+    fireEvent.change(screen.getByLabelText("Source"), {
+      target: { value: "title: saved while draft PUT is in flight\n" },
+    });
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Commit immutable revision" }),
+    );
+    await waitFor(() =>
+      expect(strategyWorkbenchApi.getStrategyDraft).toHaveBeenCalledWith(
+        NEXT_DRAFT_ID,
+      ),
+    );
+
+    resolveWrite?.(
+      remoteDraft("title: saved while draft PUT is in flight\n", 1),
     );
 
     await waitFor(() => expect(remove).toHaveBeenCalledWith(DRAFT_ID, 1));

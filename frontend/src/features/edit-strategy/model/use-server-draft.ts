@@ -246,6 +246,10 @@ export const useServerDraft = (
           requestedId,
           requestOf(requestedState, requestedSchema, current.version),
         );
+        // A revision save can retire this identity while its PUT is in flight. Record the
+        // committed version before the UI-identity guard so the queued retirement can CAS-delete
+        // the old register; only presentation state belongs behind that guard.
+        knownVersions.current.set(requestedId, saved.version);
         if (sessionRef.current.draftId !== requestedId) return;
         const next = {
           draftId: requestedId,
@@ -259,7 +263,6 @@ export const useServerDraft = (
           incompatible: false,
           errorMessage: null,
         } satisfies Session;
-        knownVersions.current.set(requestedId, saved.version);
         sessionRef.current = next;
         setSession(next);
       } catch (error) {

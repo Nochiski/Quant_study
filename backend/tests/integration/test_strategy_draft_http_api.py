@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -104,6 +105,37 @@ def test_non_utf8_scalar_source_is_a_typed_rejection_and_is_not_persisted() -> N
     assert rejected.status_code == 422
     assert rejected.json()["detail"]["code"] == "strategy.draft.invalid"
     assert client.get("/api/v1/strategy-drafts/non-utf8").status_code == 404
+
+
+def test_non_utf8_persisted_metadata_is_a_typed_rejection_and_is_not_persisted() -> None:
+    client = TestClient(build_http_app(), raise_server_exceptions=False)
+    cases = (
+        {**_body("title: valid"), "schema_version": "\ud800"},
+        {
+            **_body("title: valid"),
+            "strategy_id": "\ud800",
+            "base_revision": 1,
+            "base_spec_hash": "0" * 64,
+        },
+        {
+            **_body("title: valid"),
+            "strategy_id": "strategy",
+            "base_revision": 1,
+            "base_spec_hash": "\ud800" * 64,
+        },
+    )
+
+    for index, body in enumerate(cases):
+        draft_id = f"non-utf8-metadata-{index}"
+        rejected = client.put(
+            f"/api/v1/strategy-drafts/{draft_id}",
+            content=json.dumps(body).encode("ascii"),
+            headers={"content-type": "application/json"},
+        )
+
+        assert rejected.status_code == 422
+        assert rejected.json()["detail"]["code"] == "strategy.draft.invalid"
+        assert client.get(f"/api/v1/strategy-drafts/{draft_id}").status_code == 404
 
 
 def test_server_draft_survives_runtime_container_reconstruction(tmp_path: Path) -> None:

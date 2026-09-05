@@ -19,7 +19,12 @@ const RESEARCH = [
     icon: "↗",
     to: "/research/strategies",
   },
-  { key: "backtests", label: "nav.backtests", icon: "▤", to: null },
+  {
+    key: "backtests",
+    label: "nav.backtests",
+    icon: "▤",
+    to: "/research/backtests",
+  },
   { key: "experiments", label: "nav.experiments", icon: "▦", to: null },
 ] as const;
 

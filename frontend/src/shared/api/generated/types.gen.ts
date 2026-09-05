@@ -115,6 +115,16 @@ export type BacktestRunState = {
 };
 
 /**
+ * BacktestRunSummary
+ *
+ * One process-lifetime run and the strategy meaning resolved before it started.
+ */
+export type BacktestRunSummary = {
+  run: BacktestRunState;
+  strategy_provenance: StrategyProvenance;
+};
+
+/**
  * BacktestSeries
  */
 export type BacktestSeries = {
@@ -1810,6 +1820,28 @@ export type NodeValueType =
  * OrderStyle
  */
 export type OrderStyle = "market";
+
+/**
+ * Page
+ */
+export type PageBacktestRunSummary = {
+  /**
+   * Items
+   */
+  items: Array<BacktestRunSummary>;
+  /**
+   * Limit
+   */
+  limit: number;
+  /**
+   * Offset
+   */
+  offset: number;
+  /**
+   * Total
+   */
+  total: number;
+};
 
 /**
  * Page
@@ -4142,6 +4174,45 @@ export type WarningSeverity = "info" | "warning";
  * WeightingMethod
  */
 export type WeightingMethod = "equal" | "factor_score" | "rank" | "risk";
+
+export type ListBacktestsData = {
+  body?: never;
+  path?: never;
+  query?: {
+    /**
+     * Offset
+     */
+    offset?: number;
+    /**
+     * Limit
+     */
+    limit?: number;
+    /**
+     * Strategy Id
+     */
+    strategy_id?: string | null;
+  };
+  url: "/api/v1/backtests";
+};
+
+export type ListBacktestsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ListBacktestsError = ListBacktestsErrors[keyof ListBacktestsErrors];
+
+export type ListBacktestsResponses = {
+  /**
+   * Successful Response
+   */
+  200: PageBacktestRunSummary;
+};
+
+export type ListBacktestsResponse =
+  ListBacktestsResponses[keyof ListBacktestsResponses];
 
 export type StartBacktestData = {
   body: BacktestRunSpec;

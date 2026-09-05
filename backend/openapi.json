@@ -197,6 +197,23 @@
         "title": "BacktestRunState",
         "type": "object"
       },
+      "BacktestRunSummary": {
+        "description": "One process-lifetime run and the strategy meaning resolved before it started.",
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/BacktestRunState"
+          },
+          "strategy_provenance": {
+            "$ref": "#/components/schemas/StrategyProvenance"
+          }
+        },
+        "required": [
+          "run",
+          "strategy_provenance"
+        ],
+        "title": "BacktestRunSummary",
+        "type": "object"
+      },
       "BacktestSeries": {
         "properties": {
           "drawdown": {
@@ -2988,6 +3005,37 @@
         ],
         "title": "OrderStyle",
         "type": "string"
+      },
+      "Page_BacktestRunSummary_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BacktestRunSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "offset",
+          "limit"
+        ],
+        "title": "Page",
+        "type": "object"
       },
       "Page_RevisionSummary_": {
         "properties": {
@@ -6691,6 +6739,75 @@
   "openapi": "3.1.0",
   "paths": {
     "/api/v1/backtests": {
+      "get": {
+        "operationId": "listBacktests",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "strategy_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Strategy Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_BacktestRunSummary_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Backtests"
+      },
       "post": {
         "operationId": "startBacktest",
         "requestBody": {

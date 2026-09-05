@@ -20,6 +20,7 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunService,
     BacktestRunSpec,
     BacktestRunState,
+    BacktestRunSummary,
     BacktestStartResponse,
     InvalidBacktestRunError,
     RunStatus,
@@ -245,6 +246,20 @@ def create_app(
     @app.get("/api/v1/health", operation_id="getHealth")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get(
+        "/api/v1/backtests",
+        operation_id="listBacktests",
+    )
+    def list_backtests(
+        offset: int = Query(default=0, ge=0, le=PageRequest.MAX_OFFSET),
+        limit: int = Query(default=50, ge=1, le=PageRequest.MAX_LIMIT),
+        strategy_id: str | None = Query(default=None, min_length=1),
+    ) -> Page[BacktestRunSummary]:
+        return backtest_runs.list_runs(
+            PageRequest(offset=offset, limit=limit),
+            strategy_id=strategy_id,
+        )
 
     @app.post(
         "/api/v1/backtests",

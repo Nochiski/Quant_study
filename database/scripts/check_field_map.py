@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""EQUITY_FIELD_MAP.md ↔ 워크벤치 팩터 레지스트리 문서(backend/FACTORS.md)의 field_id 집합 차를 검사한다.
+"""EQUITY_FIELD_MAP.md ↔ 워크벤치 팩터 레지스트리 문서(backend/FACTORS.md)의 field_id 집합 차를
+검사한다.
 
 S00 통과 조건: 레지스트리가 요구하는 field_id 집합 − 대응표 field_id 집합 = ∅.
-반대 방향(대응표에만 있는 id)은 경고로만 출력한다 — equity 내부 스코프(`price.adj_close` 등)가 있을 수 있다.
+반대 방향(대응표에만 있는 id)은 경고로만 출력한다 — equity 내부 스코프(`price.adj_close` 등)가
+있을 수 있다.
 
 사용: python database/scripts/check_field_map.py [--registry backend/FACTORS.md]
-                                                     [--map database/docs/EQUITY_FIELD_MAP.md]
+                                            [--map database/docs/EQUITY_FIELD_MAP.md]
 종료 코드 0 = 차집합 없음, 1 = 누락 있음, 2 = 파일 문제.
 """
 from __future__ import annotations

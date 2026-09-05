@@ -385,7 +385,8 @@ def _reason_checks(ctx: EquityGateContext, k: int, lb: int, la: int,
         "n_adj_apply_rows": int(str(n_apply)),
         "n_adj_apply_rows_not_ok": int(str(n_apply_not_ok)),
         "adj_apply_event_types": {str(r[0]): int(str(r[1])) for r in ctx.con.execute(
-            "SELECT event_type, count(*) FROM adj_factor GROUP BY 1 ORDER BY 1").fetchall()},
+            "SELECT event_type, count(*) FROM adj_factor "
+            "WHERE event_type <> 'unknown_price_only' GROUP BY 1 ORDER BY 1").fetchall()},
         "no_trade_reason_vocab": list(NO_TRADE_REASON_VOCAB),
     }
     return checks, metrics

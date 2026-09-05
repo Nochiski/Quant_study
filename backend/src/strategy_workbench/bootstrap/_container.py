@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
@@ -29,9 +30,11 @@ from strategy_workbench.application.factor_research.facade.research import (
 from strategy_workbench.application.portfolio_design.facade.design import PortfolioDesignService
 from strategy_workbench.application.portfolio_design.facade.trace import StrategyTraceService
 from strategy_workbench.application.strategy_authoring.facade.authoring import (
+    CompileRequest,
     StrategyAuthoringService,
     StrategyDocumentService,
 )
+from strategy_workbench.application.strategy_authoring.facade.ports import SourceFormat
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.application.strategy_design.facade.ports import StrategyRepositoryPort
 from strategy_workbench.domain.analytics.facade.metrics import build_default_metric_registry
@@ -69,7 +72,6 @@ def build_container(
         )
     equity_data = MockEquityDataAdapter.demo()
     engine_portfolio = BacktestEnginePortfolioAdapter()
-    strategy_repository = SQLiteStrategyRepository(strategy_repository_path)
     factor_registry = build_default_factor_registry()
     portfolio_design = PortfolioDesignService(
         equity_data,
@@ -82,6 +84,10 @@ def build_container(
         RuamelDocumentCodec(),
         factor_registry_version=factor_registry.version,
         dataset_snapshot_id=lambda: equity_data.snapshot().snapshot_id,
+    )
+    strategy_repository = SQLiteStrategyRepository(
+        strategy_repository_path,
+        source_spec_hash=_source_spec_hash_resolver(strategy_authoring),
     )
     run_artifact_root = artifact_root or (
         Path(__file__).resolve().parents[3] / ".local" / "backtest-runs"
@@ -115,3 +121,20 @@ def build_container(
             new_id=lambda: str(uuid4()),
         ),
     )
+
+
+def _source_spec_hash_resolver(
+    strategy_authoring: StrategyAuthoringService,
+) -> Callable[[str, SourceFormat], str]:
+    """Adapt the authoring compile contract to storage integrity without copying its rules."""
+
+    def resolve(source: str, format: SourceFormat) -> str:
+        compiled = strategy_authoring.compile(CompileRequest(source, format))
+        if compiled.spec_hash is None:
+            diagnostics = ", ".join(
+                f"{diagnostic.code}@{diagnostic.pointer}" for diagnostic in compiled.diagnostics[:5]
+            )
+            raise ValueError(f"stored source no longer compiles -- {diagnostics}")
+        return compiled.spec_hash
+
+    return resolve

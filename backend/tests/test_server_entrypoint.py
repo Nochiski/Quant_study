@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -24,7 +26,8 @@ def test_server_entrypoint_owns_defaults_and_forwards_overrides(monkeypatch) -> 
     assert command.calls == [
         {
             "args": [
-                "strategy_workbench.bootstrap.facade.http:app",
+                "strategy_workbench.bootstrap.facade.http:build_runtime_http_app",
+                "--factory",
                 "--host",
                 "127.0.0.1",
                 "--port",
@@ -38,9 +41,7 @@ def test_server_entrypoint_owns_defaults_and_forwards_overrides(monkeypatch) -> 
     ]
 
 
-def test_http_runtime_owns_the_durable_repository_path(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_http_runtime_owns_the_durable_repository_path(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.delenv(_http.STRATEGY_REPOSITORY_PATH_ENV, raising=False)
     assert _http.runtime_strategy_repository_path() == _http.DEFAULT_STRATEGY_REPOSITORY_PATH
 
@@ -48,3 +49,29 @@ def test_http_runtime_owns_the_durable_repository_path(
     monkeypatch.setenv(_http.STRATEGY_REPOSITORY_PATH_ENV, str(configured))
 
     assert _http.runtime_strategy_repository_path() == configured
+
+
+def test_importing_and_building_test_app_never_opens_the_runtime_database(
+    monkeypatch, tmp_path: Path
+) -> None:
+    configured = tmp_path / "runtime" / "strategies.sqlite3"
+    monkeypatch.setenv(_http.STRATEGY_REPOSITORY_PATH_ENV, str(configured))
+    environment = os.environ.copy()
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from strategy_workbench.bootstrap.facade.http import build_http_app; build_http_app()",
+        ],
+        check=False,
+        capture_output=True,
+        env=environment,
+        text=True,
+        timeout=15,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert not configured.exists()
+    _http.build_runtime_http_app()
+    assert configured.is_file()

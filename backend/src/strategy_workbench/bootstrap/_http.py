@@ -32,4 +32,6 @@ def build_http_app(
     )
 
 
-app = build_http_app(strategy_repository_path=runtime_strategy_repository_path())
+def build_runtime_http_app():
+    """Uvicorn factory: only an actual server process opens the durable runtime database."""
+    return build_http_app(strategy_repository_path=runtime_strategy_repository_path())

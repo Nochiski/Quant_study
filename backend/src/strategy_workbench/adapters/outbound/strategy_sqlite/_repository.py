@@ -18,20 +18,16 @@ from strategy_workbench.application.strategy_design.facade.ports import (
 )
 
 from ._errors import StrategyRepositoryStorageError
-from ._record_codec import decode_record, encode_record
+from ._record_codec import SourceSpecHashResolver, decode_record, encode_record
 from ._schema import SCHEMA_VERSION, migrate_schema
 
 _LATEST_ROWS_SQL = """
 SELECT revisions.*
-FROM strategy_revisions AS revisions
-INNER JOIN (
-    SELECT strategy_id, MAX(revision) AS latest_revision
-    FROM strategy_revisions
-    GROUP BY strategy_id
-) AS latest
-ON latest.strategy_id = revisions.strategy_id
-AND latest.latest_revision = revisions.revision
-ORDER BY revisions.strategy_id COLLATE BINARY ASC
+FROM strategy_heads AS heads
+INNER JOIN strategy_revisions AS revisions
+    ON revisions.strategy_id = heads.strategy_id
+    AND revisions.revision = heads.latest_revision
+ORDER BY heads.strategy_id COLLATE BINARY ASC
 LIMIT ? OFFSET ?
 """
 
@@ -41,16 +37,22 @@ class SQLiteStrategyRepository:
 
     A file path gives durable process-restart storage. ``None`` creates an isolated in-memory
     SQLite database for composition-root tests; both modes execute the same schema and queries.
-    Domain canonicalisation/hydration remains the only StrategySpec serialisation contract.
+    Domain canonicalisation/hydration remains the only StrategySpec serialisation contract. The
+    injected source hash resolver delegates document compilation back to the authoring SoT.
     """
 
     SCHEMA_VERSION: ClassVar[int] = SCHEMA_VERSION
 
     def __init__(
-        self, path: str | Path | None = None, *, busy_timeout_seconds: float = 5.0
+        self,
+        path: str | Path | None = None,
+        *,
+        source_spec_hash: SourceSpecHashResolver,
+        busy_timeout_seconds: float = 5.0,
     ) -> None:
         if busy_timeout_seconds <= 0:
             raise ValueError("busy_timeout_seconds must be positive")
+        self._source_spec_hash = source_spec_hash
         self._busy_timeout_seconds = busy_timeout_seconds
         self._busy_timeout_ms = max(1, round(busy_timeout_seconds * 1000))
         self._lock = RLock()
@@ -64,7 +66,7 @@ class SQLiteStrategyRepository:
         else:
             candidate = Path(path).expanduser()
             if candidate.exists() and candidate.is_dir():
-                raise ValueError(f"strategy repository path is a directory — path={candidate}")
+                raise ValueError(f"strategy repository path is a directory -- path={candidate}")
             candidate.parent.mkdir(parents=True, exist_ok=True)
             self._path = candidate.resolve()
             with closing(self._new_connection(str(self._path))) as connection:
@@ -91,85 +93,87 @@ class SQLiteStrategyRepository:
         self.close()
 
     def add(self, record: StrategyRevisionRecord) -> None:
+        values = encode_record(record, source_spec_hash=self._source_spec_hash)
         with self._transaction(write=True) as connection:
-            latest_revision = self._latest_revision(connection, record.strategy_id)
+            latest_revision = self._validated_latest_revision(connection, record.strategy_id)
             if latest_revision is not None:
                 raise StrategyRevisionConflictError(
-                    f"strategy already exists — strategy_id={record.strategy_id}",
+                    f"strategy already exists -- strategy_id={record.strategy_id}",
                     latest_revision=latest_revision,
                 )
             if record.revision != 1:
                 raise StrategyRevisionConflictError(
-                    f"first revision must be 1 — revision={record.revision}"
+                    f"first revision must be 1 -- revision={record.revision}"
                 )
-            self._insert(connection, record)
+            connection.execute(
+                "INSERT INTO strategy_heads (strategy_id, latest_revision) VALUES (?, ?)",
+                (record.strategy_id, 1),
+            )
+            self._insert(connection, values)
 
     def append(self, record: StrategyRevisionRecord, *, expected_revision: int) -> None:
+        values = encode_record(record, source_spec_hash=self._source_spec_hash)
         with self._transaction(write=True) as connection:
-            actual_revision = self._latest_revision(connection, record.strategy_id)
+            actual_revision = self._validated_latest_revision(connection, record.strategy_id)
             if actual_revision is None:
                 raise StrategyNotFoundError(
-                    f"strategy not found — strategy_id={record.strategy_id}"
+                    f"strategy not found -- strategy_id={record.strategy_id}"
                 )
             if actual_revision != expected_revision:
                 raise StrategyRevisionConflictError(
-                    "strategy revision conflict — "
+                    "strategy revision conflict -- "
                     f"strategy_id={record.strategy_id} expected={expected_revision} "
                     f"actual={actual_revision}",
                     latest_revision=actual_revision,
                 )
             if record.revision != expected_revision + 1:
                 raise StrategyRevisionConflictError(
-                    "next revision is not monotonic — "
+                    "next revision is not monotonic -- "
                     f"expected={expected_revision + 1} actual={record.revision}",
                     latest_revision=actual_revision,
                 )
-            self._insert(connection, record)
+            self._insert(connection, values)
+            updated = connection.execute(
+                """
+                UPDATE strategy_heads
+                SET latest_revision = ?
+                WHERE strategy_id = ? AND latest_revision = ?
+                """,
+                (record.revision, record.strategy_id, expected_revision),
+            )
+            if updated.rowcount != 1:  # pragma: no cover - BEGIN IMMEDIATE owns the writer slot
+                raise StrategyRepositoryStorageError(
+                    "strategy head changed inside a serialised append -- "
+                    f"strategy_id={record.strategy_id}"
+                )
 
     def get(self, strategy_id: str, revision: int | None = None) -> StrategyRevisionRecord:
         with self._transaction(write=False) as connection:
-            if revision is None:
-                row = connection.execute(
-                    """
-                    SELECT * FROM strategy_revisions
-                    WHERE strategy_id = ?
-                    ORDER BY revision DESC
-                    LIMIT 1
-                    """,
-                    (strategy_id,),
-                ).fetchone()
-                if row is None:
-                    raise StrategyNotFoundError(
-                        f"strategy not found — strategy_id={strategy_id}"
-                    )
-            else:
-                row = connection.execute(
-                    """
-                    SELECT * FROM strategy_revisions
-                    WHERE strategy_id = ? AND revision = ?
-                    """,
-                    (strategy_id, revision),
-                ).fetchone()
-                if row is None:
-                    if self._latest_revision(connection, strategy_id) is None:
-                        raise StrategyNotFoundError(
-                            f"strategy not found — strategy_id={strategy_id}"
-                        )
-                    raise StrategyNotFoundError(
-                        "strategy revision not found — "
-                        f"strategy_id={strategy_id} revision={revision}"
-                    )
-            return decode_record(row)
+            latest_revision = self._validated_latest_revision(connection, strategy_id)
+            if latest_revision is None:
+                raise StrategyNotFoundError(f"strategy not found -- strategy_id={strategy_id}")
+            requested_revision = latest_revision if revision is None else revision
+            row = connection.execute(
+                """
+                SELECT * FROM strategy_revisions
+                WHERE strategy_id = ? AND revision = ?
+                """,
+                (strategy_id, requested_revision),
+            ).fetchone()
+            if row is None:
+                raise StrategyNotFoundError(
+                    "strategy revision not found -- "
+                    f"strategy_id={strategy_id} revision={requested_revision}"
+                )
+            return self._decode(row)
 
     def list_strategies(self, page: PageRequest) -> Page[StrategySummary]:
         with self._transaction(write=False) as connection:
-            total_row = connection.execute(
-                "SELECT COUNT(*) FROM "
-                "(SELECT strategy_id FROM strategy_revisions GROUP BY strategy_id)"
-            ).fetchone()
+            self._audit_all_revision_chains(connection)
+            total_row = connection.execute("SELECT COUNT(*) FROM strategy_heads").fetchone()
             total = self._count_from_row(total_row)
             rows = connection.execute(_LATEST_ROWS_SQL, (page.limit, page.offset)).fetchall()
-            records = tuple(decode_record(row) for row in rows)
+            records = tuple(self._decode(row) for row in rows)
         return Page(
             items=tuple(
                 StrategySummary(
@@ -188,13 +192,9 @@ class SQLiteStrategyRepository:
 
     def history(self, strategy_id: str, page: PageRequest) -> Page[RevisionSummary]:
         with self._transaction(write=False) as connection:
-            total_row = connection.execute(
-                "SELECT COUNT(*) FROM strategy_revisions WHERE strategy_id = ?",
-                (strategy_id,),
-            ).fetchone()
-            total = self._count_from_row(total_row)
-            if total == 0:
-                raise StrategyNotFoundError(f"strategy not found — strategy_id={strategy_id}")
+            latest_revision = self._validated_latest_revision(connection, strategy_id)
+            if latest_revision is None:
+                raise StrategyNotFoundError(f"strategy not found -- strategy_id={strategy_id}")
             rows = connection.execute(
                 """
                 SELECT * FROM strategy_revisions
@@ -204,7 +204,7 @@ class SQLiteStrategyRepository:
                 """,
                 (strategy_id, page.limit, page.offset),
             ).fetchall()
-            records = tuple(decode_record(row) for row in rows)
+            records = tuple(self._decode(row) for row in rows)
         return Page(
             items=tuple(
                 RevisionSummary(
@@ -219,7 +219,7 @@ class SQLiteStrategyRepository:
                 )
                 for record in records
             ),
-            total=total,
+            total=latest_revision,
             offset=page.offset,
             limit=page.limit,
         )
@@ -231,7 +231,7 @@ class SQLiteStrategyRepository:
             raise
         except sqlite3.DatabaseError as error:
             raise StrategyRepositoryStorageError(
-                f"could not initialise SQLite strategy repository — {error}"
+                f"could not initialise SQLite strategy repository -- {error}"
             ) from error
 
     def _new_connection(self, database: str) -> sqlite3.Connection:
@@ -278,10 +278,11 @@ class SQLiteStrategyRepository:
             raise
         except sqlite3.DatabaseError as error:
             raise StrategyRepositoryStorageError(
-                f"SQLite strategy repository operation failed — {error}"
+                f"SQLite strategy repository operation failed -- {error}"
             ) from error
 
-    def _insert(self, connection: sqlite3.Connection, record: StrategyRevisionRecord) -> None:
+    @staticmethod
+    def _insert(connection: sqlite3.Connection, values: tuple[object, ...]) -> None:
         connection.execute(
             """
             INSERT INTO strategy_revisions (
@@ -298,22 +299,66 @@ class SQLiteStrategyRepository:
                 change_note
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            encode_record(record),
+            values,
         )
 
-    @staticmethod
-    def _latest_revision(connection: sqlite3.Connection, strategy_id: str) -> int | None:
-        row = connection.execute(
-            "SELECT MAX(revision) FROM strategy_revisions WHERE strategy_id = ?",
+    def _decode(self, row: sqlite3.Row) -> StrategyRevisionRecord:
+        return decode_record(row, source_spec_hash=self._source_spec_hash)
+
+    def _audit_all_revision_chains(self, connection: sqlite3.Connection) -> None:
+        rows = connection.execute(
+            """
+            SELECT strategy_id FROM strategy_heads
+            UNION
+            SELECT strategy_id FROM strategy_revisions
+            ORDER BY strategy_id COLLATE BINARY
+            """
+        ).fetchall()
+        for row in rows:
+            strategy_id = row[0]
+            if not isinstance(strategy_id, str):  # pragma: no cover - TEXT column invariant
+                raise StrategyRepositoryStorageError("stored strategy id is not text")
+            self._validated_latest_revision(connection, strategy_id)
+
+    def _validated_latest_revision(
+        self, connection: sqlite3.Connection, strategy_id: str
+    ) -> int | None:
+        head = connection.execute(
+            "SELECT latest_revision FROM strategy_heads WHERE strategy_id = ?",
             (strategy_id,),
         ).fetchone()
-        if row is None or row[0] is None:
+        aggregate = connection.execute(
+            """
+            SELECT COUNT(*), MIN(revision), MAX(revision)
+            FROM strategy_revisions
+            WHERE strategy_id = ?
+            """,
+            (strategy_id,),
+        ).fetchone()
+        count = self._count_from_row(aggregate)
+        if head is None and count == 0:
             return None
-        if not isinstance(row[0], int):  # pragma: no cover - INTEGER column invariant
+
+        latest = head[0] if head is not None else None
+        minimum = aggregate[1] if aggregate is not None else None
+        maximum = aggregate[2] if aggregate is not None else None
+        if (
+            not isinstance(latest, int)
+            or isinstance(latest, bool)
+            or not isinstance(minimum, int)
+            or isinstance(minimum, bool)
+            or not isinstance(maximum, int)
+            or isinstance(maximum, bool)
+            or minimum != 1
+            or maximum != latest
+            or count != latest
+        ):
             raise StrategyRepositoryStorageError(
-                f"stored latest revision is not an integer — strategy_id={strategy_id}"
+                "stored strategy revision chain failed integrity validation -- "
+                f"strategy_id={strategy_id} head={latest!r} count={count} "
+                f"min={minimum!r} max={maximum!r}"
             )
-        return row[0]
+        return latest
 
     @staticmethod
     def _count_from_row(row: sqlite3.Row | None) -> int:

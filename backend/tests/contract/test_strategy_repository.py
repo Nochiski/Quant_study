@@ -20,6 +20,7 @@ from strategy_workbench.adapters.outbound.document_codec.facade.codec import Rua
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
 )
+from strategy_workbench.adapters.outbound.strategy_sqlite import _schema as sqlite_schema
 from strategy_workbench.adapters.outbound.strategy_sqlite.facade.repository import (
     SQLiteStrategyRepository,
     StrategyRepositoryStorageError,
@@ -44,6 +45,7 @@ from strategy_workbench.domain.strategy.facade.document import SourceFormat, sou
 from strategy_workbench.domain.strategy.facade.specification import (
     StrategyIdentity,
     StrategySpec,
+    canonical_strategy_json,
     strategy_spec_hash,
 )
 
@@ -64,7 +66,7 @@ def factory(request: pytest.FixtureRequest, tmp_path: Path) -> RepositoryFactory
     sequence = iter(range(1_000_000))
 
     def create_sqlite_repository() -> SQLiteStrategyRepository:
-        return SQLiteStrategyRepository(tmp_path / f"strategy-{next(sequence)}.sqlite3")
+        return _sqlite(tmp_path / f"strategy-{next(sequence)}.sqlite3")
 
     return create_sqlite_repository
 
@@ -73,6 +75,17 @@ def _authoring() -> StrategyAuthoringService:
     return StrategyAuthoringService(
         RuamelDocumentCodec(), factor_registry_version="r", dataset_snapshot_id=lambda: "s"
     )
+
+
+def _source_spec_hash(source: str, format: SourceFormat) -> str:
+    compiled = _authoring().compile(CompileRequest(source, format))
+    if compiled.spec_hash is None:
+        raise ValueError("test source does not compile")
+    return compiled.spec_hash
+
+
+def _sqlite(path: Path) -> SQLiteStrategyRepository:
+    return SQLiteStrategyRepository(path, source_spec_hash=_source_spec_hash)
 
 
 def _template() -> StrategySpec:
@@ -92,17 +105,38 @@ def _legacy(spec: StrategySpec, strategy_id: str, revision: int, at: datetime = 
 
 
 def _document(
-    text: str, strategy_id: str, revision: int, at: datetime = T0, change_note: str | None = None
+    text: str,
+    strategy_id: str,
+    revision: int,
+    at: datetime = T0,
+    change_note: str | None = None,
+    *,
+    format: SourceFormat = SourceFormat.YAML,
 ):
-    compiled = _authoring().compile(CompileRequest(text, SourceFormat.YAML))
+    compiled = _authoring().compile(CompileRequest(text, format))
     assert compiled.ok and compiled.spec is not None and compiled.spec_hash is not None
     saved = replace(compiled.spec, identity=StrategyIdentity(strategy_id, revision))
     return StrategyRevisionRecord(
         spec=saved,
         spec_hash=compiled.spec_hash,
-        source=RevisionSource(SourceFormat.YAML, text, compiled.source_hash),
+        source=RevisionSource(format, text, compiled.source_hash),
         provenance=RevisionProvenance(RevisionOrigin.DOCUMENT, at, change_note=change_note),
     )
+
+
+def _document_source(format: SourceFormat, *, title: str) -> str:
+    yaml_source = (FIXTURES / "quality_momentum.yaml").read_text(encoding="utf-8")
+    if format is SourceFormat.YAML:
+        return yaml_source.replace('title: "퀄리티 모멘텀"', f'title: "{title}"')
+    compiled = _authoring().compile(CompileRequest(yaml_source, SourceFormat.YAML))
+    assert compiled.spec is not None
+    return canonical_strategy_json(replace(compiled.spec, title=title), indent=2)
+
+
+def _drop_revision_guards(connection: sqlite3.Connection) -> None:
+    """Simulate storage damage after startup; production connections cannot mutate revisions."""
+    connection.execute("DROP TRIGGER strategy_revisions_immutable_update")
+    connection.execute("DROP TRIGGER strategy_revisions_immutable_delete")
 
 
 def test_revision_source_is_immutable_after_the_next_revision(factory: RepositoryFactory) -> None:
@@ -136,6 +170,52 @@ def test_compiling_the_stored_source_reproduces_the_record_hashes(
     assert recompiled.source_hash == stored.source.source_hash == source_hash_of(text)
 
 
+@pytest.mark.parametrize("format", (SourceFormat.YAML, SourceFormat.JSON))
+@pytest.mark.parametrize("read_path", ("get", "list", "history"))
+def test_sqlite_rejects_source_that_no_longer_compiles_to_the_stored_spec(
+    tmp_path: Path, format: SourceFormat, read_path: str
+) -> None:
+    path = tmp_path / f"source-drift-{format.value}-{read_path}.sqlite3"
+    repository = _sqlite(path)
+    original = _document_source(format, title="original")
+    changed = _document_source(format, title="changed")
+    repository.add(_document(original, "drift", 1, format=format))
+
+    with sqlite3.connect(path) as connection:
+        _drop_revision_guards(connection)
+        connection.execute(
+            """
+            UPDATE strategy_revisions
+            SET source_text = ?, source_hash = ?
+            WHERE strategy_id = ? AND revision = 1
+            """,
+            (changed, source_hash_of(changed), "drift"),
+        )
+
+    with pytest.raises(StrategyRepositoryStorageError, match="compiles to a different"):
+        if read_path == "get":
+            repository.get("drift")
+        elif read_path == "list":
+            repository.list_strategies(PageRequest())
+        else:
+            repository.history("drift", PageRequest())
+
+
+def test_sqlite_rejects_a_mismatched_document_envelope_before_writing(tmp_path: Path) -> None:
+    repository = _sqlite(tmp_path / "write-drift.sqlite3")
+    original = _document_source(SourceFormat.YAML, title="original")
+    changed = _document_source(SourceFormat.YAML, title="changed")
+    record = _document(original, "drift", 1)
+    mismatched = replace(
+        record,
+        source=RevisionSource(SourceFormat.YAML, changed, source_hash_of(changed)),
+    )
+
+    with pytest.raises(StrategyRepositoryStorageError, match="source and spec disagree"):
+        repository.add(mismatched)
+    assert repository.list_strategies(PageRequest()).total == 0
+
+
 def test_legacy_revisions_have_no_source_and_keep_the_json_flow(
     factory: RepositoryFactory,
 ) -> None:
@@ -159,9 +239,7 @@ def test_stale_expected_revision_conflicts(factory: RepositoryFactory) -> None:
     template = _template()
     repository.add(_legacy(template, "s1", 1))
 
-    with pytest.raises(
-        StrategyRevisionConflictError, match="expected=0 actual=1"
-    ) as stale:
+    with pytest.raises(StrategyRevisionConflictError, match="expected=0 actual=1") as stale:
         repository.append(_legacy(template, "s1", 2), expected_revision=0)
     assert stale.value.latest_revision == 1
     with pytest.raises(StrategyRevisionConflictError, match="not monotonic") as monotonic:
@@ -289,18 +367,16 @@ def test_revision_source_rejects_empty_text_and_provenance_carries_a_change_note
 
 def test_sqlite_restores_exact_revision_envelopes_after_process_restart(tmp_path: Path) -> None:
     path = tmp_path / "nested" / "strategies.sqlite3"
-    text = (FIXTURES / "quality_momentum.yaml").read_text(encoding="utf-8").replace(
-        "\n", "\r\n"
-    )
+    text = (FIXTURES / "quality_momentum.yaml").read_text(encoding="utf-8").replace("\n", "\r\n")
     first = _document(text, "durable", 1, change_note="exact source")
     second = _legacy(replace(_template(), title="second"), "durable", 2, at=T0.replace(second=1))
 
-    initial = SQLiteStrategyRepository(path)
+    initial = _sqlite(path)
     initial.add(first)
     initial.append(second, expected_revision=1)
     initial.close()
 
-    restarted = SQLiteStrategyRepository(path)
+    restarted = _sqlite(path)
     assert restarted.get("durable", 1) == first
     assert restarted.get("durable") == second
     assert restarted.history("durable", PageRequest()).total == 2
@@ -309,8 +385,8 @@ def test_sqlite_restores_exact_revision_envelopes_after_process_restart(tmp_path
 
 def test_sqlite_two_instances_serialize_competing_revision_appends(tmp_path: Path) -> None:
     path = tmp_path / "strategies.sqlite3"
-    first = SQLiteStrategyRepository(path)
-    second = SQLiteStrategyRepository(path)
+    first = _sqlite(path)
+    second = _sqlite(path)
     template = _template()
     first.add(_legacy(template, "race", 1))
     barrier = Barrier(2)
@@ -340,8 +416,8 @@ def test_sqlite_two_instances_serialize_competing_revision_appends(tmp_path: Pat
 
 def test_sqlite_two_instances_serialize_competing_strategy_creates(tmp_path: Path) -> None:
     path = tmp_path / "strategies.sqlite3"
-    first = SQLiteStrategyRepository(path)
-    second = SQLiteStrategyRepository(path)
+    first = _sqlite(path)
+    second = _sqlite(path)
     template = _template()
     barrier = Barrier(2)
 
@@ -367,38 +443,186 @@ def test_sqlite_two_instances_serialize_competing_strategy_creates(tmp_path: Pat
     assert first.get("race").spec.title in {"writer-a", "writer-b"}
 
 
+def test_sqlite_serializes_concurrent_first_time_schema_initialization(tmp_path: Path) -> None:
+    path = tmp_path / "new" / "strategies.sqlite3"
+    barrier = Barrier(2)
+
+    def initialize() -> int:
+        barrier.wait(timeout=5)
+        repository = _sqlite(path)
+        version = repository.SCHEMA_VERSION
+        repository.close()
+        return version
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        versions = tuple(
+            future.result(timeout=10)
+            for future in (executor.submit(initialize), executor.submit(initialize))
+        )
+
+    assert versions == (SQLiteStrategyRepository.SCHEMA_VERSION,) * 2
+    assert _sqlite(path).list_strategies(PageRequest()).total == 0
+
+
+@pytest.mark.parametrize("damage", ("first_moved", "middle_deleted", "latest_deleted"))
+@pytest.mark.parametrize("operation", ("get", "list", "history", "append"))
+def test_sqlite_rejects_a_damaged_revision_chain_before_every_materialization_or_append(
+    tmp_path: Path, damage: str, operation: str
+) -> None:
+    path = tmp_path / f"chain-{damage}-{operation}.sqlite3"
+    repository = _sqlite(path)
+    template = _template()
+    for revision in range(1, 4):
+        record = _legacy(replace(template, title=f"revision-{revision}"), "damaged", revision)
+        if revision == 1:
+            repository.add(record)
+        else:
+            repository.append(record, expected_revision=revision - 1)
+
+    with sqlite3.connect(path) as connection:
+        _drop_revision_guards(connection)
+        if damage == "first_moved":
+            connection.execute(
+                "UPDATE strategy_revisions SET revision = 5 "
+                "WHERE strategy_id = 'damaged' AND revision = 1"
+            )
+        elif damage == "middle_deleted":
+            connection.execute(
+                "DELETE FROM strategy_revisions WHERE strategy_id = 'damaged' AND revision = 2"
+            )
+        else:
+            connection.execute(
+                "DELETE FROM strategy_revisions WHERE strategy_id = 'damaged' AND revision = 3"
+            )
+
+    with pytest.raises(StrategyRepositoryStorageError, match="revision chain"):
+        if operation == "get":
+            repository.get("damaged")
+        elif operation == "list":
+            repository.list_strategies(PageRequest())
+        elif operation == "history":
+            repository.history("damaged", PageRequest())
+        else:
+            repository.append(_legacy(template, "damaged", 4), expected_revision=3)
+
+
 def test_sqlite_schema_migration_is_idempotent_and_rejects_future_versions(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "strategies.sqlite3"
-    SQLiteStrategyRepository(path).close()
-    SQLiteStrategyRepository(path).close()
+    _sqlite(path).close()
+    _sqlite(path).close()
 
     with sqlite3.connect(path) as connection:
         version = connection.execute("PRAGMA user_version").fetchone()[0]
         columns = {
-            row[1]
-            for row in connection.execute("PRAGMA table_info(strategy_revisions)").fetchall()
+            row[1] for row in connection.execute("PRAGMA table_info(strategy_revisions)").fetchall()
         }
     assert version == SQLiteStrategyRepository.SCHEMA_VERSION
     assert {"spec_json", "spec_hash", "source_text", "source_hash", "created_at"} <= columns
 
     with sqlite3.connect(path) as connection:
-        connection.execute(
-            f"PRAGMA user_version = {SQLiteStrategyRepository.SCHEMA_VERSION + 1}"
-        )
+        connection.execute(f"PRAGMA user_version = {SQLiteStrategyRepository.SCHEMA_VERSION + 1}")
     with pytest.raises(StrategyRepositoryStorageError, match="newer than this server"):
-        SQLiteStrategyRepository(path)
+        _sqlite(path)
 
 
-def test_sqlite_rejects_declared_schema_with_the_wrong_shape(tmp_path: Path) -> None:
-    path = tmp_path / "broken.sqlite3"
+def test_sqlite_refuses_to_claim_an_unowned_nonempty_database(tmp_path: Path) -> None:
+    path = tmp_path / "unowned.sqlite3"
     with sqlite3.connect(path) as connection:
+        connection.execute("CREATE TABLE someone_elses_data (value TEXT)")
+
+    with pytest.raises(StrategyRepositoryStorageError, match="refusing to claim"):
+        _sqlite(path)
+
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("PRAGMA application_id").fetchone()[0] == 0
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT name FROM sqlite_schema WHERE name = 'someone_elses_data'"
+        ).fetchone() == ("someone_elses_data",)
+        assert (
+            connection.execute(
+                "SELECT name FROM sqlite_schema WHERE name = 'strategy_heads'"
+            ).fetchone()
+            is None
+        )
+
+
+def test_sqlite_rejects_an_owned_schema_with_the_wrong_shape(tmp_path: Path) -> None:
+    path = tmp_path / "broken.sqlite3"
+    _sqlite(path).close()
+    with sqlite3.connect(path) as connection:
+        _drop_revision_guards(connection)
+        connection.execute("DROP TABLE strategy_revisions")
         connection.execute("CREATE TABLE strategy_revisions (strategy_id TEXT)")
-        connection.execute(f"PRAGMA user_version = {SQLiteStrategyRepository.SCHEMA_VERSION}")
 
     with pytest.raises(StrategyRepositoryStorageError, match="schema does not match"):
-        SQLiteStrategyRepository(path)
+        _sqlite(path)
+
+
+def test_sqlite_rejects_matching_columns_when_constraints_or_storage_shape_differ(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "weakened.sqlite3"
+    _sqlite(path).close()
+    with sqlite3.connect(path) as connection:
+        _drop_revision_guards(connection)
+        connection.execute("DROP TABLE strategy_revisions")
+        connection.execute(
+            """
+            CREATE TABLE strategy_revisions (
+                strategy_id TEXT NOT NULL,
+                revision INTEGER NOT NULL,
+                schema_version TEXT NOT NULL,
+                spec_json TEXT NOT NULL,
+                spec_hash TEXT NOT NULL,
+                source_format TEXT,
+                source_text TEXT,
+                source_hash TEXT,
+                origin TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                change_note TEXT,
+                PRIMARY KEY (strategy_id, revision)
+            )
+            """
+        )
+
+    with pytest.raises(StrategyRepositoryStorageError, match="schema does not match"):
+        _sqlite(path)
+
+
+def test_sqlite_rejects_unexpected_schema_objects(tmp_path: Path) -> None:
+    path = tmp_path / "extra-object.sqlite3"
+    _sqlite(path).close()
+    with sqlite3.connect(path) as connection:
+        connection.execute("CREATE TABLE unexpected_data (value TEXT)")
+
+    with pytest.raises(StrategyRepositoryStorageError, match="unexpected"):
+        _sqlite(path)
+
+
+def test_sqlite_schema_migration_rolls_back_headers_and_objects_on_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "migration-failure.sqlite3"
+    broken_objects = sqlite_schema._V1_SCHEMA_OBJECTS + (
+        ("table", "broken", "CREATE TABL broken (value TEXT)"),
+    )
+    monkeypatch.setattr(sqlite_schema, "_V1_SCHEMA_OBJECTS", broken_objects)
+
+    with pytest.raises(StrategyRepositoryStorageError, match="could not initialise"):
+        _sqlite(path)
+
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("PRAGMA application_id").fetchone()[0] == 0
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 0
+        assert (
+            connection.execute(
+                "SELECT name FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*'"
+            ).fetchall()
+            == []
+        )
 
 
 def test_sqlite_rejects_a_database_owned_by_another_application(tmp_path: Path) -> None:
@@ -407,11 +631,29 @@ def test_sqlite_rejects_a_database_owned_by_another_application(tmp_path: Path) 
         connection.execute("PRAGMA application_id = 1234")
 
     with pytest.raises(StrategyRepositoryStorageError, match="another application"):
-        SQLiteStrategyRepository(path)
+        _sqlite(path)
 
     with sqlite3.connect(path) as connection:
         assert connection.execute("PRAGMA application_id").fetchone()[0] == 1234
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 0
+
+
+def test_sqlite_revisions_are_physically_immutable(tmp_path: Path) -> None:
+    path = tmp_path / "immutable.sqlite3"
+    repository = _sqlite(path)
+    repository.add(_legacy(_template(), "immutable", 1))
+
+    with sqlite3.connect(path) as connection:
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            connection.execute(
+                "UPDATE strategy_revisions SET change_note = 'changed' "
+                "WHERE strategy_id = 'immutable'"
+            )
+        connection.rollback()
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            connection.execute("DELETE FROM strategy_revisions WHERE strategy_id = 'immutable'")
+
+    assert repository.get("immutable").revision == 1
 
 
 @pytest.mark.parametrize(
@@ -426,12 +668,13 @@ def test_sqlite_fails_closed_when_persisted_revision_is_corrupted(
     tmp_path: Path, column: str, value: str, message: str
 ) -> None:
     path = tmp_path / "strategies.sqlite3"
-    repository = SQLiteStrategyRepository(path)
+    repository = _sqlite(path)
     text = (FIXTURES / "quality_momentum.yaml").read_text(encoding="utf-8")
     repository.add(_document(text, "corrupt", 1))
 
     assert column in {"spec_hash", "spec_json", "source_hash"}
     with sqlite3.connect(path) as connection:
+        _drop_revision_guards(connection)
         connection.execute(
             f"UPDATE strategy_revisions SET {column} = ? WHERE strategy_id = ?",
             (value, "corrupt"),

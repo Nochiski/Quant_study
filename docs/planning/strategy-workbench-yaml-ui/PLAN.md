@@ -1,16 +1,16 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: APPROVED
-current_phase: P5
-current_pr: P5-03
-active_prs: [P5-03]
+project_status: IN_PROGRESS
+current_phase: P6
+current_pr: P6-01
+active_prs: [P6-01]
 parallel_window: []
-last_updated: 2026-09-05T18:19:48+09:00
+last_updated: 2026-09-05T18:30:20+09:00
 planned_prs: 50
-merged_prs: 43
+merged_prs: 44
 approved_prs: 44
-progress_percent: 86
+progress_percent: 88
 ---
 
 # YAML Strategy Workbench 실시간 진행 계획
@@ -22,13 +22,13 @@ progress_percent: 86
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `APPROVED` |
-| Current phase | `P5` |
-| Current/next PR | `P5-03` |
-| Active PR | `P5-03` |
-| Progress | `43 / 50 merged (86%)` |
+| Project status | `IN_PROGRESS` |
+| Current phase | `P6` |
+| Current/next PR | `P6-01` |
+| Active PR | `P6-01` |
+| Progress | `44 / 50 merged (88%)` |
 | Approved | `44 / 50` |
-| Aggregated at | `2026-09-05 18:19 KST` |
+| Aggregated at | `2026-09-05 18:30 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -77,25 +77,25 @@ progress_percent: 86
 | P2 | App Shell and visual foundation | 4 | 4 | `MERGED` |
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
 | P4 | Outline, Contract, Projections | 10 | 10 | `MERGED` |
-| P5 | Truthful Trace UI | 3 | 2 | `APPROVED` |
-| P6 | Professional release and migration | 7 | 1 | `WAITING` |
-| **Total** |  | **50** | **43** | **86%** |
+| P5 | Truthful Trace UI | 3 | 3 | `MERGED` |
+| P6 | Professional release and migration | 7 | 1 | `IN_PROGRESS` |
+| **Total** |  | **50** | **44** | **88%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
 
 | 항목 | 값 |
 |---|---|
-| PR | `P5-03` Raw→Target full linked trace UI APPROVED |
-| Intent | truthful pipeline이 계산 중 함께 만든 raw provenance·FactorGraph node cache·portfolio construction audit를 한 행의 연결 trace로 투영해 전문 사용자가 값의 출처부터 실제 TargetTape와 주문 추정까지 역추적하게 한다 |
-| Acceptance | 모든 reachable node를 bounded trace로 조회; raw CellKind로 실제 0/source omitted/missing/not collected/coverage gap 구분; backend가 factor contribution·composite·selection·unconstrained/risk-constrained target을 동일 compile 경로에서 산출; 명시적 starting holdings가 있을 때만 previous weight·estimated delta와 execution 시점/가정 표시; warm-up·계산 제외·risk adjusted/removed 상태; TargetTape/tape hash/backtest parity·PIT·cancellation·source/fingerprint fail-closed; ko/en·keyboard/accessible linked stage UI |
-| Non-goals | frontend 재계산·수기 wire DTO, saved factor/subgraph 값을 공급할 별도 resolver, 실제 주문 제출, repository/history(P6-01/02), 대규모 virtualization(P6-04), IDE layout 재설계 |
-| Branch/worktree | `feat/p5-03-linked-trace-ui` (`Quant_study-p5-03`) |
-| Base SHA | `fcc37ee` (P5-02 merge main) |
-| Head SHA | `f12fcd7` reviewer-fix freeze |
-| Diff stat | 37 implementation files, +3,280/-198; 최초 vertical slice와 paging/default-date 수정에 raw field identity contract 및 세 execution route의 공통 typed HTTP 오류/OpenAPI/generated SDK를 추가. port contract → application consumer → inbound wire → generated client 책임을 유지하며 WORKFLOW 12절 size exception 적용 |
-| Focused tests | raw port·truthful pipeline·preview/trace/backtest HTTP 103, frontend generated error contract 1 passed. duplicate/blank field identity의 construction·consumer revalidation과 preview/trace/backtest 공통 `portfolio.raw_observation.invalid`를 포함하며 기존 trace-focused backend 96/frontend 70도 통과 |
-| Full gate | backend pytest 1,041·Ruff·Pyright; OpenAPI/SDK 2회 연속 생성 SHA-256 동일; frontend typecheck·lint·Vitest 403·build; diff-check 통과 |
+| PR | `P6-01` SQLite persistent strategy revision repository IN_PROGRESS |
+| Intent | 기존 `StrategyRepositoryPort`와 domain canonical/hydrate를 정본으로 유지하면서 immutable revision envelope를 SQLite에 원자적으로 저장해 프로세스 재시작 뒤에도 전략·원문·provenance를 정확히 복원한다 |
+| Acceptance | versioned schema migration이 반복 실행에 안전함; canonical `StrategySpec`을 domain codec으로 round-trip하고 저장 hash를 재검증; exact source text/format/hash와 UTC provenance/change note 보존; add/append의 revision 불변식과 optimistic concurrency를 두 repository instance에서도 원자적으로 보장; latest/specific get과 deterministic list/history pagination; DB 손상·hash 불일치는 fail-closed; 같은 DB를 다시 연 container에서 전략 복원; bootstrap은 production 기본 파일 경로와 test용 명시 경로를 소유; 기존 memory adapter도 동일 contract 통과 |
+| Non-goals | server draft와 strategy/backtest history UI(P6-02), 원격 DB·분산 lock, 전략 domain/schema 변경, revision 삭제·수정, legacy editor 정리(P6-06) |
+| Branch/worktree | `feat/p6-01-sqlite-strategy-repository` (`Quant_study-p6-01`) |
+| Base SHA | `a609eee` (P5-03 merge main) |
+| Head SHA | 구현 전 |
+| Diff stat | 구현 후 기록 |
+| Focused tests | repository contract matrix, migration/restart/corruption/two-instance concurrency, bootstrap persistence를 구현하며 기록 |
+| Full gate | 구현 후 backend pytest·Ruff·Pyright와 frontend 회귀 gate를 기록 |
 
 ---
 
@@ -219,19 +219,19 @@ Phase exit:
 |---|---|---|---|---|---|
 | [x] | `P5-01` | Correctness pipeline을 조회하는 scoped trace API | P1.5-04, P1-03 | `MERGED` | [#65](https://github.com/Nochiski/Quant_study/pull/65) · `review_p5_01` APPROVE · merge `e4fabd4` |
 | [x] | `P5-02` | Date/security/node 선택 Debugger shell | P3-05, P5-01, P2-03 | `MERGED` | [#67](https://github.com/Nochiski/Quant_study/pull/67) · `review_p5_02` APPROVE · merge `fcc37ee` |
-| [ ] | `P5-03` | Raw→Target trace, risk before/after, order delta estimate | P4-01, P4-07, P5-02 | `APPROVED` | [#68](https://github.com/Nochiski/Quant_study/pull/68) · `review_p5_03` APPROVE P0/P1/P2 0 · review `65d0b18` |
+| [x] | `P5-03` | Raw→Target trace, risk before/after, order delta estimate | P4-01, P4-07, P5-02 | `MERGED` | [#68](https://github.com/Nochiski/Quant_study/pull/68) · `review_p5_03` APPROVE P0/P1/P2 0 · merge `a609eee` |
 
 Phase exit:
 
-- [ ] UI trace가 실제 FactorGraph, TargetTape, Backtest 입력과 일치한다.
-- [ ] `spec_hash/snapshot_id/registry_version/plan_hash`로 재현할 수 있다.
-- [ ] `/risk/max_name_weight` JSON Pointer와 zero/missing/coverage 상태가 정확하다.
+- [x] UI trace가 실제 FactorGraph, TargetTape, Backtest 입력과 일치한다.
+- [x] `spec_hash/snapshot_id/registry_version/plan_hash`로 재현할 수 있다.
+- [x] `/risk/max_name_weight` JSON Pointer와 zero/missing/coverage 상태가 정확하다.
 
 ## P6 — 전문 사용자 마감과 전환
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P6-01` | SQLite persistent strategy revision repository | P1-07 | `WAITING` | — |
+| [ ] | `P6-01` | SQLite persistent strategy revision repository | P1-07 | `IN_PROGRESS` | — |
 | [ ] | `P6-02` | Server draft, strategy/revision/backtest history UI | P6-01, P3-06, P4-08 | `WAITING` | — |
 | [ ] | `P6-03` | Keyboard workflow와 Command Palette | P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `WAITING` | — |
 | [ ] | `P6-04` | Large/hostile spec 성능·접근성·i18n과 soft dark theme (`$ref`-only cycle fail-closed 포함) | P3-05, P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `WAITING` | — |
@@ -341,6 +341,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | P5-03 [#68](https://github.com/Nochiski/Quant_study/pull/68)의 approval-doc HEAD와 CI 4/4를 확인해 merge commit `a609eee`로 순차 병합하고 Phase 5를 3/3 완료했다. 최신 main에서 P6-01 전용 worktree를 열고 immutable revision envelope의 SQLite 원자 저장·migration·재시작 복원·두 instance optimistic concurrency를 scope로 고정해 IN_PROGRESS 전환한다 | 13.5 merge gate·44/50 merged·StrategyRepositoryPort/domain canonical-hydrate SoT·adapter/bootstrap 책임분리 |
 | 2026-09-05 KST | Codex | 동일 reviewer `review_p5_03`이 `65d0b18` 최신 전체 diff에서 누적 P1 3건 해소와 새 P0/P1/P2 0을 확인해 APPROVE했다. hostile blank/duplicate에서 세 HTTP 경로 동일 typed 422·schedule/FactorGraph/TargetTape 진입 0, 1,025-field checkpoint 취소, 기존 paging/default-date 회귀를 재현했고 backend 1,041·frontend 403·정적·runtime OpenAPI=tracked·CI 4/4까지 통과했다. 반복 compile 성능은 P6-04, HTTP 정책 docstring P3는 비차단 잔여로 기록하고 APPROVED 전환한다 | independent same-reviewer gate·SoT/책임분리 감사·latest main/CI merge 준비 |
 | 2026-09-05 KST | Codex | raw identity fix와 self-check를 `b05800b`에 고정하고 [#68](https://github.com/Nochiski/Quant_study/pull/68) 본문에 세 P1의 원인·수정·회귀, 공통 execution-error contract, 최신 38-file size exception을 반영했다. 동일 reviewer `review_p5_03`에게 `7edc33d..b05800b` fix와 base 대비 최신 전체 diff를 재검토하도록 IN_REVIEW 전환한다 | same-reviewer closure·13.3 diff freeze·PR body/PLAN 최신화 |
 | 2026-09-05 KST | Codex | 새 raw identity P1을 `f12fcd7`에서 수정했다. `RawFieldValue`가 blank identity를 construction에서 거부하고 `RawObservationSet` consumer validation이 observation별 duplicate/blank를 checkpoint와 함께 다시 검사한다. inbound 공통 execution-error contract가 `portfolio.raw_observation.invalid`를 단일 정의하고 preview·trace·backtest 모두 계산 전에 같은 typed 422를 반환하며 OpenAPI/generated SDK와 exhaustive frontend consumer를 갱신했다. focused backend 103/frontend 1, 전체 backend 1,041/frontend 403, Ruff·Pyright·typecheck·lint·build·generated deterministic·diff-check 통과 후 SELF_CHECK 전환 | RawObservation port/consumer/inbound wire SoT·3-route parity·reviewer P1 회귀 고정 |

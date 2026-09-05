@@ -806,6 +806,10 @@ WHERE g.${VALUE_COL} = 0
 | `adj_factor.factor_product_tol` | EG3-P04 | 2 | 부동소수 허용오차 — **미등재**: 산출 정밀도 상수 `rules_s06.FACTOR_PRODUCT_TOL = 1e-12`(DOUBLE 역수 곱 반올림 1.1e-16 실측, §9 S06) |
 | `adj_factor.price_match_tol_rel`·`price_match_tol_abs` | apply_date 판정 (a)(b)(c) · EG3_adj_factor | 2 | 조정 후 잔여 허용치 max(tol_rel × m, tol_abs), m = \|min(pf, 1/pf) − 1\| — 서버 1차 실측(09-05) 0.15 · 0.05 (§9 S06 2차) |
 | `adj_factor.price_match_window_sessions`·`price_match_lookback_sessions` | apply_date 판정 (b)(c) · EG3_adj_factor | 2 | 창 [n0 − lookback, n0 + window] 세션 — 서버 1차 실측 최적일 오프셋 p10 −5 · p90 +27~+31.5 → 5 · 40 |
+| `adj_factor.base_price_tol_rel` | S06-2 `krx_base_price` 후보 판정 · EG1 우변(신규 행 수) · EG3_adj_factor 기준가 분류 | 2 | \|`base_price_krw` / 직전 행 close − 1\| > tol 인 (ticker, date) 가 후보 — seed 0.002(기준가는 정확값). 절단본: 기준가 ≠ 직전 close 59 중 tol 안 14 는 전부 ETF 소액 분배락, 비ETF 9 는 전부 후보(min 0.0098). ★ 서버 실측 뒤 후보 밖 불일치 건수 확인 (§9 S06-2) |
+| `adj_factor.base_match_window_sessions` | S06-2 (a) 사건 교체 매칭 · EG3_adj_factor 창 여유·`n_ok_without_base_price_event` | 2 | \|n(기준가 날) − n(단위 apply_date)\| ≤ 창 — seed 5. 절단본 3건 거리 0. ★ 서버: no_price_match 830 중 살아나는 건수·거리 분포로 조정 |
+| `adj_factor.factor_product_tol_base` | S06-2 기준가 행 ok 판정(mktcap_neutral vs `krx_base_inconsistent`) · EG3-P04 기준가 행 허용오차 | 2 | \|price_factor × share_factor − 1\| ≤ tol — seed 0.01(호가단위 반올림·자기주식 신주 미배정 등 KRX 산식 잔여; 247540 \|0.2507 × 4 − 1\| = 0.0028). 절단본 곱 정확히 1.0. ★ 서버 unknown_krx 곱 분포로 경계 확인 |
+| `corp_event.krx_share_change_tol`(S06-2 재사용) | S06-2 같은 날 주식수 변화비 S 판정(\|S − 1\| > tol 일 때만 share_factor = S) | 1 | S05 의 상수를 `_const` 로 복제 없이 읽는다(`corp_event.` 접두 키) |
 | `adj_factor.adj_return_jump_max` | EG8-P02 | 2 | 점프 상한 |
 | `adj_factor.adj_volume_ratio_band` | EG8-P03 | 2 | ok 이벤트 집합의 조정 거래량 20세션 중앙값 비(후/전) 중앙값 밴드 [1/k, k] — 방향 오류 탐지(3차, §9). `adj_volume_jump_max`(건별 하루 점프)는 폐기 |
 | `adj_factor.asof_for_jump_check` | EG8-P02·P03 | 2 | 검사용 고정 asof |
@@ -992,9 +996,23 @@ SELECT count(*) AS n_dup FROM (
 
 ### ⑩ `adj_factor`
 ```sql
+-- S06-2(09-05): 우변 = corp_event 계수 대상 + KRX 기준가 신규 행((b) unknown_krx · (d) unknown_price_only).
+-- 기준가 후보(bpc)는 price_daily·security·security_span 에서 독립 정의(rules_s06._BASE_PRICE_CANDIDATES_CTE):
+--   |base_price_krw / 직전 행 close − 1| > base_price_tol_rel, 비ETF, 구간 첫날 아님.
+-- (c) 재발견(주식수 불변 ∧ 직전 행 reference)은 행이 없고, (a) 로 사건에 붙은 날짜는 산출의
+-- (ticker, apply_date, apply_basis='krx_base_price', MVP 유형) 로 뺀다 — 산출을 읽는 유일한 항.
+WITH bpc AS (...)
 SELECT (SELECT count(*) FROM adj_factor)
      - ((SELECT count(*) FROM corp_event
          WHERE event_type IN (SELECT value FROM _reg_vocab WHERE domain = 'factor_bearing_event'))
+        + (SELECT count(*) FROM bpc b
+           WHERE NOT b.is_etf AND NOT b.span_start
+             AND NOT (b.share_ratio IS NULL AND b.prev_kind = 'reference')
+             AND NOT EXISTS (SELECT 1 FROM adj_factor o
+                             WHERE o.ticker = b.ticker AND o.apply_date = b.date
+                               AND o.apply_basis = 'krx_base_price'
+                               AND o.event_type IN (SELECT value FROM _reg_vocab
+                                                    WHERE domain = 'factor_bearing_event')))
         - eg1_tail('adj_factor')) AS delta;
 ```
 
@@ -1870,3 +1888,22 @@ workspace/dongmin/src/equity/
 | 부정 픽스처 | FX-N-006(거래량 나눗셈 → EG8) | + 전방 축 3건(`test_equity_s06_views.py`): (a) as_of 를 2018-05-03·05-04·2026-08-20 으로 바꿔도 공개된 사건 전후 셀(05-03 2,650,000 · 05-04 2,595,000) 불변 (b) `v_adj_price_fwd` 를 나눗셈으로 뒤집으면 분할일 \|조정수익률\| 0.9996(EG8-P02 상한 1.0 밖; 곱셈은 −2.08%) (c) 창 [start,end] 을 바꿔도 같은 셀 동일 — equity `test_adj_close_는_창을_바꿔도_같은_셀이_같다`(창 [04-02, 05-03] vs [04-02, 05-31])·backend `test_adj_close_is_raw_close_scaled_by_factors_applied_on_or_before_the_row`·contract `FIELDS` 에 `price.adj_close` 추가(`test_facts_do_not_depend_on_the_query_window` 가 equity 어댑터에서도 adj_close 를 본다) | S21 에이전트 지적 모순의 회귀 |
 | EG8 | `v_adj_price` | 변경 없음 — base = as_of 축 위에서 그대로 잰다. 같은 as_of 에서 `adj_fwd / adj_bwd = Π(전 계수)` 가 종목별 상수(005930·005935 50, 247540 4)라 점프 판정 동일 | `test_전방조정과_as_of_조정은_종목별_상수배다` |
 | MVP-B 재실행 | P25 | 4변형(top 20/3 × adj/raw) 수익률·`tape_hash`·`run_fingerprint` 전부 이전과 동일 — 순위·선택 불변이 채택 검증 기준 | DESIGN §10 P25 |
+
+**S06-2 — `price_daily` 기준가 컬럼 · `adj_factor` v3 KRX 기준가 원천 `krx_base_price` (2026-09-05, DESIGN §4-2 v3 절 구현 → `rules_s04.py`·`sql/price_daily.sql`·`rules_s06.py`·`sql/adj_factor.sql`·`backend/…/equity_duckdb.py`, 규칙 판본 e1.3.0)**
+
+절단본 실측(DESIGN §10 P27): `price_daily` 41,066행 그대로(+2컬럼), 기준가 = 직전 행 close 비율 0.99855(불일치 59 = ETF 069500 분배락 50 + 주식 9). `adj_factor` **10행** = corp_event MVP 8 + 기준가 신규 2 — (a) 교체 3(005930·005935 split · 247540 bonus, 전부 ok) · (b) unknown_krx 0 · (c) 재발견 2(101970 2014-08-21 · 900050 2016-07-29) · (d) unknown_price_only 2(247540 2022-05-09 · 900050 2011-02-16, ok=false) · 후보 밖 ETF 36 · 구간 첫날 2. EG8 max |조정수익률| 0.0898(247540: 135,900/124,700 − 1; 이전 0.0929 는 1/4 기준).
+
+| 항목 | 설계(DESIGN v3 절) | 구현 | 근거 |
+|---|---|---|---|
+| `price_daily` 컬럼 | `change_krw`·`base_price_krw`(`shares_out` 다음) | 그대로. `base_price_krw` 는 DECIMAL 차(절단본 (10,0)), EG0-P04 는 컬럼명·순서만 대조. `input_columns` 에 두 stage 의 `change_krw` 추가. 기록형 `n_base_price_null`·`n_change_null`·`n_base_price_ne_close_minus_change`(항등 0)·`n_trade_rows_with_prev_row`·`n_base_price_eq/ne_prev_close_trade`·`base_price_match_rate_trade`·`n_base_price_ne_prev_close_reference` | `rules_s04.eg3_price_daily` |
+| 픽스처 `price_daily.json` | 005930 05-04 기준가 53,000 · 247540 06-27 124,350 | 005930 05-04 `change_krw` −1,100·`base_price_krw` 53,000 · 05-03 참고가 행 base = close 2,650,000 · **247540 06-27 base = 124,700**(원자료: close 135,900 − change 11,200; 497,400/4 = 124,350 은 자기주식 신주 미배정 등 KRX 산식을 무시한 산술값 — 기준가가 정본) · 000030 무거래일 base = close · 069500 첫 거래일 base 22,575 | 절단본 원자료 |
+| 기준가 후보 | 같은 티커 직전 행 close 대비 \|r − 1\| > `base_price_tol_rel` | + **ETF 제외**(`security.sec_type='etf'`) · **구간 첫날 제외**(`security_span.first_date`) — 두 입력 추가. ETF: 분배락이 기준가를 바꾸고 상장좌수가 설정·환매로 거의 매일 변해 (b) 의 주식수 변화가 증거가 아니다(절단본 069500 후보 36 중 14 가 곱 검사를 우연히 통과 → 설계대로면 가짜 ok `unknown_krx`, 나머지는 분배락마다 (d) 행). 구간 첫날: 재상장 첫 행의 직전 행은 옛 구간 종가(036220 2024-03-13 r 5.7 · 101970 2025-03-28 r 22.5) | DESIGN §4-2 v3 구현 결과 ①② |
+| (a) 사건 교체 | apply/명목 ± `base_match_window_sessions`, 비율 `price_match_tol` 안, 성분은 곱 | 단위 = 개별 event_id 또는 combined (ticker, apply_date); 단위 ↔ 후보 1:1(dev·거리 최소, 양쪽 rank 1). 성분은 멤버 전부 같은 날 · 루트(min event_id) 잔여 r/Π(다른 pf) · share 는 S/Π(다른 ratio). + **반증 규칙**: ok 사건의 apply_date 에 후보가 있는데 비율이 안 맞으면 사건 `krx_base_inconsistent`(basis 유지), 후보는 (b)/(d) — 같은 날 두 원천이 다른 값을 낸 채 둘 다 ok 금지(이중 적용) | `sql/adj_factor.sql` pair·matched·replaced·conflict |
+| share_factor 교체 | 같은 날 shares_out 비 S(\|S−1\| > `krx_share_change_tol`) 아니면 1/pf | 그대로. 결과: 247540 share_factor **3.9888**(1/0.2507) ≠ ratio 4.0 — EG3 `n_ok_share_factor_ne_ratio` 는 기준가 행 제외, `krx_share_factor_ratio_dev_max`(0.0028) 기록. 엔진 SPLIT ratio 도 3.9888(정수 아님) — 시총 불변 우선의 설계 귀결, ★ 서버 실측 뒤 ratio 정수 유지 옵션 판단 | `fixtures/adj_factor.json` bonus-247540-* |
+| (b) unknown_krx | 같은 날 shares_out 변화 → 신규 행, ok = 곱 검사 | 그대로 + `corp_code = security.corp_code`. **무상증자는 여기 안 온다** — 권리락일과 신주 상장일이 2~3주 떨어져(247540 06-27 vs 07-15) 주식수 변화가 같은 날이 아니다 → DART 공백기 무상증자 권리락은 (d) ok=false. (b) 는 액면분할·감자(변경상장일 = 기준가 변경일) | 절단본 listing 원장 |
+| (c)(d) | 재발견 행 없음 · `unknown_price_only` ok=false | 그대로. (d) 의 `factor_source='unknown_price_only'`(어휘 추가) · available = 다음 세션 · 월별 건수 `n_base_price_only_by_month` | `sql/adj_factor.sql` bp_new·out_new |
+| EG1 | MVP + (b)(d) 독립 재계산 | 우변 = MVP + [후보(`_BASE_PRICE_CANDIDATES_CTE`, 입력만) − (c) − (a) 소비 날짜(산출 (ticker, apply_date) 를 읽는 유일한 항)]. §3 ⑩ 갱신 | `rules_s06.ADJ_FACTOR.eg1_rhs_sql` |
+| EG3_adj_factor 추가 | apply_basis 어휘 + 곱 검사(base 원천 `factor_product_tol_base`) + (a)~(d) 건수 | 폐기형 6: `n_krx_new_row_invariant_bad`(event_id 패턴·effective = announce = apply·corp_event 없음) · `n_unknown_price_only_ok` · `n_krx_price_factor_mismatch`(ok 기준가 행의 (ticker, apply_date) 곱 = price_daily 기준가/직전 행 close 독립 재계산, 1e-12) · `n_unknown_krx_ok_share_factor_bad`(= 같은 날 주식수 비) · `n_krx_row_out_of_scope`(ETF·구간 첫날·후보 아님) · `n_unknown_krx_shared_apply_date`(ok unknown_krx 와 같은 날 다른 ok 행 0). 창 검사는 기준가 행에 ± base_win 여유(단위 = 같은 (ticker, apply_date, basis)). 기록형: 후보·ETF 제외·구간 첫날 제외·(a) 단위/행·(b) ok·(c)·(d)·월별·`n_ok_without_base_price_event`(폴백만으로 선 ok 행)·`krx_share_factor_ratio_dev_max` | `rules_s06.eg3_adj_factor` |
+| 부정 픽스처 | (i) 비율 어긋남 (ii) 기준가만 (iii) 전일 무거래 (iv) no_price_match 회생 | `test_equity_s06_adj.py` 합성 5건 + 절단본 1건: (i) 분할 pf 0.5 + 같은 날 주식수 ×3 → `krx_base_inconsistent`; r 0.8 반증 → 사건 inconsistent + (d) 신규; 기준가 없으면 폴백 nominal 회귀 (ii) 기준가 ×0.9 → (d) 행·available 다음 세션·ETF 는 행 없음 (iii) 정지 뒤 ×0.7 → 행 없음·`n_base_price_rediscovery` 1·구간 첫날(×5 + 주식수 ×0.2)은 spans 축이 가른다 (iv) 감자 재개일 원수익률 ×12.5 → 2차 unmatched, 기준가 ×10 → (a) 회생(10, 0.1); 창 밖(+7)이면 (b) unknown_krx 가 대신 선다 · 성분(감자+병합 ×4) 기준가 곱 교체 · 산출 기준가 행 계수 ×2 변조 → `n_krx_price_factor_mismatch`·`n_unknown_krx_ok_share_factor_bad` | 절단본 분류 (a)3·(b)0·(c)2·(d)2 |
+| 어댑터 | 변경 없음 | `EVENT_TYPE_MAP` 은 그대로 + `RATIO_DIRECTED_EVENT_TYPES = {unknown_krx}`: share_factor > 1 → SPLIT, < 1 → REVERSE_SPLIT, = 1 은 FORMAT_ERROR. `unknown_price_only` 는 ok=false 라 방출되지 않고 ok 로 오면 어휘 밖 FORMAT_ERROR(그대로) — EGC-04 가 `unknown_krx` ok 행을 비교 모집단에 넣으려면 매핑이 있어야 했다 | backend `test_unknown_krx_*` 3건 |
+| 규칙 판본 | e1.3.0 | `model.RULES_VERSION` e1.3.0 — 첫 서버 빌드는 EG5a `skip(rules_changed)`, 재빌드 해시 동일로 확인 | DESIGN §2 |

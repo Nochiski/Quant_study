@@ -8,7 +8,7 @@
 -- stage 가 O/H/L '0' 을 NULL(miss_kind=ledger_zero) 로 둔 것도 그대로 나른다(결측은 결측, 원칙 ④).
 -- 산출이 stage 와 같은지는 EG20 이 독립 재조인으로 본다.
 --
--- 파생은 셋뿐이다:
+-- 파생은 넷이다(S06-2 에서 base_price_krw 추가):
 --   shares_out    = 같은 날 stg_listing_daily.list_shrs (KRX 정본). ETF 는 listing 원장에 없으므로
 --                   stg_etf_price_daily.list_shrs(상장좌수) — 같은 KRX 원장이고 MKTCAP 항등이 선다.
 --                   listing 에 그날 행이 없는 주식은 NULL (LEFT JOIN — 행을 버리면 EG1 이 깨진다).
@@ -20,6 +20,11 @@
 --                   DECIMAL 곱 타입을 그대로 받는다.
 --   price_kind    : volume_shr > 0 → 'trade' · = 0 → 'reference'(기준가·정지일, 종가 보존 FX-2-006)
 --                   · NULL → NULL (n_price_kind_null 기록). S03B 의 suspended 판정이 'reference' 를 읽는다.
+--   change_krw    = stage change_krw(KRX CMPPREVDD_PRC, 전일 대비) 그대로 · base_price_krw = close − change
+--                   (S06-2). KRX 의 '전일 대비' 는 그날 **기준가** 대비라 close − change 가 그날 KRX 기준가다 —
+--                   분할·무상증자·감자·정지 재개일에 기준가 ≠ 직전 종가(005930 2018-05-04: 51,900 − (−1,100)
+--                   = 53,000 = 2,650,000 / 50). change NULL 이면 base 도 NULL(결측은 결측). S06 adj_factor 의
+--                   krx_base_price 원천이 읽고, EG3_price_daily 가 base = 직전 행 close 비율을 기록한다.
 --
 -- PIT: 가격류 — stage lag_known=true, 공표 시각 미제공 → available_date = date, basis 'default'.
 -- 격리(EG7-P01 격리형, 행을 버리지 않고 _reject/<reason>/ 으로):
@@ -28,6 +33,7 @@
 WITH stock AS (
     SELECT p.ticker, p.date,
            p.open_krw, p.high_krw, p.low_krw, p.close_krw, p.volume_shr, p.value_krw,
+           p.change_krw,
            l.list_shrs          AS shares_out,
            l.par_value_krw      AS par_value_krw
     FROM stg_price_daily p
@@ -36,17 +42,18 @@ WITH stock AS (
 etf AS (
     SELECT e.ticker, e.date,
            e.open_krw, e.high_krw, e.low_krw, e.close_krw, e.volume_shr, e.value_krw,
+           e.change_krw,                        -- ETF DECIMAL(8,0) → UNION ALL 이 주식의 DECIMAL(9,0) 으로
            e.list_shrs          AS shares_out,
            NULL                 AS par_value_krw   -- UNION ALL 이 listing 의 DECIMAL(9,2) 로 맞춘다
     FROM stg_etf_price_daily e
 ),
 src AS (
     SELECT ticker, date, open_krw, high_krw, low_krw, close_krw, volume_shr, value_krw,
-           shares_out, par_value_krw
+           change_krw, shares_out, par_value_krw
     FROM stock
     UNION ALL
     SELECT ticker, date, open_krw, high_krw, low_krw, close_krw, volume_shr, value_krw,
-           shares_out, par_value_krw
+           change_krw, shares_out, par_value_krw
     FROM etf
 )
 SELECT
@@ -60,6 +67,8 @@ SELECT
     s.value_krw,
     s.close_krw * s.shares_out AS mktcap_krw,   -- DECIMAL 곱 그대로(절단본 실측 DECIMAL(18,0), 무손실)
     s.shares_out,
+    s.change_krw,
+    s.close_krw - s.change_krw AS base_price_krw,   -- 그날 KRX 기준가 (DECIMAL 차 그대로, 절단본 DECIMAL(10,0))
     s.par_value_krw,
     CASE WHEN s.volume_shr > 0 THEN 'trade'
          WHEN s.volume_shr = 0 THEN 'reference'

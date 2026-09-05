@@ -11,10 +11,20 @@
 price_matched_combined · unmatched(→ `factor_source='no_price_match'`, 계수 1). 규칙은 `.sql`
 머리말.
 
-입력 — equity `corp_event`·`price_daily`(close·price_kind: 매칭 축 + EG8)·`trading_calendar` +
-`stg_event_cr`(감자 유·무상 판정 축 `cr_mth`·`cr_rs`: corp_event 에는 구분 컬럼이 없다). 상수는
-`corp_event.near_dup_window_days` 와 `adj_factor.price_match_*` 4개를 `_const` 로 읽는다
-(build.make_consts 의 `<table>.<metric>` 키).
+3차(S06-2, 09-05): **KRX 기준가 원천 `krx_base_price`** — `price_daily.base_price_krw`(= close −
+change_krw, 그날 KRX 기준가)가 직전 행 close 와 다른 (ticker, date) 를 사건으로 읽는다. (a) 창 안의
+MVP 사건(성분은 곱)과 비율이 맞으면 그 사건의 계수·apply_date 를 기준가로 교체(`apply_basis=
+'krx_base_price'`, share_factor = 같은 날 주식수 비 또는 1/price_factor) · (b) 사건 없이 주식수 변화
+동반이면 신규 행 `unknown_krx`(ok = 곱 검사) · (c) 주식수 불변 ∧ 전일 무거래는 정지 재개 가격 재발견
+(행 없음, 기록) · (d) 그 외는 `unknown_price_only` ok=false. 사건 매칭(2차)은 기준가 사건이 없을
+때의 폴백으로 남는다. ETF(분배락·설정환매)와 재상장 첫 행은 후보 밖 — 근거는 `.sql` 머리말.
+
+입력 — equity `corp_event`·`price_daily`(close·price_kind: 매칭 축 + EG8 · base_price_krw·
+shares_out: 기준가 원천)·`trading_calendar`·`security`(sec_type·corp_code)·`security_span`(구간
+첫날) + `stg_event_cr`(감자 유·무상 판정 축 `cr_mth`·`cr_rs`: corp_event 에는 구분 컬럼이 없다).
+상수는 `corp_event.near_dup_window_days`·`corp_event.krx_share_change_tol` 와
+`adj_factor.price_match_*` 4개 + `base_price_tol_rel`·`base_match_window_sessions`·
+`factor_product_tol_base` 를 `_const` 로 읽는다(build.make_consts 의 `<table>.<metric>` 키).
 
 테이블 특화 술어(`extra_gates`):
   EG3_adj_factor — 어휘 폐쇄(factor_source·apply_basis·event_type) · EG3-P04 시총 불변
@@ -44,21 +54,64 @@ from .rules_s05 import MVP_EVENT_TYPES
 
 SQL_DIR = Path(__file__).parent / "sql"
 
-# 계수를 내는 이벤트 어휘 (GATES §3-⑩ `_reg_vocab('factor_bearing_event')`) = S05 MVP 4종.
+# 계수를 내는 corp_event 이벤트 어휘 (GATES §3-⑩ `_reg_vocab('factor_bearing_event')`) = S05 MVP
+# 4종. EG1 우변의 corp_event 쪽 항이다.
 FACTOR_BEARING_EVENTS: tuple[str, ...] = MVP_EVENT_TYPES
+# S06-2 — KRX 기준가 원천이 만드는 신규 행의 event_type. corp_event 에 없다(event_id
+# `{ticker}:krx_base:{date}`).
+#   unknown_krx        : 기준가 + 같은 날 주식수 변화 — 시총 불변 검사 통과 시 ok(DART 공백기
+#                        분할·감자)
+#   unknown_price_only : 기준가만 변화(주식수 불변·전일 거래) — 항상 ok=false(권리락·주식배당락 등
+#                        MVP 밖)
+KRX_BASE_EVENT_TYPES: tuple[str, ...] = ("unknown_krx", "unknown_price_only")
+EVENT_TYPE_VOCAB: tuple[str, ...] = (*FACTOR_BEARING_EVENTS, *KRX_BASE_EVENT_TYPES)
+KRX_BASE_EVENT_ID_INFIX = ":krx_base:"
 # factor_source 폐쇄 어휘 — mktcap_neutral 만 factor_ok=true 다(사유 우선순위는 sql/adj_factor.sql).
+# S06-2: krx_base_inconsistent(기준가 비율 × 주식수 비가 1 ± factor_product_tol_base 밖, 또는 ok
+# 사건의 apply_date 에 기준가 후보가 있는데 비율이 안 맞음) · unknown_price_only(위 (d) 행의 사유).
 FACTOR_SOURCE_VOCAB: tuple[str, ...] = ("mktcap_neutral", "ratio_null", "capred_paid",
                                         "near_dup_suppressed", "no_share_change",
-                                        "no_price_match", "same_day_suppressed")
+                                        "no_price_match", "same_day_suppressed",
+                                        "krx_base_inconsistent", "unknown_price_only")
 OK_FACTOR_SOURCE = "mktcap_neutral"
-# apply_basis 폐쇄 어휘. ok 행은 앞 3개, no_price_match 행만 unmatched, 그 외 not-ok 행은 nominal.
+# apply_basis 폐쇄 어휘. ok 행은 OK_APPLY_BASIS, no_price_match 행만 unmatched, 그 외 not-ok 행은
+# 매칭 결과(nominal·price_matched·krx_base_price) 유지. S06-2: krx_base_price = KRX 기준가가 정한
+# 세션.
 APPLY_BASIS_VOCAB: tuple[str, ...] = ("nominal", "price_matched", "price_matched_combined",
-                                      "unmatched")
-OK_APPLY_BASIS: tuple[str, ...] = ("nominal", "price_matched", "price_matched_combined")
+                                      "unmatched", "krx_base_price")
+OK_APPLY_BASIS: tuple[str, ...] = ("nominal", "price_matched", "price_matched_combined",
+                                   "krx_base_price")
+KRX_BASE_APPLY_BASIS = "krx_base_price"
 # baseline 상수 — 가격 매칭 창·허용치 (adj_factor 네임스페이스) + 근접 중복 창 (corp_event)
 PRICE_MATCH_CONSTS: tuple[str, ...] = ("price_match_tol_rel", "price_match_tol_abs",
                                        "price_match_window_sessions",
                                        "price_match_lookback_sessions")
+# S06-2 기준가 원천 상수 (adj_factor 네임스페이스). 주식수 변화 허용치는 corp_event 의 것을 복제
+# 없이 읽는다(선언의 consts).
+BASE_PRICE_CONSTS: tuple[str, ...] = ("base_price_tol_rel", "base_match_window_sessions",
+                                      "factor_product_tol_base")
+# EG1 우변 · EG3 의 독립 재계산이 쓰는 기준가 후보 CTE — `sql/adj_factor.sql` 의 bpx·bp 와 같은
+# 정의를 게이트 쪽에서 따로 적는다(산출 SQL 을 재사용하지 않는다). ETF·구간 첫날은 플래그로 남겨
+# 제외 건수를 센다.
+_BASE_PRICE_CANDIDATES_CTE = """
+bpc AS (
+    SELECT x.ticker, x.date, x.prev_kind, x.is_etf,
+           x.base_price_krw / x.prev_close AS r,
+           CASE WHEN x.prev_shares > 0 AND abs(x.shares_out / x.prev_shares - 1) > k.share_tol
+                THEN x.shares_out / x.prev_shares END AS share_ratio,
+           EXISTS (SELECT 1 FROM security_span sp
+                   WHERE sp.ticker = x.ticker AND sp.first_date = x.date) AS span_start
+    FROM (SELECT p.ticker, p.date, p.base_price_krw, p.shares_out,
+                 lag(p.close) OVER w AS prev_close, lag(p.shares_out) OVER w AS prev_shares,
+                 lag(p.price_kind) OVER w AS prev_kind,
+                 p.ticker IN (SELECT ticker FROM security WHERE sec_type = 'etf') AS is_etf
+          FROM price_daily p WINDOW w AS (PARTITION BY p.ticker ORDER BY p.date)) x
+    CROSS JOIN (SELECT CAST(base_price_tol_rel AS DOUBLE) AS base_tol,
+                       CAST(krx_share_change_tol AS DOUBLE) AS share_tol FROM _const) k
+    WHERE x.prev_close > 0 AND x.base_price_krw IS NOT NULL
+      AND abs(x.base_price_krw / x.prev_close - 1) > k.base_tol)"""
+# 후보 중 원천이 실제로 쓰는 것(비ETF · 구간 첫날 아님)
+_BP_IN_SCOPE = "NOT b.is_etf AND NOT b.span_start"
 # EG3-P04 허용오차 — baseline 상수가 아니라 **산출 정밀도** 다: price_factor = 1/ratio 를 DOUBLE 로
 # 두므로 곱은 1 ± 몇 ulp 다(실측 max |1/x·x − 1| = 1.1e-16, x ∈ [1, 1e5]). 1e-12 는 그 1e4 배
 # 여유이고 계수 방향 오류(역수·제곱)는 1e-12 로는 절대 못 숨긴다.
@@ -114,8 +167,19 @@ def _const_or_none(ctx: EquityGateContext, table: str, metric: str) -> float | N
 # ── EG3_adj_factor ───────────────────────────────────────────────────────────
 
 def eg3_adj_factor(ctx: EquityGateContext) -> GateResult:
-    """EG3-P04·P07·P13 + 계수·apply_date 불변식 + available_date 독립 재계산 + corp_event 정합."""
+    """EG3-P04·P07·P13 + 계수·apply_date 불변식 + available_date 독립 재계산 + corp_event 정합
+    + S06-2 기준가 원천 불변식(ok 기준가 행의 계수 = price_daily 기준가/직전 행 close 독립 재계산 ·
+    unknown_krx 의 share_factor = 같은 날 주식수 비 · unknown_price_only 는 ok 0 · ETF·구간 첫날
+    아님 · 같은 날 이중 ok 없음) + 후보 분류 (a)(b)(c)(d) 기록."""
     v = _q(ctx.out_view)
+    krx = KRX_BASE_APPLY_BASIS
+    # EG3-P04 허용오차: corp_event ratio 행은 산출 정밀도(FACTOR_PRODUCT_TOL), 기준가 원천 행은
+    # baseline
+    # `factor_product_tol_base`(기준가 비율 × 주식수 비 — 호가단위 반올림·자기주식 신주 미배정 등
+    # KRX 산식 잔여).
+    prod_tol = _const_or_none(ctx, ctx.rule.name, "factor_product_tol_base")
+    tol_expr = (f"CASE WHEN apply_basis = '{krx}' THEN {prod_tol!r} ELSE {FACTOR_PRODUCT_TOL!r} END"
+                if prod_tol is not None else repr(FACTOR_PRODUCT_TOL))
     (n_src_vocab, n_basis_vocab, n_type_vocab, n_ticker_bad, n_product_off, n_not_ok_ne_one,
      n_ok_source, n_ok_basis_bad, n_unmatched_mismatch, n_avail_null, n_basis, n_apply_null,
      max_dev) = _row(ctx, f"""
@@ -125,12 +189,12 @@ def eg3_adj_factor(ctx: EquityGateContext) -> GateResult:
           (SELECT count(*) FROM {v} WHERE apply_basis IS NULL
              OR apply_basis NOT IN ({_vocab_sql(APPLY_BASIS_VOCAB)})),
           (SELECT count(*) FROM {v} WHERE event_type IS NULL
-             OR event_type NOT IN ({_vocab_sql(FACTOR_BEARING_EVENTS)})),
+             OR event_type NOT IN ({_vocab_sql(EVENT_TYPE_VOCAB)})),
           (SELECT count(*) FROM {v} WHERE ticker IS NULL OR typeof(ticker) <> 'VARCHAR'
              OR length(ticker) <> {TICKER_LEN}),
           (SELECT count(*) FROM {v} WHERE factor_ok
              AND (price_factor IS NULL OR share_factor IS NULL
-                  OR abs(price_factor * share_factor - 1) > {FACTOR_PRODUCT_TOL!r})),
+                  OR abs(price_factor * share_factor - 1) > {tol_expr})),
           (SELECT count(*) FROM {v} WHERE NOT factor_ok
              AND (price_factor IS DISTINCT FROM 1 OR share_factor IS DISTINCT FROM 1)),
           (SELECT count(*) FROM {v}
@@ -147,16 +211,24 @@ def eg3_adj_factor(ctx: EquityGateContext) -> GateResult:
     # corp_event · 캘린더 정합 — 키·속성·ratio · 명목 세션 · apply 창 · available 재계산.
     lookback = _const_or_none(ctx, ctx.rule.name, "price_match_lookback_sessions")
     window = _const_or_none(ctx, ctx.rule.name, "price_match_window_sessions")
+    base_win = _const_or_none(ctx, ctx.rule.name, "base_match_window_sessions")
     # 창 검사: 개별(nominal·price_matched·unmatched)은 자기 명목 세션 창, 복합 성분(combined)은
     # **성분 창** [min(명목) − lookback, max(명목) + window] — 성분 = 같은 티커·같은 apply_date 의
     # combined 행(서버 3차: 멤버 명목일이 떨어진 성분의 공통 apply_date 가 멤버 자기 창 밖이라
-    # FAIL 했다).
+    # FAIL 했다). S06-2 기준가 교체 행(krx_base_price, corp_event 있음)은 같은 (ticker, apply_date)
+    # 단위 창에 ± base_match_window_sessions 를 더한다(교체 전 apply_date 가 창 안이고 기준가는 그
+    # ± base_win 안). 기준가 신규 행은 effective = apply 라 거리 0.
+    base_win_expr = (f"(CASE WHEN apply_basis = '{krx}' THEN {int(base_win)} ELSE 0 END)"
+                     if base_win is not None else "0")
     win_sql = ("count(*) FILTER (WHERE n_apply IS NOT NULL AND n_lo IS NOT NULL AND "
-               f"(n_apply < n_lo - {int(lookback)} OR n_apply > n_hi + {int(window)}))"
+               f"(n_apply < n_lo - {int(lookback)} - {base_win_expr} "
+               f"OR n_apply > n_hi + {int(window)} + {base_win_expr}))"
                if lookback is not None and window is not None else "NULL")
+    mvp_types = _vocab_sql(FACTOR_BEARING_EVENTS)
+    krx_types = _vocab_sql(KRX_BASE_EVENT_TYPES)
     (n_event_mismatch, n_share_ne_ratio, n_avail_mismatch, n_avail_before_announce,
      n_apply_off_cal, n_nominal_ne, n_apply_outside, max_off, max_off_ind, max_off_comb,
-     n_off_pos, med_off) = _row(ctx, f"""
+     n_off_pos, med_off, n_krx_new_bad, n_price_only_ok, krx_sf_dev_max) = _row(ctx, f"""
         WITH cal AS (SELECT date, row_number() OVER (ORDER BY date) AS n FROM trading_calendar),
              j0 AS (
           SELECT a.*, e.event_id AS e_id, e.ticker AS e_ticker, e.effective_date AS e_eff,
@@ -169,20 +241,22 @@ def eg3_adj_factor(ctx: EquityGateContext) -> GateResult:
           LEFT JOIN cal ca ON ca.date = a.apply_date),
              j AS (
           SELECT j0.*,
-                 CASE WHEN apply_basis = 'price_matched_combined'
+                 CASE WHEN apply_basis IN ('price_matched_combined', '{krx}')
                       THEN min(n_nom) OVER (PARTITION BY ticker, apply_date, apply_basis)
                       ELSE n_nom END AS n_lo,
-                 CASE WHEN apply_basis = 'price_matched_combined'
+                 CASE WHEN apply_basis IN ('price_matched_combined', '{krx}')
                       THEN max(n_nom) OVER (PARTITION BY ticker, apply_date, apply_basis)
                       ELSE n_nom END AS n_hi
           FROM j0)
         SELECT
-          count(*) FILTER (WHERE e_id IS NULL OR ticker IS DISTINCT FROM e_ticker
+          count(*) FILTER (WHERE event_type IN ({mvp_types})
+                             AND (e_id IS NULL OR ticker IS DISTINCT FROM e_ticker
                               OR effective_date IS DISTINCT FROM e_eff
                               OR event_type IS DISTINCT FROM e_type
                               OR announce_date IS DISTINCT FROM e_ann
-                              OR corp_code IS DISTINCT FROM e_corp),
-          count(*) FILTER (WHERE factor_ok AND share_factor IS DISTINCT FROM ratio),
+                              OR corp_code IS DISTINCT FROM e_corp)),
+          count(*) FILTER (WHERE factor_ok AND apply_basis <> '{krx}'
+                             AND share_factor IS DISTINCT FROM ratio),
           count(*) FILTER (WHERE available_date IS DISTINCT FROM least(e_ann, next_session)),
           count(*) FILTER (WHERE available_date < e_ann),
           count(*) FILTER (WHERE n_apply IS NULL),
@@ -194,7 +268,16 @@ def eg3_adj_factor(ctx: EquityGateContext) -> GateResult:
           coalesce(max(n_apply - n_nom) FILTER (WHERE factor_ok
                      AND apply_basis = 'price_matched_combined'), 0),
           count(*) FILTER (WHERE factor_ok AND n_apply <> n_nom),
-          coalesce(median(n_apply - n_nom) FILTER (WHERE factor_ok AND n_apply <> n_nom), 0)
+          coalesce(median(n_apply - n_nom) FILTER (WHERE factor_ok AND n_apply <> n_nom), 0),
+          count(*) FILTER (WHERE event_type IN ({krx_types})
+                             AND (e_id IS NOT NULL OR apply_basis <> '{krx}'
+                              OR effective_date IS DISTINCT FROM apply_date
+                              OR announce_date IS DISTINCT FROM apply_date
+                              OR event_id IS DISTINCT FROM ticker || '{KRX_BASE_EVENT_ID_INFIX}'
+                                 || CAST(apply_date AS VARCHAR))),
+          count(*) FILTER (WHERE event_type = 'unknown_price_only' AND factor_ok),
+          coalesce(max(abs(share_factor / ratio - 1)) FILTER (WHERE factor_ok
+                     AND apply_basis = '{krx}' AND ratio IS NOT NULL), 0)
         FROM j""")
     # 복합 성분은 같은 apply_date · 개별 매칭 ok 2건이 같은 apply_date 를 나눠 갖지 않는다
     n_combined_inconsistent = _n(ctx, f"""
@@ -251,6 +334,7 @@ def eg3_adj_factor(ctx: EquityGateContext) -> GateResult:
               AND a.factor_ok AND b.factor_ok""")
     by_source = _counts(ctx, "factor_source")
     by_basis = _counts(ctx, "apply_basis")
+    by_type = _counts(ctx, "event_type")
     basis_by_type = {f"{r[0]}:{r[1]}": int(str(r[2])) for r in ctx.con.execute(
         f"SELECT event_type, apply_basis, count(*) FROM {v} WHERE factor_ok "
         "GROUP BY 1, 2 ORDER BY 1, 2").fetchall()}
@@ -272,12 +356,103 @@ def eg3_adj_factor(ctx: EquityGateContext) -> GateResult:
           WHERE p.ticker = u.ticker
             AND c.n BETWEEN u.n_nom - {int(lookback) if lookback is not None else 0}
                         AND u.n_nom + {int(window) if window is not None else 0})""")
+    # ── S06-2 기준가 원천 — price_daily 에서 후보를 독립 재계산해 산출과 대조 ──
+    # ok 기준가 행의 계수 = 그날 기준가 / 직전 행 close(성분은 같은 (ticker, apply_date) 곱) · ok
+    # unknown_krx
+    # 행의 share_factor = 같은 날 주식수 비 · 기준가 행은 ETF·구간 첫날이 아님 · ok unknown_krx 행은
+    # 같은 날
+    # 다른 ok 행과 겹치지 않음(이중 적용) · 후보 분류 건수(a)(b)(c)(d) · 기준가 사건 없는 ok 사건
+    # 수.
+    bp_base_win = int(base_win) if base_win is not None else 0
+    (n_krx_pf_mismatch, n_unknown_krx_share_bad, n_krx_out_of_scope, n_unknown_krx_shared,
+     n_bp_candidates, n_bp_etf, n_bp_span_start, n_bp_consumed, n_bp_rediscovery,
+     n_bp_share_change, n_bp_price_only, n_ok_no_bp) = _row(ctx, f"""
+        WITH cal AS (SELECT date, row_number() OVER (ORDER BY date) AS n FROM trading_calendar),
+             {_BASE_PRICE_CANDIDATES_CTE},
+             grp AS (
+          SELECT ticker, apply_date, product(price_factor) AS pf_prod,
+                 bool_or(event_type IN ({mvp_types})) AS has_event
+          FROM {v} WHERE factor_ok AND apply_basis = '{krx}' GROUP BY ticker, apply_date),
+             krx_rows AS (
+          SELECT a.ticker, a.apply_date, a.event_id, a.event_type, a.factor_ok, a.share_factor,
+                 b.r, b.share_ratio, b.is_etf, b.span_start
+          FROM {v} a LEFT JOIN bpc b ON b.ticker = a.ticker AND b.date = a.apply_date
+          WHERE a.apply_basis = '{krx}'),
+             consumed AS (
+          SELECT DISTINCT ticker, apply_date AS date FROM {v}
+          WHERE apply_basis = '{krx}' AND event_type IN ({mvp_types})),
+             scope AS (SELECT b.* FROM bpc b WHERE {_BP_IN_SCOPE}),
+             free AS (SELECT s.* FROM scope s
+                      WHERE NOT EXISTS (SELECT 1 FROM consumed c
+                                        WHERE c.ticker = s.ticker AND c.date = s.date)),
+             ok_ev AS (
+          SELECT a.ticker, ca.n FROM {v} a JOIN cal ca ON ca.date = a.apply_date
+          WHERE a.factor_ok AND a.apply_basis <> '{krx}')
+        SELECT
+          (SELECT count(*) FROM grp g
+             LEFT JOIN bpc b ON b.ticker = g.ticker AND b.date = g.apply_date
+            WHERE b.r IS NULL OR abs(g.pf_prod / b.r - 1) > {FACTOR_PRODUCT_TOL!r}),
+          (SELECT count(*) FROM krx_rows
+            WHERE factor_ok AND event_type = 'unknown_krx'
+              AND (share_ratio IS NULL OR share_factor IS DISTINCT FROM share_ratio)),
+          (SELECT count(*) FROM krx_rows WHERE r IS NULL OR is_etf OR span_start),
+          (SELECT count(*) FROM krx_rows k
+            WHERE k.factor_ok AND k.event_type = 'unknown_krx'
+              AND EXISTS (SELECT 1 FROM {v} o WHERE o.factor_ok AND o.ticker = k.ticker
+                          AND o.apply_date = k.apply_date AND o.event_id <> k.event_id)),
+          (SELECT count(*) FROM scope),
+          (SELECT count(*) FROM bpc b WHERE b.is_etf),
+          (SELECT count(*) FROM bpc b WHERE NOT b.is_etf AND b.span_start),
+          (SELECT count(*) FROM consumed),
+          (SELECT count(*) FROM free WHERE share_ratio IS NULL AND prev_kind = 'reference'),
+          (SELECT count(*) FROM free WHERE share_ratio IS NOT NULL),
+          (SELECT count(*) FROM free
+            WHERE share_ratio IS NULL AND prev_kind IS DISTINCT FROM 'reference'),
+          (SELECT count(*) FROM ok_ev o
+            WHERE NOT EXISTS (SELECT 1 FROM scope s JOIN cal c ON c.date = s.date
+                              WHERE s.ticker = o.ticker AND abs(c.n - o.n) <= {bp_base_win}))""")
+    price_only_by_month = {str(r[0]): int(str(r[1])) for r in ctx.con.execute(f"""
+        SELECT strftime(apply_date, '%Y-%m'), count(*) FROM {v}
+        WHERE event_type = 'unknown_price_only' GROUP BY 1 ORDER BY 1""").fetchall()}
+    by_type_source = {f"{r[0]}:{r[1]}": int(str(r[2])) for r in ctx.con.execute(f"""
+        SELECT event_type, factor_source, count(*) FROM {v} WHERE apply_basis = '{krx}'
+        GROUP BY 1, 2 ORDER BY 1, 2""").fetchall()}
+    checks.update({
+        "n_krx_new_row_invariant_bad": int(str(n_krx_new_bad)),
+        "n_unknown_price_only_ok": int(str(n_price_only_ok)),
+        "n_krx_price_factor_mismatch": int(str(n_krx_pf_mismatch)),
+        "n_unknown_krx_ok_share_factor_bad": int(str(n_unknown_krx_share_bad)),
+        "n_krx_row_out_of_scope": int(str(n_krx_out_of_scope)),
+        "n_unknown_krx_shared_apply_date": int(str(n_unknown_krx_shared)),
+    })
     metrics: dict[str, object] = {
+        # ── S06-2 기준가 원천 분류 (a)(b)(c)(d) ──
+        "n_base_price_candidates": int(str(n_bp_candidates)),
+        "n_base_price_etf_excluded": int(str(n_bp_etf)),
+        "n_base_price_span_start_excluded": int(str(n_bp_span_start)),
+        "n_base_price_replaced_units": int(str(n_bp_consumed)),                 # (a) 단위 수
+        "n_krx_replaced_rows": sum(n for k, n in by_type_source.items()
+                                   if k.split(":")[0] in FACTOR_BEARING_EVENTS),
+        "n_unknown_krx": by_type.get("unknown_krx", 0),                          # (b) 행 수
+        "n_unknown_krx_ok": by_type_source.get("unknown_krx:mktcap_neutral", 0),   # (b) ok
+        "n_base_price_share_change_free": int(str(n_bp_share_change)),          # (b) 후보 수
+        "n_base_price_rediscovery": int(str(n_bp_rediscovery)),                 # (c)
+        "n_unknown_price_only": by_type.get("unknown_price_only", 0),           # (d)
+        "n_base_price_only_free": int(str(n_bp_price_only)),
+        "n_base_price_only_by_month": price_only_by_month,
+        "n_krx_base_inconsistent": by_source.get("krx_base_inconsistent", 0),
+        "n_krx_by_event_type_factor_source": by_type_source,
+        "n_ok_without_base_price_event": int(str(n_ok_no_bp)),   # 폴백(사건 매칭)으로만 선 ok 행
+        "krx_share_factor_ratio_dev_max": float(str(krx_sf_dev_max)),
+        "base_match_window_sessions": base_win,
+        "factor_product_tol_base": prod_tol,
+        "base_price_tol_rel": _const_or_none(ctx, ctx.rule.name, "base_price_tol_rel"),
+        "krx_share_change_tol": ctx.baseline.get("corp_event", "krx_share_change_tol"),
         "n_ok": _n(ctx, f"SELECT count(*) FROM {v} WHERE factor_ok"),
         "n_by_factor_source": by_source,
         "n_by_apply_basis": by_basis,
         "n_ok_by_event_type_apply_basis": basis_by_type,
-        "n_by_event_type": _counts(ctx, "event_type"),
+        "n_by_event_type": by_type,
         "n_near_dup_suppressed": by_source.get("near_dup_suppressed", 0),
         "n_same_day_suppressed": by_source.get("same_day_suppressed", 0),
         "n_ratio_null": by_source.get("ratio_null", 0),
@@ -470,28 +645,41 @@ ADJ_FACTOR = register(EquityTable(
              "apply_date": "DATE", "apply_basis": "VARCHAR",
              "price_factor": "DOUBLE", "share_factor": "DOUBLE", "factor_source": "VARCHAR",
              "factor_ok": "BOOLEAN", "available_date": "DATE", "available_basis": "VARCHAR"},
-    inputs=("corp_event", "price_daily", "trading_calendar", "stg_event_cr"),
+    inputs=("corp_event", "price_daily", "trading_calendar", "stg_event_cr", "security",
+            "security_span"),
     partition_class="date_axis",
     partition_key_expr="year(effective_date)",
-    available_rule=("derived: min(corp_event.announce_date, apply_date 다음 세션) — "
-                    "EG2-P02 축 없음(회고 기재 원천은 available < announce 가 정상), "
-                    "EG3_adj_factor 가 독립 재계산"),
-    # GATES §3-⑩: 좌변 행수 = corp_event 의 계수 대상 이벤트 수(격리 없음).
+    available_rule=("derived: min(corp_event.announce_date, apply_date 다음 세션) · 기준가 신규 "
+                    "행은 apply_date 다음 세션 — EG2-P02 축 없음(회고 기재 원천은 available < "
+                    "announce 가 정상), EG3_adj_factor 가 독립 재계산"),
+    # GATES §3-⑩ (S06-2): 좌변 행수 = corp_event 의 계수 대상 이벤트 수 + 기준가 신규 행 수(격리
+    # 없음). 신규 행 수 = price_daily 기준가 후보(비ETF·구간 첫날 아님) − (a) 로 사건에 붙은 날짜 −
+    # (c) 재발견(주식수 불변 ∧ 직전 행 reference). 후보·재발견은 입력에서 독립 재계산하고 (a) 소비
+    # 날짜만 산출의 (ticker, apply_date) 를 읽는다.
     eg1_lhs_sql="SELECT count(*) FROM out_pq",
-    eg1_rhs_sql=("SELECT count(*) FROM corp_event WHERE event_type IN "
-                 f"({_vocab_sql(FACTOR_BEARING_EVENTS)})"),
+    eg1_rhs_sql=(f"WITH {_BASE_PRICE_CANDIDATES_CTE} "
+                 "SELECT (SELECT count(*) FROM corp_event WHERE event_type IN "
+                 f"({_vocab_sql(FACTOR_BEARING_EVENTS)})) "
+                 f"+ (SELECT count(*) FROM bpc b WHERE {_BP_IN_SCOPE} "
+                 "AND NOT (b.share_ratio IS NULL AND b.prev_kind = 'reference') "
+                 "AND NOT EXISTS (SELECT 1 FROM out_pq o WHERE o.ticker = b.ticker "
+                 f"AND o.apply_date = b.date AND o.apply_basis = '{KRX_BASE_APPLY_BASIS}' "
+                 f"AND o.event_type IN ({_vocab_sql(FACTOR_BEARING_EVENTS)})))"),
     sql_path=SQL_DIR / "adj_factor.sql",
     input_columns={
         "corp_event": ("event_id", "ticker", "corp_code", "event_type", "announce_date",
                        "effective_date", "effective_basis", "ratio", "rcept_no", "source"),
         "price_daily": ("ticker", "date", "open", "high", "low", "close", "volume_shr",
-                        "price_kind"),
+                        "price_kind", "base_price_krw", "shares_out"),
         "trading_calendar": ("date",),
-        "stg_event_cr": ("rcept_no", "corp_code", "cr_mth", "cr_rs")},
+        "stg_event_cr": ("rcept_no", "corp_code", "cr_mth", "cr_rs"),
+        "security": ("ticker", "sec_type", "corp_code"),
+        "security_span": ("ticker", "span_seq", "first_date")},
     available_basis=("derived",),
     content_date_column=None,
     reject_reasons=(),
-    consts=("corp_event.near_dup_window_days", *PRICE_MATCH_CONSTS),
+    consts=("corp_event.near_dup_window_days", *PRICE_MATCH_CONSTS, *BASE_PRICE_CONSTS,
+            "corp_event.krx_share_change_tol"),
     extra_gates=(eg3_adj_factor, eg8_adj_jump),
 ))
 
@@ -501,7 +689,8 @@ BASELINE_SEED = Path(__file__).parent / "baseline_seed_s06.json"
 """이 슬라이스가 요구하는 상수의 초기값(절단본 실측 + 서버 재측정 표기). 승인 뒤 `baseline.json`
 에 병합."""
 
-__all__ = ["ADJ_FACTOR", "APPLY_BASIS_VOCAB", "BASELINE_SEED", "FACTOR_BEARING_EVENTS",
-           "FACTOR_PRODUCT_TOL", "FACTOR_SOURCE_VOCAB", "OK_APPLY_BASIS", "OK_FACTOR_SOURCE",
-           "PRICE_MATCH_CONSTS", "RETURN_REPORT_LIMIT", "TABLES", "VOLUME_MEDIAN_WINDOW",
-           "VOLUME_RATIO_REPORT_BAND"]
+__all__ = ["ADJ_FACTOR", "APPLY_BASIS_VOCAB", "BASELINE_SEED", "BASE_PRICE_CONSTS",
+           "EVENT_TYPE_VOCAB", "FACTOR_BEARING_EVENTS", "FACTOR_PRODUCT_TOL",
+           "FACTOR_SOURCE_VOCAB", "KRX_BASE_APPLY_BASIS", "KRX_BASE_EVENT_ID_INFIX",
+           "KRX_BASE_EVENT_TYPES", "OK_APPLY_BASIS", "OK_FACTOR_SOURCE", "PRICE_MATCH_CONSTS",
+           "RETURN_REPORT_LIMIT", "TABLES", "VOLUME_MEDIAN_WINDOW", "VOLUME_RATIO_REPORT_BAND"]

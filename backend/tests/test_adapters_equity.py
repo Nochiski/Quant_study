@@ -457,6 +457,57 @@ class TestEquityCorporateActionSource:
         assert result.status is LoadStatus.FORMAT_ERROR
         assert "direction contradicts" in (result.detail or "")
 
+    def test_unknown_krx_is_directed_by_share_factor(self, tmp_path: Path) -> None:
+        """S06-2 KRX 기준가 원천 행(`unknown_krx`, corp_event 에 없는 사건)은 share_factor 방향으로
+        SPLIT / REVERSE_SPLIT — DART 공백기 액면분할(×10)·감자(×0.1)."""
+        write_factors(
+            tmp_path,
+            [
+                ("005930", date(2012, 3, 5), "005930:krx_base:2012-03-05", "unknown_krx", 10.0,
+                 True),
+                ("000660", date(2013, 7, 1), "000660:krx_base:2013-07-01", "unknown_krx", 0.1,
+                 True),
+            ],
+        )
+        assert actions_of(tmp_path, "005930", "000660") == [
+            ("005930", CorporateActionType.SPLIT, Decimal("10.0"), date(2012, 3, 5),
+             "005930:krx_base:2012-03-05"),
+            ("000660", CorporateActionType.REVERSE_SPLIT, Decimal("0.1"), date(2013, 7, 1),
+             "000660:krx_base:2013-07-01"),
+        ]
+
+    def test_unknown_price_only_ok_row_is_format_error(self, tmp_path: Path) -> None:
+        """`unknown_price_only` 는 시총 불변이 아니라 항상 factor_ok=false 로 실려야 한다 —
+        ok 로 오면 어휘 밖(조용한 분할 적용 금지). ok=false 행은 방출되지 않는다."""
+        rows: list[FactorRow] = [
+            ("005930", date(2012, 3, 5), "005930:krx_base:2012-03-05", "unknown_price_only", 1.0,
+             False),
+        ]
+        write_factors(tmp_path, rows)
+        assert actions_of(tmp_path, "005930") == []
+        write_factors(
+            tmp_path,
+            [("005930", date(2012, 3, 5), "005930:krx_base:2012-03-05", "unknown_price_only",
+              0.98, True)],
+        )
+        result = EquityCorporateActionSource(tmp_path).load_actions(
+            CorporateActionQuery(instruments=(SAMSUNG,))
+        )
+        assert result.status is LoadStatus.FORMAT_ERROR
+        assert "event_type='unknown_price_only'" in (result.detail or "")
+
+    def test_unknown_krx_with_share_factor_one_is_format_error(self, tmp_path: Path) -> None:
+        write_factors(
+            tmp_path,
+            [("005930", date(2012, 3, 5), "005930:krx_base:2012-03-05", "unknown_krx", 1.0,
+              True)],
+        )
+        result = EquityCorporateActionSource(tmp_path).load_actions(
+            CorporateActionQuery(instruments=(SAMSUNG,))
+        )
+        assert result.status is LoadStatus.FORMAT_ERROR
+        assert "cannot direct" in (result.detail or "")
+
     def test_instrument_without_events_is_ok_but_unknown_ticker_is_no_data(
         self, tmp_path: Path
     ) -> None:

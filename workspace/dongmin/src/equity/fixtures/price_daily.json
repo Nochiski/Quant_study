@@ -121,5 +121,38 @@
  {"case": "pit_available_basis",
   "key": {"ticker": "005930", "date": "2018-05-03"}, "column": "available_basis", "expect": "default",
   "source": "hand — DESIGN §1 basis 어휘. stage stg_price_daily 도 전 행 'default'",
-  "expect_source": "hand", "fixture_class": "positive"}
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "s062_split_day_change_krw",
+  "key": {"ticker": "005930", "date": "2018-05-04"}, "column": "change_krw", "expect": "-1100",
+  "source": "stage:stg_price_daily.change_krw — 절단본 원자료 (KRX CMPPREVDD_PRC, fluc_pct −2.08%)",
+  "expect_source": "stage:stg_price_daily.change_krw", "fixture_class": "positive",
+  "note": "S06-2. 전일 대비는 직전 종가(2,650,000)가 아니라 그날 기준가(53,000) 대비다 — 그래서 기준가를 복원할 수 있다"},
+
+ {"case": "s062_split_day_base_price",
+  "key": {"ticker": "005930", "date": "2018-05-04"}, "column": "base_price_krw", "expect": "53000",
+  "source": "hand — close 51,900 − change (−1,100) = 53,000 = 2,650,000 / 50 (KRX 분할 기준가)",
+  "expect_source": "hand", "fixture_class": "positive",
+  "note": "S06-2 검증 픽스처. adj_factor krx_base_price 원천의 price_factor = 53,000 / 2,650,000 = 0.02"},
+
+ {"case": "s062_split_eve_base_price_is_close",
+  "key": {"ticker": "005930", "date": "2018-05-03"}, "column": "base_price_krw", "expect": "2650000",
+  "source": "hand — 정지 중 참고가 행: change 0 → base = close = 직전 종가 2,650,000 (기준가 변경은 재개일 05-04 에)",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "s062_bonus_ex_date_base_price",
+  "key": {"ticker": "247540", "date": "2022-06-27"}, "column": "base_price_krw", "expect": "124700",
+  "source": "stage:stg_price_daily — close 135,900 − change 11,200 = 124,700 (절단본 원자료)",
+  "expect_source": "stage:stg_price_daily.change_krw", "fixture_class": "positive",
+  "note": "S06-2 설계는 497,400 / 4 = 124,350 을 기대했으나 KRX 실제 기준가는 124,700(자기주식 신주 미배정 등 KRX 산식) — 기준가가 정본이라 원자료 값을 고정한다. 124,700 / 497,400 = 0.2507 이 price_factor"},
+
+ {"case": "s062_no_trade_day_base_price",
+  "key": {"ticker": "000030", "date": "2019-01-09"}, "column": "base_price_krw", "expect": "14800",
+  "source": "hand — 무거래일 change 0 → base = close 14,800 (FX-2-006 행)",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "s062_etf_base_price",
+  "key": {"ticker": "069500", "date": "2010-01-04"}, "column": "base_price_krw", "expect": "22575",
+  "source": "stage:stg_etf_price_daily — close 22,710 − change 135 = 22,575 (ETF 원장에도 change_krw 가 있다; 첫 거래일이라 직전 행은 없다)",
+  "expect_source": "stage:stg_etf_price_daily.change_krw", "fixture_class": "positive"}
 ]

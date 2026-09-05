@@ -1,9 +1,11 @@
--- adj_factor (S06, 2차 = apply_date) — 조정계수. grain (ticker, effective_date, event_id).
--- DESIGN v1.2 §4-2 · GATES §3-⑩ · EG3-P04 · EG8.
+-- adj_factor (S06, 2차 = apply_date · S06-2 v3 = KRX 기준가 원천) — 조정계수.
+-- grain (ticker, effective_date, event_id). DESIGN v1.2 §4-2 · GATES §3-⑩ · EG3-P04 · EG8.
 --
 -- 원천: equity corp_event(MVP 4종 split · reverse_split · bonus · capred 만 계수를 낸다) · trading_calendar
---   (세션 축) · price_daily(close · price_kind — 계수를 **어느 세션에 적용할지** 가격으로 가린다) ·
---   stg_event_cr(감자 결정공시 본문 cr_mth·cr_rs — 유·무상 축).
+--   (세션 축) · price_daily(close · price_kind — 계수를 **어느 세션에 적용할지** 가격으로 가린다 ·
+--   base_price_krw · shares_out — S06-2 KRX 기준가 원천) · stg_event_cr(감자 결정공시 본문 cr_mth·cr_rs —
+--   유·무상 축) · security(sec_type — ETF 는 기준가 원천 밖 · corp_code — 신규 행) · security_span(구간
+--   첫날 — 재상장 첫 행은 직전 행이 옛 구간이라 기준가 후보 밖).
 --
 -- 계수 정의 (결정 6 · 원칙 ②): 이벤트 **후** 기준으로 이전 가격·거래량을 맞추는 곱셈 계수.
 --   share_factor = corp_event.ratio (= 이벤트 후 주식수 / 전 주식수)  · price_factor = 1 / ratio
@@ -60,6 +62,31 @@
 -- available_date = min(announce_date, apply_date 다음 세션) · basis derived — 공시가 없어도 KRX 가격·주식수
 --   변화가 그 다음 세션에 관측된다. 회고 기재 원천(자본변동, announce 가 수년 뒤)은 available < announce
 --   가 정상이라 EG2-P02 announce 축을 못 쓴다(content_date_column 없음) — EG3_adj_factor 가 독립 재계산.
+--
+-- ── S06-2 KRX 기준가 원천 `krx_base_price` (v3, 09-05) — 위 사건 매칭은 기준가 사건이 없을 때의 폴백 ──
+--   price_daily.base_price_krw(= close − change_krw) 가 그날 KRX 기준가라, 사건이 실제로 가격에 적용된 세션과
+--   비율을 KRX 가 직접 준다. 후보 = 같은 티커의 직전 **행** close 대비 r = base / prev_close 가 1 ± base_price_tol_rel
+--   밖인 (ticker, date). 후보에서 빼는 것: ETF(security.sec_type = 'etf' — 분배락이 기준가를 바꾸고 상장좌수는
+--   설정·환매로 매일 바뀌어 주식수 변화가 사건의 증거가 아니다; 절단본 069500 후보 36 중 14 가 곱 검사를 우연히
+--   통과한다) · 구간 첫날(security_span.first_date — 재상장 첫 행의 '직전 행' 은 수년 전 옛 구간 종가).
+--   같은 날 주식수 변화비 S = shares_out / 직전 행 shares_out (|S − 1| > corp_event.krx_share_change_tol 일 때만).
+--   분류(우선순위):
+--   (a) 사건 교체 — 계수 후보(base_source mktcap_neutral, same_day 억제 제외; 성분 combined 은 한 단위로 곱)의
+--       apply_date(미매칭은 명목 세션) ± base_match_window_sessions 안에 있고 |r / pf − 1| ≤ tol(위 판정식과 같은
+--       허용치)이면 그 단위의 계수를 기준가로 교체: price_factor = r · share_factor = S(없으면 1/r) · apply_date =
+--       그날 · apply_basis 'krx_base_price'. 단위 ↔ 후보는 1:1(dev, 거리 최소). 성분은 멤버 전부 같은 날로 옮기고
+--       루트(min event_id)가 잔여 r / Π(다른 멤버 pf) 를 갖는다(다른 멤버는 원래 pf·ratio). 곱 |r × S − 1| ≤
+--       factor_product_tol_base 면 mktcap_neutral, 밖이면 krx_base_inconsistent(ok=false, 계수 1). 기존
+--       no_price_match 사건도 창 안에 기준가 사건이 있으면 여기서 살아난다.
+--       기준가 후보가 ok 사건의 apply_date 에 있는데 비율이 안 맞아 묶이지 않은 사건은 기준가가 계수를 반증한
+--       것이라 krx_base_inconsistent 로 내린다(같은 날 두 원천이 다른 값을 낸 채 둘 다 ok 일 수 없다 — 이중 적용).
+--   (b) 사건과 안 맞고 S 가 있으면 신규 행 event_id '<ticker>:krx_base:<date>' · event_type 'unknown_krx' ·
+--       effective = announce = apply = date · corp_code = security.corp_code · 계수 (r, S) · ok 는 곱 검사
+--       (2010~2014 DART 공백기의 액면분할·감자 변경상장일이 여기로 온다).
+--   (c) 사건과 안 맞고 S 없음 · 직전 행이 reference(전일 무거래) → 정지 재개 가격 재발견, 행 없음(EG3 기록형).
+--   (d) 그 외(주식수 불변 · 전일 거래) → 신규 행 event_type 'unknown_price_only' · ok=false · 계수 1
+--       (유상증자 권리락·주식배당락 등 MVP 밖 — 시총 불변이 아니라 계수를 만들지 않는다).
+--   (b)(d) 의 available_date = 다음 세션 · (a) 는 min(announce, 다음 세션) 그대로. 상수는 전부 _const.
 -- 숫자 리터럴은 0·1·2 만 쓴다(test_sql파일에_상수_하드코딩_없음) — 창 폭·허용치는 _const 로만 들어온다.
 WITH RECURSIVE
 cal AS (
@@ -70,7 +97,11 @@ k AS (
            CAST(price_match_window_sessions AS INTEGER)  AS win_after,
            CAST(price_match_lookback_sessions AS INTEGER) AS win_before,
            CAST(price_match_tol_rel AS DOUBLE)           AS tol_rel,
-           CAST(price_match_tol_abs AS DOUBLE)           AS tol_abs
+           CAST(price_match_tol_abs AS DOUBLE)           AS tol_abs,
+           CAST(base_price_tol_rel AS DOUBLE)            AS base_tol,        -- S06-2 기준가 원천
+           CAST(base_match_window_sessions AS INTEGER)   AS base_win,
+           CAST(factor_product_tol_base AS DOUBLE)       AS prod_tol,
+           CAST(krx_share_change_tol AS DOUBLE)          AS share_tol
     FROM _const
 ),
 ev AS (
@@ -241,23 +272,143 @@ final AS (
     FROM nominal n
     LEFT JOIN resolved r ON r.event_id = n.event_id
     LEFT JOIN same_day sd ON sd.event_id = n.event_id
+),
+-- ── S06-2 KRX 기준가 원천 ───────────────────────────────────────────────────
+bpx AS (
+    -- 비ETF 전 가격 행 + 직전 행(참고가 행 포함)의 close·shares_out·price_kind
+    SELECT p.ticker, p.date, p.close, p.base_price_krw, p.shares_out, p.price_kind, c.n,
+           lag(p.close) OVER w        AS prev_close,
+           lag(p.shares_out) OVER w   AS prev_shares,
+           lag(p.price_kind) OVER w   AS prev_kind
+    FROM price_daily p
+    JOIN cal c ON c.date = p.date
+    WHERE p.ticker NOT IN (SELECT ticker FROM security WHERE sec_type = 'etf')
+    WINDOW w AS (PARTITION BY p.ticker ORDER BY p.date)
+),
+bp AS (
+    -- 후보: r = 기준가 / 직전 행 close 가 1 ± base_tol 밖. 구간 첫날(재상장 첫 행)은 제외
+    SELECT x.ticker, x.date, x.n, x.prev_kind,
+           x.base_price_krw / x.prev_close                                             AS r,
+           CASE WHEN x.prev_shares > 0 AND abs(x.shares_out / x.prev_shares - 1) > k.share_tol
+                THEN x.shares_out / x.prev_shares END                                  AS share_ratio
+    FROM bpx x CROSS JOIN k
+    WHERE x.prev_close > 0 AND x.base_price_krw IS NOT NULL
+      AND abs(x.base_price_krw / x.prev_close - 1) > k.base_tol
+      AND NOT EXISTS (SELECT 1 FROM security_span sp
+                      WHERE sp.ticker = x.ticker AND sp.first_date = x.date)
+),
+elig AS (
+    -- (a) 대상 단위: 계수 후보(same_day 억제 제외). 성분(combined)은 (ticker, apply_date) 한 단위
+    SELECT f.event_id, f.ticker, f.apply_date, f.factor_source, 1 / f.ratio AS pf, f.ratio,
+           CASE WHEN f.apply_basis = 'price_matched_combined'
+                THEN f.ticker || '@' || CAST(f.apply_date AS VARCHAR) ELSE f.event_id END AS unit_id
+    FROM final f
+    WHERE f.factor_source IN ('mktcap_neutral', 'no_price_match')
+),
+unit AS (
+    SELECT unit_id, any_value(ticker) AS ticker, any_value(apply_date) AS apply_date,
+           product(pf) AS pf, product(ratio) AS sf, count(*) AS n_members, min(event_id) AS root_id
+    FROM elig GROUP BY unit_id
+),
+pair AS (
+    SELECT u.unit_id, b.ticker, b.date, b.r, abs(b.r / u.pf - 1) AS dev, abs(b.n - cu.n) AS dist,
+           greatest(k.tol_rel * abs(least(u.pf, 1 / u.pf) - 1), k.tol_abs)              AS tol
+    FROM unit u CROSS JOIN k
+    JOIN cal cu ON cu.date = u.apply_date
+    JOIN bp b ON b.ticker = u.ticker AND abs(b.n - cu.n) <= k.base_win
+),
+matched AS (
+    -- 단위 ↔ 기준가 후보 1:1 — 양쪽 모두에서 (dev, 거리) 최소인 쌍만
+    SELECT unit_id, ticker, date, r
+    FROM pair
+    WHERE dev <= tol
+    QUALIFY row_number() OVER (PARTITION BY unit_id ORDER BY dev, dist, date) = 1
+        AND row_number() OVER (PARTITION BY ticker, date ORDER BY dev, dist, unit_id) = 1
+),
+replaced AS (
+    SELECT e.event_id, m.date AS apply_date,
+           CASE WHEN u.n_members = 1        THEN m.r
+                WHEN e.event_id = u.root_id THEN m.r / (u.pf / e.pf)
+                ELSE e.pf END                                                          AS price_factor,
+           CASE WHEN u.n_members = 1        THEN coalesce(b.share_ratio, 1 / m.r)
+                WHEN e.event_id = u.root_id THEN coalesce(b.share_ratio, 1 / m.r) / (u.sf / e.ratio)
+                ELSE e.ratio END                                                       AS share_factor,
+           abs(m.r * coalesce(b.share_ratio, 1 / m.r) - 1) <= k.prod_tol                AS product_ok
+    FROM elig e
+    JOIN unit u ON u.unit_id = e.unit_id
+    JOIN matched m ON m.unit_id = e.unit_id
+    JOIN bp b ON b.ticker = m.ticker AND b.date = m.date
+    CROSS JOIN k
+),
+conflict AS (
+    -- ok 사건의 apply_date 에 기준가 후보가 있는데 (a) 로 묶이지 않음 → 기준가가 계수를 반증
+    SELECT e.event_id
+    FROM elig e
+    JOIN bp b ON b.ticker = e.ticker AND b.date = e.apply_date
+    WHERE e.factor_source = 'mktcap_neutral'
+      AND e.unit_id NOT IN (SELECT unit_id FROM matched)
+),
+bp_new AS (
+    -- (a) 에 쓰이지 않은 후보 → (b) unknown_krx · (c) 재발견(행 없음) · (d) unknown_price_only
+    SELECT b.ticker, b.date, b.r, b.share_ratio,
+           CASE WHEN b.share_ratio IS NOT NULL THEN 'unknown_krx'
+                WHEN b.prev_kind = 'reference'  THEN NULL
+                ELSE 'unknown_price_only' END                                          AS event_type
+    FROM bp b
+    WHERE NOT EXISTS (SELECT 1 FROM matched m WHERE m.ticker = b.ticker AND m.date = b.date)
+),
+out_events AS (
+    SELECT f.ticker, f.effective_date, f.event_id, f.corp_code, f.event_type, f.announce_date,
+           coalesce(rp.apply_date, f.apply_date)                                       AS apply_date,
+           CASE WHEN rp.event_id IS NOT NULL THEN 'krx_base_price' ELSE f.apply_basis END AS apply_basis,
+           CASE WHEN rp.event_id IS NOT NULL AND rp.product_ok THEN 'mktcap_neutral'
+                WHEN rp.event_id IS NOT NULL                   THEN 'krx_base_inconsistent'
+                WHEN cf.event_id IS NOT NULL                   THEN 'krx_base_inconsistent'
+                ELSE f.factor_source END                                               AS factor_source,
+           CASE WHEN rp.event_id IS NOT NULL THEN rp.price_factor ELSE 1 / f.ratio END AS pf_raw,
+           CASE WHEN rp.event_id IS NOT NULL THEN rp.share_factor ELSE f.ratio END     AS sf_raw,
+           FALSE                                                                       AS is_new
+    FROM final f
+    LEFT JOIN replaced rp ON rp.event_id = f.event_id
+    LEFT JOIN conflict cf ON cf.event_id = f.event_id
+),
+out_new AS (
+    SELECT b.ticker, b.date AS effective_date,
+           b.ticker || ':krx_base:' || CAST(b.date AS VARCHAR)                         AS event_id,
+           s.corp_code, b.event_type, b.date AS announce_date, b.date AS apply_date,
+           'krx_base_price'                                                            AS apply_basis,
+           CASE WHEN b.event_type = 'unknown_krx' AND abs(b.r * b.share_ratio - 1) <= k.prod_tol
+                     THEN 'mktcap_neutral'
+                WHEN b.event_type = 'unknown_krx' THEN 'krx_base_inconsistent'
+                ELSE 'unknown_price_only' END                                          AS factor_source,
+           b.r                                                                         AS pf_raw,
+           b.share_ratio                                                               AS sf_raw,
+           TRUE                                                                        AS is_new
+    FROM bp_new b CROSS JOIN k
+    LEFT JOIN security s ON s.ticker = b.ticker
+    WHERE b.event_type IS NOT NULL
+),
+out_all AS (
+    SELECT * FROM out_events
+    UNION ALL
+    SELECT * FROM out_new
 )
 SELECT
-    f.ticker,
-    f.effective_date,
-    f.event_id,
-    f.corp_code,
-    f.event_type,
-    f.announce_date,
-    f.apply_date,
-    f.apply_basis,
-    CASE WHEN f.factor_source = 'mktcap_neutral' THEN 1 / f.ratio ELSE 1 END         AS price_factor,
-    CASE WHEN f.factor_source = 'mktcap_neutral' THEN f.ratio     ELSE 1 END         AS share_factor,
-    f.factor_source,
-    (f.factor_source = 'mktcap_neutral')                                             AS factor_ok,
-    least(f.announce_date, nx.date)                                                  AS available_date,
+    o.ticker,
+    o.effective_date,
+    o.event_id,
+    o.corp_code,
+    o.event_type,
+    o.announce_date,
+    o.apply_date,
+    o.apply_basis,
+    CASE WHEN o.factor_source = 'mktcap_neutral' THEN o.pf_raw ELSE 1 END             AS price_factor,
+    CASE WHEN o.factor_source = 'mktcap_neutral' THEN o.sf_raw ELSE 1 END             AS share_factor,
+    o.factor_source,
+    (o.factor_source = 'mktcap_neutral')                                             AS factor_ok,
+    CASE WHEN o.is_new THEN nx.date ELSE least(o.announce_date, nx.date) END         AS available_date,
     'derived'                                                                        AS available_basis,
     NULL::VARCHAR                                                                    AS reject_reason
-FROM final f
-JOIN cal ca ON ca.date = f.apply_date
+FROM out_all o
+JOIN cal ca ON ca.date = o.apply_date
 LEFT JOIN cal nx ON nx.n = ca.n + 1

@@ -27,6 +27,9 @@ SAMPLE_DATES = ["2010-01-04", "2015-03-16", "2018-05-04", "2024-03-13", "2026-08
 N_SAMPLE_TICKERS = 15
 ASOF_ROWS = 111305          # Σ_as_of Σ_ticker (date ≤ as_of 인 가격 행) — 절단본 실측
 MKTCAP_005930_0503 = 2650000 * 128386494 + 2125000 * 18072580     # 378,628,441,600,000
+# S06-2: 247540 권리락일 계수는 KRX 기준가 124,700 / 직전 종가 497,400 (1/4 = 124,350 이 아니다)
+PF_247540 = 124700 / 497400
+SF_247540 = 497400 / 124700
 
 
 @pytest.fixture(scope="module")
@@ -141,7 +144,8 @@ def test_lag_override는_계수의_available_date를_세션으로_민다(
     # 무상증자 계수 available = 공시일 06-14: as_of 06-27 랙 1 이어도 이미 알려져 있었다
     assert ro.execute("SELECT cum_price_factor "
                       "FROM v_cum_adj(DATE '2022-06-27', lag_override := 1) "
-                      "WHERE ticker = '247540' AND date = DATE '2022-06-24'").fetchone() == (0.25,)
+                      "WHERE ticker = '247540' AND date = DATE '2022-06-24'").fetchone() == (
+        pytest.approx(PF_247540),)
 
 
 def test_FX_2_010_조정_거래량은_원거래량_곱하기_50이다(ro: duckdb.DuckDBPyConnection) -> None:
@@ -163,7 +167,8 @@ def test_무상증자_권리락_전일_조정가는_4분의_1이다(ro: duckdb.D
         SELECT date, cum_price_factor, adj_close FROM v_adj_price(DATE '2022-06-30')
         WHERE ticker = '247540' AND date BETWEEN '2022-06-24' AND '2022-06-27' ORDER BY date
         """).fetchall()
-    assert got == [(date(2022, 6, 24), 0.25, 124350.0), (date(2022, 6, 27), 1.0, 135900.0)]
+    assert got == [(date(2022, 6, 24), pytest.approx(PF_247540), pytest.approx(124700.0)),
+                   (date(2022, 6, 27), 1.0, 135900.0)]
 
 
 def test_v_adj_price는_v_cum_adj와_같은_계수를_쓴다(ro: duckdb.DuckDBPyConnection) -> None:
@@ -237,7 +242,7 @@ def test_전방조정_lag_override는_아직_공개_전_계수를_접지_않는�
     assert ro.execute("SELECT cum_share_factor, adj_close "
                       "FROM v_adj_price_fwd(DATE '2022-06-27', lag_override := 1) "
                       "WHERE ticker = '247540' AND date = DATE '2022-06-27'").fetchone() == (
-        4.0, 543600.0)
+        pytest.approx(SF_247540), pytest.approx(135900 * SF_247540))
     assert ro.execute("SELECT cum_share_factor, adj_close FROM v_adj_price_fwd(DATE '2022-06-30') "
                       "WHERE ticker = '247540' AND date = DATE '2022-06-24'").fetchone() == (
         1.0, 497400.0)
@@ -269,7 +274,7 @@ def test_전방조정과_as_of_조정은_종목별_상수배다(ro: duckdb.DuckD
     assert rows and all(n == 1 for _, n, _ in rows)
     ratio = {t: r for t, _, r in rows}
     assert ratio["005930"] == ratio["005935"] == pytest.approx(50.0)
-    assert ratio["247540"] == pytest.approx(4.0) and ratio["000660"] == pytest.approx(1.0)
+    assert ratio["247540"] == pytest.approx(SF_247540) and ratio["000660"] == pytest.approx(1.0)
 
 
 _FWD_DIVIDED = views.TEMPLATES["v_adj_price_fwd"].replace(

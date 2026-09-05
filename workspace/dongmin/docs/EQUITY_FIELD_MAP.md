@@ -18,6 +18,7 @@
 | `data_snapshot_id` | 카탈로그 생성 시 전 테이블 `build_id` 정렬 해시 = `equity.duckdb` 의 `snapshot_id` | `FactorMatrixCacheKey` |
 | `previous_weight`·`forward_return` | equity 소유 아님 — 어댑터가 `0.0`·`None` 고정 | 포트 docstring |
 | 가격 조정 | **`price.close` = 원주가(불변)**, **`price.adj_close` = `v_adj_price_fwd(asof)`**(**전방 조정**, 결정 09-05: 각 행 d 에 apply_date ≤ d ∧ available_date ≤ d 인 계수의 share_factor 누적곱 — 첫 관측 수준 고정, 005930 2018-05-03 2,650,000 · 05-04 2,595,000; 값은 (security, date) 의 순수 함수라 창·asof 에 무관, `available_date` = greatest(원주가 공개일, 접힌 계수 공개일) = d). 차트·EG8 은 base = asof 인 `v_adj_price(asof)`. 레지스트리의 수익률·모멘텀·변동성 팩터는 `adj_close` 를 써야 한다 — 레지스트리 개정은 워크벤치 이슈(결정 6) | 원칙 ② · GAP `price.close` · DESIGN §11 ① |
+| KRX 기준가(S06-2) | `price_daily.change_krw`(KRX 전일 대비)·`base_price_krw`(= close − change, 그날 기준가)는 **field_id 가 아니다** — `adj_factor` 의 `krx_base_price` 원천(계수·적용 세션의 정본)과 EG3 기록형이 읽는 내부 축. 어댑터는 노출하지 않고, `adj_factor.event_type` `unknown_krx`(corp_event 밖의 기준가 사건, 시총 불변)는 커널 어댑터가 share_factor 방향으로 SPLIT/REVERSE_SPLIT 로 보낸다 | DESIGN §4-2 v3 · GATES §9 S06-2 |
 
 ## 2. field_id 대응 (42)
 

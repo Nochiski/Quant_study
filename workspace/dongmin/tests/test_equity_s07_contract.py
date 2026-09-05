@@ -123,9 +123,10 @@ def test_EGC03_재상장_2종_Membership_2구간_coverage_gap_유지_backfill_en
 def test_EGC04_actions_는_factor_ok_3건_ratio_share_factor(result: contract.ContractResult) -> None:
     m = _metrics(result, "EGC-04")
     assert m["ts_column"] == "apply_date"           # S06 2차: 계수는 apply_date 세션에 적용
-    # 절단본 8건 중 ok 3 (005930·005935 split, 247540 bonus) — 101970 감자 3건은 폐지 기간이라
-    # no_price_match, ratio_null 1, near_dup_suppressed 1 (S06 2차 P23)
-    assert m["n_rows"] == 8 and m["n_ok"] == m["n_actions"] == 3
+    # 절단본 10건(corp_event MVP 8 + S06-2 기준가 신규 unknown_price_only 2, ok=false) 중 ok 3
+    # (005930·005935 split, 247540 bonus — 전부 krx_base_price 교체) — 101970 감자 3건은 폐지
+    # 기간이라 no_price_match, ratio_null 1, near_dup_suppressed 1 (S06 2차 P23 · S06-2 P27)
+    assert m["n_rows"] == 10 and m["n_ok"] == m["n_actions"] == 3
     assert m["n_only_adapter"] == m["n_only_factor"] == m["n_not_ok_emitted"] == 0
     assert m["by_type"] == {"split->split": 2, "bonus->split": 1}
 

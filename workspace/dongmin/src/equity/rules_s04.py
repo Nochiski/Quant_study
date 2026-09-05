@@ -3,6 +3,9 @@
 원칙 ②("원주가 불변 + 계수 분리")를 코드로 고정하는 슬라이스다. OHLC·거래량·거래대금은 stage 값을
 그대로 나르고(수정 없음), 조정은 S06 `adj_factor` 와 뷰가 한다. 파생은 셋뿐이다 —
 `mktcap_krw = close × shares_out` · `price_kind`(trade/reference) · `available_date = date`.
+S06-2(09-05)가 KRX 기준가 축을 더했다 — `change_krw`(stage 그대로) · `base_price_krw = close −
+change`(그날 KRX 기준가). 원주가 축은 그대로이고(EG20 불변), S06 `adj_factor` 의 `krx_base_price`
+원천이 읽는다.
 
 입력 — stage 3(`stg_price_daily`·`stg_etf_price_daily`·`stg_listing_daily`) + equity
 `trading_calendar`(캘린더 밖 날짜 격리 축). 숫자 상수는 없다(`baseline_seed_s04.json` 참조).
@@ -11,7 +14,9 @@
   EG3_price_daily — 두 원천 (ticker,date) 교집합 0(GATES §3 ⑧ 두 번째 식) · `price_kind` 어휘
                     폐쇄 · ticker 폭. 나머지는 **기록형 metric**(GATES §0-1): GAP-14
                     `open IS NULL ∧ volume>0` · 격리 사유별 건수 · `shares_out`/`par_value_krw`
-                    NULL · stage MKTCAP 과의 차이 · `price_kind` NULL
+                    NULL · stage MKTCAP 과의 차이 · `price_kind` NULL · **기준가 축(S06-2)**:
+                    직전 행이 있는 거래 행에서 `base_price_krw = 직전 행 close` 비율(기대 ≈ 99.9%)·
+                    불일치 건수·NULL 건수
   EG20            — 원주가 불변: 산출 OHLC·`volume_shr`·`value_krw` 를 stage 와 독립 재조인해
                     다른 행 0
   EG8-P01(KIS 수정종가 대조)은 독립 KIS 가격 stage 테이블이 없고 계수(S06)가 있어야 대조가 되므로
@@ -84,7 +89,8 @@ def eg3_price_daily(ctx: EquityGateContext) -> GateResult:
                OR length(ticker) <> {TICKER_LEN})""")
     (n_open_null_vol, n_kind_null, n_close_null, n_ref_with_value,
      n_shares_null_stock, n_shares_null_etf, n_par_null_stock,
-     n_mktcap_mismatch, n_shares_mismatch) = _row(ctx, f"""
+     n_mktcap_mismatch, n_shares_mismatch, n_change_null, n_base_null,
+     n_base_ne_close_minus_change) = _row(ctx, f"""
         SELECT
           (SELECT count(*) FROM {v} WHERE "open" IS NULL AND volume_shr > 0),
           (SELECT count(*) FROM {v} WHERE price_kind IS NULL),
@@ -101,7 +107,28 @@ def eg3_price_daily(ctx: EquityGateContext) -> GateResult:
              LEFT JOIN stg_etf_price_daily e ON e.ticker = p.ticker AND e.date = p.date
             WHERE p.mktcap_krw IS DISTINCT FROM coalesce(s.mktcap_krw, e.mktcap_krw)),
           (SELECT count(*) FROM {v} p JOIN stg_price_daily s USING (ticker, date)
-            WHERE p.shares_out IS DISTINCT FROM s.list_shrs)""")
+            WHERE p.shares_out IS DISTINCT FROM s.list_shrs),
+          (SELECT count(*) FROM {v} WHERE change_krw IS NULL),
+          (SELECT count(*) FROM {v} WHERE base_price_krw IS NULL),
+          (SELECT count(*) FROM {v}
+            WHERE base_price_krw IS DISTINCT FROM "close" - change_krw)""")
+    # 기준가 축(S06-2) — 같은 티커의 직전 **행**(참고가 행 포함) close 대비. 기준가 ≠ 직전 종가는
+    # 분할·무상증자·감자·정지 재개(가격 재발견)·ETF 분배락에서 나는 사실이지 이 테이블의 결함이
+    # 아니라 기록형.
+    (n_with_prev, n_trade_with_prev, n_base_eq_prev_trade, n_base_ne_prev_trade,
+     n_base_ne_prev_reference) = _row(ctx, f"""
+        WITH x AS (SELECT price_kind, base_price_krw,
+                          lag("close") OVER (PARTITION BY ticker ORDER BY date) AS prev_close
+                   FROM {v})
+        SELECT count(*) FILTER (WHERE prev_close IS NOT NULL),
+               count(*) FILTER (WHERE prev_close IS NOT NULL AND price_kind = 'trade'),
+               count(*) FILTER (WHERE prev_close IS NOT NULL AND price_kind = 'trade'
+                                  AND base_price_krw = prev_close),
+               count(*) FILTER (WHERE prev_close IS NOT NULL AND price_kind = 'trade'
+                                  AND base_price_krw IS DISTINCT FROM prev_close),
+               count(*) FILTER (WHERE prev_close IS NOT NULL AND price_kind = 'reference'
+                                  AND base_price_krw IS DISTINCT FROM prev_close)
+        FROM x""")
     kinds = {str(r[0]): int(str(r[1])) for r in ctx.con.execute(
         f"SELECT price_kind, count(*) FROM {v} GROUP BY 1 ORDER BY 1").fetchall()}
     checks = {
@@ -121,6 +148,16 @@ def eg3_price_daily(ctx: EquityGateContext) -> GateResult:
         "n_par_value_null_stock": int(str(n_par_null_stock)),
         "n_mktcap_stage_mismatch": int(str(n_mktcap_mismatch)),
         "n_shares_out_stage_mismatch": int(str(n_shares_mismatch)),
+        "n_change_null": int(str(n_change_null)),                    # S06-2 기준가 축
+        "n_base_price_null": int(str(n_base_null)),
+        "n_base_price_ne_close_minus_change": int(str(n_base_ne_close_minus_change)),
+        "n_rows_with_prev_row": int(str(n_with_prev)),
+        "n_trade_rows_with_prev_row": int(str(n_trade_with_prev)),
+        "n_base_price_eq_prev_close_trade": int(str(n_base_eq_prev_trade)),
+        "n_base_price_ne_prev_close_trade": int(str(n_base_ne_prev_trade)),
+        "n_base_price_ne_prev_close_reference": int(str(n_base_ne_prev_reference)),
+        "base_price_match_rate_trade": (int(str(n_base_eq_prev_trade)) / int(str(n_trade_with_prev))
+                                        if int(str(n_trade_with_prev)) else None),
         "price_kind_counts": kinds,
         "price_kind_vocab": list(PRICE_KINDS),
     }
@@ -160,13 +197,17 @@ eg20_raw_price.gate_name = "EG20"               # type: ignore[attr-defined]
 PRICE_DAILY = register(EquityTable(
     name="price_daily",
     grain=("ticker", "date"),
-    # 순서 = DESIGN §4-2 컬럼 순서. OHLC 는 FIELD_MAP `price.close`·`price.open` 대응이라 접미사
-    # 없음(원주가 KRW 는 자명), 나머지 수량·금액 컬럼은 stage 단위 접미사 규약(_shr·_krw) 유지.
+    # 순서 = DESIGN §4-2 컬럼 순서(S06-2: `change_krw`·`base_price_krw` 는 `shares_out` 다음).
+    # OHLC 는 FIELD_MAP `price.close`·`price.open` 대응이라 접미사 없음(원주가 KRW 는 자명), 나머지
+    # 수량·금액 컬럼은 stage 단위 접미사 규약(_shr·_krw) 유지.
     columns={"ticker": "VARCHAR", "date": "DATE",
              "open": "DECIMAL(9,0)", "high": "DECIMAL(9,0)", "low": "DECIMAL(9,0)",
              "close": "DECIMAL(9,0)", "volume_shr": "DECIMAL(13,0)",
              "value_krw": "DECIMAL(16,0)", "mktcap_krw": "DECIMAL(18,0)",
-             "shares_out": "DECIMAL(13,0)", "par_value_krw": "DECIMAL(9,2)",
+             "shares_out": "DECIMAL(13,0)",
+             # S06-2: KRX 전일 대비(stage 그대로) · 기준가 = close − change(DECIMAL 차, (10,0))
+             "change_krw": "DECIMAL(9,0)", "base_price_krw": "DECIMAL(10,0)",
+             "par_value_krw": "DECIMAL(9,2)",
              "price_kind": "VARCHAR", "available_date": "DATE", "available_basis": "VARCHAR"},
     inputs=("stg_price_daily", "stg_etf_price_daily", "stg_listing_daily", "trading_calendar"),
     partition_class="date_axis",
@@ -179,9 +220,10 @@ PRICE_DAILY = register(EquityTable(
     sql_path=SQL_DIR / "price_daily.sql",
     input_columns={
         "stg_price_daily": ("ticker", "date", "open_krw", "high_krw", "low_krw", "close_krw",
-                            "volume_shr", "value_krw", "mktcap_krw", "list_shrs"),
+                            "change_krw", "volume_shr", "value_krw", "mktcap_krw", "list_shrs"),
         "stg_etf_price_daily": ("ticker", "date", "open_krw", "high_krw", "low_krw", "close_krw",
-                                "volume_shr", "value_krw", "mktcap_krw", "list_shrs"),
+                                "change_krw", "volume_shr", "value_krw", "mktcap_krw",
+                                "list_shrs"),
         "stg_listing_daily": ("ticker", "date", "par_value_krw", "list_shrs"),
         "trading_calendar": ("date",)},
     available_basis=("default",),

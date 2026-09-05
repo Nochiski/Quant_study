@@ -230,6 +230,48 @@ def test_PIT는_available_date가_date이고_basis는_default(built: build.Build
     assert eg2.metrics["content_date_column"] == "date"
 
 
+def test_기준가는_close_minus_change_직전_행_불일치는_기록형(built: build.BuildResult) -> None:
+    """S06-2. `change_krw` 는 stage 그대로, `base_price_krw = close − change` = 그날 KRX 기준가.
+    절단본: 직전 행 있는 거래 행 40,705 중 기준가 = 직전 행 close 40,646(0.99855), 불일치 59 = ETF
+    069500 분배락 50 + 주식 9(분할 2·무상증자 권리락 1·정지 재개 2·재상장 첫 행 2·그 외 2)."""
+    r = built
+    assert r.out_dir is not None
+    cols = [row[0] for row in _query(r.out_dir, "DESCRIBE pd")]
+    assert cols[:12] == ["ticker", "date", "open", "high", "low", "close", "volume_shr",
+                         "value_krw", "mktcap_krw", "shares_out", "change_krw", "base_price_krw"]
+    assert _query(r.out_dir, "SELECT count(*) FROM pd WHERE change_krw IS NULL "
+                             "OR base_price_krw IS DISTINCT FROM \"close\" - change_krw") == [(0,)]
+    assert _query(r.out_dir, "SELECT date, change_krw, base_price_krw FROM pd "
+                             "WHERE ticker = '005930' AND date IN (DATE '2018-05-03', "
+                             "DATE '2018-05-04') ORDER BY date") == [
+        (date(2018, 5, 3), Decimal(0), Decimal(2650000)),
+        (date(2018, 5, 4), Decimal(-1100), Decimal(53000))]      # = 2,650,000 / 50
+    assert _query(r.out_dir, "SELECT change_krw, base_price_krw FROM pd "
+                             "WHERE ticker = '247540' AND date = DATE '2022-06-27'") == [
+        (Decimal(11200), Decimal(124700))]                       # 497,400 / 4 = 124,350 이 아니다
+    # 기준가 ≠ 직전 행 close 인 주식 행 9 (ETF 069500 은 분배락 50)
+    mism = _query(r.out_dir, """
+        WITH x AS (SELECT ticker, date, base_price_krw,
+                          lag("close") OVER (PARTITION BY ticker ORDER BY date) AS prev
+                   FROM pd)
+        SELECT ticker, count(*) FROM x WHERE prev IS NOT NULL AND base_price_krw <> prev
+        GROUP BY 1 ORDER BY 1""")
+    assert mism == [("005930", 1), ("005935", 1), ("036220", 1), ("069500", 50), ("101970", 2),
+                    ("247540", 2), ("900050", 2)]
+    m = _gate(r, "EG3_price_daily").metrics
+    assert m["n_change_null"] == 0 and m["n_base_price_null"] == 0
+    assert m["n_base_price_ne_close_minus_change"] == 0
+    assert m["n_rows_with_prev_row"] == N_ROWS - 15                 # 티커 15 의 첫 행
+    assert m["n_trade_rows_with_prev_row"] == 40705
+    assert m["n_base_price_eq_prev_close_trade"] == 40646
+    assert m["n_base_price_ne_prev_close_trade"] == 59
+    assert m["n_base_price_ne_prev_close_reference"] == 0
+    assert m["base_price_match_rate_trade"] == pytest.approx(40646 / 40705)
+    # 원주가 축은 그대로 — EG20 6축 변경 0
+    assert _gate(r, "EG20").metrics["raw_columns"] == ["close", "volume_shr", "open", "high",
+                                                       "low", "value_krw"]
+
+
 def test_기록형_metric이_meta에_남는다(built: build.BuildResult) -> None:
     """GAP-14(open NULL ∧ volume>0)·격리 건수·원천 교집합은 통과 조건이 아니라 기록이다."""
     g = _gate(built, "EG3_price_daily")
@@ -314,7 +356,7 @@ D_SAT = date(2020, 1, 4)            # 캘린더(stg_index_daily) 에 없는 날
 def _price_row(ticker: str, d: date, o: int | None, h: int | None, lo: int | None, c: int,
                vol: int | None, shrs: int) -> dict[str, object]:
     return {"ticker": ticker, "date": d, "open_krw": o, "high_krw": h, "low_krw": lo,
-            "close_krw": c, "volume_shr": vol,
+            "close_krw": c, "change_krw": 0, "volume_shr": vol,
             "value_krw": 0 if not vol else vol * c, "mktcap_krw": c * shrs, "list_shrs": shrs}
 
 

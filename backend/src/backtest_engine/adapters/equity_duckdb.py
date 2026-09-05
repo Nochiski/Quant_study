@@ -33,8 +33,9 @@ duckdb 가 아니라 **pyarrow** 로 parquet 를 직접 읽는다 — 결정 7: 
 - `CorporateActionSource`: `adj_factor` 의 `factor_ok=true` 행만 → `CorporateActionEvent(
   ts=apply_date(컬럼이 있으면) 또는 effective_date, ratio=Decimal(share_factor), detail=event_id)`.
   `apply_date` 는 S06 후속(감자는 기준일이 아니라 거래재개일에 가격이 조정된다)으로 추가되는
-  컬럼이라 **컬럼 존재로 분기**한다. `event_type` → enum 매핑은 `EVENT_TYPE_MAP`(아래). 어휘 밖
-  유형·방향이 ratio 와 어긋나는 행은 FORMAT_ERROR.
+  컬럼이라 **컬럼 존재로 분기**한다. `event_type` → enum 매핑은 `EVENT_TYPE_MAP`(아래); S06-2 의
+  KRX 기준가 원천 행 `unknown_krx` 는 유형이 없어 share_factor 방향으로 SPLIT/REVERSE_SPLIT
+  (`RATIO_DIRECTED_EVENT_TYPES`). 어휘 밖 유형·방향이 ratio 와 어긋나는 행은 FORMAT_ERROR.
 
 pyarrow 는 optional extra `parquet` 로 설치한다: `uv sync --extra parquet`.
 """
@@ -75,6 +76,11 @@ EVENT_TYPE_MAP: dict[str, CorporateActionType] = {
     "reverse_split": CorporateActionType.REVERSE_SPLIT,
     "capred": CorporateActionType.REVERSE_SPLIT,
 }
+# S06-2 KRX 기준가 원천이 만든 사건 — corp_event 에 없어 유형을 모른다(`unknown_krx`: 기준가 변화 +
+# 같은 날 주식수 변화, 시총 불변). 방향은 share_factor 가 정한다: > 1 → SPLIT, < 1 → REVERSE_SPLIT.
+# `unknown_price_only`(기준가만 변화, 항상 factor_ok=false)는 방출되지 않고, ok 로 실려 오면 어휘 밖
+# FORMAT_ERROR 가 맞다 — 시총 불변이 아닌 사건을 분할로 적용하면 안 된다.
+RATIO_DIRECTED_EVENT_TYPES: frozenset[str] = frozenset({"unknown_krx"})
 
 _PRICE_COLUMNS = ("date", "open", "high", "low", "close", "volume_shr", "price_kind")
 _SPAN_COLUMNS = ("ticker", "span_seq", "first_date", "last_date", "end_reason")
@@ -638,12 +644,6 @@ class EquityCorporateActionSource:
             if not (window[0] <= session <= window[1]) or not query.includes(session):
                 continue
             event_type = str(record["event_type"])
-            action_type = EVENT_TYPE_MAP.get(event_type)
-            if action_type is None:
-                raise _SourceError(
-                    f"event_type outside adapter vocabulary — {build.label} event_id={event_id} "
-                    f"event_type={event_type!r} known={sorted(EVENT_TYPE_MAP)}"
-                )
             share_factor = record["share_factor"]
             if isinstance(share_factor, bool) or not isinstance(
                 share_factor, int | float | Decimal
@@ -653,6 +653,23 @@ class EquityCorporateActionSource:
                     f"got={share_factor!r}"
                 )
             ratio = Decimal(repr(float(share_factor)))
+            if event_type in RATIO_DIRECTED_EVENT_TYPES:
+                if ratio == 1:
+                    raise _SourceError(
+                        f"share_factor 1 cannot direct a ratio-directed event — {build.label} "
+                        f"event_id={event_id} event_type={event_type}"
+                    )
+                action_type = (
+                    CorporateActionType.SPLIT if ratio > 1 else CorporateActionType.REVERSE_SPLIT
+                )
+            else:
+                action_type = EVENT_TYPE_MAP.get(event_type)
+            if action_type is None:
+                raise _SourceError(
+                    f"event_type outside adapter vocabulary — {build.label} event_id={event_id} "
+                    f"event_type={event_type!r} "
+                    f"known={sorted(EVENT_TYPE_MAP) + sorted(RATIO_DIRECTED_EVENT_TYPES)}"
+                )
             expects_increase = action_type is CorporateActionType.SPLIT
             if (ratio > 1) != expects_increase:
                 raise _SourceError(

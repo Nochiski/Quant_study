@@ -579,17 +579,17 @@
   "fixture_class": "positive"
  },
  {
-  "case": "adv20_rank_top_005930_20180503",
+  "case": "adv20_rank_null_corp_action_005930_20180503",
   "key": {
    "date": "2018-05-03",
    "ticker": "005930"
   },
   "column": "adv20_rank_pct",
-  "expect": "1.0",
-  "source": "hand — 2018-05-03 모집단(보통주 ∧ listed ∧ adv20 있음) 5종목 adv20 오름차순 003540 2.91B · 161890 9.14B · 000030 31.8B · 000660 349B · 005930 582B → cume_dist 0.2·0.4·0.6·0.8·1.0",
+  "expect": null,
+  "source": "hand — S03C: 무거래 + 다음 세션(05-04) 50:1 분할 apply → corp_action_window → status suspended → 순위 모집단 밖",
   "expect_source": "hand",
   "fixture_class": "positive",
-  "note": "S03B-2. 005930 은 분할 정지 3일째(run 3 < k=5, 정지 공시 없음)라 status listed → 모집단 안. 900050 은 sec_type foreign, 036220·101970 은 이날 구간 밖, 247540 은 2019-03 상장이라 모집단 5"
+  "note": "S03B-2 때는 이 셀이 1.0(모집단 5 중 최대)이었으나 S03C 가 status 를 suspended 로 바꿔 모집단에서 빠졌다. 모집단 크기·순위값에 안 기대는 불변식 픽스처다 — 서버 모집단(1,651~2,335종목)에서도 같은 이유로 NULL (P26′ 의 모집단 의존 픽스처 제거 교훈)"
  },
  {
   "case": "adv20_rank_null_preferred_005935_20180503",
@@ -664,6 +664,106 @@
   "expect_source": "hand",
   "fixture_class": "positive",
   "note": "005930 이 항상 1 인 것은 아니다 — 2026-08-20 은 000660 이 최댓값이고 005930 은 7/8"
+ },
+ {
+  "case": "no_trade_reason_trade_day_005930_20180427",
+  "key": {
+   "date": "2018-04-27",
+   "ticker": "005930"
+  },
+  "column": "no_trade_reason",
+  "expect": "none",
+  "source": "hand — S03C: 거래 행(price_kind='trade')은 판정 대상이 아니다",
+  "expect_source": "hand",
+  "fixture_class": "positive",
+  "note": "분할 정지 직전 거래일. 다음 세션부터 무거래가 시작되지만 이날은 거래가 있으므로 창 안이어도 none"
+ },
+ {
+  "case": "no_trade_reason_trade_day_on_halt_101970_20140611",
+  "key": {
+   "date": "2014-06-11",
+   "ticker": "101970"
+  },
+  "column": "no_trade_reason",
+  "expect": "none",
+  "source": "hand — S03C: halt_state=true(지정일) 이지만 그날 거래량 185,252 라 무거래가 아니다 → none",
+  "expect_source": "hand",
+  "fixture_class": "positive",
+  "note": "status 는 halt_state 로 여전히 suspended(FX-1-013b) — 이유 컬럼과 status 는 다른 축이다"
+ },
+ {
+  "case": "no_trade_reason_halt_disclosed_101970_20140612",
+  "key": {
+   "date": "2014-06-12",
+   "ticker": "101970"
+  },
+  "column": "no_trade_reason",
+  "expect": "halt_disclosed",
+  "source": "hand — 정지 공시 2014-06-11 로 halt_state true, 06-12 는 무거래 → 우선순위 ①",
+  "expect_source": "hand",
+  "fixture_class": "positive"
+ },
+ {
+  "case": "no_trade_reason_corp_action_005930_20180503",
+  "key": {
+   "date": "2018-05-03",
+   "ticker": "005930"
+  },
+  "column": "no_trade_reason",
+  "expect": "corp_action_window",
+  "source": "hand — adj_factor 005930:split:2018-05-04 의 apply_date 05-04 가 [D−5, D+45] 안(D+1). 정지 공시가 없어 halt_state false, 정리매매도 아님 → 우선순위 ③",
+  "expect_source": "hand",
+  "fixture_class": "positive",
+  "note": "S03B-2 까지는 run 3 < k=5 라 listed 였다. 50:1 분할 정지가 공시로 안 잡히던 구멍을 계수 표가 메운다"
+ },
+ {
+  "case": "no_trade_reason_corp_action_status_005930_20180503",
+  "key": {
+   "date": "2018-05-03",
+   "ticker": "005930"
+  },
+  "column": "status",
+  "expect": "suspended",
+  "source": "hand — S03C status 규칙: corp_action_window 는 run 과 무관하게 suspended",
+  "expect_source": "hand",
+  "fixture_class": "positive"
+ },
+ {
+  "case": "no_trade_reason_illiquid_run_below_k_900050_20170330",
+  "key": {
+   "date": "2017-03-30",
+   "ticker": "900050"
+  },
+  "column": "no_trade_reason",
+  "expect": "illiquid",
+  "source": "hand — 정지·정리매매·관리 신호 없음, adj_factor 행 없음(외국주) → 우선순위 ⑤",
+  "expect_source": "hand",
+  "fixture_class": "positive",
+  "note": "run 1 이라 status 는 listed — 이유를 모르는 무거래는 k 세션을 넘겨야 정지로 본다"
+ },
+ {
+  "case": "no_trade_reason_illiquid_run_below_k_status_900050_20170330",
+  "key": {
+   "date": "2017-03-30",
+   "ticker": "900050"
+  },
+  "column": "status",
+  "expect": "listed",
+  "source": "hand — illiquid ∧ run 1 < k=5",
+  "expect_source": "hand",
+  "fixture_class": "positive"
+ },
+ {
+  "case": "no_trade_reason_illiquid_run_at_k_000030_20190115",
+  "key": {
+   "date": "2019-01-15",
+   "ticker": "000030"
+  },
+  "column": "no_trade_reason",
+  "expect": "illiquid",
+  "source": "hand — 폐지 전 무거래 22세션, 공시 신호 없음. run 5 = k 라 status suspended(FX-1-012d)",
+  "expect_source": "hand",
+  "fixture_class": "positive"
  },
  {
   "case": "listing_age_005930",

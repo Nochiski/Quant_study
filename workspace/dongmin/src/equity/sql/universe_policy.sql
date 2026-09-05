@@ -9,7 +9,9 @@
 --   investable   : common-stock + NOT admin_state + NOT liquidation_window.
 --                  admin_state NULL(basis unknown) 행은 NOT NULL = NULL 이라 빠진다 — 서버 S03 실측
 --                  (P19′) 에서 unknown 0 이라 실효 없음. 결측 정책이 필요해지면 행을 바꾼다.
---   liquid       : (S03B-2, 09-05 사용자 결정 "날짜별 상위 비율") investable 4행 + 임계 1행
+--   liquid       : (S03B-2, 09-05 사용자 결정 "날짜별 상위 비율") investable 4행 + S03C 무거래 술어 1행
+--                  `no_trade_reason <> 'illiquid'`(그날 거래가 없고 이유도 모르는 종목은 유동성 유니버스
+--                  밖 — investable 은 그대로 두고 liquid 에만 건다) + 임계 1행
 --                  `adv20_rank_pct >= 1 − liquid_top_pct` (threshold_kind='quantile',
 --                  threshold_value = liquid_top_pct). 임계는 절대 금액이 아니라 같은 날 보통주 모집단 안
 --                  adv20 백분위(universe_daily.adv20_rank_pct, cume_dist) 라 시장 규모 변화·인플레이션에
@@ -29,7 +31,8 @@ WITH flag_rules AS (
         ('investable',   ['sec_type = ''common''', 'status = ''listed''',
                           'NOT admin_state', 'NOT liquidation_window']),
         ('liquid',       ['sec_type = ''common''', 'status = ''listed''',
-                          'NOT admin_state', 'NOT liquidation_window'])
+                          'NOT admin_state', 'NOT liquidation_window',
+                          'no_trade_reason <> ''illiquid'''])
     ) AS p(policy, predicates)
 ),
 flag_rows AS (

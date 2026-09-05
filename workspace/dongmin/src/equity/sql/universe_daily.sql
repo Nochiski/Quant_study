@@ -1,5 +1,5 @@
--- universe_daily v2 (S03 존재·상태 + S03B 시장 파생 + S03B-2 날짜별 유동성 순위) — grain (date, ticker) · date_axis.
--- DESIGN v1.2 §4-1 · GATES §3 ⑦ · §4 FX-1-012.
+-- universe_daily v4 (S03 존재·상태 + S03B 시장 파생 + S03B-2 유동성 순위 + S03C 무거래 이유) —
+-- grain (date, ticker) · date_axis. DESIGN v1.2 §4-1 · GATES §3 ⑦ · §4 FX-1-012.
 --
 -- 격자 = security_span × trading_calendar (둘 다 앞서 커밋된 equity 테이블, _pinned/ 고정).
 -- 행수 = Σ n_days — 구간 정의가 "캘린더 위 최대 연속 run" 이라 구간 안 거래일이 전부 존재일이다.
@@ -28,8 +28,26 @@
 --                      D 에 거래가 있으면 0. 가격 행 없음(또는 volume NULL → price_kind NULL)은 무거래로
 --                      세지 않는다: 그날은 NULL 이고 run 을 끊는다(다음 무거래일은 1 부터) — NULL 을
 --                      뒤로 전파하지 않는다.
---   status           = suspended(halt_state ∨ (price_kind='reference' ∧ no_trade_run ≥ no_trade_run_k))
+--   no_trade_reason  = (S03C) 무거래(price_kind='reference') 행의 이유 1개. 거래 행·가격 행 없는 날은
+--                      'none'(판정 대상이 아니다). 우선순위(먼저 맞는 것 하나):
+--                        ① halt_state                      → 'halt_disclosed'
+--                        ② liquidation_window              → 'liquidation'
+--                        ③ 같은 티커 adj_factor 행(factor_ok 무관)의 apply_date 가
+--                           [D − corp_action_lookback_sessions, D + corp_action_lookahead_sessions]
+--                           세션 창 안                      → 'corp_action_window'
+--                        ④ admin_state ∧ 지정 신호(signal_admin)가 D 전
+--                           admin_signal_window_sessions 안 → 'admin'
+--                        ⑤ 나머지                          → 'illiquid'
+--                      ③ 은 사건 쪽에서 창을 펼친다(ca_win) — 적용일이 그 티커 구간 밖(폐지 기간)이어도
+--                      구간 안 D 가 창에 들면 잡힌다. ok 여부를 안 보는 이유: 계수를 못 낸 사건일수록
+--                      가격이 튀므로 오히려 창으로 막아야 한다(DESIGN S06-2 ⑸).
+--   status           = suspended(halt_state ∨ no_trade_reason='corp_action_window'
+--                                ∨ (no_trade_reason='illiquid' ∧ no_trade_run ≥ no_trade_run_k))
 --                    / listed. k 는 _const(baseline universe_daily.no_trade_run_k, GATES §5-B8).
+--                      S03C 변경: k 임계는 **이유를 모르는** 무거래에만 건다(사용자 09-05). 공시로
+--                      설명되는 정지(halt·정리매매·관리종목)는 halt_state 만 정지로 남고, 나머지는
+--                      universe_policy 의 investable 술어(NOT admin_state·NOT liquidation_window)가
+--                      뺀다 — 같은 사실을 status 와 정책 양쪽에서 두 번 빼지 않는다.
 --   mktcap_krw       = 같은 날 price_daily.mktcap_krw (원주가 × KRX 주식수, 조정 없음). 결측은 결측.
 --   adv20_krw        = 같은 구간 [D−19, D] 20 거래일 value_krw 평균. 창에 value 있는 행이 20 미만이면
 --                      NULL(구간 첫 19일·가격 결측일 뒤 19일). 랙은 뷰가 건다(available_date = date).
@@ -57,6 +75,20 @@ grid AS (
     SELECT s.ticker, s.span_seq, s.first_date, c.date, c.td_seq
     FROM security_span s
     JOIN cal c ON c.date BETWEEN s.first_date AND s.last_date
+),
+ca_win AS (
+    -- S03C ③ 의 창을 **사건 쪽에서** 펼친다: apply_date 가 [D − lookback, D + lookahead] 안이라는 조건은
+    -- D 가 [apply − lookahead, apply + lookback] 안이라는 조건과 같다. 사건당 세션 51개(seed)라 집합이
+    -- 작고, 격자와 (ticker, td_seq) 동등 조인으로 붙어 10.9M 행 위 범위 조인을 피한다. 격자가 아니라
+    -- 캘린더에서 펼치므로 적용일이 그 티커의 구간 밖(폐지 기간)이어도 구간 안 D 가 창에 들면 잡힌다.
+    -- apply_date 는 adj_factor 가 캘린더 세션으로 보장한다(EG3_adj_factor apply_date 불변식) —
+    -- 그래도 캘린더 밖 행이 생기면 여기서 조용히 빠지므로 EG3_universe 가 건수를 기록한다.
+    SELECT DISTINCT a.ticker, c.td_seq
+    FROM adj_factor a
+    CROSS JOIN _const k
+    JOIN cal ca ON ca.date = a.apply_date
+    JOIN cal c  ON c.td_seq BETWEEN ca.td_seq - k.corp_action_lookahead_sessions
+                               AND ca.td_seq + k.corp_action_lookback_sessions
 ),
 sig_raw AS (
     SELECT ticker, rcept_dt,
@@ -98,13 +130,16 @@ base AS (
            coalesce(s.signal_delist, false)       AS signal_delist,
            p.volume_shr, p.value_krw, p.mktcap_krw, p.price_kind,
            m.is_admin_issue, m.is_trade_halt, m.is_liquidation,
-           k.admin_window_td, k.no_trade_run_k, k.adv_window_td
+           (w.ticker IS NOT NULL)                 AS corp_action_near,
+           k.admin_window_td, k.no_trade_run_k, k.adv_window_td,
+           k.admin_signal_window_sessions
     FROM grid g
     LEFT JOIN stg_listing_daily l ON l.ticker = g.ticker AND l.date = g.date
     LEFT JOIN security x          ON x.ticker = g.ticker
     LEFT JOIN sig s               ON s.ticker = g.ticker AND s.date = g.date
     LEFT JOIN price_daily p       ON p.ticker = g.ticker AND p.date = g.date
     LEFT JOIN stg_master_daily m  ON m.ticker = g.ticker AND m.date = g.date
+    LEFT JOIN ca_win w            ON w.ticker = g.ticker AND w.td_seq = g.td_seq
     CROSS JOIN _const k
 ),
 run AS (
@@ -152,12 +187,31 @@ state AS (
            date_diff('day', coalesce(r.list_date, r.first_date), r.date)         AS listing_age_days
     FROM run r
 ),
-scored AS (
+reasoned AS (
+    -- S03C. CASE 의 순서가 곧 우선순위다 — 한 행에 여러 사유가 겹치면 위쪽이 이긴다.
+    -- admin 은 '지정 신호가 최근' 일 때만 이유가 된다: 관리종목 상태는 몇 달씩 이어지는데 그 기간의
+    -- 무거래를 전부 admin 으로 부르면 비유동(illiquid)과 구분이 사라진다. 창은 [지정일, 지정일 + n 세션]
+    -- (td_seq 차 ≤ n, 지정일 당일 포함) — last_admin 은 같은 (ticker, span_seq) 안 마지막 신호일이라
+    -- 재상장 구간으로 새지 않는다.
     SELECT s.*,
-           CASE WHEN s.halt_state
-                     OR (s.price_kind = 'reference' AND s.no_trade_run >= s.no_trade_run_k)
-                THEN 'suspended' ELSE 'listed' END                                AS status
+           CASE WHEN s.price_kind IS DISTINCT FROM 'reference' THEN 'none'
+                WHEN s.halt_state                              THEN 'halt_disclosed'
+                WHEN s.liquidation_window                      THEN 'liquidation'
+                WHEN s.corp_action_near                        THEN 'corp_action_window'
+                WHEN coalesce(s.admin_state, false)
+                     AND s.last_admin IS NOT NULL
+                     AND s.td_seq - s.last_admin <= s.admin_signal_window_sessions
+                                                               THEN 'admin'
+                ELSE 'illiquid' END                                               AS no_trade_reason
     FROM state s
+),
+scored AS (
+    SELECT r.*,
+           CASE WHEN r.halt_state
+                     OR r.no_trade_reason = 'corp_action_window'
+                     OR (r.no_trade_reason = 'illiquid' AND r.no_trade_run >= r.no_trade_run_k)
+                THEN 'suspended' ELSE 'listed' END                                AS status
+    FROM reasoned r
 ),
 pop AS (
     -- adv20_rank_pct 모집단(S03B-2): 같은 날 보통주 ∧ listed ∧ adv20 있음. sec_type NULL 은 없지만
@@ -196,6 +250,7 @@ SELECT
     mktcap_krw,
     adv20_krw,
     adv20_rank_pct,
+    no_trade_reason,
     listing_age_days,
     no_trade_run,
     date                                                    AS available_date,

@@ -1,5 +1,6 @@
-"""S03·S03B 슬라이스 선언 — 유니버스 존재·상태·시장 파생 `universe_daily` v2 · 정책 선언표
-`universe_policy` (DESIGN v1.2 §4-1, GATES v1.0 §3 ⑦·㉒, §1 EG3-P09, §4 FX-1-006·011~017, §5-B8).
+"""S03·S03B·S03B-2·S03C 슬라이스 선언 — 유니버스 존재·상태·시장 파생 `universe_daily` v4 · 정책
+선언표 `universe_policy` (DESIGN v1.2 §4-1, GATES v1.0 §3 ⑦·㉒, §1 EG3-P09, §4 FX-1-006·011~017,
+§5-B8).
 
 `universe_daily` 는 처음으로 **앞서 커밋된 equity 테이블을 입력으로 읽는** 테이블이다 —
 `security_span`·`trading_calendar`(S02)·`security`(S01)·`price_daily`(S04)가 `stg_*` 와 같은
@@ -19,10 +20,22 @@ S03B-2(날짜별 유동성 순위, 09-05 사용자 결정 "날짜별 상위 비�
 `threshold_kind='quantile'`, `threshold_value` = baseline `universe_policy.liquid_top_pct`)을
 등재한다.
 
+S03C(무거래 이유 분류, 09-05 사용자 결정 "무거래 연속 정지가 어떤 이유인지 데이터를 받고 판단"):
+`adv20_rank_pct` 다음에 `no_trade_reason` ∈ {halt_disclosed, corp_action_window, liquidation,
+admin, illiquid, none} — 무거래(`price_kind='reference'`) 행만 판정하고 거래 행은 `none`. 우선순위는
+`sql/universe_daily.sql` 의 `reasoned` CTE 가 정본(halt → 정리매매 → 기업행위 창 → 관리종목 지정
+직후 → 나머지). **`status` 규칙이 바뀐다**: `suspended` = `halt_state` ∨ `corp_action_window` ∨
+(`illiquid` ∧ `no_trade_run ≥ k`) — k 임계는 이유를 모르는 무거래에만 건다. 기업행위 창을 넣기 위해
+equity `adj_factor` 를 입력에 더한다(순환 없음 — `adj_factor` 는 `universe_daily` 를 읽지 않는다;
+빌드 순서 price_daily → corp_event → adj_factor → universe_daily). `universe_policy` 의 `liquid`
+에는 `no_trade_reason <> 'illiquid'` 술어가 붙는다(판본 s03c-v4).
+
 산출 규칙 상수(게이트 임계 아님, GATES §5-B8 부류)는 `baseline_seed_s03.json` → `_const`:
   `universe_daily.admin_window_td` (KOSPI·소속부 공란 행의 관리종목 창) ·
   `universe_daily.no_trade_run_k` (무거래 연속 임계, 사람 승인) ·
   `universe_daily.adv_window_td` (adv20 창 폭 — 컬럼 이름이 못박은 20, SQL 리터럴 금지 통로) ·
+  `universe_daily.corp_action_lookback_sessions`·`corp_action_lookahead_sessions` (S03C ③ 창) ·
+  `universe_daily.admin_signal_window_sessions` (S03C ④ 창) ·
   `universe_policy.version` · `universe_policy.liquid_top_pct` (liquid 상위 비율, 사용자 선택).
 
 테이블 특화 술어(`extra_gates`):
@@ -32,9 +45,12 @@ S03B-2(날짜별 유동성 순위, 09-05 사용자 결정 "날짜별 상위 비�
                  `price_daily` 값, `no_trade_run` 은 부호·NULL 이 `price_kind` 와 정합, `adv20`
                  NULL 은 창 미달만, `listing_age_days` ≥ 0 ∧ 같은 날 listing 과 일치) · S03B-2
                  순위 술어(`adv20_rank_pct` ∈ (0, 1] · NULL ⇔ 모집단 밖 · 날짜별 최댓값 1 ·
-                 순위 × 재계산 모집단 크기 = 정수 · 같은 날 adv20 순으로 단조). 열린 halt 건수·run
+                 순위 × 재계산 모집단 크기 = 정수 · 같은 날 adv20 순으로 단조) · S03C 이유 술어
+                 (어휘 폐쇄 · NULL 0 · 무거래 아닌 행 = none · 무거래 행 ≠ none · halt 행 =
+                 halt_disclosed · 입력 `adj_factor`·`trading_calendar` 에서 창을 다시 펼친 우선순위
+                 독립 재계산 위반 0 · 새 status 규칙 재계산 위반 0). 열린 halt 건수·run
                  으로만 suspended 된 건수·run 히스토그램·adv20 분위수·날짜별 모집단 크기 분포·순위
-                 NULL 건수는 기록형.
+                 NULL 건수·이유 부류별 행수·illiquid 의 run 분포·liquid 에서 빠지는 건수는 기록형.
   EG3_policy   — 어휘 폐쇄(policy·threshold_kind·basis) · universe_id 문법 · 'all' 행 존재 ·
                  임계 종류와 값의 정합(quantile 은 (0, 1]) · predicate 가 universe_daily 스키마
                  위에서 바인딩되는가.
@@ -60,9 +76,14 @@ MARKET_VOCAB: tuple[str, ...] = ("KOSPI", "KOSDAQ")
 # / convention = ETF(지정 대상 아님) / unknown = 판정축 없음(admin_state NULL)
 ADMIN_STATE_BASIS_VOCAB: tuple[str, ...] = (
     "measured", "derived_kospi_window", "convention", "unknown")
+# S03C 무거래 이유 폐쇄 어휘 — 나열 순서가 곧 판정 우선순위이고, 'none' 은 판정 대상이 아닌 행
+# (거래일 · 가격 행 없는 날)이다. 우선순위 정본은 sql/universe_daily.sql 의 `reasoned` CTE.
+NO_TRADE_REASON_VOCAB: tuple[str, ...] = (
+    "halt_disclosed", "liquidation", "corp_action_window", "admin", "illiquid", "none")
+NO_TRADE_REASON_NONE = "none"
 # FIELD_MAP §1 universe_id 어휘의 policy 부분. 'common-stock' 은 소비자 계약 `krx.common-stock` 이
 # 정책표로 풀리도록 S03B 에서 추가(sec_type='common' ∧ status='listed'). 'liquid' 는 S03B-2 에서
-# 행 등재 — 절대 금액 임계가 아니라 날짜별 상위 비율(`adv20_rank_pct >= 1 − liquid_top_pct`).
+# 행 등재 — 날짜별 상위 비율(`adv20_rank_pct >= 1 − liquid_top_pct`) + S03C 무거래 술어.
 POLICY_VOCAB: tuple[str, ...] = ("all", "common-stock", "investable", "liquid")
 THRESHOLD_KIND_VOCAB: tuple[str, ...] = ("quantile", "absolute", "flag")
 UNIVERSE_ID_PREFIX = "krx."          # FIELD_MAP §1 — universe_id = '<market>.<policy>'
@@ -137,11 +158,13 @@ def _market_checks(ctx: EquityGateContext, k: int,
     """
     v = _q(ctx.out_view)
     (n_status, n_run_neg, n_run_null, n_run_sign, n_mktcap_null, n_mktcap_diff,
-     n_age_null, n_age_neg, n_age_diff, n_by_run, n_age_fb_stock, n_age_fb, n_run_null_rows,
-     run_max) = _row(ctx, f"""
+     n_age_null, n_age_neg, n_age_diff, n_by_run, n_by_ca, n_age_fb_stock, n_age_fb,
+     n_run_null_rows, run_max) = _row(ctx, f"""
         SELECT
           count(*) FILTER (WHERE (u.status = 'suspended') <> coalesce(u.halt_state
-                                 OR (p.price_kind = 'reference' AND u.no_trade_run >= {k}), false)),
+                                 OR u.no_trade_reason = 'corp_action_window'
+                                 OR (u.no_trade_reason = 'illiquid'
+                                     AND u.no_trade_run >= {k}), false)),
           count(*) FILTER (WHERE u.no_trade_run < 0),
           count(*) FILTER (WHERE (u.no_trade_run IS NULL) <> (p.price_kind IS NULL)),
           count(*) FILTER (WHERE (u.no_trade_run = 0 AND p.price_kind <> 'trade')
@@ -152,7 +175,10 @@ def _market_checks(ctx: EquityGateContext, k: int,
           count(*) FILTER (WHERE u.listing_age_days < 0),
           count(*) FILTER (WHERE l.list_date IS NOT NULL
                              AND u.listing_age_days <> date_diff('day', l.list_date, u.date)),
-          count(*) FILTER (WHERE u.status = 'suspended' AND NOT u.halt_state),
+          count(*) FILTER (WHERE u.status = 'suspended' AND NOT u.halt_state
+                             AND u.no_trade_reason = 'illiquid'),
+          count(*) FILTER (WHERE u.status = 'suspended' AND NOT u.halt_state
+                             AND u.no_trade_reason = 'corp_action_window'),
           count(*) FILTER (WHERE l.list_date IS NULL AND u.sec_type <> 'etf'),
           count(*) FILTER (WHERE l.list_date IS NULL),
           count(*) FILTER (WHERE u.no_trade_run IS NULL),
@@ -180,7 +206,8 @@ def _market_checks(ctx: EquityGateContext, k: int,
         SELECT quantile_cont(adv20_krw, [0.1, 0.25, 0.5, 0.75, 0.9])
         FROM {v} WHERE sec_type = 'common' AND adv20_krw IS NOT NULL""")[0]
     checks = {
-        # S03B 규칙: status='suspended' ⇔ halt_state ∨ (reference ∧ run ≥ k)
+        # S03C 규칙: status='suspended' ⇔ halt_state ∨ corp_action_window ∨ (illiquid ∧ run ≥ k).
+        # 이름은 S03B 부터 쓰던 것을 유지한다(부정 픽스처·서버 실측 표가 이 키로 적혀 있다).
         "n_status_halt_mismatch": int(str(n_status)),
         "n_no_trade_run_negative": int(str(n_run_neg)),
         "n_no_trade_run_null_mismatch": int(str(n_run_null)),
@@ -195,7 +222,10 @@ def _market_checks(ctx: EquityGateContext, k: int,
     metrics: dict[str, object] = {
         "no_trade_run_k": k,
         "adv_window_td": w,
+        # S03C 로 halt 밖 suspended 가 두 갈래로 갈린다 — 이름은 서버 실측 표(P22′ 74,824)와 잇기
+        # 위해 유지하되 뜻은 '이유를 모르는 무거래(illiquid) ∧ run ≥ k' 로 좁아졌다
         "n_suspended_by_run": int(str(n_by_run)),
+        "n_suspended_by_corp_action": int(str(n_by_ca)),
         "n_no_trade_run_null": int(str(n_run_null_rows)),
         "no_trade_run_max": int(str(run_max)),
         "no_trade_run_hist": hist,
@@ -263,6 +293,103 @@ def _rank_checks(ctx: EquityGateContext) -> tuple[dict[str, int], dict[str, obje
     return checks, metrics
 
 
+def _reason_checks(ctx: EquityGateContext, k: int, lb: int, la: int,
+                   aw: int) -> tuple[dict[str, int], dict[str, object]]:
+    """S03C `no_trade_reason` 술어 — 우선순위 전체를 입력에서 **다시 펼쳐** 재계산하고 대조한다.
+
+    빌드 SQL 은 사건 창(`ca_win`)을 격자에 LEFT JOIN 해 플래그로 들고 다니는데, 여기서는 산출 행을
+    캘린더·`security_span`·`price_daily`·`adj_factor` 에 다시 조인해 창과 `last_admin` 을 새로 짠다.
+    같은 뜻의 다른 질의라 CTE 순서·조인 방향이 어긋나면 갈린다(부정 픽스처: 우선순위를 바꾼 사본).
+    `k`·`lb`(lookback)·`la`(lookahead)·`aw`(admin 신호 창)는 전부 baseline `_const`.
+    """
+    v = _q(ctx.out_view)
+    recalc = f"""
+        WITH cal AS (
+          SELECT date, row_number() OVER (ORDER BY date) AS td_seq FROM trading_calendar),
+        ca AS (
+          -- 적용 세션 ± 창 — apply_date ∈ [D − lb, D + la] ⇔ D ∈ [apply − la, apply + lb]
+          SELECT DISTINCT a.ticker, c.td_seq
+          FROM adj_factor a
+          JOIN cal ap ON ap.date = a.apply_date
+          JOIN cal c  ON c.td_seq BETWEEN ap.td_seq - {la} AND ap.td_seq + {lb}),
+        g AS (
+          SELECT u.date, u.ticker, u.status, u.halt_state, u.liquidation_window, u.admin_state,
+                 u.signal_admin, u.no_trade_run, u.no_trade_reason,
+                 c.td_seq, s.span_seq, p.price_kind, (w.ticker IS NOT NULL) AS ca_near
+          FROM {v} u
+          JOIN cal c           ON c.date = u.date
+          JOIN security_span s ON s.ticker = u.ticker
+                              AND u.date BETWEEN s.first_date AND s.last_date
+          LEFT JOIN price_daily p ON p.ticker = u.ticker AND p.date = u.date
+          LEFT JOIN ca w          ON w.ticker = u.ticker AND w.td_seq = c.td_seq),
+        x AS (
+          SELECT g.*,
+                 max(td_seq) FILTER (WHERE signal_admin)
+                   OVER (PARTITION BY ticker, span_seq ORDER BY td_seq
+                         ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS last_admin
+          FROM g),
+        r AS (
+          SELECT x.*,
+                 CASE WHEN price_kind IS DISTINCT FROM 'reference' THEN 'none'
+                      WHEN halt_state                              THEN 'halt_disclosed'
+                      WHEN liquidation_window                      THEN 'liquidation'
+                      WHEN ca_near                                 THEN 'corp_action_window'
+                      WHEN coalesce(admin_state, false) AND last_admin IS NOT NULL
+                           AND td_seq - last_admin <= {aw}         THEN 'admin'
+                      ELSE 'illiquid' END AS want
+          FROM x)"""
+    (n_recalc, n_trade_not_none, n_ref_none, n_halt_bad, n_status_bad) = _row(ctx, recalc + f"""
+        SELECT count(*) FILTER (WHERE no_trade_reason IS DISTINCT FROM want),
+               count(*) FILTER (WHERE price_kind IS DISTINCT FROM 'reference'
+                                  AND no_trade_reason <> '{NO_TRADE_REASON_NONE}'),
+               count(*) FILTER (WHERE price_kind = 'reference'
+                                  AND no_trade_reason = '{NO_TRADE_REASON_NONE}'),
+               count(*) FILTER (WHERE price_kind = 'reference' AND halt_state
+                                  AND no_trade_reason <> 'halt_disclosed'),
+               count(*) FILTER (WHERE (status = 'suspended') <> coalesce(
+                                        halt_state OR want = 'corp_action_window'
+                                        OR (want = 'illiquid' AND no_trade_run >= {k}), false))
+        FROM r""")
+    hist = {f"{lo}-{hi}" if hi else f"{lo}+": _n(
+        ctx, f"SELECT count(*) FROM {v} WHERE no_trade_reason = 'illiquid' AND no_trade_run >= {lo}"
+             + (f" AND no_trade_run <= {hi}" if hi else "")) for lo, hi in _RUN_BUCKETS}
+    n_apply, n_apply_not_ok, n_apply_off_cal = _row(ctx, """
+        SELECT count(*), count(*) FILTER (WHERE NOT factor_ok),
+               count(*) FILTER (WHERE apply_date NOT IN (SELECT date FROM trading_calendar))
+        FROM adj_factor""")
+    checks = {
+        "n_no_trade_reason_outside_vocab": _outside_vocab(ctx, "no_trade_reason",
+                                                          NO_TRADE_REASON_VOCAB),
+        "n_no_trade_reason_null": _null(ctx, "no_trade_reason"),
+        "n_no_trade_reason_trade_not_none": int(str(n_trade_not_none)),
+        "n_no_trade_reason_no_trade_none": int(str(n_ref_none)),
+        "n_no_trade_reason_halt_mismatch": int(str(n_halt_bad)),
+        "n_no_trade_reason_recompute_mismatch": int(str(n_recalc)),
+        "n_status_reason_mismatch": int(str(n_status_bad)),
+        # 창이 캘린더 밖 적용일을 조용히 흘리면 corp_action_window 가 통째로 비므로 폐기형이다
+        "n_adj_apply_off_calendar": int(str(n_apply_off_cal)),
+    }
+    metrics: dict[str, object] = {
+        "corp_action_lookback_sessions": lb,
+        "corp_action_lookahead_sessions": la,
+        "admin_signal_window_sessions": aw,
+        "no_trade_reason_counts": _counts(ctx, "no_trade_reason"),
+        "no_trade_reason_run_hist_illiquid": hist,
+        # liquid 정책이 `no_trade_reason <> 'illiquid'` 로 빼는 행 — 순위 임계(liquid_top_pct) 이전
+        # 기준이라 실제 제외분의 상계다(임계는 universe_policy 의 상수라 여기서 모른다)
+        "n_liquid_excluded_by_illiquid": _n(
+            ctx, f"SELECT count(*) FROM {v} WHERE no_trade_reason = 'illiquid' "
+                 "AND adv20_rank_pct IS NOT NULL AND NOT admin_state "
+                 "AND NOT liquidation_window"),
+        "n_adj_apply_rows": int(str(n_apply)),
+        "n_adj_apply_rows_not_ok": int(str(n_apply_not_ok)),
+        "adj_apply_event_types": {str(r[0]): int(str(r[1])) for r in ctx.con.execute(
+            "SELECT event_type, count(*) FROM adj_factor GROUP BY 1 ORDER BY 1").fetchall()},
+        "no_trade_reason_vocab": list(NO_TRADE_REASON_VOCAB),
+    }
+    return checks, metrics
+
+
 def eg3_universe(ctx: EquityGateContext) -> GateResult:
     """EG3-P07·P09·P13 + S03 상태 규칙 정합 + S03B 시장 파생 재계산 술어 + S03B-2 순위 술어.
 
@@ -274,6 +401,9 @@ def eg3_universe(ctx: EquityGateContext) -> GateResult:
     """
     k = int(require_const(ctx, "no_trade_run_k"))
     w = int(require_const(ctx, "adv_window_td"))
+    lb = int(require_const(ctx, "corp_action_lookback_sessions"))
+    la = int(require_const(ctx, "corp_action_lookahead_sessions"))
+    aw = int(require_const(ctx, "admin_signal_window_sessions"))
     v = _q(ctx.out_view)
     checks = {
         "n_ticker_bad_width": _n(
@@ -308,6 +438,8 @@ def eg3_universe(ctx: EquityGateContext) -> GateResult:
     checks.update(market_checks)
     rank_checks, rank_metrics = _rank_checks(ctx)
     checks.update(rank_checks)
+    reason_checks, reason_metrics = _reason_checks(ctx, k, lb, la, aw)
+    checks.update(reason_checks)
     metrics: dict[str, object] = {
         "n_halt_open_at_coverage_end": _n(
             ctx, f"SELECT count(*) FROM security_span s JOIN {v} u "
@@ -334,9 +466,10 @@ def eg3_universe(ctx: EquityGateContext) -> GateResult:
         "admin_state_basis_vocab": list(ADMIN_STATE_BASIS_VOCAB),
         **market_metrics,
         **rank_metrics,
+        **reason_metrics,
     }
     return _result("EG3_universe", checks, metrics,
-                   "유니버스 상태·시장 파생·유동성 순위 불변식 성립")
+                   "유니버스 상태·시장 파생·유동성 순위·무거래 이유 불변식 성립")
 
 
 eg3_universe.gate_name = "EG3_universe"         # type: ignore[attr-defined]
@@ -345,8 +478,9 @@ UNIVERSE_DAILY = register(EquityTable(
     name="universe_daily",
     grain=("date", "ticker"),
     # 순서 = DESIGN §4-1: S03 컬럼 → S03B 시장 파생 4개(+ S03B-2 `adv20_rank_pct` 는 `adv20_krw`
-    # 바로 다음) → PIT 2개. `adv20_krw` 는 duckdb avg(DECIMAL) 의 반환 타입(DOUBLE)을 그대로 받는다
-    # (정밀도 리터럴 캐스팅 금지). `adv20_rank_pct` 는 cume_dist 반환 타입(DOUBLE).
+    # 바로 다음, S03C `no_trade_reason` 은 `adv20_rank_pct` 바로 다음) → PIT 2개. `adv20_krw` 는
+    # duckdb avg(DECIMAL) 의 반환 타입(DOUBLE)을 그대로 받는다(정밀도 리터럴 캐스팅 금지).
+    # `adv20_rank_pct` 는 cume_dist 반환 타입(DOUBLE).
     columns={"date": "DATE", "ticker": "VARCHAR", "status": "VARCHAR", "market": "VARCHAR",
              "sec_type": "VARCHAR", "halt_state": "BOOLEAN", "admin_state": "BOOLEAN",
              "admin_state_basis": "VARCHAR", "liquidation_window": "BOOLEAN",
@@ -354,10 +488,13 @@ UNIVERSE_DAILY = register(EquityTable(
              "signal_admin": "BOOLEAN", "signal_liquidation": "BOOLEAN",
              "signal_delist": "BOOLEAN", "admin_flag": "BOOLEAN",
              "mktcap_krw": "DECIMAL(18,0)", "adv20_krw": "DOUBLE", "adv20_rank_pct": "DOUBLE",
+             "no_trade_reason": "VARCHAR",
              "listing_age_days": "BIGINT", "no_trade_run": "BIGINT",
              "available_date": "DATE", "available_basis": "VARCHAR"},
-    inputs=("security_span", "trading_calendar", "security", "price_daily", "stg_listing_daily",
-            "stg_master_daily", "stg_disclosure"),
+    # S03C 로 equity `adj_factor` 가 입력에 들어온다 — 순환 없음(adj_factor 는 universe_daily 를
+    # 읽지 않는다). 빌드 순서 price_daily → corp_event → adj_factor → universe_daily.
+    inputs=("security_span", "trading_calendar", "security", "price_daily", "adj_factor",
+            "stg_listing_daily", "stg_master_daily", "stg_disclosure"),
     partition_class="date_axis",
     partition_key_expr="year(date)",
     # build.py 가 연도 루프를 아직 지원하지 않는다(NotImplementedError). 서버는 security_span 의
@@ -375,6 +512,8 @@ UNIVERSE_DAILY = register(EquityTable(
         "trading_calendar": ("date",),
         "security": ("ticker", "sec_type"),
         "price_daily": ("ticker", "date", "volume_shr", "value_krw", "mktcap_krw", "price_kind"),
+        # factor_ok·event_type 은 산출에 안 쓴다(창은 ok 무관) — EG3_universe 기록형 metric 용
+        "adj_factor": ("ticker", "apply_date", "factor_ok", "event_type"),
         "stg_listing_daily": ("ticker", "date", "market", "sect_tp", "sect_available",
                               "list_date"),
         "stg_master_daily": ("ticker", "date", "is_admin_issue", "is_trade_halt",
@@ -382,7 +521,9 @@ UNIVERSE_DAILY = register(EquityTable(
         "stg_disclosure": ("rcept_no", "rcept_dt", "ticker", "has_ticker", "report_nm")},
     available_basis=("default",),
     content_date_column="date",
-    consts=("admin_window_td", "no_trade_run_k", "adv_window_td"),
+    consts=("admin_window_td", "no_trade_run_k", "adv_window_td",
+            "corp_action_lookback_sessions", "corp_action_lookahead_sessions",
+            "admin_signal_window_sessions"),
     extra_gates=(eg3_universe,),
 ))
 

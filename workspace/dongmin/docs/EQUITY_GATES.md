@@ -799,8 +799,11 @@ WHERE g.${VALUE_COL} = 0
 | `corp_ticker.map_rate_min` | 1단계 통과 조건 | 1 | `corp_code NOT NULL` 비율 (분모 정의는 §5-A4) |
 | `universe_daily.no_trade_run_k` | `status='suspended'` 판정 · EG3_universe `n_status_halt_mismatch` | 1 | 무거래 연속 임계 — S03B 제안 5(P6 중앙값 4 + 1), 서버 `no_trade_run_hist` 로 승인 |
 | `universe_daily.adv_window_td` | `adv20_krw` 창 · EG3_universe `n_adv20_null_mismatch` | 1 | 컬럼 이름이 못박은 20 — SQL 리터럴 금지 규약의 통로일 뿐 조정 상수가 아니다 |
+| `universe_daily.corp_action_lookback_sessions` | `no_trade_reason='corp_action_window'` 창의 뒤쪽 폭(`ca_win`) · EG3_universe `n_no_trade_reason_recompute_mismatch` | 1 | S03C 제안 **5** — adj_factor 의 가격 대조 창 뒤쪽(−5, P23′)과 같은 값. 길게 잡으면 사건 뒤 비유동 구간이 통째로 corp_action_window 로 넘어간다 |
+| `universe_daily.corp_action_lookahead_sessions` | 같은 창의 앞쪽 폭 | 1 | S03C 제안 **45** — 감자·병합 정지는 적용일 **앞**에 놓인다. P23′ ok 적용일 오프셋 중앙값 13.5 · max 개별 40 · 성분 48. 서버 `no_trade_reason_counts` 로 48 승격 판단 |
+| `universe_daily.admin_signal_window_sessions` | `no_trade_reason='admin'` 판정(지정 신호 D 전 n 세션) | 1 | S03C 제안 **5** — 관리종목 *상태*(해제까지 지속)가 아니라 *지정 직후* 국면만 admin 으로 부른다. 상태 자체는 `universe_policy.investable` 의 `NOT admin_state` 가 뺀다 |
 | `universe_policy.liquid_top_pct` | `liquid` 임계 행 술어(`adv20_rank_pct >= 1 − v`)·`threshold_value` · EG3_policy `n_quantile_threshold_out_of_range` | 1 | 사용자 선택 상위 비율(S03B-2, 09-05 결정) 0.5 — 잰 값이 아니라 convention. (0, 1] 밖이면 폐기. 근거 P22′ 보통주 adv20 분위수 |
-| `universe_policy.version` | `version` 컬럼 | 1 | 정책 집합 판본 문자열 — s03-v1 → s03b-v2 → s03b-v3(liquid 등재) |
+| `universe_policy.version` | `version` 컬럼 | 1 | 정책 집합 판본 문자열 — s03-v1 → s03b-v2 → s03b-v3(liquid 등재) → **s03c-v4**(liquid 에 `no_trade_reason <> 'illiquid'` flag 1행, 13행·quantile rule_seq 6) |
 | `universe_daily.contract_probe_dates` | EG-C ② | 1 | 계약 검사 날짜 배열 |
 | `price_daily.krx_kis_ratio_match_min` | EG8-P01 | 2 | 일치율 |
 | `adj_factor.factor_product_tol` | EG3-P04 | 2 | 부동소수 허용오차 — **미등재**: 산출 정밀도 상수 `rules_s06.FACTOR_PRODUCT_TOL = 1e-12`(DOUBLE 역수 곱 반올림 1.1e-16 실측, §9 S06) |
@@ -1200,8 +1203,9 @@ SELECT (SELECT count(*) FROM opinion_broker_daily)
 | FX-1-014 | `universe_daily` | 정지+해제 동일일 1 (1,214 중) | `halt_state`, `signal_halt`, `signal_halt_release` | doc:P12 | 당일 양쪽 신호 true, `halt_state` 규칙대로 |
 | FX-1-015 | `universe_daily` | KOSDAQ 관리종목 소속부 1 | `admin_state`, `admin_state_basis` | stage:`stg_listing_daily.sect_tp` | true / `measured` |
 | FX-1-016 | `universe_daily` | 정리매매 개시 1 (349 중) | `liquidation_window` | doc:P6 | 개시일~`delist_date` true |
-| FX-1-017 | `universe_policy` | (`all`, 1) + S03B (`common-stock`, 1·2)·(`investable`, 3·4) + S03B-2 (`liquid`, 1·4·5) | `predicate`, `threshold_kind`, `threshold_value`, `universe_id`, `measured_at` | hand · doc:FIELD_MAP §1 | 선언표 `all` 1행(`TRUE`·`flag`·`krx.all`) + `krx.common-stock`(`sec_type = 'common'`·`status = 'listed'`) + investable `NOT admin_state`·flag + `liquid`(k~p): rule 5 `adv20_rank_pct >= 0.5`·`quantile`·`threshold_value` 0.5(= baseline `liquid_top_pct`)·`measured_at` NULL, rule 1 `krx.liquid`, rule 4 = investable 4행 그대로(§9 S03B-2) |
-| S03B-2 `adv20_rank_pct` | `universe_daily` | (`005930`·`003540`, 2018-05-03) · (`000660`·`005930`·`036220`, 2026-08-20) · (`036220`, 2010-01-29) · NULL 5종(우선주·ETF·외국주·정지·창 미달) | `adv20_rank_pct` | hand(파이썬 독립 cume_dist) | 2018-05-03 모집단 5 → 1.0·0.2 / 2026-08-20 모집단 8 → 1.0·0.875·0.125 / 첫 모집단 날 0.25 / 005935·069500·900050·000030(2019-01-15 run 5)·005930(2010-01-28) NULL (§9 S03B-2) |
+| FX-1-017 | `universe_policy` | (`all`, 1) + S03B (`common-stock`, 1·2)·(`investable`, 3·4) + S03B-2 (`liquid`, 1·4·6) + S03C (`liquid`, 5)·(`investable`, 5 부재) | `predicate`, `threshold_kind`, `threshold_value`, `universe_id`, `measured_at` | hand · doc:FIELD_MAP §1 | 선언표 `all` 1행(`TRUE`·`flag`·`krx.all`) + `krx.common-stock`(`sec_type = 'common'`·`status = 'listed'`) + investable `NOT admin_state`·flag + `liquid`(k~s): rule 5 `no_trade_reason <> 'illiquid'`·`flag`(S03C), rule 6 `adv20_rank_pct >= 0.5`·`quantile`·`threshold_value` 0.5(= baseline `liquid_top_pct`)·`measured_at` NULL, rule 1 `krx.liquid`, rule 4 = investable 4행 그대로, investable rule 5 는 부재(§9 S03B-2·S03C) |
+| S03B-2 `adv20_rank_pct` | `universe_daily` | (`003540`, 2018-05-03) · (`000660`, 2026-08-20) · NULL 6종(우선주·ETF·외국주·정지·창 미달·S03C 기업행위 창) | `adv20_rank_pct` | hand(파이썬 독립 cume_dist) | 2026-08-20 모집단 8 → 000660 = 1.0 / 005935·069500·900050·000030(2019-01-15 run 5)·005930(2010-01-28 창 미달, 2018-05-03 corp_action_window) NULL (§9 S03B-2·S03C) |
+| S03C `no_trade_reason` | `universe_daily` | (`005930`, 2018-04-27·05-03) · (`101970`, 2014-06-11·06-12) · (`900050`, 2017-03-30) · (`000030`, 2019-01-15) | `no_trade_reason`, `status` | hand | 거래 행 = `none`(halt 지정일이어도) · 분할 apply 앞 무거래 = `corp_action_window`·suspended · 정지 공시 뒤 무거래 = `halt_disclosed` · 신호 없는 무거래 = `illiquid`(run 1 listed / run 5 = k suspended). 모집단 비의존 불변식만(§9 S03C) |
 
 ### 2단계
 
@@ -1770,6 +1774,24 @@ workspace/dongmin/src/equity/
 | §1-12 등록부 | — | `universe_policy.liquid_top_pct`(convention, 사용자 선택) · `universe_policy.version` s03b-v3 추가 | seed `_measured` |
 | FX 픽스처 | "2018-05-03 보통주 8종목 중 005930 = 1.0" | 절단본 2018-05-03 모집단은 **5**(900050 은 `foreign`, 036220·101970 은 구간 밖, 247540 은 2019-03 상장) — 005930 = 1.0 은 맞다. 8종목 날은 backfill_end 2026-08-20(000660 = 1.0, 005930 = 0.875). 11케이스 추가(총 63), 정책 6케이스 추가(k~p, 총 16) | `fixtures/universe_daily.json`·`universe_policy.json` |
 | 서버 규모 | — | universe_daily 10.9M 행 위 날짜 창 1개 추가(창 입력 = 22컬럼 wide 행 전체 재정렬). 추정 RSS +1.0~1.5GB(현 4.5GB → 5.5~6GB, memory_limit 6GB 경계 — 스필은 temp_directory) · 시간 +20~40%. 6GB 에서 스필이 길면 `--memory-limit 8GB` 로 재시도. baseline 추가분: `universe_policy.liquid_top_pct` 0.5 · `version` s03b-v3 | P22′ 대비 추정, P26 |
+
+
+**S03C `universe_daily.no_trade_reason` · `status` 규칙 · `universe_policy` liquid 구현 정정 (2026-09-05, `rules_s03.py`·`sql/universe_daily.sql`·`sql/universe_policy.sql` — 사용자 결정 "무거래 연속 정지가 어떤 이유인지 데이터를 받고 판단하는 로직")**
+
+| 항목 | 초안 | 정정 | 근거 |
+|---|---|---|---|
+| 컬럼 위치 | "`adv20_rank_pct` 다음, `available_date` 앞"(두 문구가 범위를 다르게 읽힌다) | **`adv20_rank_pct` 바로 다음**(= `listing_age_days` 앞) — S03B-2 의 "`adv20_krw` 다음" 과 같은 규약으로 읽어 두 문구를 동시에 만족시킨다. 컬럼 23개 | `test_컬럼_선언순서가_산출과_같다` |
+| ③ 창 구현 | "같은 티커 `adj_factor` 행의 `apply_date` 가 [D − lb, D + la] 안" | **사건 쪽에서 펼친다**(`ca_win` CTE): `apply_date ∈ [D − lb, D + la] ⇔ D ∈ [apply − la, apply + lb]` 를 캘린더 위에서 전개해 (ticker, td_seq) 동등 조인으로 붙인다. ① 10.9M 행 위 범위 조인을 피하고 ② 적용일이 그 티커의 **구간 밖**(폐지 기간)이어도 구간 안 D 가 창에 들면 잡힌다(격자에 플래그를 심는 방식은 이 경우를 놓친다) | 절단본 101970 감자 5건이 전부 폐지 뒤 적용일 |
+| ④ admin 창 경계 | "`signal_admin` 이 D 전 n 세션 안"(부등호 미지정) | **`td_seq − last_admin ≤ n`** = 창 [지정일, 지정일 + n세션], 지정일 당일 포함. `admin_window_td`(365)가 쓰는 `<` 와 다르지만, S03C 의 두 창(③ 의 대괄호 표기·④)을 같은 눈금으로 맞췄다. 값이 5 라 경계 1세션 차이의 실질 영향은 admin ↔ illiquid 1일 | 설계 §4-1 대괄호 표기 |
+| `price_kind` NULL 행 | "무거래 행만 판정, 거래 행은 none" | 가격 행이 없는 날(`price_kind` NULL, `no_trade_run` NULL)도 **`none`** — 판정 대상은 `price_kind='reference'` 뿐이라는 술어를 `IS DISTINCT FROM 'reference'` 로 닫는다. 어휘에 NULL 을 들이지 않는다 | EG3_universe `n_no_trade_reason_null` = 0 |
+| `n_suspended_by_run` 뜻 | halt 밖 suspended 전부 | S03C 로 두 갈래가 되므로 **`illiquid ∧ run ≥ k` 로 좁히고** `n_suspended_by_corp_action` 을 새로 기록한다. 이름은 서버 P22′(74,824)와 잇기 위해 유지 | 절단본 201 + 6 |
+| EG3_universe 추가 술어 | "어휘·거래 행 none·halt 행 halt_disclosed·우선순위 재계산" | 폐기형 6 + 1: `n_no_trade_reason_outside_vocab` · `n_no_trade_reason_null` · `n_no_trade_reason_trade_not_none` · `n_no_trade_reason_no_trade_none`(무거래인데 none) · `n_no_trade_reason_halt_mismatch` · `n_no_trade_reason_recompute_mismatch`(입력 `adj_factor`·`trading_calendar`·`security_span`·`price_daily` 에서 창과 `last_admin` 을 새로 짜 우선순위 전체를 재계산) · `n_status_reason_mismatch`(재계산 이유로 status 규칙 재판정) + `n_adj_apply_off_calendar`(적용일이 캘린더 밖이면 창이 조용히 비므로 폐기형). 기록형 `no_trade_reason_counts` · `no_trade_reason_run_hist_illiquid` · `n_liquid_excluded_by_illiquid` · `n_adj_apply_rows`·`_not_ok` · `adj_apply_event_types` · 창 상수 3 | 부정 픽스처 2(①↔② 스왑 → 4행 · ③ 제거 → 6행) |
+| `status` 규칙 | S03B `halt ∨ (reference ∧ run ≥ k)` | **`halt ∨ corp_action_window ∨ (illiquid ∧ run ≥ k)`**. 정리매매·관리종목 무거래는 더 이상 status 로 빼지 않는다 — 같은 사실을 status 와 `universe_policy.investable`(`NOT liquidation_window`·`NOT admin_state`) 양쪽에서 두 번 빼면 두 축의 뜻이 겹친다. 합성 stage 로 확인: 정리매매 무거래 9세션(run 9 ≥ k)이 `listed` | `test_정리매매_무거래는_run이_길어도_정지가_아니다` |
+| `universe_policy` liquid | investable 4행 + quantile 1행(rule_seq 5) | + **flag 행 `no_trade_reason <> 'illiquid'`(rule_seq 5)**, quantile 은 6 으로 밀린다(`len(predicates) + 1` 규약 그대로). 13행. `investable` 은 건드리지 않는다 — 유동성 조건이지 투자가능성 조건이 아니다 | FX-1-017q·r·s |
+| FX 픽스처 | S03B-2 의 "005930 2018-05-03 `adv20_rank_pct` = 1.0" | 그 셀은 이제 **NULL** — 05-04 분할 apply 앞 무거래라 corp_action_window·suspended → 모집단 밖. 픽스처를 모집단 비의존 NULL 불변식으로 바꾸고(`adv20_rank_null_corp_action_005930_20180503`) `no_trade_reason` 8케이스를 더했다(총 67). 정책 6케이스 추가(총 19) | P26′ 모집단 의존 픽스처 실패 교훈 |
+| 입력 추가 | — | equity **`adj_factor`**(`ticker`·`apply_date`·`factor_ok`·`event_type`) — 순환 없음(adj_factor 는 universe_daily 를 읽지 않는다). 테스트 상류 체인이 8테이블로 늘어난다(trading_calendar → security → security_span → corp → corp_ticker → price_daily → corp_event → adj_factor) | `rules_s03.UNIVERSE_DAILY.inputs` |
+| §1-12 등록부 | — | `universe_daily.corp_action_lookback_sessions` 5 · `corp_action_lookahead_sessions` 45 · `admin_signal_window_sessions` 5(전부 convention·사람 승인 대기) · `universe_policy.version` s03c-v4 | seed `_measured` |
+| 알려진 한계 | — | 거래소 매매거래정지 **현황 목록**은 미수집이라 공시 텍스트로 안 잡히는 정지는 `illiquid` 로 남는다. 절단본에서 900050(HK 상장사) 198행이 그 예 — 안전 쪽으로 실패한다(run ≥ k 면 여전히 suspended). stage 수집 계획 항목 | DESIGN §4-1 |
 
 
 **S06 `adj_factor` · 뷰 매크로 · 카탈로그 게이트 구현 정정 (2026-09-05, `rules_s06.py`·`sql/adj_factor.sql`·`views.py`·`catalog.py`)**

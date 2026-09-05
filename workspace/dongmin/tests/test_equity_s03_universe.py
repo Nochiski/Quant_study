@@ -1,18 +1,23 @@
-"""S03·S03B `universe_daily` v2 — 절단본 위 실빌드 왕복 · 합성 stage 위 상태 규칙 · 부정 픽스처
-(DESIGN §4-1 · GATES §3 ⑦ · §1 EG3-P09 · §4 FX-1-006·011·012·013~016 · §5-B8).
+"""S03·S03B·S03B-2·S03C `universe_daily` v4 — 절단본 위 실빌드 왕복 · 합성 stage 위 상태 규칙 ·
+부정 픽스처 (DESIGN §4-1 · GATES §3 ⑦ · §1 EG3-P09 · §4 FX-1-006·011·012·013~016 · §5-B8).
 
 절단본 실측(손계산, 빌드 SQL 과 독립): 격자 41,066 = Σ security_span.n_days · 정지 126 거래일
 (8 구간) · KOSDAQ 관리·투자주의환기 74 거래일 · 정리매매 18 거래일 · 신호 22/12/0/3/21.
 S03B: 무거래 run {1×7, 3×3, 10, 12, 22, 49, 55, 66, 116}, k=5 에서 run 으로만 suspended 201행
 (000030 18 · 101970 1 · 900050 180 · 900060 2) → suspended 327 · adv20 NULL 323 = 17구간 × 19 ·
 가격 결측 0.
-S03B-2: `adv20_rank_pct` 모집단(보통주 ∧ listed ∧ adv20 있음) 21,495행 / NULL 19,571 · 모집단이
-있는 날 4,075(캘린더 첫 19일은 비어 있다) · 날짜별 모집단 크기 4×692 · 5×2,064 · 6×942 · 7×261 ·
+S03C: 무거래 346행이 이유별로 갈린다 — halt_disclosed 117(036220 56 · 101970 51 · 900060 10) ·
+corp_action_window 6(005930·005935 2018-04-30~05-03, 50:1 분할 apply 05-04) · illiquid 223
+(000030 22 · 101970 1 · 900050 198 · 900060 2) · liquidation·admin 0(절단본엔 겹치는 무거래가
+없다 — 합성 stage 가 본다). status suspended 333 = halt 126 + illiquid∧run≥k 201 +
+corp_action 6. `adv20_rank_pct` 모집단은 005930 이 3세션 빠져 21,492 / NULL 19,574 · 모집단이
+있는 날 4,075(캘린더 첫 19일은 비어 있다) · 날짜별 모집단 크기 4×695 · 5×2,061 · 6×942 · 7×261 ·
 8×116 · 순위 최솟값 1/8 · 최댓값 1 · rank ≥ 0.5 행 13,660(파이썬 독립 계산).
 절단본에 없는 축(KOSPI 관리종목 창 · 해제 공시로 닫히는 정지 · 비거래일 접수 · master 측정값
-우선 · 열린 정지 · 가격 행 결측)은 `make_stage_tree` 합성 stage 위에서 검사한다. 이 슬라이스는
-equity 산출(`security_span`·`trading_calendar`·`security`·`price_daily`)을 입력으로 읽으므로
-상류 4테이블을 같은 equity_root 에 먼저 빌드한다.
+우선 · 열린 정지 · 가격 행 결측 · S03C 의 liquidation·admin 이유와 창 밖 판정)은 `make_stage_tree`
+합성 stage 위에서 검사한다. 이 슬라이스는 equity 산출(`security_span`·`trading_calendar`·
+`security`·`price_daily`·`adj_factor`)을 입력으로 읽으므로 상류를 같은 equity_root 에 먼저
+빌드한다(adj_factor 체인 때문에 `corp`·`corp_ticker`·`corp_event` 도 함께).
 """
 from __future__ import annotations
 
@@ -23,17 +28,31 @@ from pathlib import Path
 
 import duckdb
 import pytest
-from equity import build, rules_s01, rules_s02, rules_s03, rules_s04
+from equity import build, rules_s01, rules_s02, rules_s03, rules_s04, rules_s05, rules_s06
 from equity.baseline import Baseline, load
 from equity.gates import GateStatus
 from equity.model import EquityTable
 
 STAGE_SLICE = Path(__file__).parent / "fixtures" / "stage_slice"
-SEED = Baseline({**load(rules_s01.BASELINE_SEED).data,
-                 **load(Path(rules_s02.__file__).parent / "baseline_seed_s02.json").data,
-                 **load(rules_s03.BASELINE_SEED).data})
+
+
+def _seed() -> Baseline:
+    """S01·S02·S03·S05·S06 seed 를 테이블 단위로 병합 — S03C 로 adj_factor 체인이 상류에 들어와
+    S05·S06 상수까지 필요해졌다(test_equity_s21_workbench.seed 와 같은 규약)."""
+    merged: dict[str, dict[str, object]] = {}
+    for p in (rules_s01.BASELINE_SEED, Path(rules_s02.__file__).parent / "baseline_seed_s02.json",
+              rules_s03.BASELINE_SEED, rules_s05.BASELINE_SEED, rules_s06.BASELINE_SEED):
+        for k, v in load(p).data.items():
+            if not k.startswith("_") and k != "measured_at" and isinstance(v, dict):
+                merged.setdefault(k, {}).update(v)
+    return Baseline(dict(merged))
+
+
+SEED = _seed()
+# S03C: universe_daily 가 equity adj_factor 를 읽으므로 계수 체인을 통째로 앞세운다
 UPSTREAM = (rules_s02.TRADING_CALENDAR, rules_s01.SECURITY, rules_s02.SECURITY_SPAN,
-            rules_s04.PRICE_DAILY)
+            rules_s01.CORP, rules_s01.CORP_TICKER, rules_s04.PRICE_DAILY, rules_s05.CORP_EVENT,
+            rules_s06.ADJ_FACTOR)
 UNIVERSE = rules_s03.UNIVERSE_DAILY
 BACKFILL_END = date(2026, 8, 20)
 GATE_ORDER = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG3_universe", "EG4", "EG5a"]
@@ -83,6 +102,26 @@ NO_TRADE_RUN_K = 5                   # baseline_seed_s03 제안값 (사람 승�
 # 900050 10일 run 6 + 66일 run 62 + 116일 run 112 · 900060 09-26·27 2)
 BY_RUN_ROWS = {"000030": 18, "101970": 1, "900050": 180, "900060": 2}
 N_BY_RUN = 201
+# ── S03C no_trade_reason — 무거래 346행(ZERO_RUNS)을 HALT_RUNS·adj_factor 적용일과 겹쳐 손계산 ──
+# halt_disclosed = 무거래 ∩ halt_state: 036220 01-29(1) + 02-02~04-25(55) = 56 · 101970
+# 06-12~08-19(48) + 2015-03-03~03-05(3) = 51 · 900060 09-09~09-25(10). 101970 08-20 은 해제일이라
+# halt false → illiquid, 900060 09-26·27 은 해제 뒤라 illiquid.
+REASON_HALT_ROWS = {"036220": 56, "101970": 51, "900060": 10}
+N_HALT_DISCLOSED = 117
+# corp_action_window = adj_factor 005930/005935:split:2018-05-04 의 apply_date 앞 무거래 3세션씩
+CORP_ACTION_ROWS = {"005930": 3, "005935": 3}
+N_CORP_ACTION = 6
+# illiquid = 나머지 무거래. 000030 22 · 101970 1(08-20) · 900050 198(전 run) · 900060 2
+ILLIQUID_ROWS = {"000030": 22, "101970": 1, "900050": 198, "900060": 2}
+N_ILLIQUID = 223
+N_SUSPENDED = N_HALT + N_BY_RUN + N_CORP_ACTION        # 126 + 201 + 6
+# 절단본에는 halt 가 앞서지 않는 정리매매 무거래도, 지정 신호 5세션 안 무거래도 없다
+N_LIQUIDATION_REASON = 0
+N_ADMIN_REASON = 0
+# 우선순위 ①↔② 를 맞바꾼 사본이 갈리는 행 = 무거래 ∩ halt ∩ 정리매매
+# (036220 2016-04-22·04-25 · 101970 2015-03-04·03-05)
+N_HALT_AND_LIQUIDATION = 4
+CORP_ACTION_LOOKBACK, CORP_ACTION_LOOKAHEAD, ADMIN_SIGNAL_WINDOW = 5, 45, 5
 ADMIN_RUNS = {
     ("036220", "measured", date(2016, 1, 29), date(2016, 5, 4), 64),   # 관리 34 + 투자주의환기 30
     ("101970", "measured", date(2015, 3, 3), date(2015, 3, 16), 10),
@@ -96,13 +135,14 @@ SIGNAL_COUNTS = {"signal_halt": 22, "signal_halt_release": 12, "signal_admin": 0
                  "signal_liquidation": 3, "signal_delist": 21}
 # S03B-2 adv20_rank_pct — 파이썬 독립 계산(모집단 = 보통주 ∧ listed ∧ adv20 있음, cume_dist)
 _POP = "sec_type = 'common' AND status = 'listed' AND adv20_krw IS NOT NULL"
-N_RANK_POP = 21495
+N_RANK_POP = 21492                   # S03C 로 005930 이 2018-04-30·05-02·05-03 3세션 빠졌다
 N_RANK_NULL = N_GRID - N_RANK_POP
 N_DATES_WITH_POP = 4075              # 캘린더 4,094 − 첫 19일(전 종목 adv20 NULL)
-POP_SIZE_HIST = {4: 692, 5: 2064, 6: 942, 7: 261, 8: 116}
-N_RANK_TOP_HALF = 13660              # rank ≥ 0.5 (= liquid 임계 행, 절단본은 전부 investable)
-# 2018-05-03 모집단 5 (005930 은 분할 정지 3일째지만 공시 없음·run 3 < k 라 listed)
-RANK_20180503 = {"003540": 0.2, "161890": 0.4, "000030": 0.6, "000660": 0.8, "005930": 1.0}
+POP_SIZE_HIST = {4: 695, 5: 2061, 6: 942, 7: 261, 8: 116}
+N_RANK_TOP_HALF = 13660              # rank ≥ 0.5 — 005930 3행이 빠진 만큼 그날 모집단이 4로 줄어
+                                     # 나머지 행의 순위가 올라 총계는 그대로다(손계산 −3 +3)
+# 2018-05-03 모집단 4 — 005930 은 분할 창 무거래(corp_action_window)라 suspended → 모집단 밖
+RANK_20180503 = {"003540": 0.25, "161890": 0.5, "000030": 0.75, "000660": 1.0}
 # backfill_end 모집단 8 — 000660 이 최댓값, 005930 은 7/8
 RANK_20260820 = {"036220": 0.125, "101970": 0.25, "0001A0": 0.375, "003540": 0.5, "247540": 0.625,
                  "161890": 0.75, "005930": 0.875, "000660": 1.0}
@@ -175,11 +215,12 @@ def test_절단본_빌드가_전_게이트를_통과한다(built: build.BuildRes
     assert {g.name: g.status.value for g in built.gates if g.status is not GateStatus.PASS} == {
         "EG5a": "skip"}
     assert built.n_rows == N_GRID and built.n_reject == 0
-    # equity 입력 4개가 stage 입력과 같은 규약으로 고정된다 (inputs.source_root)
+    # equity 입력 5개가 stage 입력과 같은 규약으로 고정된다 (inputs.source_root)
     assert built.inputs["security_span"] == "b_security_span"
     assert built.inputs["trading_calendar"] == "b_trading_calendar"
     assert built.inputs["security"] == "b_security"
     assert built.inputs["price_daily"] == "b_price_daily"
+    assert built.inputs["adj_factor"] == "b_adj_factor"          # S03C
     assert set(built.inputs) == set(UNIVERSE.inputs)
     assert not {"stg_price_daily", "stg_etf_price_daily"} & set(built.inputs)
 
@@ -191,13 +232,13 @@ def test_EG1_우변은_span_n_days_합이다(built: build.BuildResult) -> None:
 
 
 def test_컬럼_선언순서가_산출과_같다(built: build.BuildResult) -> None:
-    """S03 컬럼 → S03B 4개(+ S03B-2 `adv20_rank_pct` 는 `adv20_krw` 다음) → available 2개
-    (DESIGN §4-1 순서)."""
+    """S03 컬럼 → S03B 4개(+ S03B-2 `adv20_rank_pct` 는 `adv20_krw` 다음, S03C `no_trade_reason`
+    은 `adv20_rank_pct` 다음) → available 2개 (DESIGN §4-1 순서)."""
     assert built.out_dir is not None
     cols = [str(r[0]) for r in _query(built.out_dir, "DESCRIBE u")]
     assert cols == list(UNIVERSE.columns)
-    assert cols[-7:] == ["mktcap_krw", "adv20_krw", "adv20_rank_pct", "listing_age_days",
-                         "no_trade_run", "available_date", "available_basis"]
+    assert cols[-8:] == ["mktcap_krw", "adv20_krw", "adv20_rank_pct", "no_trade_reason",
+                         "listing_age_days", "no_trade_run", "available_date", "available_basis"]
 
 
 def test_격자는_구간과_일치하고_backfill_end_뒤_행이_없다(built: build.BuildResult) -> None:
@@ -230,16 +271,18 @@ def test_지정_해제_동일일은_그날_정지가_아니다(built: build.Buil
     assert ("900050", date(2010, 11, 25), False) in rows
 
 
-def test_status는_halt_또는_무거래_run으로_suspended(built: build.BuildResult) -> None:
-    """S03B 규칙: suspended ⇔ halt_state ∨ (reference ∧ run ≥ k). run 으로만 잡히는 201행."""
+def test_status는_halt_기업행위창_또는_이유없는_무거래로_정지다(built: build.BuildResult) -> None:
+    """S03C 규칙: suspended ⇔ halt_state ∨ corp_action_window ∨ (illiquid ∧ run ≥ k).
+    k 임계는 이유를 모르는 무거래에만 걸린다 — run 으로만 잡히는 201행 + 기업행위 창 6행."""
     assert built.out_dir is not None
     m = _gate(built, "EG3_universe").metrics
     assert m["no_trade_run_k"] == NO_TRADE_RUN_K
-    assert m["status_counts"] == {"listed": N_GRID - N_HALT - N_BY_RUN,
-                                  "suspended": N_HALT + N_BY_RUN}
+    assert m["status_counts"] == {"listed": N_GRID - N_SUSPENDED, "suspended": N_SUSPENDED}
     assert m["n_suspended_by_run"] == N_BY_RUN and m["n_status_halt_mismatch"] == 0
-    got = dict(_query(built.out_dir, "SELECT ticker, count(*) FROM u "
-                                     "WHERE status = 'suspended' AND NOT halt_state GROUP BY 1"))
+    assert m["n_suspended_by_corp_action"] == N_CORP_ACTION
+    got = dict(_query(built.out_dir, "SELECT ticker, count(*) FROM u WHERE status = 'suspended' "
+                                     "AND NOT halt_state AND no_trade_reason = 'illiquid' "
+                                     "GROUP BY 1"))
     assert got == BY_RUN_ROWS
     # halt_state 인 행은 run 과 무관하게 suspended (S03 회귀)
     assert _query(built.out_dir, "SELECT count(*) FROM u WHERE halt_state "
@@ -367,6 +410,73 @@ def test_adv20_rank_pct는_같은날_보통주_listed_모집단의_cume_dist(bui
     assert all(m[k] == 0 for k in ("n_adv20_rank_out_of_range", "n_adv20_rank_null_mismatch",
                                    "n_adv20_rank_max_not_one", "n_adv20_rank_pop_mismatch",
                                    "n_adv20_rank_order_violation"))
+
+
+def test_no_trade_reason은_무거래_행만_우선순위대로_분류한다(built: build.BuildResult) -> None:
+    """S03C. 거래 행·가격 없는 날은 none, 무거래 행은 ① halt ② 정리매매 ③ 기업행위 창 ④ 관리종목
+    지정 직후 ⑤ 나머지. 절단본은 ①③⑤ 만 나오고 ②④ 는 합성 stage 가 본다."""
+    assert built.out_dir is not None
+    got = dict(_query(built.out_dir, "SELECT no_trade_reason, count(*) FROM u GROUP BY 1"))
+    assert got == {"none": N_TRADE_DAYS, "halt_disclosed": N_HALT_DISCLOSED,
+                   "corp_action_window": N_CORP_ACTION, "illiquid": N_ILLIQUID}
+    assert sum(got.values()) == N_GRID
+    for reason, rows in (("halt_disclosed", REASON_HALT_ROWS),
+                         ("corp_action_window", CORP_ACTION_ROWS), ("illiquid", ILLIQUID_ROWS)):
+        assert dict(_query(built.out_dir, "SELECT ticker, count(*) FROM u WHERE no_trade_reason = "
+                                          f"'{reason}' GROUP BY 1")) == rows
+    # 거래 행은 halt 여도 none (101970 지정일 06-11 은 거래량 185,252), 무거래 행은 none 이 아니다
+    assert _query(built.out_dir, "SELECT date, no_trade_run, no_trade_reason, status FROM u "
+                                 "WHERE ticker = '101970' AND date BETWEEN '2014-06-11' "
+                                 "AND '2014-06-13' ORDER BY 1") == [
+        (date(2014, 6, 11), 0, "none", "suspended"), (date(2014, 6, 12), 1, "halt_disclosed",
+                                                      "suspended"),
+        (date(2014, 6, 13), 2, "halt_disclosed", "suspended")]
+    # ③ 기업행위 창 — 분할 apply_date(2018-05-04) 앞 3세션. run 3 < k 여도 suspended
+    assert _query(built.out_dir, "SELECT date, no_trade_run, no_trade_reason, status FROM u "
+                                 "WHERE ticker = '005930' AND date BETWEEN '2018-04-27' "
+                                 "AND '2018-05-04' ORDER BY 1") == [
+        (date(2018, 4, 27), 0, "none", "listed"),
+        (date(2018, 4, 30), 1, "corp_action_window", "suspended"),
+        (date(2018, 5, 2), 2, "corp_action_window", "suspended"),
+        (date(2018, 5, 3), 3, "corp_action_window", "suspended"),
+        (date(2018, 5, 4), 0, "none", "listed")]
+    # ⑤ illiquid — 신호도 계수도 없는 무거래. run < k 는 listed, run ≥ k 부터 suspended
+    assert _query(built.out_dir, "SELECT date, no_trade_run, no_trade_reason, status FROM u "
+                                 "WHERE ticker = '900050' AND date BETWEEN '2017-04-04' "
+                                 "AND '2017-04-05' ORDER BY 1") == [
+        (date(2017, 4, 4), 4, "illiquid", "listed"), (date(2017, 4, 5), 5, "illiquid",
+                                                      "suspended")]
+    m = _gate(built, "EG3_universe").metrics
+    assert m["no_trade_reason_counts"] == got
+    assert m["no_trade_reason_vocab"] == list(rules_s03.NO_TRADE_REASON_VOCAB)
+    assert (m["corp_action_lookback_sessions"], m["corp_action_lookahead_sessions"],
+            m["admin_signal_window_sessions"]) == (CORP_ACTION_LOOKBACK, CORP_ACTION_LOOKAHEAD,
+                                                   ADMIN_SIGNAL_WINDOW)
+    # illiquid 의 run 분포 — run ≥ k 부분(20+33+148)이 곧 n_suspended_by_run
+    assert m["no_trade_reason_run_hist_illiquid"] == {"1-1": 10, "2-4": 12, "5-9": 20,
+                                                      "10-19": 33, "20+": 148}
+    assert sum(m["no_trade_reason_run_hist_illiquid"].values()) == N_ILLIQUID
+    assert m["no_trade_reason_run_hist_illiquid"]["5-9"] + m["no_trade_reason_run_hist_illiquid"][
+        "10-19"] + m["no_trade_reason_run_hist_illiquid"]["20+"] == N_BY_RUN
+    assert m["n_adj_apply_rows"] == 8 and m["n_adj_apply_rows_not_ok"] == 5
+    assert m["adj_apply_event_types"] == {"bonus": 1, "capred": 5, "split": 2}
+    assert m["n_liquid_excluded_by_illiquid"] == N_RANK_TOP_HALF - 13656
+    assert all(m[k] == 0 for k in (
+        "n_no_trade_reason_outside_vocab", "n_no_trade_reason_null",
+        "n_no_trade_reason_trade_not_none", "n_no_trade_reason_no_trade_none",
+        "n_no_trade_reason_halt_mismatch", "n_no_trade_reason_recompute_mismatch",
+        "n_status_reason_mismatch", "n_adj_apply_off_calendar"))
+
+
+def test_기업행위_창은_ok가_아닌_계수_행도_센다(built: build.BuildResult) -> None:
+    """설계 ③ 「ok 여부 무관」 — 절단본 adj_factor 8행 중 5행이 factor_ok=false(101970 감자)다.
+    101970 의 적용일(2015-11-26~2018-10-15)은 구간(2015-03-16 폐지) 밖이라 격자에 닿지 않아
+    corp_action_window 는 005930·005935 6행뿐이지만, 창 계산이 ok 행만 볼 경우 서버에서 감자 정지가
+    통째로 illiquid 로 떨어진다 — 게이트 재계산도 같은 규칙을 쓴다."""
+    assert built.out_dir is not None
+    assert _query(built.out_dir, "SELECT count(*) FROM u WHERE ticker = '101970' "
+                                 "AND no_trade_reason = 'corp_action_window'") == [(0,)]
+    assert _gate(built, "EG3_universe").metrics["n_adj_apply_rows_not_ok"] == 5
 
 
 def test_listing_age는_같은날_listing_상장일_기준_역일(built: build.BuildResult) -> None:
@@ -540,12 +650,17 @@ def _synthetic(tmp_path: Path, make_stage_tree, *, d_end_reason: str) -> build.B
         *(_price("Q00020", d, 0 if d in TD[5:9] else 100) for d in TD[:9]),
         *(_price("D00040", d, 0 if d in TD[8:] else 100) for d in TD),
         *(_price("E00030", d, 100) for d in TD)])
+    # S03C 입력 — 이 시나리오엔 기업행위가 없다(격자에 없는 티커 1행으로 표만 채운다)
+    _equity_table(tmp_path, root, make_stage_tree, "adj_factor", [
+        {"ticker": "Z99999", "apply_date": TD[0], "factor_ok": True, "event_type": "split"}])
     fx = tmp_path / "fx.json"
     fx.write_text(json.dumps([{"case": "k_td1", "key": {"date": "2020-01-06", "ticker": "K00010"},
                                "column": "status", "expect": "suspended", "source": "hand"}]),
                   encoding="utf-8")
     bl = Baseline({UNIVERSE.name: {"admin_window_td": 3, "no_trade_run_k": SYN_K,
-                                   "adv_window_td": 20}})
+                                   "adv_window_td": 20, "corp_action_lookback_sessions": 5,
+                                   "corp_action_lookahead_sessions": 45,
+                                   "admin_signal_window_sessions": 5}})
     return build.build_table(UNIVERSE, stage_root, root, bl, build_id="b_syn", fixtures_path=fx)
 
 
@@ -576,15 +691,20 @@ def test_비거래일_접수는_다음_거래일_지정이고_거래일에_닫�
 def test_해제_공시가_거래보다_먼저면_해제일에_닫히고_무거래_run이_잇는다(
         tmp_path: Path, make_stage_tree) -> None:
     """Q00020: td6 지정, td6~td9 무거래, td8 해제 → halt true td6·td7, false td8·td9.
-    S03B: run td6..td9 = 1,2,3,4 → td8(3 ≥ k=3)·td9 는 run 으로 suspended."""
+    S03B: run td6..td9 = 1,2,3,4. **S03C**: td8·td9 는 정리매매 개시 뒤라 이유가 liquidation 이고,
+    k 임계는 illiquid 에만 걸리므로 run 3·4 ≥ k=3 이어도 status 는 listed 다(S03B 는 정지였다).
+    정리매매 종목은 `universe_policy` 의 `NOT liquidation_window` 가 투자 유니버스에서 뺀다."""
     r = _synthetic(tmp_path, make_stage_tree, d_end_reason="coverage_gap")
     assert r.ok and r.out_dir is not None
     assert _cell(r.out_dir, "Q00020", "halt_state") == [False] * 5 + [True, True, False, False]
     assert _cell(r.out_dir, "Q00020", "no_trade_run") == [0] * 5 + [1, 2, 3, 4]
-    assert _cell(r.out_dir, "Q00020", "status") == ["listed"] * 5 + ["suspended"] * 4
+    assert _cell(r.out_dir, "Q00020", "no_trade_reason") == ["none"] * 5 + [
+        "halt_disclosed", "halt_disclosed", "liquidation", "liquidation"]
+    assert _cell(r.out_dir, "Q00020", "status") == ["listed"] * 5 + ["suspended"] * 2 + [
+        "listed"] * 2
     assert _cell(r.out_dir, "Q00020", "liquidation_window") == [False] * 7 + [True, True]
     m = _gate(r, "EG3_universe").metrics
-    assert m["n_halt_open_at_delist"] == 0 and m["n_suspended_by_run"] == 2
+    assert m["n_halt_open_at_delist"] == 0 and m["n_suspended_by_run"] == 0
     # D00040: td9 지정·무거래(run 1·2 < k) — halt 로 suspended, run 으로는 아니다
     assert _cell(r.out_dir, "D00040", "status") == ["listed"] * 8 + ["suspended"] * 2
     assert _cell(r.out_dir, "D00040", "no_trade_run") == [0] * 8 + [1, 2]
@@ -647,6 +767,167 @@ def test_has_ticker_false_공시는_신호가_아니다(tmp_path: Path, make_sta
     assert _cell(r.out_dir, "K00010", "halt_state")[8] is False
 
 
+# ── 합성 stage — S03C 이유 우선순위 5부류 ─────────────────────────────────────
+# 캘린더 20거래일 2021-03-01(월) ~ 03-26(금), 주말만 뺀다. rtd1..rtd20 = RTD[0..19].
+RTD = [date(2021, 3, d) for d in
+       (1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 15, 16, 17, 18, 19, 22, 23, 24, 25, 26)]
+REASON_K = 5                         # 합성 baseline no_trade_run_k — 절단본·서버와 같은 값
+REASON_LOOKAHEAD = 45                # apply 앞 45세션 · 뒤 5세션
+
+
+def _reason_synthetic(tmp_path: Path, make_stage_tree) -> build.BuildResult:
+    """이유 5부류를 한 격자에 모은 합성 stage — 20세션 × 5종목 = 100행.
+
+    C00010 기업행위: rtd9~rtd13 무거래 + `adj_factor` 적용일 rtd14(factor_ok=false) → 창 안이라
+                     corp_action_window·suspended. rtd20 은 창(rtd14 + lookback 5 = rtd19) 밖이라
+                     illiquid — 같은 종목·같은 무거래인데 창 하나로 갈린다.
+    I00020 비유동  : 신호도 계수도 없이 rtd11~rtd16 6세션 무거래 → 전부 illiquid, run 1~6.
+                     run 3(rtd13) 은 listed, run 5·6(rtd15·rtd16) 은 suspended (k=5).
+    H00030 정지    : rtd6 정지 공시 + rtd6~rtd10 무거래 → halt_disclosed·suspended.
+    A00040 관리    : rtd5 관리종목지정 공시(KOSPI 창 규칙) → rtd6·rtd7 무거래는 지정 신호가 5세션
+                     안이라 admin, rtd13 무거래는 admin_state 가 true 여도 신호가 8세션 전이라
+                     illiquid. 셋 다 status listed(run < k) — 관리종목은 정책이 뺀다.
+    L00050 정리매매: rtd11 정리매매 개시 공시 + rtd12~rtd20 9세션 무거래 → liquidation. run 이 9까지
+                     가도 status 는 listed — k 는 illiquid 에만 걸린다.
+    """
+    root = tmp_path / "equity"
+    root.mkdir()
+    st = tmp_path / "stg"
+    listing = [
+        *({"ticker": t, "date": d, "market": "KOSPI", "sect_tp": "", "sect_available": False,
+           "list_date": RTD[0]} for t in ("C00010", "H00030", "A00040") for d in RTD),
+        *({"ticker": t, "date": d, "market": "KOSDAQ", "sect_tp": "벤처기업부",
+           "sect_available": True, "list_date": RTD[0]} for t in ("I00020", "L00050")
+          for d in RTD)]
+    trees = [
+        make_stage_tree(st, "stg_listing_daily", listing, partition_class="date_axis"),
+        # master 측정축은 이 시나리오 밖 — 격자에 없는 티커 1행으로 표만 채운다
+        make_stage_tree(st, "stg_master_daily", [
+            {"ticker": "Z99999", "date": RTD[0], "is_admin_issue": False, "is_trade_halt": False,
+             "is_liquidation": False}]),
+        make_stage_tree(st, "stg_disclosure", [
+            {"rcept_no": "20210305000001", "rcept_dt": RTD[4], "ticker": "A00040",
+             "has_ticker": True, "report_nm": "관리종목지정"},
+            {"rcept_no": "20210308000001", "rcept_dt": RTD[5], "ticker": "H00030",
+             "has_ticker": True, "report_nm": "주권매매거래정지(투자자보호)"},
+            {"rcept_no": "20210315000001", "rcept_dt": RTD[10], "ticker": "L00050",
+             "has_ticker": True, "report_nm": "기타시장안내(정리매매 개시)"}]),
+    ]
+    stage_root = trees[0].stage_root
+    _equity_table(tmp_path, root, make_stage_tree, "trading_calendar", [{"date": d} for d in RTD])
+    _equity_table(tmp_path, root, make_stage_tree, "security_span", [
+        {"ticker": t, "span_seq": 1, "first_date": RTD[0], "last_date": RTD[19], "n_days": 20,
+         "end_reason": "coverage_gap"}
+        for t in ("C00010", "I00020", "H00030", "A00040", "L00050")])
+    _equity_table(tmp_path, root, make_stage_tree, "security", [
+        {"ticker": t, "sec_type": "common"}
+        for t in ("C00010", "I00020", "H00030", "A00040", "L00050")])
+    no_trade = {"C00010": set(RTD[8:13]) | {RTD[19]}, "I00020": set(RTD[10:16]),
+                "H00030": set(RTD[5:10]), "A00040": {RTD[5], RTD[6], RTD[12]},
+                "L00050": set(RTD[11:])}
+    _equity_table(tmp_path, root, make_stage_tree, "price_daily", [
+        _price(t, d, 0 if d in zero else 100) for t, zero in no_trade.items() for d in RTD])
+    _equity_table(tmp_path, root, make_stage_tree, "adj_factor", [
+        {"ticker": "C00010", "apply_date": RTD[13], "factor_ok": False, "event_type": "capred"}])
+    fx = tmp_path / "fx.json"
+    fx.write_text(json.dumps([
+        {"case": "corp_action", "key": {"date": RTD[8].isoformat(), "ticker": "C00010"},
+         "column": "no_trade_reason", "expect": "corp_action_window", "source": "hand"},
+        {"case": "corp_action_outside", "key": {"date": RTD[19].isoformat(), "ticker": "C00010"},
+         "column": "no_trade_reason", "expect": "illiquid", "source": "hand"}]), encoding="utf-8")
+    bl = Baseline({UNIVERSE.name: {
+        "admin_window_td": 365, "no_trade_run_k": REASON_K, "adv_window_td": 20,
+        "corp_action_lookback_sessions": 5, "corp_action_lookahead_sessions": REASON_LOOKAHEAD,
+        "admin_signal_window_sessions": 5}})
+    return build.build_table(UNIVERSE, stage_root, root, bl, build_id="b_reason",
+                             fixtures_path=fx)
+
+
+def test_이유_합성_빌드가_전_게이트를_통과한다(tmp_path: Path, make_stage_tree) -> None:
+    reason_built = _reason_synthetic(tmp_path, make_stage_tree)
+    assert reason_built.ok, _fails(reason_built)
+    assert reason_built.n_rows == 5 * len(RTD)
+    m = _gate(reason_built, "EG3_universe").metrics
+    # 무거래 29행 = C00010 6 + I00020 6 + H00030 5 + A00040 3 + L00050 9, 나머지 71 은 거래
+    assert m["no_trade_reason_counts"] == {"none": 71, "corp_action_window": 5, "illiquid": 8,
+                                           "halt_disclosed": 5, "admin": 2, "liquidation": 9}
+    assert sum(m["no_trade_reason_counts"].values()) == 5 * len(RTD)
+    assert all(m[k] == 0 for k in (
+        "n_no_trade_reason_outside_vocab", "n_no_trade_reason_null",
+        "n_no_trade_reason_trade_not_none", "n_no_trade_reason_no_trade_none",
+        "n_no_trade_reason_halt_mismatch", "n_no_trade_reason_recompute_mismatch",
+        "n_status_reason_mismatch", "n_status_halt_mismatch", "n_adj_apply_off_calendar"))
+
+
+def test_기업행위_창_안팎이_같은_무거래를_가른다(tmp_path: Path, make_stage_tree) -> None:
+    """③ — C00010 의 적용일 rtd14 기준 창 [rtd14 − 45, rtd14 + 5] = [rtd1, rtd19].
+    rtd9~rtd13 은 창 안(corp_action_window·suspended, run 1~5), rtd20 은 창 밖(illiquid·run 1)."""
+    reason_built = _reason_synthetic(tmp_path, make_stage_tree)
+    assert reason_built.out_dir is not None
+    assert _cell(reason_built.out_dir, "C00010", "no_trade_reason") == (
+        ["none"] * 8 + ["corp_action_window"] * 5 + ["none"] * 6 + ["illiquid"])
+    assert _cell(reason_built.out_dir, "C00010", "status") == (
+        ["listed"] * 8 + ["suspended"] * 5 + ["listed"] * 7)
+    # 창 안 첫날은 run 1 인데도 suspended — k 는 illiquid 에만 건다
+    assert _cell(reason_built.out_dir, "C00010", "no_trade_run") == (
+        [0] * 8 + [1, 2, 3, 4, 5] + [0] * 6 + [1])
+    m = _gate(reason_built, "EG3_universe").metrics
+    assert m["n_suspended_by_corp_action"] == 5 and m["n_adj_apply_rows_not_ok"] == 1
+
+
+def test_신호_없는_무거래는_run_k_에서_정지가_된다(tmp_path: Path, make_stage_tree) -> None:
+    """⑤ — I00020 은 6세션 무거래 전부 illiquid. run 3 은 listed, run 5·6 은 suspended(k=5)."""
+    reason_built = _reason_synthetic(tmp_path, make_stage_tree)
+    assert reason_built.out_dir is not None
+    assert _cell(reason_built.out_dir, "I00020", "no_trade_reason") == (
+        ["none"] * 10 + ["illiquid"] * 6 + ["none"] * 4)
+    assert _cell(reason_built.out_dir, "I00020", "no_trade_run") == (
+        [0] * 10 + [1, 2, 3, 4, 5, 6] + [0] * 4)
+    assert _cell(reason_built.out_dir, "I00020", "status") == (
+        ["listed"] * 14 + ["suspended"] * 2 + ["listed"] * 4)
+    m = _gate(reason_built, "EG3_universe").metrics
+    assert m["n_suspended_by_run"] == 2
+    # illiquid 8 = I00020 run 1~6 + C00010 rtd20 run 1 + A00040 rtd13 run 1
+    assert m["no_trade_reason_run_hist_illiquid"] == {"1-1": 3, "2-4": 3, "5-9": 2, "10-19": 0,
+                                                      "20+": 0}
+
+
+def test_정지_공시가_있으면_halt_disclosed가_우선한다(tmp_path: Path, make_stage_tree) -> None:
+    """① — H00030 rtd6 지정, rtd6~rtd10 무거래, rtd11 거래로 암묵 해제."""
+    reason_built = _reason_synthetic(tmp_path, make_stage_tree)
+    assert reason_built.out_dir is not None
+    assert _cell(reason_built.out_dir, "H00030", "no_trade_reason") == (
+        ["none"] * 5 + ["halt_disclosed"] * 5 + ["none"] * 10)
+    assert _cell(reason_built.out_dir, "H00030", "status") == (
+        ["listed"] * 5 + ["suspended"] * 5 + ["listed"] * 10)
+
+
+def test_관리종목_지정_직후_무거래만_admin이다(tmp_path: Path, make_stage_tree) -> None:
+    """④ — A00040 rtd5 지정. rtd6·rtd7(신호 1·2세션 전) 은 admin, rtd13(8세션 전) 은 admin_state 가
+    여전히 true 여도 illiquid. 셋 다 run < k 라 status listed — 관리종목은 정책이 뺀다."""
+    reason_built = _reason_synthetic(tmp_path, make_stage_tree)
+    assert reason_built.out_dir is not None
+    assert _cell(reason_built.out_dir, "A00040", "admin_state")[4:] == [True] * 16
+    assert _cell(reason_built.out_dir, "A00040", "no_trade_reason") == (
+        ["none"] * 5 + ["admin"] * 2 + ["none"] * 5 + ["illiquid"] + ["none"] * 7)
+    assert set(_cell(reason_built.out_dir, "A00040", "status")) == {"listed"}
+    assert set(_cell(reason_built.out_dir, "A00040",
+                     "admin_state_basis")) == {"derived_kospi_window"}
+
+
+def test_정리매매_무거래는_run이_길어도_정지가_아니다(tmp_path: Path, make_stage_tree) -> None:
+    """② + status 규칙 — L00050 rtd11 개시 공시, rtd12~rtd20 9세션 무거래. run 이 9 까지 가도
+    이유가 liquidation 이라 status 는 listed 다(정리매매 제외는 universe_policy 몫)."""
+    reason_built = _reason_synthetic(tmp_path, make_stage_tree)
+    assert reason_built.out_dir is not None
+    assert _cell(reason_built.out_dir, "L00050", "no_trade_reason") == (
+        ["none"] * 11 + ["liquidation"] * 9)
+    assert _cell(reason_built.out_dir, "L00050", "no_trade_run")[11:] == list(range(1, 10))
+    assert set(_cell(reason_built.out_dir, "L00050", "status")) == {"listed"}
+    assert _cell(reason_built.out_dir, "L00050", "liquidation_window") == (
+        [False] * 10 + [True] * 10)
+
+
 # ── 부정 픽스처 (게이트가 fail 을 내야 통과) ─────────────────────────────────
 
 def test_정지가_열린_채_data_gap으로_끝나면_EG3_universe가_폐기한다(tmp_path: Path,
@@ -680,21 +961,57 @@ def test_status가_전부_listed면_EG3_universe가_폐기한다(built: build.Bu
     assert _gate(r, "EG1").status is GateStatus.PASS
     eg3 = _gate(r, "EG3_universe")
     assert eg3.status is GateStatus.FAIL
-    assert eg3.metrics["n_status_halt_mismatch"] == N_HALT + N_BY_RUN
+    assert eg3.metrics["n_status_halt_mismatch"] == N_SUSPENDED
 
 
 def test_run이_k_이상인데_listed면_EG3_universe가_폐기한다(built: build.BuildResult,
                                                        tmp_path: Path) -> None:
-    """S03 규칙(halt 만)으로 되돌린 변종 — run 으로 잡혀야 할 201행이 mismatch."""
+    """S03 규칙(halt 만)으로 되돌린 변종 — run 으로 잡혀야 할 201행 + 기업행위 창 6행이 mismatch."""
     r = _variant(built, tmp_path, "universe_s03_status",
                  "WITH base AS ({body}) SELECT * REPLACE (CASE WHEN halt_state THEN 'suspended' "
                  "ELSE 'listed' END AS status) FROM base")
     assert r.status is build.BuildStatus.GATE_FAILED
     eg3 = _gate(r, "EG3_universe")
     assert eg3.status is GateStatus.FAIL
-    assert eg3.metrics["n_status_halt_mismatch"] == N_BY_RUN
+    assert eg3.metrics["n_status_halt_mismatch"] == N_BY_RUN + N_CORP_ACTION
     assert eg3.metrics["n_suspended_by_run"] == 0
+    assert eg3.metrics["n_suspended_by_corp_action"] == 0
     assert _gate(r, "EG4").detail == "upstream_failed"
+
+
+def test_이유_우선순위를_바꾸면_EG3_universe가_폐기한다(built: build.BuildResult,
+                                                 tmp_path: Path) -> None:
+    """S03C ①②를 맞바꾼 사본 — 정지와 정리매매가 겹친 무거래 4행(036220 2016-04-22·04-25 ·
+    101970 2015-03-04·03-05)이 halt_disclosed 대신 liquidation 이 된다. 게이트가 입력에서 우선순위를
+    다시 계산하므로 갈리고, status 규칙(halt 우선)은 그대로라 status 술어는 조용하다 — 이유 재계산
+    술어가 유일한 방어다."""
+    r = _variant(built, tmp_path, "universe_reason_swapped",
+                 "WITH base AS ({body}) SELECT * REPLACE (CASE WHEN no_trade_reason = "
+                 "'halt_disclosed' AND liquidation_window THEN 'liquidation' "
+                 "ELSE no_trade_reason END AS no_trade_reason) FROM base")
+    assert r.status is build.BuildStatus.GATE_FAILED
+    eg3 = _gate(r, "EG3_universe")
+    assert eg3.status is GateStatus.FAIL
+    assert eg3.metrics["n_no_trade_reason_recompute_mismatch"] == N_HALT_AND_LIQUIDATION
+    assert eg3.metrics["n_no_trade_reason_halt_mismatch"] == N_HALT_AND_LIQUIDATION
+    assert eg3.metrics["n_status_halt_mismatch"] == 0
+    assert eg3.metrics["n_status_reason_mismatch"] == 0
+
+
+def test_기업행위_창을_무시하면_EG3_universe가_폐기한다(built: build.BuildResult,
+                                                 tmp_path: Path) -> None:
+    """③ 을 뺀 사본(corp_action_window → illiquid) — 6행이 재계산과 갈리고, 그 6행은 run 1~3 <
+    k 라 status='suspended' 가 산출 이유와도 어긋난다(n_status_halt_mismatch)."""
+    r = _variant(built, tmp_path, "universe_reason_no_ca",
+                 "WITH base AS ({body}) SELECT * REPLACE (CASE WHEN no_trade_reason = "
+                 "'corp_action_window' THEN 'illiquid' ELSE no_trade_reason END "
+                 "AS no_trade_reason) FROM base")
+    assert r.status is build.BuildStatus.GATE_FAILED
+    eg3 = _gate(r, "EG3_universe")
+    assert eg3.status is GateStatus.FAIL
+    assert eg3.metrics["n_no_trade_reason_recompute_mismatch"] == N_CORP_ACTION
+    assert eg3.metrics["n_status_halt_mismatch"] == N_CORP_ACTION
+    assert eg3.metrics["n_status_reason_mismatch"] == 0      # 재계산 이유로는 status 가 맞다
 
 
 def test_창_미달_adv20을_만들어_내면_EG3_universe가_폐기한다(built: build.BuildResult,

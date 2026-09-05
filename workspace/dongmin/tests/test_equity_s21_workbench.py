@@ -148,20 +148,25 @@ def test_krx_common_stock_은_정책표대로_ETF_우선주를_뺀다(adapter) -
 
 
 def test_krx_liquid_은_정책표대로_같은날_상위_비율만_남긴다(adapter) -> None:
-    """S03B-2 — `krx.liquid` 가 정책표 5행(investable 4 + `adv20_rank_pct >= 0.5`)으로 풀린다.
-    2018-05 모집단 5(003540·161890·000030·000660·005930, 손계산 순위 0.2·0.4·0.6·0.8·1.0) 중
-    상위 3 만 행 집합에 든다."""
+    """S03B-2 + **S03C** — `krx.liquid` 가 정책표 6행(investable 4 + `no_trade_reason <> 'illiquid'`
+    + `adv20_rank_pct >= 0.5`)으로 풀린다. 05-03 은 005930 이 분할 창 무거래(corp_action_window)로
+    suspended 라 모집단이 4(003540 0.25 · 161890 0.5 · 000030 0.75 · 000660 1.0)이고 상위 3 =
+    {161890, 000030, 000660}. 005930 은 05-04 재개 뒤 다시 들어와 창 전체의 행 집합은 4종목이다."""
     r = _raw(adapter, date(2018, 5, 1), date(2018, 5, 31), universe="krx.liquid")
     assert r.ok, r.detail
     ids = {o.security_id for o in r.observations}
-    assert ids == {"000030:1", "000660:1", "005930:1"}
+    assert ids == {"000030:1", "000660:1", "005930:1", "161890:1"}
     common = {o.security_id
               for o in _raw(adapter, date(2018, 5, 1), date(2018, 5, 31)).observations}
-    assert ids < common and {"003540:1", "161890:1"} <= common
-    # 행 집합 안에서도 universe_member 는 그날 술어값 — 05-03 은 셋 다 true
+    assert ids < common and "003540:1" in common
+    # 행 집합 안에서도 universe_member 는 그날 술어값 — 05-03 은 005930 만 false(정지)
     members = {o.security_id for o in r.observations
                if o.as_of == HALT_LAST and o.universe_member}
-    assert members == ids
+    assert members == ids - {"005930:1"}
+    # 분할 적용일(05-04) 에는 거래가 재개돼 005930 이 다시 모집단(5종목)에 들고, 그만큼 161890 의
+    # 순위가 0.4 로 내려가 그날은 빠진다 — 행은 남고 universe_member 만 갈린다(D-001)
+    assert {o.security_id for o in r.observations
+            if o.as_of == SPLIT and o.universe_member} == ids - {"161890:1"}
 
 
 def test_미지원_필드는_unavailable_이고_mock_대체가_없다(adapter) -> None:

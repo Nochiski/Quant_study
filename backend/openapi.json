@@ -318,6 +318,7 @@
               "mapping": {
                 "backtest.run.invalid": "#/components/schemas/BacktestRunInvalidDetail",
                 "portfolio.data.unavailable": "#/components/schemas/PortfolioDataUnavailableDetail",
+                "portfolio.raw_observation.invalid": "#/components/schemas/PortfolioRawObservationInvalidDetail",
                 "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail"
               },
               "propertyName": "code"
@@ -331,6 +332,9 @@
               },
               {
                 "$ref": "#/components/schemas/PortfolioDataUnavailableDetail"
+              },
+              {
+                "$ref": "#/components/schemas/PortfolioRawObservationInvalidDetail"
               }
             ],
             "title": "Detail"
@@ -3291,6 +3295,26 @@
         "title": "PortfolioPreviewRequest",
         "type": "object"
       },
+      "PortfolioRawObservationInvalidDetail": {
+        "description": "A configured data adapter violated the raw execution-input contract.",
+        "properties": {
+          "code": {
+            "const": "portfolio.raw_observation.invalid",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "PortfolioRawObservationInvalidDetail",
+        "type": "object"
+      },
       "PortfolioSide": {
         "enum": [
           "long_only",
@@ -3416,6 +3440,7 @@
             "discriminator": {
               "mapping": {
                 "portfolio.data.unavailable": "#/components/schemas/PortfolioDataUnavailableDetail",
+                "portfolio.raw_observation.invalid": "#/components/schemas/PortfolioRawObservationInvalidDetail",
                 "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail"
               },
               "propertyName": "code"
@@ -3426,6 +3451,9 @@
               },
               {
                 "$ref": "#/components/schemas/PortfolioDataUnavailableDetail"
+              },
+              {
+                "$ref": "#/components/schemas/PortfolioRawObservationInvalidDetail"
               }
             ],
             "title": "Detail"
@@ -5965,6 +5993,7 @@
             "discriminator": {
               "mapping": {
                 "portfolio.data.unavailable": "#/components/schemas/PortfolioDataUnavailableDetail",
+                "portfolio.raw_observation.invalid": "#/components/schemas/PortfolioRawObservationInvalidDetail",
                 "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail",
                 "trace.capability.unsupported": "#/components/schemas/TraceCapabilityUnsupportedDetail",
                 "trace.engine.incompatible": "#/components/schemas/TraceEngineIncompatibleDetail",
@@ -5987,6 +6016,9 @@
               },
               {
                 "$ref": "#/components/schemas/PortfolioDataUnavailableDetail"
+              },
+              {
+                "$ref": "#/components/schemas/PortfolioRawObservationInvalidDetail"
               }
             ],
             "title": "Detail"

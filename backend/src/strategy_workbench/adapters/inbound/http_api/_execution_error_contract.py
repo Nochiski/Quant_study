@@ -31,6 +31,14 @@ class PortfolioDataUnavailableDetail:
 
 
 @dataclass(frozen=True)
+class PortfolioRawObservationInvalidDetail:
+    """A configured data adapter violated the raw execution-input contract."""
+
+    code: Literal["portfolio.raw_observation.invalid"]
+    message: str
+
+
+@dataclass(frozen=True)
 class RequestValidationIssue:
     loc: tuple[str | int, ...]
     msg: str
@@ -45,7 +53,9 @@ class RequestValidationResponse:
 
 
 PortfolioUnprocessableDetail: TypeAlias = Annotated[
-    PortfolioStrategyInvalidDetail | PortfolioDataUnavailableDetail,
+    PortfolioStrategyInvalidDetail
+    | PortfolioDataUnavailableDetail
+    | PortfolioRawObservationInvalidDetail,
     Field(discriminator="code"),
 ]
 

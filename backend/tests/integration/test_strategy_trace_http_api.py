@@ -725,6 +725,7 @@ def test_trace_openapi_contract_exposes_bounded_source_union() -> None:
     detail = schema["components"]["schemas"]["TraceUnprocessableResponse"]["properties"]["detail"]
     assert detail["discriminator"]["propertyName"] == "code"
     assert "trace.capability.unsupported" in detail["discriminator"]["mapping"]
+    assert "portfolio.raw_observation.invalid" in detail["discriminator"]["mapping"]
     TypeAdapter(Trace422Response).validate_python(
         {
             "detail": {

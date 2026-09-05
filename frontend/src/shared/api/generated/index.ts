@@ -226,6 +226,7 @@ export type {
   PortfolioDataUnavailableDetail,
   PortfolioPreview,
   PortfolioPreviewRequest,
+  PortfolioRawObservationInvalidDetail,
   PortfolioSide,
   PortfolioStartingHolding,
   PortfolioStep,

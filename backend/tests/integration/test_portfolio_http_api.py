@@ -82,6 +82,7 @@ def test_portfolio_preview_openapi_declares_coded_and_malformed_422() -> None:
     assert detail["discriminator"]["propertyName"] == "code"
     assert set(detail["discriminator"]["mapping"]) == {
         "portfolio.data.unavailable",
+        "portfolio.raw_observation.invalid",
         "portfolio.strategy.invalid",
     }
     malformed = client.post("/api/v1/portfolio/preview", json={"spec": {}})

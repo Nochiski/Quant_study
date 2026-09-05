@@ -9,6 +9,7 @@ from pydantic import Field
 
 from ._execution_error_contract import (
     PortfolioDataUnavailableDetail,
+    PortfolioRawObservationInvalidDetail,
     PortfolioStrategyInvalidDetail,
     RequestValidationResponse,
 )
@@ -21,7 +22,10 @@ class BacktestRunInvalidDetail:
 
 
 BacktestUnprocessableDetail: TypeAlias = Annotated[
-    BacktestRunInvalidDetail | PortfolioStrategyInvalidDetail | PortfolioDataUnavailableDetail,
+    BacktestRunInvalidDetail
+    | PortfolioStrategyInvalidDetail
+    | PortfolioDataUnavailableDetail
+    | PortfolioRawObservationInvalidDetail,
     Field(discriminator="code"),
 ]
 

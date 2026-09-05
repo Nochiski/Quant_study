@@ -11,6 +11,8 @@ Contract:
   never leaked. The application layer treats a violation as an adapter bug (fail-closed).
 - A field is *omitted* when nothing was published as of `as_of`; `value=None` means the source
   observed a missing/uncollected cell (the value exists as a fact, and it is "no number").
+  Every observation contains at most one non-blank `field_id`; duplicate identities are invalid
+  because evaluators cannot consistently choose which raw fact is authoritative.
   Numeric values and `previous_weight` are always finite; NaN/±Infinity is an adapter contract
   violation and is rejected before factor or portfolio calculation rather than normalized.
 - `universe_member` is a fact of (as_of, security) alone: the same pair answers the same way
@@ -106,6 +108,11 @@ class RawFieldValue:
     kind: CellKind = CellKind.OBSERVED
 
     def __post_init__(self) -> None:
+        if not isinstance(self.field_id, str) or not self.field_id.strip():
+            raise RawObservationContractViolation(
+                "raw field_id must not be blank — "
+                f"field_id={self.field_id!r} available_date={self.available_date}"
+            )
         if self.kind in (CellKind.OBSERVED, CellKind.SOURCE_OMITTED_ZERO):
             if self.value is None:
                 raise RawObservationContractViolation(
@@ -203,7 +210,21 @@ class RawObservationSet:
                     f"as_of={observation.as_of} security_id={observation.security_id!r} "
                     f"value={observation.previous_weight!r} snapshot={self.data_snapshot_id!r}"
                 )
+            field_ids: set[str] = set()
             for field in _checkpointed(observation.fields, checkpoint):
+                if not isinstance(field.field_id, str) or not field.field_id.strip():
+                    raise RawObservationContractViolation(
+                        "raw field_id must not be blank — "
+                        f"as_of={observation.as_of} security_id={observation.security_id!r} "
+                        f"field_id={field.field_id!r} snapshot={self.data_snapshot_id!r}"
+                    )
+                if field.field_id in field_ids:
+                    raise RawObservationContractViolation(
+                        "raw observation field_ids must be unique — "
+                        f"as_of={observation.as_of} security_id={observation.security_id!r} "
+                        f"field_id={field.field_id!r} snapshot={self.data_snapshot_id!r}"
+                    )
+                field_ids.add(field.field_id)
                 value = field.value
                 if isinstance(value, (int, float)) and not isinstance(value, bool):
                     if not _finite_number(value):

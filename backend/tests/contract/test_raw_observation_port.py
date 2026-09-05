@@ -22,6 +22,7 @@ from strategy_workbench.application.portfolio_design.facade.ports import (
     CancellableRawObservationPort,
     RawFieldValue,
     RawObservation,
+    RawObservationContractViolation,
     RawObservationPort,
     RawObservationQuery,
     RawObservationSet,
@@ -248,6 +249,39 @@ def test_result_rejects_unordered_or_duplicate_observations() -> None:
     duplicate = RawObservation(START, "a", True, ())
     with pytest.raises(ValueError, match="unique"):
         RawObservationSet(DataLoadStatus.OK, snapshot, (START,), (), (duplicate, duplicate))
+
+
+def test_result_rejects_blank_or_duplicate_field_identities_at_construction() -> None:
+    with pytest.raises(RawObservationContractViolation, match="field_id must not be blank"):
+        RawFieldValue(" \t", 1.0, START)
+
+    field = RawFieldValue("price.close", 1.0, START)
+    with pytest.raises(RawObservationContractViolation, match="field_ids must be unique"):
+        RawObservationSet(
+            DataLoadStatus.OK,
+            "snap",
+            (START,),
+            (),
+            (RawObservation(START, "a", True, (field, field)),),
+        )
+
+
+@pytest.mark.parametrize("violation", ["blank", "duplicate"])
+def test_consumer_revalidation_rejects_mutated_field_identities(violation: str) -> None:
+    first = RawFieldValue("price.close", 1.0, START)
+    second = RawFieldValue("price.market_cap", 2.0, START)
+    observation = RawObservation(START, "a", True, (first, second))
+    result = RawObservationSet(DataLoadStatus.OK, "snap", (START,), (), (observation,))
+
+    if violation == "blank":
+        object.__setattr__(first, "field_id", "")
+        expected = "field_id must not be blank"
+    else:
+        object.__setattr__(observation, "fields", (first, first))
+        expected = "field_ids must be unique"
+
+    with pytest.raises(RawObservationContractViolation, match=expected):
+        result.validate_contract()
 
 
 def test_mock_lag_shifts_availability_by_whole_sessions() -> None:

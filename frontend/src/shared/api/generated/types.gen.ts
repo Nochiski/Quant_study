@@ -201,7 +201,10 @@ export type BacktestUnprocessableResponse = {
       } & PortfolioStrategyInvalidDetail)
     | ({
         code: "portfolio.data.unavailable";
-      } & PortfolioDataUnavailableDetail);
+      } & PortfolioDataUnavailableDetail)
+    | ({
+        code: "portfolio.raw_observation.invalid";
+      } & PortfolioRawObservationInvalidDetail);
 };
 
 /**
@@ -1991,6 +1994,22 @@ export type PortfolioPreviewRequest = {
 };
 
 /**
+ * PortfolioRawObservationInvalidDetail
+ *
+ * A configured data adapter violated the raw execution-input contract.
+ */
+export type PortfolioRawObservationInvalidDetail = {
+  /**
+   * Code
+   */
+  code: "portfolio.raw_observation.invalid";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
  * PortfolioSide
  */
 export type PortfolioSide = "long_only" | "long_short";
@@ -2075,7 +2094,10 @@ export type PortfolioUnprocessableResponse = {
       } & PortfolioStrategyInvalidDetail)
     | ({
         code: "portfolio.data.unavailable";
-      } & PortfolioDataUnavailableDetail);
+      } & PortfolioDataUnavailableDetail)
+    | ({
+        code: "portfolio.raw_observation.invalid";
+      } & PortfolioRawObservationInvalidDetail);
 };
 
 /**
@@ -3714,7 +3736,10 @@ export type TraceUnprocessableResponse = {
       } & PortfolioStrategyInvalidDetail)
     | ({
         code: "portfolio.data.unavailable";
-      } & PortfolioDataUnavailableDetail);
+      } & PortfolioDataUnavailableDetail)
+    | ({
+        code: "portfolio.raw_observation.invalid";
+      } & PortfolioRawObservationInvalidDetail);
 };
 
 /**

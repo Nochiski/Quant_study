@@ -15,7 +15,13 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import TypeAdapter
 
+from strategy_workbench.adapters.inbound.http_api._backtest_contract import Backtest422Response
+from strategy_workbench.adapters.inbound.http_api._execution_error_contract import (
+    Portfolio422Response,
+)
+from strategy_workbench.adapters.inbound.http_api._trace_contract import Trace422Response
 from strategy_workbench.adapters.outbound.artifact_local.facade.store import LocalArtifactStore
 from strategy_workbench.adapters.outbound.backtest_engine.facade.executor import (
     BacktestEngineExecutorAdapter,
@@ -482,6 +488,67 @@ def test_non_finite_raw_opening_book_is_not_normalized_to_missing() -> None:
 
     with pytest.raises(RawObservationContractError, match="previous_weight must be finite"):
         portfolio.preview(PortfolioPreviewRequest(_spec()))
+
+
+def test_duplicate_raw_fields_fail_closed_with_one_code_on_every_http_execution_route(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = MockEquityDataAdapter.load_raw_observations_cancellable
+
+    def duplicate_one_field(
+        adapter: MockEquityDataAdapter,
+        query: RawObservationQuery,
+        *,
+        checkpoint,
+    ) -> RawObservationSet:
+        result = original(adapter, query, checkpoint=checkpoint)
+        observation = next(item for item in result.observations if item.fields)
+        field = observation.fields[0]
+        # A stale/foreign adapter can bypass frozen construction; the application consumer
+        # boundary must still reject its ambiguous execution input before calculation.
+        object.__setattr__(
+            observation,
+            "fields",
+            (field, field, *observation.fields[1:]),
+        )
+        return result
+
+    monkeypatch.setattr(
+        MockEquityDataAdapter,
+        "load_raw_observations_cancellable",
+        duplicate_one_field,
+    )
+    client = TestClient(build_http_app())
+    spec = client.get("/api/v1/strategies/template").json()
+    factor = spec["factors"]["factors"][0]
+    responses = (
+        (
+            client.post("/api/v1/portfolio/preview", json={"spec": spec}),
+            Portfolio422Response,
+        ),
+        (
+            client.post(
+                "/api/v1/strategies/debug/trace",
+                json={
+                    "strategy_source": {"kind": "inline_draft", "spec": spec},
+                    "security_ids": ["sec-005930-1"],
+                    "factor_id": factor["factor_id"],
+                    "node_ids": [factor["graph"]["output_node_id"]],
+                },
+            ),
+            Trace422Response,
+        ),
+        (
+            client.post("/api/v1/backtests", json={"strategy": spec, "core": "python"}),
+            Backtest422Response,
+        ),
+    )
+
+    for response, contract in responses:
+        assert response.status_code == 422, response.text
+        assert response.json()["detail"]["code"] == "portfolio.raw_observation.invalid"
+        assert "field_ids must be unique" in response.json()["detail"]["message"]
+        TypeAdapter(contract).validate_python(response.json())
 
 
 def test_legacy_raw_port_keeps_preview_and_backtest_compatible(tmp_path: Path) -> None:

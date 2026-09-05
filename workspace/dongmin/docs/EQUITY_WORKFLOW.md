@@ -103,7 +103,9 @@ EG0 입력 고정 · EG1 격자 등식(`− n_dedup − Σ n_reject` 일반형, 
 | **S04** | 가격 정본 | `price_daily` | S02·S03 + `stg_price_daily`·`stg_etf_price_daily`·`stg_listing_daily` | ∥ S05 | S03 |
 | **S05** | 기업행위 | `corp_event` | `stg_event_*`·`stg_capital`·`stg_disclosure` 락일·배당결정 · KRX 주식수 변화 | ∥ S04 | S03 |
 | **S06** | 조정계수·가격 뷰 | `adj_factor`·`v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_firm_mktcap`(+ S21 후속 전방 조정 `v_adj_price_fwd`·`v_adj_volume_fwd`) | S04·S05 | — | S04·S05 |
+| **S06-2** | 조정계수 v3(KRX 기준가) | `price_daily` +`change_krw`·`base_price_krw` · `adj_factor` 원천 `krx_base_price`(사건 교체·신규 `unknown_krx`·재발견 제외·`unknown_price_only` 기록) · EG8 재측정 | S04·S06 + stage `change_krw` | ∥ S03C | S06 (설계 확정 09-05, 구현 대기) |
 | **S03B** | 유니버스(시장 파생) | `universe_daily` v2(`mktcap_krw`·`adv20_krw`·`listing_age_days`·`no_trade_run`·`suspended` 완성) | S04·S03 | ∥ S06 | S04 |
+| **S03C** | 유니버스(무거래 이유) | `universe_daily` v4(`no_trade_reason`, status 규칙 = 신호 없는 무거래에만 k) · `universe_policy` liquid 술어 +1 | S03B·S06 + equity `adj_factor` | ∥ S06-2 | S03B·S06 (설계 확정 09-05, 구현 대기) |
 | **S07** | **엔진 어댑터 v0** | `backtest_engine/adapters/equity_duckdb.py`(3포트, pyarrow) + `backend/tests/test_bar_source_contract.py::BUILDERS` 등록(런타임 어댑터 레지스트리는 없다 — 호출자가 직접 생성) · `equity contract`(`src/equity/contract.py`, EG-C ①②③④⑤⑩ → `_contract_meta.json`) · `baseline_seed_s07.json` | S03B·S06 | — | S06·S03B |
 | **S08** | 수급 격자 | `flow_daily`(13주체 + KIS 대응표) | S03B + 키움·KIS flow·foreign·로그 | ∥ | S03B |
 | **S09** | 공매도·대차 격자 | `short_daily` | S03B + short kiwoom/kis·lending·loan_kis | ∥ | S03B |

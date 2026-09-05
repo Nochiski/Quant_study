@@ -1,6 +1,25 @@
 {
   "components": {
     "schemas": {
+      "BacktestRunInvalidDetail": {
+        "properties": {
+          "code": {
+            "const": "backtest.run.invalid",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "BacktestRunInvalidDetail",
+        "type": "object"
+      },
       "BacktestRunResult": {
         "properties": {
           "artifacts": {
@@ -228,6 +247,99 @@
           "run"
         ],
         "title": "BacktestStartResponse",
+        "type": "object"
+      },
+      "BacktestStrategyNotFoundDetail": {
+        "properties": {
+          "code": {
+            "const": "backtest.strategy.not_found",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "BacktestStrategyNotFoundDetail",
+        "type": "object"
+      },
+      "BacktestStrategyNotFoundResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/BacktestStrategyNotFoundDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "BacktestStrategyNotFoundResponse",
+        "type": "object"
+      },
+      "BacktestStrategyStaleDetail": {
+        "properties": {
+          "code": {
+            "const": "backtest.strategy.stale",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "BacktestStrategyStaleDetail",
+        "type": "object"
+      },
+      "BacktestStrategyStaleResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/BacktestStrategyStaleDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "BacktestStrategyStaleResponse",
+        "type": "object"
+      },
+      "BacktestUnprocessableResponse": {
+        "properties": {
+          "detail": {
+            "discriminator": {
+              "mapping": {
+                "backtest.run.invalid": "#/components/schemas/BacktestRunInvalidDetail",
+                "portfolio.data.unavailable": "#/components/schemas/PortfolioDataUnavailableDetail",
+                "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail"
+              },
+              "propertyName": "code"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BacktestRunInvalidDetail"
+              },
+              {
+                "$ref": "#/components/schemas/PortfolioStrategyInvalidDetail"
+              },
+              {
+                "$ref": "#/components/schemas/PortfolioDataUnavailableDetail"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "BacktestUnprocessableResponse",
         "type": "object"
       },
       "BinaryNode": {
@@ -2904,6 +3016,36 @@
         "title": "ParameterNode",
         "type": "object"
       },
+      "PortfolioDataUnavailableDetail": {
+        "properties": {
+          "code": {
+            "const": "portfolio.data.unavailable",
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DataLoadStatus"
+          }
+        },
+        "required": [
+          "code",
+          "status",
+          "detail"
+        ],
+        "title": "PortfolioDataUnavailableDetail",
+        "type": "object"
+      },
       "PortfolioPreview": {
         "description": "The tape a run will consume, plus the caveats the observation source reported.\n\n`warnings` are the raw observation adapter's own messages, passed through verbatim. They ride\ninto `RunManifest.warnings` so a caveat visible in the preview cannot disappear from the run\nthat used the same data.",
         "properties": {
@@ -3040,6 +3182,51 @@
           }
         },
         "title": "PortfolioStep",
+        "type": "object"
+      },
+      "PortfolioStrategyInvalidDetail": {
+        "properties": {
+          "code": {
+            "const": "portfolio.strategy.invalid",
+            "title": "Code",
+            "type": "string"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/StrategyValidation"
+          }
+        },
+        "required": [
+          "code",
+          "validation"
+        ],
+        "title": "PortfolioStrategyInvalidDetail",
+        "type": "object"
+      },
+      "PortfolioUnprocessableResponse": {
+        "properties": {
+          "detail": {
+            "discriminator": {
+              "mapping": {
+                "portfolio.data.unavailable": "#/components/schemas/PortfolioDataUnavailableDetail",
+                "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail"
+              },
+              "propertyName": "code"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PortfolioStrategyInvalidDetail"
+              },
+              {
+                "$ref": "#/components/schemas/PortfolioDataUnavailableDetail"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "PortfolioUnprocessableResponse",
         "type": "object"
       },
       "RawArtifactBundle": {
@@ -3437,6 +3624,56 @@
         ],
         "title": "RebalanceFrequency",
         "type": "string"
+      },
+      "RequestValidationIssue": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Loc",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Msg",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "RequestValidationIssue",
+        "type": "object"
+      },
+      "RequestValidationResponse": {
+        "description": "FastAPI's malformed-envelope 422 shape, alongside coded application diagnostics.",
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/RequestValidationIssue"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "RequestValidationResponse",
+        "type": "object"
       },
       "ResearchCatalog": {
         "properties": {
@@ -5415,54 +5652,6 @@
         "title": "TraceEngineIncompatibleDetail",
         "type": "object"
       },
-      "TracePortfolioDataUnavailableDetail": {
-        "properties": {
-          "code": {
-            "const": "portfolio.data.unavailable",
-            "title": "Code",
-            "type": "string"
-          },
-          "detail": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Detail"
-          },
-          "status": {
-            "$ref": "#/components/schemas/DataLoadStatus"
-          }
-        },
-        "required": [
-          "code",
-          "status",
-          "detail"
-        ],
-        "title": "TracePortfolioDataUnavailableDetail",
-        "type": "object"
-      },
-      "TracePortfolioStrategyInvalidDetail": {
-        "properties": {
-          "code": {
-            "const": "portfolio.strategy.invalid",
-            "title": "Code",
-            "type": "string"
-          },
-          "validation": {
-            "$ref": "#/components/schemas/StrategyValidation"
-          }
-        },
-        "required": [
-          "code",
-          "validation"
-        ],
-        "title": "TracePortfolioStrategyInvalidDetail",
-        "type": "object"
-      },
       "TraceRequestInvalidDetail": {
         "properties": {
           "code": {
@@ -5480,56 +5669,6 @@
           "message"
         ],
         "title": "TraceRequestInvalidDetail",
-        "type": "object"
-      },
-      "TraceRequestValidationIssue": {
-        "properties": {
-          "loc": {
-            "items": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "integer"
-                }
-              ]
-            },
-            "title": "Loc",
-            "type": "array"
-          },
-          "msg": {
-            "title": "Msg",
-            "type": "string"
-          },
-          "type": {
-            "title": "Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "loc",
-          "msg",
-          "type"
-        ],
-        "title": "TraceRequestValidationIssue",
-        "type": "object"
-      },
-      "TraceRequestValidationResponse": {
-        "description": "FastAPI's malformed-envelope 422 shape, alongside coded application diagnostics.",
-        "properties": {
-          "detail": {
-            "items": {
-              "$ref": "#/components/schemas/TraceRequestValidationIssue"
-            },
-            "title": "Detail",
-            "type": "array"
-          }
-        },
-        "required": [
-          "detail"
-        ],
-        "title": "TraceRequestValidationResponse",
         "type": "object"
       },
       "TraceStrategyNotFoundDetail": {
@@ -5599,8 +5738,8 @@
           "detail": {
             "discriminator": {
               "mapping": {
-                "portfolio.data.unavailable": "#/components/schemas/TracePortfolioDataUnavailableDetail",
-                "portfolio.strategy.invalid": "#/components/schemas/TracePortfolioStrategyInvalidDetail",
+                "portfolio.data.unavailable": "#/components/schemas/PortfolioDataUnavailableDetail",
+                "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail",
                 "trace.capability.unsupported": "#/components/schemas/TraceCapabilityUnsupportedDetail",
                 "trace.engine.incompatible": "#/components/schemas/TraceEngineIncompatibleDetail",
                 "trace.request.invalid": "#/components/schemas/TraceRequestInvalidDetail"
@@ -5618,10 +5757,10 @@
                 "$ref": "#/components/schemas/TraceCapabilityUnsupportedDetail"
               },
               {
-                "$ref": "#/components/schemas/TracePortfolioStrategyInvalidDetail"
+                "$ref": "#/components/schemas/PortfolioStrategyInvalidDetail"
               },
               {
-                "$ref": "#/components/schemas/TracePortfolioDataUnavailableDetail"
+                "$ref": "#/components/schemas/PortfolioDataUnavailableDetail"
               }
             ],
             "title": "Detail"
@@ -6011,15 +6150,43 @@
             },
             "description": "Successful Response"
           },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestStrategyNotFoundResponse"
+                }
+              }
+            },
+            "description": "The immutable strategy revision does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestStrategyStaleResponse"
+                }
+              }
+            },
+            "description": "The saved revision hash differs from the expected hash"
+          },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BacktestUnprocessableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationResponse"
+                    }
+                  ],
+                  "title": "Response 422 Startbacktest"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Malformed envelope or a coded backtest preflight diagnostic"
           }
         },
         "summary": "Start Backtest"
@@ -6713,11 +6880,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/PortfolioUnprocessableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationResponse"
+                    }
+                  ],
+                  "title": "Response 422 Previewportfolio"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Malformed envelope or a coded portfolio preflight diagnostic"
           }
         },
         "summary": "Portfolio Preview"
@@ -6815,7 +6990,7 @@
                       "$ref": "#/components/schemas/TraceUnprocessableResponse"
                     },
                     {
-                      "$ref": "#/components/schemas/TraceRequestValidationResponse"
+                      "$ref": "#/components/schemas/RequestValidationResponse"
                     }
                   ],
                   "title": "Response 422 Tracestrategy"

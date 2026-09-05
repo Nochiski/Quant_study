@@ -14,8 +14,12 @@ from pydantic import Field
 
 from strategy_workbench.application.portfolio_design.facade.design import EngineCompatibility
 from strategy_workbench.application.portfolio_design.facade.trace import StrategyTraceRequest
-from strategy_workbench.domain.equity.facade.research_data import DataLoadStatus
-from strategy_workbench.domain.strategy.facade.validation import StrategyValidation
+
+from ._execution_error_contract import (
+    PortfolioDataUnavailableDetail,
+    PortfolioStrategyInvalidDetail,
+    RequestValidationResponse,
+)
 
 
 @dataclass(frozen=True)
@@ -37,25 +41,12 @@ class TraceCapabilityUnsupportedDetail:
     message: str
 
 
-@dataclass(frozen=True)
-class TracePortfolioStrategyInvalidDetail:
-    code: Literal["portfolio.strategy.invalid"]
-    validation: StrategyValidation
-
-
-@dataclass(frozen=True)
-class TracePortfolioDataUnavailableDetail:
-    code: Literal["portfolio.data.unavailable"]
-    status: DataLoadStatus
-    detail: str | None
-
-
 TraceUnprocessableDetail: TypeAlias = Annotated[
     TraceRequestInvalidDetail
     | TraceEngineIncompatibleDetail
     | TraceCapabilityUnsupportedDetail
-    | TracePortfolioStrategyInvalidDetail
-    | TracePortfolioDataUnavailableDetail,
+    | PortfolioStrategyInvalidDetail
+    | PortfolioDataUnavailableDetail,
     Field(discriminator="code"),
 ]
 
@@ -65,21 +56,7 @@ class TraceUnprocessableResponse:
     detail: TraceUnprocessableDetail
 
 
-@dataclass(frozen=True)
-class TraceRequestValidationIssue:
-    loc: tuple[str | int, ...]
-    msg: str
-    type: str
-
-
-@dataclass(frozen=True)
-class TraceRequestValidationResponse:
-    """FastAPI's malformed-envelope 422 shape, alongside coded application diagnostics."""
-
-    detail: tuple[TraceRequestValidationIssue, ...]
-
-
-Trace422Response: TypeAlias = TraceUnprocessableResponse | TraceRequestValidationResponse
+Trace422Response: TypeAlias = TraceUnprocessableResponse | RequestValidationResponse
 
 
 @dataclass(frozen=True)

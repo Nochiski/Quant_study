@@ -58,6 +58,7 @@ from strategy_workbench.domain.portfolio.facade.construction import (
     PortfolioFactorValue,
     PortfolioFieldValue,
     PortfolioObservation,
+    compile_rebalance_schedule,
     compile_target_tape,
 )
 from strategy_workbench.domain.strategy.facade.specification import StrategySpec
@@ -79,6 +80,7 @@ from .ports.outgoing.engine_portfolio import EnginePortfolioPort
 from .ports.outgoing.raw_observations import (
     CancellableRawObservationPort,
     RawObservation,
+    RawObservationContractViolation,
     RawObservationPort,
     RawObservationQuery,
     RawObservationSet,
@@ -244,12 +246,18 @@ class PortfolioDesignService:
                 (plan.minimum_history_sessions - 1 for plan in plans.values()), default=0
             ),
         )
-        if isinstance(self._observation_source, CancellableRawObservationPort):
-            raw = self._observation_source.load_raw_observations_cancellable(
-                raw_query, checkpoint=checkpoint
-            )
-        else:
-            raw = self._observation_source.load_raw_observations(raw_query)
+        try:
+            if isinstance(self._observation_source, CancellableRawObservationPort):
+                raw = self._observation_source.load_raw_observations_cancellable(
+                    raw_query, checkpoint=checkpoint
+                )
+            else:
+                raw = self._observation_source.load_raw_observations(raw_query)
+            # Normal construction already validates the immutable value. Recheck at the consumer
+            # boundary so a foreign/stale adapter cannot bypass the current port contract.
+            raw.validate_contract()
+        except RawObservationContractViolation as error:
+            raise RawObservationContractError(str(error)) from error
         checkpoint()
         if not raw.ok:
             raise RawObservationUnavailableError(raw.status, raw.detail)
@@ -259,7 +267,12 @@ class PortfolioDesignService:
                 actual=raw.data_snapshot_id,
             )
         _reject_sessions_outside_strategy_range(raw, spec)
-        _validate_loaded_trace_scope(pipeline_options, raw)
+        schedule = compile_rebalance_schedule(spec, raw.sessions, checkpoint=checkpoint)
+        _validate_loaded_trace_scope(
+            pipeline_options,
+            raw,
+            first_signal_as_of=schedule.first_signal_as_of,
+        )
         checkpoint()
         factor_observations = tuple(
             _to_factor_observation(item) for item in _checkpointed(raw.observations, checkpoint)
@@ -326,6 +339,7 @@ class PortfolioDesignService:
                 data_snapshot_id=raw.data_snapshot_id,
                 sessions=raw.sessions,
                 observations=observations,
+                schedule=schedule,
                 checkpoint=checkpoint,
             )
         except NonFinitePortfolioCalculationError as error:
@@ -428,7 +442,12 @@ def _validate_trace_selection(
         )
 
 
-def _validate_loaded_trace_scope(options: PortfolioPipelineOptions, raw: RawObservationSet) -> None:
+def _validate_loaded_trace_scope(
+    options: PortfolioPipelineOptions,
+    raw: RawObservationSet,
+    *,
+    first_signal_as_of: date | None,
+) -> None:
     """Reject an untraceable date/security scope before any FactorGraph calculation.
 
     A non-member row is still a valid point-in-time security observation and must not be confused
@@ -457,15 +476,22 @@ def _validate_loaded_trace_scope(options: PortfolioPipelineOptions, raw: RawObse
                 f"snapshot={raw.data_snapshot_id!r}"
             )
     if options.starting_holdings:
-        sessions = set(raw.sessions)
-        observed_ids = {item.security_id for item in raw.observations if item.as_of in sessions}
+        if first_signal_as_of is None:
+            raise InvalidPortfolioTraceSelectionError(
+                "trace starting holdings require a TargetTape signal frame — "
+                f"snapshot={raw.data_snapshot_id!r}"
+            )
+        observed_ids = {
+            item.security_id for item in raw.observations if item.as_of == first_signal_as_of
+        }
         unmatched_holdings = {
             holding.security_id for holding in options.starting_holdings
         } - observed_ids
         if unmatched_holdings:
             raise InvalidPortfolioTraceSelectionError(
-                "trace starting holdings are absent from the selected snapshot — "
-                f"security_ids={sorted(unmatched_holdings)!r} snapshot={raw.data_snapshot_id!r}"
+                "trace starting holdings are absent from the first TargetTape signal frame — "
+                f"security_ids={sorted(unmatched_holdings)!r} "
+                f"signal_as_of={first_signal_as_of} snapshot={raw.data_snapshot_id!r}"
             )
 
 

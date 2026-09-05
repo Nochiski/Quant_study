@@ -5,6 +5,20 @@ export type ClientOptions = {
 };
 
 /**
+ * BacktestRunInvalidDetail
+ */
+export type BacktestRunInvalidDetail = {
+  /**
+   * Code
+   */
+  code: "backtest.run.invalid";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
  * BacktestRunResult
  */
 export type BacktestRunResult = {
@@ -127,6 +141,67 @@ export type BacktestSeries = {
  */
 export type BacktestStartResponse = {
   run: BacktestRunState;
+};
+
+/**
+ * BacktestStrategyNotFoundDetail
+ */
+export type BacktestStrategyNotFoundDetail = {
+  /**
+   * Code
+   */
+  code: "backtest.strategy.not_found";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * BacktestStrategyNotFoundResponse
+ */
+export type BacktestStrategyNotFoundResponse = {
+  detail: BacktestStrategyNotFoundDetail;
+};
+
+/**
+ * BacktestStrategyStaleDetail
+ */
+export type BacktestStrategyStaleDetail = {
+  /**
+   * Code
+   */
+  code: "backtest.strategy.stale";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * BacktestStrategyStaleResponse
+ */
+export type BacktestStrategyStaleResponse = {
+  detail: BacktestStrategyStaleDetail;
+};
+
+/**
+ * BacktestUnprocessableResponse
+ */
+export type BacktestUnprocessableResponse = {
+  /**
+   * Detail
+   */
+  detail:
+    | ({
+        code: "backtest.run.invalid";
+      } & BacktestRunInvalidDetail)
+    | ({
+        code: "portfolio.strategy.invalid";
+      } & PortfolioStrategyInvalidDetail)
+    | ({
+        code: "portfolio.data.unavailable";
+      } & PortfolioDataUnavailableDetail);
 };
 
 /**
@@ -1777,6 +1852,21 @@ export type ParameterNode = {
 };
 
 /**
+ * PortfolioDataUnavailableDetail
+ */
+export type PortfolioDataUnavailableDetail = {
+  /**
+   * Code
+   */
+  code: "portfolio.data.unavailable";
+  /**
+   * Detail
+   */
+  detail: string | null;
+  status: DataLoadStatus;
+};
+
+/**
  * PortfolioPreview
  *
  * The tape a run will consume, plus the caveats the observation source reported.
@@ -1860,6 +1950,33 @@ export type PortfolioStep = {
    */
   turnover_buffer_count?: number;
   weighting?: WeightingMethod;
+};
+
+/**
+ * PortfolioStrategyInvalidDetail
+ */
+export type PortfolioStrategyInvalidDetail = {
+  /**
+   * Code
+   */
+  code: "portfolio.strategy.invalid";
+  validation: StrategyValidation;
+};
+
+/**
+ * PortfolioUnprocessableResponse
+ */
+export type PortfolioUnprocessableResponse = {
+  /**
+   * Detail
+   */
+  detail:
+    | ({
+        code: "portfolio.strategy.invalid";
+      } & PortfolioStrategyInvalidDetail)
+    | ({
+        code: "portfolio.data.unavailable";
+      } & PortfolioDataUnavailableDetail);
 };
 
 /**
@@ -2135,6 +2252,36 @@ export type RawTrade = {
  */
 export type RebalanceFrequency =
   "every_n_sessions" | "weekly" | "monthly" | "quarterly";
+
+/**
+ * RequestValidationIssue
+ */
+export type RequestValidationIssue = {
+  /**
+   * Loc
+   */
+  loc: Array<string | number>;
+  /**
+   * Msg
+   */
+  msg: string;
+  /**
+   * Type
+   */
+  type: string;
+};
+
+/**
+ * RequestValidationResponse
+ *
+ * FastAPI's malformed-envelope 422 shape, alongside coded application diagnostics.
+ */
+export type RequestValidationResponse = {
+  /**
+   * Detail
+   */
+  detail: Array<RequestValidationIssue>;
+};
 
 /**
  * ResearchCatalog
@@ -3386,32 +3533,6 @@ export type TraceEngineIncompatibleDetail = {
 };
 
 /**
- * TracePortfolioDataUnavailableDetail
- */
-export type TracePortfolioDataUnavailableDetail = {
-  /**
-   * Code
-   */
-  code: "portfolio.data.unavailable";
-  /**
-   * Detail
-   */
-  detail: string | null;
-  status: DataLoadStatus;
-};
-
-/**
- * TracePortfolioStrategyInvalidDetail
- */
-export type TracePortfolioStrategyInvalidDetail = {
-  /**
-   * Code
-   */
-  code: "portfolio.strategy.invalid";
-  validation: StrategyValidation;
-};
-
-/**
  * TraceRequestInvalidDetail
  */
 export type TraceRequestInvalidDetail = {
@@ -3423,36 +3544,6 @@ export type TraceRequestInvalidDetail = {
    * Message
    */
   message: string;
-};
-
-/**
- * TraceRequestValidationIssue
- */
-export type TraceRequestValidationIssue = {
-  /**
-   * Loc
-   */
-  loc: Array<string | number>;
-  /**
-   * Msg
-   */
-  msg: string;
-  /**
-   * Type
-   */
-  type: string;
-};
-
-/**
- * TraceRequestValidationResponse
- *
- * FastAPI's malformed-envelope 422 shape, alongside coded application diagnostics.
- */
-export type TraceRequestValidationResponse = {
-  /**
-   * Detail
-   */
-  detail: Array<TraceRequestValidationIssue>;
 };
 
 /**
@@ -3516,10 +3607,10 @@ export type TraceUnprocessableResponse = {
       } & TraceCapabilityUnsupportedDetail)
     | ({
         code: "portfolio.strategy.invalid";
-      } & TracePortfolioStrategyInvalidDetail)
+      } & PortfolioStrategyInvalidDetail)
     | ({
         code: "portfolio.data.unavailable";
-      } & TracePortfolioDataUnavailableDetail);
+      } & PortfolioDataUnavailableDetail);
 };
 
 /**
@@ -3741,9 +3832,19 @@ export type StartBacktestData = {
 
 export type StartBacktestErrors = {
   /**
-   * Validation Error
+   * The immutable strategy revision does not exist
    */
-  422: HttpValidationError;
+  404: BacktestStrategyNotFoundResponse;
+  /**
+   * The saved revision hash differs from the expected hash
+   */
+  409: BacktestStrategyStaleResponse;
+  /**
+   * Response 422 Startbacktest
+   *
+   * Malformed envelope or a coded backtest preflight diagnostic
+   */
+  422: BacktestUnprocessableResponse | RequestValidationResponse;
 };
 
 export type StartBacktestError = StartBacktestErrors[keyof StartBacktestErrors];
@@ -4184,9 +4285,11 @@ export type PreviewPortfolioData = {
 
 export type PreviewPortfolioErrors = {
   /**
-   * Validation Error
+   * Response 422 Previewportfolio
+   *
+   * Malformed envelope or a coded portfolio preflight diagnostic
    */
-  422: HttpValidationError;
+  422: PortfolioUnprocessableResponse | RequestValidationResponse;
 };
 
 export type PreviewPortfolioError =
@@ -4250,7 +4353,7 @@ export type TraceStrategyErrors = {
    *
    * Malformed envelope or a coded trace preflight diagnostic
    */
-  422: TraceUnprocessableResponse | TraceRequestValidationResponse;
+  422: TraceUnprocessableResponse | RequestValidationResponse;
   /**
    * The client cancelled the trace request
    */

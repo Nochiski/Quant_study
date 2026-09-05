@@ -11,6 +11,8 @@ Contract:
   never leaked. The application layer treats a violation as an adapter bug (fail-closed).
 - A field is *omitted* when nothing was published as of `as_of`; `value=None` means the source
   observed a missing/uncollected cell (the value exists as a fact, and it is "no number").
+  Numeric values and `previous_weight` are always finite; NaN/±Infinity is an adapter contract
+  violation and is rejected before factor or portfolio calculation rather than normalized.
 - `universe_member` is a fact of (as_of, security) alone: the same pair answers the same way
   regardless of the query window or history length (window invariance).
 - `history_sessions_before_start` counts sessions strictly before `start` (as_of is not one of
@@ -31,6 +33,7 @@ Contract:
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
@@ -39,6 +42,19 @@ from typing import Protocol, runtime_checkable
 from strategy_workbench.domain.equity.facade.research_data import DataLoadStatus
 
 RawFieldValueType = float | str | bool | None
+
+
+class RawObservationContractViolation(ValueError):
+    """An adapter attempted to publish a structurally or numerically invalid raw snapshot."""
+
+
+def _finite_number(value: object) -> bool:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
 
 
 @dataclass(frozen=True)
@@ -107,21 +123,27 @@ class RawObservationSet:
         return self.status is DataLoadStatus.OK
 
     def __post_init__(self) -> None:
+        self.validate_contract()
+
+    def validate_contract(self) -> None:
+        """Validate again at the consumer boundary as well as at normal construction time."""
         if list(self.sessions) != sorted(set(self.sessions)):
-            raise ValueError(f"raw observation sessions must ascend — sessions={self.sessions}")
+            raise RawObservationContractViolation(
+                f"raw observation sessions must ascend — sessions={self.sessions}"
+            )
         if list(self.history_sessions) != sorted(set(self.history_sessions)):
-            raise ValueError(
+            raise RawObservationContractViolation(
                 f"raw observation history must ascend — history={self.history_sessions}"
             )
         overlaps = bool(self.sessions and self.history_sessions)
         if overlaps and self.history_sessions[-1] >= self.sessions[0]:
-            raise ValueError(
+            raise RawObservationContractViolation(
                 "raw observation history must precede the requested range — "
                 f"last_history={self.history_sessions[-1]} first_session={self.sessions[0]}"
             )
         keys = [(item.as_of, item.security_id) for item in self.observations]
         if keys != sorted(set(keys)):
-            raise ValueError(
+            raise RawObservationContractViolation(
                 "raw observations must be ordered by (as_of, security_id) and unique — "
                 f"count={len(keys)}"
             )
@@ -130,13 +152,30 @@ class RawObservationSet:
         declared = set(self.sessions) | set(self.history_sessions)
         undeclared = sorted({item.as_of for item in self.observations} - declared)
         if undeclared:
-            raise ValueError(
+            raise RawObservationContractViolation(
                 "raw observations carry dates that are neither a session nor warm-up history — "
                 f"undeclared={undeclared[:5]} undeclared_count={len(undeclared)} "
                 f"declared_sessions={len(self.sessions)} "
                 f"declared_history={len(self.history_sessions)} "
                 f"snapshot={self.data_snapshot_id!r}"
             )
+        for observation in self.observations:
+            if not _finite_number(observation.previous_weight):
+                raise RawObservationContractViolation(
+                    "raw observation previous_weight must be finite — "
+                    f"as_of={observation.as_of} security_id={observation.security_id!r} "
+                    f"value={observation.previous_weight!r} snapshot={self.data_snapshot_id!r}"
+                )
+            for field in observation.fields:
+                value = field.value
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    if not _finite_number(value):
+                        raise RawObservationContractViolation(
+                            "raw numeric field value must be finite — "
+                            f"as_of={observation.as_of} security_id={observation.security_id!r} "
+                            f"field_id={field.field_id!r} value={value!r} "
+                            f"snapshot={self.data_snapshot_id!r}"
+                        )
 
 
 class RawObservationPort(Protocol):

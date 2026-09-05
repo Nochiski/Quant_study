@@ -4,7 +4,7 @@ import hashlib
 import json
 import math
 from collections.abc import Callable, Iterable, Iterator, Mapping
-from dataclasses import fields, is_dataclass, replace
+from dataclasses import dataclass, fields, is_dataclass, replace
 from datetime import date
 from enum import Enum
 from typing import TypeGuard, TypeVar
@@ -58,17 +58,58 @@ class NonFinitePortfolioCalculationError(ArithmeticError):
         self.context = context
 
 
+@dataclass(frozen=True)
+class PortfolioRebalanceSchedule:
+    """Compiler-owned rebalance pairs shared by preflight and TargetTape construction."""
+
+    sessions: tuple[date, ...]
+    pairs: tuple[tuple[date, date], ...]
+    rebalance: RebalanceFrequency
+    rebalance_every_n_sessions: int
+
+    @property
+    def first_signal_as_of(self) -> date | None:
+        return self.pairs[0][0] if self.pairs else None
+
+
+def compile_rebalance_schedule(
+    spec: StrategySpec,
+    sessions: tuple[date, ...],
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
+) -> PortfolioRebalanceSchedule:
+    ordered_sessions = tuple(sorted(set(sessions)))
+    if len(ordered_sessions) != len(sessions):
+        raise ValueError("portfolio sessions must be unique")
+    return PortfolioRebalanceSchedule(
+        sessions=ordered_sessions,
+        pairs=_rebalance_pairs(spec, ordered_sessions, checkpoint=checkpoint),
+        rebalance=spec.portfolio.rebalance,
+        rebalance_every_n_sessions=spec.portfolio.rebalance_every_n_sessions,
+    )
+
+
 def compile_target_tape(
     spec: StrategySpec,
     *,
     data_snapshot_id: str,
     sessions: tuple[date, ...],
     observations: tuple[PortfolioObservation, ...],
+    schedule: PortfolioRebalanceSchedule | None = None,
     checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> TargetTape:
+    prepared_schedule = schedule or compile_rebalance_schedule(
+        spec, sessions, checkpoint=checkpoint
+    )
     ordered_sessions = tuple(sorted(set(sessions)))
     if len(ordered_sessions) != len(sessions):
         raise ValueError("portfolio sessions must be unique")
+    if (
+        prepared_schedule.sessions != ordered_sessions
+        or prepared_schedule.rebalance is not spec.portfolio.rebalance
+        or prepared_schedule.rebalance_every_n_sessions != spec.portfolio.rebalance_every_n_sessions
+    ):
+        raise ValueError("portfolio rebalance schedule does not match the strategy and sessions")
     by_date: dict[date, list[PortfolioObservation]] = {}
     seen: set[tuple[date, str]] = set()
     for observation in _checkpointed(observations, checkpoint):
@@ -82,9 +123,7 @@ def compile_target_tape(
     # The book is folded frame by frame: the compiler owns `previous_weight` from the second
     # rebalance on, and `PortfolioObservation.previous_weight` seeds only the first (D-002).
     carried: dict[str, float] | None = None
-    for signal_as_of, execution_on in _checkpointed(
-        _rebalance_pairs(spec, ordered_sessions, checkpoint=checkpoint), checkpoint
-    ):
+    for signal_as_of, execution_on in _checkpointed(prepared_schedule.pairs, checkpoint):
         frame_observations = tuple(by_date.get(signal_as_of, ()))
         previous_weights = (
             {

@@ -1,5 +1,7 @@
 from strategy_workbench.domain.portfolio._compiler import (
     NonFinitePortfolioCalculationError,
+    PortfolioRebalanceSchedule,
+    compile_rebalance_schedule,
     compile_target_tape,
 )
 from strategy_workbench.domain.portfolio._models import (
@@ -24,8 +26,10 @@ __all__ = [
     "PortfolioFieldValue",
     "PortfolioInputValue",
     "PortfolioObservation",
+    "PortfolioRebalanceSchedule",
     "TargetFrame",
     "TargetPosition",
     "TargetTape",
+    "compile_rebalance_schedule",
     "compile_target_tape",
 ]

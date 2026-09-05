@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import TypeAdapter
 
+from strategy_workbench.adapters.inbound.http_api._backtest_contract import Backtest422Response
 from strategy_workbench.adapters.inbound.http_api._trace_contract import (
     Trace422Response,
     TraceStrategyNotFoundResponse,
@@ -468,6 +469,31 @@ def test_finite_factor_overflow_is_the_same_coded_failure_for_all_execution_rout
                 "overflow",
             )
         }
+    TypeAdapter(Backtest422Response).validate_python(responses[-1].json())
+
+
+def test_starting_holdings_without_a_target_frame_return_a_typed_preflight_error() -> None:
+    client = TestClient(build_http_app())
+    spec = client.get("/api/v1/strategies/template").json()
+    spec["data"].update({"start": "2026-09-04", "end": "2026-09-04"})
+    spec["portfolio"].update({"rebalance": "every_n_sessions", "rebalance_every_n_sessions": 1})
+    factor = spec["factors"]["factors"][0]
+
+    response = client.post(
+        "/api/v1/strategies/debug/trace",
+        json={
+            "strategy_source": {"kind": "inline_draft", "spec": spec},
+            "as_of": spec["data"]["end"],
+            "security_ids": ["sec-005930-1"],
+            "factor_id": factor["factor_id"],
+            "starting_holdings": [{"security_id": "sec-005930-1", "weight": 0.5}],
+        },
+    )
+
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"]["code"] == "trace.request.invalid"
+    assert "require a TargetTape signal frame" in response.json()["detail"]["message"]
+    TypeAdapter(Trace422Response).validate_python(response.json())
 
 
 def test_trace_openapi_contract_exposes_bounded_source_union() -> None:

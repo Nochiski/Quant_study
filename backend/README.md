@@ -10,7 +10,9 @@ Persistent Rust Engine → atomic local JSON artifact이며 Python reference cor
 
 - `POST /api/v1/backtests`: Rust/Python core, 초기 자본, benchmark, metric scope와 함께 실행 시작.
   `strategy_source`로 저장 revision(`saved_revision`, spec_hash 대조) 또는 inline draft를 지정하고
-  manifest의 `strategy_provenance`에 출처를 기록 (기존 `strategy` inline도 유지)
+  manifest의 `strategy_provenance`에 출처를 기록 (기존 `strategy` inline도 유지). 실제
+  `backtest.run.invalid`·`portfolio.*` 422와 saved-reference 404/409는 OpenAPI/generated SDK의
+  discriminated error 계약으로 함께 제공한다.
 - `GET /api/v1/backtests/{run_id}`: 상태·진행률·artifact hash 조회
 - `GET /api/v1/backtests/{run_id}/events`: SSE progress stream
 - `GET /api/v1/backtests/{run_id}/result`: versioned metrics, 차트 series, raw artifact, manifest 조회
@@ -36,7 +38,9 @@ equal/factor-score/rank/risk weight, exposure cap·neutralization, turnover/liqu
   호환 계약으로 유지하고 trace는 별도 `CancellableRawObservationPort`를 계산 전에 협상한다.
   비세션 날짜와 snapshot에 없는 종목, 모든 StrategySpec numeric leaf의 non-finite 값과 유한
   피연산자의 산술 overflow는 빈 성공값·NaN tape 대신 coded 422로 실패한다. 404/409/422/499
-  envelope, 요청 cap과 `trace.capability.unsupported` 진단은 OpenAPI/generated SDK에 명시된다
+  envelope, 요청 cap과 `trace.capability.unsupported` 진단은 OpenAPI/generated SDK에 명시된다.
+  Raw port의 모든 숫자와 opening book은 계산 전 finite 계약을 통과해야 하고, starting holding은
+  domain compiler가 TargetTape와 공유하는 실제 첫 signal frame에 존재할 때만 적용된다.
 - `equity_mock`: 실제 Equity DB가 오기 전 portfolio observation port를 구현하는 deterministic adapter
 - `engine_portfolio`: `StrategyRequirements`를 사전 협상하고 `SetPortfolioTarget(REPLACE)`로 변환
 

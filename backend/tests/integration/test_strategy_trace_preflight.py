@@ -27,6 +27,7 @@ from strategy_workbench.application.portfolio_design.facade.design import (
     IncompatiblePortfolioRequestError,
     InvalidPortfolioRequestError,
     PortfolioDesignService,
+    PortfolioStartingHolding,
     TraceObservationCapabilityError,
 )
 from strategy_workbench.application.portfolio_design.facade.ports import RawObservationQuery
@@ -50,6 +51,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
     EligibilityRule,
     EligibilityStep,
     FloatParameter,
+    RebalanceFrequency,
 )
 
 
@@ -122,6 +124,34 @@ class _LegacyRawAdapter:
         return self._delegate.load_raw_observations(query)
 
 
+class _SparseFirstSignalAdapter(_LegacyRawAdapter):
+    def __init__(self, security_id: str) -> None:
+        super().__init__()
+        self._security_id = security_id
+
+    def resolve_factor_fields(self, field_ids: tuple[str, ...]) -> FactorMetadataSnapshot:
+        return self._delegate.resolve_factor_fields(field_ids)
+
+    def load_raw_observations(self, query: RawObservationQuery):
+        raw = super().load_raw_observations(query)
+        first_signal = raw.sessions[0]
+        return replace(
+            raw,
+            observations=tuple(
+                observation
+                for observation in raw.observations
+                if not (
+                    observation.as_of == first_signal
+                    and observation.security_id == self._security_id
+                )
+            ),
+        )
+
+    def load_raw_observations_cancellable(self, query: RawObservationQuery, *, checkpoint):
+        checkpoint()
+        return self.load_raw_observations(query)
+
+
 def _spec():
     return StrategyDesignService(
         InMemoryStrategyRepository(),
@@ -139,6 +169,79 @@ def _request(spec, *, node_ids: tuple[str, ...] = ()) -> StrategyTraceRequest:
         factor_id=factor.factor_id,
         node_ids=node_ids,
     )
+
+
+def _every_session_spec():
+    spec = _spec()
+    return replace(
+        spec,
+        portfolio=replace(
+            spec.portfolio,
+            rebalance=RebalanceFrequency.EVERY_N_SESSIONS,
+            rebalance_every_n_sessions=1,
+        ),
+    )
+
+
+def test_starting_holding_must_exist_on_the_actual_first_signal_frame() -> None:
+    security_id = "sec-005930-1"
+    spec = _every_session_spec()
+    holding = PortfolioStartingHolding(security_id, 0.5)
+
+    present_source = MockEquityDataAdapter.demo()
+    present = StrategyTraceService(
+        PortfolioDesignService(
+            present_source,
+            BacktestEnginePortfolioAdapter(),
+            factor_metadata=present_source,
+            factor_registry_version="factor-registry-v1",
+        ),
+        InMemoryStrategyRepository(),
+    )
+    accepted = present.trace(replace(_request(spec), starting_holdings=(holding,)))
+    assert accepted.spec_hash
+
+    sparse_source = _SparseFirstSignalAdapter(security_id)
+    sparse = StrategyTraceService(
+        PortfolioDesignService(
+            sparse_source,
+            BacktestEnginePortfolioAdapter(),
+            factor_metadata=sparse_source,
+            factor_registry_version="factor-registry-v1",
+        ),
+        InMemoryStrategyRepository(),
+    )
+    with pytest.raises(
+        InvalidStrategyTraceRequestError,
+        match="absent from the first TargetTape signal frame",
+    ):
+        sparse.trace(replace(_request(spec), starting_holdings=(holding,)))
+
+
+def test_starting_holding_requires_at_least_one_target_tape_frame() -> None:
+    source = MockEquityDataAdapter.demo()
+    spec = _every_session_spec()
+    spec = replace(spec, data=replace(spec.data, start=spec.data.end))
+    service = StrategyTraceService(
+        PortfolioDesignService(
+            source,
+            BacktestEnginePortfolioAdapter(),
+            factor_metadata=source,
+            factor_registry_version="factor-registry-v1",
+        ),
+        InMemoryStrategyRepository(),
+    )
+
+    with pytest.raises(
+        InvalidStrategyTraceRequestError,
+        match="require a TargetTape signal frame",
+    ):
+        service.trace(
+            replace(
+                _request(spec),
+                starting_holdings=(PortfolioStartingHolding("sec-005930-1", 0.5),),
+            )
+        )
 
 
 def test_engine_capability_failure_precedes_metadata_and_raw_calculation() -> None:

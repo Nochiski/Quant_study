@@ -19,6 +19,7 @@ from strategy_workbench.domain.portfolio.facade.construction import (
     PortfolioFactorValue,
     PortfolioFieldValue,
     PortfolioObservation,
+    compile_rebalance_schedule,
     compile_target_tape,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
@@ -88,6 +89,29 @@ def _compile(spec, observations, sessions=None):
         sessions=sessions or (signal_day, signal_day + timedelta(days=1)),
         observations=tuple(observations),
     )
+
+
+def test_preflight_and_target_tape_share_the_compiler_owned_schedule(monkeypatch) -> None:
+    from strategy_workbench.domain.portfolio import _compiler as compiler_module
+
+    spec = _spec()
+    sessions = (date(2026, 1, 2), date(2026, 1, 5), date(2026, 1, 6))
+    schedule = compile_rebalance_schedule(spec, sessions)
+    assert schedule.first_signal_as_of == sessions[0]
+
+    def fail_if_recomputed(*args, **kwargs):
+        raise AssertionError((args, kwargs))
+
+    monkeypatch.setattr(compiler_module, "_rebalance_pairs", fail_if_recomputed)
+    tape = compile_target_tape(
+        spec,
+        data_snapshot_id="snapshot-1",
+        sessions=sessions,
+        observations=(_observation(sessions[0], "a", 1.0),),
+        schedule=schedule,
+    )
+
+    assert tuple(frame.signal_as_of for frame in tape.frames) == sessions[:-1]
 
 
 def test_eligibility_and_point_in_time_rules_explain_every_rejection() -> None:

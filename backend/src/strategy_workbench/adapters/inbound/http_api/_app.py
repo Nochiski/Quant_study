@@ -99,6 +99,12 @@ from strategy_workbench.domain.strategy.facade.explanation import StrategyExplan
 from strategy_workbench.domain.strategy.facade.specification import StrategySpec
 from strategy_workbench.domain.strategy.facade.validation import StrategyValidation
 
+from ._backtest_contract import (
+    Backtest422Response,
+    BacktestStrategyNotFoundResponse,
+    BacktestStrategyStaleResponse,
+)
+from ._execution_error_contract import Portfolio422Response
 from ._trace_contract import (
     Trace422Response,
     TraceCancelledDetail,
@@ -191,6 +197,20 @@ def create_app(
         "/api/v1/backtests",
         operation_id="startBacktest",
         status_code=status.HTTP_202_ACCEPTED,
+        responses={
+            404: {
+                "model": BacktestStrategyNotFoundResponse,
+                "description": "The immutable strategy revision does not exist",
+            },
+            409: {
+                "model": BacktestStrategyStaleResponse,
+                "description": "The saved revision hash differs from the expected hash",
+            },
+            422: {
+                "model": Backtest422Response,
+                "description": "Malformed envelope or a coded backtest preflight diagnostic",
+            },
+        },
     )
     def start_backtest(spec: BacktestRunSpec) -> BacktestStartResponse:
         try:
@@ -294,6 +314,12 @@ def create_app(
     @app.post(
         "/api/v1/portfolio/preview",
         operation_id="previewPortfolio",
+        responses={
+            422: {
+                "model": Portfolio422Response,
+                "description": "Malformed envelope or a coded portfolio preflight diagnostic",
+            }
+        },
     )
     def portfolio_preview(request: PortfolioPreviewRequest) -> PortfolioPreview:
         try:

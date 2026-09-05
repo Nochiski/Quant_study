@@ -20,6 +20,7 @@ from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
 )
 from strategy_workbench.application.portfolio_design.facade.ports import (
     CancellableRawObservationPort,
+    RawFieldValue,
     RawObservation,
     RawObservationPort,
     RawObservationQuery,
@@ -273,6 +274,28 @@ def test_result_rejects_observations_on_undeclared_dates() -> None:
 
     accepted = RawObservationSet(DataLoadStatus.OK, "snap", (declared, stray), (), rows)
     assert len(accepted.observations) == 2
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_result_rejects_every_non_finite_raw_number(value: float) -> None:
+    field = RawFieldValue("price.market_cap", value, START)
+    with pytest.raises(ValueError, match="raw numeric field value must be finite"):
+        RawObservationSet(
+            DataLoadStatus.OK,
+            "snap",
+            (START,),
+            (),
+            (RawObservation(START, "a", True, (field,)),),
+        )
+
+    with pytest.raises(ValueError, match="previous_weight must be finite"):
+        RawObservationSet(
+            DataLoadStatus.OK,
+            "snap",
+            (START,),
+            (),
+            (RawObservation(START, "a", True, (), previous_weight=value),),
+        )
 
 
 @pytest.mark.parametrize("adapter", ADAPTERS)

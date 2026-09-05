@@ -151,6 +151,7 @@ const isRootCollection = (
   if (Array.isArray(value) || isRecord(value)) return true;
   if (rootSchema === null) return false;
   const resolved = resolveRef(rootSchema, option.schema);
+  if (resolved === null) return false;
   return (
     resolved.type === "array" ||
     resolved.type === "object" ||

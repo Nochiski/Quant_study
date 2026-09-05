@@ -3,6 +3,7 @@ import type {
   MetricDefinition,
   MetricValue,
 } from "../../../shared/api";
+import { t } from "../../../shared/config";
 
 type ChartSeries = {
   label: string;
@@ -46,7 +47,7 @@ const LineChart = ({
         <header>
           <h4>{title}</h4>
         </header>
-        <p className="inline-state">이 구간에서 산출 가능한 값이 없습니다.</p>
+        <p className="inline-state">{t("backtest.result.chartEmpty")}</p>
       </section>
     );
   }
@@ -67,7 +68,7 @@ const LineChart = ({
         </div>
       </header>
       <svg
-        aria-label={`${title} chart`}
+        aria-label={`${title} ${t("backtest.result.chart")}`}
         preserveAspectRatio="none"
         role="img"
         viewBox="0 0 620 180"
@@ -157,8 +158,8 @@ export const BacktestRunDetail = ({
     <article className="run-detail">
       <header className="run-detail__header">
         <div>
-          <span className="section-kicker">PROFESSIONAL RESULT</span>
-          <h3>백테스트 결과</h3>
+          <span className="section-kicker">{t("backtest.result.kicker")}</span>
+          <h3>{t("backtest.result.title")}</h3>
           <p>
             {result.manifest.engine_core.toUpperCase()} core · registry{" "}
             <code>{result.manifest.metric_registry_version}</code>
@@ -167,7 +168,10 @@ export const BacktestRunDetail = ({
         <span className="run-id">{result.manifest.run_id.slice(0, 12)}</span>
       </header>
 
-      <section className="metric-highlights" aria-label="핵심 성과 지표">
+      <section
+        className="metric-highlights"
+        aria-label={t("backtest.result.highlights")}
+      >
         {highlights.map((metricId) => {
           const metric = fullMetrics.get(metricId);
           const definition = definitions.get(metricId);
@@ -185,63 +189,63 @@ export const BacktestRunDetail = ({
         <LineChart
           series={[
             {
-              label: "Strategy",
+              label: t("backtest.result.series.strategy"),
               color: "var(--chart-series-1)",
               values: result.series.equity.map((item) => item.equity),
             },
             {
-              label: "Benchmark",
+              label: t("backtest.result.series.benchmark"),
               color: "var(--chart-series-2)",
               values: result.series.equity.map((item) => item.benchmark_equity),
             },
           ]}
-          title="Equity curve"
+          title={t("backtest.result.chart.equity")}
         />
         <LineChart
           series={[
             {
-              label: "Drawdown",
+              label: t("backtest.result.series.drawdown"),
               color: "var(--chart-series-3)",
               values: result.series.drawdown.map((item) => item.drawdown),
             },
           ]}
-          title="Drawdown"
+          title={t("backtest.result.chart.drawdown")}
         />
         <LineChart
           series={[
             {
-              label: "Rolling Sharpe",
+              label: t("backtest.result.series.rollingSharpe"),
               color: "var(--chart-series-4)",
               values: result.series.rolling_sharpe.map((item) => item.value),
             },
           ]}
-          title="Rolling Sharpe"
+          title={t("backtest.result.chart.rollingSharpe")}
         />
         <LineChart
           series={[
             {
-              label: "Gross",
+              label: t("backtest.result.series.gross"),
               color: "var(--chart-series-5)",
               values: result.artifacts.snapshots.map(
                 (item) => item.gross_exposure,
               ),
             },
             {
-              label: "Net",
+              label: t("backtest.result.series.net"),
               color: "var(--chart-series-6)",
               values: result.artifacts.snapshots.map(
                 (item) => item.net_exposure,
               ),
             },
           ]}
-          title="Exposure"
+          title={t("backtest.result.chart.exposure")}
         />
       </div>
 
       <section className="monthly-panel">
         <header>
-          <h4>Monthly returns</h4>
-          <span>서버 산출 월별 성과</span>
+          <h4>{t("backtest.result.monthly")}</h4>
+          <span>{t("backtest.result.monthly.description")}</span>
         </header>
         <div className="monthly-grid">
           {result.series.monthly_returns.map((item) => (
@@ -261,22 +265,22 @@ export const BacktestRunDetail = ({
       <section className="raw-metric-panel">
         <header>
           <div>
-            <h4>Raw metric table</h4>
-            <p>
-              None과 0을 구분하고 Full·IS·Validation·OOS scope를 보존합니다.
-            </p>
+            <h4>{t("backtest.result.metrics")}</h4>
+            <p>{t("backtest.result.metrics.description")}</p>
           </div>
-          <span>{result.metrics.length} values</span>
+          <span>
+            {result.metrics.length} {t("backtest.result.values")}
+          </span>
         </header>
         <div className="result-table-wrap">
           <table className="result-table">
             <thead>
               <tr>
-                <th>Scope</th>
-                <th>Metric</th>
-                <th>Category</th>
-                <th>Value</th>
-                <th>Samples</th>
+                <th>{t("backtest.result.column.scope")}</th>
+                <th>{t("backtest.result.column.metric")}</th>
+                <th>{t("backtest.result.column.category")}</th>
+                <th>{t("backtest.result.column.value")}</th>
+                <th>{t("backtest.result.column.samples")}</th>
               </tr>
             </thead>
             <tbody>
@@ -306,30 +310,28 @@ export const BacktestRunDetail = ({
 
       <section className="trade-panel">
         <header>
-          <h4>Closed trades</h4>
+          <h4>{t("backtest.result.trades")}</h4>
           <span>
-            orders {result.artifacts.orders.length} · fills{" "}
-            {result.artifacts.fills.length} · positions{" "}
-            {result.artifacts.positions.length}
+            {t("backtest.result.orders")} {result.artifacts.orders.length} ·{" "}
+            {t("backtest.result.fills")} {result.artifacts.fills.length} ·{" "}
+            {t("backtest.result.positions")} {result.artifacts.positions.length}
           </span>
         </header>
         {result.artifacts.trades.length === 0 ? (
-          <p className="inline-state">
-            이 실행에는 청산 완료된 거래가 없습니다.
-          </p>
+          <p className="inline-state">{t("backtest.result.trades.empty")}</p>
         ) : (
           <div className="result-table-wrap">
             <table className="result-table">
               <thead>
                 <tr>
-                  <th>Security</th>
-                  <th>Side</th>
-                  <th>Opened</th>
-                  <th>Closed</th>
-                  <th>Qty</th>
-                  <th>P&amp;L</th>
-                  <th>Fees</th>
-                  <th>Slippage</th>
+                  <th>{t("backtest.result.column.security")}</th>
+                  <th>{t("backtest.result.column.side")}</th>
+                  <th>{t("backtest.result.column.opened")}</th>
+                  <th>{t("backtest.result.column.closed")}</th>
+                  <th>{t("backtest.result.column.quantity")}</th>
+                  <th>{t("backtest.result.column.pnl")}</th>
+                  <th>{t("backtest.result.column.fees")}</th>
+                  <th>{t("backtest.result.column.slippage")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -358,62 +360,62 @@ export const BacktestRunDetail = ({
       </section>
 
       <details className="manifest-drawer">
-        <summary>Manifest · 데이터 경고 · 재현성 정보</summary>
+        <summary>{t("backtest.result.manifest")}</summary>
         <div className="manifest-grid">
           <dl>
             <div>
-              <dt>Schema</dt>
+              <dt>{t("backtest.result.manifest.schema")}</dt>
               <dd>{result.manifest.schema_version}</dd>
             </div>
             <div>
-              <dt>Engine</dt>
+              <dt>{t("backtest.result.manifest.engine")}</dt>
               <dd>{result.manifest.engine_version}</dd>
             </div>
             <div>
-              <dt>Run fingerprint</dt>
+              <dt>{t("backtest.result.manifest.fingerprint")}</dt>
               <dd title={result.manifest.run_fingerprint}>
                 {result.manifest.run_fingerprint.slice(0, 16)}…
               </dd>
             </div>
             <div>
-              <dt>Strategy</dt>
+              <dt>{t("backtest.result.manifest.strategy")}</dt>
               <dd>{result.manifest.run_spec.strategy?.title ?? "—"}</dd>
             </div>
             <div>
-              <dt>Strategy source</dt>
+              <dt>{t("backtest.result.manifest.source")}</dt>
               <dd title={result.manifest.strategy_provenance.spec_hash}>
                 {result.manifest.strategy_provenance.kind === "saved_revision"
                   ? `${result.manifest.strategy_provenance.strategy_id} r${result.manifest.strategy_provenance.revision}`
-                  : "inline draft"}
+                  : t("backtest.result.manifest.inline")}
               </dd>
             </div>
             <div>
-              <dt>Strategy hash</dt>
+              <dt>{t("backtest.result.manifest.strategyHash")}</dt>
               <dd title={result.manifest.strategy_hash}>
                 {result.manifest.strategy_hash.slice(0, 16)}…
               </dd>
             </div>
             <div>
-              <dt>TargetTape hash</dt>
+              <dt>{t("backtest.result.manifest.targetHash")}</dt>
               <dd title={result.manifest.target_tape_hash}>
                 {result.manifest.target_tape_hash.slice(0, 16)}…
               </dd>
             </div>
             <div>
-              <dt>Data snapshot</dt>
+              <dt>{t("backtest.result.manifest.snapshot")}</dt>
               <dd>{result.manifest.data_snapshot_id}</dd>
             </div>
             <div>
-              <dt>Completed</dt>
+              <dt>{t("backtest.result.manifest.completed")}</dt>
               <dd>
                 {new Date(result.manifest.completed_at).toLocaleString("ko-KR")}
               </dd>
             </div>
           </dl>
           <div className="manifest-warnings">
-            <h5>Data warnings</h5>
+            <h5>{t("backtest.result.warnings")}</h5>
             {(result.manifest.warnings ?? []).length === 0 ? (
-              <p>경고 없음</p>
+              <p>{t("backtest.result.warnings.empty")}</p>
             ) : (
               (result.manifest.warnings ?? []).map((warning) => (
                 <p key={warning.code}>

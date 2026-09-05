@@ -1237,6 +1237,9 @@ describe("document routes (P2-04)", () => {
     expect(history.location.pathname).toBe(
       "/research/strategies/s1/revisions/2",
     );
+    await waitFor(() =>
+      expect(globalThis.document.activeElement).toBe(legacyLink()),
+    );
   });
 
   it("appends the next revision from a saved base and surfaces a stale-base conflict", async () => {

@@ -4,7 +4,7 @@
   z-index: 25; /* above drawers (15) and tooltips (20), below the skip link (30) */
   display: grid;
   place-items: center;
-  background: rgb(15 23 42 / 0.35);
+  background: var(--overlay-scrim);
 }
 
 .leave-guard__dialog {

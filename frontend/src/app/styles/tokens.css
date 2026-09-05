@@ -1,5 +1,6 @@
 /*
- * Semantic theme tokens (WORKFLOW P2-01). One light, neutral theme matching the v3 concept.
+ * Semantic theme tokens (WORKFLOW P2-01, P6-04). The light and soft-dark palettes expose the
+ * same component contract; P6-03 owns preference persistence and selects `data-theme`.
  * Components use only semantic names (surface / border / text / accent / status / focus);
  * raw colours live here and nowhere else. The `--color-*` aliases at the bottom keep the legacy
  * Quick/Advanced builder stylesheet working until P6-06 removes it.
@@ -56,6 +57,14 @@
   --focus-ring: #2e6fd6;
   --focus-ring-offset: 2px;
 
+  /* source syntax */
+  --syntax-key: #1f5d96;
+  --syntax-string: #176b3a;
+  --syntax-number: #713f98;
+  --syntax-literal: #974609;
+  --syntax-comment: #66717f;
+  --syntax-punctuation: #5b6675;
+
   /* typography: body 14px, secondary text never below 12px */
   --font-sans:
     Inter, Pretendard, ui-sans-serif, system-ui, -apple-system,
@@ -99,4 +108,63 @@
   --color-warning: var(--status-warn);
   --color-violet: var(--chart-series-4);
   --color-sky: var(--status-info);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* surfaces */
+  --surface-canvas: #111820;
+  --surface-panel: #18222d;
+  --surface-raised: #1e2a36;
+  --surface-subtle: #253441;
+  --surface-inverse: #090f15;
+  --overlay-scrim: rgb(3 7 12 / 58%);
+
+  /* borders */
+  --border: #354352;
+  --border-strong: #536274;
+  --border-inverse: #3e4d5e;
+
+  /* text */
+  --text: #e6edf3;
+  --text-muted: #acb8c5;
+  --text-subtle: #93a2b1;
+  --text-on-accent: #071d1a;
+  --text-inverse: #f1f5f8;
+
+  /* accent */
+  --accent: #4fc3b1;
+  --accent-hover: #72d5c5;
+  --accent-soft: #173c39;
+  --accent-border: #347f76;
+
+  /* status */
+  --status-ok: #68d391;
+  --status-ok-soft: #173a2a;
+  --status-warn: #f0b35f;
+  --status-warn-soft: #3b2b19;
+  --status-error: #ff8c82;
+  --status-error-soft: #402321;
+  --status-error-border: #8a4640;
+  --status-info: #86b3ff;
+  --status-info-soft: #1d3150;
+
+  /* chart series tuned for the dark canvas */
+  --chart-series-1: #4fc3b1;
+  --chart-series-2: #86b3ff;
+  --chart-series-3: #ff8c82;
+  --chart-series-4: #b7a6ff;
+  --chart-series-5: #72c7ef;
+  --chart-series-6: #f0b35f;
+
+  --focus-ring: #7eb4ff;
+  --syntax-key: #8bc4ff;
+  --syntax-string: #8bd49c;
+  --syntax-number: #d7a6ff;
+  --syntax-literal: #ffbd7a;
+  --syntax-comment: #93a2b1;
+  --syntax-punctuation: #acb8c5;
+  --shadow-panel: 0 1px 2px rgb(0 0 0 / 28%), 0 2px 5px rgb(0 0 0 / 22%);
+  --shadow-popover: 0 12px 32px rgb(0 0 0 / 42%);
 }

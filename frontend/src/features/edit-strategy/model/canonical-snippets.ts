@@ -97,6 +97,8 @@ const materializeSchemaValue = (
   },
 ): unknown => {
   const node = resolveRef(root, schemaNode);
+  if (node === null)
+    throw new UnsupportedSnippetSchema("unresolvable schema reference");
   state.budget.remaining -= 1;
   if (state.budget.remaining < 0 || state.ancestors.has(node))
     throw new UnsupportedSnippetSchema("recursive or oversized schema");
@@ -128,6 +130,8 @@ const materializeSchemaValue = (
     for (const [key, candidate] of Object.entries(properties)) {
       if (!isRecord(candidate)) continue;
       const property = resolveRef(root, candidate);
+      if (property === null)
+        throw new UnsupportedSnippetSchema("unresolvable property reference");
       if (
         !required.has(key) &&
         !owns(candidate, "default") &&
@@ -161,14 +165,17 @@ const factorAuthoringContract = (
   for (const [sectionKey, candidate] of Object.entries(root)) {
     if (!isRecord(candidate)) continue;
     const section = resolveRef(schema, candidate);
+    if (section === null) continue;
     const properties = isRecord(section.properties) ? section.properties : {};
     for (const [collectionKey, collectionCandidate] of Object.entries(
       properties,
     )) {
       if (!isRecord(collectionCandidate)) continue;
       const collection = resolveRef(schema, collectionCandidate);
+      if (collection === null) continue;
       if (collection.type !== "array" || !isRecord(collection.items)) continue;
       const item = resolveRef(schema, collection.items);
+      if (item === null) continue;
       const itemProperties = isRecord(item.properties) ? item.properties : {};
       const required = Array.isArray(item.required)
         ? item.required.filter((key): key is string => typeof key === "string")

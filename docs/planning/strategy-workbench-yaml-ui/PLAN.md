@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: SELF_CHECK
+project_status: IN_REVIEW
 current_phase: P6
 current_pr: P6-08,P6-09,P6-03,P6-04,P6-05
 active_prs: [P6-03, P6-04, P6-05, P6-08, P6-09]
 parallel_window: [P6-08, P6-09, P6-03, P6-04, P6-05]
-last_updated: 2026-09-06T05:36:26+09:00
+last_updated: 2026-09-06T05:38:41+09:00
 planned_prs: 52
 merged_prs: 46
 approved_prs: 50
@@ -22,13 +22,13 @@ progress_percent: 88
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `SELF_CHECK` |
+| Project status | `IN_REVIEW` |
 | Current phase | `P6` |
 | Current/next PR | `P6-08,P6-09,P6-03,P6-04,P6-05` |
 | Active PR | `P6-03, P6-04, P6-05, P6-08, P6-09` |
 | Progress | `46 / 52 merged (88%)` |
 | Approved | `50 / 52` |
-| Aggregated at | `2026-09-06 05:36 KST` |
+| Aggregated at | `2026-09-06 05:38 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -78,7 +78,7 @@ progress_percent: 88
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
 | P4 | Outline, Contract, Projections | 10 | 10 | `MERGED` |
 | P5 | Truthful Trace UI | 3 | 3 | `MERGED` |
-| P6 | Professional release and migration | 9 | 3 | `SELF_CHECK` |
+| P6 | Professional release and migration | 9 | 3 | `IN_REVIEW` |
 | **Total** |  | **52** | **46** | **88%** |
 <!-- PLAN:PHASES:END -->
 
@@ -86,14 +86,14 @@ progress_percent: 88
 
 | 항목 | 값 |
 |---|---|
-| PR | `P6-05` Browser E2E·visual regression infrastructure SELF_CHECK |
+| PR | `P6-05` Browser E2E·visual regression infrastructure IN_REVIEW |
 | Intent | 실제 FastAPI와 production Vite preview를 Playwright가 같은 격리 환경에서 기동해 전문 YAML IDE의 direct-entry·lazy editor·light/dark viewport baseline을 재현 가능한 release gate로 만든다 |
 | Acceptance | exact Playwright dependency/lock; 격리 SQLite를 쓰는 실제 backend와 production preview webServer; `/research/strategies/new` direct route와 CodeMirror lazy chunk·worker-free 확인; 1440×900·1920×1080 light/dark screenshot baseline 4개 commit; Windows CI browser job과 실패 artifact; local update/test 명령 문서화 |
 | Non-goals | 생성→저장→백테스트 등 업무 E2E 시나리오(P6-06), legacy route/editor 제거(P6-06), backend wire/domain 의미 변경, UI 재설계, mock API 기반 browser test |
 | Branch/worktree | `feat/p6-05-browser-infrastructure` (`Quant_study-p6-05`), stacked on P6-04 approval-doc HEAD |
 | Base SHA | `c6182e9` (P6-04 approval-doc HEAD; #74→#75→#76→#77 순차 merge 후 base 전환) |
-| Head SHA | `82953d5` (review P1 2/P2 2 fix freeze) |
-| Diff stat | base `c6182e9` 대비 fix freeze 17 files +469/-35; exact lock·CI·runtime wrapper·config/test/docs·bundled fonts와 재생성 PNG 4개 포함 |
+| Head SHA | `82953d5` (review P1 2/P2 2 fix freeze; `3295f6e` self-check 기록 후 PLAN-only review HEAD) |
+| Diff stat | base `c6182e9` 대비 self-check freeze 17 files +470/-35; exact lock·CI·runtime wrapper·config/test/docs·bundled fonts와 재생성 PNG 4개 포함 |
 | Focused tests | bundled font baseline update 8/8, strict no-update 8/8, clean install 후 strict 8/8; direct unmanaged runner reject; 성공·의도적 실패 모두 temp artifact/listener 0; 4 PNG 직접 확인 |
 | Full gate | clean `npm ci` 400 packages/취약점 0; frontend Vitest 474·app/E2E typecheck·lint·build(editor 131.94KiB); root 6; reviewer backend 1,118·Rust 13; PLAN/diff-check 통과 |
 
@@ -235,7 +235,7 @@ Phase exit:
 | [x] | `P6-02` | Server draft persistence/CAS/recovery UI | P6-01, P3-06, P4-08 | `MERGED` | [#72](https://github.com/Nochiski/Quant_study/pull/72) · `review_p6_02` APPROVE |
 | [ ] | `P6-03` | Keyboard workflow와 Command Palette | P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `APPROVED` | [#76](https://github.com/Nochiski/Quant_study/pull/76) · `review_p6_03` APPROVE, P0/P1/P2 0 · CI billing 차단 |
 | [ ] | `P6-04` | Large/hostile spec 성능·접근성·i18n과 soft dark theme (`$ref`-only cycle fail-closed 포함) | P3-05, P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `APPROVED` | [#77](https://github.com/Nochiski/Quant_study/pull/77) · `review_p6_04` APPROVE, P0/P1/P2 0 · CI billing 차단 |
-| [ ] | `P6-05` | Playwright/visual regression infrastructure와 CI | P2-03, P3-05, P6-04 | `SELF_CHECK` | [#78](https://github.com/Nochiski/Quant_study/pull/78) · `review_p6_05` P1 2/P2 2 수정 `82953d5`, 동일 reviewer 재검토 대기; CI billing 차단 |
+| [ ] | `P6-05` | Playwright/visual regression infrastructure와 CI | P2-03, P3-05, P6-04 | `IN_REVIEW` | [#78](https://github.com/Nochiski/Quant_study/pull/78) · `review_p6_05` P1 2/P2 2 수정 `82953d5`, 동일 reviewer 재검토 중; CI billing 차단 |
 | [ ] | `P6-06` | 전체 browser E2E·실구동 시나리오 검증, migration gate, 조건부 legacy cleanup | P6-01, P6-02, P6-03, P6-04, P6-05, P6-08, P6-09 | `WAITING` | — |
 | [x] | `P6-07` | Root frontend/backend development entrypoints | P0-02, P0-03 | `MERGED` | [#56](https://github.com/Nochiski/Quant_study/pull/56) · `review_p6_07` APPROVE |
 | [ ] | `P6-08` | Strategy list와 revision history routed UI | P6-01, P6-02, P3-06, P4-08 | `APPROVED` | [#74](https://github.com/Nochiski/Quant_study/pull/74) · `review_p6_08` APPROVE, P0/P1/P2 0; CI billing 차단 |
@@ -256,7 +256,7 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
-| P6-05 | `review_p6_05` | `c6182e9` | `82953d5` | RECHECK_PENDING (최초 P1 2/P2 2 수정) | 2 (폐쇄 검증 대기) | Windows 2025 strict CI는 billing 해제 후 green 필수; exact webfont·runner generation·unique runtime cleanup·late final status·Node 22 contract 재검토 | 2026-09-06 |
+| P6-05 | `review_p6_05` | `c6182e9` | `3295f6e` | IN_REVIEW (최초 P1 2/P2 2 수정 후 동일 reviewer) | 2 (폐쇄 검증 중) | Windows 2025 strict CI는 billing 해제 후 green 필수; exact webfont·runner generation·unique runtime cleanup·late final status·Node 22 contract 재검토 | 2026-09-06 |
 | P6-04 | `review_p6_04` | `e84bd7e` | `7b532a9` | APPROVE (최초 P1 2/P2 1과 2차 P1 1/P2 1을 동일 reviewer가 폐쇄; 최종 P0/P1/P2 0) | 0 | 실제 Safari/browser IME·viewport와 committed visual baseline은 P6-05~06, transitive editor chunk 합산, CI billing은 외부 merge blocker | 2026-09-06 |
 | P6-03 | `review_p6_03` | `db076ea` | `76023db` | APPROVE (최초 P1 3/P2 4와 2차 신규 P1 1을 동일 reviewer가 hostile 재현·폐쇄; 최종 P0/P1/P2 0) | 4 (해소) | 실제 Safari IME·browser viewport/focus는 P6-05~06, entry chunk 500 kB 경고와 500-node 입력 성능은 P6-04 범위; merge 전 green CI 필수 | 2026-09-06 |
 | P6-09 | `review_p6_09` | `f760a5b` | `74ebae0` | APPROVE (최초 P2 canonical pagination 1건을 동일 reviewer가 세 endpoint hostile matrix로 폐쇄; 최종 P0/P1/P2 0) | 0 | process restart/multi-worker history 공유, client-asserted inline `source_hash`, 실제 browser E2E는 P6-06 범위 | 2026-09-06 |
@@ -357,6 +357,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-06 KST | Codex | P6-05 fix `82953d5`와 self-check `3295f6e`를 push하고 #78 전체 diff·finding 폐쇄·검증 증거를 동기화한다. 최초 fresh reviewer `review_p6_05` 한 명에게 exact webfont/Windows generation의 pixel input, unique temp runtime의 성공·실패 cleanup, network-idle 후 final status, Node 22 parity와 최신 전체 diff의 신규 회귀를 재검토받도록 IN_REVIEW로 전환한다 | 13.3 latest diff freeze·13.4 same-reviewer finding loop·reviewer 중복 생성 금지 |
 | 2026-09-06 KST | Codex | P6-05 review fix `82953d5`: exact Noto Sans KR/JetBrains Mono webfont와 `windows-2025`로 visual input을 고정하고 4 PNG를 재생성했다. Node type을 CI runtime 22.18.0으로 맞추고, atomic unique temp directory를 생성하는 runner가 Playwright 성공·실패 후 SQLite/WAL/SHM을 포함한 directory를 안전 검증 후 삭제하며 unmanaged 직접 실행을 거부한다. network-idle 후 lazy chunk exact 1·required API 모든 status 200·failed request 0을 최종 단언한다. update/strict/clean strict 24, Vitest 474, typecheck 2종·lint·build·root 6을 통과하고 성공·의도적 실패 모두 artifact/listener 0을 확인해 SELF_CHECK로 전환한다 | 최초 reviewer P1 2/P2 2 폐쇄·visual input SoT·DB lifetime owner·late false-positive 차단·runtime/type parity |
 | 2026-09-06 KST | Codex | P6-05 [#78](https://github.com/Nochiski/Quant_study/pull/78)을 parent `feat/p6-04-hardening` 대상으로 열고 base `c6182e9`, author freeze `adf0cd6`, review diff 14 files +317/-22와 exact dependency/실서버/4 PNG/runner boundary/CI scope를 본문에 고정한다. fresh review-only agent `review_p6_05` 한 명에게 Playwright server lifecycle·isolation·worker/lazy/resource assertions, Windows strict baseline portability, Vitest 분리, Actions failure artifact, SoT/FSD 책임분리와 최신 전체 diff를 독립 검토받도록 IN_REVIEW로 전환한다. Actions 6 jobs는 모두 step 0에서 billing/spending-limit annotation으로 실패해 merge gate를 우회하지 않는다 | 13.3 actual diff freeze·13.4 PR별 fresh reviewer 정확히 1명·stack 순차 merge gate·CI 비우회 |
 | 2026-09-06 KST | Codex | `review_p6_05`의 독립 재현은 clean install, backend 1,118·frontend 474·Rust 13·root 6, app/E2E typecheck·lint·ruff·pyright·build, 실 FastAPI+preview Playwright 8/8과 port/process teardown을 통과했지만 P1 2/P2 2로 REQUEST_CHANGES했다. 로컬 Windows 10과 floating `windows-latest`·host font의 strict pixel 환경이 다르고, PID-only `%TEMP%` SQLite가 누적·재사용되며, network-idle 전 poll이 late duplicate/failure를 놓치고, Node 22 runtime과 `@types/node` 26이 불일치한다. 환경·수명주기·최종 응답·runtime contract을 고정한 뒤 같은 reviewer로 재검토한다 | 시각 회귀 재현성·격리 DB freshness/cleanup·false-positive 차단·same-reviewer loop |

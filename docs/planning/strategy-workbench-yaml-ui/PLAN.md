@@ -3,10 +3,10 @@ plan_version: 2
 project: yaml-strategy-workbench-ui
 project_status: APPROVED
 current_phase: P6
-current_pr: P6-08
-active_prs: [P6-08]
-parallel_window: []
-last_updated: 2026-09-06T00:21:27+09:00
+current_pr: P6-08,P6-09
+active_prs: [P6-08, P6-09]
+parallel_window: [P6-08, P6-09]
+last_updated: 2026-09-06T00:24:24+09:00
 planned_prs: 52
 merged_prs: 46
 approved_prs: 47
@@ -24,11 +24,11 @@ progress_percent: 88
 |---|---|
 | Project status | `APPROVED` |
 | Current phase | `P6` |
-| Current/next PR | `P6-08` |
-| Active PR | `P6-08` |
+| Current/next PR | `P6-08,P6-09` |
+| Active PR | `P6-08, P6-09` |
 | Progress | `46 / 52 merged (88%)` |
 | Approved | `47 / 52` |
-| Aggregated at | `2026-09-06 00:21 KST` |
+| Aggregated at | `2026-09-06 00:24 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -86,16 +86,16 @@ progress_percent: 88
 
 | 항목 | 값 |
 |---|---|
-| PR | `P6-08` Strategy/revision history routed UI APPROVED |
-| Intent | 기존 repository의 immutable revision/history SoT를 그대로 투영해 전문 사용자가 저장 전략을 찾고 원하는 revision을 편집·diff direct route로 열 수 있게 한다 |
-| Acceptance | deterministic strategy list와 revision pagination; `/research/strategies` direct route와 nav; strategy 선택 시 revision history·최신 revision 편집 연결; 임의 revision edit/diff deep link; loading·empty·error·out-of-range offset을 안전하게 canonical page로 복구; OpenAPI/generated client와 backend/frontend 계약 테스트 동기화 |
-| Non-goals | server draft 변경(P6-02), backtest run history/provenance(P6-09), strategy 삭제·rename, 검색 인덱스, legacy editor 제거(P6-06) |
-| Branch/worktree | `feat/p6-08-strategy-history` (`Quant_study-p6-08`) |
-| Base SHA | `b7fc4de` (P6-02 merge 기록 포함 latest main) |
-| Head SHA | `f7bb1fd` (final reviewed HEAD; code-fix freeze `09db117`) |
-| Diff stat | 26 files, +1,371/-36 (OpenAPI/generated, PLAN과 hostile/review regression 포함; production은 list/history vertical 및 공용 query lifecycle owner) |
-| Focused tests | backend strategy/history/repository 72 + architecture 7 passed; frontend router/legacy save 17 + document routes 46 passed |
-| Full gate | backend 1,114·frontend 423·Rust 13·root 5 passed; Ruff·Pyright·typecheck·lint·Prettier·build·cargo fmt/clippy 통과; OpenAPI/SDK 17 files 재생성 전후 SHA-256 동일 |
+| PR | `P6-09` Backtest run history routed UI와 provenance IN_PROGRESS (stacked; P6-08 CI billing blocked) |
+| Intent | process-lifetime BacktestRunService의 실제 lifecycle/provenance를 read-only history로 투영해 전문 사용자가 run을 최신순 탐색하고 saved/inline 실행 근거를 확인한 뒤 detail route로 복귀하게 한다 |
+| Acceptance | newest-first deterministic pagination과 strategy filter; saved/inline의 strategy/revision/spec/schema/source hash를 명시적으로 분리 표시; nonterminal row만 polling하고 terminal-only page는 멈춤; run detail direct link; loading·empty·error·out-of-range URL canonical recovery; OpenAPI/generated/backend/frontend 계약 동기화 |
+| Non-goals | run 영속화·삭제·재시작 복구, 새로운 backtest 실행 의미, 결과/trace 화면 변경, strategy history 변경, legacy editor 제거 |
+| Branch/worktree | `feat/p6-09-backtest-history` (`Quant_study-p6-09`), base branch `feat/p6-08-strategy-history` |
+| Base SHA | `f760a5b` (P6-08 approved docs HEAD; #74 merge 후 main에 순차 rebase/base 전환) |
+| Head SHA | 구현 전 |
+| Diff stat | 구현 전 |
+| Focused tests | backend list/filter/pagination/provenance lifecycle; frontend route/filter/pagination/polling/canonical URL 예정 |
+| Full gate | backend/frontend/Rust/root와 static/build/generated deterministic 예정 |
 
 ---
 
@@ -239,7 +239,7 @@ Phase exit:
 | [ ] | `P6-06` | 전체 browser E2E·실구동 시나리오 검증, migration gate, 조건부 legacy cleanup | P6-01, P6-02, P6-03, P6-04, P6-05, P6-08, P6-09 | `WAITING` | — |
 | [x] | `P6-07` | Root frontend/backend development entrypoints | P0-02, P0-03 | `MERGED` | [#56](https://github.com/Nochiski/Quant_study/pull/56) · `review_p6_07` APPROVE |
 | [ ] | `P6-08` | Strategy list와 revision history routed UI | P6-01, P6-02, P3-06, P4-08 | `APPROVED` | [#74](https://github.com/Nochiski/Quant_study/pull/74) · `review_p6_08` APPROVE, P0/P1/P2 0; CI billing 차단 |
-| [ ] | `P6-09` | Backtest run history routed UI와 provenance | P6-08, P3-05 | `WAITING` | P6-02 review size finding으로 분리 |
+| [ ] | `P6-09` | Backtest run history routed UI와 provenance | P6-08, P3-05 | `IN_PROGRESS` | P6-08 Actions billing 차단 중 stacked branch로 구현; 순차 merge 유지 |
 
 Phase exit:
 
@@ -349,6 +349,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-06 KST | Codex | P6-08은 승인됐지만 approval-doc Actions 재실행도 모든 job이 코드 step 전 billing/spending-limit로 실패해 merge gate가 외부 차단됐다. 체크 우회·보호 규칙 변경 없이 승인 HEAD `f760a5b` 위에 P6-09 전용 stacked worktree를 열고 `parallel_window`를 명시했다. process-lifetime run register의 newest-first page/filter와 saved/inline strategy·revision·spec/schema/source provenance, detail link, nonterminal-only polling, URL/state 복구만 구현하며 #74 green/merge 후 순차 base 전환한다 | 외부 CI 차단 중 안전한 stacked 진행·P6-08→P6-09 코드 dependency·순차 merge 보존 |
 | 2026-09-06 KST | Codex | 동일 reviewer `review_p6_08`이 final reviewed HEAD `f7bb1fd`에서 누적 findings를 모두 폐쇄하고 새 P0/P1/P2 0으로 APPROVE했다. backend 79, router 14, YAML/legacy late-cache 2, key-scope·MAX·duplicate-title·OpenAPI parity hostile 검증을 독립 수행했다. 외부 탭 즉시성·offset snapshot·chain audit 성능은 비차단 residual로 P6-04 범위를 유지하고 P6-08을 APPROVED로 전환한다. merge는 latest approval-doc HEAD의 CI green 뒤에만 수행한다 | same-reviewer final approval·blocking 0·13.6 CI merge gate |
 | 2026-09-06 KST | Codex | P6-08 3차 review에 code freeze `09db117`, self-check 기록 `f1736ed`, latest 26 files +1,372/-36 및 전체 gate를 PR #74에 고정했다. 최초 reviewer `review_p6_08`에게 legacy create/revise late cache와 duplicate-title accessible identity의 finding별 폐쇄 및 최신 전체 diff 신규 회귀를 재검토하도록 IN_REVIEW로 전환한다 | 13.3 latest diff freeze·13.4 same-reviewer fix loop·PR body merge gate |
 | 2026-09-06 KST | Codex | P6-08 2차 review fix를 `09db117`에 고정했다. strategy entity query owner의 단일 retire helper가 모든 save path에서 list prefix를 cancel→remove하고, legacy JSON create/revise 각각의 늦은 in-flight 응답이 cache를 복원하지 못함을 실제 provider 회귀로 고정했다. 접근성 label은 동일 제목이어도 항상 strategy ID를 포함하고 두 duplicate-title 행의 toggle·region·pager ownership을 검증한다. focused frontend 17 + document routes 46, solo full 423, typecheck·lint·Prettier·build 통과로 SELF_CHECK 전환한다. 병렬 full 중 기존 runtime-schema snippet 1건의 5초 timeout은 동일 file 46 및 solo full에서 재현되지 않았다 | cache invalidation 단일 owner·모든 활성 save path coherence·accessible identity·flake 격리 검증 |

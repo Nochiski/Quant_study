@@ -86,16 +86,16 @@ progress_percent: 86
 
 | 항목 | 값 |
 |---|---|
-| PR | `P5-02` Date/security/factor/node 선택 Debugger shell IN_PROGRESS |
-| Intent | generated trace SDK를 소비하는 feature-owned shell을 Strategy IDE 하단 slot에 연결해 전문 사용자가 실제 TargetTape 결과를 선택 범위와 provenance와 함께 조회하게 한다 |
-| Acceptance | 기존 collapse/resize·responsive drawer 보존; date/security/factor/node 선택; TargetTape score/rank/selected/exclusion/target 우선 표시; invalid/stale compile에서는 요청 금지; sourceVersion·request identity·response fingerprint mismatch 응답 폐기; loading/empty/error/cancel 상태와 ko/en accessible controls |
-| Non-goals | Raw→node 전체 단계·risk before/after·order delta(P5-03), 별도 계산식/DTO, repository/history(P6-01/02), IDE layout 재설계 |
-| Branch/worktree | `feat/p5-02-debugger-shell` (`Quant_study-p5-02`) |
-| Base SHA | `e4fabd4` (P5-01 merge main) |
+| PR | `P5-03` Raw→Target full linked trace UI IN_PROGRESS |
+| Intent | truthful pipeline이 계산 중 함께 만든 raw provenance·FactorGraph node cache·portfolio construction audit를 한 행의 연결 trace로 투영해 전문 사용자가 값의 출처부터 실제 TargetTape와 주문 추정까지 역추적하게 한다 |
+| Acceptance | 모든 reachable node를 bounded trace로 조회; raw CellKind로 실제 0/source omitted/missing/not collected/coverage gap 구분; backend가 factor contribution·composite·selection·unconstrained/risk-constrained target을 동일 compile 경로에서 산출; 명시적 starting holdings가 있을 때만 previous weight·estimated delta와 execution 시점/가정 표시; warm-up·계산 제외·risk adjusted/removed 상태; TargetTape/tape hash/backtest parity·PIT·cancellation·source/fingerprint fail-closed; ko/en·keyboard/accessible linked stage UI |
+| Non-goals | frontend 재계산·수기 wire DTO, saved factor/subgraph 값을 공급할 별도 resolver, 실제 주문 제출, repository/history(P6-01/02), 대규모 virtualization(P6-04), IDE layout 재설계 |
+| Branch/worktree | `feat/p5-03-linked-trace-ui` (`Quant_study-p5-03`) |
+| Base SHA | `fcc37ee` (P5-02 merge main) |
 | Head SHA | 구현 전 |
-| Diff stat | 구현 전; feature model/query/UI와 new/revision page wiring, focused user-result tests로 제한 |
-| Focused tests | invalid/stale no-request, selector payload, superseded response discard, TargetTape-first rows, collapse/resize·keyboard·drawer 회귀 예정 |
-| Full gate | frontend focused → typecheck → lint → full Vitest → build; generated SDK 외 DTO 없음·backend API 변경 없음·diff-check·PLAN consistency 예정 |
+| Diff stat | 구현 전; domain portfolio audit owner → application projection → HTTP/OpenAPI/generated SDK → debug feature linked projection 순으로 제한 |
+| Focused tests | legacy TargetTape byte/hash parity, raw CellKind·zero/null, contribution 합계, unconstrained/constrained/final·order delta, no-holdings suppression, all-node cap/truncation, linked UI/status/keyboard와 route wire 회귀 예정 |
+| Full gate | backend focused/full·Ruff·Pyright → OpenAPI/SDK deterministic → frontend focused/typecheck/lint/full/build → diff-check·PLAN consistency 예정 |
 
 ---
 
@@ -339,6 +339,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | P5-03 scope를 domain-owned portfolio construction audit, raw `CellKind` provenance, additive trace API/generated SDK, feature-owned linked projection으로 고정했다. frontend 계산과 실제 주문, 저장 factor/subgraph value resolver, P6 repository/history/virtualization은 non-goal이며 TargetTape/hash/backtest byte parity를 선행 gate로 둔다 | StrategySpec/portfolio compiler SoT·domain/application/adapter/frontend 책임 분리·P5-03 acceptance |
 | 2026-09-05 KST | Codex | P5-02 PR #67 최종 approval-doc HEAD `dc8b940` CI 4/4와 clean merge state를 확인해 merge commit `fcc37ee`로 순차 머지하고 main fast-forward. 등록된 P5-02 worktree를 제거하고 최신 main의 `feat/p5-03-linked-trace-ui` 전용 worktree에서 P5-03 IN_PROGRESS 전환 | 13.5 merge gate·43/50 merged·단일 active PR·linked trace 책임 분리 |
 | 2026-09-05 KST | Codex | P5-02 동일 reviewer 재검토가 최초 P1 1/P2 4 해소와 최신 전체 diff의 새 P0/P1/P2 0을 확인해 APPROVE. reviewer focused 62·lint·typecheck·build·diff check와 review HEAD CI 4/4가 통과했고 source transition/old cache/Plan live region/revision history를 독립 재확인해 APPROVED 전환 | independent review gate·same-reviewer closure·merge 준비 |
 | 2026-09-05 KST | Codex | P5-02 P1 1/P2 4 fix와 focused 62·frontend 392 전체 gate 증거를 [#67](https://github.com/Nochiski/Quant_study/pull/67)에 동기화하고 동일 reviewer `review_p5_02`의 latest full-diff 재검토로 IN_REVIEW 전환 | same-reviewer review-fix gate·latest CI gate |

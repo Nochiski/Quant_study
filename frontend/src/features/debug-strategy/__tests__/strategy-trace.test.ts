@@ -28,7 +28,7 @@ const context = (): StrategyDebuggerContext => ({
   expectedSnapshotId: "snapshot-v1",
   expectedRegistryVersion: "registry-v1",
   start: SPEC.data.start,
-  end: "2026-08-31",
+  end: "2026-09-01",
   factors: [
     {
       factorId: "momentum",
@@ -132,7 +132,7 @@ const response = (): StrategyTraceResponse => ({
 });
 
 describe("strategy trace request contract", () => {
-  it("normalizes security IDs without changing first-seen order and builds one bounded node request", () => {
+  it("normalizes security IDs and builds bounded linked plus selected-node requests", () => {
     expect(parseSecurityIds(" sec-b,sec-a  sec-b\nsec-c ")).toEqual([
       "sec-b",
       "sec-a",
@@ -161,7 +161,53 @@ describe("strategy trace request contract", () => {
         offset: 0,
         limit: 4,
       },
+      selectedRequest: {
+        node_ids: ["ranked"],
+        include_raw: false,
+        limit: 2,
+      },
     });
+  });
+
+  it("chunks more than 100 reachable nodes below the server cap", () => {
+    const expanded = context();
+    expanded.factors[0]!.nodes = Array.from({ length: 101 }, (_, index) => ({
+      nodeId: `n${index}`,
+      operation: `op.${index}`,
+      pointer: `/factors/factors/0/graph/nodes/${index}`,
+    }));
+    expanded.factors[0]!.outputNodeId = "n100";
+
+    const prepared = prepareStrategyTrace(expanded, {
+      asOf: "2026-08-31",
+      security: "sec-a",
+      factorId: "momentum",
+      nodeId: "n100",
+    });
+
+    expect(prepared.kind).toBe("ready");
+    if (prepared.kind !== "ready") return;
+    expect(prepared.linkedRequests.map((item) => item.node_ids?.length)).toEqual([
+      64, 37,
+    ]);
+    expect(prepared.linkedRequests.map((item) => item.limit)).toEqual([64, 37]);
+    expect(prepared.selectedRequest.node_ids).toEqual(["n100"]);
+  });
+
+  it("omits an empty as-of so the backend schedule owns the default", () => {
+    const prepared = prepareStrategyTrace(context(), {
+      asOf: "",
+      security: "sec-a",
+      factorId: "momentum",
+      nodeId: "ranked",
+    });
+    expect(prepared.kind).toBe("ready");
+    if (prepared.kind !== "ready") return;
+    expect(prepared.request).not.toHaveProperty("as_of");
+    expect(responseMatchesStrategyTrace(prepared, response())).toBe(true);
+    expect(
+      responseMatchesStrategyTrace(prepared, { ...response(), target: null }),
+    ).toBe(false);
   });
 
   it("distinguishes source-owned, flat and explicit opening books", () => {
@@ -294,6 +340,12 @@ describe("strategy trace request contract", () => {
         },
       },
       {
+        target: {
+          ...response().target!,
+          execution_on: "2026-09-02",
+        },
+      },
+      {
         raw: [
           {
             as_of: "2026-08-31",
@@ -381,7 +433,7 @@ describe("strategy trace request contract", () => {
       },
     ];
 
-    expect(projectLinkedTraceRows(payload)).toEqual([
+    expect(projectLinkedTraceRows(payload, ["sec-a"])).toEqual([
       {
         securityId: "sec-a",
         raw: payload.raw,

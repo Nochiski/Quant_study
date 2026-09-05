@@ -107,36 +107,40 @@ const LinkedTraceResult = ({
   selectedNodeId: string;
 }) => {
   if (state.kind !== "success") return null;
-  if (state.response.target === null)
-    return (
-      <div className="strategy-debugger__state" role="status">
-        <p>{t("debugger.target.empty")}</p>
-      </div>
-    );
   const target = state.response.target;
-  const rows = projectLinkedTraceRows(state.response);
+  const rows = projectLinkedTraceRows(
+    state.response,
+    state.request.security_ids,
+    state.linkedRows,
+  );
   return (
     <div className="strategy-debugger__pipeline-list">
       {rows.map(({ securityId, raw, nodes, construction }) => (
         <article className="strategy-debugger__pipeline" key={securityId}>
           <header className="strategy-debugger__pipeline-header">
             <h3>{securityId}</h3>
-            <Badge tone={construction.selected ? "ok" : "neutral"}>
-              {construction.selected
-                ? t("debugger.value.selected")
-                : t("debugger.value.excluded")}
-            </Badge>
-            <Badge
-              tone={
-                construction.constraint_effect === "removed"
-                  ? "error"
-                  : construction.constraint_effect === "adjusted"
-                    ? "warn"
-                    : "neutral"
-              }
-            >
-              {construction.constraint_effect}
-            </Badge>
+            {construction === null ? (
+              <Badge tone="warn">{t("debugger.target.unavailable")}</Badge>
+            ) : (
+              <>
+                <Badge tone={construction.selected ? "ok" : "neutral"}>
+                  {construction.selected
+                    ? t("debugger.value.selected")
+                    : t("debugger.value.excluded")}
+                </Badge>
+                <Badge
+                  tone={
+                    construction.constraint_effect === "removed"
+                      ? "error"
+                      : construction.constraint_effect === "adjusted"
+                        ? "warn"
+                        : "neutral"
+                  }
+                >
+                  {construction.constraint_effect}
+                </Badge>
+              </>
+            )}
           </header>
           <ol className="strategy-debugger__pipeline-stages">
             <li>
@@ -184,88 +188,94 @@ const LinkedTraceResult = ({
                 ))}
               </div>
             </li>
-            <li>
-              <strong>{t("debugger.stage.contribution")}</strong>
-              <div className="strategy-debugger__stage-values">
-                {construction.factor_contributions.map((contribution) => (
-                  <span key={contribution.factor_id}>
-                    <code>{contribution.factor_id}</code>
-                    <span>
-                      {contribution.direction} ×{" "}
-                      {formatNumber(contribution.configured_weight)}
-                    </span>
-                    <span className="strategy-debugger__numeric">
-                      {formatNumber(contribution.normalized_contribution)}
-                    </span>
-                    <Badge tone={contribution.status === "ok" ? "ok" : "warn"}>
-                      {contribution.status}
-                    </Badge>
-                  </span>
-                ))}
-              </div>
-            </li>
-            <li>
-              <strong>{t("debugger.stage.composite")}</strong>
-              <span className="strategy-debugger__stage-primary">
-                {formatNumber(construction.composite_score)}
-              </span>
-            </li>
-            <li>
-              <strong>{t("debugger.stage.selection")}</strong>
-              <span className="strategy-debugger__stage-primary">
-                {t("debugger.column.rank")} {formatNumber(construction.rank)} ·{" "}
-                {construction.side ?? t("debugger.value.none")}
-              </span>
-              {construction.exclusion_reasons.length > 0 ? (
-                <code>{construction.exclusion_reasons.join(", ")}</code>
-              ) : null}
-            </li>
-            <li>
-              <strong>{t("debugger.stage.unconstrained")}</strong>
-              <span className="strategy-debugger__stage-primary">
-                {formatWeight(construction.unconstrained_target_weight)}
-              </span>
-            </li>
-            <li>
-              <strong>{t("debugger.stage.constrained")}</strong>
-              <span className="strategy-debugger__stage-primary">
-                {formatWeight(construction.constrained_target_weight)}
-              </span>
-              <Badge
-                tone={
-                  construction.constraint_effect === "removed"
-                    ? "error"
-                    : construction.constraint_effect === "adjusted"
-                      ? "warn"
-                      : "neutral"
-                }
-              >
-                {construction.constraint_effect}
-              </Badge>
-            </li>
-            {construction.estimated_order_delta !== null ? (
+            {construction === null || target === null ? (
               <li>
-                <strong>{t("debugger.stage.orderDelta")}</strong>
-                <span className="strategy-debugger__stage-primary">
-                  {t("debugger.order.previous")}{" "}
-                  {formatWeight(construction.previous_weight)} →{" "}
-                  {t("debugger.order.delta")}{" "}
-                  {formatWeight(construction.estimated_order_delta)}
-                </span>
-                <small>
-                  {target.signal_as_of} → {target.execution_on} ·{" "}
-                  {t("debugger.order.assumption")}
-                </small>
+                <strong>{t("debugger.target.unavailable")}</strong>
+                <span>{t("debugger.target.partial")}</span>
               </li>
-            ) : null}
+            ) : (
+              <>
+                <li>
+                  <strong>{t("debugger.stage.contribution")}</strong>
+                  <div className="strategy-debugger__stage-values">
+                    {construction.factor_contributions.map((contribution) => (
+                      <span key={contribution.factor_id}>
+                        <code>{contribution.factor_id}</code>
+                        <span>
+                          {contribution.direction} ×{" "}
+                          {formatNumber(contribution.configured_weight)}
+                        </span>
+                        <span className="strategy-debugger__numeric">
+                          {formatNumber(contribution.normalized_contribution)}
+                        </span>
+                        <Badge
+                          tone={contribution.status === "ok" ? "ok" : "warn"}
+                        >
+                          {contribution.status}
+                        </Badge>
+                      </span>
+                    ))}
+                  </div>
+                </li>
+                <li>
+                  <strong>{t("debugger.stage.composite")}</strong>
+                  <span className="strategy-debugger__stage-primary">
+                    {formatNumber(construction.composite_score)}
+                  </span>
+                </li>
+                <li>
+                  <strong>{t("debugger.stage.selection")}</strong>
+                  <span className="strategy-debugger__stage-primary">
+                    {t("debugger.column.rank")} {formatNumber(construction.rank)} ·{" "}
+                    {construction.side ?? t("debugger.value.none")}
+                  </span>
+                  {construction.exclusion_reasons.length > 0 ? (
+                    <code>{construction.exclusion_reasons.join(", ")}</code>
+                  ) : null}
+                </li>
+                <li>
+                  <strong>{t("debugger.stage.unconstrained")}</strong>
+                  <span className="strategy-debugger__stage-primary">
+                    {formatWeight(construction.unconstrained_target_weight)}
+                  </span>
+                </li>
+                <li>
+                  <strong>{t("debugger.stage.constrained")}</strong>
+                  <span className="strategy-debugger__stage-primary">
+                    {formatWeight(construction.constrained_target_weight)}
+                  </span>
+                  <Badge
+                    tone={
+                      construction.constraint_effect === "removed"
+                        ? "error"
+                        : construction.constraint_effect === "adjusted"
+                          ? "warn"
+                          : "neutral"
+                    }
+                  >
+                    {construction.constraint_effect}
+                  </Badge>
+                </li>
+                {construction.estimated_order_delta !== null ? (
+                  <li>
+                    <strong>{t("debugger.stage.orderDelta")}</strong>
+                    <span className="strategy-debugger__stage-primary">
+                      {t("debugger.order.previous")}{" "}
+                      {formatWeight(construction.previous_weight)} →{" "}
+                      {t("debugger.order.delta")}{" "}
+                      {formatWeight(construction.estimated_order_delta)}
+                    </span>
+                    <small>
+                      {target.signal_as_of} → {target.execution_on} ·{" "}
+                      {t("debugger.order.assumption")}
+                    </small>
+                  </li>
+                ) : null}
+              </>
+            )}
           </ol>
         </article>
       ))}
-      {state.response.trace.has_more ? (
-        <p className="strategy-debugger__note" role="status">
-          {t("debugger.node.truncated")}
-        </p>
-      ) : null}
     </div>
   );
 };
@@ -340,6 +350,7 @@ const TargetResult = ({
     state.response,
     state.request.security_ids,
     selectedNodeId,
+    state.selectedRows,
   );
   return (
     <div className="strategy-debugger__table-wrap">
@@ -418,9 +429,7 @@ const NodeResult = ({
   selectedNodeId: string;
 }) => {
   if (state.kind !== "success") return null;
-  const rows = state.response.trace.rows.filter(
-    (row) => row.node_id === selectedNodeId,
-  );
+  const rows = state.selectedRows.filter((row) => row.node_id === selectedNodeId);
   if (rows.length === 0)
     return (
       <div className="strategy-debugger__state" role="status">
@@ -475,11 +484,6 @@ const NodeResult = ({
           ))}
         </tbody>
       </table>
-      {state.response.trace.has_more ? (
-        <p className="strategy-debugger__note" role="status">
-          {t("debugger.node.truncated")}
-        </p>
-      ) : null}
     </div>
   );
 };
@@ -506,6 +510,9 @@ const Provenance = ({ state }: { state: StrategyTraceState }) => {
       <span>
         {t("debugger.provenance.plan")}{" "}
         <code title={response.plan_hash}>{shortHash(response.plan_hash)}</code>
+      </span>
+      <span>
+        {t("debugger.provenance.asOf")} <code>{response.as_of}</code>
       </span>
     </div>
   );
@@ -540,7 +547,7 @@ export const StrategyDebugger = ({
       (candidate) => candidate.nodeId === factor.outputNodeId,
     ) ??
     factor?.nodes[0];
-  const externalAsOf = asOf ?? context?.end ?? "";
+  const externalAsOf = asOf ?? "";
   const externalSecurity = security ?? "";
   const externalDocumentEpoch = context?.documentEpoch ?? -1;
   const [scope, setScope] = useState(() => ({
@@ -607,9 +614,11 @@ export const StrategyDebugger = ({
           <span>{t("debugger.date")}</span>
           <input
             type="date"
+            aria-label={t("debugger.date")}
             value={selectedAsOf}
             min={context?.start}
             max={context?.end}
+            aria-describedby={`${idBase}-date-note`}
             disabled={context === null}
             onChange={(event) => {
               setScope((current) => ({
@@ -622,6 +631,7 @@ export const StrategyDebugger = ({
               });
             }}
           />
+          <small id={`${idBase}-date-note`}>{t("debugger.date.note")}</small>
         </label>
         <label className="strategy-debugger__security-control">
           <span>{t("debugger.security")}</span>
@@ -753,6 +763,12 @@ export const StrategyDebugger = ({
             <li key={warning}>{warning}</li>
           ))}
         </ul>
+      ) : null}
+
+      {trace.state.kind === "success" && trace.state.linkedTruncated ? (
+        <p className="strategy-debugger__note" role="status">
+          {t("debugger.node.aggregateTruncated")}
+        </p>
       ) : null}
 
       <StateNotice state={trace.state} />

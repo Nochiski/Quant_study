@@ -1206,18 +1206,19 @@ describe("FactorGraph read-only projection (P4-07)", () => {
       ...graphHandlers(),
       http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
         const body = (await request.json()) as Record<string, unknown> & {
-          as_of: string;
+          as_of?: string;
           node_ids: string[];
           security_ids: string[];
         };
         tracedStrategies.push(body);
+        const resolvedAsOf = body.as_of ?? "2026-09-01";
         return HttpResponse.json({
           spec_hash: "7".repeat(64),
           snapshot_id: "snap",
           registry_version: "v1",
           plan_hash: "p".repeat(64),
           factor_id: "momentum",
-          as_of: body.as_of,
+          as_of: resolvedAsOf,
           provenance: {
             kind: "inline_draft",
             schema_version: "1.0",
@@ -1235,7 +1236,7 @@ describe("FactorGraph read-only projection (P4-07)", () => {
                 node_id: nodeId,
                 operation:
                   nodeId === "close" ? "field" : "time_series.momentum",
-                as_of: body.as_of,
+                as_of: resolvedAsOf,
                 security_id: securityId,
                 value: nodeId === "close" ? 10 : 0.2,
                 status: "ok",
@@ -1249,10 +1250,10 @@ describe("FactorGraph read-only projection (P4-07)", () => {
             has_more: false,
           },
           target: {
-            signal_as_of: body.as_of,
-            execution_on: "2026-09-04",
+            signal_as_of: resolvedAsOf,
+            execution_on: "2026-09-02",
             candidates: body.security_ids.map((securityId, index) => ({
-              as_of: body.as_of,
+              as_of: resolvedAsOf,
               security_id: securityId,
               sector_id: null,
               eligible: true,
@@ -1271,7 +1272,7 @@ describe("FactorGraph read-only projection (P4-07)", () => {
               rank: index + 1,
             })),
             construction: body.security_ids.map((securityId, index) => ({
-              as_of: body.as_of,
+              as_of: resolvedAsOf,
               security_id: securityId,
               factor_contributions: [
                 {
@@ -1318,7 +1319,6 @@ describe("FactorGraph read-only projection (P4-07)", () => {
     expect(await screen.findAllByText("5.00%")).toHaveLength(4);
     expect(tracedStrategies).toHaveLength(1);
     expect(tracedStrategies[0]).toMatchObject({
-      as_of: "2026-09-03",
       security_ids: ["sec-a", "sec-b"],
       factor_id: "momentum",
       node_ids: ["close", "mom_252"],
@@ -1327,6 +1327,8 @@ describe("FactorGraph read-only projection (P4-07)", () => {
         source_hash: "b".repeat(64),
       },
     });
+    expect(tracedStrategies[0]).not.toHaveProperty("as_of");
+    expect(screen.getByText("2026-09-01")).toBeInTheDocument();
   }, 15_000);
 
   it("restores revision trace scope from history and sends the saved revision source", async () => {

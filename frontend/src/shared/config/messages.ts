@@ -245,6 +245,8 @@ const ko = {
   "ide.debugger.status": "상태",
   "debugger.controls": "전략 추적 범위",
   "debugger.date": "기준일",
+  "debugger.date.note":
+    "비워 두면 서버가 실제 TargetTape의 마지막 실행 가능한 신호일을 선택합니다.",
   "debugger.security": "종목 ID",
   "debugger.security.placeholder": "쉼표 또는 공백으로 구분",
   "debugger.holdings": "시작 보유 비중",
@@ -283,10 +285,15 @@ const ko = {
     "현재 문서·요청과 fingerprint가 다른 응답을 폐기했습니다.",
   "debugger.state.error": "추적에 실패했습니다.",
   "debugger.target.empty": "선택한 기준일에는 TargetTape frame이 없습니다.",
+  "debugger.target.unavailable": "TargetTape 없음",
+  "debugger.target.partial":
+    "이 날짜의 원시 데이터와 노드 계산은 표시하지만 목표 비중 단계는 생성되지 않았습니다.",
   "debugger.target.caption": "TargetTape 후보와 선택 노드 결과",
   "debugger.node.empty": "선택 범위에 계산된 노드 값이 없습니다.",
   "debugger.node.caption": "선택한 FactorGraph 노드의 실제 계산 결과",
   "debugger.node.truncated": "응답 한도 이후의 추적 행이 더 있습니다.",
+  "debugger.node.aggregateTruncated":
+    "연결 추적은 8,000행 예산에서 중단되었습니다. 선택 노드 결과는 별도로 완전하게 조회했습니다.",
   "debugger.raw.empty": "선택 범위에 반환된 원시 필드가 없습니다.",
   "debugger.raw.caption": "원시 필드 값, 공개일과 데이터 상태",
   "debugger.raw.truncated": "원시 데이터 응답 한도 이후의 행이 더 있습니다.",
@@ -326,6 +333,7 @@ const ko = {
   "debugger.provenance.snapshot": "snapshot",
   "debugger.provenance.registry": "registry",
   "debugger.provenance.plan": "plan",
+  "debugger.provenance.asOf": "resolved as-of",
   "debugger.source.saved": "저장 리비전",
   "debugger.source.inline": "인라인 초안",
   "debugger.sourceVersion": "source version",
@@ -987,6 +995,8 @@ export const messages = {
     "ide.debugger.status": "Status",
     "debugger.controls": "Strategy trace scope",
     "debugger.date": "As-of date",
+    "debugger.date.note":
+      "Leave blank to let the server choose the latest executable TargetTape signal date.",
     "debugger.security": "Security IDs",
     "debugger.security.placeholder": "Separate with commas or spaces",
     "debugger.holdings": "Opening weights",
@@ -1025,6 +1035,9 @@ export const messages = {
       "A response with a different document, request or fingerprint was discarded.",
     "debugger.state.error": "Trace failed.",
     "debugger.target.empty": "There is no TargetTape frame for this date.",
+    "debugger.target.unavailable": "TargetTape unavailable",
+    "debugger.target.partial":
+      "Raw data and node calculations for this date remain visible, but no target-weight stage was produced.",
     "debugger.target.caption":
       "TargetTape candidates and selected-node results",
     "debugger.node.empty": "There are no calculated node values in this scope.",
@@ -1032,6 +1045,8 @@ export const messages = {
       "Actual calculation results for the selected FactorGraph node",
     "debugger.node.truncated":
       "More trace rows exist beyond this response limit.",
+    "debugger.node.aggregateTruncated":
+      "The linked trace stopped at its 8,000-row budget. The selected node was fetched completely in a separate request.",
     "debugger.raw.empty": "No raw fields were returned for this scope.",
     "debugger.raw.caption":
       "Raw field values, publication dates and data states",
@@ -1072,6 +1087,7 @@ export const messages = {
     "debugger.provenance.snapshot": "snapshot",
     "debugger.provenance.registry": "registry",
     "debugger.provenance.plan": "plan",
+    "debugger.provenance.asOf": "resolved as-of",
     "debugger.source.saved": "Saved revision",
     "debugger.source.inline": "Inline draft",
     "debugger.sourceVersion": "source version",

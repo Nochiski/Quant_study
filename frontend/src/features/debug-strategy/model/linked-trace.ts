@@ -4,24 +4,26 @@ export type LinkedTraceRow = {
   securityId: string;
   raw: StrategyTraceResponse["raw"];
   nodes: StrategyTraceResponse["trace"]["rows"];
-  construction: NonNullable<
-    StrategyTraceResponse["target"]
-  >["construction"][number];
+  construction:
+    | NonNullable<StrategyTraceResponse["target"]>["construction"][number]
+    | null;
 };
 
 /** Join backend projections by identity only; every displayed calculation remains server-owned. */
 export const projectLinkedTraceRows = (
   response: StrategyTraceResponse,
+  securityIds: readonly string[],
+  nodeRows: StrategyTraceResponse["trace"]["rows"] = response.trace.rows,
 ): LinkedTraceRow[] => {
-  if (response.target === null) return [];
-  return response.target.construction.map((construction) => ({
-    securityId: construction.security_id,
-    construction,
+  const construction = new Map(
+    (response.target?.construction ?? []).map((row) => [row.security_id, row]),
+  );
+  return securityIds.map((securityId) => ({
+    securityId,
+    construction: construction.get(securityId) ?? null,
     raw: response.raw.filter(
-      (row) => row.security_id === construction.security_id,
+      (row) => row.security_id === securityId,
     ),
-    nodes: response.trace.rows.filter(
-      (row) => row.security_id === construction.security_id,
-    ),
+    nodes: nodeRows.filter((row) => row.security_id === securityId),
   }));
 };

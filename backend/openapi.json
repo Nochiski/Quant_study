@@ -5394,9 +5394,16 @@
       "StrategyTraceRequest": {
         "properties": {
           "as_of": {
-            "format": "date",
-            "title": "As Of",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
           },
           "factor_id": {
             "minLength": 1,
@@ -5482,7 +5489,6 @@
         },
         "required": [
           "strategy_source",
-          "as_of",
           "security_ids",
           "factor_id"
         ],

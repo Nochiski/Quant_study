@@ -26,9 +26,10 @@ TraceComputedValue: TypeAlias = float | bool | None
 @dataclass(frozen=True)
 class StrategyTraceRequest:
     strategy_source: StrategySource
-    as_of: date
     security_ids: tuple[str, ...]
     factor_id: str
+    # None asks the compiler-owned rebalance schedule for its latest executable signal frame.
+    as_of: date | None = None
     node_ids: tuple[str, ...] = ()
     include_raw: bool = False
     starting_holdings: tuple[PortfolioStartingHolding, ...] | None = None

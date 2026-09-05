@@ -3347,7 +3347,7 @@ export type StrategyTraceRequest = {
   /**
    * As Of
    */
-  as_of: string;
+  as_of?: string | null;
   /**
    * Factor Id
    */

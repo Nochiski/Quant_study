@@ -20,7 +20,7 @@ change; the observation adapter owns their as_of vintage (D-006).
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from typing import TypeVar
 
@@ -59,6 +59,7 @@ from strategy_workbench.domain.portfolio.facade.construction import (
     PortfolioFactorValue,
     PortfolioFieldValue,
     PortfolioObservation,
+    PortfolioRebalanceSchedule,
     compile_rebalance_schedule,
     compile_target_tape,
     compile_target_tape_with_trace,
@@ -276,6 +277,7 @@ class PortfolioDesignService:
             )
         _reject_sessions_outside_strategy_range(raw, spec, checkpoint=checkpoint)
         schedule = compile_rebalance_schedule(spec, raw.sessions, checkpoint=checkpoint)
+        pipeline_options = _resolve_default_trace_date(pipeline_options, schedule)
         _validate_loaded_trace_scope(
             pipeline_options,
             raw,
@@ -466,6 +468,31 @@ def _validate_trace_selection(
             "trace references unknown or unreachable nodes before observation loading — "
             f"factor_id={factor_id!r} node_ids={sorted(unknown)!r}"
         )
+
+
+def _resolve_default_trace_date(
+    options: PortfolioPipelineOptions,
+    schedule: PortfolioRebalanceSchedule,
+) -> PortfolioPipelineOptions:
+    """Resolve an omitted trace date through the compiler-owned executable schedule."""
+    construction = options.construction_trace_selection
+    if construction is None or construction.as_of is not None:
+        return options
+    resolved = schedule.resolve_signal_as_of(None)
+    if resolved is None:
+        raise InvalidPortfolioTraceSelectionError(
+            "trace default date requires an executable TargetTape signal frame"
+        )
+    factor = options.trace_selection
+    if factor is None:
+        raise InvalidPortfolioTraceSelectionError(
+            "trace default date requires a factor trace selection"
+        )
+    return replace(
+        options,
+        trace_selection=replace(factor, as_of=(resolved,)),
+        construction_trace_selection=replace(construction, as_of=resolved),
+    )
 
 
 def _validate_loaded_trace_scope(

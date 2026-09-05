@@ -16,12 +16,13 @@ export const projectTargetTapeRows = (
   response: StrategyTraceResponse,
   securityIds: readonly string[],
   nodeId: string,
+  selectedRows: StrategyTraceResponse["trace"]["rows"] = response.trace.rows,
 ): TargetTapeProjectionRow[] => {
   const candidates = new Map(
     (response.target?.candidates ?? []).map((row) => [row.security_id, row]),
   );
   const traceRows = new Map(
-    response.trace.rows
+    selectedRows
       .filter((row) => row.node_id === nodeId)
       .map((row) => [row.security_id, row]),
   );

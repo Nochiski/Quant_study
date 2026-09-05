@@ -54,15 +54,27 @@ export type PreparedStrategyTrace =
   | {
       kind: "ready";
       ownerKey: string;
+      /** First request retained for UI ownership; the hook pages every linked request below. */
       request: StrategyTraceRequest;
+      linkedRequests: StrategyTraceRequest[];
+      selectedRequest: StrategyTraceRequest;
       expected: {
         specHash: string;
         snapshotId: string;
         registryVersion: string;
         planHash: string;
         sourceVersion: number;
+        start: string;
+        end: string;
       };
     };
+
+/** Client-owned budgets stay below the generated server contract and bound aggregate memory. */
+export const STRATEGY_TRACE_CLIENT_BUDGET = {
+  nodeChunk: 64,
+  pageRows: 400,
+  totalRows: 8_000,
+} as const;
 
 const validIsoDate = (value: string): boolean => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -121,7 +133,8 @@ export const prepareStrategyTrace = (
   selection: StrategyTraceSelection,
 ): PreparedStrategyTrace => {
   if (context === null) return { kind: "blocked", reason: "document" };
-  if (!validIsoDate(selection.asOf)) return { kind: "blocked", reason: "date" };
+  if (selection.asOf !== "" && !validIsoDate(selection.asOf))
+    return { kind: "blocked", reason: "date" };
   const securityIds = parseSecurityIds(selection.security);
   if (securityIds.length === 0 || securityIds.length > 100)
     return { kind: "blocked", reason: "security" };
@@ -136,20 +149,47 @@ export const prepareStrategyTrace = (
     return { kind: "blocked", reason: "holdings" };
 
   const nodeIds = factor.nodes.map((node) => node.nodeId);
-
-  const request: StrategyTraceRequest = {
+  const commonRequest: Omit<
+    StrategyTraceRequest,
+    "node_ids" | "include_raw" | "offset" | "limit"
+  > = {
     strategy_source: context.strategySource,
-    as_of: selection.asOf,
     security_ids: securityIds,
     factor_id: factor.factorId,
-    node_ids: nodeIds,
-    include_raw: true,
-    offset: 0,
-    // The server may truncate a very large graph/scope, but the request itself stays bounded.
-    limit: Math.min(nodeIds.length * securityIds.length, 500),
+    ...(selection.asOf === "" ? {} : { as_of: selection.asOf }),
     ...(startingHoldings.kind === "explicit"
       ? { starting_holdings: startingHoldings.holdings }
       : {}),
+  };
+  const linkedRequests: StrategyTraceRequest[] = [];
+  for (
+    let index = 0;
+    index < nodeIds.length;
+    index += STRATEGY_TRACE_CLIENT_BUDGET.nodeChunk
+  ) {
+    const chunk = nodeIds.slice(
+      index,
+      index + STRATEGY_TRACE_CLIENT_BUDGET.nodeChunk,
+    );
+    linkedRequests.push({
+      ...commonRequest,
+      node_ids: chunk,
+      include_raw: index === 0,
+      offset: 0,
+      limit: Math.min(
+        chunk.length * securityIds.length,
+        STRATEGY_TRACE_CLIENT_BUDGET.pageRows,
+      ),
+    });
+  }
+  const request = linkedRequests[0];
+  if (request === undefined) return { kind: "blocked", reason: "node" };
+  const selectedRequest: StrategyTraceRequest = {
+    ...commonRequest,
+    node_ids: [selection.nodeId],
+    include_raw: false,
+    offset: 0,
+    limit: securityIds.length,
   };
   const sourceOwner =
     request.strategy_source.kind === "saved_revision"
@@ -176,19 +216,22 @@ export const prepareStrategyTrace = (
       request.as_of,
       request.security_ids,
       request.factor_id,
-      request.node_ids,
-      request.include_raw,
+      nodeIds,
+      selection.nodeId,
       request.starting_holdings ?? null,
-      request.offset,
-      request.limit,
+      STRATEGY_TRACE_CLIENT_BUDGET,
     ]),
     request,
+    linkedRequests,
+    selectedRequest,
     expected: {
       specHash: context.specHash,
       snapshotId: context.expectedSnapshotId,
       registryVersion: context.expectedRegistryVersion,
       planHash: factor.expectedPlanHash,
       sourceVersion: context.sourceVersion,
+      start: context.start,
+      end: context.end,
     },
   };
 };
@@ -285,12 +328,43 @@ const targetProjectionMatches = (
   return targets.size <= requestedSecurities.size;
 };
 
+const responseDateMatches = (
+  prepared: Extract<PreparedStrategyTrace, { kind: "ready" }>,
+  request: StrategyTraceRequest,
+  response: StrategyTraceResponse,
+): boolean => {
+  if (
+    !validIsoDate(response.as_of) ||
+    response.as_of < prepared.expected.start ||
+    response.as_of > prepared.expected.end ||
+    (request.as_of != null && response.as_of !== request.as_of)
+  )
+    return false;
+  if (response.target === null) return request.as_of != null;
+  return (
+    response.target.signal_as_of === response.as_of &&
+    validIsoDate(response.target.execution_on) &&
+    response.target.execution_on > response.as_of &&
+    response.target.execution_on <= prepared.expected.end
+  );
+};
+
+const traceRowsAreUnique = (response: StrategyTraceResponse): boolean => {
+  const identities = new Set<string>();
+  for (const row of response.trace.rows) {
+    const identity = JSON.stringify([row.node_id, row.as_of, row.security_id]);
+    if (identities.has(identity)) return false;
+    identities.add(identity);
+  }
+  return true;
+};
+
 /** Fail closed before a response can replace the current debugger projection. */
 export const responseMatchesStrategyTrace = (
   prepared: Extract<PreparedStrategyTrace, { kind: "ready" }>,
   response: StrategyTraceResponse,
+  request: StrategyTraceRequest = prepared.request,
 ): boolean => {
-  const request = prepared.request;
   const requestedSecurities = new Set(request.security_ids);
   const requestedNodes = new Set(request.node_ids ?? []);
   const expectsOrderDelta = request.starting_holdings != null;
@@ -301,23 +375,24 @@ export const responseMatchesStrategyTrace = (
     response.registry_version === prepared.expected.registryVersion &&
     response.plan_hash === prepared.expected.planHash &&
     response.factor_id === request.factor_id &&
-    response.as_of === request.as_of &&
+    responseDateMatches(prepared, request, response) &&
     sameSourceProvenance(request, response) &&
     response.trace.offset === (request.offset ?? 0) &&
     response.trace.limit === (request.limit ?? 200) &&
     response.trace.returned === response.trace.rows.length &&
+    traceRowsAreUnique(response) &&
     response.trace.rows.every(
       (row) =>
-        row.as_of === request.as_of &&
+        row.as_of === response.as_of &&
         requestedSecurities.has(row.security_id) &&
         requestedNodes.has(row.node_id),
     ) &&
     response.raw.every(
       (row) =>
-        row.as_of === request.as_of && requestedSecurities.has(row.security_id),
+        row.as_of === response.as_of && requestedSecurities.has(row.security_id),
     ) &&
     (response.target === null ||
-      (response.target.signal_as_of === request.as_of &&
+      (response.target.signal_as_of === response.as_of &&
         targetProjectionMatches(
           response.target,
           requestedSecurities,

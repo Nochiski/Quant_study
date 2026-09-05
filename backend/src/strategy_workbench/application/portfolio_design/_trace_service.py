@@ -89,7 +89,7 @@ class StrategyTraceService:
     ) -> StrategyTraceResponse:
         spec, provenance = self._resolve(request)
         _raise_if_cancelled(cancelled)
-        if not spec.data.start <= request.as_of <= spec.data.end:
+        if request.as_of is not None and not spec.data.start <= request.as_of <= spec.data.end:
             raise InvalidStrategyTraceRequestError(
                 "trace as_of is outside the strategy data range — "
                 f"as_of={request.as_of} range={spec.data.start}..{spec.data.end}"
@@ -104,7 +104,7 @@ class StrategyTraceService:
         selection = TraceSelection(
             node_ids=request.node_ids or None,
             security_ids=tuple(sorted(request.security_ids)),
-            as_of=(request.as_of,),
+            as_of=(request.as_of,) if request.as_of is not None else None,
             # One look-ahead row is enough to answer `has_more` without an unbounded response.
             max_rows=request.offset + request.limit + 1,
         )
@@ -151,6 +151,13 @@ class StrategyTraceService:
         )
         if record.trace is None:  # pragma: no cover - options above require this invariant
             raise RuntimeError("truthful pipeline omitted its requested factor trace")
+        resolved_as_of = request.as_of
+        if resolved_as_of is None:
+            if pipeline.construction_trace is None:
+                raise InvalidStrategyTraceRequestError(
+                    "trace default date could not resolve an executable TargetTape signal frame"
+                )
+            resolved_as_of = pipeline.construction_trace.signal_as_of
         rows_list: list[StrategyTraceRow] = []
         for node in record.trace.nodes:
             _raise_if_cancelled(cancelled)
@@ -176,12 +183,15 @@ class StrategyTraceService:
         rows = tuple(rows_list)
         page_rows = rows[request.offset : request.offset + request.limit]
         raw, raw_truncated = _raw_projection(
-            pipeline.raw_observations, request, cancelled=cancelled
+            pipeline.raw_observations,
+            request,
+            as_of=resolved_as_of,
+            cancelled=cancelled,
         )
         _raise_if_cancelled(cancelled)
         target = _target_projection(
             pipeline.preview.tape.frames,
-            request.as_of,
+            resolved_as_of,
             set(request.security_ids),
             pipeline.construction_trace,
             cancelled=cancelled,
@@ -193,7 +203,7 @@ class StrategyTraceService:
             plan_hash=record.plan.plan_hash,
             provenance=provenance,
             factor_id=request.factor_id,
-            as_of=request.as_of,
+            as_of=resolved_as_of,
             trace=StrategyTracePage(
                 rows=page_rows,
                 offset=request.offset,
@@ -244,6 +254,7 @@ def _raw_projection(
     observations: tuple[RawObservation, ...],
     request: StrategyTraceRequest,
     *,
+    as_of: date,
     cancelled: Callable[[], bool] = lambda: False,
 ) -> tuple[tuple[RawStrategyTraceRow, ...], bool]:
     if not request.include_raw:
@@ -253,7 +264,7 @@ def _raw_projection(
     for observation_index, observation in enumerate(observations):
         if observation_index % 128 == 0:
             _raise_if_cancelled(cancelled)
-        if observation.as_of != request.as_of or observation.security_id not in security_ids:
+        if observation.as_of != as_of or observation.security_id not in security_ids:
             continue
         for field_index, field in enumerate(
             sorted(observation.fields, key=lambda item: item.field_id)

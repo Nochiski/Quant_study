@@ -125,6 +125,76 @@ def test_inline_trace_matches_preview_target_and_is_deterministic() -> None:
         assert row["estimated_order_delta"] is None
 
 
+@pytest.mark.parametrize("end", ["2026-09-04", "2026-09-05"])
+def test_omitted_as_of_resolves_the_latest_executable_frame_for_inline_and_saved(
+    end: str,
+) -> None:
+    client = TestClient(build_http_app())
+    spec = client.get("/api/v1/strategies/template").json()
+    spec["data"]["end"] = end
+    preview = client.post("/api/v1/portfolio/preview", json={"spec": spec})
+    assert preview.status_code == 200, preview.text
+    expected = preview.json()["tape"]["frames"][-1]
+    factor = spec["factors"]["factors"][0]
+    security_ids = [item["security_id"] for item in expected["candidates"][:2]]
+    saved = _save(client, spec)
+    sources = (
+        {"kind": "inline_draft", "spec": spec},
+        {
+            "kind": "saved_revision",
+            "strategy_id": saved["strategy_id"],
+            "revision": saved["revision"],
+            "expected_spec_hash": saved["spec_hash"],
+        },
+    )
+
+    for source in sources:
+        response = client.post(
+            "/api/v1/strategies/debug/trace",
+            json={
+                "strategy_source": source,
+                "security_ids": security_ids,
+                "factor_id": factor["factor_id"],
+                "node_ids": [factor["graph"]["output_node_id"]],
+                "include_raw": True,
+            },
+        )
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["as_of"] == expected["signal_as_of"]
+        assert payload["target"]["signal_as_of"] == expected["signal_as_of"]
+        assert payload["target"]["execution_on"] == expected["execution_on"]
+        assert payload["target"]["execution_on"] <= end
+        assert payload["raw"] and payload["trace"]["rows"]
+
+
+def test_explicit_non_rebalance_date_keeps_raw_and_node_partial_trace() -> None:
+    client = TestClient(build_http_app())
+    spec = client.get("/api/v1/strategies/template").json()
+    spec["data"]["end"] = "2026-09-04"
+    _, security_ids, factor_id = _scope(client, spec)
+    factor = spec["factors"]["factors"][0]
+
+    response = client.post(
+        "/api/v1/strategies/debug/trace",
+        json={
+            "strategy_source": {"kind": "inline_draft", "spec": spec},
+            "as_of": spec["data"]["end"],
+            "security_ids": security_ids,
+            "factor_id": factor_id,
+            "node_ids": [factor["graph"]["output_node_id"]],
+            "include_raw": True,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["as_of"] == spec["data"]["end"]
+    assert payload["target"] is None
+    assert payload["raw"]
+    assert payload["trace"]["rows"]
+
+
 def test_trace_page_is_stable_and_bounded() -> None:
     client = TestClient(build_http_app())
     _, request = _inline_request(client)
@@ -582,6 +652,31 @@ def test_starting_holdings_without_a_target_frame_return_a_typed_preflight_error
     TypeAdapter(Trace422Response).validate_python(response.json())
 
 
+def test_omitted_as_of_without_an_executable_frame_returns_a_typed_error() -> None:
+    client = TestClient(build_http_app())
+    spec = client.get("/api/v1/strategies/template").json()
+    spec["data"].update({"start": "2026-09-04", "end": "2026-09-04"})
+    spec["portfolio"].update({"rebalance": "every_n_sessions", "rebalance_every_n_sessions": 1})
+    factor = spec["factors"]["factors"][0]
+
+    response = client.post(
+        "/api/v1/strategies/debug/trace",
+        json={
+            "strategy_source": {"kind": "inline_draft", "spec": spec},
+            "security_ids": ["sec-005930-1"],
+            "factor_id": factor["factor_id"],
+            "node_ids": [factor["graph"]["output_node_id"]],
+        },
+    )
+
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"] == {
+        "code": "trace.request.invalid",
+        "message": "trace default date requires an executable TargetTape signal frame",
+    }
+    TypeAdapter(Trace422Response).validate_python(response.json())
+
+
 def test_trace_openapi_contract_exposes_bounded_source_union() -> None:
     schema = TestClient(build_http_app()).get("/openapi.json").json()
     operation = schema["paths"]["/api/v1/strategies/debug/trace"]["post"]
@@ -590,6 +685,11 @@ def test_trace_openapi_contract_exposes_bounded_source_union() -> None:
     assert {"200", "404", "409", "422", "499"} <= set(operation["responses"])
     request_schema = schema["components"]["schemas"]["StrategyTraceRequest"]
     properties = request_schema["properties"]
+    assert "as_of" not in request_schema["required"]
+    assert {item.get("type") for item in properties["as_of"]["anyOf"]} == {
+        "string",
+        "null",
+    }
     assert {key: properties["limit"][key] for key in ("default", "minimum", "maximum")} == {
         "default": 200,
         "minimum": 1,

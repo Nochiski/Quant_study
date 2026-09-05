@@ -73,7 +73,8 @@ class PortfolioConstructionTrace:
 class PortfolioTraceSelection:
     """Bound the optional audit without changing the compiler's executable scope."""
 
-    as_of: date
+    # None resolves through PortfolioRebalanceSchedule, never through calendar arithmetic here.
+    as_of: date | None
     security_ids: tuple[str, ...]
     include_order_delta: bool = False
 

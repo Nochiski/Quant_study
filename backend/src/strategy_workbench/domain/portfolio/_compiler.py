@@ -80,6 +80,12 @@ class PortfolioRebalanceSchedule:
     def first_signal_as_of(self) -> date | None:
         return self.pairs[0][0] if self.pairs else None
 
+    def resolve_signal_as_of(self, requested: date | None) -> date | None:
+        """Resolve an explicit date or the latest executable signal without calendar guessing."""
+        if requested is not None:
+            return requested
+        return self.pairs[-1][0] if self.pairs else None
+
 
 def compile_rebalance_schedule(
     spec: StrategySpec,
@@ -174,6 +180,11 @@ def _compile_target_tape(
 
     compiled: list[TargetFrame] = []
     construction_trace: PortfolioConstructionTrace | None = None
+    trace_as_of = (
+        prepared_schedule.resolve_signal_as_of(trace_selection.as_of)
+        if trace_selection is not None
+        else None
+    )
     # The book is folded frame by frame: the compiler owns `previous_weight` from the second
     # rebalance on, and `PortfolioObservation.previous_weight` seeds only the first (D-002).
     carried: dict[str, float] | None = None
@@ -189,7 +200,7 @@ def _compile_target_tape(
         )
         selected_ids = (
             set(trace_selection.security_ids)
-            if trace_selection is not None and trace_selection.as_of == signal_as_of
+            if trace_selection is not None and trace_as_of == signal_as_of
             else None
         )
         frame_result = _compile_frame(

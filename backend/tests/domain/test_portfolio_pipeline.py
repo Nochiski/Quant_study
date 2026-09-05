@@ -417,6 +417,29 @@ def test_construction_trace_is_out_of_band_and_contributions_sum_to_the_same_sco
     assert by_id["a"].estimated_order_delta is None
 
 
+def test_omitted_construction_trace_date_uses_the_schedule_latest_signal() -> None:
+    spec = _spec()
+    sessions = (
+        date(2026, 1, 2),
+        date(2026, 1, 5),
+        date(2026, 1, 6),
+    )
+    observations = tuple(_observation(day, "a", float(index)) for index, day in enumerate(sessions))
+
+    result = compile_target_tape_with_trace(
+        spec,
+        data_snapshot_id="snapshot-1",
+        sessions=sessions,
+        observations=observations,
+        trace_selection=PortfolioTraceSelection(None, ("a",)),
+    )
+
+    assert result.trace is not None
+    assert result.trace.signal_as_of == sessions[-2]
+    assert result.trace.execution_on == sessions[-1]
+    assert result.trace.signal_as_of == result.tape.frames[-1].signal_as_of
+
+
 def test_construction_trace_explains_missing_future_removed_and_explicit_order_delta() -> None:
     spec = replace(
         _spec(),

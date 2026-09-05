@@ -644,17 +644,19 @@ def test_factor_evaluator_checkpoint_stops_before_target_tape(monkeypatch) -> No
 
 def test_raw_projection_stops_at_one_lookahead_row_and_reports_truncation() -> None:
     request = replace(_request(_spec()), include_raw=True)
+    assert request.as_of is not None
+    as_of = request.as_of
     observation = RawObservation(
-        as_of=request.as_of,
+        as_of=as_of,
         security_id=request.security_ids[0],
         universe_member=True,
         fields=tuple(
-            RawFieldValue(f"field.{index:04d}", float(index), request.as_of)
+            RawFieldValue(f"field.{index:04d}", float(index), as_of)
             for index in range(trace_module.MAX_RAW_ROWS + 1)
         ),
     )
 
-    rows, truncated = trace_module._raw_projection((observation,), request)
+    rows, truncated = trace_module._raw_projection((observation,), request, as_of=as_of)
 
     assert len(rows) == trace_module.MAX_RAW_ROWS
     assert rows[-1].field_id == "field.1999"

@@ -16,6 +16,8 @@ const classify = (response: StartBacktest422): string => {
       return `strategy:${detail.validation.valid}`;
     case "portfolio.data.unavailable":
       return `data:${detail.status}`;
+    case "portfolio.raw_observation.invalid":
+      return `raw:${detail.message}`;
     default: {
       const exhaustive: never = detail;
       return exhaustive;
@@ -35,5 +37,13 @@ describe("generated startBacktest error contract", () => {
         detail: [{ loc: ["body", "core"], msg: "invalid core", type: "enum" }],
       }),
     ).toBe("request.validation:enum");
+    expect(
+      classify({
+        detail: {
+          code: "portfolio.raw_observation.invalid",
+          message: "duplicate field",
+        },
+      }),
+    ).toBe("raw:duplicate field");
   });
 });

@@ -84,6 +84,7 @@ def test_inline_trace_matches_preview_target_and_is_deterministic() -> None:
         request["security_ids"]
     )
     assert payload["raw"] and payload["raw_truncated"] is False
+    assert {row["kind"] for row in payload["raw"]} == {"observed"}
 
     factor = spec["factors"]["factors"][0]
     explained = client.post(
@@ -109,8 +110,89 @@ def test_inline_trace_matches_preview_target_and_is_deterministic() -> None:
     assert payload["target"]["candidates"] == expected_candidates
     assert payload["target"]["targets"] == expected_targets
     by_security = {item["security_id"]: item for item in expected_candidates}
+    construction = {item["security_id"]: item for item in payload["target"]["construction"]}
+    assert set(construction) == set(request["security_ids"])
     for row in payload["trace"]["rows"]:
         assert row["value"] == by_security[row["security_id"]]["composite_score"]
+    for security_id, row in construction.items():
+        candidate = by_security[security_id]
+        assert row["composite_score"] == candidate["composite_score"]
+        assert row["constrained_target_weight"] == candidate["target_weight"]
+        assert sum(
+            item["normalized_contribution"] or 0.0 for item in row["factor_contributions"]
+        ) == pytest.approx(row["composite_score"])
+        assert row["previous_weight"] is None
+        assert row["estimated_order_delta"] is None
+
+
+@pytest.mark.parametrize("end", ["2026-09-04", "2026-09-05"])
+def test_omitted_as_of_resolves_the_latest_executable_frame_for_inline_and_saved(
+    end: str,
+) -> None:
+    client = TestClient(build_http_app())
+    spec = client.get("/api/v1/strategies/template").json()
+    spec["data"]["end"] = end
+    preview = client.post("/api/v1/portfolio/preview", json={"spec": spec})
+    assert preview.status_code == 200, preview.text
+    expected = preview.json()["tape"]["frames"][-1]
+    factor = spec["factors"]["factors"][0]
+    security_ids = [item["security_id"] for item in expected["candidates"][:2]]
+    saved = _save(client, spec)
+    sources = (
+        {"kind": "inline_draft", "spec": spec},
+        {
+            "kind": "saved_revision",
+            "strategy_id": saved["strategy_id"],
+            "revision": saved["revision"],
+            "expected_spec_hash": saved["spec_hash"],
+        },
+    )
+
+    for source in sources:
+        response = client.post(
+            "/api/v1/strategies/debug/trace",
+            json={
+                "strategy_source": source,
+                "security_ids": security_ids,
+                "factor_id": factor["factor_id"],
+                "node_ids": [factor["graph"]["output_node_id"]],
+                "include_raw": True,
+            },
+        )
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["as_of"] == expected["signal_as_of"]
+        assert payload["target"]["signal_as_of"] == expected["signal_as_of"]
+        assert payload["target"]["execution_on"] == expected["execution_on"]
+        assert payload["target"]["execution_on"] <= end
+        assert payload["raw"] and payload["trace"]["rows"]
+
+
+def test_explicit_non_rebalance_date_keeps_raw_and_node_partial_trace() -> None:
+    client = TestClient(build_http_app())
+    spec = client.get("/api/v1/strategies/template").json()
+    spec["data"]["end"] = "2026-09-04"
+    _, security_ids, factor_id = _scope(client, spec)
+    factor = spec["factors"]["factors"][0]
+
+    response = client.post(
+        "/api/v1/strategies/debug/trace",
+        json={
+            "strategy_source": {"kind": "inline_draft", "spec": spec},
+            "as_of": spec["data"]["end"],
+            "security_ids": security_ids,
+            "factor_id": factor_id,
+            "node_ids": [factor["graph"]["output_node_id"]],
+            "include_raw": True,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["as_of"] == spec["data"]["end"]
+    assert payload["target"] is None
+    assert payload["raw"]
+    assert payload["trace"]["rows"]
 
 
 def test_trace_page_is_stable_and_bounded() -> None:
@@ -173,6 +255,20 @@ def test_starting_holdings_change_the_actual_target_and_unknown_holding_is_rejec
     assert {item["security_id"] for item in seeded_book.json()["target"]["targets"]} == set(
         security_ids
     )
+    empty_construction = empty_book.json()["target"]["construction"]
+    seeded_construction = seeded_book.json()["target"]["construction"]
+    assert all(item["previous_weight"] == 0.0 for item in empty_construction)
+    assert all(
+        item["estimated_order_delta"]
+        == pytest.approx(item["constrained_target_weight"] - item["previous_weight"])
+        for item in empty_construction
+    )
+    assert all(item["previous_weight"] == pytest.approx(0.1) for item in seeded_construction)
+    assert all(
+        item["estimated_order_delta"]
+        == pytest.approx(item["constrained_target_weight"] - item["previous_weight"])
+        for item in seeded_construction
+    )
 
     unknown = client.post(
         "/api/v1/strategies/debug/trace",
@@ -183,6 +279,66 @@ def test_starting_holdings_change_the_actual_target_and_unknown_holding_is_rejec
     )
     assert unknown.status_code == 422
     assert unknown.json()["detail"]["code"] == "trace.request.invalid"
+
+
+def test_trace_preserves_raw_zero_missing_collection_and_coverage_semantics() -> None:
+    client = TestClient(build_http_app())
+    spec = client.get("/api/v1/strategies/template").json()
+    spec["data"].update({"start": "2024-01-03", "end": "2024-01-09"})
+    spec["portfolio"].update({"rebalance": "every_n_sessions", "rebalance_every_n_sessions": 1})
+    factor = spec["factors"]["factors"][0]
+    factor["graph"] = {
+        "nodes": [
+            {
+                "node_id": "foreign-flow",
+                "field_id": "flow.foreign_net_buy",
+                "kind": "field",
+            }
+        ],
+        "output_node_id": "foreign-flow",
+        "missing_policy": "drop",
+    }
+    base = {
+        "strategy_source": {"kind": "inline_draft", "spec": spec},
+        "factor_id": factor["factor_id"],
+        "node_ids": ["foreign-flow"],
+        "include_raw": True,
+    }
+    scopes = (
+        ("2024-01-03", ["sec-005930-1", "sec-000660-1"]),
+        ("2024-01-04", ["sec-005930-1", "sec-000660-1"]),
+        ("2024-01-08", ["sec-035420-1"]),
+    )
+    raw_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    for as_of, security_ids in scopes:
+        response = client.post(
+            "/api/v1/strategies/debug/trace",
+            json={**base, "as_of": as_of, "security_ids": security_ids},
+        )
+        assert response.status_code == 200, response.text
+        for row in response.json()["raw"]:
+            raw_by_key[(row["as_of"], row["security_id"])] = row
+
+    assert (
+        raw_by_key[("2024-01-03", "sec-005930-1")]["value"],
+        raw_by_key[("2024-01-03", "sec-005930-1")]["kind"],
+    ) == (0.0, "observed")
+    assert (
+        raw_by_key[("2024-01-03", "sec-000660-1")]["value"],
+        raw_by_key[("2024-01-03", "sec-000660-1")]["kind"],
+    ) == (None, "missing")
+    assert (
+        raw_by_key[("2024-01-04", "sec-005930-1")]["value"],
+        raw_by_key[("2024-01-04", "sec-005930-1")]["kind"],
+    ) == (0.0, "source_omitted_zero")
+    assert (
+        raw_by_key[("2024-01-04", "sec-000660-1")]["value"],
+        raw_by_key[("2024-01-04", "sec-000660-1")]["kind"],
+    ) == (None, "not_collected")
+    assert (
+        raw_by_key[("2024-01-08", "sec-035420-1")]["value"],
+        raw_by_key[("2024-01-08", "sec-035420-1")]["kind"],
+    ) == (None, "coverage_gap")
 
 
 def test_saved_revision_trace_is_hash_guarded_and_errors_are_structured() -> None:
@@ -496,6 +652,31 @@ def test_starting_holdings_without_a_target_frame_return_a_typed_preflight_error
     TypeAdapter(Trace422Response).validate_python(response.json())
 
 
+def test_omitted_as_of_without_an_executable_frame_returns_a_typed_error() -> None:
+    client = TestClient(build_http_app())
+    spec = client.get("/api/v1/strategies/template").json()
+    spec["data"].update({"start": "2026-09-04", "end": "2026-09-04"})
+    spec["portfolio"].update({"rebalance": "every_n_sessions", "rebalance_every_n_sessions": 1})
+    factor = spec["factors"]["factors"][0]
+
+    response = client.post(
+        "/api/v1/strategies/debug/trace",
+        json={
+            "strategy_source": {"kind": "inline_draft", "spec": spec},
+            "security_ids": ["sec-005930-1"],
+            "factor_id": factor["factor_id"],
+            "node_ids": [factor["graph"]["output_node_id"]],
+        },
+    )
+
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"] == {
+        "code": "trace.request.invalid",
+        "message": "trace default date requires an executable TargetTape signal frame",
+    }
+    TypeAdapter(Trace422Response).validate_python(response.json())
+
+
 def test_trace_openapi_contract_exposes_bounded_source_union() -> None:
     schema = TestClient(build_http_app()).get("/openapi.json").json()
     operation = schema["paths"]["/api/v1/strategies/debug/trace"]["post"]
@@ -504,6 +685,11 @@ def test_trace_openapi_contract_exposes_bounded_source_union() -> None:
     assert {"200", "404", "409", "422", "499"} <= set(operation["responses"])
     request_schema = schema["components"]["schemas"]["StrategyTraceRequest"]
     properties = request_schema["properties"]
+    assert "as_of" not in request_schema["required"]
+    assert {item.get("type") for item in properties["as_of"]["anyOf"]} == {
+        "string",
+        "null",
+    }
     assert {key: properties["limit"][key] for key in ("default", "minimum", "maximum")} == {
         "default": 200,
         "minimum": 1,
@@ -539,6 +725,7 @@ def test_trace_openapi_contract_exposes_bounded_source_union() -> None:
     detail = schema["components"]["schemas"]["TraceUnprocessableResponse"]["properties"]["detail"]
     assert detail["discriminator"]["propertyName"] == "code"
     assert "trace.capability.unsupported" in detail["discriminator"]["mapping"]
+    assert "portfolio.raw_observation.invalid" in detail["discriminator"]["mapping"]
     TypeAdapter(Trace422Response).validate_python(
         {
             "detail": {

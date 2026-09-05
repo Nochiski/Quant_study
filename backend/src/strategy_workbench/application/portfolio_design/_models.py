@@ -4,7 +4,10 @@ from dataclasses import dataclass
 from math import isfinite
 
 from strategy_workbench.domain.factor.facade.trace import TraceSelection
-from strategy_workbench.domain.portfolio.facade.construction import TargetTape
+from strategy_workbench.domain.portfolio.facade.construction import (
+    PortfolioTraceSelection,
+    TargetTape,
+)
 from strategy_workbench.domain.strategy.facade.specification import StrategySpec
 
 
@@ -59,6 +62,7 @@ class PortfolioPipelineOptions:
 
     trace_factor_id: str | None = None
     trace_selection: TraceSelection | None = None
+    construction_trace_selection: PortfolioTraceSelection | None = None
     starting_holdings: tuple[PortfolioStartingHolding, ...] | None = None
     require_engine_compatible: bool = False
 

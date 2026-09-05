@@ -51,8 +51,7 @@ export const buildStrategyDebuggerAvailability = (
   if (source.kind === "blocked")
     return {
       context: null,
-      reason:
-        source.reason === "factor-plan" ? "execution-plan" : "document",
+      reason: source.reason === "factor-plan" ? "execution-plan" : "document",
     };
 
   const factors = plans.factors.flatMap((factor) => {
@@ -71,6 +70,7 @@ export const buildStrategyDebuggerAvailability = (
           ];
     });
     if (
+      nodes.length !== plan.steps.length ||
       !nodes.some((node) => node.nodeId === factor.request.graph.output_node_id)
     )
       return [];

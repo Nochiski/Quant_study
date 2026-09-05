@@ -103,7 +103,7 @@ describe("Strategy IDE debugger composition", () => {
   it("packages the editor-owned inline source with backend-owned plan identities", () => {
     expect(buildStrategyDebuggerAvailability(documentState(), plans())).toEqual(
       {
-      reason: null,
+        reason: null,
         context: {
           documentEpoch: 3,
           sourceVersion: 7,
@@ -176,6 +176,19 @@ describe("Strategy IDE debugger composition", () => {
     invalidPlans.factors[0]!.explanation.plan = null;
     expect(
       buildStrategyDebuggerAvailability(documentState(), invalidPlans),
+    ).toEqual({ context: null, reason: "execution-plan" });
+
+    const incompletePlans = plans();
+    if (incompletePlans.status !== "ready") throw new Error("test setup");
+    incompletePlans.factors[0]!.explanation.plan!.steps = [
+      {
+        ...incompletePlans.factors[0]!.explanation.plan!.steps[0]!,
+        node_id: "node-that-is-not-in-the-graph",
+      },
+      incompletePlans.factors[0]!.explanation.plan!.steps[1]!,
+    ];
+    expect(
+      buildStrategyDebuggerAvailability(documentState(), incompletePlans),
     ).toEqual({ context: null, reason: "execution-plan" });
   });
 });

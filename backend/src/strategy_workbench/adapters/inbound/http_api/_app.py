@@ -54,6 +54,7 @@ from strategy_workbench.application.portfolio_design.facade.design import (
     PortfolioDesignService,
     PortfolioPreview,
     PortfolioPreviewRequest,
+    RawObservationContractError,
     RawObservationUnavailableError,
 )
 from strategy_workbench.application.portfolio_design.facade.trace import (
@@ -104,7 +105,10 @@ from ._backtest_contract import (
     BacktestStrategyNotFoundResponse,
     BacktestStrategyStaleResponse,
 )
-from ._execution_error_contract import Portfolio422Response
+from ._execution_error_contract import (
+    Portfolio422Response,
+    PortfolioRawObservationInvalidDetail,
+)
 from ._trace_contract import (
     Trace422Response,
     TraceCancelledDetail,
@@ -231,7 +235,11 @@ def create_app(
                 detail={"code": "backtest.strategy.stale", "message": str(error)},
             ) from error
 
-        except (InvalidPortfolioRequestError, RawObservationUnavailableError) as error:
+        except (
+            InvalidPortfolioRequestError,
+            RawObservationUnavailableError,
+            RawObservationContractError,
+        ) as error:
             raise _portfolio_http_error(error) from error
 
     @app.get(
@@ -324,7 +332,11 @@ def create_app(
     def portfolio_preview(request: PortfolioPreviewRequest) -> PortfolioPreview:
         try:
             return portfolio_design.preview(request)
-        except (InvalidPortfolioRequestError, RawObservationUnavailableError) as error:
+        except (
+            InvalidPortfolioRequestError,
+            RawObservationUnavailableError,
+            RawObservationContractError,
+        ) as error:
             raise _portfolio_http_error(error) from error
 
     @app.post(
@@ -395,7 +407,11 @@ def create_app(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=asdict(detail),
             ) from error
-        except (InvalidPortfolioRequestError, RawObservationUnavailableError) as error:
+        except (
+            InvalidPortfolioRequestError,
+            RawObservationUnavailableError,
+            RawObservationContractError,
+        ) as error:
             raise _portfolio_http_error(error) from error
         except StrategyTraceCancelledError as error:
             detail = TraceCancelledDetail("trace.cancelled", str(error))
@@ -770,7 +786,9 @@ def _invalid_document(error: InvalidStrategyDocumentError) -> HTTPException:
 
 
 def _portfolio_http_error(
-    error: InvalidPortfolioRequestError | RawObservationUnavailableError,
+    error: InvalidPortfolioRequestError
+    | RawObservationUnavailableError
+    | RawObservationContractError,
 ) -> HTTPException:
     """Same coded 422 for the preview and backtest routes: the pipeline rejected the request."""
     if isinstance(error, InvalidPortfolioRequestError):
@@ -778,10 +796,17 @@ def _portfolio_http_error(
             "code": "portfolio.strategy.invalid",
             "validation": jsonable_encoder(asdict(error.validation)),
         }
-    else:
+    elif isinstance(error, RawObservationUnavailableError):
         detail = {
             "code": "portfolio.data.unavailable",
             "status": error.status.value,
             "detail": error.detail,
         }
+    else:
+        detail = asdict(
+            PortfolioRawObservationInvalidDetail(
+                "portfolio.raw_observation.invalid",
+                str(error),
+            )
+        )
     return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=detail)

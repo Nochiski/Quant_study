@@ -318,6 +318,7 @@
               "mapping": {
                 "backtest.run.invalid": "#/components/schemas/BacktestRunInvalidDetail",
                 "portfolio.data.unavailable": "#/components/schemas/PortfolioDataUnavailableDetail",
+                "portfolio.raw_observation.invalid": "#/components/schemas/PortfolioRawObservationInvalidDetail",
                 "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail"
               },
               "propertyName": "code"
@@ -331,6 +332,9 @@
               },
               {
                 "$ref": "#/components/schemas/PortfolioDataUnavailableDetail"
+              },
+              {
+                "$ref": "#/components/schemas/PortfolioRawObservationInvalidDetail"
               }
             ],
             "title": "Detail"
@@ -1483,6 +1487,78 @@
         ],
         "title": "FactorComparisonOperator",
         "type": "string"
+      },
+      "FactorContributionStatus": {
+        "enum": [
+          "ok",
+          "missing",
+          "future_data"
+        ],
+        "title": "FactorContributionStatus",
+        "type": "string"
+      },
+      "FactorContributionTrace": {
+        "description": "One term of the compiler-owned normalized weighted-sum score.",
+        "properties": {
+          "configured_weight": {
+            "title": "Configured Weight",
+            "type": "number"
+          },
+          "direction": {
+            "$ref": "#/components/schemas/FactorDirection"
+          },
+          "factor_id": {
+            "title": "Factor Id",
+            "type": "string"
+          },
+          "normalized_contribution": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Normalized Contribution"
+          },
+          "status": {
+            "$ref": "#/components/schemas/FactorContributionStatus"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "weighted_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weighted Value"
+          }
+        },
+        "required": [
+          "factor_id",
+          "value",
+          "configured_weight",
+          "direction",
+          "weighted_value",
+          "normalized_contribution",
+          "status"
+        ],
+        "title": "FactorContributionTrace",
+        "type": "object"
       },
       "FactorDefinition": {
         "properties": {
@@ -3016,6 +3092,142 @@
         "title": "ParameterNode",
         "type": "object"
       },
+      "PortfolioCandidateTrace": {
+        "description": "The linked score -> selection -> constrained target path for one security.",
+        "properties": {
+          "as_of": {
+            "format": "date",
+            "title": "As Of",
+            "type": "string"
+          },
+          "composite_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Composite Score"
+          },
+          "constrained_target_weight": {
+            "title": "Constrained Target Weight",
+            "type": "number"
+          },
+          "constraint_effect": {
+            "$ref": "#/components/schemas/PortfolioConstraintEffect"
+          },
+          "eligible": {
+            "title": "Eligible",
+            "type": "boolean"
+          },
+          "estimated_order_delta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Order Delta"
+          },
+          "exclusion_reasons": {
+            "items": {
+              "$ref": "#/components/schemas/ExclusionReason"
+            },
+            "title": "Exclusion Reasons",
+            "type": "array"
+          },
+          "factor_contributions": {
+            "items": {
+              "$ref": "#/components/schemas/FactorContributionTrace"
+            },
+            "title": "Factor Contributions",
+            "type": "array"
+          },
+          "previous_weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Weight"
+          },
+          "rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "selected": {
+            "title": "Selected",
+            "type": "boolean"
+          },
+          "side": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CandidateSide"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unconstrained_target_weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unconstrained Target Weight"
+          }
+        },
+        "required": [
+          "as_of",
+          "security_id",
+          "factor_contributions",
+          "composite_score",
+          "rank",
+          "eligible",
+          "selected",
+          "side",
+          "unconstrained_target_weight",
+          "constrained_target_weight",
+          "previous_weight",
+          "estimated_order_delta",
+          "constraint_effect",
+          "exclusion_reasons"
+        ],
+        "title": "PortfolioCandidateTrace",
+        "type": "object"
+      },
+      "PortfolioConstraintEffect": {
+        "enum": [
+          "not_selected",
+          "unchanged",
+          "adjusted",
+          "removed"
+        ],
+        "title": "PortfolioConstraintEffect",
+        "type": "string"
+      },
       "PortfolioDataUnavailableDetail": {
         "properties": {
           "code": {
@@ -3081,6 +3293,26 @@
           "spec"
         ],
         "title": "PortfolioPreviewRequest",
+        "type": "object"
+      },
+      "PortfolioRawObservationInvalidDetail": {
+        "description": "A configured data adapter violated the raw execution-input contract.",
+        "properties": {
+          "code": {
+            "const": "portfolio.raw_observation.invalid",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "PortfolioRawObservationInvalidDetail",
         "type": "object"
       },
       "PortfolioSide": {
@@ -3208,6 +3440,7 @@
             "discriminator": {
               "mapping": {
                 "portfolio.data.unavailable": "#/components/schemas/PortfolioDataUnavailableDetail",
+                "portfolio.raw_observation.invalid": "#/components/schemas/PortfolioRawObservationInvalidDetail",
                 "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail"
               },
               "propertyName": "code"
@@ -3218,6 +3451,9 @@
               },
               {
                 "$ref": "#/components/schemas/PortfolioDataUnavailableDetail"
+              },
+              {
+                "$ref": "#/components/schemas/PortfolioRawObservationInvalidDetail"
               }
             ],
             "title": "Detail"
@@ -3523,6 +3759,9 @@
             "title": "Field Id",
             "type": "string"
           },
+          "kind": {
+            "$ref": "#/components/schemas/CellKind"
+          },
           "security_id": {
             "title": "Security Id",
             "type": "string"
@@ -3550,7 +3789,8 @@
           "security_id",
           "field_id",
           "value",
-          "available_date"
+          "available_date",
+          "kind"
         ],
         "title": "RawStrategyTraceRow",
         "type": "object"
@@ -5080,6 +5320,13 @@
             "title": "Candidates",
             "type": "array"
           },
+          "construction": {
+            "items": {
+              "$ref": "#/components/schemas/PortfolioCandidateTrace"
+            },
+            "title": "Construction",
+            "type": "array"
+          },
           "execution_on": {
             "format": "date",
             "title": "Execution On",
@@ -5102,7 +5349,8 @@
           "signal_as_of",
           "execution_on",
           "targets",
-          "candidates"
+          "candidates",
+          "construction"
         ],
         "title": "StrategyTargetTrace",
         "type": "object"
@@ -5174,9 +5422,16 @@
       "StrategyTraceRequest": {
         "properties": {
           "as_of": {
-            "format": "date",
-            "title": "As Of",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
           },
           "factor_id": {
             "minLength": 1,
@@ -5262,7 +5517,6 @@
         },
         "required": [
           "strategy_source",
-          "as_of",
           "security_ids",
           "factor_id"
         ],
@@ -5739,6 +5993,7 @@
             "discriminator": {
               "mapping": {
                 "portfolio.data.unavailable": "#/components/schemas/PortfolioDataUnavailableDetail",
+                "portfolio.raw_observation.invalid": "#/components/schemas/PortfolioRawObservationInvalidDetail",
                 "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail",
                 "trace.capability.unsupported": "#/components/schemas/TraceCapabilityUnsupportedDetail",
                 "trace.engine.incompatible": "#/components/schemas/TraceEngineIncompatibleDetail",
@@ -5761,6 +6016,9 @@
               },
               {
                 "$ref": "#/components/schemas/PortfolioDataUnavailableDetail"
+              },
+              {
+                "$ref": "#/components/schemas/PortfolioRawObservationInvalidDetail"
               }
             ],
             "title": "Detail"

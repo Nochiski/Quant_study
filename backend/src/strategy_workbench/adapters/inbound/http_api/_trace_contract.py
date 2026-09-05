@@ -17,6 +17,7 @@ from strategy_workbench.application.portfolio_design.facade.trace import Strateg
 
 from ._execution_error_contract import (
     PortfolioDataUnavailableDetail,
+    PortfolioRawObservationInvalidDetail,
     PortfolioStrategyInvalidDetail,
     RequestValidationResponse,
 )
@@ -46,7 +47,8 @@ TraceUnprocessableDetail: TypeAlias = Annotated[
     | TraceEngineIncompatibleDetail
     | TraceCapabilityUnsupportedDetail
     | PortfolioStrategyInvalidDetail
-    | PortfolioDataUnavailableDetail,
+    | PortfolioDataUnavailableDetail
+    | PortfolioRawObservationInvalidDetail,
     Field(discriminator="code"),
 ]
 

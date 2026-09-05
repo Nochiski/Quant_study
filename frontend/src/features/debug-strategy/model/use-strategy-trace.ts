@@ -10,6 +10,7 @@ import {
 import {
   prepareStrategyTrace,
   responseMatchesStrategyTrace,
+  STRATEGY_TRACE_CLIENT_BUDGET,
   type PreparedStrategyTrace,
   type StrategyDebuggerContext,
   type StrategyTraceSelection,
@@ -30,7 +31,13 @@ export type StrategyTraceState =
   | ({ kind: "cancelled" } & RequestOwned)
   | ({ kind: "discarded" } & RequestOwned)
   | ({ kind: "error"; message: string } & RequestOwned)
-  | ({ kind: "success"; response: StrategyTraceResponse } & RequestOwned);
+  | ({
+      kind: "success";
+      response: StrategyTraceResponse;
+      linkedRows: StrategyTraceResponse["trace"]["rows"];
+      selectedRows: StrategyTraceResponse["trace"]["rows"];
+      linkedTruncated: boolean;
+    } & RequestOwned);
 
 type OwnedState = Exclude<StrategyTraceState, { kind: "blocked" | "idle" }>;
 
@@ -46,6 +53,134 @@ class DiscardedStrategyTraceResponse extends Error {
     this.name = "DiscardedStrategyTraceResponse";
   }
 }
+
+type ReadyTrace = Extract<PreparedStrategyTrace, { kind: "ready" }>;
+type TraceRow = StrategyTraceResponse["trace"]["rows"][number];
+
+const sameWireValue = (left: unknown, right: unknown): boolean =>
+  JSON.stringify(left) === JSON.stringify(right);
+
+const sameCalculation = (
+  anchor: StrategyTraceResponse,
+  candidate: StrategyTraceResponse,
+): boolean =>
+  anchor.as_of === candidate.as_of &&
+  sameWireValue(anchor.provenance, candidate.provenance) &&
+  sameWireValue(anchor.target, candidate.target) &&
+  sameWireValue(anchor.warnings ?? [], candidate.warnings ?? []);
+
+const rowIdentity = (row: TraceRow): string =>
+  JSON.stringify([row.node_id, row.as_of, row.security_id]);
+
+const requestTrace = async (
+  prepared: ReadyTrace,
+  request: StrategyTraceRequest,
+  signal: AbortSignal,
+): Promise<StrategyTraceResponse> => {
+  const response = await strategyWorkbenchApi.traceStrategy(request, signal);
+  if (!responseMatchesStrategyTrace(prepared, response, request))
+    throw new DiscardedStrategyTraceResponse();
+  return response;
+};
+
+const selectedRowsAreComplete = (
+  rows: readonly TraceRow[],
+  request: StrategyTraceRequest,
+): boolean => {
+  const selectedNode = request.node_ids?.[0];
+  if (selectedNode === undefined || rows.length !== request.security_ids.length)
+    return false;
+  const securities = new Set(
+    rows
+      .filter((row) => row.node_id === selectedNode)
+      .map((row) => row.security_id),
+  );
+  return (
+    securities.size === request.security_ids.length &&
+    request.security_ids.every((securityId) => securities.has(securityId))
+  );
+};
+
+/** Page/chunk server rows by identity only; no factor or portfolio value is calculated here. */
+const fetchTraceBundle = async (
+  prepared: ReadyTrace,
+  signal: AbortSignal,
+) => {
+  let anchor: StrategyTraceResponse | null = null;
+  let remainingBudget: number = STRATEGY_TRACE_CLIENT_BUDGET.totalRows;
+  let linkedTruncated = false;
+  const linkedRows: TraceRow[] = [];
+  const seenRows = new Set<string>();
+
+  outer: for (const baseRequest of prepared.linkedRequests) {
+    const nodeCount = baseRequest.node_ids?.length ?? 0;
+    const expectedRows = nodeCount * baseRequest.security_ids.length;
+    let offset = 0;
+    while (offset < expectedRows) {
+      if (remainingBudget === 0) {
+        linkedTruncated = true;
+        break outer;
+      }
+      const limit = Math.min(
+        STRATEGY_TRACE_CLIENT_BUDGET.pageRows,
+        expectedRows - offset,
+        remainingBudget,
+      );
+      const pageRequest: StrategyTraceRequest = {
+        ...baseRequest,
+        include_raw: anchor === null,
+        offset,
+        limit,
+      };
+      const page = await requestTrace(prepared, pageRequest, signal);
+      if (anchor === null) anchor = page;
+      else if (!sameCalculation(anchor, page))
+        throw new DiscardedStrategyTraceResponse();
+      if (!pageRequest.include_raw && (page.raw.length > 0 || page.raw_truncated))
+        throw new DiscardedStrategyTraceResponse();
+      if (page.trace.returned !== limit)
+        throw new DiscardedStrategyTraceResponse();
+      for (const row of page.trace.rows) {
+        const identity = rowIdentity(row);
+        if (seenRows.has(identity)) throw new DiscardedStrategyTraceResponse();
+        seenRows.add(identity);
+        linkedRows.push(row);
+      }
+      offset += page.trace.returned;
+      remainingBudget -= page.trace.returned;
+      if (!page.trace.has_more) {
+        if (offset !== expectedRows)
+          throw new DiscardedStrategyTraceResponse();
+        break;
+      }
+    }
+  }
+  if (anchor === null) throw new DiscardedStrategyTraceResponse();
+
+  let selectedRows = linkedRows.filter(
+    (row) => row.node_id === prepared.selectedRequest.node_ids?.[0],
+  );
+  if (
+    linkedTruncated ||
+    !selectedRowsAreComplete(selectedRows, prepared.selectedRequest)
+  ) {
+    const selected = await requestTrace(
+      prepared,
+      prepared.selectedRequest,
+      signal,
+    );
+    if (
+      !sameCalculation(anchor, selected) ||
+      selected.raw.length > 0 ||
+      selected.raw_truncated ||
+      selected.trace.has_more ||
+      !selectedRowsAreComplete(selected.trace.rows, prepared.selectedRequest)
+    )
+      throw new DiscardedStrategyTraceResponse();
+    selectedRows = selected.trace.rows;
+  }
+  return { anchor, linkedRows, selectedRows, linkedTruncated };
+};
 
 const errorMessage = (error: unknown): string =>
   error instanceof ApiRequestError
@@ -79,17 +214,13 @@ export const useStrategyTrace = (
     queryFn: async ({ signal }) => {
       if (prepared.kind !== "ready")
         throw new Error("blocked strategy trace query cannot execute");
-      const response = await strategyWorkbenchApi.traceStrategy(
-        prepared.request,
-        signal,
-      );
-      if (!responseMatchesStrategyTrace(prepared, response))
-        throw new DiscardedStrategyTraceResponse();
-      return response;
+      return fetchTraceBundle(prepared, signal);
     },
     enabled: false,
     retry: false,
     staleTime: Number.POSITIVE_INFINITY,
+    // Linked traces are deliberately larger than the P5-02 single-node response.
+    gcTime: 60_000,
   });
 
   const run = useCallback(async (): Promise<void> => {
@@ -129,7 +260,10 @@ export const useStrategyTrace = (
       : {
           kind: "success",
           ...requestOwner,
-          response: query.data,
+          response: query.data.anchor,
+          linkedRows: query.data.linkedRows,
+          selectedRows: query.data.selectedRows,
+          linkedTruncated: query.data.linkedTruncated,
         };
   }, [
     cancelled,

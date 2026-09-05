@@ -201,7 +201,10 @@ export type BacktestUnprocessableResponse = {
       } & PortfolioStrategyInvalidDetail)
     | ({
         code: "portfolio.data.unavailable";
-      } & PortfolioDataUnavailableDetail);
+      } & PortfolioDataUnavailableDetail)
+    | ({
+        code: "portfolio.raw_observation.invalid";
+      } & PortfolioRawObservationInvalidDetail);
 };
 
 /**
@@ -905,6 +908,41 @@ export type FactorCategory =
  * FactorComparisonOperator
  */
 export type FactorComparisonOperator = "gt" | "gte" | "lt" | "lte" | "eq";
+
+/**
+ * FactorContributionStatus
+ */
+export type FactorContributionStatus = "ok" | "missing" | "future_data";
+
+/**
+ * FactorContributionTrace
+ *
+ * One term of the compiler-owned normalized weighted-sum score.
+ */
+export type FactorContributionTrace = {
+  /**
+   * Configured Weight
+   */
+  configured_weight: number;
+  direction: FactorDirection;
+  /**
+   * Factor Id
+   */
+  factor_id: string;
+  /**
+   * Normalized Contribution
+   */
+  normalized_contribution: number | null;
+  status: FactorContributionStatus;
+  /**
+   * Value
+   */
+  value: number | null;
+  /**
+   * Weighted Value
+   */
+  weighted_value: number | null;
+};
 
 /**
  * FactorDefinition
@@ -1852,6 +1890,70 @@ export type ParameterNode = {
 };
 
 /**
+ * PortfolioCandidateTrace
+ *
+ * The linked score -> selection -> constrained target path for one security.
+ */
+export type PortfolioCandidateTrace = {
+  /**
+   * As Of
+   */
+  as_of: string;
+  /**
+   * Composite Score
+   */
+  composite_score: number | null;
+  /**
+   * Constrained Target Weight
+   */
+  constrained_target_weight: number;
+  constraint_effect: PortfolioConstraintEffect;
+  /**
+   * Eligible
+   */
+  eligible: boolean;
+  /**
+   * Estimated Order Delta
+   */
+  estimated_order_delta: number | null;
+  /**
+   * Exclusion Reasons
+   */
+  exclusion_reasons: Array<ExclusionReason>;
+  /**
+   * Factor Contributions
+   */
+  factor_contributions: Array<FactorContributionTrace>;
+  /**
+   * Previous Weight
+   */
+  previous_weight: number | null;
+  /**
+   * Rank
+   */
+  rank: number | null;
+  /**
+   * Security Id
+   */
+  security_id: string;
+  /**
+   * Selected
+   */
+  selected: boolean;
+  side: CandidateSide | null;
+  /**
+   * Unconstrained Target Weight
+   */
+  unconstrained_target_weight: number | null;
+};
+
+/**
+ * PortfolioConstraintEffect
+ */
+export type PortfolioConstraintEffect =
+  "not_selected" | "unchanged" | "adjusted" | "removed";
+
+/**
  * PortfolioDataUnavailableDetail
  */
 export type PortfolioDataUnavailableDetail = {
@@ -1889,6 +1991,22 @@ export type PortfolioPreview = {
  */
 export type PortfolioPreviewRequest = {
   spec: StrategySpec;
+};
+
+/**
+ * PortfolioRawObservationInvalidDetail
+ *
+ * A configured data adapter violated the raw execution-input contract.
+ */
+export type PortfolioRawObservationInvalidDetail = {
+  /**
+   * Code
+   */
+  code: "portfolio.raw_observation.invalid";
+  /**
+   * Message
+   */
+  message: string;
 };
 
 /**
@@ -1976,7 +2094,10 @@ export type PortfolioUnprocessableResponse = {
       } & PortfolioStrategyInvalidDetail)
     | ({
         code: "portfolio.data.unavailable";
-      } & PortfolioDataUnavailableDetail);
+      } & PortfolioDataUnavailableDetail)
+    | ({
+        code: "portfolio.raw_observation.invalid";
+      } & PortfolioRawObservationInvalidDetail);
 };
 
 /**
@@ -2191,6 +2312,7 @@ export type RawStrategyTraceRow = {
    * Field Id
    */
   field_id: string;
+  kind: CellKind;
   /**
    * Security Id
    */
@@ -3183,6 +3305,10 @@ export type StrategyTargetTrace = {
    */
   candidates: Array<CandidateDecision>;
   /**
+   * Construction
+   */
+  construction: Array<PortfolioCandidateTrace>;
+  /**
    * Execution On
    */
   execution_on: string;
@@ -3243,7 +3369,7 @@ export type StrategyTraceRequest = {
   /**
    * As Of
    */
-  as_of: string;
+  as_of?: string | null;
   /**
    * Factor Id
    */
@@ -3610,7 +3736,10 @@ export type TraceUnprocessableResponse = {
       } & PortfolioStrategyInvalidDetail)
     | ({
         code: "portfolio.data.unavailable";
-      } & PortfolioDataUnavailableDetail);
+      } & PortfolioDataUnavailableDetail)
+    | ({
+        code: "portfolio.raw_observation.invalid";
+      } & PortfolioRawObservationInvalidDetail);
 };
 
 /**

@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: APPROVED
+project_status: IN_PROGRESS
 current_phase: P6
-current_pr: P6-08,P6-09,P6-03,P6-04,P6-05
-active_prs: [P6-03, P6-04, P6-05, P6-08, P6-09]
-parallel_window: [P6-08, P6-09, P6-03, P6-04, P6-05]
-last_updated: 2026-09-06T06:08:02+09:00
+current_pr: P6-08,P6-09,P6-03,P6-04,P6-05,P6-06
+active_prs: [P6-03, P6-04, P6-05, P6-06, P6-08, P6-09]
+parallel_window: [P6-08, P6-09, P6-03, P6-04, P6-05, P6-06]
+last_updated: 2026-09-06T06:09:17+09:00
 planned_prs: 52
 merged_prs: 46
 approved_prs: 51
@@ -22,13 +22,13 @@ progress_percent: 88
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `APPROVED` |
+| Project status | `IN_PROGRESS` |
 | Current phase | `P6` |
-| Current/next PR | `P6-08,P6-09,P6-03,P6-04,P6-05` |
-| Active PR | `P6-03, P6-04, P6-05, P6-08, P6-09` |
+| Current/next PR | `P6-08,P6-09,P6-03,P6-04,P6-05,P6-06` |
+| Active PR | `P6-03, P6-04, P6-05, P6-06, P6-08, P6-09` |
 | Progress | `46 / 52 merged (88%)` |
 | Approved | `51 / 52` |
-| Aggregated at | `2026-09-06 06:08 KST` |
+| Aggregated at | `2026-09-06 06:09 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -78,7 +78,7 @@ progress_percent: 88
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
 | P4 | Outline, Contract, Projections | 10 | 10 | `MERGED` |
 | P5 | Truthful Trace UI | 3 | 3 | `MERGED` |
-| P6 | Professional release and migration | 9 | 3 | `APPROVED` |
+| P6 | Professional release and migration | 9 | 3 | `IN_PROGRESS` |
 | **Total** |  | **52** | **46** | **88%** |
 <!-- PLAN:PHASES:END -->
 
@@ -236,7 +236,7 @@ Phase exit:
 | [ ] | `P6-03` | Keyboard workflow와 Command Palette | P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `APPROVED` | [#76](https://github.com/Nochiski/Quant_study/pull/76) · `review_p6_03` APPROVE, P0/P1/P2 0 · CI billing 차단 |
 | [ ] | `P6-04` | Large/hostile spec 성능·접근성·i18n과 soft dark theme (`$ref`-only cycle fail-closed 포함) | P3-05, P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `APPROVED` | [#77](https://github.com/Nochiski/Quant_study/pull/77) · `review_p6_04` APPROVE, P0/P1/P2 0 · CI billing 차단 |
 | [ ] | `P6-05` | Playwright/visual regression infrastructure와 CI | P2-03, P3-05, P6-04 | `APPROVED` | [#78](https://github.com/Nochiski/Quant_study/pull/78) · `review_p6_05` APPROVE, P0/P1/P2 0 · reviewed `c97708e` · CI billing 차단 |
-| [ ] | `P6-06` | 전체 browser E2E·실구동 시나리오 검증, migration gate, 조건부 legacy cleanup | P6-01, P6-02, P6-03, P6-04, P6-05, P6-08, P6-09 | `WAITING` | — |
+| [ ] | `P6-06` | 전체 browser E2E·실구동 시나리오 검증, migration gate, 조건부 legacy cleanup | P6-01, P6-02, P6-03, P6-04, P6-05, P6-08, P6-09 | `IN_PROGRESS` | author gates와 실서버 workflow E2E 준비 중 |
 | [x] | `P6-07` | Root frontend/backend development entrypoints | P0-02, P0-03 | `MERGED` | [#56](https://github.com/Nochiski/Quant_study/pull/56) · `review_p6_07` APPROVE |
 | [ ] | `P6-08` | Strategy list와 revision history routed UI | P6-01, P6-02, P3-06, P4-08 | `APPROVED` | [#74](https://github.com/Nochiski/Quant_study/pull/74) · `review_p6_08` APPROVE, P0/P1/P2 0; CI billing 차단 |
 | [ ] | `P6-09` | Backtest run history routed UI와 provenance | P6-08, P3-05 | `APPROVED` | [#75](https://github.com/Nochiski/Quant_study/pull/75) · `review_p6_09` APPROVE, P0/P1/P2 0; CI billing 차단 |

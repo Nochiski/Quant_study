@@ -802,6 +802,8 @@ WHERE g.${VALUE_COL} = 0
 | `universe_daily.contract_probe_dates` | EG-C ② | 1 | 계약 검사 날짜 배열 |
 | `price_daily.krx_kis_ratio_match_min` | EG8-P01 | 2 | 일치율 |
 | `adj_factor.factor_product_tol` | EG3-P04 | 2 | 부동소수 허용오차 — **미등재**: 산출 정밀도 상수 `rules_s06.FACTOR_PRODUCT_TOL = 1e-12`(DOUBLE 역수 곱 반올림 1.1e-16 실측, §9 S06) |
+| `adj_factor.price_match_tol_rel`·`price_match_tol_abs` | apply_date 판정 (a)(b)(c) · EG3_adj_factor | 2 | 조정 후 잔여 허용치 max(tol_rel × m, tol_abs), m = \|min(pf, 1/pf) − 1\| — 서버 1차 실측(09-05) 0.15 · 0.05 (§9 S06 2차) |
+| `adj_factor.price_match_window_sessions`·`price_match_lookback_sessions` | apply_date 판정 (b)(c) · EG3_adj_factor | 2 | 창 [n0 − lookback, n0 + window] 세션 — 서버 1차 실측 최적일 오프셋 p10 −5 · p90 +27~+31.5 → 5 · 40 |
 | `adj_factor.adj_return_jump_max` | EG8-P02 | 2 | 점프 상한 |
 | `adj_factor.adj_volume_jump_max` | EG8-P03 | 2 | 거래량 점프 상한 |
 | `adj_factor.asof_for_jump_check` | EG8-P02·P03 | 2 | 검사용 고정 asof |
@@ -1757,3 +1759,25 @@ workspace/dongmin/src/equity/
 | FX-N-006 | `v_adj_volume` 나눗셈 → EG8-P03 fail ∧ FX-2-010 fail | 구현: `views.TEMPLATES['v_adj_volume']` 을 나눗셈으로 바꿔 `adj_factor` 재빌드 → **EG8 만 FAIL**(거래량 점프 > 1,000, 수익률 축 위반 0, 앞 게이트 pass) ∧ 04-27 조정 거래량 12,124 | `test_FX_N_006_…` |
 | §2 매트릭스 11행 EG7 | `●(P02)` | 격리 사유 없음 — 비율 0 으로 통과. `adj_factor` 는 EG7 격리형 술어를 갖지 않는다(ok=false 는 격리가 아니다) | DESIGN §4-2 |
 | `_catalog_meta.json` | snapshot_id·builds·macros | + `gates`(EG11·EG5c·EG3_firm_mktcap)·`asof`(뷰별 경로·행수·해시)·`macros_skipped`(입력 테이블 미커밋으로 못 만든 매크로와 이유) | `catalog.publish` |
+
+**S06 2차 `adj_factor.apply_date` 정정 (2026-09-05, 서버 1차 빌드 EG8 실패 → `sql/adj_factor.sql`·`rules_s06.py`·`views.py`)**
+
+서버 1차(명목 효력일 적용, 3,226행·ok 2,299): EG8 `n_return_jump_over` 520 · `n_volume_jump_over` 101 · `n_ok_median_zero` 833. 원인 실측(ok 중 가격 있는 2,173, 명목일 원수익률 vs 기대 `price_factor−1`, 허용 max(15%·|기대|, 0.05)): 감자 결정공시 명목일 일치 110/667(최적일 오프셋 p50 +13 세션 = 정지 뒤 재개일) · 액면병합 0/151(어느 날도 단독 비율과 안 맞음 = 감자와 복합) · 무상증자 불일치 136 은 대부분 2~5% 잡음.
+
+| 항목 | 1차 | 정정 | 근거 |
+|---|---|---|---|
+| 컬럼 | 12 | + **`apply_date`**(계수를 가격에 적용하는 세션) · **`apply_basis`** ∈ {`nominal`, `price_matched`, `price_matched_combined`, `unmatched`}(어휘 폐쇄, EG3-P13). grain 불변 | 위 실측 |
+| 판정 | 명목 효력일 적용 | 명목 세션 n0 = 캘린더에서 effective_date 이상 첫 세션. dev = \|close_t / 직전 거래 종가 / price_factor − 1\|, tol = max(`price_match_tol_rel` × m, `price_match_tol_abs`), m = \|min(pf, 1/pf) − 1\|. (a) n0 의 dev ≤ tol → nominal · (b) 창 [n0 − lookback, n0 + window] 거래 세션 argmin dev ≤ tol → price_matched · (c) (a)(b) 실패 후보의 연결 성분(같은 티커, n0 거리 ≤ window, 재귀 CTE)의 계수 곱으로 성분 창에서 한 세션 → 전부 price_matched_combined · (d) 못 찾으면 `factor_ok=false`·`factor_source='no_price_match'`·계수 1·apply_basis unmatched(apply_date 는 명목 세션) | 오케스트레이터 확정 규칙 1 |
+| 허용치 정의 | 원수익률 \|r − pf\| ≤ max(0.15·\|pf−1\|, 0.05) | **조정 후 잔여** \|r/pf − 1\| ≤ max(0.15·m, 0.05). 감자(pf > 1)에선 같은 식이고 분할(pf < 1)에선 더 엄격 — 원수익률 기준은 50:1 에 r ∈ [0, 0.167] 을 허용해 조정 후 +735% 를 apply_date 로 받아들인다(EG8-P02 가 잡을 구멍을 판정에서 막는다) | 절단본 3건 잔여 0.021·0.034·0.093 → 전부 nominal |
+| 소액 이벤트 | 규칙 없음 | m ≤ tol_abs(2~5% 무상증자)는 창 탐색 없이 **nominal** — 가격으로 날짜를 못 가리고 창 탐색은 잡음 매칭. 건수 `n_nominal_small_expected`(기록형) | 서버 실측 (3) |
+| 같은 날 개별 매칭 | — | 개별 매칭(nominal·price_matched) ok 2건이 같은 (ticker, apply_date) → 같은 사건을 두 원천·두 유형이 실은 것(감자 cr + KRX 액면병합) → 우선순위 낮은 쪽 `factor_source='same_day_suppressed'`(ok=false, 계수 1, apply_basis 는 매칭 결과 유지). 성분 매칭은 제외. EG3 `n_ok_same_apply_date_individual` = 0 폐기형 | 이중 계산 방지 |
+| `factor_source` 어휘 | 4 | 6 = + `no_price_match` · `same_day_suppressed`. 우선순위 near_dup_suppressed > ratio_null > capred_paid > no_price_match > same_day_suppressed | `rules_s06.FACTOR_SOURCE_VOCAB` |
+| 상수 | `near_dup_window_days` | + `adj_factor.price_match_tol_rel` 0.15 · `price_match_tol_abs` 0.05 · `price_match_window_sessions` 40 · `price_match_lookback_sessions` 5(창 [−5, +40] 을 두 상수로, 비대칭) — `_const` 로 산출식에. 값 근거는 seed `_measured[].note`(서버 1차 실측 오프셋 p10/p90), ★ 서버 재측정 | §1-12 등록 |
+| available_date | min(announce, effective_date 다음 거래일) | **min(announce, apply_date 다음 세션)**. EG3_adj_factor 재계산 술어 갱신. 절단본: 토요일 기준일 11-28 → 명목 11-30 → 12-01 | 오케스트레이터 확정 규칙 2 |
+| 뷰 `v_cum_adj` | `d < effective_date ≤ as_of` | **`d < apply_date ≤ as_of`**, (ticker, apply_date) 로 접어 누적(복합 성분 = 같은 날 곱). `v_adj_price`·`v_adj_volume` 은 그대로 이것을 부른다 | 규칙 2 |
+| EG8-P02/P03 | effective_date(비거래일이면 뒤 첫 거래일) | **apply_date** 에서 측정. P03 은 거래량 중앙값 0 인 이벤트를 분모에서 빼고 `n_ok_median_zero`·`n_ok_volume_judged` 기록. seed 유지 0.30 · 10(근거: 매칭 잔여 ≤ 0.15 구조 상한 + 소액 nominal 은 제한폭 30% + 절단본 max 0.093·3.43), ★ 서버 재측정 | 규칙 3 |
+| EG3_adj_factor 추가 | — | apply_basis 어휘 · apply_date NOT NULL·캘린더 세션 · `n_apply_outside_window`(n0 − lookback ≤ n ≤ n0 + window) · `n_nominal_apply_ne_nominal_session` · `n_combined_apply_inconsistent`(성분 쌍 apply_date 상이 0) · `n_ok_same_apply_date_individual` · `n_unmatched_source_mismatch`(no_price_match ⇔ unmatched) · `n_ok_apply_basis_bad`. 기록형: `n_by_apply_basis`·`n_ok_by_event_type_apply_basis`·`n_no_price_match_no_price_rows`(창 안 거래 행 0 = 가격 부재, 매칭 실패 아님)·`apply_offset_sessions_max`·`_median_nonzero`·`n_nominal_small_expected` | 규칙 4 |
+| FX-2-001 | — | + apply_basis nominal · apply_date 2018-05-04(직전 거래 종가는 정지 전 04-27 2,650,000, reference 행은 건너뛴다) | 절단본 |
+| FX-2-004 | (`101970`, 2018-10-12) 두 축 상이 | 절단본 101970 은 폐지 기간 사건이라 창에 거래 행 0 → **`no_price_match`·unmatched·계수 1** 로 고정(가격 부재 사건은 적용하지 않는다). 두 축 상이는 합성 가격 SQL 테스트(정지 뒤 재개일 +11 세션 ×9.8 → price_matched (10, 0.1)) | `test_equity_s06_adj.py::test_합성_*` |
+| 부정 픽스처 | FX-N-003·not-ok·available | + apply_date=effective_date 변종 → `n_apply_off_calendar` 2(토요일 기준일)·`n_nominal_apply_ne_nominal_session` 1 | — |
+| 절단본 분포 | ok 6 | ok 3(nominal) · no_price_match 3 · ratio_null 1 · near_dup 1 · apply_basis nominal 5 / unmatched 3. `_asof` 표본 행수 111,305 불변(계수만 바뀐다) | DESIGN §10 P23 |

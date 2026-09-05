@@ -9,8 +9,9 @@ S06 이 내는 4개: `v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_firm_mktcap`
 두 경로가 한 템플릿을 쓰므로 게이트가 본 계산과 소비자가 보는 계산이 갈릴 수 없다.
 
 as-of 규칙 (DESIGN §5): `v_cum_adj(as_of, lag_override := NULL)` —
-  cum_*(d) = Π(계수 : d < effective_date ≤ as_of ∧ available_date ≤ cutoff ∧ factor_ok),
-  base = as_of 에서 1.
+  cum_*(d) = Π(계수 : d < apply_date ≤ as_of ∧ available_date ≤ cutoff ∧ factor_ok),
+  base = as_of 에서 1. 축은 **apply_date**(계수를 가격에 적용하는 세션 — 감자는 정지 뒤 재개일,
+  S06 2차)이지 명목 효력일이 아니다.
   cutoff = as_of 에서 `lag` 세션 전 거래일(trading_calendar 역산). lag 기본값은 컬럼군 세션 랙인데
   `dataset_profile`(S19)이 아직 없으므로 **가격 계열 0 세션** 을 본문 상수(FACTOR_LAG_SESSIONS)로
   둔다 — 근거: 계수의 available_date 는 min(공시 접수일, 효력일 다음 거래일) 이라 이미 '그날 알 수
@@ -49,9 +50,9 @@ MACRO_DEPENDS: dict[str, tuple[str, ...]] = {
     "v_adj_price": ("v_cum_adj",), "v_adj_volume": ("v_cum_adj",)}
 
 TEMPLATES: dict[str, str] = {
-    # ticker·date 별 누적 계수. 계수는 (ticker, effective_date) 로 먼저 접어(같은 날 두 이벤트 = 곱)
-    # 뒤에서부터 누적한 뒤 ASOF JOIN 으로 '이 날 이후 첫 효력일' 의 누적값을 붙인다 — 행별
-    # GROUP BY 없음.
+    # ticker·date 별 누적 계수. 계수는 (ticker, apply_date) 로 먼저 접어(같은 날 두 이벤트 = 곱,
+    # 복합 성분) 뒤에서부터 누적한 뒤 ASOF JOIN 으로 '이 날 이후 첫 적용 세션' 의 누적값을
+    # 붙인다 — 행별 GROUP BY 없음.
     "v_cum_adj": """
 WITH cut AS (
     SELECT k.date AS cutoff
@@ -60,24 +61,24 @@ WITH cut AS (
     WHERE k.n = coalesce(lag_override, {lag_factor})
 ),
 fac AS (
-    SELECT ticker, effective_date, product(price_factor) AS pf, product(share_factor) AS sf
+    SELECT ticker, apply_date, product(price_factor) AS pf, product(share_factor) AS sf
     FROM {adj_factor}
-    WHERE factor_ok AND effective_date <= as_of AND available_date <= (SELECT cutoff FROM cut)
-    GROUP BY ticker, effective_date
+    WHERE factor_ok AND apply_date <= as_of AND available_date <= (SELECT cutoff FROM cut)
+    GROUP BY ticker, apply_date
 ),
 suf AS (
-    SELECT ticker, effective_date,
+    SELECT ticker, apply_date,
            product(pf) OVER w AS cum_price_factor,
            product(sf) OVER w AS cum_share_factor
     FROM fac
-    WINDOW w AS (PARTITION BY ticker ORDER BY effective_date
+    WINDOW w AS (PARTITION BY ticker ORDER BY apply_date
                  ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)
 )
 SELECT p.ticker, p.date,
        coalesce(s.cum_price_factor, 1) AS cum_price_factor,
        coalesce(s.cum_share_factor, 1) AS cum_share_factor
 FROM (SELECT ticker, date FROM {price_daily} WHERE date <= as_of) p
-ASOF LEFT JOIN suf s ON s.ticker = p.ticker AND p.date < s.effective_date
+ASOF LEFT JOIN suf s ON s.ticker = p.ticker AND p.date < s.apply_date
 """,
     # 원주가 × 누적 가격계수 (FIELD_MAP price.adj_close). 원주가 컬럼은 그대로 함께 낸다(결정 6).
     "v_adj_price": """

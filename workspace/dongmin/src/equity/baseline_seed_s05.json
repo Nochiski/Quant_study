@@ -1,0 +1,53 @@
+{
+ "_seed": "S05 corp_event(MVP-B: split·reverse_split·bonus·capred) 가 요구하는 baseline 상수. 오케스트레이터가 data/equity/baseline.json 에 병합한다. value 는 tests/fixtures/stage_slice 절단본에서 측정한 값이고, 서버 current_build 위 재측정이 필요한 항목은 _measured[].note 가 지목한다.",
+ "measured_at": "2026-09-05",
+ "corp_event": {
+  "effective_before_announce_max_days": 2555,
+  "near_dup_window_days": 5,
+  "thresholds": {
+   "EG7": 0.375
+  }
+ },
+ "_measured": [
+  {
+   "table": "corp_event",
+   "metric": "effective_before_announce_max_days",
+   "inputs": {
+    "stg_capital": "b_20260903T013110_716954Z"
+   },
+   "sql": "SELECT max(date_diff('day', isu_dcrs_de, available_date)) FROM stg_capital WHERE (isu_dcrs_stle LIKE '%감자%' OR (isu_dcrs_stle LIKE '%무상증자%' AND isu_dcrs_stle NOT LIKE '%유상%')) AND isu_dcrs_de IS NOT NULL",
+   "value": 2555,
+   "measured_at": "2026-09-05",
+   "growing": true,
+   "used_by": "EG7-P08 effective_before_announce (sql/corp_event.sql judged CTE) · _const",
+   "note": "★ 서버 재측정 필요. 정기보고서 증자(감자)현황(stg_capital)은 과거 사건을 회고 기재하므로 announce_date(rcept_dt) 가 effective_date(isu_dcrs_de) 보다 늦다 — 절단본 최대 2,555일(우리은행 2013-04-01 유상감자를 2020-03-30 사업보고서가 기재). 결정공시(fric·cr)·KRX 행은 이 임계와 무관하게 0 근처다. 이 값을 넘는 후보(연도 오타·미래일 등)만 effective_before_announce 로 격리한다. 절단본 값이라 서버 p100 으로 갱신하지 않으면 정상 회고 행이 격리된다."
+  },
+  {
+   "table": "corp_event",
+   "metric": "near_dup_window_days",
+   "inputs": {},
+   "sql": null,
+   "value": 5,
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "used_by": "EG3_corp_event metric n_near_dup_cross_source (기록형)",
+   "note": "convention. 같은 (ticker, event_type) 이 다른 원천에서 이 일수 안에 두 번 나오면 정확 축 dedup 이 놓친 같은 사건일 가능성이 높다 — 절단본 실측 1건(101970 capred: 결정공시 cr_std 2018-10-12 vs 자본변동 isu_dcrs_de 2018-10-13). 판정하지 않고 기록만 한다(GATES §0-1 기록형)."
+  },
+  {
+   "table": "corp_event",
+   "metric": "threshold_EG7",
+   "inputs": {
+    "stg_capital": "b_20260903T013110_716954Z",
+    "stg_event_cr": "b_20260902T164513_403656Z",
+    "stg_event_pifric": "b_20260902T164512_875330Z",
+    "stg_listing_daily": "b_20260902T162451_832365Z"
+   },
+   "sql": "SELECT n_reject::DOUBLE / (n_rows + n_reject) FROM corp_event _meta  -- 프레임 gates.eg7_range 의 분모 = n_out + n_reject (dedup 뒤 행수 기준)",
+   "value": 0.375,
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "used_by": "EG7 격리 비율 상한 (gates.threshold)",
+   "note": "★ 서버 재측정 필요. 절단본 후보 34행 → dedup 뒤 10행 + 격리 6 = ticker_unresolved 6(우리은행 유상감자 우선주 class 5 — 절단본에 우리은행 우선주 티커 없음 · 덕양에너젠 무상증자 상환전환우선주 1 — 비상장). 상장 종류주가 없는 주식 종류에 붙은 자본변동 행은 데이터 결함이 아니라 소비자 없는 행이므로 비율이 stage 기본값(0.001)보다 훨씬 크다. GATES §1 EG7 은 분모를 n_src(EG1 우변 34 → 0.176)로 적었지만 프레임은 n_out+n_reject(16 → 0.375)를 쓴다 — dedup 이 있는 테이블에서 두 정의가 갈린다(프레임 미수정, S05 보고). 서버에서는 비상장 우선주·RCPS 비중으로 재측정해 등재한다."
+  }
+ ]
+}

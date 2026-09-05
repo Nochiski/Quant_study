@@ -24,6 +24,7 @@ import {
   reviseStrategy,
   reviseStrategyDocument,
   startBacktest,
+  traceStrategy as postStrategyTrace,
   validateFactorGraph,
   validateStrategy,
 } from "./generated/sdk.gen";
@@ -75,6 +76,8 @@ import type {
   StrategyDocumentSchema,
   StrategyRevisionConflictDetail,
   StrategySpec,
+  StrategyTraceRequest,
+  StrategyTraceResponse,
   StrategyValidation,
   UniverseHistoryQuery,
   UniversePreview,
@@ -194,6 +197,15 @@ export const strategyWorkbenchApi = {
   async cancelBacktest(runId: string): Promise<BacktestRunState> {
     const response = await cancelBacktest({ path: { run_id: runId } });
     return requireData(response.data, "cancelBacktest");
+  },
+
+  /** Bounded projection from the same calculation that produces TargetTape/backtest input. */
+  async traceStrategy(
+    request: StrategyTraceRequest,
+    signal?: AbortSignal,
+  ): Promise<StrategyTraceResponse> {
+    const response = await postStrategyTrace({ body: request, signal });
+    return unwrap(response, "traceStrategy");
   },
 
   async getTemplate(): Promise<StrategySpec> {
@@ -426,6 +438,8 @@ export type {
   StrategyDocumentContractResponse,
   StrategyDocumentSchema,
   StrategySpec,
+  StrategyTraceRequest,
+  StrategyTraceResponse,
   StrategyValidation,
   UniverseHistoryQuery,
   UniversePreview,

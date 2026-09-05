@@ -115,6 +115,7 @@ export {
 } from "./model/canonical-snippets";
 export {
   factorIndexAtPointer,
+  factorGraphPointer,
   factorNodePointer,
   nodePointerById,
   pointerSelectsNode,

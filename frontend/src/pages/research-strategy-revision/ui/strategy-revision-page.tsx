@@ -7,7 +7,6 @@ import {
   ConflictBanner,
   DirtyLeaveGuard,
   DocumentToolbar,
-  ExecutionPlanPanel,
   FactorGraphPanel,
   RecoveryBanner,
   SnippetCatalog,
@@ -35,7 +34,10 @@ import {
 import { t } from "../../../shared/config";
 import { useNavigate, useParams, useSearch } from "../../../shared/lib/router";
 import { Badge, type CodeEditorHandle } from "../../../shared/ui";
-import { StrategyIde } from "../../../widgets/strategy-ide";
+import {
+  StrategyDebuggerPanel,
+  StrategyIde,
+} from "../../../widgets/strategy-ide";
 
 const ROUTE = "/research/strategies/$strategyId/revisions/$revision";
 
@@ -288,10 +290,21 @@ export const StrategyRevisionPage = () => {
           />
         }
         debugger={
-          <ExecutionPlanPanel
-            state={executionPlans}
+          <StrategyDebuggerPanel
+            document={document}
+            executionPlans={executionPlans}
+            asOf={search.asOf}
+            security={search.security}
             selectedPointer={search.path}
             onSelectPointer={(pointer) => selectPointer(pointer, "outline")}
+            onSearchSelection={(selection) =>
+              void navigate({
+                to: ROUTE,
+                params: { strategyId, revision },
+                search: { ...search, ...selection },
+                replace: true,
+              })
+            }
           />
         }
         editor={

@@ -48,6 +48,8 @@ export {
   type StrategyDocumentContractResponse,
   type StrategyDocumentSchema,
   type StrategySpec,
+  type StrategyTraceRequest,
+  type StrategyTraceResponse,
   type StrategyValidation,
   type UniverseHistoryQuery,
   type UniversePreview,

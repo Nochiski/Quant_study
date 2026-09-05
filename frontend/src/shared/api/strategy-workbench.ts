@@ -17,8 +17,6 @@ import {
   getStrategyDocumentSchema,
   getBacktestStatus,
   listStrategyRevisions,
-  listBacktests,
-  listStrategies,
   getStrategyTemplate,
   previewFactorGraph,
   previewPortfolio,
@@ -37,7 +35,6 @@ import type {
   BacktestRunResult,
   BacktestRunSpec,
   BacktestRunState,
-  BacktestRunSummary,
   BacktestStartResponse,
   CompileRequest,
   CompiledDocument,
@@ -62,8 +59,6 @@ import type {
   MetricDefinition,
   MetricValue,
   PageRevisionSummary,
-  PageBacktestRunSummary,
-  PageStrategySummary,
   PortfolioPreview,
   PortfolioPreviewRequest,
   ResearchCatalog,
@@ -87,7 +82,6 @@ import type {
   StrategyDraftConflictDetail,
   StrategyRevisionConflictDetail,
   StrategySpec,
-  StrategySummary,
   StrategyTraceRequest,
   StrategyTraceResponse,
   StrategyValidation,
@@ -175,52 +169,58 @@ const revisionConflictDetail = (
     : null;
 };
 
-/** Runtime check for a CAS conflict. Invalid payloads fail closed as an ordinary request error. */
+const strategyDraftRecord = (
+  candidate: unknown,
+  expectedDraftId: string,
+): StrategyDraft | null => {
+  if (typeof candidate !== "object" || candidate === null) return null;
+  const value = candidate as unknown as Record<string, unknown>;
+  const savedIdentity =
+    value.strategy_id === null &&
+    value.base_revision === null &&
+    value.base_spec_hash === null
+      ? true
+      : typeof value.strategy_id === "string" &&
+        value.strategy_id.trim() !== "" &&
+        typeof value.base_revision === "number" &&
+        Number.isSafeInteger(value.base_revision) &&
+        value.base_revision > 0 &&
+        typeof value.base_spec_hash === "string" &&
+        /^[a-f0-9]{64}$/u.test(value.base_spec_hash);
+  return value.draft_id === expectedDraftId &&
+    expectedDraftId.trim() !== "" &&
+    expectedDraftId.length <= 512 &&
+    typeof value.version === "number" &&
+    Number.isSafeInteger(value.version) &&
+    value.version > 0 &&
+    typeof value.source === "string" &&
+    (value.format === "yaml" || value.format === "json") &&
+    typeof value.source_hash === "string" &&
+    /^[a-f0-9]{64}$/u.test(value.source_hash) &&
+    typeof value.schema_version === "string" &&
+    value.schema_version.trim() !== "" &&
+    typeof value.updated_at === "string" &&
+    value.updated_at.endsWith("Z") &&
+    Number.isFinite(Date.parse(value.updated_at)) &&
+    savedIdentity
+    ? (candidate as StrategyDraft)
+    : null;
+};
+
+/** Runtime check for a CAS conflict, bound to the route identity that produced it. */
 const draftConflictDetail = (
   error: unknown,
+  expectedDraftId: string | undefined,
 ): StrategyDraftConflictDetail | null => {
+  if (expectedDraftId === undefined) return null;
   if (typeof error !== "object" || error === null || !("detail" in error))
     return null;
   const detail = (error as { detail: unknown }).detail;
   if (typeof detail !== "object" || detail === null) return null;
   const candidate = detail as Partial<StrategyDraftConflictDetail>;
   const current = candidate.current;
-  const value =
-    typeof current === "object" && current !== null
-      ? (current as unknown as Record<string, unknown>)
-      : null;
-  const savedIdentity =
-    value === null
-      ? false
-      : value.strategy_id === null &&
-          value.base_revision === null &&
-          value.base_spec_hash === null
-        ? true
-        : typeof value.strategy_id === "string" &&
-          value.strategy_id.trim() !== "" &&
-          typeof value.base_revision === "number" &&
-          Number.isSafeInteger(value.base_revision) &&
-          value.base_revision > 0 &&
-          typeof value.base_spec_hash === "string" &&
-          /^[a-f0-9]{64}$/u.test(value.base_spec_hash);
   const validCurrent =
-    current === null ||
-    (value !== null &&
-      typeof value.draft_id === "string" &&
-      value.draft_id.trim() !== "" &&
-      value.draft_id.length <= 512 &&
-      typeof value.version === "number" &&
-      Number.isSafeInteger(value.version) &&
-      value.version > 0 &&
-      typeof value.source === "string" &&
-      (value.format === "yaml" || value.format === "json") &&
-      typeof value.source_hash === "string" &&
-      /^[a-f0-9]{64}$/u.test(value.source_hash) &&
-      typeof value.schema_version === "string" &&
-      value.schema_version.trim() !== "" &&
-      typeof value.updated_at === "string" &&
-      Number.isFinite(Date.parse(value.updated_at)) &&
-      savedIdentity);
+    current === null || strategyDraftRecord(current, expectedDraftId) !== null;
   return candidate.code === "strategy.draft.conflict" &&
     typeof candidate.message === "string" &&
     validCurrent
@@ -231,17 +231,52 @@ const draftConflictDetail = (
 const requestError = (
   response: { error?: unknown; response?: { status: number } },
   context: string,
+  expectedDraftId?: string,
 ): ApiRequestError => {
   const conflict = revisionConflictDetail(response.error);
-  const draftConflict = draftConflictDetail(response.error);
+  const draftConflict = draftConflictDetail(response.error, expectedDraftId);
+  const responseStatus = response.response?.status ?? 0;
+  if (
+    expectedDraftId !== undefined &&
+    responseStatus === 409 &&
+    draftConflict === null
+  ) {
+    return new ApiRequestError(
+      context,
+      responseStatus,
+      "client.response.invalid",
+      "Draft conflict response did not match the requested draft identity.",
+    );
+  }
   return new ApiRequestError(
     context,
-    response.response?.status ?? 0,
+    responseStatus,
     errorCode(response.error),
     errorField(response.error, "message"),
     conflict?.latest_revision ?? null,
     draftConflict?.current ?? null,
   );
+};
+
+const invalidDraftResponse = (
+  context: string,
+  detail: string,
+): ApiRequestError =>
+  new ApiRequestError(context, 200, "client.response.invalid", detail);
+
+const requireStrategyDraft = (
+  candidate: unknown,
+  draftId: string,
+  context: string,
+): StrategyDraft => {
+  const draft = strategyDraftRecord(candidate, draftId);
+  if (draft === null) {
+    throw invalidDraftResponse(
+      context,
+      "Draft response did not match the requested draft identity or contract.",
+    );
+  }
+  return draft;
 };
 
 /** Turns an SDK reply into data or a typed error; every document call goes through here. */
@@ -256,19 +291,6 @@ const unwrap = <T>(
 };
 
 export const strategyWorkbenchApi = {
-  async listBacktests(
-    page: { offset?: number; limit?: number; strategyId?: string } = {},
-  ): Promise<PageBacktestRunSummary> {
-    const response = await listBacktests({
-      query: {
-        offset: page.offset,
-        limit: page.limit,
-        strategy_id: page.strategyId,
-      },
-    });
-    return unwrap(response, "listBacktests");
-  },
-
   async startBacktest(spec: BacktestRunSpec): Promise<BacktestStartResponse> {
     const response = await startBacktest({ body: spec });
     return requireData(response.data, "startBacktest");
@@ -389,16 +411,13 @@ export const strategyWorkbenchApi = {
     return requireData(response.data, "getStrategy");
   },
 
-  async listStrategies(
-    page: { offset?: number; limit?: number } = {},
-  ): Promise<PageStrategySummary> {
-    const response = await listStrategies({ query: page });
-    return unwrap(response, "listStrategies");
-  },
-
   async getStrategyDraft(draftId: string): Promise<StrategyDraft> {
     const response = await getStrategyDraft({ path: { draft_id: draftId } });
-    return unwrap(response, "getStrategyDraft");
+    return requireStrategyDraft(
+      unwrap(response, "getStrategyDraft"),
+      draftId,
+      "getStrategyDraft",
+    );
   },
 
   async saveStrategyDraft(
@@ -409,7 +428,29 @@ export const strategyWorkbenchApi = {
       path: { draft_id: draftId },
       body: request,
     });
-    return unwrap(response, "saveStrategyDraft");
+    if (response.error !== undefined) {
+      throw requestError(response, "saveStrategyDraft", draftId);
+    }
+    const saved = requireStrategyDraft(
+      requireData(response.data, "saveStrategyDraft"),
+      draftId,
+      "saveStrategyDraft",
+    );
+    const exactSuccessor =
+      saved.version === request.expected_version + 1 &&
+      saved.source === request.source &&
+      saved.format === request.format &&
+      saved.schema_version === request.schema_version &&
+      saved.strategy_id === request.strategy_id &&
+      saved.base_revision === request.base_revision &&
+      saved.base_spec_hash === request.base_spec_hash;
+    if (!exactSuccessor) {
+      throw invalidDraftResponse(
+        "saveStrategyDraft",
+        "Saved draft response did not match the submitted CAS snapshot.",
+      );
+    }
+    return saved;
   },
 
   async deleteStrategyDraft(
@@ -421,7 +462,7 @@ export const strategyWorkbenchApi = {
       query: { expected_version: expectedVersion },
     });
     if (response.error !== undefined)
-      throw requestError(response, "deleteStrategyDraft");
+      throw requestError(response, "deleteStrategyDraft", draftId);
   },
 
   async getStrategyDocument(
@@ -522,7 +563,6 @@ export type {
   BacktestRunResult,
   BacktestRunSpec,
   BacktestRunState,
-  BacktestRunSummary,
   BacktestStartResponse,
   CompileRequest,
   CompiledDocument,
@@ -545,8 +585,6 @@ export type {
   MetricDefinition,
   MetricValue,
   PageRevisionSummary,
-  PageBacktestRunSummary,
-  PageStrategySummary,
   PortfolioPreview,
   PortfolioPreviewRequest,
   ResearchCatalog,
@@ -568,7 +606,6 @@ export type {
   StrategyDocumentSchema,
   StrategyDraft,
   StrategySpec,
-  StrategySummary,
   StrategyTraceRequest,
   StrategyTraceResponse,
   StrategyValidation,

@@ -115,14 +115,6 @@ export type BacktestRunState = {
 };
 
 /**
- * BacktestRunSummary
- */
-export type BacktestRunSummary = {
-  run: BacktestRunState;
-  strategy_provenance: StrategyProvenance;
-};
-
-/**
  * BacktestSeries
  */
 export type BacktestSeries = {
@@ -1822,55 +1814,11 @@ export type OrderStyle = "market";
 /**
  * Page
  */
-export type PageBacktestRunSummary = {
-  /**
-   * Items
-   */
-  items: Array<BacktestRunSummary>;
-  /**
-   * Limit
-   */
-  limit: number;
-  /**
-   * Offset
-   */
-  offset: number;
-  /**
-   * Total
-   */
-  total: number;
-};
-
-/**
- * Page
- */
 export type PageRevisionSummary = {
   /**
    * Items
    */
   items: Array<RevisionSummary>;
-  /**
-   * Limit
-   */
-  limit: number;
-  /**
-   * Offset
-   */
-  offset: number;
-  /**
-   * Total
-   */
-  total: number;
-};
-
-/**
- * Page
- */
-export type PageStrategySummary = {
-  /**
-   * Items
-   */
-  items: Array<StrategySummary>;
   /**
    * Limit
    */
@@ -3492,32 +3440,6 @@ export type StrategySpec = {
 };
 
 /**
- * StrategySummary
- */
-export type StrategySummary = {
-  /**
-   * Latest Revision
-   */
-  latest_revision: number;
-  /**
-   * Spec Hash
-   */
-  spec_hash: string;
-  /**
-   * Strategy Id
-   */
-  strategy_id: string;
-  /**
-   * Title
-   */
-  title: string;
-  /**
-   * Updated At
-   */
-  updated_at: string;
-};
-
-/**
  * StrategyTargetTrace
  */
 export type StrategyTargetTrace = {
@@ -4173,45 +4095,6 @@ export type WarningSeverity = "info" | "warning";
  */
 export type WeightingMethod = "equal" | "factor_score" | "rank" | "risk";
 
-export type ListBacktestsData = {
-  body?: never;
-  path?: never;
-  query?: {
-    /**
-     * Offset
-     */
-    offset?: number;
-    /**
-     * Limit
-     */
-    limit?: number;
-    /**
-     * Strategy Id
-     */
-    strategy_id?: string | null;
-  };
-  url: "/api/v1/backtests";
-};
-
-export type ListBacktestsErrors = {
-  /**
-   * Validation Error
-   */
-  422: HttpValidationError;
-};
-
-export type ListBacktestsError = ListBacktestsErrors[keyof ListBacktestsErrors];
-
-export type ListBacktestsResponses = {
-  /**
-   * Successful Response
-   */
-  200: PageBacktestRunSummary;
-};
-
-export type ListBacktestsResponse =
-  ListBacktestsResponses[keyof ListBacktestsResponses];
-
 export type StartBacktestData = {
   body: BacktestRunSpec;
   path?: never;
@@ -4693,42 +4576,6 @@ export type PreviewPortfolioResponses = {
 
 export type PreviewPortfolioResponse =
   PreviewPortfolioResponses[keyof PreviewPortfolioResponses];
-
-export type ListStrategiesData = {
-  body?: never;
-  path?: never;
-  query?: {
-    /**
-     * Offset
-     */
-    offset?: number;
-    /**
-     * Limit
-     */
-    limit?: number;
-  };
-  url: "/api/v1/strategies";
-};
-
-export type ListStrategiesErrors = {
-  /**
-   * Validation Error
-   */
-  422: HttpValidationError;
-};
-
-export type ListStrategiesError =
-  ListStrategiesErrors[keyof ListStrategiesErrors];
-
-export type ListStrategiesResponses = {
-  /**
-   * Successful Response
-   */
-  200: PageStrategySummary;
-};
-
-export type ListStrategiesResponse =
-  ListStrategiesResponses[keyof ListStrategiesResponses];
 
 export type CreateStrategyData = {
   body: StrategySpec;

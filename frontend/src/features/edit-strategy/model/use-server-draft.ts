@@ -16,12 +16,20 @@ type Session = {
   draftId: string | null;
   schemaVersion: string | null;
   initialized: boolean;
-  phase: "loading" | "synced" | "saving" | "offline" | "recovery" | "conflict";
+  phase:
+    | "loading"
+    | "synced"
+    | "saving"
+    | "offline"
+    | "rejected"
+    | "recovery"
+    | "conflict";
   version: number;
   persistedSource: string | null;
   updatedAt: string | null;
   remote: StrategyDraft | null;
   incompatible: boolean;
+  errorMessage: string | null;
 };
 
 export type ServerDraftSync = {
@@ -29,6 +37,7 @@ export type ServerDraftSync = {
   updatedAt: string | null;
   remote: StrategyDraft | null;
   incompatible: boolean;
+  errorMessage: string | null;
   applyRemote: () => void;
   keepLocal: () => void;
   retry: () => void;
@@ -54,7 +63,19 @@ const initialSession = (
   updatedAt: null,
   remote: null,
   incompatible: false,
+  errorMessage: null,
 });
+
+const failedSession = (current: Session, error: unknown): Session => {
+  const rejected = error instanceof ApiRequestError && error.status !== 0;
+  return {
+    ...current,
+    phase: rejected ? "rejected" : "offline",
+    errorMessage: rejected
+      ? (error.detail ?? error.code ?? "Draft request was rejected.")
+      : null,
+  };
+};
 
 const baseOf = (
   state: DocumentState,
@@ -145,14 +166,16 @@ export const useServerDraft = (
       const absent =
         remoteQuery.error instanceof ApiRequestError &&
         remoteQuery.error.status === 404;
-      const next = {
+      const empty = {
         ...initialSession(draftId, schemaVersion),
         initialized: true,
-        phase: absent ? "synced" : "offline",
         persistedSource: absent
           ? (baseOriginals.current.get(draftId) ?? stateRef.current.source)
           : null,
       } satisfies Session;
+      const next = absent
+        ? ({ ...empty, phase: "synced" } satisfies Session)
+        : failedSession(empty, remoteQuery.error);
       sessionRef.current = next;
       setSession(next);
       return;
@@ -177,6 +200,7 @@ export const useServerDraft = (
       updatedAt: remote.updated_at,
       remote: needsChoice ? remote : null,
       incompatible: !compatible,
+      errorMessage: null,
     } satisfies Session;
     knownVersions.current.set(draftId, remote.version);
     sessionRef.current = next;
@@ -207,6 +231,7 @@ export const useServerDraft = (
         current.schemaVersion !== requestedSchema ||
         !current.initialized ||
         current.phase === "offline" ||
+        current.phase === "rejected" ||
         current.phase === "conflict" ||
         current.phase === "recovery" ||
         requestedState.composing ||
@@ -232,13 +257,18 @@ export const useServerDraft = (
           updatedAt: saved.updated_at,
           remote: null,
           incompatible: false,
+          errorMessage: null,
         } satisfies Session;
         knownVersions.current.set(requestedId, saved.version);
         sessionRef.current = next;
         setSession(next);
       } catch (error) {
         if (sessionRef.current.draftId !== requestedId) return;
-        if (error instanceof ApiRequestError && error.status === 409) {
+        if (
+          error instanceof ApiRequestError &&
+          error.status === 409 &&
+          error.code === "strategy.draft.conflict"
+        ) {
           const remote = error.currentDraft;
           const compatible =
             remote !== null &&
@@ -256,6 +286,7 @@ export const useServerDraft = (
             updatedAt: remote?.updated_at ?? null,
             remote,
             incompatible: remote !== null && !compatible,
+            errorMessage: null,
           } satisfies Session;
           if (remote !== null)
             knownVersions.current.set(requestedId, remote.version);
@@ -263,7 +294,7 @@ export const useServerDraft = (
           setSession(next);
           return;
         }
-        const next = { ...current, phase: "offline" } satisfies Session;
+        const next = failedSession(current, error);
         sessionRef.current = next;
         setSession(next);
       }
@@ -298,12 +329,110 @@ export const useServerDraft = (
     });
   }, [draftId, state.documentEpoch, state.savedVersion]);
 
+  // Reverting a persisted edit to its immutable base is a server mutation too. Leaving the
+  // register behind would resurrect text the user explicitly discarded on the next device.
+  useEffect(() => {
+    const currentSession = sessionRef.current;
+    if (
+      draftId === null ||
+      schemaVersion === null ||
+      currentSession.draftId !== draftId ||
+      currentSession.schemaVersion !== schemaVersion ||
+      !currentSession.initialized ||
+      currentSession.phase !== "synced" ||
+      currentSession.version < 1 ||
+      state.dirty ||
+      state.composing ||
+      currentSession.persistedSource === state.source
+    )
+      return;
+    const expectedVersion = currentSession.version;
+    const retained = state.source;
+    const requestedBase = baseOf(state, schemaVersion);
+    const deleting = {
+      ...currentSession,
+      phase: "saving",
+    } satisfies Session;
+    // Reserve this CAS operation synchronously so another render cannot enqueue it twice.
+    // The visible state update runs inside the serialized external-operation callback.
+    sessionRef.current = deleting;
+    writeChain.current = writeChain.current.then(async () => {
+      if (sessionRef.current !== deleting) return;
+      setSession(deleting);
+      try {
+        await strategyWorkbenchApi.deleteStrategyDraft(
+          draftId,
+          expectedVersion,
+        );
+        if (sessionRef.current.draftId !== draftId) return;
+        const next = {
+          ...sessionRef.current,
+          phase: "synced",
+          version: 0,
+          persistedSource: retained,
+          updatedAt: null,
+          remote: null,
+          incompatible: false,
+          errorMessage: null,
+        } satisfies Session;
+        knownVersions.current.delete(draftId);
+        sessionRef.current = next;
+        setSession(next);
+      } catch (error) {
+        if (sessionRef.current.draftId !== draftId) return;
+        if (error instanceof ApiRequestError && error.status === 404) {
+          const next = {
+            ...sessionRef.current,
+            phase: "synced",
+            version: 0,
+            persistedSource: retained,
+            updatedAt: null,
+            remote: null,
+            incompatible: false,
+            errorMessage: null,
+          } satisfies Session;
+          knownVersions.current.delete(draftId);
+          sessionRef.current = next;
+          setSession(next);
+          return;
+        }
+        if (
+          error instanceof ApiRequestError &&
+          error.status === 409 &&
+          error.code === "strategy.draft.conflict" &&
+          error.currentDraft !== null
+        ) {
+          const remote = error.currentDraft;
+          const compatible = matchesServerDraftBase(remote, requestedBase);
+          const next = {
+            ...sessionRef.current,
+            phase: "conflict",
+            version: remote.version,
+            persistedSource: remote.source,
+            updatedAt: remote.updated_at,
+            remote,
+            incompatible: !compatible,
+            errorMessage: null,
+          } satisfies Session;
+          knownVersions.current.set(draftId, remote.version);
+          sessionRef.current = next;
+          setSession(next);
+          return;
+        }
+        const next = failedSession(sessionRef.current, error);
+        sessionRef.current = next;
+        setSession(next);
+      }
+    });
+  }, [draftId, schemaVersion, session, state]);
+
   useEffect(() => {
     if (
       session.draftId !== draftId ||
       session.schemaVersion !== schemaVersion ||
       !session.initialized ||
       session.phase === "offline" ||
+      session.phase === "rejected" ||
       session.phase === "conflict" ||
       session.phase === "recovery" ||
       !state.dirty ||
@@ -338,6 +467,7 @@ export const useServerDraft = (
       persistedSource: current.remote.source,
       remote: null,
       incompatible: false,
+      errorMessage: null,
     } satisfies Session;
     sessionRef.current = next;
     setSession(next);
@@ -351,8 +481,9 @@ export const useServerDraft = (
     )
       return;
     if (!stateRef.current.dirty && current.remote !== null) {
-      if (current.schemaVersion === null) return;
+      if (current.schemaVersion === null || current.draftId === null) return;
       const remoteToDelete = current.remote;
+      const requestedId = current.draftId;
       const currentSchema = current.schemaVersion;
       const retained = stateRef.current.source;
       const deleting = { ...current, phase: "saving" } satisfies Session;
@@ -361,7 +492,7 @@ export const useServerDraft = (
       writeChain.current = writeChain.current.then(async () => {
         try {
           await strategyWorkbenchApi.deleteStrategyDraft(
-            remoteToDelete.draft_id,
+            requestedId,
             remoteToDelete.version,
           );
           if (sessionRef.current.draftId !== current.draftId) return;
@@ -372,31 +503,37 @@ export const useServerDraft = (
             persistedSource: retained,
             updatedAt: null,
             remote: null,
+            incompatible: false,
+            errorMessage: null,
           } satisfies Session;
-          knownVersions.current.delete(remoteToDelete.draft_id);
+          knownVersions.current.delete(requestedId);
           sessionRef.current = next;
           setSession(next);
         } catch (error) {
           if (sessionRef.current.draftId !== current.draftId) return;
+          if (error instanceof ApiRequestError && error.status === 404) {
+            const next = {
+              ...current,
+              phase: "synced",
+              version: 0,
+              persistedSource: retained,
+              updatedAt: null,
+              remote: null,
+              incompatible: false,
+              errorMessage: null,
+            } satisfies Session;
+            knownVersions.current.delete(requestedId);
+            sessionRef.current = next;
+            setSession(next);
+            return;
+          }
           if (
             error instanceof ApiRequestError &&
-            (error.status === 404 || error.status === 409)
+            error.status === 409 &&
+            error.code === "strategy.draft.conflict" &&
+            error.currentDraft !== null
           ) {
             const remote = error.currentDraft;
-            if (error.status === 404 || remote === null) {
-              const next = {
-                ...current,
-                phase: "synced",
-                version: 0,
-                persistedSource: retained,
-                updatedAt: null,
-                remote: null,
-              } satisfies Session;
-              knownVersions.current.delete(remoteToDelete.draft_id);
-              sessionRef.current = next;
-              setSession(next);
-              return;
-            }
             const compatible = matchesServerDraftBase(
               remote,
               baseOf(stateRef.current, currentSchema),
@@ -409,13 +546,14 @@ export const useServerDraft = (
               updatedAt: remote.updated_at,
               remote,
               incompatible: !compatible,
+              errorMessage: null,
             } satisfies Session;
-            knownVersions.current.set(remote.draft_id, remote.version);
+            knownVersions.current.set(requestedId, remote.version);
             sessionRef.current = next;
             setSession(next);
             return;
           }
-          const next = { ...current, phase: "offline" } satisfies Session;
+          const next = failedSession(current, error);
           sessionRef.current = next;
           setSession(next);
         }
@@ -428,6 +566,7 @@ export const useServerDraft = (
       persistedSource: current.remote?.source ?? null,
       remote: null,
       incompatible: false,
+      errorMessage: null,
     } satisfies Session;
     sessionRef.current = next;
     setSession(next);
@@ -455,6 +594,7 @@ export const useServerDraft = (
       updatedAt: session.updatedAt,
       remote: session.remote,
       incompatible: session.incompatible,
+      errorMessage: session.errorMessage,
       applyRemote,
       keepLocal,
       retry,

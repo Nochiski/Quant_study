@@ -25,6 +25,7 @@ import {
 } from "vitest";
 
 import { readBackendFixture } from "../../shared/testing/backend-fixtures";
+import { t } from "../../shared/config";
 import { App } from "../app";
 
 const API = "http://localhost:8000";
@@ -673,6 +674,140 @@ describe("document routes (P2-04)", () => {
       within(banner).getByRole("button", { name: "서버 초안 적용" }),
     );
     await waitFor(() => expect(view.state.doc.toString()).toBe(recovered));
+  });
+
+  it("rejects a server draft whose payload identity differs from the requested route", async () => {
+    let deleteCalls = 0;
+    server.use(
+      http.get(`${API}/api/v1/strategy-drafts/:draftId`, () =>
+        HttpResponse.json({
+          draft_id: "revision:another-strategy:99:wrong",
+          version: 7,
+          source: `${STORED}description: wrong identity\n`,
+          format: "yaml",
+          source_hash: "d".repeat(64),
+          schema_version: "1.0",
+          updated_at: "2026-09-05T01:02:03Z",
+          strategy_id: "s1",
+          base_revision: 2,
+          base_spec_hash: "2".repeat(64),
+        }),
+      ),
+      http.delete(`${API}/api/v1/strategy-drafts/:draftId`, () => {
+        deleteCalls += 1;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    mount("/research/strategies/s1/revisions/2");
+    const view = await editor();
+    const alert = await screen.findByRole("alert");
+
+    expect(alert).toHaveTextContent(t("draft.server.rejected"));
+    expect(alert).toHaveTextContent(
+      "Draft response did not match the requested draft identity or contract.",
+    );
+    expect(view.state.doc.toString()).toBe(STORED);
+    expect(
+      screen.queryByRole("button", { name: t("draft.server.applyRemote") }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: t("draft.server.keepLocal") }),
+    ).not.toBeInTheDocument();
+    expect(deleteCalls).toBe(0);
+  });
+
+  it("rejects a malformed draft conflict instead of exposing another draft's actions", async () => {
+    let putCalls = 0;
+    let deleteCalls = 0;
+    server.use(
+      http.put(`${API}/api/v1/strategy-drafts/:draftId`, async () => {
+        putCalls += 1;
+        return HttpResponse.json(
+          {
+            detail: {
+              code: "strategy.draft.conflict",
+              message: "newer writer",
+              current: {
+                draft_id: "revision:another-strategy:99:wrong",
+                version: 2,
+                source: "title: another draft\n",
+                format: "yaml",
+                source_hash: "e".repeat(64),
+                schema_version: "1.0",
+                updated_at: "2026-09-05T01:02:04Z",
+                strategy_id: "s1",
+                base_revision: 2,
+                base_spec_hash: "2".repeat(64),
+              },
+            },
+          },
+          { status: 409 },
+        );
+      }),
+      http.delete(`${API}/api/v1/strategy-drafts/:draftId`, () => {
+        deleteCalls += 1;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    mount("/research/strategies/s1/revisions/2");
+    const view = await editor();
+    replaceText(view, `${STORED}description: local edit\n`);
+    const alert = await screen.findByRole("alert", undefined, {
+      timeout: 3_000,
+    });
+
+    expect(putCalls).toBe(1);
+    expect(alert).toHaveTextContent(t("draft.server.rejected"));
+    expect(alert).toHaveTextContent(
+      "Draft conflict response did not match the requested draft identity.",
+    );
+    expect(
+      screen.queryByRole("button", { name: t("draft.server.applyRemote") }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: t("draft.server.keepLocal") }),
+    ).not.toBeInTheDocument();
+    expect(deleteCalls).toBe(0);
+  });
+
+  it("assigns a new-draft recovery identity before persisting the first edit", async () => {
+    const writes: Array<{ draftId: string; source: string }> = [];
+    server.use(
+      http.put(
+        `${API}/api/v1/strategy-drafts/:draftId`,
+        async ({ params, request }) => {
+          const body = (await request.json()) as Record<string, unknown>;
+          const draftId = String(params.draftId);
+          writes.push({ draftId, source: String(body.source) });
+          return HttpResponse.json({
+            draft_id: draftId,
+            version: Number(body.expected_version) + 1,
+            source: body.source,
+            format: body.format,
+            source_hash: "d".repeat(64),
+            schema_version: body.schema_version,
+            updated_at: "2026-09-05T00:00:00Z",
+            strategy_id: null,
+            base_revision: null,
+            base_spec_hash: null,
+          });
+        },
+      ),
+    );
+
+    const history = mount("/research/strategies/new");
+    const view = await editor();
+    const source = 'schema_version: "1.0"\ntitle: first edit\n';
+    replaceText(view, source);
+
+    await waitFor(() => expect(writes).toHaveLength(1), { timeout: 3_000 });
+    const routeDraft = new URLSearchParams(history.location.search).get(
+      "draft",
+    );
+    expect(routeDraft).not.toBeNull();
+    expect(writes).toEqual([{ draftId: routeDraft, source }]);
   });
 
   it("creates a strategy from the new draft and moves the URL to revision 1", async () => {

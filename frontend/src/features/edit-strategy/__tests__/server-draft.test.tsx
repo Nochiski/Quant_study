@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useReducer } from "react";
@@ -16,6 +17,7 @@ import {
   type SaveStrategyDraftRequest,
   type StrategyDraft,
 } from "../../../shared/api";
+import { t } from "../../../shared/config";
 import { documentReducer, initialDocumentState } from "../model/document-state";
 import { useServerDraft } from "../model/use-server-draft";
 import { ServerDraftBanner } from "../ui/server-draft-banner";
@@ -115,9 +117,10 @@ describe("server draft CAS", () => {
     );
     const save = vi
       .spyOn(strategyWorkbenchApi, "saveStrategyDraft")
-      .mockImplementation(async (_id, request) =>
-        remoteDraft(request.source, request.expected_version + 1),
-      );
+      .mockImplementation(async (_id, request) => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return remoteDraft(request.source, request.expected_version + 1);
+      });
     mount();
     await screen.findByText("서버 초안 동기화됨");
 
@@ -286,5 +289,122 @@ describe("server draft CAS", () => {
     );
 
     await waitFor(() => expect(remove).toHaveBeenCalledWith(DRAFT_ID, 1));
+  });
+
+  it("CAS-deletes a persisted edit when the document returns to its immutable base", async () => {
+    vi.spyOn(strategyWorkbenchApi, "getStrategyDraft").mockRejectedValue(
+      new ApiRequestError("get", 404, "strategy.draft.not_found"),
+    );
+    const save = vi
+      .spyOn(strategyWorkbenchApi, "saveStrategyDraft")
+      .mockImplementation(async (_id, request) => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return remoteDraft(request.source, request.expected_version + 1);
+      });
+    const remove = vi
+      .spyOn(strategyWorkbenchApi, "deleteStrategyDraft")
+      .mockResolvedValue();
+    mount();
+    await screen.findByText(t("draft.server.synced"));
+
+    fireEvent.change(screen.getByLabelText("Source"), {
+      target: { value: "title: changed\n" },
+    });
+    await screen.findByText(t("draft.server.saving"));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    await screen.findByText(t("draft.server.synced"));
+
+    fireEvent.change(screen.getByLabelText("Source"), {
+      target: { value: BASE },
+    });
+
+    await waitFor(() => expect(remove).toHaveBeenCalledWith(DRAFT_ID, 1));
+    expect(screen.getByLabelText("Source")).toHaveValue(BASE);
+    expect(
+      await screen.findByText(t("draft.server.synced")),
+    ).toBeInTheDocument();
+  });
+
+  it("preserves a newer writer when reverting the local document races with CAS delete", async () => {
+    vi.spyOn(strategyWorkbenchApi, "getStrategyDraft").mockRejectedValue(
+      new ApiRequestError("get", 404, "strategy.draft.not_found"),
+    );
+    const save = vi
+      .spyOn(strategyWorkbenchApi, "saveStrategyDraft")
+      .mockImplementation(async (_id, request) => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return remoteDraft(request.source, request.expected_version + 1);
+      });
+    const newer = remoteDraft("title: newer writer\n", 2);
+    const remove = vi
+      .spyOn(strategyWorkbenchApi, "deleteStrategyDraft")
+      .mockRejectedValue(
+        new ApiRequestError(
+          "delete",
+          409,
+          "strategy.draft.conflict",
+          "newer version exists",
+          null,
+          newer,
+        ),
+      );
+    mount();
+    await screen.findByText(t("draft.server.synced"));
+    fireEvent.change(screen.getByLabelText("Source"), {
+      target: { value: "title: changed\n" },
+    });
+    await screen.findByText(t("draft.server.saving"));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    await screen.findByText(t("draft.server.synced"));
+
+    fireEvent.change(screen.getByLabelText("Source"), {
+      target: { value: BASE },
+    });
+
+    await waitFor(() => expect(remove).toHaveBeenCalledWith(DRAFT_ID, 1));
+    const conflict = await screen.findByRole("region", {
+      name: t("draft.server.conflictTitle"),
+    });
+    expect(screen.getByLabelText("Source")).toHaveValue(BASE);
+    expect(
+      within(conflict).getByRole("button", {
+        name: t("draft.server.applyRemote"),
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows a typed server rejection instead of misreporting it as offline", async () => {
+    vi.spyOn(strategyWorkbenchApi, "getStrategyDraft").mockRejectedValue(
+      new ApiRequestError("get", 404, "strategy.draft.not_found"),
+    );
+    const save = vi
+      .spyOn(strategyWorkbenchApi, "saveStrategyDraft")
+      .mockRejectedValue(
+        new ApiRequestError(
+          "save",
+          422,
+          "strategy.draft.invalid",
+          "source is not valid UTF-8",
+        ),
+      );
+    mount();
+    await screen.findByText(t("draft.server.synced"));
+
+    fireEvent.change(screen.getByLabelText("Source"), {
+      target: { value: "title: rejected\n" },
+    });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(t("draft.server.rejected"));
+    expect(alert).toHaveTextContent("source is not valid UTF-8");
+    expect(alert).not.toHaveTextContent(t("draft.server.offline"));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByRole("button", { name: t("draft.server.applyRemote") }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: t("draft.server.keepLocal") }),
+    ).not.toBeInTheDocument();
   });
 });

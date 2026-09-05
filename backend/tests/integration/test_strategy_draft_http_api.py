@@ -87,6 +87,25 @@ def test_saved_draft_requires_the_exact_immutable_base() -> None:
     assert rejected.json()["detail"]["code"] == "strategy.draft.invalid"
 
 
+def test_non_utf8_scalar_source_is_a_typed_rejection_and_is_not_persisted() -> None:
+    client = TestClient(build_http_app(), raise_server_exceptions=False)
+    payload = (
+        b'{"expected_version":0,"source":"\\ud800","format":"yaml",'
+        b'"schema_version":"1.0","strategy_id":null,"base_revision":null,'
+        b'"base_spec_hash":null}'
+    )
+
+    rejected = client.put(
+        "/api/v1/strategy-drafts/non-utf8",
+        content=payload,
+        headers={"content-type": "application/json"},
+    )
+
+    assert rejected.status_code == 422
+    assert rejected.json()["detail"]["code"] == "strategy.draft.invalid"
+    assert client.get("/api/v1/strategy-drafts/non-utf8").status_code == 404
+
+
 def test_server_draft_survives_runtime_container_reconstruction(tmp_path: Path) -> None:
     path = tmp_path / "runtime.sqlite3"
     first = TestClient(build_http_app(strategy_repository_path=path))

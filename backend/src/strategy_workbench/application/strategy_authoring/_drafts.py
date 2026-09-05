@@ -60,7 +60,12 @@ class StrategyDraftService:
             validated_id = validate_draft_id(draft_id)
         except ValueError as error:
             raise InvalidStrategyDraftError(str(error)) from error
-        source_bytes = len(request.source.encode("utf-8"))
+        try:
+            source_bytes = len(request.source.encode("utf-8"))
+        except UnicodeEncodeError as error:
+            raise InvalidStrategyDraftError(
+                "draft source must be representable as valid UTF-8 text"
+            ) from error
         if source_bytes > self._max_source_bytes:
             raise InvalidStrategyDraftError(
                 "draft source exceeds authoring limit -- "

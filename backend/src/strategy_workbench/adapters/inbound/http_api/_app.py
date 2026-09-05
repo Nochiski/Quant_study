@@ -20,7 +20,6 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunService,
     BacktestRunSpec,
     BacktestRunState,
-    BacktestRunSummary,
     BacktestStartResponse,
     InvalidBacktestRunError,
     RunStatus,
@@ -101,7 +100,6 @@ from strategy_workbench.application.strategy_design.facade.ports import (
     RevisionSummary,
     StrategyNotFoundError,
     StrategyRevisionConflictError,
-    StrategySummary,
 )
 from strategy_workbench.domain.equity.facade.research_data import (
     ResearchPanelQuery,
@@ -292,21 +290,6 @@ def create_app(
             RawObservationContractError,
         ) as error:
             raise _portfolio_http_error(error) from error
-
-    @app.get(
-        "/api/v1/backtests",
-        operation_id="listBacktests",
-    )
-    def list_backtests(
-        offset: int = Query(default=0, ge=0),
-        limit: int = Query(default=50, ge=1, le=PageRequest.MAX_LIMIT),
-        strategy_id: str | None = Query(default=None, min_length=1),
-    ) -> Page[BacktestRunSummary]:
-        """Newest-first snapshot of runs retained by this server process."""
-        return backtest_runs.list_runs(
-            PageRequest(offset, limit),
-            strategy_id=strategy_id,
-        )
 
     @app.get(
         "/api/v1/backtests/{run_id}",
@@ -837,17 +820,6 @@ def create_app(
                     "validation": jsonable_encoder(asdict(error.validation)),
                 },
             ) from error
-
-    @app.get(
-        "/api/v1/strategies",
-        operation_id="listStrategies",
-    )
-    def list_strategies(
-        offset: int = Query(default=0, ge=0),
-        limit: int = Query(default=50, ge=1, le=PageRequest.MAX_LIMIT),
-    ) -> Page[StrategySummary]:
-        """Latest immutable revision of every strategy, ordered by strategy id."""
-        return strategy_documents.list_strategies(PageRequest(offset, limit))
 
     @app.get(
         "/api/v1/strategies/{strategy_id}",

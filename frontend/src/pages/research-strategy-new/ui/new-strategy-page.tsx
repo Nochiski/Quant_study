@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
   ContractInspector,
@@ -56,6 +56,9 @@ export const NewStrategyPage = () => {
   const navigate = useNavigate();
   const search = useSearch({ from: ROUTE });
   const [document, dispatch] = useStrategyDocument(NEW_DRAFT);
+  // The recovery identity exists before the first paint. A URL-only effect leaves a short
+  // draftId=null window in which an immediate edit can be mistaken for an already-synced base.
+  const [entryDraftId] = useState(createNewDraftId);
   const { save, status, canSave } = useSaveDocument(document, dispatch);
   const assist = useSchemaAssist(document);
   const serverDraftId =
@@ -67,7 +70,7 @@ export const NewStrategyPage = () => {
           document.baseRevision,
           document.baseSpecHash,
         )
-      : (search.draft ?? null);
+      : (search.draft ?? entryDraftId);
   const serverDraft = useServerDraft(document, dispatch, {
     draftId: serverDraftId,
     schemaVersion: assist.schemaVersion,
@@ -132,10 +135,10 @@ export const NewStrategyPage = () => {
     if (search.draft !== undefined) return;
     void navigate({
       to: ROUTE,
-      search: { ...search, draft: createNewDraftId() },
+      search: { ...search, draft: entryDraftId },
       replace: true,
     });
-  }, [navigate, search]);
+  }, [entryDraftId, navigate, search]);
 
   // If the user types while create is in flight, stay on this page and preserve the newer text.
   // A second save appends it to the newly created strategy; navigate only once the current text

@@ -98,72 +98,6 @@ const server = setupServer(
     `${API}/api/v1/strategy-drafts/:draftId`,
     () => new HttpResponse(null, { status: 204 }),
   ),
-  http.get(`${API}/api/v1/strategies`, ({ request }) => {
-    const offset = Number(new URL(request.url).searchParams.get("offset") ?? 0);
-    const items = [
-      {
-        strategy_id: "s1",
-        latest_revision: 2,
-        title: "Alpha strategy",
-        spec_hash: "a".repeat(64),
-        updated_at: "2026-09-05T00:00:00Z",
-      },
-    ];
-    return HttpResponse.json({
-      items: offset === 0 ? items : [],
-      total: items.length,
-      offset,
-      limit: 20,
-    });
-  }),
-  http.get(`${API}/api/v1/strategies/:strategyId/revisions`, ({ params }) =>
-    HttpResponse.json({
-      items: [2, 1].map((revision) => ({
-        strategy_id: params.strategyId,
-        revision,
-        spec_hash: `${revision}`.repeat(64).slice(0, 64),
-        source_hash: "b".repeat(64),
-        source_format: "yaml",
-        origin: "document",
-        change_note: null,
-        created_at: `2026-09-0${revision}T00:00:00Z`,
-      })),
-      total: 2,
-      offset: 0,
-      limit: 100,
-    }),
-  ),
-  http.get(`${API}/api/v1/backtests`, ({ request }) => {
-    const url = new URL(request.url);
-    const strategyId = url.searchParams.get("strategy_id");
-    const items = [
-      {
-        run: {
-          run_id: "run-1",
-          status: "completed",
-          progress: 1,
-          stage: "done",
-          message: "Run completed",
-          created_at: "2026-09-05T00:00:00Z",
-          updated_at: "2026-09-05T00:00:01Z",
-        },
-        strategy_provenance: {
-          kind: "saved_revision",
-          strategy_id: "s1",
-          revision: 2,
-          spec_hash: "a".repeat(64),
-          schema_version: "1.0",
-          source_hash: "b".repeat(64),
-        },
-      },
-    ];
-    return HttpResponse.json({
-      items: strategyId && strategyId !== "s1" ? [] : items,
-      total: strategyId && strategyId !== "s1" ? 0 : 1,
-      offset: 0,
-      limit: 25,
-    });
-  }),
   http.post(`${API}/api/v1/strategy-documents/compile`, async ({ request }) => {
     const body = (await request.json()) as { source: string };
     return HttpResponse.json({
@@ -437,74 +371,6 @@ describe("App Shell routes", () => {
     );
   });
 
-  it("browses saved strategies and opens immutable revision history", async () => {
-    const user = userEvent.setup();
-    mount("/research/strategies");
-    expect(
-      await screen.findByRole("heading", { name: "전략 이력" }),
-    ).toBeInTheDocument();
-    expect(await screen.findByText("Alpha strategy")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "최신본 열기" })).toHaveAttribute(
-      "href",
-      "/research/strategies/s1/revisions/2",
-    );
-    await user.click(screen.getByRole("button", { name: "Revision 펼치기" }));
-    expect(await screen.findByText("저장 revision 목록")).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "편집" })).toHaveLength(2);
-    expect(screen.getAllByRole("link", { name: "Diff" })[0]).toHaveAttribute(
-      "href",
-      expect.stringContaining("view=diff"),
-    );
-  });
-
-  it("filters backtest history by strategy and links both provenance and run", async () => {
-    const user = userEvent.setup();
-    const history = mount("/research/backtests?strategy=missing");
-    expect(
-      await screen.findByRole("heading", { name: "백테스트 이력" }),
-    ).toBeInTheDocument();
-    expect(await screen.findByText("백테스트 실행이 없습니다")).toBeVisible();
-    const filter = screen.getByLabelText("전략 ID");
-    await user.clear(filter);
-    await user.type(filter, "s1");
-    await user.click(screen.getByRole("button", { name: "필터 적용" }));
-    expect(await screen.findByText("run-1")).toBeInTheDocument();
-    expect(history.location.search).toContain("strategy=s1");
-    expect(screen.getByRole("link", { name: "결과 열기" })).toHaveAttribute(
-      "href",
-      "/research/backtests/run-1",
-    );
-    expect(screen.getByRole("link", { name: /s1 · v2/ })).toHaveAttribute(
-      "href",
-      "/research/strategies/s1/revisions/2",
-    );
-  });
-
-  it("shows explicit loading, empty, and error states for history", async () => {
-    server.use(
-      http.get(`${API}/api/v1/strategies`, async () => {
-        await delay(250);
-        return HttpResponse.json({ items: [], total: 0, offset: 0, limit: 20 });
-      }),
-    );
-    mount("/research/strategies");
-    expect(await screen.findByRole("status")).toHaveTextContent(
-      "불러오는 중입니다",
-    );
-    expect(
-      await screen.findByText("저장된 전략이 없습니다"),
-    ).toBeInTheDocument();
-
-    cleanup();
-    server.use(
-      http.get(`${API}/api/v1/strategies`, () => HttpResponse.error()),
-    );
-    mount("/research/strategies");
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "전략 목록을 불러올 수 없습니다",
-    );
-  });
-
   it("supports back and forward between routes", async () => {
     const user = userEvent.setup();
     const history = mount("/research/backtests/run-1");
@@ -512,7 +378,7 @@ describe("App Shell routes", () => {
       await screen.findByRole("heading", { name: "백테스트 실행" }),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("link", { name: "전략" }));
-    await screen.findByRole("heading", { name: "전략 이력" });
+    await screen.findByRole("heading", { name: "새 전략" });
     history.back();
     await waitFor(() =>
       expect(history.location.pathname).toBe("/research/backtests/run-1"),
@@ -522,7 +388,7 @@ describe("App Shell routes", () => {
     ).toBeInTheDocument();
     history.forward();
     await waitFor(() =>
-      expect(history.location.pathname).toBe("/research/strategies"),
+      expect(history.location.pathname).toBe("/research/strategies/new"),
     );
   });
 });

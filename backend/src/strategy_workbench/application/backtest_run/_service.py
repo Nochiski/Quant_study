@@ -11,8 +11,6 @@ from strategy_workbench.application.portfolio_design.facade.design import (
     PortfolioPreviewRequest,
 )
 from strategy_workbench.application.strategy_design.facade.ports import (
-    Page,
-    PageRequest,
     StrategyNotFoundError,
     StrategyRepositoryPort,
 )
@@ -62,16 +60,9 @@ class BacktestResultNotReadyError(RuntimeError):
     pass
 
 
-@dataclass(frozen=True)
-class BacktestRunSummary:
-    run: BacktestRunState
-    strategy_provenance: StrategyProvenance
-
-
 @dataclass
 class _RunRecord:
     state: BacktestRunState
-    provenance: StrategyProvenance
     events: list[RunProgressEvent]
     cancellation: Event
     result: BacktestRunResult | None = None
@@ -143,12 +134,7 @@ class BacktestRunService:
             created_at=created,
             updated_at=created,
         )
-        record = _RunRecord(
-            state=state,
-            provenance=provenance,
-            events=[],
-            cancellation=Event(),
-        )
+        record = _RunRecord(state=state, events=[], cancellation=Event())
         with self._lock:
             self._records[run_id] = record
             self._emit(record, RunStatus.QUEUED, 0.0, "queued", "Run accepted")
@@ -163,36 +149,6 @@ class BacktestRunService:
     def state(self, run_id: str) -> BacktestRunState:
         with self._lock:
             return self._record(run_id).state
-
-    def list_runs(
-        self,
-        page: PageRequest,
-        *,
-        strategy_id: str | None = None,
-    ) -> Page[BacktestRunSummary]:
-        """Newest-first snapshot of the server's run lifecycle register."""
-        with self._lock:
-            records = tuple(
-                record
-                for record in self._records.values()
-                if strategy_id is None or record.provenance.strategy_id == strategy_id
-            )
-            ordered = tuple(
-                sorted(
-                    records,
-                    key=lambda record: (record.state.created_at, record.state.run_id),
-                    reverse=True,
-                )
-            )
-            return Page(
-                items=tuple(
-                    BacktestRunSummary(record.state, record.provenance)
-                    for record in ordered[page.offset : page.offset + page.limit]
-                ),
-                total=len(ordered),
-                offset=page.offset,
-                limit=page.limit,
-            )
 
     def result(self, run_id: str) -> BacktestRunResult:
         with self._lock:

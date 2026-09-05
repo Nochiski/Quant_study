@@ -58,12 +58,6 @@ import type {
   GetStrategyResponses,
   GetStrategyTemplateData,
   GetStrategyTemplateResponses,
-  ListBacktestsData,
-  ListBacktestsErrors,
-  ListBacktestsResponses,
-  ListStrategiesData,
-  ListStrategiesErrors,
-  ListStrategiesResponses,
   ListStrategyRevisionsData,
   ListStrategyRevisionsErrors,
   ListStrategyRevisionsResponses,
@@ -125,20 +119,6 @@ export type Options<
    */
   meta?: Record<string, unknown>;
 };
-
-/**
- * List Backtests
- *
- * Newest-first snapshot of runs retained by this server process.
- */
-export const listBacktests = <ThrowOnError extends boolean = false>(
-  options?: Options<ListBacktestsData, ThrowOnError>,
-) =>
-  (options?.client ?? client).get<
-    ListBacktestsResponses,
-    ListBacktestsErrors,
-    ThrowOnError
-  >({ url: "/api/v1/backtests", ...options });
 
 /**
  * Start Backtest
@@ -374,20 +354,6 @@ export const previewPortfolio = <ThrowOnError extends boolean = false>(
       ...options.headers,
     },
   });
-
-/**
- * List Strategies
- *
- * Latest immutable revision of every strategy, ordered by strategy id.
- */
-export const listStrategies = <ThrowOnError extends boolean = false>(
-  options?: Options<ListStrategiesData, ThrowOnError>,
-) =>
-  (options?.client ?? client).get<
-    ListStrategiesResponses,
-    ListStrategiesErrors,
-    ThrowOnError
-  >({ url: "/api/v1/strategies", ...options });
 
 /**
  * Create Strategy

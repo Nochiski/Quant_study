@@ -33,6 +33,19 @@ export const ServerDraftBanner = ({ sync }: { sync: ServerDraftSync }) => {
       </section>
     );
   }
+  if (sync.phase === "rejected") {
+    return (
+      <section className="server-draft server-draft--conflict" role="alert">
+        <span>
+          {t("draft.server.rejected")}
+          {sync.errorMessage ? ` ${sync.errorMessage}` : ""}
+        </span>
+        <Button size="small" tone="ghost" onClick={sync.retry}>
+          {t("draft.server.retry")}
+        </Button>
+      </section>
+    );
+  }
   const recovery = sync.phase === "recovery";
   const label = sync.incompatible
     ? t("draft.server.incompatibleTitle")

@@ -2,7 +2,6 @@ from strategy_workbench.application.backtest_run._service import (
     BacktestResultNotReadyError,
     BacktestRunNotFoundError,
     BacktestRunService,
-    BacktestRunSummary,
     InvalidBacktestRunError,
     StaleStrategyReferenceError,
     StrategyReferenceNotFoundError,
@@ -24,7 +23,6 @@ from strategy_workbench.domain.backtest.facade.runs import (
 __all__ = [
     "BacktestResultNotReadyError",
     "BacktestRunNotFoundError",
-    "BacktestRunSummary",
     "BacktestRunResult",
     "BacktestRunService",
     "BacktestRunSpec",

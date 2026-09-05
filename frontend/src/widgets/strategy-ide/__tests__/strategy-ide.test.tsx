@@ -256,6 +256,31 @@ describe("StrategyIde", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("lets palette Escape close only the top modal and restore focus inside a narrow drawer", async () => {
+    matchMedia(true);
+    const user = userEvent.setup();
+    mount();
+    await user.click(
+      screen.getByRole("button", { name: "계약", expanded: false }),
+    );
+    const drawerControl = screen.getByRole("button", { name: "계약 접기" });
+    await waitFor(() => expect(drawerControl).toHaveFocus());
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    await waitFor(() => expect(screen.getByRole("combobox")).toHaveFocus());
+    await user.keyboard("{Shift>}{Tab}{/Shift}");
+    expect(
+      screen.getByRole("button", { name: "명령 팔레트 닫기" }),
+    ).toHaveFocus();
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("complementary", { name: "계약" }),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(drawerControl).toHaveFocus());
+  });
+
   it("renders the concept frame: breadcrumb, run action, meta line, outline and snippets", async () => {
     matchMedia(false);
     const user = userEvent.setup();

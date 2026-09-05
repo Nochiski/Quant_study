@@ -150,7 +150,12 @@ const OpenCommandPalette = ({
         if (event.target === event.currentTarget) closePalette();
       }}
       onKeyDown={(event) => {
-        if (event.key === "Escape") closePalette();
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          closePalette();
+          return;
+        }
         if (event.key !== "Tab") return;
         const target = event.target;
         if (event.shiftKey && target === input.current) {

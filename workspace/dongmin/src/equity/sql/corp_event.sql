@@ -25,6 +25,7 @@
 --   class_unknown    종류 어휘 밖('-' 포함) — 어느 티커의 사건인지 정할 수 없다
 --   pre_listing      티커는 있으나 효력일이 그 티커의 security_span 첫 존재일 이전
 --   krx_par_only     KRX 액면가 변경인데 주식수가 사실상 불변(|ratio−1| ≤ krx_share_change_tol)
+--   share_unchanged  결정공시·자본변동인데 전후 주식수 불변(액면감액 감자 등) — 같은 허용치
 -- 범위 안 후보만 격리 판정을 받는다: ticker_unresolved(보통주 계열인데 상장 보통주 없음) ·
 -- effective_unresolved(기준일 없음) · ratio_unparsed · effective_before_announce(사건 단위 —
 -- 가장 이른 announce 기준, 아래 judged CTE).
@@ -184,6 +185,11 @@ pool AS (
            CASE WHEN p.source = 'krx_listing' AND p.ratio IS NOT NULL
                      AND abs(p.ratio - 1) <= k.krx_share_change_tol
                      THEN 'krx_par_only'
+                -- 결정공시·자본변동인데 전후 주식수가 같은 사건(액면감액 방식 감자 등, 서버 cr 39건)도
+                -- 가격 조정이 없으므로 이벤트가 아니다 (S05 4차, 09-05).
+                WHEN p.source <> 'krx_listing' AND p.ratio IS NOT NULL
+                     AND abs(p.ratio - 1) <= k.krx_share_change_tol
+                     THEN 'share_unchanged'
                 WHEN p.source <> 'krx_listing' AND p.basis_date IS NOT NULL
                      AND (p.effective_date IS NULL
                           OR p.effective_date < b.cal_min OR p.effective_date > b.cal_max)

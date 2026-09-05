@@ -54,7 +54,7 @@ REJECT_REASONS: tuple[str, ...] = ("ticker_unresolved", "effective_unresolved", 
                                    "effective_before_announce")
 # 범위 밖 사유(격리 아님, 기록형) — sql/corp_event.sql pool.scope_out
 SCOPE_OUT_VOCAB: tuple[str, ...] = ("out_of_calendar", "unlisted_class", "class_unknown",
-                                    "pre_listing", "krx_par_only")
+                                    "pre_listing", "krx_par_only", "share_unchanged")
 # 방향 불변식(EG3_corp_event 폐기형, 원천 무관): ratio 는 주식수 배수이므로 유형이 방향을 못 박는다.
 RATIO_ABOVE_ONE: tuple[str, ...] = ("split", "bonus")
 RATIO_BELOW_ONE: tuple[str, ...] = ("reverse_split", "capred")
@@ -211,6 +211,7 @@ def eg3_corp_event(ctx: EquityGateContext) -> GateResult:
         "n_pool_by_scope": {k: sum(d.values()) for k, d in scope.items()},
         "n_pool_by_scope_source": scope,
         "n_krx_par_only": sum(scope.get("krx_par_only", {}).values()),
+        "n_share_unchanged": sum(scope.get("share_unchanged", {}).values()),
         "krx_share_change_tol": ctx.baseline.get(ctx.rule.name, "krx_share_change_tol"),
         "n_dedup": _n(ctx, f'SELECT coalesce(sum(n_src_rows - 1), 0) FROM "{v}"'),
         "n_out_by_source": _counts(ctx, "source"),

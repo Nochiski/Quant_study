@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: SELF_CHECK
+project_status: IN_REVIEW
 current_phase: P6
 current_pr: P6-08
 active_prs: [P6-08]
 parallel_window: []
-last_updated: 2026-09-05T23:54:48+09:00
+last_updated: 2026-09-05T23:56:25+09:00
 planned_prs: 52
 merged_prs: 46
 approved_prs: 46
@@ -22,13 +22,13 @@ progress_percent: 88
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `SELF_CHECK` |
+| Project status | `IN_REVIEW` |
 | Current phase | `P6` |
 | Current/next PR | `P6-08` |
 | Active PR | `P6-08` |
 | Progress | `46 / 52 merged (88%)` |
 | Approved | `46 / 52` |
-| Aggregated at | `2026-09-05 23:54 KST` |
+| Aggregated at | `2026-09-05 23:56 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -78,7 +78,7 @@ progress_percent: 88
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
 | P4 | Outline, Contract, Projections | 10 | 10 | `MERGED` |
 | P5 | Truthful Trace UI | 3 | 3 | `MERGED` |
-| P6 | Professional release and migration | 9 | 3 | `SELF_CHECK` |
+| P6 | Professional release and migration | 9 | 3 | `IN_REVIEW` |
 | **Total** |  | **52** | **46** | **88%** |
 <!-- PLAN:PHASES:END -->
 
@@ -86,7 +86,7 @@ progress_percent: 88
 
 | 항목 | 값 |
 |---|---|
-| PR | `P6-08` Strategy/revision history routed UI SELF_CHECK |
+| PR | `P6-08` Strategy/revision history routed UI IN_REVIEW |
 | Intent | 기존 repository의 immutable revision/history SoT를 그대로 투영해 전문 사용자가 저장 전략을 찾고 원하는 revision을 편집·diff direct route로 열 수 있게 한다 |
 | Acceptance | deterministic strategy list와 revision pagination; `/research/strategies` direct route와 nav; strategy 선택 시 revision history·최신 revision 편집 연결; 임의 revision edit/diff deep link; loading·empty·error·out-of-range offset을 안전하게 canonical page로 복구; OpenAPI/generated client와 backend/frontend 계약 테스트 동기화 |
 | Non-goals | server draft 변경(P6-02), backtest run history/provenance(P6-09), strategy 삭제·rename, 검색 인덱스, legacy editor 제거(P6-06) |
@@ -238,7 +238,7 @@ Phase exit:
 | [ ] | `P6-05` | Playwright/visual regression infrastructure와 CI | P2-03, P3-05, P6-04 | `WAITING` | — |
 | [ ] | `P6-06` | 전체 browser E2E·실구동 시나리오 검증, migration gate, 조건부 legacy cleanup | P6-01, P6-02, P6-03, P6-04, P6-05, P6-08, P6-09 | `WAITING` | — |
 | [x] | `P6-07` | Root frontend/backend development entrypoints | P0-02, P0-03 | `MERGED` | [#56](https://github.com/Nochiski/Quant_study/pull/56) · `review_p6_07` APPROVE |
-| [ ] | `P6-08` | Strategy list와 revision history routed UI | P6-01, P6-02, P3-06, P4-08 | `SELF_CHECK` | [#74](https://github.com/Nochiski/Quant_study/pull/74) · P1 3/P2 2 회귀 수정, 동일 reviewer 재검토 대기 |
+| [ ] | `P6-08` | Strategy list와 revision history routed UI | P6-01, P6-02, P3-06, P4-08 | `IN_REVIEW` | [#74](https://github.com/Nochiski/Quant_study/pull/74) · `review_p6_08` P1 3/P2 2 수정 재검토 중 |
 | [ ] | `P6-09` | Backtest run history routed UI와 provenance | P6-08, P3-05 | `WAITING` | P6-02 review size finding으로 분리 |
 
 Phase exit:
@@ -348,6 +348,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | P6-08 review-fix code freeze `7267107`, self-check 기록 `09713c6`, 최신 24 files +1,244/-32 및 gate를 PR #74 본문에 반영했다. 최초 검토자 `review_p6_08`에게 P1 3/P2 2의 회귀 폐쇄와 최신 전체 diff를 같은 reviewer loop에서 재검토하도록 IN_REVIEW로 전환한다 | 13.3 latest diff freeze·13.4 same-reviewer fix loop·PR body merge gate |
 | 2026-09-05 KST | Codex | P6-08 review fix를 `7267107`에 고정했다. PageRequest가 frontend와 DB에 공통으로 안전한 정수 상한을 소유하고 HTTP schema도 같은 상한을 노출한다. revision 표는 source format/hash와 spec hash를 분리했으며 UTC 표기를 명시했다. save는 공용 strategy-list query key의 진행 중 요청을 취소·제거해 늦은 stale 응답도 되살아나지 않는다. strategy/revision 각각 21개 실제 pagination, 별도 edit/diff link, 고유 toggle/region 접근성 이름을 회귀로 고정했다. focused backend 72/frontend 60, 전체 backend 1,114/frontend 422 및 모든 정적·build·generated deterministic gate를 통과해 SELF_CHECK로 전환한다 | portable pagination SoT·provenance truth·cache lifecycle owner·review P1 3/P2 2 closure |
 | 2026-09-05 KST | Codex | `review_p6_08`이 P1 3건을 재현해 REQUEST_CHANGES로 전환했다. signed 64-bit를 넘는 offset이 SQLite binding 500을 만들고, revision source 열이 source_hash 대신 spec_hash를 표시하며, save 성공이 strategy list cache를 무효화하지 않아 stale latest link가 노출된다. P2로 >20 pagination 검출력과 여러 strategy toggle/region 접근성 이름도 보강한다. PageRequest portable 상한·공용 list key/invalidation·provenance 분리와 hostile 회귀 후 같은 reviewer에게 재검토받는다. 원격 CI 재실행은 코드 step 전에 GitHub billing/spending-limit annotation으로 동일 실패했다 | portable pagination SoT·source/spec provenance 정확성·cache ownership·same-reviewer loop |
 | 2026-09-05 KST | Codex | P6-08 [#74](https://github.com/Nochiski/Quant_study/pull/74)를 열고 base `b7fc4de`, implementation `f9879d7`, self-check record `f68f18b`, 18 files +958/-4와 size exception·전체 gate를 본문에 고정했다. fresh review-only agent `review_p6_08`에게 repository/API pagination, route canonicalization, immutable edit/diff link, 상태 UI, SoT·책임분리를 독립 검토하도록 IN_REVIEW로 전환한다 | 13.3 diff freeze·13.4 PR별 fresh reviewer 정확히 1명·12절 size exception |

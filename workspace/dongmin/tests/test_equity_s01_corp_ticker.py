@@ -90,8 +90,8 @@ def test_비KR7은_isin8이_같아도_단독_법인이다(built: build.BuildResu
                   "SELECT ticker, isin8, corp_code, common_ticker, is_common, link_basis "
                   "FROM t WHERE isin8 = 'HK000005' ORDER BY 1")
     # 900050·900060 은 isin8 이 같지만 발행사가 다르다 — 묶으면 과합병
-    assert rows == [("900050", "HK000005", "00722500", None, False, "corp_map"),
-                    ("900060", "HK000005", "00694003", None, False, "corp_map")]
+    assert rows == [("900050", "HK000005", "00722500", None, True, "corp_map"),
+                    ("900060", "HK000005", "00694003", None, True, "corp_map")]
     assert rows[0][2] != rows[1][2]
 
 
@@ -117,11 +117,10 @@ def test_KR7_그룹당_보통주는_정확히_1개(built: build.BuildResult) -> 
 
 
 # ── security 와의 정의 일치 (중복 술어의 stale 방어) ──────────────────────────
-def test_is_common은_security_sec_type_common과_일치한다(tmp_path: Path) -> None:
-    """`is_common` 술어는 security.sql 의 common 분기와 같은 규칙을 다시 쓴 것이다.
-
-    equity 산출은 다른 equity 테이블의 입력이 될 수 없어(빌더가 stage 만 고정한다) 복제가
-    불가피하다 — 두 정의가 벌어지면 여기서 잡는다.
+def test_is_common은_주식종류_보통주이고_sec_type_common을_포함한다(tmp_path: Path) -> None:
+    """`is_common` = 주식종류(stkcert_tp='보통주'). sec_type='common' 이면 반드시 is_common 이지만
+    역은 아니다 — 스팩·리츠·펀드는 sec_type 이 달라도 주식종류는 보통주다(서버 실측 09-05:
+    sec_type 기준으로 정의하면 KR7 그룹 474 개가 보통주 0 이 돼 EG3 이 깨졌다).
     """
     eq = tmp_path / "equity"
     sec = build.build_table(rules_s01.SECURITY, STAGE_SLICE, eq, _baseline(), build_id="b_s")
@@ -135,10 +134,17 @@ def test_is_common은_security_sec_type_common과_일치한다(tmp_path: Path) -
         con.execute(f"CREATE VIEW c AS SELECT * FROM read_parquet("
                     f"'{ct.out_dir / '*.parquet'}', hive_partitioning=false)")
         rows = con.execute("SELECT s.ticker, s.sec_type, c.is_common FROM s JOIN c USING (ticker) "
-                           "WHERE (s.sec_type = 'common') <> c.is_common").fetchall()
+                           "WHERE s.sec_type = 'common' AND NOT c.is_common").fetchall()
+        lst = STAGE_SLICE / "stg_listing_daily"
+        con.execute(f"CREATE VIEW l AS SELECT * FROM read_parquet('{lst}/v=*/year=*/*.parquet', "
+                    "hive_partitioning=true) QUALIFY row_number() OVER (PARTITION BY ticker "
+                    "ORDER BY date DESC) = 1")
+        mismatch = con.execute("SELECT c.ticker FROM c JOIN l USING (ticker) "
+                               "WHERE c.is_common <> (l.stkcert_tp = '보통주')").fetchall()
     finally:
         con.close()
     assert rows == []
+    assert mismatch == []
 
 
 # ── 부정 픽스처 — 한 KR7 isin8 에 보통주 2개면 EG3_corp_ticker 가 폐기시킨다 ───

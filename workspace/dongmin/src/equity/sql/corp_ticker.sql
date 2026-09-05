@@ -5,10 +5,9 @@
 -- 발행사가 나눠 쓴다(SPEC §2-17: HK000005 를 900050·900060 이 공유) → 그룹핑하면 과합병이다.
 -- 비KR7·ETF 는 단독이고 corp_code 는 corp_map 직접 매핑으로만 붙인다.
 --
--- `is_common` 술어는 security.sql 의 sec_type='common' 분기와 같은 규칙이다. equity 산출을
--- 다른 equity 테이블의 입력으로 쓸 수 없어(빌더가 stage 만 고정한다) 여기서 다시 쓴다 —
--- tests/test_equity_s01_corp_ticker.py::test_is_common은_security_sec_type_common과_일치 가
--- 두 정의가 벌어지는 것을 막는다.
+-- `is_common` 은 **주식종류**(stkcert_tp='보통주')다 — 종목 유형(sec_type: spac·reit·fund·dr)과 다르다.
+-- 서버 실측(P11): KR7 isin8 그룹 3,438 전부 '보통주' 정확히 1. sec_type='common' 으로 정의하면
+-- 스팩·리츠·펀드 그룹 474 개가 보통주 0 이 되어 EG3 이 깨진다(09-05 서버 1차 빌드 실측).
 WITH lst AS (
     SELECT ticker, isin, secugrp, stkcert_tp
     FROM stg_listing_daily
@@ -47,8 +46,7 @@ flag AS (
         ticker,
         isin8,
         coalesce(isin8 LIKE 'KR7%', false)                        AS is_kr7,
-        coalesce(NOT is_spac AND secugrp = '주권' AND stkcert_tp = '보통주', false)
-                                                                  AS is_common
+        coalesce(stkcert_tp = '보통주', false)                     AS is_common
     FROM base
 ),
 grp AS (
@@ -61,9 +59,7 @@ SELECT
     f.ticker                                                      AS ticker,
     f.isin8                                                       AS isin8,
     coalesce(cmg.corp_code, cms.corp_code)                        AS corp_code,
-    CASE WHEN f.is_kr7 THEN g.common_ticker
-         WHEN f.is_common THEN f.ticker
-         ELSE NULL END                                            AS common_ticker,
+    CASE WHEN f.is_kr7 THEN g.common_ticker ELSE NULL END        AS common_ticker,  -- 비KR7 단독
     f.is_common                                                   AS is_common,
     CASE WHEN cmg.corp_code IS NOT NULL THEN 'isin8'
          WHEN cms.corp_code IS NOT NULL THEN 'corp_map'

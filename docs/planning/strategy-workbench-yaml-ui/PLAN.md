@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: READY
+project_status: IN_PROGRESS
 current_phase: P6
 current_pr: P6-08
-active_prs: []
+active_prs: [P6-08]
 parallel_window: []
-last_updated: 2026-09-05T23:01:50+09:00
+last_updated: 2026-09-05T23:03:21+09:00
 planned_prs: 52
 merged_prs: 46
 approved_prs: 46
@@ -22,13 +22,13 @@ progress_percent: 88
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `READY` |
+| Project status | `IN_PROGRESS` |
 | Current phase | `P6` |
 | Current/next PR | `P6-08` |
-| Active PR | none |
+| Active PR | `P6-08` |
 | Progress | `46 / 52 merged (88%)` |
 | Approved | `46 / 52` |
-| Aggregated at | `2026-09-05 23:01 KST` |
+| Aggregated at | `2026-09-05 23:03 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -78,7 +78,7 @@ progress_percent: 88
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
 | P4 | Outline, Contract, Projections | 10 | 10 | `MERGED` |
 | P5 | Truthful Trace UI | 3 | 3 | `MERGED` |
-| P6 | Professional release and migration | 9 | 3 | `READY` |
+| P6 | Professional release and migration | 9 | 3 | `IN_PROGRESS` |
 | **Total** |  | **52** | **46** | **88%** |
 <!-- PLAN:PHASES:END -->
 
@@ -86,12 +86,12 @@ progress_percent: 88
 
 | 항목 | 값 |
 |---|---|
-| PR | `P6-08` Strategy/revision history routed UI READY |
+| PR | `P6-08` Strategy/revision history routed UI IN_PROGRESS |
 | Intent | 기존 repository의 immutable revision/history SoT를 그대로 투영해 전문 사용자가 저장 전략을 찾고 원하는 revision을 편집·diff direct route로 열 수 있게 한다 |
 | Acceptance | deterministic strategy list와 revision pagination; `/research/strategies` direct route와 nav; strategy 선택 시 revision history·최신 revision 편집 연결; 임의 revision edit/diff deep link; loading·empty·error·out-of-range offset을 안전하게 canonical page로 복구; OpenAPI/generated client와 backend/frontend 계약 테스트 동기화 |
 | Non-goals | server draft 변경(P6-02), backtest run history/provenance(P6-09), strategy 삭제·rename, 검색 인덱스, legacy editor 제거(P6-06) |
-| Branch/worktree | 아직 생성 전 (`READY`) |
-| Base SHA | `c25d43c` (P6-02 merge main) |
+| Branch/worktree | `feat/p6-08-strategy-history` (`Quant_study-p6-08`) |
+| Base SHA | `b7fc4de` (P6-02 merge 기록 포함 latest main) |
 | Head SHA | — |
 | Diff stat | — |
 | Focused tests | list/history API pagination, direct route, loading/empty/error/out-of-range 상태를 구현과 함께 고정 예정 |
@@ -238,7 +238,7 @@ Phase exit:
 | [ ] | `P6-05` | Playwright/visual regression infrastructure와 CI | P2-03, P3-05, P6-04 | `WAITING` | — |
 | [ ] | `P6-06` | 전체 browser E2E·실구동 시나리오 검증, migration gate, 조건부 legacy cleanup | P6-01, P6-02, P6-03, P6-04, P6-05, P6-08, P6-09 | `WAITING` | — |
 | [x] | `P6-07` | Root frontend/backend development entrypoints | P0-02, P0-03 | `MERGED` | [#56](https://github.com/Nochiski/Quant_study/pull/56) · `review_p6_07` APPROVE |
-| [ ] | `P6-08` | Strategy list와 revision history routed UI | P6-01, P6-02, P3-06, P4-08 | `READY` | P6-02 review size finding으로 분리 |
+| [ ] | `P6-08` | Strategy list와 revision history routed UI | P6-01, P6-02, P3-06, P4-08 | `IN_PROGRESS` | P6-02 review size finding으로 분리; 구현 중 |
 | [ ] | `P6-09` | Backtest run history routed UI와 provenance | P6-08, P3-05 | `WAITING` | P6-02 review size finding으로 분리 |
 
 Phase exit:
@@ -347,6 +347,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | latest main `b7fc4de`에서 P6-08 전용 worktree를 열고 IN_PROGRESS로 전환했다. 기존 repository의 list/history pagination을 application SoT로 재사용하며 `/research/strategies`에서 저장 전략과 immutable revision을 탐색하고 edit/diff direct route로 연결한다. P6-02 보존 snapshot에서는 strategy history 수직 슬라이스만 선별하고 backtest history와 draft fix 역행은 배제한다 | immutable revision/repository SoT·API/query/route/UI 책임분리·small vertical slice |
 | 2026-09-05 KST | Codex | P6-02 [#72](https://github.com/Nochiski/Quant_study/pull/72)의 동일 reviewer 최종 APPROVE와 approval-doc HEAD `54156c6` CI 4/4를 확인해 merge commit `c25d43c`로 순차 병합했다. 46/52를 완료하고 분리된 strategy/revision history 수직 슬라이스 P6-08을 READY로 전환한다 | 13.6 merge gate·exact-source draft CAS SoT·history 책임분리 |
 | 2026-09-05 KST | Codex | 동일 reviewer `review_p6_02`가 source/schema/strategy/hash raw surrogate 4종의 typed 422/no-persistence와 controlled in-flight PUT→revision transition의 old ID/version CAS-delete 1회를 독립 재현했다. 최초 P1 4/P2 3과 2차 P1 2가 모두 폐쇄됐고 최신 full diff에서 새 P0/P1/P2 0으로 APPROVE했다. reviewed HEAD `1473633`을 APPROVED로 전환하며 승인 기록을 포함한 latest HEAD CI 4/4 후 순차 merge한다 | same-reviewer final approval·persisted-text/CAS race closure·13.6 latest CI merge gate |
 | 2026-09-05 KST | Codex | 두 번째 P1 fix self-check를 `cfcc6e8`에 고정하고 base 대비 39 files +3,863/-88 diff를 다시 freeze했다. 동일 reviewer `review_p6_02`에게 persisted metadata UTF-8 policy와 in-flight PUT retirement race의 독립 재현 폐쇄, 최초 findings 유지 폐쇄 및 최신 full diff를 재검토하도록 IN_REVIEW로 전환한다 | same-reviewer fix loop·13.3 diff freeze·latest CI gate |

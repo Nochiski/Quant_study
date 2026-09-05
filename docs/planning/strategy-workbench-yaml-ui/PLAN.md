@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: SELF_CHECK
+project_status: IN_REVIEW
 current_phase: P6
 current_pr: P6-08,P6-09,P6-03,P6-04
 active_prs: [P6-03, P6-04, P6-08, P6-09]
 parallel_window: [P6-08, P6-09, P6-03, P6-04]
-last_updated: 2026-09-06T04:21:38+09:00
+last_updated: 2026-09-06T04:24:11+09:00
 planned_prs: 52
 merged_prs: 46
 approved_prs: 49
@@ -22,13 +22,13 @@ progress_percent: 88
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `SELF_CHECK` |
+| Project status | `IN_REVIEW` |
 | Current phase | `P6` |
 | Current/next PR | `P6-08,P6-09,P6-03,P6-04` |
 | Active PR | `P6-03, P6-04, P6-08, P6-09` |
 | Progress | `46 / 52 merged (88%)` |
 | Approved | `49 / 52` |
-| Aggregated at | `2026-09-06 04:21 KST` |
+| Aggregated at | `2026-09-06 04:24 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -78,7 +78,7 @@ progress_percent: 88
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
 | P4 | Outline, Contract, Projections | 10 | 10 | `MERGED` |
 | P5 | Truthful Trace UI | 3 | 3 | `MERGED` |
-| P6 | Professional release and migration | 9 | 3 | `SELF_CHECK` |
+| P6 | Professional release and migration | 9 | 3 | `IN_REVIEW` |
 | **Total** |  | **52** | **46** | **88%** |
 <!-- PLAN:PHASES:END -->
 
@@ -86,13 +86,13 @@ progress_percent: 88
 
 | 항목 | 값 |
 |---|---|
-| PR | `P6-04` Performance·accessibility·i18n·soft dark hardening SELF_CHECK |
+| PR | `P6-04` Performance·accessibility·i18n·soft dark hardening IN_REVIEW |
 | Intent | 500-node 전문 전략에서도 입력과 trace 탐색을 bounded하게 유지하고, P6-03 preference를 실제 soft-dark token에 연결하며 모든 visible 상태를 접근 가능한 ko/en catalog로 제공한다 |
 | Acceptance | 500-node 약 3,000줄 입력 지연 <16ms/keystroke와 folding/search; editor lazy gzip ≤200KB; trace table/list DOM virtualization; modal/drawer focus와 accessible name; 1440/1920 light/dark 확인; 저장된 system/light/dark preference가 semantic token만 전환; ko/en key·placeholder 완결; hostile/recursive `$ref`-only schema cycle fail-closed |
 | Non-goals | Playwright dependency·CI·screenshot baseline(P6-05), 전체 실사용 E2E와 legacy cleanup(P6-06), backend StrategySpec/validation/trace 의미 변경, 새 authoring DSL |
 | Branch/worktree | `feat/p6-04-hardening` (`Quant_study-p6-04`), stacked on `feat/p6-03-keyboard-palette` |
 | Base SHA | `e84bd7e` (P6-03 approval-doc HEAD; #74→#75→#76 순차 merge 후 base 전환) |
-| Head SHA | `e56dd45` (review fixes; implementation `e4af2d5`) |
+| Head SHA | `6f60f0c` (review-fix freeze; code fix `e56dd45`) |
 | Diff stat | base `e84bd7e` 대비 30 files +1,729/-471; lockfile와 PLAN/ADR, test/contract fixture 포함. PLAN이 묶은 large-spec·trace·theme·i18n release gate를 실제 IDE에서 함께 검증해야 하므로 WORKFLOW 12절 size exception 적용 |
 | Focused tests | author editor/route/schema/trace/theme/i18n 9 files 117; review fix trace/virtual 21, order-reversed mixed-status PLAN fixture 1 passed; reviewer 500-node 10/10 |
 | Full gate | frontend 474·typecheck·lint·changed-file Prettier·build(editor gzip 131.94 KiB); backend 1,118·Rust 13·root 6·Ruff·Pyright·fmt·clippy; diff-check 통과 |
@@ -234,7 +234,7 @@ Phase exit:
 | [x] | `P6-01` | SQLite persistent strategy revision repository | P1-07 | `MERGED` | [#69](https://github.com/Nochiski/Quant_study/pull/69) · `review_p6_01` APPROVE |
 | [x] | `P6-02` | Server draft persistence/CAS/recovery UI | P6-01, P3-06, P4-08 | `MERGED` | [#72](https://github.com/Nochiski/Quant_study/pull/72) · `review_p6_02` APPROVE |
 | [ ] | `P6-03` | Keyboard workflow와 Command Palette | P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `APPROVED` | [#76](https://github.com/Nochiski/Quant_study/pull/76) · `review_p6_03` APPROVE, P0/P1/P2 0 · CI billing 차단 |
-| [ ] | `P6-04` | Large/hostile spec 성능·접근성·i18n과 soft dark theme (`$ref`-only cycle fail-closed 포함) | P3-05, P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `SELF_CHECK` | [#77](https://github.com/Nochiski/Quant_study/pull/77) · `e56dd45` review P1 2/P2 1 수정·author gate 통과; same reviewer 재검토 준비 |
+| [ ] | `P6-04` | Large/hostile spec 성능·접근성·i18n과 soft dark theme (`$ref`-only cycle fail-closed 포함) | P3-05, P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `IN_REVIEW` | [#77](https://github.com/Nochiski/Quant_study/pull/77) · `review_p6_04`이 `6f60f0c` same-reviewer 재검토 중; CI billing 차단 |
 | [ ] | `P6-05` | Playwright/visual regression infrastructure와 CI | P2-03, P3-05, P6-04 | `WAITING` | — |
 | [ ] | `P6-06` | 전체 browser E2E·실구동 시나리오 검증, migration gate, 조건부 legacy cleanup | P6-01, P6-02, P6-03, P6-04, P6-05, P6-08, P6-09 | `WAITING` | — |
 | [x] | `P6-07` | Root frontend/backend development entrypoints | P0-02, P0-03 | `MERGED` | [#56](https://github.com/Nochiski/Quant_study/pull/56) · `review_p6_07` APPROVE |
@@ -355,6 +355,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-06 KST | Codex | P6-04 review fixes와 author self-check를 `6f60f0c`에 고정하고 최초 reviewer `review_p6_04`에게 keyboard virtual scroll, order-independent project/phase aggregation, CSS 금지 규칙의 3건 폐쇄와 최신 전체 diff 신규 blocker를 재검토받도록 IN_REVIEW로 전환한다 | 13.3 diff freeze·13.5 same-reviewer fix loop |
 | 2026-09-06 KST | Codex | P6-04 review P1 2/P2 1을 `e56dd45`에서 수정했다. domain-free virtual viewport adapter가 자기 focus에서만 Arrow/Page/Home/End를 처리하고, trace table은 named region, security/node list는 기존 semantic list를 focus target으로 제공해 off-DOM `sec-99`와 500번째 server node를 keyboard로 불러온다. CSS specificity로 spacer를 재정의해 `!important`를 제거했다. PLAN active status는 parallel 배열 순서가 아니라 `CHANGES_REQUESTED→IN_PROGRESS→SELF_CHECK→IN_REVIEW→APPROVED` 명시 우선순위의 단일 함수가 project/phase를 함께 집계하며, 순서를 뒤집은 실제 임시 PLAN black-box test를 root gate에 추가했다. focused 21+1, frontend 474, root 6, typecheck·lint·Prettier·build·Ruff·Pyright·diff-check를 통과해 SELF_CHECK로 전환한다 | keyboard viewport mechanics/trace semantics 분리·order-independent tracker SoT·UI 금지 규칙·same-reviewer fix loop |
 | 2026-09-06 KST | Codex | `review_p6_04`가 P1 2/P2 1로 REQUEST_CHANGES를 판정했다. virtual table/security/node viewport가 focusable하지 않아 keyboard-only 사용자가 off-DOM row를 불러올 수 없고, PLAN 집계 script가 `parallel_window`의 마지막 active row를 대표 상태로 사용해 배열 순서에 따라 다른 CHANGES_REQUESTED를 숨길 수 있다. 신규 trace spacer CSS의 `!important` 금지도 함께 폐쇄하고 같은 reviewer에게 재검토받는다. 독립 검증은 500-node 10/10, frontend 474, typecheck·lint·build, editor 131.94KiB를 통과했다 | keyboard scroll 접근성·tracker order-independent 상태 SoT·UI style rule·same-reviewer fix loop |
 | 2026-09-06 KST | Codex | P6-04 [#77](https://github.com/Nochiski/Quant_study/pull/77)을 parent `feat/p6-03-keyboard-palette` 대상으로 열고 base `e84bd7e`, review freeze `d2e5df5`, cumulative 30 files +1,729/-471과 full gate·size exception을 본문에 고정했다. fresh review-only agent `review_p6_04` 한 명에게 500-node budget의 신뢰성, virtual trace identity/접근성, theme/i18n 완결, hostile schema fail-closed, FSD·SoT·책임분리와 최신 전체 diff를 독립 검토하도록 IN_REVIEW로 전환한다. Actions 4 jobs는 모두 step 0에서 기존과 같은 billing/spending-limit annotation으로 실패했으며 merge gate는 우회하지 않는다 | 13.3 diff freeze·13.4 PR별 fresh reviewer 정확히 1명·stack 순차 merge gate·CI 비우회 |

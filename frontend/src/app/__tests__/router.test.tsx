@@ -215,13 +215,11 @@ describe("App Shell routes", () => {
     expect(
       await screen.findByRole("heading", { name: "퀄리티 모멘텀 v2" }),
     ).toBeInTheDocument();
-    // The diff view is not implemented yet: the stored YAML is shown, the URL keeps the request,
-    // a notice says so.
-    expect(screen.getByRole("tab", { name: "YAML" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
-    expect(screen.getByText(/DIFF/)).toBeInTheDocument();
+    expect(screen.getByLabelText("StrategySpec Diff")).toBeVisible();
     expect(screen.getAllByRole("tabpanel").length).toBeGreaterThan(0);
     expect(history.location.search).toContain("view=diff");
     expect(history.location.search).toContain("path=%2Frisk");

@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import {
   strategyDocumentQuery,
@@ -12,6 +12,7 @@ import {
 } from "../../../shared/api";
 import type { SourceFormat } from "../../../shared/lib/yaml12";
 import {
+  currentCompile,
   currentSpec,
   type DocumentAction,
   type DocumentState,
@@ -41,6 +42,7 @@ type SaveSnapshot = {
   baseRevision: number | null;
   documentEpoch: number;
   sourceVersion: number;
+  canonicalJson: string;
 };
 
 /**
@@ -93,6 +95,7 @@ export const useSaveDocument = (
         strategyId: document.strategy_id,
         revision: document.revision,
         specHash: document.spec_hash,
+        canonicalJson: snapshot.canonicalJson,
         source: document.source,
         documentEpoch: snapshot.documentEpoch,
         sourceVersion: snapshot.sourceVersion,
@@ -131,7 +134,8 @@ export const useSaveDocument = (
 
   const { mutate, isPending } = mutation;
   const save = useCallback(() => {
-    if (!canSaveDocument(state) || isPending) return;
+    const compile = currentCompile(state);
+    if (!canSaveDocument(state) || compile === null || isPending) return;
     mutate({
       source: state.source,
       format: state.format,
@@ -139,17 +143,55 @@ export const useSaveDocument = (
       baseRevision: state.baseRevision,
       documentEpoch: state.documentEpoch,
       sourceVersion: state.sourceVersion,
+      canonicalJson: compile.canonicalJson,
     });
   }, [isPending, mutate, state]);
 
-  const visibleStatus: SaveStatus =
-    status.kind === "idle" || status.documentEpoch === state.documentEpoch
-      ? status
-      : { kind: "idle" };
+  const visibleStatus = useMemo<SaveStatus>(
+    () =>
+      status.kind === "idle" || status.documentEpoch === state.documentEpoch
+        ? status
+        : { kind: "idle" },
+    [state.documentEpoch, status],
+  );
+
+  /**
+   * Explicitly publish the preserved current document after the server's latest revision. This
+   * is not a merge: immutable server history remains intact and the button warns that the new
+   * revision uses the current whole document. A second concurrent save simply returns another
+   * structured conflict through the same mutation.
+   */
+  const createRevisionFromConflict = useCallback(() => {
+    const compile = currentCompile(state);
+    if (
+      visibleStatus.kind !== "conflict" ||
+      visibleStatus.strategyId === null ||
+      visibleStatus.latestRevision === null ||
+      visibleStatus.strategyId !== state.strategyId ||
+      compile === null ||
+      isPending
+    )
+      return;
+    mutate({
+      source: state.source,
+      format: state.format,
+      strategyId: visibleStatus.strategyId,
+      baseRevision: visibleStatus.latestRevision,
+      documentEpoch: state.documentEpoch,
+      sourceVersion: state.sourceVersion,
+      canonicalJson: compile.canonicalJson,
+    });
+  }, [isPending, mutate, state, visibleStatus]);
 
   return {
     save,
     status: visibleStatus,
     canSave: canSaveDocument(state) && !isPending,
+    createRevisionFromConflict,
+    canCreateRevisionFromConflict:
+      visibleStatus.kind === "conflict" &&
+      visibleStatus.latestRevision !== null &&
+      currentCompile(state) !== null &&
+      !isPending,
   };
 };

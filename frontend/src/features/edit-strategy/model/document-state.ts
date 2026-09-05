@@ -92,6 +92,8 @@ export type DocumentState = {
   baseRevision: number | null;
   baseSpecHash: string | null;
   savedSource: string | null;
+  /** Exact backend canonical bytes for `savedSource`; never serialized by the client. */
+  savedCanonicalJson: string | null;
   savedVersion: number;
   strategyId: string | null;
   dirty: boolean;
@@ -112,10 +114,18 @@ export type DocumentAction =
   | { type: "parsed"; version: number; result: ParsedSource }
   | { type: "compiled"; version: number; outcome: CompileOutcome }
   | {
+      type: "base-compiled";
+      documentEpoch: number;
+      source: string;
+      specHash: string;
+      canonicalJson: string;
+    }
+  | {
       type: "saved";
       strategyId: string;
       revision: number;
       specHash: string;
+      canonicalJson: string;
       source: string;
       documentEpoch: number;
       sourceVersion: number;
@@ -139,6 +149,7 @@ export const initialDocumentState = (
   baseRevision: null,
   baseSpecHash: null,
   savedSource: null,
+  savedCanonicalJson: null,
   savedVersion: -1,
   strategyId: null,
   dirty: false,
@@ -176,6 +187,7 @@ export const documentReducer = (
         baseRevision: action.baseRevision,
         baseSpecHash: action.baseSpecHash,
         savedSource: action.baseRevision === null ? null : action.source,
+        savedCanonicalJson: null,
         savedVersion:
           action.baseRevision === null ? -1 : state.sourceVersion + 1,
         dirty: false,
@@ -239,6 +251,13 @@ export const documentReducer = (
       const complete = isCompleteCompileOutcome(action.outcome)
         ? action.outcome
         : null;
+      const savedCanonicalJson =
+        current &&
+        !state.dirty &&
+        state.baseSpecHash !== null &&
+        complete?.specHash === state.baseSpecHash
+          ? complete.canonicalJson
+          : state.savedCanonicalJson;
       return {
         ...state,
         compiled: action.outcome,
@@ -246,9 +265,21 @@ export const documentReducer = (
         lastValidCompiled: complete
           ? { version: action.version, outcome: complete }
           : state.lastValidCompiled,
+        savedCanonicalJson,
         phase: current ? phaseFromCompile(action.outcome, saved) : state.phase,
       };
     }
+    case "base-compiled":
+      // This reply belongs only to the exact stored source and revision hash that requested it.
+      // It must never change the current draft verdict: it supplies the backend-owned Diff base.
+      if (
+        action.documentEpoch !== state.documentEpoch ||
+        action.source !== state.savedSource ||
+        action.specHash !== state.baseSpecHash
+      ) {
+        return state;
+      }
+      return { ...state, savedCanonicalJson: action.canonicalJson };
     case "saved":
       // A save response is valid only for the document instance that issued it. Within that
       // document, a response for an older source may establish the base while later edits remain
@@ -266,6 +297,7 @@ export const documentReducer = (
         baseRevision: action.revision,
         baseSpecHash: action.specHash,
         savedSource: action.source,
+        savedCanonicalJson: action.canonicalJson,
         savedVersion: action.sourceVersion,
         dirty: action.source !== state.source,
         phase:

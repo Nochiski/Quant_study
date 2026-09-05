@@ -103,6 +103,59 @@ export const useCompileDocument = (
     state.parse?.status === "ok";
 
   useEffect(() => {
+    // If editing outruns the initial debounced compile, obtain the immutable saved baseline in
+    // a separate request. Its reducer action can only fill `savedCanonicalJson`; it cannot mark
+    // the current text valid or replace the current compile. Thus both sides of semantic Diff
+    // remain backend canonical payloads without a client-side serializer.
+    if (
+      !state.dirty ||
+      state.savedSource === null ||
+      state.baseSpecHash === null ||
+      state.savedCanonicalJson !== null
+    ) {
+      return;
+    }
+    const documentEpoch = state.documentEpoch;
+    const source = state.savedSource;
+    const expectedSpecHash = state.baseSpecHash;
+    const controller = new AbortController();
+    void strategyWorkbenchApi
+      .compileStrategyDocument(
+        { format: state.format, source },
+        controller.signal,
+      )
+      .then((compiled) => {
+        if (
+          controller.signal.aborted ||
+          compiled.canonical_json === null ||
+          compiled.spec_hash !== expectedSpecHash
+        ) {
+          return;
+        }
+        dispatch({
+          type: "base-compiled",
+          documentEpoch,
+          source,
+          specHash: compiled.spec_hash,
+          canonicalJson: compiled.canonical_json,
+        });
+      })
+      .catch(() => {
+        // The current draft compile owns visible availability diagnostics. A baseline retry is
+        // naturally triggered by the next edit while the canonical payload remains absent.
+      });
+    return () => controller.abort();
+  }, [
+    dispatch,
+    state.baseSpecHash,
+    state.dirty,
+    state.documentEpoch,
+    state.format,
+    state.savedCanonicalJson,
+    state.savedSource,
+  ]);
+
+  useEffect(() => {
     if (!shouldCompile(state) && !(forcedNow && canForce)) return;
     const version = state.sourceVersion;
     const request = { format: state.format, source: state.source };

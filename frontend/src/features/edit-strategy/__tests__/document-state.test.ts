@@ -239,6 +239,58 @@ describe("document state machine", () => {
     expect(state.compiled).toBeNull();
   });
 
+  it("accepts a backend canonical base only for the exact loaded document", () => {
+    let state = run(initialDocumentState(), {
+      type: "load",
+      format: "yaml",
+      source: "title: A\n",
+      strategyId: "A",
+      baseRevision: 1,
+      baseSpecHash: "hA",
+    });
+    const documentEpoch = state.documentEpoch;
+    state = run(state, { type: "edit", source: "title: edited\n" });
+
+    const wrongHash = run(state, {
+      type: "base-compiled",
+      documentEpoch,
+      source: "title: A\n",
+      specHash: "wrong",
+      canonicalJson: '{"title":"wrong"}',
+    });
+    expect(wrongHash).toBe(state);
+
+    state = run(state, {
+      type: "base-compiled",
+      documentEpoch,
+      source: "title: A\n",
+      specHash: "hA",
+      canonicalJson: '{"title":"A"}',
+    });
+    expect(state.savedCanonicalJson).toBe('{"title":"A"}');
+    expect(state.source).toBe("title: edited\n");
+    expect(state.compiled).toBeNull();
+
+    const previous = state;
+    state = run(state, {
+      type: "load",
+      format: "yaml",
+      source: "title: B\n",
+      strategyId: "B",
+      baseRevision: 1,
+      baseSpecHash: "hB",
+    });
+    expect(
+      run(state, {
+        type: "base-compiled",
+        documentEpoch: previous.documentEpoch,
+        source: "title: A\n",
+        specHash: "hA",
+        canonicalJson: '{"title":"stale"}',
+      }),
+    ).toBe(state);
+  });
+
   it("does not parse while an IME composition is active and resumes after it ends", () => {
     let state = initialDocumentState("yaml", "");
     state = run(state, { type: "composing", composing: true });
@@ -286,6 +338,7 @@ describe("document state machine", () => {
       outcome: okOutcome("h1"),
     });
     expect(state.phase).toBe("saved"); // matches the base hash and the text is unchanged
+    expect(state.savedCanonicalJson).toBe('{"title":"x"}');
 
     state = run(state, { type: "edit", source: "title: b\n" });
     expect(state.dirty).toBe(true);
@@ -300,11 +353,13 @@ describe("document state machine", () => {
       outcome: okOutcome("h2"),
     });
     expect(state.phase).toBe("semantically-valid");
+    expect(state.savedCanonicalJson).toBe('{"title":"x"}');
     state = run(state, {
       type: "saved",
       strategyId: "s1",
       revision: 4,
       specHash: "h2",
+      canonicalJson: '{"title":"b"}',
       source: "title: b\n",
       documentEpoch: state.documentEpoch,
       sourceVersion: state.sourceVersion,
@@ -312,6 +367,7 @@ describe("document state machine", () => {
     expect(state.phase).toBe("saved");
     expect(state.dirty).toBe(false);
     expect(state.baseRevision).toBe(4);
+    expect(state.savedCanonicalJson).toBe('{"title":"b"}');
   });
 
   it("rejects save responses from an older loaded document", () => {
@@ -328,6 +384,7 @@ describe("document state machine", () => {
       documentEpoch: state.documentEpoch,
       sourceVersion: state.sourceVersion,
       source: state.source,
+      canonicalJson: '{"title":"same"}',
     };
     state = run(state, {
       type: "load",
@@ -365,6 +422,7 @@ describe("document state machine", () => {
       documentEpoch: state.documentEpoch,
       sourceVersion: state.sourceVersion,
       source: state.source,
+      canonicalJson: '{"title":"b"}',
     };
     state = run(state, { type: "edit", source: "title: c\n" });
     state = run(state, {

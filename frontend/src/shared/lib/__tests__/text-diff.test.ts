@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { lineDiffSummary } from "../text-diff";
+import { lineDiff, lineDiffSummary } from "../text-diff";
 
 describe("lineDiffSummary", () => {
   it("counts added and removed lines and previews them in order", () => {
@@ -29,9 +29,10 @@ describe("lineDiffSummary", () => {
   });
 
   it("uses the bounded coarse summary beyond the quadratic table cap", () => {
-    const before = Array.from({ length: 2_001 }, (_, index) => `a${index}`).join(
-      "\n",
-    );
+    const before = Array.from(
+      { length: 2_001 },
+      (_, index) => `a${index}`,
+    ).join("\n");
     const after = Array.from({ length: 2_001 }, (_, index) => `b${index}`).join(
       "\n",
     );
@@ -39,6 +40,40 @@ describe("lineDiffSummary", () => {
       added: 2_001,
       removed: 2_001,
       preview: [],
+    });
+  });
+
+  it("projects bounded changed rows with exact side line numbers", () => {
+    expect(lineDiff("a\nb\nc", "a\nB\nc\nd")).toEqual({
+      added: 2,
+      removed: 1,
+      rows: [
+        {
+          kind: "removed",
+          text: "b",
+          beforeLine: 2,
+          afterLine: null,
+        },
+        {
+          kind: "added",
+          text: "B",
+          beforeLine: null,
+          afterLine: 2,
+        },
+        {
+          kind: "added",
+          text: "d",
+          beforeLine: null,
+          afterLine: 4,
+        },
+      ],
+      truncated: false,
+    });
+    expect(lineDiff("", "first\nsecond", 1)).toMatchObject({
+      added: 2,
+      removed: 0,
+      truncated: true,
+      rows: [{ kind: "added", text: "first", afterLine: 1 }],
     });
   });
 });

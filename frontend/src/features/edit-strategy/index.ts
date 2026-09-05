@@ -80,6 +80,13 @@ export { ExecutionPlanPanel } from "./ui/execution-plan-panel";
 export { FactorGraphPanel } from "./ui/factor-graph-panel";
 export { SnippetCatalog } from "./ui/snippet-catalog";
 export { StrategyProjectionPanel } from "./ui/strategy-projection-panel";
+export { StrategyDiffPanel } from "./ui/strategy-diff-panel";
+export {
+  diffCanonicalJson,
+  projectDraftDiff,
+  type DraftDiffProjection,
+  type DraftSemanticDiff,
+} from "./model/diff-projection";
 export {
   projectContractField,
   projectContractInspector,

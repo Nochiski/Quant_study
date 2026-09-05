@@ -10,6 +10,7 @@ import {
   SnippetCatalog,
   SourceEditor,
   StrategyProjectionPanel,
+  StrategyDiffPanel,
   StrategyOutline,
   PROJECTION_VIEWS,
   currentDiagnostics,
@@ -193,6 +194,7 @@ export const NewStrategyPage = () => {
               }}
             />
           ),
+          diff: <StrategyDiffPanel state={document} active={view === "diff"} />,
         }}
         outline={
           <StrategyOutline

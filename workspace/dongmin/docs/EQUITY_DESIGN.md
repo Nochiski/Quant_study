@@ -32,7 +32,7 @@
 |---|---|---|
 | 포맷 | parquet, `data/equity/<table>/v=<build>/…` + `MANIFEST.json`(keep=3) + 파티션 `_meta.json` + `_reject/reject_reason=<r>/`(duckdb `PARTITION_BY`) | stage §2 계승 |
 | 파티션 클래스 | `date_axis` = `year(date)` / `receipt_axis` = `substr(rcept_no,1,4)`(receipt 테이블은 `rcept_no` 필수) / `whole`. `consensus_daily` 는 `date_axis` 이되 파티션 키 식은 `year(obs_month)`(PIT 축 아님) | STAGE_DESIGN §4 |
-| 입력 고정 | `BuildRecord.inputs = {stg_x: build_id}` · 고정 빌드는 `_pinned/<stg_x>/v=<build>/` 하드링크 + `_pinned/<stg_x>/MANIFEST.json` 에 BuildRecord 복사(맨 glob 금지). **문서층 4테이블도 고정**. `_pinned/` 에 `manifest.commit()` 호출 금지 | manifest.py GC · 같은 파일시스템(P9) |
+| 입력 고정 | `BuildRecord.inputs = {stg_x: build_id}` · 고정 빌드는 `_pinned/<stg_x>/v=<build>/` 하드링크 + `_pinned/<stg_x>/MANIFEST.json` 에 BuildRecord 복사(맨 glob 금지). 입력 이름이 `stg_` 로 시작하지 않으면 앞서 커밋된 **equity 테이블**(`<equity_root>/<table>/MANIFEST.json` current_build)을 같은 규약으로 고정한다 — S03 부터 `security_span`·`trading_calendar` 가 이렇게 들어온다. 자기 참조는 선언 단계에서 거부. **문서층 4테이블도 고정**. `_pinned/` 에 `manifest.commit()` 호출 금지 | manifest.py GC · 같은 파일시스템(P9) |
 | 재현성 | 같은 `inputs` → 파티션 `content_hash` 동일(EG5a, 해시는 **tmp 경로에서** 계산 — `v=` 하이브 컬럼 함정) · `_asof/<view>/<build>/` 에 고정 표본(baseline `asof_sample` 날짜 5 × 종목 20) 결과 보관, keep=3 (EG5c·EG11·EG19) | code proposal §2-5 |
 | 뷰 카탈로그 | `equity.duckdb` 는 매크로만, 절대경로, 임시 파일 → `os.replace`. **빌드·GC 뒤 반드시 재생성**(굽힌 `v=` 가 rmtree 되면 깨진다) · `snapshot_id` = 전 테이블 build_id 정렬 해시 | P1a~d · code proposal |
 | 빌드 실행 | 서버 테이블 직렬(`flock`), `memory_limit` 6GB·threads 3·`temp_directory=data/equity/_tmp/spill`. 큰 테이블은 연도 파티션 루프, 집계는 스트리밍(09-05 문서층 스왑 사고) | RAM 15GB |

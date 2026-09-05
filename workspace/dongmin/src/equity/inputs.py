@@ -8,6 +8,11 @@
 BuildRecord 1건만 담은 MANIFEST 를 그 옆에 원자 기록한다 — stage 의 keep=3 GC
 (`manifest.commit()` 의 rmtree)가 입력을 지워도 빌드가 재현된다.
 `_pinned/` 에는 `manifest.commit()` 을 부르지 않는다(그 함수가 keep 밖 `v=` 를 rmtree 한다).
+
+equity 내부 입력: 이름이 `stg_` 로 시작하지 않는 입력은 앞서 커밋된 equity 테이블이다 —
+`<equity_root>/<table>/MANIFEST.json` 의 current_build 를 같은 규약으로 `_pinned/` 에 고정한다
+(S03 `universe_daily` 가 `security_span`·`trading_calendar` 를 읽는 식).
+자기 참조는 model 이 거부한다.
 """
 from __future__ import annotations
 
@@ -43,6 +48,13 @@ class PinnedBuild:
 # 뷰에 노출하지 않는다 — 노출하면 같은 이름의 stage 컬럼을 build_id 문자열로 덮어쓴다.
 _PIN_AXIS_COLUMN = "v"
 
+STAGE_PREFIX = "stg_"                # stage 테이블 실명은 전부 이 접두를 갖는다 (STAGE_HANDOFF §1)
+
+
+def source_root(stage_root: Path, equity_root: Path, table: str) -> Path:
+    """입력 이름으로 출처 루트를 고른다 — `stg_*` 는 stage, 그 외는 앞서 커밋된 equity 테이블."""
+    return stage_root if table.startswith(STAGE_PREFIX) else equity_root
+
 
 def _q(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
@@ -51,7 +63,7 @@ def _q(name: str) -> str:
 def _record(m: manifest.Manifest, table: str, path: Path) -> manifest.BuildRecord:
     if m.current_build is None:
         raise FileNotFoundError(
-            f"stage table has no committed build — build it first: table={table} manifest={path}")
+            f"input table has no committed build — build it first: table={table} manifest={path}")
     for b in m.builds:
         if b.build_id == m.current_build:
             return b
@@ -77,9 +89,9 @@ def _build(table_root: Path, table: str, rec: manifest.BuildRecord) -> PinnedBui
                        _load_meta(paths))
 
 
-def resolve(stage_root: Path, table: str) -> PinnedBuild:
-    """stage 테이블의 current_build 를 MANIFEST 경유로 푼다. 커밋된 빌드가 없으면 예외."""
-    table_root = stage_root / table
+def resolve(root: Path, table: str) -> PinnedBuild:
+    """`<root>/<table>/MANIFEST.json` 의 current_build 를 푼다(root = stage 또는 equity)."""
+    table_root = root / table
     path = table_root / "MANIFEST.json"
     return _build(table_root, table, _record(manifest.load(path), table, path))
 
@@ -101,10 +113,11 @@ def pin(stage_root: Path, equity_root: Path, table: str) -> PinnedBuild:
     다른 파일시스템이면 `os.link` 의 OSError(EXDEV)를 그대로 올린다 — 조용한 복사로 대체하지
     않는다(DESIGN §10 P9 가 stage 와 equity 가 같은 디바이스임을 실측했다).
     """
-    src = resolve(stage_root, table)
+    from_root = source_root(stage_root, equity_root, table)
+    src = resolve(from_root, table)
     dst_table_root = equity_root / "_pinned" / table
     dst_root = dst_table_root / f"v={src.build_id}"
-    src_root = stage_root / table / f"v={src.build_id}"
+    src_root = from_root / table / f"v={src.build_id}"
     dst_paths: list[Path] = []
     for src_dir in src.partition_paths:
         out = dst_root / src_dir.relative_to(src_root)
@@ -116,14 +129,17 @@ def pin(stage_root: Path, equity_root: Path, table: str) -> PinnedBuild:
             if f.is_file():              # `_reject/` 는 입력이 아니다 → 디렉토리는 건너뛴다
                 os.link(f, out / f.name)
     _write_build_record(dst_table_root, table, manifest.load(
-        stage_root / table / "MANIFEST.json"), src.build_id)
+        from_root / table / "MANIFEST.json"), src.build_id)
     parts = tuple(dst_paths)
     return PinnedBuild(table, src.build_id, dst_root, parts, _load_meta(parts))
 
 
 def _write_build_record(dst_table_root: Path, table: str, m: manifest.Manifest,
                         build_id: str) -> None:
-    """`_pinned/<table>/MANIFEST.json` 에 해당 BuildRecord 1건만 원자 기록한다.
+    """`_pinned/<table>/MANIFEST.json` 에 BuildRecord 를 누적 기록한다(current_build = 이번 것).
+
+    고정한 판본은 전부 살아 있어야 한다 — 상위 테이블이 재빌드돼 새 판본을 고정해도 `load_pinned` 로
+    옛 판본을 다시 열어 재판정·재현 빌드를 할 수 있어야 하므로 덮어쓰지 않고 합친다.
 
     `manifest.commit()` 을 쓰면 안 된다 — keep 밖 `v=` 를 rmtree 해서 고정한 하드링크를 지운다.
     `manifest._write_atomic` 은 private 이라 같은 규약(임시 파일 → os.replace)을 여기서 쓴다.
@@ -133,8 +149,9 @@ def _write_build_record(dst_table_root: Path, table: str, m: manifest.Manifest,
         raise FileNotFoundError(f"build record disappeared while pinning: table={table} "
                                 f"build_id={build_id} builds={[b.build_id for b in m.builds]}")
     dst_table_root.mkdir(parents=True, exist_ok=True)
-    pinned = manifest.Manifest(table=table, current_build=build_id, keep=1, builds=[rec])
     path = dst_table_root / "MANIFEST.json"
+    kept = [b for b in manifest.load(path).builds if b.build_id != build_id] + [rec]
+    pinned = manifest.Manifest(table=table, current_build=build_id, keep=len(kept), builds=kept)
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(asdict(pinned), ensure_ascii=False, indent=1), encoding="utf-8")
     os.replace(tmp, path)

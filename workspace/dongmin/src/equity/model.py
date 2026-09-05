@@ -40,7 +40,7 @@ class EquityTable:
     name: str
     grain: tuple[str, ...]                      # PK — EG3-P01 유일성 축
     columns: dict[str, str]                     # 산출 컬럼명 → duckdb 타입. 선언 순서 = SELECT 순서
-    inputs: tuple[str, ...]                     # 읽는 stage 테이블 실명
+    inputs: tuple[str, ...]                     # 입력 실명 — stage(`stg_*`) 또는 앞선 equity 테이블
     partition_class: str                        # PARTITION_CLASSES
     partition_key_expr: str | None              # `year` 를 만드는 식. whole 이면 None
     available_rule: str                         # EG2 축 설명. AVAILABLE_NONE = 차원 테이블
@@ -82,6 +82,9 @@ class EquityTable:
         if self.content_date_column is not None and self.content_date_column not in self.columns:
             raise ValueError(f"content_date_column not declared: table={self.name} "
                              f"got={self.content_date_column!r} columns={sorted(self.columns)}")
+        if self.name in self.inputs:
+            raise ValueError(f"table cannot read itself as an input: table={self.name} "
+                             f"inputs={list(self.inputs)}")
         unknown_inputs = [t for t in self.input_columns if t not in self.inputs]
         if unknown_inputs:
             raise ValueError(f"input_columns declares a table that is not an input: "

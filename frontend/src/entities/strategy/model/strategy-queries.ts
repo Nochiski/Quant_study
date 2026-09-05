@@ -40,9 +40,19 @@ export const strategyDiffQuery = (
     staleTime: Number.POSITIVE_INFINITY,
   });
 
+export const strategyRevisionsKey = (strategyId: string) =>
+  ["strategy", strategyId, "revisions"] as const;
+
 /** The history grows with every save: refetched when used, invalidated by a successful save. */
-export const strategyRevisionsQuery = (strategyId: string) =>
+export const strategyRevisionsQuery = (
+  strategyId: string,
+  page: { offset?: number; limit?: number } = {},
+) =>
   queryOptions({
-    queryKey: ["strategy", strategyId, "revisions"],
-    queryFn: () => strategyWorkbenchApi.listStrategyRevisions(strategyId),
+    queryKey: [
+      ...strategyRevisionsKey(strategyId),
+      page.offset ?? 0,
+      page.limit ?? 50,
+    ],
+    queryFn: () => strategyWorkbenchApi.listStrategyRevisions(strategyId, page),
   });

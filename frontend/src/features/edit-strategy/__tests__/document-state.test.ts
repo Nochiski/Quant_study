@@ -291,6 +291,58 @@ describe("document state machine", () => {
     ).toBe(state);
   });
 
+  it("keeps a mismatched save canonical fail-closed until the saved hash recompiles", () => {
+    let state = run(initialDocumentState(), {
+      type: "load",
+      format: "yaml",
+      source: "title: A\n",
+      strategyId: "s1",
+      baseRevision: 1,
+      baseSpecHash: "h1",
+    });
+    state = run(state, { type: "edit", source: "title: B\n" });
+    state = run(state, {
+      type: "parsed",
+      version: state.sourceVersion,
+      result: parseSource(state.source, "yaml"),
+    });
+    state = run(state, {
+      type: "compiled",
+      version: state.sourceVersion,
+      outcome: okOutcome("hA"),
+    });
+    state = run(state, {
+      type: "saved",
+      strategyId: "s1",
+      revision: 2,
+      specHash: "hB",
+      canonicalJson: null,
+      source: "title: B\n",
+      documentEpoch: state.documentEpoch,
+      sourceVersion: state.sourceVersion,
+    });
+
+    expect(state.savedCanonicalJson).toBeNull();
+    expect(state.compiled).toBeNull();
+    expect(state.compiledVersion).toBe(state.sourceVersion - 1);
+    expect(state.phase).toBe("structurally-valid");
+    expect(shouldCompile(state)).toBe(true);
+    expect(
+      run(state, {
+        type: "compiled",
+        version: state.sourceVersion - 1,
+        outcome: okOutcome("stale"),
+      }),
+    ).toBe(state);
+    state = run(state, {
+      type: "compiled",
+      version: state.sourceVersion,
+      outcome: okOutcome("hB"),
+    });
+    expect(state.savedCanonicalJson).toBe('{"title":"x"}');
+    expect(currentCompile(state)?.specHash).toBe("hB");
+  });
+
   it("does not parse while an IME composition is active and resumes after it ends", () => {
     let state = initialDocumentState("yaml", "");
     state = run(state, { type: "composing", composing: true });

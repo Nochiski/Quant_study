@@ -142,7 +142,7 @@ export const useCompileDocument = (
       })
       .catch(() => {
         // The current draft compile owns visible availability diagnostics. A baseline retry is
-        // naturally triggered by the next edit while the canonical payload remains absent.
+        // triggered by the next edit or the next explicit Validate while canonical stays absent.
       });
     return () => controller.abort();
   }, [
@@ -153,6 +153,8 @@ export const useCompileDocument = (
     state.format,
     state.savedCanonicalJson,
     state.savedSource,
+    state.sourceVersion,
+    forced?.nonce,
   ]);
 
   useEffect(() => {

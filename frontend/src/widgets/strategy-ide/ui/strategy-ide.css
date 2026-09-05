@@ -97,6 +97,10 @@
   margin: 0;
 }
 
+.ide__notice {
+  padding: 0 var(--space-5);
+}
+
 /* body: left · centre · right */
 .ide__body {
   display: flex;

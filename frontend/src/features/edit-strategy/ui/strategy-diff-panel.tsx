@@ -61,7 +61,11 @@ const SourceDiff = ({ diff }: { diff: TextDiff }) => (
                   {row.kind === "added" ? "+" : "−"}
                 </td>
                 <td>
-                  <code>{row.text || " "}</code>
+                  <code>
+                    {row.marker === "final-newline"
+                      ? t("diff.source.finalNewline")
+                      : row.text || " "}
+                  </code>
                 </td>
               </tr>
             ))}
@@ -114,6 +118,8 @@ type RevisionSelection = {
   target: number;
 };
 
+const REVISION_PAGE_SIZE = 50;
+
 const RevisionComparison = ({
   strategyId,
   currentRevision,
@@ -128,7 +134,14 @@ const RevisionComparison = ({
     base: 0,
     target: 0,
   });
-  const revisions = useQuery(strategyRevisionsQuery(strategyId));
+  // Revisions are contiguous and one-based. Center the bounded history page on the route's
+  // current revision so v51+ can never silently fall back to comparing an older pair.
+  const revisions = useQuery(
+    strategyRevisionsQuery(strategyId, {
+      offset: Math.max(0, currentRevision - REVISION_PAGE_SIZE),
+      limit: REVISION_PAGE_SIZE,
+    }),
+  );
   const choices = useMemo(
     () =>
       [...(revisions.data?.items ?? [])].sort(
@@ -296,8 +309,20 @@ export const StrategyDiffPanel = ({
           <strong>{t("diff.title")}</strong>
           <span>{t("diff.readOnly")}</span>
         </div>
-        <Badge tone={state.dirty ? "warn" : "ok"}>
-          {state.dirty ? t("diff.dirty") : t("diff.clean")}
+        <Badge
+          tone={
+            state.baseRevision === null
+              ? "neutral"
+              : state.dirty
+                ? "warn"
+                : "ok"
+          }
+        >
+          {state.baseRevision === null
+            ? t("diff.newDraft")
+            : state.dirty
+              ? t("diff.dirty")
+              : t("diff.clean")}
         </Badge>
       </header>
 

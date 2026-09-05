@@ -578,16 +578,18 @@ const ko = {
   "diff.readOnly": "원문과 backend canonical 의미를 분리한 읽기 전용 비교",
   "diff.dirty": "미저장 변경",
   "diff.clean": "저장본과 동일",
+  "diff.newDraft": "저장 전 초안",
   "diff.draft.sourceTitle": "현재 원문 변경",
   "diff.draft.semanticTitle": "현재 의미 변경",
   "diff.sourceBase.saved-revision":
     "현재 draft의 기준 저장 revision과 비교합니다.",
   "diff.sourceBase.empty-draft":
     "저장 기준이 없는 새 draft이므로 빈 문서와 비교합니다.",
-  "diff.source.counts": "+{added} / −{removed} 줄",
+  "diff.source.counts": "+{added} / −{removed} 변경 항목",
   "diff.source.empty": "원문 변경이 없습니다.",
   "diff.source.truncated":
-    "큰 문서는 변경 수만 계산했습니다. 전체 행 표시는 성능 hardening 단계에서 제공합니다.",
+    "큰 문서는 공통 앞·뒤 구간을 제외한 변경 블록의 상한만 표시합니다. 전체 행 표시는 성능 hardening 단계에서 제공합니다.",
+  "diff.source.finalNewline": "파일 끝 개행 (↵ EOF)",
   "diff.source.beforeLine": "이전 줄",
   "diff.source.afterLine": "이후 줄",
   "diff.source.change": "변경",
@@ -1243,16 +1245,18 @@ export const messages = {
       "Read-only comparison that separates source changes from backend canonical meaning",
     "diff.dirty": "Unsaved changes",
     "diff.clean": "Matches saved source",
+    "diff.newDraft": "Unsaved new draft",
     "diff.draft.sourceTitle": "Current source changes",
     "diff.draft.semanticTitle": "Current semantic changes",
     "diff.sourceBase.saved-revision":
       "Compared with the saved revision that this draft is based on.",
     "diff.sourceBase.empty-draft":
       "This new draft has no saved base, so its source is compared with an empty document.",
-    "diff.source.counts": "+{added} / −{removed} lines",
+    "diff.source.counts": "+{added} / −{removed} change entries",
     "diff.source.empty": "No source changes.",
     "diff.source.truncated":
-      "Only change counts are available for this large document. Full rows are deferred to performance hardening.",
+      "For a large document, this shows an upper-bound changed block after trimming the common prefix and suffix. Full rows are deferred to performance hardening.",
+    "diff.source.finalNewline": "Final newline (↵ EOF)",
     "diff.source.beforeLine": "Before line",
     "diff.source.afterLine": "After line",
     "diff.source.change": "Change",

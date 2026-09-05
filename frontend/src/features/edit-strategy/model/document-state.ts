@@ -125,7 +125,7 @@ export type DocumentAction =
       strategyId: string;
       revision: number;
       specHash: string;
-      canonicalJson: string;
+      canonicalJson: string | null;
       source: string;
       documentEpoch: number;
       sourceVersion: number;
@@ -279,7 +279,10 @@ export const documentReducer = (
       ) {
         return state;
       }
-      return { ...state, savedCanonicalJson: action.canonicalJson };
+      return {
+        ...state,
+        savedCanonicalJson: action.canonicalJson,
+      };
     case "saved":
       // A save response is valid only for the document instance that issued it. Within that
       // document, a response for an older source may establish the base while later edits remain
@@ -291,6 +294,14 @@ export const documentReducer = (
       ) {
         return state;
       }
+      // The save endpoint recompiles the source. If its hash differs from the compile used to
+      // authorize Save, those earlier bytes are no longer evidence for the newly stored base.
+      // When that saved source is still current, invalidate the current compile as well so
+      // Save/Run/Diff fail closed until the normal compile effect proves the server response.
+      // A newer in-editor source keeps its own compile while the separate baseline request
+      // recovers canonical bytes for the exact source the server stored.
+      const invalidateCurrentCompile =
+        action.canonicalJson === null && action.source === state.source;
       return {
         ...state,
         strategyId: action.strategyId,
@@ -299,9 +310,15 @@ export const documentReducer = (
         savedSource: action.source,
         savedCanonicalJson: action.canonicalJson,
         savedVersion: action.sourceVersion,
+        compiled: invalidateCurrentCompile ? null : state.compiled,
+        // Keep the version watermark monotonic so a delayed compile from older text still drops.
+        compiledVersion: invalidateCurrentCompile
+          ? state.sourceVersion - 1
+          : state.compiledVersion,
         dirty: action.source !== state.source,
-        phase:
-          action.source === state.source && currentCompile(state) !== null
+        phase: invalidateCurrentCompile
+          ? "structurally-valid"
+          : action.source === state.source && currentCompile(state) !== null
             ? "saved"
             : state.phase,
       };

@@ -41,6 +41,53 @@ describe("lineDiffSummary", () => {
       removed: 2_001,
       preview: [],
     });
+
+    const duplicateBefore = Array.from({ length: 2_002 }, () => "x").join("\n");
+    const duplicateAfter = Array.from({ length: 2_001 }, () => "x").join("\n");
+    expect(lineDiff(duplicateBefore, duplicateAfter)).toMatchObject({
+      added: 0,
+      removed: 1,
+      rows: [],
+      truncated: true,
+    });
+
+    const reordered = [...Array.from({ length: 2_000 }, () => "x"), "a", "b"];
+    const reorderedAfter = [
+      ...Array.from({ length: 2_000 }, () => "x"),
+      "b",
+      "a",
+    ];
+    expect(
+      lineDiff(reordered.join("\n"), reorderedAfter.join("\n")),
+    ).toMatchObject({
+      added: 2,
+      removed: 2,
+      truncated: true,
+    });
+  });
+
+  it("reports an exact final-newline-only source change", () => {
+    expect(lineDiff("a", "a\n")).toEqual({
+      added: 1,
+      removed: 0,
+      rows: [
+        {
+          kind: "added",
+          text: "",
+          beforeLine: null,
+          afterLine: 1,
+          marker: "final-newline",
+        },
+      ],
+      truncated: false,
+    });
+    expect(lineDiff("a\n", "a")).toMatchObject({
+      added: 0,
+      removed: 1,
+      rows: [{ kind: "removed", marker: "final-newline", beforeLine: 1 }],
+      truncated: false,
+    });
+    expect(lineDiffSummary("a", "a\n").preview).toEqual(["+↵ EOF"]);
   });
 
   it("projects bounded changed rows with exact side line numbers", () => {

@@ -174,7 +174,11 @@ describe("StrategySpec diff projection", () => {
     });
     const projection = projectDraftDiff(state);
     expect(projection.sourceBase).toBe("empty-draft");
-    expect(projection.source.added).toBe(2);
+    expect(projection.source.added).toBe(3);
+    expect(projection.source.rows.at(-1)).toMatchObject({
+      kind: "added",
+      marker: "final-newline",
+    });
     expect(projection.semantic).toEqual({ status: "no-base" });
   });
 });

@@ -264,6 +264,22 @@ describe("StrategyIde", () => {
     expect(inspector).not.toHaveTextContent("/risk/max_name_weight");
   });
 
+  it("keeps a document notice visible outside every representation panel", () => {
+    matchMedia(false);
+    mount({
+      view: "diff",
+      availableViews: ["yaml", "diff"],
+      projections: { diff: <div>diff projection</div> },
+      notice: <div role="alert">document recovery</div>,
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent("document recovery");
+    expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
   it("connects every tab to a labelled panel", () => {
     matchMedia(false);
     mount({ availableViews: ["yaml", "json"] });

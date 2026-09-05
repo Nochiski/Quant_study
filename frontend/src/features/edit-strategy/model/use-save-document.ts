@@ -3,7 +3,7 @@ import { useCallback, useMemo, useState } from "react";
 
 import {
   strategyDocumentQuery,
-  strategyRevisionsQuery,
+  strategyRevisionsKey,
 } from "../../../entities/strategy";
 import {
   ApiRequestError,
@@ -43,6 +43,7 @@ type SaveSnapshot = {
   documentEpoch: number;
   sourceVersion: number;
   canonicalJson: string;
+  specHash: string;
 };
 
 /**
@@ -88,14 +89,21 @@ export const useSaveDocument = (
         document,
       );
       void queryClient.invalidateQueries({
-        queryKey: strategyRevisionsQuery(document.strategy_id).queryKey,
+        queryKey: strategyRevisionsKey(document.strategy_id),
       });
       dispatch({
         type: "saved",
         strategyId: document.strategy_id,
         revision: document.revision,
         specHash: document.spec_hash,
-        canonicalJson: snapshot.canonicalJson,
+        // Save recompiles the exact source. Reuse the earlier canonical bytes only when the
+        // response proves that both source and semantic hash are still the same snapshot.
+        // Otherwise the reducer marks the saved baseline for a backend recompile.
+        canonicalJson:
+          document.source === snapshot.source &&
+          document.spec_hash === snapshot.specHash
+            ? snapshot.canonicalJson
+            : null,
         source: document.source,
         documentEpoch: snapshot.documentEpoch,
         sourceVersion: snapshot.sourceVersion,
@@ -144,6 +152,7 @@ export const useSaveDocument = (
       documentEpoch: state.documentEpoch,
       sourceVersion: state.sourceVersion,
       canonicalJson: compile.canonicalJson,
+      specHash: compile.specHash,
     });
   }, [isPending, mutate, state]);
 
@@ -180,6 +189,7 @@ export const useSaveDocument = (
       documentEpoch: state.documentEpoch,
       sourceVersion: state.sourceVersion,
       canonicalJson: compile.canonicalJson,
+      specHash: compile.specHash,
     });
   }, [isPending, mutate, state, visibleStatus]);
 

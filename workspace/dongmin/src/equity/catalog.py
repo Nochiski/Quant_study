@@ -37,7 +37,9 @@ CATALOG_NAME = "equity.duckdb"
 META_NAME = "_catalog_meta.json"
 ASOF_DIR = "_asof"
 ASOF_KEEP = 3
-ASOF_VIEWS: tuple[str, ...] = ("v_cum_adj", "v_adj_price")     # 표본을 남기는 뷰(S06)
+ASOF_VIEWS: tuple[str, ...] = (                                 # 표본을 남기는 뷰
+    "v_cum_adj", "v_adj_price",                                  # S06 (base = as_of)
+    "v_adj_price_fwd", "v_adj_volume_fwd")                       # S21 후속 (전방 조정)
 ASOF_PART = "part0.parquet"
 ASOF_META = "_meta.json"
 SAMPLE_DATES = ("trading_calendar", "asof_sample_dates")

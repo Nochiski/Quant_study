@@ -45,7 +45,7 @@ v1.1 은 "엔진에 재무·컨센서스 포트가 없다" 고 결론지었으�
 | look-ahead(공개시점) | 전 행 `available_date`·컬럼군별 세션 랙(`dataset_profile`)·뷰가 적용·파생 컬럼 `<col>_available_date` | EG2·EG13·EG19·EG-C |
 | look-ahead(정정) | `disclosure_version`(grain `rcept_no`, 확정 링크 `orig_rcept_no`, `first_correction_dt`·`n_corrections` 팩트 — 판정은 뷰) | EG6(E-G6a/b/c)·E-G7 |
 | look-ahead(컨센서스) | `available_date`=최초 관측 · `obs_month` 축 금지 · `src` 구간 | EG6·EG-C ⑨ |
-| 조정 오류 | 두 축 계수 + 공개일 · base=asof 곱셈 · `price.adj_close` 필드 분리 | EG3·EG8·EG20 |
+| 조정 오류 | 두 축 계수 + 공개일 · 곱셈(base=asof `v_adj_price` · 전방 `v_adj_price_fwd`) · `price.adj_close` 필드 분리 | EG3·EG8·EG20 |
 | 레짐 편향 | 격자 + `fill_kind`(근거율) | EG9·EG14·EG17 |
 | 우선주 시총 | isin8(KR7) · `v_firm_mktcap` | EG3·EG4 |
 | **목적 자체(54 재료)** | **`factor_readiness`(54행)** | **EG10** |
@@ -102,7 +102,7 @@ EG0 입력 고정 · EG1 격자 등식(`− n_dedup − Σ n_reject` 일반형, 
 | **S03** | 유니버스(존재·상태) | `universe_daily` v1(`status`·`market`·`sec_type`·`halt_state`·`admin_state`·`liquidation_window`·`signal_*`) · `universe_policy` 스키마+`all` | S02 + `stg_listing_daily`·`stg_master_daily`·`stg_disclosure` | ∥ 4A | S02 |
 | **S04** | 가격 정본 | `price_daily` | S02·S03 + `stg_price_daily`·`stg_etf_price_daily`·`stg_listing_daily` | ∥ S05 | S03 |
 | **S05** | 기업행위 | `corp_event` | `stg_event_*`·`stg_capital`·`stg_disclosure` 락일·배당결정 · KRX 주식수 변화 | ∥ S04 | S03 |
-| **S06** | 조정계수·가격 뷰 | `adj_factor`·`v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_firm_mktcap` | S04·S05 | — | S04·S05 |
+| **S06** | 조정계수·가격 뷰 | `adj_factor`·`v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_firm_mktcap`(+ S21 후속 전방 조정 `v_adj_price_fwd`·`v_adj_volume_fwd`) | S04·S05 | — | S04·S05 |
 | **S03B** | 유니버스(시장 파생) | `universe_daily` v2(`mktcap_krw`·`adv20_krw`·`listing_age_days`·`no_trade_run`·`suspended` 완성) | S04·S03 | ∥ S06 | S04 |
 | **S07** | **엔진 어댑터 v0** | `backtest_engine/adapters/equity_duckdb.py`(3포트, pyarrow) + `backend/tests/test_bar_source_contract.py::BUILDERS` 등록(런타임 어댑터 레지스트리는 없다 — 호출자가 직접 생성) · `equity contract`(`src/equity/contract.py`, EG-C ①②③④⑤⑩ → `_contract_meta.json`) · `baseline_seed_s07.json` | S03B·S06 | — | S06·S03B |
 | **S08** | 수급 격자 | `flow_daily`(13주체 + KIS 대응표) | S03B + 키움·KIS flow·foreign·로그 | ∥ | S03B |
@@ -200,7 +200,7 @@ S00·S01·S02·S03·S04·S05(축소: split·bonus·capred 만)·S06·S03B·S07 +
 |---|---|---|
 | 1~4 | 산출 형식 · 판본·게이트 · 팩터 ID 54 · 유니버스 정책표 | 확정(09-05 "작업 진행") |
 | 5 | **엔진 커널 3포트 + 워크벤치 5포트, 단일 어댑터 `equity_duckdb`**(v1.1 의 "팩터층 주입" 폐기) | 확정(재기술) |
-| **6** | `price.close` = 원주가 · `price.adj_close` = as-of 조정가 두 필드 제공. 레지스트리의 수익률·모멘텀·변동성 팩터가 `adj_close` 를 쓰도록 워크벤치 이슈 발행 | **확정(09-05)** |
+| **6** | `price.close` = 원주가 · `price.adj_close` = 조정가(전방 조정 `v_adj_price_fwd`, S21 후속 09-05) 두 필드 제공. 레지스트리의 수익률·모멘텀·변동성 팩터가 `adj_close` 를 쓰도록 워크벤치 이슈 발행 | **확정(09-05)** |
 | **7** | 워크벤치 어댑터는 duckdb 필요 → `backend` optional-dependency `equity = ["duckdb>=1.5"]` 추가(코드 규칙 "새 라이브러리 금지" 예외, S21 에서 반영). 커널 어댑터(S07)는 pyarrow 로 새 의존성 0 | **확정(09-05) · 반영(S21 축소 — `backend/pyproject.toml`·`uv.lock` duckdb 1.5.5·CI `uv sync --extra parquet --extra equity`)** |
 
 ---

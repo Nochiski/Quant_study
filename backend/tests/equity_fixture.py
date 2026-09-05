@@ -213,8 +213,8 @@ def policy_table(rows: list[PolicyRow]) -> pa.Table:
 
 # ── 카탈로그 (`equity.duckdb` + `_catalog_meta.json`) ────────────────────────
 # `equity.catalog`·`equity.views`(workspace/dongmin) 의 테스트 대역. backend 는 그 패키지를 import
-# 할 수 없으므로 매크로 본문(DESIGN §5 v_cum_adj·v_adj_price)과 snapshot_id 규칙(전 테이블
-# table=build 정렬 sha256 16자리)을 여기 옮겨 적는다 — 본문이 바뀌면 여기도 같이 바꾼다.
+# 할 수 없으므로 매크로 본문(DESIGN §5 v_cum_adj·v_adj_price·v_adj_price_fwd)과 snapshot_id 규칙
+# (전 테이블 table=build 정렬 sha256 16자리)을 여기 옮겨 적는다 — 본문이 바뀌면 여기도 같이 바꾼다.
 
 _CUM_ADJ_SQL = """
 WITH cut AS (
@@ -253,9 +253,52 @@ SELECT p.ticker, p.date, p.open, p.high, p.low, p.close, p.volume_shr, p.price_k
 FROM {price_daily} p
 JOIN v_cum_adj(as_of, lag_override := lag_override) c ON c.ticker = p.ticker AND c.date = p.date
 """
+# 전방 조정(S21 후속) — `equity.views._FWD_CTE` + `v_adj_price_fwd` 본문 사본. 계수는 fold_date =
+# greatest(apply_date, available_date) 부터 앞으로 누적해 곱한다(공개 전 계수는 접지 않는다).
+_ADJ_PRICE_FWD_SQL = """
+WITH cut AS (
+    SELECT k.date AS cutoff
+    FROM (SELECT date, row_number() OVER (ORDER BY date DESC) - 1 AS n
+          FROM {trading_calendar} WHERE date <= as_of) k
+    WHERE k.n = coalesce(lag_override, 0)
+),
+fac AS (
+    SELECT ticker, greatest(apply_date, available_date) AS fold_date,
+           product(price_factor) AS pf, product(share_factor) AS sf,
+           max(available_date) AS available_date
+    FROM {adj_factor}
+    WHERE factor_ok AND apply_date <= as_of AND available_date <= (SELECT cutoff FROM cut)
+    GROUP BY ticker, greatest(apply_date, available_date)
+),
+pre AS (
+    SELECT ticker, fold_date,
+           product(pf) OVER w AS cum_price_factor,
+           product(sf) OVER w AS cum_share_factor,
+           max(available_date) OVER w AS available_date
+    FROM fac
+    WINDOW w AS (PARTITION BY ticker ORDER BY fold_date
+                 ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+),
+fwd AS (
+    SELECT p.ticker, p.date, p.open, p.high, p.low, p.close, p.volume_shr, p.price_kind,
+           coalesce(c.cum_price_factor, 1) AS cum_price_factor,
+           coalesce(c.cum_share_factor, 1) AS cum_share_factor,
+           greatest(p.date, coalesce(c.available_date, p.date)) AS available_date
+    FROM (SELECT * FROM {price_daily} WHERE date <= as_of) p
+    ASOF LEFT JOIN pre c ON c.ticker = p.ticker AND p.date >= c.fold_date
+)
+SELECT ticker, date, open, high, low, close, volume_shr, price_kind,
+       cum_price_factor, cum_share_factor, available_date,
+       open  * cum_share_factor AS adj_open,
+       high  * cum_share_factor AS adj_high,
+       low   * cum_share_factor AS adj_low,
+       close * cum_share_factor AS adj_close
+FROM fwd
+"""
 CATALOG_MACROS = (
     "v_cum_adj(as_of, lag_override := NULL)",
     "v_adj_price(as_of, lag_override := NULL)",
+    "v_adj_price_fwd(as_of, lag_override := NULL)",
 )
 _MACRO_INPUTS = ("price_daily", "adj_factor", "trading_calendar")
 
@@ -289,7 +332,7 @@ def _partition_source(root: Path, table: str, build_id: str) -> str:
 
 
 def write_catalog(root: Path, *, snapshot: str | None = None, with_macros: bool = True) -> Path:
-    """`equity.duckdb`(매크로 2개) + `_catalog_meta.json` 을 쓴다.
+    """`equity.duckdb`(매크로 3개) + `_catalog_meta.json` 을 쓴다.
 
     `snapshot` 을 주면 meta 의 snapshot_id 를 그 값으로 둔다(stale 카탈로그 부정 픽스처).
     `with_macros=False` 면 매크로 없이 `macros_skipped` 만 남긴다.
@@ -312,11 +355,16 @@ def write_catalog(root: Path, *, snapshot: str | None = None, with_macros: bool 
             con.execute(
                 f"CREATE MACRO {CATALOG_MACROS[1]} AS TABLE " + _ADJ_PRICE_SQL.format(**sources)
             )
+            con.execute(
+                f"CREATE MACRO {CATALOG_MACROS[2]} AS TABLE "
+                + _ADJ_PRICE_FWD_SQL.format(**sources)
+            )
             macros = list(CATALOG_MACROS)
         else:
             skipped = {
                 "v_cum_adj": "not_built: inputs=['adj_factor']",
                 "v_adj_price": "depends_on_skipped: ['v_cum_adj']",
+                "v_adj_price_fwd": "not_built: inputs=['adj_factor']",
             }
     finally:
         con.close()

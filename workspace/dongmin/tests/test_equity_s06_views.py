@@ -1,5 +1,6 @@
-"""S06 뷰 매크로 — `v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_firm_mktcap` + 카탈로그 실체화
-+ `_asof/` + 카탈로그 단계 게이트 EG11·EG5c·EG3-P05
+"""S06 뷰 매크로 — `v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_firm_mktcap` + S21 후속 전방 조정
+`v_adj_price_fwd`·`v_adj_volume_fwd` + 카탈로그 실체화 + `_asof/` + 카탈로그 단계 게이트
+EG11·EG5c·EG3-P05
 (DESIGN §2·§5 · GATES §6 EG11 · §1 EG5c · EG3-P05 · FX-2-010 · FX-N-006).
 
 절단본 위에 S06 체인(5테이블)을 짓고 `catalog.publish` 로 `equity.duckdb` 를 만든 뒤 read_only 로
@@ -59,9 +60,10 @@ def _copy_root(published: tuple[Path, catalog.CatalogResult], tmp_path: Path) ->
 
 # ── 카탈로그 실체화 ───────────────────────────────────────────────────────────
 
-def test_카탈로그는_매크로_4개이고_뷰_게이트를_통과한다(
+def test_카탈로그는_매크로_6개이고_뷰_게이트를_통과한다(
         published: tuple[Path, catalog.CatalogResult]) -> None:
     root, p = published
+    assert len(p.macros) == 6
     assert sorted(p.macros) == sorted(views.SIGNATURES.values()) and p.skipped == {}
     assert [g.name for g in p.gates] == ["EG11", "EG5c", "EG3_firm_mktcap"]
     assert _gate(p, "EG11").status is GateStatus.PASS
@@ -73,8 +75,9 @@ def test_카탈로그는_매크로_4개이고_뷰_게이트를_통과한다(
     assert set(meta["builds"]) == {"trading_calendar", "security", "security_span", "corp_ticker",
                                    "price_daily", "corp_event", "adj_factor"}
     assert [g["name"] for g in meta["gates"]] == ["EG11", "EG5c", "EG3_firm_mktcap"]
-    assert set(meta["asof"]) == set(catalog.ASOF_VIEWS)
-    assert meta["asof"]["v_adj_price"]["n_rows"] == ASOF_ROWS
+    assert set(meta["asof"]) == set(catalog.ASOF_VIEWS) == {
+        "v_cum_adj", "v_adj_price", "v_adj_price_fwd", "v_adj_volume_fwd"}
+    assert all(meta["asof"][v]["n_rows"] == ASOF_ROWS for v in catalog.ASOF_VIEWS)
 
 
 def test_매크로_본문의_parquet_경로는_절대경로다(
@@ -172,6 +175,133 @@ def test_v_adj_price는_v_cum_adj와_같은_계수를_쓴다(ro: duckdb.DuckDBPy
     assert n == (0,)
 
 
+# ── 전방 조정 (S21 후속, 사용자 결정 09-05) ───────────────────────────────────
+# adj_close_fwd(d) = close(d) × Π(share_factor : apply_date ≤ d ∧ available_date ≤ d) — 첫 관측
+# 수준을 고정하고 사건 뒤 가격을 올린다. 값은 (ticker, date) 의 순수 함수(as_of·창 무관).
+
+FWD_005930 = [        # (date, close, cum_share_factor, adj_close) — 분할 전 원주가 그대로, 뒤 × 50
+    (date(2018, 4, 26), 2607000.0, 1.0, 2607000.0),
+    (date(2018, 4, 27), 2650000.0, 1.0, 2650000.0),
+    (date(2018, 4, 30), 2650000.0, 1.0, 2650000.0),
+    (date(2018, 5, 2), 2650000.0, 1.0, 2650000.0),
+    (date(2018, 5, 3), 2650000.0, 1.0, 2650000.0),
+    (date(2018, 5, 4), 51900.0, 50.0, 2595000.0),
+    (date(2018, 5, 8), 52600.0, 50.0, 2630000.0)]
+
+
+def test_전방조정_분할_전은_원주가_그대로이고_분할일부터_곱하기_50이다(
+        ro: duckdb.DuckDBPyConnection) -> None:
+    got = ro.execute("""
+        SELECT date, close, cum_share_factor, adj_close, available_date
+        FROM v_adj_price_fwd(DATE '2026-08-20')
+        WHERE ticker = '005930' AND date BETWEEN '2018-04-26' AND '2018-05-08' ORDER BY date
+        """).fetchall()
+    assert [(d, float(c), f, a) for d, c, f, a, _ in got] == FWD_005930
+    # available_date = greatest(원주가 공개일, 접힌 계수 공개일) — fold 규칙상 그날과 같다
+    assert all(av == d for d, _, _, _, av in got)
+    assert ro.execute("SELECT count(*) FILTER (WHERE available_date <> date), count(*) "
+                      "FROM v_adj_price_fwd(DATE '2026-08-20')").fetchone() == (0, 41066)
+
+
+def test_전방조정은_as_of를_바꿔도_공개된_사건_전후_값이_변하지_않는다(
+        ro: duckdb.DuckDBPyConnection) -> None:
+    """부정 검사 (a): 수준값이 (ticker, date) 의 순수 함수 — base = as_of 인 v_adj_price 와
+    다르다."""
+    q = ("SELECT adj_close FROM v_adj_price_fwd(DATE '{as_of}') "
+         "WHERE ticker = '005930' AND date = DATE '{d}'")
+    for as_of in ("2018-05-03", "2018-05-04", "2018-12-28", "2026-08-20"):
+        assert ro.execute(q.format(as_of=as_of, d="2018-05-03")).fetchone() == (2650000.0,)
+    for as_of in ("2018-05-04", "2018-05-08", "2026-08-20"):
+        assert ro.execute(q.format(as_of=as_of, d="2018-05-04")).fetchone() == (2595000.0,)
+    # as_of 는 행 절단으로만 작용한다
+    assert ro.execute("SELECT count(*) FROM v_adj_price_fwd(DATE '2018-05-03') "
+                      "WHERE date > DATE '2018-05-03'").fetchone() == (0,)
+    # 대조: 기존 v_adj_price 는 같은 (05-03) 셀이 as_of 에 따라 2,650,000 / 53,000 으로 갈린다
+    assert ro.execute("SELECT adj_close FROM v_adj_price(DATE '2018-05-03') "
+                      "WHERE ticker = '005930' AND date = DATE '2018-05-03'").fetchone() == (
+        2650000.0,)
+    assert ro.execute("SELECT adj_close FROM v_adj_price(DATE '2018-05-04') "
+                      "WHERE ticker = '005930' AND date = DATE '2018-05-03'").fetchone() == (
+        53000.0,)
+
+
+def test_전방조정_lag_override는_아직_공개_전_계수를_접지_않는다(
+        ro: duckdb.DuckDBPyConnection) -> None:
+    """분할 계수 available 05-04. as_of 05-04 랙 1 → 컷오프 05-03 → 05-04 행은 원주가 그대로."""
+    q = ("SELECT cum_share_factor, adj_close FROM v_adj_price_fwd(DATE '{as_of}', "
+         "lag_override := {lag}) WHERE ticker = '005930' AND date = DATE '2018-05-04'")
+    assert ro.execute(q.format(as_of="2018-05-04", lag=0)).fetchone() == (50.0, 2595000.0)
+    assert ro.execute(q.format(as_of="2018-05-04", lag=1)).fetchone() == (1.0, 51900.0)
+    assert ro.execute(q.format(as_of="2018-05-08", lag=1)).fetchone() == (50.0, 2595000.0)
+    # 무상증자 계수 available = 공시일 06-14 < 권리락일 06-27: 랙 1 이어도 권리락일에 접힌다
+    assert ro.execute("SELECT cum_share_factor, adj_close "
+                      "FROM v_adj_price_fwd(DATE '2022-06-27', lag_override := 1) "
+                      "WHERE ticker = '247540' AND date = DATE '2022-06-27'").fetchone() == (
+        4.0, 543600.0)
+    assert ro.execute("SELECT cum_share_factor, adj_close FROM v_adj_price_fwd(DATE '2022-06-30') "
+                      "WHERE ticker = '247540' AND date = DATE '2022-06-24'").fetchone() == (
+        1.0, 497400.0)
+
+
+def test_전방조정_거래량은_원거래량_나누기_50이다(ro: duckdb.DuckDBPyConnection) -> None:
+    """FX-2-010 의 전방 축 — 분할 전 거래량은 그대로, 분할 뒤 거래량을 분할 전 척도로 내린다."""
+    got = ro.execute("""
+        SELECT date, volume_shr, cum_price_factor, adj_volume
+        FROM v_adj_volume_fwd(DATE '2018-06-01')
+        WHERE ticker = '005930'
+          AND date IN (DATE '2018-04-27', DATE '2018-05-03', DATE '2018-05-04')
+        ORDER BY date""").fetchall()
+    assert [(d, int(v), f, a) for d, v, f, a in got] == [
+        (date(2018, 4, 27), 606216, 1.0, 606216.0),
+        (date(2018, 5, 3), 0, 1.0, 0.0),
+        (date(2018, 5, 4), 39565391, 0.02, pytest.approx(39565391 * 0.02))]
+
+
+def test_전방조정과_as_of_조정은_종목별_상수배다(ro: duckdb.DuckDBPyConnection) -> None:
+    """같은 as_of 에서 adj_fwd / adj_bwd = Π(전 계수) 가 종목마다 상수 → 수익률·모멘텀·순위 불변
+    (전방 조정 채택의 검증 기준: MVP-B 백테스트 결과 동일, DESIGN §10 P25)."""
+    rows = ro.execute("""
+        SELECT ticker, count(DISTINCT round(f.adj_close / b.adj_close, 9)) AS n_ratio,
+               min(f.adj_close / b.adj_close) AS ratio
+        FROM v_adj_price_fwd(DATE '2026-08-20') f
+        JOIN v_adj_price(DATE '2026-08-20') b USING (ticker, date)
+        GROUP BY ticker ORDER BY ticker""").fetchall()
+    assert rows and all(n == 1 for _, n, _ in rows)
+    ratio = {t: r for t, _, r in rows}
+    assert ratio["005930"] == ratio["005935"] == pytest.approx(50.0)
+    assert ratio["247540"] == pytest.approx(4.0) and ratio["000660"] == pytest.approx(1.0)
+
+
+_FWD_DIVIDED = views.TEMPLATES["v_adj_price_fwd"].replace(
+    "close * cum_share_factor AS adj_close", "close / cum_share_factor AS adj_close")
+
+
+def test_전방조정을_나눗셈으로_뒤집으면_분할일_조정수익률이_점프한다(
+        published: tuple[Path, catalog.CatalogResult]) -> None:
+    """부정 검사 (b): FX-N-006 류 방향 오류 — 곱셈이면 05-03 → 05-04 가 −2.1%, 나눗셈이면
+    −99.96%."""
+    assert _FWD_DIVIDED != views.TEMPLATES["v_adj_price_fwd"]
+    src = {t: views.parquet_source(published[0], t)
+           for t in ("price_daily", "adj_factor", "trading_calendar")}
+    q = ("SELECT adj_close FROM v_adj_price_fwd(DATE '2018-06-01') WHERE ticker = '005930' "
+         "AND date = DATE '{d}'")
+
+    def jump(overrides: dict[str, str] | None) -> float:
+        con = duckdb.connect()
+        try:
+            views.install_temp_macros(con, src, overrides)
+            before = con.execute(q.format(d="2018-05-03")).fetchone()
+            after = con.execute(q.format(d="2018-05-04")).fetchone()
+        finally:
+            con.close()
+        assert before is not None and after is not None
+        return after[0] / before[0] - 1
+
+    assert jump(None) == pytest.approx(2595000 / 2650000 - 1)             # −2.08%, 연속
+    assert jump({"v_adj_price_fwd": _FWD_DIVIDED}) == pytest.approx(1038 / 2650000 - 1)
+    assert abs(jump({"v_adj_price_fwd": _FWD_DIVIDED})) > 0.99            # EG8-P02 상한 1.0 밖
+
+
 # ── v_firm_mktcap ────────────────────────────────────────────────────────────
 
 def test_v_firm_mktcap는_본주_우선주_시총의_합이다(ro: duckdb.DuckDBPyConnection) -> None:
@@ -267,6 +397,20 @@ def test_asof_표본은_고정_날짜_종목의_뷰_결과다(
     assert meta["snapshot_id"] == p.snapshot_id and meta["n_rows"] == ASOF_ROWS
     assert meta["asof_sample_dates"] == SAMPLE_DATES and meta["content_hash"].startswith(
         f"{ASOF_ROWS}:")
+    # 전방 조정 표본: 같은 (as_of 05-04, 005930) 에서 05-03 은 원주가 그대로, 05-04 는 × 50
+    fwd = Path(str(p.asof["v_adj_price_fwd"]["path"]))
+    con = duckdb.connect()
+    try:
+        con.execute(f"CREATE VIEW f AS SELECT * FROM read_parquet('{fwd}')")
+        assert con.execute("SELECT date, adj_close, cum_share_factor, available_date FROM f "
+                           "WHERE as_of = DATE '2018-05-04' AND ticker = '005930' "
+                           "AND date >= DATE '2018-05-03' ORDER BY date").fetchall() == [
+            (date(2018, 5, 3), 2650000.0, 1.0, date(2018, 5, 3)),
+            (date(2018, 5, 4), 2595000.0, 50.0, date(2018, 5, 4))]
+        assert con.execute("SELECT count(*), count(DISTINCT as_of) FROM f").fetchone() == (
+            ASOF_ROWS, 5)
+    finally:
+        con.close()
 
 
 def test_두_번째_publish는_EG5c_pass이고_표본을_같은_snapshot에_덮어쓴다(
@@ -385,6 +529,7 @@ def test_CLI_catalog는_뷰_게이트와_asof를_출력한다(published: tuple[P
     code = main(["--root", str(root), "--stage-root", str(STAGE_SLICE), "--baseline", str(bl),
                  "catalog"])
     out = capsys.readouterr().out
-    assert code == 0 and "ok catalog=" in out and "macros=4" in out
+    assert code == 0 and "ok catalog=" in out and "macros=6" in out
     assert "EG11  pass" in out and "EG5c  pass" in out and "EG3_firm_mktcap pass" in out
     assert f"_asof/v_adj_price: rows={ASOF_ROWS}" in out
+    assert f"_asof/v_adj_price_fwd: rows={ASOF_ROWS}" in out

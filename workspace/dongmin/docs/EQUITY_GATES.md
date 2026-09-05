@@ -1858,3 +1858,14 @@ workspace/dongmin/src/equity/
 | MVP-B 재현(`tape_hash` 동일) | S22 | 같은 snapshot·spec 에서 `tape_hash` 결정적(P25: adj `75aa2447…`, raw `a8df8452…`). 재현 2회는 S22 | DESIGN §10 P25 |
 | 커널 정지 세션 | — | `TargetTapeStrategy.on_event` 가 bar 없는 목표를 보유 유지/건너뛰기(`no_bar=[…]` reason). 커널 정책이 생기면 되돌린다 | `backend/tests/test_target_tape_strategy.py` |
 | 워밍업 부족 | — | start 앞 캘린더가 요청 워밍업보다 짧으면 잘라내고 `warnings` 로 알린다(NO_DATA 아님) — 첫 유효 스코어가 늦어질 뿐 값을 합성하지 않는다 | 어댑터 `_window` |
+
+**S21 후속 — `price.adj_close` 전방 조정 (2026-09-05, 사용자 결정 → `views.py`·`catalog.py`·`equity_duckdb/_adapter.py`·`tests/equity_fixture.py`)**
+
+| 항목 | 이전 | 정정 | 근거 |
+|---|---|---|---|
+| `price.adj_close` 축 | `v_adj_price(as_of := 창 end)` — base = end, 수준값 비 PIT·창마다 다름(DESIGN §11 ①) | **`v_adj_price_fwd(as_of)`** — 각 행 d 에 `apply_date ≤ d ∧ available_date ≤ d` 인 factor_ok 계수의 share_factor 누적곱(첫 관측 수준 고정). 005930 05-03 2,650,000 · 05-04 51,900 × 50 = 2,595,000. 접는 세션 `fold_date = greatest(apply_date, available_date)` 라 (ticker, date) 값이 as_of·창에 무관 | DESIGN §5·§11 ① |
+| `available_date`(어댑터) | 원주가 공개일(date) | 뷰 출력 `greatest(date, 접힌 계수의 available_date)` — fold 규칙상 항상 date. available = apply 다음 세션인 계수는 apply 세션엔 접히지 않고(원주가 점프 노출) 다음 세션부터 접힌다 — 포트 계약 `available_date ≤ as_of` 가 어떤 랙에서도 성립. `DatasetFieldProfile.point_in_time=True` | contract `test_no_field_value_is_visible_before_its_available_date` |
+| EG11·EG5c·`_asof/` 대상 뷰 | `v_cum_adj`·`v_adj_price` | + `v_adj_price_fwd`·`v_adj_volume_fwd`(`catalog.ASOF_VIEWS` 4, 매크로 6). 절단본 EG11 pass 4뷰 × 111,305행, snapshot `90115cc068146382` 불변 | `catalog.publish` |
+| 부정 픽스처 | FX-N-006(거래량 나눗셈 → EG8) | + 전방 축 3건(`test_equity_s06_views.py`): (a) as_of 를 2018-05-03·05-04·2026-08-20 으로 바꿔도 공개된 사건 전후 셀(05-03 2,650,000 · 05-04 2,595,000) 불변 (b) `v_adj_price_fwd` 를 나눗셈으로 뒤집으면 분할일 \|조정수익률\| 0.9996(EG8-P02 상한 1.0 밖; 곱셈은 −2.08%) (c) 창 [start,end] 을 바꿔도 같은 셀 동일 — equity `test_adj_close_는_창을_바꿔도_같은_셀이_같다`(창 [04-02, 05-03] vs [04-02, 05-31])·backend `test_adj_close_is_raw_close_scaled_by_factors_applied_on_or_before_the_row`·contract `FIELDS` 에 `price.adj_close` 추가(`test_facts_do_not_depend_on_the_query_window` 가 equity 어댑터에서도 adj_close 를 본다) | S21 에이전트 지적 모순의 회귀 |
+| EG8 | `v_adj_price` | 변경 없음 — base = as_of 축 위에서 그대로 잰다. 같은 as_of 에서 `adj_fwd / adj_bwd = Π(전 계수)` 가 종목별 상수(005930·005935 50, 247540 4)라 점프 판정 동일 | `test_전방조정과_as_of_조정은_종목별_상수배다` |
+| MVP-B 재실행 | P25 | 4변형(top 20/3 × adj/raw) 수익률·`tape_hash`·`run_fingerprint` 전부 이전과 동일 — 순위·선택 불변이 채택 검증 기준 | DESIGN §10 P25 |

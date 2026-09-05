@@ -120,8 +120,7 @@ def test_list_fields_serves_the_three_price_fields_only(adapter: EquityDuckdbAda
     assert set(profiles) == set(ALL_FIELDS)
     assert all(p.recommended_lag_sessions == 0 for p in profiles.values())
     assert all(p.coverage.venues == ("XKRX",) for p in profiles.values())
-    assert profiles["price.close"].coverage.point_in_time
-    assert not profiles["price.adj_close"].coverage.point_in_time  # 수준값은 스냅샷 vintage
+    assert all(p.coverage.point_in_time for p in profiles.values())  # adj_close 도 전방 조정
     assert profiles["price.close"].coverage.estimated_coverage_pct == 100.0
     assert profiles["price.market_cap"].coverage.estimated_coverage_pct < 100.0  # 035420 NULL
 
@@ -157,18 +156,30 @@ def test_krx_all_keeps_preferred_and_etf_as_members(adapter: EquityDuckdbAdapter
     assert all(o.universe_member for o in result.observations)
 
 
-def test_adj_close_is_raw_close_scaled_by_factors_applied_after_the_row(
+def test_adj_close_is_raw_close_scaled_by_factors_applied_on_or_before_the_row(
     adapter: EquityDuckdbAdapter,
 ) -> None:
+    """전방 조정: 분할 전 행은 원주가 그대로, 분할일부터 × share_factor(2). 값은 창에 무관하다."""
     before = date(2024, 1, 5)
     result = _raw(adapter, history=1)
     assert _field(result, before, "000660:1", "price.close") == 103_500.0
-    assert _field(result, before, "000660:1", "price.adj_close") == 51_750.0  # × 1/2
-    assert _field(result, WB_SPLIT_DATE, "000660:1", "price.adj_close") == 52_000.0  # base
+    assert _field(result, before, "000660:1", "price.adj_close") == 103_500.0  # 첫 관측 수준 고정
+    assert _field(result, WB_SPLIT_DATE, "000660:1", "price.close") == 52_000.0
+    assert _field(result, WB_SPLIT_DATE, "000660:1", "price.adj_close") == 104_000.0  # × 2
+    assert _field(result, END, "000660:1", "price.adj_close") == 2 * wb_close("000660", END)
     assert _field(result, before, "005930:1", "price.adj_close") == 73_500.0  # not-ok 행 무시
-    # base = 질의 end: 분할 전에 끝나는 창에서는 계수가 아직 없다(모듈 docstring 의 절충)
+    # 창 독립성(부정 검사 c): 분할 전에 끝나는 창과 분할을 지나는 창에서 같은 셀은 같은 값이다 —
+    # base = 창 end 였을 때는 103,500 / 51,750 으로 갈렸다
     early = _raw(adapter, start=date(2024, 1, 2), end=before)
     assert _field(early, before, "000660:1", "price.adj_close") == 103_500.0
+    late = _raw(adapter, start=date(2024, 1, 2), end=END)
+    assert _field(late, before, "000660:1", "price.adj_close") == 103_500.0
+    assert _field(late, WB_SPLIT_DATE, "000660:1", "price.adj_close") == 104_000.0
+    # 공개일 = greatest(원주가 공개일, 접힌 계수 공개일) = 세션 (계수 available = apply = 01-08)
+    split = next(
+        o for o in result.observations if (o.as_of, o.security_id) == (WB_SPLIT_DATE, "000660:1")
+    )
+    assert {f.available_date for f in split.fields} == {WB_SPLIT_DATE}
 
 
 def test_missing_market_cap_is_a_none_value_not_an_omission(adapter: EquityDuckdbAdapter) -> None:
@@ -413,5 +424,5 @@ def test_truthful_pipeline_momentum_across_a_split_is_continuous_on_adj_close(
         assert value is not None
         return value
 
-    assert momentum("price.adj_close") == pytest.approx(52_000 / 51_500 - 1)
+    assert momentum("price.adj_close") == pytest.approx(104_000 / 103_000 - 1)  # 전방 조정
     assert momentum("price.close") == pytest.approx(52_000 / 103_000 - 1)

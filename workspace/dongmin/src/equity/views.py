@@ -1,6 +1,7 @@
 """뷰 매크로 SQL 템플릿 — `equity.duckdb` 의 테이블 매크로 본문 (DESIGN v1.2 §5 · 결정 1·6).
 
-S06 이 내는 4개: `v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_firm_mktcap`. 본문은 하나의 템플릿이고
+S06 이 내는 4개: `v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_firm_mktcap` + S21 후속(09-05, 전방
+조정) 2개: `v_adj_price_fwd`·`v_adj_volume_fwd`. 본문은 하나의 템플릿이고
 읽는 자리(`{price_daily}` 등)만 두 방식으로 채운다 —
   카탈로그: `render_macros(equity_root)` 가 커밋된 테이블의 MANIFEST 파티션 경로(**절대경로**,
             P1c)를 `read_parquet([...])` 로 넣어 `catalog.write_catalog` 에 준다.
@@ -20,6 +21,22 @@ as-of 규칙 (DESIGN §5): `v_cum_adj(as_of, lag_override := NULL)` —
   조정가가 하루 늦게 붙어 EG8 점프가 생긴다. 소비자는 `lag_override` 로 세션 단위로 늘릴 수 있다.
   가격 행 자체는 `date ≤ as_of` 로 자른다(가격 랙 0 세션, PRICE_LAG_SESSIONS).
 매개변수 이름이 `as_of` 인 이유: `asof` 는 duckdb 예약어(ASOF JOIN)라 매크로 인자로 못 쓴다.
+
+전방 조정 (S21 후속, 사용자 결정 09-05 "전방 조정으로 바꾸는 쪽으로 가자" — FIELD_MAP
+`price.adj_close`):
+  `v_adj_price_fwd(as_of, lag_override := NULL)` —
+  adj_close_fwd(d) = close(d) × Π(share_factor : factor_ok ∧ apply_date ≤ d ∧ available_date ≤ d
+                                                 ∧ available_date ≤ cutoff),
+  즉 종목의 **첫 관측 수준을 고정**하고 사건마다 이후 가격을 누적 배수로 올린다(시총 불변 사건은
+  share_factor = 1/price_factor 라 위 `v_adj_price` 의 역수 축과 같은 값). 삼성전자 2018-05-03 =
+  2,650,000(원주가 그대로) · 05-04 = 51,900 × 50 = 2,595,000. 접는 세션 fold_date =
+  greatest(apply_date, available_date): 적용 세션이 와도 아직 공개 전인 계수(회고 원천 —
+  available = apply 다음 세션)는 공개 세션부터 접는다. 그래서 (ticker, date) 의 값은 as_of·창에
+  무관한 **순수 함수**이고(as_of 는 "아직 공개되지 않은 사건을 접지 않는다" 는 필터 + 행 절단
+  `date ≤ as_of` 로만 작용), 출력 `available_date` = greatest(date, 접힌 계수의 available_date)
+  는 fold 규칙상 항상 date 다 — 워크벤치 포트 계약 `available_date ≤ as_of` 가 어떤 랙에서도 선다.
+  `v_adj_volume_fwd` = volume_shr × Π price_factor(= ÷ Π share_factor), 같은 fold 축.
+  기존 `v_adj_price`(base = as_of, 차트·EG8 용)는 그대로 둔다.
 """
 from __future__ import annotations
 
@@ -38,16 +55,57 @@ SIGNATURES: dict[str, str] = {
     "v_adj_price": "v_adj_price(as_of, lag_override := NULL)",
     "v_adj_volume": "v_adj_volume(as_of, lag_override := NULL)",
     "v_firm_mktcap": "v_firm_mktcap(d)",
+    "v_adj_price_fwd": "v_adj_price_fwd(as_of, lag_override := NULL)",
+    "v_adj_volume_fwd": "v_adj_volume_fwd(as_of, lag_override := NULL)",
 }
 MACRO_INPUTS: dict[str, tuple[str, ...]] = {
     "v_cum_adj": ("price_daily", "adj_factor", "trading_calendar"),
     "v_adj_price": ("price_daily", "adj_factor", "trading_calendar"),
     "v_adj_volume": ("price_daily", "adj_factor", "trading_calendar"),
     "v_firm_mktcap": ("price_daily", "corp_ticker"),
+    "v_adj_price_fwd": ("price_daily", "adj_factor", "trading_calendar"),
+    "v_adj_volume_fwd": ("price_daily", "adj_factor", "trading_calendar"),
 }
 # 매크로가 다른 매크로를 부르는 경우 — 같은 카탈로그(또는 같은 세션)에 함께 있어야 한다.
 MACRO_DEPENDS: dict[str, tuple[str, ...]] = {
     "v_adj_price": ("v_cum_adj",), "v_adj_volume": ("v_cum_adj",)}
+
+# 전방 조정 공통 CTE — `v_adj_price_fwd`·`v_adj_volume_fwd` 가 같은 본문을 쓴다(매크로는 둘,
+# 정의는 하나). 계수를 (ticker, fold_date) 로 접고(같은 날 두 이벤트 = 곱) 앞에서부터 누적한 뒤
+# ASOF JOIN 으로 '이 날 이전 마지막 접는 세션' 의 누적값을 붙인다 — 행별 GROUP BY 없음.
+_FWD_CTE = """
+WITH cut AS (
+    SELECT k.date AS cutoff
+    FROM (SELECT date, row_number() OVER (ORDER BY date DESC) - 1 AS n
+          FROM {trading_calendar} WHERE date <= as_of) k
+    WHERE k.n = coalesce(lag_override, {lag_factor})
+),
+fac AS (
+    SELECT ticker, greatest(apply_date, available_date) AS fold_date,
+           product(price_factor) AS pf, product(share_factor) AS sf,
+           max(available_date) AS available_date
+    FROM {adj_factor}
+    WHERE factor_ok AND apply_date <= as_of AND available_date <= (SELECT cutoff FROM cut)
+    GROUP BY ticker, greatest(apply_date, available_date)
+),
+pre AS (
+    SELECT ticker, fold_date,
+           product(pf) OVER w AS cum_price_factor,
+           product(sf) OVER w AS cum_share_factor,
+           max(available_date) OVER w AS available_date
+    FROM fac
+    WINDOW w AS (PARTITION BY ticker ORDER BY fold_date
+                 ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+),
+fwd AS (
+    SELECT p.ticker, p.date, p.open, p.high, p.low, p.close, p.volume_shr, p.price_kind,
+           coalesce(c.cum_price_factor, 1) AS cum_price_factor,
+           coalesce(c.cum_share_factor, 1) AS cum_share_factor,
+           greatest(p.date, coalesce(c.available_date, p.date)) AS available_date
+    FROM (SELECT * FROM {price_daily} WHERE date <= as_of) p
+    ASOF LEFT JOIN pre c ON c.ticker = p.ticker AND p.date >= c.fold_date
+)
+"""
 
 TEMPLATES: dict[str, str] = {
     # ticker·date 별 누적 계수. 계수는 (ticker, apply_date) 로 먼저 접어(같은 날 두 이벤트 = 곱,
@@ -98,6 +156,24 @@ SELECT p.ticker, p.date, p.volume_shr, c.cum_share_factor,
        p.volume_shr * c.cum_share_factor AS adj_volume
 FROM {price_daily} p
 JOIN v_cum_adj(as_of, lag_override := lag_override) c ON c.ticker = p.ticker AND c.date = p.date
+""",
+    # 전방 조정가 = 원주가 × 그날까지 접힌 누적 주식수계수 (FIELD_MAP price.adj_close, S21 후속).
+    # 곱셈이다 — 나눗셈이면 분할 뒤 가격이 1/2500 로 떨어진다(FX-N-006 류, test_equity_s06_views).
+    "v_adj_price_fwd": _FWD_CTE + """
+SELECT ticker, date, open, high, low, close, volume_shr, price_kind,
+       cum_price_factor, cum_share_factor, available_date,
+       open  * cum_share_factor AS adj_open,
+       high  * cum_share_factor AS adj_high,
+       low   * cum_share_factor AS adj_low,
+       close * cum_share_factor AS adj_close
+FROM fwd
+""",
+    # 전방 조정 거래량 = 원거래량 × 누적 가격계수(= ÷ 누적 주식수계수) — 분할 뒤 거래량을 분할 전
+    # 주식수 척도로 내린다.
+    "v_adj_volume_fwd": _FWD_CTE + """
+SELECT ticker, date, volume_shr, cum_price_factor, cum_share_factor, available_date,
+       volume_shr * cum_price_factor AS adj_volume
+FROM fwd
 """,
     # 기업 시총 = 그날 가격 행이 있는(= 상장) 종류주 시총의 합. 그룹 키는 corp_ticker 의
     # common_ticker(KR7 isin8 그룹), 비KR7·ETF 는 자기 티커 단독. EG3-P05 는 isin8 축으로 독립

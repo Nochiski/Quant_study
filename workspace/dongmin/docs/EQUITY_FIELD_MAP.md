@@ -17,15 +17,15 @@
 | 결측 어휘 | equity `fill_kind.kind` → 엔진 `CellKind`: `measured`→OBSERVED · `src_omitted`→SOURCE_OMITTED_ZERO · `empty_response`·stage `miss_kind`→MISSING · `not_collected`→NOT_COLLECTED · `security_span` 밖·`backfill_end` 이후→COVERAGE_GAP | `dataset_profile.supported_cell_kinds` |
 | `data_snapshot_id` | 카탈로그 생성 시 전 테이블 `build_id` 정렬 해시 = `equity.duckdb` 의 `snapshot_id` | `FactorMatrixCacheKey` |
 | `previous_weight`·`forward_return` | equity 소유 아님 — 어댑터가 `0.0`·`None` 고정 | 포트 docstring |
-| 가격 조정 | **`price.close` = 원주가(불변)**, **`price.adj_close` = `v_adj_price(asof)`**(효력일·공개일 모두 ≤ asof 인 계수만, base = asof). 레지스트리의 수익률·모멘텀·변동성 팩터는 `adj_close` 를 써야 한다 — 레지스트리 개정은 워크벤치 이슈(결정 6) | 원칙 ② · GAP `price.close` |
+| 가격 조정 | **`price.close` = 원주가(불변)**, **`price.adj_close` = `v_adj_price_fwd(asof)`**(**전방 조정**, 결정 09-05: 각 행 d 에 apply_date ≤ d ∧ available_date ≤ d 인 계수의 share_factor 누적곱 — 첫 관측 수준 고정, 005930 2018-05-03 2,650,000 · 05-04 2,595,000; 값은 (security, date) 의 순수 함수라 창·asof 에 무관, `available_date` = greatest(원주가 공개일, 접힌 계수 공개일) = d). 차트·EG8 은 base = asof 인 `v_adj_price(asof)`. 레지스트리의 수익률·모멘텀·변동성 팩터는 `adj_close` 를 써야 한다 — 레지스트리 개정은 워크벤치 이슈(결정 6) | 원칙 ② · GAP `price.close` · DESIGN §11 ① |
 
 ## 2. field_id 대응 (42)
 
 | field_id | equity 산출 | 판정 | 비고 |
 |---|---|---|---|
-| `price.close` | `price_daily.close`(원주가) | **부분** | **핵심 충돌**: registry `price.momentum_12_1` 은 조정가를 전제한다. 원주가를 그대로 주면 분할 구간 모멘텀이 틀린다. **해소안: `price.close`(원주가) + `price.adj_close`(`v_adj_price`, base = query.end) 2필드로 분리하고 엔진 registry 의 가격 그래프를 `price.adj_close` 로 바꾸는 이슈를 엔진 저장소에 발행** |
+| `price.close` | `price_daily.close`(원주가) | **부분** | **핵심 충돌**: registry `price.momentum_12_1` 은 조정가를 전제한다. 원주가를 그대로 주면 분할 구간 모멘텀이 틀린다. **해소안: `price.close`(원주가) + `price.adj_close`(`v_adj_price_fwd`, 전방 조정 — 09-05 결정) 2필드로 분리하고 엔진 registry 의 가격 그래프를 `price.adj_close` 로 바꾸는 이슈를 엔진 저장소에 발행** |
 | `price.open` | `price_daily.open` | **부분** | NULL 유지 정책 · `Bar.open` 은 필수·>0 (GAP-14) |
-| `price.volume` | `price_daily.volume_shr` / `v_adj_volume` | 지원 | 조정 여부 명시 필요 |
+| `price.volume` | `price_daily.volume_shr` / `v_adj_volume`·`v_adj_volume_fwd` | 지원 | 조정 여부 명시 필요 |
 | `price.market_cap` | `price_daily.mktcap_krw` / `v_firm_mktcap` | 지원 | 랙 1세션(익일 지식) — **S21 축소 어댑터는 0**(`price_daily.available_date = date`, 종가와 같은 시점 확정; `dataset_profile`(S19)에서 확정, DESIGN §11) |
 | `price.shares_outstanding` | `price_daily.shares_out` | 지원 | |
 | `price.trading_value` | `price_daily.value_krw` | 지원 | |
@@ -66,7 +66,7 @@
 ## 3. 집계
 
 - 지원 17 · 부분 15 · 미지원 9 · 미확인 1 (2026-09-05, 슬라이스 착수 전 판정).
-- **S21 축소 어댑터(09-05)가 실제로 내는 field_id 는 3** — `price.close`·`price.market_cap`·`price.adj_close`(equity 내부 스코프, 위 표 밖). 나머지 39 는 `list_fields()` 에 없고 질의하면 `INVALID_QUERY`(detail `unavailable`)다. `price.adj_close` 의 base 는 질의 창의 마지막 세션(`v_adj_price(as_of := end)`)이며 수준값은 PIT 가 아니고 비율만 PIT 다(DESIGN §7·§11). 레지스트리 가격 팩터가 `price.close` 를 요구하는 충돌(#64)은 미해결 — `scripts/run_mvp_backtest.py` 는 FieldNode 를 `price.adj_close` 로 바꿔 돈다.
+- **S21 축소 어댑터(09-05)가 실제로 내는 field_id 는 3** — `price.close`·`price.market_cap`·`price.adj_close`(equity 내부 스코프, 위 표 밖). 나머지 39 는 `list_fields()` 에 없고 질의하면 `INVALID_QUERY`(detail `unavailable`)다. `price.adj_close` 는 **전방 조정**(`v_adj_price_fwd`, 09-05 결정)이라 수준·비율 모두 PIT 이고 창에 무관하다(DESIGN §7·§11 ①; 이전 base = 창 end 절충은 폐기). 레지스트리 가격 팩터가 `price.close` 를 요구하는 충돌(#64)은 미해결 — `scripts/run_mvp_backtest.py` 는 FieldNode 를 `price.adj_close` 로 바꿔 돈다.
 - 미지원 9 는 원천 부재(대량매매·반대매매·담보·잠정실적·지수구성 PIT·텍스트 감성·매출총이익·차입금 계열)로, 어댑터 `list_fields()` 가 `unavailable` 로 답한다. 레지스트리 50 팩터 중 이 필드에 걸린 팩터는 `factor_readiness.status='blocked'`.
 - `financial.gross_profit` 은 `fin_map.py` 에 `gross_profit` 항목이 있으므로 4단계 계정 매트릭스에 추가하면 **지원**으로 바뀐다(S12 첫 작업에서 판정).
 

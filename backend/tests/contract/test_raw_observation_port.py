@@ -7,8 +7,10 @@ explicit warm-up history, deterministic ordering, window-invariant facts, failur
 raw facts only (no factor values).
 
 `ADAPTERS` names the cases; the `adapter` fixture builds them. Each case answers the subset of
-`FIELDS` its `list_fields()` declares — the equity adapter serves the S21 price fields only and
-must reject the rest as a failure value, never synthesise them.
+`FIELDS` its `list_fields()` declares — the equity adapter serves the S21 price fields only
+(`price.close`, `price.market_cap`, `price.adj_close` — the last is forward-adjusted, so it is a
+window-invariant (as_of, security) fact like the others) and must reject the rest as a failure
+value, never synthesise them.
 """
 
 from __future__ import annotations
@@ -41,6 +43,7 @@ MARKET, UNIVERSE = "KRX", "krx.common-stock"
 FIELDS = (
     "price.close",
     "price.market_cap",
+    "price.adj_close",
     "financial.book_equity",
     "classification.sector",
 )

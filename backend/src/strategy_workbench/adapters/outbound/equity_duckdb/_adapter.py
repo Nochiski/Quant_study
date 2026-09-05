@@ -1,7 +1,7 @@
 """`EquityDuckdbAdapter` — equity 층 parquet·카탈로그 위에서 워크벤치 5포트를 답한다 (S21 축소).
 
 범위(EQUITY_WORKFLOW §3-5 MVP-B): 필드 3 — `price.close`(price_daily 원주가) · `price.market_cap`
-(price_daily.mktcap_krw) · `price.adj_close`(카탈로그 매크로 `v_adj_price`). 그 밖의 field_id 는
+(price_daily.mktcap_krw) · `price.adj_close`(카탈로그 매크로 `v_adj_price_fwd`). 그 밖의 field_id 는
 `list_fields()` 에 없고 질의하면 `INVALID_QUERY`(detail 에 `unavailable`) 다 — mock 값으로 대신하지
 않는다. `RawObservationPort` 가 축소 슬라이스의 본체이고, 같은 패널 코어 위에 `EquityDataPort`
 (`snapshot`·`list_fields`·`load_universe`·`load_panel`), `FactorMetadataPort`,
@@ -16,12 +16,14 @@ PIT: 세 필드 모두 `price_daily.available_date = date`(S04, 공표 시각 �
 랙 0 세션. `dataset_profile`(S19)이 아직 없어 본문 상수 `PRICE_LAG_SESSIONS` 로 두고, S19 가 생기면
 프로필 값으로 바꾼다. 랙 n 은 as_of 에서 n 세션 전 행을 답한다(`available_date` = 그 행의 날짜).
 
-`price.adj_close` 의 기준점(base): `v_adj_price(as_of := <질의 end>)` — 창 마지막 세션에서 1 이 되는
-누적 가격계수를 원주가에 곱한 값(FIELD_MAP §2 "base = query.end"). 값 자체는 (security, date) 의
-함수가 아니라 as_of 뒤의 계수까지 접힌 **스냅샷 vintage 수준값**이므로 수준(level)은 PIT 가 아니고
-비율(모멘텀·수익률)만 PIT 다. `available_date` 는 원주가의 공개일(= date)을 싣는다 — 계수 공개일을
-실으면 분할 전 구간 전부가 `LookAheadViolationError` 가 되어 어떤 창도 평가할 수 없다. 이 절충은
-DESIGN §7·§10 P25 에 기록돼 있다.
+`price.adj_close` = **전방 조정**(S21 후속, 사용자 결정 09-05): `v_adj_price_fwd(as_of := <질의
+end>)` — 원주가 × 그날까지 공개·적용된 계수의 누적 share_factor. 종목의 첫 관측 수준을 고정하고
+사건마다 이후 가격을 올린다(삼성전자 2018-05-03 2,650,000 그대로, 05-04 51,900 × 50 = 2,595,000).
+값은 (security, date) 의 순수 함수라 창·as_of 에 무관하고(포트의 "창 불변 사실" 원칙),
+`available_date` 는 뷰가 내는 greatest(원주가 공개일, 그날까지 접힌 계수의 available_date) — fold
+규칙(공개 전 계수는 접지 않는다)상 date 와 같아 `available_date ≤ as_of` 가 어떤 랙에서도 선다.
+수익률·모멘텀은 base = as_of 인 `v_adj_price` 와 종목별 상수배라 같다(DESIGN §10 P25 백테스트 동일).
+이전 절충(base = 창 end, 수준값 비 PIT)은 DESIGN §11 ① 에서 닫혔다.
 
 `load_universe` 는 정책 미적용(`krx.all`) — 그날 `universe_daily` 에 있는 전 종목(ETF·우선주 포함,
 생존편향 방지). `load_factor_observations` 는 유니버스 인자가 없어 `RESEARCH_UNIVERSE_ID` 로 답한다.
@@ -114,7 +116,7 @@ POLICY_TABLE = "universe_policy"
 PRICE_TABLE = "price_daily"
 SECURITY_TABLE = "security"
 FACTOR_TABLE = "adj_factor"
-ADJ_MACRO = "v_adj_price"
+ADJ_MACRO = "v_adj_price_fwd"
 REQUIRED_TABLES = (CALENDAR_TABLE, SPAN_TABLE, UNIVERSE_TABLE, POLICY_TABLE, PRICE_TABLE)
 REFERENCE_KIND = "reference"
 # adj_factor.event_type → 커널 CorporateActionType 값 (S07 `EVENT_TYPE_MAP` 과 같은 판단: ok 행은
@@ -175,20 +177,24 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         field_id="price.adj_close",
         dataset_id=ADJ_MACRO,
         column="adj_close",
-        label="조정 종가",
+        label="조정 종가(전방 조정)",
         unit="KRW",
         value_type=FieldValueType.PRICE,
         available_date_basis=(
-            "원주가 공개일(date). 누적 계수는 질의 end 를 base 로 접힌 스냅샷 vintage"
+            "greatest(원주가 공개일 date, 그날까지 접힌 계수의 available_date) = "
+            "v_adj_price_fwd.available_date — 공개 전 계수는 접지 않으므로 date 와 같다"
         ),
         description=(
-            "원주가 × 누적 가격계수(adj_factor factor_ok 행, apply_date 축, base = 질의 end). "
-            "비율(수익률·모멘텀)만 PIT — 수준값은 이후 사건까지 접혀 있다."
+            "원주가 × 그날까지 공개·적용된 계수(adj_factor factor_ok 행, apply_date 축)의 누적 "
+            "share_factor. 첫 관측 수준 고정, 사건 뒤 가격을 올린다 — (security, date) 의 순수 "
+            "함수라 창·as_of 에 무관(완전 PIT)."
         ),
         disclosure_basis=(
             "원주가 세션 확정 + 계수 available_date(min(공시 접수일, apply_date 다음 세션))"
         ),
-        evidence="equity.duckdb v_adj_price(as_of) ← price_daily × adj_factor × trading_calendar",
+        evidence=(
+            "equity.duckdb v_adj_price_fwd(as_of) ← price_daily × adj_factor × trading_calendar"
+        ),
     ),
 )
 
@@ -205,10 +211,17 @@ class _Row:
     close: float | None
     mktcap_krw: float | None
     adj_close: float | None
+    adj_available_date: date | None  # v_adj_price_fwd.available_date (행이 있으면 = session)
 
     @property
     def security_id(self) -> str:
         return f"{self.ticker}{SECURITY_ID_SEP}{self.span_seq}"
+
+    def available_date(self, column: str) -> date:
+        """컬럼의 공개일 — 원주가·시총은 세션, 조정가는 뷰가 낸 available_date."""
+        if column == "adj_close" and self.adj_available_date is not None:
+            return self.adj_available_date
+        return self.session
 
     def value(self, column: str) -> float | None:
         if column == "close":
@@ -428,7 +441,7 @@ class EquityDuckdbAdapter:
                     venues=(VENUE,),
                     estimated_coverage_pct=coverage[spec.field_id],
                     supported_cell_kinds=(CellKind.OBSERVED, CellKind.MISSING),
-                    point_in_time=spec.field_id != "price.adj_close",
+                    point_in_time=True,  # adj_close 도 전방 조정이라 (security, date) 의 함수
                 ),
             )
             for spec in self._fields.values()
@@ -568,14 +581,15 @@ class EquityDuckdbAdapter:
                 found = self._lagged(rows, row, lag_by_field[field_id])
                 if found is None:
                     continue
-                value = found.value(self._fields[field_id].column)
+                column = self._fields[field_id].column
+                value = found.value(column)
                 cells.append(
                     ResearchPanelCell(
                         as_of=row.session,
                         security_id=row.security_id,
                         field_id=field_id,
                         source_effective_date=found.session,
-                        available_date=found.session,
+                        available_date=found.available_date(column),
                         value=value,
                         kind=CellKind.OBSERVED if value is not None else CellKind.MISSING,
                     )
@@ -681,11 +695,12 @@ class EquityDuckdbAdapter:
                 found = self._lagged(rows, row, PRICE_LAG_SESSIONS)
                 if found is None:
                     continue
+                column = self._fields[field_id].column
                 fields.append(
                     RawFieldValue(
                         field_id=field_id,
-                        value=found.value(self._fields[field_id].column),
-                        available_date=found.session,
+                        value=found.value(column),
+                        available_date=found.available_date(column),
                     )
                 )
             observations.append(
@@ -980,14 +995,14 @@ class EquityDuckdbAdapter:
         params: list[object] = [] if tickers is None else [list(tickers)]
         wants_adj = "price.adj_close" in fields
         adj_join = (
-            f"LEFT JOIN (SELECT ticker, date, adj_close "
+            f"LEFT JOIN (SELECT ticker, date, adj_close, available_date "
             f"FROM {ADJ_MACRO}(as_of := {_lit(fetch_end)}) "
             f"WHERE date BETWEEN {_lit(fetch_start)} AND {_lit(fetch_end)}) a "
             "ON a.ticker = r.ticker AND a.date = r.date"
             if wants_adj
             else ""
         )
-        adj_expr = "a.adj_close" if wants_adj else "NULL::DOUBLE"
+        adj_expr = "a.adj_close, a.available_date" if wants_adj else "NULL::DOUBLE, NULL::DATE"
         sql = f"""
             WITH u AS (
                 SELECT u.date, u.ticker, {member_expr} AS member
@@ -1019,7 +1034,7 @@ class EquityDuckdbAdapter:
         finally:
             con.close()
         rows: dict[tuple[str, date], _Row] = {}
-        for raw_date, ticker, span_seq, member, has_price, close, mktcap, adj in raw_rows:
+        for raw_date, ticker, span_seq, member, has_price, close, mktcap, adj, adj_av in raw_rows:
             row = _Row(
                 session=_as_date(raw_date, "universe_daily.date"),
                 ticker=str(ticker),
@@ -1029,6 +1044,9 @@ class EquityDuckdbAdapter:
                 close=_as_float(close, "close"),
                 mktcap_krw=_as_float(mktcap, "mktcap_krw"),
                 adj_close=_as_float(adj, "adj_close"),
+                adj_available_date=(
+                    None if adj_av is None else _as_date(adj_av, f"{ADJ_MACRO}.available_date")
+                ),
             )
             key = (row.ticker, row.session)
             if key in rows:

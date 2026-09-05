@@ -9,7 +9,8 @@ numpy·pyarrow·duckdb 가 필요하다(`uv run --with duckdb --with pyarrow --w
 
 손계산 기대값(절단본 원자료 `stg_price_daily`·`stg_listing_daily`):
   005930 2018-04-27 종가 2,650,000(거래) · 04-30~05-03 기준가 2,650,000(거래량 0) · 05-04 51,900
-  50:1 분할 apply_date 05-04 → as_of ≥ 05-04 에서 05-03 adj_close 53,000, 05-04 51,900
+  50:1 분할 apply_date 05-04 → **전방 조정**(S21 후속, `v_adj_price_fwd`): 05-03 adj_close
+  2,650,000(원주가 그대로), 05-04 51,900 × 50 = 2,595,000 — 창·as_of 에 무관한 (security, date) 값
   list_shrs 05-03 128,386,494 → 05-04 6,419,324,700
 """
 from __future__ import annotations
@@ -109,13 +110,31 @@ def test_005930_2018_분할_전후_원주가_조정가_시총(adapter) -> None:
     assert _value(r, date(2018, 4, 27), "005930:1", "price.close") == 2_650_000
     assert _value(r, HALT_LAST, "005930:1", "price.close") == 2_650_000   # 기준가 행도 실린다
     assert _value(r, SPLIT, "005930:1", "price.close") == 51_900
-    assert _value(r, HALT_LAST, "005930:1", "price.adj_close") == pytest.approx(53_000)
-    assert _value(r, SPLIT, "005930:1", "price.adj_close") == pytest.approx(51_900)
+    assert _value(r, HALT_LAST, "005930:1", "price.adj_close") == pytest.approx(2_650_000)
+    assert _value(r, SPLIT, "005930:1", "price.adj_close") == pytest.approx(51_900 * 50)
     assert _value(r, HALT_LAST, "005930:1", "price.market_cap") == 2_650_000 * SHARES_BEFORE
     assert _value(r, SPLIT, "005930:1", "price.market_cap") == 51_900 * SHARES_AFTER
     # 세 필드 모두 공개일 = 세션(랙 0)
     o = next(o for o in r.observations if (o.as_of, o.security_id) == (SPLIT, "005930:1"))
     assert {f.available_date for f in o.fields} == {SPLIT}
+
+
+def test_adj_close_는_창을_바꿔도_같은_셀이_같다(adapter) -> None:
+    """부정 검사 (c) — S21 에이전트가 지적한 모순의 회귀: base = 창 end 였을 때는 분할 전에 끝나는
+    창에서 05-03 이 2,650,000, 분할을 지나는 창에서 53,000 으로 갈렸다. 전방 조정은 창 독립."""
+    short = _raw(adapter, date(2018, 4, 2), HALT_LAST)            # 분할 전에 끝나는 창
+    long = _raw(adapter, date(2018, 4, 2), date(2018, 5, 31))      # 분할을 지나는 창
+    assert short.ok and long.ok
+    for d, close in ((date(2018, 4, 27), 2_650_000), (HALT_LAST, 2_650_000)):
+        assert (_value(short, d, "005930:1", "price.adj_close")
+                == _value(long, d, "005930:1", "price.adj_close") == pytest.approx(close))
+    # 분할일 이후 창을 다르게 잡아도 같다
+    later = _raw(adapter, SPLIT, date(2018, 12, 28))
+    assert (_value(later, SPLIT, "005930:1", "price.adj_close")
+            == _value(long, SPLIT, "005930:1", "price.adj_close") == pytest.approx(2_595_000))
+    # 우선주도 같은 50:1 — 05-03 2,125,000 그대로
+    assert _value(_raw(adapter, date(2018, 5, 2), date(2018, 5, 31), universe="krx.all"),
+                  HALT_LAST, "005935:1", "price.adj_close") == pytest.approx(2_125_000)
 
 
 def test_krx_common_stock_은_정책표대로_ETF_우선주를_뺀다(adapter) -> None:

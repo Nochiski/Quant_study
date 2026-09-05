@@ -1,14 +1,16 @@
 import { defineConfig } from "@playwright/test";
-import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const frontendDirectory = dirname(fileURLToPath(import.meta.url));
 const backendDirectory = resolve(frontendDirectory, "../backend");
-const runtimeDatabase = join(
-  tmpdir(),
-  `quant-strategy-workbench-e2e-${process.pid}.sqlite3`,
-);
+const runtimeDirectory = process.env.STRATEGY_WORKBENCH_E2E_RUNTIME_DIR;
+if (runtimeDirectory === undefined || !isAbsolute(runtimeDirectory)) {
+  throw new Error(
+    "Run Playwright through `npm run test:e2e` so its isolated runtime can be cleaned up.",
+  );
+}
+const runtimeDatabase = join(runtimeDirectory, "strategy-workbench.sqlite3");
 const ci = process.env.CI !== undefined;
 
 const browserProject = (

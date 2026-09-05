@@ -10,9 +10,10 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-The four Windows Chromium baselines (1440×900 and 1920×1080, light and dark) are authoritative
-because the CI browser job also runs on `windows-latest`. Regenerate them on Windows only after an
-intentional visual change:
+The four Windows Chromium baselines (1440×900 and 1920×1080, light and dark) use Playwright's
+exact Chromium build and exact-version bundled Noto Sans KR/JetBrains Mono webfonts. The CI browser
+job is pinned to the Windows Server 2025 generation. Regenerate them on Windows only after an
+intentional visual change, then require a strict no-update CI pass:
 
 ```text
 npm run test:e2e:update
@@ -22,3 +23,8 @@ npm run test:e2e:report
 This layer owns browser process, server lifecycle, viewport/theme matrix, screenshots and failure
 artifacts. Workflow scenarios and product assertions belong to P6-06; backend contract meaning
 continues to be owned by the backend and its generated client.
+
+The npm test/update commands atomically create a unique random directory under the operating
+system temp root, pass its SQLite path only to the backend process, and delete the whole directory
+after Playwright exits. Calling `playwright test` directly is rejected so a reused PID or abandoned
+database cannot leak state into a later run.

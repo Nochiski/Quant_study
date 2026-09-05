@@ -82,7 +82,9 @@ jobs:
           exit 1
 
   browser-e2e:
-    runs-on: windows-latest
+    # Baselines use bundled exact-version webfonts; pin the Windows generation as well so the
+    # host rasterizer does not silently move from one runner generation to another.
+    runs-on: windows-2025
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4

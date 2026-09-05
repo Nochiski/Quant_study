@@ -66,12 +66,9 @@
   --syntax-punctuation: #5b6675;
 
   /* typography: body 14px, secondary text never below 12px */
-  --font-sans:
-    Inter, Pretendard, ui-sans-serif, system-ui, -apple-system,
-    BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-mono:
-    "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono",
-    monospace;
+  /* Exact-version webfonts keep strict browser snapshots independent of host-installed fonts. */
+  --font-sans: "Noto Sans KR Variable", sans-serif;
+  --font-mono: "JetBrains Mono Variable", "Noto Sans KR Variable", monospace;
   --text-size-body: 14px;
   --text-size-small: 12px;
   --text-size-title: 20px;

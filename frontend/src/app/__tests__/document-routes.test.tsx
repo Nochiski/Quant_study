@@ -6,6 +6,7 @@ import { createMemoryHistory } from "@tanstack/react-router";
 import {
   act,
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -387,6 +388,8 @@ beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
   cleanup();
   server.resetHandlers();
+  localStorage.clear();
+  delete globalThis.document.documentElement.dataset.theme;
   posted.length = 0;
   started.length = 0;
   explainedGraphs.length = 0;
@@ -440,6 +443,58 @@ const legacyLink = () =>
   globalThis.document.querySelector<HTMLAnchorElement>(
     'a[href="/legacy/builder"]',
   )!;
+
+describe("professional keyboard workflow (P6-03)", () => {
+  it("finds a JSON Pointer from a read-only view, returns to YAML and reveals its source", async () => {
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2?view=json");
+    expect(
+      await screen.findByLabelText("StrategySpec JSON"),
+    ).toBeInTheDocument();
+
+    await user.keyboard("{Control>}k{/Control}");
+    const search = screen.getByRole("combobox", {
+      name: "명령과 문서 경로 검색",
+    });
+    await user.type(search, "/title");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(history.location.search).toContain("path=%2Ftitle");
+      expect(history.location.search).not.toContain("view=json");
+    });
+    const view = await editor();
+    expect(
+      view.state.sliceDoc(
+        view.state.selection.main.from,
+        view.state.selection.main.to,
+      ),
+    ).toBe("퀄리티 모멘텀");
+    expect(view.hasFocus).toBe(true);
+  });
+
+  it("routes Ctrl+S through the same revision save gate as the toolbar", async () => {
+    const history = mount("/research/strategies/s1/revisions/2");
+    const view = await editor();
+    replaceText(view, `${STORED}description: keyboard save\n`);
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+
+    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+
+    await waitFor(() =>
+      expect(history.location.pathname).toBe(
+        "/research/strategies/s1/revisions/3",
+      ),
+    );
+    expect(posted).toEqual([
+      {
+        expected_revision: 2,
+        format: "yaml",
+        source: `${STORED}description: keyboard save\n`,
+      },
+    ]);
+  });
+});
 
 describe("document routes (P2-04)", () => {
   it.each([

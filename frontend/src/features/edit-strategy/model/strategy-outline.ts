@@ -24,6 +24,14 @@ export type StrategyOutlineNode = {
   semanticIdentity: { namespace: string; value: string } | null;
 };
 
+export type StrategyOutlineSymbol = {
+  id: string;
+  pointer: string;
+  label: string;
+  description: string;
+  keywords: readonly string[];
+};
+
 export type ValidParsedSource = {
   status: "ok";
   tree: Record<string, unknown>;
@@ -249,4 +257,36 @@ export const outlineAncestorIds = (
   };
   for (const node of nodes) if (visit(node)) break;
   return path;
+};
+
+/** Search projection only; source navigation still resolves through the parser-owned map. */
+export const projectStrategyOutlineSymbols = (
+  nodes: readonly StrategyOutlineNode[],
+): StrategyOutlineSymbol[] => {
+  const symbols: StrategyOutlineSymbol[] = [];
+  const visit = (
+    node: StrategyOutlineNode,
+    parents: readonly string[],
+  ): void => {
+    const path = [...parents, node.label];
+    if (node.present && node.range !== null) {
+      const semantic = node.semanticIdentity;
+      symbols.push({
+        id: node.id,
+        pointer: node.pointer,
+        label: path.join(" › "),
+        description: node.pointer === "" ? "/" : node.pointer,
+        keywords: semantic
+          ? [
+              semantic.namespace,
+              semantic.value,
+              `${semantic.namespace}:${semantic.value}`,
+            ]
+          : [],
+      });
+    }
+    for (const child of node.children) visit(child, path);
+  };
+  for (const node of nodes) visit(node, []);
+  return symbols;
 };

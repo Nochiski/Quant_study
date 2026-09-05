@@ -1,12 +1,16 @@
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 
+import type { StrategyOutlineSymbol } from "../../../features/edit-strategy";
 import { t } from "../../../shared/config";
 import { useMediaQuery } from "../../../shared/lib/media";
+import { useThemePreference } from "../../../shared/lib/theme";
 import {
   Badge,
   Button,
+  CommandPalette,
   SplitHandle,
   Tabs,
+  type CommandPaletteItem,
   panelId,
   tabId,
 } from "../../../shared/ui";
@@ -40,6 +44,12 @@ export type StrategyIdeProps = {
   saveTone?: "ok" | "warn" | "error";
   onRunBacktest?: () => void;
   runDisabled?: boolean;
+  onValidate?: () => void;
+  validateDisabled?: boolean;
+  onSave?: () => void;
+  saveDisabled?: boolean;
+  symbols?: readonly StrategyOutlineSymbol[];
+  onSelectSymbol?: (pointer: string) => void;
   /** The source editor slot (P3). */
   editor: ReactNode;
   /** Source tab whose editor must stay mounted while read-only projections are selected. */
@@ -85,6 +95,12 @@ export const StrategyIde = ({
   saveTone = "ok",
   onRunBacktest,
   runDisabled = false,
+  onValidate,
+  validateDisabled = true,
+  onSave,
+  saveDisabled = true,
+  symbols = [],
+  onSelectSymbol,
   editor,
   sourceView,
   projections,
@@ -110,6 +126,102 @@ export const StrategyIde = ({
     debugger: useId(),
     views: useId(),
   };
+  const theme = useThemePreference();
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const commands = useMemo<CommandPaletteItem[]>(() => {
+    const actionCommands: CommandPaletteItem[] = [
+      {
+        id: "action.validate",
+        group: t("command.group.action"),
+        label: t("toolbar.validate"),
+        shortcut: "Ctrl/⌘ Enter",
+        disabled: validateDisabled || !onValidate,
+        execute: () => onValidate?.(),
+      },
+      {
+        id: "action.save",
+        group: t("command.group.action"),
+        label: t("toolbar.saveRevision"),
+        shortcut: "Ctrl/⌘ S",
+        disabled: saveDisabled || !onSave,
+        execute: () => onSave?.(),
+      },
+      {
+        id: "action.backtest",
+        group: t("command.group.action"),
+        label: t("ide.runBacktest"),
+        shortcut: "Ctrl/⌘ Shift Enter",
+        disabled: runDisabled || !onRunBacktest,
+        execute: () => onRunBacktest?.(),
+      },
+    ];
+    const viewCommands: CommandPaletteItem[] = VIEWS.map((id, index) => ({
+      id: `view.${id}`,
+      group: t("command.group.view"),
+      label: `${t("command.openView")} ${id.toUpperCase()}`,
+      description: id === view ? t("command.current") : undefined,
+      shortcut: `Alt ${index + 1}`,
+      disabled: !availableViews.includes(id),
+      execute: () => onViewChange?.(id),
+    }));
+    const panelCommands: CommandPaletteItem[] = [
+      ["outline", "outlineOpen"],
+      ["inspector", "inspectorOpen"],
+      ["debugger", "debuggerOpen"],
+    ].map(([name, key]) => {
+      const panel = key as "outlineOpen" | "inspectorOpen" | "debuggerOpen";
+      return {
+        id: `panel.${name}`,
+        group: t("command.group.panel"),
+        label: `${layout[panel] ? t("command.hide") : t("command.show")} ${t(
+          `ide.${name}` as "ide.outline" | "ide.inspector" | "ide.debugger",
+        )}`,
+        execute: () => toggle(panel),
+      };
+    });
+    const themeCommands: CommandPaletteItem[] = (
+      ["system", "light", "dark"] as const
+    ).map((preference) => ({
+      id: `theme.${preference}`,
+      group: t("command.group.theme"),
+      label: t(`command.theme.${preference}`),
+      description:
+        theme.preference === preference ? t("command.current") : undefined,
+      disabled: theme.preference === preference,
+      execute: () => theme.setPreference(preference),
+    }));
+    const symbolCommands: CommandPaletteItem[] = symbols.map((symbol) => ({
+      id: `symbol.${symbol.id}`,
+      group: t("command.group.symbol"),
+      label: symbol.label,
+      description: symbol.description,
+      keywords: symbol.keywords,
+      disabled: !onSelectSymbol,
+      execute: () => onSelectSymbol?.(symbol.pointer),
+    }));
+    return [
+      ...actionCommands,
+      ...viewCommands,
+      ...panelCommands,
+      ...themeCommands,
+      ...symbolCommands,
+    ];
+  }, [
+    availableViews,
+    layout,
+    onRunBacktest,
+    onSave,
+    onSelectSymbol,
+    onValidate,
+    onViewChange,
+    runDisabled,
+    saveDisabled,
+    symbols,
+    theme,
+    toggle,
+    validateDisabled,
+    view,
+  ]);
 
   useEffect(() => {
     if (narrow) close(["inspectorOpen", "debuggerOpen"]);
@@ -123,6 +235,47 @@ export const StrategyIde = ({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [narrow, close]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.isComposing || event.keyCode === 229) return;
+      const modifier = event.ctrlKey || event.metaKey;
+      const key = event.key.toLowerCase();
+      if (modifier && key === "k") {
+        event.preventDefault();
+        setPaletteOpen((open) => !open);
+        return;
+      }
+      if (paletteOpen) return;
+      if (modifier && key === "s") {
+        event.preventDefault();
+        if (!event.repeat && !saveDisabled) onSave?.();
+      } else if (modifier && event.key === "Enter") {
+        event.preventDefault();
+        if (event.repeat) return;
+        if (event.shiftKey) {
+          if (!runDisabled) onRunBacktest?.();
+        } else if (!validateDisabled) onValidate?.();
+      } else if (event.altKey && !modifier && /^[1-5]$/.test(event.key)) {
+        const next = VIEWS[Number(event.key) - 1];
+        if (!next || !availableViews.includes(next)) return;
+        event.preventDefault();
+        onViewChange?.(next);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [
+    availableViews,
+    onRunBacktest,
+    onSave,
+    onValidate,
+    onViewChange,
+    paletteOpen,
+    runDisabled,
+    saveDisabled,
+    validateDisabled,
+  ]);
 
   const inspectorNode = (
     <aside
@@ -194,6 +347,15 @@ export const StrategyIde = ({
           ) : null}
         </div>
         <div className="ide__topbar-actions">
+          <Button
+            size="small"
+            tone="ghost"
+            onClick={() => setPaletteOpen(true)}
+            aria-haspopup="dialog"
+            aria-keyshortcuts="Control+K Meta+K"
+          >
+            {t("command.open")} <kbd>Ctrl/⌘ K</kbd>
+          </Button>
           {!layout.outlineOpen ? (
             <Button
               size="small"
@@ -228,6 +390,7 @@ export const StrategyIde = ({
             tone="primary"
             onClick={onRunBacktest}
             disabled={runDisabled || !onRunBacktest}
+            aria-keyshortcuts="Control+Shift+Enter Meta+Shift+Enter"
           >
             <span aria-hidden="true">▷</span> {t("ide.runBacktest")}
           </Button>
@@ -434,6 +597,16 @@ export const StrategyIde = ({
           </div>
         </>
       ) : null}
+      <CommandPalette
+        open={paletteOpen}
+        label={t("command.palette")}
+        searchLabel={t("command.search")}
+        searchPlaceholder={t("command.searchPlaceholder")}
+        emptyLabel={t("command.empty")}
+        closeLabel={t("command.close")}
+        commands={commands}
+        onClose={() => setPaletteOpen(false)}
+      />
     </div>
   );
 };

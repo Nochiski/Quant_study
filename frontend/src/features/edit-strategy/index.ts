@@ -5,6 +5,7 @@ export { PortfolioEditor } from "./ui/portfolio-editor";
 export { RiskEditor } from "./ui/risk-editor";
 export { ExecutionEditor } from "./ui/execution-editor";
 export {
+  canValidateDocument,
   currentDiagnostics,
   currentCompile,
   currentSpec,
@@ -107,6 +108,7 @@ export {
   useOutlineNavigation,
   type StrategyOutlineNavigation,
 } from "./model/use-outline-navigation";
+export type { StrategyOutlineSymbol } from "./model/strategy-outline";
 export {
   useSnippetInsertion,
   type SnippetFeedback,

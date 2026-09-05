@@ -20,6 +20,7 @@ import type { JsonSchema } from "../model/schema-navigator";
 import {
   findOutlineNode,
   projectStrategyOutline,
+  projectStrategyOutlineSymbols,
 } from "../model/strategy-outline";
 import { useStrategyOutline } from "../model/use-strategy-outline";
 import { useOutlineNavigation } from "../model/use-outline-navigation";
@@ -175,6 +176,24 @@ describe("Strategy Outline projection", () => {
       arrayIndex: 0,
       semanticIdentity: null,
     });
+  });
+
+  it("projects present source paths and backend-declared semantic identities for search", () => {
+    const symbols = projectStrategyOutlineSymbols(
+      projectStrategyOutline(parsed(), SCHEMA),
+    );
+    expect(
+      symbols.find((item) => item.pointer === "/risk/max_name_weight"),
+    ).toMatchObject({
+      label: "risk › max_name_weight",
+      description: "/risk/max_name_weight",
+    });
+    expect(
+      symbols.find(
+        (item) => item.pointer === "/factors/factors/0/graph/nodes/0",
+      ),
+    ).toMatchObject({ keywords: ["node", "close", "node:close"] });
+    expect(symbols.some((item) => item.pointer === "/deployment")).toBe(false);
   });
 
   it("retains only the same document epoch's last valid tree during a parse error", () => {

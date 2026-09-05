@@ -34,6 +34,18 @@ type/unit, minimum history, inline validation과 함께 표시한다. 두 모드
 저장되는 전략의 의미는 백엔드의 버전된 `StrategySpec`이 소유하며, 이 폴더는 편집 경험과
 시각화만 소유한다. YAML-first 전환 후 Form/Graph는 read-only projection이 된다.
 
+## YAML IDE 키보드 작업 흐름 (P6-03)
+
+- `Ctrl/⌘+K`: 명령 팔레트에서 Validate·Save·Backtest, YAML/JSON/Form/Graph/Diff, 세 패널,
+  현재 문서의 JSON Pointer·팩터/노드 ID와 테마 선호를 검색한다.
+- `Ctrl/⌘+Enter`, `Ctrl/⌘+S`, `Ctrl/⌘+Shift+Enter`: 각각 현재 원문의 검증, 리비전 저장,
+  백테스트다. 툴바와 같은 invalid/stale/dirty gate를 사용하며 IME 조합 중에는 실행하지 않는다.
+- `Alt+1`~`Alt+5`: 현재 route에서 제공하는 표현 탭만 연다.
+
+패널 크기와 `system`/`light`/`dark` 테마 선호만 versioned local storage에 저장한다. 선택 path와
+view는 URL이 소유하고, StrategySpec·서버 revision에는 UI 선호를 넣지 않는다. 실제 dark 색상
+token은 P6-04에서 저장된 선호에 연결한다.
+
 ## 테마 토큰과 UI primitive (P2-01)
 
 - 테마는 시안과 같은 밝은 중성 테마 하나다. 색·글꼴·간격은 `src/app/styles/tokens.css`의 semantic
@@ -42,9 +54,9 @@ type/unit, minimum history, inline validation과 함께 표시한다. 두 모드
 - `src/app/styles/base.css`는 reset·타이포·focus-visible, `legacy-builder.css`는 Quick/Advanced 편집기
   스타일이다(P6-06에서 제거). `--color-*`는 legacy alias이며 새 코드에서 쓰지 않는다. legacy 스타일은
   `ui-*` 클래스를 건드리지 않는다(cascade 충돌 금지). 차트 색은 `--chart-series-*`만 쓴다.
-- `src/shared/ui`: `Button`, `Tabs`, `Badge`, `Tooltip`, `EmptyState`, `SplitHandle`. 상태는 색과 함께
-  글리프/문구로 표시하고, Tabs·SplitHandle은 키보드로 조작한다. 문구는 `shared/config/messages.ts`에 ko/en을
-  함께 추가한다.
+- `src/shared/ui`: `Button`, `Tabs`, `Badge`, `Tooltip`, `EmptyState`, `SplitHandle`, `CommandPalette`.
+  상태는 색과 함께 글리프/문구로 표시하고, Tabs·SplitHandle·CommandPalette는 키보드로 조작한다.
+  문구는 `shared/config/messages.ts`에 ko/en을 함께 추가한다.
 
 ## 환경 변수
 

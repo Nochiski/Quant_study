@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   Badge,
   Button,
+  CommandPalette,
   EmptyState,
   SplitHandle,
   Tabs,
@@ -241,5 +242,95 @@ describe("Button", () => {
       "type",
       "button",
     );
+  });
+});
+
+describe("CommandPalette", () => {
+  const Harness = ({ execute }: { execute: (id: string) => void }) => {
+    const [open, setOpen] = useState(false);
+    return (
+      <>
+        <button type="button" onClick={() => setOpen(true)}>
+          commands
+        </button>
+        <CommandPalette
+          open={open}
+          label="Command palette"
+          searchLabel="Search commands"
+          searchPlaceholder="Path or command"
+          emptyLabel="No commands"
+          closeLabel="Close"
+          onClose={() => setOpen(false)}
+          commands={[
+            {
+              id: "save",
+              group: "Action",
+              label: "Save revision",
+              disabled: true,
+              execute: () => execute("save"),
+            },
+            {
+              id: "validate",
+              group: "Action",
+              label: "Validate",
+              execute: () => execute("validate"),
+            },
+            {
+              id: "symbol-risk",
+              group: "Symbol",
+              label: "risk › max_name_weight",
+              description: "/risk/max_name_weight",
+              keywords: ["name cap"],
+              execute: () => execute("symbol-risk"),
+            },
+          ]}
+        />
+      </>
+    );
+  };
+
+  it("filters keywords, executes with Enter, closes and restores focus", async () => {
+    const user = userEvent.setup();
+    const execute = vi.fn();
+    render(<Harness execute={execute} />);
+    const trigger = screen.getByRole("button", { name: "commands" });
+    await user.click(trigger);
+    const search = screen.getByRole("combobox", { name: "Search commands" });
+    expect(search).toHaveFocus();
+
+    await user.type(search, "name cap");
+    expect(screen.getAllByRole("option")).toHaveLength(1);
+    fireEvent.keyDown(search, { key: "Enter", isComposing: true });
+    expect(execute).not.toHaveBeenCalled();
+    await user.keyboard("{Enter}");
+
+    expect(execute).toHaveBeenCalledWith("symbol-risk");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("skips disabled commands and traps Tab between search and close", async () => {
+    const user = userEvent.setup();
+    const execute = vi.fn();
+    render(<Harness execute={execute} />);
+    await user.click(screen.getByRole("button", { name: "commands" }));
+    const search = screen.getByRole("combobox", { name: "Search commands" });
+    expect(search).toHaveAttribute(
+      "aria-activedescendant",
+      expect.stringContaining("option-1"),
+    );
+    await user.keyboard("{ArrowUp}{Enter}");
+    expect(execute).toHaveBeenCalledWith("symbol-risk");
+
+    await user.click(screen.getByRole("button", { name: "commands" }));
+    const reopenedSearch = screen.getByRole("combobox", {
+      name: "Search commands",
+    });
+    await user.keyboard("{Shift>}{Tab}{/Shift}");
+    expect(screen.getByRole("button", { name: "Close" })).toHaveFocus();
+    await user.keyboard("{Tab}");
+    expect(reopenedSearch).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });

@@ -9,10 +9,17 @@ import {
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ThemePreferenceProvider } from "../../../shared/lib/theme";
 import { StrategyIde } from "..";
+import {
+  PANEL_LAYOUT_STORAGE_KEY,
+  readPanelSizes,
+} from "../model/use-panel-layout";
 
 afterEach(() => {
   cleanup();
+  localStorage.clear();
+  delete document.documentElement.dataset.theme;
   vi.unstubAllGlobals();
 });
 
@@ -59,12 +66,14 @@ const controlledMatchMedia = (initial: boolean) => {
 const mount = (props: Partial<Parameters<typeof StrategyIde>[0]> = {}) => {
   const { versionLabel = "v12", ...rest } = props;
   return render(
-    <StrategyIde
-      title="새 전략"
-      versionLabel={versionLabel}
-      editor={<textarea aria-label="source" />}
-      {...rest}
-    />,
+    <ThemePreferenceProvider>
+      <StrategyIde
+        title="새 전략"
+        versionLabel={versionLabel}
+        editor={<textarea aria-label="source" />}
+        {...rest}
+      />
+    </ThemePreferenceProvider>,
   );
 };
 
@@ -292,5 +301,136 @@ describe("StrategyIde", () => {
       expect(panel).toHaveAttribute("role", "tabpanel");
       expect(panel).toHaveAttribute("aria-labelledby", tab.id);
     }
+  });
+
+  it("runs only enabled document shortcuts and ignores IME composition", () => {
+    matchMedia(false);
+    const onValidate = vi.fn();
+    const onSave = vi.fn();
+    const onRunBacktest = vi.fn();
+    const onViewChange = vi.fn();
+    mount({
+      onValidate,
+      validateDisabled: false,
+      onSave,
+      saveDisabled: false,
+      onRunBacktest,
+      runDisabled: false,
+      onViewChange,
+      availableViews: ["yaml", "diff"],
+    });
+
+    fireEvent.keyDown(window, { key: "Enter", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "Enter", ctrlKey: true, shiftKey: true });
+    fireEvent.keyDown(window, { key: "5", altKey: true });
+    fireEvent.keyDown(window, {
+      key: "s",
+      ctrlKey: true,
+      isComposing: true,
+      keyCode: 229,
+    });
+
+    expect(onValidate).toHaveBeenCalledTimes(1);
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onRunBacktest).toHaveBeenCalledTimes(1);
+    expect(onViewChange).toHaveBeenCalledWith("diff");
+  });
+
+  it("keeps disabled document shortcuts fail-closed", () => {
+    matchMedia(false);
+    const onValidate = vi.fn();
+    const onSave = vi.fn();
+    const onRunBacktest = vi.fn();
+    mount({
+      onValidate,
+      validateDisabled: true,
+      onSave,
+      saveDisabled: true,
+      onRunBacktest,
+      runDisabled: true,
+    });
+
+    fireEvent.keyDown(window, { key: "Enter", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "Enter", ctrlKey: true, shiftKey: true });
+
+    expect(onValidate).not.toHaveBeenCalled();
+    expect(onSave).not.toHaveBeenCalled();
+    expect(onRunBacktest).not.toHaveBeenCalled();
+  });
+
+  it("searches document symbols and controls panels and theme from the palette", async () => {
+    matchMedia(false);
+    const user = userEvent.setup();
+    const onSelectSymbol = vi.fn();
+    mount({
+      symbols: [
+        {
+          id: "/factors/0/graph/nodes/2",
+          pointer: "/factors/0/graph/nodes/2",
+          label: "factors › momentum › rank_1",
+          description: "/factors/0/graph/nodes/2",
+          keywords: ["node", "rank_1"],
+        },
+      ],
+      onSelectSymbol,
+    });
+
+    await user.click(screen.getByRole("button", { name: /명령/ }));
+    await user.type(screen.getByRole("combobox"), "rank_1");
+    await user.keyboard("{Enter}");
+    expect(onSelectSymbol).toHaveBeenCalledWith("/factors/0/graph/nodes/2");
+
+    await user.click(screen.getByRole("button", { name: /명령/ }));
+    await user.type(screen.getByRole("combobox"), "닫기 계약");
+    await user.keyboard("{Enter}");
+    expect(
+      screen.queryByRole("complementary", { name: "계약" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /명령/ }));
+    await user.type(screen.getByRole("combobox"), "테마: 다크");
+    await user.keyboard("{Enter}");
+    expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+    expect(localStorage.getItem("quant-workbench.theme.v1")).toContain("dark");
+  });
+
+  it("persists bounded panel sizes and rejects hostile stored layouts", async () => {
+    matchMedia(false);
+    const user = userEvent.setup();
+    const first = mount();
+    const outline = screen.getByRole("separator", {
+      name: "전략 구조 크기 조절",
+    });
+    outline.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(outline).toHaveAttribute("aria-valuenow", "256");
+    first.unmount();
+
+    mount();
+    expect(
+      screen.getByRole("separator", { name: "전략 구조 크기 조절" }),
+    ).toHaveAttribute("aria-valuenow", "256");
+
+    const hostile = {
+      getItem: () =>
+        JSON.stringify({
+          version: 1,
+          sizes: {
+            outlineWidth: 421,
+            inspectorWidth: 320,
+            debuggerHeight: 220,
+          },
+        }),
+      setItem: vi.fn(),
+    };
+    expect(readPanelSizes(hostile)).toBeNull();
+    expect(
+      JSON.parse(localStorage.getItem(PANEL_LAYOUT_STORAGE_KEY) ?? "null"),
+    ).toEqual({
+      version: 1,
+      sizes: { outlineWidth: 256, inspectorWidth: 320, debuggerHeight: 220 },
+    });
   });
 });

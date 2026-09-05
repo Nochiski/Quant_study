@@ -16,6 +16,7 @@ import {
   StrategyDiffPanel,
   StrategyOutline,
   PROJECTION_VIEWS,
+  canValidateDocument,
   currentDiagnostics,
   projectStrategySpec,
   revisionDraftId,
@@ -92,11 +93,13 @@ export const StrategyRevisionPage = () => {
     schemaPending: assist.loading,
   });
   const { validateNow, validating } = useCompileDocument(document, dispatch);
+  const canValidate = !validating && canValidateDocument(document);
   const autosave = useAutosave(document, dispatch, {
     schemaVersion: assist.schemaVersion,
   });
   const executionPlans = useExecutionPlans(document, assist.inspectorSource);
   const backtest = useRunBacktest(document, executionPlans);
+  const startBacktest = backtest.run;
   const current =
     document.compiled !== null &&
     document.compiledVersion === document.sourceVersion
@@ -148,6 +151,14 @@ export const StrategyRevisionPage = () => {
       onSnippetEditorReady(editor);
     },
     [onOutlineEditorReady, onSnippetEditorReady],
+  );
+  const runBacktest = useCallback(() => void startBacktest(), [startBacktest]);
+  const selectSymbol = useCallback(
+    (pointer: string): void => {
+      outline.requestSourceReveal(pointer);
+      selectPointer(pointer, "outline");
+    },
+    [outline, selectPointer],
   );
 
   // A save can complete while the user is still typing. Keep that newer text on the current
@@ -209,8 +220,14 @@ export const StrategyRevisionPage = () => {
           specHash: current?.specHash ?? null,
         }}
         saveStatus={saveStatusText(document, status)}
-        onRunBacktest={() => void backtest.run()}
+        onRunBacktest={runBacktest}
         runDisabled={!backtest.canRun}
+        onValidate={validateNow}
+        validateDisabled={!canValidate}
+        onSave={save}
+        saveDisabled={!canSave}
+        symbols={outline.symbols}
+        onSelectSymbol={selectSymbol}
         saveTone={saveStatusTone(document, status)}
         view={view}
         sourceView={stored.format}
@@ -230,11 +247,12 @@ export const StrategyRevisionPage = () => {
           <DocumentToolbar
             state={document}
             onValidate={validateNow}
+            canValidate={canValidate}
             validating={validating}
             onSave={save}
             canSave={canSave}
             saving={status.kind === "saving"}
-            onRun={() => void backtest.run()}
+            onRun={runBacktest}
             decision={backtest.decision}
             runStatus={backtest.status}
           />

@@ -1,4 +1,4 @@
-import { useCallback, useReducer } from "react";
+import { useCallback, useEffect, useReducer, useState } from "react";
 
 /**
  * Panel sizes and collapse flags of the Strategy IDE. Widget-local by design (WORKFLOW 2.6:
@@ -26,6 +26,78 @@ export const DEFAULT_LAYOUT: PanelLayout = {
   outlineOpen: true,
   inspectorOpen: true,
   debuggerOpen: true,
+};
+
+type PanelSizes = Pick<
+  PanelLayout,
+  "outlineWidth" | "inspectorWidth" | "debuggerHeight"
+>;
+type LayoutStorage = Pick<Storage, "getItem" | "setItem">;
+
+export const PANEL_LAYOUT_STORAGE_KEY = "quant-workbench.panel-sizes.v1";
+
+const browserStorage = (): LayoutStorage | null => {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+};
+
+const validSize = (key: keyof PanelSizes, value: unknown): value is number =>
+  Number.isInteger(value) &&
+  (value as number) >= PANEL_BOUNDS[key].min &&
+  (value as number) <= PANEL_BOUNDS[key].max;
+
+export const readPanelSizes = (
+  storage: LayoutStorage | null = browserStorage(),
+): PanelSizes | null => {
+  if (storage === null) return null;
+  try {
+    const value: unknown = JSON.parse(
+      storage.getItem(PANEL_LAYOUT_STORAGE_KEY) ?? "null",
+    );
+    if (typeof value !== "object" || value === null || Array.isArray(value))
+      return null;
+    const record = value as { version?: unknown; sizes?: Partial<PanelSizes> };
+    if (
+      record.version !== 1 ||
+      typeof record.sizes !== "object" ||
+      record.sizes === null
+    )
+      return null;
+    const { outlineWidth, inspectorWidth, debuggerHeight } = record.sizes;
+    if (
+      !validSize("outlineWidth", outlineWidth) ||
+      !validSize("inspectorWidth", inspectorWidth) ||
+      !validSize("debuggerHeight", debuggerHeight)
+    )
+      return null;
+    return { outlineWidth, inspectorWidth, debuggerHeight };
+  } catch {
+    return null;
+  }
+};
+
+const writePanelSizes = (
+  storage: LayoutStorage | null,
+  layout: PanelLayout,
+): void => {
+  try {
+    storage?.setItem(
+      PANEL_LAYOUT_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        sizes: {
+          outlineWidth: layout.outlineWidth,
+          inspectorWidth: layout.inspectorWidth,
+          debuggerHeight: layout.debuggerHeight,
+        },
+      }),
+    );
+  } catch {
+    // Local persistence must never make the editor unusable.
+  }
 };
 
 type Action =
@@ -58,7 +130,14 @@ const reduce = (state: PanelLayout, action: Action): PanelLayout => {
 };
 
 export const usePanelLayout = (initial: PanelLayout = DEFAULT_LAYOUT) => {
-  const [layout, dispatch] = useReducer(reduce, initial);
+  const [storage] = useState(browserStorage);
+  const [layout, dispatch] = useReducer(reduce, initial, (base) => ({
+    ...base,
+    ...readPanelSizes(storage),
+  }));
+  useEffect(() => {
+    writePanelSizes(storage, layout);
+  }, [layout, storage]);
   return {
     layout,
     resize: (

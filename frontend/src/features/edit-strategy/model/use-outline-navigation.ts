@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { locatePointer, locateRange } from "../../../shared/lib/yaml12";
 import type {
@@ -7,7 +7,12 @@ import type {
 } from "../../../shared/ui/code-editor";
 import type { DocumentState } from "./document-state";
 import type { JsonSchema } from "./schema-navigator";
-import { findOutlineNode, type StrategyOutlineNode } from "./strategy-outline";
+import {
+  findOutlineNode,
+  projectStrategyOutlineSymbols,
+  type StrategyOutlineNode,
+  type StrategyOutlineSymbol,
+} from "./strategy-outline";
 import {
   useStrategyOutline,
   type StrategyOutlineSnapshot,
@@ -28,6 +33,7 @@ type OutlineNavigationOptions = {
 
 export type StrategyOutlineNavigation = {
   snapshot: StrategyOutlineSnapshot | null;
+  symbols: readonly StrategyOutlineSymbol[];
   onEditorReady: (editor: CodeEditorHandle | null) => void;
   onEditorSelectionChange: (selection: EditorSelection) => void;
   onSelectOutlineNode: (node: StrategyOutlineNode) => void;
@@ -47,6 +53,10 @@ export const useOutlineNavigation = ({
   onSelectedPointer,
 }: OutlineNavigationOptions): StrategyOutlineNavigation => {
   const snapshot = useStrategyOutline(state, schema);
+  const symbols = useMemo(
+    () => projectStrategyOutlineSymbols(snapshot?.nodes ?? []),
+    [snapshot?.nodes],
+  );
   const editor = useRef<CodeEditorHandle | null>(null);
   const latestSnapshot = useRef(snapshot);
   const latestSelected = useRef(selectedPointer);
@@ -237,6 +247,7 @@ export const useOutlineNavigation = ({
 
   return {
     snapshot,
+    symbols,
     onEditorReady,
     onEditorSelectionChange,
     onSelectOutlineNode,

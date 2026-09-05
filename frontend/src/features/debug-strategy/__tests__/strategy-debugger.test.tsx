@@ -216,6 +216,9 @@ const traceResponse = (): StrategyTraceResponse => ({
   },
 });
 
+const selectedNodeSentinel = (securityId: string): number =>
+  499_000 + Number(securityId.slice("sec-".length)) + 0.123456;
+
 const pagedTraceResponse = (
   request: StrategyTraceRequest,
 ): StrategyTraceResponse => {
@@ -228,7 +231,9 @@ const pagedTraceResponse = (
       operation: `operation.${nodeId}`,
       as_of: asOf,
       security_id: securityId,
-      value: 0.25,
+      // A selected-node sentinel proves that virtualization displays the exact server value;
+      // it must not derive one from the node or security identity on the client.
+      value: nodeId === "n499" ? selectedNodeSentinel(securityId) : 0.25,
       status: "ok" as const,
       inputs: [],
     })),
@@ -512,6 +517,8 @@ describe("StrategyDebugger", () => {
     expect(viewport).toHaveFocus();
     await user.keyboard("{End}");
     expect(await within(panel).findByText("sec-99")).toBeInTheDocument();
+    await user.keyboard("{Home}");
+    expect(await within(panel).findByText("sec-0")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
@@ -637,21 +644,56 @@ describe("StrategyDebugger", () => {
       nodeLists.length,
     );
 
-    nodeLists[0]!.focus();
-    expect(nodeLists[0]).toHaveFocus();
-    await user.keyboard("{Home}");
-    expect(
-      await within(nodeLists[0]!).findByText("operation.n0"),
-    ).toBeInTheDocument();
-    await user.keyboard("{End}");
-    expect(
-      await within(nodeLists[0]!).findByText("operation.n499"),
-    ).toBeInTheDocument();
-
-    securityList.focus();
+    Object.defineProperty(securityList, "clientHeight", {
+      configurable: true,
+      value: 648,
+    });
+    for (
+      let attempt = 0;
+      attempt < 30 && document.activeElement !== securityList;
+      attempt += 1
+    )
+      await user.tab();
     expect(securityList).toHaveFocus();
     await user.keyboard("{End}");
     expect(await within(securityList).findByText("sec-99")).toBeInTheDocument();
+    await user.keyboard("{Home}");
+    expect(await within(securityList).findByText("sec-0")).toBeInTheDocument();
+    await user.keyboard("{End}");
+    expect(await within(securityList).findByText("sec-99")).toBeInTheDocument();
+
+    const visibleNodeList = within(securityList).getAllByRole("list", {
+      name: "2 FactorGraph 노드",
+    })[0]!;
+    const visiblePipeline =
+      visibleNodeList.closest<HTMLElement>('[role="listitem"]')!;
+    const visibleSecurity = within(visiblePipeline).getByRole("heading", {
+      level: 3,
+    }).textContent!;
+    Object.defineProperty(visibleNodeList, "clientHeight", {
+      configurable: true,
+      value: 174,
+    });
+    await user.tab();
+    expect(visibleNodeList).toHaveFocus();
+    const outerScrollTop = securityList.scrollTop;
+    await user.keyboard("{Home}");
+    expect(securityList.scrollTop).toBe(outerScrollTop);
+    expect(
+      await within(visibleNodeList).findByText("operation.n0"),
+    ).toBeInTheDocument();
+    await user.keyboard("{End}");
+    expect(securityList.scrollTop).toBe(outerScrollTop);
+    expect(
+      await within(visibleNodeList).findByText("operation.n499"),
+    ).toBeInTheDocument();
+    expect(
+      within(visibleNodeList).getByText(
+        selectedNodeSentinel(visibleSecurity).toLocaleString("en-US", {
+          maximumFractionDigits: 8,
+        }),
+      ),
+    ).toBeInTheDocument();
   }, 20_000);
 
   it("discards a fingerprint drift on a later linked-trace page", async () => {

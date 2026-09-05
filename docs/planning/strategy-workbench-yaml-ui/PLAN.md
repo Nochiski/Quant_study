@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: CHANGES_REQUESTED
+project_status: SELF_CHECK
 current_phase: P5
 current_pr: P5-01
 active_prs: [P5-01]
 parallel_window: []
-last_updated: 2026-09-05T13:40:32+09:00
+last_updated: 2026-09-05T13:55:12+09:00
 planned_prs: 50
 merged_prs: 41
 approved_prs: 41
@@ -22,13 +22,13 @@ progress_percent: 82
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `CHANGES_REQUESTED` |
+| Project status | `SELF_CHECK` |
 | Current phase | `P5` |
 | Current/next PR | `P5-01` |
 | Active PR | `P5-01` |
 | Progress | `41 / 50 merged (82%)` |
 | Approved | `41 / 50` |
-| Aggregated at | `2026-09-05 13:40 KST` |
+| Aggregated at | `2026-09-05 13:55 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -77,7 +77,7 @@ progress_percent: 82
 | P2 | App Shell and visual foundation | 4 | 4 | `MERGED` |
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
 | P4 | Outline, Contract, Projections | 10 | 10 | `MERGED` |
-| P5 | Truthful Trace UI | 3 | 0 | `CHANGES_REQUESTED` |
+| P5 | Truthful Trace UI | 3 | 0 | `SELF_CHECK` |
 | P6 | Professional release and migration | 7 | 1 | `WAITING` |
 | **Total** |  | **50** | **41** | **82%** |
 <!-- PLAN:PHASES:END -->
@@ -86,16 +86,16 @@ progress_percent: 82
 
 | 항목 | 값 |
 |---|---|
-| PR | `P5-01` Correctness pipeline을 조회하는 scoped trace API CHANGES_REQUESTED · fourth-review P2 cancellation gap 수정 · [#65](https://github.com/Nochiski/Quant_study/pull/65) |
+| PR | `P5-01` Correctness pipeline을 조회하는 scoped trace API SELF_CHECK · fourth-review cancellation fix 검증 완료 · [#65](https://github.com/Nochiski/Quant_study/pull/65) |
 | Intent | 기존 truthful portfolio pipeline과 factor evaluator를 단일 계산 owner로 재사용해 전문 사용자가 제한된 date/security/factor/node trace를 provenance와 함께 조회하게 한다 |
 | Acceptance | `POST /api/v1/strategies/debug/trace`; inline draft 또는 saved revision; as-of/security/factor/node/raw/starting holdings scope; deterministic ordering; row/page cap; cancellation; 계산 전 invalid/capability diagnostic; `spec_hash/snapshot_id/registry_version/plan_hash` provenance |
 | Non-goals | 별도 factor 계산기, frontend Debugger shell(P5-02), full linked trace/risk/order projection(P5-03), persistent strategy repository(P6-01) |
 | Branch/worktree | `feat/p5-01-scoped-trace-api` (`Quant_study-p5-01`) |
 | Base SHA | `5a242ec` (P4-08 merge main) |
-| Head SHA | `3e2bac9` (third review-fix; initial implementation `752f66b`) |
-| Diff stat | base…fix 47 files, +5,375/-291. OpenAPI/generated SDK와 exhaustive numeric/cancellation/port/raw/schedule regression이 포함된다. wire·truthful calculation·compatibility를 분리하면 거짓 성공 또는 미생성 intermediate가 되어 WORKFLOW 12절 size exception 유지 |
-| Focused tests | raw numeric/starting-holding schedule/portfolio·trace·backtest wire/factor overflow/truthful pipeline 150 passed |
-| Full gate | backend pytest 1,022 passed·Ruff·Pyright; frontend Vitest 369 passed·typecheck·lint·build; OpenAPI/SDK 2회 17-file hash deterministic; generated TypeScript narrowing·legacy TargetTape hash parity·diff-check clean |
+| Head SHA | `29e15e0` (fourth review-fix; initial implementation `752f66b`) |
+| Diff stat | base…fix 47 files, +5,662/-309. OpenAPI/generated SDK와 exhaustive numeric/cancellation/port/raw/schedule regression이 포함된다. wire·truthful calculation·compatibility를 분리하면 거짓 성공 또는 미생성 intermediate가 되어 WORKFLOW 12절 size exception 유지 |
+| Focused tests | raw contract·scope·factor output cancellation과 기존 numeric/schedule/wire/truthful pipeline 251 passed; architecture 7 passed |
+| Full gate | backend pytest 1,027 passed·Ruff `src tests`·Pyright; frontend Vitest 369 passed·typecheck·lint·build; OpenAPI/SDK 변경 없음·기존 17-file deterministic 증거 유지; diff-check clean |
 
 ---
 
@@ -217,7 +217,7 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P5-01` | Correctness pipeline을 조회하는 scoped trace API | P1.5-04, P1-03 | `CHANGES_REQUESTED` | [#65](https://github.com/Nochiski/Quant_study/pull/65) · fourth review P2 1건 · raw/scope/factor materialization cancellation 보완 중 |
+| [ ] | `P5-01` | Correctness pipeline을 조회하는 scoped trace API | P1.5-04, P1-03 | `SELF_CHECK` | [#65](https://github.com/Nochiski/Quant_study/pull/65) · fourth review fix `29e15e0` · same reviewer fifth pass 준비 |
 | [ ] | `P5-02` | Date/security/node 선택 Debugger shell | P3-05, P5-01, P2-03 | `WAITING` | — |
 | [ ] | `P5-03` | Raw→Target trace, risk before/after, order delta estimate | P4-01, P4-07, P5-02 | `WAITING` | — |
 
@@ -254,7 +254,7 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
-| P5-01 | `review_p5_01` | `5a242ec` | `c936f8e` | REQUEST_CHANGES fourth pass | P2 1 open | 3차 P1 3건은 해소. raw contract consumer 재검증, trace scope scan, factor output materialization이 취소 뒤에도 전체 입력을 소비하는 공백을 동일 checkpoint 계약으로 보완; 초대형 `sorted(set(...))` 내부 정렬 latency는 비차단 잔여 위험 | 2026-09-05 |
+| P5-01 | `review_p5_01` | `5a242ec` | `29e15e0` | REQUEST_CHANGES fourth pass; fix SELF_CHECK | P2 1 pending re-review | raw contract construction·consumer 검증과 trace scope·factor output·portfolio materialization에 동일 bounded checkpoint를 적용하고 첫 원소 cancellation에서 전체 collection 미소비를 회귀 고정; 초대형 `sorted(set(...))` 내부 정렬 latency는 비차단 잔여 위험 | 2026-09-05 |
 | P4-08 | `review_p4_08` | `bdee3f7` | `684dc69` | APPROVE (최초 P1 2/P2 3과 new-draft badge를 동일 reviewer 재검토에서 모두 해소) | 2 (해소) | 대형 Diff 전체 행 virtualization은 P6-04, 서로 다른 history page 간 선택은 P6-02 범위 | 2026-09-05 |
 | P4-07 | `review_p4_07` | `f9a0e35` | `380d583` | APPROVE (REQUEST_CHANGES P1 1/P2 1 해소 후 동일 reviewer 재승인) | 0 | saved JSON Graph↔source browser 통합과 대형 DAG 시각·키보드 UX는 P6 E2E/성능·접근성에서 확인 | 2026-09-05 |
 | P4-09 | `review_p4_09` | `25d8b45` | `160fad4` | APPROVE | 0 | factor 보유 실제 route→URL→editor reveal/focus 통합 테스트와 plan-null registry/data provenance 표시를 후속 보강 | 2026-09-05 |
@@ -297,7 +297,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
-| P5-01 | third-review regression 150 passed; fourth reviewer focused 150·architecture 7 passed | backend pytest 1,022·Ruff·Pyright; frontend typecheck·lint·Vitest 369·build | OpenAPI/SDK 2회 17-file SHA-256 deterministic; startBacktest 404/409/422·preview 422 schema/actual parity와 generated TS exhaustive narrowing | 3차 P1 3건 해소 확인. cancellation probe에서 raw numeric 2,000/2,000과 factor values 1,000/1,000이 취소 후 소비되어 P2 보완 중 | [#65](https://github.com/Nochiski/Quant_study/pull/65) latest review HEAD `c936f8e`; CI 4/4 pass; fourth pass REQUEST_CHANGES P2 1 | 2026-09-05 |
+| P5-01 | fourth-fix focused 251 passed; architecture 7 passed | backend pytest 1,027·Ruff `src tests`·Pyright; frontend typecheck·lint·Vitest 369·build | API wire 변경 없음; 기존 OpenAPI/SDK 17-file deterministic·schema parity 증거 유지 | constructor/consumer raw numeric은 첫 check 뒤 1/2,000 미만에서 취소, scope observation과 factor output은 첫 원소 1/1,000에서 취소; FactorGraph/TargetTape·projection 후속 단계 미진입 검증 | [#65](https://github.com/Nochiski/Quant_study/pull/65) fourth review fix `29e15e0`; same reviewer fifth pass 준비 | 2026-09-05 |
 | P4-08 | author focused 75/66 + reviewer focused 5 files 75 passed | frontend typecheck·lint·vitest 368·build; reviewer 독립 전체 368; real-backend PIT E2E 포함; backend Ruff | OpenAPI/SDK 재생성 deterministic·clean | save source/hash/canonical 결합과 fail-closed 재compile, edit/명시 검증 baseline retry, EOF·대형 duplicate/reorder non-zero, v51 현재 revision page, Diff view 409 recovery, new draft badge까지 검증 | [#63](https://github.com/Nochiski/Quant_study/pull/63) `review_p4_08` APPROVE P0/P1/P2 0, review HEAD `684dc69` CI 4/4 pass | 2026-09-05 |
 | P4-07 | FactorGraph model/UI·disconnected node·plan-null·same-pointer source 복귀·execution gate·new/revision route 53 passed | frontend typecheck·lint·vitest 350·build; real-backend PIT 포함 | generated API 변경 없음 | 실행 노드는 backend plan 순서/contract, disconnected authored node는 별도 미실행 영역·validation contract·exact pointer; hidden editor focus 금지와 명시적 projection→source reveal, Form/JSON selection·undo 보존 검증 | [#62](https://github.com/Nochiski/Quant_study/pull/62) `review_p4_07` APPROVE P0/P1/P2 0, latest approval-doc HEAD CI 4/4 pass, MERGED (`bdee3f7`) | 2026-09-05 |
 | P4-10 | schema coherence·snippet hook/UI·new/revision route 47 passed | frontend typecheck·lint·vitest 317·build; real-backend PIT 포함; editor gzip 136.63 KB | OpenAPI/SDK 재생성 deterministic·semantic diff clean | metadata query 오류는 unavailable, schema/contract hash·registry 세대 불일치는 incompatible로 fail-closed; JSON projection YAML-only, feedback epoch/status 왕복, 실제 factor graph 삽입·중복·syntax 무변경·dirty compile·focus·단일 undo 검증 | [#60](https://github.com/Nochiski/Quant_study/pull/60) `review_p4_10` APPROVE P0/P1/P2 0, latest HEAD CI 4/4 pass, MERGED (`20491b8`) | 2026-09-05 |
@@ -337,6 +337,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | P5-01 fourth-review fix `29e15e0`: `RawObservationSet`이 optional validation checkpoint를 단일 계약으로 소유하고 mock cancellable adapter의 construction과 application consumer revalidation이 같은 callback을 사용한다. trace scope, raw→factor 변환, factor output map, portfolio field/publication materialization도 bounded `_checkpointed`를 사용한다. 첫 raw numeric·scope observation·factor output에서 취소해 각각 1개만 소비하고 FactorGraph/TargetTape·projection이 시작되지 않는 회귀를 추가했다. focused 251·architecture 7, backend 1,027, frontend 369와 모든 표준 정적/build gate를 통과해 SELF_CHECK 전환 | fourth-review P2 1 회귀 고정·raw port/application responsibility·same-reviewer 준비 |
 | 2026-09-05 KST | Codex | P5-01 동일 reviewer 4차 검토에서 이전 P1 3건 해소와 focused 150·backend 1,022·frontend 369·CI 4/4를 확인했으나 cooperative cancellation P2 1건을 재현해 CHANGES_REQUESTED 전환. raw contract consumer 재검증, trace scope scan, factor output materialization에 동일 bounded checkpoint를 관통시키고 첫 raw numeric·scope observation·factor output에서 전체 collection 소비 전 중단되는 회귀를 추가한다 | raw→FactorGraph→TargetTape cancellation acceptance·application/port owner 공유·same-reviewer loop |
 | 2026-09-05 KST | Codex | P5-01 third-review fix와 전체 gate, 47 files +5,376/-291 size exception을 PR #65 본문에 동기화하고 동일 reviewer `review_p5_01`의 fourth-pass full-diff 검토로 IN_REVIEW 전환 | same-reviewer review-fix gate·latest CI gate |
 | 2026-09-05 KST | Codex | P5-01 third-review fix `3e2bac9`: preview/backtest 실제 coded error를 shared inbound discriminator 모델에서 OpenAPI/generated SDK로 생성하고 TypeScript exhaustive narrowing을 고정했다. RawObservationSet 단일 계약이 모든 numeric field와 previous_weight의 finite를 생성·소비 경계에서 검증하고, domain compiler의 `PortfolioRebalanceSchedule`을 preflight와 TargetTape가 공유해 later-only/no-frame starting holding을 typed 진단으로 차단한다. focused 150, backend 1,022, frontend 369, 모든 정적·build·17-file generated deterministic gate를 통과해 SELF_CHECK 전환 | third-review P1 3 회귀 고정·wire/raw/schedule SoT·책임분리·same-reviewer 준비 |

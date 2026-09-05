@@ -1,18 +1,30 @@
-"""S03 슬라이스 선언 — 유니버스 존재·상태 `universe_daily` v1 · 정책 선언표 `universe_policy`
-(DESIGN v1.2 §4-1, GATES v1.0 §3 ⑦·㉒, §1 EG3-P09, §4 FX-1-006·011·013~017).
+"""S03·S03B 슬라이스 선언 — 유니버스 존재·상태·시장 파생 `universe_daily` v2 · 정책 선언표
+`universe_policy` (DESIGN v1.2 §4-1, GATES v1.0 §3 ⑦·㉒, §1 EG3-P09, §4 FX-1-006·011~017, §5-B8).
 
 `universe_daily` 는 처음으로 **앞서 커밋된 equity 테이블을 입력으로 읽는** 테이블이다 —
-`security_span`·`trading_calendar`(S02)·`security`(S01)가 `stg_*` 와 같은 규약으로 `_pinned/` 에
-고정된다(inputs.source_root). 격자 = span × 캘린더라 EG1 우변은 Σ `security_span.n_days` 이고
-coverage_gap·delisted 행은 만들지 않는다(GAP-21, 캘린더 max = backfill_end).
+`security_span`·`trading_calendar`(S02)·`security`(S01)·`price_daily`(S04)가 `stg_*` 와 같은
+규약으로 `_pinned/` 에 고정된다(inputs.source_root). 격자 = span × 캘린더라 EG1 우변은
+Σ `security_span.n_days` 이고 coverage_gap·delisted 행은 만들지 않는다(GAP-21, 캘린더 max =
+backfill_end).
+
+S03B(시장 파생, 09-05): S03 컬럼 뒤에 `mktcap_krw`·`adv20_krw`·`listing_age_days`·`no_trade_run`
+을 붙이고 `status='suspended'` 판정을 `halt_state ∨ (price_kind='reference' ∧ no_trade_run ≥ k)`
+로 완성한다. 가격 축은 stage 두 원장 대신 equity `price_daily`(EG20 으로 stage 와 동일) 하나에서
+읽는다.
 
 산출 규칙 상수(게이트 임계 아님, GATES §5-B8 부류)는 `baseline_seed_s03.json` → `_const`:
-  `universe_daily.admin_window_td` (KOSPI·소속부 공란 행의 관리종목 창) · `universe_policy.version`.
+  `universe_daily.admin_window_td` (KOSPI·소속부 공란 행의 관리종목 창) ·
+  `universe_daily.no_trade_run_k` (무거래 연속 임계, 사람 승인) ·
+  `universe_daily.adv_window_td` (adv20 창 폭 — 컬럼 이름이 못박은 20, SQL 리터럴 금지 통로) ·
+  `universe_policy.version`.
 
 테이블 특화 술어(`extra_gates`):
   EG3_universe — 어휘 폐쇄(status·market·sec_type·admin_state_basis) · 불린 팩트 NULL 0 ·
-                 status ⇔ halt_state(S03 규칙) · 격자 ⊆ 구간 · **EG3-P09** halt 열린 채
-                 폐지·coverage_gap 아닌 사유로 끝난 구간 0. 열린 halt 의 건수는 기록형.
+                 status ⇔ (halt_state ∨ run 판정) · 격자 ⊆ 구간 · **EG3-P09** halt 열린 채
+                 폐지·coverage_gap 아닌 사유로 끝난 구간 0 · S03B 재계산 술어(`mktcap` 는 같은 날
+                 `price_daily` 값, `no_trade_run` 은 부호·NULL 이 `price_kind` 와 정합, `adv20`
+                 NULL 은 창 미달만, `listing_age_days` ≥ 0 ∧ 같은 날 listing 과 일치). 열린 halt
+                 건수·run 으로만 suspended 된 건수·run 히스토그램·adv20 분위수는 기록형.
   EG3_policy   — 어휘 폐쇄(policy·threshold_kind·basis) · universe_id 문법 · 'all' 행 존재 ·
                  임계 종류와 값의 정합 · predicate 가 universe_daily 스키마 위에서 바인딩되는가.
 `universe_policy` 는 선언표라 EG1 을 `skip(declaration_table)` 한다(`declaration_table=True`).
@@ -24,7 +36,7 @@ from pathlib import Path
 import duckdb
 from stage.gates import GateResult, GateStatus
 
-from .gates import EquityGateContext
+from .gates import EquityGateContext, require_const
 from .model import AVAILABLE_NONE, BASIS_VOCAB, EquityTable, register
 from .rules_s01 import SEC_TYPE_VOCAB, TICKER_LEN
 
@@ -37,13 +49,18 @@ MARKET_VOCAB: tuple[str, ...] = ("KOSPI", "KOSDAQ")
 # / convention = ETF(지정 대상 아님) / unknown = 판정축 없음(admin_state NULL)
 ADMIN_STATE_BASIS_VOCAB: tuple[str, ...] = (
     "measured", "derived_kospi_window", "convention", "unknown")
-POLICY_VOCAB: tuple[str, ...] = ("all", "investable", "liquid")
+# FIELD_MAP §1 universe_id 어휘의 policy 부분. 'common-stock' 은 소비자 계약 `krx.common-stock` 이
+# 정책표로 풀리도록 S03B 에서 추가(sec_type='common' ∧ status='listed'). 'liquid' 는 어휘만 예약 —
+# 임계(adv20 분위수)는 서버 실측 뒤 등재하므로 행이 없다.
+POLICY_VOCAB: tuple[str, ...] = ("all", "common-stock", "investable", "liquid")
 THRESHOLD_KIND_VOCAB: tuple[str, ...] = ("quantile", "absolute", "flag")
 UNIVERSE_ID_PREFIX = "krx."          # FIELD_MAP §1 — universe_id = '<market>.<policy>'
 
 _BOOL_FACTS: tuple[str, ...] = (
     "halt_state", "liquidation_window", "signal_halt", "signal_halt_release", "signal_admin",
     "signal_liquidation", "signal_delist")
+# no_trade_run 히스토그램 구간(기록형) — k 승인 근거. 상한은 열려 있다.
+_RUN_BUCKETS: tuple[tuple[int, int | None], ...] = ((1, 1), (2, 4), (5, 9), (10, 19), (20, None))
 
 
 def _row(ctx: EquityGateContext, sql: str) -> tuple[object, ...]:
@@ -94,13 +111,101 @@ def _counts(ctx: EquityGateContext, column: str) -> dict[str, int]:
 
 # ── universe_daily ───────────────────────────────────────────────────────────
 
+def _market_checks(ctx: EquityGateContext, k: int,
+                   w: int) -> tuple[dict[str, int], dict[str, object]]:
+    """S03B 컬럼의 재계산 술어 — 산출 행을 입력 `price_daily`·`stg_listing_daily`·`security_span`
+    에 다시 조인해 한 번에 센다(10.9M 행 위에서 조인 1회 + 창 1회). `k` = no_trade_run_k,
+    `w` = adv_window_td (둘 다 baseline).
+
+    `no_trade_run` 은 구간 안 run 자체를 다시 세지 않고 부호·NULL 정합만 본다(0 ⇔ trade ·
+    >0 ⇔ reference · NULL ⇔ 가격 없음). `adv20` 은 창 안 value 행수를 독립 창으로 세어 NULL 여부만
+    대조한다(평균값 자체는 픽스처가 손계산으로 본다).
+    """
+    v = _q(ctx.out_view)
+    (n_status, n_run_neg, n_run_null, n_run_sign, n_mktcap_null, n_mktcap_diff,
+     n_age_null, n_age_neg, n_age_diff, n_by_run, n_age_fb_stock, n_age_fb, n_run_null_rows,
+     run_max) = _row(ctx, f"""
+        SELECT
+          count(*) FILTER (WHERE (u.status = 'suspended') <> coalesce(u.halt_state
+                                 OR (p.price_kind = 'reference' AND u.no_trade_run >= {k}), false)),
+          count(*) FILTER (WHERE u.no_trade_run < 0),
+          count(*) FILTER (WHERE (u.no_trade_run IS NULL) <> (p.price_kind IS NULL)),
+          count(*) FILTER (WHERE (u.no_trade_run = 0 AND p.price_kind <> 'trade')
+                              OR (u.no_trade_run > 0 AND p.price_kind <> 'reference')),
+          count(*) FILTER (WHERE (u.mktcap_krw IS NULL) <> (p.mktcap_krw IS NULL)),
+          count(*) FILTER (WHERE u.mktcap_krw IS DISTINCT FROM p.mktcap_krw),
+          count(*) FILTER (WHERE u.listing_age_days IS NULL),
+          count(*) FILTER (WHERE u.listing_age_days < 0),
+          count(*) FILTER (WHERE l.list_date IS NOT NULL
+                             AND u.listing_age_days <> date_diff('day', l.list_date, u.date)),
+          count(*) FILTER (WHERE u.status = 'suspended' AND NOT u.halt_state),
+          count(*) FILTER (WHERE l.list_date IS NULL AND u.sec_type <> 'etf'),
+          count(*) FILTER (WHERE l.list_date IS NULL),
+          count(*) FILTER (WHERE u.no_trade_run IS NULL),
+          coalesce(max(u.no_trade_run), 0)
+        FROM {v} u
+        LEFT JOIN price_daily p       ON p.ticker = u.ticker AND p.date = u.date
+        LEFT JOIN stg_listing_daily l ON l.ticker = u.ticker AND l.date = u.date""")
+    n_adv_null_mismatch, n_adv_null = _row(ctx, f"""
+        WITH x AS (
+          SELECT u.adv20_krw,
+                 count(p.value_krw) OVER (PARTITION BY u.ticker, s.span_seq ORDER BY u.date
+                                          ROWS BETWEEN {w - 1} PRECEDING
+                                          AND CURRENT ROW) AS n_value
+          FROM {v} u
+          JOIN security_span s ON s.ticker = u.ticker
+                              AND u.date BETWEEN s.first_date AND s.last_date
+          LEFT JOIN price_daily p ON p.ticker = u.ticker AND p.date = u.date)
+        SELECT count(*) FILTER (WHERE (adv20_krw IS NULL) <> (n_value < {w})),
+               count(*) FILTER (WHERE adv20_krw IS NULL)
+        FROM x""")
+    hist = {f"{lo}-{hi}" if hi else f"{lo}+": _n(
+        ctx, f"SELECT count(*) FROM {v} WHERE no_trade_run >= {lo}"
+             + (f" AND no_trade_run <= {hi}" if hi else "")) for lo, hi in _RUN_BUCKETS}
+    quantiles = _row(ctx, f"""
+        SELECT quantile_cont(adv20_krw, [0.1, 0.25, 0.5, 0.75, 0.9])
+        FROM {v} WHERE sec_type = 'common' AND adv20_krw IS NOT NULL""")[0]
+    checks = {
+        # S03B 규칙: status='suspended' ⇔ halt_state ∨ (reference ∧ run ≥ k)
+        "n_status_halt_mismatch": int(str(n_status)),
+        "n_no_trade_run_negative": int(str(n_run_neg)),
+        "n_no_trade_run_null_mismatch": int(str(n_run_null)),
+        "n_no_trade_run_sign_mismatch": int(str(n_run_sign)),
+        "n_mktcap_null_mismatch": int(str(n_mktcap_null)),
+        "n_mktcap_price_mismatch": int(str(n_mktcap_diff)),
+        "n_adv20_null_mismatch": int(str(n_adv_null_mismatch)),
+        "n_listing_age_null": int(str(n_age_null)),
+        "n_listing_age_negative": int(str(n_age_neg)),
+        "n_listing_age_listing_mismatch": int(str(n_age_diff)),
+    }
+    metrics: dict[str, object] = {
+        "no_trade_run_k": k,
+        "adv_window_td": w,
+        "n_suspended_by_run": int(str(n_by_run)),
+        "n_no_trade_run_null": int(str(n_run_null_rows)),
+        "no_trade_run_max": int(str(run_max)),
+        "no_trade_run_hist": hist,
+        "n_adv20_null": int(str(n_adv_null)),
+        "n_mktcap_null": _null(ctx, "mktcap_krw"),
+        "n_listing_age_fallback": int(str(n_age_fb)),
+        "n_listing_age_fallback_stock": int(str(n_age_fb_stock)),
+        "adv20_common_quantiles": (None if quantiles is None
+                                   else [float(str(x)) for x in quantiles]),
+    }
+    return checks, metrics
+
+
 def eg3_universe(ctx: EquityGateContext) -> GateResult:
-    """EG3-P07·P09·P13 + S03 상태 규칙 정합. 상수를 안 쓰므로 baseline 유무와 무관하게 돈다.
+    """EG3-P07·P09·P13 + S03 상태 규칙 정합 + S03B 시장 파생 재계산 술어.
 
     P09 는 GATES §1 술어 그대로다 — `end_reason ∈ {delisted, coverage_gap}` 인 구간 끝의 열린
     halt 는 정상(폐지까지 재거래 없음 930건·현재 정지 중)이라 술어 밖이고, 그 건수는 기록형으로
     남긴다. 술어 안에 남는 것은 `data_gap`(예약 어휘) 구간 끝뿐이다.
+    S03B 판정에 쓰는 k(`no_trade_run_k`)·창 폭(`adv_window_td`)은 baseline — 미등재면 게이트
+    전체가 `skip(no_baseline)`.
     """
+    k = int(require_const(ctx, "no_trade_run_k"))
+    w = int(require_const(ctx, "adv_window_td"))
     v = _q(ctx.out_view)
     checks = {
         "n_ticker_bad_width": _n(
@@ -121,9 +226,6 @@ def eg3_universe(ctx: EquityGateContext) -> GateResult:
         "n_bool_fact_null": _n(
             ctx, f"SELECT count(*) FROM {v} WHERE "
                  + " OR ".join(f"{_q(c)} IS NULL" for c in _BOOL_FACTS)),
-        # S03 규칙: status='suspended' ⇔ halt_state. S03B 가 무거래 연속 판정을 더하면 술어를 넓힌다
-        "n_status_halt_mismatch": _n(
-            ctx, f"SELECT count(*) FROM {v} WHERE (status = 'suspended') <> halt_state"),
         # 격자 ⊆ 구간 — EG1 은 합만 보므로 구간 밖 날짜가 다른 결손과 상쇄되면 못 본다
         "n_rows_off_span": _n(
             ctx, f"SELECT count(*) FROM {v} u WHERE NOT EXISTS (SELECT 1 FROM security_span s "
@@ -134,6 +236,8 @@ def eg3_universe(ctx: EquityGateContext) -> GateResult:
                  "ON u.ticker = s.ticker AND u.date = s.last_date "
                  "WHERE u.halt_state AND s.end_reason NOT IN ('delisted', 'coverage_gap')"),
     }
+    market_checks, market_metrics = _market_checks(ctx, k, w)
+    checks.update(market_checks)
     metrics: dict[str, object] = {
         "n_halt_open_at_coverage_end": _n(
             ctx, f"SELECT count(*) FROM security_span s JOIN {v} u "
@@ -158,8 +262,9 @@ def eg3_universe(ctx: EquityGateContext) -> GateResult:
         "sec_type_counts": _counts(ctx, "sec_type"),
         "status_vocab": list(STATUS_VOCAB),
         "admin_state_basis_vocab": list(ADMIN_STATE_BASIS_VOCAB),
+        **market_metrics,
     }
-    return _result("EG3_universe", checks, metrics, "유니버스 상태 불변식 성립")
+    return _result("EG3_universe", checks, metrics, "유니버스 상태·시장 파생 불변식 성립")
 
 
 eg3_universe.gate_name = "EG3_universe"         # type: ignore[attr-defined]
@@ -167,15 +272,19 @@ eg3_universe.gate_name = "EG3_universe"         # type: ignore[attr-defined]
 UNIVERSE_DAILY = register(EquityTable(
     name="universe_daily",
     grain=("date", "ticker"),
+    # 순서 = DESIGN §4-1: S03 컬럼 → S03B 시장 파생 4개 → PIT 2개. `adv20_krw` 는 duckdb
+    # avg(DECIMAL) 의 반환 타입(DOUBLE)을 그대로 받는다(정밀도 리터럴 캐스팅 금지).
     columns={"date": "DATE", "ticker": "VARCHAR", "status": "VARCHAR", "market": "VARCHAR",
              "sec_type": "VARCHAR", "halt_state": "BOOLEAN", "admin_state": "BOOLEAN",
              "admin_state_basis": "VARCHAR", "liquidation_window": "BOOLEAN",
              "signal_halt": "BOOLEAN", "signal_halt_release": "BOOLEAN",
              "signal_admin": "BOOLEAN", "signal_liquidation": "BOOLEAN",
              "signal_delist": "BOOLEAN", "admin_flag": "BOOLEAN",
+             "mktcap_krw": "DECIMAL(18,0)", "adv20_krw": "DOUBLE",
+             "listing_age_days": "BIGINT", "no_trade_run": "BIGINT",
              "available_date": "DATE", "available_basis": "VARCHAR"},
-    inputs=("security_span", "trading_calendar", "security", "stg_listing_daily",
-            "stg_master_daily", "stg_disclosure", "stg_price_daily", "stg_etf_price_daily"),
+    inputs=("security_span", "trading_calendar", "security", "price_daily", "stg_listing_daily",
+            "stg_master_daily", "stg_disclosure"),
     partition_class="date_axis",
     partition_key_expr="year(date)",
     # build.py 가 연도 루프를 아직 지원하지 않는다(NotImplementedError). 서버는 security_span 의
@@ -192,15 +301,15 @@ UNIVERSE_DAILY = register(EquityTable(
                           "end_reason"),
         "trading_calendar": ("date",),
         "security": ("ticker", "sec_type"),
-        "stg_listing_daily": ("ticker", "date", "market", "sect_tp", "sect_available"),
+        "price_daily": ("ticker", "date", "volume_shr", "value_krw", "mktcap_krw", "price_kind"),
+        "stg_listing_daily": ("ticker", "date", "market", "sect_tp", "sect_available",
+                              "list_date"),
         "stg_master_daily": ("ticker", "date", "is_admin_issue", "is_trade_halt",
                              "is_liquidation"),
-        "stg_disclosure": ("rcept_no", "rcept_dt", "ticker", "has_ticker", "report_nm"),
-        "stg_price_daily": ("ticker", "date", "volume_shr"),
-        "stg_etf_price_daily": ("ticker", "date", "volume_shr")},
+        "stg_disclosure": ("rcept_no", "rcept_dt", "ticker", "has_ticker", "report_nm")},
     available_basis=("default",),
     content_date_column="date",
-    consts=("admin_window_td",),
+    consts=("admin_window_td", "no_trade_run_k", "adv_window_td"),
     extra_gates=(eg3_universe,),
 ))
 

@@ -1,9 +1,9 @@
 [
  {"case": "FX-1-017",
   "key": {"policy": "all", "rule_seq": "1"}, "column": "predicate", "expect": "TRUE",
-  "source": "hand — S03 은 스키마 + 'all' 1행(DESIGN v1.2 §4-1). 임계 등재는 S03B 실측 후",
+  "source": "hand — 정책 미적용 행(DESIGN v1.2 §4-1). S03B 가 common-stock·investable 을 더했고 liquid 는 서버 실측 뒤",
   "expect_source": "hand", "fixture_class": "positive",
-  "note": "GATES §4 는 ('liquid', 1) 로 적었으나 v1.2 가 S03 을 'all' 만으로 좁혔다(§9 정정). liquid 행은 S03B 에서 이 파일에 추가"},
+  "note": "GATES §4 는 ('liquid', 1) 로 적었으나 v1.2 가 S03 을 'all' 만으로 좁혔다(§9 정정). liquid 행은 adv20 분위수 실측 뒤 이 파일에 추가"},
 
  {"case": "FX-1-017b",
   "key": {"policy": "all", "rule_seq": "1"}, "column": "threshold_kind", "expect": "flag",
@@ -23,5 +23,31 @@
  {"case": "FX-1-017e",
   "key": {"policy": "all", "rule_seq": "1"}, "column": "measured_at", "expect": null,
   "source": "hand — 잰 임계가 없으니 잰 날도 없다",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "FX-1-017f",
+  "key": {"policy": "common-stock", "rule_seq": "1"}, "column": "universe_id", "expect": "krx.common-stock",
+  "source": "doc:FIELD_MAP §1 — 소비자 계약 UNIVERSE='krx.common-stock' (backend/tests/contract/test_raw_observation_port.py:33)",
+  "expect_source": "doc:EQUITY_FIELD_MAP §1", "fixture_class": "positive",
+  "note": "policy 값 자체가 'common-stock' 이라 'krx.' || policy 문법과 정합한다(하이픈은 정책 어휘의 일부)"},
+
+ {"case": "FX-1-017g",
+  "key": {"policy": "common-stock", "rule_seq": "1"}, "column": "predicate", "expect": "sec_type = 'common'",
+  "source": "hand — common-stock = sec_type='common' ∧ status='listed' (S03B)",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "FX-1-017h",
+  "key": {"policy": "common-stock", "rule_seq": "2"}, "column": "predicate", "expect": "status = 'listed'",
+  "source": "hand — 정지(halt ∨ 무거래 run) 행은 보통주여도 유니버스 밖",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "FX-1-017i",
+  "key": {"policy": "investable", "rule_seq": "3"}, "column": "predicate", "expect": "NOT admin_state",
+  "source": "hand — investable = common-stock + NOT admin_state + NOT liquidation_window (플래그형만, 임계 없음)",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "FX-1-017j",
+  "key": {"policy": "investable", "rule_seq": "4"}, "column": "threshold_kind", "expect": "flag",
+  "source": "hand — S03B 의 정책 행은 전부 flag. quantile 행(liquid)은 서버 실측 뒤",
   "expect_source": "hand", "fixture_class": "positive"}
 ]

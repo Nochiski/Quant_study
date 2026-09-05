@@ -796,7 +796,8 @@ WHERE g.${VALUE_COL} = 0
 | `security.delist_sample_seed`·`delist_sample_n` | EG-C ⑩ | 1 | 표본 고정 |
 | `security_span.respan_count` | EG1·EG-C ③ | 1 | 구간 2개 이상 티커 수 |
 | `corp_ticker.map_rate_min` | 1단계 통과 조건 | 1 | `corp_code NOT NULL` 비율 (분모 정의는 §5-A4) |
-| `universe_daily.no_trade_run_k` | `status='suspended'` 판정 | 1 | 무거래 연속 임계 |
+| `universe_daily.no_trade_run_k` | `status='suspended'` 판정 · EG3_universe `n_status_halt_mismatch` | 1 | 무거래 연속 임계 — S03B 제안 5(P6 중앙값 4 + 1), 서버 `no_trade_run_hist` 로 승인 |
+| `universe_daily.adv_window_td` | `adv20_krw` 창 · EG3_universe `n_adv20_null_mismatch` | 1 | 컬럼 이름이 못박은 20 — SQL 리터럴 금지 규약의 통로일 뿐 조정 상수가 아니다 |
 | `universe_daily.contract_probe_dates` | EG-C ② | 1 | 계약 검사 날짜 배열 |
 | `price_daily.krx_kis_ratio_match_min` | EG8-P01 | 2 | 일치율 |
 | `adj_factor.factor_product_tol` | EG3-P04 | 2 | 부동소수 허용오차 |
@@ -842,7 +843,7 @@ WHERE g.${VALUE_COL} = 0
 | 4 | `corp_ticker` | 1 | ● | ●(§3-④) | — 비팩트 | ●(P01,P02,P07) | ●(FX-1-003,005) | ●(a) | skip(no_multi_version) | ● | — | skip(not_grid) | — |
 | 5 | `trading_calendar` | 1 | ● | ●(§3-⑤) | — 비팩트 | ●(P01) | ●(FX-1-009) | ●(a) | skip(no_multi_version) | ● | — | skip(not_grid) | — |
 | 6 | `index_daily` | 1 | ● | ●(§3-⑥) | ●(P01–P04) | ●(P01) | ●(FX-1-010) | ●(a) | skip(no_multi_version) | ● | skip(no_cross_source) | skip(not_grid) | — |
-| 7 | `universe_daily` | 1 | ● | ●(§3-⑦) | ●(P01–P04) | ●(P01,P07,P09,P13) | ●(FX-1-006,011,013,014,015,016 — 012 는 S03B) | ●(a,c) | skip(no_multi_version) | ● | ●(P08 경유) | skip(not_grid) | ●②⑤⑩ |
+| 7 | `universe_daily` | 1 | ● | ●(§3-⑦) | ●(P01–P04) | ●(P01,P07,P09,P13) | ●(FX-1-006,011,012,013,014,015,016) | ●(a,c) | skip(no_multi_version) | ● | ●(P08 경유) | skip(not_grid) | ●②⑤⑩ |
 | 8 | `universe_policy` | 1 | ● | skip(declaration_table) | — 비팩트 | ●(P01,P13) | ●(FX-1-017) | ●(a) | skip(no_multi_version) | ● | — | skip(not_grid) | — |
 | 9 | `price_daily` | 2 | ● | ●(§3-⑧) | ●(P01–P04) | ●(P01,P07) | ●(FX-2-001,002,005,006) | ●(a) | skip(no_multi_version) | ●(P01) | ●(P01) | skip(not_grid) | ●①⑤⑩ |
 | 10 | `corp_event` | 2 | ● | ●(§3-⑨) | ●(P01–P04, 축=announce) | ●(P01,P07,P13) | ●(FX-2-003,008) | ●(a) | skip(no_multi_version) | ●(P08) | ●(P04) | skip(not_grid) | ●④ |
@@ -1171,12 +1172,12 @@ SELECT (SELECT count(*) FROM opinion_broker_daily)
 | FX-1-009 | `trading_calendar` | `date` = 연휴 직후 1일 | `prev_td` | stage:`stg_index_daily` | 직전 거래일 |
 | FX-1-010 | `index_daily` | (`코스피`, 고정일) | `close_idx` | stage:`stg_index_daily.close_idx` | 1:1 사본 |
 | FX-1-011 | `universe_daily` | backfill_end × 살아있는 1종(005930) + 그 다음 날 | `status` | hand | backfill_end 행 `listed`, 2026-08-21 행 **부재**(NULL 기대) — coverage_gap 행을 만들지 않는다(§9 정정, GAP-21) |
-| FX-1-012 | `universe_daily` | 무거래 연속 종목 1 | `no_trade_run` | hand(가격 행 카운트) | 직전 무거래 연속 거래일 수 |
+| FX-1-012 | `universe_daily` | (`000030`, 2019-02-12·01-09·01-08) + k 경계 (01-15 / 01-14) + (`101970`, 2014-08-20·08-21) | `no_trade_run`, `status` | hand(가격 행 카운트) | 22 · 1 · 0 / run 5 = k → suspended, run 4 → listed / 해제일 무거래 run 49 → suspended, 첫 거래일 0 (S03B, §9) |
 | FX-1-013 | `universe_daily` | 정지 지정 → 거래 재개 사례 1 | `halt_state` at 지정일·재개일 | doc:DESIGN §10 P6·P12 | 지정일 true, 첫 `volume>0` 일 false |
 | FX-1-014 | `universe_daily` | 정지+해제 동일일 1 (1,214 중) | `halt_state`, `signal_halt`, `signal_halt_release` | doc:P12 | 당일 양쪽 신호 true, `halt_state` 규칙대로 |
 | FX-1-015 | `universe_daily` | KOSDAQ 관리종목 소속부 1 | `admin_state`, `admin_state_basis` | stage:`stg_listing_daily.sect_tp` | true / `measured` |
 | FX-1-016 | `universe_daily` | 정리매매 개시 1 (349 중) | `liquidation_window` | doc:P6 | 개시일~`delist_date` true |
-| FX-1-017 | `universe_policy` | (`all`, 1) | `predicate`, `threshold_kind`, `universe_id` | hand | 선언표 `all` 1행(`TRUE`·`flag`·`krx.all`). `liquid` 행은 S03B 임계 등재 뒤(§9 정정) |
+| FX-1-017 | `universe_policy` | (`all`, 1) + S03B (`common-stock`, 1·2)·(`investable`, 3·4) | `predicate`, `threshold_kind`, `universe_id` | hand · doc:FIELD_MAP §1 | 선언표 `all` 1행(`TRUE`·`flag`·`krx.all`) + `krx.common-stock`(`sec_type = 'common'`·`status = 'listed'`) + investable `NOT admin_state`·flag. `liquid` 행은 adv20 분위수 서버 실측 뒤(§9 정정) |
 
 ### 2단계
 
@@ -1714,4 +1715,17 @@ workspace/dongmin/src/equity/
 | EG7 비율 분모 (S05) | `Σ reject / n_src`(EG1 우변) | 프레임 `gates.eg7_range` 는 `n_reject / (n_out + n_reject)` — dedup 이 있는 테이블에서는 두 정의가 갈린다(`corp_event` 절단본 0.176 vs 0.375). 프레임 미수정, `corp_event.threshold_EG7` seed 는 프레임 정의로 측정. 정본 정의는 미결(§8) | P21 |
 | FX-2-003 (S05) | `corp_event` 무상증자 1.2:1 사례 1 (doc:2단계 기록) | 절단본·seed 픽스처 파일에는 사례가 없어 `tests/test_equity_s05_event.py` 의 `stg_event_fric` 손 트리(SK하이닉스 0.2 배정 → ratio 1.2)로 검증하고, 서버 빌드 뒤 실사례를 `fixtures/corp_event.json` 에 등재한다 | 절단본 `stg_event_fric` 0행 |
 | EG8-P04 (S05) | `corp_event` 첫 빌드 skip(no_baseline) | 분모(기준가≠전일종가)가 `price_daily` 를 요구하므로 S05 에서는 술어를 붙이지 않고 S06 이후에 `corp_event` 재판정으로 붙인다 | DESIGN §4-2 |
+
+**S03B `universe_daily` v2 · `universe_policy` 구현 정정 (2026-09-05, `rules_s03.py`)**
+
+| 항목 | 초안 | 정정 | 근거 |
+|---|---|---|---|
+| §5-B8 `no_trade_run_k` | metric 이름만 | `baseline_seed_s03.json` 에 **제안값 5** 등재(`_measured.note` 에 근거·"사람 승인 필요"). 절단본 무거래 run 분포 {1×7, 3×3, 10, 12, 22, 49, 55, 66, 116}, k=3/5/10/20 에서 run 으로만 suspended 211/201/181/148행. 승인 축은 서버 `EG3_universe.no_trade_run_hist`(1 / 2-4 / 5-9 / 10-19 / 20+)·`n_suspended_by_run` | DESIGN §4-1 S03B · §10 P6(첫 거래 중앙값 4일) |
+| `universe_daily` 입력 | S03 `stg_price_daily` ∪ `stg_etf_price_daily`(`volume_shr`) + S03B 에 `price_daily` **추가** | stage 가격 두 원장을 equity `price_daily` 로 **대체**(입력 7개) — 같은 값(EG20)이고 거래 재개 축·시장 파생이 한 조인에서 나온다. `_reject`(nonpositive_price·off_calendar) 행은 격자 밖이거나 `volume>0 ∧ close≤0` 라 halt 닫힘 축에 실효 없음 | DESIGN §4-2 EG20 · 서버 RSS 3.9GB |
+| `listing_age_days` 기준 | DESIGN "`D − security.list_date`" | **같은 날 `stg_listing_daily.list_date`**(PIT). `security.list_date` 는 티커당 최신 listing 행 값이라 재상장 2종의 첫 구간(036220 1,570 + 101970 648 = 2,218행)이 음수 — 부정 픽스처 `test_security_list_date로_상장일수를_재면_…`. 결측(ETF)은 구간 `first_date` 하한, basis 는 컬럼 없이 `security.list_date_basis`/`sec_type` + 기록형 `n_listing_age_fallback[_stock]` | 절단본 `stg_listing_daily` 036220 2007-06-05 → 2024-03-13 |
+| `no_trade_run` 결측 | "NULL 전파 vs run 끊기" 미결 | 가격 행 없음(`price_kind` NULL)은 그날 NULL 이고 run 을 **끊는다**(다음 무거래일 1). 게이트 `n_no_trade_run_null_mismatch`(NULL ⇔ price_kind NULL)·`n_no_trade_run_sign_mismatch`(0 ⇔ trade, >0 ⇔ reference) | 합성 stage 테스트 K00010 td5 |
+| EG3_universe | S03 술어 | `n_status_halt_mismatch` 를 `(status='suspended') ⇔ coalesce(halt_state ∨ (price_kind='reference' ∧ run ≥ k), false)` 로 재정의(`price_kind` 는 입력 `price_daily` 재조인). 추가 폐기형: `n_no_trade_run_negative`·`n_mktcap_null_mismatch`·`n_mktcap_price_mismatch`·`n_adv20_null_mismatch`(독립 창 카운트 = `adv_window_td`)·`n_listing_age_null`·`n_listing_age_negative`·`n_listing_age_listing_mismatch`. 기록형: `n_suspended_by_run`·`no_trade_run_hist`·`no_trade_run_max`·`n_adv20_null`·`n_mktcap_null`·`n_listing_age_fallback[_stock]`·`adv20_common_quantiles`(p10/25/50/75/90, `liquid` 임계 근거). k·창 폭 미등재면 게이트 전체 `skip(no_baseline)` | GATES §0-1 기록형 · §5-C7(항진명제 회피: run 자체는 재계산하지 않고 부호·NULL 정합만) |
+| `adv20` 창 폭 리터럴 | SQL 에 `19 PRECEDING`·`= 20` | `test_equity_build::test_sql파일에_상수_하드코딩_없음`(허용 {0,1,2,-1}) 이 잡는다 → baseline `universe_daily.adv_window_td`=20 을 `_const` 로 주입, 프레임 경계 `(adv_window_td − 1) PRECEDING`(duckdb 컬럼식 프레임 지원 확인). 컬럼 이름 adv20 이 못박은 값이라 사실상 불변 | §1-12 등록부 |
+| `universe_policy` 행 | `all` 1행, `common-stock` 은 sec_type 축(정책 행 아님, S21) | **7행** `all`·`common-stock`(sec_type='common' ∧ status='listed')·`investable`(+ NOT admin_state, NOT liquidation_window), 전부 flag. `POLICY_VOCAB` 에 `common-stock` 추가 → `universe_id = 'krx.' \|\| policy` 문법 그대로 `krx.common-stock`(소비자 계약 값). `rule_seq` 는 `generate_subscripts`(리터럴 금지). `liquid` 행은 서버 adv20 분위수 뒤. `version` s03-v1 → s03b-v2 | FIELD_MAP §1 · DESIGN §7 |
+| §2 매트릭스 7행 · FX-1-012 · FX-1-017 | 012 는 S03B / 017 은 (`all`, 1) | 012 를 `universe_daily` 픽스처에 편입(a~g: run 22·1·0, k 경계 01-15/01-14, 101970 해제일 무거래) + mktcap 2·adv20 4·listing_age 5 케이스(총 52). 017 은 f~j(common-stock·investable) 추가 | `fixtures/universe_daily.json`·`universe_policy.json` |
 

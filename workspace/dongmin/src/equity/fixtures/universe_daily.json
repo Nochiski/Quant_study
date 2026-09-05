@@ -178,5 +178,101 @@
   "key": {"date": "2024-10-31", "ticker": "005930"}, "column": "signal_delist", "expect": "true",
   "source": "hand — 주요사항보고서(해외증권시장주권등상장폐지결정) 2024-10-31. '%상장폐지%' 술어는 해외 상폐 결정도 잡는다",
   "expect_source": "hand", "fixture_class": "positive",
-  "note": "신호이지 상태가 아니다 — status 는 그대로 listed"}
+  "note": "신호이지 상태가 아니다 — status 는 그대로 listed"},
+
+ {"case": "FX-1-012",
+  "key": {"date": "2019-02-12", "ticker": "000030"}, "column": "no_trade_run", "expect": "22",
+  "source": "hand — stg_price_daily 000030 volume_shr=0 이 2019-01-09 부터 마지막 존재일 02-12 까지 22 거래일(가격 행 카운트). 정지 공시 신호 없음",
+  "expect_source": "hand", "fixture_class": "positive",
+  "note": "GATES §4 FX-1-012. 우리은행 지주 전환 전 정지 — halt_state 는 false 인데 run 으로 suspended 가 되는 대표 사례"},
+
+ {"case": "FX-1-012b",
+  "key": {"date": "2019-01-09", "ticker": "000030"}, "column": "no_trade_run", "expect": "1",
+  "source": "hand — 무거래 첫날은 1 (D 포함)",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "FX-1-012c",
+  "key": {"date": "2019-01-08", "ticker": "000030"}, "column": "no_trade_run", "expect": "0",
+  "source": "hand — 거래일(volume 6,296,886)은 0",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "FX-1-012d",
+  "key": {"date": "2019-01-15", "ticker": "000030"}, "column": "status", "expect": "suspended",
+  "source": "hand — run 5 = no_trade_run_k(5) 첫 도달일. halt_state false, price_kind reference",
+  "expect_source": "hand", "fixture_class": "positive",
+  "note": "k 경계 픽스처 — baseline no_trade_run_k 가 바뀌면 이 케이스의 날짜가 바뀐다(2019-01-14 는 run 4 = listed)"},
+
+ {"case": "FX-1-012e",
+  "key": {"date": "2019-01-14", "ticker": "000030"}, "column": "status", "expect": "listed",
+  "source": "hand — run 4 < k. 무거래 4일까지는 상태가 아니라 비유동",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "FX-1-012f",
+  "key": {"date": "2014-08-20", "ticker": "101970"}, "column": "status", "expect": "suspended",
+  "source": "hand — 해제 공시일(halt_state false, FX-1-013c) 인데 volume 0 → run 49 ≥ k. 다음 날 첫 거래 2,048,382",
+  "expect_source": "hand", "fixture_class": "positive",
+  "note": "halt 규칙이 놓치는 '해제일 무거래' 를 run 규칙이 덮는다"},
+
+ {"case": "FX-1-012g",
+  "key": {"date": "2014-08-21", "ticker": "101970"}, "column": "no_trade_run", "expect": "0",
+  "source": "hand — 첫 거래일에 run 이 0 으로 끊긴다",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "mktcap_is_price_daily_005930",
+  "key": {"date": "2010-01-04", "ticker": "005930"}, "column": "mktcap_krw", "expect": "119165163633000",
+  "source": "stage:stg_price_daily.mktcap_krw — 809,000 × 147,299,337 (= price_daily.mktcap_krw, 조정 없음)",
+  "expect_source": "stage:stg_price_daily.mktcap_krw", "fixture_class": "positive"},
+
+ {"case": "mktcap_etf_069500",
+  "key": {"date": "2010-01-04", "ticker": "069500"}, "column": "mktcap_krw", "expect": "1301283000000",
+  "source": "stage:stg_etf_price_daily.mktcap_krw — 22,710 × 57,300,000 (ETF 도 같은 컬럼)",
+  "expect_source": "stage:stg_etf_price_daily.mktcap_krw", "fixture_class": "positive"},
+
+ {"case": "adv20_window_not_full_005930",
+  "key": {"date": "2010-01-28", "ticker": "005930"}, "column": "adv20_krw", "expect": null,
+  "source": "hand — 캘린더 19번째 거래일: 창 [D−19, D] 에 19행뿐 → NULL (만들어 내지 않는다)",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "adv20_first_full_window_005930",
+  "key": {"date": "2010-01-29", "ticker": "005930"}, "column": "adv20_krw", "expect": "310792575918.3",
+  "source": "hand — 2010-01-04~01-29 20 거래일 value_krw 합 6,215,851,518,366 / 20",
+  "expect_source": "hand", "fixture_class": "positive",
+  "note": "D 포함 [D−19, D]. 랙은 뷰가 건다(available_date = date)"},
+
+ {"case": "adv20_respan_restarts_036220",
+  "key": {"date": "2024-03-13", "ticker": "036220"}, "column": "adv20_krw", "expect": null,
+  "source": "hand — 재상장 둘째 구간 첫날. 창은 (ticker, span_seq) 안에서만 산다 — 2016 구간 값이 새면 여기서 잡힌다",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "adv20_respan_20th_day_036220",
+  "key": {"date": "2024-04-09", "ticker": "036220"}, "column": "adv20_krw", "expect": "39505356477.0",
+  "source": "hand — 2024-03-13~04-09 20 거래일 value_krw 합 790,107,129,540 / 20",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "listing_age_005930",
+  "key": {"date": "2010-01-04", "ticker": "005930"}, "column": "listing_age_days", "expect": "12626",
+  "source": "stage:stg_listing_daily.list_date — 1975-06-11, 역일 차 12,626",
+  "expect_source": "stage:stg_listing_daily.list_date", "fixture_class": "positive"},
+
+ {"case": "listing_age_first_span_036220",
+  "key": {"date": "2016-05-04", "ticker": "036220"}, "column": "listing_age_days", "expect": "3256",
+  "source": "stage:stg_listing_daily.list_date — 첫 구간의 같은 날 list_date 2007-06-05 (security.list_date 는 재상장 2024-03-13 이라 음수가 된다)",
+  "expect_source": "stage:stg_listing_daily.list_date", "fixture_class": "positive",
+  "note": "PIT: D 에 KRX 가 알려준 상장일. 재상장 2종(036220·101970)에서 security.list_date 와 갈린다"},
+
+ {"case": "listing_age_respan_day0_036220",
+  "key": {"date": "2024-03-13", "ticker": "036220"}, "column": "listing_age_days", "expect": "0",
+  "source": "stage:stg_listing_daily.list_date — 재상장일 = 그날 list_date",
+  "expect_source": "stage:stg_listing_daily.list_date", "fixture_class": "positive"},
+
+ {"case": "listing_age_etf_fallback_069500",
+  "key": {"date": "2026-08-20", "ticker": "069500"}, "column": "listing_age_days", "expect": "6072",
+  "source": "hand — ETF 는 listing 원장에 없어 list_date 결측(P8) → 구간 first_date 2010-01-04 기준 하한(실제 상장 2002-10-14)",
+  "expect_source": "hand", "fixture_class": "positive",
+  "note": "basis 는 티커 단위 security.list_date_basis='unknown' / sec_type='etf' 로 가른다. 주식의 fallback 건수는 EG3_universe.n_listing_age_fallback_stock"},
+
+ {"case": "listing_age_ipo_day_0001A0",
+  "key": {"date": "2026-01-30", "ticker": "0001A0"}, "column": "listing_age_days", "expect": "0",
+  "source": "stage:stg_listing_daily.list_date — 상장일 2026-01-30 = 첫 존재일",
+  "expect_source": "stage:stg_listing_daily.list_date", "fixture_class": "positive"}
 ]

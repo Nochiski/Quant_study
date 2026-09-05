@@ -1,11 +1,13 @@
 {
- "_seed": "S03 (universe_daily · universe_policy) 가 요구하는 baseline 상수. 오케스트레이터가 data/equity/baseline.json 에 병합한다. 둘 다 산출 규칙 상수(GATES §5-B8 의 no_trade_run_k 와 같은 부류)라 게이트 임계가 아니다.",
+ "_seed": "S03·S03B (universe_daily · universe_policy) 가 요구하는 baseline 상수. 오케스트레이터가 data/equity/baseline.json 에 병합한다. 셋 다 산출 규칙 상수(GATES §5-B8 부류)라 게이트 임계가 아니다. no_trade_run_k 는 제안값이며 서버 실측(EG3_universe.no_trade_run_hist) 뒤 사람 승인이 필요하다.",
  "measured_at": "2026-09-05",
  "universe_daily": {
-  "admin_window_td": 365
+  "admin_window_td": 365,
+  "no_trade_run_k": 5,
+  "adv_window_td": 20
  },
  "universe_policy": {
-  "version": "s03-v1"
+  "version": "s03b-v2"
  },
  "_measured": [
   {
@@ -21,16 +23,40 @@
    "note": "DESIGN v1.2 §4-1 「KOSPI = 지정 신호 365거래일 창」. 관리종목 해제 공시가 3건뿐이라(P12) 종료 사건이 없어 창 길이로 닫는다 — 창 안은 [지정일, 지정일 + 364 거래일]. 값을 바꾸면 KOSPI admin_state 이력이 통째로 바뀌므로 재빌드 전 사람 승인."
   },
   {
+   "table": "universe_daily",
+   "metric": "no_trade_run_k",
+   "value": 5,
+   "kind": "convention",
+   "sql": "-- 근거 실측(절단본, 빌드 SQL 과 독립 손계산): 무거래(volume_shr=0) 연속 run 길이 분포 {1×7, 3×3, 10, 12, 22, 49, 55, 66, 116}. halt_state 밖의 긴 run = 000030 22(폐지 전, 공시 없음) · 900050 10·66·116(HK 상장사, 공시 없음) · 900060 해제 뒤 2일 · 101970 해제일 1일. k 별 run 으로만 suspended 되는 행: k=3 211 · k=5 201 · k=10 181 · k=20 148 (halt 126 별도).",
+   "inputs": {},
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "used_by": "sql/universe_daily.sql status (price_kind='reference' ∧ no_trade_run ≥ k → suspended) · rules_s03.eg3_universe n_status_halt_mismatch",
+   "note": "**제안값 — 사람 승인 필요.** 목적은 정지 공시 없이 오래 기준가만 찍히는 종목(P6: 지정 뒤 첫 거래 중앙값 4일·p90 562일·재거래 없음 930)을 잡는 것. k=5 = 1거래주(KRX 주 5일) = P6 중앙값(4)+1 이라 '정지의 긴 절반' 부터 잡고, 단일·이틀 무거래(비유동 우선주의 일상)는 잡지 않는다. 절단본에서 잡히는 최단 무공시 정지는 3일(005930·005935 분할 정지 2018-04-30~05-03) — k=5 는 이를 놓치지만 커널이 reference 행을 방출하지 않으므로(§7) 거래 가능성 판정에는 영향이 없고 유니버스 상태에만 남는다. 대안 k=10(2주)·k=20(adv20 창과 같은 1개월)은 잡히는 행이 각각 10%·26% 준다. 서버 빌드 뒤 EG3_universe.no_trade_run_hist(1 / 2-4 / 5-9 / 10-19 / 20+ 행수, halt_state 무관)와 n_suspended_by_run 을 보고 확정한다. 값을 바꾸면 status 이력과 FX-1-012d 픽스처가 같이 바뀐다."
+  },
+  {
+   "table": "universe_daily",
+   "metric": "adv_window_td",
+   "value": 20,
+   "kind": "convention",
+   "sql": null,
+   "inputs": {},
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "used_by": "sql/universe_daily.sql adv20_krw 창(ROWS BETWEEN adv_window_td−1 PRECEDING) · rules_s03.eg3_universe n_adv20_null_mismatch",
+   "note": "조정 상수가 아니라 컬럼 이름 adv20 이 못박은 정의(DESIGN §4-1 「[D−19, D] 20 거래일」). SQL 본문 숫자 리터럴 금지(test_equity_build::test_sql파일에_상수_하드코딩_없음)라 _const 로 들어올 뿐이다. 값을 바꾸면 컬럼 이름·FIELD_MAP 을 같이 바꿔야 한다 — 사실상 불변."
+  },
+  {
    "table": "universe_policy",
    "metric": "version",
-   "value": "s03-v1",
+   "value": "s03b-v2",
    "kind": "convention",
    "sql": null,
    "inputs": {},
    "measured_at": "2026-09-05",
    "growing": false,
    "used_by": "sql/universe_policy.sql version 컬럼",
-   "note": "정책 집합 판본. 행이 늘거나(S03B investable·liquid) 임계가 바뀌면 올린다. baseline 은 게이트 상수 전용(EQD-10)이지만 SQL 이 문자열 리터럴 없이 판본을 실을 통로가 _const 뿐이라 여기 둔다."
+   "note": "정책 집합 판본. s03-v1 = all 1행 → s03b-v2 = all + common-stock(2행) + investable(4행), 전부 flag. liquid 임계 등재 시 s03b-v3. baseline 은 게이트 상수 전용(EQD-10)이지만 SQL 이 문자열 리터럴 없이 판본을 실을 통로가 _const 뿐이라 여기 둔다."
   }
  ]
 }

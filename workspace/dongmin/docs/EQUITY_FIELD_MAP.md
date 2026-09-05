@@ -9,7 +9,7 @@
 | 축 | 규칙 | 근거 |
 |---|---|---|
 | `security_id` | **`{ticker}:{span_seq}`** — 재상장 2종(036220·101970)은 구간마다 다른 id. mock 의 `"sec-005930-1"` 형식은 쓰지 않는다 | `security_span` grain |
-| `universe_id` | `krx.all`(정책 미적용) · **`krx.common-stock`**(`sec_type='common'`, 계약 테스트 `backend/tests/contract/test_raw_observation_port.py:33` 의 값) · `krx.investable`·`krx.liquid`(`universe_policy` 확정 후) | 계약 테스트 |
+| `universe_id` | `krx.all`(정책 미적용) · **`krx.common-stock`**(`sec_type='common'` ∧ `status='listed'` — S03B `universe_policy` 행, 계약 테스트 `backend/tests/contract/test_raw_observation_port.py:33` 의 값) · `krx.investable`(S03B 플래그 4행: common-stock + `NOT admin_state` + `NOT liquidation_window`) · `krx.liquid`(`adv20_krw` 임계 서버 실측 후) | 계약 테스트 |
 | `market` | `"KRX"` (계약 테스트) · `venue='XKRX'`(커널 `InstrumentId`) | 두 어휘 병기 |
 | `benchmark` | `security_id` 예약 접두 **`idx:`** — `idx:코스피`·`idx:코스닥`·`idx:코스피 200`·`idx:코스닥 150` → `index_daily`. `security` 테이블에 지수 행을 넣지 않는다 | GAP-09 |
 | `sessions` | `trading_calendar`(거래일만). `history_sessions_before_start` 는 캘린더에서 역산 | `RawObservationSet` |

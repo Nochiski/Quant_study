@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: IN_PROGRESS
+project_status: SELF_CHECK
 current_phase: P6
 current_pr: P6-01
 active_prs: [P6-01]
 parallel_window: []
-last_updated: 2026-09-05T18:30:20+09:00
+last_updated: 2026-09-05T18:52:03+09:00
 planned_prs: 50
 merged_prs: 44
 approved_prs: 44
@@ -22,13 +22,13 @@ progress_percent: 88
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_PROGRESS` |
+| Project status | `SELF_CHECK` |
 | Current phase | `P6` |
 | Current/next PR | `P6-01` |
 | Active PR | `P6-01` |
 | Progress | `44 / 50 merged (88%)` |
 | Approved | `44 / 50` |
-| Aggregated at | `2026-09-05 18:30 KST` |
+| Aggregated at | `2026-09-05 18:52 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -78,7 +78,7 @@ progress_percent: 88
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
 | P4 | Outline, Contract, Projections | 10 | 10 | `MERGED` |
 | P5 | Truthful Trace UI | 3 | 3 | `MERGED` |
-| P6 | Professional release and migration | 7 | 1 | `IN_PROGRESS` |
+| P6 | Professional release and migration | 7 | 1 | `SELF_CHECK` |
 | **Total** |  | **50** | **44** | **88%** |
 <!-- PLAN:PHASES:END -->
 
@@ -86,16 +86,16 @@ progress_percent: 88
 
 | 항목 | 값 |
 |---|---|
-| PR | `P6-01` SQLite persistent strategy revision repository IN_PROGRESS |
+| PR | `P6-01` SQLite persistent strategy revision repository SELF_CHECK |
 | Intent | 기존 `StrategyRepositoryPort`와 domain canonical/hydrate를 정본으로 유지하면서 immutable revision envelope를 SQLite에 원자적으로 저장해 프로세스 재시작 뒤에도 전략·원문·provenance를 정확히 복원한다 |
 | Acceptance | versioned schema migration이 반복 실행에 안전함; canonical `StrategySpec`을 domain codec으로 round-trip하고 저장 hash를 재검증; exact source text/format/hash와 UTC provenance/change note 보존; add/append의 revision 불변식과 optimistic concurrency를 두 repository instance에서도 원자적으로 보장; latest/specific get과 deterministic list/history pagination; DB 손상·hash 불일치는 fail-closed; 같은 DB를 다시 연 container에서 전략 복원; bootstrap은 production 기본 파일 경로와 test용 명시 경로를 소유; 기존 memory adapter도 동일 contract 통과 |
 | Non-goals | server draft와 strategy/backtest history UI(P6-02), 원격 DB·분산 lock, 전략 domain/schema 변경, revision 삭제·수정, legacy editor 정리(P6-06) |
 | Branch/worktree | `feat/p6-01-sqlite-strategy-repository` (`Quant_study-p6-01`) |
 | Base SHA | `a609eee` (P5-03 merge main) |
-| Head SHA | 구현 전 |
-| Diff stat | 구현 후 기록 |
-| Focused tests | repository contract matrix, migration/restart/corruption/two-instance concurrency, bootstrap persistence를 구현하며 기록 |
-| Full gate | 구현 후 backend pytest·Ruff·Pyright와 frontend 회귀 gate를 기록 |
+| Head SHA | `79eab39` implementation freeze |
+| Diff stat | 15 implementation/test/doc files, +871/-33. schema migration·record codec·transaction repository·composition root·contract/restart/concurrency tests가 하나의 persistent port acceptance를 이루어 분리 시 한쪽이 실행 불가능하므로 WORKFLOW 12절 size exception 적용 |
+| Focused tests | memory/SQLite repository contract와 migration/restart/corruption/two-instance create/append concurrency, bootstrap/runtime path, architecture 35+ tests 통과 |
+| Full gate | backend 1,059(구조 분리 전 동일 동작)·Ruff·Pyright 통과, Rust extension 재빌드 후 backtest 실패 3건 해소; frontend typecheck·lint·Vitest 403·build; OpenAPI/SDK 2회 생성 semantic diff 0. 최신 구조 기준 전체 backend 재실행 중 |
 
 ---
 
@@ -231,7 +231,7 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P6-01` | SQLite persistent strategy revision repository | P1-07 | `IN_PROGRESS` | — |
+| [ ] | `P6-01` | SQLite persistent strategy revision repository | P1-07 | `SELF_CHECK` | — |
 | [ ] | `P6-02` | Server draft, strategy/revision/backtest history UI | P6-01, P3-06, P4-08 | `WAITING` | — |
 | [ ] | `P6-03` | Keyboard workflow와 Command Palette | P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `WAITING` | — |
 | [ ] | `P6-04` | Large/hostile spec 성능·접근성·i18n과 soft dark theme (`$ref`-only cycle fail-closed 포함) | P3-05, P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `WAITING` | — |
@@ -341,6 +341,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | P6-01 구현을 `79eab39`에 고정했다. SQLite adapter를 migration·canonical record codec·transaction/query 책임으로 분리하고 runtime은 `backend/.local/strategy-revisions.sqlite3`(환경 변수 override), test factory는 동일 adapter의 isolated in-memory mode를 사용한다. memory/SQLite 공통 contract, exact CRLF source·hash·UTC provenance 재시작 복원, future/foreign/wrong-shape schema와 변조 fail-closed, 두 instance create/append race, container 재조립을 회귀로 고정했다. backend 1,059·frontend 403·정적/build·generated semantic diff 0을 1차 통과하고 최신 구조 전체 재검증을 위해 SELF_CHECK 전환한다. 15 files +871/-33은 schema→codec→transaction→bootstrap→contract/restart acceptance를 분리하면 어느 PR도 독립 실행되지 않아 WORKFLOW 12절 size exception을 적용한다 | StrategyRepositoryPort·domain canonical/hydrate SoT·schema/codec/repository/bootstrap 책임분리·13.2 self-check |
 | 2026-09-05 KST | Codex | P5-03 [#68](https://github.com/Nochiski/Quant_study/pull/68)의 approval-doc HEAD와 CI 4/4를 확인해 merge commit `a609eee`로 순차 병합하고 Phase 5를 3/3 완료했다. 최신 main에서 P6-01 전용 worktree를 열고 immutable revision envelope의 SQLite 원자 저장·migration·재시작 복원·두 instance optimistic concurrency를 scope로 고정해 IN_PROGRESS 전환한다 | 13.5 merge gate·44/50 merged·StrategyRepositoryPort/domain canonical-hydrate SoT·adapter/bootstrap 책임분리 |
 | 2026-09-05 KST | Codex | 동일 reviewer `review_p5_03`이 `65d0b18` 최신 전체 diff에서 누적 P1 3건 해소와 새 P0/P1/P2 0을 확인해 APPROVE했다. hostile blank/duplicate에서 세 HTTP 경로 동일 typed 422·schedule/FactorGraph/TargetTape 진입 0, 1,025-field checkpoint 취소, 기존 paging/default-date 회귀를 재현했고 backend 1,041·frontend 403·정적·runtime OpenAPI=tracked·CI 4/4까지 통과했다. 반복 compile 성능은 P6-04, HTTP 정책 docstring P3는 비차단 잔여로 기록하고 APPROVED 전환한다 | independent same-reviewer gate·SoT/책임분리 감사·latest main/CI merge 준비 |
 | 2026-09-05 KST | Codex | raw identity fix와 self-check를 `b05800b`에 고정하고 [#68](https://github.com/Nochiski/Quant_study/pull/68) 본문에 세 P1의 원인·수정·회귀, 공통 execution-error contract, 최신 38-file size exception을 반영했다. 동일 reviewer `review_p5_03`에게 `7edc33d..b05800b` fix와 base 대비 최신 전체 diff를 재검토하도록 IN_REVIEW 전환한다 | same-reviewer closure·13.3 diff freeze·PR body/PLAN 최신화 |

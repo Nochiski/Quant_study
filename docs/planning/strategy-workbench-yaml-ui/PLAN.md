@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: SELF_CHECK
+project_status: IN_REVIEW
 current_phase: P5
 current_pr: P5-01
 active_prs: [P5-01]
 parallel_window: []
-last_updated: 2026-09-05T10:56:41+09:00
+last_updated: 2026-09-05T10:58:19+09:00
 planned_prs: 50
 merged_prs: 41
 approved_prs: 41
@@ -22,13 +22,13 @@ progress_percent: 82
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `SELF_CHECK` |
+| Project status | `IN_REVIEW` |
 | Current phase | `P5` |
 | Current/next PR | `P5-01` |
 | Active PR | `P5-01` |
 | Progress | `41 / 50 merged (82%)` |
 | Approved | `41 / 50` |
-| Aggregated at | `2026-09-05 10:56 KST` |
+| Aggregated at | `2026-09-05 10:58 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -77,7 +77,7 @@ progress_percent: 82
 | P2 | App Shell and visual foundation | 4 | 4 | `MERGED` |
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
 | P4 | Outline, Contract, Projections | 10 | 10 | `MERGED` |
-| P5 | Truthful Trace UI | 3 | 0 | `SELF_CHECK` |
+| P5 | Truthful Trace UI | 3 | 0 | `IN_REVIEW` |
 | P6 | Professional release and migration | 7 | 1 | `WAITING` |
 | **Total** |  | **50** | **41** | **82%** |
 <!-- PLAN:PHASES:END -->
@@ -86,7 +86,7 @@ progress_percent: 82
 
 | 항목 | 값 |
 |---|---|
-| PR | `P5-01` Correctness pipeline을 조회하는 scoped trace API SELF_CHECK |
+| PR | `P5-01` Correctness pipeline을 조회하는 scoped trace API IN_REVIEW · [#65](https://github.com/Nochiski/Quant_study/pull/65) |
 | Intent | 기존 truthful portfolio pipeline과 factor evaluator를 단일 계산 owner로 재사용해 전문 사용자가 제한된 date/security/factor/node trace를 provenance와 함께 조회하게 한다 |
 | Acceptance | `POST /api/v1/strategies/debug/trace`; inline draft 또는 saved revision; as-of/security/factor/node/raw/starting holdings scope; deterministic ordering; row/page cap; cancellation; 계산 전 invalid/capability diagnostic; `spec_hash/snapshot_id/registry_version/plan_hash` provenance |
 | Non-goals | 별도 factor 계산기, frontend Debugger shell(P5-02), full linked trace/risk/order projection(P5-03), persistent strategy repository(P6-01) |
@@ -217,7 +217,7 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P5-01` | Correctness pipeline을 조회하는 scoped trace API | P1.5-04, P1-03 | `SELF_CHECK` | implementation `752f66b` · base `5a242ec` |
+| [ ] | `P5-01` | Correctness pipeline을 조회하는 scoped trace API | P1.5-04, P1-03 | `IN_REVIEW` | [#65](https://github.com/Nochiski/Quant_study/pull/65) · `review_p5_01` pending · implementation `752f66b` |
 | [ ] | `P5-02` | Date/security/node 선택 Debugger shell | P3-05, P5-01, P2-03 | `WAITING` | — |
 | [ ] | `P5-03` | Raw→Target trace, risk before/after, order delta estimate | P4-01, P4-07, P5-02 | `WAITING` | — |
 
@@ -336,6 +336,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | P5-01 [#65](https://github.com/Nochiski/Quant_study/pull/65)을 열고 base `5a242ec`, implementation `752f66b`, self-check `6f3338f`, 26 implementation files +1,894/-73과 전체 gate를 PR 본문에 고정해 fresh review-only agent `review_p5_01` 검토로 IN_REVIEW 전환 | PR별 reviewer 정확히 1명·13.3~13.4 diff freeze/review gate·12절 size exception |
 | 2026-09-05 KST | Codex | P5-01 구현을 `752f66b`에 freeze: StrategySource/Provenance를 domain.strategy 단일 owner로 이동하고 saved/inline source를 해소하는 bounded trace API를 추가했다. FactorGraph output과 node trace는 동일 `_compute_nodes` cache에서 나오며 truthful portfolio pipeline의 raw observation·TargetTape·engine capability·starting holdings를 그대로 사용한다. offset/limit/security/node/raw cap과 cooperative cancellation, structured stale/missing/invalid/capability 오류, 4종 fingerprint를 OpenAPI/generated SDK까지 고정했다. backend focused 17·full 912·Ruff·Pyright, frontend timeout 회귀 2·full 368·typecheck·lint·build, generated deterministic·diff-check 통과 후 SELF_CHECK 전환 | StrategySpec/provenance SoT·factor 계산 단일 owner·application port 책임분리·P5-01 acceptance·12절 size exception |
 | 2026-09-05 KST | Codex | P4-08 PR #63 최신 approval-doc HEAD `983b5f4` CI 4/4 통과 후 merge commit `5a242ec`로 순차 머지하고 main fast-forward. Phase 4 exit을 닫고 메인 기준 `feat/p5-01-scoped-trace-api` 전용 worktree에서 P5-01 IN_PROGRESS 전환 | 13.5 merge gate·단일 active PR·truthful pipeline SoT |
 | 2026-09-05 KST | Codex | 동일 reviewer `review_p4_08`이 review HEAD `684dc69`에서 최초 P1 2/P2 3과 new-draft badge 해소를 재현하고 APPROVE(P0/P1/P2 0). reviewer focused 75·frontend 전체 368·typecheck·lint·build, PLAN consistency, 원격 CI 4/4 통과를 확인해 APPROVED 전환 | 13.5 approval gate·same-reviewer 재승인·backend canonical/hash SoT·latest CI |

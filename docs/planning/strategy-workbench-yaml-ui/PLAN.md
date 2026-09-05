@@ -1,16 +1,16 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: IN_REVIEW
+project_status: CHANGES_REQUESTED
 current_phase: P6
 current_pr: P6-02
 active_prs: [P6-02]
 parallel_window: []
-last_updated: 2026-09-05T21:43:44+09:00
-planned_prs: 50
+last_updated: 2026-09-05T22:03:08+09:00
+planned_prs: 52
 merged_prs: 45
 approved_prs: 45
-progress_percent: 90
+progress_percent: 87
 ---
 
 # YAML Strategy Workbench 실시간 진행 계획
@@ -22,13 +22,13 @@ progress_percent: 90
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_REVIEW` |
+| Project status | `CHANGES_REQUESTED` |
 | Current phase | `P6` |
 | Current/next PR | `P6-02` |
 | Active PR | `P6-02` |
-| Progress | `45 / 50 merged (90%)` |
-| Approved | `45 / 50` |
-| Aggregated at | `2026-09-05 21:43 KST` |
+| Progress | `45 / 52 merged (87%)` |
+| Approved | `45 / 52` |
+| Aggregated at | `2026-09-05 22:03 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -78,22 +78,22 @@ progress_percent: 90
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
 | P4 | Outline, Contract, Projections | 10 | 10 | `MERGED` |
 | P5 | Truthful Trace UI | 3 | 3 | `MERGED` |
-| P6 | Professional release and migration | 7 | 2 | `IN_REVIEW` |
-| **Total** |  | **50** | **45** | **90%** |
+| P6 | Professional release and migration | 9 | 2 | `CHANGES_REQUESTED` |
+| **Total** |  | **52** | **45** | **87%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
 
 | 항목 | 값 |
 |---|---|
-| PR | `P6-02` Server draft, strategy/revision/backtest history UI IN_REVIEW |
-| Intent | invalid source도 보존하는 server-owned draft CAS와 전문 사용자가 저장 전략·revision·backtest 실행 이력을 탐색하는 routed UI를 추가하되 StrategySpec·revision·run lifecycle의 기존 SoT를 재정의하지 않는다 |
-| Acceptance | opaque draft ID와 monotonic version/expected_version으로 exact source·format·source hash·base revision/hash·schema version·UTC updated_at을 SQLite에 저장하고 restart·두 client create/update/delete race를 원자 처리; draft는 compile 성공을 요구하지 않아 invalid source도 복구 가능; 충돌 시 remote record를 포함한 409를 반환하고 UI가 자동 overwrite 없이 remote 적용 또는 명시적 local 유지 재시도를 제공; 서버 장애 시 기존 local recovery가 fallback으로 유지; strategy list와 revision history를 deterministic pagination으로 탐색하고 원하는 revision 편집/diff로 이동; backtest run history를 최신순으로 조회해 상태·source provenance와 run detail로 연결; `/research/strategies`와 `/research/backtests` direct route·nav·loading/empty/error 상태; OpenAPI/generated SDK와 backend/frontend 계약 테스트 동기화 |
-| Non-goals | durable backtest artifact/run ledger, 인증·사용자별 draft ownership, CRDT/자동 병합, legacy editor 제거(P6-06), command palette(P6-03) |
+| PR | `P6-02` Server draft persistence/CAS/recovery UI CHANGES_REQUESTED |
+| Intent | invalid source를 보존하는 server-owned draft CAS와 multi-device 복구 UX를 추가하되 StrategySpec·immutable revision의 기존 SoT를 재정의하지 않는다. 최초 review의 size finding에 따라 strategy/revision history와 backtest history는 P6-08/P6-09로 분리한다 |
+| Acceptance | opaque draft ID와 monotonic version/expected_version으로 UTF-8 표현 가능한 exact source·format·source hash·base revision/hash·schema version·UTC updated_at을 SQLite에 저장하고 restart·두 client create/update/delete race를 원자 처리; compile 성공을 요구하지 않는 invalid source 복구; UTF-8 불가 입력은 typed 422; 모든 GET/PUT/409 record를 요청 draft ID·요청 snapshot과 결합해 malformed 응답을 fail-closed; base 원문으로 revert하면 known version을 CAS-delete하고 409 newer writer를 보존; URL draft ID 확정 전 edit도 유실 없이 저장; 서버 invalid와 transport offline을 구분; local recovery fallback 유지; OpenAPI/generated SDK와 backend/frontend hostile 계약 테스트 동기화 |
+| Non-goals | strategy/revision history(P6-08), backtest history(P6-09), durable backtest artifact/run ledger, 인증·사용자별 draft ownership, CRDT/자동 병합, legacy editor 제거(P6-06), command palette(P6-03) |
 | Branch/worktree | `feat/p6-02-server-draft-history` (`Quant_study-p6-02`) |
 | Base SHA | `206ee41` (P6-01 merge 기록 포함 latest main) |
-| Head SHA | `d83aa2a` (review freeze; implementation `6d1a5f9`) |
-| Diff stat | base 대비 52 files, +4,929/-234 (OpenAPI/generated 1,517줄·테스트 971줄 포함); server draft CAS와 history API/route가 한 사용자 흐름으로 함께 성립해야 하므로 WORKFLOW 12절 size exception 적용 |
+| Head SHA | `3217e16` (reviewed; fix 진행 중) |
+| Diff stat | 최초 review diff 52 files, +4,929/-234; reviewer size finding에 따라 history 두 수직 슬라이스를 P6-08/P6-09로 분리 중 |
 | Focused tests | backend draft/history 15 passed; server draft 6 passed; router/document route는 frontend 전체 413 tests에서 통과; architecture/server entrypoint 10 passed |
 | Full gate | backend 1,112 passed, Ruff·Pyright; frontend 413 passed, typecheck·lint·build; Rust 13 passed + fmt/clippy; root entrypoint 5 passed; OpenAPI/SDK 2회 deterministic, diff check 통과 |
 
@@ -232,12 +232,14 @@ Phase exit:
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [x] | `P6-01` | SQLite persistent strategy revision repository | P1-07 | `MERGED` | [#69](https://github.com/Nochiski/Quant_study/pull/69) · `review_p6_01` APPROVE |
-| [ ] | `P6-02` | Server draft, strategy/revision/backtest history UI | P6-01, P3-06, P4-08 | `IN_REVIEW` | `d83aa2a` diff freeze; fresh reviewer 요청 |
+| [ ] | `P6-02` | Server draft persistence/CAS/recovery UI | P6-01, P3-06, P4-08 | `CHANGES_REQUESTED` | `review_p6_02` P1 4/P2 3; 동일 reviewer fix loop |
 | [ ] | `P6-03` | Keyboard workflow와 Command Palette | P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `WAITING` | — |
 | [ ] | `P6-04` | Large/hostile spec 성능·접근성·i18n과 soft dark theme (`$ref`-only cycle fail-closed 포함) | P3-05, P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `WAITING` | — |
 | [ ] | `P6-05` | Playwright/visual regression infrastructure와 CI | P2-03, P3-05, P6-04 | `WAITING` | — |
-| [ ] | `P6-06` | 전체 browser E2E·실구동 시나리오 검증, migration gate, 조건부 legacy cleanup | P6-01, P6-02, P6-03, P6-04, P6-05 | `WAITING` | — |
+| [ ] | `P6-06` | 전체 browser E2E·실구동 시나리오 검증, migration gate, 조건부 legacy cleanup | P6-01, P6-02, P6-03, P6-04, P6-05, P6-08, P6-09 | `WAITING` | — |
 | [x] | `P6-07` | Root frontend/backend development entrypoints | P0-02, P0-03 | `MERGED` | [#56](https://github.com/Nochiski/Quant_study/pull/56) · `review_p6_07` APPROVE |
+| [ ] | `P6-08` | Strategy list와 revision history routed UI | P6-01, P6-02, P3-06, P4-08 | `WAITING` | P6-02 review size finding으로 분리 |
+| [ ] | `P6-09` | Backtest run history routed UI와 provenance | P6-08, P3-05 | `WAITING` | P6-02 review size finding으로 분리 |
 
 Phase exit:
 
@@ -254,6 +256,7 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
+| P6-02 | `review_p6_02` | `206ee41` | `3217e16` | CHANGES_REQUESTED (UTF-8 500·cross-draft identity·revert cleanup·size P1 4, 초기 ID·invalid 상태·history completeness P2 3) | 4 | update/delete 교차 race와 unmount in-flight 전용 회귀, auth/ownership은 후속 경계 | 2026-09-05 |
 | P6-01 | `review_p6_01` | `a609eee` | `15370c7` | APPROVE (누적 P1 모두 폐쇄, latest full diff의 새 P0/P1/P2 0) | 0 | strategy별 chain startup/list N+1은 P6-04 측정; 외부 ANALYZE의 sqlite_stat*은 의도적으로 fail-closed | 2026-09-05 |
 | P5-03 | `review_p5_03` | `fcc37ee` | `65d0b18` | APPROVE (누적 P1 3건 해소, latest full diff의 새 P0/P1/P2 0) | 0 | page/chunk별 pipeline 재계산 비용은 P6-04 측정·축소; RawObservationContractError docstring의 HTTP 정책 설명은 비차단 P3 | 2026-09-05 |
 | P5-02 | `review_p5_02` | `e4fabd4` | `fceddf7` | APPROVE (최초 P1 1/P2 4를 동일 reviewer 재검토에서 모두 해소) | 1 (해소) | P5-03 다단계 trace cache 크기/gcTime, URL asOf/security 정규화와 backend invariant 기반 duplicate row는 후속 검토 | 2026-09-05 |
@@ -343,6 +346,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | P6-02 fresh reviewer가 raw `\\ud800` source의 unhandled 500, cross-draft GET/409 identity 신뢰, base revert 후 stale server draft 잔존, 독립 배포 가능한 history까지 묶은 size exception을 P1 4건으로 판정했다. 초기 draft ID 전 edit race, typed invalid/offline 혼합, out-of-range history/provenance 누락 P2 3건도 확인했다. P6-02를 server draft 수직 슬라이스로 축소하고 history는 P6-08/P6-09로 분리하며 같은 `review_p6_02`에게 수정분을 재검토받도록 CHANGES_REQUESTED로 전환했다 | independent hostile review·same-reviewer closure·small PR rule·fail-closed source/identity |
 | 2026-09-05 KST | Codex | P6-02를 base `206ee41` 대비 review freeze `d83aa2a`(52 files, +4,929/-234)로 고정했다. 자체 계약 점검에서 application invalid 422와 FastAPI malformed 422를 명시적 union으로 보강했고 OpenAPI/SDK를 재생성한 뒤 clean deterministic을 재확인했다. 이제 신규 독립 reviewer에게 correctness·CAS race·SoT/경계·history UX와 size exception을 함께 검토 요청한다 | 13.3 diff freeze·typed HTTP contract·fresh reviewer gate |
 | 2026-09-05 KST | Codex | P6-02 구현을 `6d1a5f9`에 고정했다. SQLite schema v2 exact-source draft register와 application-owned base 검증/CAS, typed 404/409/422 HTTP·generated SDK, 충돌·복구·offline UI, strategy/revision/backtest history direct route를 연결했다. backend 1,112·frontend 413·Rust 13·root 5 tests와 Ruff·Pyright·typecheck·lint·build·OpenAPI 2회 deterministic을 통과해 SELF_CHECK로 전환했다. 총 4,912줄 중 OpenAPI/generated 1,517줄·테스트 971줄이며 server draft와 history의 단일 P6-02 acceptance를 end-to-end로 닫기 위한 12절 size exception을 기록한다 | draft exact source/CAS SoT·immutable revision/run lifecycle projection·HTTP/UI 책임분리·12절 size exception |
 | 2026-09-05 KST | Codex | latest main `206ee41`에서 P6-02 전용 worktree를 열고 IN_PROGRESS로 전환했다. opaque draft ID+expected_version CAS가 invalid exact source를 SQLite schema v2에 보존하고, frontend는 server draft 충돌을 자동 overwrite 없이 조정하며 localStorage를 장애 fallback으로 유지한다. 기존 repository pagination과 run lifecycle projection 위에 strategy/revision/backtest history direct route를 구성하는 범위로 고정한다 | draft source/CAS application SoT·SQLite persistence·history projection/UI 책임분리 |

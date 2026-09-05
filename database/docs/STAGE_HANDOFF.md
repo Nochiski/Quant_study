@@ -55,6 +55,10 @@
 | DART | `stg_company` | 3,478 | 3,478 | 0 | `_current` 전부 · `est_dt` TEXT(1956 이전 설립 실재) · available 비부여 |
 | DART | `stg_corp_map` | 3,478 | 3,478 | 0 | 참조표 · observed_date 면제 |
 | DART | `stg_doc_index` | 174,309 | 174,309 | 0 | ZIP 메타 · 수집 종료(09-03 07:34 KST) · zip_ok=false 3,130 |
+| DART(ZIP) | `stg_doc_meta` | 242,196 | 242,196 | 0 | 문서층 P1(09-05, PR #54) · 멤버(XML)당 1행 · 세대·인코딩·헤더·표 계상·정정장 유무 · `DOC_DESIGN.md` §3.1 |
+| DART(ZIP) | `stg_doc_section` | 7,929,624 | 7,929,624 | 0 | 목차 항목당 1행 · 절 코드·종류·트리 좌표·절 안 표 개수 · §3.2 |
+| DART(ZIP) | `stg_doc_correction` | 17,600 | 17,600 | 0 | 정정 첫 장 원문 필드(정정대상·최초제출일·항목 JSON) · ZIP 있는 정정만 · §3.3 |
+| DART(ZIP) | `stg_doc_parse_log` | 242,196 | 242,196 | 0 | 파싱 모드·오류·정제 카운터 · lenient 65 |
 | DART | `stg_calls_dart` | 555,294 | 555,294 | 0 | unversioned 로그 · 요청축 빈값 비키 |
 | DART | `stg_units_dart` | 346,342 | 346,342 | 0 | unversioned 로그 |
 | DS005 | `stg_event_bnk_mngt_pcbg` | 15 | 15 | 0 | DS005 · 키 rcept_no · 한글 날짜 · available=참조표 |
@@ -93,13 +97,13 @@
 - 가격 정본·조정계수: `stg_price_daily`(KRX 원주가) + `stg_credit_daily`(`stck_prpr` 수정종가, OHL 원주가 — 컬럼 단위 `price_basis_*`) + `stg_listing_daily`(PARVAL·상장주식수). `price_matches_krx` 딱지는 equity.
 - corp_code↔ticker: `stg_corp_map`(현재 시점 값 — `corp_cls` 로 과거 유니버스 거르면 폐지종목 26% 소실) + `stg_company`(`_current`). 우선주 1:N.
 - 유니버스: `universe_asof` = KRX 스냅샷(pit) · 현재=`stg_master_daily`(coverage_from 2026-09-01) · 폐지일=`stg_delisted_master`(전 상태 `_current` — 과거 필터 금지). 2026-08-21~백필일 구간 `coverage_gap`.
-- **공시 정정 신호(equity 첫 파생 테이블 후보)**: "이 공시에 나중에 정정이 붙었나" 는 stage 에 없다 — 원장에 원본↔정정 링크가 없고(ZIP 본문에만), 여러 행을 묶는 일이라 §1 금지. stage 가 주는 재료는 `stg_disclosure.is_correction`(그 접수가 정정인가)·`report_nm` 원문·`rcept_dt`·`stg_doc_index.zip_ok`. equity 는 (corp_code, 보고서 종류, `report_nm` 끝 기간 라벨) 로 묶어 `has_correction`·`correction_rcept_no`·`corrected_at` 을 만들고 기준일 D 에는 `rcept_dt ≤ D` 판본만 본다. 실측 09-03: 정기보고서 그룹 181,106 중 정정 있음 20,759(11.5%), 정정 접수는 원본 후 7일 이내 32% · 90일 이후 30% · 1년 이후 10% → 이 규칙 없이는 look-ahead. 확정 링크는 문서층 L1 이 ZIP 첫 장 정정신고 표에서 원본 접수번호를 파싱해 만든다(원본 ZIP 153,223/153,228 확보, 정정 ZIP 18,013/21,138).
+- **공시 정정 신호(equity 첫 파생 테이블 후보)**: "이 공시에 나중에 정정이 붙었나" 는 stage 에 없다 — 원장에 원본↔정정 링크가 없고(ZIP 본문에만), 여러 행을 묶는 일이라 §1 금지. stage 가 주는 재료는 `stg_disclosure.is_correction`(그 접수가 정정인가)·`report_nm` 원문·`rcept_dt`·`stg_doc_index.zip_ok`. equity 는 (corp_code, 보고서 종류, `report_nm` 끝 기간 라벨) 로 묶어 `has_correction`·`correction_rcept_no`·`corrected_at` 을 만들고 기준일 D 에는 `rcept_dt ≤ D` 판본만 본다. 실측 09-03: 정기보고서 그룹 181,106 중 정정 있음 20,759(11.5%), 정정 접수는 원본 후 7일 이내 32% · 90일 이후 30% · 1년 이후 10% → 이 규칙 없이는 look-ahead. **09-05 정정**: ZIP 첫 장에는 원본 접수번호가 없다(C340 0/339). 링크는 equity 가 원장 후보 규칙(같은 corp·종류·기간, 접두 ∉ {[기재정정],[첨부정정]})으로 만들고 `stg_doc_correction.filed_date` 는 검증 딱지 — `DOC_DESIGN.md` §8.1.
 - 집계행·라벨: DART 보조원장 `row_kind='aggregate'` 제외 후 합산. `stg_fin` 은 wide 6금액·`account_std=false` 행은 표준계정 조인 금지·기간 라벨은 텍스트.
 - WISE: `stg_consensus_*` 는 fetched_date 판본 축 — 리비전 팩터는 `(ticker, obs)` 의 `min(fetched_date)` 행이 PIT. `stg_fin_wise` 의 `val_q*` 슬롯 라벨·`lookback` 해석은 equity. 단위는 데이터 값(`unit`, `acc_nm`).
 - 단위 미측정 컬럼(접미사 없음): 키움 `shrts_avg_pric`·`last_price`·ka20068 `dbrt_trde_*`·`rmnd`·ka10008 `frgnr_limit*`, KIS `frgn_reg/nreg_ntby_pbmn`·credit `*_amt` 6, DART `df_amt`, WISE T2Y/T2Q 값(억원·원은 카탈로그 지식).
 
 ## 5. 알려진 한계 (§0·§8)
-- 문서층 L1(ZIP 본문)·정정 체인 복원·공개시점 대장·일일 증분은 범위 밖. `ws_run_log` 미편입.
+- 문서층 L1 은 P1(메타·목차·정정 첫 장) 완료(09-05, `DOC_DESIGN.md`) · 표 내용 추출(P2 재무 격자·P3 서식표 셀)·정정 체인 복원·공개시점 대장·일일 증분은 미착수. `ws_run_log` 미편입.
 - KRX 2026-08-21~ 상장·폐지 재구성 불가. 관리종목·거래정지 과거 시계열 부재(09-01 부터 `stg_master_daily`).
 - `stg_wise_coverage`·`stg_delisted_master`·`stg_company`·`stg_corp_map` 은 현재 상태(`_current`). 재조회가 덮는 소스(KRX·키움 upsert)는 판본이 1~3개로 퇴화.
 - 후속 후보: stg_fin 스필 최적화 · 통합 종목마스터 DB(사용자 보류). (cTB24 는 09-03 `stg_analyst_broker` 로 편입, daily_wise flock 은 불필요 판정)

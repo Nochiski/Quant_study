@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from threading import Event
 from typing import Annotated
 
@@ -19,6 +20,7 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunService,
     BacktestRunSpec,
     BacktestRunState,
+    BacktestRunSummary,
     BacktestStartResponse,
     InvalidBacktestRunError,
     RunStatus,
@@ -71,14 +73,22 @@ from strategy_workbench.application.strategy_authoring.facade.authoring import (
     CompiledDocument,
     CompileRequest,
     InvalidStrategyDocumentError,
+    InvalidStrategyDraftError,
     ReviseDocumentRequest,
     RevisionDiff,
     SaveDocumentRequest,
+    SaveStrategyDraftRequest,
     StrategyAuthoringService,
     StrategyDocument,
     StrategyDocumentContract,
     StrategyDocumentSchema,
     StrategyDocumentService,
+    StrategyDraft,
+    StrategyDraftService,
+)
+from strategy_workbench.application.strategy_authoring.facade.ports import (
+    StrategyDraftConflictError,
+    StrategyDraftNotFoundError,
 )
 from strategy_workbench.application.strategy_design.facade.design import (
     InvalidStrategyError,
@@ -91,6 +101,7 @@ from strategy_workbench.application.strategy_design.facade.ports import (
     RevisionSummary,
     StrategyNotFoundError,
     StrategyRevisionConflictError,
+    StrategySummary,
 )
 from strategy_workbench.domain.equity.facade.research_data import (
     ResearchPanelQuery,
@@ -108,6 +119,12 @@ from ._backtest_contract import (
 from ._execution_error_contract import (
     Portfolio422Response,
     PortfolioRawObservationInvalidDetail,
+)
+from ._strategy_draft_contract import (
+    StrategyDraft422Response,
+    StrategyDraftConflictDetail,
+    StrategyDraftConflictResponse,
+    StrategyDraftErrorResponse,
 )
 from ._trace_contract import (
     Trace422Response,
@@ -164,11 +181,44 @@ def _backtest_not_found(error: BacktestRunNotFoundError) -> HTTPException:
     )
 
 
+def _draft_conflict(error: StrategyDraftConflictError) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=jsonable_encoder(
+            asdict(
+                StrategyDraftConflictDetail(
+                    code="strategy.draft.conflict",
+                    message=str(error),
+                    current=error.current,
+                )
+            ),
+            custom_encoder={
+                datetime: lambda value: value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+            },
+        ),
+    )
+
+
+def _draft_not_found(error: StrategyDraftNotFoundError) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={"code": "strategy.draft.not_found", "message": str(error)},
+    )
+
+
+def _invalid_draft(error: InvalidStrategyDraftError) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail={"code": "strategy.draft.invalid", "message": str(error)},
+    )
+
+
 def create_app(
     *,
     strategy_design: StrategyDesignService,
     strategy_authoring: StrategyAuthoringService,
     strategy_documents: StrategyDocumentService,
+    strategy_drafts: StrategyDraftService,
     equity_workspace: EquityWorkspaceService,
     factor_research: FactorResearchService,
     portfolio_design: PortfolioDesignService,
@@ -224,6 +274,7 @@ def create_app(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail={"code": "backtest.run.invalid", "message": str(error)},
             ) from error
+
         except StrategyReferenceNotFoundError as error:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -241,6 +292,21 @@ def create_app(
             RawObservationContractError,
         ) as error:
             raise _portfolio_http_error(error) from error
+
+    @app.get(
+        "/api/v1/backtests",
+        operation_id="listBacktests",
+    )
+    def list_backtests(
+        offset: int = Query(default=0, ge=0),
+        limit: int = Query(default=50, ge=1, le=PageRequest.MAX_LIMIT),
+        strategy_id: str | None = Query(default=None, min_length=1),
+    ) -> Page[BacktestRunSummary]:
+        """Newest-first snapshot of runs retained by this server process."""
+        return backtest_runs.list_runs(
+            PageRequest(offset, limit),
+            strategy_id=strategy_id,
+        )
 
     @app.get(
         "/api/v1/backtests/{run_id}",
@@ -527,6 +593,83 @@ def create_app(
                 },
             ) from error
 
+    @app.get(
+        "/api/v1/strategy-drafts/{draft_id}",
+        operation_id="getStrategyDraft",
+        responses={
+            404: {
+                "model": StrategyDraftErrorResponse,
+                "description": "Draft does not exist",
+            },
+            422: {
+                "model": StrategyDraft422Response,
+                "description": "Malformed request or invalid draft identity/base",
+            },
+        },
+    )
+    def get_strategy_draft(draft_id: str) -> StrategyDraft:
+        try:
+            return strategy_drafts.get(draft_id)
+        except StrategyDraftNotFoundError as error:
+            raise _draft_not_found(error) from error
+        except InvalidStrategyDraftError as error:
+            raise _invalid_draft(error) from error
+
+    @app.put(
+        "/api/v1/strategy-drafts/{draft_id}",
+        operation_id="saveStrategyDraft",
+        responses={
+            409: {
+                "model": StrategyDraftConflictResponse,
+                "description": "A different client advanced this draft version",
+            },
+            422: {
+                "model": StrategyDraft422Response,
+                "description": "Malformed request or invalid draft identity/base",
+            },
+        },
+    )
+    def save_strategy_draft(draft_id: str, request: SaveStrategyDraftRequest) -> StrategyDraft:
+        try:
+            return strategy_drafts.save(draft_id, request)
+        except StrategyDraftConflictError as error:
+            raise _draft_conflict(error) from error
+        except InvalidStrategyDraftError as error:
+            raise _invalid_draft(error) from error
+
+    @app.delete(
+        "/api/v1/strategy-drafts/{draft_id}",
+        operation_id="deleteStrategyDraft",
+        status_code=status.HTTP_204_NO_CONTENT,
+        responses={
+            404: {
+                "model": StrategyDraftErrorResponse,
+                "description": "Draft does not exist",
+            },
+            409: {
+                "model": StrategyDraftConflictResponse,
+                "description": "A different client advanced this draft version",
+            },
+            422: {
+                "model": StrategyDraft422Response,
+                "description": "Malformed request or invalid draft identity/base",
+            },
+        },
+    )
+    def delete_strategy_draft(
+        draft_id: str,
+        expected_version: int = Query(ge=1),
+    ) -> Response:
+        try:
+            strategy_drafts.delete(draft_id, expected_version=expected_version)
+        except StrategyDraftNotFoundError as error:
+            raise _draft_not_found(error) from error
+        except StrategyDraftConflictError as error:
+            raise _draft_conflict(error) from error
+        except InvalidStrategyDraftError as error:
+            raise _invalid_draft(error) from error
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
     @app.post(
         "/api/v1/strategy-documents/compile",
         operation_id="compileStrategyDocument",
@@ -694,6 +837,17 @@ def create_app(
                     "validation": jsonable_encoder(asdict(error.validation)),
                 },
             ) from error
+
+    @app.get(
+        "/api/v1/strategies",
+        operation_id="listStrategies",
+    )
+    def list_strategies(
+        offset: int = Query(default=0, ge=0),
+        limit: int = Query(default=50, ge=1, le=PageRequest.MAX_LIMIT),
+    ) -> Page[StrategySummary]:
+        """Latest immutable revision of every strategy, ordered by strategy id."""
+        return strategy_documents.list_strategies(PageRequest(offset, limit))
 
     @app.get(
         "/api/v1/strategies/{strategy_id}",

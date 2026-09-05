@@ -17,6 +17,7 @@ from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
     MockEquityDataAdapter,
 )
 from strategy_workbench.adapters.outbound.strategy_sqlite.facade.repository import (
+    SQLiteStrategyDraftRepository,
     SQLiteStrategyRepository,
 )
 from strategy_workbench.application.backtest_run.facade.runs import BacktestRunService
@@ -33,6 +34,7 @@ from strategy_workbench.application.strategy_authoring.facade.authoring import (
     CompileRequest,
     StrategyAuthoringService,
     StrategyDocumentService,
+    StrategyDraftService,
 )
 from strategy_workbench.application.strategy_authoring.facade.ports import SourceFormat
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
@@ -49,6 +51,7 @@ class BackendContainer:
     strategy_design: StrategyDesignService
     strategy_authoring: StrategyAuthoringService
     strategy_documents: StrategyDocumentService
+    strategy_drafts: StrategyDraftService
     factor_research: FactorResearchService
     portfolio_design: PortfolioDesignService
     strategy_traces: StrategyTraceService
@@ -89,6 +92,7 @@ def build_container(
         strategy_repository_path,
         source_spec_hash=_source_spec_hash_resolver(strategy_authoring),
     )
+    strategy_draft_repository = SQLiteStrategyDraftRepository(strategy_repository_path)
     run_artifact_root = artifact_root or (
         Path(__file__).resolve().parents[3] / ".local" / "backtest-runs"
     )
@@ -104,6 +108,10 @@ def build_container(
         strategy_authoring=strategy_authoring,
         strategy_documents=StrategyDocumentService(
             strategy_authoring, strategy_repository, new_id=lambda: str(uuid4())
+        ),
+        strategy_drafts=StrategyDraftService(
+            strategy_draft_repository,
+            strategy_repository,
         ),
         factor_research=FactorResearchService(
             factor_registry,

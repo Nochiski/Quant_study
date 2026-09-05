@@ -4,17 +4,21 @@ import {
   compileStrategyDocument,
   createStrategy,
   createStrategyDocument,
+  deleteStrategyDraft,
   diffStrategyRevisions,
   explainFactorGraph,
   getEquityCatalog,
   getFactorCatalog,
   getBacktestResult,
   getStrategy,
+  getStrategyDraft,
   getStrategyDocument,
   getStrategyDocumentContract,
   getStrategyDocumentSchema,
   getBacktestStatus,
   listStrategyRevisions,
+  listBacktests,
+  listStrategies,
   getStrategyTemplate,
   previewFactorGraph,
   previewPortfolio,
@@ -23,6 +27,7 @@ import {
   previewEquityUniverse,
   reviseStrategy,
   reviseStrategyDocument,
+  saveStrategyDraft,
   startBacktest,
   traceStrategy as postStrategyTrace,
   validateFactorGraph,
@@ -32,6 +37,7 @@ import type {
   BacktestRunResult,
   BacktestRunSpec,
   BacktestRunState,
+  BacktestRunSummary,
   BacktestStartResponse,
   CompileRequest,
   CompiledDocument,
@@ -56,6 +62,8 @@ import type {
   MetricDefinition,
   MetricValue,
   PageRevisionSummary,
+  PageBacktestRunSummary,
+  PageStrategySummary,
   PortfolioPreview,
   PortfolioPreviewRequest,
   ResearchCatalog,
@@ -68,14 +76,18 @@ import type {
   RevisionDiff,
   RevisionSummary,
   SaveDocumentRequest,
+  SaveStrategyDraftRequest,
   SavedRevisionReference,
   SavedStrategy,
   SourceDiagnostic,
   StrategyDocument,
   StrategyDocumentContractResponse,
   StrategyDocumentSchema,
+  StrategyDraft,
+  StrategyDraftConflictDetail,
   StrategyRevisionConflictDetail,
   StrategySpec,
+  StrategySummary,
   StrategyTraceRequest,
   StrategyTraceResponse,
   StrategyValidation,
@@ -100,6 +112,7 @@ export class ApiRequestError extends Error {
   readonly code: string | undefined;
   readonly detail: string | undefined;
   readonly latestRevision: number | null;
+  readonly currentDraft: StrategyDraft | null;
 
   constructor(
     context: string,
@@ -107,6 +120,7 @@ export class ApiRequestError extends Error {
     code?: string,
     detail?: string,
     latestRevision: number | null = null,
+    currentDraft: StrategyDraft | null = null,
   ) {
     super(
       `API request failed: ${context} status=${status} code=${code ?? "-"}`,
@@ -116,6 +130,7 @@ export class ApiRequestError extends Error {
     this.code = code;
     this.detail = detail;
     this.latestRevision = latestRevision;
+    this.currentDraft = currentDraft;
   }
 }
 
@@ -160,25 +175,100 @@ const revisionConflictDetail = (
     : null;
 };
 
+/** Runtime check for a CAS conflict. Invalid payloads fail closed as an ordinary request error. */
+const draftConflictDetail = (
+  error: unknown,
+): StrategyDraftConflictDetail | null => {
+  if (typeof error !== "object" || error === null || !("detail" in error))
+    return null;
+  const detail = (error as { detail: unknown }).detail;
+  if (typeof detail !== "object" || detail === null) return null;
+  const candidate = detail as Partial<StrategyDraftConflictDetail>;
+  const current = candidate.current;
+  const value =
+    typeof current === "object" && current !== null
+      ? (current as unknown as Record<string, unknown>)
+      : null;
+  const savedIdentity =
+    value === null
+      ? false
+      : value.strategy_id === null &&
+          value.base_revision === null &&
+          value.base_spec_hash === null
+        ? true
+        : typeof value.strategy_id === "string" &&
+          value.strategy_id.trim() !== "" &&
+          typeof value.base_revision === "number" &&
+          Number.isSafeInteger(value.base_revision) &&
+          value.base_revision > 0 &&
+          typeof value.base_spec_hash === "string" &&
+          /^[a-f0-9]{64}$/u.test(value.base_spec_hash);
+  const validCurrent =
+    current === null ||
+    (value !== null &&
+      typeof value.draft_id === "string" &&
+      value.draft_id.trim() !== "" &&
+      value.draft_id.length <= 512 &&
+      typeof value.version === "number" &&
+      Number.isSafeInteger(value.version) &&
+      value.version > 0 &&
+      typeof value.source === "string" &&
+      (value.format === "yaml" || value.format === "json") &&
+      typeof value.source_hash === "string" &&
+      /^[a-f0-9]{64}$/u.test(value.source_hash) &&
+      typeof value.schema_version === "string" &&
+      value.schema_version.trim() !== "" &&
+      typeof value.updated_at === "string" &&
+      Number.isFinite(Date.parse(value.updated_at)) &&
+      savedIdentity);
+  return candidate.code === "strategy.draft.conflict" &&
+    typeof candidate.message === "string" &&
+    validCurrent
+    ? (candidate as StrategyDraftConflictDetail)
+    : null;
+};
+
+const requestError = (
+  response: { error?: unknown; response?: { status: number } },
+  context: string,
+): ApiRequestError => {
+  const conflict = revisionConflictDetail(response.error);
+  const draftConflict = draftConflictDetail(response.error);
+  return new ApiRequestError(
+    context,
+    response.response?.status ?? 0,
+    errorCode(response.error),
+    errorField(response.error, "message"),
+    conflict?.latest_revision ?? null,
+    draftConflict?.current ?? null,
+  );
+};
+
 /** Turns an SDK reply into data or a typed error; every document call goes through here. */
 const unwrap = <T>(
   response: { data?: T; error?: unknown; response?: { status: number } },
   context: string,
 ): T => {
   if (response.error !== undefined) {
-    const conflict = revisionConflictDetail(response.error);
-    throw new ApiRequestError(
-      context,
-      response.response?.status ?? 0,
-      errorCode(response.error),
-      errorField(response.error, "message"),
-      conflict?.latest_revision ?? null,
-    );
+    throw requestError(response, context);
   }
   return requireData(response.data, context);
 };
 
 export const strategyWorkbenchApi = {
+  async listBacktests(
+    page: { offset?: number; limit?: number; strategyId?: string } = {},
+  ): Promise<PageBacktestRunSummary> {
+    const response = await listBacktests({
+      query: {
+        offset: page.offset,
+        limit: page.limit,
+        strategy_id: page.strategyId,
+      },
+    });
+    return unwrap(response, "listBacktests");
+  },
+
   async startBacktest(spec: BacktestRunSpec): Promise<BacktestStartResponse> {
     const response = await startBacktest({ body: spec });
     return requireData(response.data, "startBacktest");
@@ -299,6 +389,41 @@ export const strategyWorkbenchApi = {
     return requireData(response.data, "getStrategy");
   },
 
+  async listStrategies(
+    page: { offset?: number; limit?: number } = {},
+  ): Promise<PageStrategySummary> {
+    const response = await listStrategies({ query: page });
+    return unwrap(response, "listStrategies");
+  },
+
+  async getStrategyDraft(draftId: string): Promise<StrategyDraft> {
+    const response = await getStrategyDraft({ path: { draft_id: draftId } });
+    return unwrap(response, "getStrategyDraft");
+  },
+
+  async saveStrategyDraft(
+    draftId: string,
+    request: SaveStrategyDraftRequest,
+  ): Promise<StrategyDraft> {
+    const response = await saveStrategyDraft({
+      path: { draft_id: draftId },
+      body: request,
+    });
+    return unwrap(response, "saveStrategyDraft");
+  },
+
+  async deleteStrategyDraft(
+    draftId: string,
+    expectedVersion: number,
+  ): Promise<void> {
+    const response = await deleteStrategyDraft({
+      path: { draft_id: draftId },
+      query: { expected_version: expectedVersion },
+    });
+    if (response.error !== undefined)
+      throw requestError(response, "deleteStrategyDraft");
+  },
+
   async getStrategyDocument(
     strategyId: string,
     revision: number,
@@ -397,6 +522,7 @@ export type {
   BacktestRunResult,
   BacktestRunSpec,
   BacktestRunState,
+  BacktestRunSummary,
   BacktestStartResponse,
   CompileRequest,
   CompiledDocument,
@@ -419,6 +545,8 @@ export type {
   MetricDefinition,
   MetricValue,
   PageRevisionSummary,
+  PageBacktestRunSummary,
+  PageStrategySummary,
   PortfolioPreview,
   PortfolioPreviewRequest,
   ResearchCatalog,
@@ -431,13 +559,16 @@ export type {
   RevisionDiff,
   RevisionSummary,
   SaveDocumentRequest,
+  SaveStrategyDraftRequest,
   SavedRevisionReference,
   SavedStrategy,
   SourceDiagnostic,
   StrategyDocument,
   StrategyDocumentContractResponse,
   StrategyDocumentSchema,
+  StrategyDraft,
   StrategySpec,
+  StrategySummary,
   StrategyTraceRequest,
   StrategyTraceResponse,
   StrategyValidation,

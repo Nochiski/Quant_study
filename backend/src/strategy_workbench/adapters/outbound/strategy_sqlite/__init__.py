@@ -1,1 +1,1 @@
-"""SQLite strategy revision repository adapter."""
+"""SQLite strategy revision and exact-source draft adapters."""

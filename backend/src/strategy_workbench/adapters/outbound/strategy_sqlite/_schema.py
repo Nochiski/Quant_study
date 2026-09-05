@@ -4,7 +4,7 @@ import sqlite3
 
 from ._errors import StrategyRepositoryStorageError
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 _APPLICATION_ID = 0x5357524B  # ASCII-ish "SWRK", scoped to this adapter's database.
 
 _V1_SCHEMA_OBJECTS = (
@@ -79,6 +79,42 @@ _V1_SCHEMA_OBJECTS = (
     ),
 )
 
+_V2_ADDED_SCHEMA_OBJECTS = (
+    (
+        "table",
+        "strategy_drafts",
+        """
+        CREATE TABLE strategy_drafts (
+            draft_id TEXT NOT NULL COLLATE BINARY PRIMARY KEY CHECK (
+                length(draft_id) BETWEEN 1 AND 512 AND length(trim(draft_id)) >= 1
+            ),
+            version INTEGER NOT NULL CHECK (
+                typeof(version) = 'integer' AND version >= 1
+            ),
+            source_format TEXT NOT NULL CHECK (source_format IN ('yaml', 'json')),
+            source_text TEXT NOT NULL,
+            source_hash TEXT NOT NULL CHECK (length(source_hash) = 64),
+            schema_version TEXT NOT NULL CHECK (length(trim(schema_version)) >= 1),
+            strategy_id TEXT COLLATE BINARY,
+            base_revision INTEGER,
+            base_spec_hash TEXT,
+            updated_at TEXT NOT NULL,
+            CHECK (
+                (strategy_id IS NULL
+                    AND base_revision IS NULL
+                    AND base_spec_hash IS NULL)
+                OR
+                (strategy_id IS NOT NULL
+                    AND length(trim(strategy_id)) >= 1
+                    AND typeof(base_revision) = 'integer'
+                    AND base_revision >= 1
+                    AND length(base_spec_hash) = 64)
+            )
+        ) WITHOUT ROWID
+        """,
+    ),
+)
+
 
 def migrate_schema(connection: sqlite3.Connection) -> None:
     """Create our schema atomically, while refusing to claim or weaken any foreign file."""
@@ -94,7 +130,10 @@ def migrate_schema(connection: sqlite3.Connection) -> None:
                     "refusing to claim a non-empty SQLite database without this "
                     f"application id -- user_version={version} objects={footprint}"
                 )
-            for _object_type, _name, statement in _V1_SCHEMA_OBJECTS:
+            for _object_type, _name, statement in (
+                *_V1_SCHEMA_OBJECTS,
+                *_V2_ADDED_SCHEMA_OBJECTS,
+            ):
                 connection.execute(statement)
             connection.execute(f"PRAGMA application_id = {_APPLICATION_ID}")
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
@@ -110,11 +149,21 @@ def migrate_schema(connection: sqlite3.Connection) -> None:
                 "SQLite strategy schema is newer than this server -- "
                 f"stored={version} supported={SCHEMA_VERSION}"
             )
+        if version == 1:
+            _validate_manifest(connection, _V1_SCHEMA_OBJECTS, version=1)
+            for _object_type, _name, statement in _V2_ADDED_SCHEMA_OBJECTS:
+                connection.execute(statement)
+            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            version = SCHEMA_VERSION
         if version != SCHEMA_VERSION:  # pragma: no cover - next migration adds a branch above
             raise StrategyRepositoryStorageError(
                 f"no migration path -- stored={version} supported={SCHEMA_VERSION}"
             )
-        _validate_v1_manifest(connection)
+        _validate_manifest(
+            connection,
+            (*_V1_SCHEMA_OBJECTS, *_V2_ADDED_SCHEMA_OBJECTS),
+            version=SCHEMA_VERSION,
+        )
         connection.commit()
     except Exception:
         if connection.in_transaction:
@@ -177,10 +226,14 @@ def _schema_objects(
     return objects
 
 
-def _validate_v1_manifest(connection: sqlite3.Connection) -> None:
+def _validate_manifest(
+    connection: sqlite3.Connection,
+    manifest: tuple[tuple[str, str, str], ...],
+    *,
+    version: int,
+) -> None:
     expected = {
-        (object_type, name): _normalise_sql(statement)
-        for object_type, name, statement in _V1_SCHEMA_OBJECTS
+        (object_type, name): _normalise_sql(statement) for object_type, name, statement in manifest
     }
     actual = _schema_objects(connection)
     if actual == expected:
@@ -192,7 +245,7 @@ def _validate_v1_manifest(connection: sqlite3.Connection) -> None:
         key for key in actual.keys() & expected.keys() if actual[key] != expected[key]
     )
     raise StrategyRepositoryStorageError(
-        "SQLite strategy schema does not match version 1 -- "
+        f"SQLite strategy schema does not match version {version} -- "
         f"missing={missing} unexpected={unexpected} incompatible={incompatible}"
     )
 

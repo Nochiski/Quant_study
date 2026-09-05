@@ -13,6 +13,7 @@ import {
 import { strategyDocumentQuery } from "../../entities/strategy";
 import {
   STRATEGY_VIEWS,
+  isNewDraftId,
   type StrategyView,
 } from "../../features/edit-strategy";
 import { ApiRequestError } from "../../shared/api";
@@ -44,6 +45,7 @@ type StrategyDocumentSearch = {
   path?: string;
   asOf?: string;
   security?: string;
+  draft?: string;
 };
 
 /** Selection/projection state for every StrategySpec authoring route. */
@@ -59,6 +61,7 @@ const strategyDocumentSearch = (
         : undefined,
     asOf: typeof search.asOf === "string" ? search.asOf : undefined,
     security: typeof search.security === "string" ? search.security : undefined,
+    draft: isNewDraftId(search.draft) ? search.draft : undefined,
   };
 };
 
@@ -79,6 +82,35 @@ const StrategyRevisionPage = lazyRouteComponent(
   () => import("../../pages/research-strategy-revision"),
   "StrategyRevisionPage",
 );
+const StrategiesPage = lazyRouteComponent(
+  () => import("../../pages/research-strategies"),
+  "StrategiesPage",
+);
+const BacktestsPage = lazyRouteComponent(
+  () => import("../../pages/research-backtests"),
+  "BacktestsPage",
+);
+
+const offsetOf = (value: unknown): number | undefined => {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+};
+
+const strategyHistorySearch = (
+  search: Record<string, unknown>,
+): { offset?: number } => ({
+  offset: offsetOf(search.offset),
+});
+
+const backtestHistorySearch = (
+  search: Record<string, unknown>,
+): { offset?: number; strategy?: string } => ({
+  offset: offsetOf(search.offset),
+  strategy:
+    typeof search.strategy === "string" && search.strategy.trim() !== ""
+      ? search.strategy.trim()
+      : undefined,
+});
 
 const rootRoute = createRootRouteWithContext<RouterContext>()({
   component: () => {
@@ -125,6 +157,13 @@ const newStrategyRoute = createRoute({
   component: NewStrategyPage,
 });
 
+const strategiesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/research/strategies",
+  validateSearch: strategyHistorySearch,
+  component: StrategiesPage,
+});
+
 const strategyRevisionRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/research/strategies/$strategyId/revisions/$revision",
@@ -150,6 +189,13 @@ const backtestRunRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/research/backtests/$runId",
   component: BacktestRunPage,
+});
+
+const backtestsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/research/backtests",
+  validateSearch: backtestHistorySearch,
+  component: BacktestsPage,
 });
 
 const operationsRoute = createRoute({
@@ -190,8 +236,10 @@ const riskRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   indexRoute,
   legacyBuilderRoute,
+  strategiesRoute,
   newStrategyRoute,
   strategyRevisionRoute,
+  backtestsRoute,
   backtestRunRoute,
   operationsRoute.addChildren([
     deploymentsRoute,

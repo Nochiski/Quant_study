@@ -187,6 +187,34 @@ const acceptedRun = (runId = "run-7") => ({
 });
 
 const server = setupServer(
+  http.get(`${API}/api/v1/strategy-drafts/:draftId`, () =>
+    HttpResponse.json(
+      { detail: { code: "strategy.draft.not_found" } },
+      { status: 404 },
+    ),
+  ),
+  http.put(
+    `${API}/api/v1/strategy-drafts/:draftId`,
+    async ({ params, request }) => {
+      const body = (await request.json()) as Record<string, unknown>;
+      return HttpResponse.json({
+        draft_id: params.draftId,
+        version: Number(body.expected_version) + 1,
+        source: body.source,
+        format: body.format,
+        source_hash: "d".repeat(64),
+        schema_version: body.schema_version,
+        updated_at: "2026-09-05T00:00:00Z",
+        strategy_id: body.strategy_id ?? null,
+        base_revision: body.base_revision ?? null,
+        base_spec_hash: body.base_spec_hash ?? null,
+      });
+    },
+  ),
+  http.delete(
+    `${API}/api/v1/strategy-drafts/:draftId`,
+    () => new HttpResponse(null, { status: 204 }),
+  ),
   http.get(`${API}/api/v1/strategies/:strategyId/diff`, ({ request }) => {
     const url = new URL(request.url);
     return HttpResponse.json({
@@ -613,6 +641,38 @@ describe("document routes (P2-04)", () => {
     expect(screen.getByText("저장됨 v2")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "리비전 저장" })).toBeDisabled();
     expect(screen.getByText("2026-09-04 09:30")).toBeInTheDocument();
+  });
+
+  it("recovers an exact server draft on a direct revision route without silent overwrite", async () => {
+    const recovered = `${STORED}description: server recovery\n`;
+    server.use(
+      http.get(`${API}/api/v1/strategy-drafts/:draftId`, ({ params }) =>
+        HttpResponse.json({
+          draft_id: params.draftId,
+          version: 7,
+          source: recovered,
+          format: "yaml",
+          source_hash: "d".repeat(64),
+          schema_version: "1.0",
+          updated_at: "2026-09-05T01:02:03Z",
+          strategy_id: "s1",
+          base_revision: 2,
+          base_spec_hash: "2".repeat(64),
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    mount("/research/strategies/s1/revisions/2");
+    const view = await editor();
+    expect(view.state.doc.toString()).toBe(STORED);
+    const banner = await screen.findByRole("region", {
+      name: "복구할 서버 초안",
+    });
+    expect(view.state.doc.toString()).toBe(STORED);
+    await user.click(
+      within(banner).getByRole("button", { name: "서버 초안 적용" }),
+    );
+    await waitFor(() => expect(view.state.doc.toString()).toBe(recovered));
   });
 
   it("creates a strategy from the new draft and moves the URL to revision 1", async () => {

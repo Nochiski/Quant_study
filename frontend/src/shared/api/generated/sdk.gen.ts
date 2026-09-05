@@ -15,6 +15,9 @@ import type {
   CreateStrategyDocumentResponses,
   CreateStrategyErrors,
   CreateStrategyResponses,
+  DeleteStrategyDraftData,
+  DeleteStrategyDraftErrors,
+  DeleteStrategyDraftResponses,
   DiffStrategyRevisionsData,
   DiffStrategyRevisionsErrors,
   DiffStrategyRevisionsResponses,
@@ -48,10 +51,19 @@ import type {
   GetStrategyDocumentSchemaData,
   GetStrategyDocumentSchemaErrors,
   GetStrategyDocumentSchemaResponses,
+  GetStrategyDraftData,
+  GetStrategyDraftErrors,
+  GetStrategyDraftResponses,
   GetStrategyErrors,
   GetStrategyResponses,
   GetStrategyTemplateData,
   GetStrategyTemplateResponses,
+  ListBacktestsData,
+  ListBacktestsErrors,
+  ListBacktestsResponses,
+  ListStrategiesData,
+  ListStrategiesErrors,
+  ListStrategiesResponses,
   ListStrategyRevisionsData,
   ListStrategyRevisionsErrors,
   ListStrategyRevisionsResponses,
@@ -76,6 +88,9 @@ import type {
   ReviseStrategyDocumentResponses,
   ReviseStrategyErrors,
   ReviseStrategyResponses,
+  SaveStrategyDraftData,
+  SaveStrategyDraftErrors,
+  SaveStrategyDraftResponses,
   StartBacktestData,
   StartBacktestErrors,
   StartBacktestResponses,
@@ -110,6 +125,20 @@ export type Options<
    */
   meta?: Record<string, unknown>;
 };
+
+/**
+ * List Backtests
+ *
+ * Newest-first snapshot of runs retained by this server process.
+ */
+export const listBacktests = <ThrowOnError extends boolean = false>(
+  options?: Options<ListBacktestsData, ThrowOnError>,
+) =>
+  (options?.client ?? client).get<
+    ListBacktestsResponses,
+    ListBacktestsErrors,
+    ThrowOnError
+  >({ url: "/api/v1/backtests", ...options });
 
 /**
  * Start Backtest
@@ -345,6 +374,20 @@ export const previewPortfolio = <ThrowOnError extends boolean = false>(
       ...options.headers,
     },
   });
+
+/**
+ * List Strategies
+ *
+ * Latest immutable revision of every strategy, ordered by strategy id.
+ */
+export const listStrategies = <ThrowOnError extends boolean = false>(
+  options?: Options<ListStrategiesData, ThrowOnError>,
+) =>
+  (options?.client ?? client).get<
+    ListStrategiesResponses,
+    ListStrategiesErrors,
+    ThrowOnError
+  >({ url: "/api/v1/strategies", ...options });
 
 /**
  * Create Strategy
@@ -603,6 +646,49 @@ export const reviseStrategyDocument = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     url: "/api/v1/strategy-documents/{strategy_id}/revisions",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Delete Strategy Draft
+ */
+export const deleteStrategyDraft = <ThrowOnError extends boolean = false>(
+  options: Options<DeleteStrategyDraftData, ThrowOnError>,
+) =>
+  (options.client ?? client).delete<
+    DeleteStrategyDraftResponses,
+    DeleteStrategyDraftErrors,
+    ThrowOnError
+  >({ url: "/api/v1/strategy-drafts/{draft_id}", ...options });
+
+/**
+ * Get Strategy Draft
+ */
+export const getStrategyDraft = <ThrowOnError extends boolean = false>(
+  options: Options<GetStrategyDraftData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetStrategyDraftResponses,
+    GetStrategyDraftErrors,
+    ThrowOnError
+  >({ url: "/api/v1/strategy-drafts/{draft_id}", ...options });
+
+/**
+ * Save Strategy Draft
+ */
+export const saveStrategyDraft = <ThrowOnError extends boolean = false>(
+  options: Options<SaveStrategyDraftData, ThrowOnError>,
+) =>
+  (options.client ?? client).put<
+    SaveStrategyDraftResponses,
+    SaveStrategyDraftErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/strategy-drafts/{draft_id}",
     ...options,
     headers: {
       "Content-Type": "application/json",

@@ -197,6 +197,22 @@
         "title": "BacktestRunState",
         "type": "object"
       },
+      "BacktestRunSummary": {
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/BacktestRunState"
+          },
+          "strategy_provenance": {
+            "$ref": "#/components/schemas/StrategyProvenance"
+          }
+        },
+        "required": [
+          "run",
+          "strategy_provenance"
+        ],
+        "title": "BacktestRunSummary",
+        "type": "object"
+      },
       "BacktestSeries": {
         "properties": {
           "drawdown": {
@@ -2989,11 +3005,73 @@
         "title": "OrderStyle",
         "type": "string"
       },
+      "Page_BacktestRunSummary_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BacktestRunSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "offset",
+          "limit"
+        ],
+        "title": "Page",
+        "type": "object"
+      },
       "Page_RevisionSummary_": {
         "properties": {
           "items": {
             "items": {
               "$ref": "#/components/schemas/RevisionSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "offset",
+          "limit"
+        ],
+        "title": "Page",
+        "type": "object"
+      },
+      "Page_StrategySummary_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/StrategySummary"
             },
             "title": "Items",
             "type": "array"
@@ -4632,6 +4710,67 @@
         "title": "SaveDocumentRequest",
         "type": "object"
       },
+      "SaveStrategyDraftRequest": {
+        "description": "Exact editor bytes plus the immutable base they were edited from.\n\nDrafts deliberately accept syntactically invalid source. Compilation remains the authoring\nservice's responsibility; this contract only preserves bytes and compare-and-swap identity.",
+        "properties": {
+          "base_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Revision"
+          },
+          "base_spec_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Spec Hash"
+          },
+          "expected_version": {
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "format": {
+            "$ref": "#/components/schemas/SourceFormat"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "strategy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy Id"
+          }
+        },
+        "required": [
+          "expected_version",
+          "source",
+          "format",
+          "schema_version"
+        ],
+        "title": "SaveStrategyDraftRequest",
+        "type": "object"
+      },
       "SavedFactorNode": {
         "properties": {
           "factor_id": {
@@ -5072,6 +5211,186 @@
         "title": "StrategyDocumentSchema",
         "type": "object"
       },
+      "StrategyDraft": {
+        "properties": {
+          "base_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Revision"
+          },
+          "base_spec_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Spec Hash"
+          },
+          "draft_id": {
+            "title": "Draft Id",
+            "type": "string"
+          },
+          "format": {
+            "$ref": "#/components/schemas/SourceFormat"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "source_hash": {
+            "title": "Source Hash",
+            "type": "string"
+          },
+          "strategy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy Id"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "draft_id",
+          "version",
+          "source",
+          "format",
+          "source_hash",
+          "schema_version",
+          "updated_at"
+        ],
+        "title": "StrategyDraft",
+        "type": "object"
+      },
+      "StrategyDraftConflictDetail": {
+        "properties": {
+          "code": {
+            "const": "strategy.draft.conflict",
+            "title": "Code",
+            "type": "string"
+          },
+          "current": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StrategyDraft"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "current"
+        ],
+        "title": "StrategyDraftConflictDetail",
+        "type": "object"
+      },
+      "StrategyDraftConflictResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/StrategyDraftConflictDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "StrategyDraftConflictResponse",
+        "type": "object"
+      },
+      "StrategyDraftErrorDetail": {
+        "properties": {
+          "code": {
+            "const": "strategy.draft.not_found",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "StrategyDraftErrorDetail",
+        "type": "object"
+      },
+      "StrategyDraftErrorResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/StrategyDraftErrorDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "StrategyDraftErrorResponse",
+        "type": "object"
+      },
+      "StrategyDraftInvalidDetail": {
+        "properties": {
+          "code": {
+            "const": "strategy.draft.invalid",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "StrategyDraftInvalidDetail",
+        "type": "object"
+      },
+      "StrategyDraftInvalidResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/StrategyDraftInvalidDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "StrategyDraftInvalidResponse",
+        "type": "object"
+      },
       "StrategyExplanation": {
         "properties": {
           "steps": {
@@ -5309,6 +5628,40 @@
           "execution"
         ],
         "title": "StrategySpec",
+        "type": "object"
+      },
+      "StrategySummary": {
+        "properties": {
+          "latest_revision": {
+            "title": "Latest Revision",
+            "type": "integer"
+          },
+          "spec_hash": {
+            "title": "Spec Hash",
+            "type": "string"
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "strategy_id",
+          "title",
+          "latest_revision",
+          "spec_hash",
+          "updated_at"
+        ],
+        "title": "StrategySummary",
         "type": "object"
       },
       "StrategyTargetTrace": {
@@ -6385,6 +6738,75 @@
   "openapi": "3.1.0",
   "paths": {
     "/api/v1/backtests": {
+      "get": {
+        "description": "Newest-first snapshot of runs retained by this server process.",
+        "operationId": "listBacktests",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "strategy_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Strategy Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_BacktestRunSummary_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Backtests"
+      },
       "post": {
         "operationId": "startBacktest",
         "requestBody": {
@@ -7157,6 +7579,58 @@
       }
     },
     "/api/v1/strategies": {
+      "get": {
+        "description": "Latest immutable revision of every strategy, ordered by strategy id.",
+        "operationId": "listStrategies",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_StrategySummary_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Strategies"
+      },
       "post": {
         "operationId": "createStrategy",
         "requestBody": {
@@ -7886,6 +8360,196 @@
           }
         },
         "summary": "Revise Strategy Document"
+      }
+    },
+    "/api/v1/strategy-drafts/{draft_id}": {
+      "delete": {
+        "operationId": "deleteStrategyDraft",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "title": "Draft Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "expected_version",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Expected Version",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyDraftErrorResponse"
+                }
+              }
+            },
+            "description": "Draft does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyDraftConflictResponse"
+                }
+              }
+            },
+            "description": "A different client advanced this draft version"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/StrategyDraftInvalidResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationResponse"
+                    }
+                  ],
+                  "title": "Response 422 Deletestrategydraft"
+                }
+              }
+            },
+            "description": "Malformed request or invalid draft identity/base"
+          }
+        },
+        "summary": "Delete Strategy Draft"
+      },
+      "get": {
+        "operationId": "getStrategyDraft",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "title": "Draft Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyDraft"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyDraftErrorResponse"
+                }
+              }
+            },
+            "description": "Draft does not exist"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/StrategyDraftInvalidResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationResponse"
+                    }
+                  ],
+                  "title": "Response 422 Getstrategydraft"
+                }
+              }
+            },
+            "description": "Malformed request or invalid draft identity/base"
+          }
+        },
+        "summary": "Get Strategy Draft"
+      },
+      "put": {
+        "operationId": "saveStrategyDraft",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "title": "Draft Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveStrategyDraftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyDraft"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyDraftConflictResponse"
+                }
+              }
+            },
+            "description": "A different client advanced this draft version"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/StrategyDraftInvalidResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationResponse"
+                    }
+                  ],
+                  "title": "Response 422 Savestrategydraft"
+                }
+              }
+            },
+            "description": "Malformed request or invalid draft identity/base"
+          }
+        },
+        "summary": "Save Strategy Draft"
       }
     }
   }

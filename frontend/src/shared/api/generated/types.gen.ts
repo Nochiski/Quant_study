@@ -115,6 +115,14 @@ export type BacktestRunState = {
 };
 
 /**
+ * BacktestRunSummary
+ */
+export type BacktestRunSummary = {
+  run: BacktestRunState;
+  strategy_provenance: StrategyProvenance;
+};
+
+/**
  * BacktestSeries
  */
 export type BacktestSeries = {
@@ -1814,11 +1822,55 @@ export type OrderStyle = "market";
 /**
  * Page
  */
+export type PageBacktestRunSummary = {
+  /**
+   * Items
+   */
+  items: Array<BacktestRunSummary>;
+  /**
+   * Limit
+   */
+  limit: number;
+  /**
+   * Offset
+   */
+  offset: number;
+  /**
+   * Total
+   */
+  total: number;
+};
+
+/**
+ * Page
+ */
 export type PageRevisionSummary = {
   /**
    * Items
    */
   items: Array<RevisionSummary>;
+  /**
+   * Limit
+   */
+  limit: number;
+  /**
+   * Offset
+   */
+  offset: number;
+  /**
+   * Total
+   */
+  total: number;
+};
+
+/**
+ * Page
+ */
+export type PageStrategySummary = {
+  /**
+   * Items
+   */
+  items: Array<StrategySummary>;
   /**
    * Limit
    */
@@ -2853,6 +2905,42 @@ export type SaveDocumentRequest = {
 };
 
 /**
+ * SaveStrategyDraftRequest
+ *
+ * Exact editor bytes plus the immutable base they were edited from.
+ *
+ * Drafts deliberately accept syntactically invalid source. Compilation remains the authoring
+ * service's responsibility; this contract only preserves bytes and compare-and-swap identity.
+ */
+export type SaveStrategyDraftRequest = {
+  /**
+   * Base Revision
+   */
+  base_revision?: number | null;
+  /**
+   * Base Spec Hash
+   */
+  base_spec_hash?: string | null;
+  /**
+   * Expected Version
+   */
+  expected_version: number;
+  format: SourceFormat;
+  /**
+   * Schema Version
+   */
+  schema_version: string;
+  /**
+   * Source
+   */
+  source: string;
+  /**
+   * Strategy Id
+   */
+  strategy_id?: string | null;
+};
+
+/**
  * SavedFactorNode
  */
 export type SavedFactorNode = {
@@ -3166,6 +3254,113 @@ export type StrategyDocumentSchema = {
 };
 
 /**
+ * StrategyDraft
+ */
+export type StrategyDraft = {
+  /**
+   * Base Revision
+   */
+  base_revision?: number | null;
+  /**
+   * Base Spec Hash
+   */
+  base_spec_hash?: string | null;
+  /**
+   * Draft Id
+   */
+  draft_id: string;
+  format: SourceFormat;
+  /**
+   * Schema Version
+   */
+  schema_version: string;
+  /**
+   * Source
+   */
+  source: string;
+  /**
+   * Source Hash
+   */
+  source_hash: string;
+  /**
+   * Strategy Id
+   */
+  strategy_id?: string | null;
+  /**
+   * Updated At
+   */
+  updated_at: string;
+  /**
+   * Version
+   */
+  version: number;
+};
+
+/**
+ * StrategyDraftConflictDetail
+ */
+export type StrategyDraftConflictDetail = {
+  /**
+   * Code
+   */
+  code: "strategy.draft.conflict";
+  current: StrategyDraft | null;
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * StrategyDraftConflictResponse
+ */
+export type StrategyDraftConflictResponse = {
+  detail: StrategyDraftConflictDetail;
+};
+
+/**
+ * StrategyDraftErrorDetail
+ */
+export type StrategyDraftErrorDetail = {
+  /**
+   * Code
+   */
+  code: "strategy.draft.not_found";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * StrategyDraftErrorResponse
+ */
+export type StrategyDraftErrorResponse = {
+  detail: StrategyDraftErrorDetail;
+};
+
+/**
+ * StrategyDraftInvalidDetail
+ */
+export type StrategyDraftInvalidDetail = {
+  /**
+   * Code
+   */
+  code: "strategy.draft.invalid";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * StrategyDraftInvalidResponse
+ */
+export type StrategyDraftInvalidResponse = {
+  detail: StrategyDraftInvalidDetail;
+};
+
+/**
  * StrategyExplanation
  */
 export type StrategyExplanation = {
@@ -3294,6 +3489,32 @@ export type StrategySpec = {
    * Title
    */
   title: string;
+};
+
+/**
+ * StrategySummary
+ */
+export type StrategySummary = {
+  /**
+   * Latest Revision
+   */
+  latest_revision: number;
+  /**
+   * Spec Hash
+   */
+  spec_hash: string;
+  /**
+   * Strategy Id
+   */
+  strategy_id: string;
+  /**
+   * Title
+   */
+  title: string;
+  /**
+   * Updated At
+   */
+  updated_at: string;
 };
 
 /**
@@ -3952,6 +4173,45 @@ export type WarningSeverity = "info" | "warning";
  */
 export type WeightingMethod = "equal" | "factor_score" | "rank" | "risk";
 
+export type ListBacktestsData = {
+  body?: never;
+  path?: never;
+  query?: {
+    /**
+     * Offset
+     */
+    offset?: number;
+    /**
+     * Limit
+     */
+    limit?: number;
+    /**
+     * Strategy Id
+     */
+    strategy_id?: string | null;
+  };
+  url: "/api/v1/backtests";
+};
+
+export type ListBacktestsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ListBacktestsError = ListBacktestsErrors[keyof ListBacktestsErrors];
+
+export type ListBacktestsResponses = {
+  /**
+   * Successful Response
+   */
+  200: PageBacktestRunSummary;
+};
+
+export type ListBacktestsResponse =
+  ListBacktestsResponses[keyof ListBacktestsResponses];
+
 export type StartBacktestData = {
   body: BacktestRunSpec;
   path?: never;
@@ -4433,6 +4693,42 @@ export type PreviewPortfolioResponses = {
 
 export type PreviewPortfolioResponse =
   PreviewPortfolioResponses[keyof PreviewPortfolioResponses];
+
+export type ListStrategiesData = {
+  body?: never;
+  path?: never;
+  query?: {
+    /**
+     * Offset
+     */
+    offset?: number;
+    /**
+     * Limit
+     */
+    limit?: number;
+  };
+  url: "/api/v1/strategies";
+};
+
+export type ListStrategiesErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ListStrategiesError =
+  ListStrategiesErrors[keyof ListStrategiesErrors];
+
+export type ListStrategiesResponses = {
+  /**
+   * Successful Response
+   */
+  200: PageStrategySummary;
+};
+
+export type ListStrategiesResponse =
+  ListStrategiesResponses[keyof ListStrategiesResponses];
 
 export type CreateStrategyData = {
   body: StrategySpec;
@@ -4917,3 +5213,126 @@ export type ReviseStrategyDocumentResponses = {
 
 export type ReviseStrategyDocumentResponse =
   ReviseStrategyDocumentResponses[keyof ReviseStrategyDocumentResponses];
+
+export type DeleteStrategyDraftData = {
+  body?: never;
+  path: {
+    /**
+     * Draft Id
+     */
+    draft_id: string;
+  };
+  query: {
+    /**
+     * Expected Version
+     */
+    expected_version: number;
+  };
+  url: "/api/v1/strategy-drafts/{draft_id}";
+};
+
+export type DeleteStrategyDraftErrors = {
+  /**
+   * Draft does not exist
+   */
+  404: StrategyDraftErrorResponse;
+  /**
+   * A different client advanced this draft version
+   */
+  409: StrategyDraftConflictResponse;
+  /**
+   * Response 422 Deletestrategydraft
+   *
+   * Malformed request or invalid draft identity/base
+   */
+  422: StrategyDraftInvalidResponse | RequestValidationResponse;
+};
+
+export type DeleteStrategyDraftError =
+  DeleteStrategyDraftErrors[keyof DeleteStrategyDraftErrors];
+
+export type DeleteStrategyDraftResponses = {
+  /**
+   * Successful Response
+   */
+  204: void;
+};
+
+export type DeleteStrategyDraftResponse =
+  DeleteStrategyDraftResponses[keyof DeleteStrategyDraftResponses];
+
+export type GetStrategyDraftData = {
+  body?: never;
+  path: {
+    /**
+     * Draft Id
+     */
+    draft_id: string;
+  };
+  query?: never;
+  url: "/api/v1/strategy-drafts/{draft_id}";
+};
+
+export type GetStrategyDraftErrors = {
+  /**
+   * Draft does not exist
+   */
+  404: StrategyDraftErrorResponse;
+  /**
+   * Response 422 Getstrategydraft
+   *
+   * Malformed request or invalid draft identity/base
+   */
+  422: StrategyDraftInvalidResponse | RequestValidationResponse;
+};
+
+export type GetStrategyDraftError =
+  GetStrategyDraftErrors[keyof GetStrategyDraftErrors];
+
+export type GetStrategyDraftResponses = {
+  /**
+   * Successful Response
+   */
+  200: StrategyDraft;
+};
+
+export type GetStrategyDraftResponse =
+  GetStrategyDraftResponses[keyof GetStrategyDraftResponses];
+
+export type SaveStrategyDraftData = {
+  body: SaveStrategyDraftRequest;
+  path: {
+    /**
+     * Draft Id
+     */
+    draft_id: string;
+  };
+  query?: never;
+  url: "/api/v1/strategy-drafts/{draft_id}";
+};
+
+export type SaveStrategyDraftErrors = {
+  /**
+   * A different client advanced this draft version
+   */
+  409: StrategyDraftConflictResponse;
+  /**
+   * Response 422 Savestrategydraft
+   *
+   * Malformed request or invalid draft identity/base
+   */
+  422: StrategyDraftInvalidResponse | RequestValidationResponse;
+};
+
+export type SaveStrategyDraftError =
+  SaveStrategyDraftErrors[keyof SaveStrategyDraftErrors];
+
+export type SaveStrategyDraftResponses = {
+  /**
+   * Successful Response
+   */
+  200: StrategyDraft;
+};
+
+export type SaveStrategyDraftResponse =
+  SaveStrategyDraftResponses[keyof SaveStrategyDraftResponses];

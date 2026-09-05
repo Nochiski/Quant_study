@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from strategy_workbench.application.strategy_design.facade.ports import (
@@ -22,6 +22,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
 )
 
 from ._errors import StrategyRepositoryStorageError
+from ._values import datetime_text, optional_text, required_int, required_text
 
 SourceSpecHashResolver = Callable[[str, SourceFormat], str]
 
@@ -43,7 +44,7 @@ def encode_record(
             source.text if source else None,
             source.source_hash if source else None,
             record.provenance.origin.value,
-            _datetime_text(record.provenance.created_at),
+            datetime_text(record.provenance.created_at),
             record.provenance.change_note,
         )
     except (TypeError, ValueError) as error:
@@ -59,11 +60,11 @@ def decode_record(
     """Rehydrate through the domain contract and reject every redundant-field mismatch."""
     location = "strategy_id=<invalid> revision=<invalid>"
     try:
-        strategy_id = _required_text(row, "strategy_id")
-        revision = _required_int(row, "revision")
+        strategy_id = required_text(row, "strategy_id")
+        revision = required_int(row, "revision")
         location = f"strategy_id={strategy_id} revision={revision}"
-        schema_version = _required_text(row, "schema_version")
-        spec_json = _required_text(row, "spec_json")
+        schema_version = required_text(row, "schema_version")
+        spec_json = required_text(row, "spec_json")
         payload: Any = json.loads(spec_json)
         if not isinstance(payload, dict) or not all(isinstance(key, str) for key in payload):
             raise ValueError("spec_json must contain a JSON object with string keys")
@@ -80,10 +81,10 @@ def decode_record(
         if canonical_strategy_json(spec) != spec_json:
             raise ValueError("spec_json is not canonical for its hydrated StrategySpec")
 
-        origin = RevisionOrigin(_required_text(row, "origin"))
-        source_format_text = _optional_text(row, "source_format")
-        source_text = _optional_text(row, "source_text")
-        source_hash = _optional_text(row, "source_hash")
+        origin = RevisionOrigin(required_text(row, "origin"))
+        source_format_text = optional_text(row, "source_format")
+        source_text = optional_text(row, "source_text")
+        source_hash = optional_text(row, "source_hash")
         source: RevisionSource | None
         if source_format_text is None and source_text is None and source_hash is None:
             source = None
@@ -92,18 +93,18 @@ def decode_record(
         else:
             raise ValueError("source format/text/hash must be all present or all absent")
 
-        created_at_text = _required_text(row, "created_at")
+        created_at_text = required_text(row, "created_at")
         created_at = datetime.fromisoformat(created_at_text)
-        if _datetime_text(created_at) != created_at_text:
+        if datetime_text(created_at) != created_at_text:
             raise ValueError("created_at is not canonical timezone-aware UTC text")
         record = StrategyRevisionRecord(
             spec=spec,
-            spec_hash=_required_text(row, "spec_hash"),
+            spec_hash=required_text(row, "spec_hash"),
             source=source,
             provenance=RevisionProvenance(
                 origin=origin,
                 created_at=created_at,
-                change_note=_optional_text(row, "change_note"),
+                change_note=optional_text(row, "change_note"),
             ),
         )
         _verify_source_spec(record, source_spec_hash)
@@ -112,33 +113,6 @@ def decode_record(
         raise StrategyRepositoryStorageError(
             f"stored strategy revision failed integrity validation — {location}: {error}"
         ) from error
-
-
-def _required_text(row: sqlite3.Row, key: str) -> str:
-    value = row[key]
-    if not isinstance(value, str):
-        raise ValueError(f"{key} must be text")
-    return value
-
-
-def _optional_text(row: sqlite3.Row, key: str) -> str | None:
-    value = row[key]
-    if value is not None and not isinstance(value, str):
-        raise ValueError(f"{key} must be text or null")
-    return value
-
-
-def _required_int(row: sqlite3.Row, key: str) -> int:
-    value = row[key]
-    if not isinstance(value, int) or isinstance(value, bool):
-        raise ValueError(f"{key} must be an integer")
-    return value
-
-
-def _datetime_text(value: datetime) -> str:
-    if value.tzinfo is None or value.utcoffset() != UTC.utcoffset(None):
-        raise ValueError(f"datetime must be timezone-aware UTC — got={value!r}")
-    return value.astimezone(UTC).isoformat(timespec="microseconds")
 
 
 def _as_document(payload: dict[str, Any]) -> Mapping[str, object]:

@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: IN_REVIEW
+project_status: CHANGES_REQUESTED
 current_phase: P5
 current_pr: P5-01
 active_prs: [P5-01]
 parallel_window: []
-last_updated: 2026-09-05T11:50:26+09:00
+last_updated: 2026-09-05T12:13:30+09:00
 planned_prs: 50
 merged_prs: 41
 approved_prs: 41
@@ -22,13 +22,13 @@ progress_percent: 82
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_REVIEW` |
+| Project status | `CHANGES_REQUESTED` |
 | Current phase | `P5` |
 | Current/next PR | `P5-01` |
 | Active PR | `P5-01` |
 | Progress | `41 / 50 merged (82%)` |
 | Approved | `41 / 50` |
-| Aggregated at | `2026-09-05 11:50 KST` |
+| Aggregated at | `2026-09-05 12:13 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -77,7 +77,7 @@ progress_percent: 82
 | P2 | App Shell and visual foundation | 4 | 4 | `MERGED` |
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
 | P4 | Outline, Contract, Projections | 10 | 10 | `MERGED` |
-| P5 | Truthful Trace UI | 3 | 0 | `IN_REVIEW` |
+| P5 | Truthful Trace UI | 3 | 0 | `CHANGES_REQUESTED` |
 | P6 | Professional release and migration | 7 | 1 | `WAITING` |
 | **Total** |  | **50** | **41** | **82%** |
 <!-- PLAN:PHASES:END -->
@@ -86,7 +86,7 @@ progress_percent: 82
 
 | 항목 | 값 |
 |---|---|
-| PR | `P5-01` Correctness pipeline을 조회하는 scoped trace API IN_REVIEW · same reviewer 재검토 · [#65](https://github.com/Nochiski/Quant_study/pull/65) |
+| PR | `P5-01` Correctness pipeline을 조회하는 scoped trace API CHANGES_REQUESTED · 재리뷰 P1 2/P2 2 · [#65](https://github.com/Nochiski/Quant_study/pull/65) |
 | Intent | 기존 truthful portfolio pipeline과 factor evaluator를 단일 계산 owner로 재사용해 전문 사용자가 제한된 date/security/factor/node trace를 provenance와 함께 조회하게 한다 |
 | Acceptance | `POST /api/v1/strategies/debug/trace`; inline draft 또는 saved revision; as-of/security/factor/node/raw/starting holdings scope; deterministic ordering; row/page cap; cancellation; 계산 전 invalid/capability diagnostic; `spec_hash/snapshot_id/registry_version/plan_hash` provenance |
 | Non-goals | 별도 factor 계산기, frontend Debugger shell(P5-02), full linked trace/risk/order projection(P5-03), persistent strategy repository(P6-01) |
@@ -217,7 +217,7 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P5-01` | Correctness pipeline을 조회하는 scoped trace API | P1.5-04, P1-03 | `IN_REVIEW` | [#65](https://github.com/Nochiski/Quant_study/pull/65) · review fix `d305b4a` · `review_p5_01` 재검토 요청 |
+| [ ] | `P5-01` | Correctness pipeline을 조회하는 scoped trace API | P1.5-04, P1-03 | `CHANGES_REQUESTED` | [#65](https://github.com/Nochiski/Quant_study/pull/65) · `review_p5_01` 재리뷰 P1 2/P2 2 |
 | [ ] | `P5-02` | Date/security/node 선택 Debugger shell | P3-05, P5-01, P2-03 | `WAITING` | — |
 | [ ] | `P5-03` | Raw→Target trace, risk before/after, order delta estimate | P4-01, P4-07, P5-02 | `WAITING` | — |
 
@@ -297,7 +297,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
-| P5-01 | review regression 포함 factor/portfolio/constraint/trace HTTP/preflight/truthful pipeline 149 passed; raw port cancellation contract pass | backend pytest 953·Ruff·Pyright; frontend typecheck·lint·Vitest 368·build | OpenAPI/SDK 2회 deterministic regeneration·generated error union 확인 | `NaN/±inf→coded 422`, 휴장일/미지→422, non-member row→200, raw/evaluator/TargetTape batch cancel, holdings target 변화·None/empty, raw 2,000+1 cap 검증 | [#65](https://github.com/Nochiski/Quant_study/pull/65) initial CI 4/4 pass; review fix `d305b4a`, `review_p5_01` 재검토·latest CI 대기 | 2026-09-05 |
+| P5-01 | author focused 149·backend full 953·frontend 368 pass; reviewer 동일 full gate pass 후 catalog 밖 non-finite·finite 산술 overflow·tape materialization cancel·legacy raw adapter probe 재현 | latest HEAD CI 4/4 pass; review P1 2/P2 2 수정 후 재실행 필요 | OpenAPI/SDK 현재 deterministic; typed failure 및 hash byte contract 보존 필요 | factor weight/graph constant/parameter 등 모든 numeric leaf finite preflight, overflow fail-closed, TargetTape canonical batch cancellation, legacy raw port preview/backtest 호환 보강 중 | [#65](https://github.com/Nochiski/Quant_study/pull/65) `review_p5_01` REQUEST_CHANGES P1 2/P2 2 | 2026-09-05 |
 | P4-08 | author focused 75/66 + reviewer focused 5 files 75 passed | frontend typecheck·lint·vitest 368·build; reviewer 독립 전체 368; real-backend PIT E2E 포함; backend Ruff | OpenAPI/SDK 재생성 deterministic·clean | save source/hash/canonical 결합과 fail-closed 재compile, edit/명시 검증 baseline retry, EOF·대형 duplicate/reorder non-zero, v51 현재 revision page, Diff view 409 recovery, new draft badge까지 검증 | [#63](https://github.com/Nochiski/Quant_study/pull/63) `review_p4_08` APPROVE P0/P1/P2 0, review HEAD `684dc69` CI 4/4 pass | 2026-09-05 |
 | P4-07 | FactorGraph model/UI·disconnected node·plan-null·same-pointer source 복귀·execution gate·new/revision route 53 passed | frontend typecheck·lint·vitest 350·build; real-backend PIT 포함 | generated API 변경 없음 | 실행 노드는 backend plan 순서/contract, disconnected authored node는 별도 미실행 영역·validation contract·exact pointer; hidden editor focus 금지와 명시적 projection→source reveal, Form/JSON selection·undo 보존 검증 | [#62](https://github.com/Nochiski/Quant_study/pull/62) `review_p4_07` APPROVE P0/P1/P2 0, latest approval-doc HEAD CI 4/4 pass, MERGED (`bdee3f7`) | 2026-09-05 |
 | P4-10 | schema coherence·snippet hook/UI·new/revision route 47 passed | frontend typecheck·lint·vitest 317·build; real-backend PIT 포함; editor gzip 136.63 KB | OpenAPI/SDK 재생성 deterministic·semantic diff clean | metadata query 오류는 unavailable, schema/contract hash·registry 세대 불일치는 incompatible로 fail-closed; JSON projection YAML-only, feedback epoch/status 왕복, 실제 factor graph 삽입·중복·syntax 무변경·dirty compile·focus·단일 undo 검증 | [#60](https://github.com/Nochiski/Quant_study/pull/60) `review_p4_10` APPROVE P0/P1/P2 0, latest HEAD CI 4/4 pass, MERGED (`20491b8`) | 2026-09-05 |
@@ -337,6 +337,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | P5-01 동일 reviewer 재검토가 P1 2/P2 2로 REQUEST_CHANGES. catalog 밖 numeric leaf의 non-finite가 validate를 통과해 hash 500을 만들고, 유한 피연산자의 overflow가 `status=ok` null trace와 non-finite TargetTape/backtest 지연 실패를 만드는 correctness 결함을 확인했다. TargetTape frame/candidate materialization·hash cancellation 공백과 checkpoint keyword로 인한 legacy RawObservationPort preview/backtest 호환 파손도 같은 loop에서 수정하기 위해 CHANGES_REQUESTED 전환 | 모든 StrategySpec 숫자의 domain finite invariant·factor/portfolio fail-closed·canonical cancellation·port compatibility·same-reviewer loop |
 | 2026-09-05 KST | Codex | P5-01 review-fix self-check 결과와 다섯 finding의 회귀 증거를 PR #65 본문에 반영하고 동일 reviewer `review_p5_01`의 재검토로 IN_REVIEW 전환 | PR별 reviewer 동일성·review-fix full-diff 재검토 gate |
 | 2026-09-05 KST | Codex | P5-01 review fix `d305b4a`: constraint catalog가 NaN/±inf를 공통 거부하고 inline provenance는 validation을 통과한 TargetTape hash에서 조립한다. 404/409/422/499 typed envelope와 `code`/source discriminator, 서버-owned cap을 inbound OpenAPI overlay에서 생성해 SDK error union을 복구했다. raw load 직후 session/security/holding scope를 non-member row와 구분하고 raw adapter·FactorGraph row/node·TargetTape·trace projection에 동일 cancellation checkpoint를 관통시켰다. raw 2,000+1 truncation과 holdings target/None-empty 회귀까지 추가해 focused 149, backend 953, frontend 368, Ruff·Pyright·typecheck·lint·build·generated deterministic을 통과하고 SELF_CHECK 전환 | reviewer P1 2/P2 3 전부 회귀 고정·constraint/wire/execution SoT·port/domain/application 책임분리·same-reviewer loop |
 | 2026-09-05 KST | Codex | `review_p5_01`이 P1 2/P2 3으로 REQUEST_CHANGES. non-finite inline draft의 canonical hash 예외가 500으로 누수되고 실제 404/409/422/499 오류가 OpenAPI/generated SDK에 없음을 blocking으로 확인했다. 비세션·미지 security의 silent empty, 비싼 구간 cancellation, wire cap/discriminator와 holdings/raw 경계도 같은 reviewer loop에서 함께 보강하기 위해 CHANGES_REQUESTED 전환 | backend diagnostic/constraint SoT·wire contract·truthful scope/cancellation 책임·same-reviewer fix loop |

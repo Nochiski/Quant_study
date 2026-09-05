@@ -120,6 +120,7 @@ from ._execution_error_contract import (
     Portfolio422Response,
     PortfolioRawObservationInvalidDetail,
 )
+from ._pagination import CANONICAL_PAGE_INTEGER_VALIDATOR
 from ._strategy_draft_contract import (
     StrategyDraft422Response,
     StrategyDraftConflictDetail,
@@ -252,8 +253,16 @@ def create_app(
         operation_id="listBacktests",
     )
     def list_backtests(
-        offset: int = Query(default=0, ge=0, le=PageRequest.MAX_OFFSET),
-        limit: int = Query(default=50, ge=1, le=PageRequest.MAX_LIMIT),
+        offset: Annotated[
+            int,
+            Query(ge=0, le=PageRequest.MAX_OFFSET),
+            CANONICAL_PAGE_INTEGER_VALIDATOR,
+        ] = 0,
+        limit: Annotated[
+            int,
+            Query(ge=1, le=PageRequest.MAX_LIMIT),
+            CANONICAL_PAGE_INTEGER_VALIDATOR,
+        ] = 50,
         strategy_id: str | None = Query(default=None, min_length=1),
     ) -> Page[BacktestRunSummary]:
         return backtest_runs.list_runs(
@@ -724,8 +733,16 @@ def create_app(
     )
     def list_strategy_revisions(
         strategy_id: str,
-        offset: int = Query(default=0, ge=0, le=PageRequest.MAX_OFFSET),
-        limit: int = Query(default=50, ge=1, le=PageRequest.MAX_LIMIT),
+        offset: Annotated[
+            int,
+            Query(ge=0, le=PageRequest.MAX_OFFSET),
+            CANONICAL_PAGE_INTEGER_VALIDATOR,
+        ] = 0,
+        limit: Annotated[
+            int,
+            Query(ge=1, le=PageRequest.MAX_LIMIT),
+            CANONICAL_PAGE_INTEGER_VALIDATOR,
+        ] = 50,
     ) -> Page[RevisionSummary]:
         """Revision history, ascending by revision, paginated deterministically."""
         try:
@@ -842,8 +859,16 @@ def create_app(
         operation_id="listStrategies",
     )
     def list_strategies(
-        offset: int = Query(default=0, ge=0, le=PageRequest.MAX_OFFSET),
-        limit: int = Query(default=50, ge=1, le=PageRequest.MAX_LIMIT),
+        offset: Annotated[
+            int,
+            Query(ge=0, le=PageRequest.MAX_OFFSET),
+            CANONICAL_PAGE_INTEGER_VALIDATOR,
+        ] = 0,
+        limit: Annotated[
+            int,
+            Query(ge=1, le=PageRequest.MAX_LIMIT),
+            CANONICAL_PAGE_INTEGER_VALIDATOR,
+        ] = 50,
     ) -> Page[StrategySummary]:
         """Latest immutable revision of every strategy, ordered by strategy id."""
         return strategy_documents.list_strategies(PageRequest(offset, limit))

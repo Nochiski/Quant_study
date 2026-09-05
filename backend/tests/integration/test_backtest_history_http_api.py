@@ -122,3 +122,40 @@ def test_backtest_history_uses_shared_page_bounds_and_rejected_runs_do_not_appea
     rejected = client.post("/api/v1/backtests", json={"core": "python"})
     assert rejected.status_code == 422
     assert client.get("/api/v1/backtests").json()["total"] == 0
+
+
+def test_all_page_endpoints_reject_noncanonical_integer_wire_forms() -> None:
+    client = TestClient(build_http_app())
+    document = _saved_document(client)
+    endpoints = (
+        "/api/v1/backtests",
+        "/api/v1/strategies",
+        f"/api/v1/strategies/{document['strategy_id']}/revisions",
+    )
+
+    for endpoint in endpoints:
+        for value in ("1.0", "01", "+1", " 1 ", "9_0"):
+            response = client.get(endpoint, params={"offset": value})
+            assert response.status_code == 422, (endpoint, value, response.text)
+        response = client.get(endpoint, params={"limit": "1.0"})
+        assert response.status_code == 422, (endpoint, response.text)
+
+
+def test_all_page_endpoints_accept_canonical_integer_bounds() -> None:
+    client = TestClient(build_http_app())
+    document = _saved_document(client)
+    endpoints = (
+        "/api/v1/backtests",
+        "/api/v1/strategies",
+        f"/api/v1/strategies/{document['strategy_id']}/revisions",
+    )
+
+    for endpoint in endpoints:
+        for offset in (0, 1, PageRequest.MAX_OFFSET):
+            response = client.get(endpoint, params={"offset": str(offset)})
+            assert response.status_code == 200, (endpoint, offset, response.text)
+            assert response.json()["offset"] == offset
+        for limit in (1, PageRequest.MAX_LIMIT):
+            response = client.get(endpoint, params={"limit": str(limit)})
+            assert response.status_code == 200, (endpoint, limit, response.text)
+            assert response.json()["limit"] == limit

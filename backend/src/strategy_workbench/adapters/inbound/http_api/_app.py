@@ -98,6 +98,19 @@ from strategy_workbench.domain.strategy.facade.explanation import StrategyExplan
 from strategy_workbench.domain.strategy.facade.specification import StrategySpec
 from strategy_workbench.domain.strategy.facade.validation import StrategyValidation
 
+from ._trace_contract import (
+    Trace422Response,
+    TraceCancelledDetail,
+    TraceCancelledResponse,
+    TraceEngineIncompatibleDetail,
+    TraceRequestInvalidDetail,
+    TraceStrategyNotFoundDetail,
+    TraceStrategyNotFoundResponse,
+    TraceStrategyStaleDetail,
+    TraceStrategyStaleResponse,
+    apply_trace_openapi_contract,
+)
+
 EQUITY_CATALOG_PATH = "/api/v1/equity/catalog"
 FACTOR_CATALOG_PATH = "/api/v1/factors/catalog"
 
@@ -289,7 +302,24 @@ def create_app(
     @app.post(
         "/api/v1/strategies/debug/trace",
         operation_id="traceStrategy",
-        responses={499: {"description": "The client cancelled the trace request"}},
+        responses={
+            404: {
+                "model": TraceStrategyNotFoundResponse,
+                "description": "The immutable strategy revision does not exist",
+            },
+            409: {
+                "model": TraceStrategyStaleResponse,
+                "description": "The saved revision hash differs from the expected hash",
+            },
+            422: {
+                "model": Trace422Response,
+                "description": "Malformed envelope or a coded trace preflight diagnostic",
+            },
+            499: {
+                "model": TraceCancelledResponse,
+                "description": "The client cancelled the trace request",
+            },
+        },
     )
     async def trace_strategy(
         trace_request: StrategyTraceRequest, request: Request
@@ -306,34 +336,38 @@ def create_app(
                 await asyncio.sleep(0.01)
             return await task
         except InvalidStrategyTraceRequestError as error:
+            detail = TraceRequestInvalidDetail("trace.request.invalid", str(error))
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail={"code": "trace.request.invalid", "message": str(error)},
+                detail=asdict(detail),
             ) from error
         except StrategyTraceSourceNotFoundError as error:
+            detail = TraceStrategyNotFoundDetail("trace.strategy.not_found", str(error))
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail={"code": "trace.strategy.not_found", "message": str(error)},
+                detail=asdict(detail),
             ) from error
         except StaleStrategyTraceSourceError as error:
+            detail = TraceStrategyStaleDetail("trace.strategy.stale", str(error))
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail={"code": "trace.strategy.stale", "message": str(error)},
+                detail=asdict(detail),
             ) from error
         except IncompatiblePortfolioRequestError as error:
+            detail = TraceEngineIncompatibleDetail(
+                "trace.engine.incompatible", error.compatibility
+            )
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail={
-                    "code": "trace.engine.incompatible",
-                    "compatibility": jsonable_encoder(asdict(error.compatibility)),
-                },
+                detail=jsonable_encoder(asdict(detail)),
             ) from error
         except (InvalidPortfolioRequestError, RawObservationUnavailableError) as error:
             raise _portfolio_http_error(error) from error
         except StrategyTraceCancelledError as error:
+            detail = TraceCancelledDetail("trace.cancelled", str(error))
             raise HTTPException(
                 status_code=499,
-                detail={"code": "trace.cancelled", "message": str(error)},
+                detail=asdict(detail),
             ) from error
         finally:
             stop.set()
@@ -655,6 +689,9 @@ def create_app(
         except StrategyRevisionConflictError as error:
             raise _revision_conflict(error) from error
 
+    # FastAPI sees plain dataclasses, while this inbound adapter owns wire-only constraints and
+    # discriminator metadata. Mutate the cached schema once after every route is registered.
+    apply_trace_openapi_contract(app.openapi())
     return app
 
 

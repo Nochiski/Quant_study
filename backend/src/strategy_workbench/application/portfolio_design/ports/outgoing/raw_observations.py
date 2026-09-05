@@ -24,10 +24,13 @@ Contract:
   responsibility and the application layer cannot verify it.
 - Failures are values: `status != OK` with `detail` (unknown universe/field, no data), never a
   synthesised observation.
+- Long-running adapters invoke the supplied cancellation checkpoint at bounded row batches. The
+  application owns the exception raised by that callback; the adapter only yields cooperatively.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from typing import Protocol
@@ -136,4 +139,9 @@ class RawObservationSet:
 
 
 class RawObservationPort(Protocol):
-    def load_raw_observations(self, query: RawObservationQuery) -> RawObservationSet: ...
+    def load_raw_observations(
+        self,
+        query: RawObservationQuery,
+        *,
+        checkpoint: Callable[[], None] = lambda: None,
+    ) -> RawObservationSet: ...

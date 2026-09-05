@@ -22,7 +22,6 @@ from strategy_workbench.domain.strategy.facade.provenance import (
 )
 from strategy_workbench.domain.strategy.facade.specification import (
     StrategySpec,
-    strategy_spec_hash,
 )
 
 from ._models import PortfolioPipelineOptions, PortfolioPreviewRequest
@@ -113,33 +112,60 @@ class StrategyTraceService:
             raise InvalidStrategyTraceRequestError(str(error)) from error
         except PortfolioPipelineCancelledError as error:
             raise StrategyTraceCancelledError(str(error)) from error
+        _raise_if_cancelled(cancelled)
+        if provenance is None:
+            source = request.strategy_source
+            if not isinstance(source, InlineDraft):  # pragma: no cover - resolver invariant
+                raise RuntimeError("inline trace lost its resolved source")
+            provenance = StrategyProvenance(
+                kind=StrategySourceKind.INLINE_DRAFT,
+                spec_hash=pipeline.preview.tape.strategy_hash,
+                schema_version=spec.identity.schema_version,
+                source_hash=source.source_hash,
+            )
+        elif provenance.spec_hash != pipeline.preview.tape.strategy_hash:
+            raise RuntimeError(
+                "saved strategy repository hash differs from the executed StrategySpec — "
+                f"stored={provenance.spec_hash!r} executed={pipeline.preview.tape.strategy_hash!r}"
+            )
         record = next(
             item for item in pipeline.factor_evaluations if item.factor_id == request.factor_id
         )
         if record.trace is None:  # pragma: no cover - options above require this invariant
             raise RuntimeError("truthful pipeline omitted its requested factor trace")
-        rows = tuple(
-            StrategyTraceRow(
-                node_id=node.node_id,
-                operation=node.operation,
-                as_of=value.as_of,
-                security_id=value.security_id,
-                value=value.value,
-                status=value.status,
-                inputs=tuple(
-                    StrategyTraceInput(node_id=input_id, value=input_value)
-                    for input_id, input_value in zip(
-                        node.input_node_ids, value.inputs, strict=True
+        rows_list: list[StrategyTraceRow] = []
+        for node in record.trace.nodes:
+            _raise_if_cancelled(cancelled)
+            for index, value in enumerate(node.values):
+                if index % 128 == 0:
+                    _raise_if_cancelled(cancelled)
+                rows_list.append(
+                    StrategyTraceRow(
+                        node_id=node.node_id,
+                        operation=node.operation,
+                        as_of=value.as_of,
+                        security_id=value.security_id,
+                        value=value.value,
+                        status=value.status,
+                        inputs=tuple(
+                            StrategyTraceInput(node_id=input_id, value=input_value)
+                            for input_id, input_value in zip(
+                                node.input_node_ids, value.inputs, strict=True
+                            )
+                        ),
                     )
-                ),
-            )
-            for node in record.trace.nodes
-            for value in node.values
-        )
+                )
+        rows = tuple(rows_list)
         page_rows = rows[request.offset : request.offset + request.limit]
-        raw, raw_truncated = _raw_projection(pipeline.observations, request)
+        raw, raw_truncated = _raw_projection(
+            pipeline.observations, request, cancelled=cancelled
+        )
+        _raise_if_cancelled(cancelled)
         target = _target_projection(
-            pipeline.preview.tape.frames, request.as_of, set(request.security_ids)
+            pipeline.preview.tape.frames,
+            request.as_of,
+            set(request.security_ids),
+            cancelled=cancelled,
         )
         return StrategyTraceResponse(
             spec_hash=provenance.spec_hash,
@@ -164,7 +190,7 @@ class StrategyTraceService:
 
     def _resolve(
         self, request: StrategyTraceRequest
-    ) -> tuple[StrategySpec, StrategyProvenance]:
+    ) -> tuple[StrategySpec, StrategyProvenance | None]:
         source = request.strategy_source
         if isinstance(source, SavedRevisionReference):
             try:
@@ -190,46 +216,75 @@ class StrategyTraceService:
             )
         if not isinstance(source, InlineDraft):  # pragma: no cover - union invariant
             raise TypeError(f"unsupported trace source — type={type(source).__name__}")
-        return source.spec, StrategyProvenance(
-            kind=StrategySourceKind.INLINE_DRAFT,
-            spec_hash=strategy_spec_hash(source.spec),
-            schema_version=source.spec.identity.schema_version,
-            source_hash=source.source_hash,
-        )
+        # Hash only after the truthful pipeline's validation succeeds. Its TargetTape owns the
+        # canonical strategy hash, preventing non-finite user values from escaping as a 500 here.
+        return source.spec, None
 
 
 def _raw_projection(
-    observations: tuple[PortfolioObservation, ...], request: StrategyTraceRequest
+    observations: tuple[PortfolioObservation, ...],
+    request: StrategyTraceRequest,
+    *,
+    cancelled: Callable[[], bool] = lambda: False,
 ) -> tuple[tuple[RawStrategyTraceRow, ...], bool]:
     if not request.include_raw:
         return (), False
     security_ids = set(request.security_ids)
-    all_rows = tuple(
-        RawStrategyTraceRow(
-            as_of=observation.as_of,
-            security_id=observation.security_id,
-            field_id=field.field_id,
-            value=field.value,
-            available_date=field.available_date,
-        )
-        for observation in observations
-        if observation.as_of == request.as_of and observation.security_id in security_ids
-        for field in sorted(observation.fields, key=lambda item: item.field_id)
-    )
-    return all_rows[:MAX_RAW_ROWS], len(all_rows) > MAX_RAW_ROWS
+    rows: list[RawStrategyTraceRow] = []
+    for observation_index, observation in enumerate(observations):
+        if observation_index % 128 == 0:
+            _raise_if_cancelled(cancelled)
+        if observation.as_of != request.as_of or observation.security_id not in security_ids:
+            continue
+        for field_index, field in enumerate(
+            sorted(observation.fields, key=lambda item: item.field_id)
+        ):
+            if field_index % 128 == 0:
+                _raise_if_cancelled(cancelled)
+            if len(rows) > MAX_RAW_ROWS:
+                break
+            rows.append(
+                RawStrategyTraceRow(
+                    as_of=observation.as_of,
+                    security_id=observation.security_id,
+                    field_id=field.field_id,
+                    value=field.value,
+                    available_date=field.available_date,
+                )
+            )
+        if len(rows) > MAX_RAW_ROWS:
+            break
+    return tuple(rows[:MAX_RAW_ROWS]), len(rows) > MAX_RAW_ROWS
 
 
 def _target_projection(
-    frames: tuple[TargetFrame, ...], as_of: date, security_ids: set[str]
+    frames: tuple[TargetFrame, ...],
+    as_of: date,
+    security_ids: set[str],
+    *,
+    cancelled: Callable[[], bool] = lambda: False,
 ) -> StrategyTargetTrace | None:
+    _raise_if_cancelled(cancelled)
     frame = next((item for item in frames if item.signal_as_of == as_of), None)
     if frame is None:
         return None
+    targets = []
+    for index, item in enumerate(frame.targets):
+        if index % 128 == 0:
+            _raise_if_cancelled(cancelled)
+        if item.security_id in security_ids:
+            targets.append(item)
+    candidates = []
+    for index, item in enumerate(frame.candidates):
+        if index % 128 == 0:
+            _raise_if_cancelled(cancelled)
+        if item.security_id in security_ids:
+            candidates.append(item)
     return StrategyTargetTrace(
         signal_as_of=frame.signal_as_of,
         execution_on=frame.execution_on,
-        targets=tuple(item for item in frame.targets if item.security_id in security_ids),
-        candidates=tuple(item for item in frame.candidates if item.security_id in security_ids),
+        targets=tuple(targets),
+        candidates=tuple(candidates),
     )
 
 

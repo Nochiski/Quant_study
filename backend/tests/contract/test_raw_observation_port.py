@@ -117,6 +117,22 @@ def test_observations_are_deterministic_and_ordered(adapter: RawObservationPort)
 
 
 @pytest.mark.parametrize("adapter", ADAPTERS)
+def test_long_raw_load_honours_the_application_cancellation_checkpoint(
+    adapter: RawObservationPort,
+) -> None:
+    calls = 0
+
+    def cancel() -> None:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("cancelled by application")
+
+    with pytest.raises(RuntimeError, match="cancelled by application"):
+        adapter.load_raw_observations(_query(), checkpoint=cancel)
+    assert calls == 1
+
+
+@pytest.mark.parametrize("adapter", ADAPTERS)
 def test_facts_do_not_depend_on_the_query_window(adapter: RawObservationPort) -> None:
     """(as_of, security) facts are window-invariant: membership and fields never flip."""
     narrow = _index(adapter.load_raw_observations(_query()))

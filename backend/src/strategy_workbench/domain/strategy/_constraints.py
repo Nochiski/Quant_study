@@ -67,8 +67,8 @@ class ScalarConstraint:
         return self.pointer.strip("/").replace("/", ".")
 
     def satisfied_by(self, value: float | int) -> bool:
-        if isinstance(value, float) and math.isnan(value):
-            return False  # NaN satisfies no bound; never let it through as valid
+        if isinstance(value, float) and not math.isfinite(value):
+            return False  # NaN and infinities satisfy no contract, even a one-sided bound.
         if self.minimum is not None:
             if self.exclusive_minimum and not value > self.minimum:
                 return False

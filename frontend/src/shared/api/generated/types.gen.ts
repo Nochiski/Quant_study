@@ -3115,6 +3115,8 @@ export type StrategyTraceRequest = {
   node_ids?: Array<string>;
   /**
    * Offset
+   *
+   * Zero-based flat trace offset. offset + limit must be <= 10000.
    */
   offset?: number;
   /**
@@ -3123,12 +3125,20 @@ export type StrategyTraceRequest = {
   security_ids: Array<string>;
   /**
    * Starting Holdings
+   *
+   * Optional full opening-book override. Security ids must be unique; omitted securities start at zero. null preserves the observation source's opening book.
    */
   starting_holdings?: Array<PortfolioStartingHolding> | null;
   /**
    * Strategy Source
    */
-  strategy_source: SavedRevisionReference | InlineDraft;
+  strategy_source:
+    | ({
+        kind?: "saved_revision";
+      } & SavedRevisionReference)
+    | ({
+        kind?: "inline_draft";
+      } & InlineDraft);
 };
 
 /**
@@ -3324,6 +3334,172 @@ export type TimeSeriesNode = {
  */
 export type TimeSeriesOperator =
   "mean" | "std" | "momentum" | "delta" | "min" | "max";
+
+/**
+ * TraceCancelledDetail
+ */
+export type TraceCancelledDetail = {
+  /**
+   * Code
+   */
+  code: "trace.cancelled";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * TraceCancelledResponse
+ */
+export type TraceCancelledResponse = {
+  detail: TraceCancelledDetail;
+};
+
+/**
+ * TraceEngineIncompatibleDetail
+ */
+export type TraceEngineIncompatibleDetail = {
+  /**
+   * Code
+   */
+  code: "trace.engine.incompatible";
+  compatibility: EngineCompatibility;
+};
+
+/**
+ * TracePortfolioDataUnavailableDetail
+ */
+export type TracePortfolioDataUnavailableDetail = {
+  /**
+   * Code
+   */
+  code: "portfolio.data.unavailable";
+  /**
+   * Detail
+   */
+  detail: string | null;
+  status: DataLoadStatus;
+};
+
+/**
+ * TracePortfolioStrategyInvalidDetail
+ */
+export type TracePortfolioStrategyInvalidDetail = {
+  /**
+   * Code
+   */
+  code: "portfolio.strategy.invalid";
+  validation: StrategyValidation;
+};
+
+/**
+ * TraceRequestInvalidDetail
+ */
+export type TraceRequestInvalidDetail = {
+  /**
+   * Code
+   */
+  code: "trace.request.invalid";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * TraceRequestValidationIssue
+ */
+export type TraceRequestValidationIssue = {
+  /**
+   * Loc
+   */
+  loc: Array<string | number>;
+  /**
+   * Msg
+   */
+  msg: string;
+  /**
+   * Type
+   */
+  type: string;
+};
+
+/**
+ * TraceRequestValidationResponse
+ *
+ * FastAPI's malformed-envelope 422 shape, alongside coded application diagnostics.
+ */
+export type TraceRequestValidationResponse = {
+  /**
+   * Detail
+   */
+  detail: Array<TraceRequestValidationIssue>;
+};
+
+/**
+ * TraceStrategyNotFoundDetail
+ */
+export type TraceStrategyNotFoundDetail = {
+  /**
+   * Code
+   */
+  code: "trace.strategy.not_found";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * TraceStrategyNotFoundResponse
+ */
+export type TraceStrategyNotFoundResponse = {
+  detail: TraceStrategyNotFoundDetail;
+};
+
+/**
+ * TraceStrategyStaleDetail
+ */
+export type TraceStrategyStaleDetail = {
+  /**
+   * Code
+   */
+  code: "trace.strategy.stale";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * TraceStrategyStaleResponse
+ */
+export type TraceStrategyStaleResponse = {
+  detail: TraceStrategyStaleDetail;
+};
+
+/**
+ * TraceUnprocessableResponse
+ */
+export type TraceUnprocessableResponse = {
+  /**
+   * Detail
+   */
+  detail:
+    | ({
+        code: "trace.request.invalid";
+      } & TraceRequestInvalidDetail)
+    | ({
+        code: "trace.engine.incompatible";
+      } & TraceEngineIncompatibleDetail)
+    | ({
+        code: "portfolio.strategy.invalid";
+      } & TracePortfolioStrategyInvalidDetail)
+    | ({
+        code: "portfolio.data.unavailable";
+      } & TracePortfolioDataUnavailableDetail);
+};
 
 /**
  * TraceValueStatus
@@ -4041,13 +4217,23 @@ export type TraceStrategyData = {
 
 export type TraceStrategyErrors = {
   /**
-   * Validation Error
+   * The immutable strategy revision does not exist
    */
-  422: HttpValidationError;
+  404: TraceStrategyNotFoundResponse;
+  /**
+   * The saved revision hash differs from the expected hash
+   */
+  409: TraceStrategyStaleResponse;
+  /**
+   * Response 422 Tracestrategy
+   *
+   * Malformed envelope or a coded trace preflight diagnostic
+   */
+  422: TraceUnprocessableResponse | TraceRequestValidationResponse;
   /**
    * The client cancelled the trace request
    */
-  499: unknown;
+  499: TraceCancelledResponse;
 };
 
 export type TraceStrategyError = TraceStrategyErrors[keyof TraceStrategyErrors];

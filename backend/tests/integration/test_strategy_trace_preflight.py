@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 from threading import Event
 
@@ -17,11 +18,14 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
     InMemoryStrategyRepository,
 )
 from strategy_workbench.application.factor_research.facade.ports import FactorMetadataSnapshot
+from strategy_workbench.application.portfolio_design import _service as portfolio_module
+from strategy_workbench.application.portfolio_design import _trace_service as trace_module
 from strategy_workbench.application.portfolio_design.facade.design import (
     EngineCapabilityIssue,
     EngineCompatibility,
     EngineRequirementSummary,
     IncompatiblePortfolioRequestError,
+    InvalidPortfolioRequestError,
     PortfolioDesignService,
 )
 from strategy_workbench.application.portfolio_design.facade.ports import RawObservationQuery
@@ -32,6 +36,10 @@ from strategy_workbench.application.portfolio_design.facade.trace import (
     StrategyTraceService,
 )
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
+from strategy_workbench.domain.portfolio.facade.construction import (
+    PortfolioFieldValue,
+    PortfolioObservation,
+)
 from strategy_workbench.domain.strategy.facade.provenance import InlineDraft
 
 
@@ -43,7 +51,7 @@ class _NoRawAdapter:
     def resolve_factor_fields(self, field_ids: tuple[str, ...]) -> FactorMetadataSnapshot:
         return self._delegate.resolve_factor_fields(field_ids)
 
-    def load_raw_observations(self, query: RawObservationQuery):
+    def load_raw_observations(self, query: RawObservationQuery, *, checkpoint=lambda: None):
         self.raw_called = True
         raise AssertionError(f"raw calculation should not start — query={query!r}")
 
@@ -65,11 +73,23 @@ class _CancelAfterRawAdapter(_NoRawAdapter):
         super().__init__()
         self._stop = stop
 
-    def load_raw_observations(self, query: RawObservationQuery):
+    def load_raw_observations(self, query: RawObservationQuery, *, checkpoint=lambda: None):
         self.raw_called = True
-        result = self._delegate.load_raw_observations(query)
+        result = self._delegate.load_raw_observations(query, checkpoint=checkpoint)
         self._stop.set()
         return result
+
+
+class _CancelInsideRawAdapter(_NoRawAdapter):
+    def __init__(self, stop: Event) -> None:
+        super().__init__()
+        self._stop = stop
+
+    def load_raw_observations(self, query: RawObservationQuery, *, checkpoint=lambda: None):
+        self.raw_called = True
+        self._stop.set()
+        checkpoint()
+        raise AssertionError("cancellation checkpoint should have interrupted raw loading")
 
 
 def _spec():
@@ -85,7 +105,7 @@ def _request(spec, *, node_ids: tuple[str, ...] = ()) -> StrategyTraceRequest:
     return StrategyTraceRequest(
         strategy_source=InlineDraft(spec, "inline_draft"),
         as_of=spec.data.end,
-        security_ids=("005930",),
+        security_ids=("sec-005930-1",),
         factor_id=factor.factor_id,
         node_ids=node_ids,
     )
@@ -126,6 +146,25 @@ def test_unknown_node_and_pre_cancelled_request_never_load_raw_rows() -> None:
     assert source.raw_called is False
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_inline_spec_fails_validation_before_raw_loading(value: float) -> None:
+    source = _NoRawAdapter()
+    portfolio = PortfolioDesignService(
+        source,
+        BacktestEnginePortfolioAdapter(),
+        factor_metadata=source,
+        factor_registry_version="factor-registry-v1",
+    )
+    service = StrategyTraceService(portfolio, InMemoryStrategyRepository())
+    spec = _spec()
+    spec = replace(spec, execution=replace(spec.execution, fee_bps=value))
+
+    with pytest.raises(InvalidPortfolioRequestError):
+        service.trace(_request(spec))
+
+    assert source.raw_called is False
+
+
 def test_cancellation_after_raw_load_stops_before_factor_evaluation() -> None:
     stop = Event()
     source = _CancelAfterRawAdapter(stop)
@@ -140,3 +179,94 @@ def test_cancellation_after_raw_load_stops_before_factor_evaluation() -> None:
     with pytest.raises(StrategyTraceCancelledError, match="cancelled"):
         service.trace(_request(_spec()), cancelled=stop.is_set)
     assert source.raw_called is True
+
+
+def test_raw_port_checkpoint_interrupts_loading() -> None:
+    stop = Event()
+    source = _CancelInsideRawAdapter(stop)
+    portfolio = PortfolioDesignService(
+        source,
+        BacktestEnginePortfolioAdapter(),
+        factor_metadata=source,
+        factor_registry_version="factor-registry-v1",
+    )
+    service = StrategyTraceService(portfolio, InMemoryStrategyRepository())
+
+    with pytest.raises(StrategyTraceCancelledError, match="cancelled"):
+        service.trace(_request(_spec()), cancelled=stop.is_set)
+    assert source.raw_called is True
+
+
+def test_factor_evaluator_checkpoint_stops_before_target_tape(monkeypatch) -> None:
+    source = MockEquityDataAdapter.demo()
+    portfolio = PortfolioDesignService(
+        source,
+        BacktestEnginePortfolioAdapter(),
+        factor_metadata=source,
+        factor_registry_version="factor-registry-v1",
+    )
+    service = StrategyTraceService(portfolio, InMemoryStrategyRepository())
+    entered_evaluator = Event()
+    from strategy_workbench.domain.factor import _trace as factor_trace_module
+
+    original = factor_trace_module._compute_nodes
+
+    def enter_then_compute(*args, **kwargs):
+        entered_evaluator.set()
+        return original(*args, **kwargs)
+
+    def fail_target_tape(*args, **kwargs):
+        raise AssertionError("TargetTape must not compile after evaluator cancellation")
+
+    monkeypatch.setattr(factor_trace_module, "_compute_nodes", enter_then_compute)
+    monkeypatch.setattr(
+        portfolio_module,
+        "compile_target_tape",
+        fail_target_tape,
+    )
+
+    with pytest.raises(StrategyTraceCancelledError, match="cancelled"):
+        service.trace(_request(_spec()), cancelled=entered_evaluator.is_set)
+
+
+def test_raw_projection_stops_at_one_lookahead_row_and_reports_truncation() -> None:
+    request = replace(_request(_spec()), include_raw=True)
+    observation = PortfolioObservation(
+        as_of=request.as_of,
+        security_id=request.security_ids[0],
+        universe_member=True,
+        factor_values=(),
+        fields=tuple(
+            PortfolioFieldValue(f"field.{index:04d}", float(index), request.as_of)
+            for index in range(trace_module.MAX_RAW_ROWS + 1)
+        ),
+    )
+
+    rows, truncated = trace_module._raw_projection((observation,), request)
+
+    assert len(rows) == trace_module.MAX_RAW_ROWS
+    assert rows[-1].field_id == "field.1999"
+    assert truncated is True
+
+
+def test_starting_holdings_none_preserves_adapter_book_while_empty_overrides_it() -> None:
+    spec = _spec()
+    raw = MockEquityDataAdapter.demo().load_raw_observations(
+        RawObservationQuery(
+            market=spec.data.market.value,
+            universe_id=spec.data.universe_id,
+            start=spec.data.start,
+            end=spec.data.end,
+            field_ids=("price.close",),
+        )
+    )
+    first = raw.observations[0]
+    seeded = replace(first, previous_weight=0.37)
+    raw = replace(raw, observations=(seeded, *raw.observations[1:]))
+    evaluation = ()
+
+    preserved = portfolio_module._to_portfolio_observations(raw, evaluation, None)
+    overridden = portfolio_module._to_portfolio_observations(raw, evaluation, ())
+
+    assert preserved[0].previous_weight == 0.37
+    assert overridden[0].previous_weight == 0.0

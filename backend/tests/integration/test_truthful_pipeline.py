@@ -446,7 +446,9 @@ def test_factor_value_publication_date_is_the_latest_input_publication() -> None
 class _LeakyPort:
     """Adapter that violates the contract: one field published after its observation date."""
 
-    def load_raw_observations(self, query: RawObservationQuery) -> RawObservationSet:
+    def load_raw_observations(
+        self, query: RawObservationQuery, *, checkpoint=lambda: None
+    ) -> RawObservationSet:
         result = MockEquityDataAdapter.demo().load_raw_observations(query)
         first = result.observations[0]
         leaked = replace(
@@ -592,7 +594,9 @@ class _NonMemberNoisePort:
     def __init__(self, value: float = 1e6) -> None:
         self._value = value
 
-    def load_raw_observations(self, query: RawObservationQuery) -> RawObservationSet:
+    def load_raw_observations(
+        self, query: RawObservationQuery, *, checkpoint=lambda: None
+    ) -> RawObservationSet:
         result = MockEquityDataAdapter.demo().load_raw_observations(query)
         template = result.observations[0]
         extra = tuple(
@@ -655,7 +659,9 @@ def test_non_members_do_not_enter_the_member_cross_section() -> None:
 class _WideRangePort:
     """Adapter that answers a wider window than asked (D-004 probe)."""
 
-    def load_raw_observations(self, query: RawObservationQuery) -> RawObservationSet:
+    def load_raw_observations(
+        self, query: RawObservationQuery, *, checkpoint=lambda: None
+    ) -> RawObservationSet:
         widened = replace(query, end=query.end + timedelta(days=14))
         return MockEquityDataAdapter.demo().load_raw_observations(widened)
 

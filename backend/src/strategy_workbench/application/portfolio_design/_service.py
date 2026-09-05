@@ -19,9 +19,10 @@ change; the observation adapter owns their as_of vintage (D-006).
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import date
+from typing import TypeVar
 
 from strategy_workbench.application.factor_research.facade.ports import (
     FactorMetadataPort,
@@ -79,6 +80,9 @@ from .ports.outgoing.raw_observations import (
     RawObservationQuery,
     RawObservationSet,
 )
+
+_T = TypeVar("_T")
+_CHECKPOINT_BATCH = 256
 
 
 class InvalidPortfolioRequestError(ValueError):
@@ -179,11 +183,15 @@ class PortfolioDesignService:
         cancelled: Callable[[], bool] = lambda: False,
     ) -> PortfolioPipelineResult:
         pipeline_options = options or PortfolioPipelineOptions()
+
+        def checkpoint() -> None:
+            _raise_if_cancelled(cancelled)
+
         spec = request.spec
         validation = validate_strategy(spec)
         if not validation.valid:
             raise InvalidPortfolioRequestError(validation)
-        _raise_if_cancelled(cancelled)
+        checkpoint()
 
         engine = self._engine_portfolio.assess(spec)
         if pipeline_options.require_engine_compatible and not engine.compatible:
@@ -204,7 +212,7 @@ class PortfolioDesignService:
         _reject_non_numeric_factor_outputs(spec, plans)
         _reject_saved_references(spec, plans)
         _validate_trace_selection(pipeline_options, plans)
-        _raise_if_cancelled(cancelled)
+        checkpoint()
         raw = self._observation_source.load_raw_observations(
             RawObservationQuery(
                 market=spec.data.market.value,
@@ -216,8 +224,10 @@ class PortfolioDesignService:
                 history_sessions_before_start=max(
                     (plan.minimum_history_sessions - 1 for plan in plans.values()), default=0
                 ),
-            )
+            ),
+            checkpoint=checkpoint,
         )
+        checkpoint()
         if not raw.ok:
             raise RawObservationUnavailableError(raw.status, raw.detail)
         if raw.data_snapshot_id != metadata.data_snapshot_id:
@@ -226,15 +236,19 @@ class PortfolioDesignService:
                 actual=raw.data_snapshot_id,
             )
         _reject_sessions_outside_strategy_range(raw, spec)
-        _raise_if_cancelled(cancelled)
-        factor_observations = tuple(_to_factor_observation(item) for item in raw.observations)
+        _validate_loaded_trace_scope(pipeline_options, raw)
+        checkpoint()
+        factor_observations = tuple(
+            _to_factor_observation(item)
+            for item in _checkpointed(raw.observations, checkpoint)
+        )
         parameters = tuple(
             ResolvedFactorParameter(parameter.parameter_id, parameter.default)
             for parameter in spec.parameters
         )
         evaluations: list[FactorEvaluationRecord] = []
         for factor in spec.factors.factors:
-            _raise_if_cancelled(cancelled)
+            checkpoint()
             trace = None
             if factor.factor_id == pipeline_options.trace_factor_id:
                 evaluation, trace = evaluate_factor_graph_with_trace(
@@ -242,10 +256,14 @@ class PortfolioDesignService:
                     observations=factor_observations,
                     parameters=parameters,
                     selection=pipeline_options.trace_selection,
+                    checkpoint=checkpoint,
                 )
             else:
                 evaluation = evaluate_factor_graph(
-                    factor.graph, observations=factor_observations, parameters=parameters
+                    factor.graph,
+                    observations=factor_observations,
+                    parameters=parameters,
+                    checkpoint=checkpoint,
                 )
             evaluations.append(
                 FactorEvaluationRecord(
@@ -256,16 +274,21 @@ class PortfolioDesignService:
                 )
             )
         evaluation_records = tuple(evaluations)
-        _raise_if_cancelled(cancelled)
+        checkpoint()
         observations = _to_portfolio_observations(
-            raw, evaluation_records, pipeline_options.starting_holdings
+            raw,
+            evaluation_records,
+            pipeline_options.starting_holdings,
+            checkpoint=checkpoint,
         )
+        checkpoint()
         preview = PortfolioPreview(
             tape=compile_target_tape(
                 spec,
                 data_snapshot_id=raw.data_snapshot_id,
                 sessions=raw.sessions,
                 observations=observations,
+                checkpoint=checkpoint,
             ),
             engine=engine,
             warnings=raw.warnings,
@@ -356,9 +379,61 @@ def _validate_trace_selection(
         )
 
 
+def _validate_loaded_trace_scope(
+    options: PortfolioPipelineOptions, raw: RawObservationSet
+) -> None:
+    """Reject an untraceable date/security scope before any FactorGraph calculation.
+
+    A non-member row is still a valid point-in-time security observation and must not be confused
+    with an unknown identifier. Absence of the row is an invalid scope, not a successful missing
+    value: missing fields on a present row remain represented by the trace value status.
+    """
+    selection = options.trace_selection
+    if selection is None:
+        return
+    selected_dates = set(selection.as_of or ())
+    missing_sessions = selected_dates - set(raw.sessions)
+    if missing_sessions:
+        raise InvalidPortfolioTraceSelectionError(
+            "trace as_of dates are not trading sessions in the selected snapshot — "
+            f"as_of={sorted(missing_sessions)!r} snapshot={raw.data_snapshot_id!r}"
+        )
+    if selected_dates and selection.security_ids:
+        observed_ids = {
+            item.security_id for item in raw.observations if item.as_of in selected_dates
+        }
+        unmatched = set(selection.security_ids) - observed_ids
+        if unmatched:
+            raise InvalidPortfolioTraceSelectionError(
+                "trace security ids have no observation rows at the selected as_of — "
+                f"security_ids={sorted(unmatched)!r} as_of={sorted(selected_dates)!r} "
+                f"snapshot={raw.data_snapshot_id!r}"
+            )
+    if options.starting_holdings:
+        sessions = set(raw.sessions)
+        observed_ids = {
+            item.security_id for item in raw.observations if item.as_of in sessions
+        }
+        unmatched_holdings = {
+            holding.security_id for holding in options.starting_holdings
+        } - observed_ids
+        if unmatched_holdings:
+            raise InvalidPortfolioTraceSelectionError(
+                "trace starting holdings are absent from the selected snapshot — "
+                f"security_ids={sorted(unmatched_holdings)!r} snapshot={raw.data_snapshot_id!r}"
+            )
+
+
 def _raise_if_cancelled(cancelled: Callable[[], bool]) -> None:
     if cancelled():
         raise PortfolioPipelineCancelledError("portfolio pipeline trace was cancelled")
+
+
+def _checkpointed(items: Iterable[_T], checkpoint: Callable[[], None]) -> Iterator[_T]:
+    for index, item in enumerate(items):
+        if index % _CHECKPOINT_BATCH == 0:
+            checkpoint()
+        yield item
 
 
 def _reject_saved_references(spec: StrategySpec, plans: dict[str, FactorExecutionPlan]) -> None:
@@ -450,6 +525,8 @@ def _to_portfolio_observations(
     raw: RawObservationSet,
     evaluations: tuple[FactorEvaluationRecord, ...],
     starting_holdings: tuple[PortfolioStartingHolding, ...] | None = None,
+    *,
+    checkpoint: Callable[[], None] = lambda: None,
 ) -> tuple[PortfolioObservation, ...]:
     in_range = set(raw.sessions)
     values_by_key: dict[tuple[str, date, str], float | None] = {}
@@ -485,7 +562,7 @@ def _to_portfolio_observations(
                 else opening_weights.get(item.security_id, 0.0)
             ),
         )
-        for item in raw.observations
+        for item in _checkpointed(raw.observations, checkpoint)
         if item.as_of in in_range
     )
 

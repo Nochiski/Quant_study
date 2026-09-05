@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from datetime import date, timedelta
 
 from strategy_workbench.application.backtest_run.facade.ports import (
@@ -221,7 +222,12 @@ class MockEquityDataAdapter:
             data_snapshot_id=self._snapshot.snapshot_id, observations=observations
         )
 
-    def load_raw_observations(self, query: RawObservationQuery) -> RawObservationSet:
+    def load_raw_observations(
+        self,
+        query: RawObservationQuery,
+        *,
+        checkpoint: Callable[[], None] = lambda: None,
+    ) -> RawObservationSet:
         """Raw PIT panel for the truthful pipeline (P1.5-03).
 
         Inside the fixture calendar every value comes from the same fixture `Observation` rows and
@@ -257,7 +263,10 @@ class MockEquityDataAdapter:
         warnings: set[str] = set()
         observations: list[RawObservation] = []
         for session in history + requested:
+            checkpoint()
             for security_index, membership in enumerate(memberships):
+                if security_index % 64 == 0:
+                    checkpoint()
                 security_id = membership.security.security_id
                 fields: list[RawFieldValue] = []
                 for field_id in query.field_ids:

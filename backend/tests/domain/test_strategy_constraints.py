@@ -206,8 +206,11 @@ def test_fee_and_slippage_report_one_issue_each_with_their_own_path() -> None:
 
 
 @pytest.mark.parametrize("constraint", STRATEGY_SCALAR_CONSTRAINTS, ids=lambda c: c.pointer)
-def test_nan_never_satisfies_a_bound(constraint: ScalarConstraint) -> None:
-    spec = _with_scalar(_template(), constraint.pointer, float("nan"))
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_value_never_satisfies_a_bound(
+    constraint: ScalarConstraint, value: float
+) -> None:
+    spec = _with_scalar(_template(), constraint.pointer, value)
     assert constraint.code in {issue.code for issue in validate_strategy(spec).issues}
 
 

@@ -2952,6 +2952,7 @@
       "PortfolioStartingHolding": {
         "properties": {
           "security_id": {
+            "minLength": 1,
             "title": "Security Id",
             "type": "string"
           },
@@ -4941,6 +4942,7 @@
             "type": "string"
           },
           "factor_id": {
+            "minLength": 1,
             "title": "Factor Id",
             "type": "string"
           },
@@ -4951,28 +4953,40 @@
           },
           "limit": {
             "default": 200,
+            "maximum": 500,
+            "minimum": 1,
             "title": "Limit",
             "type": "integer"
           },
           "node_ids": {
             "default": [],
             "items": {
+              "minLength": 1,
               "type": "string"
             },
+            "maxItems": 100,
             "title": "Node Ids",
-            "type": "array"
+            "type": "array",
+            "uniqueItems": true
           },
           "offset": {
             "default": 0,
+            "description": "Zero-based flat trace offset. offset + limit must be <= 10000.",
+            "maximum": 9999,
+            "minimum": 0,
             "title": "Offset",
             "type": "integer"
           },
           "security_ids": {
             "items": {
+              "minLength": 1,
               "type": "string"
             },
+            "maxItems": 100,
+            "minItems": 1,
             "title": "Security Ids",
-            "type": "array"
+            "type": "array",
+            "uniqueItems": true
           },
           "starting_holdings": {
             "anyOf": [
@@ -4980,12 +4994,14 @@
                 "items": {
                   "$ref": "#/components/schemas/PortfolioStartingHolding"
                 },
+                "maxItems": 100,
                 "type": "array"
               },
               {
                 "type": "null"
               }
             ],
+            "description": "Optional full opening-book override. Security ids must be unique; omitted securities start at zero. null preserves the observation source's opening book.",
             "title": "Starting Holdings"
           },
           "strategy_source": {
@@ -4997,6 +5013,13 @@
                 "$ref": "#/components/schemas/InlineDraft"
               }
             ],
+            "discriminator": {
+              "mapping": {
+                "inline_draft": "#/components/schemas/InlineDraft",
+                "saved_revision": "#/components/schemas/SavedRevisionReference"
+              },
+              "propertyName": "kind"
+            },
             "title": "Strategy Source"
           }
         },
@@ -5318,6 +5341,269 @@
         ],
         "title": "TimeSeriesOperator",
         "type": "string"
+      },
+      "TraceCancelledDetail": {
+        "properties": {
+          "code": {
+            "const": "trace.cancelled",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "TraceCancelledDetail",
+        "type": "object"
+      },
+      "TraceCancelledResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/TraceCancelledDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "TraceCancelledResponse",
+        "type": "object"
+      },
+      "TraceEngineIncompatibleDetail": {
+        "properties": {
+          "code": {
+            "const": "trace.engine.incompatible",
+            "title": "Code",
+            "type": "string"
+          },
+          "compatibility": {
+            "$ref": "#/components/schemas/EngineCompatibility"
+          }
+        },
+        "required": [
+          "code",
+          "compatibility"
+        ],
+        "title": "TraceEngineIncompatibleDetail",
+        "type": "object"
+      },
+      "TracePortfolioDataUnavailableDetail": {
+        "properties": {
+          "code": {
+            "const": "portfolio.data.unavailable",
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DataLoadStatus"
+          }
+        },
+        "required": [
+          "code",
+          "status",
+          "detail"
+        ],
+        "title": "TracePortfolioDataUnavailableDetail",
+        "type": "object"
+      },
+      "TracePortfolioStrategyInvalidDetail": {
+        "properties": {
+          "code": {
+            "const": "portfolio.strategy.invalid",
+            "title": "Code",
+            "type": "string"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/StrategyValidation"
+          }
+        },
+        "required": [
+          "code",
+          "validation"
+        ],
+        "title": "TracePortfolioStrategyInvalidDetail",
+        "type": "object"
+      },
+      "TraceRequestInvalidDetail": {
+        "properties": {
+          "code": {
+            "const": "trace.request.invalid",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "TraceRequestInvalidDetail",
+        "type": "object"
+      },
+      "TraceRequestValidationIssue": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Loc",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Msg",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "TraceRequestValidationIssue",
+        "type": "object"
+      },
+      "TraceRequestValidationResponse": {
+        "description": "FastAPI's malformed-envelope 422 shape, alongside coded application diagnostics.",
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/TraceRequestValidationIssue"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "TraceRequestValidationResponse",
+        "type": "object"
+      },
+      "TraceStrategyNotFoundDetail": {
+        "properties": {
+          "code": {
+            "const": "trace.strategy.not_found",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "TraceStrategyNotFoundDetail",
+        "type": "object"
+      },
+      "TraceStrategyNotFoundResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/TraceStrategyNotFoundDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "TraceStrategyNotFoundResponse",
+        "type": "object"
+      },
+      "TraceStrategyStaleDetail": {
+        "properties": {
+          "code": {
+            "const": "trace.strategy.stale",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "TraceStrategyStaleDetail",
+        "type": "object"
+      },
+      "TraceStrategyStaleResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/TraceStrategyStaleDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "TraceStrategyStaleResponse",
+        "type": "object"
+      },
+      "TraceUnprocessableResponse": {
+        "properties": {
+          "detail": {
+            "discriminator": {
+              "mapping": {
+                "portfolio.data.unavailable": "#/components/schemas/TracePortfolioDataUnavailableDetail",
+                "portfolio.strategy.invalid": "#/components/schemas/TracePortfolioStrategyInvalidDetail",
+                "trace.engine.incompatible": "#/components/schemas/TraceEngineIncompatibleDetail",
+                "trace.request.invalid": "#/components/schemas/TraceRequestInvalidDetail"
+              },
+              "propertyName": "code"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TraceRequestInvalidDetail"
+              },
+              {
+                "$ref": "#/components/schemas/TraceEngineIncompatibleDetail"
+              },
+              {
+                "$ref": "#/components/schemas/TracePortfolioStrategyInvalidDetail"
+              },
+              {
+                "$ref": "#/components/schemas/TracePortfolioDataUnavailableDetail"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "TraceUnprocessableResponse",
+        "type": "object"
       },
       "TraceValueStatus": {
         "enum": [
@@ -6472,17 +6758,52 @@
             },
             "description": "Successful Response"
           },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceStrategyNotFoundResponse"
+                }
+              }
+            },
+            "description": "The immutable strategy revision does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceStrategyStaleResponse"
+                }
+              }
+            },
+            "description": "The saved revision hash differs from the expected hash"
+          },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/TraceUnprocessableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TraceRequestValidationResponse"
+                    }
+                  ],
+                  "title": "Response 422 Tracestrategy"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Malformed envelope or a coded trace preflight diagnostic"
           },
           "499": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceCancelledResponse"
+                }
+              }
+            },
             "description": "The client cancelled the trace request"
           }
         },

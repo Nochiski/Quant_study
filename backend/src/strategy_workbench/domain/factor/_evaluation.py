@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import date
 from statistics import mean, median, pstdev
-from typing import TypeAlias, TypeGuard
+from typing import TypeAlias, TypeGuard, TypeVar
 
 from ._nodes import (
     BinaryNode,
@@ -33,6 +34,23 @@ from ._validation import node_dependencies
 
 FactorInputValue: TypeAlias = float | str | bool | None
 FactorComputedValue: TypeAlias = float | bool | None
+
+_T = TypeVar("_T")
+_CHECKPOINT_BATCH = 256
+
+
+def _noop_checkpoint() -> None:
+    return None
+
+
+def _checkpointed(
+    items: Iterable[_T], checkpoint: Callable[[], None]
+) -> Iterator[_T]:
+    """Yield work in bounded batches without assigning cancellation policy to the domain."""
+    for index, item in enumerate(items):
+        if index % _CHECKPOINT_BATCH == 0:
+            checkpoint()
+        yield item
 
 
 @dataclass(frozen=True)
@@ -85,15 +103,22 @@ def evaluate_factor_graph(
     *,
     observations: tuple[FactorObservation, ...],
     parameters: tuple[ResolvedFactorParameter, ...] = (),
+    checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> FactorEvaluation:
-    computed = _compute_nodes(graph, observations=observations, parameters=parameters)
-    return _evaluation_from_computed(graph, observations, computed)
+    computed = _compute_nodes(
+        graph, observations=observations, parameters=parameters, checkpoint=checkpoint
+    )
+    return _evaluation_from_computed(
+        graph, observations, computed, checkpoint=checkpoint
+    )
 
 
 def _evaluation_from_computed(
     graph: FactorGraph,
     observations: tuple[FactorObservation, ...],
     computed: dict[str, list[FactorComputedValue]],
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> FactorEvaluation:
     """Build the public output from an already evaluated node cache.
 
@@ -109,7 +134,9 @@ def _evaluation_from_computed(
             if isinstance(value, (int, float)) and not isinstance(value, bool)
             else None,
         )
-        for observation, value in zip(observations, raw_output, strict=True)
+        for observation, value in _checkpointed(
+            zip(observations, raw_output, strict=True), checkpoint
+        )
     )
     return FactorEvaluation(output_node_id=graph.output_node_id, values=output)
 
@@ -119,6 +146,7 @@ def _compute_nodes(
     *,
     observations: tuple[FactorObservation, ...],
     parameters: tuple[ResolvedFactorParameter, ...] = (),
+    checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> dict[str, list[FactorComputedValue]]:
     """Evaluate every node reachable from the output once; the cache is the single value source.
 
@@ -130,6 +158,7 @@ def _compute_nodes(
     computed: dict[str, list[FactorComputedValue]] = {}
 
     def evaluate(node_id: str) -> list[FactorComputedValue]:
+        checkpoint()
         if node_id in computed:
             return computed[node_id]
         try:
@@ -141,9 +170,11 @@ def _compute_nodes(
         inputs = [evaluate(dependency) for dependency in node_dependencies(node)]
         values: list[FactorComputedValue]
         if isinstance(node, FieldNode):
-            values = _field_values(observations, node.field_id, graph.missing_policy)
+            values = _field_values(
+                observations, node.field_id, graph.missing_policy, checkpoint=checkpoint
+            )
         elif isinstance(node, ConstantNode):
-            values = [node.value for _ in observations]
+            values = [node.value for _ in _checkpointed(observations, checkpoint)]
         elif isinstance(node, ParameterNode):
             if node.parameter_id not in parameter_values:
                 raise ValueError(
@@ -156,32 +187,40 @@ def _compute_nodes(
                     "numeric factor parameter has incompatible value — "
                     f"parameter_id={node.parameter_id!r} value={value!r}"
                 )
-            values = [float(value)] * len(observations)
+            values = [float(value) for _ in _checkpointed(observations, checkpoint)]
         elif isinstance(node, BinaryNode):
             values = [
-                _binary(node.operator, left, right) for left, right in zip(*inputs, strict=True)
+                _binary(node.operator, left, right)
+                for left, right in _checkpointed(zip(*inputs, strict=True), checkpoint)
             ]
         elif isinstance(node, ComparisonNode):
             values = [
-                _compare(node.operator, left, right) for left, right in zip(*inputs, strict=True)
+                _compare(node.operator, left, right)
+                for left, right in _checkpointed(zip(*inputs, strict=True), checkpoint)
             ]
         elif isinstance(node, ConditionalNode):
             values = [
                 true_value if predicate is True else false_value if predicate is False else None
-                for predicate, true_value, false_value in zip(*inputs, strict=True)
+                for predicate, true_value, false_value in _checkpointed(
+                    zip(*inputs, strict=True), checkpoint
+                )
             ]
         elif isinstance(node, UnaryNode):
-            values = _unary(node, inputs[0], observations)
+            values = _unary(node, inputs[0], observations, checkpoint=checkpoint)
         elif isinstance(node, TimeSeriesNode):
-            values = _time_series(node, inputs[0], observations)
+            values = _time_series(node, inputs[0], observations, checkpoint=checkpoint)
         elif isinstance(node, CrossSectionalNode):
-            values = _cross_sectional(node, inputs[0], observations)
+            values = _cross_sectional(node, inputs[0], observations, checkpoint=checkpoint)
         elif isinstance(node, GroupNode):
-            values = _group_transform(node, inputs[0], observations)
+            values = _group_transform(node, inputs[0], observations, checkpoint=checkpoint)
         elif isinstance(node, SavedFactorNode):
-            values = _reference_values(observations, f"factor:{node.factor_id}")
+            values = _reference_values(
+                observations, f"factor:{node.factor_id}", checkpoint=checkpoint
+            )
         elif isinstance(node, SavedSubgraphNode):
-            values = _reference_values(observations, f"subgraph:{node.subgraph_id}")
+            values = _reference_values(
+                observations, f"subgraph:{node.subgraph_id}", checkpoint=checkpoint
+            )
         computed[node_id] = values
         return values
 
@@ -193,9 +232,11 @@ def _field_values(
     observations: tuple[FactorObservation, ...],
     field_id: str,
     missing_policy: MissingPolicy,
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> list[FactorComputedValue]:
     raw: list[float | None] = []
-    for observation in observations:
+    for observation in _checkpointed(observations, checkpoint):
         by_id = {field.field_id: field.value for field in observation.fields}
         value = by_id.get(field_id)
         raw.append(
@@ -206,12 +247,16 @@ def _field_values(
     if missing_policy is MissingPolicy.ZERO:
         return [0.0 if value is None else value for value in raw]
     if missing_policy is MissingPolicy.CROSS_SECTIONAL_MEDIAN:
-        by_date = _cross_section_indices(observations)
+        by_date = _cross_section_indices(observations, checkpoint=checkpoint)
         result = list(raw)
-        for indices in by_date.values():
-            available = [value for index in indices if (value := raw[index]) is not None]
+        for indices in _checkpointed(by_date.values(), checkpoint):
+            available = [
+                value
+                for index in _checkpointed(indices, checkpoint)
+                if (value := raw[index]) is not None
+            ]
             fill = median(available) if available else None
-            for index in indices:
+            for index in _checkpointed(indices, checkpoint):
                 if result[index] is None:
                     result[index] = fill
         return result
@@ -219,7 +264,10 @@ def _field_values(
 
 
 def _reference_values(
-    observations: tuple[FactorObservation, ...], reference_id: str
+    observations: tuple[FactorObservation, ...],
+    reference_id: str,
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> list[FactorComputedValue]:
     return [
         next(
@@ -230,7 +278,7 @@ def _reference_values(
             ),
             None,
         )
-        for observation in observations
+        for observation in _checkpointed(observations, checkpoint)
     ]
 
 
@@ -276,16 +324,18 @@ def _unary(
     node: UnaryNode,
     values: list[FactorComputedValue],
     observations: tuple[FactorObservation, ...],
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> list[FactorComputedValue]:
     if node.operator is UnaryOperator.NEGATE:
         return [
             -value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
-            for value in values
+            for value in _checkpointed(values, checkpoint)
         ]
     if node.operator is UnaryOperator.LAG:
-        return _lag(values, observations, node.periods or 0)
+        return _lag(values, observations, node.periods or 0, checkpoint=checkpoint)
     if node.operator is UnaryOperator.NEUTRALIZE:
-        return _cross_sectional_demean(values, observations)
+        return _cross_sectional_demean(values, observations, checkpoint=checkpoint)
     synthetic = CrossSectionalNode(
         node_id=node.node_id,
         operator={
@@ -296,22 +346,26 @@ def _unary(
         input_node_id=node.input_node_id,
         kind="cross_sectional",
     )
-    return _cross_sectional(synthetic, values, observations)
+    return _cross_sectional(synthetic, values, observations, checkpoint=checkpoint)
 
 
 def _cross_sectional_demean(
     values: list[FactorComputedValue],
     observations: tuple[FactorObservation, ...],
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> list[FactorComputedValue]:
     result: list[FactorComputedValue] = [None] * len(values)
-    for indices in _cross_section_indices(observations).values():
+    for indices in _checkpointed(
+        _cross_section_indices(observations, checkpoint=checkpoint).values(), checkpoint
+    ):
         numeric = [
             (index, number)
-            for index in indices
+            for index in _checkpointed(indices, checkpoint)
             if (number := _as_number(values[index])) is not None
         ]
         center = mean(value for _, value in numeric) if numeric else 0.0
-        for index, value in numeric:
+        for index, value in _checkpointed(numeric, checkpoint):
             result[index] = value - center
     return result
 
@@ -320,15 +374,20 @@ def _time_series(
     node: TimeSeriesNode,
     values: list[FactorComputedValue],
     observations: tuple[FactorObservation, ...],
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> list[FactorComputedValue]:
     result: list[FactorComputedValue] = [None] * len(values)
-    for indices in _indices_by_security(observations).values():
-        for position, result_index in enumerate(indices):
+    by_security = _indices_by_security(observations, checkpoint=checkpoint)
+    for indices in _checkpointed(by_security.values(), checkpoint):
+        for position, result_index in _checkpointed(enumerate(indices), checkpoint):
             end = position - node.lag + 1
             start = end - node.window
             if start < 0 or end <= 0:
                 continue
-            window = values_from_indices(values, indices[start:end])
+            window = values_from_indices(
+                values, indices[start:end], checkpoint=checkpoint
+            )
             if len(window) != node.window:
                 continue
             if node.operator is TimeSeriesOperator.MEAN:
@@ -350,12 +409,15 @@ def _cross_sectional(
     node: CrossSectionalNode,
     values: list[FactorComputedValue],
     observations: tuple[FactorObservation, ...],
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> list[FactorComputedValue]:
     result: list[FactorComputedValue] = [None] * len(values)
-    for indices in _cross_section_indices(observations).values():
+    groups = _cross_section_indices(observations, checkpoint=checkpoint)
+    for indices in _checkpointed(groups.values(), checkpoint):
         numeric = [
             (index, number)
-            for index in indices
+            for index in _checkpointed(indices, checkpoint)
             if (number := _as_number(values[index])) is not None
         ]
         if not numeric:
@@ -363,19 +425,19 @@ def _cross_sectional(
         if node.operator is CrossSectionalOperator.RANK:
             ranked = rank_items(numeric)
             denominator = max(len(ranked) - 1, 1)
-            for index, rank in ranked.items():
+            for index, rank in _checkpointed(ranked.items(), checkpoint):
                 result[index] = (rank - 1) / denominator
         elif node.operator is CrossSectionalOperator.ZSCORE:
             samples = [value for _, value in numeric]
             center = mean(samples)
             deviation = pstdev(samples)
-            for index, value in numeric:
+            for index, value in _checkpointed(numeric, checkpoint):
                 result[index] = 0.0 if deviation == 0 else (value - center) / deviation
         else:
             ordered = sorted(value for _, value in numeric)
             lower = quantile(ordered, node.lower_quantile)
             upper = quantile(ordered, node.upper_quantile)
-            for index, value in numeric:
+            for index, value in _checkpointed(numeric, checkpoint):
                 result[index] = min(max(value, lower), upper)
     return result
 
@@ -384,9 +446,11 @@ def _group_transform(
     node: GroupNode,
     values: list[FactorComputedValue],
     observations: tuple[FactorObservation, ...],
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> list[FactorComputedValue]:
     grouped: dict[tuple[date, bool, str], list[int]] = {}
-    for index, observation in enumerate(observations):
+    for index, observation in _checkpointed(enumerate(observations), checkpoint):
         group = next(
             (field.value for field in observation.fields if field.field_id == node.group_field_id),
             None,
@@ -395,20 +459,20 @@ def _group_transform(
             key = (observation.as_of, observation.universe_member, group)
             grouped.setdefault(key, []).append(index)
     result: list[FactorComputedValue] = [None] * len(values)
-    for indices in grouped.values():
+    for indices in _checkpointed(grouped.values(), checkpoint):
         numeric = [
             (index, number)
-            for index in indices
+            for index in _checkpointed(indices, checkpoint)
             if (number := _as_number(values[index])) is not None
         ]
         if node.operator is GroupOperator.NEUTRALIZE:
             center = mean(value for _, value in numeric) if numeric else 0.0
-            for index, value in numeric:
+            for index, value in _checkpointed(numeric, checkpoint):
                 result[index] = value - center
         else:
             ranked = rank_items(numeric)
             denominator = max(len(ranked) - 1, 1)
-            for index, rank in ranked.items():
+            for index, rank in _checkpointed(ranked.items(), checkpoint):
                 result[index] = (rank - 1) / denominator
     return result
 
@@ -417,10 +481,13 @@ def _lag(
     values: list[FactorComputedValue],
     observations: tuple[FactorObservation, ...],
     periods: int,
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> list[FactorComputedValue]:
     result: list[FactorComputedValue] = [None] * len(values)
-    for indices in _indices_by_security(observations).values():
-        for position, index in enumerate(indices):
+    by_security = _indices_by_security(observations, checkpoint=checkpoint)
+    for indices in _checkpointed(by_security.values(), checkpoint):
+        for position, index in _checkpointed(enumerate(indices), checkpoint):
             if position >= periods:
                 result[index] = values[indices[position - periods]]
     return result
@@ -428,6 +495,8 @@ def _lag(
 
 def _cross_section_indices(
     observations: tuple[FactorObservation, ...],
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> dict[tuple[date, bool], list[int]]:
     """Peer groups for cross-sectional operators: one group per (as_of, universe_member).
 
@@ -436,24 +505,35 @@ def _cross_section_indices(
     with `observations` positionally; the portfolio compiler drops those rows afterwards.
     """
     grouped: dict[tuple[date, bool], list[int]] = {}
-    for index, observation in enumerate(observations):
+    for index, observation in _checkpointed(enumerate(observations), checkpoint):
         grouped.setdefault((observation.as_of, observation.universe_member), []).append(index)
     return grouped
 
 
 def _indices_by_security(
     observations: tuple[FactorObservation, ...],
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> dict[str, list[int]]:
     grouped: dict[str, list[int]] = {}
-    for index, observation in enumerate(observations):
+    for index, observation in _checkpointed(enumerate(observations), checkpoint):
         grouped.setdefault(observation.security_id, []).append(index)
-    for indices in grouped.values():
+    for indices in _checkpointed(grouped.values(), checkpoint):
         indices.sort(key=lambda index: observations[index].as_of)
     return grouped
 
 
-def values_from_indices(values: list[FactorComputedValue], indices: list[int]) -> list[float]:
-    return [number for index in indices if (number := _as_number(values[index])) is not None]
+def values_from_indices(
+    values: list[FactorComputedValue],
+    indices: list[int],
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
+) -> list[float]:
+    return [
+        number
+        for index in _checkpointed(indices, checkpoint)
+        if (number := _as_number(values[index])) is not None
+    ]
 
 
 def _is_number(value: FactorComputedValue) -> TypeGuard[int | float]:

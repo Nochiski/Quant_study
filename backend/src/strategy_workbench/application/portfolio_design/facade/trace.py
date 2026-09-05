@@ -11,6 +11,7 @@ from strategy_workbench.application.portfolio_design._trace_service import (
     InvalidStrategyTraceRequestError,
     StaleStrategyTraceSourceError,
     StrategyTraceCancelledError,
+    StrategyTraceCapabilityError,
     StrategyTraceService,
     StrategyTraceSourceNotFoundError,
 )
@@ -21,6 +22,7 @@ __all__ = [
     "StaleStrategyTraceSourceError",
     "StrategyTargetTrace",
     "StrategyTraceCancelledError",
+    "StrategyTraceCapabilityError",
     "StrategyTraceInput",
     "StrategyTracePage",
     "StrategyTraceRequest",

@@ -29,6 +29,7 @@ from ._service import (
     InvalidPortfolioTraceSelectionError,
     PortfolioDesignService,
     PortfolioPipelineCancelledError,
+    TraceObservationCapabilityError,
 )
 from ._trace_models import (
     RawStrategyTraceRow,
@@ -57,6 +58,14 @@ class StaleStrategyTraceSourceError(RuntimeError):
 
 class StrategyTraceCancelledError(RuntimeError):
     """The caller disconnected or otherwise cancelled a trace calculation."""
+
+
+class StrategyTraceCapabilityError(RuntimeError):
+    """A configured provider cannot satisfy a required truthful-trace capability."""
+
+    def __init__(self, capability: str, message: str) -> None:
+        super().__init__(message)
+        self.capability = capability
 
 
 class StrategyTraceService:
@@ -110,6 +119,8 @@ class StrategyTraceService:
             )
         except InvalidPortfolioTraceSelectionError as error:
             raise InvalidStrategyTraceRequestError(str(error)) from error
+        except TraceObservationCapabilityError as error:
+            raise StrategyTraceCapabilityError(error.capability, str(error)) from error
         except PortfolioPipelineCancelledError as error:
             raise StrategyTraceCancelledError(str(error)) from error
         _raise_if_cancelled(cancelled)
@@ -157,9 +168,7 @@ class StrategyTraceService:
                 )
         rows = tuple(rows_list)
         page_rows = rows[request.offset : request.offset + request.limit]
-        raw, raw_truncated = _raw_projection(
-            pipeline.observations, request, cancelled=cancelled
-        )
+        raw, raw_truncated = _raw_projection(pipeline.observations, request, cancelled=cancelled)
         _raise_if_cancelled(cancelled)
         target = _target_projection(
             pipeline.preview.tape.frames,

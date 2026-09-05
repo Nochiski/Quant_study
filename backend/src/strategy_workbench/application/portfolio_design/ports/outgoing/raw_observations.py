@@ -24,8 +24,9 @@ Contract:
   responsibility and the application layer cannot verify it.
 - Failures are values: `status != OK` with `detail` (unknown universe/field, no data), never a
   synthesised observation.
-- Long-running adapters invoke the supplied cancellation checkpoint at bounded row batches. The
-  application owns the exception raised by that callback; the adapter only yields cooperatively.
+- ``RawObservationPort`` preserves the original preview/backtest call contract. Adapters that can
+  cooperatively cancel a long trace additionally implement ``CancellableRawObservationPort``;
+  the application negotiates that capability before metadata or raw calculation starts.
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from strategy_workbench.domain.equity.facade.research_data import DataLoadStatus
 
@@ -142,6 +143,16 @@ class RawObservationPort(Protocol):
     def load_raw_observations(
         self,
         query: RawObservationQuery,
+    ) -> RawObservationSet: ...
+
+
+@runtime_checkable
+class CancellableRawObservationPort(Protocol):
+    """Optional trace capability; callback exception policy remains application-owned."""
+
+    def load_raw_observations_cancellable(
+        self,
+        query: RawObservationQuery,
         *,
-        checkpoint: Callable[[], None] = lambda: None,
+        checkpoint: Callable[[], None],
     ) -> RawObservationSet: ...

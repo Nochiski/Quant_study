@@ -225,8 +225,15 @@ class MockEquityDataAdapter:
     def load_raw_observations(
         self,
         query: RawObservationQuery,
+    ) -> RawObservationSet:
+        """Original preview/backtest port; cancellation is an optional trace capability."""
+        return self.load_raw_observations_cancellable(query, checkpoint=lambda: None)
+
+    def load_raw_observations_cancellable(
+        self,
+        query: RawObservationQuery,
         *,
-        checkpoint: Callable[[], None] = lambda: None,
+        checkpoint: Callable[[], None],
     ) -> RawObservationSet:
         """Raw PIT panel for the truthful pipeline (P1.5-03).
 

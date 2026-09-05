@@ -343,6 +343,46 @@ class _DriftedMetadata:
         )
 
 
+class _LegacyRawPort:
+    """Pre-P5 public port implementation: no checkpoint keyword or trace capability."""
+
+    def __init__(self, delegate: MockEquityDataAdapter) -> None:
+        self._delegate = delegate
+        self.calls = 0
+
+    def load_raw_observations(self, query: RawObservationQuery) -> RawObservationSet:
+        self.calls += 1
+        return self._delegate.load_raw_observations(query)
+
+
+def test_legacy_raw_port_keeps_preview_and_backtest_compatible(tmp_path: Path) -> None:
+    adapter = MockEquityDataAdapter.demo()
+    legacy = _LegacyRawPort(adapter)
+    portfolio = _service(legacy, metadata=adapter)
+    spec = _spec()
+
+    assert portfolio.preview(PortfolioPreviewRequest(spec)).tape.frames
+    backtests = BacktestRunService(
+        portfolio,
+        InMemoryStrategyRepository(),
+        adapter,
+        BacktestEngineExecutorAdapter(build_default_metric_registry()),
+        LocalArtifactStore(tmp_path),
+        new_id=lambda: "legacy-port-run",
+    )
+
+    accepted = backtests.start(BacktestRunSpec(strategy=spec, core=ExecutionCore.PYTHON))
+
+    assert accepted.run.run_id == "legacy-port-run"
+    assert legacy.calls == 2
+    for _ in range(200):
+        state = backtests.state("legacy-port-run")
+        if state.status.value in {"completed", "failed", "cancelled"}:
+            break
+        time.sleep(0.01)
+    assert state.status.value == "completed"
+
+
 def test_metadata_raw_snapshot_mismatch_blocks_portfolio_and_backtest(tmp_path: Path) -> None:
     adapter = MockEquityDataAdapter.demo()
     portfolio = _service(adapter, metadata=_DriftedMetadata(adapter))

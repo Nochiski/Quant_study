@@ -19,6 +19,7 @@ from strategy_workbench.application.portfolio_design._service import (
     PortfolioSnapshotMismatchError,
     RawObservationContractError,
     RawObservationUnavailableError,
+    TraceObservationCapabilityError,
 )
 
 __all__ = [
@@ -40,4 +41,5 @@ __all__ = [
     "PortfolioStartingHolding",
     "RawObservationContractError",
     "RawObservationUnavailableError",
+    "TraceObservationCapabilityError",
 ]

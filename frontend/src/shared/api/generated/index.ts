@@ -329,6 +329,7 @@ export type {
   TimeSeriesOperator,
   TraceCancelledDetail,
   TraceCancelledResponse,
+  TraceCapabilityUnsupportedDetail,
   TraceEngineIncompatibleDetail,
   TracePortfolioDataUnavailableDetail,
   TracePortfolioStrategyInvalidDetail,

@@ -19,6 +19,7 @@ from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
     MockEquityDataAdapter,
 )
 from strategy_workbench.application.portfolio_design.facade.ports import (
+    CancellableRawObservationPort,
     RawObservation,
     RawObservationPort,
     RawObservationQuery,
@@ -118,7 +119,7 @@ def test_observations_are_deterministic_and_ordered(adapter: RawObservationPort)
 
 @pytest.mark.parametrize("adapter", ADAPTERS)
 def test_long_raw_load_honours_the_application_cancellation_checkpoint(
-    adapter: RawObservationPort,
+    adapter: CancellableRawObservationPort,
 ) -> None:
     calls = 0
 
@@ -128,7 +129,7 @@ def test_long_raw_load_honours_the_application_cancellation_checkpoint(
         raise RuntimeError("cancelled by application")
 
     with pytest.raises(RuntimeError, match="cancelled by application"):
-        adapter.load_raw_observations(_query(), checkpoint=cancel)
+        adapter.load_raw_observations_cancellable(_query(), checkpoint=cancel)
     assert calls == 1
 
 

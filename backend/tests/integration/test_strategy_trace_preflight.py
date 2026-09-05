@@ -27,33 +27,48 @@ from strategy_workbench.application.portfolio_design.facade.design import (
     IncompatiblePortfolioRequestError,
     InvalidPortfolioRequestError,
     PortfolioDesignService,
+    TraceObservationCapabilityError,
 )
 from strategy_workbench.application.portfolio_design.facade.ports import RawObservationQuery
 from strategy_workbench.application.portfolio_design.facade.trace import (
     InvalidStrategyTraceRequestError,
     StrategyTraceCancelledError,
+    StrategyTraceCapabilityError,
     StrategyTraceRequest,
     StrategyTraceService,
 )
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
+from strategy_workbench.domain.factor.facade.expression import ConstantNode
 from strategy_workbench.domain.portfolio.facade.construction import (
     PortfolioFieldValue,
     PortfolioObservation,
 )
 from strategy_workbench.domain.strategy.facade.provenance import InlineDraft
+from strategy_workbench.domain.strategy.facade.specification import (
+    ChoiceParameter,
+    ComparisonOperator,
+    EligibilityRule,
+    EligibilityStep,
+    FloatParameter,
+)
 
 
 class _NoRawAdapter:
     def __init__(self) -> None:
         self._delegate = MockEquityDataAdapter.demo()
         self.raw_called = False
+        self.metadata_called = False
 
     def resolve_factor_fields(self, field_ids: tuple[str, ...]) -> FactorMetadataSnapshot:
+        self.metadata_called = True
         return self._delegate.resolve_factor_fields(field_ids)
 
-    def load_raw_observations(self, query: RawObservationQuery, *, checkpoint=lambda: None):
+    def load_raw_observations(self, query: RawObservationQuery):
         self.raw_called = True
         raise AssertionError(f"raw calculation should not start — query={query!r}")
+
+    def load_raw_observations_cancellable(self, query: RawObservationQuery, *, checkpoint):
+        return self.load_raw_observations(query)
 
 
 class _RejectingEngine:
@@ -73,9 +88,9 @@ class _CancelAfterRawAdapter(_NoRawAdapter):
         super().__init__()
         self._stop = stop
 
-    def load_raw_observations(self, query: RawObservationQuery, *, checkpoint=lambda: None):
+    def load_raw_observations_cancellable(self, query: RawObservationQuery, *, checkpoint):
         self.raw_called = True
-        result = self._delegate.load_raw_observations(query, checkpoint=checkpoint)
+        result = self._delegate.load_raw_observations_cancellable(query, checkpoint=checkpoint)
         self._stop.set()
         return result
 
@@ -85,11 +100,26 @@ class _CancelInsideRawAdapter(_NoRawAdapter):
         super().__init__()
         self._stop = stop
 
-    def load_raw_observations(self, query: RawObservationQuery, *, checkpoint=lambda: None):
+    def load_raw_observations_cancellable(self, query: RawObservationQuery, *, checkpoint):
         self.raw_called = True
         self._stop.set()
         checkpoint()
         raise AssertionError("cancellation checkpoint should have interrupted raw loading")
+
+
+class _LegacyRawAdapter:
+    def __init__(self) -> None:
+        self._delegate = MockEquityDataAdapter.demo()
+        self.raw_called = False
+        self.metadata_called = False
+
+    def resolve_factor_fields(self, field_ids: tuple[str, ...]) -> FactorMetadataSnapshot:
+        self.metadata_called = True
+        return self._delegate.resolve_factor_fields(field_ids)
+
+    def load_raw_observations(self, query: RawObservationQuery):
+        self.raw_called = True
+        return self._delegate.load_raw_observations(query)
 
 
 def _spec():
@@ -123,6 +153,25 @@ def test_engine_capability_failure_precedes_metadata_and_raw_calculation() -> No
 
     with pytest.raises(IncompatiblePortfolioRequestError):
         service.trace(_request(_spec()))
+    assert source.raw_called is False
+
+
+def test_trace_rejects_a_legacy_raw_adapter_before_metadata_or_raw_calculation() -> None:
+    source = _LegacyRawAdapter()
+    portfolio = PortfolioDesignService(
+        source,
+        BacktestEnginePortfolioAdapter(),
+        factor_metadata=source,
+        factor_registry_version="factor-registry-v1",
+    )
+
+    service = StrategyTraceService(portfolio, InMemoryStrategyRepository())
+
+    with pytest.raises(StrategyTraceCapabilityError) as excinfo:
+        service.trace(_request(_spec()))
+
+    assert excinfo.value.capability == TraceObservationCapabilityError.capability
+    assert source.metadata_called is False
     assert source.raw_called is False
 
 
@@ -162,6 +211,67 @@ def test_non_finite_inline_spec_fails_validation_before_raw_loading(value: float
     with pytest.raises(InvalidPortfolioRequestError):
         service.trace(_request(spec))
 
+    assert source.raw_called is False
+    assert source.metadata_called is False
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+@pytest.mark.parametrize(
+    "location",
+    ("factor_weight", "constant", "eligibility", "signal", "float_parameter", "choice"),
+)
+def test_all_non_finite_strategy_leaves_fail_before_metadata_and_raw(
+    value: float, location: str
+) -> None:
+    source = _NoRawAdapter()
+    portfolio = PortfolioDesignService(
+        source,
+        BacktestEnginePortfolioAdapter(),
+        factor_metadata=source,
+        factor_registry_version="factor-registry-v1",
+    )
+    service = StrategyTraceService(portfolio, InMemoryStrategyRepository())
+    spec = _spec()
+    factor = spec.factors.factors[0]
+    if location == "factor_weight":
+        spec = replace(
+            spec,
+            factors=replace(spec.factors, factors=(replace(factor, weight=value),)),
+        )
+    elif location == "constant":
+        graph = replace(
+            factor.graph,
+            nodes=(*factor.graph.nodes, ConstantNode("bad", value, "constant")),
+        )
+        spec = replace(
+            spec,
+            factors=replace(spec.factors, factors=(replace(factor, graph=graph),)),
+        )
+    elif location == "eligibility":
+        spec = replace(
+            spec,
+            eligibility=EligibilityStep(
+                (EligibilityRule("price.close", ComparisonOperator.GREATER_THAN, value),)
+            ),
+        )
+    elif location == "signal":
+        spec = replace(spec, signal=replace(spec.signal, score_threshold=value))
+    elif location == "float_parameter":
+        spec = replace(
+            spec,
+            parameters=(FloatParameter("scale", value, 0.0, 1.0, "float"),),
+        )
+    else:
+        spec = replace(
+            spec,
+            parameters=(ChoiceParameter("scale", 1.0, (1.0, value), "choice"),),
+        )
+
+    with pytest.raises(InvalidPortfolioRequestError) as excinfo:
+        service.trace(_request(spec))
+
+    assert "strategy.number.non_finite" in {issue.code for issue in excinfo.value.validation.issues}
+    assert source.metadata_called is False
     assert source.raw_called is False
 
 

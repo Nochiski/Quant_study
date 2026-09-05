@@ -118,21 +118,18 @@ def test_trace_page_is_stable_and_bounded() -> None:
     request["node_ids"] = []
     request["include_raw"] = False
 
-    whole = client.post(
-        "/api/v1/strategies/debug/trace", json={**request, "offset": 0, "limit": 2}
-    )
-    first = client.post(
-        "/api/v1/strategies/debug/trace", json={**request, "offset": 0, "limit": 1}
-    )
+    whole = client.post("/api/v1/strategies/debug/trace", json={**request, "offset": 0, "limit": 2})
+    first = client.post("/api/v1/strategies/debug/trace", json={**request, "offset": 0, "limit": 1})
     second = client.post(
         "/api/v1/strategies/debug/trace", json={**request, "offset": 1, "limit": 1}
     )
 
     assert whole.status_code == first.status_code == second.status_code == 200
     assert first.json()["trace"]["has_more"] is True
-    assert first.json()["trace"]["rows"] + second.json()["trace"]["rows"] == whole.json()[
-        "trace"
-    ]["rows"]
+    assert (
+        first.json()["trace"]["rows"] + second.json()["trace"]["rows"]
+        == whole.json()["trace"]["rows"]
+    )
     assert whole.json()["raw"] == []
 
     over_cap = client.post(
@@ -165,8 +162,7 @@ def test_starting_holdings_change_the_actual_target_and_unknown_holding_is_rejec
         json={
             **request,
             "starting_holdings": [
-                {"security_id": security_id, "weight": 0.1}
-                for security_id in security_ids
+                {"security_id": security_id, "weight": 0.1} for security_id in security_ids
             ],
         },
     )
@@ -283,13 +279,120 @@ def test_non_finite_inline_number_is_a_coded_preflight_error(literal: str) -> No
     TypeAdapter(Trace422Response).validate_python(response.json())
 
 
+@pytest.mark.parametrize("literal", ["NaN", "1e309", "-1e309"])
+@pytest.mark.parametrize(
+    ("location", "expected_path"),
+    (
+        ("factor_weight", "factors.factors.0.weight"),
+        ("constant", ""),
+        ("eligibility", "eligibility.rules.0.value"),
+        ("signal", "signal.score_threshold"),
+        ("float_parameter", "parameters.0.default"),
+        ("choice", "parameters.0.choices.1"),
+    ),
+)
+def test_every_unbounded_non_finite_number_is_a_coded_422(
+    literal: str, location: str, expected_path: str
+) -> None:
+    client = TestClient(build_http_app())
+    _, request = _inline_request(client)
+    spec = request["strategy_source"]["spec"]
+    marker = "__NON_FINITE_NUMBER__"
+    factor = spec["factors"]["factors"][0]
+    if location == "factor_weight":
+        factor["weight"] = marker
+    elif location == "constant":
+        factor["graph"]["nodes"].append(
+            {"node_id": "non-finite", "value": marker, "kind": "constant"}
+        )
+        expected_path = f"factors.factors.0.graph.nodes.{len(factor['graph']['nodes']) - 1}.value"
+    elif location == "eligibility":
+        spec["eligibility"]["rules"] = [
+            {"field_id": "price.close", "operator": "gt", "value": marker}
+        ]
+    elif location == "signal":
+        spec["signal"]["score_threshold"] = marker
+    elif location == "float_parameter":
+        spec["parameters"] = [
+            {
+                "parameter_id": "scale",
+                "default": marker,
+                "minimum": 0.0,
+                "maximum": 1.0,
+                "kind": "float",
+                "step": None,
+            }
+        ]
+    else:
+        spec["parameters"] = [
+            {
+                "parameter_id": "scale",
+                "default": 1.0,
+                "choices": [1.0, marker],
+                "kind": "choice",
+            }
+        ]
+    encoded = json.dumps(request).replace(f'"{marker}"', literal)
+
+    response = client.post(
+        "/api/v1/strategies/debug/trace",
+        content=encoded,
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code == 422, response.text
+    detail = response.json()["detail"]
+    assert detail["code"] == "portfolio.strategy.invalid"
+    issues = detail["validation"]["issues"]
+    assert any(
+        issue["code"] == "strategy.number.non_finite" and issue["path"] == expected_path
+        for issue in issues
+    )
+    TypeAdapter(Trace422Response).validate_python(response.json())
+
+
+def test_factor_weight_overflow_is_invalid_before_preview_or_backtest_hashing() -> None:
+    client = TestClient(build_http_app())
+    spec = client.get("/api/v1/strategies/template").json()
+    marker = "__NON_FINITE_NUMBER__"
+    spec["factors"]["factors"][0]["weight"] = marker
+
+    def raw_json(payload: object) -> str:
+        return json.dumps(payload).replace(f'"{marker}"', "1e309")
+
+    validation = client.post(
+        "/api/v1/strategies/validate",
+        content=raw_json(spec),
+        headers={"content-type": "application/json"},
+    )
+    preview = client.post(
+        "/api/v1/portfolio/preview",
+        content=raw_json({"spec": spec}),
+        headers={"content-type": "application/json"},
+    )
+    backtest = client.post(
+        "/api/v1/backtests",
+        content=raw_json({"strategy": spec, "core": "python"}),
+        headers={"content-type": "application/json"},
+    )
+
+    assert validation.status_code == 200
+    assert validation.json()["valid"] is False
+    assert any(
+        issue["code"] == "strategy.number.non_finite"
+        and issue["path"] == "factors.factors.0.weight"
+        for issue in validation.json()["issues"]
+    )
+    for response in (preview, backtest):
+        assert response.status_code == 422, response.text
+        assert response.json()["detail"]["code"] == "portfolio.strategy.invalid"
+
+
 def test_trace_rejects_non_session_and_unknown_security_but_accepts_non_member() -> None:
     client = TestClient(build_http_app())
     _, request = _inline_request(client)
 
-    weekend = client.post(
-        "/api/v1/strategies/debug/trace", json={**request, "as_of": "2026-08-30"}
-    )
+    weekend = client.post("/api/v1/strategies/debug/trace", json={**request, "as_of": "2026-08-30"})
     assert weekend.status_code == 422
     assert weekend.json()["detail"]["code"] == "trace.request.invalid"
     assert "not trading sessions" in weekend.json()["detail"]["message"]
@@ -313,9 +416,58 @@ def test_trace_rejects_non_session_and_unknown_security_but_accepts_non_member()
         },
     )
     assert non_member.status_code == 200, non_member.text
-    assert {row["security_id"] for row in non_member.json()["trace"]["rows"]} == {
-        "sec-035420-1"
+    assert {row["security_id"] for row in non_member.json()["trace"]["rows"]} == {"sec-035420-1"}
+
+
+def test_finite_factor_overflow_is_the_same_coded_failure_for_all_execution_routes() -> None:
+    client = TestClient(build_http_app())
+    spec = client.get("/api/v1/strategies/template").json()
+    factor = spec["factors"]["factors"][0]
+    factor["graph"] = {
+        "nodes": [
+            {"node_id": "close", "field_id": "price.close", "kind": "field"},
+            {"node_id": "scale", "value": 1e308, "kind": "constant"},
+            {
+                "node_id": "overflow",
+                "operator": "multiply",
+                "left_node_id": "close",
+                "right_node_id": "scale",
+                "kind": "binary",
+            },
+        ],
+        "output_node_id": "overflow",
+        "missing_policy": "drop",
     }
+    spec["portfolio"]["weighting"] = "factor_score"
+    spec["data"]["end"] = "2026-09-04"
+    trace_request = {
+        "strategy_source": {"kind": "inline_draft", "spec": spec},
+        "as_of": spec["data"]["end"],
+        "security_ids": ["sec-005930-1"],
+        "factor_id": factor["factor_id"],
+        "node_ids": ["overflow"],
+    }
+
+    responses = (
+        client.post("/api/v1/portfolio/preview", json={"spec": spec}),
+        client.post("/api/v1/strategies/debug/trace", json=trace_request),
+        client.post("/api/v1/backtests", json={"strategy": spec, "core": "python"}),
+    )
+
+    for response in responses:
+        assert response.status_code == 422, response.text
+        detail = response.json()["detail"]
+        assert detail["code"] == "portfolio.strategy.invalid"
+        assert {
+            (issue["code"], issue["path"], issue["node_id"])
+            for issue in detail["validation"]["issues"]
+        } == {
+            (
+                "strategy.expression.calculation_non_finite",
+                "factors.factors.0.graph.nodes.2",
+                "overflow",
+            )
+        }
 
 
 def test_trace_openapi_contract_exposes_bounded_source_union() -> None:
@@ -326,13 +478,14 @@ def test_trace_openapi_contract_exposes_bounded_source_union() -> None:
     assert {"200", "404", "409", "422", "499"} <= set(operation["responses"])
     request_schema = schema["components"]["schemas"]["StrategyTraceRequest"]
     properties = request_schema["properties"]
-    assert {
-        key: properties["limit"][key] for key in ("default", "minimum", "maximum")
-    } == {"default": 200, "minimum": 1, "maximum": 500}
+    assert {key: properties["limit"][key] for key in ("default", "minimum", "maximum")} == {
+        "default": 200,
+        "minimum": 1,
+        "maximum": 500,
+    }
     assert properties["offset"]["minimum"] == 0
     assert {
-        key: properties["security_ids"][key]
-        for key in ("minItems", "maxItems", "uniqueItems")
+        key: properties["security_ids"][key] for key in ("minItems", "maxItems", "uniqueItems")
     } == {
         "minItems": 1,
         "maxItems": 100,
@@ -357,7 +510,15 @@ def test_trace_openapi_contract_exposes_bounded_source_union() -> None:
     assert responses["499"]["content"]["application/json"]["schema"]["$ref"].endswith(
         "TraceCancelledResponse"
     )
-    detail = schema["components"]["schemas"]["TraceUnprocessableResponse"]["properties"][
-        "detail"
-    ]
+    detail = schema["components"]["schemas"]["TraceUnprocessableResponse"]["properties"]["detail"]
     assert detail["discriminator"]["propertyName"] == "code"
+    assert "trace.capability.unsupported" in detail["discriminator"]["mapping"]
+    TypeAdapter(Trace422Response).validate_python(
+        {
+            "detail": {
+                "code": "trace.capability.unsupported",
+                "capability": "raw_observation.cancellation",
+                "message": "adapter does not support cancellable trace",
+            }
+        }
+    )

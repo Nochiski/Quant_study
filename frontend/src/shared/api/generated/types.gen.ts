@@ -3357,6 +3357,24 @@ export type TraceCancelledResponse = {
 };
 
 /**
+ * TraceCapabilityUnsupportedDetail
+ */
+export type TraceCapabilityUnsupportedDetail = {
+  /**
+   * Capability
+   */
+  capability: string;
+  /**
+   * Code
+   */
+  code: "trace.capability.unsupported";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
  * TraceEngineIncompatibleDetail
  */
 export type TraceEngineIncompatibleDetail = {
@@ -3493,6 +3511,9 @@ export type TraceUnprocessableResponse = {
     | ({
         code: "trace.engine.incompatible";
       } & TraceEngineIncompatibleDetail)
+    | ({
+        code: "trace.capability.unsupported";
+      } & TraceCapabilityUnsupportedDetail)
     | ({
         code: "portfolio.strategy.invalid";
       } & TracePortfolioStrategyInvalidDetail)

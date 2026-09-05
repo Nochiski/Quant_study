@@ -5373,6 +5373,30 @@
         "title": "TraceCancelledResponse",
         "type": "object"
       },
+      "TraceCapabilityUnsupportedDetail": {
+        "properties": {
+          "capability": {
+            "title": "Capability",
+            "type": "string"
+          },
+          "code": {
+            "const": "trace.capability.unsupported",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "capability",
+          "message"
+        ],
+        "title": "TraceCapabilityUnsupportedDetail",
+        "type": "object"
+      },
       "TraceEngineIncompatibleDetail": {
         "properties": {
           "code": {
@@ -5577,6 +5601,7 @@
               "mapping": {
                 "portfolio.data.unavailable": "#/components/schemas/TracePortfolioDataUnavailableDetail",
                 "portfolio.strategy.invalid": "#/components/schemas/TracePortfolioStrategyInvalidDetail",
+                "trace.capability.unsupported": "#/components/schemas/TraceCapabilityUnsupportedDetail",
                 "trace.engine.incompatible": "#/components/schemas/TraceEngineIncompatibleDetail",
                 "trace.request.invalid": "#/components/schemas/TraceRequestInvalidDetail"
               },
@@ -5588,6 +5613,9 @@
               },
               {
                 "$ref": "#/components/schemas/TraceEngineIncompatibleDetail"
+              },
+              {
+                "$ref": "#/components/schemas/TraceCapabilityUnsupportedDetail"
               },
               {
                 "$ref": "#/components/schemas/TracePortfolioStrategyInvalidDetail"

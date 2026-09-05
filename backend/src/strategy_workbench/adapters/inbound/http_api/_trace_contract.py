@@ -31,6 +31,13 @@ class TraceEngineIncompatibleDetail:
 
 
 @dataclass(frozen=True)
+class TraceCapabilityUnsupportedDetail:
+    code: Literal["trace.capability.unsupported"]
+    capability: str
+    message: str
+
+
+@dataclass(frozen=True)
 class TracePortfolioStrategyInvalidDetail:
     code: Literal["portfolio.strategy.invalid"]
     validation: StrategyValidation
@@ -46,6 +53,7 @@ class TracePortfolioDataUnavailableDetail:
 TraceUnprocessableDetail: TypeAlias = Annotated[
     TraceRequestInvalidDetail
     | TraceEngineIncompatibleDetail
+    | TraceCapabilityUnsupportedDetail
     | TracePortfolioStrategyInvalidDetail
     | TracePortfolioDataUnavailableDetail,
     Field(discriminator="code"),
@@ -162,9 +170,9 @@ def apply_trace_openapi_contract(schema: dict[str, Any]) -> None:
     item_schema["minLength"] = 1
     node_item_schema = _mapping(_mapping(properties, "node_ids"), "items")
     node_item_schema["minLength"] = 1
-    _mapping(_mapping(components, "PortfolioStartingHolding"), "properties")[
-        "security_id"
-    ]["minLength"] = 1
+    _mapping(_mapping(components, "PortfolioStartingHolding"), "properties")["security_id"][
+        "minLength"
+    ] = 1
 
 
 def _mapping(parent: dict[str, Any], key: str) -> dict[str, Any]:

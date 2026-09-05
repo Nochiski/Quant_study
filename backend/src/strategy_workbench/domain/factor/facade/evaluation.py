@@ -6,6 +6,7 @@ from strategy_workbench.domain.factor._evaluation import (
     FactorObservation,
     FactorReferenceValue,
     FactorValue,
+    NonFiniteFactorCalculationError,
     evaluate_factor_graph,
 )
 
@@ -17,5 +18,6 @@ __all__ = [
     "FactorObservation",
     "FactorReferenceValue",
     "FactorValue",
+    "NonFiniteFactorCalculationError",
     "evaluate_factor_graph",
 ]

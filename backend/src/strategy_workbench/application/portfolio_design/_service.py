@@ -33,6 +33,7 @@ from strategy_workbench.domain.factor.facade.evaluation import (
     FactorFieldValue,
     FactorObservation,
     FactorValue,
+    NonFiniteFactorCalculationError,
     evaluate_factor_graph,
 )
 from strategy_workbench.domain.factor.facade.expression import NodeValueType
@@ -53,6 +54,7 @@ from strategy_workbench.domain.factor.facade.validation import (
     required_field_ids as factor_required_field_ids,
 )
 from strategy_workbench.domain.portfolio.facade.construction import (
+    NonFinitePortfolioCalculationError,
     PortfolioFactorValue,
     PortfolioFieldValue,
     PortfolioObservation,
@@ -75,6 +77,7 @@ from ._models import (
 )
 from .ports.outgoing.engine_portfolio import EnginePortfolioPort
 from .ports.outgoing.raw_observations import (
+    CancellableRawObservationPort,
     RawObservation,
     RawObservationPort,
     RawObservationQuery,
@@ -140,6 +143,19 @@ class InvalidPortfolioTraceSelectionError(ValueError):
     """The requested factor/node projection is not in the compiled execution plan."""
 
 
+class TraceObservationCapabilityError(RuntimeError):
+    """The configured raw source cannot provide a cooperatively cancellable trace."""
+
+    capability = "raw_observation.cancellation"
+
+    def __init__(self, adapter_type: str) -> None:
+        super().__init__(
+            "raw observation adapter lacks the cancellable trace capability — "
+            f"capability={self.capability!r} adapter_type={adapter_type!r}"
+        )
+        self.adapter_type = adapter_type
+
+
 @dataclass(frozen=True)
 class FactorEvaluationRecord:
     """One factor's plan and evaluated values, kept for parity checks and the debug trace."""
@@ -196,6 +212,10 @@ class PortfolioDesignService:
         engine = self._engine_portfolio.assess(spec)
         if pipeline_options.require_engine_compatible and not engine.compatible:
             raise IncompatiblePortfolioRequestError(engine)
+        if pipeline_options.trace_selection is not None and not isinstance(
+            self._observation_source, CancellableRawObservationPort
+        ):
+            raise TraceObservationCapabilityError(type(self._observation_source).__name__)
 
         metadata = self._factor_metadata.resolve_factor_fields(
             tuple(
@@ -213,20 +233,23 @@ class PortfolioDesignService:
         _reject_saved_references(spec, plans)
         _validate_trace_selection(pipeline_options, plans)
         checkpoint()
-        raw = self._observation_source.load_raw_observations(
-            RawObservationQuery(
-                market=spec.data.market.value,
-                universe_id=spec.data.universe_id,
-                start=spec.data.start,
-                end=spec.data.end,
-                field_ids=_required_field_ids(spec, plans),
-                # Plans count as_of itself; the port counts sessions strictly before start.
-                history_sessions_before_start=max(
-                    (plan.minimum_history_sessions - 1 for plan in plans.values()), default=0
-                ),
+        raw_query = RawObservationQuery(
+            market=spec.data.market.value,
+            universe_id=spec.data.universe_id,
+            start=spec.data.start,
+            end=spec.data.end,
+            field_ids=_required_field_ids(spec, plans),
+            # Plans count as_of itself; the port counts sessions strictly before start.
+            history_sessions_before_start=max(
+                (plan.minimum_history_sessions - 1 for plan in plans.values()), default=0
             ),
-            checkpoint=checkpoint,
         )
+        if isinstance(self._observation_source, CancellableRawObservationPort):
+            raw = self._observation_source.load_raw_observations_cancellable(
+                raw_query, checkpoint=checkpoint
+            )
+        else:
+            raw = self._observation_source.load_raw_observations(raw_query)
         checkpoint()
         if not raw.ok:
             raise RawObservationUnavailableError(raw.status, raw.detail)
@@ -239,32 +262,47 @@ class PortfolioDesignService:
         _validate_loaded_trace_scope(pipeline_options, raw)
         checkpoint()
         factor_observations = tuple(
-            _to_factor_observation(item)
-            for item in _checkpointed(raw.observations, checkpoint)
+            _to_factor_observation(item) for item in _checkpointed(raw.observations, checkpoint)
         )
         parameters = tuple(
             ResolvedFactorParameter(parameter.parameter_id, parameter.default)
             for parameter in spec.parameters
         )
         evaluations: list[FactorEvaluationRecord] = []
-        for factor in spec.factors.factors:
+        for factor_index, factor in enumerate(spec.factors.factors):
             checkpoint()
             trace = None
-            if factor.factor_id == pipeline_options.trace_factor_id:
-                evaluation, trace = evaluate_factor_graph_with_trace(
-                    factor.graph,
-                    observations=factor_observations,
-                    parameters=parameters,
-                    selection=pipeline_options.trace_selection,
-                    checkpoint=checkpoint,
+            try:
+                if factor.factor_id == pipeline_options.trace_factor_id:
+                    evaluation, trace = evaluate_factor_graph_with_trace(
+                        factor.graph,
+                        observations=factor_observations,
+                        parameters=parameters,
+                        selection=pipeline_options.trace_selection,
+                        checkpoint=checkpoint,
+                    )
+                else:
+                    evaluation = evaluate_factor_graph(
+                        factor.graph,
+                        observations=factor_observations,
+                        parameters=parameters,
+                        checkpoint=checkpoint,
+                    )
+            except NonFiniteFactorCalculationError as error:
+                node_index = next(
+                    index
+                    for index, node in enumerate(factor.graph.nodes)
+                    if node.node_id == error.node_id
                 )
-            else:
-                evaluation = evaluate_factor_graph(
-                    factor.graph,
-                    observations=factor_observations,
-                    parameters=parameters,
-                    checkpoint=checkpoint,
+                issue = semantic_issue(
+                    "strategy.expression.calculation_non_finite",
+                    f"factors.factors.{factor_index}.graph.nodes.{node_index}",
+                    str(error),
+                    node_id=error.node_id,
                 )
+                raise InvalidPortfolioRequestError(
+                    StrategyValidation(valid=False, issues=(issue,))
+                ) from error
             evaluations.append(
                 FactorEvaluationRecord(
                     factor_id=factor.factor_id,
@@ -282,14 +320,25 @@ class PortfolioDesignService:
             checkpoint=checkpoint,
         )
         checkpoint()
-        preview = PortfolioPreview(
-            tape=compile_target_tape(
+        try:
+            tape = compile_target_tape(
                 spec,
                 data_snapshot_id=raw.data_snapshot_id,
                 sessions=raw.sessions,
                 observations=observations,
                 checkpoint=checkpoint,
-            ),
+            )
+        except NonFinitePortfolioCalculationError as error:
+            issue = semantic_issue(
+                "strategy.expression.calculation_non_finite",
+                "portfolio",
+                str(error),
+            )
+            raise InvalidPortfolioRequestError(
+                StrategyValidation(valid=False, issues=(issue,))
+            ) from error
+        preview = PortfolioPreview(
+            tape=tape,
             engine=engine,
             warnings=raw.warnings,
         )
@@ -379,9 +428,7 @@ def _validate_trace_selection(
         )
 
 
-def _validate_loaded_trace_scope(
-    options: PortfolioPipelineOptions, raw: RawObservationSet
-) -> None:
+def _validate_loaded_trace_scope(options: PortfolioPipelineOptions, raw: RawObservationSet) -> None:
     """Reject an untraceable date/security scope before any FactorGraph calculation.
 
     A non-member row is still a valid point-in-time security observation and must not be confused
@@ -411,9 +458,7 @@ def _validate_loaded_trace_scope(
             )
     if options.starting_holdings:
         sessions = set(raw.sessions)
-        observed_ids = {
-            item.security_id for item in raw.observations if item.as_of in sessions
-        }
+        observed_ids = {item.security_id for item in raw.observations if item.as_of in sessions}
         unmatched_holdings = {
             holding.security_id for holding in options.starting_holdings
         } - observed_ids

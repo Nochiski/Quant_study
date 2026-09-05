@@ -31,9 +31,12 @@ equal/factor-score/rank/risk weight, exposure cap·neutralization, turnover/liqu
 - `POST /api/v1/strategies/debug/trace`: saved revision 또는 inline draft의 date/security/factor/node를
   제한해 raw·node·TargetTape projection과 `spec_hash/snapshot_id/registry_version/plan_hash`를 반환.
   trace와 executable factor output은 한 번의 node-cache 계산에서 파생되며 페이지·행 cap과
-  raw/evaluator/TargetTape batch의 client-disconnect 협력적 취소를 적용. 비세션 날짜와 snapshot에
-  없는 종목은 빈 성공값 대신 coded 422로 실패하고 404/409/422/499 envelope와 요청 cap은
-  OpenAPI/generated SDK에 명시된다
+  cancellable raw capability/evaluator/TargetTape materialization·streaming hash의 client-disconnect
+  협력적 취소를 적용. 기존 `RawObservationPort.load_raw_observations(query)`는 preview/backtest
+  호환 계약으로 유지하고 trace는 별도 `CancellableRawObservationPort`를 계산 전에 협상한다.
+  비세션 날짜와 snapshot에 없는 종목, 모든 StrategySpec numeric leaf의 non-finite 값과 유한
+  피연산자의 산술 overflow는 빈 성공값·NaN tape 대신 coded 422로 실패한다. 404/409/422/499
+  envelope, 요청 cap과 `trace.capability.unsupported` 진단은 OpenAPI/generated SDK에 명시된다
 - `equity_mock`: 실제 Equity DB가 오기 전 portfolio observation port를 구현하는 deterministic adapter
 - `engine_portfolio`: `StrategyRequirements`를 사전 협상하고 `SetPortfolioTarget(REPLACE)`로 변환
 

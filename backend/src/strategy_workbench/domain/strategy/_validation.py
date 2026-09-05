@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import dataclasses
+import math
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -52,9 +55,6 @@ class StrategyValidation:
     issues: tuple[ValidationIssue, ...]
 
 
-_CATALOG_CODES = frozenset(constraint.code for constraint in STRATEGY_SCALAR_CONSTRAINTS)
-
-
 def _owned_codes() -> frozenset[str]:
     """The registry of `strategy.*` codes, read live so a monkeypatched catalog still applies."""
     return (
@@ -99,8 +99,45 @@ def _is_number(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
+def _numeric_leaves(value: object, path: str = "") -> Iterator[tuple[str, float]]:
+    """Walk every typed StrategySpec number without duplicating its model shape.
+
+    Bounds remain owned by ``STRATEGY_SCALAR_CONSTRAINTS``. This traversal owns the orthogonal
+    invariant that every floating-point leaf is finite, including repeated factor/rule/parameter
+    rows and FactorGraph node values that cannot be addressed by today's fixed-pointer catalog.
+    """
+    if isinstance(value, float):
+        yield path, value
+        return
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        for model_field in dataclasses.fields(value):
+            child_path = f"{path}.{model_field.name}" if path else model_field.name
+            yield from _numeric_leaves(getattr(value, model_field.name), child_path)
+        return
+    if isinstance(value, (tuple, list)):
+        for index, item in enumerate(value):
+            child_path = f"{path}.{index}" if path else str(index)
+            yield from _numeric_leaves(item, child_path)
+        return
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            child_path = f"{path}.{key}" if path else str(key)
+            yield from _numeric_leaves(item, child_path)
+
+
 def validate_strategy(spec: StrategySpec) -> StrategyValidation:
     issues: list[ValidationIssue] = []
+    bounded_paths = {constraint.path for constraint in STRATEGY_SCALAR_CONSTRAINTS}
+    issues.extend(
+        semantic_issue(
+            "strategy.number.non_finite",
+            path,
+            "StrategySpec numeric values must be finite before execution or hashing: "
+            f"path={path!r} value={value!r}",
+        )
+        for path, value in _numeric_leaves(spec)
+        if path not in bounded_paths and not math.isfinite(value)
+    )
     if not spec.title.strip():
         issues.append(semantic_issue("strategy.title.empty", "title", "전략 이름을 입력하세요."))
     if spec.data.start > spec.data.end:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import date
@@ -43,9 +44,7 @@ def _noop_checkpoint() -> None:
     return None
 
 
-def _checkpointed(
-    items: Iterable[_T], checkpoint: Callable[[], None]
-) -> Iterator[_T]:
+def _checkpointed(items: Iterable[_T], checkpoint: Callable[[], None]) -> Iterator[_T]:
     """Yield work in bounded batches without assigning cancellation policy to the domain."""
     for index, item in enumerate(items):
         if index % _CHECKPOINT_BATCH == 0:
@@ -98,6 +97,27 @@ class FactorEvaluation:
     values: tuple[FactorValue, ...]
 
 
+class NonFiniteFactorCalculationError(ArithmeticError):
+    """A factor node produced a value that cannot be represented in a truthful result."""
+
+    def __init__(
+        self,
+        *,
+        node_id: str,
+        value: float,
+        observation: FactorObservation,
+    ) -> None:
+        super().__init__(
+            "factor calculation produced a non-finite value — "
+            f"node_id={node_id!r} as_of={observation.as_of} "
+            f"security_id={observation.security_id!r} value={value!r}"
+        )
+        self.node_id = node_id
+        self.value = value
+        self.as_of = observation.as_of
+        self.security_id = observation.security_id
+
+
 def evaluate_factor_graph(
     graph: FactorGraph,
     *,
@@ -108,9 +128,7 @@ def evaluate_factor_graph(
     computed = _compute_nodes(
         graph, observations=observations, parameters=parameters, checkpoint=checkpoint
     )
-    return _evaluation_from_computed(
-        graph, observations, computed, checkpoint=checkpoint
-    )
+    return _evaluation_from_computed(graph, observations, computed, checkpoint=checkpoint)
 
 
 def _evaluation_from_computed(
@@ -221,11 +239,29 @@ def _compute_nodes(
             values = _reference_values(
                 observations, f"subgraph:{node.subgraph_id}", checkpoint=checkpoint
             )
+        _require_finite_values(node.node_id, values, observations, checkpoint=checkpoint)
         computed[node_id] = values
         return values
 
     evaluate(graph.output_node_id)
     return computed
+
+
+def _require_finite_values(
+    node_id: str,
+    values: list[FactorComputedValue],
+    observations: tuple[FactorObservation, ...],
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
+) -> None:
+    """Reject arithmetic overflow and non-finite adapter/reference values at one node boundary."""
+    for index, value in _checkpointed(enumerate(values), checkpoint):
+        if isinstance(value, float) and not math.isfinite(value):
+            raise NonFiniteFactorCalculationError(
+                node_id=node_id,
+                value=value,
+                observation=observations[index],
+            )
 
 
 def _field_values(
@@ -385,9 +421,7 @@ def _time_series(
             start = end - node.window
             if start < 0 or end <= 0:
                 continue
-            window = values_from_indices(
-                values, indices[start:end], checkpoint=checkpoint
-            )
+            window = values_from_indices(values, indices[start:end], checkpoint=checkpoint)
             if len(window) != node.window:
                 continue
             if node.operator is TimeSeriesOperator.MEAN:

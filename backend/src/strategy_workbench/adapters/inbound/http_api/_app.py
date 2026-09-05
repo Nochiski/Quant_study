@@ -60,6 +60,7 @@ from strategy_workbench.application.portfolio_design.facade.trace import (
     InvalidStrategyTraceRequestError,
     StaleStrategyTraceSourceError,
     StrategyTraceCancelledError,
+    StrategyTraceCapabilityError,
     StrategyTraceRequest,
     StrategyTraceResponse,
     StrategyTraceService,
@@ -102,6 +103,7 @@ from ._trace_contract import (
     Trace422Response,
     TraceCancelledDetail,
     TraceCancelledResponse,
+    TraceCapabilityUnsupportedDetail,
     TraceEngineIncompatibleDetail,
     TraceRequestInvalidDetail,
     TraceStrategyNotFoundDetail,
@@ -354,12 +356,18 @@ def create_app(
                 detail=asdict(detail),
             ) from error
         except IncompatiblePortfolioRequestError as error:
-            detail = TraceEngineIncompatibleDetail(
-                "trace.engine.incompatible", error.compatibility
-            )
+            detail = TraceEngineIncompatibleDetail("trace.engine.incompatible", error.compatibility)
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=jsonable_encoder(asdict(detail)),
+            ) from error
+        except StrategyTraceCapabilityError as error:
+            detail = TraceCapabilityUnsupportedDetail(
+                "trace.capability.unsupported", error.capability, str(error)
+            )
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=asdict(detail),
             ) from error
         except (InvalidPortfolioRequestError, RawObservationUnavailableError) as error:
             raise _portfolio_http_error(error) from error

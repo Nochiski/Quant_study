@@ -265,6 +265,7 @@ SEMANTIC_ONLY_CODES: frozenset[str] = frozenset(
         "strategy.parameter.default",
         "strategy.parameter.step",
         "strategy.parameter.choice",
+        "strategy.number.non_finite",
     }
 )
 
@@ -283,6 +284,7 @@ EXPRESSION_CODES: frozenset[str] = frozenset(
         "strategy.expression.parameter_type",
         "strategy.expression.reference_unsupported",
         "strategy.expression.output_type",
+        "strategy.expression.calculation_non_finite",
     }
 )
 

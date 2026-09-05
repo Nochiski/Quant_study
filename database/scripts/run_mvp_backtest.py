@@ -11,7 +11,7 @@ EQUITY_WORKFLOW §3-5(S21 축소): `build_container(equity_adapter="duckdb", equ
 것이 정상).
 
 사용 (backend venv — ruamel.yaml·numpy·pyarrow·duckdb 가 필요하다):
-  uv run --project backend python workspace/dongmin/scripts/run_mvp_backtest.py \\
+  uv run --project backend python database/scripts/run_mvp_backtest.py \\
       --root <equity_root> --start 2011-01-03 --end 2026-08-20 --universe krx.common-stock \\
       [--price-field price.adj_close] [--top 20] [--artifact-root <dir>]
       [--engine-src <repo>/backend/src]
@@ -38,7 +38,7 @@ POLL_SECONDS = 0.2
 def default_engine_src() -> Path:
     """`$QL_ENGINE_SRC` 또는 `<repo>/backend/src`(scripts/ 에서 3단계 위) — equity.contract 규약."""
     env = os.environ.get(ENGINE_SRC_ENV)
-    return Path(env) if env else Path(__file__).resolve().parents[3] / "backend" / "src"
+    return Path(env) if env else Path(__file__).resolve().parents[2] / "backend" / "src"
 
 
 def load_backend(engine_src: Path) -> None:

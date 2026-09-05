@@ -1,4 +1,4 @@
-"""workspace/dongmin 테스트 공통 설정 — survey/·src/ 모듈을 import 경로에 올린다."""
+"""database 테스트 공통 설정 — survey/·src/ 모듈을 import 경로에 올린다."""
 import datetime as dt
 import json
 import os

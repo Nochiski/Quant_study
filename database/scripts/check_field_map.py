@@ -4,8 +4,8 @@
 S00 통과 조건: 레지스트리가 요구하는 field_id 집합 − 대응표 field_id 집합 = ∅.
 반대 방향(대응표에만 있는 id)은 경고로만 출력한다 — equity 내부 스코프(`price.adj_close` 등)가 있을 수 있다.
 
-사용: python workspace/dongmin/scripts/check_field_map.py [--registry backend/FACTORS.md]
-                                                     [--map workspace/dongmin/docs/EQUITY_FIELD_MAP.md]
+사용: python database/scripts/check_field_map.py [--registry backend/FACTORS.md]
+                                                     [--map database/docs/EQUITY_FIELD_MAP.md]
 종료 코드 0 = 차집합 없음, 1 = 누락 있음, 2 = 파일 문제.
 """
 from __future__ import annotations
@@ -52,7 +52,7 @@ def map_fields(path: Path) -> set[str]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--registry", default="backend/FACTORS.md")
-    ap.add_argument("--map", default="workspace/dongmin/docs/EQUITY_FIELD_MAP.md")
+    ap.add_argument("--map", default="database/docs/EQUITY_FIELD_MAP.md")
     args = ap.parse_args()
     reg, mp = Path(args.registry), Path(args.map)
     if not reg.exists() or not mp.exists():

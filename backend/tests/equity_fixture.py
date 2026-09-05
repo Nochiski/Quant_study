@@ -212,7 +212,7 @@ def policy_table(rows: list[PolicyRow]) -> pa.Table:
 
 
 # ── 카탈로그 (`equity.duckdb` + `_catalog_meta.json`) ────────────────────────
-# `equity.catalog`·`equity.views`(workspace/dongmin) 의 테스트 대역. backend 는 그 패키지를 import
+# `equity.catalog`·`equity.views`(database/src/equity) 의 테스트 대역. backend 는 그 패키지를 import
 # 할 수 없으므로 매크로 본문(DESIGN §5 v_cum_adj·v_adj_price·v_adj_price_fwd)과 snapshot_id 규칙
 # (전 테이블 table=build 정렬 sha256 16자리)을 여기 옮겨 적는다 — 본문이 바뀌면 여기도 같이 바꾼다.
 

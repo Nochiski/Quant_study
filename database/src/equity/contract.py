@@ -78,11 +78,11 @@ ENGINE_SRC_ENV = "QL_ENGINE_SRC"
 
 
 def default_engine_src() -> Path:
-    """`$QL_ENGINE_SRC` 또는 `<repo>/backend/src`(workspace/dongmin/src/equity 에서 4단계 위)."""
+    """`$QL_ENGINE_SRC` 또는 `<repo>/backend/src`(database/src/equity 에서 3단계 위)."""
     env = os.environ.get(ENGINE_SRC_ENV)
     if env:
         return Path(env)
-    return Path(__file__).resolve().parents[4] / "backend" / "src"
+    return Path(__file__).resolve().parents[3] / "backend" / "src"
 
 
 def load_adapter(engine_src: Path) -> ModuleType:

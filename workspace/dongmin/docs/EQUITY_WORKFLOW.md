@@ -104,7 +104,7 @@ EG0 입력 고정 · EG1 격자 등식(`− n_dedup − Σ n_reject` 일반형, 
 | **S05** | 기업행위 | `corp_event` | `stg_event_*`·`stg_capital`·`stg_disclosure` 락일·배당결정 · KRX 주식수 변화 | ∥ S04 | S03 |
 | **S06** | 조정계수·가격 뷰 | `adj_factor`·`v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_firm_mktcap` | S04·S05 | — | S04·S05 |
 | **S03B** | 유니버스(시장 파생) | `universe_daily` v2(`mktcap_krw`·`adv20_krw`·`listing_age_days`·`no_trade_run`·`suspended` 완성) | S04·S03 | ∥ S06 | S04 |
-| **S07** | **엔진 어댑터 v0** | `backtest_engine/adapters/equity_duckdb.py`(3포트) + `BUILDERS` 등록 · EG-C ①②③④⑤⑩ | S03B·S06 | — | S06·S03B |
+| **S07** | **엔진 어댑터 v0** | `backtest_engine/adapters/equity_duckdb.py`(3포트, pyarrow) + `backend/tests/test_bar_source_contract.py::BUILDERS` 등록(런타임 어댑터 레지스트리는 없다 — 호출자가 직접 생성) · `equity contract`(`src/equity/contract.py`, EG-C ①②③④⑤⑩ → `_contract_meta.json`) · `baseline_seed_s07.json` | S03B·S06 | — | S06·S03B |
 | **S08** | 수급 격자 | `flow_daily`(13주체 + KIS 대응표) | S03B + 키움·KIS flow·foreign·로그 | ∥ | S03B |
 | **S09** | 공매도·대차 격자 | `short_daily` | S03B + short kiwoom/kis·lending·loan_kis | ∥ | S03B |
 | **S10** | 신용 격자 | `credit_daily` | S03B + `stg_credit_daily` | ∥ | S03B |
@@ -157,7 +157,7 @@ S00·S01·S02·S03·S04·S05(축소: split·bonus·capred 만)·S06·S03B·S07 +
 | S00 | `check_field_map.py` 집합 차 0 ∧ GAP 21건 전부 슬라이스 배정 ∧ 결정 5·6·7 확정 표기 |
 | 1단계 S01~S03 | EG1 7식 ∧ 폐지 전부 `delist_date`(EG3-P10) ∧ KR7 isin8 그룹당 보통주 1 ∧ span 비중첩·Σ n_days 등식 ∧ 캘린더 = 4,094 ∧ `induty_code` 공란 0 ∧ `halt_state` 열린 구간 0 ∧ `asof_sample` 등재 |
 | 2단계 S04~S06·S03B | `price_daily` = 10,890,251 ∧ 시총 불변 `price×share=1` 위반 0 ∧ `v_firm_mktcap` 독립 재계산 일치 ∧ 분할일 가격·거래량 점프 ≤ baseline ∧ EG20 원주가 불변 ∧ EG11 뷰 결정성 |
-| S07 | `BUILDERS['equity_duckdb']` 등록 후 `backend/tests/test_bar_source_contract.py` 전량 green ∧ EG-C ①②③④⑤⑩ ∧ 폐지 20종목 포함 BarQuery OK·반환 = 요청 |
+| S07 | `test_bar_source_contract.py::BUILDERS['equity_duckdb']` 등록 후 그 파일 전량 green ∧ `test_adapters_equity.py` green ∧ `equity contract` EGC-01·02·03·04·05·10 pass(절단본 체인 → 서버) ∧ 폐지 표본(`security.delist_sample_n`) BarQuery OK·반환 = 요청 |
 | 3단계 S08~S10 | 격자 등식 ∧ 미수집→0 행 0(로그 축 독립 재판정) ∧ evidence_rate ≥ baseline ∧ 커버율↔시장수익률 상관 ≤ baseline ∧ 12주체 합 항등(kiwoom) ∧ 겹침 0 ∧ pre_calendar 격리 건수 = 실측 |
 | 4A S11·S12 | 사다리 5단 baseline 등재 ∧ E-G6a ≥ 임계·E-G6b 기록·E-G7 ≥ 임계 ∧ `period_end` 문서 정본 커버 ≥ baseline ∧ `available ≥ period_end` 위반 0 ∧ 참조표 미스 0 ∧ 파생 `<col>_available_date` 위반 0 ∧ PIT 결측률 3축 교차표 baseline 등재 |
 | S14(대기) | `vintage_kind` 3종 적재 ∧ D9(정정 없는 보고서 API=원본 100%) 재현 ∧ EG5c 재기준(`_asof/` 갱신 승인) |

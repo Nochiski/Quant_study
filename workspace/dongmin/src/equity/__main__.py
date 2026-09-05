@@ -6,6 +6,9 @@
   catalog               equity.duckdb 재생성 (빌드·GC 뒤에는 반드시) + 뷰 게이트 EG11·EG5c·EG3-P05
                         + `_asof/<view>/<snapshot_id>/` 표본. 게이트 실패면 카탈로그를 교체하지
                         않는다
+  contract              EG-C 소비자 계약 ①②③④⑤⑩ — 커널 어댑터(backend/src, pyarrow)를 이 루트 위에서
+                        돌려 duckdb 독립 읽기와 대조 → `_contract_meta.json`. 엔진 소스는
+                        `--engine-src`(기본 `<repo>/backend/src` 또는 `$QL_ENGINE_SRC`)
 
 루트는 `--root`(기본 `$QL_HOME/data/equity`), stage 는 `--stage-root`.
 """
@@ -24,6 +27,7 @@ from . import baseline as baseline_mod
 from . import (
     build,
     catalog,
+    contract,
     gates,
     inputs,
     rules_s01,  # noqa: F401  # reason: 등록 부작용 — S01 corp·security·corp_ticker
@@ -121,6 +125,17 @@ def _cmd_catalog(a: argparse.Namespace) -> int:
     return 0 if r.ok else 1
 
 
+def _cmd_contract(a: argparse.Namespace) -> int:
+    bl = baseline_mod.load(a.baseline or baseline_mod.path_for(a.root))
+    r = contract.run(a.root, bl, engine_src=a.engine_src)
+    print(f"{'ok' if r.ok else 'gate_failed'} contract root={a.root} engine_src={r.engine_src} "
+          f"tables={len(r.builds)} snapshot_id={r.snapshot_id} meta={r.meta_path}")
+    _print_gates(r.gates)
+    if r.failed_report:
+        print(f"  failed report: {r.failed_report}")
+    return 0 if r.ok else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     base = Path(os.environ.get("QL_HOME") or Path(__file__).resolve().parents[2])
     ap = argparse.ArgumentParser(prog="equity", description=__doc__)
@@ -153,6 +168,12 @@ def main(argv: list[str] | None = None) -> int:
     p_cat.add_argument("--rebase-asof", action="store_true",
                        help="EG5c 차이를 승인하고 _asof/ 표본을 새 기준으로 삼는다(사람 승인)")
     p_cat.set_defaults(fn=_cmd_catalog)
+
+    p_con = sub.add_parser("contract", help="EG-C 소비자 계약 ①②③④⑤⑩ (커널 어댑터 실행 → "
+                                            "_contract_meta.json)")
+    p_con.add_argument("--engine-src", type=Path, default=None,
+                       help="backend/src 경로 (기본 <repo>/backend/src 또는 $QL_ENGINE_SRC)")
+    p_con.set_defaults(fn=_cmd_contract)
 
     a = ap.parse_args(argv)
     return int(a.fn(a))

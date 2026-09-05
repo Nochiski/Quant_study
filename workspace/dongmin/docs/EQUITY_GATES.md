@@ -1587,6 +1587,7 @@ EG5  회귀·재현성 (a·b)
 [테이블 커밋]
  ↓
 (7단계 전역) EG10 재료 커버율 · EG11 뷰 결정성 · EG19 as-of 단조성 · EG5c · EG-C ①~⑩
+   (①②③④⑤⑩ 은 S07 부터 2단계 직후 `equity contract` 로 선행 실행 — §9 S07)
 ```
 
 **EG7 이 EG1 보다 먼저**인 것이 stage 와 다른 점이다. stage 는 `stage_all` 한 번의 SELECT 에서 reject 를 갈라 두 게이트가 같은 스냅샷을 봤지만, equity 는 격리 사유가 테이블마다 달라 순서를 명시해야 한다.
@@ -1781,3 +1782,20 @@ workspace/dongmin/src/equity/
 | FX-2-004 | (`101970`, 2018-10-12) 두 축 상이 | 절단본 101970 은 폐지 기간 사건이라 창에 거래 행 0 → **`no_price_match`·unmatched·계수 1** 로 고정(가격 부재 사건은 적용하지 않는다). 두 축 상이는 합성 가격 SQL 테스트(정지 뒤 재개일 +11 세션 ×9.8 → price_matched (10, 0.1)) | `test_equity_s06_adj.py::test_합성_*` |
 | 부정 픽스처 | FX-N-003·not-ok·available | + apply_date=effective_date 변종 → `n_apply_off_calendar` 2(토요일 기준일)·`n_nominal_apply_ne_nominal_session` 1 | — |
 | 절단본 분포 | ok 6 | ok 3(nominal) · no_price_match 3 · ratio_null 1 · near_dup 1 · apply_basis nominal 5 / unmatched 3. `_asof` 표본 행수 111,305 불변(계수만 바뀐다) | DESIGN §10 P23 |
+**S07 커널 어댑터 v0 · EG-C ①②③④⑤⑩ 구현 정정 (2026-09-05, `backend/src/backtest_engine/adapters/equity_duckdb.py`·`src/equity/contract.py`)**
+
+| 항목 | 초안 | 정정 | 근거 |
+|---|---|---|---|
+| EG-C 실행 주체·시점 | 7단계 전역, "pytest 케이스" | 2단계 직후(S07) `python -m equity --root … contract [--engine-src]` — `src/equity/contract.py` 가 어댑터를 불러 항별 술어를 돌리고 `_contract_meta.json`(snapshot_id·builds·engine_src·`gates[]`·status) 에 쓴다. FAIL 이면 `_failed/contract_<snapshot_id>.json` 도 쓴다(테이블·카탈로그는 건드리지 않는다). backend pytest 는 별도 축(아래 ①) | WORKFLOW §3-0 "S07 앞당김" |
+| 결과 기록 형식 | `gates[]` 에 `EG-C` 1행 | **항별 `EGC-01`…`EGC-10` 행**(각 `metrics`). 1행으로 접으면 항별 metric·skip 사유가 사라진다 | `_contract_meta.json` |
+| ① `EGC-01` | `BUILDERS` 등록 → 전 케이스 통과 | 두 축으로 나눈다: (a) `backend/tests/test_bar_source_contract.py::BUILDERS['equity_duckdb']`(테스트 레지스트리 — 런타임 어댑터 레지스트리는 없다) 전 케이스 + `test_adapters_equity.py` = backend CI. (b) `contract` 의 EGC-01 = 표본 티커(`trading_calendar.asof_sample_tickers`) 전 구간 Bar O/H/L/C/V 가 **`price_daily` 의 고정 입력 `_pinned/stg_price_daily ∪ stg_etf_price_daily`**(캘린더 안 날짜) 원주가와 전건 동일 ∧ `dropped_rows` = 거래량 0·NULL 행 + GAP-14 류(OHLC NULL·≤0) 행. 대조축을 `price_daily` 자체로 두면 산출을 변조한 사본이 양쪽에 같이 보여 게이트가 항진명제가 된다(부정 픽스처가 잡히지 않았다) → stage 축(EG20 과 같은 축). 정책 CLAMP(서버 GAP-14 127행을 거절하지 않고 센다; `repaired_rows` 기록, h/l 이 보정되면 mismatch 로 FAIL) | 부정 픽스처 close+100 → mismatch 1 |
+| ② `EGC-02` | `v_universe(:d,'all')` 티커 집합 = `stg_listing_daily(d − lag)` | `v_universe` 뷰(T9)가 없어 **`UniverseSource.members(d)` 티커 집합** = `security_span` 의 고정 입력 `_pinned/stg_listing_daily(d) ∪ stg_etf_price_daily(d)`(ETF 는 listing 에 없다, P8). 랙 0(상장·가격류 `lag_known=true`). d ∈ `universe_daily.contract_probe_dates`(`baseline_seed_s07.json`, 7일 = `asof_sample_dates` 5 + 재상장 경계 2016-05-04·2024-03-12) | FIELD_MAP §1 |
+| ③ `EGC-03` | 재상장 2종 → Membership 2구간, coverage_gap 유지, `end > backfill_end` 거절 | 술어 그대로 + 명시: 구간 ≥ 2 티커 수 = `security_span.respan_count` ∧ 티커별 Membership = 구간(first,last) 전건 ∧ 구간 사이 공백(a.last < b.first) ∧ `coverage_gap` 구간 last_session = backfill_end ∧ `UniverseQuery(end=backfill_end+1)` → NO_DATA(detail 에 `backfill_end=`) ∧ `end=backfill_end` OK. 거절 상태는 `LoadStatus` 어휘 안 **NO_DATA**(커버리지 밖 = 데이터 없음; FORMAT_ERROR 는 원천 형식 오류) | 부정 픽스처 구간 합침 → respan 1/2 FAIL(② 도 공백 probe 에서 FAIL — 항 간 중복 검출 의도) |
+| ④ `EGC-04` | 분할 픽스처 run 의 누적수익률 = 조정가 손계산, `adj_factor.backtest_return_tol` | **S07 은 좁힌다**: `CorporateActionEvent` 집합 = `adj_factor` factor_ok 행 {(ticker, `apply_date`\|`effective_date`, share_factor, event_id)} — ratio(Decimal) = share_factor 전건, not-ok 행 미방출, 유형 매핑 건수 기록(`by_type`). 엔진 run 누적수익률 대조는 전략·run 이 필요해 S21/S22 MVP-B 몫이며 `backtest_return_tol` 은 그때 등재 | 초기 지시(brief) |
+| ⑤ `EGC-05` | 거래정지 섞인 다종목 BarQuery → OK ∧ dropped > 0 | reference 행 최다 5티커 + reference 없는 1티커 → OK ∧ `dropped_rows` = Σ(거래량 0·NULL + GAP-14 류) > 0(stage 축 재계산) | 절단본 6종목 dropped 340 |
+| ⑩ `EGC-10` | 폐지 909 중 무작위 20, `security.delist_sample_seed`·`delist_sample_n` | 후보 = `security_span.end_reason='delisted'` 구간(KRX 정본, `{ticker}:{span_seq}`), `random.Random(seed).sample(정렬 후보, min(n, 후보수))` → 전 구간 BarQuery(CLAMP) OK ∧ 반환 symbol 집합 = 요청. seed 20260905 · n 20(`baseline_seed_s07.json`); 절단본 후보 5 전건 | 재현성 |
+| `UniverseSource` 종목 id | — | `Membership.instrument.symbol = '{ticker}:{span_seq}'`(재상장은 구간마다 다른 InstrumentId). `BarQuery`·`CorporateActionQuery` 는 `{ticker}:{span_seq}`(그 구간만) 와 `{ticker}`(전 구간, 계약 테스트 표기) 둘 다 받는다 | FIELD_MAP §1 `security_id` |
+| `CorporateActionEvent.ts` | `effective_date` | `adj_factor.apply_date` 컬럼이 있으면 그 값, 없으면 `effective_date`(컬럼 존재로 분기; ok 행의 `apply_date` NULL 은 FORMAT_ERROR). 감자는 기준일이 아니라 거래재개일에 가격이 조정된다(S06 후속) | 오케스트레이터 지시 09-05 |
+| `event_type` → enum | 미정 | `split`·`bonus`→SPLIT, `reverse_split`·`capred`→REVERSE_SPLIT(`EVENT_TYPE_MAP`). 어휘 밖·방향 불일치 FORMAT_ERROR, `SHARE_COUNT_CHANGE` 미사용 | DESIGN §7 매핑표 |
+| 엔진 의존 | §8-5 미결 | 같은 모노레포 `backend/src` 를 `contract.load_adapter(engine_src)` 가 `sys.path` 에 얹는다(equity → backend 의 유일한 import 경계). 기본 `<repo>/backend/src` 또는 `$QL_ENGINE_SRC`, 서버는 `--engine-src`. 엔진은 **numpy·pyarrow** 를 요구한다(`backtest_engine.types.market` 이 numpy import) — equity 테스트 명령에 `--with numpy` 추가. 없으면 skip 이 아니라 FileNotFoundError(A13) | §9 A13 |
+| 상수 미등재 | — | `asof_sample_tickers`·`contract_probe_dates`·`respan_count`·`delist_sample_*` 미등재는 해당 항 `skip(no_baseline)`, 테이블 미커밋은 `skip(not_built)`, `_pinned/` 입력 없음은 `skip(no_cross_source)`; skip 은 실패가 아니다 | §0-2 어휘 |

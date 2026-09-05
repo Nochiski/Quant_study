@@ -1,0 +1,66 @@
+{
+ "_seed": "S07 EG-C 소비자 계약 게이트(src/equity/contract.py, ①②③④⑤⑩)가 요구하는 baseline 상수. 오케스트레이터가 data/equity/baseline.json 에 병합한다. 셋 다 표본·검사점 고정용(GATES §1-12)이며 게이트 임계가 아니다. ①·③·⑤ 는 S02 의 trading_calendar.asof_sample_tickers·security_span.respan_count 를 그대로 쓴다(새 키 없음). adj_factor.backtest_return_tol(EG-C ④ run 누적수익률)은 S07 이 ④ 를 'ratio = share_factor' 로 좁혀 등재하지 않는다 — MVP-B(S21/S22) 에서 등재.",
+ "measured_at": "2026-09-05",
+ "universe_daily": {
+  "contract_probe_dates": [
+   "2010-01-04",
+   "2015-03-16",
+   "2016-05-04",
+   "2018-05-04",
+   "2024-03-12",
+   "2024-03-13",
+   "2026-08-20"
+  ]
+ },
+ "security": {
+  "delist_sample_seed": 20260905,
+  "delist_sample_n": 20
+ },
+ "_measured": [
+  {
+   "table": "universe_daily",
+   "metric": "contract_probe_dates",
+   "inputs": {
+    "stg_index_daily": "b_20260902T162449_297822Z"
+   },
+   "sql": "-- 고정 검사일(사람 선택). 전부 거래일임을 SELECT count(*) FROM stg_index_daily WHERE date IN (…) 로 확인",
+   "value": [
+    "2010-01-04",
+    "2015-03-16",
+    "2016-05-04",
+    "2018-05-04",
+    "2024-03-12",
+    "2024-03-13",
+    "2026-08-20"
+   ],
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "used_by": "EG-C ② (contract.egc02_universe_equals_listing) — UniverseSource.members(d) 티커 집합 = _pinned stg_listing_daily(d) ∪ stg_etf_price_daily(d)",
+   "note": "asof_sample_dates 5 + 재상장 경계 2 = 7일: 2016-05-04(036220 첫 구간 마지막 거래일) · 2024-03-12(036220 재상장 전날 — 공백 기간 안, 어댑터가 두 구간을 하나로 뭉치면 이 날 036220 이 members 에 나타나 잡힌다). 2015-03-16 은 101970 첫 구간 마지막 날, 2024-03-13 은 036220 재상장일."
+  },
+  {
+   "table": "security",
+   "metric": "delist_sample_seed",
+   "value": 20260905,
+   "kind": "convention",
+   "sql": null,
+   "inputs": {},
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "used_by": "EG-C ⑩ (contract.egc10_delisted_sample) — random.Random(seed).sample(폐지 구간 정렬 목록, n)",
+   "note": "재현성 고정용 시드(GATES EG-C ⑩ '무작위 시드는 baseline 고정'). 값 자체에 의미 없음. 후보 = security_span.end_reason='delisted' 구간(서버 1,164 티커 기준; 절단본 5: 000030·036220:1·101970:1·900050·900060). 바꾸면 표본이 바뀌므로 서버 실측 뒤 고정."
+  },
+  {
+   "table": "security",
+   "metric": "delist_sample_n",
+   "value": 20,
+   "kind": "convention",
+   "sql": null,
+   "inputs": {},
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "used_by": "EG-C ⑩ (contract.egc10_delisted_sample)",
+   "note": "GATES EG-C ⑩ '폐지 909 중 무작위 20종목'. 후보가 n 보다 적으면(절단본 5) 전건을 쓴다 — n_candidates·sample 을 metrics 에 남긴다."
+  }
+ ]
+}

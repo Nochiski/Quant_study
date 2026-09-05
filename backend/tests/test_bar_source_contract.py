@@ -87,7 +87,27 @@ def build_krx(root: Path, rows: Rows) -> BarSource:
     return KrxParquetBarSource(root)
 
 
-BUILDERS: dict[str, Builder] = {"csv": build_csv, "sqlite": build_sqlite, "krx_parquet": build_krx}
+def build_equity(root: Path, rows: Rows) -> BarSource:
+    """equity 층 `price_daily`(MANIFEST + `v=<build>/year=YYYY/`)를 손으로 만든다 (S07)."""
+    pytest.importorskip("pyarrow")
+    from backtest_engine.adapters.equity_duckdb import EquityBarSource
+    from tests.equity_fixture import PriceRow, price_table, write_equity_table
+
+    flat: list[PriceRow] = [
+        (symbol, session, o, h, lo, c, v)
+        for symbol, symbol_rows in rows.items()
+        for session, o, h, lo, c, v in symbol_rows
+    ]
+    write_equity_table(root, "price_daily", price_table(flat), year_column="date")
+    return EquityBarSource(root)
+
+
+BUILDERS: dict[str, Builder] = {
+    "csv": build_csv,
+    "sqlite": build_sqlite,
+    "krx_parquet": build_krx,
+    "equity_duckdb": build_equity,
+}
 
 
 @pytest.fixture(params=sorted(BUILDERS), ids=sorted(BUILDERS))
@@ -167,8 +187,14 @@ def test_clamp_drops_zero_price_rows_and_reports(build: Callable[[Rows], BarSour
 
 # 거래량 0(가격 양수) 행의 처리는 어댑터별 정책이다 — 계약에 명시한다.
 # KRX 원장은 정지 중에도 종가를 유지한 행이 매일 있어 거래량 0을 정지 신호로 보고 제거하고,
-# CSV·sqlite는 거래량 0을 데이터로 신뢰해 유지한다.
-ZERO_VOLUME_DROPPED: dict[str, bool] = {"csv": False, "sqlite": False, "krx_parquet": True}
+# CSV·sqlite는 거래량 0을 데이터로 신뢰해 유지한다. equity 층은 거래량 0 을 `price_kind='reference'`
+# (기준가·정지일)로 굽고 어댑터가 그 행을 방출하지 않는다.
+ZERO_VOLUME_DROPPED: dict[str, bool] = {
+    "csv": False,
+    "sqlite": False,
+    "krx_parquet": True,
+    "equity_duckdb": True,
+}
 
 
 @pytest.mark.parametrize("name", sorted(BUILDERS), ids=sorted(BUILDERS))

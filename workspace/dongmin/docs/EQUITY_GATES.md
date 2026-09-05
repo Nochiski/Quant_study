@@ -39,6 +39,7 @@
 | `not_grid` | 격자 테이블이 아니다(EG9) |
 | `no_coverage` | 데이터 구간이 아직 없어 실행 불가(EG-C ⑥ 의 G05 등) |
 | `not_built` | 의존 테이블 미착수 |
+| `no_previous_snapshot` | 카탈로그 단계 EG5c 의 직전 `_asof/<view>/<snapshot_id>/` 표본이 없다(첫 catalog 실행, S06) |
 
 **skip 은 통과가 아니다.** 7단계 최종 게이트(§7-4)가 "전 테이블 `gates[]` 에 `status='fail'` 0 **이면서** `status='skip'` 중 `no_baseline` 잔존 0" 을 요구한다.
 
@@ -788,7 +789,7 @@ WHERE g.${VALUE_COL} = 0
 |---|---|---|---|
 | `trading_calendar.backfill_end` | EG1·EG3 | 1 | `max(date)` of `stg_listing_daily` |
 | `trading_calendar.gap_days` | EG1 | 1 | gap 축 거래일 수 |
-| `trading_calendar.fixture_date` | EG3-P05 | 1 | 픽스처 기준일(고정) |
+| `trading_calendar.fixture_date` | EG3-P05 | 1 | 픽스처 기준일(고정) — **미등재**: S06 `EG3_firm_mktcap` 은 `trading_calendar.asof_sample_dates` 5일 전부를 대조 날짜로 쓴다(§9 S06) |
 | `security.delisted_total` | EG3-P10·P12 | 1 | KIS 폐지 ∪ listing 소멸 distinct ticker |
 | `security.delist_conflict_max` | EG3-P11 | 1 | krx≠kis 폐지일 건수 |
 | `security.delist_signal_recall_min` | EG8-P08 | 1 | recall 초회 측정 |
@@ -800,7 +801,7 @@ WHERE g.${VALUE_COL} = 0
 | `universe_daily.adv_window_td` | `adv20_krw` 창 · EG3_universe `n_adv20_null_mismatch` | 1 | 컬럼 이름이 못박은 20 — SQL 리터럴 금지 규약의 통로일 뿐 조정 상수가 아니다 |
 | `universe_daily.contract_probe_dates` | EG-C ② | 1 | 계약 검사 날짜 배열 |
 | `price_daily.krx_kis_ratio_match_min` | EG8-P01 | 2 | 일치율 |
-| `adj_factor.factor_product_tol` | EG3-P04 | 2 | 부동소수 허용오차 |
+| `adj_factor.factor_product_tol` | EG3-P04 | 2 | 부동소수 허용오차 — **미등재**: 산출 정밀도 상수 `rules_s06.FACTOR_PRODUCT_TOL = 1e-12`(DOUBLE 역수 곱 반올림 1.1e-16 실측, §9 S06) |
 | `adj_factor.adj_return_jump_max` | EG8-P02 | 2 | 점프 상한 |
 | `adj_factor.adj_volume_jump_max` | EG8-P03 | 2 | 거래량 점프 상한 |
 | `adj_factor.asof_for_jump_check` | EG8-P02·P03 | 2 | 검사용 고정 asof |
@@ -1729,3 +1730,30 @@ workspace/dongmin/src/equity/
 | `universe_policy` 행 | `all` 1행, `common-stock` 은 sec_type 축(정책 행 아님, S21) | **7행** `all`·`common-stock`(sec_type='common' ∧ status='listed')·`investable`(+ NOT admin_state, NOT liquidation_window), 전부 flag. `POLICY_VOCAB` 에 `common-stock` 추가 → `universe_id = 'krx.' \|\| policy` 문법 그대로 `krx.common-stock`(소비자 계약 값). `rule_seq` 는 `generate_subscripts`(리터럴 금지). `liquid` 행은 서버 adv20 분위수 뒤. `version` s03-v1 → s03b-v2 | FIELD_MAP §1 · DESIGN §7 |
 | §2 매트릭스 7행 · FX-1-012 · FX-1-017 | 012 는 S03B / 017 은 (`all`, 1) | 012 를 `universe_daily` 픽스처에 편입(a~g: run 22·1·0, k 경계 01-15/01-14, 101970 해제일 무거래) + mktcap 2·adv20 4·listing_age 5 케이스(총 52). 017 은 f~j(common-stock·investable) 추가 | `fixtures/universe_daily.json`·`universe_policy.json` |
 
+
+**S06 `adj_factor` · 뷰 매크로 · 카탈로그 게이트 구현 정정 (2026-09-05, `rules_s06.py`·`sql/adj_factor.sql`·`views.py`·`catalog.py`)**
+
+| 항목 | 초안 | 정정 | 근거 |
+|---|---|---|---|
+| EG3-P04 상수 | `bl('adj_factor','factor_product_tol')` | **baseline 미등재**. `price_factor = 1/ratio` 를 DOUBLE 로 두므로 곱은 1 ± 몇 ulp 다 — 허용오차는 산출 정밀도 상수 `FACTOR_PRODUCT_TOL = 1e-12`(실측 max \|1/x·x−1\| = 1.1e-16, x ∈ [1, 1e5]). 방향 오류(역수·제곱)는 1e-12 로 못 숨긴다(FX-N-003 실측 dev > 0.9). `max_ok_product_dev` 를 metric 으로 기록 | DESIGN §4-2 · `test_equity_s06_adj.py::test_FX_N_003…` |
+| EG2-P02 축(`adj_factor`) | `available_date ≥ corp_event.announce_date` | **축 없음**(`content_date_column=None`). `available_date = min(announce, 효력일 다음 거래일)` 이라 회고 기재 원천(자본변동, announce 가 사건보다 최대 수년 뒤)은 available < announce 가 정상(절단본 8행 중 4행). 대신 `EG3_adj_factor.n_available_mismatch` 가 캘린더로 독립 재계산해 전건 일치를 요구하고 `n_available_before_announce` 를 기록한다. DESIGN §4-2 의 "EG2 예외: ≥ announce_date 축" 문구는 이 정의와 모순이라 삭제 | 부정 픽스처 available=announce → mismatch 6 |
+| `adj_factor` 컬럼·입력 | grain 3 + 계수 4 + available | `corp_code`·`event_type`·`announce_date` 를 함께 싣는다(EG8 필터·EG2 대체 검사·`_asof` 표본이 corp_event 조인 없이 선다). 입력에 **`stg_event_cr`**(`cr_mth`·`cr_rs`) 추가 — corp_event 에 감자 유·무상 축이 없어 결정공시 본문에 '유상' 이 있는 event_cr 행을 `capred_paid` 로 판정한다(brief 의 "입력 = equity 3테이블" 과 다름). `price_daily` 는 산출식에 안 쓰고 EG8 만 읽는다 | DESIGN §4-2 "감자는 S06 이 cr_mth·유무상으로" |
+| `factor_source` 어휘(EG3-P13) | 미정 | `mktcap_neutral`(ok 유일) · `ratio_null` · `capred_paid` · `near_dup_suppressed`. 사유 우선순위 near_dup > ratio_null > capred_paid | `rules_s06.FACTOR_SOURCE_VOCAB` |
+| 근접 중복 억제 | "같은 (ticker, event_type) 이 창 안에 2건이면 effective_basis 우선순위" | **교차 원천 쌍만**(S05 `n_near_dup_cross_source` 와 같은 축). 같은 원천의 근접 2건은 접수번호가 다른 다른 사건 — 101970 2015-11-26(자기주식 소각+병합, 20160608000216)·11-28(10:1 병합, 20160608000221) 회생 감자 2건을 누르면 10:1 병합이 사라진다. 우선순위 = effective_basis(disclosure_body > krx_shares_change > krx_notice > unconfirmed) → ratio 있는 쪽 → 결정공시 > 자본변동 > KRX → announce → effective → event_id(STRUCT 비교). 창은 `corp_event.near_dup_window_days` 를 `_const` 로 읽는다(`build.make_consts` `<table>.<metric>` 키 신설) · `EG3_adj_factor.n_near_dup_both_ok` = 0 폐기형, `n_near_dup_suppressed` 기록 | 절단본 1차 빌드에서 11-28 이 눌렸다 |
+| EG1 ⑩ | `_reg_vocab('factor_bearing_event')` | = `rules_s05.MVP_EVENT_TYPES`(split·reverse_split·bonus·capred). 격리 사유 없음(reject 0) — ok=false 는 행 유지 | `rules_s06.FACTOR_BEARING_EVENTS` |
+| EG8-P02 대상 | split·bonus·stock_dividend | **factor_ok 행 전부**(capred 도 시총 불변이라 조정가가 연속이어야 한다). 효력일이 비거래일이면(토요일 기준일 2015-11-28·2018-10-13) 그 뒤 첫 거래일에서 잰다(`n_effective_off_calendar` 기록). 전일은 캘린더 `prev_td` 행(정지일 reference 행 포함 — 005930 05-03 기준가 2,650,000 × 0.02 = 53,000 → 51,900 = −2.1%) | 절단본 실측 |
+| EG8-P03 창 | `median(...) OVER (ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING)` | 캘린더 인덱스로 이벤트별 직전 20거래일을 잘라 `median` 집계(전 행 윈도 함수 회피 — 서버 10.9M 행). 창 길이는 방법 상수 `VOLUME_MEDIAN_WINDOW = 20`(baseline 아님). 중앙값 0 인 이벤트는 `n_ok_median_zero` 기록 | 메모리 |
+| EG8 첫 빌드 | `skip(no_baseline)` 전량 | skip 이되 **측정치를 항상 남긴다**: `asof_for_jump_check` 미등재면 `price_daily` max(date) 로 재고 `asof_basis='max_price_date'`. 세 상수(`asof_for_jump_check`·`adj_return_jump_max`·`adj_volume_jump_max`) 전부 있어야 판정. 계산은 `views` 템플릿을 TEMP MACRO 로 올려 뷰와 같은 식으로 | seed s06 |
+| seed 값 | — | `asof_for_jump_check` 2026-08-20(= backfill_end, growing) · `adj_return_jump_max` **0.30**(KRX 가격제한폭 ±30% 가 조정 기준가 대비 한도 → 계수가 맞으면 물리적으로 못 넘는다; 절단본 max 0.0929) · `adj_volume_jump_max` **10**(절단본 max 3.43 의 ~3배). 둘 다 ★ 서버 p100 재측정. 한계: 1.2:1 미만 무상증자 누락(−17% · 1.44×)은 두 축 모두 못 잡는다 | `baseline_seed_s06.json` |
+| EG3-P05 실행 주체·날짜 | `adj_factor`/`price_daily` 테이블 게이트, `bl_date('trading_calendar','fixture_date')` 1일 | **카탈로그 단계** `EG3_firm_mktcap`(뷰가 있어야 대조가 된다). 날짜는 `trading_calendar.asof_sample_dates` 5일 전부(`fixture_date` 상수 미등재). 뷰는 `common_ticker` 로 묶고 게이트는 `isin8` 로 묶어 항진명제를 피한다. `universe_daily` status 필터 대신 '그날 가격 행 존재'(listing 존재일 = 가격 (ticker,date) 전건, P20) — universe_daily 를 카탈로그가 요구하지 않게 | 부정 픽스처: 우선주 제외 → mismatch 10 |
+| `v_firm_mktcap(d)` 컬럼 | `corp_code, firm_mktcap_krw` | `corp_code`(그룹 min) · `firm_ticker`(common_ticker 또는 자기 티커) · `date` · `n_leg` · `firm_mktcap_krw`. 비KR7·ETF 는 단독 행(corp_code NULL 가능) | DESIGN §5 |
+| EG11 | `determinism_asof` 상수, 뷰당 1 as_of | 카탈로그 단계. 고정 표본 = `asof_sample_dates × asof_sample_tickers`(새 상수 없음), 임시 카탈로그를 **별도 read_only 연결 2개**로 열어 `count + bit_xor(hash(row))` 동일. 대상 뷰 `v_cum_adj`·`v_adj_price`(`catalog.ASOF_VIEWS`) | P1b 경로 |
+| EG5c · `_asof/` | `_asof/<view>/<build>/`, 표본 5×20, 4단계부터 | `_asof/<view>/<snapshot_id>/part0.parquet` + `_meta.json`(builds·표본·content_hash·written_at), keep=3(`catalog --keep`). 직전 스냅샷과 (as_of, ticker, date) 키 위 행 해시로 `only_current`·`only_previous`·`changed` 를 센다. 첫 실행 `skip(no_previous_snapshot)`(§0-2 어휘 추가) · 차이 > 0 이면 **FAIL 이고 카탈로그를 교체하지 않는다**(`_failed/catalog_<snapshot_id>.json`) · 사람 승인은 `catalog --rebase-asof`(pass, 이번 표본이 새 기준). "새 rcept_dt > asof 로 설명되는 차이" 예외는 가격 뷰(랙 0)에 해당 없음 — 재무 뷰(S12)가 붙일 것 | §8-2 채택안 구체화 |
+| 매크로 인자 이름 | `asof` | **`as_of`** — `asof` 는 duckdb 1.5 예약어(ASOF JOIN). §1 EG5c·EG8·§6 EG11/EG19 의 `v_*(asof)` 표기는 `as_of` 로 읽는다 | duckdb 파서 오류 실측 |
+| FX-2-004 키 | 감자 1 | (`101970`, 2018-10-12) 결정공시 10주→1주 무상병합: `price_factor` 10.000000659 · `share_factor` 0.0999999934(단수주 절사라 정확히 10 이 아니다) | `fixtures/adj_factor.json` |
+| FX-2-007 | `207940` 인적분할 `factor_ok=false` | MVP 에 spinoff 가 없다 → **대체**: (`101970`, capred 2018-02-23) 자본변동 단독 행 `ratio_null` → `factor_ok=false`·계수 1(S05 2차 범위 규칙 뒤 절단본의 유일한 자본변동 단독 사건 — 000030·0001A0 사건은 상장 전·비상장 종류라 모집단 밖). 207940 은 S05 가 spinoff 를 내는 슬라이스에서 복원 | 절단본 |
+| FX-2-009 | KRX 관측만 계수 → `available = 효력일 + 1거래일` | KRX 파생행은 announce_date = 관측일 = 효력일이라 `min(announce, 다음 거래일)` = **효력일 당일**(005930 2018-05-04). '+1거래일' 은 회고 기재 원천(공시가 늦은 자본변동)에서만 실현된다(101970 2018-02-23(금) → 2018-02-26) | `fixtures/adj_factor.json` FX-2-009 |
+| FX-2-010 키 | (`005930`, 2018-05-03, as_of 2018-06-01) 원 거래량 × 50 | **2018-04-27**(606,216 → 30,310,800). 05-03 은 분할 정지일이라 거래량 0 — 0 × 50 = 0 / 50 이라 방향을 못 가른다. 뷰 픽스처는 파일이 아니라 `test_equity_s06_views.py` 가 든다 | 절단본 실측 |
+| FX-N-006 | `v_adj_volume` 나눗셈 → EG8-P03 fail ∧ FX-2-010 fail | 구현: `views.TEMPLATES['v_adj_volume']` 을 나눗셈으로 바꿔 `adj_factor` 재빌드 → **EG8 만 FAIL**(거래량 점프 > 1,000, 수익률 축 위반 0, 앞 게이트 pass) ∧ 04-27 조정 거래량 12,124 | `test_FX_N_006_…` |
+| §2 매트릭스 11행 EG7 | `●(P02)` | 격리 사유 없음 — 비율 0 으로 통과. `adj_factor` 는 EG7 격리형 술어를 갖지 않는다(ok=false 는 격리가 아니다) | DESIGN §4-2 |
+| `_catalog_meta.json` | snapshot_id·builds·macros | + `gates`(EG11·EG5c·EG3_firm_mktcap)·`asof`(뷰별 경로·행수·해시)·`macros_skipped`(입력 테이블 미커밋으로 못 만든 매크로와 이유) | `catalog.publish` |

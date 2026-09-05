@@ -94,13 +94,24 @@ def make_consts(con: duckdb.DuckDBPyConnection, rule: EquityTable, baseline: Bas
 
     `.sql` 본문은 상수를 `CROSS JOIN _const` 로만 본다 — 숫자 리터럴 하드코딩 금지
     (EQUITY_WORKFLOW §1)를 기계적으로 검사할 수 있게 하는 유일한 통로다.
+
+    키는 자기 테이블의 metric 이름이거나 `<table>.<metric>`(다른 테이블에 등재된 상수를 복제 없이
+    읽는다 — S06 `adj_factor` 가 `corp_event.near_dup_window_days` 를 읽는 식). 컬럼명은
+    metric 부분.
     """
-    missing = [k for k in rule.consts if baseline.get(rule.name, k) is None]
+    keyed = [(k, *_split_const_key(rule.name, k)) for k in rule.consts]
+    missing = [k for k, t, m in keyed if baseline.get(t, m) is None]
     if missing:
         raise KeyError(f"baseline constant not found — table={rule.name} keys={missing} "
                        f"path={baseline.path} (등재는 사람 승인: GATES §7-3)")
-    sel = ", ".join(f"{_lit(baseline.get(rule.name, k))} AS {_q(k)}" for k in rule.consts)
+    sel = ", ".join(f"{_lit(baseline.get(t, m))} AS {_q(m)}" for _, t, m in keyed)
     con.execute(f"CREATE OR REPLACE TEMP TABLE _const AS SELECT {sel or 'NULL AS _none'}")
+
+
+def _split_const_key(table: str, key: str) -> tuple[str, str]:
+    """`metric` → (자기 테이블, metric) · `other.metric` → (other, metric)."""
+    owner, _, metric = key.rpartition(".")
+    return (owner or table, metric)
 
 
 def _previous_record(table_root: Path) -> manifest.BuildRecord | None:

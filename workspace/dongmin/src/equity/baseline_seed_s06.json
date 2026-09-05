@@ -1,0 +1,54 @@
+{
+ "_seed": "S06 adj_factor(+ 뷰 v_cum_adj·v_adj_price·v_adj_volume·v_firm_mktcap) 가 요구하는 baseline 상수. 오케스트레이터가 data/equity/baseline.json 에 병합한다. value 는 tests/fixtures/stage_slice 절단본 실측에 근거한 초기값이고, 서버 current_build 위 재측정이 필요한 항목은 _measured[].note 가 ★ 로 지목한다. adj_factor.factor_product_tol 은 등재하지 않는다 — EG3-P04 허용오차는 baseline 상수가 아니라 산출 정밀도(rules_s06.FACTOR_PRODUCT_TOL, DOUBLE 역수 곱 반올림)다. _asof/ 표본·EG11·EG5c·EG3-P05 는 S02 의 trading_calendar.asof_sample_dates·asof_sample_tickers 를 그대로 쓴다(새 키 없음). 근접 중복 창은 corp_event.near_dup_window_days 를 _const 로 복제 없이 읽는다.",
+ "measured_at": "2026-09-05",
+ "adj_factor": {
+  "asof_for_jump_check": "2026-08-20",
+  "adj_return_jump_max": 0.3,
+  "adj_volume_jump_max": 10.0
+ },
+ "_measured": [
+  {
+   "table": "adj_factor",
+   "metric": "asof_for_jump_check",
+   "inputs": {
+    "stg_index_daily": "b_20260902T162449_297822Z"
+   },
+   "sql": "SELECT CAST(max(date) AS VARCHAR) FROM stg_index_daily  -- = trading_calendar.backfill_end",
+   "value": "2026-08-20",
+   "measured_at": "2026-09-05",
+   "growing": true,
+   "used_by": "EG8-P02·P03 (rules_s06.eg8_adj_jump) — v_adj_price/v_adj_volume 를 부르는 고정 as_of",
+   "note": "backfill_end 와 같은 값. 전 이벤트의 effective_date·available_date 가 이 날 이하라 모든 ok 계수가 반영된 조정가로 점프를 잰다. 백필이 재개되면 backfill_end 와 함께 갱신(growing=true). 미등재면 게이트는 price_daily max(date) 로 대신 재고 skip(no_baseline) 에 측정치를 남긴다."
+  },
+  {
+   "table": "adj_factor",
+   "metric": "adj_return_jump_max",
+   "inputs": {
+    "stg_price_daily": "b_20260902T162433_936519Z",
+    "stg_listing_daily": "b_20260902T162451_832365Z",
+    "stg_event_pifric": "b_20260902T164512_875330Z"
+   },
+   "sql": "SELECT max(abs(adj_return)) FROM _eg8 WHERE factor_ok  -- rules_s06._jump_table: adj_close(effective_td) / adj_close(prev_td) - 1, as_of = asof_for_jump_check",
+   "value": 0.3,
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "used_by": "EG8-P02 (rules_s06.eg8_adj_jump.n_return_jump_over)",
+   "note": "★ 서버 재측정 필요(ok 이벤트 전건 p100 확인). 절단본 실측 max 0.0929 = 247540 무상증자 권리락일 2022-06-27(조정 전일 497,400×0.25 = 124,350 → 135,900) · 005930 −0.0208 · 005935 −0.0341. 값 0.30 의 근거: KRX 가격제한폭 ±30%(2015-06-15 이후; 이전 ±15%) 가 조정 기준가 대비 한도이므로 계수가 맞으면 이벤트일 |수정수익률| 은 물리적으로 0.30 을 넘을 수 없다. 계수 누락은 1/ratio 규모(50:1 −98% · 4:1 −75% · 1.2:1 −17%)라 ratio ≥ 1.43 부터 잡히고, 방향 역전은 ratio² 규모다. 1.2:1 미만 무상증자 누락은 이 축으로 못 잡는다(한계 — 거래량 축 P03 도 1.44 라 못 잡는다, DESIGN §4-2 기록)."
+  },
+  {
+   "table": "adj_factor",
+   "metric": "adj_volume_jump_max",
+   "inputs": {
+    "stg_price_daily": "b_20260902T162433_936519Z",
+    "stg_listing_daily": "b_20260902T162451_832365Z",
+    "stg_event_pifric": "b_20260902T164512_875330Z"
+   },
+   "sql": "SELECT max(volume_jump) FROM _eg8 WHERE factor_ok  -- adj_volume(effective_td) / median(adj_volume over 직전 20 거래일)",
+   "value": 10.0,
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "used_by": "EG8-P03 (rules_s06.eg8_adj_jump.n_volume_jump_over) · 부정 픽스처 FX-N-006",
+   "note": "★ 서버 재측정 필요(ok 이벤트 전건 p100 — 이벤트일 거래 폭주가 10 배를 넘는 사례가 있으면 그 값으로). 절단본 실측 max 3.43 = 247540 06-27(조정 거래량 3,082,174 / 중앙값) · 005930 3.38 · 005935 2.26. 10 = 절단본 최대의 ~3배 여유. 계수 방향이 뒤집히면(v_adj_volume 나눗셈, FX-N-006) 분할 전 거래량이 1/2500 이 되어 이 비율이 수천 배로 튄다 — 그것을 잡는 축이다. 중앙값 창 20 거래일은 baseline 이 아니라 측정 방법(rules_s06.VOLUME_MEDIAN_WINDOW, GATES EG8 M03)."
+  }
+ ]
+}

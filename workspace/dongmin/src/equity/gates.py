@@ -30,11 +30,12 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     "EG7": 0.001,     # 격리 비율 상한 — stage DEFAULT_THRESHOLDS["G7"] 초기값 계승 (GATES §1 EG7)
 }
 
-# GATES §0-2 의 폐쇄 어휘 + 프레임이 쓰는 2개(upstream_failed·no_previous_build·inputs_changed).
+# GATES §0-2 의 폐쇄 어휘 + 프레임이 쓰는 것(upstream_failed·no_previous_build·inputs_changed)
+# + 카탈로그 단계 EG5c 의 no_previous_snapshot(직전 `_asof/` 표본 없음, S06).
 SKIP_REASONS: tuple[str, ...] = (
     "no_baseline", "no_fixtures", "no_cross_source", "no_multi_version", "declaration_table",
     "not_grid", "no_coverage", "not_built", "dimension_table", "upstream_failed",
-    "no_previous_build", "inputs_changed",
+    "no_previous_build", "inputs_changed", "no_previous_snapshot",
 )
 
 

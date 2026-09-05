@@ -3,7 +3,9 @@
   pin     <stg_table>   stage current_build 를 `_pinned/` 에 하드링크로 고정
   build   <table>       빌드 → 게이트 → 통과 시 MANIFEST 교체
   gate    <table>       커밋된 current_build 를 재판정만 한다 (폐기 없음)
-  catalog               equity.duckdb 재생성 (빌드·GC 뒤에는 반드시)
+  catalog               equity.duckdb 재생성 (빌드·GC 뒤에는 반드시) + 뷰 게이트 EG11·EG5c·EG3-P05
+                        + `_asof/<view>/<snapshot_id>/` 표본. 게이트 실패면 카탈로그를 교체하지
+                        않는다
 
 루트는 `--root`(기본 `$QL_HOME/data/equity`), stage 는 `--stage-root`.
 """
@@ -29,6 +31,7 @@ from . import (
     rules_s03,  # noqa: F401  # reason: 등록 부작용 — S03 유니버스 존재·상태·정책
     rules_s04,  # noqa: F401  # reason: 등록 부작용 — S04 가격 정본
     rules_s05,  # noqa: F401  # reason: 등록 부작용 — S05 기업행위 corp_event
+    rules_s06,  # noqa: F401  # reason: 등록 부작용 — S06 조정계수 adj_factor
     rules_sample,  # noqa: F401  # reason: T0 샘플 테이블
 )
 from .model import RULES
@@ -106,11 +109,16 @@ def _cmd_gate(a: argparse.Namespace) -> int:
 
 
 def _cmd_catalog(a: argparse.Namespace) -> int:
-    path = catalog.write_catalog(a.root, catalog.MACROS)
-    builds = catalog.table_builds(a.root)
-    print(f"ok catalog={path} macros={len(catalog.MACROS)} tables={len(builds)} "
-          f"snapshot_id={catalog.snapshot_id(builds)}")
-    return 0
+    bl = baseline_mod.load(a.baseline or baseline_mod.path_for(a.root))
+    r = catalog.publish(a.root, bl, keep=a.keep, rebase_asof=a.rebase_asof)
+    print(f"{'ok' if r.ok else 'gate_failed'} catalog={r.path} macros={len(r.macros)} "
+          f"skipped={sorted(r.skipped)} tables={len(r.builds)} snapshot_id={r.snapshot_id}")
+    _print_gates(r.gates)
+    for view, info in sorted(r.asof.items()):
+        print(f"  _asof/{view}: rows={info['n_rows']} path={info['path']}")
+    if r.failed_report:
+        print(f"  failed report: {r.failed_report}")
+    return 0 if r.ok else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -138,7 +146,12 @@ def main(argv: list[str] | None = None) -> int:
     p_gate.add_argument("--build")
     p_gate.set_defaults(fn=_cmd_gate)
 
-    p_cat = sub.add_parser("catalog", help="equity.duckdb 재생성")
+    p_cat = sub.add_parser("catalog", help="equity.duckdb 재생성 + 뷰 게이트(EG11·EG5c·EG3-P05) "
+                                           "+ _asof/ 표본")
+    p_cat.add_argument("--keep", type=int, default=catalog.ASOF_KEEP,
+                       help="_asof/<view>/ 에 남길 스냅샷 수")
+    p_cat.add_argument("--rebase-asof", action="store_true",
+                       help="EG5c 차이를 승인하고 _asof/ 표본을 새 기준으로 삼는다(사람 승인)")
     p_cat.set_defaults(fn=_cmd_catalog)
 
     a = ap.parse_args(argv)

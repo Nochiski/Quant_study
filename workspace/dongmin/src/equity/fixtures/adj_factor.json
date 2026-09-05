@@ -1,0 +1,120 @@
+[
+ {"case": "FX-2-001-price-factor",
+  "key": {"event_id": "005930:split:2018-05-04"}, "column": "price_factor", "expect": "0.02",
+  "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — 50:1 액면분할, price_factor = 1/ratio = 1/50. 분할 전 종가 2,650,000 × 0.02 = 53,000 (분할일 51,900 과 연속)",
+  "note": "GATES §4 FX-2-001. 나눗셈 방향이면 50.0 이 나와 여기서 잡힌다"},
+
+ {"case": "FX-2-001-share-factor",
+  "key": {"event_id": "005930:split:2018-05-04"}, "column": "share_factor", "expect": "50.0",
+  "expect_source": "stage:stg_listing_daily.list_shrs", "fixture_class": "positive",
+  "source": "hand — KRX list_shrs 128,386,494(05-03) → 6,419,324,700(05-04) = ×50 = corp_event.ratio",
+  "note": "FX-2-001 · price_factor × share_factor = 1 (EG3-P04)"},
+
+ {"case": "FX-2-001-ok",
+  "key": {"event_id": "005930:split:2018-05-04"}, "column": "factor_ok", "expect": "true",
+  "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — ratio 있는 시총 불변 이벤트", "note": ""},
+
+ {"case": "FX-2-001-source",
+  "key": {"event_id": "005930:split:2018-05-04"}, "column": "factor_source",
+  "expect": "mktcap_neutral", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — factor_ok=true 인 유일한 사유 어휘", "note": ""},
+
+ {"case": "FX-2-009-krx-only-available",
+  "key": {"event_id": "005930:split:2018-05-04"}, "column": "available_date",
+  "expect": "2018-05-04", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — KRX 관측만으로 만든 계수: announce_date = 관측일 = 효력일 05-04, 다음 거래일 05-08 → min = 05-04",
+  "note": "GATES §4 FX-2-009 는 '효력일 + 1거래일' 이라 적었으나 KRX 파생행은 announce 가 관측일이라 min 이 그날이다(§9 정정)"},
+
+ {"case": "FX-2-009-basis",
+  "key": {"event_id": "005930:split:2018-05-04"}, "column": "available_basis",
+  "expect": "derived", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — min(공시, 효력일 다음 거래일) 파생", "note": ""},
+
+ {"case": "FX-2-001-preferred-share-factor",
+  "key": {"event_id": "005935:split:2018-05-04"}, "column": "share_factor", "expect": "50.0",
+  "expect_source": "stage:stg_listing_daily.list_shrs", "fixture_class": "positive",
+  "source": "hand — 우선주 18,072,580 → 903,629,000 = ×50", "note": "종류주도 같은 계수"},
+
+ {"case": "FX-2-004-capred-price-factor",
+  "key": {"event_id": "101970:capred:2018-10-12"}, "column": "price_factor",
+  "expect": "10.000000659041508", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — 1 / (13,656,196 / 136,561,969). 10주 → 1주 무상병합(단수주 절사) 이라 정확히 10 이 아니다. DOUBLE 최단 왕복 표기",
+  "note": "GATES §4 FX-2-004 감자: 두 축 상이(price 10 · share 0.1)"},
+
+ {"case": "FX-2-004-capred-share-factor",
+  "key": {"event_id": "101970:capred:2018-10-12"}, "column": "share_factor",
+  "expect": "0.09999999340958536", "expect_source": "stage:stg_event_cr.atcr_tisstk_ostk",
+  "fixture_class": "positive",
+  "source": "hand — 13,656,196 / 136,561,969 = corp_event.ratio 그대로", "note": ""},
+
+ {"case": "FX-2-004-capred-ok",
+  "key": {"event_id": "101970:capred:2018-10-12"}, "column": "factor_source",
+  "expect": "mktcap_neutral", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — cr_mth '보통주 10주를 동일한 액면주식 1주로 무상병합' 에 '유상' 없음 → 시총 불변",
+  "note": ""},
+
+ {"case": "capred-2015-11-28-share-factor",
+  "key": {"event_id": "101970:capred:2015-11-28"}, "column": "share_factor",
+  "expect": "0.09999771569112545", "expect_source": "stage:stg_event_cr.atcr_tisstk_ostk",
+  "fixture_class": "positive",
+  "source": "hand — 20,885,490 / 208,859,671 (결정공시 20160608000221 주식병합). 같은 원천의 이틀 전 감자(11-26, 20160608000216)와는 다른 사건이라 근접 중복으로 누르지 않는다",
+  "note": "회생 감자 2건: 자기주식 소각+병합(11-26) → 출자전환 → 10:1 병합(11-28)"},
+
+ {"case": "capred-2015-11-26-price-factor",
+  "key": {"event_id": "101970:capred:2015-11-26"}, "column": "price_factor",
+  "expect": "2.3361013018377976", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — 1 / (11,016,503 / 25,735,667)", "note": ""},
+
+ {"case": "near-dup-loser",
+  "key": {"event_id": "101970:capred:2018-10-13"}, "column": "factor_source",
+  "expect": "near_dup_suppressed", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — 결정공시 cr_std 2018-10-12(event_cr, ratio 있음) 와 자본변동 isu_dcrs_de 2018-10-13(capital, ratio NULL) 은 같은 감자. 우선순위 낮은 자본변동 행을 누른다",
+  "note": "둘 다 곱하면 감자를 두 번 곱는다. 사유 우선순위 near_dup_suppressed > ratio_null"},
+
+ {"case": "near-dup-loser-factor-one",
+  "key": {"event_id": "101970:capred:2018-10-13"}, "column": "share_factor", "expect": "1.0",
+  "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — factor_ok=false 행의 계수는 1", "note": ""},
+
+ {"case": "FX-2-007-substitute-ratio-null-ok",
+  "key": {"event_id": "101970:capred:2018-02-23"}, "column": "factor_ok", "expect": "false",
+  "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — 우양에이치씨 2018-02-23 무상감자는 자본변동(2018·2019·2020 사업보고서)에만 있어 전 주식수가 없다 → ratio NULL → 계수를 못 낸다(격리 아님)",
+  "note": "GATES §4 FX-2-007(207940 인적분할 factor_ok=false)의 대체 — MVP 에 spinoff 가 없다(§9 정정). S05 2차 범위 규칙 뒤 절단본의 자본변동 단독 행은 이것 하나다(000030·0001A0 사건은 상장 전·비상장 종류로 범위 밖)"},
+
+ {"case": "FX-2-007-substitute-ratio-null-source",
+  "key": {"event_id": "101970:capred:2018-02-23"}, "column": "factor_source",
+  "expect": "ratio_null", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — 사유 우선순위 near_dup > ratio_null > capred_paid 에서 근접 중복 상대가 없으니 ratio_null",
+  "note": ""},
+
+ {"case": "FX-2-007-substitute-ratio-null-price-factor",
+  "key": {"event_id": "101970:capred:2018-02-23"}, "column": "price_factor", "expect": "1.0",
+  "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — 계수 1 (곱해도 변하지 않는다)", "note": ""},
+
+ {"case": "retro-available-next-td-wins",
+  "key": {"event_id": "101970:capred:2018-02-23"}, "column": "available_date",
+  "expect": "2018-02-26", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — announce 2019-03-13(가장 이른 사업보고서 rcept_dt) vs 효력일 2018-02-23(금) 다음 거래일 02-26(월) → min = 02-26",
+  "note": "회고 기재 원천은 available < announce 가 정상 — EG2-P02 announce 축을 못 쓰는 이유"},
+
+ {"case": "bonus-247540-price-factor",
+  "key": {"event_id": "247540:bonus:2022-06-27"}, "column": "price_factor", "expect": "0.25",
+  "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — 1주당 3주 배정 → ratio 4 → 1/4. 권리락 전일 497,400 × 0.25 = 124,350 (권리락일 135,900)",
+  "note": ""},
+
+ {"case": "bonus-247540-share-factor",
+  "key": {"event_id": "247540:bonus:2022-06-27"}, "column": "share_factor", "expect": "4.0",
+  "expect_source": "stage:stg_event_pifric.fric_nstk_ascnt_ps_ostk_ratio", "fixture_class": "positive",
+  "source": "hand — 1 + 3.0", "note": ""},
+
+ {"case": "bonus-247540-available",
+  "key": {"event_id": "247540:bonus:2022-06-27"}, "column": "available_date",
+  "expect": "2022-06-14", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — announce(rcept_dt) 06-14 < 효력일 06-27 다음 거래일 06-28 → 공시일",
+  "note": "결정공시가 있으면 공시일에 이미 알 수 있었다"}
+]

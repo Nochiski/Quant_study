@@ -4,6 +4,7 @@ import sqlite3
 from pathlib import Path
 
 import duckdb
+
 from stage import (
     build,
     gates,
@@ -11,6 +12,7 @@ from stage import (
     rules,
     rules_dart,
     rules_dart_events,
+    rules_doc,
     rules_kis,
     rules_kiwoom,
     rules_krx,
@@ -58,7 +60,7 @@ AMT_FIXTURE = [{"key": {"k": "a"}, "column": "amt_krw", "expect": "12000000",
 
 
 def _built(tmp_path: Path, fixtures: list[dict[str, object]] | None = AMT_FIXTURE,
-           **kw: object) -> build.BuildResult:
+           gate_thresholds: dict[str, float] | None = None) -> build.BuildResult:
     d = tmp_path / "raw"
     d.mkdir()
     _write(d / "x.db")
@@ -67,7 +69,8 @@ def _built(tmp_path: Path, fixtures: list[dict[str, object]] | None = AMT_FIXTUR
     if fixtures is not None:
         fp = tmp_path / "fx.json"
         fp.write_text(json.dumps(fixtures), encoding="utf-8")
-    return build.build_table(RULE, s, tmp_path / "stage", fixtures_path=fp, **kw)
+    return build.build_table(RULE, s, tmp_path / "stage", fixtures_path=fp,
+                             gate_thresholds=gate_thresholds)
 
 
 def _read(tmp_path: Path, r: build.BuildResult) -> duckdb.DuckDBPyConnection:
@@ -88,13 +91,15 @@ def test_unit_scale_multiplies_before_the_decimal_cast(tmp_path: Path) -> None:
 def test_korean_date_kind_parses_yyyy_mm_dd_labels(tmp_path: Path) -> None:
     r = _built(tmp_path, gate_thresholds={"G7": 2.0})
     con = _read(tmp_path, r)
-    assert str(con.execute("SELECT kd FROM t WHERE k='a'").fetchone()[0]) == "2016-01-08"
+    row = con.execute("SELECT kd FROM t WHERE k='a'").fetchone()
+    assert row is not None and str(row[0]) == "2016-01-08"
 
 
 def test_dot_date_kind_parses_yyyy_dot_mm_dot_dd(tmp_path: Path) -> None:
     r = _built(tmp_path, gate_thresholds={"G7": 2.0})
     con = _read(tmp_path, r)
-    assert str(con.execute("SELECT dd FROM t WHERE k='a'").fetchone()[0]) == "2016-01-08"
+    row = con.execute("SELECT dd FROM t WHERE k='a'").fetchone()
+    assert row is not None and str(row[0]) == "2016-01-08"
 
 
 def test_non_key_date_out_of_range_is_isolated_not_rejected(tmp_path: Path) -> None:
@@ -151,7 +156,8 @@ def test_g7_default_threshold_fails_on_isolated_cells(tmp_path: Path) -> None:
 
 
 def test_registry_assembles_per_source_modules() -> None:
-    mods = (rules_krx, rules_kiwoom, rules_kis, rules_dart, rules_dart_events, rules_wise)
+    mods = (rules_krx, rules_kiwoom, rules_kis, rules_dart, rules_dart_events, rules_wise,
+            rules_doc)
     names = {t.name for mod in mods for t in mod.TABLES}
     assert set(rules.RULES) == names
     assert rules_krx.TABLES[0].name == "stg_price_daily"

@@ -1,0 +1,2576 @@
+[
+ {
+  "key": {
+   "rcept_no": "20100326000630",
+   "member_name": "20100326000630.xml"
+  },
+  "column": "gen",
+  "expect": "dart3_hdr",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100326000630",
+   "member_name": "20100326000630.xml"
+  },
+  "column": "byte_enc",
+  "expect": "cp949",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100326000630",
+   "member_name": "20100326000630.xml"
+  },
+  "column": "doc_acode",
+  "expect": "11011",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100326000630",
+   "member_name": "20100326000630.xml"
+  },
+  "column": "formula_version",
+  "expect": "1.1",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100326000630",
+   "member_name": "20100326000630.xml"
+  },
+  "column": "toc_n",
+  "expect": "29",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100326000630",
+   "member_name": "20100326000630.xml"
+  },
+  "column": "n_xbrl_groups",
+  "expect": "5",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100326000630",
+   "member_name": "20100326000630.xml"
+  },
+  "column": "has_correction_page",
+  "expect": "false",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100326000630",
+   "member_name": "20100326000630.xml"
+  },
+  "column": "period_from",
+  "expect": "2009-01-01",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100326000630",
+   "member_name": "20100326000630.xml"
+  },
+  "column": "period_to",
+  "expect": "2009-12-31",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100331002629",
+   "member_name": "20100331002629.xml"
+  },
+  "column": "gen",
+  "expect": "dart3_hdr",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100331002629",
+   "member_name": "20100331002629.xml"
+  },
+  "column": "byte_enc",
+  "expect": "cp949",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100331002629",
+   "member_name": "20100331002629.xml"
+  },
+  "column": "doc_acode",
+  "expect": "11011",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100331002629",
+   "member_name": "20100331002629.xml"
+  },
+  "column": "formula_version",
+  "expect": "1.1",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100331002629",
+   "member_name": "20100331002629.xml"
+  },
+  "column": "toc_n",
+  "expect": "31",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100331002629",
+   "member_name": "20100331002629.xml"
+  },
+  "column": "n_xbrl_groups",
+  "expect": "0",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100331002629",
+   "member_name": "20100331002629.xml"
+  },
+  "column": "has_correction_page",
+  "expect": "true",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100331002629",
+   "member_name": "20100331002629.xml"
+  },
+  "column": "period_from",
+  "expect": "2009-01-01",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100331002629",
+   "member_name": "20100331002629.xml"
+  },
+  "column": "period_to",
+  "expect": "2009-12-31",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100414000675",
+   "member_name": "20100414000675.xml"
+  },
+  "column": "gen",
+  "expect": "dart3_hdr",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100414000675",
+   "member_name": "20100414000675.xml"
+  },
+  "column": "byte_enc",
+  "expect": "cp949",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100414000675",
+   "member_name": "20100414000675.xml"
+  },
+  "column": "doc_acode",
+  "expect": "11013",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100414000675",
+   "member_name": "20100414000675.xml"
+  },
+  "column": "formula_version",
+  "expect": "1.1",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100414000675",
+   "member_name": "20100414000675.xml"
+  },
+  "column": "toc_n",
+  "expect": "29",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100414000675",
+   "member_name": "20100414000675.xml"
+  },
+  "column": "n_xbrl_groups",
+  "expect": "5",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100414000675",
+   "member_name": "20100414000675.xml"
+  },
+  "column": "has_correction_page",
+  "expect": "false",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100414000675",
+   "member_name": "20100414000675.xml"
+  },
+  "column": "period_from",
+  "expect": "2009-06-01",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100414000675",
+   "member_name": "20100414000675.xml"
+  },
+  "column": "period_to",
+  "expect": "2010-02-28",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100629000280",
+   "member_name": "20100629000280.xml"
+  },
+  "column": "gen",
+  "expect": "dart3_hdr",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100629000280",
+   "member_name": "20100629000280.xml"
+  },
+  "column": "byte_enc",
+  "expect": "cp949",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100629000280",
+   "member_name": "20100629000280.xml"
+  },
+  "column": "doc_acode",
+  "expect": "11011",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100629000280",
+   "member_name": "20100629000280.xml"
+  },
+  "column": "formula_version",
+  "expect": "1.1",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100629000280",
+   "member_name": "20100629000280.xml"
+  },
+  "column": "toc_n",
+  "expect": "29",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100629000280",
+   "member_name": "20100629000280.xml"
+  },
+  "column": "n_xbrl_groups",
+  "expect": "5",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100629000280",
+   "member_name": "20100629000280.xml"
+  },
+  "column": "has_correction_page",
+  "expect": "false",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100629000280",
+   "member_name": "20100629000280.xml"
+  },
+  "column": "period_from",
+  "expect": "2009-04-01",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100629000280",
+   "member_name": "20100629000280.xml"
+  },
+  "column": "period_to",
+  "expect": "2010-03-31",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100811000066",
+   "member_name": "20100811000066.xml"
+  },
+  "column": "gen",
+  "expect": "dart3_hdr",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100811000066",
+   "member_name": "20100811000066.xml"
+  },
+  "column": "byte_enc",
+  "expect": "cp949",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100811000066",
+   "member_name": "20100811000066.xml"
+  },
+  "column": "doc_acode",
+  "expect": "11012",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100811000066",
+   "member_name": "20100811000066.xml"
+  },
+  "column": "formula_version",
+  "expect": "1.1",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100811000066",
+   "member_name": "20100811000066.xml"
+  },
+  "column": "toc_n",
+  "expect": "29",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100811000066",
+   "member_name": "20100811000066.xml"
+  },
+  "column": "n_xbrl_groups",
+  "expect": "5",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100811000066",
+   "member_name": "20100811000066.xml"
+  },
+  "column": "has_correction_page",
+  "expect": "false",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100811000066",
+   "member_name": "20100811000066.xml"
+  },
+  "column": "period_from",
+  "expect": "2010-01-01",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20100811000066",
+   "member_name": "20100811000066.xml"
+  },
+  "column": "period_to",
+  "expect": "2010-06-30",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130329000019",
+   "member_name": "20130329000019.xml"
+  },
+  "column": "gen",
+  "expect": "dart3_hdr",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130329000019",
+   "member_name": "20130329000019.xml"
+  },
+  "column": "byte_enc",
+  "expect": "cp949",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130329000019",
+   "member_name": "20130329000019.xml"
+  },
+  "column": "doc_acode",
+  "expect": "11011",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130329000019",
+   "member_name": "20130329000019.xml"
+  },
+  "column": "formula_version",
+  "expect": "2.0",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130329000019",
+   "member_name": "20130329000019.xml"
+  },
+  "column": "toc_n",
+  "expect": "29",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130329000019",
+   "member_name": "20130329000019.xml"
+  },
+  "column": "n_xbrl_groups",
+  "expect": "0",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130329000019",
+   "member_name": "20130329000019.xml"
+  },
+  "column": "has_correction_page",
+  "expect": "false",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130329000019",
+   "member_name": "20130329000019.xml"
+  },
+  "column": "period_from",
+  "expect": "2012-01-01",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130329000019",
+   "member_name": "20130329000019.xml"
+  },
+  "column": "period_to",
+  "expect": "2012-12-31",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130401003224",
+   "member_name": "20130401003224.xml"
+  },
+  "column": "gen",
+  "expect": "dart3_hdr",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130401003224",
+   "member_name": "20130401003224.xml"
+  },
+  "column": "byte_enc",
+  "expect": "cp949",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130401003224",
+   "member_name": "20130401003224.xml"
+  },
+  "column": "doc_acode",
+  "expect": "11011",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130401003224",
+   "member_name": "20130401003224.xml"
+  },
+  "column": "formula_version",
+  "expect": "2.0",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130401003224",
+   "member_name": "20130401003224.xml"
+  },
+  "column": "toc_n",
+  "expect": "31",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130401003224",
+   "member_name": "20130401003224.xml"
+  },
+  "column": "n_xbrl_groups",
+  "expect": "4",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130401003224",
+   "member_name": "20130401003224.xml"
+  },
+  "column": "has_correction_page",
+  "expect": "true",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130401003224",
+   "member_name": "20130401003224.xml"
+  },
+  "column": "period_from",
+  "expect": "2012-01-01",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130401003224",
+   "member_name": "20130401003224.xml"
+  },
+  "column": "period_to",
+  "expect": "2012-12-31",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130507000729",
+   "member_name": "20130507000729.xml"
+  },
+  "column": "gen",
+  "expect": "dart3_hdr",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130507000729",
+   "member_name": "20130507000729.xml"
+  },
+  "column": "byte_enc",
+  "expect": "cp949",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130507000729",
+   "member_name": "20130507000729.xml"
+  },
+  "column": "doc_acode",
+  "expect": "11013",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130507000729",
+   "member_name": "20130507000729.xml"
+  },
+  "column": "formula_version",
+  "expect": "2.0",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130507000729",
+   "member_name": "20130507000729.xml"
+  },
+  "column": "toc_n",
+  "expect": "29",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130507000729",
+   "member_name": "20130507000729.xml"
+  },
+  "column": "n_xbrl_groups",
+  "expect": "8",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130507000729",
+   "member_name": "20130507000729.xml"
+  },
+  "column": "has_correction_page",
+  "expect": "false",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130507000729",
+   "member_name": "20130507000729.xml"
+  },
+  "column": "period_from",
+  "expect": "2013-01-01",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130507000729",
+   "member_name": "20130507000729.xml"
+  },
+  "column": "period_to",
+  "expect": "2013-03-31",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130813000100",
+   "member_name": "20130813000100.xml"
+  },
+  "column": "gen",
+  "expect": "dart3_hdr",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130813000100",
+   "member_name": "20130813000100.xml"
+  },
+  "column": "byte_enc",
+  "expect": "cp949",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130813000100",
+   "member_name": "20130813000100.xml"
+  },
+  "column": "doc_acode",
+  "expect": "11012",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130813000100",
+   "member_name": "20130813000100.xml"
+  },
+  "column": "formula_version",
+  "expect": "2.0",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130813000100",
+   "member_name": "20130813000100.xml"
+  },
+  "column": "toc_n",
+  "expect": "29",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130813000100",
+   "member_name": "20130813000100.xml"
+  },
+  "column": "n_xbrl_groups",
+  "expect": "4",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130813000100",
+   "member_name": "20130813000100.xml"
+  },
+  "column": "has_correction_page",
+  "expect": "false",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130813000100",
+   "member_name": "20130813000100.xml"
+  },
+  "column": "period_from",
+  "expect": "2013-01-01",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130813000100",
+   "member_name": "20130813000100.xml"
+  },
+  "column": "period_to",
+  "expect": "2013-06-30",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130814001633",
+   "member_name": "20130814001633.xml"
+  },
+  "column": "gen",
+  "expect": "dart3_hdr",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130814001633",
+   "member_name": "20130814001633.xml"
+  },
+  "column": "byte_enc",
+  "expect": "cp949",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130814001633",
+   "member_name": "20130814001633.xml"
+  },
+  "column": "doc_acode",
+  "expect": "11012",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130814001633",
+   "member_name": "20130814001633.xml"
+  },
+  "column": "formula_version",
+  "expect": "2.0",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130814001633",
+   "member_name": "20130814001633.xml"
+  },
+  "column": "toc_n",
+  "expect": "31",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130814001633",
+   "member_name": "20130814001633.xml"
+  },
+  "column": "n_xbrl_groups",
+  "expect": "0",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130814001633",
+   "member_name": "20130814001633.xml"
+  },
+  "column": "has_correction_page",
+  "expect": "true",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130814001633",
+   "member_name": "20130814001633.xml"
+  },
+  "column": "period_from",
+  "expect": "2013-01-01",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20130814001633",
+   "member_name": "20130814001633.xml"
+  },
+  "column": "period_to",
+  "expect": "2013-06-30",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160223800353",
+   "member_name": "/20160223800353.xml"
+  },
+  "column": "gen",
+  "expect": "html",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 html main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160223800353",
+   "member_name": "/20160223800353.xml"
+  },
+  "column": "byte_enc",
+  "expect": "cp949",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 html main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160223800353",
+   "member_name": "/20160223800353.xml"
+  },
+  "column": "doc_acode",
+  "expect": null,
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 html main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160223800353",
+   "member_name": "/20160223800353.xml"
+  },
+  "column": "formula_version",
+  "expect": null,
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 html main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160223800353",
+   "member_name": "/20160223800353.xml"
+  },
+  "column": "toc_n",
+  "expect": null,
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 html main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160223800353",
+   "member_name": "/20160223800353.xml"
+  },
+  "column": "n_xbrl_groups",
+  "expect": null,
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 html main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160223800353",
+   "member_name": "/20160223800353.xml"
+  },
+  "column": "has_correction_page",
+  "expect": null,
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 html main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160223800353",
+   "member_name": "/20160223800353.xml"
+  },
+  "column": "period_from",
+  "expect": null,
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 html main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160223800353",
+   "member_name": "/20160223800353.xml"
+  },
+  "column": "period_to",
+  "expect": null,
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 html main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160329000533",
+   "member_name": "/20160329000533.xml"
+  },
+  "column": "gen",
+  "expect": "dart3_hdr",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160329000533",
+   "member_name": "/20160329000533.xml"
+  },
+  "column": "byte_enc",
+  "expect": "cp949",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160329000533",
+   "member_name": "/20160329000533.xml"
+  },
+  "column": "doc_acode",
+  "expect": "11011",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160329000533",
+   "member_name": "/20160329000533.xml"
+  },
+  "column": "formula_version",
+  "expect": "2.8",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160329000533",
+   "member_name": "/20160329000533.xml"
+  },
+  "column": "toc_n",
+  "expect": "33",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160329000533",
+   "member_name": "/20160329000533.xml"
+  },
+  "column": "n_xbrl_groups",
+  "expect": "8",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160329000533",
+   "member_name": "/20160329000533.xml"
+  },
+  "column": "has_correction_page",
+  "expect": "false",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160329000533",
+   "member_name": "/20160329000533.xml"
+  },
+  "column": "period_from",
+  "expect": "2015-01-01",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160329000533",
+   "member_name": "/20160329000533.xml"
+  },
+  "column": "period_to",
+  "expect": "2015-12-31",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160330004609",
+   "member_name": "/20160330004609.xml"
+  },
+  "column": "gen",
+  "expect": "dart3_hdr",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160330004609",
+   "member_name": "/20160330004609.xml"
+  },
+  "column": "byte_enc",
+  "expect": "cp949",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160330004609",
+   "member_name": "/20160330004609.xml"
+  },
+  "column": "doc_acode",
+  "expect": "11011",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160330004609",
+   "member_name": "/20160330004609.xml"
+  },
+  "column": "formula_version",
+  "expect": "2.8",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160330004609",
+   "member_name": "/20160330004609.xml"
+  },
+  "column": "toc_n",
+  "expect": "35",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160330004609",
+   "member_name": "/20160330004609.xml"
+  },
+  "column": "n_xbrl_groups",
+  "expect": "8",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160330004609",
+   "member_name": "/20160330004609.xml"
+  },
+  "column": "has_correction_page",
+  "expect": "true",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160330004609",
+   "member_name": "/20160330004609.xml"
+  },
+  "column": "period_from",
+  "expect": "2015-01-01",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160330004609",
+   "member_name": "/20160330004609.xml"
+  },
+  "column": "period_to",
+  "expect": "2015-12-31",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160511001817",
+   "member_name": "/20160511001817.xml"
+  },
+  "column": "gen",
+  "expect": "dart3_hdr",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160511001817",
+   "member_name": "/20160511001817.xml"
+  },
+  "column": "byte_enc",
+  "expect": "cp949",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160511001817",
+   "member_name": "/20160511001817.xml"
+  },
+  "column": "doc_acode",
+  "expect": "11013",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160511001817",
+   "member_name": "/20160511001817.xml"
+  },
+  "column": "formula_version",
+  "expect": "2.9",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160511001817",
+   "member_name": "/20160511001817.xml"
+  },
+  "column": "toc_n",
+  "expect": "33",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160511001817",
+   "member_name": "/20160511001817.xml"
+  },
+  "column": "n_xbrl_groups",
+  "expect": "0",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160511001817",
+   "member_name": "/20160511001817.xml"
+  },
+  "column": "has_correction_page",
+  "expect": "false",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160511001817",
+   "member_name": "/20160511001817.xml"
+  },
+  "column": "period_from",
+  "expect": "2016-01-01",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160511001817",
+   "member_name": "/20160511001817.xml"
+  },
+  "column": "period_to",
+  "expect": "2016-03-31",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160811000095",
+   "member_name": "/20160811000095.xml"
+  },
+  "column": "gen",
+  "expect": "dart3_hdr",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160811000095",
+   "member_name": "/20160811000095.xml"
+  },
+  "column": "byte_enc",
+  "expect": "cp949",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160811000095",
+   "member_name": "/20160811000095.xml"
+  },
+  "column": "doc_acode",
+  "expect": "11012",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160811000095",
+   "member_name": "/20160811000095.xml"
+  },
+  "column": "formula_version",
+  "expect": "2.9",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160811000095",
+   "member_name": "/20160811000095.xml"
+  },
+  "column": "toc_n",
+  "expect": "33",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160811000095",
+   "member_name": "/20160811000095.xml"
+  },
+  "column": "n_xbrl_groups",
+  "expect": "8",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160811000095",
+   "member_name": "/20160811000095.xml"
+  },
+  "column": "has_correction_page",
+  "expect": "false",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160811000095",
+   "member_name": "/20160811000095.xml"
+  },
+  "column": "period_from",
+  "expect": "2016-01-01",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20160811000095",
+   "member_name": "/20160811000095.xml"
+  },
+  "column": "period_to",
+  "expect": "2016-06-30",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200327001141",
+   "member_name": "20200327001141.xml"
+  },
+  "column": "gen",
+  "expect": "dart3_hdr",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200327001141",
+   "member_name": "20200327001141.xml"
+  },
+  "column": "byte_enc",
+  "expect": "cp949",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200327001141",
+   "member_name": "20200327001141.xml"
+  },
+  "column": "doc_acode",
+  "expect": "11011",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200327001141",
+   "member_name": "20200327001141.xml"
+  },
+  "column": "formula_version",
+  "expect": "3.9",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200327001141",
+   "member_name": "20200327001141.xml"
+  },
+  "column": "toc_n",
+  "expect": "33",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200327001141",
+   "member_name": "20200327001141.xml"
+  },
+  "column": "n_xbrl_groups",
+  "expect": "8",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200327001141",
+   "member_name": "20200327001141.xml"
+  },
+  "column": "has_correction_page",
+  "expect": "false",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200327001141",
+   "member_name": "20200327001141.xml"
+  },
+  "column": "period_from",
+  "expect": "2019-01-01",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200327001141",
+   "member_name": "20200327001141.xml"
+  },
+  "column": "period_to",
+  "expect": "2019-12-31",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200330000895",
+   "member_name": "20200330000895.xml"
+  },
+  "column": "gen",
+  "expect": "dart3_hdr",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200330000895",
+   "member_name": "20200330000895.xml"
+  },
+  "column": "byte_enc",
+  "expect": "cp949",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200330000895",
+   "member_name": "20200330000895.xml"
+  },
+  "column": "doc_acode",
+  "expect": "11011",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200330000895",
+   "member_name": "20200330000895.xml"
+  },
+  "column": "formula_version",
+  "expect": "3.9",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200330000895",
+   "member_name": "20200330000895.xml"
+  },
+  "column": "toc_n",
+  "expect": "35",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200330000895",
+   "member_name": "20200330000895.xml"
+  },
+  "column": "n_xbrl_groups",
+  "expect": "4",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200330000895",
+   "member_name": "20200330000895.xml"
+  },
+  "column": "has_correction_page",
+  "expect": "true",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200330000895",
+   "member_name": "20200330000895.xml"
+  },
+  "column": "period_from",
+  "expect": "2019-01-01",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200330000895",
+   "member_name": "20200330000895.xml"
+  },
+  "column": "period_to",
+  "expect": "2019-12-31",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200330004604",
+   "member_name": "20200330004604_00761.xml"
+  },
+  "column": "gen",
+  "expect": "dart3_hdr",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 연결감사보고서 audit_cons"
+ },
+ {
+  "key": {
+   "rcept_no": "20200330004604",
+   "member_name": "20200330004604_00761.xml"
+  },
+  "column": "byte_enc",
+  "expect": "cp949",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 연결감사보고서 audit_cons"
+ },
+ {
+  "key": {
+   "rcept_no": "20200330004604",
+   "member_name": "20200330004604_00761.xml"
+  },
+  "column": "doc_acode",
+  "expect": "00761",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 연결감사보고서 audit_cons"
+ },
+ {
+  "key": {
+   "rcept_no": "20200330004604",
+   "member_name": "20200330004604_00761.xml"
+  },
+  "column": "formula_version",
+  "expect": "3.4",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 연결감사보고서 audit_cons"
+ },
+ {
+  "key": {
+   "rcept_no": "20200330004604",
+   "member_name": "20200330004604_00761.xml"
+  },
+  "column": "toc_n",
+  "expect": "6",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 연결감사보고서 audit_cons"
+ },
+ {
+  "key": {
+   "rcept_no": "20200330004604",
+   "member_name": "20200330004604_00761.xml"
+  },
+  "column": "n_xbrl_groups",
+  "expect": "0",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 연결감사보고서 audit_cons"
+ },
+ {
+  "key": {
+   "rcept_no": "20200330004604",
+   "member_name": "20200330004604_00761.xml"
+  },
+  "column": "has_correction_page",
+  "expect": "true",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 연결감사보고서 audit_cons"
+ },
+ {
+  "key": {
+   "rcept_no": "20200330004604",
+   "member_name": "20200330004604_00761.xml"
+  },
+  "column": "period_from",
+  "expect": "2019-01-01",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 연결감사보고서 audit_cons"
+ },
+ {
+  "key": {
+   "rcept_no": "20200330004604",
+   "member_name": "20200330004604_00761.xml"
+  },
+  "column": "period_to",
+  "expect": "2019-12-31",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 연결감사보고서 audit_cons"
+ },
+ {
+  "key": {
+   "rcept_no": "20200512000721",
+   "member_name": "20200512000721.xml"
+  },
+  "column": "gen",
+  "expect": "dart3_hdr",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200512000721",
+   "member_name": "20200512000721.xml"
+  },
+  "column": "byte_enc",
+  "expect": "cp949",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200512000721",
+   "member_name": "20200512000721.xml"
+  },
+  "column": "doc_acode",
+  "expect": "11013",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200512000721",
+   "member_name": "20200512000721.xml"
+  },
+  "column": "formula_version",
+  "expect": "3.9",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200512000721",
+   "member_name": "20200512000721.xml"
+  },
+  "column": "toc_n",
+  "expect": "33",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200512000721",
+   "member_name": "20200512000721.xml"
+  },
+  "column": "n_xbrl_groups",
+  "expect": "10",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200512000721",
+   "member_name": "20200512000721.xml"
+  },
+  "column": "has_correction_page",
+  "expect": "false",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200512000721",
+   "member_name": "20200512000721.xml"
+  },
+  "column": "period_from",
+  "expect": "2020-01-01",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200512000721",
+   "member_name": "20200512000721.xml"
+  },
+  "column": "period_to",
+  "expect": "2020-03-31",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200812000160",
+   "member_name": "20200812000160.xml"
+  },
+  "column": "gen",
+  "expect": "dart3_hdr",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200812000160",
+   "member_name": "20200812000160.xml"
+  },
+  "column": "byte_enc",
+  "expect": "cp949",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200812000160",
+   "member_name": "20200812000160.xml"
+  },
+  "column": "doc_acode",
+  "expect": "11012",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200812000160",
+   "member_name": "20200812000160.xml"
+  },
+  "column": "formula_version",
+  "expect": "4.1",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200812000160",
+   "member_name": "20200812000160.xml"
+  },
+  "column": "toc_n",
+  "expect": "33",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200812000160",
+   "member_name": "20200812000160.xml"
+  },
+  "column": "n_xbrl_groups",
+  "expect": "8",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200812000160",
+   "member_name": "20200812000160.xml"
+  },
+  "column": "has_correction_page",
+  "expect": "false",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200812000160",
+   "member_name": "20200812000160.xml"
+  },
+  "column": "period_from",
+  "expect": "2020-01-01",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20200812000160",
+   "member_name": "20200812000160.xml"
+  },
+  "column": "period_to",
+  "expect": "2020-06-30",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20220311000948",
+   "member_name": "20220311000948.xml"
+  },
+  "column": "gen",
+  "expect": "dart3_flat",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20220311000948",
+   "member_name": "20220311000948.xml"
+  },
+  "column": "byte_enc",
+  "expect": "cp949",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20220311000948",
+   "member_name": "20220311000948.xml"
+  },
+  "column": "doc_acode",
+  "expect": "11011",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20220311000948",
+   "member_name": "20220311000948.xml"
+  },
+  "column": "formula_version",
+  "expect": "4.7",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20220311000948",
+   "member_name": "20220311000948.xml"
+  },
+  "column": "toc_n",
+  "expect": "53",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20220311000948",
+   "member_name": "20220311000948.xml"
+  },
+  "column": "n_xbrl_groups",
+  "expect": "8",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20220311000948",
+   "member_name": "20220311000948.xml"
+  },
+  "column": "has_correction_page",
+  "expect": "false",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20220311000948",
+   "member_name": "20220311000948.xml"
+  },
+  "column": "period_from",
+  "expect": "2021-01-01",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20220311000948",
+   "member_name": "20220311000948.xml"
+  },
+  "column": "period_to",
+  "expect": "2021-12-31",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240311901285",
+   "member_name": "20240311901285.xml"
+  },
+  "column": "gen",
+  "expect": "html",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 html main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240311901285",
+   "member_name": "20240311901285.xml"
+  },
+  "column": "byte_enc",
+  "expect": "utf-8",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 html main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240311901285",
+   "member_name": "20240311901285.xml"
+  },
+  "column": "doc_acode",
+  "expect": null,
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 html main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240311901285",
+   "member_name": "20240311901285.xml"
+  },
+  "column": "formula_version",
+  "expect": null,
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 html main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240311901285",
+   "member_name": "20240311901285.xml"
+  },
+  "column": "toc_n",
+  "expect": null,
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 html main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240311901285",
+   "member_name": "20240311901285.xml"
+  },
+  "column": "n_xbrl_groups",
+  "expect": null,
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 html main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240311901285",
+   "member_name": "20240311901285.xml"
+  },
+  "column": "has_correction_page",
+  "expect": null,
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 html main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240311901285",
+   "member_name": "20240311901285.xml"
+  },
+  "column": "period_from",
+  "expect": null,
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 html main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240311901285",
+   "member_name": "20240311901285.xml"
+  },
+  "column": "period_to",
+  "expect": null,
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 html main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240313000011",
+   "member_name": "20240313000011.xml"
+  },
+  "column": "gen",
+  "expect": "dart4",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240313000011",
+   "member_name": "20240313000011.xml"
+  },
+  "column": "byte_enc",
+  "expect": "utf-8",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240313000011",
+   "member_name": "20240313000011.xml"
+  },
+  "column": "doc_acode",
+  "expect": "11011",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240313000011",
+   "member_name": "20240313000011.xml"
+  },
+  "column": "formula_version",
+  "expect": "5.5",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240313000011",
+   "member_name": "20240313000011.xml"
+  },
+  "column": "toc_n",
+  "expect": "61",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240313000011",
+   "member_name": "20240313000011.xml"
+  },
+  "column": "n_xbrl_groups",
+  "expect": "8",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240313000011",
+   "member_name": "20240313000011.xml"
+  },
+  "column": "has_correction_page",
+  "expect": "false",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240313000011",
+   "member_name": "20240313000011.xml"
+  },
+  "column": "period_from",
+  "expect": "2023-01-01",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240313000011",
+   "member_name": "20240313000011.xml"
+  },
+  "column": "period_to",
+  "expect": "2023-12-31",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240314001248",
+   "member_name": "20240314001248.xml"
+  },
+  "column": "gen",
+  "expect": "dart4",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240314001248",
+   "member_name": "20240314001248.xml"
+  },
+  "column": "byte_enc",
+  "expect": "utf-8",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240314001248",
+   "member_name": "20240314001248.xml"
+  },
+  "column": "doc_acode",
+  "expect": "11011",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240314001248",
+   "member_name": "20240314001248.xml"
+  },
+  "column": "formula_version",
+  "expect": "5.5",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240314001248",
+   "member_name": "20240314001248.xml"
+  },
+  "column": "toc_n",
+  "expect": "61",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240314001248",
+   "member_name": "20240314001248.xml"
+  },
+  "column": "n_xbrl_groups",
+  "expect": "8",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240314001248",
+   "member_name": "20240314001248.xml"
+  },
+  "column": "has_correction_page",
+  "expect": "true",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240314001248",
+   "member_name": "20240314001248.xml"
+  },
+  "column": "period_from",
+  "expect": "2023-01-01",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240314001248",
+   "member_name": "20240314001248.xml"
+  },
+  "column": "period_to",
+  "expect": "2023-12-31",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 사업보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240510000724",
+   "member_name": "20240510000724.xml"
+  },
+  "column": "gen",
+  "expect": "dart4",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240510000724",
+   "member_name": "20240510000724.xml"
+  },
+  "column": "byte_enc",
+  "expect": "utf-8",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240510000724",
+   "member_name": "20240510000724.xml"
+  },
+  "column": "doc_acode",
+  "expect": "11013",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240510000724",
+   "member_name": "20240510000724.xml"
+  },
+  "column": "formula_version",
+  "expect": "5.6",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240510000724",
+   "member_name": "20240510000724.xml"
+  },
+  "column": "toc_n",
+  "expect": "63",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240510000724",
+   "member_name": "20240510000724.xml"
+  },
+  "column": "n_xbrl_groups",
+  "expect": "8",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240510000724",
+   "member_name": "20240510000724.xml"
+  },
+  "column": "has_correction_page",
+  "expect": "false",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240510000724",
+   "member_name": "20240510000724.xml"
+  },
+  "column": "period_from",
+  "expect": "2024-01-01",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240510000724",
+   "member_name": "20240510000724.xml"
+  },
+  "column": "period_to",
+  "expect": "2024-03-31",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 분기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240809000460",
+   "member_name": "20240809000460.xml"
+  },
+  "column": "gen",
+  "expect": "dart4",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240809000460",
+   "member_name": "20240809000460.xml"
+  },
+  "column": "byte_enc",
+  "expect": "utf-8",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240809000460",
+   "member_name": "20240809000460.xml"
+  },
+  "column": "doc_acode",
+  "expect": "11012",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240809000460",
+   "member_name": "20240809000460.xml"
+  },
+  "column": "formula_version",
+  "expect": "5.6",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240809000460",
+   "member_name": "20240809000460.xml"
+  },
+  "column": "toc_n",
+  "expect": "57",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240809000460",
+   "member_name": "20240809000460.xml"
+  },
+  "column": "n_xbrl_groups",
+  "expect": "4",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240809000460",
+   "member_name": "20240809000460.xml"
+  },
+  "column": "has_correction_page",
+  "expect": "false",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240809000460",
+   "member_name": "20240809000460.xml"
+  },
+  "column": "period_from",
+  "expect": "2024-01-01",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ },
+ {
+  "key": {
+   "rcept_no": "20240809000460",
+   "member_name": "20240809000460.xml"
+  },
+  "column": "period_to",
+  "expect": "2024-06-30",
+  "measured_by": "doc_prepass --rcept-list S26",
+  "measured_at": "2026-09-04",
+  "note": "S26 반기보고서 main"
+ }
+]

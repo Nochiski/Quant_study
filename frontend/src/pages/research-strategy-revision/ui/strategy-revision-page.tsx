@@ -9,6 +9,7 @@ import {
   DocumentToolbar,
   FactorGraphPanel,
   RecoveryBanner,
+  ServerDraftBanner,
   SnippetCatalog,
   SourceEditor,
   StrategyProjectionPanel,
@@ -17,12 +18,14 @@ import {
   PROJECTION_VIEWS,
   currentDiagnostics,
   projectStrategySpec,
+  revisionDraftId,
   saveStatusText,
   saveStatusTone,
   useAutosave,
   useCompileDocument,
   useExecutionPlans,
   useRunBacktest,
+  useServerDraft,
   useSaveDocument,
   useSchemaAssist,
   useOutlineNavigation,
@@ -73,6 +76,21 @@ export const StrategyRevisionPage = () => {
     canCreateRevisionFromConflict,
   } = useSaveDocument(document, dispatch);
   const assist = useSchemaAssist(document);
+  const serverDraftId =
+    document.strategyId !== null &&
+    document.baseRevision !== null &&
+    document.baseSpecHash !== null
+      ? revisionDraftId(
+          document.strategyId,
+          document.baseRevision,
+          document.baseSpecHash,
+        )
+      : null;
+  const serverDraft = useServerDraft(document, dispatch, {
+    draftId: serverDraftId,
+    schemaVersion: assist.schemaVersion ?? stored.schema_version,
+    schemaPending: assist.loading,
+  });
   const { validateNow, validating } = useCompileDocument(document, dispatch);
   const autosave = useAutosave(document, dispatch, {
     schemaVersion: assist.schemaVersion,
@@ -317,6 +335,7 @@ export const StrategyRevisionPage = () => {
             {autosave.recovery ? (
               <RecoveryBanner recovery={autosave.recovery} />
             ) : null}
+            <ServerDraftBanner sync={serverDraft} />
             <SourceEditor
               state={document}
               dispatch={dispatch}

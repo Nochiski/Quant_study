@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
   ContractInspector,
@@ -6,6 +6,7 @@ import {
   DocumentToolbar,
   FactorGraphPanel,
   RecoveryBanner,
+  ServerDraftBanner,
   SnippetCatalog,
   SourceEditor,
   StrategyProjectionPanel,
@@ -13,13 +14,16 @@ import {
   StrategyOutline,
   PROJECTION_VIEWS,
   currentDiagnostics,
+  createNewDraftId,
   projectStrategySpec,
+  revisionDraftId,
   saveStatusText,
   saveStatusTone,
   useAutosave,
   useCompileDocument,
   useExecutionPlans,
   useRunBacktest,
+  useServerDraft,
   useSaveDocument,
   useSchemaAssist,
   useOutlineNavigation,
@@ -52,8 +56,26 @@ export const NewStrategyPage = () => {
   const navigate = useNavigate();
   const search = useSearch({ from: ROUTE });
   const [document, dispatch] = useStrategyDocument(NEW_DRAFT);
+  // The recovery identity exists before the first paint. A URL-only effect leaves a short
+  // draftId=null window in which an immediate edit can be mistaken for an already-synced base.
+  const [entryDraftId] = useState(createNewDraftId);
   const { save, status, canSave } = useSaveDocument(document, dispatch);
   const assist = useSchemaAssist(document);
+  const serverDraftId =
+    document.strategyId !== null &&
+    document.baseRevision !== null &&
+    document.baseSpecHash !== null
+      ? revisionDraftId(
+          document.strategyId,
+          document.baseRevision,
+          document.baseSpecHash,
+        )
+      : (search.draft ?? entryDraftId);
+  const serverDraft = useServerDraft(document, dispatch, {
+    draftId: serverDraftId,
+    schemaVersion: assist.schemaVersion,
+    schemaPending: assist.loading,
+  });
   const { validateNow, validating } = useCompileDocument(document, dispatch);
   const autosave = useAutosave(document, dispatch, {
     schemaVersion: assist.schemaVersion,
@@ -109,6 +131,15 @@ export const NewStrategyPage = () => {
     [onOutlineEditorReady, onSnippetEditorReady],
   );
 
+  useEffect(() => {
+    if (search.draft !== undefined) return;
+    void navigate({
+      to: ROUTE,
+      search: { ...search, draft: entryDraftId },
+      replace: true,
+    });
+  }, [entryDraftId, navigate, search]);
+
   // If the user types while create is in flight, stay on this page and preserve the newer text.
   // A second save appends it to the newly created strategy; navigate only once the current text
   // is the saved base. This gives P2-04 lossless behavior without depending on P3-06 autosave.
@@ -135,6 +166,7 @@ export const NewStrategyPage = () => {
         path: undefined,
         asOf: undefined,
         security: undefined,
+        draft: undefined,
       },
       replace: true,
     });
@@ -249,6 +281,7 @@ export const NewStrategyPage = () => {
             {autosave.recovery ? (
               <RecoveryBanner recovery={autosave.recovery} />
             ) : null}
+            <ServerDraftBanner sync={serverDraft} />
             <SourceEditor
               state={document}
               dispatch={dispatch}

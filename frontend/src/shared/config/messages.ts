@@ -739,6 +739,24 @@ const ko = {
   "conflict.diff.changed": "수정",
   "conflict.diff.before": "이전",
   "conflict.diff.after": "이후",
+  "draft.server.loading": "서버 초안을 확인하는 중입니다.",
+  "draft.server.saving": "서버에 초안을 저장하는 중입니다…",
+  "draft.server.synced": "서버 초안 동기화됨",
+  "draft.server.offline":
+    "서버 초안에 연결할 수 없습니다. 로컬 복구본은 계속 저장됩니다.",
+  "draft.server.rejected": "서버가 초안 저장을 거부했습니다.",
+  "draft.server.retry": "다시 연결",
+  "draft.server.conflictTitle": "서버 초안 충돌",
+  "draft.server.conflict":
+    "다른 화면에서 초안이 변경되었습니다. 자동으로 덮어쓰지 않습니다.",
+  "draft.server.recoveryTitle": "복구할 서버 초안",
+  "draft.server.recovery":
+    "이 문서 기준으로 저장된 편집본이 있습니다. 적용 전까지 현재 문서는 바뀌지 않습니다.",
+  "draft.server.incompatibleTitle": "호환되지 않는 서버 초안",
+  "draft.server.incompatible":
+    "초안의 전략 기준·스키마·형식이 현재 문서와 달라 적용을 차단했습니다.",
+  "draft.server.applyRemote": "서버 초안 적용",
+  "draft.server.keepLocal": "현재 문서 유지·재시도",
   "problems.compileUnavailable":
     "검증 서버에 연결할 수 없어 이 텍스트를 확인하지 못했습니다. 잠시 후 다시 시도하세요. ({detail})",
 } as const;
@@ -1506,6 +1524,24 @@ export const messages = {
     "conflict.diff.changed": "Changed",
     "conflict.diff.before": "Before",
     "conflict.diff.after": "After",
+    "draft.server.loading": "Checking the server draft.",
+    "draft.server.saving": "Saving the server draft…",
+    "draft.server.synced": "Server draft synced",
+    "draft.server.offline":
+      "The server draft is unavailable. Local recovery continues to save.",
+    "draft.server.rejected": "The server rejected the draft write.",
+    "draft.server.retry": "Reconnect",
+    "draft.server.conflictTitle": "Server draft conflict",
+    "draft.server.conflict":
+      "Another screen changed this draft. It was not overwritten automatically.",
+    "draft.server.recoveryTitle": "Server draft available",
+    "draft.server.recovery":
+      "An edited source exists for this document base. The current document stays unchanged until you apply it.",
+    "draft.server.incompatibleTitle": "Incompatible server draft",
+    "draft.server.incompatible":
+      "The draft base, schema, or format differs from this document, so applying it is blocked.",
+    "draft.server.applyRemote": "Apply server draft",
+    "draft.server.keepLocal": "Keep current and retry",
     "problems.compileUnavailable":
       "The validation server could not be reached, so this text is unverified. Try again shortly. ({detail})",
   } satisfies Record<MessageKey, string>,

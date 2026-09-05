@@ -4,12 +4,14 @@ import {
   compileStrategyDocument,
   createStrategy,
   createStrategyDocument,
+  deleteStrategyDraft,
   diffStrategyRevisions,
   explainFactorGraph,
   getEquityCatalog,
   getFactorCatalog,
   getBacktestResult,
   getStrategy,
+  getStrategyDraft,
   getStrategyDocument,
   getStrategyDocumentContract,
   getStrategyDocumentSchema,
@@ -23,6 +25,7 @@ import {
   previewEquityUniverse,
   reviseStrategy,
   reviseStrategyDocument,
+  saveStrategyDraft,
   startBacktest,
   traceStrategy as postStrategyTrace,
   validateFactorGraph,
@@ -68,12 +71,15 @@ import type {
   RevisionDiff,
   RevisionSummary,
   SaveDocumentRequest,
+  SaveStrategyDraftRequest,
   SavedRevisionReference,
   SavedStrategy,
   SourceDiagnostic,
   StrategyDocument,
   StrategyDocumentContractResponse,
   StrategyDocumentSchema,
+  StrategyDraft,
+  StrategyDraftConflictDetail,
   StrategyRevisionConflictDetail,
   StrategySpec,
   StrategyTraceRequest,
@@ -100,6 +106,7 @@ export class ApiRequestError extends Error {
   readonly code: string | undefined;
   readonly detail: string | undefined;
   readonly latestRevision: number | null;
+  readonly currentDraft: StrategyDraft | null;
 
   constructor(
     context: string,
@@ -107,6 +114,7 @@ export class ApiRequestError extends Error {
     code?: string,
     detail?: string,
     latestRevision: number | null = null,
+    currentDraft: StrategyDraft | null = null,
   ) {
     super(
       `API request failed: ${context} status=${status} code=${code ?? "-"}`,
@@ -116,6 +124,7 @@ export class ApiRequestError extends Error {
     this.code = code;
     this.detail = detail;
     this.latestRevision = latestRevision;
+    this.currentDraft = currentDraft;
   }
 }
 
@@ -160,20 +169,123 @@ const revisionConflictDetail = (
     : null;
 };
 
+const strategyDraftRecord = (
+  candidate: unknown,
+  expectedDraftId: string,
+): StrategyDraft | null => {
+  if (typeof candidate !== "object" || candidate === null) return null;
+  const value = candidate as unknown as Record<string, unknown>;
+  const savedIdentity =
+    value.strategy_id === null &&
+    value.base_revision === null &&
+    value.base_spec_hash === null
+      ? true
+      : typeof value.strategy_id === "string" &&
+        value.strategy_id.trim() !== "" &&
+        typeof value.base_revision === "number" &&
+        Number.isSafeInteger(value.base_revision) &&
+        value.base_revision > 0 &&
+        typeof value.base_spec_hash === "string" &&
+        /^[a-f0-9]{64}$/u.test(value.base_spec_hash);
+  return value.draft_id === expectedDraftId &&
+    expectedDraftId.trim() !== "" &&
+    expectedDraftId.length <= 512 &&
+    typeof value.version === "number" &&
+    Number.isSafeInteger(value.version) &&
+    value.version > 0 &&
+    typeof value.source === "string" &&
+    (value.format === "yaml" || value.format === "json") &&
+    typeof value.source_hash === "string" &&
+    /^[a-f0-9]{64}$/u.test(value.source_hash) &&
+    typeof value.schema_version === "string" &&
+    value.schema_version.trim() !== "" &&
+    typeof value.updated_at === "string" &&
+    value.updated_at.endsWith("Z") &&
+    Number.isFinite(Date.parse(value.updated_at)) &&
+    savedIdentity
+    ? (candidate as StrategyDraft)
+    : null;
+};
+
+/** Runtime check for a CAS conflict, bound to the route identity that produced it. */
+const draftConflictDetail = (
+  error: unknown,
+  expectedDraftId: string | undefined,
+): StrategyDraftConflictDetail | null => {
+  if (expectedDraftId === undefined) return null;
+  if (typeof error !== "object" || error === null || !("detail" in error))
+    return null;
+  const detail = (error as { detail: unknown }).detail;
+  if (typeof detail !== "object" || detail === null) return null;
+  const candidate = detail as Partial<StrategyDraftConflictDetail>;
+  const current = candidate.current;
+  const validCurrent =
+    current === null || strategyDraftRecord(current, expectedDraftId) !== null;
+  return candidate.code === "strategy.draft.conflict" &&
+    typeof candidate.message === "string" &&
+    validCurrent
+    ? (candidate as StrategyDraftConflictDetail)
+    : null;
+};
+
+const requestError = (
+  response: { error?: unknown; response?: { status: number } },
+  context: string,
+  expectedDraftId?: string,
+): ApiRequestError => {
+  const conflict = revisionConflictDetail(response.error);
+  const draftConflict = draftConflictDetail(response.error, expectedDraftId);
+  const responseStatus = response.response?.status ?? 0;
+  if (
+    expectedDraftId !== undefined &&
+    responseStatus === 409 &&
+    draftConflict === null
+  ) {
+    return new ApiRequestError(
+      context,
+      responseStatus,
+      "client.response.invalid",
+      "Draft conflict response did not match the requested draft identity.",
+    );
+  }
+  return new ApiRequestError(
+    context,
+    responseStatus,
+    errorCode(response.error),
+    errorField(response.error, "message"),
+    conflict?.latest_revision ?? null,
+    draftConflict?.current ?? null,
+  );
+};
+
+const invalidDraftResponse = (
+  context: string,
+  detail: string,
+): ApiRequestError =>
+  new ApiRequestError(context, 200, "client.response.invalid", detail);
+
+const requireStrategyDraft = (
+  candidate: unknown,
+  draftId: string,
+  context: string,
+): StrategyDraft => {
+  const draft = strategyDraftRecord(candidate, draftId);
+  if (draft === null) {
+    throw invalidDraftResponse(
+      context,
+      "Draft response did not match the requested draft identity or contract.",
+    );
+  }
+  return draft;
+};
+
 /** Turns an SDK reply into data or a typed error; every document call goes through here. */
 const unwrap = <T>(
   response: { data?: T; error?: unknown; response?: { status: number } },
   context: string,
 ): T => {
   if (response.error !== undefined) {
-    const conflict = revisionConflictDetail(response.error);
-    throw new ApiRequestError(
-      context,
-      response.response?.status ?? 0,
-      errorCode(response.error),
-      errorField(response.error, "message"),
-      conflict?.latest_revision ?? null,
-    );
+    throw requestError(response, context);
   }
   return requireData(response.data, context);
 };
@@ -297,6 +409,60 @@ export const strategyWorkbenchApi = {
       );
     }
     return requireData(response.data, "getStrategy");
+  },
+
+  async getStrategyDraft(draftId: string): Promise<StrategyDraft> {
+    const response = await getStrategyDraft({ path: { draft_id: draftId } });
+    return requireStrategyDraft(
+      unwrap(response, "getStrategyDraft"),
+      draftId,
+      "getStrategyDraft",
+    );
+  },
+
+  async saveStrategyDraft(
+    draftId: string,
+    request: SaveStrategyDraftRequest,
+  ): Promise<StrategyDraft> {
+    const response = await saveStrategyDraft({
+      path: { draft_id: draftId },
+      body: request,
+    });
+    if (response.error !== undefined) {
+      throw requestError(response, "saveStrategyDraft", draftId);
+    }
+    const saved = requireStrategyDraft(
+      requireData(response.data, "saveStrategyDraft"),
+      draftId,
+      "saveStrategyDraft",
+    );
+    const exactSuccessor =
+      saved.version === request.expected_version + 1 &&
+      saved.source === request.source &&
+      saved.format === request.format &&
+      saved.schema_version === request.schema_version &&
+      saved.strategy_id === request.strategy_id &&
+      saved.base_revision === request.base_revision &&
+      saved.base_spec_hash === request.base_spec_hash;
+    if (!exactSuccessor) {
+      throw invalidDraftResponse(
+        "saveStrategyDraft",
+        "Saved draft response did not match the submitted CAS snapshot.",
+      );
+    }
+    return saved;
+  },
+
+  async deleteStrategyDraft(
+    draftId: string,
+    expectedVersion: number,
+  ): Promise<void> {
+    const response = await deleteStrategyDraft({
+      path: { draft_id: draftId },
+      query: { expected_version: expectedVersion },
+    });
+    if (response.error !== undefined)
+      throw requestError(response, "deleteStrategyDraft", draftId);
   },
 
   async getStrategyDocument(
@@ -431,12 +597,14 @@ export type {
   RevisionDiff,
   RevisionSummary,
   SaveDocumentRequest,
+  SaveStrategyDraftRequest,
   SavedRevisionReference,
   SavedStrategy,
   SourceDiagnostic,
   StrategyDocument,
   StrategyDocumentContractResponse,
   StrategyDocumentSchema,
+  StrategyDraft,
   StrategySpec,
   StrategyTraceRequest,
   StrategyTraceResponse,

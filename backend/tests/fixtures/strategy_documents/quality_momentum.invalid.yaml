@@ -1,0 +1,7 @@
+# 구문 오류 fixture: factors 블록의 들여쓰기가 깨져 있고 따옴표가 닫히지 않았다.
+schema_version: "1.0"
+title: "퀄리티 모멘텀
+data:
+  market: KRX
+   start: "2021-01-01"
+  end: "2026-08-31"

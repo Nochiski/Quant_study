@@ -1,0 +1,50 @@
+.doc-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.doc-toolbar__identity {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.doc-toolbar__identity div {
+  display: flex;
+  gap: var(--space-1);
+  align-items: center;
+}
+
+.doc-toolbar__identity dt::after {
+  content: ":";
+}
+
+.doc-toolbar__identity dd {
+  margin: 0;
+  color: var(--text);
+}
+
+.doc-toolbar__identity code {
+  font-size: 11px;
+}
+
+.doc-toolbar__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.doc-toolbar__error {
+  color: var(--status-error);
+  font-size: var(--text-size-small);
+}
+
+.doc-toolbar__run-status {
+  color: var(--status-info);
+  font-size: var(--text-size-small);
+}

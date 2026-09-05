@@ -15,6 +15,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+!frontend/src/**/lib/
 lib64/
 parts/
 sdist/
@@ -217,8 +218,10 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 # Rust 코어 빌드 산출물
-rust/backtest_core/target/
-rust/backtest_core/uv.lock
+backend/rust/backtest_core/target/
+backend/rust/backtest_core/uv.lock
+frontend/node_modules/
+frontend/openapi-ts-error-*.log
 bash.exe.stackdump
 
 # ── 프로젝트 전용 ───────────────────────────────────────────
@@ -232,16 +235,17 @@ bash.exe.stackdump
 *.token
 
 # 데이터/산출물 — 코드로 재현하고 git 에는 넣지 않는다
-# (`**/data/` 는 쓰지 않는다 — src/backtest_engine/data/ 같은 패키지 디렉토리까지 가린다)
+# (`**/data/` 는 쓰지 않는다 — backend/src/backtest_engine/data/ 같은 패키지까지 가린다)
 *.csv
 *.parquet
 *.feather
 *.h5
 *.db
-!tests/fixtures/**/*.csv
-!tests/fixtures/**/*.parquet
+!backend/tests/fixtures/**/*.csv
+!backend/tests/fixtures/**/*.parquet
 
 # 원장/파생 데이터 (서버가 정본, 로컬은 작업 사본)
 workspace/*/data/
 workspace/*/logs/
 workspace/*/scratchpad/
+backend/.local/

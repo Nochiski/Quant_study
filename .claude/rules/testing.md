@@ -2,6 +2,8 @@
 paths:
   - "tests/**"
   - "scripts/**"
+  - "backend/tests/**"
+  - "backend/scripts/**"
 ---
 
 # Testing Rules

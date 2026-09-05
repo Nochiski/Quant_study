@@ -2,6 +2,7 @@
 paths:
   - "**/*.py"
   - "pyproject.toml"
+  - "backend/pyproject.toml"
 ---
 
 # Python 설계 원칙

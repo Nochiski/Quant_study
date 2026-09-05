@@ -2,27 +2,35 @@
 
 퀀트 스터디 저장소. 데이터 수집·가공부터 백테스팅까지 각자 실습하고, 쓸 만한 코드는 공용으로 올려 함께 쓴다.
 
-이벤트 드리븐 백테스트 엔진을 직접 만드는 학습 리포. 설계 아티팩트(`2026-08-17/`의
-학습 노트)에서 고정한 전략 I/O 계약을 루트의 `backtest_engine` 패키지로 구현한다.
+이벤트 드리븐 백테스트 엔진과 YAML-first Strategy Workbench를 만드는 학습 리포. 설계 아티팩트
+(`backend/reference/`의 학습 노트)에서 고정한 전략 I/O 계약을 backend의
+`backtest_engine` 패키지로 구현한다.
 
 ## 구조
 
 ```
-src/backtest_engine/
-├─ types/          # 프로토콜 계약: Requirements, Event, Context, Decision, Action, serde
-├─ capability.py   # DEFINED ≠ IMPLEMENTED — 실행 전 요구사항 협상과 거절
-├─ engine/         # reference engine: EventQueue, Router, OrderManager, BrokerSim, slippage, Portfolio, Metrics
-├─ ports/          # 헥사고날 포트: BarSource, CorporateActionSource, UniverseSource, SlippageModel
-├─ adapters/       # 포트 구현: CSV(csv_bars), sqlite(sqlite_bars), KRX 원장 parquet(krx_parquet)
-└─ data/           # 소스 무관 정제(cleaning)·자본변동 검출(corporate_actions), DataFeed
-examples/          # 골든크로스 예제 전략 + CSV / KRX parquet 데모
-scripts/           # 테스트 픽스처 재생성, 다종목 벤치마크 등 유틸
-tests/             # 골든(손계산)·계약·상태 전이·직렬화·단위 테스트
-tests/fixtures/    # KRX 원장 슬라이스 (종목 5개, 605KB) — 어댑터 스모크용
-2026-08-17/        # 설계 아티팩트와 Zipline 관찰용 앱 (기준 동작 비교용)
+backend/
+├─ src/backtest_engine/     # Python API/reference engine: types, engine, ports, adapters, data
+├─ src/strategy_workbench/  # workbench backend: domain→application→adapters, bootstrap 조립
+├─ rust/backtest_core/      # Persistent Rust Engine
+├─ tests/                   # engine/workbench/architecture 계약 테스트와 소형 fixture
+├─ examples/                # 골든크로스 CSV/KRX parquet 데모
+├─ scripts/                 # fixture 재생성·다종목 벤치마크
+├─ benchmarks/              # 성능 측정 baseline
+└─ reference/               # 2026-08-17 설계·Zipline 관찰 아카이브
+frontend/                   # workbench UI: FSD app→pages→widgets→features→entities→shared
+docs/                       # 공용 설계·로드맵·리포트
 workspace/         # 개인 작업 공간 workspace/<이름>/ — docs·src 추적, data/·logs/ 는 git 제외
-ops/               # 서버 운영 스크립트 (공용)
 ```
+
+Strategy Workbench의 전체 계획과 체크리스트는
+[Strategy Workbench 구현 로드맵](docs/superpowers/specs/2026-09-03-strategy-workbench-roadmap.md)에 있다.
+전략 authoring은 verbose YAML/JSON source로 전환 중이며 계약은
+[Strategy Authoring Contract ADR](docs/superpowers/specs/2026-09-04-strategy-authoring-contract-adr.md),
+PR 진행은 [docs/planning/strategy-workbench-yaml-ui/PLAN.md](docs/planning/strategy-workbench-yaml-ui/PLAN.md)가
+추적한다. 기존 Quick/Advanced no-code 편집기는 migration 기간 legacy route로 유지된다.
+Equity DB 계약이 확정되기 전에는 `backend`의 PIT mock adapter가 기준 구현이며, 실제 DB는 같은
+application port를 구현하는 outbound adapter로 교체한다.
 
 ## 설계 아티팩트 요약
 
@@ -93,15 +101,16 @@ Requirements → Capability 검증 → StrategyEvent + 읽기 전용 Context
   세션 시작에 보유 수량·평균단가를 조정하고(단주는 시가 현금 정산) 대기 주문을 취소한다.
   종목마스터 일별 스냅샷으로 만든 `UniverseResult`를 `run(universe=)`로 주면 전략이
   `ctx.universe()`로 그 세션의 상장 종목만 본다(look-ahead 차단). 새 데이터 채널은
-  `tests/test_bar_source_contract.py`의 빌더 하나로 계약 전체를 통과해야 한다 (sqlite로 검증).
+  `backend/tests/test_bar_source_contract.py`의 빌더 하나로 계약 전체를 통과해야 한다 (sqlite로 검증).
 
 ## 실행
 
 ```bash
+cd backend
 uv sync --extra parquet             # 의존성 설치 (Python 3.11+, pyarrow 포함)
-uv run pytest                       # 테스트
-uv run ruff check src tests examples
-uv run pyright src tests examples
+uv run pytest                       # 엔진 + Strategy Workbench 테스트
+uv run ruff check src tests examples scripts
+uv run pyright
 uv run python examples/run_demo.py      # PyKRX CSV(005930)로 골든크로스 백테스트
 uv run python examples/run_krx_demo.py  # KRX 원장 parquet 슬라이스로 동일 전략 실행
 uv run python examples/run_krx_demo.py <원장 디렉토리>   # quant-data 빌드 전체 대상
@@ -109,11 +118,28 @@ uv run maturin develop --manifest-path rust/backtest_core/Cargo.toml --release  
 uv run python examples/run_krx_demo.py --core rust      # Rust 코어로 같은 데모
 ```
 
+Strategy Workbench 개발 서버:
+
+```bash
+# 저장소 루트 · 터미널 1
+uv run server
+
+# 저장소 루트 · 터미널 2
+npm ci --prefix frontend
+npm run dev
+```
+
+`uv run server`는 backend의 FastAPI/Uvicorn 개발 서버(`127.0.0.1:8000`, reload)를,
+`npm run dev`는 frontend의 Vite 개발 서버(`localhost:5173`)를 실행한다. 백엔드 옵션은
+그대로 전달된다(예: `uv run server --port 8123`). 기존처럼 `backend`와 `frontend`
+디렉터리 안에서 각각 실행해도 같은 owner의 설정을 사용한다.
+
 ## 검증: Zipline 대조
 
 엔진 회계는 Zipline과의 세션 단위 equity 대조로 검증됐다 — buy-hold, 골든크로스, 슬리피지
 (VolumeShare + 참여율 캡·GTC 이월), 공매도 buy-hold 네 시나리오 모두 최대 상대 오차 0
-(1,619세션, KRX 원장 슬라이스에서 생성한 CSV). 실행 방법과 리포트는 `tests/manual/README.md` 참고.
+(1,619세션, KRX 원장 슬라이스에서 생성한 CSV). 실행 방법과 리포트는
+`backend/tests/manual/README.md` 참고.
 
 ## 데이터
 
@@ -124,11 +150,14 @@ uv run python examples/run_krx_demo.py --core rust      # Rust 코어로 같은 
 ## 작업 규칙
 
 1. **남의 `workspace/` 폴더는 건드리지 않는다.** 개인 공간 안에서는 구조도 스타일도 자유. 이것만 지키면 충돌이 날 일이 없다.
-2. **공용 영역 변경은 상의하거나 PR 로.** `.gitignore`, `.claude/rules/`, `README.md`, `src/`, `ops/`, `pyproject.toml` 이 해당된다.
+2. **공용 영역 변경은 상의하거나 PR 로.** `.gitignore`, `.claude/rules/`, `README.md`,
+   `backend/`, `frontend/`, `docs/`가 해당된다.
 3. **데이터 파일은 커밋하지 않는다.** 시세 CSV·parquet 등은 `.gitignore` 에서 막아 두었다. 저장소에는 **데이터를 만들어 내는 스크립트**를 넣고, 데이터는 각자 로컬에서 재현한다.
 4. **API 토큰·키는 절대 커밋하지 않는다.** `*_token.json`, `*.token` 은 `.gitignore` 에서 막아 두었다.
 
-데이터를 둘 곳이 필요하면 `workspace/<이름>/data/` 를 쓰면 된다 — `workspace/*/data/` 규칙으로 이미 git 에서 제외된다. 손으로 계산할 수 있는 소형 테스트 픽스처만 `tests/fixtures/` 아래 CSV·parquet 으로 예외 허용.
+데이터를 둘 곳이 필요하면 `workspace/<이름>/data/` 를 쓰면 된다 — `workspace/*/data/` 규칙으로
+이미 git 에서 제외된다. 손으로 계산할 수 있는 소형 테스트 픽스처만
+`backend/tests/fixtures/` 아래 CSV·parquet 으로 예외 허용.
 
 ## 코딩 규칙
 
@@ -139,5 +168,11 @@ uv run python examples/run_krx_demo.py --core rust      # Rust 코어로 같은 
 | `code-style.md` | `**/*.py` | 기존 헬퍼 재사용, 기능/정리 커밋 분리, ruff·pyright 게이트, 네이밍 |
 | `python.md` | `**/*.py` | 성공/실패는 튜플 대신 Result 값 타입으로 |
 | `error-messages.md` | `**/*.py` | 예외·로그에 재현 가능한 컨텍스트 포함 |
-| `testing.md` | `tests/`, `scripts/` | 산출물 파일 존재/내용을 단언하는 테스트 금지 |
+| `testing.md` | `backend/tests/`, `backend/scripts/` | 산출물 파일 존재/내용을 단언하는 테스트 금지 |
 | `pr-review.md` | 전체 | PR 본문 양식, 결함 보고 4요소 |
+| `backend-package-boundary.md` | `backend/**/*.py` | 헥사고날 방향, facade, `DEPENDS_ON`, mock adapter 경계 |
+| `strategy-workbench-sot.md` | `backend/`, `frontend/` | 전략·팩터·지표·상태의 단일 owner |
+| `frontend-fsd.md` | `frontend/src/` | FSD 단방향, slice 격리, public API |
+| `frontend-api-state.md` | frontend API/state | 생성 SDK, 서버·draft·UI 상태 소유권 |
+| `frontend-ui-quality.md` | frontend UI | primitive, token, 접근성, i18n, raw metric |
+| `frontend-testing.md` | frontend test/e2e | 사용자 동작·wire 경계 테스트 |

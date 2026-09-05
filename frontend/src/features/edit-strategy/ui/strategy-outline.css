@@ -1,0 +1,116 @@
+.strategy-outline {
+  min-height: 0;
+}
+
+.strategy-outline__filter {
+  padding: 0 var(--space-3) var(--space-2);
+}
+
+.strategy-outline__filter-input {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-panel);
+  color: var(--text);
+  font-size: var(--text-size-small);
+}
+
+.strategy-outline__tree,
+.strategy-outline__group {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.strategy-outline__tree {
+  max-height: min(52vh, 620px);
+  padding: var(--space-1) var(--space-2) var(--space-3);
+  overflow: auto;
+}
+
+.strategy-outline__group {
+  padding-left: var(--space-3);
+}
+
+.strategy-outline__item {
+  outline: none;
+}
+
+.strategy-outline__item-row {
+  display: flex;
+  width: 100%;
+  min-height: 30px;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-medium);
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-size-small);
+  text-align: left;
+  cursor: pointer;
+}
+
+.strategy-outline__item-row:hover {
+  background: var(--surface-subtle);
+}
+
+.strategy-outline__item[aria-selected="true"] > .strategy-outline__item-row {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.strategy-outline__item[data-present="false"] > .strategy-outline__item-row {
+  color: var(--text-muted);
+}
+
+.strategy-outline__item:focus-visible > .strategy-outline__item-row {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.strategy-outline__disclosure {
+  width: var(--space-3);
+  flex: 0 0 var(--space-3);
+  color: var(--text-subtle);
+  text-align: center;
+}
+
+.strategy-outline__index {
+  flex: none;
+  padding: 1px var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  color: var(--text-muted);
+}
+
+.strategy-outline__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.strategy-outline__identity {
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.strategy-outline__missing {
+  margin-left: auto;
+  color: var(--text-subtle);
+}
+
+.strategy-outline__notice {
+  margin: 0;
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}

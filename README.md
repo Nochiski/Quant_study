@@ -29,7 +29,8 @@ Strategy Workbench의 전체 계획과 체크리스트는
 전략 authoring은 verbose YAML/JSON source로 전환 중이며 계약은
 [Strategy Authoring Contract ADR](docs/superpowers/specs/2026-09-04-strategy-authoring-contract-adr.md),
 PR 진행은 [docs/planning/strategy-workbench-yaml-ui/PLAN.md](docs/planning/strategy-workbench-yaml-ui/PLAN.md)가
-추적한다. 기존 Quick/Advanced no-code 편집기는 migration 기간 legacy route로 유지된다.
+추적한다. 전략 작성 화면은 YAML/JSON editor 하나이며 Form/Graph/Diff는 같은 StrategySpec의
+read-only projection이다. Parameter Search는 이 route 위에 연결할 후속 milestone이다.
 Equity DB 계약이 확정되기 전에는 `backend`의 PIT mock adapter가 기준 구현이며, 실제 DB는 같은
 application port를 구현하는 outbound adapter로 교체한다.
 

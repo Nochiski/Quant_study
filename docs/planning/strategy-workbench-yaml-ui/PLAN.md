@@ -6,7 +6,7 @@ current_phase: P6
 current_pr: P6-08,P6-09,P6-03,P6-04,P6-05,P6-06
 active_prs: [P6-03, P6-04, P6-05, P6-06, P6-08, P6-09]
 parallel_window: [P6-08, P6-09, P6-03, P6-04, P6-05, P6-06]
-last_updated: 2026-09-06T06:09:17+09:00
+last_updated: 2026-09-06T06:13:45+09:00
 planned_prs: 52
 merged_prs: 46
 approved_prs: 51
@@ -28,7 +28,7 @@ progress_percent: 88
 | Active PR | `P6-03, P6-04, P6-05, P6-06, P6-08, P6-09` |
 | Progress | `46 / 52 merged (88%)` |
 | Approved | `51 / 52` |
-| Aggregated at | `2026-09-06 06:09 KST` |
+| Aggregated at | `2026-09-06 06:13 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -39,14 +39,15 @@ progress_percent: 88
 - 표현식 문자열 DSL과 `%`·`bps` literal은 v1 범위가 아니다.
 - 전략 정의는 전문 사용자를 위한 YAML-first로 전환한다. Parameter Search는 source를 직접 편집하지 않고 UI에서 수행할 수 있게 유지한다.
 - roadmap은 product milestone SoT, 이 파일은 본 initiative의 PR delivery SoT다.
-- Quick/Advanced 삭제는 P0-01의 roadmap/rule 변경과 migration acceptance가 끝난 뒤에만 가능하다.
+- 2026-09-06 제품 결정에 따라 P6-06 migration gate를 통과시켜 Quick/Advanced를 제거한다.
+  M6 Parameter Search는 YAML route 위의 후속 기능이며 제거 선행 조건이 아니다.
 - 현재 synthetic factor 경로는 UI 디버거가 아니라 backtest correctness 결함으로 분류하여 Phase 1.5에서 먼저 수정한다.
 - Domain은 Pydantic을 import하지 않고 inbound schema adapter가 기존 domain union에 discriminator annotation을 제공한다.
 - source의 unknown key는 모든 depth에서 structural blocking error로 fail-closed한다 (P1-01 구현).
 - i18n 문구 갱신은 P0-01이 아니라 P3-05 cutover에서 한다.
 - Frontend editor는 CodeMirror 6, frontend marker는 syntax만(advisory), structural/semantic marker는 backend compile diagnostic (editor ADR D2).
 - Backend YAML parser는 ruamel.yaml(1.2, pure safe). frontend `yaml` 2.9.0. 양쪽 accept 집합은 yaml12 manifest가 고정하고 판정이 갈리는 문법은 거부한다 (parser ADR D2).
-- Router는 TanStack Router. validateSearch는 잘못된 값을 제거하고 기본값을 URL에 쓰지 않으며 멱등이다. dirty blocker는 pathname 변경만 차단한다. `/?step=`·`/?run`은 query를 유지해 `/legacy/builder`로 redirect한다 (router ADR D1~D3).
+- Router는 TanStack Router. validateSearch는 잘못된 값을 제거하고 기본값을 URL에 쓰지 않으며 멱등이다. dirty blocker는 pathname 변경만 차단한다. P6-06부터 `/`의 과거 query와 `/legacy/builder`는 query를 버리고 YAML 신규 문서 route로 replace redirect한다 (router ADR D1~D3, D9 개정).
 - Dirty가 아니고 base revision/hash가 일치할 때만 saved revision backtest를 사용하며, 나머지 valid/current 문서는 inline draft provenance를 사용한다.
 
 ## 상태 값
@@ -86,16 +87,16 @@ progress_percent: 88
 
 | 항목 | 값 |
 |---|---|
-| PR | `P6-05` Browser E2E·visual regression infrastructure IN_REVIEW |
-| Intent | 실제 FastAPI와 production Vite preview를 Playwright가 같은 격리 환경에서 기동해 전문 YAML IDE의 direct-entry·lazy editor·light/dark viewport baseline을 재현 가능한 release gate로 만든다 |
-| Acceptance | exact Playwright dependency/lock; 격리 SQLite를 쓰는 실제 backend와 production preview webServer; `/research/strategies/new` direct route와 CodeMirror lazy chunk·worker-free 확인; 1440×900·1920×1080 light/dark screenshot baseline 4개 commit; Windows CI browser job과 실패 artifact; local update/test 명령 문서화 |
-| Non-goals | 생성→저장→백테스트 등 업무 E2E 시나리오(P6-06), legacy route/editor 제거(P6-06), backend wire/domain 의미 변경, UI 재설계, mock API 기반 browser test |
-| Branch/worktree | `feat/p6-05-browser-infrastructure` (`Quant_study-p6-05`), stacked on P6-04 approval-doc HEAD |
-| Base SHA | `c6182e9` (P6-04 approval-doc HEAD; #74→#75→#76→#77 순차 merge 후 base 전환) |
-| Head SHA | `621d001` (2차 visual P1 fix와 author self-check freeze; review-request PLAN commit 전 HEAD) |
-| Diff stat | base `c6182e9` 대비 product+self-check 18 files +525/-35; exact lock·CI·runtime wrapper·config/test/docs·bundled fonts와 재생성 PNG 4개 포함 |
-| Focused tests | computed body/editor family, loaded face, missing-face 0, 모든 관측 woff2 200; baseline update 8/8와 strict 8/8; direct unmanaged runner reject; 성공·timeout 실패·Ctrl+C·반복 실행 후 temp artifact/listener/process 0; PNG 4개 직접 확인 |
-| Full gate | clean `npm ci` 400 packages/취약점 0; frontend Vitest 474·app/E2E typecheck·lint·build(editor 131.94KiB); root 6; reviewer backend 1,118·Rust 13; PLAN/diff-check 통과 |
+| PR | `P6-06` 전체 업무 E2E와 YAML-first migration IN_PROGRESS |
+| Intent | 실제 FastAPI와 production preview에서 생성·오류 수정·복구·revision·backtest·trace/risk·history/diff를 한 사용자 흐름으로 증명하고 구형 Quick/Advanced 화면을 제거한다 |
+| Acceptance | 전용 single-run Playwright project; golden YAML의 create/edit/validate/save/reload; local/server recovery; 구조 오류 gate와 수정; 실제 409 conflict; trace raw/target/risk/provenance; backtest 완료와 두 history route; revision diff; `source=None` revision의 generated source 재저장 후 동일 `spec_hash`; legacy bookmark redirect; 실행 보고서 |
+| Non-goals | M6 Parameter Search 구현, backend legacy JSON wire API 제거, StrategySpec/compile/hash 의미 변경, live trading 기능 구현, UI 재설계 |
+| Branch/worktree | `feat/p6-06-workflow-migration` (`Quant_study-p6-06`), stacked on P6-05 approval-doc HEAD |
+| Base SHA | `dd9a6ff` (P6-05 approval-doc HEAD; #74→#75→#76→#77→#78 순차 merge 후 base 전환) |
+| Head SHA | 구현 중 |
+| Diff stat | 구현 완료 후 exact base diff로 고정 |
+| Focused tests | router migration, i18n/FSD dead-reference, dedicated real-server workflow E2E |
+| Full gate | frontend/backend/Rust/root 정적·unit·build·generated parity와 실제 browser workflow; CI billing 해제 후 Windows green 필수 |
 
 ---
 
@@ -171,7 +172,7 @@ Phase exit:
 Phase exit:
 
 - [ ] New/saved strategy와 backtest direct route가 동작한다.
-- [ ] Legacy editor가 migration 기간 별도 route에서 유지된다.
+- [ ] 이 Phase 당시 legacy editor가 migration route에서 유지되며 최종 제거 책임은 P6-06에 있다.
 - [ ] 1280/1440/1920 light layout과 focus-visible을 확인했다.
 
 ## P3 — YAML Editor MVP
@@ -357,6 +358,8 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-06 KST | Codex | P6-05 approval-doc HEAD `dd9a6ff` 위에 P6-06 전용 branch/worktree를 만들고 IN_PROGRESS로 전환했다. 제품 소유자의 명시적 결정을 ADR D9에 반영해 M6 Parameter Search를 YAML route 위 후속 milestone으로 유지하되 legacy editor 제거 선행 조건에서는 제외한다. P6-06은 실제 browser migration gate를 먼저 증명하고 backend legacy JSON/source=None wire 호환은 유지한다 | 제품 결정의 문서 선행·StrategySpec/source SoT 보존·UI/wire migration 책임분리·stack 순차 merge |
+| 2026-09-06 KST | Codex | 동일 reviewer `review_p6_05`가 final reviewed product HEAD `c97708e`에서 누적 P1/P2를 모두 폐쇄하고 P0/P1/P2 0으로 APPROVE했다. clean frontend 474·typecheck 2종·lint·build, 실제 FastAPI+preview strict 8/8, font face/woff2/PNG 4개와 runtime/listener 0을 독립 재현했다. 최종 `dd9a6ff`는 PLAN-only approval 기록이며 Actions billing 해제 후 Windows green merge gate를 유지한다 | same-reviewer 최종 승인·visual/runtime 증거·CI gate 비우회 |
 | 2026-09-06 KST | Codex | P6-05 font fix `d39fb10`과 self-check `621d001`을 push하고 #78 전체 diff·2차 P1 폐쇄·검증 증거를 동기화한다. 최초 reviewer `review_p6_05` 한 명에게 CodeMirror 실제 computed family, loaded/missing face 판별, woff2 final status와 새 4 baseline, 최신 전체 diff 신규 blocker를 최종 재검토받도록 IN_REVIEW로 전환한다 | 13.3 latest diff freeze·13.5 same-reviewer finding loop·reviewer 중복 생성 금지 |
 | 2026-09-06 KST | Codex | P6-05 2차 visual P1을 `d39fb10`에서 수정했다. CodeMirror scroller/content/gutter가 `--font-mono`를 직접 사용해 host monospace override를 제거하고, browser gate는 body/editor computed family, `document.fonts.load()`의 실제 loaded face와 missing family 0, 관측한 Noto/JetBrains woff2 모든 status 200을 검증한다. 새 glyph metric으로 4 PNG를 재생성·직접 확인하고 update 8/8·strict 8/8, frontend 474, typecheck 2종·lint·build, root 6, temp artifact/listener 0을 통과해 SELF_CHECK로 전환한다 | 실제 computed pixel input 고정·font false-positive 제거·13.2 author gate |
 | 2026-09-06 KST | Codex | 동일 reviewer `review_p6_05`의 2차 검토에서 최초 P1 2/P2 2의 runtime directory cleanup, unmanaged invocation, network-idle 이후 final response, Node 22 parity는 모두 폐쇄됐으나 visual P1 1건으로 REQUEST_CHANGES했다. production probe에서 body는 bundled sans를 쓰지만 CodeMirror `.cm-content`는 자체 `monospace` 규칙이 token 상속을 덮고, `document.fonts.check()`는 missing family도 true라 현재 assertion이 fallback을 놓친다. editor/scroller에 mono token을 직접 적용하고 computed family·`fonts.load()` face·woff2 200을 검증한 네 baseline을 재생성한 뒤 같은 reviewer에게 재검토받는다 | strict pixel input의 실제 computed style SoT·false-positive 차단·same-reviewer loop |

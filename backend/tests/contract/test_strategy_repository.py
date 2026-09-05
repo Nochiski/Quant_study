@@ -626,6 +626,36 @@ def test_sqlite_refuses_to_claim_an_unowned_nonempty_database(tmp_path: Path) ->
         )
 
 
+def test_sqlite_refuses_to_claim_an_unowned_sqlite_sequence_residue(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "unowned-sequence-residue.sqlite3"
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "CREATE TABLE discarded (id INTEGER PRIMARY KEY AUTOINCREMENT)"
+        )
+        connection.execute("DROP TABLE discarded")
+        assert connection.execute(
+            "SELECT type, name FROM sqlite_schema ORDER BY type, name"
+        ).fetchall() == [("table", "sqlite_sequence")]
+
+    with pytest.raises(StrategyRepositoryStorageError, match="refusing to claim"):
+        _sqlite(path)
+
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("PRAGMA application_id").fetchone()[0] == 0
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT type, name FROM sqlite_schema ORDER BY type, name"
+        ).fetchall() == [("table", "sqlite_sequence")]
+        assert (
+            connection.execute(
+                "SELECT name FROM sqlite_schema WHERE name = 'strategy_heads'"
+            ).fetchone()
+            is None
+        )
+
+
 def test_sqlite_rejects_an_owned_schema_with_the_wrong_shape(tmp_path: Path) -> None:
     path = tmp_path / "broken.sqlite3"
     _sqlite(path).close()
@@ -712,6 +742,19 @@ def test_sqlite_rejects_unexpected_schema_objects(tmp_path: Path) -> None:
         _sqlite(path)
 
 
+def test_sqlite_rejects_unexpected_sqlite_managed_schema_objects(tmp_path: Path) -> None:
+    path = tmp_path / "extra-sqlite-object.sqlite3"
+    _sqlite(path).close()
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "CREATE TABLE discarded (id INTEGER PRIMARY KEY AUTOINCREMENT)"
+        )
+        connection.execute("DROP TABLE discarded")
+
+    with pytest.raises(StrategyRepositoryStorageError, match="unexpected"):
+        _sqlite(path)
+
+
 def test_sqlite_schema_migration_rolls_back_headers_and_objects_on_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -727,12 +770,7 @@ def test_sqlite_schema_migration_rolls_back_headers_and_objects_on_failure(
     with sqlite3.connect(path) as connection:
         assert connection.execute("PRAGMA application_id").fetchone()[0] == 0
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 0
-        assert (
-            connection.execute(
-                "SELECT name FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*'"
-            ).fetchall()
-            == []
-        )
+        assert connection.execute("SELECT name FROM sqlite_schema").fetchall() == []
 
 
 def test_sqlite_rejects_a_database_owned_by_another_application(tmp_path: Path) -> None:

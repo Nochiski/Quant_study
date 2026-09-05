@@ -86,13 +86,13 @@ def migrate_schema(connection: sqlite3.Connection) -> None:
         connection.execute("BEGIN IMMEDIATE")
         application_id = _pragma_int(connection, "application_id")
         version = _pragma_int(connection, "user_version")
-        objects = _schema_objects(connection)
+        footprint = _schema_footprint(connection)
 
         if application_id == 0:
-            if version != 0 or objects:
+            if version != 0 or footprint:
                 raise StrategyRepositoryStorageError(
                     "refusing to claim a non-empty SQLite database without this "
-                    f"application id -- user_version={version} objects={sorted(objects)}"
+                    f"application id -- user_version={version} objects={footprint}"
                 )
             for _object_type, _name, statement in _V1_SCHEMA_OBJECTS:
                 connection.execute(statement)
@@ -129,26 +129,51 @@ def _pragma_int(connection: sqlite3.Connection, name: str) -> int:
     return row[0]
 
 
-def _schema_objects(connection: sqlite3.Connection) -> dict[tuple[str, str], str]:
+def _schema_footprint(connection: sqlite3.Connection) -> tuple[tuple[str, str], ...]:
+    """Return every persisted schema object, including SQLite-managed objects.
+
+    An unowned database is claimable only when this footprint is empty. SQLite can leave
+    ``sqlite_sequence`` behind after an AUTOINCREMENT table is dropped, so internal names must
+    not be treated as evidence of an empty file.
+    """
+    rows = connection.execute(
+        """
+        SELECT type, name
+        FROM sqlite_schema
+        ORDER BY type COLLATE BINARY, name COLLATE BINARY
+        """
+    ).fetchall()
+    footprint: list[tuple[str, str]] = []
+    for object_type, name in rows:
+        if not isinstance(object_type, str) or not isinstance(name, str):
+            raise StrategyRepositoryStorageError(
+                "SQLite strategy schema contains an invalid object identity"
+            )
+        footprint.append((object_type, name))
+    return tuple(footprint)
+
+
+def _schema_objects(
+    connection: sqlite3.Connection,
+) -> dict[tuple[str, str], str | None]:
     rows = connection.execute(
         """
         SELECT type, name, sql
         FROM sqlite_schema
-        WHERE name NOT GLOB 'sqlite_*'
         ORDER BY type COLLATE BINARY, name COLLATE BINARY
         """
     ).fetchall()
-    objects: dict[tuple[str, str], str] = {}
+    objects: dict[tuple[str, str], str | None] = {}
     for object_type, name, sql in rows:
-        if (
-            not isinstance(object_type, str)
-            or not isinstance(name, str)
-            or not isinstance(sql, str)
-        ):
+        if not isinstance(object_type, str) or not isinstance(name, str):
             raise StrategyRepositoryStorageError(
-                "SQLite strategy schema contains an object without canonical SQL"
+                "SQLite strategy schema contains an invalid object identity"
             )
-        objects[(object_type, name)] = _normalise_sql(sql)
+        if sql is not None and not isinstance(sql, str):  # pragma: no cover - SQLite invariant
+            raise StrategyRepositoryStorageError(
+                "SQLite strategy schema contains an object with invalid SQL"
+            )
+        objects[(object_type, name)] = None if sql is None else _normalise_sql(sql)
     return objects
 
 

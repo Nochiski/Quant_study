@@ -257,7 +257,8 @@ def eg3_adj_factor(ctx: EquityGateContext) -> GateResult:
                               OR corp_code IS DISTINCT FROM e_corp)),
           count(*) FILTER (WHERE factor_ok AND apply_basis <> '{krx}'
                              AND share_factor IS DISTINCT FROM ratio),
-          count(*) FILTER (WHERE available_date IS DISTINCT FROM least(e_ann, next_session)),
+          count(*) FILTER (WHERE available_date IS DISTINCT FROM
+                                 coalesce(least(e_ann, next_session), apply_date)),
           count(*) FILTER (WHERE available_date < e_ann),
           count(*) FILTER (WHERE n_apply IS NULL),
           count(*) FILTER (WHERE apply_basis = 'nominal' AND n_apply IS DISTINCT FROM n_nom),

@@ -173,6 +173,7 @@ const FACTOR = {
 const posted: unknown[] = [];
 const started: Record<string, unknown>[] = [];
 const explainedGraphs: unknown[] = [];
+const tracedStrategies: Record<string, unknown>[] = [];
 const acceptedRun = (runId = "run-7") => ({
   run: {
     run_id: runId,
@@ -358,6 +359,7 @@ afterEach(() => {
   posted.length = 0;
   started.length = 0;
   explainedGraphs.length = 0;
+  tracedStrategies.length = 0;
 });
 afterAll(() => server.close());
 
@@ -1196,6 +1198,237 @@ describe("FactorGraph read-only projection (P4-07)", () => {
           view.state.selection.main.to,
         ),
       ).toContain("node_id: mom_252"),
+    );
+  }, 15_000);
+
+  it("connects URL-owned trace scope to the generated API on the new-strategy route", async () => {
+    server.use(
+      ...graphHandlers(),
+      http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown> & {
+          as_of: string;
+          security_ids: string[];
+        };
+        tracedStrategies.push(body);
+        return HttpResponse.json({
+          spec_hash: "7".repeat(64),
+          snapshot_id: "snap",
+          registry_version: "v1",
+          plan_hash: "p".repeat(64),
+          factor_id: "momentum",
+          as_of: body.as_of,
+          provenance: {
+            kind: "inline_draft",
+            schema_version: "1.0",
+            spec_hash: "7".repeat(64),
+            source_hash: "b".repeat(64),
+            strategy_id: null,
+            revision: null,
+          },
+          raw: [],
+          raw_truncated: false,
+          warnings: [],
+          trace: {
+            rows: body.security_ids.map((securityId) => ({
+              node_id: "mom_252",
+              operation: "time_series.momentum",
+              as_of: body.as_of,
+              security_id: securityId,
+              value: 0.2,
+              status: "ok",
+              inputs: [{ node_id: "close", value: 10 }],
+            })),
+            offset: 0,
+            limit: body.security_ids.length,
+            returned: body.security_ids.length,
+            has_more: false,
+          },
+          target: {
+            signal_as_of: body.as_of,
+            execution_on: "2026-09-04",
+            candidates: body.security_ids.map((securityId, index) => ({
+              as_of: body.as_of,
+              security_id: securityId,
+              sector_id: null,
+              eligible: true,
+              composite_score: 0.2,
+              rank: index + 1,
+              selected: true,
+              side: "long",
+              exclusion_reasons: [],
+              target_weight: 0.05,
+            })),
+            targets: body.security_ids.map((securityId, index) => ({
+              security_id: securityId,
+              side: "long",
+              weight: 0.05,
+              composite_score: 0.2,
+              rank: index + 1,
+            })),
+          },
+        });
+      }),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/new");
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: "종목 ID" })).toBeEnabled(),
+    );
+    const security = screen.getByRole("textbox", { name: "종목 ID" });
+    expect(screen.getByRole("button", { name: "추적 실행" })).toBeDisabled();
+
+    await user.type(security, "sec-a, sec-b");
+    expect(security).toHaveValue("sec-a, sec-b");
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    await waitFor(() =>
+      expect(history.location.search).toContain("security=sec-a%2C+sec-b"),
+    );
+
+    expect(await screen.findAllByText("5.00%")).toHaveLength(2);
+    expect(tracedStrategies).toHaveLength(1);
+    expect(tracedStrategies[0]).toMatchObject({
+      as_of: "2026-09-03",
+      security_ids: ["sec-a", "sec-b"],
+      factor_id: "momentum",
+      node_ids: ["mom_252"],
+      strategy_source: {
+        kind: "inline_draft",
+        source_hash: "b".repeat(64),
+      },
+    });
+  }, 15_000);
+
+  it("restores revision trace scope from history and sends the saved revision source", async () => {
+    const specHash = "7".repeat(64);
+    server.use(
+      ...graphHandlers(),
+      http.get(
+        `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
+        () =>
+          HttpResponse.json({
+            ...document("s1", 2, GRAPH_SOURCE, "그래프 전략"),
+            spec: graphSpec("s1", 2),
+            spec_hash: specHash,
+          }),
+      ),
+      http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown> & {
+          as_of: string;
+          security_ids: string[];
+        };
+        tracedStrategies.push(body);
+        return HttpResponse.json({
+          spec_hash: specHash,
+          snapshot_id: "snap",
+          registry_version: "v1",
+          plan_hash: "p".repeat(64),
+          factor_id: "momentum",
+          as_of: body.as_of,
+          provenance: {
+            kind: "saved_revision",
+            schema_version: "1.0",
+            spec_hash: specHash,
+            source_hash: "b".repeat(64),
+            strategy_id: "s1",
+            revision: 2,
+          },
+          raw: [],
+          raw_truncated: false,
+          warnings: [],
+          trace: {
+            rows: body.security_ids.map((securityId) => ({
+              node_id: "mom_252",
+              operation: "time_series.momentum",
+              as_of: body.as_of,
+              security_id: securityId,
+              value: 0.2,
+              status: "ok",
+              inputs: [],
+            })),
+            offset: 0,
+            limit: body.security_ids.length,
+            returned: body.security_ids.length,
+            has_more: false,
+          },
+          target: {
+            signal_as_of: body.as_of,
+            execution_on: "2026-09-01",
+            candidates: body.security_ids.map((securityId) => ({
+              as_of: body.as_of,
+              security_id: securityId,
+              sector_id: null,
+              eligible: true,
+              composite_score: 0.2,
+              rank: 1,
+              selected: true,
+              side: "long",
+              exclusion_reasons: [],
+              target_weight: 0.05,
+            })),
+            targets: [],
+          },
+        });
+      }),
+    );
+    const nodePath = "%2Ffactors%2Ffactors%2F0%2Fgraph%2Fnodes%2F1";
+    const initial = `/research/strategies/s1/revisions/2?asOf=2026-08-31&security=sec-r&path=${nodePath}`;
+    const history = mount(initial);
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "추적 실행" })).toBeEnabled(),
+    );
+    expect(screen.getByLabelText("기준일")).toHaveValue("2026-08-31");
+    expect(screen.getByRole("textbox", { name: "종목 ID" })).toHaveValue(
+      "sec-r",
+    );
+    expect(screen.getByRole("combobox", { name: "노드" })).toHaveValue(
+      "mom_252",
+    );
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    expect(await screen.findByText("5.00%")).toBeInTheDocument();
+    expect(tracedStrategies[0]).toMatchObject({
+      as_of: "2026-08-31",
+      security_ids: ["sec-r"],
+      node_ids: ["mom_252"],
+      strategy_source: {
+        kind: "saved_revision",
+        strategy_id: "s1",
+        revision: 2,
+        expected_spec_hash: specHash,
+      },
+    });
+
+    act(() => {
+      history.push(
+        `/research/strategies/s1/revisions/2?asOf=2026-08-30&security=sec-next&path=%2Ffactors%2Ffactors%2F0%2Fgraph%2Fnodes%2F0`,
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByLabelText("기준일")).toHaveValue("2026-08-30");
+      expect(screen.getByRole("textbox", { name: "종목 ID" })).toHaveValue(
+        "sec-next",
+      );
+      expect(screen.getByRole("combobox", { name: "노드" })).toHaveValue(
+        "close",
+      );
+    });
+
+    act(() => history.back());
+    await waitFor(() => {
+      expect(screen.getByLabelText("기준일")).toHaveValue("2026-08-31");
+      expect(screen.getByRole("textbox", { name: "종목 ID" })).toHaveValue(
+        "sec-r",
+      );
+      expect(screen.getByRole("combobox", { name: "노드" })).toHaveValue(
+        "mom_252",
+      );
+    });
+    act(() => history.forward());
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: "종목 ID" })).toHaveValue(
+        "sec-next",
+      ),
     );
   }, 15_000);
 });

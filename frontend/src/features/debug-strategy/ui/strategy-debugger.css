@@ -1,0 +1,192 @@
+.strategy-debugger {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.strategy-debugger__controls {
+  display: grid;
+  grid-template-columns:
+    minmax(132px, 0.7fr) minmax(220px, 1.4fr) minmax(180px, 1fr)
+    minmax(180px, 1fr) auto;
+  gap: var(--space-2);
+  align-items: end;
+  padding: 0 var(--space-4) var(--space-2);
+}
+
+.strategy-debugger__controls label {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.strategy-debugger__controls input,
+.strategy-debugger__controls select {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface-panel);
+  color: var(--text);
+  font: inherit;
+}
+
+.strategy-debugger__controls input:focus-visible,
+.strategy-debugger__controls select:focus-visible {
+  border-color: var(--accent);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.strategy-debugger__actions {
+  display: flex;
+  gap: var(--space-1);
+  align-items: center;
+  min-height: 30px;
+}
+
+.strategy-debugger__identity {
+  display: flex;
+  min-height: 29px;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-1) var(--space-4);
+  border-block: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.strategy-debugger__identity p {
+  margin: 0;
+}
+
+.strategy-debugger__provenance {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  justify-content: flex-end;
+}
+
+.strategy-debugger__provenance span {
+  white-space: nowrap;
+}
+
+.strategy-debugger__warnings {
+  margin: 0;
+  padding: var(--space-2) var(--space-6);
+  border-bottom: 1px solid var(--status-warn);
+  background: var(--status-warn-soft);
+  color: var(--status-warn);
+  font-size: var(--text-size-small);
+}
+
+.strategy-debugger__results {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.strategy-debugger__results > .ui-tabs {
+  padding-inline: var(--space-4);
+}
+
+.strategy-debugger__panel {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+}
+
+.strategy-debugger__panel[hidden] {
+  display: none;
+}
+
+.strategy-debugger__state {
+  display: grid;
+  min-height: 72px;
+  place-content: center;
+  padding: var(--space-4);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.strategy-debugger__state p {
+  margin: 0;
+}
+
+.strategy-debugger__state[role="alert"] {
+  color: var(--status-error);
+}
+
+.strategy-debugger__table-wrap {
+  min-width: 100%;
+  overflow: auto;
+}
+
+.strategy-debugger__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-size-small);
+  white-space: nowrap;
+}
+
+.strategy-debugger__table th,
+.strategy-debugger__table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.strategy-debugger__table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.strategy-debugger__table td.strategy-debugger__numeric {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.strategy-debugger__input {
+  display: block;
+}
+
+.strategy-debugger__note {
+  margin: var(--space-2) var(--space-4);
+  color: var(--status-warn);
+  font-size: var(--text-size-small);
+}
+
+@media (max-width: 1279px) {
+  .strategy-debugger {
+    overflow: auto;
+  }
+
+  .strategy-debugger__controls {
+    grid-template-columns: 1fr;
+  }
+
+  .strategy-debugger__provenance {
+    justify-content: flex-start;
+  }
+
+  .strategy-debugger__results {
+    min-height: 260px;
+    overflow: visible;
+  }
+}

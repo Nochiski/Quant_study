@@ -1,7 +1,7 @@
 -- corp_event (S05, MVP-B) — grain event_id. 기업행위 4종: split · reverse_split · bonus · capred.
 -- DESIGN v1.2 §4-2 · GATES v1.0 §3-⑨ · EG7-P08.
 --
--- 원천 5 (선언 등록표 = rules_s05.SOURCES, EG1 우변은 그 표의 합):
+-- 원천 5 (선언 등록표 = rules_s05.SOURCES, EG1 우변은 아래 pool 의 범위 안 행수):
 --   event_fric   무상증자 결정(DS005)            → bonus
 --   event_pifric 유무상증자 결정의 무상 부분(DS005) → bonus
 --   event_cr     감자 결정(DS005)                → capred
@@ -12,9 +12,22 @@
 -- 축(보통주 / 기타·우선주)을 따로 싣고 있으므로 class-row 단위로 전개한다 —
 --   common    ← is_common(주식종류 '보통주') 또는 비KR7 단독 티커(외국주권)
 --   preferred ← KR7 그룹의 비보통주(구형·신형·종류 우선주)
--- leg 가 없는 class-row(상환전환우선주·미상장 우선주·corp 미매핑)는 ticker NULL → ticker_unresolved.
+-- 자본변동의 종류 어휘(isu_dcrs_stock_knd)는 rules_s05 의 COMMON_KINDS·PREFERRED_KINDS·
+-- UNLISTED_KINDS 선언과 같은 리터럴이어야 한다(tests 가 대조).
 --
--- effective_date = **가격 축 효력일** (계수는 date >= effective_date 인 가격에 곱한다, DESIGN §4-2):
+-- **범위 밖(scope_out)은 격리가 아니라 모집단 밖이다** — 조정할 가격이 없는 사건(서버 1차 빌드
+-- 실측: 사업보고서가 창립 이래 자본 변동을 회고 기재해 1963년 사건까지 실린다). 행을 내지 않고
+-- EG3_corp_event 가 건수만 기록한다:
+--   out_of_calendar  효력일이 trading_calendar [min, max] 밖(DART 결정공시·자본변동 공통)
+--   unlisted_class   상장 티커가 없는 주식 종류(RCPS·전환우선주 등 UNLISTED_KINDS, 또는 우선주
+--                    계열인데 법인에 상장 우선주가 없음, 결정공시의 기타주식도 같은 규칙)
+--   class_unknown    종류 어휘 밖('-' 포함) — 어느 티커의 사건인지 정할 수 없다
+--   pre_listing      티커는 있으나 효력일이 그 티커의 security_span 첫 존재일 이전
+-- 범위 안 후보만 격리 판정을 받는다: ticker_unresolved(보통주 계열인데 상장 보통주 없음) ·
+-- effective_unresolved(기준일 없음) · ratio_unparsed · effective_before_announce(사건 단위 —
+-- 가장 이른 announce 기준, 아래 judged CTE).
+--
+-- effective_date = **가격 축 효력일** (계수는 date >= effective_date 인 가격·거래량에 곱한다):
 --   bonus  : 권리락일 = 신주배정기준일 직전 거래일(trading_calendar) — 절단본 실측 247540 2022-06-27
 --            (기준일 06-28, 종가 497,400 → 135,900). DART 자본변동의 isu_dcrs_de 도 배정기준일이라
 --            두 원천이 같은 effective_date 로 접힌다.
@@ -29,10 +42,17 @@
 --   보강, basis derived) / KRX 는 관측일 = 효력일. available_date = announce_date.
 -- dedup 축 (ticker, event_type, effective_date): reject 없는 후보만 접는다. 우선순위 =
 --   결정공시 > 자본변동 > KRX → announce_date 오름차순 → rcept_no. 접힌 수는 n_src_rows.
---   reject 후보는 접지 않고 각각 격리한다 → Σ원천 = Σ_out n_src_rows + n_reject (EG1).
+--   reject 후보는 접지 않고 각각 격리한다 → 범위 안 후보 = Σ_out n_src_rows + n_reject (EG1).
 -- 숫자 리터럴은 0·1·2 만 쓴다(test_sql파일에_상수_하드코딩_없음) — 임계는 _const 로만 들어온다.
+-- 캘린더 경계는 _const 가 아니라 trading_calendar 뷰의 min/max 서브쿼리(S03 과 같은 방식).
 WITH cal AS (
     SELECT date, prev_td FROM trading_calendar
+),
+cal_bounds AS (
+    SELECT min(date) AS cal_min, max(date) AS cal_max FROM trading_calendar
+),
+first_listed AS (
+    SELECT ticker, min(first_date) AS first_date FROM security_span GROUP BY ticker
 ),
 legs AS (
     SELECT corp_code, ticker,
@@ -90,9 +110,11 @@ cr AS (
 capital AS (
     SELECT rcept_no, corp_code, 'capital' AS source,
            CASE WHEN isu_dcrs_stle LIKE '%감자%' THEN 'capred' ELSE 'bonus' END AS event_type,
-           CASE WHEN isu_dcrs_stock_knd = '보통주' THEN 'common'
-                WHEN isu_dcrs_stock_knd = '우선주' THEN 'preferred'
-                ELSE 'none' END AS cls,
+           CASE WHEN isu_dcrs_stock_knd IN ('보통주', '보통주식', '기명식보통주') THEN 'common'
+                WHEN isu_dcrs_stock_knd IN ('우선주', '우선주식') THEN 'preferred'
+                WHEN isu_dcrs_stock_knd IN ('상환전환우선주', '전환상환우선주', '전환우선주', 'RCPS')
+                     THEN 'unlisted'
+                ELSE 'unknown' END AS cls,
            isu_dcrs_de AS basis_date,
            NULL::DOUBLE AS ratio, FALSE AS ratio_given, available_date, available_basis
     FROM stg_capital
@@ -108,6 +130,7 @@ dart AS (
 dart_leg AS (
     -- announce 폴백: rcept_no 14자리 = 접수일 YYYYMMDD + 일련번호 6자리 → '%Y%m%d%f'(%f = 6자리)
     -- 로 한 번에 파싱해 날짜만 취한다(참조표 미스 → stage available_date NULL·basis unknown).
+    -- unlisted·unknown class-row 는 legs 에 없으므로 ticker NULL 1행으로 남아 scope_out 으로 간다.
     SELECT l.ticker, d.corp_code, d.source, d.event_type, d.cls, d.basis_date, d.ratio,
            d.ratio_given, d.rcept_no,
            coalesce(d.available_date,
@@ -133,6 +156,7 @@ listing AS (
 krx AS (
     SELECT l.ticker, ct.corp_code, 'krx_listing' AS source,
            CASE WHEN l.par_value_krw < l.prev_par THEN 'split' ELSE 'reverse_split' END AS event_type,
+           'common' AS cls, l.date AS basis_date,
            CASE WHEN l.prev_shrs > 0 THEN l.list_shrs / l.prev_shrs END AS ratio,
            TRUE AS ratio_given, NULL::VARCHAR AS rcept_no,
            l.date AS announce_date, l.available_basis,
@@ -144,25 +168,57 @@ krx AS (
       AND l.par_value_krw <> l.prev_par
       AND l.prev_date = c.prev_td
 ),
-cand AS (
-    SELECT ticker, corp_code, source, event_type, ratio, ratio_given, rcept_no, announce_date,
-           available_basis, effective_date, effective_basis
-    FROM dart_leg
-    UNION ALL
-    SELECT ticker, corp_code, source, event_type, ratio, ratio_given, rcept_no, announce_date,
-           available_basis, effective_date, effective_basis
-    FROM krx
+-- ── 모집단(pool) + 범위 판정 ─────────────────────────────────────────────────
+pool AS (
+    SELECT p.*,
+           CASE WHEN p.source <> 'krx_listing' AND p.basis_date IS NOT NULL
+                     AND (p.effective_date IS NULL
+                          OR p.effective_date < b.cal_min OR p.effective_date > b.cal_max)
+                     THEN 'out_of_calendar'
+                WHEN p.cls = 'unlisted' OR (p.cls = 'preferred' AND p.ticker IS NULL)
+                     THEN 'unlisted_class'
+                WHEN p.cls = 'unknown' THEN 'class_unknown'
+                WHEN p.ticker IS NOT NULL AND p.effective_date < fl.first_date THEN 'pre_listing'
+           END AS scope_out
+    FROM (
+        SELECT ticker, corp_code, source, event_type, cls, basis_date, ratio, ratio_given,
+               rcept_no, announce_date, available_basis, effective_date, effective_basis
+        FROM dart_leg
+        UNION ALL
+        SELECT ticker, corp_code, source, event_type, cls, basis_date, ratio, ratio_given,
+               rcept_no, announce_date, available_basis, effective_date, effective_basis
+        FROM krx
+    ) p
+    CROSS JOIN cal_bounds b
+    LEFT JOIN first_listed fl ON fl.ticker = p.ticker
+)
+-- ==== eg1: 여기까지가 모집단(pool). rules_s05 가 이 앞부분을 EG1 우변·범위 metric 에 재사용한다 ====
+, cand AS (
+    SELECT * FROM pool WHERE scope_out IS NULL
 ),
-judged AS (
+judged0 AS (
     SELECT c.*,
            CASE WHEN c.ticker IS NULL THEN 'ticker_unresolved'
                 WHEN c.effective_date IS NULL OR c.announce_date IS NULL THEN 'effective_unresolved'
                 WHEN c.ratio_given AND (c.ratio IS NULL OR c.ratio <= 0) THEN 'ratio_unparsed'
-                WHEN date_diff('day', c.effective_date, c.announce_date)
-                     > CAST(k.effective_before_announce_max_days AS INTEGER)
-                     THEN 'effective_before_announce'
-           END AS reject_reason
-    FROM cand c CROSS JOIN _const k
+           END AS reject_reason0
+    FROM cand c
+),
+judged AS (
+    -- EG7-P08 은 **사건 단위**: 같은 dedup 축의 후보 중 가장 이른 announce_date 가 효력일보다 임계
+    -- 이상 늦을 때 그 사건의 후보 전부를 격리한다. 자본변동은 같은 사건을 매년 사업보고서마다 다시
+    -- 기재하므로(서버 실측 공시−효력 최대 14,294일) 사본마다 판정하면 결정공시·앞선 보고서에
+    -- 접힐 행이 격리로 새고, 격리 비율이 사건 수가 아니라 보고서 수에 비례해 부푼다.
+    SELECT j.*,
+           coalesce(j.reject_reason0,
+                    CASE WHEN date_diff('day', j.effective_date,
+                                        min(CASE WHEN j.reject_reason0 IS NULL
+                                                 THEN j.announce_date END)
+                                            OVER (PARTITION BY j.ticker, j.event_type,
+                                                               j.effective_date))
+                              > CAST(k.effective_before_announce_max_days AS INTEGER)
+                         THEN 'effective_before_announce' END)                 AS reject_reason
+    FROM judged0 j CROSS JOIN _const k
 ),
 ranked AS (
     -- 우선순위: 결정공시 > 자본변동 > KRX (FALSE < TRUE 정렬) → 가장 이른 announce → rcept_no

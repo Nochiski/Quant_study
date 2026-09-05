@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: IN_PROGRESS
+project_status: SELF_CHECK
 current_phase: P6
 current_pr: P6-08
 active_prs: [P6-08]
 parallel_window: []
-last_updated: 2026-09-05T23:03:21+09:00
+last_updated: 2026-09-05T23:25:50+09:00
 planned_prs: 52
 merged_prs: 46
 approved_prs: 46
@@ -22,13 +22,13 @@ progress_percent: 88
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_PROGRESS` |
+| Project status | `SELF_CHECK` |
 | Current phase | `P6` |
 | Current/next PR | `P6-08` |
 | Active PR | `P6-08` |
 | Progress | `46 / 52 merged (88%)` |
 | Approved | `46 / 52` |
-| Aggregated at | `2026-09-05 23:03 KST` |
+| Aggregated at | `2026-09-05 23:25 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -78,7 +78,7 @@ progress_percent: 88
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
 | P4 | Outline, Contract, Projections | 10 | 10 | `MERGED` |
 | P5 | Truthful Trace UI | 3 | 3 | `MERGED` |
-| P6 | Professional release and migration | 9 | 3 | `IN_PROGRESS` |
+| P6 | Professional release and migration | 9 | 3 | `SELF_CHECK` |
 | **Total** |  | **52** | **46** | **88%** |
 <!-- PLAN:PHASES:END -->
 
@@ -86,16 +86,16 @@ progress_percent: 88
 
 | 항목 | 값 |
 |---|---|
-| PR | `P6-08` Strategy/revision history routed UI IN_PROGRESS |
+| PR | `P6-08` Strategy/revision history routed UI SELF_CHECK |
 | Intent | 기존 repository의 immutable revision/history SoT를 그대로 투영해 전문 사용자가 저장 전략을 찾고 원하는 revision을 편집·diff direct route로 열 수 있게 한다 |
 | Acceptance | deterministic strategy list와 revision pagination; `/research/strategies` direct route와 nav; strategy 선택 시 revision history·최신 revision 편집 연결; 임의 revision edit/diff deep link; loading·empty·error·out-of-range offset을 안전하게 canonical page로 복구; OpenAPI/generated client와 backend/frontend 계약 테스트 동기화 |
 | Non-goals | server draft 변경(P6-02), backtest run history/provenance(P6-09), strategy 삭제·rename, 검색 인덱스, legacy editor 제거(P6-06) |
 | Branch/worktree | `feat/p6-08-strategy-history` (`Quant_study-p6-08`) |
 | Base SHA | `b7fc4de` (P6-02 merge 기록 포함 latest main) |
-| Head SHA | — |
-| Diff stat | — |
-| Focused tests | list/history API pagination, direct route, loading/empty/error/out-of-range 상태를 구현과 함께 고정 예정 |
-| Full gate | 구현 후 backend/frontend 전체 gate, OpenAPI/SDK deterministic, root entrypoint, PLAN/diff check 실행 예정 |
+| Head SHA | `f9879d7` |
+| Diff stat | 18 files, +958/-4 (OpenAPI/generated 226줄, test 162줄 포함; handwritten production은 단일 list/history vertical 약 570줄) |
+| Focused tests | backend list/document history 8 passed; frontend router 13 passed; 기존 dataset workspace flake 단독 1 passed |
+| Full gate | backend 1,114·frontend 420·Rust 13·root 5 passed; Ruff·Pyright·typecheck·lint·build·cargo fmt/clippy 통과; OpenAPI/SDK 17 files 재생성 해시 deterministic |
 
 ---
 
@@ -238,7 +238,7 @@ Phase exit:
 | [ ] | `P6-05` | Playwright/visual regression infrastructure와 CI | P2-03, P3-05, P6-04 | `WAITING` | — |
 | [ ] | `P6-06` | 전체 browser E2E·실구동 시나리오 검증, migration gate, 조건부 legacy cleanup | P6-01, P6-02, P6-03, P6-04, P6-05, P6-08, P6-09 | `WAITING` | — |
 | [x] | `P6-07` | Root frontend/backend development entrypoints | P0-02, P0-03 | `MERGED` | [#56](https://github.com/Nochiski/Quant_study/pull/56) · `review_p6_07` APPROVE |
-| [ ] | `P6-08` | Strategy list와 revision history routed UI | P6-01, P6-02, P3-06, P4-08 | `IN_PROGRESS` | P6-02 review size finding으로 분리; 구현 중 |
+| [ ] | `P6-08` | Strategy list와 revision history routed UI | P6-01, P6-02, P3-06, P4-08 | `SELF_CHECK` | P6-02에서 분리한 strategy history vertical; author full gate 통과 |
 | [ ] | `P6-09` | Backtest run history routed UI와 provenance | P6-08, P3-05 | `WAITING` | P6-02 review size finding으로 분리 |
 
 Phase exit:
@@ -303,6 +303,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
+| P6-08 | backend strategy list/document history 8; frontend router 13; isolated dataset workspace 1 passed | backend 1,114·frontend 420·Rust 13·root 5; Ruff·Pyright·typecheck·lint·build·cargo fmt/clippy | OpenAPI/SDK 17 files 재생성 전후 SHA-256 동일 | strategy 목록·revision 펼침·latest edit·임의 revision Diff link, loading/empty/error, malformed/out-of-range offset canonicalization | author SELF_CHECK (`f9879d7`), fresh reviewer/CI 대기 | 2026-09-05 |
 | P6-02 | draft repository/HTTP 15, frontend server-draft 10 + document-route 45, reviewer hostile probes | backend 1,112·Ruff·Pyright; frontend 417·typecheck·lint·build; Rust 13·root 5 | OpenAPI/SDK deterministic diff 0 | raw surrogate 4종 422/no-write, wrong-ID/malformed wire 차단, base revert 및 in-flight PUT→revision CAS retirement | [#72](https://github.com/Nochiski/Quant_study/pull/72) same reviewer APPROVE P0/P1/P2 0, approval-doc HEAD CI 4/4 pass, MERGED (`c25d43c`) | 2026-09-05 |
 | P6-01 | repository/server/architecture 74 passed; reviewer internal-object hostile probes | backend 1,097·Ruff·Pyright; frontend 403·typecheck·lint·build; root smoke/static | OpenAPI/SDK deterministic diff 0 | restart exact source, REAL chain corruption, literal DDL mutation, unowned/owned sqlite_sequence와 SQL-NULL autoindex fail-closed | [#69](https://github.com/Nochiski/Quant_study/pull/69) same reviewer APPROVE, approval-doc HEAD CI 4/4 pass, MERGED (`fe3fbc5`) | 2026-09-05 |
 | P5-03 | author raw/API 103+frontend contract 1, trace backend 96/frontend 70; reviewer backend focused 138+architecture 7/frontend 74 | author/reviewer backend 1,041·frontend 403; Ruff·Pyright·typecheck·lint·build | OpenAPI/SDK 2회 deterministic, reviewer runtime=tracked 202 schemas | duplicate/blank hostile 세 route 422·계산 진입 0, 1,025-field cancellation, 6×100/101-node/8,100-row와 default/non-rebalance 실제 HTTP를 독립 재검증 | [#68](https://github.com/Nochiski/Quant_study/pull/68) `review_p5_03` APPROVE P0/P1/P2 0; CI 4/4 pass | 2026-09-05 |
@@ -347,6 +348,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | P6-08 구현을 `f9879d7`에 고정했다. 기존 StrategyRepositoryPort의 strategy-id/revision 오름차순 pagination을 StrategyDocumentService와 GET `/api/v1/strategies`로 투영하고 generated client/query owner를 거쳐 `/research/strategies`에서 latest edit와 immutable revision edit/diff link를 제공한다. 잘못된 URL offset은 서버 total을 기준으로 마지막 유효 페이지로 replace하고 loading·empty·error를 분리했다. focused backend 8/frontend router 13, 전체 backend 1,114/frontend 420, Rust 13/root 5와 모든 정적·build·generated deterministic gate를 통과해 SELF_CHECK로 전환한다. 18 files +958/-4 중 OpenAPI/generated 226줄·tests 162줄이며 handwritten production은 단일 list/history vertical 약 570줄이므로 12절 size exception을 기록한다 | repository/application SoT·HTTP/query/route/UI 책임분리·out-of-range fail-safe·12절 size exception |
 | 2026-09-05 KST | Codex | latest main `b7fc4de`에서 P6-08 전용 worktree를 열고 IN_PROGRESS로 전환했다. 기존 repository의 list/history pagination을 application SoT로 재사용하며 `/research/strategies`에서 저장 전략과 immutable revision을 탐색하고 edit/diff direct route로 연결한다. P6-02 보존 snapshot에서는 strategy history 수직 슬라이스만 선별하고 backtest history와 draft fix 역행은 배제한다 | immutable revision/repository SoT·API/query/route/UI 책임분리·small vertical slice |
 | 2026-09-05 KST | Codex | P6-02 [#72](https://github.com/Nochiski/Quant_study/pull/72)의 동일 reviewer 최종 APPROVE와 approval-doc HEAD `54156c6` CI 4/4를 확인해 merge commit `c25d43c`로 순차 병합했다. 46/52를 완료하고 분리된 strategy/revision history 수직 슬라이스 P6-08을 READY로 전환한다 | 13.6 merge gate·exact-source draft CAS SoT·history 책임분리 |
 | 2026-09-05 KST | Codex | 동일 reviewer `review_p6_02`가 source/schema/strategy/hash raw surrogate 4종의 typed 422/no-persistence와 controlled in-flight PUT→revision transition의 old ID/version CAS-delete 1회를 독립 재현했다. 최초 P1 4/P2 3과 2차 P1 2가 모두 폐쇄됐고 최신 full diff에서 새 P0/P1/P2 0으로 APPROVE했다. reviewed HEAD `1473633`을 APPROVED로 전환하며 승인 기록을 포함한 latest HEAD CI 4/4 후 순차 merge한다 | same-reviewer final approval·persisted-text/CAS race closure·13.6 latest CI merge gate |

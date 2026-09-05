@@ -15,7 +15,9 @@ import re
 import sys
 from pathlib import Path
 
-FIELD_RE = re.compile(r"`((?:price|financial|consensus|flow|short|credit|event|benchmark|classification)\.[a-z_0-9]+)`")
+FIELD_RE = re.compile(
+    r"`((?:price|financial|consensus|flow|short|credit|event|benchmark|classification)"
+    r"\.[a-z_0-9]+)`")
 FACTOR_ID_RE = re.compile(r"^\| *\d+ *\| *`([a-z]+\.[a-z_0-9]+)` *\|")
 
 

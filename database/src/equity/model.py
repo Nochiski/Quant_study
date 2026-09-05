@@ -24,8 +24,8 @@ RULES_VERSION = "e1.3.1"                # BuildRecord.rules_version 에 실린�
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
-# e1.1.0: EG5a rules_changed 도입 · e1.2.0: corp_event 종류 어휘 대응표(S05-4) · e1.3.0: S06-2 기준가 원천
-# · e1.3.1: S03C 기업행위 창에서 unknown_price_only 제외
+# e1.1.0: EG5a rules_changed 도입 · e1.2.0: corp_event 종류 어휘 대응표(S05-4)
+# e1.3.0: S06-2 기준가 원천 · e1.3.1: S03C 기업행위 창에서 unknown_price_only 제외
 # e1.3.0: S06-2 — price_daily +change_krw·base_price_krw · adj_factor 원천 krx_base_price(사건 교체·
 #         unknown_krx·unknown_price_only 신규 행)
 

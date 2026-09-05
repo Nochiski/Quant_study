@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: SELF_CHECK
+project_status: IN_REVIEW
 current_phase: P6
 current_pr: P6-03,P6-08,P6-09
 active_prs: [P6-03, P6-08, P6-09]
 parallel_window: [P6-08, P6-09, P6-03]
-last_updated: 2026-09-06T02:46:15+09:00
+last_updated: 2026-09-06T02:47:40+09:00
 planned_prs: 52
 merged_prs: 46
 approved_prs: 48
@@ -22,13 +22,13 @@ progress_percent: 88
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `SELF_CHECK` |
+| Project status | `IN_REVIEW` |
 | Current phase | `P6` |
 | Current/next PR | `P6-03,P6-08,P6-09` |
 | Active PR | `P6-03, P6-08, P6-09` |
 | Progress | `46 / 52 merged (88%)` |
 | Approved | `48 / 52` |
-| Aggregated at | `2026-09-06 02:46 KST` |
+| Aggregated at | `2026-09-06 02:47 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -78,7 +78,7 @@ progress_percent: 88
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
 | P4 | Outline, Contract, Projections | 10 | 10 | `MERGED` |
 | P5 | Truthful Trace UI | 3 | 3 | `MERGED` |
-| P6 | Professional release and migration | 9 | 3 | `SELF_CHECK` |
+| P6 | Professional release and migration | 9 | 3 | `IN_REVIEW` |
 | **Total** |  | **52** | **46** | **88%** |
 <!-- PLAN:PHASES:END -->
 
@@ -86,13 +86,13 @@ progress_percent: 88
 
 | 항목 | 값 |
 |---|---|
-| PR | `P6-03` Keyboard workflow와 Command Palette SELF_CHECK ([#76](https://github.com/Nochiski/Quant_study/pull/76), review findings 수정 완료) |
+| PR | `P6-03` Keyboard workflow와 Command Palette IN_REVIEW ([#76](https://github.com/Nochiski/Quant_study/pull/76), same-reviewer re-review) |
 | Intent | 전문 사용자가 마우스 없이 현재 StrategySpec을 검증·저장·백테스트하고 표현·패널·문서 symbol을 탐색하며 workspace 선호를 복구하게 한다 |
 | Acceptance | 접근 가능한 command palette와 IME-safe 단축키; Validate/Save/Backtest의 기존 gate 재사용; 사용 가능한 view와 세 IDE panel 전환; 현재 outline의 path·semantic symbol 검색 후 source reveal; panel size와 light/dark/system theme preference의 versioned local persistence 및 hostile storage fail-closed; new/revision route 통합 |
 | Non-goals | soft dark 색상 token 자체(P6-04), palette 밖 전역 앱 검색, 서버 동기화 preference, 브라우저 E2E/visual baseline(P6-05~06), legacy editor 제거 |
 | Branch/worktree | `feat/p6-03-keyboard-palette` (`Quant_study-p6-03`), base branch `feat/p6-09-backtest-history` |
 | Base SHA | `db076ea` (P6-09 approval-doc HEAD; #74→#75 순차 merge 후 base 전환) |
-| Head SHA | `7baf1b8` (review fixes; implementation `adf3263`) |
+| Head SHA | `787f114` (re-review freeze; review fixes `7baf1b8`) |
 | Diff stat | base 대비 28 files +1,905/-76 (review-fix delta 9 files +628/-82) |
 | Focused tests | palette keyboard/focus/IME, current-only outline symbol/reveal, IDE focus transfer와 new/revision route action gate 4 files 97 passed; professional route matrix 11 passed |
 | Full gate | frontend 454·backend 1,118·Rust 13·root delegate 5 passed; typecheck·lint·changed-file Prettier·build·Ruff·Pyright·cargo fmt/clippy; OpenAPI/SDK regeneration diff clean |
@@ -233,7 +233,7 @@ Phase exit:
 |---|---|---|---|---|---|
 | [x] | `P6-01` | SQLite persistent strategy revision repository | P1-07 | `MERGED` | [#69](https://github.com/Nochiski/Quant_study/pull/69) · `review_p6_01` APPROVE |
 | [x] | `P6-02` | Server draft persistence/CAS/recovery UI | P6-01, P3-06, P4-08 | `MERGED` | [#72](https://github.com/Nochiski/Quant_study/pull/72) · `review_p6_02` APPROVE |
-| [ ] | `P6-03` | Keyboard workflow와 Command Palette | P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `SELF_CHECK` | [#76](https://github.com/Nochiski/Quant_study/pull/76) · `review_p6_03` P1 3/P2 4 수정 완료·재검토 대기 · CI billing 차단 |
+| [ ] | `P6-03` | Keyboard workflow와 Command Palette | P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `IN_REVIEW` | [#76](https://github.com/Nochiski/Quant_study/pull/76) · `review_p6_03` P1 3/P2 4 수정분 재검토 중 · CI billing 차단 |
 | [ ] | `P6-04` | Large/hostile spec 성능·접근성·i18n과 soft dark theme (`$ref`-only cycle fail-closed 포함) | P3-05, P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `WAITING` | — |
 | [ ] | `P6-05` | Playwright/visual regression infrastructure와 CI | P2-03, P3-05, P6-04 | `WAITING` | — |
 | [ ] | `P6-06` | 전체 browser E2E·실구동 시나리오 검증, migration gate, 조건부 legacy cleanup | P6-01, P6-02, P6-03, P6-04, P6-05, P6-08, P6-09 | `WAITING` | — |
@@ -352,6 +352,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-06 KST | Codex | P6-03 수정 self-check와 최신 증거를 `787f114`에 고정하고 최초 reviewer `review_p6_03`에게 동일 7건의 재현 폐쇄 여부와 최신 전체 diff의 신규 blocker를 재검토받도록 IN_REVIEW로 전환한다. CI billing 실패는 코드 신호와 분리해 기록하되 green merge gate는 유지한다 | 13.3 diff freeze·13.5 same-reviewer fix loop·CI gate 비우회 |
 | 2026-09-06 KST | Codex | P6-03 review fixes를 `7baf1b8`에 고정했다. outline symbol/reveal은 정확한 document epoch·source version의 current snapshot만 허용하고 stale/updating/invalid 상태는 fail-closed한다. palette는 Safari IME 229, 긴 list scroll, 반복 호출·session reset을 처리하며 view/panel 전환은 숨겨진 호출자가 아닌 보이는 논리 대상으로 focus를 넘긴다. new/revision 실제 route의 Validate/Save/Backtest wire와 invalid·stale·composing 차단, backend runtime schema semantic identity, overlay semantic token을 회귀 고정했다. focused 97+route matrix 11, frontend 454, typecheck·lint·changed-file Prettier·build를 통과해 SELF_CHECK로 전환하고 같은 reviewer 재검토를 준비한다 | exact source-map identity·IME/focus accessibility·기존 action gate SoT·semantic token·same-reviewer loop |
 | 2026-09-06 KST | Codex | `review_p6_03`이 P1 3/P2 4로 REQUEST_CHANGES를 판정했다. stale last-valid outline symbol이 syntax-invalid/updating 원문에 노출되어 이전 range를 현재 source에 reveal하고, palette Enter가 Safari 계열 IME `keyCode=229`를 실행하며, view/panel 명령이 invocation target을 숨긴 뒤 focus를 보이는 논리 대상으로 넘기지 않는다. 긴 list active option scroll, repeat Ctrl/⌘+K와 query session reset, new/revision 세 action wire/gate, hard-coded backdrop token도 함께 회귀 고정해 같은 reviewer에게 재검토받는다. #76 Actions 4 jobs는 1~2초·step 0에서 기존과 동일한 billing/spending-limit annotation으로 실패했으며 merge gate는 우회하지 않는다 | current source-map·IME/focus accessibility·route wire·semantic token·same-reviewer fix loop·CI green gate |
 | 2026-09-06 KST | Codex | P6-03 [#76](https://github.com/Nochiski/Quant_study/pull/76)을 parent `feat/p6-09-backtest-history` 대상으로 열고 base `db076ea`, review freeze `1fa6d93`, 27 files +1,325/-44 및 전체 gate와 size exception을 본문에 고정했다. fresh review-only agent `review_p6_03` 한 명에게 palette 접근성/IME/focus, 기존 action gate 재사용, source-map symbol→URL/source reveal, preference hostile persistence, FSD·SoT·책임분리와 최신 전체 diff를 독립 검토하도록 IN_REVIEW로 전환한다 | 13.3 diff freeze·13.4 PR별 fresh reviewer 정확히 1명·stack 순차 merge gate |

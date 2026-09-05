@@ -1,15 +1,15 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: IN_REVIEW
+project_status: APPROVED
 current_phase: P5
 current_pr: P5-02
 active_prs: [P5-02]
 parallel_window: []
-last_updated: 2026-09-05T15:25:05+09:00
+last_updated: 2026-09-05T15:30:08+09:00
 planned_prs: 50
 merged_prs: 42
-approved_prs: 42
+approved_prs: 43
 progress_percent: 84
 ---
 
@@ -22,13 +22,13 @@ progress_percent: 84
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_REVIEW` |
+| Project status | `APPROVED` |
 | Current phase | `P5` |
 | Current/next PR | `P5-02` |
 | Active PR | `P5-02` |
 | Progress | `42 / 50 merged (84%)` |
-| Approved | `42 / 50` |
-| Aggregated at | `2026-09-05 15:25 KST` |
+| Approved | `43 / 50` |
+| Aggregated at | `2026-09-05 15:30 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -77,7 +77,7 @@ progress_percent: 84
 | P2 | App Shell and visual foundation | 4 | 4 | `MERGED` |
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
 | P4 | Outline, Contract, Projections | 10 | 10 | `MERGED` |
-| P5 | Truthful Trace UI | 3 | 1 | `IN_REVIEW` |
+| P5 | Truthful Trace UI | 3 | 1 | `APPROVED` |
 | P6 | Professional release and migration | 7 | 1 | `WAITING` |
 | **Total** |  | **50** | **42** | **84%** |
 <!-- PLAN:PHASES:END -->
@@ -218,7 +218,7 @@ Phase exit:
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [x] | `P5-01` | Correctness pipeline을 조회하는 scoped trace API | P1.5-04, P1-03 | `MERGED` | [#65](https://github.com/Nochiski/Quant_study/pull/65) · `review_p5_01` APPROVE · merge `e4fabd4` |
-| [ ] | `P5-02` | Date/security/node 선택 Debugger shell | P3-05, P5-01, P2-03 | `IN_REVIEW` | [#67](https://github.com/Nochiski/Quant_study/pull/67) · `review_p5_02` 재검토 |
+| [ ] | `P5-02` | Date/security/node 선택 Debugger shell | P3-05, P5-01, P2-03 | `APPROVED` | [#67](https://github.com/Nochiski/Quant_study/pull/67) · `review_p5_02` APPROVE |
 | [ ] | `P5-03` | Raw→Target trace, risk before/after, order delta estimate | P4-01, P4-07, P5-02 | `WAITING` | — |
 
 Phase exit:
@@ -254,7 +254,7 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
-| P5-02 | `review_p5_02` | `e4fabd4` | `b6cb9f6` | RE-REVIEW (P1 1/P2 4 수정 증거와 전체 diff 재검토) | 1 (재검토 중) | URL validator 범위 정규화와 backend invariant 기반 duplicate row는 후속 검토 | 2026-09-05 |
+| P5-02 | `review_p5_02` | `e4fabd4` | `fceddf7` | APPROVE (최초 P1 1/P2 4를 동일 reviewer 재검토에서 모두 해소) | 1 (해소) | P5-03 다단계 trace cache 크기/gcTime, URL asOf/security 정규화와 backend invariant 기반 duplicate row는 후속 검토 | 2026-09-05 |
 | P5-01 | `review_p5_01` | `5a242ec` | `f3b8735` | APPROVE (누적 P1/P2 모두 동일 reviewer 재검토에서 해소) | 0 | 초대형 `sorted(set(...))` 내부 정렬과 제3자 adapter construction callback 준수는 비차단 잔여 위험; application consumer revalidation은 독립 checkpoint 보장 | 2026-09-05 |
 | P4-08 | `review_p4_08` | `bdee3f7` | `684dc69` | APPROVE (최초 P1 2/P2 3과 new-draft badge를 동일 reviewer 재검토에서 모두 해소) | 2 (해소) | 대형 Diff 전체 행 virtualization은 P6-04, 서로 다른 history page 간 선택은 P6-02 범위 | 2026-09-05 |
 | P4-07 | `review_p4_07` | `f9a0e35` | `380d583` | APPROVE (REQUEST_CHANGES P1 1/P2 1 해소 후 동일 reviewer 재승인) | 0 | saved JSON Graph↔source browser 통합과 대형 DAG 시각·키보드 UX는 P6 E2E/성능·접근성에서 확인 | 2026-09-05 |
@@ -298,7 +298,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
-| P5-02 | review-fix focused 62 passed; reviewer initial focused 58 | frontend typecheck·lint·Vitest 392·build; backend pytest 1,027·Ruff·Pyright | OpenAPI/SDK 재생성 deterministic·diff clean | source identity key·query-cache REST owner·inline→saved late/visible result 폐기·Plan 탭 error/cancel/discard·revision saved wire와 URL back/forward·feature CSS no-important 회귀 | [#67](https://github.com/Nochiski/Quant_study/pull/67) previous CI 4/4 pass, fix 재검토 대기 | 2026-09-05 |
+| P5-02 | author/reviewer focused 62 passed | frontend typecheck·lint·Vitest 392·build; backend pytest 1,027·Ruff·Pyright | OpenAPI/SDK 재생성 deterministic·diff clean | source identity key·query-cache REST owner·inline→saved late/visible result 폐기·Plan 탭 error/cancel/discard·revision saved wire와 URL back/forward·feature CSS no-important 회귀를 reviewer 재확인 | [#67](https://github.com/Nochiski/Quant_study/pull/67) `review_p5_02` APPROVE, review HEAD CI 4/4 pass | 2026-09-05 |
 | P5-01 | author focused 251 + reviewer backend full 1,027·architecture 7 passed | backend pytest 1,027·Ruff `src tests`·Pyright; frontend typecheck·lint·Vitest 369·build | runtime OpenAPI == tracked true; 기존 OpenAPI/SDK 17-file deterministic·schema parity 증거 유지 | reviewer 독립 probe raw consumer 2,000→1, factor output 1,000→1; constructor/scope/raw→factor/portfolio checkpoint·기존 wire/non-finite/schedule/tape parity 재확인 | [#65](https://github.com/Nochiski/Quant_study/pull/65) `review_p5_01` APPROVE, final CI 4/4 pass, MERGED (`e4fabd4`) | 2026-09-05 |
 | P4-08 | author focused 75/66 + reviewer focused 5 files 75 passed | frontend typecheck·lint·vitest 368·build; reviewer 독립 전체 368; real-backend PIT E2E 포함; backend Ruff | OpenAPI/SDK 재생성 deterministic·clean | save source/hash/canonical 결합과 fail-closed 재compile, edit/명시 검증 baseline retry, EOF·대형 duplicate/reorder non-zero, v51 현재 revision page, Diff view 409 recovery, new draft badge까지 검증 | [#63](https://github.com/Nochiski/Quant_study/pull/63) `review_p4_08` APPROVE P0/P1/P2 0, review HEAD `684dc69` CI 4/4 pass | 2026-09-05 |
 | P4-07 | FactorGraph model/UI·disconnected node·plan-null·same-pointer source 복귀·execution gate·new/revision route 53 passed | frontend typecheck·lint·vitest 350·build; real-backend PIT 포함 | generated API 변경 없음 | 실행 노드는 backend plan 순서/contract, disconnected authored node는 별도 미실행 영역·validation contract·exact pointer; hidden editor focus 금지와 명시적 projection→source reveal, Form/JSON selection·undo 보존 검증 | [#62](https://github.com/Nochiski/Quant_study/pull/62) `review_p4_07` APPROVE P0/P1/P2 0, latest approval-doc HEAD CI 4/4 pass, MERGED (`bdee3f7`) | 2026-09-05 |
@@ -339,6 +339,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | P5-02 동일 reviewer 재검토가 최초 P1 1/P2 4 해소와 최신 전체 diff의 새 P0/P1/P2 0을 확인해 APPROVE. reviewer focused 62·lint·typecheck·build·diff check와 review HEAD CI 4/4가 통과했고 source transition/old cache/Plan live region/revision history를 독립 재확인해 APPROVED 전환 | independent review gate·same-reviewer closure·merge 준비 |
 | 2026-09-05 KST | Codex | P5-02 P1 1/P2 4 fix와 focused 62·frontend 392 전체 gate 증거를 [#67](https://github.com/Nochiski/Quant_study/pull/67)에 동기화하고 동일 reviewer `review_p5_02`의 latest full-diff 재검토로 IN_REVIEW 전환 | same-reviewer review-fix gate·latest CI gate |
 | 2026-09-05 KST | Codex | P5-02 review fix `84dce04`: saved source는 kind/id/revision/expected hash, inline은 kind/source hash를 trace ownerKey에 포함하고 REST 응답을 TanStack Query cache 단일 owner로 이동했다. 상태 live region을 탭 밖에 두고 revision saved wire·직접 URL·back/forward, inline→saved late/visible result, same-owner refetch 회귀를 추가했으며 feature의 `!important`를 제거했다. focused 62, frontend 392·typecheck·lint·build, generated deterministic 통과 후 SELF_CHECK 전환 | P1 1/P2 4 전부 회귀 고정·query/source/UI/route 책임 분리·same-reviewer 준비 |
 | 2026-09-05 KST | Codex | `review_p5_02`가 P1 1/P2 4로 REQUEST_CHANGES. 동일 epoch/version/fingerprint에서 inline→saved source identity가 ownerKey에 없어 늦은 응답·기존 결과가 잘못 귀속되는 재현을 확인했다. REST trace query-cache owner, Plan 탭 상태, revision URL/back-forward 통합 회귀, 금지된 `!important`도 같은 reviewer loop에서 수정한다 | exact source provenance·server-state owner·접근성·route acceptance·UI rule |

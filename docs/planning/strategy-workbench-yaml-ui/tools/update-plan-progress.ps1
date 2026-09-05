@@ -75,6 +75,28 @@ $activeStatuses = @(
     "CHANGES_REQUESTED",
     "APPROVED"
 )
+
+# An active stack is a concurrency set, not a priority-ordered list. Aggregate by explicit
+# workflow severity so reordering parallel_window can never hide a requested change.
+$activeStatusPriority = @(
+    "CHANGES_REQUESTED",
+    "IN_PROGRESS",
+    "SELF_CHECK",
+    "IN_REVIEW",
+    "APPROVED"
+)
+
+function Get-AggregateActiveStatus {
+    param([object[]]$CandidateRows)
+
+    foreach ($status in $activeStatusPriority) {
+        if (@($CandidateRows | Where-Object Status -eq $status).Count -gt 0) {
+            return $status
+        }
+    }
+    return $null
+}
+
 $activeRows = @($rows | Where-Object Status -in $activeStatuses)
 
 $parallelMatch = [regex]::Match($original, '(?m)^parallel_window:\s*\[(?<ids>[^\]]*)\]\s*$')
@@ -151,18 +173,12 @@ $orderedActiveRows = @(
         }
     }
 )
-$leadActiveRow = if ($orderedActiveRows.Count -gt 0) {
-    $orderedActiveRows[-1]
-} elseif ($activeRows.Count -gt 0) {
-    $activeRows[0]
-} else {
-    $null
-}
+$aggregateActiveStatus = Get-AggregateActiveStatus -CandidateRows $activeRows
 
 if ($merged -eq $total) {
     $projectStatus = "COMPLETE"
-} elseif ($null -ne $leadActiveRow) {
-    $projectStatus = $leadActiveRow.Status
+} elseif ($null -ne $aggregateActiveStatus) {
+    $projectStatus = $aggregateActiveStatus
 } elseif (@($rows | Where-Object Status -eq "READY").Count -gt 0) {
     $projectStatus = "READY"
 } elseif (@($rows | Where-Object Status -eq "PAUSED").Count -gt 0) {
@@ -284,12 +300,7 @@ foreach ($phase in $phaseGoals.Keys) {
     if ($phaseMerged -eq $phaseRows.Count) {
         $phaseStatus = "MERGED"
     } elseif ($phaseActive.Count -gt 0) {
-        $phaseLead = @($orderedActiveRows | Where-Object Phase -eq $phase)
-        $phaseStatus = if ($phaseLead.Count -gt 0) {
-            $phaseLead[-1].Status
-        } else {
-            $phaseActive[0].Status
-        }
+        $phaseStatus = Get-AggregateActiveStatus -CandidateRows $phaseActive
     } elseif (@($phaseRows | Where-Object Status -eq "READY").Count -gt 0) {
         $phaseStatus = "READY"
     } elseif (@($phaseRows | Where-Object Status -eq "PAUSED").Count -gt 0) {

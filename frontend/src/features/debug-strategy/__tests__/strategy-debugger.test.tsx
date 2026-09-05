@@ -2,7 +2,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   act,
   cleanup,
-  fireEvent,
   render,
   screen,
   waitFor,
@@ -491,17 +490,27 @@ describe("StrategyDebugger", () => {
     );
     const panel = screen.getByRole("tabpanel", { name: "선택 노드" });
     const table = within(panel).getByRole("table");
-    const viewport = table.parentElement as HTMLDivElement;
+    const viewport = within(panel).getByRole("region", {
+      name: "선택한 FactorGraph 노드의 실제 계산 결과",
+    });
+    expect(viewport).toContainElement(table);
     expect(table).toHaveAttribute("aria-rowcount", "101");
     expect(viewport).toHaveAttribute("data-virtualized", "true");
+    expect(viewport).toHaveAttribute("tabindex", "0");
     expect(within(panel).getAllByRole("row").length).toBeLessThan(30);
     expect(within(panel).getAllByText("operation.n5").length).toBeLessThan(30);
     Object.defineProperty(viewport, "clientHeight", {
       configurable: true,
       value: 384,
     });
-    viewport.scrollTop = 100 * 64;
-    fireEvent.scroll(viewport);
+    for (
+      let attempt = 0;
+      attempt < 30 && document.activeElement !== viewport;
+      attempt += 1
+    )
+      await user.tab();
+    expect(viewport).toHaveFocus();
+    await user.keyboard("{End}");
     expect(await within(panel).findByText("sec-99")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
@@ -610,6 +619,7 @@ describe("StrategyDebugger", () => {
     const securityList = screen.getByRole("list", { name: "연결 추적" });
     expect(securityList).toHaveAttribute("data-total-rows", "100");
     expect(securityList).toHaveAttribute("data-virtualized", "true");
+    expect(securityList).toHaveAttribute("tabindex", "0");
     expect(
       Number(securityList.getAttribute("data-rendered-rows")),
     ).toBeLessThan(10);
@@ -620,11 +630,28 @@ describe("StrategyDebugger", () => {
     expect(nodeLists.length).toBeLessThan(10);
     for (const list of nodeLists) {
       expect(list).toHaveAttribute("data-virtualized", "true");
+      expect(list).toHaveAttribute("tabindex", "0");
       expect(Number(list.getAttribute("data-rendered-rows"))).toBeLessThan(20);
     }
     expect(within(securityList).getAllByText("operation.n499").length).toBe(
       nodeLists.length,
     );
+
+    nodeLists[0]!.focus();
+    expect(nodeLists[0]).toHaveFocus();
+    await user.keyboard("{Home}");
+    expect(
+      await within(nodeLists[0]!).findByText("operation.n0"),
+    ).toBeInTheDocument();
+    await user.keyboard("{End}");
+    expect(
+      await within(nodeLists[0]!).findByText("operation.n499"),
+    ).toBeInTheDocument();
+
+    securityList.focus();
+    expect(securityList).toHaveFocus();
+    await user.keyboard("{End}");
+    expect(await within(securityList).findByText("sec-99")).toBeInTheDocument();
   }, 20_000);
 
   it("discards a fingerprint drift on a later linked-trace page", async () => {

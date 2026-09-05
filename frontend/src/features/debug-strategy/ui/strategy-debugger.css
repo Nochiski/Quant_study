@@ -163,11 +163,17 @@
   height: 64px;
 }
 
-.strategy-debugger__virtual-spacer,
-.strategy-debugger__virtual-spacer td {
-  padding: 0 !important;
-  border: 0 !important;
+.strategy-debugger__table .strategy-debugger__virtual-spacer > td {
+  padding: 0;
+  border: 0;
   line-height: 0;
+}
+
+.strategy-debugger__virtual-viewport:focus-visible,
+.strategy-debugger__pipeline-list:focus-visible,
+.strategy-debugger__node-chain:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
 }
 
 .strategy-debugger__table th {

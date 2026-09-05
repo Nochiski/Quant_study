@@ -111,9 +111,13 @@ const VirtualTable = <Row,>({
     <div
       ref={viewportRef}
       className="strategy-debugger__table-wrap strategy-debugger__virtual-viewport"
+      role="region"
+      aria-label={caption}
+      tabIndex={0}
       data-rendered-rows={visible.length}
       data-total-rows={rows.length}
       data-virtualized={virtual.virtualized || undefined}
+      onKeyDown={virtual.onKeyDown}
       onScroll={virtual.onScroll}
     >
       <table
@@ -173,9 +177,11 @@ const VirtualNodeChain = ({
       className="strategy-debugger__node-chain"
       role="list"
       aria-label={t("debugger.stage.nodes")}
+      tabIndex={0}
       data-rendered-rows={virtual.end - virtual.start}
       data-total-rows={nodes.length}
       data-virtualized={virtual.virtualized || undefined}
+      onKeyDown={virtual.onKeyDown}
       onScroll={virtual.onScroll}
     >
       {virtual.paddingBefore > 0 ? (
@@ -289,9 +295,11 @@ const LinkedTraceResult = ({
       className="strategy-debugger__pipeline-list"
       role="list"
       aria-label={t("debugger.tab.trace")}
+      tabIndex={0}
       data-rendered-rows={virtual.end - virtual.start}
       data-total-rows={rows.length}
       data-virtualized={virtual.virtualized || undefined}
+      onKeyDown={virtual.onKeyDown}
       onScroll={virtual.onScroll}
     >
       {virtual.paddingBefore > 0 ? (

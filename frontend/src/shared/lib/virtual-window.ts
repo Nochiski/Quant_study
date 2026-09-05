@@ -3,6 +3,7 @@ import {
   useLayoutEffect,
   useMemo,
   useState,
+  type KeyboardEvent,
   type RefObject,
   type UIEvent,
 } from "react";
@@ -70,6 +71,7 @@ type UseVirtualWindowOptions = Pick<
 };
 
 type UseVirtualWindowResult = VirtualWindow & {
+  onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
   onScroll: (event: UIEvent<HTMLDivElement>) => void;
 };
 
@@ -151,5 +153,34 @@ export const useVirtualWindow = (
     (event: UIEvent<HTMLDivElement>) => updateMetrics(event.currentTarget),
     [updateMetrics],
   );
-  return { ...range, onScroll };
+  const onKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>): void => {
+      // Child controls keep their own arrow/Home/End contract. This adapter only makes the
+      // focusable scroll viewport keyboard-operable when the viewport itself owns focus.
+      if (event.target !== event.currentTarget) return;
+      const element = event.currentTarget;
+      const viewportHeight = element.clientHeight || fallbackViewportHeight;
+      const maximumScroll = Math.max(
+        0,
+        itemCount * itemHeight - viewportHeight,
+      );
+      const deltaByKey: Partial<Record<string, number>> = {
+        ArrowDown: itemHeight,
+        ArrowUp: -itemHeight,
+        PageDown: viewportHeight,
+        PageUp: -viewportHeight,
+      };
+      const delta = deltaByKey[event.key];
+      let next: number | null =
+        delta === undefined ? null : element.scrollTop + delta;
+      if (event.key === "Home") next = 0;
+      if (event.key === "End") next = maximumScroll;
+      if (next === null) return;
+      event.preventDefault();
+      element.scrollTop = Math.min(Math.max(0, next), maximumScroll);
+      updateMetrics(element);
+    },
+    [fallbackViewportHeight, itemCount, itemHeight, updateMetrics],
+  );
+  return { ...range, onKeyDown, onScroll };
 };

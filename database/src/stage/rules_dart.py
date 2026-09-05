@@ -142,7 +142,9 @@ def _row_kind(src: str) -> ExtraColumn:
 # 보조원장 6종 공통: 같은 접수번호 안에 구분 컬럼(se·stock_knd·nm·adtor…)이 같은 복수 행이
 # 실재한다(1차 풀 빌드 09-03 G6: capital 27·hyslr 13·audit 4·tesstk 4·dividend 2·shares 2).
 # 내용 컬럼만으로는 행 식별이 안 되므로 원장 PK `row_hash`(내용 해시)를 키에 넣는다 —
-# DART 응답 행에는 위치 식별자가 없다.
+# DART 응답 행에는 위치 식별자가 없다. 라벨형 키(se·stock_knd·stle·acqs_mth·nm·bsns_year)는 §5 문자열
+# 정규화를 적용한다 — §5 의 '키 정규화 금지' 는 식별자·코드(corp_code·account_id)를 뜻하고, 라벨의 앞뒤
+# 공백·개행은 원장 표기 잡음이다(09-05 equity 리뷰 실측). 접힘은 raw payload 기준이라 영향 없다.
 # ── stg_dividend ← dart_dividend (384,232행) ───────────────────────────────────────────────────
 # se 는 단위 라벨을 품은 구분 문자열('(연결)당기순이익(백만원)'·'현금배당수익률(%)' 등 — survey
 # 패턴)이라 금액 3컬럼의 단위가 행마다 다르다 → 단위 접미사 금지, unit_scale 금지 (§5).
@@ -154,8 +156,8 @@ STG_DIVIDEND = TableRule(
     columns=(
         ColumnRule("row_hash", "row_hash", KIND_TEXT, expected_len=32, key=True),   # 원장 PK
         *_REQ_AXIS,
-        ColumnRule("se", "se", KIND_TEXT, key=True),              # 구분 — 원문 보존(키 구성원)
-        ColumnRule("stock_knd", "stock_knd", KIND_TEXT, key=True),  # '-' 270,320행은 그대로 둔다
+        ColumnRule("se", "se", KIND_TEXT, key=True, normalize_text=True),   # 구분 라벨
+        ColumnRule("stock_knd", "stock_knd", KIND_TEXT, key=True, normalize_text=True),  # '-' 유지
         *_RESP_META,
         ColumnRule("thstrm", "thstrm", KIND_NUMERIC, _DIV_P, _DIV_S),
         ColumnRule("frmtrm", "frmtrm", KIND_NUMERIC, _DIV_P, _DIV_S),
@@ -184,7 +186,7 @@ STG_SHARES = TableRule(
     columns=(
         ColumnRule("row_hash", "row_hash", KIND_TEXT, expected_len=32, key=True),   # 원장 PK
         *_REQ_AXIS,
-        ColumnRule("se", "se", KIND_TEXT, key=True),               # 주식 종류 구분 + '합계'
+        ColumnRule("se", "se", KIND_TEXT, key=True, normalize_text=True),   # 주식 종류 + '합계'
         *_RESP_META,
         ColumnRule("isu_stock_totqy", "isu_stock_totqy_shr", KIND_NUMERIC, *p_headroom(15)),
         ColumnRule("now_to_isu_stock_totqy", "now_to_isu_stock_totqy_shr", KIND_NUMERIC,
@@ -226,8 +228,9 @@ STG_CAPITAL = TableRule(
         ColumnRule("row_hash", "row_hash", KIND_TEXT, expected_len=32, key=True),   # 원장 PK
         *_REQ_AXIS,
         ColumnRule("isu_dcrs_de", "isu_dcrs_de_raw", KIND_TEXT, key=True),
-        ColumnRule("isu_dcrs_stle", "isu_dcrs_stle", KIND_TEXT, key=True),
-        ColumnRule("isu_dcrs_stock_knd", "isu_dcrs_stock_knd", KIND_TEXT, key=True),
+        ColumnRule("isu_dcrs_stle", "isu_dcrs_stle", KIND_TEXT, key=True, normalize_text=True),
+        ColumnRule("isu_dcrs_stock_knd", "isu_dcrs_stock_knd", KIND_TEXT, key=True,
+                   normalize_text=True),          # 개행 579·앞뒤 공백 561행 실측 (equity 리뷰)
         *_RESP_META,
         ColumnRule("isu_dcrs_de", "isu_dcrs_de", KIND_DATE_DOT),
         ColumnRule("isu_dcrs_qy", "isu_dcrs_qy_shr", KIND_NUMERIC, *p_headroom(14)),
@@ -260,10 +263,10 @@ STG_TESSTK = TableRule(
     columns=(
         ColumnRule("row_hash", "row_hash", KIND_TEXT, expected_len=32, key=True),   # 원장 PK
         *_REQ_AXIS,
-        ColumnRule("acqs_mth1", "acqs_mth1", KIND_TEXT, key=True),
-        ColumnRule("acqs_mth2", "acqs_mth2", KIND_TEXT, key=True),
-        ColumnRule("acqs_mth3", "acqs_mth3", KIND_TEXT, key=True),
-        ColumnRule("stock_knd", "stock_knd", KIND_TEXT, key=True),
+        ColumnRule("acqs_mth1", "acqs_mth1", KIND_TEXT, key=True, normalize_text=True),
+        ColumnRule("acqs_mth2", "acqs_mth2", KIND_TEXT, key=True, normalize_text=True),
+        ColumnRule("acqs_mth3", "acqs_mth3", KIND_TEXT, key=True, normalize_text=True),
+        ColumnRule("stock_knd", "stock_knd", KIND_TEXT, key=True, normalize_text=True),
         *_RESP_META,
         ColumnRule("bsis_qy", "bsis_qy_shr", KIND_NUMERIC, *p_headroom(13)),
         ColumnRule("change_qy_acqs", "change_qy_acqs_shr", KIND_NUMERIC, *p_headroom(12)),
@@ -298,10 +301,10 @@ STG_HYSLR = TableRule(
     columns=(
         ColumnRule("row_hash", "row_hash", KIND_TEXT, expected_len=32, key=True),   # 원장 PK
         *_REQ_AXIS,
-        ColumnRule("nm", "nm", KIND_TEXT, key=True),                # 성명 — 키라 정규화 금지
-        ColumnRule("stock_knd", "stock_knd", KIND_TEXT, key=True),
+        ColumnRule("nm", "nm", KIND_TEXT, key=True, normalize_text=True),   # 성명 라벨(공백 1,179행)
+        ColumnRule("stock_knd", "stock_knd", KIND_TEXT, key=True, normalize_text=True),
         *_RESP_META,
-        ColumnRule("relate", "relate", KIND_TEXT),                  # 관계 (NULL 51,993행)
+        ColumnRule("relate", "relate", KIND_TEXT, normalize_text=True),   # 관계 (NULL 51,993행)
         ColumnRule("bsis_posesn_stock_co", "bsis_posesn_stock_co_shr", KIND_NUMERIC,
                    *p_headroom(14)),
         ColumnRule("bsis_posesn_stock_qota_rt", "bsis_posesn_stock_qota_rt_pct", KIND_NUMERIC,
@@ -339,7 +342,8 @@ STG_AUDIT = TableRule(
     columns=(
         ColumnRule("row_hash", "row_hash", KIND_TEXT, expected_len=32, key=True),   # 원장 PK
         *_REQ_AXIS,
-        ColumnRule("bsns_year", "bsns_year_label", KIND_TEXT, key=True),
+        ColumnRule("bsns_year", "bsns_year_label", KIND_TEXT, key=True,
+                   normalize_text=True),          # '제30기\n(전전기)' 개행 30,944행 실측
         *_RESP_META,
         ColumnRule("adtor", "adtor", KIND_TEXT, normalize_text=True),          # 감사인
         ColumnRule("adt_opinion", "adt_opinion", KIND_TEXT),                   # 원문 보존

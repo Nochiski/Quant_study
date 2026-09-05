@@ -3,6 +3,7 @@ import { useCallback, useMemo, useState } from "react";
 
 import {
   strategyDocumentQuery,
+  strategiesKey,
   strategyRevisionsKey,
 } from "../../../entities/strategy";
 import {
@@ -83,7 +84,11 @@ export const useSaveDocument = (
           }),
     onMutate: (snapshot) =>
       setStatus({ kind: "saving", documentEpoch: snapshot.documentEpoch }),
-    onSuccess: (document, snapshot) => {
+    onSuccess: async (document, snapshot) => {
+      // A saved document changes either list membership or its latest-revision projection.
+      // Cancel first so an older in-flight page cannot repopulate the cache after removal.
+      await queryClient.cancelQueries({ queryKey: strategiesKey() });
+      queryClient.removeQueries({ queryKey: strategiesKey() });
       queryClient.setQueryData(
         strategyDocumentQuery(document.strategy_id, document.revision).queryKey,
         document,

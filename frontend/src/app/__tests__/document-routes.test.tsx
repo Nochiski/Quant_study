@@ -24,6 +24,7 @@ import {
   vi,
 } from "vitest";
 
+import { strategiesQuery } from "../../entities/strategy";
 import { readBackendFixture } from "../../shared/testing/backend-fixtures";
 import { t } from "../../shared/config";
 import { App } from "../app";
@@ -392,7 +393,7 @@ afterEach(() => {
 });
 afterAll(() => server.close());
 
-const mount = (initial: string) => {
+const mountWithClient = (initial: string) => {
   const history = createMemoryHistory({ initialEntries: [initial] });
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: 0 } },
@@ -404,8 +405,10 @@ const mount = (initial: string) => {
       operationsEnabled={false}
     />,
   );
-  return history;
+  return { history, queryClient };
 };
+
+const mount = (initial: string) => mountWithClient(initial).history;
 
 /** Waits for the lazy CodeMirror editor and returns its view for programmatic edits. */
 const editor = async () => {
@@ -995,6 +998,63 @@ describe("document routes (P2-04)", () => {
     await user.click(screen.getByRole("button", { name: "리비전 저장" }));
     expect(await screen.findByText(/^충돌:/)).toBeInTheDocument();
     expect(second.state.doc.toString()).toBe(`${STORED}description: 충돌\n`);
+  });
+
+  it("removes stale strategy-list pages and ignores an older in-flight page after save", async () => {
+    const user = userEvent.setup();
+    const { history, queryClient } = mountWithClient(
+      "/research/strategies/s1/revisions/2",
+    );
+    const list = strategiesQuery({ offset: 0, limit: 20 });
+    const stalePage = {
+      items: [
+        {
+          strategy_id: "s1",
+          title: "Old title",
+          latest_revision: 2,
+          spec_hash: "2".repeat(64),
+          updated_at: "2026-09-04T00:00:00Z",
+        },
+      ],
+      total: 1,
+      offset: 0,
+      limit: 20,
+    };
+    queryClient.setQueryData(list.queryKey, stalePage);
+    let releaseLatePage: (() => void) | undefined;
+    const latePage = new Promise<void>((resolve) => {
+      releaseLatePage = resolve;
+    });
+    const oldFetch = queryClient
+      .fetchQuery({
+        ...list,
+        queryFn: async () => {
+          await latePage;
+          return stalePage;
+        },
+      })
+      .catch(() => undefined);
+    await waitFor(() =>
+      expect(queryClient.getQueryState(list.queryKey)?.fetchStatus).toBe(
+        "fetching",
+      ),
+    );
+
+    const view = await editor();
+    replaceText(view, `${STORED}description: latest\n`);
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+    await user.click(saveButton());
+    await waitFor(() =>
+      expect(history.location.pathname).toBe(
+        "/research/strategies/s1/revisions/3",
+      ),
+    );
+    expect(await screen.findByText("방금 저장됨")).toBeInTheDocument();
+    expect(queryClient.getQueryData(list.queryKey)).toBeUndefined();
+
+    releaseLatePage?.();
+    await oldFetch;
+    expect(queryClient.getQueryData(list.queryKey)).toBeUndefined();
   });
 });
 

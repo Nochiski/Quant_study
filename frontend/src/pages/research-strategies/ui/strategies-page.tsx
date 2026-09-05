@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 
 import {
   strategiesQuery,
@@ -20,16 +20,26 @@ const displayTime = (value: string): string => {
   return Number.isNaN(parsed.valueOf())
     ? value
     : new Intl.DateTimeFormat(undefined, {
-        dateStyle: "medium",
-        timeStyle: "short",
+        year: "numeric",
+        month: "short",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
         timeZone: "UTC",
+        timeZoneName: "short",
       }).format(parsed);
 };
 
 const lastPageOffset = (total: number, pageSize: number): number =>
   total === 0 ? 0 : Math.floor((total - 1) / pageSize) * pageSize;
 
-const RevisionRows = ({ strategyId }: { strategyId: string }) => {
+const RevisionRows = ({
+  strategyId,
+  strategyLabel,
+}: {
+  strategyId: string;
+  strategyLabel: string;
+}) => {
   const [offset, setOffset] = useState(0);
   const revisions = useQuery(
     strategyRevisionsQuery(strategyId, {
@@ -65,6 +75,7 @@ const RevisionRows = ({ strategyId }: { strategyId: string }) => {
               <th scope="col">{t("history.revisions.revision")}</th>
               <th scope="col">{t("history.revisions.created")}</th>
               <th scope="col">{t("history.revisions.source")}</th>
+              <th scope="col">{t("history.revisions.specHash")}</th>
               <th scope="col">{t("history.revisions.note")}</th>
               <th scope="col">{t("history.actions")}</th>
             </tr>
@@ -77,6 +88,20 @@ const RevisionRows = ({ strategyId }: { strategyId: string }) => {
                 <td>
                   {revision.source_format ?? revision.origin}
                   <br />
+                  {revision.source_hash === null ? (
+                    <span className="data-list-page__hash">
+                      {t("history.revisions.sourceUnavailable")}
+                    </span>
+                  ) : (
+                    <code
+                      className="data-list-page__hash"
+                      title={revision.source_hash}
+                    >
+                      {revision.source_hash.slice(0, 12)}
+                    </code>
+                  )}
+                </td>
+                <td>
                   <code
                     className="data-list-page__hash"
                     title={revision.spec_hash}
@@ -119,7 +144,7 @@ const RevisionRows = ({ strategyId }: { strategyId: string }) => {
       {revisions.data.total > REVISION_PAGE_SIZE ? (
         <nav
           className="data-list-page__pager"
-          aria-label={t("history.revisions.pagination")}
+          aria-label={`${t("history.revisions.pagination")}: ${strategyLabel}`}
         >
           <Button
             size="small"
@@ -150,6 +175,9 @@ const RevisionRows = ({ strategyId }: { strategyId: string }) => {
 
 const StrategyRow = ({ strategy }: { strategy: StrategySummary }) => {
   const [expanded, setExpanded] = useState(false);
+  const historyId = useId();
+  const strategyLabel = strategy.title || strategy.strategy_id;
+  const historyLabel = `${t("history.revisions.caption")}: ${strategyLabel}`;
   return (
     <>
       <tr>
@@ -183,6 +211,12 @@ const StrategyRow = ({ strategy }: { strategy: StrategySummary }) => {
               size="small"
               tone="ghost"
               aria-expanded={expanded}
+              aria-controls={historyId}
+              aria-label={`${
+                expanded
+                  ? t("history.revisions.close")
+                  : t("history.revisions.open")
+              }: ${strategyLabel}`}
               onClick={() => setExpanded((value) => !value)}
             >
               {expanded
@@ -195,7 +229,12 @@ const StrategyRow = ({ strategy }: { strategy: StrategySummary }) => {
       {expanded ? (
         <tr>
           <td colSpan={5} className="data-list-page__nested">
-            <RevisionRows strategyId={strategy.strategy_id} />
+            <div id={historyId} role="region" aria-label={historyLabel}>
+              <RevisionRows
+                strategyId={strategy.strategy_id}
+                strategyLabel={strategyLabel}
+              />
+            </div>
           </td>
         </tr>
       ) : null}

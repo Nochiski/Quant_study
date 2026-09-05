@@ -189,3 +189,10 @@ def test_exact_bytes_round_trip_including_crlf_and_no_trailing_newline() -> None
         client.get(f"/api/v1/strategies/{strategy_id}/revisions", params={"limit": 501}).status_code
         == 422
     )
+    assert (
+        client.get(
+            f"/api/v1/strategies/{strategy_id}/revisions",
+            params={"offset": 9_007_199_254_740_992},
+        ).status_code
+        == 422
+    )

@@ -709,7 +709,7 @@ def create_app(
     )
     def list_strategy_revisions(
         strategy_id: str,
-        offset: int = Query(default=0, ge=0),
+        offset: int = Query(default=0, ge=0, le=PageRequest.MAX_OFFSET),
         limit: int = Query(default=50, ge=1, le=PageRequest.MAX_LIMIT),
     ) -> Page[RevisionSummary]:
         """Revision history, ascending by revision, paginated deterministically."""
@@ -827,7 +827,7 @@ def create_app(
         operation_id="listStrategies",
     )
     def list_strategies(
-        offset: int = Query(default=0, ge=0),
+        offset: int = Query(default=0, ge=0, le=PageRequest.MAX_OFFSET),
         limit: int = Query(default=50, ge=1, le=PageRequest.MAX_LIMIT),
     ) -> Page[StrategySummary]:
         """Latest immutable revision of every strategy, ordered by strategy id."""

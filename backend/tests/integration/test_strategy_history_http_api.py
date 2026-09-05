@@ -63,3 +63,14 @@ def test_strategy_list_returns_canonical_empty_page_and_rejects_invalid_bounds()
     assert client.get("/api/v1/strategies", params={"offset": -1}).status_code == 422
     assert client.get("/api/v1/strategies", params={"limit": 0}).status_code == 422
     assert client.get("/api/v1/strategies", params={"limit": 501}).status_code == 422
+    portable_boundary = client.get(
+        "/api/v1/strategies", params={"offset": 9_007_199_254_740_991, "limit": 1}
+    )
+    assert portable_boundary.status_code == 200
+    assert portable_boundary.json()["items"] == []
+    assert (
+        client.get(
+            "/api/v1/strategies", params={"offset": 9_007_199_254_740_992, "limit": 1}
+        ).status_code
+        == 422
+    )

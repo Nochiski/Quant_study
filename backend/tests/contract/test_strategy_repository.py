@@ -333,6 +333,13 @@ def test_record_invariants_fail_closed() -> None:
         RevisionProvenance(RevisionOrigin.LEGACY_JSON, datetime(2026, 9, 4))
     with pytest.raises(ValueError, match="page request out of range"):
         PageRequest(limit=0)
+    with pytest.raises(ValueError, match="page request out of range"):
+        PageRequest(offset=PageRequest.MAX_OFFSET + 1)
+    with pytest.raises(ValueError, match="page request out of range"):
+        PageRequest(offset=True)
+    with pytest.raises(ValueError, match="page request out of range"):
+        PageRequest(offset=1.5)  # type: ignore[arg-type]
+    assert PageRequest(offset=PageRequest.MAX_OFFSET).offset == PageRequest.MAX_OFFSET
 
 
 def test_history_exposes_document_source_provenance(
@@ -631,9 +638,7 @@ def test_sqlite_refuses_to_claim_an_unowned_sqlite_sequence_residue(
 ) -> None:
     path = tmp_path / "unowned-sequence-residue.sqlite3"
     with sqlite3.connect(path) as connection:
-        connection.execute(
-            "CREATE TABLE discarded (id INTEGER PRIMARY KEY AUTOINCREMENT)"
-        )
+        connection.execute("CREATE TABLE discarded (id INTEGER PRIMARY KEY AUTOINCREMENT)")
         connection.execute("DROP TABLE discarded")
         assert connection.execute(
             "SELECT type, name FROM sqlite_schema ORDER BY type, name"
@@ -746,9 +751,7 @@ def test_sqlite_rejects_unexpected_sqlite_managed_schema_objects(tmp_path: Path)
     path = tmp_path / "extra-sqlite-object.sqlite3"
     _sqlite(path).close()
     with sqlite3.connect(path) as connection:
-        connection.execute(
-            "CREATE TABLE discarded (id INTEGER PRIMARY KEY AUTOINCREMENT)"
-        )
+        connection.execute("CREATE TABLE discarded (id INTEGER PRIMARY KEY AUTOINCREMENT)")
         connection.execute("DROP TABLE discarded")
 
     with pytest.raises(StrategyRepositoryStorageError, match="unexpected"):

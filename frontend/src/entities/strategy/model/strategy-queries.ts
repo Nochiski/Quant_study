@@ -2,11 +2,13 @@ import { queryOptions } from "@tanstack/react-query";
 
 import { strategyWorkbenchApi } from "../../../shared/api";
 
+export const strategiesKey = () => ["strategies"] as const;
+
 export const strategiesQuery = (
   page: { offset?: number; limit?: number } = {},
 ) =>
   queryOptions({
-    queryKey: ["strategies", page.offset ?? 0, page.limit ?? 50],
+    queryKey: [...strategiesKey(), page.offset ?? 0, page.limit ?? 50],
     queryFn: () => strategyWorkbenchApi.listStrategies(page),
   });
 

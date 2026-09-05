@@ -403,37 +403,65 @@ def _view(con: duckdb.DuckDBPyConnection, name: str, rows_: list[dict[str, objec
                 f"AS t({', '.join(cols)})")
 
 
+def _setup(con: duckdb.DuckDBPyConnection, events: list[dict[str, object]],
+           prices: list[dict[str, object]], cal: list[date],
+           cr: list[dict[str, object]] | None, const: dict[str, object] | None) -> None:
+    """합성 입력 뷰(corp_event·price_daily·trading_calendar·stg_event_cr) + `_const`."""
+    ev_types = {"event_id": "VARCHAR", "ticker": "VARCHAR", "corp_code": "VARCHAR",
+                "event_type": "VARCHAR", "announce_date": "DATE", "effective_date": "DATE",
+                "effective_basis": "VARCHAR", "ratio": "DOUBLE", "rcept_no": "VARCHAR",
+                "source": "VARCHAR"}
+    evs = []
+    for e in events:
+        full = {**_EV_DEFAULT, **e}
+        full["event_id"] = f"{full['ticker']}:{full['event_type']}:{full['effective_date']}"
+        evs.append(full)
+    _view(con, "corp_event", evs, ev_types)
+    _view(con, "price_daily", prices,
+          {"ticker": "VARCHAR", "date": "DATE", "close": "DECIMAL(9,0)",
+           "price_kind": "VARCHAR"})
+    _view(con, "trading_calendar", [{"date": d} for d in cal], {"date": "DATE"})
+    _view(con, "stg_event_cr", cr or [{"rcept_no": "x", "corp_code": "x", "cr_mth": None,
+                                       "cr_rs": None}],
+          {"rcept_no": "VARCHAR", "corp_code": "VARCHAR", "cr_mth": "VARCHAR",
+           "cr_rs": "VARCHAR"})
+    k = {**_CONST, **(const or {})}
+    con.execute("CREATE OR REPLACE TEMP TABLE _const AS SELECT "
+                + ", ".join(f"{_lit(v)} AS {c}" for c, v in k.items()))
+
+
 def run_adj_sql(events: list[dict[str, object]], prices: list[dict[str, object]],
                 cal: list[date], cr: list[dict[str, object]] | None = None,
                 const: dict[str, object] | None = None) -> dict[str, dict[str, object]]:
     """`sql/adj_factor.sql` 을 합성 입력 뷰 위에서 그대로 실행한다(프레임·게이트 없이 산출식만)."""
     con = duckdb.connect()
     try:
-        ev_types = {"event_id": "VARCHAR", "ticker": "VARCHAR", "corp_code": "VARCHAR",
-                    "event_type": "VARCHAR", "announce_date": "DATE", "effective_date": "DATE",
-                    "effective_basis": "VARCHAR", "ratio": "DOUBLE", "rcept_no": "VARCHAR",
-                    "source": "VARCHAR"}
-        evs = []
-        for e in events:
-            full = {**_EV_DEFAULT, **e}
-            full["event_id"] = f"{full['ticker']}:{full['event_type']}:{full['effective_date']}"
-            evs.append(full)
-        _view(con, "corp_event", evs, ev_types)
-        _view(con, "price_daily", prices,
-              {"ticker": "VARCHAR", "date": "DATE", "close": "DECIMAL(9,0)",
-               "price_kind": "VARCHAR"})
-        _view(con, "trading_calendar", [{"date": d} for d in cal], {"date": "DATE"})
-        _view(con, "stg_event_cr", cr or [{"rcept_no": "x", "corp_code": "x", "cr_mth": None,
-                                           "cr_rs": None}],
-              {"rcept_no": "VARCHAR", "corp_code": "VARCHAR", "cr_mth": "VARCHAR",
-               "cr_rs": "VARCHAR"})
-        k = {**_CONST, **(const or {})}
-        con.execute("CREATE OR REPLACE TEMP TABLE _const AS SELECT "
-                    + ", ".join(f"{_lit(v)} AS {c}" for c, v in k.items()))
+        _setup(con, events, prices, cal, cr, const)
         rel = con.execute(_body())
         cols = [d[0] for d in rel.description]
         return {str(r[cols.index("event_id")]): dict(zip(cols, r, strict=True))
                 for r in rel.fetchall()}
+    finally:
+        con.close()
+
+
+def run_eg3(events: list[dict[str, object]], prices: list[dict[str, object]],
+            cal: list[date], const: dict[str, object] | None = None):
+    """같은 합성 입력 위에서 산출을 `out_pq` 로 올리고 `EG3_adj_factor` 만 돌린다."""
+    from equity.gates import EquityGateContext
+
+    con = duckdb.connect()
+    try:
+        _setup(con, events, prices, cal, None, const)
+        con.execute(f"CREATE OR REPLACE TEMP TABLE out_pq AS {_body()}")
+        n_out = con.execute("SELECT count(*) FROM out_pq").fetchone()[0]   # type: ignore[index]
+        k = {**_CONST, **(const or {})}
+        bl = Baseline({"corp_event": {"near_dup_window_days": k["near_dup_window_days"]},
+                       "adj_factor": {c: k[c] for c in rules_s06.PRICE_MATCH_CONSTS}})
+        ctx = EquityGateContext(con=con, rule=ADJ, out_view="out_pq", reject_view=None,
+                                pinned={}, n_out=int(n_out), n_reject=0, reject_by_reason={},
+                                inputs={}, partition_hashes={}, baseline=bl)
+        return rules_s06.eg3_adj_factor(ctx)
     finally:
         con.close()
 
@@ -539,6 +567,58 @@ def test_합성_복합_사건은_계수_곱으로_한_세션에_같이_적용된
     assert b2["factor_source"] == "same_day_suppressed" and b2["factor_ok"] is False
     assert b2["apply_basis"] == "price_matched" and b2["apply_date"] == cal[26]
     assert (b2["price_factor"], b2["share_factor"]) == (1.0, 1.0)
+
+
+def test_합성_명목일이_떨어진_성분의_공통_apply_date는_성분_창_기준이다(tmp_path: Path) -> None:
+    """4차(서버 3차 EG3 FAIL `n_apply_outside_window` 3): 감자(명목 세션 20)와 액면병합(명목 50)이
+    뒤쪽 명목일 +20 세션(70)에서 한 번에 ×4 조정 — 앞 멤버 자기 창 [15, 60] 밖이지만 성분 창
+    [15, 90] 안이라 combined 유효(EG3 도 성분 창으로 판정). 점프가 성분 창 밖(95)이면 성분 전체
+    no_price_match."""
+    cal = sessions(120)
+    ev = [{"ticker": "A00008", "event_type": "capred", "effective_date": cal[20], "ratio": 0.5,
+           "source": "event_cr", "rcept_no": "20191202000008", "announce_date": cal[5]},
+          {"ticker": "A00008", "event_type": "reverse_split", "effective_date": cal[50],
+           "ratio": 0.5, "source": "krx_listing", "effective_basis": "krx_shares_change",
+           "announce_date": cal[50]}]
+    px = flat_prices("A00008", cal, 1000, jumps={70: 4.0}, halt=(19, 69))
+    f = run_adj_sql(ev, px, cal)
+    a, b = f[f"A00008:capred:{cal[20]}"], f[f"A00008:reverse_split:{cal[50]}"]
+    for x in (a, b):
+        assert x["apply_basis"] == "price_matched_combined" and x["apply_date"] == cal[70]
+        assert x["factor_ok"] is True and (x["price_factor"], x["share_factor"]) == (2.0, 0.5)
+    g = run_eg3(ev, px, cal)
+    assert g.status is GateStatus.PASS, g.detail
+    m = g.metrics
+    assert m["n_apply_outside_window"] == 0 and m["n_combined_apply_inconsistent"] == 0
+    assert m["apply_offset_sessions_max"] == 50            # 앞 멤버 기준 실측(창 40 초과)
+    assert m["apply_offset_sessions_max_individual"] == 0
+    assert m["apply_offset_sessions_max_combined"] == 50
+    assert m["n_by_apply_basis"] == {"price_matched_combined": 2}
+    # 성분 창 [15, 90] 밖(95)에서만 점프 → 성분 전체 no_price_match
+    px2 = flat_prices("A00008", cal, 1000, jumps={95: 4.0}, halt=(19, 94))
+    h = run_adj_sql(ev, px2, cal)
+    assert {x["factor_source"] for x in h.values()} == {"no_price_match"}
+    assert {x["apply_basis"] for x in h.values()} == {"unmatched"}
+    g2 = run_eg3(ev, px2, cal)
+    assert g2.status is GateStatus.PASS and g2.metrics["n_apply_outside_window"] == 0
+    # 개별 매칭이 자기 창 밖에 놓이는 산출은 만들어질 수 없다 — 억지로 만들면 EG3 가 잡는다
+    con = duckdb.connect()
+    try:
+        _setup(con, ev, px, cal, None, None)
+        con.execute(f"CREATE OR REPLACE TEMP TABLE out_pq AS {_body()}")
+        con.execute("UPDATE out_pq SET apply_basis = 'price_matched'")   # 성분 → 개별로 위장
+        from equity.gates import EquityGateContext
+
+        bl = Baseline({"corp_event": {"near_dup_window_days": 5},
+                       "adj_factor": {c: _CONST[c] for c in rules_s06.PRICE_MATCH_CONSTS}})
+        ctx = EquityGateContext(con=con, rule=ADJ, out_view="out_pq", reject_view=None,
+                                pinned={}, n_out=2, n_reject=0, reject_by_reason={}, inputs={},
+                                partition_hashes={}, baseline=bl)
+        bad = rules_s06.eg3_adj_factor(ctx)
+    finally:
+        con.close()
+    assert bad.status is GateStatus.FAIL and bad.metrics["n_apply_outside_window"] == 1
+    assert bad.metrics["n_ok_same_apply_date_individual"] == 1
 
 
 def test_합성_소액_이벤트는_가격으로_못_가리므로_항상_nominal(tmp_path: Path) -> None:

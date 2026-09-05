@@ -147,13 +147,18 @@ def eg3_adj_factor(ctx: EquityGateContext) -> GateResult:
     # corp_event · 캘린더 정합 — 키·속성·ratio · 명목 세션 · apply 창 · available 재계산.
     lookback = _const_or_none(ctx, ctx.rule.name, "price_match_lookback_sessions")
     window = _const_or_none(ctx, ctx.rule.name, "price_match_window_sessions")
-    win_sql = ("count(*) FILTER (WHERE n_apply IS NOT NULL AND n_nom IS NOT NULL AND "
-               f"(n_apply < n_nom - {int(lookback)} OR n_apply > n_nom + {int(window)}))"
+    # 창 검사: 개별(nominal·price_matched·unmatched)은 자기 명목 세션 창, 복합 성분(combined)은
+    # **성분 창** [min(명목) − lookback, max(명목) + window] — 성분 = 같은 티커·같은 apply_date 의
+    # combined 행(서버 3차: 멤버 명목일이 떨어진 성분의 공통 apply_date 가 멤버 자기 창 밖이라
+    # FAIL 했다).
+    win_sql = ("count(*) FILTER (WHERE n_apply IS NOT NULL AND n_lo IS NOT NULL AND "
+               f"(n_apply < n_lo - {int(lookback)} OR n_apply > n_hi + {int(window)}))"
                if lookback is not None and window is not None else "NULL")
     (n_event_mismatch, n_share_ne_ratio, n_avail_mismatch, n_avail_before_announce,
-     n_apply_off_cal, n_nominal_ne, n_apply_outside, max_off, n_off_pos, med_off) = _row(ctx, f"""
+     n_apply_off_cal, n_nominal_ne, n_apply_outside, max_off, max_off_ind, max_off_comb,
+     n_off_pos, med_off) = _row(ctx, f"""
         WITH cal AS (SELECT date, row_number() OVER (ORDER BY date) AS n FROM trading_calendar),
-             j AS (
+             j0 AS (
           SELECT a.*, e.event_id AS e_id, e.ticker AS e_ticker, e.effective_date AS e_eff,
                  e.event_type AS e_type, e.announce_date AS e_ann, e.corp_code AS e_corp, e.ratio,
                  ca.n AS n_apply,
@@ -161,7 +166,16 @@ def eg3_adj_factor(ctx: EquityGateContext) -> GateResult:
                  (SELECT c.date FROM cal c WHERE c.n = ca.n + 1) AS next_session
           FROM {v} a
           LEFT JOIN corp_event e ON e.event_id = a.event_id
-          LEFT JOIN cal ca ON ca.date = a.apply_date)
+          LEFT JOIN cal ca ON ca.date = a.apply_date),
+             j AS (
+          SELECT j0.*,
+                 CASE WHEN apply_basis = 'price_matched_combined'
+                      THEN min(n_nom) OVER (PARTITION BY ticker, apply_date, apply_basis)
+                      ELSE n_nom END AS n_lo,
+                 CASE WHEN apply_basis = 'price_matched_combined'
+                      THEN max(n_nom) OVER (PARTITION BY ticker, apply_date, apply_basis)
+                      ELSE n_nom END AS n_hi
+          FROM j0)
         SELECT
           count(*) FILTER (WHERE e_id IS NULL OR ticker IS DISTINCT FROM e_ticker
                               OR effective_date IS DISTINCT FROM e_eff
@@ -175,6 +189,10 @@ def eg3_adj_factor(ctx: EquityGateContext) -> GateResult:
           count(*) FILTER (WHERE apply_basis = 'nominal' AND n_apply IS DISTINCT FROM n_nom),
           {win_sql},
           coalesce(max(n_apply - n_nom) FILTER (WHERE factor_ok), 0),
+          coalesce(max(n_apply - n_nom) FILTER (WHERE factor_ok
+                     AND apply_basis IN ('nominal', 'price_matched')), 0),
+          coalesce(max(n_apply - n_nom) FILTER (WHERE factor_ok
+                     AND apply_basis = 'price_matched_combined'), 0),
           count(*) FILTER (WHERE factor_ok AND n_apply <> n_nom),
           coalesce(median(n_apply - n_nom) FILTER (WHERE factor_ok AND n_apply <> n_nom), 0)
         FROM j""")
@@ -269,7 +287,9 @@ def eg3_adj_factor(ctx: EquityGateContext) -> GateResult:
         "n_no_price_match_no_price_rows": n_unmatched_no_price,
         "n_nominal_small_expected": n_small_nominal,
         "n_ok_apply_ne_nominal": int(str(n_off_pos)),
-        "apply_offset_sessions_max": int(str(max_off)),
+        "apply_offset_sessions_max": int(str(max_off)),                 # combined 포함 실측
+        "apply_offset_sessions_max_individual": int(str(max_off_ind)),  # 자기 창 기준(≤ window)
+        "apply_offset_sessions_max_combined": int(str(max_off_comb)),   # 성분 창 기준
         "apply_offset_sessions_median_nonzero": float(str(med_off)),
         "max_ok_product_dev": float(str(max_dev)),
         "n_available_before_announce": int(str(n_avail_before_announce)),

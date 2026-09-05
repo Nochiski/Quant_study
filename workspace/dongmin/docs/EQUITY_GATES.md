@@ -1777,7 +1777,7 @@ workspace/dongmin/src/equity/
 | available_date | min(announce, effective_date 다음 거래일) | **min(announce, apply_date 다음 세션)**. EG3_adj_factor 재계산 술어 갱신. 절단본: 토요일 기준일 11-28 → 명목 11-30 → 12-01 | 오케스트레이터 확정 규칙 2 |
 | 뷰 `v_cum_adj` | `d < effective_date ≤ as_of` | **`d < apply_date ≤ as_of`**, (ticker, apply_date) 로 접어 누적(복합 성분 = 같은 날 곱). `v_adj_price`·`v_adj_volume` 은 그대로 이것을 부른다 | 규칙 2 |
 | EG8-P02/P03 | effective_date(비거래일이면 뒤 첫 거래일) | **apply_date** 에서 측정. P03 은 거래량 중앙값 0 인 이벤트를 분모에서 빼고 `n_ok_median_zero`·`n_ok_volume_judged` 기록. seed 유지 0.30 · 10(근거: 매칭 잔여 ≤ 0.15 구조 상한 + 소액 nominal 은 제한폭 30% + 절단본 max 0.093·3.43), ★ 서버 재측정 | 규칙 3 |
-| EG3_adj_factor 추가 | — | apply_basis 어휘 · apply_date NOT NULL·캘린더 세션 · `n_apply_outside_window`(n0 − lookback ≤ n ≤ n0 + window) · `n_nominal_apply_ne_nominal_session` · `n_combined_apply_inconsistent`(성분 쌍 apply_date 상이 0) · `n_ok_same_apply_date_individual` · `n_unmatched_source_mismatch`(no_price_match ⇔ unmatched) · `n_ok_apply_basis_bad`. 기록형: `n_by_apply_basis`·`n_ok_by_event_type_apply_basis`·`n_no_price_match_no_price_rows`(창 안 거래 행 0 = 가격 부재, 매칭 실패 아님)·`apply_offset_sessions_max`·`_median_nonzero`·`n_nominal_small_expected` | 규칙 4 |
+| EG3_adj_factor 추가 | — | apply_basis 어휘 · apply_date NOT NULL·캘린더 세션 · `n_apply_outside_window`(개별: n0 − lookback ≤ n ≤ n0 + window · combined: 성분 창 min(n0) − lookback ≤ n ≤ max(n0) + window, 4차) · `n_nominal_apply_ne_nominal_session` · `n_combined_apply_inconsistent`(성분 쌍 apply_date 상이 0) · `n_ok_same_apply_date_individual` · `n_unmatched_source_mismatch`(no_price_match ⇔ unmatched) · `n_ok_apply_basis_bad`. 기록형: `n_by_apply_basis`·`n_ok_by_event_type_apply_basis`·`n_no_price_match_no_price_rows`(창 안 거래 행 0 = 가격 부재, 매칭 실패 아님)·`apply_offset_sessions_max`·`_median_nonzero`·`n_nominal_small_expected` | 규칙 4 |
 | FX-2-001 | — | + apply_basis nominal · apply_date 2018-05-04(직전 거래 종가는 정지 전 04-27 2,650,000, reference 행은 건너뛴다) | 절단본 |
 | FX-2-004 | (`101970`, 2018-10-12) 두 축 상이 | 절단본 101970 은 폐지 기간 사건이라 창에 거래 행 0 → **`no_price_match`·unmatched·계수 1** 로 고정(가격 부재 사건은 적용하지 않는다). 두 축 상이는 합성 가격 SQL 테스트(정지 뒤 재개일 +11 세션 ×9.8 → price_matched (10, 0.1)) | `test_equity_s06_adj.py::test_합성_*` |
 | 부정 픽스처 | FX-N-003·not-ok·available | + apply_date=effective_date 변종 → `n_apply_off_calendar` 2(토요일 기준일)·`n_nominal_apply_ne_nominal_session` 1 | — |
@@ -1814,3 +1814,15 @@ workspace/dongmin/src/equity/
 | FX-N-006 | `n_volume_jump_over ≥ 2` | `n_volume_ratio_out_of_band = 1` ∧ 집합 중앙값 > 1,000(절단본 50:1 뿐이라 ≈ 2,500) ∧ `n_ok_volume_ratio_over_10` 3 → 여전히 EG8 만 FAIL | `test_FX_N_006_*` |
 | 합성 테스트 | 5 | + 정지 중 참고가 행(세션 27)에 먼저 실린 기준가 ×9.9 → apply_date = 그 참고가 행(재개일 31 은 잔여 0 이라 후보 아님) · ratio 1 → no_share_change | `test_합성_참고가_행_*`·`test_합성_ratio_1_*` |
 | 절단본 EG8(3차) | max_abs_adj_return 0.0929 · 하루 점프 max 3.43 | max_abs_adj_return **0.0929**(동일) · `n_ok_abs_adj_return_over_030` 0 · 집합 중앙값 비 **1.232**(005930 1.232 · 005935 1.345 · 247540 1.111, p10 1.135 · p90 1.322 · max 1.345) · > 10 건수 0 · 미정의 0 → pass | DESIGN §10 P23 |
+
+**S06 4차 정정 — 복합 성분의 창 판정 (2026-09-05, 서버 3차 빌드 EG3_adj_factor FAIL `n_apply_outside_window` 3 → `rules_s06.py`)**
+
+서버 3차(행 대 행, 3,226행·ok 1,390 · combined 10 · `apply_offset_sessions_max` 48 > 창 40): 다른 EG3 술어는 전부 0. 산출식 (c) 는 성분 창 [min(명목) − lookback, max(명목) + window] 에서만 탐색하므로 창 밖 3행은 combined 성분의 공통 apply_date 가 **멤버 자기 창** 밖인 경우다(개별 매칭은 SQL 이 자기 창 안으로 제한한다).
+
+| 항목 | 3차 | 정정 | 근거 |
+|---|---|---|---|
+| 규칙 | (암묵) 성분 창 탐색 | **확정**: 성분의 공통 apply_date 는 성분 전체의 [min(명목) − lookback, max(명목) + window] 안이면 유효. 성분 창 밖은 탐색 대상이 아니므로 성분 전체 no_price_match(산출식 gwin 그대로) | 오케스트레이터 확정 |
+| EG3 `n_apply_outside_window` | 전 행 자기 명목 세션 창 | 개별(nominal·price_matched·unmatched·not-ok)은 자기 창, **combined 는 성분 창** — 성분은 같은 티커·같은 apply_date 의 combined 행으로 게이트가 독립 복원(재귀 CTE 재실행 없음) | 항진명제 회피 |
+| 기록형 | `apply_offset_sessions_max` | + `apply_offset_sessions_max_individual`(자기 창 기준, ≤ window 여야 한다) · `apply_offset_sessions_max_combined`(성분 창 기준). 기존 max 는 combined 포함 실측 그대로 | 지시 |
+| 합성 테스트 | — | 명목 세션 20(감자)·50(액면병합), 세션 70 에 ×4 한 번 → 둘 다 combined @70(앞 멤버 오프셋 50), EG3 pass·`n_apply_outside_window` 0·max 50/개별 0/성분 50 · 점프 95(성분 창 [15, 90] 밖) → 성분 전체 no_price_match · 성분 행을 `price_matched` 로 위장 → EG3 FAIL(창 밖 1 + 같은 날 개별 1) | `test_합성_명목일이_떨어진_성분_*` |
+| 절단본 | combined 0 | 변화 없음(ok 3 nominal · EG8 3차 수치 동일) | DESIGN §10 P23 |

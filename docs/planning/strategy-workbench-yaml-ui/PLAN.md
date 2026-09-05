@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: SELF_CHECK
+project_status: IN_REVIEW
 current_phase: P6
 current_pr: P6-02
 active_prs: [P6-02]
 parallel_window: []
-last_updated: 2026-09-05T22:25:16+09:00
+last_updated: 2026-09-05T22:26:13+09:00
 planned_prs: 52
 merged_prs: 45
 approved_prs: 45
@@ -22,13 +22,13 @@ progress_percent: 87
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `SELF_CHECK` |
+| Project status | `IN_REVIEW` |
 | Current phase | `P6` |
 | Current/next PR | `P6-02` |
 | Active PR | `P6-02` |
 | Progress | `45 / 52 merged (87%)` |
 | Approved | `45 / 52` |
-| Aggregated at | `2026-09-05 22:25 KST` |
+| Aggregated at | `2026-09-05 22:26 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -78,7 +78,7 @@ progress_percent: 87
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
 | P4 | Outline, Contract, Projections | 10 | 10 | `MERGED` |
 | P5 | Truthful Trace UI | 3 | 3 | `MERGED` |
-| P6 | Professional release and migration | 9 | 2 | `SELF_CHECK` |
+| P6 | Professional release and migration | 9 | 2 | `IN_REVIEW` |
 | **Total** |  | **52** | **45** | **87%** |
 <!-- PLAN:PHASES:END -->
 
@@ -86,14 +86,14 @@ progress_percent: 87
 
 | 항목 | 값 |
 |---|---|
-| PR | `P6-02` Server draft persistence/CAS/recovery UI SELF_CHECK |
+| PR | `P6-02` Server draft persistence/CAS/recovery UI IN_REVIEW |
 | Intent | invalid source를 보존하는 server-owned draft CAS와 multi-device 복구 UX를 추가하되 StrategySpec·immutable revision의 기존 SoT를 재정의하지 않는다. 최초 review의 size finding에 따라 strategy/revision history와 backtest history는 P6-08/P6-09로 분리한다 |
 | Acceptance | opaque draft ID와 monotonic version/expected_version으로 UTF-8 표현 가능한 exact source·format·source hash·base revision/hash·schema version·UTC updated_at을 SQLite에 저장하고 restart·두 client create/update/delete race를 원자 처리; compile 성공을 요구하지 않는 invalid source 복구; UTF-8 불가 입력은 typed 422; 모든 GET/PUT/409 record를 요청 draft ID·요청 snapshot과 결합해 malformed 응답을 fail-closed; base 원문으로 revert하면 known version을 CAS-delete하고 409 newer writer를 보존; URL draft ID 확정 전 edit도 유실 없이 저장; 서버 invalid와 transport offline을 구분; local recovery fallback 유지; OpenAPI/generated SDK와 backend/frontend hostile 계약 테스트 동기화 |
 | Non-goals | strategy/revision history(P6-08), backtest history(P6-09), durable backtest artifact/run ledger, 인증·사용자별 draft ownership, CRDT/자동 병합, legacy editor 제거(P6-06), command palette(P6-03) |
 | Branch/worktree | `feat/p6-02-server-draft-history` (`Quant_study-p6-02`) |
 | Base SHA | `206ee41` (P6-01 merge 기록 포함 latest main) |
-| Head SHA | `ede3cab` (review findings fixed; self-check complete) |
-| Diff stat | base 대비 39 files, +3,765/-88. OpenAPI/generated 775줄과 회귀 테스트 998줄을 포함한 server-draft 단일 vertical slice; history는 P6-08/P6-09로 분리 완료 |
+| Head SHA | `b9f3946` (review-fix self-check freeze; review-request record follows) |
+| Diff stat | base 대비 39 files, +3,766/-88. OpenAPI/generated 775줄과 회귀 테스트 998줄을 포함한 server-draft 단일 vertical slice; history는 P6-08/P6-09로 분리 완료 |
 | Focused tests | backend draft repository/HTTP 14 passed; frontend server-draft+document-route 54 passed; hostile surrogate·wrong-ID GET/409·base-revert CAS·new-draft first-edit 회귀 포함 |
 | Full gate | backend 1,111 passed, scoped Ruff·Pyright; frontend 416 passed, typecheck·lint·build; Rust 13 passed + fmt/clippy; root entrypoint 5 passed; OpenAPI/SDK 2회 deterministic, diff check 통과 |
 
@@ -232,7 +232,7 @@ Phase exit:
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [x] | `P6-01` | SQLite persistent strategy revision repository | P1-07 | `MERGED` | [#69](https://github.com/Nochiski/Quant_study/pull/69) · `review_p6_01` APPROVE |
-| [ ] | `P6-02` | Server draft persistence/CAS/recovery UI | P6-01, P3-06, P4-08 | `SELF_CHECK` | `review_p6_02` P1 4/P2 3 수정 완료; 동일 reviewer 재검토 대기 |
+| [ ] | `P6-02` | Server draft persistence/CAS/recovery UI | P6-01, P3-06, P4-08 | `IN_REVIEW` | `review_p6_02` P1 4/P2 3 수정분과 축소된 full diff 재검토 중 |
 | [ ] | `P6-03` | Keyboard workflow와 Command Palette | P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `WAITING` | — |
 | [ ] | `P6-04` | Large/hostile spec 성능·접근성·i18n과 soft dark theme (`$ref`-only cycle fail-closed 포함) | P3-05, P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `WAITING` | — |
 | [ ] | `P6-05` | Playwright/visual regression infrastructure와 CI | P2-03, P3-05, P6-04 | `WAITING` | — |
@@ -346,6 +346,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | P6-02 review fix self-check를 `b9f3946`에 고정했다. base `206ee41` 대비 최신 범위는 39 files +3,766/-88이고 history UI/API를 제외한 exact-source draft persistence/CAS/recovery 단일 vertical slice다. PR 제목·본문도 축소 범위와 hostile 회귀 및 최신 전체 gate로 교체하고, 최초 reviewer `review_p6_02`에게 일곱 finding 폐쇄와 최신 full diff를 재검토하도록 IN_REVIEW로 전환한다 | 13.3 diff freeze·same-reviewer closure·최신 CI gate |
 | 2026-09-05 KST | Codex | P6-02 reviewer 지적을 `ede3cab`에서 수정했다. UTF-8로 encode할 수 없는 scalar는 typed 422로 거부하고, GET/PUT/409 응답은 요청 draft ID와 제출한 CAS snapshot에 결합해 다른 draft 또는 malformed payload를 fail-closed 처리한다. 저장된 edit를 immutable base로 되돌리면 CAS-delete하며 409의 newer writer는 보존하고, 신규 route는 첫 paint 전에 opaque draft ID를 갖는다. typed 422와 transport offline UI를 분리하고 history를 P6-08/P6-09로 완전히 추출했다. hostile focused backend 14/frontend 54, 전체 backend 1,111/frontend 416, Ruff·Pyright·typecheck·lint·build·Rust 13·root 5·generated 2회 deterministic을 통과해 SELF_CHECK로 전환한다 | exact-source/application SoT·HTTP identity binding·serialized CAS ownership·history vertical-slice 분리·same-reviewer fix loop |
 | 2026-09-05 KST | Codex | P6-02 fresh reviewer가 raw `\\ud800` source의 unhandled 500, cross-draft GET/409 identity 신뢰, base revert 후 stale server draft 잔존, 독립 배포 가능한 history까지 묶은 size exception을 P1 4건으로 판정했다. 초기 draft ID 전 edit race, typed invalid/offline 혼합, out-of-range history/provenance 누락 P2 3건도 확인했다. P6-02를 server draft 수직 슬라이스로 축소하고 history는 P6-08/P6-09로 분리하며 같은 `review_p6_02`에게 수정분을 재검토받도록 CHANGES_REQUESTED로 전환했다 | independent hostile review·same-reviewer closure·small PR rule·fail-closed source/identity |
 | 2026-09-05 KST | Codex | P6-02를 base `206ee41` 대비 review freeze `d83aa2a`(52 files, +4,929/-234)로 고정했다. 자체 계약 점검에서 application invalid 422와 FastAPI malformed 422를 명시적 union으로 보강했고 OpenAPI/SDK를 재생성한 뒤 clean deterministic을 재확인했다. 이제 신규 독립 reviewer에게 correctness·CAS race·SoT/경계·history UX와 size exception을 함께 검토 요청한다 | 13.3 diff freeze·typed HTTP contract·fresh reviewer gate |

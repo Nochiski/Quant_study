@@ -792,11 +792,13 @@ export const StrategyDebugger = ({
         aria-label={t("debugger.controls")}
         onSubmit={(event) => {
           event.preventDefault();
-          onSearchSelection({
+          const submittedSelection = {
             asOf: selectedAsOf || undefined,
             security: selectedSecurity || undefined,
-          });
-          void trace.run();
+          };
+          // Route search changes remount this panel. Keep the request owner alive until the
+          // submitted calculation settles, then publish the exact scope as a deep link.
+          void trace.run().finally(() => onSearchSelection(submittedSelection));
         }}
       >
         <label>
@@ -836,12 +838,6 @@ export const StrategyDebugger = ({
                 ...current,
                 selectedSecurity: event.target.value,
               }))
-            }
-            onBlur={(event) =>
-              onSearchSelection({
-                asOf: selectedAsOf || undefined,
-                security: event.target.value || undefined,
-              })
             }
           />
         </label>

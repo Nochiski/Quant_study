@@ -745,6 +745,33 @@ describe("StrategyDebugger", () => {
     expect(screen.getByText(/서버가 실제 TargetTape/)).toBeInTheDocument();
   });
 
+  it("commits a typed security scope and runs the trace in one submit", async () => {
+    const user = userEvent.setup();
+    const onSearchSelection = vi.fn();
+    renderDebugger(
+      <StrategyDebugger
+        {...props()}
+        security={undefined}
+        onSearchSelection={onSearchSelection}
+      />,
+    );
+
+    await user.type(
+      screen.getByRole("textbox", { name: "종목 ID" }),
+      "sec-a, sec-b",
+    );
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+
+    expect(await screen.findByText("3.50%")).toBeInTheDocument();
+    expect(onSearchSelection).toHaveBeenCalledTimes(1);
+    expect(onSearchSelection).toHaveBeenCalledWith({
+      asOf: "2026-08-31",
+      security: "sec-a, sec-b",
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.security_ids).toEqual(["sec-a", "sec-b"]);
+  });
+
   it("shows raw cell semantics and only requests order deltas for an explicit opening book", async () => {
     server.use(
       http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {

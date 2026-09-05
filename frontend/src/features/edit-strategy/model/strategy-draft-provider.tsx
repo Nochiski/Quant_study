@@ -1,7 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 
-import type { StrategySpec } from "../../../entities/strategy";
+import {
+  retireStrategyListQueries,
+  type StrategySpec,
+} from "../../../entities/strategy";
 import { strategyWorkbenchApi } from "../../../shared/api";
 import { t } from "../../../shared/config";
 import { StrategyDraftContext } from "./strategy-draft-context";
@@ -34,7 +37,8 @@ const StrategyDraftSession = ({
       savedIdentity === null
         ? strategyWorkbenchApi.create(draft)
         : strategyWorkbenchApi.revise(savedIdentity, draft),
-    onSuccess: (saved) => {
+    onSuccess: async (saved) => {
+      await retireStrategyListQueries(queryClient);
       const identity = saved.spec.identity;
       queryClient.setQueryData(
         ["strategy", identity.strategy_id, identity.revision],

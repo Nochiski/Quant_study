@@ -1,4 +1,5 @@
 export {
+  retireStrategyListQueries,
   strategiesQuery,
   strategiesKey,
   strategyContractQuery,

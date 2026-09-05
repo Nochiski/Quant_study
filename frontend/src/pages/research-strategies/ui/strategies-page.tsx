@@ -176,7 +176,9 @@ const RevisionRows = ({
 const StrategyRow = ({ strategy }: { strategy: StrategySummary }) => {
   const [expanded, setExpanded] = useState(false);
   const historyId = useId();
-  const strategyLabel = strategy.title || strategy.strategy_id;
+  const strategyLabel = strategy.title
+    ? `${strategy.title} (${strategy.strategy_id})`
+    : strategy.strategy_id;
   const historyLabel = `${t("history.revisions.caption")}: ${strategyLabel}`;
   return (
     <>

@@ -427,11 +427,11 @@ describe("App Shell routes", () => {
     );
     await user.click(
       screen.getByRole("button", {
-        name: "Revision 펼치기: Alpha strategy",
+        name: "Revision 펼치기: Alpha strategy (s1)",
       }),
     );
     const revisions = await screen.findByRole("region", {
-      name: "저장 revision 목록: Alpha strategy",
+      name: "저장 revision 목록: Alpha strategy (s1)",
     });
     expect(within(revisions).getByText("bbbbbbbbbbbb")).toBeInTheDocument();
     expect(within(revisions).getByText("원문 hash 없음")).toBeInTheDocument();
@@ -452,7 +452,10 @@ describe("App Shell routes", () => {
       return {
         strategy_id: `s${String(number).padStart(2, "0")}`,
         latest_revision: 21,
-        title: `Strategy ${String(number).padStart(2, "0")}`,
+        title:
+          number <= 2
+            ? "Duplicate title"
+            : `Strategy ${String(number).padStart(2, "0")}`,
         spec_hash: "a".repeat(64),
         updated_at: "2026-09-05T00:00:00Z",
       };
@@ -499,10 +502,10 @@ describe("App Shell routes", () => {
     const user = userEvent.setup();
     const history = mount("/research/strategies");
     const firstToggle = await screen.findByRole("button", {
-      name: "Revision 펼치기: Strategy 01",
+      name: "Revision 펼치기: Duplicate title (s01)",
     });
     const secondToggle = screen.getByRole("button", {
-      name: "Revision 펼치기: Strategy 02",
+      name: "Revision 펼치기: Duplicate title (s02)",
     });
     expect(firstToggle).toHaveAttribute("aria-controls");
     expect(firstToggle.getAttribute("aria-controls")).not.toBe(
@@ -511,14 +514,19 @@ describe("App Shell routes", () => {
     await user.click(firstToggle);
     await user.click(secondToggle);
     const firstHistory = await screen.findByRole("region", {
-      name: "저장 revision 목록: Strategy 01",
+      name: "저장 revision 목록: Duplicate title (s01)",
     });
     expect(
       screen.getByRole("region", {
-        name: "저장 revision 목록: Strategy 02",
+        name: "저장 revision 목록: Duplicate title (s02)",
       }),
     ).toBeInTheDocument();
     expect(firstHistory.id).toBe(firstToggle.getAttribute("aria-controls"));
+    expect(
+      within(firstHistory).getByRole("navigation", {
+        name: "Revision 목록 페이지: Duplicate title (s01)",
+      }),
+    ).toBeInTheDocument();
 
     await user.click(
       within(firstHistory).getByRole("button", { name: "다음" }),

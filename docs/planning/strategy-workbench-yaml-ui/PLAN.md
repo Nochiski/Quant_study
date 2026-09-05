@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: IN_PROGRESS
+project_status: SELF_CHECK
 current_phase: P6
 current_pr: P6-08,P6-09,P6-03,P6-04,P6-05
 active_prs: [P6-03, P6-04, P6-05, P6-08, P6-09]
 parallel_window: [P6-08, P6-09, P6-03, P6-04, P6-05]
-last_updated: 2026-09-06T04:46:17+09:00
+last_updated: 2026-09-06T05:03:17+09:00
 planned_prs: 52
 merged_prs: 46
 approved_prs: 50
@@ -22,13 +22,13 @@ progress_percent: 88
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_PROGRESS` |
+| Project status | `SELF_CHECK` |
 | Current phase | `P6` |
 | Current/next PR | `P6-08,P6-09,P6-03,P6-04,P6-05` |
 | Active PR | `P6-03, P6-04, P6-05, P6-08, P6-09` |
 | Progress | `46 / 52 merged (88%)` |
 | Approved | `50 / 52` |
-| Aggregated at | `2026-09-06 04:46 KST` |
+| Aggregated at | `2026-09-06 05:03 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -78,7 +78,7 @@ progress_percent: 88
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
 | P4 | Outline, Contract, Projections | 10 | 10 | `MERGED` |
 | P5 | Truthful Trace UI | 3 | 3 | `MERGED` |
-| P6 | Professional release and migration | 9 | 3 | `IN_PROGRESS` |
+| P6 | Professional release and migration | 9 | 3 | `SELF_CHECK` |
 | **Total** |  | **52** | **46** | **88%** |
 <!-- PLAN:PHASES:END -->
 
@@ -86,16 +86,16 @@ progress_percent: 88
 
 | 항목 | 값 |
 |---|---|
-| PR | `P6-05` Browser E2E·visual regression infrastructure IN_PROGRESS |
+| PR | `P6-05` Browser E2E·visual regression infrastructure SELF_CHECK |
 | Intent | 실제 FastAPI와 production Vite preview를 Playwright가 같은 격리 환경에서 기동해 전문 YAML IDE의 direct-entry·lazy editor·light/dark viewport baseline을 재현 가능한 release gate로 만든다 |
 | Acceptance | exact Playwright dependency/lock; 격리 SQLite를 쓰는 실제 backend와 production preview webServer; `/research/strategies/new` direct route와 CodeMirror lazy chunk·worker-free 확인; 1440×900·1920×1080 light/dark screenshot baseline 4개 commit; Windows CI browser job과 실패 artifact; local update/test 명령 문서화 |
 | Non-goals | 생성→저장→백테스트 등 업무 E2E 시나리오(P6-06), legacy route/editor 제거(P6-06), backend wire/domain 의미 변경, UI 재설계, mock API 기반 browser test |
 | Branch/worktree | `feat/p6-05-browser-infrastructure` (`Quant_study-p6-05`), stacked on P6-04 approval-doc HEAD |
 | Base SHA | `c6182e9` (P6-04 approval-doc HEAD; #74→#75→#76→#77 순차 merge 후 base 전환) |
-| Head SHA | `c6182e9` (scope start) |
-| Diff stat | 구현 후 기록 |
-| Focused tests | 구현 후 기록 |
-| Full gate | 구현 후 기록 |
+| Head SHA | `b76d7d2` (implementation) |
+| Diff stat | base `c6182e9` 대비 14 files +313/-22; exact lock·CI·runner boundary·config/test/docs와 committed PNG 4개 포함 |
+| Focused tests | 실제 FastAPI+production preview Playwright 4 projects×2 tests=8 passed; baseline 생성 후 strict no-update 8 passed; 1440×900·1920×1080 light/dark PNG 직접 확인; 종료 후 5173/8000 listener 0 |
+| Full gate | clean `npm ci` 399 packages/취약점 0; frontend Vitest 474·app/E2E typecheck·lint·build(editor 131.94KiB); root 6; Rust extension release build; OpenAPI/SDK diff 0; CI YAML safe parse·PLAN/diff-check 통과 |
 
 ---
 
@@ -235,7 +235,7 @@ Phase exit:
 | [x] | `P6-02` | Server draft persistence/CAS/recovery UI | P6-01, P3-06, P4-08 | `MERGED` | [#72](https://github.com/Nochiski/Quant_study/pull/72) · `review_p6_02` APPROVE |
 | [ ] | `P6-03` | Keyboard workflow와 Command Palette | P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `APPROVED` | [#76](https://github.com/Nochiski/Quant_study/pull/76) · `review_p6_03` APPROVE, P0/P1/P2 0 · CI billing 차단 |
 | [ ] | `P6-04` | Large/hostile spec 성능·접근성·i18n과 soft dark theme (`$ref`-only cycle fail-closed 포함) | P3-05, P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `APPROVED` | [#77](https://github.com/Nochiski/Quant_study/pull/77) · `review_p6_04` APPROVE, P0/P1/P2 0 · CI billing 차단 |
-| [ ] | `P6-05` | Playwright/visual regression infrastructure와 CI | P2-03, P3-05, P6-04 | `IN_PROGRESS` | stacked on P6-04 `c6182e9`; implementation 중 |
+| [ ] | `P6-05` | Playwright/visual regression infrastructure와 CI | P2-03, P3-05, P6-04 | `SELF_CHECK` | `b76d7d2`; real-server browser 8/8·frontend 474·clean install gate 통과, PR 준비 |
 | [ ] | `P6-06` | 전체 browser E2E·실구동 시나리오 검증, migration gate, 조건부 legacy cleanup | P6-01, P6-02, P6-03, P6-04, P6-05, P6-08, P6-09 | `WAITING` | — |
 | [x] | `P6-07` | Root frontend/backend development entrypoints | P0-02, P0-03 | `MERGED` | [#56](https://github.com/Nochiski/Quant_study/pull/56) · `review_p6_07` APPROVE |
 | [ ] | `P6-08` | Strategy list와 revision history routed UI | P6-01, P6-02, P3-06, P4-08 | `APPROVED` | [#74](https://github.com/Nochiski/Quant_study/pull/74) · `review_p6_08` APPROVE, P0/P1/P2 0; CI billing 차단 |
@@ -307,6 +307,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
+| P6-05 | actual FastAPI+production preview Playwright 4 projects×2=8 passed; baseline update 뒤 no-update strict 8 passed; lazy `code-editor-view-*` 1회·page worker 0·schema/contract/equity/factor 200 | clean npm ci 399/취약점 0; frontend Vitest 474·main/E2E typecheck·lint·build(editor 131.94KiB); root 6; maturin release build; CI YAML safe parse·PLAN/diff-check | OpenAPI/SDK 재생성 후 diff 0 | committed PNG 4개를 직접 열어 1440×900·1920×1080 light/dark의 panel clipping/overlap/theme 확인; 매 실행 뒤 5173/8000 listener 0 | PR 개설 후 기록; Windows browser job은 실패 시 report/test-results 7일 artifact | 2026-09-06 |
 | P6-04 | author 9 files 117, reviewer 500-node 10/10; fix trace/virtual 21 + reversed mixed-status PLAN fixture 1; 500-node·3,000-line real CodeMirror p95 <16 ms/folding/search; hostile recursive/missing/external `$ref` fail-closed | frontend 474·typecheck·lint·changed-file Prettier·build; backend 1,118·Rust 13·root 6; Ruff·Pyright·cargo fmt/clippy·diff-check | OpenAPI/SDK 재생성 후 semantic diff 0 | root `npm run dev`·`uv run server` 5173/8000 health 200; Chrome 1440×900·1920×1080 light/dark; 실제 Tab이 virtual table/security/node에 진입해 Home/End off-DOM server row와 sentinel을 표시하고 nested outer scroll을 보존 | [#77](https://github.com/Nochiski/Quant_study/pull/77) `review_p6_04` APPROVE P0/P1/P2 0; Actions 4 jobs 모두 step 0 billing/spending-limit 실패, green gate 유지 | 2026-09-06 |
 | P6-03 | final reviewer palette/IDE 2 files 30; 이전 review-fix 4 files 97 + professional route matrix 11 passed | frontend 455·backend 1,118·Rust 13·root 5; typecheck·lint·changed-file Prettier·build·Ruff·Pyright·cargo fmt/clippy | OpenAPI/SDK 재생성 후 tracked content diff 0 | 실제 root backend 42813 health 200·Vite 42814 direct new route 200; current identity/IME/action gate와 함께 narrow drawer 위 palette close-button Escape가 modal 경계에서 소비되고 drawer/focus가 보존됨을 독립 재검증 | [#76](https://github.com/Nochiski/Quant_study/pull/76) `review_p6_03` APPROVE P0/P1/P2 0; Actions billing으로 step 전 실패, green gate 유지 | 2026-09-06 |
 | P6-09 | author backend history/reference/status 13·frontend router+document route 64; reviewer backend 20 + hostile probes | backend 1,118·frontend 427·Rust 13·root 5; Ruff·Pyright·typecheck·lint·changed-file Prettier·build·cargo fmt/clippy | OpenAPI/SDK 재생성 전후 diff hash `0d80043b706914d479227815fc732c5754340202` 동일; reviewer runtime/tracked 214 schemas 일치 | saved/inline provenance, exact strategy filter, 26개 page/out-of-range 복구, nonterminal→terminal polling stop, late cache 폐기와 세 endpoint noncanonical integer 422·MAX bounds를 검증; 실제 browser는 P6-06 범위 | [#75](https://github.com/Nochiski/Quant_study/pull/75) `review_p6_09` APPROVE P0/P1/P2 0; Actions billing으로 step 전 실패 | 2026-09-06 |
@@ -355,6 +356,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-06 KST | Codex | P6-05 구현 `b76d7d2`에서 Playwright 1.63.0과 Node type을 exact lock하고, 격리 temp SQLite의 canonical `uv run server`와 production preview 두 webServer, 4개 Chromium viewport/theme project, lazy chunk·worker-free·실 backend resource contract, strict PNG baseline 4개와 Windows CI failure artifact를 추가했다. Vitest가 E2E spec을 수집한 최초 self-check 결함은 `configDefaults.exclude`로 runner 책임을 분리해 폐쇄했다. clean npm ci 후 Playwright 8/8·Vitest 474·app/E2E typecheck·lint·build·root 6·maturin·API diff·YAML/PLAN/diff-check를 통과하고 PNG 4개 직접 확인·port teardown까지 완료해 SELF_CHECK로 전환한다 | infrastructure-only browser lifecycle SoT·unit/browser runner 책임분리·실서버/worker/visual release gate·13.2 dependency/CI self-check |
 | 2026-09-06 KST | Codex | P6-04 approval-doc HEAD `c6182e9` 위에 P6-05 전용 branch/worktree를 만들고 IN_PROGRESS로 전환했다. exact Playwright·lock과 실제 FastAPI/production preview webServer, 격리 SQLite, direct new route·lazy CodeMirror·worker-free contract, Windows 1440×900/1920×1080 light/dark baseline 4개와 CI artifact만 이 PR에 둔다. 업무 E2E·legacy cleanup은 P6-06에 남기며 backend/domain/frontend validation 의미는 변경하지 않는다 | P6-05 infrastructure-only scope·실서버 경계·SoT/책임분리·billing-blocked stack ancestry 유지 |
 | 2026-09-06 KST | Codex | 동일 reviewer `review_p6_04`이 review HEAD `7b532a9`에서 누적 P1/P2 5건의 폐쇄와 최신 전체 diff 신규 P0/P1/P2 0을 확인해 APPROVE했다. 실제 Tab→Home/End, nested outer scroll 불변, server sentinel, order-reversed PLAN fixture를 독립 재현했고 focused 21·root 6·typecheck·lint·diff-check를 통과했다. 직전 full frontend 474·build·editor 131.94KiB 이후 production 변경은 없으며, 실제 Safari/browser visual은 P6-05~06 residual, Actions billing은 merge blocker로 유지한다 | same-reviewer final approval·server trace SoT·keyboard 접근성·CI gate 비우회 |
 | 2026-09-06 KST | Codex | P6-04 2차 findings를 `a6fd4b7`에서 보강했다. Target table·security viewport·500-node chain 모두 programmatic focus가 아니라 실제 Tab 순서로 진입해 End/Home 양 끝을 불러오고, node Home/End 전후 outer security scroll 불변과 `sec-*`별 server-only numeric sentinel을 함께 검증한다. focused 21, frontend 474, typecheck·lint·Prettier·build(editor 131.94KiB), root 6, PLAN check·diff-check를 통과했고 실제 review diff 31 files +1,959/-472와 PR 본문을 동기화해 동일 reviewer 3차 검토로 전환한다 | keyboard 사용자 결과·server value SoT·nested viewport 책임분리·13.2 self-check·13.3 actual diff freeze·13.5 same-reviewer loop |

@@ -1,16 +1,16 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: APPROVED
+project_status: READY
 current_phase: P6
-current_pr: P6-01
-active_prs: [P6-01]
+current_pr: P6-02
+active_prs: []
 parallel_window: []
-last_updated: 2026-09-05T20:19:41+09:00
+last_updated: 2026-09-05T20:28:23+09:00
 planned_prs: 50
-merged_prs: 44
+merged_prs: 45
 approved_prs: 45
-progress_percent: 88
+progress_percent: 90
 ---
 
 # YAML Strategy Workbench 실시간 진행 계획
@@ -22,13 +22,13 @@ progress_percent: 88
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `APPROVED` |
+| Project status | `READY` |
 | Current phase | `P6` |
-| Current/next PR | `P6-01` |
-| Active PR | `P6-01` |
-| Progress | `44 / 50 merged (88%)` |
+| Current/next PR | `P6-02` |
+| Active PR | none |
+| Progress | `45 / 50 merged (90%)` |
 | Approved | `45 / 50` |
-| Aggregated at | `2026-09-05 20:19 KST` |
+| Aggregated at | `2026-09-05 20:28 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -78,24 +78,24 @@ progress_percent: 88
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
 | P4 | Outline, Contract, Projections | 10 | 10 | `MERGED` |
 | P5 | Truthful Trace UI | 3 | 3 | `MERGED` |
-| P6 | Professional release and migration | 7 | 1 | `APPROVED` |
-| **Total** |  | **50** | **44** | **88%** |
+| P6 | Professional release and migration | 7 | 2 | `READY` |
+| **Total** |  | **50** | **45** | **90%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
 
 | 항목 | 값 |
 |---|---|
-| PR | `P6-01` SQLite persistent strategy revision repository APPROVED |
-| Intent | 기존 `StrategyRepositoryPort`와 domain canonical/hydrate를 정본으로 유지하면서 immutable revision envelope를 SQLite에 원자적으로 저장해 프로세스 재시작 뒤에도 전략·원문·provenance를 정확히 복원한다 |
-| Acceptance | versioned schema migration이 반복 실행에 안전함; canonical `StrategySpec`을 domain codec으로 round-trip하고 저장 hash를 재검증; exact source text/format/hash와 UTC provenance/change note 보존; add/append의 revision 불변식과 optimistic concurrency를 두 repository instance에서도 원자적으로 보장; latest/specific get과 deterministic list/history pagination; DB 손상·hash 불일치는 fail-closed; 같은 DB를 다시 연 container에서 전략 복원; bootstrap은 production 기본 파일 경로와 test용 명시 경로를 소유; 기존 memory adapter도 동일 contract 통과 |
-| Non-goals | server draft와 strategy/backtest history UI(P6-02), 원격 DB·분산 lock, 전략 domain/schema 변경, revision 삭제·수정, legacy editor 정리(P6-06) |
-| Branch/worktree | `feat/p6-01-sqlite-strategy-repository` (`Quant_study-p6-01`) |
-| Base SHA | `a609eee` (P5-03 merge main) |
-| Head SHA | `15370c7` approved review HEAD |
-| Diff stat | base `a609eee` 대비 20 files +1,580/-79. schema migration·record codec·transaction repository·composition root·contract/restart/concurrency/corruption tests가 하나의 persistent port acceptance를 이루어 분리 시 한쪽이 실행 불가능하므로 WORKFLOW 12절 size exception 적용 |
-| Focused tests | memory/SQLite repository contract와 migration/restart/corruption/two-instance create/append concurrency, bootstrap/runtime path, architecture 74 tests 통과; unowned·owned `sqlite_sequence` 잔여 객체 거부와 migration header/object rollback을 포함 |
-| Full gate | backend pytest 1,097·Ruff·Pyright, frontend typecheck·lint·Vitest 403·build, real-backend integration, root server smoke, root Ruff·Pyright, OpenAPI/SDK deterministic diff 0, PLAN check·diff-check 통과 |
+| PR | `P6-02` Server draft, strategy/revision/backtest history UI READY |
+| Intent | invalid source도 보존하는 server-owned draft CAS와 전문 사용자가 저장 전략·revision·backtest 실행 이력을 탐색하는 routed UI를 추가하되 StrategySpec·revision·run lifecycle의 기존 SoT를 재정의하지 않는다 |
+| Acceptance | opaque draft ID와 monotonic version/expected_version으로 exact source·format·source hash·base revision/hash·schema version·UTC updated_at을 SQLite에 저장하고 restart·두 client create/update/delete race를 원자 처리; draft는 compile 성공을 요구하지 않아 invalid source도 복구 가능; 충돌 시 remote record를 포함한 409를 반환하고 UI가 자동 overwrite 없이 remote 적용 또는 명시적 local 유지 재시도를 제공; 서버 장애 시 기존 local recovery가 fallback으로 유지; strategy list와 revision history를 deterministic pagination으로 탐색하고 원하는 revision 편집/diff로 이동; backtest run history를 최신순으로 조회해 상태·source provenance와 run detail로 연결; `/research/strategies`와 `/research/backtests` direct route·nav·loading/empty/error 상태; OpenAPI/generated SDK와 backend/frontend 계약 테스트 동기화 |
+| Non-goals | durable backtest artifact/run ledger, 인증·사용자별 draft ownership, CRDT/자동 병합, legacy editor 제거(P6-06), command palette(P6-03) |
+| Branch/worktree | 아직 생성 전 (`READY`) |
+| Base SHA | `fe3fbc5` (P6-01 merge main) |
+| Head SHA | — |
+| Diff stat | — |
+| Focused tests | draft CAS/migration/restart/concurrency, history API/query/route/UI 상태를 구현과 함께 고정 예정 |
+| Full gate | 구현 후 backend/frontend 전체 gate, OpenAPI/SDK deterministic, root entrypoint, PLAN/diff check 실행 예정 |
 
 ---
 
@@ -231,8 +231,8 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P6-01` | SQLite persistent strategy revision repository | P1-07 | `APPROVED` | `review_p6_01` APPROVE · P0/P1/P2 0 · latest CI gate |
-| [ ] | `P6-02` | Server draft, strategy/revision/backtest history UI | P6-01, P3-06, P4-08 | `WAITING` | — |
+| [x] | `P6-01` | SQLite persistent strategy revision repository | P1-07 | `MERGED` | [#69](https://github.com/Nochiski/Quant_study/pull/69) · `review_p6_01` APPROVE |
+| [ ] | `P6-02` | Server draft, strategy/revision/backtest history UI | P6-01, P3-06, P4-08 | `READY` | — |
 | [ ] | `P6-03` | Keyboard workflow와 Command Palette | P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `WAITING` | — |
 | [ ] | `P6-04` | Large/hostile spec 성능·접근성·i18n과 soft dark theme (`$ref`-only cycle fail-closed 포함) | P3-05, P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `WAITING` | — |
 | [ ] | `P6-05` | Playwright/visual regression infrastructure와 CI | P2-03, P3-05, P6-04 | `WAITING` | — |
@@ -300,6 +300,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
+| P6-01 | repository/server/architecture 74 passed; reviewer internal-object hostile probes | backend 1,097·Ruff·Pyright; frontend 403·typecheck·lint·build; root smoke/static | OpenAPI/SDK deterministic diff 0 | restart exact source, REAL chain corruption, literal DDL mutation, unowned/owned sqlite_sequence와 SQL-NULL autoindex fail-closed | [#69](https://github.com/Nochiski/Quant_study/pull/69) same reviewer APPROVE, approval-doc HEAD CI 4/4 pass, MERGED (`fe3fbc5`) | 2026-09-05 |
 | P5-03 | author raw/API 103+frontend contract 1, trace backend 96/frontend 70; reviewer backend focused 138+architecture 7/frontend 74 | author/reviewer backend 1,041·frontend 403; Ruff·Pyright·typecheck·lint·build | OpenAPI/SDK 2회 deterministic, reviewer runtime=tracked 202 schemas | duplicate/blank hostile 세 route 422·계산 진입 0, 1,025-field cancellation, 6×100/101-node/8,100-row와 default/non-rebalance 실제 HTTP를 독립 재검증 | [#68](https://github.com/Nochiski/Quant_study/pull/68) `review_p5_03` APPROVE P0/P1/P2 0; CI 4/4 pass | 2026-09-05 |
 | P5-02 | author/reviewer focused 62 passed | frontend typecheck·lint·Vitest 392·build; backend pytest 1,027·Ruff·Pyright | OpenAPI/SDK 재생성 deterministic·diff clean | source identity key·query-cache REST owner·inline→saved late/visible result 폐기·Plan 탭 error/cancel/discard·revision saved wire와 URL back/forward·feature CSS no-important 회귀를 reviewer 재확인 | [#67](https://github.com/Nochiski/Quant_study/pull/67) `review_p5_02` APPROVE, final CI 4/4 pass, MERGED (`fcc37ee`) | 2026-09-05 |
 | P5-01 | author focused 251 + reviewer backend full 1,027·architecture 7 passed | backend pytest 1,027·Ruff `src tests`·Pyright; frontend typecheck·lint·Vitest 369·build | runtime OpenAPI == tracked true; 기존 OpenAPI/SDK 17-file deterministic·schema parity 증거 유지 | reviewer 독립 probe raw consumer 2,000→1, factor output 1,000→1; constructor/scope/raw→factor/portfolio checkpoint·기존 wire/non-finite/schedule/tape parity 재확인 | [#65](https://github.com/Nochiski/Quant_study/pull/65) `review_p5_01` APPROVE, final CI 4/4 pass, MERGED (`e4fabd4`) | 2026-09-05 |
@@ -342,6 +343,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | P6-01 [#69](https://github.com/Nochiski/Quant_study/pull/69)의 동일 reviewer 최종 APPROVE와 approval-doc HEAD CI 4/4를 확인해 merge commit `fe3fbc5`로 순차 병합했다. 45/50(90%)을 완료하고 P6-02를 READY로 전환해 persistent invalid-source draft CAS, multi-device 충돌 UX, strategy/revision/backtest history route를 다음 단일 범위로 고정한다 | 13.6 merge gate·StrategySpec/revision/run lifecycle SoT 유지·draft/history 책임분리 |
 | 2026-09-05 KST | Codex | 동일 reviewer `review_p6_01`이 unowned/owned `sqlite_sequence`, SQL-NULL `sqlite_autoindex_*`, rollback header/footprint를 독립 재현해 마지막 P1 폐쇄와 기존 findings 유지 폐쇄를 확인했다. 최신 전체 diff에서 새 P0/P1/P2 0으로 APPROVE했고 reviewed HEAD `15370c7`의 원격 CI 4/4도 green이라 APPROVED로 전환한다. 승인 기록 문서가 포함된 latest HEAD CI를 다시 확인한 뒤 순차 merge한다 | same-reviewer final approval·complete schema manifest·13.6 latest CI merge gate |
 | 2026-09-05 KST | Codex | P6-01 third fix self-check를 `dc89cdf`에 고정하고 base 대비 20 files +1,579/-79 diff를 freeze했다. 전체 persisted schema footprint와 unowned/owned `sqlite_sequence` hostile regression, 최신 1,097-test 결과를 PR 본문에 반영하고 동일 reviewer `review_p6_01`에게 P1 폐쇄와 latest 전체 diff의 최종 재검토를 요청한다 | 13.3 diff freeze·same-reviewer closure·CI 재실행 gate |
 | 2026-09-05 KST | Codex | 세 번째 review P1을 `eeafe6a`에서 수정했다. claim 단계는 이름 필터 없는 전체 `sqlite_schema` footprint가 정말 비어 있을 때만 ownership을 설정하고, canonical manifest도 SQL이 NULL인 autoindex를 포함한 모든 persisted object를 비교해 예상 외 SQLite-managed object를 거부한다. AUTOINCREMENT table create/drop으로 만든 `sqlite_sequence` 잔여물을 unowned/owned DB 양쪽에 재현하고, unowned 거부 뒤 application_id·user_version=0과 원본 footprint가 보존되는 회귀를 고정했다. focused 74, backend 1,097, frontend 403·typecheck·lint·build, real-backend integration, root smoke/static, Ruff·Pyright, generated diff 0, PLAN/diff check를 통과해 SELF_CHECK로 전환한다 | truly-empty claim과 complete manifest 단일 schema owner·rollback fail-closed·same-reviewer fix loop |

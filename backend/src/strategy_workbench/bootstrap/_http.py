@@ -12,6 +12,7 @@ def build_http_app():  # type annotation is inferred from FastAPI factory at thi
         equity_workspace=container.equity_workspace,
         factor_research=container.factor_research,
         portfolio_design=container.portfolio_design,
+        strategy_traces=container.strategy_traces,
         backtest_runs=container.backtest_runs,
     )
 

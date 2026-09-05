@@ -19,6 +19,7 @@ change; the observation adapter owns their as_of vintage (D-006).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 
@@ -40,6 +41,10 @@ from strategy_workbench.domain.factor.facade.planning import (
     ResolvedFactorParameter,
     compile_factor_plan,
 )
+from strategy_workbench.domain.factor.facade.trace import (
+    FactorTrace,
+    evaluate_factor_graph_with_trace,
+)
 from strategy_workbench.domain.factor.facade.validation import (
     FactorValidationSeverity,
 )
@@ -60,7 +65,13 @@ from strategy_workbench.domain.strategy.facade.validation import (
     validate_strategy,
 )
 
-from ._models import PortfolioPreview, PortfolioPreviewRequest
+from ._models import (
+    EngineCompatibility,
+    PortfolioPipelineOptions,
+    PortfolioPreview,
+    PortfolioPreviewRequest,
+    PortfolioStartingHolding,
+)
 from .ports.outgoing.engine_portfolio import EnginePortfolioPort
 from .ports.outgoing.raw_observations import (
     RawObservation,
@@ -109,6 +120,22 @@ class PortfolioSnapshotMismatchError(RawObservationContractError):
         self.actual = actual
 
 
+class IncompatiblePortfolioRequestError(ValueError):
+    """The selected execution engine cannot implement this strategy."""
+
+    def __init__(self, compatibility: EngineCompatibility) -> None:
+        super().__init__("strategy exceeds engine capabilities")
+        self.compatibility = compatibility
+
+
+class PortfolioPipelineCancelledError(RuntimeError):
+    """Cooperative cancellation observed between bounded pipeline stages."""
+
+
+class InvalidPortfolioTraceSelectionError(ValueError):
+    """The requested factor/node projection is not in the compiled execution plan."""
+
+
 @dataclass(frozen=True)
 class FactorEvaluationRecord:
     """One factor's plan and evaluated values, kept for parity checks and the debug trace."""
@@ -116,6 +143,7 @@ class FactorEvaluationRecord:
     factor_id: str
     plan: FactorExecutionPlan
     values: tuple[FactorValue, ...]
+    trace: FactorTrace | None = None
 
 
 @dataclass(frozen=True)
@@ -143,11 +171,23 @@ class PortfolioDesignService:
     def preview(self, request: PortfolioPreviewRequest) -> PortfolioPreview:
         return self.run_pipeline(request).preview
 
-    def run_pipeline(self, request: PortfolioPreviewRequest) -> PortfolioPipelineResult:
+    def run_pipeline(
+        self,
+        request: PortfolioPreviewRequest,
+        *,
+        options: PortfolioPipelineOptions | None = None,
+        cancelled: Callable[[], bool] = lambda: False,
+    ) -> PortfolioPipelineResult:
+        pipeline_options = options or PortfolioPipelineOptions()
         spec = request.spec
         validation = validate_strategy(spec)
         if not validation.valid:
             raise InvalidPortfolioRequestError(validation)
+        _raise_if_cancelled(cancelled)
+
+        engine = self._engine_portfolio.assess(spec)
+        if pipeline_options.require_engine_compatible and not engine.compatible:
+            raise IncompatiblePortfolioRequestError(engine)
 
         metadata = self._factor_metadata.resolve_factor_fields(
             tuple(
@@ -163,6 +203,8 @@ class PortfolioDesignService:
         plans = self._plans(spec, metadata)
         _reject_non_numeric_factor_outputs(spec, plans)
         _reject_saved_references(spec, plans)
+        _validate_trace_selection(pipeline_options, plans)
+        _raise_if_cancelled(cancelled)
         raw = self._observation_source.load_raw_observations(
             RawObservationQuery(
                 market=spec.data.market.value,
@@ -184,22 +226,40 @@ class PortfolioDesignService:
                 actual=raw.data_snapshot_id,
             )
         _reject_sessions_outside_strategy_range(raw, spec)
+        _raise_if_cancelled(cancelled)
         factor_observations = tuple(_to_factor_observation(item) for item in raw.observations)
         parameters = tuple(
             ResolvedFactorParameter(parameter.parameter_id, parameter.default)
             for parameter in spec.parameters
         )
-        evaluations = tuple(
-            FactorEvaluationRecord(
-                factor_id=factor.factor_id,
-                plan=plans[factor.factor_id],
-                values=evaluate_factor_graph(
+        evaluations: list[FactorEvaluationRecord] = []
+        for factor in spec.factors.factors:
+            _raise_if_cancelled(cancelled)
+            trace = None
+            if factor.factor_id == pipeline_options.trace_factor_id:
+                evaluation, trace = evaluate_factor_graph_with_trace(
+                    factor.graph,
+                    observations=factor_observations,
+                    parameters=parameters,
+                    selection=pipeline_options.trace_selection,
+                )
+            else:
+                evaluation = evaluate_factor_graph(
                     factor.graph, observations=factor_observations, parameters=parameters
-                ).values,
+                )
+            evaluations.append(
+                FactorEvaluationRecord(
+                    factor_id=factor.factor_id,
+                    plan=plans[factor.factor_id],
+                    values=evaluation.values,
+                    trace=trace,
+                )
             )
-            for factor in spec.factors.factors
+        evaluation_records = tuple(evaluations)
+        _raise_if_cancelled(cancelled)
+        observations = _to_portfolio_observations(
+            raw, evaluation_records, pipeline_options.starting_holdings
         )
-        observations = _to_portfolio_observations(raw, evaluations)
         preview = PortfolioPreview(
             tape=compile_target_tape(
                 spec,
@@ -207,12 +267,12 @@ class PortfolioDesignService:
                 sessions=raw.sessions,
                 observations=observations,
             ),
-            engine=self._engine_portfolio.assess(spec),
+            engine=engine,
             warnings=raw.warnings,
         )
         return PortfolioPipelineResult(
             data_snapshot_id=raw.data_snapshot_id,
-            factor_evaluations=evaluations,
+            factor_evaluations=evaluation_records,
             observations=observations,
             preview=preview,
         )
@@ -272,6 +332,33 @@ def _required_field_ids(
     for plan in plans.values():
         fields.update(plan.required_field_ids)
     return tuple(sorted(fields))
+
+
+def _validate_trace_selection(
+    options: PortfolioPipelineOptions, plans: dict[str, FactorExecutionPlan]
+) -> None:
+    factor_id = options.trace_factor_id
+    selection = options.trace_selection
+    if factor_id is None or selection is None:
+        return
+    plan = plans.get(factor_id)
+    if plan is None:
+        raise InvalidPortfolioTraceSelectionError(
+            "trace references an unknown factor before observation loading — "
+            f"factor_id={factor_id!r} available={sorted(plans)!r}"
+        )
+    reachable = {step.node_id for step in plan.steps}
+    unknown = set(selection.node_ids or ()) - reachable
+    if unknown:
+        raise InvalidPortfolioTraceSelectionError(
+            "trace references unknown or unreachable nodes before observation loading — "
+            f"factor_id={factor_id!r} node_ids={sorted(unknown)!r}"
+        )
+
+
+def _raise_if_cancelled(cancelled: Callable[[], bool]) -> None:
+    if cancelled():
+        raise PortfolioPipelineCancelledError("portfolio pipeline trace was cancelled")
 
 
 def _reject_saved_references(spec: StrategySpec, plans: dict[str, FactorExecutionPlan]) -> None:
@@ -360,13 +447,20 @@ def _to_factor_observation(item: RawObservation) -> FactorObservation:
 
 
 def _to_portfolio_observations(
-    raw: RawObservationSet, evaluations: tuple[FactorEvaluationRecord, ...]
+    raw: RawObservationSet,
+    evaluations: tuple[FactorEvaluationRecord, ...],
+    starting_holdings: tuple[PortfolioStartingHolding, ...] | None = None,
 ) -> tuple[PortfolioObservation, ...]:
     in_range = set(raw.sessions)
     values_by_key: dict[tuple[str, date, str], float | None] = {}
     for record in evaluations:
         for value in record.values:
             values_by_key[(record.factor_id, value.as_of, value.security_id)] = value.value
+    opening_weights = (
+        None
+        if starting_holdings is None
+        else {holding.security_id: holding.weight for holding in starting_holdings}
+    )
     return tuple(
         PortfolioObservation(
             as_of=item.as_of,
@@ -385,7 +479,11 @@ def _to_portfolio_observations(
                 for field in item.fields
             ),
             sector_id=item.sector_id,
-            previous_weight=item.previous_weight,
+            previous_weight=(
+                item.previous_weight
+                if opening_weights is None
+                else opening_weights.get(item.security_id, 0.0)
+            ),
         )
         for item in raw.observations
         if item.as_of in in_range

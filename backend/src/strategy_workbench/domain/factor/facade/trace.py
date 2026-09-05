@@ -4,6 +4,7 @@ from strategy_workbench.domain.factor._trace import (
     TracedValue,
     TraceSelection,
     TraceValueStatus,
+    evaluate_factor_graph_with_trace,
     trace_factor_graph,
 )
 
@@ -13,5 +14,6 @@ __all__ = [
     "TracedValue",
     "TraceSelection",
     "TraceValueStatus",
+    "evaluate_factor_graph_with_trace",
     "trace_factor_graph",
 ]

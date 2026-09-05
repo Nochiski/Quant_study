@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from dataclasses import asdict, dataclass
+from threading import Event
 from typing import Annotated
 
-from fastapi import FastAPI, Header, HTTPException, Query, Response, status
+from fastapi import FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -47,11 +49,21 @@ from strategy_workbench.application.factor_research.facade.research import (
     InvalidFactorRequestError,
 )
 from strategy_workbench.application.portfolio_design.facade.design import (
+    IncompatiblePortfolioRequestError,
     InvalidPortfolioRequestError,
     PortfolioDesignService,
     PortfolioPreview,
     PortfolioPreviewRequest,
     RawObservationUnavailableError,
+)
+from strategy_workbench.application.portfolio_design.facade.trace import (
+    InvalidStrategyTraceRequestError,
+    StaleStrategyTraceSourceError,
+    StrategyTraceCancelledError,
+    StrategyTraceRequest,
+    StrategyTraceResponse,
+    StrategyTraceService,
+    StrategyTraceSourceNotFoundError,
 )
 from strategy_workbench.application.strategy_authoring.facade.authoring import (
     CompiledDocument,
@@ -135,6 +147,7 @@ def create_app(
     equity_workspace: EquityWorkspaceService,
     factor_research: FactorResearchService,
     portfolio_design: PortfolioDesignService,
+    strategy_traces: StrategyTraceService,
     backtest_runs: BacktestRunService,
     allowed_origins: tuple[str, ...] = ("http://localhost:5173",),
 ) -> FastAPI:
@@ -272,6 +285,58 @@ def create_app(
             return portfolio_design.preview(request)
         except (InvalidPortfolioRequestError, RawObservationUnavailableError) as error:
             raise _portfolio_http_error(error) from error
+
+    @app.post(
+        "/api/v1/strategies/debug/trace",
+        operation_id="traceStrategy",
+        responses={499: {"description": "The client cancelled the trace request"}},
+    )
+    async def trace_strategy(
+        trace_request: StrategyTraceRequest, request: Request
+    ) -> StrategyTraceResponse:
+        """Bounded node/raw/target projection from the same calculation that builds TargetTape."""
+        stop = Event()
+        task = asyncio.create_task(
+            asyncio.to_thread(strategy_traces.trace, trace_request, cancelled=stop.is_set)
+        )
+        try:
+            while not task.done():
+                if await request.is_disconnected():
+                    stop.set()
+                await asyncio.sleep(0.01)
+            return await task
+        except InvalidStrategyTraceRequestError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={"code": "trace.request.invalid", "message": str(error)},
+            ) from error
+        except StrategyTraceSourceNotFoundError as error:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "trace.strategy.not_found", "message": str(error)},
+            ) from error
+        except StaleStrategyTraceSourceError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "trace.strategy.stale", "message": str(error)},
+            ) from error
+        except IncompatiblePortfolioRequestError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "code": "trace.engine.incompatible",
+                    "compatibility": jsonable_encoder(asdict(error.compatibility)),
+                },
+            ) from error
+        except (InvalidPortfolioRequestError, RawObservationUnavailableError) as error:
+            raise _portfolio_http_error(error) from error
+        except StrategyTraceCancelledError as error:
+            raise HTTPException(
+                status_code=499,
+                detail={"code": "trace.cancelled", "message": str(error)},
+            ) from error
+        finally:
+            stop.set()
 
     @app.get(
         EQUITY_CATALOG_PATH,

@@ -28,6 +28,10 @@ equal/factor-score/rank/risk weight, exposure cap·neutralization, turnover/liqu
 결과를 snapshot/spec/tape hash와 T 종가→T+1 실행일이 고정된 immutable `TargetTape`로 반환한다.
 
 - `POST /api/v1/portfolio/preview`: 세션별 후보, 편입·제외 이유, 목표 비중과 engine compatibility
+- `POST /api/v1/strategies/debug/trace`: saved revision 또는 inline draft의 date/security/factor/node를
+  제한해 raw·node·TargetTape projection과 `spec_hash/snapshot_id/registry_version/plan_hash`를 반환.
+  trace와 executable factor output은 한 번의 node-cache 계산에서 파생되며 페이지·행 cap과
+  client disconnect 협력적 취소를 적용
 - `equity_mock`: 실제 Equity DB가 오기 전 portfolio observation port를 구현하는 deterministic adapter
 - `engine_portfolio`: `StrategyRequirements`를 사전 협상하고 `SetPortfolioTarget(REPLACE)`로 변환
 

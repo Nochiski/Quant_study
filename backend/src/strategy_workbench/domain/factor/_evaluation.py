@@ -87,6 +87,19 @@ def evaluate_factor_graph(
     parameters: tuple[ResolvedFactorParameter, ...] = (),
 ) -> FactorEvaluation:
     computed = _compute_nodes(graph, observations=observations, parameters=parameters)
+    return _evaluation_from_computed(graph, observations, computed)
+
+
+def _evaluation_from_computed(
+    graph: FactorGraph,
+    observations: tuple[FactorObservation, ...],
+    computed: dict[str, list[FactorComputedValue]],
+) -> FactorEvaluation:
+    """Build the public output from an already evaluated node cache.
+
+    The trace use case calls this helper so its output values and per-node rows are projections
+    of one `_compute_nodes` invocation, rather than two calculations that merely ought to agree.
+    """
     raw_output = computed[graph.output_node_id]
     output = tuple(
         FactorValue(

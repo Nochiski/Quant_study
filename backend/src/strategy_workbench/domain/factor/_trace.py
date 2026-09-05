@@ -15,9 +15,11 @@ from enum import StrEnum
 
 from ._evaluation import (
     FactorComputedValue,
+    FactorEvaluation,
     FactorObservation,
     _as_number,
     _compute_nodes,
+    _evaluation_from_computed,
     _indices_by_security,
     values_from_indices,
 )
@@ -106,6 +108,37 @@ def trace_factor_graph(
 
     Values come from the same cache `evaluate_factor_graph` reads, so they never diverge.
     """
+    bounds, nodes, order = _trace_context(graph, observations, selection)
+    computed = _compute_nodes(graph, observations=observations, parameters=parameters)
+    return _project_trace(graph, observations, bounds, nodes, order, computed)
+
+
+def evaluate_factor_graph_with_trace(
+    graph: FactorGraph,
+    *,
+    observations: tuple[FactorObservation, ...],
+    parameters: tuple[ResolvedFactorParameter, ...] = (),
+    selection: TraceSelection | None = None,
+) -> tuple[FactorEvaluation, FactorTrace]:
+    """Evaluate once and derive both the executable output and bounded debug projection.
+
+    This is the truthful pipeline entry point for P5: the portfolio score and trace rows share
+    the exact in-memory node cache. Callers do not run `evaluate_factor_graph` and
+    `trace_factor_graph` independently.
+    """
+    bounds, nodes, order = _trace_context(graph, observations, selection)
+    computed = _compute_nodes(graph, observations=observations, parameters=parameters)
+    return (
+        _evaluation_from_computed(graph, observations, computed),
+        _project_trace(graph, observations, bounds, nodes, order, computed),
+    )
+
+
+def _trace_context(
+    graph: FactorGraph,
+    observations: tuple[FactorObservation, ...],
+    selection: TraceSelection | None,
+) -> tuple[TraceSelection, dict[str, ExpressionNode], tuple[str, ...]]:
     bounds = selection or TraceSelection()
     if bounds.max_rows <= 0:
         raise ValueError(f"trace max_rows must be positive — max_rows={bounds.max_rows}")
@@ -119,7 +152,17 @@ def trace_factor_graph(
             f"node_ids={sorted(unknown)!r} reachable={list(order)!r}"
         )
     _require_unique_rows(observations)
-    computed = _compute_nodes(graph, observations=observations, parameters=parameters)
+    return bounds, nodes, order
+
+
+def _project_trace(
+    graph: FactorGraph,
+    observations: tuple[FactorObservation, ...],
+    bounds: TraceSelection,
+    nodes: dict[str, ExpressionNode],
+    order: tuple[str, ...],
+    computed: dict[str, list[FactorComputedValue]],
+) -> FactorTrace:
     wanted_nodes = order if bounds.node_ids is None else [n for n in order if n in bounds.node_ids]
 
     positions = _positions(observations, bounds)

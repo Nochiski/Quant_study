@@ -1491,10 +1491,10 @@ export type HttpValidationError = {
 /**
  * InlineDraft
  *
- * Run an unsaved spec (draft backtests only; never a deployment source).
+ * Use an unsaved typed spec while recording its authoring-source hash when known.
  *
- * `source_hash` is client-asserted provenance: the server cannot verify it without the text
- * and records it as given.
+ * An inline draft can be researched or backtested, but it is never a deployment source.
+ * `source_hash` is client-asserted provenance: the server cannot verify it without the text.
  */
 export type InlineDraft = {
   /**
@@ -1807,6 +1807,20 @@ export type PortfolioPreviewRequest = {
 export type PortfolioSide = "long_only" | "long_short";
 
 /**
+ * PortfolioStartingHolding
+ */
+export type PortfolioStartingHolding = {
+  /**
+   * Security Id
+   */
+  security_id: string;
+  /**
+   * Weight
+   */
+  weight: number;
+};
+
+/**
  * PortfolioStep
  */
 export type PortfolioStep = {
@@ -2042,6 +2056,32 @@ export type RawSnapshot = {
    * Session
    */
   session: string;
+};
+
+/**
+ * RawStrategyTraceRow
+ */
+export type RawStrategyTraceRow = {
+  /**
+   * As Of
+   */
+  as_of: string;
+  /**
+   * Available Date
+   */
+  available_date: string;
+  /**
+   * Field Id
+   */
+  field_id: string;
+  /**
+   * Security Id
+   */
+  security_id: string;
+  /**
+   * Value
+   */
+  value: number | string | boolean | null;
 };
 
 /**
@@ -2564,7 +2604,7 @@ export type SavedFactorNode = {
 /**
  * SavedRevisionReference
  *
- * Run a stored revision; the run fails before starting if the hash no longer matches.
+ * Resolve an immutable revision and fail before calculation if its hash differs.
  */
 export type SavedRevisionReference = {
   /**
@@ -2905,7 +2945,7 @@ export type StrategyIdentity = {
 /**
  * StrategyProvenance
  *
- * What exactly was run: recorded in the manifest so a result names its revision.
+ * The exact strategy meaning a calculation consumed.
  */
 export type StrategyProvenance = {
   kind: StrategySourceKind;
@@ -2985,6 +3025,186 @@ export type StrategySpec = {
    * Title
    */
   title: string;
+};
+
+/**
+ * StrategyTargetTrace
+ */
+export type StrategyTargetTrace = {
+  /**
+   * Candidates
+   */
+  candidates: Array<CandidateDecision>;
+  /**
+   * Execution On
+   */
+  execution_on: string;
+  /**
+   * Signal As Of
+   */
+  signal_as_of: string;
+  /**
+   * Targets
+   */
+  targets: Array<TargetPosition>;
+};
+
+/**
+ * StrategyTraceInput
+ */
+export type StrategyTraceInput = {
+  /**
+   * Node Id
+   */
+  node_id: string;
+  /**
+   * Value
+   */
+  value: number | boolean | null;
+};
+
+/**
+ * StrategyTracePage
+ */
+export type StrategyTracePage = {
+  /**
+   * Has More
+   */
+  has_more: boolean;
+  /**
+   * Limit
+   */
+  limit: number;
+  /**
+   * Offset
+   */
+  offset: number;
+  /**
+   * Returned
+   */
+  returned: number;
+  /**
+   * Rows
+   */
+  rows: Array<StrategyTraceRow>;
+};
+
+/**
+ * StrategyTraceRequest
+ */
+export type StrategyTraceRequest = {
+  /**
+   * As Of
+   */
+  as_of: string;
+  /**
+   * Factor Id
+   */
+  factor_id: string;
+  /**
+   * Include Raw
+   */
+  include_raw?: boolean;
+  /**
+   * Limit
+   */
+  limit?: number;
+  /**
+   * Node Ids
+   */
+  node_ids?: Array<string>;
+  /**
+   * Offset
+   */
+  offset?: number;
+  /**
+   * Security Ids
+   */
+  security_ids: Array<string>;
+  /**
+   * Starting Holdings
+   */
+  starting_holdings?: Array<PortfolioStartingHolding> | null;
+  /**
+   * Strategy Source
+   */
+  strategy_source: SavedRevisionReference | InlineDraft;
+};
+
+/**
+ * StrategyTraceResponse
+ */
+export type StrategyTraceResponse = {
+  /**
+   * As Of
+   */
+  as_of: string;
+  /**
+   * Factor Id
+   */
+  factor_id: string;
+  /**
+   * Plan Hash
+   */
+  plan_hash: string;
+  provenance: StrategyProvenance;
+  /**
+   * Raw
+   */
+  raw: Array<RawStrategyTraceRow>;
+  /**
+   * Raw Truncated
+   */
+  raw_truncated: boolean;
+  /**
+   * Registry Version
+   */
+  registry_version: string;
+  /**
+   * Snapshot Id
+   */
+  snapshot_id: string;
+  /**
+   * Spec Hash
+   */
+  spec_hash: string;
+  target: StrategyTargetTrace | null;
+  trace: StrategyTracePage;
+  /**
+   * Warnings
+   */
+  warnings?: Array<string>;
+};
+
+/**
+ * StrategyTraceRow
+ */
+export type StrategyTraceRow = {
+  /**
+   * As Of
+   */
+  as_of: string;
+  /**
+   * Inputs
+   */
+  inputs: Array<StrategyTraceInput>;
+  /**
+   * Node Id
+   */
+  node_id: string;
+  /**
+   * Operation
+   */
+  operation: string;
+  /**
+   * Security Id
+   */
+  security_id: string;
+  status: TraceValueStatus;
+  /**
+   * Value
+   */
+  value: number | boolean | null;
 };
 
 /**
@@ -3104,6 +3324,17 @@ export type TimeSeriesNode = {
  */
 export type TimeSeriesOperator =
   "mean" | "std" | "momentum" | "delta" | "min" | "max";
+
+/**
+ * TraceValueStatus
+ */
+export type TraceValueStatus =
+  | "ok"
+  | "missing_input"
+  | "warm_up"
+  | "divide_by_zero"
+  | "group_missing"
+  | "reference_missing";
 
 /**
  * UnaryNode
@@ -3800,6 +4031,36 @@ export type CreateStrategyResponses = {
 
 export type CreateStrategyResponse =
   CreateStrategyResponses[keyof CreateStrategyResponses];
+
+export type TraceStrategyData = {
+  body: StrategyTraceRequest;
+  path?: never;
+  query?: never;
+  url: "/api/v1/strategies/debug/trace";
+};
+
+export type TraceStrategyErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+  /**
+   * The client cancelled the trace request
+   */
+  499: unknown;
+};
+
+export type TraceStrategyError = TraceStrategyErrors[keyof TraceStrategyErrors];
+
+export type TraceStrategyResponses = {
+  /**
+   * Successful Response
+   */
+  200: StrategyTraceResponse;
+};
+
+export type TraceStrategyResponse =
+  TraceStrategyResponses[keyof TraceStrategyResponses];
 
 export type ExplainStrategyData = {
   body: StrategySpec;

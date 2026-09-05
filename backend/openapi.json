@@ -2470,7 +2470,7 @@
         "type": "object"
       },
       "InlineDraft": {
-        "description": "Run an unsaved spec (draft backtests only; never a deployment source).\n\n`source_hash` is client-asserted provenance: the server cannot verify it without the text\nand records it as given.",
+        "description": "Use an unsaved typed spec while recording its authoring-source hash when known.\n\nAn inline draft can be researched or backtested, but it is never a deployment source.\n`source_hash` is client-asserted provenance: the server cannot verify it without the text.",
         "properties": {
           "kind": {
             "const": "inline_draft",
@@ -2949,6 +2949,24 @@
         "title": "PortfolioSide",
         "type": "string"
       },
+      "PortfolioStartingHolding": {
+        "properties": {
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "weight": {
+            "title": "Weight",
+            "type": "number"
+          }
+        },
+        "required": [
+          "security_id",
+          "weight"
+        ],
+        "title": "PortfolioStartingHolding",
+        "type": "object"
+      },
       "PortfolioStep": {
         "properties": {
           "liquidity_field_id": {
@@ -3299,6 +3317,54 @@
           "net_exposure"
         ],
         "title": "RawSnapshot",
+        "type": "object"
+      },
+      "RawStrategyTraceRow": {
+        "properties": {
+          "as_of": {
+            "format": "date",
+            "title": "As Of",
+            "type": "string"
+          },
+          "available_date": {
+            "format": "date",
+            "title": "Available Date",
+            "type": "string"
+          },
+          "field_id": {
+            "title": "Field Id",
+            "type": "string"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "as_of",
+          "security_id",
+          "field_id",
+          "value",
+          "available_date"
+        ],
+        "title": "RawStrategyTraceRow",
         "type": "object"
       },
       "RawTrade": {
@@ -4113,7 +4179,7 @@
         "type": "object"
       },
       "SavedRevisionReference": {
-        "description": "Run a stored revision; the run fails before starting if the hash no longer matches.",
+        "description": "Resolve an immutable revision and fail before calculation if its hash differs.",
         "properties": {
           "expected_spec_hash": {
             "title": "Expected Spec Hash",
@@ -4594,7 +4660,7 @@
         "type": "object"
       },
       "StrategyProvenance": {
-        "description": "What exactly was run: recorded in the manifest so a result names its revision.",
+        "description": "The exact strategy meaning a calculation consumed.",
         "properties": {
           "kind": {
             "$ref": "#/components/schemas/StrategySourceKind"
@@ -4765,6 +4831,317 @@
           "execution"
         ],
         "title": "StrategySpec",
+        "type": "object"
+      },
+      "StrategyTargetTrace": {
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/CandidateDecision"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "execution_on": {
+            "format": "date",
+            "title": "Execution On",
+            "type": "string"
+          },
+          "signal_as_of": {
+            "format": "date",
+            "title": "Signal As Of",
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/TargetPosition"
+            },
+            "title": "Targets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "signal_as_of",
+          "execution_on",
+          "targets",
+          "candidates"
+        ],
+        "title": "StrategyTargetTrace",
+        "type": "object"
+      },
+      "StrategyTraceInput": {
+        "properties": {
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "node_id",
+          "value"
+        ],
+        "title": "StrategyTraceInput",
+        "type": "object"
+      },
+      "StrategyTracePage": {
+        "properties": {
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "returned": {
+            "title": "Returned",
+            "type": "integer"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/StrategyTraceRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rows",
+          "offset",
+          "limit",
+          "returned",
+          "has_more"
+        ],
+        "title": "StrategyTracePage",
+        "type": "object"
+      },
+      "StrategyTraceRequest": {
+        "properties": {
+          "as_of": {
+            "format": "date",
+            "title": "As Of",
+            "type": "string"
+          },
+          "factor_id": {
+            "title": "Factor Id",
+            "type": "string"
+          },
+          "include_raw": {
+            "default": false,
+            "title": "Include Raw",
+            "type": "boolean"
+          },
+          "limit": {
+            "default": 200,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "node_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Node Ids",
+            "type": "array"
+          },
+          "offset": {
+            "default": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "security_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Security Ids",
+            "type": "array"
+          },
+          "starting_holdings": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PortfolioStartingHolding"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Starting Holdings"
+          },
+          "strategy_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SavedRevisionReference"
+              },
+              {
+                "$ref": "#/components/schemas/InlineDraft"
+              }
+            ],
+            "title": "Strategy Source"
+          }
+        },
+        "required": [
+          "strategy_source",
+          "as_of",
+          "security_ids",
+          "factor_id"
+        ],
+        "title": "StrategyTraceRequest",
+        "type": "object"
+      },
+      "StrategyTraceResponse": {
+        "properties": {
+          "as_of": {
+            "format": "date",
+            "title": "As Of",
+            "type": "string"
+          },
+          "factor_id": {
+            "title": "Factor Id",
+            "type": "string"
+          },
+          "plan_hash": {
+            "title": "Plan Hash",
+            "type": "string"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/StrategyProvenance"
+          },
+          "raw": {
+            "items": {
+              "$ref": "#/components/schemas/RawStrategyTraceRow"
+            },
+            "title": "Raw",
+            "type": "array"
+          },
+          "raw_truncated": {
+            "title": "Raw Truncated",
+            "type": "boolean"
+          },
+          "registry_version": {
+            "title": "Registry Version",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "title": "Snapshot Id",
+            "type": "string"
+          },
+          "spec_hash": {
+            "title": "Spec Hash",
+            "type": "string"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StrategyTargetTrace"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "trace": {
+            "$ref": "#/components/schemas/StrategyTracePage"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "spec_hash",
+          "snapshot_id",
+          "registry_version",
+          "plan_hash",
+          "provenance",
+          "factor_id",
+          "as_of",
+          "trace",
+          "raw",
+          "raw_truncated",
+          "target"
+        ],
+        "title": "StrategyTraceResponse",
+        "type": "object"
+      },
+      "StrategyTraceRow": {
+        "properties": {
+          "as_of": {
+            "format": "date",
+            "title": "As Of",
+            "type": "string"
+          },
+          "inputs": {
+            "items": {
+              "$ref": "#/components/schemas/StrategyTraceInput"
+            },
+            "title": "Inputs",
+            "type": "array"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operation": {
+            "title": "Operation",
+            "type": "string"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TraceValueStatus"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "node_id",
+          "operation",
+          "as_of",
+          "security_id",
+          "value",
+          "status",
+          "inputs"
+        ],
+        "title": "StrategyTraceRow",
         "type": "object"
       },
       "StrategyValidation": {
@@ -4940,6 +5317,18 @@
           "max"
         ],
         "title": "TimeSeriesOperator",
+        "type": "string"
+      },
+      "TraceValueStatus": {
+        "enum": [
+          "ok",
+          "missing_input",
+          "warm_up",
+          "divide_by_zero",
+          "group_missing",
+          "reference_missing"
+        ],
+        "title": "TraceValueStatus",
         "type": "string"
       },
       "UnaryNode": {
@@ -6056,6 +6445,48 @@
           }
         },
         "summary": "Create Strategy"
+      }
+    },
+    "/api/v1/strategies/debug/trace": {
+      "post": {
+        "description": "Bounded node/raw/target projection from the same calculation that builds TargetTape.",
+        "operationId": "traceStrategy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StrategyTraceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyTraceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "499": {
+            "description": "The client cancelled the trace request"
+          }
+        },
+        "summary": "Trace Strategy"
       }
     },
     "/api/v1/strategies/explain": {

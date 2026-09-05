@@ -26,6 +26,7 @@ from strategy_workbench.domain.factor.facade.expression import (
 from strategy_workbench.domain.factor.facade.trace import (
     TraceSelection,
     TraceValueStatus,
+    evaluate_factor_graph_with_trace,
     trace_factor_graph,
 )
 
@@ -93,6 +94,28 @@ def test_trace_values_equal_evaluation_values_for_every_selected_row() -> None:
     for node in trace.nodes:
         assert all(order.index(dep) < order.index(node.node_id) for dep in node.input_node_ids)
     assert trace.output_node_id == "final"
+
+
+def test_joint_evaluation_and_trace_share_one_compute_cache(monkeypatch) -> None:
+    """P5-01 must not evaluate once for the tape and again for the debugger."""
+    from strategy_workbench.domain.factor import _trace as trace_module
+
+    calls = 0
+    original = trace_module._compute_nodes
+
+    def counted(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(trace_module, "_compute_nodes", counted)
+    evaluation, trace = evaluate_factor_graph_with_trace(
+        _graph(), observations=_panel(), selection=TraceSelection(node_ids=("final",))
+    )
+
+    assert calls == 1
+    traced = {(row.as_of, row.security_id): row.value for row in trace.nodes[0].values}
+    assert traced == {(row.as_of, row.security_id): row.value for row in evaluation.values}
 
 
 def test_rows_are_ordered_by_as_of_then_security_and_carry_inputs() -> None:

@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: CHANGES_REQUESTED
+project_status: SELF_CHECK
 current_phase: P5
 current_pr: P5-03
 active_prs: [P5-03]
 parallel_window: []
-last_updated: 2026-09-05T17:54:41+09:00
+last_updated: 2026-09-05T18:04:57+09:00
 planned_prs: 50
 merged_prs: 43
 approved_prs: 43
@@ -22,13 +22,13 @@ progress_percent: 86
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `CHANGES_REQUESTED` |
+| Project status | `SELF_CHECK` |
 | Current phase | `P5` |
 | Current/next PR | `P5-03` |
 | Active PR | `P5-03` |
 | Progress | `43 / 50 merged (86%)` |
 | Approved | `43 / 50` |
-| Aggregated at | `2026-09-05 17:54 KST` |
+| Aggregated at | `2026-09-05 18:04 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -77,7 +77,7 @@ progress_percent: 86
 | P2 | App Shell and visual foundation | 4 | 4 | `MERGED` |
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
 | P4 | Outline, Contract, Projections | 10 | 10 | `MERGED` |
-| P5 | Truthful Trace UI | 3 | 2 | `CHANGES_REQUESTED` |
+| P5 | Truthful Trace UI | 3 | 2 | `SELF_CHECK` |
 | P6 | Professional release and migration | 7 | 1 | `WAITING` |
 | **Total** |  | **50** | **43** | **86%** |
 <!-- PLAN:PHASES:END -->
@@ -86,16 +86,16 @@ progress_percent: 86
 
 | 항목 | 값 |
 |---|---|
-| PR | `P5-03` Raw→Target full linked trace UI CHANGES_REQUESTED |
+| PR | `P5-03` Raw→Target full linked trace UI SELF_CHECK |
 | Intent | truthful pipeline이 계산 중 함께 만든 raw provenance·FactorGraph node cache·portfolio construction audit를 한 행의 연결 trace로 투영해 전문 사용자가 값의 출처부터 실제 TargetTape와 주문 추정까지 역추적하게 한다 |
 | Acceptance | 모든 reachable node를 bounded trace로 조회; raw CellKind로 실제 0/source omitted/missing/not collected/coverage gap 구분; backend가 factor contribution·composite·selection·unconstrained/risk-constrained target을 동일 compile 경로에서 산출; 명시적 starting holdings가 있을 때만 previous weight·estimated delta와 execution 시점/가정 표시; warm-up·계산 제외·risk adjusted/removed 상태; TargetTape/tape hash/backtest parity·PIT·cancellation·source/fingerprint fail-closed; ko/en·keyboard/accessible linked stage UI |
 | Non-goals | frontend 재계산·수기 wire DTO, saved factor/subgraph 값을 공급할 별도 resolver, 실제 주문 제출, repository/history(P6-01/02), 대규모 virtualization(P6-04), IDE layout 재설계 |
 | Branch/worktree | `feat/p5-03-linked-trace-ui` (`Quant_study-p5-03`) |
 | Base SHA | `fcc37ee` (P5-02 merge main) |
-| Head SHA | `72bff34` reviewer-fix freeze |
-| Diff stat | 29 implementation files, +3,034/-186; 최초 vertical slice에 backend-owned executable default signal, bounded 64-node chunk·400-row page·8,000-row aggregate와 selected-node fallback, target 없는 partial trace를 추가. domain schedule → application trace → HTTP/OpenAPI/generated SDK → debug query/projection/UI 책임을 유지하며 WORKFLOW 12절 size exception 적용 |
-| Focused tests | backend portfolio/trace HTTP·preflight 96 passed; frontend trace/debugger/document route 70 passed. 6×100 paging, 101-node chunk, 8,100-row cap+selected fallback, later-page fingerprint drift, mid-page cancellation, omitted/default·weekend end·no executable frame·explicit non-rebalance partial trace를 포함 |
-| Full gate | backend pytest 1,037·Ruff·Pyright; OpenAPI/SDK 2회 연속 생성 SHA-256 동일; frontend typecheck·lint·Vitest 403·build; diff-check 통과 |
+| Head SHA | `f12fcd7` reviewer-fix freeze |
+| Diff stat | 37 implementation files, +3,280/-198; 최초 vertical slice와 paging/default-date 수정에 raw field identity contract 및 세 execution route의 공통 typed HTTP 오류/OpenAPI/generated SDK를 추가. port contract → application consumer → inbound wire → generated client 책임을 유지하며 WORKFLOW 12절 size exception 적용 |
+| Focused tests | raw port·truthful pipeline·preview/trace/backtest HTTP 103, frontend generated error contract 1 passed. duplicate/blank field identity의 construction·consumer revalidation과 preview/trace/backtest 공통 `portfolio.raw_observation.invalid`를 포함하며 기존 trace-focused backend 96/frontend 70도 통과 |
+| Full gate | backend pytest 1,041·Ruff·Pyright; OpenAPI/SDK 2회 연속 생성 SHA-256 동일; frontend typecheck·lint·Vitest 403·build; diff-check 통과 |
 
 ---
 
@@ -219,7 +219,7 @@ Phase exit:
 |---|---|---|---|---|---|
 | [x] | `P5-01` | Correctness pipeline을 조회하는 scoped trace API | P1.5-04, P1-03 | `MERGED` | [#65](https://github.com/Nochiski/Quant_study/pull/65) · `review_p5_01` APPROVE · merge `e4fabd4` |
 | [x] | `P5-02` | Date/security/node 선택 Debugger shell | P3-05, P5-01, P2-03 | `MERGED` | [#67](https://github.com/Nochiski/Quant_study/pull/67) · `review_p5_02` APPROVE · merge `fcc37ee` |
-| [ ] | `P5-03` | Raw→Target trace, risk before/after, order delta estimate | P4-01, P4-07, P5-02 | `CHANGES_REQUESTED` | [#68](https://github.com/Nochiski/Quant_study/pull/68) · 최초 P1 2건 해소, 새 raw field 계약 P1 1건 수정 중 · review `7edc33d` |
+| [ ] | `P5-03` | Raw→Target trace, risk before/after, order delta estimate | P4-01, P4-07, P5-02 | `SELF_CHECK` | [#68](https://github.com/Nochiski/Quant_study/pull/68) · 누적 P1 3건 수정 완료·재검토 대기 · fix `f12fcd7` |
 
 Phase exit:
 
@@ -299,7 +299,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
-| P5-03 | author backend 96/frontend 70; reviewer backend 119+architecture 5/frontend 73 passed | backend pytest 1,037·Ruff·Pyright; frontend typecheck·lint·Vitest 403·build | OpenAPI/SDK 2회 연속 생성 SHA-256 동일, reviewer runtime exact match | 최초 P1 paging/default-date 해소 및 실제 HTTP probe 통과; reviewer가 duplicate raw `field_id`에서 raw `[1,2]`와 executable node `2` 불일치를 재현 | [#68](https://github.com/Nochiski/Quant_study/pull/68) CI 4/4 pass; `review_p5_03` 새 P1 1건 수정 중 | 2026-09-05 |
+| P5-03 | author raw/API 103+frontend contract 1, trace backend 96/frontend 70; reviewer backend 119+architecture 5/frontend 73 | backend pytest 1,041·Ruff·Pyright; frontend typecheck·lint·Vitest 403·build | OpenAPI/SDK 2회 연속 생성 SHA-256 동일 | duplicate/blank raw field construction·consumer 재검증, preview/trace/backtest 동일 coded 422; 기존 paging/default-date 실제 HTTP probe와 race/hostile 경계 유지 | [#68](https://github.com/Nochiski/Quant_study/pull/68) 누적 P1 3건 `f12fcd7`까지 수정; 최신 CI·동일 reviewer 재검토 대기 | 2026-09-05 |
 | P5-02 | author/reviewer focused 62 passed | frontend typecheck·lint·Vitest 392·build; backend pytest 1,027·Ruff·Pyright | OpenAPI/SDK 재생성 deterministic·diff clean | source identity key·query-cache REST owner·inline→saved late/visible result 폐기·Plan 탭 error/cancel/discard·revision saved wire와 URL back/forward·feature CSS no-important 회귀를 reviewer 재확인 | [#67](https://github.com/Nochiski/Quant_study/pull/67) `review_p5_02` APPROVE, final CI 4/4 pass, MERGED (`fcc37ee`) | 2026-09-05 |
 | P5-01 | author focused 251 + reviewer backend full 1,027·architecture 7 passed | backend pytest 1,027·Ruff `src tests`·Pyright; frontend typecheck·lint·Vitest 369·build | runtime OpenAPI == tracked true; 기존 OpenAPI/SDK 17-file deterministic·schema parity 증거 유지 | reviewer 독립 probe raw consumer 2,000→1, factor output 1,000→1; constructor/scope/raw→factor/portfolio checkpoint·기존 wire/non-finite/schedule/tape parity 재확인 | [#65](https://github.com/Nochiski/Quant_study/pull/65) `review_p5_01` APPROVE, final CI 4/4 pass, MERGED (`e4fabd4`) | 2026-09-05 |
 | P4-08 | author focused 75/66 + reviewer focused 5 files 75 passed | frontend typecheck·lint·vitest 368·build; reviewer 독립 전체 368; real-backend PIT E2E 포함; backend Ruff | OpenAPI/SDK 재생성 deterministic·clean | save source/hash/canonical 결합과 fail-closed 재compile, edit/명시 검증 baseline retry, EOF·대형 duplicate/reorder non-zero, v51 현재 revision page, Diff view 409 recovery, new draft badge까지 검증 | [#63](https://github.com/Nochiski/Quant_study/pull/63) `review_p4_08` APPROVE P0/P1/P2 0, review HEAD `684dc69` CI 4/4 pass | 2026-09-05 |
@@ -341,6 +341,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | 새 raw identity P1을 `f12fcd7`에서 수정했다. `RawFieldValue`가 blank identity를 construction에서 거부하고 `RawObservationSet` consumer validation이 observation별 duplicate/blank를 checkpoint와 함께 다시 검사한다. inbound 공통 execution-error contract가 `portfolio.raw_observation.invalid`를 단일 정의하고 preview·trace·backtest 모두 계산 전에 같은 typed 422를 반환하며 OpenAPI/generated SDK와 exhaustive frontend consumer를 갱신했다. focused backend 103/frontend 1, 전체 backend 1,041/frontend 403, Ruff·Pyright·typecheck·lint·build·generated deterministic·diff-check 통과 후 SELF_CHECK 전환 | RawObservation port/consumer/inbound wire SoT·3-route parity·reviewer P1 회귀 고정 |
 | 2026-09-05 KST | Codex | 동일 reviewer 재검토에서 최초 P1 2건은 해소됐으나 새 P1 1건이 확인됐다. `RawObservationSet`이 observation 내부 duplicate/blank `field_id`를 허용해 raw trace는 두 값을 표시하고 FieldNode dict는 마지막 값, group lookup은 첫 값을 실행하는 provenance/실행 불일치를 재현했다. construction 및 application consumer boundary에서 field identity를 cancellation-aware하게 검증하고 trace·preview·backtest가 계산 전 같은 coded failure를 내도록 고정하기 위해 CHANGES_REQUESTED로 전환한다 | RawObservationPort provenance SoT·truthful trace/execution parity·same-reviewer fix loop |
 | 2026-09-05 KST | Codex | P5-03 reviewer fix와 self-check를 `009325d`에 고정하고 [#68](https://github.com/Nochiski/Quant_study/pull/68) 본문에 P1 원인·수정·대규모/race 회귀·최신 30-file size exception을 갱신했다. 같은 reviewer `review_p5_03`에게 base `fcc37ee` 대비 최신 전체 diff와 최초 P1 2건 폐쇄 여부를 재검토하도록 IN_REVIEW 전환한다 | 13.3 diff freeze·same-reviewer fix loop·PR body/PLAN 최신화 |
 | 2026-09-05 KST | Codex | P5-03 reviewer P1 2건을 `72bff34`에서 수정했다. backend compiler-owned schedule이 생략된 날짜를 마지막 실행 가능 signal frame으로 해석하고 실행 frame이 없으면 typed 422로 닫으며, 명시한 non-rebalance date는 raw/node partial trace를 보존한다. frontend query owner는 64-node chunk·400-row page·8,000-row 총예산으로 전체 trace를 identity-only 집계하고 선택 node를 독립 bounded fallback으로 완전 조회한다. 6×100·101-node·8,100-row·later-page drift·중간 취소 회귀를 포함해 focused backend 96/frontend 70, 전체 backend 1,037/frontend 403, 정적·빌드·generated deterministic·diff-check를 통과해 SELF_CHECK로 전환했다 | compiler schedule SoT·application/API/default scope 책임·query/projection/UI 책임분리·동일 reviewer P1 회귀 고정 |

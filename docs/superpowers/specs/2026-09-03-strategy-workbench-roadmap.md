@@ -113,10 +113,10 @@ backend/
 frontend/
 ├─ src/
 │  ├─ app/                        # router/providers/composition
-│  ├─ pages/                      # strategy-builder/results/run-detail
-│  ├─ widgets/                    # factor-canvas/candidate-table/charts
-│  ├─ features/                   # edit-strategy/configure-search/run-backtest/...
-│  ├─ entities/                   # strategy/factor/experiment/metric/dataset
+│  ├─ pages/                      # strategy new/revision/history, backtest run/history
+│  ├─ widgets/                    # app shell, Strategy IDE
+│  ├─ features/                   # edit-strategy/debug-strategy/...
+│  ├─ entities/                   # strategy/factor/backtest/metric/dataset
 │  └─ shared/                     # generated SDK/UI primitive/token/lib
 ├─ e2e/
 └─ README.md
@@ -209,9 +209,9 @@ DAG cycle, unit mismatch, division risk, insufficient history, unavailable datas
 issue로 반환한다. UI는 그 issue를 node와 field에 연결해 보여준다.
 
 v1 authoring은 canonical field name과 raw value를 그대로 쓰는 verbose YAML/JSON source다. Form과
-Graph는 현재 valid spec을 읽는 projection이며 새 편집 모델이 아니다. legacy Quick Builder는 허용된
-subgraph를 form으로, Advanced Graph는 전체 DAG를 편집하지만 migration 기간에만 유지된다
-(ADR D2, D5, D9).
+Graph는 현재 valid spec을 읽는 projection이며 새 편집 모델이 아니다. 과거 Quick Builder와
+Advanced Graph는 P6-06 migration gate 통과 후 제거됐고, 기존 URL은 YAML 신규 문서 route로
+이동한다(ADR D2, D5, D9).
 
 ### 7.2 SearchSpec과 trial identity
 
@@ -685,5 +685,5 @@ authoring 방식을 verbose YAML/JSON source로 전환했다. 이 initiative의 
 - M8 항목 중 revision history/diff, autosave/recovery, revision conflict, keyboard navigation은
   initiative P1-08, P3-06, P3-07, P4-08, P6-02, P6-03이 먼저 제공하며, 해당 PR merge 시 M8
   체크박스를 갱신한다. custom formula editor(표현식 DSL)는 initiative v1 non-goal이며 M8에 남는다.
-- Quick/Advanced 편집기는 ADR D9의 P6-06 migration gate와 실제 browser E2E를 통과시켜 제거한다.
+- Quick/Advanced 편집기는 ADR D9의 P6-06 migration gate와 실제 browser E2E를 통과한 뒤 제거했다.
   M6 Parameter Search는 YAML route 위의 후속 feature이며 legacy editor 제거의 선행 조건이 아니다.

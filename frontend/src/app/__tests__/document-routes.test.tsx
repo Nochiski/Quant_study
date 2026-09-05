@@ -442,9 +442,9 @@ const saveButton = () =>
     { name: "리비전 저장" },
   );
 
-const legacyLink = () =>
+const leaveLink = () =>
   globalThis.document.querySelector<HTMLAnchorElement>(
-    'a[href="/legacy/builder"]',
+    'a[href="/research/backtests"]',
   )!;
 
 const WORKFLOW_ROUTES = [
@@ -1192,20 +1192,20 @@ describe("document routes (P2-04)", () => {
     const history = mount("/research/strategies/new");
     const view = await editor();
     replaceText(view, "title: 임시\n");
-    await user.click(screen.getByRole("link", { name: "기존 편집기" }));
+    await user.click(screen.getByRole("link", { name: "백테스트" }));
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog).toHaveTextContent("저장하지 않은 변경이 있습니다");
     await user.click(within(dialog).getByRole("button", { name: "머무르기" }));
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     expect(history.location.pathname).toBe("/research/strategies/new");
-    await user.click(screen.getByRole("link", { name: "기존 편집기" }));
+    await user.click(screen.getByRole("link", { name: "백테스트" }));
     await user.click(
       within(await screen.findByRole("alertdialog")).getByRole("button", {
         name: "나가기",
       }),
     );
     await waitFor(() =>
-      expect(history.location.pathname).toBe("/legacy/builder"),
+      expect(history.location.pathname).toBe("/research/backtests"),
     );
   });
 
@@ -1219,7 +1219,7 @@ describe("document routes (P2-04)", () => {
     await waitFor(() => expect(history.location.search).toContain("view=json"));
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
 
-    await user.click(legacyLink());
+    await user.click(leaveLink());
     const dialog = await screen.findByRole("alertdialog");
     expect(globalThis.document.activeElement).toBe(
       within(dialog).getAllByRole("button")[0],
@@ -1238,7 +1238,7 @@ describe("document routes (P2-04)", () => {
       "/research/strategies/s1/revisions/2",
     );
     await waitFor(() =>
-      expect(globalThis.document.activeElement).toBe(legacyLink()),
+      expect(globalThis.document.activeElement).toBe(leaveLink()),
     );
   });
 
@@ -2755,7 +2755,7 @@ describe("dirty guard follow-ups (P2-04 review)", () => {
       "aria-selected",
       "true",
     );
-    await user.click(screen.getByRole("link", { name: "기존 편집기" }));
+    await user.click(screen.getByRole("link", { name: "백테스트" }));
     const dialog = await screen.findByRole("alertdialog");
     expect(globalThis.document.activeElement).toBe(
       within(dialog).getByRole("button", { name: "머무르기" }),

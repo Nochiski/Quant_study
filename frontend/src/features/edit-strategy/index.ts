@@ -1,9 +1,3 @@
-export { StrategyDraftProvider } from "./model/strategy-draft-provider";
-export { useStrategyDraft } from "./model/strategy-draft-context";
-export { StrategyEditorWorkspace } from "./ui/strategy-editor-workspace";
-export { PortfolioEditor } from "./ui/portfolio-editor";
-export { RiskEditor } from "./ui/risk-editor";
-export { ExecutionEditor } from "./ui/execution-editor";
 export {
   canValidateDocument,
   currentDiagnostics,
@@ -144,5 +138,4 @@ export {
   type GraphNodeDetail,
   type GraphNodeProjection,
 } from "./model/factor-graph-projection";
-export { SaveAction } from "./ui/save-action";
 export { DirtyLeaveGuard } from "./ui/dirty-leave-guard";

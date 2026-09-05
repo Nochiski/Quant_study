@@ -24,7 +24,6 @@ import {
   RouteErrorPage,
   RoutePendingPage,
 } from "../../pages/route-states";
-import { StrategyBuilderPage } from "../../pages/strategy-builder";
 import { t } from "../../shared/config";
 import { isJsonPointer } from "../../shared/lib/yaml12";
 import { AppShell } from "../../widgets/app-shell";
@@ -39,7 +38,6 @@ const isView = (value: unknown): value is StrategyView =>
   typeof value === "string" &&
   (STRATEGY_VIEWS as readonly string[]).includes(value);
 
-type LegacySearch = { step?: string; run?: string };
 type StrategyDocumentSearch = {
   view?: StrategyView;
   path?: string;
@@ -65,13 +63,6 @@ const strategyDocumentSearch = (
     draft: isNewDraftId(search.draft) ? search.draft : undefined,
   };
 };
-
-/** Idempotent: invalid values are dropped, defaults are never written to the URL (ADR D1). */
-const legacySearch = (search: Record<string, unknown>): LegacySearch => ({
-  step: typeof search.step === "string" ? search.step : undefined,
-  // `run` carries a run id (legacy `?run=<id>`); bare `?run` stays an empty string.
-  run: search.run === undefined ? undefined : String(search.run),
-});
 
 // The editor pages (parser, CodeMirror, schema assist) are the heavy part of the app; they load
 // on first navigation so the entry chunk stays small (editor ADR D1).
@@ -136,12 +127,7 @@ const rootRoute = createRootRouteWithContext<RouterContext>()({
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  validateSearch: legacySearch,
-  beforeLoad: ({ search }) => {
-    // Existing bookmarks (`/?step=`, `/?run`) keep their query on the legacy route (ADR D2).
-    if (search.step !== undefined || search.run !== undefined) {
-      throw redirect({ to: "/legacy/builder", search, replace: true });
-    }
+  beforeLoad: () => {
     throw redirect({
       to: "/research/strategies/new",
       search: {},
@@ -153,8 +139,13 @@ const indexRoute = createRoute({
 const legacyBuilderRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/legacy/builder",
-  validateSearch: legacySearch,
-  component: StrategyBuilderPage,
+  beforeLoad: () => {
+    throw redirect({
+      to: "/research/strategies/new",
+      search: {},
+      replace: true,
+    });
+  },
 });
 
 const newStrategyRoute = createRoute({

@@ -1,0 +1,198 @@
+# 레짐 전환 변동성 적응형 (Regime-Adaptive Volatility)
+#
+# 변동성 레짐이 바뀌는 장세에서는 (1) 모멘텀이 무너지고 급락 후 반전이 나오며, (2) 저변동성
+# 종목의 상대 성과가 강해지고, (3) 이익이 실제로 확인된 종목만 버틴다. 이 전략은 종목별로
+# 레짐을 감지해 점수 계산식을 바꾸고, 점수 임계값으로 shock 국면에서 자동으로 현금을 늘린다.
+#
+# 레짐 감지: vol_ratio = 20세션 실현변동성 / 120세션 실현변동성.
+#   vol_ratio > shock_ratio(기본 1.5) 이면 그 종목은 shock 레짐, 아니면 calm 레짐.
+#   1. regime_core     - calm: 6개월 추세 순위(121세션 모멘텀, 최근 10세션 제외)
+#                        shock: 10세션 반전 순위 x shock_scale(기본 0.6)
+#                        곱해서 낮춘 점수는 score_threshold를 넘기 어려워지므로 시장 전체가
+#                        shock에 들어가면 보유 종목이 줄고 현금 비중이 자동으로 커진다.
+#   2. low_vol         - 20세션 실현변동성이 낮을수록 높은 순위
+#   3. earnings_quality - PIT 어닝 서프라이즈 순위
+#
+# 구현 메모:
+#   - momentum(window=w)는 window[-1]/window[0]-1 이므로 1일 수익률은 window: 2, 10세션 수익률은 window: 11.
+#   - 조건 분기(conditional)는 양쪽 출력 단위가 같아야 해서 calm 분기에도 상수 1.0을 곱한다.
+#   - 횡단면 집계 연산자가 없어 레짐 판정은 시장 단위가 아니라 종목 단위다.
+#   - mock 합성 데이터는 단조 추세라 shock 분기가 켜지지 않는다. 레짐 효과는 실데이터에서만 보인다.
+# 데이터 구간은 코로나 급락(2020-03), 2022 금리 쇼크 약세장, 2023 회복까지 레짐 전환 세 번을 담는다.
+schema_version: "1.0"
+title: "레짐 전환 변동성 적응형"
+description: "종목별 변동성 레짐(20세션/120세션 실현변동성 비율)을 감지해 calm에서는 6개월 추세, shock에서는 10세션 반전에 베팅하고, 저변동성·어닝 서프라이즈를 더해 점수 임계값으로 shock 국면에 현금을 늘리는 롱온리 전략."
+data:
+  market: KRX
+  start: "2020-01-02"
+  end: "2023-06-30"
+  universe_id: krx.common-stock
+  frequency: daily
+eligibility:
+  rules: []
+factors:
+  factors:
+    - factor_id: regime_core
+      label: "레짐 조건부 추세/반전"
+      direction: high
+      weight: 0.5
+      graph:
+        nodes:
+          - node_id: close
+            field_id: price.close
+            kind: field
+          - node_id: ret_1d
+            operator: momentum
+            input_node_id: close
+            window: 2
+            kind: time_series
+          - node_id: vol_20
+            operator: std
+            input_node_id: ret_1d
+            window: 20
+            kind: time_series
+          - node_id: vol_120
+            operator: std
+            input_node_id: ret_1d
+            window: 120
+            kind: time_series
+          - node_id: vol_ratio
+            operator: divide
+            left_node_id: vol_20
+            right_node_id: vol_120
+            kind: binary
+          - node_id: shock_ratio
+            parameter_id: shock_ratio
+            kind: parameter
+          - node_id: is_shock
+            operator: gt
+            left_node_id: vol_ratio
+            right_node_id: shock_ratio
+            kind: comparison
+          # calm 분기: 6개월 추세 (최근 10세션 제외)
+          - node_id: trend_121
+            operator: momentum
+            input_node_id: close
+            window: 121
+            lag: 10
+            kind: time_series
+          - node_id: trend_rank
+            operator: rank
+            input_node_id: trend_121
+            kind: cross_sectional
+          - node_id: one
+            value: 1.0
+            kind: constant
+          - node_id: calm_score
+            operator: multiply
+            left_node_id: trend_rank
+            right_node_id: one
+            kind: binary
+          # shock 분기: 10세션 반전 (최근 하락 종목 매수) x shock_scale
+          - node_id: ret_10
+            operator: momentum
+            input_node_id: close
+            window: 11
+            kind: time_series
+          - node_id: reversal
+            operator: negate
+            input_node_id: ret_10
+            kind: unary
+          - node_id: reversal_rank
+            operator: rank
+            input_node_id: reversal
+            kind: cross_sectional
+          - node_id: shock_scale
+            parameter_id: shock_scale
+            kind: parameter
+          - node_id: shock_score
+            operator: multiply
+            left_node_id: reversal_rank
+            right_node_id: shock_scale
+            kind: binary
+          - node_id: score
+            predicate_node_id: is_shock
+            true_node_id: shock_score
+            false_node_id: calm_score
+            kind: conditional
+        output_node_id: score
+        missing_policy: drop
+    - factor_id: low_vol
+      label: "저변동성 (20세션 실현변동성 역순위)"
+      direction: high
+      weight: 0.3
+      graph:
+        nodes:
+          - node_id: close
+            field_id: price.close
+            kind: field
+          - node_id: ret_1d
+            operator: momentum
+            input_node_id: close
+            window: 2
+            kind: time_series
+          - node_id: vol_20
+            operator: std
+            input_node_id: ret_1d
+            window: 20
+            kind: time_series
+          - node_id: neg_vol
+            operator: negate
+            input_node_id: vol_20
+            kind: unary
+          - node_id: low_vol_rank
+            operator: rank
+            input_node_id: neg_vol
+            kind: cross_sectional
+        output_node_id: low_vol_rank
+        missing_policy: drop
+    - factor_id: earnings_quality
+      label: "어닝 서프라이즈 순위"
+      direction: high
+      weight: 0.2
+      graph:
+        nodes:
+          - node_id: surprise
+            field_id: event.earnings_surprise
+            kind: field
+          - node_id: surprise_rank
+            operator: rank
+            input_node_id: surprise
+            kind: cross_sectional
+        output_node_id: surprise_rank
+        missing_policy: drop
+signal:
+  method: weighted_sum
+  # 세 팩터 모두 [0,1] 순위이므로 합산 점수도 [0,1]. 0.45 미만은 제외되어 현금으로 남는다.
+  score_threshold: 0.45
+portfolio:
+  side: long_only
+  selection_count: 20
+  weighting: equal
+  rebalance: every_n_sessions
+  rebalance_every_n_sessions: 10
+  selection_method: top_n
+  turnover_buffer_count: 3
+risk:
+  gross_exposure: 1.0
+  net_exposure: 1.0
+  max_name_weight: 0.07
+  max_sector_weight: 0.30
+execution:
+  timing: next_open
+  order_style: market
+  fee_bps: 15.0
+  slippage_bps: 10.0
+parameters:
+  - parameter_id: shock_ratio
+    kind: float
+    default: 1.5
+    minimum: 1.0
+    maximum: 3.0
+    step: 0.1
+  - parameter_id: shock_scale
+    kind: float
+    default: 0.6
+    minimum: 0.2
+    maximum: 1.0
+    step: 0.1

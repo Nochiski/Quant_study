@@ -23,6 +23,8 @@ class BuildRecord:
     content_hash: str
     partitions: list[dict[str, object]] = field(default_factory=list)
     gates: list[dict[str, object]] = field(default_factory=list)
+    # equity 층 전용: 입력 stage 테이블 → 고정한 build_id. stage 빌드는 빈 dict (EQUITY_WORKFLOW §1)
+    inputs: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass

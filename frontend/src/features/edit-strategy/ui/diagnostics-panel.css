@@ -1,0 +1,230 @@
+.problems {
+  margin-top: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-raised);
+  overflow: hidden;
+}
+
+.problems--stale {
+  opacity: 0.7;
+}
+
+.problems__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.problems__summary {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+  font-weight: 600;
+}
+
+.problems__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.problems__filter,
+.problems__copy {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.problems__filter {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 3px var(--space-2);
+  font-size: 11px;
+}
+
+.problems__filter[aria-pressed="true"] {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.problems__filter:hover,
+.problems__copy:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.problems__filter:focus-visible,
+.problems__copy:focus-visible,
+.problems__navigate:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.problems__filter-count {
+  min-width: 16px;
+  border-radius: 999px;
+  background: var(--surface-subtle);
+  padding: 0 4px;
+  text-align: center;
+}
+
+.problems__body {
+  max-height: 220px;
+  overflow: auto;
+}
+
+.problems__section + .problems__section {
+  border-top: 1px solid var(--border);
+}
+
+.problems__section-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  background: var(--surface-subtle);
+  color: var(--text-subtle);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.problems__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.problems__item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  border-bottom: 1px solid var(--border);
+}
+
+.problems__item:last-child {
+  border-bottom: 0;
+}
+
+.problems__navigate {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  width: 100%;
+  min-width: 0;
+  align-items: baseline;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--text-size-small);
+  text-align: left;
+  cursor: pointer;
+}
+
+.problems__navigate:disabled {
+  cursor: default;
+}
+
+.problems__navigate:not(:disabled):hover {
+  background: var(--surface-subtle);
+}
+
+.problems__severity {
+  font-weight: 700;
+}
+
+.problems__item--error .problems__severity {
+  color: var(--status-error);
+}
+
+.problems__item--warning .problems__severity {
+  color: var(--status-warn);
+}
+
+.problems__kind {
+  color: var(--text-subtle);
+}
+
+.problems__message {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.problems__where {
+  color: var(--text-subtle);
+  font-size: 11px;
+}
+
+.problems__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding-right: var(--space-2);
+}
+
+.problems__copy {
+  padding: 2px var(--space-1);
+  white-space: nowrap;
+  font-size: 10px;
+}
+
+.problems__empty {
+  margin: 0;
+  padding: var(--space-4);
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+  text-align: center;
+}
+
+.problems__copy-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 840px) {
+  .problems__header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .problems__navigate {
+    grid-template-columns: auto auto minmax(0, 1fr);
+  }
+
+  .problems__where {
+    grid-column: 1 / -1;
+  }
+
+  .problems__item {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .problems__actions {
+    justify-content: flex-end;
+    padding: 0 var(--space-2) var(--space-2);
+  }
+}

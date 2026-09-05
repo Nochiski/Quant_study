@@ -2,11 +2,16 @@
 
 > 작성: 2026-09-03
 >
-> 상태: M0 진행 중 — 기반 규칙·폴더·Equity mock 첫 절단면 완료
+> 상태: M5 완료 — Single backtest/전문 결과 화면 수직 슬라이스 완결
 >
-> 체크리스트: 150개 중 9개 완료, 141개 남음
+> 체크리스트: 150개 중 77개 완료, 73개 남음
 >
-> 다음 체크: M0-10 backend 독립 패키지 설정과 frontend toolchain 결정
+> 다음 체크: YAML-first initiative Phase 1.5(backtest correctness gate) 완료 후 M6-1 `domain.experiment`
+> SearchSpec/ParameterSpace/Constraint 추가
+>
+> 진행 중 initiative: YAML-first authoring 전환 — PR 단위 상태는
+> [docs/planning/strategy-workbench-yaml-ui/PLAN.md](../../planning/strategy-workbench-yaml-ui/PLAN.md)만
+> 추적한다 (16절 참고).
 > 진행 규칙: 구현·테스트·문서가 모두 끝난 항목만 `[x]`. 각 M 완료 시 이 머리말과 완료 기록을 갱신한다.
 
 ## 1. 결론
@@ -14,16 +19,19 @@
 재료는 충분하다. 추가 기능 아이디어보다 먼저 고정해야 할 것은 사실의 owner, import 방향,
 재현 가능한 실행 단위다. 제품은 아래 한 문장으로 설계한다.
 
-> Quick Builder와 Advanced Graph가 동일한 `StrategySpec`을 편집하고, backend가 이를
+> 전문 트레이더가 verbose YAML/JSON source로 `StrategySpec`을 작성하고, backend가 이를
 > PIT factor plan과 target tape로 컴파일한 뒤 Persistent Rust Engine으로 실행하며, 모든
-> 후보를 원시 지표·데이터 판본·실험 이력과 함께 비교하는 전문가용 no-code 연구 도구.
+> 후보를 원시 지표·데이터 판본·실험 이력과 함께 비교하는 전문가용 연구 도구.
+>
+> (2026-09-04 개정: Quick Builder/Advanced Graph no-code 편집기는 legacy route로 유지되며
+> 삭제 조건은 [Strategy Authoring Contract ADR](./2026-09-04-strategy-authoring-contract-adr.md) D9.)
 
 백엔드와 UX를 별도 단계로 만들지 않는다. 각 마일스톤은 항상
 `domain contract → application/API → 화면 → 사용자 시나리오 테스트`까지 닫는 수직 슬라이스다.
 
 ## 2. 설계 입력과 현재 고정점
 
-- 실행 커널: `src/backtest_engine`의 `StrategyRequirements → StrategyEvent/Context →
+- 실행 커널: `backend/src/backtest_engine`의 `StrategyRequirements → StrategyEvent/Context →
   StrategyDecision → Action → Order/Fill/Portfolio` 계약.
 - 고성능 상태 owner: `core="rust"` Persistent Rust Engine. 주문·그룹·포트폴리오·queue·accounting
   mutable state는 Rust가 소유한다.
@@ -42,9 +50,9 @@
 
 ```text
 Frontend
-  Quick Builder ─┐
-                 ├─ edit same StrategySpec draft ── generated OpenAPI SDK
-  Advanced Graph ┘                                  │
+  YAML/JSON source editor ─ compile ─ StrategySpec ── generated OpenAPI SDK
+  JSON/Form/Graph/Diff (read-only projection) ┘       │
+  (legacy Quick/Advanced: migration 기간 별도 route)  │
                                                     ▼
 Backend inbound adapter                         HTTP + SSE
                                                     │
@@ -70,6 +78,8 @@ Rust event loop에 넣지 않고, 주문/포트폴리오 상태를 Python factor
 
 ```text
 backend/
+├─ src/backtest_engine/              # 검증된 Python 실행 커널 API
+├─ rust/backtest_core/               # Persistent Rust 구현
 ├─ src/strategy_workbench/
 │  ├─ domain/
 │  │  ├─ equity/                 # PIT query/result와 coverage 의미
@@ -110,14 +120,11 @@ frontend/
 │  └─ shared/                     # generated SDK/UI primitive/token/lib
 ├─ e2e/
 └─ README.md
-
-src/backtest_engine/              # 검증된 Python 실행 커널 API — 당장 이동하지 않음
-rust/backtest_core/               # Persistent Rust 구현
 ```
 
-기존 커널을 지금 `backend/` 아래로 대규모 이동하지 않는다. 먼저 backend가 facade adapter 하나로만
-커널을 소비하게 고정하고, 경로 이동은 기능 변경과 분리된 독립 refactor로 판단한다. 앱 코드에서
-커널 내부 deep import가 생기지 않는 것이 물리 위치보다 중요한 첫 게이트다.
+기존 Python/Rust 커널, 테스트, 예제, 벤치마크, 스크립트, reference 자료는 M0에서
+`backend/` 아래로 물리 이동했다. Strategy Workbench는 같은 폴더 안에서도 facade adapter 하나로만
+커널을 소비하며 앱 코드의 커널 내부 deep import는 architecture gate로 차단한다.
 
 ## 5. SoT 대장
 
@@ -125,8 +132,9 @@ rust/backtest_core/               # Persistent Rust 구현
 |---|---|---|---|
 | raw equity 값·공개 시점·coverage | Equity DB view + `dataset_profile` | data snapshot/build ID | Equity adapter |
 | Equity 조회 의미 | `EquityDataPort` | port version | mock/DuckDB adapter |
+| raw PIT 관측(원천 필드·공개일·멤버십·섹터) | `RawObservationPort` (`application/portfolio_design`) | port version | mock/DuckDB adapter |
 | 팩터 식·방향·단위·입력·결측 정책 | Factor Registry | `factor_id@version` | catalog, compiler, UI |
-| 전략 의미 | immutable `StrategySpec` revision | schema version + canonical hash | 두 editor, compiler |
+| 전략 의미 | immutable `StrategySpec` revision | schema version + canonical hash | source editor, projection view, compiler (legacy editor는 migration 기간) |
 | 탐색 공간 | `SearchSpec` | schema version + hash | planner/optimizer |
 | 해소된 한 후보 | `ResolvedStrategySpec` | base hash + params hash | factor compiler |
 | 세션별 목표 비중 | `TargetTape` derived artifact | input fingerprint | engine adapter |
@@ -136,6 +144,12 @@ rust/backtest_core/               # Persistent Rust 구현
 | experiment/trial lifecycle | Experiment Repository | monotonic event/revision | worker/SSE/UI |
 | 최종 후보 선택 | user selection record | strategy revision + trial ID | compare UI |
 | 미저장 draft·그래프 좌표 | frontend feature/local state | draft ID | editor only |
+
+두 Equity port는 같은 셀에 같은 답을 해야 한다: `EquityDataPort`와 `RawObservationPort`가
+같은 (security, date, field)에 대해 같은 값과 같은 `available_date`를 돌려주는 것이 어댑터
+계약이며, `backend/tests/contract/test_raw_observation_port.py`가 이를 셀 단위로 강제한다.
+`universe_member`와 `sector_id`에는 공개일이 없으므로 as_of vintage로 답할 책임도 어댑터에
+있고 application은 검증하지 못한다.
 
 두 위치를 동시에 고쳐야 같은 의미가 유지된다면 SoT 위반이다. generated OpenAPI/TypeScript,
 execution plan, TargetTape, metric view, composite score, cache는 모두 파생물이다.
@@ -163,8 +177,10 @@ execution plan, TargetTape, metric view, composite score, cache는 모두 파생
 `StrategySpec`은 UI form JSON이 아니라 버전된 typed AST/DAG다.
 
 ```text
-identity
-  strategy_id, revision, schema_version, title, description
+identity (revision envelope가 소유, spec_hash 제외)
+  strategy_id, revision
+schema_version (document top-level)
+title, description (document)
 data
   market, date range, universe, eligibility, dataset lag overrides
 signal
@@ -192,9 +208,10 @@ parameters
 DAG cycle, unit mismatch, division risk, insufficient history, unavailable dataset은 실행 전 validation
 issue로 반환한다. UI는 그 issue를 node와 field에 연결해 보여준다.
 
-Quick Builder는 허용된 subgraph를 form으로 편집한다. Advanced Graph는 전체 DAG를 편집한다.
-Quick에서 표현할 수 없는 graph를 열면 읽기 전용 요약이나 Advanced 전환을 제안하며 정보를
-잘라서 저장하지 않는다.
+v1 authoring은 canonical field name과 raw value를 그대로 쓰는 verbose YAML/JSON source다. Form과
+Graph는 현재 valid spec을 읽는 projection이며 새 편집 모델이 아니다. legacy Quick Builder는 허용된
+subgraph를 form으로, Advanced Graph는 전체 DAG를 편집하지만 migration 기간에만 유지된다
+(ADR D2, D5, D9).
 
 ### 7.2 SearchSpec과 trial identity
 
@@ -277,7 +294,8 @@ raw metrics를 숨기거나 “최고 전략”을 자동 확정하지 않는다
 
 ### 9.1 Strategy Builder
 
-왼쪽 단계 rail과 중앙 editor, 오른쪽 항상 보이는 Validation/Estimate panel로 구성한다.
+왼쪽 outline(문서 섹션 탐색, 상단 중복 stepper 없음)과 중앙 editor, 오른쪽 항상 보이는
+Validation/Estimate panel로 구성한다. 아래 번호는 outline 섹션이지 wizard 단계가 아니다.
 
 1. 데이터/유니버스: 시장, 기간, 상장/관리/유동성/시총 필터, coverage와 available-date 설명.
 2. 팩터: catalog 검색, factor card, 방향/단위/coverage, transform chain, 조합 weight.
@@ -285,7 +303,8 @@ raw metrics를 숨기거나 “최고 전략”을 자동 확정하지 않는다
 4. 위험/실행: 노출 cap, sector neutral, turnover buffer, 비용·슬리피지·지연·참여율.
 5. 파라미터: 탐색 대상 토글, 범위/분포/step, constraint, 예상 trial/time/memory.
 
-Quick/Advanced toggle은 페이지 이동이 아니라 같은 draft의 표현 전환이다. 우측 panel은
+YAML/JSON/Form/Graph/Diff view 전환은 페이지 이동이 아니라 같은 source의 표현 전환이며 source와
+undo history를 보존한다. 우측 panel은
 backend `/validate`, `/explain`, `/estimate` 결과를 표시하며 error는 실행을 막고 warning은 사용자가
 확인한 기록을 남긴다.
 
@@ -343,103 +362,103 @@ Trial: QUEUED -> RUNNING -> COMPLETED | FAILED | PRUNED | CANCELLED
 - [x] `EquityDataPort`와 PIT query/result 타입 첫 버전 추가.
 - [x] revision/lag/zero/missing/coverage gap을 가진 deterministic mock adapter 연결.
 - [x] mock/architecture unit test 7개 통과.
-- [ ] backend 독립 package/test 설정과 root 커널 dependency 방식을 확정.
-- [ ] frontend React/TypeScript/Vite toolchain과 lint/boundaries plugin을 초기화.
-- [ ] CI에 backend architecture/test/lint와 frontend typecheck/lint/test job 추가.
+- [x] backend 독립 package/test 설정과 root 커널 dependency 방식을 확정.
+- [x] frontend React/TypeScript/Vite toolchain과 lint/boundaries plugin을 초기화.
+- [x] CI에 backend architecture/test/lint와 frontend typecheck/lint/test job 추가.
 
 완료 게이트: 새 코드의 물리 경로만 봐도 owner와 import 방향을 설명할 수 있고, 실제 DB 없이
 frontend가 mock catalog/preview를 호출할 수 있다.
 
 ### M1 — StrategySpec 계약 + Builder shell
 
-- [ ] backend `domain.strategy` 노드와 immutable StrategySpec v1 모델 추가.
-- [ ] Universe→Eligibility→Factor→Signal→Portfolio→Risk→Execution pipeline 타입 고정.
-- [ ] typed expression node union과 parameter reference 타입 고정.
-- [ ] canonical JSON serialization/hash와 revision identity 추가.
-- [ ] syntax/semantic/capability validation issue 모델 추가.
-- [ ] strategy create/get/revise/validate/explain application use case 추가.
-- [ ] in-memory strategy repository adapter와 contract test 추가.
-- [ ] HTTP adapter의 StrategySpec endpoint/OpenAPI 첫 절단면 추가.
-- [ ] generated TypeScript SDK를 `shared/api` 단일 gateway로 연결.
-- [ ] Strategy Builder page shell과 5단계 navigation 추가.
-- [ ] Quick/Advanced가 같은 draft object를 읽는 editor host 추가.
-- [ ] 저장 전/저장 후 revision, dirty state, validation panel UX 테스트 추가.
+- [x] backend `domain.strategy` 노드와 immutable StrategySpec v1 모델 추가.
+- [x] Universe→Eligibility→Factor→Signal→Portfolio→Risk→Execution pipeline 타입 고정.
+- [x] typed expression node union과 parameter reference 타입 고정.
+- [x] canonical JSON serialization/hash와 revision identity 추가.
+- [x] syntax/semantic/capability validation issue 모델 추가.
+- [x] strategy create/get/revise/validate/explain application use case 추가.
+- [x] in-memory strategy repository adapter와 contract test 추가.
+- [x] HTTP adapter의 StrategySpec endpoint/OpenAPI 첫 절단면 추가.
+- [x] generated TypeScript SDK를 `shared/api` 단일 gateway로 연결.
+- [x] Strategy Builder page shell과 5단계 navigation 추가.
+- [x] Quick/Advanced가 같은 draft object를 읽는 editor host 추가.
+- [x] 저장 전/저장 후 revision, dirty state, validation panel UX 테스트 추가.
 
 완료 게이트: 사용자가 빈 전략을 만들고 수정·검증·새 revision으로 저장하며, network payload와
 frontend 타입이 backend schema에서 생성된다.
 
 ### M2 — Equity catalog/preview 수직 슬라이스
 
-- [ ] mock field catalog를 API로 노출하고 검색/필터/pagination 계약 추가.
-- [ ] 데이터 snapshot과 field별 unit/availability/lag/coverage capability 반환.
-- [ ] universe history preview API와 session coverage summary 추가.
-- [ ] panel preview API에 row/column limit와 cost estimate 추가.
-- [ ] `dataset` entity와 query keys/hooks 추가.
-- [ ] Builder 데이터/유니버스 화면 추가.
-- [ ] field tooltip에 내용일/공개일/권장 lag/근거 표시.
-- [ ] actual zero, missing, not-collected, coverage-gap 시각 구분 추가.
-- [ ] coverage 부족·lag override warning 확인 UX 추가.
-- [ ] mock MSW가 아닌 실제 backend mock adapter를 쓰는 통합 테스트 추가.
-- [ ] PIT revision이 공개일 전 UI preview에 나타나지 않는 E2E 추가.
+- [x] mock field catalog를 API로 노출하고 검색/필터/pagination 계약 추가.
+- [x] 데이터 snapshot과 field별 unit/availability/lag/coverage capability 반환.
+- [x] universe history preview API와 session coverage summary 추가.
+- [x] panel preview API에 row/column limit와 cost estimate 추가.
+- [x] `dataset` entity와 query keys/hooks 추가.
+- [x] Builder 데이터/유니버스 화면 추가.
+- [x] field tooltip에 내용일/공개일/권장 lag/근거 표시.
+- [x] actual zero, missing, not-collected, coverage-gap 시각 구분 추가.
+- [x] coverage 부족·lag override warning 확인 UX 추가.
+- [x] mock MSW가 아닌 실제 backend mock adapter를 쓰는 통합 테스트 추가.
+- [x] PIT revision이 공개일 전 UI preview에 나타나지 않는 E2E 추가.
 
 완료 게이트: 실제 Equity DB 없이 데이터 선택 UX와 PIT 설명을 끝까지 검증할 수 있다.
 
 ### M3 — Factor Registry + 조합 editor
 
-- [ ] `domain.factor` 노드와 FactorDefinition/FactorRegistry SoT 추가.
-- [ ] `FACTORS.md` 50개 ID와 Equity field 요구사항 mapping 대장 작성.
-- [ ] 가격/재무/컨센서스/수급/공매도/신용/이벤트 mock factor subset 구현.
-- [ ] arithmetic/time-series/cross-sectional/group/conditional node 타입 추가.
-- [ ] DAG cycle/type/unit/min-history/missing-policy validator 구현.
-- [ ] winsorize/z-score/rank/neutralize/lag transform 구현.
-- [ ] parameter reference와 saved subgraph/factor reference 구현.
-- [ ] DAG→PIT execution plan compiler와 deterministic plan hash 추가.
-- [ ] factor matrix cache key에 data/factor/params/as-of fingerprint 포함.
-- [ ] IC/rank IC/quantile spread/coverage/turnover/decay 분석 구현.
-- [ ] factor catalog API와 validate/explain/preview API 추가.
-- [ ] `factor` entity와 factor browser/card UI 추가.
-- [ ] Quick transform chain/weight editor 추가.
-- [ ] Advanced typed node graph, port type, inline validation 추가.
-- [ ] Quick↔Advanced↔StrategySpec lossless property test 추가.
+- [x] `domain.factor` 노드와 FactorDefinition/FactorRegistry SoT 추가.
+- [x] `FACTORS.md` 50개 ID와 Equity field 요구사항 mapping 대장 작성.
+- [x] 가격/재무/컨센서스/수급/공매도/신용/이벤트 mock factor subset 구현.
+- [x] arithmetic/time-series/cross-sectional/group/conditional node 타입 추가.
+- [x] DAG cycle/type/unit/min-history/missing-policy validator 구현.
+- [x] winsorize/z-score/rank/neutralize/lag transform 구현.
+- [x] parameter reference와 saved subgraph/factor reference 구현.
+- [x] DAG→PIT execution plan compiler와 deterministic plan hash 추가.
+- [x] factor matrix cache key에 data/factor/params/as-of fingerprint 포함.
+- [x] IC/rank IC/quantile spread/coverage/turnover/decay 분석 구현.
+- [x] factor catalog API와 validate/explain/preview API 추가.
+- [x] `factor` entity와 factor browser/card UI 추가.
+- [x] Quick transform chain/weight editor 추가.
+- [x] Advanced typed node graph, port type, inline validation 추가.
+- [x] Quick↔Advanced↔StrategySpec lossless property test 추가.
 
 완료 게이트: 동일 spec/data snapshot이 동일 factor plan/value를 만들고, 두 UI 모드 사이 정보 손실이
 없다.
 
 ### M4 — Portfolio pipeline + TargetTape
 
-- [ ] eligibility filter와 point-in-time universe 결합 구현.
-- [ ] composite score, rank, threshold, regime signal 구현.
-- [ ] top/bottom N·percentile, long-only/long-short 선택 구현.
-- [ ] equal/factor-score/rank/risk weight 구현.
-- [ ] gross/net/name/sector cap과 neutralization 구현.
-- [ ] turnover buffer, minimum trade/liquidity rule 구현.
-- [ ] every-N-session/weekly/month-end/quarterly rebalance calendar 구현.
-- [ ] pipeline 결과를 immutable TargetTape로 컴파일.
-- [ ] StrategyRequirements/SetPortfolioTarget로 변환하는 engine adapter 추가.
-- [ ] schedule/action/short/margin capability를 실행 전 협상.
-- [ ] Builder 포트폴리오·위험·실행 화면 추가.
-- [ ] 세션별 구성 종목/score/target/exclusion 이유 preview 추가.
-- [ ] T 종가 신호가 T+1 이전에 체결되지 않는 통합 E2E 추가.
+- [x] eligibility filter와 point-in-time universe 결합 구현.
+- [x] composite score, rank, threshold, regime signal 구현.
+- [x] top/bottom N·percentile, long-only/long-short 선택 구현.
+- [x] equal/factor-score/rank/risk weight 구현.
+- [x] gross/net/name/sector cap과 neutralization 구현.
+- [x] turnover buffer, minimum trade/liquidity rule 구현.
+- [x] every-N-session/weekly/month-end/quarterly rebalance calendar 구현.
+- [x] pipeline 결과를 immutable TargetTape로 컴파일.
+- [x] StrategyRequirements/SetPortfolioTarget로 변환하는 engine adapter 추가.
+- [x] schedule/action/short/margin capability를 실행 전 협상.
+- [x] Builder 포트폴리오·위험·실행 화면 추가.
+- [x] 세션별 구성 종목/score/target/exclusion 이유 preview 추가.
+- [x] T 종가 신호가 T+1 이전에 체결되지 않는 통합 E2E 추가.
 
 완료 게이트: 사용자가 만든 mock factor 전략이 설명 가능한 TargetTape가 되고 기존 Python/Rust
 engine에서 동일하게 실행 준비된다.
 
 ### M5 — Single backtest + 전문 결과 화면
 
-- [ ] `domain.analytics` MetricDefinition/MetricRegistry 추가.
-- [ ] BacktestRunSpec과 Run Manifest 모델 추가.
-- [ ] Equity research data를 engine Bar/Universe/CorporateAction port로 잇는 adapter 추가.
-- [ ] TargetTapeStrategy→`BacktestEngine(core="rust")` executor 구현.
-- [ ] Python reference executor를 패리티/debug 선택지로 유지.
-- [ ] raw snapshot/order/fill/cost/position artifact schema 고정.
-- [ ] current 8개 지표를 registry versioned implementation으로 흡수.
-- [ ] MDD duration/recovery, benchmark, trade, exposure, cost 지표 확장.
-- [ ] `None`과 0, scope(full/IS/validation/OOS/window) 직렬화 계약 추가.
-- [ ] local artifact store와 atomic run commit 구현.
-- [ ] run start/status/result/cancel API와 SSE progress 추가.
-- [ ] Run Detail에 equity/drawdown/monthly/rolling/exposure/trades 차트 추가.
-- [ ] raw metric table과 manifest/data warning drawer 추가.
-- [ ] Python/Rust result·metric golden parity 테스트 추가.
+- [x] `domain.analytics` MetricDefinition/MetricRegistry 추가.
+- [x] BacktestRunSpec과 Run Manifest 모델 추가.
+- [x] Equity research data를 engine Bar/Universe/CorporateAction port로 잇는 adapter 추가.
+- [x] TargetTapeStrategy→`BacktestEngine(core="rust")` executor 구현.
+- [x] Python reference executor를 패리티/debug 선택지로 유지.
+- [x] raw snapshot/order/fill/cost/position artifact schema 고정.
+- [x] current 8개 지표를 registry versioned implementation으로 흡수.
+- [x] MDD duration/recovery, benchmark, trade, exposure, cost 지표 확장.
+- [x] `None`과 0, scope(full/IS/validation/OOS/window) 직렬화 계약 추가.
+- [x] local artifact store와 atomic run commit 구현.
+- [x] run start/status/result/cancel API와 SSE progress 추가.
+- [x] Run Detail에 equity/drawdown/monthly/rolling/exposure/trades 차트 추가.
+- [x] raw metric table과 manifest/data warning drawer 추가.
+- [x] Python/Rust result·metric golden parity 테스트 추가.
 
 완료 게이트: UI에서 single run을 실행하고 raw metrics와 모든 재현 가정을 확인할 수 있으며
 Python/Rust 결과가 같다.
@@ -503,8 +522,9 @@ Python/Rust 결과가 같다.
 - [ ] draft autosave/recovery와 server revision conflict UX 구현.
 - [ ] 임의 Python plugin은 sandbox/reproducibility 별도 spec 전까지 제외.
 
-완료 게이트: 코드를 몰라도 대부분의 cross-sectional 전략을 만들 수 있고, 전문 사용자는 typed
-graph와 식으로 제약 없이 확장하며 결과를 재현할 수 있다.
+완료 게이트: 전략 정의는 verbose source로 작성하되 parameter search와 실험 실행은 source를 다시
+편집하지 않고 UI에서 수행할 수 있고, 전문 사용자는 typed graph와 식으로 제약 없이 확장하며 결과를
+재현할 수 있다 (2026-09-04 ADR D8로 조정).
 
 ### M9 — 실제 Equity DuckDB adapter 전환
 
@@ -552,14 +572,14 @@ graph와 식으로 제약 없이 확장하며 결과를 재현할 수 있다.
 Backend:
 
 ```powershell
-$env:PYTHONPATH = (Resolve-Path backend/src)
-uv run pytest backend/tests -q
-uv run ruff check backend/src backend/tests
-uv run pyright backend/src backend/tests
+cd backend
+uv sync --extra parquet
 uv run pytest -q
-cargo fmt --manifest-path rust/backtest_core/Cargo.toml -- --check
-cargo clippy --manifest-path rust/backtest_core/Cargo.toml --all-targets -- -D warnings
-cargo test --manifest-path rust/backtest_core/Cargo.toml
+uv run ruff check src tests examples scripts
+uv run pyright
+uv run cargo fmt --manifest-path rust/backtest_core/Cargo.toml -- --check
+uv run cargo clippy --manifest-path rust/backtest_core/Cargo.toml --all-targets -- -D warnings
+uv run cargo test --manifest-path rust/backtest_core/Cargo.toml
 ```
 
 Frontend toolchain 확정 후:
@@ -588,7 +608,7 @@ Contract:
   같은 port contract를 통과한 뒤 운영 adapter로 승격한다.
 - arbitrary Python factor/plugin은 표현력은 크지만 재현성·보안·자원 통제가 별도 문제다.
   typed DAG로 먼저 최대 범위를 제공하고 plugin sandbox는 독립 설계한다.
-- 기존 `src/backtest_engine`의 `backend/` 하위 물리 이동은 기능 개발과 섞지 않는다.
+- 커널의 물리 이동은 M0에서 완료했다. 이후 커널 경로와 앱 adapter 경계는 독립적으로 유지한다.
 
 ## 14. 완료 정의
 
@@ -599,7 +619,7 @@ Contract:
 - 실제 Equity DB 교체가 adapter 변경으로 끝난다.
 - factor 계산, 실험 계획, 실행 상태, metric 계산의 owner가 겹치지 않는다.
 - 모든 후보는 raw metrics, 실패 trial, 비용, split, data/engine/registry version과 함께 남는다.
-- Quick/Advanced 편집이 lossless이고 전문 표현력을 막지 않는다.
+- source ↔ StrategySpec ↔ projection round-trip이 lossless이고 전문 표현력을 막지 않는다.
 - Persistent Rust Engine이 execution state를 계속 단독 소유한다.
 - import 방향과 public surface 위반이 CI에서 실패한다.
 - mock, Python reference, Rust, 실제 Equity adapter에 대한 계약/패리티/재현성 검증이 통과한다.
@@ -609,6 +629,60 @@ Contract:
 - 2026-09-03 — M0 첫 절단면: backend/frontend 폴더, backend facade/`DEPENDS_ON` 규칙,
   frontend FSD/API-state/UI/test 규칙, EquityDataPort, deterministic PIT mock, architecture/contract
   테스트 7개 추가.
+- 2026-09-03 — 기존 Python/Rust 커널, 테스트, 예제, 스크립트, 벤치마크와 reference 자료를
+  `backend/` 아래로 물리 통합. 루트는 backend/frontend/docs와 저장소 운영 파일만 소유하도록 정리.
+- 2026-09-03 — M0 완료: backend 독립 uv package, React/TypeScript/Vite, 생성 OpenAPI SDK,
+  FSD boundaries lint, backend/frontend CI gate를 연결.
+- 2026-09-03 — M1 완료: immutable StrategySpec v1 typed DAG와 parameter contract, canonical hash,
+  validation/explanation, in-memory revision repository, FastAPI endpoint, Quick/Advanced 공유 draft,
+  dirty/validation/revision UX와 MSW wire 테스트를 추가.
+- 2026-09-03 — M2 완료: 검색·필터·pagination field catalog, snapshot/field capability,
+  universe coverage와 제한·비용이 있는 PIT panel preview API를 추가. Builder 데이터 화면에서
+  필드 근거와 lag를 선택하고 coverage/lag 위험을 명시적으로 확인하며, 실제 0·원천 생략 0·결측·
+  미수집·coverage gap을 구분한다. 실제 backend mock HTTP 통합 테스트와 공개일 전 revision이
+  노출되지 않는 UI→generated SDK→실제 FastAPI mock adapter E2E를 고정했다.
+- 2026-09-03 — M3 완료: 50개 versioned Factor Registry와 7개 카테고리별 실행 가능한 mock
+  graph를 추가했다. arithmetic/time-series/cross-sectional/group/conditional 표현식, cycle·type·
+  unit·history·missing 검증, PIT plan/hash/cache key, IC·Rank IC·quantile spread·coverage·turnover·
+  decay 분석을 backend SoT로 고정했다. Factor catalog/validate/explain/preview API와 Quick 팩터
+  탐색·가중치·5종 transform·진단, Advanced typed port/inline validation을 연결하고 두 편집 모드의
+  StrategySpec 무손실 속성을 테스트했다. Equity DB가 확정되기 전에는 같은 application port를
+  deterministic mock adapter가 구현한다.
+- 2026-09-03 — M4 완료: `domain.portfolio`가 PIT eligibility, 합성 점수·순위·레짐,
+  long-only/long-short 선택, equal/factor/rank/risk 비중, gross/net/name/sector 제약,
+  neutralization, 유동성·회전율 규칙과 리밸런싱 달력을 소유한다. 결과는 snapshot/spec hash와
+  T 종가→T+1 실행일을 담은 immutable `TargetTape`로 컴파일된다. 미확정 Equity DB는 portfolio
+  observation port의 deterministic mock으로 연결하고, engine adapter가 schedule/action/short/margin
+  요구사항을 실행 전에 협상해 `SetPortfolioTarget(REPLACE, next_open)`으로 변환한다. Builder에
+  포트폴리오·리스크·실행 화면과 후보 score/target/exclusion preview를 추가하고 backend HTTP 및
+  frontend MSW E2E로 T+1 경계를 고정했다.
+- 2026-09-03 — M5 완료: versioned `MetricRegistry`와 immutable `BacktestRunSpec`/manifest,
+  raw snapshot·position·order·fill·cost·trade artifact 계약을 추가했다. Equity mock의 OHLCV·universe·
+  corporate-action port가 `TargetTapeStrategy`를 Persistent Rust Engine 또는 Python reference core로
+  실행하고, 기존 8개 지표와 MDD 기간/회복·benchmark·trade·exposure·cost를 포함한 21개 지표를
+  같은 registry에서 산출한다. local store는 staging directory rename으로 JSON artifact를 원자
+  commit하며 `None`/0과 Full·IS·Validation·OOS·Window scope를 보존한다. start/status/result/cancel와
+  SSE progress API, Builder 6단계 run console, equity/drawdown/monthly/rolling Sharpe/exposure 차트,
+  거래 원장·raw metric table·manifest/data warning drawer를 연결했고 Python/Rust golden parity를
+  통합 테스트로 고정했다.
 
 체크 수는 이 문서의 완료/미완료 체크박스 기준으로 갱신한다. 설명 안의 예시 checkbox는 두지
 않아 수치가 실제 구현 단위와 일치하게 유지한다.
+
+## 16. YAML-first authoring initiative와 M6~M10의 선후 관계
+
+2026-09-04 [Strategy Authoring Contract ADR](./2026-09-04-strategy-authoring-contract-adr.md)로
+authoring 방식을 verbose YAML/JSON source로 전환했다. 이 initiative의 Phase/PR 범위는
+[WORKFLOW.md](../../planning/strategy-workbench-yaml-ui/WORKFLOW.md), PR 진행 상태는
+[PLAN.md](../../planning/strategy-workbench-yaml-ui/PLAN.md)가 소유한다. 이 로드맵은 PR 단위
+상태를 복제하지 않는다.
+
+- 이 로드맵은 product milestone SoT로 남는다. M6~M10의 순서와 완료 게이트는 유지한다.
+- initiative Phase 1.5(backtest correctness gate)는 M6 parameter search보다 먼저 끝나야 한다.
+  현재 portfolio preview/backtest가 FactorGraph 대신 factor ID 기반 synthetic 값을 쓰는 결함을
+  제거한다.
+- M6 parameter search UI는 initiative Phase 3(YAML MVP) 이후 YAML route 위에 연결한다.
+- M8 항목 중 revision history/diff, autosave/recovery, revision conflict, keyboard navigation은
+  initiative P1-08, P3-06, P3-07, P4-08, P6-02, P6-03이 먼저 제공하며, 해당 PR merge 시 M8
+  체크박스를 갱신한다. custom formula editor(표현식 DSL)는 initiative v1 non-goal이며 M8에 남는다.
+- Quick/Advanced 편집기 삭제는 ADR D9 조건이 모두 충족될 때만 initiative P6-06에서 수행한다.

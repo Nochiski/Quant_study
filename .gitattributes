@@ -1,0 +1,2 @@
+# YAML/JSON contract fixtures must keep LF so exact-source hashes (P1-02) are stable across checkouts.
+backend/tests/fixtures/strategy_documents/** text eol=lf

@@ -1,0 +1,125 @@
+# ADR: Backend YAML parser와 cross-runtime YAML 1.2 계약 (P0-03)
+
+> 작성: 2026-09-04
+>
+> 상태: Accepted
+>
+> 상위 ADR: [Strategy Authoring Contract](./2026-09-04-strategy-authoring-contract-adr.md)
+> · Initiative tracker: [PLAN.md](../../planning/strategy-workbench-yaml-ui/PLAN.md)
+
+## 1. 맥락
+
+같은 YAML source를 frontend(`yaml` npm)와 backend(Python)가 각각 parse한다. 두 parser가 같은
+scalar를 다른 타입으로 읽으면 frontend는 valid로 표시하고 backend는 다른 값을 compile하는
+silent corrupt 경로가 생긴다. P0-03은 backend parser를 정하고, 양쪽이 동일한 typed tree를 만들도록
+허용 문법과 fail-closed 규칙을 고정한다.
+
+## 2. 실측
+
+PyYAML 6.0.3(YAML 1.1), ruamel.yaml 0.19.1(`typ="safe", pure=True`, `version=(1,2)`), `yaml` 2.9.0
+(`version: "1.2", schema: "core"`)으로 같은 probe를 읽은 결과. 실제 fixture는 3절의 manifest에 있다.
+
+| plain scalar / 구조 | PyYAML (1.1) | ruamel.yaml safe (1.2) | `yaml` npm core (1.2) | 판정 |
+|---|---|---|---|---|
+| `yes` / `no` / `on` / `off` | bool | str | str | 1.1 금지, 문자열로 허용 |
+| `010` / `0o10` / `0x1F` | int 8 / 8 / 31 | int 10 / 8 / 31 | number 10 / 8 / 31 | 1.2 core 그대로 허용 |
+| `1_000`, `1_000.5`, `1_0e3`, `0x1_F`, `1_`, `0b1010` | int/float | **int/float (1.1 잔재 허용)** | **string** | 양쪽 불일치 → `non_core_number` 거부 (resolver 숫자 판정 ≠ core schema regex) |
+| `.5e3`, `-.5E3` (선행 `.` + 부호 없는 지수) | float | **str** (resolver 선행 `.` 분기는 부호 있는 지수만 float) | number | 역방향 불일치 → `non_core_number` 거부. `.5e+3`, `.5e-3`은 양쪽 float로 허용 |
+| `a: <<` (value 위치 plain `<<`) | merge | resolver merge tag → 거부 | string | frontend도 위치 무관 `merge_key` 거부로 대칭 |
+| `1e16`, `1e300` | float | float | number | 허용. 정수 범위 검사는 core int 표기에만 적용 |
+| `1e-2` | **str** | float 0.01 | number 0.01 | 1.1 금지, 허용 |
+| `2021-01-01` (plain) | date | **date** | string | backend timestamp constructor를 문자열로 교체 → 양쪽 string |
+| `-0.0` | float -0.0 | float -0.0 | number -0 | 허용. canonical `-0.0`→`0.0` 정규화는 P1-01 |
+| `.nan` / `.inf` | float | float nan/inf | NaN / Infinity | `non_finite_number` 거부 |
+| duplicate key | 마지막 값 (무음) | DuplicateKeyError | `DUPLICATE_KEY` error | `duplicate_key` 거부 |
+| `&anchor` / `*alias` | 해석 | 해석 | 해석 | 정책 거부 `anchor_or_alias` (P1-02 node/alias 폭발 제한과 별개) |
+| `<<: *base` / `<<: {x: 1}` merge key | 병합 | **병합 (alias 없어도)** | **`"<<"` 문자열 key** (`merge: false`) | 양쪽 불일치 → plain `<<` key를 `merge_key`로 거부 (quoted `"<<"`는 양쪽 문자열 key) |
+| `!custom 1` | ConstructorError | ConstructorError | **warning `TAG_RESOLVE_FAILED` + string** | `tag` 거부. frontend는 warning을 error로 취급 |
+| `!!binary aGk=` | bytes | bytes | Buffer | `tag` 거부 (JSON 불가) |
+| `%YAML 1.1` / `%TAG` directive | 1.1 해석 | DirectiveToken | `directives.yaml.explicit` / `directives.tags` | `directive` 거부 |
+| `9007199254740993` (2^53 초과) | int | int 정확 | **number 반올림** | `integer_out_of_range` 거부 (`\|n\| < 2^53`, `Number.isSafeInteger`) |
+| `-0.0` / `-0` | float/int | -0.0 / 0 | -0 / 0 | 허용. JSON 호환 tree 비교(`-0` → `0`), canonical 정규화는 P1-01 |
+| `a:\tb`, `"\\0"` escape, CR 단독 줄바꿈, `%TAG !!` 동일 prefix 재선언 | — | **syntax/directive 거부** | 허용 | backend가 더 좁은 accept 집합. fail-closed라 corrupt는 없고 frontend 판정은 표시용일 뿐 실행 gate가 아니다(P0-01 D1) |
+| 다중 document | 오류 | ComposerError | 2 documents | `multiple_documents` 거부 |
+| `1: v` / `? [1,2]` key | int / tuple key | int / tuple key | `"1"` / `"[ 1, 2 ]"` 문자열화 | 양쪽 불일치 → `non_string_key` 거부 |
+| 빈 문서 / scalar / sequence root | None / str / list | None / str / list | no doc / string / array | `not_a_mapping` 거부 |
+| `~`, `null`, 빈 값 | None | None | null | 허용 |
+
+## 3. 결정
+
+### D1. Backend parser는 ruamel.yaml, YAML 1.2, pure Python safe loader다
+
+- `ruamel.yaml>=0.19.1`을 backend runtime 의존성에 추가한다. PyYAML은 uvicorn transitive 의존성과 P0-01
+  임시 테스트 loader(dev group)로만 남고 `strategy_workbench` 코드는 import하지 않는다. P1-02가 codec을
+  추가할 때 `import yaml`을 architecture test로 금지한다.
+- 값 tree는 `typ="safe"` loader로 만들고, source map(JSON Pointer ↔ line/column)은 P1-02가 같은 pure
+  scanner의 token/mark 또는 `typ="rt"` loader의 `lc` 정보로 만든다. `rt` wrapper 타입(`ScalarInt` 등)은
+  값 tree로 쓰지 않는다.
+- `tag:yaml.org,2002:timestamp` constructor를 원문 문자열 반환으로 교체한다. 날짜 변환은 typed hydrate가
+  한다.
+- pure Python loader만 사용한다. C loader는 position 정보와 resolver 커스터마이징이 다르다.
+
+### D2. 허용 문법은 YAML 1.2 core schema에서 다음을 뺀 부분집합이다
+
+거부(diagnostic `syntax` 또는 `structural`, 위치 포함):
+
+- 다중 document, directive, custom tag(`!`, `!!python/...`), anchor/alias(`&`, `*`), merge key(`<<`)
+- duplicate key, 비문자열 key, 비어 있지 않은 complex key
+- plain scalar timestamp: backend는 timestamp constructor를 문자열 반환으로 교체해 frontend와 같은
+  string tree를 만든다. quoted/plain 어느 쪽이든 typed hydrate가 `date`로 변환한다.
+- 숫자 판정 불일치: backend는 ruamel resolver의 int/float 판정과 YAML 1.2 core schema regex(`[-+]?[0-9]+`,
+  `0o[0-7]+`, `0x[0-9a-fA-F]+`, `[-+]?(\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?`)가 **어느 방향으로든**
+  어긋나는 plain scalar를 `non_core_number`로 거부한다 (`1_000.5`: resolver 숫자·core 아님, `.5e3`: resolver
+  문자열·core 숫자). frontend는 대칭으로 ruamel 1.2 resolver의 int/float 모양(`_`, `0b`)에 맞고 core에 맞지
+  않는 scalar와 `[-+]?\.[0-9]+[eE][0-9]+`(선행 `.` + 부호 없는 지수)를 거부한다. P1-02 codec은 resolver 자체를 core schema
+  regex로 교체하는 것이 근본 해결이다.
+- merge key: plain `<<`는 key·value 위치 무관하게 `merge_key`로 거부한다 (ruamel resolver는 모든 plain `<<`에
+  merge tag를 주고 key 위치에서는 병합, `yaml`은 문자열). quoted `"<<"`는 양쪽 문자열이라 허용.
+- 정수 범위: core int 표기의 plain 정수는 `|n| < 2^53` (`Number.isSafeInteger`). 초과는
+  `integer_out_of_range`. float 표기(`1e16`)에는 적용하지 않는다.
+- 정책 거부 reason code: `syntax`, `directive`, `anchor_or_alias`, `tag`, `merge_key`, `non_core_number`,
+  `duplicate_key`, `multiple_documents`, `non_string_key`, `non_finite_number`, `integer_out_of_range`,
+  `not_a_mapping`. P1-02 diagnostic `code`의 접두어는 port가 정한다 — 두 포맷에 똑같이 적용되는 정책은
+  `document.<reason>`, YAML 문법에만 있는 구성물은 `yaml.<reason>`, syntax는 파싱 포맷을 단다
+  (`ports/outgoing/document_codec.py`, DEFECT-103).
+- 복수 위반 문서의 reason 우선순위: syntax → directive 순서는 일치한다. anchor/merge/non_core_number는
+  backend가 scan 단계에서 duplicate보다 먼저 잡고 frontend는 duplicate 뒤 visit에서 잡는다.
+  not_a_mapping도 backend가 tree 검사보다 먼저, frontend가 뒤에 잡는다. multiple_documents는 frontend가
+  먼저 잡는다. 단일 위반 fixture에서는 reason이 같으며 최종 우선순위는 P1-02 diagnostic 설계에서 확정한다.
+- backend가 더 좁게 거부하는 문법(`:` 뒤 tab, `\0` escape, CR 단독 줄바꿈)은 fail-closed이며 frontend
+  syntax marker가 advisory인 이상 corrupt가 아니다. P1-02가 codec diagnostic으로 노출한다.
+- `.nan`, `.inf`, `-.inf` 와 non-finite float
+- 크기 제한: 512 KiB bytes, depth 32, node 20,000 초과 시 거부 (P1-02에서 값 확정)
+
+### D3. Cross-runtime fixture는 양쪽 테스트가 같은 파일을 읽는다
+
+- `backend/tests/fixtures/strategy_documents/yaml12/manifest.json`이 case 목록의 SoT다. 각 case는
+  `accepted/*.yaml` + 기대 JSON 또는 `rejected/*.yaml` + 기대 reason code를 가진다 (16 accepted, 27
+  rejected). manifest에 없는 fixture 파일은 backend 테스트가 실패시킨다. `.gitattributes`가 이 fixture를
+  LF로 고정해 P1-02의 exact source hash 검증이 체크아웃 설정에 흔들리지 않게 한다.
+- backend: `backend/tests/contract/test_yaml12_cross_runtime.py`가 ruamel 기반 임시 loader로 manifest를
+  검증한다. P1-02 codec이 이 loader를 대체한다.
+- frontend: `frontend/src/shared/lib/yaml12/__tests__/cross-runtime.test.ts`가 같은 manifest를 `yaml`
+  2.9.0으로 검증한다. `yaml`은 이 PR에서 frontend dependency로 추가된다 (P3-01이 CST/source map에 그대로
+  사용). fixture는 backend 디렉터리 한 곳에만 둔다.
+
+### D4. Typed hydrate 이후 canonical bytes 동일성은 P1-01/P1-02가 검증한다
+
+P0-03의 fixture는 parser tree 동일성(JSON 호환 tree)까지만 고정한다. yaml12 fixture는 StrategySpec 모양이
+아니므로 hydrate 대상이 아니다. hydrate 이후 `canonical_strategy_json`/`spec_hash` 동일성은 P1-02 codec이
+WORKFLOW 2.2 golden spec fixture(`quality_momentum.yaml`/`.json` 쌍)로 검증하고, `1.0`↔`1`·`-0.0`↔`0.0`
+같은 numeric 정규화는 P1-01 canonicalizer가 맡는다.
+
+## 4. 대안
+
+- **PyYAML 유지**: `yes`→bool, `1e-2`→str, duplicate key 무음 허용. 1.2 core와 맞추려면 resolver를
+  전부 교체해야 하고 position은 Mark로만 제한적으로 나온다. 기각.
+- **strictyaml**: 타입 추론을 아예 없애지만 schema를 별도로 선언해야 해 StrategySpec과 owner가
+  둘이 된다. 기각.
+- **frontend parse 결과를 backend로 전송**: source가 아니라 파생 트리를 보내므로 exact source 보존과
+  server-side compile 원칙(ADR P0-01 D1)에 어긋난다. 기각.
+
+## 5. Rollback
+
+ruamel.yaml 의존성과 codec 모듈을 제거하면 JSON 경로만 남는다. YAML source가 저장된 revision은
+`source`가 남아 있어도 JSON canonical로 조회할 수 있다.

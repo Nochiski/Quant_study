@@ -1,0 +1,6679 @@
+{
+  "components": {
+    "schemas": {
+      "BacktestRunResult": {
+        "properties": {
+          "artifacts": {
+            "$ref": "#/components/schemas/RawArtifactBundle"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/RunManifest"
+          },
+          "metric_definitions": {
+            "items": {
+              "$ref": "#/components/schemas/MetricDefinition"
+            },
+            "title": "Metric Definitions",
+            "type": "array"
+          },
+          "metrics": {
+            "items": {
+              "$ref": "#/components/schemas/MetricValue"
+            },
+            "title": "Metrics",
+            "type": "array"
+          },
+          "series": {
+            "$ref": "#/components/schemas/BacktestSeries"
+          }
+        },
+        "required": [
+          "manifest",
+          "metric_definitions",
+          "metrics",
+          "series",
+          "artifacts"
+        ],
+        "title": "BacktestRunResult",
+        "type": "object"
+      },
+      "BacktestRunSpec": {
+        "description": "A request names its strategy once: `strategy` (legacy inline spec) or `strategy_source`.\n\n`strategy` stays for compatibility with the JSON editors; new callers use `strategy_source`\nso a run can name a saved revision (P1-09). The run service rejects a request carrying both\nor neither (one coded 422, `backtest.run.invalid`).\nAfter resolution the run spec stored in the manifest carries both: `strategy` is the exact\nspec that was executed and `strategy_source` says where it came from.",
+        "properties": {
+          "annualization_days": {
+            "default": 252,
+            "title": "Annualization Days",
+            "type": "integer"
+          },
+          "benchmark_security_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Security Id"
+          },
+          "core": {
+            "$ref": "#/components/schemas/ExecutionCore",
+            "default": "rust"
+          },
+          "initial_cash": {
+            "default": 100000000.0,
+            "title": "Initial Cash",
+            "type": "number"
+          },
+          "metric_windows": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/MetricWindow"
+            },
+            "title": "Metric Windows",
+            "type": "array"
+          },
+          "strategy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StrategySpec"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "strategy_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SavedRevisionReference"
+              },
+              {
+                "$ref": "#/components/schemas/InlineDraft"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy Source"
+          }
+        },
+        "title": "BacktestRunSpec",
+        "type": "object"
+      },
+      "BacktestRunState": {
+        "properties": {
+          "artifact_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Sha256"
+          },
+          "artifact_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Uri"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "progress": {
+            "title": "Progress",
+            "type": "number"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "progress",
+          "stage",
+          "message",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "BacktestRunState",
+        "type": "object"
+      },
+      "BacktestSeries": {
+        "properties": {
+          "drawdown": {
+            "items": {
+              "$ref": "#/components/schemas/DrawdownPoint"
+            },
+            "title": "Drawdown",
+            "type": "array"
+          },
+          "equity": {
+            "items": {
+              "$ref": "#/components/schemas/EquityCurvePoint"
+            },
+            "title": "Equity",
+            "type": "array"
+          },
+          "monthly_returns": {
+            "items": {
+              "$ref": "#/components/schemas/MonthlyReturnPoint"
+            },
+            "title": "Monthly Returns",
+            "type": "array"
+          },
+          "rolling_sharpe": {
+            "items": {
+              "$ref": "#/components/schemas/RollingMetricPoint"
+            },
+            "title": "Rolling Sharpe",
+            "type": "array"
+          }
+        },
+        "required": [
+          "equity",
+          "drawdown",
+          "monthly_returns",
+          "rolling_sharpe"
+        ],
+        "title": "BacktestSeries",
+        "type": "object"
+      },
+      "BacktestStartResponse": {
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/BacktestRunState"
+          }
+        },
+        "required": [
+          "run"
+        ],
+        "title": "BacktestStartResponse",
+        "type": "object"
+      },
+      "BinaryNode": {
+        "properties": {
+          "kind": {
+            "const": "binary",
+            "title": "Kind",
+            "type": "string"
+          },
+          "left_node_id": {
+            "title": "Left Node Id",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operator": {
+            "$ref": "#/components/schemas/BinaryOperator"
+          },
+          "right_node_id": {
+            "title": "Right Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "operator",
+          "left_node_id",
+          "right_node_id",
+          "kind"
+        ],
+        "title": "BinaryNode",
+        "type": "object"
+      },
+      "BinaryOperator": {
+        "enum": [
+          "add",
+          "subtract",
+          "multiply",
+          "divide"
+        ],
+        "title": "BinaryOperator",
+        "type": "string"
+      },
+      "CandidateDecision": {
+        "properties": {
+          "as_of": {
+            "format": "date",
+            "title": "As Of",
+            "type": "string"
+          },
+          "composite_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Composite Score"
+          },
+          "eligible": {
+            "title": "Eligible",
+            "type": "boolean"
+          },
+          "exclusion_reasons": {
+            "items": {
+              "$ref": "#/components/schemas/ExclusionReason"
+            },
+            "title": "Exclusion Reasons",
+            "type": "array"
+          },
+          "rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank"
+          },
+          "sector_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector Id"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "selected": {
+            "title": "Selected",
+            "type": "boolean"
+          },
+          "side": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CandidateSide"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "target_weight": {
+            "title": "Target Weight",
+            "type": "number"
+          }
+        },
+        "required": [
+          "as_of",
+          "security_id",
+          "eligible",
+          "selected",
+          "composite_score",
+          "rank",
+          "side",
+          "target_weight",
+          "sector_id",
+          "exclusion_reasons"
+        ],
+        "title": "CandidateDecision",
+        "type": "object"
+      },
+      "CandidateSide": {
+        "enum": [
+          "long",
+          "short"
+        ],
+        "title": "CandidateSide",
+        "type": "string"
+      },
+      "CellKind": {
+        "description": "A numeric zero and unavailable data must never collapse into one value.",
+        "enum": [
+          "observed",
+          "source_omitted_zero",
+          "missing",
+          "not_collected",
+          "coverage_gap"
+        ],
+        "title": "CellKind",
+        "type": "string"
+      },
+      "ChoiceParameter": {
+        "properties": {
+          "choices": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "title": "Choices",
+            "type": "array"
+          },
+          "default": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              }
+            ],
+            "title": "Default"
+          },
+          "kind": {
+            "const": "choice",
+            "title": "Kind",
+            "type": "string"
+          },
+          "parameter_id": {
+            "title": "Parameter Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "parameter_id",
+          "default",
+          "choices",
+          "kind"
+        ],
+        "title": "ChoiceParameter",
+        "type": "object"
+      },
+      "ComparisonNode": {
+        "properties": {
+          "kind": {
+            "const": "comparison",
+            "title": "Kind",
+            "type": "string"
+          },
+          "left_node_id": {
+            "title": "Left Node Id",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operator": {
+            "$ref": "#/components/schemas/FactorComparisonOperator"
+          },
+          "right_node_id": {
+            "title": "Right Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "operator",
+          "left_node_id",
+          "right_node_id",
+          "kind"
+        ],
+        "title": "ComparisonNode",
+        "type": "object"
+      },
+      "ComparisonOperator": {
+        "enum": [
+          "gt",
+          "gte",
+          "lt",
+          "lte",
+          "eq"
+        ],
+        "title": "ComparisonOperator",
+        "type": "string"
+      },
+      "CompileRequest": {
+        "properties": {
+          "format": {
+            "$ref": "#/components/schemas/SourceFormat"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "format"
+        ],
+        "title": "CompileRequest",
+        "type": "object"
+      },
+      "CompiledDocument": {
+        "properties": {
+          "canonical_json": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Json"
+          },
+          "diagnostics": {
+            "items": {
+              "$ref": "#/components/schemas/SourceDiagnostic"
+            },
+            "title": "Diagnostics",
+            "type": "array"
+          },
+          "format": {
+            "$ref": "#/components/schemas/SourceFormat"
+          },
+          "schema_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Version"
+          },
+          "source_hash": {
+            "title": "Source Hash",
+            "type": "string"
+          },
+          "spec": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StrategySpec"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "spec_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spec Hash"
+          }
+        },
+        "required": [
+          "format",
+          "source_hash",
+          "schema_version",
+          "spec",
+          "canonical_json",
+          "spec_hash",
+          "diagnostics"
+        ],
+        "title": "CompiledDocument",
+        "type": "object"
+      },
+      "ConditionalNode": {
+        "properties": {
+          "false_node_id": {
+            "title": "False Node Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "conditional",
+            "title": "Kind",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "predicate_node_id": {
+            "title": "Predicate Node Id",
+            "type": "string"
+          },
+          "true_node_id": {
+            "title": "True Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "predicate_node_id",
+          "true_node_id",
+          "false_node_id",
+          "kind"
+        ],
+        "title": "ConditionalNode",
+        "type": "object"
+      },
+      "ConstantNode": {
+        "properties": {
+          "kind": {
+            "const": "constant",
+            "title": "Kind",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "node_id",
+          "value",
+          "kind"
+        ],
+        "title": "ConstantNode",
+        "type": "object"
+      },
+      "CrossSectionalNode": {
+        "properties": {
+          "input_node_id": {
+            "title": "Input Node Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "cross_sectional",
+            "title": "Kind",
+            "type": "string"
+          },
+          "lower_quantile": {
+            "default": 0.01,
+            "title": "Lower Quantile",
+            "type": "number"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operator": {
+            "$ref": "#/components/schemas/CrossSectionalOperator"
+          },
+          "upper_quantile": {
+            "default": 0.99,
+            "title": "Upper Quantile",
+            "type": "number"
+          }
+        },
+        "required": [
+          "node_id",
+          "operator",
+          "input_node_id",
+          "kind"
+        ],
+        "title": "CrossSectionalNode",
+        "type": "object"
+      },
+      "CrossSectionalOperator": {
+        "enum": [
+          "rank",
+          "zscore",
+          "winsorize"
+        ],
+        "title": "CrossSectionalOperator",
+        "type": "string"
+      },
+      "DataFrequency": {
+        "enum": [
+          "daily"
+        ],
+        "title": "DataFrequency",
+        "type": "string"
+      },
+      "DataLoadStatus": {
+        "enum": [
+          "ok",
+          "no_data",
+          "invalid_query",
+          "confirmation_required"
+        ],
+        "title": "DataLoadStatus",
+        "type": "string"
+      },
+      "DataSnapshot": {
+        "properties": {
+          "built_at": {
+            "format": "date-time",
+            "title": "Built At",
+            "type": "string"
+          },
+          "dataset_revisions": {
+            "items": {
+              "$ref": "#/components/schemas/DatasetRevision"
+            },
+            "title": "Dataset Revisions",
+            "type": "array"
+          },
+          "point_in_time": {
+            "title": "Point In Time",
+            "type": "boolean"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "title": "Snapshot Id",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "snapshot_id",
+          "schema_version",
+          "built_at",
+          "source",
+          "point_in_time",
+          "dataset_revisions"
+        ],
+        "title": "DataSnapshot",
+        "type": "object"
+      },
+      "DataStep": {
+        "properties": {
+          "end": {
+            "format": "date",
+            "title": "End",
+            "type": "string"
+          },
+          "frequency": {
+            "$ref": "#/components/schemas/DataFrequency",
+            "default": "daily"
+          },
+          "market": {
+            "$ref": "#/components/schemas/Market"
+          },
+          "start": {
+            "format": "date",
+            "title": "Start",
+            "type": "string"
+          },
+          "universe_id": {
+            "title": "Universe Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "market",
+          "start",
+          "end",
+          "universe_id"
+        ],
+        "title": "DataStep",
+        "type": "object"
+      },
+      "DataWarning": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/WarningSeverity",
+            "default": "warning"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "DataWarning",
+        "type": "object"
+      },
+      "DatasetFieldProfile": {
+        "properties": {
+          "available_date_basis": {
+            "title": "Available Date Basis",
+            "type": "string"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/FieldCoverageCapability"
+          },
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "disclosure_basis": {
+            "title": "Disclosure Basis",
+            "type": "string"
+          },
+          "evidence": {
+            "title": "Evidence",
+            "type": "string"
+          },
+          "field_id": {
+            "title": "Field Id",
+            "type": "string"
+          },
+          "frequency": {
+            "title": "Frequency",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "recommended_lag_sessions": {
+            "title": "Recommended Lag Sessions",
+            "type": "integer"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          },
+          "value_type": {
+            "$ref": "#/components/schemas/FieldValueType"
+          }
+        },
+        "required": [
+          "field_id",
+          "dataset_id",
+          "label",
+          "unit",
+          "value_type",
+          "frequency",
+          "available_date_basis",
+          "recommended_lag_sessions",
+          "description",
+          "disclosure_basis",
+          "evidence",
+          "coverage"
+        ],
+        "title": "DatasetFieldProfile",
+        "type": "object"
+      },
+      "DatasetRevision": {
+        "properties": {
+          "as_of": {
+            "format": "date",
+            "title": "As Of",
+            "type": "string"
+          },
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dataset_id",
+          "revision",
+          "as_of"
+        ],
+        "title": "DatasetRevision",
+        "type": "object"
+      },
+      "DiagnosticKind": {
+        "enum": [
+          "syntax",
+          "structural",
+          "semantic",
+          "capability"
+        ],
+        "title": "DiagnosticKind",
+        "type": "string"
+      },
+      "DiagnosticSeverity": {
+        "enum": [
+          "error",
+          "warning"
+        ],
+        "title": "DiagnosticSeverity",
+        "type": "string"
+      },
+      "DiffEntry": {
+        "description": "One leaf-level difference at a JSON Pointer of the canonical payload.\n\n`before`/`after` are JSON values (scalars, or a whole subtree when a key or array item was\nadded/removed). `changed` never carries containers: nested differences are reported per\nleaf so an editor can highlight exact ranges.",
+        "properties": {
+          "after": {
+            "title": "After"
+          },
+          "before": {
+            "title": "Before"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/DiffKind"
+          },
+          "pointer": {
+            "title": "Pointer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pointer",
+          "kind",
+          "before",
+          "after"
+        ],
+        "title": "DiffEntry",
+        "type": "object"
+      },
+      "DiffKind": {
+        "enum": [
+          "added",
+          "removed",
+          "changed"
+        ],
+        "title": "DiffKind",
+        "type": "string"
+      },
+      "DrawdownPoint": {
+        "properties": {
+          "drawdown": {
+            "title": "Drawdown",
+            "type": "number"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "drawdown"
+        ],
+        "title": "DrawdownPoint",
+        "type": "object"
+      },
+      "EligibilityRule": {
+        "properties": {
+          "field_id": {
+            "title": "Field Id",
+            "type": "string"
+          },
+          "operator": {
+            "$ref": "#/components/schemas/ComparisonOperator"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "field_id",
+          "operator",
+          "value"
+        ],
+        "title": "EligibilityRule",
+        "type": "object"
+      },
+      "EligibilityStep": {
+        "properties": {
+          "rules": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/EligibilityRule"
+            },
+            "title": "Rules",
+            "type": "array"
+          }
+        },
+        "title": "EligibilityStep",
+        "type": "object"
+      },
+      "EngineCapabilityIssue": {
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "support": {
+            "title": "Support",
+            "type": "string"
+          }
+        },
+        "required": [
+          "category",
+          "name",
+          "support",
+          "reason"
+        ],
+        "title": "EngineCapabilityIssue",
+        "type": "object"
+      },
+      "EngineCompatibility": {
+        "properties": {
+          "compatible": {
+            "title": "Compatible",
+            "type": "boolean"
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/EngineCapabilityIssue"
+            },
+            "title": "Issues",
+            "type": "array"
+          },
+          "requirements": {
+            "$ref": "#/components/schemas/EngineRequirementSummary"
+          }
+        },
+        "required": [
+          "compatible",
+          "requirements",
+          "issues"
+        ],
+        "title": "EngineCompatibility",
+        "type": "object"
+      },
+      "EngineRequirementSummary": {
+        "properties": {
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "events": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "features": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Features",
+            "type": "array"
+          },
+          "schedule": {
+            "title": "Schedule",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schedule",
+          "actions",
+          "events",
+          "features"
+        ],
+        "title": "EngineRequirementSummary",
+        "type": "object"
+      },
+      "EquityCurvePoint": {
+        "properties": {
+          "benchmark_equity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Equity"
+          },
+          "equity": {
+            "title": "Equity",
+            "type": "number"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "equity",
+          "benchmark_equity"
+        ],
+        "title": "EquityCurvePoint",
+        "type": "object"
+      },
+      "ExclusionReason": {
+        "enum": [
+          "not_in_universe",
+          "future_data",
+          "missing_eligibility",
+          "eligibility_failed",
+          "missing_factor",
+          "score_threshold",
+          "regime_blocked",
+          "liquidity_failed",
+          "outside_selection",
+          "missing_risk",
+          "turnover_buffer",
+          "minimum_trade"
+        ],
+        "title": "ExclusionReason",
+        "type": "string"
+      },
+      "ExecutionCore": {
+        "enum": [
+          "rust",
+          "python"
+        ],
+        "title": "ExecutionCore",
+        "type": "string"
+      },
+      "ExecutionStep": {
+        "properties": {
+          "fee_bps": {
+            "default": 15.0,
+            "title": "Fee Bps",
+            "type": "number"
+          },
+          "order_style": {
+            "$ref": "#/components/schemas/OrderStyle",
+            "default": "market"
+          },
+          "participation_rate": {
+            "default": 0.1,
+            "title": "Participation Rate",
+            "type": "number"
+          },
+          "slippage_bps": {
+            "default": 10.0,
+            "title": "Slippage Bps",
+            "type": "number"
+          },
+          "timing": {
+            "$ref": "#/components/schemas/ExecutionTiming",
+            "default": "next_open"
+          }
+        },
+        "title": "ExecutionStep",
+        "type": "object"
+      },
+      "ExecutionTiming": {
+        "enum": [
+          "next_open"
+        ],
+        "title": "ExecutionTiming",
+        "type": "string"
+      },
+      "FactorAnalytics": {
+        "properties": {
+          "coverage": {
+            "title": "Coverage",
+            "type": "number"
+          },
+          "decay": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decay"
+          },
+          "information_coefficient": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Information Coefficient"
+          },
+          "observation_count": {
+            "title": "Observation Count",
+            "type": "integer"
+          },
+          "quantile_spread": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantile Spread"
+          },
+          "rank_information_coefficient": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank Information Coefficient"
+          },
+          "turnover": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Turnover"
+          },
+          "valid_count": {
+            "title": "Valid Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "information_coefficient",
+          "rank_information_coefficient",
+          "quantile_spread",
+          "coverage",
+          "turnover",
+          "decay",
+          "observation_count",
+          "valid_count"
+        ],
+        "title": "FactorAnalytics",
+        "type": "object"
+      },
+      "FactorAvailability": {
+        "enum": [
+          "implemented",
+          "catalog_only"
+        ],
+        "title": "FactorAvailability",
+        "type": "string"
+      },
+      "FactorCatalog": {
+        "properties": {
+          "facets": {
+            "$ref": "#/components/schemas/FactorCatalogFacets"
+          },
+          "factors": {
+            "items": {
+              "$ref": "#/components/schemas/FactorDefinition"
+            },
+            "title": "Factors",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_count": {
+            "title": "Page Count",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "registry_version": {
+            "title": "Registry Version",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "registry_version",
+          "factors",
+          "total",
+          "page",
+          "page_size",
+          "page_count",
+          "facets"
+        ],
+        "title": "FactorCatalog",
+        "type": "object"
+      },
+      "FactorCatalogFacets": {
+        "properties": {
+          "availability": {
+            "items": {
+              "$ref": "#/components/schemas/FactorAvailability"
+            },
+            "title": "Availability",
+            "type": "array"
+          },
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/FactorCategory"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "output_units": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Output Units",
+            "type": "array"
+          }
+        },
+        "required": [
+          "categories",
+          "availability",
+          "output_units"
+        ],
+        "title": "FactorCatalogFacets",
+        "type": "object"
+      },
+      "FactorCategory": {
+        "enum": [
+          "price",
+          "financial",
+          "consensus",
+          "flow",
+          "short",
+          "credit",
+          "event"
+        ],
+        "title": "FactorCategory",
+        "type": "string"
+      },
+      "FactorComparisonOperator": {
+        "enum": [
+          "gt",
+          "gte",
+          "lt",
+          "lte",
+          "eq"
+        ],
+        "title": "FactorComparisonOperator",
+        "type": "string"
+      },
+      "FactorDefinition": {
+        "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/FactorAvailability"
+          },
+          "category": {
+            "$ref": "#/components/schemas/FactorCategory"
+          },
+          "default_graph": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FactorGraph"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "factor_id": {
+            "title": "Factor Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "minimum_history_sessions": {
+            "title": "Minimum History Sessions",
+            "type": "integer"
+          },
+          "missing_policy": {
+            "$ref": "#/components/schemas/MissingPolicy"
+          },
+          "output_unit": {
+            "title": "Output Unit",
+            "type": "string"
+          },
+          "preference": {
+            "$ref": "#/components/schemas/FactorPreference"
+          },
+          "required_field_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Field Ids",
+            "type": "array"
+          },
+          "tags": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "factor_id",
+          "label",
+          "description",
+          "category",
+          "preference",
+          "output_unit",
+          "required_field_ids",
+          "minimum_history_sessions",
+          "missing_policy",
+          "availability",
+          "default_graph"
+        ],
+        "title": "FactorDefinition",
+        "type": "object"
+      },
+      "FactorDirection": {
+        "enum": [
+          "high",
+          "low"
+        ],
+        "title": "FactorDirection",
+        "type": "string"
+      },
+      "FactorEvaluation": {
+        "properties": {
+          "output_node_id": {
+            "title": "Output Node Id",
+            "type": "string"
+          },
+          "values": {
+            "items": {
+              "$ref": "#/components/schemas/FactorValue"
+            },
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "output_node_id",
+          "values"
+        ],
+        "title": "FactorEvaluation",
+        "type": "object"
+      },
+      "FactorExecutionPlan": {
+        "properties": {
+          "as_of_policy": {
+            "default": "available_date_lte_as_of",
+            "title": "As Of Policy",
+            "type": "string"
+          },
+          "graph_hash": {
+            "title": "Graph Hash",
+            "type": "string"
+          },
+          "minimum_history_sessions": {
+            "title": "Minimum History Sessions",
+            "type": "integer"
+          },
+          "missing_policy": {
+            "title": "Missing Policy",
+            "type": "string"
+          },
+          "output_node_id": {
+            "title": "Output Node Id",
+            "type": "string"
+          },
+          "plan_hash": {
+            "title": "Plan Hash",
+            "type": "string"
+          },
+          "referenced_factor_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Referenced Factor Ids",
+            "type": "array"
+          },
+          "referenced_subgraph_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Referenced Subgraph Ids",
+            "type": "array"
+          },
+          "registry_version": {
+            "title": "Registry Version",
+            "type": "string"
+          },
+          "required_field_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Field Ids",
+            "type": "array"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/FactorExecutionStep"
+            },
+            "title": "Steps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "graph_hash",
+          "plan_hash",
+          "registry_version",
+          "output_node_id",
+          "steps",
+          "required_field_ids",
+          "referenced_factor_ids",
+          "referenced_subgraph_ids",
+          "minimum_history_sessions",
+          "missing_policy"
+        ],
+        "title": "FactorExecutionPlan",
+        "type": "object"
+      },
+      "FactorExecutionStep": {
+        "properties": {
+          "input_node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Input Node Ids",
+            "type": "array"
+          },
+          "minimum_history_sessions": {
+            "title": "Minimum History Sessions",
+            "type": "integer"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operation": {
+            "title": "Operation",
+            "type": "string"
+          },
+          "output_type": {
+            "title": "Output Type",
+            "type": "string"
+          },
+          "output_unit": {
+            "title": "Output Unit",
+            "type": "string"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sequence",
+          "node_id",
+          "operation",
+          "input_node_ids",
+          "output_type",
+          "output_unit",
+          "minimum_history_sessions"
+        ],
+        "title": "FactorExecutionStep",
+        "type": "object"
+      },
+      "FactorExplanation": {
+        "properties": {
+          "data_snapshot_id": {
+            "title": "Data Snapshot Id",
+            "type": "string"
+          },
+          "narrative": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Narrative",
+            "type": "array"
+          },
+          "plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FactorExecutionPlan"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "registry_version": {
+            "title": "Registry Version",
+            "type": "string"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/FactorGraphValidation"
+          }
+        },
+        "required": [
+          "registry_version",
+          "data_snapshot_id",
+          "validation",
+          "plan",
+          "narrative"
+        ],
+        "title": "FactorExplanation",
+        "type": "object"
+      },
+      "FactorGraph": {
+        "properties": {
+          "missing_policy": {
+            "$ref": "#/components/schemas/MissingPolicy",
+            "default": "drop"
+          },
+          "nodes": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FieldNode"
+                },
+                {
+                  "$ref": "#/components/schemas/ConstantNode"
+                },
+                {
+                  "$ref": "#/components/schemas/ParameterNode"
+                },
+                {
+                  "$ref": "#/components/schemas/UnaryNode"
+                },
+                {
+                  "$ref": "#/components/schemas/BinaryNode"
+                },
+                {
+                  "$ref": "#/components/schemas/TimeSeriesNode"
+                },
+                {
+                  "$ref": "#/components/schemas/CrossSectionalNode"
+                },
+                {
+                  "$ref": "#/components/schemas/GroupNode"
+                },
+                {
+                  "$ref": "#/components/schemas/ComparisonNode"
+                },
+                {
+                  "$ref": "#/components/schemas/ConditionalNode"
+                },
+                {
+                  "$ref": "#/components/schemas/SavedFactorNode"
+                },
+                {
+                  "$ref": "#/components/schemas/SavedSubgraphNode"
+                }
+              ]
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "output_node_id": {
+            "title": "Output Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "nodes",
+          "output_node_id"
+        ],
+        "title": "FactorGraph",
+        "type": "object"
+      },
+      "FactorGraphRequest": {
+        "properties": {
+          "factor_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Factor Ids",
+            "type": "array"
+          },
+          "graph": {
+            "$ref": "#/components/schemas/FactorGraph"
+          },
+          "parameter_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Parameter Ids",
+            "type": "array"
+          },
+          "subgraph_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Subgraph Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "graph"
+        ],
+        "title": "FactorGraphRequest",
+        "type": "object"
+      },
+      "FactorGraphValidation": {
+        "properties": {
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/FactorValidationIssue"
+            },
+            "title": "Issues",
+            "type": "array"
+          },
+          "minimum_history_sessions": {
+            "title": "Minimum History Sessions",
+            "type": "integer"
+          },
+          "node_contracts": {
+            "items": {
+              "$ref": "#/components/schemas/NodeContract"
+            },
+            "title": "Node Contracts",
+            "type": "array"
+          },
+          "required_field_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Field Ids",
+            "type": "array"
+          },
+          "valid": {
+            "title": "Valid",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "valid",
+          "issues",
+          "node_contracts",
+          "minimum_history_sessions",
+          "required_field_ids"
+        ],
+        "title": "FactorGraphValidation",
+        "type": "object"
+      },
+      "FactorMatrixCacheKey": {
+        "properties": {
+          "as_of_end": {
+            "format": "date",
+            "title": "As Of End",
+            "type": "string"
+          },
+          "as_of_start": {
+            "format": "date",
+            "title": "As Of Start",
+            "type": "string"
+          },
+          "data_snapshot_id": {
+            "title": "Data Snapshot Id",
+            "type": "string"
+          },
+          "fingerprint": {
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "parameters": {
+            "items": {
+              "$ref": "#/components/schemas/ResolvedFactorParameter"
+            },
+            "title": "Parameters",
+            "type": "array"
+          },
+          "plan_hash": {
+            "title": "Plan Hash",
+            "type": "string"
+          },
+          "registry_version": {
+            "title": "Registry Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fingerprint",
+          "data_snapshot_id",
+          "plan_hash",
+          "registry_version",
+          "parameters",
+          "as_of_start",
+          "as_of_end"
+        ],
+        "title": "FactorMatrixCacheKey",
+        "type": "object"
+      },
+      "FactorPreference": {
+        "enum": [
+          "high",
+          "low"
+        ],
+        "title": "FactorPreference",
+        "type": "string"
+      },
+      "FactorPreview": {
+        "properties": {
+          "analytics": {
+            "$ref": "#/components/schemas/FactorAnalytics"
+          },
+          "cache_key": {
+            "$ref": "#/components/schemas/FactorMatrixCacheKey"
+          },
+          "data_snapshot_id": {
+            "title": "Data Snapshot Id",
+            "type": "string"
+          },
+          "evaluation": {
+            "$ref": "#/components/schemas/FactorEvaluation"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/FactorExecutionPlan"
+          }
+        },
+        "required": [
+          "data_snapshot_id",
+          "plan",
+          "cache_key",
+          "evaluation",
+          "analytics"
+        ],
+        "title": "FactorPreview",
+        "type": "object"
+      },
+      "FactorPreviewRequest": {
+        "description": "Preview request. The data snapshot is owned by the adapter (P1.5-01).\n\n`expected_data_snapshot_id` is optional provenance the client saw in the catalog; when it\ndiffers from the adapter's actual snapshot the preview fails closed instead of silently\ncomputing against different data.",
+        "properties": {
+          "as_of_end": {
+            "format": "date",
+            "title": "As Of End",
+            "type": "string"
+          },
+          "as_of_start": {
+            "format": "date",
+            "title": "As Of Start",
+            "type": "string"
+          },
+          "expected_data_snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Data Snapshot Id"
+          },
+          "factor_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Factor Ids",
+            "type": "array"
+          },
+          "graph": {
+            "$ref": "#/components/schemas/FactorGraph"
+          },
+          "parameters": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ResolvedFactorParameter"
+            },
+            "title": "Parameters",
+            "type": "array"
+          },
+          "subgraph_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Subgraph Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "graph",
+          "as_of_start",
+          "as_of_end"
+        ],
+        "title": "FactorPreviewRequest",
+        "type": "object"
+      },
+      "FactorSignal": {
+        "properties": {
+          "direction": {
+            "$ref": "#/components/schemas/FactorDirection"
+          },
+          "factor_id": {
+            "title": "Factor Id",
+            "type": "string"
+          },
+          "graph": {
+            "$ref": "#/components/schemas/FactorGraph"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "weight": {
+            "title": "Weight",
+            "type": "number"
+          }
+        },
+        "required": [
+          "factor_id",
+          "label",
+          "direction",
+          "weight",
+          "graph"
+        ],
+        "title": "FactorSignal",
+        "type": "object"
+      },
+      "FactorStep": {
+        "properties": {
+          "factors": {
+            "items": {
+              "$ref": "#/components/schemas/FactorSignal"
+            },
+            "title": "Factors",
+            "type": "array"
+          }
+        },
+        "required": [
+          "factors"
+        ],
+        "title": "FactorStep",
+        "type": "object"
+      },
+      "FactorValidationIssue": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/FactorValidationSeverity",
+            "default": "error"
+          }
+        },
+        "required": [
+          "code",
+          "node_id",
+          "path",
+          "message"
+        ],
+        "title": "FactorValidationIssue",
+        "type": "object"
+      },
+      "FactorValidationSeverity": {
+        "enum": [
+          "error",
+          "warning"
+        ],
+        "title": "FactorValidationSeverity",
+        "type": "string"
+      },
+      "FactorValue": {
+        "properties": {
+          "as_of": {
+            "format": "date",
+            "title": "As Of",
+            "type": "string"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "as_of",
+          "security_id",
+          "value"
+        ],
+        "title": "FactorValue",
+        "type": "object"
+      },
+      "FieldCatalogFacets": {
+        "properties": {
+          "dataset_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Dataset Ids",
+            "type": "array"
+          },
+          "frequencies": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Frequencies",
+            "type": "array"
+          },
+          "units": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Units",
+            "type": "array"
+          }
+        },
+        "required": [
+          "dataset_ids",
+          "units",
+          "frequencies"
+        ],
+        "title": "FieldCatalogFacets",
+        "type": "object"
+      },
+      "FieldContract": {
+        "description": "One scalar authoring path with everything an editor needs to explain it.\n\n`pointer` is a JSON Pointer template: array positions are written as an asterisk\n(for example the factor weight row is `/factors/factors/<asterisk>/weight`). Rows of a\ndiscriminated union share the pointer and differ by `branch` (the member's `kind`).\nBounds and metadata come from the constraint catalog; type, enum, nullability, required\nand default come from the model.",
+        "properties": {
+          "applied_stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied Stage"
+          },
+          "branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Branch"
+          },
+          "catalog": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalog"
+          },
+          "const": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Const"
+          },
+          "default": {
+            "title": "Default"
+          },
+          "description_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description Key"
+          },
+          "display_unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Unit"
+          },
+          "enum": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enum"
+          },
+          "example": {
+            "title": "Example"
+          },
+          "exclusive_maximum": {
+            "default": false,
+            "title": "Exclusive Maximum",
+            "type": "boolean"
+          },
+          "exclusive_minimum": {
+            "default": false,
+            "title": "Exclusive Minimum",
+            "type": "boolean"
+          },
+          "format": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Format"
+          },
+          "has_default": {
+            "default": false,
+            "title": "Has Default",
+            "type": "boolean"
+          },
+          "maximum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maximum"
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum"
+          },
+          "nullable": {
+            "default": false,
+            "title": "Nullable",
+            "type": "boolean"
+          },
+          "pointer": {
+            "title": "Pointer",
+            "type": "string"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          }
+        },
+        "required": [
+          "pointer",
+          "type",
+          "required"
+        ],
+        "title": "FieldContract",
+        "type": "object"
+      },
+      "FieldCoverageCapability": {
+        "properties": {
+          "ends_on": {
+            "format": "date",
+            "title": "Ends On",
+            "type": "string"
+          },
+          "estimated_coverage_pct": {
+            "title": "Estimated Coverage Pct",
+            "type": "number"
+          },
+          "point_in_time": {
+            "title": "Point In Time",
+            "type": "boolean"
+          },
+          "requires_confirmation": {
+            "default": false,
+            "title": "Requires Confirmation",
+            "type": "boolean"
+          },
+          "starts_on": {
+            "format": "date",
+            "title": "Starts On",
+            "type": "string"
+          },
+          "supported_cell_kinds": {
+            "items": {
+              "$ref": "#/components/schemas/CellKind"
+            },
+            "title": "Supported Cell Kinds",
+            "type": "array"
+          },
+          "venues": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Venues",
+            "type": "array"
+          }
+        },
+        "required": [
+          "starts_on",
+          "ends_on",
+          "venues",
+          "estimated_coverage_pct",
+          "supported_cell_kinds",
+          "point_in_time"
+        ],
+        "title": "FieldCoverageCapability",
+        "type": "object"
+      },
+      "FieldLag": {
+        "properties": {
+          "field_id": {
+            "title": "Field Id",
+            "type": "string"
+          },
+          "sessions": {
+            "title": "Sessions",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "field_id",
+          "sessions"
+        ],
+        "title": "FieldLag",
+        "type": "object"
+      },
+      "FieldNode": {
+        "properties": {
+          "field_id": {
+            "title": "Field Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "field",
+            "title": "Kind",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "field_id",
+          "kind"
+        ],
+        "title": "FieldNode",
+        "type": "object"
+      },
+      "FieldValueType": {
+        "enum": [
+          "price",
+          "amount",
+          "ratio",
+          "count",
+          "category"
+        ],
+        "title": "FieldValueType",
+        "type": "string"
+      },
+      "FloatParameter": {
+        "properties": {
+          "default": {
+            "title": "Default",
+            "type": "number"
+          },
+          "kind": {
+            "const": "float",
+            "title": "Kind",
+            "type": "string"
+          },
+          "maximum": {
+            "title": "Maximum",
+            "type": "number"
+          },
+          "minimum": {
+            "title": "Minimum",
+            "type": "number"
+          },
+          "parameter_id": {
+            "title": "Parameter Id",
+            "type": "string"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step"
+          }
+        },
+        "required": [
+          "parameter_id",
+          "default",
+          "minimum",
+          "maximum",
+          "kind"
+        ],
+        "title": "FloatParameter",
+        "type": "object"
+      },
+      "GroupNode": {
+        "properties": {
+          "group_field_id": {
+            "title": "Group Field Id",
+            "type": "string"
+          },
+          "input_node_id": {
+            "title": "Input Node Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "group",
+            "title": "Kind",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operator": {
+            "$ref": "#/components/schemas/GroupOperator"
+          }
+        },
+        "required": [
+          "node_id",
+          "operator",
+          "input_node_id",
+          "group_field_id",
+          "kind"
+        ],
+        "title": "GroupNode",
+        "type": "object"
+      },
+      "GroupOperator": {
+        "enum": [
+          "neutralize",
+          "rank"
+        ],
+        "title": "GroupOperator",
+        "type": "string"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "InlineDraft": {
+        "description": "Run an unsaved spec (draft backtests only; never a deployment source).\n\n`source_hash` is client-asserted provenance: the server cannot verify it without the text\nand records it as given.",
+        "properties": {
+          "kind": {
+            "const": "inline_draft",
+            "title": "Kind",
+            "type": "string"
+          },
+          "source_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Hash"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/StrategySpec"
+          }
+        },
+        "required": [
+          "spec",
+          "kind"
+        ],
+        "title": "InlineDraft",
+        "type": "object"
+      },
+      "IntegerParameter": {
+        "properties": {
+          "default": {
+            "title": "Default",
+            "type": "integer"
+          },
+          "kind": {
+            "const": "integer",
+            "title": "Kind",
+            "type": "string"
+          },
+          "maximum": {
+            "title": "Maximum",
+            "type": "integer"
+          },
+          "minimum": {
+            "title": "Minimum",
+            "type": "integer"
+          },
+          "parameter_id": {
+            "title": "Parameter Id",
+            "type": "string"
+          },
+          "step": {
+            "default": 1,
+            "title": "Step",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "parameter_id",
+          "default",
+          "minimum",
+          "maximum",
+          "kind"
+        ],
+        "title": "IntegerParameter",
+        "type": "object"
+      },
+      "Market": {
+        "enum": [
+          "KRX"
+        ],
+        "title": "Market",
+        "type": "string"
+      },
+      "MetricCategory": {
+        "enum": [
+          "return",
+          "risk",
+          "risk_adjusted",
+          "benchmark",
+          "trade",
+          "exposure",
+          "cost"
+        ],
+        "title": "MetricCategory",
+        "type": "string"
+      },
+      "MetricDefinition": {
+        "properties": {
+          "category": {
+            "$ref": "#/components/schemas/MetricCategory"
+          },
+          "higher_is_better": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Higher Is Better"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "metric_id": {
+            "title": "Metric Id",
+            "type": "string"
+          },
+          "nullable": {
+            "title": "Nullable",
+            "type": "boolean"
+          },
+          "precision": {
+            "default": 4,
+            "title": "Precision",
+            "type": "integer"
+          },
+          "unit": {
+            "$ref": "#/components/schemas/MetricUnit"
+          },
+          "version": {
+            "default": 1,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "metric_id",
+          "label",
+          "category",
+          "unit",
+          "higher_is_better",
+          "nullable"
+        ],
+        "title": "MetricDefinition",
+        "type": "object"
+      },
+      "MetricScope": {
+        "enum": [
+          "full",
+          "in_sample",
+          "validation",
+          "out_of_sample",
+          "window"
+        ],
+        "title": "MetricScope",
+        "type": "string"
+      },
+      "MetricUnit": {
+        "enum": [
+          "percent",
+          "ratio",
+          "count",
+          "sessions",
+          "currency"
+        ],
+        "title": "MetricUnit",
+        "type": "string"
+      },
+      "MetricValue": {
+        "properties": {
+          "metric_id": {
+            "title": "Metric Id",
+            "type": "string"
+          },
+          "sample_count": {
+            "title": "Sample Count",
+            "type": "integer"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/MetricScope"
+          },
+          "scope_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Label"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Reason"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "metric_id",
+          "value",
+          "scope",
+          "sample_count"
+        ],
+        "title": "MetricValue",
+        "type": "object"
+      },
+      "MetricWindow": {
+        "properties": {
+          "end": {
+            "format": "date",
+            "title": "End",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/MetricScope"
+          },
+          "start": {
+            "format": "date",
+            "title": "Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "start",
+          "end"
+        ],
+        "title": "MetricWindow",
+        "type": "object"
+      },
+      "MissingPolicy": {
+        "enum": [
+          "drop",
+          "keep",
+          "zero",
+          "cross_sectional_median"
+        ],
+        "title": "MissingPolicy",
+        "type": "string"
+      },
+      "MonthlyReturnPoint": {
+        "properties": {
+          "month": {
+            "title": "Month",
+            "type": "integer"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          },
+          "year": {
+            "title": "Year",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "year",
+          "month",
+          "value"
+        ],
+        "title": "MonthlyReturnPoint",
+        "type": "object"
+      },
+      "NodeContract": {
+        "properties": {
+          "minimum_history_sessions": {
+            "title": "Minimum History Sessions",
+            "type": "integer"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          },
+          "value_type": {
+            "$ref": "#/components/schemas/NodeValueType"
+          }
+        },
+        "required": [
+          "node_id",
+          "value_type",
+          "unit",
+          "minimum_history_sessions"
+        ],
+        "title": "NodeContract",
+        "type": "object"
+      },
+      "NodeValueType": {
+        "enum": [
+          "numeric_series",
+          "boolean_series",
+          "group_series",
+          "scalar"
+        ],
+        "title": "NodeValueType",
+        "type": "string"
+      },
+      "OrderStyle": {
+        "enum": [
+          "market"
+        ],
+        "title": "OrderStyle",
+        "type": "string"
+      },
+      "Page_RevisionSummary_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RevisionSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "offset",
+          "limit"
+        ],
+        "title": "Page",
+        "type": "object"
+      },
+      "PanelPreviewCostEstimate": {
+        "properties": {
+          "estimated_bytes": {
+            "title": "Estimated Bytes",
+            "type": "integer"
+          },
+          "estimated_cells": {
+            "title": "Estimated Cells",
+            "type": "integer"
+          },
+          "requested_columns": {
+            "title": "Requested Columns",
+            "type": "integer"
+          },
+          "requested_rows": {
+            "title": "Requested Rows",
+            "type": "integer"
+          },
+          "returned_cells": {
+            "title": "Returned Cells",
+            "type": "integer"
+          },
+          "returned_columns": {
+            "title": "Returned Columns",
+            "type": "integer"
+          },
+          "returned_rows": {
+            "title": "Returned Rows",
+            "type": "integer"
+          },
+          "session_count": {
+            "title": "Session Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "session_count",
+          "requested_rows",
+          "requested_columns",
+          "estimated_cells",
+          "estimated_bytes",
+          "returned_rows",
+          "returned_columns",
+          "returned_cells"
+        ],
+        "title": "PanelPreviewCostEstimate",
+        "type": "object"
+      },
+      "ParameterNode": {
+        "properties": {
+          "kind": {
+            "const": "parameter",
+            "title": "Kind",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "parameter_id": {
+            "title": "Parameter Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "parameter_id",
+          "kind"
+        ],
+        "title": "ParameterNode",
+        "type": "object"
+      },
+      "PortfolioPreview": {
+        "description": "The tape a run will consume, plus the caveats the observation source reported.\n\n`warnings` are the raw observation adapter's own messages, passed through verbatim. They ride\ninto `RunManifest.warnings` so a caveat visible in the preview cannot disappear from the run\nthat used the same data.",
+        "properties": {
+          "engine": {
+            "$ref": "#/components/schemas/EngineCompatibility"
+          },
+          "tape": {
+            "$ref": "#/components/schemas/TargetTape"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tape",
+          "engine"
+        ],
+        "title": "PortfolioPreview",
+        "type": "object"
+      },
+      "PortfolioPreviewRequest": {
+        "properties": {
+          "spec": {
+            "$ref": "#/components/schemas/StrategySpec"
+          }
+        },
+        "required": [
+          "spec"
+        ],
+        "title": "PortfolioPreviewRequest",
+        "type": "object"
+      },
+      "PortfolioSide": {
+        "enum": [
+          "long_only",
+          "long_short"
+        ],
+        "title": "PortfolioSide",
+        "type": "string"
+      },
+      "PortfolioStep": {
+        "properties": {
+          "liquidity_field_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Liquidity Field Id"
+          },
+          "minimum_liquidity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum Liquidity"
+          },
+          "minimum_trade_weight": {
+            "default": 0.0,
+            "title": "Minimum Trade Weight",
+            "type": "number"
+          },
+          "rebalance": {
+            "$ref": "#/components/schemas/RebalanceFrequency",
+            "default": "monthly"
+          },
+          "rebalance_every_n_sessions": {
+            "default": 21,
+            "title": "Rebalance Every N Sessions",
+            "type": "integer"
+          },
+          "selection_count": {
+            "default": 20,
+            "title": "Selection Count",
+            "type": "integer"
+          },
+          "selection_method": {
+            "$ref": "#/components/schemas/SelectionMethod",
+            "default": "top_n"
+          },
+          "selection_percentile": {
+            "default": 0.1,
+            "title": "Selection Percentile",
+            "type": "number"
+          },
+          "short_selection_count": {
+            "default": 20,
+            "title": "Short Selection Count",
+            "type": "integer"
+          },
+          "side": {
+            "$ref": "#/components/schemas/PortfolioSide",
+            "default": "long_only"
+          },
+          "turnover_buffer_count": {
+            "default": 0,
+            "title": "Turnover Buffer Count",
+            "type": "integer"
+          },
+          "weighting": {
+            "$ref": "#/components/schemas/WeightingMethod",
+            "default": "equal"
+          }
+        },
+        "title": "PortfolioStep",
+        "type": "object"
+      },
+      "RawArtifactBundle": {
+        "properties": {
+          "costs": {
+            "items": {
+              "$ref": "#/components/schemas/RawCost"
+            },
+            "title": "Costs",
+            "type": "array"
+          },
+          "fills": {
+            "items": {
+              "$ref": "#/components/schemas/RawFill"
+            },
+            "title": "Fills",
+            "type": "array"
+          },
+          "orders": {
+            "items": {
+              "$ref": "#/components/schemas/RawOrder"
+            },
+            "title": "Orders",
+            "type": "array"
+          },
+          "positions": {
+            "items": {
+              "$ref": "#/components/schemas/RawPosition"
+            },
+            "title": "Positions",
+            "type": "array"
+          },
+          "schema_version": {
+            "default": "backtest-artifacts-v1",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "snapshots": {
+            "items": {
+              "$ref": "#/components/schemas/RawSnapshot"
+            },
+            "title": "Snapshots",
+            "type": "array"
+          },
+          "trades": {
+            "items": {
+              "$ref": "#/components/schemas/RawTrade"
+            },
+            "title": "Trades",
+            "type": "array"
+          }
+        },
+        "required": [
+          "snapshots",
+          "positions",
+          "orders",
+          "fills",
+          "costs",
+          "trades"
+        ],
+        "title": "RawArtifactBundle",
+        "type": "object"
+      },
+      "RawCost": {
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "number"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "security_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Security Id"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "kind",
+          "security_id",
+          "amount"
+        ],
+        "title": "RawCost",
+        "type": "object"
+      },
+      "RawFill": {
+        "properties": {
+          "fee": {
+            "title": "Fee",
+            "type": "number"
+          },
+          "fill_id": {
+            "title": "Fill Id",
+            "type": "string"
+          },
+          "order_id": {
+            "title": "Order Id",
+            "type": "string"
+          },
+          "price": {
+            "title": "Price",
+            "type": "number"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "string"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          },
+          "side": {
+            "title": "Side",
+            "type": "string"
+          },
+          "slippage_per_share": {
+            "title": "Slippage Per Share",
+            "type": "number"
+          }
+        },
+        "required": [
+          "fill_id",
+          "order_id",
+          "session",
+          "security_id",
+          "side",
+          "quantity",
+          "price",
+          "fee",
+          "slippage_per_share"
+        ],
+        "title": "RawFill",
+        "type": "object"
+      },
+      "RawOrder": {
+        "properties": {
+          "decision_id": {
+            "title": "Decision Id",
+            "type": "string"
+          },
+          "order_id": {
+            "title": "Order Id",
+            "type": "string"
+          },
+          "order_type": {
+            "title": "Order Type",
+            "type": "string"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "string"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          },
+          "side": {
+            "title": "Side",
+            "type": "string"
+          },
+          "time_in_force": {
+            "title": "Time In Force",
+            "type": "string"
+          }
+        },
+        "required": [
+          "order_id",
+          "decision_id",
+          "session",
+          "security_id",
+          "side",
+          "quantity",
+          "order_type",
+          "time_in_force"
+        ],
+        "title": "RawOrder",
+        "type": "object"
+      },
+      "RawPosition": {
+        "properties": {
+          "average_price": {
+            "title": "Average Price",
+            "type": "number"
+          },
+          "market_price": {
+            "title": "Market Price",
+            "type": "number"
+          },
+          "market_value": {
+            "title": "Market Value",
+            "type": "number"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "string"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          },
+          "unrealized_pnl": {
+            "title": "Unrealized Pnl",
+            "type": "number"
+          }
+        },
+        "required": [
+          "session",
+          "security_id",
+          "quantity",
+          "average_price",
+          "market_price",
+          "market_value",
+          "unrealized_pnl"
+        ],
+        "title": "RawPosition",
+        "type": "object"
+      },
+      "RawSnapshot": {
+        "properties": {
+          "cash": {
+            "title": "Cash",
+            "type": "number"
+          },
+          "equity": {
+            "title": "Equity",
+            "type": "number"
+          },
+          "gross_exposure": {
+            "title": "Gross Exposure",
+            "type": "number"
+          },
+          "net_exposure": {
+            "title": "Net Exposure",
+            "type": "number"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "cash",
+          "equity",
+          "gross_exposure",
+          "net_exposure"
+        ],
+        "title": "RawSnapshot",
+        "type": "object"
+      },
+      "RawTrade": {
+        "properties": {
+          "closed_on": {
+            "format": "date",
+            "title": "Closed On",
+            "type": "string"
+          },
+          "entry_price": {
+            "title": "Entry Price",
+            "type": "number"
+          },
+          "exit_price": {
+            "title": "Exit Price",
+            "type": "number"
+          },
+          "fees": {
+            "title": "Fees",
+            "type": "number"
+          },
+          "opened_on": {
+            "format": "date",
+            "title": "Opened On",
+            "type": "string"
+          },
+          "pnl": {
+            "title": "Pnl",
+            "type": "number"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "string"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "side": {
+            "title": "Side",
+            "type": "string"
+          },
+          "slippage_cost": {
+            "title": "Slippage Cost",
+            "type": "number"
+          }
+        },
+        "required": [
+          "security_id",
+          "opened_on",
+          "closed_on",
+          "side",
+          "quantity",
+          "entry_price",
+          "exit_price",
+          "pnl",
+          "fees",
+          "slippage_cost"
+        ],
+        "title": "RawTrade",
+        "type": "object"
+      },
+      "RebalanceFrequency": {
+        "enum": [
+          "every_n_sessions",
+          "weekly",
+          "monthly",
+          "quarterly"
+        ],
+        "title": "RebalanceFrequency",
+        "type": "string"
+      },
+      "ResearchCatalog": {
+        "properties": {
+          "facets": {
+            "$ref": "#/components/schemas/FieldCatalogFacets"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/DatasetFieldProfile"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_count": {
+            "title": "Page Count",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/DataSnapshot"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "snapshot",
+          "fields",
+          "total",
+          "page",
+          "page_size",
+          "page_count",
+          "facets"
+        ],
+        "title": "ResearchCatalog",
+        "type": "object"
+      },
+      "ResearchDataWarning": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "field_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field Id"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "requires_confirmation": {
+            "title": "Requires Confirmation",
+            "type": "boolean"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/ResearchWarningSeverity"
+          },
+          "warning_id": {
+            "title": "Warning Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "warning_id",
+          "code",
+          "message",
+          "severity",
+          "field_id",
+          "requires_confirmation"
+        ],
+        "title": "ResearchDataWarning",
+        "type": "object"
+      },
+      "ResearchPanelCell": {
+        "properties": {
+          "as_of": {
+            "format": "date",
+            "title": "As Of",
+            "type": "string"
+          },
+          "available_date": {
+            "format": "date",
+            "title": "Available Date",
+            "type": "string"
+          },
+          "field_id": {
+            "title": "Field Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CellKind"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "source_effective_date": {
+            "format": "date",
+            "title": "Source Effective Date",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "as_of",
+          "security_id",
+          "field_id",
+          "source_effective_date",
+          "available_date",
+          "value",
+          "kind"
+        ],
+        "title": "ResearchPanelCell",
+        "type": "object"
+      },
+      "ResearchPanelPreview": {
+        "properties": {
+          "confirmation_required": {
+            "title": "Confirmation Required",
+            "type": "boolean"
+          },
+          "cost": {
+            "$ref": "#/components/schemas/PanelPreviewCostEstimate"
+          },
+          "panel": {
+            "$ref": "#/components/schemas/ResearchPanelResult"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchDataWarning"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "panel",
+          "cost",
+          "warnings",
+          "confirmation_required",
+          "truncated"
+        ],
+        "title": "ResearchPanelPreview",
+        "type": "object"
+      },
+      "ResearchPanelPreviewRequest": {
+        "properties": {
+          "column_limit": {
+            "default": 10,
+            "title": "Column Limit",
+            "type": "integer"
+          },
+          "confirmed_warning_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Confirmed Warning Ids",
+            "type": "array"
+          },
+          "query": {
+            "$ref": "#/components/schemas/ResearchPanelQuery"
+          },
+          "row_limit": {
+            "default": 50,
+            "title": "Row Limit",
+            "type": "integer"
+          },
+          "venue": {
+            "default": "XKRX",
+            "title": "Venue",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "ResearchPanelPreviewRequest",
+        "type": "object"
+      },
+      "ResearchPanelQuery": {
+        "properties": {
+          "end": {
+            "format": "date",
+            "title": "End",
+            "type": "string"
+          },
+          "field_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Field Ids",
+            "type": "array"
+          },
+          "lag_overrides": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/FieldLag"
+            },
+            "title": "Lag Overrides",
+            "type": "array"
+          },
+          "security_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Security Ids",
+            "type": "array"
+          },
+          "start": {
+            "format": "date",
+            "title": "Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "security_ids",
+          "field_ids"
+        ],
+        "title": "ResearchPanelQuery",
+        "type": "object"
+      },
+      "ResearchPanelResult": {
+        "properties": {
+          "cells": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchPanelCell"
+            },
+            "title": "Cells",
+            "type": "array"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "snapshot_id": {
+            "title": "Snapshot Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DataLoadStatus"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "cells",
+          "status",
+          "snapshot_id"
+        ],
+        "title": "ResearchPanelResult",
+        "type": "object"
+      },
+      "ResearchPreview": {
+        "properties": {
+          "panel": {
+            "$ref": "#/components/schemas/ResearchPanelResult"
+          },
+          "universe": {
+            "$ref": "#/components/schemas/UniverseHistoryResult"
+          }
+        },
+        "required": [
+          "universe",
+          "panel"
+        ],
+        "title": "ResearchPreview",
+        "type": "object"
+      },
+      "ResearchWarningSeverity": {
+        "enum": [
+          "info",
+          "warning"
+        ],
+        "title": "ResearchWarningSeverity",
+        "type": "string"
+      },
+      "ResolvedFactorParameter": {
+        "properties": {
+          "parameter_id": {
+            "title": "Parameter Id",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "parameter_id",
+          "value"
+        ],
+        "title": "ResolvedFactorParameter",
+        "type": "object"
+      },
+      "ReviseDocumentRequest": {
+        "properties": {
+          "expected_revision": {
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "format": {
+            "$ref": "#/components/schemas/SourceFormat"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "format",
+          "expected_revision"
+        ],
+        "title": "ReviseDocumentRequest",
+        "type": "object"
+      },
+      "ReviseStrategyRequest": {
+        "properties": {
+          "expected_revision": {
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/StrategySpec"
+          }
+        },
+        "required": [
+          "expected_revision",
+          "spec"
+        ],
+        "title": "ReviseStrategyRequest",
+        "type": "object"
+      },
+      "RevisionDiff": {
+        "description": "Semantic differences between two stored revisions of one strategy (P1-08).\n\nComputed over canonical payloads: identity, comments and formatting are invisible;\nequal `spec_hash` implies `changes == ()`.",
+        "properties": {
+          "base_revision": {
+            "title": "Base Revision",
+            "type": "integer"
+          },
+          "base_spec_hash": {
+            "title": "Base Spec Hash",
+            "type": "string"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/DiffEntry"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "string"
+          },
+          "target_revision": {
+            "title": "Target Revision",
+            "type": "integer"
+          },
+          "target_spec_hash": {
+            "title": "Target Spec Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "strategy_id",
+          "base_revision",
+          "target_revision",
+          "base_spec_hash",
+          "target_spec_hash",
+          "changes"
+        ],
+        "title": "RevisionDiff",
+        "type": "object"
+      },
+      "RevisionOrigin": {
+        "enum": [
+          "document",
+          "legacy_json"
+        ],
+        "title": "RevisionOrigin",
+        "type": "string"
+      },
+      "RevisionSummary": {
+        "properties": {
+          "change_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Note"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/RevisionOrigin"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "source_format": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceFormat"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Hash"
+          },
+          "spec_hash": {
+            "title": "Spec Hash",
+            "type": "string"
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "strategy_id",
+          "revision",
+          "spec_hash",
+          "origin",
+          "created_at",
+          "source_format",
+          "source_hash"
+        ],
+        "title": "RevisionSummary",
+        "type": "object"
+      },
+      "RiskStep": {
+        "properties": {
+          "gross_exposure": {
+            "default": 1.0,
+            "title": "Gross Exposure",
+            "type": "number"
+          },
+          "max_name_weight": {
+            "default": 0.1,
+            "title": "Max Name Weight",
+            "type": "number"
+          },
+          "max_sector_weight": {
+            "default": 0.3,
+            "title": "Max Sector Weight",
+            "type": "number"
+          },
+          "net_exposure": {
+            "default": 1.0,
+            "title": "Net Exposure",
+            "type": "number"
+          },
+          "risk_field_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk Field Id"
+          },
+          "sector_neutral": {
+            "default": false,
+            "title": "Sector Neutral",
+            "type": "boolean"
+          }
+        },
+        "title": "RiskStep",
+        "type": "object"
+      },
+      "RollingMetricPoint": {
+        "properties": {
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "session",
+          "value"
+        ],
+        "title": "RollingMetricPoint",
+        "type": "object"
+      },
+      "RunManifest": {
+        "description": "What a finished run was made of.\n\n`strategy_hash` and `strategy_provenance.spec_hash` always carry the same value: one run\nexecuted one strategy.",
+        "properties": {
+          "annualization_days": {
+            "title": "Annualization Days",
+            "type": "integer"
+          },
+          "completed_at": {
+            "format": "date-time",
+            "title": "Completed At",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "data_snapshot_id": {
+            "title": "Data Snapshot Id",
+            "type": "string"
+          },
+          "engine_core": {
+            "$ref": "#/components/schemas/ExecutionCore"
+          },
+          "engine_version": {
+            "title": "Engine Version",
+            "type": "string"
+          },
+          "fee_bps": {
+            "title": "Fee Bps",
+            "type": "number"
+          },
+          "initial_cash": {
+            "title": "Initial Cash",
+            "type": "number"
+          },
+          "metric_registry_version": {
+            "title": "Metric Registry Version",
+            "type": "string"
+          },
+          "participation_rate": {
+            "title": "Participation Rate",
+            "type": "number"
+          },
+          "run_fingerprint": {
+            "title": "Run Fingerprint",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "run_spec": {
+            "$ref": "#/components/schemas/BacktestRunSpec"
+          },
+          "schema_version": {
+            "default": "backtest-run-v2",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "slippage_bps": {
+            "title": "Slippage Bps",
+            "type": "number"
+          },
+          "strategy_hash": {
+            "title": "Strategy Hash",
+            "type": "string"
+          },
+          "strategy_provenance": {
+            "$ref": "#/components/schemas/StrategyProvenance"
+          },
+          "target_tape_hash": {
+            "title": "Target Tape Hash",
+            "type": "string"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/DataWarning"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "run_id",
+          "created_at",
+          "completed_at",
+          "engine_core",
+          "engine_version",
+          "run_fingerprint",
+          "run_spec",
+          "strategy_hash",
+          "data_snapshot_id",
+          "target_tape_hash",
+          "metric_registry_version",
+          "initial_cash",
+          "annualization_days",
+          "fee_bps",
+          "slippage_bps",
+          "participation_rate",
+          "strategy_provenance"
+        ],
+        "title": "RunManifest",
+        "type": "object"
+      },
+      "RunStatus": {
+        "enum": [
+          "queued",
+          "running",
+          "cancel_requested",
+          "cancelled",
+          "completed",
+          "failed"
+        ],
+        "title": "RunStatus",
+        "type": "string"
+      },
+      "SaveDocumentRequest": {
+        "properties": {
+          "format": {
+            "$ref": "#/components/schemas/SourceFormat"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "format"
+        ],
+        "title": "SaveDocumentRequest",
+        "type": "object"
+      },
+      "SavedFactorNode": {
+        "properties": {
+          "factor_id": {
+            "title": "Factor Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "saved_factor",
+            "title": "Kind",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "factor_id",
+          "kind"
+        ],
+        "title": "SavedFactorNode",
+        "type": "object"
+      },
+      "SavedRevisionReference": {
+        "description": "Run a stored revision; the run fails before starting if the hash no longer matches.",
+        "properties": {
+          "expected_spec_hash": {
+            "title": "Expected Spec Hash",
+            "type": "string"
+          },
+          "kind": {
+            "const": "saved_revision",
+            "title": "Kind",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "strategy_id",
+          "revision",
+          "expected_spec_hash",
+          "kind"
+        ],
+        "title": "SavedRevisionReference",
+        "type": "object"
+      },
+      "SavedStrategy": {
+        "properties": {
+          "spec": {
+            "$ref": "#/components/schemas/StrategySpec"
+          },
+          "spec_hash": {
+            "title": "Spec Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "spec",
+          "spec_hash"
+        ],
+        "title": "SavedStrategy",
+        "type": "object"
+      },
+      "SavedSubgraphNode": {
+        "properties": {
+          "kind": {
+            "const": "saved_subgraph",
+            "title": "Kind",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "subgraph_id": {
+            "title": "Subgraph Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "subgraph_id",
+          "kind"
+        ],
+        "title": "SavedSubgraphNode",
+        "type": "object"
+      },
+      "SecurityRef": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          },
+          "venue": {
+            "title": "Venue",
+            "type": "string"
+          }
+        },
+        "required": [
+          "security_id",
+          "ticker",
+          "name",
+          "venue"
+        ],
+        "title": "SecurityRef",
+        "type": "object"
+      },
+      "SelectionMethod": {
+        "enum": [
+          "top_n",
+          "percentile"
+        ],
+        "title": "SelectionMethod",
+        "type": "string"
+      },
+      "SignalMethod": {
+        "enum": [
+          "weighted_sum",
+          "rank_threshold"
+        ],
+        "title": "SignalMethod",
+        "type": "string"
+      },
+      "SignalStep": {
+        "properties": {
+          "entry_percentile": {
+            "default": 0.1,
+            "title": "Entry Percentile",
+            "type": "number"
+          },
+          "method": {
+            "$ref": "#/components/schemas/SignalMethod",
+            "default": "weighted_sum"
+          },
+          "regime_field_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regime Field Id"
+          },
+          "regime_minimum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regime Minimum"
+          },
+          "score_threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score Threshold"
+          }
+        },
+        "title": "SignalStep",
+        "type": "object"
+      },
+      "SourceDiagnostic": {
+        "description": "One diagnostic. `severity` is always sent (no default) so the wire schema marks it required.\n\n`range` is None only when the source has no node to point at (empty document).\n`node_id` names the FactorGraph node a semantic issue is about, when known.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/DiagnosticKind"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "pointer": {
+            "title": "Pointer",
+            "type": "string"
+          },
+          "range": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceRange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "severity": {
+            "$ref": "#/components/schemas/DiagnosticSeverity"
+          }
+        },
+        "required": [
+          "code",
+          "kind",
+          "pointer",
+          "message",
+          "severity"
+        ],
+        "title": "SourceDiagnostic",
+        "type": "object"
+      },
+      "SourceFormat": {
+        "enum": [
+          "yaml",
+          "json"
+        ],
+        "title": "SourceFormat",
+        "type": "string"
+      },
+      "SourcePosition": {
+        "description": "0-based line/column and offset into the exact source text.\n\nUnits are Unicode code points (Python `str` indices). JavaScript editors count UTF-16 code\nunits; astral characters (emoji) shift later columns by one per character, so the frontend\nconverts at the wire boundary (P3-04). Korean text is BMP-only and unaffected.",
+        "properties": {
+          "column": {
+            "title": "Column",
+            "type": "integer"
+          },
+          "line": {
+            "title": "Line",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "line",
+          "column",
+          "offset"
+        ],
+        "title": "SourcePosition",
+        "type": "object"
+      },
+      "SourceRange": {
+        "properties": {
+          "end": {
+            "$ref": "#/components/schemas/SourcePosition"
+          },
+          "start": {
+            "$ref": "#/components/schemas/SourcePosition"
+          }
+        },
+        "required": [
+          "start",
+          "end"
+        ],
+        "title": "SourceRange",
+        "type": "object"
+      },
+      "StrategyDocument": {
+        "description": "A stored revision as an editor sees it: exact source plus what it compiles to.\n\n`generated` is True when the revision predates document authoring (legacy JSON API) and the\nsource shown is a canonical JSON projection of the stored spec, not text an author wrote.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "format": {
+            "$ref": "#/components/schemas/SourceFormat"
+          },
+          "generated": {
+            "title": "Generated",
+            "type": "boolean"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/RevisionOrigin"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "source_hash": {
+            "title": "Source Hash",
+            "type": "string"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/StrategySpec"
+          },
+          "spec_hash": {
+            "title": "Spec Hash",
+            "type": "string"
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "strategy_id",
+          "revision",
+          "format",
+          "source",
+          "source_hash",
+          "spec",
+          "spec_hash",
+          "schema_version",
+          "origin",
+          "created_at",
+          "generated"
+        ],
+        "title": "StrategyDocument",
+        "type": "object"
+      },
+      "StrategyDocumentContract": {
+        "description": "Per-field authoring contract plus the registry versions the schema was built against.\n\n`factor_registry_version` and `dataset_snapshot_id` identify the catalogs an editor should\npair with this schema (field ids, factor ids); the HTTP layer adds their links.",
+        "properties": {
+          "contract_hash": {
+            "title": "Contract Hash",
+            "type": "string"
+          },
+          "dataset_snapshot_id": {
+            "title": "Dataset Snapshot Id",
+            "type": "string"
+          },
+          "factor_registry_version": {
+            "title": "Factor Registry Version",
+            "type": "string"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/FieldContract"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "schema_hash": {
+            "title": "Schema Hash",
+            "type": "string"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "schema_hash",
+          "contract_hash",
+          "factor_registry_version",
+          "dataset_snapshot_id",
+          "fields"
+        ],
+        "title": "StrategyDocumentContract",
+        "type": "object"
+      },
+      "StrategyDocumentContractResponse": {
+        "description": "Wire envelope: the application contract plus the catalog links this API serves.",
+        "properties": {
+          "contract": {
+            "$ref": "#/components/schemas/StrategyDocumentContract"
+          },
+          "equity_catalog_url": {
+            "title": "Equity Catalog Url",
+            "type": "string"
+          },
+          "factor_catalog_url": {
+            "title": "Factor Catalog Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "contract",
+          "factor_catalog_url",
+          "equity_catalog_url"
+        ],
+        "title": "StrategyDocumentContractResponse",
+        "type": "object"
+      },
+      "StrategyDocumentSchema": {
+        "description": "Runtime JSON Schema of the authoring document; `schema_hash` is the ETag.",
+        "properties": {
+          "schema": {
+            "additionalProperties": true,
+            "title": "Schema",
+            "type": "object"
+          },
+          "schema_hash": {
+            "title": "Schema Hash",
+            "type": "string"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "schema_hash",
+          "schema"
+        ],
+        "title": "StrategyDocumentSchema",
+        "type": "object"
+      },
+      "StrategyExplanation": {
+        "properties": {
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/StrategyExplanationStep"
+            },
+            "title": "Steps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "steps"
+        ],
+        "title": "StrategyExplanation",
+        "type": "object"
+      },
+      "StrategyExplanationStep": {
+        "properties": {
+          "details": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Details",
+            "type": "array"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stage",
+          "summary",
+          "details"
+        ],
+        "title": "StrategyExplanationStep",
+        "type": "object"
+      },
+      "StrategyIdentity": {
+        "properties": {
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "schema_version": {
+            "default": "1.0",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "strategy_id",
+          "revision"
+        ],
+        "title": "StrategyIdentity",
+        "type": "object"
+      },
+      "StrategyProvenance": {
+        "description": "What exactly was run: recorded in the manifest so a result names its revision.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/StrategySourceKind"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Hash"
+          },
+          "spec_hash": {
+            "title": "Spec Hash",
+            "type": "string"
+          },
+          "strategy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy Id"
+          }
+        },
+        "required": [
+          "kind",
+          "spec_hash",
+          "schema_version"
+        ],
+        "title": "StrategyProvenance",
+        "type": "object"
+      },
+      "StrategyRevisionConflictDetail": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "latest_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Revision"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "latest_revision"
+        ],
+        "title": "StrategyRevisionConflictDetail",
+        "type": "object"
+      },
+      "StrategyRevisionConflictResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/StrategyRevisionConflictDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "StrategyRevisionConflictResponse",
+        "type": "object"
+      },
+      "StrategySourceKind": {
+        "enum": [
+          "saved_revision",
+          "inline_draft"
+        ],
+        "title": "StrategySourceKind",
+        "type": "string"
+      },
+      "StrategySpec": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DataStep"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "eligibility": {
+            "$ref": "#/components/schemas/EligibilityStep"
+          },
+          "execution": {
+            "$ref": "#/components/schemas/ExecutionStep"
+          },
+          "factors": {
+            "$ref": "#/components/schemas/FactorStep"
+          },
+          "identity": {
+            "$ref": "#/components/schemas/StrategyIdentity"
+          },
+          "parameters": {
+            "default": [],
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FloatParameter"
+                },
+                {
+                  "$ref": "#/components/schemas/IntegerParameter"
+                },
+                {
+                  "$ref": "#/components/schemas/ChoiceParameter"
+                }
+              ]
+            },
+            "title": "Parameters",
+            "type": "array"
+          },
+          "portfolio": {
+            "$ref": "#/components/schemas/PortfolioStep"
+          },
+          "risk": {
+            "$ref": "#/components/schemas/RiskStep"
+          },
+          "signal": {
+            "$ref": "#/components/schemas/SignalStep"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "identity",
+          "title",
+          "description",
+          "data",
+          "eligibility",
+          "factors",
+          "signal",
+          "portfolio",
+          "risk",
+          "execution"
+        ],
+        "title": "StrategySpec",
+        "type": "object"
+      },
+      "StrategyValidation": {
+        "properties": {
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationIssue"
+            },
+            "title": "Issues",
+            "type": "array"
+          },
+          "valid": {
+            "title": "Valid",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "valid",
+          "issues"
+        ],
+        "title": "StrategyValidation",
+        "type": "object"
+      },
+      "TargetFrame": {
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/CandidateDecision"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "execution_on": {
+            "format": "date",
+            "title": "Execution On",
+            "type": "string"
+          },
+          "signal_as_of": {
+            "format": "date",
+            "title": "Signal As Of",
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/TargetPosition"
+            },
+            "title": "Targets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "signal_as_of",
+          "execution_on",
+          "targets",
+          "candidates"
+        ],
+        "title": "TargetFrame",
+        "type": "object"
+      },
+      "TargetPosition": {
+        "properties": {
+          "composite_score": {
+            "title": "Composite Score",
+            "type": "number"
+          },
+          "rank": {
+            "title": "Rank",
+            "type": "integer"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "side": {
+            "$ref": "#/components/schemas/CandidateSide"
+          },
+          "weight": {
+            "title": "Weight",
+            "type": "number"
+          }
+        },
+        "required": [
+          "security_id",
+          "weight",
+          "composite_score",
+          "rank",
+          "side"
+        ],
+        "title": "TargetPosition",
+        "type": "object"
+      },
+      "TargetTape": {
+        "properties": {
+          "data_snapshot_id": {
+            "title": "Data Snapshot Id",
+            "type": "string"
+          },
+          "execution_timing": {
+            "default": "next_open",
+            "title": "Execution Timing",
+            "type": "string"
+          },
+          "frames": {
+            "items": {
+              "$ref": "#/components/schemas/TargetFrame"
+            },
+            "title": "Frames",
+            "type": "array"
+          },
+          "strategy_hash": {
+            "title": "Strategy Hash",
+            "type": "string"
+          },
+          "tape_hash": {
+            "title": "Tape Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data_snapshot_id",
+          "strategy_hash",
+          "tape_hash",
+          "frames"
+        ],
+        "title": "TargetTape",
+        "type": "object"
+      },
+      "TimeSeriesNode": {
+        "properties": {
+          "input_node_id": {
+            "title": "Input Node Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "time_series",
+            "title": "Kind",
+            "type": "string"
+          },
+          "lag": {
+            "default": 0,
+            "title": "Lag",
+            "type": "integer"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operator": {
+            "$ref": "#/components/schemas/TimeSeriesOperator"
+          },
+          "window": {
+            "title": "Window",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "node_id",
+          "operator",
+          "input_node_id",
+          "window",
+          "kind"
+        ],
+        "title": "TimeSeriesNode",
+        "type": "object"
+      },
+      "TimeSeriesOperator": {
+        "enum": [
+          "mean",
+          "std",
+          "momentum",
+          "delta",
+          "min",
+          "max"
+        ],
+        "title": "TimeSeriesOperator",
+        "type": "string"
+      },
+      "UnaryNode": {
+        "properties": {
+          "input_node_id": {
+            "title": "Input Node Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "unary",
+            "title": "Kind",
+            "type": "string"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operator": {
+            "$ref": "#/components/schemas/UnaryOperator"
+          },
+          "periods": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Periods"
+          }
+        },
+        "required": [
+          "node_id",
+          "operator",
+          "input_node_id",
+          "kind"
+        ],
+        "title": "UnaryNode",
+        "type": "object"
+      },
+      "UnaryOperator": {
+        "enum": [
+          "negate",
+          "lag",
+          "rank",
+          "zscore",
+          "winsorize",
+          "neutralize"
+        ],
+        "title": "UnaryOperator",
+        "type": "string"
+      },
+      "UniverseCoverageSummary": {
+        "properties": {
+          "average_members": {
+            "title": "Average Members",
+            "type": "number"
+          },
+          "covered_session_count": {
+            "title": "Covered Session Count",
+            "type": "integer"
+          },
+          "first_session": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Session"
+          },
+          "gap_session_count": {
+            "title": "Gap Session Count",
+            "type": "integer"
+          },
+          "last_session": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Session"
+          },
+          "maximum_members": {
+            "title": "Maximum Members",
+            "type": "integer"
+          },
+          "minimum_members": {
+            "title": "Minimum Members",
+            "type": "integer"
+          },
+          "session_count": {
+            "title": "Session Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "session_count",
+          "covered_session_count",
+          "gap_session_count",
+          "first_session",
+          "last_session",
+          "minimum_members",
+          "maximum_members",
+          "average_members"
+        ],
+        "title": "UniverseCoverageSummary",
+        "type": "object"
+      },
+      "UniverseHistoryQuery": {
+        "properties": {
+          "end": {
+            "format": "date",
+            "title": "End",
+            "type": "string"
+          },
+          "start": {
+            "format": "date",
+            "title": "Start",
+            "type": "string"
+          },
+          "venue": {
+            "title": "Venue",
+            "type": "string"
+          }
+        },
+        "required": [
+          "venue",
+          "start",
+          "end"
+        ],
+        "title": "UniverseHistoryQuery",
+        "type": "object"
+      },
+      "UniverseHistoryResult": {
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/UniversePoint"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "snapshot_id": {
+            "title": "Snapshot Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DataLoadStatus"
+          }
+        },
+        "required": [
+          "points",
+          "status",
+          "snapshot_id"
+        ],
+        "title": "UniverseHistoryResult",
+        "type": "object"
+      },
+      "UniversePoint": {
+        "properties": {
+          "coverage": {
+            "$ref": "#/components/schemas/CellKind",
+            "default": "observed"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/SecurityRef"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "members"
+        ],
+        "title": "UniversePoint",
+        "type": "object"
+      },
+      "UniversePreview": {
+        "properties": {
+          "coverage": {
+            "$ref": "#/components/schemas/UniverseCoverageSummary"
+          },
+          "universe": {
+            "$ref": "#/components/schemas/UniverseHistoryResult"
+          }
+        },
+        "required": [
+          "universe",
+          "coverage"
+        ],
+        "title": "UniversePreview",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "ValidationIssue": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ValidationKind"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/ValidationSeverity",
+            "default": "error"
+          }
+        },
+        "required": [
+          "code",
+          "path",
+          "message",
+          "kind"
+        ],
+        "title": "ValidationIssue",
+        "type": "object"
+      },
+      "ValidationKind": {
+        "enum": [
+          "syntax",
+          "semantic",
+          "capability"
+        ],
+        "title": "ValidationKind",
+        "type": "string"
+      },
+      "ValidationSeverity": {
+        "enum": [
+          "error",
+          "warning"
+        ],
+        "title": "ValidationSeverity",
+        "type": "string"
+      },
+      "WarningSeverity": {
+        "enum": [
+          "info",
+          "warning"
+        ],
+        "title": "WarningSeverity",
+        "type": "string"
+      },
+      "WeightingMethod": {
+        "enum": [
+          "equal",
+          "factor_score",
+          "rank",
+          "risk"
+        ],
+        "title": "WeightingMethod",
+        "type": "string"
+      }
+    }
+  },
+  "info": {
+    "description": "YAML-first factor strategy authoring, validation and backtest orchestration API. StrategySpec is the execution source of truth; YAML/JSON documents are compiled by the server.",
+    "title": "Quant Strategy Workbench API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/backtests": {
+      "post": {
+        "operationId": "startBacktest",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BacktestRunSpec"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestStartResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Backtest"
+      }
+    },
+    "/api/v1/backtests/{run_id}": {
+      "get": {
+        "operationId": "getBacktestStatus",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Backtest Status"
+      }
+    },
+    "/api/v1/backtests/{run_id}/cancel": {
+      "post": {
+        "operationId": "cancelBacktest",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Backtest"
+      }
+    },
+    "/api/v1/backtests/{run_id}/events": {
+      "get": {
+        "operationId": "streamBacktestEvents",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after_sequence",
+            "required": false,
+            "schema": {
+              "default": -1,
+              "minimum": -1,
+              "title": "After Sequence",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {}
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream Backtest Events"
+      }
+    },
+    "/api/v1/backtests/{run_id}/result": {
+      "get": {
+        "operationId": "getBacktestResult",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Backtest Result"
+      }
+    },
+    "/api/v1/equity/catalog": {
+      "get": {
+        "operationId": "getEquityCatalog",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dataset_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dataset Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "unit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Unit"
+            }
+          },
+          {
+            "in": "query",
+            "name": "frequency",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Frequency"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResearchCatalog"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Equity Catalog"
+      }
+    },
+    "/api/v1/equity/panel/preview": {
+      "post": {
+        "operationId": "previewEquityPanel",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResearchPanelPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResearchPanelPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Equity Panel Preview"
+      }
+    },
+    "/api/v1/equity/preview": {
+      "post": {
+        "operationId": "previewEquityData",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "venue",
+            "required": false,
+            "schema": {
+              "default": "XKRX",
+              "title": "Venue",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResearchPanelQuery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResearchPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Equity Preview"
+      }
+    },
+    "/api/v1/equity/universe/preview": {
+      "post": {
+        "operationId": "previewEquityUniverse",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UniverseHistoryQuery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UniversePreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Equity Universe Preview"
+      }
+    },
+    "/api/v1/factors/catalog": {
+      "get": {
+        "operationId": "getFactorCatalog",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/components/schemas/FactorCategory"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
+            }
+          },
+          {
+            "in": "query",
+            "name": "availability",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/components/schemas/FactorAvailability"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Availability"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FactorCatalog"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Factor Catalog"
+      }
+    },
+    "/api/v1/factors/explain": {
+      "post": {
+        "operationId": "explainFactorGraph",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FactorGraphRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FactorExplanation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Explain Factor Graph"
+      }
+    },
+    "/api/v1/factors/preview": {
+      "post": {
+        "operationId": "previewFactorGraph",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FactorPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FactorPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Factor Graph"
+      }
+    },
+    "/api/v1/factors/validate": {
+      "post": {
+        "operationId": "validateFactorGraph",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FactorGraphRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FactorGraphValidation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Validate Factor Graph"
+      }
+    },
+    "/api/v1/health": {
+      "get": {
+        "operationId": "getHealth",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Gethealth",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health"
+      }
+    },
+    "/api/v1/portfolio/preview": {
+      "post": {
+        "operationId": "previewPortfolio",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortfolioPreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Portfolio Preview"
+      }
+    },
+    "/api/v1/strategies": {
+      "post": {
+        "operationId": "createStrategy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StrategySpec"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedStrategy"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Strategy"
+      }
+    },
+    "/api/v1/strategies/explain": {
+      "post": {
+        "operationId": "explainStrategy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StrategySpec"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyExplanation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Explain Strategy"
+      }
+    },
+    "/api/v1/strategies/template": {
+      "get": {
+        "operationId": "getStrategyTemplate",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategySpec"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Strategy Template"
+      }
+    },
+    "/api/v1/strategies/validate": {
+      "post": {
+        "operationId": "validateStrategy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StrategySpec"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyValidation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Validate Strategy"
+      }
+    },
+    "/api/v1/strategies/{strategy_id}": {
+      "get": {
+        "operationId": "getStrategy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "revision",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Revision"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedStrategy"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Strategy"
+      }
+    },
+    "/api/v1/strategies/{strategy_id}/diff": {
+      "get": {
+        "description": "Semantic diff of two revisions over their canonical payloads (identity excluded).",
+        "operationId": "diffStrategyRevisions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "base",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Base",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "target",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Target",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevisionDiff"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Diff Strategy Revisions"
+      }
+    },
+    "/api/v1/strategies/{strategy_id}/revisions": {
+      "get": {
+        "description": "Revision history, ascending by revision, paginated deterministically.",
+        "operationId": "listStrategyRevisions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_RevisionSummary_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Strategy Revisions"
+      },
+      "post": {
+        "operationId": "reviseStrategy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviseStrategyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedStrategy"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyRevisionConflictResponse"
+                }
+              }
+            },
+            "description": "The expected revision is stale or the authoring mode conflicts"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revise Strategy"
+      }
+    },
+    "/api/v1/strategies/{strategy_id}/revisions/{revision}/document": {
+      "get": {
+        "description": "Exact stored source of one revision (a generated projection for legacy ones).",
+        "operationId": "getStrategyDocument",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "revision",
+            "required": true,
+            "schema": {
+              "title": "Revision",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyDocument"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Strategy Document"
+      }
+    },
+    "/api/v1/strategy-documents": {
+      "post": {
+        "description": "Store a cleanly compiled exact source as revision 1 of a new strategy.",
+        "operationId": "createStrategyDocument",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveDocumentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyDocument"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Strategy Document"
+      }
+    },
+    "/api/v1/strategy-documents/compile": {
+      "post": {
+        "description": "Compile YAML/JSON source into a StrategySpec with syntax/structural/semantic diagnostics.\n\n200 for every well-formed request envelope: the outcome is the diagnostic list, and\n`spec`/`spec_hash` are null while any error-severity diagnostic exists. Only a malformed\nenvelope (missing `source`, unknown `format`) is a 422.",
+        "operationId": "compileStrategyDocument",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompiledDocument"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Compile Strategy Document"
+      }
+    },
+    "/api/v1/strategy-documents/contract": {
+      "get": {
+        "description": "Per-field authoring contract (type, enum, range, unit, default, example, stage)\nwith the factor/dataset registry versions and catalog links it pairs with.",
+        "operationId": "getStrategyDocumentContract",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "if-none-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyDocumentContractResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "304": {
+            "description": "Not modified (ETag matched If-None-Match)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Strategy Document Contract"
+      }
+    },
+    "/api/v1/strategy-documents/schema": {
+      "get": {
+        "description": "Runtime JSON Schema of the authoring document. ETag = schema hash (304 on match).",
+        "operationId": "getStrategyDocumentSchema",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "if-none-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyDocumentSchema"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "304": {
+            "description": "Not modified (ETag matched If-None-Match)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Strategy Document Schema"
+      }
+    },
+    "/api/v1/strategy-documents/{strategy_id}/revisions": {
+      "post": {
+        "description": "Store the next revision; 409 when `expected_revision` is stale.",
+        "operationId": "reviseStrategyDocument",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviseDocumentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyDocument"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyRevisionConflictResponse"
+                }
+              }
+            },
+            "description": "The expected revision is stale"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revise Strategy Document"
+      }
+    }
+  }
+}

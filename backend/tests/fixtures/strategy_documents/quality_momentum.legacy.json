@@ -1,0 +1,75 @@
+{
+  "identity": {"strategy_id": "strategy-legacy", "revision": 3, "schema_version": "1.0"},
+  "title": "퀄리티 모멘텀",
+  "description": "",
+  "data": {
+    "market": "KRX",
+    "start": "2021-01-01",
+    "end": "2026-08-31",
+    "universe_id": "krx.common-stock",
+    "frequency": "daily"
+  },
+  "eligibility": {"rules": []},
+  "factors": {
+    "factors": [
+      {
+        "factor_id": "momentum",
+        "label": "모멘텀",
+        "direction": "high",
+        "weight": 0.6,
+        "graph": {
+          "nodes": [
+            {"node_id": "close", "field_id": "price.close", "kind": "field"},
+            {
+              "node_id": "mom_252",
+              "operator": "momentum",
+              "input_node_id": "close",
+              "window": 252,
+              "kind": "time_series",
+              "lag": 0
+            }
+          ],
+          "output_node_id": "mom_252",
+          "missing_policy": "drop"
+        }
+      }
+    ]
+  },
+  "signal": {
+    "method": "weighted_sum",
+    "entry_percentile": 0.1,
+    "score_threshold": null,
+    "regime_field_id": null,
+    "regime_minimum": null
+  },
+  "portfolio": {
+    "side": "long_only",
+    "selection_count": 20,
+    "weighting": "equal",
+    "rebalance": "monthly",
+    "selection_method": "top_n",
+    "short_selection_count": 20,
+    "selection_percentile": 0.1,
+    "rebalance_every_n_sessions": 21,
+    "turnover_buffer_count": 0,
+    "minimum_trade_weight": 0.0,
+    "liquidity_field_id": null,
+    "minimum_liquidity": null
+  },
+  "risk": {
+    "gross_exposure": 1.0,
+    "net_exposure": 1.0,
+    "max_name_weight": 0.05,
+    "max_sector_weight": 0.3,
+    "sector_neutral": false,
+    "risk_field_id": null
+  },
+  "execution": {
+    "timing": "next_open",
+    "order_style": "market",
+    "participation_rate": 0.1,
+    "fee_bps": 15.0,
+    "slippage_bps": 10.0
+  },
+  "parameters": []
+}

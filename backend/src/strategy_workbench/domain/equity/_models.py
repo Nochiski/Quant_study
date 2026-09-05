@@ -9,6 +9,7 @@ class DataLoadStatus(Enum):
     OK = "ok"
     NO_DATA = "no_data"
     INVALID_QUERY = "invalid_query"
+    CONFIRMATION_REQUIRED = "confirmation_required"
 
 
 class CellKind(Enum):
@@ -21,12 +22,54 @@ class CellKind(Enum):
     COVERAGE_GAP = "coverage_gap"
 
 
+class FieldValueType(Enum):
+    PRICE = "price"
+    AMOUNT = "amount"
+    RATIO = "ratio"
+    COUNT = "count"
+    CATEGORY = "category"
+
+
+@dataclass(frozen=True)
+class DatasetRevision:
+    dataset_id: str
+    revision: str
+    as_of: date
+
+
+@dataclass(frozen=True)
+class FieldCoverageCapability:
+    starts_on: date
+    ends_on: date
+    venues: tuple[str, ...]
+    estimated_coverage_pct: float
+    supported_cell_kinds: tuple[CellKind, ...]
+    point_in_time: bool
+    requires_confirmation: bool = False
+
+    def __post_init__(self) -> None:
+        if self.starts_on > self.ends_on:
+            raise ValueError(
+                "field coverage start must be <= end — "
+                f"starts_on={self.starts_on} ends_on={self.ends_on}"
+            )
+        if not 0 <= self.estimated_coverage_pct <= 100:
+            raise ValueError(
+                "field coverage percentage must be within [0, 100] — "
+                f"estimated_coverage_pct={self.estimated_coverage_pct}"
+            )
+        if not self.venues:
+            raise ValueError("field coverage requires at least one venue — venues=()")
+
+
 @dataclass(frozen=True)
 class DataSnapshot:
     snapshot_id: str
     schema_version: str
     built_at: datetime
     source: str
+    point_in_time: bool
+    dataset_revisions: tuple[DatasetRevision, ...]
 
 
 @dataclass(frozen=True)
@@ -35,9 +78,14 @@ class DatasetFieldProfile:
     dataset_id: str
     label: str
     unit: str
+    value_type: FieldValueType
+    frequency: str
     available_date_basis: str
     recommended_lag_sessions: int
     description: str
+    disclosure_basis: str
+    evidence: str
+    coverage: FieldCoverageCapability
 
     def __post_init__(self) -> None:
         if not self.field_id or not self.dataset_id:
@@ -75,9 +123,7 @@ class UniverseHistoryQuery:
 
     def __post_init__(self) -> None:
         if self.start > self.end:
-            raise ValueError(
-                f"universe start must be <= end — start={self.start} end={self.end}"
-            )
+            raise ValueError(f"universe start must be <= end — start={self.start} end={self.end}")
 
 
 @dataclass(frozen=True)
@@ -135,7 +181,7 @@ class ResearchPanelCell:
     field_id: str
     source_effective_date: date
     available_date: date
-    value: float | None
+    value: float | str | bool | None
     kind: CellKind
 
     def __post_init__(self) -> None:

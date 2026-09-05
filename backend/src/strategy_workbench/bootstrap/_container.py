@@ -15,8 +15,8 @@ from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import 
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
     MockEquityDataAdapter,
 )
-from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
-    InMemoryStrategyRepository,
+from strategy_workbench.adapters.outbound.strategy_sqlite.facade.repository import (
+    SQLiteStrategyRepository,
 )
 from strategy_workbench.application.backtest_run.facade.runs import BacktestRunService
 from strategy_workbench.application.equity_workspace.facade.ports import EquityDataPort
@@ -56,15 +56,20 @@ def build_container(
     *,
     equity_adapter: str = "mock",
     artifact_root: Path | None = None,
+    strategy_repository_path: str | Path | None = None,
 ) -> BackendContainer:
-    """Build one explicit dependency graph; unknown adapters fail instead of falling back."""
+    """Build one dependency graph; ``None`` selects isolated in-memory SQLite for tests.
+
+    The HTTP runtime supplies a durable file path explicitly. This keeps test application
+    factories isolated while both environments exercise the same persistent adapter contract.
+    """
     if equity_adapter != "mock":
         raise ValueError(
             f"unsupported equity adapter — equity_adapter={equity_adapter!r} available=('mock',)"
         )
     equity_data = MockEquityDataAdapter.demo()
     engine_portfolio = BacktestEnginePortfolioAdapter()
-    strategy_repository = InMemoryStrategyRepository()
+    strategy_repository = SQLiteStrategyRepository(strategy_repository_path)
     factor_registry = build_default_factor_registry()
     portfolio_design = PortfolioDesignService(
         equity_data,

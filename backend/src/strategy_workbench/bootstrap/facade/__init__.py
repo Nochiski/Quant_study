@@ -13,7 +13,7 @@ DEPENDS_ON: tuple[str, ...] = (
     "adapters.outbound.document_codec",
     "adapters.outbound.equity_mock",
     "adapters.outbound.engine_portfolio",
-    "adapters.outbound.strategy_memory",
+    "adapters.outbound.strategy_sqlite",
     "domain.factor",
     "domain.analytics",
 )

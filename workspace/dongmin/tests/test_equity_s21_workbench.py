@@ -128,6 +128,23 @@ def test_krx_common_stock_은_정책표대로_ETF_우선주를_뺀다(adapter) -
     assert {"069500:1", "005935:1"} <= everyone
 
 
+def test_krx_liquid_은_정책표대로_같은날_상위_비율만_남긴다(adapter) -> None:
+    """S03B-2 — `krx.liquid` 가 정책표 5행(investable 4 + `adv20_rank_pct >= 0.5`)으로 풀린다.
+    2018-05 모집단 5(003540·161890·000030·000660·005930, 손계산 순위 0.2·0.4·0.6·0.8·1.0) 중
+    상위 3 만 행 집합에 든다."""
+    r = _raw(adapter, date(2018, 5, 1), date(2018, 5, 31), universe="krx.liquid")
+    assert r.ok, r.detail
+    ids = {o.security_id for o in r.observations}
+    assert ids == {"000030:1", "000660:1", "005930:1"}
+    common = {o.security_id
+              for o in _raw(adapter, date(2018, 5, 1), date(2018, 5, 31)).observations}
+    assert ids < common and {"003540:1", "161890:1"} <= common
+    # 행 집합 안에서도 universe_member 는 그날 술어값 — 05-03 은 셋 다 true
+    members = {o.security_id for o in r.observations
+               if o.as_of == HALT_LAST and o.universe_member}
+    assert members == ids
+
+
 def test_미지원_필드는_unavailable_이고_mock_대체가_없다(adapter) -> None:
     from strategy_workbench.domain.equity.facade.research_data import DataLoadStatus
     r = _raw(adapter, date(2018, 5, 1), date(2018, 5, 31), fields=("financial.book_equity",))

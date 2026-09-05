@@ -12,21 +12,32 @@ S03B(시장 파생, 09-05): S03 컬럼 뒤에 `mktcap_krw`·`adv20_krw`·`listin
 로 완성한다. 가격 축은 stage 두 원장 대신 equity `price_daily`(EG20 으로 stage 와 동일) 하나에서
 읽는다.
 
+S03B-2(날짜별 유동성 순위, 09-05 사용자 결정 "날짜별 상위 비율 기준"): `adv20_krw` 다음에
+`adv20_rank_pct` — 같은 날 모집단(`sec_type='common' ∧ status='listed' ∧ adv20_krw IS NOT NULL`)
+안 `adv20_krw` 의 cume_dist((0, 1], 클수록 유동성 큼, 날짜별 최댓값 1). 모집단 밖 행은 NULL.
+`universe_policy` 에 `liquid` 정책(investable 4행 + `adv20_rank_pct >= 1 − liquid_top_pct` 1행,
+`threshold_kind='quantile'`, `threshold_value` = baseline `universe_policy.liquid_top_pct`)을
+등재한다.
+
 산출 규칙 상수(게이트 임계 아님, GATES §5-B8 부류)는 `baseline_seed_s03.json` → `_const`:
   `universe_daily.admin_window_td` (KOSPI·소속부 공란 행의 관리종목 창) ·
   `universe_daily.no_trade_run_k` (무거래 연속 임계, 사람 승인) ·
   `universe_daily.adv_window_td` (adv20 창 폭 — 컬럼 이름이 못박은 20, SQL 리터럴 금지 통로) ·
-  `universe_policy.version`.
+  `universe_policy.version` · `universe_policy.liquid_top_pct` (liquid 상위 비율, 사용자 선택).
 
 테이블 특화 술어(`extra_gates`):
   EG3_universe — 어휘 폐쇄(status·market·sec_type·admin_state_basis) · 불린 팩트 NULL 0 ·
                  status ⇔ (halt_state ∨ run 판정) · 격자 ⊆ 구간 · **EG3-P09** halt 열린 채
                  폐지·coverage_gap 아닌 사유로 끝난 구간 0 · S03B 재계산 술어(`mktcap` 는 같은 날
                  `price_daily` 값, `no_trade_run` 은 부호·NULL 이 `price_kind` 와 정합, `adv20`
-                 NULL 은 창 미달만, `listing_age_days` ≥ 0 ∧ 같은 날 listing 과 일치). 열린 halt
-                 건수·run 으로만 suspended 된 건수·run 히스토그램·adv20 분위수는 기록형.
+                 NULL 은 창 미달만, `listing_age_days` ≥ 0 ∧ 같은 날 listing 과 일치) · S03B-2
+                 순위 술어(`adv20_rank_pct` ∈ (0, 1] · NULL ⇔ 모집단 밖 · 날짜별 최댓값 1 ·
+                 순위 × 재계산 모집단 크기 = 정수 · 같은 날 adv20 순으로 단조). 열린 halt 건수·run
+                 으로만 suspended 된 건수·run 히스토그램·adv20 분위수·날짜별 모집단 크기 분포·순위
+                 NULL 건수는 기록형.
   EG3_policy   — 어휘 폐쇄(policy·threshold_kind·basis) · universe_id 문법 · 'all' 행 존재 ·
-                 임계 종류와 값의 정합 · predicate 가 universe_daily 스키마 위에서 바인딩되는가.
+                 임계 종류와 값의 정합(quantile 은 (0, 1]) · predicate 가 universe_daily 스키마
+                 위에서 바인딩되는가.
 `universe_policy` 는 선언표라 EG1 을 `skip(declaration_table)` 한다(`declaration_table=True`).
 """
 from __future__ import annotations
@@ -50,8 +61,8 @@ MARKET_VOCAB: tuple[str, ...] = ("KOSPI", "KOSDAQ")
 ADMIN_STATE_BASIS_VOCAB: tuple[str, ...] = (
     "measured", "derived_kospi_window", "convention", "unknown")
 # FIELD_MAP §1 universe_id 어휘의 policy 부분. 'common-stock' 은 소비자 계약 `krx.common-stock` 이
-# 정책표로 풀리도록 S03B 에서 추가(sec_type='common' ∧ status='listed'). 'liquid' 는 어휘만 예약 —
-# 임계(adv20 분위수)는 서버 실측 뒤 등재하므로 행이 없다.
+# 정책표로 풀리도록 S03B 에서 추가(sec_type='common' ∧ status='listed'). 'liquid' 는 S03B-2 에서
+# 행 등재 — 절대 금액 임계가 아니라 날짜별 상위 비율(`adv20_rank_pct >= 1 − liquid_top_pct`).
 POLICY_VOCAB: tuple[str, ...] = ("all", "common-stock", "investable", "liquid")
 THRESHOLD_KIND_VOCAB: tuple[str, ...] = ("quantile", "absolute", "flag")
 UNIVERSE_ID_PREFIX = "krx."          # FIELD_MAP §1 — universe_id = '<market>.<policy>'
@@ -61,6 +72,9 @@ _BOOL_FACTS: tuple[str, ...] = (
     "signal_liquidation", "signal_delist")
 # no_trade_run 히스토그램 구간(기록형) — k 승인 근거. 상한은 열려 있다.
 _RUN_BUCKETS: tuple[tuple[int, int | None], ...] = ((1, 1), (2, 4), (5, 9), (10, 19), (20, None))
+# adv20_rank_pct = k/n (cume_dist) 를 DOUBLE 로 저장하므로 rank × n 은 정수 ± 몇 ulp 다. 게이트
+# 임계가 아니라 산출 정밀도 상수(rules_s06.FACTOR_PRODUCT_TOL 부류) — n ≤ 10⁴ 에서 오차 ≤ 1e-12.
+RANK_INTEGRAL_TOL = 1e-9
 
 
 def _row(ctx: EquityGateContext, sql: str) -> tuple[object, ...]:
@@ -195,8 +209,62 @@ def _market_checks(ctx: EquityGateContext, k: int,
     return checks, metrics
 
 
+def _rank_checks(ctx: EquityGateContext) -> tuple[dict[str, int], dict[str, object]]:
+    """S03B-2 `adv20_rank_pct` 술어 — 산출 컬럼만으로 모집단(보통주 ∧ listed ∧ adv20 있음)을 다시
+    가르고, 순위값이 그 모집단의 cume_dist 답게 생겼는지 본다. cume_dist 자체를 다시 돌리지 않고
+    (§5-C7) 성질만 본다: 범위 (0, 1] · NULL ⇔ 모집단 밖 · 날짜별 최댓값 1 · 순위 × 모집단 크기 =
+    정수(모집단을 다르게 잡은 순위는 대부분 여기서 갈린다) · 같은 날 adv20 오름차순으로 단조.
+    정확한 값은 픽스처(손계산)가 본다. 창은 좁은 투영(date·adv20·rank) 위 1개."""
+    v = _q(ctx.out_view)
+    pop_sql = f"""
+        WITH x AS (
+          SELECT date, adv20_krw, adv20_rank_pct AS r,
+                 coalesce(sec_type = 'common' AND status = 'listed' AND adv20_krw IS NOT NULL,
+                          false) AS in_pop
+          FROM {v}),
+        p AS (
+          SELECT date, count(*) FILTER (WHERE in_pop) AS n_pop, max(r) AS r_max
+          FROM x GROUP BY date)"""
+    n_range, n_null_mismatch, n_not_integral, n_null = _row(ctx, pop_sql + f"""
+        SELECT count(*) FILTER (WHERE x.r <= 0 OR x.r > 1),
+               count(*) FILTER (WHERE (x.r IS NULL) <> NOT x.in_pop),
+               count(*) FILTER (WHERE x.r IS NOT NULL AND abs(x.r * p.n_pop - round(x.r * p.n_pop))
+                                      > {RANK_INTEGRAL_TOL!r}),
+               count(*) FILTER (WHERE x.r IS NULL)
+        FROM x JOIN p USING (date)""")
+    n_max_not_one, n_dates_pop, n_dates_no_pop, pop_min, pop_p50, pop_max = _row(
+        ctx, pop_sql + """
+        SELECT count(*) FILTER (WHERE n_pop > 0 AND r_max IS DISTINCT FROM 1),
+               count(*) FILTER (WHERE n_pop > 0),
+               count(*) FILTER (WHERE n_pop = 0),
+               min(n_pop) FILTER (WHERE n_pop > 0),
+               quantile_cont(n_pop, 0.5) FILTER (WHERE n_pop > 0),
+               max(n_pop) FILTER (WHERE n_pop > 0)
+        FROM p""")
+    n_order = _n(ctx, pop_sql + """
+        SELECT count(*) FROM (
+          SELECT r, lag(r) OVER (PARTITION BY date ORDER BY adv20_krw, r) AS r_prev
+          FROM x WHERE in_pop)
+        WHERE r < r_prev""")
+    checks = {
+        "n_adv20_rank_out_of_range": int(str(n_range)),
+        "n_adv20_rank_null_mismatch": int(str(n_null_mismatch)),
+        "n_adv20_rank_max_not_one": int(str(n_max_not_one)),
+        "n_adv20_rank_pop_mismatch": int(str(n_not_integral)),
+        "n_adv20_rank_order_violation": int(str(n_order)),
+    }
+    metrics: dict[str, object] = {
+        "n_adv20_rank_null": int(str(n_null)),
+        "n_dates_with_rank_pop": int(str(n_dates_pop)),
+        "n_dates_without_rank_pop": int(str(n_dates_no_pop)),
+        "adv20_rank_pop_size": (None if pop_min is None else {
+            "min": int(str(pop_min)), "p50": float(str(pop_p50)), "max": int(str(pop_max))}),
+    }
+    return checks, metrics
+
+
 def eg3_universe(ctx: EquityGateContext) -> GateResult:
-    """EG3-P07·P09·P13 + S03 상태 규칙 정합 + S03B 시장 파생 재계산 술어.
+    """EG3-P07·P09·P13 + S03 상태 규칙 정합 + S03B 시장 파생 재계산 술어 + S03B-2 순위 술어.
 
     P09 는 GATES §1 술어 그대로다 — `end_reason ∈ {delisted, coverage_gap}` 인 구간 끝의 열린
     halt 는 정상(폐지까지 재거래 없음 930건·현재 정지 중)이라 술어 밖이고, 그 건수는 기록형으로
@@ -238,6 +306,8 @@ def eg3_universe(ctx: EquityGateContext) -> GateResult:
     }
     market_checks, market_metrics = _market_checks(ctx, k, w)
     checks.update(market_checks)
+    rank_checks, rank_metrics = _rank_checks(ctx)
+    checks.update(rank_checks)
     metrics: dict[str, object] = {
         "n_halt_open_at_coverage_end": _n(
             ctx, f"SELECT count(*) FROM security_span s JOIN {v} u "
@@ -263,8 +333,10 @@ def eg3_universe(ctx: EquityGateContext) -> GateResult:
         "status_vocab": list(STATUS_VOCAB),
         "admin_state_basis_vocab": list(ADMIN_STATE_BASIS_VOCAB),
         **market_metrics,
+        **rank_metrics,
     }
-    return _result("EG3_universe", checks, metrics, "유니버스 상태·시장 파생 불변식 성립")
+    return _result("EG3_universe", checks, metrics,
+                   "유니버스 상태·시장 파생·유동성 순위 불변식 성립")
 
 
 eg3_universe.gate_name = "EG3_universe"         # type: ignore[attr-defined]
@@ -272,15 +344,16 @@ eg3_universe.gate_name = "EG3_universe"         # type: ignore[attr-defined]
 UNIVERSE_DAILY = register(EquityTable(
     name="universe_daily",
     grain=("date", "ticker"),
-    # 순서 = DESIGN §4-1: S03 컬럼 → S03B 시장 파생 4개 → PIT 2개. `adv20_krw` 는 duckdb
-    # avg(DECIMAL) 의 반환 타입(DOUBLE)을 그대로 받는다(정밀도 리터럴 캐스팅 금지).
+    # 순서 = DESIGN §4-1: S03 컬럼 → S03B 시장 파생 4개(+ S03B-2 `adv20_rank_pct` 는 `adv20_krw`
+    # 바로 다음) → PIT 2개. `adv20_krw` 는 duckdb avg(DECIMAL) 의 반환 타입(DOUBLE)을 그대로 받는다
+    # (정밀도 리터럴 캐스팅 금지). `adv20_rank_pct` 는 cume_dist 반환 타입(DOUBLE).
     columns={"date": "DATE", "ticker": "VARCHAR", "status": "VARCHAR", "market": "VARCHAR",
              "sec_type": "VARCHAR", "halt_state": "BOOLEAN", "admin_state": "BOOLEAN",
              "admin_state_basis": "VARCHAR", "liquidation_window": "BOOLEAN",
              "signal_halt": "BOOLEAN", "signal_halt_release": "BOOLEAN",
              "signal_admin": "BOOLEAN", "signal_liquidation": "BOOLEAN",
              "signal_delist": "BOOLEAN", "admin_flag": "BOOLEAN",
-             "mktcap_krw": "DECIMAL(18,0)", "adv20_krw": "DOUBLE",
+             "mktcap_krw": "DECIMAL(18,0)", "adv20_krw": "DOUBLE", "adv20_rank_pct": "DOUBLE",
              "listing_age_days": "BIGINT", "no_trade_run": "BIGINT",
              "available_date": "DATE", "available_basis": "VARCHAR"},
     inputs=("security_span", "trading_calendar", "security", "price_daily", "stg_listing_daily",
@@ -348,6 +421,10 @@ def eg3_policy(ctx: EquityGateContext) -> GateResult:
         "n_threshold_value_mismatch": _n(
             ctx, f"SELECT count(*) FROM {v} WHERE (threshold_kind = 'flag') <> "
                  "(threshold_value IS NULL)"),
+        # quantile 임계는 비율 — (0, 1] 밖이면 술어가 전부/전무를 뽑는다(S03B-2 liquid_top_pct)
+        "n_quantile_threshold_out_of_range": _n(
+            ctx, f"SELECT count(*) FROM {v} WHERE threshold_kind = 'quantile' "
+                 "AND NOT (threshold_value > 0 AND threshold_value <= 1)"),
         "n_all_missing": int(not any(p == "all" for p, _, _ in rows)),
         "n_predicate_unbound": len(unbound),
     }
@@ -355,6 +432,9 @@ def eg3_policy(ctx: EquityGateContext) -> GateResult:
         "n_rows": len(rows), "policy_counts": _counts(ctx, "policy"),
         "unbound_predicates": unbound, "policy_vocab": list(POLICY_VOCAB),
         "threshold_kind_vocab": list(THRESHOLD_KIND_VOCAB),
+        "quantile_rows": {f"{r[0]}#{r[1]}": float(str(r[2])) for r in ctx.con.execute(
+            f"SELECT policy, rule_seq, threshold_value FROM {v} "
+            "WHERE threshold_kind = 'quantile' ORDER BY 1, 2").fetchall()},
     }
     return _result("EG3_policy", checks, metrics, "정책 선언표 정합")
 
@@ -375,7 +455,7 @@ UNIVERSE_POLICY = register(EquityTable(
     eg1_rhs_sql="",
     sql_path=SQL_DIR / "universe_policy.sql",
     input_columns={"universe_daily": ()},   # predicate 바인딩 검사용 — 전 컬럼
-    consts=("version",),
+    consts=("version", "liquid_top_pct"),
     extra_gates=(eg3_policy,),
     declaration_table=True,
 ))

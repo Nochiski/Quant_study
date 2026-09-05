@@ -1,5 +1,5 @@
 {
- "_seed": "S03·S03B (universe_daily · universe_policy) 가 요구하는 baseline 상수. 오케스트레이터가 data/equity/baseline.json 에 병합한다. 셋 다 산출 규칙 상수(GATES §5-B8 부류)라 게이트 임계가 아니다. no_trade_run_k 는 제안값이며 서버 실측(EG3_universe.no_trade_run_hist) 뒤 사람 승인이 필요하다.",
+ "_seed": "S03·S03B·S03B-2 (universe_daily · universe_policy) 가 요구하는 baseline 상수. 오케스트레이터가 data/equity/baseline.json 에 병합한다. 전부 산출 규칙 상수(GATES §5-B8 부류)라 게이트 임계가 아니다. no_trade_run_k 는 제안값이며 서버 실측(EG3_universe.no_trade_run_hist) 뒤 사람 승인이 필요하다. liquid_top_pct 는 사용자 선택 상위 비율(09-05 결정, 기본 50%).",
  "measured_at": "2026-09-05",
  "universe_daily": {
   "admin_window_td": 365,
@@ -7,7 +7,8 @@
   "adv_window_td": 20
  },
  "universe_policy": {
-  "version": "s03b-v2"
+  "version": "s03b-v3",
+  "liquid_top_pct": 0.5
  },
  "_measured": [
   {
@@ -49,14 +50,26 @@
   {
    "table": "universe_policy",
    "metric": "version",
-   "value": "s03b-v2",
+   "value": "s03b-v3",
    "kind": "convention",
    "sql": null,
    "inputs": {},
    "measured_at": "2026-09-05",
    "growing": false,
    "used_by": "sql/universe_policy.sql version 컬럼",
-   "note": "정책 집합 판본. s03-v1 = all 1행 → s03b-v2 = all + common-stock(2행) + investable(4행), 전부 flag. liquid 임계 등재 시 s03b-v3. baseline 은 게이트 상수 전용(EQD-10)이지만 SQL 이 문자열 리터럴 없이 판본을 실을 통로가 _const 뿐이라 여기 둔다."
+   "note": "정책 집합 판본. s03-v1 = all 1행 → s03b-v2 = all + common-stock(2행) + investable(4행), 전부 flag → s03b-v3 = + liquid(investable 4행 + quantile 1행 `adv20_rank_pct >= 1 − liquid_top_pct`), 12행. liquid_top_pct 를 바꾸면 임계 행 술어가 바뀌므로 판본도 올린다. baseline 은 게이트 상수 전용(EQD-10)이지만 SQL 이 문자열 리터럴 없이 판본을 실을 통로가 _const 뿐이라 여기 둔다."
+  },
+  {
+   "table": "universe_policy",
+   "metric": "liquid_top_pct",
+   "value": 0.5,
+   "kind": "convention",
+   "sql": "-- 근거(서버 P22′, 보통주 adv20_krw 분위수, 2026-09-05): p10 7,076만 · p25 2.31억 · p50 8.85억 · p75 35.8억 · p90 124.9억 원. 절단본 손계산: 날짜별 모집단 4~8종목, rank ≥ 0.5 행 13,660 / 모집단 21,495 (63.6% — 모집단이 작아 cume_dist 의 동률·이산 효과로 절반보다 많다; 서버는 ~2,600종목이라 50.0% 에 수렴).",
+   "inputs": {},
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "used_by": "sql/universe_policy.sql liquid 임계 행(predicate 'adv20_rank_pct >= ' || (1 − liquid_top_pct) · threshold_value) · rules_s03.eg3_policy n_quantile_threshold_out_of_range",
+   "note": "**사용자 선택 상위 비율, 기본 50%**(09-05 결정 \"날짜별 상위 비율 기준으로 가자\"). liquid = investable ∧ 같은 날 보통주 모집단 안 adv20 백분위(universe_daily.adv20_rank_pct, cume_dist) 가 1 − 0.5 = 0.5 이상 — 서버 P22′ 로 치면 그날 adv20 중앙값(2010~2026 전 기간 합산 p50 8.85억) 이상인 보통주. 절대 금액 임계(예: adv20 ≥ 10억) 대신 비율을 고른 이유: 시장 규모·물가에 따라 절대 금액의 의미가 15년 사이 크게 변하고(P22′ p50 은 전 기간 합산), 비율은 날마다 모집단 안에서 재정의되어 유니버스 크기가 안정적이다. 값은 (0, 1] 이어야 한다(EG3_policy). 바꾸면 universe_policy.version 도 올리고 FX-1-017k~m 픽스처가 같이 바뀐다."
   }
  ]
 }

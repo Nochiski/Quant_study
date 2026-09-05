@@ -249,6 +249,64 @@
   "source": "hand — 2024-03-13~04-09 20 거래일 value_krw 합 790,107,129,540 / 20",
   "expect_source": "hand", "fixture_class": "positive"},
 
+ {"case": "adv20_rank_top_005930_20180503",
+  "key": {"date": "2018-05-03", "ticker": "005930"}, "column": "adv20_rank_pct", "expect": "1.0",
+  "source": "hand — 2018-05-03 모집단(보통주 ∧ listed ∧ adv20 있음) 5종목 adv20 오름차순 003540 2.91B · 161890 9.14B · 000030 31.8B · 000660 349B · 005930 582B → cume_dist 0.2·0.4·0.6·0.8·1.0",
+  "expect_source": "hand", "fixture_class": "positive",
+  "note": "S03B-2. 005930 은 분할 정지 3일째(run 3 < k=5, 정지 공시 없음)라 status listed → 모집단 안. 900050 은 sec_type foreign, 036220·101970 은 이날 구간 밖, 247540 은 2019-03 상장이라 모집단 5"},
+
+ {"case": "adv20_rank_bottom_003540_20180503",
+  "key": {"date": "2018-05-03", "ticker": "003540"}, "column": "adv20_rank_pct", "expect": "0.2",
+  "source": "hand — 위 모집단 5 중 최솟값 → 1/5 (cume_dist 는 0 이 아니라 1/n)",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "adv20_rank_null_preferred_005935_20180503",
+  "key": {"date": "2018-05-03", "ticker": "005935"}, "column": "adv20_rank_pct", "expect": null,
+  "source": "hand — 우선주(sec_type preferred)는 모집단 밖 → NULL (adv20_krw 는 있다)",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "adv20_rank_null_etf_069500_20180503",
+  "key": {"date": "2018-05-03", "ticker": "069500"}, "column": "adv20_rank_pct", "expect": null,
+  "source": "hand — ETF 는 모집단 밖 → NULL",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "adv20_rank_null_foreign_900050_20160425",
+  "key": {"date": "2016-04-25", "ticker": "900050"}, "column": "adv20_rank_pct", "expect": null,
+  "source": "hand — 외국주(sec_type foreign)는 모집단 밖 → NULL. 이날 모집단 5(003540·161890·000030·000660·005930)",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "adv20_rank_null_suspended_000030_20190115",
+  "key": {"date": "2019-01-15", "ticker": "000030"}, "column": "adv20_rank_pct", "expect": null,
+  "source": "hand — run 5 = k 로 status suspended(FX-1-012d) → 모집단 밖. 이날 모집단 4(003540·161890·000660·005930)",
+  "expect_source": "hand", "fixture_class": "positive",
+  "note": "정지 행은 adv20 이 있어도 순위를 받지 않는다 — liquid 가 suspended 를 status 술어로 이미 빼지만 순위 모집단도 같이 좁혀 분모가 일관되게"},
+
+ {"case": "adv20_rank_null_window_005930_20100128",
+  "key": {"date": "2010-01-28", "ticker": "005930"}, "column": "adv20_rank_pct", "expect": null,
+  "source": "hand — adv20 창 미달(NULL) 행은 모집단 밖 → NULL. 캘린더 첫 19일은 모집단 자체가 비어 있다",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "adv20_rank_first_pop_day_036220_20100129",
+  "key": {"date": "2010-01-29", "ticker": "036220"}, "column": "adv20_rank_pct", "expect": "0.25",
+  "source": "hand — 첫 모집단 날(20번째 거래일) 4종목 036220 2.16B · 003540 4.30B · 000660 236B · 005930 311B → 1/4",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "adv20_rank_8_pop_max_000660_20260820",
+  "key": {"date": "2026-08-20", "ticker": "000660"}, "column": "adv20_rank_pct", "expect": "1.0",
+  "source": "hand — backfill_end 모집단 8종목 오름차순 036220 87.2M · 101970 133M · 0001A0 648M · 003540 2.02B · 247540 44.3B · 161890 54.7B · 005930 7.29T · 000660 9.02T",
+  "expect_source": "hand", "fixture_class": "positive",
+  "note": "005930 이 항상 1 인 것은 아니다 — 2026-08-20 은 000660 이 최댓값이고 005930 은 7/8"},
+
+ {"case": "adv20_rank_8_pop_7of8_005930_20260820",
+  "key": {"date": "2026-08-20", "ticker": "005930"}, "column": "adv20_rank_pct", "expect": "0.875",
+  "source": "hand — 위 모집단 8 중 7번째 → 7/8",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "adv20_rank_8_pop_min_036220_20260820",
+  "key": {"date": "2026-08-20", "ticker": "036220"}, "column": "adv20_rank_pct", "expect": "0.125",
+  "source": "hand — 위 모집단 8 중 최솟값 → 1/8. liquid(≥ 0.5) 밖",
+  "expect_source": "hand", "fixture_class": "positive"},
+
  {"case": "listing_age_005930",
   "key": {"date": "2010-01-04", "ticker": "005930"}, "column": "listing_age_days", "expect": "12626",
   "source": "stage:stg_listing_daily.list_date — 1975-06-11, 역일 차 12,626",

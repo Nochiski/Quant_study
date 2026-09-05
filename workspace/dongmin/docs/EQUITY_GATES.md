@@ -799,6 +799,8 @@ WHERE g.${VALUE_COL} = 0
 | `corp_ticker.map_rate_min` | 1단계 통과 조건 | 1 | `corp_code NOT NULL` 비율 (분모 정의는 §5-A4) |
 | `universe_daily.no_trade_run_k` | `status='suspended'` 판정 · EG3_universe `n_status_halt_mismatch` | 1 | 무거래 연속 임계 — S03B 제안 5(P6 중앙값 4 + 1), 서버 `no_trade_run_hist` 로 승인 |
 | `universe_daily.adv_window_td` | `adv20_krw` 창 · EG3_universe `n_adv20_null_mismatch` | 1 | 컬럼 이름이 못박은 20 — SQL 리터럴 금지 규약의 통로일 뿐 조정 상수가 아니다 |
+| `universe_policy.liquid_top_pct` | `liquid` 임계 행 술어(`adv20_rank_pct >= 1 − v`)·`threshold_value` · EG3_policy `n_quantile_threshold_out_of_range` | 1 | 사용자 선택 상위 비율(S03B-2, 09-05 결정) 0.5 — 잰 값이 아니라 convention. (0, 1] 밖이면 폐기. 근거 P22′ 보통주 adv20 분위수 |
+| `universe_policy.version` | `version` 컬럼 | 1 | 정책 집합 판본 문자열 — s03-v1 → s03b-v2 → s03b-v3(liquid 등재) |
 | `universe_daily.contract_probe_dates` | EG-C ② | 1 | 계약 검사 날짜 배열 |
 | `price_daily.krx_kis_ratio_match_min` | EG8-P01 | 2 | 일치율 |
 | `adj_factor.factor_product_tol` | EG3-P04 | 2 | 부동소수 허용오차 — **미등재**: 산출 정밀도 상수 `rules_s06.FACTOR_PRODUCT_TOL = 1e-12`(DOUBLE 역수 곱 반올림 1.1e-16 실측, §9 S06) |
@@ -1180,7 +1182,8 @@ SELECT (SELECT count(*) FROM opinion_broker_daily)
 | FX-1-014 | `universe_daily` | 정지+해제 동일일 1 (1,214 중) | `halt_state`, `signal_halt`, `signal_halt_release` | doc:P12 | 당일 양쪽 신호 true, `halt_state` 규칙대로 |
 | FX-1-015 | `universe_daily` | KOSDAQ 관리종목 소속부 1 | `admin_state`, `admin_state_basis` | stage:`stg_listing_daily.sect_tp` | true / `measured` |
 | FX-1-016 | `universe_daily` | 정리매매 개시 1 (349 중) | `liquidation_window` | doc:P6 | 개시일~`delist_date` true |
-| FX-1-017 | `universe_policy` | (`all`, 1) + S03B (`common-stock`, 1·2)·(`investable`, 3·4) | `predicate`, `threshold_kind`, `universe_id` | hand · doc:FIELD_MAP §1 | 선언표 `all` 1행(`TRUE`·`flag`·`krx.all`) + `krx.common-stock`(`sec_type = 'common'`·`status = 'listed'`) + investable `NOT admin_state`·flag. `liquid` 행은 adv20 분위수 서버 실측 뒤(§9 정정) |
+| FX-1-017 | `universe_policy` | (`all`, 1) + S03B (`common-stock`, 1·2)·(`investable`, 3·4) + S03B-2 (`liquid`, 1·4·5) | `predicate`, `threshold_kind`, `threshold_value`, `universe_id`, `measured_at` | hand · doc:FIELD_MAP §1 | 선언표 `all` 1행(`TRUE`·`flag`·`krx.all`) + `krx.common-stock`(`sec_type = 'common'`·`status = 'listed'`) + investable `NOT admin_state`·flag + `liquid`(k~p): rule 5 `adv20_rank_pct >= 0.5`·`quantile`·`threshold_value` 0.5(= baseline `liquid_top_pct`)·`measured_at` NULL, rule 1 `krx.liquid`, rule 4 = investable 4행 그대로(§9 S03B-2) |
+| S03B-2 `adv20_rank_pct` | `universe_daily` | (`005930`·`003540`, 2018-05-03) · (`000660`·`005930`·`036220`, 2026-08-20) · (`036220`, 2010-01-29) · NULL 5종(우선주·ETF·외국주·정지·창 미달) | `adv20_rank_pct` | hand(파이썬 독립 cume_dist) | 2018-05-03 모집단 5 → 1.0·0.2 / 2026-08-20 모집단 8 → 1.0·0.875·0.125 / 첫 모집단 날 0.25 / 005935·069500·900050·000030(2019-01-15 run 5)·005930(2010-01-28) NULL (§9 S03B-2) |
 
 ### 2단계
 
@@ -1733,6 +1736,21 @@ workspace/dongmin/src/equity/
 | `adv20` 창 폭 리터럴 | SQL 에 `19 PRECEDING`·`= 20` | `test_equity_build::test_sql파일에_상수_하드코딩_없음`(허용 {0,1,2,-1}) 이 잡는다 → baseline `universe_daily.adv_window_td`=20 을 `_const` 로 주입, 프레임 경계 `(adv_window_td − 1) PRECEDING`(duckdb 컬럼식 프레임 지원 확인). 컬럼 이름 adv20 이 못박은 값이라 사실상 불변 | §1-12 등록부 |
 | `universe_policy` 행 | `all` 1행, `common-stock` 은 sec_type 축(정책 행 아님, S21) | **7행** `all`·`common-stock`(sec_type='common' ∧ status='listed')·`investable`(+ NOT admin_state, NOT liquidation_window), 전부 flag. `POLICY_VOCAB` 에 `common-stock` 추가 → `universe_id = 'krx.' \|\| policy` 문법 그대로 `krx.common-stock`(소비자 계약 값). `rule_seq` 는 `generate_subscripts`(리터럴 금지). `liquid` 행은 서버 adv20 분위수 뒤. `version` s03-v1 → s03b-v2 | FIELD_MAP §1 · DESIGN §7 |
 | §2 매트릭스 7행 · FX-1-012 · FX-1-017 | 012 는 S03B / 017 은 (`all`, 1) | 012 를 `universe_daily` 픽스처에 편입(a~g: run 22·1·0, k 경계 01-15/01-14, 101970 해제일 무거래) + mktcap 2·adv20 4·listing_age 5 케이스(총 52). 017 은 f~j(common-stock·investable) 추가 | `fixtures/universe_daily.json`·`universe_policy.json` |
+
+**S03B-2 `universe_daily.adv20_rank_pct` · `universe_policy` `liquid` 구현 정정 (2026-09-05, `rules_s03.py` — 사용자 결정 "날짜별 상위 비율 기준으로 가자")**
+
+| 항목 | 초안 | 정정 | 근거 |
+|---|---|---|---|
+| `liquid` 임계 종류 | `adv20_krw` 절대 금액 quantile(서버 P22′ 분위수를 표에 박는다) | **날짜별 상위 비율** — `universe_daily` 에 `adv20_rank_pct`(같은 날 모집단 `sec_type='common' ∧ status='listed' ∧ adv20_krw IS NOT NULL` 안 `adv20_krw` 의 **cume_dist**, (0, 1]·클수록 유동성 큼·날짜별 최댓값 1, 모집단 밖 NULL) 컬럼을 `adv20_krw` 다음에 두고, `liquid` = investable 4행 + `adv20_rank_pct >= 1 − liquid_top_pct` 1행(`threshold_kind='quantile'`, `threshold_value` = baseline `universe_policy.liquid_top_pct` **0.5**). 절대 금액은 15년 사이 물가·시장 규모로 뜻이 변하고 P22′ p50 은 전 기간 합산값이라 어느 해에도 중앙값이 아니다 | DESIGN §4-1 · §10 P22′·P26 |
+| 순위 정의 | `percent_rank` 또는 `cume_dist` 중 택일 | **`cume_dist`** — 최솟값 행이 1/n > 0 이라 "(0, 1]" 을 만족하고 동률은 같은(큰 쪽) 값을 받아 임계에서 임의로 갈리지 않는다. `percent_rank` 는 최솟값 0(부정 픽스처 `n_adv20_rank_out_of_range` = 모집단 있는 날 4,075) | `test_percent_rank로_순위를_내면_…` |
+| 창 비용 | — | 날짜 파티션 창 1개(`PARTITION BY date, in_pop ORDER BY adv20_krw`) — 모집단 밖 행은 자기들끼리 한 파티션이라 순위 계산에 섞이지 않고 CASE 로 NULL. 별도 좁은 투영 + 재조인 안(참조 2회 → CTE 재계산 위험)은 택하지 않음 | 절단본 0.8s → 1.3s |
+| `liquid` 행 `basis`·`measured_at` | 초안 SQL 주석 "quantile·measured·measured_at = 잰 날" | **`convention`·NULL** — 비율은 잰 값이 아니라 사람이 고른 값이고 순위는 날마다 재계산되므로 "잰 날" 이 없다. P22′ 분위수는 baseline `_measured.note` 의 근거로만 남긴다 | FX-1-017p |
+| 술어 문자열 | `adv20_rank_pct >= 1 - liquid_top_pct` 를 소비자가 baseline 을 읽어 푼다 | 표에 **`adv20_rank_pct >= 0.5`** 로 박는다(`'adv20_rank_pct >= ' \|\| CAST(1 − k.liquid_top_pct AS VARCHAR)`, `_const` DECIMAL 산술이라 문자열이 깔끔) — 워크벤치 어댑터는 정책표만 읽고 `_const` 를 모른다. 리터럴 금지 규약은 `_const` 통로로 지킨다 | `test_liquid_임계는_baseline_liquid_top_pct에서_온다`(0.2 → `>= 0.8`) |
+| EG3_universe 추가 술어 | "모집단 크기 재계산" | 폐기형 `n_adv20_rank_out_of_range`(≤ 0 ∨ > 1) · `n_adv20_rank_null_mismatch`(NULL ⇔ 산출 컬럼으로 다시 가른 모집단 밖) · `n_adv20_rank_max_not_one`(모집단 있는 날의 max ≠ 1) · `n_adv20_rank_pop_mismatch`(rank × 재계산 모집단 크기가 정수가 아님, tol `RANK_INTEGRAL_TOL = 1e-9` — 산출 정밀도 상수) · `n_adv20_rank_order_violation`(같은 날 adv20 오름차순으로 rank 가 내려감, 좁은 투영 위 lag 창 1개). 기록형 `n_adv20_rank_null` · `n_dates_with_rank_pop` · `n_dates_without_rank_pop` · `adv20_rank_pop_size`{min, p50, max}. cume_dist 자체는 다시 돌리지 않는다(§5-C7) — 값은 FX 손계산 | 부정 픽스처 3(percent_rank · 전 종목 모집단 → null_mismatch 19,248 · NULL→1 → 19,571) |
+| EG3_policy 추가 술어 | 바인딩만 | + `n_quantile_threshold_out_of_range`(quantile 의 `threshold_value` ∉ (0, 1] → 폐기; 1.5 면 `>= -0.5` 로 모집단 전부) · 기록형 `quantile_rows` | `test_liquid_top_pct가_비율_밖이면_…` |
+| §1-12 등록부 | — | `universe_policy.liquid_top_pct`(convention, 사용자 선택) · `universe_policy.version` s03b-v3 추가 | seed `_measured` |
+| FX 픽스처 | "2018-05-03 보통주 8종목 중 005930 = 1.0" | 절단본 2018-05-03 모집단은 **5**(900050 은 `foreign`, 036220·101970 은 구간 밖, 247540 은 2019-03 상장) — 005930 = 1.0 은 맞다. 8종목 날은 backfill_end 2026-08-20(000660 = 1.0, 005930 = 0.875). 11케이스 추가(총 63), 정책 6케이스 추가(k~p, 총 16) | `fixtures/universe_daily.json`·`universe_policy.json` |
+| 서버 규모 | — | universe_daily 10.9M 행 위 날짜 창 1개 추가(창 입력 = 22컬럼 wide 행 전체 재정렬). 추정 RSS +1.0~1.5GB(현 4.5GB → 5.5~6GB, memory_limit 6GB 경계 — 스필은 temp_directory) · 시간 +20~40%. 6GB 에서 스필이 길면 `--memory-limit 8GB` 로 재시도. baseline 추가분: `universe_policy.liquid_top_pct` 0.5 · `version` s03b-v3 | P22′ 대비 추정, P26 |
 
 
 **S06 `adj_factor` · 뷰 매크로 · 카탈로그 게이트 구현 정정 (2026-09-05, `rules_s06.py`·`sql/adj_factor.sql`·`views.py`·`catalog.py`)**

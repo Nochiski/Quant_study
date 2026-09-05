@@ -1,9 +1,9 @@
 [
  {"case": "FX-1-017",
   "key": {"policy": "all", "rule_seq": "1"}, "column": "predicate", "expect": "TRUE",
-  "source": "hand — 정책 미적용 행(DESIGN v1.2 §4-1). S03B 가 common-stock·investable 을 더했고 liquid 는 서버 실측 뒤",
+  "source": "hand — 정책 미적용 행(DESIGN v1.2 §4-1). S03B 가 common-stock·investable 을, S03B-2 가 liquid 를 더했다",
   "expect_source": "hand", "fixture_class": "positive",
-  "note": "GATES §4 는 ('liquid', 1) 로 적었으나 v1.2 가 S03 을 'all' 만으로 좁혔다(§9 정정). liquid 행은 adv20 분위수 실측 뒤 이 파일에 추가"},
+  "note": "GATES §4 는 ('liquid', 1) 로 적었으나 v1.2 가 S03 을 'all' 만으로 좁혔다(§9 정정). liquid 행은 S03B-2 에서 k~p 로 추가"},
 
  {"case": "FX-1-017b",
   "key": {"policy": "all", "rule_seq": "1"}, "column": "threshold_kind", "expect": "flag",
@@ -48,6 +48,37 @@
 
  {"case": "FX-1-017j",
   "key": {"policy": "investable", "rule_seq": "4"}, "column": "threshold_kind", "expect": "flag",
-  "source": "hand — S03B 의 정책 행은 전부 flag. quantile 행(liquid)은 서버 실측 뒤",
+  "source": "hand — S03B 의 정책 행은 전부 flag. quantile 행은 liquid 의 마지막 행뿐(S03B-2)",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "FX-1-017k",
+  "key": {"policy": "liquid", "rule_seq": "5"}, "column": "predicate", "expect": "adv20_rank_pct >= 0.5",
+  "source": "hand — liquid 임계 행 = adv20_rank_pct >= 1 − liquid_top_pct, baseline liquid_top_pct 0.5(사용자 선택 상위 50%, 09-05)",
+  "expect_source": "hand", "fixture_class": "positive",
+  "note": "S03B-2. 술어에 임계가 문자열로 박혀 소비자(워크벤치 어댑터)가 baseline 없이 적용한다. liquid_top_pct 를 바꾸면 이 기대값·version 이 같이 바뀐다"},
+
+ {"case": "FX-1-017l",
+  "key": {"policy": "liquid", "rule_seq": "5"}, "column": "threshold_kind", "expect": "quantile",
+  "source": "hand — 날짜별 백분위 임계(절대 금액 아님)",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "FX-1-017m",
+  "key": {"policy": "liquid", "rule_seq": "5"}, "column": "threshold_value", "expect": "0.5",
+  "source": "hand — threshold_value = liquid_top_pct(상위 비율) 자체. 술어의 0.5 는 1 − 0.5 라 같은 값으로 보이는 것뿐",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "FX-1-017n",
+  "key": {"policy": "liquid", "rule_seq": "1"}, "column": "universe_id", "expect": "krx.liquid",
+  "source": "doc:FIELD_MAP §1 — universe_id 어휘 krx.liquid",
+  "expect_source": "doc:EQUITY_FIELD_MAP §1", "fixture_class": "positive"},
+
+ {"case": "FX-1-017o",
+  "key": {"policy": "liquid", "rule_seq": "4"}, "column": "predicate", "expect": "NOT liquidation_window",
+  "source": "hand — liquid 는 investable 4행을 그대로 품는다(common-stock + 관리·정리매매 제외) → 포함관계 investable ⊇ liquid",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "FX-1-017p",
+  "key": {"policy": "liquid", "rule_seq": "5"}, "column": "measured_at", "expect": null,
+  "source": "hand — 비율은 잰 값이 아니라 사람이 고른 값(basis convention)이고 순위는 날마다 재계산되므로 잰 날이 없다",
   "expect_source": "hand", "fixture_class": "positive"}
 ]

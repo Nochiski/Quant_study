@@ -1,4 +1,4 @@
--- universe_daily v2 (S03 존재·상태 + S03B 시장 파생) — grain (date, ticker) · date_axis.
+-- universe_daily v2 (S03 존재·상태 + S03B 시장 파생 + S03B-2 날짜별 유동성 순위) — grain (date, ticker) · date_axis.
 -- DESIGN v1.2 §4-1 · GATES §3 ⑦ · §4 FX-1-012.
 --
 -- 격자 = security_span × trading_calendar (둘 다 앞서 커밋된 equity 테이블, _pinned/ 고정).
@@ -36,6 +36,12 @@
 --                      기준가 날의 value_krw=0 도 평균에 들어간다(정지가 길면 자연히 0 에 수렴).
 --                      창 폭 20 은 컬럼 이름에 박힌 정의이지만 SQL 리터럴 금지 규약 때문에 _const
 --                      adv_window_td 로 들어온다 — 값을 바꾸면 컬럼 이름도 바꿔야 한다.
+--   adv20_rank_pct   = (S03B-2) 같은 날 모집단(sec_type='common' ∧ status='listed' ∧ adv20_krw IS NOT NULL)
+--                      안에서 adv20_krw 의 cume_dist — (adv20 ≤ 자기 행인 모집단 행수) / 모집단 행수,
+--                      (0, 1]·클수록 유동성 큼·날짜별 최댓값 1. 동률은 큰 쪽 값을 같이 받는다(percent_rank 는
+--                      최솟값이 0 이라 '0 초과' 를 못 만든다). 모집단 밖(ETF·우선주·외국주·정지·adv20 NULL)은
+--                      NULL. 날짜 파티션 하나라 (ticker, span_seq) 창과 달리 재상장·구간 무관. 랙은 뷰가 건다.
+--                      liquid 정책(universe_policy)이 adv20_rank_pct >= 1 − liquid_top_pct 로 자른다.
 --   listing_age_days = D − 같은 날 stg_listing_daily.list_date (역일). 재상장은 구간마다 list_date 가
 --                      다르므로(036220 2007-06-05 → 2024-03-13) security.list_date(최신 값)를 쓰지 않는다.
 --                      list_date 가 없으면(ETF: listing 원장에 없음 P8) 구간 first_date 기준 — 2010-01-04
@@ -145,12 +151,36 @@ state AS (
            CASE WHEN r.n_value_adv = r.adv_window_td THEN r.avg_value_adv END    AS adv20_krw,
            date_diff('day', coalesce(r.list_date, r.first_date), r.date)         AS listing_age_days
     FROM run r
+),
+scored AS (
+    SELECT s.*,
+           CASE WHEN s.halt_state
+                     OR (s.price_kind = 'reference' AND s.no_trade_run >= s.no_trade_run_k)
+                THEN 'suspended' ELSE 'listed' END                                AS status
+    FROM state s
+),
+pop AS (
+    -- adv20_rank_pct 모집단(S03B-2): 같은 날 보통주 ∧ listed ∧ adv20 있음. sec_type NULL 은 없지만
+    -- (EG3_universe n_sec_type_null) 있더라도 모집단 밖으로 가게 coalesce 한다.
+    SELECT c.*,
+           coalesce(c.sec_type = 'common' AND c.status = 'listed' AND c.adv20_krw IS NOT NULL,
+                    false)                                                        AS in_pop
+    FROM scored c
+),
+ranked AS (
+    -- 날짜별 창 1개(PARTITION BY date, in_pop): 모집단 밖 행은 자기들끼리 한 파티션에 모여 순위 계산에
+    -- 섞이지 않고, 결과는 CASE 로 NULL 이 된다. cume_dist = (adv20 ≤ 자기 행인 모집단 행수) / 모집단
+    -- 행수 — 동률은 같은 값(큰 쪽), 최댓값 행은 항상 1, 최솟값 행은 1/n > 0.
+    SELECT p.*,
+           CASE WHEN p.in_pop
+                THEN cume_dist() OVER (PARTITION BY p.date, p.in_pop ORDER BY p.adv20_krw) END
+                                                                                  AS adv20_rank_pct
+    FROM pop p
 )
 SELECT
     date,
     ticker,
-    CASE WHEN halt_state OR (price_kind = 'reference' AND no_trade_run >= no_trade_run_k)
-         THEN 'suspended' ELSE 'listed' END                 AS status,
+    status,
     market,
     sec_type,
     halt_state,
@@ -165,9 +195,10 @@ SELECT
     is_admin_issue                                          AS admin_flag,
     mktcap_krw,
     adv20_krw,
+    adv20_rank_pct,
     listing_age_days,
     no_trade_run,
     date                                                    AS available_date,
     'default'                                               AS available_basis,
     NULL::VARCHAR                                           AS reject_reason
-FROM state
+FROM ranked

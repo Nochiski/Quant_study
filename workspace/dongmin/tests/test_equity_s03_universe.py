@@ -6,6 +6,9 @@
 S03B: 무거래 run {1×7, 3×3, 10, 12, 22, 49, 55, 66, 116}, k=5 에서 run 으로만 suspended 201행
 (000030 18 · 101970 1 · 900050 180 · 900060 2) → suspended 327 · adv20 NULL 323 = 17구간 × 19 ·
 가격 결측 0.
+S03B-2: `adv20_rank_pct` 모집단(보통주 ∧ listed ∧ adv20 있음) 21,495행 / NULL 19,571 · 모집단이
+있는 날 4,075(캘린더 첫 19일은 비어 있다) · 날짜별 모집단 크기 4×692 · 5×2,064 · 6×942 · 7×261 ·
+8×116 · 순위 최솟값 1/8 · 최댓값 1 · rank ≥ 0.5 행 13,660(파이썬 독립 계산).
 절단본에 없는 축(KOSPI 관리종목 창 · 해제 공시로 닫히는 정지 · 비거래일 접수 · master 측정값
 우선 · 열린 정지 · 가격 행 결측)은 `make_stage_tree` 합성 stage 위에서 검사한다. 이 슬라이스는
 equity 산출(`security_span`·`trading_calendar`·`security`·`price_daily`)을 입력으로 읽으므로
@@ -91,6 +94,18 @@ LIQUIDATION_RUNS = {
 # signal_halt 22 = 지정 12 + 지정·해제 동일일 10(양쪽 신호) · release 12 = 동일일 10 + 순수 해제 2
 SIGNAL_COUNTS = {"signal_halt": 22, "signal_halt_release": 12, "signal_admin": 0,
                  "signal_liquidation": 3, "signal_delist": 21}
+# S03B-2 adv20_rank_pct — 파이썬 독립 계산(모집단 = 보통주 ∧ listed ∧ adv20 있음, cume_dist)
+_POP = "sec_type = 'common' AND status = 'listed' AND adv20_krw IS NOT NULL"
+N_RANK_POP = 21495
+N_RANK_NULL = N_GRID - N_RANK_POP
+N_DATES_WITH_POP = 4075              # 캘린더 4,094 − 첫 19일(전 종목 adv20 NULL)
+POP_SIZE_HIST = {4: 692, 5: 2064, 6: 942, 7: 261, 8: 116}
+N_RANK_TOP_HALF = 13660              # rank ≥ 0.5 (= liquid 임계 행, 절단본은 전부 investable)
+# 2018-05-03 모집단 5 (005930 은 분할 정지 3일째지만 공시 없음·run 3 < k 라 listed)
+RANK_20180503 = {"003540": 0.2, "161890": 0.4, "000030": 0.6, "000660": 0.8, "005930": 1.0}
+# backfill_end 모집단 8 — 000660 이 최댓값, 005930 은 7/8
+RANK_20260820 = {"036220": 0.125, "101970": 0.25, "0001A0": 0.375, "003540": 0.5, "247540": 0.625,
+                 "161890": 0.75, "005930": 0.875, "000660": 1.0}
 
 
 def _query(out_dir: Path, sql: str) -> list[tuple[object, ...]]:
@@ -176,12 +191,13 @@ def test_EG1_우변은_span_n_days_합이다(built: build.BuildResult) -> None:
 
 
 def test_컬럼_선언순서가_산출과_같다(built: build.BuildResult) -> None:
-    """S03 컬럼 → S03B 4개 → available 2개 (DESIGN §4-1 순서)."""
+    """S03 컬럼 → S03B 4개(+ S03B-2 `adv20_rank_pct` 는 `adv20_krw` 다음) → available 2개
+    (DESIGN §4-1 순서)."""
     assert built.out_dir is not None
     cols = [str(r[0]) for r in _query(built.out_dir, "DESCRIBE u")]
     assert cols == list(UNIVERSE.columns)
-    assert cols[-6:] == ["mktcap_krw", "adv20_krw", "listing_age_days", "no_trade_run",
-                         "available_date", "available_basis"]
+    assert cols[-7:] == ["mktcap_krw", "adv20_krw", "adv20_rank_pct", "listing_age_days",
+                         "no_trade_run", "available_date", "available_basis"]
 
 
 def test_격자는_구간과_일치하고_backfill_end_뒤_행이_없다(built: build.BuildResult) -> None:
@@ -298,6 +314,59 @@ def test_adv20은_구간_안_20거래일_평균이고_창_미달은_NULL(built: 
     m = _gate(built, "EG3_universe").metrics
     assert m["n_adv20_null"] == N_SPANS * 19 and m["n_adv20_null_mismatch"] == 0
     assert len(m["adv20_common_quantiles"]) == 5
+
+
+def test_adv20_rank_pct는_같은날_보통주_listed_모집단의_cume_dist(built: build.BuildResult) -> None:
+    """S03B-2. 모집단 = sec_type='common' ∧ status='listed' ∧ adv20 있음, 그 안에서
+    cume_dist = (adv20 ≤ 자기 행인 모집단 행수) / 모집단 행수 — (0, 1], 최댓값 1, 최솟값 1/n.
+    모집단 밖(ETF·우선주·외국주·정지·창 미달)은 NULL. 전 행을 파이썬으로 독립 재계산해 대조한다."""
+    assert built.out_dir is not None
+    rows = _query(built.out_dir, "SELECT date, ticker, sec_type, status, adv20_krw, adv20_rank_pct "
+                                 "FROM u ORDER BY 1, 2")
+    pop: dict[object, list[tuple[object, object]]] = {}
+    for d, t, st, s, adv, _ in rows:
+        if st == "common" and s == "listed" and adv is not None:
+            pop.setdefault(d, []).append((t, adv))
+    n_bad = 0
+    for d, t, _st, _s, adv, r in rows:
+        lst = pop.get(d, [])
+        exp = (sum(1 for _, a in lst if a <= adv) / len(lst)          # type: ignore[operator]
+               if (t, adv) in lst else None)
+        if (r is None) != (exp is None) or (r is not None and abs(r - exp) > 1e-12):  # type: ignore[operator]
+            n_bad += 1
+    assert n_bad == 0
+    assert sum(len(v) for v in pop.values()) == N_RANK_POP and len(pop) == N_DATES_WITH_POP
+    assert _query(built.out_dir, "SELECT count(adv20_rank_pct), count(*) - count(adv20_rank_pct), "
+                                 "min(adv20_rank_pct), max(adv20_rank_pct) FROM u") == [
+        (N_RANK_POP, N_RANK_NULL, 0.125, 1.0)]
+    # 날짜별 모집단 크기 분포 · 모집단 밖은 어떤 sec_type/status 든 NULL
+    assert dict(_query(built.out_dir, "SELECT n, count(*) FROM (SELECT date, count(adv20_rank_pct) "
+                                      "AS n FROM u GROUP BY 1) WHERE n > 0 GROUP BY 1")) == \
+        POP_SIZE_HIST
+    assert _query(built.out_dir, "SELECT count(*) FROM u WHERE adv20_rank_pct IS NOT NULL "
+                                 f"AND NOT ({_POP})") == [(0,)]
+    assert _query(built.out_dir, "SELECT count(*) FROM u WHERE adv20_rank_pct IS NULL "
+                                 f"AND {_POP}") == [(0,)]
+    # 손계산 두 날짜 — 005930 이 항상 1 은 아니다(2026-08-20 은 000660)
+    by_date = ("SELECT ticker, adv20_rank_pct FROM u WHERE date = DATE '{}' "
+               "AND adv20_rank_pct IS NOT NULL")
+    assert dict(_query(built.out_dir, by_date.format("2018-05-03"))) == RANK_20180503
+    assert dict(_query(built.out_dir, by_date.format("2026-08-20"))) == RANK_20260820
+    assert _query(built.out_dir, "SELECT count(*) FROM u WHERE adv20_rank_pct >= 0.5") == [
+        (N_RANK_TOP_HALF,)]
+    # 정지 행(000030 2019-01-15 run 5)·우선주·ETF 는 adv20 이 있어도 NULL
+    assert _query(built.out_dir, "SELECT adv20_krw IS NOT NULL, adv20_rank_pct FROM u WHERE "
+                                 "(ticker, date) IN (('000030', DATE '2019-01-15'), "
+                                 "('005935', DATE '2018-05-03'), ('069500', DATE '2018-05-03')) "
+                  ) == [(True, None)] * 3
+    m = _gate(built, "EG3_universe").metrics
+    assert m["n_adv20_rank_null"] == N_RANK_NULL
+    assert m["n_dates_with_rank_pop"] == N_DATES_WITH_POP
+    assert m["n_dates_without_rank_pop"] == 4094 - N_DATES_WITH_POP
+    assert m["adv20_rank_pop_size"] == {"min": 4, "p50": 5.0, "max": 8}
+    assert all(m[k] == 0 for k in ("n_adv20_rank_out_of_range", "n_adv20_rank_null_mismatch",
+                                   "n_adv20_rank_max_not_one", "n_adv20_rank_pop_mismatch",
+                                   "n_adv20_rank_order_violation"))
 
 
 def test_listing_age는_같은날_listing_상장일_기준_역일(built: build.BuildResult) -> None:
@@ -538,6 +607,9 @@ def test_가격_행이_없는_날은_run_NULL_이고_run을_끊는다(tmp_path: 
     assert m["n_no_trade_run_null"] == 1 and m["n_mktcap_null"] == 1
     assert m["n_listing_age_fallback"] == 10 and m["n_listing_age_fallback_stock"] == 0
     assert m["n_adv20_null"] == 39 and m["adv20_common_quantiles"] is None
+    # adv20 이 전부 NULL 이면 순위 모집단도 비어 rank 전부 NULL — 게이트 pass(빈 모집단은 위반 아님)
+    assert m["n_adv20_rank_null"] == 39 and m["adv20_rank_pop_size"] is None
+    assert m["n_dates_with_rank_pop"] == 0 and m["n_dates_without_rank_pop"] == 10
 
 
 def test_KOSPI_관리종목은_지정_신호_창_derived(tmp_path: Path, make_stage_tree) -> None:
@@ -636,6 +708,56 @@ def test_창_미달_adv20을_만들어_내면_EG3_universe가_폐기한다(built
     assert eg3.status is GateStatus.FAIL
     assert eg3.metrics["n_adv20_null_mismatch"] == N_SPANS * 19
     assert eg3.metrics["n_status_halt_mismatch"] == 0
+
+
+def test_percent_rank로_순위를_내면_최솟값_0이라_EG3_universe가_폐기한다(built: build.BuildResult,
+                                                                 tmp_path: Path) -> None:
+    """정의를 percent_rank((rank−1)/(n−1)) 로 바꾼 변종 — 모집단이 있는 날마다 최솟값 행이 0 이라
+    `(0, 1]` 밖(4,075 = 날짜 수, 최솟값 동률 없음). rank × n 도 정수가 아니라 pop_mismatch 도
+    뜬다."""
+    r = _variant(built, tmp_path, "universe_rank_percent",
+                 f"WITH base AS ({{body}}) SELECT * REPLACE (CASE WHEN {_POP} THEN percent_rank() "
+                 f"OVER (PARTITION BY date, {_POP} ORDER BY adv20_krw) END AS adv20_rank_pct) "
+                 "FROM base")
+    assert r.status is build.BuildStatus.GATE_FAILED
+    eg3 = _gate(r, "EG3_universe")
+    assert eg3.status is GateStatus.FAIL
+    assert eg3.metrics["n_adv20_rank_out_of_range"] == N_DATES_WITH_POP
+    assert eg3.metrics["n_adv20_rank_pop_mismatch"] > 0
+    assert eg3.metrics["n_adv20_rank_null_mismatch"] == 0
+    assert eg3.metrics["n_adv20_rank_max_not_one"] == 0
+
+
+def test_모집단을_전_종목으로_잡으면_EG3_universe가_폐기한다(built: build.BuildResult,
+                                                     tmp_path: Path) -> None:
+    """ETF·우선주·외국주·정지 행까지 넣고 순위를 낸 변종 — 모집단 밖인데 순위가 있는 행
+    41,066 − 323(adv20 NULL) − 21,495 = 19,248 이 null_mismatch. 모집단 크기도 달라 정수 검사가
+    깨진다."""
+    r = _variant(built, tmp_path, "universe_rank_all",
+                 "WITH base AS ({body}) SELECT * REPLACE (CASE WHEN adv20_krw IS NOT NULL THEN "
+                 "cume_dist() OVER (PARTITION BY date, adv20_krw IS NOT NULL ORDER BY adv20_krw) "
+                 "END AS adv20_rank_pct) FROM base")
+    assert r.status is build.BuildStatus.GATE_FAILED
+    eg3 = _gate(r, "EG3_universe")
+    assert eg3.status is GateStatus.FAIL
+    assert eg3.metrics["n_adv20_rank_null_mismatch"] == N_GRID - N_SPANS * 19 - N_RANK_POP
+    assert eg3.metrics["n_adv20_rank_pop_mismatch"] > 0
+    assert eg3.metrics["n_adv20_rank_out_of_range"] == 0
+
+
+def test_순위_NULL을_1로_채우면_EG3_universe가_폐기한다(built: build.BuildResult,
+                                                tmp_path: Path) -> None:
+    """모집단 밖을 '최상위' 로 채운 변종 — 19,571행 null_mismatch. 순위값은 범위 안이라 다른 술어는
+    조용하다(NULL ⇔ 모집단 밖 술어가 유일한 방어)."""
+    r = _variant(built, tmp_path, "universe_rank_filled",
+                 "WITH base AS ({body}) SELECT * REPLACE (coalesce(adv20_rank_pct, 1) "
+                 "AS adv20_rank_pct) FROM base")
+    assert r.status is build.BuildStatus.GATE_FAILED
+    eg3 = _gate(r, "EG3_universe")
+    assert eg3.status is GateStatus.FAIL
+    assert eg3.metrics["n_adv20_rank_null_mismatch"] == N_RANK_NULL
+    assert eg3.metrics["n_adv20_rank_out_of_range"] == 0
+    assert eg3.metrics["n_adv20_rank_max_not_one"] == 0
 
 
 def test_security_list_date로_상장일수를_재면_재상장_첫_구간이_음수라_폐기한다(

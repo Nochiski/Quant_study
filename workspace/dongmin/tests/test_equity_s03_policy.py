@@ -1,12 +1,15 @@
-"""S03·S03B `universe_policy` — 선언표 스키마 + all · common-stock · investable 7행
+"""S03·S03B·S03B-2 `universe_policy` — 선언표 스키마 + all · common-stock · investable · liquid 12행
 (DESIGN §4-1 · GATES §3 ㉒ · §4 FX-1-017).
 
 행수 등식이 없는 선언표라 EG1 은 `skip(declaration_table)` 이고, 대신 EG3_policy 가 어휘·문법·
 'all' 존재·임계 정합·predicate 바인딩(입력 `universe_daily` 스키마 위)을 본다. 입력이 equity
-산출이므로 절단본 위에 S01·S02·S04·S03 상류를 먼저 빌드한다. `liquid` 행은 adv20 분위수 실측 뒤.
+산출이므로 절단본 위에 S01·S02·S04·S03 상류를 먼저 빌드한다. `liquid`(S03B-2) 는 investable 4행 +
+`adv20_rank_pct >= 1 − liquid_top_pct`(quantile, baseline `universe_policy.liquid_top_pct` 0.5) —
+절단본 손계산 13,660행(rank ≥ 0.5 행은 전부 investable).
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import duckdb
@@ -23,7 +26,9 @@ SEED = Baseline({**load(rules_s01.BASELINE_SEED).data,
 UPSTREAM = (rules_s02.TRADING_CALENDAR, rules_s01.SECURITY, rules_s02.SECURITY_SPAN,
             rules_s04.PRICE_DAILY, rules_s03.UNIVERSE_DAILY)
 POLICY = rules_s03.UNIVERSE_POLICY
-VERSION = "s03b-v2"
+VERSION = "s03b-v3"
+LIQUID_TOP_PCT = 0.5                 # baseline_seed_s03 universe_policy.liquid_top_pct
+N_LIQUID = 13660                     # 절단본 손계산 (test_equity_s03_universe.N_RANK_TOP_HALF)
 
 _ROWS = [
     ("krx.all", "all", 1, "TRUE", "flag", None, "convention", None, VERSION),
@@ -38,6 +43,13 @@ _ROWS = [
     ("krx.investable", "investable", 3, "NOT admin_state", "flag", None, "convention",
      None, VERSION),
     ("krx.investable", "investable", 4, "NOT liquidation_window", "flag", None, "convention",
+     None, VERSION),
+    ("krx.liquid", "liquid", 1, "sec_type = 'common'", "flag", None, "convention", None, VERSION),
+    ("krx.liquid", "liquid", 2, "status = 'listed'", "flag", None, "convention", None, VERSION),
+    ("krx.liquid", "liquid", 3, "NOT admin_state", "flag", None, "convention", None, VERSION),
+    ("krx.liquid", "liquid", 4, "NOT liquidation_window", "flag", None, "convention", None,
+     VERSION),
+    ("krx.liquid", "liquid", 5, "adv20_rank_pct >= 0.5", "quantile", LIQUID_TOP_PCT, "convention",
      None, VERSION),
 ]
 
@@ -102,35 +114,44 @@ def test_빌드가_통과하고_EG1은_declaration_table_skip(built: build.Build
     assert built.inputs == {"universe_daily": "b_universe_daily"}
 
 
-def test_표는_all_common_stock_investable_7행이고_전부_flag(built: build.BuildResult) -> None:
+def test_표는_all_common_stock_investable_liquid_12행이고_quantile은_liquid_마지막_행뿐(
+        built: build.BuildResult) -> None:
     assert built.out_dir is not None
     assert _query(built.out_dir, "SELECT * FROM t ORDER BY policy, rule_seq") == _ROWS
     assert [str(r[0]) for r in _query(built.out_dir, "DESCRIBE t")] == list(POLICY.columns)
-    assert _query(built.out_dir, "SELECT count(*) FROM t WHERE threshold_kind <> 'flag' "
-                                 "OR threshold_value IS NOT NULL OR measured_at IS NOT NULL") == [
-        (0,)]
-    # liquid 는 어휘만 — 임계는 서버 실측 뒤
-    assert _query(built.out_dir, "SELECT count(*) FROM t WHERE policy = 'liquid'") == [(0,)]
+    assert _query(built.out_dir, "SELECT policy, rule_seq, threshold_value FROM t WHERE "
+                                 "threshold_kind <> 'flag' OR threshold_value IS NOT NULL") == [
+        ("liquid", 5, LIQUID_TOP_PCT)]
+    assert _query(built.out_dir, "SELECT count(*) FROM t WHERE measured_at IS NOT NULL") == [(0,)]
+    # liquid = investable 4행 그대로 + 임계 1행 — 술어 문자열에 1 − liquid_top_pct 가 박힌다
+    assert _query(built.out_dir, "SELECT a.predicate FROM t a JOIN t b ON a.rule_seq = b.rule_seq "
+                                 "AND b.policy = 'investable' WHERE a.policy = 'liquid' "
+                                 "AND a.predicate <> b.predicate") == []
+    assert _query(built.out_dir, "SELECT predicate FROM t WHERE policy = 'liquid' AND rule_seq = 5"
+                  ) == [(f"adv20_rank_pct >= {1 - LIQUID_TOP_PCT}",)]
     assert "liquid" in rules_s03.POLICY_VOCAB
 
 
 def test_universe_id는_소비자_계약_어휘와_같다(built: build.BuildResult) -> None:
     """FIELD_MAP §1 — `krx.common-stock` 이 정책표로 풀린다(하이픈 포함 policy 값 =
-    'krx.' || policy)."""
+    'krx.' || policy). `krx.liquid` 는 S03B-2 부터."""
     assert built.out_dir is not None
     assert _query(built.out_dir, "SELECT DISTINCT universe_id FROM t ORDER BY 1") == [
-        ("krx.all",), ("krx.common-stock",), ("krx.investable",)]
+        ("krx.all",), ("krx.common-stock",), ("krx.investable",), ("krx.liquid",)]
 
 
 def test_predicate가_universe_daily_스키마에서_평가된다(built: build.BuildResult) -> None:
     m = _gate(built, "EG3_policy").metrics
     assert m["n_predicate_unbound"] == 0 and m["unbound_predicates"] == []
-    assert m["policy_counts"] == {"all": 1, "common-stock": 2, "investable": 4}
+    assert m["policy_counts"] == {"all": 1, "common-stock": 2, "investable": 4, "liquid": 5}
+    assert m["quantile_rows"] == {"liquid#5": LIQUID_TOP_PCT}
+    assert m["n_quantile_threshold_out_of_range"] == 0
 
 
 def test_정책을_universe_daily에_적용하면_포함_관계가_선다(built: build.BuildResult) -> None:
-    """all ⊇ common-stock ⊇ investable. 절단본: common 주식 행 중 suspended 327·ETF 4,094·우선주·
-    관리·정리매매 행이 차례로 빠진다(적용은 팩터층 몫이지만 술어가 뜻대로 도는지는 여기서 본다)."""
+    """all ⊇ common-stock ⊇ investable ⊇ liquid. 절단본: common 주식 행 중 suspended 327·ETF 4,094·
+    우선주·관리·정리매매 행이 차례로 빠지고, liquid 는 같은 날 보통주 모집단 안 adv20 백분위 상위
+    50%(13,660행, 손계산)만 남는다(적용은 팩터층 몫이지만 술어가 뜻대로 도는지는 여기서 본다)."""
     assert built.out_dir is not None
     root = built.out_dir.parents[1]
     con = duckdb.connect()
@@ -141,7 +162,7 @@ def test_정책을_universe_daily에_적용하면_포함_관계가_선다(built:
         con.execute(f"CREATE VIEW t AS SELECT * FROM read_parquet('{built.out_dir / '*.parquet'}')")
         preds = {p: " AND ".join(f"({x})" for x in [r[0] for r in con.execute(
             f"SELECT predicate FROM t WHERE policy = '{p}' ORDER BY rule_seq").fetchall()])
-            for p in ("all", "common-stock", "investable")}
+            for p in ("all", "common-stock", "investable", "liquid")}
         n = {p: con.execute(f"SELECT count(*) FROM u WHERE {w}").fetchone()[0]  # type: ignore[index]
              for p, w in preds.items()}
         n_common_listed = con.execute("SELECT count(*) FROM u WHERE sec_type = 'common' "
@@ -149,10 +170,65 @@ def test_정책을_universe_daily에_적용하면_포함_관계가_선다(built:
         n_inv = con.execute("SELECT count(*) FROM u WHERE sec_type = 'common' "
                             "AND status = 'listed' AND NOT admin_state "
                             "AND NOT liquidation_window").fetchone()[0]  # type: ignore[index]
+        # liquid 는 investable 안에서 rank ≥ 1 − top_pct — 2018-05-03 모집단 5 중 상위 3
+        liq_20180503 = con.execute(f"SELECT ticker FROM u WHERE {preds['liquid']} "
+                                   "AND date = DATE '2018-05-03' ORDER BY 1").fetchall()
     finally:
         con.close()
     assert n["all"] == 41066
     assert n["all"] > n["common-stock"] == n_common_listed > n["investable"] == n_inv
+    assert n_inv > n["liquid"] == N_LIQUID
+    assert liq_20180503 == [("000030",), ("000660",), ("005930",)]
+
+
+def _with_top_pct(built: build.BuildResult, name: str, top_pct: object,
+                  fixtures_path: Path | None = None) -> build.BuildResult:
+    """같은 SQL, baseline `liquid_top_pct` 만 바꾼 변종(변종 이름으로 재등재 — 정본은 그대로).
+    변종 이름엔 픽스처 파일이 없으므로 통과시키려면 `fixtures_path` 를 준다."""
+    assert built.out_dir is not None
+    rule = EquityTable(**{**POLICY.__dict__, "name": name})
+    bl = Baseline({**SEED.data, name: {**SEED.table(POLICY.name), "liquid_top_pct": top_pct}})
+    return build.build_table(rule, STAGE_SLICE, built.out_dir.parents[1], bl, build_id=f"b_{name}",
+                             fixtures_path=fixtures_path)
+
+
+def test_liquid_임계는_baseline_liquid_top_pct에서_온다(built: build.BuildResult,
+                                                   tmp_path: Path) -> None:
+    """상위 20% 로 바꾸면 술어가 `adv20_rank_pct >= 0.8`, threshold_value 0.2 — SQL 리터럴 없이
+    `_const` 로만 들어온다(픽스처도 그 값으로 준다)."""
+    fx = tmp_path / "fx.json"
+    fx.write_text(json.dumps([
+        {"case": "top20_pred", "key": {"policy": "liquid", "rule_seq": "5"}, "column": "predicate",
+         "expect": "adv20_rank_pct >= 0.8", "source": "hand"},
+        {"case": "top20_value", "key": {"policy": "liquid", "rule_seq": "5"},
+         "column": "threshold_value", "expect": "0.2", "source": "hand"}]), encoding="utf-8")
+    r = _with_top_pct(built, "policy_top20", 0.2, fixtures_path=fx)
+    assert r.ok, _fails(r)
+    assert r.out_dir is not None
+    assert _query(r.out_dir, "SELECT predicate, threshold_kind, threshold_value FROM t "
+                             "WHERE policy = 'liquid' AND rule_seq = 5") == [
+        ("adv20_rank_pct >= 0.8", "quantile", 0.2)]
+    assert _query(r.out_dir, "SELECT count(*) FROM t") == [(len(_ROWS),)]
+    assert _gate(r, "EG3_policy").metrics["quantile_rows"] == {"liquid#5": 0.2}
+
+
+def test_liquid_top_pct가_비율_밖이면_EG3_policy가_폐기한다(built: build.BuildResult) -> None:
+    """1.5 → quantile 임계가 (0, 1] 밖 — 술어 `adv20_rank_pct >= -0.5` 는 모집단 전부를 뽑는다."""
+    r = _with_top_pct(built, "policy_top150", 1.5)
+    assert r.status is build.BuildStatus.GATE_FAILED
+    eg3 = _gate(r, "EG3_policy")
+    assert eg3.status is GateStatus.FAIL
+    assert eg3.metrics["n_quantile_threshold_out_of_range"] == 1
+    assert eg3.metrics["n_predicate_unbound"] == 0
+
+
+def test_liquid_top_pct가_baseline에_없으면_빌드가_거절된다(built: build.BuildResult) -> None:
+    """산출 규칙 상수는 `_const` 로만 — 미등재는 KeyError(사람 승인 지점, S03 `no_trade_run_k` 와
+    같은 규약)."""
+    assert built.out_dir is not None
+    bl = Baseline({**SEED.data, POLICY.name: {"version": VERSION}})
+    with pytest.raises(KeyError, match="liquid_top_pct"):
+        build.build_table(POLICY, STAGE_SLICE, built.out_dir.parents[1], bl, build_id="b_no_pct")
 
 
 # ── 부정 픽스처 ──────────────────────────────────────────────────────────────
@@ -172,8 +248,8 @@ def test_없는_컬럼을_쓰는_predicate는_EG3_policy가_폐기한다(built: 
 
 
 def test_S03B_컬럼은_이제_바인딩된다(built: build.BuildResult, tmp_path: Path) -> None:
-    """`adv20_krw` 위 quantile 행은 문법상 통과한다 — 임계 등재 자체는 서버 실측 뒤(여기선
-    변종만)."""
+    """`adv20_krw` 위 절대 금액 quantile 행도 문법상 통과한다 — 정본은 S03B-2 의 `adv20_rank_pct`
+    비율 행이지만, 표는 다른 임계 종류도 실을 수 있다(여기선 변종만)."""
     r = _variant(built, tmp_path, "policy_liquid_shape",
                  f"{ALL}, ('liquid', 1, 'adv20_krw >= 1000000', 'quantile', 0.2, 'measured', "
                  "DATE '2026-09-05')")

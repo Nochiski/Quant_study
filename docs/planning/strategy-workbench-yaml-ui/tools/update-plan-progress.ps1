@@ -144,11 +144,25 @@ $total = $rows.Count
 $merged = @($rows | Where-Object Checked).Count
 $approved = @($rows | Where-Object Status -in @("APPROVED", "MERGED")).Count
 $progress = if ($total -eq 0) { 0 } else { [math]::Round(($merged * 100.0) / $total) }
+$orderedActiveRows = @(
+    foreach ($id in $parallelIds) {
+        if ($rowById.ContainsKey($id) -and $rowById[$id].Status -in $activeStatuses) {
+            $rowById[$id]
+        }
+    }
+)
+$leadActiveRow = if ($orderedActiveRows.Count -gt 0) {
+    $orderedActiveRows[-1]
+} elseif ($activeRows.Count -gt 0) {
+    $activeRows[0]
+} else {
+    $null
+}
 
 if ($merged -eq $total) {
     $projectStatus = "COMPLETE"
-} elseif ($activeRows.Count -gt 0) {
-    $projectStatus = $activeRows[0].Status
+} elseif ($null -ne $leadActiveRow) {
+    $projectStatus = $leadActiveRow.Status
 } elseif (@($rows | Where-Object Status -eq "READY").Count -gt 0) {
     $projectStatus = "READY"
 } elseif (@($rows | Where-Object Status -eq "PAUSED").Count -gt 0) {
@@ -157,7 +171,9 @@ if ($merged -eq $total) {
     $projectStatus = "WAITING"
 }
 
-$currentRows = if ($activeRows.Count -gt 0) {
+$currentRows = if ($orderedActiveRows.Count -gt 0) {
+    $orderedActiveRows
+} elseif ($activeRows.Count -gt 0) {
     $activeRows
 } else {
     $readyRows = @($rows | Where-Object Status -eq "READY")
@@ -268,7 +284,12 @@ foreach ($phase in $phaseGoals.Keys) {
     if ($phaseMerged -eq $phaseRows.Count) {
         $phaseStatus = "MERGED"
     } elseif ($phaseActive.Count -gt 0) {
-        $phaseStatus = $phaseActive[0].Status
+        $phaseLead = @($orderedActiveRows | Where-Object Phase -eq $phase)
+        $phaseStatus = if ($phaseLead.Count -gt 0) {
+            $phaseLead[-1].Status
+        } else {
+            $phaseActive[0].Status
+        }
     } elseif (@($phaseRows | Where-Object Status -eq "READY").Count -gt 0) {
         $phaseStatus = "READY"
     } elseif (@($phaseRows | Where-Object Status -eq "PAUSED").Count -gt 0) {

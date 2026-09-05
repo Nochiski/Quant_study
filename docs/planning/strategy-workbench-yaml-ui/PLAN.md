@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: APPROVED
+project_status: IN_PROGRESS
 current_phase: P6
-current_pr: P6-03,P6-08,P6-09
-active_prs: [P6-03, P6-08, P6-09]
-parallel_window: [P6-08, P6-09, P6-03]
-last_updated: 2026-09-06T03:09:55+09:00
+current_pr: P6-08,P6-09,P6-03,P6-04
+active_prs: [P6-03, P6-04, P6-08, P6-09]
+parallel_window: [P6-08, P6-09, P6-03, P6-04]
+last_updated: 2026-09-06T03:12:41+09:00
 planned_prs: 52
 merged_prs: 46
 approved_prs: 49
@@ -22,13 +22,13 @@ progress_percent: 88
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `APPROVED` |
+| Project status | `IN_PROGRESS` |
 | Current phase | `P6` |
-| Current/next PR | `P6-03,P6-08,P6-09` |
-| Active PR | `P6-03, P6-08, P6-09` |
+| Current/next PR | `P6-08,P6-09,P6-03,P6-04` |
+| Active PR | `P6-03, P6-04, P6-08, P6-09` |
 | Progress | `46 / 52 merged (88%)` |
 | Approved | `49 / 52` |
-| Aggregated at | `2026-09-06 03:09 KST` |
+| Aggregated at | `2026-09-06 03:12 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -78,7 +78,7 @@ progress_percent: 88
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
 | P4 | Outline, Contract, Projections | 10 | 10 | `MERGED` |
 | P5 | Truthful Trace UI | 3 | 3 | `MERGED` |
-| P6 | Professional release and migration | 9 | 3 | `APPROVED` |
+| P6 | Professional release and migration | 9 | 3 | `IN_PROGRESS` |
 | **Total** |  | **52** | **46** | **88%** |
 <!-- PLAN:PHASES:END -->
 
@@ -86,16 +86,16 @@ progress_percent: 88
 
 | 항목 | 값 |
 |---|---|
-| PR | `P6-03` Keyboard workflow와 Command Palette APPROVED ([#76](https://github.com/Nochiski/Quant_study/pull/76), P0/P1/P2 0) |
-| Intent | 전문 사용자가 마우스 없이 현재 StrategySpec을 검증·저장·백테스트하고 표현·패널·문서 symbol을 탐색하며 workspace 선호를 복구하게 한다 |
-| Acceptance | 접근 가능한 command palette와 IME-safe 단축키; Validate/Save/Backtest의 기존 gate 재사용; 사용 가능한 view와 세 IDE panel 전환; 현재 outline의 path·semantic symbol 검색 후 source reveal; panel size와 light/dark/system theme preference의 versioned local persistence 및 hostile storage fail-closed; new/revision route 통합 |
-| Non-goals | soft dark 색상 token 자체(P6-04), palette 밖 전역 앱 검색, 서버 동기화 preference, 브라우저 E2E/visual baseline(P6-05~06), legacy editor 제거 |
-| Branch/worktree | `feat/p6-03-keyboard-palette` (`Quant_study-p6-03`), base branch `feat/p6-09-backtest-history` |
-| Base SHA | `db076ea` (P6-09 approval-doc HEAD; #74→#75 순차 merge 후 base 전환) |
-| Head SHA | `76023db` (final reviewed HEAD; Escape fix `b8f397c`) |
-| Diff stat | base 대비 28 files +1,940/-76 (second-review product delta 2 files +31/-1) |
-| Focused tests | narrow drawer 위 palette close-button Escape 격리와 focus 복구를 포함한 palette/IDE 2 files 30 passed; 이전 review-fix 4 files 97와 route matrix 11 passed |
-| Full gate | frontend 455·backend 1,118·Rust 13·root delegate 5 passed; typecheck·lint·changed-file Prettier·build·Ruff·Pyright·cargo fmt/clippy; OpenAPI/SDK regeneration diff clean |
+| PR | `P6-04` Performance·accessibility·i18n·soft dark hardening IN_PROGRESS |
+| Intent | 500-node 전문 전략에서도 입력과 trace 탐색을 bounded하게 유지하고, P6-03 preference를 실제 soft-dark token에 연결하며 모든 visible 상태를 접근 가능한 ko/en catalog로 제공한다 |
+| Acceptance | 500-node 약 3,000줄 입력 지연 <16ms/keystroke와 folding/search; editor lazy gzip ≤200KB; trace table/list DOM virtualization; modal/drawer focus와 accessible name; 1440/1920 light/dark 확인; 저장된 system/light/dark preference가 semantic token만 전환; ko/en key·placeholder 완결; hostile/recursive `$ref`-only schema cycle fail-closed |
+| Non-goals | Playwright dependency·CI·screenshot baseline(P6-05), 전체 실사용 E2E와 legacy cleanup(P6-06), backend StrategySpec/validation/trace 의미 변경, 새 authoring DSL |
+| Branch/worktree | `feat/p6-04-hardening` (`Quant_study-p6-04`), stacked on `feat/p6-03-keyboard-palette` |
+| Base SHA | `e84bd7e` (P6-03 approval-doc HEAD; #74→#75→#76 순차 merge 후 base 전환) |
+| Head SHA | 구현 전 |
+| Diff stat | 구현 전 |
+| Focused tests | large/hostile document, virtual trace window, theme/accessibility/i18n 계약을 추가 예정 |
+| Full gate | P6-03 기준 frontend 455·backend 1,118·Rust 13·root 5 통과; P6-04 완료 후 전체 재실행 |
 
 ---
 
@@ -234,7 +234,7 @@ Phase exit:
 | [x] | `P6-01` | SQLite persistent strategy revision repository | P1-07 | `MERGED` | [#69](https://github.com/Nochiski/Quant_study/pull/69) · `review_p6_01` APPROVE |
 | [x] | `P6-02` | Server draft persistence/CAS/recovery UI | P6-01, P3-06, P4-08 | `MERGED` | [#72](https://github.com/Nochiski/Quant_study/pull/72) · `review_p6_02` APPROVE |
 | [ ] | `P6-03` | Keyboard workflow와 Command Palette | P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `APPROVED` | [#76](https://github.com/Nochiski/Quant_study/pull/76) · `review_p6_03` APPROVE, P0/P1/P2 0 · CI billing 차단 |
-| [ ] | `P6-04` | Large/hostile spec 성능·접근성·i18n과 soft dark theme (`$ref`-only cycle fail-closed 포함) | P3-05, P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `WAITING` | — |
+| [ ] | `P6-04` | Large/hostile spec 성능·접근성·i18n과 soft dark theme (`$ref`-only cycle fail-closed 포함) | P3-05, P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `IN_PROGRESS` | 전용 stacked worktree · review 전 |
 | [ ] | `P6-05` | Playwright/visual regression infrastructure와 CI | P2-03, P3-05, P6-04 | `WAITING` | — |
 | [ ] | `P6-06` | 전체 browser E2E·실구동 시나리오 검증, migration gate, 조건부 legacy cleanup | P6-01, P6-02, P6-03, P6-04, P6-05, P6-08, P6-09 | `WAITING` | — |
 | [x] | `P6-07` | Root frontend/backend development entrypoints | P0-02, P0-03 | `MERGED` | [#56](https://github.com/Nochiski/Quant_study/pull/56) · `review_p6_07` APPROVE |
@@ -353,6 +353,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-06 KST | Codex | P6-03 승인-doc HEAD `e84bd7e` 위에 P6-04 전용 branch/worktree를 만들고 IN_PROGRESS로 전환했다. 기존 ADR의 500-node <16ms/keystroke·editor gzip ≤200KB를 성능 SoT로 재사용하고, trace는 server value를 재계산하지 않는 표시 virtualization만, dark는 P6-03 preference에 semantic token만 연결한다. Playwright/visual baseline은 P6-05, full E2E/legacy cleanup은 P6-06에 남긴다. CI billing으로 승인된 세 PR 병합은 보류하되 순차 stack ancestry를 유지한다 | 성능 기준 SoT 재사용·trace 계산/표시 책임분리·theme state 중복 금지·stack 순차 merge |
 | 2026-09-06 KST | Codex | 동일 reviewer `review_p6_03`이 final reviewed HEAD `76023db`에서 narrow modal Escape P1 폐쇄와 최초 7 findings 유지, 최신 전체 diff의 P0/P1/P2 0을 확인해 APPROVE했다. focused palette/IDE 30, frontend 455, typecheck·lint·changed-file Prettier·build·diff-check를 독립 재현했다. 실제 Safari/browser viewport·focus는 P6-05~06, entry chunk/500-node는 P6-04 residual로 명시하고 P6-03을 APPROVED로 전환한다. GitHub Actions billing 실패 때문에 green merge gate는 아직 충족되지 않았다 | same-reviewer final approval·blocking 0·SoT/FSD 책임분리·CI gate 유지 |
 | 2026-09-06 KST | Codex | P6-03 narrow modal Escape 수정과 self-check 증거를 `ba6cbb1`에 고정하고 동일 reviewer `review_p6_03`에게 신규 P1 폐쇄와 최신 전체 diff blocker 0 여부의 3차 검토를 요청하도록 IN_REVIEW로 전환한다 | 13.3 diff freeze·13.5 same-reviewer fix loop |
 | 2026-09-06 KST | Codex | P6-03 2차 review P1을 `b8f397c`에서 수정했다. palette backdrop의 모든 Escape 경로가 default와 propagation을 소비한 뒤 최상위 modal만 닫는다. `<1280px` Inspector drawer를 열고 palette close button에서 Escape를 누르는 실제 widget 회귀로 drawer 유지와 원래 `계약 접기` control focus 복구를 고정했다. focused palette/IDE 30, frontend 455, typecheck·lint·changed-file Prettier·build를 통과해 SELF_CHECK로 전환한다 | modal stack Escape ownership·focus restoration·same-reviewer fix loop |

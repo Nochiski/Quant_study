@@ -24,7 +24,8 @@ from . import (
     catalog,
     gates,
     inputs,
-    rules_sample,  # noqa: F401  # reason: T0 유일 등록 모듈 — T1 에서 rules_master 추가
+    rules_s02,  # noqa: F401  # reason: 등록 부작용 — S02 캘린더·구간·지수
+    rules_sample,  # noqa: F401  # reason: T0 샘플 테이블
 )
 from .model import RULES
 

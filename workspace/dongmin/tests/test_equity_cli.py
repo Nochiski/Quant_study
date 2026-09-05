@@ -45,7 +45,9 @@ def test_없는_테이블은_argparse_에러(tmp_path: Path, make_stage_tree) ->
     with pytest.raises(SystemExit) as e:
         main([*base, "build", "없는테이블"])
     assert e.value.code == 2
-    assert sorted(RULES) == ["sample_table"]      # T1 에서 rules_master 가 늘린다
+    # RULES 는 import 된 rules_* 모듈이 채우는 전역 레지스트리라 같은 세션에서 S01·S02 를
+    # import 하면 늘어난다. T0 회귀 축은 "sample_table 이 계속 등록돼 있다" 뿐이다.
+    assert "sample_table" in RULES
 
 
 def test_동사를_안_주면_argparse_에러() -> None:

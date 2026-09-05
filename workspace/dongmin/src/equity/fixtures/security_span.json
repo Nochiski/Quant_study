@@ -1,0 +1,66 @@
+[
+ {"case": "respan_036220_span1_last",
+  "key": {"ticker": "036220", "span_seq": "1"}, "column": "last_date", "expect": "2016-05-04",
+  "source": "doc:DESIGN §10 P8 + hand — 절단본 stg_listing_daily 036220 존재일 2,163 중 첫 run 1,570",
+  "expect_source": "doc:DESIGN §10 P8", "fixture_class": "positive"},
+
+ {"case": "respan_036220_span1_end_reason",
+  "key": {"ticker": "036220", "span_seq": "1"}, "column": "end_reason", "expect": "delisted",
+  "source": "hand — last_date 2016-05-04 != 커버리지 끝(2026-08-20)",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "respan_036220_span2_first",
+  "key": {"ticker": "036220", "span_seq": "2"}, "column": "first_date", "expect": "2024-03-13",
+  "source": "doc:DESIGN §10 P8 + hand — 두 번째 run 593일의 시작",
+  "expect_source": "doc:DESIGN §10 P8", "fixture_class": "positive",
+  "note": "FX-1-001. 구간 2개가 1개로 뭉치면 2016~2024 공백 8년이 상장 구간으로 둔갑한다(생존편향)"},
+
+ {"case": "respan_101970_span1_last",
+  "key": {"ticker": "101970", "span_seq": "1"}, "column": "last_date", "expect": "2015-03-16",
+  "source": "doc:DESIGN §10 P8 + hand — 절단본 101970 첫 run 648일(2012-07-26 시작)",
+  "expect_source": "doc:DESIGN §10 P8", "fixture_class": "positive"},
+
+ {"case": "respan_101970_span2_first",
+  "key": {"ticker": "101970", "span_seq": "2"}, "column": "first_date", "expect": "2025-03-28",
+  "source": "doc:DESIGN §10 P8 + hand — 두 번째 run 341일의 시작",
+  "expect_source": "doc:DESIGN §10 P8", "fixture_class": "positive",
+  "note": "FX-1-002"},
+
+ {"case": "continuous_005930_first",
+  "key": {"ticker": "005930", "span_seq": "1"}, "column": "first_date", "expect": "2010-01-04",
+  "source": "hand — 삼성전자는 절단본 전 거래일에 존재(4,094행)",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "continuous_005930_n_days",
+  "key": {"ticker": "005930", "span_seq": "1"}, "column": "n_days", "expect": "4094",
+  "source": "hand — 절단본 stg_listing_daily 005930 행수 = 캘린더 거래일 수",
+  "expect_source": "hand", "fixture_class": "positive",
+  "note": "구간이 하나라도 쪼개지면 이 값이 줄어든다. 행수 등식(EG1)은 Σ 라서 못 본다"},
+
+ {"case": "continuous_005930_end_reason",
+  "key": {"ticker": "005930", "span_seq": "1"}, "column": "end_reason", "expect": "coverage_gap",
+  "source": "hand — last_date 2026-08-20 = 커버리지 끝. 생존 종목을 'delisted' 로 적으면 폐지",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "delisted_000030_last",
+  "key": {"ticker": "000030", "span_seq": "1"}, "column": "last_date", "expect": "2019-02-12",
+  "source": "hand — 절단본 stg_listing_daily 000030 존재일 max(1,037행, 2014-11-19 시작)",
+  "expect_source": "hand", "fixture_class": "positive",
+  "note": "FX-1-008 짝"},
+
+ {"case": "delisted_000030_end_reason",
+  "key": {"ticker": "000030", "span_seq": "1"}, "column": "end_reason", "expect": "delisted",
+  "source": "hand — last_date 2019-02-12 < 커버리지 끝",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "etf_069500_n_days",
+  "key": {"ticker": "069500", "span_seq": "1"}, "column": "n_days", "expect": "4094",
+  "source": "hand — 절단본 stg_etf_price_daily 069500 4,094행. ETF 는 listing 원장에 없다",
+  "expect_source": "hand", "fixture_class": "positive",
+  "note": "listing ∪ etf 합집합을 빠뜨리면 이 행 자체가 사라진다(ETF 전량 유니버스 이탈)"},
+
+ {"case": "etf_069500_end_reason",
+  "key": {"ticker": "069500", "span_seq": "1"}, "column": "end_reason", "expect": "coverage_gap",
+  "source": "hand — ETF 도 커버리지 끝까지 존재",
+  "expect_source": "hand", "fixture_class": "positive"}
+]

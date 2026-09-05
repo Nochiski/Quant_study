@@ -95,6 +95,16 @@ def require_const(ctx: EquityGateContext, metric: str,
     return float(str(v))
 
 
+def require_const_date(ctx: EquityGateContext, metric: str,
+                       metrics: dict[str, object] | None = None) -> str:
+    """날짜 상수(ISO 문자열). 미등재면 `require_const` 와 같은 규약으로 SkipGate('no_baseline')."""
+    v = ctx.baseline.get(ctx.rule.name, metric)
+    if v is None:
+        raise SkipGate("no_baseline", {"missing_metric": f"{ctx.rule.name}.{metric}",
+                                       **(metrics or {})})
+    return str(v)
+
+
 def threshold(ctx: EquityGateContext, gate: str) -> float:
     """격리 비율 임계. baseline `threshold_<gate>` → CLI override → 코드 기본값 순."""
     v = ctx.baseline.get(ctx.rule.name, f"threshold_{gate}")

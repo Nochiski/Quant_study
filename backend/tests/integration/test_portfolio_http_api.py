@@ -3,7 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi.testclient import TestClient
+from pydantic import TypeAdapter
 
+from strategy_workbench.adapters.inbound.http_api._execution_error_contract import (
+    Portfolio422Response,
+)
 from strategy_workbench.bootstrap.facade.http import build_http_app
 
 
@@ -63,3 +67,24 @@ def test_invalid_portfolio_configuration_returns_structured_validation() -> None
     assert response.json()["detail"]["code"] == "portfolio.strategy.invalid"
     codes = {item["code"] for item in response.json()["detail"]["validation"]["issues"]}
     assert "strategy.risk.risk_field" in codes
+    TypeAdapter(Portfolio422Response).validate_python(response.json())
+
+
+def test_portfolio_preview_openapi_declares_coded_and_malformed_422() -> None:
+    client = TestClient(build_http_app())
+    schema = client.get("/openapi.json").json()
+    operation = schema["paths"]["/api/v1/portfolio/preview"]["post"]
+    detail = schema["components"]["schemas"]["PortfolioUnprocessableResponse"]["properties"][
+        "detail"
+    ]
+
+    assert "422" in operation["responses"]
+    assert detail["discriminator"]["propertyName"] == "code"
+    assert set(detail["discriminator"]["mapping"]) == {
+        "portfolio.data.unavailable",
+        "portfolio.strategy.invalid",
+    }
+    malformed = client.post("/api/v1/portfolio/preview", json={"spec": {}})
+    assert malformed.status_code == 422
+    assert isinstance(malformed.json()["detail"], list)
+    TypeAdapter(Portfolio422Response).validate_python(malformed.json())

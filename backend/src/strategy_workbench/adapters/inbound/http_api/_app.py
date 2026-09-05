@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from dataclasses import asdict, dataclass
+from threading import Event
 from typing import Annotated
 
-from fastapi import FastAPI, Header, HTTPException, Query, Response, status
+from fastapi import FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -47,11 +49,22 @@ from strategy_workbench.application.factor_research.facade.research import (
     InvalidFactorRequestError,
 )
 from strategy_workbench.application.portfolio_design.facade.design import (
+    IncompatiblePortfolioRequestError,
     InvalidPortfolioRequestError,
     PortfolioDesignService,
     PortfolioPreview,
     PortfolioPreviewRequest,
     RawObservationUnavailableError,
+)
+from strategy_workbench.application.portfolio_design.facade.trace import (
+    InvalidStrategyTraceRequestError,
+    StaleStrategyTraceSourceError,
+    StrategyTraceCancelledError,
+    StrategyTraceCapabilityError,
+    StrategyTraceRequest,
+    StrategyTraceResponse,
+    StrategyTraceService,
+    StrategyTraceSourceNotFoundError,
 )
 from strategy_workbench.application.strategy_authoring.facade.authoring import (
     CompiledDocument,
@@ -85,6 +98,26 @@ from strategy_workbench.domain.equity.facade.research_data import (
 from strategy_workbench.domain.strategy.facade.explanation import StrategyExplanation
 from strategy_workbench.domain.strategy.facade.specification import StrategySpec
 from strategy_workbench.domain.strategy.facade.validation import StrategyValidation
+
+from ._backtest_contract import (
+    Backtest422Response,
+    BacktestStrategyNotFoundResponse,
+    BacktestStrategyStaleResponse,
+)
+from ._execution_error_contract import Portfolio422Response
+from ._trace_contract import (
+    Trace422Response,
+    TraceCancelledDetail,
+    TraceCancelledResponse,
+    TraceCapabilityUnsupportedDetail,
+    TraceEngineIncompatibleDetail,
+    TraceRequestInvalidDetail,
+    TraceStrategyNotFoundDetail,
+    TraceStrategyNotFoundResponse,
+    TraceStrategyStaleDetail,
+    TraceStrategyStaleResponse,
+    apply_trace_openapi_contract,
+)
 
 EQUITY_CATALOG_PATH = "/api/v1/equity/catalog"
 FACTOR_CATALOG_PATH = "/api/v1/factors/catalog"
@@ -135,6 +168,7 @@ def create_app(
     equity_workspace: EquityWorkspaceService,
     factor_research: FactorResearchService,
     portfolio_design: PortfolioDesignService,
+    strategy_traces: StrategyTraceService,
     backtest_runs: BacktestRunService,
     allowed_origins: tuple[str, ...] = ("http://localhost:5173",),
 ) -> FastAPI:
@@ -163,6 +197,20 @@ def create_app(
         "/api/v1/backtests",
         operation_id="startBacktest",
         status_code=status.HTTP_202_ACCEPTED,
+        responses={
+            404: {
+                "model": BacktestStrategyNotFoundResponse,
+                "description": "The immutable strategy revision does not exist",
+            },
+            409: {
+                "model": BacktestStrategyStaleResponse,
+                "description": "The saved revision hash differs from the expected hash",
+            },
+            422: {
+                "model": Backtest422Response,
+                "description": "Malformed envelope or a coded backtest preflight diagnostic",
+            },
+        },
     )
     def start_backtest(spec: BacktestRunSpec) -> BacktestStartResponse:
         try:
@@ -266,12 +314,97 @@ def create_app(
     @app.post(
         "/api/v1/portfolio/preview",
         operation_id="previewPortfolio",
+        responses={
+            422: {
+                "model": Portfolio422Response,
+                "description": "Malformed envelope or a coded portfolio preflight diagnostic",
+            }
+        },
     )
     def portfolio_preview(request: PortfolioPreviewRequest) -> PortfolioPreview:
         try:
             return portfolio_design.preview(request)
         except (InvalidPortfolioRequestError, RawObservationUnavailableError) as error:
             raise _portfolio_http_error(error) from error
+
+    @app.post(
+        "/api/v1/strategies/debug/trace",
+        operation_id="traceStrategy",
+        responses={
+            404: {
+                "model": TraceStrategyNotFoundResponse,
+                "description": "The immutable strategy revision does not exist",
+            },
+            409: {
+                "model": TraceStrategyStaleResponse,
+                "description": "The saved revision hash differs from the expected hash",
+            },
+            422: {
+                "model": Trace422Response,
+                "description": "Malformed envelope or a coded trace preflight diagnostic",
+            },
+            499: {
+                "model": TraceCancelledResponse,
+                "description": "The client cancelled the trace request",
+            },
+        },
+    )
+    async def trace_strategy(
+        trace_request: StrategyTraceRequest, request: Request
+    ) -> StrategyTraceResponse:
+        """Bounded node/raw/target projection from the same calculation that builds TargetTape."""
+        stop = Event()
+        task = asyncio.create_task(
+            asyncio.to_thread(strategy_traces.trace, trace_request, cancelled=stop.is_set)
+        )
+        try:
+            while not task.done():
+                if await request.is_disconnected():
+                    stop.set()
+                await asyncio.sleep(0.01)
+            return await task
+        except InvalidStrategyTraceRequestError as error:
+            detail = TraceRequestInvalidDetail("trace.request.invalid", str(error))
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=asdict(detail),
+            ) from error
+        except StrategyTraceSourceNotFoundError as error:
+            detail = TraceStrategyNotFoundDetail("trace.strategy.not_found", str(error))
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=asdict(detail),
+            ) from error
+        except StaleStrategyTraceSourceError as error:
+            detail = TraceStrategyStaleDetail("trace.strategy.stale", str(error))
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=asdict(detail),
+            ) from error
+        except IncompatiblePortfolioRequestError as error:
+            detail = TraceEngineIncompatibleDetail("trace.engine.incompatible", error.compatibility)
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=jsonable_encoder(asdict(detail)),
+            ) from error
+        except StrategyTraceCapabilityError as error:
+            detail = TraceCapabilityUnsupportedDetail(
+                "trace.capability.unsupported", error.capability, str(error)
+            )
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=asdict(detail),
+            ) from error
+        except (InvalidPortfolioRequestError, RawObservationUnavailableError) as error:
+            raise _portfolio_http_error(error) from error
+        except StrategyTraceCancelledError as error:
+            detail = TraceCancelledDetail("trace.cancelled", str(error))
+            raise HTTPException(
+                status_code=499,
+                detail=asdict(detail),
+            ) from error
+        finally:
+            stop.set()
 
     @app.get(
         EQUITY_CATALOG_PATH,
@@ -590,6 +723,9 @@ def create_app(
         except StrategyRevisionConflictError as error:
             raise _revision_conflict(error) from error
 
+    # FastAPI sees plain dataclasses, while this inbound adapter owns wire-only constraints and
+    # discriminator metadata. Mutate the cached schema once after every route is registered.
+    apply_trace_openapi_contract(app.openapi())
     return app
 
 

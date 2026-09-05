@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from datetime import date, timedelta
 
 from strategy_workbench.application.backtest_run.facade.ports import (
@@ -221,7 +222,19 @@ class MockEquityDataAdapter:
             data_snapshot_id=self._snapshot.snapshot_id, observations=observations
         )
 
-    def load_raw_observations(self, query: RawObservationQuery) -> RawObservationSet:
+    def load_raw_observations(
+        self,
+        query: RawObservationQuery,
+    ) -> RawObservationSet:
+        """Original preview/backtest port; cancellation is an optional trace capability."""
+        return self.load_raw_observations_cancellable(query, checkpoint=lambda: None)
+
+    def load_raw_observations_cancellable(
+        self,
+        query: RawObservationQuery,
+        *,
+        checkpoint: Callable[[], None],
+    ) -> RawObservationSet:
         """Raw PIT panel for the truthful pipeline (P1.5-03).
 
         Inside the fixture calendar every value comes from the same fixture `Observation` rows and
@@ -232,6 +245,7 @@ class MockEquityDataAdapter:
         function of (security, date) only. The synthetic series is not continuous with the fixture
         values at the calendar boundary (a mock data-quality artifact, deterministic either way).
         """
+        checkpoint()
         venue = _MOCK_UNIVERSES.get((query.market, query.universe_id))
         profile_by_id = {profile.field_id: profile for profile in self._profiles}
         unknown_fields = sorted(set(query.field_ids) - set(profile_by_id))
@@ -247,6 +261,7 @@ class MockEquityDataAdapter:
                     f"market={query.market!r} universe_id={query.universe_id!r} "
                     f"supported={sorted(_MOCK_UNIVERSES)} unknown_fields={unknown_fields}"
                 ),
+                validation_checkpoint=checkpoint,
             )
         history, requested = _sessions_with_history(
             query.start, query.end, query.history_sessions_before_start
@@ -257,7 +272,10 @@ class MockEquityDataAdapter:
         warnings: set[str] = set()
         observations: list[RawObservation] = []
         for session in history + requested:
+            checkpoint()
             for security_index, membership in enumerate(memberships):
+                if security_index % 64 == 0:
+                    checkpoint()
                 security_id = membership.security.security_id
                 fields: list[RawFieldValue] = []
                 for field_id in query.field_ids:
@@ -290,6 +308,7 @@ class MockEquityDataAdapter:
             observations=tuple(observations),
             detail=None if observations else f"no mock raw observations — query={query}",
             warnings=tuple(sorted(warnings)),
+            validation_checkpoint=checkpoint,
         )
 
     def _raw_field(

@@ -3,11 +3,11 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from collections.abc import Mapping
-from dataclasses import asdict, replace
+from collections.abc import Callable, Iterable, Iterator, Mapping
+from dataclasses import dataclass, fields, is_dataclass, replace
 from datetime import date
 from enum import Enum
-from typing import TypeGuard
+from typing import TypeGuard, TypeVar
 
 from strategy_workbench.domain.strategy.facade.specification import (
     ComparisonOperator,
@@ -30,6 +30,64 @@ from ._models import (
     TargetTape,
 )
 
+_T = TypeVar("_T")
+_CHECKPOINT_BATCH = 256
+
+
+def _noop_checkpoint() -> None:
+    return None
+
+
+def _checkpointed(items: Iterable[_T], checkpoint: Callable[[], None]) -> Iterator[_T]:
+    for index, item in enumerate(items):
+        if index % _CHECKPOINT_BATCH == 0:
+            checkpoint()
+        yield item
+
+
+class NonFinitePortfolioCalculationError(ArithmeticError):
+    """Portfolio arithmetic produced a value that cannot enter an auditable TargetTape."""
+
+    def __init__(self, *, stage: str, value: float, context: str) -> None:
+        super().__init__(
+            "portfolio calculation produced a non-finite value — "
+            f"stage={stage!r} value={value!r} context={context}"
+        )
+        self.stage = stage
+        self.value = value
+        self.context = context
+
+
+@dataclass(frozen=True)
+class PortfolioRebalanceSchedule:
+    """Compiler-owned rebalance pairs shared by preflight and TargetTape construction."""
+
+    sessions: tuple[date, ...]
+    pairs: tuple[tuple[date, date], ...]
+    rebalance: RebalanceFrequency
+    rebalance_every_n_sessions: int
+
+    @property
+    def first_signal_as_of(self) -> date | None:
+        return self.pairs[0][0] if self.pairs else None
+
+
+def compile_rebalance_schedule(
+    spec: StrategySpec,
+    sessions: tuple[date, ...],
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
+) -> PortfolioRebalanceSchedule:
+    ordered_sessions = tuple(sorted(set(sessions)))
+    if len(ordered_sessions) != len(sessions):
+        raise ValueError("portfolio sessions must be unique")
+    return PortfolioRebalanceSchedule(
+        sessions=ordered_sessions,
+        pairs=_rebalance_pairs(spec, ordered_sessions, checkpoint=checkpoint),
+        rebalance=spec.portfolio.rebalance,
+        rebalance_every_n_sessions=spec.portfolio.rebalance_every_n_sessions,
+    )
+
 
 def compile_target_tape(
     spec: StrategySpec,
@@ -37,13 +95,24 @@ def compile_target_tape(
     data_snapshot_id: str,
     sessions: tuple[date, ...],
     observations: tuple[PortfolioObservation, ...],
+    schedule: PortfolioRebalanceSchedule | None = None,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> TargetTape:
+    prepared_schedule = schedule or compile_rebalance_schedule(
+        spec, sessions, checkpoint=checkpoint
+    )
     ordered_sessions = tuple(sorted(set(sessions)))
     if len(ordered_sessions) != len(sessions):
         raise ValueError("portfolio sessions must be unique")
+    if (
+        prepared_schedule.sessions != ordered_sessions
+        or prepared_schedule.rebalance is not spec.portfolio.rebalance
+        or prepared_schedule.rebalance_every_n_sessions != spec.portfolio.rebalance_every_n_sessions
+    ):
+        raise ValueError("portfolio rebalance schedule does not match the strategy and sessions")
     by_date: dict[date, list[PortfolioObservation]] = {}
     seen: set[tuple[date, str]] = set()
-    for observation in observations:
+    for observation in _checkpointed(observations, checkpoint):
         key = (observation.as_of, observation.security_id)
         if key in seen:
             raise ValueError(f"duplicate portfolio observation: key={key}")
@@ -54,29 +123,44 @@ def compile_target_tape(
     # The book is folded frame by frame: the compiler owns `previous_weight` from the second
     # rebalance on, and `PortfolioObservation.previous_weight` seeds only the first (D-002).
     carried: dict[str, float] | None = None
-    for signal_as_of, execution_on in _rebalance_pairs(spec, ordered_sessions):
+    for signal_as_of, execution_on in _checkpointed(prepared_schedule.pairs, checkpoint):
         frame_observations = tuple(by_date.get(signal_as_of, ()))
         previous_weights = (
-            {item.security_id: item.previous_weight for item in frame_observations}
+            {
+                item.security_id: item.previous_weight
+                for item in _checkpointed(frame_observations, checkpoint)
+            }
             if carried is None
             else carried
         )
         frame = _compile_frame(
-            spec, signal_as_of, execution_on, frame_observations, previous_weights
+            spec,
+            signal_as_of,
+            execution_on,
+            frame_observations,
+            previous_weights,
+            checkpoint=checkpoint,
+        )
+        _require_finite_tree(
+            frame,
+            stage="frame",
+            context=f"signal_as_of={signal_as_of} execution_on={execution_on}",
+            checkpoint=checkpoint,
         )
         compiled.append(frame)
-        carried = {target.security_id: target.weight for target in frame.targets}
+        carried = {
+            target.security_id: target.weight for target in _checkpointed(frame.targets, checkpoint)
+        }
     frames = tuple(compiled)
+    checkpoint()
     strategy_hash = strategy_spec_hash(spec)
     payload = {
         "data_snapshot_id": data_snapshot_id,
         "strategy_hash": strategy_hash,
         "execution_timing": spec.execution.timing.value,
-        "frames": [asdict(frame) for frame in frames],
+        "frames": _canonical_payload(frames, checkpoint=checkpoint),
     }
-    tape_hash = hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":"), default=_json_default).encode()
-    ).hexdigest()
+    tape_hash = _hash_payload(payload, checkpoint=checkpoint)
     return TargetTape(
         data_snapshot_id=data_snapshot_id,
         strategy_hash=strategy_hash,
@@ -87,15 +171,22 @@ def compile_target_tape(
 
 
 def _rebalance_pairs(
-    spec: StrategySpec, sessions: tuple[date, ...]
+    spec: StrategySpec,
+    sessions: tuple[date, ...],
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> tuple[tuple[date, date], ...]:
     selected: set[int] = set()
     if spec.portfolio.rebalance is RebalanceFrequency.EVERY_N_SESSIONS:
         interval = spec.portfolio.rebalance_every_n_sessions
-        selected.update(index for index in range(len(sessions)) if (index + 1) % interval == 0)
+        selected.update(
+            index
+            for index in _checkpointed(range(len(sessions)), checkpoint)
+            if (index + 1) % interval == 0
+        )
     else:
         grouped: dict[tuple[int, ...], int] = {}
-        for index, session in enumerate(sessions):
+        for index, session in _checkpointed(enumerate(sessions), checkpoint):
             if spec.portfolio.rebalance is RebalanceFrequency.WEEKLY:
                 iso = session.isocalendar()
                 key = (iso.year, iso.week)
@@ -105,11 +196,11 @@ def _rebalance_pairs(
                 key = (session.year, (session.month - 1) // 3 + 1)
             grouped[key] = index
         selected.update(grouped.values())
-    return tuple(
-        (sessions[index], sessions[index + 1])
-        for index in sorted(selected)
-        if index + 1 < len(sessions)
-    )
+    pairs: list[tuple[date, date]] = []
+    for index in _checkpointed(sorted(selected), checkpoint):
+        if index + 1 < len(sessions):
+            pairs.append((sessions[index], sessions[index + 1]))
+    return tuple(pairs)
 
 
 def _compile_frame(
@@ -118,16 +209,25 @@ def _compile_frame(
     execution_on: date,
     observations: tuple[PortfolioObservation, ...],
     previous_weights: Mapping[str, float],
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> TargetFrame:
     """One rebalance. `previous_weights` is the book carried in, never read off observations."""
-    decisions = [_score_candidate(spec, observation) for observation in observations]
+    decisions = [
+        _score_candidate(spec, observation)
+        for observation in _checkpointed(observations, checkpoint)
+    ]
     ranked = sorted(
-        (decision for decision in decisions if decision.eligible),
+        (decision for decision in _checkpointed(decisions, checkpoint) if decision.eligible),
         key=lambda item: (-(item.composite_score or 0.0), item.security_id),
     )
-    rank_by_id = {item.security_id: index for index, item in enumerate(ranked, start=1)}
+    rank_by_id = {
+        item.security_id: index
+        for index, item in _checkpointed(enumerate(ranked, start=1), checkpoint)
+    }
     decisions = [
-        replace(decision, rank=rank_by_id.get(decision.security_id)) for decision in decisions
+        replace(decision, rank=rank_by_id.get(decision.security_id))
+        for decision in _checkpointed(decisions, checkpoint)
     ]
     long_count, short_count = _selection_counts(spec, len(ranked))
     long_ids = {item.security_id for item in ranked[:long_count]}
@@ -136,7 +236,9 @@ def _compile_frame(
         if spec.portfolio.side is PortfolioSide.LONG_SHORT
         else set()
     )
-    observations_by_id = {item.security_id: item for item in observations}
+    observations_by_id = {
+        item.security_id: item for item in _checkpointed(observations, checkpoint)
+    }
     buffer_retained = _apply_turnover_buffer(
         spec,
         ranked,
@@ -145,6 +247,7 @@ def _compile_frame(
         short_ids=short_ids,
         long_count=long_count,
         short_count=short_count,
+        checkpoint=checkpoint,
     )
     weights, weight_reasons = _target_weights(
         spec,
@@ -153,6 +256,7 @@ def _compile_frame(
         previous_weights,
         long_ids=long_ids,
         short_ids=short_ids,
+        checkpoint=checkpoint,
     )
     decisions = [
         _finalize_decision(
@@ -164,7 +268,7 @@ def _compile_frame(
             weight_reasons,
             buffer_retained,
         )
-        for decision in decisions
+        for decision in _checkpointed(decisions, checkpoint)
     ]
     targets = tuple(
         TargetPosition(
@@ -174,7 +278,9 @@ def _compile_frame(
             rank=decision.rank or 0,
             side=decision.side or CandidateSide.LONG,
         )
-        for decision in sorted(decisions, key=lambda item: item.security_id)
+        for decision in _checkpointed(
+            sorted(decisions, key=lambda item: item.security_id), checkpoint
+        )
         if decision.selected and decision.target_weight != 0
     )
     return TargetFrame(
@@ -233,13 +339,41 @@ def _score_candidate(spec: StrategySpec, observation: PortfolioObservation) -> C
         if value is None or value.value is None:
             reasons.append(ExclusionReason.MISSING_FACTOR)
             continue
+        if not _number(value.value):
+            raise NonFinitePortfolioCalculationError(
+                stage="factor_input",
+                value=value.value,
+                context=(
+                    f"as_of={observation.as_of} security_id={observation.security_id!r} "
+                    f"factor_id={factor.factor_id!r}"
+                ),
+            )
         if value.available_date > observation.as_of:
             reasons.append(ExclusionReason.FUTURE_DATA)
             continue
         direction = 1.0 if factor.direction is FactorDirection.HIGH else -1.0
-        score += direction * factor.weight * value.value
-        denominator += abs(factor.weight)
-    composite_score = score / denominator if denominator else None
+        score = _finite(
+            score + direction * factor.weight * value.value,
+            stage="composite_score",
+            context=(
+                f"as_of={observation.as_of} security_id={observation.security_id!r} "
+                f"factor_id={factor.factor_id!r}"
+            ),
+        )
+        denominator = _finite(
+            denominator + abs(factor.weight),
+            stage="composite_denominator",
+            context=f"security_id={observation.security_id!r}",
+        )
+    composite_score = (
+        _finite(
+            score / denominator,
+            stage="composite_score",
+            context=f"as_of={observation.as_of} security_id={observation.security_id!r}",
+        )
+        if denominator
+        else None
+    )
     if composite_score is not None and spec.signal.score_threshold is not None:
         passes = (
             abs(composite_score) >= abs(spec.signal.score_threshold)
@@ -291,12 +425,13 @@ def _apply_turnover_buffer(
     short_ids: set[str],
     long_count: int,
     short_count: int,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> set[str]:
     retained: set[str] = set()
     buffer_count = spec.portfolio.turnover_buffer_count
     if buffer_count == 0:
         return retained
-    for index, candidate in enumerate(ranked):
+    for index, candidate in _checkpointed(enumerate(ranked), checkpoint):
         previous = previous_weights.get(candidate.security_id, 0.0)
         if previous > 0 and index < long_count + buffer_count:
             if candidate.security_id not in long_ids:
@@ -324,6 +459,7 @@ def _target_weights(
     *,
     long_ids: set[str],
     short_ids: set[str],
+    checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> tuple[dict[str, float], dict[str, ExclusionReason]]:
     long_budget = (
         (spec.risk.gross_exposure + spec.risk.net_exposure) / 2
@@ -336,18 +472,32 @@ def _target_weights(
         else 0.0
     )
     reasons: dict[str, ExclusionReason] = {}
-    long_scores = _weight_scores(spec, ranked, observations, long_ids, reasons)
-    short_scores = _weight_scores(spec, list(reversed(ranked)), observations, short_ids, reasons)
-    weights = _capped_allocate(long_scores, long_budget, spec.risk.max_name_weight)
+    long_scores = _weight_scores(
+        spec, ranked, observations, long_ids, reasons, checkpoint=checkpoint
+    )
+    short_scores = _weight_scores(
+        spec,
+        list(reversed(ranked)),
+        observations,
+        short_ids,
+        reasons,
+        checkpoint=checkpoint,
+    )
+    weights = _capped_allocate(
+        long_scores, long_budget, spec.risk.max_name_weight, checkpoint=checkpoint
+    )
     weights.update(
         {
             security_id: -weight
             for security_id, weight in _capped_allocate(
-                short_scores, short_budget, spec.risk.max_name_weight
+                short_scores,
+                short_budget,
+                spec.risk.max_name_weight,
+                checkpoint=checkpoint,
             ).items()
         }
     )
-    for security_id in observations:
+    for security_id in _checkpointed(observations, checkpoint):
         proposed = weights.get(security_id, 0.0)
         previous = previous_weights.get(security_id, 0.0)
         sign_compatible = (security_id in long_ids and previous >= 0) or (
@@ -363,21 +513,28 @@ def _target_weights(
                 reasons[security_id] = ExclusionReason.MINIMUM_TRADE
             if previous != 0:
                 weights[security_id] = previous
-    weights = _apply_sector_constraints(spec, weights, observations)
-    return _apply_side_budgets(weights, long_budget, short_budget), reasons
+    weights = _apply_sector_constraints(spec, weights, observations, checkpoint=checkpoint)
+    return (
+        _apply_side_budgets(weights, long_budget, short_budget, checkpoint=checkpoint),
+        reasons,
+    )
 
 
 def _apply_side_budgets(
     weights: dict[str, float],
     long_budget: float,
     short_budget: float,
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> dict[str, float]:
     result = dict(weights)
-    current_long = sum(max(weight, 0.0) for weight in result.values())
-    current_short = sum(abs(min(weight, 0.0)) for weight in result.values())
+    current_long = sum(max(weight, 0.0) for weight in _checkpointed(result.values(), checkpoint))
+    current_short = sum(
+        abs(min(weight, 0.0)) for weight in _checkpointed(result.values(), checkpoint)
+    )
     long_scale = min(long_budget / current_long, 1.0) if current_long > 0 else 0.0
     short_scale = min(short_budget / current_short, 1.0) if current_short > 0 else 0.0
-    for security_id, weight in result.items():
+    for security_id, weight in _checkpointed(tuple(result.items()), checkpoint):
         result[security_id] = weight * (long_scale if weight > 0 else short_scale)
     return result
 
@@ -388,9 +545,11 @@ def _weight_scores(
     observations: dict[str, PortfolioObservation],
     selected: set[str],
     reasons: dict[str, ExclusionReason],
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> dict[str, float]:
     scores: dict[str, float] = {}
-    for order, candidate in enumerate(ranked, start=1):
+    for order, candidate in _checkpointed(enumerate(ranked, start=1), checkpoint):
         if candidate.security_id not in selected:
             continue
         if spec.portfolio.weighting is WeightingMethod.EQUAL:
@@ -406,31 +565,62 @@ def _weight_scores(
                 reasons[candidate.security_id] = ExclusionReason.MISSING_RISK
                 continue
             score = 1 / risk
-        scores[candidate.security_id] = score
+        scores[candidate.security_id] = _finite(
+            score,
+            stage="weight_score",
+            context=f"security_id={candidate.security_id!r} weighting={spec.portfolio.weighting}",
+        )
     return scores
 
 
-def _capped_allocate(scores: dict[str, float], budget: float, cap: float) -> dict[str, float]:
+def _capped_allocate(
+    scores: dict[str, float],
+    budget: float,
+    cap: float,
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
+) -> dict[str, float]:
     allocation = {security_id: 0.0 for security_id in scores}
     remaining = set(scores)
     remaining_budget = max(budget, 0.0)
     while remaining and remaining_budget > 1e-15:
-        denominator = sum(scores[security_id] for security_id in remaining)
+        checkpoint()
+        denominator = _finite(
+            sum(scores[security_id] for security_id in _checkpointed(remaining, checkpoint)),
+            stage="allocation_denominator",
+            context=f"remaining={len(remaining)} budget={remaining_budget!r}",
+        )
         if denominator <= 0:
             break
         proposed = {
-            security_id: remaining_budget * scores[security_id] / denominator
-            for security_id in remaining
+            security_id: _finite(
+                remaining_budget * scores[security_id] / denominator,
+                stage="allocation",
+                context=f"security_id={security_id!r} budget={remaining_budget!r}",
+            )
+            for security_id in _checkpointed(remaining, checkpoint)
         }
         capped = {security_id for security_id, weight in proposed.items() if weight > cap}
         if not capped:
-            for security_id, weight in proposed.items():
-                allocation[security_id] += weight
+            for security_id, weight in _checkpointed(proposed.items(), checkpoint):
+                allocation[security_id] = _finite(
+                    allocation[security_id] + weight,
+                    stage="allocation",
+                    context=f"security_id={security_id!r}",
+                )
             break
-        for security_id in capped:
+        for security_id in _checkpointed(capped, checkpoint):
             room = max(cap - allocation[security_id], 0.0)
-            allocation[security_id] += room
-            remaining_budget -= room
+            allocation[security_id] = _finite(
+                allocation[security_id] + room,
+                stage="allocation_cap",
+                context=f"security_id={security_id!r} cap={cap!r}",
+            )
+            remaining_budget = _finite(
+                remaining_budget - room,
+                stage="remaining_budget",
+                context=f"security_id={security_id!r} cap={cap!r}",
+            )
             remaining.remove(security_id)
     return allocation
 
@@ -439,23 +629,25 @@ def _apply_sector_constraints(
     spec: StrategySpec,
     weights: dict[str, float],
     observations: dict[str, PortfolioObservation],
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> dict[str, float]:
     result = dict(weights)
     sectors: dict[str, list[str]] = {}
-    for security_id in weights:
+    for security_id in _checkpointed(weights, checkpoint):
         sector = observations[security_id].sector_id or "__unknown__"
         sectors.setdefault(sector, []).append(security_id)
-    for security_ids in sectors.values():
+    for security_ids in _checkpointed(sectors.values(), checkpoint):
         exposure = sum(abs(result[item]) for item in security_ids)
         if exposure > spec.risk.max_sector_weight:
             scale = spec.risk.max_sector_weight / exposure
-            for security_id in security_ids:
+            for security_id in _checkpointed(security_ids, checkpoint):
                 result[security_id] *= scale
         if spec.risk.sector_neutral and spec.portfolio.side is PortfolioSide.LONG_SHORT:
             longs = sum(max(result[item], 0.0) for item in security_ids)
             shorts = sum(abs(min(result[item], 0.0)) for item in security_ids)
             matched = min(longs, shorts)
-            for security_id in security_ids:
+            for security_id in _checkpointed(security_ids, checkpoint):
                 weight = result[security_id]
                 if weight > 0:
                     result[security_id] = weight * matched / longs if longs > 0 else 0.0
@@ -523,7 +715,96 @@ def _compare(value: float, operator: ComparisonOperator, threshold: float) -> bo
 
 
 def _number(value: object) -> TypeGuard[int | float]:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+    )
+
+
+def _finite(value: float, *, stage: str, context: str) -> float:
+    if not math.isfinite(value):
+        raise NonFinitePortfolioCalculationError(stage=stage, value=value, context=context)
+    return value
+
+
+def _require_finite_tree(
+    value: object,
+    *,
+    stage: str,
+    context: str,
+    checkpoint: Callable[[], None],
+) -> None:
+    """Defense-in-depth at the immutable frame boundary, independent of calculation branches."""
+    if isinstance(value, float):
+        _finite(value, stage=stage, context=context)
+        return
+    if is_dataclass(value) and not isinstance(value, type):
+        checkpoint()
+        for model_field in fields(value):
+            _require_finite_tree(
+                getattr(value, model_field.name),
+                stage=stage,
+                context=f"{context} field={model_field.name!r}",
+                checkpoint=checkpoint,
+            )
+        return
+    if isinstance(value, (tuple, list)):
+        for item in _checkpointed(value, checkpoint):
+            _require_finite_tree(item, stage=stage, context=context, checkpoint=checkpoint)
+        return
+    if isinstance(value, Mapping):
+        for key, item in _checkpointed(value.items(), checkpoint):
+            _require_finite_tree(
+                item,
+                stage=stage,
+                context=f"{context} key={key!r}",
+                checkpoint=checkpoint,
+            )
+
+
+def _canonical_payload(
+    value: object,
+    *,
+    checkpoint: Callable[[], None],
+) -> object:
+    """Checkpointed ``asdict`` equivalent used by the TargetTape hash contract."""
+    if isinstance(value, float):
+        return _finite(value, stage="canonicalization", context="TargetTape payload")
+    if is_dataclass(value) and not isinstance(value, type):
+        checkpoint()
+        return {
+            model_field.name: _canonical_payload(
+                getattr(value, model_field.name), checkpoint=checkpoint
+            )
+            for model_field in fields(value)
+        }
+    if isinstance(value, (tuple, list)):
+        return [
+            _canonical_payload(item, checkpoint=checkpoint)
+            for item in _checkpointed(value, checkpoint)
+        ]
+    if isinstance(value, Mapping):
+        return {
+            key: _canonical_payload(item, checkpoint=checkpoint)
+            for key, item in _checkpointed(value.items(), checkpoint)
+        }
+    return value
+
+
+def _hash_payload(payload: Mapping[str, object], *, checkpoint: Callable[[], None]) -> str:
+    """Stream the legacy JSON byte contract so cancellation also reaches hashing."""
+    encoder = json.JSONEncoder(
+        sort_keys=True,
+        separators=(",", ":"),
+        default=_json_default,
+        allow_nan=False,
+    )
+    digest = hashlib.sha256()
+    for chunk in _checkpointed(encoder.iterencode(payload), checkpoint):
+        digest.update(chunk.encode())
+    checkpoint()
+    return digest.hexdigest()
 
 
 def _json_default(value: object) -> str:

@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from threading import Event, RLock, Thread
 
 from strategy_workbench.application.portfolio_design.facade.design import (
+    InvalidPortfolioRequestError,
     PortfolioDesignService,
     PortfolioPreviewRequest,
 )
@@ -28,7 +29,6 @@ from strategy_workbench.domain.backtest.facade.runs import (
     WarningSeverity,
 )
 from strategy_workbench.domain.portfolio.facade.construction import TargetTape
-from strategy_workbench.domain.strategy.facade.specification import strategy_spec_hash
 from strategy_workbench.domain.strategy.facade.validation import validate_strategy
 
 from .ports.outgoing.artifact_store import BacktestArtifactStorePort
@@ -97,8 +97,7 @@ class BacktestRunService:
             raise InvalidBacktestRunError("resolved run spec has no strategy")
         validation = validate_strategy(strategy)
         if not validation.valid:
-            codes = ", ".join(item.code for item in validation.issues)
-            raise InvalidBacktestRunError(f"invalid strategy: {codes}")
+            raise InvalidPortfolioRequestError(validation)
         for window in spec.metric_windows:
             if window.start < strategy.data.start or window.end > strategy.data.end:
                 raise InvalidBacktestRunError(
@@ -107,6 +106,23 @@ class BacktestRunService:
         portfolio = self._portfolio_design.preview(PortfolioPreviewRequest(strategy))
         if not portfolio.engine.compatible:
             raise InvalidBacktestRunError("strategy exceeds engine capabilities")
+        if provenance is None:
+            source_hash = (
+                request.strategy_source.source_hash
+                if isinstance(request.strategy_source, InlineDraft)
+                else None
+            )
+            provenance = StrategyProvenance(
+                kind=StrategySourceKind.INLINE_DRAFT,
+                spec_hash=portfolio.tape.strategy_hash,
+                schema_version=strategy.identity.schema_version,
+                source_hash=source_hash,
+            )
+        elif provenance.spec_hash != portfolio.tape.strategy_hash:
+            raise RuntimeError(
+                "saved strategy repository hash differs from the executed StrategySpec — "
+                f"stored={provenance.spec_hash!r} executed={portfolio.tape.strategy_hash!r}"
+            )
         run_id = self._new_id()
         created = self._now()
         state = BacktestRunState(
@@ -168,7 +184,9 @@ class BacktestRunService:
                 event for event in self._record(run_id).events if event.sequence > after_sequence
             )
 
-    def _resolve(self, request: BacktestRunSpec) -> tuple[BacktestRunSpec, StrategyProvenance]:
+    def _resolve(
+        self, request: BacktestRunSpec
+    ) -> tuple[BacktestRunSpec, StrategyProvenance | None]:
         """Turn the request into a run spec whose `strategy` is the exact spec to execute."""
         source = request.strategy_source
         if request.strategy is None and source is None:
@@ -203,18 +221,13 @@ class BacktestRunService:
             )
             return replace(request, strategy=record.spec), provenance
         if isinstance(source, InlineDraft):
-            strategy, source_hash = source.spec, source.source_hash
+            strategy = source.spec
         else:
             if request.strategy is None:  # pragma: no cover - dataclass invariant
                 raise InvalidBacktestRunError("run spec has neither strategy nor strategy_source")
-            strategy, source_hash = request.strategy, None
-        provenance = StrategyProvenance(
-            kind=StrategySourceKind.INLINE_DRAFT,
-            spec_hash=strategy_spec_hash(strategy),
-            schema_version=strategy.identity.schema_version,
-            source_hash=source_hash,
-        )
-        return replace(request, strategy=strategy), provenance
+            strategy = request.strategy
+        # Inline provenance is assembled from the truthful TargetTape hash after validation.
+        return replace(request, strategy=strategy), None
 
     def _run(
         self,

@@ -82,6 +82,9 @@ import type {
   StreamBacktestEventsData,
   StreamBacktestEventsErrors,
   StreamBacktestEventsResponses,
+  TraceStrategyData,
+  TraceStrategyErrors,
+  TraceStrategyResponses,
   ValidateFactorGraphData,
   ValidateFactorGraphErrors,
   ValidateFactorGraphResponses,
@@ -355,6 +358,27 @@ export const createStrategy = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     url: "/api/v1/strategies",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Trace Strategy
+ *
+ * Bounded node/raw/target projection from the same calculation that builds TargetTape.
+ */
+export const traceStrategy = <ThrowOnError extends boolean = false>(
+  options: Options<TraceStrategyData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    TraceStrategyResponses,
+    TraceStrategyErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/strategies/debug/trace",
     ...options,
     headers: {
       "Content-Type": "application/json",

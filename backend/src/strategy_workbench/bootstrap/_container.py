@@ -27,6 +27,7 @@ from strategy_workbench.application.factor_research.facade.research import (
     FactorResearchService,
 )
 from strategy_workbench.application.portfolio_design.facade.design import PortfolioDesignService
+from strategy_workbench.application.portfolio_design.facade.trace import StrategyTraceService
 from strategy_workbench.application.strategy_authoring.facade.authoring import (
     StrategyAuthoringService,
     StrategyDocumentService,
@@ -47,6 +48,7 @@ class BackendContainer:
     strategy_documents: StrategyDocumentService
     factor_research: FactorResearchService
     portfolio_design: PortfolioDesignService
+    strategy_traces: StrategyTraceService
     backtest_runs: BacktestRunService
 
 
@@ -79,6 +81,7 @@ def build_container(
     run_artifact_root = artifact_root or (
         Path(__file__).resolve().parents[3] / ".local" / "backtest-runs"
     )
+    strategy_traces = StrategyTraceService(portfolio_design, strategy_repository)
     return BackendContainer(
         equity_data=equity_data,
         equity_workspace=EquityWorkspaceService(equity_data),
@@ -97,6 +100,7 @@ def build_container(
             observation_source=equity_data,
         ),
         portfolio_design=portfolio_design,
+        strategy_traces=strategy_traces,
         backtest_runs=BacktestRunService(
             portfolio_design,
             strategy_repository,

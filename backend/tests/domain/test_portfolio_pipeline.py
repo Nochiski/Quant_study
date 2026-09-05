@@ -1,7 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import replace
+import hashlib
+import json
+import math
+from dataclasses import asdict, replace
 from datetime import date, timedelta
+from enum import Enum
 
 import pytest
 
@@ -11,9 +15,11 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.domain.portfolio.facade.construction import (
     ExclusionReason,
+    NonFinitePortfolioCalculationError,
     PortfolioFactorValue,
     PortfolioFieldValue,
     PortfolioObservation,
+    compile_rebalance_schedule,
     compile_target_tape,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
@@ -83,6 +89,29 @@ def _compile(spec, observations, sessions=None):
         sessions=sessions or (signal_day, signal_day + timedelta(days=1)),
         observations=tuple(observations),
     )
+
+
+def test_preflight_and_target_tape_share_the_compiler_owned_schedule(monkeypatch) -> None:
+    from strategy_workbench.domain.portfolio import _compiler as compiler_module
+
+    spec = _spec()
+    sessions = (date(2026, 1, 2), date(2026, 1, 5), date(2026, 1, 6))
+    schedule = compile_rebalance_schedule(spec, sessions)
+    assert schedule.first_signal_as_of == sessions[0]
+
+    def fail_if_recomputed(*args, **kwargs):
+        raise AssertionError((args, kwargs))
+
+    monkeypatch.setattr(compiler_module, "_rebalance_pairs", fail_if_recomputed)
+    tape = compile_target_tape(
+        spec,
+        data_snapshot_id="snapshot-1",
+        sessions=sessions,
+        observations=(_observation(sessions[0], "a", 1.0),),
+        schedule=schedule,
+    )
+
+    assert tuple(frame.signal_as_of for frame in tape.frames) == sessions[:-1]
 
 
 def test_eligibility_and_point_in_time_rules_explain_every_rejection() -> None:
@@ -322,6 +351,107 @@ def test_target_tape_hash_is_immutable_and_snapshot_sensitive() -> None:
     assert first == second
     assert first.tape_hash == second.tape_hash
     assert first.tape_hash != different_snapshot.tape_hash
+
+
+def test_target_tape_hash_preserves_the_pre_cancellation_byte_contract() -> None:
+    spec = _spec()
+    day = date(2026, 1, 2)
+    tape = _compile(spec, (_observation(day, "a", 1.0),))
+    payload = {
+        "data_snapshot_id": tape.data_snapshot_id,
+        "strategy_hash": tape.strategy_hash,
+        "execution_timing": tape.execution_timing,
+        "frames": [asdict(frame) for frame in tape.frames],
+    }
+
+    def encode(value: object) -> str:
+        if isinstance(value, date):
+            return value.isoformat()
+        if isinstance(value, Enum):
+            return str(value.value)
+        raise TypeError(type(value).__name__)
+
+    legacy_hash = hashlib.sha256(
+        json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=encode,
+        ).encode()
+    ).hexdigest()
+
+    assert tape.tape_hash == legacy_hash
+
+
+def test_portfolio_arithmetic_overflow_never_materializes_a_target_tape() -> None:
+    spec = _spec()
+    factor = replace(spec.factors.factors[0], weight=1e308)
+    spec = replace(spec, factors=replace(spec.factors, factors=(factor,)))
+    day = date(2026, 1, 2)
+
+    with pytest.raises(NonFinitePortfolioCalculationError, match="composite_score"):
+        _compile(spec, (_observation(day, "overflow", 2.0),))
+
+
+@pytest.mark.parametrize("stage", ["materialization", "hash"])
+def test_target_tape_cancellation_reaches_canonical_materialization_and_hash(
+    stage: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from strategy_workbench.domain.portfolio import _compiler as compiler_module
+
+    entered = False
+    if stage == "materialization":
+        original = compiler_module._canonical_payload
+
+        def observed_materialization(*args, **kwargs):
+            nonlocal entered
+            entered = True
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(compiler_module, "_canonical_payload", observed_materialization)
+    else:
+        original = compiler_module._hash_payload
+
+        def observed_hash(*args, **kwargs):
+            nonlocal entered
+            entered = True
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(compiler_module, "_hash_payload", observed_hash)
+
+    def checkpoint() -> None:
+        if entered:
+            raise RuntimeError(f"cancelled during {stage}")
+
+    spec = _spec()
+    day = date(2026, 1, 2)
+    with pytest.raises(RuntimeError, match=f"cancelled during {stage}"):
+        compile_target_tape(
+            spec,
+            data_snapshot_id="snapshot-1",
+            sessions=(day, day + timedelta(days=1)),
+            observations=(_observation(day, "a", 1.0),),
+            checkpoint=checkpoint,
+        )
+    assert entered
+
+
+def test_every_materialized_target_tape_number_is_finite() -> None:
+    spec = _spec()
+    day = date(2026, 1, 2)
+    payload = asdict(_compile(spec, (_observation(day, "a", 1.0),)))
+
+    def numbers(value: object):
+        if isinstance(value, float):
+            yield value
+        elif isinstance(value, dict):
+            for item in value.values():
+                yield from numbers(item)
+        elif isinstance(value, (tuple, list)):
+            for item in value:
+                yield from numbers(item)
+
+    assert all(math.isfinite(value) for value in numbers(payload))
 
 
 def test_hard_risk_limits_override_a_minimum_trade_hold() -> None:

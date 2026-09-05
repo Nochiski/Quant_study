@@ -20,6 +20,7 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 )
 from strategy_workbench.application.portfolio_design import _service as _portfolio_service
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
+from strategy_workbench.domain.factor.facade.expression import ConstantNode
 from strategy_workbench.domain.strategy import _validation
 from strategy_workbench.domain.strategy.facade.constraints import (
     EXPRESSION_CODES,
@@ -31,7 +32,14 @@ from strategy_workbench.domain.strategy.facade.constraints import (
     resolve_scalar,
     scalar_constraint_index,
 )
-from strategy_workbench.domain.strategy.facade.specification import StrategySpec
+from strategy_workbench.domain.strategy.facade.specification import (
+    ChoiceParameter,
+    ComparisonOperator,
+    EligibilityRule,
+    EligibilityStep,
+    FloatParameter,
+    StrategySpec,
+)
 from strategy_workbench.domain.strategy.facade.validation import (
     semantic_issue,
     validate_strategy,
@@ -206,9 +214,84 @@ def test_fee_and_slippage_report_one_issue_each_with_their_own_path() -> None:
 
 
 @pytest.mark.parametrize("constraint", STRATEGY_SCALAR_CONSTRAINTS, ids=lambda c: c.pointer)
-def test_nan_never_satisfies_a_bound(constraint: ScalarConstraint) -> None:
-    spec = _with_scalar(_template(), constraint.pointer, float("nan"))
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_value_never_satisfies_a_bound(
+    constraint: ScalarConstraint, value: float
+) -> None:
+    spec = _with_scalar(_template(), constraint.pointer, value)
     assert constraint.code in {issue.code for issue in validate_strategy(spec).issues}
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_every_unbounded_strategy_numeric_leaf_must_be_finite(value: float) -> None:
+    spec = _template()
+    factor = spec.factors.factors[0]
+    constant_index = len(factor.graph.nodes)
+    variants = (
+        (
+            replace(
+                spec,
+                factors=replace(
+                    spec.factors,
+                    factors=(replace(factor, weight=value),),
+                ),
+            ),
+            "factors.factors.0.weight",
+        ),
+        (
+            replace(
+                spec,
+                factors=replace(
+                    spec.factors,
+                    factors=(
+                        replace(
+                            factor,
+                            graph=replace(
+                                factor.graph,
+                                nodes=(*factor.graph.nodes, ConstantNode("bad", value, "constant")),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            f"factors.factors.0.graph.nodes.{constant_index}.value",
+        ),
+        (
+            replace(
+                spec,
+                eligibility=EligibilityStep(
+                    (EligibilityRule("price.close", ComparisonOperator.GREATER_THAN, value),)
+                ),
+            ),
+            "eligibility.rules.0.value",
+        ),
+        (
+            replace(spec, signal=replace(spec.signal, score_threshold=value)),
+            "signal.score_threshold",
+        ),
+        (
+            replace(
+                spec,
+                parameters=(FloatParameter("scale", value, 0.0, 1.0, "float"),),
+            ),
+            "parameters.0.default",
+        ),
+        (
+            replace(
+                spec,
+                parameters=(ChoiceParameter("scale", 1.0, (1.0, value), "choice"),),
+            ),
+            "parameters.0.choices.1",
+        ),
+    )
+
+    for variant, expected_path in variants:
+        issues = [
+            issue
+            for issue in validate_strategy(variant).issues
+            if issue.code == "strategy.number.non_finite"
+        ]
+        assert expected_path in {issue.path for issue in issues}
 
 
 def test_inclusive_minimum_boundaries_are_accepted() -> None:

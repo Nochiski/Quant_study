@@ -11,6 +11,8 @@ Contract:
   never leaked. The application layer treats a violation as an adapter bug (fail-closed).
 - A field is *omitted* when nothing was published as of `as_of`; `value=None` means the source
   observed a missing/uncollected cell (the value exists as a fact, and it is "no number").
+  Numeric values and `previous_weight` are always finite; NaN/±Infinity is an adapter contract
+  violation and is rejected before factor or portfolio calculation rather than normalized.
 - `universe_member` is a fact of (as_of, security) alone: the same pair answers the same way
   regardless of the query window or history length (window invariance).
 - `history_sessions_before_start` counts sessions strictly before `start` (as_of is not one of
@@ -24,17 +26,50 @@ Contract:
   responsibility and the application layer cannot verify it.
 - Failures are values: `status != OK` with `detail` (unknown universe/field, no data), never a
   synthesised observation.
+- ``RawObservationPort`` preserves the original preview/backtest call contract. Adapters that can
+  cooperatively cancel a long trace additionally implement ``CancellableRawObservationPort``;
+  the application negotiates that capability before metadata or raw calculation starts. Those
+  adapters pass the same callback as ``validation_checkpoint`` when constructing the result, and
+  the application passes it again when revalidating at the consumer boundary.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import math
+from collections.abc import Callable, Iterable, Iterator
+from dataclasses import InitVar, dataclass
 from datetime import date
-from typing import Protocol
+from typing import Protocol, TypeVar, runtime_checkable
 
 from strategy_workbench.domain.equity.facade.research_data import DataLoadStatus
 
 RawFieldValueType = float | str | bool | None
+_T = TypeVar("_T")
+_CHECKPOINT_BATCH = 256
+
+
+class RawObservationContractViolation(ValueError):
+    """An adapter attempted to publish a structurally or numerically invalid raw snapshot."""
+
+
+def _finite_number(value: object) -> bool:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
+def _noop_checkpoint() -> None:
+    pass
+
+
+def _checkpointed(items: Iterable[_T], checkpoint: Callable[[], None]) -> Iterator[_T]:
+    for index, item in enumerate(items):
+        if index % _CHECKPOINT_BATCH == 0:
+            checkpoint()
+        yield item
 
 
 @dataclass(frozen=True)
@@ -97,43 +132,87 @@ class RawObservationSet:
     observations: tuple[RawObservation, ...]
     detail: str | None = None
     warnings: tuple[str, ...] = ()
+    validation_checkpoint: InitVar[Callable[[], None] | None] = None
 
     @property
     def ok(self) -> bool:
         return self.status is DataLoadStatus.OK
 
-    def __post_init__(self) -> None:
+    def __post_init__(self, validation_checkpoint: Callable[[], None] | None) -> None:
+        self.validate_contract(checkpoint=validation_checkpoint or _noop_checkpoint)
+
+    def validate_contract(self, *, checkpoint: Callable[[], None] = _noop_checkpoint) -> None:
+        """Validate at construction and consumer boundaries with bounded cancellation checks."""
+        checkpoint()
         if list(self.sessions) != sorted(set(self.sessions)):
-            raise ValueError(f"raw observation sessions must ascend — sessions={self.sessions}")
+            raise RawObservationContractViolation(
+                f"raw observation sessions must ascend — sessions={self.sessions}"
+            )
         if list(self.history_sessions) != sorted(set(self.history_sessions)):
-            raise ValueError(
+            raise RawObservationContractViolation(
                 f"raw observation history must ascend — history={self.history_sessions}"
             )
         overlaps = bool(self.sessions and self.history_sessions)
         if overlaps and self.history_sessions[-1] >= self.sessions[0]:
-            raise ValueError(
+            raise RawObservationContractViolation(
                 "raw observation history must precede the requested range — "
                 f"last_history={self.history_sessions[-1]} first_session={self.sessions[0]}"
             )
-        keys = [(item.as_of, item.security_id) for item in self.observations]
+        keys = [
+            (item.as_of, item.security_id) for item in _checkpointed(self.observations, checkpoint)
+        ]
         if keys != sorted(set(keys)):
-            raise ValueError(
+            raise RawObservationContractViolation(
                 "raw observations must be ordered by (as_of, security_id) and unique — "
                 f"count={len(keys)}"
             )
         # The evaluator counts lag and rolling windows by row position, not by calendar, so an
         # undeclared date silently shifts every window behind it (D-003). Fail closed instead.
         declared = set(self.sessions) | set(self.history_sessions)
-        undeclared = sorted({item.as_of for item in self.observations} - declared)
+        undeclared = sorted(
+            {item.as_of for item in _checkpointed(self.observations, checkpoint)} - declared
+        )
         if undeclared:
-            raise ValueError(
+            raise RawObservationContractViolation(
                 "raw observations carry dates that are neither a session nor warm-up history — "
                 f"undeclared={undeclared[:5]} undeclared_count={len(undeclared)} "
                 f"declared_sessions={len(self.sessions)} "
                 f"declared_history={len(self.history_sessions)} "
                 f"snapshot={self.data_snapshot_id!r}"
             )
+        for observation in _checkpointed(self.observations, checkpoint):
+            if not _finite_number(observation.previous_weight):
+                raise RawObservationContractViolation(
+                    "raw observation previous_weight must be finite — "
+                    f"as_of={observation.as_of} security_id={observation.security_id!r} "
+                    f"value={observation.previous_weight!r} snapshot={self.data_snapshot_id!r}"
+                )
+            for field in _checkpointed(observation.fields, checkpoint):
+                value = field.value
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    if not _finite_number(value):
+                        raise RawObservationContractViolation(
+                            "raw numeric field value must be finite — "
+                            f"as_of={observation.as_of} security_id={observation.security_id!r} "
+                            f"field_id={field.field_id!r} value={value!r} "
+                            f"snapshot={self.data_snapshot_id!r}"
+                        )
 
 
 class RawObservationPort(Protocol):
-    def load_raw_observations(self, query: RawObservationQuery) -> RawObservationSet: ...
+    def load_raw_observations(
+        self,
+        query: RawObservationQuery,
+    ) -> RawObservationSet: ...
+
+
+@runtime_checkable
+class CancellableRawObservationPort(Protocol):
+    """Optional trace capability; callback exception policy remains application-owned."""
+
+    def load_raw_observations_cancellable(
+        self,
+        query: RawObservationQuery,
+        *,
+        checkpoint: Callable[[], None],
+    ) -> RawObservationSet: ...

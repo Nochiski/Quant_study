@@ -19,10 +19,15 @@ from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
     MockEquityDataAdapter,
 )
 from strategy_workbench.application.portfolio_design.facade.ports import (
+    CancellableRawObservationPort,
+    RawFieldValue,
     RawObservation,
     RawObservationPort,
     RawObservationQuery,
     RawObservationSet,
+)
+from strategy_workbench.application.portfolio_design.ports.outgoing import (
+    raw_observations as raw_observation_module,
 )
 from strategy_workbench.domain.equity.facade.research_data import (
     DataLoadStatus,
@@ -114,6 +119,22 @@ def test_observations_are_deterministic_and_ordered(adapter: RawObservationPort)
     keys = [(o.as_of, o.security_id) for o in first.observations]
     assert keys == sorted(keys)
     assert len(keys) == len(set(keys))
+
+
+@pytest.mark.parametrize("adapter", ADAPTERS)
+def test_long_raw_load_honours_the_application_cancellation_checkpoint(
+    adapter: CancellableRawObservationPort,
+) -> None:
+    calls = 0
+
+    def cancel() -> None:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("cancelled by application")
+
+    with pytest.raises(RuntimeError, match="cancelled by application"):
+        adapter.load_raw_observations_cancellable(_query(), checkpoint=cancel)
+    assert calls == 1
 
 
 @pytest.mark.parametrize("adapter", ADAPTERS)
@@ -256,6 +277,78 @@ def test_result_rejects_observations_on_undeclared_dates() -> None:
 
     accepted = RawObservationSet(DataLoadStatus.OK, "snap", (declared, stray), (), rows)
     assert len(accepted.observations) == 2
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_result_rejects_every_non_finite_raw_number(value: float) -> None:
+    field = RawFieldValue("price.market_cap", value, START)
+    with pytest.raises(ValueError, match="raw numeric field value must be finite"):
+        RawObservationSet(
+            DataLoadStatus.OK,
+            "snap",
+            (START,),
+            (),
+            (RawObservation(START, "a", True, (field,)),),
+        )
+
+    with pytest.raises(ValueError, match="previous_weight must be finite"):
+        RawObservationSet(
+            DataLoadStatus.OK,
+            "snap",
+            (START,),
+            (),
+            (RawObservation(START, "a", True, (), previous_weight=value),),
+        )
+
+
+@pytest.mark.parametrize("consumer_revalidation", [False, True])
+def test_raw_contract_validation_cancels_after_first_numeric_check(
+    monkeypatch: pytest.MonkeyPatch, consumer_revalidation: bool
+) -> None:
+    rows = tuple(
+        RawObservation(
+            START,
+            f"security-{index:04d}",
+            True,
+            (RawFieldValue("price.close", float(index), START),),
+        )
+        for index in range(1_000)
+    )
+    existing = (
+        RawObservationSet(DataLoadStatus.OK, "snap", (START,), (), rows)
+        if consumer_revalidation
+        else None
+    )
+    stopped = False
+    numeric_checks = 0
+    original = raw_observation_module._finite_number
+
+    def latch_on_first_numeric(value: object) -> bool:
+        nonlocal numeric_checks, stopped
+        numeric_checks += 1
+        stopped = True
+        return original(value)
+
+    def checkpoint() -> None:
+        if stopped:
+            raise RuntimeError("cancelled during raw contract validation")
+
+    monkeypatch.setattr(raw_observation_module, "_finite_number", latch_on_first_numeric)
+
+    with pytest.raises(RuntimeError, match="cancelled during raw contract validation"):
+        if existing is None:
+            RawObservationSet(
+                DataLoadStatus.OK,
+                "snap",
+                (START,),
+                (),
+                rows,
+                validation_checkpoint=checkpoint,
+            )
+        else:
+            existing.validate_contract(checkpoint=checkpoint)
+
+    assert numeric_checks == 1
 
 
 @pytest.mark.parametrize("adapter", ADAPTERS)

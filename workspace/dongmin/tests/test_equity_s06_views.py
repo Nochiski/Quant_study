@@ -358,7 +358,9 @@ def test_FX_N_006_거래량을_나누면_EG8만_fail하고_FX_2_010이_틀린다
     st = {g.name: g.status.value for g in r.gates}
     assert st["EG8"] == "fail" and st["EG3_adj_factor"] == "pass" and st["EG4"] == "skip"
     m = next(g for g in r.gates if g.name == "EG8").metrics
-    assert m["n_volume_jump_over"] >= 2 and m["max_adj_volume_jump"] > 1000
+    # P03 집합 통계: 나눗셈이면 이벤트별 중앙값 비가 share_factor² (50:1 → 2,500 · 4 → 16) 로 튄다
+    assert m["n_volume_ratio_out_of_band"] == 1 and m["adj_volume_ratio_median"] > 1000
+    assert m["n_ok_volume_ratio_over_10"] == 3
     assert m["n_return_jump_over"] == 0                           # 가격 축은 멀쩡하다
     # FX-2-010: 같은 나눗셈 템플릿을 TEMP MACRO 로 올려 보면 04-27 조정 거래량이 606,216/50 이 된다
     con = duckdb.connect()

@@ -15,7 +15,11 @@
 --   명목 효력일(effective_date, 감자는 기준일)에 기준가가 바뀌지 않는 사건이 많다 — 감자는 매매거래정지 뒤
 --   재개일에 조정되고(명목일 원수익률 0.0 = 정지, 최적일 중앙값 +13 세션), 감자병합은 개별 비율로는 어느
 --   날도 맞지 않는다(복합 사건). 그래서 명목 세션(캘린더에서 effective_date 이상 첫 세션)의 **잔여 수익률**
---   dev = |close_t / 직전 거래 종가 / price_factor − 1| 로 적용 세션을 가린다. 허용치는 조정 후 잔여 기준
+--   dev = |close_t / 직전 **행** 종가 / price_factor − 1| 로 적용 세션을 가린다. 분모가 직전 거래 종가가
+--   아니라 직전 행(참고가 행 포함)인 이유(3차, 서버 2차 실측): KRX 는 정지 중 참고가(reference) 행의 close 에
+--   새 기준가를 먼저 싣는다 — 시계열의 점프는 거래 재개일이 아니라 그 전 무거래 행에서 일어나고, 뷰가
+--   조정하는 대상이 price_daily 의 행 시계열이므로 매칭·EG8 전부 행 대 행이어야 한다(거래 유무 무관).
+--   후보 세션도 거래 행만이 아니라 창 안 모든 가격 행이다. 허용치는 조정 후 잔여 기준
 --   tol = max(tol_rel × m, tol_abs), m = |min(pf, 1/pf) − 1| (기대 점프 크기 — 50:1 분할 0.98 · 10:1 감자
 --   0.9 · 5% 무상증자 0.048). 원수익률 기준 |r − pf| ≤ max(0.15|pf−1|, 0.05)(서버 실측에 쓴 식)과 감자에선
 --   같고 분할에선 더 엄격하다 — 원수익률 기준은 50:1 분할에 r ∈ [0, 0.167] 을 허용해 조정 후 +735% 까지
@@ -45,9 +49,12 @@
 --   capred_paid          : 유상감자 — 시총 불변이 아니고 KRX 기준가 산식이 달라 price_factor 를 ratio 로 못
 --                          낸다. corp_event 에 구분 축이 없으므로 결정공시 본문 stg_event_cr.cr_mth·cr_rs 에
 --                          '유상' 이 있는 event_cr 행으로 판정한다
+--   no_share_change      : ratio = 1 — 주식수가 안 바뀐 사건(액면가만 바뀐 KRX 관측 등). 계수 1 이라 조정할
+--                          것이 없고, ok 로 두면 EG8 이 그날 원수익률(정지 뒤 재개일 ±)을 점프로 잰다
 --   no_price_match       : 위 (d)
 --   same_day_suppressed  : 위 같은 apply_date 규칙
---   사유 우선순위: near_dup_suppressed > ratio_null > capred_paid > no_price_match > same_day_suppressed.
+--   사유 우선순위: near_dup_suppressed > ratio_null > capred_paid > no_share_change > no_price_match
+--   > same_day_suppressed.
 --   ok 가 아닌 행의 apply_date 는 명목 세션, apply_basis 는 no_price_match 만 'unmatched' 나머지 'nominal'.
 --
 -- available_date = min(announce_date, apply_date 다음 세션) · basis derived — 공시가 없어도 KRX 가격·주식수
@@ -102,6 +109,7 @@ judged AS (
            CASE WHEN s.event_id IS NOT NULL THEN 'near_dup_suppressed'
                 WHEN r.ratio IS NULL          THEN 'ratio_null'
                 WHEN r.capred_paid            THEN 'capred_paid'
+                WHEN r.ratio = 1              THEN 'no_share_change'
                 ELSE 'mktcap_neutral' END AS base_source
     FROM ranked r
     LEFT JOIN suppressed s ON s.event_id = r.event_id
@@ -112,12 +120,10 @@ nominal AS (
     FROM judged j
     ASOF JOIN cal c ON j.effective_date <= c.date
 ),
--- ── 가격 축: 후보 티커의 가격 행 + 직전 거래 종가 ───────────────────────────
+-- ── 가격 축: 후보 티커의 가격 행 + 직전 행 종가(참고가 행 포함, 행 대 행) ────────
 px AS (
     SELECT p.ticker, p.date, p.close, p.price_kind,
-           last_value(CASE WHEN p.price_kind = 'trade' THEN p.close END IGNORE NULLS)
-             OVER (PARTITION BY p.ticker ORDER BY p.date
-                   ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING)                    AS prev_trade_close
+           lag(p.close) OVER (PARTITION BY p.ticker ORDER BY p.date)                    AS prev_close
     FROM price_daily p
     WHERE p.ticker IN (SELECT DISTINCT ticker FROM nominal WHERE base_source = 'mktcap_neutral')
 ),
@@ -130,11 +136,11 @@ cand AS (
     WHERE n.base_source = 'mktcap_neutral'
 ),
 nom_dev AS (
-    -- (a) 명목 세션의 잔여 (정지일 reference 행은 close = 직전 종가라 dev = |1/pf − 1|)
-    SELECT c.event_id, abs(x.close / x.prev_trade_close / c.pf - 1) AS dev
+    -- (a) 명목 세션의 잔여 (기준가가 안 바뀐 정지일 reference 행은 close = 직전 행 종가라 dev = |1/pf − 1|)
+    SELECT c.event_id, abs(x.close / x.prev_close / c.pf - 1) AS dev
     FROM cand c
     JOIN px x ON x.ticker = c.ticker AND x.date = c.nominal_date
-    WHERE x.prev_trade_close > 0
+    WHERE x.prev_close > 0
 ),
 step_a AS (
     SELECT c.event_id
@@ -143,12 +149,12 @@ step_a AS (
     WHERE c.jump_mag <= k.tol_abs OR d.dev <= c.tol
 ),
 win AS (
-    -- (b) 창 안 거래 세션의 잔여 (개별)
-    SELECT c.event_id, x.date, c.tol, abs(x.close / x.prev_trade_close / c.pf - 1) AS dev
+    -- (b) 창 안 가격 행(참고가 행 포함)의 잔여 (개별)
+    SELECT c.event_id, x.date, c.tol, abs(x.close / x.prev_close / c.pf - 1) AS dev
     FROM cand c CROSS JOIN k
     JOIN cal w ON w.n BETWEEN c.n0 - k.win_before AND c.n0 + k.win_after
     JOIN px x ON x.ticker = c.ticker AND x.date = w.date
-    WHERE x.price_kind = 'trade' AND x.prev_trade_close > 0
+    WHERE x.prev_close > 0
       AND c.event_id NOT IN (SELECT event_id FROM step_a)
 ),
 step_b AS (
@@ -188,12 +194,12 @@ groups AS (
 gwin AS (
     -- (c) 성분 창에서 계수 곱과 맞는 세션
     SELECT g.root, x.date,
-           abs(x.close / x.prev_trade_close / g.pf_prod - 1)                              AS dev,
+           abs(x.close / x.prev_close / g.pf_prod - 1)                                    AS dev,
            greatest(k.tol_rel * abs(least(g.pf_prod, 1 / g.pf_prod) - 1), k.tol_abs)   AS tol
     FROM groups g CROSS JOIN k
     JOIN cal w ON w.n BETWEEN g.n_min - k.win_before AND g.n_max + k.win_after
     JOIN px x ON x.ticker = g.ticker AND x.date = w.date
-    WHERE x.price_kind = 'trade' AND x.prev_trade_close > 0
+    WHERE x.prev_close > 0
 ),
 step_c AS (
     SELECT root, date AS apply_date

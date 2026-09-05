@@ -244,10 +244,14 @@ def test_EG8_점프는_apply_date의_조정가로_재고_원주가_점프는_사
     m = eg8.metrics
     assert m["asof_basis"] == "baseline" and m["asof_used"] == "2026-08-20"
     assert m["n_ok_events"] == N_OK and m["n_ok_events_with_price"] == 3
-    assert m["n_return_jump_over"] == 0 and m["n_volume_jump_over"] == 0
-    assert m["n_ok_median_zero"] == 0 and m["n_ok_volume_judged"] == 3
+    assert m["n_return_jump_over"] == 0 and m["n_volume_ratio_out_of_band"] == 0
+    assert m["n_ok_abs_adj_return_over_030"] == 0
     assert m["max_abs_adj_return_jump"] == pytest.approx(MAX_ADJ_RETURN)
-    assert 1 < m["max_adj_volume_jump"] < 10                    # 절단본 실측 3.43
+    # P03 집합 통계: 이벤트별 조정 거래량 20세션 중앙값 비(후/전), 계수가 맞으면 1 근처
+    assert m["n_ok_volume_ratio_judged"] == 3 and m["n_ok_volume_ratio_undefined"] == 0
+    assert 1 / 3 <= m["adj_volume_ratio_median"] <= 3
+    assert m["adj_volume_ratio_quantiles"]["max"] < 10 and m["n_ok_volume_ratio_over_10"] == 0
+    assert 1 < m["max_adj_volume_jump_day"] < 10                # 하루 점프(기록형) 절단본 3.43
     assert m["n_ok_apply_ne_effective"] == 0
     ev = {e["event_id"]: e for e in m["events"]}                # type: ignore[union-attr]
     assert ev["005930:split:2018-05-04"]["raw_return"] == pytest.approx(MAX_RAW_RETURN_005930)
@@ -436,16 +440,14 @@ def run_adj_sql(events: list[dict[str, object]], prices: list[dict[str, object]]
 
 def flat_prices(ticker: str, cal: list[date], close: float, *, jumps: dict[int, float],
                 halt: tuple[int, int] | None = None) -> list[dict[str, object]]:
-    """세션 i 의 종가 = 직전 종가 × jumps[i](없으면 1). halt=(a, b) 구간은 reference 행(종가
-    유지)."""
+    """세션 i 의 종가 = 직전 종가 × jumps[i](없으면 1). halt=(a, b) 구간은 reference 행 — 종가는
+    유지하되 jumps 가 있으면 참고가 행에도 새 기준가를 싣는다(KRX 관례)."""
     out: list[dict[str, object]] = []
     c = close
     for i, d in enumerate(cal):
-        if halt and halt[0] <= i <= halt[1]:
-            out.append({"ticker": ticker, "date": d, "close": c, "price_kind": "reference"})
-            continue
         c = c * jumps.get(i, 1.0)
-        out.append({"ticker": ticker, "date": d, "close": round(c), "price_kind": "trade"})
+        kind = "reference" if halt and halt[0] <= i <= halt[1] else "trade"
+        out.append({"ticker": ticker, "date": d, "close": round(c), "price_kind": kind})
     return out
 
 
@@ -480,6 +482,36 @@ def test_합성_정지_뒤_재개일에_기준가가_바뀌는_감자는_price_m
     assert g["apply_basis"] == "unmatched" and g["factor_source"] == "no_price_match"
     assert g["factor_ok"] is False and (g["price_factor"], g["share_factor"]) == (1.0, 1.0)
     assert g["apply_date"] == cal[20] and g["available_date"] == cal[5]
+
+
+def test_합성_참고가_행에_먼저_실린_기준가는_그_행이_apply_date다(tmp_path: Path) -> None:
+    """3차(서버 2차 실측): KRX 는 정지 중 참고가 행의 close 에 새 기준가를 먼저 싣는다 — 시계열
+    점프는 거래 재개일(세션 31)이 아니라 정지 중 세션 27(reference) 에서 일어난다. 행 대 행 정의라
+    세션 27 이 apply_date 이고, 재개일은 잔여 0 이라 후보가 아니다."""
+    cal = sessions(80)
+    ev = [{"ticker": "A00006", "event_type": "capred", "effective_date": cal[20], "ratio": 0.1,
+           "source": "event_cr", "rcept_no": "20191202000006", "announce_date": cal[5]}]
+    px = flat_prices("A00006", cal, 1000, jumps={27: 9.9, 31: 1.02}, halt=(19, 30))
+    assert px[27]["price_kind"] == "reference" and px[27]["close"] == 9900
+    f = run_adj_sql(ev, px, cal)[f"A00006:capred:{cal[20]}"]
+    assert f["apply_basis"] == "price_matched" and f["apply_date"] == cal[27]
+    assert f["factor_ok"] is True and (f["price_factor"], f["share_factor"]) == (10.0, 0.1)
+    # 직전 거래 종가 정의였다면 재개일 31 이 |1.02·9.9/10 − 1| = 0.01 로 매칭돼 정지 중 4개 참고가
+    # 행(9,900)이 조정 전 가격으로 남았을 것이다 — 뷰가 조정하는 것은 행 시계열이다
+
+
+def test_합성_ratio_1_은_주식수_불변이라_no_share_change(tmp_path: Path) -> None:
+    """서버 2차 001360:split pf 1.0 — 액면가만 바뀌고 주식수는 그대로인 KRX 관측. 계수 1 이라 조정할
+    것이 없고 ok 로 두면 EG8 이 그날 원수익률(재개일 +36%)을 점프로 잰다."""
+    cal = sessions(80)
+    ev = [{"ticker": "A00007", "event_type": "split", "effective_date": cal[30], "ratio": 1.0,
+           "source": "krx_listing", "effective_basis": "krx_shares_change",
+           "announce_date": cal[30]}]
+    px = flat_prices("A00007", cal, 10000, jumps={30: 1.36})
+    f = run_adj_sql(ev, px, cal)[f"A00007:split:{cal[30]}"]
+    assert f["factor_source"] == "no_share_change" and f["factor_ok"] is False
+    assert (f["price_factor"], f["share_factor"]) == (1.0, 1.0)
+    assert f["apply_basis"] == "nominal" and f["apply_date"] == cal[30]
 
 
 def test_합성_복합_사건은_계수_곱으로_한_세션에_같이_적용된다(tmp_path: Path) -> None:

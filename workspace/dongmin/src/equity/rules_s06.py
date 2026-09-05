@@ -24,9 +24,10 @@ price_matched_combined · unmatched(→ `factor_source='no_price_match'`, 계수
                    `available_date = min(announce, apply_date 다음 세션)` 독립 재계산(EG2-P02
                    대체 — announce 축은 회고 기재 원천에서 available < announce 가 정상이라 못
                    쓴다) · corp_event 정합. 기록형: 사유·apply_basis 별 건수, 오프셋 분포.
-  EG8            — P02 수정수익률 점프·P03 조정 거래량 점프를 **apply_date** 에서 잰다(`views` 의
-                   같은 템플릿을 TEMP MACRO 로 올려 계산). 거래량 중앙값 0 인 이벤트는 P03 분모에서
-                   빼고 건수만 기록. 상수 미등재면 skip(no_baseline) 이되 **metric 은 항상 계산**.
+  EG8            — P02 수정수익률(행 대 행) 점프를 **apply_date** 에서 건별로, P03 은 이벤트 집합의
+                   조정 거래량 20세션 중앙값 비의 중앙값 ∈ [1/band, band](방향 오류 탐지, 3차)
+                   (`views` 의 같은 템플릿을 TEMP MACRO 로 올려 계산). 상수 미등재면
+                   skip(no_baseline) 이되 **metric 은 항상 계산**.
   EG8-P01(KIS 수정종가 대조)은 독립 KIS 가격 stage 테이블이 없어 여전히 붙이지 않는다.
 """
 from __future__ import annotations
@@ -47,8 +48,8 @@ SQL_DIR = Path(__file__).parent / "sql"
 FACTOR_BEARING_EVENTS: tuple[str, ...] = MVP_EVENT_TYPES
 # factor_source 폐쇄 어휘 — mktcap_neutral 만 factor_ok=true 다(사유 우선순위는 sql/adj_factor.sql).
 FACTOR_SOURCE_VOCAB: tuple[str, ...] = ("mktcap_neutral", "ratio_null", "capred_paid",
-                                        "near_dup_suppressed", "no_price_match",
-                                        "same_day_suppressed")
+                                        "near_dup_suppressed", "no_share_change",
+                                        "no_price_match", "same_day_suppressed")
 OK_FACTOR_SOURCE = "mktcap_neutral"
 # apply_basis 폐쇄 어휘. ok 행은 앞 3개, no_price_match 행만 unmatched, 그 외 not-ok 행은 nominal.
 APPLY_BASIS_VOCAB: tuple[str, ...] = ("nominal", "price_matched", "price_matched_combined",
@@ -62,9 +63,12 @@ PRICE_MATCH_CONSTS: tuple[str, ...] = ("price_match_tol_rel", "price_match_tol_a
 # 두므로 곱은 1 ± 몇 ulp 다(실측 max |1/x·x − 1| = 1.1e-16, x ∈ [1, 1e5]). 1e-12 는 그 1e4 배
 # 여유이고 계수 방향 오류(역수·제곱)는 1e-12 로는 절대 못 숨긴다.
 FACTOR_PRODUCT_TOL = 1e-12
-# EG8-P03 중앙값 창(직전 거래일 수, GATES §1 EG8 M03 의 'ROWS BETWEEN 20 PRECEDING'). 임계가 아니라
-# 측정 방법의 일부라 코드 상수다.
+# EG8-P03 중앙값 창(전·후 세션 수, GATES §1 EG8 M03 의 20). 임계가 아니라 측정 방법의 일부라 코드
+# 상수다. 아래 둘은 **기록형 보고 구간**(판정축 아님): 이벤트 거래량 비 > 10 건수 ·
+# |조정수익률| > 0.30(일반 세션 가격제한폭 — 거래 재개 첫날은 제한폭이 없어 판정에 못 쓴다) 건수.
 VOLUME_MEDIAN_WINDOW = 20
+VOLUME_RATIO_REPORT_BAND = 10.0
+RETURN_REPORT_LIMIT = 0.30
 JUMP_SAMPLE_ROWS = 20
 
 
@@ -198,6 +202,8 @@ def eg3_adj_factor(ctx: EquityGateContext) -> GateResult:
         "n_ok_product_off_one": int(str(n_product_off)),           # EG3-P04
         "n_not_ok_factor_ne_one": int(str(n_not_ok_ne_one)),
         "n_ok_source_mismatch": int(str(n_ok_source)),
+        "n_ok_factor_one": _n(ctx, f"SELECT count(*) FROM {v} WHERE factor_ok "
+                                   "AND share_factor = 1"),
         "n_ok_apply_basis_bad": int(str(n_ok_basis_bad)),
         "n_unmatched_source_mismatch": int(str(n_unmatched_mismatch)),
         "n_available_null": int(str(n_avail_null)),
@@ -235,7 +241,7 @@ def eg3_adj_factor(ctx: EquityGateContext) -> GateResult:
         SELECT count(*) FROM {v} WHERE factor_ok AND apply_basis = 'nominal'
           AND abs(least(price_factor, share_factor) - 1) <= {tol_abs!r}""")
         if tol_abs is not None else None)
-    # no_price_match 중 창 안에 거래 행이 아예 없는 사건(상장폐지 기간 등) — 매칭 실패가 아니라
+    # no_price_match 중 창 안에 가격 행이 아예 없는 사건(상장폐지 기간 등) — 매칭 실패가 아니라
     # 가격 부재
     n_unmatched_no_price = _n(ctx, f"""
         WITH cal AS (SELECT date, row_number() OVER (ORDER BY date) AS n FROM trading_calendar),
@@ -245,7 +251,7 @@ def eg3_adj_factor(ctx: EquityGateContext) -> GateResult:
         SELECT count(*) FROM u
         WHERE NOT EXISTS (
           SELECT 1 FROM price_daily p JOIN cal c ON c.date = p.date
-          WHERE p.ticker = u.ticker AND p.price_kind = 'trade'
+          WHERE p.ticker = u.ticker
             AND c.n BETWEEN u.n_nom - {int(lookback) if lookback is not None else 0}
                         AND u.n_nom + {int(window) if window is not None else 0})""")
     metrics: dict[str, object] = {
@@ -258,6 +264,7 @@ def eg3_adj_factor(ctx: EquityGateContext) -> GateResult:
         "n_same_day_suppressed": by_source.get("same_day_suppressed", 0),
         "n_ratio_null": by_source.get("ratio_null", 0),
         "n_capred_paid": by_source.get("capred_paid", 0),
+        "n_no_share_change": by_source.get("no_share_change", 0),
         "n_no_price_match": by_source.get("no_price_match", 0),
         "n_no_price_match_no_price_rows": n_unmatched_no_price,
         "n_nominal_small_expected": n_small_nominal,
@@ -284,8 +291,14 @@ eg3_adj_factor.gate_name = "EG3_adj_factor"     # type: ignore[attr-defined]
 # ── EG8 — 적용 세션 점프 ─────────────────────────────────────────────────────
 
 def _jump_table(ctx: EquityGateContext, asof: str) -> None:
-    """이벤트별 수정수익률·조정 거래량 점프를 `_eg8` 임시 테이블로. 뷰 템플릿을 TEMP MACRO 로
-    올려 쓴다. 측정 세션은 apply_date(캘린더 세션임은 EG3_adj_factor 가 보장)."""
+    """이벤트별 수정수익률·조정 거래량 통계를 `_eg8` 임시 테이블로. 뷰 템플릿을 TEMP MACRO 로
+    올려 쓴다. 측정 세션은 apply_date(캘린더 세션임은 EG3_adj_factor 가 보장).
+
+    수익률은 **행 대 행**(그 티커의 직전 가격 행, 참고가 행 포함) — KRX 는 정지 중 참고가 행에
+    새 기준가를 먼저 싣고, 뷰가 조정하는 것도 행 시계열이다(GATES §9 S06 3차).
+    거래량은 이벤트별 20세션 중앙값 비 `median_after / median_before`(둘 다 조정 거래량 —
+    계수 방향이 뒤집히면 share_factor² 배로 튄다).
+    """
     views.install_temp_macros(ctx.con, {"price_daily": "price_daily", "adj_factor": ctx.out_view,
                                         "trading_calendar": "trading_calendar"})
     v = _q(ctx.out_view)
@@ -295,22 +308,31 @@ def _jump_table(ctx: EquityGateContext, asof: str) -> None:
         WITH ev AS (SELECT ticker, effective_date, apply_date, apply_basis, event_id, event_type,
                            factor_ok FROM {v}),
              tk AS (SELECT DISTINCT ticker FROM ev),
-             ap AS (SELECT a.* FROM v_adj_price(DATE '{asof}') a JOIN tk USING (ticker)),
+             ap AS (SELECT a.*,
+                           lag(a.adj_close) OVER (PARTITION BY a.ticker ORDER BY a.date)
+                             AS prev_adj_close,
+                           lag(a.close) OVER (PARTITION BY a.ticker ORDER BY a.date)
+                             AS raw_prev_close
+                    FROM v_adj_price(DATE '{asof}') a JOIN tk USING (ticker)),
              av AS (SELECT a.* FROM v_adj_volume(DATE '{asof}') a JOIN tk USING (ticker)),
              ci AS (SELECT date, row_number() OVER (ORDER BY date) AS n FROM trading_calendar),
              evn AS (SELECT ev.*, ci.n FROM ev JOIN ci ON ci.date = ev.apply_date),
              ret AS (
-               SELECT e.event_id, cur.adj_close, prv.adj_close AS prev_adj_close,
-                      cur.close AS raw_close, prv.close AS raw_prev_close
-               FROM evn e
-               JOIN ap cur ON cur.ticker = e.ticker AND cur.date = e.apply_date
-               LEFT JOIN ci p ON p.n = e.n - 1
-               LEFT JOIN ap prv ON prv.ticker = e.ticker AND prv.date = p.date),
-             med AS (
-               SELECT e.event_id, median(av.adj_volume) AS med_window,
-                      count(av.adj_volume) AS n_window
+               SELECT e.event_id, x.adj_close, x.prev_adj_close, x.close AS raw_close,
+                      x.raw_prev_close
+               FROM evn e JOIN ap x ON x.ticker = e.ticker AND x.date = e.apply_date),
+             vb AS (
+               SELECT e.event_id, median(av.adj_volume) AS med_before,
+                      count(av.adj_volume) AS n_before
                FROM evn e
                JOIN ci wd ON wd.n BETWEEN e.n - {w} AND e.n - 1
+               LEFT JOIN av ON av.ticker = e.ticker AND av.date = wd.date
+               GROUP BY e.event_id),
+             va AS (
+               SELECT e.event_id, median(av.adj_volume) AS med_after,
+                      count(av.adj_volume) AS n_after
+               FROM evn e
+               JOIN ci wd ON wd.n BETWEEN e.n AND e.n + {w} - 1
                LEFT JOIN av ON av.ticker = e.ticker AND av.date = wd.date
                GROUP BY e.event_id),
              vol AS (
@@ -321,21 +343,28 @@ def _jump_table(ctx: EquityGateContext, asof: str) -> None:
                r.adj_close, r.prev_adj_close,
                r.adj_close / nullif(r.prev_adj_close, 0) - 1     AS adj_return,
                r.raw_close / nullif(r.raw_prev_close, 0) - 1     AS raw_return,
-               vol.adj_volume, m.med_window, m.n_window,
-               vol.adj_volume / nullif(m.med_window, 0)          AS volume_jump
+               vol.adj_volume, vb.med_before, vb.n_before, va.med_after, va.n_after,
+               vol.adj_volume / nullif(vb.med_before, 0)         AS volume_jump,
+               va.med_after / nullif(vb.med_before, 0)           AS volume_ratio
         FROM evn e
         LEFT JOIN ret r USING (event_id)
-        LEFT JOIN med m USING (event_id)
+        LEFT JOIN vb USING (event_id)
+        LEFT JOIN va USING (event_id)
         LEFT JOIN vol USING (event_id)""")
 
 
 def eg8_adj_jump(ctx: EquityGateContext) -> GateResult:
-    """EG8-P02·P03 — factor_ok 이벤트의 **apply_date** 에서 |수정수익률| ≤ `adj_return_jump_max` ∧
-    조정 거래량 / 직전 20거래일 중앙값 ≤ `adj_volume_jump_max` (asof = `asof_for_jump_check`).
+    """EG8-P02·P03 (asof = `asof_for_jump_check`, factor_ok 이벤트의 **apply_date** 기준).
 
+    P02 |수정수익률(행 대 행)| ≤ `adj_return_jump_max` — 건별.
+    P03 이벤트 집합의 조정 거래량 20세션 중앙값 비 `median_after / median_before` 의 **중앙값** ∈
+        [1/band, band], band = `adj_volume_ratio_band` — 집합 통계. 얇은 종목의 재개일 급증은
+        정상이라 건별 임계는 의미가 없고, 목적은 계수 방향 오류(÷↔×, share_factor² 배) 탐지다.
+        분포 p10/p50/p90/p99·max·> 10 건수·중앙값 미정의(정지 구간) 건수는 기록형.
     상수가 없어도 측정은 한다: asof 는 price_daily 의 max(date) 로 대신 잡고(`asof_basis`),
-    결과는 skip(no_baseline) 의 metrics 에 남는다(GATES §7-3 ①). 거래량 중앙값이 0 인 이벤트
-    (정지 뒤 재개 등)는 P03 을 판정할 수 없어 분모에서 빼고 `n_ok_median_zero` 로 기록한다.
+    결과는 skip(no_baseline) 의 metrics 에 남는다(GATES §7-3 ①). 기록형 보조 축:
+    |수정수익률| > 0.30(일반 세션 가격제한폭) 건수 — 거래 재개 첫날은 제한폭이 없어 판정축이
+    아니다.
     """
     asof = ctx.baseline.get(ctx.rule.name, "asof_for_jump_check")
     asof_basis = "baseline"
@@ -343,35 +372,51 @@ def eg8_adj_jump(ctx: EquityGateContext) -> GateResult:
         asof = str(_row(ctx, "SELECT CAST(max(date) AS VARCHAR) FROM price_daily")[0])
         asof_basis = "max_price_date"
     _jump_table(ctx, str(asof))
-    (n_ok, n_ok_price, n_ok_no_prev, n_med_zero, n_vol_judged, max_ret, max_vol, n_unadj_price,
+    (n_ok, n_ok_price, n_ok_no_prev, max_ret, n_ret_over_030, n_ratio_judged, n_ratio_undef,
+     ratio_med, q10, q90, q99, ratio_max, n_ratio_over, max_day_jump, n_unadj_price,
      max_raw_unadj, n_apply_ne_eff) = _row(ctx, f"""
         SELECT
           (SELECT count(*) FROM {_q(ctx.out_view)} WHERE factor_ok),
           count(*) FILTER (WHERE factor_ok AND adj_close IS NOT NULL),
           count(*) FILTER (WHERE factor_ok AND adj_close IS NOT NULL AND prev_adj_close IS NULL),
-          count(*) FILTER (WHERE factor_ok AND adj_volume IS NOT NULL
-                             AND coalesce(med_window, 0) = 0),
-          count(*) FILTER (WHERE factor_ok AND volume_jump IS NOT NULL),
           coalesce(max(abs(adj_return)) FILTER (WHERE factor_ok), 0),
+          count(*) FILTER (WHERE factor_ok AND abs(adj_return) > {RETURN_REPORT_LIMIT!r}),
+          count(*) FILTER (WHERE factor_ok AND volume_ratio IS NOT NULL),
+          count(*) FILTER (WHERE factor_ok AND volume_ratio IS NULL AND adj_close IS NOT NULL),
+          median(volume_ratio) FILTER (WHERE factor_ok),
+          quantile_cont(volume_ratio, 0.1) FILTER (WHERE factor_ok),
+          quantile_cont(volume_ratio, 0.9) FILTER (WHERE factor_ok),
+          quantile_cont(volume_ratio, 0.99) FILTER (WHERE factor_ok),
+          max(volume_ratio) FILTER (WHERE factor_ok),
+          count(*) FILTER (WHERE factor_ok AND volume_ratio > {VOLUME_RATIO_REPORT_BAND!r}),
           coalesce(max(volume_jump) FILTER (WHERE factor_ok), 0),
           count(*) FILTER (WHERE NOT factor_ok AND adj_close IS NOT NULL),
           coalesce(max(abs(raw_return)) FILTER (WHERE NOT factor_ok), 0),
           count(*) FILTER (WHERE factor_ok AND apply_date <> effective_date)
         FROM _eg8""")
-    sample = [dict(zip(("event_id", "apply_basis", "adj_return", "raw_return", "volume_jump",
-                        "factor_ok"), r, strict=True))
+    sample = [dict(zip(("event_id", "apply_basis", "adj_return", "raw_return", "volume_ratio",
+                        "volume_jump", "factor_ok"), r, strict=True))
               for r in ctx.con.execute(f"""
-        SELECT event_id, apply_basis, adj_return, raw_return, volume_jump, factor_ok FROM _eg8
-        WHERE adj_close IS NOT NULL
+        SELECT event_id, apply_basis, adj_return, raw_return, volume_ratio, volume_jump, factor_ok
+        FROM _eg8 WHERE adj_close IS NOT NULL
         ORDER BY abs(adj_return) DESC NULLS LAST, event_id LIMIT {JUMP_SAMPLE_ROWS}""").fetchall()]
+    ratio_median = None if ratio_med is None else float(str(ratio_med))
     metrics: dict[str, object] = {
         "asof_used": str(asof), "asof_basis": asof_basis,
         "n_ok_events": int(str(n_ok)), "n_ok_events_with_price": int(str(n_ok_price)),
         "n_ok_no_prev_price": int(str(n_ok_no_prev)),
-        "n_ok_median_zero": int(str(n_med_zero)),
-        "n_ok_volume_judged": int(str(n_vol_judged)),
         "max_abs_adj_return_jump": float(str(max_ret)),
-        "max_adj_volume_jump": float(str(max_vol)),
+        "n_ok_abs_adj_return_over_030": int(str(n_ret_over_030)),
+        "adj_volume_ratio_median": ratio_median,
+        "adj_volume_ratio_quantiles": {
+            "p10": None if q10 is None else float(str(q10)),
+            "p90": None if q90 is None else float(str(q90)),
+            "p99": None if q99 is None else float(str(q99)),
+            "max": None if ratio_max is None else float(str(ratio_max))},
+        "n_ok_volume_ratio_judged": int(str(n_ratio_judged)),
+        "n_ok_volume_ratio_undefined": int(str(n_ratio_undef)),
+        "n_ok_volume_ratio_over_10": int(str(n_ratio_over)),
+        "max_adj_volume_jump_day": float(str(max_day_jump)),
         "n_unadjusted_events_with_price": int(str(n_unadj_price)),
         "max_abs_raw_return_unadjusted": float(str(max_raw_unadj)),
         "n_ok_apply_ne_effective": int(str(n_apply_ne_eff)),
@@ -382,16 +427,14 @@ def eg8_adj_jump(ctx: EquityGateContext) -> GateResult:
         raise SkipGate("no_baseline", {"missing_metric": f"{ctx.rule.name}.asof_for_jump_check",
                                        **metrics})
     ret_max = require_const(ctx, "adj_return_jump_max", metrics)
-    vol_max = require_const(ctx, "adj_volume_jump_max", metrics)
-    n_ret_over, n_vol_over = _row(ctx, f"""
-        SELECT count(*) FILTER (WHERE factor_ok AND abs(adj_return) > {ret_max!r}),
-               count(*) FILTER (WHERE factor_ok AND coalesce(med_window, 0) > 0
-                                  AND volume_jump > {vol_max!r})
-        FROM _eg8""")
-    checks = {"n_return_jump_over": int(str(n_ret_over)),
-              "n_volume_jump_over": int(str(n_vol_over))}
-    metrics.update({"adj_return_jump_max": ret_max, "adj_volume_jump_max": vol_max})
-    return _result("EG8", checks, metrics, "적용 세션 수정수익률·조정 거래량 점프 이내")
+    band = require_const(ctx, "adj_volume_ratio_band", metrics)
+    n_ret_over = _n(ctx, f"SELECT count(*) FROM _eg8 WHERE factor_ok "
+                         f"AND abs(adj_return) > {ret_max!r}")
+    out_of_band = int(ratio_median is not None and not (1 / band <= ratio_median <= band))
+    checks = {"n_return_jump_over": n_ret_over,
+              "n_volume_ratio_out_of_band": out_of_band}
+    metrics.update({"adj_return_jump_max": ret_max, "adj_volume_ratio_band": band})
+    return _result("EG8", checks, metrics, "적용 세션 수정수익률·조정 거래량 중앙값 비 이내")
 
 
 eg8_adj_jump.gate_name = "EG8"                  # type: ignore[attr-defined]
@@ -440,4 +483,5 @@ BASELINE_SEED = Path(__file__).parent / "baseline_seed_s06.json"
 
 __all__ = ["ADJ_FACTOR", "APPLY_BASIS_VOCAB", "BASELINE_SEED", "FACTOR_BEARING_EVENTS",
            "FACTOR_PRODUCT_TOL", "FACTOR_SOURCE_VOCAB", "OK_APPLY_BASIS", "OK_FACTOR_SOURCE",
-           "PRICE_MATCH_CONSTS", "TABLES", "VOLUME_MEDIAN_WINDOW"]
+           "PRICE_MATCH_CONSTS", "RETURN_REPORT_LIMIT", "TABLES", "VOLUME_MEDIAN_WINDOW",
+           "VOLUME_RATIO_REPORT_BAND"]

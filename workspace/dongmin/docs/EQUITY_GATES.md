@@ -616,7 +616,7 @@ SELECT (SELECT sum(n) FROM _reject_counts WHERE tbl = '${T}')::DOUBLE
 |---|---|---|---|
 | EG8-P01 | `price_daily`×`adj_factor` | `krx_kis_close_ratio` 대 누적계수 일치율 ≥ baseline | `price_daily.krx_kis_ratio_match_min` |
 | EG8-P02 | `adj_factor` | 분할·무상증자 이벤트일 **수정수익률** 점프 절댓값 ≤ baseline | `adj_factor.adj_return_jump_max` |
-| EG8-P03 | `adj_factor` | 같은 날 **조정 거래량** 점프(M03 절댓값) ≤ baseline | `adj_factor.adj_volume_jump_max` |
+| EG8-P03 | `adj_factor` | ok 이벤트 집합의 **조정 거래량** 20세션 중앙값 비(후/전)의 중앙값 ∈ [1/k, k] (3차 정정, §9 — 건별 하루 점프 M03 은 기록형) | `adj_factor.adj_volume_ratio_band` |
 | EG8-P04 | `corp_event` | 기준가≠전일종가 사례의 이벤트 매칭 recall ≥ baseline | `corp_event.detect_recall_min`·`corp_event.base_price_anomaly_n` |
 | EG8-P05 | `flow_daily` | 키움 ⋈ KIS `flow_split` 겹침 = 0 | — (등식) |
 | EG8-P06 | `short_daily` | 키움 ⋈ KIS 겹침 = 0 | — (등식) |
@@ -805,7 +805,7 @@ WHERE g.${VALUE_COL} = 0
 | `adj_factor.price_match_tol_rel`·`price_match_tol_abs` | apply_date 판정 (a)(b)(c) · EG3_adj_factor | 2 | 조정 후 잔여 허용치 max(tol_rel × m, tol_abs), m = \|min(pf, 1/pf) − 1\| — 서버 1차 실측(09-05) 0.15 · 0.05 (§9 S06 2차) |
 | `adj_factor.price_match_window_sessions`·`price_match_lookback_sessions` | apply_date 판정 (b)(c) · EG3_adj_factor | 2 | 창 [n0 − lookback, n0 + window] 세션 — 서버 1차 실측 최적일 오프셋 p10 −5 · p90 +27~+31.5 → 5 · 40 |
 | `adj_factor.adj_return_jump_max` | EG8-P02 | 2 | 점프 상한 |
-| `adj_factor.adj_volume_jump_max` | EG8-P03 | 2 | 거래량 점프 상한 |
+| `adj_factor.adj_volume_ratio_band` | EG8-P03 | 2 | ok 이벤트 집합의 조정 거래량 20세션 중앙값 비(후/전) 중앙값 밴드 [1/k, k] — 방향 오류 탐지(3차, §9). `adj_volume_jump_max`(건별 하루 점프)는 폐기 |
 | `adj_factor.asof_for_jump_check` | EG8-P02·P03 | 2 | 검사용 고정 asof |
 | `adj_factor.backtest_return_tol` | EG-C ④ | 7 | 누적수익률 허용오차 |
 | `corp_event.detect_recall_min`·`base_price_anomaly_n` | EG8-P04 | 2 | recall·분모 |
@@ -1799,3 +1799,18 @@ workspace/dongmin/src/equity/
 | `event_type` → enum | 미정 | `split`·`bonus`→SPLIT, `reverse_split`·`capred`→REVERSE_SPLIT(`EVENT_TYPE_MAP`). 어휘 밖·방향 불일치 FORMAT_ERROR, `SHARE_COUNT_CHANGE` 미사용 | DESIGN §7 매핑표 |
 | 엔진 의존 | §8-5 미결 | 같은 모노레포 `backend/src` 를 `contract.load_adapter(engine_src)` 가 `sys.path` 에 얹는다(equity → backend 의 유일한 import 경계). 기본 `<repo>/backend/src` 또는 `$QL_ENGINE_SRC`, 서버는 `--engine-src`. 엔진은 **numpy·pyarrow** 를 요구한다(`backtest_engine.types.market` 이 numpy import) — equity 테스트 명령에 `--with numpy` 추가. 없으면 skip 이 아니라 FileNotFoundError(A13) | §9 A13 |
 | 상수 미등재 | — | `asof_sample_tickers`·`contract_probe_dates`·`respan_count`·`delist_sample_*` 미등재는 해당 항 `skip(no_baseline)`, 테이블 미커밋은 `skip(not_built)`, `_pinned/` 입력 없음은 `skip(no_cross_source)`; skip 은 실패가 아니다 | §0-2 어휘 |
+
+**S06 3차 정정 — 행 대 행 매칭 · EG8-P03 집합 통계 · P02 임계 (2026-09-05, 서버 2차 빌드 EG8 실패 → `sql/adj_factor.sql`·`rules_s06.py`)**
+
+서버 2차(apply_date 판, 3,226행·ok 1,360 · nominal 2,129 · price_matched 157 · combined 2 · unmatched 938): EG8 `n_return_jump_over` 4(max 0.86) · `n_volume_jump_over` 71(max 1,724). 원인: (1) |조정수익률| > 0.30 6건이 전부 "직전 거래 종가" 로 재면 맞고 "직전 행 종가" 로 재면 튀는 패턴 — KRX 는 정지 중 **참고가(reference) 행의 close 에 새 기준가를 먼저 싣는다**(071970 capred 행 대 행 원수익률 0.102 → 조정 −0.86 · 044180 · 004200 · 123420 combined · 001360 split pf 1.0). (2) 얇은 종목의 재개일 거래 급증은 정상이라 하루 점프 건별 임계(10)는 71건을 잡지만 전부 정상.
+
+| 항목 | 2차 | 정정 | 근거 |
+|---|---|---|---|
+| 매칭 분모 | 직전 **거래** 종가(`last_value(... trade) IGNORE NULLS`), 후보는 거래 행만 | 직전 **행** 종가(`lag(close)`, 참고가 행 포함), 후보는 창 안 모든 가격 행. 뷰가 조정하는 대상이 `price_daily` 행 시계열이므로 매칭·apply_date·EG8-P02 전부 행 대 행 | 서버 2차 6건 |
+| `no_share_change` | ratio = 1 인 split 이 ok(계수 1) → EG8 이 그날 원수익률을 잼 | `factor_source='no_share_change'`·ok=false(계수 1, apply_basis nominal). 우선순위 capred_paid 다음. EG3 `n_ok_factor_one` = 0 폐기형 · `n_no_share_change` 기록 | 001360:split pf 1.0 raw 0.363 |
+| EG8-P02 | |수정수익률| ≤ 0.30, 전일 = 직전 캘린더 세션 행 | 전일 = 그 티커의 **직전 가격 행**(`lag` over ticker). seed `adj_return_jump_max` **1.0** — 거래 재개 첫날은 가격제한폭이 없고 기준가의 50~200% 에서 체결되므로 소액 nominal 행의 |조정수익률| 물리 상한 +1.0(−0.5); price_matched·combined 는 판정 잔여 ≤ 0.15 로 구조 상한. 0.30 은 기록형 `n_ok_abs_adj_return_over_030`. ★ 서버 p100 은 오케스트레이터 확정 | 절단본 max 0.0929(변화 없음 — 005930 직전 행 = 05-03 참고가) |
+| EG8-P03 | 건별 하루 점프 / 직전 20거래일 중앙값 ≤ `adj_volume_jump_max`(10) | **집합 통계**: 이벤트별 `median(adj_volume [apply, apply+19]) / median(adj_volume [apply−20, apply−1])` 의 ok 전체 **중앙값** ∈ [1/`adj_volume_ratio_band`, band](seed 3). 방향 오류(÷↔×)면 share_factor² 배(50:1 → 2,500)로 튄다. 기록형: 분포 p10/p90/p99·max·> 10 건수(`n_ok_volume_ratio_over_10`)·미정의 건수(분모 0·행 없음, `n_ok_volume_ratio_undefined`)·하루 점프 max. `adj_volume_jump_max` 폐기 | 서버 2차 분포 p10 0.28 · p50 0.81 · p90 2.3 · p99 17 · max 115 |
+| §1 EG8 표·§1-12 | P03 = "같은 날 조정 거래량 점프 ≤ baseline", `adj_factor.adj_volume_jump_max` | P03 = 집합 중앙값 비 밴드, `adj_factor.adj_volume_ratio_band`. §1 술어 SQL(M03 단일일)은 3차 정의로 읽는다 | 위 |
+| FX-N-006 | `n_volume_jump_over ≥ 2` | `n_volume_ratio_out_of_band = 1` ∧ 집합 중앙값 > 1,000(절단본 50:1 뿐이라 ≈ 2,500) ∧ `n_ok_volume_ratio_over_10` 3 → 여전히 EG8 만 FAIL | `test_FX_N_006_*` |
+| 합성 테스트 | 5 | + 정지 중 참고가 행(세션 27)에 먼저 실린 기준가 ×9.9 → apply_date = 그 참고가 행(재개일 31 은 잔여 0 이라 후보 아님) · ratio 1 → no_share_change | `test_합성_참고가_행_*`·`test_합성_ratio_1_*` |
+| 절단본 EG8(3차) | max_abs_adj_return 0.0929 · 하루 점프 max 3.43 | max_abs_adj_return **0.0929**(동일) · `n_ok_abs_adj_return_over_030` 0 · 집합 중앙값 비 **1.232**(005930 1.232 · 005935 1.345 · 247540 1.111, p10 1.135 · p90 1.322 · max 1.345) · > 10 건수 0 · 미정의 0 → pass | DESIGN §10 P23 |

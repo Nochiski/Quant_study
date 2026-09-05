@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: SELF_CHECK
+project_status: IN_REVIEW
 current_phase: P6
 current_pr: P6-08
 active_prs: [P6-08]
 parallel_window: []
-last_updated: 2026-09-06T00:16:17+09:00
+last_updated: 2026-09-06T00:17:52+09:00
 planned_prs: 52
 merged_prs: 46
 approved_prs: 46
@@ -22,13 +22,13 @@ progress_percent: 88
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `SELF_CHECK` |
+| Project status | `IN_REVIEW` |
 | Current phase | `P6` |
 | Current/next PR | `P6-08` |
 | Active PR | `P6-08` |
 | Progress | `46 / 52 merged (88%)` |
 | Approved | `46 / 52` |
-| Aggregated at | `2026-09-06 00:16 KST` |
+| Aggregated at | `2026-09-06 00:17 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -78,7 +78,7 @@ progress_percent: 88
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
 | P4 | Outline, Contract, Projections | 10 | 10 | `MERGED` |
 | P5 | Truthful Trace UI | 3 | 3 | `MERGED` |
-| P6 | Professional release and migration | 9 | 3 | `SELF_CHECK` |
+| P6 | Professional release and migration | 9 | 3 | `IN_REVIEW` |
 | **Total** |  | **52** | **46** | **88%** |
 <!-- PLAN:PHASES:END -->
 
@@ -86,7 +86,7 @@ progress_percent: 88
 
 | 항목 | 값 |
 |---|---|
-| PR | `P6-08` Strategy/revision history routed UI SELF_CHECK |
+| PR | `P6-08` Strategy/revision history routed UI IN_REVIEW |
 | Intent | 기존 repository의 immutable revision/history SoT를 그대로 투영해 전문 사용자가 저장 전략을 찾고 원하는 revision을 편집·diff direct route로 열 수 있게 한다 |
 | Acceptance | deterministic strategy list와 revision pagination; `/research/strategies` direct route와 nav; strategy 선택 시 revision history·최신 revision 편집 연결; 임의 revision edit/diff deep link; loading·empty·error·out-of-range offset을 안전하게 canonical page로 복구; OpenAPI/generated client와 backend/frontend 계약 테스트 동기화 |
 | Non-goals | server draft 변경(P6-02), backtest run history/provenance(P6-09), strategy 삭제·rename, 검색 인덱스, legacy editor 제거(P6-06) |
@@ -238,7 +238,7 @@ Phase exit:
 | [ ] | `P6-05` | Playwright/visual regression infrastructure와 CI | P2-03, P3-05, P6-04 | `WAITING` | — |
 | [ ] | `P6-06` | 전체 browser E2E·실구동 시나리오 검증, migration gate, 조건부 legacy cleanup | P6-01, P6-02, P6-03, P6-04, P6-05, P6-08, P6-09 | `WAITING` | — |
 | [x] | `P6-07` | Root frontend/backend development entrypoints | P0-02, P0-03 | `MERGED` | [#56](https://github.com/Nochiski/Quant_study/pull/56) · `review_p6_07` APPROVE |
-| [ ] | `P6-08` | Strategy list와 revision history routed UI | P6-01, P6-02, P3-06, P4-08 | `SELF_CHECK` | [#74](https://github.com/Nochiski/Quant_study/pull/74) · 2차 P1 1/P2 1 회귀 수정, 동일 reviewer 재검토 대기 |
+| [ ] | `P6-08` | Strategy list와 revision history routed UI | P6-01, P6-02, P3-06, P4-08 | `IN_REVIEW` | [#74](https://github.com/Nochiski/Quant_study/pull/74) · `review_p6_08` 3차 재검토 중 |
 | [ ] | `P6-09` | Backtest run history routed UI와 provenance | P6-08, P3-05 | `WAITING` | P6-02 review size finding으로 분리 |
 
 Phase exit:
@@ -348,6 +348,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-06 KST | Codex | P6-08 3차 review에 code freeze `09db117`, self-check 기록 `f1736ed`, latest 26 files +1,372/-36 및 전체 gate를 PR #74에 고정했다. 최초 reviewer `review_p6_08`에게 legacy create/revise late cache와 duplicate-title accessible identity의 finding별 폐쇄 및 최신 전체 diff 신규 회귀를 재검토하도록 IN_REVIEW로 전환한다 | 13.3 latest diff freeze·13.4 same-reviewer fix loop·PR body merge gate |
 | 2026-09-06 KST | Codex | P6-08 2차 review fix를 `09db117`에 고정했다. strategy entity query owner의 단일 retire helper가 모든 save path에서 list prefix를 cancel→remove하고, legacy JSON create/revise 각각의 늦은 in-flight 응답이 cache를 복원하지 못함을 실제 provider 회귀로 고정했다. 접근성 label은 동일 제목이어도 항상 strategy ID를 포함하고 두 duplicate-title 행의 toggle·region·pager ownership을 검증한다. focused frontend 17 + document routes 46, solo full 423, typecheck·lint·Prettier·build 통과로 SELF_CHECK 전환한다. 병렬 full 중 기존 runtime-schema snippet 1건의 5초 timeout은 동일 file 46 및 solo full에서 재현되지 않았다 | cache invalidation 단일 owner·모든 활성 save path coherence·accessible identity·flake 격리 검증 |
 | 2026-09-06 KST | Codex | `review_p6_08` 2차 검토에서 최초 P1 3건과 pagination·UTC 보강은 폐쇄됐으나 P1 1/P2 1로 REQUEST_CHANGES. P6-06 migration gate 전까지 활성인 legacy JSON save가 strategy-list cache를 폐기하지 않아 membership/latest link가 stale하고, 동일 제목 전략은 고유 controls ID에도 disclosure/region/pager accessible name이 충돌한다. 공용 query owner의 cancel→remove helper를 YAML/legacy mutation이 공유하고 duplicate-title+late response 회귀를 추가한 뒤 같은 reviewer에게 재검토받는다 | 모든 save path의 cache coherence SoT·고유 accessible identity·same-reviewer loop |
 | 2026-09-05 KST | Codex | P6-08 review-fix code freeze `7267107`, self-check 기록 `09713c6`, 최신 24 files +1,244/-32 및 gate를 PR #74 본문에 반영했다. 최초 검토자 `review_p6_08`에게 P1 3/P2 2의 회귀 폐쇄와 최신 전체 diff를 같은 reviewer loop에서 재검토하도록 IN_REVIEW로 전환한다 | 13.3 latest diff freeze·13.4 same-reviewer fix loop·PR body merge gate |

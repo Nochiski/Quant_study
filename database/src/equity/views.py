@@ -1,7 +1,8 @@
 """뷰 매크로 SQL 템플릿 — `equity.duckdb` 의 테이블 매크로 본문 (DESIGN v1.2 §5 · 결정 1·6).
 
 S06 이 내는 4개: `v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_firm_mktcap` + S21 후속(09-05, 전방
-조정) 2개: `v_adj_price_fwd`·`v_adj_volume_fwd` + S17 1개: `v_consensus`. 본문은 하나의 템플릿이고
+조정) 2개: `v_adj_price_fwd`·`v_adj_volume_fwd` + S17 1개: `v_consensus` + S21 본판 1개:
+`v_fin_latest`. 본문은 하나의 템플릿이고
 읽는 자리(`{price_daily}` 등)만 두 방식으로 채운다 —
   카탈로그: `render_macros(equity_root)` 가 커밋된 테이블의 MANIFEST 파티션 경로(**절대경로**,
             P1c)를 `read_parquet([...])` 로 넣어 `catalog.write_catalog` 에 준다.
@@ -58,6 +59,9 @@ from . import inputs
 FACTOR_LAG_SESSIONS = 0     # 계수 available_date 컷오프 기본 랙(세션). 위 docstring 근거
 PRICE_LAG_SESSIONS = 0      # 가격 행 컷오프 랙(세션) — 0 이라 `date <= as_of` 와 같다
 CONSENSUS_LAG_SESSIONS = 0  # 컨센서스 available_date 컷오프 기본 랙(세션). 아래 v_consensus 근거
+FIN_LAG_SESSIONS = 0        # 재무 available_date 컷오프 기본 랙(세션). 아래 v_fin_latest 근거
+# TTM 창(4분기)의 period_end 폭 허용 범위(일) — 3분기 간격 ≈ 273일. 밖이면 분기가 빠진 것이다.
+TTM_SPAN_MIN_DAYS, TTM_SPAN_MAX_DAYS = 240, 400
 
 # 매크로 이름 → (시그니처, 읽는 테이블). 시그니처는 catalog._MACRO_NAME_RE 규약.
 SIGNATURES: dict[str, str] = {
@@ -68,6 +72,7 @@ SIGNATURES: dict[str, str] = {
     "v_adj_price_fwd": "v_adj_price_fwd(as_of, lag_override := NULL)",
     "v_adj_volume_fwd": "v_adj_volume_fwd(as_of, lag_override := NULL)",
     "v_consensus": "v_consensus(as_of, lag_override := NULL)",
+    "v_fin_latest": "v_fin_latest(as_of, lag_override := NULL, vintage := 'restated')",
 }
 MACRO_INPUTS: dict[str, tuple[str, ...]] = {
     "v_cum_adj": ("price_daily", "adj_factor", "trading_calendar"),
@@ -77,6 +82,7 @@ MACRO_INPUTS: dict[str, tuple[str, ...]] = {
     "v_adj_price_fwd": ("price_daily", "adj_factor", "trading_calendar"),
     "v_adj_volume_fwd": ("price_daily", "adj_factor", "trading_calendar"),
     "v_consensus": ("consensus_daily", "trading_calendar"),
+    "v_fin_latest": ("fin_std", "disclosure_version", "trading_calendar"),
 }
 # 매크로가 다른 매크로를 부르는 경우 — 같은 카탈로그(또는 같은 세션)에 함께 있어야 한다.
 MACRO_DEPENDS: dict[str, tuple[str, ...]] = {
@@ -235,6 +241,109 @@ SELECT ticker, obs_month, target_period, metric, src, obs_date,
 FROM vis
 WHERE rn = 1
 """,
+    # 재무 판본 뷰 (DESIGN §5, S21 본판). 접는 축은 **판본과 재무제표 구분 둘뿐**이고 기간 축
+    # (`period_end`)은 남긴다 — "latest" 는 vintage·fs_div 의 latest 다. as_of 로 기간을 하나로
+    # 접지 않는 이유: 소비자(워크벤치 어댑터)는 세션마다 값이 필요한데 기간까지 접으면 세션 수만큼
+    # 매크로를 다시 불러야 한다. 세션 축 절단은 소비자가 `available_date` 로 ASOF 조인한다
+    # (`v_adj_price_fwd` 와 같은 규약 — as_of 는 컷오프·행 절단으로만 작용).
+    #   ① 판본: `vintage` 인자 — 'restated' → `vintage_kind='api_restated'`(4A 가 내는 유일한 판),
+    #      'pit' → `original`·`corrected`(4C=S14 대기라 현재는 빈 결과), 그 밖 값은 vintage_kind
+    #      리터럴로 본다.
+    #   ② 재무제표 구분: (corp_code, period_end, report_code) 당 **CFS 우선** 한 행 → `fs_div_used`.
+    #      동률은 available_date 최신 → rcept_no 최신(정정 재제출).
+    #   ③ TTM: 3개월 축(`report_code='11011'` 은 `<계정>_q4_derived`, 나머지는 원 계정 — 현금흐름은
+    #      `_q`)의 4행 합인데 **4분기가 전부 보일 때만**이다. 조건 셋을 다 건다 — 창의 non-null 이
+    #      4개 · 창의 period_end 폭이 3분기(240~400일) · 창 안 모든 행의 available_date 가 이 행의
+    #      available_date 이하(정정 재제출로 옛 분기가 나중에 접수되면 그 행에서만 TTM 이 선다).
+    #      하나라도 어긋나면 NULL 이다 — 부분합을 내면 분기 하나가 빠진 채 연간처럼 읽힌다.
+    #   ④ `has_correction` = `disclosure_version.first_correction_dt <= cutoff`(DEFECT-E01 —
+    #      정적 플래그가 아니라 기준일 판정이다). 링크가 없으면 FALSE.
+    # 랙 기본값 0 세션(FIN_LAG_SESSIONS): `available_date` 가 DART 접수일이라 이미 '그날 알 수
+    # 있었던 날' 이다. `dataset_profile`(S19)이 생기면 그 값으로 교체한다.
+    "v_fin_latest": """
+WITH cut AS (
+    SELECT k.date AS cutoff
+    FROM (SELECT date, row_number() OVER (ORDER BY date DESC) - 1 AS n
+          FROM {trading_calendar} WHERE date <= as_of) k
+    WHERE k.n = coalesce(lag_override, {lag_fin})
+),
+vis AS (
+    SELECT f.*
+    FROM {fin_std} f
+    WHERE f.available_date <= (SELECT cutoff FROM cut)
+      AND CASE WHEN vintage = 'restated' THEN f.vintage_kind = 'api_restated'
+               WHEN vintage = 'pit'      THEN f.vintage_kind IN ('original', 'corrected')
+               ELSE f.vintage_kind = vintage END
+),
+pick AS (
+    SELECT * FROM (
+        SELECT v.*, row_number() OVER (
+                   PARTITION BY v.corp_code, v.period_end, v.report_code
+                   ORDER BY CASE WHEN v.fs_div = 'CFS' THEN 0 ELSE 1 END, v.fs_div,
+                            v.available_date DESC, v.rcept_no DESC) AS rn
+        FROM vis v)
+    WHERE rn = 1
+),
+q AS (
+    SELECT p.*,
+           CASE WHEN p.report_code = '11011' THEN p.revenue_q4_derived
+                ELSE p.revenue END                                   AS q_revenue,
+           CASE WHEN p.report_code = '11011' THEN p.gross_profit_q4_derived
+                ELSE p.gross_profit END                              AS q_gross_profit,
+           CASE WHEN p.report_code = '11011' THEN p.op_profit_q4_derived
+                ELSE p.op_profit END                                 AS q_op_profit,
+           CASE WHEN p.report_code = '11011' THEN p.net_income_q4_derived
+                ELSE p.net_income END                                AS q_net_income,
+           p.cf_operating_q                                          AS q_cf_operating
+    FROM pick p
+),
+ttm AS (
+    SELECT q.*,
+           count(*) OVER w                                           AS ttm_n_rows,
+           max(q.available_date) OVER w                              AS ttm_max_available,
+           min(q.period_end) OVER w                                  AS ttm_first_period_end,
+           sum(q.q_revenue) OVER w                                   AS ttm_sum_revenue,
+           count(q.q_revenue) OVER w                                 AS ttm_cnt_revenue,
+           sum(q.q_gross_profit) OVER w                              AS ttm_sum_gross_profit,
+           count(q.q_gross_profit) OVER w                            AS ttm_cnt_gross_profit,
+           sum(q.q_op_profit) OVER w                                 AS ttm_sum_op_profit,
+           count(q.q_op_profit) OVER w                               AS ttm_cnt_op_profit,
+           sum(q.q_net_income) OVER w                                AS ttm_sum_net_income,
+           count(q.q_net_income) OVER w                              AS ttm_cnt_net_income,
+           sum(q.q_cf_operating) OVER w                              AS ttm_sum_cf_operating,
+           count(q.q_cf_operating) OVER w                            AS ttm_cnt_cf_operating
+    FROM q
+    WINDOW w AS (PARTITION BY q.corp_code ORDER BY q.period_end, q.report_code
+                 ROWS BETWEEN 3 PRECEDING AND CURRENT ROW)
+),
+ok AS (
+    SELECT t.*,
+           (t.ttm_n_rows = 4
+            AND t.ttm_max_available <= t.available_date
+            AND date_diff('day', t.ttm_first_period_end, t.period_end)
+                BETWEEN {ttm_span_min} AND {ttm_span_max}) AS ttm_window_ok
+    FROM ttm t
+)
+SELECT o.corp_code, o.period_end, o.report_code, o.fs_div AS fs_div_used,
+       o.bsns_year, o.rcept_no, o.period_start, o.currency,
+       o.revenue, o.revenue_basis, o.gross_profit, o.op_profit, o.net_income,
+       o.total_asset, o.total_liab, o.total_equity, o.cf_operating_ytd, o.cf_operating_q,
+       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_revenue = 4
+            THEN o.ttm_sum_revenue END                               AS ttm_revenue,
+       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_gross_profit = 4
+            THEN o.ttm_sum_gross_profit END                          AS ttm_gross_profit,
+       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_op_profit = 4
+            THEN o.ttm_sum_op_profit END                             AS ttm_op_profit,
+       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_net_income = 4
+            THEN o.ttm_sum_net_income END                            AS ttm_net_income,
+       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_cf_operating = 4
+            THEN o.ttm_sum_cf_operating END                          AS ttm_cf_operating,
+       coalesce(d.first_correction_dt <= (SELECT cutoff FROM cut), FALSE) AS has_correction,
+       o.available_date, o.available_basis
+FROM ok o
+LEFT JOIN (SELECT rcept_no, first_correction_dt FROM {disclosure_version}) d
+       ON d.rcept_no = o.rcept_no
+""",
 }
 
 
@@ -243,7 +352,9 @@ def render_body(name: str, sources: dict[str, str], template: str | None = None)
     body = template if template is not None else TEMPLATES[name]
     fill = {t: sources[t] for t in MACRO_INPUTS[name]}
     return body.format(lag_factor=FACTOR_LAG_SESSIONS, lag_price=PRICE_LAG_SESSIONS,
-                       lag_consensus=CONSENSUS_LAG_SESSIONS, **fill).strip()
+                       lag_consensus=CONSENSUS_LAG_SESSIONS, lag_fin=FIN_LAG_SESSIONS,
+                       ttm_span_min=TTM_SPAN_MIN_DAYS, ttm_span_max=TTM_SPAN_MAX_DAYS,
+                       **fill).strip()
 
 
 def parquet_source(equity_root: Path, table: str) -> str:
@@ -301,6 +412,7 @@ def install_temp_macros(con: duckdb.DuckDBPyConnection, sources: dict[str, str],
     return made
 
 
-__all__ = ["CONSENSUS_LAG_SESSIONS", "FACTOR_LAG_SESSIONS", "MACRO_DEPENDS", "MACRO_INPUTS",
-           "PRICE_LAG_SESSIONS", "SIGNATURES", "TEMPLATES", "install_temp_macros",
-           "parquet_source", "render_body", "render_macros"]
+__all__ = ["CONSENSUS_LAG_SESSIONS", "FACTOR_LAG_SESSIONS", "FIN_LAG_SESSIONS", "MACRO_DEPENDS",
+           "MACRO_INPUTS", "PRICE_LAG_SESSIONS", "SIGNATURES", "TEMPLATES", "TTM_SPAN_MAX_DAYS",
+           "TTM_SPAN_MIN_DAYS", "install_temp_macros", "parquet_source", "render_body",
+           "render_macros"]

@@ -94,11 +94,19 @@ def _decimal(values: Sequence[float | int | None], scale_type: pa.DataType) -> p
     )
 
 
+def _dec4(values: Sequence[float | int | None]) -> pa.Array:
+    """`fin_std`·`consensus_daily` 처럼 소수 자리가 있는 금액 컬럼 (DECIMAL(38,4))."""
+    return pa.array(
+        [None if v is None else Decimal(str(v)) for v in values], type=pa.decimal128(38, 4)
+    )
+
+
 def price_table(rows: list[PriceRow], shares_out: dict[str, int] | None = None) -> pa.Table:
     """`price_daily` 관심 컬럼. `price_kind` 는 S04 규칙대로 volume>0 → trade, =0 → reference.
 
-    `shares_out` 을 주면 `mktcap_krw = close × shares_out[ticker]`(S04 파생) 를 붙인다 — 없는 티커는
-    NULL(결측은 결측).
+    `shares_out` 을 주면 S04 파생 셋을 붙인다 — `shares_out`(KRX 상장주식수, FIELD_MAP
+    `price.shares_outstanding`) · `mktcap_krw = close × shares_out` · `value_krw = close × volume`.
+    없는 티커는 NULL(결측은 결측 — 035420 이 그 자리다).
     """
     volumes = [r[6] for r in rows]
     columns: dict[str, pa.Array] = {
@@ -109,12 +117,19 @@ def price_table(rows: list[PriceRow], shares_out: dict[str, int] | None = None) 
         "low": _decimal([r[4] for r in rows], pa.decimal128(9, 0)),
         "close": _decimal([r[5] for r in rows], pa.decimal128(9, 0)),
         "volume_shr": _decimal(volumes, pa.decimal128(13, 0)),
+        "value_krw": _decimal(
+            [None if r[5] is None or r[6] is None else r[5] * r[6] for r in rows],
+            pa.decimal128(16, 0),
+        ),
         "price_kind": pa.array(
             [None if v is None else ("trade" if v > 0 else "reference") for v in volumes],
             type=pa.string(),
         ),
     }
     if shares_out is not None:
+        columns["shares_out"] = _decimal(
+            [shares_out.get(r[0]) for r in rows], pa.decimal128(13, 0)
+        )
         columns["mktcap_krw"] = _decimal(
             [
                 None if r[5] is None or r[0] not in shares_out else r[5] * shares_out[r[0]]
@@ -211,6 +226,176 @@ def policy_table(rows: list[PolicyRow]) -> pa.Table:
     )
 
 
+# ── S21 본판이 읽는 나머지 테이블 (S01·S05·S11·S12·S15·S16·S17·S18) ──────────
+# 컬럼은 `database/src/equity/rules_s*.py` 의 선언 중 어댑터·매크로가 읽는 것만 만든다.
+
+def corp_ticker_table(rows: list[tuple[str, str | None, bool]]) -> pa.Table:
+    """`corp_ticker` (ticker, corp_code, is_common) — 법인 축 테이블을 종목 축으로 여는 대응표."""
+    return pa.table(
+        {
+            "ticker": pa.array([r[0] for r in rows], type=pa.string()),
+            "isin8": pa.array([f"KR7{r[0]}" for r in rows], type=pa.string()),
+            "corp_code": pa.array([r[1] for r in rows], type=pa.string()),
+            "common_ticker": pa.array([r[0] if r[2] else None for r in rows], type=pa.string()),
+            "is_common": pa.array([r[2] for r in rows], type=pa.bool_()),
+            "link_basis": pa.array(["corp_map"] * len(rows), type=pa.string()),
+        }
+    )
+
+
+FIN_ACCOUNTS: tuple[str, ...] = (
+    "revenue", "gross_profit", "op_profit", "net_income",
+    "total_asset", "total_liab", "total_equity", "cf_operating_ytd", "cf_operating_q",
+)
+FIN_Q4_ACCOUNTS: tuple[str, ...] = ("revenue", "gross_profit", "op_profit", "net_income")
+
+
+def fin_std_table(rows: list[dict[str, object]]) -> pa.Table:
+    """`fin_std` 중 `v_fin_latest` 가 읽는 컬럼. 값 키가 없으면 NULL(결측은 결측)."""
+    columns: dict[str, pa.Array] = {
+        "corp_code": pa.array([r["corp_code"] for r in rows], type=pa.string()),
+        "period_end": pa.array([r["period_end"] for r in rows], type=pa.date32()),
+        "report_code": pa.array([r["report_code"] for r in rows], type=pa.string()),
+        "fs_div": pa.array([r.get("fs_div", "CFS") for r in rows], type=pa.string()),
+        "vintage_kind": pa.array(
+            [r.get("vintage_kind", "api_restated") for r in rows], type=pa.string()
+        ),
+        "bsns_year": pa.array([r["bsns_year"] for r in rows], type=pa.string()),
+        "rcept_no": pa.array([r["rcept_no"] for r in rows], type=pa.string()),
+        "period_start": pa.array([r.get("period_start") for r in rows], type=pa.date32()),
+        "currency": pa.array(["KRW"] * len(rows), type=pa.string()),
+        "revenue_basis": pa.array(
+            [r.get("revenue_basis", "standard") for r in rows], type=pa.string()
+        ),
+        "restated_unknown": pa.array([True] * len(rows), type=pa.bool_()),
+    }
+    for account in FIN_ACCOUNTS:
+        columns[account] = _dec4([r.get(account) for r in rows])  # pyright: ignore[reportArgumentType]  # reason: 픽스처 dict 값은 숫자·None
+    for account in FIN_Q4_ACCOUNTS:
+        key = f"{account}_q4_derived"
+        columns[key] = _dec4([r.get(key) for r in rows])  # pyright: ignore[reportArgumentType]  # reason: 위와 같다
+    columns["available_date"] = pa.array([r["available_date"] for r in rows], type=pa.date32())
+    columns["available_basis"] = pa.array(["derived"] * len(rows), type=pa.string())
+    return pa.table(columns)
+
+
+def disclosure_version_table(rows: list[tuple[str, date | None]]) -> pa.Table:
+    """`disclosure_version` 중 `v_fin_latest.has_correction` 이 읽는 (rcept_no, 첫 정정일)."""
+    return pa.table(
+        {
+            "rcept_no": pa.array([r[0] for r in rows], type=pa.string()),
+            "first_correction_dt": pa.array([r[1] for r in rows], type=pa.date32()),
+        }
+    )
+
+
+ConsensusRow = tuple[str, date, str, str, str, date, float | None, float | None, float | None, bool]
+"""ticker, obs_month, target_period, metric, src, obs_date, est_mean, est_min, est_max, degraded."""
+
+
+def consensus_table(rows: list[ConsensusRow], available: list[date]) -> pa.Table:
+    return pa.table(
+        {
+            "ticker": pa.array([r[0] for r in rows], type=pa.string()),
+            "obs_month": pa.array([r[1] for r in rows], type=pa.date32()),
+            "target_period": pa.array([r[2] for r in rows], type=pa.string()),
+            "metric": pa.array([r[3] for r in rows], type=pa.string()),
+            "src": pa.array([r[4] for r in rows], type=pa.string()),
+            "obs_date": pa.array([r[5] for r in rows], type=pa.date32()),
+            "est_mean": _dec4([r[6] for r in rows]),
+            "est_min": _dec4([r[7] for r in rows]),
+            "est_max": _dec4([r[8] for r in rows]),
+            "unit": pa.array(
+                ["원" if r[3] == "eps" else "억원" for r in rows], type=pa.string()
+            ),
+            "coverage_degraded": pa.array([r[9] for r in rows], type=pa.bool_()),
+            "available_date": pa.array(available, type=pa.date32()),
+            "available_basis": pa.array(
+                ["default" if r[9] else "measured" for r in rows], type=pa.string()
+            ),
+        }
+    )
+
+
+OpinionRow = tuple[str, date, str, float | None, float | None, float | None, bool]
+"""ticker, obs_date, src, opinion_score, target_price_krw, analyst_count, coverage_degraded."""
+
+
+def opinion_table(rows: list[OpinionRow]) -> pa.Table:
+    return pa.table(
+        {
+            "ticker": pa.array([r[0] for r in rows], type=pa.string()),
+            "obs_date": pa.array([r[1] for r in rows], type=pa.date32()),
+            "src": pa.array([r[2] for r in rows], type=pa.string()),
+            "opinion_score": _dec4([r[3] for r in rows]),
+            "target_price_krw": _dec4([r[4] for r in rows]),
+            "analyst_count": _dec4([r[5] for r in rows]),
+            "coverage_degraded": pa.array([r[6] for r in rows], type=pa.bool_()),
+            "available_date": pa.array([r[1] for r in rows], type=pa.date32()),
+            "available_basis": pa.array(
+                ["default" if r[6] else "measured" for r in rows], type=pa.string()
+            ),
+        }
+    )
+
+
+DividendRow = tuple[str, str, str, str, float | None, date, date]
+"""corp_code, bsns_year, reprt_code, stock_knd, dps_krw, stlm_dt, available_date."""
+
+
+def dividend_table(rows: list[DividendRow]) -> pa.Table:
+    return pa.table(
+        {
+            "corp_code": pa.array([r[0] for r in rows], type=pa.string()),
+            "bsns_year": pa.array([r[1] for r in rows], type=pa.string()),
+            "reprt_code": pa.array([r[2] for r in rows], type=pa.string()),
+            "stock_knd": pa.array([r[3] for r in rows], type=pa.string()),
+            "rcept_no": pa.array([f"D{r[1]}{r[0]}" for r in rows], type=pa.string()),
+            "stlm_dt": pa.array([r[5] for r in rows], type=pa.date32()),
+            "dps_krw": _dec4([r[4] for r in rows]),
+            "available_date": pa.array([r[6] for r in rows], type=pa.date32()),
+            "available_basis": pa.array(["derived"] * len(rows), type=pa.string()),
+        }
+    )
+
+
+CorpEventRow = tuple[str, str, str, date, float | None]
+"""event_id, ticker, event_type, announce_date, amount_krw."""
+
+
+def corp_event_table(rows: list[CorpEventRow]) -> pa.Table:
+    return pa.table(
+        {
+            "event_id": pa.array([r[0] for r in rows], type=pa.string()),
+            "ticker": pa.array([r[1] for r in rows], type=pa.string()),
+            "event_type": pa.array([r[2] for r in rows], type=pa.string()),
+            "announce_date": pa.array([r[3] for r in rows], type=pa.date32()),
+            "amount_krw": pa.array([r[4] for r in rows], type=pa.int64()),
+            "available_date": pa.array([r[3] for r in rows], type=pa.date32()),
+            "available_basis": pa.array(["derived"] * len(rows), type=pa.string()),
+        }
+    )
+
+
+HolderRow = tuple[str, str, str, str, float | None, date]
+"""rcept_no, src, repror, corp_code, qty_change_shr, rcept_dt(=available_date)."""
+
+
+def holder_table(rows: list[HolderRow]) -> pa.Table:
+    return pa.table(
+        {
+            "rcept_no": pa.array([r[0] for r in rows], type=pa.string()),
+            "src": pa.array([r[1] for r in rows], type=pa.string()),
+            "repror": pa.array([r[2] for r in rows], type=pa.string()),
+            "corp_code": pa.array([r[3] for r in rows], type=pa.string()),
+            "rcept_dt": pa.array([r[5] for r in rows], type=pa.date32()),
+            "qty_change_shr": _dec4([r[4] for r in rows]),
+            "available_date": pa.array([r[5] for r in rows], type=pa.date32()),
+            "available_basis": pa.array(["derived"] * len(rows), type=pa.string()),
+        }
+    )
+
+
 # ── 카탈로그 (`equity.duckdb` + `_catalog_meta.json`) ────────────────────────
 # `equity.catalog`·`equity.views`(database/src/equity) 의 테스트 대역. backend 는 그 패키지를 import
 # 할 수 없으므로 매크로 본문(DESIGN §5 v_cum_adj·v_adj_price·v_adj_price_fwd)과 snapshot_id 규칙
@@ -295,12 +480,133 @@ SELECT ticker, date, open, high, low, close, volume_shr, price_kind,
        close * cum_share_factor AS adj_close
 FROM fwd
 """
-CATALOG_MACROS = (
-    "v_cum_adj(as_of, lag_override := NULL)",
-    "v_adj_price(as_of, lag_override := NULL)",
-    "v_adj_price_fwd(as_of, lag_override := NULL)",
+# 컨센서스 뷰(S17) — `equity.views.TEMPLATES['v_consensus']` 본문 사본. `available_date` 로만
+# 자르고 겹치는 달의 wise·v3 2행을 먼저 알 수 있던 한 행으로 접는다(obs_month 로 자르지 않는다).
+_CONSENSUS_SQL = """
+WITH cut AS (
+    SELECT k.date AS cutoff
+    FROM (SELECT date, row_number() OVER (ORDER BY date DESC) - 1 AS n
+          FROM {trading_calendar} WHERE date <= as_of) k
+    WHERE k.n = coalesce(lag_override, 0)
+),
+vis AS (
+    SELECT c.*, row_number() OVER (
+               PARTITION BY c.ticker, c.obs_month, c.target_period, c.metric
+               ORDER BY c.available_date, c.src) AS rn
+    FROM {consensus_daily} c
+    WHERE c.available_date <= (SELECT cutoff FROM cut)
 )
-_MACRO_INPUTS = ("price_daily", "adj_factor", "trading_calendar")
+SELECT ticker, obs_month, target_period, metric, src, obs_date,
+       est_mean, est_min, est_max, unit, coverage_degraded,
+       available_date, available_basis
+FROM vis
+WHERE rn = 1
+"""
+# 재무 판본 뷰(S21 본판) — `equity.views.TEMPLATES['v_fin_latest']` 본문 사본. 판본(vintage)과
+# 재무제표 구분(CFS 우선)만 접고 기간 축은 남긴다. TTM 은 4분기가 전부 보일 때만 선다.
+_FIN_LATEST_SQL = """
+WITH cut AS (
+    SELECT k.date AS cutoff
+    FROM (SELECT date, row_number() OVER (ORDER BY date DESC) - 1 AS n
+          FROM {trading_calendar} WHERE date <= as_of) k
+    WHERE k.n = coalesce(lag_override, 0)
+),
+vis AS (
+    SELECT f.*
+    FROM {fin_std} f
+    WHERE f.available_date <= (SELECT cutoff FROM cut)
+      AND CASE WHEN vintage = 'restated' THEN f.vintage_kind = 'api_restated'
+               WHEN vintage = 'pit'      THEN f.vintage_kind IN ('original', 'corrected')
+               ELSE f.vintage_kind = vintage END
+),
+pick AS (
+    SELECT * FROM (
+        SELECT v.*, row_number() OVER (
+                   PARTITION BY v.corp_code, v.period_end, v.report_code
+                   ORDER BY CASE WHEN v.fs_div = 'CFS' THEN 0 ELSE 1 END, v.fs_div,
+                            v.available_date DESC, v.rcept_no DESC) AS rn
+        FROM vis v)
+    WHERE rn = 1
+),
+q AS (
+    SELECT p.*,
+           CASE WHEN p.report_code = '11011' THEN p.revenue_q4_derived
+                ELSE p.revenue END                                   AS q_revenue,
+           CASE WHEN p.report_code = '11011' THEN p.gross_profit_q4_derived
+                ELSE p.gross_profit END                              AS q_gross_profit,
+           CASE WHEN p.report_code = '11011' THEN p.op_profit_q4_derived
+                ELSE p.op_profit END                                 AS q_op_profit,
+           CASE WHEN p.report_code = '11011' THEN p.net_income_q4_derived
+                ELSE p.net_income END                                AS q_net_income,
+           p.cf_operating_q                                          AS q_cf_operating
+    FROM pick p
+),
+ttm AS (
+    SELECT q.*,
+           count(*) OVER w                                           AS ttm_n_rows,
+           max(q.available_date) OVER w                              AS ttm_max_available,
+           min(q.period_end) OVER w                                  AS ttm_first_period_end,
+           sum(q.q_revenue) OVER w                                   AS ttm_sum_revenue,
+           count(q.q_revenue) OVER w                                 AS ttm_cnt_revenue,
+           sum(q.q_gross_profit) OVER w                              AS ttm_sum_gross_profit,
+           count(q.q_gross_profit) OVER w                            AS ttm_cnt_gross_profit,
+           sum(q.q_op_profit) OVER w                                 AS ttm_sum_op_profit,
+           count(q.q_op_profit) OVER w                               AS ttm_cnt_op_profit,
+           sum(q.q_net_income) OVER w                                AS ttm_sum_net_income,
+           count(q.q_net_income) OVER w                              AS ttm_cnt_net_income,
+           sum(q.q_cf_operating) OVER w                              AS ttm_sum_cf_operating,
+           count(q.q_cf_operating) OVER w                            AS ttm_cnt_cf_operating
+    FROM q
+    WINDOW w AS (PARTITION BY q.corp_code ORDER BY q.period_end, q.report_code
+                 ROWS BETWEEN 3 PRECEDING AND CURRENT ROW)
+),
+ok AS (
+    SELECT t.*,
+           (t.ttm_n_rows = 4
+            AND t.ttm_max_available <= t.available_date
+            AND date_diff('day', t.ttm_first_period_end, t.period_end)
+                BETWEEN 240 AND 400) AS ttm_window_ok
+    FROM ttm t
+)
+SELECT o.corp_code, o.period_end, o.report_code, o.fs_div AS fs_div_used,
+       o.bsns_year, o.rcept_no, o.period_start, o.currency,
+       o.revenue, o.revenue_basis, o.gross_profit, o.op_profit, o.net_income,
+       o.total_asset, o.total_liab, o.total_equity, o.cf_operating_ytd, o.cf_operating_q,
+       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_revenue = 4
+            THEN o.ttm_sum_revenue END                               AS ttm_revenue,
+       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_gross_profit = 4
+            THEN o.ttm_sum_gross_profit END                          AS ttm_gross_profit,
+       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_op_profit = 4
+            THEN o.ttm_sum_op_profit END                             AS ttm_op_profit,
+       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_net_income = 4
+            THEN o.ttm_sum_net_income END                            AS ttm_net_income,
+       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_cf_operating = 4
+            THEN o.ttm_sum_cf_operating END                          AS ttm_cf_operating,
+       coalesce(d.first_correction_dt <= (SELECT cutoff FROM cut), FALSE) AS has_correction,
+       o.available_date, o.available_basis
+FROM ok o
+LEFT JOIN (SELECT rcept_no, first_correction_dt FROM {disclosure_version}) d
+       ON d.rcept_no = o.rcept_no
+"""
+
+# 시그니처 → (본문, 읽는 테이블). `equity.views.SIGNATURES`·`MACRO_INPUTS` 의 사본이다.
+_PRICE_INPUTS = ("price_daily", "adj_factor", "trading_calendar")
+_CATALOG_BODIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("v_cum_adj(as_of, lag_override := NULL)", _CUM_ADJ_SQL, _PRICE_INPUTS),
+    ("v_adj_price(as_of, lag_override := NULL)", _ADJ_PRICE_SQL, _PRICE_INPUTS),
+    ("v_adj_price_fwd(as_of, lag_override := NULL)", _ADJ_PRICE_FWD_SQL, _PRICE_INPUTS),
+    (
+        "v_consensus(as_of, lag_override := NULL)",
+        _CONSENSUS_SQL,
+        ("consensus_daily", "trading_calendar"),
+    ),
+    (
+        "v_fin_latest(as_of, lag_override := NULL, vintage := 'restated')",
+        _FIN_LATEST_SQL,
+        ("fin_std", "disclosure_version", "trading_calendar"),
+    ),
+)
+CATALOG_MACROS = tuple(signature for signature, _, _ in _CATALOG_BODIES)
 
 
 def table_builds(root: Path) -> dict[str, str]:
@@ -332,7 +638,7 @@ def _partition_source(root: Path, table: str, build_id: str) -> str:
 
 
 def write_catalog(root: Path, *, snapshot: str | None = None, with_macros: bool = True) -> Path:
-    """`equity.duckdb`(매크로 3개) + `_catalog_meta.json` 을 쓴다.
+    """`equity.duckdb`(입력이 갖춰진 매크로 전부) + `_catalog_meta.json` 을 쓴다.
 
     `snapshot` 을 주면 meta 의 snapshot_id 를 그 값으로 둔다(stale 카탈로그 부정 픽스처).
     `with_macros=False` 면 매크로 없이 `macros_skipped` 만 남긴다.
@@ -347,25 +653,15 @@ def write_catalog(root: Path, *, snapshot: str | None = None, with_macros: bool 
     skipped: dict[str, str] = {}
     con = duckdb.connect(str(path))
     try:
-        if with_macros:
-            sources = {t: _partition_source(root, t, builds[t]) for t in _MACRO_INPUTS}
-            con.execute(
-                f"CREATE MACRO {CATALOG_MACROS[0]} AS TABLE " + _CUM_ADJ_SQL.format(**sources)
-            )
-            con.execute(
-                f"CREATE MACRO {CATALOG_MACROS[1]} AS TABLE " + _ADJ_PRICE_SQL.format(**sources)
-            )
-            con.execute(
-                f"CREATE MACRO {CATALOG_MACROS[2]} AS TABLE "
-                + _ADJ_PRICE_FWD_SQL.format(**sources)
-            )
-            macros = list(CATALOG_MACROS)
-        else:
-            skipped = {
-                "v_cum_adj": "not_built: inputs=['adj_factor']",
-                "v_adj_price": "depends_on_skipped: ['v_cum_adj']",
-                "v_adj_price_fwd": "not_built: inputs=['adj_factor']",
-            }
+        for signature, body, inputs in _CATALOG_BODIES:
+            name = signature.split("(", 1)[0]
+            absent = [table for table in inputs if table not in builds]
+            if not with_macros or absent:
+                skipped[name] = f"not_built: inputs={absent or list(inputs)}"
+                continue
+            sources = {t: _partition_source(root, t, builds[t]) for t in inputs}
+            con.execute(f"CREATE MACRO {signature} AS TABLE " + body.format(**sources))
+            macros.append(signature)
     finally:
         con.close()
     (root / "_catalog_meta.json").write_text(
@@ -420,6 +716,111 @@ WB_SHARES = {"005930": 5_969_782_550, "000660": 728_002_365, "036220": 1_000_000
              "005935": 822_886_700, "069500": 100_000_000}
 WB_BASE_CLOSE = {"005930": 70_000, "000660": 100_000, "035420": 200_000, "036220": 10_000,
                  "005935": 60_000, "069500": 30_000}
+
+# 법인 축(S12·S15·S16) — 005930 과 우선주 005935 는 **같은 법인**이다. 035420 은 법인 대응은
+# 있으나 재무·배당·지분 행이 하나도 없고(관측 없음 → 셀 없음), 069500(ETF)은 법인 자체가 없다.
+WB_CORP = {"005930": "C05930", "005935": "C05930", "000660": "C00660", "035420": "C35420",
+           "036220": "C36220"}
+WB_FIN_RCEPT = {  # (corp, period_end) → 접수번호. `disclosure_version` 이 정정 여부를 붙인다
+    ("C05930", date(2023, 3, 31)): "R05930Q1",
+    ("C05930", date(2023, 6, 30)): "R05930Q2",
+    ("C05930", date(2023, 9, 30)): "R05930Q3",
+    ("C05930", date(2023, 12, 31)): "R05930FY",
+    ("C00660", date(2023, 6, 30)): "R00660Q2",
+    ("C36220", date(2023, 12, 31)): "R36220FY",
+}
+# 005930 2023 4분기 = 연간 − 3분기 누계. 연간 460 = 100 + 110 + 120 + 130 이라 TTM 이 연간과 같다.
+WB_FIN_ROWS: list[dict[str, object]] = [
+    {"corp_code": "C05930", "period_end": date(2023, 3, 31), "report_code": "11013",
+     "bsns_year": "2023", "rcept_no": "R05930Q1", "available_date": date(2023, 5, 15),
+     "revenue": 100, "gross_profit": 40, "op_profit": 30, "net_income": 20,
+     "total_asset": 1000, "total_liab": 400, "total_equity": 600,
+     "cf_operating_ytd": 25, "cf_operating_q": 25},
+    {"corp_code": "C05930", "period_end": date(2023, 6, 30), "report_code": "11012",
+     "bsns_year": "2023", "rcept_no": "R05930Q2", "available_date": date(2023, 8, 14),
+     "revenue": 110, "gross_profit": 44, "op_profit": 33, "net_income": 22,
+     "total_asset": 1010, "total_liab": 405, "total_equity": 605,
+     "cf_operating_ytd": 60, "cf_operating_q": 35},
+    {"corp_code": "C05930", "period_end": date(2023, 9, 30), "report_code": "11014",
+     "bsns_year": "2023", "rcept_no": "R05930Q3", "available_date": date(2023, 11, 14),
+     "revenue": 120, "gross_profit": 48, "op_profit": 36, "net_income": 24,
+     "total_asset": 1020, "total_liab": 410, "total_equity": 610,
+     "cf_operating_ytd": 100, "cf_operating_q": 40},
+    {"corp_code": "C05930", "period_end": date(2023, 12, 31), "report_code": "11011",
+     "bsns_year": "2023", "rcept_no": "R05930FY", "available_date": date(2024, 1, 4),
+     "revenue": 460, "gross_profit": 184, "op_profit": 138, "net_income": 92,
+     "total_asset": 1030, "total_liab": 415, "total_equity": 615,
+     "cf_operating_ytd": 150, "cf_operating_q": 50,
+     "revenue_q4_derived": 130, "gross_profit_q4_derived": 52,
+     "op_profit_q4_derived": 39, "net_income_q4_derived": 26},
+    # 000660 — 같은 grain 에 CFS·OFS 2행. v_fin_latest 는 CFS 를 고른다(OFS 값은 나오면 안 된다).
+    {"corp_code": "C00660", "period_end": date(2023, 6, 30), "report_code": "11012",
+     "bsns_year": "2023", "rcept_no": "R00660Q2", "available_date": date(2023, 8, 14),
+     "fs_div": "CFS", "revenue": 200, "gross_profit": 80, "op_profit": 60, "net_income": 40,
+     "total_asset": 2000, "total_liab": 800, "total_equity": 1200,
+     "cf_operating_ytd": 70, "cf_operating_q": 30},
+    {"corp_code": "C00660", "period_end": date(2023, 6, 30), "report_code": "11012",
+     "bsns_year": "2023", "rcept_no": "R00660Q2", "available_date": date(2023, 8, 14),
+     "fs_div": "OFS", "revenue": 999, "gross_profit": 999, "op_profit": 999, "net_income": 999,
+     "total_asset": 9999, "total_liab": 9999, "total_equity": 9999,
+     "cf_operating_ytd": 999, "cf_operating_q": 999},
+    # 036220 — 값이 일부만 있는 행(매출 결측 → MISSING, 순이익 7 → OBSERVED). 창 안 공개일.
+    {"corp_code": "C36220", "period_end": date(2023, 12, 31), "report_code": "11011",
+     "bsns_year": "2023", "rcept_no": "R36220FY", "available_date": date(2024, 1, 9),
+     "net_income": 7, "total_asset": 70, "total_liab": 30, "total_equity": 40},
+]
+WB_CORRECTION = date(2024, 1, 11)  # R05930FY 의 첫 정정 접수일 — v_fin_latest.has_correction 축
+WB_CONSENSUS_ROWS: list[ConsensusRow] = [
+    # 2023-12 관측점: FY1 = 202312(5,000원), FY2 = 202412(6,000원)
+    ("005930", date(2023, 12, 1), "202312", "eps", "wise", date(2023, 12, 29),
+     5_000, 4_000, 6_000, False),
+    ("005930", date(2023, 12, 1), "202412", "eps", "wise", date(2023, 12, 29),
+     6_000, 5_000, 7_000, False),
+    # 2024-01 관측점: 202312 은 이미 지난 기간이라 FY1 = 202412(6,500원)
+    ("005930", date(2024, 1, 1), "202412", "eps", "wise", date(2024, 1, 5),
+     6_500, 6_000, 7_200, False),
+    # 매출(억원) — v3 판본이라 min/max 가 없다(dispersion 은 eps 축에서만 선다)
+    ("005930", date(2024, 1, 1), "202412", "revenue", "v3", date(2024, 1, 5),
+     3_000_000, None, None, True),
+    ("000660", date(2023, 12, 1), "202412", "eps", "wise", date(2023, 12, 27),
+     1_200, 1_000, 1_500, False),
+]
+WB_CONSENSUS_AVAILABLE = [
+    date(2023, 12, 29), date(2023, 12, 29), date(2024, 1, 5), date(2024, 1, 5),
+    date(2023, 12, 27),
+]
+WB_OPINION_ROWS: list[OpinionRow] = [
+    # 같은 (ticker, obs_date) 에 v3·wise 공존 — 잰 판본(wise)이 이긴다
+    ("005930", date(2024, 1, 4), "v3", 3.8, 90_000, 25, True),
+    ("005930", date(2024, 1, 4), "wise", 4.1, 95_000, 28, False),
+    ("005930", date(2024, 1, 9), "v3", 4.0, 97_000, 30, True),
+    ("000660", date(2024, 1, 4), "wise", 4.5, 150_000, 20, False),
+]
+WB_DIVIDEND_ROWS: list[DividendRow] = [
+    # 2022 사업연도 — 종류 축 3행. 접는 규칙(값 있는 행 · 최신 연도 · stock_knd 사전순)상 보통주.
+    ("C05930", "2022", "11011", "보통주", 361, date(2022, 12, 31), date(2023, 3, 7)),
+    ("C05930", "2022", "11011", "우선주", 362, date(2022, 12, 31), date(2023, 3, 7)),
+    ("C05930", "2022", "11011", "-", None, date(2022, 12, 31), date(2023, 3, 7)),
+    # 2023 사업연도 — 창 안(01-09)에 공개돼 as-of 가 갈린다
+    ("C05930", "2023", "11011", "보통주", 400, date(2023, 12, 31), date(2024, 1, 9)),
+    ("C00660", "2022", "11011", "보통주", 1_200, date(2022, 12, 31), date(2023, 3, 8)),
+]
+WB_EVENT_ROWS: list[CorpEventRow] = [
+    # 같은 공시일 2건 → 합 1,500,000
+    ("E1", "005930", "tsstk_aq", date(2024, 1, 5), 1_000_000),
+    ("E2", "005930", "tsstk_aq", date(2024, 1, 5), 500_000),
+    # 유형이 다른 행은 event.buyback_amount 에 섞이지 않는다
+    ("E3", "005930", "split", date(2024, 1, 8), None),
+    ("E4", "000660", "tsstk_aq", date(2023, 12, 27), 2_000_000),
+]
+WB_HOLDER_ROWS: list[HolderRow] = [
+    ("H1", "elestock", "홍길동", "C05930", 1_000, date(2024, 1, 9)),
+    ("H1", "elestock", "김철수", "C05930", -400, date(2024, 1, 9)),
+    # majorstock 축은 event.insider_net_buy 에 섞이지 않는다
+    ("H2", "majorstock", "국민연금", "C05930", 99_999, date(2024, 1, 9)),
+    # 값이 결측인 보고 하나뿐 → 합도 결측(MISSING)
+    ("H3", "elestock", "박영희", "C00660", None, date(2024, 1, 4)),
+]
 
 
 def wb_close(ticker: str, session: date) -> float:
@@ -487,6 +888,38 @@ def build_workbench_root(root: Path, *, catalog: bool = True) -> Path:
         ),
         year_column="effective_date",
     )
+    write_equity_table(
+        root,
+        "corp_ticker",
+        corp_ticker_table(
+            [(t, WB_CORP.get(t), t != "005935") for t in sorted(WB_SEC_TYPES)]
+        ),
+    )
+    write_equity_table(root, "fin_std", fin_std_table(WB_FIN_ROWS), year_column="period_end")
+    write_equity_table(
+        root,
+        "disclosure_version",
+        disclosure_version_table(
+            [
+                (rcept, WB_CORRECTION if rcept == "R05930FY" else None)
+                for rcept in sorted(set(WB_FIN_RCEPT.values()))
+            ]
+        ),
+    )
+    write_equity_table(
+        root,
+        "consensus_daily",
+        consensus_table(WB_CONSENSUS_ROWS, WB_CONSENSUS_AVAILABLE),
+        year_column="obs_month",
+    )
+    write_equity_table(
+        root, "opinion_daily", opinion_table(WB_OPINION_ROWS), year_column="obs_date"
+    )
+    write_equity_table(root, "dividend_event", dividend_table(WB_DIVIDEND_ROWS))
+    write_equity_table(
+        root, "corp_event", corp_event_table(WB_EVENT_ROWS), year_column="announce_date"
+    )
+    write_equity_table(root, "holder_daily", holder_table(WB_HOLDER_ROWS))
     if catalog:
         write_catalog(root)
     return root

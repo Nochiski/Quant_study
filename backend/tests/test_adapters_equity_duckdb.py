@@ -16,6 +16,10 @@ import pytest
 from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import (
     BacktestEnginePortfolioAdapter,
 )
+from strategy_workbench.adapters.outbound.equity_duckdb._specs import (
+    FIELD_SPECS,
+    UNSUPPORTED_FIELDS,
+)
 from strategy_workbench.adapters.outbound.equity_duckdb.facade.provider import (
     EquityDuckdbAdapter,
     EquityDuckdbSetupError,
@@ -67,7 +71,19 @@ from tests.equity_fixture import (
 pytest.importorskip("duckdb", reason="backend optional extra `equity` (uv sync --extra equity)")
 
 START, END = date(2024, 1, 8), date(2024, 1, 12)
-ALL_FIELDS = ("price.close", "price.adj_close", "price.market_cap")
+PRICE_FIELDS = ("price.close", "price.adj_close", "price.market_cap")
+# 손 픽스처가 원천을 다 갖췄을 때 어댑터가 내는 field_id — FIELD_MAP §2 의 42 중 23 +
+# equity 내부 스코프 `price.adj_close`. 나머지 19 의 사유는 `_specs.UNSUPPORTED_FIELDS` 다.
+ALL_FIELDS = (
+    "price.close", "price.open", "price.volume", "price.market_cap",
+    "price.shares_outstanding", "price.trading_value", "price.adj_close",
+    "financial.revenue", "financial.gross_profit", "financial.operating_income",
+    "financial.net_income", "financial.operating_cash_flow", "financial.total_assets",
+    "financial.total_liabilities", "financial.book_equity",
+    "consensus.forward_eps", "consensus.forward_sales", "consensus.eps_dispersion",
+    "consensus.target_price", "consensus.recommendation", "consensus.analyst_count",
+    "event.dividend_per_share", "event.buyback_amount", "event.insider_net_buy",
+)
 
 
 @pytest.fixture(scope="module")
@@ -85,7 +101,7 @@ def _raw(
     *,
     start: date = START,
     end: date = END,
-    fields: tuple[str, ...] = ALL_FIELDS,
+    fields: tuple[str, ...] = PRICE_FIELDS,
     history: int = 0,
     universe: str = "krx.common-stock",
 ):
@@ -115,7 +131,9 @@ def test_snapshot_is_the_manifest_hash_and_names_every_table(
     assert all(r.as_of == WB_SESSIONS[-1] for r in snapshot.dataset_revisions)
 
 
-def test_list_fields_serves_the_three_price_fields_only(adapter: EquityDuckdbAdapter) -> None:
+def test_list_fields_serves_every_declared_field_whose_source_is_built(
+    adapter: EquityDuckdbAdapter,
+) -> None:
     profiles = {p.field_id: p for p in adapter.list_fields()}
     assert set(profiles) == set(ALL_FIELDS)
     assert all(p.recommended_lag_sessions == 0 for p in profiles.values())
@@ -123,6 +141,25 @@ def test_list_fields_serves_the_three_price_fields_only(adapter: EquityDuckdbAda
     assert all(p.coverage.point_in_time for p in profiles.values())  # adj_close 도 전방 조정
     assert profiles["price.close"].coverage.estimated_coverage_pct == 100.0
     assert profiles["price.market_cap"].coverage.estimated_coverage_pct < 100.0  # 035420 NULL
+    # dataset_id 는 FIELD_MAP §2 의 equity 산출 자리다
+    assert profiles["financial.book_equity"].dataset_id == "fin_std"
+    assert profiles["consensus.target_price"].dataset_id == "opinion_daily"
+    assert profiles["event.insider_net_buy"].dataset_id == "holder_daily"
+    # LATEST 원천의 커버 시작은 첫 공개일이고, 그 전 세션에는 셀이 없다
+    assert profiles["financial.book_equity"].coverage.starts_on == WB_SESSIONS[0]
+    assert profiles["event.buyback_amount"].coverage.starts_on == date(2023, 12, 27)
+    # 판정(지원/부분)은 프로필 설명 앞에 붙어 소비자에게 그대로 보인다
+    assert profiles["financial.revenue"].description.startswith("[부분]")
+    assert profiles["financial.net_income"].description.startswith("[지원]")
+
+
+def test_field_specs_cover_every_field_map_id_exactly_once() -> None:
+    """FIELD_MAP §2 의 42 = 어댑터가 내는 23 + 사유가 적힌 19. 겹치거나 빠지면 안 된다."""
+    declared = {spec.field_id for spec in FIELD_SPECS} - {"price.adj_close"}
+    assert declared & set(UNSUPPORTED_FIELDS) == set()
+    assert len(declared) == 23 and len(UNSUPPORTED_FIELDS) == 19
+    assert len(declared | set(UNSUPPORTED_FIELDS)) == 42
+    assert all(reason.strip() for reason in UNSUPPORTED_FIELDS.values())
 
 
 # ── RawObservationPort ────────────────────────────────────────────────────────
@@ -193,11 +230,15 @@ def test_missing_market_cap_is_a_none_value_not_an_omission(adapter: EquityDuckd
 def test_unavailable_field_is_a_failure_value_naming_the_supported_set(
     adapter: EquityDuckdbAdapter,
 ) -> None:
-    result = _raw(adapter, fields=("price.close", "financial.book_equity"))
+    result = _raw(adapter, fields=("price.close", "classification.sector"))
     assert result.status is DataLoadStatus.INVALID_QUERY and result.observations == ()
     assert result.detail is not None
-    assert "unavailable" in result.detail and "financial.book_equity" in result.detail
+    assert "unavailable" in result.detail and "classification.sector" in result.detail
+    assert "현재값 라벨" in result.detail  # 사유를 그대로 붙인다
     assert "price.adj_close" in result.detail  # supported 목록
+    # S08~S10 격자는 "원천 없음" 이 아니라 "아직 병합되지 않은 테이블" 이라고 말해야 한다
+    flow = _raw(adapter, fields=("flow.foreign_net_buy",))
+    assert flow.detail is not None and "equity/s08-s10" in flow.detail
 
 
 def test_queries_outside_calendar_coverage_are_no_data(adapter: EquityDuckdbAdapter) -> None:
@@ -215,6 +256,132 @@ def test_history_is_truncated_at_calendar_start_with_a_warning(
     assert result.ok
     assert result.history_sessions == (WB_SESSIONS[0],)
     assert any("insufficient calendar for warm-up history" in w for w in result.warnings)
+
+
+def _cell(result, as_of: date, security_id: str, field_id: str):
+    observation = next(
+        o for o in result.observations if (o.as_of, o.security_id) == (as_of, security_id)
+    )
+    return next(f for f in observation.fields if f.field_id == field_id)
+
+
+def _has(result, as_of: date, security_id: str, field_id: str) -> bool:
+    observation = next(
+        o for o in result.observations if (o.as_of, o.security_id) == (as_of, security_id)
+    )
+    return any(f.field_id == field_id for f in observation.fields)
+
+
+def test_price_row_fields_come_from_the_krx_ledger_row(adapter: EquityDuckdbAdapter) -> None:
+    """`price.*` 6 은 같은 (ticker, session) 원장 행이고 공개일은 그 세션이다."""
+    result = _raw(adapter, fields=ALL_FIELDS)
+    close = wb_close("005930", START)
+    assert _field(result, START, "005930:1", "price.close") == close
+    assert _field(result, START, "005930:1", "price.open") == close - 100
+    assert _field(result, START, "005930:1", "price.volume") == 1_000
+    assert _field(result, START, "005930:1", "price.trading_value") == close * 1_000
+    assert _field(result, START, "005930:1", "price.shares_outstanding") == 5_969_782_550
+    assert _cell(result, START, "005930:1", "price.open").available_date == START
+    # 정지일(기준가 행)은 OHLC 가 NULL 이라 값이 아니라 MISSING 이다 — 0 으로 접지 않는다
+    halted = _cell(result, WB_HALT_DATE, "000660:1", "price.open")
+    assert (halted.value, halted.kind) == (None, CellKind.MISSING)
+    assert _field(result, WB_HALT_DATE, "000660:1", "price.volume") == 0  # 실제 0 은 관측이다
+    # 035420 은 상장주식수 원장이 없어 시총·주식수가 결측이다(합성하지 않는다)
+    assert _field(result, START, "035420:1", "price.shares_outstanding") is None
+
+
+def test_financials_are_the_latest_filing_and_every_share_class_shares_them(
+    adapter: EquityDuckdbAdapter,
+) -> None:
+    """법인 축 재무는 `corp_ticker` 로 전개된다 — 005930 과 우선주 005935 가 같은 값이다."""
+    result = _raw(adapter, start=date(2024, 1, 3), end=END, fields=ALL_FIELDS, universe="krx.all")
+    # 01-03 에는 3분기 보고서(2023-11-14 공개)가 최신, 01-04 부터 사업보고서(01-04 공개)
+    early = _cell(result, date(2024, 1, 3), "005930:1", "financial.revenue")
+    assert (early.value, early.available_date) == (120.0, date(2023, 11, 14))
+    late = _cell(result, date(2024, 1, 4), "005930:1", "financial.revenue")
+    assert (late.value, late.available_date) == (460.0, date(2024, 1, 4))
+    assert _field(result, START, "005930:1", "financial.book_equity") == 615.0
+    assert _field(result, START, "005935:1", "financial.book_equity") == 615.0  # 같은 법인
+    assert _field(result, START, "005930:1", "financial.operating_cash_flow") == 150.0
+    # 같은 grain 의 CFS·OFS 중 v_fin_latest 가 CFS 를 고른다(OFS 는 9,999 로 깔아 뒀다)
+    assert _field(result, START, "000660:1", "financial.book_equity") == 1_200.0
+    # 값이 없는 계정은 셀이 나가되 MISSING 이고, 있는 계정은 OBSERVED 다(같은 행에서 갈린다)
+    missing = _cell(result, date(2024, 1, 9), "036220:2", "financial.revenue")
+    assert (missing.value, missing.kind) == (None, CellKind.MISSING)
+    assert _field(result, date(2024, 1, 9), "036220:2", "financial.net_income") == 7.0
+    # 재무 원천이 없는 종목(ETF)은 셀 자체가 없다 — mock 값으로 채우지 않는다
+    assert not _has(result, START, "069500:1", "financial.revenue")
+    # 창 독립: 같은 셀은 창을 좁혀도 같다(as-of 값은 (security, 컷오프) 의 함수다)
+    narrow = _raw(adapter, start=START, end=START, fields=("financial.revenue",))
+    assert _field(narrow, START, "005930:1", "financial.revenue") == _field(
+        result, START, "005930:1", "financial.revenue"
+    )
+
+
+def test_consensus_picks_the_nearest_target_period_and_the_measured_source(
+    adapter: EquityDuckdbAdapter,
+) -> None:
+    result = _raw(adapter, start=date(2024, 1, 4), end=END, fields=ALL_FIELDS)
+    # 2023-12 관측점의 FY1 = 202312(5,000원) · 범위 = 6,000 − 4,000
+    assert _field(result, date(2024, 1, 4), "005930:1", "consensus.forward_eps") == 5_000.0
+    assert _field(result, date(2024, 1, 4), "005930:1", "consensus.eps_dispersion") == 2_000.0
+    # 2024-01 관측점(01-05 공개)이 오면 FY1 이 202412 로 넘어간다
+    later = _cell(result, date(2024, 1, 5), "005930:1", "consensus.forward_eps")
+    assert (later.value, later.available_date) == (6_500.0, date(2024, 1, 5))
+    assert _field(result, date(2024, 1, 5), "005930:1", "consensus.eps_dispersion") == 1_200.0
+    assert _field(result, date(2024, 1, 5), "005930:1", "consensus.forward_sales") == 3_000_000.0
+    # 같은 (ticker, obs_date) 의 v3·wise 중 잰 판본(wise, 95,000)이 이긴다
+    assert _field(result, date(2024, 1, 4), "005930:1", "consensus.target_price") == 95_000.0
+    assert _field(result, date(2024, 1, 4), "005930:1", "consensus.recommendation") == 4.1
+    assert _field(result, date(2024, 1, 4), "005930:1", "consensus.analyst_count") == 28.0
+    # wise 가 없는 날은 v3 를 쓴다(coverage_degraded — 프로필이 그렇게 말한다)
+    assert _field(result, date(2024, 1, 9), "005930:1", "consensus.target_price") == 97_000.0
+
+
+def test_event_fields_are_the_latest_filing_with_its_publication_date(
+    adapter: EquityDuckdbAdapter,
+) -> None:
+    result = _raw(adapter, start=date(2024, 1, 4), end=END, fields=ALL_FIELDS, universe="krx.all")
+    # 자사주 취득 결정 2건이 같은 공시일에 있으면 합한다(다른 event_type 은 섞이지 않는다)
+    buyback = _cell(result, date(2024, 1, 5), "005930:1", "event.buyback_amount")
+    assert (buyback.value, buyback.available_date) == (1_500_000.0, date(2024, 1, 5))
+    assert not _has(result, date(2024, 1, 4), "005930:1", "event.buyback_amount")
+    # 임원 지분 증감은 같은 접수일의 보고자를 합하고(1,000 − 400) majorstock 은 빼놓는다
+    insider = _cell(result, date(2024, 1, 9), "005930:1", "event.insider_net_buy")
+    assert (insider.value, insider.available_date) == (600.0, date(2024, 1, 9))
+    assert not _has(result, START, "005930:1", "event.insider_net_buy")
+    # 보고가 값 없이 하나뿐이면 합도 결측이다(0 으로 접지 않는다)
+    empty = _cell(result, date(2024, 1, 9), "000660:1", "event.insider_net_buy")
+    assert (empty.value, empty.kind) == (None, CellKind.MISSING)
+    # 배당은 종류 축을 접어 보통주 값이 우선주 티커에도 간다(FIELD_MAP 부분 판정 ②)
+    old = _cell(result, START, "005930:1", "event.dividend_per_share")
+    assert (old.value, old.available_date) == (361.0, date(2023, 3, 7))
+    assert _field(result, START, "005935:1", "event.dividend_per_share") == 361.0
+    assert _field(result, date(2024, 1, 9), "005930:1", "event.dividend_per_share") == 400.0
+
+
+def test_latest_fields_never_show_a_filing_before_its_available_date(
+    adapter: EquityDuckdbAdapter,
+) -> None:
+    """PIT — 공개일이 as_of 보다 늦은 판본은 보이지 않고, 랙은 컷오프를 세션 단위로 물린다."""
+    result = _raw(adapter, start=WB_SESSIONS[0], end=END, fields=ALL_FIELDS, universe="krx.all")
+    for observation in result.observations:
+        for cell in observation.fields:
+            assert cell.available_date <= observation.as_of, (observation.as_of, cell)
+    panel = adapter.load_panel(
+        ResearchPanelQuery(
+            start=date(2024, 1, 9),
+            end=date(2024, 1, 9),
+            security_ids=("005930:1",),
+            field_ids=("financial.revenue",),
+            lag_overrides=(FieldLag("financial.revenue", 4),),
+        )
+    )
+    assert panel.ok
+    # 01-09 에서 4세션 전 = 01-03 → 사업보고서(01-04 공개)는 아직 보이지 않는다
+    (cell,) = panel.cells
+    assert (cell.value, cell.available_date) == (120.0, date(2023, 11, 14))
+    assert cell.source_effective_date == date(2023, 9, 30)  # 내용일 = 기간 말일
 
 
 # ── EquityDataPort ────────────────────────────────────────────────────────────
@@ -268,7 +435,7 @@ def test_load_universe_is_policy_free_and_names_securities(adapter: EquityDuckdb
 def test_factor_metadata_and_observations_come_from_the_same_panel(
     adapter: EquityDuckdbAdapter,
 ) -> None:
-    metadata = adapter.resolve_factor_fields(("price.adj_close", "financial.book_equity"))
+    metadata = adapter.resolve_factor_fields(("price.adj_close", "flow.foreign_net_buy"))
     assert [f.field_id for f in metadata.fields] == ["price.adj_close"]
     assert metadata.data_snapshot_id == adapter.snapshot().snapshot_id
     observations = adapter.load_factor_observations(
@@ -325,7 +492,10 @@ def test_backtest_dataset_refuses_unknown_and_index_ids(adapter: EquityDuckdbAda
 def test_missing_or_stale_catalog_makes_adj_close_unavailable(tmp_path: Path) -> None:
     root = build_workbench_root(tmp_path / "equity", catalog=False)
     without = EquityDuckdbAdapter(root)
-    assert {p.field_id for p in without.list_fields()} == {"price.close", "price.market_cap"}
+    # 매크로가 없으면 그 매크로를 읽는 원천의 필드가 전부 빠진다 — 테이블 원천은 남는다
+    served = {p.field_id for p in without.list_fields()}
+    assert "price.close" in served and "consensus.target_price" in served
+    assert not served & {"price.adj_close", "financial.book_equity", "consensus.forward_eps"}
     denied = _raw(without, fields=("price.adj_close",))
     assert denied.status is DataLoadStatus.INVALID_QUERY
     assert denied.detail is not None and "catalog file missing" in denied.detail
@@ -364,7 +534,10 @@ def test_container_boots_with_the_duckdb_adapter(root: Path, tmp_path: Path) -> 
     assert isinstance(container.equity_data, EquityDuckdbAdapter)
     catalog = container.equity_workspace.catalog()
     assert catalog.snapshot.schema_version == "equity-v1.2"
-    assert {p.field_id for p in catalog.fields} == set(ALL_FIELDS)
+    # 카탈로그는 페이지 단위라 한 쪽에 다 담기지 않는다 — 총 개수와 첫 쪽의 소속만 본다
+    assert catalog.total == len(ALL_FIELDS)
+    assert {p.field_id for p in catalog.fields} <= set(ALL_FIELDS)
+    assert "fin_std" in catalog.facets.dataset_ids
 
 
 def _momentum_spec(field_id: str) -> StrategySpec:

@@ -72,8 +72,9 @@
 
 ## 3. 집계
 
-- 지원 **18** · 부분 15 · 미지원 **8** · 미확인 1 (2026-09-06 — S12 가 `financial.gross_profit` 을 미지원 → 지원으로 바꿨다).
-- **S21 축소 어댑터(09-05)가 실제로 내는 field_id 는 3** — `price.close`·`price.market_cap`·`price.adj_close`(equity 내부 스코프, 위 표 밖). 나머지 39 는 `list_fields()` 에 없고 질의하면 `INVALID_QUERY`(detail `unavailable`)다. `price.adj_close` 는 **전방 조정**(`v_adj_price_fwd`, 09-05 결정)이라 수준·비율 모두 PIT 이고 창에 무관하다(DESIGN §7·§11 ①; 이전 base = 창 end 절충은 폐기). 레지스트리 가격 팩터가 `price.close` 를 요구하는 충돌(#64)은 미해결 — `scripts/run_mvp_backtest.py` 는 FieldNode 를 `price.adj_close` 로 바꿔 돈다.
+- **§2 표 42 의 판정 집계(2026-09-06 S21 본판 재계수)**: 지원 **15** · 부분 **16** · 미지원 **9** · 미확인 **1** · 부분/미지원 **1**(`classification.sector`) = 42. (초안의 "지원 18/16" 두 줄은 서로 어긋나 있었다 — 표를 한 행씩 세어 정정한다.)
+- **판정 ↔ 어댑터 노출의 대응**: 지원 15 + 부분 16 = 31 중 어댑터가 실제로 내는 것은 **23** 이고, 나머지 8(`flow.*` 4 지원/부분 · `short.*` 3 · `credit.margin_balance`)은 판정이 아니라 **테이블 미병합·산식 문제**로 빠진다. 즉 판정표는 "원천이 있느냐" 를, `list_fields()` 는 "이 빌드에서 읽히느냐" 를 말한다 — 둘이 다를 때 사유는 `UNSUPPORTED_FIELDS` 가 문장으로 남긴다.
+- **S21 본판 어댑터(09-06)가 실제로 내는 field_id 는 24** — 위 표의 **23** + equity 내부 스코프 `price.adj_close`(표 밖). 나머지 19 는 `list_fields()` 에 없고 질의하면 `INVALID_QUERY`(detail `unavailable` + 사유 문장)다. 사유는 셋으로 갈린다(정본 `adapters/outbound/equity_duckdb/_specs.py::UNSUPPORTED_FIELDS`): **원천 부재 10**(`benchmark.close` GAP-09 · `flow.block_*` 2 · `credit.collateral_value`·`credit.loan_value`·`credit.forced_liquidation` · `event.earnings_surprise`·`event.index_membership_change`·`event.disclosure_sentiment` · `credit.net_buy` 미확인) · **테이블 미병합 7**(`flow.*` 4 · `short.short_sale_value`·`short.borrowed_quantity` · `credit.margin_balance` — S08~S10 은 브랜치 `equity/s08-s10` 에 있고 미병합) · **굽지 않기로 한 2**(`short.short_balance_ratio` 는 분모가 `price_daily.shares_out` 이라 셀 하나가 아니고 원장 값이 잔고가 아니다 · `classification.sector` 는 시점축 없는 현재값 라벨이라 과거 세션에 붙이면 look-ahead — DESIGN §7 `sector_id=None` 규약). `price.adj_close` 는 **전방 조정**(`v_adj_price_fwd`, 09-05 결정)이라 수준·비율 모두 PIT 이고 창에 무관하다(DESIGN §7·§11 ①). 레지스트리 가격 팩터가 `price.close` 를 요구하는 충돌(#64)은 미해결 — `scripts/run_mvp_backtest.py` 는 FieldNode 를 `price.adj_close` 로 바꿔 돈다.
 - 미지원 9 는 원천 부재(대량매매·반대매매·담보·잠정실적·지수구성 PIT·텍스트 감성·매출총이익·차입금 계열)로, 어댑터 `list_fields()` 가 `unavailable` 로 답한다. 레지스트리 50 팩터 중 이 필드에 걸린 팩터는 `factor_readiness.status='blocked'`.
 - **`financial.*` 가 요구하는 `fin_std` 컬럼(S12 구현 09-06, 단위 원 KRW · 결측은 NULL · 부분합·보간 금지)**: `revenue`(+`revenue_basis`) · `op_profit` · `net_income` · `total_asset` · `total_liab` · `total_equity` · `gross_profit` · `cf_operating_ytd`/`_q`. 손익 계정은 전부 `<계정>_q4_derived` 를 동반하고(사업보고서 − Σ3분기, 하나라도 없으면 NULL) 파생 블록마다 `q4_derived_available_date`·`q4_derived_n_rows` / `cf_q_available_date`·`cf_q_n_rows` 가 붙는다. 기간 어휘는 `report_code` 가 정한다 — 11011 은 12개월, 11012·11013·11014 는 3개월 손익이고 현금흐름은 전부 연초누계다(DEFECT-C02). `eps_basic` 은 **주식분할 미조정**(원장 그대로 — 삼성전자 2018 1분기 85,435 vs 사업보고서 6,461)이라 시계열로 쓰려면 `adj_factor` 가 필요하다. `fin_std` 의 24 계정 중 `financial.*` 밖(cost_of_sales·pretax_income·net_income_owners·eps_basic·equity_owners·cash·inventories·current_assets·current_liab·lease_liab·borrowings·depreciation·interest_expense·cf_investing_ytd·cf_financing_ytd·capex_ytd)는 equity 내부 스코프이고 `dataset_profile`(S19)이 노출 여부를 정한다.
 
@@ -86,6 +87,8 @@
 - **S21 축소 어댑터(09-05)가 실제로 내는 field_id 는 3** — `price.close`·`price.market_cap`·`price.adj_close`(equity 내부 스코프, 위 표 밖). 나머지 39 는 `list_fields()` 에 없고 질의하면 `INVALID_QUERY`(detail `unavailable`)다. `price.adj_close` 는 **전방 조정**(`v_adj_price_fwd`, 09-05 결정)이라 수준·비율 모두 PIT 이고 창에 무관하다(DESIGN §7·§11 ①; 이전 base = 창 end 절충은 폐기). 레지스트리 가격 팩터가 `price.close` 를 요구하는 충돌(#64)은 미해결 — `scripts/run_mvp_backtest.py` 는 FieldNode 를 `price.adj_close` 로 바꿔 돈다.
 - 미지원 10 은 원천 부재(대량매매·반대매매·담보·잠정실적·지수구성 PIT·텍스트 감성·매출총이익·차입금 계열 + **신용 순매수**(S10 판정))로, 어댑터 `list_fields()` 가 `unavailable` 로 답한다. 레지스트리 50 팩터 중 이 필드에 걸린 팩터는 `factor_readiness.status='blocked'`.
 - `financial.gross_profit` 은 `fin_map.py` 에 `gross_profit` 항목이 있으므로 4단계 계정 매트릭스에 추가하면 **지원**으로 바뀐다(S12 첫 작업에서 판정).
+- (판정 변경 이력) 2026-09-06 S12 가 `financial.gross_profit` 을 미지원 → 지원으로, S16 실측이 `event.dividend_per_share` 를 지원 → 부분으로 바꿨다. 근거는 §2 비고.
+- 미지원 9 는 원천 부재(대량매매·반대매매·담보·잠정실적·지수구성 PIT·텍스트 감성·매출총이익·차입금 계열)로, 어댑터 `list_fields()` 가 `unavailable` 로 답한다. 레지스트리 50 팩터 중 이 필드에 걸린 팩터는 `factor_readiness.status='blocked'`.
 - **S16(09-06)이 낸 equity 내부 스코프 필드 9** — 레지스트리(`backend/FACTORS.md`)가 요구하지 않으므로 위 표에 행을 두지 않는다(`price.adj_close` 와 같은 규약). 전부 축이 **(corp_code, bsns_year, reprt_code, …)** 이고 PIT 축은 `available_date`(사업보고서 접수일)다. 티커 축 팩터로 쓰려면 소비자가 `corp_ticker` 로 전개하고 종류(`se`·`stock_knd`)를 대응시켜야 한다.
   - `financial.shares_issued` = `shares_outstanding.issued_shr`(발행주식총수) · `financial.shares_treasury` = `.treasury_shr`(자기주식수) · `financial.shares_distributed` = `.distributed_shr`(유통주식수). **`price.shares_outstanding` 의 대체가 아니다** — 그쪽 정본은 KRX 상장주식수다.
   - `event.treasury_acquired`·`event.treasury_disposed`·`event.treasury_retired` = `treasury_stock.acquired_shr`·`disposed_shr`·`retired_shr`. 취득방법 3축이 grain 에 있으므로 종목·연도 합계는 **`acqs_mth3 <> '소계'` 인 잎 행만** 더해야 한다(소계 행이 함께 실려 있다 — GATES FX-4B-001). 기존 `event.buyback_amount`(`corp_event.amount_krw`, 결정공시 축)와는 축도 시점도 다르다: 이쪽은 사업보고서 확정치다.
@@ -109,6 +112,27 @@
 - **`opinion_broker_daily` 는 field_id 가 아니다** — 제공처별 원문 의견·목표주가는 레지스트리 42 필드에 대응이 없다. 어댑터는 노출하지 않고, 목표가 리비전 분산 같은 팩터를 뒤에 만들 때 읽는 내부 축이다. 읽을 때 **`change_pct` 는 기간이 없는 값** 임에 주의한다 — 직전 의견의 날짜를 WISE 가 주지 않아 `prev_opinion_date` 를 우리 관측 이력에서 되찾고, 못 찾으면 NULL 이다(FX-5-008, 절단본 249행 전부 NULL).
 - **S09 `short_daily`(09-06) 실제 컬럼명** — `short.*` 3필드가 읽는 컬럼은 **원천별 접미사**를 갖는다(사용자 확정 "합치지 않는다", DESIGN §4-3): 공매도 키움 `short_volume_kiwoom_shr`·`short_value_kiwoom_krw`·`short_weight_kiwoom_pct`·`short_avg_price_kiwoom_raw`(+`_basis`) / 공매도 KIS `short_volume_kis_shr`·`short_value_kis_krw`·`short_volume_ratio_kis_pct`·`short_value_ratio_kis_pct`·`short_avg_price_kis_krw` / 대차 KIS `lending_new_kis_shr`·`lending_redeem_kis_shr`·`lending_balance_kis_shr`·`lending_balance_kis_krw`. 결측 3분류는 원천마다 하나씩(`fill_kind_short_kiwoom`·`fill_kind_short_kis`·`fill_kind_loan_kis`) — §1 「결측 어휘」의 `fill_kind.kind` → `CellKind` 대응은 그대로이되 **어댑터가 어느 원천을 읽는지에 따라 셀 종류가 갈린다**(같은 (ticker, date) 에서 키움은 `measured`, KIS 는 `not_collected` 인 셀이 절단본에 33,081행). `short_balance_ratio` 의 분모 `shares_out` 은 `price_daily` 에 있다 — `short_daily` 는 주식수를 재수록하지 않는다.
 - `check_field_map.py` 가 보는 것은 **field_id 집합**이라 위 컬럼명 변경은 CI 대상이 아니다(registry 39 · map 42 · missing 0, 09-06 재확인). 어댑터가 이 컬럼들을 실제로 노출하는 시점은 S19 `dataset_profile` 이 랙(`recommended_lag_sessions`)을 확정한 뒤다 — stage 세 원천 모두 `lag_known=false` 이므로 랙 0 을 가정하면 안 된다.
+
+### S21 본판 어댑터의 소비 규약 (2026-09-06)
+
+어댑터는 **필드별 분기 없이 선언표를 해석**한다(`_specs.SOURCE_SPECS` × `FIELD_SPECS`). 읽는 방식은 둘뿐이고, grain 이 (security, session) 보다 굵은 원천은 표에 적힌 규칙으로 줄인다.
+
+| 원천 | 축 | 읽는 방식 | grain 축소 규칙 | field_id |
+|---|---|---|---|---|
+| `price_daily` | ticker | GRID (ticker, date) | 없음 | `price.close`·`open`·`volume`·`market_cap`·`shares_outstanding`·`trading_value` |
+| `v_adj_price_fwd` | ticker | GRID | 없음 | `price.adj_close`(내부 스코프) |
+| `v_fin_latest` | **corp** | LATEST(available_date) | 판본·`fs_div` 는 뷰가 접고, 같은 접수일의 여러 기간은 `period_end DESC, report_code DESC` | `financial.*` 8 |
+| `v_consensus`(metric=eps / revenue) | ticker | LATEST | 관측 달 이후로 끝나는 `target_period` 중 가장 가까운 것(**FY1**), 동률 `obs_month DESC` | `consensus.forward_eps`·`forward_sales`·`eps_dispersion` |
+| `opinion_daily` | ticker | LATEST | 잰 판본 우선(`coverage_degraded=false` = wise), 동률 `src` 사전순 | `consensus.target_price`·`recommendation`·`analyst_count` |
+| `dividend_event` | **corp** | LATEST | 종류(`stock_knd`) 축을 접는다 — 값 있는 행 우선 → 최신 `bsns_year`·`reprt_code` → `stock_knd` 사전순(한글 정렬상 '보통주' 가 '우선주' 앞) | `event.dividend_per_share` |
+| `corp_event`(`event_type='tsstk_aq'`) | ticker | LATEST | 같은 공시일의 여러 건은 `sum(amount_krw)` | `event.buyback_amount` |
+| `holder_daily`(`src='elestock'`) | **corp** | LATEST | 같은 접수일의 보고자는 `sum(qty_change_shr)`(전부 NULL 이면 NULL) | `event.insider_net_buy` |
+
+- **GRID** 는 랙 n 을 "정확히 n 세션 전 행" 으로 읽고 그 세션에 원천 행이 없으면 셀을 내지 않는다 — 재상장 구간 첫날이 직전 구간 값을 물지 않는다(합성 금지). **LATEST** 는 컷오프(as_of 에서 n 세션 전 거래일) 이하의 마지막 관측이고 `available_date` 는 **그 관측의 공개일**이라 as_of 보다 몇 달 앞일 수 있다(계약은 `available_date ≤ as_of` 만 요구한다). 관측이 하나도 없으면 셀이 없고, 값이 NULL 이면 셀은 나가되 `CellKind.MISSING` 이다(`load_panel` 과 같은 규칙).
+- **corp 축 3원천은 `corp_ticker` 로 전개하고 한 법인의 종류주 티커 전부가 같은 값을 받는다.** 재무·임원지분은 법인 사실이라 옳지만 **배당은 종류마다 다르다** — 우선주 티커가 보통주 DPS 를 받는 것이 `event.dividend_per_share` 부분 판정의 근거 ②이고, 종류별 DPS 가 필요하면 소비자가 `dividend_event` 를 직접 읽어야 한다. `corp_ticker` 는 시점축 없는 현재 스냅샷이라 폐지·티커 재사용 구간의 대응은 DESIGN §4-5 6 의 한계를 그대로 물려받는다.
+- **랙은 전부 0 세션**이고 근거는 원천마다 `SourceSpec.lag_basis` 에 적혀 `DatasetFieldProfile.available_date_basis` 로 나간다 — 가격류는 `available_date = date`, DART 축은 `available_date = rcept_dt`(접수일 자체가 공개일이라 세션 랙을 더하면 이중 계산), 컨센서스·의견은 stage 가 잰 수집일이다. `dataset_profile`(S19)이 오면 프로필 값으로 갈아 끼운다.
+- **`event.*` 3 은 최근 관측이 그대로 이어진다** — 창·감쇠·이벤트 스터디는 팩터층 몫이고, 언제 공시된 값인지는 `available_date` 가 말한다.
+- **단위는 field_id 별 상수가 아닐 수 있다** — `consensus.forward_sales` 는 억원이고(`unit` 컬럼이 정본) `consensus.eps_dispersion` 은 표준편차가 아니라 `est_max − est_min` 범위다.
 
 ## 4. 유지 규약
 

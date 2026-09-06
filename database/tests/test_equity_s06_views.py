@@ -67,10 +67,12 @@ def test_카탈로그는_매크로_6개이고_뷰_게이트를_통과한다(
         published: tuple[Path, catalog.CatalogResult]) -> None:
     root, p = published
     assert len(p.macros) == 6
-    # S17 `v_consensus` 는 `consensus_daily` 가 이 체인에 없어 렌더되지 않는다(깨진 매크로를
-    # 카탈로그에 싣지 않는다 — views.render_macros).
-    assert sorted(p.macros) == sorted(v for k, v in views.SIGNATURES.items() if k != "v_consensus")
-    assert sorted(p.skipped) == ["v_consensus"]
+    # S17 `v_consensus`(consensus_daily) 와 S21 `v_fin_latest`(fin_std·disclosure_version) 는
+    # 입력이 이 체인에 없어 렌더되지 않는다(깨진 매크로를 카탈로그에 싣지 않는다 —
+    # views.render_macros).
+    absent = {"v_consensus", "v_fin_latest"}
+    assert sorted(p.macros) == sorted(v for k, v in views.SIGNATURES.items() if k not in absent)
+    assert sorted(p.skipped) == sorted(absent)
     assert [g.name for g in p.gates] == ["EG11", "EG5c", "EG3_firm_mktcap"]
     assert _gate(p, "EG11").status is GateStatus.PASS
     assert _gate(p, "EG5c").status is GateStatus.SKIP

@@ -1,0 +1,34 @@
+{
+ "_seed": "S08 (flow_daily) 가 요구하는 baseline 상수 2개. 오케스트레이터가 data/equity/baseline.json 에 병합한다. investor_sum_tol_krw 는 EG3-P06(키움 12주체 합 = 0) 의 허용오차이고 threshold_EG7 은 격리 비율 상한이다 — 둘 다 절단본 실측 + 유도근거로 제안하며 **서버 재측정 뒤 사람 승인**이 필요하다(GATES §7-3). 나머지 축은 상수를 안 쓴다: 격자 술어·fill_kind 판정·KIS 대응표는 어휘이고, 커버율·gap·겹침·orgn 편차는 EG3_flow_daily 기록형 metric 이라 임계가 없다. EG9(레짐 커버리지) 의 coverage_probe_dates·coverage_min·evidence_rate_min·coverage_return_corr_max·corr_min_months 는 여기서 등재하지 않는다 — 절단본 커버율(50.3%)이 서버(원장 7.6M/격자 9.2M)와 다른 축이라 지금 값을 굳히면 서버 첫 빌드가 잘못된 기준으로 폐기된다. EG9 는 서버 실측(EG3_flow_daily.coverage_measured·evidence_rate)을 보고 S08 후속에서 붙인다. 사유별 격리 건수 회귀(GATES §3 ⑪ (d) reject_pre_calendar·reject_off_grid) 도 같은 이유로 미등재이며 EG1_ledger.n_reject_by_reason 기록형으로 남는다.",
+ "measured_at": "2026-09-06",
+ "flow_daily": {
+  "investor_sum_tol_krw": 6000000,
+  "threshold_EG7": 0.05
+ },
+ "_measured": [
+  {
+   "table": "flow_daily",
+   "metric": "investor_sum_tol_krw",
+   "value": 6000000,
+   "kind": "convention",
+   "sql": "-- 절단본 실측(빌드 SQL 과 독립, 원장 stg_flow_daily_kiwoom 20,313행 위 손계산): 12주체 합 s = ind+frgnr+fnnc+insrnc+invtrt+etc_fnnc+bank+penfnd+samo+natn+etc_corp+natfor 의 분포(백만원) = {-4: 1, -3: 21, -2: 758, -1: 4413, 0: 10081, +1: 4294, +2: 715, +3: 29, +4: 1}. |s| 최대 4,000,000원 = 4백만원, s 는 항상 1e6 의 배수, 0 인 행 10,081 (49.6%).",
+   "inputs": {},
+   "measured_at": "2026-09-06",
+   "growing": false,
+   "used_by": "rules_s08.eg3_flow_daily n_investor_sum_violation (GATES §1 EG3-P06)",
+   "note": "**제안값 — 서버 재측정·사람 승인 필요.** 값 6,000,000 은 절단본 최대 4,000,000 이 아니라 **반올림 상한의 유도값**이다: 키움 ka10060 은 12주체를 각각 백만원 단위로 반올림해 준다(stage `_flow_krw` 가 ×1e6 로 되돌린다). 원 단위 합이 정확히 0 인 12개 값을 각각 [-0.5, +0.5] 백만원 안에서 반올림하므로 합의 오차는 [-6, +6] 백만원을 넘을 수 없다. 절단본이 ±4 까지만 보인 것은 표본(8티커)이 작기 때문이고, 서버 7.6M 행에서는 ±5·±6 이 나올 수 있다 — 실측 최댓값을 그대로 굳히면 정당한 반올림이 폐기형 게이트를 깨뜨린다. 이 값으로도 게이트의 목적은 그대로다: 단위 오적용(×1e6)·주체 매핑 누락은 오차가 최소 1e8 이상이라 전부 걸린다. 서버 첫 빌드의 EG3_flow_daily.investor_sum_abs_max_krw 를 보고 6e6 을 유지할지(기대) 조일지 판단한다."
+  },
+  {
+   "table": "flow_daily",
+   "metric": "threshold_EG7",
+   "value": 0.05,
+   "kind": "measured",
+   "sql": "-- 절단본 실측: 원장 20,313행 = 격자 매핑 18,581 + pre_calendar 18(000660·003540·005930 각 6행, 2009-12-22~12-30) + off_grid 1,714(036220 1,411행 2018-06-21~2024-03-12 · 101970 303행 2023-12-26~2025-03-27 — 폐지~재상장 사이 티커 재사용 구간). 격리 비율 = 1,732 / (36,972 + 1,732) = 0.044750.",
+   "inputs": {},
+   "measured_at": "2026-09-06",
+   "growing": true,
+   "used_by": "gates.eg7_range (GATES §1 EG7 — 코드 기본값 0.001 을 테이블 상수로 이관)",
+   "note": "**제안값 — 서버 재측정 필요.** 격자 테이블의 EG7 격리는 '결함 행' 이 아니라 **원장이 격자보다 넓다는 사실**이다: 캘린더 하한 이전(P11 서버 flow 7,609행)과 폐지·재상장 사이 티커 재사용 구간이 전부 여기로 온다. 코드 기본값 0.001 은 열(cell) 격리형 테이블 기준이라 격자 테이블에 그대로 쓰면 첫 빌드가 반드시 폐기된다. 0.05 는 절단본 0.0448 + 여유이며, 절단본은 재상장 2종이 15티커 중 2 라 서버(3,478 중 2)보다 off_grid 비중이 극단적으로 높다 — 서버 비율은 pre_calendar 7,609/7,621,338 = 0.001 에 티커 재사용·폐지 구간이 더해진 값이라 0.05 보다 훨씬 작을 것으로 본다. 서버 첫 빌드 뒤 실측값으로 조인다. 사유별 건수 회귀(GATES §3 ⑪ (d))가 붙으면 이 비율 임계는 보조축이 된다."
+  }
+ ]
+}

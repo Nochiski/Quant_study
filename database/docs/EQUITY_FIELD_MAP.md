@@ -46,10 +46,10 @@
 | `consensus.recommendation` | `opinion_daily.opinion_score` | 부분 | 동일 |
 | `consensus.analyst_count` | `opinion_daily.analyst_count` | 부분 | WISE 커버 804 |
 | `consensus.eps_dispersion` | `consensus_daily.est_min`·`est_max` | **부분** | v3 구간은 min/max NULL(§4-6) |
-| `flow.foreign_net_buy` | `flow_daily.frgnr_invsr_krw` | 지원 | |
-| `flow.institution_net_buy` | `flow_daily.orgn_krw` | **부분** | GAP-03 — `orgn` 은 합계 컬럼 |
-| `flow.retail_net_buy` | `flow_daily.ind_invsr_krw` | 지원 | |
-| `flow.foreign_ownership` | `flow_daily.foreign_wght_pct` | 지원 | |
+| `flow.foreign_net_buy` | `flow_daily.frgnr_invsr_krw` | 지원 | S08 구현(09-06). 원 단위(stage 가 백만원 ×1e6 완료) · 값 없는 셀은 NULL + `fill_kind` |
+| `flow.institution_net_buy` | `flow_daily.orgn_krw` | **부분** | GAP-03 — `orgn` 은 합계 컬럼이고 **기관 7주체 합과 다르다**(S08 절단본 실측: 18,581행 중 10,783행 불일치, 편차 최대 2,834억원). 12주체 항등식(EG3-P06)에서 제외 |
+| `flow.retail_net_buy` | `flow_daily.ind_invsr_krw` | 지원 | S08 구현(09-06) |
+| `flow.foreign_ownership` | `flow_daily.foreign_wght_pct` | **미확인** | **S08 미구현 → S08-2**. 원천이 `stg_flow_daily_kiwoom`(ka10060)이 아니라 `stg_foreign_daily`(ka10008)인데 절단본에 없어 검증축이 0이다 — 컬럼을 만들고 NULL 로 두는 대신 만들지 않았다(F08 `limit_exh_rt_pct`·F43 `foreign_poss_shr` 도 같다). 선행 조건: 절단본에 `stg_foreign_daily` 절단 |
 | `flow.block_buy`·`flow.block_sell` | — | **미지원** | 대량매매·프로그램매매 미수집(`FACTORS.md` §9) |
 | `short.short_balance_ratio` | `short_daily.short_volume_shr / shares_out` | **부분** | 진짜 잔고 아님(F45 취득 불가) — 라벨 정정 필요 |
 | `short.short_sale_value` | `short_daily.short_value_krw` | 지원 | |
@@ -67,7 +67,8 @@
 
 ## 3. 집계
 
-- 지원 17 · 부분 15 · 미지원 9 · 미확인 1 (2026-09-05, 슬라이스 착수 전 판정).
+- 지원 17 · 부분 15 · 미지원 9 · 미확인 1 (2026-09-05, 슬라이스 착수 전 판정). **S08 뒤(09-06) 재판정: 지원 17 → 16 · 미확인 1 → 2** — `flow.foreign_ownership` 이 지원에서 미확인으로 내려갔다(원천 `stg_foreign_daily` 미절단, S08-2). 집합은 그대로라 `check_field_map.py` 판정은 불변이다.
+- **S08 `flow_daily`(09-06)** — 실제로 내는 flow field_id 는 **3**: `flow.foreign_net_buy`(`frgnr_invsr_krw`) · `flow.retail_net_buy`(`ind_invsr_krw`) · `flow.institution_net_buy`(`orgn_krw`, 부분). 전부 **원 단위**이고 stage 가 백만원 ×1e6 환산을 마친 값을 그대로 나른다 — 어댑터가 다시 스케일하면 안 된다. 값 없는 셀은 **NULL + `fill_kind`** 이고 어휘 대응은 §1 '결측 어휘' 그대로다(`measured`→OBSERVED · `src_omitted`→SOURCE_OMITTED_ZERO · `empty_response`→MISSING · `not_collected`→NOT_COLLECTED). `src` 는 `not_collected` 셀에서 **NULL**(그 셀을 덮는 수집 로그가 없어 원천이 없다) — 어댑터는 `src` 를 필드로 노출하지 않는다. 랙은 `available_date = date`(basis `default`)이며 세션 랙 확정은 `dataset_profile`(S19).
 - **S21 축소 어댑터(09-05)가 실제로 내는 field_id 는 3** — `price.close`·`price.market_cap`·`price.adj_close`(equity 내부 스코프, 위 표 밖). 나머지 39 는 `list_fields()` 에 없고 질의하면 `INVALID_QUERY`(detail `unavailable`)다. `price.adj_close` 는 **전방 조정**(`v_adj_price_fwd`, 09-05 결정)이라 수준·비율 모두 PIT 이고 창에 무관하다(DESIGN §7·§11 ①; 이전 base = 창 end 절충은 폐기). 레지스트리 가격 팩터가 `price.close` 를 요구하는 충돌(#64)은 미해결 — `scripts/run_mvp_backtest.py` 는 FieldNode 를 `price.adj_close` 로 바꿔 돈다.
 - 미지원 9 는 원천 부재(대량매매·반대매매·담보·잠정실적·지수구성 PIT·텍스트 감성·매출총이익·차입금 계열)로, 어댑터 `list_fields()` 가 `unavailable` 로 답한다. 레지스트리 50 팩터 중 이 필드에 걸린 팩터는 `factor_readiness.status='blocked'`.
 - `financial.gross_profit` 은 `fin_map.py` 에 `gross_profit` 항목이 있으므로 4단계 계정 매트릭스에 추가하면 **지원**으로 바뀐다(S12 첫 작업에서 판정).

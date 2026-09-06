@@ -9,16 +9,21 @@ cap; ordering is deterministic (topological node order, then as_of, then securit
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
 
 from ._evaluation import (
     FactorComputedValue,
+    FactorEvaluation,
     FactorObservation,
     _as_number,
+    _checkpointed,
     _compute_nodes,
+    _evaluation_from_computed,
     _indices_by_security,
+    _noop_checkpoint,
     values_from_indices,
 )
 from ._nodes import (
@@ -101,11 +106,60 @@ def trace_factor_graph(
     observations: tuple[FactorObservation, ...],
     parameters: tuple[ResolvedFactorParameter, ...] = (),
     selection: TraceSelection | None = None,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> FactorTrace:
     """Project the evaluator node cache into a bounded, explained, deterministically ordered trace.
 
     Values come from the same cache `evaluate_factor_graph` reads, so they never diverge.
     """
+    bounds, nodes, order = _trace_context(
+        graph, observations, selection, checkpoint=checkpoint
+    )
+    computed = _compute_nodes(
+        graph, observations=observations, parameters=parameters, checkpoint=checkpoint
+    )
+    return _project_trace(
+        graph, observations, bounds, nodes, order, computed, checkpoint=checkpoint
+    )
+
+
+def evaluate_factor_graph_with_trace(
+    graph: FactorGraph,
+    *,
+    observations: tuple[FactorObservation, ...],
+    parameters: tuple[ResolvedFactorParameter, ...] = (),
+    selection: TraceSelection | None = None,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
+) -> tuple[FactorEvaluation, FactorTrace]:
+    """Evaluate once and derive both the executable output and bounded debug projection.
+
+    This is the truthful pipeline entry point for P5: the portfolio score and trace rows share
+    the exact in-memory node cache. Callers do not run `evaluate_factor_graph` and
+    `trace_factor_graph` independently.
+    """
+    bounds, nodes, order = _trace_context(
+        graph, observations, selection, checkpoint=checkpoint
+    )
+    computed = _compute_nodes(
+        graph, observations=observations, parameters=parameters, checkpoint=checkpoint
+    )
+    return (
+        _evaluation_from_computed(
+            graph, observations, computed, checkpoint=checkpoint
+        ),
+        _project_trace(
+            graph, observations, bounds, nodes, order, computed, checkpoint=checkpoint
+        ),
+    )
+
+
+def _trace_context(
+    graph: FactorGraph,
+    observations: tuple[FactorObservation, ...],
+    selection: TraceSelection | None,
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
+) -> tuple[TraceSelection, dict[str, ExpressionNode], tuple[str, ...]]:
     bounds = selection or TraceSelection()
     if bounds.max_rows <= 0:
         raise ValueError(f"trace max_rows must be positive — max_rows={bounds.max_rows}")
@@ -118,16 +172,28 @@ def trace_factor_graph(
             "trace selection references nodes that are unknown or not reachable from the output — "
             f"node_ids={sorted(unknown)!r} reachable={list(order)!r}"
         )
-    _require_unique_rows(observations)
-    computed = _compute_nodes(graph, observations=observations, parameters=parameters)
+    _require_unique_rows(observations, checkpoint=checkpoint)
+    return bounds, nodes, order
+
+
+def _project_trace(
+    graph: FactorGraph,
+    observations: tuple[FactorObservation, ...],
+    bounds: TraceSelection,
+    nodes: dict[str, ExpressionNode],
+    order: tuple[str, ...],
+    computed: dict[str, list[FactorComputedValue]],
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
+) -> FactorTrace:
     wanted_nodes = order if bounds.node_ids is None else [n for n in order if n in bounds.node_ids]
 
-    positions = _positions(observations, bounds)
-    by_security = _indices_by_security(observations)
+    positions = _positions(observations, bounds, checkpoint=checkpoint)
+    by_security = _indices_by_security(observations, checkpoint=checkpoint)
     row_count = 0
     truncated = False
     traced_nodes: list[NodeTrace] = []
-    for node_id in wanted_nodes:
+    for node_id in _checkpointed(wanted_nodes, checkpoint):
         if positions and row_count >= bounds.max_rows:
             truncated = True  # no empty trailing NodeTrace: a capped node is simply absent
             break
@@ -135,7 +201,7 @@ def trace_factor_graph(
         values = computed[node_id]
         input_ids = tuple(node_dependencies(node))
         rows: list[TracedValue] = []
-        for index in positions:
+        for index in _checkpointed(positions, checkpoint):
             if row_count >= bounds.max_rows:
                 truncated = True
                 break
@@ -147,7 +213,14 @@ def trace_factor_graph(
                     security_id=observations[index].security_id,
                     value=values[index],
                     status=_status(
-                        node, values[index], inputs, first_series, index, observations, by_security
+                        node,
+                        values[index],
+                        inputs,
+                        first_series,
+                        index,
+                        observations,
+                        by_security,
+                        checkpoint=checkpoint,
                     ),
                     inputs=inputs,
                 )
@@ -171,11 +244,15 @@ def trace_factor_graph(
     )
 
 
-def _require_unique_rows(observations: tuple[FactorObservation, ...]) -> None:
+def _require_unique_rows(
+    observations: tuple[FactorObservation, ...],
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
+) -> None:
     """(as_of, security_id) must be unique: the evaluator's time-series order depends on it."""
     seen: set[tuple[date, str]] = set()
     duplicates: set[tuple[date, str]] = set()
-    for observation in observations:
+    for observation in _checkpointed(observations, checkpoint):
         key = (observation.as_of, observation.security_id)
         if key in seen:
             duplicates.add(key)
@@ -187,10 +264,15 @@ def _require_unique_rows(observations: tuple[FactorObservation, ...]) -> None:
         )
 
 
-def _positions(observations: tuple[FactorObservation, ...], bounds: TraceSelection) -> list[int]:
+def _positions(
+    observations: tuple[FactorObservation, ...],
+    bounds: TraceSelection,
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
+) -> list[int]:
     selected = [
         index
-        for index, observation in enumerate(observations)
+        for index, observation in _checkpointed(enumerate(observations), checkpoint)
         if (bounds.security_ids is None or observation.security_id in bounds.security_ids)
         and (bounds.as_of is None or observation.as_of in bounds.as_of)
     ]
@@ -206,6 +288,8 @@ def _status(
     index: int,
     observations: tuple[FactorObservation, ...],
     by_security: dict[str, list[int]],
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> TraceValueStatus:
     if value is not None:
         return TraceValueStatus.OK
@@ -247,7 +331,9 @@ def _status(
         indices = by_security[observations[index].security_id]
         position = indices.index(index)
         end = position - node.lag + 1
-        window = values_from_indices(first_series, indices[end - node.window : end])
+        window = values_from_indices(
+            first_series, indices[end - node.window : end], checkpoint=checkpoint
+        )
         if (
             node.operator is TimeSeriesOperator.MOMENTUM
             and len(window) == node.window

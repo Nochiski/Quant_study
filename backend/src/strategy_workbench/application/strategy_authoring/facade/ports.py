@@ -16,6 +16,11 @@ from strategy_workbench.application.strategy_authoring.ports.outgoing.document_c
     diagnostic_codes,
     source_hash_of,
 )
+from strategy_workbench.application.strategy_authoring.ports.outgoing.draft_repository import (
+    StrategyDraftConflictError,
+    StrategyDraftNotFoundError,
+    StrategyDraftRepositoryPort,
+)
 
 __all__ = [
     "DOCUMENT_POLICY_REASONS",
@@ -31,6 +36,9 @@ __all__ = [
     "SourceFormat",
     "SourcePosition",
     "SourceRange",
+    "StrategyDraftConflictError",
+    "StrategyDraftNotFoundError",
+    "StrategyDraftRepositoryPort",
     "diagnostic_code",
     "diagnostic_codes",
     "source_hash_of",

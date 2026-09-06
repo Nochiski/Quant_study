@@ -25,6 +25,7 @@ import {
 } from "vitest";
 
 import { readBackendFixture } from "../../shared/testing/backend-fixtures";
+import { t } from "../../shared/config";
 import { App } from "../app";
 
 const API = "http://localhost:8000";
@@ -173,6 +174,7 @@ const FACTOR = {
 const posted: unknown[] = [];
 const started: Record<string, unknown>[] = [];
 const explainedGraphs: unknown[] = [];
+const tracedStrategies: Record<string, unknown>[] = [];
 const acceptedRun = (runId = "run-7") => ({
   run: {
     run_id: runId,
@@ -186,6 +188,34 @@ const acceptedRun = (runId = "run-7") => ({
 });
 
 const server = setupServer(
+  http.get(`${API}/api/v1/strategy-drafts/:draftId`, () =>
+    HttpResponse.json(
+      { detail: { code: "strategy.draft.not_found" } },
+      { status: 404 },
+    ),
+  ),
+  http.put(
+    `${API}/api/v1/strategy-drafts/:draftId`,
+    async ({ params, request }) => {
+      const body = (await request.json()) as Record<string, unknown>;
+      return HttpResponse.json({
+        draft_id: params.draftId,
+        version: Number(body.expected_version) + 1,
+        source: body.source,
+        format: body.format,
+        source_hash: "d".repeat(64),
+        schema_version: body.schema_version,
+        updated_at: "2026-09-05T00:00:00Z",
+        strategy_id: body.strategy_id ?? null,
+        base_revision: body.base_revision ?? null,
+        base_spec_hash: body.base_spec_hash ?? null,
+      });
+    },
+  ),
+  http.delete(
+    `${API}/api/v1/strategy-drafts/:draftId`,
+    () => new HttpResponse(null, { status: 204 }),
+  ),
   http.get(`${API}/api/v1/strategies/:strategyId/diff`, ({ request }) => {
     const url = new URL(request.url);
     return HttpResponse.json({
@@ -358,6 +388,7 @@ afterEach(() => {
   posted.length = 0;
   started.length = 0;
   explainedGraphs.length = 0;
+  tracedStrategies.length = 0;
 });
 afterAll(() => server.close());
 
@@ -611,6 +642,172 @@ describe("document routes (P2-04)", () => {
     expect(screen.getByText("저장됨 v2")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "리비전 저장" })).toBeDisabled();
     expect(screen.getByText("2026-09-04 09:30")).toBeInTheDocument();
+  });
+
+  it("recovers an exact server draft on a direct revision route without silent overwrite", async () => {
+    const recovered = `${STORED}description: server recovery\n`;
+    server.use(
+      http.get(`${API}/api/v1/strategy-drafts/:draftId`, ({ params }) =>
+        HttpResponse.json({
+          draft_id: params.draftId,
+          version: 7,
+          source: recovered,
+          format: "yaml",
+          source_hash: "d".repeat(64),
+          schema_version: "1.0",
+          updated_at: "2026-09-05T01:02:03Z",
+          strategy_id: "s1",
+          base_revision: 2,
+          base_spec_hash: "2".repeat(64),
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    mount("/research/strategies/s1/revisions/2");
+    const view = await editor();
+    expect(view.state.doc.toString()).toBe(STORED);
+    const banner = await screen.findByRole("region", {
+      name: "복구할 서버 초안",
+    });
+    expect(view.state.doc.toString()).toBe(STORED);
+    await user.click(
+      within(banner).getByRole("button", { name: "서버 초안 적용" }),
+    );
+    await waitFor(() => expect(view.state.doc.toString()).toBe(recovered));
+  });
+
+  it("rejects a server draft whose payload identity differs from the requested route", async () => {
+    let deleteCalls = 0;
+    server.use(
+      http.get(`${API}/api/v1/strategy-drafts/:draftId`, () =>
+        HttpResponse.json({
+          draft_id: "revision:another-strategy:99:wrong",
+          version: 7,
+          source: `${STORED}description: wrong identity\n`,
+          format: "yaml",
+          source_hash: "d".repeat(64),
+          schema_version: "1.0",
+          updated_at: "2026-09-05T01:02:03Z",
+          strategy_id: "s1",
+          base_revision: 2,
+          base_spec_hash: "2".repeat(64),
+        }),
+      ),
+      http.delete(`${API}/api/v1/strategy-drafts/:draftId`, () => {
+        deleteCalls += 1;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    mount("/research/strategies/s1/revisions/2");
+    const view = await editor();
+    const alert = await screen.findByRole("alert");
+
+    expect(alert).toHaveTextContent(t("draft.server.rejected"));
+    expect(alert).toHaveTextContent(
+      "Draft response did not match the requested draft identity or contract.",
+    );
+    expect(view.state.doc.toString()).toBe(STORED);
+    expect(
+      screen.queryByRole("button", { name: t("draft.server.applyRemote") }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: t("draft.server.keepLocal") }),
+    ).not.toBeInTheDocument();
+    expect(deleteCalls).toBe(0);
+  });
+
+  it("rejects a malformed draft conflict instead of exposing another draft's actions", async () => {
+    let putCalls = 0;
+    let deleteCalls = 0;
+    server.use(
+      http.put(`${API}/api/v1/strategy-drafts/:draftId`, async () => {
+        putCalls += 1;
+        return HttpResponse.json(
+          {
+            detail: {
+              code: "strategy.draft.conflict",
+              message: "newer writer",
+              current: {
+                draft_id: "revision:another-strategy:99:wrong",
+                version: 2,
+                source: "title: another draft\n",
+                format: "yaml",
+                source_hash: "e".repeat(64),
+                schema_version: "1.0",
+                updated_at: "2026-09-05T01:02:04Z",
+                strategy_id: "s1",
+                base_revision: 2,
+                base_spec_hash: "2".repeat(64),
+              },
+            },
+          },
+          { status: 409 },
+        );
+      }),
+      http.delete(`${API}/api/v1/strategy-drafts/:draftId`, () => {
+        deleteCalls += 1;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    mount("/research/strategies/s1/revisions/2");
+    const view = await editor();
+    replaceText(view, `${STORED}description: local edit\n`);
+    const alert = await screen.findByRole("alert", undefined, {
+      timeout: 3_000,
+    });
+
+    expect(putCalls).toBe(1);
+    expect(alert).toHaveTextContent(t("draft.server.rejected"));
+    expect(alert).toHaveTextContent(
+      "Draft conflict response did not match the requested draft identity.",
+    );
+    expect(
+      screen.queryByRole("button", { name: t("draft.server.applyRemote") }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: t("draft.server.keepLocal") }),
+    ).not.toBeInTheDocument();
+    expect(deleteCalls).toBe(0);
+  });
+
+  it("assigns a new-draft recovery identity before persisting the first edit", async () => {
+    const writes: Array<{ draftId: string; source: string }> = [];
+    server.use(
+      http.put(
+        `${API}/api/v1/strategy-drafts/:draftId`,
+        async ({ params, request }) => {
+          const body = (await request.json()) as Record<string, unknown>;
+          const draftId = String(params.draftId);
+          writes.push({ draftId, source: String(body.source) });
+          return HttpResponse.json({
+            draft_id: draftId,
+            version: Number(body.expected_version) + 1,
+            source: body.source,
+            format: body.format,
+            source_hash: "d".repeat(64),
+            schema_version: body.schema_version,
+            updated_at: "2026-09-05T00:00:00Z",
+            strategy_id: null,
+            base_revision: null,
+            base_spec_hash: null,
+          });
+        },
+      ),
+    );
+
+    const history = mount("/research/strategies/new");
+    const view = await editor();
+    const source = 'schema_version: "1.0"\ntitle: first edit\n';
+    replaceText(view, source);
+
+    await waitFor(() => expect(writes).toHaveLength(1), { timeout: 3_000 });
+    const routeDraft = new URLSearchParams(history.location.search).get(
+      "draft",
+    );
+    expect(routeDraft).not.toBeNull();
+    expect(writes).toEqual([{ draftId: routeDraft, source }]);
   });
 
   it("creates a strategy from the new draft and moves the URL to revision 1", async () => {
@@ -1196,6 +1393,307 @@ describe("FactorGraph read-only projection (P4-07)", () => {
           view.state.selection.main.to,
         ),
       ).toContain("node_id: mom_252"),
+    );
+  }, 15_000);
+
+  it("connects URL-owned trace scope to the generated API on the new-strategy route", async () => {
+    server.use(
+      ...graphHandlers(),
+      http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown> & {
+          as_of?: string;
+          node_ids: string[];
+          security_ids: string[];
+        };
+        tracedStrategies.push(body);
+        const resolvedAsOf = body.as_of ?? "2026-09-01";
+        return HttpResponse.json({
+          spec_hash: "7".repeat(64),
+          snapshot_id: "snap",
+          registry_version: "v1",
+          plan_hash: "p".repeat(64),
+          factor_id: "momentum",
+          as_of: resolvedAsOf,
+          provenance: {
+            kind: "inline_draft",
+            schema_version: "1.0",
+            spec_hash: "7".repeat(64),
+            source_hash: "b".repeat(64),
+            strategy_id: null,
+            revision: null,
+          },
+          raw: [],
+          raw_truncated: false,
+          warnings: [],
+          trace: {
+            rows: body.node_ids.flatMap((nodeId) =>
+              body.security_ids.map((securityId) => ({
+                node_id: nodeId,
+                operation:
+                  nodeId === "close" ? "field" : "time_series.momentum",
+                as_of: resolvedAsOf,
+                security_id: securityId,
+                value: nodeId === "close" ? 10 : 0.2,
+                status: "ok",
+                inputs:
+                  nodeId === "close" ? [] : [{ node_id: "close", value: 10 }],
+              })),
+            ),
+            offset: 0,
+            limit: body.security_ids.length * body.node_ids.length,
+            returned: body.security_ids.length * body.node_ids.length,
+            has_more: false,
+          },
+          target: {
+            signal_as_of: resolvedAsOf,
+            execution_on: "2026-09-02",
+            candidates: body.security_ids.map((securityId, index) => ({
+              as_of: resolvedAsOf,
+              security_id: securityId,
+              sector_id: null,
+              eligible: true,
+              composite_score: 0.2,
+              rank: index + 1,
+              selected: true,
+              side: "long",
+              exclusion_reasons: [],
+              target_weight: 0.05,
+            })),
+            targets: body.security_ids.map((securityId, index) => ({
+              security_id: securityId,
+              side: "long",
+              weight: 0.05,
+              composite_score: 0.2,
+              rank: index + 1,
+            })),
+            construction: body.security_ids.map((securityId, index) => ({
+              as_of: resolvedAsOf,
+              security_id: securityId,
+              factor_contributions: [
+                {
+                  factor_id: "momentum",
+                  value: 0.2,
+                  configured_weight: 1,
+                  direction: "high",
+                  weighted_value: 0.2,
+                  normalized_contribution: 0.2,
+                  status: "ok",
+                },
+              ],
+              composite_score: 0.2,
+              rank: index + 1,
+              eligible: true,
+              selected: true,
+              side: "long",
+              unconstrained_target_weight: 0.05,
+              constrained_target_weight: 0.05,
+              previous_weight: null,
+              estimated_order_delta: null,
+              constraint_effect: "unchanged",
+              exclusion_reasons: [],
+            })),
+          },
+        });
+      }),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/new");
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: "종목 ID" })).toBeEnabled(),
+    );
+    const security = screen.getByRole("textbox", { name: "종목 ID" });
+    expect(screen.getByRole("button", { name: "추적 실행" })).toBeDisabled();
+
+    await user.type(security, "sec-a, sec-b");
+    expect(security).toHaveValue("sec-a, sec-b");
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    await waitFor(() =>
+      expect(history.location.search).toContain("security=sec-a%2C+sec-b"),
+    );
+
+    expect(await screen.findAllByText("5.00%")).toHaveLength(4);
+    expect(tracedStrategies).toHaveLength(1);
+    expect(tracedStrategies[0]).toMatchObject({
+      security_ids: ["sec-a", "sec-b"],
+      factor_id: "momentum",
+      node_ids: ["close", "mom_252"],
+      strategy_source: {
+        kind: "inline_draft",
+        source_hash: "b".repeat(64),
+      },
+    });
+    expect(tracedStrategies[0]).not.toHaveProperty("as_of");
+    expect(screen.getByText("2026-09-01")).toBeInTheDocument();
+  }, 15_000);
+
+  it("restores revision trace scope from history and sends the saved revision source", async () => {
+    const specHash = "7".repeat(64);
+    server.use(
+      ...graphHandlers(),
+      http.get(
+        `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
+        () =>
+          HttpResponse.json({
+            ...document("s1", 2, GRAPH_SOURCE, "그래프 전략"),
+            spec: graphSpec("s1", 2),
+            spec_hash: specHash,
+          }),
+      ),
+      http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown> & {
+          as_of: string;
+          node_ids: string[];
+          security_ids: string[];
+        };
+        tracedStrategies.push(body);
+        return HttpResponse.json({
+          spec_hash: specHash,
+          snapshot_id: "snap",
+          registry_version: "v1",
+          plan_hash: "p".repeat(64),
+          factor_id: "momentum",
+          as_of: body.as_of,
+          provenance: {
+            kind: "saved_revision",
+            schema_version: "1.0",
+            spec_hash: specHash,
+            source_hash: "b".repeat(64),
+            strategy_id: "s1",
+            revision: 2,
+          },
+          raw: [],
+          raw_truncated: false,
+          warnings: [],
+          trace: {
+            rows: body.node_ids.flatMap((nodeId) =>
+              body.security_ids.map((securityId) => ({
+                node_id: nodeId,
+                operation:
+                  nodeId === "close" ? "field" : "time_series.momentum",
+                as_of: body.as_of,
+                security_id: securityId,
+                value: nodeId === "close" ? 10 : 0.2,
+                status: "ok",
+                inputs:
+                  nodeId === "close" ? [] : [{ node_id: "close", value: 10 }],
+              })),
+            ),
+            offset: 0,
+            limit: body.security_ids.length * body.node_ids.length,
+            returned: body.security_ids.length * body.node_ids.length,
+            has_more: false,
+          },
+          target: {
+            signal_as_of: body.as_of,
+            execution_on: "2026-09-01",
+            candidates: body.security_ids.map((securityId) => ({
+              as_of: body.as_of,
+              security_id: securityId,
+              sector_id: null,
+              eligible: true,
+              composite_score: 0.2,
+              rank: 1,
+              selected: true,
+              side: "long",
+              exclusion_reasons: [],
+              target_weight: 0.05,
+            })),
+            targets: body.security_ids.map((securityId) => ({
+              security_id: securityId,
+              side: "long",
+              weight: 0.05,
+              composite_score: 0.2,
+              rank: 1,
+            })),
+            construction: body.security_ids.map((securityId) => ({
+              as_of: body.as_of,
+              security_id: securityId,
+              factor_contributions: [
+                {
+                  factor_id: "momentum",
+                  value: 0.2,
+                  configured_weight: 1,
+                  direction: "high",
+                  weighted_value: 0.2,
+                  normalized_contribution: 0.2,
+                  status: "ok",
+                },
+              ],
+              composite_score: 0.2,
+              rank: 1,
+              eligible: true,
+              selected: true,
+              side: "long",
+              unconstrained_target_weight: 0.05,
+              constrained_target_weight: 0.05,
+              previous_weight: null,
+              estimated_order_delta: null,
+              constraint_effect: "unchanged",
+              exclusion_reasons: [],
+            })),
+          },
+        });
+      }),
+    );
+    const nodePath = "%2Ffactors%2Ffactors%2F0%2Fgraph%2Fnodes%2F1";
+    const initial = `/research/strategies/s1/revisions/2?asOf=2026-08-31&security=sec-r&path=${nodePath}`;
+    const history = mount(initial);
+    const user = userEvent.setup();
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "추적 실행" })).toBeEnabled(),
+    );
+    expect(screen.getByLabelText("기준일")).toHaveValue("2026-08-31");
+    expect(screen.getByRole("textbox", { name: "종목 ID" })).toHaveValue(
+      "sec-r",
+    );
+    expect(screen.getByRole("combobox", { name: "노드" })).toHaveValue(
+      "mom_252",
+    );
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    expect(await screen.findAllByText("5.00%")).toHaveLength(2);
+    expect(tracedStrategies[0]).toMatchObject({
+      as_of: "2026-08-31",
+      security_ids: ["sec-r"],
+      node_ids: ["close", "mom_252"],
+      strategy_source: {
+        kind: "saved_revision",
+        strategy_id: "s1",
+        revision: 2,
+        expected_spec_hash: specHash,
+      },
+    });
+
+    act(() => {
+      history.push(
+        `/research/strategies/s1/revisions/2?asOf=2026-08-30&security=sec-next&path=%2Ffactors%2Ffactors%2F0%2Fgraph%2Fnodes%2F0`,
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByLabelText("기준일")).toHaveValue("2026-08-30");
+      expect(screen.getByRole("textbox", { name: "종목 ID" })).toHaveValue(
+        "sec-next",
+      );
+      expect(screen.getByRole("combobox", { name: "노드" })).toHaveValue(
+        "close",
+      );
+    });
+
+    act(() => history.back());
+    await waitFor(() => {
+      expect(screen.getByLabelText("기준일")).toHaveValue("2026-08-31");
+      expect(screen.getByRole("textbox", { name: "종목 ID" })).toHaveValue(
+        "sec-r",
+      );
+      expect(screen.getByRole("combobox", { name: "노드" })).toHaveValue(
+        "mom_252",
+      );
+    });
+    act(() => history.forward());
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: "종목 ID" })).toHaveValue(
+        "sec-next",
+      ),
     );
   }, 15_000);
 });

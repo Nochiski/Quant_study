@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
@@ -18,8 +19,9 @@ from strategy_workbench.adapters.outbound.equity_duckdb.facade.provider import (
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
     MockEquityDataAdapter,
 )
-from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
-    InMemoryStrategyRepository,
+from strategy_workbench.adapters.outbound.strategy_sqlite.facade.repository import (
+    SQLiteStrategyDraftRepository,
+    SQLiteStrategyRepository,
 )
 from strategy_workbench.application.backtest_run.facade.runs import BacktestRunService
 from strategy_workbench.application.equity_workspace.facade.ports import EquityDataPort
@@ -30,10 +32,14 @@ from strategy_workbench.application.factor_research.facade.research import (
     FactorResearchService,
 )
 from strategy_workbench.application.portfolio_design.facade.design import PortfolioDesignService
+from strategy_workbench.application.portfolio_design.facade.trace import StrategyTraceService
 from strategy_workbench.application.strategy_authoring.facade.authoring import (
+    CompileRequest,
     StrategyAuthoringService,
     StrategyDocumentService,
+    StrategyDraftService,
 )
+from strategy_workbench.application.strategy_authoring.facade.ports import SourceFormat
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.application.strategy_design.facade.ports import StrategyRepositoryPort
 from strategy_workbench.domain.analytics.facade.metrics import build_default_metric_registry
@@ -48,8 +54,10 @@ class BackendContainer:
     strategy_design: StrategyDesignService
     strategy_authoring: StrategyAuthoringService
     strategy_documents: StrategyDocumentService
+    strategy_drafts: StrategyDraftService
     factor_research: FactorResearchService
     portfolio_design: PortfolioDesignService
+    strategy_traces: StrategyTraceService
     backtest_runs: BacktestRunService
 
 
@@ -61,11 +69,14 @@ def build_container(
     equity_adapter: str = "mock",
     artifact_root: Path | None = None,
     equity_root: Path | None = None,
+    strategy_repository_path: str | Path | None = None,
 ) -> BackendContainer:
     """Build one explicit dependency graph; unknown adapters fail instead of falling back.
 
     `equity_adapter="duckdb"` reads the equity layer at `equity_root` (S21); it needs the
     `equity` optional extra (duckdb) and fails loudly when the root or the extra is missing.
+    `strategy_repository_path=None` selects isolated in-memory SQLite for tests; the HTTP
+    runtime supplies a durable file path explicitly so both exercise the same adapter contract.
     """
     equity_data: MockEquityDataAdapter | EquityDuckdbAdapter
     if equity_adapter == "mock":
@@ -83,7 +94,6 @@ def build_container(
             f"available={EQUITY_ADAPTERS}"
         )
     engine_portfolio = BacktestEnginePortfolioAdapter()
-    strategy_repository = InMemoryStrategyRepository()
     factor_registry = build_default_factor_registry()
     portfolio_design = PortfolioDesignService(
         equity_data,
@@ -97,9 +107,15 @@ def build_container(
         factor_registry_version=factor_registry.version,
         dataset_snapshot_id=lambda: equity_data.snapshot().snapshot_id,
     )
+    strategy_repository = SQLiteStrategyRepository(
+        strategy_repository_path,
+        source_spec_hash=_source_spec_hash_resolver(strategy_authoring),
+    )
+    strategy_draft_repository = SQLiteStrategyDraftRepository(strategy_repository_path)
     run_artifact_root = artifact_root or (
         Path(__file__).resolve().parents[3] / ".local" / "backtest-runs"
     )
+    strategy_traces = StrategyTraceService(portfolio_design, strategy_repository)
     return BackendContainer(
         equity_data=equity_data,
         equity_workspace=EquityWorkspaceService(equity_data),
@@ -112,12 +128,17 @@ def build_container(
         strategy_documents=StrategyDocumentService(
             strategy_authoring, strategy_repository, new_id=lambda: str(uuid4())
         ),
+        strategy_drafts=StrategyDraftService(
+            strategy_draft_repository,
+            strategy_repository,
+        ),
         factor_research=FactorResearchService(
             factor_registry,
             metadata_source=equity_data,
             observation_source=equity_data,
         ),
         portfolio_design=portfolio_design,
+        strategy_traces=strategy_traces,
         backtest_runs=BacktestRunService(
             portfolio_design,
             strategy_repository,
@@ -127,3 +148,20 @@ def build_container(
             new_id=lambda: str(uuid4()),
         ),
     )
+
+
+def _source_spec_hash_resolver(
+    strategy_authoring: StrategyAuthoringService,
+) -> Callable[[str, SourceFormat], str]:
+    """Adapt the authoring compile contract to storage integrity without copying its rules."""
+
+    def resolve(source: str, format: SourceFormat) -> str:
+        compiled = strategy_authoring.compile(CompileRequest(source, format))
+        if compiled.spec_hash is None:
+            diagnostics = ", ".join(
+                f"{diagnostic.code}@{diagnostic.pointer}" for diagnostic in compiled.diagnostics[:5]
+            )
+            raise ValueError(f"stored source no longer compiles -- {diagnostics}")
+        return compiled.spec_hash
+
+    return resolve

@@ -101,6 +101,17 @@ class BlobSource:
 
 
 @dataclass(frozen=True)
+class FileSource:
+    """§1 예외 — 원장 파일(ZIP)을 파이썬 파서로 N행 언네스트. 파싱은 doc_prepass 가 미리 해
+    `<stage_root>/_tmp/doc/<snapshot_id>/<table>/year=*.jsonl` 에 캐시하고, 빌더는 그 캐시를 읽는다.
+    sources[0] 은 원장 메타(dart.doc_store) — ATTACH·G0 대상."""
+
+    table: str                                   # 캐시 디렉토리 이름 = stage 테이블 이름
+    columns: tuple[str, ...]                     # JSONL 행의 컬럼(전부 VARCHAR)
+    required_columns: tuple[str, ...] = ("rcept_no", "zip_ok", "fetched_at")   # doc_store 실물 계약
+
+
+@dataclass(frozen=True)
 class AvailableRule:
     """available_date 부여 규칙 (§6).
 
@@ -141,6 +152,7 @@ class TableRule:
     invariants: tuple[Invariant, ...] = ()
     cross_check: CrossCheck | None = None
     blob_source: BlobSource | None = None
+    file_source: FileSource | None = None
     coverage_from: str | None = None    # §3 temporality ⓑ — 누적 스냅샷 관측 시작일 (ka10099 09-01)
     versioned: bool = True              # False = 판본 없는 로그(콜·유닛) → G6 skip(unversioned)
 

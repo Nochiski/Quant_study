@@ -7,7 +7,6 @@ from strategy_workbench.domain.backtest._models import (
     BacktestStartResponse,
     DataWarning,
     ExecutionCore,
-    InlineDraft,
     MetricWindow,
     RawArtifactBundle,
     RawCost,
@@ -19,11 +18,14 @@ from strategy_workbench.domain.backtest._models import (
     RunManifest,
     RunProgressEvent,
     RunStatus,
+    WarningSeverity,
+)
+from strategy_workbench.domain.strategy.facade.provenance import (
+    InlineDraft,
     SavedRevisionReference,
     StrategyProvenance,
     StrategySource,
     StrategySourceKind,
-    WarningSeverity,
 )
 
 __all__ = [

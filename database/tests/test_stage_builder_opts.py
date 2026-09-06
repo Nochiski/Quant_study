@@ -190,3 +190,20 @@ def test_build_with_every_row_rejected_yields_an_empty_build_not_a_crash(tmp_pat
     r = build.build_table(rule, s, tmp_path / "stage")
     assert r.ok, [g for g in r.gates if g.status is gates.GateStatus.FAIL]
     assert (r.n_src, r.n_rows, r.n_reject, r.content_hash) == (2, 0, 2, "0:empty")
+
+
+def test_manifest_round_trips_equity_inputs_and_reads_old_records(tmp_path: Path) -> None:
+    """equity 층은 BuildRecord.inputs(입력 stage 테이블 → 고정 build_id)를 쓴다. stage 빌드는 빈 dict."""
+    from stage import manifest
+    root = tmp_path / "eq_table"
+    root.mkdir()
+    rec = manifest.BuildRecord("b1", "s1", "2.2.3", "2026-09-05T00:00:00Z", 3, "3:abc",
+                               inputs={"stg_capital": "b_20260905T105922_786120Z"})
+    manifest.commit(root, rec)
+    m = manifest.load(root / "MANIFEST.json")
+    assert m.builds[-1].inputs == {"stg_capital": "b_20260905T105922_786120Z"}
+    old = {"table": "eq_table", "current_build": "b0", "keep": 3, "builds": [
+        {"build_id": "b0", "snapshot_id": "s0", "rules_version": "2.2.3",
+         "built_at_utc": "2026-09-01T00:00:00Z", "n_rows": 1, "content_hash": "1:0"}]}
+    (root / "MANIFEST.json").write_text(json.dumps(old), encoding="utf-8")
+    assert manifest.load(root / "MANIFEST.json").builds[0].inputs == {}   # 구 레코드 호환

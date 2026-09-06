@@ -1,7 +1,7 @@
 """DART DS005 주요사항보고서 이벤트 15테이블 선언 (STAGE_DESIGN v2.2 §4 DART · SPEC §2-14·§2-19).
 
 코드가 아니라 목록이다. 15테이블은 골격이 같다 — 키 `rcept_no` 단독(중복 0 전수 실측,
-`docs/dart_census_DS005.md`), 파티션 receipt_axis, `observed_src=collected_at`,
+`docs/archive/dart_census_DS005.md`), 파티션 receipt_axis, `observed_src=collected_at`,
 write_mode append_only, available_date 는 `stg_rcept_dt_map` 룩업(내용 테이블에 `rcept_dt`
 컬럼이 없다 — §6. 미스는 NULL + basis `unknown`).
 

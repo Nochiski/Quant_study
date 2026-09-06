@@ -28,12 +28,19 @@ from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
 )
 from strategy_workbench.application.equity_workspace.facade.ports import EquityDataPort
 from strategy_workbench.application.portfolio_design.facade.ports import (
+    CancellableRawObservationPort,
+    RawFieldValue,
     RawObservation,
+    RawObservationContractViolation,
     RawObservationPort,
     RawObservationQuery,
     RawObservationSet,
 )
+from strategy_workbench.application.portfolio_design.ports.outgoing import (
+    raw_observations as raw_observation_module,
+)
 from strategy_workbench.domain.equity.facade.research_data import (
+    CellKind,
     DataLoadStatus,
     ResearchPanelQuery,
 )
@@ -51,8 +58,14 @@ FIELDS = (
 ADAPTERS = [pytest.param("mock", id="mock"), pytest.param("equity_duckdb", id="equity_duckdb")]
 
 
-class ContractAdapter(RawObservationPort, EquityDataPort, Protocol):
-    """Both ports on one object — the suite checks they agree cell by cell."""
+class ContractAdapter(
+    RawObservationPort, CancellableRawObservationPort, EquityDataPort, Protocol
+):
+    """All three ports on one object — the suite checks they agree cell by cell.
+
+    Cancellation is not optional for a contract case: a long trace must be interruptible on
+    every adapter the container can wire, so the suite demands the cancellable capability too.
+    """
 
 
 @pytest.fixture(scope="session")
@@ -161,6 +174,22 @@ def test_observations_are_deterministic_and_ordered(adapter: ContractAdapter) ->
 
 
 @pytest.mark.parametrize("adapter", ADAPTERS, indirect=True)
+def test_long_raw_load_honours_the_application_cancellation_checkpoint(
+    adapter: ContractAdapter,
+) -> None:
+    calls = 0
+
+    def cancel() -> None:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("cancelled by application")
+
+    with pytest.raises(RuntimeError, match="cancelled by application"):
+        adapter.load_raw_observations_cancellable(_query(adapter), checkpoint=cancel)
+    assert calls == 1
+
+
+@pytest.mark.parametrize("adapter", ADAPTERS, indirect=True)
 def test_facts_do_not_depend_on_the_query_window(adapter: ContractAdapter) -> None:
     """(as_of, security) facts are window-invariant: membership and fields never flip."""
     narrow = _index(adapter.load_raw_observations(_query(adapter)))
@@ -233,6 +262,36 @@ def test_raw_port_and_research_panel_agree_cell_by_cell(adapter: ContractAdapter
     for key, field in raw_cells.items():
         assert field.value == cells[key].value, key
         assert field.available_date == cells[key].available_date, key
+        assert field.kind is cells[key].kind, key
+
+
+def test_raw_port_preserves_every_equity_cell_kind_without_collapsing_zero_and_missing() -> None:
+    adapter = MockEquityDataAdapter.demo()
+    raw = adapter.load_raw_observations(
+        _query(
+            adapter,
+            start=date(2024, 1, 3),
+            end=date(2024, 1, 8),
+            fields=("flow.foreign_net_buy",),
+        )
+    )
+    cells = {
+        (item.as_of, item.security_id): field for item in raw.observations for field in item.fields
+    }
+
+    actual_zero = cells[(date(2024, 1, 3), "sec-005930-1")]
+    missing = cells[(date(2024, 1, 3), "sec-000660-1")]
+    omitted_zero = cells[(date(2024, 1, 4), "sec-005930-1")]
+    not_collected = cells[(date(2024, 1, 4), "sec-000660-1")]
+    coverage_gap = cells[(date(2024, 1, 8), "sec-035420-1")]
+    assert (actual_zero.value, actual_zero.kind) == (0.0, CellKind.OBSERVED)
+    assert (omitted_zero.value, omitted_zero.kind) == (
+        0.0,
+        CellKind.SOURCE_OMITTED_ZERO,
+    )
+    assert (missing.value, missing.kind) == (None, CellKind.MISSING)
+    assert (not_collected.value, not_collected.kind) == (None, CellKind.NOT_COLLECTED)
+    assert (coverage_gap.value, coverage_gap.kind) == (None, CellKind.COVERAGE_GAP)
 
 
 def test_query_rejects_inverted_range_negative_history_and_missing_universe() -> None:
@@ -252,6 +311,39 @@ def test_result_rejects_unordered_or_duplicate_observations() -> None:
     duplicate = RawObservation(START, "a", True, ())
     with pytest.raises(ValueError, match="unique"):
         RawObservationSet(DataLoadStatus.OK, snapshot, (START,), (), (duplicate, duplicate))
+
+
+def test_result_rejects_blank_or_duplicate_field_identities_at_construction() -> None:
+    with pytest.raises(RawObservationContractViolation, match="field_id must not be blank"):
+        RawFieldValue(" \t", 1.0, START)
+
+    field = RawFieldValue("price.close", 1.0, START)
+    with pytest.raises(RawObservationContractViolation, match="field_ids must be unique"):
+        RawObservationSet(
+            DataLoadStatus.OK,
+            "snap",
+            (START,),
+            (),
+            (RawObservation(START, "a", True, (field, field)),),
+        )
+
+
+@pytest.mark.parametrize("violation", ["blank", "duplicate"])
+def test_consumer_revalidation_rejects_mutated_field_identities(violation: str) -> None:
+    first = RawFieldValue("price.close", 1.0, START)
+    second = RawFieldValue("price.market_cap", 2.0, START)
+    observation = RawObservation(START, "a", True, (first, second))
+    result = RawObservationSet(DataLoadStatus.OK, "snap", (START,), (), (observation,))
+
+    if violation == "blank":
+        object.__setattr__(first, "field_id", "")
+        expected = "field_id must not be blank"
+    else:
+        object.__setattr__(observation, "fields", (first, first))
+        expected = "field_ids must be unique"
+
+    with pytest.raises(RawObservationContractViolation, match=expected):
+        result.validate_contract()
 
 
 def test_mock_lag_shifts_availability_by_whole_sessions() -> None:
@@ -313,6 +405,78 @@ def test_result_rejects_observations_on_undeclared_dates() -> None:
 
     accepted = RawObservationSet(DataLoadStatus.OK, "snap", (declared, stray), (), rows)
     assert len(accepted.observations) == 2
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_result_rejects_every_non_finite_raw_number(value: float) -> None:
+    field = RawFieldValue("price.market_cap", value, START)
+    with pytest.raises(ValueError, match="raw numeric field value must be finite"):
+        RawObservationSet(
+            DataLoadStatus.OK,
+            "snap",
+            (START,),
+            (),
+            (RawObservation(START, "a", True, (field,)),),
+        )
+
+    with pytest.raises(ValueError, match="previous_weight must be finite"):
+        RawObservationSet(
+            DataLoadStatus.OK,
+            "snap",
+            (START,),
+            (),
+            (RawObservation(START, "a", True, (), previous_weight=value),),
+        )
+
+
+@pytest.mark.parametrize("consumer_revalidation", [False, True])
+def test_raw_contract_validation_cancels_after_first_numeric_check(
+    monkeypatch: pytest.MonkeyPatch, consumer_revalidation: bool
+) -> None:
+    rows = tuple(
+        RawObservation(
+            START,
+            f"security-{index:04d}",
+            True,
+            (RawFieldValue("price.close", float(index), START),),
+        )
+        for index in range(1_000)
+    )
+    existing = (
+        RawObservationSet(DataLoadStatus.OK, "snap", (START,), (), rows)
+        if consumer_revalidation
+        else None
+    )
+    stopped = False
+    numeric_checks = 0
+    original = raw_observation_module._finite_number
+
+    def latch_on_first_numeric(value: object) -> bool:
+        nonlocal numeric_checks, stopped
+        numeric_checks += 1
+        stopped = True
+        return original(value)
+
+    def checkpoint() -> None:
+        if stopped:
+            raise RuntimeError("cancelled during raw contract validation")
+
+    monkeypatch.setattr(raw_observation_module, "_finite_number", latch_on_first_numeric)
+
+    with pytest.raises(RuntimeError, match="cancelled during raw contract validation"):
+        if existing is None:
+            RawObservationSet(
+                DataLoadStatus.OK,
+                "snap",
+                (START,),
+                (),
+                rows,
+                validation_checkpoint=checkpoint,
+            )
+        else:
+            existing.validate_contract(checkpoint=checkpoint)
+
+    assert numeric_checks == 1
 
 
 @pytest.mark.parametrize("adapter", ADAPTERS, indirect=True)

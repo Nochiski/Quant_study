@@ -244,7 +244,9 @@ rules 의 `partition_class`·`partition_expr` 는 이 표와 일치해야 한다
   실측 09-02: kis_credit 중복 566,795 = payload 26컬럼 동일 그룹 517,648/517,648, 접기 후 잔여 0
 - **문자열 정규화 — 텍스트 컬럼만**: NFKC → 개행·탭 제거 → 연속공백 축약 → strip. **태그 제거는 컬럼별 옵트인(`strip_tags`)** —
   WISE 라벨의 `<br />` 류만. DART 서술 컬럼의 `<주1>` 은 각주(내용)라 무차별 제거 = silent 손실(09-03 5단계 리뷰 정정).
-  **식별자·조인 키(account_id·corp_code·ticker·ISU_*)와 숫자 컬럼에는 적용 금지** —
+  **식별자·조인 키(account_id·corp_code·ticker·ISU_*)와 숫자 컬럼에는 적용 금지** — 단 키 구성원이라도
+  **라벨형 텍스트(se·stock_knd·isu_dcrs_stle·acqs_mth·nm·bsns_year_label)는 정규화한다**(09-05 정정: 원장 표기에 앞뒤 공백·개행이
+  실재 — capital.stock_knd 개행 579행·audit.bsns_year 개행 30,944행. 접힘은 raw payload 기준이라 정규화가 판본을 합치지 않는다) —
   실측: 숫자 컬럼 1,607만 행에서 전각·유니코드 마이너스 0건(방어는 게이트로 —
   비ASCII 검출 시 실패), 반면 account_id 는 17.8%가 한글 센티널이라 무차별 NFKC 는 키 변형 위험
 - **숫자**: 콤마 제거 → 부호 정책 → **Decimal**. 컬럼별 (p,s) 필수 — **survey v2 가 유도

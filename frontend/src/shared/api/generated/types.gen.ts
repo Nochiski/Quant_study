@@ -5,6 +5,20 @@ export type ClientOptions = {
 };
 
 /**
+ * BacktestRunInvalidDetail
+ */
+export type BacktestRunInvalidDetail = {
+  /**
+   * Code
+   */
+  code: "backtest.run.invalid";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
  * BacktestRunResult
  */
 export type BacktestRunResult = {
@@ -127,6 +141,70 @@ export type BacktestSeries = {
  */
 export type BacktestStartResponse = {
   run: BacktestRunState;
+};
+
+/**
+ * BacktestStrategyNotFoundDetail
+ */
+export type BacktestStrategyNotFoundDetail = {
+  /**
+   * Code
+   */
+  code: "backtest.strategy.not_found";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * BacktestStrategyNotFoundResponse
+ */
+export type BacktestStrategyNotFoundResponse = {
+  detail: BacktestStrategyNotFoundDetail;
+};
+
+/**
+ * BacktestStrategyStaleDetail
+ */
+export type BacktestStrategyStaleDetail = {
+  /**
+   * Code
+   */
+  code: "backtest.strategy.stale";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * BacktestStrategyStaleResponse
+ */
+export type BacktestStrategyStaleResponse = {
+  detail: BacktestStrategyStaleDetail;
+};
+
+/**
+ * BacktestUnprocessableResponse
+ */
+export type BacktestUnprocessableResponse = {
+  /**
+   * Detail
+   */
+  detail:
+    | ({
+        code: "backtest.run.invalid";
+      } & BacktestRunInvalidDetail)
+    | ({
+        code: "portfolio.strategy.invalid";
+      } & PortfolioStrategyInvalidDetail)
+    | ({
+        code: "portfolio.data.unavailable";
+      } & PortfolioDataUnavailableDetail)
+    | ({
+        code: "portfolio.raw_observation.invalid";
+      } & PortfolioRawObservationInvalidDetail);
 };
 
 /**
@@ -832,6 +910,41 @@ export type FactorCategory =
 export type FactorComparisonOperator = "gt" | "gte" | "lt" | "lte" | "eq";
 
 /**
+ * FactorContributionStatus
+ */
+export type FactorContributionStatus = "ok" | "missing" | "future_data";
+
+/**
+ * FactorContributionTrace
+ *
+ * One term of the compiler-owned normalized weighted-sum score.
+ */
+export type FactorContributionTrace = {
+  /**
+   * Configured Weight
+   */
+  configured_weight: number;
+  direction: FactorDirection;
+  /**
+   * Factor Id
+   */
+  factor_id: string;
+  /**
+   * Normalized Contribution
+   */
+  normalized_contribution: number | null;
+  status: FactorContributionStatus;
+  /**
+   * Value
+   */
+  value: number | null;
+  /**
+   * Weighted Value
+   */
+  weighted_value: number | null;
+};
+
+/**
  * FactorDefinition
  */
 export type FactorDefinition = {
@@ -1491,10 +1604,10 @@ export type HttpValidationError = {
 /**
  * InlineDraft
  *
- * Run an unsaved spec (draft backtests only; never a deployment source).
+ * Use an unsaved typed spec while recording its authoring-source hash when known.
  *
- * `source_hash` is client-asserted provenance: the server cannot verify it without the text
- * and records it as given.
+ * An inline draft can be researched or backtested, but it is never a deployment source.
+ * `source_hash` is client-asserted provenance: the server cannot verify it without the text.
  */
 export type InlineDraft = {
   /**
@@ -1777,6 +1890,85 @@ export type ParameterNode = {
 };
 
 /**
+ * PortfolioCandidateTrace
+ *
+ * The linked score -> selection -> constrained target path for one security.
+ */
+export type PortfolioCandidateTrace = {
+  /**
+   * As Of
+   */
+  as_of: string;
+  /**
+   * Composite Score
+   */
+  composite_score: number | null;
+  /**
+   * Constrained Target Weight
+   */
+  constrained_target_weight: number;
+  constraint_effect: PortfolioConstraintEffect;
+  /**
+   * Eligible
+   */
+  eligible: boolean;
+  /**
+   * Estimated Order Delta
+   */
+  estimated_order_delta: number | null;
+  /**
+   * Exclusion Reasons
+   */
+  exclusion_reasons: Array<ExclusionReason>;
+  /**
+   * Factor Contributions
+   */
+  factor_contributions: Array<FactorContributionTrace>;
+  /**
+   * Previous Weight
+   */
+  previous_weight: number | null;
+  /**
+   * Rank
+   */
+  rank: number | null;
+  /**
+   * Security Id
+   */
+  security_id: string;
+  /**
+   * Selected
+   */
+  selected: boolean;
+  side: CandidateSide | null;
+  /**
+   * Unconstrained Target Weight
+   */
+  unconstrained_target_weight: number | null;
+};
+
+/**
+ * PortfolioConstraintEffect
+ */
+export type PortfolioConstraintEffect =
+  "not_selected" | "unchanged" | "adjusted" | "removed";
+
+/**
+ * PortfolioDataUnavailableDetail
+ */
+export type PortfolioDataUnavailableDetail = {
+  /**
+   * Code
+   */
+  code: "portfolio.data.unavailable";
+  /**
+   * Detail
+   */
+  detail: string | null;
+  status: DataLoadStatus;
+};
+
+/**
  * PortfolioPreview
  *
  * The tape a run will consume, plus the caveats the observation source reported.
@@ -1802,9 +1994,39 @@ export type PortfolioPreviewRequest = {
 };
 
 /**
+ * PortfolioRawObservationInvalidDetail
+ *
+ * A configured data adapter violated the raw execution-input contract.
+ */
+export type PortfolioRawObservationInvalidDetail = {
+  /**
+   * Code
+   */
+  code: "portfolio.raw_observation.invalid";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
  * PortfolioSide
  */
 export type PortfolioSide = "long_only" | "long_short";
+
+/**
+ * PortfolioStartingHolding
+ */
+export type PortfolioStartingHolding = {
+  /**
+   * Security Id
+   */
+  security_id: string;
+  /**
+   * Weight
+   */
+  weight: number;
+};
 
 /**
  * PortfolioStep
@@ -1846,6 +2068,36 @@ export type PortfolioStep = {
    */
   turnover_buffer_count?: number;
   weighting?: WeightingMethod;
+};
+
+/**
+ * PortfolioStrategyInvalidDetail
+ */
+export type PortfolioStrategyInvalidDetail = {
+  /**
+   * Code
+   */
+  code: "portfolio.strategy.invalid";
+  validation: StrategyValidation;
+};
+
+/**
+ * PortfolioUnprocessableResponse
+ */
+export type PortfolioUnprocessableResponse = {
+  /**
+   * Detail
+   */
+  detail:
+    | ({
+        code: "portfolio.strategy.invalid";
+      } & PortfolioStrategyInvalidDetail)
+    | ({
+        code: "portfolio.data.unavailable";
+      } & PortfolioDataUnavailableDetail)
+    | ({
+        code: "portfolio.raw_observation.invalid";
+      } & PortfolioRawObservationInvalidDetail);
 };
 
 /**
@@ -2045,6 +2297,33 @@ export type RawSnapshot = {
 };
 
 /**
+ * RawStrategyTraceRow
+ */
+export type RawStrategyTraceRow = {
+  /**
+   * As Of
+   */
+  as_of: string;
+  /**
+   * Available Date
+   */
+  available_date: string;
+  /**
+   * Field Id
+   */
+  field_id: string;
+  kind: CellKind;
+  /**
+   * Security Id
+   */
+  security_id: string;
+  /**
+   * Value
+   */
+  value: number | string | boolean | null;
+};
+
+/**
  * RawTrade
  */
 export type RawTrade = {
@@ -2095,6 +2374,36 @@ export type RawTrade = {
  */
 export type RebalanceFrequency =
   "every_n_sessions" | "weekly" | "monthly" | "quarterly";
+
+/**
+ * RequestValidationIssue
+ */
+export type RequestValidationIssue = {
+  /**
+   * Loc
+   */
+  loc: Array<string | number>;
+  /**
+   * Msg
+   */
+  msg: string;
+  /**
+   * Type
+   */
+  type: string;
+};
+
+/**
+ * RequestValidationResponse
+ *
+ * FastAPI's malformed-envelope 422 shape, alongside coded application diagnostics.
+ */
+export type RequestValidationResponse = {
+  /**
+   * Detail
+   */
+  detail: Array<RequestValidationIssue>;
+};
 
 /**
  * ResearchCatalog
@@ -2544,6 +2853,42 @@ export type SaveDocumentRequest = {
 };
 
 /**
+ * SaveStrategyDraftRequest
+ *
+ * Exact editor bytes plus the immutable base they were edited from.
+ *
+ * Drafts deliberately accept syntactically invalid source. Compilation remains the authoring
+ * service's responsibility; this contract only preserves bytes and compare-and-swap identity.
+ */
+export type SaveStrategyDraftRequest = {
+  /**
+   * Base Revision
+   */
+  base_revision?: number | null;
+  /**
+   * Base Spec Hash
+   */
+  base_spec_hash?: string | null;
+  /**
+   * Expected Version
+   */
+  expected_version: number;
+  format: SourceFormat;
+  /**
+   * Schema Version
+   */
+  schema_version: string;
+  /**
+   * Source
+   */
+  source: string;
+  /**
+   * Strategy Id
+   */
+  strategy_id?: string | null;
+};
+
+/**
  * SavedFactorNode
  */
 export type SavedFactorNode = {
@@ -2564,7 +2909,7 @@ export type SavedFactorNode = {
 /**
  * SavedRevisionReference
  *
- * Run a stored revision; the run fails before starting if the hash no longer matches.
+ * Resolve an immutable revision and fail before calculation if its hash differs.
  */
 export type SavedRevisionReference = {
   /**
@@ -2857,6 +3202,113 @@ export type StrategyDocumentSchema = {
 };
 
 /**
+ * StrategyDraft
+ */
+export type StrategyDraft = {
+  /**
+   * Base Revision
+   */
+  base_revision?: number | null;
+  /**
+   * Base Spec Hash
+   */
+  base_spec_hash?: string | null;
+  /**
+   * Draft Id
+   */
+  draft_id: string;
+  format: SourceFormat;
+  /**
+   * Schema Version
+   */
+  schema_version: string;
+  /**
+   * Source
+   */
+  source: string;
+  /**
+   * Source Hash
+   */
+  source_hash: string;
+  /**
+   * Strategy Id
+   */
+  strategy_id?: string | null;
+  /**
+   * Updated At
+   */
+  updated_at: string;
+  /**
+   * Version
+   */
+  version: number;
+};
+
+/**
+ * StrategyDraftConflictDetail
+ */
+export type StrategyDraftConflictDetail = {
+  /**
+   * Code
+   */
+  code: "strategy.draft.conflict";
+  current: StrategyDraft | null;
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * StrategyDraftConflictResponse
+ */
+export type StrategyDraftConflictResponse = {
+  detail: StrategyDraftConflictDetail;
+};
+
+/**
+ * StrategyDraftErrorDetail
+ */
+export type StrategyDraftErrorDetail = {
+  /**
+   * Code
+   */
+  code: "strategy.draft.not_found";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * StrategyDraftErrorResponse
+ */
+export type StrategyDraftErrorResponse = {
+  detail: StrategyDraftErrorDetail;
+};
+
+/**
+ * StrategyDraftInvalidDetail
+ */
+export type StrategyDraftInvalidDetail = {
+  /**
+   * Code
+   */
+  code: "strategy.draft.invalid";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * StrategyDraftInvalidResponse
+ */
+export type StrategyDraftInvalidResponse = {
+  detail: StrategyDraftInvalidDetail;
+};
+
+/**
  * StrategyExplanation
  */
 export type StrategyExplanation = {
@@ -2905,7 +3357,7 @@ export type StrategyIdentity = {
 /**
  * StrategyProvenance
  *
- * What exactly was run: recorded in the manifest so a result names its revision.
+ * The exact strategy meaning a calculation consumed.
  */
 export type StrategyProvenance = {
   kind: StrategySourceKind;
@@ -2985,6 +3437,200 @@ export type StrategySpec = {
    * Title
    */
   title: string;
+};
+
+/**
+ * StrategyTargetTrace
+ */
+export type StrategyTargetTrace = {
+  /**
+   * Candidates
+   */
+  candidates: Array<CandidateDecision>;
+  /**
+   * Construction
+   */
+  construction: Array<PortfolioCandidateTrace>;
+  /**
+   * Execution On
+   */
+  execution_on: string;
+  /**
+   * Signal As Of
+   */
+  signal_as_of: string;
+  /**
+   * Targets
+   */
+  targets: Array<TargetPosition>;
+};
+
+/**
+ * StrategyTraceInput
+ */
+export type StrategyTraceInput = {
+  /**
+   * Node Id
+   */
+  node_id: string;
+  /**
+   * Value
+   */
+  value: number | boolean | null;
+};
+
+/**
+ * StrategyTracePage
+ */
+export type StrategyTracePage = {
+  /**
+   * Has More
+   */
+  has_more: boolean;
+  /**
+   * Limit
+   */
+  limit: number;
+  /**
+   * Offset
+   */
+  offset: number;
+  /**
+   * Returned
+   */
+  returned: number;
+  /**
+   * Rows
+   */
+  rows: Array<StrategyTraceRow>;
+};
+
+/**
+ * StrategyTraceRequest
+ */
+export type StrategyTraceRequest = {
+  /**
+   * As Of
+   */
+  as_of?: string | null;
+  /**
+   * Factor Id
+   */
+  factor_id: string;
+  /**
+   * Include Raw
+   */
+  include_raw?: boolean;
+  /**
+   * Limit
+   */
+  limit?: number;
+  /**
+   * Node Ids
+   */
+  node_ids?: Array<string>;
+  /**
+   * Offset
+   *
+   * Zero-based flat trace offset. offset + limit must be <= 10000.
+   */
+  offset?: number;
+  /**
+   * Security Ids
+   */
+  security_ids: Array<string>;
+  /**
+   * Starting Holdings
+   *
+   * Optional full opening-book override. Security ids must be unique; omitted securities start at zero. null preserves the observation source's opening book.
+   */
+  starting_holdings?: Array<PortfolioStartingHolding> | null;
+  /**
+   * Strategy Source
+   */
+  strategy_source:
+    | ({
+        kind?: "saved_revision";
+      } & SavedRevisionReference)
+    | ({
+        kind?: "inline_draft";
+      } & InlineDraft);
+};
+
+/**
+ * StrategyTraceResponse
+ */
+export type StrategyTraceResponse = {
+  /**
+   * As Of
+   */
+  as_of: string;
+  /**
+   * Factor Id
+   */
+  factor_id: string;
+  /**
+   * Plan Hash
+   */
+  plan_hash: string;
+  provenance: StrategyProvenance;
+  /**
+   * Raw
+   */
+  raw: Array<RawStrategyTraceRow>;
+  /**
+   * Raw Truncated
+   */
+  raw_truncated: boolean;
+  /**
+   * Registry Version
+   */
+  registry_version: string;
+  /**
+   * Snapshot Id
+   */
+  snapshot_id: string;
+  /**
+   * Spec Hash
+   */
+  spec_hash: string;
+  target: StrategyTargetTrace | null;
+  trace: StrategyTracePage;
+  /**
+   * Warnings
+   */
+  warnings?: Array<string>;
+};
+
+/**
+ * StrategyTraceRow
+ */
+export type StrategyTraceRow = {
+  /**
+   * As Of
+   */
+  as_of: string;
+  /**
+   * Inputs
+   */
+  inputs: Array<StrategyTraceInput>;
+  /**
+   * Node Id
+   */
+  node_id: string;
+  /**
+   * Operation
+   */
+  operation: string;
+  /**
+   * Security Id
+   */
+  security_id: string;
+  status: TraceValueStatus;
+  /**
+   * Value
+   */
+  value: number | boolean | null;
 };
 
 /**
@@ -3104,6 +3750,151 @@ export type TimeSeriesNode = {
  */
 export type TimeSeriesOperator =
   "mean" | "std" | "momentum" | "delta" | "min" | "max";
+
+/**
+ * TraceCancelledDetail
+ */
+export type TraceCancelledDetail = {
+  /**
+   * Code
+   */
+  code: "trace.cancelled";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * TraceCancelledResponse
+ */
+export type TraceCancelledResponse = {
+  detail: TraceCancelledDetail;
+};
+
+/**
+ * TraceCapabilityUnsupportedDetail
+ */
+export type TraceCapabilityUnsupportedDetail = {
+  /**
+   * Capability
+   */
+  capability: string;
+  /**
+   * Code
+   */
+  code: "trace.capability.unsupported";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * TraceEngineIncompatibleDetail
+ */
+export type TraceEngineIncompatibleDetail = {
+  /**
+   * Code
+   */
+  code: "trace.engine.incompatible";
+  compatibility: EngineCompatibility;
+};
+
+/**
+ * TraceRequestInvalidDetail
+ */
+export type TraceRequestInvalidDetail = {
+  /**
+   * Code
+   */
+  code: "trace.request.invalid";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * TraceStrategyNotFoundDetail
+ */
+export type TraceStrategyNotFoundDetail = {
+  /**
+   * Code
+   */
+  code: "trace.strategy.not_found";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * TraceStrategyNotFoundResponse
+ */
+export type TraceStrategyNotFoundResponse = {
+  detail: TraceStrategyNotFoundDetail;
+};
+
+/**
+ * TraceStrategyStaleDetail
+ */
+export type TraceStrategyStaleDetail = {
+  /**
+   * Code
+   */
+  code: "trace.strategy.stale";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * TraceStrategyStaleResponse
+ */
+export type TraceStrategyStaleResponse = {
+  detail: TraceStrategyStaleDetail;
+};
+
+/**
+ * TraceUnprocessableResponse
+ */
+export type TraceUnprocessableResponse = {
+  /**
+   * Detail
+   */
+  detail:
+    | ({
+        code: "trace.request.invalid";
+      } & TraceRequestInvalidDetail)
+    | ({
+        code: "trace.engine.incompatible";
+      } & TraceEngineIncompatibleDetail)
+    | ({
+        code: "trace.capability.unsupported";
+      } & TraceCapabilityUnsupportedDetail)
+    | ({
+        code: "portfolio.strategy.invalid";
+      } & PortfolioStrategyInvalidDetail)
+    | ({
+        code: "portfolio.data.unavailable";
+      } & PortfolioDataUnavailableDetail)
+    | ({
+        code: "portfolio.raw_observation.invalid";
+      } & PortfolioRawObservationInvalidDetail);
+};
+
+/**
+ * TraceValueStatus
+ */
+export type TraceValueStatus =
+  | "ok"
+  | "missing_input"
+  | "warm_up"
+  | "divide_by_zero"
+  | "group_missing"
+  | "reference_missing";
 
 /**
  * UnaryNode
@@ -3313,9 +4104,19 @@ export type StartBacktestData = {
 
 export type StartBacktestErrors = {
   /**
-   * Validation Error
+   * The immutable strategy revision does not exist
    */
-  422: HttpValidationError;
+  404: BacktestStrategyNotFoundResponse;
+  /**
+   * The saved revision hash differs from the expected hash
+   */
+  409: BacktestStrategyStaleResponse;
+  /**
+   * Response 422 Startbacktest
+   *
+   * Malformed envelope or a coded backtest preflight diagnostic
+   */
+  422: BacktestUnprocessableResponse | RequestValidationResponse;
 };
 
 export type StartBacktestError = StartBacktestErrors[keyof StartBacktestErrors];
@@ -3756,9 +4557,11 @@ export type PreviewPortfolioData = {
 
 export type PreviewPortfolioErrors = {
   /**
-   * Validation Error
+   * Response 422 Previewportfolio
+   *
+   * Malformed envelope or a coded portfolio preflight diagnostic
    */
-  422: HttpValidationError;
+  422: PortfolioUnprocessableResponse | RequestValidationResponse;
 };
 
 export type PreviewPortfolioError =
@@ -3800,6 +4603,46 @@ export type CreateStrategyResponses = {
 
 export type CreateStrategyResponse =
   CreateStrategyResponses[keyof CreateStrategyResponses];
+
+export type TraceStrategyData = {
+  body: StrategyTraceRequest;
+  path?: never;
+  query?: never;
+  url: "/api/v1/strategies/debug/trace";
+};
+
+export type TraceStrategyErrors = {
+  /**
+   * The immutable strategy revision does not exist
+   */
+  404: TraceStrategyNotFoundResponse;
+  /**
+   * The saved revision hash differs from the expected hash
+   */
+  409: TraceStrategyStaleResponse;
+  /**
+   * Response 422 Tracestrategy
+   *
+   * Malformed envelope or a coded trace preflight diagnostic
+   */
+  422: TraceUnprocessableResponse | RequestValidationResponse;
+  /**
+   * The client cancelled the trace request
+   */
+  499: TraceCancelledResponse;
+};
+
+export type TraceStrategyError = TraceStrategyErrors[keyof TraceStrategyErrors];
+
+export type TraceStrategyResponses = {
+  /**
+   * Successful Response
+   */
+  200: StrategyTraceResponse;
+};
+
+export type TraceStrategyResponse =
+  TraceStrategyResponses[keyof TraceStrategyResponses];
 
 export type ExplainStrategyData = {
   body: StrategySpec;
@@ -4217,3 +5060,126 @@ export type ReviseStrategyDocumentResponses = {
 
 export type ReviseStrategyDocumentResponse =
   ReviseStrategyDocumentResponses[keyof ReviseStrategyDocumentResponses];
+
+export type DeleteStrategyDraftData = {
+  body?: never;
+  path: {
+    /**
+     * Draft Id
+     */
+    draft_id: string;
+  };
+  query: {
+    /**
+     * Expected Version
+     */
+    expected_version: number;
+  };
+  url: "/api/v1/strategy-drafts/{draft_id}";
+};
+
+export type DeleteStrategyDraftErrors = {
+  /**
+   * Draft does not exist
+   */
+  404: StrategyDraftErrorResponse;
+  /**
+   * A different client advanced this draft version
+   */
+  409: StrategyDraftConflictResponse;
+  /**
+   * Response 422 Deletestrategydraft
+   *
+   * Malformed request or invalid draft identity/base
+   */
+  422: StrategyDraftInvalidResponse | RequestValidationResponse;
+};
+
+export type DeleteStrategyDraftError =
+  DeleteStrategyDraftErrors[keyof DeleteStrategyDraftErrors];
+
+export type DeleteStrategyDraftResponses = {
+  /**
+   * Successful Response
+   */
+  204: void;
+};
+
+export type DeleteStrategyDraftResponse =
+  DeleteStrategyDraftResponses[keyof DeleteStrategyDraftResponses];
+
+export type GetStrategyDraftData = {
+  body?: never;
+  path: {
+    /**
+     * Draft Id
+     */
+    draft_id: string;
+  };
+  query?: never;
+  url: "/api/v1/strategy-drafts/{draft_id}";
+};
+
+export type GetStrategyDraftErrors = {
+  /**
+   * Draft does not exist
+   */
+  404: StrategyDraftErrorResponse;
+  /**
+   * Response 422 Getstrategydraft
+   *
+   * Malformed request or invalid draft identity/base
+   */
+  422: StrategyDraftInvalidResponse | RequestValidationResponse;
+};
+
+export type GetStrategyDraftError =
+  GetStrategyDraftErrors[keyof GetStrategyDraftErrors];
+
+export type GetStrategyDraftResponses = {
+  /**
+   * Successful Response
+   */
+  200: StrategyDraft;
+};
+
+export type GetStrategyDraftResponse =
+  GetStrategyDraftResponses[keyof GetStrategyDraftResponses];
+
+export type SaveStrategyDraftData = {
+  body: SaveStrategyDraftRequest;
+  path: {
+    /**
+     * Draft Id
+     */
+    draft_id: string;
+  };
+  query?: never;
+  url: "/api/v1/strategy-drafts/{draft_id}";
+};
+
+export type SaveStrategyDraftErrors = {
+  /**
+   * A different client advanced this draft version
+   */
+  409: StrategyDraftConflictResponse;
+  /**
+   * Response 422 Savestrategydraft
+   *
+   * Malformed request or invalid draft identity/base
+   */
+  422: StrategyDraftInvalidResponse | RequestValidationResponse;
+};
+
+export type SaveStrategyDraftError =
+  SaveStrategyDraftErrors[keyof SaveStrategyDraftErrors];
+
+export type SaveStrategyDraftResponses = {
+  /**
+   * Successful Response
+   */
+  200: StrategyDraft;
+};
+
+export type SaveStrategyDraftResponse =
+  SaveStrategyDraftResponses[keyof SaveStrategyDraftResponses];

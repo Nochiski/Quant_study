@@ -1,6 +1,25 @@
 {
   "components": {
     "schemas": {
+      "BacktestRunInvalidDetail": {
+        "properties": {
+          "code": {
+            "const": "backtest.run.invalid",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "BacktestRunInvalidDetail",
+        "type": "object"
+      },
       "BacktestRunResult": {
         "properties": {
           "artifacts": {
@@ -228,6 +247,103 @@
           "run"
         ],
         "title": "BacktestStartResponse",
+        "type": "object"
+      },
+      "BacktestStrategyNotFoundDetail": {
+        "properties": {
+          "code": {
+            "const": "backtest.strategy.not_found",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "BacktestStrategyNotFoundDetail",
+        "type": "object"
+      },
+      "BacktestStrategyNotFoundResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/BacktestStrategyNotFoundDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "BacktestStrategyNotFoundResponse",
+        "type": "object"
+      },
+      "BacktestStrategyStaleDetail": {
+        "properties": {
+          "code": {
+            "const": "backtest.strategy.stale",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "BacktestStrategyStaleDetail",
+        "type": "object"
+      },
+      "BacktestStrategyStaleResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/BacktestStrategyStaleDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "BacktestStrategyStaleResponse",
+        "type": "object"
+      },
+      "BacktestUnprocessableResponse": {
+        "properties": {
+          "detail": {
+            "discriminator": {
+              "mapping": {
+                "backtest.run.invalid": "#/components/schemas/BacktestRunInvalidDetail",
+                "portfolio.data.unavailable": "#/components/schemas/PortfolioDataUnavailableDetail",
+                "portfolio.raw_observation.invalid": "#/components/schemas/PortfolioRawObservationInvalidDetail",
+                "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail"
+              },
+              "propertyName": "code"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/BacktestRunInvalidDetail"
+              },
+              {
+                "$ref": "#/components/schemas/PortfolioStrategyInvalidDetail"
+              },
+              {
+                "$ref": "#/components/schemas/PortfolioDataUnavailableDetail"
+              },
+              {
+                "$ref": "#/components/schemas/PortfolioRawObservationInvalidDetail"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "BacktestUnprocessableResponse",
         "type": "object"
       },
       "BinaryNode": {
@@ -1372,6 +1488,78 @@
         "title": "FactorComparisonOperator",
         "type": "string"
       },
+      "FactorContributionStatus": {
+        "enum": [
+          "ok",
+          "missing",
+          "future_data"
+        ],
+        "title": "FactorContributionStatus",
+        "type": "string"
+      },
+      "FactorContributionTrace": {
+        "description": "One term of the compiler-owned normalized weighted-sum score.",
+        "properties": {
+          "configured_weight": {
+            "title": "Configured Weight",
+            "type": "number"
+          },
+          "direction": {
+            "$ref": "#/components/schemas/FactorDirection"
+          },
+          "factor_id": {
+            "title": "Factor Id",
+            "type": "string"
+          },
+          "normalized_contribution": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Normalized Contribution"
+          },
+          "status": {
+            "$ref": "#/components/schemas/FactorContributionStatus"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "weighted_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weighted Value"
+          }
+        },
+        "required": [
+          "factor_id",
+          "value",
+          "configured_weight",
+          "direction",
+          "weighted_value",
+          "normalized_contribution",
+          "status"
+        ],
+        "title": "FactorContributionTrace",
+        "type": "object"
+      },
       "FactorDefinition": {
         "properties": {
           "availability": {
@@ -2470,7 +2658,7 @@
         "type": "object"
       },
       "InlineDraft": {
-        "description": "Run an unsaved spec (draft backtests only; never a deployment source).\n\n`source_hash` is client-asserted provenance: the server cannot verify it without the text\nand records it as given.",
+        "description": "Use an unsaved typed spec while recording its authoring-source hash when known.\n\nAn inline draft can be researched or backtested, but it is never a deployment source.\n`source_hash` is client-asserted provenance: the server cannot verify it without the text.",
         "properties": {
           "kind": {
             "const": "inline_draft",
@@ -2904,6 +3092,172 @@
         "title": "ParameterNode",
         "type": "object"
       },
+      "PortfolioCandidateTrace": {
+        "description": "The linked score -> selection -> constrained target path for one security.",
+        "properties": {
+          "as_of": {
+            "format": "date",
+            "title": "As Of",
+            "type": "string"
+          },
+          "composite_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Composite Score"
+          },
+          "constrained_target_weight": {
+            "title": "Constrained Target Weight",
+            "type": "number"
+          },
+          "constraint_effect": {
+            "$ref": "#/components/schemas/PortfolioConstraintEffect"
+          },
+          "eligible": {
+            "title": "Eligible",
+            "type": "boolean"
+          },
+          "estimated_order_delta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Order Delta"
+          },
+          "exclusion_reasons": {
+            "items": {
+              "$ref": "#/components/schemas/ExclusionReason"
+            },
+            "title": "Exclusion Reasons",
+            "type": "array"
+          },
+          "factor_contributions": {
+            "items": {
+              "$ref": "#/components/schemas/FactorContributionTrace"
+            },
+            "title": "Factor Contributions",
+            "type": "array"
+          },
+          "previous_weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Weight"
+          },
+          "rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "selected": {
+            "title": "Selected",
+            "type": "boolean"
+          },
+          "side": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CandidateSide"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unconstrained_target_weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unconstrained Target Weight"
+          }
+        },
+        "required": [
+          "as_of",
+          "security_id",
+          "factor_contributions",
+          "composite_score",
+          "rank",
+          "eligible",
+          "selected",
+          "side",
+          "unconstrained_target_weight",
+          "constrained_target_weight",
+          "previous_weight",
+          "estimated_order_delta",
+          "constraint_effect",
+          "exclusion_reasons"
+        ],
+        "title": "PortfolioCandidateTrace",
+        "type": "object"
+      },
+      "PortfolioConstraintEffect": {
+        "enum": [
+          "not_selected",
+          "unchanged",
+          "adjusted",
+          "removed"
+        ],
+        "title": "PortfolioConstraintEffect",
+        "type": "string"
+      },
+      "PortfolioDataUnavailableDetail": {
+        "properties": {
+          "code": {
+            "const": "portfolio.data.unavailable",
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DataLoadStatus"
+          }
+        },
+        "required": [
+          "code",
+          "status",
+          "detail"
+        ],
+        "title": "PortfolioDataUnavailableDetail",
+        "type": "object"
+      },
       "PortfolioPreview": {
         "description": "The tape a run will consume, plus the caveats the observation source reported.\n\n`warnings` are the raw observation adapter's own messages, passed through verbatim. They ride\ninto `RunManifest.warnings` so a caveat visible in the preview cannot disappear from the run\nthat used the same data.",
         "properties": {
@@ -2941,6 +3295,26 @@
         "title": "PortfolioPreviewRequest",
         "type": "object"
       },
+      "PortfolioRawObservationInvalidDetail": {
+        "description": "A configured data adapter violated the raw execution-input contract.",
+        "properties": {
+          "code": {
+            "const": "portfolio.raw_observation.invalid",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "PortfolioRawObservationInvalidDetail",
+        "type": "object"
+      },
       "PortfolioSide": {
         "enum": [
           "long_only",
@@ -2948,6 +3322,25 @@
         ],
         "title": "PortfolioSide",
         "type": "string"
+      },
+      "PortfolioStartingHolding": {
+        "properties": {
+          "security_id": {
+            "minLength": 1,
+            "title": "Security Id",
+            "type": "string"
+          },
+          "weight": {
+            "title": "Weight",
+            "type": "number"
+          }
+        },
+        "required": [
+          "security_id",
+          "weight"
+        ],
+        "title": "PortfolioStartingHolding",
+        "type": "object"
       },
       "PortfolioStep": {
         "properties": {
@@ -3021,6 +3414,55 @@
           }
         },
         "title": "PortfolioStep",
+        "type": "object"
+      },
+      "PortfolioStrategyInvalidDetail": {
+        "properties": {
+          "code": {
+            "const": "portfolio.strategy.invalid",
+            "title": "Code",
+            "type": "string"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/StrategyValidation"
+          }
+        },
+        "required": [
+          "code",
+          "validation"
+        ],
+        "title": "PortfolioStrategyInvalidDetail",
+        "type": "object"
+      },
+      "PortfolioUnprocessableResponse": {
+        "properties": {
+          "detail": {
+            "discriminator": {
+              "mapping": {
+                "portfolio.data.unavailable": "#/components/schemas/PortfolioDataUnavailableDetail",
+                "portfolio.raw_observation.invalid": "#/components/schemas/PortfolioRawObservationInvalidDetail",
+                "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail"
+              },
+              "propertyName": "code"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PortfolioStrategyInvalidDetail"
+              },
+              {
+                "$ref": "#/components/schemas/PortfolioDataUnavailableDetail"
+              },
+              {
+                "$ref": "#/components/schemas/PortfolioRawObservationInvalidDetail"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "PortfolioUnprocessableResponse",
         "type": "object"
       },
       "RawArtifactBundle": {
@@ -3301,6 +3743,58 @@
         "title": "RawSnapshot",
         "type": "object"
       },
+      "RawStrategyTraceRow": {
+        "properties": {
+          "as_of": {
+            "format": "date",
+            "title": "As Of",
+            "type": "string"
+          },
+          "available_date": {
+            "format": "date",
+            "title": "Available Date",
+            "type": "string"
+          },
+          "field_id": {
+            "title": "Field Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CellKind"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "as_of",
+          "security_id",
+          "field_id",
+          "value",
+          "available_date",
+          "kind"
+        ],
+        "title": "RawStrategyTraceRow",
+        "type": "object"
+      },
       "RawTrade": {
         "properties": {
           "closed_on": {
@@ -3370,6 +3864,56 @@
         ],
         "title": "RebalanceFrequency",
         "type": "string"
+      },
+      "RequestValidationIssue": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Loc",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Msg",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "RequestValidationIssue",
+        "type": "object"
+      },
+      "RequestValidationResponse": {
+        "description": "FastAPI's malformed-envelope 422 shape, alongside coded application diagnostics.",
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/RequestValidationIssue"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "RequestValidationResponse",
+        "type": "object"
       },
       "ResearchCatalog": {
         "properties": {
@@ -4088,6 +4632,67 @@
         "title": "SaveDocumentRequest",
         "type": "object"
       },
+      "SaveStrategyDraftRequest": {
+        "description": "Exact editor bytes plus the immutable base they were edited from.\n\nDrafts deliberately accept syntactically invalid source. Compilation remains the authoring\nservice's responsibility; this contract only preserves bytes and compare-and-swap identity.",
+        "properties": {
+          "base_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Revision"
+          },
+          "base_spec_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Spec Hash"
+          },
+          "expected_version": {
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "format": {
+            "$ref": "#/components/schemas/SourceFormat"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "strategy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy Id"
+          }
+        },
+        "required": [
+          "expected_version",
+          "source",
+          "format",
+          "schema_version"
+        ],
+        "title": "SaveStrategyDraftRequest",
+        "type": "object"
+      },
       "SavedFactorNode": {
         "properties": {
           "factor_id": {
@@ -4113,7 +4718,7 @@
         "type": "object"
       },
       "SavedRevisionReference": {
-        "description": "Run a stored revision; the run fails before starting if the hash no longer matches.",
+        "description": "Resolve an immutable revision and fail before calculation if its hash differs.",
         "properties": {
           "expected_spec_hash": {
             "title": "Expected Spec Hash",
@@ -4528,6 +5133,186 @@
         "title": "StrategyDocumentSchema",
         "type": "object"
       },
+      "StrategyDraft": {
+        "properties": {
+          "base_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Revision"
+          },
+          "base_spec_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Spec Hash"
+          },
+          "draft_id": {
+            "title": "Draft Id",
+            "type": "string"
+          },
+          "format": {
+            "$ref": "#/components/schemas/SourceFormat"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "source_hash": {
+            "title": "Source Hash",
+            "type": "string"
+          },
+          "strategy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy Id"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "draft_id",
+          "version",
+          "source",
+          "format",
+          "source_hash",
+          "schema_version",
+          "updated_at"
+        ],
+        "title": "StrategyDraft",
+        "type": "object"
+      },
+      "StrategyDraftConflictDetail": {
+        "properties": {
+          "code": {
+            "const": "strategy.draft.conflict",
+            "title": "Code",
+            "type": "string"
+          },
+          "current": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StrategyDraft"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "current"
+        ],
+        "title": "StrategyDraftConflictDetail",
+        "type": "object"
+      },
+      "StrategyDraftConflictResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/StrategyDraftConflictDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "StrategyDraftConflictResponse",
+        "type": "object"
+      },
+      "StrategyDraftErrorDetail": {
+        "properties": {
+          "code": {
+            "const": "strategy.draft.not_found",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "StrategyDraftErrorDetail",
+        "type": "object"
+      },
+      "StrategyDraftErrorResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/StrategyDraftErrorDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "StrategyDraftErrorResponse",
+        "type": "object"
+      },
+      "StrategyDraftInvalidDetail": {
+        "properties": {
+          "code": {
+            "const": "strategy.draft.invalid",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "StrategyDraftInvalidDetail",
+        "type": "object"
+      },
+      "StrategyDraftInvalidResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/StrategyDraftInvalidDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "StrategyDraftInvalidResponse",
+        "type": "object"
+      },
       "StrategyExplanation": {
         "properties": {
           "steps": {
@@ -4594,7 +5379,7 @@
         "type": "object"
       },
       "StrategyProvenance": {
-        "description": "What exactly was run: recorded in the manifest so a result names its revision.",
+        "description": "The exact strategy meaning a calculation consumed.",
         "properties": {
           "kind": {
             "$ref": "#/components/schemas/StrategySourceKind"
@@ -4765,6 +5550,353 @@
           "execution"
         ],
         "title": "StrategySpec",
+        "type": "object"
+      },
+      "StrategyTargetTrace": {
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/CandidateDecision"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "construction": {
+            "items": {
+              "$ref": "#/components/schemas/PortfolioCandidateTrace"
+            },
+            "title": "Construction",
+            "type": "array"
+          },
+          "execution_on": {
+            "format": "date",
+            "title": "Execution On",
+            "type": "string"
+          },
+          "signal_as_of": {
+            "format": "date",
+            "title": "Signal As Of",
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/TargetPosition"
+            },
+            "title": "Targets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "signal_as_of",
+          "execution_on",
+          "targets",
+          "candidates",
+          "construction"
+        ],
+        "title": "StrategyTargetTrace",
+        "type": "object"
+      },
+      "StrategyTraceInput": {
+        "properties": {
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "node_id",
+          "value"
+        ],
+        "title": "StrategyTraceInput",
+        "type": "object"
+      },
+      "StrategyTracePage": {
+        "properties": {
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "returned": {
+            "title": "Returned",
+            "type": "integer"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/StrategyTraceRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rows",
+          "offset",
+          "limit",
+          "returned",
+          "has_more"
+        ],
+        "title": "StrategyTracePage",
+        "type": "object"
+      },
+      "StrategyTraceRequest": {
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "factor_id": {
+            "minLength": 1,
+            "title": "Factor Id",
+            "type": "string"
+          },
+          "include_raw": {
+            "default": false,
+            "title": "Include Raw",
+            "type": "boolean"
+          },
+          "limit": {
+            "default": 200,
+            "maximum": 500,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "node_ids": {
+            "default": [],
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Node Ids",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "offset": {
+            "default": 0,
+            "description": "Zero-based flat trace offset. offset + limit must be <= 10000.",
+            "maximum": 9999,
+            "minimum": 0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "security_ids": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Security Ids",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "starting_holdings": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PortfolioStartingHolding"
+                },
+                "maxItems": 100,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional full opening-book override. Security ids must be unique; omitted securities start at zero. null preserves the observation source's opening book.",
+            "title": "Starting Holdings"
+          },
+          "strategy_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SavedRevisionReference"
+              },
+              {
+                "$ref": "#/components/schemas/InlineDraft"
+              }
+            ],
+            "discriminator": {
+              "mapping": {
+                "inline_draft": "#/components/schemas/InlineDraft",
+                "saved_revision": "#/components/schemas/SavedRevisionReference"
+              },
+              "propertyName": "kind"
+            },
+            "title": "Strategy Source"
+          }
+        },
+        "required": [
+          "strategy_source",
+          "security_ids",
+          "factor_id"
+        ],
+        "title": "StrategyTraceRequest",
+        "type": "object"
+      },
+      "StrategyTraceResponse": {
+        "properties": {
+          "as_of": {
+            "format": "date",
+            "title": "As Of",
+            "type": "string"
+          },
+          "factor_id": {
+            "title": "Factor Id",
+            "type": "string"
+          },
+          "plan_hash": {
+            "title": "Plan Hash",
+            "type": "string"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/StrategyProvenance"
+          },
+          "raw": {
+            "items": {
+              "$ref": "#/components/schemas/RawStrategyTraceRow"
+            },
+            "title": "Raw",
+            "type": "array"
+          },
+          "raw_truncated": {
+            "title": "Raw Truncated",
+            "type": "boolean"
+          },
+          "registry_version": {
+            "title": "Registry Version",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "title": "Snapshot Id",
+            "type": "string"
+          },
+          "spec_hash": {
+            "title": "Spec Hash",
+            "type": "string"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StrategyTargetTrace"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "trace": {
+            "$ref": "#/components/schemas/StrategyTracePage"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "spec_hash",
+          "snapshot_id",
+          "registry_version",
+          "plan_hash",
+          "provenance",
+          "factor_id",
+          "as_of",
+          "trace",
+          "raw",
+          "raw_truncated",
+          "target"
+        ],
+        "title": "StrategyTraceResponse",
+        "type": "object"
+      },
+      "StrategyTraceRow": {
+        "properties": {
+          "as_of": {
+            "format": "date",
+            "title": "As Of",
+            "type": "string"
+          },
+          "inputs": {
+            "items": {
+              "$ref": "#/components/schemas/StrategyTraceInput"
+            },
+            "title": "Inputs",
+            "type": "array"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operation": {
+            "title": "Operation",
+            "type": "string"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TraceValueStatus"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "node_id",
+          "operation",
+          "as_of",
+          "security_id",
+          "value",
+          "status",
+          "inputs"
+        ],
+        "title": "StrategyTraceRow",
         "type": "object"
       },
       "StrategyValidation": {
@@ -4940,6 +6072,215 @@
           "max"
         ],
         "title": "TimeSeriesOperator",
+        "type": "string"
+      },
+      "TraceCancelledDetail": {
+        "properties": {
+          "code": {
+            "const": "trace.cancelled",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "TraceCancelledDetail",
+        "type": "object"
+      },
+      "TraceCancelledResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/TraceCancelledDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "TraceCancelledResponse",
+        "type": "object"
+      },
+      "TraceCapabilityUnsupportedDetail": {
+        "properties": {
+          "capability": {
+            "title": "Capability",
+            "type": "string"
+          },
+          "code": {
+            "const": "trace.capability.unsupported",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "capability",
+          "message"
+        ],
+        "title": "TraceCapabilityUnsupportedDetail",
+        "type": "object"
+      },
+      "TraceEngineIncompatibleDetail": {
+        "properties": {
+          "code": {
+            "const": "trace.engine.incompatible",
+            "title": "Code",
+            "type": "string"
+          },
+          "compatibility": {
+            "$ref": "#/components/schemas/EngineCompatibility"
+          }
+        },
+        "required": [
+          "code",
+          "compatibility"
+        ],
+        "title": "TraceEngineIncompatibleDetail",
+        "type": "object"
+      },
+      "TraceRequestInvalidDetail": {
+        "properties": {
+          "code": {
+            "const": "trace.request.invalid",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "TraceRequestInvalidDetail",
+        "type": "object"
+      },
+      "TraceStrategyNotFoundDetail": {
+        "properties": {
+          "code": {
+            "const": "trace.strategy.not_found",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "TraceStrategyNotFoundDetail",
+        "type": "object"
+      },
+      "TraceStrategyNotFoundResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/TraceStrategyNotFoundDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "TraceStrategyNotFoundResponse",
+        "type": "object"
+      },
+      "TraceStrategyStaleDetail": {
+        "properties": {
+          "code": {
+            "const": "trace.strategy.stale",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "TraceStrategyStaleDetail",
+        "type": "object"
+      },
+      "TraceStrategyStaleResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/TraceStrategyStaleDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "TraceStrategyStaleResponse",
+        "type": "object"
+      },
+      "TraceUnprocessableResponse": {
+        "properties": {
+          "detail": {
+            "discriminator": {
+              "mapping": {
+                "portfolio.data.unavailable": "#/components/schemas/PortfolioDataUnavailableDetail",
+                "portfolio.raw_observation.invalid": "#/components/schemas/PortfolioRawObservationInvalidDetail",
+                "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail",
+                "trace.capability.unsupported": "#/components/schemas/TraceCapabilityUnsupportedDetail",
+                "trace.engine.incompatible": "#/components/schemas/TraceEngineIncompatibleDetail",
+                "trace.request.invalid": "#/components/schemas/TraceRequestInvalidDetail"
+              },
+              "propertyName": "code"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TraceRequestInvalidDetail"
+              },
+              {
+                "$ref": "#/components/schemas/TraceEngineIncompatibleDetail"
+              },
+              {
+                "$ref": "#/components/schemas/TraceCapabilityUnsupportedDetail"
+              },
+              {
+                "$ref": "#/components/schemas/PortfolioStrategyInvalidDetail"
+              },
+              {
+                "$ref": "#/components/schemas/PortfolioDataUnavailableDetail"
+              },
+              {
+                "$ref": "#/components/schemas/PortfolioRawObservationInvalidDetail"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "TraceUnprocessableResponse",
+        "type": "object"
+      },
+      "TraceValueStatus": {
+        "enum": [
+          "ok",
+          "missing_input",
+          "warm_up",
+          "divide_by_zero",
+          "group_missing",
+          "reference_missing"
+        ],
+        "title": "TraceValueStatus",
         "type": "string"
       },
       "UnaryNode": {
@@ -5308,15 +6649,43 @@
             },
             "description": "Successful Response"
           },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestStrategyNotFoundResponse"
+                }
+              }
+            },
+            "description": "The immutable strategy revision does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestStrategyStaleResponse"
+                }
+              }
+            },
+            "description": "The saved revision hash differs from the expected hash"
+          },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BacktestUnprocessableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationResponse"
+                    }
+                  ],
+                  "title": "Response 422 Startbacktest"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Malformed envelope or a coded backtest preflight diagnostic"
           }
         },
         "summary": "Start Backtest"
@@ -6010,11 +7379,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/PortfolioUnprocessableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationResponse"
+                    }
+                  ],
+                  "title": "Response 422 Previewportfolio"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Malformed envelope or a coded portfolio preflight diagnostic"
           }
         },
         "summary": "Portfolio Preview"
@@ -6056,6 +7433,83 @@
           }
         },
         "summary": "Create Strategy"
+      }
+    },
+    "/api/v1/strategies/debug/trace": {
+      "post": {
+        "description": "Bounded node/raw/target projection from the same calculation that builds TargetTape.",
+        "operationId": "traceStrategy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StrategyTraceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyTraceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceStrategyNotFoundResponse"
+                }
+              }
+            },
+            "description": "The immutable strategy revision does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceStrategyStaleResponse"
+                }
+              }
+            },
+            "description": "The saved revision hash differs from the expected hash"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/TraceUnprocessableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationResponse"
+                    }
+                  ],
+                  "title": "Response 422 Tracestrategy"
+                }
+              }
+            },
+            "description": "Malformed envelope or a coded trace preflight diagnostic"
+          },
+          "499": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceCancelledResponse"
+                }
+              }
+            },
+            "description": "The client cancelled the trace request"
+          }
+        },
+        "summary": "Trace Strategy"
       }
     },
     "/api/v1/strategies/explain": {
@@ -6673,6 +8127,196 @@
           }
         },
         "summary": "Revise Strategy Document"
+      }
+    },
+    "/api/v1/strategy-drafts/{draft_id}": {
+      "delete": {
+        "operationId": "deleteStrategyDraft",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "title": "Draft Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "expected_version",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Expected Version",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyDraftErrorResponse"
+                }
+              }
+            },
+            "description": "Draft does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyDraftConflictResponse"
+                }
+              }
+            },
+            "description": "A different client advanced this draft version"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/StrategyDraftInvalidResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationResponse"
+                    }
+                  ],
+                  "title": "Response 422 Deletestrategydraft"
+                }
+              }
+            },
+            "description": "Malformed request or invalid draft identity/base"
+          }
+        },
+        "summary": "Delete Strategy Draft"
+      },
+      "get": {
+        "operationId": "getStrategyDraft",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "title": "Draft Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyDraft"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyDraftErrorResponse"
+                }
+              }
+            },
+            "description": "Draft does not exist"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/StrategyDraftInvalidResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationResponse"
+                    }
+                  ],
+                  "title": "Response 422 Getstrategydraft"
+                }
+              }
+            },
+            "description": "Malformed request or invalid draft identity/base"
+          }
+        },
+        "summary": "Get Strategy Draft"
+      },
+      "put": {
+        "operationId": "saveStrategyDraft",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "title": "Draft Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveStrategyDraftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyDraft"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyDraftConflictResponse"
+                }
+              }
+            },
+            "description": "A different client advanced this draft version"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/StrategyDraftInvalidResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationResponse"
+                    }
+                  ],
+                  "title": "Response 422 Savestrategydraft"
+                }
+              }
+            },
+            "description": "Malformed request or invalid draft identity/base"
+          }
+        },
+        "summary": "Save Strategy Draft"
       }
     }
   }

@@ -160,10 +160,13 @@ const buildFactorPlanRequests = (spec: StrategySpec): FactorPlanRequest[] => {
   }));
 };
 
+export const factorGraphPointer = (factorIndex: number): string =>
+  `/factors/factors/${factorIndex}/graph`;
+
 export const factorNodePointer = (
   factorIndex: number,
   nodeIndex: number,
-): string => `/factors/factors/${factorIndex}/graph/nodes/${nodeIndex}`;
+): string => `${factorGraphPointer(factorIndex)}/nodes/${nodeIndex}`;
 
 export const factorIndexAtPointer = (
   pointer: string | undefined,

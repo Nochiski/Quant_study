@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import re
 from bisect import bisect_left, bisect_right
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
@@ -108,6 +108,7 @@ VENUE = "XKRX"
 SCHEMA_VERSION = "equity-v1.2"
 SECURITY_ID_SEP = ":"
 PRICE_LAG_SESSIONS = 0  # 가격 계열 세션 랙 — 모듈 docstring 근거. S19 dataset_profile 이 오면 교체
+_CHECKPOINT_ROWS = 256  # 취소 체크포인트 간격(행) — 포트의 `_CHECKPOINT_BATCH` 와 같은 크기
 RESEARCH_UNIVERSE_ID = "krx.common-stock"  # FactorObservationQuery 에 유니버스가 없다 — 계약 기본값
 CALENDAR_TABLE = "trading_calendar"
 SPAN_TABLE = "security_span"
@@ -128,6 +129,10 @@ EVENT_TYPE_MAP: dict[str, str] = {
     "capred": "reverse_split",
 }
 _TICKER_RE = re.compile(r"^[0-9A-Za-z]{1,12}$")
+
+
+def _noop_checkpoint() -> None:
+    """취소를 요구하지 않는 호출자용 체크포인트 — `load_raw_observations` 의 기본값."""
 
 
 @dataclass(frozen=True)
@@ -660,9 +665,35 @@ class EquityDuckdbAdapter:
     # ── RawObservationPort ────────────────────────────────────────────────────
 
     def load_raw_observations(self, query: RawObservationQuery) -> RawObservationSet:
-        def failure(status: DataLoadStatus, detail: str) -> RawObservationSet:
-            return RawObservationSet(status, self._snapshot_id, (), (), (), detail)
+        """원래의 preview/backtest 호출 계약 — 취소는 선택 능력이라 no-op 체크포인트로 위임한다."""
+        return self.load_raw_observations_cancellable(query, checkpoint=_noop_checkpoint)
 
+    def load_raw_observations_cancellable(
+        self,
+        query: RawObservationQuery,
+        *,
+        checkpoint: Callable[[], None],
+    ) -> RawObservationSet:
+        """`load_raw_observations` 와 같은 결과 + 협조적 취소.
+
+        `checkpoint` 는 (1) duckdb 로 내려가기 전 1회, (2) 행 조립 루프에서
+        `_CHECKPOINT_ROWS` 행마다, (3) `RawObservationSet` 계약 검증 중
+        (`validation_checkpoint`) 호출된다. 콜백이 던지는 예외는 그대로 올라간다 —
+        정책은 애플리케이션 소유다. duckdb 질의 자체는 원자적이라 그 안에서는 끊지 못한다.
+        """
+
+        def failure(status: DataLoadStatus, detail: str) -> RawObservationSet:
+            return RawObservationSet(
+                status,
+                self._snapshot_id,
+                (),
+                (),
+                (),
+                detail,
+                validation_checkpoint=checkpoint,
+            )
+
+        checkpoint()
         if query.market != MARKET:
             return failure(
                 DataLoadStatus.INVALID_QUERY,
@@ -689,18 +720,25 @@ class EquityDuckdbAdapter:
             fields=query.field_ids,
         )
         observations: list[RawObservation] = []
-        for row in self._rows_in(rows, window.sessions):
+        for index, row in enumerate(self._rows_in(rows, window.sessions)):
+            if index % _CHECKPOINT_ROWS == 0:
+                checkpoint()
             fields: list[RawFieldValue] = []
             for field_id in query.field_ids:
                 found = self._lagged(rows, row, PRICE_LAG_SESSIONS)
                 if found is None:
                     continue
                 column = self._fields[field_id].column
+                value = found.value(column)
                 fields.append(
                     RawFieldValue(
                         field_id=field_id,
-                        value=found.value(column),
+                        value=value,
                         available_date=found.available_date(column),
+                        # load_panel 과 같은 규칙 — 셀이 비면 MISSING 이다. OBSERVED 로 두면
+                        # 포트 계약(관측 셀은 값이 있어야 한다)이 생성 시점에 깨지고, 두 포트의
+                        # kind 가 셀 단위로 어긋난다.
+                        kind=CellKind.OBSERVED if value is not None else CellKind.MISSING,
                     )
                 )
             observations.append(
@@ -727,6 +765,7 @@ class EquityDuckdbAdapter:
                 f"start={query.start} end={query.end} root={self._root}"
             ),
             warnings=tuple(sorted({*window.warnings, *fetch_warnings})),
+            validation_checkpoint=checkpoint,
         )
 
     # ── BacktestDataPort ──────────────────────────────────────────────────────

@@ -1,6 +1,9 @@
 """MANIFEST.json — 테이블당 1개. 포인터 1회 원자 교체 + 구버전 GC (§2).
 
 os.replace 는 파일에만 원자적이므로 디렉토리가 아니라 MANIFEST.json 을 바꾼다.
+
+equity 층이 이 모듈의 `BuildRecord`·`load`·`commit`(그리고 `gates.GateResult`·`GateStatus`,
+`baseline.write`)을 import 한다 — 시그니처를 바꾸면 equity 세션에 통지한다 (2026-09-05 합의).
 """
 from __future__ import annotations
 

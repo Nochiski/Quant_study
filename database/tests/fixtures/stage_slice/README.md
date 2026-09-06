@@ -8,3 +8,4 @@
 - 생성: 2026-09-05, 스크립트는 세션 스크래치(`slice_stage.py`) — 재생성 시 티커·where 절을 위 목록으로.
 
 - 테이블 +7 (2026-09-06 추가, S11·S12 입력 — 법인 11개 `corp_code`·그 법인의 공시 접수번호 33,971건·티커로 절단): stg_fin(41,740) · stg_fin_wise(2,712) · stg_doc_meta(845) · stg_doc_correction(84) · stg_doc_index(631) · stg_doc_parse_log(845) · stg_doc_section(29,734). 파일명 `part0.parquet`.
+- 테이블 +7 (2026-09-06 추가, S08·S09·S10 입력 — 15티커로 절단): stg_flow_daily_kiwoom · stg_short_daily_kis · stg_short_daily_kiwoom · stg_loan_daily_kis · stg_shards_kiwoom · stg_units_kis · stg_calls_kis(행수는 MANIFEST). 파일명 `part0.parquet`.

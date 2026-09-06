@@ -323,6 +323,7 @@ const LinkedTraceResult = ({
             className="strategy-debugger__pipeline"
             key={securityId}
             role="listitem"
+            aria-label={securityId}
             aria-posinset={virtual.start + visibleIndex + 1}
             aria-setsize={rows.length}
           >

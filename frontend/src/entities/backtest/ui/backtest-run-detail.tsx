@@ -359,7 +359,10 @@ export const BacktestRunDetail = ({
         )}
       </section>
 
-      <details className="manifest-drawer">
+      <details
+        className="manifest-drawer"
+        aria-label={t("backtest.result.manifest")}
+      >
         <summary>{t("backtest.result.manifest")}</summary>
         <div className="manifest-grid">
           <dl>

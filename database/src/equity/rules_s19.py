@@ -18,7 +18,7 @@ grain `field_id` — 어댑터 `list_fields()`(`DatasetFieldProfile`)의 원천�
 선언표라 EG1 은 `skip(declaration_table)`(GATES §3 ㉒), 차원표라 프레임 EG2 는
 `skip(dimension_table)` 이고 **EG2-P04/P06/P07 은 `EG2_dataset_profile` 이 대신 판정**한다.
 
-입력은 **전 equity 테이블 22개**다(`SOURCE_TABLES`). 셋을 한꺼번에 얻기 위해서다:
+입력은 **전 equity 테이블 25개**다(`SOURCE_TABLES`). 셋을 한꺼번에 얻기 위해서다:
   ① 필드의 값 컬럼(커버 실측) ② `universe_daily` 격자(커버율 분모·시총 분위) ③ 각 파티션
   `_meta.lag_known_inputs`(EG2-P04 의 stage `lag_known=false` 모집단 — 이 맵이 아니면 SQL 로
   stage 판본을 볼 방법이 없다). 그래서 6단계는 S08~S18 이 전부 커밋된 뒤에만 돈다.
@@ -54,6 +54,9 @@ from . import (
     rules_s04,  # noqa: F401
     rules_s05,  # noqa: F401
     rules_s06,  # noqa: F401
+    rules_s08,  # noqa: F401
+    rules_s09,  # noqa: F401
+    rules_s10,  # noqa: F401
     rules_s11,  # noqa: F401
     rules_s12,  # noqa: F401
     rules_s15,  # noqa: F401
@@ -79,10 +82,10 @@ TABLE_NAME = "dataset_profile"
 # `RULES` 를 그대로 쓰면 T0 샘플(`sample_table`)이나 import 순서에 따라 집합이 흔들리기 때문이다.
 SOURCE_TABLES: tuple[str, ...] = (
     "adj_factor", "audit_opinion", "consensus_daily", "corp", "corp_event", "corp_ticker",
-    "disclosure_version", "dividend_event", "fin_std", "holder_daily", "index_daily",
-    "opinion_broker_daily", "opinion_daily", "ownership_snapshot", "price_daily",
-    "security", "security_span", "shares_outstanding", "trading_calendar", "treasury_stock",
-    "universe_daily", "universe_policy",
+    "credit_daily", "disclosure_version", "dividend_event", "fin_std", "flow_daily",
+    "holder_daily", "index_daily", "opinion_broker_daily", "opinion_daily", "ownership_snapshot",
+    "price_daily", "security", "security_span", "shares_outstanding", "short_daily",
+    "trading_calendar", "treasury_stock", "universe_daily", "universe_policy",
 )
 # 격자 분모·시총 분위 축. 창 폴백의 마지막 단계는 캘린더다.
 GRID_TABLE = "universe_daily"
@@ -93,6 +96,10 @@ MKTCAP_QUINTILES = 5
 # 그 테이블의 필드만 5종 전부를 받는다.
 BASE_CELL_KINDS: tuple[str, ...] = ("observed", "missing", "coverage_gap")
 FILL_KIND_COLUMN = "fill_kind"
+# `short_daily` 는 원천마다 fill_kind 를 두어 컬럼 이름이 `fill_kind_short_kiwoom` 부류다
+# (DESIGN §4-3 구현 결과 ②) — 접두로 본다. 이름을 하나만 보면 그 테이블의 필드가 격자가 아닌
+# 것처럼 3종만 받아 소비자가 not_collected·src_omitted 셀을 만나고도 어휘에서 못 찾는다.
+FILL_KIND_PREFIX = FILL_KIND_COLUMN + "_"
 
 REJECT_REASONS: tuple[str, ...] = ("no_coverage_window",)
 
@@ -163,8 +170,9 @@ def available_date_basis(owner: EquityTable, fp: FieldProfile) -> str:
 
 
 def supported_cell_kinds(owner: EquityTable) -> tuple[str, ...]:
-    """FIELD_MAP §1 결측 어휘 → 엔진 `CellKind`. 격자 테이블(`fill_kind`)만 5종 전부."""
-    return CELL_KINDS if FILL_KIND_COLUMN in owner.columns else BASE_CELL_KINDS
+    """FIELD_MAP §1 결측 어휘 → 엔진 `CellKind`. 격자 테이블(`fill_kind*`)만 5종 전부."""
+    grid = any(c == FILL_KIND_COLUMN or c.startswith(FILL_KIND_PREFIX) for c in owner.columns)
+    return CELL_KINDS if grid else BASE_CELL_KINDS
 
 
 def declaration_rows() -> list[tuple[object, ...]]:

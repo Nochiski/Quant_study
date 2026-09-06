@@ -1,12 +1,14 @@
 """S19 `dataset_profile` — stage 절단본 위 전 테이블 체인 → 실제 `build_table` 왕복
 (DESIGN v1.2 §4-7 · GATES v1.0 §2 27행 · §3 ㉒ · §4 FX-6-001~008 · EG2-P04/P06/P07 · EG9-P06).
 
-이 슬라이스는 **전 equity 테이블(22)을 입력으로 고정**하므로 체인 전체를 먼저 지어야 한다. 느려서
-모듈 픽스처로 한 번만 짓는다(절단본 22테이블 약 6초).
+이 슬라이스는 **전 equity 테이블(25)을 입력으로 고정**하므로 체인 전체를 먼저 지어야 한다. 느려서
+모듈 픽스처로 한 번만 짓는다(절단본 25테이블 약 20초).
 
-절단본 실측(2026-09-06): 프로파일 **66행**(FIELD_MAP §2 어휘 24 · equity 내부 스코프 42), 격리 0,
-`price.*` 커버 100%(`open`·`high`·`low` 99.16%) · 컨센서스·의견 종목 커버 33.33%(15 중 5) ·
+절단본 실측(2026-09-06 S19-2): 프로파일 **72행**(FIELD_MAP §2 어휘 30 · equity 내부 스코프 42),
+격리 0, `price.*` 커버 100%(`open`·`high`·`low` 99.16%) · 컨센서스·의견 종목 커버 33.33%(15 중 5) ·
 GAP-02 3계정(`borrowings`·`depreciation`·`interest_expense`) 커버 17.5/15/15%, 첫 관측 2023-11-14.
+격자 3테이블(S19-2)의 6필드 커버: `flow.*` 54.72% · `short.short_sale_value` 41.94% ·
+`short.borrowed_quantity` 15.24%(창 2014-01-02~2019-02-12) · `credit.margin_balance` 60.01%.
 
 **절단본이 못 보는 축**: stage 절단본 트리에 `_meta.json` 이 없어 `lag_known` 이 전부 미상이고
 EG2-P04 모집단이 빈다. 그래서 여기서는 `lag_known=false` 를 실은 `_meta` 를 손으로 만들어
@@ -28,7 +30,7 @@ import pytest
 from equity import build, gates, inputs, rules_s19
 from equity.baseline import Baseline, load
 from equity.gates import EquityGateContext
-from equity.model import RULES, VALUE_TYPES
+from equity.model import CELL_KINDS, RULES, VALUE_TYPES
 
 STAGE_SLICE = Path(__file__).parent / "fixtures" / "stage_slice"
 SRC = Path(rules_s19.__file__).parent
@@ -37,12 +39,14 @@ SRC = Path(rules_s19.__file__).parent
 CHAIN: tuple[str, ...] = (
     "trading_calendar", "corp", "security", "corp_ticker", "security_span", "index_daily",
     "price_daily", "corp_event", "adj_factor", "universe_daily", "universe_policy",
+    # 격자 3(S08~S10) — `universe_daily` 격자와 `price_daily`(credit 게이트 축) 뒤
+    "flow_daily", "short_daily", "credit_daily",
     "disclosure_version", "fin_std", "holder_daily", "ownership_snapshot", "audit_opinion",
     "shares_outstanding", "treasury_stock", "dividend_event", "consensus_daily",
     "opinion_daily", "opinion_broker_daily")
 
-N_FIELDS = 66                    # 선언 행수 — 코드가 정본이라 서버에서도 같다
-N_FIELD_MAP_SCOPE = 24           # FIELD_MAP §2 42 어휘 중 프로파일 행을 갖는 것
+N_FIELDS = 72                    # 선언 행수 — 코드가 정본이라 서버에서도 같다
+N_FIELD_MAP_SCOPE = 30           # FIELD_MAP §2 42 어휘 중 프로파일 행을 갖는 것
 N_INTERNAL_SCOPE = 42            # equity 내부 스코프(price.adj_close·fin_std 계정·4B·유니버스 …)
 N_FIELD_MAP_VOCAB = 42           # FIELD_MAP §2 표의 field_id 수 (check_field_map.py 와 같은 축)
 PROFILE_GATES = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG2_dataset_profile", "EG9", "EG4", "EG5a"]
@@ -69,7 +73,7 @@ def build_chain(equity_root: Path, tables: tuple[str, ...] = CHAIN) -> None:
 
 @pytest.fixture(scope="module")
 def built(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, build.BuildResult]:
-    """체인 22 + `dataset_profile` 1회. 읽기 전용 검사가 여럿이라 모듈에서 한 번만 짓는다."""
+    """체인 25 + `dataset_profile` 1회. 읽기 전용 검사가 여럿이라 모듈에서 한 번만 짓는다."""
     eq = tmp_path_factory.mktemp("s19") / "equity"
     build_chain(eq)
     r = build.build_table(rules_s19.DATASET_PROFILE, STAGE_SLICE, eq, SEED,
@@ -137,20 +141,24 @@ def test_field_map_스코프_행은_전부_대응표_어휘_안이다(built) -> 
 
 
 def test_대응표_어휘_중_행이_없는_필드는_어댑터의_unavailable_이다(built) -> None:
-    """원천이 없거나(미지원 9) 슬라이스가 없는(S08~S10) 필드는 프로파일에 실리지 않는다."""
+    """원천이 없거나(미지원 10) 컬럼이 이 슬라이스에 없는 필드는 프로파일에 실리지 않는다.
+
+    S19-2 가 격자 3테이블의 6필드를 선언해 「슬라이스 미구현」 8 중 6 이 빠졌다. 남은 둘은
+    **컬럼 자체가 없다** — `flow.foreign_ownership` 은 원천이 `stg_foreign_daily`(ka10008)라
+    S08 이 싣지 않았고(S08-2), `short.short_balance_ratio` 는 공매도량 ÷ 상장주식수라 비율
+    계산이 팩터층 몫이다. 선언만 하고 NULL 로 두면 준비도가 거짓으로 ready 가 된다.
+    """
     _, r = built
     got = {f for (f,) in _rows(r.out_dir, "SELECT field_id FROM dp")}
     absent = sorted(_field_map_vocab() - got)
     assert absent == sorted([
-        # 원천 부재 9 (FIELD_MAP §3 미지원) + 미확인 1
+        # 원천 부재 10 (FIELD_MAP §3 미지원 + GAP-09 benchmark)
         "benchmark.close", "flow.block_buy", "flow.block_sell", "credit.net_buy",
         "credit.collateral_value", "credit.loan_value", "credit.forced_liquidation",
         "event.earnings_surprise", "event.index_membership_change",
         "event.disclosure_sentiment",
-        # 원천은 있고 슬라이스가 없다 — S08 수급 4 · S09 공매도 3 · S10 신용 1
-        "flow.foreign_net_buy", "flow.institution_net_buy", "flow.retail_net_buy",
-        "flow.foreign_ownership", "short.short_balance_ratio", "short.short_sale_value",
-        "short.borrowed_quantity", "credit.margin_balance"])
+        # 격자 테이블에 컬럼이 없다 — S08-2 대기 1 · 팩터층 계산 1
+        "flow.foreign_ownership", "short.short_balance_ratio"])
     assert len(absent) == N_FIELD_MAP_VOCAB - N_FIELD_MAP_SCOPE
 
 
@@ -179,6 +187,63 @@ def test_랙은_문서가_아니라_rules_선언에서_온다(built) -> None:
     assert {k: decl[k] for k in got} == got
 
 
+GRID_FIELDS = {
+    # field_id: (소유 테이블, 컬럼, 단위, value_type)
+    "flow.foreign_net_buy": ("flow_daily", "frgnr_invsr_krw", "KRW", "amount"),
+    "flow.institution_net_buy": ("flow_daily", "orgn_krw", "KRW", "amount"),
+    "flow.retail_net_buy": ("flow_daily", "ind_invsr_krw", "KRW", "amount"),
+    "short.short_sale_value": ("short_daily", "short_value_kiwoom_krw", "KRW", "amount"),
+    "short.borrowed_quantity": ("short_daily", "lending_balance_kis_shr", "주", "count"),
+    "credit.margin_balance": ("credit_daily", "whol_loan_rmnd_stcn_shr", "주", "count"),
+}
+
+
+def test_격자_3테이블은_어댑터가_내는_6필드만_선언한다(built) -> None:
+    """S19-2 — 선언의 정본은 `rules_s08/s09/s10` 의 `field_profiles` 다.
+
+    **어댑터가 못 내는 필드는 선언하지 않는다**: 선언만 하고 값이 없으면 `dataset_profile` 에
+    '있는데 늘 빈' 행이 생겨 S20 준비도가 거짓으로 ready 가 된다. 대응은
+    `backend/.../equity_duckdb/_specs.py` 의 `FIELD_SPECS` 격자 6행이다.
+    """
+    _, r = built
+    rows = _rows(r.out_dir, "SELECT field_id, table_name, column_scope, unit, value_type, "
+                            "frequency, available_date_basis, recommended_lag_sessions, "
+                            "recommended_lag_days, point_in_time, coverage_basis "
+                            "FROM dp WHERE table_name IN ('flow_daily', 'short_daily', "
+                            "'credit_daily') ORDER BY 1")
+    assert {r0[0] for r0 in rows} == set(GRID_FIELDS)
+    for field_id, table, col, unit, value_type, freq, basis, lag_s, lag_d, pit, cov in rows:
+        assert (table, col, unit, value_type) == GRID_FIELDS[field_id], field_id
+        assert freq == "session" and cov == "grid_session", field_id
+        # available_date = date(basis default) 인 팩트 축이고, 공표 랙은 여기서만 낸다
+        assert basis == "default", field_id
+        # 세 원장 전부 stage lag_known=false — STAGE_HANDOFF §2 · FIELD_MAP §1 「나머지 1 세션」
+        assert (lag_s, lag_d) == (1, 1), field_id
+        assert pit is True, field_id
+
+
+def test_격자_필드_중_미결_조건이_남은_것은_기관_순매수_하나다(built) -> None:
+    """GAP-03 — `orgn` 은 원장의 합계 컬럼인데 기관 7주체 합과 다르고 값의 기준이 공표되지
+    않았다. 합계 컬럼을 쓸지 7주체를 다시 합할지가 소비 측에 남아 S20 이 partial_support 로
+    옮긴다. 나머지 5필드는 단위·산출 규칙·원천 선택이 전부 닫혀 있다."""
+    _, r = built
+    got = dict(_rows(r.out_dir, "SELECT field_id, requires_confirmation FROM dp "
+                                "WHERE table_name IN ('flow_daily', 'short_daily', "
+                                "'credit_daily') ORDER BY 1"))
+    assert {k for k, v in got.items() if v} == {"flow.institution_net_buy"}
+
+
+def test_격자_필드의_stage_원천은_그_테이블의_원장을_포함한다(built) -> None:
+    _, r = built
+    got = {f: set(s) for f, s in _rows(
+        r.out_dir, "SELECT field_id, source_stage_tables FROM dp "
+                   "WHERE table_name IN ('flow_daily', 'short_daily', 'credit_daily')")}
+    assert {"stg_flow_daily_kiwoom", "stg_flow_split_daily"} <= got["flow.foreign_net_buy"]
+    assert "stg_short_daily_kiwoom" in got["short.short_sale_value"]
+    assert "stg_loan_daily_kis" in got["short.borrowed_quantity"]
+    assert "stg_credit_daily" in got["credit.margin_balance"]
+
+
 def test_sql_본문에_랙_리터럴이_없다() -> None:
     body = (SRC / "sql" / "dataset_profile.sql").read_text(encoding="utf-8")
     statement = "\n".join(ln for ln in body.splitlines() if not ln.lstrip().startswith("--"))
@@ -205,10 +270,18 @@ def test_뷰_필드는_산출처를_뷰_이름으로_밝힌다(built) -> None:
 
 
 def test_cell_kind_는_엔진_어휘를_쓴다(built) -> None:
+    """격자 테이블(`fill_kind*`)만 5종 전부를 받고 나머지는 3종이다 — 유도는 소유 테이블의
+    컬럼에서 기계적으로 나온다(선언 중복 금지, `rules_s19.supported_cell_kinds`)."""
     _, r = built
     kinds = {k for (row,) in _rows(r.out_dir, "SELECT supported_cell_kinds FROM dp")
              for k in row}
-    assert kinds == {"observed", "missing", "coverage_gap"}     # 격자 테이블이 아직 없다
+    assert kinds == set(CELL_KINDS)
+    by_table = {t: sorted(k) for t, k in _rows(
+        r.out_dir, "SELECT table_name, any_value(supported_cell_kinds) FROM dp GROUP BY 1")}
+    # `short_daily` 는 원천마다 fill_kind 를 두어 컬럼 이름이 `fill_kind_short_kiwoom` 부류다
+    for grid in ("flow_daily", "short_daily", "credit_daily"):
+        assert by_table[grid] == sorted(CELL_KINDS), grid
+    assert by_table["price_daily"] == sorted(["observed", "missing", "coverage_gap"])
 
 
 def test_value_type_은_엔진_FieldValueType_어휘_안이다(built) -> None:
@@ -403,12 +476,20 @@ def test_lag_known_false_인_stage_원천은_세션_랙_1_이상인_행을_요�
 
 
 def test_어떤_필드도_싣지_않은_lag_known_false_원천은_EG2를_폐기한다(built) -> None:
-    """S08 수급 격자가 붙었는데 프로파일 행을 안 만들면 여기서 잡힌다."""
+    """원천을 실었는데 프로파일 행을 안 만들면 여기서 잡힌다.
+
+    S19-2 전에는 `stg_flow_daily_kiwoom` 이 이 예였다 — S08 격자가 커밋됐는데 선언이 비어 있어
+    수급 원천을 아무 필드도 덮지 않았다. 지금은 `flow.*` 3필드가 랙 1 로 덮으므로 예를
+    `stg_foreign_daily`(ka10008 외국인 보유, S08-2 대기)로 옮긴다.
+    """
     eq, r = built
-    bad = rules_s19.eg2_dataset_profile(
+    covered = rules_s19.eg2_dataset_profile(
         _profile_ctx(eq, r.out_dir, {"stg_flow_daily_kiwoom": False}))
+    assert covered.status is gates.GateStatus.PASS      # S19-2 가 덮었다
+    bad = rules_s19.eg2_dataset_profile(
+        _profile_ctx(eq, r.out_dir, {"stg_foreign_daily": False}))
     assert bad.status is gates.GateStatus.FAIL
-    assert bad.metrics["uncovered_lag_known_false"] == ["stg_flow_daily_kiwoom"]
+    assert bad.metrics["uncovered_lag_known_false"] == ["stg_foreign_daily"]
     assert "n_lag_known_false_without_profile=1" in bad.detail
 
 

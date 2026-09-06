@@ -54,7 +54,14 @@ from pathlib import Path
 from stage.gates import GateResult, GateStatus
 
 from .gates import EquityGateContext
-from .model import BASIS_VOCAB, FILL_EVIDENCE, FILL_KINDS, EquityTable, register
+from .model import (
+    BASIS_VOCAB,
+    FILL_EVIDENCE,
+    FILL_KINDS,
+    EquityTable,
+    FieldProfile,
+    register,
+)
 from .rules_s01 import TICKER_LEN
 
 SQL_DIR = Path(__file__).parent / "sql"
@@ -296,6 +303,54 @@ def eg3_short_daily(ctx: EquityGateContext) -> GateResult:
 eg3_short_daily.gate_name = "EG3_short_daily"       # type: ignore[attr-defined]
 
 
+# ── S19 필드 선언 (DESIGN §4-7 · FIELD_MAP §2 `short.*`) ─────────────────────
+# **랙 1 세션**. 세 원장(`stg_short_daily_kiwoom`·`stg_short_daily_kis`·`stg_loan_daily_kis`)이
+# 전부 stage `lag_known=false` 라 공표 시각을 잰 적이 없다 — STAGE_HANDOFF §2 「lag_known=false 는
+# lag 0 을 적용하면 안 된다」 + FIELD_MAP §1 랙 단위 「나머지 전부 1 세션」.
+# 원천별 접미사 컬럼을 나란히 두는 테이블이므로(사용자 확정 09-06) **field_id 하나 = 컬럼 하나**로
+# 선언한다 — 두 원천을 폴백 병합하면 시계열이 원천을 섞는다(FIELD_MAP §2 `short.short_sale_value`).
+# 선언하지 않는 것: `short.short_balance_ratio` 는 공매도량 ÷ 상장주식수라 **비율 계산이 팩터층
+# 몫**이고 이 테이블에 그 컬럼이 없다(FIELD_MAP §2 「진짜 잔고 아님」). KIS 공매도 축
+# (`short_volume_kis_shr`·`short_value_kis_krw` …)과 대차 금액축(`lending_balance_kis_krw`)도
+# field_id 가 없어 선언하지 않는다 — 없는 것을 선언하면 프로파일에 '있는데 늘 빈' 행이 생긴다.
+_SAXIS: tuple[str, str] = ("ticker", "date")
+
+FIELDS: tuple[FieldProfile, ...] = (
+    FieldProfile(
+        field_id="short.short_sale_value", columns=("short_value_kiwoom_krw",),
+        label="공매도 거래대금(키움)", unit="KRW", value_type="amount", frequency="session",
+        recommended_lag_sessions=1, recommended_lag_days=1, point_in_time=True,
+        requires_confirmation=False,
+        disclosure_basis="원장 날짜 = 매매일. 키움 ka10014 는 공표 시각을 주지 않는다"
+                         "(stage lag_known=false) → 익일 지식으로 쓴다",
+        evidence="short_daily.short_value_kiwoom_krw ← stg_short_daily_kiwoom."
+                 "shrts_trde_prica_krw(stage unit_scale=1e3 완료 → **원 단위**). 원천은 키움 "
+                 "하나로 고정이고 미결이 아니다 — KRX 정본이 없는 축이라 둘 중 하나를 골라야 "
+                 "했고, 커버가 넓은 쪽을 골랐다(절단본 measured 키움 18,265 vs KIS 3,891). KIS 축 "
+                 "`short_value_kis_krw` 는 같은 테이블에 그대로 남아 있지만 이 field_id 로 "
+                 "폴백 병합하지 않는다(단위·정의 차가 조용히 섞인다). 결측 사유는 "
+                 "fill_kind_short_kiwoom 이 나르고, 키움 공매도 평균가는 단위 미측정이라 "
+                 "`short_avg_price_kiwoom_raw` + `_basis='unknown'` 로 따로 남는다(FX-3-009).",
+        coverage_axis="grid_session", axis_columns=_SAXIS),
+    FieldProfile(
+        field_id="short.borrowed_quantity", columns=("lending_balance_kis_shr",),
+        label="대차잔고(주식수, KIS)", unit="주", value_type="count", frequency="session",
+        recommended_lag_sessions=1, recommended_lag_days=1, point_in_time=True,
+        requires_confirmation=False,
+        disclosure_basis="원장 날짜 = 대차 잔량 기준일. KIS kis_loan_trans 는 공표 시각을 주지 "
+                         "않는다(stage lag_known=false) → 익일 지식으로 쓴다",
+        evidence="short_daily.lending_balance_kis_shr ← stg_loan_daily_kis.rmnd_stcn_shr(주수, "
+                 "stage 측정 단위). **KIS 축뿐이다**(GAP-04) — 키움 대차 원장 stg_lending_daily "
+                 "가 S09 입력에 없어 `lending_balance_kiwoom_raw`(단위 미측정) 는 후속 슬라이스 "
+                 "몫이고, 그래서 고를 원천이 하나뿐이라 축 선택이 미결이 아니다. 좁은 커버"
+                 "(유닛 dataset='loan' 287 티커)는 조건이 아니라 이 행의 "
+                 "estimated_coverage_pct·coverage_from 이 재는 사실이다. 원장이 주는 음수 잔고는 "
+                 "자르지 않고 그대로 보존한다(원칙 ④) — 건수는 EG3_short_daily 기록형. 금액축 "
+                 "`lending_balance_kis_krw`(stage ×1e6)는 별개 컬럼이고 field_id 가 없다.",
+        coverage_axis="grid_session", axis_columns=_SAXIS),
+)
+
+
 # ── 선언 ─────────────────────────────────────────────────────────────────────
 
 SHORT_DAILY = register(EquityTable(
@@ -361,11 +416,12 @@ SHORT_DAILY = register(EquityTable(
     content_date_column="date",
     reject_reasons=REJECT_REASONS,
     extra_gates=(eg1_short_daily, eg3_short_daily),
+    field_profiles=FIELDS,
 ))
 
 TABLES: tuple[EquityTable, ...] = (SHORT_DAILY,)
 
 BASELINE_SEED = Path(__file__).parent / "baseline_seed_s09.json"
 
-__all__ = ["GRID_EXCLUDED_SEC_TYPES", "GRID_STATUSES", "REJECT_REASONS", "SHORT_DAILY", "SOURCES",
-           "TABLES", "UNIT_LABELS"]
+__all__ = ["FIELDS", "GRID_EXCLUDED_SEC_TYPES", "GRID_STATUSES", "REJECT_REASONS",
+           "SHORT_DAILY", "SOURCES", "TABLES", "UNIT_LABELS"]

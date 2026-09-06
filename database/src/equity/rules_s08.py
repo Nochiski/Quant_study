@@ -44,7 +44,7 @@ from stage.gates import GateResult, GateStatus
 from stage.rules_kiwoom import STG_FLOW_DAILY_KIWOOM
 
 from .gates import EquityGateContext
-from .model import FILL_EVIDENCE, FILL_KINDS, EquityTable, register
+from .model import FILL_EVIDENCE, FILL_KINDS, EquityTable, FieldProfile, register
 from .rules_s01 import TICKER_LEN
 
 SQL_DIR = Path(__file__).parent / "sql"
@@ -354,6 +354,62 @@ def _coverage_metrics(ctx: EquityGateContext, out: str) -> dict[str, object]:
     }
 
 
+# ── S19 필드 선언 (DESIGN §4-7 · FIELD_MAP §2 `flow.*`) ──────────────────────
+# **랙 1 세션**. 두 원장(`stg_flow_daily_kiwoom`·`stg_flow_split_daily`)이 stage
+# `lag_known=false` — 공표 시각 컬럼이 없어 "그날 장중에 알 수 있었는가" 를 잰 적이 없다.
+# STAGE_HANDOFF §2 「lag_known=false 는 lag 0 을 적용하면 안 된다」 + FIELD_MAP §1 랙 단위
+# 「나머지 전부 1 세션」 을 그대로 따른다. `available_date = date`(basis default)인 것은 팩트 행의
+# 축이고, 소비 랙은 이 선언이 낸다(테이블 `available_rule` 이 그렇게 적어 두었다).
+# 여기 없는 `flow.foreign_ownership`·`flow.foreign_limit_exhaustion`·`flow.pension_net_buy` 는
+# **선언하지 않는다** — 앞 둘은 원천이 `stg_foreign_daily`(ka10008)라 이 테이블에 컬럼이 없고
+# (S08-2, DESIGN §4-3 구현 결과 ①), `pension_net_buy` 는 `penfnd_etc_krw` 가 실재하지만 FIELD_MAP
+# §2 어휘에 그 field_id 행이 없다. 없는 것을 선언하면 `dataset_profile` 에 '있는데 늘 빈' 행이
+# 생겨 S20 준비도가 거짓으로 ready 가 된다.
+_FAXIS: tuple[str, str] = ("ticker", "date")
+_FLOW_DISCLOSURE = ("원장 날짜 = 매매일. 키움 ka10060·KIS 투자자별 매매동향 모두 공표 시각을 "
+                    "주지 않는다(stage lag_known=false) → 익일 지식으로 쓴다")
+_FLOW_SRC_NOTE = ("grain 에 `src` 가 들어 한 격자 셀에 원장 행이 둘일 수 있다(상보 결합) — 고르는 "
+                  "규칙은 미결이 아니라 확정이다: 키움 우선, 동률은 `src` 사전순으로 한 행"
+                  "(FIELD_MAP §2 · S21-3 어댑터 `pick_order`). 값을 섞지 않는다. 절단본 겹침 0, "
+                  "서버는 `EG3_flow_daily.n_src_overlap` 이 매 빌드 센다.")
+
+FIELDS: tuple[FieldProfile, ...] = (
+    FieldProfile(
+        field_id="flow.foreign_net_buy", columns=("frgnr_invsr_krw",),
+        label="외국인 순매수(대금)", unit="KRW", value_type="amount", frequency="session",
+        recommended_lag_sessions=1, recommended_lag_days=1, point_in_time=True,
+        requires_confirmation=False, disclosure_basis=_FLOW_DISCLOSURE,
+        evidence="flow_daily.frgnr_invsr_krw ← stg_flow_daily_kiwoom.frgnr_invsr_krw ∪ "
+                 "stg_flow_split_daily.frgn_ntby_tr_pbmn_krw. **원 단위** — stage 가 백만원 "
+                 "×1e6 환산을 마쳤고(STAGE_HANDOFF §2) equity 도 어댑터도 다시 곱하지 않는다"
+                 "(EG3_flow_daily 원장 재조인 단위 대조). 값 없는 셀은 0 이 아니라 NULL 이고 "
+                 "이유는 fill_kind 가 나른다. " + _FLOW_SRC_NOTE,
+        coverage_axis="grid_session", axis_columns=_FAXIS),
+    FieldProfile(
+        field_id="flow.institution_net_buy", columns=("orgn_krw",),
+        label="기관 순매수(대금)", unit="KRW", value_type="amount", frequency="session",
+        recommended_lag_sessions=1, recommended_lag_days=1, point_in_time=True,
+        requires_confirmation=True, disclosure_basis=_FLOW_DISCLOSURE,
+        evidence="flow_daily.orgn_krw ← 키움 orgn_krw ∪ KIS orgn_ntby_tr_pbmn_krw. "
+                 "**미결 조건(GAP-03)**: `orgn` 은 원장의 합계 컬럼인데 그 값이 무엇을 합한 것인지 "
+                 "원천이 공표하지 않고, 기관 7주체(fnnc_invt·insrnc·invtrt·etc_fnnc·bank·"
+                 "penfnd_etc·samo_fund) 합과 실제로 다르다(절단본 18,581행 중 10,783행 불일치, "
+                 "편차 최대 2,834억원 — EG3_flow_daily 기록형이 매 빌드 갱신). 그래서 12주체 "
+                 "항등식(EG3-P06)에서도 빠진다. 합계 컬럼을 쓸지 7주체를 다시 합할지는 소비 측이 "
+                 "골라야 하고(FACTORS §11-2), 그 선택이 남아 있는 동안 이 필드는 "
+                 "partial_support 다. " + _FLOW_SRC_NOTE,
+        coverage_axis="grid_session", axis_columns=_FAXIS),
+    FieldProfile(
+        field_id="flow.retail_net_buy", columns=("ind_invsr_krw",),
+        label="개인 순매수(대금)", unit="KRW", value_type="amount", frequency="session",
+        recommended_lag_sessions=1, recommended_lag_days=1, point_in_time=True,
+        requires_confirmation=False, disclosure_basis=_FLOW_DISCLOSURE,
+        evidence="flow_daily.ind_invsr_krw ← 키움 ind_invsr_krw ∪ KIS prsn_ntby_tr_pbmn_krw. "
+                 "원 단위(stage ×1e6 완료 — 재환산 금지). " + _FLOW_SRC_NOTE,
+        coverage_axis="grid_session", axis_columns=_FAXIS),
+)
+
+
 # ── 선언 ─────────────────────────────────────────────────────────────────────
 
 _INVESTOR_TYPES = {c: "DECIMAL(15,0)" for c in KIWOOM_INVESTOR_COLUMNS}
@@ -405,11 +461,12 @@ FLOW_DAILY = register(EquityTable(
     content_date_column="date",
     reject_reasons=REJECT_REASONS,
     extra_gates=(eg1_ledger, eg3_flow_daily),
+    field_profiles=FIELDS,
 ))
 
 TABLES: tuple[EquityTable, ...] = (FLOW_DAILY,)
 
 BASELINE_SEED = Path(__file__).parent / "baseline_seed_s08.json"
 
-__all__ = ["FLOW_DAILY", "KIS_MAPPING", "KIWOOM_INVESTOR_COLUMNS", "REJECT_REASONS",
-           "SRC_VOCAB", "TABLES"]
+__all__ = ["FIELDS", "FLOW_DAILY", "KIS_MAPPING", "KIWOOM_INVESTOR_COLUMNS",
+           "REJECT_REASONS", "SRC_VOCAB", "TABLES"]

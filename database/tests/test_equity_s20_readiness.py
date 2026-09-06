@@ -1,10 +1,15 @@
 """S20 `factor_readiness` — 절단본 전 체인 + `dataset_profile` 위 실제 `build_table` 왕복
 (DESIGN v1.2 §4-8 · GATES v1.0 §6 EG10 · §9 「EG10 이름」 · WORKFLOW §4 DoD 6단계).
 
-절단본 실측(2026-09-06): **31 ready / 23 blocked** (ready 비율 0.574). 막힌 사유 분포는
-`field_unavailable` 10(S08~S10 미구현 9 + GAP-09 R04) · `partial_support` 11(컨센서스·의견 6 ·
-금융업 매출액 3 · EPS 분할 미조정 1 · KOSPI 관리종목 비대칭 1) · `no_observations` 2(E05·E06 —
-`corp_event` MVP 4유형 밖이라 행이 0).
+절단본 실측(2026-09-06 S19-2): **35 ready / 19 blocked** (ready 비율 0.648). 막힌 사유 분포는
+`field_unavailable` 5(F02·F04·F05·F08 + GAP-09 R04) · `partial_support` 12(컨센서스·의견 6 ·
+금융업 매출액 3 · EPS 분할 미조정 1 · KOSPI 관리종목 비대칭 1 + **GAP-03 기관 순매수 1**) ·
+`no_observations` 2(E05·E06 — `corp_event` MVP 4유형 밖이라 행이 0).
+
+S19-2 직전은 31 ready / 23 blocked 였고 `field_unavailable` 이 10 이었다 — 격자 3테이블
+(`flow_daily`·`short_daily`·`credit_daily`)이 커밋돼 있는데 `field_profiles` 선언이 비어
+`dataset_profile` 에 행이 없었기 때문이다. 선언을 채우자 F01·F06·F07·F09 넷이 ready 로 열리고
+F03 이 `field_unavailable` → `partial_support`(GAP-03) 로 옮겨 갔다.
 
 선언 54가 `FACTORS.md` 정본과 어긋나지 않는지는 **문서를 파싱해** 대조한다(`check_field_map.py`
 규약) — 표를 손으로 옮긴 곳이라 드리프트가 가장 쉽게 생기는 지점이다.
@@ -27,15 +32,15 @@ from test_equity_s19_profile import SEED, STAGE_SLICE, build_chain
 DOCS = Path(__file__).parents[1] / "docs"
 REGISTRY_DOC = Path(__file__).parents[2] / "backend" / "FACTORS.md"
 
-N_READY = 31
-N_BLOCKED = 23
-BLOCKED_REASON_COUNTS = {"field_unavailable": 10, "partial_support": 11, "no_observations": 2}
+N_READY = 35
+N_BLOCKED = 19
+BLOCKED_REASON_COUNTS = {"field_unavailable": 5, "partial_support": 12, "no_observations": 2}
 READINESS_GATES = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG10", "EG4", "EG5a"]
 
 
 @pytest.fixture(scope="module")
 def built(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, build.BuildResult]:
-    """체인 22 + `dataset_profile` + `factor_readiness`. 느려서 모듈에서 한 번만 짓는다."""
+    """체인 25 + `dataset_profile` + `factor_readiness`. 느려서 모듈에서 한 번만 짓는다."""
     eq = tmp_path_factory.mktemp("s20") / "equity"
     build_chain(eq)
     p = build.build_table(rules_s19.DATASET_PROFILE, STAGE_SLICE, eq, SEED,
@@ -123,13 +128,27 @@ def test_절단본_준비도는_31_대_23_이다(built) -> None:
     assert m["blocked_reason_counts"] == BLOCKED_REASON_COUNTS
 
 
-def test_수급_공매도_신용_9팩터는_슬라이스_미구현으로_막힌다(built) -> None:
-    """S08~S10 이 붙으면 아홉이 풀린다 — 제안서 §1-8 '즉시 36' 과의 차이가 이것이다."""
+def test_수급_공매도_신용_9팩터의_판정은_선언한_필드가_가른다(built) -> None:
+    """S19-2 — 격자 3테이블의 6필드를 선언하자 F01·F06·F07·F09 가 ready 로 열렸다.
+
+    남는 넷은 **재료가 없어서** 막힌 것이지 선언을 빠뜨린 것이 아니다:
+      F02 `flow.foreign_ownership` · F08 `flow.foreign_limit_exhaustion` — 원천이
+          `stg_foreign_daily`(ka10008)라 `flow_daily` 에 컬럼이 없다(S08-2 대기)
+      F04 `flow.pension_net_buy` — `penfnd_etc_krw` 는 실재하지만 FIELD_MAP §2 에 그 field_id
+          행이 없어 어댑터가 내지 않는다
+      F05 `short.short_balance_ratio` — 공매도량 ÷ 상장주식수라 비율 계산이 팩터층 몫이다
+    F03 은 재료가 있으므로 `field_unavailable` 이 아니라 `partial_support`(GAP-03)다.
+    """
     _, r = built
-    got = _rows(r.out_dir, "SELECT factor_id, blocked_reason FROM fr "
-                           "WHERE factor_id LIKE 'F0%' ORDER BY 1")
-    assert [f for f, _ in got] == [f"F0{i}" for i in range(1, 10)]
-    assert all(str(reason).startswith("field_unavailable: ") for _, reason in got)
+    got = dict(_rows(r.out_dir, "SELECT factor_id, coalesce(blocked_reason, 'ready') FROM fr "
+                                "WHERE factor_id LIKE 'F0%' ORDER BY 1"))
+    assert sorted(got) == [f"F0{i}" for i in range(1, 10)]
+    assert {f for f, v in got.items() if v == "ready"} == {"F01", "F06", "F07", "F09"}
+    assert got["F02"] == "field_unavailable: flow.foreign_ownership"
+    assert got["F04"] == "field_unavailable: flow.pension_net_buy"
+    assert got["F05"] == "field_unavailable: short.short_balance_ratio"
+    assert got["F08"] == "field_unavailable: flow.foreign_limit_exhaustion"
+    assert got["F03"] == "partial_support: flow.institution_net_buy"
 
 
 def test_막힌_행은_사유와_소유자를_반드시_갖는다(built) -> None:
@@ -181,9 +200,11 @@ def test_required_columns_는_프로파일에서_유도된다(built) -> None:
     assert list(cols) == ["v_adj_price_fwd.adj_close"]
     (cols,), = _rows(r.out_dir, "SELECT required_columns FROM fr WHERE factor_id = 'Q01'")
     assert list(cols) == ["fin_std.net_income", "fin_std.total_equity"]
-    # 프로파일 행이 없는 필드는 컬럼도 없다
     (cols,), = _rows(r.out_dir, "SELECT required_columns FROM fr WHERE factor_id = 'F01'")
-    assert list(cols) == ["price_daily.value_krw"]
+    assert list(cols) == ["flow_daily.frgnr_invsr_krw", "price_daily.value_krw"]
+    # 프로파일 행이 없는 필드는 컬럼도 없다 — F02 는 요구 재료가 그 하나뿐이라 빈 목록이다
+    (cols,), = _rows(r.out_dir, "SELECT required_columns FROM fr WHERE factor_id = 'F02'")
+    assert list(cols) == []
 
 
 def test_커버_실측에_걸린_판정은_손계산으로_잰다(built) -> None:
@@ -196,8 +217,11 @@ def test_커버_실측에_걸린_판정은_손계산으로_잰다(built) -> None
     _, r = built
     got = {f: (s, str(d) if d is not None else None, b) for f, s, d, b in _rows(
         r.out_dir, "SELECT factor_id, status, first_usable_date, blocked_reason FROM fr "
-                   "WHERE factor_id IN ('M01', 'E05', 'E06', 'V05') ORDER BY 1")}
+                   "WHERE factor_id IN ('M01', 'E05', 'E06', 'V05', 'F07', 'F09') ORDER BY 1")}
     assert got["M01"] == ("ready", "2010-01-04", None)
+    # 대차잔고는 KIS 유닛이 덮는 구간만 있다 — 가장 늦게 열린 재료가 팩터의 시작일이다
+    assert got["F07"] == ("ready", "2014-01-02", None)
+    assert got["F09"] == ("ready", "2010-01-04", None)
     assert got["E05"] == ("blocked", None, "no_observations: event.buyback_amount")
     assert got["E06"] == ("blocked", None, "no_observations: event.capital_raise_amount")
     # GAP-02 계정이 가장 늦게 열려 V05 의 시작일이 된다

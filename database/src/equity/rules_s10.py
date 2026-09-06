@@ -69,7 +69,7 @@ from pathlib import Path
 from stage.gates import GateResult, GateStatus
 
 from .gates import EquityGateContext
-from .model import FILL_EVIDENCE, FILL_KINDS, EquityTable, register
+from .model import FILL_EVIDENCE, FILL_KINDS, EquityTable, FieldProfile, register
 from .rules_s01 import TICKER_LEN
 
 SQL_DIR = Path(__file__).parent / "sql"
@@ -412,6 +412,42 @@ def eg3_credit_daily(ctx: EquityGateContext) -> GateResult:
 eg3_credit_daily.gate_name = "EG3_credit_daily"     # type: ignore[attr-defined]
 
 
+# ── S19 필드 선언 (DESIGN §4-7 · FIELD_MAP §2 `credit.*`) ────────────────────
+# **랙 1 세션**. `stg_credit_daily` 가 stage `lag_known=false` 이고 KIS 신용잔고는 실제로 **T+1
+# 공표**다 — 원장 날짜를 당일 지식으로 읽으면 look-ahead 다. STAGE_HANDOFF §2 「lag_known=false 는
+# lag 0 을 적용하면 안 된다」 + FIELD_MAP §1 랙 단위 「나머지 전부 1 세션」. 이 테이블의
+# `available_rule` 이 「공표 랙(T+1)은 팩트 행이 아니라 dataset_profile.recommended_lag_sessions」
+# 라고 적어 둔 그 몫을 여기서 낸다.
+# 선언하지 않는 것: `credit.net_buy`(원천에 축이 없다 — 위 docstring 판정) ·
+# `credit.collateral_value`·`credit.loan_value`·`credit.forced_liquidation`(원천 없음) ·
+# `*_amt` 6컬럼(단위 미상, `amt_basis='unknown'`) · 대주 잔고 `whol_stln_rmnd_stcn_shr`
+# (FIELD_MAP §2 어휘에 field_id 가 없다).
+_CAXIS: tuple[str, str] = ("ticker", "date")
+
+FIELDS: tuple[FieldProfile, ...] = (
+    FieldProfile(
+        field_id="credit.margin_balance", columns=("whol_loan_rmnd_stcn_shr",),
+        label="신용융자 잔고(주식수)", unit="주", value_type="count", frequency="session",
+        recommended_lag_sessions=1, recommended_lag_days=1, point_in_time=True,
+        requires_confirmation=False,
+        disclosure_basis="원장 날짜 = 잔고 기준일. KIS 신용잔고는 **T+1 공표**이고 공표 시각 "
+                         "컬럼이 없다(stage lag_known=false) → 1 세션 뒤부터 쓴다",
+        evidence="credit_daily.whol_loan_rmnd_stcn_shr ← stg_credit_daily(KIS 신용잔고) 무수정. "
+                 "**주식수 축**이라 단위가 닫혀 있다 — 금액축 `*_amt` 6컬럼은 단위 미상이라"
+                 "(`amt_basis='unknown'`, STAGE_HANDOFF §4) 이 field_id 로 나가지 않고, 대주 잔고 "
+                 "`whol_stln_rmnd_stcn_shr` 는 별개 축이다. 격자 빈칸은 0 이 아니라 NULL 이고 "
+                 "뜻은 fill_kind.kind 가 나른다(FIELD_MAP §1: src_omitted → "
+                 "CellKind.SOURCE_OMITTED_ZERO) — 0 으로 읽을지는 소비자가 셀 종류를 "
+                 "보고 정한다. 다만 **워크벤치 어댑터는 지금 그 종류를 MISSING 으로 "
+                 "좁힌다**(도메인이 SOURCE_OMITTED_ZERO 셀에 값을 요구한다 — DESIGN §11 "
+                 "⑪), 그래서 소비층에서는 두 결측이 구분되지 않는다. 잔고 > 그날 상장주식수인 원장 "
+                 "행은 `_reject/balance_over_shares/` 로 격리되고 그 셀은 empty_response"
+                 "(→ MISSING)로 남는다(DESIGN §9 결정 9) — 신용잔고비율 > 100% 셀이 소비층까지 "
+                 "가지 않는다.",
+        coverage_axis="grid_session", axis_columns=_CAXIS),
+)
+
+
 # ── 선언 ─────────────────────────────────────────────────────────────────────
 
 CREDIT_DAILY = register(EquityTable(
@@ -467,6 +503,7 @@ CREDIT_DAILY = register(EquityTable(
     content_date_column="date",
     reject_reasons=REJECT_REASONS,
     extra_gates=(eg1_credit_daily, eg3_credit_daily),
+    field_profiles=FIELDS,
 ))
 
 TABLES: tuple[EquityTable, ...] = (CREDIT_DAILY,)
@@ -474,6 +511,6 @@ TABLES: tuple[EquityTable, ...] = (CREDIT_DAILY,)
 BASELINE_SEED = Path(__file__).parent / "baseline_seed_s10.json"
 """이 슬라이스가 요구하는 baseline 상수 — 격리 비율 임계 하나. 승인 뒤 baseline.json 에 병합."""
 
-__all__ = ["BALANCE_SHARE_COLUMNS", "BASELINE_SEED", "CREDIT_DAILY", "MEASURE_COLUMNS",
-           "REJECTED_CELL_KIND", "REJECT_REASONS", "TABLES", "UNIT_DATASET", "grid_predicate",
-           "over_shares_predicate"]
+__all__ = ["BALANCE_SHARE_COLUMNS", "BASELINE_SEED", "CREDIT_DAILY", "FIELDS",
+           "MEASURE_COLUMNS", "REJECTED_CELL_KIND", "REJECT_REASONS", "TABLES", "UNIT_DATASET",
+           "grid_predicate", "over_shares_predicate"]

@@ -22,7 +22,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.4.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.5.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -33,6 +33,10 @@ RULES_VERSION = "e1.4.0"                # BuildRecord.rules_version 에 실린�
 # e1.4.0: S19·S20 — `FieldProfile` 선언면 신설(`EquityTable.field_profiles`·`declarations` 훅) +
 #         `dataset_profile`·`factor_readiness` 두 선언표. 기존 22테이블의 **산출은 바뀌지 않지만**
 #         선언이 늘어 EG5a 비교 대상이 달라지므로 판본을 올린다(GATES §2-4 규약).
+# e1.5.0: S19-2 — 격자 3테이블(`flow_daily`·`short_daily`·`credit_daily`)이 `field_profiles` 로
+#         6필드를 선언하고 `rules_s19.SOURCE_TABLES` 가 22 → 25 로 늘었다. 세 격자 테이블의 산출은
+#         그대로지만 `dataset_profile` 66 → 72행 · `factor_readiness` 판정(31/23 → 35/19)이
+#         바뀐다.
 
 # DESIGN §1 — stage 4종 + equity 신설 convention
 BASIS_VOCAB: tuple[str, ...] = ("measured", "derived", "convention", "default", "unknown")

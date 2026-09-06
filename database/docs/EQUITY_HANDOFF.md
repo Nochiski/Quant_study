@@ -1,4 +1,4 @@
-# EQUITY_HANDOFF — equity 층 인계 (S22, 2026-09-06)
+# EQUITY_HANDOFF — equity 층 인계 (S23, 2026-09-06)
 
 이 문서는 **equity 층을 넘겨받는 사람이 처음 30분에 읽을 것**이다. 설계의 정본은
 `EQUITY_DESIGN.md`(테이블 카탈로그·뷰·소비자 계약), 게이트의 정본은 `EQUITY_GATES.md`,
@@ -10,7 +10,7 @@
 
 ## 1. 한 문장
 
-`data/stage/` 의 원장 parquet 을 읽어 **27개 equity 표**(팩트·차원 24 + 선언표 3 —
+`data/stage/` 의 원장 parquet 을 읽어 **28개 equity 표**(팩트·차원 25 + 선언표 3 —
 `declaration_table=True` 는 `universe_policy`·`dataset_profile`·`factor_readiness`)를 짓고,
 `equity.duckdb` 카탈로그(매크로 8)와 워크벤치 어댑터(`equity_duckdb`, 필드 30)를 통해
 백테스트 파이프라인에 point-in-time 관측을 공급한다.
@@ -21,7 +21,7 @@
 
 ---
 
-## 2. 27표와 빌드 의존 순서
+## 2. 28표와 빌드 의존 순서
 
 아래 순서는 각 `EquityTable.inputs` 의 위상 정렬이며, `database/scripts/equity_rebuild_all.sh` 의
 `ORDER` 와 **같은 문자열**이다(둘이 갈리면 스크립트가 아니라 이 표를 고칠 것).
@@ -38,6 +38,7 @@
 | 7 | `price_daily` | ticker, date | date_axis | 1 | 3 | 10,890,251 |
 | 8 | `corp_event` | event_id | receipt_axis | 1·4·5 | 5 | 3,147 |
 | 9 | `adj_factor` | ticker, effective_date, event_id | date_axis | 1·3·4·7·8 | 1 | 5,733 |
+| 9b | `price_adj_daily` | ticker, date | date_axis | 4·7·9 (+1) | 0 | 10,890,251 |
 | 10 | `universe_daily` | date, ticker | date_axis | 1·3·4·7·9 | 3 | 10,890,251 |
 | 11 | `universe_policy` | policy, rule_seq | whole | 10 | 0 | 13 |
 | 12 | `flow_daily` | date, ticker, src | date_axis | 1·10 | 4 | 9,201,516 |
@@ -54,14 +55,15 @@
 | 23 | `consensus_daily` | ticker, obs_month, target_period, metric, src | date_axis | 4 | 2 | 145,316 |
 | 24 | `opinion_daily` | ticker, obs_date, src | date_axis | 3·4 | 3 | 256,537 |
 | 25 | `opinion_broker_daily` | ticker, fetched_date, broker, opinion_date | date_axis | 3·4 | 1 | 9,717 |
-| 26 | `dataset_profile` | field_id | whole | **1~25 전부** | 0 | 72 |
-| 27 | `factor_readiness` | factor_id | whole | **26 + 1~25** | 0 | 54 |
+| 26 | `dataset_profile` | field_id | whole | **1~25 + 9b 전부(26표)** | 0 | 72 |
+| 27 | `factor_readiness` | factor_id | whole | **26 + 그 26표** | 0 | 54 |
 
 **의존 그래프의 실질 형태**
 
 ```
-stage ─┬─ trading_calendar ─┬─ price_daily ─┬─ corp_event ─ adj_factor ─┬─ universe_daily ─┬─ universe_policy
-       │                    │               │  (corp_ticker·span)       │                  ├─ flow_daily
+stage ─┬─ trading_calendar ─┬─ price_daily ─┬─ corp_event ─ adj_factor ─┬─ price_adj_daily
+       │                    │               │  (corp_ticker·span)       ├─ universe_daily ─┬─ universe_policy
+       │                    │               │                           │                  ├─ flow_daily
        ├─ corp ─┬─ holder/ownership/audit   │                           │                  ├─ short_daily
        │        └─ fin_std ← disclosure_version                         │                  └─ credit_daily
        ├─ security · security_span · corp_ticker · index_daily          │
@@ -71,6 +73,7 @@ stage ─┬─ trading_calendar ─┬─ price_daily ─┬─ corp_event ─ 
                                                                         └─► dataset_profile ─ factor_readiness
 ```
 
+- **9b `price_adj_daily`** = 전방 조정 OHLCV 저장본(S23). `price_daily`·`adj_factor`·`security_span`·`trading_calendar` 를 읽고 워크벤치 `price.adj_close` 가 여기서 나온다 — 카탈로그 매크로가 아니라 **표**라 카탈로그가 낡아도 산다.
 - **26·27 은 전 표를 읽는다.** 어떤 표든 다시 지으면 `dataset_profile`·`factor_readiness` 도
   다시 지어야 커버율·준비도가 맞는다.
 - `universe_daily` 를 다시 지으면 그 아래 격자 3표(12·13·14)와 `universe_policy` 가 전부 따라온다.
@@ -111,7 +114,7 @@ scripts/run_equity.sh <table> --threads 3 --memory-limit 8GB
 `flock -n /tmp/quant_ledger_equity.lock` 으로 **직렬화**한다(RAM 15GB, 격자 표는 5~7GB 를 쓴다).
 락이 잡혀 있으면 exit 3 으로 즉시 빠진다 — 병렬 빌드는 시도하지 마라.
 
-### 3-3. 27표 전량 재빌드(의존 순서)
+### 3-3. 28표 전량 재빌드(의존 순서)
 
 ```bash
 # 배포 1회 — 러너는 저장소에 산다
@@ -128,10 +131,10 @@ ssh kael-server "cd ~/quant-ledger && chmod +x scripts/equity_rebuild_all.sh && 
 ```
 
 한 표라도 rc≠0 이면 즉시 멈춘다(뒤 표는 어차피 깨진 입력 위에 지어진다).
-서버 실측 소요는 **409초**(P42, 2회 모두). 두 번 돌려 `summary.tsv` 의 `content_hash` 열을
+서버 실측 소요는 **409초**(P42, 27표 기준 2회 모두) + `price_adj_daily` 58초(P43). 두 번 돌려 `summary.tsv` 의 `content_hash` 열을
 비교하는 것이 재현성 검사다 — 아래 §7 ⑦ 의 EG5a 한계 때문에 게이트만 믿으면 안 된다.
 
-커밋된 27표를 **빌드 없이 재판정**만 하려면(baseline 상수를 바꾼 뒤 확인용):
+커밋된 28표를 **빌드 없이 재판정**만 하려면(baseline 상수를 바꾼 뒤 확인용):
 
 ```bash
 scp database/scripts/equity_gate_all.sh kael-server:~/quant-ledger/scripts/
@@ -461,6 +464,7 @@ scp database/src/equity/baseline_locked.json kael-server:~/quant-ledger/data/equ
 | 표 선언(grain·입력·EG1 등식·상수·픽스처 훅) | `database/src/equity/rules_s<NN>.py` |
 | 산출 SQL | `database/src/equity/sql/<table>.sql` |
 | 프레임(빌드·게이트·입력 고정·baseline·CLI) | `build.py`·`gates.py`·`inputs.py`·`baseline.py`·`__main__.py` |
+| 전방 조정가 표 | `rules_s23.py` · `sql/price_adj_daily.sql` — 소비 규약은 아래 「조정가 읽는 법」 |
 | 뷰 매크로 8 | `views.py` (`v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_adj_price_fwd`·`v_adj_volume_fwd`·`v_firm_mktcap`·`v_consensus`·`v_fin_latest`) |
 | 카탈로그 publish + EG11·EG5c | `catalog.py` |
 | 소비자 계약 EG-C | `contract.py` |
@@ -468,18 +472,50 @@ scp database/src/equity/baseline_locked.json kael-server:~/quant-ledger/data/equ
 | baseline 확정본·시드 | `baseline_locked.json` · `baseline_seed_s<NN>.json` |
 | 워크벤치 어댑터(5포트·필드 30) | `backend/src/strategy_workbench/adapters/outbound/equity_duckdb/` |
 | MVP-B 백테스트 | `database/scripts/run_mvp_backtest.py` |
-| 서버 빌드 러너 | `database/scripts/run_equity.sh`(표 1개) · `equity_rebuild_all.sh`(27표 전량) · `equity_gate_all.sh`(전량 재판정) · `equity_manifest_row.py`·`equity_gate_metrics.py`(요약·근거 추출) |
+| 서버 빌드 러너 | `database/scripts/run_equity.sh`(표 1개) · `equity_rebuild_all.sh`(28표 전량, `ORDER` 에 `price_adj_daily` 포함) · `equity_gate_all.sh`(전량 재판정) · `equity_manifest_row.py`·`equity_gate_metrics.py`(요약·근거 추출) |
+
+## 조정가 읽는 법 (`price_adj_daily`, S23)
+
+**무엇인가** — 전방 조정(forward-adjusted) OHLCV 의 저장본이다. `adj_close(d) = close(d) ×
+Π{share_factor : factor_ok ∧ 같은 `security_span` 구간 ∧ greatest(apply_date, available_date) ≤ d}`
+이고, **종목의 첫 관측 수준을 고정**하고 사건마다 이후 가격을 올린다(005930 2018-05-03 =
+2,650,000 원주가 그대로 · 05-04 = 51,900 × 50 = 2,595,000). 값은 (ticker, date) 의 **순수 함수**라
+질의 창·as_of 에 무관하고 `available_date` 는 언제나 `date` 다.
+
+**누가 읽는가**
+- 워크벤치 `price.adj_close` — 어댑터가 이 표를 직접 읽는다(매크로가 아니다). 카탈로그가 낡거나
+  없어도 산다.
+- parquet 을 직접 읽는 분석 — `data/equity/price_adj_daily/v=<build>/year=*/…`.
+- 카탈로그 매크로 `v_adj_price_fwd`·`v_adj_volume_fwd` — 같은 값을 내는 읽기 경로다. 표에 없는
+  것(원주가 컬럼 동반·`lag_override` 로 계수 컷오프를 미는 축)이 필요할 때만 쓴다.
+
+**읽지 않는 곳 — 엔진 커널**. 커널(`backtest_engine`)은 **원주가 bar + `CorporateActionEvent`** 로
+포지션 수량을 스스로 조정한다. 조정가를 bar 로 주면 같은 사건이 두 번 반영된다(가격은 이미
+조정됐는데 수량까지 다시 조정된다). `backtest_engine/adapters/equity_duckdb.py` 가 이 표를 읽지
+않는다는 것을 `test_equity_s23_price_adj.py::test_커널_어댑터는_조정가_표를_읽지_않는다` 가 지킨다.
+
+**`n_unadjusted_events` 를 반드시 보라** — 같은 구간에서 `factor_ok=false` 이고
+`apply_date ≤ d` 인 사건 수다. **0 이 아니면 그 구간의 조정 시계열은 불완전하다**: 기업행위가
+실재하는데 계수를 못 냈다는 뜻이고(사유는 `adj_factor.factor_source` — `no_price_match` ·
+`ratio_null` · `capred_paid` · `unknown_price_only` 등), 그 뒤 구간의 수익률에는 조정되지 않은
+점프가 남아 있다. equity 는 값을 만들어 채우지 않는다. 소비자는 이 열로 종목·구간을 거른다
+(서버 실측: 행의 27.4% · 1,440 종목이 걸린다 — 대부분 `unknown_price_only`(유상증자 권리락·
+주식배당락 등 MVP 밖 사건)라 "조정이 틀렸다" 가 아니라 "이 축은 MVP 가 안 덮는다" 는 뜻이다).
+
+**`cum_price_factor` × `cum_share_factor` = 1** 이고(시총 불변), 구간 첫 행에서는 둘 다 정확히
+1 이다. 재상장 종목(036220·101970)은 구간마다 누적이 초기화된다 — 폐지 전 구간의 계수는 새 구간에
+넘어오지 않는다.
 
 ## 소비자 기동 (워크벤치 · 로컬 데이터)
 
 **로컬 데이터 내려받기** — `database/scripts/fetch_equity_local.sh <로컬 경로> [minimal|full]`
-- `minimal`(기본) 9표 ≈ 1.6GB: 가격·유니버스·조정계수·기업행위·식별 4표. 가격/모멘텀/변동성 전략용.
-- `full` 18표 ≈ 2.9GB: 재무·컨센서스·의견·수급·공매도·신용·배당·지분 추가.
+- `minimal`(기본) 10표 ≈ 2.0GB: 가격·**조정가**·유니버스·조정계수·기업행위·식별 4표. 가격/모멘텀/변동성 전략용.
+- `full` 19표 ≈ 3.3GB: 재무·컨센서스·의견·수급·공매도·신용·배당·지분 추가.
 - **`_pinned/` 은 받지 않는다** — 재빌드 시 stage 입력을 고정한 하드링크 사본이라 읽기에 불필요하고,
   rsync 하면 하드링크가 풀려 실제 크기(수 GB)로 복사된다. `_asof/`·`_tmp/`·`_failed/` 도 같다.
 - 스크립트가 `baseline.json` 을 함께 받고 **카탈로그를 다시 만든다**. 매크로 본문이 절대경로를
-  굽기 때문에(§10 P1c) 경로가 바뀌면 `price.adj_close`·`financial.*`·`consensus.*` 가 전부
-  `unavailable` 이 된다 — 손으로 복사했다면 반드시 `python -m equity --root <경로> … catalog`.
+  굽기 때문에(§10 P1c) 경로가 바뀌면 `financial.*`·`consensus.*` 가
+  `unavailable` 이 된다(`price.adj_close` 는 S23 부터 표를 읽으므로 무관하다) — 손으로 복사했다면 반드시 `python -m equity --root <경로> … catalog`.
 
 **워크벤치를 duckdb 어댑터로 기동**
 ```

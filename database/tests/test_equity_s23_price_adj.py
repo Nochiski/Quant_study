@@ -146,6 +146,18 @@ def test_EG3_불변식이_전부_0이고_기록형_실측이_남는다(built) ->
     assert m["product_tol_basis"] == "baseline"
     # 절단본은 구간 규칙을 꺼도 산출이 같다 — 재상장 2종에 ok 계수가 없다(합성 트리에서 검증)
     assert m["n_rows_span_free_diff"] == 0
+    # 미조정 사건의 **사유별 내역** — "조정이 틀렸다" 와 "MVP 밖 축이다" 를 구별할 수 있어야 한다
+    by_source = {row["factor_source"]: row for row in m["unadjusted_events_by_factor_source"]}
+    assert set(by_source) == {"no_price_match", "ratio_null", "near_dup_suppressed",
+                              "unknown_price_only"}
+    # 101970 의 5건은 폐지 구간이라 어느 행에도 안 걸린다 — 걸리는 것은 unknown_price_only 2건뿐
+    assert [s for s, r in by_source.items() if r["n_events_counted"]] == ["unknown_price_only"]
+    assert by_source["unknown_price_only"]["n_events_counted"] == 2
+    assert by_source["unknown_price_only"]["n_tickers"] == N_TICKERS_UNADJUSTED_EVENT
+    assert (by_source["unknown_price_only"]["n_row_hits"]
+            == m["n_rows_with_unadjusted_events"])      # 사건이 겹치지 않아 행 수와 같다
+    q = m["cum_share_factor_quantiles_adjusted_rows"]
+    assert set(q) == {"p10", "p50", "p90"} and all(v is not None and v > 0 for v in q.values())
 
 
 def test_매크로_v_adj_price_fwd와_표가_as_of_표본에서_같은_값을_낸다(built) -> None:
@@ -362,11 +374,14 @@ def _synth_root(root: Path) -> Path:
     _write_equity_table(root, "price_daily",
                         f"SELECT * FROM (VALUES {px}) AS t(ticker, date, open, high, low, close, "
                         "volume_shr, price_kind)", partition_expr="year(date)")
-    fac = ("('036220', DATE '2020-01-03', DATE '2020-01-03', 0.1, 10.0, TRUE), "
-           "('036220', DATE '2020-01-06', DATE '2020-01-06', 1.0, 1.0, FALSE)")
+    fac = ("('036220:split:2020-01-03', '036220', DATE '2020-01-03', DATE '2020-01-03', "
+           "0.1, 10.0, TRUE, 'mktcap_neutral'), "
+           "('036220:capred:2020-01-06', '036220', DATE '2020-01-06', DATE '2020-01-06', "
+           "1.0, 1.0, FALSE, 'no_price_match')")
     _write_equity_table(root, "adj_factor",
-                        f"SELECT * FROM (VALUES {fac}) AS t(ticker, apply_date, available_date, "
-                        "price_factor, share_factor, factor_ok)", partition_expr="year(apply_date)")
+                        f"SELECT * FROM (VALUES {fac}) AS t(event_id, ticker, apply_date, "
+                        "available_date, price_factor, share_factor, factor_ok, factor_source)",
+                        partition_expr="year(apply_date)")
     return root
 
 

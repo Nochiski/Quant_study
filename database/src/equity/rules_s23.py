@@ -247,7 +247,8 @@ def eg3_price_adj_daily(ctx: EquityGateContext) -> GateResult:
       ⑨ 매크로(`v_adj_price_fwd`·`v_adj_volume_fwd`) 정합 — `_macro_mismatch`
 
     기록형: 구간 없는 행 수 · 구간 규칙을 껐을 때 달라지는 행 수(= 이전 구간 계수 누출 크기) ·
-    미조정 사건이 걸린 행·종목 수와 비율 · 누적계수 분포 · 매크로 최대 상대편차.
+    미조정 사건이 걸린 행·종목 수와 비율 · **사유(`factor_source`)별 내역** · 누적계수 분포 ·
+    매크로 최대 상대편차.
     """
     v = _q(ctx.out_view)
     r = _q(RECALC_TABLE)
@@ -313,6 +314,31 @@ def eg3_price_adj_daily(ctx: EquityGateContext) -> GateResult:
             GROUP BY o.ticker, o.span_first)
         SELECT count(*) FROM first_row f JOIN {v} o USING (ticker, date)
         WHERE o.cum_price_factor <> 1 OR o.cum_share_factor <> 1 OR o.n_factors_applied <> 0""")
+    # 기록형 — 누적계수 분포(조정이 걸린 행만) · 미조정 사건의 사유별 내역.
+    # 사유(`adj_factor.factor_source`)를 여기서 세는 이유는 소비자가 "조정이 틀렸다" 와 "MVP 가
+    # 안 덮는 축이다" 를 구별해야 하기 때문이다 — 대부분은 `unknown_price_only`(유상증자
+    # 권리락·주식배당락 등)라 계수를 못 낸 것이 아니라 MVP 범위 밖이라는 뜻이다.
+    q10, q50, q90 = _row(ctx, f"""
+        SELECT quantile_cont(cum_share_factor, 0.1), median(cum_share_factor),
+               quantile_cont(cum_share_factor, 0.9)
+        FROM {v} WHERE n_factors_applied > 0""")
+    by_source = [dict(zip(("factor_source", "n_events", "n_events_counted", "n_tickers",
+                           "n_row_hits"), r, strict=True))
+                 for r in ctx.con.execute(f"""
+        WITH ev AS (SELECT event_id, ticker, apply_date, factor_source
+                    FROM adj_factor WHERE NOT factor_ok),
+             hit AS (
+                 -- 사건 축은 `event_id` 다. (ticker, apply_date) 로 묶으면 같은 날 두 사건이
+                 -- 하나로 접혀 `n_unadjusted_events` 의 세는 축과 갈린다(서버 44건).
+                 SELECT e.event_id, e.factor_source, e.ticker, count(a.date) AS n_rows
+                 FROM ev e LEFT JOIN {r} a
+                   ON a.ticker = e.ticker
+                   AND e.apply_date >= a.span_first AND e.apply_date <= a.date
+                 GROUP BY e.event_id, e.factor_source, e.ticker)
+        SELECT factor_source, count(*), count(*) FILTER (WHERE n_rows > 0),
+               count(DISTINCT ticker) FILTER (WHERE n_rows > 0),
+               coalesce(sum(n_rows), 0)
+        FROM hit GROUP BY factor_source ORDER BY factor_source""").fetchall()]
     n_macro_bad, macro_metrics = _macro_mismatch(ctx)
     n_out = ctx.n_out
     checks = {
@@ -340,6 +366,11 @@ def eg3_price_adj_daily(ctx: EquityGateContext) -> GateResult:
         "unadjusted_row_ratio": (int(str(n_rows_unadj)) / n_out) if n_out else 0.0,
         "cum_share_factor_min": float(str(cum_min)),
         "cum_share_factor_max": float(str(cum_max)),
+        "cum_share_factor_quantiles_adjusted_rows": {
+            "p10": None if q10 is None else float(str(q10)),
+            "p50": None if q50 is None else float(str(q50)),
+            "p90": None if q90 is None else float(str(q90))},
+        "unadjusted_events_by_factor_source": by_source,
         "max_cum_product_dev": float(str(max_dev)),
         "product_tol_basis": tol_basis,
         "factor_product_tol_base": tol,
@@ -406,8 +437,10 @@ PRICE_ADJ_DAILY = register(EquityTable(
         # `v_adj_price_fwd` 가 원주가 행 축을 그대로 싣기 때문이다(표는 안 싣는다).
         "price_daily": ("ticker", "date", "open", "high", "low", "close", "volume_shr",
                         "price_kind"),
+        # `factor_source`·`event_id` 는 산출식이 아니라 EG3 기록형(미조정 사건의 사유별 내역)이
+        # 읽는다 — 사건 축은 event_id 다(같은 날 두 사건을 접으면 세는 축이 갈린다).
         "adj_factor": ("ticker", "apply_date", "available_date", "price_factor", "share_factor",
-                       "factor_ok"),
+                       "factor_ok", "factor_source", "event_id"),
         "security_span": ("ticker", "span_seq", "first_date"),
         "trading_calendar": ("date",)},
     available_basis=("derived",),

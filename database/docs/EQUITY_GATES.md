@@ -896,8 +896,9 @@ WHERE g.${VALUE_COL} = 0
 | 26 | `opinion_broker_daily` | 5 | ● | ●(§3-㉑) | ●(P01–P04) | ●(P01,P07) | ●(FX-5-008) | ●(a) | skip(no_multi_version) | ● | — | ●(P06) | — |
 | 27 | `dataset_profile` | 6 | ● | skip(declaration_table) | skip(dimension_table) → `EG2_dataset_profile`(P04,P06,P07,P08 + 어휘·범위) | ●(P01) | ●(FX-6-001…009,016…018) | ●(a) | skip(no_multi_version) | ● | — | ●(P06 기록형, 시총 분위) | ●⑥⑧ |
 | 28 | `factor_readiness` | 6 | ● | skip(declaration_table) | skip(dimension_table) | ●(P01) | ●(FX-6-010,011,013,015,019) | ●(a) | skip(no_multi_version) | ● | — | — | — · 판정은 **EG10**(§6) |
+| 29 | `price_adj_daily` | 2 | ● | ●(§3-㉓ 항등식) | ●(P01–P04) | ●(P01) + `EG3_price_adj_daily` | ●(FX-2-011…017) | ●(a) | skip(no_multi_version) | ●(격리 사유 없음 — 항상 0) | — | skip(not_grid) | — · `price.adj_close` 는 §7 소비자 계약 |
 
-**뷰 7종**(`v_universe`·`v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_fin_latest`·`v_consensus`·`v_firm_mktcap`)은 테이블이 아니므로 EG0~EG9 매트릭스에 행이 없고, **EG5c·EG-C·EG11(§6)** 이 담당한다. 이것이 현재 명세의 가장 큰 공백이다(§5-A6). 단 EG11·EG5c 의 고정 표본 규약은 키가 (as_of, ticker, **date**)라 일별 date 축이 있는 뷰만 받는다(`catalog.ASOF_VIEWS`) — `v_consensus` 는 그래서 밖이고 결정성은 S17 e2e 테스트가 대신 본다(§9 S17).
+**뷰 7종**(`v_universe`·`v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_fin_latest`·`v_consensus`·`v_firm_mktcap`; 전방 조정 2종 `v_adj_price_fwd`·`v_adj_volume_fwd` 는 S23 부터 표 `price_adj_daily`(29행)와 **매 빌드 대조**되므로 뷰 공백이 아니다)은 테이블이 아니므로 EG0~EG9 매트릭스에 행이 없고, **EG5c·EG-C·EG11(§6)** 이 담당한다. 이것이 현재 명세의 가장 큰 공백이다(§5-A6). 단 EG11·EG5c 의 고정 표본 규약은 키가 (as_of, ticker, **date**)라 일별 date 축이 있는 뷰만 받는다(`catalog.ASOF_VIEWS`) — `v_consensus` 는 그래서 밖이고 결정성은 S17 e2e 테스트가 대신 본다(§9 S17).
 
 ---
 
@@ -1204,6 +1205,16 @@ SELECT (SELECT count(*) FROM opinion_broker_daily)
 
 ---
 
+### ㉓ `price_adj_daily`
+
+```
+count(price_adj_daily) = count(price_daily)
+```
+
+**항등식이다** — 조정은 가격 행 하나하나에 대한 순수 함수라 행이 늘거나 줄지 않고, 격리 사유가 없어 우변에서 뺄 것도 없다(`reject_reasons=()`, EG7 은 항상 0 으로 통과). 등식이 이렇게 약한 대신 값 축을 `EG3_price_adj_daily` 가 **독립 재계산**으로 전건 대조한다: 산출은 ASOF JOIN + 창 누적곱, 게이트는 범위 조인 + GROUP BY 집계로 같은 값을 만들어 8축(`adj_open`·`adj_high`·`adj_low`·`adj_close`·`adj_volume_shr`·`cum_price_factor`·`cum_share_factor`·`n_factors_applied`)을 비교하고, `n_unadjusted_events`·`available_date` 도 따로 재계산한다.
+
+---
+
 ## 4. 픽스처 카탈로그
 
 파일: `data/equity/fixtures/<table>.json`. ID 규약 `FX-<단계>-<3자리>`.
@@ -1247,6 +1258,13 @@ SELECT (SELECT count(*) FROM opinion_broker_daily)
 | FX-2-008 | `corp_event` | 공시일 ≠ 효력일 이벤트 1 | `announce_date`, `effective_date`, `effective_basis` | stage:`stg_event_*` | `available_date = announce_date` |
 | FX-2-009 | `adj_factor` | KRX 관측만으로 만든 계수 1 | `available_date`, `available_basis` | hand | 효력일 + 1거래일 / `derived` |
 | FX-2-010 | `v_adj_volume` | (`005930`, 2018-05-03, asof=2018-06-01) | `adj_volume` | hand (원 거래량 × 50) | **곱셈 방향 검증** — 나눗셈이면 여기서만 잡힌다 |
+| FX-2-011 | `price_adj_daily` | (`005930`, 2018-05-03) | `adj_close` | hand (2,650,000 = 원주가) | **전방 조정의 앵커** — 계수는 05-04 부터 접힌다. base = as_of 축이면 53,000 이 된다 |
+| FX-2-012 | `price_adj_daily` | (`005930`, 2018-05-04) | `adj_close`, `cum_share_factor`, `n_factors_applied` | hand (51,900 × 50 = 2,595,000 · 50.0 · 1) | 분할일 앞뒤가 −2.08% 로 이어진다 |
+| FX-2-013 | `price_adj_daily` | (`005930`, 2018-05-04) | `adj_volume_shr` | hand (39,565,391 × 0.02) | **거래량만 반대 축**(price_factor) — FX-2-010 의 전방 판 |
+| FX-2-014 | `price_adj_daily` | (`005930`, 2018-05-04) | `adj_open` | hand (53,000 × 50) | OHLC 는 close 와 같은 계수 |
+| FX-2-015 | `price_adj_daily` | (`247540`, 2022-06-24·06-27) | `adj_close` | hand (497,400 · 135,900 × 3.988773…) | KRX 기준가 축(S06-2) — 배정비율 4.0 이 아니다 |
+| FX-2-016 | `price_adj_daily` | (`247540`, 2022-06-27) | `n_unadjusted_events` | hand (1 = `247540:krx_base:2022-05-09`) | 조정 불완전 구간의 표식 |
+| FX-2-017 | `price_adj_daily` | (`101970`, 2025-03-28) | `cum_share_factor`, `n_unadjusted_events` | hand (1.0 · 0) | **재상장 구간의 누적 초기화** — 폐지 구간 사건 5건이 넘어오지 않는다 |
 
 ### 3단계
 
@@ -2284,3 +2302,20 @@ workspace/dongmin/src/equity/
 | EG2-P04 부정 하네스 | `stg_flow_daily_kiwoom` 을 「어떤 필드도 안 싣는 lag_known=false 원천」의 예로 썼다 | **`stg_foreign_daily` 로 옮겼다** — S19-2 가 `flow.*` 3필드를 랙 1 로 선언해 수급 원장이 덮이므로 옛 예는 이제 PASS 다(그 사실 자체를 같은 테스트가 단언한다). 술어가 항진이 되지 않게 실제로 안 덮이는 원천으로 바꾼다 | `test_어떤_필드도_싣지_않은_lag_known_false_원천은_EG2를_폐기한다` |
 | 골든 픽스처 | `dataset_profile` 17 · `factor_readiness` 10 | `dataset_profile` **27**(+ FX-6-020~023: 격자 필드의 `column_scope`·랙·`supported_cell_kinds`·`coverage_basis`·`unit`·`requires_confirmation`) · `factor_readiness` 10(**FX-6-011 의 키를 F01 → F02 로**). F01 은 이제 ready 이고, `field_unavailable` 의 예로는 재료가 정말 없는 F02(`flow.foreign_ownership`)가 맞다. 모집단 의존 값은 여전히 픽스처에 넣지 않는다(P38′ 교훈) — F03 의 `partial_support` 는 커버율 > 0 이어야 성립하므로 절단본 손계산 테스트가 맡는다 | `src/equity/fixtures/*.json` |
 | EG10 결과 | 31 ready / 23 blocked | **35 ready / 19 blocked** — F01·F06·F07·F09 가 열리고 F03 이 `field_unavailable` → `partial_support`(GAP-03) 로 옮겨 갔다. 사유 분포 `field_unavailable` 10 → **5** · `partial_support` 11 → **12** · `no_observations` 2(불변). **`ready_min` 은 여전히 미등재** — 서버 실측 뒤 사람이 정한다(§4-8 · P39′) | DESIGN §10 P41 |
+
+
+**S23 — 전방 조정가 표 `price_adj_daily` 신설 (2026-09-06, `rules_s23.py`·`sql/price_adj_daily.sql`·`views._FWD_CTE`)**
+
+| 항목 | 초안 | 정정 | 근거 |
+|---|---|---|---|
+| 조정가의 자리 | 카탈로그 매크로 `v_adj_price_fwd` 하나(S21 후속) | **표 `price_adj_daily`(28번째 테이블) + 매크로**. 매크로만 있으면 parquet 을 직접 읽는 소비자(커널 pyarrow 어댑터·노트북)가 못 보고, 카탈로그가 낡거나 없으면 `price.adj_close` 가 통째로 unavailable 이 된다. 전방 조정(결정 09-05)으로 값이 (ticker, date) 의 순수 함수가 된 뒤라야 저장할 수 있다 | DESIGN §4-2 · §11 ① |
+| 누적 범위 | 티커 전체(`PARTITION BY ticker`) | **`(ticker, span_seq)` 안에서만**. 재상장 2종의 폐지 전 구간 계수가 새 구간 가격에 곱해지던 결함이다 — 전방 조정의 앵커는 그 구간의 첫 관측이다. 계수 쪽 구간 부여만 **엄격 부등호**(`fold_date > first_date`)라 구간 첫날 계수는 어떤 행에도 곱해지지 않고, 그래야 "구간 첫 행 누적 = 1" 이 정확히 선다. 매크로 `v_adj_price_fwd`·`v_adj_volume_fwd` 도 같은 규칙으로 고쳤다 | `views._FWD_CTE` · FX-2-017 |
+| EG1 | (신규) | **항등식** `count(price_adj_daily) = count(price_daily)` — 격리 사유가 없다(EG7 항상 0). 등식이 약한 대신 값 축을 EG3 가 독립 재계산으로 전건 대조한다 | §3 ㉓ |
+| EG3 독립 재계산 | (신규) | 산출은 ASOF JOIN + 창 누적곱, 게이트는 **범위 조인 + GROUP BY 집계**로 같은 값을 다시 만든다 — `sql/price_adj_daily.sql` 을 재사용하면 항진명제다. "계수의 구간 = 행의 구간" 과 "행의 앵커 < fold ≤ date" 가 같은 집합이라는 것이 두 형식을 잇는 등식이다 | `rules_s23.install_recalc` |
+| `cum_price × cum_share = 1` 허용오차 | (신규) | 한 계수당 `adj_factor.factor_product_tol_base`(0.01, S06-2 기준가 원천의 KRX 산식 잔여)를 **접힌 수만큼 복리로 편** `(1+tol)^n − 1`. 접힌 계수가 0 이면 정확히 1 을 요구한다. 상수를 복제하지 않고 `adj_factor` 네임스페이스에서 읽는다 | `baseline_seed_s23.json` |
+| 매크로 정합 | "게이트 또는 테스트로 증명" | **매 빌드 EG3 안에서** — `views.install_temp_macros` 로 두 fwd 매크로를 빌드 세션에 올려 as-of 표본(`asof_sample_dates` 5 × `asof_sample_tickers` 20)에서 행 집합·값을 대조한다(상대오차 1e-12). 서버 실측 **319,310행 비교, 차이 0, 최대 상대편차 0.0**(비트 동일) | `rules_s23._macro_mismatch` |
+| 얇은 매크로로 합치기 | 권고 | **채택하지 않았다** — `lag_override` 가 PIT 계약의 일부이고(회귀 테스트가 "아직 공개 전인 계수를 접지 않는다" 를 단언한다) 표에는 랙 축이 없어, 매크로를 표 읽기로 바꾸면 `lag_override` 가 조용한 no-op 이 된다. 두 산출을 남기고 게이트로 묶는 쪽을 택했다 | DESIGN §5 |
+| 커널 연결 | (미기재) | **금지**. 커널은 원주가 bar + `CorporateActionEvent` 로 수량을 조정하므로 조정가를 주면 이중 계산이다. `backtest_engine/adapters/equity_duckdb.py` 가 `price_adj_daily` 를 읽지 않는다는 것을 테스트가 회귀로 지킨다 | DESIGN §7 |
+| 부정 픽스처 | (신규) | 절단본에는 "재상장 + 폐지 전 구간의 ok 계수" 조합이 없어(`n_rows_span_free_diff` = 0, 서버도 0) 구간 누출을 못 잡는다 → **합성 equity 트리**(2구간 재상장 1종)에서 돈다: ① 조정가를 나눗셈으로 뒤집기 → `n_recompute_mismatch`·`n_macro_mismatch` ② 구간 부여를 상수로 바꿔 누출 → `n_cross_span_factor`·`n_span_first_not_unit` ③ `n_unadjusted_events` 를 0 으로 지우기 → `n_unadjusted_mismatch` | `test_equity_s23_price_adj.py` |
+| `dataset_profile` 소유 이동 | `price.adj_close` 를 `adj_factor` 가 뷰 필드(`view_name`)로 선언 | **`price_adj_daily` 가 표 컬럼으로 선언**한다(FX-6-006 `table_name` = `price_adj_daily` · `available_date_basis` = `derived`). 두 표가 같은 field_id 를 선언하면 grain 이 깨지므로 이동이지 추가가 아니다. `rules_s19.SOURCE_TABLES` 25 → **26**, 프로파일 행수 72 불변 | `rules_s19.owned_fields` |
+| 조정 OHLC·거래량 노출 | (판단 대상) | **선언하지 않는다** — FIELD_MAP §2 어휘에도 FACTORS 정본 54 의 재료에도 없다(M02 는 원주가 `price.high` 를 쓴다). 표에는 컬럼으로 실려 있어 parquet 소비자는 읽을 수 있다 | FIELD_MAP §2 |

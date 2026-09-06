@@ -82,7 +82,7 @@ EG0 입력 고정 · EG1 격자 등식(`− n_dedup − Σ n_reject` 일반형, 
 
 ---
 
-## 3. 슬라이스 — 23 (+대기 2)
+## 3. 슬라이스 — 24 (+대기 2)
 
 ### 3-0. 규칙
 
@@ -123,6 +123,7 @@ EG0 입력 고정 · EG1 격자 등식(`− n_dedup − Σ n_reject` 일반형, 
 | **S19** | 공개시점 대장 | `dataset_profile`(**66행** — field_id · `recommended_lag_sessions` · `supported_cell_kinds` · `point_in_time` · `coverage_*` · `coverage_by_mktcap_quintile` · `field_scope`) | **전 equity 테이블 22**(값 컬럼 실측 + `universe_daily` 격자 + 파티션 `_meta.lag_known_inputs`) + 각 `rules_s*.py` 의 `EquityTable.field_profiles` 선언 | — | S08~S18 · **구현 완료 09-06** — 로컬 실측 DESIGN §10 P38, 서버 미실행 |
 | **S20** | **팩터 준비도** | `factor_readiness`(54행: id·label·registry_id·required_columns·required_field_ids·status ready/blocked·reason·owner·first_usable_date·caveat) + **EG10** | S19 `dataset_profile`(판정의 유일한 입력) + `FACTORS.md` 54 선언 + `backend/FACTORS.md` 50 대응 | — | S19 · **구현 완료 09-06** — 로컬 실측 **31 ready / 23 blocked**(DESIGN §10 P39), 서버 미실행 |
 | **S21** | **워크벤치 어댑터** | `adapters/outbound/equity_duckdb`(5포트) · contract suite `ADAPTERS` 매개변수화 · `build_container(equity_adapter="duckdb")`. **축소판 구현(09-05, MVP-B)**: 필드 3(`price.close`·`price.market_cap`·`price.adj_close`) 위에 5포트 전부(컨테이너·파이프라인이 요구) · contract `ADAPTERS=[mock, equity_duckdb]` green · `build_container(equity_adapter="duckdb", equity_root=…)` · `scripts/run_mvp_backtest.py` 로 절단본 백테스트 1회 완주(DESIGN §7·§10 P25). 남은 것(S19·S20 뒤 본판): 나머지 필드 39 · `dataset_profile` 랙 · `sector_id` · 서버 실측 | S07·S03B(축소) / S19·S20(본판) | — | S07(축소) · S20(본판) |
+| **S23** | **전방 조정가 표** | `price_adj_daily`(28번째 테이블 — 전방 조정 OHLCV·누적계수·`n_unadjusted_events`) + `EG3_price_adj_daily` · `v_adj_price_fwd`·`v_adj_volume_fwd` 구간 제한 · 워크벤치 `price.adj_close` 를 매크로 → 표로 · 규칙 판본 e1.6.0 | S04·S06·S02 | — | S06 · **구현 완료 2026-09-06** — 서버 실측 DESIGN §10 P43 |
 | **S22** | 마무리·인계 | `baseline.json` 고정(`baseline_locked.json` + `scripts/check_baseline_lock.py`) · `EQUITY_HANDOFF.md` · 재현성 2회 · MVP-B 백테스트 재현 | 전부 | — | S21 · **완료 2026-09-06** — 서버 전량 재빌드 2회 409s/409s **27/27 해시 동일**, `gate` 27표 fail 0, `catalog` 매크로 8, `contract` EG-C 6항 pass, baseline 확정본 sha256 `343a51b6…` 서버와 바이트 동일(DESIGN §10 P42). MVP-B 는 P25″ 로 정정 — 드리프트 원인은 backend 가 아니라 equity 규칙 `fc6e889`·`de75e9f` |
 
 병렬 최대 폭: S03B 뒤 6갈래(S08·S09·S10·S11+S12·S15+S16·S17+S18). 서버 빌드는 `flock` 직렬(RAM 15GB), 병렬은 픽스처·TDD·로컬 빌드까지.
@@ -130,7 +131,8 @@ EG0 입력 고정 · EG1 격자 등식(`− n_dedup − Σ n_reject` 일반형, 
 ### 3-2. 순서 그래프
 
 ```
-S00 ─ S01 ─ S02 ─ S03 ─┬─ S04 ─┬─ S06 ─┬─ S03B ─ S07(어댑터 v0) ─┬─ S08·S09·S10 ──┐
+S00 ─ S01 ─ S02 ─ S03 ─┬─ S04 ─┬─ S06 ─┬─ S23(조정가 표) ─┐
+                       │       │       ├─ S03B ─ S07(어댑터 v0) ─┬─ S08·S09·S10 ──┐
                        └─ S05 ─┘       └────────┘                 ├─ S15·S16 ──────┤
 S00 ─ S11(4A) ─ S12(4A) ────────────────────────────────────────── ├─ S17·S18 ──────┼─ S19 ─ S20 ─ S21 ─ S22
 stage P2 ─► S14(4C) ── 대기 ───────────────────────────────────────┤
@@ -172,7 +174,7 @@ S00·S01·S02·S03·S04·S05(축소: split·bonus·capred 만)·S06·S03B·S07 +
 | 6단계 S19·S20 | EG2 profile 전수(SQL: P04 세션 랙 ≥ 1 · P06 default basis 는 evidence · P07 `coverage_from` 전수) ∧ **EG10: `factor_readiness` 54행, blocked 는 reason·owner 필수, ready 는 `first_usable_date` NOT NULL, ready 재료 컬럼 실물 실재, ready ≥ baseline** — `ready_min` 은 **S08~S10 이 붙은 뒤** 사람이 등재한다(초기 36 은 그 세 슬라이스를 전제한 숫자, DESIGN §4-8·§10 P39) |
 | 7단계 S21·S22 | 워크벤치 contract suite `ADAPTERS` 에 `equity_duckdb` 포함 전량 green ∧ `EquityDataPort`·`RawObservationPort` 가 같은 셀에 같은 값·공개일 ∧ 미지원 필드 `unavailable` 명시 ∧ `build_container(equity_adapter="duckdb")` 부팅 ∧ EG5a·c ∧ EG-C ①~⑩ ∧ MVP-B 재현(`tape_hash` 동일) — **2026-09-06 달성**: contract suite `ADAPTERS=[mock, equity_duckdb]` green · `build_container(equity_adapter="duckdb")` 부팅 · 서버 EG5a(같은 규칙 판본 재빌드 해시 동일)·EG5c(n_diff 0)·EG-C ①~⑩ pass. **MVP-B `tape_hash` 동일 조항은 “같은 규칙 판본 안에서” 로 좁혀 달성**했다 — P25(09-05)의 `75aa2447…` 는 S06-2·S03C 이전 규칙의 산출이라 지금 규칙으로는 재현되지 않는다(원인·확정 수치는 DESIGN §10 P25″). 같은 규칙 판본(HEAD)에서는 독립 재빌드·재실행이 `5cf26486…` 로 바이트 동일하다. |
 
-**전체 DoD**: 위 전부 ∧ **27테이블**(팩트·차원 24 + 선언표 3 = `universe_policy`·`dataset_profile`·`factor_readiness`; v1.2 §4 머리말의 “28 = 25 + 3” 은 `universe_policy` 를 양쪽에 세어 하나 많다) `gates` fail 0 ∧ `EQUITY_HANDOFF.md`(읽기 계약·테이블 메모·`factor_readiness` 참조·PR 고지·한계 GAP-06/07/08/15/18). **2026-09-06 달성**: 27표 서버 재판정 fail 0(DESIGN §10 P42) · `database/docs/EQUITY_HANDOFF.md` 신설. 미달: `ready_min` 미등재 유지(사람 승인 대기) · 서버 전 종목 MVP-B 백테스트 미실행(절단본 15티커만) · 절단본 생성 스크립트 미커밋.
+**전체 DoD**: 위 전부 ∧ **28테이블**(팩트·차원 25 + 선언표 3 = `universe_policy`·`dataset_profile`·`factor_readiness`; v1.2 §4 머리말의 “28 = 25 + 3” 은 `universe_policy` 를 양쪽에 세어 하나 많다) `gates` fail 0 ∧ `EQUITY_HANDOFF.md`(읽기 계약·테이블 메모·`factor_readiness` 참조·PR 고지·한계 GAP-06/07/08/15/18). **2026-09-06 달성**: 27표 서버 재판정 fail 0(DESIGN §10 P42) + S23 `price_adj_daily` 서버 빌드 2회 해시 동일·게이트 fail 0(P43) · `database/docs/EQUITY_HANDOFF.md` 신설. 미달: `ready_min` 미등재 유지(사람 승인 대기) · 서버 전 종목 MVP-B 백테스트 미실행(절단본 15티커만) · 절단본 생성 스크립트 미커밋.
 
 ---
 

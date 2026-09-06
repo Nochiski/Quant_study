@@ -1,9 +1,9 @@
 """`EquityDuckdbAdapter` — equity 층 parquet·카탈로그 위에서 워크벤치 5포트를 답한다 (S21 본판).
 
 범위(EQUITY_WORKFLOW §3-5 · FIELD_MAP §2·§3): 선언표 `_specs.py` 가 내는 field_id 전부. 이 빌드에
-원천 테이블이 있는 것만 `list_fields()` 에 오르고, 나머지(FIELD_MAP 42 중 미지원·미확인·아직
-병합되지 않은 S08~S10 격자)는 목록 밖이며 질의하면 `INVALID_QUERY`(detail 에 `unavailable` +
-사유)다 — mock 값으로 대신하지 않는다. `RawObservationPort` 가 본체이고, 같은 패널 코어 위에
+원천 테이블이 있는 것만 `list_fields()` 에 오르고, 나머지(FIELD_MAP 42 중 미지원·미확인)는 목록
+밖이며 질의하면 `INVALID_QUERY`(detail 에 `unavailable` + 사유)다 — mock 값으로 대신하지 않는다.
+`RawObservationPort` 가 본체이고, 같은 패널 코어 위에
 `EquityDataPort`(`snapshot`·`list_fields`·`load_universe`·`load_panel`), `FactorMetadataPort`,
 `FactorObservationPort`, `BacktestDataPort` 를 올렸다 — 컨테이너(`build_container`)와 백테스트
 파이프라인이 다섯을 다 요구한다.
@@ -12,10 +12,14 @@
 `_specs.FIELD_SPECS` 의 데이터이고 이 모듈은 그 표를 SQL 과 셀 조회로 해석한다. 두 가지 읽는
 방식만 있다(`SourceMode`):
   `GRID`   (ticker, session) 격자 행. 랙 n = 정확히 n 세션 전 행, 없으면 셀 없음(합성 금지).
+           격자 셀에 원장 행이 둘 이상 올 수 있는 원천(`flow_daily` — grain 에 `src` 가 든다)은
+           선언된 `pick_order` 로 한 행을 결정적으로 고른다(값을 섞지 않는다).
   `LATEST` `available_date` 축 관측. 셀 = 컷오프(as_of 에서 n 세션 전 거래일) 이하의 마지막 관측
            이고 `available_date` 는 그 관측의 공개일이다. 관측이 없으면 셀 없음.
-값이 NULL 이면 셀은 나가되 `CellKind.MISSING` 이다(값 있는 셀만 `OBSERVED`) — `load_panel` 과
-`RawObservationPort` 가 같은 규칙을 쓴다(둘의 셀 집합·값·공개일·kind 가 계약상 같아야 한다).
+값이 있으면 `CellKind.OBSERVED`, 없으면 격자 3테이블(S08~S10)의 `fill_kind.kind` 가 말하는 종류
+(`_FILL_KIND_TO_CELL`: not_collected → NOT_COLLECTED, 나머지 → MISSING)이고 `fill_kind` 축이 없는
+원천은 MISSING 이다 — `load_panel` 과 `RawObservationPort` 가 같은 `_Observed.kind` 를 쓴다
+(둘의 셀 집합·값·공개일·kind 가 계약상 같아야 한다).
 
 어휘(FIELD_MAP §1): `security_id = {ticker}:{span_seq}` · `market = 'KRX'` · `venue = 'XKRX'` ·
 `universe_id` 는 `universe_policy` 의 행(`krx.` || policy)이고 술어(`predicate`)를 `universe_daily`
@@ -147,6 +151,31 @@ EVENT_TYPE_MAP: dict[str, str] = {
     "capred": "reverse_split",
 }
 _TICKER_RE = re.compile(r"^[0-9A-Za-z]{1,12}$")
+# equity 격자 3테이블(S08~S10)의 `fill_kind.kind` → 워크벤치 `CellKind`. 정본 어휘는
+# `database/src/equity/model.py::FILL_KINDS` 이고 대응 원칙은 FIELD_MAP §1 「결측 어휘」다.
+# `src_omitted` 만 그 표와 다르게 접힌다 — 도메인이 `SOURCE_OMITTED_ZERO` 셀에 값을 요구하는데
+# (`RawFieldValue.__post_init__`·`ResearchPanelCell.__post_init__`) equity 는 그 자리를 NULL 로
+# 두기로 못박았다(DESIGN §9 결정 8 「격자 빈칸에 0 을 굽지 않는다」). 도메인을 고치지 않는 쪽을
+# 골랐으므로 라벨을 잃고 MISSING 으로 접는다 — 사유는 필드 프로필 description 이 문장으로 남긴다.
+_FILL_KIND_TO_CELL: dict[str, CellKind] = {
+    "measured": CellKind.OBSERVED,
+    "src_omitted": CellKind.MISSING,
+    "empty_response": CellKind.MISSING,
+    "not_collected": CellKind.NOT_COLLECTED,
+}
+
+
+def _cell_kind(value: float | None, fill_kind: object) -> CellKind:
+    """셀 종류 — 값이 있으면 OBSERVED, 없으면 `fill_kind` 가 말하는 대로(없으면 MISSING).
+
+    값이 있는 셀을 무조건 OBSERVED 로 두는 것은 계약이다(관측 셀은 값을 가져야 한다). 값이
+    없는 셀만 격자 테이블의 결측 어휘를 읽고, 어휘 밖 문자열·NULL 은 MISSING 으로 접는다.
+    """
+    if value is not None:
+        return CellKind.OBSERVED
+    if fill_kind is None:
+        return CellKind.MISSING
+    return _FILL_KIND_TO_CELL.get(str(fill_kind), CellKind.MISSING)
 
 
 def _noop_checkpoint() -> None:
@@ -155,11 +184,12 @@ def _noop_checkpoint() -> None:
 
 @dataclass(frozen=True)
 class _Observed:
-    """셀 하나 — 값 · 공개일 · 내용일(관측이 가리키는 기간·사건의 날짜)."""
+    """셀 하나 — 값 · 공개일 · 내용일(관측이 가리키는 기간·사건의 날짜) · 셀 종류."""
 
     value: float | None
     available_date: date
     content_date: date
+    kind: CellKind
 
 
 @dataclass(frozen=True)
@@ -417,14 +447,24 @@ class EquityDuckdbAdapter:
                         ends_on=self.backfill_end,
                         venues=(VENUE,),
                         estimated_coverage_pct=pct,
-                        # 값이 없는 셀은 전부 MISSING 이다 — equity 격자 테이블(S08~S10)의
-                        # `fill_kind` 어휘(src_omitted·not_collected)를 쓰는 원천은 아직 없다.
-                        supported_cell_kinds=(CellKind.OBSERVED, CellKind.MISSING),
+                        supported_cell_kinds=self._cell_kinds(source),
                         point_in_time=True,
                     ),
                 )
             )
         return tuple(profiles)
+
+    @staticmethod
+    def _cell_kinds(source: SourceSpec) -> tuple[CellKind, ...]:
+        """이 원천이 낼 수 있는 셀 종류 — 선언(`kind_expr`)에서 곧바로 나온다.
+
+        `fill_kind` 축이 없는 원천은 값 유무만 있어 OBSERVED/MISSING 이다. 격자 3테이블은
+        `not_collected` 를 더 낸다. `SOURCE_OMITTED_ZERO` 는 어느 원천도 내지 않는다 —
+        equity 가 그 셀을 NULL 로 두고 도메인은 그 종류에 값을 요구해서다(`_FILL_KIND_TO_CELL`).
+        `COVERAGE_GAP` 도 내지 않는다: 구간·백필 밖은 셀 자체가 없다(합성 금지).
+        """
+        base = (CellKind.OBSERVED, CellKind.MISSING)
+        return base if source.kind_expr is None else (*base, CellKind.NOT_COLLECTED)
 
     def _coverage(self) -> dict[str, tuple[float, date]]:
         """필드별 (커버율 %, 시작 세션). 한 번 재고 캐시한다.
@@ -623,7 +663,7 @@ class EquityDuckdbAdapter:
                         source_effective_date=found.content_date,
                         available_date=found.available_date,
                         value=found.value,
-                        kind=CellKind.OBSERVED if found.value is not None else CellKind.MISSING,
+                        kind=found.kind,
                     )
                 )
         cells.sort(key=lambda cell: (cell.as_of, cell.security_id, cell.field_id))
@@ -759,10 +799,11 @@ class EquityDuckdbAdapter:
                         field_id=field_id,
                         value=found.value,
                         available_date=found.available_date,
-                        # load_panel 과 같은 규칙 — 셀이 비면 MISSING 이다. OBSERVED 로 두면
-                        # 포트 계약(관측 셀은 값이 있어야 한다)이 생성 시점에 깨지고, 두 포트의
-                        # kind 가 셀 단위로 어긋난다.
-                        kind=CellKind.OBSERVED if found.value is not None else CellKind.MISSING,
+                        # load_panel 과 **같은 `_Observed.kind`** 를 쓴다 — 값이 있으면 OBSERVED,
+                        # 없으면 격자 테이블의 `fill_kind` 가 말하는 종류(없으면 MISSING)다.
+                        # 값 있는 셀을 OBSERVED 밖으로 보내면 포트 계약이 생성 시점에 깨지고,
+                        # 두 포트가 다른 규칙을 쓰면 kind 가 셀 단위로 어긋난다.
+                        kind=found.kind,
                     )
                 )
             observations.append(
@@ -1134,16 +1175,34 @@ class EquityDuckdbAdapter:
                 f"{self._fields[field_id].expr} AS c{position}"
                 for position, field_id in enumerate(fields)
             )
+            where = [
+                f"date BETWEEN {_lit(fetch_start)} AND {_lit(fetch_end)}",
+                f"{source.key_column} IN (SELECT ticker FROM sel)",
+            ]
+            # `row_filter` 는 두 모드에 다 건다 — `_coverage` 가 이미 GRID 에도 걸고 있어
+            # 여기서 빠뜨리면 커버율과 실제로 읽는 행이 어긋난다(현재 GRID 원천 중 선언한 것은
+            # 없지만 선언표의 뜻은 모드와 무관하다).
+            if source.row_filter:
+                where.append(f"({source.row_filter})")
+            picked = (
+                f"SELECT {source.key_column} AS k, date AS d, {source.available_expr} AS av, "
+                f"{source.content_expr} AS ct, {source.kind_expr or 'NULL'} AS kd, {columns} "
+                f"FROM {self._relation(source, fetch_end)} WHERE {' AND '.join(where)}"
+            )
+            if source.pick_order is not None:
+                # 격자 셀에 원장 행이 둘 이상 올 수 있는 원천(`flow_daily` 는 grain 에 src 가
+                # 든다) — 선언된 순서로 한 행을 고른다. 고르지 않으면 LEFT JOIN 이 격자 행을
+                # 불려 (ticker, date) 중복으로 죽는다.
+                picked = (
+                    f"{picked} QUALIFY row_number() OVER (PARTITION BY {source.key_column}, "
+                    f"date ORDER BY {source.pick_order}) = 1"
+                )
             joins.append(
-                f"LEFT JOIN (SELECT {source.key_column} AS k, date AS d, "
-                f"{source.available_expr} AS av, {source.content_expr} AS ct, {columns} "
-                f"FROM {self._relation(source, fetch_end)} "
-                f"WHERE date BETWEEN {_lit(fetch_start)} AND {_lit(fetch_end)} "
-                f"AND {source.key_column} IN (SELECT ticker FROM sel)) g{index} "
+                f"LEFT JOIN ({picked}) g{index} "
                 f"ON g{index}.k = r.ticker AND g{index}.d = r.date"
             )
             selects.append(
-                f"g{index}.k IS NOT NULL, g{index}.av, g{index}.ct, "
+                f"g{index}.k IS NOT NULL, g{index}.av, g{index}.ct, g{index}.kd, "
                 + ", ".join(f"g{index}.c{position}" for position in range(len(fields)))
             )
             layout.append((name, fields))
@@ -1180,15 +1239,18 @@ class EquityDuckdbAdapter:
                 present = bool(raw[offset])
                 available = raw[offset + 1]
                 content = raw[offset + 2]
+                fill_kind = raw[offset + 3]
                 if present and available is not None and content is not None:
                     source = SOURCE_BY_NAME[name]
                     for position, field_id in enumerate(fields):
+                        value = _as_float(raw[offset + 4 + position], field_id)
                         cells[field_id] = _Observed(
-                            _as_float(raw[offset + 3 + position], field_id),
+                            value,
                             _as_date(available, f"{source.relation}.{source.available_expr}"),
                             _as_date(content, f"{source.relation}.{source.content_expr}"),
+                            _cell_kind(value, fill_kind),
                         )
-                offset += 3 + len(fields)
+                offset += 4 + len(fields)
             row = _Row(
                 session=session,
                 ticker=ticker,
@@ -1273,10 +1335,13 @@ class EquityDuckdbAdapter:
                 if content_raw is None
                 else _as_date(content_raw, f"{source.relation}.{source.content_expr}")
             )
-            entry = {
-                field_id: _Observed(_as_float(raw[3 + position], field_id), available, content)
-                for position, field_id in enumerate(fields)
-            }
+            # LATEST 원천에는 `fill_kind` 축이 없다 — 셀 종류는 값 유무로만 갈린다.
+            entry: dict[str, _Observed] = {}
+            for position, field_id in enumerate(fields):
+                value = _as_float(raw[3 + position], field_id)
+                entry[field_id] = _Observed(
+                    value, available, content, _cell_kind(value, None)
+                )
             dates.setdefault(key, []).append(available)
             cells.setdefault(key, []).append(entry)
         return {

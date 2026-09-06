@@ -72,8 +72,8 @@ pytest.importorskip("duckdb", reason="backend optional extra `equity` (uv sync -
 
 START, END = date(2024, 1, 8), date(2024, 1, 12)
 PRICE_FIELDS = ("price.close", "price.adj_close", "price.market_cap")
-# 손 픽스처가 원천을 다 갖췄을 때 어댑터가 내는 field_id — FIELD_MAP §2 의 42 중 23 +
-# equity 내부 스코프 `price.adj_close`. 나머지 19 의 사유는 `_specs.UNSUPPORTED_FIELDS` 다.
+# 손 픽스처가 원천을 다 갖췄을 때 어댑터가 내는 field_id — FIELD_MAP §2 의 42 중 29 +
+# equity 내부 스코프 `price.adj_close`. 나머지 13 의 사유는 `_specs.UNSUPPORTED_FIELDS` 다.
 ALL_FIELDS = (
     "price.close", "price.open", "price.volume", "price.market_cap",
     "price.shares_outstanding", "price.trading_value", "price.adj_close",
@@ -82,6 +82,8 @@ ALL_FIELDS = (
     "financial.total_liabilities", "financial.book_equity",
     "consensus.forward_eps", "consensus.forward_sales", "consensus.eps_dispersion",
     "consensus.target_price", "consensus.recommendation", "consensus.analyst_count",
+    "flow.foreign_net_buy", "flow.institution_net_buy", "flow.retail_net_buy",
+    "short.short_sale_value", "short.borrowed_quantity", "credit.margin_balance",
     "event.dividend_per_share", "event.buyback_amount", "event.insider_net_buy",
 )
 
@@ -154,10 +156,10 @@ def test_list_fields_serves_every_declared_field_whose_source_is_built(
 
 
 def test_field_specs_cover_every_field_map_id_exactly_once() -> None:
-    """FIELD_MAP §2 의 42 = 어댑터가 내는 23 + 사유가 적힌 19. 겹치거나 빠지면 안 된다."""
+    """FIELD_MAP §2 의 42 = 어댑터가 내는 29 + 사유가 적힌 13. 겹치거나 빠지면 안 된다."""
     declared = {spec.field_id for spec in FIELD_SPECS} - {"price.adj_close"}
     assert declared & set(UNSUPPORTED_FIELDS) == set()
-    assert len(declared) == 23 and len(UNSUPPORTED_FIELDS) == 19
+    assert len(declared) == 29 and len(UNSUPPORTED_FIELDS) == 13
     assert len(declared | set(UNSUPPORTED_FIELDS)) == 42
     assert all(reason.strip() for reason in UNSUPPORTED_FIELDS.values())
 
@@ -236,9 +238,13 @@ def test_unavailable_field_is_a_failure_value_naming_the_supported_set(
     assert "unavailable" in result.detail and "classification.sector" in result.detail
     assert "현재값 라벨" in result.detail  # 사유를 그대로 붙인다
     assert "price.adj_close" in result.detail  # supported 목록
-    # S08~S10 격자는 "원천 없음" 이 아니라 "아직 병합되지 않은 테이블" 이라고 말해야 한다
-    flow = _raw(adapter, fields=("flow.foreign_net_buy",))
-    assert flow.detail is not None and "equity/s08-s10" in flow.detail
+    # 격자 3테이블이 서도 남는 미지원은 사유가 셋으로 갈린다 — 컬럼 부재 · 원천 부재 · 안 굽기
+    ownership = _raw(adapter, fields=("flow.foreign_ownership",))
+    assert ownership.detail is not None and "S08-2" in ownership.detail
+    net_buy = _raw(adapter, fields=("credit.net_buy",))
+    assert net_buy.detail is not None and "39컬럼에 순매수 축이 없다" in net_buy.detail
+    ratio = _raw(adapter, fields=("short.short_balance_ratio",))
+    assert ratio.detail is not None and "셀 하나로 굽지 않는다" in ratio.detail
 
 
 def test_queries_outside_calendar_coverage_are_no_data(adapter: EquityDuckdbAdapter) -> None:
@@ -360,6 +366,57 @@ def test_event_fields_are_the_latest_filing_with_its_publication_date(
     assert _field(result, date(2024, 1, 9), "005930:1", "event.dividend_per_share") == 400.0
 
 
+def test_grid_fields_carry_the_missing_reason_and_never_a_synthetic_zero(
+    adapter: EquityDuckdbAdapter,
+) -> None:
+    """S08~S10 격자 — `fill_kind` → `CellKind`, 0 채움 금지, 겹친 셀의 원천 선택."""
+    result = _raw(adapter, start=START, end=END, fields=ALL_FIELDS)
+    # ① 같은 (ticker, date) 에 kiwoom·kis 두 행이 있으면 키움을 고른다(KIS 9,999 는 나오면 안 된다)
+    assert _field(result, START, "005930:1", "flow.foreign_net_buy") == -1_000_000.0
+    assert _field(result, START, "005930:1", "flow.retail_net_buy") == 3_000_000.0
+    assert _field(result, START, "005930:1", "flow.institution_net_buy") == -2_000_000.0
+    # 키움이 없는 셀은 KIS 단독 행이 그대로 나간다
+    assert _field(result, START, "000660:1", "flow.foreign_net_buy") == -200_000.0
+    # ② 진짜 0 은 OBSERVED 다 — 결측과 섞이지 않는다
+    zero = _cell(result, date(2024, 1, 11), "005930:1", "flow.foreign_net_buy")
+    assert (zero.value, zero.kind) == (0.0, CellKind.OBSERVED)
+    # ③ src_omitted 는 값이 NULL 이라 MISSING 으로 접힌다(SOURCE_OMITTED_ZERO 는 값을 요구한다)
+    omitted = _cell(result, date(2024, 1, 9), "005930:1", "flow.foreign_net_buy")
+    assert (omitted.value, omitted.kind) == (None, CellKind.MISSING)
+    # ④ not_collected 는 라벨이 살아 남는다 — '안 물어봤다' 와 '물었는데 없다' 는 다르다
+    absent = _cell(result, WB_HALT_DATE, "005930:1", "flow.retail_net_buy")
+    assert (absent.value, absent.kind) == (None, CellKind.NOT_COLLECTED)
+    # ⑤ 원장 행이 아예 없는 세션은 셀 자체가 없다(직전 값을 물지 않는다)
+    assert not _has(result, END, "005930:1", "flow.foreign_net_buy")
+    # ⑥ short 는 원천을 고정한다 — 공매도는 키움 축, 대차는 KIS 축이고 사유 컬럼도 각자다
+    assert _field(result, START, "005930:1", "short.short_sale_value") == 70_000_000.0
+    loan = _cell(result, START, "005930:1", "short.borrowed_quantity")
+    assert (loan.value, loan.kind) == (None, CellKind.NOT_COLLECTED)
+    sale = _cell(result, date(2024, 1, 9), "005930:1", "short.short_sale_value")
+    assert (sale.value, sale.kind) == (None, CellKind.MISSING)   # src_omitted
+    assert _field(result, date(2024, 1, 9), "005930:1", "short.borrowed_quantity") == 12_345.0
+    assert _field(result, WB_HALT_DATE, "005930:1", "short.borrowed_quantity") == -50.0  # 음수 보존
+    # ⑦ 신용잔고 — measured 값, src_omitted·empty_response 는 MISSING, not_collected 는 그대로
+    assert _field(result, START, "005930:1", "credit.margin_balance") == 8_359_855.0
+    for session, kind in (
+        (date(2024, 1, 9), CellKind.MISSING),        # src_omitted — 0 으로 굳히지 않는다
+        (WB_HALT_DATE, CellKind.NOT_COLLECTED),
+        (date(2024, 1, 11), CellKind.MISSING),       # empty_response(잔고 이상 격리 셀)
+    ):
+        cell = _cell(result, session, "005930:1", "credit.margin_balance")
+        assert (cell.value, cell.kind) == (None, kind), session
+    # ⑧ 프로필이 낼 수 있는 셀 종류를 선언한다 — 격자만 NOT_COLLECTED 를 갖는다
+    profiles = {p.field_id: p for p in adapter.list_fields()}
+    assert profiles["credit.margin_balance"].coverage.supported_cell_kinds == (
+        CellKind.OBSERVED, CellKind.MISSING, CellKind.NOT_COLLECTED,
+    )
+    assert profiles["price.close"].coverage.supported_cell_kinds == (
+        CellKind.OBSERVED, CellKind.MISSING,
+    )
+    assert profiles["short.short_sale_value"].dataset_id == "short_daily"
+    assert profiles["flow.institution_net_buy"].description.startswith("[부분]")
+
+
 def test_latest_fields_never_show_a_filing_before_its_available_date(
     adapter: EquityDuckdbAdapter,
 ) -> None:
@@ -435,7 +492,7 @@ def test_load_universe_is_policy_free_and_names_securities(adapter: EquityDuckdb
 def test_factor_metadata_and_observations_come_from_the_same_panel(
     adapter: EquityDuckdbAdapter,
 ) -> None:
-    metadata = adapter.resolve_factor_fields(("price.adj_close", "flow.foreign_net_buy"))
+    metadata = adapter.resolve_factor_fields(("price.adj_close", "short.short_balance_ratio"))
     assert [f.field_id for f in metadata.fields] == ["price.adj_close"]
     assert metadata.data_snapshot_id == adapter.snapshot().snapshot_id
     observations = adapter.load_factor_observations(

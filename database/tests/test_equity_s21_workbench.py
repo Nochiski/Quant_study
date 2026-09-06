@@ -1,12 +1,13 @@
 """S21 본판 — 절단본 체인 위에서 워크벤치 `equity_duckdb` 어댑터·컨테이너·MVP-B 백테스트 왕복
 (EQUITY_WORKFLOW §3-5 · DESIGN §7 · §10 P25/P40).
 
-체인 **16테이블**(`trading_calendar`→`corp`→`security`→`security_span`→`corp_ticker`→`price_daily`→
+체인 **19테이블**(`trading_calendar`→`corp`→`security`→`security_span`→`corp_ticker`→`price_daily`→
 `corp_event`→`adj_factor`→`universe_daily`→`universe_policy`→`disclosure_version`→`fin_std`→
-`holder_daily`→`dividend_event`→`consensus_daily`→`opinion_daily`) + `catalog.publish`(매크로 8)를
-스크래치에 짓고, 같은 모노레포의 `backend/src`(`contract.default_engine_src()`) 에서 워크벤치
-어댑터를 import 한다 — numpy·pyarrow·duckdb 가 필요하다(`uv run --with duckdb --with pyarrow
---with numpy`; 컨테이너·백테스트 2건은 ruamel.yaml 까지 — `uv run --project backend pytest …`).
+`holder_daily`→`dividend_event`→`consensus_daily`→`opinion_daily`→**`flow_daily`→`short_daily`→
+`credit_daily`**) + `catalog.publish`(매크로 8)를 스크래치에 짓고, 같은 모노레포의
+`backend/src`(`contract.default_engine_src()`) 에서 워크벤치 어댑터를 import 한다 —
+numpy·pyarrow·duckdb 가 필요하다(`uv run --with duckdb --with pyarrow --with numpy`;
+컨테이너·백테스트 2건은 ruamel.yaml 까지 — `uv run --project backend pytest …`).
 
 손계산 기대값(절단본 원자료):
   가격(`stg_price_daily`·`stg_listing_daily`) — 005930 2018-04-27 종가 2,650,000(거래) ·
@@ -23,6 +24,11 @@
   접수 2026-08-04). v3 판본이라 est_min·est_max 가 없어 `consensus.eps_dispersion` 은 결측이다.
   의견(`stg_v3_analyst_opinions`) — 005930 2026-08-20 목표주가 491,875 · 의견 4.04 · 24기관.
   임원지분(`stg_holder_elestock`) — 00126380 2026-08-20 접수 2건 합 −410주.
+  수급(`stg_flow_daily_kiwoom`) — 005930 2018-05-04 외국인 순매수 −53,845,000,000원(원장 원값,
+  stage 가 백만원 ×1e6 을 이미 했다) · 개인 655,449,000,000 · 기관 −591,578,000,000.
+  공매도(`stg_short_daily_kiwoom`) — 005930 2018-05-04 거래대금 103,425,481,000원
+  (= `shrts_trde_prica_krw`, 거래량 `shrts_qty_shr` 1,964,027주).
+  신용(`stg_credit_daily`) — 005930 2018-05-04 융자잔고 8,359,855주.
 """
 from __future__ import annotations
 
@@ -42,6 +48,9 @@ from equity import (
     rules_s04,
     rules_s05,
     rules_s06,
+    rules_s08,
+    rules_s09,
+    rules_s10,
     rules_s11,
     rules_s12,
     rules_s15,
@@ -59,11 +68,12 @@ CHAIN = (rules_s02.TRADING_CALENDAR, rules_s01.CORP, rules_s01.SECURITY, rules_s
          rules_s03.UNIVERSE_DAILY, rules_s03.UNIVERSE_POLICY,
          rules_s11.DISCLOSURE_VERSION, rules_s12.FIN_STD,
          rules_s15.HOLDER_DAILY, rules_s16.DIVIDEND_EVENT,
-         rules_s17.CONSENSUS_DAILY, rules_s18.OPINION_DAILY)
+         rules_s17.CONSENSUS_DAILY, rules_s18.OPINION_DAILY,
+         rules_s08.FLOW_DAILY, rules_s09.SHORT_DAILY, rules_s10.CREDIT_DAILY)
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 FIELDS = ("price.close", "price.adj_close", "price.market_cap")
-# 체인이 다 서면 어댑터가 내는 field_id — FIELD_MAP §2 의 42 중 23 + 내부 스코프 price.adj_close.
-# S08~S10 격자(flow·short·credit)가 이 브랜치에 없어 그 8 은 여기서 unavailable 이다.
+# 체인이 다 서면 어댑터가 내는 field_id — FIELD_MAP §2 의 42 중 29 + 내부 스코프 price.adj_close.
+# 남는 13 은 원천·컬럼이 없거나(11) 굽지 않기로 한 것(2)이라 여기서도 unavailable 이다.
 ALL_FIELDS = (
     "price.close", "price.open", "price.volume", "price.market_cap",
     "price.shares_outstanding", "price.trading_value", "price.adj_close",
@@ -72,6 +82,8 @@ ALL_FIELDS = (
     "financial.total_liabilities", "financial.book_equity",
     "consensus.forward_eps", "consensus.forward_sales", "consensus.eps_dispersion",
     "consensus.target_price", "consensus.recommendation", "consensus.analyst_count",
+    "flow.foreign_net_buy", "flow.institution_net_buy", "flow.retail_net_buy",
+    "short.short_sale_value", "short.borrowed_quantity", "credit.margin_balance",
     "event.dividend_per_share", "event.buyback_amount", "event.insider_net_buy",
 )
 SPLIT = date(2018, 5, 4)
@@ -85,7 +97,8 @@ def seed() -> Baseline:
     merged: dict[str, dict[str, object]] = {}
     for p in (rules_s01.BASELINE_SEED, Path(rules_s02.__file__).parent / "baseline_seed_s02.json",
               rules_s03.BASELINE_SEED, rules_s04.BASELINE_SEED, rules_s05.BASELINE_SEED,
-              rules_s06.BASELINE_SEED, rules_s11.BASELINE_SEED, rules_s12.BASELINE_SEED,
+              rules_s06.BASELINE_SEED, rules_s08.BASELINE_SEED, rules_s09.BASELINE_SEED,
+              rules_s10.BASELINE_SEED, rules_s11.BASELINE_SEED, rules_s12.BASELINE_SEED,
               rules_s15.BASELINE_SEED, rules_s16.BASELINE_SEED, rules_s17.BASELINE_SEED,
               rules_s18.BASELINE_SEED):
         for k, v in load(p).data.items():
@@ -213,10 +226,14 @@ def test_미지원_필드는_unavailable_이고_mock_대체가_없다(adapter) -
     r = _raw(adapter, date(2018, 5, 1), date(2018, 5, 31), fields=("classification.sector",))
     assert r.status is DataLoadStatus.INVALID_QUERY and "unavailable" in str(r.detail)
     assert "현재값 라벨" in str(r.detail)
-    # S08~S10 격자는 이 브랜치에 테이블이 없다 — 그 사유가 detail 에 그대로 나와야 한다
-    flow = _raw(adapter, date(2018, 5, 1), date(2018, 5, 31), fields=("flow.foreign_net_buy",))
-    assert flow.status is DataLoadStatus.INVALID_QUERY
-    assert "equity/s08-s10" in str(flow.detail)
+    # 격자 3테이블이 다 서도 남는 미지원 — 컬럼 부재(S08-2)와 원천 축 부재(S10 판정)를 구분한다
+    ownership = _raw(adapter, date(2018, 5, 1), date(2018, 5, 31),
+                     fields=("flow.foreign_ownership",))
+    assert ownership.status is DataLoadStatus.INVALID_QUERY
+    assert "S08-2" in str(ownership.detail)
+    net_buy = _raw(adapter, date(2018, 5, 1), date(2018, 5, 31), fields=("credit.net_buy",))
+    assert net_buy.status is DataLoadStatus.INVALID_QUERY
+    assert "순매수 축이 없다" in str(net_buy.detail)
 
 
 # ── S21 본판: 필드별 1셀 손검산 ───────────────────────────────────────────────
@@ -292,8 +309,43 @@ def test_2026_08_컨센서스_의견_임원지분_1셀(adapter) -> None:
     assert "event.buyback_amount" not in {f.field_id for f in o.fields}
 
 
+def test_2018_05_04_격자_3테이블은_stage_원장_값_그대로다(adapter) -> None:
+    """`flow.*`·`short.*`·`credit.*` — 절단본 원장 한 행씩 손검산(어댑터가 다시 스케일하지 않는다).
+
+    기대값 출처는 stage 절단본이다: `stg_flow_daily_kiwoom`(005930 2018-05-04 외국인
+    −53,845,000,000 = 원장 원값, stage 가 백만원 ×1e6 을 이미 마쳤다) · `stg_short_daily_kiwoom`
+    (`shrts_trde_prica_krw` 103,425,481,000 = 천원 ×1e3 완료) · `stg_credit_daily`
+    (`whol_loan_rmnd_stcn_shr` 8,359,855).
+    """
+    from strategy_workbench.domain.equity.facade.research_data import CellKind
+    r = _raw(adapter, date(2018, 5, 2), date(2018, 5, 31), fields=ALL_FIELDS)
+    assert r.ok, r.detail
+    # ① 수급 — 절단본은 겹침 0 이라 키움 행 하나가 그대로 나간다(12주체 합 0 항등식의 그 행)
+    foreign = _cell(r, SPLIT, "005930:1", "flow.foreign_net_buy")
+    assert (foreign.value, foreign.available_date, foreign.kind) == (
+        -53_845_000_000.0, SPLIT, CellKind.OBSERVED)
+    assert _value(r, SPLIT, "005930:1", "flow.retail_net_buy") == 655_449_000_000.0
+    assert _value(r, SPLIT, "005930:1", "flow.institution_net_buy") == -591_578_000_000.0
+    # ② 공매도 거래대금 — 키움 축 고정(같은 셀의 KIS 축은 not_collected 라 섞이면 결측이 된다)
+    short = _cell(r, SPLIT, "005930:1", "short.short_sale_value")
+    assert (short.value, short.kind) == (103_425_481_000.0, CellKind.OBSERVED)
+    # 대차는 KIS 축뿐이고 이 셀은 수집 로그가 덮지 않는다 — 결측이되 '안 물어봤다' 로 남는다
+    lending = _cell(r, SPLIT, "005930:1", "short.borrowed_quantity")
+    assert (lending.value, lending.kind) == (None, CellKind.NOT_COLLECTED)
+    # ③ 신용융자 잔고(주식수) — 금액축은 단위 미상이라 내지 않는다
+    credit = _cell(r, SPLIT, "005930:1", "credit.margin_balance")
+    assert (credit.value, credit.available_date, credit.kind) == (
+        8_359_855.0, SPLIT, CellKind.OBSERVED)
+    # ④ 백필 끝 세션의 신용 셀은 `src_omitted`(유닛 창 안인데 원장 행이 없다) — 0 이 아니라 NULL
+    #    이고 SOURCE_OMITTED_ZERO 대신 MISSING 으로 접힌다(_specs 의 사유 문장 참조)
+    last = _raw(adapter, date(2026, 8, 18), BACKFILL_END, fields=ALL_FIELDS)
+    omitted = _cell(last, BACKFILL_END, "005930:1", "credit.margin_balance")
+    assert (omitted.value, omitted.kind) == (None, CellKind.MISSING)
+    assert omitted.available_date == BACKFILL_END
+
+
 def test_모든_셀이_공개일_이후에만_보인다(adapter) -> None:
-    """PIT 전수 — 24필드 × 절단본 두 창에서 available_date ≤ as_of 위반 0."""
+    """PIT 전수 — 30필드 × 절단본 두 창에서 available_date ≤ as_of 위반 0."""
     for start, end in ((date(2018, 4, 2), date(2018, 5, 31)),
                        (date(2026, 8, 3), BACKFILL_END)):
         r = _raw(adapter, start, end, universe="krx.all", fields=ALL_FIELDS)

@@ -396,6 +396,85 @@ def holder_table(rows: list[HolderRow]) -> pa.Table:
     )
 
 
+# ── 격자 3테이블 (S08 flow · S09 short · S10 credit) ─────────────────────────
+# 셋 다 (ticker, date) 격자 위의 일별 행이고 값 없는 셀은 **NULL + `fill_kind`** 다(0 채움 금지 —
+# DESIGN §9 결정 8). `fill_kind` 는 STRUCT(kind VARCHAR, evidence VARCHAR) 이고 어휘는
+# `database/src/equity/model.py::FILL_KINDS`·`FILL_EVIDENCE` 다.
+
+_FILL_KIND_TYPE = pa.struct([("kind", pa.string()), ("evidence", pa.string())])
+
+
+def _fill_kind(values: Sequence[tuple[str, str] | None]) -> pa.Array:
+    return pa.array(
+        [None if v is None else {"kind": v[0], "evidence": v[1]} for v in values],
+        type=_FILL_KIND_TYPE,
+    )
+
+
+FlowRow = tuple[str, date, str | None, float | None, float | None, float | None, tuple[str, str]]
+"""ticker, date, src, ind_invsr_krw, frgnr_invsr_krw, orgn_krw, (fill_kind.kind, .evidence)."""
+
+
+def flow_table(rows: list[FlowRow]) -> pa.Table:
+    """`flow_daily` 중 어댑터가 읽는 컬럼. grain 은 (date, ticker, **src**) 다 — 같은 셀에 두
+    원천이 다 있으면 2행이고 어댑터가 `pick_order` 로 하나를 고른다."""
+    money = pa.decimal128(15, 0)
+    return pa.table(
+        {
+            "date": pa.array([r[1] for r in rows], type=pa.date32()),
+            "ticker": pa.array([r[0] for r in rows], type=pa.string()),
+            "src": pa.array([r[2] for r in rows], type=pa.string()),
+            "ind_invsr_krw": _decimal([r[3] for r in rows], money),
+            "frgnr_invsr_krw": _decimal([r[4] for r in rows], money),
+            "orgn_krw": _decimal([r[5] for r in rows], money),
+            "fill_kind": _fill_kind([r[6] for r in rows]),
+            "available_date": pa.array([r[1] for r in rows], type=pa.date32()),
+            "available_basis": pa.array(["default"] * len(rows), type=pa.string()),
+        }
+    )
+
+
+ShortRow = tuple[
+    str, date, float | None, float | None, float | None, tuple[str, str], tuple[str, str]
+]
+"""ticker, date, short_volume_kiwoom_shr, short_value_kiwoom_krw, lending_balance_kis_shr,
+fill_kind_short_kiwoom, fill_kind_loan_kis — 결측 사유가 원천마다 하나다(S09)."""
+
+
+def short_table(rows: list[ShortRow]) -> pa.Table:
+    return pa.table(
+        {
+            "date": pa.array([r[1] for r in rows], type=pa.date32()),
+            "ticker": pa.array([r[0] for r in rows], type=pa.string()),
+            "short_volume_kiwoom_shr": _decimal([r[2] for r in rows], pa.decimal128(10, 0)),
+            "short_value_kiwoom_krw": _decimal([r[3] for r in rows], pa.decimal128(15, 0)),
+            "lending_balance_kis_shr": _decimal([r[4] for r in rows], pa.decimal128(11, 0)),
+            "fill_kind_short_kiwoom": _fill_kind([r[5] for r in rows]),
+            "fill_kind_loan_kis": _fill_kind([r[6] for r in rows]),
+            "available_date": pa.array([r[1] for r in rows], type=pa.date32()),
+            "available_basis": pa.array(["default"] * len(rows), type=pa.string()),
+        }
+    )
+
+
+CreditRow = tuple[str, date, float | None, tuple[str, str]]
+"""ticker, date, whol_loan_rmnd_stcn_shr, (fill_kind.kind, .evidence)."""
+
+
+def credit_table(rows: list[CreditRow]) -> pa.Table:
+    return pa.table(
+        {
+            "date": pa.array([r[1] for r in rows], type=pa.date32()),
+            "ticker": pa.array([r[0] for r in rows], type=pa.string()),
+            "whol_loan_rmnd_stcn_shr": _decimal([r[2] for r in rows], pa.decimal128(10, 0)),
+            "amt_basis": pa.array(["unknown"] * len(rows), type=pa.string()),
+            "fill_kind": _fill_kind([r[3] for r in rows]),
+            "available_date": pa.array([r[1] for r in rows], type=pa.date32()),
+            "available_basis": pa.array(["default"] * len(rows), type=pa.string()),
+        }
+    )
+
+
 # ── 카탈로그 (`equity.duckdb` + `_catalog_meta.json`) ────────────────────────
 # `equity.catalog`·`equity.views`(database/src/equity) 의 테스트 대역. backend 는 그 패키지를 import
 # 할 수 없으므로 매크로 본문(DESIGN §5 v_cum_adj·v_adj_price·v_adj_price_fwd)과 snapshot_id 규칙
@@ -813,6 +892,41 @@ WB_EVENT_ROWS: list[CorpEventRow] = [
     ("E3", "005930", "split", date(2024, 1, 8), None),
     ("E4", "000660", "tsstk_aq", date(2023, 12, 27), 2_000_000),
 ]
+# 격자 3테이블(S08~S10) — 셀 종류 4갈래를 한 창 안에서 다 낸다.
+#   measured + 값       → OBSERVED      · measured + 0      → OBSERVED(진짜 0)
+#   src_omitted (NULL)  → **MISSING**   · empty_response    → MISSING
+#   not_collected(NULL) → NOT_COLLECTED
+# 01-12 에는 아무 행도 없다 — 격자 원천은 행이 없으면 셀 자체를 내지 않는다(합성 금지).
+WB_FLOW_ROWS: list[FlowRow] = [
+    # 같은 셀에 두 원천 — 어댑터 pick_order 가 키움을 고른다(KIS 값 9,999 가 나오면 안 된다)
+    ("005930", WB_SPLIT_DATE, "kiwoom", 3_000_000, -1_000_000, -2_000_000, ("measured", "none")),
+    ("005930", WB_SPLIT_DATE, "kis", 9_999, 9_999, 9_999, ("measured", "none")),
+    ("005930", date(2024, 1, 9), "kiwoom", None, None, None, ("src_omitted", "shard_done")),
+    ("005930", WB_HALT_DATE, None, None, None, None, ("not_collected", "none")),
+    ("005930", date(2024, 1, 11), "kiwoom", 0, 0, 0, ("measured", "none")),
+    # 키움이 없는 셀은 KIS 단독 행이다(원천이 상보적이라 셀당 행은 여전히 하나)
+    ("000660", WB_SPLIT_DATE, "kis", 500_000, -200_000, -300_000, ("measured", "none")),
+    ("000660", date(2024, 1, 9), "kiwoom", None, None, None, ("empty_response", "shard_empty")),
+]
+WB_SHORT_ROWS: list[ShortRow] = [
+    ("005930", WB_SPLIT_DATE, 1_000, 70_000_000, None,
+     ("measured", "shard_done"), ("not_collected", "none")),
+    ("005930", date(2024, 1, 9), None, None, 12_345,
+     ("src_omitted", "shard_done"), ("measured", "unit_ok")),
+    # 대차 잔고 음수는 원장 값 그대로 보존한다(GAP-04)
+    ("005930", WB_HALT_DATE, None, None, -50,
+     ("empty_response", "shard_empty"), ("measured", "unit_ok")),
+    ("000660", WB_SPLIT_DATE, 2_000, 100_000_000, 7_000,
+     ("measured", "shard_done"), ("measured", "unit_ok")),
+]
+WB_CREDIT_ROWS: list[CreditRow] = [
+    ("005930", WB_SPLIT_DATE, 8_359_855, ("measured", "unit_ok")),
+    ("005930", date(2024, 1, 9), None, ("src_omitted", "unit_ok")),
+    ("005930", WB_HALT_DATE, None, ("not_collected", "none")),
+    # 잔고 > 상장주식수로 격리된 원장 행의 자리 — 셀은 남고 종류는 empty_response 다(결정 9)
+    ("005930", date(2024, 1, 11), None, ("empty_response", "unit_ok")),
+    ("000660", WB_SPLIT_DATE, 1_234, ("measured", "unit_ok")),
+]
 WB_HOLDER_ROWS: list[HolderRow] = [
     ("H1", "elestock", "홍길동", "C05930", 1_000, date(2024, 1, 9)),
     ("H1", "elestock", "김철수", "C05930", -400, date(2024, 1, 9)),
@@ -920,6 +1034,9 @@ def build_workbench_root(root: Path, *, catalog: bool = True) -> Path:
         root, "corp_event", corp_event_table(WB_EVENT_ROWS), year_column="announce_date"
     )
     write_equity_table(root, "holder_daily", holder_table(WB_HOLDER_ROWS))
+    write_equity_table(root, "flow_daily", flow_table(WB_FLOW_ROWS), year_column="date")
+    write_equity_table(root, "short_daily", short_table(WB_SHORT_ROWS), year_column="date")
+    write_equity_table(root, "credit_daily", credit_table(WB_CREDIT_ROWS), year_column="date")
     if catalog:
         write_catalog(root)
     return root

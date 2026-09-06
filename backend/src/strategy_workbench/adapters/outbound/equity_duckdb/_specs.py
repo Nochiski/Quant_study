@@ -6,9 +6,11 @@
 
 읽는 방식은 둘뿐이다(`SourceMode`).
 
-`GRID`  (ticker, session) 격자 위의 일별 행 — `price_daily`·`v_adj_price_fwd`. 랙 n 은 **정확히 n
-        세션 전 행**이고 그 세션에 행이 없으면 셀을 내지 않는다(합성 금지 — 재상장 구간 첫날이
-        직전 구간 값을 물지 않는다).
+`GRID`  (ticker, session) 격자 위의 일별 행 — `price_daily`·`v_adj_price_fwd` · 격자 3테이블
+        `flow_daily`·`short_daily`·`credit_daily`. 랙 n 은 **정확히 n 세션 전 행**이고 그 세션에
+        행이 없으면 셀을 내지 않는다(합성 금지 — 재상장 구간 첫날이 직전 구간 값을 물지 않는다).
+        격자 3테이블은 `fill_kind`(STRUCT(kind, evidence)) 로 결측 사유를 함께 주고
+        (`SourceSpec.kind_expr`), 어댑터는 그것을 `CellKind` 로 옮긴다.
 `LATEST` `available_date` 축의 관측 — 재무·컨센서스·의견·배당·자사주·임원지분. 셀 값은 **컷오프
         (as_of 에서 랙 n 세션 전 거래일) 이하의 마지막 관측**이고, `available_date` 는 그 관측의
         공개일이다(세션과 다를 수 있다 — 계약은 `available_date ≤ as_of` 만 요구한다). 관측이
@@ -26,7 +28,7 @@ DESIGN §4-4·§4-5) 어댑터가 `corp_ticker` 로 전개하며, **한 법인�
 와 각 `rules_s*.py` 의 `available_rule` 을 옮긴 것이고 `lag_basis` 에 근거를 적었다. S19 가 오면
 프로필 값으로 갈아 끼운다. 소비자는 질의의 `lag_overrides` 로 필드마다 늘릴 수 있다.
 
-여기 없는 field_id(FIELD_MAP 42 중 19)는 `list_fields()` 밖이고 질의하면 `INVALID_QUERY` 다
+여기 없는 field_id(FIELD_MAP 42 중 13)는 `list_fields()` 밖이고 질의하면 `INVALID_QUERY` 다
 (mock 폴백 없음) — 사유는 `UNSUPPORTED_FIELDS` 가 field_id 마다 적어 둔다.
 """
 
@@ -52,6 +54,9 @@ OPINION_TABLE = "opinion_daily"
 DIVIDEND_TABLE = "dividend_event"
 EVENT_TABLE = "corp_event"
 HOLDER_TABLE = "holder_daily"
+FLOW_TABLE = "flow_daily"
+SHORT_TABLE = "short_daily"
+CREDIT_TABLE = "credit_daily"
 
 ADJ_MACRO = "v_adj_price_fwd"
 CONSENSUS_MACRO = "v_consensus"
@@ -78,7 +83,18 @@ class Reduce(Enum):
 
 @dataclass(frozen=True)
 class SourceSpec:
-    """필드들이 공유하는 읽는 자리 하나. `relation` 은 테이블 이름 또는 카탈로그 매크로 이름."""
+    """필드들이 공유하는 읽는 자리 하나. `relation` 은 테이블 이름 또는 카탈로그 매크로 이름.
+
+    `kind_expr` 은 격자 테이블(S08~S10)의 `fill_kind` STRUCT 에서 결측 사유를 꺼내는 식이다
+    (`fill_kind['kind']`). `short_daily` 처럼 한 테이블이 원천마다 `fill_kind` 를 따로 두면
+    **읽는 자리도 원천마다 하나**다 — 같은 relation 위의 SourceSpec 두 개가 서로 다른
+    `kind_expr` 을 갖는다. None 이면 그 원천에는 결측 사유 축이 없어 셀 종류는 값 유무로만
+    갈린다(값 있으면 OBSERVED, 없으면 MISSING).
+
+    `pick_order` 는 두 모드에 다 쓴다 — `LATEST` 는 (축 키, available_date) 당 1행,
+    `GRID` 는 (축 키, date) 당 1행을 고른다. GRID 에서 필요한 것은 `flow_daily` 뿐이다
+    (grain 에 `src` 가 들어 한 격자 셀에 원천 수만큼 행이 올 수 있다).
+    """
 
     name: str
     dataset_id: str
@@ -96,6 +112,7 @@ class SourceSpec:
     lag_basis: str
     requires: tuple[str, ...]
     frequency: str
+    kind_expr: str | None = None
 
 
 @dataclass(frozen=True)
@@ -135,6 +152,12 @@ _CONSENSUS_LAG_BASIS = (
 _OPINION_LAG_BASIS = (
     "opinion_daily.available_date = obs_date — wise 는 measured(fetched_date), v3 는 default + "
     "coverage_degraded(수집 시각 컬럼 없음, DESIGN §4-6) → 0 세션이되 v3 구간은 잰 값이 아니다"
+)
+_GRID_LAG_BASIS = (
+    "available_date = date (basis default) — S08~S10 stage 원천이 전부 lag_known=false 라 공표 "
+    "시각을 모른다. 랙 0 은 '원장 날짜가 곧 그날 알 수 있던 날' 이라는 **가정**이고 신용잔고는 "
+    "실제로 T+1 공표다 → 세션 랙 확정은 dataset_profile(S19) 몫이니 그때까지 소비자가 "
+    "lag_overrides 로 물려 써야 한다(FIELD_MAP §3 S09 주석)"
 )
 
 SOURCE_SPECS: tuple[SourceSpec, ...] = (
@@ -288,6 +311,90 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         requires=(EVENT_TABLE,),
         frequency="event",
     ),
+    # ── 격자 3테이블 (S08~S10) — `fill_kind` 축을 갖는 GRID 원천 ──────────────
+    SourceSpec(
+        name="flow",
+        dataset_id=FLOW_TABLE,
+        relation=FLOW_TABLE,
+        is_macro=False,
+        mode=SourceMode.GRID,
+        axis=SourceAxis.TICKER,
+        key_column="ticker",
+        available_expr="available_date",
+        content_expr="date",
+        reduce=Reduce.NONE,
+        row_filter=None,
+        # grain 이 (date, ticker, **src**) 라 한 격자 셀에 원장 행이 둘일 수 있다(상보 결합,
+        # DESIGN §4-3). 포트 grain 은 (security, session, field) 하나뿐이므로 **결정적으로
+        # 한 행을 고른다** — 키움(ka10060) 우선, 그다음 src 사전순. 키움을 앞세운 근거는
+        # ① 13주체 전부를 주는 유일한 원천이고(KIS 는 etc_fnnc·natn·natfor 가 무대응 NULL)
+        # ② 커버가 넓다(절단본 kiwoom 22,531행 vs kis 3,925행). 값을 섞지는 않는다 —
+        # 고른 한 행의 값이 그대로 나가고, 두 원천이 겹치는 셀은 절단본 0 이며 서버에서도
+        # `EG3_flow_daily.n_src_overlap` 이 매 빌드 센다. `src` 자체는 필드로 내지 않는다.
+        pick_order="(src IS DISTINCT FROM 'kiwoom'), src",
+        lag_sessions=0,
+        lag_basis=_GRID_LAG_BASIS,
+        requires=(FLOW_TABLE,),
+        frequency="daily",
+        kind_expr="fill_kind['kind']",
+    ),
+    SourceSpec(
+        name="short_kiwoom",
+        dataset_id=SHORT_TABLE,
+        relation=SHORT_TABLE,
+        is_macro=False,
+        mode=SourceMode.GRID,
+        axis=SourceAxis.TICKER,
+        key_column="ticker",
+        available_expr="available_date",
+        content_expr="date",
+        reduce=Reduce.NONE,
+        row_filter=None,
+        pick_order=None,  # grain (date, ticker) — 격자 셀당 1행
+        lag_sessions=0,
+        lag_basis=_GRID_LAG_BASIS,
+        requires=(SHORT_TABLE,),
+        frequency="daily",
+        kind_expr="fill_kind_short_kiwoom['kind']",
+    ),
+    SourceSpec(
+        name="lending_kis",
+        dataset_id=SHORT_TABLE,
+        relation=SHORT_TABLE,
+        is_macro=False,
+        mode=SourceMode.GRID,
+        axis=SourceAxis.TICKER,
+        key_column="ticker",
+        available_expr="available_date",
+        content_expr="date",
+        reduce=Reduce.NONE,
+        row_filter=None,
+        pick_order=None,
+        lag_sessions=0,
+        lag_basis=_GRID_LAG_BASIS,
+        requires=(SHORT_TABLE,),
+        frequency="daily",
+        kind_expr="fill_kind_loan_kis['kind']",
+    ),
+    SourceSpec(
+        name="credit",
+        dataset_id=CREDIT_TABLE,
+        relation=CREDIT_TABLE,
+        is_macro=False,
+        mode=SourceMode.GRID,
+        axis=SourceAxis.TICKER,
+        key_column="ticker",
+        available_expr="available_date",
+        content_expr="date",
+        reduce=Reduce.NONE,
+        row_filter=None,
+        pick_order=None,
+        lag_sessions=0,
+        lag_basis=_GRID_LAG_BASIS,
+        requires=(CREDIT_TABLE,),
+        frequency="daily",
+        kind_expr="fill_kind['kind']",
+    ),
     SourceSpec(
         name="insider",
         dataset_id=HOLDER_TABLE,
@@ -320,6 +427,17 @@ _FIN_EVIDENCE = (
     "fs_div_used) × disclosure_version, 법인→티커는 corp_ticker"
 )
 _FIN_DISCLOSURE = "DART 정기보고서 접수일(rcept_no 의 rcept_dt) — 정정본 접수번호를 API 가 돌려준다"
+
+# 격자 3테이블(S08~S10)의 결측 어휘를 소비층으로 옮길 때 접히는 축 — 프로필 description 에 그대로
+# 실어 소비자가 "왜 src_omitted 가 안 보이나" 를 코드가 아니라 카탈로그에서 읽게 한다.
+_FILL_KIND_NOTE = (
+    "값 없는 셀은 **0 이 아니라 NULL** 이고 이유는 `fill_kind` 가 나른다(DESIGN §9 결정 8). "
+    "셀 종류 대응은 measured→OBSERVED · not_collected→NOT_COLLECTED · empty_response→MISSING "
+    "이고, **`src_omitted` 는 SOURCE_OMITTED_ZERO 가 아니라 MISSING 으로 접힌다** — 워크벤치 "
+    "도메인이 SOURCE_OMITTED_ZERO 셀에 값을 요구하는데(`RawFieldValue.__post_init__`) equity 는 "
+    "그 자리를 NULL 로 두기로 했기 때문이다. 그래서 '0 으로 읽어도 되는 결측' 이라는 라벨은 "
+    "S19 `dataset_profile` 이 별도 축으로 실을 때까지 소비층에 도달하지 않는다"
+)
 
 FIELD_SPECS: tuple[FieldSpec, ...] = (
     # ── price_daily (FIELD_MAP §2 price.*) ──────────────────────────────────
@@ -635,6 +753,119 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         disclosure_basis="WISE 화면 수집일(measured) / v3 관측일(default, degraded)",
         evidence="opinion_daily.analyst_count ← stg_analyst_summary ∪ stg_v3_analyst_opinions",
     ),
+    # ── flow_daily (FIELD_MAP §2 flow.*) ─────────────────────────────────────
+    FieldSpec(
+        field_id="flow.foreign_net_buy",
+        source="flow",
+        expr="frgnr_invsr_krw",
+        label="외국인 순매수(대금)",
+        unit="KRW",
+        value_type=FieldValueType.AMOUNT,
+        verdict="지원",
+        description=(
+            "**원 단위**다 — stage 가 백만원 ×1e6 환산을 마친 값을 equity 도 어댑터도 다시 "
+            f"곱하지 않는다(STAGE_HANDOFF §2 · EG3_flow_daily 단위 대조). {_FILL_KIND_NOTE}."
+        ),
+        disclosure_basis="원장 날짜(공표 시각 미제공, basis default)",
+        evidence=(
+            "flow_daily.frgnr_invsr_krw ← stg_flow_daily_kiwoom(ka10060) ∪ "
+            "stg_flow_split_daily(KIS frgn_ntby_tr_pbmn_krw), 같은 셀에 둘 다 있으면 키움"
+        ),
+    ),
+    FieldSpec(
+        field_id="flow.institution_net_buy",
+        source="flow",
+        expr="orgn_krw",
+        label="기관 순매수(대금)",
+        unit="KRW",
+        value_type=FieldValueType.AMOUNT,
+        verdict="부분",
+        description=(
+            "GAP-03 — `orgn` 은 원장의 **합계 컬럼**이고 기관 7주체 합과 다르다(절단본 18,581행 "
+            "중 10,783행 불일치, 편차 최대 2,834억원). 그래서 12주체 항등식(EG3-P06)에서도 "
+            f"빠진다. {_FILL_KIND_NOTE}."
+        ),
+        disclosure_basis="원장 날짜(공표 시각 미제공, basis default)",
+        evidence="flow_daily.orgn_krw ← 키움 orgn_krw ∪ KIS orgn_ntby_tr_pbmn_krw",
+    ),
+    FieldSpec(
+        field_id="flow.retail_net_buy",
+        source="flow",
+        expr="ind_invsr_krw",
+        label="개인 순매수(대금)",
+        unit="KRW",
+        value_type=FieldValueType.AMOUNT,
+        verdict="지원",
+        description=f"원 단위(stage ×1e6 완료 — 재환산 금지). {_FILL_KIND_NOTE}.",
+        disclosure_basis="원장 날짜(공표 시각 미제공, basis default)",
+        evidence="flow_daily.ind_invsr_krw ← 키움 ind_invsr_krw ∪ KIS prsn_ntby_tr_pbmn_krw",
+    ),
+    # ── short_daily (FIELD_MAP §2 short.*) ───────────────────────────────────
+    FieldSpec(
+        field_id="short.short_sale_value",
+        source="short_kiwoom",
+        expr="short_value_kiwoom_krw",
+        label="공매도 거래대금(키움)",
+        unit="KRW",
+        value_type=FieldValueType.AMOUNT,
+        verdict="지원",
+        description=(
+            "**원천은 키움(ka10014) 하나로 고정**한다 — `short_daily` 는 두 원천을 합치지 않고 "
+            "접미사 컬럼으로 나란히 두므로(사용자 확정 09-06, DESIGN §4-3) 어댑터가 하나를 "
+            "고른다. 키움인 근거: KRX 정본이 없는 축이고 커버가 훨씬 넓다(절단본 measured "
+            "키움 18,265 vs KIS 3,891). **폴백 병합은 하지 않는다** — 키움이 없는 날 KIS 로 "
+            "갈아타면 시계열이 원천을 섞고 단위·정의 차가 조용히 들어온다. KIS 축 "
+            "(`short_value_kis_krw`)이 필요하면 S19 dataset_profile 이 별도 field_id 로 "
+            f"낸다. 원 단위(stage 가 천원 ×1e3 환산 완료). {_FILL_KIND_NOTE}."
+        ),
+        disclosure_basis="원장 날짜(공표 시각 미제공, basis default)",
+        evidence=(
+            "short_daily.short_value_kiwoom_krw ← stg_short_daily_kiwoom.shrts_trde_prica_krw "
+            "(unit_scale=1e3), 결측 사유는 fill_kind_short_kiwoom"
+        ),
+    ),
+    FieldSpec(
+        field_id="short.borrowed_quantity",
+        source="lending_kis",
+        expr="lending_balance_kis_shr",
+        label="대차잔고(주식수, KIS)",
+        unit="shares",
+        value_type=FieldValueType.COUNT,
+        verdict="부분",
+        description=(
+            "GAP-04. **KIS 축뿐이다** — 키움 대차 원장(`stg_lending_daily`)이 S09 입력에 없어 "
+            "`lending_balance_kiwoom_raw` 는 후속 슬라이스 몫이고, 두 축의 단위 대조도 그때 "
+            "선다(DESIGN §4-3 구현 결과 ①). 원장이 주는 **음수 잔고는 그대로 보존**한다 — "
+            f"equity 도 어댑터도 자르지 않는다(원칙 ④). {_FILL_KIND_NOTE}."
+        ),
+        disclosure_basis="원장 날짜(공표 시각 미제공, basis default)",
+        evidence=(
+            "short_daily.lending_balance_kis_shr ← stg_loan_daily_kis.rmnd_stcn_shr, 결측 "
+            "사유는 fill_kind_loan_kis(금액축 lending_balance_kis_krw 는 내부 스코프)"
+        ),
+    ),
+    # ── credit_daily (FIELD_MAP §2 credit.*) ─────────────────────────────────
+    FieldSpec(
+        field_id="credit.margin_balance",
+        source="credit",
+        expr="whol_loan_rmnd_stcn_shr",
+        label="신용융자 잔고(주식수)",
+        unit="shares",
+        value_type=FieldValueType.COUNT,
+        verdict="부분",
+        description=(
+            "**주식수 축**이다 — 금액축 `*_amt` 6컬럼은 단위 미상이라(`credit_daily.amt_basis` "
+            "= 'unknown', STAGE_HANDOFF §4) 이 필드로 나가지 않는다. 대주 잔고"
+            "(`whol_stln_rmnd_stcn_shr`)는 별개 축이고 equity 내부 스코프다. 잔고가 상장주식수를 "
+            "넘는 원장 행은 S10 이 `_reject/balance_over_shares/` 로 격리하고 그 셀은 "
+            f"`empty_response`(→ MISSING)로 남는다(DESIGN §9 결정 9). {_FILL_KIND_NOTE}."
+        ),
+        disclosure_basis=(
+            "원장 날짜(basis default) — KIS 신용잔고는 실제로 T+1 공표이나 랙 축은 "
+            "dataset_profile(S19)이 확정한다"
+        ),
+        evidence="credit_daily.whol_loan_rmnd_stcn_shr ← stg_credit_daily(KIS 신용잔고) 무수정",
+    ),
     # ── 사건 (FIELD_MAP §2 event.*) ──────────────────────────────────────────
     FieldSpec(
         field_id="event.dividend_per_share",
@@ -687,31 +918,29 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
     ),
 )
 
-# FIELD_MAP §2 의 42 중 어댑터가 내지 않는 19 — field_id → 사유. `list_fields()` 밖이고 질의하면
+# FIELD_MAP §2 의 42 중 어댑터가 내지 않는 13 — field_id → 사유. `list_fields()` 밖이고 질의하면
 # `INVALID_QUERY` 의 detail 에 이 문장이 붙는다(mock 폴백 금지, DESIGN §7).
-_NOT_BUILT = (
-    "원천 테이블이 이 빌드에 없다 — S08 flow_daily · S09 short_daily · S10 credit_daily 는 "
-    "브랜치 equity/s08-s10 에 있고 아직 병합되지 않았다"
-)
 UNSUPPORTED_FIELDS: dict[str, str] = {
     "benchmark.close": (
         "미지원(현 설계) — index_daily 는 security 축이 아니다. 벤치마크는 예약 접두 `idx:` 로 "
         "받되 S21 은 내지 않는다(GAP-09, FIELD_MAP §2)"
     ),
-    "flow.foreign_net_buy": _NOT_BUILT,
-    "flow.institution_net_buy": _NOT_BUILT,
-    "flow.retail_net_buy": _NOT_BUILT,
-    "flow.foreign_ownership": _NOT_BUILT,
+    "flow.foreign_ownership": (
+        "미확인 — flow_daily 에 컬럼이 없다. 원천이 stg_flow_daily_kiwoom(ka10060)이 아니라 "
+        "stg_foreign_daily(ka10008)인데 절단본에 없어 S08 이 컬럼을 만들지 않았다(만들고 NULL 로 "
+        "두면 '있는데 비어 있는' 컬럼이 된다). 선행 조건은 절단본 절단 → S08-2"
+    ),
     "flow.block_buy": "미지원 — 대량매매 미수집(FACTORS.md §9)",
     "flow.block_sell": "미지원 — 대량매매 미수집(FACTORS.md §9)",
     "short.short_balance_ratio": (
         "미지원 — 분모가 다른 테이블(price_daily.shares_out)이라 셀 하나로 굽지 않는다. "
         "게다가 short_daily 가 주는 것은 잔고가 아니라 거래량이다(F45 취득 불가, 라벨 정정 필요)"
     ),
-    "short.short_sale_value": _NOT_BUILT,
-    "short.borrowed_quantity": _NOT_BUILT,
-    "credit.margin_balance": _NOT_BUILT,
-    "credit.net_buy": "미확인 — stg_credit_daily 에 순매수 축이 있는지 S10 에서 판정한다",
+    "credit.net_buy": (
+        "미지원(S10 판정 09-06) — stg_credit_daily 39컬럼에 순매수 축이 없다. 유일한 후보 "
+        "`신규 − 상환` 은 순매수가 아니라 잔고 증감의 구성요소인데 실제 증감과도 맞지 않는다"
+        "(절단본 융자 17,364/24,711 · 대주 24,672/24,711, 신규·상환 음수 6행)"
+    ),
     "credit.collateral_value": "미지원 — 원천 없음",
     "credit.loan_value": "미지원 — 원천 없음",
     "credit.forced_liquidation": "미지원 — 원천 없음",

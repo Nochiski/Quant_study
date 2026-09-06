@@ -9,11 +9,12 @@ raw facts only (no factor values).
 `ADAPTERS` names the cases; the `adapter` fixture builds them. Each case answers the subset of
 `FIELDS` its `list_fields()` declares, and must reject the rest as a failure value rather than
 synthesise it. `FIELDS` is the union of what any adapter can serve: the mock declares nine of them
-and ignores the rest, while the equity adapter (S21 full pass) serves the 23 EQUITY_FIELD_MAP ids
-whose source tables are built plus the internal `price.adj_close`. That union is deliberate — the
+and ignores the rest, while the equity adapter (S21-3) serves the 29 EQUITY_FIELD_MAP ids whose
+source tables are built plus the internal `price.adj_close`. That union is deliberate — the
 window-invariance, PIT and cell-kind clauses below then run over every equity field, including the
 as-of ones (financials, consensus, filings) whose `available_date` is a filing date far behind
-`as_of`.
+`as_of` and the daily grids (flow, short, credit) whose empty cells carry a missing reason rather
+than a zero.
 """
 
 from __future__ import annotations
@@ -79,10 +80,15 @@ FIELDS = (
     "event.dividend_per_share",
     "event.buyback_amount",
     "event.insider_net_buy",
-    # served by the mock only — the equity adapter answers INVALID_QUERY for these
+    # daily grids carrying an explicit missing-reason axis (flow_daily, short_daily, credit_daily)
     "flow.foreign_net_buy",
-    "short.short_balance_ratio",
+    "flow.institution_net_buy",
+    "flow.retail_net_buy",
+    "short.short_sale_value",
+    "short.borrowed_quantity",
     "credit.margin_balance",
+    # served by the mock only — the equity adapter answers INVALID_QUERY for these
+    "short.short_balance_ratio",
     "event.earnings_surprise",
     "classification.sector",
 )

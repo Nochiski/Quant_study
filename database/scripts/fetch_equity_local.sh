@@ -3,12 +3,13 @@
 #
 #   database/scripts/fetch_equity_local.sh <로컬 경로> [minimal|full]
 #
-# minimal(기본) = 가격·유니버스·조정계수·식별 표만 (약 1.6GB)
-# full          = 어댑터가 읽는 18개 표 전부 (약 2.9GB)
+# minimal(기본) = 가격·조정가·유니버스·조정계수·식별 표만 (약 2.0GB)
+# full          = 어댑터가 읽는 19개 표 전부 (약 3.3GB)
 #
 # `_pinned/`(재빌드용 원장 고정본)·`_asof/`·`_tmp/`·`_failed/` 는 읽기에 불필요하므로 받지 않는다.
 # 카탈로그(`equity.duckdb`)의 매크로는 **절대경로**를 굽고 있어(DESIGN §10 P1c) 경로가 바뀌면
-# 조정 종가·재무·컨센서스 필드가 통째로 unavailable 이 된다 → 내려받은 뒤 반드시 다시 만든다.
+# 재무·컨센서스 필드가 통째로 unavailable 이 된다 → 내려받은 뒤 반드시 다시 만든다.
+# (조정 종가는 S23 부터 표 `price_adj_daily` 를 직접 읽으므로 카탈로그와 무관하다.)
 set -euo pipefail
 
 DEST="${1:?사용법: fetch_equity_local.sh <로컬 경로> [minimal|full]}"
@@ -17,7 +18,7 @@ REMOTE="${EQUITY_REMOTE:-kael-server}"
 REMOTE_ROOT="${EQUITY_REMOTE_ROOT:-~/quant-ledger/data/equity}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-MINIMAL=(price_daily universe_daily universe_policy adj_factor corp_event
+MINIMAL=(price_daily price_adj_daily universe_daily universe_policy adj_factor corp_event
          security security_span corp_ticker trading_calendar)
 EXTRA=(fin_std disclosure_version consensus_daily opinion_daily
        flow_daily short_daily credit_daily dividend_event holder_daily)

@@ -29,10 +29,13 @@ PIT: 모든 셀은 `available_date ≤ as_of` 다. 랙은 컬럼군별 상수(`S
 `lag_basis`)이고 `dataset_profile`(S19)이 오면 프로필 값으로 바꾼다. 창 독립: `GRID` 는 (security,
 date) 의 값, `LATEST` 는 (security, cutoff) 의 값이라 질의 창을 바꿔도 같은 셀은 같다.
 
-`price.adj_close` = **전방 조정**(결정 09-05): `v_adj_price_fwd(as_of := <창 끝>)` — 원주가 ×
-그날까지 공개·적용된 계수의 누적 share_factor. 종목의 첫 관측 수준을 고정하고 사건마다 이후
-가격을 올린다(삼성전자 2018-05-03 2,650,000 그대로, 05-04 51,900 × 50 = 2,595,000). 값은
-(security, date) 의 순수 함수라 창·as_of 에 무관하다.
+`price.adj_close` = **전방 조정**(결정 09-05): **`price_adj_daily` 표를 직접 읽는다**(S23,
+2026-09-06). 원주가 × 그날까지 공개·적용된 계수의 누적 share_factor 이고, 종목의 첫 관측 수준을
+고정하고 사건마다 이후 가격을 올린다(삼성전자 2018-05-03 2,650,000 그대로, 05-04 51,900 × 50 =
+2,595,000). 값은 (security, date) 의 순수 함수라 창·as_of 에 무관하다. 예전에는 카탈로그 매크로
+`v_adj_price_fwd` 를 불렀는데, 그러면 카탈로그가 낡거나(snapshot 불일치) 없으면 조정가가 통째로
+unavailable 이 됐다 — 표를 읽으면서 그 의존이 끊겼다(매크로는 같은 값을 내는 읽기 경로로 남고,
+동일성은 equity `EG3_price_adj_daily` 가 매 빌드 증명한다).
 
 법인 축 테이블(`fin_std`·`dividend_event`·`holder_daily`)은 티커 컬럼이 없어 `corp_ticker` 로
 전개하고 **한 법인의 종류주 티커 전부가 같은 값**을 받는다(`_specs` 모듈 docstring). `corp_ticker`

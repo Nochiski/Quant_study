@@ -6,7 +6,7 @@
 
 읽는 방식은 둘뿐이다(`SourceMode`).
 
-`GRID`  (ticker, session) 격자 위의 일별 행 — `price_daily`·`v_adj_price_fwd` · 격자 3테이블
+`GRID`  (ticker, session) 격자 위의 일별 행 — `price_daily`·`price_adj_daily` · 격자 3테이블
         `flow_daily`·`short_daily`·`credit_daily`. 랙 n 은 **정확히 n 세션 전 행**이고 그 세션에
         행이 없으면 셀을 내지 않는다(합성 금지 — 재상장 구간 첫날이 직전 구간 값을 물지 않는다).
         격자 3테이블은 `fill_kind`(STRUCT(kind, evidence)) 로 결측 사유를 함께 주고
@@ -58,7 +58,7 @@ FLOW_TABLE = "flow_daily"
 SHORT_TABLE = "short_daily"
 CREDIT_TABLE = "credit_daily"
 
-ADJ_MACRO = "v_adj_price_fwd"
+ADJ_TABLE = "price_adj_daily"
 CONSENSUS_MACRO = "v_consensus"
 FIN_MACRO = "v_fin_latest"
 
@@ -138,8 +138,8 @@ _PRICE_LAG_BASIS = (
     "시각 미제공이라 세션 종가 확정 시점) → 0 세션"
 )
 _ADJ_LAG_BASIS = (
-    "v_adj_price_fwd 의 계수 컷오프 기본값 views.FACTOR_LAG_SESSIONS=0 — 계수 available_date 가 "
-    "min(공시 접수일, apply_date 다음 세션) 이라 이미 '그날 알 수 있었던 날' 이다"
+    "price_adj_daily.available_date = date (S23 available_rule — fold_date = greatest(apply_date, "
+    "available_date) 규약상 접힌 계수는 전부 그날 이전에 공개됐다) → 0 세션"
 )
 _DART_LAG_BASIS = (
     "available_date = rcept_dt (DART 접수일, basis derived) — 접수일 자체가 공개일이라 세션 랙을 "
@@ -181,9 +181,9 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
     ),
     SourceSpec(
         name="adj",
-        dataset_id=ADJ_MACRO,
-        relation=ADJ_MACRO,
-        is_macro=True,
+        dataset_id=ADJ_TABLE,
+        relation=ADJ_TABLE,
+        is_macro=False,
         mode=SourceMode.GRID,
         axis=SourceAxis.TICKER,
         key_column="ticker",
@@ -194,7 +194,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         pick_order=None,
         lag_sessions=0,
         lag_basis=_ADJ_LAG_BASIS,
-        requires=(PRICE_TABLE, FACTOR_TABLE, ADJ_MACRO),
+        requires=(ADJ_TABLE,),
         frequency="daily",
     ),
     SourceSpec(
@@ -543,7 +543,9 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
             "원주가 세션 확정 + 계수 available_date(min(공시 접수일, apply_date 다음 세션))"
         ),
         evidence=(
-            "equity.duckdb v_adj_price_fwd(as_of) ← price_daily × adj_factor × trading_calendar"
+            "price_adj_daily.adj_close ← price_daily × adj_factor × security_span (S23 표). "
+            "카탈로그 매크로 v_adj_price_fwd 는 같은 값을 내는 읽기 경로일 뿐이고, 이 필드는 "
+            "표를 직접 읽으므로 카탈로그가 낡거나 없어도 살아 있다"
         ),
     ),
     # ── fin_std (FIELD_MAP §2 financial.*) ───────────────────────────────────

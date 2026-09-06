@@ -197,7 +197,7 @@ def test_required_columns_는_프로파일에서_유도된다(built) -> None:
     """선언은 field_id 만 말한다 — 컬럼은 `dataset_profile` 조인이 채운다."""
     _, r = built
     (cols,), = _rows(r.out_dir, "SELECT required_columns FROM fr WHERE factor_id = 'M01'")
-    assert list(cols) == ["v_adj_price_fwd.adj_close"]
+    assert list(cols) == ["price_adj_daily.adj_close"]
     (cols,), = _rows(r.out_dir, "SELECT required_columns FROM fr WHERE factor_id = 'Q01'")
     assert list(cols) == ["fin_std.net_income", "fin_std.total_equity"]
     (cols,), = _rows(r.out_dir, "SELECT required_columns FROM fr WHERE factor_id = 'F01'")

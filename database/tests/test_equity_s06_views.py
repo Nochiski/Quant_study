@@ -292,7 +292,7 @@ def test_전방조정을_나눗셈으로_뒤집으면_분할일_조정수익률�
     −99.96%."""
     assert _FWD_DIVIDED != views.TEMPLATES["v_adj_price_fwd"]
     src = {t: views.parquet_source(published[0], t)
-           for t in ("price_daily", "adj_factor", "trading_calendar")}
+           for t in ("price_daily", "adj_factor", "trading_calendar", "security_span")}
     q = ("SELECT adj_close FROM v_adj_price_fwd(DATE '2018-06-01') WHERE ticker = '005930' "
          "AND date = DATE '{d}'")
 

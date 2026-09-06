@@ -22,7 +22,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.5.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.6.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -37,6 +37,13 @@ RULES_VERSION = "e1.5.0"                # BuildRecord.rules_version 에 실린�
 #         6필드를 선언하고 `rules_s19.SOURCE_TABLES` 가 22 → 25 로 늘었다. 세 격자 테이블의 산출은
 #         그대로지만 `dataset_profile` 66 → 72행 · `factor_readiness` 판정(31/23 → 35/19)이
 #         바뀐다.
+# e1.6.0: S23 — 전방 조정가 표 `price_adj_daily` 신설(28번째 테이블). 두 가지가 산출을 바꾼다:
+#         ① 전방 조정 매크로 `v_adj_price_fwd`·`v_adj_volume_fwd` 의 누적을 `security_span`
+#            구간 안으로 제한(재상장 2종의 이전 구간 계수 누출 제거) — `_asof/` 표본이 달라질 수
+#            있어 EG5c 는 `catalog --rebase-asof` 승인이 필요하다
+#         ② `price.adj_close` 필드 선언의 소유 테이블이 `adj_factor`(뷰) → `price_adj_daily`(표)
+#            로 옮겨 `dataset_profile` 행의 `table_name`·`available_date_basis`·`coverage_basis`
+#            가 바뀐다(행수 72 는 그대로). `rules_s19.SOURCE_TABLES` 25 → 26.
 
 # DESIGN §1 — stage 4종 + equity 신설 convention
 BASIS_VOCAB: tuple[str, ...] = ("measured", "derived", "convention", "default", "unknown")

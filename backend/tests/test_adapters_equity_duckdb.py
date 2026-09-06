@@ -546,29 +546,42 @@ def test_backtest_dataset_refuses_unknown_and_index_ids(adapter: EquityDuckdbAda
 # ── 카탈로그·환경 실패 ────────────────────────────────────────────────────────
 
 
-def test_missing_or_stale_catalog_makes_adj_close_unavailable(tmp_path: Path) -> None:
+def test_missing_or_stale_catalog_makes_macro_fields_unavailable(tmp_path: Path) -> None:
+    """카탈로그가 없거나 낡으면 **매크로를 읽는 필드만** 빠진다.
+
+    S23(2026-09-06) 전에는 `price.adj_close` 가 여기 끼어 있었다 — 매크로 `v_adj_price_fwd` 를
+    읽었기 때문이다. 조정가가 표(`price_adj_daily`)가 되면서 그 의존이 끊겼고, 이제 카탈로그가
+    통째로 없어도 조정가는 답한다. 남은 매크로 필드는 `financial.*`(v_fin_latest)·
+    `consensus.forward_*`·`consensus.eps_dispersion`(v_consensus) 다.
+    """
     root = build_workbench_root(tmp_path / "equity", catalog=False)
     without = EquityDuckdbAdapter(root)
     # 매크로가 없으면 그 매크로를 읽는 원천의 필드가 전부 빠진다 — 테이블 원천은 남는다
     served = {p.field_id for p in without.list_fields()}
     assert "price.close" in served and "consensus.target_price" in served
-    assert not served & {"price.adj_close", "financial.book_equity", "consensus.forward_eps"}
-    denied = _raw(without, fields=("price.adj_close",))
+    assert "price.adj_close" in served              # 표를 읽는다 — 카탈로그와 무관
+    assert not served & {"financial.book_equity", "consensus.forward_eps"}
+    denied = _raw(without, fields=("financial.book_equity",))
     assert denied.status is DataLoadStatus.INVALID_QUERY
     assert denied.detail is not None and "catalog file missing" in denied.detail
+    # 조정가는 카탈로그 없이도 답하고 값도 같다(전방 조정은 (security, date) 의 순수 함수)
+    served_adj = _raw(without, fields=("price.adj_close",))
+    assert served_adj.ok
+    assert _field(served_adj, WB_SPLIT_DATE, "000660:1", "price.adj_close") == 104_000.0
     assert _raw(without, fields=("price.close",)).ok  # 나머지 필드는 카탈로그 없이도 답한다
 
     write_catalog(root, snapshot="deadbeefdeadbeef")
     stale = EquityDuckdbAdapter(root)
-    result = _raw(stale, fields=("price.adj_close",))
+    result = _raw(stale, fields=("financial.book_equity",))
     assert result.status is DataLoadStatus.INVALID_QUERY
     assert result.detail is not None and "catalog is stale" in result.detail
+    assert _raw(stale, fields=("price.adj_close",)).ok
     # snapshot_id 는 meta 가 아니라 MANIFEST 에서 온다
     assert stale.snapshot().snapshot_id == snapshot_id(table_builds(root))
 
     write_catalog(root, with_macros=False)
     skipped = EquityDuckdbAdapter(root)
-    result = _raw(skipped, fields=("price.adj_close",))
+    result = _raw(skipped, fields=("financial.book_equity",))
     assert result.detail is not None and "macros_skipped" in result.detail
 
 

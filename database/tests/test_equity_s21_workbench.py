@@ -1,8 +1,8 @@
 """S21 본판 — 절단본 체인 위에서 워크벤치 `equity_duckdb` 어댑터·컨테이너·MVP-B 백테스트 왕복
 (EQUITY_WORKFLOW §3-5 · DESIGN §7 · §10 P25/P40).
 
-체인 **19테이블**(`trading_calendar`→`corp`→`security`→`security_span`→`corp_ticker`→`price_daily`→
-`corp_event`→`adj_factor`→`universe_daily`→`universe_policy`→`disclosure_version`→`fin_std`→
+체인 **20테이블**(`trading_calendar`→`corp`→`security`→`security_span`→`corp_ticker`→`price_daily`→
+`corp_event`→`adj_factor`→**`price_adj_daily`**→`universe_daily`→`universe_policy`→`disclosure_version`→`fin_std`→
 `holder_daily`→`dividend_event`→`consensus_daily`→`opinion_daily`→**`flow_daily`→`short_daily`→
 `credit_daily`**) + `catalog.publish`(매크로 8)를 스크래치에 짓고, 같은 모노레포의
 `backend/src`(`contract.default_engine_src()`) 에서 워크벤치 어댑터를 import 한다 —
@@ -57,6 +57,7 @@ from equity import (
     rules_s16,
     rules_s17,
     rules_s18,
+    rules_s23,
 )
 from equity.baseline import Baseline, load
 
@@ -65,6 +66,7 @@ pytest.importorskip("numpy", reason="strategy_workbench 부팅이 backtest_engin
 STAGE_SLICE = Path(__file__).parent / "fixtures" / "stage_slice"
 CHAIN = (rules_s02.TRADING_CALENDAR, rules_s01.CORP, rules_s01.SECURITY, rules_s02.SECURITY_SPAN,
          rules_s01.CORP_TICKER, rules_s04.PRICE_DAILY, rules_s05.CORP_EVENT, rules_s06.ADJ_FACTOR,
+         rules_s23.PRICE_ADJ_DAILY,
          rules_s03.UNIVERSE_DAILY, rules_s03.UNIVERSE_POLICY,
          rules_s11.DISCLOSURE_VERSION, rules_s12.FIN_STD,
          rules_s15.HOLDER_DAILY, rules_s16.DIVIDEND_EVENT,

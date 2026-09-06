@@ -18,7 +18,7 @@ grain `field_id` — 어댑터 `list_fields()`(`DatasetFieldProfile`)의 원천�
 선언표라 EG1 은 `skip(declaration_table)`(GATES §3 ㉒), 차원표라 프레임 EG2 는
 `skip(dimension_table)` 이고 **EG2-P04/P06/P07 은 `EG2_dataset_profile` 이 대신 판정**한다.
 
-입력은 **전 equity 테이블 25개**다(`SOURCE_TABLES`). 셋을 한꺼번에 얻기 위해서다:
+입력은 **전 equity 테이블 26개**다(`SOURCE_TABLES`). 셋을 한꺼번에 얻기 위해서다:
   ① 필드의 값 컬럼(커버 실측) ② `universe_daily` 격자(커버율 분모·시총 분위) ③ 각 파티션
   `_meta.lag_known_inputs`(EG2-P04 의 stage `lag_known=false` 모집단 — 이 맵이 아니면 SQL 로
   stage 판본을 볼 방법이 없다). 그래서 6단계는 S08~S18 이 전부 커밋된 뒤에만 돈다.
@@ -63,6 +63,7 @@ from . import (
     rules_s16,  # noqa: F401
     rules_s17,  # noqa: F401
     rules_s18,  # noqa: F401
+    rules_s23,  # noqa: F401
 )
 from .gates import EquityGateContext
 from .model import (
@@ -78,14 +79,15 @@ from .model import (
 SQL_DIR = Path(__file__).parent / "sql"
 TABLE_NAME = "dataset_profile"
 
-# 프로파일이 훑는 equity 테이블 — 6단계 선행(S01~S18) 산출 전부. 목록을 코드에 고정하는 이유는
+# 프로파일이 훑는 equity 테이블 — 6단계 선행(S01~S18 · S23) 산출 전부. 목록을 코드에 고정하는 이유는
 # `RULES` 를 그대로 쓰면 T0 샘플(`sample_table`)이나 import 순서에 따라 집합이 흔들리기 때문이다.
 SOURCE_TABLES: tuple[str, ...] = (
     "adj_factor", "audit_opinion", "consensus_daily", "corp", "corp_event", "corp_ticker",
     "credit_daily", "disclosure_version", "dividend_event", "fin_std", "flow_daily",
     "holder_daily", "index_daily", "opinion_broker_daily", "opinion_daily", "ownership_snapshot",
-    "price_daily", "security", "security_span", "shares_outstanding", "short_daily",
-    "trading_calendar", "treasury_stock", "universe_daily", "universe_policy",
+    "price_adj_daily", "price_daily", "security", "security_span", "shares_outstanding",
+    "short_daily", "trading_calendar", "treasury_stock", "universe_daily",
+    "universe_policy",
 )
 # 격자 분모·시총 분위 축. 창 폴백의 마지막 단계는 캘린더다.
 GRID_TABLE = "universe_daily"

@@ -517,8 +517,10 @@ SELECT p.ticker, p.date, p.open, p.high, p.low, p.close, p.volume_shr, p.price_k
 FROM {price_daily} p
 JOIN v_cum_adj(as_of, lag_override := lag_override) c ON c.ticker = p.ticker AND c.date = p.date
 """
-# 전방 조정(S21 후속) — `equity.views._FWD_CTE` + `v_adj_price_fwd` 본문 사본. 계수는 fold_date =
-# greatest(apply_date, available_date) 부터 앞으로 누적해 곱한다(공개 전 계수는 접지 않는다).
+# 전방 조정(S21 후속 · S23 구간 제한) — `equity.views._FWD_CTE` + `v_adj_price_fwd` 본문 사본.
+# 계수는 fold_date = greatest(apply_date, available_date) 부터 앞으로 누적해 곱하고(공개 전 계수는
+# 접지 않는다), 누적은 `security_span` 구간 안에서만 한다(재상장 종목의 이전 구간 계수 누출 방지).
+# 계수 쪽 구간 부여만 **엄격 부등호**라 구간 첫날에 접히는 계수는 어떤 행에도 곱해지지 않는다.
 _ADJ_PRICE_FWD_SQL = """
 WITH cut AS (
     SELECT k.date AS cutoff
@@ -526,30 +528,47 @@ WITH cut AS (
           FROM {trading_calendar} WHERE date <= as_of) k
     WHERE k.n = coalesce(lag_override, 0)
 ),
-fac AS (
+vis AS (
     SELECT ticker, greatest(apply_date, available_date) AS fold_date,
-           product(price_factor) AS pf, product(share_factor) AS sf,
-           max(available_date) AS available_date
+           price_factor, share_factor, available_date
     FROM {adj_factor}
     WHERE factor_ok AND apply_date <= as_of AND available_date <= (SELECT cutoff FROM cut)
-    GROUP BY ticker, greatest(apply_date, available_date)
+),
+spn AS (
+    SELECT f.ticker, coalesce(s.span_seq, -1) AS span_seq, f.fold_date,
+           f.price_factor, f.share_factor, f.available_date
+    FROM vis f
+    ASOF LEFT JOIN {security_span} s ON s.ticker = f.ticker AND f.fold_date > s.first_date
+),
+fac AS (
+    SELECT ticker, span_seq, fold_date,
+           product(price_factor) AS pf, product(share_factor) AS sf,
+           max(available_date) AS available_date
+    FROM spn
+    GROUP BY ticker, span_seq, fold_date
 ),
 pre AS (
-    SELECT ticker, fold_date,
+    SELECT ticker, span_seq, fold_date,
            product(pf) OVER w AS cum_price_factor,
            product(sf) OVER w AS cum_share_factor,
            max(available_date) OVER w AS available_date
     FROM fac
-    WINDOW w AS (PARTITION BY ticker ORDER BY fold_date
+    WINDOW w AS (PARTITION BY ticker, span_seq ORDER BY fold_date
                  ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+),
+px AS (
+    SELECT p.*, coalesce(s.span_seq, 0) AS span_seq
+    FROM (SELECT * FROM {price_daily} WHERE date <= as_of) p
+    ASOF LEFT JOIN {security_span} s ON s.ticker = p.ticker AND p.date >= s.first_date
 ),
 fwd AS (
     SELECT p.ticker, p.date, p.open, p.high, p.low, p.close, p.volume_shr, p.price_kind,
            coalesce(c.cum_price_factor, 1) AS cum_price_factor,
            coalesce(c.cum_share_factor, 1) AS cum_share_factor,
            greatest(p.date, coalesce(c.available_date, p.date)) AS available_date
-    FROM (SELECT * FROM {price_daily} WHERE date <= as_of) p
-    ASOF LEFT JOIN pre c ON c.ticker = p.ticker AND p.date >= c.fold_date
+    FROM px p
+    ASOF LEFT JOIN pre c
+      ON c.ticker = p.ticker AND c.span_seq = p.span_seq AND p.date >= c.fold_date
 )
 SELECT ticker, date, open, high, low, close, volume_shr, price_kind,
        cum_price_factor, cum_share_factor, available_date,
@@ -558,6 +577,90 @@ SELECT ticker, date, open, high, low, close, volume_shr, price_kind,
        low   * cum_share_factor AS adj_low,
        close * cum_share_factor AS adj_close
 FROM fwd
+"""
+
+# `price_adj_daily`(S23) 산출 사본 — `database/src/equity/sql/price_adj_daily.sql` 과 같은 식이다.
+# 매크로가 아니라 **표**라 카탈로그와 무관하게 산다(`price.adj_close` 가 여기서 나온다).
+_PRICE_ADJ_DAILY_SQL = """
+WITH px AS (
+    SELECT p.ticker, p.date, p.open, p.high, p.low, p.close, p.volume_shr,
+           coalesce(s.span_seq, 0) AS span_seq
+    FROM {price_daily} p
+    ASOF LEFT JOIN {security_span} s ON s.ticker = p.ticker AND p.date >= s.first_date
+),
+okf AS (
+    SELECT f.ticker, greatest(f.apply_date, f.available_date) AS fold_date,
+           f.price_factor, f.share_factor, f.available_date
+    FROM {adj_factor} f WHERE f.factor_ok
+),
+oks AS (
+    SELECT o.ticker, coalesce(s.span_seq, -1) AS span_seq, o.fold_date,
+           o.price_factor, o.share_factor, o.available_date
+    FROM okf o
+    ASOF LEFT JOIN {security_span} s ON s.ticker = o.ticker AND o.fold_date > s.first_date
+),
+fac AS (
+    SELECT ticker, span_seq, fold_date,
+           product(price_factor) AS pf, product(share_factor) AS sf,
+           count(*) AS n_fac, max(available_date) AS avail
+    FROM oks GROUP BY ticker, span_seq, fold_date
+),
+cum AS (
+    SELECT ticker, span_seq, fold_date,
+           product(pf) OVER w AS cum_price_factor,
+           product(sf) OVER w AS cum_share_factor,
+           sum(n_fac)  OVER w AS n_factors_applied,
+           max(avail)  OVER w AS factor_available_date
+    FROM fac
+    WINDOW w AS (PARTITION BY ticker, span_seq ORDER BY fold_date
+                 ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+),
+badf AS (SELECT e.ticker, e.apply_date FROM {adj_factor} e WHERE NOT e.factor_ok),
+bads AS (
+    SELECT b.ticker, coalesce(s.span_seq, -1) AS span_seq, b.apply_date
+    FROM badf b
+    ASOF LEFT JOIN {security_span} s ON s.ticker = b.ticker AND b.apply_date >= s.first_date
+),
+bad AS (
+    SELECT ticker, span_seq, apply_date, count(*) AS n_bad FROM bads
+    GROUP BY ticker, span_seq, apply_date
+),
+badcum AS (
+    SELECT ticker, span_seq, apply_date,
+           sum(n_bad) OVER (PARTITION BY ticker, span_seq ORDER BY apply_date
+                            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+             AS n_unadjusted_events
+    FROM bad
+),
+joined AS (
+    SELECT p.ticker, p.date, p.span_seq, p.open, p.high, p.low, p.close, p.volume_shr,
+           coalesce(c.cum_price_factor, 1)  AS cum_price_factor,
+           coalesce(c.cum_share_factor, 1)  AS cum_share_factor,
+           coalesce(c.n_factors_applied, 0) AS n_factors_applied,
+           c.factor_available_date
+    FROM px p
+    ASOF LEFT JOIN cum c
+      ON c.ticker = p.ticker AND c.span_seq = p.span_seq AND p.date >= c.fold_date
+),
+unadj AS (
+    SELECT j.*, coalesce(b.n_unadjusted_events, 0) AS n_unadjusted_events
+    FROM joined j
+    ASOF LEFT JOIN badcum b
+      ON b.ticker = j.ticker AND b.span_seq = j.span_seq AND j.date >= b.apply_date
+)
+SELECT u.ticker, u.date,
+       u.open       * u.cum_share_factor  AS adj_open,
+       u.high       * u.cum_share_factor  AS adj_high,
+       u.low        * u.cum_share_factor  AS adj_low,
+       u.close      * u.cum_share_factor  AS adj_close,
+       u.volume_shr * u.cum_price_factor  AS adj_volume_shr,
+       u.cum_price_factor, u.cum_share_factor,
+       CAST(u.n_factors_applied AS BIGINT)   AS n_factors_applied,
+       CAST(u.n_unadjusted_events AS BIGINT) AS n_unadjusted_events,
+       greatest(u.date, coalesce(u.factor_available_date, u.date)) AS available_date,
+       'derived' AS available_basis
+FROM unadj u
+ORDER BY u.ticker, u.date
 """
 # 컨센서스 뷰(S17) — `equity.views.TEMPLATES['v_consensus']` 본문 사본. `available_date` 로만
 # 자르고 겹치는 달의 wise·v3 2행을 먼저 알 수 있던 한 행으로 접는다(obs_month 로 자르지 않는다).
@@ -670,10 +773,11 @@ LEFT JOIN (SELECT rcept_no, first_correction_dt FROM {disclosure_version}) d
 
 # 시그니처 → (본문, 읽는 테이블). `equity.views.SIGNATURES`·`MACRO_INPUTS` 의 사본이다.
 _PRICE_INPUTS = ("price_daily", "adj_factor", "trading_calendar")
+_FWD_INPUTS = ("price_daily", "adj_factor", "trading_calendar", "security_span")
 _CATALOG_BODIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("v_cum_adj(as_of, lag_override := NULL)", _CUM_ADJ_SQL, _PRICE_INPUTS),
     ("v_adj_price(as_of, lag_override := NULL)", _ADJ_PRICE_SQL, _PRICE_INPUTS),
-    ("v_adj_price_fwd(as_of, lag_override := NULL)", _ADJ_PRICE_FWD_SQL, _PRICE_INPUTS),
+    ("v_adj_price_fwd(as_of, lag_override := NULL)", _ADJ_PRICE_FWD_SQL, _FWD_INPUTS),
     (
         "v_consensus(as_of, lag_override := NULL)",
         _CONSENSUS_SQL,
@@ -714,6 +818,28 @@ def _partition_source(root: Path, table: str, build_id: str) -> str:
         for p in record["partitions"]
     )
     return f"read_parquet([{globs}], hive_partitioning=false)"
+
+
+def price_adj_table(root: Path) -> pa.Table:
+    """`price_adj_daily`(S23) — 이미 쓴 `price_daily`·`adj_factor`·`security_span` 위에서 굽는다.
+
+    `price.adj_close` 의 산출처다. 손으로 값을 적지 않고 실물과 같은 식(`_PRICE_ADJ_DAILY_SQL`)을
+    돌린다 — 그래야 분할·재상장 구간의 기대값이 어댑터 테스트의 손계산과 갈리지 않는다.
+    """
+    import duckdb  # 테스트 전용 — backend optional extra `equity`
+
+    builds = table_builds(root)
+    tables = ("price_daily", "adj_factor", "security_span")
+    absent = [name for name in tables if name not in builds]
+    if absent:
+        raise ValueError(f"price_adj_daily needs these equity tables first: missing={absent} "
+                         f"root={root} built={sorted(builds)}")
+    sources = {name: _partition_source(root, name, builds[name]) for name in tables}
+    con = duckdb.connect()
+    try:
+        return con.execute(_PRICE_ADJ_DAILY_SQL.format(**sources)).to_arrow_table()
+    finally:
+        con.close()
 
 
 def write_catalog(root: Path, *, snapshot: str | None = None, with_macros: bool = True) -> Path:
@@ -1009,6 +1135,8 @@ def build_workbench_root(root: Path, *, catalog: bool = True) -> Path:
             [(t, WB_CORP.get(t), t != "005935") for t in sorted(WB_SEC_TYPES)]
         ),
     )
+    # 전방 조정가 표(S23) — price_daily·adj_factor·security_span 이 먼저 있어야 한다
+    write_equity_table(root, "price_adj_daily", price_adj_table(root), year_column="date")
     write_equity_table(root, "fin_std", fin_std_table(WB_FIN_ROWS), year_column="period_end")
     write_equity_table(
         root,

@@ -14,7 +14,7 @@ mkdir -p "$OUT"
 SUM="$OUT/summary.tsv"
 : > "$SUM"
 
-ORDER="trading_calendar corp security security_span corp_ticker index_daily price_daily corp_event adj_factor universe_daily universe_policy flow_daily short_daily credit_daily disclosure_version fin_std holder_daily ownership_snapshot audit_opinion shares_outstanding treasury_stock dividend_event consensus_daily opinion_daily opinion_broker_daily dataset_profile factor_readiness"
+ORDER="trading_calendar corp security security_span corp_ticker index_daily price_daily corp_event adj_factor price_adj_daily universe_daily universe_policy flow_daily short_daily credit_daily disclosure_version fin_std holder_daily ownership_snapshot audit_opinion shares_outstanding treasury_stock dividend_event consensus_daily opinion_daily opinion_broker_daily dataset_profile factor_readiness"
 
 T_ALL0=$(date +%s)
 for t in $ORDER; do

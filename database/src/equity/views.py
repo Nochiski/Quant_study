@@ -26,7 +26,8 @@ as-of 규칙 (DESIGN §5): `v_cum_adj(as_of, lag_override := NULL)` —
 전방 조정 (S21 후속, 사용자 결정 09-05 "전방 조정으로 바꾸는 쪽으로 가자" — FIELD_MAP
 `price.adj_close`):
   `v_adj_price_fwd(as_of, lag_override := NULL)` —
-  adj_close_fwd(d) = close(d) × Π(share_factor : factor_ok ∧ apply_date ≤ d ∧ available_date ≤ d
+  adj_close_fwd(d) = close(d) × Π(share_factor : factor_ok ∧ **같은 security_span 구간** ∧
+                                                 apply_date ≤ d ∧ available_date ≤ d
                                                  ∧ available_date ≤ cutoff),
   즉 종목의 **첫 관측 수준을 고정**하고 사건마다 이후 가격을 누적 배수로 올린다(시총 불변 사건은
   share_factor = 1/price_factor 라 위 `v_adj_price` 의 역수 축과 같은 값). 삼성전자 2018-05-03 =
@@ -79,8 +80,8 @@ MACRO_INPUTS: dict[str, tuple[str, ...]] = {
     "v_adj_price": ("price_daily", "adj_factor", "trading_calendar"),
     "v_adj_volume": ("price_daily", "adj_factor", "trading_calendar"),
     "v_firm_mktcap": ("price_daily", "corp_ticker"),
-    "v_adj_price_fwd": ("price_daily", "adj_factor", "trading_calendar"),
-    "v_adj_volume_fwd": ("price_daily", "adj_factor", "trading_calendar"),
+    "v_adj_price_fwd": ("price_daily", "adj_factor", "trading_calendar", "security_span"),
+    "v_adj_volume_fwd": ("price_daily", "adj_factor", "trading_calendar", "security_span"),
     "v_consensus": ("consensus_daily", "trading_calendar"),
     "v_fin_latest": ("fin_std", "disclosure_version", "trading_calendar"),
 }
@@ -89,8 +90,18 @@ MACRO_DEPENDS: dict[str, tuple[str, ...]] = {
     "v_adj_price": ("v_cum_adj",), "v_adj_volume": ("v_cum_adj",)}
 
 # 전방 조정 공통 CTE — `v_adj_price_fwd`·`v_adj_volume_fwd` 가 같은 본문을 쓴다(매크로는 둘,
-# 정의는 하나). 계수를 (ticker, fold_date) 로 접고(같은 날 두 이벤트 = 곱) 앞에서부터 누적한 뒤
-# ASOF JOIN 으로 '이 날 이전 마지막 접는 세션' 의 누적값을 붙인다 — 행별 GROUP BY 없음.
+# 정의는 하나). 계수를 (ticker, span_seq, fold_date) 로 접고(같은 날 두 이벤트 = 곱) 앞에서부터
+# 누적한 뒤 ASOF JOIN 으로 '이 날 이전 마지막 접는 세션' 의 누적값을 붙인다 — 행별 GROUP BY 없음.
+#
+# **누적은 `security_span` 구간 안에서만** 한다(S23, 2026-09-06). 재상장 2종(036220·101970)에서
+# 이전 구간의 계수가 새 구간으로 넘어오면 새 구간의 수준이 통째로 틀어진다 — 전방 조정의 앵커는
+# 그 구간의 첫 관측이지 폐지 전 옛 구간이 아니다. 구간 부여는 ASOF 이고, 계수 쪽만 **엄격
+# 부등호**(`fold_date > first_date`)라 구간 첫날에 접히는 계수는 앵커와 같은 날이 되어 어떤 행에도
+# 곱해지지 않는다(그래야 "구간 첫 행 누적 = 1" 이 선다). 구간이 없는 계수는 span_seq −1 로
+# 밀어 어떤 가격 행(span_seq ≥ 0)과도 만나지 않게 한다.
+# **표 `price_adj_daily`(S23)가 같은 규칙의 저장본**이고, 그 표의 EG3_price_adj_daily 가 매 빌드
+# 기본 랙에서 두 산출의 동일성을 증명한다. 표를 읽는 얇은 매크로로 합치지 않은 이유는
+# `lag_override` 다 — 기본값 밖 랙에서는 계수 컷오프를 다시 계산해야 하는데 표에는 랙 축이 없다.
 _FWD_CTE = """
 WITH cut AS (
     SELECT k.date AS cutoff
@@ -98,30 +109,47 @@ WITH cut AS (
           FROM {trading_calendar} WHERE date <= as_of) k
     WHERE k.n = coalesce(lag_override, {lag_factor})
 ),
-fac AS (
+vis AS (
     SELECT ticker, greatest(apply_date, available_date) AS fold_date,
-           product(price_factor) AS pf, product(share_factor) AS sf,
-           max(available_date) AS available_date
+           price_factor, share_factor, available_date
     FROM {adj_factor}
     WHERE factor_ok AND apply_date <= as_of AND available_date <= (SELECT cutoff FROM cut)
-    GROUP BY ticker, greatest(apply_date, available_date)
+),
+spn AS (
+    SELECT f.ticker, coalesce(s.span_seq, -1) AS span_seq, f.fold_date,
+           f.price_factor, f.share_factor, f.available_date
+    FROM vis f
+    ASOF LEFT JOIN {security_span} s ON s.ticker = f.ticker AND f.fold_date > s.first_date
+),
+fac AS (
+    SELECT ticker, span_seq, fold_date,
+           product(price_factor) AS pf, product(share_factor) AS sf,
+           max(available_date) AS available_date
+    FROM spn
+    GROUP BY ticker, span_seq, fold_date
 ),
 pre AS (
-    SELECT ticker, fold_date,
+    SELECT ticker, span_seq, fold_date,
            product(pf) OVER w AS cum_price_factor,
            product(sf) OVER w AS cum_share_factor,
            max(available_date) OVER w AS available_date
     FROM fac
-    WINDOW w AS (PARTITION BY ticker ORDER BY fold_date
+    WINDOW w AS (PARTITION BY ticker, span_seq ORDER BY fold_date
                  ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+),
+px AS (
+    SELECT p.*, coalesce(s.span_seq, 0) AS span_seq
+    FROM (SELECT * FROM {price_daily} WHERE date <= as_of) p
+    ASOF LEFT JOIN {security_span} s ON s.ticker = p.ticker AND p.date >= s.first_date
 ),
 fwd AS (
     SELECT p.ticker, p.date, p.open, p.high, p.low, p.close, p.volume_shr, p.price_kind,
            coalesce(c.cum_price_factor, 1) AS cum_price_factor,
            coalesce(c.cum_share_factor, 1) AS cum_share_factor,
            greatest(p.date, coalesce(c.available_date, p.date)) AS available_date
-    FROM (SELECT * FROM {price_daily} WHERE date <= as_of) p
-    ASOF LEFT JOIN pre c ON c.ticker = p.ticker AND p.date >= c.fold_date
+    FROM px p
+    ASOF LEFT JOIN pre c
+      ON c.ticker = p.ticker AND c.span_seq = p.span_seq AND p.date >= c.fold_date
 )
 """
 

@@ -47,6 +47,7 @@ from . import (
     rules_s18,  # noqa: F401  # reason: 등록 부작용 — S18 의견·목표가 opinion_daily·broker
     rules_s19,  # noqa: F401  # reason: 등록 부작용 — S19 공개시점 대장 dataset_profile
     rules_s20,  # noqa: F401  # reason: 등록 부작용 — S20 팩터 준비도 factor_readiness
+    rules_s23,  # noqa: F401  # reason: 등록 부작용 — S23 전방 조정가 price_adj_daily
     rules_sample,  # noqa: F401  # reason: T0 샘플 테이블
 )
 from .model import RULES

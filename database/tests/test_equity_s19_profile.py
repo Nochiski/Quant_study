@@ -1,8 +1,8 @@
 """S19 `dataset_profile` — stage 절단본 위 전 테이블 체인 → 실제 `build_table` 왕복
 (DESIGN v1.2 §4-7 · GATES v1.0 §2 27행 · §3 ㉒ · §4 FX-6-001~008 · EG2-P04/P06/P07 · EG9-P06).
 
-이 슬라이스는 **전 equity 테이블(25)을 입력으로 고정**하므로 체인 전체를 먼저 지어야 한다. 느려서
-모듈 픽스처로 한 번만 짓는다(절단본 25테이블 약 20초).
+이 슬라이스는 **전 equity 테이블(26)을 입력으로 고정**하므로 체인 전체를 먼저 지어야 한다. 느려서
+모듈 픽스처로 한 번만 짓는다(절단본 26테이블 약 20초).
 
 절단본 실측(2026-09-06 S19-2): 프로파일 **72행**(FIELD_MAP §2 어휘 30 · equity 내부 스코프 42),
 격리 0, `price.*` 커버 100%(`open`·`high`·`low` 99.16%) · 컨센서스·의견 종목 커버 33.33%(15 중 5) ·
@@ -38,7 +38,8 @@ SRC = Path(rules_s19.__file__).parent
 # 6단계 선행 — WORKFLOW §3-2 의 순서 그래프를 그대로 편 것(입력이 먼저 커밋돼야 pin 이 된다).
 CHAIN: tuple[str, ...] = (
     "trading_calendar", "corp", "security", "corp_ticker", "security_span", "index_daily",
-    "price_daily", "corp_event", "adj_factor", "universe_daily", "universe_policy",
+    "price_daily", "corp_event", "adj_factor", "price_adj_daily",
+    "universe_daily", "universe_policy",
     # 격자 3(S08~S10) — `universe_daily` 격자와 `price_daily`(credit 게이트 축) 뒤
     "flow_daily", "short_daily", "credit_daily",
     "disclosure_version", "fin_std", "holder_daily", "ownership_snapshot", "audit_opinion",
@@ -73,7 +74,7 @@ def build_chain(equity_root: Path, tables: tuple[str, ...] = CHAIN) -> None:
 
 @pytest.fixture(scope="module")
 def built(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, build.BuildResult]:
-    """체인 25 + `dataset_profile` 1회. 읽기 전용 검사가 여럿이라 모듈에서 한 번만 짓는다."""
+    """체인 26 + `dataset_profile` 1회. 읽기 전용 검사가 여럿이라 모듈에서 한 번만 짓는다."""
     eq = tmp_path_factory.mktemp("s19") / "equity"
     build_chain(eq)
     r = build.build_table(rules_s19.DATASET_PROFILE, STAGE_SLICE, eq, SEED,
@@ -181,9 +182,9 @@ def test_랙은_문서가_아니라_rules_선언에서_온다(built) -> None:
     assert got["price.close"] == 0 and got["price.adj_close"] == 0
     # shares_out 이 stg_listing_daily(stage lag_known=false)에서 오므로 1 세션 (FIELD_MAP §2)
     assert got["price.market_cap"] == 1 and got["price.shares_outstanding"] == 1
-    from equity import rules_s04, rules_s06
+    from equity import rules_s04, rules_s23
     decl = {f.field_id: f.recommended_lag_sessions
-            for f in (*rules_s04.FIELDS, *rules_s06.FIELDS_ADJ)}
+            for f in (*rules_s04.FIELDS, *rules_s23.FIELDS)}
     assert {k: decl[k] for k in got} == got
 
 
@@ -260,13 +261,19 @@ def test_stage_원천은_equity_입력을_타고_전개된다() -> None:
     assert all(t.startswith("stg_") for t in closure)
 
 
-def test_뷰_필드는_산출처를_뷰_이름으로_밝힌다(built) -> None:
+def test_조정가_필드의_산출처는_뷰가_아니라_표다(built) -> None:
+    """S23(09-06) 전까지는 매크로 `v_adj_price_fwd` 가 산출처였다 — 카탈로그가 낡으면 필드가
+    통째로 unavailable 이 되던 자리이고, 표가 생기면서 소유가 옮겨 갔다."""
     _, r = built
     (table, basis), = _rows(r.out_dir, "SELECT table_name, available_date_basis FROM dp "
                                        "WHERE field_id = 'price.adj_close'")
-    assert table == "v_adj_price_fwd"
-    # 원주가(default) × 계수(derived) 를 함께 보는 뷰라 두 어휘가 합쳐진다 (DESIGN §5)
-    assert basis == "default|derived"
+    assert table == "price_adj_daily"
+    # 표의 available_basis 하나다 — 행의 available_date 가 구성 행의 max 라 'derived' 다
+    assert basis == "derived"
+    # 뷰 필드(`view_name`)를 선언하는 테이블은 이제 없다
+    from equity.model import RULES
+    assert not [fp.field_id for rule in RULES.values() for fp in rule.field_profiles
+                if fp.view_name is not None]
 
 
 def test_cell_kind_는_엔진_어휘를_쓴다(built) -> None:

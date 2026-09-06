@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -69,6 +70,10 @@ N_MEASURED = 24628
 N_PRE_CALENDAR = 85
 N_OFF_GRID = 9
 N_SRC_OMITTED = 62
+N_OVER_SHARES = 0                    # 절단본에는 잔고 > 상장주식수 원장 행이 없다(합성 검사)
+# 합성 잔고 이상 행 — 절단본 (161890, 2020-01-02) 융자 잔고 280,837 · 상장주식수 22,881,180
+OVER_TICKER, OVER_DATE = "161890", date(2020, 1, 2)
+OVER_VALUE = 9999999999              # DECIMAL(10,0) 상한. 어느 날 상장주식수보다도 크다
 N_NOT_COLLECTED = 12282              # 003545·003547·005935 × 4,094 (credit 유닛 0건)
 N_CLOSE_NE = 5005                    # KIS 수정종가(adjusted_asof_collect) ≠ 원주가
 # 원장 일괄 결측일 — 격자에 종목이 있는데 measured 셀이 하나도 없는 날. 0 채움 금지의 근거다.
@@ -216,7 +221,8 @@ def test_원장_행은_measured거나_격리된다(built: build.BuildResult) -> 
     assert N_SRC == N_MEASURED + N_PRE_CALENDAR + N_OFF_GRID
     m = _metrics(r, "EG1_credit_daily")
     assert m["n_ledger_delta"] == 0 and m["n_reject_outside_declared"] == 0
-    assert m["n_reject_by_reason"] == {"pre_calendar": N_PRE_CALENDAR, "off_grid": N_OFF_GRID}
+    assert m["n_reject_by_reason"] == {"pre_calendar": N_PRE_CALENDAR, "off_grid": N_OFF_GRID,
+                                      "balance_over_shares": N_OVER_SHARES}
 
 
 def test_격리는_사유별_디렉토리로_간다(built: build.BuildResult) -> None:
@@ -385,6 +391,9 @@ def test_격자_술어는_rules_선언과_SQL_리터럴이_같다() -> None:
     """`grid_predicate()` 가 SQL·EG1 우변·EG3 재계산의 단일 정의라는 것을 글자로 확인한다."""
     assert rules_s10.grid_predicate("u") in _body()          # sql/credit_daily.sql `grid` CTE
     assert f"dataset = '{rules_s10.UNIT_DATASET}'" in _body()
+    # 잔고 초과 술어도 `over` CTE·EG1 우변·EG3 재계산이 같은 정의를 쓴다
+    assert rules_s10.over_shares_predicate("c", "p") in _body()
+    assert rules_s10.over_shares_predicate("c", "p") in CREDIT.eg1_rhs_sql
     assert rules_s10.grid_predicate("u") in CREDIT.eg1_rhs_sql
     assert rules_s10.grid_predicate() in CREDIT.eg1_rhs_sql
 
@@ -420,13 +429,115 @@ def test_meta에_게이트_판정이_실린다(built: build.BuildResult) -> None
     assert meta["table"] == "credit_daily"
 
 
+def _stage_with_over_shares(tmp_path: Path) -> Path:
+    """절단본을 복사해 `(161890, 2020-01-02)` 융자 잔고주수만 상장주식수 위로 올린 stage 루트.
+
+    절단본에는 잔고 > 상장주식수 원장 행이 없어서(서버 1차 빌드 4행) 격리 경로를 합성으로 만든다.
+    `credit_daily` 가 읽는 stage 는 둘뿐(`stg_credit_daily`·`stg_units_kis`)이고 나머지 입력은
+    equity_root 에서 오므로 이 두 테이블만 복사하면 된다.
+    """
+    root = tmp_path / "stage_over"
+    for table in ("stg_credit_daily", "stg_units_kis"):
+        shutil.copytree(STAGE_SLICE / table, root / table)
+    part = next((root / "stg_credit_daily").glob(f"v=*/year={OVER_DATE.year}/*.parquet"))
+    con = duckdb.connect()
+    try:
+        con.execute(f"CREATE TEMP TABLE t AS SELECT * FROM read_parquet('{part}')")
+        con.execute(f"UPDATE t SET whol_loan_rmnd_stcn_shr = {OVER_VALUE} "
+                    f"WHERE ticker = '{OVER_TICKER}' AND date = DATE '{OVER_DATE.isoformat()}'")
+        con.execute(f"COPY t TO '{part}' (FORMAT PARQUET)")
+    finally:
+        con.close()
+    return root
+
+
+def test_잔고가_상장주식수를_넘는_원장행은_격리되고_셀은_비어_남는다(chain: Path,
+                                                                tmp_path: Path) -> None:
+    """S10 2차(09-06) — 서버 1차 빌드를 폐기시킨 4행의 처리 규약.
+
+    격리되는 것은 **원장 행**이고 격자 셀은 값 없이 남는다: 행수 등식 ⑪(a)가 유지되고,
+    원장 보존 등식 ⑪(b)는 새 사유를 항으로 받는다. 게이트는 느슨해지지 않는다 —
+    `n_balance_over_shares_out` 은 그대로 0 이어야 하고, 입력에서 다시 센 위반 행수가
+    `_reject/balance_over_shares/` 건수와 같은지까지 본다.
+    """
+    stage = _stage_with_over_shares(tmp_path)
+    r = build.build_table(CREDIT, stage, chain, SEED, build_id="b_s10_over")
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    # ⑪(a): 격자 행수 불변 · 격리는 1건 늘어난다
+    assert r.n_rows == N_GRID
+    assert r.n_reject == N_PRE_CALENDAR + N_OFF_GRID + 1
+    assert _gate(r, "EG1").metrics["delta"] == 0
+    # ⑪(b): 원장 보존 등식이 새 사유를 항으로 받는다 (measured 는 1 줄어든다)
+    b = _metrics(r, "EG1_credit_daily")
+    assert b["n_ledger_delta"] == 0
+    assert b["n_measured_cells"] == N_MEASURED - 1
+    assert b["n_reject_by_reason"] == {"pre_calendar": N_PRE_CALENDAR, "off_grid": N_OFF_GRID,
+                                       "balance_over_shares": 1}
+    # 산출 셀은 남아 있고 값이 없다
+    assert r.out_dir is not None
+    cell = _query(r.out_dir, "SELECT CAST(fill_kind AS VARCHAR), whol_loan_rmnd_stcn_shr, "
+                             "whol_stln_rmnd_stcn_shr, stlm_date FROM cd "
+                             f"WHERE ticker = '{OVER_TICKER}' AND date = DATE "
+                             f"'{OVER_DATE.isoformat()}'")
+    assert len(cell) == 1
+    kind, loan, stln, stlm = cell[0]
+    assert str(kind) == f"{{'kind': {rules_s10.REJECTED_CELL_KIND}, 'evidence': unit_ok}}"
+    assert loan is None and stln is None and stlm is None
+    # 격리된 원장 행은 원값째 보관된다
+    assert (r.out_dir / "_reject" / "reject_reason=balance_over_shares").is_dir()
+    assert _query(r.out_dir, "SELECT ticker, date, whol_loan_rmnd_stcn_shr FROM rej "
+                             "WHERE reject_reason = 'balance_over_shares'") == [
+        (OVER_TICKER, OVER_DATE, Decimal(OVER_VALUE))]
+    # 게이트는 느슨해지지 않았다 — 산출 위반 0, 입력 재계산과 격리 건수 일치
+    m = _metrics(r, "EG3_credit_daily")
+    assert m["n_balance_over_shares_out"] == 0
+    assert m["n_balance_over_shares_src"] == 1
+    assert m["n_balance_over_shares_rejected"] == 1
+    assert m["n_balance_over_shares_reject_delta"] == 0
+    assert m["n_balance_over_shares_cell_measured"] == 0
+    assert m["n_balance_over_shares_cell_missing"] == 0
+    assert m["n_src_row_without_measured"] == 0        # 격리 키는 이 술어에서 빠진다
+    assert m["n_unmeasured_value_present"] == 0
+
+
+def test_잔고_이상_원장행을_격리하지_않으면_폐기한다(chain: Path, tmp_path: Path) -> None:
+    """격리 경로를 지우면(= 서버 1차 빌드 상태) 방어가 두 겹으로 선다.
+
+    ① EG1 — 우변이 잔고 이상 원장 행을 격리 후보로 세므로 격리하지 않으면 행수 등식이 깨진다.
+    ② EG3_credit_daily — 우변까지 같이 늦춰 EG1 을 통과시켜도 `n_balance_over_shares_out` 이 잡는다.
+    """
+    stage = _stage_with_over_shares(tmp_path)
+    sql = _body().replace("    UNION ALL\n    SELECT o.date, o.ticker, 'balance_over_shares', false"
+                          "\n    FROM over o\n", "")
+    assert sql != _body()
+    sql = sql.replace("EXISTS (SELECT 1 FROM over o WHERE o.ticker = g.ticker AND o.date = g.date)",
+                      "false")
+    lax = _variant(tmp_path, "credit_no_over_reject", sql)
+    r = build.build_table(lax, stage, chain, _baseline_for(lax), build_id="b_s10_over_bad")
+    assert r.status is build.BuildStatus.GATE_FAILED
+    assert _gate(r, "EG1").status is GateStatus.FAIL
+    assert _gate(r, "EG1").metrics["delta"] == -1
+
+    # 우변까지 늦춘 변종 — EG1 은 통과하고 EG3 만이 방어선이다
+    rhs = CREDIT.eg1_rhs_sql[:CREDIT.eg1_rhs_sql.index(" + (SELECT count(*) FROM (SELECT c.ticker")]
+    lax2 = EquityTable(**{**lax.__dict__, "name": "credit_no_over_reject2", "eg1_rhs_sql": rhs})
+    r2 = build.build_table(lax2, stage, chain, _baseline_for(lax2), build_id="b_s10_over_bad2")
+    assert r2.status is build.BuildStatus.GATE_FAILED
+    assert _gate(r2, "EG1").status is GateStatus.PASS
+    g = _gate(r2, "EG3_credit_daily")
+    assert g.status is GateStatus.FAIL
+    assert g.metrics["n_balance_over_shares_out"] == 1
+    assert g.metrics["n_balance_over_shares_reject_delta"] == 1
+
 # ── 부정 픽스처 (GATES §7-5) ─────────────────────────────────────────────────
 
 def test_격자에서_한_행을_빼면_EG1이_폐기한다(chain: Path, tmp_path: Path) -> None:
-    keep = "SELECT g.date, g.ticker, NULL::VARCHAR AS reject_reason\n    FROM grid g"
+    keep = "    FROM grid g\n    UNION ALL"
     sql = _body().replace(
         keep,
-        keep + "\n    WHERE NOT (g.ticker = '005930' AND g.date = DATE '2020-01-02')")
+        "    FROM grid g\n"
+        "    WHERE NOT (g.ticker = '005930' AND g.date = DATE '2020-01-02')\n"
+        "    UNION ALL")
     assert sql != _body()
     r = _build_credit(chain, _variant(tmp_path, "credit_missing_row", sql))
     assert r.status is build.BuildStatus.GATE_FAILED
@@ -463,8 +574,8 @@ def test_measured를_미수집으로_적으면_EG1_credit_daily가_폐기한다(
                                                               tmp_path: Path) -> None:
     """⑪ (b) 전용 부정 픽스처 — 행수(a)는 그대로라 프레임 EG1 은 통과한다."""
     sql = _body().replace(
-        "CASE WHEN c.has_row    THEN 'measured'",
-        "CASE WHEN c.has_row AND NOT (c.ticker = '005930' "
+        "WHEN c.has_row    THEN 'measured'",
+        "WHEN c.has_row AND NOT (c.ticker = '005930' "
         "AND c.date = DATE '2020-01-02') THEN 'measured'")
     assert sql != _body()
     r = _build_credit(chain, _variant(tmp_path, "credit_lost_measured", sql))

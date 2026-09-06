@@ -3,8 +3,17 @@ EG7-P06 · §4 FX-3-008).
 
 3단계 격자 테이블의 첫 구현이다. 사실은 `stg_credit_daily`(KIS 신용잔고) 하나뿐이고, equity 가
 더하는 것은 셋이다 — ① 격자(캘린더 × `universe_daily`)로 **없는 날을 행으로 만든다** ②
-`stg_units_kis`(dataset='credit') 수집 로그로 그 빈칸의 이유를 `fill_kind` 로 적는다 ③ 격자 밖
-원장 행을 버리지 않고 `_reject/pre_calendar`·`_reject/off_grid` 로 격리한다.
+`stg_units_kis`(dataset='credit') 수집 로그로 그 빈칸의 이유를 `fill_kind` 로 적는다 ③ 쓸 수 없는
+원장 행을 버리지 않고 `_reject/{pre_calendar, off_grid, balance_over_shares}` 로 격리한다.
+
+**잔고 이상 격리(S10 2차, 09-06)** — 서버 1차 빌드가 `EG3_credit_daily.n_balance_over_shares_out`
+4행으로 폐기됐다(격자 9,201,516 · 다른 술어 전부 0). 잔고주수는 상장주식수를 넘을 수 없으므로 그
+원장 행은 데이터 이상이고, 실으면 신용잔고비율 > 100% 셀이 소비층까지 간다. 고친 방향은 게이트를
+느슨하게 하는 것이 아니라 **격리**다: 원장 행은 `_reject/balance_over_shares/` 로 원값째 보관하고
+(EG7 분모에 들어간다), 그 (date, ticker) 격자 셀은 **값 없이 남겨** 격자 등식 ⑪(a)를 지킨다. 셀의
+`fill_kind.kind` 는 `REJECTED_CELL_KIND`(= `empty_response` → 엔진 `MISSING`)이고, 게이트의
+`n_balance_over_shares_out` 은 **산출 검사로 그대로 유지**(0 이어야 한다)한 뒤 입력에서 다시 센
+위반 행수를 격리 건수와 대조한다.
 
 **빈칸에 0 을 굽지 않는다**(원칙 ④, S10 결정). `src_omitted` 를 0 으로 채우는 규약(FX-3-001 은
 `short_daily` 키움 샤드 축에 그렇게 적혀 있다)을 신용 격자에 옮기면 원장 일괄 결측일에 시장 전체가
@@ -46,7 +55,9 @@ EG3_credit_daily 의 `net_buy_axis`·`n_loan_balance_step_*` 기록형 metric �
   EG3_credit_daily — 어휘 폐쇄(`fill_kind.kind`·`.evidence`·`amt_basis`) · 격자 양방향 일치 ·
                      measured 셀 원값 보존(stage 재조인) · 잔고 음수 0 · **잔고 ≤ 같은 날
                      `price_daily.shares_out`** · 채움 규약(measured 아닌 셀은 전 축 NULL) ·
-                     `stlm_date ≥ date`. 나머지는 기록형 metric(GATES §0-1): fill_kind 분포 ·
+                     `stlm_date ≥ date` · **잔고 이상 격리 대조**(입력 재계산 위반 행수 =
+                     `_reject/balance_over_shares/` 건수 · 그 키의 산출 셀이 남아 있고 measured 가
+                     아니다). 나머지는 기록형 metric(GATES §0-1): fill_kind 분포 ·
                      격리 사유별 건수 · KIS 수정종가 대조 · `*_amt` 단위 추정비 · 잔고비율 대
                      상장주식수 비 · 음수 신규/상환/증감율 · 원장 일괄 결측 의심일 ·
                      net_buy 판정 근거.
@@ -68,9 +79,17 @@ SQL_DIR = Path(__file__).parent / "sql"
 GRID_STATUS: tuple[str, ...] = ("listed", "suspended")
 GRID_EXCLUDED_SEC_TYPE = "etf"
 
-# EG7-P06 격리 어휘 — 캘린더 하한 이전 / 격자 밖(상장 전·재상장 공백). `_reject/<reason>/` 이름이자
-# EG3 폐쇄 대상이다.
-REJECT_REASONS: tuple[str, ...] = ("pre_calendar", "off_grid")
+# EG7-P06 격리 어휘 — 캘린더 하한 이전 / 격자 밖(상장 전·재상장 공백) / 잔고 이상.
+# `_reject/<reason>/` 디렉토리 이름이자 EG3 폐쇄 대상이고, EG1_credit_daily 원장 보존 등식의 항이다.
+# `balance_over_shares`(S10 2차, 09-06): 잔고주수 > 그날 `price_daily.shares_out` 인 원장 행. 서버
+# 1차 빌드가 이 4행 때문에 EG3_credit_daily 로 폐기됐다 — 잔고는 상장주식수를 넘을 수 없으므로
+# 원장 이상이고, 격리해야 신용잔고비율 > 100% 셀이 소비층까지 가지 않는다. 격리되는 것은 **원장
+# 행**이고 격자 셀은 값 없이 남는다(§ `sql/credit_daily.sql` `over`·`drop_value`).
+REJECT_REASONS: tuple[str, ...] = ("pre_calendar", "off_grid", "balance_over_shares")
+# 잔고 이상으로 값을 지운 격자 셀의 `fill_kind.kind`. `FILL_KINDS` 에 'rejected' 가 없고 어휘는
+# DESIGN §3 · 엔진 `CellKind` 계약이라 여기서 늘리지 않는다 — 남은 넷 중 `empty_response`(→ 엔진
+# `MISSING`)만이 "원천에 물었고 쓸 값이 없다" 를 뜻해 가장 정직하다.
+REJECTED_CELL_KIND = "empty_response"
 # `stg_units_kis.dataset` 중 이 테이블이 읽는 갈래 (DESIGN §4-3 유닛 dataset 어휘)
 UNIT_DATASET = "credit"
 
@@ -157,9 +176,10 @@ def _quantiles(ctx: EquityGateContext, expr: str, source: str) -> dict[str, floa
 def eg1_credit_daily(ctx: EquityGateContext) -> GateResult:
     """⑪ (b): 원장 행은 전부 measured 셀이 되거나 격리된다. 잃어버린 행 0.
 
-    프레임 EG1 은 등식 하나만 받으므로(⑪ (a) 격자 행수) 소스 보존 등식은 여기서 본다. 세 항은
+    프레임 EG1 은 등식 하나만 받으므로(⑪ (a) 격자 행수) 소스 보존 등식은 여기서 본다. 항은
     서로 다른 곳에서 온다 — 원장은 `_pinned/stg_credit_daily`, measured 는 산출 parquet,
-    격리 건수는 `_reject/` 집계 — 라 항진명제가 아니다.
+    격리 건수는 `_reject/` 집계 — 라 항진명제가 아니다. 격리 사유 3종(`pre_calendar`·`off_grid`·
+    **`balance_over_shares`**)을 `REJECT_REASONS` 에서 그대로 돌므로 사유가 늘면 자동으로 반영된다.
     """
     v = _q(ctx.out_view)
     n_src = _n(ctx, "SELECT count(*) FROM stg_credit_daily")
@@ -174,7 +194,7 @@ def eg1_credit_daily(ctx: EquityGateContext) -> GateResult:
     metrics: dict[str, object] = {
         "n_src_rows": n_src, "n_measured_cells": n_measured, "n_reject_by_reason": by_reason,
         "eg1b_sql": ("count(stg_credit_daily) = count(out WHERE fill_kind.kind='measured') "
-                     "+ reject(pre_calendar) + reject(off_grid)")}
+                     "+ Σ reject(" + ", ".join(REJECT_REASONS) + ")")}
     return _result("EG1_credit_daily", checks, metrics, "원장 보존 등식 성립 (GATES §3 ⑪ (b))")
 
 
@@ -187,6 +207,21 @@ def _grid_sql() -> str:
     return f"SELECT date, ticker FROM universe_daily WHERE {grid_predicate()}"
 
 
+def over_shares_predicate(alias: str, shares: str) -> str:
+    """잔고주수가 그날 상장주식수를 넘는가. `sql/credit_daily.sql` `over` CTE 와 같은 정의를
+    한 곳에서 만든다(`test_잔고_초과_술어는_rules_선언과_SQL_리터럴이_같다` 가 대조)."""
+    return " OR ".join(f"{alias}.{c} > {shares}.shares_out" for c in BALANCE_SHARE_COLUMNS)
+
+
+def _over_shares_sql() -> str:
+    """격자 안이면서 잔고 이상인 **원장 행**의 키 — 입력(`stg_credit_daily`·`universe_daily`·
+    `price_daily`)에서만 다시 센다. 산출을 읽지 않으므로 격리 건수 대조가 항진명제가 아니다."""
+    return (f"SELECT c.ticker, c.date FROM stg_credit_daily c "
+            f"JOIN ({_grid_sql()}) g ON g.ticker = c.ticker AND g.date = c.date "
+            "JOIN price_daily p ON p.ticker = c.ticker AND p.date = c.date "
+            f"WHERE p.shares_out IS NOT NULL AND ({over_shares_predicate('c', 'p')})")
+
+
 def eg3_credit_daily(ctx: EquityGateContext) -> GateResult:
     """EG3 특화 — 어휘·격자·원값 보존·잔고 불변식·채움 규약. 산출식은 다시 계산하지 않는다.
 
@@ -197,6 +232,8 @@ def eg3_credit_daily(ctx: EquityGateContext) -> GateResult:
     """
     v = _q(ctx.out_view)
     grid = _grid_sql()
+    over_src = _over_shares_sql()
+    over_out = over_shares_predicate("c", "p")
 
     # ① 어휘 폐쇄 + 키 폭
     n_kind_vocab, n_evidence_vocab, n_fill_null, n_amt_basis, n_ticker_bad = _row(ctx, f"""
@@ -236,6 +273,8 @@ def eg3_credit_daily(ctx: EquityGateContext) -> GateResult:
           (SELECT count(*) FROM stg_credit_daily s
              WHERE EXISTS (SELECT 1 FROM ({grid}) g
                             WHERE g.ticker = s.ticker AND g.date = s.date)
+               AND NOT EXISTS (SELECT 1 FROM ({over_src}) o
+                                WHERE o.ticker = s.ticker AND o.date = s.date)
                AND NOT EXISTS (SELECT 1 FROM {v} c
                                 WHERE c.ticker = s.ticker AND c.date = s.date
                                   AND c.fill_kind.kind = 'measured')),
@@ -251,16 +290,24 @@ def eg3_credit_daily(ctx: EquityGateContext) -> GateResult:
               AND (({any_notnull}) OR stlm_date IS NOT NULL)),
           (SELECT count(*) FROM {v} WHERE stlm_date < date)""")
 
-    # ⑤ 잔고 불변식 — 음수 0 · 상장주식수 초과 0 (같은 날 price_daily.shares_out 재조인)
+    # ⑤ 잔고 불변식 — 음수 0 · 상장주식수 초과 0 (같은 날 price_daily.shares_out 재조인) +
+    #    잔고 이상 격리의 양쪽 대조: 입력에서 다시 센 위반 행수 = `_reject/balance_over_shares/`
+    #    건수 · 그 키의 산출 셀은 남아 있고(격자 등식) measured 가 아니다.
     neg = " OR ".join(f"{_q(c)} < 0" for c in BALANCE_SHARE_COLUMNS + BALANCE_AMOUNT_COLUMNS)
-    over = " OR ".join(f"c.{_q(c)} > p.shares_out" for c in BALANCE_SHARE_COLUMNS)
-    n_balance_neg, n_over_shares, n_shares_null = _row(ctx, f"""
+    (n_balance_neg, n_over_shares, n_shares_null,
+     n_over_src, n_over_cell_measured, n_over_cell_missing) = _row(ctx, f"""
         SELECT
           (SELECT count(*) FROM {v} WHERE {neg}),
           (SELECT count(*) FROM {v} c JOIN price_daily p USING (ticker, date)
-            WHERE p.shares_out IS NOT NULL AND ({over})),
+            WHERE p.shares_out IS NOT NULL AND ({over_out})),
           (SELECT count(*) FROM {v} c JOIN price_daily p USING (ticker, date)
-            WHERE p.shares_out IS NULL AND c.fill_kind.kind = 'measured')""")
+            WHERE p.shares_out IS NULL AND c.fill_kind.kind = 'measured'),
+          (SELECT count(*) FROM ({over_src})),
+          (SELECT count(*) FROM ({over_src}) o JOIN {v} c USING (ticker, date)
+            WHERE c.fill_kind.kind = 'measured'),
+          (SELECT count(*) FROM ({over_src}) o
+            WHERE NOT EXISTS (SELECT 1 FROM {v} c
+                               WHERE c.ticker = o.ticker AND c.date = o.date))""")
 
     checks = {
         "n_fill_kind_outside_vocab": int(str(n_kind_vocab)),
@@ -277,6 +324,10 @@ def eg3_credit_daily(ctx: EquityGateContext) -> GateResult:
         "n_stlm_date_before_date": int(str(n_stlm_early)),
         "n_balance_negative": int(str(n_balance_neg)),
         "n_balance_over_shares_out": int(str(n_over_shares)),
+        "n_balance_over_shares_reject_delta":
+            int(str(n_over_src)) - int(ctx.reject_by_reason.get("balance_over_shares", 0)),
+        "n_balance_over_shares_cell_measured": int(str(n_over_cell_measured)),
+        "n_balance_over_shares_cell_missing": int(str(n_over_cell_missing)),
     }
 
     # ── 기록형 ──────────────────────────────────────────────────────────────
@@ -323,6 +374,9 @@ def eg3_credit_daily(ctx: EquityGateContext) -> GateResult:
         "fill_evidence_vocab": list(FILL_EVIDENCE),
         "n_pre_calendar": int(ctx.reject_by_reason.get("pre_calendar", 0)),
         "n_off_grid": int(ctx.reject_by_reason.get("off_grid", 0)),
+        "n_balance_over_shares_rejected":
+            int(ctx.reject_by_reason.get("balance_over_shares", 0)),
+        "n_balance_over_shares_src": int(str(n_over_src)),
         "n_measured_evidence_none": int(evidence.get("measured/none", 0)),
         "n_shares_out_null_measured": int(str(n_shares_null)),
         "n_close_compared": int(str(n_close_join)),
@@ -400,7 +454,8 @@ CREDIT_DAILY = register(EquityTable(
     eg1_rhs_sql=(f"SELECT (SELECT count(*) FROM universe_daily WHERE {grid_predicate()}) "
                  "+ (SELECT count(*) FROM stg_credit_daily c WHERE NOT EXISTS ("
                  "SELECT 1 FROM universe_daily u WHERE u.ticker = c.ticker AND u.date = c.date "
-                 f"AND {grid_predicate('u')}))"),
+                 f"AND {grid_predicate('u')})) "
+                 f"+ (SELECT count(*) FROM ({_over_shares_sql()}))"),
     sql_path=SQL_DIR / "credit_daily.sql",
     input_columns={
         "trading_calendar": ("date",),
@@ -419,5 +474,6 @@ TABLES: tuple[EquityTable, ...] = (CREDIT_DAILY,)
 BASELINE_SEED = Path(__file__).parent / "baseline_seed_s10.json"
 """이 슬라이스가 요구하는 baseline 상수 — 격리 비율 임계 하나. 승인 뒤 baseline.json 에 병합."""
 
-__all__ = ["BASELINE_SEED", "CREDIT_DAILY", "MEASURE_COLUMNS", "REJECT_REASONS",
-           "TABLES", "UNIT_DATASET", "grid_predicate"]
+__all__ = ["BALANCE_SHARE_COLUMNS", "BASELINE_SEED", "CREDIT_DAILY", "MEASURE_COLUMNS",
+           "REJECTED_CELL_KIND", "REJECT_REASONS", "TABLES", "UNIT_DATASET", "grid_predicate",
+           "over_shares_predicate"]

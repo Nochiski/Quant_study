@@ -8,11 +8,23 @@
 --   universe_daily 의 sec_type NULL 은 0 이라 값은 같고, 규칙만 안전한 쪽으로 닫는다.
 --   status 어휘에 'delisted' 는 없다(폐지일엔 구간이 없다, S03) — 술어는 그대로 둔다.
 --
--- 격리(EG7-P06 격리형, 행을 버리지 않고 `_reject/<reason>/` 으로). 격자 밖 stage 행이 대상이다:
---   pre_calendar = `date < min(trading_calendar.date)` (캘린더 하한 이전. 절단본 85행 = 2009년)
---   off_grid     = 캘린더 안이지만 그 (ticker, date) 격자 셀이 없다 — 상장 전·재상장 공백 기간에
---                  KIS 가 돌려준 행(절단본 9행: 000030 2014-11-17·18 등, 전부 `_src_flag='partial'`)
---   두 사유는 배타적이고 순서대로 먼저 맞는 것 하나를 쓴다.
+-- 격리(EG7-P06 격리형, 행을 버리지 않고 `_reject/<reason>/` 으로). 대상은 원장 행이다:
+--   pre_calendar        = `date < min(trading_calendar.date)` (캘린더 하한 이전. 절단본 85행 = 2009년)
+--   off_grid            = 캘린더 안이지만 그 (ticker, date) 격자 셀이 없다 — 상장 전·재상장 공백
+--                         기간에 KIS 가 돌려준 행(절단본 9행, 전부 `_src_flag='partial'`)
+--   balance_over_shares = 격자 안이지만 융자·대주 **잔고주수가 그날 `price_daily.shares_out` 을
+--                         넘는다**(서버 1차 빌드 4행). 잔고는 상장주식수를 넘을 수 없으므로 원장
+--                         이상이고, 값을 그대로 실으면 신용잔고비율이 100% 를 넘는 셀이 소비층까지
+--                         간다. `shares_out` 이 NULL 인 날은 판정축이 없으므로 위반이 아니다.
+--   세 사유는 배타적이고 위 순서대로 먼저 맞는 것 하나를 쓴다.
+--
+-- **`balance_over_shares` 는 격자 셀을 지우지 않는다.** 격리되는 것은 원장 행이고, 그 (date, ticker)
+-- 셀은 값 없이 남아 격자 등식(⑪ (a))이 깨지지 않는다. 셀의 `fill_kind.kind` 는 `empty_response`
+-- 다 — `FILL_KINDS` 에 'rejected' 가 없고(어휘는 DESIGN §3 · 엔진 `CellKind` 계약이라 여기서 늘리지
+-- 않는다), 남은 넷 중 `empty_response`(→ 엔진 `MISSING`)만이 "원천에 물었고 쓸 값이 없다" 를 뜻해
+-- 가장 정직하다. `measured`(값이 없다)·`src_omitted`(0 으로 읽힌다)·`not_collected`(수집은 됐다)는
+-- 전부 거짓이 된다. 어느 셀이 이 경로였는지는 `_reject/balance_over_shares/` 가 키·원값째로 보관하고
+-- EG3_credit_daily 가 건수를 대조한다.
 --
 -- fill_kind STRUCT(kind, evidence) — DESIGN §3 어휘 × §4-3 판정. 원천이 KIS 하나뿐이라 키움 샤드
 -- 가지는 없고 유닛 축만 쓴다:
@@ -76,19 +88,36 @@ island AS (
     FROM unit_grp
     GROUP BY ticker, status, island_seq
 ),
+over AS (
+    -- 격자 안이면서 잔고주수 > 그날 상장주식수인 원장 행. `shares_out` NULL 은 판정 밖이다.
+    SELECT c.ticker, c.date
+    FROM stg_credit_daily c
+    JOIN grid g       ON g.ticker = c.ticker AND g.date = c.date
+    JOIN price_daily p ON p.ticker = c.ticker AND p.date = c.date
+    WHERE p.shares_out IS NOT NULL
+      AND (c.whol_loan_rmnd_stcn_shr > p.shares_out OR c.whol_stln_rmnd_stcn_shr > p.shares_out)
+),
 base AS (
-    -- 격자 셀(채택) + 격자 밖 stage 행(격리). 두 집합은 배타적이라 키가 겹치지 않는다.
-    SELECT g.date, g.ticker, NULL::VARCHAR AS reject_reason
+    -- 격자 셀(채택) + 격자 밖 원장 행(격리) + 잔고 이상 원장 행(격리).
+    -- `drop_value` 는 격자 셀 쪽에만 선다 — 그 셀은 값을 받지 않고, 같은 키의 원장 행은
+    -- `_reject/balance_over_shares/` 에 원값째로 남는다.
+    SELECT g.date, g.ticker, NULL::VARCHAR AS reject_reason,
+           EXISTS (SELECT 1 FROM over o WHERE o.ticker = g.ticker AND o.date = g.date)
+                                        AS drop_value
     FROM grid g
     UNION ALL
     SELECT c.date, c.ticker,
            CASE WHEN c.date < (SELECT first_date FROM cal) THEN 'pre_calendar'
-                ELSE 'off_grid' END
+                ELSE 'off_grid' END,
+           false
     FROM stg_credit_daily c
     WHERE NOT EXISTS (SELECT 1 FROM grid g WHERE g.ticker = c.ticker AND g.date = c.date)
+    UNION ALL
+    SELECT o.date, o.ticker, 'balance_over_shares', false
+    FROM over o
 ),
 cell AS (
-    SELECT b.date, b.ticker, b.reject_reason,
+    SELECT b.date, b.ticker, b.reject_reason, b.drop_value,
            (s.ticker IS NOT NULL)   AS has_row,
            (iok.ticker IS NOT NULL) AS unit_ok,
            (iem.ticker IS NOT NULL) AS unit_empty,
@@ -100,7 +129,8 @@ cell AS (
            s.whol_stln_new_amt, s.whol_stln_rdmp_amt, s.whol_stln_rmnd_amt,
            s.whol_stln_rmnd_rate_pct, s.whol_stln_gvrt_pct
     FROM base b
-    LEFT JOIN stg_credit_daily s ON s.ticker = b.ticker AND s.date = b.date
+    -- `NOT b.drop_value` 조인 조건 하나가 잔고 이상 셀의 17축을 전부 NULL 로 만든다
+    LEFT JOIN stg_credit_daily s ON s.ticker = b.ticker AND s.date = b.date AND NOT b.drop_value
     LEFT JOIN island iok ON iok.ticker = b.ticker AND iok.status = 'ok'
                         AND b.date BETWEEN iok.wf AND iok.wt
     LEFT JOIN island iem ON iem.ticker = b.ticker AND iem.status = 'empty'
@@ -108,7 +138,8 @@ cell AS (
 ),
 kinded AS (
     SELECT c.*,
-           CASE WHEN c.has_row    THEN 'measured'
+           CASE WHEN c.drop_value THEN 'empty_response'   -- 잔고 이상으로 격리된 셀 (위 주석)
+                WHEN c.has_row    THEN 'measured'
                 WHEN c.unit_ok    THEN 'src_omitted'
                 WHEN c.unit_empty THEN 'empty_response'
                 ELSE 'not_collected' END AS kind
@@ -137,10 +168,11 @@ SELECT
     whol_stln_rmnd_rate_pct,
     whol_stln_gvrt_pct,
     'unknown'                                              AS amt_basis,
+    -- evidence 는 kind 와 무관한 **로그 사실**이다: 그 셀을 덮는 유닛 창이 ok / empty / 없음.
+    -- (kind 별 분기와 같은 값을 내면서 잔고 이상 셀까지 한 규칙으로 덮는다.)
     {'kind': kind,
-     'evidence': CASE WHEN kind = 'measured' AND unit_ok THEN 'unit_ok'
-                      WHEN kind = 'src_omitted'          THEN 'unit_ok'
-                      WHEN kind = 'empty_response'       THEN 'unit_empty'
+     'evidence': CASE WHEN unit_ok    THEN 'unit_ok'
+                      WHEN unit_empty THEN 'unit_empty'
                       ELSE 'none' END}                     AS fill_kind,
     date                                                   AS available_date,
     'default'                                              AS available_basis,

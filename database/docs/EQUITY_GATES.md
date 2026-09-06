@@ -236,6 +236,7 @@ count(equity_table) = <선언 우변>  −  n_dedup  −  Σ n_reject_by_reason
 | EG2-P05 | 파생 컬럼 `available` = 구성 행 `available` 의 max | `n = 0` |
 | EG2-P06 | `basis='default'` 인 profile 행에 `evidence` 필수 | `n = 0` |
 | EG2-P07 | `coverage_from` 전수 (profile 전 행 NOT NULL) | `n = 0` |
+| EG2-P08 | (S19 2차 신설) `estimated_coverage_pct` 가 정수 분자·분모의 순수 함수 — `0 ≤ n_observed ≤ n_denominator` ∧ `pct = round(100·n_observed/n_denominator, 6)` | `n = 0` |
 
 ```sql
 -- EG2-P01
@@ -893,8 +894,8 @@ WHERE g.${VALUE_COL} = 0
 | 24 | `consensus_daily` | 5 | ● | ●(§3-⑲) | ●(P01–P03) · P04 skip(profile 없음) | ●(P01,P07,P13) | ●(FX-5-001…006) | ●(a) · c 는 §9 S17(뷰가 `ASOF_VIEWS` 밖) | ●(P01,P02,P03) | ●(P07) | ●(P07) | ●(P05) · P06 은 §9 S17 대용 | ●⑥⑨ |
 | 25 | `opinion_daily` | 5 | ● | ●(§3-⑳) | ●(P01–P04) | ●(P01,P07) | ●(FX-5-007) | ●(a) | ●(P01,P03) | ● | skip(no_baseline) | ●(P06) | — |
 | 26 | `opinion_broker_daily` | 5 | ● | ●(§3-㉑) | ●(P01–P04) | ●(P01,P07) | ●(FX-5-008) | ●(a) | skip(no_multi_version) | ● | — | ●(P06) | — |
-| 27 | `dataset_profile` | 6 | ● | skip(declaration_table) | skip(dimension_table) → `EG2_dataset_profile`(P04,P06,P07 + 어휘·범위) | ●(P01) | ●(FX-6-001…008) | ●(a) | skip(no_multi_version) | ● | — | ●(P06 기록형, 시총 분위) | ●⑥⑧ |
-| 28 | `factor_readiness` | 6 | ● | skip(declaration_table) | skip(dimension_table) | ●(P01) | ●(FX-6-010…015) | ●(a) | skip(no_multi_version) | ● | — | — | — · 판정은 **EG10**(§6) |
+| 27 | `dataset_profile` | 6 | ● | skip(declaration_table) | skip(dimension_table) → `EG2_dataset_profile`(P04,P06,P07,P08 + 어휘·범위) | ●(P01) | ●(FX-6-001…009,016…018) | ●(a) | skip(no_multi_version) | ● | — | ●(P06 기록형, 시총 분위) | ●⑥⑧ |
+| 28 | `factor_readiness` | 6 | ● | skip(declaration_table) | skip(dimension_table) | ●(P01) | ●(FX-6-010,011,013,015,019) | ●(a) | skip(no_multi_version) | ● | — | — | — · 판정은 **EG10**(§6) |
 
 **뷰 7종**(`v_universe`·`v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_fin_latest`·`v_consensus`·`v_firm_mktcap`)은 테이블이 아니므로 EG0~EG9 매트릭스에 행이 없고, **EG5c·EG-C·EG11(§6)** 이 담당한다. 이것이 현재 명세의 가장 큰 공백이다(§5-A6). 단 EG11·EG5c 의 고정 표본 규약은 키가 (as_of, ticker, **date**)라 일별 date 축이 있는 뷰만 받는다(`catalog.ASOF_VIEWS`) — `v_consensus` 는 그래서 밖이고 결정성은 S17 e2e 테스트가 대신 본다(§9 S17).
 
@@ -1302,26 +1303,39 @@ SELECT (SELECT count(*) FROM opinion_broker_daily)
 
 ### 6단계 (신설 — DESIGN §8 에 없다, §5-A5)
 
-**초안 재정의(2026-09-06, §9 S19)**: 초안의 키는 (테이블, 컬럼군)이었으나 DESIGN §4-7 정본이
-grain 을 `field_id` 로 정했고, FX-6-002 가 가리킨 `flow_daily` 는 아직 없는 테이블(S08)이다.
-같은 술어를 실재하는 필드 위에서 다시 세웠다. 파일은 `src/equity/fixtures/<table>.json`.
+**초안 재정의(2026-09-06, §9 S19 1차·2차)**: ① 초안의 키는 (테이블, 컬럼군)이었으나 DESIGN §4-7
+정본이 grain 을 `field_id` 로 정했고, FX-6-002 가 가리킨 `flow_daily` 는 아직 없는 테이블(S08)이다.
+② **서버 1차 빌드가 EG4 로 막혔다** — `financial.borrowings.coverage_from` 을 절단본 값(2023-11-14)
+으로 굳혔는데 서버는 2016-03-30 이었다. **골든 픽스처는 모집단 비의존 불변식만 담는다**: 창
+(`coverage_from`·`coverage_to`)·커버율·분위 배열·거기서 파생된 판정(`status`·`no_observations`
+사유·`first_usable_date`)은 모집단이 바뀌면 반드시 달라지므로 **절단본 전용 pytest 손계산**으로
+옮겼다. 남은 것은 선언(랙·PIT·basis·cell kinds·`source_stage_tables`·`column_scope`·`table_name`·
+`field_scope`·`requires_confirmation`)과 **선언 조인만으로 정해지는 판정**(요구 필드에 프로파일 행이
+없으면 언제나 `field_unavailable`)뿐이다. 파일은 `src/equity/fixtures/<table>.json`.
 
 | ID | 테이블 | 키 | 기대 컬럼 | 기대값 출처 | 검증 술어 요지 |
 |---|---|---|---|---|---|
-| FX-6-001 | `dataset_profile` | `price.close` | `available_date_basis`, `recommended_lag_sessions` | doc:STAGE_DESIGN §6 · rules_s04 | `default`, `0`(가격류 당일 관측) |
-| FX-6-002 | `dataset_profile` | `consensus.forward_eps` | `recommended_lag_sessions` | doc:STAGE_DESIGN §6 | `1` — v3 는 collected = base + 1영업일, "+1영업일은 dataset_profile 이 적용" |
-| FX-6-003 | `dataset_profile` | `price.market_cap` | `recommended_lag_sessions` | doc:FIELD_MAP §2 | `1` — 주식수가 `stg_listing_daily`(lag_known=false) |
-| FX-6-004 | `dataset_profile` | `event.buyback_amount` | `estimated_coverage_pct` | slice | `0.0` — 선언은 있고 값이 0 (corp_event MVP 4유형 밖) |
-| FX-6-005 | `dataset_profile` | `classification.sector` | `point_in_time` | doc:GAP-07 | `false` |
-| FX-6-006 | `dataset_profile` | `price.adj_close` | `table_name` | doc:DESIGN §5 결정 6 | `v_adj_price_fwd` |
-| FX-6-007 | `dataset_profile` | `event.insider_net_buy` | `coverage_from` | slice | `2024-08-26`(롤링 2년 창 시작) |
-| FX-6-008 | `dataset_profile` | `financial.borrowings` | `coverage_from` | slice | `2023-11-14` — GAP-02 3계정 실재 판정 |
-| FX-6-010 | `factor_readiness` | `M01` | `status`, `first_usable_date` | doc:FACTORS §6 | `ready`, `2010-01-04` |
-| FX-6-011 | `factor_readiness` | `F01` | `blocked_reason` | doc:WORKFLOW §3-1 | `field_unavailable: flow.foreign_net_buy`(S08 미구현) |
-| FX-6-012 | `factor_readiness` | `V05` | `first_usable_date` | slice | `2023-11-14` — 가장 늦게 열린 재료가 시작일 |
-| FX-6-013 | `factor_readiness` | `R04` | `owner` | doc:GAP-09 | `unavailable` |
-| FX-6-014 | `factor_readiness` | `E05` | `blocked_reason`, `first_usable_date` | slice | `no_observations: event.buyback_amount`, NULL |
-| FX-6-015 | `factor_readiness` | `V01` | `registry_factor_id` | doc:backend/FACTORS.md #11 | `financial.book_to_market` |
+| FX-6-001 | `dataset_profile` | `price.close` | `available_date_basis`, `recommended_lag_sessions` | decl:rules_s04 | `default`, `0`(가격류 당일 관측) |
+| FX-6-002 | `dataset_profile` | `consensus.forward_eps` | `recommended_lag_sessions` | decl:rules_s17 | `1` — v3 는 collected = base + 1영업일 |
+| FX-6-003 | `dataset_profile` | `price.market_cap` | `recommended_lag_sessions` | decl:rules_s04 | `1` — 주식수가 `stg_listing_daily`(lag_known=false) |
+| FX-6-004 | `dataset_profile` | `event.buyback_amount` | `column_scope` | decl:rules_s05 | `amount_krw`(커버율 0 은 pytest 손계산으로 이동) |
+| FX-6-005 | `dataset_profile` | `classification.sector` | `point_in_time` | decl:rules_s01 | `false`(GAP-07) |
+| FX-6-006 | `dataset_profile` | `price.adj_close` | `table_name`, `available_date_basis`, `field_scope` | decl:rules_s06 · rules_s19 | `v_adj_price_fwd`, `default\|derived`, `internal` |
+| FX-6-007 | `dataset_profile` | `event.insider_net_buy` | `column_scope` | decl:rules_s15 | `qty_change_shr`(롤링 2년 창은 pytest) |
+| FX-6-008 | `dataset_profile` | `financial.borrowings` | `table_name` | decl:rules_s12 | `fin_std`(GAP-02 계정 · 첫 관측일은 pytest) |
+| FX-6-009 | `dataset_profile` | `consensus.eps_dispersion` | `column_scope`, `coverage_basis` | decl:rules_s17 | `est_min,est_max`, `grid_security` |
+| FX-6-016 | `dataset_profile` | `financial.revenue` | `requires_confirmation` | decl:rules_s12 | `true`(GAP-01) |
+| FX-6-017 | `dataset_profile` | `price.volume` | `supported_cell_kinds`, `source_stage_tables` | decl:rules_s19 | 3종 · `price_daily` 전이 폐포 4(EG2-P04 대조축) |
+| FX-6-018 | `dataset_profile` | `universe.admin_state` | `requires_confirmation` | decl:rules_s03 | `true`(GAP-06) |
+| FX-6-010 | `factor_readiness` | `M01` | `required_columns`, `label` | decl:rules_s20 ⋈ profile | `[v_adj_price_fwd.adj_close]` — 결정 6 이 여기 박힌다 |
+| FX-6-011 | `factor_readiness` | `F01` | `blocked_reason`, `status` | decl:프로파일 행 부재 | `field_unavailable: flow.foreign_net_buy`, `blocked` |
+| FX-6-013 | `factor_readiness` | `R04` | `owner`, `blocked_reason` | decl:GAP-09 | `unavailable`, `field_unavailable: benchmark.close` |
+| FX-6-015 | `factor_readiness` | `V01` | `registry_factor_id`, `required_field_ids` | decl:backend/FACTORS.md #11 | `financial.book_to_market`, `[price.market_cap, financial.book_equity]` |
+| FX-6-019 | `factor_readiness` | `Q01` | `required_columns`, `owner` | decl:rules_s20 ⋈ profile | `[fin_std.net_income, fin_std.total_equity]`, `factor_layer` |
+
+절단본 손계산으로 옮긴 실측 단언: `event.insider_net_buy` 창 2024-08-26~2026-08-26 · GAP-02
+3계정 커버·첫 관측일 · `event.buyback_amount`·`event.capital_raise_amount` 커버 0 ·
+M01/V05 `first_usable_date` · E05/E06 `no_observations` · 커버율 ↔ 정수 분자·분모 항등.
 
 ### 부정 픽스처 (§7-5)
 
@@ -1964,6 +1978,17 @@ workspace/dongmin/src/equity/
 | FX-6-001·002 키 | (`price_daily`, `ohlcv`) · (`flow_daily`, `kiwoom`) | grain 이 `field_id` 라 키를 필드로 바꾸고, `flow_daily` 는 아직 없는 테이블(S08)이라 실재 필드로 옮겼다 — §4 6단계 표 재정의(FX-6-001~008) | §4 |
 | FX-6-001 기대 basis | `convention` | **`default`** — `price_daily.available_basis` 는 `default` 다(가격류는 공표 시각 미제공, DESIGN §4-2). `convention` 은 equity 가 신설한 어휘지만 이 테이블은 쓰지 않는다 | `rules_s04.PRICE_DAILY.available_basis` |
 | 절단본 한계 | — | stage 절단본 트리에 `_meta.json` 이 없어 `lag_known` 이 전부 미상이고 **EG2-P04 모집단이 빈다**(항진). 기록형 `lag_known_unmeasured_inputs`(24 테이블)로 그 사실을 남기고, 술어는 손으로 만든 `_meta` 하네스 2건으로 검증한다(`stg_fin` 커버 → PASS · `stg_flow_daily_kiwoom` 미커버 → FAIL). **서버 실측에서 모집단이 채워지는지 반드시 확인** | `tests/test_equity_s19_profile.py` |
+
+**S19 서버 1차 실패 2건 — 정정 (2026-09-06 2차, `rules_s19.py`·`sql/dataset_profile.sql`·픽스처)**
+
+| 항목 | 1차 | 정정 | 근거 |
+|---|---|---|---|
+| EG4 픽스처 축 | 절단본 실측값을 그대로 등재(`financial.borrowings.coverage_from` = 2023-11-14 · `event.insider_net_buy.coverage_from` · `event.buyback_amount.estimated_coverage_pct` · `M01`·`V05`·`E05` 의 시작일·사유) | **모집단 비의존 불변식만 남긴다.** 서버(법인 3,478)는 같은 필드의 첫 관측일이 2016-03-30 이라 EG4 가 폐기했다 — 창·커버율·분위와 거기서 파생된 판정은 모집단의 함수다. 옮긴 자리는 **절단본 전용 pytest 손계산**이고, 픽스처는 선언(랙·PIT·basis·cell kinds·`source_stage_tables`·`column_scope`)과 선언 조인만으로 정해지는 판정(`field_unavailable`)만 담는다 | §4 6단계 표 · `tests/test_equity_s19_profile.py` |
+| 분위 `ntile` 의 ORDER BY | `PARTITION BY date ORDER BY mktcap_krw` · `ORDER BY mktcap_krw` | **총순서**로 못박는다 — `… ORDER BY mktcap_krw, ticker`. 유일하지 않은 ORDER BY 는 동률 행의 분위를 SQL 이 정하지 않는다는 뜻이고, 답이 엔진의 행 순서(병렬 스캔·정렬·스필)에 맡겨진다. 서버 같은 입력 두 빌드가 `66:63db8b7d7a57d2b6` / `66:ede4412907a3b47f` 로 갈렸고(EG5a 는 EG4 실패로 `skip(upstream_failed)` 라 잡지 못했다), 최소 재현(동률 6/10 이 경계를 가로지르는 표를 행 순서만 바꿔 3회)에서 tie-break 없으면 커버 배열 2종·있으면 1종임을 확정했다 | `test_분위_경계의_동률은_총순서로만_결정된다` |
+| 분위 계산 횟수 | 필드마다(격자 창 정렬 22회) | **빌드당 1회** — `_grid_quintile`·`_grid_security_quintile` TEMP TABLE 을 굽고 창으로 자른다. 세션 축 ntile 은 `PARTITION BY date` 라 날짜를 잘라도 각 날의 분위가 변하지 않으므로 결과가 같다. 격자 셀 수·종목 수 분모도 창별로 캐시한다(서버 1차 63초의 주범) | `rules_s19.install_grid_quintiles` |
+| 커버율 표현 | `100.0 * count / count` 를 엔진이 계산한 DOUBLE | **정수 분자·분모(`n_observed`·`n_denominator`)를 산출에 싣고** 비율은 파이썬 나눗셈 + 6자리 반올림(`COVERAGE_PCT_DECIMALS`). 분위 배열도 정수 두 개를 받아 같은 함수로 만든다 — 엔진의 DECIMAL/DOUBLE 축약이 값 경로에서 사라지고, 소비자가 표만 보고 재계산할 수 있다. 항등은 `EG2_dataset_profile.n_pct_not_derivable` 이 SQL 로 다시 본다 | DESIGN §4-7 |
+| 재현성 회귀 검사 | 재빌드 1회(EG5a) | **같은 입력 5회 연속 빌드(threads=3) 해시 동일** 을 두 테이블 모두에 추가. 1회 비교로는 순서 의존이 우연히 같은 답을 낼 수 있다 | `test_같은_입력으로_다섯_번_지어도_해시가_같다` |
+| `factor_readiness` 결정성 | 미점검(입력 미커밋으로 서버 미실행) | 리스트 컬럼은 전부 `list_sort(list(DISTINCT …))`(6곳), `first_usable_date` 는 `max(coverage_from)` 라 집계 순서에 무관함을 테스트로 고정 | `test_리스트_컬럼은_정렬돼_있다` |
 
 **S20 `factor_readiness` 구현 정정 (2026-09-06, `rules_s20.py`·`sql/factor_readiness.sql`)**
 

@@ -8,9 +8,12 @@ grain `field_id` — 어댑터 `list_fields()`(`DatasetFieldProfile`)의 원천�
         랙·PIT·cell kind·단위·판정은 **여기서만** 온다 — 문서를 베끼지 않는다. 이 모듈은
         `RULES` 를 훑어 모으고 `source_stage_tables`·`available_date_basis`·
         `supported_cell_kinds` 를 소유 테이블에서 기계적으로 유도한다(중복 선언 금지).
-  실측  `coverage_from`·`coverage_to`·`estimated_coverage_pct`·`coverage_by_mktcap_quintile` 은
-        고정한 equity 파티션을 직접 재서 넣는다. `_meta.json` 은 파티션 라벨(`year=YYYY`)까지만
-        주므로 연 단위 해상도밖에 안 나온다 — 그래서 값 컬럼을 직접 읽는다.
+  실측  `coverage_from`·`coverage_to`·`n_observed`·`n_denominator`·`estimated_coverage_pct`·
+        `coverage_by_mktcap_quintile` 은 고정한 equity 파티션을 직접 재서 넣는다. `_meta.json` 은
+        파티션 라벨(`year=YYYY`)까지만 주므로 연 단위 해상도밖에 안 나온다 — 그래서 값 컬럼을
+        직접 읽는다. **비율은 정수 분자·분모의 순수 함수**(파이썬 나눗셈 + 6자리 반올림)이고
+        그 항등을 게이트가 SQL 로 다시 확인한다 — 산출에 실리는 유일한 부동소수라 엔진의 축약
+        순서가 content_hash 에 섞이지 않게 못박는 장치다(§9 S19 2차, 서버 해시 불일치).
 
 선언표라 EG1 은 `skip(declaration_table)`(GATES §3 ㉒), 차원표라 프레임 EG2 는
 `skip(dimension_table)` 이고 **EG2-P04/P06/P07 은 `EG2_dataset_profile` 이 대신 판정**한다.
@@ -207,6 +210,48 @@ def _window(con: duckdb.DuckDBPyConnection, table: str, date_col: str, pred: str
     return (*calendar, False)
 
 
+# ── 시총 분위 지도 (빌드당 **한 번**만 만든다) ────────────────────────────────
+# 두 가지를 동시에 해결한다.
+#   ① **결정성**  `ntile` 의 `ORDER BY` 가 유일하지 않으면 동률 행이 어느 분위로 가는지 SQL 이
+#      정하지 않는다 — 엔진의 정렬·병렬·스필 구현에 답이 맡겨진다(서버 실측: 같은 입력 두 빌드의
+#      content_hash 불일치, §9 S19 2차). 그래서 **총순서**로 못박는다: 세션 축은 (date 안에서)
+#      `mktcap_krw, ticker`, 종목 축은 `mktcap_krw, ticker`. `universe_daily` grain 이
+#      (date, ticker) 라 두 키는 각 파티션 안에서 유일하고, 따라서 ntile 결과가 데이터의 순수
+#      함수가 된다.
+#   ② **비용**  분위는 필드마다 달라지지 않는다(같은 격자·같은 시총). 필드별로 다시 계산하면
+#      10.9M 행 창 정렬을 22번 돌게 된다(서버 63초). 한 번 만들어 두고 창으로 자르기만 한다 —
+#      세션 축 ntile 은 `PARTITION BY date` 라 날짜를 잘라도 각 날의 분위가 변하지 않는다.
+_GRID_QUINTILE = "_grid_quintile"
+_GRID_SECURITY_QUINTILE = "_grid_security_quintile"
+
+
+def install_grid_quintiles(con: duckdb.DuckDBPyConnection) -> None:
+    """격자 시총 분위 지도 2개를 TEMP TABLE 로 굽는다. 총순서라 결과는 데이터의 순수 함수다."""
+    con.execute(f"""
+        CREATE OR REPLACE TEMP TABLE {_q(_GRID_QUINTILE)} AS
+        SELECT ticker, date,
+               ntile({MKTCAP_QUINTILES}) OVER (
+                   PARTITION BY date ORDER BY mktcap_krw, ticker) AS q
+        FROM {_q(GRID_TABLE)} WHERE mktcap_krw IS NOT NULL""")
+    con.execute(f"""
+        CREATE OR REPLACE TEMP TABLE {_q(_GRID_SECURITY_QUINTILE)} AS
+        WITH ranked AS (
+            SELECT ticker, mktcap_krw,
+                   row_number() OVER (
+                       PARTITION BY ticker ORDER BY date DESC, mktcap_krw DESC) AS rn
+            FROM {_q(GRID_TABLE)} WHERE mktcap_krw IS NOT NULL)
+        SELECT ticker,
+               ntile({MKTCAP_QUINTILES}) OVER (ORDER BY mktcap_krw, ticker) AS q
+        FROM ranked WHERE rn = 1""")
+
+
+def _quintiles(rows: list[tuple[object, ...]]) -> list[float]:
+    """(q, 분자, 분모) 행 → 분위별 커버율(%) 5개. **나눗셈은 파이썬 정수 나눗셈 + 고정 반올림**
+    이라 엔진의 DECIMAL/DOUBLE 축약 순서가 값에 섞이지 않는다."""
+    by_q = {int(str(r[0])): _pct(r[1], r[2]) for r in rows}
+    return [by_q.get(i + 1, 0.0) for i in range(MKTCAP_QUINTILES)]
+
+
 def _quintile_session(con: duckdb.DuckDBPyConnection, table: str, fp: FieldProfile,
                       pred: str, lo: dt.date, hi: dt.date) -> list[float]:
     """세션 축 시총 분위별 커버율(%) 5개. q1 = 그날 시총 하위 20%, q5 = 상위 20%.
@@ -214,29 +259,16 @@ def _quintile_session(con: duckdb.DuckDBPyConnection, table: str, fp: FieldProfi
     분모는 그날 `mktcap_krw` 가 있는 격자 셀이고 분자는 그중 이 필드에 값이 있는 셀이다.
     """
     ticker_col, date_col = fp.axis_columns or ("ticker", "date")
-    rows = con.execute(f"""
-        WITH grid AS (
-            SELECT ticker, date,
-                   ntile({MKTCAP_QUINTILES}) OVER (PARTITION BY date ORDER BY mktcap_krw) AS q
-            FROM {_q(GRID_TABLE)}
-            WHERE date BETWEEN DATE '{lo}' AND DATE '{hi}' AND mktcap_krw IS NOT NULL),
-             obs AS (
+    return _quintiles(con.execute(f"""
+        WITH obs AS (
             SELECT DISTINCT {_q(ticker_col)} AS ticker, {_q(date_col)} AS date
             FROM {_q(table)} WHERE {pred}
               AND {_q(date_col)} BETWEEN DATE '{lo}' AND DATE '{hi}')
-        SELECT g.q, 100.0 * count(o.ticker) / count(*)
-        FROM grid g LEFT JOIN obs o ON o.ticker = g.ticker AND o.date = g.date
-        GROUP BY g.q ORDER BY g.q""").fetchall()
-    by_q = {int(str(r[0])): float(str(r[1])) for r in rows}
-    return [by_q.get(i + 1, 0.0) for i in range(MKTCAP_QUINTILES)]
-
-
-_LAST_MKTCAP_CTE = f"""
-    ranked AS (SELECT ticker, mktcap_krw,
-                      row_number() OVER (PARTITION BY ticker ORDER BY date DESC) AS rn
-               FROM {_q(GRID_TABLE)} WHERE mktcap_krw IS NOT NULL),
-    sized AS (SELECT ticker, ntile({MKTCAP_QUINTILES}) OVER (ORDER BY mktcap_krw) AS q
-              FROM ranked WHERE rn = 1)"""
+        SELECT g.q, count(o.ticker), count(*)
+        FROM {_q(_GRID_QUINTILE)} g LEFT JOIN obs o
+               ON o.ticker = g.ticker AND o.date = g.date
+        WHERE g.date BETWEEN DATE '{lo}' AND DATE '{hi}'
+        GROUP BY g.q ORDER BY g.q""").fetchall())
 
 
 def _quintile_security(con: duckdb.DuckDBPyConnection, table: str, fp: FieldProfile,
@@ -248,22 +280,27 @@ def _quintile_security(con: duckdb.DuckDBPyConnection, table: str, fp: FieldProf
     선택편향의 크기를 그대로 보여 준다.
     """
     ticker_col, _ = fp.axis_columns or ("ticker", "date")
-    rows = con.execute(f"""
-        WITH {_LAST_MKTCAP_CTE},
-             obs AS (SELECT DISTINCT {_q(ticker_col)} AS ticker FROM {_q(table)} WHERE {pred})
-        SELECT s.q, 100.0 * count(o.ticker) / count(*)
-        FROM sized s LEFT JOIN obs o ON o.ticker = s.ticker
-        GROUP BY s.q ORDER BY s.q""").fetchall()
-    by_q = {int(str(r[0])): float(str(r[1])) for r in rows}
-    return [by_q.get(i + 1, 0.0) for i in range(MKTCAP_QUINTILES)]
+    return _quintiles(con.execute(f"""
+        WITH obs AS (SELECT DISTINCT {_q(ticker_col)} AS ticker FROM {_q(table)} WHERE {pred})
+        SELECT s.q, count(o.ticker), count(*)
+        FROM {_q(_GRID_SECURITY_QUINTILE)} s LEFT JOIN obs o ON o.ticker = s.ticker
+        GROUP BY s.q ORDER BY s.q""").fetchall())
 
 
 def coverage_rows(con: duckdb.DuckDBPyConnection) -> list[tuple[object, ...]]:
-    """`_field_coverage` 에 들어갈 행 — 고정한 equity 파티션 위 실측."""
+    """`_field_coverage` 에 들어갈 행 — 고정한 equity 파티션 위 실측.
+
+    커버율은 **정수 분자·분모를 산출에 함께 싣고**(`n_observed`·`n_denominator`) 비율은 그 둘의
+    파이썬 나눗셈을 고정 자릿수로 반올림한 값이다 — 소비자가 표만 보고 재계산할 수 있고,
+    엔진의 부동소수 축약이 content_hash 에 섞이지 않는다(§9 S19 2차).
+    """
     cal_lo, cal_hi = _one(con, f"SELECT min(date), max(date) FROM {_q(CALENDAR_TABLE)}")
     if cal_lo is None or cal_hi is None:
         raise RuntimeError(f"{CALENDAR_TABLE} 가 비어 있다 — 커버 창을 잡을 수 없다")
     calendar = (cal_lo, cal_hi)
+    install_grid_quintiles(con)
+    grid_cells: dict[tuple[dt.date, dt.date], int] = {}      # 창별 격자 셀 수 (창은 몇 종류뿐)
+    n_grid_tickers: int | None = None
     out: list[tuple[object, ...]] = []
     for table, fp in owned_fields():
         measured = fp.measured_table or table
@@ -290,7 +327,10 @@ def coverage_rows(con: duckdb.DuckDBPyConnection) -> list[tuple[object, ...]]:
                        count(*) FILTER (WHERE g.ticker IS NULL)
                 FROM obs o LEFT JOIN (SELECT DISTINCT ticker FROM {_q(GRID_TABLE)}) g
                        ON g.ticker = o.ticker""")
-            (n_den,) = _one(con, f"SELECT count(DISTINCT ticker) FROM {_q(GRID_TABLE)}")
+            if n_grid_tickers is None:
+                n_grid_tickers = int(str(_one(
+                    con, f"SELECT count(DISTINCT ticker) FROM {_q(GRID_TABLE)}")[0]))
+            n_den = n_grid_tickers
             quint = _quintile_security(con, measured, fp, pred)
             out.append((fp.field_id, lo, hi, _pct(n_obs, n_den), quint, int(str(n_obs)),
                         int(str(n_den)), int(str(n_out))))
@@ -306,8 +346,11 @@ def coverage_rows(con: duckdb.DuckDBPyConnection) -> list[tuple[object, ...]]:
                            WHERE g.ticker IS NULL)
                 FROM obs o LEFT JOIN {_q(GRID_TABLE)} g
                        ON g.ticker = o.ticker AND g.date = o.date""")
-            (n_den,) = _one(con, f"SELECT count(*) FROM {_q(GRID_TABLE)} "
-                                 f"WHERE date BETWEEN DATE '{lo}' AND DATE '{hi}'")
+            if (lo, hi) not in grid_cells:
+                grid_cells[(lo, hi)] = int(str(_one(
+                    con, f"SELECT count(*) FROM {_q(GRID_TABLE)} "
+                         f"WHERE date BETWEEN DATE '{lo}' AND DATE '{hi}'")[0]))
+            n_den = grid_cells[(lo, hi)]
             quint = _quintile_session(con, measured, fp, pred, lo, hi)
             out.append((fp.field_id, lo, hi, _pct(n_obs, n_den), quint, int(str(n_obs)),
                         int(str(n_den)), int(str(n_out))))
@@ -317,10 +360,15 @@ def coverage_rows(con: duckdb.DuckDBPyConnection) -> list[tuple[object, ...]]:
     return out
 
 
+COVERAGE_PCT_DECIMALS = 6
+"""커버율 반올림 자릿수. 산출에 실리는 유일한 부동소수라 자릿수를 고정해 두면 엔진의 축약 순서가
+content_hash 에 섞일 여지가 없다(§9 S19 2차). 분자·분모는 정수로 함께 실린다."""
+
+
 def _pct(n_obs: object, n_den: object) -> float:
     """커버율(%) — `FieldCoverageCapability.estimated_coverage_pct` 규약대로 0~100."""
     den = int(str(n_den))
-    return 0.0 if den == 0 else round(100.0 * int(str(n_obs)) / den, 6)
+    return 0.0 if den == 0 else round(100.0 * int(str(n_obs)) / den, COVERAGE_PCT_DECIMALS)
 
 
 # ── 선언 주입 훅 (`EquityTable.declarations`) ────────────────────────────────
@@ -415,6 +463,13 @@ def eg2_dataset_profile(ctx: EquityGateContext) -> GateResult:
         "n_pct_out_of_range": _n(
             ctx, f"SELECT count(*) FROM {v} WHERE estimated_coverage_pct IS NULL "
                  "OR estimated_coverage_pct < 0 OR estimated_coverage_pct > 100"),
+        # 커버율은 정수 분자·분모의 순수 함수다 — 표만 보고 재계산이 되어야 한다(§9 S19 2차)
+        "n_pct_not_derivable": _n(
+            ctx, f"SELECT count(*) FROM {v} WHERE n_observed IS NULL OR n_denominator IS NULL "
+                 "OR n_observed < 0 OR n_denominator < 0 OR n_observed > n_denominator "
+                 "OR estimated_coverage_pct IS DISTINCT FROM (CASE WHEN n_denominator = 0 "
+                 "THEN 0.0 ELSE round(100.0 * n_observed / n_denominator, "
+                 f"{COVERAGE_PCT_DECIMALS}) END)"),
         "n_cell_kind_outside_vocab": _n(
             ctx, f"SELECT count(*) FROM {v} WHERE len(supported_cell_kinds) = 0 OR EXISTS "
                  "(SELECT 1 FROM unnest(supported_cell_kinds) AS u(k) "
@@ -498,7 +553,8 @@ DATASET_PROFILE = register(EquityTable(
              "evidence": "VARCHAR", "point_in_time": "BOOLEAN",
              "requires_confirmation": "BOOLEAN", "supported_cell_kinds": "VARCHAR[]",
              "coverage_from": "DATE", "coverage_to": "DATE", "coverage_basis": "VARCHAR",
-             "estimated_coverage_pct": "DOUBLE", "coverage_by_mktcap_quintile": "DOUBLE[]",
+             "estimated_coverage_pct": "DOUBLE", "n_observed": "BIGINT",
+             "n_denominator": "BIGINT", "coverage_by_mktcap_quintile": "DOUBLE[]",
              "field_scope": "VARCHAR"},
     inputs=SOURCE_TABLES,
     partition_class="whole",

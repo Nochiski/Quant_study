@@ -12,6 +12,11 @@ GAP-02 3계정(`borrowings`·`depreciation`·`interest_expense`) 커버 17.5/15/
 EG2-P04 모집단이 빈다. 그래서 여기서는 `lag_known=false` 를 실은 `_meta` 를 손으로 만들어
 게이트 함수에 직접 물린다(아래 「EG2-P04 하네스」) — 서버 실측 전에 술어가 항진인 채로 남지
 않게 하는 유일한 방법이다.
+
+**픽스처와 손계산의 경계(§9 S19 2차)**: 골든 픽스처(`fixtures/dataset_profile.json`)는 **모집단
+비의존 선언값만** 담는다 — 창·커버율·분위처럼 모집단이 바뀌면 달라지는 값을 굳히면 서버에서 EG4 가
+폐기한다(실제로 `financial.borrowings.coverage_from` 이 절단본 2023-11-14 / 서버 2016-03-30 이라
+1차가 막혔다). 그 실측 단언은 이 파일의 손계산 테스트가 맡는다.
 """
 from __future__ import annotations
 
@@ -264,6 +269,110 @@ def test_컨센서스_커버는_종목_축이라_일별_격자로_나누지_않�
     assert {b for _, b, _ in rows} == {"grid_security"}
     # 절단본 유니버스 15종목 중 컨센서스·의견 커버 5 = 33.33%
     assert {round(p, 2) for _, _, p in rows} == {33.33, 26.67}
+
+
+def test_내부자_지분_필드는_롤링_2년_창을_coverage_from_으로_남긴다(built) -> None:
+    """FIELD_MAP §2 의 '롤링 2년' 조건은 판정이 아니라 창이다 — 그래서 골든 픽스처가 아니라
+    절단본 손계산으로 잰다(창은 모집단·수집 시점에 따라 움직인다)."""
+    _, r = built
+    got = {f: (str(lo), str(hi)) for f, lo, hi in _rows(
+        r.out_dir, "SELECT field_id, coverage_from, coverage_to FROM dp WHERE field_id IN "
+                   "('event.insider_net_buy', 'event.insider_stake_change') ORDER BY 1")}
+    assert got["event.insider_net_buy"] == ("2024-08-26", "2026-08-26")
+    assert got["event.insider_stake_change"] == got["event.insider_net_buy"]
+
+
+def test_커버율은_정수_분자_분모의_순수_함수다(built) -> None:
+    """산출에 실리는 유일한 부동소수 — 표만 보고 재계산이 되어야 content_hash 가 안정하다."""
+    _, r = built
+    rows = _rows(r.out_dir, "SELECT field_id, n_observed, n_denominator, estimated_coverage_pct "
+                            "FROM dp ORDER BY 1")
+    assert len(rows) == N_FIELDS
+    for field_id, n_obs, n_den, pct in rows:
+        assert 0 <= n_obs <= n_den, field_id
+        decimals = rules_s19.COVERAGE_PCT_DECIMALS
+        expect = 0.0 if n_den == 0 else round(100.0 * n_obs / n_den, decimals)
+        assert pct == expect, field_id
+    # 게이트도 같은 항등을 SQL 로 본다
+    assert _gate(r, "EG2_dataset_profile").metrics["n_pct_not_derivable"] == 0
+
+
+# ── 결정성 (서버 해시 불일치의 회귀, §9 S19 2차) ──────────────────────────────
+
+N_DETERMINISM_BUILDS = 5
+
+
+def test_같은_입력으로_다섯_번_지어도_해시가_같다(built) -> None:
+    """재빌드 1회 검사로는 못 잡은 축 — 커버 실측은 격자를 병렬로 훑으므로 스캔 순서가 값에
+    새면 여기서 드러난다. 서버 실측에서 같은 입력의 두 빌드가 다른 해시를 냈다(§9 S19 2차)."""
+    eq, first = built
+    hashes = {first.content_hash}
+    # keep 을 넉넉히 준다 — 기본 3 이면 manifest GC 가 모듈 픽스처의 원본 `v=` 를 지워
+    # 뒤 테스트가 읽을 산출이 사라진다(빌드 프레임의 정상 동작).
+    keep = N_DETERMINISM_BUILDS + 2
+    for i in range(N_DETERMINISM_BUILDS - 1):
+        r = build.build_table(rules_s19.DATASET_PROFILE, STAGE_SLICE, eq, SEED,
+                              build_id=f"b_det_{i}", threads=3, keep=keep)
+        assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+        hashes.add(r.content_hash)
+    assert len(hashes) == 1, hashes
+
+
+def test_분위_경계의_동률은_총순서로만_결정된다(tmp_path: Path) -> None:
+    """**서버 비결정성의 원인**: `ntile` 의 ORDER BY 가 유일하지 않으면 동률 행이 어느 분위로
+    가는지 SQL 이 정하지 않는다 — 답이 엔진의 행 순서(병렬 스캔·정렬·스필)에 맡겨진다.
+
+    아래는 동률이 분위 경계를 가로지르는 최소 사례다. 총순서가 없으면 입력 행 순서를 바꾸는
+    것만으로 커버율 배열이 달라지고, `mktcap_krw, ticker` 로 못박으면 불변이다.
+    """
+    rows = [("A", 100), ("B", 200), ("C", 200), ("D", 200), ("E", 200),
+            ("F", 200), ("G", 200), ("H", 300), ("I", 400), ("J", 500)]
+    covered = ("B", "D", "F")
+
+    def quintiles(order: list[tuple[str, int]], order_by: str) -> tuple:
+        con = duckdb.connect()
+        try:
+            values = ", ".join(f"('{t}', {m})" for t, m in order)
+            con.execute(f"CREATE TEMP TABLE g AS SELECT * FROM (VALUES {values}) "
+                        "v(ticker, mktcap_krw)")
+            obs = ", ".join(f"('{t}')" for t in covered)
+            con.execute(f"CREATE TEMP TABLE o AS SELECT * FROM (VALUES {obs}) v(ticker)")
+            got = con.execute(
+                f"WITH s AS (SELECT ticker, ntile(5) OVER (ORDER BY {order_by}) AS q FROM g) "
+                "SELECT s.q, count(o.ticker), count(*) FROM s LEFT JOIN o ON o.ticker = s.ticker "
+                "GROUP BY s.q ORDER BY s.q").fetchall()
+            return tuple((int(a), int(b), int(c)) for a, b, c in got)
+        finally:
+            con.close()
+
+    orders = [rows, list(reversed(rows)), rows[3:] + rows[:3]]
+    assert len({quintiles(o, "mktcap_krw") for o in orders}) > 1          # 총순서 없음 = 미결정
+    assert len({quintiles(o, "mktcap_krw, ticker") for o in orders}) == 1  # 총순서 = 순수 함수
+
+
+def test_분위_지도는_총순서로_한_번만_굽는다(built) -> None:
+    """구현이 실제로 그 총순서를 쓰는지 — SQL 본문과 산출 양쪽으로 본다."""
+    import inspect
+    src = inspect.getsource(rules_s19.install_grid_quintiles)
+    assert "ORDER BY mktcap_krw, ticker" in src        # 종목 축
+    assert "PARTITION BY date ORDER BY mktcap_krw, ticker" in src  # 세션 축
+    eq, r = built
+    # 같은 격자에서 두 번 구워도 지도가 같다
+    con = duckdb.connect()
+    try:
+        con.execute("SET threads = 3")
+        glob = str(eq / "universe_daily" / "v=b_universe_daily" / "year=*" / "*.parquet")
+        con.execute("CREATE OR REPLACE TEMP VIEW universe_daily AS SELECT * FROM "
+                    f"read_parquet('{glob}', hive_partitioning=true)")
+        seen = set()
+        for _ in range(3):
+            rules_s19.install_grid_quintiles(con)
+            seen.add(con.execute(
+                "SELECT bit_xor(hash(ticker || '|' || date || '|' || q)) FROM _grid_quintile"
+            ).fetchone()[0])
+        assert len(seen) == 1
+    finally:
+        con.close()
 
 
 # ── EG2-P04 하네스 (절단본 stage 에 `_meta` 가 없어 모집단이 비는 축) ────────

@@ -8,6 +8,10 @@
 
 선언 54가 `FACTORS.md` 정본과 어긋나지 않는지는 **문서를 파싱해** 대조한다(`check_field_map.py`
 규약) — 표를 손으로 옮긴 곳이라 드리프트가 가장 쉽게 생기는 지점이다.
+
+골든 픽스처는 **모집단 비의존**(선언 + 선언 조인으로만 정해지는 판정)만 담고, 커버 실측에 걸린
+판정(`status='ready'`·`no_observations`·`first_usable_date`)은 절단본 손계산 테스트가 맡는다
+(§9 S19 2차 — 서버 EG4 폐기의 교훈).
 """
 from __future__ import annotations
 
@@ -182,6 +186,24 @@ def test_required_columns_는_프로파일에서_유도된다(built) -> None:
     assert list(cols) == ["price_daily.value_krw"]
 
 
+def test_커버_실측에_걸린_판정은_손계산으로_잰다(built) -> None:
+    """골든 픽스처는 모집단 비의존 선언값만 담는다(§9 S19 1차) — 커버율에서 나온 판정은 여기서.
+
+    M01 은 재료(`price.adj_close`) 커버가 100% 라 ready 이고 시작일이 캘린더 하한이다.
+    E05·E06 은 `corp_event` 가 MVP 4유형만 적재해 재료 커버가 0 → `no_observations`,
+    시작일 NULL(재료가 없는데 날짜를 적으면 표가 거짓말을 한다).
+    """
+    _, r = built
+    got = {f: (s, str(d) if d is not None else None, b) for f, s, d, b in _rows(
+        r.out_dir, "SELECT factor_id, status, first_usable_date, blocked_reason FROM fr "
+                   "WHERE factor_id IN ('M01', 'E05', 'E06', 'V05') ORDER BY 1")}
+    assert got["M01"] == ("ready", "2010-01-04", None)
+    assert got["E05"] == ("blocked", None, "no_observations: event.buyback_amount")
+    assert got["E06"] == ("blocked", None, "no_observations: event.capital_raise_amount")
+    # GAP-02 계정이 가장 늦게 열려 V05 의 시작일이 된다
+    assert got["V05"] == ("ready", "2023-11-14", None)
+
+
 def test_같은_입력_재빌드는_파티션_해시가_같다(built) -> None:
     eq, first = built
     again = build.build_table(rules_s20.FACTOR_READINESS, STAGE_SLICE, eq, SEED,
@@ -189,6 +211,32 @@ def test_같은_입력_재빌드는_파티션_해시가_같다(built) -> None:
     assert again.ok
     assert again.content_hash == first.content_hash
     assert _gate(again, "EG5a").status is gates.GateStatus.PASS
+
+
+N_DETERMINISM_BUILDS = 5
+
+
+def test_같은_입력으로_다섯_번_지어도_해시가_같다(built) -> None:
+    """리스트 컬럼(`required_columns`·`required_field_ids`)과 `first_usable_date` 가 집계 순서에
+    새면 여기서 드러난다 — `list_sort` 와 `max` 로 총순서를 못박은 것의 회귀(§9 S19 2차)."""
+    eq, first = built
+    hashes = {first.content_hash}
+    keep = N_DETERMINISM_BUILDS + 2      # manifest GC 가 모듈 픽스처 원본을 지우지 않게
+    for i in range(N_DETERMINISM_BUILDS - 1):
+        r = build.build_table(rules_s20.FACTOR_READINESS, STAGE_SLICE, eq, SEED,
+                              build_id=f"b_fr_det_{i}", threads=3, keep=keep)
+        assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+        hashes.add(r.content_hash)
+    assert len(hashes) == 1, hashes
+
+
+def test_리스트_컬럼은_정렬돼_있다(built) -> None:
+    """`list()` 는 정렬이 없으면 스캔 순서를 그대로 담는다 — `required_columns` 는 list_sort 다."""
+    _, r = built
+    for (cols,) in _rows(r.out_dir, "SELECT required_columns FROM fr"):
+        assert list(cols) == sorted(cols)
+    body = rules_s20.FACTOR_READINESS.sql_path.read_text(encoding="utf-8")
+    assert body.count("list_sort(list(DISTINCT") == 6      # 사유 5축 + required_columns
 
 
 def test_ready_하한은_미등재라_술어만_빠지고_측정치가_남는다(built) -> None:

@@ -5,7 +5,10 @@
 --   `_decl_field`      각 rules_s*.py 의 `EquityTable.field_profiles` 선언 + 소유 테이블에서 유도한
 --                      `source_stage_tables`·`available_date_basis`·`supported_cell_kinds`.
 --                      랙·PIT·cell kind 는 여기서만 온다 — 이 파일에 리터럴을 쓰지 않는다.
---   `_field_coverage`  고정한 equity 파티션 실측 — 창(coverage_from·to)·커버율(%)·시총 분위 5.
+--   `_field_coverage`  고정한 equity 파티션 실측 — 창(coverage_from·to)·커버율(%)·정수 분자·분모·
+--                      시총 분위 5. 커버율은 정수 두 개의 순수 함수이고(파이썬 나눗셈 + 고정
+--                      반올림) 그 항등은 EG2_dataset_profile 이 SQL 로 다시 확인한다 — 엔진의
+--                      부동소수 축약 순서가 content_hash 에 섞이지 않게 하는 장치다(§9 S19 2차).
 --                      필드마다 읽는 테이블·컬럼이 달라 SQL 한 벌로는 못 재므로 파이썬이 질의를
 --                      만들어 재고 그 결과만 여기로 들어온다(값의 정의는 rules_s19 docstring).
 --
@@ -33,6 +36,8 @@ SELECT
     c.coverage_to                       AS coverage_to,
     d.coverage_basis                    AS coverage_basis,
     c.estimated_coverage_pct            AS estimated_coverage_pct,
+    c.n_observed                        AS n_observed,
+    c.n_denominator                     AS n_denominator,
     c.coverage_by_mktcap_quintile       AS coverage_by_mktcap_quintile,
     d.field_scope                       AS field_scope,
     CASE WHEN c.coverage_from IS NULL OR c.coverage_to IS NULL

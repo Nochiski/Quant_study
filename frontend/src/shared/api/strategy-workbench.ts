@@ -16,6 +16,7 @@ import {
   getStrategyDocumentContract,
   getStrategyDocumentSchema,
   getBacktestStatus,
+  listBacktests,
   listStrategies,
   listStrategyRevisions,
   getStrategyTemplate,
@@ -36,6 +37,7 @@ import type {
   BacktestRunResult,
   BacktestRunSpec,
   BacktestRunState,
+  BacktestRunSummary,
   BacktestStartResponse,
   CompileRequest,
   CompiledDocument,
@@ -60,6 +62,7 @@ import type {
   MetricDefinition,
   MetricValue,
   PageRevisionSummary,
+  PageBacktestRunSummary,
   PageStrategySummary,
   PortfolioPreview,
   PortfolioPreviewRequest,
@@ -294,6 +297,19 @@ const unwrap = <T>(
 };
 
 export const strategyWorkbenchApi = {
+  async listBacktests(
+    page: { offset?: number; limit?: number; strategyId?: string } = {},
+  ): Promise<PageBacktestRunSummary> {
+    const response = await listBacktests({
+      query: {
+        offset: page.offset,
+        limit: page.limit,
+        strategy_id: page.strategyId,
+      },
+    });
+    return unwrap(response, "listBacktests");
+  },
+
   async startBacktest(spec: BacktestRunSpec): Promise<BacktestStartResponse> {
     const response = await startBacktest({ body: spec });
     return requireData(response.data, "startBacktest");
@@ -573,6 +589,7 @@ export type {
   BacktestRunResult,
   BacktestRunSpec,
   BacktestRunState,
+  BacktestRunSummary,
   BacktestStartResponse,
   CompileRequest,
   CompiledDocument,
@@ -595,6 +612,7 @@ export type {
   MetricDefinition,
   MetricValue,
   PageRevisionSummary,
+  PageBacktestRunSummary,
   PageStrategySummary,
   PortfolioPreview,
   PortfolioPreviewRequest,

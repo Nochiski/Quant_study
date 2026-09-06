@@ -75,7 +75,8 @@
 
 .data-list-page__actions,
 .data-list-page__pager,
-.data-list-page__feedback {
+.data-list-page__feedback,
+.data-list-page__filter {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -90,6 +91,46 @@
 
 .data-list-page__feedback {
   justify-content: space-between;
+}
+
+.data-list-page__filter {
+  padding: var(--space-3) var(--space-4);
+  border-block-end: 1px solid var(--border);
+}
+
+.data-list-page__filter input {
+  min-width: min(28rem, 100%);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  background: var(--surface-panel);
+  color: var(--text-primary);
+}
+
+.data-list-page__provenance {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-1) var(--space-2);
+  margin: 0;
+  font-size: var(--text-size-small);
+}
+
+.data-list-page__provenance dt {
+  color: var(--text-muted);
+}
+
+.data-list-page__provenance dd {
+  min-width: 0;
+  margin: 0;
+}
+
+.data-list-page__error {
+  display: block;
+  max-width: 24rem;
+  margin-block-start: var(--space-1);
+  color: var(--status-error);
+  font-size: var(--text-size-small);
+  overflow-wrap: anywhere;
 }
 
 .data-list-page__nested {

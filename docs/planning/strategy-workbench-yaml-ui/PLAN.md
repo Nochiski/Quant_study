@@ -3,13 +3,13 @@ plan_version: 2
 project: yaml-strategy-workbench-ui
 project_status: APPROVED
 current_phase: P6
-current_pr: P6-08
-active_prs: [P6-08]
-parallel_window: []
-last_updated: 2026-09-06T00:21:27+09:00
+current_pr: P6-08,P6-09
+active_prs: [P6-08, P6-09]
+parallel_window: [P6-08, P6-09]
+last_updated: 2026-09-06T01:22:46+09:00
 planned_prs: 52
 merged_prs: 46
-approved_prs: 47
+approved_prs: 48
 progress_percent: 88
 ---
 
@@ -24,11 +24,11 @@ progress_percent: 88
 |---|---|
 | Project status | `APPROVED` |
 | Current phase | `P6` |
-| Current/next PR | `P6-08` |
-| Active PR | `P6-08` |
+| Current/next PR | `P6-08,P6-09` |
+| Active PR | `P6-08, P6-09` |
 | Progress | `46 / 52 merged (88%)` |
-| Approved | `47 / 52` |
-| Aggregated at | `2026-09-06 00:21 KST` |
+| Approved | `48 / 52` |
+| Aggregated at | `2026-09-06 01:22 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -86,16 +86,16 @@ progress_percent: 88
 
 | 항목 | 값 |
 |---|---|
-| PR | `P6-08` Strategy/revision history routed UI APPROVED |
-| Intent | 기존 repository의 immutable revision/history SoT를 그대로 투영해 전문 사용자가 저장 전략을 찾고 원하는 revision을 편집·diff direct route로 열 수 있게 한다 |
-| Acceptance | deterministic strategy list와 revision pagination; `/research/strategies` direct route와 nav; strategy 선택 시 revision history·최신 revision 편집 연결; 임의 revision edit/diff deep link; loading·empty·error·out-of-range offset을 안전하게 canonical page로 복구; OpenAPI/generated client와 backend/frontend 계약 테스트 동기화 |
-| Non-goals | server draft 변경(P6-02), backtest run history/provenance(P6-09), strategy 삭제·rename, 검색 인덱스, legacy editor 제거(P6-06) |
-| Branch/worktree | `feat/p6-08-strategy-history` (`Quant_study-p6-08`) |
-| Base SHA | `b7fc4de` (P6-02 merge 기록 포함 latest main) |
-| Head SHA | `f7bb1fd` (final reviewed HEAD; code-fix freeze `09db117`) |
-| Diff stat | 26 files, +1,371/-36 (OpenAPI/generated, PLAN과 hostile/review regression 포함; production은 list/history vertical 및 공용 query lifecycle owner) |
-| Focused tests | backend strategy/history/repository 72 + architecture 7 passed; frontend router/legacy save 17 + document routes 46 passed |
-| Full gate | backend 1,114·frontend 423·Rust 13·root 5 passed; Ruff·Pyright·typecheck·lint·Prettier·build·cargo fmt/clippy 통과; OpenAPI/SDK 17 files 재생성 전후 SHA-256 동일 |
+| PR | `P6-09` [#75](https://github.com/Nochiski/Quant_study/pull/75) Backtest run history routed UI와 provenance APPROVED (stacked; CI billing blocked) |
+| Intent | process-lifetime BacktestRunService의 실제 lifecycle/provenance를 read-only history로 투영해 전문 사용자가 run을 최신순 탐색하고 saved/inline 실행 근거를 확인한 뒤 detail route로 복귀하게 한다 |
+| Acceptance | newest-first deterministic pagination과 strategy filter; saved/inline의 strategy/revision/spec/schema/source hash를 명시적으로 분리 표시; nonterminal row만 polling하고 terminal-only page는 멈춤; run detail direct link; loading·empty·error·out-of-range URL canonical recovery; OpenAPI/generated/backend/frontend 계약 동기화 |
+| Non-goals | run 영속화·삭제·재시작 복구, 새로운 backtest 실행 의미, 결과/trace 화면 변경, strategy history 변경, legacy editor 제거 |
+| Branch/worktree | `feat/p6-09-backtest-history` (`Quant_study-p6-09`), base branch `feat/p6-08-strategy-history` |
+| Base SHA | `f760a5b` (P6-08 approved docs HEAD; #74 merge 후 main에 순차 rebase/base 전환) |
+| Head SHA | `74ebae0` final review freeze (`eeabb69` implementation, `d670c61` pagination fix) |
+| Diff stat | base 대비 22 files +1,228/-30 (OpenAPI/generated 211줄, tests와 hostile contract 보강 포함; 단일 API→query→route vertical slice와 공용 pagination wire guard로 12절 size exception) |
+| Focused tests | author backend history/reference/status 13·frontend router+document route 64; reviewer backend 20과 세 endpoint hostile lexical/bounds matrix |
+| Full gate | backend 1,118·frontend 427·Rust 13·root 5; Ruff·Pyright·typecheck·lint·changed-file Prettier·build·cargo fmt/clippy 통과; runtime/tracked OpenAPI 214 schemas 일치; 기존 Vite 500 kB chunk warning만 유지 |
 
 ---
 
@@ -239,7 +239,7 @@ Phase exit:
 | [ ] | `P6-06` | 전체 browser E2E·실구동 시나리오 검증, migration gate, 조건부 legacy cleanup | P6-01, P6-02, P6-03, P6-04, P6-05, P6-08, P6-09 | `WAITING` | — |
 | [x] | `P6-07` | Root frontend/backend development entrypoints | P0-02, P0-03 | `MERGED` | [#56](https://github.com/Nochiski/Quant_study/pull/56) · `review_p6_07` APPROVE |
 | [ ] | `P6-08` | Strategy list와 revision history routed UI | P6-01, P6-02, P3-06, P4-08 | `APPROVED` | [#74](https://github.com/Nochiski/Quant_study/pull/74) · `review_p6_08` APPROVE, P0/P1/P2 0; CI billing 차단 |
-| [ ] | `P6-09` | Backtest run history routed UI와 provenance | P6-08, P3-05 | `WAITING` | P6-02 review size finding으로 분리 |
+| [ ] | `P6-09` | Backtest run history routed UI와 provenance | P6-08, P3-05 | `APPROVED` | [#75](https://github.com/Nochiski/Quant_study/pull/75) · `review_p6_09` APPROVE, P0/P1/P2 0; CI billing 차단 |
 
 Phase exit:
 
@@ -256,6 +256,7 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
+| P6-09 | `review_p6_09` | `f760a5b` | `74ebae0` | APPROVE (최초 P2 canonical pagination 1건을 동일 reviewer가 세 endpoint hostile matrix로 폐쇄; 최종 P0/P1/P2 0) | 0 | process restart/multi-worker history 공유, client-asserted inline `source_hash`, 실제 browser E2E는 P6-06 범위 | 2026-09-06 |
 | P6-08 | `review_p6_08` | `b7fc4de` | `f7bb1fd` | APPROVE (최초 P1 3/P2 2와 2차 P1 1/P2 1을 동일 reviewer가 hostile 재현·폐쇄; 최종 P0/P1/P2 0) | 4 (해소) | lexical `offset=1.0` canonicalization, concurrent insert snapshot 안정성, 외부 탭 cache 즉시성, SQLite chain audit 성능은 비차단/P6-04 범위 | 2026-09-06 |
 | P6-02 | `review_p6_02` | `206ee41` | `1473633` | APPROVE (최초 P1 4/P2 3과 2차 P1 2를 동일 reviewer가 모두 독립 재현 폐쇄; P0/P1/P2 0) | 0 | auth/ownership·retention/TTL은 live 확장 전 후속, 615-line hook state machine 분리는 유지보수 후보 | 2026-09-05 |
 | P6-01 | `review_p6_01` | `a609eee` | `15370c7` | APPROVE (누적 P1 모두 폐쇄, latest full diff의 새 P0/P1/P2 0) | 0 | strategy별 chain startup/list N+1은 P6-04 측정; 외부 ANALYZE의 sqlite_stat*은 의도적으로 fail-closed | 2026-09-05 |
@@ -304,6 +305,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
+| P6-09 | author backend history/reference/status 13·frontend router+document route 64; reviewer backend 20 + hostile probes | backend 1,118·frontend 427·Rust 13·root 5; Ruff·Pyright·typecheck·lint·changed-file Prettier·build·cargo fmt/clippy | OpenAPI/SDK 재생성 전후 diff hash `0d80043b706914d479227815fc732c5754340202` 동일; reviewer runtime/tracked 214 schemas 일치 | saved/inline provenance, exact strategy filter, 26개 page/out-of-range 복구, nonterminal→terminal polling stop, late cache 폐기와 세 endpoint noncanonical integer 422·MAX bounds를 검증; 실제 browser는 P6-06 범위 | [#75](https://github.com/Nochiski/Quant_study/pull/75) `review_p6_09` APPROVE P0/P1/P2 0; Actions billing으로 step 전 실패 | 2026-09-06 |
 | P6-08 | author backend 1,114/frontend 423; reviewer backend 79, router 14, YAML/legacy late-cache 2 + hostile probes | backend 1,114·frontend 423·Rust 13·root 5; Ruff·Pyright·typecheck·lint·Prettier·build·cargo fmt/clippy | OpenAPI runtime/tracked parity 및 17 files 재생성 전후 SHA-256 동일 | 모든 save path cache coherence, duplicate title identity, portable offsets, provenance, 21개 pagination과 immutable link 독립 재검증 | [#74](https://github.com/Nochiski/Quant_study/pull/74) `review_p6_08` APPROVE P0/P1/P2 0; Actions는 billing으로 step 전 실패 | 2026-09-06 |
 | P6-02 | draft repository/HTTP 15, frontend server-draft 10 + document-route 45, reviewer hostile probes | backend 1,112·Ruff·Pyright; frontend 417·typecheck·lint·build; Rust 13·root 5 | OpenAPI/SDK deterministic diff 0 | raw surrogate 4종 422/no-write, wrong-ID/malformed wire 차단, base revert 및 in-flight PUT→revision CAS retirement | [#72](https://github.com/Nochiski/Quant_study/pull/72) same reviewer APPROVE P0/P1/P2 0, approval-doc HEAD CI 4/4 pass, MERGED (`c25d43c`) | 2026-09-05 |
 | P6-01 | repository/server/architecture 74 passed; reviewer internal-object hostile probes | backend 1,097·Ruff·Pyright; frontend 403·typecheck·lint·build; root smoke/static | OpenAPI/SDK deterministic diff 0 | restart exact source, REAL chain corruption, literal DDL mutation, unowned/owned sqlite_sequence와 SQL-NULL autoindex fail-closed | [#69](https://github.com/Nochiski/Quant_study/pull/69) same reviewer APPROVE, approval-doc HEAD CI 4/4 pass, MERGED (`fe3fbc5`) | 2026-09-05 |
@@ -349,6 +351,14 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-06 KST | Codex | 동일 reviewer `review_p6_09`이 final reviewed HEAD `74ebae0`에서 최초 pagination P2 폐쇄와 최신 전체 diff의 새 P0/P1/P2 0을 확인해 APPROVE했다. backend 20, 세 endpoint의 float-like·선행 0·부호·공백/제어문자·밑줄·지수·Unicode 숫자 hostile matrix, bounds/MAX, runtime/tracked OpenAPI 214 schemas를 독립 재현했다. process-lifetime/multi-worker와 inline source hash 신뢰 경계, 실제 browser 검증은 명시된 P6-06 residual로 유지하고 P6-09를 APPROVED로 전환한다 | same-reviewer final approval·blocking 0·wire/domain SoT 감사 |
+| 2026-09-06 KST | Codex | P6-09 수정·self-check 증거를 review HEAD `74ebae0`에 동결하고 최초 검토자 `review_p6_09`에게 P2 폐쇄 여부 재검토를 요청한다. 검토 범위는 공용 validator가 세 endpoint에 빠짐없이 적용됐는지, hostile lexical forms와 bounds, OpenAPI/도메인 SoT, 새 회귀 테스트의 실효성이다 | 13.3 diff freeze·13.5 same-reviewer fix loop |
+| 2026-09-06 KST | Codex | P6-09 리뷰 수정 `d670c61`에서 inbound HTTP 공용 canonical unsigned-decimal validator를 추가하고 backtest/strategy/revision 세 목록에 동일 적용했다. wire lexical grammar는 inbound adapter, 범위 상수·불변식은 `PageRequest`가 계속 소유한다. `1.0`, `01`, `+1`, 공백, `9_0`은 세 경로 모두 422이며 0·양의 십진수·MAX safe bounds는 통과한다. OpenAPI `integer`와 `minimum/maximum`은 무변경이고 focused 4, 전체 backend 1,118, Ruff·Pyright를 통과해 SELF_CHECK로 전환한다 | reviewer P2 폐쇄·wire/domain SoT 책임분리·generated contract deterministic |
+| 2026-09-06 KST | Codex | `review_p6_09`이 ordering/provenance/poll/cache/route/generated 경계는 통과시켰으나 HTTP query가 `offset=1.0`, `01`, `+1`, `9_0`, `limit=1.0`을 정수로 강제 변환하는 P2 1건으로 REQUEST_CHANGES를 판정했다. OpenAPI integer, frontend lexical canonicalizer, domain PageRequest 입력 집합을 맞추도록 inbound HTTP 공용 canonical decimal parser를 backtest/strategy/revision 목록에 적용하고 hostile wire regression 후 같은 reviewer에게 재검토받는다 | canonical wire input SoT·공용 inbound parser 책임·same-reviewer fix loop |
+| 2026-09-06 KST | Codex | P6-09 #75의 push/PR Actions backend·frontend 4 jobs가 모두 1~2초, 실행 step 0으로 실패했다. check-run annotation은 #74와 동일하게 “recent account payments have failed or spending limit needs to be increased”이며 코드·테스트 실행 전 외부 차단이다. 체크 우회나 branch protection 변경 없이 독립 reviewer와 로컬 전체 gate를 유지하고 순차 merge는 green 이후로 보류한다 | GitHub check-run annotation·13.6 CI green 필수 gate 보존 |
+| 2026-09-06 KST | Codex | P6-09 [#75](https://github.com/Nochiski/Quant_study/pull/75)를 parent branch `feat/p6-08-strategy-history` 대상으로 열고 review HEAD `2a04c44`, implementation `eeabb69`, base 대비 21 files +1,132/-26과 전체 gate·size exception을 본문에 고정했다. fresh review-only agent `review_p6_09`에게 process-lifetime ordering/provenance snapshot, page/filter bounds, cache race, generated contract, polling/URL/accessibility와 SoT·책임분리를 독립 검토하도록 IN_REVIEW로 전환한다 | 13.3 diff freeze·13.4 PR별 fresh reviewer 정확히 1명·stack 순차 merge gate |
+| 2026-09-06 KST | Codex | P6-09 구현을 `eeabb69`에 고정했다. BacktestRunService가 수락 순서를 잠금 안에서 소유하고 process-lifetime run state와 실행 직전 확정한 saved/inline provenance를 atomic newest-first page/filter로 투영한다. generated SDK와 backtest entity query owner를 거쳐 `/research/backtests` route가 strategy/revision/spec/schema/source hash, status/error/time, detail link를 표시하며 nonterminal page만 polling한다. 성공한 새 run은 history prefix를 cancel→remove해 늦은 응답도 stale 목록을 복원하지 못한다. focused backend 11/frontend 64, 전체 backend 1,116/frontend 427/Rust 13/root 5와 모든 정적·build·generated deterministic gate를 통과해 SELF_CHECK로 전환한다. handwritten production 약 574줄의 단일 API→query→route vertical slice이므로 12절 size exception을 기록한다 | run lifecycle/provenance application SoT·HTTP/generated/query/route/UI 책임분리·cache race fail-closed·13.2 self-check |
+| 2026-09-06 KST | Codex | P6-08은 승인됐지만 approval-doc Actions 재실행도 모든 job이 코드 step 전 billing/spending-limit로 실패해 merge gate가 외부 차단됐다. 체크 우회·보호 규칙 변경 없이 승인 HEAD `f760a5b` 위에 P6-09 전용 stacked worktree를 열고 `parallel_window`를 명시했다. process-lifetime run register의 newest-first page/filter와 saved/inline strategy·revision·spec/schema/source provenance, detail link, nonterminal-only polling, URL/state 복구만 구현하며 #74 green/merge 후 순차 base 전환한다 | 외부 CI 차단 중 안전한 stacked 진행·P6-08→P6-09 코드 dependency·순차 merge 보존 |
 | 2026-09-06 KST | Codex | 동일 reviewer `review_p6_08`이 final reviewed HEAD `f7bb1fd`에서 누적 findings를 모두 폐쇄하고 새 P0/P1/P2 0으로 APPROVE했다. backend 79, router 14, YAML/legacy late-cache 2, key-scope·MAX·duplicate-title·OpenAPI parity hostile 검증을 독립 수행했다. 외부 탭 즉시성·offset snapshot·chain audit 성능은 비차단 residual로 P6-04 범위를 유지하고 P6-08을 APPROVED로 전환한다. merge는 latest approval-doc HEAD의 CI green 뒤에만 수행한다 | same-reviewer final approval·blocking 0·13.6 CI merge gate |
 | 2026-09-06 KST | Codex | P6-08 3차 review에 code freeze `09db117`, self-check 기록 `f1736ed`, latest 26 files +1,372/-36 및 전체 gate를 PR #74에 고정했다. 최초 reviewer `review_p6_08`에게 legacy create/revise late cache와 duplicate-title accessible identity의 finding별 폐쇄 및 최신 전체 diff 신규 회귀를 재검토하도록 IN_REVIEW로 전환한다 | 13.3 latest diff freeze·13.4 same-reviewer fix loop·PR body merge gate |
 | 2026-09-06 KST | Codex | P6-08 2차 review fix를 `09db117`에 고정했다. strategy entity query owner의 단일 retire helper가 모든 save path에서 list prefix를 cancel→remove하고, legacy JSON create/revise 각각의 늦은 in-flight 응답이 cache를 복원하지 못함을 실제 provider 회귀로 고정했다. 접근성 label은 동일 제목이어도 항상 strategy ID를 포함하고 두 duplicate-title 행의 toggle·region·pager ownership을 검증한다. focused frontend 17 + document routes 46, solo full 423, typecheck·lint·Prettier·build 통과로 SELF_CHECK 전환한다. 병렬 full 중 기존 runtime-schema snippet 1건의 5초 timeout은 동일 file 46 및 solo full에서 재현되지 않았다 | cache invalidation 단일 owner·모든 활성 save path coherence·accessible identity·flake 격리 검증 |

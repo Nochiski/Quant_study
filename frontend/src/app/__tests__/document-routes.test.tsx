@@ -24,6 +24,7 @@ import {
   vi,
 } from "vitest";
 
+import { backtestHistoryQuery } from "../../entities/backtest";
 import { strategiesQuery } from "../../entities/strategy";
 import { readBackendFixture } from "../../shared/testing/backend-fixtures";
 import { t } from "../../shared/config";
@@ -2103,9 +2104,32 @@ describe("StrategySpec Diff projection (P4-08)", () => {
 });
 
 describe("backtest from the editor (P3-05)", () => {
-  it("runs a clean saved revision by reference and moves to the run page", async () => {
+  it("runs a clean saved revision by reference, retires history, and moves to the run page", async () => {
     const user = userEvent.setup();
-    const history = mount("/research/strategies/s1/revisions/2");
+    const { history, queryClient } = mountWithClient(
+      "/research/strategies/s1/revisions/2",
+    );
+    const list = backtestHistoryQuery({ offset: 0, limit: 25 });
+    const stalePage = { items: [], total: 0, offset: 0, limit: 25 };
+    queryClient.setQueryData(list.queryKey, stalePage);
+    let releaseLatePage: (() => void) | undefined;
+    const latePage = new Promise<void>((resolve) => {
+      releaseLatePage = resolve;
+    });
+    const oldFetch = queryClient
+      .fetchQuery({
+        ...list,
+        queryFn: async () => {
+          await latePage;
+          return stalePage;
+        },
+      })
+      .catch(() => undefined);
+    await waitFor(() =>
+      expect(queryClient.getQueryState(list.queryKey)?.fetchStatus).toBe(
+        "fetching",
+      ),
+    );
     await editor();
     const run = screen.getByRole("button", { name: /백테스트 실행/ });
     await waitFor(() => expect(run).toBeEnabled());
@@ -2124,6 +2148,10 @@ describe("backtest from the editor (P3-05)", () => {
         },
       },
     ]);
+    expect(queryClient.getQueryData(list.queryKey)).toBeUndefined();
+    releaseLatePage?.();
+    await oldFetch;
+    expect(queryClient.getQueryData(list.queryKey)).toBeUndefined();
   });
 
   it("runs an edited document as an inline draft with provenance, and never while invalid", async () => {

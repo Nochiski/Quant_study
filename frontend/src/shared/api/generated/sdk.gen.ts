@@ -58,6 +58,9 @@ import type {
   GetStrategyResponses,
   GetStrategyTemplateData,
   GetStrategyTemplateResponses,
+  ListBacktestsData,
+  ListBacktestsErrors,
+  ListBacktestsResponses,
   ListStrategiesData,
   ListStrategiesErrors,
   ListStrategiesResponses,
@@ -122,6 +125,18 @@ export type Options<
    */
   meta?: Record<string, unknown>;
 };
+
+/**
+ * List Backtests
+ */
+export const listBacktests = <ThrowOnError extends boolean = false>(
+  options?: Options<ListBacktestsData, ThrowOnError>,
+) =>
+  (options?.client ?? client).get<
+    ListBacktestsResponses,
+    ListBacktestsErrors,
+    ThrowOnError
+  >({ url: "/api/v1/backtests", ...options });
 
 /**
  * Start Backtest

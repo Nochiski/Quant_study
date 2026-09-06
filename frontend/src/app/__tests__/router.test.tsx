@@ -75,6 +75,37 @@ title: ${title}
   created_at: "2026-09-04T00:00:00+00:00",
 });
 
+const backtestSummary = ({
+  runId,
+  status = "completed",
+  saved = false,
+}: {
+  runId: string;
+  status?: "queued" | "running" | "completed" | "failed";
+  saved?: boolean;
+}) => ({
+  run: {
+    run_id: runId,
+    status,
+    progress: status === "completed" ? 1 : 0.4,
+    stage: status === "completed" ? "completed" : "engine",
+    message: status === "completed" ? "Run completed" : "Running engine",
+    created_at: saved ? "2026-09-05T00:00:00Z" : "2026-09-05T01:00:00Z",
+    updated_at: saved ? "2026-09-05T00:01:00Z" : "2026-09-05T01:01:00Z",
+    error: null,
+    artifact_uri: null,
+    artifact_sha256: null,
+  },
+  strategy_provenance: {
+    kind: saved ? "saved_revision" : "inline_draft",
+    spec_hash: saved ? "1".repeat(64) : "2".repeat(64),
+    schema_version: "1.0",
+    strategy_id: saved ? "s1" : null,
+    revision: saved ? 2 : null,
+    source_hash: saved ? "b".repeat(64) : "c".repeat(64),
+  },
+});
+
 const server = setupServer(
   http.get(`${API}/api/v1/strategy-drafts/:draftId`, () =>
     HttpResponse.json(
@@ -141,6 +172,28 @@ const server = setupServer(
       limit: 20,
     }),
   ),
+  http.get(`${API}/api/v1/backtests`, ({ request }) => {
+    const url = new URL(request.url);
+    const offset = Number(url.searchParams.get("offset") ?? 0);
+    const limit = Number(url.searchParams.get("limit") ?? 25);
+    const strategyId = url.searchParams.get("strategy_id");
+    const all = [
+      backtestSummary({ runId: "run-inline" }),
+      backtestSummary({ runId: "run-saved", saved: true }),
+    ];
+    const filtered =
+      strategyId === null
+        ? all
+        : all.filter(
+            (item) => item.strategy_provenance.strategy_id === strategyId,
+          );
+    return HttpResponse.json({
+      items: filtered.slice(offset, offset + limit),
+      total: filtered.length,
+      offset,
+      limit,
+    });
+  }),
   http.post(`${API}/api/v1/strategy-documents/compile`, async ({ request }) => {
     const body = (await request.json()) as { source: string };
     return HttpResponse.json({
@@ -577,6 +630,131 @@ describe("App Shell routes", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "전략 목록을 불러올 수 없습니다",
     );
+  });
+
+  it("browses saved and inline backtest provenance and filters by strategy", async () => {
+    const user = userEvent.setup();
+    const history = mount("/research/backtests");
+    expect(
+      await screen.findByRole("heading", { name: "백테스트 이력" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "백테스트" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(await screen.findByText("run-inline")).toBeInTheDocument();
+    expect(screen.getByText("run-saved")).toBeInTheDocument();
+    expect(screen.getByText("Inline draft")).toBeInTheDocument();
+    expect(screen.getByText("저장 revision")).toBeInTheDocument();
+    expect(screen.getByText("bbbbbbbbbbbb")).toBeInTheDocument();
+    expect(screen.getByText("cccccccccccc")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "s1 · v2" })).toHaveAttribute(
+      "href",
+      "/research/strategies/s1/revisions/2",
+    );
+    expect(
+      within(screen.getByText("run-inline").closest("tr")!).getByRole("link", {
+        name: "실행 열기",
+      }),
+    ).toHaveAttribute("href", "/research/backtests/run-inline");
+
+    const filter = screen.getByRole("textbox", { name: "Strategy ID" });
+    await user.type(filter, " s1 ");
+    await user.click(screen.getByRole("button", { name: "필터 적용" }));
+    await waitFor(() =>
+      expect(history.location.search).toContain("strategy=s1"),
+    );
+    expect(await screen.findByText("run-saved")).toBeInTheDocument();
+    expect(screen.queryByText("run-inline")).not.toBeInTheDocument();
+  });
+
+  it("paginates and canonicalizes out-of-range backtest history URLs", async () => {
+    const offsets: number[] = [];
+    const runs = Array.from({ length: 26 }, (_, index) =>
+      backtestSummary({ runId: `run-${String(index + 1).padStart(2, "0")}` }),
+    );
+    server.use(
+      http.get(`${API}/api/v1/backtests`, ({ request }) => {
+        const url = new URL(request.url);
+        const offset = Number(url.searchParams.get("offset") ?? 0);
+        const limit = Number(url.searchParams.get("limit") ?? 25);
+        offsets.push(offset);
+        return HttpResponse.json({
+          items: runs.slice(offset, offset + limit),
+          total: runs.length,
+          offset,
+          limit,
+        });
+      }),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/backtests");
+    await screen.findByText("run-01");
+    const pager = screen.getByRole("navigation", {
+      name: "백테스트 이력 페이지",
+    });
+    await user.click(within(pager).getByRole("button", { name: "다음" }));
+    expect(await screen.findByText("run-26")).toBeInTheDocument();
+    await waitFor(() => expect(history.location.search).toContain("offset=25"));
+    expect(offsets).toContain(25);
+
+    history.push("/research/backtests?offset=50");
+    await waitFor(() => expect(offsets).toContain(50));
+    await waitFor(() => expect(history.location.search).toContain("offset=25"));
+    expect(await screen.findByText("run-26")).toBeInTheDocument();
+  });
+
+  it("polls nonterminal backtest history and stops once every row is terminal", async () => {
+    let requests = 0;
+    server.use(
+      http.get(`${API}/api/v1/backtests`, () => {
+        requests += 1;
+        const status = requests === 1 ? "running" : "completed";
+        return HttpResponse.json({
+          items: [backtestSummary({ runId: "run-live", status })],
+          total: 1,
+          offset: 0,
+          limit: 25,
+        });
+      }),
+    );
+    mount("/research/backtests");
+    expect(await screen.findByText("running")).toBeInTheDocument();
+    await waitFor(() => expect(requests).toBeGreaterThanOrEqual(2), {
+      timeout: 2_500,
+    });
+    expect((await screen.findAllByText("completed")).length).toBeGreaterThan(0);
+    const terminalRequestCount = requests;
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    expect(requests).toBe(terminalRequestCount);
+  }, 7_500);
+
+  it("shows loading, filtered-empty, and retryable error states for backtest history", async () => {
+    server.use(
+      http.get(`${API}/api/v1/backtests`, async ({ request }) => {
+        await delay(250);
+        const url = new URL(request.url);
+        return HttpResponse.json({
+          items: [],
+          total: 0,
+          offset: Number(url.searchParams.get("offset") ?? 0),
+          limit: Number(url.searchParams.get("limit") ?? 25),
+        });
+      }),
+    );
+    mount("/research/backtests?strategy=missing");
+    expect(await screen.findByRole("status")).toHaveTextContent("불러오는 중");
+    expect(
+      await screen.findByText("이 전략으로 실행한 백테스트가 없습니다."),
+    ).toBeInTheDocument();
+
+    cleanup();
+    server.use(http.get(`${API}/api/v1/backtests`, () => HttpResponse.error()));
+    mount("/research/backtests");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "백테스트 이력을 불러올 수 없습니다",
+    );
+    expect(screen.getByRole("button", { name: "다시 시도" })).toBeEnabled();
   });
 
   it("supports back and forward between routes", async () => {

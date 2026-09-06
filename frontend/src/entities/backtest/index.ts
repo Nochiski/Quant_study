@@ -1,4 +1,6 @@
 export {
+  backtestHistoryKey,
+  backtestHistoryQuery,
   useBacktestResult,
   useBacktestStatus,
   useCancelBacktest,
@@ -9,4 +11,6 @@ export type {
   BacktestRunResult,
   BacktestRunSpec,
   BacktestRunState,
+  BacktestRunSummary,
+  PageBacktestRunSummary,
 } from "../../shared/api";

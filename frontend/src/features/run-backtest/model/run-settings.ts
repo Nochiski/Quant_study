@@ -52,7 +52,10 @@ export const buildBacktestRunOptions = (
     errors.push("initial_cash");
   const annualizationText = fields.annualizationDays.trim();
   const annualizationDays = Number(annualizationText);
-  if (annualizationText === "" || !Number.isInteger(annualizationDays))
+  // JSON numbers are JavaScript numbers at this boundary. Reject integers that cannot be
+  // represented losslessly before they can mutate accepted-request provenance. Positivity and
+  // the business range remain backend-owned semantics.
+  if (annualizationText === "" || !Number.isSafeInteger(annualizationDays))
     errors.push("annualization_days");
 
   const oosStart = fields.oosStart.trim();

@@ -152,37 +152,59 @@ describe("backtest run settings", () => {
     });
   });
 
-  it("forwards typed semantic boundary values for the backend contract to decide", () => {
+  it("blocks an unsafe integer before Number conversion can mutate the wire value", () => {
     expect(
       buildBacktestRunOptions(
         {
           core: "rust",
-          initialCashKrw: "0",
+          initialCashKrw: "100000000",
           benchmarkSecurityId: "",
-          annualizationDays: "0",
-          oosStart: "2020-12-31",
+          annualizationDays: "9007199254740993",
+          oosStart: "",
         },
         { start: "2021-01-01", end: "2026-08-31" },
       ),
     ).toEqual({
-      valid: true,
-      errors: [],
-      options: {
-        core: "rust",
-        initial_cash: 0,
-        benchmark_security_id: null,
-        annualization_days: 0,
-        metric_windows: [
-          {
-            scope: "out_of_sample",
-            start: "2020-12-31",
-            end: "2026-08-31",
-            label: "OOS 2020-12-31",
-          },
-        ],
-      },
+      valid: false,
+      options: null,
+      errors: ["annualization_days"],
     });
   });
+
+  it.each(["0", "-1"])(
+    "forwards safe semantic boundary %s for the backend contract to decide",
+    (annualizationDays) => {
+      expect(
+        buildBacktestRunOptions(
+          {
+            core: "rust",
+            initialCashKrw: "0",
+            benchmarkSecurityId: "",
+            annualizationDays,
+            oosStart: "2020-12-31",
+          },
+          { start: "2021-01-01", end: "2026-08-31" },
+        ),
+      ).toEqual({
+        valid: true,
+        errors: [],
+        options: {
+          core: "rust",
+          initial_cash: 0,
+          benchmark_security_id: null,
+          annualization_days: Number(annualizationDays),
+          metric_windows: [
+            {
+              scope: "out_of_sample",
+              start: "2020-12-31",
+              end: "2026-08-31",
+              label: "OOS 2020-12-31",
+            },
+          ],
+        },
+      });
+    },
+  );
 
   it("exposes every assumption through accessible controls and reports invalid input", async () => {
     const Harness = () => {

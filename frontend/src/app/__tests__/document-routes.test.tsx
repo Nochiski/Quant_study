@@ -2511,6 +2511,57 @@ describe("StrategySpec Diff projection (P4-08)", () => {
 });
 
 describe("backtest from the editor (P3-05)", () => {
+  it("blocks a lossy integer locally and lets the backend reject a safe negative integer", async () => {
+    server.use(
+      http.post(`${API}/api/v1/backtests`, async ({ request }) => {
+        started.push((await request.json()) as Record<string, unknown>);
+        return HttpResponse.json(
+          {
+            detail: [
+              {
+                type: "greater_than",
+                loc: ["body", "annualization_days"],
+                msg: "Input should be greater than 0",
+                input: -1,
+                ctx: { gt: 0 },
+              },
+            ],
+          },
+          { status: 422 },
+        );
+      }),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2");
+    await editor();
+    const run = screen.getByRole("button", { name: /백테스트 실행/ });
+    await waitFor(() => expect(run).toBeEnabled());
+    await user.click(screen.getByLabelText("실행 설정 열기"));
+    const annualization = screen.getByRole("spinbutton", {
+      name: "연환산 거래일",
+    });
+
+    fireEvent.change(annualization, {
+      target: { value: "9007199254740993" },
+    });
+    await waitFor(() => expect(run).toBeDisabled());
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "정확히 전송 가능한 정수",
+    );
+    expect(started).toHaveLength(0);
+
+    fireEvent.change(annualization, { target: { value: "-1" } });
+    await waitFor(() => expect(run).toBeEnabled());
+    await user.click(run);
+
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]).toMatchObject({ annualization_days: -1 });
+    expect(await screen.findByRole("alert")).toHaveTextContent("status=422");
+    expect(history.location.pathname).toBe(
+      "/research/strategies/s1/revisions/2",
+    );
+  });
+
   it("runs a clean saved revision by reference, retires history, and moves to the run page", async () => {
     const user = userEvent.setup();
     const { history, queryClient } = mountWithClient(

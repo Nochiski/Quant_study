@@ -55,7 +55,7 @@ const ko = {
   "backtest.settings.error.initial_cash":
     "초기 자본을 숫자로 입력하세요. 허용 범위는 서버가 검증합니다.",
   "backtest.settings.error.annualization_days":
-    "연환산 거래일을 정수로 입력하세요. 허용 범위는 서버가 검증합니다.",
+    "연환산 거래일을 정확히 전송 가능한 정수로 입력하세요. 허용 범위는 서버가 검증합니다.",
   "backtest.settings.error.date_range_unavailable":
     "OOS 구간을 만들려면 전략 검증을 먼저 완료하세요.",
   "backtest.actions.title": "백테스트 실행 제어",
@@ -802,7 +802,7 @@ export const messages = {
     "backtest.settings.error.initial_cash":
       "Enter initial capital as a number; the server validates its accepted range.",
     "backtest.settings.error.annualization_days":
-      "Enter annualization sessions as an integer; the server validates its accepted range.",
+      "Enter annualization sessions as a losslessly representable integer; the server validates its accepted range.",
     "backtest.settings.error.date_range_unavailable":
       "Validate the strategy before defining an OOS window.",
     "backtest.actions.title": "Backtest run controls",

@@ -37,6 +37,8 @@ from . import (
     rules_s05,  # noqa: F401  # reason: 등록 부작용 — S05 기업행위 corp_event
     rules_s06,  # noqa: F401  # reason: 등록 부작용 — S06 조정계수 adj_factor
     rules_s08,  # noqa: F401  # reason: 등록 부작용 — S08 수급 격자 flow_daily
+    rules_s09,  # noqa: F401  # reason: 등록 부작용 — S09 공매도·대차 격자 short_daily
+    rules_s10,  # noqa: F401  # reason: 등록 부작용 — S10 신용 격자 credit_daily
     rules_sample,  # noqa: F401  # reason: T0 샘플 테이블
 )
 from .model import RULES

@@ -45,6 +45,8 @@ from . import (
     rules_s16,  # noqa: F401  # reason: 등록 부작용 — S16 주식수·자사주·배당
     rules_s17,  # noqa: F401  # reason: 등록 부작용 — S17 컨센서스 consensus_daily
     rules_s18,  # noqa: F401  # reason: 등록 부작용 — S18 의견·목표가 opinion_daily·broker
+    rules_s19,  # noqa: F401  # reason: 등록 부작용 — S19 공개시점 대장 dataset_profile
+    rules_s20,  # noqa: F401  # reason: 등록 부작용 — S20 팩터 준비도 factor_readiness
     rules_sample,  # noqa: F401  # reason: T0 샘플 테이블
 )
 from .model import RULES
@@ -98,6 +100,8 @@ def _cmd_gate(a: argparse.Namespace) -> int:
         # 게이트 SQL(EG1 우변·extra_gates)이 빌드 때와 같은 `_const` 를 볼 수 있어야 재판정이 된다
         # — S05 corp_event 의 EG1 우변이 pool CTE(krx_share_change_tol) 를 재사용한다.
         build.make_consts(con, rule, bl)
+        if rule.declarations is not None:
+            rule.declarations(con, rule)    # S19·S20 — 재판정도 같은 선언표 위에서 돈다
         # `v=<build_id>` 도 하이브 컬럼으로 붙는다 — 선언 스키마 대조를 위해 걷어낸다.
         con.execute("CREATE OR REPLACE TEMP VIEW out_pq AS SELECT * EXCLUDE (v) FROM "
                     f"read_parquet('{glob}', hive_partitioning=true)")

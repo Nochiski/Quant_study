@@ -48,7 +48,7 @@ from stage.gates import GateResult, GateStatus
 
 from . import views
 from .gates import EquityGateContext, SkipGate, require_const
-from .model import EquityTable, register
+from .model import EquityTable, FieldProfile, register
 from .rules_s01 import TICKER_LEN
 from .rules_s05 import MVP_EVENT_TYPES
 
@@ -638,6 +638,31 @@ eg8_adj_jump.gate_name = "EG8"                  # type: ignore[attr-defined]
 
 # ── 선언 ─────────────────────────────────────────────────────────────────────
 
+# ── S19 필드 선언 (DESIGN §4-7 · FIELD_MAP §2 `price.adj_close`) ─────────────
+# 조정가는 테이블이 아니라 **뷰**(`v_adj_price_fwd`)가 낸다 — 계수를 낳는 `adj_factor` 에 선언을
+# 달고 `view_name` 으로 산출처를 밝힌다. 커버율은 매크로가 빌드 세션에 없으므로(카탈로그는 빌드
+# 뒤에 굽는다) 뷰의 행 집합과 같은 `price_daily.close` 로 잰다(`coverage_table`).
+# 랙 0 세션: 전방 조정 값은 `apply_date ≤ d ∧ available_date ≤ d` 인 계수만 접으므로 (security,
+# date) 의 순수 함수이고 출력 `available_date` 가 항상 date 다(DESIGN §5·§11 ①). S06 본문 상수
+# `views.FACTOR_LAG_SESSIONS = 0` 이 이 값이며, 랙을 더 두면 분할 당일 조정가가 하루 늦게 붙어
+# EG8 점프가 생긴다.
+FIELDS_ADJ: tuple[FieldProfile, ...] = (
+    FieldProfile(
+        field_id="price.adj_close", columns=("adj_close",), label="조정 종가(전방 조정)",
+        unit="KRW", value_type="price", frequency="session", recommended_lag_sessions=0,
+        recommended_lag_days=0, point_in_time=True, requires_confirmation=False,
+        disclosure_basis="원주가 세션 확정 + 계수 available_date(min(공시 접수일, apply_date "
+                         "다음 세션)) 중 나중",
+        evidence="v_adj_price_fwd(as_of) = close × Π(share_factor : factor_ok ∧ apply_date ≤ d "
+                 "∧ available_date ≤ d). 첫 관측 수준 고정이라 창·as_of 에 무관하다(결정 6, "
+                 "09-05). 커버율은 같은 행 집합인 price_daily.close 로 쟀다. **FIELD_MAP §2 의 "
+                 "42 어휘 밖**(equity 내부 스코프, §3) 이라 field_scope='internal' 이다.",
+        coverage_axis="grid_session", scope="internal", view_name="v_adj_price_fwd",
+        coverage_table="price_daily", coverage_columns=("close",),
+        axis_columns=("ticker", "date")),
+)
+
+
 ADJ_FACTOR = register(EquityTable(
     name="adj_factor",
     grain=("ticker", "effective_date", "event_id"),
@@ -682,6 +707,7 @@ ADJ_FACTOR = register(EquityTable(
     consts=("corp_event.near_dup_window_days", *PRICE_MATCH_CONSTS, *BASE_PRICE_CONSTS,
             "corp_event.krx_share_change_tol"),
     extra_gates=(eg3_adj_factor, eg8_adj_jump),
+    field_profiles=FIELDS_ADJ,
 ))
 
 TABLES: tuple[EquityTable, ...] = (ADJ_FACTOR,)

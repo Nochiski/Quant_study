@@ -30,7 +30,7 @@ from pathlib import Path
 from stage.gates import GateResult, GateStatus
 
 from .gates import EquityGateContext
-from .model import EquityTable, register
+from .model import EquityTable, FieldProfile, register
 
 SQL_DIR = Path(__file__).parent / "sql"
 HOLDER_SQL = SQL_DIR / "holder_daily.sql"
@@ -322,6 +322,44 @@ eg3_audit_opinion.gate_name = "EG3_audit_opinion"        # type: ignore[attr-def
 
 
 # ── 선언 ─────────────────────────────────────────────────────────────────────
+# ── S19 필드 선언 (DESIGN §4-7 · FIELD_MAP §2 `event.insider_net_buy` · §3 내부) ──
+# 세 테이블 다 법인 축(`corp_code`)이고 **티커 컬럼이 없다** — 종목 축으로 쓰려면 소비자가
+# `corp_ticker` 로 조인한다(법인→티커는 1:N 이라 equity 가 전개하지 않는다, FIELD_MAP §3).
+# 그래서 커버 축은 `table_rows` 이고 시총 분위 커버율은 내지 않는다.
+# 랙 1 세션 — 원천 `stg_holder_*`·`stg_hyslr`·`stg_audit` 이 전부 stage `lag_known=false` 이고
+# `rcept_dt` 는 접수 날짜이지 시각이 아니다.
+_HOLDER_DISCLOSURE = "지분 보고 접수일(rcept_dt) — 접수 시각 미제공이라 1 세션 뒤부터 쓴다"
+
+FIELDS_HOLDER: tuple[FieldProfile, ...] = (
+    FieldProfile(
+        field_id="event.insider_net_buy", columns=("qty_change_shr",),
+        label="임원·주요주주 소유 수량 증감", unit="주", value_type="count", frequency="event",
+        recommended_lag_sessions=1, recommended_lag_days=1, point_in_time=True,
+        requires_confirmation=False, disclosure_basis=_HOLDER_DISCLOSURE,
+        evidence="holder_daily.qty_change_shr WHERE src='elestock'. 커버 구간이 **롤링 2년**이라 "
+                 "(DART API 가 그 창만 준다 — 재수집 불가, DART_DESIGN P3e) 과거로 못 간다. "
+                 "FACTORS 정본 E01 은 수량이 아니라 **비율**(event.insider_stake_change)을 쓰라고 "
+                 "못박는다 — 액면병합이 대량매도로 읽힌다.",
+        coverage_axis="table_rows", row_filter="src = 'elestock'"),
+    FieldProfile(
+        field_id="event.insider_stake_change", columns=("rate_change_pct",),
+        label="임원·주요주주 지분율 증감", unit="%", value_type="ratio", frequency="event",
+        recommended_lag_sessions=1, recommended_lag_days=1, point_in_time=True,
+        requires_confirmation=False, disclosure_basis=_HOLDER_DISCLOSURE,
+        evidence="equity 내부 스코프. FACTORS 정본 E01 의 정본 재료(비율 축). 롤링 2년 창은 "
+                 "event.insider_net_buy 와 같다.",
+        coverage_axis="table_rows", scope="internal", row_filter="src = 'elestock'"),
+    FieldProfile(
+        field_id="event.major_holder_stake", columns=("rate_pct",),
+        label="5% 대량보유 지분율", unit="%", value_type="ratio", frequency="event",
+        recommended_lag_sessions=1, recommended_lag_days=1, point_in_time=True,
+        requires_confirmation=False, disclosure_basis=_HOLDER_DISCLOSURE,
+        evidence="equity 내부 스코프(레지스트리 42 밖). FACTORS 정본 E02 의 재료 — 경영권 분쟁·"
+                 "행동주의·기관 대량 진입의 PIT 이벤트 스트림(DATA_CATALOG CA-10). 롤링 2년.",
+        coverage_axis="table_rows", scope="internal", row_filter="src = 'majorstock'"),
+)
+
+
 HOLDER_DAILY = register(EquityTable(
     name="holder_daily",
     grain=("rcept_no", "repror", "src"),
@@ -360,7 +398,22 @@ HOLDER_DAILY = register(EquityTable(
     content_date_column="rcept_dt",
     reject_reasons=HOLDER_REJECTS,
     extra_gates=(eg3_holder_daily,),
+    field_profiles=FIELDS_HOLDER,
 ))
+
+FIELDS_OWNERSHIP: tuple[FieldProfile, ...] = (
+    FieldProfile(
+        field_id="event.largest_holder_stake", columns=("trmend_rate_pct",),
+        label="최대주주·특수관계인 기말 지분율", unit="%", value_type="ratio",
+        frequency="report", recommended_lag_sessions=1, recommended_lag_days=1,
+        point_in_time=True, requires_confirmation=False,
+        disclosure_basis="정기보고서 접수일(rcept_dt) — 내용일은 결산기준일 stlm_dt",
+        evidence="equity 내부 스코프(레지스트리 42 밖). FACTORS 정본 E03 지배구조 팩터의 재료이고 "
+                 "E04(실질 유통비율)의 분자다(1 − 최대주주 − 자사주비율). n_source_rows > 1 인 "
+                 "행은 원장 여러 행이 한 grain 으로 접힌 것이라 건수 집계에 그대로 쓰면 안 된다.",
+        coverage_axis="table_rows", scope="internal"),
+)
+
 
 OWNERSHIP_SNAPSHOT = register(EquityTable(
     name="ownership_snapshot",
@@ -391,7 +444,21 @@ OWNERSHIP_SNAPSHOT = register(EquityTable(
     reject_reasons=OWNERSHIP_REJECTS,
     consts=("pct_min", "pct_max"),
     extra_gates=(eg3_ownership_snapshot,),
+    field_profiles=FIELDS_OWNERSHIP,
 ))
+
+FIELDS_AUDIT: tuple[FieldProfile, ...] = (
+    FieldProfile(
+        field_id="event.audit_opinion", columns=("adt_opinion_class",), label="감사의견 분류",
+        unit="", value_type="category", frequency="report", recommended_lag_sessions=1,
+        recommended_lag_days=1, point_in_time=True, requires_confirmation=False,
+        disclosure_basis="정기보고서 접수일(rcept_dt) — 내용일은 결산기준일 stlm_dt",
+        evidence="equity 내부 스코프(레지스트리 42 밖). adt_opinion_class ∈ {적정, 한정, "
+                 "의견거절, 부적정, other} — FACTORS 정본 E08(비적정 감사의견)의 재료이자 "
+                 "상장폐지 선행 신호다.",
+        coverage_axis="table_rows", scope="internal"),
+)
+
 
 AUDIT_OPINION = register(EquityTable(
     name="audit_opinion",
@@ -419,6 +486,7 @@ AUDIT_OPINION = register(EquityTable(
     content_date_column="stlm_dt",
     reject_reasons=AUDIT_REJECTS,
     extra_gates=(eg3_audit_opinion,),
+    field_profiles=FIELDS_AUDIT,
 ))
 
 TABLES: tuple[EquityTable, ...] = (HOLDER_DAILY, OWNERSHIP_SNAPSHOT, AUDIT_OPINION)

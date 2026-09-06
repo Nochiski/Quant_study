@@ -44,7 +44,7 @@ from pathlib import Path
 from stage.gates import GateResult, GateStatus
 
 from .gates import EquityGateContext, SkipGate, require_const
-from .model import EquityTable, register
+from .model import EquityTable, FieldProfile, register
 from .rules_s01 import TICKER_LEN
 
 SQL_DIR = Path(__file__).parent / "sql"
@@ -420,6 +420,53 @@ eg9_consensus_daily.gate_name = "EG9_consensus_daily"       # type: ignore[attr-
 
 # ── 선언 ─────────────────────────────────────────────────────────────────────
 
+# ── S19 필드 선언 (DESIGN §4-7 · FIELD_MAP §3 `consensus.*`) ─────────────────
+# **랙 1 세션**을 여기서 확정한다. wise 축은 `fetched_date` 를 실측하지만(measured) v3 축은
+# `stg_v3_revision_daily`(stage `lag_known=false`)이고 STAGE_DESIGN §6 이 "실측 collected =
+# base + 1영업일 100% 이므로 default 는 '사실 없음'이지 '당일 가용'이 아니다 — **+1영업일은
+# dataset_profile 이 적용**" 이라고 몫을 넘겼다. 두 축이 한 격자에 섞여 있으므로 보수적인 쪽(1)을
+# 필드 랙으로 삼는다. `views.CONSENSUS_LAG_SESSIONS = 0` 은 뷰 기본값이고, 본판 어댑터가 이
+# 프로파일 값을 읽어 교체한다(DESIGN §5 "dataset_profile 이 생기면 그 값으로 교체").
+# 단위는 **행의 `unit` 컬럼이 정본**이다 — 아래 값은 그 컬럼의 지배적 값을 카탈로그 라벨로 옮긴 것.
+_CONS_AXIS: tuple[str, str] = ("ticker", "available_date")
+_CONS_DISCLOSURE = ("wise = 화면 수집일(fetched_date, measured) / v3 = 미러 수집일"
+                    "(collected_date) — 관측 시각은 미측정이라 1 세션 뒤부터 쓴다")
+
+
+def _cons(field_id: str, columns: tuple[str, ...], metric: str, label: str, unit: str,
+          evidence: str, *, scope: str = "field_map") -> FieldProfile:
+    return FieldProfile(
+        field_id=field_id, columns=columns, label=label, unit=unit, value_type="amount",
+        frequency="monthly", recommended_lag_sessions=1, recommended_lag_days=1,
+        point_in_time=True, requires_confirmation=True, disclosure_basis=_CONS_DISCLOSURE,
+        evidence=evidence, coverage_axis="grid_security", scope=scope,
+        row_filter=f"metric = '{metric}'", axis_columns=_CONS_AXIS)
+
+
+FIELDS_CONSENSUS: tuple[FieldProfile, ...] = (
+    _cons("consensus.forward_eps", ("est_mean",), "eps", "컨센서스 EPS 추정치", "원",
+          "consensus_daily.est_mean WHERE metric='eps'. **target_period 별 값만 준다** — "
+          "'12개월 선행' 합성은 팩터층 몫이다(FIELD_MAP §2). 소비는 v_consensus(as_of)."),
+    _cons("consensus.forward_sales", ("est_mean",), "revenue", "컨센서스 매출 추정치", "억원",
+          "consensus_daily.est_mean WHERE metric='revenue'. **원 단위가 아니다**(억원) — "
+          "스케일 변환은 소비자 몫이고 행의 unit 컬럼이 정본이다."),
+    FieldProfile(
+        field_id="consensus.eps_dispersion", columns=("est_min", "est_max"),
+        label="컨센서스 EPS 추정치 산포(최소·최대)", unit="원", value_type="amount",
+        frequency="monthly", recommended_lag_sessions=1, recommended_lag_days=1,
+        point_in_time=True, requires_confirmation=True, disclosure_basis=_CONS_DISCLOSURE,
+        evidence="**wise 구간에만 있다** — v3 행은 min/max 가 NULL 이라(원장이 안 준다) 겹치는 "
+                 "달에 v_consensus 가 v3 를 고르면 산포는 결측이다(FIELD_MAP §3). 두 컬럼이 "
+                 "함께 있어야 값이 성립하므로 커버율은 둘 다 NOT NULL 인 행으로 잰다.",
+        coverage_axis="grid_security", row_filter="metric = 'eps'", axis_columns=_CONS_AXIS),
+    _cons("consensus.forward_op", ("est_mean",), "op", "컨센서스 영업이익 추정치", "억원",
+          "equity 내부 스코프(레지스트리 42 밖). FACTORS 정본 G05(영업이익 추정치 리비전)의 "
+          "재료 — 리비전은 서로 다른 두 obs_month 관측점을 필요로 한다.", scope="internal"),
+    _cons("consensus.forward_ni", ("est_mean",), "ni", "컨센서스 순이익 추정치", "억원",
+          "equity 내부 스코프. FACTORS 정본 G06(순이익 추정치 리비전)의 재료.", scope="internal"),
+)
+
+
 CONSENSUS_DAILY = register(EquityTable(
     name="consensus_daily",
     grain=("ticker", "obs_month", "target_period", "metric", "src"),
@@ -455,6 +502,7 @@ CONSENSUS_DAILY = register(EquityTable(
     consts=(),
     extra_gates=(eg3_consensus_daily, eg6_consensus_daily, eg8_consensus_daily,
                  eg9_consensus_daily),
+    field_profiles=FIELDS_CONSENSUS,
 ))
 
 TABLES: tuple[EquityTable, ...] = (CONSENSUS_DAILY,)

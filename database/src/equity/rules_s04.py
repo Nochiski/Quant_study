@@ -29,7 +29,7 @@ from pathlib import Path
 from stage.gates import GateResult, GateStatus
 
 from .gates import EquityGateContext
-from .model import EquityTable, register
+from .model import EquityTable, FieldProfile, register
 from .rules_s01 import TICKER_LEN
 
 SQL_DIR = Path(__file__).parent / "sql"
@@ -192,6 +192,85 @@ def eg20_raw_price(ctx: EquityGateContext) -> GateResult:
 eg20_raw_price.gate_name = "EG20"               # type: ignore[attr-defined]
 
 
+# ── S19 필드 선언 (DESIGN §4-7 · FIELD_MAP §2) ────────────────────────────────
+# 랙 정본은 **세션**이다. OHLCV·거래대금은 값 원천이 stage `lag_known=true`(`stg_price_daily`·
+# `stg_etf_price_daily`)이고 "가격류는 당일 실시간 관측 실증"(STAGE_DESIGN §6 표)이라 **0 세션** —
+# S06 `views.FACTOR_LAG_SESSIONS` 0 과 S17 `CONSENSUS_LAG_SESSIONS` 이 근거로 든 그 값이다.
+# `shares_out`·`mktcap_krw` 는 값이 `stg_listing_daily.list_shrs`(KRX 일별 마스터, stage
+# `lag_known=false`)에서 오므로 **1 세션**으로 확정한다 — STAGE_HANDOFF §2 「lag_known=false 는
+# lag 0 을 적용하면 안 된다」 + FIELD_MAP §2 「랙 1세션(익일 지식)」. S21 축소 어댑터의 본문 상수
+# `PRICE_LAG_SESSIONS=0` 은 본판에서 이 값으로 교체된다(DESIGN §11 ②).
+_AXIS: tuple[str, str] = ("ticker", "date")
+
+FIELDS: tuple[FieldProfile, ...] = (
+    FieldProfile(
+        field_id="price.close", columns=("close",), label="종가(원주가)", unit="KRW",
+        value_type="price", frequency="session", recommended_lag_sessions=0,
+        recommended_lag_days=0, point_in_time=True, requires_confirmation=False,
+        disclosure_basis="정규장 종가 확정(세션 마감)",
+        evidence="price_daily.close ← stg_price_daily ∪ stg_etf_price_daily (EG20 원주가 불변). "
+                 "분할·증자 조정 없음(원칙 ②) — 조정 축은 price.adj_close(전방 조정).",
+        coverage_axis="grid_session", axis_columns=_AXIS),
+    FieldProfile(
+        field_id="price.open", columns=("open",), label="시가(원주가)", unit="KRW",
+        value_type="price", frequency="session", recommended_lag_sessions=0,
+        recommended_lag_days=0, point_in_time=True, requires_confirmation=False,
+        disclosure_basis="정규장 시가 확정(세션 개장)",
+        evidence="stage 가 KRX '0' 을 NULL 로 두는 정책이라 결측 행이 있다 — 그 크기는 이 행의 "
+                 "estimated_coverage_pct 가 재므로 확인 대상 조건이 아니다(GAP-14 의 '결측 건수 "
+                 "미측정' 은 S19 가 닫았다). 엔진 `Bar.open` 필수·>0 제약은 커널 어댑터 "
+                 "`OhlcPolicy` 몫이고 팩터 필드 조건이 아니다.",
+        coverage_axis="grid_session", axis_columns=_AXIS),
+    FieldProfile(
+        field_id="price.high", columns=("high",), label="고가(원주가)", unit="KRW",
+        value_type="price", frequency="session", recommended_lag_sessions=0,
+        recommended_lag_days=0, point_in_time=True, requires_confirmation=False,
+        disclosure_basis="정규장 고가 확정(세션 마감)",
+        evidence="equity 내부 스코프 — 레지스트리 42 필드에 없다(FIELD_MAP §2). FACTORS 정본 M02"
+                 "(52주 신고가 근접도)의 재료이고 price.open 과 같은 NULL 유지 정책을 탄다.",
+        coverage_axis="grid_session", scope="internal", axis_columns=_AXIS),
+    FieldProfile(
+        field_id="price.low", columns=("low",), label="저가(원주가)", unit="KRW",
+        value_type="price", frequency="session", recommended_lag_sessions=0,
+        recommended_lag_days=0, point_in_time=True, requires_confirmation=False,
+        disclosure_basis="정규장 저가 확정(세션 마감)",
+        evidence="equity 내부 스코프. price.high 와 같은 NULL 유지 정책.",
+        coverage_axis="grid_session", scope="internal", axis_columns=_AXIS),
+    FieldProfile(
+        field_id="price.volume", columns=("volume_shr",), label="거래량", unit="주",
+        value_type="count", frequency="session", recommended_lag_sessions=0,
+        recommended_lag_days=0, point_in_time=True, requires_confirmation=False,
+        disclosure_basis="정규장 마감 집계",
+        evidence="원거래량. 조정 거래량 축은 뷰 v_adj_volume(base=as_of)·v_adj_volume_fwd"
+                 "(전방)이며 같은 field_id 로 노출한다(FIELD_MAP §2).",
+        coverage_axis="grid_session", axis_columns=_AXIS),
+    FieldProfile(
+        field_id="price.trading_value", columns=("value_krw",), label="거래대금", unit="KRW",
+        value_type="amount", frequency="session", recommended_lag_sessions=0,
+        recommended_lag_days=0, point_in_time=True, requires_confirmation=False,
+        disclosure_basis="정규장 마감 집계",
+        evidence="price_daily.value_krw ← KRX 원장 그대로.",
+        coverage_axis="grid_session", axis_columns=_AXIS),
+    FieldProfile(
+        field_id="price.market_cap", columns=("mktcap_krw",), label="시가총액", unit="KRW",
+        value_type="amount", frequency="session", recommended_lag_sessions=1,
+        recommended_lag_days=1, point_in_time=True, requires_confirmation=False,
+        disclosure_basis="정규장 종가 확정 + KRX 일별 마스터(상장주식수) 게시 — 게시 시각 미측정",
+        evidence="mktcap_krw = close × shares_out. 종가는 lag_known=true 지만 주식수가 "
+                 "stg_listing_daily(lag_known=false)라 보수적으로 1 세션. 우선주 합산이 아니다"
+                 "(법인 시총은 뷰 v_firm_mktcap).",
+        coverage_axis="grid_session", axis_columns=_AXIS),
+    FieldProfile(
+        field_id="price.shares_outstanding", columns=("shares_out",), label="상장주식수",
+        unit="주", value_type="count", frequency="session", recommended_lag_sessions=1,
+        recommended_lag_days=1, point_in_time=True, requires_confirmation=False,
+        disclosure_basis="KRX 일별 마스터 게시 — 게시 시각 미측정",
+        evidence="정본은 KRX 상장주식수(stg_listing_daily.list_shrs). DART 발행주식총수"
+                 "(financial.shares_issued, S16)는 뜻이 다른 별개 필드다.",
+        coverage_axis="grid_session", axis_columns=_AXIS),
+)
+
+
 # ── 선언 ─────────────────────────────────────────────────────────────────────
 
 PRICE_DAILY = register(EquityTable(
@@ -230,6 +309,7 @@ PRICE_DAILY = register(EquityTable(
     content_date_column="date",
     reject_reasons=REJECT_REASONS,
     extra_gates=(eg3_price_daily, eg20_raw_price),
+    field_profiles=FIELDS,
 ))
 
 TABLES: tuple[EquityTable, ...] = (PRICE_DAILY,)
@@ -237,4 +317,4 @@ TABLES: tuple[EquityTable, ...] = (PRICE_DAILY,)
 BASELINE_SEED = Path(__file__).parent / "baseline_seed_s04.json"
 """이 슬라이스가 요구하는 baseline 상수 — 없다. 파일은 그 사실과 이유를 기록한다."""
 
-__all__ = ["PRICE_DAILY", "PRICE_KINDS", "REJECT_REASONS", "TABLES"]
+__all__ = ["FIELDS", "PRICE_DAILY", "PRICE_KINDS", "REJECT_REASONS", "TABLES"]

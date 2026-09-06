@@ -40,7 +40,7 @@ from fin_map import FIN_MAP, REVENUE_FALLBACK
 from stage.gates import GateResult, GateStatus
 
 from .gates import EquityGateContext, require_const
-from .model import EquityTable, register
+from .model import EquityTable, FieldProfile, register
 
 SQL_DIR = Path(__file__).parent / "sql"
 SQL_PATH = SQL_DIR / "fin_std.sql"
@@ -357,6 +357,96 @@ _VALUE_COLUMNS: dict[str, str] = ({m: "DECIMAL(38,4)" for m in ACCOUNTS}
                                   | {c: "DECIMAL(38,4)" for c in Q4_COLUMNS}
                                   | {c: "DECIMAL(38,4)" for c in CF_Q_COLUMNS})
 
+# ── S19 필드 선언 (DESIGN §4-7 · FIELD_MAP §2 `financial.*` + §3 내부 스코프) ──
+# 랙 **1 세션**: `available_date = rcept_dt` 는 접수 *날짜* 이지 시각이 아니고(원천 `stg_fin`·
+# `stg_doc_meta`·`stg_disclosure` 가 전부 stage `lag_known=false`), 장 마감 뒤 접수된 보고서를
+# 그날 지식으로 쓰면 look-ahead 다. 단위는 전부 원(KRW) — stage 가 이미 환산했다(§4-4).
+# `frequency='report'` 이고 기간 어휘는 `report_code` 가 정한다(11011 12개월 · 11012~14 3개월 손익,
+# 현금흐름은 전부 연초누계 — DEFECT-C02).
+FIN_LAG_SESSIONS = 1
+_FIN_DISCLOSURE = "정기보고서 접수일(rcept_dt) — 접수 시각 미제공이라 1 세션 뒤부터 쓴다"
+
+
+def _fin(field_id: str, column: str, label: str, unit: str, value_type: str, evidence: str,
+         *, scope: str = "field_map", requires_confirmation: bool = False) -> FieldProfile:
+    """`fin_std` 계정 한 줄. 랙·PIT·빈도·커버 축은 이 테이블 전체가 같다."""
+    return FieldProfile(
+        field_id=field_id, columns=(column,), label=label, unit=unit, value_type=value_type,
+        frequency="report", recommended_lag_sessions=FIN_LAG_SESSIONS, recommended_lag_days=1,
+        point_in_time=True, requires_confirmation=requires_confirmation,
+        disclosure_basis=_FIN_DISCLOSURE, evidence=evidence, coverage_axis="table_rows",
+        scope=scope)
+
+
+FIELDS_FIN: tuple[FieldProfile, ...] = (
+    # FIELD_MAP §2 의 8 (레지스트리가 요구하는 것)
+    _fin("financial.book_equity", "total_equity", "자본총계", "KRW", "amount",
+         "fin_std.total_equity ← 표준계정 자본총계. 지배주주지분은 financial.equity_owners."),
+    _fin("financial.net_income", "net_income", "당기순이익", "KRW", "amount",
+         "분기는 3개월·사업보고서는 12개월 값이다(report_code 가 기간을 정한다). TTM 합성은 "
+         "팩터층이고 fin_std 에 ttm 컬럼은 없다. 4분기 파생은 net_income_q4_derived."),
+    _fin("financial.revenue", "revenue", "매출액", "KRW", "amount",
+         "금융업 470사는 ifrs-full_Revenue 가 성립하지 않아 revenue_basis 가 행마다 산출 규칙을 "
+         "남긴다(banking_gross·insurance_gross 규칙은 미확정 — GAP-01, FACTORS §8).",
+         requires_confirmation=True),
+    _fin("financial.total_assets", "total_asset", "자산총계", "KRW", "amount",
+         "fin_std.total_asset ← 표준계정 자산총계."),
+    _fin("financial.operating_income", "op_profit", "영업이익", "KRW", "amount",
+         "영업이익 아래로는 DART 와 컨센서스가 완전히 일치한다(FACTORS §8 실측)."),
+    _fin("financial.operating_cash_flow", "cf_operating_ytd", "영업활동현금흐름(연초누계)",
+         "KRW", "amount",
+         "**연초누계 축**이다(DEFECT-C02: 현금흐름은 분기보고서도 누계). 분기 차분 축은 별개 "
+         "필드 financial.cf_operating_q 로 갈랐다 — S19 가 두 축을 필드로 분리해 FIELD_MAP §2 의 "
+         "'소비 측이 축을 골라야 한다' 조건을 닫았다."),
+    _fin("financial.total_liabilities", "total_liab", "부채총계", "KRW", "amount",
+         "fin_std.total_liab ← 표준계정 부채총계."),
+    _fin("financial.gross_profit", "gross_profit", "매출총이익", "KRW", "amount",
+         "fin_map.FIN_MAP['gross_profit'](concept GrossProfit·nm 매출총이익) 실재 — 24계정에 "
+         "실었다(DESIGN §10 P30). 금융업은 매출총이익 개념이 없어 결측이 정상이다."),
+    # equity 내부 스코프 — FIELD_MAP §3 이 "dataset_profile(S19)이 노출 여부를 정한다" 한 16계정
+    _fin("financial.cost_of_sales", "cost_of_sales", "매출원가", "KRW", "amount",
+         "equity 내부 스코프. 매출총이익 = 매출 − 매출원가 검산 축.", scope="internal"),
+    _fin("financial.pretax_income", "pretax_income", "법인세비용차감전순이익", "KRW", "amount",
+         "equity 내부 스코프.", scope="internal"),
+    _fin("financial.net_income_owners", "net_income_owners", "지배주주순이익", "KRW", "amount",
+         "equity 내부 스코프. 연결 기준 ROE 분자를 지배주주로 볼 때 쓴다.", scope="internal"),
+    _fin("financial.eps_basic", "eps_basic", "기본주당순이익", "KRW", "amount",
+         "equity 내부 스코프. **주식분할 미조정**(원장 그대로 — 삼성전자 2018 1분기 85,435 vs "
+         "사업보고서 6,461)이라 시계열로 쓰려면 adj_factor 가 필요하다(FIELD_MAP §3).",
+         scope="internal", requires_confirmation=True),
+    _fin("financial.equity_owners", "equity_owners", "지배주주지분", "KRW", "amount",
+         "equity 내부 스코프.", scope="internal"),
+    _fin("financial.cash", "cash", "현금및현금성자산", "KRW", "amount",
+         "equity 내부 스코프. FACTORS 정본 V07(순현금비율)·Q08(NOA)의 재료.", scope="internal"),
+    _fin("financial.inventories", "inventories", "재고자산", "KRW", "amount",
+         "equity 내부 스코프.", scope="internal"),
+    _fin("financial.current_assets", "current_assets", "유동자산", "KRW", "amount",
+         "equity 내부 스코프.", scope="internal"),
+    _fin("financial.current_liabilities", "current_liab", "유동부채", "KRW", "amount",
+         "equity 내부 스코프.", scope="internal"),
+    _fin("financial.lease_liabilities", "lease_liab", "리스부채", "KRW", "amount",
+         "equity 내부 스코프.", scope="internal"),
+    _fin("financial.borrowings", "borrowings", "차입금", "KRW", "amount",
+         "equity 내부 스코프. GAP-02 의 3계정 중 하나 — V05(EV/EBITDA)·V07·Q08 이 여기에 매달려 "
+         "있고 실재 여부는 S19 커버율이 판정한다(GATES §6 EG10).", scope="internal"),
+    _fin("financial.depreciation", "depreciation", "감가상각비", "KRW", "amount",
+         "equity 내부 스코프. GAP-02 3계정 중 하나 — V05(EBITDA 분모)의 재료.", scope="internal"),
+    _fin("financial.interest_expense", "interest_expense", "이자비용", "KRW", "amount",
+         "equity 내부 스코프. GAP-02 3계정 중 하나 — Q07(이자보상배율)의 재료.", scope="internal"),
+    _fin("financial.cf_operating_q", "cf_operating_q", "영업활동현금흐름(분기 차분)", "KRW",
+         "amount",
+         "equity 내부 스코프. 직전 보고서 누계와의 차라 직전 판본이 없으면 NULL 이고 "
+         "cf_q_n_rows 가 구성 수를 남긴다(FIELD_MAP §2).",
+         scope="internal", requires_confirmation=True),
+    _fin("financial.cf_investing", "cf_investing_ytd", "투자활동현금흐름(연초누계)", "KRW",
+         "amount", "equity 내부 스코프.", scope="internal"),
+    _fin("financial.cf_financing", "cf_financing_ytd", "재무활동현금흐름(연초누계)", "KRW",
+         "amount", "equity 내부 스코프.", scope="internal"),
+    _fin("financial.capex", "capex_ytd", "유형자산 취득(연초누계)", "KRW", "amount",
+         "equity 내부 스코프. FACTORS 정본 Q05(FCF 수익률)의 재료.", scope="internal"),
+)
+
+
 FIN_STD = register(EquityTable(
     name="fin_std",
     grain=("corp_code", "period_end", "report_code", "fs_div", "vintage_kind"),
@@ -398,6 +488,7 @@ FIN_STD = register(EquityTable(
     consts=("period_end_lag_max_days", "rcept_lag_p99_days", "quarter_months",
             "half_months", "three_quarter_months"),
     extra_gates=(eg3_fin_std, eg6_fin_std),
+    field_profiles=FIELDS_FIN,
 ))
 
 TABLES: tuple[EquityTable, ...] = (FIN_STD,)

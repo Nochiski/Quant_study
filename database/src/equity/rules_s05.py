@@ -38,7 +38,7 @@ from pathlib import Path
 from stage.gates import GateResult, GateStatus
 
 from .gates import EquityGateContext
-from .model import EquityTable, register
+from .model import EquityTable, FieldProfile, register
 
 SQL_DIR = Path(__file__).parent / "sql"
 SQL_PATH = SQL_DIR / "corp_event.sql"
@@ -331,6 +331,37 @@ def eg3_corp_event(ctx: EquityGateContext) -> GateResult:
 
 eg3_corp_event.gate_name = "EG3_corp_event"     # type: ignore[attr-defined]
 
+# ── S19 필드 선언 (DESIGN §4-7 · FIELD_MAP §2 `event.buyback_amount`) ────────
+# **두 필드 다 MVP 4유형(split·reverse_split·bonus·capred) 밖이라 지금은 행이 0 이다** — 원천
+# (`stg_event_tsstk_aq` 1,951 · `piic` 5,538 · `cvbd_is` 5,386)은 실재하지만 `corp_event` 가 아직
+# 적재하지 않는다(DESIGN §4-2 "나머지 9종의 행은 만들지 않는다"). 선언을 지우지 않고 남기는 이유는
+# S19 가 커버율 0 을 재고 S20 EG10 이 그것을 blocked(no_observations)로 드러내게 하기 위해서다 —
+# 선언이 없으면 "필드가 없다" 와 "필드는 있는데 값이 없다" 가 구별되지 않는다(GATES §6 EG10 의 왜).
+# 랙 1 세션: 원천이 전부 stage `lag_known=false` 이고 공시는 장중·장후 어느 쪽이든 접수된다.
+FIELDS_CORP_EVENT: tuple[FieldProfile, ...] = (
+    FieldProfile(
+        field_id="event.buyback_amount", columns=("amount_krw",), label="자사주 취득 결정 금액",
+        unit="KRW", value_type="amount", frequency="event", recommended_lag_sessions=1,
+        recommended_lag_days=1, point_in_time=True, requires_confirmation=False,
+        disclosure_basis="자기주식취득결정 공시 접수일(rcept_dt)",
+        evidence="corp_event.amount_krw WHERE event_type='treasury_buy' ← stg_event_tsstk_aq. "
+                 "S19 실측 커버율 0 — MVP 적재 범위 밖(S05 후속). 사업보고서 확정치 축은 "
+                 "event.treasury_acquired(S16)로 축·시점이 다르다.",
+        coverage_axis="table_rows", row_filter="event_type = 'treasury_buy'"),
+    FieldProfile(
+        field_id="event.capital_raise_amount", columns=("amount_krw",),
+        label="유상증자·CB 발행 금액", unit="KRW", value_type="amount", frequency="event",
+        recommended_lag_sessions=1, recommended_lag_days=1, point_in_time=True,
+        requires_confirmation=False,
+        disclosure_basis="유상증자결정·전환사채발행결정 공시 접수일(rcept_dt)",
+        evidence="equity 내부 스코프(레지스트리 42 밖). FACTORS 정본 E06 의 재료이고 "
+                 "corp_event.amount_krw WHERE event_type IN ('rights','cb_issue') 다. "
+                 "S19 실측 커버율 0 — MVP 적재 범위 밖.",
+        coverage_axis="table_rows", scope="internal",
+        row_filter="event_type IN ('rights', 'cb_issue')"),
+)
+
+
 CORP_EVENT = register(EquityTable(
     name="corp_event",
     grain=("event_id",),
@@ -373,6 +404,7 @@ CORP_EVENT = register(EquityTable(
     reject_reasons=REJECT_REASONS,
     consts=("effective_before_announce_max_days", "krx_share_change_tol"),
     extra_gates=(eg3_corp_event,),
+    field_profiles=FIELDS_CORP_EVENT,
 ))
 
 TABLES: tuple[EquityTable, ...] = (CORP_EVENT,)

@@ -1,0 +1,37 @@
+{
+ "_seed": "S20 (factor_readiness) 이 요구하는 상수는 하나뿐이고 **사람 승인 대기**라 등재하지 않는다 — `factor_readiness.ready_min`(EG10 의 ready 하한). DESIGN §4-8 은 초기값 36 을 적었으나 그 숫자는 워크플로우 제안 §1-8 이 **S08~S10(수급·공매도·신용 격자)이 지어진 상태**를 전제로 센 것이다. 지금 그 세 슬라이스가 없어 F01~F09 아홉 팩터가 전부 blocked(field_unavailable) 이고 절단본 실측 ready 는 31 이다(31 + 7 = 38 ≥ 36 — 제안서가 '즉시' 로 센 F01·F02·F04·F05·F06·F08·F09 를 되돌리면 수치가 맞는다). 36 을 지금 등재하면 첫 빌드가 폐기되고, 31 을 등재하면 S08~S10 이 붙어도 하한이 느슨해진다. 그래서 미등재로 두고 EG10 은 하한 술어만 빼고 나머지 폐기형(54행 전수·blocked reason/owner 필수·ready first_usable_date 필수·**ready 재료 컬럼 실재**)을 그대로 돌린다. 3단계 격자가 붙은 뒤 서버 실측으로 사람이 고른다. EG7 격리 비율도 코드 기본값 — 이 테이블은 격리 사유 어휘가 비어 있다(선언 54행이 그대로 나간다).",
+ "measured_at": "2026-09-06",
+ "factor_readiness": {},
+ "_measured": [
+  {
+   "table": "factor_readiness",
+   "metric": "ready_min",
+   "inputs": {"dataset_profile": "b_dataset_profile"},
+   "sql": "SELECT count(*) FILTER (WHERE status = 'ready') AS n_ready, count(*) AS n FROM factor_readiness",
+   "value": null,
+   "measured_value": 31,
+   "measured_at": "2026-09-06",
+   "growing": true,
+   "used_by": "EG10 (rules_s20.eg10_factor_readiness) — ready 팩터 수 하한",
+   "note": "절단본 실측 31/54(ready 비율 0.574). 막힌 23 의 사유 분포는 field_unavailable 10 · partial_support 11 · no_observations 2 다. field_unavailable 10 중 9 는 S08~S10 미구현(F01~F09)이고 1 은 GAP-09(R04 benchmark.close 는 security 축이 아니다). 이 값은 슬라이스가 늘면 커지므로 growing=true 이고, 하한을 등재하는 시점은 3단계 격자가 붙은 뒤다."
+  },
+  {
+   "table": "factor_readiness",
+   "metric": "_blocked_shape",
+   "inputs": {"dataset_profile": "b_dataset_profile"},
+   "sql": "SELECT split_part(blocked_reason, ':', 1) AS reason, count(*) FROM factor_readiness WHERE status = 'blocked' GROUP BY 1 ORDER BY 1",
+   "value": null,
+   "measured_value": {
+    "field_unavailable": 10,
+    "partial_support": 11,
+    "no_observations": 2,
+    "by_group_ready": {"V": 6, "Q": 7, "G": 2, "I": 5, "F": 0, "M": 3, "R": 3, "E": 5},
+    "owner": {"equity": 16, "factor_layer": 37, "unavailable": 1}
+   },
+   "measured_at": "2026-09-06",
+   "growing": true,
+   "used_by": "EG10 기록형 · 인계 문서 「팩터 × 컬럼 × 시작일 표」",
+   "note": "상수가 아니라 실측 기록이다. partial_support 11 = 컨센서스·의견 6(G05~G10, src·단위·합성 축 선택) + 금융업 매출액 3(V03·Q03·G01, GAP-01) + EPS 분할 미조정 1(G04) + KOSPI 관리종목 비대칭 1(E07, GAP-06). no_observations 2 = E05·E06(corp_event MVP 4유형 밖이라 treasury_buy·rights·cb_issue 행이 0)."
+  }
+ ]
+}

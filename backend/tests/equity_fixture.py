@@ -1184,9 +1184,13 @@ def build_workbench_root(root: Path, *, catalog: bool = True, profile: bool = Tr
             [
                 ("000660", WB_SPLIT_DATE, "000660:split:2024-01-08", "split", 2.0, True),
                 ("005930", date(2024, 1, 3), "005930:capred:2024-01-03", "capred", 1.0, False),
+                # S06-2 KRX 기준가 원천 행 — corp_event 에 없어 유형을 모른다. 방향은
+                # share_factor 가 정한다(서버 factor_ok 55행이 이 유형이다).
+                ("036220", date(2024, 1, 9), "036220:krx_base:2024-01-09",
+                 "unknown_krx", 0.5, True),
             ],
-            apply_dates=[WB_SPLIT_DATE, date(2024, 1, 3)],
-            available_dates=[WB_SPLIT_DATE, date(2024, 1, 3)],
+            apply_dates=[WB_SPLIT_DATE, date(2024, 1, 3), date(2024, 1, 9)],
+            available_dates=[WB_SPLIT_DATE, date(2024, 1, 3), date(2024, 1, 9)],
         ),
         year_column="effective_date",
     )

@@ -544,6 +544,9 @@ def test_backtest_dataset_drops_reference_rows_and_carries_ok_actions_only(
     assert {b.session for b in dataset.bars if b.security_id == "036220:2"} == set(
         WB_SESSIONS[8:]
     )
+    # `unknown_krx` 는 corp_event 에 유형이 없는 KRX 기준가 원천 행이라 방향을 share_factor 가
+    # 정한다(0.5 → reverse_split). 엔진 어댑터와 같은 어휘를 쓴다 — 한쪽만 알면 같은 데이터로
+    # 한쪽에서만 run 이 죽는다.
     assert dataset.corporate_actions == (
         replace(
             dataset.corporate_actions[0],
@@ -552,6 +555,14 @@ def test_backtest_dataset_drops_reference_rows_and_carries_ok_actions_only(
             action_type="split",
             ratio="2.0",
             detail="000660:split:2024-01-08",
+        ),
+        replace(
+            dataset.corporate_actions[1],
+            session=date(2024, 1, 9),
+            security_id="036220:2",
+            action_type="reverse_split",
+            ratio="0.5",
+            detail="036220:krx_base:2024-01-09",
         ),
     )
     assert {m.security_id: (m.first_session, m.last_session) for m in dataset.memberships}[

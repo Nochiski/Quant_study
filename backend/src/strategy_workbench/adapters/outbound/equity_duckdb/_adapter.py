@@ -154,6 +154,13 @@ EVENT_TYPE_MAP: dict[str, str] = {
     "reverse_split": "reverse_split",
     "capred": "reverse_split",
 }
+# S06-2 의 KRX 기준가 원천이 만든 사건 — `corp_event` 에 없어 유형을 모른다(기준가 변화 + 같은 날
+# 주식수 변화, 시총 불변). 방향은 share_factor 가 정한다: > 1 → split, < 1 → reverse_split.
+# 엔진 어댑터(`backtest_engine/adapters/equity_duckdb.py::RATIO_DIRECTED_EVENT_TYPES`)와 **같은
+# 어휘를 써야 한다** — 한쪽만 알면 같은 데이터로 한쪽에서만 run 이 죽는다(서버 factor_ok 55행).
+# `unknown_price_only`(기준가만 변화)는 항상 factor_ok=false 라 여기 오지 않고, ok 로 실려 오면
+# 어휘 밖이 맞다 — 시총 불변이 아닌 사건을 분할로 적용하면 안 된다.
+RATIO_DIRECTED_EVENT_TYPES: frozenset[str] = frozenset({"unknown_krx"})
 _TICKER_RE = re.compile(r"^[0-9A-Za-z]{1,12}$")
 # equity 격자 3테이블(S08~S10)의 `fill_kind.kind` → 워크벤치 `CellKind`. 정본 어휘는
 # `database/src/equity/model.py::FILL_KINDS` 이고 대응 원칙은 FIELD_MAP §1 「결측 어휘」다.
@@ -976,13 +983,23 @@ class EquityDuckdbAdapter:
                     f"root={self._root}"
                 )
             session = _as_date(raw_ts, ts_column)
-            action_type = EVENT_TYPE_MAP.get(str(event_type))
+            ratio = _as_float(share_factor, "share_factor")
+            if str(event_type) in RATIO_DIRECTED_EVENT_TYPES:
+                if ratio is None or ratio == 1:
+                    raise ValueError(
+                        f"share_factor cannot direct a ratio-directed event — "
+                        f"event_id={event_id} event_type={event_type} "
+                        f"share_factor={share_factor!r}"
+                    )
+                action_type = "split" if ratio > 1 else "reverse_split"
+            else:
+                action_type = EVENT_TYPE_MAP.get(str(event_type))
             if action_type is None:
                 raise ValueError(
                     f"adj_factor.event_type outside adapter vocabulary — event_id={event_id} "
-                    f"event_type={event_type!r} known={sorted(EVENT_TYPE_MAP)}"
+                    f"event_type={event_type!r} "
+                    f"known={sorted(EVENT_TYPE_MAP) + sorted(RATIO_DIRECTED_EVENT_TYPES)}"
                 )
-            ratio = _as_float(share_factor, "share_factor")
             if ratio is None or (ratio > 1) != (action_type == "split"):
                 raise ValueError(
                     f"share_factor direction contradicts event_type — event_id={event_id} "

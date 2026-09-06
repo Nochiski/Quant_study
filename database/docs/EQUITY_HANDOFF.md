@@ -519,6 +519,48 @@ scp database/src/equity/baseline_locked.json kael-server:~/quant-ledger/data/equ
 1 이다. 재상장 종목(036220·101970)은 구간마다 누적이 초기화된다 — 폐지 전 구간의 계수는 새 구간에
 넘어오지 않는다.
 
+## 소비자가 먼저 알 것 두 가지 (2026-09-07)
+
+전 종목 백테스트를 서버 실데이터로 처음 돌리면서 드러난 것이다. **둘 다 지금 바로 부딪힌다.**
+
+### ① 전 종목 유니버스(`krx.common-stock`)로는 run 이 죽는다 — `krx.liquid` 를 쓸 것
+
+정지된 뒤 데이터 끝까지 재개하지 않은 종목에 감자·병합이 걸리면 커널이
+`CorporateActionWithoutBar` 를 던지고 **run 전체가 중단된다**(부분 결과도 없다).
+서버 실측 26건 · 25종목이고 전부 `status='suspended'` 다. 자세한 것은 `TECH_DEBT.md` §10.
+
+```
+CorporateActionWithoutBar: no traded session for instrument at or after corporate action
+  instrument=450140:1 ts=2025-12-15 action=reverse_split
+```
+
+**`krx.liquid` · `krx.investable` 은 술어에 `status = 'listed'` 가 있어 이 25종목을 잡지 않는다.**
+그래서 그쪽 유니버스로는 그대로 돌아간다. 전 종목이 필요하면 커널 쪽 정책 결정이 선행해야 한다
+(사건을 마지막 보유 가능 세션에 정산할지, 바 없이 수량만 적용할지).
+
+### ② 값이 한 세션 뒤로 옮겨졌다 — 예전 숫자와 비교하지 말 것
+
+어댑터가 공개시차를 자기 상수(전부 0세션)로 우기던 것을 고쳐 `dataset_profile` 의 필드별 값을
+읽는다(커밋 `8014655`). 대장이 정한 랙은 **72필드 중 65가 1세션**이고 0세션은 장중 가격 축
+7개뿐이다. 즉 어댑터가 내던 30필드 중 **25개가 한 세션 이르게 열려 있었다** — 확정 look-ahead 였다.
+
+바뀐 것:
+
+| 축 | 전 | 후 |
+|---|---|---|
+| `price.close/open/high/low/volume/trading_value/adj_close` | 당일 | **그대로 당일** |
+| `price.market_cap`·`shares_outstanding` | 당일 | 직전 세션 |
+| `financial.*`(공시) | 공시 당일 | 공시 **다음** 세션 |
+| `consensus.*`·`event.*` | 관측 당일 | 관측 **다음** 세션 |
+| `flow.*`·`short.*`·`credit.*`(격자) | 원장 날짜 당일 | 원장 날짜 **다음** 세션 |
+
+**이 변경으로 백테스트 성과는 대체로 나빠진다.** 예전 숫자가 낙관 방향으로 틀려 있었기 때문이고,
+지금 값이 맞는 값이다. `dataset_profile` 이 없는 옛 루트는 예전처럼 동작하되
+`list_fields()` 의 `available_date_basis` 에 `fallback` 이라고 적힌다 — 조용히 되돌아가지 않는다.
+필드마다 더 늘리고 싶으면 질의의 `lag_overrides` 를 쓴다(줄일 수는 없다).
+
+---
+
 ## 소비자 기동 (워크벤치 · 로컬 데이터)
 
 **로컬 데이터 내려받기** — `database/scripts/fetch_equity_local.sh <로컬 경로> [minimal|full]`

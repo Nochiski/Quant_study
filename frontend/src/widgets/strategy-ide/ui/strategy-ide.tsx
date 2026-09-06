@@ -1,12 +1,23 @@
-import { useEffect, useId, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
+import type { StrategyOutlineSymbol } from "../../../features/edit-strategy";
 import { t } from "../../../shared/config";
 import { useMediaQuery } from "../../../shared/lib/media";
+import { useThemePreference } from "../../../shared/lib/theme";
 import {
   Badge,
   Button,
+  CommandPalette,
   SplitHandle,
   Tabs,
+  type CommandPaletteItem,
   panelId,
   tabId,
 } from "../../../shared/ui";
@@ -40,6 +51,12 @@ export type StrategyIdeProps = {
   saveTone?: "ok" | "warn" | "error";
   onRunBacktest?: () => void;
   runDisabled?: boolean;
+  onValidate?: () => void;
+  validateDisabled?: boolean;
+  onSave?: () => void;
+  saveDisabled?: boolean;
+  symbols?: readonly StrategyOutlineSymbol[];
+  onSelectSymbol?: (pointer: string) => void;
   /** The source editor slot (P3). */
   editor: ReactNode;
   /** Source tab whose editor must stay mounted while read-only projections are selected. */
@@ -85,6 +102,12 @@ export const StrategyIde = ({
   saveTone = "ok",
   onRunBacktest,
   runDisabled = false,
+  onValidate,
+  validateDisabled = true,
+  onSave,
+  saveDisabled = true,
+  symbols = [],
+  onSelectSymbol,
   editor,
   sourceView,
   projections,
@@ -104,12 +127,135 @@ export const StrategyIde = ({
       ? { ...DEFAULT_LAYOUT, inspectorOpen: false, debuggerOpen: false }
       : DEFAULT_LAYOUT,
   );
+  const outlineId = useId();
+  const inspectorId = useId();
+  const debuggerId = useId();
+  const viewTabsId = useId();
   const ids = {
-    outline: useId(),
-    inspector: useId(),
-    debugger: useId(),
-    views: useId(),
+    outline: outlineId,
+    inspector: inspectorId,
+    debugger: debuggerId,
+    views: viewTabsId,
   };
+  const outlineRestore = useRef<HTMLButtonElement>(null);
+  const inspectorRestore = useRef<HTMLButtonElement>(null);
+  const debuggerRestore = useRef<HTMLButtonElement>(null);
+  const outlineCollapse = useRef<HTMLButtonElement>(null);
+  const inspectorCollapse = useRef<HTMLButtonElement>(null);
+  const debuggerCollapse = useRef<HTMLButtonElement>(null);
+  const theme = useThemePreference();
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const commands = useMemo<CommandPaletteItem[]>(() => {
+    const actionCommands: CommandPaletteItem[] = [
+      {
+        id: "action.validate",
+        group: t("command.group.action"),
+        label: t("toolbar.validate"),
+        shortcut: "Ctrl/⌘ Enter",
+        disabled: validateDisabled || !onValidate,
+        execute: () => onValidate?.(),
+      },
+      {
+        id: "action.save",
+        group: t("command.group.action"),
+        label: t("toolbar.saveRevision"),
+        shortcut: "Ctrl/⌘ S",
+        disabled: saveDisabled || !onSave,
+        execute: () => onSave?.(),
+      },
+      {
+        id: "action.backtest",
+        group: t("command.group.action"),
+        label: t("ide.runBacktest"),
+        shortcut: "Ctrl/⌘ Shift Enter",
+        disabled: runDisabled || !onRunBacktest,
+        execute: () => onRunBacktest?.(),
+      },
+    ];
+    const viewCommands: CommandPaletteItem[] = VIEWS.map((id, index) => ({
+      id: `view.${id}`,
+      group: t("command.group.view"),
+      label: `${t("command.openView")} ${id.toUpperCase()}`,
+      description: id === view ? t("command.current") : undefined,
+      shortcut: `Alt ${index + 1}`,
+      disabled: !availableViews.includes(id) || !onViewChange,
+      focusAfterExecute: () => document.getElementById(tabId(viewTabsId, id)),
+      execute: () => onViewChange?.(id),
+    }));
+    const panelCommands: CommandPaletteItem[] = [
+      {
+        id: "panel.outline",
+        group: t("command.group.panel"),
+        label: `${layout.outlineOpen ? t("command.hide") : t("command.show")} ${t("ide.outline")}`,
+        focusAfterExecute: () =>
+          layout.outlineOpen ? outlineRestore.current : outlineCollapse.current,
+        execute: () => toggle("outlineOpen"),
+      },
+      {
+        id: "panel.inspector",
+        group: t("command.group.panel"),
+        label: `${layout.inspectorOpen ? t("command.hide") : t("command.show")} ${t("ide.inspector")}`,
+        focusAfterExecute: () =>
+          layout.inspectorOpen
+            ? inspectorRestore.current
+            : inspectorCollapse.current,
+        execute: () => toggle("inspectorOpen"),
+      },
+      {
+        id: "panel.debugger",
+        group: t("command.group.panel"),
+        label: `${layout.debuggerOpen ? t("command.hide") : t("command.show")} ${t("ide.debugger")}`,
+        focusAfterExecute: () =>
+          layout.debuggerOpen
+            ? debuggerRestore.current
+            : debuggerCollapse.current,
+        execute: () => toggle("debuggerOpen"),
+      },
+    ];
+    const themeCommands: CommandPaletteItem[] = (
+      ["system", "light", "dark"] as const
+    ).map((preference) => ({
+      id: `theme.${preference}`,
+      group: t("command.group.theme"),
+      label: t(`command.theme.${preference}`),
+      description:
+        theme.preference === preference ? t("command.current") : undefined,
+      disabled: theme.preference === preference,
+      execute: () => theme.setPreference(preference),
+    }));
+    const symbolCommands: CommandPaletteItem[] = symbols.map((symbol) => ({
+      id: `symbol.${symbol.id}`,
+      group: t("command.group.symbol"),
+      label: symbol.label,
+      description: symbol.description,
+      keywords: symbol.keywords,
+      disabled: !onSelectSymbol,
+      execute: () => onSelectSymbol?.(symbol.pointer),
+    }));
+    return [
+      ...actionCommands,
+      ...viewCommands,
+      ...panelCommands,
+      ...themeCommands,
+      ...symbolCommands,
+    ];
+  }, [
+    availableViews,
+    layout,
+    onRunBacktest,
+    onSave,
+    onSelectSymbol,
+    onValidate,
+    onViewChange,
+    runDisabled,
+    saveDisabled,
+    symbols,
+    theme,
+    toggle,
+    validateDisabled,
+    view,
+    viewTabsId,
+  ]);
 
   useEffect(() => {
     if (narrow) close(["inspectorOpen", "debuggerOpen"]);
@@ -124,6 +270,58 @@ export const StrategyIde = ({
     return () => window.removeEventListener("keydown", onKey);
   }, [narrow, close]);
 
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.isComposing || event.keyCode === 229) return;
+      const modifier = event.ctrlKey || event.metaKey;
+      const key = event.key.toLowerCase();
+      if (modifier && key === "k") {
+        event.preventDefault();
+        if (event.repeat) return;
+        setPaletteOpen((open) => !open);
+        return;
+      }
+      if (paletteOpen) return;
+      if (modifier && key === "s") {
+        event.preventDefault();
+        if (!event.repeat && !saveDisabled) onSave?.();
+      } else if (modifier && event.key === "Enter") {
+        event.preventDefault();
+        if (event.repeat) return;
+        if (event.shiftKey) {
+          if (!runDisabled) onRunBacktest?.();
+        } else if (!validateDisabled) onValidate?.();
+      } else if (event.altKey && !modifier && /^[1-5]$/.test(event.key)) {
+        const next = VIEWS[Number(event.key) - 1];
+        if (
+          event.repeat ||
+          !next ||
+          !availableViews.includes(next) ||
+          !onViewChange
+        )
+          return;
+        event.preventDefault();
+        onViewChange(next);
+        queueMicrotask(() =>
+          document.getElementById(tabId(viewTabsId, next))?.focus(),
+        );
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [
+    availableViews,
+    onRunBacktest,
+    onSave,
+    onValidate,
+    onViewChange,
+    paletteOpen,
+    runDisabled,
+    saveDisabled,
+    validateDisabled,
+    viewTabsId,
+  ]);
+
   const inspectorNode = (
     <aside
       id={ids.inspector}
@@ -135,9 +333,13 @@ export const StrategyIde = ({
       <header className="ide__panel-header">
         <h2>{t("ide.inspector")}</h2>
         <Button
+          ref={inspectorCollapse}
           size="small"
           tone="ghost"
-          onClick={() => toggle("inspectorOpen")}
+          onClick={() => {
+            toggle("inspectorOpen");
+            queueMicrotask(() => inspectorRestore.current?.focus());
+          }}
         >
           {t("ide.collapseInspector")}
         </Button>
@@ -159,9 +361,13 @@ export const StrategyIde = ({
       <header className="ide__panel-header">
         <h2>{t("ide.debugger")}</h2>
         <Button
+          ref={debuggerCollapse}
           size="small"
           tone="ghost"
-          onClick={() => toggle("debuggerOpen")}
+          onClick={() => {
+            toggle("debuggerOpen");
+            queueMicrotask(() => debuggerRestore.current?.focus());
+          }}
         >
           {t("ide.collapseDebugger")}
         </Button>
@@ -194,10 +400,23 @@ export const StrategyIde = ({
           ) : null}
         </div>
         <div className="ide__topbar-actions">
+          <Button
+            size="small"
+            tone="ghost"
+            onClick={() => setPaletteOpen(true)}
+            aria-haspopup="dialog"
+            aria-keyshortcuts="Control+K Meta+K"
+          >
+            {t("command.open")} <kbd>Ctrl/⌘ K</kbd>
+          </Button>
           {!layout.outlineOpen ? (
             <Button
+              ref={outlineRestore}
               size="small"
-              onClick={() => toggle("outlineOpen")}
+              onClick={() => {
+                toggle("outlineOpen");
+                queueMicrotask(() => outlineCollapse.current?.focus());
+              }}
               aria-controls={ids.outline}
               aria-expanded={false}
             >
@@ -206,8 +425,12 @@ export const StrategyIde = ({
           ) : null}
           {narrow || !layout.inspectorOpen ? (
             <Button
+              ref={inspectorRestore}
               size="small"
-              onClick={() => toggle("inspectorOpen")}
+              onClick={() => {
+                toggle("inspectorOpen");
+                queueMicrotask(() => inspectorCollapse.current?.focus());
+              }}
               aria-controls={ids.inspector}
               aria-expanded={layout.inspectorOpen}
             >
@@ -216,8 +439,12 @@ export const StrategyIde = ({
           ) : null}
           {narrow || !layout.debuggerOpen ? (
             <Button
+              ref={debuggerRestore}
               size="small"
-              onClick={() => toggle("debuggerOpen")}
+              onClick={() => {
+                toggle("debuggerOpen");
+                queueMicrotask(() => debuggerCollapse.current?.focus());
+              }}
               aria-controls={ids.debugger}
               aria-expanded={layout.debuggerOpen}
             >
@@ -228,6 +455,7 @@ export const StrategyIde = ({
             tone="primary"
             onClick={onRunBacktest}
             disabled={runDisabled || !onRunBacktest}
+            aria-keyshortcuts="Control+Shift+Enter Meta+Shift+Enter"
           >
             <span aria-hidden="true">▷</span> {t("ide.runBacktest")}
           </Button>
@@ -303,9 +531,13 @@ export const StrategyIde = ({
             <header className="ide__panel-header">
               <h2>{t("ide.outline")}</h2>
               <Button
+                ref={outlineCollapse}
                 size="small"
                 tone="ghost"
-                onClick={() => toggle("outlineOpen")}
+                onClick={() => {
+                  toggle("outlineOpen");
+                  queueMicrotask(() => outlineRestore.current?.focus());
+                }}
               >
                 {t("ide.collapseOutline")}
               </Button>
@@ -434,6 +666,16 @@ export const StrategyIde = ({
           </div>
         </>
       ) : null}
+      <CommandPalette
+        open={paletteOpen}
+        label={t("command.palette")}
+        searchLabel={t("command.search")}
+        searchPlaceholder={t("command.searchPlaceholder")}
+        emptyLabel={t("command.empty")}
+        closeLabel={t("command.close")}
+        commands={commands}
+        onClose={() => setPaletteOpen(false)}
+      />
     </div>
   );
 };

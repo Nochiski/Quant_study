@@ -3,13 +3,13 @@ plan_version: 2
 project: yaml-strategy-workbench-ui
 project_status: APPROVED
 current_phase: P6
-current_pr: P6-08,P6-09
-active_prs: [P6-08, P6-09]
-parallel_window: [P6-08, P6-09]
-last_updated: 2026-09-06T01:22:46+09:00
+current_pr: P6-03,P6-08,P6-09
+active_prs: [P6-03, P6-08, P6-09]
+parallel_window: [P6-08, P6-09, P6-03]
+last_updated: 2026-09-06T03:09:55+09:00
 planned_prs: 52
 merged_prs: 46
-approved_prs: 48
+approved_prs: 49
 progress_percent: 88
 ---
 
@@ -24,11 +24,11 @@ progress_percent: 88
 |---|---|
 | Project status | `APPROVED` |
 | Current phase | `P6` |
-| Current/next PR | `P6-08,P6-09` |
-| Active PR | `P6-08, P6-09` |
+| Current/next PR | `P6-03,P6-08,P6-09` |
+| Active PR | `P6-03, P6-08, P6-09` |
 | Progress | `46 / 52 merged (88%)` |
-| Approved | `48 / 52` |
-| Aggregated at | `2026-09-06 01:22 KST` |
+| Approved | `49 / 52` |
+| Aggregated at | `2026-09-06 03:09 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -86,16 +86,16 @@ progress_percent: 88
 
 | 항목 | 값 |
 |---|---|
-| PR | `P6-09` [#75](https://github.com/Nochiski/Quant_study/pull/75) Backtest run history routed UI와 provenance APPROVED (stacked; CI billing blocked) |
-| Intent | process-lifetime BacktestRunService의 실제 lifecycle/provenance를 read-only history로 투영해 전문 사용자가 run을 최신순 탐색하고 saved/inline 실행 근거를 확인한 뒤 detail route로 복귀하게 한다 |
-| Acceptance | newest-first deterministic pagination과 strategy filter; saved/inline의 strategy/revision/spec/schema/source hash를 명시적으로 분리 표시; nonterminal row만 polling하고 terminal-only page는 멈춤; run detail direct link; loading·empty·error·out-of-range URL canonical recovery; OpenAPI/generated/backend/frontend 계약 동기화 |
-| Non-goals | run 영속화·삭제·재시작 복구, 새로운 backtest 실행 의미, 결과/trace 화면 변경, strategy history 변경, legacy editor 제거 |
-| Branch/worktree | `feat/p6-09-backtest-history` (`Quant_study-p6-09`), base branch `feat/p6-08-strategy-history` |
-| Base SHA | `f760a5b` (P6-08 approved docs HEAD; #74 merge 후 main에 순차 rebase/base 전환) |
-| Head SHA | `74ebae0` final review freeze (`eeabb69` implementation, `d670c61` pagination fix) |
-| Diff stat | base 대비 22 files +1,228/-30 (OpenAPI/generated 211줄, tests와 hostile contract 보강 포함; 단일 API→query→route vertical slice와 공용 pagination wire guard로 12절 size exception) |
-| Focused tests | author backend history/reference/status 13·frontend router+document route 64; reviewer backend 20과 세 endpoint hostile lexical/bounds matrix |
-| Full gate | backend 1,118·frontend 427·Rust 13·root 5; Ruff·Pyright·typecheck·lint·changed-file Prettier·build·cargo fmt/clippy 통과; runtime/tracked OpenAPI 214 schemas 일치; 기존 Vite 500 kB chunk warning만 유지 |
+| PR | `P6-03` Keyboard workflow와 Command Palette APPROVED ([#76](https://github.com/Nochiski/Quant_study/pull/76), P0/P1/P2 0) |
+| Intent | 전문 사용자가 마우스 없이 현재 StrategySpec을 검증·저장·백테스트하고 표현·패널·문서 symbol을 탐색하며 workspace 선호를 복구하게 한다 |
+| Acceptance | 접근 가능한 command palette와 IME-safe 단축키; Validate/Save/Backtest의 기존 gate 재사용; 사용 가능한 view와 세 IDE panel 전환; 현재 outline의 path·semantic symbol 검색 후 source reveal; panel size와 light/dark/system theme preference의 versioned local persistence 및 hostile storage fail-closed; new/revision route 통합 |
+| Non-goals | soft dark 색상 token 자체(P6-04), palette 밖 전역 앱 검색, 서버 동기화 preference, 브라우저 E2E/visual baseline(P6-05~06), legacy editor 제거 |
+| Branch/worktree | `feat/p6-03-keyboard-palette` (`Quant_study-p6-03`), base branch `feat/p6-09-backtest-history` |
+| Base SHA | `db076ea` (P6-09 approval-doc HEAD; #74→#75 순차 merge 후 base 전환) |
+| Head SHA | `76023db` (final reviewed HEAD; Escape fix `b8f397c`) |
+| Diff stat | base 대비 28 files +1,940/-76 (second-review product delta 2 files +31/-1) |
+| Focused tests | narrow drawer 위 palette close-button Escape 격리와 focus 복구를 포함한 palette/IDE 2 files 30 passed; 이전 review-fix 4 files 97와 route matrix 11 passed |
+| Full gate | frontend 455·backend 1,118·Rust 13·root delegate 5 passed; typecheck·lint·changed-file Prettier·build·Ruff·Pyright·cargo fmt/clippy; OpenAPI/SDK regeneration diff clean |
 
 ---
 
@@ -233,7 +233,7 @@ Phase exit:
 |---|---|---|---|---|---|
 | [x] | `P6-01` | SQLite persistent strategy revision repository | P1-07 | `MERGED` | [#69](https://github.com/Nochiski/Quant_study/pull/69) · `review_p6_01` APPROVE |
 | [x] | `P6-02` | Server draft persistence/CAS/recovery UI | P6-01, P3-06, P4-08 | `MERGED` | [#72](https://github.com/Nochiski/Quant_study/pull/72) · `review_p6_02` APPROVE |
-| [ ] | `P6-03` | Keyboard workflow와 Command Palette | P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `WAITING` | — |
+| [ ] | `P6-03` | Keyboard workflow와 Command Palette | P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `APPROVED` | [#76](https://github.com/Nochiski/Quant_study/pull/76) · `review_p6_03` APPROVE, P0/P1/P2 0 · CI billing 차단 |
 | [ ] | `P6-04` | Large/hostile spec 성능·접근성·i18n과 soft dark theme (`$ref`-only cycle fail-closed 포함) | P3-05, P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `WAITING` | — |
 | [ ] | `P6-05` | Playwright/visual regression infrastructure와 CI | P2-03, P3-05, P6-04 | `WAITING` | — |
 | [ ] | `P6-06` | 전체 browser E2E·실구동 시나리오 검증, migration gate, 조건부 legacy cleanup | P6-01, P6-02, P6-03, P6-04, P6-05, P6-08, P6-09 | `WAITING` | — |
@@ -256,6 +256,7 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
+| P6-03 | `review_p6_03` | `db076ea` | `76023db` | APPROVE (최초 P1 3/P2 4와 2차 신규 P1 1을 동일 reviewer가 hostile 재현·폐쇄; 최종 P0/P1/P2 0) | 4 (해소) | 실제 Safari IME·browser viewport/focus는 P6-05~06, entry chunk 500 kB 경고와 500-node 입력 성능은 P6-04 범위; merge 전 green CI 필수 | 2026-09-06 |
 | P6-09 | `review_p6_09` | `f760a5b` | `74ebae0` | APPROVE (최초 P2 canonical pagination 1건을 동일 reviewer가 세 endpoint hostile matrix로 폐쇄; 최종 P0/P1/P2 0) | 0 | process restart/multi-worker history 공유, client-asserted inline `source_hash`, 실제 browser E2E는 P6-06 범위 | 2026-09-06 |
 | P6-08 | `review_p6_08` | `b7fc4de` | `f7bb1fd` | APPROVE (최초 P1 3/P2 2와 2차 P1 1/P2 1을 동일 reviewer가 hostile 재현·폐쇄; 최종 P0/P1/P2 0) | 4 (해소) | lexical `offset=1.0` canonicalization, concurrent insert snapshot 안정성, 외부 탭 cache 즉시성, SQLite chain audit 성능은 비차단/P6-04 범위 | 2026-09-06 |
 | P6-02 | `review_p6_02` | `206ee41` | `1473633` | APPROVE (최초 P1 4/P2 3과 2차 P1 2를 동일 reviewer가 모두 독립 재현 폐쇄; P0/P1/P2 0) | 0 | auth/ownership·retention/TTL은 live 확장 전 후속, 615-line hook state machine 분리는 유지보수 후보 | 2026-09-05 |
@@ -305,6 +306,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
+| P6-03 | final reviewer palette/IDE 2 files 30; 이전 review-fix 4 files 97 + professional route matrix 11 passed | frontend 455·backend 1,118·Rust 13·root 5; typecheck·lint·changed-file Prettier·build·Ruff·Pyright·cargo fmt/clippy | OpenAPI/SDK 재생성 후 tracked content diff 0 | 실제 root backend 42813 health 200·Vite 42814 direct new route 200; current identity/IME/action gate와 함께 narrow drawer 위 palette close-button Escape가 modal 경계에서 소비되고 drawer/focus가 보존됨을 독립 재검증 | [#76](https://github.com/Nochiski/Quant_study/pull/76) `review_p6_03` APPROVE P0/P1/P2 0; Actions billing으로 step 전 실패, green gate 유지 | 2026-09-06 |
 | P6-09 | author backend history/reference/status 13·frontend router+document route 64; reviewer backend 20 + hostile probes | backend 1,118·frontend 427·Rust 13·root 5; Ruff·Pyright·typecheck·lint·changed-file Prettier·build·cargo fmt/clippy | OpenAPI/SDK 재생성 전후 diff hash `0d80043b706914d479227815fc732c5754340202` 동일; reviewer runtime/tracked 214 schemas 일치 | saved/inline provenance, exact strategy filter, 26개 page/out-of-range 복구, nonterminal→terminal polling stop, late cache 폐기와 세 endpoint noncanonical integer 422·MAX bounds를 검증; 실제 browser는 P6-06 범위 | [#75](https://github.com/Nochiski/Quant_study/pull/75) `review_p6_09` APPROVE P0/P1/P2 0; Actions billing으로 step 전 실패 | 2026-09-06 |
 | P6-08 | author backend 1,114/frontend 423; reviewer backend 79, router 14, YAML/legacy late-cache 2 + hostile probes | backend 1,114·frontend 423·Rust 13·root 5; Ruff·Pyright·typecheck·lint·Prettier·build·cargo fmt/clippy | OpenAPI runtime/tracked parity 및 17 files 재생성 전후 SHA-256 동일 | 모든 save path cache coherence, duplicate title identity, portable offsets, provenance, 21개 pagination과 immutable link 독립 재검증 | [#74](https://github.com/Nochiski/Quant_study/pull/74) `review_p6_08` APPROVE P0/P1/P2 0; Actions는 billing으로 step 전 실패 | 2026-09-06 |
 | P6-02 | draft repository/HTTP 15, frontend server-draft 10 + document-route 45, reviewer hostile probes | backend 1,112·Ruff·Pyright; frontend 417·typecheck·lint·build; Rust 13·root 5 | OpenAPI/SDK deterministic diff 0 | raw surrogate 4종 422/no-write, wrong-ID/malformed wire 차단, base revert 및 in-flight PUT→revision CAS retirement | [#72](https://github.com/Nochiski/Quant_study/pull/72) same reviewer APPROVE P0/P1/P2 0, approval-doc HEAD CI 4/4 pass, MERGED (`c25d43c`) | 2026-09-05 |
@@ -351,6 +353,16 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-06 KST | Codex | 동일 reviewer `review_p6_03`이 final reviewed HEAD `76023db`에서 narrow modal Escape P1 폐쇄와 최초 7 findings 유지, 최신 전체 diff의 P0/P1/P2 0을 확인해 APPROVE했다. focused palette/IDE 30, frontend 455, typecheck·lint·changed-file Prettier·build·diff-check를 독립 재현했다. 실제 Safari/browser viewport·focus는 P6-05~06, entry chunk/500-node는 P6-04 residual로 명시하고 P6-03을 APPROVED로 전환한다. GitHub Actions billing 실패 때문에 green merge gate는 아직 충족되지 않았다 | same-reviewer final approval·blocking 0·SoT/FSD 책임분리·CI gate 유지 |
+| 2026-09-06 KST | Codex | P6-03 narrow modal Escape 수정과 self-check 증거를 `ba6cbb1`에 고정하고 동일 reviewer `review_p6_03`에게 신규 P1 폐쇄와 최신 전체 diff blocker 0 여부의 3차 검토를 요청하도록 IN_REVIEW로 전환한다 | 13.3 diff freeze·13.5 same-reviewer fix loop |
+| 2026-09-06 KST | Codex | P6-03 2차 review P1을 `b8f397c`에서 수정했다. palette backdrop의 모든 Escape 경로가 default와 propagation을 소비한 뒤 최상위 modal만 닫는다. `<1280px` Inspector drawer를 열고 palette close button에서 Escape를 누르는 실제 widget 회귀로 drawer 유지와 원래 `계약 접기` control focus 복구를 고정했다. focused palette/IDE 30, frontend 455, typecheck·lint·changed-file Prettier·build를 통과해 SELF_CHECK로 전환한다 | modal stack Escape ownership·focus restoration·same-reviewer fix loop |
+| 2026-09-06 KST | Codex | 동일 reviewer `review_p6_03`의 2차 검토에서 최초 P1 3/P2 4는 모두 폐쇄됐으나, narrow drawer 위 palette의 close button에서 Escape가 window까지 전파되어 drawer도 닫고 focus restore를 잃는 신규 P1 1건을 재현했다. palette modal 경계가 Escape를 완전히 소비하고 실제 narrow widget 회귀를 추가하도록 CHANGES_REQUESTED로 전환했다 | topmost modal event ownership·accessible focus·same-reviewer loop |
+| 2026-09-06 KST | Codex | P6-03 수정 self-check와 최신 증거를 `787f114`에 고정하고 최초 reviewer `review_p6_03`에게 동일 7건의 재현 폐쇄 여부와 최신 전체 diff의 신규 blocker를 재검토받도록 IN_REVIEW로 전환한다. CI billing 실패는 코드 신호와 분리해 기록하되 green merge gate는 유지한다 | 13.3 diff freeze·13.5 same-reviewer fix loop·CI gate 비우회 |
+| 2026-09-06 KST | Codex | P6-03 review fixes를 `7baf1b8`에 고정했다. outline symbol/reveal은 정확한 document epoch·source version의 current snapshot만 허용하고 stale/updating/invalid 상태는 fail-closed한다. palette는 Safari IME 229, 긴 list scroll, 반복 호출·session reset을 처리하며 view/panel 전환은 숨겨진 호출자가 아닌 보이는 논리 대상으로 focus를 넘긴다. new/revision 실제 route의 Validate/Save/Backtest wire와 invalid·stale·composing 차단, backend runtime schema semantic identity, overlay semantic token을 회귀 고정했다. focused 97+route matrix 11, frontend 454, typecheck·lint·changed-file Prettier·build를 통과해 SELF_CHECK로 전환하고 같은 reviewer 재검토를 준비한다 | exact source-map identity·IME/focus accessibility·기존 action gate SoT·semantic token·same-reviewer loop |
+| 2026-09-06 KST | Codex | `review_p6_03`이 P1 3/P2 4로 REQUEST_CHANGES를 판정했다. stale last-valid outline symbol이 syntax-invalid/updating 원문에 노출되어 이전 range를 현재 source에 reveal하고, palette Enter가 Safari 계열 IME `keyCode=229`를 실행하며, view/panel 명령이 invocation target을 숨긴 뒤 focus를 보이는 논리 대상으로 넘기지 않는다. 긴 list active option scroll, repeat Ctrl/⌘+K와 query session reset, new/revision 세 action wire/gate, hard-coded backdrop token도 함께 회귀 고정해 같은 reviewer에게 재검토받는다. #76 Actions 4 jobs는 1~2초·step 0에서 기존과 동일한 billing/spending-limit annotation으로 실패했으며 merge gate는 우회하지 않는다 | current source-map·IME/focus accessibility·route wire·semantic token·same-reviewer fix loop·CI green gate |
+| 2026-09-06 KST | Codex | P6-03 [#76](https://github.com/Nochiski/Quant_study/pull/76)을 parent `feat/p6-09-backtest-history` 대상으로 열고 base `db076ea`, review freeze `1fa6d93`, 27 files +1,325/-44 및 전체 gate와 size exception을 본문에 고정했다. fresh review-only agent `review_p6_03` 한 명에게 palette 접근성/IME/focus, 기존 action gate 재사용, source-map symbol→URL/source reveal, preference hostile persistence, FSD·SoT·책임분리와 최신 전체 diff를 독립 검토하도록 IN_REVIEW로 전환한다 | 13.3 diff freeze·13.4 PR별 fresh reviewer 정확히 1명·stack 순차 merge gate |
+| 2026-09-06 KST | Codex | P6-03 구현을 `adf3263`에 고정했다. domain-free CommandPalette는 검색·listbox keyboard·focus/IME만, IDE widget은 기존 action gate를 받는 shortcut registry와 view/panel/theme 명령만, edit feature는 parser source-map에서 현재 path·backend-declared semantic identity 검색 projection만, page는 URL→source reveal을 조립한다. panel size와 theme preference는 versioned local contract로만 저장하고 StrategySpec/revision에는 넣지 않는다. focused 99, frontend 438, backend 1,118, Rust 13, root 5와 정적·build·generated·실구동 smoke를 통과해 SELF_CHECK로 전환했다. 전체 1,323줄 중 테스트 약 401줄이고 palette 접근성 primitive·workspace preference·document route를 하나의 실제 mouse-free acceptance로 연결해야 하므로 12절 size exception을 기록한다 | action/source-map/URL/backend 의미 SoT 재사용·FSD 책임분리·13.2 self-check·12절 size exception |
+| 2026-09-06 KST | Codex | P6-09 승인 HEAD `db076ea` 위에 P6-03 전용 branch/worktree를 만들고 IN_PROGRESS로 전환했다. 공용 palette UI는 검색·키보드·focus만, IDE widget은 view/panel과 local panel-size state만, document page는 기존 validate/save/backtest gate와 outline symbol→URL/source reveal 조립만 소유한다. theme preference는 versioned local contract로 분리하고 실제 dark token은 P6-04에 남긴다 | stacked 진행 규칙·action SoT 재사용·FSD/상태 책임분리·P6-03/P6-04 경계 |
 | 2026-09-06 KST | Codex | 동일 reviewer `review_p6_09`이 final reviewed HEAD `74ebae0`에서 최초 pagination P2 폐쇄와 최신 전체 diff의 새 P0/P1/P2 0을 확인해 APPROVE했다. backend 20, 세 endpoint의 float-like·선행 0·부호·공백/제어문자·밑줄·지수·Unicode 숫자 hostile matrix, bounds/MAX, runtime/tracked OpenAPI 214 schemas를 독립 재현했다. process-lifetime/multi-worker와 inline source hash 신뢰 경계, 실제 browser 검증은 명시된 P6-06 residual로 유지하고 P6-09를 APPROVED로 전환한다 | same-reviewer final approval·blocking 0·wire/domain SoT 감사 |
 | 2026-09-06 KST | Codex | P6-09 수정·self-check 증거를 review HEAD `74ebae0`에 동결하고 최초 검토자 `review_p6_09`에게 P2 폐쇄 여부 재검토를 요청한다. 검토 범위는 공용 validator가 세 endpoint에 빠짐없이 적용됐는지, hostile lexical forms와 bounds, OpenAPI/도메인 SoT, 새 회귀 테스트의 실효성이다 | 13.3 diff freeze·13.5 same-reviewer fix loop |
 | 2026-09-06 KST | Codex | P6-09 리뷰 수정 `d670c61`에서 inbound HTTP 공용 canonical unsigned-decimal validator를 추가하고 backtest/strategy/revision 세 목록에 동일 적용했다. wire lexical grammar는 inbound adapter, 범위 상수·불변식은 `PageRequest`가 계속 소유한다. `1.0`, `01`, `+1`, 공백, `9_0`은 세 경로 모두 422이며 0·양의 십진수·MAX safe bounds는 통과한다. OpenAPI `integer`와 `minimum/maximum`은 무변경이고 focused 4, 전체 backend 1,118, Ruff·Pyright를 통과해 SELF_CHECK로 전환한다 | reviewer P2 폐쇄·wire/domain SoT 책임분리·generated contract deterministic |

@@ -934,7 +934,7 @@ Phase 5 종료 기준:
 - trace virtualization
 - focus trap과 accessible name
 - 1440/1920 light/dark 확인
-- soft dark theme와 theme preference 추가
+- soft dark theme token을 P6-03의 저장된 theme preference에 연결
 - ko/en 문구 완결
 
 ### P6-05 — Browser E2E·visual regression 기반

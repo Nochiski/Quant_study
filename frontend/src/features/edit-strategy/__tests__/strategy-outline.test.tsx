@@ -10,6 +10,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { parseSource } from "../../../shared/lib/yaml12";
+import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import type { CodeEditorHandle } from "../../../shared/ui/code-editor";
 import {
   documentReducer,
@@ -20,6 +21,7 @@ import type { JsonSchema } from "../model/schema-navigator";
 import {
   findOutlineNode,
   projectStrategyOutline,
+  projectStrategyOutlineSymbols,
 } from "../model/strategy-outline";
 import { useStrategyOutline } from "../model/use-strategy-outline";
 import { useOutlineNavigation } from "../model/use-outline-navigation";
@@ -175,6 +177,45 @@ describe("Strategy Outline projection", () => {
       arrayIndex: 0,
       semanticIdentity: null,
     });
+  });
+
+  it("projects present source paths and backend-declared semantic identities for search", () => {
+    const symbols = projectStrategyOutlineSymbols(
+      projectStrategyOutline(parsed(), SCHEMA),
+    );
+    expect(
+      symbols.find((item) => item.pointer === "/risk/max_name_weight"),
+    ).toMatchObject({
+      label: "risk › max_name_weight",
+      description: "/risk/max_name_weight",
+    });
+    expect(
+      symbols.find(
+        (item) => item.pointer === "/factors/factors/0/graph/nodes/0",
+      ),
+    ).toMatchObject({ keywords: ["node", "close", "node:close"] });
+    expect(symbols.some((item) => item.pointer === "/deployment")).toBe(false);
+  });
+
+  it("projects semantic identities from the production runtime schema fixture", () => {
+    const source = readBackendFixture(
+      "strategy_documents/quality_momentum.yaml",
+    );
+    const runtimeSchema = JSON.parse(
+      readBackendFixture("strategy_documents/runtime-schema.json"),
+    ) as JsonSchema;
+    const result = parseSource(source, "yaml");
+    if (result.status !== "ok") throw new Error("golden YAML must parse");
+
+    const symbols = projectStrategyOutlineSymbols(
+      projectStrategyOutline(result, runtimeSchema),
+    );
+
+    expect(
+      symbols.find(
+        (item) => item.pointer === "/factors/factors/0/graph/nodes/1",
+      ),
+    ).toMatchObject({ keywords: ["node", "mom_252", "node:mom_252"] });
   });
 
   it("retains only the same document epoch's last valid tree during a parse error", () => {
@@ -335,6 +376,68 @@ describe("Strategy Outline projection", () => {
     expect(setSelection).toHaveBeenCalledTimes(2);
     expect(scrollTo).toHaveBeenCalledTimes(2);
   });
+
+  it.each(["updating", "syntax-error"] as const)(
+    "does not search or reveal retained offsets while the current source is %s",
+    (phase) => {
+      const valid = parsedState();
+      const edited = documentReducer(valid, {
+        type: "edit",
+        source: `${SOURCE}broken: [\n`,
+      });
+      const state =
+        phase === "updating"
+          ? edited
+          : documentReducer(edited, {
+              type: "parsed",
+              version: edited.sourceVersion,
+              result: parseSource(edited.source, "yaml"),
+            });
+      const onSelectedPointer = vi.fn();
+      const setSelection = vi.fn();
+      const scrollTo = vi.fn();
+      const focus = vi.fn();
+      const { result } = renderHook(() =>
+        useOutlineNavigation({
+          state,
+          schema: SCHEMA,
+          selectedPointer: "/risk/max_name_weight",
+          onSelectedPointer,
+        }),
+      );
+      const staleRisk = findOutlineNode(
+        result.current.snapshot?.nodes ?? [],
+        "/risk/max_name_weight",
+      );
+      expect(staleRisk).not.toBeNull();
+      expect(result.current.snapshot).toMatchObject({
+        stale: true,
+        staleReason: phase,
+      });
+      expect(result.current.symbols).toEqual([]);
+
+      act(() =>
+        result.current.onEditorReady({
+          getText: () => state.source,
+          setText: vi.fn(),
+          replaceRange: vi.fn(),
+          getSelection: () => ({ from: 0, to: 0 }),
+          setSelection,
+          offsetToPosition: () => ({ line: 0, column: 0 }),
+          positionToOffset: () => 0,
+          scrollTo,
+          focus,
+          getHistoryState: () => null,
+          restoreHistoryState: vi.fn(),
+        }),
+      );
+      act(() => result.current.onSelectOutlineNode(staleRisk!));
+
+      expect(setSelection).not.toHaveBeenCalled();
+      expect(scrollTo).not.toHaveBeenCalled();
+      expect(focus).not.toHaveBeenCalled();
+    },
+  );
 
   it("lets an explicit route selection win and rejects skipped-version cursor offsets", () => {
     const first = parsedState();

@@ -4,15 +4,24 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ThemePreferenceProvider } from "../../../shared/lib/theme";
 import { StrategyIde } from "..";
+import {
+  PANEL_LAYOUT_STORAGE_KEY,
+  readPanelSizes,
+} from "../model/use-panel-layout";
 
 afterEach(() => {
   cleanup();
+  localStorage.clear();
+  delete document.documentElement.dataset.theme;
   vi.unstubAllGlobals();
 });
 
@@ -59,12 +68,33 @@ const controlledMatchMedia = (initial: boolean) => {
 const mount = (props: Partial<Parameters<typeof StrategyIde>[0]> = {}) => {
   const { versionLabel = "v12", ...rest } = props;
   return render(
-    <StrategyIde
-      title="새 전략"
-      versionLabel={versionLabel}
-      editor={<textarea aria-label="source" />}
-      {...rest}
-    />,
+    <ThemePreferenceProvider>
+      <StrategyIde
+        title="새 전략"
+        versionLabel={versionLabel}
+        editor={<textarea aria-label="source" />}
+        {...rest}
+      />
+    </ThemePreferenceProvider>,
+  );
+};
+
+const StatefulViewIde = () => {
+  const [view, setView] =
+    useState<NonNullable<Parameters<typeof StrategyIde>[0]["view"]>>("yaml");
+  return (
+    <ThemePreferenceProvider>
+      <StrategyIde
+        title="새 전략"
+        versionLabel="초안"
+        editor={<textarea aria-label="source" />}
+        sourceView="yaml"
+        projections={{ json: <div>JSON projection</div> }}
+        view={view}
+        onViewChange={setView}
+        availableViews={["yaml", "json"]}
+      />
+    </ThemePreferenceProvider>
   );
 };
 
@@ -226,6 +256,31 @@ describe("StrategyIde", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("lets palette Escape close only the top modal and restore focus inside a narrow drawer", async () => {
+    matchMedia(true);
+    const user = userEvent.setup();
+    mount();
+    await user.click(
+      screen.getByRole("button", { name: "계약", expanded: false }),
+    );
+    const drawerControl = screen.getByRole("button", { name: "계약 접기" });
+    await waitFor(() => expect(drawerControl).toHaveFocus());
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    await waitFor(() => expect(screen.getByRole("combobox")).toHaveFocus());
+    await user.keyboard("{Shift>}{Tab}{/Shift}");
+    expect(
+      screen.getByRole("button", { name: "명령 팔레트 닫기" }),
+    ).toHaveFocus();
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("complementary", { name: "계약" }),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(drawerControl).toHaveFocus());
+  });
+
   it("renders the concept frame: breadcrumb, run action, meta line, outline and snippets", async () => {
     matchMedia(false);
     const user = userEvent.setup();
@@ -292,5 +347,195 @@ describe("StrategyIde", () => {
       expect(panel).toHaveAttribute("role", "tabpanel");
       expect(panel).toHaveAttribute("aria-labelledby", tab.id);
     }
+  });
+
+  it("runs only enabled document shortcuts and ignores IME composition", () => {
+    matchMedia(false);
+    const onValidate = vi.fn();
+    const onSave = vi.fn();
+    const onRunBacktest = vi.fn();
+    const onViewChange = vi.fn();
+    mount({
+      onValidate,
+      validateDisabled: false,
+      onSave,
+      saveDisabled: false,
+      onRunBacktest,
+      runDisabled: false,
+      onViewChange,
+      availableViews: ["yaml", "diff"],
+    });
+
+    fireEvent.keyDown(window, { key: "Enter", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "Enter", ctrlKey: true, shiftKey: true });
+    fireEvent.keyDown(window, { key: "5", altKey: true });
+    fireEvent.keyDown(window, {
+      key: "s",
+      ctrlKey: true,
+      isComposing: true,
+      keyCode: 229,
+    });
+
+    expect(onValidate).toHaveBeenCalledTimes(1);
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onRunBacktest).toHaveBeenCalledTimes(1);
+    expect(onViewChange).toHaveBeenCalledWith("diff");
+  });
+
+  it("keeps disabled document shortcuts fail-closed", () => {
+    matchMedia(false);
+    const onValidate = vi.fn();
+    const onSave = vi.fn();
+    const onRunBacktest = vi.fn();
+    mount({
+      onValidate,
+      validateDisabled: true,
+      onSave,
+      saveDisabled: true,
+      onRunBacktest,
+      runDisabled: true,
+    });
+
+    fireEvent.keyDown(window, { key: "Enter", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "Enter", ctrlKey: true, shiftKey: true });
+
+    expect(onValidate).not.toHaveBeenCalled();
+    expect(onSave).not.toHaveBeenCalled();
+    expect(onRunBacktest).not.toHaveBeenCalled();
+  });
+
+  it("searches document symbols and controls panels and theme from the palette", async () => {
+    matchMedia(false);
+    const user = userEvent.setup();
+    const onSelectSymbol = vi.fn();
+    mount({
+      symbols: [
+        {
+          id: "/factors/0/graph/nodes/2",
+          pointer: "/factors/0/graph/nodes/2",
+          label: "factors › momentum › rank_1",
+          description: "/factors/0/graph/nodes/2",
+          keywords: ["node", "rank_1"],
+        },
+      ],
+      onSelectSymbol,
+    });
+
+    await user.click(screen.getByRole("button", { name: /명령/ }));
+    await user.type(screen.getByRole("combobox"), "rank_1");
+    await user.keyboard("{Enter}");
+    expect(onSelectSymbol).toHaveBeenCalledWith("/factors/0/graph/nodes/2");
+
+    await user.click(screen.getByRole("button", { name: /명령/ }));
+    await user.type(screen.getByRole("combobox"), "닫기 계약");
+    await user.keyboard("{Enter}");
+    expect(
+      screen.queryByRole("complementary", { name: "계약" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /명령/ }));
+    await user.type(screen.getByRole("combobox"), "테마: 다크");
+    await user.keyboard("{Enter}");
+    expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+    expect(localStorage.getItem("quant-workbench.theme.v1")).toContain("dark");
+  });
+
+  it("ignores repeated palette shortcuts and resets every closed session", async () => {
+    matchMedia(false);
+    const user = userEvent.setup();
+    mount();
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    const search = screen.getByRole("combobox");
+    await user.type(search, "닫기 계약");
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true, repeat: true });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    expect(screen.getByRole("combobox")).toHaveValue("");
+  });
+
+  it("moves focus to view tabs for palette and Alt navigation", async () => {
+    matchMedia(false);
+    const user = userEvent.setup();
+    render(<StatefulViewIde />);
+    const source = screen.getByRole("textbox", { name: "source" });
+    source.focus();
+
+    fireEvent.keyDown(window, { key: "2", altKey: true });
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: "JSON" })).toHaveFocus(),
+    );
+
+    await user.click(screen.getByRole("tab", { name: "YAML" }));
+    source.focus();
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    await user.type(screen.getByRole("combobox"), "표현 열기 JSON");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: "JSON" })).toHaveFocus(),
+    );
+    expect(source.closest('[role="tabpanel"]')).toHaveAttribute("hidden");
+  });
+
+  it("moves focus from a hidden panel command to its restore toggle", async () => {
+    matchMedia(false);
+    const user = userEvent.setup();
+    mount();
+    const collapse = screen.getByRole("button", { name: "계약 접기" });
+    collapse.focus();
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    await user.type(screen.getByRole("combobox"), "닫기 계약");
+    await user.keyboard("{Enter}");
+
+    const restore = screen.getByRole("button", {
+      name: "계약",
+      expanded: false,
+    });
+    await waitFor(() => expect(restore).toHaveFocus());
+  });
+
+  it("persists bounded panel sizes and rejects hostile stored layouts", async () => {
+    matchMedia(false);
+    const user = userEvent.setup();
+    const first = mount();
+    const outline = screen.getByRole("separator", {
+      name: "전략 구조 크기 조절",
+    });
+    outline.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(outline).toHaveAttribute("aria-valuenow", "256");
+    first.unmount();
+
+    mount();
+    expect(
+      screen.getByRole("separator", { name: "전략 구조 크기 조절" }),
+    ).toHaveAttribute("aria-valuenow", "256");
+
+    const hostile = {
+      getItem: () =>
+        JSON.stringify({
+          version: 1,
+          sizes: {
+            outlineWidth: 421,
+            inspectorWidth: 320,
+            debuggerHeight: 220,
+          },
+        }),
+      setItem: vi.fn(),
+    };
+    expect(readPanelSizes(hostile)).toBeNull();
+    expect(
+      JSON.parse(localStorage.getItem(PANEL_LAYOUT_STORAGE_KEY) ?? "null"),
+    ).toEqual({
+      version: 1,
+      sizes: { outlineWidth: 256, inspectorWidth: 320, debuggerHeight: 220 },
+    });
   });
 });

@@ -336,6 +336,12 @@ export const shouldCompile = (state: DocumentState): boolean =>
   state.parse?.status === "ok" &&
   state.compiledVersion !== state.sourceVersion;
 
+/** Shared toolbar/keyboard gate for forcing a compile of this exact parsed text. */
+export const canValidateDocument = (state: DocumentState): boolean =>
+  !state.composing &&
+  state.parsedVersion === state.sourceVersion &&
+  state.parse?.status === "ok";
+
 /** A compiled spec that no longer matches the text: view-only, shown with an explicit badge. */
 export const isSpecStale = (state: DocumentState): boolean =>
   state.compiled?.spec != null && state.compiledVersion !== state.sourceVersion;

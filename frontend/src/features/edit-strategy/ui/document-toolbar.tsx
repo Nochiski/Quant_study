@@ -8,6 +8,7 @@ import "./document-toolbar.css";
 type DocumentToolbarProps = {
   state: DocumentState;
   onValidate: () => void;
+  canValidate: boolean;
   validating: boolean;
   onSave: () => void;
   canSave: boolean;
@@ -42,6 +43,7 @@ const decisionLabel = (decision: BacktestSourceDecision): string => {
 export const DocumentToolbar = ({
   state,
   onValidate,
+  canValidate,
   validating,
   onSave,
   canSave,
@@ -90,10 +92,9 @@ export const DocumentToolbar = ({
         <Button
           size="small"
           onClick={onValidate}
-          disabled={
-            validating || state.composing || state.parse?.status !== "ok"
-          }
+          disabled={!canValidate}
           aria-busy={validating || undefined}
+          aria-keyshortcuts="Control+Enter Meta+Enter"
         >
           {t("toolbar.validate")}
         </Button>
@@ -103,6 +104,7 @@ export const DocumentToolbar = ({
           onClick={onSave}
           disabled={!canSave}
           aria-busy={saving || undefined}
+          aria-keyshortcuts="Control+S Meta+S"
         >
           {t("toolbar.saveRevision")}
         </Button>
@@ -114,6 +116,7 @@ export const DocumentToolbar = ({
               decision.kind === "blocked" || runStatus.kind === "starting"
             }
             aria-busy={runStatus.kind === "starting" || undefined}
+            aria-keyshortcuts="Control+Shift+Enter Meta+Shift+Enter"
           >
             {runStatus.kind === "accepted"
               ? t("toolbar.run.open")

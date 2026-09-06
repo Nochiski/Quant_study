@@ -6,6 +6,7 @@ import { createMemoryHistory } from "@tanstack/react-router";
 import {
   act,
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -175,6 +176,7 @@ const FACTOR = {
 };
 const posted: unknown[] = [];
 const started: Record<string, unknown>[] = [];
+const compiledSources: string[] = [];
 const explainedGraphs: unknown[] = [];
 const tracedStrategies: Record<string, unknown>[] = [];
 const acceptedRun = (runId = "run-7") => ({
@@ -244,6 +246,7 @@ const server = setupServer(
   }),
   http.post(`${API}/api/v1/strategy-documents/compile`, async ({ request }) => {
     const body = (await request.json()) as { source: string };
+    compiledSources.push(body.source);
     const title = /title: (.*)/.exec(body.source)?.[1] ?? "";
     const compiledSpec = spec("draft", 0, title);
     const { identity, ...canonicalSpec } = compiledSpec;
@@ -387,8 +390,11 @@ beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
   cleanup();
   server.resetHandlers();
+  localStorage.clear();
+  delete globalThis.document.documentElement.dataset.theme;
   posted.length = 0;
   started.length = 0;
+  compiledSources.length = 0;
   explainedGraphs.length = 0;
   tracedStrategies.length = 0;
 });
@@ -440,6 +446,274 @@ const legacyLink = () =>
   globalThis.document.querySelector<HTMLAnchorElement>(
     'a[href="/legacy/builder"]',
   )!;
+
+const WORKFLOW_ROUTES = [
+  {
+    name: "new strategy",
+    route: "/research/strategies/new",
+    initialSource: 'schema_version: "1.0"\ntitle: ""\n',
+    editedSource:
+      'schema_version: "1.0"\ntitle: ""\ndescription: keyboard save\n',
+    savedPath: "/research/strategies/s9/revisions/1",
+    savedRequest: {
+      format: "yaml",
+      source: 'schema_version: "1.0"\ntitle: ""\ndescription: keyboard save\n',
+    },
+    backtestSource: "inline_draft",
+  },
+  {
+    name: "saved revision",
+    route: "/research/strategies/s1/revisions/2",
+    initialSource: STORED,
+    editedSource: `${STORED}description: keyboard save\n`,
+    savedPath: "/research/strategies/s1/revisions/3",
+    savedRequest: {
+      expected_revision: 2,
+      format: "yaml",
+      source: `${STORED}description: keyboard save\n`,
+    },
+    backtestSource: "saved_revision",
+  },
+] as const;
+
+const serveRuntimeGraphDocument = (): void => {
+  server.use(
+    http.get(`${API}/api/v1/strategy-documents/schema`, () =>
+      HttpResponse.json({
+        schema: RUNTIME_SCHEMA,
+        schema_hash: "h".repeat(64),
+        schema_version: "1.0",
+      }),
+    ),
+    http.get(
+      `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
+      () =>
+        HttpResponse.json({
+          ...document("s1", 2, GRAPH_SOURCE, "그래프 전략"),
+          spec: graphSpec("s1", 2),
+        }),
+    ),
+  );
+};
+
+describe("professional keyboard workflow (P6-03)", () => {
+  it("finds a JSON Pointer from a read-only view, returns to YAML and reveals its source", async () => {
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2?view=json");
+    expect(
+      await screen.findByLabelText("StrategySpec JSON"),
+    ).toBeInTheDocument();
+
+    await user.keyboard("{Control>}k{/Control}");
+    const search = screen.getByRole("combobox", {
+      name: "명령과 문서 경로 검색",
+    });
+    await user.type(search, "/title");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(history.location.search).toContain("path=%2Ftitle");
+      expect(history.location.search).not.toContain("view=json");
+    });
+    const view = await editor();
+    expect(
+      view.state.sliceDoc(
+        view.state.selection.main.from,
+        view.state.selection.main.to,
+      ),
+    ).toBe("퀄리티 모멘텀");
+    expect(view.hasFocus).toBe(true);
+  });
+
+  it.each(WORKFLOW_ROUTES)(
+    "routes Ctrl+Enter through the same Validate gate on $name",
+    async ({ route, initialSource }) => {
+      mount(route);
+      await editor();
+      await waitFor(() => expect(compiledSources).toContain(initialSource));
+      const validate = within(
+        globalThis.document.querySelector(".ide__editor-actions")!,
+      ).getByRole("button", { name: "검증" });
+      await waitFor(() => expect(validate).toBeEnabled());
+      const before = compiledSources.length;
+
+      fireEvent.keyDown(window, { key: "Enter", ctrlKey: true });
+
+      await waitFor(() => expect(compiledSources.length).toBe(before + 1));
+      expect(compiledSources.at(-1)).toBe(initialSource);
+    },
+  );
+
+  it.each(WORKFLOW_ROUTES)(
+    "routes Ctrl+S through the same Save gate on $name",
+    async ({ route, editedSource, savedPath, savedRequest }) => {
+      const history = mount(route);
+      const view = await editor();
+      replaceText(view, editedSource);
+      await waitFor(() => expect(saveButton()).toBeEnabled());
+
+      fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+
+      await waitFor(() => expect(history.location.pathname).toBe(savedPath));
+      expect(posted).toEqual([savedRequest]);
+    },
+  );
+
+  it.each(WORKFLOW_ROUTES)(
+    "routes Ctrl+Shift+Enter through the same Backtest gate on $name",
+    async ({ route, backtestSource }) => {
+      const history = mount(route);
+      await editor();
+      const run = within(
+        globalThis.document.querySelector(".ide__editor-actions")!,
+      ).getByRole("button", { name: "백테스트" });
+      await waitFor(() => expect(run).toBeEnabled());
+
+      fireEvent.keyDown(window, {
+        key: "Enter",
+        ctrlKey: true,
+        shiftKey: true,
+      });
+
+      await waitFor(() => expect(started).toHaveLength(1));
+      expect(
+        (started[0]?.strategy_source as { kind?: string } | undefined)?.kind,
+      ).toBe(backtestSource);
+      await waitFor(() =>
+        expect(history.location.pathname).toBe("/research/backtests/run-7"),
+      );
+    },
+  );
+
+  it.each(WORKFLOW_ROUTES)(
+    "keeps Validate, Save and Backtest blocked while $name is composing or invalid",
+    async ({ route }) => {
+      const history = mount(route);
+      const view = await editor();
+      const run = within(
+        globalThis.document.querySelector(".ide__editor-actions")!,
+      ).getByRole("button", { name: "백테스트" });
+      await waitFor(() => expect(run).toBeEnabled());
+
+      act(() =>
+        view.contentDOM.dispatchEvent(
+          new Event("compositionstart", { bubbles: true }),
+        ),
+      );
+      expect(await screen.findByText(t("document.composing"))).toBeVisible();
+      const beforeComposition = compiledSources.length;
+      fireEvent.keyDown(window, { key: "Enter", ctrlKey: true });
+      fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+      fireEvent.keyDown(window, {
+        key: "Enter",
+        ctrlKey: true,
+        shiftKey: true,
+      });
+      expect(compiledSources).toHaveLength(beforeComposition);
+      expect(posted).toEqual([]);
+      expect(started).toEqual([]);
+      act(() =>
+        view.contentDOM.dispatchEvent(
+          new Event("compositionend", { bubbles: true }),
+        ),
+      );
+
+      replaceText(view, "title: [broken\n");
+      await screen.findByText(t("ide.outline.stale"));
+      const beforeInvalid = compiledSources.length;
+      fireEvent.keyDown(window, { key: "Enter", ctrlKey: true });
+      fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+      fireEvent.keyDown(window, {
+        key: "Enter",
+        ctrlKey: true,
+        shiftKey: true,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      expect(compiledSources).toHaveLength(beforeInvalid);
+      expect(posted).toEqual([]);
+      expect(started).toEqual([]);
+      expect(history.location.pathname).toBe(route.split("?")[0]);
+    },
+  );
+
+  it("searches a runtime-schema semantic node identity and reveals its pointer", async () => {
+    serveRuntimeGraphDocument();
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2?view=json");
+    expect(await screen.findByLabelText("StrategySpec JSON")).toBeVisible();
+    const outlineFilter = screen.getByRole("searchbox", {
+      name: t("ide.outline.filter"),
+    });
+    await user.type(outlineFilter, "mom_252");
+    expect(
+      await screen.findByRole("treeitem", { name: /mom_252/ }),
+    ).toBeVisible();
+    await user.clear(outlineFilter);
+
+    await user.keyboard("{Control>}k{/Control}");
+    await user.type(
+      screen.getByRole("combobox", { name: "명령과 문서 경로 검색" }),
+      "node:mom_252",
+    );
+    const semanticResult = await screen.findByRole("option");
+    expect(semanticResult).toHaveTextContent(
+      "/factors/factors/0/graph/nodes/1",
+    );
+    expect(screen.getAllByRole("option")).toHaveLength(1);
+    await user.keyboard("{Enter}");
+
+    await waitFor(() =>
+      expect(history.location.search).toContain(
+        "path=%2Ffactors%2Ffactors%2F0%2Fgraph%2Fnodes%2F1",
+      ),
+    );
+    const view = await editor();
+    expect(view.hasFocus).toBe(true);
+    expect(
+      view.state.sliceDoc(
+        view.state.selection.main.from,
+        view.state.selection.main.to,
+      ),
+    ).toContain("node_id: mom_252");
+  });
+
+  it("does not expose or execute stale symbols while graph source is updating or invalid", async () => {
+    serveRuntimeGraphDocument();
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2");
+    const view = await editor();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /백테스트 실행/ }),
+      ).toBeEnabled(),
+    );
+    view.focus();
+    replaceText(view, `${GRAPH_SOURCE}broken: [\n`);
+    const selection = view.state.selection.main;
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    const search = screen.getByRole("combobox", {
+      name: "명령과 문서 경로 검색",
+    });
+    await user.type(search, "node:mom_252");
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+    expect(screen.getByText(t("command.empty"))).toBeVisible();
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(search).toHaveFocus();
+    expect(history.location.search).not.toContain("path=");
+    expect(view.state.selection.main.from).toBe(selection.from);
+    expect(view.state.selection.main.to).toBe(selection.to);
+
+    await screen.findByText(t("ide.outline.stale"));
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(history.location.search).not.toContain("path=");
+    expect(view.state.selection.main.from).toBe(selection.from);
+    expect(view.state.selection.main.to).toBe(selection.to);
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(view.hasFocus).toBe(true));
+  });
+});
 
 describe("document routes (P2-04)", () => {
   it.each([

@@ -14,11 +14,11 @@ import { json } from "@codemirror/lang-json";
 import { yaml } from "@codemirror/lang-yaml";
 import {
   bracketMatching,
+  HighlightStyle,
   foldGutter,
   foldKeymap,
   indentOnInput,
   syntaxHighlighting,
-  defaultHighlightStyle,
 } from "@codemirror/language";
 import {
   linter,
@@ -43,6 +43,7 @@ import {
   keymap,
   lineNumbers,
 } from "@codemirror/view";
+import { tags } from "@lezer/highlight";
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 
 import type {
@@ -55,6 +56,27 @@ import type {
 import "./code-editor.css";
 
 const HISTORY_FIELDS = { history: historyField };
+
+const semanticHighlightStyle = HighlightStyle.define([
+  {
+    tag: [tags.propertyName, tags.variableName, tags.labelName, tags.typeName],
+    color: "var(--syntax-key)",
+  },
+  {
+    tag: [tags.string, tags.special(tags.string)],
+    color: "var(--syntax-string)",
+  },
+  { tag: tags.number, color: "var(--syntax-number)" },
+  {
+    tag: [tags.bool, tags.null, tags.atom, tags.keyword],
+    color: "var(--syntax-literal)",
+  },
+  { tag: [tags.comment, tags.meta], color: "var(--syntax-comment)" },
+  {
+    tag: [tags.punctuation, tags.separator, tags.bracket],
+    color: "var(--syntax-punctuation)",
+  },
+]);
 
 const toCmDiagnostics = (
   items: EditorDiagnostic[],
@@ -185,7 +207,7 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
         indentOnInput(),
         bracketMatching(),
         highlightSelectionMatches(),
-        syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+        syntaxHighlighting(semanticHighlightStyle, { fallback: true }),
         history(),
         lintGutter(),
         linter(null),

@@ -75,6 +75,28 @@ $activeStatuses = @(
     "CHANGES_REQUESTED",
     "APPROVED"
 )
+
+# An active stack is a concurrency set, not a priority-ordered list. Aggregate by explicit
+# workflow severity so reordering parallel_window can never hide a requested change.
+$activeStatusPriority = @(
+    "CHANGES_REQUESTED",
+    "IN_PROGRESS",
+    "SELF_CHECK",
+    "IN_REVIEW",
+    "APPROVED"
+)
+
+function Get-AggregateActiveStatus {
+    param([object[]]$CandidateRows)
+
+    foreach ($status in $activeStatusPriority) {
+        if (@($CandidateRows | Where-Object Status -eq $status).Count -gt 0) {
+            return $status
+        }
+    }
+    return $null
+}
+
 $activeRows = @($rows | Where-Object Status -in $activeStatuses)
 
 $parallelMatch = [regex]::Match($original, '(?m)^parallel_window:\s*\[(?<ids>[^\]]*)\]\s*$')
@@ -144,11 +166,19 @@ $total = $rows.Count
 $merged = @($rows | Where-Object Checked).Count
 $approved = @($rows | Where-Object Status -in @("APPROVED", "MERGED")).Count
 $progress = if ($total -eq 0) { 0 } else { [math]::Round(($merged * 100.0) / $total) }
+$orderedActiveRows = @(
+    foreach ($id in $parallelIds) {
+        if ($rowById.ContainsKey($id) -and $rowById[$id].Status -in $activeStatuses) {
+            $rowById[$id]
+        }
+    }
+)
+$aggregateActiveStatus = Get-AggregateActiveStatus -CandidateRows $activeRows
 
 if ($merged -eq $total) {
     $projectStatus = "COMPLETE"
-} elseif ($activeRows.Count -gt 0) {
-    $projectStatus = $activeRows[0].Status
+} elseif ($null -ne $aggregateActiveStatus) {
+    $projectStatus = $aggregateActiveStatus
 } elseif (@($rows | Where-Object Status -eq "READY").Count -gt 0) {
     $projectStatus = "READY"
 } elseif (@($rows | Where-Object Status -eq "PAUSED").Count -gt 0) {
@@ -157,7 +187,9 @@ if ($merged -eq $total) {
     $projectStatus = "WAITING"
 }
 
-$currentRows = if ($activeRows.Count -gt 0) {
+$currentRows = if ($orderedActiveRows.Count -gt 0) {
+    $orderedActiveRows
+} elseif ($activeRows.Count -gt 0) {
     $activeRows
 } else {
     $readyRows = @($rows | Where-Object Status -eq "READY")
@@ -268,7 +300,7 @@ foreach ($phase in $phaseGoals.Keys) {
     if ($phaseMerged -eq $phaseRows.Count) {
         $phaseStatus = "MERGED"
     } elseif ($phaseActive.Count -gt 0) {
-        $phaseStatus = $phaseActive[0].Status
+        $phaseStatus = Get-AggregateActiveStatus -CandidateRows $phaseActive
     } elseif (@($phaseRows | Where-Object Status -eq "READY").Count -gt 0) {
         $phaseStatus = "READY"
     } elseif (@($phaseRows | Where-Object Status -eq "PAUSED").Count -gt 0) {

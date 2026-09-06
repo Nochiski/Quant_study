@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import {
   propertyOptions,
+  resolveRef,
   schemaAt,
   typeLabel,
   valueOptions,
@@ -170,5 +171,46 @@ describe("schema navigator", () => {
     const version = schemaAt(SCHEMA, "/schema_version", DOCUMENT);
     expect(valueOptions(version!)).toEqual(["1.0"]);
     expect(typeLabel(operator!.node)).toBe("enum(gt|gte|lt|lte|eq)");
+  });
+
+  it.each([
+    ["self cycle", { $ref: "#/$defs/Self" }],
+    ["mutual cycle", { $ref: "#/$defs/A" }],
+    ["missing target", { $ref: "#/$defs/Missing" }],
+    ["external target", { $ref: "https://example.invalid/schema.json" }],
+  ])("fails closed for an unresolvable %s", (_label, property) => {
+    const schema: JsonSchema = {
+      type: "object",
+      properties: { unsafe: property },
+      $defs: {
+        Self: { $ref: "#/$defs/Self" },
+        A: { $ref: "#/$defs/B" },
+        B: { $ref: "#/$defs/A" },
+      },
+    };
+    const root = schemaAt(schema, "", {});
+
+    expect(root).not.toBeNull();
+    expect(
+      propertyOptions(schema, root!).map((option) => option.name),
+    ).not.toContain("unsafe");
+    expect(schemaAt(schema, "/unsafe", { unsafe: {} })).toBeNull();
+    expect(resolveRef(schema, property)).toBeNull();
+  });
+
+  it("fails closed when a reference chain exceeds the navigation budget", () => {
+    const definitions = Object.fromEntries(
+      Array.from({ length: 18 }, (_, index) => [
+        `N${index}`,
+        index === 17 ? { type: "string" } : { $ref: `#/$defs/N${index + 1}` },
+      ]),
+    );
+    const schema: JsonSchema = {
+      type: "object",
+      properties: { unsafe: { $ref: "#/$defs/N0" } },
+      $defs: definitions,
+    };
+
+    expect(schemaAt(schema, "/unsafe", { unsafe: "value" })).toBeNull();
   });
 });

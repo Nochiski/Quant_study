@@ -258,10 +258,10 @@ test("Rust 실행부터 전문 차트·raw metric·manifest 경고까지 한 흐
   expect(
     await screen.findByRole("heading", { name: "백테스트 결과" }),
   ).toBeInTheDocument();
-  expect(screen.getByLabelText("Equity curve chart")).toBeInTheDocument();
-  expect(screen.getByLabelText("Drawdown chart")).toBeInTheDocument();
-  expect(screen.getByLabelText("Rolling Sharpe chart")).toBeInTheDocument();
-  expect(screen.getByLabelText("Exposure chart")).toBeInTheDocument();
+  expect(screen.getByLabelText("Equity curve 차트")).toBeInTheDocument();
+  expect(screen.getByLabelText("Drawdown 차트")).toBeInTheDocument();
+  expect(screen.getByLabelText("Rolling Sharpe 차트")).toBeInTheDocument();
+  expect(screen.getByLabelText("Exposure 차트")).toBeInTheDocument();
   expect(screen.getAllByText("N/A").length).toBeGreaterThan(0);
   expect(screen.getAllByText("0.0000").length).toBeGreaterThan(0);
   expect(screen.getAllByText("zero return variance").length).toBeGreaterThan(0);

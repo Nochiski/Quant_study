@@ -8,6 +8,7 @@ import {
   useStartBacktest,
 } from "../../../entities/backtest";
 import type { StrategySpec } from "../../../entities/strategy";
+import { t } from "../../../shared/config";
 import { Button } from "../../../shared/ui";
 
 export const BacktestRunner = ({ strategy }: { strategy: StrategySpec }) => {
@@ -55,38 +56,35 @@ export const BacktestRunner = ({ strategy }: { strategy: StrategySpec }) => {
     <section className="backtest-workspace">
       <header className="backtest-workspace__header">
         <div>
-          <span className="section-kicker">PERSISTENT RUST ENGINE</span>
-          <h2>전략 실행과 전문 성과 분석</h2>
-          <p>
-            현재 StrategySpec을 TargetTape로 컴파일한 뒤 엔진에서 실행합니다.
-            Python core는 패리티 디버깅용입니다.
-          </p>
+          <span className="section-kicker">{t("backtest.runner.kicker")}</span>
+          <h2>{t("backtest.runner.title")}</h2>
+          <p>{t("backtest.runner.description")}</p>
         </div>
         <span className="engine-badge engine-badge--ready">
-          MetricRegistry v1 · 21 metrics
+          {t("backtest.runner.registry")}
         </span>
       </header>
 
       <section className="run-console">
         <div className="run-controls">
           <label>
-            실행 core
+            {t("backtest.runner.core")}
             <select
-              aria-label="실행 core"
+              aria-label={t("backtest.runner.core")}
               disabled={active}
               onChange={(event) =>
                 setCore(event.target.value as "rust" | "python")
               }
               value={core}
             >
-              <option value="rust">Persistent Rust</option>
-              <option value="python">Python reference</option>
+              <option value="rust">{t("backtest.runner.core.rust")}</option>
+              <option value="python">{t("backtest.runner.core.python")}</option>
             </select>
           </label>
           <label>
-            초기 자본 (KRW)
+            {t("backtest.runner.initialCash")}
             <input
-              aria-label="초기 자본 (KRW)"
+              aria-label={t("backtest.runner.initialCash")}
               disabled={active}
               min={1}
               onChange={(event) => setInitialCash(Number(event.target.value))}
@@ -95,18 +93,18 @@ export const BacktestRunner = ({ strategy }: { strategy: StrategySpec }) => {
             />
           </label>
           <label>
-            벤치마크 종목 ID
+            {t("backtest.runner.benchmark")}
             <input
-              aria-label="벤치마크 종목 ID"
+              aria-label={t("backtest.runner.benchmark")}
               disabled={active}
               onChange={(event) => setBenchmark(event.target.value)}
               value={benchmark}
             />
           </label>
           <label>
-            OOS 시작일 (선택)
+            {t("backtest.runner.oosStart")}
             <input
-              aria-label="OOS 시작일 (선택)"
+              aria-label={t("backtest.runner.oosStart")}
               disabled={active}
               max={strategy.data.end}
               min={strategy.data.start}
@@ -122,7 +120,7 @@ export const BacktestRunner = ({ strategy }: { strategy: StrategySpec }) => {
             onClick={() => void run()}
             tone="primary"
           >
-            {completed ? "새 백테스트 실행" : "백테스트 실행"}
+            {completed ? t("backtest.runner.rerun") : t("backtest.runner.run")}
           </Button>
           {active && runId !== null && (
             <Button
@@ -131,7 +129,7 @@ export const BacktestRunner = ({ strategy }: { strategy: StrategySpec }) => {
               }
               onClick={() => void cancel.mutateAsync(runId)}
             >
-              실행 취소
+              {t("backtest.runner.cancel")}
             </Button>
           )}
           <span>
@@ -152,8 +150,7 @@ export const BacktestRunner = ({ strategy }: { strategy: StrategySpec }) => {
         )}
         {(start.isError || status.isError || result.isError) && (
           <p className="inline-state inline-state--error">
-            실행 요청 또는 결과 조회에 실패했습니다. 입력 조건과 API 상태를
-            확인하세요.
+            {t("backtest.runner.error")}
           </p>
         )}
         {state?.status === "failed" && (
@@ -162,7 +159,7 @@ export const BacktestRunner = ({ strategy }: { strategy: StrategySpec }) => {
       </section>
 
       {result.isPending && completed && (
-        <p className="state-message">결과 artifact를 불러오는 중입니다.</p>
+        <p className="state-message">{t("backtest.runner.resultLoading")}</p>
       )}
       {result.data !== undefined && <BacktestRunDetail result={result.data} />}
     </section>

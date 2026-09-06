@@ -3,13 +3,13 @@ plan_version: 2
 project: yaml-strategy-workbench-ui
 project_status: APPROVED
 current_phase: P6
-current_pr: P6-03,P6-08,P6-09
-active_prs: [P6-03, P6-08, P6-09]
-parallel_window: [P6-08, P6-09, P6-03]
-last_updated: 2026-09-06T03:09:55+09:00
+current_pr: P6-08,P6-09,P6-03,P6-04
+active_prs: [P6-03, P6-04, P6-08, P6-09]
+parallel_window: [P6-08, P6-09, P6-03, P6-04]
+last_updated: 2026-09-06T04:44:23+09:00
 planned_prs: 52
 merged_prs: 46
-approved_prs: 49
+approved_prs: 50
 progress_percent: 88
 ---
 
@@ -24,11 +24,11 @@ progress_percent: 88
 |---|---|
 | Project status | `APPROVED` |
 | Current phase | `P6` |
-| Current/next PR | `P6-03,P6-08,P6-09` |
-| Active PR | `P6-03, P6-08, P6-09` |
+| Current/next PR | `P6-08,P6-09,P6-03,P6-04` |
+| Active PR | `P6-03, P6-04, P6-08, P6-09` |
 | Progress | `46 / 52 merged (88%)` |
-| Approved | `49 / 52` |
-| Aggregated at | `2026-09-06 03:09 KST` |
+| Approved | `50 / 52` |
+| Aggregated at | `2026-09-06 04:44 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -86,16 +86,16 @@ progress_percent: 88
 
 | 항목 | 값 |
 |---|---|
-| PR | `P6-03` Keyboard workflow와 Command Palette APPROVED ([#76](https://github.com/Nochiski/Quant_study/pull/76), P0/P1/P2 0) |
-| Intent | 전문 사용자가 마우스 없이 현재 StrategySpec을 검증·저장·백테스트하고 표현·패널·문서 symbol을 탐색하며 workspace 선호를 복구하게 한다 |
-| Acceptance | 접근 가능한 command palette와 IME-safe 단축키; Validate/Save/Backtest의 기존 gate 재사용; 사용 가능한 view와 세 IDE panel 전환; 현재 outline의 path·semantic symbol 검색 후 source reveal; panel size와 light/dark/system theme preference의 versioned local persistence 및 hostile storage fail-closed; new/revision route 통합 |
-| Non-goals | soft dark 색상 token 자체(P6-04), palette 밖 전역 앱 검색, 서버 동기화 preference, 브라우저 E2E/visual baseline(P6-05~06), legacy editor 제거 |
-| Branch/worktree | `feat/p6-03-keyboard-palette` (`Quant_study-p6-03`), base branch `feat/p6-09-backtest-history` |
-| Base SHA | `db076ea` (P6-09 approval-doc HEAD; #74→#75 순차 merge 후 base 전환) |
-| Head SHA | `76023db` (final reviewed HEAD; Escape fix `b8f397c`) |
-| Diff stat | base 대비 28 files +1,940/-76 (second-review product delta 2 files +31/-1) |
-| Focused tests | narrow drawer 위 palette close-button Escape 격리와 focus 복구를 포함한 palette/IDE 2 files 30 passed; 이전 review-fix 4 files 97와 route matrix 11 passed |
-| Full gate | frontend 455·backend 1,118·Rust 13·root delegate 5 passed; typecheck·lint·changed-file Prettier·build·Ruff·Pyright·cargo fmt/clippy; OpenAPI/SDK regeneration diff clean |
+| PR | `P6-04` Performance·accessibility·i18n·soft dark hardening APPROVED |
+| Intent | 500-node 전문 전략에서도 입력과 trace 탐색을 bounded하게 유지하고, P6-03 preference를 실제 soft-dark token에 연결하며 모든 visible 상태를 접근 가능한 ko/en catalog로 제공한다 |
+| Acceptance | 500-node 약 3,000줄 입력 지연 <16ms/keystroke와 folding/search; editor lazy gzip ≤200KB; trace table/list DOM virtualization; modal/drawer focus와 accessible name; 1440/1920 light/dark 확인; 저장된 system/light/dark preference가 semantic token만 전환; ko/en key·placeholder 완결; hostile/recursive `$ref`-only schema cycle fail-closed |
+| Non-goals | Playwright dependency·CI·screenshot baseline(P6-05), 전체 실사용 E2E와 legacy cleanup(P6-06), backend StrategySpec/validation/trace 의미 변경, 새 authoring DSL |
+| Branch/worktree | `feat/p6-04-hardening` (`Quant_study-p6-04`), stacked on `feat/p6-03-keyboard-palette` |
+| Base SHA | `e84bd7e` (P6-03 approval-doc HEAD; #74→#75→#76 순차 merge 후 base 전환) |
+| Head SHA | `7b532a9` (same reviewer APPROVE; product/test fix `a6fd4b7`) |
+| Diff stat | base `e84bd7e` 대비 review freeze 31 files +1,959/-472; lockfile와 PLAN/ADR, test/contract fixture 포함. PLAN이 묶은 large-spec·trace·theme·i18n release gate를 실제 IDE에서 함께 검증해야 하므로 WORKFLOW 12절 size exception 적용 |
+| Focused tests | author editor/route/schema/trace/theme/i18n 9 files 117; trace/virtual 21에서 실제 Tab→End/Home, nested outer scroll 불변, server sentinel 보존; order-reversed mixed-status PLAN fixture 1; reviewer 500-node 10/10 |
+| Full gate | frontend 474·typecheck·lint·changed-file Prettier·build(editor gzip 131.94 KiB); backend 1,118·Rust 13·root 6·Ruff·Pyright·fmt·clippy; diff-check 통과 |
 
 ---
 
@@ -234,7 +234,7 @@ Phase exit:
 | [x] | `P6-01` | SQLite persistent strategy revision repository | P1-07 | `MERGED` | [#69](https://github.com/Nochiski/Quant_study/pull/69) · `review_p6_01` APPROVE |
 | [x] | `P6-02` | Server draft persistence/CAS/recovery UI | P6-01, P3-06, P4-08 | `MERGED` | [#72](https://github.com/Nochiski/Quant_study/pull/72) · `review_p6_02` APPROVE |
 | [ ] | `P6-03` | Keyboard workflow와 Command Palette | P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `APPROVED` | [#76](https://github.com/Nochiski/Quant_study/pull/76) · `review_p6_03` APPROVE, P0/P1/P2 0 · CI billing 차단 |
-| [ ] | `P6-04` | Large/hostile spec 성능·접근성·i18n과 soft dark theme (`$ref`-only cycle fail-closed 포함) | P3-05, P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `WAITING` | — |
+| [ ] | `P6-04` | Large/hostile spec 성능·접근성·i18n과 soft dark theme (`$ref`-only cycle fail-closed 포함) | P3-05, P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `APPROVED` | [#77](https://github.com/Nochiski/Quant_study/pull/77) · `review_p6_04` APPROVE, P0/P1/P2 0 · CI billing 차단 |
 | [ ] | `P6-05` | Playwright/visual regression infrastructure와 CI | P2-03, P3-05, P6-04 | `WAITING` | — |
 | [ ] | `P6-06` | 전체 browser E2E·실구동 시나리오 검증, migration gate, 조건부 legacy cleanup | P6-01, P6-02, P6-03, P6-04, P6-05, P6-08, P6-09 | `WAITING` | — |
 | [x] | `P6-07` | Root frontend/backend development entrypoints | P0-02, P0-03 | `MERGED` | [#56](https://github.com/Nochiski/Quant_study/pull/56) · `review_p6_07` APPROVE |
@@ -256,6 +256,7 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
+| P6-04 | `review_p6_04` | `e84bd7e` | `7b532a9` | APPROVE (최초 P1 2/P2 1과 2차 P1 1/P2 1을 동일 reviewer가 폐쇄; 최종 P0/P1/P2 0) | 0 | 실제 Safari/browser IME·viewport와 committed visual baseline은 P6-05~06, transitive editor chunk 합산, CI billing은 외부 merge blocker | 2026-09-06 |
 | P6-03 | `review_p6_03` | `db076ea` | `76023db` | APPROVE (최초 P1 3/P2 4와 2차 신규 P1 1을 동일 reviewer가 hostile 재현·폐쇄; 최종 P0/P1/P2 0) | 4 (해소) | 실제 Safari IME·browser viewport/focus는 P6-05~06, entry chunk 500 kB 경고와 500-node 입력 성능은 P6-04 범위; merge 전 green CI 필수 | 2026-09-06 |
 | P6-09 | `review_p6_09` | `f760a5b` | `74ebae0` | APPROVE (최초 P2 canonical pagination 1건을 동일 reviewer가 세 endpoint hostile matrix로 폐쇄; 최종 P0/P1/P2 0) | 0 | process restart/multi-worker history 공유, client-asserted inline `source_hash`, 실제 browser E2E는 P6-06 범위 | 2026-09-06 |
 | P6-08 | `review_p6_08` | `b7fc4de` | `f7bb1fd` | APPROVE (최초 P1 3/P2 2와 2차 P1 1/P2 1을 동일 reviewer가 hostile 재현·폐쇄; 최종 P0/P1/P2 0) | 4 (해소) | lexical `offset=1.0` canonicalization, concurrent insert snapshot 안정성, 외부 탭 cache 즉시성, SQLite chain audit 성능은 비차단/P6-04 범위 | 2026-09-06 |
@@ -306,6 +307,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
+| P6-04 | author 9 files 117, reviewer 500-node 10/10; fix trace/virtual 21 + reversed mixed-status PLAN fixture 1; 500-node·3,000-line real CodeMirror p95 <16 ms/folding/search; hostile recursive/missing/external `$ref` fail-closed | frontend 474·typecheck·lint·changed-file Prettier·build; backend 1,118·Rust 13·root 6; Ruff·Pyright·cargo fmt/clippy·diff-check | OpenAPI/SDK 재생성 후 semantic diff 0 | root `npm run dev`·`uv run server` 5173/8000 health 200; Chrome 1440×900·1920×1080 light/dark; 실제 Tab이 virtual table/security/node에 진입해 Home/End off-DOM server row와 sentinel을 표시하고 nested outer scroll을 보존 | [#77](https://github.com/Nochiski/Quant_study/pull/77) `review_p6_04` APPROVE P0/P1/P2 0; Actions 4 jobs 모두 step 0 billing/spending-limit 실패, green gate 유지 | 2026-09-06 |
 | P6-03 | final reviewer palette/IDE 2 files 30; 이전 review-fix 4 files 97 + professional route matrix 11 passed | frontend 455·backend 1,118·Rust 13·root 5; typecheck·lint·changed-file Prettier·build·Ruff·Pyright·cargo fmt/clippy | OpenAPI/SDK 재생성 후 tracked content diff 0 | 실제 root backend 42813 health 200·Vite 42814 direct new route 200; current identity/IME/action gate와 함께 narrow drawer 위 palette close-button Escape가 modal 경계에서 소비되고 drawer/focus가 보존됨을 독립 재검증 | [#76](https://github.com/Nochiski/Quant_study/pull/76) `review_p6_03` APPROVE P0/P1/P2 0; Actions billing으로 step 전 실패, green gate 유지 | 2026-09-06 |
 | P6-09 | author backend history/reference/status 13·frontend router+document route 64; reviewer backend 20 + hostile probes | backend 1,118·frontend 427·Rust 13·root 5; Ruff·Pyright·typecheck·lint·changed-file Prettier·build·cargo fmt/clippy | OpenAPI/SDK 재생성 전후 diff hash `0d80043b706914d479227815fc732c5754340202` 동일; reviewer runtime/tracked 214 schemas 일치 | saved/inline provenance, exact strategy filter, 26개 page/out-of-range 복구, nonterminal→terminal polling stop, late cache 폐기와 세 endpoint noncanonical integer 422·MAX bounds를 검증; 실제 browser는 P6-06 범위 | [#75](https://github.com/Nochiski/Quant_study/pull/75) `review_p6_09` APPROVE P0/P1/P2 0; Actions billing으로 step 전 실패 | 2026-09-06 |
 | P6-08 | author backend 1,114/frontend 423; reviewer backend 79, router 14, YAML/legacy late-cache 2 + hostile probes | backend 1,114·frontend 423·Rust 13·root 5; Ruff·Pyright·typecheck·lint·Prettier·build·cargo fmt/clippy | OpenAPI runtime/tracked parity 및 17 files 재생성 전후 SHA-256 동일 | 모든 save path cache coherence, duplicate title identity, portable offsets, provenance, 21개 pagination과 immutable link 독립 재검증 | [#74](https://github.com/Nochiski/Quant_study/pull/74) `review_p6_08` APPROVE P0/P1/P2 0; Actions는 billing으로 step 전 실패 | 2026-09-06 |
@@ -353,6 +355,15 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-06 KST | Codex | 동일 reviewer `review_p6_04`이 review HEAD `7b532a9`에서 누적 P1/P2 5건의 폐쇄와 최신 전체 diff 신규 P0/P1/P2 0을 확인해 APPROVE했다. 실제 Tab→Home/End, nested outer scroll 불변, server sentinel, order-reversed PLAN fixture를 독립 재현했고 focused 21·root 6·typecheck·lint·diff-check를 통과했다. 직전 full frontend 474·build·editor 131.94KiB 이후 production 변경은 없으며, 실제 Safari/browser visual은 P6-05~06 residual, Actions billing은 merge blocker로 유지한다 | same-reviewer final approval·server trace SoT·keyboard 접근성·CI gate 비우회 |
+| 2026-09-06 KST | Codex | P6-04 2차 findings를 `a6fd4b7`에서 보강했다. Target table·security viewport·500-node chain 모두 programmatic focus가 아니라 실제 Tab 순서로 진입해 End/Home 양 끝을 불러오고, node Home/End 전후 outer security scroll 불변과 `sec-*`별 server-only numeric sentinel을 함께 검증한다. focused 21, frontend 474, typecheck·lint·Prettier·build(editor 131.94KiB), root 6, PLAN check·diff-check를 통과했고 실제 review diff 31 files +1,959/-472와 PR 본문을 동기화해 동일 reviewer 3차 검토로 전환한다 | keyboard 사용자 결과·server value SoT·nested viewport 책임분리·13.2 self-check·13.3 actual diff freeze·13.5 same-reviewer loop |
+| 2026-09-06 KST | Codex | `review_p6_04` 2차 검토에서 최초 keyboard virtual scroll·order-independent 집계·`!important` 3건은 폐쇄됐으나 신규 P1 1/P2 1로 REQUEST_CHANGES. 실제 `e84bd7e..bd61fdf`는 31 files +1,914/-471인데 PLAN/PR body가 더 작은 예전 통계를 설명하고 있으며, security/node test가 programmatic focus를 사용해 실제 Tab 순서와 nested child-only key handling을 잠그지 못한다. 최종 HEAD 기준 PLAN·PR size/gate를 재동기화하고 table/security/node의 Tab→End/Home, inner node key 전후 outer scroll 불변, server sentinel identity/value를 같은 reviewer에게 재검토받는다 | 13.3 실제 diff freeze·keyboard 순차 접근·nested viewport 책임분리·same-reviewer fix loop |
+| 2026-09-06 KST | Codex | P6-04 review fixes와 author self-check를 `6f60f0c`에 고정하고 최초 reviewer `review_p6_04`에게 keyboard virtual scroll, order-independent project/phase aggregation, CSS 금지 규칙의 3건 폐쇄와 최신 전체 diff 신규 blocker를 재검토받도록 IN_REVIEW로 전환한다 | 13.3 diff freeze·13.5 same-reviewer fix loop |
+| 2026-09-06 KST | Codex | P6-04 review P1 2/P2 1을 `e56dd45`에서 수정했다. domain-free virtual viewport adapter가 자기 focus에서만 Arrow/Page/Home/End를 처리하고, trace table은 named region, security/node list는 기존 semantic list를 focus target으로 제공해 off-DOM `sec-99`와 500번째 server node를 keyboard로 불러온다. CSS specificity로 spacer를 재정의해 `!important`를 제거했다. PLAN active status는 parallel 배열 순서가 아니라 `CHANGES_REQUESTED→IN_PROGRESS→SELF_CHECK→IN_REVIEW→APPROVED` 명시 우선순위의 단일 함수가 project/phase를 함께 집계하며, 순서를 뒤집은 실제 임시 PLAN black-box test를 root gate에 추가했다. focused 21+1, frontend 474, root 6, typecheck·lint·Prettier·build·Ruff·Pyright·diff-check를 통과해 SELF_CHECK로 전환한다 | keyboard viewport mechanics/trace semantics 분리·order-independent tracker SoT·UI 금지 규칙·same-reviewer fix loop |
+| 2026-09-06 KST | Codex | `review_p6_04`가 P1 2/P2 1로 REQUEST_CHANGES를 판정했다. virtual table/security/node viewport가 focusable하지 않아 keyboard-only 사용자가 off-DOM row를 불러올 수 없고, PLAN 집계 script가 `parallel_window`의 마지막 active row를 대표 상태로 사용해 배열 순서에 따라 다른 CHANGES_REQUESTED를 숨길 수 있다. 신규 trace spacer CSS의 `!important` 금지도 함께 폐쇄하고 같은 reviewer에게 재검토받는다. 독립 검증은 500-node 10/10, frontend 474, typecheck·lint·build, editor 131.94KiB를 통과했다 | keyboard scroll 접근성·tracker order-independent 상태 SoT·UI style rule·same-reviewer fix loop |
+| 2026-09-06 KST | Codex | P6-04 [#77](https://github.com/Nochiski/Quant_study/pull/77)을 parent `feat/p6-03-keyboard-palette` 대상으로 열고 base `e84bd7e`, review freeze `d2e5df5`, cumulative 30 files +1,729/-471과 full gate·size exception을 본문에 고정했다. fresh review-only agent `review_p6_04` 한 명에게 500-node budget의 신뢰성, virtual trace identity/접근성, theme/i18n 완결, hostile schema fail-closed, FSD·SoT·책임분리와 최신 전체 diff를 독립 검토하도록 IN_REVIEW로 전환한다. Actions 4 jobs는 모두 step 0에서 기존과 같은 billing/spending-limit annotation으로 실패했으며 merge gate는 우회하지 않는다 | 13.3 diff freeze·13.4 PR별 fresh reviewer 정확히 1명·stack 순차 merge gate·CI 비우회 |
+| 2026-09-06 KST | Codex | P6-04 구현 `e4af2d5`에서 500-node·3,000-line 실제 CodeMirror 입력 p95 <16ms/folding/search와 editor gzip 131.94KiB를 자동 budget으로 고정하고, domain-free virtual window 위에 trace feature가 server row identity를 보존하는 bounded table/list를 구성했다. P6-03 system/light/dark preference는 semantic color/syntax token만 전환하며 WCAG contrast, focus restore, ko/en key·placeholder parity를 회귀 고정했다. schema navigator의 cyclic/missing/external/16-hop 초과 `$ref`는 validation을 복제하지 않고 assist/projection에서 fail-closed한다. focused 117·frontend 474·backend 1,118·Rust 13·root 5와 정적·build·generated·실구동 visual gate를 통과해 SELF_CHECK로 전환한다. 28 files +1,680/-446은 PLAN이 한 PR로 정의한 large-spec·trace·theme·i18n release acceptance를 실제 IDE에서 함께 검증해야 하므로 12절 size exception을 기록한다 | editor budget ADR·backend meaning/virtual display·theme preference/token·schema validation/assist 책임분리·13.2 self-check·12절 size exception |
+| 2026-09-06 KST | Codex | P6-03 승인-doc HEAD `e84bd7e` 위에 P6-04 전용 branch/worktree를 만들고 IN_PROGRESS로 전환했다. 기존 ADR의 500-node <16ms/keystroke·editor gzip ≤200KB를 성능 SoT로 재사용하고, trace는 server value를 재계산하지 않는 표시 virtualization만, dark는 P6-03 preference에 semantic token만 연결한다. Playwright/visual baseline은 P6-05, full E2E/legacy cleanup은 P6-06에 남긴다. CI billing으로 승인된 세 PR 병합은 보류하되 순차 stack ancestry를 유지한다 | 성능 기준 SoT 재사용·trace 계산/표시 책임분리·theme state 중복 금지·stack 순차 merge |
 | 2026-09-06 KST | Codex | 동일 reviewer `review_p6_03`이 final reviewed HEAD `76023db`에서 narrow modal Escape P1 폐쇄와 최초 7 findings 유지, 최신 전체 diff의 P0/P1/P2 0을 확인해 APPROVE했다. focused palette/IDE 30, frontend 455, typecheck·lint·changed-file Prettier·build·diff-check를 독립 재현했다. 실제 Safari/browser viewport·focus는 P6-05~06, entry chunk/500-node는 P6-04 residual로 명시하고 P6-03을 APPROVED로 전환한다. GitHub Actions billing 실패 때문에 green merge gate는 아직 충족되지 않았다 | same-reviewer final approval·blocking 0·SoT/FSD 책임분리·CI gate 유지 |
 | 2026-09-06 KST | Codex | P6-03 narrow modal Escape 수정과 self-check 증거를 `ba6cbb1`에 고정하고 동일 reviewer `review_p6_03`에게 신규 P1 폐쇄와 최신 전체 diff blocker 0 여부의 3차 검토를 요청하도록 IN_REVIEW로 전환한다 | 13.3 diff freeze·13.5 same-reviewer fix loop |
 | 2026-09-06 KST | Codex | P6-03 2차 review P1을 `b8f397c`에서 수정했다. palette backdrop의 모든 Escape 경로가 default와 propagation을 소비한 뒤 최상위 modal만 닫는다. `<1280px` Inspector drawer를 열고 palette close button에서 Escape를 누르는 실제 widget 회귀로 drawer 유지와 원래 `계약 접기` control focus 복구를 고정했다. focused palette/IDE 30, frontend 455, typecheck·lint·changed-file Prettier·build를 통과해 SELF_CHECK로 전환한다 | modal stack Escape ownership·focus restoration·same-reviewer fix loop |

@@ -18,6 +18,7 @@ import {
   PROJECTION_VIEWS,
   canValidateDocument,
   currentDiagnostics,
+  currentSpec,
   projectStrategySpec,
   revisionDraftId,
   saveStatusText,
@@ -35,6 +36,10 @@ import {
   type DocumentSource,
   type StrategyView,
 } from "../../../features/edit-strategy";
+import {
+  BacktestRunSettings,
+  useBacktestRunSettings,
+} from "../../../features/run-backtest";
 import { t } from "../../../shared/config";
 import { useNavigate, useParams, useSearch } from "../../../shared/lib/router";
 import { Badge, type CodeEditorHandle } from "../../../shared/ui";
@@ -98,7 +103,20 @@ export const StrategyRevisionPage = () => {
     schemaVersion: assist.schemaVersion,
   });
   const executionPlans = useExecutionPlans(document, assist.inspectorSource);
-  const backtest = useRunBacktest(document, executionPlans);
+  const executableSpec = currentSpec(document);
+  const runDateRange = useMemo(
+    () =>
+      executableSpec === null
+        ? null
+        : { start: executableSpec.data.start, end: executableSpec.data.end },
+    [executableSpec],
+  );
+  const runSettings = useBacktestRunSettings(runDateRange);
+  const backtest = useRunBacktest(
+    document,
+    executionPlans,
+    runSettings.requestOptions,
+  );
   const startBacktest = backtest.run;
   const current =
     document.compiled !== null &&
@@ -253,6 +271,18 @@ export const StrategyRevisionPage = () => {
             canSave={canSave}
             saving={status.kind === "saving"}
             onRun={runBacktest}
+            canRun={backtest.canRun}
+            runBlockedReason={
+              runSettings.result.valid
+                ? undefined
+                : t("backtest.settings.blocked")
+            }
+            runSettings={
+              <BacktestRunSettings
+                controller={runSettings}
+                disabled={backtest.status.kind === "starting"}
+              />
+            }
             decision={backtest.decision}
             runStatus={backtest.status}
           />

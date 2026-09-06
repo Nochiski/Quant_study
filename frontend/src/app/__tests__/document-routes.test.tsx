@@ -267,6 +267,9 @@ const server = setupServer(
     started.push((await request.json()) as Record<string, unknown>);
     return HttpResponse.json(acceptedRun(), { status: 202 });
   }),
+  http.get(`${API}/api/v1/backtests/:runId/request`, () =>
+    HttpResponse.json(started.at(-1) ?? {}),
+  ),
   http.get(`${API}/api/v1/backtests/:runId`, ({ params }) =>
     HttpResponse.json({
       run_id: params.runId,
@@ -2417,6 +2420,11 @@ describe("backtest from the editor (P3-05)", () => {
     );
     expect(started).toEqual([
       {
+        core: "rust",
+        initial_cash: 100_000_000,
+        benchmark_security_id: "005930",
+        annualization_days: 252,
+        metric_windows: [],
         strategy_source: {
           kind: "saved_revision",
           strategy_id: "s1",
@@ -2441,6 +2449,11 @@ describe("backtest from the editor (P3-05)", () => {
     await user.click(run);
     await waitFor(() => expect(started).toHaveLength(1));
     expect(started[0]).toEqual({
+      core: "rust",
+      initial_cash: 100_000_000,
+      benchmark_security_id: "005930",
+      annualization_days: 252,
+      metric_windows: [],
       strategy_source: {
         kind: "inline_draft",
         spec: expect.objectContaining({ title: "퀄리티 모멘텀" }),

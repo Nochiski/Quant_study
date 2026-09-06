@@ -265,6 +265,17 @@ const server = setupServer(
       updated_at: "2026-09-04T00:00:01Z",
     }),
   ),
+  http.get(`${API}/api/v1/backtests/:runId/request`, () =>
+    HttpResponse.json({
+      strategy: spec(0, "Rerun fixture"),
+      core: "rust",
+      initial_cash: 100_000_000,
+      benchmark_security_id: "005930",
+      annualization_days: 252,
+      metric_windows: [],
+      strategy_source: null,
+    }),
+  ),
   http.get(`${API}/api/v1/backtests/:runId/result`, () => HttpResponse.error()),
   http.get(`${API}/api/v1/equity/catalog`, () =>
     HttpResponse.json({

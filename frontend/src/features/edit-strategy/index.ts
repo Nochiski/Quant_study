@@ -50,6 +50,7 @@ export {
 } from "./model/backtest-source";
 export {
   useRunBacktest,
+  type BacktestRunOptions,
   type RunBacktestStatus,
 } from "./model/use-run-backtest";
 export { DocumentToolbar } from "./ui/document-toolbar";

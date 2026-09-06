@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import { t } from "../../../shared/config";
 import { Badge, Button, Tooltip } from "../../../shared/ui";
 import type { BacktestSourceDecision } from "../model/backtest-source";
@@ -14,6 +16,9 @@ type DocumentToolbarProps = {
   canSave: boolean;
   saving: boolean;
   onRun: () => void;
+  canRun: boolean;
+  runBlockedReason?: string;
+  runSettings?: ReactNode;
   decision: BacktestSourceDecision;
   runStatus: RunBacktestStatus;
 };
@@ -49,6 +54,9 @@ export const DocumentToolbar = ({
   canSave,
   saving,
   onRun,
+  canRun,
+  runBlockedReason,
+  runSettings,
   decision,
   runStatus,
 }: DocumentToolbarProps) => {
@@ -89,6 +97,7 @@ export const DocumentToolbar = ({
         </div>
       </dl>
       <div className="doc-toolbar__actions">
+        {runSettings}
         <Button
           size="small"
           onClick={onValidate}
@@ -108,13 +117,11 @@ export const DocumentToolbar = ({
         >
           {t("toolbar.saveRevision")}
         </Button>
-        <Tooltip content={decisionLabel(decision)}>
+        <Tooltip content={runBlockedReason ?? decisionLabel(decision)}>
           <Button
             size="small"
             onClick={onRun}
-            disabled={
-              decision.kind === "blocked" || runStatus.kind === "starting"
-            }
+            disabled={!canRun || runStatus.kind === "starting"}
             aria-busy={runStatus.kind === "starting" || undefined}
             aria-keyshortcuts="Control+Shift+Enter Meta+Shift+Enter"
           >

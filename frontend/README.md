@@ -7,9 +7,11 @@
 
 ## M5 Backtest run · professional result
 
-YAML workbench는 현재 `StrategySpec`을 generated SDK로 single run에 제출한다. 사용자는 기본
-Persistent Rust core와 패리티/debug용 Python reference, 초기 자본, benchmark, OOS 시작 구간을
-설정할 수 있다. 실행 상태는 backend run lifecycle에서 polling하고 완료 결과는 query cache가 소유한다.
+YAML workbench는 현재 저장 revision 또는 inline draft provenance와 별도 `BacktestRunSpec` 실행
+설정을 generated SDK로 제출한다. 사용자는 Persistent Rust core와 패리티/debug용 Python
+reference, 초기 자본, benchmark, 연환산 거래일, OOS 시작 구간을 설정할 수 있다. 실행 상태와
+수락된 실행 요청은 backend run lifecycle이 소유하며, 실행 화면에서 nonterminal run을 취소하거나
+서버가 돌려준 동일 요청으로 새 run을 만들 수 있다. 완료 결과는 query cache가 소유한다.
 
 결과 화면은 backend `MetricRegistry` 응답을 그대로 사용해 equity/benchmark, drawdown,
 monthly return, rolling Sharpe, gross/net exposure와 closed trade를 표시한다. raw metric table은

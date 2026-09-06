@@ -372,6 +372,35 @@ export const BacktestRunDetail = ({
               <dd>{result.manifest.engine_version}</dd>
             </div>
             <div>
+              <dt>{t("backtest.result.manifest.core")}</dt>
+              <dd>{result.manifest.engine_core.toUpperCase()}</dd>
+            </div>
+            <div>
+              <dt>{t("backtest.result.manifest.initialCash")}</dt>
+              <dd>{result.manifest.initial_cash.toLocaleString("ko-KR")}</dd>
+            </div>
+            <div>
+              <dt>{t("backtest.result.manifest.benchmark")}</dt>
+              <dd>{result.manifest.run_spec.benchmark_security_id ?? "—"}</dd>
+            </div>
+            <div>
+              <dt>{t("backtest.result.manifest.annualizationDays")}</dt>
+              <dd>{result.manifest.annualization_days}</dd>
+            </div>
+            <div>
+              <dt>{t("backtest.result.manifest.metricWindows")}</dt>
+              <dd>
+                {result.manifest.run_spec.metric_windows?.length
+                  ? result.manifest.run_spec.metric_windows
+                      .map(
+                        (window) =>
+                          `${window.scope}: ${window.start} → ${window.end}`,
+                      )
+                      .join(" · ")
+                  : "—"}
+              </dd>
+            </div>
+            <div>
               <dt>{t("backtest.result.manifest.fingerprint")}</dt>
               <dd title={result.manifest.run_fingerprint}>
                 {result.manifest.run_fingerprint.slice(0, 16)}…

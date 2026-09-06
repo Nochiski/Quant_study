@@ -1,6 +1,12 @@
 import { QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, delay, http } from "msw";
 import { setupServer } from "msw/node";
@@ -97,6 +103,43 @@ const server = setupServer(
   http.delete(
     `${API}/api/v1/strategy-drafts/:draftId`,
     () => new HttpResponse(null, { status: 204 }),
+  ),
+  http.get(`${API}/api/v1/strategies`, ({ request }) => {
+    const url = new URL(request.url);
+    const offset = Number(url.searchParams.get("offset") ?? 0);
+    const limit = Number(url.searchParams.get("limit") ?? 20);
+    const items = [
+      {
+        strategy_id: "s1",
+        latest_revision: 2,
+        title: "Alpha strategy",
+        spec_hash: "a".repeat(64),
+        updated_at: "2026-09-05T00:00:00Z",
+      },
+    ];
+    return HttpResponse.json({
+      items: offset === 0 ? items : [],
+      total: items.length,
+      offset,
+      limit,
+    });
+  }),
+  http.get(`${API}/api/v1/strategies/:strategyId/revisions`, ({ params }) =>
+    HttpResponse.json({
+      items: [1, 2].map((revision) => ({
+        strategy_id: params.strategyId,
+        revision,
+        spec_hash: `${revision}`.repeat(64).slice(0, 64),
+        source_hash: revision === 1 ? null : "b".repeat(64),
+        source_format: revision === 1 ? null : "yaml",
+        origin: revision === 1 ? "legacy_json" : "document",
+        change_note: null,
+        created_at: `2026-09-0${revision}T00:00:00Z`,
+      })),
+      total: 2,
+      offset: 0,
+      limit: 20,
+    }),
   ),
   http.post(`${API}/api/v1/strategy-documents/compile`, async ({ request }) => {
     const body = (await request.json()) as { source: string };
@@ -371,6 +414,171 @@ describe("App Shell routes", () => {
     );
   });
 
+  it("browses saved strategies and opens immutable revision history", async () => {
+    const user = userEvent.setup();
+    mount("/research/strategies");
+    expect(
+      await screen.findByRole("heading", { name: "전략 이력" }),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("Alpha strategy")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "최신본 열기" })).toHaveAttribute(
+      "href",
+      "/research/strategies/s1/revisions/2",
+    );
+    await user.click(
+      screen.getByRole("button", {
+        name: "Revision 펼치기: Alpha strategy (s1)",
+      }),
+    );
+    const revisions = await screen.findByRole("region", {
+      name: "저장 revision 목록: Alpha strategy (s1)",
+    });
+    expect(within(revisions).getByText("bbbbbbbbbbbb")).toBeInTheDocument();
+    expect(within(revisions).getByText("원문 hash 없음")).toBeInTheDocument();
+    expect(within(revisions).getByText("111111111111")).toBeInTheDocument();
+    expect(
+      within(revisions).getAllByRole("link", { name: "편집" }),
+    ).toHaveLength(2);
+    expect(
+      within(revisions).getAllByRole("link", { name: "Diff" })[0],
+    ).toHaveAttribute("href", expect.stringContaining("view=diff"));
+  });
+
+  it("paginates strategy and revision pages with distinct disclosure ownership", async () => {
+    const strategyOffsets: number[] = [];
+    const revisionOffsets: number[] = [];
+    const strategies = Array.from({ length: 21 }, (_, index) => {
+      const number = index + 1;
+      return {
+        strategy_id: `s${String(number).padStart(2, "0")}`,
+        latest_revision: 21,
+        title:
+          number <= 2
+            ? "Duplicate title"
+            : `Strategy ${String(number).padStart(2, "0")}`,
+        spec_hash: "a".repeat(64),
+        updated_at: "2026-09-05T00:00:00Z",
+      };
+    });
+    server.use(
+      http.get(`${API}/api/v1/strategies`, ({ request }) => {
+        const url = new URL(request.url);
+        const offset = Number(url.searchParams.get("offset") ?? 0);
+        const limit = Number(url.searchParams.get("limit") ?? 20);
+        strategyOffsets.push(offset);
+        return HttpResponse.json({
+          items: strategies.slice(offset, offset + limit),
+          total: strategies.length,
+          offset,
+          limit,
+        });
+      }),
+      http.get(
+        `${API}/api/v1/strategies/:strategyId/revisions`,
+        ({ params, request }) => {
+          const url = new URL(request.url);
+          const offset = Number(url.searchParams.get("offset") ?? 0);
+          const limit = Number(url.searchParams.get("limit") ?? 20);
+          revisionOffsets.push(offset);
+          const items = Array.from({ length: 21 }, (_, index) => ({
+            strategy_id: params.strategyId,
+            revision: index + 1,
+            spec_hash: `${index + 1}`.repeat(64).slice(0, 64),
+            source_hash: "b".repeat(64),
+            source_format: "yaml",
+            origin: "document",
+            change_note: null,
+            created_at: "2026-09-05T00:00:00Z",
+          }));
+          return HttpResponse.json({
+            items: items.slice(offset, offset + limit),
+            total: items.length,
+            offset,
+            limit,
+          });
+        },
+      ),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/strategies");
+    const firstToggle = await screen.findByRole("button", {
+      name: "Revision 펼치기: Duplicate title (s01)",
+    });
+    const secondToggle = screen.getByRole("button", {
+      name: "Revision 펼치기: Duplicate title (s02)",
+    });
+    expect(firstToggle).toHaveAttribute("aria-controls");
+    expect(firstToggle.getAttribute("aria-controls")).not.toBe(
+      secondToggle.getAttribute("aria-controls"),
+    );
+    await user.click(firstToggle);
+    await user.click(secondToggle);
+    const firstHistory = await screen.findByRole("region", {
+      name: "저장 revision 목록: Duplicate title (s01)",
+    });
+    expect(
+      screen.getByRole("region", {
+        name: "저장 revision 목록: Duplicate title (s02)",
+      }),
+    ).toBeInTheDocument();
+    expect(firstHistory.id).toBe(firstToggle.getAttribute("aria-controls"));
+    expect(
+      within(firstHistory).getByRole("navigation", {
+        name: "Revision 목록 페이지: Duplicate title (s01)",
+      }),
+    ).toBeInTheDocument();
+
+    await user.click(
+      within(firstHistory).getByRole("button", { name: "다음" }),
+    );
+    expect(await within(firstHistory).findByText("v21")).toBeInTheDocument();
+    expect(revisionOffsets).toContain(20);
+
+    const listPager = screen.getByRole("navigation", {
+      name: "전략 목록 페이지",
+    });
+    await user.click(within(listPager).getByRole("button", { name: "다음" }));
+    expect(await screen.findByText("Strategy 21")).toBeInTheDocument();
+    await waitFor(() => expect(history.location.search).toContain("offset=20"));
+    expect(strategyOffsets).toContain(20);
+  });
+
+  it("canonicalizes malformed and out-of-range strategy list offsets", async () => {
+    const beyond = mount("/research/strategies?offset=20");
+    expect(await screen.findByText("Alpha strategy")).toBeInTheDocument();
+    await waitFor(() => expect(beyond.location.search).toBe(""));
+
+    cleanup();
+    const malformed = mount("/research/strategies?offset=1e2");
+    expect(await screen.findByText("Alpha strategy")).toBeInTheDocument();
+    await waitFor(() => expect(malformed.location.search).toBe(""));
+  });
+
+  it("shows explicit loading, empty, and error states for strategy history", async () => {
+    server.use(
+      http.get(`${API}/api/v1/strategies`, async () => {
+        await delay(250);
+        return HttpResponse.json({ items: [], total: 0, offset: 0, limit: 20 });
+      }),
+    );
+    mount("/research/strategies");
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "불러오는 중입니다",
+    );
+    expect(
+      await screen.findByText("저장된 전략이 없습니다"),
+    ).toBeInTheDocument();
+
+    cleanup();
+    server.use(
+      http.get(`${API}/api/v1/strategies`, () => HttpResponse.error()),
+    );
+    mount("/research/strategies");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "전략 목록을 불러올 수 없습니다",
+    );
+  });
+
   it("supports back and forward between routes", async () => {
     const user = userEvent.setup();
     const history = mount("/research/backtests/run-1");
@@ -378,7 +586,7 @@ describe("App Shell routes", () => {
       await screen.findByRole("heading", { name: "백테스트 실행" }),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("link", { name: "전략" }));
-    await screen.findByRole("heading", { name: "새 전략" });
+    await screen.findByRole("heading", { name: "전략 이력" });
     history.back();
     await waitFor(() =>
       expect(history.location.pathname).toBe("/research/backtests/run-1"),
@@ -388,7 +596,7 @@ describe("App Shell routes", () => {
     ).toBeInTheDocument();
     history.forward();
     await waitFor(() =>
-      expect(history.location.pathname).toBe("/research/strategies/new"),
+      expect(history.location.pathname).toBe("/research/strategies"),
     );
   });
 });

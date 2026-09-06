@@ -5,7 +5,7 @@ import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, expect, test } from "vitest";
 
-import type { StrategySpec } from "../../../entities/strategy";
+import { strategiesQuery, type StrategySpec } from "../../../entities/strategy";
 import { StrategyDraftProvider } from "../model/strategy-draft-provider";
 import { StrategyEditorWorkspace } from "../ui/strategy-editor-workspace";
 
@@ -59,6 +59,10 @@ const template: StrategySpec = {
 };
 
 let lastCreateBody: StrategySpec | null = null;
+let lastReviseBody: {
+  expected_revision: number;
+  spec: StrategySpec;
+} | null = null;
 let lastPreviewBody: { expected_data_snapshot_id?: string | null } | null =
   null;
 
@@ -222,6 +226,29 @@ const server = setupServer(
       { status: 201 },
     );
   }),
+  http.post(
+    "http://localhost:8000/api/v1/strategies/:strategyId/revisions",
+    async ({ params, request }) => {
+      lastReviseBody = (await request.json()) as {
+        expected_revision: number;
+        spec: StrategySpec;
+      };
+      return HttpResponse.json(
+        {
+          spec: {
+            ...lastReviseBody.spec,
+            identity: {
+              strategy_id: String(params.strategyId),
+              revision: lastReviseBody.expected_revision + 1,
+              schema_version: "1.0",
+            },
+          },
+          spec_hash: "b".repeat(64),
+        },
+        { status: 201 },
+      );
+    },
+  ),
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
@@ -229,6 +256,7 @@ afterEach(() => {
   cleanup();
   server.resetHandlers();
   lastCreateBody = null;
+  lastReviseBody = null;
   lastPreviewBody = null;
 });
 afterAll(() => server.close());
@@ -277,6 +305,7 @@ const renderEditor = () => {
       </StrategyDraftProvider>
     </QueryClientProvider>,
   );
+  return queryClient;
 };
 
 test("Quick과 Advanced가 같은 draft를 편집하고 저장 후 revision 상태를 표시한다", async () => {
@@ -305,4 +334,72 @@ test("Quick과 Advanced가 같은 draft를 편집하고 저장 후 revision 상�
   await waitFor(() => expect(lastCreateBody?.title).toBe("퀄리티 모멘텀"));
   expect(screen.getByText("저장된 상태")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "새 리비전 저장" })).toBeDisabled();
+});
+
+test("legacy JSON create와 revise가 늦은 strategy list 응답까지 폐기한다", async () => {
+  const user = userEvent.setup();
+  const queryClient = renderEditor();
+  const list = strategiesQuery({ offset: 0, limit: 20 });
+  const stalePage = {
+    items: [
+      {
+        strategy_id: "strategy-1",
+        title: "이전 제목",
+        latest_revision: 1,
+        spec_hash: "0".repeat(64),
+        updated_at: "2026-09-05T00:00:00Z",
+      },
+    ],
+    total: 1,
+    offset: 0,
+    limit: 20,
+  };
+  const beginLateList = async () => {
+    queryClient.setQueryData(list.queryKey, stalePage);
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const request = queryClient
+      .fetchQuery({
+        ...list,
+        queryFn: async () => {
+          await gate;
+          return stalePage;
+        },
+      })
+      .catch(() => undefined);
+    await waitFor(() =>
+      expect(queryClient.getQueryState(list.queryKey)?.fetchStatus).toBe(
+        "fetching",
+      ),
+    );
+    return { release: () => release?.(), request };
+  };
+
+  const title = await screen.findByRole("textbox", { name: "전략 이름" });
+  await user.clear(title);
+  await user.type(title, "Legacy create");
+  const createRace = await beginLateList();
+  await user.click(screen.getByRole("button", { name: "전략 저장" }));
+  expect(
+    await screen.findByText("리비전이 저장되었습니다."),
+  ).toBeInTheDocument();
+  expect(queryClient.getQueryData(list.queryKey)).toBeUndefined();
+  createRace.release();
+  await createRace.request;
+  expect(queryClient.getQueryData(list.queryKey)).toBeUndefined();
+
+  await user.clear(title);
+  await user.type(title, "Legacy revise");
+  const reviseRace = await beginLateList();
+  await user.click(screen.getByRole("button", { name: "새 리비전 저장" }));
+  expect(
+    await screen.findByText("리비전이 저장되었습니다."),
+  ).toBeInTheDocument();
+  await waitFor(() => expect(lastReviseBody?.expected_revision).toBe(1));
+  expect(queryClient.getQueryData(list.queryKey)).toBeUndefined();
+  reviseRace.release();
+  await reviseRace.request;
+  expect(queryClient.getQueryData(list.queryKey)).toBeUndefined();
 });

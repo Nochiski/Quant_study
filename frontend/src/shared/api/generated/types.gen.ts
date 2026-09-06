@@ -1834,6 +1834,28 @@ export type PageRevisionSummary = {
 };
 
 /**
+ * Page
+ */
+export type PageStrategySummary = {
+  /**
+   * Items
+   */
+  items: Array<StrategySummary>;
+  /**
+   * Limit
+   */
+  limit: number;
+  /**
+   * Offset
+   */
+  offset: number;
+  /**
+   * Total
+   */
+  total: number;
+};
+
+/**
  * PanelPreviewCostEstimate
  */
 export type PanelPreviewCostEstimate = {
@@ -3440,6 +3462,32 @@ export type StrategySpec = {
 };
 
 /**
+ * StrategySummary
+ */
+export type StrategySummary = {
+  /**
+   * Latest Revision
+   */
+  latest_revision: number;
+  /**
+   * Spec Hash
+   */
+  spec_hash: string;
+  /**
+   * Strategy Id
+   */
+  strategy_id: string;
+  /**
+   * Title
+   */
+  title: string;
+  /**
+   * Updated At
+   */
+  updated_at: string;
+};
+
+/**
  * StrategyTargetTrace
  */
 export type StrategyTargetTrace = {
@@ -4576,6 +4624,42 @@ export type PreviewPortfolioResponses = {
 
 export type PreviewPortfolioResponse =
   PreviewPortfolioResponses[keyof PreviewPortfolioResponses];
+
+export type ListStrategiesData = {
+  body?: never;
+  path?: never;
+  query?: {
+    /**
+     * Offset
+     */
+    offset?: number;
+    /**
+     * Limit
+     */
+    limit?: number;
+  };
+  url: "/api/v1/strategies";
+};
+
+export type ListStrategiesErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ListStrategiesError =
+  ListStrategiesErrors[keyof ListStrategiesErrors];
+
+export type ListStrategiesResponses = {
+  /**
+   * Successful Response
+   */
+  200: PageStrategySummary;
+};
+
+export type ListStrategiesResponse =
+  ListStrategiesResponses[keyof ListStrategiesResponses];
 
 export type CreateStrategyData = {
   body: StrategySpec;

@@ -22,6 +22,7 @@ from strategy_workbench.application.strategy_design.facade.ports import (
     RevisionSummary,
     StrategyRepositoryPort,
     StrategyRevisionRecord,
+    StrategySummary,
 )
 from strategy_workbench.domain.strategy.facade.diff import DiffEntry, diff_strategy_specs
 from strategy_workbench.domain.strategy.facade.specification import (
@@ -128,6 +129,9 @@ class StrategyDocumentService:
 
     def history(self, strategy_id: str, page: PageRequest) -> Page[RevisionSummary]:
         return self._repository.history(strategy_id, page)
+
+    def list_strategies(self, page: PageRequest) -> Page[StrategySummary]:
+        return self._repository.list_strategies(page)
 
     def diff(self, strategy_id: str, base_revision: int, target_revision: int) -> RevisionDiff:
         base = self._repository.get(strategy_id, base_revision)

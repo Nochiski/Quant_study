@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 
 import {
+  retireStrategyListQueries,
   strategyDocumentQuery,
   strategyRevisionsKey,
 } from "../../../entities/strategy";
@@ -83,7 +84,8 @@ export const useSaveDocument = (
           }),
     onMutate: (snapshot) =>
       setStatus({ kind: "saving", documentEpoch: snapshot.documentEpoch }),
-    onSuccess: (document, snapshot) => {
+    onSuccess: async (document, snapshot) => {
+      await retireStrategyListQueries(queryClient);
       queryClient.setQueryData(
         strategyDocumentQuery(document.strategy_id, document.revision).queryKey,
         document,

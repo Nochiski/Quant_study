@@ -100,6 +100,7 @@ from strategy_workbench.application.strategy_design.facade.ports import (
     RevisionSummary,
     StrategyNotFoundError,
     StrategyRevisionConflictError,
+    StrategySummary,
 )
 from strategy_workbench.domain.equity.facade.research_data import (
     ResearchPanelQuery,
@@ -708,7 +709,7 @@ def create_app(
     )
     def list_strategy_revisions(
         strategy_id: str,
-        offset: int = Query(default=0, ge=0),
+        offset: int = Query(default=0, ge=0, le=PageRequest.MAX_OFFSET),
         limit: int = Query(default=50, ge=1, le=PageRequest.MAX_LIMIT),
     ) -> Page[RevisionSummary]:
         """Revision history, ascending by revision, paginated deterministically."""
@@ -820,6 +821,17 @@ def create_app(
                     "validation": jsonable_encoder(asdict(error.validation)),
                 },
             ) from error
+
+    @app.get(
+        "/api/v1/strategies",
+        operation_id="listStrategies",
+    )
+    def list_strategies(
+        offset: int = Query(default=0, ge=0, le=PageRequest.MAX_OFFSET),
+        limit: int = Query(default=50, ge=1, le=PageRequest.MAX_LIMIT),
+    ) -> Page[StrategySummary]:
+        """Latest immutable revision of every strategy, ordered by strategy id."""
+        return strategy_documents.list_strategies(PageRequest(offset, limit))
 
     @app.get(
         "/api/v1/strategies/{strategy_id}",

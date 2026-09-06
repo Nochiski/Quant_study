@@ -82,6 +82,28 @@ const StrategyRevisionPage = lazyRouteComponent(
   () => import("../../pages/research-strategy-revision"),
   "StrategyRevisionPage",
 );
+const StrategiesPage = lazyRouteComponent(
+  () => import("../../pages/research-strategies"),
+  "StrategiesPage",
+);
+
+const offsetOf = (value: unknown): number | undefined => {
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+  }
+  if (typeof value !== "string" || !/^[1-9]\d*$/u.test(value)) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
+};
+
+const strategyHistorySearch = (
+  search: Record<string, unknown>,
+): { offset?: number } => ({
+  offset: offsetOf(search.offset),
+});
+
 const rootRoute = createRootRouteWithContext<RouterContext>()({
   component: () => {
     const { operationsEnabled } = rootRoute.useRouteContext();
@@ -125,6 +147,13 @@ const newStrategyRoute = createRoute({
   path: "/research/strategies/new",
   validateSearch: strategyDocumentSearch,
   component: NewStrategyPage,
+});
+
+const strategiesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/research/strategies",
+  validateSearch: strategyHistorySearch,
+  component: StrategiesPage,
 });
 
 const strategyRevisionRoute = createRoute({
@@ -192,6 +221,7 @@ const riskRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   indexRoute,
   legacyBuilderRoute,
+  strategiesRoute,
   newStrategyRoute,
   strategyRevisionRoute,
   backtestRunRoute,

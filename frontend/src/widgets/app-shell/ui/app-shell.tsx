@@ -17,7 +17,7 @@ const RESEARCH = [
     key: "strategies",
     label: "nav.strategies",
     icon: "↗",
-    to: "/research/strategies/new",
+    to: "/research/strategies",
   },
   { key: "backtests", label: "nav.backtests", icon: "▤", to: null },
   { key: "experiments", label: "nav.experiments", icon: "▦", to: null },

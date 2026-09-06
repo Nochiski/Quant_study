@@ -58,6 +58,9 @@ import type {
   GetStrategyResponses,
   GetStrategyTemplateData,
   GetStrategyTemplateResponses,
+  ListStrategiesData,
+  ListStrategiesErrors,
+  ListStrategiesResponses,
   ListStrategyRevisionsData,
   ListStrategyRevisionsErrors,
   ListStrategyRevisionsResponses,
@@ -354,6 +357,20 @@ export const previewPortfolio = <ThrowOnError extends boolean = false>(
       ...options.headers,
     },
   });
+
+/**
+ * List Strategies
+ *
+ * Latest immutable revision of every strategy, ordered by strategy id.
+ */
+export const listStrategies = <ThrowOnError extends boolean = false>(
+  options?: Options<ListStrategiesData, ThrowOnError>,
+) =>
+  (options?.client ?? client).get<
+    ListStrategiesResponses,
+    ListStrategiesErrors,
+    ThrowOnError
+  >({ url: "/api/v1/strategies", ...options });
 
 /**
  * Create Strategy

@@ -16,6 +16,7 @@ import {
   getStrategyDocumentContract,
   getStrategyDocumentSchema,
   getBacktestStatus,
+  listStrategies,
   listStrategyRevisions,
   getStrategyTemplate,
   previewFactorGraph,
@@ -59,6 +60,7 @@ import type {
   MetricDefinition,
   MetricValue,
   PageRevisionSummary,
+  PageStrategySummary,
   PortfolioPreview,
   PortfolioPreviewRequest,
   ResearchCatalog,
@@ -82,6 +84,7 @@ import type {
   StrategyDraftConflictDetail,
   StrategyRevisionConflictDetail,
   StrategySpec,
+  StrategySummary,
   StrategyTraceRequest,
   StrategyTraceResponse,
   StrategyValidation,
@@ -411,6 +414,13 @@ export const strategyWorkbenchApi = {
     return requireData(response.data, "getStrategy");
   },
 
+  async listStrategies(
+    page: { offset?: number; limit?: number } = {},
+  ): Promise<PageStrategySummary> {
+    const response = await listStrategies({ query: page });
+    return unwrap(response, "listStrategies");
+  },
+
   async getStrategyDraft(draftId: string): Promise<StrategyDraft> {
     const response = await getStrategyDraft({ path: { draft_id: draftId } });
     return requireStrategyDraft(
@@ -585,6 +595,7 @@ export type {
   MetricDefinition,
   MetricValue,
   PageRevisionSummary,
+  PageStrategySummary,
   PortfolioPreview,
   PortfolioPreviewRequest,
   ResearchCatalog,
@@ -606,6 +617,7 @@ export type {
   StrategyDocumentSchema,
   StrategyDraft,
   StrategySpec,
+  StrategySummary,
   StrategyTraceRequest,
   StrategyTraceResponse,
   StrategyValidation,

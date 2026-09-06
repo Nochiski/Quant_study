@@ -341,6 +341,18 @@ def create_app(
                 detail={"code": "backtest.result.not_ready", "message": str(error)},
             ) from error
 
+    @app.get(
+        "/api/v1/backtests/{run_id}/request",
+        operation_id="getBacktestRequest",
+    )
+    def get_backtest_request(run_id: str) -> BacktestRunSpec:
+        """Expose the server-owned accepted assumptions for audit and exact reruns."""
+
+        try:
+            return backtest_runs.request(run_id)
+        except BacktestRunNotFoundError as error:
+            raise _backtest_not_found(error) from error
+
     @app.post(
         "/api/v1/backtests/{run_id}/cancel",
         operation_id="cancelBacktest",

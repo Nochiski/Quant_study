@@ -63,6 +63,15 @@ def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts()
     assert accepted.status_code == 202
     run_id = accepted.json()["run"]["run_id"]
 
+    accepted_request = client.get(f"/api/v1/backtests/{run_id}/request")
+    assert accepted_request.status_code == 200
+    assert accepted_request.json() == {
+        **_run_body(client),
+        "annualization_days": 252,
+        "initial_cash": 100_000_000.0,
+        "strategy_source": None,
+    }
+
     not_ready = client.get(f"/api/v1/backtests/{run_id}/result")
     assert not_ready.status_code in {200, 409}
     state = _wait(client, run_id)
@@ -116,6 +125,7 @@ def test_python_reference_and_rust_core_have_golden_result_and_metric_parity() -
 def test_backtest_unknown_run_and_invalid_metric_window_return_structured_errors() -> None:
     client = TestClient(build_http_app())
     assert client.get("/api/v1/backtests/missing").status_code == 404
+    assert client.get("/api/v1/backtests/missing/request").status_code == 404
     assert client.post("/api/v1/backtests/missing/cancel").status_code == 404
 
     body = _run_body(client)

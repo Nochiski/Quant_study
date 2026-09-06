@@ -73,6 +73,7 @@ class BacktestRunSummary:
 @dataclass
 class _RunRecord:
     state: BacktestRunState
+    request: BacktestRunSpec
     provenance: StrategyProvenance
     accepted_sequence: int
     events: list[RunProgressEvent]
@@ -150,6 +151,7 @@ class BacktestRunService:
         with self._lock:
             record = _RunRecord(
                 state=state,
+                request=request,
                 provenance=provenance,
                 accepted_sequence=self._next_accepted_sequence,
                 events=[],
@@ -169,6 +171,17 @@ class BacktestRunService:
     def state(self, run_id: str) -> BacktestRunState:
         with self._lock:
             return self._record(run_id).state
+
+    def request(self, run_id: str) -> BacktestRunSpec:
+        """Return the normalized request accepted for an in-process run.
+
+        The unresolved request carries exactly one strategy source and is therefore safe to
+        submit again. The resolved execution spec intentionally remains an internal detail until
+        it is committed to the immutable result manifest.
+        """
+
+        with self._lock:
+            return self._record(run_id).request
 
     def list_runs(
         self,

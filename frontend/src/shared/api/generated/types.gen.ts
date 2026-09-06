@@ -4348,6 +4348,38 @@ export type StreamBacktestEventsResponses = {
   200: unknown;
 };
 
+export type GetBacktestRequestData = {
+  body?: never;
+  path: {
+    /**
+     * Run Id
+     */
+    run_id: string;
+  };
+  query?: never;
+  url: "/api/v1/backtests/{run_id}/request";
+};
+
+export type GetBacktestRequestErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetBacktestRequestError =
+  GetBacktestRequestErrors[keyof GetBacktestRequestErrors];
+
+export type GetBacktestRequestResponses = {
+  /**
+   * Successful Response
+   */
+  200: BacktestRunSpec;
+};
+
+export type GetBacktestRequestResponse =
+  GetBacktestRequestResponses[keyof GetBacktestRequestResponses];
+
 export type GetBacktestResultData = {
   body?: never;
   path: {

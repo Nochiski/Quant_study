@@ -6997,6 +6997,46 @@
         "summary": "Stream Backtest Events"
       }
     },
+    "/api/v1/backtests/{run_id}/request": {
+      "get": {
+        "description": "Expose the server-owned accepted assumptions for audit and exact reruns.",
+        "operationId": "getBacktestRequest",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunSpec"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Backtest Request"
+      }
+    },
     "/api/v1/backtests/{run_id}/result": {
       "get": {
         "operationId": "getBacktestResult",

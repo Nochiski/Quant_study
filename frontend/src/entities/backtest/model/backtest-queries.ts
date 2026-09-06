@@ -59,6 +59,14 @@ export const useBacktestStatus = (runId: string | null) =>
         : 250,
   });
 
+export const useBacktestRequest = (runId: string | null) =>
+  useQuery({
+    queryKey: ["backtest", runId, "request"],
+    queryFn: () => strategyWorkbenchApi.getBacktestRequest(runId ?? ""),
+    enabled: runId !== null,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+
 export const useBacktestResult = (runId: string | null, enabled: boolean) =>
   useQuery({
     queryKey: ["backtest", runId, "result"],
@@ -67,7 +75,13 @@ export const useBacktestResult = (runId: string | null, enabled: boolean) =>
     staleTime: Number.POSITIVE_INFINITY,
   });
 
-export const useCancelBacktest = () =>
-  useMutation({
+export const useCancelBacktest = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
     mutationFn: (runId: string) => strategyWorkbenchApi.cancelBacktest(runId),
+    onSuccess: async (state, runId) => {
+      queryClient.setQueryData(["backtest", runId, "status"], state);
+      await retireBacktestHistoryQueries(queryClient);
+    },
   });
+};

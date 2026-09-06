@@ -8,6 +8,7 @@ import {
   explainFactorGraph,
   getEquityCatalog,
   getFactorCatalog,
+  getBacktestRequest,
   getBacktestResult,
   getStrategyDraft,
   getStrategyDocument,
@@ -292,6 +293,11 @@ export const strategyWorkbenchApi = {
   async getBacktestStatus(runId: string): Promise<BacktestRunState> {
     const response = await getBacktestStatus({ path: { run_id: runId } });
     return requireData(response.data, "getBacktestStatus");
+  },
+
+  async getBacktestRequest(runId: string): Promise<BacktestRunSpec> {
+    const response = await getBacktestRequest({ path: { run_id: runId } });
+    return requireData(response.data, "getBacktestRequest");
   },
 
   async getBacktestResult(runId: string): Promise<BacktestRunResult> {

@@ -33,6 +33,8 @@ type DebuggerSearchSelection = {
 type StrategyDebuggerProps = {
   context: StrategyDebuggerContext | null;
   unavailableReason: StrategyDebuggerUnavailableReason | null;
+  /** Opaque page-owned identity for the URL generation allowed to receive a trace deep link. */
+  publicationOwnerKey: string;
   asOf?: string;
   security?: string;
   selectedPointer?: string;
@@ -718,6 +720,7 @@ const Provenance = ({ state }: { state: StrategyTraceState }) => {
 export const StrategyDebugger = ({
   context,
   unavailableReason,
+  publicationOwnerKey,
   asOf,
   security,
   selectedPointer,
@@ -793,11 +796,15 @@ export const StrategyDebugger = ({
   const trace = useStrategyTrace(context, selection);
   const loading = trace.state.kind === "loading";
   const latestTraceOwner = useRef<string | null>(null);
+  const latestPublicationOwner = useRef(publicationOwnerKey);
   const traceOwnerKey =
     trace.prepared.kind === "ready" ? trace.prepared.ownerKey : null;
   useLayoutEffect(() => {
     latestTraceOwner.current = traceOwnerKey;
   }, [traceOwnerKey]);
+  useLayoutEffect(() => {
+    latestPublicationOwner.current = publicationOwnerKey;
+  }, [publicationOwnerKey]);
   const mounted = useRef(false);
   const submittedRequest = useRef<symbol | null>(null);
   useLayoutEffect(() => {
@@ -824,15 +831,18 @@ export const StrategyDebugger = ({
             security: selectedSecurity || undefined,
           };
           const ownerKey = trace.prepared.ownerKey;
+          const submittedPublicationOwner = publicationOwnerKey;
           const requestId = Symbol("trace-submit");
           submittedRequest.current = requestId;
           // The calculation cache owns late data. This component may publish a deep link only
-          // while it still owns the exact document + selection that submitted the request.
+          // while it still owns the exact document + selection and committed URL generation
+          // that submitted the request.
           void trace.run().finally(() => {
             if (
               mounted.current &&
               submittedRequest.current === requestId &&
-              latestTraceOwner.current === ownerKey
+              latestTraceOwner.current === ownerKey &&
+              latestPublicationOwner.current === submittedPublicationOwner
             ) {
               submittedRequest.current = null;
               onSearchSelection(submittedSelection);

@@ -113,6 +113,9 @@ export const NewStrategyPage = () => {
   const requested: StrategyView = search.view ?? document.format;
   const implemented = availableViews.includes(requested);
   const view: StrategyView = implemented ? requested : document.format;
+  // The page/router owns URL generations. The debugger treats this as an opaque publication
+  // lease, so an older async trace cannot replay a callback that captured an older search object.
+  const debuggerPublicationOwner = JSON.stringify([ROUTE, search]);
   const selectPointer = useCallback(
     (
       path: string | undefined,
@@ -306,6 +309,7 @@ export const NewStrategyPage = () => {
           <StrategyDebuggerPanel
             document={document}
             executionPlans={executionPlans}
+            publicationOwnerKey={debuggerPublicationOwner}
             asOf={search.asOf}
             security={search.security}
             selectedPointer={search.path}

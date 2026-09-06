@@ -342,6 +342,7 @@ afterAll(() => server.close());
 const props = (debugContext: StrategyDebuggerContext | null = context()) => ({
   context: debugContext,
   unavailableReason: debugContext === null ? ("document" as const) : null,
+  publicationOwnerKey: "route-generation-1",
   asOf: "2026-08-31",
   security: "sec-a, sec-b",
   selectedPointer: "/factors/factors/0/graph/nodes/2",
@@ -782,10 +783,7 @@ describe("StrategyDebugger", () => {
     const onSearchSelection = vi.fn();
     const initial = props();
     const view = renderDebugger(
-      <StrategyDebugger
-        {...initial}
-        onSearchSelection={onSearchSelection}
-      />,
+      <StrategyDebugger {...initial} onSearchSelection={onSearchSelection} />,
     );
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "추적 실행" }));
@@ -809,6 +807,36 @@ describe("StrategyDebugger", () => {
     expect(onSearchSelection).not.toHaveBeenCalled();
   });
 
+  it("does not publish into a newer opaque route generation with the same trace owner", async () => {
+    let resolveTrace: ((value: StrategyTraceResponse) => void) | undefined;
+    vi.spyOn(strategyWorkbenchApi, "traceStrategy").mockReturnValue(
+      new Promise((resolve) => {
+        resolveTrace = resolve;
+      }),
+    );
+    const onSearchSelection = vi.fn();
+    const initial = props();
+    const view = renderDebugger(
+      <StrategyDebugger {...initial} onSearchSelection={onSearchSelection} />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    await waitFor(() =>
+      expect(strategyWorkbenchApi.traceStrategy).toHaveBeenCalledTimes(1),
+    );
+
+    view.rerender(
+      <StrategyDebugger
+        {...initial}
+        publicationOwnerKey="route-generation-2"
+        onSearchSelection={onSearchSelection}
+      />,
+    );
+    await act(async () => resolveTrace?.(traceResponse()));
+
+    expect(onSearchSelection).not.toHaveBeenCalled();
+  });
+
   it("does not let a rejected request restore a previous document route", async () => {
     let rejectTrace: ((reason?: unknown) => void) | undefined;
     vi.spyOn(strategyWorkbenchApi, "traceStrategy").mockReturnValue(
@@ -819,10 +847,7 @@ describe("StrategyDebugger", () => {
     const onSearchSelection = vi.fn();
     const initial = props(context());
     const view = renderDebugger(
-      <StrategyDebugger
-        {...initial}
-        onSearchSelection={onSearchSelection}
-      />,
+      <StrategyDebugger {...initial} onSearchSelection={onSearchSelection} />,
     );
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "추적 실행" }));
@@ -858,10 +883,7 @@ describe("StrategyDebugger", () => {
     );
     const onSearchSelection = vi.fn();
     const view = renderDebugger(
-      <StrategyDebugger
-        {...props()}
-        onSearchSelection={onSearchSelection}
-      />,
+      <StrategyDebugger {...props()} onSearchSelection={onSearchSelection} />,
     );
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "추적 실행" }));

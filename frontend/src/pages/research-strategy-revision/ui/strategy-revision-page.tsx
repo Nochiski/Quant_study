@@ -131,6 +131,14 @@ export const StrategyRevisionPage = () => {
   const requested: StrategyView = search.view ?? stored.format;
   const implemented = availableViews.includes(requested);
   const view: StrategyView = implemented ? requested : stored.format;
+  // Include route params as well as the validated search generation; the debug feature only
+  // compares this opaque lease and never interprets router state.
+  const debuggerPublicationOwner = JSON.stringify([
+    ROUTE,
+    strategyId,
+    revision,
+    search,
+  ]);
   const selectPointer = useCallback(
     (
       path: string | undefined,
@@ -359,6 +367,7 @@ export const StrategyRevisionPage = () => {
           <StrategyDebuggerPanel
             document={document}
             executionPlans={executionPlans}
+            publicationOwnerKey={debuggerPublicationOwner}
             asOf={search.asOf}
             security={search.security}
             selectedPointer={search.path}

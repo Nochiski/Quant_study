@@ -1,6 +1,8 @@
 import { QueryClient } from "@tanstack/react-query";
 import { RouterProvider, type RouterHistory } from "@tanstack/react-router";
 import { useState } from "react";
+import "@fontsource-variable/jetbrains-mono/wght.css";
+import "@fontsource-variable/noto-sans-kr/wght.css";
 
 import { operationsEnabledFromEnv } from "./config";
 import { AppProvider } from "./providers/app-provider";

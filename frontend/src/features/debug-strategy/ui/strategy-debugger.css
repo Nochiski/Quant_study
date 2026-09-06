@@ -1,16 +1,23 @@
 .strategy-debugger {
   display: flex;
+  min-width: 0;
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  container-type: inline-size;
 }
 
 .strategy-debugger__controls {
   display: grid;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  flex: none;
   grid-template-columns:
-    minmax(125px, 0.65fr) minmax(190px, 1.2fr) minmax(160px, 0.9fr)
-    minmax(160px, 0.9fr) minmax(230px, 1.35fr) auto;
+    minmax(110px, 0.65fr) minmax(150px, 1.2fr) minmax(150px, 0.9fr)
+    minmax(140px, 0.9fr) minmax(180px, 1.35fr) auto;
   gap: var(--space-2);
   align-items: end;
   padding: 0 var(--space-4) var(--space-2);
@@ -59,6 +66,7 @@
 .strategy-debugger__identity {
   display: flex;
   min-height: 29px;
+  flex: none;
   flex-wrap: wrap;
   gap: var(--space-2);
   align-items: center;
@@ -97,7 +105,7 @@
 .strategy-debugger__results {
   display: flex;
   min-height: 0;
-  flex: 1;
+  flex: 1 0 260px;
   flex-direction: column;
   overflow: hidden;
 }
@@ -335,11 +343,19 @@
   font-size: var(--text-size-small);
 }
 
-@media (max-width: 1279px) {
-  .strategy-debugger {
-    overflow: auto;
+@container (max-width: 1119px) {
+  .strategy-debugger__controls {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+}
 
+@container (max-width: 599px) {
+  .strategy-debugger__controls {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1279px) {
   .strategy-debugger__controls {
     grid-template-columns: 1fr;
   }
@@ -349,7 +365,7 @@
   }
 
   .strategy-debugger__results {
-    min-height: 260px;
+    flex-basis: 260px;
     overflow: visible;
   }
 }

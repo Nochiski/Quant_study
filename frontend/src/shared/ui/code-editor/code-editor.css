@@ -19,7 +19,15 @@
 }
 
 .code-editor .cm-scroller {
+  font-family: var(--font-mono);
   line-height: 1.55;
+}
+
+/* CodeMirror declares its own `monospace` family. Keep the rendered source tied to the
+ * application token instead of a host-specific Consolas/Courier fallback. */
+.code-editor .cm-content,
+.code-editor .cm-gutters {
+  font-family: var(--font-mono);
 }
 
 .code-editor .cm-gutters {

@@ -2,8 +2,7 @@
  * Semantic theme tokens (WORKFLOW P2-01, P6-04). The light and soft-dark palettes expose the
  * same component contract; P6-03 owns preference persistence and selects `data-theme`.
  * Components use only semantic names (surface / border / text / accent / status / focus);
- * raw colours live here and nowhere else. The `--color-*` aliases at the bottom keep the legacy
- * Quick/Advanced builder stylesheet working until P6-06 removes it.
+ * raw colours live here and nowhere else.
  */
 :root {
   color-scheme: light;
@@ -66,12 +65,9 @@
   --syntax-punctuation: #5b6675;
 
   /* typography: body 14px, secondary text never below 12px */
-  --font-sans:
-    Inter, Pretendard, ui-sans-serif, system-ui, -apple-system,
-    BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-mono:
-    "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono",
-    monospace;
+  /* Exact-version webfonts keep strict browser snapshots independent of host-installed fonts. */
+  --font-sans: "Noto Sans KR Variable", sans-serif;
+  --font-mono: "JetBrains Mono Variable", "Noto Sans KR Variable", monospace;
   --text-size-body: 14px;
   --text-size-small: 12px;
   --text-size-title: 20px;
@@ -92,22 +88,6 @@
   --space-4: 16px;
   --space-5: 24px;
   --space-6: 32px;
-
-  /* legacy aliases (Quick/Advanced builder stylesheet, removed in P6-06) */
-  --color-canvas: var(--surface-canvas);
-  --color-panel: var(--surface-panel);
-  --color-panel-raised: var(--surface-raised);
-  --color-line: var(--border);
-  --color-line-strong: var(--border-strong);
-  --color-text: var(--text);
-  --color-muted: var(--text-muted);
-  --color-accent: var(--accent);
-  --color-accent-strong: var(--accent-hover);
-  --color-blue: var(--status-info);
-  --color-danger: var(--status-error);
-  --color-warning: var(--status-warn);
-  --color-violet: var(--chart-series-4);
-  --color-sky: var(--status-info);
 }
 
 :root[data-theme="dark"] {

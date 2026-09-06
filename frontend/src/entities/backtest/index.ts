@@ -1,6 +1,7 @@
 export {
   backtestHistoryKey,
   backtestHistoryQuery,
+  useBacktestRequest,
   useBacktestResult,
   useBacktestStatus,
   useCancelBacktest,

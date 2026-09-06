@@ -4,6 +4,9 @@
 >
 > 상태: Accepted
 >
+> 2026-09-06 P6-06 개정: 제품 소유자의 명시적 결정으로 D9의 M6 선행 조건을 폐기하고
+> YAML-first 전환을 완료한다. M6 Parameter Search는 YAML route에 결합되는 후속 milestone이다.
+>
 > Initiative: [YAML Strategy Workbench](../../planning/strategy-workbench-yaml-ui/README.md) —
 > 범위는 [WORKFLOW.md](../../planning/strategy-workbench-yaml-ui/WORKFLOW.md), PR 진행은
 > [PLAN.md](../../planning/strategy-workbench-yaml-ui/PLAN.md)
@@ -125,11 +128,12 @@ AND semantic blocking error == 0
   조정한다: "전략 정의는 문서로 작성하되, parameter search와 실험 실행은 source를 다시 편집하지
   않고 UI에서 수행할 수 있다." Form/Graph projection과 snippet, completion, Contract Inspector가
   비개발자의 진입 장벽을 낮추는 역할을 맡는다.
-- Quick/Advanced 편집기는 legacy route로 유지된다. 삭제 조건은 D9.
+- Quick/Advanced 편집기는 P6-06에서 제거한다. 기존 URL은 YAML 신규 문서 route로만
+  redirect하며 별도 편집 모델이나 화면을 유지하지 않는다.
 
 ### D9. Quick/Advanced deprecation 정책
 
-삭제는 P6-06에서 다음 조건이 모두 충족될 때만 별도 cleanup commit으로 수행한다.
+P6-06에서 다음 migration gate를 증명한 뒤 별도 cleanup commit으로 삭제한다.
 
 1. 로드맵, `.claude/rules`, README, i18n 문구가 YAML-first로 갱신되어 있다 (이 PR에서 문서·규칙,
    P3-05 cutover에서 i18n 문구).
@@ -137,10 +141,14 @@ AND semantic blocking error == 0
    autosave recovery, 409 conflict, revision diff, factor trace E2E가 통과한다.
 3. legacy로 저장된 모든 revision(`source=None`)이 YAML route에서 열리고 같은 `spec_hash`로
    재저장된다.
-4. 로드맵 M6 parameter search UI가 YAML route에 연결되어 있다. 연결 전에는 Quick/Advanced를 지우지
-   않는다.
+4. `/`의 과거 query bookmark와 `/legacy/builder`는 query를 버리고
+   `/research/strategies/new`로 redirect한다. legacy editor component·navigation·style은 남기지 않는다.
 
-조건이 하나라도 미충족이면 legacy route를 유지하고 삭제를 별도 initiative로 넘긴다.
+2026-09-06 제품 결정으로 기존 4번 조건이었던 “M6 parameter search UI 선행 연결”은 폐기했다.
+Parameter Search는 StrategySpec/YAML source를 복제하지 않는 독립 feature로 YAML route 위에
+연결되므로, 아직 구현되지 않았다는 사실이 두 authoring surface를 동시에 유지할 근거가 되지 않는다.
+M6의 범위와 완료 게이트는 그대로 유지한다. 위 1~3의 문서·실행·호환 migration gate가 실패하면
+cleanup을 완료로 표시하지 않고 P6-06 안에서 수정한다.
 
 ### D10. 로드맵과 tracker의 관계
 
@@ -151,8 +159,8 @@ AND semantic blocking error == 0
 - 로드맵 M8 항목 중 revision history/diff, autosave/recovery, revision conflict, keyboard
   navigation은 이 initiative(P1-08, P3-06, P3-07, P4-08, P6-02, P6-03)가 먼저 제공한다. 로드맵
   M8 체크박스는 해당 PR merge 시 갱신한다.
-- 로드맵 M6 parameter search는 이 initiative의 Phase 3(YAML MVP) 이후에 YAML route 위에서
-  진행한다. Phase 1.5 correctness gate는 M6보다 먼저 끝나야 한다.
+- 로드맵 M6 parameter search는 YAML route 위에서 후속 진행한다. Phase 1.5 correctness gate와
+  YAML authoring 전환은 M6보다 먼저 끝내며, M6 미구현은 legacy editor의 유지 조건이 아니다.
 
 ## 3. 규칙·문서 갱신
 
@@ -162,11 +170,11 @@ AND semantic blocking error == 0
 |---|---|
 | `.claude/rules/strategy-workbench-sot.md` | 전략 의미 row와 금지 항목을 source/projection 표현으로 갱신 |
 | `.claude/rules/frontend-testing.md` | round-trip property test 대상을 source ↔ StrategySpec ↔ projection으로 갱신 |
-| `README.md`, `frontend/README.md`, `backend/FACTORS.md` | no-code 표현을 YAML-first + legacy no-code 유지로 갱신 |
+| `README.md`, `frontend/README.md`, `backend/FACTORS.md` | YAML-first 단일 authoring surface와 M6 후속 관계로 갱신 |
 | 로드맵 | 결론·시스템 한 컷·7.1·9.1·M8 gate·완료 정의 갱신, 16절에서 이 tracker 링크 |
 
-i18n 문구(`builder.subtitle` 등)는 legacy 편집기가 아직 기본 화면이므로 이 PR에서 바꾸지 않는다.
-P3-05 YAML route cutover에서 ko/en을 함께 갱신한다 (WORKFLOW P3-05 acceptance에 반영).
+i18n 문구는 P3-05 YAML route cutover에서 ko/en을 함께 갱신했고, P6-06은 삭제되는 legacy 화면의
+문구와 navigation key를 제거한다.
 
 알려진 잔존 표현: HTTP API 설명 문자열(`adapters/inbound/http_api/_app.py`의 "No-code factor
 strategy design")과 그로부터 생성된 `backend/openapi.json`은 API 코드 변경이 non-goal이므로 P1-03에서
@@ -219,8 +227,9 @@ typing을 피하도록 날짜·버전을 quoted string으로 적으며, P0-03이
   Phase 1에 PR 3~4개 추가되고 "별도 authoring 모델 없음" 원칙과 충돌한다. M8로 미룬다.
 - **Form을 편집 가능하게 유지**: YAML 주석·순서 보존과 undo history 통합이 필요해 source SoT가
   둘이 된다. projection으로 제한한다.
-- **Quick/Advanced 즉시 삭제**: legacy revision 호환과 M6 UI 연결 전에는 사용자 흐름이 끊긴다.
-  조건부 삭제(D9)로 둔다.
+- **Quick/Advanced를 영구 병행**: 두 authoring surface와 테스트·스타일·query facade가 서로 다른
+  lifecycle을 만들어 source SoT를 흐린다. P6-06 migration gate 뒤 제거하고 backend legacy revision
+  호환만 유지한다(D9의 2026-09-06 개정).
 
 ## 7. Rollback
 

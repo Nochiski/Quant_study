@@ -29,7 +29,8 @@ Strategy Workbench의 전체 계획과 체크리스트는
 전략 authoring은 verbose YAML/JSON source로 전환 중이며 계약은
 [Strategy Authoring Contract ADR](docs/superpowers/specs/2026-09-04-strategy-authoring-contract-adr.md),
 PR 진행은 [docs/planning/strategy-workbench-yaml-ui/PLAN.md](docs/planning/strategy-workbench-yaml-ui/PLAN.md)가
-추적한다. 기존 Quick/Advanced no-code 편집기는 migration 기간 legacy route로 유지된다.
+추적한다. 전략 작성 화면은 YAML/JSON editor 하나이며 Form/Graph/Diff는 같은 StrategySpec의
+read-only projection이다. Parameter Search는 이 route 위에 연결할 후속 milestone이다.
 Equity DB 계약이 확정되기 전에는 `backend`의 PIT mock adapter가 기준 구현이며, 실제 DB는 같은
 application port를 구현하는 outbound adapter로 교체한다.
 
@@ -115,7 +116,7 @@ uv run pyright
 uv run python examples/run_demo.py      # PyKRX CSV(005930)로 골든크로스 백테스트
 uv run python examples/run_krx_demo.py  # KRX 원장 parquet 슬라이스로 동일 전략 실행
 uv run python examples/run_krx_demo.py <원장 디렉토리>   # quant-data 빌드 전체 대상
-uv run maturin develop --manifest-path rust/backtest_core/Cargo.toml --release  # Rust 코어(선택)
+uv run maturin develop --manifest-path rust/backtest_core/Cargo.toml --release  # 기본 Workbench 백테스트에 필요
 uv run python examples/run_krx_demo.py --core rust      # Rust 코어로 같은 데모
 ```
 
@@ -135,7 +136,9 @@ npm run dev
 그대로 전달된다(예: `uv run server --port 8123`). 기존처럼 `backend`와 `frontend`
 디렉터리 안에서 각각 실행해도 같은 owner의 설정을 사용한다. 서버가 저장한 전략 revision은
 기본적으로 `backend/.local/strategy-revisions.sqlite3`에 유지된다. 다른 위치가 필요하면 서버
-시작 전에 `STRATEGY_WORKBENCH_DB_PATH`를 설정한다.
+시작 전에 `STRATEGY_WORKBENCH_DB_PATH`를 설정한다. 서버 자체는 Rust 확장 없이도 시작하지만,
+기본 `rust` core 백테스트는 위 `maturin develop` 설치가 없으면 명시적인 `CoreUnavailable`로
+실패하며 Python core로 조용히 대체하지 않는다.
 
 ## 검증: Zipline 대조
 

@@ -1,4 +1,11 @@
-import { useId, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { t } from "../../../shared/config";
 import { useVirtualWindow } from "../../../shared/lib/virtual-window";
@@ -26,6 +33,8 @@ type DebuggerSearchSelection = {
 type StrategyDebuggerProps = {
   context: StrategyDebuggerContext | null;
   unavailableReason: StrategyDebuggerUnavailableReason | null;
+  /** Opaque page-owned identity for the URL generation allowed to receive a trace deep link. */
+  publicationOwnerKey: string;
   asOf?: string;
   security?: string;
   selectedPointer?: string;
@@ -316,6 +325,7 @@ const LinkedTraceResult = ({
             className="strategy-debugger__pipeline"
             key={securityId}
             role="listitem"
+            aria-label={securityId}
             aria-posinset={virtual.start + visibleIndex + 1}
             aria-setsize={rows.length}
           >
@@ -710,6 +720,7 @@ const Provenance = ({ state }: { state: StrategyTraceState }) => {
 export const StrategyDebugger = ({
   context,
   unavailableReason,
+  publicationOwnerKey,
   asOf,
   security,
   selectedPointer,
@@ -784,6 +795,28 @@ export const StrategyDebugger = ({
   );
   const trace = useStrategyTrace(context, selection);
   const loading = trace.state.kind === "loading";
+  const latestTraceOwner = useRef<string | null>(null);
+  const latestPublicationOwner = useRef(publicationOwnerKey);
+  const traceOwnerKey =
+    trace.prepared.kind === "ready" ? trace.prepared.ownerKey : null;
+  useLayoutEffect(() => {
+    latestTraceOwner.current = traceOwnerKey;
+  }, [traceOwnerKey]);
+  useLayoutEffect(() => {
+    latestPublicationOwner.current = publicationOwnerKey;
+  }, [publicationOwnerKey]);
+  const mounted = useRef(false);
+  const submittedRequest = useRef<symbol | null>(null);
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      submittedRequest.current = null;
+    };
+  }, []);
+  const supersedeSubmittedRequest = () => {
+    submittedRequest.current = null;
+  };
 
   return (
     <div className="strategy-debugger">
@@ -792,11 +825,29 @@ export const StrategyDebugger = ({
         aria-label={t("debugger.controls")}
         onSubmit={(event) => {
           event.preventDefault();
-          onSearchSelection({
+          if (trace.prepared.kind !== "ready") return;
+          const submittedSelection = {
             asOf: selectedAsOf || undefined,
             security: selectedSecurity || undefined,
+          };
+          const ownerKey = trace.prepared.ownerKey;
+          const submittedPublicationOwner = publicationOwnerKey;
+          const requestId = Symbol("trace-submit");
+          submittedRequest.current = requestId;
+          // The calculation cache owns late data. This component may publish a deep link only
+          // while it still owns the exact document + selection and committed URL generation
+          // that submitted the request.
+          void trace.run().finally(() => {
+            if (
+              mounted.current &&
+              submittedRequest.current === requestId &&
+              latestTraceOwner.current === ownerKey &&
+              latestPublicationOwner.current === submittedPublicationOwner
+            ) {
+              submittedRequest.current = null;
+              onSearchSelection(submittedSelection);
+            }
           });
-          void trace.run();
         }}
       >
         <label>
@@ -810,6 +861,7 @@ export const StrategyDebugger = ({
             aria-describedby={`${idBase}-date-note`}
             disabled={context === null}
             onChange={(event) => {
+              supersedeSubmittedRequest();
               setScope((current) => ({
                 ...current,
                 selectedAsOf: event.target.value,
@@ -831,18 +883,13 @@ export const StrategyDebugger = ({
             autoComplete="off"
             spellCheck={false}
             disabled={context === null}
-            onChange={(event) =>
+            onChange={(event) => {
+              supersedeSubmittedRequest();
               setScope((current) => ({
                 ...current,
                 selectedSecurity: event.target.value,
-              }))
-            }
-            onBlur={(event) =>
-              onSearchSelection({
-                asOf: selectedAsOf || undefined,
-                security: event.target.value || undefined,
-              })
-            }
+              }));
+            }}
           />
         </label>
         <label className="strategy-debugger__holdings-control">
@@ -855,12 +902,13 @@ export const StrategyDebugger = ({
             autoComplete="off"
             spellCheck={false}
             disabled={context === null}
-            onChange={(event) =>
+            onChange={(event) => {
+              supersedeSubmittedRequest();
               setScope((current) => ({
                 ...current,
                 selectedHoldings: event.target.value,
-              }))
-            }
+              }));
+            }}
           />
           <small id={`${idBase}-holdings-note`}>
             {t("debugger.holdings.note")}
@@ -872,6 +920,7 @@ export const StrategyDebugger = ({
             value={factor?.factorId ?? ""}
             disabled={context === null || context.factors.length === 0}
             onChange={(event) => {
+              supersedeSubmittedRequest();
               const next = context?.factors.find(
                 (candidate) => candidate.factorId === event.target.value,
               );
@@ -895,6 +944,7 @@ export const StrategyDebugger = ({
             value={node?.nodeId ?? ""}
             disabled={factor === undefined}
             onChange={(event) => {
+              supersedeSubmittedRequest();
               const next = factor?.nodes.find(
                 (candidate) => candidate.nodeId === event.target.value,
               );
@@ -918,7 +968,14 @@ export const StrategyDebugger = ({
             {loading ? t("debugger.running") : t("debugger.run")}
           </Button>
           {loading ? (
-            <Button size="small" tone="ghost" onClick={trace.cancel}>
+            <Button
+              size="small"
+              tone="ghost"
+              onClick={() => {
+                supersedeSubmittedRequest();
+                trace.cancel();
+              }}
+            >
               {t("debugger.cancel")}
             </Button>
           ) : null}

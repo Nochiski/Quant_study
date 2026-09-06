@@ -342,6 +342,7 @@ afterAll(() => server.close());
 const props = (debugContext: StrategyDebuggerContext | null = context()) => ({
   context: debugContext,
   unavailableReason: debugContext === null ? ("document" as const) : null,
+  publicationOwnerKey: "route-generation-1",
   asOf: "2026-08-31",
   security: "sec-a, sec-b",
   selectedPointer: "/factors/factors/0/graph/nodes/2",
@@ -743,6 +744,155 @@ describe("StrategyDebugger", () => {
     expect(requests).toHaveLength(1);
     expect(requests[0]).not.toHaveProperty("as_of");
     expect(screen.getByText(/서버가 실제 TargetTape/)).toBeInTheDocument();
+  });
+
+  it("commits a typed security scope and runs the trace in one submit", async () => {
+    const user = userEvent.setup();
+    const onSearchSelection = vi.fn();
+    renderDebugger(
+      <StrategyDebugger
+        {...props()}
+        security={undefined}
+        onSearchSelection={onSearchSelection}
+      />,
+    );
+
+    await user.type(
+      screen.getByRole("textbox", { name: "종목 ID" }),
+      "sec-a, sec-b",
+    );
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+
+    expect(await screen.findByText("3.50%")).toBeInTheDocument();
+    expect(onSearchSelection).toHaveBeenCalledTimes(1);
+    expect(onSearchSelection).toHaveBeenCalledWith({
+      asOf: "2026-08-31",
+      security: "sec-a, sec-b",
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.security_ids).toEqual(["sec-a", "sec-b"]);
+  });
+
+  it("does not let a resolved request restore a superseded URL scope", async () => {
+    let resolveTrace: ((value: StrategyTraceResponse) => void) | undefined;
+    vi.spyOn(strategyWorkbenchApi, "traceStrategy").mockReturnValue(
+      new Promise((resolve) => {
+        resolveTrace = resolve;
+      }),
+    );
+    const onSearchSelection = vi.fn();
+    const initial = props();
+    const view = renderDebugger(
+      <StrategyDebugger {...initial} onSearchSelection={onSearchSelection} />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    await waitFor(() =>
+      expect(strategyWorkbenchApi.traceStrategy).toHaveBeenCalledTimes(1),
+    );
+
+    view.rerender(
+      <StrategyDebugger
+        {...initial}
+        asOf="2026-08-28"
+        security="sec-new"
+        onSearchSelection={onSearchSelection}
+      />,
+    );
+    await act(async () => resolveTrace?.(traceResponse()));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("기준일")).toHaveValue("2026-08-28"),
+    );
+    expect(onSearchSelection).not.toHaveBeenCalled();
+  });
+
+  it("does not publish into a newer opaque route generation with the same trace owner", async () => {
+    let resolveTrace: ((value: StrategyTraceResponse) => void) | undefined;
+    vi.spyOn(strategyWorkbenchApi, "traceStrategy").mockReturnValue(
+      new Promise((resolve) => {
+        resolveTrace = resolve;
+      }),
+    );
+    const onSearchSelection = vi.fn();
+    const initial = props();
+    const view = renderDebugger(
+      <StrategyDebugger {...initial} onSearchSelection={onSearchSelection} />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    await waitFor(() =>
+      expect(strategyWorkbenchApi.traceStrategy).toHaveBeenCalledTimes(1),
+    );
+
+    view.rerender(
+      <StrategyDebugger
+        {...initial}
+        publicationOwnerKey="route-generation-2"
+        onSearchSelection={onSearchSelection}
+      />,
+    );
+    await act(async () => resolveTrace?.(traceResponse()));
+
+    expect(onSearchSelection).not.toHaveBeenCalled();
+  });
+
+  it("does not let a rejected request restore a previous document route", async () => {
+    let rejectTrace: ((reason?: unknown) => void) | undefined;
+    vi.spyOn(strategyWorkbenchApi, "traceStrategy").mockReturnValue(
+      new Promise((_resolve, reject) => {
+        rejectTrace = reject;
+      }),
+    );
+    const onSearchSelection = vi.fn();
+    const initial = props(context());
+    const view = renderDebugger(
+      <StrategyDebugger {...initial} onSearchSelection={onSearchSelection} />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    await waitFor(() =>
+      expect(strategyWorkbenchApi.traceStrategy).toHaveBeenCalledTimes(1),
+    );
+
+    view.rerender(
+      <StrategyDebugger
+        {...props({ ...savedContext(), documentEpoch: 9 })}
+        onSearchSelection={onSearchSelection}
+      />,
+    );
+    await act(async () => rejectTrace?.(new Error("old route failed")));
+
+    await waitFor(() =>
+      expect(screen.getByText("저장 리비전")).toBeInTheDocument(),
+    );
+    expect(onSearchSelection).not.toHaveBeenCalled();
+  });
+
+  it("does not publish a deep link after unmount aborts the request", async () => {
+    let requestSignal: AbortSignal | undefined;
+    vi.spyOn(strategyWorkbenchApi, "traceStrategy").mockImplementation(
+      (_request, signal) => {
+        requestSignal = signal;
+        return new Promise((_resolve, reject) => {
+          signal?.addEventListener("abort", () =>
+            reject(new DOMException("aborted", "AbortError")),
+          );
+        });
+      },
+    );
+    const onSearchSelection = vi.fn();
+    const view = renderDebugger(
+      <StrategyDebugger {...props()} onSearchSelection={onSearchSelection} />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    await waitFor(() => expect(requestSignal).toBeDefined());
+
+    view.unmount();
+
+    await waitFor(() => expect(requestSignal?.aborted).toBe(true));
+    expect(onSearchSelection).not.toHaveBeenCalled();
   });
 
   it("shows raw cell semantics and only requests order deltas for an explicit opening book", async () => {

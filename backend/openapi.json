@@ -1,6 +1,37 @@
 {
   "components": {
     "schemas": {
+      "BacktestResultNotReadyDetail": {
+        "properties": {
+          "code": {
+            "const": "backtest.result.not_ready",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "BacktestResultNotReadyDetail",
+        "type": "object"
+      },
+      "BacktestResultNotReadyResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/BacktestResultNotReadyDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "BacktestResultNotReadyResponse",
+        "type": "object"
+      },
       "BacktestRunInvalidDetail": {
         "properties": {
           "code": {
@@ -18,6 +49,37 @@
           "message"
         ],
         "title": "BacktestRunInvalidDetail",
+        "type": "object"
+      },
+      "BacktestRunNotFoundDetail": {
+        "properties": {
+          "code": {
+            "const": "backtest.run.not_found",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "BacktestRunNotFoundDetail",
+        "type": "object"
+      },
+      "BacktestRunNotFoundResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/BacktestRunNotFoundDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "BacktestRunNotFoundResponse",
         "type": "object"
       },
       "BacktestRunResult": {
@@ -6898,6 +6960,16 @@
             },
             "description": "Successful Response"
           },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunNotFoundResponse"
+                }
+              }
+            },
+            "description": "The process-lifetime backtest run does not exist"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -6936,6 +7008,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunNotFoundResponse"
+                }
+              }
+            },
+            "description": "The process-lifetime backtest run does not exist"
           },
           "422": {
             "content": {
@@ -6983,6 +7065,16 @@
             },
             "description": "Successful Response"
           },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunNotFoundResponse"
+                }
+              }
+            },
+            "description": "The process-lifetime backtest run does not exist"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -6995,6 +7087,56 @@
           }
         },
         "summary": "Stream Backtest Events"
+      }
+    },
+    "/api/v1/backtests/{run_id}/request": {
+      "get": {
+        "description": "Expose the server-owned accepted assumptions for audit and exact reruns.",
+        "operationId": "getBacktestRequest",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunSpec"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunNotFoundResponse"
+                }
+              }
+            },
+            "description": "The process-lifetime backtest run does not exist"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Backtest Request"
       }
     },
     "/api/v1/backtests/{run_id}/result": {
@@ -7021,6 +7163,26 @@
               }
             },
             "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunNotFoundResponse"
+                }
+              }
+            },
+            "description": "The process-lifetime backtest run does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResultNotReadyResponse"
+                }
+              }
+            },
+            "description": "The run has not completed with a result"
           },
           "422": {
             "content": {

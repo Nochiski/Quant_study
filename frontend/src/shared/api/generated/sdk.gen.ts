@@ -27,6 +27,9 @@ import type {
   ExplainStrategyData,
   ExplainStrategyErrors,
   ExplainStrategyResponses,
+  GetBacktestRequestData,
+  GetBacktestRequestErrors,
+  GetBacktestRequestResponses,
   GetBacktestResultData,
   GetBacktestResultErrors,
   GetBacktestResultResponses,
@@ -192,6 +195,20 @@ export const streamBacktestEvents = <ThrowOnError extends boolean = false>(
     StreamBacktestEventsErrors,
     ThrowOnError
   >({ url: "/api/v1/backtests/{run_id}/events", ...options });
+
+/**
+ * Get Backtest Request
+ *
+ * Expose the server-owned accepted assumptions for audit and exact reruns.
+ */
+export const getBacktestRequest = <ThrowOnError extends boolean = false>(
+  options: Options<GetBacktestRequestData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetBacktestRequestResponses,
+    GetBacktestRequestErrors,
+    ThrowOnError
+  >({ url: "/api/v1/backtests/{run_id}/request", ...options });
 
 /**
  * Get Backtest Result

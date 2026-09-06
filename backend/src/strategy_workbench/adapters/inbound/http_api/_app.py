@@ -6,7 +6,7 @@ import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from threading import Event
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.encoders import jsonable_encoder
@@ -113,6 +113,8 @@ from strategy_workbench.domain.strategy.facade.validation import StrategyValidat
 
 from ._backtest_contract import (
     Backtest422Response,
+    BacktestResultNotReadyResponse,
+    BacktestRunNotFoundResponse,
     BacktestStrategyNotFoundResponse,
     BacktestStrategyStaleResponse,
 )
@@ -180,6 +182,15 @@ def _backtest_not_found(error: BacktestRunNotFoundError) -> HTTPException:
         status_code=status.HTTP_404_NOT_FOUND,
         detail={"code": "backtest.run.not_found", "message": str(error)},
     )
+
+
+def _backtest_run_not_found_responses() -> dict[int | str, dict[str, Any]]:
+    return {
+        404: {
+            "model": BacktestRunNotFoundResponse,
+            "description": "The process-lifetime backtest run does not exist",
+        }
+    }
 
 
 def _draft_conflict(error: StrategyDraftConflictError) -> HTTPException:
@@ -319,6 +330,7 @@ def create_app(
     @app.get(
         "/api/v1/backtests/{run_id}",
         operation_id="getBacktestStatus",
+        responses=_backtest_run_not_found_responses(),
     )
     def get_backtest_status(run_id: str) -> BacktestRunState:
         try:
@@ -329,6 +341,13 @@ def create_app(
     @app.get(
         "/api/v1/backtests/{run_id}/result",
         operation_id="getBacktestResult",
+        responses={
+            **_backtest_run_not_found_responses(),
+            409: {
+                "model": BacktestResultNotReadyResponse,
+                "description": "The run has not completed with a result",
+            },
+        },
     )
     def get_backtest_result(run_id: str) -> BacktestRunResult:
         try:
@@ -341,9 +360,23 @@ def create_app(
                 detail={"code": "backtest.result.not_ready", "message": str(error)},
             ) from error
 
+    @app.get(
+        "/api/v1/backtests/{run_id}/request",
+        operation_id="getBacktestRequest",
+        responses=_backtest_run_not_found_responses(),
+    )
+    def get_backtest_request(run_id: str) -> BacktestRunSpec:
+        """Expose the server-owned accepted assumptions for audit and exact reruns."""
+
+        try:
+            return backtest_runs.request(run_id)
+        except BacktestRunNotFoundError as error:
+            raise _backtest_not_found(error) from error
+
     @app.post(
         "/api/v1/backtests/{run_id}/cancel",
         operation_id="cancelBacktest",
+        responses=_backtest_run_not_found_responses(),
     )
     def cancel_backtest(run_id: str) -> BacktestRunState:
         try:
@@ -355,7 +388,10 @@ def create_app(
         "/api/v1/backtests/{run_id}/events",
         operation_id="streamBacktestEvents",
         response_class=StreamingResponse,
-        responses={200: {"content": {"text/event-stream": {}}}},
+        responses={
+            **_backtest_run_not_found_responses(),
+            200: {"content": {"text/event-stream": {}}},
+        },
     )
     def stream_backtest_events(
         run_id: str,

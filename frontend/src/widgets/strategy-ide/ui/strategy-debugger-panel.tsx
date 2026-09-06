@@ -11,6 +11,7 @@ import { buildStrategyDebuggerAvailability } from "../model/strategy-debugger-co
 type StrategyDebuggerPanelProps = {
   document: DocumentState;
   executionPlans: ExecutionPlansState;
+  publicationOwnerKey: string;
   asOf?: string;
   security?: string;
   selectedPointer?: string;
@@ -24,6 +25,7 @@ type StrategyDebuggerPanelProps = {
 export const StrategyDebuggerPanel = ({
   document,
   executionPlans,
+  publicationOwnerKey,
   asOf,
   security,
   selectedPointer,
@@ -38,6 +40,7 @@ export const StrategyDebuggerPanel = ({
     <StrategyDebugger
       context={availability.context}
       unavailableReason={availability.reason}
+      publicationOwnerKey={publicationOwnerKey}
       asOf={asOf}
       security={security}
       selectedPointer={selectedPointer}

@@ -4,6 +4,9 @@
 >
 > 상태: Accepted
 >
+> 2026-09-06 P6-06 개정: legacy editor 제거에 따라 D2의 bookmark migration 상태를
+> YAML 신규 문서 route로의 query-free replace redirect로 전환한다.
+>
 > 상위 ADR: [Strategy Authoring Contract](./2026-09-04-strategy-authoring-contract-adr.md)
 > · Initiative tracker: [PLAN.md](../../planning/strategy-workbench-yaml-ui/PLAN.md)
 
@@ -74,16 +77,13 @@ TanStack Query 통합(`loader`에서 `queryClient.ensureQueryData`)과 error bou
   /strategies/new                   ← template 로드, draft base 상태
   /strategies/$strategyId/revisions/$revision
   /backtests/$runId
-/legacy/builder                     ← 기존 StrategyBuilderPage (migration 기간)
+/legacy/builder                     → redirect /research/strategies/new (bookmark 호환만)
 /operations/*                       ← feature flag 뒤, placeholder page (ADR P0-01 D8, WORKFLOW 15절)
 ```
 
-- 기존 진입 `/?step=...`, `/?run`은 `/legacy/builder`로 query를 유지하며 redirect한다. WORKFLOW P2-02의
-  "기존 진입 URL은 새 전략 route로 redirect"를 이렇게 구체화한 이유: P0-01 D8/D9가 Quick/Advanced를
-  migration 기간 legacy route로 유지하기로 했고, 현재 `strategy-editor.tsx`는 mount 시
-  `window.location.search`의 `step`/`run`을 읽으므로 query를 보존한 redirect가 기존 북마크와 호환된다.
-  query 없는 `/`만 `/research/strategies/new`로 간다. P6-06에서 legacy를 제거하면 `/legacy/builder`는
-  `/research/strategies/new`로 redirect한다 (WORKFLOW P2-02 bullet 갱신).
+- P2-02 당시 `/?step=...`, `/?run`은 legacy 화면을 위해 query를 보존했다. P6-06부터 `/`의 모든
+  search와 `/legacy/builder` search는 버리고 `/research/strategies/new`로 replace redirect한다.
+  `step`/`run`은 YAML route 계약이 아니므로 보존하면 잘못된 선택 상태처럼 보일 수 있다.
 - `/operations/*`는 항상 route tree에 등록하고, `VITE_ENABLE_OPERATIONS`가 truthy가 아니면 `beforeLoad`에서
   `notFound()`를 던진다. route 등록을 flag로 조건화하면 빌드마다 route tree 타입이 달라진다.
 

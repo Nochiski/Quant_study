@@ -27,6 +27,13 @@
 -- `group_key_basis='no_label'` 로 남기고 링크 후보에서만 뺀다. 격리하면 그 접수가 모집단에서
 -- 사라져 "정정 없음" 으로 보이는 생존편향을 게이트가 만든다(GATES §5-C6 과 같은 함정).
 --
+-- **모집단 dedup**: stage `stg_disclosure` 는 `write_mode='append_only'` · `key_unique=False`
+-- 라(rules_dart.py) 같은 접수번호가 재수집 판본만큼 쌓인다 — 서버 실측 203건(정기보고서 안 26건),
+-- 중복 쌍은 투영 컬럼이 전부 같다. grain 이 `rcept_no` 이므로 **모집단 CTE 에서** 접수번호당
+-- 1행만 남긴다. 안 접으면 산출이 같은 행을 두 번 내고 EG1 이 그만큼 어긋난다(서버 1차 빌드
+-- 198,189 vs count(DISTINCT rcept_no) 198,163, delta −26). `stg_doc_index` 도 같은 규약이라
+-- 조인 전에 접는다(`idx`); `stg_doc_correction` 은 `key_unique=True` 라 접을 필요가 없다.
+--
 -- PIT: `available_date = rcept_dt`(derived). 격리는 `rcept_dt` 결측 하나뿐이다(그 행은
 -- available_date 를 가질 수 없다).
 WITH base AS (
@@ -39,6 +46,13 @@ WITH base AS (
            nullif(regexp_extract(d.report_nm, '^\[([^\]]*)\]', 1), '')  AS corr_prefix,
            regexp_replace(d.report_nm, '^\[[^\]]*\]', '')               AS nm_clean
     FROM stg_disclosure d
+    -- 판본 선택은 first_write_wins(GATES EG6-P04 규약, `observed_date` 최소). 동률은 투영 컬럼
+    -- 전체로 깬다 — 판본끼리 payload 가 같으므로 어느 행을 골라도 산출이 같고 EG5a 가 선다.
+    QUALIFY row_number() OVER (
+        PARTITION BY d.rcept_no
+        ORDER BY d.observed_date NULLS LAST, d.rcept_dt NULLS LAST, d.corp_code NULLS LAST,
+                 d.report_nm NULLS LAST, d.is_correction NULLS LAST,
+                 d.rm_corrected_later NULLS LAST) = 1
 ),
 periodic AS (
     SELECT b.rcept_no, b.rcept_dt, b.corp_code, b.is_correction, b.rm_corrected_later,
@@ -73,8 +87,17 @@ periodic AS (
     FROM periodic p
 ),
 corr AS (
+    -- `stg_doc_correction` 은 natural_key (rcept_no) · `key_unique=True` 라 접수번호당 1행이
+    -- 보장된다(rules_doc.py) — dedup 하지 않는다.
     SELECT rcept_no, page_found, filed_date, filed_date_status, reason_raw, items
     FROM stg_doc_correction
+),
+idx AS (
+    -- `stg_doc_index` 는 append_only · key_unique=False → LEFT JOIN 팬아웃 방어
+    SELECT rcept_no, zip_ok
+    FROM stg_doc_index
+    QUALIFY row_number() OVER (PARTITION BY rcept_no
+                               ORDER BY observed_date NULLS LAST, zip_ok NULLS LAST) = 1
 ),
 cand AS (
     SELECT c.rcept_no,
@@ -135,7 +158,7 @@ linked AS (
                 AS BIGINT)                                              AS prior_corr_count
     FROM labeled l
     LEFT JOIN corr k ON k.rcept_no = l.rcept_no
-    LEFT JOIN stg_doc_index i ON i.rcept_no = l.rcept_no
+    LEFT JOIN idx i ON i.rcept_no = l.rcept_no
     LEFT JOIN picked a ON a.rcept_no = l.rcept_no
 ),
 back AS (

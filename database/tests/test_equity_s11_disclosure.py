@@ -214,7 +214,7 @@ def test_모집단_어휘가_sql_리터럴과_같다() -> None:
 
 def test_EG1_우변은_sql_의_모집단_CTE_를_재사용한다() -> None:
     rhs = rules_s11.EG1_RHS_SQL
-    assert rhs.endswith("SELECT count(*) FROM periodic")
+    assert rhs.endswith("SELECT count(DISTINCT rcept_no) FROM periodic")
     assert rhs.startswith(rules_s11.SQL_PATH.read_text(encoding="utf-8")[:40])
     # 마커는 정확히 한 번만 나온다 — 머리말 주석에 섞이면 모집단 정의가 잘린다
     assert rules_s11.SQL_PATH.read_text(encoding="utf-8").count("-- ==== eg1:") == 1
@@ -240,11 +240,15 @@ def test_픽스처는_전부_positive_이고_키가_유일하다(built: build.Bu
 
 # ── 손 트리 부정 픽스처 ───────────────────────────────────────────────────────
 
+OBSERVED = date(2026, 9, 1)          # 손 트리의 재수집 관측일(판본 선택 축)
+
+
 def _disclosure(rcept_no: str, rcept_dt: date | None, corp: str, report_nm: str,
-                is_correction: bool, rm: bool = False) -> dict[str, object]:
+                is_correction: bool, rm: bool = False,
+                observed: date = OBSERVED) -> dict[str, object]:
     return {"rcept_no": rcept_no, "rcept_dt": rcept_dt, "corp_code": corp,
             "report_nm": report_nm, "is_correction": is_correction,
-            "rm_corrected_later": rm}
+            "rm_corrected_later": rm, "observed_date": observed}
 
 
 def _correction(rcept_no: str, filed: date | None, status: str = "parsed",
@@ -261,8 +265,8 @@ def _hand_tree(make_stage_tree, tmp_path: Path, disclosures: list[dict[str, obje
     make_stage_tree(tmp_path, "stg_doc_correction", corrections,
                     partition_class="receipt_axis")
     make_stage_tree(tmp_path, "stg_doc_index",
-                    [{"rcept_no": d["rcept_no"], "zip_ok": True} for d in disclosures],
-                    partition_class="receipt_axis")
+                    [{"rcept_no": d["rcept_no"], "zip_ok": True, "observed_date": OBSERVED}
+                     for d in disclosures], partition_class="receipt_axis")
     make_stage_tree(tmp_path, "stg_doc_meta",
                     [{"rcept_no": d["rcept_no"], "member_role": "main"} for d in disclosures],
                     partition_class="receipt_axis")
@@ -388,6 +392,44 @@ def test_부정_비정기보고서는_모집단_밖(make_stage_tree, tmp_path: P
                     [_correction("20200101000001", date(2020, 3, 30))])
     assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
     assert (r.n_rows, r.n_reject) == (1, 0)
+
+
+def test_부정_재수집_판본이_모집단에_둘이면_한_행만_낸다(make_stage_tree,
+                                                          tmp_path: Path) -> None:
+    """stage `stg_disclosure` 는 append_only·key_unique=False 라 같은 접수가 여러 번 실린다.
+
+    grain 이 `rcept_no` 이므로 모집단 CTE 가 접수번호당 1행으로 접어야 한다 — 안 접으면 산출이
+    같은 행을 두 번 내고 EG1(count DISTINCT rcept_no)이 그만큼 어긋난다(서버 1차 빌드 delta −26).
+    `stg_doc_index` 도 같은 규약이라 손 트리가 그 중복까지 함께 만든다.
+    """
+    disclosures = [
+        _disclosure("20200101000001", date(2020, 3, 30), "00000001",
+                    "사업보고서 (2019.12)", False, rm=True),
+        # 같은 접수의 재수집 판본 — payload 는 같고 observed_date 만 늦다
+        _disclosure("20200101000001", date(2020, 3, 30), "00000001",
+                    "사업보고서 (2019.12)", False, rm=True, observed=date(2026, 9, 3)),
+        _disclosure("20200101000003", date(2020, 5, 20), "00000001",
+                    "[기재정정]사업보고서 (2019.12)", True),
+    ]
+    r = _build_hand(make_stage_tree, tmp_path, disclosures,
+                    [_correction("20200101000003", date(2020, 3, 30))])
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    assert (r.n_rows, r.n_reject) == (2, 0)          # 원본 1 + 정정 1, 중복 판본은 접혔다
+    assert r.out_dir is not None
+    rows = _rows(r.out_dir)
+    assert [x["rcept_no"] for x in rows] == ["20200101000001", "20200101000003"]
+    m = _gate(r, "EG3_disclosure_version").metrics
+    assert m["n_population_dup_rcept"] == 1          # 접힌 재수집 판본 1건(기록형)
+    assert m["ladder_stage"] == m["ladder_out"]      # 사다리는 두 축 모두 접수번호 축이다
+    assert m["ladder_stage"]["n_periodic"] == 2
+    # EG1 은 접수번호 축 항등 — 중복을 못 접으면 lhs 2 vs rhs 3 으로 깨진다
+    eg1 = _gate(r, "EG1").metrics
+    assert (eg1["lhs"], eg1["rhs"], eg1["delta"]) == (2, 2, 0)
+    # 링크도 dedup 뒤 모집단으로 계산된다 — 후보가 판본만큼 늘면 multi_unresolved 가 됐을 것이다
+    assert {x["rcept_no"]: x["candidate_status"] for x in rows} == {
+        "20200101000001": "n/a", "20200101000003": "unique"}
+    assert rows[1]["orig_rcept_no"] == "20200101000001"
+    assert rows[0]["n_corrections"] == 1
 
 
 def test_부정_링크_성립률_임계를_못_넘기면_폐기된다(make_stage_tree, tmp_path: Path) -> None:

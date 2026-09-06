@@ -21,6 +21,13 @@
 -- (11013 은 누계 자체가 분기값). 두 파생 블록은 `*_available_date`(구성 행 max)와 `*_n_rows`
 -- 를 동반한다.
 --
+-- **재수집 판본 dedup**: `stg_fin`·`stg_disclosure` 는 `write_mode='append_only'` ·
+-- `key_unique=False` 라(rules_dart.py) 같은 자연키가 여러 번 실릴 수 있다. `grp` 는 GROUP BY 라
+-- 안전하지만 ① `fin` 을 안 접으면 `sum` 집계(lease_liab · 금융업 매출 대체)가 이중계상되고
+-- ② `stg_disclosure` 를 그대로 조인하면 grp 행이 판본 수만큼 늘어 grain 이 깨진다(S11 이 서버
+-- 1차 빌드에서 같은 함정으로 EG1 delta −26). `stg_doc_meta` 는 key_unique=True 지만 접수당 main
+-- 멤버가 여럿일 수 있어 `doc` 이 이미 접는다.
+--
 -- PIT: `available_date = rcept_dt`(derived, `stg_disclosure`). `stg_rcept_dt_map` 은 stage 에
 -- 실재하지 않는다(GATES §9). 판본은 `api_restated` 하나 · `restated_unknown = true`(4A).
 -- 격리 4종: non_krw · period_unresolved · rcept_lag_out_of_range · duplicate_vintage.
@@ -104,6 +111,18 @@ fin AS (
     SEMI JOIN grp g
       ON g.corp_code = f.corp_code AND g.bsns_year = f.bsns_year
      AND g.reprt_code = f.reprt_code AND g.fs_div = f.fs_div
+    -- 자연키 8열(rules_dart.STG_FIN natural_key)당 1행. first_write_wins(`observed_date` 최소).
+    QUALIFY row_number() OVER (
+        PARTITION BY f.corp_code, f.bsns_year, f.reprt_code, f.fs_div, f.sj_div,
+                     f.account_id, f.account_detail, f.ord
+        ORDER BY f.observed_date NULLS LAST, f.thstrm_amount NULLS LAST) = 1
+),
+dt AS (
+    -- 접수일 원천. 접수번호당 1행으로 접어야 `head` 조인이 grp 행을 늘리지 않는다.
+    SELECT rcept_no, rcept_dt
+    FROM stg_disclosure
+    QUALIFY row_number() OVER (PARTITION BY rcept_no
+                               ORDER BY observed_date NULLS LAST, rcept_dt NULLS LAST) = 1
 ),
 req AS (
     -- 대체 규칙의 발동 조건(fin_map.REVENUE_FALLBACK.require) — 태그 존재 여부
@@ -177,7 +196,7 @@ head AS (
            m.period_from, m.period_to, m.doc_acode,
            c.fiscal_month
     FROM grp g
-    LEFT JOIN stg_disclosure d ON d.rcept_no = g.rcept_no
+    LEFT JOIN dt d ON d.rcept_no = g.rcept_no
     LEFT JOIN doc m ON m.rcept_no = g.rcept_no
     LEFT JOIN corp c ON c.corp_code = g.corp_code
 ),

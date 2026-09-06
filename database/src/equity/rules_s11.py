@@ -83,7 +83,9 @@ def population_sql(select: str) -> str:
     return f"{_population_prefix()}\nSELECT {select}"
 
 
-EG1_RHS_SQL = population_sql("count(*) FROM periodic")
+# 우변도 접수번호 축으로 센다 — 모집단 CTE 가 이미 dedup 하므로 count(*) 와 같지만,
+# 좌변(count DISTINCT rcept_no)과 같은 축이어야 dedup 이 깨질 때 EG1 이 그것을 잡는다.
+EG1_RHS_SQL = population_sql("count(DISTINCT rcept_no) FROM periodic")
 EG1_LHS_SQL = 'SELECT count(DISTINCT rcept_no) FROM "out_pq"'
 
 # ── 사다리 5단 — stage 뷰만 읽는 **독립** 산출 (모집단 CTE 를 재사용하지 않는다) ────────
@@ -96,17 +98,23 @@ _PERIODIC_PRED = " OR ".join(f"{_NM_CLEAN} LIKE '{p}%'" for p in PERIODIC_PREFIX
 _EXCLUDED_PRED = " AND ".join(f"{_NM_CLEAN} NOT LIKE '%{t}%'" for t in EXCLUDED_TOKENS)
 _PERIODIC_FROM = (f"FROM stg_disclosure d WHERE ({_PERIODIC_PRED}) AND {_EXCLUDED_PRED}")
 
+# `stg_disclosure` 는 접수번호가 중복될 수 있으므로(append_only) 전부 `count(DISTINCT rcept_no)`
+# 로 센다 — 행으로 세면 산출(접수번호 축)과 축이 달라 사다리가 항상 어긋난다.
 LADDER: tuple[tuple[str, str], ...] = (
-    ("n_periodic", f"SELECT count(*) {_PERIODIC_FROM}"),
-    ("n_rm_corrected_later", f"SELECT count(*) {_PERIODIC_FROM} AND d.rm_corrected_later"),
-    ("n_is_correction", f"SELECT count(*) {_PERIODIC_FROM} AND d.is_correction"),
-    ("n_correction_zip", f"SELECT count(*) {_PERIODIC_FROM} AND d.is_correction AND EXISTS "
-                         "(SELECT 1 FROM stg_doc_correction c WHERE c.rcept_no = d.rcept_no)"),
+    ("n_periodic", f"SELECT count(DISTINCT d.rcept_no) {_PERIODIC_FROM}"),
+    ("n_rm_corrected_later",
+     f"SELECT count(DISTINCT d.rcept_no) {_PERIODIC_FROM} AND d.rm_corrected_later"),
+    ("n_is_correction", f"SELECT count(DISTINCT d.rcept_no) {_PERIODIC_FROM} AND d.is_correction"),
+    ("n_correction_zip",
+     f"SELECT count(DISTINCT d.rcept_no) {_PERIODIC_FROM} AND d.is_correction AND EXISTS "
+     "(SELECT 1 FROM stg_doc_correction c WHERE c.rcept_no = d.rcept_no)"),
     ("n_correction_filed_parsed",
-     f"SELECT count(*) {_PERIODIC_FROM} AND d.is_correction AND EXISTS "
+     f"SELECT count(DISTINCT d.rcept_no) {_PERIODIC_FROM} AND d.is_correction AND EXISTS "
      "(SELECT 1 FROM stg_doc_correction c WHERE c.rcept_no = d.rcept_no "
      "AND c.filed_date_status = 'parsed')"),
 )
+# 모집단에서 접힌 재수집 판본 수(기록형) — 0 이 아니면 stage 가 같은 접수를 여러 번 실은 것이다.
+POPULATION_DUP_SQL = (f"SELECT count(*) - count(DISTINCT d.rcept_no) {_PERIODIC_FROM}")
 # 산출에서 같은 다섯 단을 다시 센다. L1·L3 은 산출 컬럼만으로, L2·L4·L5 는 stage 축과 조인해서
 # 센다 — 뒤 세 단이 검사하는 축은 "산출의 정기보고서·정정 집합이 stage 의 그것과 같은가"다
 # (`stg_doc_correction` 조인 자체는 양변이 공유한다). 정정 문서의 **재료 유무**가 `date_check`
@@ -114,8 +122,8 @@ LADDER: tuple[tuple[str, str], ...] = (
 LADDER_OUT: tuple[tuple[str, str], ...] = (
     ("n_periodic", 'SELECT count(*) FROM "{v}"'),
     ("n_rm_corrected_later",
-     'SELECT count(*) FROM "{v}" o JOIN stg_disclosure d USING (rcept_no) '
-     "WHERE d.rm_corrected_later"),
+     'SELECT count(*) FROM "{v}" o WHERE EXISTS (SELECT 1 FROM stg_disclosure d '
+     "WHERE d.rcept_no = o.rcept_no AND d.rm_corrected_later)"),
     ("n_is_correction", 'SELECT count(*) FROM "{v}" WHERE is_correction'),
     ("n_correction_zip",
      'SELECT count(*) FROM "{v}" o WHERE o.is_correction AND EXISTS '
@@ -237,6 +245,7 @@ def eg3_disclosure_version(ctx: EquityGateContext) -> GateResult:
         "n_by_candidate_status": _counts(ctx, "candidate_status"),
         "n_by_date_check": _counts(ctx, "date_check"),
         "n_by_group_key_basis": _counts(ctx, "group_key_basis"),
+        "n_population_dup_rcept": _n(ctx, POPULATION_DUP_SQL),
         "n_no_label": _n(ctx, f'SELECT count(*) FROM "{v}" WHERE period_label IS NULL'),
         "n_linked_originals": _n(ctx, f'SELECT count(DISTINCT orig_rcept_no) FROM "{v}"'),
         "n_corr_has_fin_item": _n(ctx, f'SELECT count(*) FROM "{v}" WHERE corr_has_fin_item'),
@@ -314,17 +323,16 @@ def eg8_disclosure_version(ctx: EquityGateContext) -> GateResult:
     82/97 = 0.845 로 떨어지는데 그 15건은 규칙이 의도한 결과이지 놓친 링크가 아니다.
     """
     v = ctx.out_view
-    n_rm = _n(ctx, f'SELECT count(*) FROM "{v}" o JOIN stg_disclosure d USING (rcept_no) '
-                   "WHERE d.rm_corrected_later AND NOT o.is_correction")
-    n_reached = _n(ctx, f'SELECT count(*) FROM "{v}" o JOIN stg_disclosure d USING (rcept_no) '
-                        "WHERE d.rm_corrected_later AND NOT o.is_correction "
+    # stage 축은 **EXISTS** 로 읽는다 — `stg_disclosure` 는 접수번호가 중복될 수 있어 JOIN 하면
+    # 산출 행이 판본 수만큼 부풀고 비율이 흔들린다.
+    rm = ("EXISTS (SELECT 1 FROM stg_disclosure d WHERE d.rcept_no = o.rcept_no "
+          "AND d.rm_corrected_later)")
+    n_rm = _n(ctx, f'SELECT count(*) FROM "{v}" o WHERE {rm} AND NOT o.is_correction')
+    n_reached = _n(ctx, f'SELECT count(*) FROM "{v}" o WHERE {rm} AND NOT o.is_correction '
                         "AND o.n_corrections > 0")
     # 기록형 둘: ① 정정본에 붙은 rm(구조적 미도달) ② 링크는 닿았는데 stage 플래그가 없는 원본
-    n_rm_on_correction = _n(ctx, f'SELECT count(*) FROM "{v}" o JOIN stg_disclosure d '
-                                 "USING (rcept_no) WHERE d.rm_corrected_later "
-                                 "AND o.is_correction")
-    n_linked_no_rm = _n(ctx, f'SELECT count(*) FROM "{v}" o JOIN stg_disclosure d '
-                             "USING (rcept_no) WHERE NOT d.rm_corrected_later "
+    n_rm_on_correction = _n(ctx, f'SELECT count(*) FROM "{v}" o WHERE {rm} AND o.is_correction')
+    n_linked_no_rm = _n(ctx, f'SELECT count(*) FROM "{v}" o WHERE NOT {rm} '
                              "AND o.n_corrections > 0")
     rate = (n_reached / n_rm) if n_rm else None
     metrics: dict[str, object] = {"n_rm_corrected_later": n_rm, "n_rm_reached": n_reached,
@@ -368,11 +376,12 @@ DISCLOSURE_VERSION = register(EquityTable(
     eg1_rhs_sql=EG1_RHS_SQL,
     sql_path=SQL_PATH,
     input_columns={
+        # `observed_date` 는 재수집 판본을 접는 축이다(first_write_wins) — 산출 컬럼이 아니다.
         "stg_disclosure": ("rcept_no", "rcept_dt", "corp_code", "report_nm", "is_correction",
-                           "rm_corrected_later"),
+                           "rm_corrected_later", "observed_date"),
         "stg_doc_correction": ("rcept_no", "page_found", "filed_date", "filed_date_status",
                                "reason_raw", "items"),
-        "stg_doc_index": ("rcept_no", "zip_ok"),
+        "stg_doc_index": ("rcept_no", "zip_ok", "observed_date"),
         # `stg_doc_meta` 는 이 산출에 쓰이지 않지만 **입력으로 고정**한다 — S12 가 같은 판본을
         # 읽어야 `period_end` 정본과 링크가 어긋나지 않는다(WORKFLOW §3-1 4A 입력 4테이블).
         "stg_doc_meta": ("rcept_no",)},
@@ -390,6 +399,7 @@ BASELINE_SEED = Path(__file__).parent / "baseline_seed_s11.json"
 """이 슬라이스가 요구하는 상수의 초기값(절단본 실측). 승인 뒤 `baseline.json` 에 병합한다."""
 
 __all__ = ["BASELINE_SEED", "CANDIDATE_STATUS_VOCAB", "CORRECTION_PREFIXES", "DATE_CHECK_VOCAB",
+           "POPULATION_DUP_SQL",
            "DATE_CHECK_UNMEASURED", "DISCLOSURE_VERSION", "EXCLUDED_TOKENS",
            "FIN_ITEM_KEYWORDS", "GROUP_KEY_BASIS_VOCAB", "KIND_VOCAB", "LADDER", "LADDER_OUT",
            "LINKED_STATUS", "LINK_BASIS_VOCAB", "PERIODIC_PREFIXES", "REJECT_REASONS", "TABLES",

@@ -269,6 +269,14 @@ def eg3_fin_std(ctx: EquityGateContext) -> GateResult:
             ctx, f'SELECT count(*) FROM "{v}" o JOIN corp c USING (corp_code) '
                  "WHERE o.report_code = '11011' AND c.fiscal_month IS NOT NULL "
                  "AND month(o.period_end) <> c.fiscal_month"),
+        # 재수집 판본 접힌 수(기록형) — 0 이 아니면 stage 가 같은 자연키를 여러 번 실었다.
+        "n_stg_fin_dup_natural_key": _n(
+            ctx, "SELECT coalesce(sum(c - 1), 0) FROM (SELECT count(*) AS c FROM stg_fin "
+                 "GROUP BY corp_code, bsns_year, reprt_code, fs_div, sj_div, account_id, "
+                 "account_detail, ord HAVING c > 1)"),
+        "n_disclosure_dup_rcept": _n(
+            ctx, "SELECT coalesce(sum(c - 1), 0) FROM (SELECT count(*) AS c "
+                 "FROM stg_disclosure GROUP BY rcept_no HAVING c > 1)"),
         # rcept_no 당 main 문서가 둘 이상이면 `.sql` 의 tie-break 가 실제로 작동한 것이다
         "n_doc_meta_multi_main": _n(
             ctx, "SELECT count(*) FROM (SELECT rcept_no FROM stg_doc_meta "
@@ -373,11 +381,13 @@ FIN_STD = register(EquityTable(
                  "FROM stg_fin WHERE account_std)"),
     sql_path=SQL_PATH,
     input_columns={
+        # `account_detail`·`ord`·`observed_date` 는 재수집 판본을 접는 축이다(자연키 8열 +
+        # first_write_wins) — 산출 컬럼이 아니다.
         "stg_fin": ("corp_code", "bsns_year", "reprt_code", "fs_div", "sj_div", "account_id",
-                    "account_nm", "thstrm_amount", "account_std", "is_krw", "currency",
-                    "rcept_no"),
+                    "account_detail", "ord", "account_nm", "thstrm_amount", "account_std",
+                    "is_krw", "currency", "rcept_no", "observed_date"),
         "stg_doc_meta": ("rcept_no", "member_role", "doc_acode", "period_from", "period_to"),
-        "stg_disclosure": ("rcept_no", "rcept_dt"),
+        "stg_disclosure": ("rcept_no", "rcept_dt", "observed_date"),
         # 링크 판본을 같이 고정한다(EG6_fin_std 무매칭 비대칭이 읽는다). `stg_rcept_dt_map` 은
         # 실재하지 않아 접수일 원천은 `stg_disclosure.rcept_dt` 다(GATES §9).
         "disclosure_version": ("rcept_no", "corp_code", "kind", "period_label"),

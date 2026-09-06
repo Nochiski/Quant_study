@@ -306,13 +306,17 @@ def test_픽스처는_전부_positive_이고_키가_유일하다(built: build.Bu
 
 # ── 손 트리 부정 픽스처 ───────────────────────────────────────────────────────
 
+OBSERVED = date(2026, 9, 1)          # 손 트리의 재수집 관측일(판본 선택 축)
+
+
 def _fin_row(corp: str, year: str, reprt: str, rcept: str, *, sj: str, account_id: str,
-             account_nm: str, amount: float, is_krw: bool = True,
-             currency: str = "KRW") -> dict[str, object]:
+             account_nm: str, amount: float, is_krw: bool = True, currency: str = "KRW",
+             ord_: int = 1, observed: date = OBSERVED) -> dict[str, object]:
     return {"corp_code": corp, "bsns_year": year, "reprt_code": reprt, "fs_div": "CFS",
-            "sj_div": sj, "account_id": account_id, "account_nm": account_nm,
+            "sj_div": sj, "account_id": account_id, "account_detail": "",
+            "ord": ord_, "account_nm": account_nm,
             "thstrm_amount": amount, "account_std": True, "is_krw": is_krw,
-            "currency": currency, "rcept_no": rcept}
+            "currency": currency, "rcept_no": rcept, "observed_date": observed}
 
 
 def _fixture_file(tmp_path: Path, name: str, key: str, column: str, expect: object) -> Path:
@@ -327,28 +331,31 @@ def _fixture_file(tmp_path: Path, name: str, key: str, column: str, expect: obje
 def _hand_build(make_stage_tree, tmp_path: Path, corps: list[tuple[str, str | None]],
                 reports: list[tuple[str, str, str, str, date, date | None, str | None]],
                 fin: list[dict[str, object]], fixture: tuple[str, str, object],
-                **bl: object) -> build.BuildResult:
+                duplicate_disclosure: bool = False, **bl: object) -> build.BuildResult:
     """corps = [(corp_code, acc_mt)] · reports = [(rcept, corp, year, reprt, rcept_dt,
-    period_to, doc_acode)] — period_to 가 None 이면 문서가 없는 그룹이다."""
+    period_to, doc_acode)] — period_to 가 None 이면 문서가 없는 그룹이다.
+    `duplicate_disclosure` 는 첫 접수의 재수집 판본을 `stg_disclosure` 에 하나 더 실는다."""
     tree = make_stage_tree(tmp_path, "stg_corp_map",
                            [{"corp_code": c, "ticker": f"00000{i}", "corp_name_current": c}
                             for i, (c, _) in enumerate(corps)])
     make_stage_tree(tmp_path, "stg_company",
                     [{"corp_code": c, "acc_mt": m, "induty_code_current": "26",
                       "observed_date": date(2026, 1, 1)} for c, m in corps])
-    make_stage_tree(tmp_path, "stg_disclosure",
-                    [{"rcept_no": r, "rcept_dt": dt, "corp_code": c,
-                      "report_nm": f"사업보고서 ({y}.12)", "is_correction": False,
-                      "rm_corrected_later": False}
-                     for r, c, y, _rc, dt, _pt, _ac in reports],
+    disclosures = [{"rcept_no": r, "rcept_dt": dt, "corp_code": c,
+                    "report_nm": f"사업보고서 ({y}.12)", "is_correction": False,
+                    "rm_corrected_later": False, "observed_date": OBSERVED}
+                   for r, c, y, _rc, dt, _pt, _ac in reports]
+    if duplicate_disclosure:
+        disclosures.append({**disclosures[0], "observed_date": date(2026, 9, 3)})
+    make_stage_tree(tmp_path, "stg_disclosure", disclosures,
                     partition_class="receipt_axis")
     make_stage_tree(tmp_path, "stg_doc_correction",
                     [{"rcept_no": reports[0][0], "page_found": True,
                       "filed_date": reports[0][4], "filed_date_status": "parsed",
                       "reason_raw": "", "items": ""}], partition_class="receipt_axis")
     make_stage_tree(tmp_path, "stg_doc_index",
-                    [{"rcept_no": r, "zip_ok": True} for r, *_ in reports],
-                    partition_class="receipt_axis")
+                    [{"rcept_no": r, "zip_ok": True, "observed_date": OBSERVED}
+                     for r, *_ in reports], partition_class="receipt_axis")
     make_stage_tree(tmp_path, "stg_doc_meta",
                     [{"rcept_no": r, "member_role": "main", "doc_acode": ac,
                       "period_from": None if pt is None else date(pt.year, 1, 1),
@@ -509,6 +516,42 @@ def test_부정_접수지연_상한_밖은_격리된다(make_stage_tree, tmp_pat
     assert r.out_dir is not None
     assert [(x["corp_code"], x["reject_reason"]) for x in _rejects(r.out_dir)] == [
         ("00000002", "rcept_lag_out_of_range")]
+
+
+def test_부정_재수집_판본이_있어도_grain_과_합계가_흔들리지_않는다(make_stage_tree,
+                                                                    tmp_path: Path) -> None:
+    """`stg_fin`·`stg_disclosure` 는 append_only·key_unique=False 라 같은 자연키가 여러 번 실린다.
+
+    ① `stg_disclosure` 중복을 안 접으면 `head` 조인이 grp 행을 늘려 grain 이 깨지고
+    ② `stg_fin` 중복을 안 접으면 `sum` 집계(lease_liab)가 이중계상된다.
+    """
+    corps = [("00000001", "12")]
+    reports = [("20210330000001", "00000001", "2020", "11011", date(2021, 3, 30),
+                date(2020, 12, 31), "11011")]
+    row = dict(_fin_row("00000001", "2020", "11011", "20210330000001", sj="BS",
+                        account_id="ifrs-full_CurrentLeaseLiabilities", account_nm="리스부채",
+                        amount=40.0))
+    fin = [
+        _fin_row("00000001", "2020", "11011", "20210330000001", sj="IS",
+                 account_id="ifrs-full_Revenue", account_nm="매출액", amount=100.0),
+        row,
+        {**row, "observed_date": date(2026, 9, 3)},     # 같은 자연키의 재수집 판본
+        _fin_row("00000001", "2020", "11011", "20210330000001", sj="BS",
+                 account_id="ifrs-full_NoncurrentLeaseLiabilities", account_nm="리스부채",
+                 amount=60.0, ord_=2),
+    ]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20210330000001", "lease_liab", "100.0"), duplicate_disclosure=True)
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    assert (r.n_rows, r.n_reject) == (1, 0)            # 접수 중복이 grain 을 늘리지 않는다
+    rows = _rows(r.out_dir)                            # type: ignore[arg-type]
+    # 유동 40 + 비유동 60 = 100. 판본을 안 접으면 140 이 된다(이중계상).
+    assert _num(rows[0]["lease_liab"]) == Decimal("100")
+    m = _gate(r, "EG3_fin_std").metrics
+    assert m["n_stg_fin_dup_natural_key"] == 1
+    assert m["n_disclosure_dup_rcept"] == 1
+    eg1 = _gate(r, "EG1").metrics
+    assert (eg1["lhs"], eg1["rhs"], eg1["delta"]) == (1, 1, 0)
 
 
 def test_부정_pick_이_갈리면_값을_만들지_않는다(make_stage_tree, tmp_path: Path) -> None:

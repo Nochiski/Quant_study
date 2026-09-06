@@ -23,6 +23,13 @@ ORDER=(stg_rcept_dt_map
   stg_event_ds_rs_ocr stg_event_bnk_mngt_pcbg
   stg_consensus_monthly stg_consensus_annual stg_consensus_quarterly stg_consensus_matrix stg_analyst_summary stg_analyst_broker stg_fin_wise
   stg_v3_revision_daily stg_v3_analyst_opinions stg_v3_consensus_annual stg_v3_revision_compare stg_wise_coverage stg_calls_wise)
+# 문서층 4테이블은 같은 스냅샷의 프리패스 캐시(doc_prepass)가 있어야 빌드된다 — 없으면 건너뛰고 알린다.
+DOC_SUM="data/stage/_tmp/doc/$SNAP/summary.json"
+if [ -f "$DOC_SUM" ] && grep -q '"status": "ok"' "$DOC_SUM"; then
+  ORDER+=(stg_doc_meta stg_doc_section stg_doc_correction stg_doc_parse_log)
+else
+  echo "stg_doc_*: prepass cache for $SNAP missing or gate_failed — run 'PYTHONPATH=src .venv/bin/python -m stage.doc_prepass --snapshot-id $SNAP' first (skipped)"
+fi
 if [ "$#" -gt 0 ]; then ORDER=("$@"); fi
 
 for T in "${ORDER[@]}"; do

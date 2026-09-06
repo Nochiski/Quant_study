@@ -1,16 +1,16 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: APPROVED
-current_phase: P4
-current_pr: P4-08
-active_prs: [P4-08]
+project_status: READY
+current_phase: P6
+current_pr: P6-08
+active_prs: []
 parallel_window: []
-last_updated: 2026-09-05T10:03:23+09:00
-planned_prs: 50
-merged_prs: 40
-approved_prs: 41
-progress_percent: 80
+last_updated: 2026-09-05T23:01:50+09:00
+planned_prs: 52
+merged_prs: 46
+approved_prs: 46
+progress_percent: 88
 ---
 
 # YAML Strategy Workbench 실시간 진행 계획
@@ -22,13 +22,13 @@ progress_percent: 80
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `APPROVED` |
-| Current phase | `P4` |
-| Current/next PR | `P4-08` |
-| Active PR | `P4-08` |
-| Progress | `40 / 50 merged (80%)` |
-| Approved | `41 / 50` |
-| Aggregated at | `2026-09-05 10:03 KST` |
+| Project status | `READY` |
+| Current phase | `P6` |
+| Current/next PR | `P6-08` |
+| Active PR | none |
+| Progress | `46 / 52 merged (88%)` |
+| Approved | `46 / 52` |
+| Aggregated at | `2026-09-05 23:01 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -76,26 +76,26 @@ progress_percent: 80
 | P1.5 | Backtest Correctness Gate | 5 | 5 | `MERGED` |
 | P2 | App Shell and visual foundation | 4 | 4 | `MERGED` |
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
-| P4 | Outline, Contract, Projections | 10 | 9 | `APPROVED` |
-| P5 | Truthful Trace UI | 3 | 0 | `WAITING` |
-| P6 | Professional release and migration | 7 | 1 | `WAITING` |
-| **Total** |  | **50** | **40** | **80%** |
+| P4 | Outline, Contract, Projections | 10 | 10 | `MERGED` |
+| P5 | Truthful Trace UI | 3 | 3 | `MERGED` |
+| P6 | Professional release and migration | 9 | 3 | `READY` |
+| **Total** |  | **52** | **46** | **88%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
 
 | 항목 | 값 |
 |---|---|
-| PR | `P4-08` Source/semantic/revision Diff와 conflict resolution APPROVED |
-| Intent | 같은 StrategySpec의 원문 변화와 backend canonical 의미 변화를 분리해 보여주고 revision/409 conflict 결정을 안전하게 완료한다 |
-| Acceptance | source text diff; backend canonical semantic diff; revision-to-revision diff; invalid source는 text-only; comment-only는 semantic change 없음; 409에서 server revision으로 이동하거나 현재 변경 복사 후 새 revision 작성; new/revision URL·pointer parity |
-| Non-goals | 자동 3-way merge, 임의 client semantic normalization, 대용량 diff virtualization(P6-04), server draft/history(P6-02) |
-| Branch/worktree | `feat/p4-08-diff-view` (`Quant_study-p4-08`) |
-| Base SHA | `bdee3f7` (P4-07 merge main) |
-| Head SHA | `9b29220` review-fix freeze |
-| Diff stat | 28 files, +2,130/-177 (test churn 883, reusable Diff model/table·route/state·CSS·i18n); source/canonical/revision/conflict와 동일 reviewer 회귀가 하나의 end-to-end acceptance라 12절 size exception |
-| Focused tests | reviewer 회귀 5 files 75 passed; compile/document/route lifecycle 3 files 66 passed |
-| Full gate | frontend typecheck·lint·vitest 368·build; real-backend PIT E2E 포함; backend Ruff; OpenAPI/SDK 재생성 clean |
+| PR | `P6-08` Strategy/revision history routed UI READY |
+| Intent | 기존 repository의 immutable revision/history SoT를 그대로 투영해 전문 사용자가 저장 전략을 찾고 원하는 revision을 편집·diff direct route로 열 수 있게 한다 |
+| Acceptance | deterministic strategy list와 revision pagination; `/research/strategies` direct route와 nav; strategy 선택 시 revision history·최신 revision 편집 연결; 임의 revision edit/diff deep link; loading·empty·error·out-of-range offset을 안전하게 canonical page로 복구; OpenAPI/generated client와 backend/frontend 계약 테스트 동기화 |
+| Non-goals | server draft 변경(P6-02), backtest run history/provenance(P6-09), strategy 삭제·rename, 검색 인덱스, legacy editor 제거(P6-06) |
+| Branch/worktree | 아직 생성 전 (`READY`) |
+| Base SHA | `c25d43c` (P6-02 merge main) |
+| Head SHA | — |
+| Diff stat | — |
+| Focused tests | list/history API pagination, direct route, loading/empty/error/out-of-range 상태를 구현과 함께 고정 예정 |
+| Full gate | 구현 후 backend/frontend 전체 gate, OpenAPI/SDK deterministic, root entrypoint, PLAN/diff check 실행 예정 |
 
 ---
 
@@ -203,41 +203,43 @@ Phase exit:
 | [x] | `P4-05` | Canonical node snippet insertion | P3-02, P1-05 | `MERGED` | [#59](https://github.com/Nochiski/Quant_study/pull/59) · `review_p4_05` APPROVE · `191b902` |
 | [x] | `P4-06` | Read-only canonical JSON과 Form projection | P3-05 | `MERGED` | [#61](https://github.com/Nochiski/Quant_study/pull/61) · `review_p4_06` APPROVE · `f9a0e35` |
 | [x] | `P4-07` | Read-only FactorGraph DAG projection | P4-01, P3-05 | `MERGED` | [#62](https://github.com/Nochiski/Quant_study/pull/62) · `review_p4_07` APPROVE · `bdee3f7` |
-| [ ] | `P4-08` | Source/semantic/revision Diff와 conflict resolution | P1-08, P3-07 | `APPROVED` | [#63](https://github.com/Nochiski/Quant_study/pull/63) · `review_p4_08` APPROVE (P1 2/P2 3 해소) · latest CI 4/4 |
+| [x] | `P4-08` | Source/semantic/revision Diff와 conflict resolution | P1-08, P3-07 | `MERGED` | [#63](https://github.com/Nochiski/Quant_study/pull/63) · `review_p4_08` APPROVE (P1 2/P2 3 해소) · `5a242ec` |
 | [x] | `P4-09` | Execution Plan 표시와 YAML/graph selection 연동 | P4-04, P4-01 | `MERGED` | [#58](https://github.com/Nochiski/Quant_study/pull/58) · `review_p4_09` APPROVE · `8a2ebfc` |
 | [x] | `P4-10` | Five-area snippet catalog UI와 new/revision page wiring | P4-05 | `MERGED` | [#60](https://github.com/Nochiski/Quant_study/pull/60) · `review_p4_10` APPROVE · `20491b8` |
 
 Phase exit:
 
-- [ ] 상단 중복 stepper 없이 left/center/right IDE 영역이 완성되었다.
-- [ ] Outline에 parameters가 포함되었다.
-- [ ] YAML/JSON/Form/Graph/Diff가 같은 StrategySpec을 표현한다.
+- [x] 상단 중복 stepper 없이 left/center/right IDE 영역이 완성되었다.
+- [x] Outline에 parameters가 포함되었다.
+- [x] YAML/JSON/Form/Graph/Diff가 같은 StrategySpec을 표현한다.
 
 ## P5 — 실제 계산 Trace UI
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P5-01` | Correctness pipeline을 조회하는 scoped trace API | P1.5-04, P1-03 | `WAITING` | — |
-| [ ] | `P5-02` | Date/security/node 선택 Debugger shell | P3-05, P5-01, P2-03 | `WAITING` | — |
-| [ ] | `P5-03` | Raw→Target trace, risk before/after, order delta estimate | P4-01, P4-07, P5-02 | `WAITING` | — |
+| [x] | `P5-01` | Correctness pipeline을 조회하는 scoped trace API | P1.5-04, P1-03 | `MERGED` | [#65](https://github.com/Nochiski/Quant_study/pull/65) · `review_p5_01` APPROVE · merge `e4fabd4` |
+| [x] | `P5-02` | Date/security/node 선택 Debugger shell | P3-05, P5-01, P2-03 | `MERGED` | [#67](https://github.com/Nochiski/Quant_study/pull/67) · `review_p5_02` APPROVE · merge `fcc37ee` |
+| [x] | `P5-03` | Raw→Target trace, risk before/after, order delta estimate | P4-01, P4-07, P5-02 | `MERGED` | [#68](https://github.com/Nochiski/Quant_study/pull/68) · `review_p5_03` APPROVE P0/P1/P2 0 · merge `a609eee` |
 
 Phase exit:
 
-- [ ] UI trace가 실제 FactorGraph, TargetTape, Backtest 입력과 일치한다.
-- [ ] `spec_hash/snapshot_id/registry_version/plan_hash`로 재현할 수 있다.
-- [ ] `/risk/max_name_weight` JSON Pointer와 zero/missing/coverage 상태가 정확하다.
+- [x] UI trace가 실제 FactorGraph, TargetTape, Backtest 입력과 일치한다.
+- [x] `spec_hash/snapshot_id/registry_version/plan_hash`로 재현할 수 있다.
+- [x] `/risk/max_name_weight` JSON Pointer와 zero/missing/coverage 상태가 정확하다.
 
 ## P6 — 전문 사용자 마감과 전환
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P6-01` | SQLite persistent strategy revision repository | P1-07 | `WAITING` | — |
-| [ ] | `P6-02` | Server draft, strategy/revision/backtest history UI | P6-01, P3-06, P4-08 | `WAITING` | — |
+| [x] | `P6-01` | SQLite persistent strategy revision repository | P1-07 | `MERGED` | [#69](https://github.com/Nochiski/Quant_study/pull/69) · `review_p6_01` APPROVE |
+| [x] | `P6-02` | Server draft persistence/CAS/recovery UI | P6-01, P3-06, P4-08 | `MERGED` | [#72](https://github.com/Nochiski/Quant_study/pull/72) · `review_p6_02` APPROVE |
 | [ ] | `P6-03` | Keyboard workflow와 Command Palette | P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `WAITING` | — |
 | [ ] | `P6-04` | Large/hostile spec 성능·접근성·i18n과 soft dark theme (`$ref`-only cycle fail-closed 포함) | P3-05, P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `WAITING` | — |
 | [ ] | `P6-05` | Playwright/visual regression infrastructure와 CI | P2-03, P3-05, P6-04 | `WAITING` | — |
-| [ ] | `P6-06` | 전체 browser E2E·실구동 시나리오 검증, migration gate, 조건부 legacy cleanup | P6-01, P6-02, P6-03, P6-04, P6-05 | `WAITING` | — |
+| [ ] | `P6-06` | 전체 browser E2E·실구동 시나리오 검증, migration gate, 조건부 legacy cleanup | P6-01, P6-02, P6-03, P6-04, P6-05, P6-08, P6-09 | `WAITING` | — |
 | [x] | `P6-07` | Root frontend/backend development entrypoints | P0-02, P0-03 | `MERGED` | [#56](https://github.com/Nochiski/Quant_study/pull/56) · `review_p6_07` APPROVE |
+| [ ] | `P6-08` | Strategy list와 revision history routed UI | P6-01, P6-02, P3-06, P4-08 | `READY` | P6-02 review size finding으로 분리 |
+| [ ] | `P6-09` | Backtest run history routed UI와 provenance | P6-08, P3-05 | `WAITING` | P6-02 review size finding으로 분리 |
 
 Phase exit:
 
@@ -254,6 +256,11 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
+| P6-02 | `review_p6_02` | `206ee41` | `1473633` | APPROVE (최초 P1 4/P2 3과 2차 P1 2를 동일 reviewer가 모두 독립 재현 폐쇄; P0/P1/P2 0) | 0 | auth/ownership·retention/TTL은 live 확장 전 후속, 615-line hook state machine 분리는 유지보수 후보 | 2026-09-05 |
+| P6-01 | `review_p6_01` | `a609eee` | `15370c7` | APPROVE (누적 P1 모두 폐쇄, latest full diff의 새 P0/P1/P2 0) | 0 | strategy별 chain startup/list N+1은 P6-04 측정; 외부 ANALYZE의 sqlite_stat*은 의도적으로 fail-closed | 2026-09-05 |
+| P5-03 | `review_p5_03` | `fcc37ee` | `65d0b18` | APPROVE (누적 P1 3건 해소, latest full diff의 새 P0/P1/P2 0) | 0 | page/chunk별 pipeline 재계산 비용은 P6-04 측정·축소; RawObservationContractError docstring의 HTTP 정책 설명은 비차단 P3 | 2026-09-05 |
+| P5-02 | `review_p5_02` | `e4fabd4` | `fceddf7` | APPROVE (최초 P1 1/P2 4를 동일 reviewer 재검토에서 모두 해소) | 1 (해소) | P5-03 다단계 trace cache 크기/gcTime, URL asOf/security 정규화와 backend invariant 기반 duplicate row는 후속 검토 | 2026-09-05 |
+| P5-01 | `review_p5_01` | `5a242ec` | `f3b8735` | APPROVE (누적 P1/P2 모두 동일 reviewer 재검토에서 해소) | 0 | 초대형 `sorted(set(...))` 내부 정렬과 제3자 adapter construction callback 준수는 비차단 잔여 위험; application consumer revalidation은 독립 checkpoint 보장 | 2026-09-05 |
 | P4-08 | `review_p4_08` | `bdee3f7` | `684dc69` | APPROVE (최초 P1 2/P2 3과 new-draft badge를 동일 reviewer 재검토에서 모두 해소) | 2 (해소) | 대형 Diff 전체 행 virtualization은 P6-04, 서로 다른 history page 간 선택은 P6-02 범위 | 2026-09-05 |
 | P4-07 | `review_p4_07` | `f9a0e35` | `380d583` | APPROVE (REQUEST_CHANGES P1 1/P2 1 해소 후 동일 reviewer 재승인) | 0 | saved JSON Graph↔source browser 통합과 대형 DAG 시각·키보드 UX는 P6 E2E/성능·접근성에서 확인 | 2026-09-05 |
 | P4-09 | `review_p4_09` | `25d8b45` | `160fad4` | APPROVE | 0 | factor 보유 실제 route→URL→editor reveal/focus 통합 테스트와 plan-null registry/data provenance 표시를 후속 보강 | 2026-09-05 |
@@ -296,6 +303,11 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
+| P6-02 | draft repository/HTTP 15, frontend server-draft 10 + document-route 45, reviewer hostile probes | backend 1,112·Ruff·Pyright; frontend 417·typecheck·lint·build; Rust 13·root 5 | OpenAPI/SDK deterministic diff 0 | raw surrogate 4종 422/no-write, wrong-ID/malformed wire 차단, base revert 및 in-flight PUT→revision CAS retirement | [#72](https://github.com/Nochiski/Quant_study/pull/72) same reviewer APPROVE P0/P1/P2 0, approval-doc HEAD CI 4/4 pass, MERGED (`c25d43c`) | 2026-09-05 |
+| P6-01 | repository/server/architecture 74 passed; reviewer internal-object hostile probes | backend 1,097·Ruff·Pyright; frontend 403·typecheck·lint·build; root smoke/static | OpenAPI/SDK deterministic diff 0 | restart exact source, REAL chain corruption, literal DDL mutation, unowned/owned sqlite_sequence와 SQL-NULL autoindex fail-closed | [#69](https://github.com/Nochiski/Quant_study/pull/69) same reviewer APPROVE, approval-doc HEAD CI 4/4 pass, MERGED (`fe3fbc5`) | 2026-09-05 |
+| P5-03 | author raw/API 103+frontend contract 1, trace backend 96/frontend 70; reviewer backend focused 138+architecture 7/frontend 74 | author/reviewer backend 1,041·frontend 403; Ruff·Pyright·typecheck·lint·build | OpenAPI/SDK 2회 deterministic, reviewer runtime=tracked 202 schemas | duplicate/blank hostile 세 route 422·계산 진입 0, 1,025-field cancellation, 6×100/101-node/8,100-row와 default/non-rebalance 실제 HTTP를 독립 재검증 | [#68](https://github.com/Nochiski/Quant_study/pull/68) `review_p5_03` APPROVE P0/P1/P2 0; CI 4/4 pass | 2026-09-05 |
+| P5-02 | author/reviewer focused 62 passed | frontend typecheck·lint·Vitest 392·build; backend pytest 1,027·Ruff·Pyright | OpenAPI/SDK 재생성 deterministic·diff clean | source identity key·query-cache REST owner·inline→saved late/visible result 폐기·Plan 탭 error/cancel/discard·revision saved wire와 URL back/forward·feature CSS no-important 회귀를 reviewer 재확인 | [#67](https://github.com/Nochiski/Quant_study/pull/67) `review_p5_02` APPROVE, final CI 4/4 pass, MERGED (`fcc37ee`) | 2026-09-05 |
+| P5-01 | author focused 251 + reviewer backend full 1,027·architecture 7 passed | backend pytest 1,027·Ruff `src tests`·Pyright; frontend typecheck·lint·Vitest 369·build | runtime OpenAPI == tracked true; 기존 OpenAPI/SDK 17-file deterministic·schema parity 증거 유지 | reviewer 독립 probe raw consumer 2,000→1, factor output 1,000→1; constructor/scope/raw→factor/portfolio checkpoint·기존 wire/non-finite/schedule/tape parity 재확인 | [#65](https://github.com/Nochiski/Quant_study/pull/65) `review_p5_01` APPROVE, final CI 4/4 pass, MERGED (`e4fabd4`) | 2026-09-05 |
 | P4-08 | author focused 75/66 + reviewer focused 5 files 75 passed | frontend typecheck·lint·vitest 368·build; reviewer 독립 전체 368; real-backend PIT E2E 포함; backend Ruff | OpenAPI/SDK 재생성 deterministic·clean | save source/hash/canonical 결합과 fail-closed 재compile, edit/명시 검증 baseline retry, EOF·대형 duplicate/reorder non-zero, v51 현재 revision page, Diff view 409 recovery, new draft badge까지 검증 | [#63](https://github.com/Nochiski/Quant_study/pull/63) `review_p4_08` APPROVE P0/P1/P2 0, review HEAD `684dc69` CI 4/4 pass | 2026-09-05 |
 | P4-07 | FactorGraph model/UI·disconnected node·plan-null·same-pointer source 복귀·execution gate·new/revision route 53 passed | frontend typecheck·lint·vitest 350·build; real-backend PIT 포함 | generated API 변경 없음 | 실행 노드는 backend plan 순서/contract, disconnected authored node는 별도 미실행 영역·validation contract·exact pointer; hidden editor focus 금지와 명시적 projection→source reveal, Form/JSON selection·undo 보존 검증 | [#62](https://github.com/Nochiski/Quant_study/pull/62) `review_p4_07` APPROVE P0/P1/P2 0, latest approval-doc HEAD CI 4/4 pass, MERGED (`bdee3f7`) | 2026-09-05 |
 | P4-10 | schema coherence·snippet hook/UI·new/revision route 47 passed | frontend typecheck·lint·vitest 317·build; real-backend PIT 포함; editor gzip 136.63 KB | OpenAPI/SDK 재생성 deterministic·semantic diff clean | metadata query 오류는 unavailable, schema/contract hash·registry 세대 불일치는 incompatible로 fail-closed; JSON projection YAML-only, feedback epoch/status 왕복, 실제 factor graph 삽입·중복·syntax 무변경·dirty compile·focus·단일 undo 검증 | [#60](https://github.com/Nochiski/Quant_study/pull/60) `review_p4_10` APPROVE P0/P1/P2 0, latest HEAD CI 4/4 pass, MERGED (`20491b8`) | 2026-09-05 |
@@ -335,6 +347,65 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-05 KST | Codex | P6-02 [#72](https://github.com/Nochiski/Quant_study/pull/72)의 동일 reviewer 최종 APPROVE와 approval-doc HEAD `54156c6` CI 4/4를 확인해 merge commit `c25d43c`로 순차 병합했다. 46/52를 완료하고 분리된 strategy/revision history 수직 슬라이스 P6-08을 READY로 전환한다 | 13.6 merge gate·exact-source draft CAS SoT·history 책임분리 |
+| 2026-09-05 KST | Codex | 동일 reviewer `review_p6_02`가 source/schema/strategy/hash raw surrogate 4종의 typed 422/no-persistence와 controlled in-flight PUT→revision transition의 old ID/version CAS-delete 1회를 독립 재현했다. 최초 P1 4/P2 3과 2차 P1 2가 모두 폐쇄됐고 최신 full diff에서 새 P0/P1/P2 0으로 APPROVE했다. reviewed HEAD `1473633`을 APPROVED로 전환하며 승인 기록을 포함한 latest HEAD CI 4/4 후 순차 merge한다 | same-reviewer final approval·persisted-text/CAS race closure·13.6 latest CI merge gate |
+| 2026-09-05 KST | Codex | 두 번째 P1 fix self-check를 `cfcc6e8`에 고정하고 base 대비 39 files +3,863/-88 diff를 다시 freeze했다. 동일 reviewer `review_p6_02`에게 persisted metadata UTF-8 policy와 in-flight PUT retirement race의 독립 재현 폐쇄, 최초 findings 유지 폐쇄 및 최신 full diff를 재검토하도록 IN_REVIEW로 전환한다 | same-reviewer fix loop·13.3 diff freeze·latest CI gate |
+| 2026-09-05 KST | Codex | 2차 reviewer P1 2건을 `f88d645`에서 수정했다. application draft service의 단일 UTF-8 경계가 `draft_id/source/schema_version/strategy_id/base_spec_hash`를 adapter 호출 전에 검증해 raw metadata surrogate를 typed 422/no-persistence로 닫는다. old PUT 성공 version은 UI identity guard 전에 retirement registry에 기록해 immutable revision save와 새 GET이 앞선 경우에도 serialized CAS-delete한다. 실제 hook interleaving 회귀와 metadata 3종 raw JSON 회귀를 추가했고 focused backend 15/frontend 10, 전체 backend 1,112/frontend 417 및 정적/build gate를 통과해 SELF_CHECK로 전환한다 | complete persisted-text SoT·write/retire serialization·same-reviewer closure |
+| 2026-09-05 KST | Codex | 동일 reviewer의 2차 hostile probe에서 최초 7건은 코드상 폐쇄됐으나 새 P1 2건이 재현됐다. `schema_version`/`strategy_id` 등 source 외 persisted text의 raw lone surrogate가 SQLite binding에서 500을 만들고, old PUT 진행 중 immutable revision save와 새 draft GET이 앞서 끝나면 old PUT version을 identity guard 전에 기록하지 않아 retired draft CAS-delete가 생략된다. persisted text UTF-8 정책을 application 단일 경계로 확장하고, 성공 version을 UI identity 판정 전에 cleanup registry에 기록한 뒤 실제 hook race 회귀를 고정하도록 CHANGES_REQUESTED로 전환한다 | complete persisted-text policy·serialized write/retire ownership·same-reviewer loop |
+| 2026-09-05 KST | Codex | P6-02 review fix self-check를 `b9f3946`에 고정했다. base `206ee41` 대비 최신 범위는 39 files +3,766/-88이고 history UI/API를 제외한 exact-source draft persistence/CAS/recovery 단일 vertical slice다. PR 제목·본문도 축소 범위와 hostile 회귀 및 최신 전체 gate로 교체하고, 최초 reviewer `review_p6_02`에게 일곱 finding 폐쇄와 최신 full diff를 재검토하도록 IN_REVIEW로 전환한다 | 13.3 diff freeze·same-reviewer closure·최신 CI gate |
+| 2026-09-05 KST | Codex | P6-02 reviewer 지적을 `ede3cab`에서 수정했다. UTF-8로 encode할 수 없는 scalar는 typed 422로 거부하고, GET/PUT/409 응답은 요청 draft ID와 제출한 CAS snapshot에 결합해 다른 draft 또는 malformed payload를 fail-closed 처리한다. 저장된 edit를 immutable base로 되돌리면 CAS-delete하며 409의 newer writer는 보존하고, 신규 route는 첫 paint 전에 opaque draft ID를 갖는다. typed 422와 transport offline UI를 분리하고 history를 P6-08/P6-09로 완전히 추출했다. hostile focused backend 14/frontend 54, 전체 backend 1,111/frontend 416, Ruff·Pyright·typecheck·lint·build·Rust 13·root 5·generated 2회 deterministic을 통과해 SELF_CHECK로 전환한다 | exact-source/application SoT·HTTP identity binding·serialized CAS ownership·history vertical-slice 분리·same-reviewer fix loop |
+| 2026-09-05 KST | Codex | P6-02 fresh reviewer가 raw `\\ud800` source의 unhandled 500, cross-draft GET/409 identity 신뢰, base revert 후 stale server draft 잔존, 독립 배포 가능한 history까지 묶은 size exception을 P1 4건으로 판정했다. 초기 draft ID 전 edit race, typed invalid/offline 혼합, out-of-range history/provenance 누락 P2 3건도 확인했다. P6-02를 server draft 수직 슬라이스로 축소하고 history는 P6-08/P6-09로 분리하며 같은 `review_p6_02`에게 수정분을 재검토받도록 CHANGES_REQUESTED로 전환했다 | independent hostile review·same-reviewer closure·small PR rule·fail-closed source/identity |
+| 2026-09-05 KST | Codex | P6-02를 base `206ee41` 대비 review freeze `d83aa2a`(52 files, +4,929/-234)로 고정했다. 자체 계약 점검에서 application invalid 422와 FastAPI malformed 422를 명시적 union으로 보강했고 OpenAPI/SDK를 재생성한 뒤 clean deterministic을 재확인했다. 이제 신규 독립 reviewer에게 correctness·CAS race·SoT/경계·history UX와 size exception을 함께 검토 요청한다 | 13.3 diff freeze·typed HTTP contract·fresh reviewer gate |
+| 2026-09-05 KST | Codex | P6-02 구현을 `6d1a5f9`에 고정했다. SQLite schema v2 exact-source draft register와 application-owned base 검증/CAS, typed 404/409/422 HTTP·generated SDK, 충돌·복구·offline UI, strategy/revision/backtest history direct route를 연결했다. backend 1,112·frontend 413·Rust 13·root 5 tests와 Ruff·Pyright·typecheck·lint·build·OpenAPI 2회 deterministic을 통과해 SELF_CHECK로 전환했다. 총 4,912줄 중 OpenAPI/generated 1,517줄·테스트 971줄이며 server draft와 history의 단일 P6-02 acceptance를 end-to-end로 닫기 위한 12절 size exception을 기록한다 | draft exact source/CAS SoT·immutable revision/run lifecycle projection·HTTP/UI 책임분리·12절 size exception |
+| 2026-09-05 KST | Codex | latest main `206ee41`에서 P6-02 전용 worktree를 열고 IN_PROGRESS로 전환했다. opaque draft ID+expected_version CAS가 invalid exact source를 SQLite schema v2에 보존하고, frontend는 server draft 충돌을 자동 overwrite 없이 조정하며 localStorage를 장애 fallback으로 유지한다. 기존 repository pagination과 run lifecycle projection 위에 strategy/revision/backtest history direct route를 구성하는 범위로 고정한다 | draft source/CAS application SoT·SQLite persistence·history projection/UI 책임분리 |
+| 2026-09-05 KST | Codex | P6-01 [#69](https://github.com/Nochiski/Quant_study/pull/69)의 동일 reviewer 최종 APPROVE와 approval-doc HEAD CI 4/4를 확인해 merge commit `fe3fbc5`로 순차 병합했다. 45/50(90%)을 완료하고 P6-02를 READY로 전환해 persistent invalid-source draft CAS, multi-device 충돌 UX, strategy/revision/backtest history route를 다음 단일 범위로 고정한다 | 13.6 merge gate·StrategySpec/revision/run lifecycle SoT 유지·draft/history 책임분리 |
+| 2026-09-05 KST | Codex | 동일 reviewer `review_p6_01`이 unowned/owned `sqlite_sequence`, SQL-NULL `sqlite_autoindex_*`, rollback header/footprint를 독립 재현해 마지막 P1 폐쇄와 기존 findings 유지 폐쇄를 확인했다. 최신 전체 diff에서 새 P0/P1/P2 0으로 APPROVE했고 reviewed HEAD `15370c7`의 원격 CI 4/4도 green이라 APPROVED로 전환한다. 승인 기록 문서가 포함된 latest HEAD CI를 다시 확인한 뒤 순차 merge한다 | same-reviewer final approval·complete schema manifest·13.6 latest CI merge gate |
+| 2026-09-05 KST | Codex | P6-01 third fix self-check를 `dc89cdf`에 고정하고 base 대비 20 files +1,579/-79 diff를 freeze했다. 전체 persisted schema footprint와 unowned/owned `sqlite_sequence` hostile regression, 최신 1,097-test 결과를 PR 본문에 반영하고 동일 reviewer `review_p6_01`에게 P1 폐쇄와 latest 전체 diff의 최종 재검토를 요청한다 | 13.3 diff freeze·same-reviewer closure·CI 재실행 gate |
+| 2026-09-05 KST | Codex | 세 번째 review P1을 `eeafe6a`에서 수정했다. claim 단계는 이름 필터 없는 전체 `sqlite_schema` footprint가 정말 비어 있을 때만 ownership을 설정하고, canonical manifest도 SQL이 NULL인 autoindex를 포함한 모든 persisted object를 비교해 예상 외 SQLite-managed object를 거부한다. AUTOINCREMENT table create/drop으로 만든 `sqlite_sequence` 잔여물을 unowned/owned DB 양쪽에 재현하고, unowned 거부 뒤 application_id·user_version=0과 원본 footprint가 보존되는 회귀를 고정했다. focused 74, backend 1,097, frontend 403·typecheck·lint·build, real-backend integration, root smoke/static, Ruff·Pyright, generated diff 0, PLAN/diff check를 통과해 SELF_CHECK로 전환한다 | truly-empty claim과 complete manifest 단일 schema owner·rollback fail-closed·same-reviewer fix loop |
+| 2026-09-05 KST | Codex | 동일 reviewer의 세 번째 검토에서 이전 source/spec drift·revision storage class·literal-sensitive manifest·runtime DB finding은 모두 폐쇄됐다. 다만 `name NOT GLOB 'sqlite_*'`가 AUTOINCREMENT table 생성 후 삭제해 남은 `sqlite_sequence`를 숨겨 non-empty unowned DB를 claim하고 이후에도 unexpected object를 누락하는 새 P1 1건이 재현돼 CHANGES_REQUESTED로 전환한다. claim용 전체 schema footprint와 canonical manifest 모두 모든 persisted object를 fail-closed로 검사하고 rollback 보존 회귀를 추가한 뒤 같은 reviewer에게 재검토한다 | truly-empty ownership invariant·complete sqlite_schema manifest·same-reviewer fix loop |
+| 2026-09-05 KST | Codex | P6-01 두 번째 fix self-check를 `0bfa4d9`에 고정하고 base 대비 20 files +1,513/-79 diff를 freeze했다. PR 본문에 REAL storage-class·literal-sensitive manifest와 최신 1,095-test 결과를 반영하고 동일 reviewer `review_p6_01`에게 자체 hostile probe와 latest 전체 diff의 최종 재검토를 요청한다 | 13.3 diff freeze·same-reviewer closure·CI 재실행 gate |
+| 2026-09-05 KST | Codex | 2차 reviewer P1 2건을 `4a1d151`에서 수정했다. revision/head CHECK가 `typeof(...)=integer`를 강제하고 chain audit도 head storage class와 모든 revision의 non-integer count를 검사하며 repository 재구축 시 전체 chain을 감사한다. SQLite constraint를 의도적으로 우회한 REAL 2.5 손상이 reopen/get/list/history/append 모두에서 실패하고 정상 write도 REAL을 거절한다. schema manifest는 outer trim 외 DDL을 exact 비교해 enum literal case와 trigger literal 내부 공백 변조를 초기화에서 차단한다. focused 70, full backend 1,095, real-backend frontend 1, root smoke 5, Ruff·Pyright·generated diff 0을 통과해 SELF_CHECK로 전환했다 | schema+runtime defense in depth·literal-sensitive manifest·same-reviewer hostile regression |
+| 2026-09-05 KST | Codex | 동일 reviewer의 2차 검토에서 최초 source↔spec·runtime DB P1은 폐쇄됐고 revision/schema P1은 integer 손상 기준으로는 폐쇄됐으나 새 우회 2건이 재현됐다. SQLite affinity가 revision `2.5`를 허용해 COUNT/MIN/MAX 연속성 검사를 통과하고 재시작·append까지 성공했으며, SQL 전체 `casefold()`가 CHECK의 `'yaml'`과 `'YAML'` literal 의미 차이를 지워 incompatible schema를 수용했다. `typeof(...)=integer` schema+runtime 이중 검증과 quoted literal/공백을 보존하는 exact manifest 비교를 추가한 뒤 같은 reviewer에게 다시 전달한다 | SQLite dynamic typing·canonical schema 의미 보존·same-reviewer fix loop |
+| 2026-09-05 KST | Codex | P6-01 fix self-check를 `963e002`에 고정하고 base `a609eee` 대비 20 files +1,372/-79 diff를 freeze했다. 기존 size exception에 reviewer 요구로 authoring parity·chain head/trigger·full SQL manifest·runtime factory와 각 corruption matrix가 추가됐으며 분리 시 네 blocking invariant 중 일부만 배포되므로 같은 exception을 유지한다. PR 본문을 최신 acceptance와 gate로 갱신하고 동일 reviewer `review_p6_01`에게 최초 P1 4건 및 latest full diff를 재검토하도록 IN_REVIEW 전환한다 | 13.3 diff freeze·same-reviewer fix loop·WORKFLOW 12 size exception |
+| 2026-09-05 KST | Codex | P6-01 reviewer P1 4건을 `514bf9d`에서 수정했다. injected authoring compile resolver가 document source를 YAML/JSON 모두 다시 compile해 stored spec hash와 write/get/list/history에서 대조하고, head+연속 chain audit와 immutable trigger가 first move·middle/latest deletion을 모든 materialization/append 전에 차단한다. DB는 완전히 빈 파일만 claim하고 table/constraint/collation/WITHOUT ROWID/FK/trigger 전체 `sqlite_schema` manifest와 unexpected object를 검증한다. test builder/OpenAPI import는 in-memory만 사용하고 실제 Uvicorn만 runtime factory로 durable DB를 연다. focused backend 61, full backend 1,086, frontend 403와 real-backend integration, root smoke 5, Ruff·Pyright·typecheck·lint·build·OpenAPI/SDK 2회 deterministic을 통과해 SELF_CHECK로 전환했다 | authoring/domain canonical SoT·revision chain/storage manifest fail-closed·test/runtime composition 책임분리·same-reviewer fix loop |
+| 2026-09-05 KST | Codex | `review_p6_01`이 backend 1,060·focused 35·정적·CI 4/4를 독립 확인했으나 P1 4건을 재현해 REQUEST_CHANGES: 올바른 source_hash까지 함께 바꾼 source↔stored spec drift, revision PK 이동/삭제 gap의 정상 materialization, application_id=0 non-empty foreign DB 및 동일 columns/누락 constraints schema 수용, test builder import의 runtime DB eager 생성. domain codec 기반 source parity, 모든 materialization/append 전 chain audit, empty DB만 claim+canonical sqlite_schema 검증, Uvicorn runtime factory 분리를 회귀로 고정한 뒤 같은 reviewer에게 재검토한다 | backend canonical/source/revision SoT·storage fail-closed·bootstrap test/runtime 책임분리·same-reviewer fix loop |
+| 2026-09-05 KST | Codex | P6-01 self-check 결과를 `2db9653`에 고정하고 base `a609eee` 대비 16 files +904/-64(그중 implementation/test/doc 15 files +871/-33) diff를 freeze했다. PR 본문에 migration·canonical hydrate/hash·exact source·restart·two-instance race·runtime path와 size exception을 명시하고 fresh review-only agent `review_p6_01`의 전체 diff 검토로 IN_REVIEW 전환한다 | 13.3 diff freeze·13.4 PR별 fresh reviewer 정확히 1명·WORKFLOW 12 size exception |
+| 2026-09-05 KST | Codex | P6-01 구현을 `79eab39`에 고정했다. SQLite adapter를 migration·canonical record codec·transaction/query 책임으로 분리하고 runtime은 `backend/.local/strategy-revisions.sqlite3`(환경 변수 override), test factory는 동일 adapter의 isolated in-memory mode를 사용한다. memory/SQLite 공통 contract, exact CRLF source·hash·UTC provenance 재시작 복원, future/foreign/wrong-shape schema와 변조 fail-closed, 두 instance create/append race, container 재조립을 회귀로 고정했다. 새 worktree의 Rust extension을 빌드한 뒤 최신 구조 backend 1,060·frontend 403·Ruff·Pyright·typecheck·lint·build·OpenAPI/SDK 2회 semantic diff 0을 통과했다. 15 files +871/-33은 schema→codec→transaction→bootstrap→contract/restart acceptance를 분리하면 어느 PR도 독립 실행되지 않아 WORKFLOW 12절 size exception을 적용한다 | StrategyRepositoryPort·domain canonical/hydrate SoT·schema/codec/repository/bootstrap 책임분리·13.2 self-check |
+| 2026-09-05 KST | Codex | P5-03 [#68](https://github.com/Nochiski/Quant_study/pull/68)의 approval-doc HEAD와 CI 4/4를 확인해 merge commit `a609eee`로 순차 병합하고 Phase 5를 3/3 완료했다. 최신 main에서 P6-01 전용 worktree를 열고 immutable revision envelope의 SQLite 원자 저장·migration·재시작 복원·두 instance optimistic concurrency를 scope로 고정해 IN_PROGRESS 전환한다 | 13.5 merge gate·44/50 merged·StrategyRepositoryPort/domain canonical-hydrate SoT·adapter/bootstrap 책임분리 |
+| 2026-09-05 KST | Codex | 동일 reviewer `review_p5_03`이 `65d0b18` 최신 전체 diff에서 누적 P1 3건 해소와 새 P0/P1/P2 0을 확인해 APPROVE했다. hostile blank/duplicate에서 세 HTTP 경로 동일 typed 422·schedule/FactorGraph/TargetTape 진입 0, 1,025-field checkpoint 취소, 기존 paging/default-date 회귀를 재현했고 backend 1,041·frontend 403·정적·runtime OpenAPI=tracked·CI 4/4까지 통과했다. 반복 compile 성능은 P6-04, HTTP 정책 docstring P3는 비차단 잔여로 기록하고 APPROVED 전환한다 | independent same-reviewer gate·SoT/책임분리 감사·latest main/CI merge 준비 |
+| 2026-09-05 KST | Codex | raw identity fix와 self-check를 `b05800b`에 고정하고 [#68](https://github.com/Nochiski/Quant_study/pull/68) 본문에 세 P1의 원인·수정·회귀, 공통 execution-error contract, 최신 38-file size exception을 반영했다. 동일 reviewer `review_p5_03`에게 `7edc33d..b05800b` fix와 base 대비 최신 전체 diff를 재검토하도록 IN_REVIEW 전환한다 | same-reviewer closure·13.3 diff freeze·PR body/PLAN 최신화 |
+| 2026-09-05 KST | Codex | 새 raw identity P1을 `f12fcd7`에서 수정했다. `RawFieldValue`가 blank identity를 construction에서 거부하고 `RawObservationSet` consumer validation이 observation별 duplicate/blank를 checkpoint와 함께 다시 검사한다. inbound 공통 execution-error contract가 `portfolio.raw_observation.invalid`를 단일 정의하고 preview·trace·backtest 모두 계산 전에 같은 typed 422를 반환하며 OpenAPI/generated SDK와 exhaustive frontend consumer를 갱신했다. focused backend 103/frontend 1, 전체 backend 1,041/frontend 403, Ruff·Pyright·typecheck·lint·build·generated deterministic·diff-check 통과 후 SELF_CHECK 전환 | RawObservation port/consumer/inbound wire SoT·3-route parity·reviewer P1 회귀 고정 |
+| 2026-09-05 KST | Codex | 동일 reviewer 재검토에서 최초 P1 2건은 해소됐으나 새 P1 1건이 확인됐다. `RawObservationSet`이 observation 내부 duplicate/blank `field_id`를 허용해 raw trace는 두 값을 표시하고 FieldNode dict는 마지막 값, group lookup은 첫 값을 실행하는 provenance/실행 불일치를 재현했다. construction 및 application consumer boundary에서 field identity를 cancellation-aware하게 검증하고 trace·preview·backtest가 계산 전 같은 coded failure를 내도록 고정하기 위해 CHANGES_REQUESTED로 전환한다 | RawObservationPort provenance SoT·truthful trace/execution parity·same-reviewer fix loop |
+| 2026-09-05 KST | Codex | P5-03 reviewer fix와 self-check를 `009325d`에 고정하고 [#68](https://github.com/Nochiski/Quant_study/pull/68) 본문에 P1 원인·수정·대규모/race 회귀·최신 30-file size exception을 갱신했다. 같은 reviewer `review_p5_03`에게 base `fcc37ee` 대비 최신 전체 diff와 최초 P1 2건 폐쇄 여부를 재검토하도록 IN_REVIEW 전환한다 | 13.3 diff freeze·same-reviewer fix loop·PR body/PLAN 최신화 |
+| 2026-09-05 KST | Codex | P5-03 reviewer P1 2건을 `72bff34`에서 수정했다. backend compiler-owned schedule이 생략된 날짜를 마지막 실행 가능 signal frame으로 해석하고 실행 frame이 없으면 typed 422로 닫으며, 명시한 non-rebalance date는 raw/node partial trace를 보존한다. frontend query owner는 64-node chunk·400-row page·8,000-row 총예산으로 전체 trace를 identity-only 집계하고 선택 node를 독립 bounded fallback으로 완전 조회한다. 6×100·101-node·8,100-row·later-page drift·중간 취소 회귀를 포함해 focused backend 96/frontend 70, 전체 backend 1,037/frontend 403, 정적·빌드·generated deterministic·diff-check를 통과해 SELF_CHECK로 전환했다 | compiler schedule SoT·application/API/default scope 책임·query/projection/UI 책임분리·동일 reviewer P1 회귀 고정 |
+| 2026-09-05 KST | Codex | `review_p5_03`이 P1 2건을 독립 재현해 REQUEST_CHANGES: 6 node×100 security에서 단일 500행 all-node page가 마지막 output node를 누락하고 101개 node는 422가 되며, 기본 `context.end`는 compiler 구조상 실행 가능한 signal frame이 아니어서 weekend는 422/trading end는 `target:null`인데 linked view가 이미 계산된 raw/node까지 숨긴다. 선택 node를 bounded all-node 조회와 분리하고 backend-owned 실행 가능 scope 및 partial trace 상태를 고정한 뒤 같은 reviewer에게 재검토한다 | P5-03 all-node/selected-node acceptance·canonical schedule SoT·same-reviewer fix loop |
+| 2026-09-05 KST | Codex | P5-03 [#68](https://github.com/Nochiski/Quant_study/pull/68)을 열고 base `fcc37ee`, implementation `cc43d1d`, self-check `7600bef`, 29 branch files +2,262/-161과 전체 gate·WORKFLOW 12절 size exception을 PR 본문에 고정했다. fresh review-only agent `review_p5_03`의 전체 diff 검토로 IN_REVIEW 전환한다 | 13.3 diff freeze·13.4 PR별 reviewer 정확히 1명·latest CI gate |
+| 2026-09-05 KST | Codex | P5-03 구현을 `cc43d1d`에 freeze: portfolio compiler의 동일 score/selection/weight 경로가 factor contribution·constraint 전후·optional order delta audit를 함께 내고 TargetTape/hash는 byte-equivalent로 유지한다. raw port의 `CellKind`를 손실 없이 trace에 전달하고 generated SDK만 소비하는 linked UI가 전체 plan node를 연결하되 선택 node projection은 분리한다. exact date-security scope, response candidate/construction/target parity, no-holdings order suppression을 fail-closed 회귀로 고정했다. focused backend 114·frontend 25, full backend 1,032·frontend 396, 정적/build·17-file generated deterministic·diff-check 통과 후 SELF_CHECK 전환. 28 files +2,235/-136은 domain→application→wire→generated SDK→UI parity가 단일 acceptance인 WORKFLOW 12절 size exception이다 | portfolio compiler/RawObservation/StrategySpec SoT·domain/application/adapter/FSD 책임분리·P5-03 acceptance·13.2 self-check |
+| 2026-09-05 KST | Codex | P5-03 scope를 domain-owned portfolio construction audit, raw `CellKind` provenance, additive trace API/generated SDK, feature-owned linked projection으로 고정했다. frontend 계산과 실제 주문, 저장 factor/subgraph value resolver, P6 repository/history/virtualization은 non-goal이며 TargetTape/hash/backtest byte parity를 선행 gate로 둔다 | StrategySpec/portfolio compiler SoT·domain/application/adapter/frontend 책임 분리·P5-03 acceptance |
+| 2026-09-05 KST | Codex | P5-02 PR #67 최종 approval-doc HEAD `dc8b940` CI 4/4와 clean merge state를 확인해 merge commit `fcc37ee`로 순차 머지하고 main fast-forward. 등록된 P5-02 worktree를 제거하고 최신 main의 `feat/p5-03-linked-trace-ui` 전용 worktree에서 P5-03 IN_PROGRESS 전환 | 13.5 merge gate·43/50 merged·단일 active PR·linked trace 책임 분리 |
+| 2026-09-05 KST | Codex | P5-02 동일 reviewer 재검토가 최초 P1 1/P2 4 해소와 최신 전체 diff의 새 P0/P1/P2 0을 확인해 APPROVE. reviewer focused 62·lint·typecheck·build·diff check와 review HEAD CI 4/4가 통과했고 source transition/old cache/Plan live region/revision history를 독립 재확인해 APPROVED 전환 | independent review gate·same-reviewer closure·merge 준비 |
+| 2026-09-05 KST | Codex | P5-02 P1 1/P2 4 fix와 focused 62·frontend 392 전체 gate 증거를 [#67](https://github.com/Nochiski/Quant_study/pull/67)에 동기화하고 동일 reviewer `review_p5_02`의 latest full-diff 재검토로 IN_REVIEW 전환 | same-reviewer review-fix gate·latest CI gate |
+| 2026-09-05 KST | Codex | P5-02 review fix `84dce04`: saved source는 kind/id/revision/expected hash, inline은 kind/source hash를 trace ownerKey에 포함하고 REST 응답을 TanStack Query cache 단일 owner로 이동했다. 상태 live region을 탭 밖에 두고 revision saved wire·직접 URL·back/forward, inline→saved late/visible result, same-owner refetch 회귀를 추가했으며 feature의 `!important`를 제거했다. focused 62, frontend 392·typecheck·lint·build, generated deterministic 통과 후 SELF_CHECK 전환 | P1 1/P2 4 전부 회귀 고정·query/source/UI/route 책임 분리·same-reviewer 준비 |
+| 2026-09-05 KST | Codex | `review_p5_02`가 P1 1/P2 4로 REQUEST_CHANGES. 동일 epoch/version/fingerprint에서 inline→saved source identity가 ownerKey에 없어 늦은 응답·기존 결과가 잘못 귀속되는 재현을 확인했다. REST trace query-cache owner, Plan 탭 상태, revision URL/back-forward 통합 회귀, 금지된 `!important`도 같은 reviewer loop에서 수정한다 | exact source provenance·server-state owner·접근성·route acceptance·UI rule |
+| 2026-09-05 KST | Codex | P5-02 [#67](https://github.com/Nochiski/Quant_study/pull/67)을 열고 base `e4fabd4`, implementation `975ea9b`, self-check `1125de3`, 20 implementation files +2,334/-9와 전체 gate·size exception을 PR 본문에 고정해 IN_REVIEW 전환 | 13.3 diff freeze·13.4 fresh reviewer gate·최신 CI gate |
+| 2026-09-05 KST | Codex | P5-02를 `975ea9b`에 freeze: generated trace API와 current document execution-source 결정을 합성해 date/security/factor/node debugger, exact TargetTape·node projection, 4-fingerprint/provenance guard, 취소·late response 폐기를 new/revision route에 연결했다. focused 40, frontend 388·typecheck·lint·build, backend 1,027·Ruff·Pyright, generated deterministic·diff-check 통과 후 SELF_CHECK 전환. 20 files +2,334/-9는 FSD owner 분리와 race/route 전체 acceptance를 한 vertical slice로 검토하기 위한 12절 size exception이다 | backend result/hash SoT·debug/edit/widget/page 책임 분리·P5-02 acceptance·13.2 self-check |
+| 2026-09-05 KST | Codex | P5-01 PR #65 최종 approval-doc HEAD `98345cc` CI 4/4와 clean merge state를 확인해 merge commit `e4fabd4`로 순차 머지하고 main fast-forward. 등록된 P5-01 worktree를 제거하고 최신 main의 `feat/p5-02-debugger-shell` 전용 worktree에서 P5-02 IN_PROGRESS 전환 | 13.5 merge gate·42/50 merged·단일 active PR·Debugger feature 책임 분리 |
+| 2026-09-05 KST | Codex | P5-01 동일 reviewer 5차 검토가 누적 finding 해소와 새 P0/P1/P2 0을 확인해 APPROVE. reviewer backend 1,027·architecture 7·frontend 369·정적/build·runtime OpenAPI parity·CI 4/4를 통과했고 raw consumer 2,000→1, factor output 1,000→1 cancellation probe를 독립 재현해 APPROVED 전환 | independent review gate·same-reviewer closure·merge 준비 |
+| 2026-09-05 KST | Codex | P5-01 fourth-review cancellation fix와 전체 gate, 47 files +5,663/-309 size exception을 PR #65 본문에 동기화하고 동일 reviewer `review_p5_01`의 fifth-pass full-diff 검토로 IN_REVIEW 전환 | same-reviewer review-fix gate·latest CI gate |
+| 2026-09-05 KST | Codex | P5-01 fourth-review fix `29e15e0`: `RawObservationSet`이 optional validation checkpoint를 단일 계약으로 소유하고 mock cancellable adapter의 construction과 application consumer revalidation이 같은 callback을 사용한다. trace scope, raw→factor 변환, factor output map, portfolio field/publication materialization도 bounded `_checkpointed`를 사용한다. 첫 raw numeric·scope observation·factor output에서 취소해 각각 1개만 소비하고 FactorGraph/TargetTape·projection이 시작되지 않는 회귀를 추가했다. focused 251·architecture 7, backend 1,027, frontend 369와 모든 표준 정적/build gate를 통과해 SELF_CHECK 전환 | fourth-review P2 1 회귀 고정·raw port/application responsibility·same-reviewer 준비 |
+| 2026-09-05 KST | Codex | P5-01 동일 reviewer 4차 검토에서 이전 P1 3건 해소와 focused 150·backend 1,022·frontend 369·CI 4/4를 확인했으나 cooperative cancellation P2 1건을 재현해 CHANGES_REQUESTED 전환. raw contract consumer 재검증, trace scope scan, factor output materialization에 동일 bounded checkpoint를 관통시키고 첫 raw numeric·scope observation·factor output에서 전체 collection 소비 전 중단되는 회귀를 추가한다 | raw→FactorGraph→TargetTape cancellation acceptance·application/port owner 공유·same-reviewer loop |
+| 2026-09-05 KST | Codex | P5-01 third-review fix와 전체 gate, 47 files +5,376/-291 size exception을 PR #65 본문에 동기화하고 동일 reviewer `review_p5_01`의 fourth-pass full-diff 검토로 IN_REVIEW 전환 | same-reviewer review-fix gate·latest CI gate |
+| 2026-09-05 KST | Codex | P5-01 third-review fix `3e2bac9`: preview/backtest 실제 coded error를 shared inbound discriminator 모델에서 OpenAPI/generated SDK로 생성하고 TypeScript exhaustive narrowing을 고정했다. RawObservationSet 단일 계약이 모든 numeric field와 previous_weight의 finite를 생성·소비 경계에서 검증하고, domain compiler의 `PortfolioRebalanceSchedule`을 preflight와 TargetTape가 공유해 later-only/no-frame starting holding을 typed 진단으로 차단한다. focused 150, backend 1,022, frontend 369, 모든 정적·build·17-file generated deterministic gate를 통과해 SELF_CHECK 전환 | third-review P1 3 회귀 고정·wire/raw/schedule SoT·책임분리·same-reviewer 준비 |
+| 2026-09-05 KST | Codex | P5-01 동일 reviewer 3차 검토에서 이전 P1/P2 네 건 해소와 backend focused 103·full 1,003을 확인했으나 새 P1 3건을 재현해 CHANGES_REQUESTED 전환. startBacktest의 실제 coded 404/409/422가 OpenAPI/SDK에 없고, factor 미사용 raw numeric/previous_weight non-finite가 null·missing으로 위조되며, 첫 signal frame에 없는 starting holding이 조용히 무시된다. inbound wire union, raw/application finite invariant, compiler-owned first-frame 결과를 공유하는 scope gate로 수정한다 | generated transport SoT·raw provenance fail-closed·schedule owner 공유·same-reviewer loop |
+| 2026-09-05 KST | Codex | P5-01 second review의 P1 2/P2 2 수정과 full gate, 41 files +4,531/-381 size exception을 PR #65 본문에 동기화하고 동일 reviewer `review_p5_01`의 third-pass full-diff 검토로 IN_REVIEW 전환 | same-reviewer review-fix gate·latest CI gate |
+| 2026-09-05 KST | Codex | P5-01 second review fix `bdafc33`: StrategySpec dataclass 전체 numeric leaf의 finite invariant를 domain validation에 추가하고 factor node 계산 결과와 portfolio score/allocation/frame 경계가 non-finite를 전용 오류로 fail-closed하도록 했다. preview·trace·backtest는 동일 structured 422를 내며 inline provenance는 TargetTape 이후 조립된다. 기존 RawObservationPort 호출은 복원하고 CancellableRawObservationPort를 별도 trace capability로 계산 전 협상한다. rebalance pair·frame/candidate materialization과 legacy byte-equivalent streaming tape hash에 checkpoint를 넣었다. focused 216, backend 1,003, frontend 368, 모든 정적 gate와 generated deterministic을 통과해 SELF_CHECK 전환 | 재리뷰 P1 2/P2 2 전부 회귀 고정·domain/application/adapter owner 분리·hash/port compatibility 보존 |
+| 2026-09-05 KST | Codex | P5-01 동일 reviewer 재검토가 P1 2/P2 2로 REQUEST_CHANGES. catalog 밖 numeric leaf의 non-finite가 validate를 통과해 hash 500을 만들고, 유한 피연산자의 overflow가 `status=ok` null trace와 non-finite TargetTape/backtest 지연 실패를 만드는 correctness 결함을 확인했다. TargetTape frame/candidate materialization·hash cancellation 공백과 checkpoint keyword로 인한 legacy RawObservationPort preview/backtest 호환 파손도 같은 loop에서 수정하기 위해 CHANGES_REQUESTED 전환 | 모든 StrategySpec 숫자의 domain finite invariant·factor/portfolio fail-closed·canonical cancellation·port compatibility·same-reviewer loop |
+| 2026-09-05 KST | Codex | P5-01 review-fix self-check 결과와 다섯 finding의 회귀 증거를 PR #65 본문에 반영하고 동일 reviewer `review_p5_01`의 재검토로 IN_REVIEW 전환 | PR별 reviewer 동일성·review-fix full-diff 재검토 gate |
+| 2026-09-05 KST | Codex | P5-01 review fix `d305b4a`: constraint catalog가 NaN/±inf를 공통 거부하고 inline provenance는 validation을 통과한 TargetTape hash에서 조립한다. 404/409/422/499 typed envelope와 `code`/source discriminator, 서버-owned cap을 inbound OpenAPI overlay에서 생성해 SDK error union을 복구했다. raw load 직후 session/security/holding scope를 non-member row와 구분하고 raw adapter·FactorGraph row/node·TargetTape·trace projection에 동일 cancellation checkpoint를 관통시켰다. raw 2,000+1 truncation과 holdings target/None-empty 회귀까지 추가해 focused 149, backend 953, frontend 368, Ruff·Pyright·typecheck·lint·build·generated deterministic을 통과하고 SELF_CHECK 전환 | reviewer P1 2/P2 3 전부 회귀 고정·constraint/wire/execution SoT·port/domain/application 책임분리·same-reviewer loop |
+| 2026-09-05 KST | Codex | `review_p5_01`이 P1 2/P2 3으로 REQUEST_CHANGES. non-finite inline draft의 canonical hash 예외가 500으로 누수되고 실제 404/409/422/499 오류가 OpenAPI/generated SDK에 없음을 blocking으로 확인했다. 비세션·미지 security의 silent empty, 비싼 구간 cancellation, wire cap/discriminator와 holdings/raw 경계도 같은 reviewer loop에서 함께 보강하기 위해 CHANGES_REQUESTED 전환 | backend diagnostic/constraint SoT·wire contract·truthful scope/cancellation 책임·same-reviewer fix loop |
+| 2026-09-05 KST | Codex | P5-01 [#65](https://github.com/Nochiski/Quant_study/pull/65)을 열고 base `5a242ec`, implementation `752f66b`, self-check `6f3338f`, 26 implementation files +1,894/-73과 전체 gate를 PR 본문에 고정해 fresh review-only agent `review_p5_01` 검토로 IN_REVIEW 전환 | PR별 reviewer 정확히 1명·13.3~13.4 diff freeze/review gate·12절 size exception |
+| 2026-09-05 KST | Codex | P5-01 구현을 `752f66b`에 freeze: StrategySource/Provenance를 domain.strategy 단일 owner로 이동하고 saved/inline source를 해소하는 bounded trace API를 추가했다. FactorGraph output과 node trace는 동일 `_compute_nodes` cache에서 나오며 truthful portfolio pipeline의 raw observation·TargetTape·engine capability·starting holdings를 그대로 사용한다. offset/limit/security/node/raw cap과 cooperative cancellation, structured stale/missing/invalid/capability 오류, 4종 fingerprint를 OpenAPI/generated SDK까지 고정했다. backend focused 17·full 912·Ruff·Pyright, frontend timeout 회귀 2·full 368·typecheck·lint·build, generated deterministic·diff-check 통과 후 SELF_CHECK 전환 | StrategySpec/provenance SoT·factor 계산 단일 owner·application port 책임분리·P5-01 acceptance·12절 size exception |
+| 2026-09-05 KST | Codex | P4-08 PR #63 최신 approval-doc HEAD `983b5f4` CI 4/4 통과 후 merge commit `5a242ec`로 순차 머지하고 main fast-forward. Phase 4 exit을 닫고 메인 기준 `feat/p5-01-scoped-trace-api` 전용 worktree에서 P5-01 IN_PROGRESS 전환 | 13.5 merge gate·단일 active PR·truthful pipeline SoT |
 | 2026-09-05 KST | Codex | 동일 reviewer `review_p4_08`이 review HEAD `684dc69`에서 최초 P1 2/P2 3과 new-draft badge 해소를 재현하고 APPROVE(P0/P1/P2 0). reviewer focused 75·frontend 전체 368·typecheck·lint·build, PLAN consistency, 원격 CI 4/4 통과를 확인해 APPROVED 전환 | 13.5 approval gate·same-reviewer 재승인·backend canonical/hash SoT·latest CI |
 | 2026-09-05 KST | Codex | P4-08 review-fix code freeze `9b29220`, 최신 검증과 28 files +2,129/-177 size exception을 PR #63 본문에 반영하고 최초 검토자 `review_p4_08`에게 P1 2/P2 3 동일 reviewer 재검토를 요청하기 위해 IN_REVIEW 전환 | 13.4 same-reviewer fix loop·최신 evidence·PR body merge gate |
 | 2026-09-05 KST | Codex | P4-08 review fix `9b29220`: Save snapshot의 source/spec_hash/canonical을 한 쌍으로 검증하고 불일치 시 current 또는 saved baseline을 backend 재compile할 때까지 Save/Run/Diff를 fail-closed. baseline 실패는 다음 edit와 명시 검증으로 재시도한다. exact EOF marker와 대형 duplicate/reorder 상한 diff, current revision을 포함하는 50개 history page, 모든 projection 위의 409 recovery notice, new draft 중립 badge를 회귀로 고정. reviewer 회귀 75·compile/document/route 66·frontend 전체 368·typecheck·lint·build·backend Ruff·generated clean 후 SELF_CHECK 전환 | backend canonical/hash SoT·document/query/diff/shell 책임분리·P1 2/P2 3 전부 회귀 고정·동일 reviewer 재검토 |

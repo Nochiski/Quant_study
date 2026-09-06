@@ -9,11 +9,13 @@ import pytest
 from strategy_workbench.domain.factor.facade.evaluation import (
     FactorFieldValue,
     FactorObservation,
+    NonFiniteFactorCalculationError,
     evaluate_factor_graph,
 )
 from strategy_workbench.domain.factor.facade.expression import (
     BinaryNode,
     BinaryOperator,
+    ConstantNode,
     FactorGraph,
     FieldNode,
     GroupNode,
@@ -26,6 +28,7 @@ from strategy_workbench.domain.factor.facade.expression import (
 from strategy_workbench.domain.factor.facade.trace import (
     TraceSelection,
     TraceValueStatus,
+    evaluate_factor_graph_with_trace,
     trace_factor_graph,
 )
 
@@ -95,6 +98,28 @@ def test_trace_values_equal_evaluation_values_for_every_selected_row() -> None:
     assert trace.output_node_id == "final"
 
 
+def test_joint_evaluation_and_trace_share_one_compute_cache(monkeypatch) -> None:
+    """P5-01 must not evaluate once for the tape and again for the debugger."""
+    from strategy_workbench.domain.factor import _trace as trace_module
+
+    calls = 0
+    original = trace_module._compute_nodes
+
+    def counted(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(trace_module, "_compute_nodes", counted)
+    evaluation, trace = evaluate_factor_graph_with_trace(
+        _graph(), observations=_panel(), selection=TraceSelection(node_ids=("final",))
+    )
+
+    assert calls == 1
+    traced = {(row.as_of, row.security_id): row.value for row in trace.nodes[0].values}
+    assert traced == {(row.as_of, row.security_id): row.value for row in evaluation.values}
+
+
 def test_rows_are_ordered_by_as_of_then_security_and_carry_inputs() -> None:
     trace = trace_factor_graph(_graph(), observations=_panel())
 
@@ -151,6 +176,33 @@ def test_division_by_zero_is_distinguished_from_missing_input() -> None:
     trace = trace_factor_graph(graph, observations=panel)
 
     assert _rows(trace, "div")[(DAYS[0], "a")].status is TraceValueStatus.DIVIDE_BY_ZERO
+
+
+@pytest.mark.parametrize(
+    ("operator", "right"),
+    ((BinaryOperator.MULTIPLY, 1e308), (BinaryOperator.DIVIDE, 1e-308)),
+)
+def test_finite_operands_that_overflow_fail_at_the_node_boundary(
+    operator: BinaryOperator, right: float
+) -> None:
+    graph = FactorGraph(
+        nodes=(
+            FieldNode("left", "price.close", "field"),
+            ConstantNode("right", right, "constant"),
+            BinaryNode("overflow", operator, "left", "right", "binary"),
+        ),
+        output_node_id="overflow",
+    )
+    observation = _observation(DAYS[0], "overflowing-security", 2.0)
+    if operator is BinaryOperator.DIVIDE:
+        observation = _observation(DAYS[0], "overflowing-security", 1e308)
+
+    with pytest.raises(NonFiniteFactorCalculationError) as excinfo:
+        evaluate_factor_graph_with_trace(graph, observations=(observation,))
+
+    assert excinfo.value.node_id == "overflow"
+    assert excinfo.value.as_of == DAYS[0]
+    assert excinfo.value.security_id == "overflowing-security"
 
 
 def test_selection_bounds_nodes_securities_dates_and_rows() -> None:

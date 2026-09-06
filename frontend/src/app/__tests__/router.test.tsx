@@ -70,6 +70,34 @@ title: ${title}
 });
 
 const server = setupServer(
+  http.get(`${API}/api/v1/strategy-drafts/:draftId`, () =>
+    HttpResponse.json(
+      { detail: { code: "strategy.draft.not_found" } },
+      { status: 404 },
+    ),
+  ),
+  http.put(
+    `${API}/api/v1/strategy-drafts/:draftId`,
+    async ({ params, request }) => {
+      const body = (await request.json()) as Record<string, unknown>;
+      return HttpResponse.json({
+        draft_id: params.draftId,
+        version: Number(body.expected_version) + 1,
+        source: body.source,
+        format: body.format,
+        source_hash: "d".repeat(64),
+        schema_version: body.schema_version,
+        updated_at: "2026-09-05T00:00:00Z",
+        strategy_id: body.strategy_id ?? null,
+        base_revision: body.base_revision ?? null,
+        base_spec_hash: body.base_spec_hash ?? null,
+      });
+    },
+  ),
+  http.delete(
+    `${API}/api/v1/strategy-drafts/:draftId`,
+    () => new HttpResponse(null, { status: 204 }),
+  ),
   http.post(`${API}/api/v1/strategy-documents/compile`, async ({ request }) => {
     const body = (await request.json()) as { source: string };
     return HttpResponse.json({

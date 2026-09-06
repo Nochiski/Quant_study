@@ -13,6 +13,7 @@ import {
 import { strategyDocumentQuery } from "../../entities/strategy";
 import {
   STRATEGY_VIEWS,
+  isNewDraftId,
   type StrategyView,
 } from "../../features/edit-strategy";
 import { ApiRequestError } from "../../shared/api";
@@ -44,6 +45,7 @@ type StrategyDocumentSearch = {
   path?: string;
   asOf?: string;
   security?: string;
+  draft?: string;
 };
 
 /** Selection/projection state for every StrategySpec authoring route. */
@@ -59,6 +61,7 @@ const strategyDocumentSearch = (
         : undefined,
     asOf: typeof search.asOf === "string" ? search.asOf : undefined,
     security: typeof search.security === "string" ? search.security : undefined,
+    draft: isNewDraftId(search.draft) ? search.draft : undefined,
   };
 };
 
@@ -79,7 +82,6 @@ const StrategyRevisionPage = lazyRouteComponent(
   () => import("../../pages/research-strategy-revision"),
   "StrategyRevisionPage",
 );
-
 const rootRoute = createRootRouteWithContext<RouterContext>()({
   component: () => {
     const { operationsEnabled } = rootRoute.useRouteContext();

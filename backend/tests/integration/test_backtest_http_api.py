@@ -4,7 +4,9 @@ import time
 from typing import Any
 
 from fastapi.testclient import TestClient
+from pydantic import TypeAdapter
 
+from strategy_workbench.adapters.inbound.http_api._backtest_contract import Backtest422Response
 from strategy_workbench.bootstrap.facade.http import build_http_app
 
 
@@ -122,3 +124,41 @@ def test_backtest_unknown_run_and_invalid_metric_window_return_structured_errors
 
     assert response.status_code == 422
     assert response.json()["detail"]["code"] == "backtest.run.invalid"
+    TypeAdapter(Backtest422Response).validate_python(response.json())
+
+
+def test_start_backtest_openapi_declares_every_actual_preflight_error() -> None:
+    client = TestClient(build_http_app())
+    schema = client.get("/openapi.json").json()
+    operation = schema["paths"]["/api/v1/backtests"]["post"]
+
+    assert {"202", "404", "409", "422"} <= set(operation["responses"])
+    assert operation["responses"]["404"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "BacktestStrategyNotFoundResponse"
+    )
+    assert operation["responses"]["409"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "BacktestStrategyStaleResponse"
+    )
+    detail = schema["components"]["schemas"]["BacktestUnprocessableResponse"]["properties"][
+        "detail"
+    ]
+    assert detail["discriminator"]["propertyName"] == "code"
+    assert set(detail["discriminator"]["mapping"]) == {
+        "backtest.run.invalid",
+        "portfolio.data.unavailable",
+        "portfolio.raw_observation.invalid",
+        "portfolio.strategy.invalid",
+    }
+
+    semantic = _run_body(client, "python")
+    semantic["strategy"]["portfolio"]["weighting"] = "risk"
+    semantic["strategy"]["risk"]["risk_field_id"] = None
+    semantic_response = client.post("/api/v1/backtests", json=semantic)
+    malformed_response = client.post("/api/v1/backtests", json={"core": "not-a-core"})
+
+    assert semantic_response.status_code == malformed_response.status_code == 422
+    assert semantic_response.json()["detail"]["code"] == "portfolio.strategy.invalid"
+    assert isinstance(malformed_response.json()["detail"], list)
+    adapter = TypeAdapter(Backtest422Response)
+    adapter.validate_python(semantic_response.json())
+    adapter.validate_python(malformed_response.json())

@@ -72,6 +72,15 @@ export {
   type DraftStorage,
 } from "./model/draft-store";
 export { RecoveryBanner } from "./ui/recovery-banner";
+export { ServerDraftBanner } from "./ui/server-draft-banner";
+export {
+  createNewDraftId,
+  isNewDraftId,
+  matchesServerDraftBase,
+  revisionDraftId,
+  type ServerDraftBase,
+} from "./model/server-draft";
+export { useServerDraft, type ServerDraftSync } from "./model/use-server-draft";
 export { ConflictBanner } from "./ui/conflict-banner";
 export { SourceEditor } from "./ui/source-editor";
 export { StrategyOutline } from "./ui/strategy-outline";
@@ -115,6 +124,7 @@ export {
 } from "./model/canonical-snippets";
 export {
   factorIndexAtPointer,
+  factorGraphPointer,
   factorNodePointer,
   nodePointerById,
   pointerSelectsNode,

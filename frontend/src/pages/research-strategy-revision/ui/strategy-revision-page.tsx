@@ -7,9 +7,9 @@ import {
   ConflictBanner,
   DirtyLeaveGuard,
   DocumentToolbar,
-  ExecutionPlanPanel,
   FactorGraphPanel,
   RecoveryBanner,
+  ServerDraftBanner,
   SnippetCatalog,
   SourceEditor,
   StrategyProjectionPanel,
@@ -18,12 +18,14 @@ import {
   PROJECTION_VIEWS,
   currentDiagnostics,
   projectStrategySpec,
+  revisionDraftId,
   saveStatusText,
   saveStatusTone,
   useAutosave,
   useCompileDocument,
   useExecutionPlans,
   useRunBacktest,
+  useServerDraft,
   useSaveDocument,
   useSchemaAssist,
   useOutlineNavigation,
@@ -35,7 +37,10 @@ import {
 import { t } from "../../../shared/config";
 import { useNavigate, useParams, useSearch } from "../../../shared/lib/router";
 import { Badge, type CodeEditorHandle } from "../../../shared/ui";
-import { StrategyIde } from "../../../widgets/strategy-ide";
+import {
+  StrategyDebuggerPanel,
+  StrategyIde,
+} from "../../../widgets/strategy-ide";
 
 const ROUTE = "/research/strategies/$strategyId/revisions/$revision";
 
@@ -71,6 +76,21 @@ export const StrategyRevisionPage = () => {
     canCreateRevisionFromConflict,
   } = useSaveDocument(document, dispatch);
   const assist = useSchemaAssist(document);
+  const serverDraftId =
+    document.strategyId !== null &&
+    document.baseRevision !== null &&
+    document.baseSpecHash !== null
+      ? revisionDraftId(
+          document.strategyId,
+          document.baseRevision,
+          document.baseSpecHash,
+        )
+      : null;
+  const serverDraft = useServerDraft(document, dispatch, {
+    draftId: serverDraftId,
+    schemaVersion: assist.schemaVersion ?? stored.schema_version,
+    schemaPending: assist.loading,
+  });
   const { validateNow, validating } = useCompileDocument(document, dispatch);
   const autosave = useAutosave(document, dispatch, {
     schemaVersion: assist.schemaVersion,
@@ -288,10 +308,21 @@ export const StrategyRevisionPage = () => {
           />
         }
         debugger={
-          <ExecutionPlanPanel
-            state={executionPlans}
+          <StrategyDebuggerPanel
+            document={document}
+            executionPlans={executionPlans}
+            asOf={search.asOf}
+            security={search.security}
             selectedPointer={search.path}
             onSelectPointer={(pointer) => selectPointer(pointer, "outline")}
+            onSearchSelection={(selection) =>
+              void navigate({
+                to: ROUTE,
+                params: { strategyId, revision },
+                search: { ...search, ...selection },
+                replace: true,
+              })
+            }
           />
         }
         editor={
@@ -304,6 +335,7 @@ export const StrategyRevisionPage = () => {
             {autosave.recovery ? (
               <RecoveryBanner recovery={autosave.recovery} />
             ) : null}
+            <ServerDraftBanner sync={serverDraft} />
             <SourceEditor
               state={document}
               dispatch={dispatch}

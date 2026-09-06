@@ -1,7 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import replace
+import hashlib
+import json
+import math
+from dataclasses import asdict, replace
 from datetime import date, timedelta
+from enum import Enum
 
 import pytest
 
@@ -11,10 +15,16 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.domain.portfolio.facade.construction import (
     ExclusionReason,
+    FactorContributionStatus,
+    NonFinitePortfolioCalculationError,
+    PortfolioConstraintEffect,
     PortfolioFactorValue,
     PortfolioFieldValue,
     PortfolioObservation,
+    PortfolioTraceSelection,
+    compile_rebalance_schedule,
     compile_target_tape,
+    compile_target_tape_with_trace,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
     ComparisonOperator,
@@ -83,6 +93,29 @@ def _compile(spec, observations, sessions=None):
         sessions=sessions or (signal_day, signal_day + timedelta(days=1)),
         observations=tuple(observations),
     )
+
+
+def test_preflight_and_target_tape_share_the_compiler_owned_schedule(monkeypatch) -> None:
+    from strategy_workbench.domain.portfolio import _compiler as compiler_module
+
+    spec = _spec()
+    sessions = (date(2026, 1, 2), date(2026, 1, 5), date(2026, 1, 6))
+    schedule = compile_rebalance_schedule(spec, sessions)
+    assert schedule.first_signal_as_of == sessions[0]
+
+    def fail_if_recomputed(*args, **kwargs):
+        raise AssertionError((args, kwargs))
+
+    monkeypatch.setattr(compiler_module, "_rebalance_pairs", fail_if_recomputed)
+    tape = compile_target_tape(
+        spec,
+        data_snapshot_id="snapshot-1",
+        sessions=sessions,
+        observations=(_observation(sessions[0], "a", 1.0),),
+        schedule=schedule,
+    )
+
+    assert tuple(frame.signal_as_of for frame in tape.frames) == sessions[:-1]
 
 
 def test_eligibility_and_point_in_time_rules_explain_every_rejection() -> None:
@@ -322,6 +355,237 @@ def test_target_tape_hash_is_immutable_and_snapshot_sensitive() -> None:
     assert first == second
     assert first.tape_hash == second.tape_hash
     assert first.tape_hash != different_snapshot.tape_hash
+
+
+def test_construction_trace_is_out_of_band_and_contributions_sum_to_the_same_score() -> None:
+    spec = _spec()
+    original = spec.factors.factors[0]
+    second = replace(original, factor_id="second", weight=3.0)
+    first = replace(original, weight=1.0)
+    spec = replace(
+        spec,
+        factors=replace(spec.factors, factors=(first, second)),
+        portfolio=replace(
+            spec.portfolio, selection_count=2, weighting=WeightingMethod.FACTOR_SCORE
+        ),
+        risk=replace(spec.risk, max_name_weight=0.6),
+    )
+    day = date(2026, 1, 2)
+    observations = (
+        replace(
+            _observation(day, "a", 4.0),
+            factor_values=(
+                PortfolioFactorValue("price.close", 4.0, day),
+                PortfolioFactorValue("second", 2.0, day),
+            ),
+        ),
+        replace(
+            _observation(day, "b", 1.0),
+            factor_values=(
+                PortfolioFactorValue("price.close", 1.0, day),
+                PortfolioFactorValue("second", 1.0, day),
+            ),
+        ),
+    )
+    kwargs = {
+        "data_snapshot_id": "snapshot-1",
+        "sessions": (day, day + timedelta(days=1)),
+        "observations": observations,
+    }
+
+    plain = compile_target_tape(spec, **kwargs)
+    traced = compile_target_tape_with_trace(
+        spec,
+        **kwargs,
+        trace_selection=PortfolioTraceSelection(day, ("a", "b")),
+    )
+
+    assert traced.tape == plain
+    assert traced.tape.tape_hash == plain.tape_hash
+    assert traced.trace is not None
+    by_id = {item.security_id: item for item in traced.trace.candidates}
+    for candidate in by_id.values():
+        contributions = candidate.factor_contributions
+        assert all(item.status is FactorContributionStatus.OK for item in contributions)
+        assert sum(item.normalized_contribution or 0.0 for item in contributions) == pytest.approx(
+            candidate.composite_score
+        )
+    assert by_id["a"].unconstrained_target_weight == pytest.approx(5 / 7)
+    assert by_id["a"].constrained_target_weight == pytest.approx(0.6)
+    assert by_id["a"].constraint_effect is PortfolioConstraintEffect.ADJUSTED
+    assert by_id["a"].previous_weight is None
+    assert by_id["a"].estimated_order_delta is None
+
+
+def test_omitted_construction_trace_date_uses_the_schedule_latest_signal() -> None:
+    spec = _spec()
+    sessions = (
+        date(2026, 1, 2),
+        date(2026, 1, 5),
+        date(2026, 1, 6),
+    )
+    observations = tuple(_observation(day, "a", float(index)) for index, day in enumerate(sessions))
+
+    result = compile_target_tape_with_trace(
+        spec,
+        data_snapshot_id="snapshot-1",
+        sessions=sessions,
+        observations=observations,
+        trace_selection=PortfolioTraceSelection(None, ("a",)),
+    )
+
+    assert result.trace is not None
+    assert result.trace.signal_as_of == sessions[-2]
+    assert result.trace.execution_on == sessions[-1]
+    assert result.trace.signal_as_of == result.tape.frames[-1].signal_as_of
+
+
+def test_construction_trace_explains_missing_future_removed_and_explicit_order_delta() -> None:
+    spec = replace(
+        _spec(),
+        portfolio=replace(_spec().portfolio, side=PortfolioSide.LONG_SHORT),
+        risk=replace(
+            _spec().risk,
+            gross_exposure=1.0,
+            net_exposure=0.0,
+            sector_neutral=True,
+        ),
+    )
+    day = date(2026, 1, 2)
+    observations = (
+        _observation(day, "long", 2.0, sector_id="long-only", previous_weight=0.2),
+        _observation(day, "short", -2.0, sector_id="short-only", previous_weight=-0.1),
+        _observation(day, "missing", None, sector_id="missing"),
+        _observation(
+            day,
+            "future",
+            1.0,
+            available_date=day + timedelta(days=1),
+            sector_id="future",
+        ),
+    )
+
+    result = compile_target_tape_with_trace(
+        spec,
+        data_snapshot_id="snapshot-1",
+        sessions=(day, day + timedelta(days=1)),
+        observations=observations,
+        trace_selection=PortfolioTraceSelection(
+            day,
+            tuple(item.security_id for item in observations),
+            include_order_delta=True,
+        ),
+    )
+
+    assert result.trace is not None
+    by_id = {item.security_id: item for item in result.trace.candidates}
+    assert by_id["missing"].factor_contributions[0].status is FactorContributionStatus.MISSING
+    assert by_id["future"].factor_contributions[0].status is FactorContributionStatus.FUTURE_DATA
+    assert by_id["long"].constraint_effect is PortfolioConstraintEffect.REMOVED
+    assert by_id["short"].constraint_effect is PortfolioConstraintEffect.REMOVED
+    assert by_id["long"].previous_weight == pytest.approx(0.2)
+    assert by_id["long"].estimated_order_delta == pytest.approx(-0.2)
+
+
+def test_target_tape_hash_preserves_the_pre_cancellation_byte_contract() -> None:
+    spec = _spec()
+    day = date(2026, 1, 2)
+    tape = _compile(spec, (_observation(day, "a", 1.0),))
+    payload = {
+        "data_snapshot_id": tape.data_snapshot_id,
+        "strategy_hash": tape.strategy_hash,
+        "execution_timing": tape.execution_timing,
+        "frames": [asdict(frame) for frame in tape.frames],
+    }
+
+    def encode(value: object) -> str:
+        if isinstance(value, date):
+            return value.isoformat()
+        if isinstance(value, Enum):
+            return str(value.value)
+        raise TypeError(type(value).__name__)
+
+    legacy_hash = hashlib.sha256(
+        json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=encode,
+        ).encode()
+    ).hexdigest()
+
+    assert tape.tape_hash == legacy_hash
+
+
+def test_portfolio_arithmetic_overflow_never_materializes_a_target_tape() -> None:
+    spec = _spec()
+    factor = replace(spec.factors.factors[0], weight=1e308)
+    spec = replace(spec, factors=replace(spec.factors, factors=(factor,)))
+    day = date(2026, 1, 2)
+
+    with pytest.raises(NonFinitePortfolioCalculationError, match="composite_score"):
+        _compile(spec, (_observation(day, "overflow", 2.0),))
+
+
+@pytest.mark.parametrize("stage", ["materialization", "hash"])
+def test_target_tape_cancellation_reaches_canonical_materialization_and_hash(
+    stage: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from strategy_workbench.domain.portfolio import _compiler as compiler_module
+
+    entered = False
+    if stage == "materialization":
+        original = compiler_module._canonical_payload
+
+        def observed_materialization(*args, **kwargs):
+            nonlocal entered
+            entered = True
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(compiler_module, "_canonical_payload", observed_materialization)
+    else:
+        original = compiler_module._hash_payload
+
+        def observed_hash(*args, **kwargs):
+            nonlocal entered
+            entered = True
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(compiler_module, "_hash_payload", observed_hash)
+
+    def checkpoint() -> None:
+        if entered:
+            raise RuntimeError(f"cancelled during {stage}")
+
+    spec = _spec()
+    day = date(2026, 1, 2)
+    with pytest.raises(RuntimeError, match=f"cancelled during {stage}"):
+        compile_target_tape(
+            spec,
+            data_snapshot_id="snapshot-1",
+            sessions=(day, day + timedelta(days=1)),
+            observations=(_observation(day, "a", 1.0),),
+            checkpoint=checkpoint,
+        )
+    assert entered
+
+
+def test_every_materialized_target_tape_number_is_finite() -> None:
+    spec = _spec()
+    day = date(2026, 1, 2)
+    payload = asdict(_compile(spec, (_observation(day, "a", 1.0),)))
+
+    def numbers(value: object):
+        if isinstance(value, float):
+            yield value
+        elif isinstance(value, dict):
+            for item in value.values():
+                yield from numbers(item)
+        elif isinstance(value, (tuple, list)):
+            for item in value:
+                yield from numbers(item)
+
+    assert all(math.isfinite(value) for value in numbers(payload))
 
 
 def test_hard_risk_limits_override_a_minimum_trade_hold() -> None:

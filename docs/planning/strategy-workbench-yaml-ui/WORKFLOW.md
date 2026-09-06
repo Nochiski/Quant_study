@@ -913,12 +913,10 @@ Phase 5 종료 기준:
 - 기존 repository port 유지
 - process restart 후 strategy 복원
 
-### P6-02 — Server draft와 history UI
+### P6-02 — Server draft persistence/CAS/recovery UI
 
 - server draft optimistic lock
 - multi-device draft conflict
-- strategy list와 revision history
-- backtest run history
 - local recovery는 서버 장애 fallback으로 유지
 
 ### P6-03 — Keyboard·Command Palette
@@ -975,6 +973,18 @@ Acceptance:
 - 각 명령은 표준 입출력과 종료 신호를 하위 프로세스에 전달하고 non-zero 종료를 숨기지 않는다.
 - README quick start와 실제 HTTP smoke test가 명령 계약을 고정한다.
 - production process manager, Docker, 양쪽 서버 동시 실행은 이 PR의 범위가 아니다.
+
+### P6-08 — Strategy/revision history routed UI
+
+- deterministic strategy list와 revision history pagination
+- 원하는 immutable revision 편집·diff direct route 연결
+- loading, empty, error, out-of-range URL 상태
+
+### P6-09 — Backtest run history routed UI와 provenance
+
+- process-lifetime run lifecycle의 newest-first pagination과 strategy filter
+- saved/inline provenance의 strategy/revision/spec/schema/source hash 표시
+- run detail direct route 연결과 nonterminal polling
 
 Phase 6 종료 기준:
 

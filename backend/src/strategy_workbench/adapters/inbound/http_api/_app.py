@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
+from threading import Event
 from typing import Annotated
 
-from fastapi import FastAPI, Header, HTTPException, Query, Response, status
+from fastapi import FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -47,24 +50,44 @@ from strategy_workbench.application.factor_research.facade.research import (
     InvalidFactorRequestError,
 )
 from strategy_workbench.application.portfolio_design.facade.design import (
+    IncompatiblePortfolioRequestError,
     InvalidPortfolioRequestError,
     PortfolioDesignService,
     PortfolioPreview,
     PortfolioPreviewRequest,
+    RawObservationContractError,
     RawObservationUnavailableError,
+)
+from strategy_workbench.application.portfolio_design.facade.trace import (
+    InvalidStrategyTraceRequestError,
+    StaleStrategyTraceSourceError,
+    StrategyTraceCancelledError,
+    StrategyTraceCapabilityError,
+    StrategyTraceRequest,
+    StrategyTraceResponse,
+    StrategyTraceService,
+    StrategyTraceSourceNotFoundError,
 )
 from strategy_workbench.application.strategy_authoring.facade.authoring import (
     CompiledDocument,
     CompileRequest,
     InvalidStrategyDocumentError,
+    InvalidStrategyDraftError,
     ReviseDocumentRequest,
     RevisionDiff,
     SaveDocumentRequest,
+    SaveStrategyDraftRequest,
     StrategyAuthoringService,
     StrategyDocument,
     StrategyDocumentContract,
     StrategyDocumentSchema,
     StrategyDocumentService,
+    StrategyDraft,
+    StrategyDraftService,
+)
+from strategy_workbench.application.strategy_authoring.facade.ports import (
+    StrategyDraftConflictError,
+    StrategyDraftNotFoundError,
 )
 from strategy_workbench.application.strategy_design.facade.design import (
     InvalidStrategyError,
@@ -85,6 +108,35 @@ from strategy_workbench.domain.equity.facade.research_data import (
 from strategy_workbench.domain.strategy.facade.explanation import StrategyExplanation
 from strategy_workbench.domain.strategy.facade.specification import StrategySpec
 from strategy_workbench.domain.strategy.facade.validation import StrategyValidation
+
+from ._backtest_contract import (
+    Backtest422Response,
+    BacktestStrategyNotFoundResponse,
+    BacktestStrategyStaleResponse,
+)
+from ._execution_error_contract import (
+    Portfolio422Response,
+    PortfolioRawObservationInvalidDetail,
+)
+from ._strategy_draft_contract import (
+    StrategyDraft422Response,
+    StrategyDraftConflictDetail,
+    StrategyDraftConflictResponse,
+    StrategyDraftErrorResponse,
+)
+from ._trace_contract import (
+    Trace422Response,
+    TraceCancelledDetail,
+    TraceCancelledResponse,
+    TraceCapabilityUnsupportedDetail,
+    TraceEngineIncompatibleDetail,
+    TraceRequestInvalidDetail,
+    TraceStrategyNotFoundDetail,
+    TraceStrategyNotFoundResponse,
+    TraceStrategyStaleDetail,
+    TraceStrategyStaleResponse,
+    apply_trace_openapi_contract,
+)
 
 EQUITY_CATALOG_PATH = "/api/v1/equity/catalog"
 FACTOR_CATALOG_PATH = "/api/v1/factors/catalog"
@@ -127,14 +179,48 @@ def _backtest_not_found(error: BacktestRunNotFoundError) -> HTTPException:
     )
 
 
+def _draft_conflict(error: StrategyDraftConflictError) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=jsonable_encoder(
+            asdict(
+                StrategyDraftConflictDetail(
+                    code="strategy.draft.conflict",
+                    message=str(error),
+                    current=error.current,
+                )
+            ),
+            custom_encoder={
+                datetime: lambda value: value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+            },
+        ),
+    )
+
+
+def _draft_not_found(error: StrategyDraftNotFoundError) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={"code": "strategy.draft.not_found", "message": str(error)},
+    )
+
+
+def _invalid_draft(error: InvalidStrategyDraftError) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail={"code": "strategy.draft.invalid", "message": str(error)},
+    )
+
+
 def create_app(
     *,
     strategy_design: StrategyDesignService,
     strategy_authoring: StrategyAuthoringService,
     strategy_documents: StrategyDocumentService,
+    strategy_drafts: StrategyDraftService,
     equity_workspace: EquityWorkspaceService,
     factor_research: FactorResearchService,
     portfolio_design: PortfolioDesignService,
+    strategy_traces: StrategyTraceService,
     backtest_runs: BacktestRunService,
     allowed_origins: tuple[str, ...] = ("http://localhost:5173",),
 ) -> FastAPI:
@@ -163,6 +249,20 @@ def create_app(
         "/api/v1/backtests",
         operation_id="startBacktest",
         status_code=status.HTTP_202_ACCEPTED,
+        responses={
+            404: {
+                "model": BacktestStrategyNotFoundResponse,
+                "description": "The immutable strategy revision does not exist",
+            },
+            409: {
+                "model": BacktestStrategyStaleResponse,
+                "description": "The saved revision hash differs from the expected hash",
+            },
+            422: {
+                "model": Backtest422Response,
+                "description": "Malformed envelope or a coded backtest preflight diagnostic",
+            },
+        },
     )
     def start_backtest(spec: BacktestRunSpec) -> BacktestStartResponse:
         try:
@@ -172,6 +272,7 @@ def create_app(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail={"code": "backtest.run.invalid", "message": str(error)},
             ) from error
+
         except StrategyReferenceNotFoundError as error:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -183,7 +284,11 @@ def create_app(
                 detail={"code": "backtest.strategy.stale", "message": str(error)},
             ) from error
 
-        except (InvalidPortfolioRequestError, RawObservationUnavailableError) as error:
+        except (
+            InvalidPortfolioRequestError,
+            RawObservationUnavailableError,
+            RawObservationContractError,
+        ) as error:
             raise _portfolio_http_error(error) from error
 
     @app.get(
@@ -266,12 +371,105 @@ def create_app(
     @app.post(
         "/api/v1/portfolio/preview",
         operation_id="previewPortfolio",
+        responses={
+            422: {
+                "model": Portfolio422Response,
+                "description": "Malformed envelope or a coded portfolio preflight diagnostic",
+            }
+        },
     )
     def portfolio_preview(request: PortfolioPreviewRequest) -> PortfolioPreview:
         try:
             return portfolio_design.preview(request)
-        except (InvalidPortfolioRequestError, RawObservationUnavailableError) as error:
+        except (
+            InvalidPortfolioRequestError,
+            RawObservationUnavailableError,
+            RawObservationContractError,
+        ) as error:
             raise _portfolio_http_error(error) from error
+
+    @app.post(
+        "/api/v1/strategies/debug/trace",
+        operation_id="traceStrategy",
+        responses={
+            404: {
+                "model": TraceStrategyNotFoundResponse,
+                "description": "The immutable strategy revision does not exist",
+            },
+            409: {
+                "model": TraceStrategyStaleResponse,
+                "description": "The saved revision hash differs from the expected hash",
+            },
+            422: {
+                "model": Trace422Response,
+                "description": "Malformed envelope or a coded trace preflight diagnostic",
+            },
+            499: {
+                "model": TraceCancelledResponse,
+                "description": "The client cancelled the trace request",
+            },
+        },
+    )
+    async def trace_strategy(
+        trace_request: StrategyTraceRequest, request: Request
+    ) -> StrategyTraceResponse:
+        """Bounded node/raw/target projection from the same calculation that builds TargetTape."""
+        stop = Event()
+        task = asyncio.create_task(
+            asyncio.to_thread(strategy_traces.trace, trace_request, cancelled=stop.is_set)
+        )
+        try:
+            while not task.done():
+                if await request.is_disconnected():
+                    stop.set()
+                await asyncio.sleep(0.01)
+            return await task
+        except InvalidStrategyTraceRequestError as error:
+            detail = TraceRequestInvalidDetail("trace.request.invalid", str(error))
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=asdict(detail),
+            ) from error
+        except StrategyTraceSourceNotFoundError as error:
+            detail = TraceStrategyNotFoundDetail("trace.strategy.not_found", str(error))
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=asdict(detail),
+            ) from error
+        except StaleStrategyTraceSourceError as error:
+            detail = TraceStrategyStaleDetail("trace.strategy.stale", str(error))
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=asdict(detail),
+            ) from error
+        except IncompatiblePortfolioRequestError as error:
+            detail = TraceEngineIncompatibleDetail("trace.engine.incompatible", error.compatibility)
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=jsonable_encoder(asdict(detail)),
+            ) from error
+        except StrategyTraceCapabilityError as error:
+            detail = TraceCapabilityUnsupportedDetail(
+                "trace.capability.unsupported", error.capability, str(error)
+            )
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=asdict(detail),
+            ) from error
+        except (
+            InvalidPortfolioRequestError,
+            RawObservationUnavailableError,
+            RawObservationContractError,
+        ) as error:
+            raise _portfolio_http_error(error) from error
+        except StrategyTraceCancelledError as error:
+            detail = TraceCancelledDetail("trace.cancelled", str(error))
+            raise HTTPException(
+                status_code=499,
+                detail=asdict(detail),
+            ) from error
+        finally:
+            stop.set()
 
     @app.get(
         EQUITY_CATALOG_PATH,
@@ -377,6 +575,83 @@ def create_app(
                     "validation": jsonable_encoder(asdict(error.validation)),
                 },
             ) from error
+
+    @app.get(
+        "/api/v1/strategy-drafts/{draft_id}",
+        operation_id="getStrategyDraft",
+        responses={
+            404: {
+                "model": StrategyDraftErrorResponse,
+                "description": "Draft does not exist",
+            },
+            422: {
+                "model": StrategyDraft422Response,
+                "description": "Malformed request or invalid draft identity/base",
+            },
+        },
+    )
+    def get_strategy_draft(draft_id: str) -> StrategyDraft:
+        try:
+            return strategy_drafts.get(draft_id)
+        except StrategyDraftNotFoundError as error:
+            raise _draft_not_found(error) from error
+        except InvalidStrategyDraftError as error:
+            raise _invalid_draft(error) from error
+
+    @app.put(
+        "/api/v1/strategy-drafts/{draft_id}",
+        operation_id="saveStrategyDraft",
+        responses={
+            409: {
+                "model": StrategyDraftConflictResponse,
+                "description": "A different client advanced this draft version",
+            },
+            422: {
+                "model": StrategyDraft422Response,
+                "description": "Malformed request or invalid draft identity/base",
+            },
+        },
+    )
+    def save_strategy_draft(draft_id: str, request: SaveStrategyDraftRequest) -> StrategyDraft:
+        try:
+            return strategy_drafts.save(draft_id, request)
+        except StrategyDraftConflictError as error:
+            raise _draft_conflict(error) from error
+        except InvalidStrategyDraftError as error:
+            raise _invalid_draft(error) from error
+
+    @app.delete(
+        "/api/v1/strategy-drafts/{draft_id}",
+        operation_id="deleteStrategyDraft",
+        status_code=status.HTTP_204_NO_CONTENT,
+        responses={
+            404: {
+                "model": StrategyDraftErrorResponse,
+                "description": "Draft does not exist",
+            },
+            409: {
+                "model": StrategyDraftConflictResponse,
+                "description": "A different client advanced this draft version",
+            },
+            422: {
+                "model": StrategyDraft422Response,
+                "description": "Malformed request or invalid draft identity/base",
+            },
+        },
+    )
+    def delete_strategy_draft(
+        draft_id: str,
+        expected_version: int = Query(ge=1),
+    ) -> Response:
+        try:
+            strategy_drafts.delete(draft_id, expected_version=expected_version)
+        except StrategyDraftNotFoundError as error:
+            raise _draft_not_found(error) from error
+        except StrategyDraftConflictError as error:
+            raise _draft_conflict(error) from error
+        except InvalidStrategyDraftError as error:
+            raise _invalid_draft(error) from error
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.post(
         "/api/v1/strategy-documents/compile",
@@ -590,6 +865,9 @@ def create_app(
         except StrategyRevisionConflictError as error:
             raise _revision_conflict(error) from error
 
+    # FastAPI sees plain dataclasses, while this inbound adapter owns wire-only constraints and
+    # discriminator metadata. Mutate the cached schema once after every route is registered.
+    apply_trace_openapi_contract(app.openapi())
     return app
 
 
@@ -634,7 +912,9 @@ def _invalid_document(error: InvalidStrategyDocumentError) -> HTTPException:
 
 
 def _portfolio_http_error(
-    error: InvalidPortfolioRequestError | RawObservationUnavailableError,
+    error: InvalidPortfolioRequestError
+    | RawObservationUnavailableError
+    | RawObservationContractError,
 ) -> HTTPException:
     """Same coded 422 for the preview and backtest routes: the pipeline rejected the request."""
     if isinstance(error, InvalidPortfolioRequestError):
@@ -642,10 +922,17 @@ def _portfolio_http_error(
             "code": "portfolio.strategy.invalid",
             "validation": jsonable_encoder(asdict(error.validation)),
         }
-    else:
+    elif isinstance(error, RawObservationUnavailableError):
         detail = {
             "code": "portfolio.data.unavailable",
             "status": error.status.value,
             "detail": error.detail,
         }
+    else:
+        detail = asdict(
+            PortfolioRawObservationInvalidDetail(
+                "portfolio.raw_observation.invalid",
+                str(error),
+            )
+        )
     return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=detail)

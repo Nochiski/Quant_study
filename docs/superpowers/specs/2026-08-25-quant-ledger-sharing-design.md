@@ -325,5 +325,5 @@ WHERE bas_dd >= '2020-01-01';
 
 ## 관련 컨텍스트
 
-- `~/Desktop/Quant_study/workspace/dongmin/docs/DATA_CATALOG.md` — PR-02/PR-03/MS-02/MS-04/MS-05 결함 상세
-- `~/Desktop/Quant_study/workspace/dongmin/docs/RESEARCH_VERDICT.md` — 원장 SQLite + 분석층 Parquet 아키텍처 확정
+- `database/docs/DATA_CATALOG.md` — PR-02/PR-03/MS-02/MS-04/MS-05 결함 상세
+- `database/docs/archive/RESEARCH_VERDICT.md` — 원장 SQLite + 분석층 Parquet 아키텍처 확정

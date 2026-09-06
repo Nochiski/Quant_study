@@ -4,9 +4,10 @@ import sys
 
 from uvicorn.main import main as uvicorn_cli
 
-APP_TARGET = "strategy_workbench.bootstrap.facade.http:app"
+APP_TARGET = "strategy_workbench.bootstrap.facade.http:build_runtime_http_app"
 DEFAULT_ARGUMENTS = (
     APP_TARGET,
+    "--factory",
     "--host",
     "127.0.0.1",
     "--port",

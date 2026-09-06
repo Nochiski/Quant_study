@@ -15,7 +15,13 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import TypeAdapter
 
+from strategy_workbench.adapters.inbound.http_api._backtest_contract import Backtest422Response
+from strategy_workbench.adapters.inbound.http_api._execution_error_contract import (
+    Portfolio422Response,
+)
+from strategy_workbench.adapters.inbound.http_api._trace_contract import Trace422Response
 from strategy_workbench.adapters.outbound.artifact_local.facade.store import LocalArtifactStore
 from strategy_workbench.adapters.outbound.backtest_engine.facade.executor import (
     BacktestEngineExecutorAdapter,
@@ -55,6 +61,10 @@ from strategy_workbench.application.portfolio_design.facade.ports import (
     RawObservationQuery,
     RawObservationSet,
 )
+from strategy_workbench.application.portfolio_design.facade.trace import (
+    StrategyTraceRequest,
+    StrategyTraceService,
+)
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.bootstrap.facade.http import build_http_app
 from strategy_workbench.domain.analytics.facade.metrics import build_default_metric_registry
@@ -79,15 +89,20 @@ from strategy_workbench.domain.factor.facade.expression import (
 from strategy_workbench.domain.factor.facade.registry import build_default_factor_registry
 from strategy_workbench.domain.factor.facade.trace import trace_factor_graph
 from strategy_workbench.domain.portfolio.facade.construction import ExclusionReason
+from strategy_workbench.domain.strategy.facade.provenance import InlineDraft
 from strategy_workbench.domain.strategy.facade.specification import (
     ChoiceParameter,
+    ComparisonOperator,
     DataStep,
+    EligibilityRule,
+    EligibilityStep,
     FactorDirection,
     FactorSignal,
     FactorStep,
     Market,
     RebalanceFrequency,
     StrategySpec,
+    WeightingMethod,
 )
 from strategy_workbench.domain.strategy.facade.validation import validate_strategy
 
@@ -343,6 +358,227 @@ class _DriftedMetadata:
         )
 
 
+class _LegacyRawPort:
+    """Pre-P5 public port implementation: no checkpoint keyword or trace capability."""
+
+    def __init__(self, delegate: MockEquityDataAdapter) -> None:
+        self._delegate = delegate
+        self.calls = 0
+
+    def load_raw_observations(self, query: RawObservationQuery) -> RawObservationSet:
+        self.calls += 1
+        return self._delegate.load_raw_observations(query)
+
+
+class _NonFiniteRawPort:
+    """Malicious/stale adapter fixture that violates the current immutable port contract."""
+
+    def __init__(
+        self,
+        delegate: MockEquityDataAdapter,
+        *,
+        value: float,
+        field_id: str | None,
+    ) -> None:
+        self._delegate = delegate
+        self._value = value
+        self._field_id = field_id
+
+    def load_raw_observations(self, query: RawObservationQuery) -> RawObservationSet:
+        result = self._delegate.load_raw_observations(query)
+        observations = list(result.observations)
+        for index, observation in enumerate(observations):
+            if self._field_id is None:
+                observations[index] = replace(observation, previous_weight=self._value)
+                return replace(result, observations=tuple(observations))
+            if any(field.field_id == self._field_id for field in observation.fields):
+                observations[index] = replace(
+                    observation,
+                    fields=tuple(
+                        replace(field, value=self._value)
+                        if field.field_id == self._field_id
+                        else field
+                        for field in observation.fields
+                    ),
+                )
+                return replace(result, observations=tuple(observations))
+        raise AssertionError(f"fixture field was not loaded: {self._field_id!r}")
+
+    def load_raw_observations_cancellable(
+        self, query: RawObservationQuery, *, checkpoint
+    ) -> RawObservationSet:
+        checkpoint()
+        return self.load_raw_observations(query)
+
+
+def _spec_using_market_cap_outside_the_factor(role: str) -> StrategySpec:
+    spec = _spec(_momentum())
+    field_id = "price.market_cap"
+    if role == "eligibility":
+        return replace(
+            spec,
+            eligibility=EligibilityStep(
+                (EligibilityRule(field_id, ComparisonOperator.GREATER_THAN, 0.0),)
+            ),
+        )
+    if role == "liquidity":
+        return replace(
+            spec,
+            portfolio=replace(
+                spec.portfolio,
+                liquidity_field_id=field_id,
+                minimum_liquidity=0.0,
+            ),
+        )
+    if role == "risk":
+        return replace(
+            spec,
+            portfolio=replace(spec.portfolio, weighting=WeightingMethod.RISK),
+            risk=replace(spec.risk, risk_field_id=field_id),
+        )
+    raise AssertionError(role)
+
+
+@pytest.mark.parametrize("role", ["eligibility", "liquidity", "risk"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_unused_by_factor_non_finite_raw_field_fails_before_every_execution_route(
+    role: str,
+    value: float,
+    tmp_path: Path,
+) -> None:
+    delegate = MockEquityDataAdapter.demo()
+    source = _NonFiniteRawPort(delegate, value=value, field_id="price.market_cap")
+    portfolio = _service(source, metadata=delegate)
+    spec = _spec_using_market_cap_outside_the_factor(role)
+    assert validate_strategy(spec).valid
+
+    with pytest.raises(RawObservationContractError, match="raw numeric field value must be finite"):
+        portfolio.preview(PortfolioPreviewRequest(spec))
+
+    trace = StrategyTraceService(portfolio, InMemoryStrategyRepository())
+    with pytest.raises(RawObservationContractError, match="raw numeric field value must be finite"):
+        trace.trace(
+            StrategyTraceRequest(
+                strategy_source=InlineDraft(spec, "inline_draft", "raw-contract-probe"),
+                as_of=spec.data.end,
+                security_ids=("sec-005930-1",),
+                factor_id=spec.factors.factors[0].factor_id,
+                include_raw=True,
+            )
+        )
+
+    backtests = BacktestRunService(
+        portfolio,
+        InMemoryStrategyRepository(),
+        delegate,
+        BacktestEngineExecutorAdapter(build_default_metric_registry()),
+        LocalArtifactStore(tmp_path),
+        new_id=lambda: "raw-contract-run",
+    )
+    with pytest.raises(RawObservationContractError, match="raw numeric field value must be finite"):
+        backtests.start(BacktestRunSpec(strategy=spec, core=ExecutionCore.PYTHON))
+
+
+def test_non_finite_raw_opening_book_is_not_normalized_to_missing() -> None:
+    delegate = MockEquityDataAdapter.demo()
+    portfolio = _service(
+        _NonFiniteRawPort(delegate, value=float("inf"), field_id=None),
+        metadata=delegate,
+    )
+
+    with pytest.raises(RawObservationContractError, match="previous_weight must be finite"):
+        portfolio.preview(PortfolioPreviewRequest(_spec()))
+
+
+def test_duplicate_raw_fields_fail_closed_with_one_code_on_every_http_execution_route(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = MockEquityDataAdapter.load_raw_observations_cancellable
+
+    def duplicate_one_field(
+        adapter: MockEquityDataAdapter,
+        query: RawObservationQuery,
+        *,
+        checkpoint,
+    ) -> RawObservationSet:
+        result = original(adapter, query, checkpoint=checkpoint)
+        observation = next(item for item in result.observations if item.fields)
+        field = observation.fields[0]
+        # A stale/foreign adapter can bypass frozen construction; the application consumer
+        # boundary must still reject its ambiguous execution input before calculation.
+        object.__setattr__(
+            observation,
+            "fields",
+            (field, field, *observation.fields[1:]),
+        )
+        return result
+
+    monkeypatch.setattr(
+        MockEquityDataAdapter,
+        "load_raw_observations_cancellable",
+        duplicate_one_field,
+    )
+    client = TestClient(build_http_app())
+    spec = client.get("/api/v1/strategies/template").json()
+    factor = spec["factors"]["factors"][0]
+    responses = (
+        (
+            client.post("/api/v1/portfolio/preview", json={"spec": spec}),
+            Portfolio422Response,
+        ),
+        (
+            client.post(
+                "/api/v1/strategies/debug/trace",
+                json={
+                    "strategy_source": {"kind": "inline_draft", "spec": spec},
+                    "security_ids": ["sec-005930-1"],
+                    "factor_id": factor["factor_id"],
+                    "node_ids": [factor["graph"]["output_node_id"]],
+                },
+            ),
+            Trace422Response,
+        ),
+        (
+            client.post("/api/v1/backtests", json={"strategy": spec, "core": "python"}),
+            Backtest422Response,
+        ),
+    )
+
+    for response, contract in responses:
+        assert response.status_code == 422, response.text
+        assert response.json()["detail"]["code"] == "portfolio.raw_observation.invalid"
+        assert "field_ids must be unique" in response.json()["detail"]["message"]
+        TypeAdapter(contract).validate_python(response.json())
+
+
+def test_legacy_raw_port_keeps_preview_and_backtest_compatible(tmp_path: Path) -> None:
+    adapter = MockEquityDataAdapter.demo()
+    legacy = _LegacyRawPort(adapter)
+    portfolio = _service(legacy, metadata=adapter)
+    spec = _spec()
+
+    assert portfolio.preview(PortfolioPreviewRequest(spec)).tape.frames
+    backtests = BacktestRunService(
+        portfolio,
+        InMemoryStrategyRepository(),
+        adapter,
+        BacktestEngineExecutorAdapter(build_default_metric_registry()),
+        LocalArtifactStore(tmp_path),
+        new_id=lambda: "legacy-port-run",
+    )
+
+    accepted = backtests.start(BacktestRunSpec(strategy=spec, core=ExecutionCore.PYTHON))
+
+    assert accepted.run.run_id == "legacy-port-run"
+    assert legacy.calls == 2
+    for _ in range(200):
+        state = backtests.state("legacy-port-run")
+        if state.status.value in {"completed", "failed", "cancelled"}:
+            break
+        time.sleep(0.01)
+    assert state.status.value == "completed"
+
+
 def test_metadata_raw_snapshot_mismatch_blocks_portfolio_and_backtest(tmp_path: Path) -> None:
     adapter = MockEquityDataAdapter.demo()
     portfolio = _service(adapter, metadata=_DriftedMetadata(adapter))
@@ -446,7 +682,9 @@ def test_factor_value_publication_date_is_the_latest_input_publication() -> None
 class _LeakyPort:
     """Adapter that violates the contract: one field published after its observation date."""
 
-    def load_raw_observations(self, query: RawObservationQuery) -> RawObservationSet:
+    def load_raw_observations(
+        self, query: RawObservationQuery, *, checkpoint=lambda: None
+    ) -> RawObservationSet:
         result = MockEquityDataAdapter.demo().load_raw_observations(query)
         first = result.observations[0]
         leaked = replace(
@@ -592,7 +830,9 @@ class _NonMemberNoisePort:
     def __init__(self, value: float = 1e6) -> None:
         self._value = value
 
-    def load_raw_observations(self, query: RawObservationQuery) -> RawObservationSet:
+    def load_raw_observations(
+        self, query: RawObservationQuery, *, checkpoint=lambda: None
+    ) -> RawObservationSet:
         result = MockEquityDataAdapter.demo().load_raw_observations(query)
         template = result.observations[0]
         extra = tuple(
@@ -655,7 +895,9 @@ def test_non_members_do_not_enter_the_member_cross_section() -> None:
 class _WideRangePort:
     """Adapter that answers a wider window than asked (D-004 probe)."""
 
-    def load_raw_observations(self, query: RawObservationQuery) -> RawObservationSet:
+    def load_raw_observations(
+        self, query: RawObservationQuery, *, checkpoint=lambda: None
+    ) -> RawObservationSet:
         widened = replace(query, end=query.end + timedelta(days=14))
         return MockEquityDataAdapter.demo().load_raw_observations(widened)
 

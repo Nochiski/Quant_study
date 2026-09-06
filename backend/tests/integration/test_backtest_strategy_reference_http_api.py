@@ -12,7 +12,12 @@ from pathlib import Path
 from typing import Any
 
 from fastapi.testclient import TestClient
+from pydantic import TypeAdapter
 
+from strategy_workbench.adapters.inbound.http_api._backtest_contract import (
+    BacktestStrategyNotFoundResponse,
+    BacktestStrategyStaleResponse,
+)
 from strategy_workbench.bootstrap.facade.http import build_http_app
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
@@ -89,6 +94,7 @@ def test_stale_or_missing_reference_fails_before_a_run_exists() -> None:
     assert stale.status_code == 409, stale.text
     assert stale.json()["detail"]["code"] == "backtest.strategy.stale"
     assert document["spec_hash"] in stale.json()["detail"]["message"]
+    TypeAdapter(BacktestStrategyStaleResponse).validate_python(stale.json())
 
     missing = client.post(
         "/api/v1/backtests",
@@ -99,6 +105,7 @@ def test_stale_or_missing_reference_fails_before_a_run_exists() -> None:
     )
     assert missing.status_code == 404
     assert missing.json()["detail"]["code"] == "backtest.strategy.not_found"
+    TypeAdapter(BacktestStrategyNotFoundResponse).validate_python(missing.json())
 
 
 def test_inline_draft_and_legacy_inline_spec_record_inline_provenance() -> None:

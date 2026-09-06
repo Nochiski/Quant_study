@@ -1,5 +1,7 @@
 # 문서층(L1) 착수 노트 — DART 보고서 ZIP 처리 (2026-09-03, stage 세션 인계)
 
+> **결과(09-05)**: P1 완료 — 설계·실측은 `DOC_DESIGN.md`(v1.1, §7 실측·교훈), 코드는 PR #54(`stg_doc_meta`·`section`·`correction`·`parse_log`). 이 문서는 착수 시점 기록이며 아래 계획 중 "첫 장에서 원본 접수번호 파싱" 은 실측(§1.7)으로 폐기됐다.
+
 > stage 설계 §0 이 범위 밖으로 둔 "문서층 L1(ZIP 본문 파싱)" 트랙의 시작 문서. 읽는 순서: 이 문서 → `STAGE_HANDOFF.md` §4(공시 정정 신호 항목)
 > → `STAGE_DESIGN.md` §0·§7(정정 체인)·§10(doc_index 실측) → `EQUITY_KICKOFF.md`(equity 4단계 `disclosure_version` 이 이 트랙의 첫 고객).
 

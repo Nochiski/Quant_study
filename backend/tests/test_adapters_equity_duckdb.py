@@ -567,6 +567,27 @@ def test_backtest_dataset_refuses_unknown_and_index_ids(adapter: EquityDuckdbAda
         adapter.load_backtest_dataset(BacktestDataQuery(START, END, ("000660:1",), "idx:코스피"))
 
 
+def test_lag_falls_back_to_source_constants_and_says_so_when_the_profile_is_absent(
+    tmp_path: Path,
+) -> None:
+    """`dataset_profile` 없는 루트는 원천 상수로 돌아가되 **그 사실을 근거 문자열에 남긴다**.
+
+    조용히 폴백하면 어댑터가 자기 상수로 PIT 를 우기던 예전 상태로 되돌아간 것을 아무도 모른다
+    (TECH_DEBT §4). 그래서 값이 갈리는 것보다 갈렸다는 표시가 중요하다.
+    """
+    root = build_workbench_root(tmp_path / "equity", profile=False)
+    profiles = {p.field_id: p for p in EquityDuckdbAdapter(root).list_fields()}
+    assert all(p.recommended_lag_sessions == 0 for p in profiles.values())
+    assert all(
+        "fallback: no dataset_profile row" in p.available_date_basis for p in profiles.values()
+    )
+    # 대장이 있는 루트에서는 폴백 표시가 없다
+    with_profile = EquityDuckdbAdapter(build_workbench_root(tmp_path / "equity2"))
+    served = {p.field_id: p for p in with_profile.list_fields()}
+    assert not any("fallback" in p.available_date_basis for p in served.values())
+    assert served["credit.margin_balance"].recommended_lag_sessions == 1
+
+
 # ── 카탈로그·환경 실패 ────────────────────────────────────────────────────────
 
 

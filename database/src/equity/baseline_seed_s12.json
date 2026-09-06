@@ -1,0 +1,120 @@
+{
+ "_seed": "S12 fin_std(재무 PIT 표준화, vintage_kind='api_restated') 가 요구하는 baseline 상수. 오케스트레이터가 data/equity/baseline.json 에 병합한다. value 는 tests/fixtures/stage_slice 절단본에서 측정한 값이고, 서버 current_build 위 재측정이 필요한 항목은 _measured[].note 가 ★ 로 지목한다.",
+ "measured_at": "2026-09-06",
+ "fin_std": {
+  "period_end_lag_max_days": 200,
+  "rcept_lag_p99_days": 1826,
+  "nonmatch_rate_gap_max": 0.05,
+  "thresholds": {
+   "EG7": 0.03
+  },
+  "quarter_months": 3,
+  "half_months": 6,
+  "three_quarter_months": 9
+ },
+ "_measured": [
+  {
+   "table": "fin_std",
+   "metric": "quarter_months",
+   "inputs": {},
+   "sql": null,
+   "value": 3,
+   "measured_at": "2026-09-06",
+   "growing": false,
+   "used_by": "sql/fin_std.sql pe_cand(후보 기간 말일)·resolved(1Q/3Q 판정) (_const)",
+   "note": "convention(회계 달력). 결산월 말일에서 보고서 종류만큼 당겨 기간 말일을 만드는 개월 수 — 1분기 −9(`three_quarter_months`) · 반기 −6(`half_months`) · 3분기 −3(`quarter_months`) · 사업보고서 0. `quarter_months` 는 문서 `doc_acode` 11013 을 1분기(≤ 3개월)와 3분기로 가르는 경계이기도 하다. 잰 값이 아니라 분기의 정의이고, SQL 숫자 리터럴 금지 규약(tests/test_equity_build.py::test_sql파일에_상수_하드코딩_없음)의 통로일 뿐이다(`universe_daily.adv_window_td` 20 과 같은 취급, GATES §1-12). 서버 재측정 대상이 아니다."
+  },
+  {
+   "table": "fin_std",
+   "metric": "half_months",
+   "inputs": {},
+   "sql": null,
+   "value": 6,
+   "measured_at": "2026-09-06",
+   "growing": false,
+   "used_by": "sql/fin_std.sql pe_cand(후보 기간 말일)·resolved(1Q/3Q 판정) (_const)",
+   "note": "convention(회계 달력). 결산월 말일에서 보고서 종류만큼 당겨 기간 말일을 만드는 개월 수 — 1분기 −9(`three_quarter_months`) · 반기 −6(`half_months`) · 3분기 −3(`quarter_months`) · 사업보고서 0. `quarter_months` 는 문서 `doc_acode` 11013 을 1분기(≤ 3개월)와 3분기로 가르는 경계이기도 하다. 잰 값이 아니라 분기의 정의이고, SQL 숫자 리터럴 금지 규약(tests/test_equity_build.py::test_sql파일에_상수_하드코딩_없음)의 통로일 뿐이다(`universe_daily.adv_window_td` 20 과 같은 취급, GATES §1-12). 서버 재측정 대상이 아니다."
+  },
+  {
+   "table": "fin_std",
+   "metric": "three_quarter_months",
+   "inputs": {},
+   "sql": null,
+   "value": 9,
+   "measured_at": "2026-09-06",
+   "growing": false,
+   "used_by": "sql/fin_std.sql pe_cand(후보 기간 말일)·resolved(1Q/3Q 판정) (_const)",
+   "note": "convention(회계 달력). 결산월 말일에서 보고서 종류만큼 당겨 기간 말일을 만드는 개월 수 — 1분기 −9(`three_quarter_months`) · 반기 −6(`half_months`) · 3분기 −3(`quarter_months`) · 사업보고서 0. `quarter_months` 는 문서 `doc_acode` 11013 을 1분기(≤ 3개월)와 3분기로 가르는 경계이기도 하다. 잰 값이 아니라 분기의 정의이고, SQL 숫자 리터럴 금지 규약(tests/test_equity_build.py::test_sql파일에_상수_하드코딩_없음)의 통로일 뿐이다(`universe_daily.adv_window_td` 20 과 같은 취급, GATES §1-12). 서버 재측정 대상이 아니다."
+  },
+  {
+   "table": "fin_std",
+   "metric": "period_end_lag_max_days",
+   "inputs": {
+    "stg_fin": "slice",
+    "stg_doc_meta": "slice",
+    "stg_disclosure": "slice"
+   },
+   "sql": "SELECT max(date_diff('day', period_end, rcept_dt)) FROM fin_std WHERE period_end_basis = 'document' AND date_diff('day', period_end, rcept_dt) <= 200",
+   "value": 200,
+   "measured_at": "2026-09-06",
+   "growing": false,
+   "used_by": "sql/fin_std.sql pe_inf(문서 없는 그룹의 period_end 후보 선택 창) · _const",
+   "note": "DESIGN §4-4 가 명시한 후보 규칙의 창(0~200일)을 그대로 쓴다. 정상 접수는 사업보고서 90일·반기/분기 45일 안이고, 지연·정정 접수를 흡수할 여유를 둔 값이다. 창이 좁으면 후보 0 개(period_unresolved), 넓으면 인접 회계연도 후보가 둘 다 들어와 역시 unresolved 가 된다 — 절단본에서 문서 없는 그룹은 1건(00722500 2016 반기)이고 후보가 정확히 1개(2016-06-30, lag 62일)로 잡혔다. ★ 서버에서 문서 없는 그룹 수와 unresolved 분포로 재확인."
+  },
+  {
+   "table": "fin_std",
+   "metric": "rcept_lag_p99_days",
+   "inputs": {
+    "stg_fin": "slice",
+    "stg_doc_meta": "slice",
+    "stg_disclosure": "slice"
+   },
+   "sql": "SELECT quantile_cont(date_diff('day', period_end, rcept_dt), 0.99), max(date_diff('day', period_end, rcept_dt)) FROM fin_std",
+   "value": 1826,
+   "measured_at": "2026-09-06",
+   "growing": false,
+   "used_by": "EG7-P04 rcept_lag_out_of_range (sql/fin_std.sql judged · _const)",
+   "note": "★ 서버 재측정 필요. 절단본 실측 p50 45 · p99 216 · **max 445**(00110893 FY2021 사업보고서를 2023-03-21 접수 — API 가 정정본의 rcept_no 를 돌려주는 `api_restated` 축의 증거). GATES §1-12 는 이름을 `rcept_lag_p99_days` 로 등재했지만 **값을 문자 그대로 p99 로 잡으면 안 된다** — 그러면 정의상 1% 가 매번 격리된다(GATES §9 정정). 이 상한이 잡아야 하는 것은 `period_end` 오판(1년 어긋나면 lag 이 365 이상 튄다)과 음수 lag(결산 전 접수 = 불가능)이고, 정상 범위의 늦은 정정 접수는 통과시켜야 한다. seed 1826(5년)은 절단본 max 445 의 4배 여유이며 서버 lag 분포(p99·max·연도별)로 확정한다."
+  },
+  {
+   "table": "fin_std",
+   "metric": "nonmatch_rate_gap_max",
+   "inputs": {
+    "stg_fin": "slice",
+    "disclosure_version": "slice"
+   },
+   "sql": "SELECT abs(nondec_nonmatch_rate - dec_nonmatch_rate) FROM (SELECT (c.fiscal_month = 12) AS dec_fy, count(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM disclosure_version d WHERE d.rcept_no = o.rcept_no))::DOUBLE / count(*) AS rate FROM fin_std o JOIN corp c USING (corp_code) WHERE c.fiscal_month IS NOT NULL GROUP BY 1)",
+   "value": 0.05,
+   "measured_at": "2026-09-06",
+   "growing": false,
+   "used_by": "EG6_fin_std (GATES EG6-P08)",
+   "note": "★ 서버 재측정 필요 — **절단본에서는 측정 불가**. `stg_fin` 이 있는 법인 9개가 전부 12월 결산이라 비12월 결산 표본이 0 이고 게이트가 skip(no_coverage) 로 떨어진다(12월 결산 무매칭률은 0/220 = 0.0). 3월 결산 법인(00694003, 900060)은 절단본 `stg_fin` 에 재무 행이 없다. 이 게이트가 잡으려는 것은 `period_end` 후보 규칙이 비12월 결산에서만 어긋나는 비대칭이므로 서버 전량(비12월 결산 32사)에서 처음 판정된다. GATES 초안의 조인축(`disclosure_version.bsns_year`·`reprt_code`)은 v1.2 grain(`rcept_no`)에 없어 접수번호 조인으로 바꿨다(§9)."
+  },
+  {
+   "table": "fin_std",
+   "metric": "threshold_EG7",
+   "inputs": {
+    "stg_fin": "slice"
+   },
+   "sql": "SELECT n_reject::DOUBLE / (n_rows + n_reject) FROM fin_std _meta",
+   "value": 0.03,
+   "measured_at": "2026-09-06",
+   "growing": false,
+   "used_by": "EG7 격리 비율 상한 (gates.threshold)",
+   "note": "★ 서버 재측정 필요. 절단본 실측 6/226 = 0.02655 — 전부 `non_krw`(중국원양자원 00722500, 통화 HKD 848행). `period_unresolved`·`rcept_lag_out_of_range`·`duplicate_vintage` 는 절단본에서 0 이다. 서버 비KRW 는 STAGE_DESIGN baseline 실측 132,355행 / 15,375,024행 = 0.86%(행 기준)이므로 그룹 기준 비율은 그와 비슷하거나 낮을 것으로 본다. seed 0.03 은 절단본 값 위의 여유이고 서버 값으로 낮춰야 한다."
+  },
+  {
+   "_coverage_reference": "계정 커버율은 임계가 아니라 기록형이다(EG3_fin_std.coverage_by_account). 절단본 220행 실측 — revenue·op_profit·pretax_income·total_asset·total_liab·total_equity·cash·inventories·cf_* 1.0 · net_income 0.991 · eps_basic 0.964 · cost_of_sales·gross_profit·current_assets·current_liab 0.945 · equity_owners 0.868 · net_income_owners 0.841 · lease_liab 0.432 · **borrowings 0.064 · depreciation 0.055 · interest_expense 0.055**. 추가 3계정의 커버율이 낮은 것은 완전일치 규칙(fin_map 규칙 1)을 지킨 결과다 — 합산·부분일치로 올리면 이중계상·오탐이 들어온다. ★ 서버에서 다시 재고 판정한다.",
+   "server_reference": {
+    "stg_fin_rows": 15375024,
+    "stg_fin_non_krw_rows": 132355,
+    "stg_fin_bsns_year_mismatch": 120,
+    "stg_fin_account_std_false_rows": 2741192,
+    "stg_doc_meta_main": 170762,
+    "stg_doc_meta_period_from_filled": 168938,
+    "source": "STAGE_DESIGN §baseline 28지표 · EQUITY_DESIGN §10 P14",
+    "note": "fin_std 예상 행수 = (corp, bsns_year, reprt_code, fs_div) distinct 로 stg_fin 15.4M 행이 수십만 그룹으로 접힌다. 절단본 비 41,740행 → 226그룹(184:1)을 그대로 쓰면 8.3만, `stg_doc_meta` main 170,762 를 상한으로 보면 그 사이다."
+   }
+  }
+ ]
+}

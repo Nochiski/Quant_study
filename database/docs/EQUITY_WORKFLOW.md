@@ -110,8 +110,8 @@ EG0 입력 고정 · EG1 격자 등식(`− n_dedup − Σ n_reject` 일반형, 
 | **S08** | 수급 격자 | `flow_daily`(13주체 + KIS 대응표) | S03B + 키움·KIS flow·foreign·로그 | ∥ | S03B |
 | **S09** | 공매도·대차 격자 | `short_daily` | S03B + short kiwoom/kis·lending·loan_kis | ∥ | S03B |
 | **S10** | 신용 격자 | `credit_daily` | S03B + `stg_credit_daily` | ∥ | S03B |
-| **4A = S11** | 공시 판본(확정 링크) | `disclosure_version`(grain `rcept_no`, `orig_rcept_no`·`candidate_status`·`date_check`·`prior_corr_count`·`first_correction_dt`·`n_corrections`·`legal_deadline`·`delay_days`) + 모집단 5단 사다리 baseline | `stg_disclosure`·`stg_doc_correction`·`stg_doc_index`·`stg_doc_meta` | ∥ S03 | S00 · **doc-p1 main 병합** |
-| **4A = S12** | 재무 PIT | `fin_std`(`period_end` = `stg_doc_meta.period_to` 정본, `vintage_kind='api_restated'`, 파생 `<col>_available_date`) · `v_fin_latest` | `stg_fin`·`stg_rcept_dt_map`·`stg_doc_meta`·S11 | ∥ | S11 |
+| **4A = S11** | 공시 판본(확정 링크) | `disclosure_version`(grain `rcept_no`, `orig_rcept_no`·`candidate_status`·`date_check`·`prior_corr_count`·`first_correction_dt`·`n_corrections`·`legal_deadline`·`delay_days`) + 모집단 5단 사다리 baseline | `stg_disclosure`·`stg_doc_correction`·`stg_doc_index`·`stg_doc_meta` | ∥ S03 | S00 · **doc-p1 main 병합** (**구현 완료 09-06** — 로컬 실측 DESIGN §10 P29, 서버 미실행) |
+| **4A = S12** | 재무 PIT | `fin_std`(`period_end` = `stg_doc_meta.period_to` 정본, `vintage_kind='api_restated'`, 파생 블록마다 `*_available_date`·`*_n_rows`) · `v_fin_latest`(**후속**) | `stg_fin`·**`stg_disclosure`**(`stg_rcept_dt_map` 부재)·`stg_doc_meta`·S11·`corp` | ∥ | S11 (**테이블 구현 완료 09-06** — 로컬 실측 DESIGN §10 P30, 뷰·서버 미실행) |
 | **4C = S14** | 재무 원본 판본 | `fin_std.vintage_kind ∈ {original, corrected}` · `v_fin_latest(vintage := 'pit')` · D9 교차 | + `stg_fin_asreported` | **대기** | S12 · **문서층 P2 완료** |
 | **S15** | 지분·감사 | `holder_daily`·`ownership_snapshot`·`audit_opinion` | `stg_holder_*`·`stg_hyslr`·`stg_audit`·S01 | ∥ | S01 |
 | **S16** | 주식수·자사주·배당 | `shares_outstanding`·`treasury_stock`·`dividend_event` | `stg_shares`·`stg_tesstk`·`stg_dividend`·S01 | ∥ | S01 |

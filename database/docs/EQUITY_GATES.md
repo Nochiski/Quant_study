@@ -823,15 +823,18 @@ WHERE g.${VALUE_COL} = 0
 | `<격자>.evidence_rate_min` | EG9-P02 | 3 | 근거율 하한 |
 | `<격자>.coverage_return_corr_max`·`corr_min_months` | EG9-P03 | 3 | 상관 상한·최소 월수 |
 | `<table>.threshold_EG7` | EG7 | 전 단계 | 격리 비율 상한 |
-| `fin_std.rcept_lag_p99_days` | EG7-P04 | 4 | `rcept_dt − period_end` p99 |
-| `fin_std.period_end_lag_max_days` | `period_end` 후보 선택 | 4 | 후보 판정 상한 |
+| `fin_std.rcept_lag_p99_days` | EG7-P04 | 4 | `rcept_dt − period_end` **범위 상한**(이름은 p99 로 등재됐지만 값은 백분위가 아니다 — §9 S12 참조). seed 1826 |
+| `fin_std.period_end_lag_max_days` | `period_end` 후보 선택 | 4 | 후보 판정 상한. seed 200 |
+| `fin_std.quarter_months`·`half_months`·`three_quarter_months` | `period_end` 후보 식 · `doc_acode` 11013 의 1Q/3Q 분해 | 4 | 3·6·9 — 회계 달력의 정의이고 SQL 리터럴 금지 규약의 통로(`universe_daily.adv_window_td` 와 같은 취급) |
+| `fin_std.nonmatch_rate_gap_max` | EG6-P08 | 4 | 결산월별 무매칭률 비대칭 상한(초안은 `disclosure_version.` 접두, §9 S12) |
 | `fin_std.asof_value_change_max` | EG5c-P02 | 4 | 과거값 변경 허용 건수 |
 | `v_fin_latest.asof_sample_dates`·`asof_sample_tickers` | EG5c-P01 | 4 | as-of 표본 |
-| `disclosure_version.misjudge_rate_max` | EG6-P07 | 4 | 그룹 오판율 상한 |
-| `disclosure_version.nonmatch_rate_gap_max` | EG6-P08 | 4 | 비대칭 상한 |
-| `correction_link.link_rate_min` | EG6-P05 (E-G6a) | 4 | 링크 성립률 |
-| `correction_link.date_exact_rate` | EG6-P06 (E-G6b) | 4 | 기록형 |
-| `correction_link.reach_rate_min` | EG8-P09 (E-G7) | 4 | 도달률 |
+| `disclosure_version.misjudge_rate_max` | EG6-P07 | 4 | 그룹 오판율 상한 — **미등재**(사람이 라벨한 표본이 있어야 재는 값이라 코드가 판정하지 않는다, §9 S11) |
+| `disclosure_version.deadline_days_annual`·`deadline_days_interim` | `legal_deadline`·`delay_days` | 4 | 90·45(자본시장법 §159·§160). 규범이라 재측정 대상 아님 |
+| `disclosure_version.date_check_near_days` | `date_check='off_2_7d'` 경계 | 4 | 7 — 어휘 라벨이 못박은 값, SQL 리터럴 금지 규약의 통로 |
+| `disclosure_version.link_rate_min` | EG6-P05 (E-G6a) | 4 | 링크 성립률. 초안 키는 `correction_link.` 였다(§9 S11) |
+| `disclosure_version.date_exact_rate` | EG6-P06 (E-G6b) | 4 | 기록형 |
+| `disclosure_version.reach_rate_min` | EG8-P09 (E-G7) | 4 | `rm` 정정 플래그 도달률. 분모는 **원본만**(§9 S11) |
 | `consensus_daily.v3_wise_match_min` | EG8-P07 | 5 | 겹침 일치율 |
 | `consensus_daily.cover_ratio_drop_max`·`cover_ratio_rise_max` | EG9-P05 | 5 | 급락·급증 |
 | `consensus_daily.obs_month_bias_min` | EG-C ⑨ | 5 | 편의 하한 |
@@ -863,9 +866,9 @@ WHERE g.${VALUE_COL} = 0
 | 12 | `flow_daily` | 3 | ● | ●(§3-⑪) | ●(P01–P04) | ●(P01,P06,P07,P13) | ●(FX-3-001,002,003,004,005,006,007) | ●(a) | skip(no_multi_version) | ●(P06,P07) | ●(P05) | ●(P01–P04) | — |
 | 13 | `short_daily` | 3 | ● | ●(§3-⑪) | ●(P01–P04) | ●(P01,P07,P13) | ●(FX-3-001,003,004) | ●(a) | skip(no_multi_version) | ●(P06,P07) | ●(P06) | ●(P01–P04) | — |
 | 14 | `credit_daily` | 3 | ● | ●(§3-⑪) | ●(P01–P04) | ●(P01,P07,P13) | ●(FX-3-008) | ●(a) | skip(no_multi_version) | ●(P06,P07) | skip(no_cross_source) | ●(P01,P03,P04) · P02 skip(no_log_axis) | — |
-| 15 | `fin_std` | 4 | ● | ●(§3-⑫) | ●(P01–P05) | ●(P01,P13) | ●(FX-4-001…008) | ●(a,c) | ●(P07,P08) | ●(P04) | skip(no_baseline)→D9 승격 시 ● | skip(not_grid) | ●⑥⑦ |
-| 16 | `disclosure_version` | 4 | ● | ●(§3-⑬) | ●(P01–P04) | ●(P01) | ●(FX-4-004,005) | ●(a) | ●(P07,P08) | ●(P05) | — | skip(not_grid) | ●⑦ |
-| 17 | `correction_link` (문서층 §8.1) | 4 | ● | ●(§3-⑭) | ●(P01–P03) | ●(P01,P13) | ●(FX-4-009,010) | ●(a) | ●(P05,P06) | ● | ●(P09) | skip(not_grid) | — |
+| 15 | `fin_std` | 4 | ● | ●(§3-⑫) | ●(P01–P05) | ●(P01,P13) + `EG3_fin_std` | ●(FX-4-001…008) | ●(a) · c 는 뷰(S12 후속) | ●(P08) | ●(P04 + non_krw·period_unresolved·duplicate_vintage) | skip(no_baseline)→D9 승격 시 ● | skip(not_grid) | ●⑥⑦ |
+| 16 | `disclosure_version` | 4 | ● | ●(§3-⑬) | ●(P01–P04) | ●(P01) + `EG3_disclosure_version` | ●(FX-4-004,005,009,010) | ●(a) | ●(P05,P06) · P07 미등재 · P08 → `fin_std` | ●(격리 `rcept_dt_missing` 뿐 — P05 `no_label` 폐기) | ●(P09) | skip(not_grid) | ●⑦ |
+| 17 | ~~`correction_link`~~ (16행에 흡수) | 4 | — | — | — | — | — | — | — | — | — | — | — |
 | 18 | `holder_daily` | 4B | ● | ●(§3-⑮) | ●(P01–P04) | ●(P01,P07) | ●(FX-4B-003) | ●(a) | skip(no_multi_version) | ● | — | skip(not_grid) | — |
 | 19 | `ownership_snapshot` | 4B | ● | ●(§3-⑯) | ●(P01–P04) | ●(P01) | ●(FX-4B-005) | ●(a) | skip(no_multi_version) | ●(P07) | — | skip(not_grid) | — |
 | 20 | `shares_outstanding` | 4B | ● | ●(§3-⑯) | ●(P01–P04) | ●(P01) | ●(FX-4B-001) | ●(a) | skip(no_multi_version) | ● | — | skip(not_grid) | — |
@@ -1929,3 +1932,40 @@ workspace/dongmin/src/equity/
 | 부정 픽스처 | (i) 비율 어긋남 (ii) 기준가만 (iii) 전일 무거래 (iv) no_price_match 회생 | `test_equity_s06_adj.py` 합성 5건 + 절단본 1건: (i) 분할 pf 0.5 + 같은 날 주식수 ×3 → `krx_base_inconsistent`; r 0.8 반증 → 사건 inconsistent + (d) 신규; 기준가 없으면 폴백 nominal 회귀 (ii) 기준가 ×0.9 → (d) 행·available 다음 세션·ETF 는 행 없음 (iii) 정지 뒤 ×0.7 → 행 없음·`n_base_price_rediscovery` 1·구간 첫날(×5 + 주식수 ×0.2)은 spans 축이 가른다 (iv) 감자 재개일 원수익률 ×12.5 → 2차 unmatched, 기준가 ×10 → (a) 회생(10, 0.1); 창 밖(+7)이면 (b) unknown_krx 가 대신 선다 · 성분(감자+병합 ×4) 기준가 곱 교체 · 산출 기준가 행 계수 ×2 변조 → `n_krx_price_factor_mismatch`·`n_unknown_krx_ok_share_factor_bad` | 절단본 분류 (a)3·(b)0·(c)2·(d)2 |
 | 어댑터 | 변경 없음 | `EVENT_TYPE_MAP` 은 그대로 + `RATIO_DIRECTED_EVENT_TYPES = {unknown_krx}`: share_factor > 1 → SPLIT, < 1 → REVERSE_SPLIT, = 1 은 FORMAT_ERROR. `unknown_price_only` 는 ok=false 라 방출되지 않고 ok 로 오면 어휘 밖 FORMAT_ERROR(그대로) — EGC-04 가 `unknown_krx` ok 행을 비교 모집단에 넣으려면 매핑이 있어야 했다 | backend `test_unknown_krx_*` 3건 |
 | 규칙 판본 | e1.3.0 | `model.RULES_VERSION` e1.3.0 — 첫 서버 빌드는 EG5a `skip(rules_changed)`, 재빌드 해시 동일로 확인 | DESIGN §2 |
+
+---
+
+**S11 `disclosure_version` 구현 정정 (2026-09-06, `rules_s11.py`)**
+
+| 항목 | 초안 | 정정 | 근거 |
+|---|---|---|---|
+| EG7-P05 `no_label` 격리 | 기간 라벨 `(YYYY.MM)` 없는 행(서버 586)을 `_reject/no_label/` 로 | **폐기** — 행을 유지하고 `group_key` NULL + `group_key_basis='no_label'` 로 표시한다. 격리하면 그 접수가 모집단에서 사라져 뷰가 "정정 없음"으로 읽는다(§5-C6 의 `sec_type='other'` 와 똑같은, 게이트가 만드는 생존편향). 남은 격리 사유는 `rcept_dt_missing` 하나 | DESIGN v1.2 §4-4 "행 유지" · 부정 픽스처 `test_부정_기간_라벨이_없어도_행은_남는다` |
+| §3-⑬ EG1 우변 | `_reg_vocab`(domain `periodic_report`·`excluded_report`) 테이블 | 레지스트리 테이블이 실재하지 않는다 → `.sql` 의 모집단 CTE(`periodic`)를 마커(`-- ==== eg1:`)까지 잘라 그대로 재사용한다(S05 `pool_sql` 규약). 어휘는 `rules_s11.PERIODIC_PREFIXES`(3) · `EXCLUDED_TOKENS`(4) 튜플이 정본이고 tests 가 `.sql` 리터럴과 대조 | `rules_s11.population_sql` · `test_모집단_어휘가_sql_리터럴과_같다` |
+| §3-⑭ `correction_link` EG1 | 별도 테이블의 등식 | 16행에 흡수됐으므로 등식도 없다. 링크 성립 여부는 EG6-P05, 날짜 축은 EG6-P06, ZIP 부재는 `date_check='no_zip'` 건수(기록형)가 대신한다 | §9 C15 |
+| EG6-P05·P06·EG8-P09 baseline 키 | `correction_link.*` | `disclosure_version.link_rate_min`·`date_exact_rate`·`reach_rate_min` (§1-12 갱신) | 흡수 |
+| EG8-P09(E-G7) 분모 | `rm` 정정 플래그가 붙은 접수 전건 | **원본만**(`NOT is_correction`). 정정이 또 정정되면 DART 가 정정본에도 `rm` 을 붙이는데, 후보 술어가 정정본을 원본 자격에서 빼므로(DESIGN §4-4) 구조적으로 도달 대상이 아니다 — 정정 체인은 평평하게 접혀 그룹의 모든 정정이 같은 원본을 가리킨다. 절단본에서 분모에 넣으면 82/97 = 0.845, 빼면 82/82 = 1.0 이고 그 15건은 규칙이 의도한 결과다. 건수는 `n_rm_on_correction` 으로 기록 | `test_E_G7_도달률은_정정본을_분모에서_뺀다` |
+| EG6-P07 그룹 오판율 | `misjudge_rate_max` 로 판정 | **코드가 판정하지 않는다** — 사람이 라벨한 정정 그룹 표본이 있어야 재는 값이라 SQL 로 못 쓴다(§5-A 유형). baseline 미등재로 두고 EG6 metrics 에 참조값만 싣는다 | §5-A |
+| 모집단 사다리 5단 | baseline 등재 뒤 임계 판정 | 절대 건수는 **임계로 쓰지 않는다**(접수는 매일 늘어난다). `EG3_disclosure_version` 이 stage 뷰만으로 센 다섯 단과 산출에서 센 다섯 단의 **일치**를 폐기형으로 판정하고, 서버 참조값(181,106 / 20,579 / 24,285 / 17,600 / 15,225)은 `baseline_seed_s11.json` 의 `_measured._ladder_reference` 에 남긴다. 임계형은 E-G6a·E-G7 둘뿐이고 미등재면 `skip(no_baseline)` + 기록형 | WORKFLOW §3-4 |
+| 사다리 L2 값 | DESIGN·WORKFLOW 20,579 | `STAGE_HANDOFF` §5 는 같은 축을 **20,759** 로 적었다(정기보고서 그룹 181,106 중 정정 있음 20,759). 180 건 어긋난다 — 첫 서버 빌드의 `ladder_stage.n_rm_corrected_later` 로 확정한다 | 두 문서 대조 |
+| `date_check` 의 링크 실패 행 | 어휘 8종 그대로 | `candidate_status ∈ {none, multi_unresolved}` 인 정정은 대조할 원본 접수일이 없어 `mismatch` 로 떨어진다(어휘를 늘리지 않는다). 링크 성립률은 E-G6a 가 따로 재므로 두 축이 섞이지 않는다 | `.sql` date_check CASE |
+| `corr_has_fin_item` 술어 | "items 에 재무 항목, 2,238" | 항목 목록이 명시되지 않은 인용이라 재현할 수 없다 → `rules_s11.FIN_ITEM_KEYWORDS` 6종(재무제표·재무상태표·손익계산서·현금흐름표·자본변동표·요약재무)을 선언하고 기록형으로 둔다. 절단본 39/84 · ★ 서버 재측정 | DESIGN §4-4 |
+| 상수 | 없음 | `deadline_days_annual` 90 · `deadline_days_interim` 45(법정) · `date_check_near_days` 7(어휘 경계). 뒤 하나는 SQL 숫자 리터럴 금지 규약(`test_sql파일에_상수_하드코딩_없음`)의 통로다 | `baseline_seed_s11.json` |
+
+**S12 `fin_std` 구현 정정 (2026-09-06, `rules_s12.py`)**
+
+| 항목 | 초안 | 정정 | 근거 |
+|---|---|---|---|
+| 접수일 원천 `stg_rcept_dt_map` | DESIGN §4-4 입력 | **stage 에 실재하지 않는다**(`data/stage` 절단본·STAGE_HANDOFF 표 어디에도 없다) → `stg_disclosure.rcept_dt` 로 대체. 절단본 `stg_fin` 의 226 접수번호 전건이 `stg_disclosure` 에 있다 | 절단본 DESCRIBE · `SELECT count(DISTINCT rcept_no) FROM stg_fin WHERE NOT EXISTS (…stg_disclosure…)` = 0 |
+| EG6-P08 조인축 | `disclosure_version.bsns_year = f.bsns_year AND .reprt_code = f.report_code` | v1.2 `disclosure_version` 은 grain 이 `rcept_no` 라 그 두 컬럼이 없다 → **접수번호 조인**(`d.rcept_no = o.rcept_no`). baseline 키도 `fin_std.nonmatch_rate_gap_max` 로 옮겼다(측정이 `fin_std` 빌드에서 일어난다) | §1-12 갱신 · `eg6_fin_std` |
+| EG7-P04 `rcept_lag_p99_days` | "상한은 baseline p99" | **값을 문자 그대로 p99 로 잡으면 안 된다** — 그러면 정의상 1% 가 매번 격리된다(§5-B 유형). 이 상한이 잡아야 하는 것은 `period_end` 오판(1년 어긋나면 lag 이 365 이상 튄다)과 음수 lag(결산 전 접수 = 불가능)이고, 늦은 정정 접수는 통과시켜야 한다. 이름은 등록부대로 두고 seed 는 1826(5년) — 절단본 p99 216 · max 445 | `baseline_seed_s12.json` |
+| 격리 어휘 | EG7-P04 `rcept_lag_out_of_range` 만 | 4종: `non_krw`(`is_krw` 아님 — 원 단위 축 밖) · `period_unresolved`(문서도 없고 후보가 0 또는 2) · `rcept_lag_out_of_range` · `duplicate_vintage`(서로 다른 (bsns_year, reprt_code) 가 같은 grain 으로 접힘 — 어느 쪽이 옳은지 규칙이 못 고르므로 **둘 다** 격리한다) | 부정 픽스처 4건 |
+| FX-4-008 `derived_n_rows` | 이름 하나 | 파생 블록이 둘(q4·CF 분기)이라 접두를 붙였다 — `q4_derived_n_rows`·`q4_derived_available_date` · `cf_q_n_rows`·`cf_q_available_date`. 계정별 `<col>_available_date` 는 두지 않는다: 한 블록의 구성 보고서가 같아 값이 전부 같다 | DESIGN §3 파생 규약 |
+| 계정 수 | fin_map 21 + 3 + `gross_profit` | **24**. `gross_profit` 은 fin_map 21 에 이미 있으므로 새 계정이 아니라 FIELD_MAP §3 의 판정(미지원 → 지원)만 바뀐다. 추가 3 의 `account_id` 는 절단본에서 실재 확인: `DepreciationAndAmortisationExpense`(CIS 9) · `Borrowings`(BS 9) · `InterestExpense`(CIS 12). **합산하지 않는다** — 단기·장기·유동성장기 차입금은 겹쳐서 이중계상되고 `FinanceCosts`(137행)는 이자비용보다 넓다. 커버율이 낮은 것은 사실이고 `coverage_by_account` 가 기록한다 | `rules_s12.EXTRA_ACCOUNTS` |
+| 계정 대응표 위치 | 미결 | `src/fin_map.py` 가 정본이고 `rules_s12.acct_rows()` 가 import 해서 유도한다(베끼지 않는다). `.sql` 의 `_acct` VALUES 블록은 `acct_values_sql()` 문자열을 그대로 담고 tests 가 `in` 으로 대조 | `test_sql_의_acct_블록은_생성기_문자열과_같다` |
+| `.sql` 숫자 리터럴 | — | `test_sql파일에_상수_하드코딩_없음`(허용 {0,1,2,-1})에 걸려 넷을 바꿨다: ① tier 를 정렬 가능한 라벨(`a_concept`…`e_banking_gross`)로 — `min(tier)` 이 우선순위를 고른다 ② 우선순위를 `tier*1000+sj_rank` 대신 tier → sj_rank 두 단계로 ③ 보고서 코드 목록을 `_qcode`·`_rcode` CTE 로 빼서 "분기 셋" 을 `count(*)` 로 센다 ④ 개월 수 3·6·9 를 `_const` 로. `DECIMAL(38,4)` 캐스팅은 제거하고 원천 타입을 그대로 나른다(절단본 해시 불변) | `sql/fin_std.sql` |
+| FX-4-002(3월 결산)·FX-4-006(은행) | 절단본 픽스처 | **절단본에서 낼 수 없다** — `stg_fin` 이 있는 법인 9개가 전부 12월 결산이고 은행·보험 재무가 없다(3월 결산 00694003 은 재무 행 0). 후보 규칙(`inferred`)·금융업 매출 대체는 손 트리 부정 픽스처로 덮고 실사례는 서버 빌드 뒤 `fixtures/fin_std.json` 에 추가한다. EG6-P08 도 같은 이유로 `skip(no_coverage)` | `test_equity_s12_fin.py` |
+| FX-4-003(`v_fin_latest` asof) | S12 산출 | 뷰 `v_fin_latest` 는 이 슬라이스 범위 밖이다(EG5c·EG11·EG-C ⑥⑦ 과 함께 S12 후속). 4A 는 테이블 둘까지 | WORKFLOW §3-1 S12 행 |
+| `corp.fiscal_month` 검산 | `period_end` 후보 규칙의 근거이자 검산 | `EG3_fin_std.n_fiscal_month_mismatch` 는 **기록형**이다(폐기형 아님) — `corp.fiscal_month` 는 현재값 스냅샷이라 결산월을 바꾼 법인의 과거 사업보고서는 정상적으로 어긋난다(DESIGN §11 "결산월 변경은 문서 `period_to` 로 해소"). 폐기형으로 두면 그런 법인 하나가 서버 빌드를 죽인다. 절단본 0 | DESIGN §11 |
+| 기간 판정 재계산 축 | — | `.sql` 의 tie-break(rcept_no 당 main 이 여럿일 때 `ORDER BY period_to, period_from, doc_acode` 첫 행)를 게이트가 베끼면 항진명제가 된다 → **존재 명제**로 본다: "그 접수의 main 문서 중 어느 한 행이 이 `period_end`·`period_start` 를 주고 그 행의 개월 수가 이 `report_code` 를 준다". tie-break 가 실제로 작동했는지는 `n_doc_meta_multi_main`(절단본 0)이 기록한다 | §5-C 항진명제 규약 |
+| 규칙 판본 | — | `model.RULES_VERSION` 은 **올리지 않았다**(4A 는 새 테이블 둘이라 기존 산출을 바꾸지 않는다). 병합 시 오케스트레이터가 판단 | DESIGN §2 |
+

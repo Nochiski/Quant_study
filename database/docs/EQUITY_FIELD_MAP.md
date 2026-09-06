@@ -33,13 +33,13 @@
 | `price.trading_value` | `price_daily.value_krw` | 지원 | |
 | `benchmark.close` | `index_daily.close_idx` | **미지원(현 설계)** | GAP-09 — security 축이 아님 |
 | `financial.book_equity` | `fin_std.total_equity` / `v_fin_latest` | 지원 | |
-| `financial.net_income` | `fin_std.net_income`·`ttm_net_income` | 지원 | |
+| `financial.net_income` | `fin_std.net_income`(+ `net_income_q4_derived`) | 지원 | 분기는 3개월·사업보고서는 12개월 값이다(`report_code` 가 기간을 정한다). **TTM 합성은 팩터층** — `fin_std` 에 `ttm_net_income` 컬럼은 없다(S12 구현 09-06) |
 | `financial.revenue` | `fin_std.revenue`(+`revenue_basis`) | **부분** | GAP-01 금융업 470사 |
 | `financial.total_assets` | `fin_std.total_asset` | 지원 | |
 | `financial.operating_income` | `fin_std.op_profit` | 지원 | |
-| `financial.operating_cash_flow` | `fin_std.cf_operating_ytd`·`_q` | **부분** | ytd/분기 축 선택 필요 |
+| `financial.operating_cash_flow` | `fin_std.cf_operating_ytd`·`cf_operating_q` | **부분** | 두 축을 다 싣는다(S12 구현 09-06). `_q` 는 직전 보고서 누계와의 차라 직전 판본이 없으면 NULL(`cf_q_n_rows` 가 구성 수를 남긴다) — 소비 측이 축을 골라야 한다 |
 | `financial.total_liabilities` | `fin_std.total_liab` | 지원 | |
-| `financial.gross_profit` | — | **미지원** | `FACTORS.md` 정본 54 에 매출총이익 팩터가 없고 `EQUITY_DESIGN.md` §6 계정 매트릭스에도 없다. 엔진 factor #16 `gross_profitability` 는 unavailable |
+| `financial.gross_profit` | `fin_std.gross_profit`(+ `_q4_derived`) | **지원**(09-06 판정 변경) | `fin_map.FIN_MAP['gross_profit']`(concept `GrossProfit`, nm 매출총이익)이 실재해 S12 가 24계정에 실었다 — 절단본 커버율 0.945, 삼성전자 2018 111,377,004백만원 = 매출 − 매출원가 원 단위 일치(§10 P30). `FACTORS.md` 정본 54 에 매출총이익 팩터는 여전히 없고 엔진 factor #16 `gross_profitability` 만 이 필드를 쓴다 |
 | `consensus.forward_eps` | `consensus_daily(metric='eps')` | **부분** | mock 라벨은 "12개월 선행 EPS". equity 는 `target_period` 별 값만 준다 — **12M forward 합성은 팩터층** 이라는 경계를 `field_map` 에 명시 |
 | `consensus.forward_sales` | `consensus_daily(metric='revenue')` | 부분 | 동일 |
 | `consensus.target_price` | `opinion_daily.target_price_krw` | **부분** | 판본 2일(P5) |
@@ -67,10 +67,10 @@
 
 ## 3. 집계
 
-- 지원 17 · 부분 15 · 미지원 9 · 미확인 1 (2026-09-05, 슬라이스 착수 전 판정).
+- 지원 **18** · 부분 15 · 미지원 **8** · 미확인 1 (2026-09-06 — S12 가 `financial.gross_profit` 을 미지원 → 지원으로 바꿨다).
 - **S21 축소 어댑터(09-05)가 실제로 내는 field_id 는 3** — `price.close`·`price.market_cap`·`price.adj_close`(equity 내부 스코프, 위 표 밖). 나머지 39 는 `list_fields()` 에 없고 질의하면 `INVALID_QUERY`(detail `unavailable`)다. `price.adj_close` 는 **전방 조정**(`v_adj_price_fwd`, 09-05 결정)이라 수준·비율 모두 PIT 이고 창에 무관하다(DESIGN §7·§11 ①; 이전 base = 창 end 절충은 폐기). 레지스트리 가격 팩터가 `price.close` 를 요구하는 충돌(#64)은 미해결 — `scripts/run_mvp_backtest.py` 는 FieldNode 를 `price.adj_close` 로 바꿔 돈다.
 - 미지원 9 는 원천 부재(대량매매·반대매매·담보·잠정실적·지수구성 PIT·텍스트 감성·매출총이익·차입금 계열)로, 어댑터 `list_fields()` 가 `unavailable` 로 답한다. 레지스트리 50 팩터 중 이 필드에 걸린 팩터는 `factor_readiness.status='blocked'`.
-- `financial.gross_profit` 은 `fin_map.py` 에 `gross_profit` 항목이 있으므로 4단계 계정 매트릭스에 추가하면 **지원**으로 바뀐다(S12 첫 작업에서 판정).
+- **`financial.*` 가 요구하는 `fin_std` 컬럼(S12 구현 09-06, 단위 원 KRW · 결측은 NULL · 부분합·보간 금지)**: `revenue`(+`revenue_basis`) · `op_profit` · `net_income` · `total_asset` · `total_liab` · `total_equity` · `gross_profit` · `cf_operating_ytd`/`_q`. 손익 계정은 전부 `<계정>_q4_derived` 를 동반하고(사업보고서 − Σ3분기, 하나라도 없으면 NULL) 파생 블록마다 `q4_derived_available_date`·`q4_derived_n_rows` / `cf_q_available_date`·`cf_q_n_rows` 가 붙는다. 기간 어휘는 `report_code` 가 정한다 — 11011 은 12개월, 11012·11013·11014 는 3개월 손익이고 현금흐름은 전부 연초누계다(DEFECT-C02). `eps_basic` 은 **주식분할 미조정**(원장 그대로 — 삼성전자 2018 1분기 85,435 vs 사업보고서 6,461)이라 시계열로 쓰려면 `adj_factor` 가 필요하다. `fin_std` 의 24 계정 중 `financial.*` 밖(cost_of_sales·pretax_income·net_income_owners·eps_basic·equity_owners·cash·inventories·current_assets·current_liab·lease_liab·borrowings·depreciation·interest_expense·cf_investing_ytd·cf_financing_ytd·capex_ytd)는 equity 내부 스코프이고 `dataset_profile`(S19)이 노출 여부를 정한다.
 
 ## 4. 유지 규약
 

@@ -1,7 +1,7 @@
 """뷰 매크로 SQL 템플릿 — `equity.duckdb` 의 테이블 매크로 본문 (DESIGN v1.2 §5 · 결정 1·6).
 
 S06 이 내는 4개: `v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_firm_mktcap` + S21 후속(09-05, 전방
-조정) 2개: `v_adj_price_fwd`·`v_adj_volume_fwd`. 본문은 하나의 템플릿이고
+조정) 2개: `v_adj_price_fwd`·`v_adj_volume_fwd` + S17 1개: `v_consensus`. 본문은 하나의 템플릿이고
 읽는 자리(`{price_daily}` 등)만 두 방식으로 채운다 —
   카탈로그: `render_macros(equity_root)` 가 커밋된 테이블의 MANIFEST 파티션 경로(**절대경로**,
             P1c)를 `read_parquet([...])` 로 넣어 `catalog.write_catalog` 에 준다.
@@ -37,6 +37,15 @@ as-of 규칙 (DESIGN §5): `v_cum_adj(as_of, lag_override := NULL)` —
   는 fold 규칙상 항상 date 다 — 워크벤치 포트 계약 `available_date ≤ as_of` 가 어떤 랙에서도 선다.
   `v_adj_volume_fwd` = volume_shr × Π price_factor(= ÷ Π share_factor), 같은 fold 축.
   기존 `v_adj_price`(base = as_of, 차트·EG8 용)는 그대로 둔다.
+
+컨센서스 (S17, DESIGN §5 "관측점별 최초 관측, target_period 노출"):
+  `v_consensus(as_of, lag_override := NULL)` — `consensus_daily` 를 `available_date <= cutoff` 로
+  자르고 겹치는 달의 wise·v3 2행을 먼저 알 수 있었던 한 행으로 접는다. `obs_month` 로는 자르지
+  않는다(DESIGN §4-6 "obs_month 날짜 축 금지"). `_asof/`·EG11·EG5c 대상이 아니다 — 그 표본 규약은
+  키가 (as_of, ticker, **date**)인데(`catalog.sample_sql`·`eg5c_asof_invariance`) 이 뷰에는 일별
+  date 축이 없고, `obs_month` 를 `date` 로 이름만 바꿔 실으면 금지한 날짜 축을 카탈로그 산출물에
+  굽는 셈이 된다. 뷰 결과의 결정성은 S17 e2e 테스트가 같은 카탈로그를 read_only 연결 두 개로 열어
+  직접 대조한다(GATES §9 S17 블록).
 """
 from __future__ import annotations
 
@@ -48,6 +57,7 @@ from . import inputs
 
 FACTOR_LAG_SESSIONS = 0     # 계수 available_date 컷오프 기본 랙(세션). 위 docstring 근거
 PRICE_LAG_SESSIONS = 0      # 가격 행 컷오프 랙(세션) — 0 이라 `date <= as_of` 와 같다
+CONSENSUS_LAG_SESSIONS = 0  # 컨센서스 available_date 컷오프 기본 랙(세션). 아래 v_consensus 근거
 
 # 매크로 이름 → (시그니처, 읽는 테이블). 시그니처는 catalog._MACRO_NAME_RE 규약.
 SIGNATURES: dict[str, str] = {
@@ -57,6 +67,7 @@ SIGNATURES: dict[str, str] = {
     "v_firm_mktcap": "v_firm_mktcap(d)",
     "v_adj_price_fwd": "v_adj_price_fwd(as_of, lag_override := NULL)",
     "v_adj_volume_fwd": "v_adj_volume_fwd(as_of, lag_override := NULL)",
+    "v_consensus": "v_consensus(as_of, lag_override := NULL)",
 }
 MACRO_INPUTS: dict[str, tuple[str, ...]] = {
     "v_cum_adj": ("price_daily", "adj_factor", "trading_calendar"),
@@ -65,6 +76,7 @@ MACRO_INPUTS: dict[str, tuple[str, ...]] = {
     "v_firm_mktcap": ("price_daily", "corp_ticker"),
     "v_adj_price_fwd": ("price_daily", "adj_factor", "trading_calendar"),
     "v_adj_volume_fwd": ("price_daily", "adj_factor", "trading_calendar"),
+    "v_consensus": ("consensus_daily", "trading_calendar"),
 }
 # 매크로가 다른 매크로를 부르는 경우 — 같은 카탈로그(또는 같은 세션)에 함께 있어야 한다.
 MACRO_DEPENDS: dict[str, tuple[str, ...]] = {
@@ -189,6 +201,40 @@ JOIN {corp_ticker} ct ON ct.ticker = p.ticker
 WHERE p.date = d AND p.mktcap_krw IS NOT NULL
 GROUP BY coalesce(ct.common_ticker, ct.ticker), p.date
 """,
+    # 관측점별 최초 관측 (DESIGN §5, S17). `consensus_daily` 는 이미 관측점(월)마다 최초 관측
+    # 한 행이므로 뷰가 하는 일은 둘뿐이다:
+    #   ① PIT 절단 — `available_date <= cutoff`. **`obs_month` 로 자르지 않는다**(DESIGN §4-6
+    #      "obs_month 날짜 축 금지"): wise 판본은 2026-09-01 에야 알 수 있는데 obs_month 는
+    #      2025-08 이라 obs_month 로 자르면 1년치 look-ahead 가 열린다(EG-C ⑨).
+    #   ② 원천 해소 — 겹치는 달의 같은 키(ticker, obs_month, target_period, metric)는 테이블에
+    #      wise·v3 2행이다(FX-5-004). 소비자가 두 번 세지 않도록 **먼저 알 수 있었던 행**
+    #      (min(available_date), 동률이면 src 사전순)만 남긴다. available_date 는 행마다 고정이라
+    #      as_of 가 커져도 한 번 고른 행이 바뀌지 않는다(단조).
+    # obs_month 는 자르지 않고 **그대로 노출**한다 — 여러 관측점이 보여야 리비전 팩터(G05)를
+    # 팩터층이 계산할 수 있다. 12M forward 합성도 팩터층 몫이다(FIELD_MAP §2 consensus.*).
+    # 랙 기본값 0 세션(CONSENSUS_LAG_SESSIONS): available_date 가 이미 '그날 알 수 있었던 날'
+    # (wise fetched_date measured · v3 collected_date measured, stage lag_known=true)이다.
+    # `dataset_profile`(S19)이 생기면 그 값으로 교체한다.
+    "v_consensus": """
+WITH cut AS (
+    SELECT k.date AS cutoff
+    FROM (SELECT date, row_number() OVER (ORDER BY date DESC) - 1 AS n
+          FROM {trading_calendar} WHERE date <= as_of) k
+    WHERE k.n = coalesce(lag_override, {lag_consensus})
+),
+vis AS (
+    SELECT c.*, row_number() OVER (
+               PARTITION BY c.ticker, c.obs_month, c.target_period, c.metric
+               ORDER BY c.available_date, c.src) AS rn
+    FROM {consensus_daily} c
+    WHERE c.available_date <= (SELECT cutoff FROM cut)
+)
+SELECT ticker, obs_month, target_period, metric, src, obs_date,
+       est_mean, est_min, est_max, unit, coverage_degraded,
+       available_date, available_basis
+FROM vis
+WHERE rn = 1
+""",
 }
 
 
@@ -197,7 +243,7 @@ def render_body(name: str, sources: dict[str, str], template: str | None = None)
     body = template if template is not None else TEMPLATES[name]
     fill = {t: sources[t] for t in MACRO_INPUTS[name]}
     return body.format(lag_factor=FACTOR_LAG_SESSIONS, lag_price=PRICE_LAG_SESSIONS,
-                       **fill).strip()
+                       lag_consensus=CONSENSUS_LAG_SESSIONS, **fill).strip()
 
 
 def parquet_source(equity_root: Path, table: str) -> str:
@@ -255,6 +301,6 @@ def install_temp_macros(con: duckdb.DuckDBPyConnection, sources: dict[str, str],
     return made
 
 
-__all__ = ["FACTOR_LAG_SESSIONS", "MACRO_DEPENDS", "MACRO_INPUTS", "PRICE_LAG_SESSIONS",
-           "SIGNATURES", "TEMPLATES", "install_temp_macros", "parquet_source", "render_body",
-           "render_macros"]
+__all__ = ["CONSENSUS_LAG_SESSIONS", "FACTOR_LAG_SESSIONS", "MACRO_DEPENDS", "MACRO_INPUTS",
+           "PRICE_LAG_SESSIONS", "SIGNATURES", "TEMPLATES", "install_temp_macros",
+           "parquet_source", "render_body", "render_macros"]

@@ -1,0 +1,51 @@
+{
+ "_seed": "S18 (opinion_daily · opinion_broker_daily) 은 baseline 상수를 **등재하지 않는다**. 산출식에 임계·리터럴이 없고(값은 stage 그대로, 파생은 v3 최초 관측 선택과 prev_opinion_date 두 개뿐이며 둘 다 상수가 없다), 게이트도 등식·어휘 폐쇄·PIT 항등뿐이다. 예외 하나가 EG8 의 opinion_daily.src_overlap_agree_min 인데 **사람 승인 대기**라 여기에 넣지 않는다 — GATES §2 매트릭스 25행이 첫 빌드를 skip(no_baseline) 로 규정하고, 미등재면 gates.require_const 가 측정치(agree_rate·n_overlap_keys·컬럼별 일치수)를 SKIP metrics 에 실어 남긴다. 절단본 실측은 겹친 키 5 / 전 컬럼 일치 5 = 1.0(아래 _measured)인데 표본이 5키뿐이라 이 값으로 임계를 굳히면 서버(겹침 2일 × 커버 종목) 첫 불일치에 테이블이 폐기된다. 서버 실측 뒤 오케스트레이터가 등재한다. EG7 격리 비율도 첫 빌드는 코드 기본값(gates.DEFAULT_THRESHOLDS['EG7'])을 쓰고 2회차에 opinion_daily.thresholds.EG7 · opinion_broker_daily.thresholds.EG7 로 이관한다. EG9-P06 은 전부 기록형이라 상수가 없다 — 시총 분위별 커버율은 universe_daily 가 S18 입력이 아니라 못 내고 S19 dataset_profile.coverage_by_mktcap_quintile 이 낸다(GATES §9 S18 블록).",
+ "measured_at": "2026-09-06",
+ "opinion_daily": {},
+ "opinion_broker_daily": {},
+ "_measured": [
+  {
+   "table": "opinion_daily",
+   "metric": "src_overlap_agree_min",
+   "inputs": {
+    "stg_analyst_summary": "b_20260902T164531_624311Z",
+    "stg_v3_analyst_opinions": "b_20260902T164600_921885Z"
+   },
+   "sql": "WITH w AS (SELECT * FROM opinion_daily WHERE src = 'wise'), x AS (SELECT * FROM opinion_daily WHERE src = 'v3') SELECT count(*) AS n_overlap, count(*) FILTER (WHERE w.opinion_score IS NOT DISTINCT FROM x.opinion_score AND w.target_price_krw IS NOT DISTINCT FROM x.target_price_krw AND w.eps_krw IS NOT DISTINCT FROM x.eps_krw AND w.per IS NOT DISTINCT FROM x.per AND w.analyst_count IS NOT DISTINCT FROM x.analyst_count) AS n_agree FROM w JOIN x ON x.ticker = w.ticker AND x.obs_date = w.obs_date",
+   "value": null,
+   "measured_value": 1.0,
+   "measured_at": "2026-09-06",
+   "growing": false,
+   "used_by": "EG8 (rules_s18.eg8_src_overlap) — v3 ⋈ wise 겹친 (ticker, obs_date) 의 값 일치율 하한",
+   "note": "절단본 실측: 겹침 5키(005930·000660·003540·161890·247540 × 2026-09-01), 5개 값 컬럼(opinion_score·target_price_krw·eps_krw·per·analyst_count) 전부 일치 → agree_rate 1.0. 표본이 5뿐이라 등재하지 않는다(value=null = 미등재). 서버는 wise 수집 시작(2026-09-01)과 v3 미러 끝(2026-09-02)이 겹치는 이틀 × 커버 종목(WISE 804 / v3 810)이 모집단이므로 그 위에서 재측정한 뒤 사람이 하한을 고른다. 1.0 을 그대로 쓰면 반올림·수집 시각 차이 한 건에도 폐기된다."
+  },
+  {
+   "table": "opinion_daily",
+   "metric": "_slice_shape",
+   "inputs": {
+    "stg_analyst_summary": "b_20260902T164531_624311Z",
+    "stg_v3_analyst_opinions": "b_20260902T164600_921885Z",
+    "stg_wise_coverage": "b_20260902T164603_170424Z"
+   },
+   "sql": "SELECT (SELECT count(*) FROM stg_analyst_summary) AS wise, (SELECT count(*) FROM (SELECT DISTINCT ticker, date FROM stg_v3_analyst_opinions)) AS v3",
+   "value": null,
+   "measured_value": {"wise": 10, "v3": 809, "out": 819, "reject": 0},
+   "measured_at": "2026-09-06",
+   "growing": true,
+   "used_by": "EG1 §3-⑳ 회귀 참고값(상수 아님)",
+   "note": "상수가 아니라 실측 기록이다. 서버 규모는 wise 810종목 × 2일 · v3 810종목 × 약 102일."
+  },
+  {
+   "table": "opinion_broker_daily",
+   "metric": "_slice_shape",
+   "inputs": {"stg_analyst_broker": "b_20260903T015713_411395Z"},
+   "sql": "SELECT count(*) FROM stg_analyst_broker",
+   "value": null,
+   "measured_value": {"src": 249, "out": 249, "reject": 0, "n_prev_opinion_date_null": 249},
+   "measured_at": "2026-09-06",
+   "growing": true,
+   "used_by": "EG1 §3-㉑ · FX-5-008 회귀 참고값(상수 아님)",
+   "note": "절단본은 fetched_date 3일(09-01~03)뿐이고 (ticker, broker) 마다 opinion_date 가 하나라 prev_opinion_date 는 전 행 NULL 이다. 서버 9,717행(DESIGN §4-6)에서 실사례가 나오면 fixtures/opinion_broker_daily.json 에 non-NULL 케이스를 등재한다."
+  }
+ ]
+}

@@ -40,7 +40,11 @@ export {
   validateStrategy,
 } from "./sdk.gen";
 export type {
+  BacktestResultNotReadyDetail,
+  BacktestResultNotReadyResponse,
   BacktestRunInvalidDetail,
+  BacktestRunNotFoundDetail,
+  BacktestRunNotFoundResponse,
   BacktestRunResult,
   BacktestRunSpec,
   BacktestRunState,

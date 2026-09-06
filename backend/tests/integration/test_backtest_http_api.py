@@ -1,13 +1,65 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from pathlib import Path
+from threading import Event
+from typing import Any, cast
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import TypeAdapter
 
 from strategy_workbench.adapters.inbound.http_api._backtest_contract import Backtest422Response
+from strategy_workbench.adapters.inbound.http_api.facade.api import create_app
+from strategy_workbench.adapters.outbound.artifact_local.facade.store import LocalArtifactStore
+from strategy_workbench.adapters.outbound.backtest_engine.facade.executor import (
+    BacktestEngineExecutorAdapter,
+)
+from strategy_workbench.application.backtest_run.facade.ports import (
+    ArtifactCommit,
+    BacktestDataPort,
+)
+from strategy_workbench.application.backtest_run.facade.runs import BacktestRunService
+from strategy_workbench.bootstrap.facade.container import BackendContainer, build_container
 from strategy_workbench.bootstrap.facade.http import build_http_app
+from strategy_workbench.domain.analytics.facade.metrics import build_default_metric_registry
+from strategy_workbench.domain.backtest.facade.runs import BacktestRunResult
+
+
+class _CommitBarrierStore:
+    """Test adapter that pauses one real local commit at the cancellation race boundary."""
+
+    def __init__(self, delegate: LocalArtifactStore, blocked_run_id: str) -> None:
+        self._delegate = delegate
+        self._blocked_run_id = blocked_run_id
+        self.entered = Event()
+        self.release = Event()
+        self.discarded: list[str] = []
+
+    def commit(self, result: BacktestRunResult) -> ArtifactCommit:
+        if result.manifest.run_id == self._blocked_run_id:
+            self.entered.set()
+            if not self.release.wait(timeout=30):
+                raise TimeoutError("artifact commit test barrier was not released")
+        return self._delegate.commit(result)
+
+    def discard(self, run_id: str) -> None:
+        self.discarded.append(run_id)
+        self._delegate.discard(run_id)
+
+
+def _app_with_backtests(container: BackendContainer, backtests: BacktestRunService) -> FastAPI:
+    return create_app(
+        strategy_design=container.strategy_design,
+        strategy_authoring=container.strategy_authoring,
+        strategy_documents=container.strategy_documents,
+        strategy_drafts=container.strategy_drafts,
+        equity_workspace=container.equity_workspace,
+        factor_research=container.factor_research,
+        portfolio_design=container.portfolio_design,
+        strategy_traces=container.strategy_traces,
+        backtest_runs=backtests,
+    )
 
 
 def _run_body(client: TestClient, core: str = "rust") -> dict[str, Any]:
@@ -109,6 +161,71 @@ def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts()
     assert '"status":"completed"' in events.text
 
 
+def test_cancel_accepted_during_artifact_commit_wins_and_exact_request_replays(
+    tmp_path: Path,
+) -> None:
+    first_run_id = "run-cancel-during-artifact"
+    replay_run_id = "run-byte-exact-replay"
+    run_ids = iter((first_run_id, replay_run_id))
+    container = build_container(artifact_root=tmp_path / "unused")
+    artifact_root = tmp_path / "artifacts"
+    barrier = _CommitBarrierStore(LocalArtifactStore(artifact_root), first_run_id)
+    backtests = BacktestRunService(
+        container.portfolio_design,
+        container.strategy_repository,
+        cast(BacktestDataPort, container.equity_data),
+        BacktestEngineExecutorAdapter(build_default_metric_registry()),
+        barrier,
+        new_id=lambda: next(run_ids),
+    )
+    client = TestClient(_app_with_backtests(container, backtests))
+    submitted = _run_body(client, "python")
+    accepted = client.post("/api/v1/backtests", json=submitted)
+    assert accepted.status_code == 202
+    assert accepted.json()["run"]["run_id"] == first_run_id
+    assert barrier.entered.wait(timeout=30), "run never entered artifact commit"
+
+    accepted_request = client.get(f"/api/v1/backtests/{first_run_id}/request")
+    assert accepted_request.status_code == 200
+    try:
+        cancellation = client.post(f"/api/v1/backtests/{first_run_id}/cancel")
+        assert cancellation.status_code == 200
+        assert cancellation.json()["status"] == "cancel_requested"
+    finally:
+        barrier.release.set()
+
+    state = _wait(client, first_run_id)
+    assert state["status"] == "cancelled"
+    assert state["artifact_uri"] is None
+    assert state["artifact_sha256"] is None
+    assert barrier.discarded == [first_run_id]
+    assert not (artifact_root / first_run_id).exists()
+    not_ready = client.get(f"/api/v1/backtests/{first_run_id}/result")
+    assert not_ready.status_code == 409
+    assert not_ready.json()["detail"]["code"] == "backtest.result.not_ready"
+    events = client.get(f"/api/v1/backtests/{first_run_id}/events").text
+    assert '"status":"cancel_requested"' in events
+    assert '"status":"cancelled"' in events
+    assert '"status":"completed"' not in events
+
+    # Reuse the server-serialized accepted request bytes, not the original client draft.
+    replay = client.post(
+        "/api/v1/backtests",
+        content=accepted_request.content,
+        headers={"content-type": "application/json"},
+    )
+    assert replay.status_code == 202
+    assert replay.json()["run"]["run_id"] == replay_run_id
+    replay_request = client.get(f"/api/v1/backtests/{replay_run_id}/request")
+    assert replay_request.status_code == 200
+    assert replay_request.content == accepted_request.content
+    replay_state = _wait(client, replay_run_id)
+    assert replay_state["status"] == "completed", replay_state
+    replay_result = client.get(f"/api/v1/backtests/{replay_run_id}/result")
+    assert replay_result.status_code == 200
+    assert replay_result.json()["manifest"]["run_spec"] == accepted_request.json()
+
+
 def test_python_reference_and_rust_core_have_golden_result_and_metric_parity() -> None:
     client = TestClient(build_http_app())
 
@@ -172,3 +289,28 @@ def test_start_backtest_openapi_declares_every_actual_preflight_error() -> None:
     adapter = TypeAdapter(Backtest422Response)
     adapter.validate_python(semantic_response.json())
     adapter.validate_python(malformed_response.json())
+
+
+def test_run_resource_openapi_declares_typed_not_found_and_not_ready_errors() -> None:
+    client = TestClient(build_http_app())
+    schema = client.get("/openapi.json").json()
+    paths = schema["paths"]
+    run_not_found_paths = (
+        ("/api/v1/backtests/{run_id}", "get"),
+        ("/api/v1/backtests/{run_id}/request", "get"),
+        ("/api/v1/backtests/{run_id}/cancel", "post"),
+        ("/api/v1/backtests/{run_id}/events", "get"),
+    )
+    for path, method in run_not_found_paths:
+        response = paths[path][method]["responses"]["404"]
+        assert response["content"]["application/json"]["schema"]["$ref"].endswith(
+            "BacktestRunNotFoundResponse"
+        )
+
+    result_responses = paths["/api/v1/backtests/{run_id}/result"]["get"]["responses"]
+    assert result_responses["404"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "BacktestRunNotFoundResponse"
+    )
+    assert result_responses["409"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "BacktestResultNotReadyResponse"
+    )

@@ -239,9 +239,11 @@ def eg3_price_adj_daily(ctx: EquityGateContext) -> GateResult:
          `adj_factor.factor_product_tol_base` 를 접힌 수만큼 복리로 편 `(1+tol)^n − 1` 이고,
          **접힌 계수가 없으면 정확히 1** 이다. 항등이 `Π(pf·sf)` 와 같은지도 함께 본다
       ③ 구간 첫 행의 누적 = 1 ∧ `n_factors_applied` = 0  (앵커 = 첫 관측)
-      ④ 독립 재계산(`install_recalc`)과 조정값 8축 전건 일치 — 나눗셈으로 뒤집으면 여기서 걸린다
-      ⑤ `n_unadjusted_events` 독립 재계산 일치
-      ⑥ 구간 밖 계수 유입 0 — 접힌 수가 구간 안 계수 수를 넘지 않는다
+      ④ 독립 재계산(`install_recalc`)과 값 7축(조정 OHLC 4 · 조정 거래량 · 누적계수 2) 전건 일치
+         — 나눗셈으로 뒤집으면 여기서 걸린다
+      ⑤ `n_unadjusted_events`·`n_factors_applied` 독립 재계산 일치
+      ⑥ 구간 밖 계수 유입 0 — 접힌 수가 구간 안 계수 수를 **넘지** 않는다(⑤ 의 부분집합이지만
+         방향을 이름으로 남긴다: 누출인지 누락인지가 진단에서 갈린다)
       ⑦ `available_date = date` ∧ basis 'derived' (fold 규약의 귀결을 산출로 증명한다)
       ⑧ `date` 가 캘린더 세션 ∧ ticker 6자리
       ⑨ 매크로(`v_adj_price_fwd`·`v_adj_volume_fwd`) 정합 — `_macro_mismatch`
@@ -289,13 +291,16 @@ def eg3_price_adj_daily(ctx: EquityGateContext) -> GateResult:
         f"OR abs(coalesce({_q(c)}, 0) - coalesce({e}, 0)) "
         f"> {FACTOR_PRODUCT_TOL!r} * greatest(abs(coalesce({e}, 0)), 1))"
         for c, e in num_axes)
-    (n_recalc, n_unadj_bad, n_avail_recalc, n_cross_span, n_no_span, n_span_free_diff,
-     n_rows_unadj, n_tickers_unadj, n_rows_adjusted, cum_min, cum_max) = _row(ctx, f"""
+    (n_recalc, n_unadj_bad, n_avail_recalc, n_factor_count_bad, n_cross_span, n_no_span,
+     n_span_free_diff, n_rows_unadj, n_tickers_unadj, n_rows_adjusted,
+     cum_min, cum_max) = _row(ctx, f"""
         SELECT
           (SELECT count(*) FROM {r} WHERE {axis_conds}),
           (SELECT count(*) FROM {r} WHERE n_unadjusted_events IS DISTINCT FROM
                                           r_n_unadjusted_events),
           (SELECT count(*) FROM {r} WHERE available_date IS DISTINCT FROM r_available_date),
+          (SELECT count(*) FROM {r} WHERE n_factors_applied IS DISTINCT FROM
+                                          r_n_factors_applied),
           (SELECT count(*) FROM {r} WHERE n_factors_applied > r_n_factors_applied),
           (SELECT count(*) FROM {r} WHERE span_first IS NULL),
           (SELECT count(*) FROM {r}
@@ -349,6 +354,7 @@ def eg3_price_adj_daily(ctx: EquityGateContext) -> GateResult:
         "n_recompute_mismatch": int(str(n_recalc)),
         "n_unadjusted_mismatch": int(str(n_unadj_bad)),
         "n_available_recompute_mismatch": int(str(n_avail_recalc)),
+        "n_factor_count_mismatch": int(str(n_factor_count_bad)),
         "n_cross_span_factor": int(str(n_cross_span)),
         "n_available_ne_date": int(str(n_avail_bad)),
         "n_available_basis_not_derived": int(str(n_basis_bad)),

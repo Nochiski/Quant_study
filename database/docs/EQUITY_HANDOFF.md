@@ -440,6 +440,19 @@ scp database/src/equity/baseline_locked.json kael-server:~/quant-ledger/data/equ
 - **`consensus.*` 의 `target_period` 선택**이 어댑터 규칙(FY1)이다 — 레지스트리 라벨
   "12개월 선행 EPS" 와 값의 뜻이 다르다.
 
+### 조정가 축 (S23 이 남긴 것)
+- **`n_unadjusted_events` 의 소비 규약이 없다** — equity 는 수를 싣지만 "몇 이상이면 거른다" 는
+  판단이 없고 `dataset_profile` 에도 행 단위 품질 축이 없다(`requires_confirmation` 은 필드 단위).
+  서버 27.44% 행이 걸리는데 절반 이상이 `unknown_price_only`(MVP 4유형 밖 기준가 변화)라
+  일률적으로 거르면 유니버스가 반으로 준다. 팩터층·소비자와 함께 정할 것.
+- **`financial.*`·`consensus.*` 도 표로 내릴지** — 카탈로그가 낡으면 여전히 이 9필드가 죽는다.
+  다만 두 뷰는 `as_of` 로 접는 축이 있어 (키, 날짜) 의 순수 함수가 아니다 — 조정가처럼 그냥
+  옮길 수 없고, 무엇을 grain 으로 굳힐지부터 정해야 한다.
+- **조정 OHLC·거래량의 field_id** — 표에는 컬럼으로 있으나 어댑터는 내지 않는다(FIELD_MAP §2
+  어휘 밖). FACTORS 정본이 조정 고가/거래량을 요구하게 되면 §2 어휘를 먼저 늘려야 한다.
+- **`v_adj_price`(base = as_of) 는 남아 있다** — 차트·EG8 용이고 구간 제한을 적용하지 않았다
+  (그 뷰의 base 는 as_of 라 앵커 개념이 없다). 재상장 종목의 차트 축을 어떻게 볼지는 미결.
+
 ### 운영·검증 축
 - **`factor_readiness.ready_min` 등재 판단**(§5-3).
 - **절단본 생성 스크립트 커밋**(§8 결함).

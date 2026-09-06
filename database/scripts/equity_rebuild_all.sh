@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# equity 27표 전량 재빌드 — 의존 순서대로 1회 지으며 표별 content_hash 를 기록한다.
+# equity 28표 전량 재빌드 — 의존 순서대로 1회 지으며 표별 content_hash 를 기록한다.
 # 서버 전용(경로가 ~/quant-ledger 고정). 배포: scp 로 서버 scripts/ 에 두고 실행.
 # 사용: equity_rebuild_all.sh <pass-label>   (예: pass1 / pass2)
 # 재현성 검사 = 두 pass 의 logs/equity/rebuild_<pass>/summary.tsv content_hash 열 비교

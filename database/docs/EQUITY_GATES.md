@@ -1211,7 +1211,7 @@ SELECT (SELECT count(*) FROM opinion_broker_daily)
 count(price_adj_daily) = count(price_daily)
 ```
 
-**항등식이다** — 조정은 가격 행 하나하나에 대한 순수 함수라 행이 늘거나 줄지 않고, 격리 사유가 없어 우변에서 뺄 것도 없다(`reject_reasons=()`, EG7 은 항상 0 으로 통과). 등식이 이렇게 약한 대신 값 축을 `EG3_price_adj_daily` 가 **독립 재계산**으로 전건 대조한다: 산출은 ASOF JOIN + 창 누적곱, 게이트는 범위 조인 + GROUP BY 집계로 같은 값을 만들어 8축(`adj_open`·`adj_high`·`adj_low`·`adj_close`·`adj_volume_shr`·`cum_price_factor`·`cum_share_factor`·`n_factors_applied`)을 비교하고, `n_unadjusted_events`·`available_date` 도 따로 재계산한다.
+**항등식이다** — 조정은 가격 행 하나하나에 대한 순수 함수라 행이 늘거나 줄지 않고, 격리 사유가 없어 우변에서 뺄 것도 없다(`reject_reasons=()`, EG7 은 항상 0 으로 통과). 등식이 이렇게 약한 대신 값 축을 `EG3_price_adj_daily` 가 **독립 재계산**으로 전건 대조한다: 산출은 ASOF JOIN + 창 누적곱, 게이트는 범위 조인 + GROUP BY 집계로 같은 값을 만들어 값 7축(`adj_open`·`adj_high`·`adj_low`·`adj_close`·`adj_volume_shr`·`cum_price_factor`·`cum_share_factor`)을 비교하고, `n_factors_applied`·`n_unadjusted_events`·`available_date` 도 따로 재계산한다. `n_factors_applied` 은 **완전 일치**(`n_factor_count_mismatch`)와 **방향 있는 초과**(`n_cross_span_factor`) 둘로 센다 — 계수 값이 1 인 사건이 새거나 빠지면 값 축은 안 움직이고 이 수만 어긋난다.
 
 ---
 
@@ -2318,4 +2318,5 @@ workspace/dongmin/src/equity/
 | 커널 연결 | (미기재) | **금지**. 커널은 원주가 bar + `CorporateActionEvent` 로 수량을 조정하므로 조정가를 주면 이중 계산이다. `backtest_engine/adapters/equity_duckdb.py` 가 `price_adj_daily` 를 읽지 않는다는 것을 테스트가 회귀로 지킨다 | DESIGN §7 |
 | 부정 픽스처 | (신규) | 절단본에는 "재상장 + 폐지 전 구간의 ok 계수" 조합이 없어(`n_rows_span_free_diff` = 0, 서버도 0) 구간 누출을 못 잡는다 → **합성 equity 트리**(2구간 재상장 1종)에서 돈다: ① 조정가를 나눗셈으로 뒤집기 → `n_recompute_mismatch`·`n_macro_mismatch` ② 구간 부여를 상수로 바꿔 누출 → `n_cross_span_factor`·`n_span_first_not_unit` ③ `n_unadjusted_events` 를 0 으로 지우기 → `n_unadjusted_mismatch` | `test_equity_s23_price_adj.py` |
 | `dataset_profile` 소유 이동 | `price.adj_close` 를 `adj_factor` 가 뷰 필드(`view_name`)로 선언 | **`price_adj_daily` 가 표 컬럼으로 선언**한다(FX-6-006 `table_name` = `price_adj_daily` · `available_date_basis` = `derived`). 두 표가 같은 field_id 를 선언하면 grain 이 깨지므로 이동이지 추가가 아니다. `rules_s19.SOURCE_TABLES` 25 → **26**, 프로파일 행수 72 불변 | `rules_s19.owned_fields` |
+| EG3 기록형 사건 축 | (신설) | 미조정 사건의 사유별 내역은 **`event_id` 축**으로 센다. (ticker, apply_date) 로 묶으면 같은 날 두 사건이 하나로 접혀 `n_unadjusted_events` 가 세는 축과 갈린다(서버 4,014 → 3,970 으로 44건 유실). `adj_factor.event_id`·`factor_source` 를 EG3 전용 입력 컬럼으로 선언한다(산출식은 읽지 않는다) | `rules_s23` `input_columns` |
 | 조정 OHLC·거래량 노출 | (판단 대상) | **선언하지 않는다** — FIELD_MAP §2 어휘에도 FACTORS 정본 54 의 재료에도 없다(M02 는 원주가 `price.high` 를 쓴다). 표에는 컬럼으로 실려 있어 parquet 소비자는 읽을 수 있다 | FIELD_MAP §2 |

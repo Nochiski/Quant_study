@@ -132,7 +132,8 @@ def test_EG3_불변식이_전부_0이고_기록형_실측이_남는다(built) ->
     m = _gate(r, "EG3_price_adj_daily").metrics
     for key in ("n_cum_nonpositive", "n_cum_product_off", "n_cum_product_recalc_off",
                 "n_span_first_not_unit", "n_recompute_mismatch", "n_unadjusted_mismatch",
-                "n_available_recompute_mismatch", "n_cross_span_factor", "n_available_ne_date",
+                "n_available_recompute_mismatch", "n_factor_count_mismatch",
+                "n_cross_span_factor", "n_available_ne_date",
                 "n_available_basis_not_derived", "n_ticker_malformed", "n_off_calendar",
                 "n_macro_mismatch"):
         assert m[key] == 0, (key, m[key])
@@ -477,6 +478,7 @@ def test_부정_구간_제한을_없애면_이전_구간_계수가_새어_EG3가
     g = _gate(r, "EG3_price_adj_daily")
     assert g.status is GateStatus.FAIL
     assert g.metrics["n_cross_span_factor"] > 0     # 구간 안 계수 수보다 많이 접혔다
+    assert g.metrics["n_factor_count_mismatch"] >= g.metrics["n_cross_span_factor"]
     assert g.metrics["n_recompute_mismatch"] > 0
     assert g.metrics["n_span_first_not_unit"] > 0   # 구간 2 첫 행의 누적이 1 이 아니다
     assert g.metrics["n_macro_mismatch"] > 0        # 구간을 지키는 매크로와도 갈린다

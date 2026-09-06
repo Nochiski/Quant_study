@@ -469,3 +469,25 @@ scp database/src/equity/baseline_locked.json kael-server:~/quant-ledger/data/equ
 | 워크벤치 어댑터(5포트·필드 30) | `backend/src/strategy_workbench/adapters/outbound/equity_duckdb/` |
 | MVP-B 백테스트 | `database/scripts/run_mvp_backtest.py` |
 | 서버 빌드 러너 | `database/scripts/run_equity.sh`(표 1개) · `equity_rebuild_all.sh`(27표 전량) · `equity_gate_all.sh`(전량 재판정) · `equity_manifest_row.py`·`equity_gate_metrics.py`(요약·근거 추출) |
+
+## 소비자 기동 (워크벤치 · 로컬 데이터)
+
+**로컬 데이터 내려받기** — `database/scripts/fetch_equity_local.sh <로컬 경로> [minimal|full]`
+- `minimal`(기본) 9표 ≈ 1.6GB: 가격·유니버스·조정계수·기업행위·식별 4표. 가격/모멘텀/변동성 전략용.
+- `full` 18표 ≈ 2.9GB: 재무·컨센서스·의견·수급·공매도·신용·배당·지분 추가.
+- **`_pinned/` 은 받지 않는다** — 재빌드 시 stage 입력을 고정한 하드링크 사본이라 읽기에 불필요하고,
+  rsync 하면 하드링크가 풀려 실제 크기(수 GB)로 복사된다. `_asof/`·`_tmp/`·`_failed/` 도 같다.
+- 스크립트가 `baseline.json` 을 함께 받고 **카탈로그를 다시 만든다**. 매크로 본문이 절대경로를
+  굽기 때문에(§10 P1c) 경로가 바뀌면 `price.adj_close`·`financial.*`·`consensus.*` 가 전부
+  `unavailable` 이 된다 — 손으로 복사했다면 반드시 `python -m equity --root <경로> … catalog`.
+
+**워크벤치를 duckdb 어댑터로 기동**
+```
+export STRATEGY_WORKBENCH_EQUITY_ADAPTER=duckdb
+export STRATEGY_WORKBENCH_EQUITY_ROOT=/path/to/equity
+cd backend && uv run --extra parquet --extra equity server
+```
+환경변수를 안 주면 `mock` 으로 뜬다(기존 동작). `duckdb` 인데 루트가 없으면 기동 시점에
+`ValueError` 로 죽는다 — 조용한 mock 폴백은 없다. 구현은
+`backend/src/strategy_workbench/bootstrap/_http.py` 의 `runtime_equity_selection()`,
+회귀 테스트는 `backend/tests/test_http_equity_env.py`.

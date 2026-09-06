@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: IN_REVIEW
+project_status: CHANGES_REQUESTED
 current_phase: P6
 current_pr: P6-08,P6-09,P6-03,P6-04,P6-05,P6-06
 active_prs: [P6-03, P6-04, P6-05, P6-06, P6-08, P6-09]
 parallel_window: [P6-08, P6-09, P6-03, P6-04, P6-05, P6-06]
-last_updated: 2026-09-06T07:13:38+09:00
+last_updated: 2026-09-06T17:59:42+09:00
 planned_prs: 52
 merged_prs: 46
 approved_prs: 51
@@ -22,13 +22,13 @@ progress_percent: 88
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_REVIEW` |
+| Project status | `CHANGES_REQUESTED` |
 | Current phase | `P6` |
 | Current/next PR | `P6-08,P6-09,P6-03,P6-04,P6-05,P6-06` |
 | Active PR | `P6-03, P6-04, P6-05, P6-06, P6-08, P6-09` |
 | Progress | `46 / 52 merged (88%)` |
 | Approved | `51 / 52` |
-| Aggregated at | `2026-09-06 07:13 KST` |
+| Aggregated at | `2026-09-06 17:59 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -79,7 +79,7 @@ progress_percent: 88
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
 | P4 | Outline, Contract, Projections | 10 | 10 | `MERGED` |
 | P5 | Truthful Trace UI | 3 | 3 | `MERGED` |
-| P6 | Professional release and migration | 9 | 3 | `IN_REVIEW` |
+| P6 | Professional release and migration | 9 | 3 | `CHANGES_REQUESTED` |
 | **Total** |  | **52** | **46** | **88%** |
 <!-- PLAN:PHASES:END -->
 
@@ -87,13 +87,13 @@ progress_percent: 88
 
 | 항목 | 값 |
 |---|---|
-| PR | `P6-06` 전체 업무 E2E와 YAML-first migration IN_REVIEW |
+| PR | `P6-06` 전체 업무 E2E와 YAML-first migration CHANGES_REQUESTED |
 | Intent | 실제 FastAPI와 production preview에서 생성·오류 수정·복구·revision·backtest·trace/risk·history/diff를 한 사용자 흐름으로 증명하고 구형 Quick/Advanced 화면을 제거한다 |
 | Acceptance | 전용 single-run Playwright project; golden YAML의 create/edit/validate/save/reload; local/server recovery; 구조 오류 gate와 수정; 실제 409 conflict; trace raw/target/risk/provenance; backtest 완료와 두 history route; revision diff; `source=None` revision의 generated source 재저장 후 동일 `spec_hash`; legacy bookmark redirect; 실행 보고서 |
 | Non-goals | M6 Parameter Search 구현, backend legacy JSON wire API 제거, StrategySpec/compile/hash 의미 변경, live trading 기능 구현, UI 재설계 |
 | Branch/worktree | `feat/p6-06-workflow-migration` (`Quant_study-p6-06`), stacked on P6-05 approval-doc HEAD |
 | Base SHA | `dd9a6ff` (P6-05 approval-doc HEAD; #74→#75→#76→#77→#78 순차 merge 후 base 전환) |
-| Head SHA | `e9c6ff2` (author freeze; subsequent delta is PLAN-only IN_REVIEW evidence) |
+| Head SHA | `e95ce92` (reviewed HEAD; subsequent delta is review-status evidence) |
 | Diff stat | `dd9a6ff...e9c6ff2` 76 files, +725/-6,469 (대부분 승인된 legacy 삭제; binary PNG 4개 별도) |
 | Focused tests | router/document/debugger 94 passed; 실제 FastAPI+preview workflow와 visual update/strict 각각 11/11 |
 | Full gate | frontend 437·backend 1,118·Rust 13·root 6; typecheck 2종·lint·Ruff·Pyright·build·cargo fmt/clippy·OpenAPI/SDK diff 0; CI billing 해제 후 Windows green 필수 |
@@ -237,7 +237,7 @@ Phase exit:
 | [ ] | `P6-03` | Keyboard workflow와 Command Palette | P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `APPROVED` | [#76](https://github.com/Nochiski/Quant_study/pull/76) · `review_p6_03` APPROVE, P0/P1/P2 0 · CI billing 차단 |
 | [ ] | `P6-04` | Large/hostile spec 성능·접근성·i18n과 soft dark theme (`$ref`-only cycle fail-closed 포함) | P3-05, P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `APPROVED` | [#77](https://github.com/Nochiski/Quant_study/pull/77) · `review_p6_04` APPROVE, P0/P1/P2 0 · CI billing 차단 |
 | [ ] | `P6-05` | Playwright/visual regression infrastructure와 CI | P2-03, P3-05, P6-04 | `APPROVED` | [#78](https://github.com/Nochiski/Quant_study/pull/78) · `review_p6_05` APPROVE, P0/P1/P2 0 · reviewed `c97708e` · CI billing 차단 |
-| [ ] | `P6-06` | 전체 browser E2E·실구동 시나리오 검증, migration gate, 조건부 legacy cleanup | P6-01, P6-02, P6-03, P6-04, P6-05, P6-08, P6-09 | `IN_REVIEW` | [#79](https://github.com/Nochiski/Quant_study/pull/79) · `review_p6_06` 독립 review 배정 예정 |
+| [ ] | `P6-06` | 전체 browser E2E·실구동 시나리오 검증, migration gate, 조건부 legacy cleanup | P6-01, P6-02, P6-03, P6-04, P6-05, P6-08, P6-09 | `CHANGES_REQUESTED` | [#79](https://github.com/Nochiski/Quant_study/pull/79) · `review_p6_06` REQUEST_CHANGES, P1 3/P2 2 |
 | [x] | `P6-07` | Root frontend/backend development entrypoints | P0-02, P0-03 | `MERGED` | [#56](https://github.com/Nochiski/Quant_study/pull/56) · `review_p6_07` APPROVE |
 | [ ] | `P6-08` | Strategy list와 revision history routed UI | P6-01, P6-02, P3-06, P4-08 | `APPROVED` | [#74](https://github.com/Nochiski/Quant_study/pull/74) · `review_p6_08` APPROVE, P0/P1/P2 0; CI billing 차단 |
 | [ ] | `P6-09` | Backtest run history routed UI와 provenance | P6-08, P3-05 | `APPROVED` | [#75](https://github.com/Nochiski/Quant_study/pull/75) · `review_p6_09` APPROVE, P0/P1/P2 0; CI billing 차단 |
@@ -257,6 +257,7 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
+| P6-06 | `review_p6_06` | `dd9a6ff` | `e95ce92` | REQUEST_CHANGES (P1 3/P2 2: stale debugger route ownership, semantic E2E 검출력, M5 실행 설정·취소 회귀, generated SDK/selector 경계, dead cleanup) | 3 | Actions billing/spending-limit 해제 후 Windows green 필수; Chromium/Windows 외 browser는 후속 | 2026-09-06 |
 | P6-05 | `review_p6_05` | `c6182e9` | `c97708e` | APPROVE (초기 P1 2/P2 2와 2차 visual P1 1을 동일 reviewer가 폐쇄; 최종 P0/P1/P2 0) | 0 | 실제 Safari 이외 브라우저 범위와 Windows 2025 CI는 후속; Actions billing/spending-limit 해제 후 green merge gate 필수 | 2026-09-06 |
 | P6-04 | `review_p6_04` | `e84bd7e` | `7b532a9` | APPROVE (최초 P1 2/P2 1과 2차 P1 1/P2 1을 동일 reviewer가 폐쇄; 최종 P0/P1/P2 0) | 0 | 실제 Safari/browser IME·viewport와 committed visual baseline은 P6-05~06, transitive editor chunk 합산, CI billing은 외부 merge blocker | 2026-09-06 |
 | P6-03 | `review_p6_03` | `db076ea` | `76023db` | APPROVE (최초 P1 3/P2 4와 2차 신규 P1 1을 동일 reviewer가 hostile 재현·폐쇄; 최종 P0/P1/P2 0) | 4 (해소) | 실제 Safari IME·browser viewport/focus는 P6-05~06, entry chunk 500 kB 경고와 500-node 입력 성능은 P6-04 범위; merge 전 green CI 필수 | 2026-09-06 |
@@ -359,6 +360,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-06 KST | Codex | `review_p6_06`이 reviewed HEAD `e95ce92`에서 P1 3/P2 2로 REQUEST_CHANGES했다. deferred trace가 최신 route/document를 덮는 소유권 결함, Rust·PIT·risk·409·immutable diff를 의미 수준에서 판별하지 못하는 migration E2E, legacy cleanup 중 M5 core/cash/benchmark/OOS·cancel/rerun 접근 경로 삭제를 blocking으로 분류했다. generated SDK/accessible selector 경계와 cancel/i18n dead layer도 같은 fix loop에서 폐쇄하고 동일 reviewer에게 재검토받는다 | route/request ownership·실행 결과/trace server SoT·authoring/runner 책임분리·same-reviewer fix loop |
 | 2026-09-06 KST | Codex | P6-06 [#79](https://github.com/Nochiski/Quant_study/pull/79)을 parent `feat/p6-05-browser-infrastructure` 대상으로 열고 author freeze `e9c6ff2`, review diff 76 files +725/-6,469와 실제 workflow·legacy cleanup·SoT 경계·전체 gate를 본문에 고정했다. PR별 fresh review-only agent 정확히 한 명인 `review_p6_06`에게 base/head 전체 diff, 삭제 후 caller/FSD, route migration과 source-less wire 호환, 409·trace·Rust backtest·visual/E2E 검출력을 독립 검토받도록 IN_REVIEW로 전환한다. Actions billing/spending-limit 차단은 merge gate로 유지한다 | 13.3 actual diff freeze·13.4 PR별 reviewer 1명·stack 순차 merge·CI 비우회 |
 | 2026-09-06 KST | Codex | P6-06 author HEAD `244c120`: 실제 backend golden YAML로 local/server recovery, exact structural pointer와 invalid 실행 차단, v1~v4·두 context 409·semantic diff, 두 security의 linked/raw/node/TargetTape/plan trace, saved-v4 Rust backtest 완료·strategy/backtest history, source-less legacy YAML materialization과 동일 canonical hash를 단일 Playwright project에서 검증했다. Quick/Advanced route/component/style/facade와 dead i18n을 제거하고 legacy URL은 clean YAML draft로 이관했다. workflow/visual update와 strict가 각각 11/11, focused 94·frontend 437·backend 1,118·Rust 13·root 6 및 전체 정적/build/generated gate를 통과하고 네 PNG 직접 확인·5173/8000/temp runtime 0을 확인해 SELF_CHECK로 전환한다 | P6-06 migration gate·StrategySpec/server hash SoT·UI/wire 책임분리·13.2 author gate·실행 보고서 |
 | 2026-09-06 KST | Codex | P6-05 approval-doc HEAD `dd9a6ff` 위에 P6-06 전용 branch/worktree를 만들고 IN_PROGRESS로 전환했다. 제품 소유자의 명시적 결정을 ADR D9에 반영해 M6 Parameter Search를 YAML route 위 후속 milestone으로 유지하되 legacy editor 제거 선행 조건에서는 제외한다. P6-06은 실제 browser migration gate를 먼저 증명하고 backend legacy JSON/source=None wire 호환은 유지한다 | 제품 결정의 문서 선행·StrategySpec/source SoT 보존·UI/wire migration 책임분리·stack 순차 merge |

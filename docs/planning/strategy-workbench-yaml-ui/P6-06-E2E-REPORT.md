@@ -1,6 +1,6 @@
 # P6-06 YAML-first migration E2E 보고서
 
-- 최종 검증: 2026-09-06 20:06 KST
+- 최종 검증: 2026-09-06 20:44 KST
 - 대상 PR: [#79](https://github.com/Nochiski/Quant_study/pull/79)
 - 대상 branch: `feat/p6-06-workflow-migration`
 - 기준 base: `dd9a6ff` (P6-05 approval-doc HEAD)
@@ -34,7 +34,9 @@ generated SDK를 사용한다. 테스트 내부에 수동 wire DTO나 프론트 
    확인한다. reload 뒤 local recovery와 server recovery가 각각 source를 byte-for-byte 복원한다.
 3. `/risk/max_name_weight`를 의도적으로 오타 내 exact JSON Pointer 진단과 Save/Backtest 차단을
    확인한다. 실행 설정의 시작 현금 `0`은 frontend가 semantic 판단으로 막지 않고 실제 backend 422를
-   표시하는지 검증한 뒤 정상값으로 수정한다.
+   표시하는지 검증한 뒤 정상값으로 수정한다. 별도 route 회귀는 `annualizationDays`의 unsafe integer
+   `9007199254740993`이 반올림되기 전에 local representation error로 실행·POST 0건이 되는지, safe
+   negative integer `-1`은 값 변경 없이 POST되어 backend 422로 판정되는지도 확인한다.
 4. v1~v4 revision을 저장하고 두 browser context가 만든 stale save가 정확히 HTTP 409인지 확인한다.
    충돌 전후 editor source가 byte-for-byte 보존되고, 명시적 해소 뒤 저장된 v4 source도 동일하다.
 5. 저장된 v4의 `selection_count`를 2로 줄이고 세 종목을 대상으로 실제 trace를 두 번 실행한다. 응답 provenance의 spec/source version,
@@ -90,7 +92,7 @@ route test로 고정했고, feature test는 opaque publication lease만 비교�
 | Gate                                          | 결과                                                     |
 | --------------------------------------------- | -------------------------------------------------------- |
 | Playwright strict 전체                        | 16 passed, 4 workflow + 12 viewport/theme infrastructure |
-| Frontend Vitest                               | 37 files, 451 passed                                     |
+| Frontend Vitest                               | 37 files, 454 passed                                     |
 | Frontend typecheck / E2E typecheck / ESLint   | PASS                                                     |
 | Frontend production build                     | PASS; editor 131.94 KiB gzip                             |
 | Backend pytest                                | 1,120 passed, dependency deprecation warning 2건         |
@@ -105,7 +107,7 @@ route test로 고정했고, feature test는 opaque publication lease만 비교�
 
 전체 게이트를 CPU 집약 작업과 동시에 처음 실행했을 때 CodeMirror 16ms performance 1건과 긴 route
 테스트 2건이 timing budget을 넘었다. 다른 작업을 모두 종료하고 각각 재실행해 1/1·57/57을 통과했고,
-프론트 전체를 단독으로 다시 실행해 444/444 green을 확정했다.
+프론트 전체를 단독으로 다시 실행했고 후속 reviewer fix까지 반영한 최신 결과는 454/454 green이다.
 
 `ruff check .`은 CI/README 범위 밖의 기존 `backend/ops/rebuild_share.py` 9건을 보고한다. 이 PR이
 변경하지 않은 운영 스크립트이며 정식 backend gate인 `ruff check src tests examples scripts`와 root
@@ -115,8 +117,9 @@ route test로 고정했고, feature test는 opaque publication lease만 비교�
 
 - 실행 가능 여부와 canonical hash는 backend `StrategySpec` compile 결과만 신뢰한다.
 - YAML source, canonical spec, saved revision, accepted run request를 서로 다른 provenance로 보존한다.
-- run 설정 UI는 generated `BacktestRunSpec`에 직렬화 가능한 표현만 검사한다. positivity와 OOS 범위는
-  backend가 판정하며, 서버가 보관한 accepted request를 cancel/rerun의 정본으로 사용한다.
+- run 설정 UI는 generated `BacktestRunSpec`에 손실 없이 직렬화 가능한 표현만 검사한다. integer는
+  JavaScript safe integer 경계에서만 전송하며 positivity와 OOS 범위는 backend가 판정한다. 서버가
+  보관한 accepted request를 cancel/rerun의 정본으로 사용한다.
 - 완료·취소는 application lock에서 단일 선형화 지점을 공유한다. artifact adapter는 application이
   취소 승자를 정한 경우 exact run bundle을 폐기할 책임만 가진다.
 - Playwright는 generated SDK와 사용자 접근성 selector를 사용한다. REST wire shape 또는 CSS 구현

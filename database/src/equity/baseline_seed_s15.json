@@ -1,0 +1,147 @@
+{
+ "_seed": "S15 지분·감사 3테이블(holder_daily · ownership_snapshot · audit_opinion)이 요구하는 baseline 상수. 오케스트레이터가 data/equity/baseline.json 에 병합한다. value 는 tests/fixtures/stage_slice 절단본(법인 11개)에서 측정한 값이고, 서버 current_build 위 재측정이 필요한 항목은 _measured[].note 가 ★ 로 지목한다.",
+ "measured_at": "2026-09-06",
+ "holder_daily": {
+  "pct_max": 100,
+  "thresholds": {
+   "EG7": 0.0
+  }
+ },
+ "ownership_snapshot": {
+  "pct_min": 0,
+  "pct_max": 100,
+  "agg_rate_tol_pct": 0.5,
+  "thresholds": {
+   "EG7": 0.001
+  }
+ },
+ "audit_opinion": {
+  "thresholds": {
+   "EG7": 0.0
+  }
+ },
+ "_measured": [
+  {
+   "table": "holder_daily",
+   "metric": "pct_max",
+   "inputs": {
+    "stg_holder_elestock": "slice",
+    "stg_holder_majorstock": "slice"
+   },
+   "sql": "SELECT max(rate_pct), min(rate_pct) FROM holder_daily",
+   "value": 100,
+   "measured_at": "2026-09-06",
+   "growing": false,
+   "used_by": "EG3_holder_daily metric n_rate_above_pct_max (기록형)",
+   "note": "convention(지분율의 정의역 상한). **격리하지 않는다** — GATES §2 18행의 EG7 은 격리 사유 없이 `●` 이고, 지분 공시는 담보·대차로 100%를 넘는 표기가 원장에 있을 수 있어 폐기하면 사건 스트림에 구멍이 난다(§5-C6 생존편향). 절단본 실측 rate_pct 0.00000000000~100.00000000000, 범위 밖 0건. ★ 서버에서 n_rate_above_pct_max 가 0 이 아니면 DESIGN §11 에 한계로 적는다."
+  },
+  {
+   "table": "holder_daily",
+   "metric": "threshold_EG7",
+   "inputs": {
+    "stg_holder_elestock": "slice",
+    "stg_holder_majorstock": "slice"
+   },
+   "sql": "SELECT n_reject::DOUBLE / (n_rows + n_reject) FROM holder_daily _meta",
+   "value": 0.0,
+   "measured_at": "2026-09-06",
+   "growing": false,
+   "used_by": "EG7 격리 비율 상한 (gates.threshold)",
+   "note": "격리 사유가 `rcept_dt_missing` 하나뿐이고 stage 가 `rcept_dt` 를 required 로 두므로(rules_dart.py ColumnRule required=True) 구조적으로 0 이다. 절단본 4,329행 전부 rcept_dt 보유."
+  },
+  {
+   "table": "ownership_snapshot",
+   "metric": "pct_min",
+   "inputs": {
+    "stg_hyslr": "slice"
+   },
+   "sql": "SELECT min(bsis_posesn_stock_qota_rt_pct), min(trmend_posesn_stock_qota_rt_pct) FROM stg_hyslr WHERE row_kind <> 'aggregate'",
+   "value": 0,
+   "measured_at": "2026-09-06",
+   "growing": false,
+   "used_by": "sql/ownership_snapshot.sql 격리 `pct_out_of_range` (_const) · EG7-P07",
+   "note": "convention(지분율 정의역 하한). 절단본 실측 min 0.00. 음수 지분율은 원장 파싱 오류이므로 격리한다."
+  },
+  {
+   "table": "ownership_snapshot",
+   "metric": "pct_max",
+   "inputs": {
+    "stg_hyslr": "slice"
+   },
+   "sql": "SELECT max(bsis_posesn_stock_qota_rt_pct), max(trmend_posesn_stock_qota_rt_pct) FROM stg_hyslr WHERE row_kind <> 'aggregate'",
+   "value": 100,
+   "measured_at": "2026-09-06",
+   "growing": false,
+   "used_by": "sql/ownership_snapshot.sql 격리 `pct_out_of_range` (_const) · EG7-P07",
+   "note": "convention(지분율 정의역 상한). 절단본 실측 max 100.00(범위 밖 0건). 최대주주 지분율은 정의상 100 을 넘지 못한다 — 넘으면 stage 의 '#######' 엑셀 오버플로 잔재(STAGE_SPEC §2-13, 서버 9행)와 같은 부류의 파싱 오류다. ★ 서버 격리 건수로 threshold_EG7 재검토."
+  },
+  {
+   "table": "ownership_snapshot",
+   "metric": "agg_rate_tol_pct",
+   "inputs": {
+    "stg_hyslr": "slice"
+   },
+   "sql": "WITH d AS (SELECT rcept_no, sum(trmend_rate_pct) s FROM ownership_snapshot WHERE stock_knd = '보통주' GROUP BY 1), a AS (SELECT rcept_no, max(trmend_posesn_stock_qota_rt_pct) t FROM stg_hyslr WHERE row_kind = 'aggregate' AND stock_knd = '보통주' GROUP BY 1) SELECT count(*), count(*) FILTER (WHERE abs(d.s - a.t) <= 0.5) FROM d JOIN a USING (rcept_no)",
+   "value": 0.5,
+   "measured_at": "2026-09-06",
+   "growing": false,
+   "used_by": "EG3_ownership_snapshot metric agg_reconcile_n_close (기록형)",
+   "note": "★ 서버 재측정. 산출(집계행 제외)의 보통주 지분율 합이 원장 '계' 행 값과 얼마나 벌어지는지의 허용오차 — 원장이 소수 2자리라 주주 수만큼 반올림이 쌓인다. 절단본 76그룹 중 75가 0.5%p 이내(어긋난 1그룹은 기록만 한다). **판정하지 않는다**(GATES §0-1 기록형): 원장 집계행 자체가 종류주를 섞어 적는 경우가 있어 폐기형으로 두면 정상 법인이 빌드를 죽인다."
+  },
+  {
+   "table": "ownership_snapshot",
+   "metric": "threshold_EG7",
+   "inputs": {
+    "stg_hyslr": "slice"
+   },
+   "sql": "SELECT n_reject::DOUBLE / (n_rows + n_reject) FROM ownership_snapshot _meta",
+   "value": 0.001,
+   "measured_at": "2026-09-06",
+   "growing": false,
+   "used_by": "EG7 격리 비율 상한 (gates.threshold)",
+   "note": "절단본 격리 0(826행 전부 통과)이지만 **0.0 으로 못 박지 않는다** — 격리 사유 `pct_out_of_range` 가 원장 파싱 오류에 걸리는 축이고 서버 228,226행에는 STAGE_SPEC §2-13 이 실측한 '#######' 오버플로 잔재가 있다(cast_failed 는 NULL 이 되어 격리를 피하지만 부분 파싱은 범위 밖 값을 낼 수 있다). 프레임 기본값 0.001 을 그대로 등재한다. ★ 서버 첫 빌드의 reject_ratio 로 확정."
+  },
+  {
+   "table": "audit_opinion",
+   "metric": "threshold_EG7",
+   "inputs": {
+    "stg_audit": "slice"
+   },
+   "sql": "SELECT n_reject::DOUBLE / (n_rows + n_reject) FROM audit_opinion _meta",
+   "value": 0.0,
+   "measured_at": "2026-09-06",
+   "growing": false,
+   "used_by": "EG7 격리 비율 상한 (gates.threshold)",
+   "note": "격리 사유가 `rcept_dt_missing` 하나뿐이다. 절단본 291행 전부 available_date 를 갖는다(stage 가 접수번호로 조회해 채운 값이고 basis='derived'). ★ 서버에서 접수일 조회가 비면 갱신."
+  },
+  {
+   "_eg1_reference": "EG1 우변은 임계가 아니라 등식이다(아래는 참조 실측값). 초안(GATES §3-⑮⑰)이 전제한 stage 행수 1:1 은 성립하지 않아 세 우변 모두 **자연키 distinct** 로 고쳤다 — GATES §9 `S15 구현 정정` 표 참조.",
+   "slice_reference": {
+    "holder_daily": {
+     "stg_holder_elestock_rows": 4197,
+     "stg_holder_majorstock_rows": 132,
+     "distinct_natural_key": 4329,
+     "out_rows": 4329,
+     "note": "절단본에서는 (rcept_no, repror) 가 두 원천 모두 유일해 행수와 같다. stage 가 key_unique=False 라 서버에서는 갈릴 수 있다."
+    },
+    "ownership_snapshot": {
+     "stg_hyslr_rows": 995,
+     "aggregate_rows": 169,
+     "detail_rows": 826,
+     "distinct_grain_with_stock_knd": 826,
+     "distinct_grain_without_stock_knd": 733,
+     "out_rows": 826,
+     "note": "★ 서버 재측정. 초안 grain(이름 축)으로는 826 → 733 으로 93행이 접힌다 — 보통주·우선주를 나눠 신고한 같은 주주다."
+    },
+    "audit_opinion": {
+     "stg_audit_rows": 291,
+     "distinct_grain": 226,
+     "out_rows": 226,
+     "dup_groups": 52,
+     "identical_payload_groups": 31,
+     "note": "★ 서버 재측정. DESIGN §4-5 의 EG1 값 93,037 은 stage 행수이고 grain distinct 가 아니다 — 서버 첫 빌드의 EG1 rhs 로 확정한다."
+    }
+   }
+  }
+ ]
+}

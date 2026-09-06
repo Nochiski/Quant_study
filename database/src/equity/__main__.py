@@ -38,6 +38,10 @@ from . import (
     rules_s06,  # noqa: F401  # reason: 등록 부작용 — S06 조정계수 adj_factor
     rules_s11,  # noqa: F401  # reason: 등록 부작용 — S11 공시 판본 disclosure_version
     rules_s12,  # noqa: F401  # reason: 등록 부작용 — S12 재무 PIT fin_std
+    rules_s15,  # noqa: F401  # reason: 등록 부작용 — S15 지분·감사 3테이블
+    rules_s16,  # noqa: F401  # reason: 등록 부작용 — S16 주식수·자사주·배당
+    rules_s17,  # noqa: F401  # reason: 등록 부작용 — S17 컨센서스 consensus_daily
+    rules_s18,  # noqa: F401  # reason: 등록 부작용 — S18 의견·목표가 opinion_daily·broker
     rules_sample,  # noqa: F401  # reason: T0 샘플 테이블
 )
 from .model import RULES

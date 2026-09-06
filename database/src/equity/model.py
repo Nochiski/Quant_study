@@ -22,7 +22,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.6.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.7.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -44,6 +44,12 @@ RULES_VERSION = "e1.6.0"                # BuildRecord.rules_version 에 실린�
 #         ② `price.adj_close` 필드 선언의 소유 테이블이 `adj_factor`(뷰) → `price_adj_daily`(표)
 #            로 옮겨 `dataset_profile` 행의 `table_name`·`available_date_basis`·`coverage_basis`
 #            가 바뀐다(행수 72 는 그대로). `rules_s19.SOURCE_TABLES` 25 → 26.
+# e1.7.0: DEFECT-10 — `adj_factor` 에 `no_bar_after_apply` 열 신설. 적용일 이후 그 종목의
+#         `price_kind='trade'` 행이 하나도 없으면 참이다(서버 26행). 커널은 사건 시점 이후 바가
+#         있는 세션을 반드시 찾으므로 이런 행을 그냥 내보내면 전 종목 백테스트 run 전체가 죽는다
+#         (TECH_DEBT §10). equity 는 사건을 버리지 않고 사실만 싣는다 — 정지 중 감자는 보유 수량을
+#         실제로 바꾸고, 26건 중 18건은 거래소가 정지 기간에 기준가를 공표했다. 기존 열의 값은
+#         바뀌지 않지만 선언 컬럼이 늘어 EG5a 비교 대상이 달라진다.
 
 # DESIGN §1 — stage 4종 + equity 신설 convention
 BASIS_VOCAB: tuple[str, ...] = ("measured", "derived", "convention", "default", "unknown")

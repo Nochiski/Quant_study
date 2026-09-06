@@ -1010,6 +1010,36 @@ def test_기준가_행_계수를_기준가_비율과_다르게_두면_EG3가_잡
     assert bad.metrics["n_ok_product_off_one"] == 0                # 곱은 여전히 1
 
 
+def test_정지_뒤_재개하지_않는_종목의_사건은_no_bar_after_apply(tmp_path: Path) -> None:
+    """DEFECT-10 — 적용일 이후 실거래 세션이 없으면 표시한다. 사건을 버리지는 않는다.
+
+    커널은 사건 시점 이후 그 종목의 바가 있는 세션을 반드시 찾는다
+    (`backtest_engine/engine/loop.py::_settlement_session`). 못 찾으면 예외를 던져 **run 전체**가
+    죽는다 — 그 종목 하나를 건너뛰는 것이 아니다. 어댑터는 `price_kind='reference'` 행을 Bar 로
+    내지 않으므로, 정지된 뒤 데이터 끝까지 재개하지 않은 종목의 감자·병합이 정확히 그 경우다
+    (서버 실측 26건 · 25종목, 전부 `status='suspended'`).
+
+    그렇다고 사건을 버릴 수는 없다 — 정지 중이라도 보유 수량은 실제로 바뀌고, 서버 26건 중 18건은
+    거래소가 정지 기간에 기준가를 공표했다. 그래서 equity 는 **사실만 싣고** 정산 정책은 소비자와
+    커널이 고른다.
+    """
+    cal = sessions(80)
+    # 2:1 병합 — 주식수 ×0.5, 기준가 ×2 로 시총이 보존된다(계수가 성립하는 사건).
+    merge = dict(jumps={55: 2.0}, base={55: 2.0}, share_jumps={55: 0.5})
+    # 세션 50 에서 거래가 끊기고 캘린더 끝까지 참고가 행만 남는다 — 재개하지 않는다.
+    px = flat_prices("A00013", cal, 10000, halt=(50, 79), **merge)
+    row = run_adj_sql([], px, cal)[f"A00013:krx_base:{cal[55]}"]
+    assert row["factor_ok"] is True, "계수 자체는 나온다 — 표시는 계수 성립과 별개다"
+    assert (row["price_factor"], row["share_factor"]) == (2.0, 0.5)  # 곱 = 1
+    assert row["apply_date"] == cal[55]
+    assert row["no_bar_after_apply"] is True
+
+    # 대조군: 같은 사건이지만 정지가 끝나고 다시 거래되면 거짓이다.
+    px_ok = flat_prices("A00014", cal, 10000, halt=(50, 60), **merge)
+    ok = run_adj_sql([], px_ok, cal)[f"A00014:krx_base:{cal[55]}"]
+    assert ok["factor_ok"] is True and ok["no_bar_after_apply"] is False
+
+
 def test_sql파일에_상수_하드코딩_없음() -> None:
     text = re.sub(r"--[^\n]*", "", ADJ.sql_path.read_text(encoding="utf-8"))
     nums = set(re.findall(r"(?<![\w.])\d+(?:\.\d+)?", text))

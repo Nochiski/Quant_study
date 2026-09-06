@@ -85,9 +85,8 @@ class PlanProgressAggregationTest(unittest.TestCase):
                     ),
                 )
 
-                # A clean Windows checkout contains CRLF throughout. The checker must
-                # not report stale aggregates merely because generated blocks preserve
-                # that repository-level line-ending choice.
+                # Windows의 clean checkout은 전체가 CRLF다. 생성 블록이 저장소의 줄바꿈
+                # 선택을 보존했다는 이유만으로 stale 판정하면 안 된다.
                 normalized = plan.read_bytes().replace(b"\r\n", b"\n")
                 plan.write_bytes(normalized.replace(b"\n", b"\r\n"))
                 subprocess.run(

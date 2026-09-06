@@ -6,7 +6,7 @@ current_phase: complete
 current_pr: none
 active_prs: []
 parallel_window: []
-last_updated: 2026-09-06T21:31:52+09:00
+last_updated: 2026-09-06T23:03:12+09:00
 planned_prs: 52
 merged_prs: 52
 approved_prs: 52
@@ -28,7 +28,7 @@ progress_percent: 100
 | Active PR | none |
 | Progress | `52 / 52 merged (100%)` |
 | Approved | `52 / 52` |
-| Aggregated at | `2026-09-06 21:31 KST` |
+| Aggregated at | `2026-09-06 23:03 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -364,6 +364,9 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-06 KST | Codex | 동일 `review_p6_06` 최종 재검토에서 CSS class 문자열 직접 단언 제거, `aria-labelledby` 결과 landmark, role/name 기반 computed-style 검증과 1440/800/520 × light/dark 반응형 회귀가 확인됐다. 이전 매뉴얼·422·GUID DB·결과 CSS findings도 모두 폐쇄되어 APPROVE, P0/P1/P2 0/0/0을 받았다. 최종 author gate는 frontend 38 files/455 tests, 실제 FastAPI/Vite Playwright 16/16, production build(editor 131.94 KiB gzip), lint·app/E2E typecheck, root 6, PLAN 52/52를 통과했다 | 동일 reviewer 최종 승인·접근성 selector·실브라우저 회귀·완료 후 PLAN 최신화 |
+| 2026-09-06 KST | Codex | 사용자 매뉴얼 최종 리뷰 P2 6건을 수정했다. 초보 흐름을 `실행 설정→Python reference→백테스트`로 바로잡고, 의미 Diff를 canonical StrategySpec 필드 차이로 설명했으며, 캡처는 사전 backtest POST 0·실패 요청값·정확한 422 RequestValidationResponse branch·revision URL 보존·성공 요청값과 spec hash·현재 run/strategy 이력 identity를 검증한다. clean checkout Chromium 설치와 실행별 GUID DB 절차를 추가했다. 결과 CSS는 `run-detail` entity 아래로 scope하고 중앙 semantic spacing/type/radius token만 사용한다. 후속 리뷰 P2에 따라 CSS class 문자열 단언을 제거하고 결과 article에 접근 가능한 이름을 부여했으며, role/name으로 찾은 실제 브라우저 결과를 1440/800/520 × light/dark에서 computed grid·반응형 열 수·surface·viewport containment로 검증했다. 서로 다른 fresh DB에서 `docs:capture` 전체 흐름을 연속 2회 통과해 PNG 12장을 갱신했고 frontend 455, E2E 16/16, lint·app/E2E typecheck·production build, root 6을 통과했다 | 동일 reviewer 수정 루프·정확한 UI 동작/422 wire 계약·접근성 기반 실브라우저 회귀·CSS SoT/책임분리 |
+| 2026-09-06 KST | Codex | 완료된 YAML Workbench를 처음 쓰는 사용자를 위해 메인·frontend README를 최신화하고, 실제 Vite/FastAPI와 격리 SQLite에서 신규 전략→검증 오류→v1/v2 저장·Diff→TargetTape→backend 422→Python 백테스트 완료→두 이력 화면을 실행해 12장 스크린샷과 재현 가능한 캡처 스크립트를 포함한 사용자 매뉴얼을 작성했다. 사용자 피드백에 따라 내부 구조 설명보다 `샘플 붙여넣기→검증→저장→중간값 확인→백테스트`를 먼저 따라 하는 쉬운 문서로 다시 구성했다. 이 과정에서 legacy editor CSS 삭제 시 백테스트 결과 스타일도 사라진 회귀를 발견해 `entities/backtest` 전용 owner로 복구하고 computed style gate를 추가했다. 코드 주석과 GitHub Issue·PR을 한글로 쓰는 단일 언어 SoT 및 `CLAUDE.md`·`AGENTS.md` 진입 규칙도 추가했다. frontend 454·typecheck·lint·production build, 실제 backend 연동 E2E 16/16, root 6, 문서 경로 19개와 이미지 12개를 검증했다. Windows fixture CRLF와 브라우저 LF 차이는 E2E 입력 경계에서 정규화했다 | 쉬운 사용자 매뉴얼·실브라우저 증거·결과 UI 책임분리·협업 언어 SoT·완료 후 문서 최신화 |
 | 2026-09-06 KST | Codex | 최종 main 전환 검증에서 clean Windows checkout의 CRLF 때문에 집계 내용이 동일해도 `-Check`가 stale로 오판하는 재현성 결함을 발견했다. 집계기가 입력 문서의 line ending을 보존하도록 단일 owner에서 수정하고 CRLF fixture 회귀를 추가한다 | PLAN generated-block SoT·Windows checkout 재현성·완료 후 검증 |
 | 2026-09-06 KST | Codex | 최종 #78의 base를 merged P6-04 뒤 `main`으로 전환하고 Playwright/visual infrastructure와 P6-06 migration 스택을 merge `cea8902`로 직접 병합했다. P6-05를 MERGED로 전환해 전체 tracker 52/52를 완료했다. 원격 Actions의 billing `steps=[]` 실패와 미충족 CI exit는 그대로 기록한다 | 제품 소유자 local-gate override·실제 merge SHA·전체 delivery 완료·CI 사실성 |
 | 2026-09-06 KST | Codex | #77의 base를 merged P6-03 뒤 `main`으로 전환하고 hardening·dark theme·성능·접근성 스택을 merge `cf091c8`로 직접 병합했다. P6-04를 MERGED로 전환하고 최종 P6-05의 main 재기준 병합을 진행한다 | 제품 소유자 local-gate override·실제 merge SHA·dependency 순서 |

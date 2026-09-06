@@ -32,7 +32,7 @@ const GOLDEN = readFileSync(
     "../../backend/tests/fixtures/strategy_documents/quality_momentum.yaml",
   ),
   "utf8",
-);
+).replace(/\r\n?/gu, "\n");
 
 const editor = (page: Page) =>
   page.getByRole("textbox", { name: "편집기", exact: true });
@@ -69,6 +69,54 @@ const requireData = <Value>(
 
 const rowFor = (region: Locator, securityId: string): Locator =>
   region.getByRole("row").filter({ hasText: securityId });
+
+const expectBacktestResultPresentation = async (page: Page) => {
+  const result = page.getByRole("article", { name: "백테스트 결과" });
+  const highlights = result.getByRole("region", { name: "핵심 성과 지표" });
+  const backgrounds = new Map<string, string>();
+  const scenarios = [
+    { width: 1440, height: 900, colorScheme: "light", columns: 6 },
+    { width: 1440, height: 900, colorScheme: "dark", columns: 6 },
+    { width: 800, height: 900, colorScheme: "light", columns: 2 },
+    { width: 800, height: 900, colorScheme: "dark", columns: 2 },
+    { width: 520, height: 900, colorScheme: "light", columns: 1 },
+    { width: 520, height: 900, colorScheme: "dark", columns: 1 },
+  ] as const;
+
+  for (const scenario of scenarios) {
+    await page.setViewportSize({
+      width: scenario.width,
+      height: scenario.height,
+    });
+    await page.emulateMedia({ colorScheme: scenario.colorScheme });
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.dataset.theme))
+      .toBe(scenario.colorScheme);
+    await expect(result).toHaveCSS("display", "grid");
+    await expect(highlights).toHaveCSS("display", "grid");
+
+    const background = await result.evaluate(
+      (element) => getComputedStyle(element).backgroundColor,
+    );
+    const columns = await highlights.evaluate(
+      (element) => getComputedStyle(element).gridTemplateColumns,
+    );
+    expect(columns.trim().split(/\s+/u)).toHaveLength(scenario.columns);
+    expect(background).not.toBe("rgba(0, 0, 0, 0)");
+    backgrounds.set(`${scenario.width}-${scenario.colorScheme}`, background);
+
+    const box = await result.boundingBox();
+    expect(box).not.toBeNull();
+    if (box !== null) {
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(scenario.width + 1);
+    }
+  }
+
+  expect(backgrounds.get("1440-light")).not.toBe(backgrounds.get("1440-dark"));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.emulateMedia({ colorScheme: "light" });
+};
 
 const currentSource = async (page: Page) => {
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
@@ -675,7 +723,7 @@ test.describe("professional YAML workflow", () => {
       workflow.getByRole("status", { name: "실행 상태" }),
     ).toContainText("completed", { timeout: 120_000 });
     await expect(
-      workflow.getByRole("heading", { name: "백테스트 결과" }),
+      workflow.getByRole("article", { name: "백테스트 결과" }),
     ).toBeVisible({ timeout: 120_000 });
     const result = requireData(
       (
@@ -709,6 +757,7 @@ test.describe("professional YAML workflow", () => {
     await expect(
       workflow.getByRole("button", { name: "동일 설정 재실행" }),
     ).toBeEnabled();
+    await expectBacktestResultPresentation(workflow);
     const manifest = workflow.getByLabel(
       "Manifest · 데이터 경고 · 재현성 정보",
     );

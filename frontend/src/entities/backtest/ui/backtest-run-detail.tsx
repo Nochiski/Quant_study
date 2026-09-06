@@ -4,6 +4,8 @@ import type {
   MetricValue,
 } from "../../../shared/api";
 import { t } from "../../../shared/config";
+import { useId } from "react";
+import "./backtest-run-detail.css";
 
 type ChartSeries = {
   label: string;
@@ -137,6 +139,7 @@ export const BacktestRunDetail = ({
 }: {
   result: BacktestRunResult;
 }) => {
+  const titleId = useId();
   const definitions = new Map(
     result.metric_definitions.map((item) => [item.metric_id, item]),
   );
@@ -155,11 +158,11 @@ export const BacktestRunDetail = ({
   ];
 
   return (
-    <article className="run-detail">
+    <article className="run-detail" aria-labelledby={titleId}>
       <header className="run-detail__header">
         <div>
           <span className="section-kicker">{t("backtest.result.kicker")}</span>
-          <h3>{t("backtest.result.title")}</h3>
+          <h3 id={titleId}>{t("backtest.result.title")}</h3>
           <p>
             {result.manifest.engine_core.toUpperCase()} core · registry{" "}
             <code>{result.manifest.metric_registry_version}</code>

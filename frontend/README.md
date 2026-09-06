@@ -1,5 +1,8 @@
 # Strategy Workbench Frontend
 
+처음 사용하는 방법과 실제 화면은
+[Strategy Workbench 사용자 매뉴얼](../docs/manual/strategy-workbench/README.md)을 참고한다.
+
 > 전략 authoring은 verbose YAML/JSON source editor 하나를 사용한다
 > ([ADR](../docs/superpowers/specs/2026-09-04-strategy-authoring-contract-adr.md),
 > [PLAN.md](../docs/planning/strategy-workbench-yaml-ui/PLAN.md)). Form/Graph/Diff는 backend가
@@ -100,6 +103,7 @@ npm run lint
 npm run test
 npm run build
 npm run test:e2e
+npm run docs:capture # 실행 중인 실제 frontend/backend로 사용자 매뉴얼 스크린샷 갱신
 ```
 
 `npm run test`에는 임의 포트의 실제 FastAPI 프로세스를 띄워 UI→generated SDK→PIT mock adapter를

@@ -243,7 +243,9 @@ test.describe("professional YAML workflow", () => {
     await saveAndWaitForRevision(page, 3);
 
     const finalTitle = `${titleV1} conflict v4`;
-    const finalSource = sourceV2.replace(titleV2, finalTitle);
+    const finalSource = sourceV2
+      .replace(titleV2, finalTitle)
+      .replace("selection_count: 20", "selection_count: 2");
     await replaceSource(conflicting.page, finalSource);
     await expectPhase(conflicting.page, "검증 통과");
     await expect(save(conflicting.page)).toBeEnabled();
@@ -288,7 +290,7 @@ test.describe("professional YAML workflow", () => {
     expect(savedV4.origin).toBe("document");
 
     const workflow = conflicting.page;
-    const securityIds = ["sec-005930-1", "sec-000660-1"];
+    const securityIds = ["sec-005930-1", "sec-000660-1", "sec-035420-1"];
     const factor = savedV4.spec.factors.factors[0];
     if (factor === undefined) throw new Error("saved v4 has no factor");
     const traceRequest: StrategyTraceRequest = {
@@ -343,7 +345,7 @@ test.describe("professional YAML workflow", () => {
         revision: 4,
         source_hash: savedV4.source_hash,
       },
-      trace: { offset: 0, limit: 4, returned: 4, has_more: false },
+      trace: { offset: 0, limit: 6, returned: 6, has_more: false },
     });
     expect(trace.spec_hash).toHaveLength(64);
     expect(trace.plan_hash).toHaveLength(64);
@@ -372,6 +374,13 @@ test.describe("professional YAML workflow", () => {
         security_id: "sec-005930-1",
         field_id: "price.close",
         value: 116_285,
+        available_date: "2026-07-31",
+        kind: "observed",
+      },
+      {
+        security_id: "sec-035420-1",
+        field_id: "price.close",
+        value: 308_855,
         available_date: "2026-07-31",
         kind: "observed",
       },
@@ -434,7 +443,7 @@ test.describe("professional YAML workflow", () => {
       selected: true,
       rank: 2,
       side: "long",
-      unconstrained_target_weight: 1 / 3,
+      unconstrained_target_weight: 1 / 2,
       constrained_target_weight: 0.05,
       constraint_effect: "adjusted",
       exclusion_reasons: [],
@@ -449,6 +458,35 @@ test.describe("professional YAML workflow", () => {
     expect(
       construction660.factor_contributions[0]?.normalized_contribution,
     ).toBeCloseTo(0.026670144121170077);
+    const excludedCandidate = requireData(
+      targetTrace.candidates.find((row) => row.security_id === "sec-005930-1"),
+      "excluded candidate for sec-005930-1",
+    );
+    expect(excludedCandidate).toMatchObject({
+      eligible: true,
+      selected: false,
+      rank: 3,
+      side: null,
+      target_weight: 0,
+      exclusion_reasons: ["outside_selection"],
+    });
+    expect(excludedCandidate.composite_score).toBeCloseTo(0.024320848454952193);
+    const excludedConstruction = requireData(
+      targetTrace.construction.find(
+        (row) => row.security_id === "sec-005930-1",
+      ),
+      "excluded construction for sec-005930-1",
+    );
+    expect(excludedConstruction).toMatchObject({
+      eligible: true,
+      selected: false,
+      rank: 3,
+      side: null,
+      unconstrained_target_weight: null,
+      constrained_target_weight: 0,
+      constraint_effect: "not_selected",
+      exclusion_reasons: ["outside_selection"],
+    });
 
     await expect(provenance).toContainText("mock-equity-v0.2-20260903");
     await expect(provenance).toContainText("factor-registry-v1");
@@ -464,9 +502,17 @@ test.describe("professional YAML workflow", () => {
     await expect(pipeline660).toContainText("212,570");
     await expect(pipeline660).toContainText("0.02667014");
     await expect(pipeline660).toContainText("순위 2 · long");
-    await expect(pipeline660).toContainText("33.3333%");
+    await expect(pipeline660).toContainText("50.00%");
     await expect(pipeline660).toContainText("5.00%");
     await expect(pipeline660).toContainText("adjusted");
+    const excludedPipeline = linkedList.getByRole("listitem", {
+      name: "sec-005930-1",
+      exact: true,
+    });
+    await expect(excludedPipeline).toContainText("순위 3 · 없음");
+    await expect(excludedPipeline).toContainText("outside_selection");
+    await expect(excludedPipeline).toContainText("0.00%");
+    await expect(excludedPipeline).toContainText("not_selected");
 
     await workflow.getByRole("tab", { name: "TargetTape" }).click();
     const target = workflow.getByRole("region", {
@@ -478,6 +524,11 @@ test.describe("professional YAML workflow", () => {
     await expect(target660).toContainText("예");
     await expect(target660).toContainText("5.00%");
     await expect(target660).toContainText("ok");
+    const excludedTarget = rowFor(target, "sec-005930-1");
+    await expect(excludedTarget).toContainText("3");
+    await expect(excludedTarget).toContainText("아니요");
+    await expect(excludedTarget).toContainText("outside_selection");
+    await expect(excludedTarget).toContainText("0.00%");
     await workflow.getByRole("tab", { name: "원시 데이터" }).click();
     const raw = workflow.getByRole("region", {
       name: "원시 필드 값, 공개일과 데이터 상태",
@@ -564,11 +615,22 @@ test.describe("professional YAML workflow", () => {
       name: "초기 자본 (KRW)",
     });
     await initialCash.fill("0");
-    await expect(workflow.getByRole("alert")).toContainText(
-      "초기 자본은 0보다 큰 숫자여야 합니다.",
+    await expect(backtest(workflow)).toBeEnabled();
+    const rejectedRun = workflow.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === "/api/v1/backtests" &&
+        response.status() === 422,
     );
-    await expect(backtest(workflow)).toBeDisabled();
+    await backtest(workflow).click();
+    expect((await rejectedRun).status()).toBe(422);
+    await expect(workflow.getByRole("alert")).toContainText(
+      "백테스트 시작 실패",
+    );
+    await expect(workflow.getByRole("alert")).toContainText("status=422");
     await initialCash.fill("123456789");
+    await expect(workflow.getByText("준비됨", { exact: true })).toBeVisible();
+    await expect(workflow.getByRole("alert")).toHaveCount(0);
     await workflow
       .getByRole("textbox", { name: "벤치마크 종목 ID" })
       .fill("sec-005930-1");
@@ -787,7 +849,7 @@ test.describe("professional YAML workflow", () => {
       if (pathname === "/api/v1/backtests/run-cancellable/cancel") {
         cancellationRequested = true;
         await route.fulfill({
-          status: 202,
+          status: 200,
           json: runState("run-cancellable", "cancel_requested"),
         });
         return;

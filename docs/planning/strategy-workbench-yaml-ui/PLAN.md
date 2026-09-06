@@ -3,14 +3,14 @@ plan_version: 2
 project: yaml-strategy-workbench-ui
 project_status: APPROVED
 current_phase: P6
-current_pr: P6-04,P6-05
-active_prs: [P6-04, P6-05]
-parallel_window: [P6-04, P6-05]
-last_updated: 2026-09-06T21:20:58+09:00
+current_pr: P6-05
+active_prs: [P6-05]
+parallel_window: [P6-05]
+last_updated: 2026-09-06T21:22:34+09:00
 planned_prs: 52
-merged_prs: 50
+merged_prs: 51
 approved_prs: 52
-progress_percent: 96
+progress_percent: 98
 ---
 
 # YAML Strategy Workbench 실시간 진행 계획
@@ -24,11 +24,11 @@ progress_percent: 96
 |---|---|
 | Project status | `APPROVED` |
 | Current phase | `P6` |
-| Current/next PR | `P6-04,P6-05` |
-| Active PR | `P6-04, P6-05` |
-| Progress | `50 / 52 merged (96%)` |
+| Current/next PR | `P6-05` |
+| Active PR | `P6-05` |
+| Progress | `51 / 52 merged (98%)` |
 | Approved | `52 / 52` |
-| Aggregated at | `2026-09-06 21:20 KST` |
+| Aggregated at | `2026-09-06 21:22 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -79,15 +79,15 @@ progress_percent: 96
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
 | P4 | Outline, Contract, Projections | 10 | 10 | `MERGED` |
 | P5 | Truthful Trace UI | 3 | 3 | `MERGED` |
-| P6 | Professional release and migration | 9 | 7 | `APPROVED` |
-| **Total** |  | **52** | **50** | **96%** |
+| P6 | Professional release and migration | 9 | 8 | `APPROVED` |
+| **Total** |  | **52** | **51** | **98%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
 
 | 항목 | 값 |
 |---|---|
-| PR | P6 stack direct merge: P6-08·P6-09·P6-03·P6-06 MERGED, P6-04→P6-05 propagation |
+| PR | P6 stack direct merge: P6-08·P6-09·P6-03·P6-04·P6-06 MERGED, P6-05 final propagation |
 | Intent | 실제 FastAPI와 production preview에서 생성·오류 수정·복구·revision·backtest·trace/risk·history/diff를 한 사용자 흐름으로 증명하고 구형 Quick/Advanced 화면을 제거한다 |
 | Acceptance | 전용 single-run Playwright project; golden YAML의 create/edit/validate/save/reload; local/server recovery; 구조 오류 gate와 수정; 실제 409 conflict; trace raw/target/risk/provenance; backtest 완료와 두 history route; revision diff; `source=None` revision의 generated source 재저장 후 동일 `spec_hash`; legacy bookmark redirect; 실행 보고서 |
 | Non-goals | M6 Parameter Search 구현, backend legacy JSON wire API 제거, StrategySpec/compile/hash 의미 변경, live trading 기능 구현, UI 재설계 |
@@ -235,7 +235,7 @@ Phase exit:
 | [x] | `P6-01` | SQLite persistent strategy revision repository | P1-07 | `MERGED` | [#69](https://github.com/Nochiski/Quant_study/pull/69) · `review_p6_01` APPROVE |
 | [x] | `P6-02` | Server draft persistence/CAS/recovery UI | P6-01, P3-06, P4-08 | `MERGED` | [#72](https://github.com/Nochiski/Quant_study/pull/72) · `review_p6_02` APPROVE |
 | [x] | `P6-03` | Keyboard workflow와 Command Palette | P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `MERGED` | [#76](https://github.com/Nochiski/Quant_study/pull/76) → `main`, merge `0747c10` · local-gate override |
-| [ ] | `P6-04` | Large/hostile spec 성능·접근성·i18n과 soft dark theme (`$ref`-only cycle fail-closed 포함) | P3-05, P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `APPROVED` | [#77](https://github.com/Nochiski/Quant_study/pull/77) · `review_p6_04` APPROVE, P0/P1/P2 0 · CI billing 차단 |
+| [x] | `P6-04` | Large/hostile spec 성능·접근성·i18n과 soft dark theme (`$ref`-only cycle fail-closed 포함) | P3-05, P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `MERGED` | [#77](https://github.com/Nochiski/Quant_study/pull/77) → `main`, merge `cf091c8` · local-gate override |
 | [ ] | `P6-05` | Playwright/visual regression infrastructure와 CI | P2-03, P3-05, P6-04 | `APPROVED` | [#78](https://github.com/Nochiski/Quant_study/pull/78) · `review_p6_05` APPROVE, P0/P1/P2 0 · reviewed `c97708e` · CI billing 차단 |
 | [x] | `P6-06` | 전체 browser E2E·실구동 시나리오 검증, migration gate, 조건부 legacy cleanup | P6-01, P6-02, P6-03, P6-04, P6-05, P6-08, P6-09 | `MERGED` | [#79](https://github.com/Nochiski/Quant_study/pull/79) → `feat/p6-05-browser-infrastructure`, merge `05c06c9` · local-gate override |
 | [x] | `P6-07` | Root frontend/backend development entrypoints | P0-02, P0-03 | `MERGED` | [#56](https://github.com/Nochiski/Quant_study/pull/56) · `review_p6_07` APPROVE |
@@ -316,7 +316,7 @@ Phase exit:
 |---|---|---|---|---|---|---|
 | P6-06 | author lossless integer model/route 70·debugger/run controls 30·backend HTTP/artifact 8; reviewer focused 70·이전 누적 backend 8/strategy reference 5/architecture 5; 실제 workflow 4/4·viewport/theme 12/12·strict 16/16 | frontend 454·backend 1,120·Rust 13·root 6; typecheck 2종·ESLint·CI 범위 Ruff·Pyright·build(editor 131.94KiB)·cargo fmt/clippy | typed run 404/result 409 OpenAPI·SDK 재생성 후 tracked diff 0 | unsafe integer는 local error·POST 0, 0/−1 safe semantic-invalid는 값 보존 후 backend 422; page route generation·excluded trace·artifact barrier cancel/replay·history/legacy·PNG 8개·root 5173/8000 200·listener/temp 0 | [#79](https://github.com/Nochiski/Quant_study/pull/79) `review_p6_06` APPROVE P0/P1/P2 0; Actions steps=[] billing 실패를 인지한 제품 소유자 local-gate override로 parent branch에 merge `05c06c9` | 2026-09-06 |
 | P6-05 | actual FastAPI+production preview baseline update 8/8·strict 8/8; network-idle 후 lazy 1회·required response/woff2 전체 200·failed request 0; body/editor computed family·loaded faces·missing-face 0 | clean npm ci 400/취약점 0; frontend Vitest 474·main/E2E typecheck·lint·build(editor 131.94KiB); root 6; reviewer backend 1,118·Rust 13; PLAN/diff-check | OpenAPI/SDK 기존 diff 0; backend wire/domain 미변경 | CodeMirror scroller/content/gutter가 mono semantic token을 직접 사용하고 네 PNG를 새 glyph metric으로 재생성·직접 확인. unique temp runtime 성공·timeout 실패·Ctrl+C·반복 실행 후 artifact/listener/process 0 | [#78](https://github.com/Nochiski/Quant_study/pull/78) Windows 2025·Node 22.18 고정; Actions billing/spending-limit 외부 차단, green gate 유지 | 2026-09-06 |
-| P6-04 | author 9 files 117, reviewer 500-node 10/10; fix trace/virtual 21 + reversed mixed-status PLAN fixture 1; 500-node·3,000-line real CodeMirror p95 <16 ms/folding/search; hostile recursive/missing/external `$ref` fail-closed | frontend 474·typecheck·lint·changed-file Prettier·build; backend 1,118·Rust 13·root 6; Ruff·Pyright·cargo fmt/clippy·diff-check | OpenAPI/SDK 재생성 후 semantic diff 0 | root `npm run dev`·`uv run server` 5173/8000 health 200; Chrome 1440×900·1920×1080 light/dark; 실제 Tab이 virtual table/security/node에 진입해 Home/End off-DOM server row와 sentinel을 표시하고 nested outer scroll을 보존 | [#77](https://github.com/Nochiski/Quant_study/pull/77) `review_p6_04` APPROVE P0/P1/P2 0; Actions 4 jobs 모두 step 0 billing/spending-limit 실패, green gate 유지 | 2026-09-06 |
+| P6-04 | author 9 files 117, reviewer 500-node 10/10; fix trace/virtual 21 + reversed mixed-status PLAN fixture 1; 500-node·3,000-line real CodeMirror p95 <16 ms/folding/search; hostile recursive/missing/external `$ref` fail-closed | frontend 474·typecheck·lint·changed-file Prettier·build; backend 1,118·Rust 13·root 6; Ruff·Pyright·cargo fmt/clippy·diff-check | OpenAPI/SDK 재생성 후 semantic diff 0 | root `npm run dev`·`uv run server` 5173/8000 health 200; Chrome 1440×900·1920×1080 light/dark; 실제 Tab이 virtual table/security/node에 진입해 Home/End off-DOM server row와 sentinel을 표시하고 nested outer scroll을 보존 | [#77](https://github.com/Nochiski/Quant_study/pull/77) `review_p6_04` APPROVE P0/P1/P2 0; Actions steps=[] billing 실패를 인지한 제품 소유자 local-gate override로 main merge `cf091c8` | 2026-09-06 |
 | P6-03 | final reviewer palette/IDE 2 files 30; 이전 review-fix 4 files 97 + professional route matrix 11 passed | frontend 455·backend 1,118·Rust 13·root 5; typecheck·lint·changed-file Prettier·build·Ruff·Pyright·cargo fmt/clippy | OpenAPI/SDK 재생성 후 tracked content diff 0 | 실제 root backend 42813 health 200·Vite 42814 direct new route 200; current identity/IME/action gate와 함께 narrow drawer 위 palette close-button Escape가 modal 경계에서 소비되고 drawer/focus가 보존됨을 독립 재검증 | [#76](https://github.com/Nochiski/Quant_study/pull/76) `review_p6_03` APPROVE P0/P1/P2 0; Actions steps=[] billing 실패를 인지한 제품 소유자 local-gate override로 main merge `0747c10` | 2026-09-06 |
 | P6-09 | author backend history/reference/status 13·frontend router+document route 64; reviewer backend 20 + hostile probes | backend 1,118·frontend 427·Rust 13·root 5; Ruff·Pyright·typecheck·lint·changed-file Prettier·build·cargo fmt/clippy | OpenAPI/SDK 재생성 전후 diff hash `0d80043b706914d479227815fc732c5754340202` 동일; reviewer runtime/tracked 214 schemas 일치 | saved/inline provenance, exact strategy filter, 26개 page/out-of-range 복구, nonterminal→terminal polling stop, late cache 폐기와 세 endpoint noncanonical integer 422·MAX bounds를 검증; 실제 browser는 P6-06 범위 | [#75](https://github.com/Nochiski/Quant_study/pull/75) `review_p6_09` APPROVE P0/P1/P2 0; Actions steps=[] billing 실패를 인지한 제품 소유자 local-gate override로 main merge `ef97e74` | 2026-09-06 |
 | P6-08 | author backend 1,114/frontend 423; reviewer backend 79, router 14, YAML/legacy late-cache 2 + hostile probes | backend 1,114·frontend 423·Rust 13·root 5; Ruff·Pyright·typecheck·lint·Prettier·build·cargo fmt/clippy | OpenAPI runtime/tracked parity 및 17 files 재생성 전후 SHA-256 동일 | 모든 save path cache coherence, duplicate title identity, portable offsets, provenance, 21개 pagination과 immutable link 독립 재검증 | [#74](https://github.com/Nochiski/Quant_study/pull/74) `review_p6_08` APPROVE P0/P1/P2 0; Actions는 billing으로 step 전 실패 | 2026-09-06 |
@@ -364,6 +364,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-06 KST | Codex | #77의 base를 merged P6-03 뒤 `main`으로 전환하고 hardening·dark theme·성능·접근성 스택을 merge `cf091c8`로 직접 병합했다. P6-04를 MERGED로 전환하고 최종 P6-05의 main 재기준 병합을 진행한다 | 제품 소유자 local-gate override·실제 merge SHA·dependency 순서 |
 | 2026-09-06 KST | Codex | #76의 base를 merged P6-09 뒤 `main`으로 전환하고 keyboard workflow·Command Palette 스택을 merge `0747c10`으로 직접 병합했다. P6-03을 MERGED로 전환하고 다음 P6-04의 main 재기준 병합을 진행한다 | 제품 소유자 local-gate override·실제 merge SHA·dependency 순서 |
 | 2026-09-06 KST | Codex | #75의 base를 merged P6-08 뒤 `main`으로 전환하고 backtest history/provenance 스택을 merge `ef97e74`로 직접 병합했다. P6-09를 MERGED로 전환하고 다음 P6-03의 main 재기준 병합을 진행한다 | 제품 소유자 local-gate override·실제 merge SHA·dependency 순서 |
 | 2026-09-06 KST | Codex | 제품 소유자가 원격 Actions의 billing/spending-limit `steps=[]` 상태에서도 이미 완료한 로컬 전체 gate를 근거로 #74~#79 직접 머지와 worktree 정리·루트 main 최신화를 명시 지시했다. 실패 CI를 green으로 위조하지 않는 예외 기록을 남기고 #79를 parent P6-05에 merge `05c06c9`, #74를 main에 merge `8df37ac`하여 P6-06·P6-08을 MERGED로 전환했다. 나머지는 base를 main으로 순차 전환해 진행한다 | 제품 소유자 명시적 local-gate override·실제 merge SHA·stack propagation·상태 SoT |

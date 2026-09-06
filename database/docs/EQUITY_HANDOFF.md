@@ -564,8 +564,11 @@ CorporateActionWithoutBar: no traded session for instrument at or after corporat
 ## 소비자 기동 (워크벤치 · 로컬 데이터)
 
 **로컬 데이터 내려받기** — `database/scripts/fetch_equity_local.sh <로컬 경로> [minimal|full]`
-- `minimal`(기본) 10표 ≈ 2.0GB: 가격·**조정가**·유니버스·조정계수·기업행위·식별 4표. 가격/모멘텀/변동성 전략용.
-- `full` 19표 ≈ 3.3GB: 재무·컨센서스·의견·수급·공매도·신용·배당·지분 추가.
+- `minimal`(기본) 12표 ≈ 2.1GB: 가격·**조정가**·유니버스·조정계수·기업행위·식별 4표
+  + **대장 2표**(`dataset_profile`·`factor_readiness`). 가격/모멘텀/변동성 전략용.
+- `full` 21표 ≈ 3.7GB: 재무·컨센서스·의견·수급·공매도·신용·배당·지분 추가.
+- **`dataset_profile` 을 빼면 안 된다**(216KB). 어댑터가 필드별 공개시차를 이 표에서 읽는다 —
+  없으면 원천 상수(전부 0세션)로 폴백해 한 세션 이른 값이 나온다(위 「소비자가 먼저 알 것」 ②).
 - **`_pinned/` 은 받지 않는다** — 재빌드 시 stage 입력을 고정한 하드링크 사본이라 읽기에 불필요하고,
   rsync 하면 하드링크가 풀려 실제 크기(수 GB)로 복사된다. `_asof/`·`_tmp/`·`_failed/` 도 같다.
 - 스크립트가 `baseline.json` 을 함께 받고 **카탈로그를 다시 만든다**. 매크로 본문이 절대경로를

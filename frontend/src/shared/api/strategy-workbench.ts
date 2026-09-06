@@ -287,27 +287,27 @@ export const strategyWorkbenchApi = {
 
   async startBacktest(spec: BacktestRunSpec): Promise<BacktestStartResponse> {
     const response = await startBacktest({ body: spec });
-    return requireData(response.data, "startBacktest");
+    return unwrap(response, "startBacktest");
   },
 
   async getBacktestStatus(runId: string): Promise<BacktestRunState> {
     const response = await getBacktestStatus({ path: { run_id: runId } });
-    return requireData(response.data, "getBacktestStatus");
+    return unwrap(response, "getBacktestStatus");
   },
 
   async getBacktestRequest(runId: string): Promise<BacktestRunSpec> {
     const response = await getBacktestRequest({ path: { run_id: runId } });
-    return requireData(response.data, "getBacktestRequest");
+    return unwrap(response, "getBacktestRequest");
   },
 
   async getBacktestResult(runId: string): Promise<BacktestRunResult> {
     const response = await getBacktestResult({ path: { run_id: runId } });
-    return requireData(response.data, "getBacktestResult");
+    return unwrap(response, "getBacktestResult");
   },
 
   async cancelBacktest(runId: string): Promise<BacktestRunState> {
     const response = await cancelBacktest({ path: { run_id: runId } });
-    return requireData(response.data, "cancelBacktest");
+    return unwrap(response, "cancelBacktest");
   },
 
   /** Bounded projection from the same calculation that produces TargetTape/backtest input. */

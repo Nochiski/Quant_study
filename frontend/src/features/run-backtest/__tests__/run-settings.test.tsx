@@ -133,22 +133,54 @@ describe("backtest run settings", () => {
     }
   });
 
-  it("blocks malformed numeric assumptions and an OOS date outside the compiled range", () => {
+  it("blocks only values that cannot be represented by the generated request type", () => {
+    expect(
+      buildBacktestRunOptions(
+        {
+          core: "rust",
+          initialCashKrw: "not-a-number",
+          benchmarkSecurityId: "",
+          annualizationDays: "252.5",
+          oosStart: "2020-12-31",
+        },
+        null,
+      ),
+    ).toEqual({
+      valid: false,
+      options: null,
+      errors: ["initial_cash", "annualization_days", "date_range_unavailable"],
+    });
+  });
+
+  it("forwards typed semantic boundary values for the backend contract to decide", () => {
     expect(
       buildBacktestRunOptions(
         {
           core: "rust",
           initialCashKrw: "0",
           benchmarkSecurityId: "",
-          annualizationDays: "252.5",
+          annualizationDays: "0",
           oosStart: "2020-12-31",
         },
         { start: "2021-01-01", end: "2026-08-31" },
       ),
     ).toEqual({
-      valid: false,
-      options: null,
-      errors: ["initial_cash", "annualization_days", "oos_range"],
+      valid: true,
+      errors: [],
+      options: {
+        core: "rust",
+        initial_cash: 0,
+        benchmark_security_id: null,
+        annualization_days: 0,
+        metric_windows: [
+          {
+            scope: "out_of_sample",
+            start: "2020-12-31",
+            end: "2026-08-31",
+            label: "OOS 2020-12-31",
+          },
+        ],
+      },
     });
   });
 
@@ -169,10 +201,9 @@ describe("backtest run settings", () => {
     );
     const cash = screen.getByRole("spinbutton", { name: "초기 자본 (KRW)" });
     await user.clear(cash);
-    await user.type(cash, "0");
 
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "초기 자본은 0보다 큰 숫자여야 합니다.",
+      "초기 자본을 숫자로 입력하세요. 허용 범위는 서버가 검증합니다.",
     );
     expect(screen.getByText("입력 확인")).toBeInTheDocument();
   });
@@ -207,5 +238,78 @@ describe("backtest run actions", () => {
       expect(onReplayed).toHaveBeenCalledWith("run-replayed"),
     );
     expect(replayedRequest).toEqual(acceptedRequest);
+  });
+
+  it("renders a typed cancel 404 without leaking an unhandled rejection", async () => {
+    server.use(
+      http.post(`${API}/api/v1/backtests/:runId/cancel`, () =>
+        HttpResponse.json(
+          {
+            detail: {
+              code: "backtest.run.not_found",
+              message: "run was retired",
+            },
+          },
+          { status: 404 },
+        ),
+      ),
+    );
+    const unhandled = vi.fn();
+    window.addEventListener("unhandledrejection", unhandled);
+    try {
+      renderWithQuery(
+        <BacktestRunActions
+          runId="missing-run"
+          status="running"
+          request={acceptedRequest}
+          onReplayed={vi.fn()}
+        />,
+      );
+      await userEvent
+        .setup()
+        .click(screen.getByRole("button", { name: "실행 취소" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "run was retired",
+      );
+      await waitFor(() => expect(unhandled).not.toHaveBeenCalled());
+    } finally {
+      window.removeEventListener("unhandledrejection", unhandled);
+    }
+  });
+
+  it("keeps navigation unchanged when a rerun fails with a server error", async () => {
+    server.use(
+      http.post(`${API}/api/v1/backtests`, () =>
+        HttpResponse.json(
+          { detail: { code: "server.error", message: "engine unavailable" } },
+          { status: 500 },
+        ),
+      ),
+    );
+    const onReplayed = vi.fn();
+    const unhandled = vi.fn();
+    window.addEventListener("unhandledrejection", unhandled);
+    try {
+      renderWithQuery(
+        <BacktestRunActions
+          runId="failed-run"
+          status="failed"
+          request={acceptedRequest}
+          onReplayed={onReplayed}
+        />,
+      );
+      await userEvent
+        .setup()
+        .click(screen.getByRole("button", { name: "동일 설정 재실행" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "engine unavailable",
+      );
+      expect(onReplayed).not.toHaveBeenCalled();
+      await waitFor(() => expect(unhandled).not.toHaveBeenCalled());
+    } finally {
+      window.removeEventListener("unhandledrejection", unhandled);
+    }
   });
 });

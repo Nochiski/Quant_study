@@ -14,10 +14,7 @@ export type BacktestRunSettingsFields = {
 };
 
 export type BacktestRunSettingsError =
-  | "initial_cash"
-  | "annualization_days"
-  | "oos_range"
-  | "date_range_unavailable";
+  "initial_cash" | "annualization_days" | "date_range_unavailable";
 
 export type BacktestRunOptions = Omit<
   BacktestRunSpec,
@@ -40,8 +37,6 @@ export const DEFAULT_BACKTEST_RUN_SETTINGS: BacktestRunSettingsFields = {
   oosStart: "",
 };
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/u;
-
 /**
  * Parse UI representation only. The backend remains the owner of accepted execution semantics,
  * defaults and final validation; successful fields are sent explicitly for a reproducible run.
@@ -51,23 +46,18 @@ export const buildBacktestRunOptions = (
   dateRange: BacktestDateRange | null,
 ): BacktestRunSettingsResult => {
   const errors: BacktestRunSettingsError[] = [];
-  const initialCashKrw = Number(fields.initialCashKrw);
-  if (!Number.isFinite(initialCashKrw) || initialCashKrw <= 0)
+  const initialCashText = fields.initialCashKrw.trim();
+  const initialCashKrw = Number(initialCashText);
+  if (initialCashText === "" || !Number.isFinite(initialCashKrw))
     errors.push("initial_cash");
-  const annualizationDays = Number(fields.annualizationDays);
-  if (!Number.isSafeInteger(annualizationDays) || annualizationDays <= 0)
+  const annualizationText = fields.annualizationDays.trim();
+  const annualizationDays = Number(annualizationText);
+  if (annualizationText === "" || !Number.isInteger(annualizationDays))
     errors.push("annualization_days");
 
   const oosStart = fields.oosStart.trim();
-  if (oosStart !== "") {
-    if (dateRange === null) errors.push("date_range_unavailable");
-    else if (
-      !ISO_DATE.test(oosStart) ||
-      oosStart < dateRange.start ||
-      oosStart > dateRange.end
-    )
-      errors.push("oos_range");
-  }
+  if (oosStart !== "" && dateRange === null)
+    errors.push("date_range_unavailable");
 
   if (errors.length > 0) return { valid: false, options: null, errors };
 

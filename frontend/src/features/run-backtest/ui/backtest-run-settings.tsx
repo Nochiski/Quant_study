@@ -59,7 +59,6 @@ export const BacktestRunSettings = ({
             <span>{t("backtest.settings.initialCash")}</span>
             <input
               inputMode="decimal"
-              min="0.01"
               step="any"
               type="number"
               value={fields.initialCashKrw}
@@ -83,7 +82,6 @@ export const BacktestRunSettings = ({
             <span>{t("backtest.settings.annualizationDays")}</span>
             <input
               inputMode="numeric"
-              min="1"
               step="1"
               type="number"
               value={fields.annualizationDays}
@@ -96,8 +94,6 @@ export const BacktestRunSettings = ({
             <span>{t("backtest.settings.oosStart")}</span>
             <input
               type="date"
-              min={dateRange?.start}
-              max={dateRange?.end}
               value={fields.oosStart}
               onChange={(event) => setField("oosStart", event.target.value)}
             />

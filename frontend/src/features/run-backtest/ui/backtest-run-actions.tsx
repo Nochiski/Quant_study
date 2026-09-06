@@ -4,6 +4,7 @@ import {
   type BacktestRunSpec,
   type BacktestRunState,
 } from "../../../entities/backtest";
+import { ApiRequestError } from "../../../shared/api";
 import { t } from "../../../shared/config";
 import { Button } from "../../../shared/ui";
 import "./backtest-run-actions.css";
@@ -34,11 +35,19 @@ export const BacktestRunActions = ({
   const replay = useStartBacktest();
   const active = ACTIVE.has(status);
 
-  const rerun = async (): Promise<void> => {
+  const rerun = (): void => {
     if (request === undefined) return;
-    const accepted = await replay.mutateAsync(request);
-    onReplayed(accepted.run.run_id);
+    replay.mutate(request, {
+      onSuccess: (accepted) => onReplayed(accepted.run.run_id),
+    });
   };
+  const actionError = cancel.error ?? replay.error;
+  const actionErrorDetail =
+    actionError instanceof ApiRequestError
+      ? (actionError.detail ?? actionError.message)
+      : actionError instanceof Error
+        ? actionError.message
+        : null;
 
   return (
     <div
@@ -51,7 +60,7 @@ export const BacktestRunActions = ({
           size="small"
           tone="danger"
           disabled={cancel.isPending || status === "cancel_requested"}
-          onClick={() => void cancel.mutateAsync(runId)}
+          onClick={() => cancel.mutate(runId)}
         >
           {status === "cancel_requested"
             ? t("backtest.actions.cancelling")
@@ -62,7 +71,7 @@ export const BacktestRunActions = ({
           size="small"
           tone="primary"
           disabled={request === undefined || requestFailed || replay.isPending}
-          onClick={() => void rerun()}
+          onClick={rerun}
         >
           {replay.isPending
             ? t("backtest.actions.replaying")
@@ -70,7 +79,10 @@ export const BacktestRunActions = ({
         </Button>
       )}
       {cancel.isError || replay.isError || requestFailed ? (
-        <span role="alert">{t("backtest.actions.error")}</span>
+        <span role="alert">
+          {t("backtest.actions.error")}
+          {actionErrorDetail === null ? null : `: ${actionErrorDetail}`}
+        </span>
       ) : null}
     </div>
   );

@@ -6,7 +6,7 @@ current_phase: complete
 current_pr: none
 active_prs: []
 parallel_window: []
-last_updated: 2026-09-06T21:24:39+09:00
+last_updated: 2026-09-06T21:31:52+09:00
 planned_prs: 52
 merged_prs: 52
 approved_prs: 52
@@ -28,7 +28,7 @@ progress_percent: 100
 | Active PR | none |
 | Progress | `52 / 52 merged (100%)` |
 | Approved | `52 / 52` |
-| Aggregated at | `2026-09-06 21:24 KST` |
+| Aggregated at | `2026-09-06 21:31 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -364,6 +364,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-06 KST | Codex | 최종 main 전환 검증에서 clean Windows checkout의 CRLF 때문에 집계 내용이 동일해도 `-Check`가 stale로 오판하는 재현성 결함을 발견했다. 집계기가 입력 문서의 line ending을 보존하도록 단일 owner에서 수정하고 CRLF fixture 회귀를 추가한다 | PLAN generated-block SoT·Windows checkout 재현성·완료 후 검증 |
 | 2026-09-06 KST | Codex | 최종 #78의 base를 merged P6-04 뒤 `main`으로 전환하고 Playwright/visual infrastructure와 P6-06 migration 스택을 merge `cea8902`로 직접 병합했다. P6-05를 MERGED로 전환해 전체 tracker 52/52를 완료했다. 원격 Actions의 billing `steps=[]` 실패와 미충족 CI exit는 그대로 기록한다 | 제품 소유자 local-gate override·실제 merge SHA·전체 delivery 완료·CI 사실성 |
 | 2026-09-06 KST | Codex | #77의 base를 merged P6-03 뒤 `main`으로 전환하고 hardening·dark theme·성능·접근성 스택을 merge `cf091c8`로 직접 병합했다. P6-04를 MERGED로 전환하고 최종 P6-05의 main 재기준 병합을 진행한다 | 제품 소유자 local-gate override·실제 merge SHA·dependency 순서 |
 | 2026-09-06 KST | Codex | #76의 base를 merged P6-09 뒤 `main`으로 전환하고 keyboard workflow·Command Palette 스택을 merge `0747c10`으로 직접 병합했다. P6-03을 MERGED로 전환하고 다음 P6-04의 main 재기준 병합을 진행한다 | 제품 소유자 local-gate override·실제 merge SHA·dependency 순서 |

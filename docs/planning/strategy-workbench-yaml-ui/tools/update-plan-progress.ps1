@@ -13,6 +13,7 @@ if ([string]::IsNullOrWhiteSpace($PlanPath)) {
 $resolvedPlanPath = (Resolve-Path -LiteralPath $PlanPath).Path
 $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $original = [System.IO.File]::ReadAllText($resolvedPlanPath, $utf8NoBom)
+$lineEnding = if ($original.Contains("`r`n")) { "`r`n" } else { "`n" }
 
 $prIdPattern = 'P\d+(?:\.\d+)?-\d{2}'
 $rowPattern = "(?m)^\| \[(?<checked>[ xX])\] \| ``(?<id>$prIdPattern)`` \| (?<title>.*?) \| (?<dependency>.*?) \| ``(?<status>[A-Z_]+)`` \| (?<review>.*?) \|[ \t\r]*$"
@@ -253,7 +254,9 @@ $frontmatterValues = [ordered]@{
 }
 
 foreach ($entry in $frontmatterValues.GetEnumerator()) {
-    $pattern = "(?m)^$([regex]::Escape($entry.Key)):\s*.*$"
+    # Do not consume the carriage return on CRLF checkouts; otherwise replacing an
+    # already-correct field silently creates mixed line endings and makes -Check fail.
+    $pattern = "(?m)^$([regex]::Escape($entry.Key)):[^\r\n]*"
     if (-not [regex]::IsMatch($updated, $pattern)) {
         throw "$($entry.Key) frontmatter field is missing"
     }
@@ -278,7 +281,7 @@ $summaryLines = @(
     "| Aggregated at | ``$displayTimestamp`` |",
     "<!-- PLAN:SUMMARY:END -->"
 )
-$summary = $summaryLines -join "`n"
+$summary = $summaryLines -join $lineEnding
 $summaryPattern = '(?s)<!-- PLAN:SUMMARY:START -->.*?<!-- PLAN:SUMMARY:END -->'
 if (-not [regex]::IsMatch($updated, $summaryPattern)) {
     throw "Summary markers are missing"
@@ -313,7 +316,7 @@ foreach ($phase in $phaseGoals.Keys) {
 
 $phaseLines.Add("| **Total** |  | **$total** | **$merged** | **$progress%** |")
 $phaseLines.Add("<!-- PLAN:PHASES:END -->")
-$phaseSummary = $phaseLines -join "`n"
+$phaseSummary = $phaseLines -join $lineEnding
 $phasePattern = '(?s)<!-- PLAN:PHASES:START -->.*?<!-- PLAN:PHASES:END -->'
 if (-not [regex]::IsMatch($updated, $phasePattern)) {
     throw "Phase summary markers are missing"

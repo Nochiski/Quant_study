@@ -84,6 +84,12 @@ class PlanProgressAggregationTest(unittest.TestCase):
                         re.MULTILINE,
                     ),
                 )
+
+                # A clean Windows checkout contains CRLF throughout. The checker must
+                # not report stale aggregates merely because generated blocks preserve
+                # that repository-level line-ending choice.
+                normalized = plan.read_bytes().replace(b"\r\n", b"\n")
+                plan.write_bytes(normalized.replace(b"\n", b"\r\n"))
                 subprocess.run(
                     [*command, "-Check"],
                     cwd=root,

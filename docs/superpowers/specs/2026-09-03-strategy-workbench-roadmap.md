@@ -2,11 +2,11 @@
 
 > 작성: 2026-09-03
 >
-> 상태: M5 완료 — Single backtest/전문 결과 화면 수직 슬라이스 완결
+> 상태: M5 완료 — YAML-first authoring initiative P6-06 마감 진행 중
 >
 > 체크리스트: 150개 중 77개 완료, 73개 남음
 >
-> 다음 체크: YAML-first initiative Phase 1.5(backtest correctness gate) 완료 후 M6-1 `domain.experiment`
+> 다음 체크: YAML-first initiative 완료 후 M6-1 `domain.experiment`
 > SearchSpec/ParameterSpace/Constraint 추가
 >
 > 진행 중 initiative: YAML-first authoring 전환 — PR 단위 상태는
@@ -23,8 +23,9 @@
 > PIT factor plan과 target tape로 컴파일한 뒤 Persistent Rust Engine으로 실행하며, 모든
 > 후보를 원시 지표·데이터 판본·실험 이력과 함께 비교하는 전문가용 연구 도구.
 >
-> (2026-09-04 개정: Quick Builder/Advanced Graph no-code 편집기는 legacy route로 유지되며
-> 삭제 조건은 [Strategy Authoring Contract ADR](./2026-09-04-strategy-authoring-contract-adr.md) D9.)
+> (2026-09-06 개정: Quick Builder/Advanced Graph는 P6-06에서 제거한다. M6 Parameter Search는
+> StrategySpec/YAML source를 복제하지 않고 YAML route 위에 붙는 후속 milestone이다. 삭제 결정과
+> migration gate는 [Strategy Authoring Contract ADR](./2026-09-04-strategy-authoring-contract-adr.md) D9.)
 
 백엔드와 UX를 별도 단계로 만들지 않는다. 각 마일스톤은 항상
 `domain contract → application/API → 화면 → 사용자 시나리오 테스트`까지 닫는 수직 슬라이스다.
@@ -52,7 +53,6 @@
 Frontend
   YAML/JSON source editor ─ compile ─ StrategySpec ── generated OpenAPI SDK
   JSON/Form/Graph/Diff (read-only projection) ┘       │
-  (legacy Quick/Advanced: migration 기간 별도 route)  │
                                                     ▼
 Backend inbound adapter                         HTTP + SSE
                                                     │
@@ -113,10 +113,10 @@ backend/
 frontend/
 ├─ src/
 │  ├─ app/                        # router/providers/composition
-│  ├─ pages/                      # strategy-builder/results/run-detail
-│  ├─ widgets/                    # factor-canvas/candidate-table/charts
-│  ├─ features/                   # edit-strategy/configure-search/run-backtest/...
-│  ├─ entities/                   # strategy/factor/experiment/metric/dataset
+│  ├─ pages/                      # strategy new/revision/history, backtest run/history
+│  ├─ widgets/                    # app shell, Strategy IDE
+│  ├─ features/                   # edit-strategy/debug-strategy/...
+│  ├─ entities/                   # strategy/factor/backtest/metric/dataset
 │  └─ shared/                     # generated SDK/UI primitive/token/lib
 ├─ e2e/
 └─ README.md
@@ -134,7 +134,7 @@ frontend/
 | Equity 조회 의미 | `EquityDataPort` | port version | mock/DuckDB adapter |
 | raw PIT 관측(원천 필드·공개일·멤버십·섹터) | `RawObservationPort` (`application/portfolio_design`) | port version | mock/DuckDB adapter |
 | 팩터 식·방향·단위·입력·결측 정책 | Factor Registry | `factor_id@version` | catalog, compiler, UI |
-| 전략 의미 | immutable `StrategySpec` revision | schema version + canonical hash | source editor, projection view, compiler (legacy editor는 migration 기간) |
+| 전략 의미 | immutable `StrategySpec` revision | schema version + canonical hash | YAML/JSON source editor, projection view, compiler |
 | 탐색 공간 | `SearchSpec` | schema version + hash | planner/optimizer |
 | 해소된 한 후보 | `ResolvedStrategySpec` | base hash + params hash | factor compiler |
 | 세션별 목표 비중 | `TargetTape` derived artifact | input fingerprint | engine adapter |
@@ -209,9 +209,9 @@ DAG cycle, unit mismatch, division risk, insufficient history, unavailable datas
 issue로 반환한다. UI는 그 issue를 node와 field에 연결해 보여준다.
 
 v1 authoring은 canonical field name과 raw value를 그대로 쓰는 verbose YAML/JSON source다. Form과
-Graph는 현재 valid spec을 읽는 projection이며 새 편집 모델이 아니다. legacy Quick Builder는 허용된
-subgraph를 form으로, Advanced Graph는 전체 DAG를 편집하지만 migration 기간에만 유지된다
-(ADR D2, D5, D9).
+Graph는 현재 valid spec을 읽는 projection이며 새 편집 모델이 아니다. 과거 Quick Builder와
+Advanced Graph는 P6-06 migration gate 통과 후 제거됐고, 기존 URL은 YAML 신규 문서 route로
+이동한다(ADR D2, D5, D9).
 
 ### 7.2 SearchSpec과 trial identity
 
@@ -685,4 +685,5 @@ authoring 방식을 verbose YAML/JSON source로 전환했다. 이 initiative의 
 - M8 항목 중 revision history/diff, autosave/recovery, revision conflict, keyboard navigation은
   initiative P1-08, P3-06, P3-07, P4-08, P6-02, P6-03이 먼저 제공하며, 해당 PR merge 시 M8
   체크박스를 갱신한다. custom formula editor(표현식 DSL)는 initiative v1 non-goal이며 M8에 남는다.
-- Quick/Advanced 편집기 삭제는 ADR D9 조건이 모두 충족될 때만 initiative P6-06에서 수행한다.
+- Quick/Advanced 편집기는 ADR D9의 P6-06 migration gate와 실제 browser E2E를 통과한 뒤 제거했다.
+  M6 Parameter Search는 YAML route 위의 후속 feature이며 legacy editor 제거의 선행 조건이 아니다.

@@ -1,10 +1,12 @@
 import {
   BacktestRunDetail,
+  useBacktestRequest,
   useBacktestResult,
   useBacktestStatus,
 } from "../../../entities/backtest";
+import { BacktestRunActions } from "../../../features/run-backtest";
 import { t } from "../../../shared/config";
-import { useParams } from "../../../shared/lib/router";
+import { useNavigate, useParams } from "../../../shared/lib/router";
 import { Badge } from "../../../shared/ui";
 
 const TONE = {
@@ -19,7 +21,9 @@ const TONE = {
 /** Backtest run entry: live status while running, the full result once completed. */
 export const BacktestRunPage = () => {
   const { runId } = useParams({ from: "/research/backtests/$runId" });
+  const navigate = useNavigate();
   const status = useBacktestStatus(runId);
+  const request = useBacktestRequest(runId);
   const completed = status.data?.status === "completed";
   const result = useBacktestResult(runId, completed);
 
@@ -39,9 +43,27 @@ export const BacktestRunPage = () => {
       <header className="page-header">
         <h1>{t("page.backtest.title")}</h1>
         <code>{state.run_id}</code>
-        <Badge tone={TONE[state.status]}>{state.status}</Badge>
+        <span role="status" aria-label={t("page.backtest.status")}>
+          <Badge tone={TONE[state.status]}>{state.status}</Badge>
+        </span>
+        <BacktestRunActions
+          runId={runId}
+          status={state.status}
+          request={request.data}
+          requestFailed={request.isError}
+          onReplayed={(nextRunId) =>
+            void navigate({
+              to: "/research/backtests/$runId",
+              params: { runId: nextRunId },
+            })
+          }
+        />
       </header>
-      <p className="page-state">
+      <p
+        className="page-state"
+        role="status"
+        aria-label={t("page.backtest.progress")}
+      >
         {state.stage} · {Math.round(state.progress * 100)}% · {state.message}
       </p>
       {completed && result.isPending ? (

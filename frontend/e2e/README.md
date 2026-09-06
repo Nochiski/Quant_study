@@ -21,8 +21,10 @@ npm run test:e2e:report
 ```
 
 This layer owns browser process, server lifecycle, viewport/theme matrix, screenshots and failure
-artifacts. Workflow scenarios and product assertions belong to P6-06; backend contract meaning
-continues to be owned by the backend and its generated client.
+artifacts. The four visual projects collect only `workbench.infrastructure.spec.ts`; the single
+1440px light project collects `workbench.workflow.spec.ts` so stateful create/revision/backtest
+scenarios execute once against the isolated real backend. Backend contract meaning continues to be
+owned by the backend and its generated client.
 
 The npm test/update commands atomically create a unique random directory under the operating
 system temp root, pass its SQLite path only to the backend process, and delete the whole directory

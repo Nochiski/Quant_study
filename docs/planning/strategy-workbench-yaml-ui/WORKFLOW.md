@@ -94,8 +94,11 @@ parameters: []
 - 전략 정의의 primary authoring은 YAML/JSON이다.
 - parameter search와 실험 실행은 source를 다시 편집하지 않고 UI에서 수행할 수 있어야 한다.
 - Form/Graph v1은 projection이며 새로운 편집 SoT가 아니다.
-- Quick/Advanced UI는 P0-01에서 deprecation 정책을 명시하고, migration acceptance가 끝나기 전에는 삭제하지 않는다.
-- P0-01은 roadmap M6~M10의 순서와 완료 정의, `strategy-workbench-sot.md`, `frontend-testing.md`, README를 함께 갱신한다. i18n 문구는 legacy 편집기가 기본 화면인 동안 유지하고 P3-05 cutover에서 ko/en을 갱신한다.
+- Quick/Advanced UI는 P6-06 migration gate를 통과시켜 제거한다. `/legacy/builder`는 YAML 신규 문서로
+  보내는 bookmark 호환 redirect만 유지한다.
+- P0-01과 P6-06 개정은 roadmap M6~M10의 순서와 완료 정의, `strategy-workbench-sot.md`,
+  `frontend-testing.md`, README를 함께 갱신한다. Parameter Search는 YAML route의 후속 기능이며
+  legacy editor 유지 조건이 아니다.
 - 상위 제품 milestone의 SoT는 기존 roadmap이다. 이 문서와 `PLAN.md`는 본 initiative의 구현 범위와 PR 상태만 소유하며, roadmap은 상세 체크리스트를 복제하지 않고 `PLAN.md`를 링크한다.
 
 ### 2.4 Revision 저장 단위
@@ -574,9 +577,9 @@ P0-04에서 선택한 router와 route composition을 구현한다.
 ```
 
 - 운영 route는 항상 등록하되 실제 기능 전까지 feature flag가 꺼져 있으면 `beforeLoad`에서 not-found로 처리한다.
-- 기존 진입 URL: query 없는 `/`는 `/research/strategies/new`로, `/?step=`·`/?run`은 query를 유지한 채
-  `/legacy/builder`로 redirect한다 (router ADR D2). P6-06 legacy 제거 후에는 `/legacy/builder`도
-  `/research/strategies/new`로 redirect한다.
+- 기존 진입 URL: `/`와 `/?step=`·`/?run`, `/legacy/builder`는 query를 버리고
+  `/research/strategies/new`로 replace redirect한다. 과거 query를 새 문서 선택 상태로 오해하지 않는다
+  (router ADR D2의 P6-06 migration 상태).
 - dirty navigation blocker는 pathname이 바뀌는 이동만 차단하고 search-only 변경(view/path/date 선택)은
   차단하지 않는다 (router ADR D3).
 - app은 router/provider만 소유하고 page는 FSD public API를 사용한다.
@@ -626,7 +629,7 @@ Acceptance:
 Phase 2 종료 기준:
 
 - 새 App Shell에서 전략과 백테스트 route를 직접 열 수 있다.
-- legacy editor는 아직 별도 route에서 사용할 수 있다.
+- 이 Phase 종료 당시에는 legacy editor를 별도 route에서 사용할 수 있었다. 최종 제거는 P6-06이 소유한다.
 
 ---
 
@@ -955,9 +958,13 @@ Phase 5 종료 기준:
 - revision conflict
 - factor trace와 exclusion/risk constraint
 - backtest start/result 연결
-- revision diff
+- strategy/backtest history와 revision diff
+- `source=None` legacy revision을 generated YAML로 열고 의미 변경 없는 저장 후 같은 `spec_hash` 유지
 
-위 시나리오가 통과한 뒤 P0-01에서 승인한 YAML-first 전환과 migration acceptance를 확인한다. Quick/Advanced editor 삭제는 roadmap·규칙 갱신과 사용자 migration 조건이 모두 충족된 경우에만 별도 cleanup commit으로 수행한다. 조건이 충족되지 않으면 legacy route를 유지하고 제거 작업은 별도 initiative로 넘긴다.
+2026-09-06 제품 결정은 ADR D9의 M6 선행 조건을 폐기했다. 위 시나리오와 문서·규칙·i18n 정합성을
+통과시킨 뒤 Quick/Advanced component, 전용 navigation/style/query facade를 별도 cleanup commit으로
+제거한다. backend legacy JSON API와 `source=None` revision 호환은 wire migration 경계이므로 유지한다.
+`/legacy/builder`는 화면을 렌더하지 않고 YAML 신규 문서 route로만 redirect한다.
 
 ### P6-07 — Root development entrypoints
 
@@ -989,7 +996,7 @@ Acceptance:
 Phase 6 종료 기준:
 
 - latest main에서 backend/frontend CI와 browser E2E가 모두 통과한다.
-- legacy route 없이 전체 핵심 사용자 흐름이 가능하다.
+- legacy editor 없이 전체 핵심 사용자 흐름이 가능하고 과거 URL은 YAML route로 안전하게 이관된다.
 
 ---
 

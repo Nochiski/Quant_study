@@ -1,4 +1,20 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { getHealth } from "../src/shared/api/generated";
+import { createClient } from "../src/shared/api/generated/client";
+
+const ownDirectory = dirname(fileURLToPath(import.meta.url));
+const GOLDEN = readFileSync(
+  resolve(
+    ownDirectory,
+    "../../backend/tests/fixtures/strategy_documents/quality_momentum.yaml",
+  ),
+  "utf8",
+);
+const apiClient = createClient({ baseUrl: "http://localhost:8000" });
 
 const EDITOR_CHUNK = /\/assets\/code-editor-view-[^/]+\.js(?:\?.*)?$/u;
 const FONT_ASSETS = {
@@ -122,13 +138,24 @@ const openWorkbench = async (page: Page) => {
   };
 };
 
+const expectWithinViewport = async (
+  locator: Locator,
+  viewport: { width: number; height: number },
+) => {
+  const box = await locator.boundingBox();
+  expect(box).not.toBeNull();
+  if (box === null) return;
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
+  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
+};
+
 test("direct entry loads the lazy worker-free editor from the real backend", async ({
   page,
-  request,
 }) => {
-  const health = await request.get("http://localhost:8000/api/v1/health");
-  expect(health.ok()).toBe(true);
-  await expect(health.json()).resolves.toEqual({ status: "ok" });
+  const health = await getHealth({ client: apiClient });
+  expect(health.data).toEqual({ status: "ok" });
 
   const observed = await openWorkbench(page);
   expect(observed.editorChunks[0]).toMatch(EDITOR_CHUNK);
@@ -163,4 +190,51 @@ test("matches the professional workbench viewport and theme baseline", async ({
   await page.mouse.move(0, 0);
 
   await expect(page).toHaveScreenshot("strategy-workbench.png");
+});
+
+test("keeps a real debugger trace legible and inside the viewport", async ({
+  page,
+}) => {
+  await openWorkbench(page);
+  await page.getByRole("textbox", { name: "편집기" }).fill(GOLDEN);
+  await expect(page.getByRole("status", { name: "문서 상태" })).toContainText(
+    "검증 통과",
+  );
+  const resizeDebugger = page.getByRole("separator", {
+    name: "중간 결과 크기 조절",
+  });
+  await resizeDebugger.focus();
+  await resizeDebugger.press("End");
+  await page
+    .getByRole("textbox", { name: "종목 ID", exact: true })
+    .fill("sec-005930-1, sec-000660-1");
+  await page
+    .getByRole("combobox", { name: "노드", exact: true })
+    .selectOption("mom_252");
+  await page.getByRole("button", { name: "추적 실행" }).click();
+  const debuggerPanel = page.getByRole("region", { name: "중간 결과" });
+  const provenance = debuggerPanel.getByLabel("추적 재현 정보");
+  await expect(provenance).toContainText("mock-equity-v0.2-20260903", {
+    timeout: 60_000,
+  });
+  await debuggerPanel.scrollIntoViewIfNeeded();
+
+  const viewport = page.viewportSize();
+  expect(viewport).not.toBeNull();
+  if (viewport === null) return;
+  await expectWithinViewport(debuggerPanel, viewport);
+  await expectWithinViewport(
+    debuggerPanel.getByRole("form", { name: "전략 추적 범위" }),
+    viewport,
+  );
+  await expectWithinViewport(
+    debuggerPanel.getByRole("tablist", { name: "추적 결과" }),
+    viewport,
+  );
+  await expectWithinViewport(
+    debuggerPanel.getByRole("tabpanel", { name: "연결 추적" }),
+    viewport,
+  );
+  await page.mouse.move(0, 0);
+  await expect(debuggerPanel).toHaveScreenshot("strategy-debugger.png");
 });

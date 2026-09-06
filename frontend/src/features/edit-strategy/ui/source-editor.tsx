@@ -121,7 +121,11 @@ export const SourceEditor = ({
 
   return (
     <div className="source-editor">
-      <div className="source-editor__status">
+      <div
+        className="source-editor__status"
+        role="status"
+        aria-label={t("document.status")}
+      >
         <Badge tone={PHASE_TONE[state.phase]}>
           {t(`document.phase.${state.phase}`)}
         </Badge>

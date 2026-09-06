@@ -88,19 +88,6 @@ export const AppShell = ({ operationsEnabled, children }: AppShellProps) => {
               )}
             </li>
           ))}
-          <li>
-            <Link
-              to="/legacy/builder"
-              search={{}}
-              className="app-shell__link app-shell__link--secondary"
-              activeProps={{ "aria-current": "page" }}
-            >
-              <span className="app-shell__icon" aria-hidden="true">
-                ⌂
-              </span>
-              <span className="app-shell__label">{t("nav.legacyBuilder")}</span>
-            </Link>
-          </li>
         </ul>
         <p className="app-shell__group" id={operationsId}>
           <span className="app-shell__label">

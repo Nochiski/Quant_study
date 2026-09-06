@@ -19,6 +19,7 @@ const browserProject = (
   colorScheme: "light" | "dark",
 ) => ({
   name: `chromium-${width}-${colorScheme}`,
+  testMatch: /workbench\.infrastructure\.spec\.ts/u,
   use: {
     browserName: "chromium" as const,
     viewport: { width, height },
@@ -82,5 +83,14 @@ export default defineConfig({
     browserProject(1440, 900, "dark"),
     browserProject(1920, 1080, "light"),
     browserProject(1920, 1080, "dark"),
+    {
+      name: "chromium-workflow",
+      testMatch: /workbench\.workflow\.spec\.ts/u,
+      use: {
+        browserName: "chromium" as const,
+        viewport: { width: 1440, height: 900 },
+        colorScheme: "light" as const,
+      },
+    },
   ],
 });

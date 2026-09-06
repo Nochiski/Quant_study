@@ -54,12 +54,32 @@ def test_run_by_saved_revision_records_the_exact_revision_in_the_manifest() -> N
         "expected_spec_hash": document["spec_hash"],
     }
 
-    accepted = client.post(
-        "/api/v1/backtests", json={"strategy_source": reference, "core": "python"}
-    )
+    requested = {
+        "strategy_source": reference,
+        "core": "python",
+        "initial_cash": 123_456_789,
+        "benchmark_security_id": "sec-benchmark",
+        "annualization_days": 260,
+        "metric_windows": [
+            {
+                "scope": "out_of_sample",
+                "start": "2025-01-02",
+                "end": document["spec"]["data"]["end"],
+                "label": "OOS 2025-01-02",
+            }
+        ],
+    }
+    accepted = client.post("/api/v1/backtests", json=requested)
     assert accepted.status_code == 202, accepted.text
     run_id = accepted.json()["run"]["run_id"]
+    accepted_request = client.get(f"/api/v1/backtests/{run_id}/request")
+    assert accepted_request.status_code == 200
+    assert accepted_request.json() == {**requested, "strategy": None}
+
+    replayed = client.post("/api/v1/backtests", json=accepted_request.json())
+    assert replayed.status_code == 202, replayed.text
     assert _wait(client, run_id)["status"] == "completed"
+    assert _wait(client, replayed.json()["run"]["run_id"])["status"] == "completed"
 
     manifest = client.get(f"/api/v1/backtests/{run_id}/result").json()["manifest"]
     assert manifest["strategy_provenance"] == {

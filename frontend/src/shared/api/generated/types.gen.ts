@@ -5,6 +5,27 @@ export type ClientOptions = {
 };
 
 /**
+ * BacktestResultNotReadyDetail
+ */
+export type BacktestResultNotReadyDetail = {
+  /**
+   * Code
+   */
+  code: "backtest.result.not_ready";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * BacktestResultNotReadyResponse
+ */
+export type BacktestResultNotReadyResponse = {
+  detail: BacktestResultNotReadyDetail;
+};
+
+/**
  * BacktestRunInvalidDetail
  */
 export type BacktestRunInvalidDetail = {
@@ -16,6 +37,27 @@ export type BacktestRunInvalidDetail = {
    * Message
    */
   message: string;
+};
+
+/**
+ * BacktestRunNotFoundDetail
+ */
+export type BacktestRunNotFoundDetail = {
+  /**
+   * Code
+   */
+  code: "backtest.run.not_found";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * BacktestRunNotFoundResponse
+ */
+export type BacktestRunNotFoundResponse = {
+  detail: BacktestRunNotFoundDetail;
 };
 
 /**
@@ -4264,6 +4306,10 @@ export type GetBacktestStatusData = {
 
 export type GetBacktestStatusErrors = {
   /**
+   * The process-lifetime backtest run does not exist
+   */
+  404: BacktestRunNotFoundResponse;
+  /**
    * Validation Error
    */
   422: HttpValidationError;
@@ -4295,6 +4341,10 @@ export type CancelBacktestData = {
 };
 
 export type CancelBacktestErrors = {
+  /**
+   * The process-lifetime backtest run does not exist
+   */
+  404: BacktestRunNotFoundResponse;
   /**
    * Validation Error
    */
@@ -4333,6 +4383,10 @@ export type StreamBacktestEventsData = {
 
 export type StreamBacktestEventsErrors = {
   /**
+   * The process-lifetime backtest run does not exist
+   */
+  404: BacktestRunNotFoundResponse;
+  /**
    * Validation Error
    */
   422: HttpValidationError;
@@ -4348,6 +4402,42 @@ export type StreamBacktestEventsResponses = {
   200: unknown;
 };
 
+export type GetBacktestRequestData = {
+  body?: never;
+  path: {
+    /**
+     * Run Id
+     */
+    run_id: string;
+  };
+  query?: never;
+  url: "/api/v1/backtests/{run_id}/request";
+};
+
+export type GetBacktestRequestErrors = {
+  /**
+   * The process-lifetime backtest run does not exist
+   */
+  404: BacktestRunNotFoundResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetBacktestRequestError =
+  GetBacktestRequestErrors[keyof GetBacktestRequestErrors];
+
+export type GetBacktestRequestResponses = {
+  /**
+   * Successful Response
+   */
+  200: BacktestRunSpec;
+};
+
+export type GetBacktestRequestResponse =
+  GetBacktestRequestResponses[keyof GetBacktestRequestResponses];
+
 export type GetBacktestResultData = {
   body?: never;
   path: {
@@ -4361,6 +4451,14 @@ export type GetBacktestResultData = {
 };
 
 export type GetBacktestResultErrors = {
+  /**
+   * The process-lifetime backtest run does not exist
+   */
+  404: BacktestRunNotFoundResponse;
+  /**
+   * The run has not completed with a result
+   */
+  409: BacktestResultNotReadyResponse;
   /**
    * Validation Error
    */

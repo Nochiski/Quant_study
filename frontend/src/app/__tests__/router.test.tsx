@@ -265,6 +265,17 @@ const server = setupServer(
       updated_at: "2026-09-04T00:00:01Z",
     }),
   ),
+  http.get(`${API}/api/v1/backtests/:runId/request`, () =>
+    HttpResponse.json({
+      strategy: spec(0, "Rerun fixture"),
+      core: "rust",
+      initial_cash: 100_000_000,
+      benchmark_security_id: "005930",
+      annualization_days: 252,
+      metric_windows: [],
+      strategy_source: null,
+    }),
+  ),
   http.get(`${API}/api/v1/backtests/:runId/result`, () => HttpResponse.error()),
   http.get(`${API}/api/v1/equity/catalog`, () =>
     HttpResponse.json({
@@ -407,14 +418,24 @@ describe("App Shell routes", () => {
     expect(screen.getByRole("tab", { name: "Graph" })).toBeEnabled();
   });
 
-  it("keeps legacy bookmarks on the legacy builder with their query and run id", async () => {
+  it("moves legacy bookmarks to a clean YAML draft route", async () => {
     const history = mount("/?step=portfolio&run=bt-42");
-    await waitFor(() =>
-      expect(history.location.pathname).toBe("/legacy/builder"),
+    await screen.findByRole("heading", { name: "새 전략" });
+    expect(history.location.pathname).toBe("/research/strategies/new");
+    expect(history.location.search).toMatch(/^\?draft=draft-[a-f0-9]{32}$/u);
+    expect(history.location.search).not.toContain("step=");
+    expect(history.location.search).not.toContain("run=");
+    cleanup();
+
+    const legacyHistory = mount("/legacy/builder?step=risk&run=bt-99");
+    await screen.findByRole("heading", { name: "새 전략" });
+    expect(legacyHistory.location.pathname).toBe("/research/strategies/new");
+    expect(legacyHistory.location.search).toMatch(
+      /^\?draft=draft-[a-f0-9]{32}$/u,
     );
-    expect(history.location.search).toContain("step=portfolio");
-    expect(history.location.search).toContain("run=bt-42");
-    expect(screen.getAllByRole("main")).toHaveLength(1);
+    expect(legacyHistory.location.search).not.toContain("step=");
+    expect(legacyHistory.location.search).not.toContain("run=");
+    expect(screen.queryByText("Quick Builder")).not.toBeInTheDocument();
   });
 
   it("shows loading inside the shell and a localised error with a way back on 500", async () => {

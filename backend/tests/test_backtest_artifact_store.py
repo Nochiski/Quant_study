@@ -108,6 +108,10 @@ def test_local_artifact_store_commits_atomically_and_preserves_null_vs_zero(tmp_
     with pytest.raises(FileExistsError):
         store.commit(_result())
 
+    store.discard("run-safe-001")
+    assert not result_path.parent.exists()
+    store.discard("run-safe-001")
+
 
 def test_local_artifact_store_rejects_run_ids_that_escape_the_root(tmp_path) -> None:
     result = _result()
@@ -126,3 +130,6 @@ def test_local_artifact_store_rejects_run_ids_that_escape_the_root(tmp_path) -> 
 
     with pytest.raises(ValueError, match="escapes artifact root"):
         LocalArtifactStore(tmp_path).commit(escaped)
+
+    with pytest.raises(ValueError, match="escapes artifact root"):
+        LocalArtifactStore(tmp_path).discard("../outside")

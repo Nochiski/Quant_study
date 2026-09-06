@@ -73,6 +73,7 @@ class BacktestRunSummary:
 @dataclass
 class _RunRecord:
     state: BacktestRunState
+    request: BacktestRunSpec
     provenance: StrategyProvenance
     accepted_sequence: int
     events: list[RunProgressEvent]
@@ -150,6 +151,7 @@ class BacktestRunService:
         with self._lock:
             record = _RunRecord(
                 state=state,
+                request=request,
                 provenance=provenance,
                 accepted_sequence=self._next_accepted_sequence,
                 events=[],
@@ -169,6 +171,17 @@ class BacktestRunService:
     def state(self, run_id: str) -> BacktestRunState:
         with self._lock:
             return self._record(run_id).state
+
+    def request(self, run_id: str) -> BacktestRunSpec:
+        """Return the normalized request accepted for an in-process run.
+
+        The unresolved request carries exactly one strategy source and is therefore safe to
+        submit again. The resolved execution spec intentionally remains an internal detail until
+        it is committed to the immutable result manifest.
+        """
+
+        with self._lock:
+            return self._record(run_id).request
 
     def list_runs(
         self,
@@ -331,20 +344,31 @@ class BacktestRunService:
             self._raise_if_cancelled(record)
             self._update(record, RunStatus.RUNNING, 0.93, "artifact", "Committing artifacts")
             commit = self._artifact_store.commit(result)
+            cancelled_after_commit = False
             with self._lock:
-                record.result = result
-                record.state = replace(
-                    record.state,
-                    artifact_uri=commit.uri,
-                    artifact_sha256=commit.sha256,
-                )
-                self._emit(
-                    record,
-                    RunStatus.COMPLETED,
-                    1.0,
-                    "completed",
-                    "Run completed",
-                )
+                # Completion and cancel acceptance linearize on the same lock. If cancel acquired
+                # it first, the committed bundle is compensation-cleaned and never becomes
+                # observable through state/result. If completion acquired it first, cancel sees a
+                # terminal run and is not accepted.
+                if record.cancellation.is_set():
+                    cancelled_after_commit = True
+                else:
+                    record.result = result
+                    record.state = replace(
+                        record.state,
+                        artifact_uri=commit.uri,
+                        artifact_sha256=commit.sha256,
+                    )
+                    self._emit(
+                        record,
+                        RunStatus.COMPLETED,
+                        1.0,
+                        "completed",
+                        "Run completed",
+                    )
+            if cancelled_after_commit:
+                self._artifact_store.discard(run_id)
+                raise RunCancelledError("run cancelled during artifact commit")
         except RunCancelledError:
             self._update(
                 record, RunStatus.CANCELLED, record.state.progress, "cancelled", "Run cancelled"

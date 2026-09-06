@@ -27,6 +27,11 @@ import {
 
 import { backtestHistoryQuery } from "../../entities/backtest";
 import { strategiesQuery } from "../../entities/strategy";
+import {
+  strategyWorkbenchApi,
+  type StrategyTraceRequest,
+  type StrategyTraceResponse,
+} from "../../shared/api";
 import { readBackendFixture } from "../../shared/testing/backend-fixtures";
 import { t } from "../../shared/config";
 import { App } from "../app";
@@ -267,6 +272,9 @@ const server = setupServer(
     started.push((await request.json()) as Record<string, unknown>);
     return HttpResponse.json(acceptedRun(), { status: 202 });
   }),
+  http.get(`${API}/api/v1/backtests/:runId/request`, () =>
+    HttpResponse.json(started.at(-1) ?? {}),
+  ),
   http.get(`${API}/api/v1/backtests/:runId`, ({ params }) =>
     HttpResponse.json({
       run_id: params.runId,
@@ -442,9 +450,9 @@ const saveButton = () =>
     { name: "리비전 저장" },
   );
 
-const legacyLink = () =>
+const leaveLink = () =>
   globalThis.document.querySelector<HTMLAnchorElement>(
-    'a[href="/legacy/builder"]',
+    'a[href="/research/backtests"]',
   )!;
 
 const WORKFLOW_ROUTES = [
@@ -1192,20 +1200,20 @@ describe("document routes (P2-04)", () => {
     const history = mount("/research/strategies/new");
     const view = await editor();
     replaceText(view, "title: 임시\n");
-    await user.click(screen.getByRole("link", { name: "기존 편집기" }));
+    await user.click(screen.getByRole("link", { name: "백테스트" }));
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog).toHaveTextContent("저장하지 않은 변경이 있습니다");
     await user.click(within(dialog).getByRole("button", { name: "머무르기" }));
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     expect(history.location.pathname).toBe("/research/strategies/new");
-    await user.click(screen.getByRole("link", { name: "기존 편집기" }));
+    await user.click(screen.getByRole("link", { name: "백테스트" }));
     await user.click(
       within(await screen.findByRole("alertdialog")).getByRole("button", {
         name: "나가기",
       }),
     );
     await waitFor(() =>
-      expect(history.location.pathname).toBe("/legacy/builder"),
+      expect(history.location.pathname).toBe("/research/backtests"),
     );
   });
 
@@ -1219,7 +1227,7 @@ describe("document routes (P2-04)", () => {
     await waitFor(() => expect(history.location.search).toContain("view=json"));
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
 
-    await user.click(legacyLink());
+    await user.click(leaveLink());
     const dialog = await screen.findByRole("alertdialog");
     expect(globalThis.document.activeElement).toBe(
       within(dialog).getAllByRole("button")[0],
@@ -1238,7 +1246,7 @@ describe("document routes (P2-04)", () => {
       "/research/strategies/s1/revisions/2",
     );
     await waitFor(() =>
-      expect(globalThis.document.activeElement).toBe(legacyLink()),
+      expect(globalThis.document.activeElement).toBe(leaveLink()),
     );
   });
 
@@ -1652,6 +1660,46 @@ describe("FactorGraph read-only projection (P4-07)", () => {
     }),
   ];
 
+  const completedTrace = (
+    request: StrategyTraceRequest,
+  ): StrategyTraceResponse => ({
+    spec_hash: "7".repeat(64),
+    snapshot_id: "snap",
+    registry_version: "v1",
+    plan_hash: "p".repeat(64),
+    factor_id: request.factor_id,
+    as_of: request.as_of ?? "2026-08-31",
+    provenance: {
+      kind: "saved_revision",
+      schema_version: "1.0",
+      spec_hash: "7".repeat(64),
+      source_hash: "b".repeat(64),
+      strategy_id: "s1",
+      revision: 2,
+    },
+    raw: [],
+    raw_truncated: false,
+    warnings: [],
+    trace: {
+      rows: (request.node_ids ?? []).flatMap((nodeId) =>
+        request.security_ids.map((securityId) => ({
+          node_id: nodeId,
+          operation: nodeId === "close" ? "field" : "time_series.momentum",
+          as_of: request.as_of ?? "2026-08-31",
+          security_id: securityId,
+          value: nodeId === "close" ? 10 : 0.2,
+          status: "ok",
+          inputs: nodeId === "close" ? [] : [{ node_id: "close", value: 10 }],
+        })),
+      ),
+      offset: request.offset ?? 0,
+      limit: request.limit ?? 200,
+      returned: (request.node_ids ?? []).length * request.security_ids.length,
+      has_more: false,
+    },
+    target: null,
+  });
+
   it.each(["/research/strategies/new", "/research/strategies/s1/revisions/2"])(
     "renders the same backend-owned DAG on %s",
     async (route) => {
@@ -2034,6 +2082,88 @@ describe("FactorGraph read-only projection (P4-07)", () => {
       ),
     );
   }, 15_000);
+
+  it.each(["resolve", "reject", "abort"] as const)(
+    "keeps a newer Diff URL generation after a deferred trace %s",
+    async (outcome) => {
+      const specHash = "7".repeat(64);
+      server.use(
+        ...graphHandlers(),
+        http.get(
+          `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
+          () =>
+            HttpResponse.json({
+              ...document("s1", 2, GRAPH_SOURCE, "그래프 전략"),
+              spec: graphSpec("s1", 2),
+              spec_hash: specHash,
+            }),
+        ),
+      );
+      let request: StrategyTraceRequest | undefined;
+      let requestSignal: AbortSignal | undefined;
+      let resolveTrace: ((response: StrategyTraceResponse) => void) | undefined;
+      let rejectTrace: ((reason?: unknown) => void) | undefined;
+      vi.spyOn(strategyWorkbenchApi, "traceStrategy").mockImplementation(
+        (nextRequest, signal) => {
+          request = nextRequest;
+          requestSignal = signal;
+          return new Promise((resolve, reject) => {
+            resolveTrace = resolve;
+            rejectTrace = reject;
+            signal?.addEventListener("abort", () =>
+              reject(new DOMException("aborted", "AbortError")),
+            );
+          });
+        },
+      );
+      const nodePath = "/factors/factors/0/graph/nodes/1";
+      const history = mount(
+        `/research/strategies/s1/revisions/2?asOf=2026-08-31&security=sec-r&path=${encodeURIComponent(nodePath)}`,
+      );
+      const user = userEvent.setup();
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "추적 실행" })).toBeEnabled(),
+      );
+      await user.click(screen.getByRole("button", { name: "추적 실행" }));
+      await waitFor(() => expect(request).toBeDefined());
+
+      await user.click(screen.getByRole("tab", { name: "Diff" }));
+      await screen.findByLabelText("StrategySpec Diff");
+      await waitFor(() =>
+        expect(new URLSearchParams(history.location.search).get("view")).toBe(
+          "diff",
+        ),
+      );
+
+      if (outcome === "resolve") {
+        await act(async () => resolveTrace?.(completedTrace(request!)));
+      } else if (outcome === "reject") {
+        await act(async () =>
+          rejectTrace?.(new Error("deferred trace failed")),
+        );
+      } else {
+        await user.click(screen.getByRole("button", { name: "취소" }));
+        await waitFor(() => expect(requestSignal?.aborted).toBe(true));
+      }
+
+      await waitFor(() => {
+        const params = new URLSearchParams(history.location.search);
+        expect(params.get("view")).toBe("diff");
+        expect(params.get("path")).toBe(nodePath);
+        expect(params.get("asOf")).toBe("2026-08-31");
+        expect(params.get("security")).toBe("sec-r");
+      });
+      expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+      expect(screen.getByLabelText("기준일")).toHaveValue("2026-08-31");
+      expect(screen.getByRole("textbox", { name: "종목 ID" })).toHaveValue(
+        "sec-r",
+      );
+    },
+    15_000,
+  );
 });
 
 describe("StrategySpec Diff projection (P4-08)", () => {
@@ -2381,6 +2511,57 @@ describe("StrategySpec Diff projection (P4-08)", () => {
 });
 
 describe("backtest from the editor (P3-05)", () => {
+  it("blocks a lossy integer locally and lets the backend reject a safe negative integer", async () => {
+    server.use(
+      http.post(`${API}/api/v1/backtests`, async ({ request }) => {
+        started.push((await request.json()) as Record<string, unknown>);
+        return HttpResponse.json(
+          {
+            detail: [
+              {
+                type: "greater_than",
+                loc: ["body", "annualization_days"],
+                msg: "Input should be greater than 0",
+                input: -1,
+                ctx: { gt: 0 },
+              },
+            ],
+          },
+          { status: 422 },
+        );
+      }),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2");
+    await editor();
+    const run = screen.getByRole("button", { name: /백테스트 실행/ });
+    await waitFor(() => expect(run).toBeEnabled());
+    await user.click(screen.getByLabelText("실행 설정 열기"));
+    const annualization = screen.getByRole("spinbutton", {
+      name: "연환산 거래일",
+    });
+
+    fireEvent.change(annualization, {
+      target: { value: "9007199254740993" },
+    });
+    await waitFor(() => expect(run).toBeDisabled());
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "정확히 전송 가능한 정수",
+    );
+    expect(started).toHaveLength(0);
+
+    fireEvent.change(annualization, { target: { value: "-1" } });
+    await waitFor(() => expect(run).toBeEnabled());
+    await user.click(run);
+
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]).toMatchObject({ annualization_days: -1 });
+    expect(await screen.findByRole("alert")).toHaveTextContent("status=422");
+    expect(history.location.pathname).toBe(
+      "/research/strategies/s1/revisions/2",
+    );
+  });
+
   it("runs a clean saved revision by reference, retires history, and moves to the run page", async () => {
     const user = userEvent.setup();
     const { history, queryClient } = mountWithClient(
@@ -2417,6 +2598,11 @@ describe("backtest from the editor (P3-05)", () => {
     );
     expect(started).toEqual([
       {
+        core: "rust",
+        initial_cash: 100_000_000,
+        benchmark_security_id: "005930",
+        annualization_days: 252,
+        metric_windows: [],
         strategy_source: {
           kind: "saved_revision",
           strategy_id: "s1",
@@ -2441,6 +2627,11 @@ describe("backtest from the editor (P3-05)", () => {
     await user.click(run);
     await waitFor(() => expect(started).toHaveLength(1));
     expect(started[0]).toEqual({
+      core: "rust",
+      initial_cash: 100_000_000,
+      benchmark_security_id: "005930",
+      annualization_days: 252,
+      metric_windows: [],
       strategy_source: {
         kind: "inline_draft",
         spec: expect.objectContaining({ title: "퀄리티 모멘텀" }),
@@ -2755,7 +2946,7 @@ describe("dirty guard follow-ups (P2-04 review)", () => {
       "aria-selected",
       "true",
     );
-    await user.click(screen.getByRole("link", { name: "기존 편집기" }));
+    await user.click(screen.getByRole("link", { name: "백테스트" }));
     const dialog = await screen.findByRole("alertdialog");
     expect(globalThis.document.activeElement).toBe(
       within(dialog).getByRole("button", { name: "머무르기" }),

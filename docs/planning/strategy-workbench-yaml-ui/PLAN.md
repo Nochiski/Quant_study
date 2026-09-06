@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: yaml-strategy-workbench-ui
-project_status: CHANGES_REQUESTED
+project_status: SELF_CHECK
 current_phase: P6
 current_pr: P6-08,P6-09,P6-03,P6-04,P6-05,P6-06
 active_prs: [P6-03, P6-04, P6-05, P6-06, P6-08, P6-09]
 parallel_window: [P6-08, P6-09, P6-03, P6-04, P6-05, P6-06]
-last_updated: 2026-09-06T17:59:42+09:00
+last_updated: 2026-09-06T19:11:57+09:00
 planned_prs: 52
 merged_prs: 46
 approved_prs: 51
@@ -22,13 +22,13 @@ progress_percent: 88
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `CHANGES_REQUESTED` |
+| Project status | `SELF_CHECK` |
 | Current phase | `P6` |
 | Current/next PR | `P6-08,P6-09,P6-03,P6-04,P6-05,P6-06` |
 | Active PR | `P6-03, P6-04, P6-05, P6-06, P6-08, P6-09` |
 | Progress | `46 / 52 merged (88%)` |
 | Approved | `51 / 52` |
-| Aggregated at | `2026-09-06 17:59 KST` |
+| Aggregated at | `2026-09-06 19:11 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
@@ -79,7 +79,7 @@ progress_percent: 88
 | P3 | YAML Editor MVP | 7 | 7 | `MERGED` |
 | P4 | Outline, Contract, Projections | 10 | 10 | `MERGED` |
 | P5 | Truthful Trace UI | 3 | 3 | `MERGED` |
-| P6 | Professional release and migration | 9 | 3 | `CHANGES_REQUESTED` |
+| P6 | Professional release and migration | 9 | 3 | `SELF_CHECK` |
 | **Total** |  | **52** | **46** | **88%** |
 <!-- PLAN:PHASES:END -->
 
@@ -87,16 +87,16 @@ progress_percent: 88
 
 | 항목 | 값 |
 |---|---|
-| PR | `P6-06` 전체 업무 E2E와 YAML-first migration CHANGES_REQUESTED |
+| PR | `P6-06` 전체 업무 E2E와 YAML-first migration SELF_CHECK |
 | Intent | 실제 FastAPI와 production preview에서 생성·오류 수정·복구·revision·backtest·trace/risk·history/diff를 한 사용자 흐름으로 증명하고 구형 Quick/Advanced 화면을 제거한다 |
 | Acceptance | 전용 single-run Playwright project; golden YAML의 create/edit/validate/save/reload; local/server recovery; 구조 오류 gate와 수정; 실제 409 conflict; trace raw/target/risk/provenance; backtest 완료와 두 history route; revision diff; `source=None` revision의 generated source 재저장 후 동일 `spec_hash`; legacy bookmark redirect; 실행 보고서 |
 | Non-goals | M6 Parameter Search 구현, backend legacy JSON wire API 제거, StrategySpec/compile/hash 의미 변경, live trading 기능 구현, UI 재설계 |
 | Branch/worktree | `feat/p6-06-workflow-migration` (`Quant_study-p6-06`), stacked on P6-05 approval-doc HEAD |
 | Base SHA | `dd9a6ff` (P6-05 approval-doc HEAD; #74→#75→#76→#77→#78 순차 merge 후 base 전환) |
-| Head SHA | `e95ce92` (reviewed HEAD; subsequent delta is review-status evidence) |
-| Diff stat | `dd9a6ff...e9c6ff2` 76 files, +725/-6,469 (대부분 승인된 legacy 삭제; binary PNG 4개 별도) |
-| Focused tests | router/document/debugger 94 passed; 실제 FastAPI+preview workflow와 visual update/strict 각각 11/11 |
-| Full gate | frontend 437·backend 1,118·Rust 13·root 6; typecheck 2종·lint·Ruff·Pyright·build·cargo fmt/clippy·OpenAPI/SDK diff 0; CI billing 해제 후 Windows green 필수 |
+| Head SHA | `2baed08` (P1 3/P2 2 review fix SELF_CHECK HEAD; same reviewer 재검토 전) |
+| Diff stat | `dd9a6ff...2baed08` 105 files, +2,614/-6,552 (대부분 승인된 legacy 삭제·회귀 테스트; binary PNG 8개) |
+| Focused tests | stale debugger owner 22·run control/document review-fix 79; 실제 FastAPI+preview workflow 4/4·viewport/theme infrastructure 12/12·strict 전체 16/16 |
+| Full gate | frontend 444·backend 1,118·Rust 13·root 6; typecheck 2종·ESLint·CI 범위 Ruff·Pyright·build(editor 131.94KiB)·cargo fmt/clippy·OpenAPI/SDK diff 0; CI billing 해제 후 Windows green 필수 |
 
 ---
 
@@ -237,7 +237,7 @@ Phase exit:
 | [ ] | `P6-03` | Keyboard workflow와 Command Palette | P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `APPROVED` | [#76](https://github.com/Nochiski/Quant_study/pull/76) · `review_p6_03` APPROVE, P0/P1/P2 0 · CI billing 차단 |
 | [ ] | `P6-04` | Large/hostile spec 성능·접근성·i18n과 soft dark theme (`$ref`-only cycle fail-closed 포함) | P3-05, P4-01, P4-02, P4-03, P4-04, P4-05, P4-06, P4-07, P4-08, P4-09, P4-10, P5-03 | `APPROVED` | [#77](https://github.com/Nochiski/Quant_study/pull/77) · `review_p6_04` APPROVE, P0/P1/P2 0 · CI billing 차단 |
 | [ ] | `P6-05` | Playwright/visual regression infrastructure와 CI | P2-03, P3-05, P6-04 | `APPROVED` | [#78](https://github.com/Nochiski/Quant_study/pull/78) · `review_p6_05` APPROVE, P0/P1/P2 0 · reviewed `c97708e` · CI billing 차단 |
-| [ ] | `P6-06` | 전체 browser E2E·실구동 시나리오 검증, migration gate, 조건부 legacy cleanup | P6-01, P6-02, P6-03, P6-04, P6-05, P6-08, P6-09 | `CHANGES_REQUESTED` | [#79](https://github.com/Nochiski/Quant_study/pull/79) · `review_p6_06` REQUEST_CHANGES, P1 3/P2 2 |
+| [ ] | `P6-06` | 전체 browser E2E·실구동 시나리오 검증, migration gate, 조건부 legacy cleanup | P6-01, P6-02, P6-03, P6-04, P6-05, P6-08, P6-09 | `SELF_CHECK` | [#79](https://github.com/Nochiski/Quant_study/pull/79) · P1 3/P2 2를 `2baed08`까지 수정, `review_p6_06` 재검토 전 |
 | [x] | `P6-07` | Root frontend/backend development entrypoints | P0-02, P0-03 | `MERGED` | [#56](https://github.com/Nochiski/Quant_study/pull/56) · `review_p6_07` APPROVE |
 | [ ] | `P6-08` | Strategy list와 revision history routed UI | P6-01, P6-02, P3-06, P4-08 | `APPROVED` | [#74](https://github.com/Nochiski/Quant_study/pull/74) · `review_p6_08` APPROVE, P0/P1/P2 0; CI billing 차단 |
 | [ ] | `P6-09` | Backtest run history routed UI와 provenance | P6-08, P3-05 | `APPROVED` | [#75](https://github.com/Nochiski/Quant_study/pull/75) · `review_p6_09` APPROVE, P0/P1/P2 0; CI billing 차단 |
@@ -310,7 +310,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
-| P6-06 | router/document/debugger 94; 실제 FastAPI+production preview workflow/visual update 11/11·strict 11/11 | frontend 437·backend 1,118·Rust 13·root 6; typecheck 2종·ESLint·Ruff·Pyright·build(editor 131.94KiB)·cargo fmt/clippy | OpenAPI/SDK 재생성 후 tracked semantic diff 0 | 새 YAML→local/server 복구→unknown-key pointer/실행 차단→v1~v4·409·diff→두 security trace 5 tabs/risk→Rust backtest completed→두 history; source-less legacy 동일 hash; 4 PNG 직접 확인; root 5173/8000 200, listener/temp runtime 0 | [#79](https://github.com/Nochiski/Quant_study/pull/79) 로컬 전체 PASS; Actions billing/spending-limit 외부 차단, Windows 2025·Node 22.18 green gate 유지 | 2026-09-06 |
+| P6-06 | stale debugger owner 22·run control/document review-fix 79; 실제 FastAPI+production preview workflow 4/4·viewport/theme 12/12·strict 전체 16/16 | frontend 444·backend 1,118·Rust 13·root 6; typecheck 2종·ESLint·CI 범위 Ruff·Pyright·build(editor 131.94KiB)·cargo fmt/clippy | OpenAPI/SDK 재생성 후 tracked diff 0 | byte-exact draft/409→v1~v4 immutable diff→두 security의 실제 PIT/raw/node/target/plan 값→비기본 Rust run manifest→cancel/server-request rerun→두 history·legacy 동일 hash; workbench/debugger PNG 8개 직접 확인; root 5173/8000 200, listener/temp SQLite 0 | [#79](https://github.com/Nochiski/Quant_study/pull/79) review fix 로컬 전체 PASS; Actions billing/spending-limit 외부 차단, same reviewer와 Windows 2025·Node 22.18 green gate 유지 | 2026-09-06 |
 | P6-05 | actual FastAPI+production preview baseline update 8/8·strict 8/8; network-idle 후 lazy 1회·required response/woff2 전체 200·failed request 0; body/editor computed family·loaded faces·missing-face 0 | clean npm ci 400/취약점 0; frontend Vitest 474·main/E2E typecheck·lint·build(editor 131.94KiB); root 6; reviewer backend 1,118·Rust 13; PLAN/diff-check | OpenAPI/SDK 기존 diff 0; backend wire/domain 미변경 | CodeMirror scroller/content/gutter가 mono semantic token을 직접 사용하고 네 PNG를 새 glyph metric으로 재생성·직접 확인. unique temp runtime 성공·timeout 실패·Ctrl+C·반복 실행 후 artifact/listener/process 0 | [#78](https://github.com/Nochiski/Quant_study/pull/78) Windows 2025·Node 22.18 고정; Actions billing/spending-limit 외부 차단, green gate 유지 | 2026-09-06 |
 | P6-04 | author 9 files 117, reviewer 500-node 10/10; fix trace/virtual 21 + reversed mixed-status PLAN fixture 1; 500-node·3,000-line real CodeMirror p95 <16 ms/folding/search; hostile recursive/missing/external `$ref` fail-closed | frontend 474·typecheck·lint·changed-file Prettier·build; backend 1,118·Rust 13·root 6; Ruff·Pyright·cargo fmt/clippy·diff-check | OpenAPI/SDK 재생성 후 semantic diff 0 | root `npm run dev`·`uv run server` 5173/8000 health 200; Chrome 1440×900·1920×1080 light/dark; 실제 Tab이 virtual table/security/node에 진입해 Home/End off-DOM server row와 sentinel을 표시하고 nested outer scroll을 보존 | [#77](https://github.com/Nochiski/Quant_study/pull/77) `review_p6_04` APPROVE P0/P1/P2 0; Actions 4 jobs 모두 step 0 billing/spending-limit 실패, green gate 유지 | 2026-09-06 |
 | P6-03 | final reviewer palette/IDE 2 files 30; 이전 review-fix 4 files 97 + professional route matrix 11 passed | frontend 455·backend 1,118·Rust 13·root 5; typecheck·lint·changed-file Prettier·build·Ruff·Pyright·cargo fmt/clippy | OpenAPI/SDK 재생성 후 tracked content diff 0 | 실제 root backend 42813 health 200·Vite 42814 direct new route 200; current identity/IME/action gate와 함께 narrow drawer 위 palette close-button Escape가 modal 경계에서 소비되고 drawer/focus가 보존됨을 독립 재검증 | [#76](https://github.com/Nochiski/Quant_study/pull/76) `review_p6_03` APPROVE P0/P1/P2 0; Actions billing으로 step 전 실패, green gate 유지 | 2026-09-06 |
@@ -360,6 +360,7 @@ Phase exit:
 
 | 시각 | 변경자 | 변경 내용 | 근거 |
 |---|---|---|---|
+| 2026-09-06 KST | Codex | P6-06 최초 리뷰 P1 3/P2 2를 `2baed08`까지 수정하고 전체 self-check를 완료했다. trace 응답을 route/document generation owner에 귀속해 늦은 resolve·reject·abort가 현재 화면을 덮지 못하게 했고, 서버가 accepted `BacktestRunSpec`을 저장·조회하도록 해 generated 타입의 core/cash/benchmark/annualization/OOS 설정과 cancel/rerun을 YAML/run detail 흐름에 복원했다. E2E는 generated SDK와 접근성 selector만 사용해 byte-exact 409/source, 실제 PIT/raw/node/target/risk/plan 값, 비기본 Rust manifest, immutable v1~v4 diff, 취소·server-owned replay를 판별한다. debugger 포함 PNG 8개를 직접 확인하고 strict 16/16, frontend 444·backend 1,118·Rust 13·root 6, 정적/build/generated·root 5173/8000 smoke와 artifact/listener 0을 통과해 SELF_CHECK로 전환한다 | route/request 소유권·accepted run request/backend trace SoT·authoring/run FSD 책임분리·리뷰 findings 회귀 고정·13.2 author gate |
 | 2026-09-06 KST | Codex | `review_p6_06`이 reviewed HEAD `e95ce92`에서 P1 3/P2 2로 REQUEST_CHANGES했다. deferred trace가 최신 route/document를 덮는 소유권 결함, Rust·PIT·risk·409·immutable diff를 의미 수준에서 판별하지 못하는 migration E2E, legacy cleanup 중 M5 core/cash/benchmark/OOS·cancel/rerun 접근 경로 삭제를 blocking으로 분류했다. generated SDK/accessible selector 경계와 cancel/i18n dead layer도 같은 fix loop에서 폐쇄하고 동일 reviewer에게 재검토받는다 | route/request ownership·실행 결과/trace server SoT·authoring/runner 책임분리·same-reviewer fix loop |
 | 2026-09-06 KST | Codex | P6-06 [#79](https://github.com/Nochiski/Quant_study/pull/79)을 parent `feat/p6-05-browser-infrastructure` 대상으로 열고 author freeze `e9c6ff2`, review diff 76 files +725/-6,469와 실제 workflow·legacy cleanup·SoT 경계·전체 gate를 본문에 고정했다. PR별 fresh review-only agent 정확히 한 명인 `review_p6_06`에게 base/head 전체 diff, 삭제 후 caller/FSD, route migration과 source-less wire 호환, 409·trace·Rust backtest·visual/E2E 검출력을 독립 검토받도록 IN_REVIEW로 전환한다. Actions billing/spending-limit 차단은 merge gate로 유지한다 | 13.3 actual diff freeze·13.4 PR별 reviewer 1명·stack 순차 merge·CI 비우회 |
 | 2026-09-06 KST | Codex | P6-06 author HEAD `244c120`: 실제 backend golden YAML로 local/server recovery, exact structural pointer와 invalid 실행 차단, v1~v4·두 context 409·semantic diff, 두 security의 linked/raw/node/TargetTape/plan trace, saved-v4 Rust backtest 완료·strategy/backtest history, source-less legacy YAML materialization과 동일 canonical hash를 단일 Playwright project에서 검증했다. Quick/Advanced route/component/style/facade와 dead i18n을 제거하고 legacy URL은 clean YAML draft로 이관했다. workflow/visual update와 strict가 각각 11/11, focused 94·frontend 437·backend 1,118·Rust 13·root 6 및 전체 정적/build/generated gate를 통과하고 네 PNG 직접 확인·5173/8000/temp runtime 0을 확인해 SELF_CHECK로 전환한다 | P6-06 migration gate·StrategySpec/server hash SoT·UI/wire 책임분리·13.2 author gate·실행 보고서 |

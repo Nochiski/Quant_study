@@ -51,10 +51,16 @@ REJECT_REASONS: tuple[str, ...] = ("rcept_dt_missing",)
 # S05 는 `stg_capital.isu_dcrs_stock_knd`(자유 텍스트 249종)를 위한 표다. 4B 원장 3종의 종류
 # 라벨은 그보다 훨씬 짧고(절단본 shares 8 · tesstk 6 · dividend 8), 겹치는 것은 S05 표가 이미
 # 덮으므로 **차이만** 여기서 더한다. S05 규약 그대로 명시적 문자열만 대응하고(패턴 매칭 없음)
-# 앞뒤 공백은 trim 으로만 흡수한다 — stage 가 이 3테이블은 개행까지 정규화하지 않았다.
-#   '의결권 있는 주식\n(보통주)' : 주식총수 원장의 은행권 표기(우리은행). 개행 위치가 두 가지다.
-#   '보통부'                     : S05 COMMON_KINDS 에 이미 있는 한 음절 오타.
-SHARES_COMMON_EXTRA: tuple[str, ...] = ("의결권 있는 주식\n(보통주)",
+# 앞뒤 공백은 trim 으로만 흡수한다. stage 는 09-06 재빌드부터 이 3테이블의 개행도 정규화하므로
+# 정본 표기는 개행 없는 형태다 — 대응표가 정규화에 뒤처지면 그 행이 KRX 검산에서 조용히 빠지고
+# 게이트는 그대로 pass 한다(실측: '의결권 있는 주식(보통주)' 3행, n_krx_class_rows 103 → 100).
+# 회귀 게이트는 tests 의 `test_종류_어휘가_stage_라벨을_전부_덮는다` 다.
+#   '의결권 있는 주식(보통주)' : 주식총수 원장의 은행권 표기. stage 정규화 뒤의 정본 표기이고,
+#                              개행이 남아 있던 옛 판본 두 형태는 옛 빌드(`_pinned/` keep=3) 방어로
+#                              함께 남긴다(S05 `.sql` 의 trim 과 같은 규약).
+#   '보통부'                   : S05 COMMON_KINDS 에 이미 있는 한 음절 오타.
+SHARES_COMMON_EXTRA: tuple[str, ...] = ("의결권 있는 주식(보통주)",
+                                        "의결권 있는 주식\n(보통주)",
                                         "의결권 \n있는 주식\n(보통주)")
 COMMON_KINDS: tuple[str, ...] = S05_COMMON_KINDS + SHARES_COMMON_EXTRA
 PREFERRED_KINDS: tuple[str, ...] = S05_PREFERRED_KINDS
@@ -216,6 +222,10 @@ def _krx_cross_metrics(ctx: EquityGateContext) -> dict[str, object]:
     단독 티커면 common). 그 종류의 상장 티커가 정확히 하나인 법인만 비교하고, 여럿이면
     `n_krx_ambiguous` 로만 센다 — 합산 규칙을 여기서 새로 만들지 않는다.
 
+    다섯 갈래(`n_krx_no_ticker`·`n_krx_ambiguous`·`n_krx_no_price`·`n_krx_stale`·
+    `n_krx_compared`)는 `n_krx_class_rows` 를 **분할**한다 — 어느 갈래에도 안 들어가는 행이
+    생기면 그만큼 대조가 조용히 사라진다(tests 가 합을 대조한다).
+
     `corp_ticker` 는 시점축이 없는 현재 스냅샷이라(grain `ticker`) 폐지·**티커 재사용** 구간에서
     결산일과 동떨어진 가격 행이 잡힌다 — 절단본 036220·101970 이 그 사례다(마지막 가격이
     2016-05-04 / 2015-03-16 인데 결산일은 2023·2024). 그래서 **결산일과 같은 해의 가격 행**만
@@ -256,6 +266,7 @@ def _krx_cross_metrics(ctx: EquityGateContext) -> dict[str, object]:
             FROM cmp
         )
         SELECT count(*),
+               count(*) FILTER (n_ticker IS NULL),
                count(*) FILTER (n_ticker > 1),
                count(*) FILTER (n_ticker = 1 AND krx_shares IS NULL),
                count(*) FILTER (n_ticker = 1 AND krx_shares IS NOT NULL AND NOT comparable),
@@ -265,8 +276,10 @@ def _krx_cross_metrics(ctx: EquityGateContext) -> dict[str, object]:
         FROM tagged""").fetchone()
     if rows is None:
         raise RuntimeError("KRX cross-check query returned no row")
-    n_class, n_amb, n_no_price, n_stale, n_cmp, n_bad, lag = (int(str(x)) for x in rows)
-    return {"n_krx_class_rows": n_class, "n_krx_ambiguous": n_amb,
+    n_class, n_no_leg, n_amb, n_no_price, n_stale, n_cmp, n_bad, lag = (
+        int(str(x)) for x in rows)
+    return {"n_krx_class_rows": n_class, "n_krx_no_ticker": n_no_leg,
+            "n_krx_ambiguous": n_amb,
             "n_krx_no_price": n_no_price, "n_krx_stale": n_stale,
             "n_krx_compared": n_cmp, "n_krx_mismatch": n_bad,
             "krx_price_lag_days_max": lag}

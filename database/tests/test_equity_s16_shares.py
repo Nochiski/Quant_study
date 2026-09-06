@@ -22,7 +22,7 @@ from pathlib import Path
 
 import duckdb
 import pytest
-from equity import build, rules_s01, rules_s02, rules_s04, rules_s05, rules_s16
+from equity import build, inputs, rules_s01, rules_s02, rules_s04, rules_s05, rules_s16
 from equity.baseline import Baseline, load
 from equity.gates import GateStatus
 from equity.model import EquityTable
@@ -83,6 +83,118 @@ def chain(tmp_path_factory: pytest.TempPathFactory) -> Chain:
 
 def _gate(r: build.BuildResult, name: str):
     return next(g for g in r.gates if g.name == name)
+
+
+# ── KRX 대조 독립 재계산 ──────────────────────────────────────────────────────
+# 게이트가 낸 수치를 그대로 믿지 않고 stage 원장·equity 산출에서 다시 센다. **종류 판정을
+# production 의 폐쇄 어휘(`rules_s16.COMMON_KINDS`)로 하지 않는 것이 요점**이다 — 어휘 표가
+# stage 정규화에 뒤처지면 두 축이 갈려야 드러난다(그러지 않으면 항진명제다). 여기서는 공백을
+# 지운 라벨이 '보통주'/'우선주' 를 품는가로만 정한다. `stg_shares.se` 는 이 두 종류 외의 표기가
+# 없는 짧은 어휘라(절단본 비집계 6종: 보통주·우선주·비고·종류주·기타·의결권 있는 주식(보통주))
+# 이 규칙으로 충분하다. S05 의 상환전환우선주 계열처럼 '우선주' 를 품지만 비상장인 표기가
+# 이 원장에 나타나면 `test_종류_어휘가_stage_라벨을_전부_덮는다` 가 먼저 걸린다.
+
+def _squash(label: str) -> str:
+    return "".join(label.split())
+
+
+def _names_a_class(label: str) -> bool:
+    s = _squash(label)
+    return "보통주" in s or "우선주" in s
+
+
+def _class_of(label: str) -> str | None:
+    s = _squash(label)
+    if "보통주" in s:
+        return "common"
+    return "preferred" if "우선주" in s else None
+
+
+def _stage_share_labels(chain: Chain) -> dict[str, int]:
+    """`stg_shares` current_build 의 **비집계** `se` 라벨 → 행수.
+
+    경로는 MANIFEST 의 `partitions[].path` 로만 푼다 — 절단본 디렉토리를 glob 하면 rsync 가
+    남긴 옛 `v=` 판본이 섞인다(STAGE_HANDOFF §1 의 맨 glob 금지 규약).
+    """
+    pb = inputs.resolve(STAGE_SLICE, "stg_shares")
+    globs = ", ".join(f"'{g}'" for g in pb.globs)
+    con = duckdb.connect()
+    try:
+        return {str(r[0]): int(str(r[1])) for r in con.execute(
+            f"SELECT se, count(*) FROM read_parquet([{globs}], hive_partitioning=true, "
+            "union_by_name=true) WHERE row_kind <> 'aggregate' GROUP BY 1").fetchall()}
+    finally:
+        con.close()
+
+
+def _recount(chain: Chain) -> dict[str, int]:
+    """항등 측정 가능 행수 + KRX 대조 6수치를 산출 parquet 위에서 파이썬으로 다시 센다."""
+    out = chain["shares_outstanding"].out_dir
+    assert out is not None
+    rows = _rows(out)
+    ct = _rows_of(chain, "corp_ticker")
+    px = _rows_of(chain, "price_daily")
+
+    # 법인 → 종류별 티커 (S05 `legs` 규칙: is_common 이거나 비KR7 단독이면 common)
+    legs: dict[tuple[str, str], list[str]] = {}
+    for r in ct:
+        corp = r["corp_code"]
+        if corp is None:
+            continue
+        isin8 = str(r["isin8"] or "")
+        cls = "common" if (r["is_common"] or not isin8.startswith("KR7")) else "preferred"
+        legs.setdefault((str(corp), cls), []).append(str(r["ticker"]))
+
+    by_ticker: dict[str, list[tuple[object, object]]] = {}
+    for r in px:
+        by_ticker.setdefault(str(r["ticker"]), []).append((r["date"], r["shares_out"]))
+    for v in by_ticker.values():
+        v.sort(key=lambda t: t[0])  # type: ignore[arg-type,return-value]
+
+    n_identity = sum(1 for r in rows if r["issued_shr"] is not None
+                     and r["treasury_shr"] is not None and r["distributed_shr"] is not None)
+    counts = dict.fromkeys(
+        ("n_krx_class_rows", "n_krx_no_ticker", "n_krx_ambiguous", "n_krx_no_price",
+         "n_krx_stale", "n_krx_compared", "n_krx_mismatch"), 0)
+    counts["n_identity_measurable"] = n_identity
+    for r in rows:
+        cls = _class_of(str(r["se"]))
+        if cls is None or r["issued_shr"] is None or r["stlm_dt"] is None:
+            continue
+        counts["n_krx_class_rows"] += 1
+        tickers = legs.get((str(r["corp_code"]), cls), [])
+        if not tickers:
+            counts["n_krx_no_ticker"] += 1
+            continue
+        if len(tickers) > 1:
+            counts["n_krx_ambiguous"] += 1
+            continue
+        prior = [t for t in by_ticker.get(tickers[0], []) if t[0] <= r["stlm_dt"]]
+        if not prior:
+            counts["n_krx_no_price"] += 1
+            continue
+        px_date, krx = prior[-1]
+        if px_date.year != r["stlm_dt"].year:      # type: ignore[union-attr]
+            counts["n_krx_stale"] += 1
+            continue
+        counts["n_krx_compared"] += 1
+        if krx != r["issued_shr"]:
+            counts["n_krx_mismatch"] += 1
+    return counts
+
+
+def _rows_of(chain: Chain, table: str) -> list[dict[str, object]]:
+    """앞서 지은 equity 테이블의 current_build 를 MANIFEST 경유로 읽는다."""
+    pb = inputs.resolve(chain.root, table)
+    globs = ", ".join(f"'{g}'" for g in pb.globs)
+    con = duckdb.connect()
+    try:
+        rel = con.execute(f"SELECT * FROM read_parquet([{globs}], hive_partitioning=true, "
+                          "union_by_name=true)")
+        cols = [d[0] for d in rel.description]
+        return [dict(zip(cols, r, strict=True)) for r in rel.fetchall()]
+    finally:
+        con.close()
 
 
 def _metrics(r: build.BuildResult, name: str) -> dict[str, object]:
@@ -148,14 +260,36 @@ def test_집계행은_모집단_밖이고_판본_중복은_접힌다(chain: Chai
 
 
 def test_주식수_항등과_KRX_대조는_기록형이다(chain: Chain) -> None:
-    """발행 = 자기 + 유통 · DART ↔ KRX 는 폐기형이 아니다 — 정본은 KRX 다(DESIGN §4-2)."""
+    """발행 = 자기 + 유통 · DART ↔ KRX 는 폐기형이 아니다 — 정본은 KRX 다(DESIGN §4-2).
+
+    절대 건수를 굳히지 않는다 — stage 재절단마다 갈린다(09-06 정규화 판본 재절단에서 옛
+    기대값 103/2 가 깨졌다). 대신 stage 원장·equity 산출에서 **독립으로 다시 센 값**과 비교한다.
+    """
     m = _metrics(chain["shares_outstanding"], "EG3_shares_outstanding")
-    assert (m["n_identity_measurable"], m["n_share_identity_mismatch"]) == (76, 0)
-    # KRX 대조: 종류 대응 103행 중 티커 다중 11 · 가격 없음 2 · 폐지·티커 재사용 구간 16 →
-    # 비교 73, 어긋남 6(발행주식총수 ≠ 상장주식수인 구간). 어긋나도 게이트는 통과한다.
-    assert (m["n_krx_class_rows"], m["n_krx_ambiguous"], m["n_krx_no_price"]) == (103, 11, 2)
-    assert (m["n_krx_stale"], m["n_krx_compared"], m["n_krx_mismatch"]) == (16, 73, 6)
+    exp = _recount(chain)
+    assert (m["n_identity_measurable"], m["n_share_identity_mismatch"]) == (
+        exp["n_identity_measurable"], 0)
+    keys = ("n_krx_class_rows", "n_krx_no_ticker", "n_krx_ambiguous", "n_krx_no_price",
+            "n_krx_stale", "n_krx_compared", "n_krx_mismatch")
+    assert {k: m[k] for k in keys} == {k: exp[k] for k in keys}
+    # 다섯 갈래는 종류 대응 행을 분할한다 — 어느 갈래에도 없는 행은 조용히 사라진 대조다
+    assert sum(int(str(m[k])) for k in keys[1:-1]) == m["n_krx_class_rows"]
+    # 대조가 실제로 돌았는지(전부 0 이면 위 등식은 항진명제다)
+    assert exp["n_krx_compared"] > 0 and exp["n_krx_class_rows"] > 0
     assert _gate(chain["shares_outstanding"], "EG3_shares_outstanding").status is GateStatus.PASS
+
+
+def test_종류_어휘가_stage_라벨을_전부_덮는다(chain: Chain) -> None:
+    """어휘 표가 stage 정규화에 뒤처지면 그 행은 KRX 검산에서 **조용히** 빠진다.
+
+    09-06 재절단 실측: stage 가 `se` 의 개행을 정규화해 '의결권 있는 주식(보통주)' 3행이
+    `SHARES_COMMON_EXTRA`(개행 형태 2종) 밖으로 떨어졌고, 게이트는 그대로 pass 하면서
+    `n_krx_class_rows` 만 103 → 100 으로 줄었다. 종류를 이름에 담은 라벨은 전부 대응돼야 한다.
+    """
+    known = set(rules_s16.COMMON_KINDS) | set(rules_s16.PREFERRED_KINDS)
+    unmapped = {label: n for label, n in _stage_share_labels(chain).items()
+                if _names_a_class(label) and label.strip() not in known}
+    assert unmapped == {}, f"종류를 이름에 담았는데 대응표 밖: {unmapped}"
 
 
 def test_원장_총계는_소계를_뺀_잎_합과_같다(chain: Chain) -> None:
@@ -287,8 +421,10 @@ def test_종류_어휘는_S05_대응표를_재사용한다() -> None:
     assert rules_s16.PREFERRED_KINDS == rules_s05.PREFERRED_KINDS
     assert "보통주" in rules_s16.COMMON_KINDS and "보통부" in rules_s16.COMMON_KINDS
     assert "우선주" in rules_s16.PREFERRED_KINDS
-    # 4B 원장에만 나오는 개행 포함 표기는 여기서 더한다(stage 가 이 3테이블은 정규화하지 않았다)
-    assert rules_s16.SHARES_COMMON_EXTRA == ("의결권 있는 주식\n(보통주)",
+    # 4B 원장에만 나오는 은행권 표기. 첫 항이 stage 정규화 뒤의 정본이고 뒤 둘은 개행이 남아
+    # 있던 옛 빌드(`_pinned/` keep=3) 방어다 — 실재 라벨과의 대조는 위 커버리지 테스트가 한다.
+    assert rules_s16.SHARES_COMMON_EXTRA == ("의결권 있는 주식(보통주)",
+                                             "의결권 있는 주식\n(보통주)",
                                              "의결권 \n있는 주식\n(보통주)")
 
 

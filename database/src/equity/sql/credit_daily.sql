@@ -129,8 +129,14 @@ cell AS (
            s.whol_stln_new_amt, s.whol_stln_rdmp_amt, s.whol_stln_rmnd_amt,
            s.whol_stln_rmnd_rate_pct, s.whol_stln_gvrt_pct
     FROM base b
-    -- `NOT b.drop_value` 조인 조건 하나가 잔고 이상 셀의 17축을 전부 NULL 로 만든다
-    LEFT JOIN stg_credit_daily s ON s.ticker = b.ticker AND s.date = b.date AND NOT b.drop_value
+    -- 잔고 이상 셀의 17축을 전부 NULL 로 만드는 것은 `drop_value` 축의 **등호 조인** 하나다.
+    -- 원장 행 쪽은 언제나 false 이므로 `drop_value` 가 true 인 격자 셀과는 만나지 않는다(양쪽
+    -- 다 NULL 이 아니라 `=` 와 `IS NOT DISTINCT FROM` 이 같다). 같은 뜻이라고 `AND NOT
+    -- b.drop_value` 로 쓰면 안 된다 — 한쪽(b)만 보는 술어는 DuckDB 가 조인 조건으로 쓰지 못하고
+    -- LEFT JOIN 이라 필터로 내리지도 못해, 해시 조인이 BLOCKWISE_NL_JOIN(격자 9.2M × 원장
+    -- 8.4M)으로 떨어진다. 서버 실측 6초 → 70분+ (S10 2차, 09-06).
+    LEFT JOIN (SELECT *, false AS drop_value FROM stg_credit_daily) s
+           ON s.ticker = b.ticker AND s.date = b.date AND s.drop_value = b.drop_value
     LEFT JOIN island iok ON iok.ticker = b.ticker AND iok.status = 'ok'
                         AND b.date BETWEEN iok.wf AND iok.wt
     LEFT JOIN island iem ON iem.ticker = b.ticker AND iem.status = 'empty'

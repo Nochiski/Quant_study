@@ -1,6 +1,6 @@
 # P6-06 YAML-first migration E2E 보고서
 
-- 최종 검증: 2026-09-06 19:08 KST
+- 최종 검증: 2026-09-06 20:06 KST
 - 대상 PR: [#79](https://github.com/Nochiski/Quant_study/pull/79)
 - 대상 branch: `feat/p6-06-workflow-migration`
 - 기준 base: `dd9a6ff` (P6-05 approval-doc HEAD)
@@ -33,24 +33,30 @@ generated SDK를 사용한다. 테스트 내부에 수동 wire DTO나 프론트 
 2. 완전한 verbose YAML을 입력하고 실제 backend compile 성공, local autosave, server draft 저장을
    확인한다. reload 뒤 local recovery와 server recovery가 각각 source를 byte-for-byte 복원한다.
 3. `/risk/max_name_weight`를 의도적으로 오타 내 exact JSON Pointer 진단과 Save/Backtest 차단을
-   확인한다. 실행 설정의 시작 현금도 `0`으로 만들어 사용자 오류와 실행 차단을 검증한 뒤 수정한다.
+   확인한다. 실행 설정의 시작 현금 `0`은 frontend가 semantic 판단으로 막지 않고 실제 backend 422를
+   표시하는지 검증한 뒤 정상값으로 수정한다.
 4. v1~v4 revision을 저장하고 두 browser context가 만든 stale save가 정확히 HTTP 409인지 확인한다.
    충돌 전후 editor source가 byte-for-byte 보존되고, 명시적 해소 뒤 저장된 v4 source도 동일하다.
-5. 저장된 v4를 대상으로 실제 trace를 두 번 실행한다. 응답 provenance의 spec/source version,
+5. 저장된 v4의 `selection_count`를 2로 줄이고 세 종목을 대상으로 실제 trace를 두 번 실행한다. 응답 provenance의 spec/source version,
    dataset snapshot `mock-equity-v0.2-20260903`, registry `factor-registry-v1`, plan hash를 검증한다.
 6. `2026-07-31` 기준 raw PIT observation 날짜가 as-of 이후가 아닌지 확인하고, 실제 fixture 값
-   `sec-000660-1=212570`, `sec-005930-1=116285`, `mom_252=0.02667014412117008`을 wire와 UI에서
-   함께 확인한다.
-7. 후보 rank·선택 여부·제한 전/후 비중과 조정 사유, factor contribution, TargetTape, raw data,
+   `sec-000660-1=212570`, `sec-005930-1=116285`, `sec-035420-1=308855`,
+   `mom_252=0.02667014412117008`을 wire와 UI에서 함께 확인한다.
+7. rank 2 종목의 선택·50%→5% cap 조정과 rank 3 종목의 `selected=false`, target 0,
+   `outside_selection`, `not_selected`를 generated SDK·Linked Trace·TargetTape에서 모두 확인한다. 이어
+   factor contribution, raw data,
    selected node, execution plan과 재현 fingerprint를 5개 debugger tab에서 확인한다. factor explain의
    plan hash도 trace plan과 일치해야 한다.
 8. Python을 선택했다가 Rust로 되돌리고 시작 현금 `123456789`, benchmark `sec-005930-1`,
    annualization `260`, OOS 시작일 `2025-01-02`를 설정해 백테스트한다. 서버가 수락한
    `BacktestRunSpec`과 manifest의 core·strategy revision/hash·snapshot·모든 실행 옵션을 정확히
    비교하고 결과가 `completed`인지 확인한다.
-9. nonterminal run을 deterministic browser fixture로 만들고 Cancel이 `cancelled` 상태로 전이하는지,
+9. nonterminal run을 deterministic browser fixture로 만들고 실제 계약과 같은 HTTP 200 Cancel이
+   `cancelled` 상태로 전이하는지,
    Rerun이 서버 소유 accepted request를 byte-for-byte 재사용해 새 run을 만드는지 확인한다.
-   accepted-request endpoint 자체의 저장·조회·replay는 backend integration test가 실제 HTTP로 검증한다.
+   backend integration은 실제 artifact commit을 barrier로 멈춘 뒤 취소해 `cancel_requested → cancelled`,
+   completed/result 비노출과 committed artifact 폐기를 검증하고, accepted-request 응답 bytes를 그대로
+   POST해 두 번째 run이 완료되는지 실제 HTTP로 확인한다.
 10. Backtest history에서 같은 run ID와 `strategy_id · v4` provenance를 확인한다. Strategy history의
     v1~v4 각 Diff 링크가 immutable `base`/`target` URL인지 확인하고 실제로 이동해 selector를 검증한다.
 11. legacy JSON endpoint로 source-less revision을 만든다. document API가 `origin=legacy_json`,
@@ -59,9 +65,10 @@ generated SDK를 사용한다. 테스트 내부에 수동 wire DTO나 프론트 
 
 ## 비동기 소유권 회귀
 
-Debugger trace 응답은 document route identity·generation owner에 귀속된다. 이전 요청이 늦게
-resolve/reject되거나 컴포넌트가 unmount되어도 현재 URL, 선택된 security/node, trace 결과를 덮어쓸 수
-없다. AbortSignal 전달과 resolve/reject/abort 세 경로를 단위 테스트로 고정했다.
+Debugger trace 응답은 document route identity와 page-owned 전체 URL generation에 귀속된다. 같은
+document·factor·node owner에서도 요청 도중 Diff로 이동하면 이전 callback이 최신 view/path를 되돌릴 수
+없다. resolve/reject/abort 각각에 대해 URL, 선택된 security/node와 활성 Diff view 보존을 page-level
+route test로 고정했고, feature test는 opaque publication lease만 비교한다.
 
 ## 시각·레이아웃 검증
 
@@ -83,10 +90,10 @@ resolve/reject되거나 컴포넌트가 unmount되어도 현재 URL, 선택된 s
 | Gate                                          | 결과                                                     |
 | --------------------------------------------- | -------------------------------------------------------- |
 | Playwright strict 전체                        | 16 passed, 4 workflow + 12 viewport/theme infrastructure |
-| Frontend Vitest                               | 37 files, 444 passed                                     |
+| Frontend Vitest                               | 37 files, 451 passed                                     |
 | Frontend typecheck / E2E typecheck / ESLint   | PASS                                                     |
 | Frontend production build                     | PASS; editor 131.94 KiB gzip                             |
-| Backend pytest                                | 1,118 passed, dependency deprecation warning 2건         |
+| Backend pytest                                | 1,120 passed, dependency deprecation warning 2건         |
 | Backend CI 범위 Ruff / Pyright                | PASS, type errors 0                                      |
 | Root delegate·PLAN·실제 server smoke unittest | 6 passed                                                 |
 | Root tools Ruff / Pyright                     | PASS, type errors 0                                      |
@@ -108,8 +115,10 @@ resolve/reject되거나 컴포넌트가 unmount되어도 현재 URL, 선택된 s
 
 - 실행 가능 여부와 canonical hash는 backend `StrategySpec` compile 결과만 신뢰한다.
 - YAML source, canonical spec, saved revision, accepted run request를 서로 다른 provenance로 보존한다.
-- run 설정 UI는 generated `BacktestRunSpec` 타입에서 파생하고 서버가 보관한 accepted request를
-  cancel/rerun의 정본으로 사용한다.
+- run 설정 UI는 generated `BacktestRunSpec`에 직렬화 가능한 표현만 검사한다. positivity와 OOS 범위는
+  backend가 판정하며, 서버가 보관한 accepted request를 cancel/rerun의 정본으로 사용한다.
+- 완료·취소는 application lock에서 단일 선형화 지점을 공유한다. artifact adapter는 application이
+  취소 승자를 정한 경우 exact run bundle을 폐기할 책임만 가진다.
 - Playwright는 generated SDK와 사용자 접근성 selector를 사용한다. REST wire shape 또는 CSS 구현
   세부를 테스트 안에 복제하지 않는다.
 - route adapter는 과거 URL 해석과 YAML route 이동만 담당한다. legacy JSON materialization은 backend

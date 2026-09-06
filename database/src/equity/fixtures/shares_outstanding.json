@@ -1,86 +1,182 @@
 [
- {"case": "FX-4B-006-samsung-2018-common-issued",
-  "key": {"corp_code": "00126380", "bsns_year": "2018", "reprt_code": "11011", "se": "보통주"},
-  "column": "issued_shr", "expect": "5969782550",
-  "expect_source": "stage:stg_shares.istc_totqy_shr", "fixture_class": "positive",
+ {
+  "case": "FX-4B-006-samsung-2018-common-issued",
+  "key": {
+   "corp_code": "00126380",
+   "bsns_year": "2018",
+   "reprt_code": "11011",
+   "se": "보통주"
+  },
+  "column": "issued_shr",
+  "expect": "5969782550",
+  "expect_source": "stage:stg_shares.istc_totqy_shr",
+  "fixture_class": "positive",
   "source": "hand — 삼성전자 2018 사업보고서(20190401004781) 보통주 발행주식 총수. KRX list_shrs 2018-12-28 과 같은 값이라 §4-2 정본 대조가 여기서 선다",
-  "note": "GATES §2 매트릭스 20행은 FX-4B-001 을 가리키지만 §4 카탈로그의 FX-4B-001 은 treasury_stock 용이다 — shares_outstanding 몫으로 FX-4B-006 을 신설(§9 S16 정정)"},
-
- {"case": "FX-4B-006-samsung-2018-common-distributed",
-  "key": {"corp_code": "00126380", "bsns_year": "2018", "reprt_code": "11011", "se": "보통주"},
-  "column": "distributed_shr", "expect": "5969782550",
-  "expect_source": "stage:stg_shares.distb_stock_co_shr", "fixture_class": "positive",
+  "note": "GATES §2 매트릭스 20행은 FX-4B-001 을 가리키지만 §4 카탈로그의 FX-4B-001 은 treasury_stock 용이다 — shares_outstanding 몫으로 FX-4B-006 을 신설(§9 S16 정정)"
+ },
+ {
+  "case": "FX-4B-006-samsung-2018-common-distributed",
+  "key": {
+   "corp_code": "00126380",
+   "bsns_year": "2018",
+   "reprt_code": "11011",
+   "se": "보통주"
+  },
+  "column": "distributed_shr",
+  "expect": "5969782550",
+  "expect_source": "stage:stg_shares.distb_stock_co_shr",
+  "fixture_class": "positive",
   "source": "hand — 자기주식 기재 없음(소각 완료)이라 유통 = 발행",
-  "note": ""},
-
- {"case": "FX-4B-006-samsung-2018-common-treasury-null",
-  "key": {"corp_code": "00126380", "bsns_year": "2018", "reprt_code": "11011", "se": "보통주"},
-  "column": "treasury_shr", "expect": null,
-  "expect_source": "stage:stg_shares.tesstk_co_shr", "fixture_class": "positive",
+  "note": ""
+ },
+ {
+  "case": "FX-4B-006-samsung-2018-common-treasury-null",
+  "key": {
+   "corp_code": "00126380",
+   "bsns_year": "2018",
+   "reprt_code": "11011",
+   "se": "보통주"
+  },
+  "column": "treasury_shr",
+  "expect": null,
+  "expect_source": "stage:stg_shares.tesstk_co_shr",
+  "fixture_class": "positive",
   "source": "hand — 원장이 비워 둔 칸은 0 이 아니라 결측이다(원칙 ④). 0 으로 채우면 유통 = 발행 항등이 우연히 서고 결측률이 사라진다",
-  "note": ""},
-
- {"case": "FX-4B-006-samsung-2018-preferred-issued",
-  "key": {"corp_code": "00126380", "bsns_year": "2018", "reprt_code": "11011", "se": "우선주"},
-  "column": "issued_shr", "expect": "822886700",
-  "expect_source": "stage:stg_shares.istc_totqy_shr", "fixture_class": "positive",
+  "note": ""
+ },
+ {
+  "case": "FX-4B-006-samsung-2018-preferred-issued",
+  "key": {
+   "corp_code": "00126380",
+   "bsns_year": "2018",
+   "reprt_code": "11011",
+   "se": "우선주"
+  },
+  "column": "issued_shr",
+  "expect": "822886700",
+  "expect_source": "stage:stg_shares.istc_totqy_shr",
+  "fixture_class": "positive",
   "source": "hand — 005935 KRX list_shrs 2018-12-28 과 같다",
-  "note": "종류 축이 grain 에 살아 있어야 보통주/우선주가 한 행으로 뭉개지지 않는다"},
-
- {"case": "FX-4B-006-daishin-2015-identity-issued",
-  "key": {"corp_code": "00110893", "bsns_year": "2015", "reprt_code": "11011", "se": "보통주"},
-  "column": "issued_shr", "expect": "50773400",
-  "expect_source": "stage:stg_shares.istc_totqy_shr", "fixture_class": "positive",
+  "note": "종류 축이 grain 에 살아 있어야 보통주/우선주가 한 행으로 뭉개지지 않는다"
+ },
+ {
+  "case": "FX-4B-006-daishin-2015-identity-issued",
+  "key": {
+   "corp_code": "00110893",
+   "bsns_year": "2015",
+   "reprt_code": "11011",
+   "se": "보통주"
+  },
+  "column": "issued_shr",
+  "expect": "50773400",
+  "expect_source": "stage:stg_shares.istc_totqy_shr",
+  "fixture_class": "positive",
   "source": "hand — 대신증권 2015 보통주. 발행 50,773,400 = 자기 10,103,074 + 유통 40,670,326 (세 값이 다 있는 76행의 항등 표본)",
-  "note": "EG3_shares_outstanding.n_share_identity_mismatch 가 전수로 재계산하는 항등의 손검산 자리"},
-
- {"case": "FX-4B-006-daishin-2015-identity-treasury",
-  "key": {"corp_code": "00110893", "bsns_year": "2015", "reprt_code": "11011", "se": "보통주"},
-  "column": "treasury_shr", "expect": "10103074",
-  "expect_source": "stage:stg_shares.tesstk_co_shr", "fixture_class": "positive",
+  "note": "EG3_shares_outstanding.n_share_identity_mismatch 가 전수로 재계산하는 항등의 손검산 자리"
+ },
+ {
+  "case": "FX-4B-006-daishin-2015-identity-treasury",
+  "key": {
+   "corp_code": "00110893",
+   "bsns_year": "2015",
+   "reprt_code": "11011",
+   "se": "보통주"
+  },
+  "column": "treasury_shr",
+  "expect": "10103074",
+  "expect_source": "stage:stg_shares.tesstk_co_shr",
+  "fixture_class": "positive",
   "source": "hand — 같은 해 treasury_stock 의 기말수량 10,103,074(대신증권 2015 보통주 총계)와 같다",
-  "note": "두 테이블이 같은 원장의 다른 표에서 나오지만 값이 일치한다"},
-
- {"case": "FX-4B-006-daishin-2015-identity-distributed",
-  "key": {"corp_code": "00110893", "bsns_year": "2015", "reprt_code": "11011", "se": "보통주"},
-  "column": "distributed_shr", "expect": "40670326",
-  "expect_source": "stage:stg_shares.distb_stock_co_shr", "fixture_class": "positive",
+  "note": "두 테이블이 같은 원장의 다른 표에서 나오지만 값이 일치한다"
+ },
+ {
+  "case": "FX-4B-006-daishin-2015-identity-distributed",
+  "key": {
+   "corp_code": "00110893",
+   "bsns_year": "2015",
+   "reprt_code": "11011",
+   "se": "보통주"
+  },
+  "column": "distributed_shr",
+  "expect": "40670326",
+  "expect_source": "stage:stg_shares.distb_stock_co_shr",
+  "fixture_class": "positive",
   "source": "hand — 50,773,400 − 10,103,074",
-  "note": ""},
-
- {"case": "FX-4B-006-note-row-kept",
-  "key": {"corp_code": "00126380", "bsns_year": "2018", "reprt_code": "11011", "se": "비고"},
-  "column": "issued_shr", "expect": null,
-  "expect_source": "hand", "fixture_class": "positive",
+  "note": ""
+ },
+ {
+  "case": "FX-4B-006-note-row-kept",
+  "key": {
+   "corp_code": "00126380",
+   "bsns_year": "2018",
+   "reprt_code": "11011",
+   "se": "비고"
+  },
+  "column": "issued_shr",
+  "expect": null,
+  "expect_source": "hand",
+  "fixture_class": "positive",
   "source": "hand — `se='비고'` 82행은 값이 전부 결측인 주석 행이지만 `row_kind='detail'` 이라 모집단에 남는다",
-  "note": "격리하면 그 접수가 모집단에서 사라져 생존편향이 된다(S11 no_label 격리 폐기와 같은 근거)"},
-
- {"case": "FX-4B-006-bank-label-common",
-  "key": {"corp_code": "01160363", "bsns_year": "2019", "reprt_code": "11011",
-          "se": "의결권 있는 주식\n(보통주)"},
-  "column": "treasury_shr", "expect": "82978",
-  "expect_source": "stage:stg_shares.tesstk_co_shr", "fixture_class": "positive",
+  "note": "격리하면 그 접수가 모집단에서 사라져 생존편향이 된다(S11 no_label 격리 폐기와 같은 근거)"
+ },
+ {
+  "case": "FX-4B-006-bank-label-common",
+  "key": {
+   "corp_code": "01160363",
+   "bsns_year": "2019",
+   "reprt_code": "11011",
+   "se": "의결권 있는 주식(보통주)"
+  },
+  "column": "treasury_shr",
+  "expect": "82978",
+  "expect_source": "stage:stg_shares.tesstk_co_shr",
+  "fixture_class": "positive",
   "source": "hand — 에코프로비엠 2019. `se` 는 원문 그대로(개행 포함) grain 에 남고 종류 대응은 EG3 기록형에서만 한다",
-  "note": "라벨을 정규화해서 grain 에 넣으면 EG1 우변(stage distinct)과 축이 갈린다"},
-
- {"case": "FX-4B-006-available-date",
-  "key": {"corp_code": "00126380", "bsns_year": "2018", "reprt_code": "11011", "se": "보통주"},
-  "column": "available_date", "expect": "2019-04-01",
-  "expect_source": "stage:stg_shares.available_date", "fixture_class": "positive",
+  "note": "라벨을 정규화해서 grain 에 넣으면 EG1 우변(stage distinct)과 축이 갈린다"
+ },
+ {
+  "case": "FX-4B-006-available-date",
+  "key": {
+   "corp_code": "00126380",
+   "bsns_year": "2018",
+   "reprt_code": "11011",
+   "se": "보통주"
+  },
+  "column": "available_date",
+  "expect": "2019-04-01",
+  "expect_source": "stage:stg_shares.available_date",
+  "fixture_class": "positive",
   "source": "hand — 접수번호 20190401004781 의 접수일. 결산일 2018-12-31 보다 뒤라 EG2-P02 가 선다",
-  "note": "DESIGN §4-5 `available_date = rcept_dt`(derived)"},
-
- {"case": "FX-4B-006-rcept-no",
-  "key": {"corp_code": "00126380", "bsns_year": "2018", "reprt_code": "11011", "se": "보통주"},
-  "column": "rcept_no", "expect": "20190401004781",
-  "expect_source": "stage:stg_shares.rcept_no", "fixture_class": "positive",
+  "note": "DESIGN §4-5 `available_date = rcept_dt`(derived)"
+ },
+ {
+  "case": "FX-4B-006-rcept-no",
+  "key": {
+   "corp_code": "00126380",
+   "bsns_year": "2018",
+   "reprt_code": "11011",
+   "se": "보통주"
+  },
+  "column": "rcept_no",
+  "expect": "20190401004781",
+  "expect_source": "stage:stg_shares.rcept_no",
+  "fixture_class": "positive",
   "source": "hand — grain 에 없지만 receipt_axis 파티션 키(substr 앞 4자리 = 2019)를 만드는 컬럼",
-  "note": ""},
-
- {"case": "FX-4B-006-n-src-rows",
-  "key": {"corp_code": "00126380", "bsns_year": "2018", "reprt_code": "11011", "se": "보통주"},
-  "column": "n_src_rows", "expect": "1",
-  "expect_source": "hand", "fixture_class": "positive",
+  "note": ""
+ },
+ {
+  "case": "FX-4B-006-n-src-rows",
+  "key": {
+   "corp_code": "00126380",
+   "bsns_year": "2018",
+   "reprt_code": "11011",
+   "se": "보통주"
+  },
+  "column": "n_src_rows",
+  "expect": "1",
+  "expect_source": "hand",
+  "fixture_class": "positive",
   "source": "hand — 절단본 stg_shares 는 grain 당 원장 행이 하나뿐이다(접힌 판본 0)",
-  "note": "서버에서 정정 재제출이 들어오면 2 이상이 나오고 EG3 의 n_collapsed_src_rows 가 함께 오른다"}
+  "note": "서버에서 정정 재제출이 들어오면 2 이상이 나오고 EG3 의 n_collapsed_src_rows 가 함께 오른다"
+ }
 ]

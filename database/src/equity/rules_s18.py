@@ -153,7 +153,8 @@ def eg3_opinion_daily(ctx: EquityGateContext) -> GateResult:
         "n_opinion_score_null": n_score_null, "n_target_price_null": n_target_null,
         "n_analyst_count_null": n_count_null, "n_no_opinion_note": n_note,
         "n_overlap_keys_wise_v3": n_overlap_keys,      # EG8 의 모집단
-        "n_dedup_v3": n_dedup,                          # 프레임 _meta.n_dedup 은 0 고정(GATES §9 S05)
+        # 프레임 _meta.n_dedup 은 0 고정(GATES §9 S05)
+        "n_dedup_v3": n_dedup,
         "n_nonpositive_target_price": int(ctx.reject_by_reason.get(
             "nonpositive_target_price", 0)),
         "n_base_date_after_obs": int(ctx.reject_by_reason.get("base_date_after_obs", 0)),
@@ -378,7 +379,8 @@ def eg3_opinion_broker_daily(ctx: EquityGateContext) -> GateResult:
     metrics: dict[str, object] = {
         "opinion_class_vocab": list(OPINION_CLASS_VOCAB),
         "opinion_class_counts": classes, "opinion_raw_counts": raw,
-        "n_prev_opinion_date_null": n_prev_date_null,   # FX-5-008 — 간격 미상이면 change_pct 해석 금지
+        # FX-5-008 — 간격 미상이면 change_pct 해석 금지
+        "n_prev_opinion_date_null": n_prev_date_null,
         "n_change_pct_null": n_change_null, "n_prev_target_price_null": n_prev_target_null,
         "n_opinion_class_null": n_class_null, "n_prev_opinion_class_null": n_prev_class_null,
         "n_nonpositive_target_price": int(ctx.reject_by_reason.get(

@@ -226,6 +226,17 @@ def policy_table(rows: list[PolicyRow]) -> pa.Table:
     )
 
 
+def profile_table(rows: list[tuple[str, int, str]]) -> pa.Table:
+    """`dataset_profile` 중 어댑터가 읽는 세 컬럼 (field_id, 랙 세션, 근거)."""
+    return pa.table(
+        {
+            "field_id": pa.array([r[0] for r in rows], type=pa.string()),
+            "recommended_lag_sessions": pa.array([r[1] for r in rows], type=pa.int64()),
+            "available_date_basis": pa.array([r[2] for r in rows], type=pa.string()),
+        }
+    )
+
+
 # ── S21 본판이 읽는 나머지 테이블 (S01·S05·S11·S12·S15·S16·S17·S18) ──────────
 # 컬럼은 `database/src/equity/rules_s*.py` 의 선언 중 어댑터·매크로가 읽는 것만 만든다.
 
@@ -1072,8 +1083,59 @@ def wb_close(ticker: str, session: date) -> float:
     return float(close)
 
 
-def build_workbench_root(root: Path, *, catalog: bool = True) -> Path:
-    """워크벤치 어댑터 손 픽스처 equity_root 를 만든다. `catalog=False` 면 equity.duckdb 없음."""
+# `dataset_profile`(S19) 이 확정한 필드별 공개시차 — 서버 실측 모양 그대로다(랙 0 은 장중 가격
+# 축뿐이고 나머지는 1세션). 어댑터는 이 표를 정본으로 읽고, 표가 없을 때만 원천 상수로 폴백한다.
+WB_PROFILE_LAG_ZERO = (
+    "price.close",
+    "price.open",
+    "price.volume",
+    "price.trading_value",
+    "price.adj_close",
+)
+WB_PROFILE_FIELDS = (
+    *WB_PROFILE_LAG_ZERO,
+    "price.market_cap",
+    "price.shares_outstanding",
+    "financial.revenue",
+    "financial.gross_profit",
+    "financial.operating_income",
+    "financial.net_income",
+    "financial.operating_cash_flow",
+    "financial.total_assets",
+    "financial.total_liabilities",
+    "financial.book_equity",
+    "consensus.forward_eps",
+    "consensus.forward_sales",
+    "consensus.eps_dispersion",
+    "consensus.target_price",
+    "consensus.recommendation",
+    "consensus.analyst_count",
+    "flow.foreign_net_buy",
+    "flow.institution_net_buy",
+    "flow.retail_net_buy",
+    "short.short_sale_value",
+    "short.borrowed_quantity",
+    "credit.margin_balance",
+    "event.dividend_per_share",
+    "event.buyback_amount",
+    "event.insider_net_buy",
+)
+WB_PROFILE_ROWS = [
+    (
+        field_id,
+        0 if field_id in WB_PROFILE_LAG_ZERO else 1,
+        "session_close" if field_id in WB_PROFILE_LAG_ZERO else "next_session_open",
+    )
+    for field_id in WB_PROFILE_FIELDS
+]
+
+
+def build_workbench_root(root: Path, *, catalog: bool = True, profile: bool = True) -> Path:
+    """워크벤치 어댑터 손 픽스처 equity_root 를 만든다.
+
+    `catalog=False` 면 equity.duckdb 없음, `profile=False` 면 `dataset_profile` 없음
+    (어댑터가 원천 상수로 폴백하는 구판 루트).
+    """
     prices: list[PriceRow] = []
     universe: list[UniverseRow] = []
     for ticker, _seq, first, last, _reason in WB_SPANS:
@@ -1165,6 +1227,8 @@ def build_workbench_root(root: Path, *, catalog: bool = True) -> Path:
     write_equity_table(root, "flow_daily", flow_table(WB_FLOW_ROWS), year_column="date")
     write_equity_table(root, "short_daily", short_table(WB_SHORT_ROWS), year_column="date")
     write_equity_table(root, "credit_daily", credit_table(WB_CREDIT_ROWS), year_column="date")
+    if profile:
+        write_equity_table(root, "dataset_profile", profile_table(WB_PROFILE_ROWS))
     if catalog:
         write_catalog(root)
     return root

@@ -122,6 +122,7 @@ from ._specs import (
     FIELD_SPECS,
     POLICY_TABLE,
     PRICE_TABLE,
+    PROFILE_TABLE,
     REQUIRED_TABLES,
     SECURITY_TABLE,
     SOURCE_BY_NAME,
@@ -340,6 +341,7 @@ class EquityDuckdbAdapter:
             for spec in FIELD_SPECS
             if self._source_reason[spec.source] is None
         }
+        self._profile: dict[str, tuple[int, str]] = self._load_profile()
         self._coverage_cache: dict[str, tuple[float, date]] | None = None
 
     # ── 구성 ──────────────────────────────────────────────────────────────────
@@ -366,6 +368,40 @@ class EquityDuckdbAdapter:
                 f"build={self._builds[CALENDAR_TABLE]}"
             )
         return sessions
+
+    def _load_profile(self) -> dict[str, tuple[int, str]]:
+        """`dataset_profile` 의 field_id → (랙 세션, 근거). 표가 없으면 빈 dict(폴백).
+
+        equity 층이 필드마다 확정한 공개시차가 정본이다(TECH_DEBT §4). 어댑터의
+        `SourceSpec.lag_sessions` 는 이 표가 없는 루트를 위한 폴백이며, 둘이 갈리면 대장이 이긴다.
+        """
+        if PROFILE_TABLE not in self._tables:
+            return {}
+        con = _open(None)
+        try:
+            rows = con.execute(
+                "SELECT field_id, recommended_lag_sessions, available_date_basis "
+                f"FROM {self._source(PROFILE_TABLE)}"
+            ).fetchall()
+        except duckdb.Error as exc:  # 컬럼이 없는 구판 표 — 폴백으로 내려간다
+            raise EquityDuckdbSetupError(
+                f"{PROFILE_TABLE} exists but is unreadable — root={self._root} error={exc}"
+            ) from exc
+        finally:
+            con.close()
+        return {
+            str(field_id): (int(lag), str(basis))
+            for field_id, lag, basis in rows
+            if field_id is not None and lag is not None
+        }
+
+    def _field_lag(self, field_id: str) -> tuple[int, str]:
+        """field_id 의 (랙, 근거). 대장에 있으면 대장, 없으면 원천 상수 폴백."""
+        entry = self._profile.get(field_id)
+        if entry is not None:
+            return entry
+        source = SOURCE_BY_NAME[self._fields[field_id].source]
+        return source.lag_sessions, f"{source.lag_basis} (fallback: no {PROFILE_TABLE} row)"
 
     def _load_policies(self) -> dict[str, tuple[str, ...]]:
         con = _open(None)
@@ -432,6 +468,7 @@ class EquityDuckdbAdapter:
         for spec in self._fields.values():
             source = SOURCE_BY_NAME[spec.source]
             pct, starts_on = coverage[spec.field_id]
+            lag_sessions, lag_basis = self._field_lag(spec.field_id)
             profiles.append(
                 DatasetFieldProfile(
                     field_id=spec.field_id,
@@ -440,8 +477,8 @@ class EquityDuckdbAdapter:
                     unit=spec.unit,
                     value_type=spec.value_type,
                     frequency=source.frequency,
-                    available_date_basis=source.lag_basis,
-                    recommended_lag_sessions=source.lag_sessions,
+                    available_date_basis=lag_basis,
+                    recommended_lag_sessions=lag_sessions,
                     description=f"[{spec.verdict}] {spec.description}",
                     disclosure_basis=spec.disclosure_basis,
                     evidence=spec.evidence,
@@ -1024,11 +1061,8 @@ class EquityDuckdbAdapter:
         return detail + (" " + " | ".join(notes) if notes else "")
 
     def _lags(self, field_ids: Sequence[str], overrides: Sequence[object]) -> dict[str, int]:
-        """field_id → 세션 랙. 기본은 원천의 컬럼군 상수이고 질의의 override 가 이긴다."""
-        lags = {
-            field_id: SOURCE_BY_NAME[self._fields[field_id].source].lag_sessions
-            for field_id in field_ids
-        }
+        """field_id → 세션 랙. 기본은 `dataset_profile` 값이고 질의의 override 가 이긴다."""
+        lags = {field_id: self._field_lag(field_id)[0] for field_id in field_ids}
         for item in overrides:
             field_id = getattr(item, "field_id", None)
             sessions = getattr(item, "sessions", None)

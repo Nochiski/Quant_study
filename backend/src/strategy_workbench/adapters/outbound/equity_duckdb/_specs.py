@@ -23,10 +23,11 @@ DESIGN §4-4·§4-5) 어댑터가 `corp_ticker` 로 전개하며, **한 법인�
 보통주 DPS 를 받는다 — FIELD_MAP §2 `event.dividend_per_share` 부분 판정의 근거 ②). `corp_ticker`
 는 시점축 없는 현재 스냅샷이라 폐지·티커 재사용 구간에서 대응이 어긋날 수 있다(DESIGN §4-5 6).
 
-랙은 컬럼군별 상수(`lag_sessions`)다 — `dataset_profile`(S19)이 아직 없어서다. 값과 근거는
-`views.py`(`PRICE_LAG_SESSIONS`·`FACTOR_LAG_SESSIONS`·`CONSENSUS_LAG_SESSIONS`·`FIN_LAG_SESSIONS`)
-와 각 `rules_s*.py` 의 `available_rule` 을 옮긴 것이고 `lag_basis` 에 근거를 적었다. S19 가 오면
-프로필 값으로 갈아 끼운다. 소비자는 질의의 `lag_overrides` 로 필드마다 늘릴 수 있다.
+랙의 정본은 **`dataset_profile`(S19)의 `recommended_lag_sessions`** 이고, 어댑터가 부팅할 때
+읽어 field_id 마다 적용한다. 아래 `SourceSpec.lag_sessions`·`lag_basis` 는 그 표가 없는 루트
+(구판·손 픽스처)를 위한 **폴백**일 뿐이며, 폴백이 쓰이면 `list_fields()` 의 `available_date_basis`
+에 그 사실이 드러난다. 두 값이 갈리면 대장이 이긴다 — 어댑터가 자기 상수로 PIT 를 우기면
+공개 전 값을 내주게 된다(TECH_DEBT §4). 소비자는 질의의 `lag_overrides` 로 필드마다 늘릴 수 있다.
 
 여기 없는 field_id(FIELD_MAP 42 중 13)는 `list_fields()` 밖이고 질의하면 `INVALID_QUERY` 다
 (mock 폴백 없음) — 사유는 `UNSUPPORTED_FIELDS` 가 field_id 마다 적어 둔다.
@@ -43,6 +44,7 @@ PRICE_TABLE = "price_daily"
 CALENDAR_TABLE = "trading_calendar"
 SPAN_TABLE = "security_span"
 UNIVERSE_TABLE = "universe_daily"
+PROFILE_TABLE = "dataset_profile"
 POLICY_TABLE = "universe_policy"
 SECURITY_TABLE = "security"
 FACTOR_TABLE = "adj_factor"

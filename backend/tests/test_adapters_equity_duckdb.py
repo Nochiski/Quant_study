@@ -59,6 +59,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
 )
 from tests.equity_fixture import (
     WB_HALT_DATE,
+    WB_PROFILE_LAG_ZERO,
     WB_SESSIONS,
     WB_SPLIT_DATE,
     build_workbench_root,
@@ -138,7 +139,12 @@ def test_list_fields_serves_every_declared_field_whose_source_is_built(
 ) -> None:
     profiles = {p.field_id: p for p in adapter.list_fields()}
     assert set(profiles) == set(ALL_FIELDS)
-    assert all(p.recommended_lag_sessions == 0 for p in profiles.values())
+    # 랙의 정본은 `dataset_profile` 이다 — 어댑터 상수가 아니라 대장 값이 나와야 한다.
+    assert {f: profiles[f].recommended_lag_sessions for f in ALL_FIELDS} == {
+        f: (0 if f in WB_PROFILE_LAG_ZERO else 1) for f in ALL_FIELDS
+    }
+    assert profiles["price.close"].available_date_basis == "session_close"
+    assert profiles["credit.margin_balance"].available_date_basis == "next_session_open"
     assert all(p.coverage.venues == ("XKRX",) for p in profiles.values())
     assert all(p.coverage.point_in_time for p in profiles.values())  # adj_close 도 전방 조정
     assert profiles["price.close"].coverage.estimated_coverage_pct == 100.0
@@ -214,18 +220,24 @@ def test_adj_close_is_raw_close_scaled_by_factors_applied_on_or_before_the_row(
     late = _raw(adapter, start=date(2024, 1, 2), end=END)
     assert _field(late, before, "000660:1", "price.adj_close") == 103_500.0
     assert _field(late, WB_SPLIT_DATE, "000660:1", "price.adj_close") == 104_000.0
-    # 공개일 = greatest(원주가 공개일, 접힌 계수 공개일) = 세션 (계수 available = apply = 01-08)
+    # 공개일 = greatest(원주가 공개일, 접힌 계수 공개일) = 세션 (계수 available = apply = 01-08).
+    # 랙은 필드마다 `dataset_profile` 값을 따른다 — 가격 축 0세션, 시총 1세션(직전 세션 공개).
     split = next(
         o for o in result.observations if (o.as_of, o.security_id) == (WB_SPLIT_DATE, "000660:1")
     )
-    assert {f.available_date for f in split.fields} == {WB_SPLIT_DATE}
+    assert {f.field_id: f.available_date for f in split.fields} == {
+        "price.close": WB_SPLIT_DATE,
+        "price.adj_close": WB_SPLIT_DATE,
+        "price.market_cap": before,
+    }
 
 
 def test_missing_market_cap_is_a_none_value_not_an_omission(adapter: EquityDuckdbAdapter) -> None:
-    result = _raw(adapter)
+    result = _raw(adapter, history=1)
     assert _field(result, START, "035420:1", "price.market_cap") is None
+    # 시총은 `dataset_profile` 이 1세션으로 확정한 필드다 — START 세션에는 직전 세션 값이 온다.
     assert _field(result, START, "005930:1", "price.market_cap") == wb_close(
-        "005930", START
+        "005930", date(2024, 1, 5)
     ) * 5_969_782_550
 
 
@@ -301,20 +313,23 @@ def test_financials_are_the_latest_filing_and_every_share_class_shares_them(
 ) -> None:
     """법인 축 재무는 `corp_ticker` 로 전개된다 — 005930 과 우선주 005935 가 같은 값이다."""
     result = _raw(adapter, start=date(2024, 1, 3), end=END, fields=ALL_FIELDS, universe="krx.all")
-    # 01-03 에는 3분기 보고서(2023-11-14 공개)가 최신, 01-04 부터 사업보고서(01-04 공개)
-    early = _cell(result, date(2024, 1, 3), "005930:1", "financial.revenue")
+    # 재무는 `dataset_profile` 이 1세션으로 확정한 필드다 — 01-04 에 공개된 사업보고서는 그날이
+    # 아니라 **다음 세션(01-05)** 부터 보인다. 공시가 장 마감 뒤에 올라오므로 당일 매매에 쓸 수
+    # 없다(TECH_DEBT §4 — 이 랙이 0이던 동안 확정 look-ahead 였다).
+    early = _cell(result, date(2024, 1, 4), "005930:1", "financial.revenue")
     assert (early.value, early.available_date) == (120.0, date(2023, 11, 14))
-    late = _cell(result, date(2024, 1, 4), "005930:1", "financial.revenue")
+    late = _cell(result, date(2024, 1, 5), "005930:1", "financial.revenue")
     assert (late.value, late.available_date) == (460.0, date(2024, 1, 4))
     assert _field(result, START, "005930:1", "financial.book_equity") == 615.0
     assert _field(result, START, "005935:1", "financial.book_equity") == 615.0  # 같은 법인
     assert _field(result, START, "005930:1", "financial.operating_cash_flow") == 150.0
     # 같은 grain 의 CFS·OFS 중 v_fin_latest 가 CFS 를 고른다(OFS 는 9,999 로 깔아 뒀다)
     assert _field(result, START, "000660:1", "financial.book_equity") == 1_200.0
-    # 값이 없는 계정은 셀이 나가되 MISSING 이고, 있는 계정은 OBSERVED 다(같은 행에서 갈린다)
-    missing = _cell(result, date(2024, 1, 9), "036220:2", "financial.revenue")
+    # 값이 없는 계정은 셀이 나가되 MISSING 이고, 있는 계정은 OBSERVED 다(같은 행에서 갈린다).
+    # 036220 의 보고서 공개일은 01-09 이고 랙 1세션이라 01-10 부터 보인다.
+    missing = _cell(result, date(2024, 1, 10), "036220:2", "financial.revenue")
     assert (missing.value, missing.kind) == (None, CellKind.MISSING)
-    assert _field(result, date(2024, 1, 9), "036220:2", "financial.net_income") == 7.0
+    assert _field(result, date(2024, 1, 10), "036220:2", "financial.net_income") == 7.0
     # 재무 원천이 없는 종목(ETF)은 셀 자체가 없다 — mock 값으로 채우지 않는다
     assert not _has(result, START, "069500:1", "financial.revenue")
     # 창 독립: 같은 셀은 창을 좁혀도 같다(as-of 값은 (security, 컷오프) 의 함수다)
@@ -331,79 +346,88 @@ def test_consensus_picks_the_nearest_target_period_and_the_measured_source(
     # 2023-12 관측점의 FY1 = 202312(5,000원) · 범위 = 6,000 − 4,000
     assert _field(result, date(2024, 1, 4), "005930:1", "consensus.forward_eps") == 5_000.0
     assert _field(result, date(2024, 1, 4), "005930:1", "consensus.eps_dispersion") == 2_000.0
-    # 2024-01 관측점(01-05 공개)이 오면 FY1 이 202412 로 넘어간다
-    later = _cell(result, date(2024, 1, 5), "005930:1", "consensus.forward_eps")
+    # 2024-01 관측점(01-05 공개)이 오면 FY1 이 202412 로 넘어간다 — 랙 1세션이라 다음 세션(01-08)
+    assert _field(result, date(2024, 1, 5), "005930:1", "consensus.forward_eps") == 5_000.0
+    later = _cell(result, date(2024, 1, 8), "005930:1", "consensus.forward_eps")
     assert (later.value, later.available_date) == (6_500.0, date(2024, 1, 5))
-    assert _field(result, date(2024, 1, 5), "005930:1", "consensus.eps_dispersion") == 1_200.0
-    assert _field(result, date(2024, 1, 5), "005930:1", "consensus.forward_sales") == 3_000_000.0
-    # 같은 (ticker, obs_date) 의 v3·wise 중 잰 판본(wise, 95,000)이 이긴다
-    assert _field(result, date(2024, 1, 4), "005930:1", "consensus.target_price") == 95_000.0
-    assert _field(result, date(2024, 1, 4), "005930:1", "consensus.recommendation") == 4.1
-    assert _field(result, date(2024, 1, 4), "005930:1", "consensus.analyst_count") == 28.0
-    # wise 가 없는 날은 v3 를 쓴다(coverage_degraded — 프로필이 그렇게 말한다)
-    assert _field(result, date(2024, 1, 9), "005930:1", "consensus.target_price") == 97_000.0
+    assert _field(result, date(2024, 1, 8), "005930:1", "consensus.eps_dispersion") == 1_200.0
+    assert _field(result, date(2024, 1, 8), "005930:1", "consensus.forward_sales") == 3_000_000.0
+    # 같은 (ticker, obs_date) 의 v3·wise 중 잰 판본(wise, 95,000)이 이긴다 — 관측 01-04, 랙 1세션
+    assert _field(result, date(2024, 1, 5), "005930:1", "consensus.target_price") == 95_000.0
+    assert _field(result, date(2024, 1, 5), "005930:1", "consensus.recommendation") == 4.1
+    assert _field(result, date(2024, 1, 5), "005930:1", "consensus.analyst_count") == 28.0
+    # wise 가 없는 날은 v3 를 쓴다(coverage_degraded — 프로필이 그렇게 말한다). 관측 01-09 → 01-10
+    assert _field(result, date(2024, 1, 10), "005930:1", "consensus.target_price") == 97_000.0
 
 
 def test_event_fields_are_the_latest_filing_with_its_publication_date(
     adapter: EquityDuckdbAdapter,
 ) -> None:
     result = _raw(adapter, start=date(2024, 1, 4), end=END, fields=ALL_FIELDS, universe="krx.all")
-    # 자사주 취득 결정 2건이 같은 공시일에 있으면 합한다(다른 event_type 은 섞이지 않는다)
-    buyback = _cell(result, date(2024, 1, 5), "005930:1", "event.buyback_amount")
+    # 자사주 취득 결정 2건이 같은 공시일에 있으면 합한다(다른 event_type 은 섞이지 않는다).
+    # 이벤트 축도 랙 1세션이라 공시일(01-05)이 아니라 다음 세션(01-08)부터 보인다.
+    buyback = _cell(result, START, "005930:1", "event.buyback_amount")
     assert (buyback.value, buyback.available_date) == (1_500_000.0, date(2024, 1, 5))
-    assert not _has(result, date(2024, 1, 4), "005930:1", "event.buyback_amount")
+    assert not _has(result, date(2024, 1, 5), "005930:1", "event.buyback_amount")
     # 임원 지분 증감은 같은 접수일의 보고자를 합하고(1,000 − 400) majorstock 은 빼놓는다
-    insider = _cell(result, date(2024, 1, 9), "005930:1", "event.insider_net_buy")
+    insider = _cell(result, date(2024, 1, 10), "005930:1", "event.insider_net_buy")
     assert (insider.value, insider.available_date) == (600.0, date(2024, 1, 9))
-    assert not _has(result, START, "005930:1", "event.insider_net_buy")
+    assert not _has(result, date(2024, 1, 9), "005930:1", "event.insider_net_buy")
     # 보고가 값 없이 하나뿐이면 합도 결측이다(0 으로 접지 않는다)
-    empty = _cell(result, date(2024, 1, 9), "000660:1", "event.insider_net_buy")
+    empty = _cell(result, date(2024, 1, 10), "000660:1", "event.insider_net_buy")
     assert (empty.value, empty.kind) == (None, CellKind.MISSING)
     # 배당은 종류 축을 접어 보통주 값이 우선주 티커에도 간다(FIELD_MAP 부분 판정 ②)
     old = _cell(result, START, "005930:1", "event.dividend_per_share")
     assert (old.value, old.available_date) == (361.0, date(2023, 3, 7))
     assert _field(result, START, "005935:1", "event.dividend_per_share") == 361.0
-    assert _field(result, date(2024, 1, 9), "005930:1", "event.dividend_per_share") == 400.0
+    assert _field(result, date(2024, 1, 10), "005930:1", "event.dividend_per_share") == 400.0
 
 
 def test_grid_fields_carry_the_missing_reason_and_never_a_synthetic_zero(
     adapter: EquityDuckdbAdapter,
 ) -> None:
     """S08~S10 격자 — `fill_kind` → `CellKind`, 0 채움 금지, 겹친 셀의 원천 선택."""
-    result = _raw(adapter, start=START, end=END, fields=ALL_FIELDS)
+    # 격자 3표는 `dataset_profile` 이 1세션으로 확정한 축이다(원장이 다음 날 공표된다). 그래서
+    # 원장 행의 날짜와 그 값이 보이는 세션이 한 칸 어긋난다 — `seen()` 이 그 사상을 이름 붙인다.
+    def seen(row_date: date) -> date:
+        return WB_SESSIONS[WB_SESSIONS.index(row_date) + 1]
+
+    result = _raw(adapter, start=START, end=END, fields=ALL_FIELDS, history=1)
     # ① 같은 (ticker, date) 에 kiwoom·kis 두 행이 있으면 키움을 고른다(KIS 9,999 는 나오면 안 된다)
-    assert _field(result, START, "005930:1", "flow.foreign_net_buy") == -1_000_000.0
-    assert _field(result, START, "005930:1", "flow.retail_net_buy") == 3_000_000.0
-    assert _field(result, START, "005930:1", "flow.institution_net_buy") == -2_000_000.0
+    assert _field(result, seen(START), "005930:1", "flow.foreign_net_buy") == -1_000_000.0
+    assert _field(result, seen(START), "005930:1", "flow.retail_net_buy") == 3_000_000.0
+    assert _field(result, seen(START), "005930:1", "flow.institution_net_buy") == -2_000_000.0
     # 키움이 없는 셀은 KIS 단독 행이 그대로 나간다
-    assert _field(result, START, "000660:1", "flow.foreign_net_buy") == -200_000.0
+    assert _field(result, seen(START), "000660:1", "flow.foreign_net_buy") == -200_000.0
     # ② 진짜 0 은 OBSERVED 다 — 결측과 섞이지 않는다
-    zero = _cell(result, date(2024, 1, 11), "005930:1", "flow.foreign_net_buy")
+    zero = _cell(result, seen(date(2024, 1, 11)), "005930:1", "flow.foreign_net_buy")
     assert (zero.value, zero.kind) == (0.0, CellKind.OBSERVED)
     # ③ src_omitted 는 값이 NULL 이라 MISSING 으로 접힌다(SOURCE_OMITTED_ZERO 는 값을 요구한다)
-    omitted = _cell(result, date(2024, 1, 9), "005930:1", "flow.foreign_net_buy")
+    omitted = _cell(result, seen(date(2024, 1, 9)), "005930:1", "flow.foreign_net_buy")
     assert (omitted.value, omitted.kind) == (None, CellKind.MISSING)
     # ④ not_collected 는 라벨이 살아 남는다 — '안 물어봤다' 와 '물었는데 없다' 는 다르다
-    absent = _cell(result, WB_HALT_DATE, "005930:1", "flow.retail_net_buy")
+    absent = _cell(result, seen(WB_HALT_DATE), "005930:1", "flow.retail_net_buy")
     assert (absent.value, absent.kind) == (None, CellKind.NOT_COLLECTED)
-    # ⑤ 원장 행이 아예 없는 세션은 셀 자체가 없다(직전 값을 물지 않는다)
-    assert not _has(result, END, "005930:1", "flow.foreign_net_buy")
+    # ⑤ 원장 행이 아예 없는 세션은 셀 자체가 없다(직전 값을 물지 않는다) — START 는 01-05 를 본다
+    assert not _has(result, START, "005930:1", "flow.foreign_net_buy")
     # ⑥ short 는 원천을 고정한다 — 공매도는 키움 축, 대차는 KIS 축이고 사유 컬럼도 각자다
-    assert _field(result, START, "005930:1", "short.short_sale_value") == 70_000_000.0
-    loan = _cell(result, START, "005930:1", "short.borrowed_quantity")
+    assert _field(result, seen(START), "005930:1", "short.short_sale_value") == 70_000_000.0
+    loan = _cell(result, seen(START), "005930:1", "short.borrowed_quantity")
     assert (loan.value, loan.kind) == (None, CellKind.NOT_COLLECTED)
-    sale = _cell(result, date(2024, 1, 9), "005930:1", "short.short_sale_value")
+    sale = _cell(result, seen(date(2024, 1, 9)), "005930:1", "short.short_sale_value")
     assert (sale.value, sale.kind) == (None, CellKind.MISSING)   # src_omitted
-    assert _field(result, date(2024, 1, 9), "005930:1", "short.borrowed_quantity") == 12_345.0
-    assert _field(result, WB_HALT_DATE, "005930:1", "short.borrowed_quantity") == -50.0  # 음수 보존
+    assert _field(result, seen(date(2024, 1, 9)), "005930:1", "short.borrowed_quantity") == 12_345.0
+    assert _field(  # 음수 보존
+        result, seen(WB_HALT_DATE), "005930:1", "short.borrowed_quantity"
+    ) == -50.0
     # ⑦ 신용잔고 — measured 값, src_omitted·empty_response 는 MISSING, not_collected 는 그대로
-    assert _field(result, START, "005930:1", "credit.margin_balance") == 8_359_855.0
+    assert _field(result, seen(START), "005930:1", "credit.margin_balance") == 8_359_855.0
     for session, kind in (
         (date(2024, 1, 9), CellKind.MISSING),        # src_omitted — 0 으로 굳히지 않는다
         (WB_HALT_DATE, CellKind.NOT_COLLECTED),
         (date(2024, 1, 11), CellKind.MISSING),       # empty_response(잔고 이상 격리 셀)
     ):
-        cell = _cell(result, session, "005930:1", "credit.margin_balance")
+        cell = _cell(result, seen(session), "005930:1", "credit.margin_balance")
         assert (cell.value, cell.kind) == (None, kind), session
     # ⑧ 프로필이 낼 수 있는 셀 종류를 선언한다 — 격자만 NOT_COLLECTED 를 갖는다
     profiles = {p.field_id: p for p in adapter.list_fields()}

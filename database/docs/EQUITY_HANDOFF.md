@@ -493,6 +493,30 @@ scp database/src/equity/baseline_locked.json kael-server:~/quant-ledger/data/equ
 
 ---
 
+## 8-4. 2026-09-07 외국인 보유 연결 (e1.10.0)
+
+`flow_daily` 에 `foreign_wght_pct`·`foreign_limit_exh_pct`·`foreign_poss_shr` 3컬럼이 붙었다.
+원천 `stg_foreign_daily`(키움 ka10008)는 서버 7,682,844행 · 2,602종목 · 2009-10-15 ~ 2026-08-24 ·
+**결측 0** 인데 아무도 읽지 않고 있었다.
+
+| 축 | 결과 |
+|---|---|
+| `flow_daily` | 9,201,516행(**불변**) · 2회 빌드 해시 동일 `9201516:cbb88b0b4a27244a` · EG5a PASS |
+| 채움 | `src='kiwoom'` 7,537,984 / 7,540,202 · **`src='kis'` 0** (원천 축이 없다 — NULL, 0 아님) |
+| `dataset_profile` | 72 → **74행** |
+| `factor_readiness` | **ready 37 → 39** · blocked 17 → 15 |
+| FIELD_MAP §2 어휘 | 42 → **43** (`flow.foreign_limit_exhaustion` 신설 — F08 이 이름으로 요구하는데 행이 없었다) |
+
+**행 수가 안 변한 것이 설계 의도다.** 격자 등식(EG1)은 (date, ticker) 축이라 컬럼이 붙어도
+모집단이 그대로다. 별도 표를 만들지 않은 이유가 이것이다.
+
+**다음으로 같은 성격의 것이 하나 더 있다** — `stg_lending_daily`(키움 대차) 6,988,296행 ·
+2011-07-25 ~ 2026-08-20 · 결측 0 인데 미사용이고, 지금 `short.borrowed_quantity` 는 커버
+**5.58%** 의 KIS 축만 쓴다. 단위만 확인하면 사실상 전 종목으로 뛴다(BLOCKED_FACTORS §9-2).
+EG2 테스트의 「덮이지 않은 `lag_known=false` 원천」 예가 이번에 그리로 옮겨 갔다.
+
+---
+
 ## 9. 미해결 후속
 
 정본은 DESIGN §11 이다. 여기엔 **다음 사람이 곧바로 집을 수 있는 것**만 골라 적는다.

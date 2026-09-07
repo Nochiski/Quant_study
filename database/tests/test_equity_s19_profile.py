@@ -48,8 +48,9 @@ CHAIN: tuple[str, ...] = (
     "opinion_daily", "opinion_broker_daily")
 
 # 2026-09-07 S08-2: `flow.foreign_ownership`·`flow.foreign_limit_exhaustion` 선언(72 → 74).
-N_FIELDS = 75                    # 선언 행수 — 코드가 정본이라 서버에서도 같다
-N_FIELD_MAP_SCOPE = 33           # FIELD_MAP §2 42 어휘 중 프로파일 행을 갖는 것
+# 2026-09-07 S02-2: `benchmark.close` 선언(75 → 76, R04 시장 베타).
+N_FIELDS = 76                    # 선언 행수 — 코드가 정본이라 서버에서도 같다
+N_FIELD_MAP_SCOPE = 34           # FIELD_MAP §2 42 어휘 중 프로파일 행을 갖는 것
 N_INTERNAL_SCOPE = 42            # equity 내부 스코프(price.adj_close·fin_std 계정·4B·유니버스 …)
 N_FIELD_MAP_VOCAB = 44           # FIELD_MAP §2 표의 field_id 수 (check_field_map.py 와 같은 축)
                                  # 2026-09-07: `flow.foreign_limit_exhaustion` 신설(F08 재료)
@@ -156,8 +157,9 @@ def test_대응표_어휘_중_행이_없는_필드는_어댑터의_unavailable_�
     got = {f for (f,) in _rows(r.out_dir, "SELECT field_id FROM dp")}
     absent = sorted(_field_map_vocab() - got)
     assert absent == sorted([
-        # 원천 부재 10 (FIELD_MAP §3 미지원 + GAP-09 benchmark)
-        "benchmark.close", "flow.block_buy", "flow.block_sell", "credit.net_buy",
+        # 원천 부재 9 (FIELD_MAP §3 미지원). `benchmark.close` 는 2026-09-07 S02-2 로
+        # `index_daily` 위에 선언됐다 — 어댑터의 `idx:` 통로 개설은 별개다
+        "flow.block_buy", "flow.block_sell", "credit.net_buy",
         "credit.collateral_value", "credit.loan_value", "credit.forced_liquidation",
         "event.earnings_surprise", "event.index_membership_change",
         "event.disclosure_sentiment",

@@ -37,9 +37,10 @@ REGISTRY_DOC = Path(__file__).parents[2] / "backend" / "FACTORS.md"
 # 2026-09-07 S08-2: `stg_foreign_daily` 를 flow_daily 에 이어 F02·F08 이 열렸다.
 # 2026-09-07 F05: 요구 재료를 실재하는 `short.short_sale_volume` 로 정정해 열렸다.
 # 2026-09-07 GAP-03 종결: 「기관」 = 원장 합계로 확정해 F03 이 열렸다.
-N_READY = 41
-N_BLOCKED = 13
-BLOCKED_REASON_COUNTS = {"field_unavailable": 2, "partial_support": 11}
+# 2026-09-07 S02-2: `benchmark.close` 선언으로 R04(시장 베타)가 열렸다.
+N_READY = 42
+N_BLOCKED = 12
+BLOCKED_REASON_COUNTS = {"field_unavailable": 1, "partial_support": 11}
 READINESS_GATES = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG10", "EG4", "EG5a"]
 
 

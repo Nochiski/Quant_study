@@ -232,15 +232,21 @@ def test_격자_3테이블은_어댑터가_내는_6필드만_선언한다(built)
         assert pit is True, field_id
 
 
-def test_격자_필드_중_미결_조건이_남은_것은_기관_순매수_하나다(built) -> None:
-    """GAP-03 — `orgn` 은 원장의 합계 컬럼인데 기관 7주체 합과 다르고 값의 기준이 공표되지
-    않았다. 합계 컬럼을 쓸지 7주체를 다시 합할지가 소비 측에 남아 S20 이 partial_support 로
-    옮긴다. 나머지 5필드는 단위·산출 규칙·원천 선택이 전부 닫혀 있다."""
+def test_격자_필드에_미결_조건이_남지_않았다(built) -> None:
+    """GAP-03 이 2026-09-07 에 닫히며 격자 축의 미결이 없어졌다.
+
+    `orgn` 은 원장의 합계 컬럼인데 기관 7주체 합과 달라 「합계를 쓸지 7주체를 다시 합할지」가
+    소비 측에 남아 있었다. 서버 전수 실측이 그 질문에 답했다 — **부분의 합으로는 재구성되지
+    않는다**: 7주체 정확 일치 80.9% · 100만원 이내 94.0%, 국가를 더한 8주체도 82.9% / 97.7% 다.
+    어긋나는 방향이 부호 반반(−728,422 / +708,362)이고 결측과 무관해 특정 주체가 빠진 것이
+    아니라 원장 자체의 잡음이다. **원장이 정본**이라는 원칙대로 합계 컬럼을 쓰고, 7주체는
+    그대로 다 나가므로 소비자가 재합산할 수 있다.
+    """
     _, r = built
     got = dict(_rows(r.out_dir, "SELECT field_id, requires_confirmation FROM dp "
                                 "WHERE table_name IN ('flow_daily', 'short_daily', "
                                 "'credit_daily') ORDER BY 1"))
-    assert {k for k, v in got.items() if v} == {"flow.institution_net_buy"}
+    assert {k for k, v in got.items() if v} == set()
 
 
 def test_격자_필드의_stage_원천은_그_테이블의_원장을_포함한다(built) -> None:

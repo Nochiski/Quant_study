@@ -1,0 +1,107 @@
+{
+ "table": "stg_v3_revision_daily",
+ "current_build": "b_20260902T164559_798057Z",
+ "keep": 3,
+ "builds": [
+  {
+   "build_id": "b_20260902T164559_798057Z",
+   "snapshot_id": "snap_20260902T154207Z",
+   "rules_version": "2.2.3",
+   "built_at_utc": "2026-09-02T16:46:00+00:00",
+   "n_rows": 494,
+   "content_hash": "63175:536b04f45a66024",
+   "partitions": [
+    {
+     "path": "v=b_20260902T164559_798057Z/year=2026",
+     "n_rows": 494
+    }
+   ],
+   "gates": [
+    {
+     "name": "G0",
+     "status": "pass",
+     "detail": "선언 대조",
+     "metrics": {
+      "missing_columns": [],
+      "n_len_mismatch": 0
+     }
+    },
+    {
+     "name": "G1",
+     "status": "pass",
+     "detail": "stage=63175 expected=63175",
+     "metrics": {
+      "n_src": 63175,
+      "fanout": 1,
+      "n_dedup": 0,
+      "n_reject": 0,
+      "n_stage": 63175
+     }
+    },
+    {
+     "name": "G2",
+     "status": "pass",
+     "detail": "cast_failed rows=0 ratio=0.000000 limit=0.0",
+     "metrics": {
+      "n_partial": 0,
+      "ratio": 0.0,
+      "limit": 0.0
+     }
+    },
+    {
+     "name": "G3",
+     "status": "pass",
+     "detail": "불변식 전부 성립",
+     "metrics": {}
+    },
+    {
+     "name": "G4",
+     "status": "skip",
+     "detail": "no_fixtures",
+     "metrics": {}
+    },
+    {
+     "name": "G5",
+     "status": "pass",
+     "detail": "Δstage=0 expected=0",
+     "metrics": {
+      "d_src": 0,
+      "d_dedup": 0,
+      "d_reject": 0,
+      "d_stage": 0
+     }
+    },
+    {
+     "name": "G6",
+     "status": "skip",
+     "detail": "write_mode=first_write_wins",
+     "metrics": {}
+    },
+    {
+     "name": "G7",
+     "status": "pass",
+     "detail": "out_of_range rows=0 cells=0 ratio=0.000000 limit=0.001 observed∈[1999,2027] content∈[1956,2066]",
+     "metrics": {
+      "n_out_of_range": 0,
+      "n_out_of_range_rows": 0,
+      "n_out_of_range_cells": 0,
+      "ratio": 0.0,
+      "limit": 0.001
+     }
+    },
+    {
+     "name": "G8",
+     "status": "skip",
+     "detail": "not_blob",
+     "metrics": {}
+    },
+    {
+     "name": "G9",
+     "status": "skip",
+     "detail": "no_cross_check",
+     "metrics": {}
+    }
+   ]
+  }
+ ]
+}

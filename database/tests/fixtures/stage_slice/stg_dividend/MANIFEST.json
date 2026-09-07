@@ -1,58 +1,58 @@
 {
  "table": "stg_dividend",
- "current_build": "b_20260902T164422_064203Z",
+ "current_build": "b_20260905T105916_671881Z",
  "keep": 3,
  "builds": [
   {
-   "build_id": "b_20260902T164422_064203Z",
-   "snapshot_id": "snap_20260902T154207Z",
+   "build_id": "b_20260905T105916_671881Z",
+   "snapshot_id": "snap_20260902T230100Z",
    "rules_version": "2.2.3",
-   "built_at_utc": "2026-09-02T16:44:25+00:00",
+   "built_at_utc": "2026-09-05T10:59:20+00:00",
    "n_rows": 1227,
-   "content_hash": "384232:b8e328944b209d4f",
+   "content_hash": "384232:1edd954ba13f4bc0",
    "partitions": [
     {
-     "path": "v=b_20260902T164422_064203Z/year=2016",
+     "path": "v=b_20260905T105916_671881Z/year=2016",
      "n_rows": 112
     },
     {
-     "path": "v=b_20260902T164422_064203Z/year=2017",
+     "path": "v=b_20260905T105916_671881Z/year=2017",
      "n_rows": 120
     },
     {
-     "path": "v=b_20260902T164422_064203Z/year=2018",
+     "path": "v=b_20260905T105916_671881Z/year=2018",
      "n_rows": 105
     },
     {
-     "path": "v=b_20260902T164422_064203Z/year=2019",
+     "path": "v=b_20260905T105916_671881Z/year=2019",
      "n_rows": 120
     },
     {
-     "path": "v=b_20260902T164422_064203Z/year=2020",
+     "path": "v=b_20260905T105916_671881Z/year=2020",
      "n_rows": 120
     },
     {
-     "path": "v=b_20260902T164422_064203Z/year=2021",
+     "path": "v=b_20260905T105916_671881Z/year=2021",
      "n_rows": 105
     },
     {
-     "path": "v=b_20260902T164422_064203Z/year=2022",
+     "path": "v=b_20260905T105916_671881Z/year=2022",
      "n_rows": 90
     },
     {
-     "path": "v=b_20260902T164422_064203Z/year=2023",
+     "path": "v=b_20260905T105916_671881Z/year=2023",
      "n_rows": 122
     },
     {
-     "path": "v=b_20260902T164422_064203Z/year=2024",
+     "path": "v=b_20260905T105916_671881Z/year=2024",
      "n_rows": 106
     },
     {
-     "path": "v=b_20260902T164422_064203Z/year=2025",
+     "path": "v=b_20260905T105916_671881Z/year=2025",
      "n_rows": 106
     },
     {
-     "path": "v=b_20260902T164422_064203Z/year=2026",
+     "path": "v=b_20260905T105916_671881Z/year=2026",
      "n_rows": 121
     }
    ],
@@ -123,7 +123,7 @@
     {
      "name": "G7",
      "status": "pass",
-     "detail": "out_of_range rows=0 cells=0 ratio=0.000000 limit=0.001 observed∈[1999,2027] content∈[1956,2066]",
+     "detail": "out_of_range rows=0 cells=0 ratio=0.000000 limit=0.001 observed∈[1999,2027] content∈[1900,2066]",
      "metrics": {
       "n_out_of_range": 0,
       "n_out_of_range_rows": 0,

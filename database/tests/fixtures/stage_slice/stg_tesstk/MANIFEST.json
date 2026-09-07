@@ -1,59 +1,59 @@
 {
- "table": "stg_shares",
- "current_build": "b_20260905T105920_276363Z",
+ "table": "stg_tesstk",
+ "current_build": "b_20260905T105926_132137Z",
  "keep": 3,
  "builds": [
   {
-   "build_id": "b_20260905T105920_276363Z",
+   "build_id": "b_20260905T105926_132137Z",
    "snapshot_id": "snap_20260902T230100Z",
    "rules_version": "2.2.3",
-   "built_at_utc": "2026-09-05T10:59:22+00:00",
-   "n_rows": 319,
-   "content_hash": "97194:5bbdf22332029e89",
+   "built_at_utc": "2026-09-05T10:59:30+00:00",
+   "n_rows": 1162,
+   "content_hash": "328704:8540a61095a69496",
    "partitions": [
     {
-     "path": "v=b_20260905T105920_276363Z/year=2016",
-     "n_rows": 29
+     "path": "v=b_20260905T105926_132137Z/year=2016",
+     "n_rows": 93
     },
     {
-     "path": "v=b_20260905T105920_276363Z/year=2017",
-     "n_rows": 32
+     "path": "v=b_20260905T105926_132137Z/year=2017",
+     "n_rows": 93
     },
     {
-     "path": "v=b_20260905T105920_276363Z/year=2018",
-     "n_rows": 28
+     "path": "v=b_20260905T105926_132137Z/year=2018",
+     "n_rows": 92
     },
     {
-     "path": "v=b_20260905T105920_276363Z/year=2019",
-     "n_rows": 31
+     "path": "v=b_20260905T105926_132137Z/year=2019",
+     "n_rows": 93
     },
     {
-     "path": "v=b_20260905T105920_276363Z/year=2020",
-     "n_rows": 31
+     "path": "v=b_20260905T105926_132137Z/year=2020",
+     "n_rows": 93
     },
     {
-     "path": "v=b_20260905T105920_276363Z/year=2021",
-     "n_rows": 27
+     "path": "v=b_20260905T105926_132137Z/year=2021",
+     "n_rows": 109
     },
     {
-     "path": "v=b_20260905T105920_276363Z/year=2022",
-     "n_rows": 23
+     "path": "v=b_20260905T105926_132137Z/year=2022",
+     "n_rows": 91
     },
     {
-     "path": "v=b_20260905T105920_276363Z/year=2023",
-     "n_rows": 31
+     "path": "v=b_20260905T105926_132137Z/year=2023",
+     "n_rows": 127
     },
     {
-     "path": "v=b_20260905T105920_276363Z/year=2024",
-     "n_rows": 27
+     "path": "v=b_20260905T105926_132137Z/year=2024",
+     "n_rows": 109
     },
     {
-     "path": "v=b_20260905T105920_276363Z/year=2025",
-     "n_rows": 28
+     "path": "v=b_20260905T105926_132137Z/year=2025",
+     "n_rows": 126
     },
     {
-     "path": "v=b_20260905T105920_276363Z/year=2026",
-     "n_rows": 32
+     "path": "v=b_20260905T105926_132137Z/year=2026",
+     "n_rows": 136
     }
    ],
    "gates": [
@@ -70,23 +70,23 @@
     {
      "name": "G1",
      "status": "pass",
-     "detail": "stage=97194 expected=97194",
+     "detail": "stage=328704 expected=328704",
      "metrics": {
-      "n_src": 97194,
+      "n_src": 328704,
       "fanout": 1,
       "n_dedup": 0,
       "n_reject": 0,
-      "n_stage": 97194
+      "n_stage": 328704
      }
     },
     {
      "name": "G2",
      "status": "pass",
-     "detail": "cast_failed rows=6643 ratio=0.068348 limit=0.12",
+     "detail": "cast_failed rows=0 ratio=0.000000 limit=0.0",
      "metrics": {
-      "n_partial": 6643,
-      "ratio": 0.06834784040167088,
-      "limit": 0.12
+      "n_partial": 0,
+      "ratio": 0.0,
+      "limit": 0.0
      }
     },
     {

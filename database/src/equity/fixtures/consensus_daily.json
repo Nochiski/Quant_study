@@ -1,0 +1,211 @@
+[
+ {
+  "case": "FX-5-001-available-date",
+  "key": {"ticker": "000660", "obs_month": "2026-08-01", "target_period": "202812",
+          "metric": "eps", "src": "wise"},
+  "column": "available_date",
+  "expect": "2026-09-01",
+  "expect_source": "stage:stg_consensus_monthly min(fetched_date)",
+  "fixture_class": "positive",
+  "source": "stage:stg_consensus_monthly — 이 관측점(obs_date 2026-08-31)은 fetched_date 2026-09-01·2026-09-02 두 판본이 있고 min 은 09-01",
+  "note": "GATES §4 FX-5-001. 문서의 '3판본' 은 절단본에 없다 — 절단본 wise 수집일은 09-01·09-02 둘뿐이고 같은 키의 판본 수 최대 2다(§9 정정). max 선택으로 바꾸면 2026-09-02 가 나와 여기서 잡힌다(FX-N-005)"
+ },
+ {
+  "case": "FX-5-001-est-mean",
+  "key": {"ticker": "000660", "obs_month": "2026-08-01", "target_period": "202812",
+          "metric": "eps", "src": "wise"},
+  "column": "est_mean",
+  "expect": "458131.6800",
+  "expect_source": "stage:stg_consensus_monthly(fetched_date 2026-09-01)",
+  "fixture_class": "positive",
+  "source": "stage:stg_consensus_monthly — 09-01 판본 458131.68, 09-02 판본 450128.71. 최초 관측은 458131.68",
+  "note": "이 테이블의 존재 이유를 그대로 고정한 픽스처다: 뒤 판본이 값을 덮어써도 최초 관측은 바뀌지 않는다(메모리 consensus-revision-db)"
+ },
+ {
+  "case": "FX-5-002-obs-2026-07",
+  "key": {"ticker": "005930", "obs_month": "2026-07-01", "target_period": "202612",
+          "metric": "eps", "src": "wise"},
+  "column": "est_mean",
+  "expect": "47928.7400",
+  "expect_source": "hand",
+  "fixture_class": "positive",
+  "source": "hand — 두 관측점(2026-07-31·2026-08-31) 중 이른 쪽의 원본 값. stg_v3_revision_compare·stg_v3_consensus_annual·stg_consensus_monthly 의 lookback 계열 컬럼에서 가져오지 않았다(EG4-P03)",
+  "note": "GATES §4 FX-5-002. 리비전은 이 값과 아래 2026-08 값의 손계산이다 — tests/test_equity_s17_consensus.py::test_두_관측점의_원본_값으로_리비전을_손계산한다"
+ },
+ {
+  "case": "FX-5-002-obs-2026-08",
+  "key": {"ticker": "005930", "obs_month": "2026-08-01", "target_period": "202612",
+          "metric": "eps", "src": "wise"},
+  "column": "est_mean",
+  "expect": "48338.6400",
+  "expect_source": "hand",
+  "fixture_class": "positive",
+  "source": "hand — 두 관측점 중 늦은 쪽의 원본 값(2026-08-31 관측, min(fetched_date) 2026-09-01 판본)",
+  "note": "손계산 리비전 = 48338.64 / 47928.74 − 1 = 0.00855218…"
+ },
+ {
+  "case": "FX-5-003-unit-eps",
+  "key": {"ticker": "005930", "obs_month": "2026-08-01", "target_period": "202612",
+          "metric": "eps", "src": "wise"},
+  "column": "unit",
+  "expect": "원",
+  "expect_source": "stage:stg_consensus_monthly.unit",
+  "fixture_class": "positive",
+  "source": "stage:stg_consensus_monthly.unit — EPS 는 원. 스케일 변환 없이 그대로 나른다",
+  "note": "GATES §4 FX-5-003"
+ },
+ {
+  "case": "FX-5-003-unit-revenue",
+  "key": {"ticker": "005930", "obs_month": "2026-08-01", "target_period": "202612",
+          "metric": "revenue", "src": "wise"},
+  "column": "unit",
+  "expect": "억원",
+  "expect_source": "stage:stg_consensus_monthly.unit",
+  "fixture_class": "positive",
+  "source": "stage:stg_consensus_monthly.unit — 매출은 억원",
+  "note": "FX-5-003. v3 쪽 같은 지표의 단위는 카탈로그 지식으로 부여한다(rules_s17.V3_METRICS)"
+ },
+ {
+  "case": "FX-5-004-wise-obs-date",
+  "key": {"ticker": "005930", "obs_month": "2026-08-01", "target_period": "202612",
+          "metric": "eps", "src": "wise"},
+  "column": "obs_date",
+  "expect": "2026-08-31",
+  "expect_source": "hand",
+  "fixture_class": "positive",
+  "source": "hand — 겹치는 달(v3 2026-04~08 ∩ wise 2025-08~2026-09)의 같은 키가 src 로만 갈린 2행. wise 쪽 관측일은 월말",
+  "note": "GATES §4 FX-5-004 구간 2행 규칙. src 컬럼 자체를 기대값으로 두면 항진명제라 두 행이 실제로 다른 관측일을 갖는지로 본다"
+ },
+ {
+  "case": "FX-5-004-v3-obs-date",
+  "key": {"ticker": "005930", "obs_month": "2026-08-01", "target_period": "202612",
+          "metric": "eps", "src": "v3"},
+  "column": "obs_date",
+  "expect": "2026-08-03",
+  "expect_source": "hand",
+  "fixture_class": "positive",
+  "source": "hand — v3 쪽은 그 달에 그 지표가 처음 관측된 날(2026-08-03, 8월 첫 거래일)",
+  "note": "FX-5-004. 두 원천을 접었다면 이 행이 없다"
+ },
+ {
+  "case": "FX-5-005-available-date",
+  "key": {"ticker": "005930", "obs_month": "2026-04-01", "target_period": "202612",
+          "metric": "revenue", "src": "v3"},
+  "column": "available_date",
+  "expect": "2026-04-03",
+  "expect_source": "stage:stg_v3_revision_daily.date",
+  "fixture_class": "positive",
+  "source": "stage:stg_v3_revision_daily — 2026-04-03 행의 collected_date 가 NULL 이라 date 로 대체된다",
+  "note": "GATES §4 FX-5-005. GATES §1 EG6-P02 초안 SQL(coalesce(min_by(collected_date, date), min(date)))은 duckdb 가 인자 NULL 행을 건너뛰어 2026-04-10 을 돌려준다 — §9 정정"
+ },
+ {
+  "case": "FX-5-005-available-basis",
+  "key": {"ticker": "005930", "obs_month": "2026-04-01", "target_period": "202612",
+          "metric": "revenue", "src": "v3"},
+  "column": "available_basis",
+  "expect": "default",
+  "expect_source": "stage:stg_v3_revision_daily.available_basis",
+  "fixture_class": "positive",
+  "source": "stage:stg_v3_revision_daily.available_basis — fallback 행은 measured 가 아니라 default",
+  "note": "FX-5-005"
+ },
+ {
+  "case": "FX-5-005-coverage-degraded",
+  "key": {"ticker": "005930", "obs_month": "2026-04-01", "target_period": "202612",
+          "metric": "revenue", "src": "v3"},
+  "column": "coverage_degraded",
+  "expect": "true",
+  "expect_source": "stage:stg_v3_revision_daily.coverage_degraded",
+  "fixture_class": "positive",
+  "source": "stage:stg_v3_revision_daily.coverage_degraded — collected_date 결측을 감춘 채 available_date 만 채우지 않는다",
+  "note": "FX-5-005 의 '+ coverage_degraded' 항"
+ },
+ {
+  "case": "FX-5-006-revenue",
+  "key": {"ticker": "005930", "obs_month": "2026-04-01", "target_period": "202612",
+          "metric": "revenue", "src": "v3"},
+  "column": "est_mean",
+  "expect": "5382462.0000",
+  "expect_source": "hand",
+  "fixture_class": "positive",
+  "source": "hand — stg_v3_revision_daily(005930, 2026-04-03, 2026/12) wide 1행의 revenue 열",
+  "note": "GATES §4 FX-5-006 unpivot 대응표. 아래 7건과 함께 wide 1행 → metric 8행을 전수로 고정한다"
+ },
+ {
+  "case": "FX-5-006-op",
+  "key": {"ticker": "005930", "obs_month": "2026-04-01", "target_period": "202612",
+          "metric": "op", "src": "v3"},
+  "column": "est_mean",
+  "expect": "2114087.0000",
+  "expect_source": "hand",
+  "fixture_class": "positive",
+  "source": "hand — 같은 wide 행의 op 열",
+  "note": "FX-5-006"
+ },
+ {
+  "case": "FX-5-006-ni",
+  "key": {"ticker": "005930", "obs_month": "2026-04-01", "target_period": "202612",
+          "metric": "ni", "src": "v3"},
+  "column": "est_mean",
+  "expect": "1758736.0000",
+  "expect_source": "hand",
+  "fixture_class": "positive",
+  "source": "hand — 같은 wide 행의 ni 열",
+  "note": "FX-5-006"
+ },
+ {
+  "case": "FX-5-006-eps",
+  "key": {"ticker": "005930", "obs_month": "2026-04-01", "target_period": "202612",
+          "metric": "eps", "src": "v3"},
+  "column": "est_mean",
+  "expect": "26367.0000",
+  "expect_source": "hand",
+  "fixture_class": "positive",
+  "source": "hand — 같은 wide 행의 eps 열",
+  "note": "FX-5-006"
+ },
+ {
+  "case": "FX-5-006-bps",
+  "key": {"ticker": "005930", "obs_month": "2026-04-01", "target_period": "202612",
+          "metric": "bps", "src": "v3"},
+  "column": "est_mean",
+  "expect": "90311.0000",
+  "expect_source": "hand",
+  "fixture_class": "positive",
+  "source": "hand — 같은 wide 행의 bps 열",
+  "note": "FX-5-006"
+ },
+ {
+  "case": "FX-5-006-per",
+  "key": {"ticker": "005930", "obs_month": "2026-04-01", "target_period": "202612",
+          "metric": "per", "src": "v3"},
+  "column": "est_mean",
+  "expect": "7.0600",
+  "expect_source": "hand",
+  "fixture_class": "positive",
+  "source": "hand — 같은 wide 행의 per 열",
+  "note": "FX-5-006. 단위는 배 — eps/bps(원)·revenue(억원) 와 섞이지 않는지 EG3 어휘가 본다"
+ },
+ {
+  "case": "FX-5-006-pbr",
+  "key": {"ticker": "005930", "obs_month": "2026-04-01", "target_period": "202612",
+          "metric": "pbr", "src": "v3"},
+  "column": "est_mean",
+  "expect": "2.0600",
+  "expect_source": "hand",
+  "fixture_class": "positive",
+  "source": "hand — 같은 wide 행의 pbr 열",
+  "note": "FX-5-006"
+ },
+ {
+  "case": "FX-5-006-roe-pct",
+  "key": {"ticker": "005930", "obs_month": "2026-04-01", "target_period": "202612",
+          "metric": "roe_pct", "src": "v3"},
+  "column": "est_mean",
+  "expect": "34.7800",
+  "expect_source": "hand",
+  "fixture_class": "positive",
+  "source": "hand — 같은 wide 행의 roe_pct 열",
+  "note": "FX-5-006. opinion 열은 대응표에 없다 — 투자의견은 S18 축이다"
+ }
+]

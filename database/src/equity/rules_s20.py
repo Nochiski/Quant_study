@@ -211,10 +211,12 @@ FACTORS: tuple[FactorSpec, ...] = (
     _f("F04", "연기금 순매수", ("flow.pension_net_buy",), "equity",
        "FACTORS §5 F04 = penfnd_etc 누적. 재료는 키움 ka10060 의 연기금 주체 컬럼.",
        caveat="F01 과 같은 S08 미구현."),
-    _f("F05", "공매도 잔고비율", ("short.short_balance_ratio", "price.shares_outstanding"),
-       "equity", "FACTORS §5 F05 = 공매도량 / 상장주식수. 재료는 키움 ka10014.",
-       caveat="`short_daily`(S09)가 아직 없다. 이름과 달리 **거래량 기반**이다 — 진짜 공매도 "
-              "잔고는 취득 불가로 확정됐다(FACTORS §12 F45).",
+    _f("F05", "공매도 거래비중", ("short.short_sale_volume", "price.shares_outstanding"),
+       "equity", "FACTORS §5 F05 = 공매도 거래량 / 상장주식수. 재료는 키움 ka10014.",
+       caveat="**이름을 정정했다(2026-09-07)** — 이 값은 공매도 잔고가 아니라 **거래량**이다. "
+              "진짜 잔고는 취득 불가로 확정됐다(FACTORS §12 F45). 요구 재료도 정정했다: 옛 "
+              "선언은 `short.short_balance_ratio` 를 가리켰는데 그 필드는 **만들지 않기로 확정한 "
+              "것**이다(분모가 다른 표에 있어 셀 하나로 굽지 않는다). 나눗셈은 팩터층 몫이다.",
        registry="short.short_balance_ratio"),
     _f("F06", "공매도 거래비중", ("short.short_sale_value", "price.trading_value"), "equity",
        "FACTORS §5 F06 = 공매도 대금 / 거래대금.", caveat="F05 와 같은 S09 미구현.",

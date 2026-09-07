@@ -468,6 +468,55 @@ scp database/src/equity/baseline_locked.json kael-server:~/quant-ledger/data/equ
 
 ---
 
+## 8-3. 2026-09-07 사건 유형 확장 (e1.9.0)
+
+`corp_event` 가 **자사주 취득 1,912건 · CB 발행 4,690건**을 싣기 시작했다(3,147 → **9,749행**).
+
+| 표 | 결과 |
+|---|---|
+| `corp_event` | 9,749행 · 2회 빌드 해시 동일 `9749:3befee5c625e778e` · EG5a PASS |
+| `adj_factor` | **해시 불변** `5507:86dceab4e5491482` |
+| `price_adj_daily` | **해시 불변** `10890251:c78a6675e0815512` |
+| `universe_daily` | **해시 불변** `10890251:6fb8d3a84ebb534d` |
+| `dataset_profile` | 커버 상승 — `event.buyback_amount` 0 → 19.7% · `event.capital_raise_amount` 0 → 48.2% |
+| `factor_readiness` | **ready 35 → 37** · blocked 19 → 17 (`no_observations` 사유 소멸) |
+
+**조정 축 세 표의 해시가 그대로인 것이 이 확장의 핵심 성질이다.** 두 유형은 가격 조정 사건이
+아니고(자사주는 주식수 불변·CB 는 그날 주식수 불변) `adj_factor` 가 계수 4유형만 읽으므로
+구조적으로 격리돼 있다. 게이트 둘이 그 격리를 지킨다 — 사실 유형이 `ratio` 를 가지거나 계수
+유형이 `amount_krw` 를 가지면 폐기다.
+
+**유상증자(`stg_event_piic` 5,538행)는 아직 못 싣는다.** 신주배정기준일 컬럼이 없고
+`ssl_bgd`/`ssl_edd` 채움률이 **5.9%** 라 가격 축 효력일을 정할 수 없다. 이것이
+`DECISIONS_PENDING` 결정 1 의 남은 절반이고, **날짜 원천을 먼저 찾아야** 움직인다
+(`unknown_price_only` 1,737건 중 537건이 유상증자다).
+
+---
+
+## 8-4. 2026-09-07 외국인 보유 연결 (e1.10.0)
+
+`flow_daily` 에 `foreign_wght_pct`·`foreign_limit_exh_pct`·`foreign_poss_shr` 3컬럼이 붙었다.
+원천 `stg_foreign_daily`(키움 ka10008)는 서버 7,682,844행 · 2,602종목 · 2009-10-15 ~ 2026-08-24 ·
+**결측 0** 인데 아무도 읽지 않고 있었다.
+
+| 축 | 결과 |
+|---|---|
+| `flow_daily` | 9,201,516행(**불변**) · 2회 빌드 해시 동일 `9201516:cbb88b0b4a27244a` · EG5a PASS |
+| 채움 | `src='kiwoom'` 7,537,984 / 7,540,202 · **`src='kis'` 0** (원천 축이 없다 — NULL, 0 아님) |
+| `dataset_profile` | 72 → **74행** |
+| `factor_readiness` | **ready 37 → 39** · blocked 17 → 15 |
+| FIELD_MAP §2 어휘 | 42 → **43** (`flow.foreign_limit_exhaustion` 신설 — F08 이 이름으로 요구하는데 행이 없었다) |
+
+**행 수가 안 변한 것이 설계 의도다.** 격자 등식(EG1)은 (date, ticker) 축이라 컬럼이 붙어도
+모집단이 그대로다. 별도 표를 만들지 않은 이유가 이것이다.
+
+**다음으로 같은 성격의 것이 하나 더 있다** — `stg_lending_daily`(키움 대차) 6,988,296행 ·
+2011-07-25 ~ 2026-08-20 · 결측 0 인데 미사용이고, 지금 `short.borrowed_quantity` 는 커버
+**5.58%** 의 KIS 축만 쓴다. 단위만 확인하면 사실상 전 종목으로 뛴다(BLOCKED_FACTORS §9-2).
+EG2 테스트의 「덮이지 않은 `lag_known=false` 원천」 예가 이번에 그리로 옮겨 갔다.
+
+---
+
 ## 9. 미해결 후속
 
 정본은 DESIGN §11 이다. 여기엔 **다음 사람이 곧바로 집을 수 있는 것**만 골라 적는다.

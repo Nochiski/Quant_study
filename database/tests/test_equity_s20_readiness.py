@@ -32,9 +32,13 @@ from test_equity_s19_profile import SEED, STAGE_SLICE, build_chain
 DOCS = Path(__file__).parents[1] / "docs"
 REGISTRY_DOC = Path(__file__).parents[2] / "backend" / "FACTORS.md"
 
-N_READY = 35
-N_BLOCKED = 19
-BLOCKED_REASON_COUNTS = {"field_unavailable": 5, "partial_support": 12, "no_observations": 2}
+# 2026-09-07: corp_event 가 자사주 취득·CB 발행을 싣기 시작해 E05·E06 이 열렸다(E05·E06 / 결정 1).
+# `no_observations` 는 「필드는 선언했는데 값이 한 줄도 없다」였고, 값이 생기며 사유가 사라졌다.
+# 2026-09-07 S08-2: `stg_foreign_daily` 를 flow_daily 에 이어 F02·F08 이 열렸다.
+# 2026-09-07 F05: 요구 재료를 실재하는 `short.short_sale_volume` 로 정정해 열렸다.
+N_READY = 40
+N_BLOCKED = 14
+BLOCKED_REASON_COUNTS = {"field_unavailable": 2, "partial_support": 12}
 READINESS_GATES = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG10", "EG4", "EG5a"]
 
 
@@ -129,25 +133,26 @@ def test_절단본_준비도는_31_대_23_이다(built) -> None:
 
 
 def test_수급_공매도_신용_9팩터의_판정은_선언한_필드가_가른다(built) -> None:
-    """S19-2 — 격자 3테이블의 6필드를 선언하자 F01·F06·F07·F09 가 ready 로 열렸다.
+    """격자 3표의 필드 선언이 수급 9팩터의 판정을 가른다.
 
-    남는 넷은 **재료가 없어서** 막힌 것이지 선언을 빠뜨린 것이 아니다:
-      F02 `flow.foreign_ownership` · F08 `flow.foreign_limit_exhaustion` — 원천이
-          `stg_foreign_daily`(ka10008)라 `flow_daily` 에 컬럼이 없다(S08-2 대기)
-      F04 `flow.pension_net_buy` — `penfnd_etc_krw` 는 실재하지만 FIELD_MAP §2 에 그 field_id
-          행이 없어 어댑터가 내지 않는다
-      F05 `short.short_balance_ratio` — 공매도량 ÷ 상장주식수라 비율 계산이 팩터층 몫이다
+    S19-2 가 6필드를 선언해 F01·F06·F07·F09 를 열었고, **2026-09-07 S08-2** 가
+    `stg_foreign_daily`(키움 ka10008)를 `flow_daily` 에 이어 F02·F08 을 더 열었다.
+
+    남는 둘은 **선언을 빠뜨린 것이 아니라 재료 판단이 남은 것**이다:
+      F04 `flow.pension_net_buy` — `penfnd_etc_krw` 는 실재하지만 키움과 KIS 가 같은 칸을 채운
+          적이 0건이라(완전 배타) KIS 의 「기금」이 키움의 「연기금등」과 같은 주체인지 확인할
+          축이 없다. 사람 결정이 먼저다(BLOCKED_FACTORS F04)
+    (F05 는 2026-09-07 에 열렸다 — 요구 재료가 만들지 않기로 한 필드를 가리키고 있었고,
+    실재하는 `short.short_sale_volume` 로 정정했다. 나눗셈은 여전히 팩터층 몫이다.)
     F03 은 재료가 있으므로 `field_unavailable` 이 아니라 `partial_support`(GAP-03)다.
     """
     _, r = built
     got = dict(_rows(r.out_dir, "SELECT factor_id, coalesce(blocked_reason, 'ready') FROM fr "
                                 "WHERE factor_id LIKE 'F0%' ORDER BY 1"))
     assert sorted(got) == [f"F0{i}" for i in range(1, 10)]
-    assert {f for f, v in got.items() if v == "ready"} == {"F01", "F06", "F07", "F09"}
-    assert got["F02"] == "field_unavailable: flow.foreign_ownership"
+    assert {f for f, v in got.items() if v == "ready"} == {"F01", "F02", "F05", "F06", "F07",
+                                                           "F08", "F09"}
     assert got["F04"] == "field_unavailable: flow.pension_net_buy"
-    assert got["F05"] == "field_unavailable: short.short_balance_ratio"
-    assert got["F08"] == "field_unavailable: flow.foreign_limit_exhaustion"
     assert got["F03"] == "partial_support: flow.institution_net_buy"
 
 
@@ -202,8 +207,11 @@ def test_required_columns_는_프로파일에서_유도된다(built) -> None:
     assert list(cols) == ["fin_std.net_income", "fin_std.total_equity"]
     (cols,), = _rows(r.out_dir, "SELECT required_columns FROM fr WHERE factor_id = 'F01'")
     assert list(cols) == ["flow_daily.frgnr_invsr_krw", "price_daily.value_krw"]
-    # 프로파일 행이 없는 필드는 컬럼도 없다 — F02 는 요구 재료가 그 하나뿐이라 빈 목록이다
+    # S08-2 로 F02 의 재료가 격자에 붙었다 — 컬럼이 조인으로 채워진다
     (cols,), = _rows(r.out_dir, "SELECT required_columns FROM fr WHERE factor_id = 'F02'")
+    assert list(cols) == ["flow_daily.foreign_wght_pct"]
+    # 프로파일 행이 없는 필드는 컬럼도 없다 — F04 는 요구 재료가 그 하나뿐이라 빈 목록이다
+    (cols,), = _rows(r.out_dir, "SELECT required_columns FROM fr WHERE factor_id = 'F04'")
     assert list(cols) == []
 
 
@@ -222,8 +230,9 @@ def test_커버_실측에_걸린_판정은_손계산으로_잰다(built) -> None
     # 대차잔고는 KIS 유닛이 덮는 구간만 있다 — 가장 늦게 열린 재료가 팩터의 시작일이다
     assert got["F07"] == ("ready", "2014-01-02", None)
     assert got["F09"] == ("ready", "2010-01-04", None)
-    assert got["E05"] == ("blocked", None, "no_observations: event.buyback_amount")
-    assert got["E06"] == ("blocked", None, "no_observations: event.capital_raise_amount")
+    # 자사주·CB 를 싣기 시작하며 둘 다 열렸다 — 시작일은 각 원천의 첫 공시일이다
+    assert got["E05"] == ("ready", "2015-01-23", None)
+    assert got["E06"] == ("ready", "2023-07-18", None)
     # GAP-02 계정이 가장 늦게 열려 V05 의 시작일이 된다
     assert got["V05"] == ("ready", "2023-11-14", None)
 

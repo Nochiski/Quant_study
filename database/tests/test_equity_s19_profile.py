@@ -47,10 +47,12 @@ CHAIN: tuple[str, ...] = (
     "shares_outstanding", "treasury_stock", "dividend_event", "consensus_daily",
     "opinion_daily", "opinion_broker_daily")
 
-N_FIELDS = 72                    # 선언 행수 — 코드가 정본이라 서버에서도 같다
-N_FIELD_MAP_SCOPE = 30           # FIELD_MAP §2 42 어휘 중 프로파일 행을 갖는 것
+# 2026-09-07 S08-2: `flow.foreign_ownership`·`flow.foreign_limit_exhaustion` 선언(72 → 74).
+N_FIELDS = 75                    # 선언 행수 — 코드가 정본이라 서버에서도 같다
+N_FIELD_MAP_SCOPE = 33           # FIELD_MAP §2 42 어휘 중 프로파일 행을 갖는 것
 N_INTERNAL_SCOPE = 42            # equity 내부 스코프(price.adj_close·fin_std 계정·4B·유니버스 …)
-N_FIELD_MAP_VOCAB = 42           # FIELD_MAP §2 표의 field_id 수 (check_field_map.py 와 같은 축)
+N_FIELD_MAP_VOCAB = 44           # FIELD_MAP §2 표의 field_id 수 (check_field_map.py 와 같은 축)
+                                 # 2026-09-07: `flow.foreign_limit_exhaustion` 신설(F08 재료)
 PROFILE_GATES = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG2_dataset_profile", "EG9", "EG4", "EG5a"]
 
 
@@ -159,8 +161,9 @@ def test_대응표_어휘_중_행이_없는_필드는_어댑터의_unavailable_�
         "credit.collateral_value", "credit.loan_value", "credit.forced_liquidation",
         "event.earnings_surprise", "event.index_membership_change",
         "event.disclosure_sentiment",
-        # 격자 테이블에 컬럼이 없다 — S08-2 대기 1 · 팩터층 계산 1
-        "flow.foreign_ownership", "short.short_balance_ratio"])
+        # 팩터층이 계산할 몫이라 굽지 않는다 1 (`flow.foreign_ownership`·
+        # `flow.foreign_limit_exhaustion` 은 2026-09-07 S08-2 로 격자에 붙었다)
+        "short.short_balance_ratio"])
     assert len(absent) == N_FIELD_MAP_VOCAB - N_FIELD_MAP_SCOPE
 
 
@@ -197,6 +200,11 @@ GRID_FIELDS = {
     "short.short_sale_value": ("short_daily", "short_value_kiwoom_krw", "KRW", "amount"),
     "short.borrowed_quantity": ("short_daily", "lending_balance_kis_shr", "주", "count"),
     "credit.margin_balance": ("credit_daily", "whol_loan_rmnd_stcn_shr", "주", "count"),
+    # S08-2 (2026-09-07) — 원천이 키움 하나뿐이라 src='kis' 행은 NULL 이다
+    "flow.foreign_ownership": ("flow_daily", "foreign_wght_pct", "pct", "ratio"),
+    "flow.foreign_limit_exhaustion": ("flow_daily", "foreign_limit_exh_pct", "pct", "ratio"),
+    # F05 재정의 (2026-09-07) — 비율이 아니라 거래량이고 나눗셈은 팩터층 몫이다
+    "short.short_sale_volume": ("short_daily", "short_volume_kiwoom_shr", "주", "count"),
 }
 
 
@@ -321,11 +329,16 @@ def test_가격_필드는_캘린더_전_구간을_덮는다(built) -> None:
 
 
 def test_선언은_있는데_값이_없는_필드는_커버율_0_으로_남는다(built) -> None:
-    """`corp_event` 는 MVP 4유형만 적재해 자사주·유상증자 행이 0 이다 — 격리가 아니라 사실이다."""
+    """2026-09-07 부터 `corp_event` 가 자사주 취득·CB 발행도 싣는다 — 커버가 0 에서 올라간다.
+
+    두 유형은 **가격 조정 사건이 아니다**(주식수가 안 변한다). `ratio` NULL · `amount_krw` 가
+    값을 나르고 `adj_factor` 는 계수 4유형만 읽으므로 조정 축과 격리돼 있다.
+    자사주 금액은 원천 채움률이 100%가 아니라(서버 `aqpln_prc_ostk` 94.7%) 커버가 그만큼 낮다.
+    """
     _, r = built
     got = dict(_rows(r.out_dir, "SELECT field_id, estimated_coverage_pct FROM dp "
                                 "WHERE table_name = 'corp_event' ORDER BY 1"))
-    assert got == {"event.buyback_amount": 0.0, "event.capital_raise_amount": 0.0}
+    assert got == {"event.buyback_amount": 75.609756, "event.capital_raise_amount": 100.0}
     assert r.n_reject == 0
 
 
@@ -486,18 +499,19 @@ def test_lag_known_false_인_stage_원천은_세션_랙_1_이상인_행을_요�
 def test_어떤_필드도_싣지_않은_lag_known_false_원천은_EG2를_폐기한다(built) -> None:
     """원천을 실었는데 프로파일 행을 안 만들면 여기서 잡힌다.
 
-    S19-2 전에는 `stg_flow_daily_kiwoom` 이 이 예였다 — S08 격자가 커밋됐는데 선언이 비어 있어
-    수급 원천을 아무 필드도 덮지 않았다. 지금은 `flow.*` 3필드가 랙 1 로 덮으므로 예를
-    `stg_foreign_daily`(ka10008 외국인 보유, S08-2 대기)로 옮긴다.
+    예가 두 번 옮겨졌다. S19-2 전에는 `stg_flow_daily_kiwoom`(S08 격자는 커밋됐는데 선언이 비어
+    있었다), 그다음 `stg_foreign_daily`(S08-2 대기)였다. **2026-09-07 S08-2 로 둘 다 덮였으므로**
+    이제 `stg_lending_daily`(키움 대차, 서버 6,988,296행 · 결측 0 인데 아직 아무 필드도 안 쓴다 —
+    현재 대차잔고는 커버 5.58% 의 KIS 축만 쓴다. BLOCKED_FACTORS §9-2)를 예로 쓴다.
     """
     eq, r = built
-    covered = rules_s19.eg2_dataset_profile(
-        _profile_ctx(eq, r.out_dir, {"stg_flow_daily_kiwoom": False}))
-    assert covered.status is gates.GateStatus.PASS      # S19-2 가 덮었다
+    for covered_src in ("stg_flow_daily_kiwoom", "stg_foreign_daily"):
+        g = rules_s19.eg2_dataset_profile(_profile_ctx(eq, r.out_dir, {covered_src: False}))
+        assert g.status is gates.GateStatus.PASS, covered_src
     bad = rules_s19.eg2_dataset_profile(
-        _profile_ctx(eq, r.out_dir, {"stg_foreign_daily": False}))
+        _profile_ctx(eq, r.out_dir, {"stg_lending_daily": False}))
     assert bad.status is gates.GateStatus.FAIL
-    assert bad.metrics["uncovered_lag_known_false"] == ["stg_foreign_daily"]
+    assert bad.metrics["uncovered_lag_known_false"] == ["stg_lending_daily"]
     assert "n_lag_known_false_without_profile=1" in bad.detail
 
 

@@ -625,3 +625,25 @@ def test_겹침_구간의_상관과_비율_분위수를_기록한다(syn: build.
 def test_가격_축이_없는_격자일을_기록한다(syn: build.BuildResult) -> None:
     """DESIGN §4-3 「KRX 가격 행 존재일」 조건 — 절단본에선 0, 합성에선 1(A00001 마지막 세션)."""
     assert _gate(syn, "EG3_short_daily").metrics["n_grid_without_price_axis"] == 1
+
+
+# ── F05 재정의: 공매도 거래비중 (2026-09-07) ──────────────────────────────────
+
+
+def test_공매도_거래량_필드가_선언된다(built: build.BuildResult) -> None:
+    """F05 는 `short.short_balance_ratio` 라는 **존재하지 않는 필드**를 요구하고 있었다.
+
+    그 이름을 만들지 않기로 한 것은 결정이다 — 분모(상장주식수)가 다른 표에 있어 셀 하나로
+    굽지 않는다(`rules_s09` 주석). 그래서 팩터 쪽을 고친다: 요구 재료를
+    `short.short_sale_volume` + `price.shares_outstanding` 로 바꾸고 나눗셈은 팩터층이 한다.
+
+    이름도 정정한다 — 이 값은 공매도 **잔고**가 아니라 **거래량**이다. 진짜 잔고는 취득 불가로
+    확정됐다(FACTORS §12 F45).
+    """
+    assert built.ok
+    decl = {f.field_id: f for f in rules_s09.FIELDS}
+    assert "short.short_sale_volume" in decl
+    f = decl["short.short_sale_volume"]
+    assert f.columns == ("short_volume_kiwoom_shr",)
+    assert f.unit == "주" and f.value_type == "count"
+    assert f.recommended_lag_sessions == 1 and not f.requires_confirmation

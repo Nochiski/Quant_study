@@ -32,17 +32,19 @@ from equity.model import EquityTable
 STAGE_SLICE = Path(__file__).parent / "fixtures" / "stage_slice"
 CORP_EVENT = rules_s05.CORP_EVENT
 
-N_POOL = 34
-N_SRC = 22                                     # 범위 안 후보 = EG1 우변
+# 2026-09-07: 자사주 취득·CB 발행을 싣기 시작해 모집단이 34 → 68 로 늘었다(E05·E06 / 결정 1).
+# 두 유형은 가격 조정 사건이 아니라 **사실만 싣는다** — ratio NULL · amount_krw 가 값을 나른다.
+N_POOL = 68
+N_SRC = 55                                     # 범위 안 후보 = EG1 우변
 N_SRC_BY_SOURCE = {"event_fric": 0, "event_pifric": 1, "event_cr": 3, "capital": 16,
-                   "krx_listing": 2}
+                   "event_tsstk_aq": 32, "event_cvbd_is": 1, "krx_listing": 2}
 N_RAW_BY_SOURCE = {"event_fric": 0, "event_pifric": 1, "event_cr": 3, "capital": 28,
                    "krx_listing": 2}
-N_SCOPE_OUT = {"in_scope": 22, "pre_listing": 6, "unlisted_class": 6}
-N_OUT = 8
+N_SCOPE_OUT = {"in_scope": 55, "out_of_calendar": 1, "pre_listing": 6, "unlisted_class": 6}
+N_OUT = 41
 N_REJECT = 0
 N_DEDUP = 14
-N_BY_TYPE = {"bonus": 1, "capred": 5, "split": 2}
+N_BY_TYPE = {"bonus": 1, "capred": 5, "cb_issue": 1, "split": 2, "treasury_buy": 32}
 
 
 # ── 합성 입력 위 산출식 단독 실행 (S06 `run_adj_sql` 과 같은 방식) ──────────────
@@ -96,6 +98,12 @@ _STG_TYPES: dict[str, dict[str, str]] = {
                      "atcr_tisstk_estk": "DOUBLE", "cr_rt_estk_pct": "DOUBLE",
                      "crstk_estk_cnt": "DOUBLE", "available_date": "DATE",
                      "available_basis": "VARCHAR"},
+    "stg_event_tsstk_aq": {"rcept_no": "VARCHAR", "corp_code": "VARCHAR", "aq_dd": "DATE",
+                           "aqpln_prc_ostk": "DOUBLE", "aqpln_prc_estk": "DOUBLE",
+                           "available_date": "DATE", "available_basis": "VARCHAR"},
+    "stg_event_cvbd_is": {"rcept_no": "VARCHAR", "corp_code": "VARCHAR", "bddd": "DATE",
+                          "bd_fta": "DOUBLE", "available_date": "DATE",
+                          "available_basis": "VARCHAR"},
     "stg_capital": {"rcept_no": "VARCHAR", "corp_code": "VARCHAR", "isu_dcrs_de": "DATE",
                     "isu_dcrs_stle": "VARCHAR", "isu_dcrs_stock_knd": "VARCHAR",
                     "available_date": "DATE", "available_basis": "VARCHAR"},
@@ -109,6 +117,8 @@ def run_event_sql(cal: list[date], listing: list[dict[str, object]],
                   fric: list[dict[str, object]] | None = None,
                   pifric: list[dict[str, object]] | None = None,
                   cr: list[dict[str, object]] | None = None,
+                  tsstk: list[dict[str, object]] | None = None,
+                  cvbd: list[dict[str, object]] | None = None,
                   const: dict[str, object] | None = None) -> dict[str, dict[str, object]]:
     """`sql/corp_event.sql` 을 합성 입력 뷰 위에서 그대로 실행한다(프레임·게이트 없이 산출식만).
 
@@ -121,7 +131,8 @@ def run_event_sql(cal: list[date], listing: list[dict[str, object]],
                    for row in listing]
         _view(con, "stg_listing_daily", listing, _STG_TYPES["stg_listing_daily"])
         for name, rows_ in (("stg_capital", capital), ("stg_event_fric", fric),
-                            ("stg_event_pifric", pifric), ("stg_event_cr", cr)):
+                            ("stg_event_pifric", pifric), ("stg_event_cr", cr),
+                            ("stg_event_tsstk_aq", tsstk), ("stg_event_cvbd_is", cvbd)):
             _view(con, name, [{"available_basis": "measured", **r} for r in (rows_ or [])],
                   _STG_TYPES[name])
         tickers = sorted({str(r["ticker"]) for r in listing})
@@ -256,9 +267,10 @@ def test_EG1은_범위_안_후보에서_dedup과_격리를_뺀_것이다(built: 
     assert x["n_raw_rows_by_source"] == N_RAW_BY_SOURCE
     assert x["n_dedup"] == N_DEDUP
     assert x["n_by_event_type"] == N_BY_TYPE
-    assert x["n_out_by_source"] == {"capital": 2, "event_cr": 3, "event_pifric": 1,
+    assert x["n_out_by_source"] == {"capital": 2, "event_cr": 3, "event_cvbd_is": 1,
+                                    "event_pifric": 1, "event_tsstk_aq": 32,
                                     "krx_listing": 2}
-    assert x["n_by_effective_basis"] == {"disclosure_body": 6, "krx_shares_change": 2}
+    assert x["n_by_effective_basis"] == {"disclosure_body": 39, "krx_shares_change": 2}
 
 
 def test_범위_밖_행은_격리도_산출도_아니고_metric에만_남는다(
@@ -276,7 +288,8 @@ def test_범위_밖_행은_격리도_산출도_아니고_metric에만_남는다(
     assert x["n_out_off_calendar"] == 0 and x["n_out_pre_listing"] == 0
     assert built.n_reject == 0 and _gate(built, "EG7").metrics["reject_by_reason"] == {}
     assert not [e for e in events if e.startswith(("000030:", "0001A0:"))]
-    assert {r["corp_code"] for r in events.values()} == {"00126380", "00450931", "01160363"}
+    assert {r["corp_code"] for r in events.values()} == {"00110893", "00126380", "00164779",
+                                                        "00260657", "00450931", "01160363"}
 
 
 def test_dedup_축_재계산은_0이고_event_id는_결정적이다(built: build.BuildResult,
@@ -302,7 +315,9 @@ def test_삼성전자_50대1_액면분할은_KRX_관측만으로_본주_우선�
         assert r["announce_date"] == r["effective_date"] == date(2018, 5, 4)
         assert r["rcept_no"] is None and r["available_basis"] == "default"
         assert r["corp_code"] == "00126380" and r["n_src_rows"] == 1
-    assert not [e for e in events if e.startswith("005930:") and "2018-05-04" not in e]
+    # 2026-09-07: 005930 은 자사주 취득(treasury_buy)도 싣는다 — 분할 축과 별개 유형이다.
+    assert not [e for e in events
+                if e.startswith("005930:split:") and "2018-05-04" not in e]
 
 
 def test_무상증자는_공시일과_효력일이_다르고_효력일은_권리락일이다(
@@ -335,16 +350,21 @@ def test_감자_ratio는_총주식수_배수이고_자본변동만_있으면_NUL
     cap = events["101970:capred:2018-02-23"]
     assert cap["ratio"] is None and cap["source"] == "capital" and cap["n_src_rows"] == 3
     assert cap["announce_date"] == date(2019, 3, 13)                 # 가장 이른 사업보고서
-    assert all(r["amount_krw"] is None for r in events.values())
+    # 금액은 사실만 싣는 유형(자사주·CB)에만 실린다 — 계수 유형은 전부 NULL 이다.
+    assert all(r["amount_krw"] is None for r in events.values()
+               if r["event_type"] in rules_s05.FACTOR_BEARING_TYPES)
 
 
 def test_상장폐지_구간_안_사건은_첫_존재일_뒤라_범위_안이다(
         events: dict[str, dict[str, object]]) -> None:
     """우양 101970: 2015-03-16 폐지 → 2025-03-28 재상장. 그 사이 감자 4건은 pre_listing 이 아니다 —
     재상장 뒤 가격과 폐지 전 가격을 이어 붙이려면 이 계수가 필요하다."""
-    assert {e for e in events if e.startswith("101970:")} == {
+    assert {e for e in events if e.startswith("101970:capred:")} == {
         "101970:capred:2015-11-26", "101970:capred:2015-11-28", "101970:capred:2018-02-23",
         "101970:capred:2018-10-12", "101970:capred:2018-10-13"}
+    # 폐지 구간 안 자사주 취득도 같은 이유로 범위 안이다(사실이므로 싣는다)
+    assert {e for e in events if e.startswith("101970:treasury_buy:")} == {
+        "101970:treasury_buy:2016-08-30", "101970:treasury_buy:2016-10-11"}
 
 
 def test_근접_중복은_기록형_metric으로만_남는다(built: build.BuildResult,
@@ -365,14 +385,17 @@ def test_파티션은_year_announce_date_이고_KRX_행도_연도를_갖는다(
     for r in events.values():
         assert int(str(r["year"])) == r["announce_date"].year   # type: ignore[union-attr]
     assert events["005930:split:2018-05-04"]["year"] == 2018
-    assert {p["path"].split("/")[1] for p in built.partitions} == {  # type: ignore[union-attr]
+    # 자사주·CB 가 들어오며 파티션이 늘었다(2015~2020·2022)
+    assert {p["path"].split("/")[1] for p in built.partitions} >= {  # type: ignore[union-attr]
         "year=2016", "year=2018", "year=2019", "year=2022"}
 
 
 def test_어휘는_MVP_4종_안이고_EG2_축은_announce_date다(built: build.BuildResult,
                                               events: dict[str, dict[str, object]]) -> None:
-    assert {r["event_type"] for r in events.values()} <= set(rules_s05.MVP_EVENT_TYPES)
-    assert set(rules_s05.MVP_EVENT_TYPES) <= set(rules_s05.EVENT_TYPE_VOCAB)
+    assert {r["event_type"] for r in events.values()} <= set(rules_s05.LOADED_EVENT_TYPES)
+    assert set(rules_s05.LOADED_EVENT_TYPES) <= set(rules_s05.EVENT_TYPE_VOCAB)
+    # 계수 유형과 사실 유형은 겹치지 않는다 — adj_factor 가 앞의 넷만 읽는다
+    assert not (set(rules_s05.FACTOR_BEARING_TYPES) & set(rules_s05.FACT_ONLY_TYPES))
     assert len(rules_s05.EVENT_TYPE_VOCAB) == 13
     assert _gate(built, "EG2").metrics["content_date_column"] == "announce_date"
     assert all(r["announce_date"] <= r["available_date"] for r in events.values())
@@ -437,7 +460,7 @@ def test_효력일이_공시일보다_임계_이상_앞서면_effective_before_a
     eg7 = _gate(r, "EG7")
     assert eg7.status is GateStatus.FAIL
     assert eg7.metrics["reject_by_reason"] == {"effective_before_announce": 14}
-    assert r.n_rows == 4
+    assert r.n_rows == 37          # 계수 4 + 자사주·CB 33 (2026-09-07 유형 확장)
     assert _gate(r, "EG1").detail == "upstream_failed"
 
 
@@ -536,19 +559,21 @@ def test_손픽스처_FX_2_003과_범위_밖_4종과_격리_3종(tmp_path: Path,
     r = _build_chain(stage_root, tmp_path / "equity", _with(_seed(), thresholds={"EG7": 0.5}),
                      fixtures_path=fx)
     assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
-    assert r.n_rows == 8 and r.n_reject == 3
+    assert r.n_rows == 41 and r.n_reject == 3      # 손픽스처 8 + 절단본 자사주·CB 33
     eg1 = _gate(r, "EG1").metrics
-    assert eg1["rhs"] == 12 and eg1["lhs"] == 9
+    assert eg1["rhs"] == 45 and eg1["lhs"] == 42       # 손픽스처 12/9 + 자사주·CB 33
     x = _gate(r, "EG3_corp_event").metrics
-    assert x["n_pool_by_scope"] == {"in_scope": 12, "unlisted_class": 2, "out_of_calendar": 2,
+    assert x["n_pool_by_scope"] == {"in_scope": 45, "unlisted_class": 2, "out_of_calendar": 3,
                                     "pre_listing": 1, "class_unknown": 1}
-    assert x["n_pool_by_scope_source"]["out_of_calendar"] == {"capital": 1, "event_fric": 1}
+    assert x["n_pool_by_scope_source"]["out_of_calendar"] == {"capital": 1, "event_fric": 1,
+                                                             "event_tsstk_aq": 1}
     assert x["n_pool_by_scope_source"]["unlisted_class"] == {"capital": 1, "event_fric": 1}
     assert x["n_pool_by_scope_source"]["pre_listing"] == {"event_fric": 1}
     assert x["class_unknown_kinds"] == ["-"]
     assert x["n_class_unknown_mvp"] == 1 and x["n_class_mapped_by_alias"] == 0
     assert x["n_src_by_source"] == {"event_fric": 4, "event_pifric": 1, "event_cr": 3,
-                                    "capital": 2, "krx_listing": 2}
+                                    "capital": 2, "event_tsstk_aq": 32, "event_cvbd_is": 1,
+                                    "krx_listing": 2}
     assert x["n_raw_rows_by_source"]["event_fric"] == 6 and x["n_dedup"] == 1
     assert _gate(r, "EG7").metrics["reject_by_reason"] == {
         "effective_unresolved": 1, "ratio_unparsed": 1, "ticker_unresolved": 1}
@@ -607,9 +632,10 @@ def test_종류_별칭은_대응표로_매핑되고_모호하면_unknown(tmp_pat
     fx.write_text(json.dumps(HAND_KIND_FIXTURES, ensure_ascii=False), encoding="utf-8")
     r = _build_chain(stage_root, tmp_path / "equity", _seed(), fixtures_path=fx)
     assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
-    assert r.n_rows == 9 and r.n_reject == 0
+    assert r.n_rows == 42 and r.n_reject == 0      # 손픽스처 9 + 절단본 자사주·CB 33
     x = _gate(r, "EG3_corp_event").metrics
-    assert x["n_pool_by_scope"] == {"in_scope": 9, "unlisted_class": 1, "class_unknown": 1}
+    assert x["n_pool_by_scope"] == {"in_scope": 42, "unlisted_class": 1, "class_unknown": 1,
+                                    "out_of_calendar": 1}
     assert x["n_pool_by_scope_source"]["unlisted_class"] == {"capital": 1}
     assert x["n_pool_by_scope_source"]["class_unknown"] == {"capital": 1}
     assert x["class_unknown_kinds"] == ["〃"] and x["n_class_unknown_mvp"] == 1
@@ -628,6 +654,11 @@ def test_종류_별칭은_대응표로_매핑되고_모호하면_unknown(tmp_pat
 # ── KRX 원천: 유형은 주식수 비 방향, 주식수 불변 액면 변경은 이벤트가 아니다 ──────────
 
 _DART_EMPTY: dict[str, str] = {
+    "stg_event_tsstk_aq": ("rcept_no VARCHAR, corp_code VARCHAR, aq_dd DATE, "
+                           "aqpln_prc_ostk DECIMAL(18,0), aqpln_prc_estk DECIMAL(18,0), "
+                           "available_date DATE, available_basis VARCHAR"),
+    "stg_event_cvbd_is": ("rcept_no VARCHAR, corp_code VARCHAR, bddd DATE, "
+                          "bd_fta DECIMAL(18,0), available_date DATE, available_basis VARCHAR"),
     "stg_event_fric": ("rcept_no VARCHAR, corp_code VARCHAR, nstk_asstd DATE, "
                        "nstk_ascnt_ps_ostk_ratio DECIMAL(14,10), nstk_ascnt_ps_estk_ratio "
                        "DECIMAL(5,2), nstk_ostk_cnt DECIMAL(11,0), nstk_estk_cnt DECIMAL(10,0), "
@@ -860,3 +891,69 @@ def test_공시가_준_비율은_유도로_덮이지_않는다() -> None:
     row = run_event_sql(cal, listing, fric=fric)[f"A00001:bonus:{cal[20]}"]
     assert row["ratio"] == 3.0                       # 1 + 2.0 — 공시가 준 값
     assert row["ratio_basis"] == "disclosed"
+
+
+# ── 이벤트 유형 확장: 자사주 취득 · CB 발행 (E05·E06 / 결정 1) ─────────────────
+
+
+def test_자사주_취득과_CB_발행은_금액을_싣고_비율은_없다() -> None:
+    """두 유형은 **가격 조정 사건이 아니다.**
+
+    자사주 취득은 주식수가 안 변하고(금고주), CB 발행은 그날 주식수가 안 변한다 — 둘 다
+    시가총액 불변 관계로 배수를 낼 수 없고 내서도 안 된다. `ratio` 는 NULL 이고 `amount_krw`
+    가 값을 나른다. `adj_factor` 는 MVP 4유형만 읽으므로(`sql/adj_factor.sql`) 계수 축에
+    영향이 없다.
+
+    사건일은 **결정일**이다 — 이 유형들은 조정할 가격 효력일이 없고, 소비자가 쓰는 축이
+    「발표 당일 초과수익」이라 결정일이 곧 사건일이다.
+    """
+    cal = sessions(60)
+    listing = flat_listing("A00001", cal, 1_000_000)
+    tsstk = [{"rcept_no": "20210301000001", "corp_code": "CA00001", "aq_dd": cal[20],
+              "aqpln_prc_ostk": 5_000_000_000.0, "aqpln_prc_estk": 1_000_000_000.0,
+              "available_date": cal[20]}]
+    cvbd = [{"rcept_no": "20210301000002", "corp_code": "CA00001", "bddd": cal[30],
+             "bd_fta": 30_000_000_000.0, "available_date": cal[30]}]
+    out = run_event_sql(cal, listing, tsstk=tsstk, cvbd=cvbd)
+
+    t = out[f"A00001:treasury_buy:{cal[20]}"]
+    assert t["ratio"] is None and t["ratio_basis"] == "none"
+    assert t["amount_krw"] == 6_000_000_000        # 보통주 + 기타주 합
+    assert t["source"] == "event_tsstk_aq" and t["effective_date"] == cal[20]
+
+    c = out[f"A00001:cb_issue:{cal[30]}"]
+    assert c["ratio"] is None and c["amount_krw"] == 30_000_000_000
+    assert c["source"] == "event_cvbd_is" and c["effective_date"] == cal[30]
+
+
+def test_새_유형은_방향_불변식에도_조정계수에도_걸리지_않는다() -> None:
+    """`ratio` 가 NULL 이라 방향 불변식(split·bonus > 1 …)의 모집단 밖이고, MVP 4유형이
+    아니라 `adj_factor` 가 읽지 않는다. 두 축 모두 건드리지 않는 것이 이 확장의 전제다."""
+    cal = sessions(60)
+    tsstk = [{"rcept_no": "20210301000001", "corp_code": "CA00001", "aq_dd": cal[20],
+              "aqpln_prc_ostk": 5_000_000_000.0, "available_date": cal[20]}]
+    out = run_event_sql(cal, flat_listing("A00001", cal, 1_000_000), tsstk=tsstk)
+    new = [r for r in out.values() if r["event_type"] not in rules_s05.MVP_EVENT_TYPES]
+    assert new and all(r["ratio"] is None for r in new)
+    assert all(r["event_type"] in rules_s05.EVENT_TYPE_VOCAB for r in out.values())
+
+
+def test_금액이_없는_행은_격리하지_않고_금액만_결측이다() -> None:
+    """금액은 원천 채움률이 95% 안팎이다(서버 `aqpln_prc_ostk` 94.7% · `bd_fta` 95.7%).
+    없다고 사건이 없던 것은 아니므로 행은 내고 `amount_krw` 만 NULL 로 둔다 — 「결측은 결측」."""
+    cal = sessions(60)
+    tsstk = [{"rcept_no": "20210301000001", "corp_code": "CA00001", "aq_dd": cal[20],
+              "aqpln_prc_ostk": None, "aqpln_prc_estk": None, "available_date": cal[20]}]
+    r = run_event_sql(cal, flat_listing("A00001", cal, 1_000_000), tsstk=tsstk)[
+        f"A00001:treasury_buy:{cal[20]}"]
+    assert r["amount_krw"] is None and r["reject_reason"] is None
+
+
+def test_사건일이_없으면_격리된다() -> None:
+    """결정일이 없으면 어느 날의 사건인지 정할 수 없다 — 기존 `effective_unresolved` 규약 그대로."""
+    cal = sessions(60)
+    cvbd = [{"rcept_no": "20210301000002", "corp_code": "CA00001", "bddd": None,
+             "bd_fta": 30_000_000_000.0, "available_date": cal[30]}]
+    out = run_event_sql(cal, flat_listing("A00001", cal, 1_000_000), cvbd=cvbd)
+    rows = [r for r in out.values() if r["event_type"] == "cb_issue"]
+    assert rows and all(r["reject_reason"] == "effective_unresolved" for r in rows)

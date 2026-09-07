@@ -81,8 +81,11 @@ bootstrap ─> application + adapters
 - 각 책임 노드는 `facade/<책임>.py`로만 외부 심볼을 노출하고
   `facade/__init__.py`에 허용 의존성 `DEPENDS_ON`을 선언한다.
 
-현재 Equity DB 계약이 확정되지 않았으므로 `equity_mock`이 기준 adapter다. 실제 DB가 오면
-같은 application port를 구현하는 `equity_duckdb` adapter를 추가하며, domain/application은
+`equity_mock`이 기준 adapter이고, equity 층(`workspace/dongmin/docs/EQUITY_DESIGN.md` §7)을 읽는
+`equity_duckdb` adapter가 S21 축소판으로 같은 application port를 구현한다 —
+`build_container(equity_adapter="duckdb", equity_root=<data/equity>)`, optional extra
+`equity`(`uv sync --extra equity`, duckdb). 현재 필드는 `price.close`·`price.market_cap`·
+`price.adj_close` 세 개뿐이며 그 밖의 field_id는 `INVALID_QUERY`(unavailable)다. domain/application은
 수정하지 않는다. mock으로 조용히 fallback하지 않고 bootstrap에서 adapter를 명시적으로 고른다.
 
 ## 현재 골격
@@ -110,6 +113,7 @@ backend/
    │  └─ ports/outgoing/strategy_repository.py
    ├─ adapters/inbound/http_api/            # FastAPI/OpenAPI wire adapter
    ├─ adapters/outbound/equity_mock/       # 결정적 in-memory Equity v0.2 mock
+   ├─ adapters/outbound/equity_duckdb/     # equity 층 parquet + equity.duckdb 카탈로그 (S21 축소)
    │  └─ facade/provider.py
    ├─ adapters/outbound/strategy_memory/    # contract reference/test adapter
    ├─ adapters/outbound/engine_portfolio/   # capability 협상과 target action 변환

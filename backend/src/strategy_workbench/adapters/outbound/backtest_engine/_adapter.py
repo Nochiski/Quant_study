@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
 
@@ -9,6 +9,7 @@ from backtest_engine.data.feed import DataFeed
 from backtest_engine.engine.slippage import FixedBpsSlippage
 from backtest_engine.ports.market_data import LoadStatus
 from backtest_engine.ports.universe import Membership, UniverseResult
+from backtest_engine.types.actions import PositionTarget, QuantityTarget
 from backtest_engine.types.decision import StrategyDecision
 from backtest_engine.types.events import (
     CorporateActionEvent,
@@ -75,17 +76,42 @@ class TargetTapeStrategy:
         return self._bridge.requirements(self._spec)
 
     def on_event(self, ctx: StrategyContext, event: StrategyEvent) -> StrategyDecision:
-        frame = self._frames.get(event.ts.date()) if isinstance(event, MarketSnapshot) else None
+        if not isinstance(event, MarketSnapshot):
+            return StrategyDecision.no_action(ctx.now, "target_tape_idle")
+        frame = self._frames.get(event.ts.date())
         if frame is None:
             return StrategyDecision.no_action(ctx.now, "target_tape_idle")
-        return StrategyDecision.of(
-            ctx.now,
-            self._bridge.to_target_action(
-                frame,
-                max_participation=self._spec.execution.participation_rate,
-            ),
-            f"target_tape:{frame.signal_as_of.isoformat()}",
+        action = self._bridge.to_target_action(
+            frame,
+            max_participation=self._spec.execution.participation_rate,
         )
+        targets, untradable = _tradable_targets(action.targets, event, ctx)
+        reason = f"target_tape:{frame.signal_as_of.isoformat()}"
+        if untradable:
+            reason += f" no_bar={untradable}"
+        return StrategyDecision.of(ctx.now, replace(action, targets=targets), reason)
+
+
+def _tradable_targets(
+    targets: tuple[PositionTarget, ...], snapshot: MarketSnapshot, ctx: StrategyContext
+) -> tuple[tuple[PositionTarget, ...], tuple[str, ...]]:
+    """The kernel sizes a weight target off this session's close, so a target whose instrument
+    has no bar today (trading halt, reference-price session — equity feeds omit those rows)
+    cannot be routed: it is held at its current quantity when held, and skipped when not. The
+    skipped budget stays in cash until the next frame; the symbols are reported in the decision
+    reason so the run manifest keeps the trace (KRX halts are routine, e.g. 005930 2018-04-30).
+    """
+    kept: list[PositionTarget] = []
+    untradable: list[str] = []
+    for target in targets:
+        if snapshot.has(target.instrument):
+            kept.append(target)
+            continue
+        untradable.append(target.instrument.symbol)
+        held = ctx.position_qty(target.instrument)
+        if held != 0:
+            kept.append(QuantityTarget(instrument=target.instrument, quantity=held))
+    return tuple(kept), tuple(untradable)
 
 
 class BacktestEngineExecutorAdapter:

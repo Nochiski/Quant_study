@@ -1,0 +1,118 @@
+{
+ "_seed": "S11 disclosure_version(정기보고서 접수 판본 · 정정 링크) 가 요구하는 baseline 상수. 오케스트레이터가 data/equity/baseline.json 에 병합한다. value 는 tests/fixtures/stage_slice 절단본에서 측정한 값이고, 서버 current_build 위 재측정이 필요한 항목은 _measured[].note 가 ★ 로 지목한다.",
+ "measured_at": "2026-09-06",
+ "disclosure_version": {
+  "deadline_days_annual": 90,
+  "deadline_days_interim": 45,
+  "link_rate_min": 0.99,
+  "date_exact_rate": 0.987,
+  "reach_rate_min": 0.99,
+  "thresholds": {
+   "EG7": 0.0
+  },
+  "date_check_near_days": 7
+ },
+ "_measured": [
+  {
+   "table": "disclosure_version",
+   "metric": "deadline_days_annual",
+   "inputs": {},
+   "sql": null,
+   "value": 90,
+   "measured_at": "2026-09-06",
+   "growing": false,
+   "used_by": "sql/disclosure_version.sql legal_deadline·delay_days (_const)",
+   "note": "convention(법정). 자본시장법 §159 — 사업보고서는 사업연도 경과 후 90일 이내 제출. 잰 값이 아니라 규범이므로 서버 재측정 대상이 아니다. `delay_days` 는 기록형이고 게이트가 임계로 쓰지 않는다."
+  },
+  {
+   "table": "disclosure_version",
+   "metric": "deadline_days_interim",
+   "inputs": {},
+   "sql": null,
+   "value": 45,
+   "measured_at": "2026-09-06",
+   "growing": false,
+   "used_by": "sql/disclosure_version.sql legal_deadline·delay_days (_const)",
+   "note": "convention(법정). 자본시장법 §160 — 반기·분기보고서는 기간 경과 후 45일 이내 제출."
+  },
+  {
+   "table": "disclosure_version",
+   "metric": "date_check_near_days",
+   "inputs": {},
+   "sql": null,
+   "value": 7,
+   "measured_at": "2026-09-06",
+   "growing": false,
+   "used_by": "sql/disclosure_version.sql date_check='off_2_7d' 경계 (_const)",
+   "note": "convention. 어휘 라벨 `off_2_7d` 가 값을 못박고 있으므로 조정 상수가 아니다 — SQL 숫자 리터럴 금지 규약(tests/test_equity_build.py::test_sql파일에_상수_하드코딩_없음)의 통로일 뿐이고 `universe_daily.adv_window_td` 20 과 같은 취급이다(GATES §1-12). 바꾸려면 어휘도 함께 바꾼다. 절단본에서 off_2_7d 는 0건."
+  },
+  {
+   "table": "disclosure_version",
+   "metric": "link_rate_min",
+   "inputs": {
+    "stg_disclosure": "slice",
+    "stg_doc_correction": "slice",
+    "stg_doc_index": "slice"
+   },
+   "sql": "SELECT count(*) FILTER (WHERE candidate_status IN ('unique','multi_resolved'))::DOUBLE / nullif(count(*) FILTER (WHERE is_correction), 0) FROM disclosure_version",
+   "value": 0.99,
+   "measured_at": "2026-09-06",
+   "growing": false,
+   "used_by": "EG6_disclosure_version (GATES EG6-P05 = DOC §8.1 E-G6a)",
+   "note": "★ 서버 재측정 필요. 절단본 실측 1.0(정정 97건 전부 unique — 법인 11개 안에서는 같은 (corp, kind, period_label) 그룹에 원본이 하나뿐이라 후보가 갈리지 않는다). seed 0.99 는 문서층 실측 DOC C340 표본 unique 339/340 = 0.99706 보다 한 자리 낮춘 값이다(WORKFLOW §3-4). 서버 전량에서는 `[첨부추가]` 원본이 같은 그룹에 둘 이상 있는 경우 multi_* 가 생기므로 값이 내려갈 수 있다 — 첫 서버 빌드의 metrics.link_rate 로 확정한다."
+  },
+  {
+   "table": "disclosure_version",
+   "metric": "date_exact_rate",
+   "inputs": {
+    "stg_disclosure": "slice",
+    "stg_doc_correction": "slice"
+   },
+   "sql": "SELECT count(*) FILTER (WHERE date_check IN ('exact','off_1d'))::DOUBLE / nullif(count(*) FILTER (WHERE date_check NOT IN ('unparsed','no_page','no_zip','n/a')), 0) FROM disclosure_version",
+   "value": 0.987,
+   "measured_at": "2026-09-06",
+   "growing": false,
+   "used_by": "EG6_disclosure_version metric date_exact_rate (GATES EG6-P06 = E-G6b, 기록형)",
+   "note": "기록형 — 판정하지 않는다(GATES §0-1). 절단본 실측 77/78 = 0.98718(어긋난 1건은 mismatch). 문서층 실측 참조값은 276/291 = 0.948(WORKFLOW §3-4). ★ 서버 값으로 갱신."
+  },
+  {
+   "table": "disclosure_version",
+   "metric": "reach_rate_min",
+   "inputs": {
+    "stg_disclosure": "slice",
+    "stg_doc_correction": "slice"
+   },
+   "sql": "SELECT count(*) FILTER (WHERE d.rm_corrected_later AND NOT o.is_correction AND o.n_corrections > 0)::DOUBLE / nullif(count(*) FILTER (WHERE d.rm_corrected_later AND NOT o.is_correction), 0) FROM disclosure_version o JOIN stg_disclosure d USING (rcept_no)",
+   "value": 0.99,
+   "measured_at": "2026-09-06",
+   "growing": false,
+   "used_by": "EG8_disclosure_version (GATES EG8-P09 = DOC §8.1 E-G7)",
+   "note": "★ 서버 재측정 필요. stage `rm` 정정 플래그가 붙은 **원본** 접수 중 산출 링크가 실제로 닿은 비율 — 산출이 만들지 않은 축으로 링크를 검사하는 유일한 게이트다(항진명제 회피). 절단본 실측 82/82 = 1.0. **분모에서 정정본을 뺀다**: 정정이 또 정정되면 DART 가 정정본에도 rm 플래그를 붙이는데(절단본 15건) 후보 술어가 정정본을 원본 자격에서 빼므로 구조적으로 도달 대상이 아니다 — 넣으면 절단본 도달률이 82/97 = 0.845 로 내려간다(GATES §9 기록). WORKFLOW §3-4 참조값 `rm` 도달 99.9%, seed 0.99."
+  },
+  {
+   "table": "disclosure_version",
+   "metric": "threshold_EG7",
+   "inputs": {
+    "stg_disclosure": "slice"
+   },
+   "sql": "SELECT n_reject::DOUBLE / (n_rows + n_reject) FROM disclosure_version _meta",
+   "value": 0.0,
+   "measured_at": "2026-09-06",
+   "growing": false,
+   "used_by": "EG7 격리 비율 상한 (gates.threshold)",
+   "note": "격리 사유가 `rcept_dt_missing` 하나뿐이고 절단본 676행 전부 rcept_dt 가 있어 0.0. 기간 라벨 없는 행(서버 586)은 **격리하지 않는다** — DESIGN §4-4 확정(행 유지 + group_key_basis='no_label'), GATES 초안 EG7-P05 `no_label` 격리는 폐기(§9). ★ 서버에서 rcept_dt 결측이 나오면 갱신."
+  },
+  {
+   "_ladder_reference": "모집단 5단 사다리는 임계가 아니라 재계산 일치로 판정한다(EG3_disclosure_version.ladder_stage vs ladder_out). 아래는 참조 실측값이며 게이트가 비교하지 않는다 — 접수는 매일 늘어난다.",
+   "server_reference": {
+    "n_periodic": 181106,
+    "n_rm_corrected_later": 20579,
+    "n_is_correction": 24285,
+    "n_correction_zip": 17600,
+    "n_correction_filed_parsed": 15225,
+    "source": "EQUITY_DESIGN §4-4 · §10 P14 · EQUITY_WORKFLOW §3-4 · STAGE_HANDOFF §5",
+    "note": "STAGE_HANDOFF 는 같은 축을 20,759 로 적었다(정기보고서 그룹 181,106 중 정정 있음 20,759). DESIGN·WORKFLOW 의 20,579 와 180 건 어긋난다 — 첫 서버 빌드의 ladder_stage 로 판정한다(GATES §9 기록)."
+   }
+  }
+ ]
+}

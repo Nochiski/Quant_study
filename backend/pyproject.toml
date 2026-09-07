@@ -17,6 +17,9 @@ server = "strategy_workbench.bootstrap.facade.server:main"
 parquet = [
     "pyarrow>=15",
 ]
+equity = [
+    "duckdb>=1.5",
+]
 
 [dependency-groups]
 dev = [

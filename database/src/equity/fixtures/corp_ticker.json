@@ -1,0 +1,115 @@
+[
+ {"case": "FX-1-003a", "key": {"ticker": "003540"}, "column": "isin8",
+  "expect": "KR700354", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — isin 'KR7003540002' 앞 8자",
+  "note": "GATES §4 FX-1-003 — 대신증권 1:N 그룹"},
+
+ {"case": "FX-1-003b", "key": {"ticker": "003545"}, "column": "isin8",
+  "expect": "KR700354", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — isin 'KR7003541000' 앞 8자",
+  "note": "본주와 같은 isin8"},
+
+ {"case": "FX-1-003c", "key": {"ticker": "003547"}, "column": "isin8",
+  "expect": "KR700354", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — isin 'KR7003542008' 앞 8자",
+  "note": "3종목 1그룹"},
+
+ {"case": "FX-1-003d", "key": {"ticker": "003545"}, "column": "common_ticker",
+  "expect": "003540", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — 그룹 내 유일 보통주",
+  "note": "우선주 → 본주 링크"},
+
+ {"case": "FX-1-003e", "key": {"ticker": "003540"}, "column": "is_common",
+  "expect": "true", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — secugrp='주권' ∧ stkcert_tp='보통주'",
+  "note": "EG3-P02 는 KR7 isin8 그룹당 이 값이 정확히 1건임을 본다"},
+
+ {"case": "FX-1-003f", "key": {"ticker": "003545"}, "column": "is_common",
+  "expect": "false", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — 구형우선주",
+  "note": ""},
+
+ {"case": "FX-1-003g", "key": {"ticker": "003547"}, "column": "corp_code",
+  "expect": "00110893", "expect_source": "stage:stg_corp_map.corp_code",
+  "fixture_class": "positive",
+  "source": "hand — 그룹 보통주 003540 의 corp_map 매핑",
+  "note": "우선주 시총 누락 방어의 핵심 링크"},
+
+ {"case": "FX-1-003h", "key": {"ticker": "003545"}, "column": "link_basis",
+  "expect": "isin8", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — corp_code 가 isin8 그룹 경유로 붙었다",
+  "note": ""},
+
+ {"case": "FX-1-S01-ct-001", "key": {"ticker": "005935"}, "column": "common_ticker",
+  "expect": "005930", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — isin8 'KR700593' 그룹",
+  "note": "삼성전자 우선주"},
+
+ {"case": "FX-1-S01-ct-002", "key": {"ticker": "005935"}, "column": "corp_code",
+  "expect": "00126380", "expect_source": "stage:stg_corp_map.corp_code",
+  "fixture_class": "positive",
+  "source": "hand — 005930 의 corp_map 매핑",
+  "note": ""},
+
+ {"case": "FX-1-005a", "key": {"ticker": "900050"}, "column": "isin8",
+  "expect": "HK000005", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — isin 'HK0000050325' 앞 8자",
+  "note": "GATES §4 FX-1-005 — 900060('HK0000051505') 과 isin8 이 같다"},
+
+ {"case": "FX-1-005b", "key": {"ticker": "900060"}, "column": "isin8",
+  "expect": "HK000005", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — isin 'HK0000051505' 앞 8자",
+  "note": "그룹핑하면 두 발행사가 한 법인이 된다 → KR7 만 그룹"},
+
+ {"case": "FX-1-005c", "key": {"ticker": "900050"}, "column": "corp_code",
+  "expect": "00722500", "expect_source": "stage:stg_corp_map.corp_code",
+  "fixture_class": "positive",
+  "source": "hand — corp_map 직접 매핑 (중국원양자원)",
+  "note": "두 행의 corp_code 가 달라야 한다"},
+
+ {"case": "FX-1-005d", "key": {"ticker": "900060"}, "column": "corp_code",
+  "expect": "00694003", "expect_source": "stage:stg_corp_map.corp_code",
+  "fixture_class": "positive",
+  "source": "hand — corp_map 직접 매핑 (중국식품포장)",
+  "note": "FX-1-005c 와 다른 값"},
+
+ {"case": "FX-1-005e", "key": {"ticker": "900050"}, "column": "link_basis",
+  "expect": "corp_map", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — 비KR7 은 isin8 그룹 축이 없다",
+  "note": ""},
+
+ {"case": "FX-1-005f", "key": {"ticker": "900050"}, "column": "common_ticker",
+  "expect": null, "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — 외국주권이라 is_common=false, 단독이라 그룹 보통주도 없다",
+  "note": "법인 링크는 corp_code 가 준다"},
+
+ {"case": "FX-1-S01-ct-003", "key": {"ticker": "069500"}, "column": "isin8",
+  "expect": null, "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — ETF 원천에 isin 컬럼이 없다",
+  "note": ""},
+
+ {"case": "FX-1-S01-ct-004", "key": {"ticker": "069500"}, "column": "link_basis",
+  "expect": "none", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — isin8·corp_map 둘 다 없음",
+  "note": "DESIGN §4-1 — ETF·미매핑은 corp_code NULL"},
+
+ {"case": "FX-1-S01-ct-005", "key": {"ticker": "069500"}, "column": "corp_code",
+  "expect": null, "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — corp_map 에 없다",
+  "note": ""},
+
+ {"case": "FX-1-S01-ct-006", "key": {"ticker": "005930"}, "column": "isin8",
+  "expect": "KR700593", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — isin 'KR7005930003' 앞 8자",
+  "note": ""},
+
+ {"case": "FX-1-S01-ct-007", "key": {"ticker": "0001A0"}, "column": "isin8",
+  "expect": "KR70001A", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — isin 'KR70001A0001' 앞 8자 (문자가 섞인 isin8)",
+  "note": "isin8 을 숫자로 다루면 이 그룹이 깨진다"},
+
+ {"case": "FX-1-S01-ct-008", "key": {"ticker": "0001A0"}, "column": "link_basis",
+  "expect": "isin8", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — 자기 자신이 그룹 보통주",
+  "note": ""}
+]

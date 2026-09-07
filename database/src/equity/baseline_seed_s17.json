@@ -1,0 +1,68 @@
+{
+ "_seed": "S17 consensus_daily(+ 뷰 v_consensus) 가 요구하는 baseline 상수. 오케스트레이터가 data/equity/baseline.json 에 병합한다. value 는 tests/fixtures/stage_slice 절단본 실측(티커 7 · wise 886행 · v3 494행)에 근거한 제안값이고, 절단본이 티커·기간으로 잘린 표본이라 네 상수 전부 ★ 서버 재측정 대상이다(_measured[].note). 서버 첫 빌드는 이 값이 baseline.json 에 없으면 EG8·EG9 가 skip(no_baseline) 로 남고 측정치는 gates[].metrics 에 실린다 — GATES §7-3 승인 루프 그대로다. 등재하지 않는 것 둘: (1) consensus_daily.obs_month_bias_min 은 EG-C ⑨(EGC-09) 상수인데 그 항은 G05 팩터를 요구해 7단계 contract 단계에서 붙는다(tests/test_equity_s17_consensus.py 의 look-ahead 대조는 임계가 아니라 '그 행이 available_date 축에서 보이지 않는다' 는 등식이라 상수를 쓰지 않는다). (2) threshold_EG7 은 절단본 격리 0 이라 코드 기본값(gates.DEFAULT_THRESHOLDS['EG7'])을 쓰고 2회차 이관 시 오케스트레이터가 서버 실측으로 등재한다.",
+ "measured_at": "2026-09-06",
+ "consensus_daily": {
+  "v3_wise_value_tol_rel": 0.001,
+  "v3_wise_match_min": 0.65,
+  "cover_ratio_drop_max": 0.5,
+  "cover_ratio_rise_max": 1.0
+ },
+ "_measured": [
+  {
+   "table": "consensus_daily",
+   "metric": "v3_wise_value_tol_rel",
+   "inputs": {
+    "stg_consensus_monthly": "b_20260902T164518_972193Z",
+    "stg_v3_revision_daily": "b_20260902T164559_798057Z"
+   },
+   "sql": "SELECT quantile_cont(abs(c.est_mean - v.est_mean) / abs(v.est_mean), 0.5) FROM consensus_daily c JOIN v3_obs v ON v.ticker=c.ticker AND v.obs_date=c.obs_date AND v.target_period=c.target_period AND v.metric=c.metric WHERE c.src='wise'  -- rules_s17.eg8_overlap_sql",
+   "value": 0.001,
+   "measured_at": "2026-09-06",
+   "growing": false,
+   "used_by": "EG8-P07 (rules_s17.eg8_consensus_daily) — 두 원천 값이 '같다' 고 볼 상대 허용오차",
+   "note": "절단본 상대차 중앙값은 revenue 6.1e-6 · eps 6.9e-5 로, 대부분은 v3 컬럼 정밀도(revenue DECIMAL(10,1) · eps DECIMAL(8,0) 반올림)만큼만 다르다. 0.001 은 그 반올림(최대 ~1e-5)보다 두 자릿수 넉넉하면서 실제 원천 차이(절단본 최대 10.8% — 247540 2026-07-31 eps wise 312.34 vs v3 350)는 잡아내는 값이다. ★ 서버에서 metric 별 상대차 분포를 다시 재고 확정."
+  },
+  {
+   "table": "consensus_daily",
+   "metric": "v3_wise_match_min",
+   "inputs": {
+    "stg_consensus_monthly": "b_20260902T164518_972193Z",
+    "stg_v3_revision_daily": "b_20260902T164559_798057Z"
+   },
+   "sql": "SELECT n_match / n_measured FROM (rules_s17.eg8_overlap_sql, tol = v3_wise_value_tol_rel)",
+   "value": 0.65,
+   "measured_at": "2026-09-06",
+   "growing": false,
+   "used_by": "EG8-P07 (rules_s17.eg8_consensus_daily.match_rate) — 폐기형 하한",
+   "note": "★ 절단본 실측 32/45 = 0.7111(tol 0.001). 겹침 모집단이 45행(티커 5 × 월 5 × 202612 × {eps,revenue} − 003540 revenue 결측 5)뿐이라 표본이 작다. 0.65 는 그 아래로 한 칸 둔 제안값이며 사람 승인 필요. 참고 분포: tol 0.01 → 37/45(0.822) · tol 0.05 → 44/45(0.978). 일치율이 낮은 쪽은 반올림이 아니라 두 WISE 엔드포인트(cF5001/cF5002 월간 vs v3 리비전)의 추정 모집단 차이로 보인다 — 서버 실측 뒤 '왜 다른가' 를 먼저 판정하고 하한을 정할 것."
+  },
+  {
+   "table": "consensus_daily",
+   "metric": "cover_ratio_drop_max",
+   "inputs": {
+    "stg_consensus_monthly": "b_20260902T164518_972193Z",
+    "stg_v3_revision_daily": "b_20260902T164559_798057Z"
+   },
+   "sql": "SELECT max(1 - n_cov / lag(n_cov) OVER (ORDER BY obs_month)) FROM (SELECT obs_month, count(DISTINCT ticker) AS n_cov FROM consensus_daily GROUP BY 1)",
+   "value": 0.5,
+   "measured_at": "2026-09-06",
+   "growing": false,
+   "used_by": "EG9-P05 (rules_s17.eg9_consensus_daily.cover_drop_max_observed)",
+   "note": "★ 절단본 실측 0.0 — 14개월 전부 커버 종목 7 로 같다(절단본이 티커 7 로 잘려 있어 월별 변동이 구조적으로 없다). 0.5 는 '한 달 만에 커버 종목이 반토막 나면 수집이 끊긴 것' 이라는 뜻의 제안값이다. 서버는 wise 월간이 2025-08~2026-09, v3 가 2026-04~08 뿐이라 두 원천이 붙고 떨어지는 경계 달에서 실제 계단이 난다 — 그 계단을 재고 확정할 것."
+  },
+  {
+   "table": "consensus_daily",
+   "metric": "cover_ratio_rise_max",
+   "inputs": {
+    "stg_consensus_monthly": "b_20260902T164518_972193Z",
+    "stg_v3_revision_daily": "b_20260902T164559_798057Z"
+   },
+   "sql": "SELECT max(n_cov / lag(n_cov) OVER (ORDER BY obs_month) - 1) FROM (SELECT obs_month, count(DISTINCT ticker) AS n_cov FROM consensus_daily GROUP BY 1)",
+   "value": 1.0,
+   "measured_at": "2026-09-06",
+   "growing": false,
+   "used_by": "EG9-P05 (rules_s17.eg9_consensus_daily.cover_rise_max_observed)",
+   "note": "★ 절단본 실측 0.0. 1.0 = '한 달 만에 커버 종목이 두 배가 되면 유니버스가 바뀐 것' 이라는 제안값. 급증도 폐기형인 이유는 커버가 갑자기 넓어진 구간의 컨센서스 팩터가 그 전 구간과 다른 모집단을 재기 때문이다(GATES §0-3 컨센서스 선택편향). 서버 실측 뒤 확정."
+  }
+ ]
+}

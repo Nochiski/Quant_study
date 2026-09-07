@@ -1,0 +1,27 @@
+{
+ "_seed": "S10 (credit_daily) 이 요구하는 baseline 상수 — 격리 비율 임계 하나뿐이다. 산출식에 숫자 임계·리터럴이 없으므로 `_const` 로 주입할 규칙 상수는 없다(EquityTable.consts = ()): 격자 술어·fill_kind 판정·채움 규약은 전부 어휘 비교이고 유일한 숫자 0 은 src_omitted 셀의 가산 축 채움값이다. 기본 격리 임계(gates.DEFAULT_THRESHOLDS['EG7'] = 0.001)를 쓸 수 없는 테이블이라 threshold_EG7 을 첫 빌드부터 등재한다 — `_reject/pre_calendar` 는 KIS 신용잔고가 KRX 지수 캘린더 하한(2010-01-04)보다 이른 날짜를 돌려주기 때문에 생기는 구조적 격리이고(DESIGN §10 P11: 서버 credit 24,497), 이 비율은 원천 품질이 아니라 두 원장의 시작일 차이다. 기록형 metric(fill_kind 분포·KIS 수정종가 대조·`*_amt` 단위 추정비·잔고비율 대 상장주식수·음수 신규/상환/증감율·net_buy 판정 근거)은 _meta.gates[EG3_credit_daily].metrics 에 남고 승격 여부는 서버 실측 뒤 판단한다. FX-3-008 골든 픽스처는 src/equity/fixtures/credit_daily.json (상수 아님).",
+ "measured_at": "2026-09-06",
+ "credit_daily": {
+  "thresholds": {
+   "EG7": 0.005
+  }
+ },
+ "_measured": [
+  {
+   "table": "credit_daily",
+   "metric": "threshold_EG7",
+   "inputs": {
+    "stg_credit_daily": "tests/fixtures/stage_slice",
+    "trading_calendar": "b_up_00",
+    "universe_daily": "b_up_08"
+   },
+   "sql": "SELECT (n_pre_calendar + n_off_grid)::DOUBLE / (n_grid + n_pre_calendar + n_off_grid)  -- 절단본: (85 + 9) / (36,972 + 94) = 0.002536",
+   "value": 0.005,
+   "kind": "convention",
+   "measured_at": "2026-09-06",
+   "growing": false,
+   "used_by": "EG7 (gates.eg7_range) — n_reject / (n_out + n_reject) <= threshold",
+   "note": "★ 서버 재측정 필요. 절단본 실측 0.002536(pre_calendar 85 = 2009년 행 · off_grid 9 = 상장 전·재상장 공백 회신), 코드 기본값 0.001 을 구조적으로 넘는다. 서버 추정은 DESIGN §10 P11 의 credit pre_calendar 24,497 을 격자(universe_daily 의 비-ETF 행, 10.9M 급)로 나눈 ~0.0023 이라 절단본과 같은 자릿수다. 0.005 는 두 값에 여유 2배를 준 사람 선택값이고, 원천 품질이 아니라 KIS 신용잔고 시작일(2009-11)과 KRX 지수 캘린더 하한(2010-01-04)의 차이를 담는 크기다. 서버 1차 빌드 뒤 실측치의 1.5~2배로 조인다."
+  }
+ ]
+}

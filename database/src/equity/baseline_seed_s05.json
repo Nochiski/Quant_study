@@ -1,0 +1,65 @@
+{
+ "_seed": "S05 corp_event(MVP-B: split·reverse_split·bonus·capred) 가 요구하는 baseline 상수. 오케스트레이터가 data/equity/baseline.json 에 병합한다. value 는 tests/fixtures/stage_slice 절단본에서 측정한 값이고, 서버 current_build 위 재측정이 필요한 항목은 _measured[].note 가 지목한다.",
+ "measured_at": "2026-09-05",
+ "corp_event": {
+  "effective_before_announce_max_days": 2555,
+  "near_dup_window_days": 5,
+  "krx_share_change_tol": 0.001,
+  "thresholds": {
+   "EG7": 0.0
+  }
+ },
+ "_measured": [
+  {
+   "table": "corp_event",
+   "metric": "effective_before_announce_max_days",
+   "inputs": {
+    "stg_capital": "b_20260903T013110_716954Z"
+   },
+   "sql": "SELECT max(date_diff('day', isu_dcrs_de, available_date)) FROM stg_capital WHERE (isu_dcrs_stle LIKE '%감자%' OR (isu_dcrs_stle LIKE '%무상증자%' AND isu_dcrs_stle NOT LIKE '%유상%')) AND isu_dcrs_de IS NOT NULL",
+   "value": 2555,
+   "measured_at": "2026-09-05",
+   "growing": true,
+   "used_by": "EG7-P08 effective_before_announce (sql/corp_event.sql judged CTE) · _const",
+   "note": "값 유지(오케스트레이터 확정, 09-05 2차). 정기보고서 증자(감자)현황(stg_capital)은 과거 사건을 회고 기재하므로 announce_date(rcept_dt) 가 effective_date(isu_dcrs_de) 보다 늦다 — 절단본 원행 최대 2,555일(우리은행 2013-04-01 유상감자를 2020-03-30 사업보고서가 기재; 2차부터는 상장 전 사건이라 범위 밖). 판정은 사건 단위다: 같은 (ticker, event_type, effective_date) 후보 중 가장 이른 announce 가 효력일보다 이 일수 이상 늦을 때만 그 사건 전부를 격리한다 — 회고 사본은 결정공시·앞선 보고서에 접힌다. 서버 1차 실측(사본 단위 판정)에서는 공시−효력 2,556~14,294일 행 2,703 이 격리됐고, 캘린더 밖(1963~2009) 사건은 2차부터 범위 밖이다."
+  },
+  {
+   "table": "corp_event",
+   "metric": "near_dup_window_days",
+   "inputs": {},
+   "sql": null,
+   "value": 5,
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "used_by": "EG3_corp_event metric n_near_dup_cross_source (기록형)",
+   "note": "convention. 같은 (ticker, event_type) 이 다른 원천에서 이 일수 안에 두 번 나오면 정확 축 dedup 이 놓친 같은 사건일 가능성이 높다 — 절단본 실측 1건(101970 capred: 결정공시 cr_std 2018-10-12 vs 자본변동 isu_dcrs_de 2018-10-13). 판정하지 않고 기록만 한다(GATES §0-1 기록형)."
+  },
+  {
+   "table": "corp_event",
+   "metric": "krx_share_change_tol",
+   "inputs": {},
+   "sql": null,
+   "value": 0.001,
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "used_by": "sql/corp_event.sql pool.scope_out='krx_par_only' · EG3_corp_event metric n_krx_par_only",
+   "note": "convention(오케스트레이터 제안 1e-3). KRX 액면가 변경일에 주식수 비 |ratio−1| 가 이 안이면 단주·소각 잡음뿐인 액면 변경이라 이벤트가 아니다(서버 실측 025620 2015-08-31 0.99991 · 094860·052300·072520·086830 0.9999999). S06 factor_source='no_share_change' 78건이 이 제외로 사라져야 정상. 진짜 분할·병합의 |ratio−1| 은 0.2 이상이라 여유가 크다."
+  },
+  {
+   "table": "corp_event",
+   "metric": "threshold_EG7",
+   "inputs": {
+    "stg_capital": "b_20260903T013110_716954Z",
+    "stg_event_cr": "b_20260902T164513_403656Z",
+    "stg_event_pifric": "b_20260902T164512_875330Z",
+    "stg_listing_daily": "b_20260902T162451_832365Z"
+   },
+   "sql": "SELECT n_reject::DOUBLE / (n_rows + n_reject) FROM corp_event _meta  -- 프레임 gates.eg7_range 의 분모 = n_out + n_reject (dedup 뒤 행수 기준)",
+   "value": 0.0,
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "used_by": "EG7 격리 비율 상한 (gates.threshold)",
+   "note": "★ 서버 재측정 필요(오케스트레이터). 09-05 2차: 범위 밖(캘린더 밖·비상장 종류주·상장 전) 행을 격리가 아니라 모집단 밖으로 옮긴 뒤 절단본 재측정 — pool 34 중 범위 밖 12(unlisted_class 6 · pre_listing 6), 범위 안 후보 22 → dedup 뒤 8행, 격리 0 → 비율 0.0. 서버 1차 빌드(격리 8,834 / 산출 3,865 = 0.696)의 격리 대부분이 이 범위 밖 행이었다. 남는 격리(보통주 무티커·기준일 없음·ratio 파싱 실패·임계 밖)는 서버에서 수백 건 규모로 예상되므로 서버 값으로 갱신해야 한다. GATES §1 EG7 은 분모를 n_src(EG1 우변)로 적었지만 프레임은 n_out+n_reject 를 쓴다 — dedup 이 있는 테이블에서 두 정의가 갈린다(프레임 미수정, 미결 기록)."
+  }
+ ]
+}

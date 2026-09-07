@@ -1,0 +1,144 @@
+{
+ "_seed": "S06 adj_factor(+ 뷰 v_cum_adj·v_adj_price·v_adj_volume·v_firm_mktcap) 가 요구하는 baseline 상수. 오케스트레이터가 data/equity/baseline.json 에 병합한다. value 는 tests/fixtures/stage_slice 절단본 실측 + 서버 1차·2차 빌드 실측(09-05, EG8 실패 → apply_date 도입 → 행 대 행 수익률·거래량 중앙값 비 집합 통계)에 근거한 초기값이고, 서버 재측정이 필요한 항목은 _measured[].note 가 ★ 로 지목한다. adj_factor.factor_product_tol 은 등재하지 않는다 — EG3-P04 허용오차는 baseline 상수가 아니라 산출 정밀도(rules_s06.FACTOR_PRODUCT_TOL, DOUBLE 역수 곱 반올림)다. _asof/ 표본·EG11·EG5c·EG3-P05 는 S02 의 trading_calendar.asof_sample_dates·asof_sample_tickers 를 그대로 쓴다(새 키 없음). 근접 중복 창은 corp_event.near_dup_window_days 를 _const 로 복제 없이 읽는다. S06-2(09-05, KRX 기준가 원천 krx_base_price)가 base_price_tol_rel·base_match_window_sessions·factor_product_tol_base 를 더했다(설계 seed 값 그대로, 절단본 실측으로 확인 — ★ 서버 재측정은 _measured[].note). 같은 날 주식수 변화 허용치는 corp_event.krx_share_change_tol 을 _const 로 복제 없이 읽는다.",
+ "measured_at": "2026-09-05",
+ "adj_factor": {
+  "asof_for_jump_check": "2026-08-20",
+  "adj_return_jump_max": 1.0,
+  "adj_volume_ratio_band": 3.0,
+  "price_match_tol_rel": 0.15,
+  "price_match_tol_abs": 0.05,
+  "price_match_window_sessions": 40,
+  "price_match_lookback_sessions": 5,
+  "base_price_tol_rel": 0.002,
+  "base_match_window_sessions": 5,
+  "factor_product_tol_base": 0.01
+ },
+ "_measured": [
+  {
+   "table": "adj_factor",
+   "metric": "asof_for_jump_check",
+   "inputs": {
+    "stg_index_daily": "b_20260902T162449_297822Z"
+   },
+   "sql": "SELECT CAST(max(date) AS VARCHAR) FROM stg_index_daily  -- = trading_calendar.backfill_end",
+   "value": "2026-08-20",
+   "measured_at": "2026-09-05",
+   "growing": true,
+   "used_by": "EG8-P02·P03 (rules_s06.eg8_adj_jump) — v_adj_price/v_adj_volume 를 부르는 고정 as_of",
+   "note": "backfill_end 와 같은 값. 전 이벤트의 apply_date·available_date 가 이 날 이하라 모든 ok 계수가 반영된 조정가로 점프를 잰다. 백필이 재개되면 backfill_end 와 함께 갱신(growing=true). 미등재면 게이트는 price_daily max(date) 로 대신 재고 skip(no_baseline) 에 측정치를 남긴다."
+  },
+  {
+   "table": "adj_factor",
+   "metric": "adj_return_jump_max",
+   "inputs": {
+    "stg_price_daily": "b_20260902T162433_936519Z",
+    "stg_listing_daily": "b_20260902T162451_832365Z",
+    "stg_event_pifric": "b_20260902T164512_875330Z"
+   },
+   "sql": "SELECT max(abs(adj_return)) FROM _eg8 WHERE factor_ok  -- rules_s06._jump_table: adj_close(apply_date) / adj_close(그 티커의 직전 가격 행, 참고가 행 포함) - 1, as_of = asof_for_jump_check",
+   "value": 1.0,
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "used_by": "EG8-P02 (rules_s06.eg8_adj_jump.n_return_jump_over) — 건별",
+   "note": "★ 서버 p100 은 오케스트레이터가 재고 확정. 3차 정의(행 대 행) 절단본 실측 max 0.0929 = 247540 무상증자 권리락일 2022-06-27 nominal(조정 전일 497,400×0.25 = 124,350 → 135,900) · 005930 −0.0208 · 005935 −0.0341(직전 행 = 정지 마지막 날 05-03 참고가 2,650,000 → 직전 거래 종가 정의와 같은 값). 값 1.0 의 근거: (i) 매칭 잔여 ≤ max(0.15·m, 0.05) 라 price_matched·combined 행은 구조적으로 ≤ 0.15 · (ii) 소액 nominal(m ≤ 0.05) 행은 그날 원수익률이 그대로 남는데, 거래 재개 첫날은 가격제한폭이 없고 기준가의 50~200% 범위에서 체결되므로 |조정수익률| 물리 상한이 +1.00(−0.50)이다 · (iii) 일반 세션 제한폭 ±30% 는 판정축이 아니라 기록형 n_ok_abs_adj_return_over_030 으로 남긴다. 서버 2차 실측(직전 거래 종가 정의) n_return_jump_over(0.30 기준) 4·max 0.86 은 전부 참고가 행에 새 기준가가 먼저 실린 패턴이라 행 대 행 정의에서 사라지거나 apply_date 가 하루 앞으로 간다."
+  },
+  {
+   "table": "adj_factor",
+   "metric": "adj_volume_ratio_band",
+   "inputs": {
+    "stg_price_daily": "b_20260902T162433_936519Z",
+    "stg_listing_daily": "b_20260902T162451_832365Z",
+    "stg_event_pifric": "b_20260902T164512_875330Z"
+   },
+   "sql": "SELECT median(median_after20 / median_before20) FROM _eg8 WHERE factor_ok  -- 이벤트별: v_adj_volume 의 [apply, apply+19] 세션 중앙값 / [apply−20, apply−1] 세션 중앙값(둘 다 조정 거래량 = 원거래량 × cum_share_factor), 분모 0·행 없음은 제외",
+   "value": 3.0,
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "used_by": "EG8-P03 (rules_s06.eg8_adj_jump.n_volume_ratio_out_of_band): 집합 중앙값 ∈ [1/band, band] · 부정 픽스처 FX-N-006",
+   "note": "★ 서버 재측정으로 확정(오케스트레이터 제안 3). 얇은 종목의 재개일 급증은 정상이라 건별 임계(1차 adj_volume_jump_max 10, 서버 2차 하루 점프 > 10 이 71건·max 1,724)는 의미가 없다 — 목적은 계수 방향 오류(÷↔×) 탐지이고, 방향이 뒤집히면 이 비가 share_factor² 배(50:1 분할 2,500·1주당 3주 무상증자 16)로 튄다. 서버 2차 실측 분포(직전 거래 종가 정의) p1 0 · p10 0.28 · p50 0.81 · p90 2.3 · p99 17 · max 115(035510 capred), > 3 이 70건·> 5 가 39건 → 집합 중앙값 0.81 ∈ [1/3, 3]. 절단본(3차) 집합 중앙값은 DESIGN §10 P23. 분포 p10/p90/p99·max·> 10 건수·미정의 건수는 기록형."
+  },
+  {
+   "table": "adj_factor",
+   "metric": "price_match_tol_rel",
+   "inputs": {},
+   "sql": "-- 판정: dev = |close_t / 직전 거래 종가 / price_factor − 1| ≤ max(tol_rel × m, tol_abs), m = |min(pf, 1/pf) − 1| (sql/adj_factor.sql cand·nom_dev·win)",
+   "value": 0.15,
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "used_by": "apply_date 판정 (a)(b)(c) · EG3_adj_factor 창·소액 metric",
+   "note": "서버 1차 실측(09-05)이 쓴 허용치 max(15%·|기대|, 0.05) 의 상대항. 기대 점프 크기 m 의 15% — 감자 10:1(m 0.9) 조정 후 ±13.5%, 분할 50:1(m 0.98) ±14.7%, 무상증자 1주당 3주(m 0.75) ±11%. 원수익률 기준 식과 감자에선 같고 분할에선 더 엄격하다(원수익률 기준은 50:1 에 r ∈ [0, 0.167] 을 허용해 조정 후 +735% 까지 통과시킨다 — 조정 후 잔여로 판정하는 이유). 절단본 3건(005930·005935·247540)은 잔여 0.021·0.034·0.093 으로 전부 nominal."
+  },
+  {
+   "table": "adj_factor",
+   "metric": "price_match_tol_abs",
+   "inputs": {},
+   "sql": "-- 위와 같은 판정식의 절대 하한. m ≤ tol_abs 인 소액 이벤트는 창 탐색 없이 nominal (sql/adj_factor.sql step_a)",
+   "value": 0.05,
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "used_by": "apply_date 판정 · EG3_adj_factor.n_nominal_small_expected",
+   "note": "서버 1차 실측이 쓴 허용치의 절대항. 하루 잡음(±5%) 안의 소액 무상증자(2~5%, 서버 불일치 136건 대부분 — 예 000100 매년 5%)는 가격으로 날짜를 가릴 수 없으므로 명목 세션에 둔다 — 창 탐색을 허용하면 잡음 매칭이 된다. 소액 nominal 건수는 n_nominal_small_expected 로 기록."
+  },
+  {
+   "table": "adj_factor",
+   "metric": "price_match_window_sessions",
+   "inputs": {},
+   "sql": "-- 창 [n0 − lookback, n0 + window] 세션 (n0 = 명목 세션). 복합 성분 창은 [min n0 − lookback, max n0 + window], 성분 연결 거리도 window (sql/adj_factor.sql win·links·gwin)",
+   "value": 40,
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "used_by": "apply_date 판정 (b)(c) · EG3_adj_factor.n_apply_outside_window·n_combined_apply_inconsistent",
+   "note": "★ 서버 재측정 뒤 조정 가능. 서버 1차 실측 최적일 오프셋: 감자 p10/p50/p90 = −5/+13/+27 세션, 무상증자 p90 +31.5, 분할 p90 +4 → +40 이 p90 을 덮는다. 창을 넓히면 잡음 매칭 확률이 오른다(창 46 세션 × 하루 잡음)."
+  },
+  {
+   "table": "adj_factor",
+   "metric": "price_match_lookback_sessions",
+   "inputs": {},
+   "sql": "-- 창의 뒤쪽 폭 (명목 세션 이전)",
+   "value": 5,
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "used_by": "apply_date 판정 (b)(c) · EG3_adj_factor.n_apply_outside_window",
+   "note": "서버 1차 실측 최적일 오프셋 p10 이 −5(감자·분할). 기준일 직전 거래일 = 권리락일 규칙(무상증자)과 KRX 정지 시작일 관례가 명목일보다 며칠 앞설 수 있다. 오케스트레이터 지시의 창 [−5, +40] 을 두 상수로 나눠 등재한다(비대칭)."
+  },
+  {
+   "table": "adj_factor",
+   "metric": "base_price_tol_rel",
+   "inputs": {
+    "stg_price_daily": "b_20260902T162335_380976Z",
+    "stg_etf_price_daily": "b_20260902T162435_439598Z"
+   },
+   "sql": "-- 후보 판정: |base_price_krw / 직전 행 close − 1| > base_price_tol_rel (sql/adj_factor.sql bp · rules_s06._BASE_PRICE_CANDIDATES_CTE). 절단본 실측: SELECT count(*) FILTER (WHERE base <> prev_close), count(*) FILTER (WHERE abs(base/prev_close − 1) <= 0.002 AND base <> prev_close) FROM (price_daily + lag(close)) → 59 · 14",
+   "value": 0.002,
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "used_by": "krx_base_price 후보 판정 · EG1 우변(신규 행 수) · EG3_adj_factor 기준가 분류 metric",
+   "note": "설계 seed 값(DESIGN §4-2 v3 — 기준가는 정확값이라 tight). 절단본에서 기준가 ≠ 직전 행 close 59행(직전 행 있음) 중 |r − 1| ≤ 0.002 인 14행은 전부 ETF 069500 의 소액 분배락(0.02~0.2%)이라 후보 판정에 영향이 없다(ETF 는 어차피 원천 밖). 비ETF 9행은 최소 |r − 1| = 0.0098(900050 2011-02-16) 로 전부 후보. 서버에서는 호가단위 반올림(기준가는 호가단위로 반올림된다)만 이 안에 들어온다 — 0.002 보다 큰 반올림은 1,000원 미만 저가주에서만 가능하고 그런 사건은 기록형 n_base_price_ne_prev_close_trade 와의 차이로 드러난다. ★ 서버 실측 뒤 후보 밖 불일치 건수(EG3_price_daily 불일치 − 후보)를 확인."
+  },
+  {
+   "table": "adj_factor",
+   "metric": "base_match_window_sessions",
+   "inputs": {},
+   "sql": "-- (a) 사건 교체: |n(기준가 날) − n(단위 apply_date)| ≤ base_match_window_sessions (sql/adj_factor.sql pair) · EG3_adj_factor n_apply_outside_window 의 기준가 행 여유 · n_ok_without_base_price_event",
+   "value": 5,
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "used_by": "krx_base_price (a) 매칭 · EG3_adj_factor",
+   "note": "설계 seed 값. 2차 매칭이 정한 apply_date(또는 미매칭의 명목 세션)와 KRX 기준가 날의 거리 — 절단본 3건(005930·005935 2018-05-04 · 247540 2022-06-27)은 거리 0. 사건 매칭이 이미 ±[5, 40] 창에서 세션을 골랐으므로 기준가는 그 근처에 있어야 하고, 창을 넓히면 같은 티커의 다른 기준가 사건(권리락 등)에 잘못 붙는다. ★ 서버 실측: no_price_match 830 중 살아나는 건수·거리 분포(p90)로 조정."
+  },
+  {
+   "table": "adj_factor",
+   "metric": "factor_product_tol_base",
+   "inputs": {
+    "stg_price_daily": "b_20260902T162335_380976Z",
+    "stg_listing_daily": "b_20260902T162451_832365Z"
+   },
+   "sql": "-- ok 판정: |price_factor × share_factor − 1| ≤ factor_product_tol_base, price_factor = 기준가 / 직전 행 close, share_factor = 같은 날 shares_out 비(없으면 1/price_factor → 곱 정확히 1) (sql/adj_factor.sql replaced·out_new · EG3_adj_factor n_ok_product_off_one 의 krx_base_price 행 허용오차)",
+   "value": 0.01,
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "used_by": "krx_base_price ok 판정(mktcap_neutral vs krx_base_inconsistent) · EG3-P04 기준가 행",
+   "note": "설계 seed 값. 절단본 실측 곱: 005930 0.02 × 50 = 1.0 · 005935 0.02 × 50 = 1.0(정확) · 247540 은 같은 날 주식수 변화가 없어 1/price_factor → 1.0. 기준가 비율이 corp_event ratio 와 어긋나는 크기는 247540 |0.2507 × 4 − 1| = 0.0028(KRX 기준가 124,700 vs 497,400/4 = 124,350 — 자기주식 신주 미배정 등 KRX 산식)이라 0.01 안. ETF 분배락은 원천 밖이라 곱 검사에 오지 않는다(절단본 069500 후보 36 중 14 가 우연히 0.01 안 — 제외 근거). ★ 서버 실측: unknown_krx 행의 곱 분포로 krx_base_inconsistent 경계 확인."
+  }
+ ]
+}

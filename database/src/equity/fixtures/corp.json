@@ -1,0 +1,49 @@
+[
+ {"case": "FX-1-S01-corp-001", "key": {"corp_code": "00126380"}, "column": "corp_name",
+  "expect": "삼성전자", "expect_source": "stage:stg_corp_map.corp_name_current",
+  "fixture_class": "positive",
+  "source": "hand — tests/fixtures/stage_slice/stg_corp_map 원자료 직접 조회",
+  "note": "corp_name 은 corp_map 의 현재 스냅샷 이름을 그대로 싣는다"},
+
+ {"case": "FX-1-S01-corp-002", "key": {"corp_code": "00126380"}, "column": "fiscal_month",
+  "expect": "12", "expect_source": "stage:stg_company.acc_mt", "fixture_class": "positive",
+  "source": "hand — stg_company.acc_mt = '12' → INTEGER 12",
+  "note": "12월 결산"},
+
+ {"case": "FX-1-004", "key": {"corp_code": "00694003"}, "column": "fiscal_month",
+  "expect": "3", "expect_source": "stage:stg_company.acc_mt", "fixture_class": "positive",
+  "source": "hand — 중국식품포장유한공사 acc_mt = '03' → INTEGER 3 (앞 0 소실 확인축)",
+  "note": "GATES §4 FX-1-004 — 3월 결산 1사"},
+
+ {"case": "FX-1-004b", "key": {"corp_code": "00694003"}, "column": "fiscal_month_basis",
+  "expect": "current_snapshot", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — DESIGN §4-1 (P10: stg_company observed_date 1개라 판본 축이 없다)",
+  "note": "결산월은 현재 스냅샷 기준임을 컬럼으로 고지한다"},
+
+ {"case": "FX-1-S01-corp-003", "key": {"corp_code": "00110893"}, "column": "induty_code",
+  "expect": "66121", "expect_source": "stage:stg_company.induty_code_current",
+  "fixture_class": "positive",
+  "source": "hand — 대신증권 KSIC 66121",
+  "note": "induty_code 는 현재값 라벨 — PIT 아님"},
+
+ {"case": "FX-1-S01-corp-004", "key": {"corp_code": "00110893"}, "column": "induty_class",
+  "expect": "financial", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — 66121 앞 2자리 '66' ∈ {64,65,66}",
+  "note": "금융지원서비스업"},
+
+ {"case": "FX-1-S01-corp-005", "key": {"corp_code": "00254045"}, "column": "induty_class",
+  "expect": "financial", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — 우리은행 64121 앞 2자리 '64'",
+  "note": "은행업"},
+
+ {"case": "FX-1-S01-corp-006", "key": {"corp_code": "00126380"}, "column": "induty_class",
+  "expect": "nonfinancial", "expect_source": "hand", "fixture_class": "positive",
+  "source": "hand — 삼성전자 264 앞 2자리 '26'",
+  "note": "3자리 코드도 앞 2자리로 자른다 — 26 ∉ {64,65,66}"},
+
+ {"case": "FX-1-S01-corp-007", "key": {"corp_code": "01516933"}, "column": "induty_code",
+  "expect": "352", "expect_source": "stage:stg_company.induty_code_current",
+  "fixture_class": "positive",
+  "source": "hand — 덕양에너젠 KSIC 352 (문자 티커 0001A0 의 법인)",
+  "note": "문자 티커 법인도 corp 에 남는다"}
+]

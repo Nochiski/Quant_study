@@ -50,6 +50,8 @@ def test_container_uses_explicit_mock_adapter_without_silent_fallback() -> None:
         "consensus.forward_eps",
     }
     with pytest.raises(ValueError, match="unsupported equity adapter"):
+        build_container(equity_adapter="nope")
+    with pytest.raises(ValueError, match="requires equity_root"):
         build_container(equity_adapter="duckdb")
 
 

@@ -1,0 +1,128 @@
+{
+ "_seed": "S02 (trading_calendar · security_span · index_daily) 가 요구하는 baseline 상수. 오케스트레이터가 data/equity/baseline.json 에 병합한다. value 는 tests/fixtures/stage_slice 절단본에서 측정한 값이고, 서버 current_build 위 재측정이 필요한 항목은 _measured[].note 가 지목한다.",
+ "measured_at": "2026-09-05",
+ "trading_calendar": {
+  "calendar_start": "2010-01-04",
+  "backfill_end": "2026-08-20",
+  "asof_sample_dates": [
+   "2010-01-04",
+   "2015-03-16",
+   "2018-05-04",
+   "2024-03-13",
+   "2026-08-20"
+  ],
+  "asof_sample_tickers": [
+   "000030",
+   "0001A0",
+   "000660",
+   "003540",
+   "003545",
+   "003547",
+   "005930",
+   "005935",
+   "036220",
+   "069500",
+   "101970",
+   "161890",
+   "247540",
+   "900050",
+   "900060"
+  ]
+ },
+ "security_span": {
+  "respan_count": 2
+ },
+ "_measured": [
+  {
+   "table": "trading_calendar",
+   "metric": "calendar_start",
+   "inputs": {
+    "stg_index_daily": "b_20260902T162449_297822Z"
+   },
+   "sql": "SELECT CAST(min(date) AS VARCHAR) FROM stg_index_daily",
+   "value": "2010-01-04",
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "used_by": "EG17 (rules_s02.eg17_calendar_integrity)",
+   "note": "KRX API 하한(MEMORY dart-universe-2010-floor). 성장하지 않는 하한이라 growing=false — 값이 뒤로 밀리면 원천이 잘린 것이다."
+  },
+  {
+   "table": "trading_calendar",
+   "metric": "backfill_end",
+   "inputs": {
+    "stg_index_daily": "b_20260902T162449_297822Z",
+    "stg_listing_daily": "b_20260902T162451_832365Z"
+   },
+   "sql": "SELECT CAST(max(date) AS VARCHAR) FROM stg_index_daily",
+   "value": "2026-08-20",
+   "measured_at": "2026-09-05",
+   "growing": true,
+   "used_by": "EG17 (rules_s02) · security_span.end_reason='coverage_gap' 경계 · GATES §3 ③(e)",
+   "note": "GATES §1-12 는 측정 SQL 을 max(date) of stg_listing_daily 로 적었다. DESIGN v1.2 §4-1 이 캘린더를 stg_index_daily distinct date 로 확정했으므로 이 seed 는 stg_index_daily 로 측정한다. 절단본에서 두 값은 같다(2026-08-20). 수집이 진행되면 커지는 값이라 growing=true — 백필이 재개되면 오케스트레이터가 재측정해 갱신한다."
+  },
+  {
+   "table": "trading_calendar",
+   "metric": "asof_sample_dates",
+   "inputs": {
+    "stg_index_daily": "b_20260902T162449_297822Z"
+   },
+   "sql": "-- 고정 표본(사람 선택). 전 거래일임을 SELECT count(*) FROM stg_index_daily WHERE date IN (…) 로 확인",
+   "value": [
+    "2010-01-04",
+    "2015-03-16",
+    "2018-05-04",
+    "2024-03-13",
+    "2026-08-20"
+   ],
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "used_by": "DESIGN §2 _asof/<view>/<build>/ · EG5c·EG11·EG19",
+   "note": "날짜 5 = 캘린더 양 끝 + 사건일 3(2015-03-16 101970 첫 구간 종료 · 2018-05-04 005930 50:1 분할 · 2024-03-13 036220 재상장). 전부 절단본 캘린더에 실재하는 거래일이다. 뷰별 키(v_fin_latest.asof_sample_dates 등)는 해당 슬라이스가 이 값을 복사해 쓴다."
+  },
+  {
+   "table": "trading_calendar",
+   "metric": "asof_sample_tickers",
+   "inputs": {
+    "stg_listing_daily": "b_20260902T162451_832365Z",
+    "stg_etf_price_daily": "b_20260902T162435_439598Z"
+   },
+   "sql": "SELECT DISTINCT ticker FROM stg_listing_daily UNION SELECT DISTINCT ticker FROM stg_etf_price_daily ORDER BY 1",
+   "value": [
+    "000030",
+    "0001A0",
+    "000660",
+    "003540",
+    "003545",
+    "003547",
+    "005930",
+    "005935",
+    "036220",
+    "069500",
+    "101970",
+    "161890",
+    "247540",
+    "900050",
+    "900060"
+   ],
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "used_by": "DESIGN §2 _asof/<view>/<build>/ · EG5c·EG11·EG19",
+   "note": "★ 대체 표본이다. 설계가 요구한 종목 20 이 아니라 절단본 티커 15 전량이다 — 절단본에 그 15개밖에 없어 20 을 만들 수 없다. 서버 표본 20 은 오케스트레이터가 채운다. 15 는 축을 다 덮는다: 보통주·우선주(005930/005935) · 1:N 종류주(003540/003545/003547) · 재상장 2종(036220/101970) · 비KR7(900050/900060) · 폐지(000030) · ETF(069500) · 문자 티커(0001A0)."
+  },
+  {
+   "table": "security_span",
+   "metric": "respan_count",
+   "inputs": {
+    "stg_listing_daily": "b_20260902T162451_832365Z",
+    "stg_etf_price_daily": "b_20260902T162435_439598Z",
+    "stg_index_daily": "b_20260902T162449_297822Z"
+   },
+   "sql": "SELECT count(*) FROM (SELECT ticker FROM security_span GROUP BY ticker HAVING count(*) >= 2)",
+   "value": 2,
+   "measured_at": "2026-09-05",
+   "growing": false,
+   "used_by": "EG16a (rules_s02.eg16a_respan_count) · GATES §3 ③(c)",
+   "note": "036220·101970 두 종목뿐(DESIGN §10 P8). 절단본은 재상장 2종을 일부러 담았으므로 전수 유니버스와 값이 같다. 이 수가 늘면 수집 결손이 가짜 재상장으로 읽힌 것이다 — 늘어난 티커를 확인하기 전에 baseline 을 올리지 말 것."
+  }
+ ]
+}

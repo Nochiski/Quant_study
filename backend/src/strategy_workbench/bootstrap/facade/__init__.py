@@ -11,6 +11,7 @@ DEPENDS_ON: tuple[str, ...] = (
     "adapters.outbound.artifact_local",
     "adapters.outbound.backtest_engine",
     "adapters.outbound.document_codec",
+    "adapters.outbound.equity_duckdb",
     "adapters.outbound.equity_mock",
     "adapters.outbound.engine_portfolio",
     "adapters.outbound.strategy_sqlite",

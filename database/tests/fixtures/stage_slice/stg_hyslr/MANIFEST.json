@@ -1,0 +1,150 @@
+{
+ "table": "stg_hyslr",
+ "current_build": "b_20260905T105931_082096Z",
+ "keep": 3,
+ "builds": [
+  {
+   "build_id": "b_20260905T105931_082096Z",
+   "snapshot_id": "snap_20260902T230100Z",
+   "rules_version": "2.2.3",
+   "built_at_utc": "2026-09-05T10:59:34+00:00",
+   "n_rows": 995,
+   "content_hash": "228226:420572a56e0c3886",
+   "partitions": [
+    {
+     "path": "v=b_20260905T105931_082096Z/year=2016",
+     "n_rows": 71
+    },
+    {
+     "path": "v=b_20260905T105931_082096Z/year=2017",
+     "n_rows": 72
+    },
+    {
+     "path": "v=b_20260905T105931_082096Z/year=2018",
+     "n_rows": 63
+    },
+    {
+     "path": "v=b_20260905T105931_082096Z/year=2019",
+     "n_rows": 69
+    },
+    {
+     "path": "v=b_20260905T105931_082096Z/year=2020",
+     "n_rows": 78
+    },
+    {
+     "path": "v=b_20260905T105931_082096Z/year=2021",
+     "n_rows": 93
+    },
+    {
+     "path": "v=b_20260905T105931_082096Z/year=2022",
+     "n_rows": 95
+    },
+    {
+     "path": "v=b_20260905T105931_082096Z/year=2023",
+     "n_rows": 126
+    },
+    {
+     "path": "v=b_20260905T105931_082096Z/year=2024",
+     "n_rows": 102
+    },
+    {
+     "path": "v=b_20260905T105931_082096Z/year=2025",
+     "n_rows": 107
+    },
+    {
+     "path": "v=b_20260905T105931_082096Z/year=2026",
+     "n_rows": 119
+    }
+   ],
+   "gates": [
+    {
+     "name": "G0",
+     "status": "pass",
+     "detail": "선언 대조",
+     "metrics": {
+      "missing_columns": [],
+      "n_len_mismatch": 0,
+      "rcept_map_miss": 0
+     }
+    },
+    {
+     "name": "G1",
+     "status": "pass",
+     "detail": "stage=228226 expected=228226",
+     "metrics": {
+      "n_src": 228226,
+      "fanout": 1,
+      "n_dedup": 0,
+      "n_reject": 0,
+      "n_stage": 228226
+     }
+    },
+    {
+     "name": "G2",
+     "status": "pass",
+     "detail": "cast_failed rows=8 ratio=0.000035 limit=0.0001",
+     "metrics": {
+      "n_partial": 8,
+      "ratio": 3.5052973806665326e-05,
+      "limit": 0.0001
+     }
+    },
+    {
+     "name": "G3",
+     "status": "pass",
+     "detail": "불변식 전부 성립",
+     "metrics": {}
+    },
+    {
+     "name": "G4",
+     "status": "skip",
+     "detail": "no_fixtures",
+     "metrics": {}
+    },
+    {
+     "name": "G5",
+     "status": "pass",
+     "detail": "Δstage=0 expected=0",
+     "metrics": {
+      "d_src": 0,
+      "d_dedup": 0,
+      "d_reject": 0,
+      "d_stage": 0
+     }
+    },
+    {
+     "name": "G6",
+     "status": "pass",
+     "detail": "(natural_key, observed_date) duplicates=0",
+     "metrics": {
+      "n_dup": 0
+     }
+    },
+    {
+     "name": "G7",
+     "status": "pass",
+     "detail": "out_of_range rows=0 cells=0 ratio=0.000000 limit=0.001 observed∈[1999,2027] content∈[1900,2066]",
+     "metrics": {
+      "n_out_of_range": 0,
+      "n_out_of_range_rows": 0,
+      "n_out_of_range_cells": 0,
+      "ratio": 0.0,
+      "limit": 0.001
+     }
+    },
+    {
+     "name": "G8",
+     "status": "skip",
+     "detail": "not_blob",
+     "metrics": {}
+    },
+    {
+     "name": "G9",
+     "status": "skip",
+     "detail": "no_cross_check",
+     "metrics": {}
+    }
+   ]
+  }
+ ]
+}

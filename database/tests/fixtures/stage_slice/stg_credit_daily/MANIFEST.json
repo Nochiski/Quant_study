@@ -1,0 +1,180 @@
+{
+ "table": "stg_credit_daily",
+ "current_build": "b_20260902T163010_574776Z",
+ "keep": 3,
+ "builds": [
+  {
+   "build_id": "b_20260902T163010_574776Z",
+   "snapshot_id": "snap_20260902T154207Z",
+   "rules_version": "2.2.3",
+   "built_at_utc": "2026-09-02T16:33:11+00:00",
+   "n_rows": 24722,
+   "content_hash": "8404204:b3a7fd5afac0ebea",
+   "partitions": [
+    {
+     "path": "v=b_20260902T163010_574776Z/year=2009",
+     "n_rows": 85
+    },
+    {
+     "path": "v=b_20260902T163010_574776Z/year=2010",
+     "n_rows": 1506
+    },
+    {
+     "path": "v=b_20260902T163010_574776Z/year=2011",
+     "n_rows": 1488
+    },
+    {
+     "path": "v=b_20260902T163010_574776Z/year=2012",
+     "n_rows": 1634
+    },
+    {
+     "path": "v=b_20260902T163010_574776Z/year=2013",
+     "n_rows": 1918
+    },
+    {
+     "path": "v=b_20260902T163010_574776Z/year=2014",
+     "n_rows": 1746
+    },
+    {
+     "path": "v=b_20260902T163010_574776Z/year=2015",
+     "n_rows": 1783
+    },
+    {
+     "path": "v=b_20260902T163010_574776Z/year=2016",
+     "n_rows": 1557
+    },
+    {
+     "path": "v=b_20260902T163010_574776Z/year=2017",
+     "n_rows": 1396
+    },
+    {
+     "path": "v=b_20260902T163010_574776Z/year=2018",
+     "n_rows": 1215
+    },
+    {
+     "path": "v=b_20260902T163010_574776Z/year=2019",
+     "n_rows": 1216
+    },
+    {
+     "path": "v=b_20260902T163010_574776Z/year=2020",
+     "n_rows": 1240
+    },
+    {
+     "path": "v=b_20260902T163010_574776Z/year=2021",
+     "n_rows": 1240
+    },
+    {
+     "path": "v=b_20260902T163010_574776Z/year=2022",
+     "n_rows": 1230
+    },
+    {
+     "path": "v=b_20260902T163010_574776Z/year=2023",
+     "n_rows": 1225
+    },
+    {
+     "path": "v=b_20260902T163010_574776Z/year=2024",
+     "n_rows": 1418
+    },
+    {
+     "path": "v=b_20260902T163010_574776Z/year=2025",
+     "n_rows": 1640
+    },
+    {
+     "path": "v=b_20260902T163010_574776Z/year=2026",
+     "n_rows": 1185
+    }
+   ],
+   "gates": [
+    {
+     "name": "G0",
+     "status": "pass",
+     "detail": "선언 대조",
+     "metrics": {
+      "missing_columns": [],
+      "n_len_mismatch": 0
+     }
+    },
+    {
+     "name": "G1",
+     "status": "pass",
+     "detail": "stage=8404204 expected=8404204",
+     "metrics": {
+      "n_src": 8970999,
+      "fanout": 1,
+      "n_dedup": 566795,
+      "n_reject": 0,
+      "n_stage": 8404204
+     }
+    },
+    {
+     "name": "G2",
+     "status": "pass",
+     "detail": "cast_failed rows=435 ratio=0.000052 limit=0.0001",
+     "metrics": {
+      "n_partial": 435,
+      "ratio": 5.1759809733319184e-05,
+      "limit": 0.0001
+     }
+    },
+    {
+     "name": "G3",
+     "status": "pass",
+     "detail": "불변식 전부 성립",
+     "metrics": {
+      "whol_loan_rmnd_stcn_neg_violations": 0,
+      "stlm_before_deal_violations": 0
+     }
+    },
+    {
+     "name": "G4",
+     "status": "skip",
+     "detail": "no_fixtures",
+     "metrics": {}
+    },
+    {
+     "name": "G5",
+     "status": "pass",
+     "detail": "Δstage=0 expected=0",
+     "metrics": {
+      "d_src": 0,
+      "d_dedup": 0,
+      "d_reject": 0,
+      "d_stage": 0
+     }
+    },
+    {
+     "name": "G6",
+     "status": "pass",
+     "detail": "(natural_key, observed_date) duplicates=0",
+     "metrics": {
+      "n_dup": 0
+     }
+    },
+    {
+     "name": "G7",
+     "status": "pass",
+     "detail": "out_of_range rows=0 cells=0 ratio=0.000000 limit=0.001 observed∈[1999,2027] content∈[1956,2066]",
+     "metrics": {
+      "n_out_of_range": 0,
+      "n_out_of_range_rows": 0,
+      "n_out_of_range_cells": 0,
+      "ratio": 0.0,
+      "limit": 0.001
+     }
+    },
+    {
+     "name": "G8",
+     "status": "skip",
+     "detail": "not_blob",
+     "metrics": {}
+    },
+    {
+     "name": "G9",
+     "status": "skip",
+     "detail": "no_cross_check",
+     "metrics": {}
+    }
+   ]
+  }
+ ]
+}

@@ -245,6 +245,8 @@ bash.exe.stackdump
 *.db
 !backend/tests/fixtures/**/*.csv
 !backend/tests/fixtures/**/*.parquet
+!database/tests/fixtures/**/*.csv
+!database/tests/fixtures/**/*.parquet
 
 # 원장/파생 데이터 (서버가 정본, 로컬은 작업 사본)
 workspace/*/data/

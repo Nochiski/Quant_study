@@ -1,0 +1,117 @@
+{
+ "table": "stg_analyst_broker",
+ "current_build": "b_20260903T015713_411395Z",
+ "keep": 3,
+ "builds": [
+  {
+   "build_id": "b_20260903T015713_411395Z",
+   "snapshot_id": "snap_20260903T015712Z",
+   "rules_version": "2.2.3",
+   "built_at_utc": "2026-09-03T01:57:14+00:00",
+   "n_rows": 249,
+   "content_hash": "9717:795d1370817beac1",
+   "partitions": [
+    {
+     "path": "v=b_20260903T015713_411395Z/year=2026",
+     "n_rows": 249
+    }
+   ],
+   "gates": [
+    {
+     "name": "G0",
+     "status": "pass",
+     "detail": "선언 대조",
+     "metrics": {
+      "missing_columns": [],
+      "n_len_mismatch": 0
+     }
+    },
+    {
+     "name": "G1",
+     "status": "pass",
+     "detail": "stage=9717 expected=9717",
+     "metrics": {
+      "n_src": 9717,
+      "fanout": 1,
+      "n_dedup": 0,
+      "n_reject": 0,
+      "n_stage": 9717
+     }
+    },
+    {
+     "name": "G2",
+     "status": "pass",
+     "detail": "cast_failed rows=0 ratio=0.000000 limit=0.0",
+     "metrics": {
+      "n_partial": 0,
+      "ratio": 0.0,
+      "limit": 0.0
+     }
+    },
+    {
+     "name": "G3",
+     "status": "pass",
+     "detail": "불변식 전부 성립",
+     "metrics": {
+      "key_uniqueness_violations": 0
+     }
+    },
+    {
+     "name": "G4",
+     "status": "pass",
+     "detail": "골든 픽스처 일치",
+     "metrics": {
+      "n_fixtures": 2,
+      "n_mismatch": 0
+     }
+    },
+    {
+     "name": "G5",
+     "status": "skip",
+     "detail": "no_baseline",
+     "metrics": {}
+    },
+    {
+     "name": "G6",
+     "status": "pass",
+     "detail": "(natural_key, observed_date) duplicates=0",
+     "metrics": {
+      "n_dup": 0
+     }
+    },
+    {
+     "name": "G7",
+     "status": "pass",
+     "detail": "out_of_range rows=0 cells=0 ratio=0.000000 limit=0.001 observed∈[1999,2027] content∈[1900,2066]",
+     "metrics": {
+      "n_out_of_range": 0,
+      "n_out_of_range_rows": 0,
+      "n_out_of_range_cells": 0,
+      "ratio": 0.0,
+      "limit": 0.001
+     }
+    },
+    {
+     "name": "G8",
+     "status": "pass",
+     "detail": "파싱 등식 성립",
+     "metrics": {
+      "n_blobs": 2413,
+      "n_no_data": 1,
+      "n_no_opinion": 866,
+      "n_rows_emitted": 9717,
+      "n_parse_failed": 0,
+      "n_dup_coords_folded": 0,
+      "n_value_mismatch": 0
+     }
+    },
+    {
+     "name": "G9",
+     "status": "skip",
+     "detail": "no_cross_check",
+     "metrics": {}
+    }
+   ]
+  }
+ ]
+}

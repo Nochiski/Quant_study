@@ -388,6 +388,15 @@ out_new AS (
     LEFT JOIN security s ON s.ticker = b.ticker
     WHERE b.event_type IS NOT NULL
 ),
+-- ── 재개 없음 축 (DEFECT-10) ────────────────────────────────────────────────
+-- 티커별 마지막 실거래 세션. `price_kind='trade'` 만 센다 — 정지일 참고가 행(volume 0)은
+-- 어댑터가 Bar 로 내지 않으므로 소비자에게는 존재하지 않는 세션이다.
+last_trade AS (
+    SELECT p.ticker, max(p.date) AS last_trade_date
+    FROM price_daily p
+    WHERE p.price_kind = 'trade'
+    GROUP BY 1
+),
 out_all AS (
     SELECT * FROM out_events
     UNION ALL
@@ -406,6 +415,12 @@ SELECT
     CASE WHEN o.factor_source = 'mktcap_neutral' THEN o.sf_raw ELSE 1 END             AS share_factor,
     o.factor_source,
     (o.factor_source = 'mktcap_neutral')                                             AS factor_ok,
+    -- DEFECT-10: 적용일 이후 그 종목의 실거래 세션이 하나도 없으면 참. 커널은 사건 시점 이후
+    -- 바가 있는 세션을 반드시 찾으므로(engine/loop.py `_settlement_session`) 이런 행을 그냥
+    -- 내보내면 run 전체가 죽는다. equity 는 버리지 않고 **사실을 싣는다** — 정지 중 감자는
+    -- 보유 수량을 실제로 바꾸고, 26건 중 18건은 거래소가 정지 기간에 기준가를 공표했다.
+    -- 소비자가 이 열로 거르거나 정산 정책을 고른다.
+    (lt.last_trade_date IS NULL OR o.apply_date > lt.last_trade_date)                 AS no_bar_after_apply,
     -- 캘린더 마지막 세션의 기준가 사건은 다음 세션이 없다(서버 09-05 EG2 NULL 1) → 적용일(당일)로.
     coalesce(CASE WHEN o.is_new THEN nx.date ELSE least(o.announce_date, nx.date) END,
              o.apply_date)                                                            AS available_date,
@@ -414,3 +429,4 @@ SELECT
 FROM out_all o
 JOIN cal ca ON ca.date = o.apply_date
 LEFT JOIN cal nx ON nx.n = ca.n + 1
+LEFT JOIN last_trade lt ON lt.ticker = o.ticker

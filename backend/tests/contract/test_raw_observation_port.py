@@ -7,10 +7,14 @@ explicit warm-up history, deterministic ordering, window-invariant facts, failur
 raw facts only (no factor values).
 
 `ADAPTERS` names the cases; the `adapter` fixture builds them. Each case answers the subset of
-`FIELDS` its `list_fields()` declares — the equity adapter serves the S21 price fields only
-(`price.close`, `price.market_cap`, `price.adj_close` — the last is forward-adjusted, so it is a
-window-invariant (as_of, security) fact like the others) and must reject the rest as a failure
-value, never synthesise them.
+`FIELDS` its `list_fields()` declares, and must reject the rest as a failure value rather than
+synthesise it. `FIELDS` is the union of what any adapter can serve: the mock declares nine of them
+and ignores the rest, while the equity adapter (S21-3) serves the 29 EQUITY_FIELD_MAP ids whose
+source tables are built plus the internal `price.adj_close`. That union is deliberate — the
+window-invariance, PIT and cell-kind clauses below then run over every equity field, including the
+as-of ones (financials, consensus, filings) whose `available_date` is a filing date far behind
+`as_of` and the daily grids (flow, short, credit) whose empty cells carry a missing reason rather
+than a zero.
 """
 
 from __future__ import annotations
@@ -48,10 +52,44 @@ from strategy_workbench.domain.equity.facade.research_data import (
 START, END = date(2024, 1, 8), date(2024, 1, 12)
 MARKET, UNIVERSE = "KRX", "krx.common-stock"
 FIELDS = (
+    # price grid
     "price.close",
+    "price.open",
+    "price.volume",
     "price.market_cap",
+    "price.shares_outstanding",
+    "price.trading_value",
     "price.adj_close",
+    # as-of filings (fin_std via v_fin_latest)
+    "financial.revenue",
+    "financial.gross_profit",
+    "financial.operating_income",
+    "financial.net_income",
+    "financial.operating_cash_flow",
+    "financial.total_assets",
+    "financial.total_liabilities",
     "financial.book_equity",
+    # as-of estimates (consensus_daily via v_consensus, opinion_daily)
+    "consensus.forward_eps",
+    "consensus.forward_sales",
+    "consensus.eps_dispersion",
+    "consensus.target_price",
+    "consensus.recommendation",
+    "consensus.analyst_count",
+    # as-of events (dividend_event, corp_event, holder_daily)
+    "event.dividend_per_share",
+    "event.buyback_amount",
+    "event.insider_net_buy",
+    # daily grids carrying an explicit missing-reason axis (flow_daily, short_daily, credit_daily)
+    "flow.foreign_net_buy",
+    "flow.institution_net_buy",
+    "flow.retail_net_buy",
+    "short.short_sale_value",
+    "short.borrowed_quantity",
+    "credit.margin_balance",
+    # served by the mock only — the equity adapter answers INVALID_QUERY for these
+    "short.short_balance_ratio",
+    "event.earnings_surprise",
     "classification.sector",
 )
 

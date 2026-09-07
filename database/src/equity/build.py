@@ -152,6 +152,8 @@ def build_table(rule: EquityTable, stage_root: Path, equity_root: Path, baseline
         inputs.create_views(con, pinned,
                             {t: list(rule.declared_columns(t)) for t in rule.inputs})
         make_consts(con, rule, baseline)
+        if rule.declarations is not None:
+            rule.declarations(con, rule)     # S19·S20 선언표 — `_const` 와 같은 통로
 
         sql_text = rule.sql_path.read_text(encoding="utf-8").strip().rstrip(";")
         con.execute(f"CREATE OR REPLACE TEMP TABLE {_q('out')} AS {sql_text}")

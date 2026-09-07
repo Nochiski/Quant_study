@@ -36,7 +36,7 @@ from pathlib import Path
 from stage.gates import GateResult, GateStatus
 
 from .gates import EquityGateContext
-from .model import EquityTable, register
+from .model import EquityTable, FieldProfile, register
 from .rules_s05 import COMMON_KINDS as S05_COMMON_KINDS
 from .rules_s05 import PREFERRED_KINDS as S05_PREFERRED_KINDS
 
@@ -410,6 +410,35 @@ eg3_dividend_event.gate_name = "EG3_dividend_event"             # type: ignore[a
 
 # ── 선언 ──────────────────────────────────────────────────────────────────────
 
+# ── S19 필드 선언 (DESIGN §4-7 · FIELD_MAP §3 「S16 내부 스코프 필드 9」) ────
+# 아홉 필드 전부 **equity 내부 스코프**다 — 레지스트리(backend/FACTORS.md)가 요구하지 않는다.
+# 축이 (corp_code, bsns_year, reprt_code, …) 라 티커 축 팩터로 쓰려면 소비자가 `corp_ticker` 로
+# 전개하고 종류(`se`·`stock_knd`)를 대응시켜야 한다 → 커버 축은 `table_rows`.
+# 랙 1 세션: `available_date = rcept_dt`(사업보고서 접수일)이고 접수 시각이 없다.
+_S16_DISCLOSURE = "사업보고서 접수일(rcept_dt) — 접수 시각 미제공이라 1 세션 뒤부터 쓴다"
+
+
+def _s16(field_id: str, column: str, label: str, unit: str, value_type: str, evidence: str,
+         *, requires_confirmation: bool = False) -> FieldProfile:
+    return FieldProfile(
+        field_id=field_id, columns=(column,), label=label, unit=unit, value_type=value_type,
+        frequency="report", recommended_lag_sessions=1, recommended_lag_days=1,
+        point_in_time=True, requires_confirmation=requires_confirmation,
+        disclosure_basis=_S16_DISCLOSURE, evidence=evidence, coverage_axis="table_rows",
+        scope="internal")
+
+
+FIELDS_SHARES: tuple[FieldProfile, ...] = (
+    _s16("financial.shares_issued", "issued_shr", "발행주식총수", "주", "count",
+         "**price.shares_outstanding 의 대체가 아니다** — 그쪽 정본은 KRX 상장주식수다. 둘은 뜻이 "
+         "달라 비상장 종류주·신주 상장 전 구간에서 갈린다(절단본 비교 73 중 6, DESIGN §4-5)."),
+    _s16("financial.shares_treasury", "treasury_shr", "자기주식수", "주", "count",
+         "사업보고서 주식총수 표의 자기주식 수량. 취득방법별 상세는 event.treasury_* 축이다."),
+    _s16("financial.shares_distributed", "distributed_shr", "유통주식수", "주", "count",
+         "발행주식총수 − 자기주식수. FACTORS 정본 E04(실질 유통비율)의 보조 축이다."),
+)
+
+
 SHARES_OUTSTANDING = register(EquityTable(
     name="shares_outstanding",
     grain=SHARES_GRAIN,
@@ -437,7 +466,20 @@ SHARES_OUTSTANDING = register(EquityTable(
     content_date_column="stlm_dt",
     reject_reasons=REJECT_REASONS,
     extra_gates=(eg3_shares_outstanding,),
+    field_profiles=FIELDS_SHARES,
 ))
+
+FIELDS_TREASURY: tuple[FieldProfile, ...] = (
+    _s16("event.treasury_acquired", "acquired_shr", "자기주식 취득수량", "주", "count",
+         "취득방법 3축(acqs_mth1/2/3)이 grain 에 있으므로 종목·연도 합계는 **`acqs_mth3 <> '소계'` "
+         "인 잎 행만** 더해야 한다(소계·총계 행이 함께 실려 있다 — FX-4B-001). grain 컬럼이 "
+         "축을 드러내므로 미결 조건이 아니라 소비 규약이다."),
+    _s16("event.treasury_disposed", "disposed_shr", "자기주식 처분수량", "주", "count",
+         "소계·총계 행 주의는 event.treasury_acquired 와 같다."),
+    _s16("event.treasury_retired", "retired_shr", "자기주식 소각수량", "주", "count",
+         "**소각 수량은 DART 전체에서 여기뿐**이다(FACTORS I05). 소계·총계 행 주의는 같다."),
+)
+
 
 TREASURY_STOCK = register(EquityTable(
     name="treasury_stock",
@@ -465,7 +507,31 @@ TREASURY_STOCK = register(EquityTable(
     content_date_column="stlm_dt",
     reject_reasons=REJECT_REASONS,
     extra_gates=(eg3_treasury_stock,),
+    field_profiles=FIELDS_TREASURY,
 ))
+
+FIELDS_DIVIDEND: tuple[FieldProfile, ...] = (
+    FieldProfile(
+        field_id="event.dividend_per_share", columns=("dps_krw",), label="주당 현금배당금",
+        unit="KRW", value_type="amount", frequency="report", recommended_lag_sessions=1,
+        recommended_lag_days=1, point_in_time=True, requires_confirmation=False,
+        disclosure_basis=_S16_DISCLOSURE,
+        evidence="**락일·기준일이 없다** — 값이 서는 시점은 available_date(사업보고서 접수일, "
+                 "결산일 + 3~8개월)뿐이라 TR·배당 재투자 팩터는 불가하다(DESIGN §4-5 확정 5). "
+                 "축이 (corp_code, bsns_year, reprt_code, stock_knd) 이고 연 1회"
+                 "(reprt_code='11011') 값이다.",
+        coverage_axis="table_rows"),
+    _s16("event.dividend_yield", "yield_pct", "현금배당수익률", "%", "ratio",
+         "원장 값 그대로다 — DPS/종가로 재계산하지 않는다(원장이 어느 기준가를 썼는지 공표되지 "
+         "않는다). 락일 부재는 event.dividend_per_share 와 같다.", requires_confirmation=True),
+    _s16("event.dividend_payout", "payout_pct", "현금배당성향", "%", "ratio",
+         "법인 축이라 `stock_knd='-'` 행에만 실린다. 연결/별도/개별 중 어느 라벨에서 왔는지는 "
+         "payout_basis 컬럼이 남기므로 미결 조건이 아니다."),
+    _s16("event.dividend_total", "cash_total_krw", "현금배당금총액", "KRW", "amount",
+         "법인 축이라 `stock_knd='-'` 행에만 실린다. FACTORS 정본 I01(배당성향)·I04(주주환원율)의 "
+         "재료다."),
+)
+
 
 DIVIDEND_EVENT = register(EquityTable(
     name="dividend_event",
@@ -492,6 +558,7 @@ DIVIDEND_EVENT = register(EquityTable(
     reject_reasons=REJECT_REASONS,
     consts=("cash_total_unit_krw",),
     extra_gates=(eg3_dividend_event,),
+    field_profiles=FIELDS_DIVIDEND,
 ))
 
 TABLES: tuple[EquityTable, ...] = (SHARES_OUTSTANDING, TREASURY_STOCK, DIVIDEND_EVENT)

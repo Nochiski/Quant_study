@@ -15,7 +15,7 @@ from pathlib import Path
 from stage.gates import GateResult, GateStatus
 
 from .gates import EquityGateContext
-from .model import AVAILABLE_NONE, BASIS_VOCAB, EquityTable, register
+from .model import AVAILABLE_NONE, BASIS_VOCAB, EquityTable, FieldProfile, register
 
 SQL_DIR = Path(__file__).parent / "sql"
 
@@ -83,6 +83,24 @@ def eg3_corp(ctx: EquityGateContext) -> GateResult:
 
 eg3_corp.gate_name = "EG3_corp"                 # type: ignore[attr-defined]
 
+# ── S19 필드 선언 (DESIGN §4-7 · FIELD_MAP §2 `classification.sector`) ────────
+# `corp` 은 차원표라 available_date 축이 없다 — 업종은 **현재값 라벨**이고 과거 시점 업종을 모른다
+# (GAP-07 · DESIGN §11). 그래서 `point_in_time=False` 를 못박고, 커버 창은 소유 테이블에 날짜가
+# 없으므로 `trading_calendar`(층 전체 창)로 잡는다(coverage_axis='static_label').
+# 랙은 1 세션 — `stg_company`·`stg_corp_map` 이 stage `lag_known=false` 라 0 을 쓸 수 없다
+# (STAGE_HANDOFF §2). PIT 가 아닌 라벨이므로 랙은 형식적이고, 실제 방어는 point_in_time=False 다.
+FIELDS_CORP: tuple[FieldProfile, ...] = (
+    FieldProfile(
+        field_id="classification.sector", columns=("induty_code",), label="업종(KSIC 현재값)",
+        unit="", value_type="category", frequency="static", recommended_lag_sessions=1,
+        recommended_lag_days=1, point_in_time=False, requires_confirmation=True,
+        disclosure_basis="DART 회사개황의 현재 업종코드 — 시점 축 없음",
+        evidence="corp.induty_code ← stg_company.induty_code_current. 과거 시점 업종 시계열이 "
+                 "없어(WICS 보류) 중립화·섹터캡에 쓰면 look-ahead 다(GAP-07).",
+        coverage_axis="static_label"),
+)
+
+
 CORP = register(EquityTable(
     name="corp",
     grain=("corp_code",),
@@ -101,6 +119,7 @@ CORP = register(EquityTable(
                                    "observed_date")},
     consts=("financial_ksic_prefix",),
     extra_gates=(eg3_corp,),
+    field_profiles=FIELDS_CORP,
 ))
 
 

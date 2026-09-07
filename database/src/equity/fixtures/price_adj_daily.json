@@ -1,0 +1,78 @@
+[
+ {"case": "fx2_011_split_eve_is_raw_close",
+  "key": {"ticker": "005930", "date": "2018-05-03"}, "column": "adj_close", "expect": "2650000.0",
+  "source": "hand — 전방 조정은 첫 관측 수준을 고정한다. 분할 계수(fold_date 2018-05-04)는 이 행보다 뒤라 접히지 않으므로 조정가 = 원주가 2,650,000",
+  "expect_source": "hand", "fixture_class": "positive",
+  "note": "FX-2-011. base = as_of 인 옛 축(v_adj_price)이면 여기가 53,000 이 된다 — 전방/후방을 뒤바꾸면 이 행에서 갈린다. 모집단 의존이 아니다: 서버 adj_factor 에도 005930 의 ok 계수는 2018-05-04 하나뿐이다(2026-09-06 실측)"},
+
+ {"case": "fx2_012_split_day_close_scaled",
+  "key": {"ticker": "005930", "date": "2018-05-04"}, "column": "adj_close", "expect": "2595000.0",
+  "source": "hand — 51,900 × 50 = 2,595,000 (원주가는 price_daily FX-2-002, 계수는 adj_factor FX-2-001)",
+  "expect_source": "hand", "fixture_class": "positive",
+  "note": "FX-2-012. 분할일 앞뒤가 2,650,000 → 2,595,000 (−2.08%) 로 이어진다 — 원주가 −98.04% 불연속이 계수로 닫힌다"},
+
+ {"case": "fx2_012_split_day_cum_share_factor",
+  "key": {"ticker": "005930", "date": "2018-05-04"}, "column": "cum_share_factor", "expect": "50.0",
+  "source": "hand — adj_factor(005930:split:2018-05-04).share_factor = 50, 접힌 계수 1개",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "fx2_012_split_day_n_factors_applied",
+  "key": {"ticker": "005930", "date": "2018-05-04"}, "column": "n_factors_applied", "expect": "1",
+  "source": "hand — fold_date = greatest(apply 2018-05-04, available 2018-05-04) = 2018-05-04 ≤ date",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "fx2_013_split_day_volume_uses_price_factor",
+  "key": {"ticker": "005930", "date": "2018-05-04"}, "column": "adj_volume_shr",
+  "expect": "791307.8200000001",
+  "source": "hand — 39,565,391 × price_factor 0.02 = 791,307.82 (DOUBLE 곱 그대로)",
+  "expect_source": "hand", "fixture_class": "positive",
+  "note": "FX-2-013. **거래량만 반대 축**이다 — share_factor 를 곱하면 19억 8천만 주가 되고, 나눗셈으로 쓰면 2,500배 어긋난다(FX-2-010 의 전방 판)"},
+
+ {"case": "fx2_014_split_day_open_uses_close_factor",
+  "key": {"ticker": "005930", "date": "2018-05-04"}, "column": "adj_open", "expect": "2650000.0",
+  "source": "hand — 시가 53,000 × 50 = 2,650,000. OHLC 는 close 와 같은 계수를 쓴다",
+  "expect_source": "hand", "fixture_class": "positive",
+  "note": "FX-2-014. 분할일 시가가 곧 KRX 기준가(53,000)라 조정 시가가 전일 조정 종가와 같아진다"},
+
+ {"case": "fx2_015_bonus_ex_date_close_scaled",
+  "key": {"ticker": "247540", "date": "2022-06-27"}, "column": "adj_close",
+  "expect": "542074.2582197273",
+  "source": "hand — 135,900 × share_factor 3.988773055332799 (= 497,400 / 124,700, KRX 기준가 축 S06-2)",
+  "expect_source": "hand", "fixture_class": "positive",
+  "note": "FX-2-015. 권리락 전날 조정가 497,400 대비 +8.98% — 1주당 3주 무상증자의 실제 수익률이다. 4.0(배정비율)으로 곱하면 543,600 이 되어 KRX 기준가 산식(자기주식 신주 미배정)과 어긋난다"},
+
+ {"case": "fx2_015_bonus_eve_is_raw_close",
+  "key": {"ticker": "247540", "date": "2022-06-24"}, "column": "adj_close", "expect": "497400.0",
+  "source": "hand — 권리락 전날. 계수의 fold_date(2022-06-27)가 뒤라 원주가 그대로",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "fx2_016_unadjusted_event_counted_in_same_span",
+  "key": {"ticker": "247540", "date": "2022-06-27"}, "column": "n_unadjusted_events", "expect": "1",
+  "source": "hand — adj_factor 247540:krx_base:2022-05-09 (unknown_price_only, factor_ok=false) 가 같은 구간·apply_date ≤ date",
+  "expect_source": "hand", "fixture_class": "positive",
+  "note": "FX-2-016. 이 열이 0 이 아니면 그 구간의 조정 시계열은 불완전하다 — 사건은 실재하는데 계수를 못 냈다는 뜻이고 소비자가 거를 축이다"},
+
+ {"case": "fx2_017_relisting_first_row_resets_cumulative",
+  "key": {"ticker": "101970", "date": "2025-03-28"}, "column": "cum_share_factor", "expect": "1.0",
+  "source": "hand — 재상장 구간(span_seq 2)의 첫 거래일. 앵커라 접힌 계수가 없다",
+  "expect_source": "hand", "fixture_class": "positive",
+  "note": "FX-2-017. 구간 누적을 안 끊으면 폐지 전 구간(2012-07-26 ~ 2015-03-16)의 계수가 그대로 넘어와 재상장 뒤 수준이 통째로 틀어진다"},
+
+ {"case": "fx2_017_relisting_first_row_drops_prior_span_events",
+  "key": {"ticker": "101970", "date": "2025-03-28"}, "column": "n_unadjusted_events", "expect": "0",
+  "source": "hand — 101970 의 미조정 사건 5건은 전부 2015~2018(폐지 구간)이라 span_seq 1 에 붙는다",
+  "expect_source": "hand", "fixture_class": "positive",
+  "note": "미조정 사건도 구간 축이다 — 안 끊으면 재상장 종목이 영구히 '조정 불완전' 으로 찍힌다"},
+
+ {"case": "pit_available_date_is_row_date",
+  "key": {"ticker": "005930", "date": "2018-05-04"}, "column": "available_date",
+  "expect": "2018-05-04",
+  "source": "hand — greatest(date, 접힌 계수의 available_date) = greatest(05-04, 05-04). fold 규약상 항상 date 다",
+  "expect_source": "hand", "fixture_class": "positive"},
+
+ {"case": "pit_available_basis",
+  "key": {"ticker": "005930", "date": "2018-05-04"}, "column": "available_basis",
+  "expect": "derived",
+  "source": "hand — 구성 행(원주가·접힌 계수)의 available_date 최댓값이라 계산 결과다(DESIGN §1 basis 어휘 · §8-3 EG2-P05)",
+  "expect_source": "hand", "fixture_class": "positive"}
+]

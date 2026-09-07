@@ -1,0 +1,23 @@
+{
+ "_seed": "S09 (short_daily) 가 요구하는 baseline 상수. 오케스트레이터가 data/equity/baseline.json 에 병합한다. 산출 규칙 상수는 없다 — SQL 에 임계·리터럴이 없고(격자 매핑 · 판본 선택 · fill_kind 판정뿐) 컬럼은 stage 원값을 그대로 나른다. 유일한 항목은 EG7 격리 비율 임계다: 격자 3종의 pre_calendar 격리는 「캘린더 하한 2010-01-04」 라는 설계가 만드는 구조적 격리라(DESIGN §4-3 P11 short 58,211) 코드 기본값 0.001(gates.DEFAULT_THRESHOLDS['EG7'])로는 첫 빌드부터 폐기된다. 진짜 회귀 감시는 사유별 정확 건수(GATES §3 ⑪ (d) reject_<reason>)이며, 그 값은 서버 실측 뒤 등재한다 — 절단본 수치를 등재하면 서버에서 틀린다. 기록형 metric(fill_kind 분포 · 겹침 상관·비율 분위수 · 음수 대차 잔고 · n_zero_without_log_evidence_* · n_kiwoom_shard_rows)은 _meta.gates[EG1_short_daily·EG3_short_daily].metrics 에 남고 승격 여부는 서버 실측 뒤 판단한다. EG9(레짐 커버리지, 매트릭스 §2 13행)는 상수 5종(coverage_probe_dates·coverage_min·evidence_rate_min·coverage_return_corr_max·corr_min_months)이 전부 서버 실측이라 S09 범위 밖이다 — EG9-P04(미수집→0)만 EG3_short_daily 가 기록형 n_zero_without_log_evidence_<src> 로 미리 잰다.",
+ "measured_at": "2026-09-06",
+ "short_daily": {
+  "thresholds": {
+   "EG7": 0.05
+  }
+ },
+ "_measured": [
+  {
+   "table": "short_daily",
+   "metric": "threshold_EG7",
+   "value": 0.05,
+   "kind": "convention",
+   "sql": "-- 절단본 실측(2026-09-06): n_reject 1,042 / (n_out 36,972 + 1,042) = 0.02741. 격리는 전건 pre_calendar 이고 전건 키움 ka10014 다(000660·003540·005930 의 2008-06-23~2010-01-03 행). off_grid 0. 서버 예상: DESIGN §4-3 P11 short pre_calendar 58,211 / 격자 약 1,040만 = 0.0056.",
+   "inputs": {},
+   "measured_at": "2026-09-06",
+   "growing": false,
+   "used_by": "gates.eg7_range(threshold(ctx,'EG7')) — short_daily 빌드",
+   "note": "**제안값 — 사람 승인 필요.** 절단본 비율(0.0274)이 서버 예상(0.0056)보다 5배 큰 이유는 슬라이스 15티커가 전부 2010 이전 상장 대형주라 pre-2010 구간의 비중이 과대표되기 때문이다. 0.05 는 둘을 다 덮으면서 '원장의 5% 넘게 격리되면 멈춘다' 는 안전판을 남긴다. 이 임계는 격리 **비율**만 보므로 사유별 회귀는 못 잡는다 — 서버 첫 빌드 뒤 GATES §3 ⑪ (d) 의 short_daily.reject_pre_calendar·reject_off_grid 정확 건수를 등재하는 것이 본 감시축이고, 그때 이 임계는 조여도 된다. 값을 키우면 원장 대량 유실이 통과하고, 0.001(코드 기본값)로 두면 정상 빌드가 폐기된다."
+  }
+ ]
+}

@@ -43,7 +43,7 @@ from pathlib import Path
 from stage.gates import GateResult, GateStatus
 
 from .gates import EquityGateContext, SkipGate, require_const
-from .model import EquityTable, register
+from .model import EquityTable, FieldProfile, register
 from .rules_s01 import TICKER_LEN
 
 SQL_DIR = Path(__file__).parent / "sql"
@@ -419,6 +419,42 @@ eg9_coverage_broker.gate_name = "EG9"                  # type: ignore[attr-defin
 
 # ── 선언 ─────────────────────────────────────────────────────────────────────
 
+# ── S19 필드 선언 (DESIGN §4-7 · FIELD_MAP §3 S18 판정) ──────────────────────
+# 셋 다 grain 이 (ticker, obs_date, **src**) 이라 **어댑터가 src 를 골라야 한다** — wise 는
+# `available_basis='measured'`(2일), v3 는 `default` + `coverage_degraded=true`(약 5개월). PIT 를
+# 엄격히 보려면 wise 만, 이력이 필요하면 v3 를 쓰되 available_date 가 잰 수집일이 아님을 받아들여야
+# 한다. 그 선택은 팩터층 몫이고 equity 는 두 축을 다 준다 → `requires_confirmation=True`.
+# 랙 1 세션: v3 축이 stage `lag_known=false`(`stg_v3_analyst_opinions`)라 consensus_daily 와 같은
+# 규약을 적용한다. `opinion_broker_daily` 는 field_id 가 아니다(제공처별 원문 의견은 레지스트리에
+# 대응이 없다 — FIELD_MAP §3) → 선언 없음.
+_OPINION_AXIS: tuple[str, str] = ("ticker", "available_date")
+_OPINION_DISCLOSURE = ("wise = 화면 수집일(fetched_date, measured) / v3 = 수집 시각 컬럼이 없어 "
+                       "관측일 그대로(default + coverage_degraded) — 1 세션 뒤부터 쓴다")
+
+
+def _opinion(field_id: str, column: str, label: str, unit: str, value_type: str,
+             evidence: str) -> FieldProfile:
+    return FieldProfile(
+        field_id=field_id, columns=(column,), label=label, unit=unit, value_type=value_type,
+        frequency="session", recommended_lag_sessions=1, recommended_lag_days=1,
+        point_in_time=True, requires_confirmation=True, disclosure_basis=_OPINION_DISCLOSURE,
+        evidence=evidence, coverage_axis="grid_security", axis_columns=_OPINION_AXIS)
+
+
+FIELDS_OPINION: tuple[FieldProfile, ...] = (
+    _opinion("consensus.target_price", "target_price_krw", "컨센서스 목표주가", "KRW", "price",
+             "opinion_daily.target_price_krw. 판본이 wise 2일뿐이라 리비전(FACTORS G09)은 축적 "
+             "대기이고 수준값만 즉시 쓸 수 있다. 겹친 5키에서 wise·v3 값이 전부 일치했다(P37 ①)."),
+    _opinion("consensus.recommendation", "opinion_score", "컨센서스 투자의견 점수", "",
+             "ratio",
+             "WISE 가 이미 접은 의견 점수다 — equity 는 임계로 등급을 굽지 않는다(§1). "
+             "FACTORS 정본 G08(투자의견 리비전)의 재료."),
+    _opinion("consensus.analyst_count", "analyst_count", "커버 애널리스트 수", "명", "count",
+             "커버는 보통주에만 있다(WISE 804 / v3 810, 우선주·ETF·외국주 0). 시총 분위별 "
+             "커버율은 이 프로파일의 coverage_by_mktcap_quintile 이 낸다."),
+)
+
+
 OPINION_DAILY = register(EquityTable(
     name="opinion_daily",
     grain=("ticker", "obs_date", "src"),
@@ -459,6 +495,7 @@ OPINION_DAILY = register(EquityTable(
     reject_reasons=OPINION_REJECT_REASONS,
     extra_gates=(eg3_opinion_daily, eg6_first_observation, eg8_src_overlap,
                  eg9_coverage_opinion),
+    field_profiles=FIELDS_OPINION,
 ))
 
 OPINION_BROKER_DAILY = register(EquityTable(

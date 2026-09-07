@@ -22,6 +22,9 @@ jobs:
       - run: uv sync --locked --extra parquet --extra equity
       - run: uv run maturin develop --manifest-path rust/backtest_core/Cargo.toml --release
       - run: uv run pytest -q
+      - name: Equity layer tests
+        working-directory: .
+        run: uv run --project backend pytest database/tests -q
       - name: Verify root server contract
         working-directory: .
         run: |

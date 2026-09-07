@@ -24,7 +24,7 @@ v1.1 은 "엔진에 재무·컨센서스 포트가 없다" 고 결론지었으�
 
 현재 조립은 `bootstrap/_container.py::build_container(equity_adapter="mock")` 이고 다른 값은 거절된다. 계약 테스트 `backend/tests/contract/test_raw_observation_port.py` 는 `ADAPTERS=[mock]` 로 매개변수화돼 있다. **equity 층의 완료 = `equity_duckdb` 어댑터가 이 `ADAPTERS` 에 들어가 전량 green 이고 `equity_adapter="duckdb"` 로 컨테이너가 뜨는 것**이다.
 
-팩터 재료의 형태는 `backend/FACTORS.md`(레지스트리 50 팩터)가 요구하는 **field_id 42종**이며, equity 컬럼과의 대응·판정은 `EQUITY_FIELD_MAP.md` 에 있다(지원 17 · 부분 15 · 미지원 9 · 미확인 1).
+팩터 재료의 형태는 `backend/FACTORS.md`(레지스트리 50 팩터)가 요구하는 **field_id 42종**이며, equity 컬럼과의 대응·판정은 `EQUITY_FIELD_MAP.md` 에 있다(**지원 16 · 부분 16 · 미지원 9 · 미확인 1** — 2026-09-06 S19 판정 반영, FIELD_MAP §3).
 
 ### 0-2. 세 층의 책임
 
@@ -82,7 +82,7 @@ EG0 입력 고정 · EG1 격자 등식(`− n_dedup − Σ n_reject` 일반형, 
 
 ---
 
-## 3. 슬라이스 — 23 (+대기 2)
+## 3. 슬라이스 — 24 (+대기 2)
 
 ### 3-0. 규칙
 
@@ -120,17 +120,19 @@ EG0 입력 고정 · EG1 격자 등식(`− n_dedup − Σ n_reject` 일반형, 
 | **S18** | 의견·목표가 | `opinion_daily`·`opinion_broker_daily` | `stg_analyst_summary/broker`·`stg_v3_analyst_opinions`·`stg_wise_coverage` | ∥ | S01 |
 | **S17** | 컨센서스 | `consensus_daily`(v3 unpivot + wise, `src`) | `stg_consensus_*`·`stg_v3_*`·S01 | ∥ | S01 |
 | **S18** | 의견·목표가 | `opinion_daily`(`src` wise ∪ v3, 최초 관측 선택)·`opinion_broker_daily`(+ 파생 `prev_opinion_date`) | `stg_analyst_summary/broker`·`stg_v3_analyst_opinions`·`stg_wise_coverage` + equity `security`·`security_span`(EG9 커버 모집단, GATES §9 S18) | ∥ | S01 · **구현 완료 09-06** — 로컬 실측 DESIGN §10 P37, 서버 미실행 |
-| **S19** | 공개시점 대장 | `dataset_profile`(field_id · `recommended_lag_sessions` · `supported_cell_kinds` · `point_in_time` · `coverage_*` · `coverage_by_mktcap_quintile`) | 전 슬라이스 `_meta` | — | S08~S18 |
-| **S20** | **팩터 준비도** | `factor_readiness`(54행: id·required_columns·status ready/blocked·reason·owner·first_usable_date) + **EG10** | S19 + `FACTORS.md` + `backend/FACTORS.md` + `EQUITY_FIELD_MAP.md` | — | S19 |
+| **S19** | 공개시점 대장 | `dataset_profile`(**66행** — field_id · `recommended_lag_sessions` · `supported_cell_kinds` · `point_in_time` · `coverage_*` · `coverage_by_mktcap_quintile` · `field_scope`) | **전 equity 테이블 22**(값 컬럼 실측 + `universe_daily` 격자 + 파티션 `_meta.lag_known_inputs`) + 각 `rules_s*.py` 의 `EquityTable.field_profiles` 선언 | — | S08~S18 · **구현 완료 09-06** — 로컬 실측 DESIGN §10 P38, 서버 미실행 |
+| **S20** | **팩터 준비도** | `factor_readiness`(54행: id·label·registry_id·required_columns·required_field_ids·status ready/blocked·reason·owner·first_usable_date·caveat) + **EG10** | S19 `dataset_profile`(판정의 유일한 입력) + `FACTORS.md` 54 선언 + `backend/FACTORS.md` 50 대응 | — | S19 · **구현 완료 09-06** — 로컬 실측 **31 ready / 23 blocked**(DESIGN §10 P39), 서버 미실행 |
 | **S21** | **워크벤치 어댑터** | `adapters/outbound/equity_duckdb`(5포트) · contract suite `ADAPTERS` 매개변수화 · `build_container(equity_adapter="duckdb")`. **축소판 구현(09-05, MVP-B)**: 필드 3(`price.close`·`price.market_cap`·`price.adj_close`) 위에 5포트 전부(컨테이너·파이프라인이 요구) · contract `ADAPTERS=[mock, equity_duckdb]` green · `build_container(equity_adapter="duckdb", equity_root=…)` · `scripts/run_mvp_backtest.py` 로 절단본 백테스트 1회 완주(DESIGN §7·§10 P25). 남은 것(S19·S20 뒤 본판): 나머지 필드 39 · `dataset_profile` 랙 · `sector_id` · 서버 실측 | S07·S03B(축소) / S19·S20(본판) | — | S07(축소) · S20(본판) |
-| **S22** | 마무리·인계 | `baseline.json` 고정 · `EQUITY_HANDOFF.md` · 재현성 2회 · MVP-B 백테스트 재현 | 전부 | — | S21 |
+| **S23** | **전방 조정가 표** | `price_adj_daily`(28번째 테이블 — 전방 조정 OHLCV·누적계수·`n_unadjusted_events`) + `EG3_price_adj_daily` · `v_adj_price_fwd`·`v_adj_volume_fwd` 구간 제한 · 워크벤치 `price.adj_close` 를 매크로 → 표로 · 규칙 판본 e1.6.0 | S04·S06·S02 | — | S06 · **구현 완료 2026-09-06** — 서버 실측 DESIGN §10 P43 |
+| **S22** | 마무리·인계 | `baseline.json` 고정(`baseline_locked.json` + `scripts/check_baseline_lock.py`) · `EQUITY_HANDOFF.md` · 재현성 2회 · MVP-B 백테스트 재현 | 전부 | — | S21 · **완료 2026-09-06** — 서버 전량 재빌드 2회 409s/409s **27/27 해시 동일**, `gate` 27표 fail 0, `catalog` 매크로 8, `contract` EG-C 6항 pass, baseline 확정본 sha256 `343a51b6…` 서버와 바이트 동일(DESIGN §10 P42). MVP-B 는 P25″ 로 정정 — 드리프트 원인은 backend 가 아니라 equity 규칙 `fc6e889`·`de75e9f` |
 
 병렬 최대 폭: S03B 뒤 6갈래(S08·S09·S10·S11+S12·S15+S16·S17+S18). 서버 빌드는 `flock` 직렬(RAM 15GB), 병렬은 픽스처·TDD·로컬 빌드까지.
 
 ### 3-2. 순서 그래프
 
 ```
-S00 ─ S01 ─ S02 ─ S03 ─┬─ S04 ─┬─ S06 ─┬─ S03B ─ S07(어댑터 v0) ─┬─ S08·S09·S10 ──┐
+S00 ─ S01 ─ S02 ─ S03 ─┬─ S04 ─┬─ S06 ─┬─ S23(조정가 표) ─┐
+                       │       │       ├─ S03B ─ S07(어댑터 v0) ─┬─ S08·S09·S10 ──┐
                        └─ S05 ─┘       └────────┘                 ├─ S15·S16 ──────┤
 S00 ─ S11(4A) ─ S12(4A) ────────────────────────────────────────── ├─ S17·S18 ──────┼─ S19 ─ S20 ─ S21 ─ S22
 stage P2 ─► S14(4C) ── 대기 ───────────────────────────────────────┤
@@ -169,10 +171,10 @@ S00·S01·S02·S03·S04·S05(축소: split·bonus·capred 만)·S06·S03B·S07 +
 | S14(대기) | `vintage_kind` 3종 적재 ∧ D9(정정 없는 보고서 API=원본 100%) 재현 ∧ EG5c 재기준(`_asof/` 갱신 승인) |
 | 4B S15·S16 | 6테이블 EG1 ∧ `row_kind` 제거 건수 기록(3테이블) ∧ 롤링 창 경계 profile |
 | 5단계 S17·S18 | 최초 관측 선택 독립 재계산 일치 ∧ v3⋈WISE 겹침 일치율 ≥ baseline ∧ EG-C ⑨(wise 구간) ∧ 시총 분위별 커버율 기록 |
-| 6단계 S19·S20 | EG2 profile 전수(SQL) ∧ 세션 랙 ≥ 1(lag_known=false) ∧ **EG10: `factor_readiness` 54행, blocked 는 reason·owner 필수, ready 는 `first_usable_date` NOT NULL, ready ≥ baseline(초기 36)** |
-| 7단계 S21·S22 | 워크벤치 contract suite `ADAPTERS` 에 `equity_duckdb` 포함 전량 green ∧ `EquityDataPort`·`RawObservationPort` 가 같은 셀에 같은 값·공개일 ∧ 미지원 필드 `unavailable` 명시 ∧ `build_container(equity_adapter="duckdb")` 부팅 ∧ EG5a·c ∧ EG-C ①~⑩ ∧ MVP-B 재현(`tape_hash` 동일) |
+| 6단계 S19·S20 | EG2 profile 전수(SQL: P04 세션 랙 ≥ 1 · P06 default basis 는 evidence · P07 `coverage_from` 전수) ∧ **EG10: `factor_readiness` 54행, blocked 는 reason·owner 필수, ready 는 `first_usable_date` NOT NULL, ready 재료 컬럼 실물 실재, ready ≥ baseline** — `ready_min` 은 **S08~S10 이 붙은 뒤** 사람이 등재한다(초기 36 은 그 세 슬라이스를 전제한 숫자, DESIGN §4-8·§10 P39) |
+| 7단계 S21·S22 | 워크벤치 contract suite `ADAPTERS` 에 `equity_duckdb` 포함 전량 green ∧ `EquityDataPort`·`RawObservationPort` 가 같은 셀에 같은 값·공개일 ∧ 미지원 필드 `unavailable` 명시 ∧ `build_container(equity_adapter="duckdb")` 부팅 ∧ EG5a·c ∧ EG-C ①~⑩ ∧ MVP-B 재현(`tape_hash` 동일) — **2026-09-06 달성**: contract suite `ADAPTERS=[mock, equity_duckdb]` green · `build_container(equity_adapter="duckdb")` 부팅 · 서버 EG5a(같은 규칙 판본 재빌드 해시 동일)·EG5c(n_diff 0)·EG-C ①~⑩ pass. **MVP-B `tape_hash` 동일 조항은 “같은 규칙 판본 안에서” 로 좁혀 달성**했다 — P25(09-05)의 `75aa2447…` 는 S06-2·S03C 이전 규칙의 산출이라 지금 규칙으로는 재현되지 않는다(원인·확정 수치는 DESIGN §10 P25″). 같은 규칙 판본(HEAD)에서는 독립 재빌드·재실행이 `5cf26486…` 로 바이트 동일하다. |
 
-**전체 DoD**: 위 전부 ∧ 27테이블(26 + `factor_readiness`) `gates` fail 0 ∧ `EQUITY_HANDOFF.md`(읽기 계약·테이블 메모·`factor_readiness` 참조·PR 고지·한계 GAP-06/07/08/15/18).
+**전체 DoD**: 위 전부 ∧ **28테이블**(팩트·차원 25 + 선언표 3 = `universe_policy`·`dataset_profile`·`factor_readiness`; v1.2 §4 머리말의 “28 = 25 + 3” 은 `universe_policy` 를 양쪽에 세어 하나 많다) `gates` fail 0 ∧ `EQUITY_HANDOFF.md`(읽기 계약·테이블 메모·`factor_readiness` 참조·PR 고지·한계 GAP-06/07/08/15/18). **2026-09-06 달성**: 27표 서버 재판정 fail 0(DESIGN §10 P42) + S23 `price_adj_daily` 서버 빌드 2회 해시 동일·게이트 fail 0(P43) · `database/docs/EQUITY_HANDOFF.md` 신설. 미달: `ready_min` 미등재 유지(사람 승인 대기) · 서버 전 종목 MVP-B 백테스트 미실행(절단본 15티커만) · 절단본 생성 스크립트 미커밋.
 
 ---
 

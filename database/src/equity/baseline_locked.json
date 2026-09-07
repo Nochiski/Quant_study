@@ -1,0 +1,1190 @@
+{
+  "_lock": "S22 확정본 (2026-09-06). 서버 data/equity/baseline.json 과 **바이트 동일**해야 한다 — 검사는 database/scripts/check_baseline_lock.py, 설치는 이 파일을 그대로 scp 로 덮어쓰기. baseline_seed_s*.json 은 슬라이스별 제안 시드이고 정본이 아니다. _measured[] 는 등재된 상수 전건의 근거이며 server_evidence 는 그 표의 커밋된 current_build 게이트 metrics 에서 그대로 읽은 값이다.",
+  "_locked_at": "2026-09-06",
+  "_measured": [
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "adj_return_jump_max",
+      "seed": "baseline_seed_s06.json",
+      "seed_note": "★ 서버 p100 은 오케스트레이터가 재고 확정. 3차 정의(행 대 행) 절단본 실측 max 0.0929 = 247540 무상증자 권리락일 2022-06-27 nominal(조정 전일 497,400×0.25 = 124,350 → 135,900) · 005930 −0.0208 · 005935 −0.0341(직전 행 = 정지 마지막 날 05-03 참고가 2,650,000 → 직전 거래 종가 정의와 같은 값). 값 1.0 의 근거: (i) 매칭 잔여 ≤ max(0.15·m, 0.05) 라 price_matched·combined 행은 구조적으로 ≤ 0.15 · (ii) 소액 nominal(m ≤ 0.05) 행은 그날 원수익률이 그대로 남는데, 거래 재개 첫날은 가격제한폭이 없고 기준가의 50~200% 범위에서 체결되므로 |조정수익률| 물리 상한이 +1.00(−0.50)이다 · (iii) 일반 세션 제한폭 ±30% 는 판정축이 아니라 기록형 n_ok_abs_adj_return_over_030 으로 남긴다. 서버 2차 실측(직전 거래 종가 정의) n_return_jump_over(0.30 기준) 4·max 0.86 은 전부 참고가 행에 새 기준가가 먼저 실린 패턴이라 행 대 행 정의에서 사라지거나 apply_date 가 하루 앞으로 간다.",
+      "server_evidence": {
+        "build_id": "b_20260906T095928_698833Z",
+        "content_hash": "5733:685136fe38882e7f",
+        "gate": "EG8 (rules_s06.eg8_adj_jump)",
+        "measured": {
+          "max_abs_adj_return_jump": 0.30000000000000027,
+          "n_ok_events": 1724,
+          "n_return_jump_over": 0
+        }
+      },
+      "sql": "SELECT max(abs(adj_return)) FROM _eg8 WHERE factor_ok  -- rules_s06._jump_table: adj_close(apply_date) / adj_close(그 티커의 직전 가격 행, 참고가 행 포함) - 1, as_of = asof_for_jump_check",
+      "table": "adj_factor",
+      "used_by": "EG8-P02 (rules_s06.eg8_adj_jump.n_return_jump_over) — 건별",
+      "value": 1.0
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "adj_volume_ratio_band",
+      "seed": "baseline_seed_s06.json",
+      "seed_note": "★ 서버 재측정으로 확정(오케스트레이터 제안 3). 얇은 종목의 재개일 급증은 정상이라 건별 임계(1차 adj_volume_jump_max 10, 서버 2차 하루 점프 > 10 이 71건·max 1,724)는 의미가 없다 — 목적은 계수 방향 오류(÷↔×) 탐지이고, 방향이 뒤집히면 이 비가 share_factor² 배(50:1 분할 2,500·1주당 3주 무상증자 16)로 튄다. 서버 2차 실측 분포(직전 거래 종가 정의) p1 0 · p10 0.28 · p50 0.81 · p90 2.3 · p99 17 · max 115(035510 capred), > 3 이 70건·> 5 가 39건 → 집합 중앙값 0.81 ∈ [1/3, 3]. 절단본(3차) 집합 중앙값은 DESIGN §10 P23. 분포 p10/p90/p99·max·> 10 건수·미정의 건수는 기록형.",
+      "server_evidence": {
+        "build_id": "b_20260906T095928_698833Z",
+        "content_hash": "5733:685136fe38882e7f",
+        "gate": "EG8 (rules_s06.eg8_adj_jump)",
+        "measured": {
+          "adj_volume_ratio_median": 0.8077165951205618,
+          "n_volume_ratio_out_of_band": 0,
+          "quantiles": {
+            "max": 114.66916664730171,
+            "p10": 0.2958792339583129,
+            "p90": 2.6050709515459096,
+            "p99": 20.227983524468446
+          }
+        }
+      },
+      "sql": "SELECT median(median_after20 / median_before20) FROM _eg8 WHERE factor_ok  -- 이벤트별: v_adj_volume 의 [apply, apply+19] 세션 중앙값 / [apply−20, apply−1] 세션 중앙값(둘 다 조정 거래량 = 원거래량 × cum_share_factor), 분모 0·행 없음은 제외",
+      "table": "adj_factor",
+      "used_by": "EG8-P03 (rules_s06.eg8_adj_jump.n_volume_ratio_out_of_band): 집합 중앙값 ∈ [1/band, band] · 부정 픽스처 FX-N-006",
+      "value": 3.0
+    },
+    {
+      "growing": true,
+      "kind": "measured",
+      "metric": "asof_for_jump_check",
+      "seed": "baseline_seed_s06.json",
+      "seed_note": "backfill_end 와 같은 값. 전 이벤트의 apply_date·available_date 가 이 날 이하라 모든 ok 계수가 반영된 조정가로 점프를 잰다. 백필이 재개되면 backfill_end 와 함께 갱신(growing=true). 미등재면 게이트는 price_daily max(date) 로 대신 재고 skip(no_baseline) 에 측정치를 남긴다.",
+      "sql": "SELECT CAST(max(date) AS VARCHAR) FROM stg_index_daily  -- = trading_calendar.backfill_end",
+      "table": "adj_factor",
+      "used_by": "EG8-P02·P03 (rules_s06.eg8_adj_jump) — v_adj_price/v_adj_volume 를 부르는 고정 as_of",
+      "value": "2026-08-20"
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "base_match_window_sessions",
+      "seed": "baseline_seed_s06.json",
+      "seed_note": "설계 seed 값. 2차 매칭이 정한 apply_date(또는 미매칭의 명목 세션)와 KRX 기준가 날의 거리 — 절단본 3건(005930·005935 2018-05-04 · 247540 2022-06-27)은 거리 0. 사건 매칭이 이미 ±[5, 40] 창에서 세션을 골랐으므로 기준가는 그 근처에 있어야 하고, 창을 넓히면 같은 티커의 다른 기준가 사건(권리락 등)에 잘못 붙는다. ★ 서버 실측: no_price_match 830 중 살아나는 건수·거리 분포(p90)로 조정.",
+      "sql": "-- (a) 사건 교체: |n(기준가 날) − n(단위 apply_date)| ≤ base_match_window_sessions (sql/adj_factor.sql pair) · EG3_adj_factor n_apply_outside_window 의 기준가 행 여유 · n_ok_without_base_price_event",
+      "table": "adj_factor",
+      "used_by": "krx_base_price (a) 매칭 · EG3_adj_factor",
+      "value": 5
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "base_price_tol_rel",
+      "seed": "baseline_seed_s06.json",
+      "seed_note": "설계 seed 값(DESIGN §4-2 v3 — 기준가는 정확값이라 tight). 절단본에서 기준가 ≠ 직전 행 close 59행(직전 행 있음) 중 |r − 1| ≤ 0.002 인 14행은 전부 ETF 069500 의 소액 분배락(0.02~0.2%)이라 후보 판정에 영향이 없다(ETF 는 어차피 원천 밖). 비ETF 9행은 최소 |r − 1| = 0.0098(900050 2011-02-16) 로 전부 후보. 서버에서는 호가단위 반올림(기준가는 호가단위로 반올림된다)만 이 안에 들어온다 — 0.002 보다 큰 반올림은 1,000원 미만 저가주에서만 가능하고 그런 사건은 기록형 n_base_price_ne_prev_close_trade 와의 차이로 드러난다. ★ 서버 실측 뒤 후보 밖 불일치 건수(EG3_price_daily 불일치 − 후보)를 확인.",
+      "sql": "-- 후보 판정: |base_price_krw / 직전 행 close − 1| > base_price_tol_rel (sql/adj_factor.sql bp · rules_s06._BASE_PRICE_CANDIDATES_CTE). 절단본 실측: SELECT count(*) FILTER (WHERE base <> prev_close), count(*) FILTER (WHERE abs(base/prev_close − 1) <= 0.002 AND base <> prev_close) FROM (price_daily + lag(close)) → 59 · 14",
+      "table": "adj_factor",
+      "used_by": "krx_base_price 후보 판정 · EG1 우변(신규 행 수) · EG3_adj_factor 기준가 분류 metric",
+      "value": 0.002
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "factor_product_tol_base",
+      "seed": "baseline_seed_s06.json",
+      "seed_note": "설계 seed 값. 절단본 실측 곱: 005930 0.02 × 50 = 1.0 · 005935 0.02 × 50 = 1.0(정확) · 247540 은 같은 날 주식수 변화가 없어 1/price_factor → 1.0. 기준가 비율이 corp_event ratio 와 어긋나는 크기는 247540 |0.2507 × 4 − 1| = 0.0028(KRX 기준가 124,700 vs 497,400/4 = 124,350 — 자기주식 신주 미배정 등 KRX 산식)이라 0.01 안. ETF 분배락은 원천 밖이라 곱 검사에 오지 않는다(절단본 069500 후보 36 중 14 가 우연히 0.01 안 — 제외 근거). ★ 서버 실측: unknown_krx 행의 곱 분포로 krx_base_inconsistent 경계 확인.",
+      "sql": "-- ok 판정: |price_factor × share_factor − 1| ≤ factor_product_tol_base, price_factor = 기준가 / 직전 행 close, share_factor = 같은 날 shares_out 비(없으면 1/price_factor → 곱 정확히 1) (sql/adj_factor.sql replaced·out_new · EG3_adj_factor n_ok_product_off_one 의 krx_base_price 행 허용오차)",
+      "table": "adj_factor",
+      "used_by": "krx_base_price ok 판정(mktcap_neutral vs krx_base_inconsistent) · EG3-P04 기준가 행",
+      "value": 0.01
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "price_match_lookback_sessions",
+      "seed": "baseline_seed_s06.json",
+      "seed_note": "서버 1차 실측 최적일 오프셋 p10 이 −5(감자·분할). 기준일 직전 거래일 = 권리락일 규칙(무상증자)과 KRX 정지 시작일 관례가 명목일보다 며칠 앞설 수 있다. 오케스트레이터 지시의 창 [−5, +40] 을 두 상수로 나눠 등재한다(비대칭).",
+      "sql": "-- 창의 뒤쪽 폭 (명목 세션 이전)",
+      "table": "adj_factor",
+      "used_by": "apply_date 판정 (b)(c) · EG3_adj_factor.n_apply_outside_window",
+      "value": 5
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "price_match_tol_abs",
+      "seed": "baseline_seed_s06.json",
+      "seed_note": "서버 1차 실측이 쓴 허용치의 절대항. 하루 잡음(±5%) 안의 소액 무상증자(2~5%, 서버 불일치 136건 대부분 — 예 000100 매년 5%)는 가격으로 날짜를 가릴 수 없으므로 명목 세션에 둔다 — 창 탐색을 허용하면 잡음 매칭이 된다. 소액 nominal 건수는 n_nominal_small_expected 로 기록.",
+      "sql": "-- 위와 같은 판정식의 절대 하한. m ≤ tol_abs 인 소액 이벤트는 창 탐색 없이 nominal (sql/adj_factor.sql step_a)",
+      "table": "adj_factor",
+      "used_by": "apply_date 판정 · EG3_adj_factor.n_nominal_small_expected",
+      "value": 0.05
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "price_match_tol_rel",
+      "seed": "baseline_seed_s06.json",
+      "seed_note": "서버 1차 실측(09-05)이 쓴 허용치 max(15%·|기대|, 0.05) 의 상대항. 기대 점프 크기 m 의 15% — 감자 10:1(m 0.9) 조정 후 ±13.5%, 분할 50:1(m 0.98) ±14.7%, 무상증자 1주당 3주(m 0.75) ±11%. 원수익률 기준 식과 감자에선 같고 분할에선 더 엄격하다(원수익률 기준은 50:1 에 r ∈ [0, 0.167] 을 허용해 조정 후 +735% 까지 통과시킨다 — 조정 후 잔여로 판정하는 이유). 절단본 3건(005930·005935·247540)은 잔여 0.021·0.034·0.093 으로 전부 nominal.",
+      "sql": "-- 판정: dev = |close_t / 직전 거래 종가 / price_factor − 1| ≤ max(tol_rel × m, tol_abs), m = |min(pf, 1/pf) − 1| (sql/adj_factor.sql cand·nom_dev·win)",
+      "table": "adj_factor",
+      "used_by": "apply_date 판정 (a)(b)(c) · EG3_adj_factor 창·소액 metric",
+      "value": 0.15
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "price_match_window_sessions",
+      "seed": "baseline_seed_s06.json",
+      "seed_note": "★ 서버 재측정 뒤 조정 가능. 서버 1차 실측 최적일 오프셋: 감자 p10/p50/p90 = −5/+13/+27 세션, 무상증자 p90 +31.5, 분할 p90 +4 → +40 이 p90 을 덮는다. 창을 넓히면 잡음 매칭 확률이 오른다(창 46 세션 × 하루 잡음).",
+      "sql": "-- 창 [n0 − lookback, n0 + window] 세션 (n0 = 명목 세션). 복합 성분 창은 [min n0 − lookback, max n0 + window], 성분 연결 거리도 window (sql/adj_factor.sql win·links·gwin)",
+      "table": "adj_factor",
+      "used_by": "apply_date 판정 (b)(c) · EG3_adj_factor.n_apply_outside_window·n_combined_apply_inconsistent",
+      "value": 40
+    },
+    {
+      "growing": false,
+      "kind": "threshold",
+      "metric": "threshold_EG7",
+      "seed": "baseline_seed_s15.json",
+      "seed_note": "격리 사유가 `rcept_dt_missing` 하나뿐이다. 절단본 291행 전부 available_date 를 갖는다(stage 가 접수번호로 조회해 채운 값이고 basis='derived'). ★ 서버에서 접수일 조회가 비면 갱신.",
+      "server_evidence": {
+        "build_id": "b_20260906T095717_670061Z",
+        "content_hash": "74275:8eeaa90e27a8f8e8",
+        "gate": "EG7 (격리 비율 상한)",
+        "measured": {
+          "n_reject": 0,
+          "reject_ratio": 0.0
+        }
+      },
+      "sql": "SELECT n_reject::DOUBLE / (n_rows + n_reject) FROM audit_opinion _meta",
+      "table": "audit_opinion",
+      "used_by": "EG7 격리 비율 상한 (gates.threshold)",
+      "value": 0.0
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "cover_ratio_drop_max",
+      "seed": "baseline_seed_s17.json",
+      "seed_note": "★ 절단본 실측 0.0 — 14개월 전부 커버 종목 7 로 같다(절단본이 티커 7 로 잘려 있어 월별 변동이 구조적으로 없다). 0.5 는 '한 달 만에 커버 종목이 반토막 나면 수집이 끊긴 것' 이라는 뜻의 제안값이다. 서버는 wise 월간이 2025-08~2026-09, v3 가 2026-04~08 뿐이라 두 원천이 붙고 떨어지는 경계 달에서 실제 계단이 난다 — 그 계단을 재고 확정할 것.",
+      "server_evidence": {
+        "build_id": "b_20260906T095724_220603Z",
+        "content_hash": "145316:d0ae713bdd5a6e58",
+        "gate": "EG9_consensus_daily",
+        "measured": {
+          "cover_drop_max_observed": 0.6,
+          "min_mom_month": "2024-02-01",
+          "n_months": 37
+        }
+      },
+      "sql": "SELECT max(1 - n_cov / lag(n_cov) OVER (ORDER BY obs_month)) FROM (SELECT obs_month, count(DISTINCT ticker) AS n_cov FROM consensus_daily GROUP BY 1)",
+      "table": "consensus_daily",
+      "used_by": "EG9-P05 (rules_s17.eg9_consensus_daily.cover_drop_max_observed)",
+      "value": 0.7
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "cover_ratio_rise_max",
+      "seed": "baseline_seed_s17.json",
+      "seed_note": "★ 절단본 실측 0.0. 1.0 = '한 달 만에 커버 종목이 두 배가 되면 유니버스가 바뀐 것' 이라는 제안값. 급증도 폐기형인 이유는 커버가 갑자기 넓어진 구간의 컨센서스 팩터가 그 전 구간과 다른 모집단을 재기 때문이다(GATES §0-3 컨센서스 선택편향). 서버 실측 뒤 확정.",
+      "server_evidence": {
+        "build_id": "b_20260906T095724_220603Z",
+        "content_hash": "145316:d0ae713bdd5a6e58",
+        "gate": "EG9_consensus_daily",
+        "measured": {
+          "cover_rise_max_observed": 15.10126582278481
+        }
+      },
+      "sql": "SELECT max(n_cov / lag(n_cov) OVER (ORDER BY obs_month) - 1) FROM (SELECT obs_month, count(DISTINCT ticker) AS n_cov FROM consensus_daily GROUP BY 1)",
+      "table": "consensus_daily",
+      "used_by": "EG9-P05 (rules_s17.eg9_consensus_daily.cover_rise_max_observed)",
+      "value": 16.0
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "v3_wise_match_min",
+      "pending_human_decision": "서버 실측 0.873(5,054/5,789)이 하한 0.65 를 크게 넘지만, 불일치 735건의 원인이 WISE 월간 엔드포인트와 v3 리비전의 추정 모집단 차이인지 아직 규명되지 않았다. 원인 규명 전에 하한을 올리면 원천 차이를 회귀로 오인한다 — 값 유지.",
+      "seed": "baseline_seed_s17.json",
+      "seed_note": "★ 절단본 실측 32/45 = 0.7111(tol 0.001). 겹침 모집단이 45행(티커 5 × 월 5 × 202612 × {eps,revenue} − 003540 revenue 결측 5)뿐이라 표본이 작다. 0.65 는 그 아래로 한 칸 둔 제안값이며 사람 승인 필요. 참고 분포: tol 0.01 → 37/45(0.822) · tol 0.05 → 44/45(0.978). 일치율이 낮은 쪽은 반올림이 아니라 두 WISE 엔드포인트(cF5001/cF5002 월간 vs v3 리비전)의 추정 모집단 차이로 보인다 — 서버 실측 뒤 '왜 다른가' 를 먼저 판정하고 하한을 정할 것.",
+      "server_evidence": {
+        "build_id": "b_20260906T095724_220603Z",
+        "content_hash": "145316:d0ae713bdd5a6e58",
+        "gate": "EG8_consensus_daily (EG8-P07)",
+        "measured": {
+          "match_rate": 0.8730350665054414,
+          "median_rel_diff": 3.784834732882383e-05,
+          "n_match": 5054,
+          "n_overlap_measured": 5789
+        }
+      },
+      "sql": "SELECT n_match / n_measured FROM (rules_s17.eg8_overlap_sql, tol = v3_wise_value_tol_rel)",
+      "table": "consensus_daily",
+      "used_by": "EG8-P07 (rules_s17.eg8_consensus_daily.match_rate) — 폐기형 하한",
+      "value": 0.65
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "v3_wise_value_tol_rel",
+      "seed": "baseline_seed_s17.json",
+      "seed_note": "절단본 상대차 중앙값은 revenue 6.1e-6 · eps 6.9e-5 로, 대부분은 v3 컬럼 정밀도(revenue DECIMAL(10,1) · eps DECIMAL(8,0) 반올림)만큼만 다르다. 0.001 은 그 반올림(최대 ~1e-5)보다 두 자릿수 넉넉하면서 실제 원천 차이(절단본 최대 10.8% — 247540 2026-07-31 eps wise 312.34 vs v3 350)는 잡아내는 값이다. ★ 서버에서 metric 별 상대차 분포를 다시 재고 확정.",
+      "server_evidence": {
+        "build_id": "b_20260906T095724_220603Z",
+        "content_hash": "145316:d0ae713bdd5a6e58",
+        "gate": "EG8_consensus_daily (EG8-P07)",
+        "measured": {
+          "max_rel_diff": 9.03242718446602,
+          "median_rel_diff": 3.784834732882383e-05
+        }
+      },
+      "sql": "SELECT quantile_cont(abs(c.est_mean - v.est_mean) / abs(v.est_mean), 0.5) FROM consensus_daily c JOIN v3_obs v ON v.ticker=c.ticker AND v.obs_date=c.obs_date AND v.target_period=c.target_period AND v.metric=c.metric WHERE c.src='wise'  -- rules_s17.eg8_overlap_sql",
+      "table": "consensus_daily",
+      "used_by": "EG8-P07 (rules_s17.eg8_consensus_daily) — 두 원천 값이 '같다' 고 볼 상대 허용오차",
+      "value": 0.001
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "financial_ksic_prefix",
+      "seed": "baseline_seed_s01.json",
+      "seed_note": "KSIC 대분류 K(금융·보험) 중분류 64 금융업 · 65 보험·연금 · 66 금융지원서비스. EQUITY_DESIGN v1.2 §4-1 induty_class 규칙. 쉼표 구분 문자열로 싣고 SQL 이 str_split 으로 푼다",
+      "table": "corp",
+      "value": "64,65,66"
+    },
+    {
+      "growing": true,
+      "kind": "measured",
+      "metric": "effective_before_announce_max_days",
+      "seed": "baseline_seed_s05.json",
+      "seed_note": "값 유지(오케스트레이터 확정, 09-05 2차). 정기보고서 증자(감자)현황(stg_capital)은 과거 사건을 회고 기재하므로 announce_date(rcept_dt) 가 effective_date(isu_dcrs_de) 보다 늦다 — 절단본 원행 최대 2,555일(우리은행 2013-04-01 유상감자를 2020-03-30 사업보고서가 기재; 2차부터는 상장 전 사건이라 범위 밖). 판정은 사건 단위다: 같은 (ticker, event_type, effective_date) 후보 중 가장 이른 announce 가 효력일보다 이 일수 이상 늦을 때만 그 사건 전부를 격리한다 — 회고 사본은 결정공시·앞선 보고서에 접힌다. 서버 1차 실측(사본 단위 판정)에서는 공시−효력 2,556~14,294일 행 2,703 이 격리됐고, 캘린더 밖(1963~2009) 사건은 2차부터 범위 밖이다.",
+      "sql": "SELECT max(date_diff('day', isu_dcrs_de, available_date)) FROM stg_capital WHERE (isu_dcrs_stle LIKE '%감자%' OR (isu_dcrs_stle LIKE '%무상증자%' AND isu_dcrs_stle NOT LIKE '%유상%')) AND isu_dcrs_de IS NOT NULL",
+      "table": "corp_event",
+      "used_by": "EG7-P08 effective_before_announce (sql/corp_event.sql judged CTE) · _const",
+      "value": 2555
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "krx_share_change_tol",
+      "seed": "baseline_seed_s05.json",
+      "seed_note": "convention(오케스트레이터 제안 1e-3). KRX 액면가 변경일에 주식수 비 |ratio−1| 가 이 안이면 단주·소각 잡음뿐인 액면 변경이라 이벤트가 아니다(서버 실측 025620 2015-08-31 0.99991 · 094860·052300·072520·086830 0.9999999). S06 factor_source='no_share_change' 78건이 이 제외로 사라져야 정상. 진짜 분할·병합의 |ratio−1| 은 0.2 이상이라 여유가 크다.",
+      "table": "corp_event",
+      "used_by": "sql/corp_event.sql pool.scope_out='krx_par_only' · EG3_corp_event metric n_krx_par_only",
+      "value": 0.001
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "near_dup_window_days",
+      "seed": "baseline_seed_s05.json",
+      "seed_note": "convention. 같은 (ticker, event_type) 이 다른 원천에서 이 일수 안에 두 번 나오면 정확 축 dedup 이 놓친 같은 사건일 가능성이 높다 — 절단본 실측 1건(101970 capred: 결정공시 cr_std 2018-10-12 vs 자본변동 isu_dcrs_de 2018-10-13). 판정하지 않고 기록만 한다(GATES §0-1 기록형).",
+      "table": "corp_event",
+      "used_by": "EG3_corp_event metric n_near_dup_cross_source (기록형)",
+      "value": 5
+    },
+    {
+      "growing": false,
+      "kind": "threshold",
+      "metric": "threshold_EG7",
+      "seed": "baseline_seed_s05.json",
+      "seed_note": "★ 서버 재측정 필요(오케스트레이터). 09-05 2차: 범위 밖(캘린더 밖·비상장 종류주·상장 전) 행을 격리가 아니라 모집단 밖으로 옮긴 뒤 절단본 재측정 — pool 34 중 범위 밖 12(unlisted_class 6 · pre_listing 6), 범위 안 후보 22 → dedup 뒤 8행, 격리 0 → 비율 0.0. 서버 1차 빌드(격리 8,834 / 산출 3,865 = 0.696)의 격리 대부분이 이 범위 밖 행이었다. 남는 격리(보통주 무티커·기준일 없음·ratio 파싱 실패·임계 밖)는 서버에서 수백 건 규모로 예상되므로 서버 값으로 갱신해야 한다. GATES §1 EG7 은 분모를 n_src(EG1 우변)로 적었지만 프레임은 n_out+n_reject 를 쓴다 — dedup 이 있는 테이블에서 두 정의가 갈린다(프레임 미수정, 미결 기록).",
+      "server_evidence": {
+        "build_id": "b_20260906T095922_209768Z",
+        "content_hash": "3147:fdfa80c6d52a27ce",
+        "gate": "EG7 (격리 비율 상한)",
+        "measured": {
+          "n_reject": 178,
+          "reject_ratio": 0.05353383458646616
+        }
+      },
+      "sql": "SELECT n_reject::DOUBLE / (n_rows + n_reject) FROM corp_event _meta  -- 프레임 gates.eg7_range 의 분모 = n_out + n_reject (dedup 뒤 행수 기준)",
+      "table": "corp_event",
+      "used_by": "EG7 격리 비율 상한 (gates.threshold)",
+      "value": 0.06
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "isin8_len",
+      "seed": "baseline_seed_s01.json",
+      "seed_note": "ISIN 12자 중 국가코드(2) + 발행사 식별 6자리 = 앞 8자가 법인 그룹 축. EQUITY_DESIGN v1.2 §4-1 isin8 = substr(isin,1,8)",
+      "table": "corp_ticker",
+      "value": 8
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "threshold_EG7",
+      "seed": "baseline_seed_s10.json",
+      "seed_note": "★ 서버 재측정 필요. 절단본 실측 0.002536(pre_calendar 85 = 2009년 행 · off_grid 9 = 상장 전·재상장 공백 회신), 코드 기본값 0.001 을 구조적으로 넘는다. 서버 추정은 DESIGN §10 P11 의 credit pre_calendar 24,497 을 격자(universe_daily 의 비-ETF 행, 10.9M 급)로 나눈 ~0.0023 이라 절단본과 같은 자릿수다. 0.005 는 두 값에 여유 2배를 준 사람 선택값이고, 원천 품질이 아니라 KIS 신용잔고 시작일(2009-11)과 KRX 지수 캘린더 하한(2010-01-04)의 차이를 담는 크기다. 서버 1차 빌드 뒤 실측치의 1.5~2배로 조인다.",
+      "server_evidence": {
+        "build_id": "b_20260906T095526_810032Z",
+        "content_hash": "9201516:253f90ab748e80cd",
+        "gate": "EG7 (격리 비율 상한)",
+        "measured": {
+          "n_reject": 24952,
+          "reject_ratio": 0.0027043934905534818
+        }
+      },
+      "sql": "SELECT (n_pre_calendar + n_off_grid)::DOUBLE / (n_grid + n_pre_calendar + n_off_grid)  -- 절단본: (85 + 9) / (36,972 + 94) = 0.002536",
+      "table": "credit_daily",
+      "used_by": "EG7 (gates.eg7_range) — n_reject / (n_out + n_reject) <= threshold",
+      "value": 0.005
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "date_check_near_days",
+      "seed": "baseline_seed_s11.json",
+      "seed_note": "convention. 어휘 라벨 `off_2_7d` 가 값을 못박고 있으므로 조정 상수가 아니다 — SQL 숫자 리터럴 금지 규약(tests/test_equity_build.py::test_sql파일에_상수_하드코딩_없음)의 통로일 뿐이고 `universe_daily.adv_window_td` 20 과 같은 취급이다(GATES §1-12). 바꾸려면 어휘도 함께 바꾼다. 절단본에서 off_2_7d 는 0건.",
+      "table": "disclosure_version",
+      "used_by": "sql/disclosure_version.sql date_check='off_2_7d' 경계 (_const)",
+      "value": 7
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "date_exact_rate",
+      "seed": "baseline_seed_s11.json",
+      "seed_note": "기록형 — 판정하지 않는다(GATES §0-1). 절단본 실측 77/78 = 0.98718(어긋난 1건은 mismatch). 문서층 실측 참조값은 276/291 = 0.948(WORKFLOW §3-4). ★ 서버 값으로 갱신.",
+      "server_evidence": {
+        "build_id": "b_20260906T095633_758705Z",
+        "content_hash": "198163:b34cf5e8ecd72159",
+        "gate": "EG6_disclosure_version (EG6-P06, 기록형 — 어떤 게이트도 이 상수를 읽지 않는다)",
+        "measured": {
+          "date_exact_rate": 0.9645697758496024,
+          "n_date_exact_or_1d": 14674,
+          "n_date_measured": 15213
+        }
+      },
+      "sql": "SELECT count(*) FILTER (WHERE date_check IN ('exact','off_1d'))::DOUBLE / nullif(count(*) FILTER (WHERE date_check NOT IN ('unparsed','no_page','no_zip','n/a')), 0) FROM disclosure_version",
+      "table": "disclosure_version",
+      "used_by": "EG6_disclosure_version metric date_exact_rate (GATES EG6-P06 = E-G6b, 기록형)",
+      "value": 0.96457,
+      "value_was": 0.987
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "deadline_days_annual",
+      "seed": "baseline_seed_s11.json",
+      "seed_note": "convention(법정). 자본시장법 §159 — 사업보고서는 사업연도 경과 후 90일 이내 제출. 잰 값이 아니라 규범이므로 서버 재측정 대상이 아니다. `delay_days` 는 기록형이고 게이트가 임계로 쓰지 않는다.",
+      "table": "disclosure_version",
+      "used_by": "sql/disclosure_version.sql legal_deadline·delay_days (_const)",
+      "value": 90
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "deadline_days_interim",
+      "seed": "baseline_seed_s11.json",
+      "seed_note": "convention(법정). 자본시장법 §160 — 반기·분기보고서는 기간 경과 후 45일 이내 제출.",
+      "table": "disclosure_version",
+      "used_by": "sql/disclosure_version.sql legal_deadline·delay_days (_const)",
+      "value": 45
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "link_rate_min",
+      "seed": "baseline_seed_s11.json",
+      "seed_note": "★ 서버 재측정 필요. 절단본 실측 1.0(정정 97건 전부 unique — 법인 11개 안에서는 같은 (corp, kind, period_label) 그룹에 원본이 하나뿐이라 후보가 갈리지 않는다). seed 0.99 는 문서층 실측 DOC C340 표본 unique 339/340 = 0.99706 보다 한 자리 낮춘 값이다(WORKFLOW §3-4). 서버 전량에서는 `[첨부추가]` 원본이 같은 그룹에 둘 이상 있는 경우 multi_* 가 생기므로 값이 내려갈 수 있다 — 첫 서버 빌드의 metrics.link_rate 로 확정한다.",
+      "server_evidence": {
+        "build_id": "b_20260906T095633_758705Z",
+        "content_hash": "198163:b34cf5e8ecd72159",
+        "gate": "EG6_disclosure_version (EG6-P05)",
+        "measured": {
+          "link_rate": 0.9959449549199776,
+          "n_correction": 23181,
+          "n_linked": 23087
+        }
+      },
+      "sql": "SELECT count(*) FILTER (WHERE candidate_status IN ('unique','multi_resolved'))::DOUBLE / nullif(count(*) FILTER (WHERE is_correction), 0) FROM disclosure_version",
+      "table": "disclosure_version",
+      "used_by": "EG6_disclosure_version (GATES EG6-P05 = DOC §8.1 E-G6a)",
+      "value": 0.99
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "reach_rate_min",
+      "seed": "baseline_seed_s11.json",
+      "seed_note": "★ 서버 재측정 필요. stage `rm` 정정 플래그가 붙은 **원본** 접수 중 산출 링크가 실제로 닿은 비율 — 산출이 만들지 않은 축으로 링크를 검사하는 유일한 게이트다(항진명제 회피). 절단본 실측 82/82 = 1.0. **분모에서 정정본을 뺀다**: 정정이 또 정정되면 DART 가 정정본에도 rm 플래그를 붙이는데(절단본 15건) 후보 술어가 정정본을 원본 자격에서 빼므로 구조적으로 도달 대상이 아니다 — 넣으면 절단본 도달률이 82/97 = 0.845 로 내려간다(GATES §9 기록). WORKFLOW §3-4 참조값 `rm` 도달 99.9%, seed 0.99.",
+      "server_evidence": {
+        "build_id": "b_20260906T095633_758705Z",
+        "content_hash": "198163:b34cf5e8ecd72159",
+        "gate": "EG8_disclosure_version",
+        "measured": {
+          "n_rm_corrected_later": 19792,
+          "n_rm_reached": 19770,
+          "reach_rate": 0.9988884397736459
+        }
+      },
+      "sql": "SELECT count(*) FILTER (WHERE d.rm_corrected_later AND NOT o.is_correction AND o.n_corrections > 0)::DOUBLE / nullif(count(*) FILTER (WHERE d.rm_corrected_later AND NOT o.is_correction), 0) FROM disclosure_version o JOIN stg_disclosure d USING (rcept_no)",
+      "table": "disclosure_version",
+      "used_by": "EG8_disclosure_version (GATES EG8-P09 = DOC §8.1 E-G7)",
+      "value": 0.99
+    },
+    {
+      "growing": false,
+      "kind": "threshold",
+      "metric": "threshold_EG7",
+      "seed": "baseline_seed_s11.json",
+      "seed_note": "격리 사유가 `rcept_dt_missing` 하나뿐이고 절단본 676행 전부 rcept_dt 가 있어 0.0. 기간 라벨 없는 행(서버 586)은 **격리하지 않는다** — DESIGN §4-4 확정(행 유지 + group_key_basis='no_label'), GATES 초안 EG7-P05 `no_label` 격리는 폐기(§9). ★ 서버에서 rcept_dt 결측이 나오면 갱신.",
+      "server_evidence": {
+        "build_id": "b_20260906T095633_758705Z",
+        "content_hash": "198163:b34cf5e8ecd72159",
+        "gate": "EG7 (격리 비율 상한)",
+        "measured": {
+          "n_reject": 0,
+          "reject_ratio": 0.0
+        }
+      },
+      "sql": "SELECT n_reject::DOUBLE / (n_rows + n_reject) FROM disclosure_version _meta",
+      "table": "disclosure_version",
+      "used_by": "EG7 격리 비율 상한 (gates.threshold)",
+      "value": 0.0
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "cash_total_unit_krw",
+      "seed": "baseline_seed_s16.json",
+      "seed_note": "convention. 원장 라벨이 단위를 '백만원' 으로 못 박고 있고 산출 컬럼 이름은 `_krw`(원) 이므로 배율이 필요하다. 숫자를 .sql 에 쓰면 test_sql파일에_상수_하드코딩_없음 이 잡으므로 _const 로 주입한다. 라벨이 바뀌면(예: '현금배당금총액(원)') 배율도 함께 바뀌어야 하며, 그 신호는 EG3_dividend_event 의 unmapped_se_labels 가 낸다.",
+      "table": "dividend_event",
+      "used_by": "sql/dividend_event.sql — cash_total_krw = thstrm('현금배당금총액(백만원)') × 이 값",
+      "value": 1000000
+    },
+    {
+      "growing": false,
+      "kind": "threshold",
+      "metric": "threshold_EG7",
+      "seed": "baseline_seed_s16.json",
+      "seed_note": "★ 서버 재측정 필요(오케스트레이터). 절단본 1,227행 → 산출 221행, 격리 0.",
+      "server_evidence": {
+        "build_id": "b_20260906T095722_893370Z",
+        "content_hash": "54939:4086e265ed86efc0",
+        "gate": "EG7 (격리 비율 상한)",
+        "measured": {
+          "n_reject": 0,
+          "reject_ratio": 0.0
+        }
+      },
+      "sql": "SELECT count(*) FILTER (available_date IS NULL)::DOUBLE / count(*) FROM stg_dividend",
+      "table": "dividend_event",
+      "used_by": "EG7 격리 비율 상한 (gates.threshold)",
+      "value": 0.0
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "half_months",
+      "seed": "baseline_seed_s12.json",
+      "seed_note": "convention(회계 달력). 결산월 말일에서 보고서 종류만큼 당겨 기간 말일을 만드는 개월 수 — 1분기 −9(`three_quarter_months`) · 반기 −6(`half_months`) · 3분기 −3(`quarter_months`) · 사업보고서 0. `quarter_months` 는 문서 `doc_acode` 11013 을 1분기(≤ 3개월)와 3분기로 가르는 경계이기도 하다. 잰 값이 아니라 분기의 정의이고, SQL 숫자 리터럴 금지 규약(tests/test_equity_build.py::test_sql파일에_상수_하드코딩_없음)의 통로일 뿐이다(`universe_daily.adv_window_td` 20 과 같은 취급, GATES §1-12). 서버 재측정 대상이 아니다.",
+      "table": "fin_std",
+      "used_by": "sql/fin_std.sql pe_cand(후보 기간 말일)·resolved(1Q/3Q 판정) (_const)",
+      "value": 6
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "nonmatch_rate_gap_max",
+      "seed": "baseline_seed_s12.json",
+      "seed_note": "★ 서버 재측정 필요 — **절단본에서는 측정 불가**. `stg_fin` 이 있는 법인 9개가 전부 12월 결산이라 비12월 결산 표본이 0 이고 게이트가 skip(no_coverage) 로 떨어진다(12월 결산 무매칭률은 0/220 = 0.0). 3월 결산 법인(00694003, 900060)은 절단본 `stg_fin` 에 재무 행이 없다. 이 게이트가 잡으려는 것은 `period_end` 후보 규칙이 비12월 결산에서만 어긋나는 비대칭이므로 서버 전량(비12월 결산 32사)에서 처음 판정된다. GATES 초안의 조인축(`disclosure_version.bsns_year`·`reprt_code`)은 v1.2 grain(`rcept_no`)에 없어 접수번호 조인으로 바꿨다(§9).",
+      "server_evidence": {
+        "build_id": "b_20260906T095641_345790Z",
+        "content_hash": "93986:38c5872924ea3be0",
+        "gate": "EG6_fin_std (EG6-P08)",
+        "measured": {
+          "n_dec_fy": 92717,
+          "n_nondec_fy": 1269,
+          "nonmatch_rate_gap": 0.0
+        }
+      },
+      "sql": "SELECT abs(nondec_nonmatch_rate - dec_nonmatch_rate) FROM (SELECT (c.fiscal_month = 12) AS dec_fy, count(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM disclosure_version d WHERE d.rcept_no = o.rcept_no))::DOUBLE / count(*) AS rate FROM fin_std o JOIN corp c USING (corp_code) WHERE c.fiscal_month IS NOT NULL GROUP BY 1)",
+      "table": "fin_std",
+      "used_by": "EG6_fin_std (GATES EG6-P08)",
+      "value": 0.05
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "period_end_lag_max_days",
+      "seed": "baseline_seed_s12.json",
+      "seed_note": "DESIGN §4-4 가 명시한 후보 규칙의 창(0~200일)을 그대로 쓴다. 정상 접수는 사업보고서 90일·반기/분기 45일 안이고, 지연·정정 접수를 흡수할 여유를 둔 값이다. 창이 좁으면 후보 0 개(period_unresolved), 넓으면 인접 회계연도 후보가 둘 다 들어와 역시 unresolved 가 된다 — 절단본에서 문서 없는 그룹은 1건(00722500 2016 반기)이고 후보가 정확히 1개(2016-06-30, lag 62일)로 잡혔다. ★ 서버에서 문서 없는 그룹 수와 unresolved 분포로 재확인.",
+      "sql": "SELECT max(date_diff('day', period_end, rcept_dt)) FROM fin_std WHERE period_end_basis = 'document' AND date_diff('day', period_end, rcept_dt) <= 200",
+      "table": "fin_std",
+      "used_by": "sql/fin_std.sql pe_inf(문서 없는 그룹의 period_end 후보 선택 창) · _const",
+      "value": 200
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "quarter_months",
+      "seed": "baseline_seed_s12.json",
+      "seed_note": "convention(회계 달력). 결산월 말일에서 보고서 종류만큼 당겨 기간 말일을 만드는 개월 수 — 1분기 −9(`three_quarter_months`) · 반기 −6(`half_months`) · 3분기 −3(`quarter_months`) · 사업보고서 0. `quarter_months` 는 문서 `doc_acode` 11013 을 1분기(≤ 3개월)와 3분기로 가르는 경계이기도 하다. 잰 값이 아니라 분기의 정의이고, SQL 숫자 리터럴 금지 규약(tests/test_equity_build.py::test_sql파일에_상수_하드코딩_없음)의 통로일 뿐이다(`universe_daily.adv_window_td` 20 과 같은 취급, GATES §1-12). 서버 재측정 대상이 아니다.",
+      "table": "fin_std",
+      "used_by": "sql/fin_std.sql pe_cand(후보 기간 말일)·resolved(1Q/3Q 판정) (_const)",
+      "value": 3
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "rcept_lag_p99_days",
+      "pending_human_decision": "1826(5년)은 이름과 달리 p99 가 아니라 범위 상한이다(GATES §9 정정). 서버 lag 분포로 조일 수 있으나 정정 접수를 격리하면 안 되므로 사람 판단 — 값 유지.",
+      "seed": "baseline_seed_s12.json",
+      "seed_note": "★ 서버 재측정 필요. 절단본 실측 p50 45 · p99 216 · **max 445**(00110893 FY2021 사업보고서를 2023-03-21 접수 — API 가 정정본의 rcept_no 를 돌려주는 `api_restated` 축의 증거). GATES §1-12 는 이름을 `rcept_lag_p99_days` 로 등재했지만 **값을 문자 그대로 p99 로 잡으면 안 된다** — 그러면 정의상 1% 가 매번 격리된다(GATES §9 정정). 이 상한이 잡아야 하는 것은 `period_end` 오판(1년 어긋나면 lag 이 365 이상 튄다)과 음수 lag(결산 전 접수 = 불가능)이고, 정상 범위의 늦은 정정 접수는 통과시켜야 한다. seed 1826(5년)은 절단본 max 445 의 4배 여유이며 서버 lag 분포(p99·max·연도별)로 확정한다.",
+      "sql": "SELECT quantile_cont(date_diff('day', period_end, rcept_dt), 0.99), max(date_diff('day', period_end, rcept_dt)) FROM fin_std",
+      "table": "fin_std",
+      "used_by": "EG7-P04 rcept_lag_out_of_range (sql/fin_std.sql judged · _const)",
+      "value": 1826
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "three_quarter_months",
+      "seed": "baseline_seed_s12.json",
+      "seed_note": "convention(회계 달력). 결산월 말일에서 보고서 종류만큼 당겨 기간 말일을 만드는 개월 수 — 1분기 −9(`three_quarter_months`) · 반기 −6(`half_months`) · 3분기 −3(`quarter_months`) · 사업보고서 0. `quarter_months` 는 문서 `doc_acode` 11013 을 1분기(≤ 3개월)와 3분기로 가르는 경계이기도 하다. 잰 값이 아니라 분기의 정의이고, SQL 숫자 리터럴 금지 규약(tests/test_equity_build.py::test_sql파일에_상수_하드코딩_없음)의 통로일 뿐이다(`universe_daily.adv_window_td` 20 과 같은 취급, GATES §1-12). 서버 재측정 대상이 아니다.",
+      "table": "fin_std",
+      "used_by": "sql/fin_std.sql pe_cand(후보 기간 말일)·resolved(1Q/3Q 판정) (_const)",
+      "value": 9
+    },
+    {
+      "growing": false,
+      "kind": "threshold",
+      "metric": "threshold_EG7",
+      "pending_human_decision": "서버 실측 격리비율 0.01275 대 임계 0.03(2.4배 여유). 비KRW 법인 증가 여지 때문에 값 유지.",
+      "seed": "baseline_seed_s12.json",
+      "seed_note": "★ 서버 재측정 필요. 절단본 실측 6/226 = 0.02655 — 전부 `non_krw`(중국원양자원 00722500, 통화 HKD 848행). `period_unresolved`·`rcept_lag_out_of_range`·`duplicate_vintage` 는 절단본에서 0 이다. 서버 비KRW 는 STAGE_DESIGN baseline 실측 132,355행 / 15,375,024행 = 0.86%(행 기준)이므로 그룹 기준 비율은 그와 비슷하거나 낮을 것으로 본다. seed 0.03 은 절단본 값 위의 여유이고 서버 값으로 낮춰야 한다.",
+      "server_evidence": {
+        "build_id": "b_20260906T095641_345790Z",
+        "content_hash": "93986:38c5872924ea3be0",
+        "gate": "EG7 (격리 비율 상한)",
+        "measured": {
+          "n_reject": 1214,
+          "reject_ratio": 0.012752100840336135
+        }
+      },
+      "sql": "SELECT n_reject::DOUBLE / (n_rows + n_reject) FROM fin_std _meta",
+      "table": "fin_std",
+      "used_by": "EG7 격리 비율 상한 (gates.threshold)",
+      "value": 0.03
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "investor_sum_tol_krw",
+      "seed": "baseline_seed_s08.json",
+      "seed_note": "**제안값 — 서버 재측정·사람 승인 필요.** 값 6,000,000 은 절단본 최대 4,000,000 이 아니라 **반올림 상한의 유도값**이다: 키움 ka10060 은 12주체를 각각 백만원 단위로 반올림해 준다(stage `_flow_krw` 가 ×1e6 로 되돌린다). 원 단위 합이 정확히 0 인 12개 값을 각각 [-0.5, +0.5] 백만원 안에서 반올림하므로 합의 오차는 [-6, +6] 백만원을 넘을 수 없다. 절단본이 ±4 까지만 보인 것은 표본(8티커)이 작기 때문이고, 서버 7.6M 행에서는 ±5·±6 이 나올 수 있다 — 실측 최댓값을 그대로 굳히면 정당한 반올림이 폐기형 게이트를 깨뜨린다. 이 값으로도 게이트의 목적은 그대로다: 단위 오적용(×1e6)·주체 매핑 누락은 오차가 최소 1e8 이상이라 전부 걸린다. 서버 첫 빌드의 EG3_flow_daily.investor_sum_abs_max_krw 를 보고 6e6 을 유지할지(기대) 조일지 판단한다.",
+      "server_evidence": {
+        "build_id": "b_20260906T100103_572209Z",
+        "content_hash": "9201516:342e6a6ff8b078f5",
+        "gate": "EG3_flow_daily (EG3-P06)",
+        "measured": {
+          "investor_sum_abs_max_krw": 4000000.0,
+          "n_investor_sum_rows": 7537984,
+          "n_investor_sum_violation": 0
+        }
+      },
+      "sql": "-- 절단본 실측(빌드 SQL 과 독립, 원장 stg_flow_daily_kiwoom 20,313행 위 손계산): 12주체 합 s = ind+frgnr+fnnc+insrnc+invtrt+etc_fnnc+bank+penfnd+samo+natn+etc_corp+natfor 의 분포(백만원) = {-4: 1, -3: 21, -2: 758, -1: 4413, 0: 10081, +1: 4294, +2: 715, +3: 29, +4: 1}. |s| 최대 4,000,000원 = 4백만원, s 는 항상 1e6 의 배수, 0 인 행 10,081 (49.6%).",
+      "table": "flow_daily",
+      "used_by": "rules_s08.eg3_flow_daily n_investor_sum_violation (GATES §1 EG3-P06)",
+      "value": 6000000
+    },
+    {
+      "growing": true,
+      "kind": "measured",
+      "metric": "threshold_EG7",
+      "pending_human_decision": "서버 실측 격리비율 0.00998 대 임계 0.05(5배 여유). 조이면 회귀 감시가 촘촘해지지만 키움 샤드 미커버(1,070티커)가 늘 때 폐기된다 — 사람 판단.",
+      "seed": "baseline_seed_s08.json",
+      "seed_note": "**제안값 — 서버 재측정 필요.** 격자 테이블의 EG7 격리는 '결함 행' 이 아니라 **원장이 격자보다 넓다는 사실**이다: 캘린더 하한 이전(P11 서버 flow 7,609행)과 폐지·재상장 사이 티커 재사용 구간이 전부 여기로 온다. 코드 기본값 0.001 은 열(cell) 격리형 테이블 기준이라 격자 테이블에 그대로 쓰면 첫 빌드가 반드시 폐기된다. 0.05 는 절단본 0.0448 + 여유이며, 절단본은 재상장 2종이 15티커 중 2 라 서버(3,478 중 2)보다 off_grid 비중이 극단적으로 높다 — 서버 비율은 pre_calendar 7,609/7,621,338 = 0.001 에 티커 재사용·폐지 구간이 더해진 값이라 0.05 보다 훨씬 작을 것으로 본다. 서버 첫 빌드 뒤 실측값으로 조인다. 사유별 건수 회귀(GATES §3 ⑪ (d))가 붙으면 이 비율 임계는 보조축이 된다.",
+      "server_evidence": {
+        "build_id": "b_20260906T100103_572209Z",
+        "content_hash": "9201516:342e6a6ff8b078f5",
+        "gate": "EG7 (격리 비율 상한)",
+        "measured": {
+          "n_reject": 92767,
+          "reject_ratio": 0.009981081918852696
+        }
+      },
+      "sql": "-- 절단본 실측: 원장 20,313행 = 격자 매핑 18,581 + pre_calendar 18(000660·003540·005930 각 6행, 2009-12-22~12-30) + off_grid 1,714(036220 1,411행 2018-06-21~2024-03-12 · 101970 303행 2023-12-26~2025-03-27 — 폐지~재상장 사이 티커 재사용 구간). 격리 비율 = 1,732 / (36,972 + 1,732) = 0.044750.",
+      "table": "flow_daily",
+      "used_by": "gates.eg7_range (GATES §1 EG7 — 코드 기본값 0.001 을 테이블 상수로 이관)",
+      "value": 0.05
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "pct_max",
+      "seed": "baseline_seed_s15.json",
+      "seed_note": "convention(지분율의 정의역 상한). **격리하지 않는다** — GATES §2 18행의 EG7 은 격리 사유 없이 `●` 이고, 지분 공시는 담보·대차로 100%를 넘는 표기가 원장에 있을 수 있어 폐기하면 사건 스트림에 구멍이 난다(§5-C6 생존편향). 절단본 실측 rate_pct 0.00000000000~100.00000000000, 범위 밖 0건. ★ 서버에서 n_rate_above_pct_max 가 0 이 아니면 DESIGN §11 에 한계로 적는다.",
+      "sql": "SELECT max(rate_pct), min(rate_pct) FROM holder_daily",
+      "table": "holder_daily",
+      "used_by": "EG3_holder_daily metric n_rate_above_pct_max (기록형)",
+      "value": 100
+    },
+    {
+      "growing": false,
+      "kind": "threshold",
+      "metric": "threshold_EG7",
+      "seed": "baseline_seed_s15.json",
+      "seed_note": "격리 사유가 `rcept_dt_missing` 하나뿐이고 stage 가 `rcept_dt` 를 required 로 두므로(rules_dart.py ColumnRule required=True) 구조적으로 0 이다. 절단본 4,329행 전부 rcept_dt 보유.",
+      "server_evidence": {
+        "build_id": "b_20260906T095715_708401Z",
+        "content_hash": "54864:6a91d1b99d035c06",
+        "gate": "EG7 (격리 비율 상한)",
+        "measured": {
+          "n_reject": 0,
+          "reject_ratio": 0.0
+        }
+      },
+      "sql": "SELECT n_reject::DOUBLE / (n_rows + n_reject) FROM holder_daily _meta",
+      "table": "holder_daily",
+      "used_by": "EG7 격리 비율 상한 (gates.threshold)",
+      "value": 0.0
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "src_overlap_agree_min",
+      "seed": null,
+      "server_evidence": {
+        "build_id": "b_20260906T095725_635156Z",
+        "content_hash": "256537:544bdb6bc6985fd2",
+        "gate": "EG8 (rules_s18)",
+        "measured": {
+          "agree_rate": 1.0,
+          "n_agree_by_column": {
+            "analyst_count": 796,
+            "eps_krw": 796,
+            "opinion_score": 796,
+            "per": 796,
+            "target_price_krw": 796
+          },
+          "n_overlap_keys": 796
+        }
+      },
+      "table": "opinion_daily",
+      "value": 0.99
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "agg_rate_tol_pct",
+      "seed": "baseline_seed_s15.json",
+      "seed_note": "★ 서버 재측정. 산출(집계행 제외)의 보통주 지분율 합이 원장 '계' 행 값과 얼마나 벌어지는지의 허용오차 — 원장이 소수 2자리라 주주 수만큼 반올림이 쌓인다. 절단본 76그룹 중 75가 0.5%p 이내(어긋난 1그룹은 기록만 한다). **판정하지 않는다**(GATES §0-1 기록형): 원장 집계행 자체가 종류주를 섞어 적는 경우가 있어 폐기형으로 두면 정상 법인이 빌드를 죽인다.",
+      "server_evidence": {
+        "build_id": "b_20260906T095716_404690Z",
+        "content_hash": "175726:41b50ee7bb412176",
+        "gate": "EG3_ownership_snapshot (기록형)",
+        "measured": {
+          "n_grain_folded": 500,
+          "n_pct_out_of_range_kept": 0
+        }
+      },
+      "sql": "WITH d AS (SELECT rcept_no, sum(trmend_rate_pct) s FROM ownership_snapshot WHERE stock_knd = '보통주' GROUP BY 1), a AS (SELECT rcept_no, max(trmend_posesn_stock_qota_rt_pct) t FROM stg_hyslr WHERE row_kind = 'aggregate' AND stock_knd = '보통주' GROUP BY 1) SELECT count(*), count(*) FILTER (WHERE abs(d.s - a.t) <= 0.5) FROM d JOIN a USING (rcept_no)",
+      "table": "ownership_snapshot",
+      "used_by": "EG3_ownership_snapshot metric agg_reconcile_n_close (기록형)",
+      "value": 0.5
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "pct_max",
+      "seed": "baseline_seed_s15.json",
+      "seed_note": "convention(지분율 정의역 상한). 절단본 실측 max 100.00(범위 밖 0건). 최대주주 지분율은 정의상 100 을 넘지 못한다 — 넘으면 stage 의 '#######' 엑셀 오버플로 잔재(STAGE_SPEC §2-13, 서버 9행)와 같은 부류의 파싱 오류다. ★ 서버 격리 건수로 threshold_EG7 재검토.",
+      "sql": "SELECT max(bsis_posesn_stock_qota_rt_pct), max(trmend_posesn_stock_qota_rt_pct) FROM stg_hyslr WHERE row_kind <> 'aggregate'",
+      "table": "ownership_snapshot",
+      "used_by": "sql/ownership_snapshot.sql 격리 `pct_out_of_range` (_const) · EG7-P07",
+      "value": 100
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "pct_min",
+      "seed": "baseline_seed_s15.json",
+      "seed_note": "convention(지분율 정의역 하한). 절단본 실측 min 0.00. 음수 지분율은 원장 파싱 오류이므로 격리한다.",
+      "sql": "SELECT min(bsis_posesn_stock_qota_rt_pct), min(trmend_posesn_stock_qota_rt_pct) FROM stg_hyslr WHERE row_kind <> 'aggregate'",
+      "table": "ownership_snapshot",
+      "used_by": "sql/ownership_snapshot.sql 격리 `pct_out_of_range` (_const) · EG7-P07",
+      "value": 0
+    },
+    {
+      "growing": false,
+      "kind": "threshold",
+      "metric": "threshold_EG7",
+      "seed": "baseline_seed_s15.json",
+      "seed_note": "절단본 격리 0(826행 전부 통과)이지만 **0.0 으로 못 박지 않는다** — 격리 사유 `pct_out_of_range` 가 원장 파싱 오류에 걸리는 축이고 서버 228,226행에는 STAGE_SPEC §2-13 이 실측한 '#######' 오버플로 잔재가 있다(cast_failed 는 NULL 이 되어 격리를 피하지만 부분 파싱은 범위 밖 값을 낼 수 있다). 프레임 기본값 0.001 을 그대로 등재한다. ★ 서버 첫 빌드의 reject_ratio 로 확정.",
+      "server_evidence": {
+        "build_id": "b_20260906T095716_404690Z",
+        "content_hash": "175726:41b50ee7bb412176",
+        "gate": "EG7 (격리 비율 상한)",
+        "measured": {
+          "n_reject": 0,
+          "reject_ratio": 0.0
+        }
+      },
+      "sql": "SELECT n_reject::DOUBLE / (n_rows + n_reject) FROM ownership_snapshot _meta",
+      "table": "ownership_snapshot",
+      "used_by": "EG7 격리 비율 상한 (gates.threshold)",
+      "value": 0.001
+    },
+    {
+      "growing": true,
+      "kind": "measured",
+      "metric": "backfill_end",
+      "seed": "baseline_seed_s01.json",
+      "seed_note": "백필 상한 거래일. 이 날까지 listing/etf 행이 있는 종목은 '아직 살아 있다' — delist_date_krx NULL·basis unknown. EQUITY_DESIGN v1.2 §4-1·§10 P16. trading_calendar.backfill_end(S02)와 같은 값이어야 한다",
+      "sql": "SELECT max(date) FROM stg_index_daily",
+      "table": "security",
+      "value": "2026-08-20"
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "delist_sample_n",
+      "seed": "baseline_seed_s07.json",
+      "seed_note": "GATES EG-C ⑩ '폐지 909 중 무작위 20종목'. 후보가 n 보다 적으면(절단본 5) 전건을 쓴다 — n_candidates·sample 을 metrics 에 남긴다.",
+      "table": "security",
+      "used_by": "EG-C ⑩ (contract.egc10_delisted_sample)",
+      "value": 20
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "delist_sample_seed",
+      "seed": "baseline_seed_s07.json",
+      "seed_note": "재현성 고정용 시드(GATES EG-C ⑩ '무작위 시드는 baseline 고정'). 값 자체에 의미 없음. 후보 = security_span.end_reason='delisted' 구간(서버 1,164 티커 기준; 절단본 5: 000030·036220:1·101970:1·900050·900060). 바꾸면 표본이 바뀌므로 서버 실측 뒤 고정.",
+      "table": "security",
+      "used_by": "EG-C ⑩ (contract.egc10_delisted_sample) — random.Random(seed).sample(폐지 구간 정렬 목록, n)",
+      "value": 20260905
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "respan_count",
+      "seed": "baseline_seed_s02.json",
+      "seed_note": "036220·101970 두 종목뿐(DESIGN §10 P8). 절단본은 재상장 2종을 일부러 담았으므로 전수 유니버스와 값이 같다. 이 수가 늘면 수집 결손이 가짜 재상장으로 읽힌 것이다 — 늘어난 티커를 확인하기 전에 baseline 을 올리지 말 것.",
+      "sql": "SELECT count(*) FROM (SELECT ticker FROM security_span GROUP BY ticker HAVING count(*) >= 2)",
+      "table": "security_span",
+      "used_by": "EG16a (rules_s02.eg16a_respan_count) · GATES §3 ③(c)",
+      "value": 2
+    },
+    {
+      "growing": false,
+      "kind": "threshold",
+      "metric": "threshold_EG7",
+      "seed": "baseline_seed_s16.json",
+      "seed_note": "★ 서버 재측정 필요(오케스트레이터). 격리 사유는 `rcept_dt_missing` 하나뿐이고 절단본 237행 중 0건이다 — stage 가 available_date 를 rcept_dt 에서 derived 로 채우므로 결측은 원천 접수일 자체가 없을 때만 난다. 서버에서도 0 이면 임계 0.0 을 유지한다.",
+      "server_evidence": {
+        "build_id": "b_20260906T095718_606837Z",
+        "content_hash": "71044:f80fc6ee3e1eb892",
+        "gate": "EG7 (격리 비율 상한)",
+        "measured": {
+          "n_reject": 0,
+          "reject_ratio": 0.0
+        }
+      },
+      "sql": "SELECT count(*) FILTER (available_date IS NULL)::DOUBLE / count(*) FROM stg_shares WHERE row_kind <> 'aggregate'",
+      "table": "shares_outstanding",
+      "used_by": "EG7 격리 비율 상한 (gates.threshold)",
+      "value": 0.0
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "threshold_EG7",
+      "pending_human_decision": "서버 실측 격리비율 0.00629 대 임계 0.05(8배 여유). 조이는 판단은 사람 몫.",
+      "seed": "baseline_seed_s09.json",
+      "seed_note": "**제안값 — 사람 승인 필요.** 절단본 비율(0.0274)이 서버 예상(0.0056)보다 5배 큰 이유는 슬라이스 15티커가 전부 2010 이전 상장 대형주라 pre-2010 구간의 비중이 과대표되기 때문이다. 0.05 는 둘을 다 덮으면서 '원장의 5% 넘게 격리되면 멈춘다' 는 안전판을 남긴다. 이 임계는 격리 **비율**만 보므로 사유별 회귀는 못 잡는다 — 서버 첫 빌드 뒤 GATES §3 ⑪ (d) 의 short_daily.reject_pre_calendar·reject_off_grid 정확 건수를 등재하는 것이 본 감시축이고, 그때 이 임계는 조여도 된다. 값을 키우면 원장 대량 유실이 통과하고, 0.001(코드 기본값)로 두면 정상 빌드가 폐기된다.",
+      "server_evidence": {
+        "build_id": "b_20260906T100152_408123Z",
+        "content_hash": "9201516:a465d48fbadcdf5a",
+        "gate": "EG7 (격리 비율 상한)",
+        "measured": {
+          "n_reject": 58213,
+          "reject_ratio": 0.006286685063893339
+        }
+      },
+      "sql": "-- 절단본 실측(2026-09-06): n_reject 1,042 / (n_out 36,972 + 1,042) = 0.02741. 격리는 전건 pre_calendar 이고 전건 키움 ka10014 다(000660·003540·005930 의 2008-06-23~2010-01-03 행). off_grid 0. 서버 예상: DESIGN §4-3 P11 short pre_calendar 58,211 / 격자 약 1,040만 = 0.0056.",
+      "table": "short_daily",
+      "used_by": "gates.eg7_range(threshold(ctx,'EG7')) — short_daily 빌드",
+      "value": 0.05
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "asof_sample_dates",
+      "seed": "baseline_seed_s02.json",
+      "seed_note": "날짜 5 = 캘린더 양 끝 + 사건일 3(2015-03-16 101970 첫 구간 종료 · 2018-05-04 005930 50:1 분할 · 2024-03-13 036220 재상장). 전부 절단본 캘린더에 실재하는 거래일이다. 뷰별 키(v_fin_latest.asof_sample_dates 등)는 해당 슬라이스가 이 값을 복사해 쓴다.",
+      "sql": "-- 고정 표본(사람 선택). 전 거래일임을 SELECT count(*) FROM stg_index_daily WHERE date IN (…) 로 확인",
+      "table": "trading_calendar",
+      "used_by": "DESIGN §2 _asof/<view>/<build>/ · EG5c·EG11·EG19",
+      "value": [
+        "2010-01-04",
+        "2015-03-16",
+        "2018-05-04",
+        "2024-03-13",
+        "2026-08-20"
+      ]
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "asof_sample_tickers",
+      "seed": "baseline_seed_s02.json",
+      "seed_note": "★ 대체 표본이다. 설계가 요구한 종목 20 이 아니라 절단본 티커 15 전량이다 — 절단본에 그 15개밖에 없어 20 을 만들 수 없다. 서버 표본 20 은 오케스트레이터가 채운다. 15 는 축을 다 덮는다: 보통주·우선주(005930/005935) · 1:N 종류주(003540/003545/003547) · 재상장 2종(036220/101970) · 비KR7(900050/900060) · 폐지(000030) · ETF(069500) · 문자 티커(0001A0).",
+      "sql": "SELECT DISTINCT ticker FROM stg_listing_daily UNION SELECT DISTINCT ticker FROM stg_etf_price_daily ORDER BY 1",
+      "table": "trading_calendar",
+      "used_by": "DESIGN §2 _asof/<view>/<build>/ · EG5c·EG11·EG19",
+      "value": [
+        "000030",
+        "000070",
+        "0001A0",
+        "000660",
+        "003540",
+        "003545",
+        "003547",
+        "005930",
+        "005935",
+        "035720",
+        "036220",
+        "051910",
+        "068270",
+        "069500",
+        "101970",
+        "161890",
+        "207940",
+        "247540",
+        "900050",
+        "900060"
+      ]
+    },
+    {
+      "growing": true,
+      "kind": "measured",
+      "metric": "backfill_end",
+      "seed": "baseline_seed_s02.json",
+      "seed_note": "GATES §1-12 는 측정 SQL 을 max(date) of stg_listing_daily 로 적었다. DESIGN v1.2 §4-1 이 캘린더를 stg_index_daily distinct date 로 확정했으므로 이 seed 는 stg_index_daily 로 측정한다. 절단본에서 두 값은 같다(2026-08-20). 수집이 진행되면 커지는 값이라 growing=true — 백필이 재개되면 오케스트레이터가 재측정해 갱신한다.",
+      "sql": "SELECT CAST(max(date) AS VARCHAR) FROM stg_index_daily",
+      "table": "trading_calendar",
+      "used_by": "EG17 (rules_s02) · security_span.end_reason='coverage_gap' 경계 · GATES §3 ③(e)",
+      "value": "2026-08-20"
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "calendar_start",
+      "seed": "baseline_seed_s02.json",
+      "seed_note": "KRX API 하한(MEMORY dart-universe-2010-floor). 성장하지 않는 하한이라 growing=false — 값이 뒤로 밀리면 원천이 잘린 것이다.",
+      "sql": "SELECT CAST(min(date) AS VARCHAR) FROM stg_index_daily",
+      "table": "trading_calendar",
+      "used_by": "EG17 (rules_s02.eg17_calendar_integrity)",
+      "value": "2010-01-04"
+    },
+    {
+      "growing": false,
+      "kind": "threshold",
+      "metric": "threshold_EG7",
+      "seed": "baseline_seed_s16.json",
+      "seed_note": "★ 서버 재측정 필요(오케스트레이터). 절단본 비집계 1,035행 중 격리 0(dedup 뒤 산출 977).",
+      "server_evidence": {
+        "build_id": "b_20260906T095720_790337Z",
+        "content_hash": "260980:212f1faae9591031",
+        "gate": "EG7 (격리 비율 상한)",
+        "measured": {
+          "n_reject": 0,
+          "reject_ratio": 0.0
+        }
+      },
+      "sql": "SELECT count(*) FILTER (available_date IS NULL)::DOUBLE / count(*) FROM stg_tesstk WHERE row_kind <> 'aggregate'",
+      "table": "treasury_stock",
+      "used_by": "EG7 격리 비율 상한 (gates.threshold)",
+      "value": 0.0
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "admin_signal_window_sessions",
+      "pending_human_decision": "제안값 5 세션(관리종목 신호 창). 사람 승인 대기 — 값 유지.",
+      "seed": "baseline_seed_s03.json",
+      "seed_note": "**제안값 — 사람 승인 필요.** 창 = [지정 신호일, 지정일 + 5세션](td_seq 차 ≤ 5, 지정일 당일 포함). 관리종목 상태 자체를 이유로 쓰지 않는 까닭: admin_state 는 지정 해제까지 이어져 그 기간 무거래를 전부 admin 으로 부르면 illiquid 와 구분이 사라지고, 관리종목 편입은 universe_policy 의 investable(NOT admin_state)이 이미 뺀다. 여기서 잡고 싶은 것은 '지정 공시 직후 며칠 안 도는' 국면뿐이다. no_trade_run_k 와 같은 5(1거래주)로 맞춰 두 임계가 같은 시간 눈금을 쓰게 한다. 값을 키우면 admin 이 늘고 illiquid 가 줄어 status suspended 가 준다.",
+      "sql": "-- 근거(서버 P19′): signal_admin 행 1,200 · admin_state true measured 274,524 + derived_kospi_window 39,776. 상태는 몇 달~1년(admin_window_td 365) 이어지지만 지정 '직후' 는 그 앞머리뿐이다.",
+      "table": "universe_daily",
+      "used_by": "sql/universe_daily.sql reasoned (S03C ④ admin) · rules_s03.eg3_universe n_no_trade_reason_recompute_mismatch",
+      "value": 5
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "admin_window_td",
+      "seed": "baseline_seed_s03.json",
+      "seed_note": "DESIGN v1.2 §4-1 「KOSPI = 지정 신호 365거래일 창」. 관리종목 해제 공시가 3건뿐이라(P12) 종료 사건이 없어 창 길이로 닫는다 — 창 안은 [지정일, 지정일 + 364 거래일]. 값을 바꾸면 KOSPI admin_state 이력이 통째로 바뀌므로 재빌드 전 사람 승인.",
+      "table": "universe_daily",
+      "used_by": "sql/universe_daily.sql admin_state (KOSPI·소속부 공란 행의 derived_kospi_window)",
+      "value": 365
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "adv_window_td",
+      "seed": "baseline_seed_s03.json",
+      "seed_note": "조정 상수가 아니라 컬럼 이름 adv20 이 못박은 정의(DESIGN §4-1 「[D−19, D] 20 거래일」). SQL 본문 숫자 리터럴 금지(test_equity_build::test_sql파일에_상수_하드코딩_없음)라 _const 로 들어올 뿐이다. 값을 바꾸면 컬럼 이름·FIELD_MAP 을 같이 바꿔야 한다 — 사실상 불변.",
+      "table": "universe_daily",
+      "used_by": "sql/universe_daily.sql adv20_krw 창(ROWS BETWEEN adv_window_td−1 PRECEDING) · rules_s03.eg3_universe n_adv20_null_mismatch",
+      "value": 20
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "contract_probe_dates",
+      "seed": "baseline_seed_s07.json",
+      "seed_note": "asof_sample_dates 5 + 재상장 경계 2 = 7일: 2016-05-04(036220 첫 구간 마지막 거래일) · 2024-03-12(036220 재상장 전날 — 공백 기간 안, 어댑터가 두 구간을 하나로 뭉치면 이 날 036220 이 members 에 나타나 잡힌다). 2015-03-16 은 101970 첫 구간 마지막 날, 2024-03-13 은 036220 재상장일.",
+      "sql": "-- 고정 검사일(사람 선택). 전부 거래일임을 SELECT count(*) FROM stg_index_daily WHERE date IN (…) 로 확인",
+      "table": "universe_daily",
+      "used_by": "EG-C ② (contract.egc02_universe_equals_listing) — UniverseSource.members(d) 티커 집합 = _pinned stg_listing_daily(d) ∪ stg_etf_price_daily(d)",
+      "value": [
+        "2010-01-04",
+        "2015-03-16",
+        "2016-05-04",
+        "2018-05-04",
+        "2024-03-12",
+        "2024-03-13",
+        "2026-08-20"
+      ]
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "corp_action_lookahead_sessions",
+      "pending_human_decision": "제안값 +45 세션(기업행위 창). 사람 승인 대기 — 값 유지.",
+      "seed": "baseline_seed_s03.json",
+      "seed_note": "**제안값 — 사람 승인 필요.** 앞쪽(lookahead)이 긴 이유: 감자·액면병합의 매매거래정지는 사건 **앞**에 놓이고(정지 → 적용일에 재개) P23′ 오프셋 max 가 개별 40·성분 48 세션이라 40 으로는 성분 사건 일부를 놓친다. 45 는 개별 max 40 을 덮고 성분 max 48 은 못 덮는 절충 — 남는 3 세션짜리 꼬리는 illiquid 로 떨어지고 run ≥ k 면 여전히 suspended 라 엔진 안전 쪽으로 실패한다. 서버 EG3_universe.no_trade_reason_counts 에서 corp_action_window 대 illiquid 비를 보고 48 로 올릴지 판단한다.",
+      "sql": "-- 근거(서버 P23′): adj_factor ok 적용일 오프셋 중앙값 13.5 세션 · max 개별 40 · 성분(combined) 48. 감자·병합은 공시 뒤 거래정지가 이어지다 적용일에 재개되므로 '적용일 앞' 이 정지 구간이다.",
+      "table": "universe_daily",
+      "used_by": "sql/universe_daily.sql ca_win (S03C ③ corp_action_window 창의 앞쪽 폭) · rules_s03.eg3_universe n_no_trade_reason_recompute_mismatch",
+      "value": 45
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "corp_action_lookback_sessions",
+      "pending_human_decision": "제안값 −5 세션(기업행위 창). 사람 승인 대기 — 값 유지.",
+      "seed": "baseline_seed_s03.json",
+      "seed_note": "**제안값 — 사람 승인 필요.** D 기준 [D − 5, D + 45] 세션 안에 같은 티커의 adj_factor 적용일이 있으면 그날 무거래는 corp_action_window 다. 뒤쪽(lookback)이 짧은 이유: 사건이 지나간 뒤의 무거래는 사건 때문이 아니라 그 종목이 원래 안 도는 것일 가능성이 커서, 길게 잡으면 illiquid 가 통째로 corp_action_window 로 넘어간다. adj_factor 의 apply 대조 창(−5)과 같은 값으로 맞춰 두 창이 같은 사건 축을 쓰게 한다. 값을 키우면 status suspended 가 늘고(§4-1 새 규칙) liquid 유니버스가 줄어든다.",
+      "sql": "-- 근거(서버 P23′, S06 4차): adj_factor 의 가격 대조 창이 [−5, +40] 세션이고, 명목일과 다른 ok 적용일 265건의 오프셋은 중앙값 13.5 · max 개별 40 · 성분 48 세션. 절단본(S03C 로컬): 005930·005935 50:1 분할 apply 2018-05-04 앞 무거래 3세션(04-30~05-03)이 D−5 창 안에 든다.",
+      "table": "universe_daily",
+      "used_by": "sql/universe_daily.sql ca_win (S03C ③ corp_action_window 창의 뒤쪽 폭) · rules_s03.eg3_universe n_no_trade_reason_recompute_mismatch",
+      "value": 5
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "no_trade_run_k",
+      "pending_human_decision": "제안값 5(연속 무거래 세션). 서버 no_trade_reason 분포로 사람이 확정한다 — 값 유지.",
+      "seed": "baseline_seed_s03.json",
+      "seed_note": "**제안값 — 사람 승인 필요.** 목적은 정지 공시 없이 오래 기준가만 찍히는 종목(P6: 지정 뒤 첫 거래 중앙값 4일·p90 562일·재거래 없음 930)을 잡는 것. k=5 = 1거래주(KRX 주 5일) = P6 중앙값(4)+1 이라 '정지의 긴 절반' 부터 잡고, 단일·이틀 무거래(비유동 우선주의 일상)는 잡지 않는다. 절단본에서 잡히는 최단 무공시 정지는 3일(005930·005935 분할 정지 2018-04-30~05-03) — k=5 는 이를 놓치지만 커널이 reference 행을 방출하지 않으므로(§7) 거래 가능성 판정에는 영향이 없고 유니버스 상태에만 남는다. 대안 k=10(2주)·k=20(adv20 창과 같은 1개월)은 잡히는 행이 각각 10%·26% 준다. 서버 빌드 뒤 EG3_universe.no_trade_run_hist(1 / 2-4 / 5-9 / 10-19 / 20+ 행수, halt_state 무관)와 n_suspended_by_run 을 보고 확정한다. 값을 바꾸면 status 이력과 FX-1-012d 픽스처가 같이 바뀐다.",
+      "sql": "-- 근거 실측(절단본, 빌드 SQL 과 독립 손계산): 무거래(volume_shr=0) 연속 run 길이 분포 {1×7, 3×3, 10, 12, 22, 49, 55, 66, 116}. halt_state 밖의 긴 run = 000030 22(폐지 전, 공시 없음) · 900050 10·66·116(HK 상장사, 공시 없음) · 900060 해제 뒤 2일 · 101970 해제일 1일. k 별 run 으로만 suspended 되는 행: k=3 211 · k=5 201 · k=10 181 · k=20 148 (halt 126 별도).",
+      "table": "universe_daily",
+      "used_by": "sql/universe_daily.sql status (price_kind='reference' ∧ no_trade_run ≥ k → suspended) · rules_s03.eg3_universe n_status_halt_mismatch",
+      "value": 5
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "liquid_top_pct",
+      "seed": "baseline_seed_s03.json",
+      "seed_note": "**사용자 선택 상위 비율, 기본 50%**(09-05 결정 \"날짜별 상위 비율 기준으로 가자\"). liquid = investable ∧ 같은 날 보통주 모집단 안 adv20 백분위(universe_daily.adv20_rank_pct, cume_dist) 가 1 − 0.5 = 0.5 이상 — 서버 P22′ 로 치면 그날 adv20 중앙값(2010~2026 전 기간 합산 p50 8.85억) 이상인 보통주. 절대 금액 임계(예: adv20 ≥ 10억) 대신 비율을 고른 이유: 시장 규모·물가에 따라 절대 금액의 의미가 15년 사이 크게 변하고(P22′ p50 은 전 기간 합산), 비율은 날마다 모집단 안에서 재정의되어 유니버스 크기가 안정적이다. 값은 (0, 1] 이어야 한다(EG3_policy). 바꾸면 universe_policy.version 도 올리고 FX-1-017k~m 픽스처가 같이 바뀐다.",
+      "sql": "-- 근거(서버 P22′, 보통주 adv20_krw 분위수, 2026-09-05): p10 7,076만 · p25 2.31억 · p50 8.85억 · p75 35.8억 · p90 124.9억 원. 절단본 손계산: 날짜별 모집단 4~8종목, rank ≥ 0.5 행 13,660 / 모집단 21,495 (63.6% — 모집단이 작아 cume_dist 의 동률·이산 효과로 절반보다 많다; 서버는 ~2,600종목이라 50.0% 에 수렴).",
+      "table": "universe_policy",
+      "used_by": "sql/universe_policy.sql liquid 임계 행(predicate 'adv20_rank_pct >= ' || (1 − liquid_top_pct) · threshold_value) · rules_s03.eg3_policy n_quantile_threshold_out_of_range",
+      "value": 0.5
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "version",
+      "seed": "baseline_seed_s03.json",
+      "seed_note": "정책 집합 판본. s03-v1 = all 1행 → s03b-v2 = all + common-stock(2행) + investable(4행), 전부 flag → s03b-v3 = + liquid(investable 4행 + quantile 1행 `adv20_rank_pct >= 1 − liquid_top_pct`), 12행 → **s03c-v4** = liquid 에 flag 술어 `no_trade_reason <> 'illiquid'` 1행 추가(그날 거래가 없고 이유도 모르는 종목은 유동성 유니버스 밖), 13행이고 quantile 행의 rule_seq 가 5 → 6 으로 밀린다. liquid_top_pct 를 바꾸면 임계 행 술어가 바뀌므로 판본도 올린다. baseline 은 게이트 상수 전용(EQD-10)이지만 SQL 이 문자열 리터럴 없이 판본을 실을 통로가 _const 뿐이라 여기 둔다.",
+      "table": "universe_policy",
+      "used_by": "sql/universe_policy.sql version 컬럼",
+      "value": "s03c-v4"
+    }
+  ],
+  "_pending": {
+    "corp_event.detect_recall_min": "EG8-P04(기준가 이상 사례의 이벤트 매칭 recall). 대조축 미확보 — 미등재.",
+    "disclosure_version.misjudge_rate_max": "EG6-P07(정정 그룹 표본 오판율). 사람이 라벨한 표본이 있어야 재는 값이라 코드가 판정하지 않는다(rules_s11.eg6 은 참조로만 싣는다). 표본 라벨링 전까지 미등재.",
+    "factor_readiness.ready_min": "EG10 의 ready 하한. 미등재 유지 — 서버 실측 ready 35 / blocked 19(P41′). DESIGN §4-8 의 초기값 36 은 등재하면 첫 빌드가 폐기되고, 35 를 등재하면 하한이 실측과 같아져 개선 여지를 0 으로 못 박는다. blocked 19 중 field_unavailable 5 가 S08-2(외국인 보유 3컬럼)·키움 대차로 풀릴 수 있으므로 그 뒤 사람이 고른다.",
+    "price_daily.krx_kis_ratio_match_min": "EG8-P01. 독립 KIS 가격 stage 표가 없어 대조축 자체가 없다 — 미등재."
+  },
+  "adj_factor": {
+    "adj_return_jump_max": 1.0,
+    "adj_volume_ratio_band": 3.0,
+    "asof_for_jump_check": "2026-08-20",
+    "base_match_window_sessions": 5,
+    "base_price_tol_rel": 0.002,
+    "factor_product_tol_base": 0.01,
+    "price_match_lookback_sessions": 5,
+    "price_match_tol_abs": 0.05,
+    "price_match_tol_rel": 0.15,
+    "price_match_window_sessions": 40
+  },
+  "audit_opinion": {
+    "thresholds": {
+      "EG7": 0.0
+    }
+  },
+  "consensus_daily": {
+    "cover_ratio_drop_max": 0.7,
+    "cover_ratio_rise_max": 16.0,
+    "v3_wise_match_min": 0.65,
+    "v3_wise_value_tol_rel": 0.001
+  },
+  "corp": {
+    "financial_ksic_prefix": "64,65,66"
+  },
+  "corp_event": {
+    "effective_before_announce_max_days": 2555,
+    "krx_share_change_tol": 0.001,
+    "near_dup_window_days": 5,
+    "thresholds": {
+      "EG7": 0.06
+    }
+  },
+  "corp_ticker": {
+    "isin8_len": 8
+  },
+  "credit_daily": {
+    "thresholds": {
+      "EG7": 0.005
+    }
+  },
+  "dataset_profile": {},
+  "disclosure_version": {
+    "date_check_near_days": 7,
+    "date_exact_rate": 0.96457,
+    "deadline_days_annual": 90,
+    "deadline_days_interim": 45,
+    "link_rate_min": 0.99,
+    "reach_rate_min": 0.99,
+    "thresholds": {
+      "EG7": 0.0
+    }
+  },
+  "dividend_event": {
+    "cash_total_unit_krw": 1000000,
+    "thresholds": {
+      "EG7": 0.0
+    }
+  },
+  "factor_readiness": {},
+  "fin_std": {
+    "half_months": 6,
+    "nonmatch_rate_gap_max": 0.05,
+    "period_end_lag_max_days": 200,
+    "quarter_months": 3,
+    "rcept_lag_p99_days": 1826,
+    "three_quarter_months": 9,
+    "thresholds": {
+      "EG7": 0.03
+    }
+  },
+  "flow_daily": {
+    "investor_sum_tol_krw": 6000000,
+    "threshold_EG7": 0.05
+  },
+  "holder_daily": {
+    "pct_max": 100,
+    "thresholds": {
+      "EG7": 0.0
+    }
+  },
+  "measured_at": "2026-09-05",
+  "opinion_broker_daily": {},
+  "opinion_daily": {
+    "src_overlap_agree_min": 0.99
+  },
+  "ownership_snapshot": {
+    "agg_rate_tol_pct": 0.5,
+    "pct_max": 100,
+    "pct_min": 0,
+    "thresholds": {
+      "EG7": 0.001
+    }
+  },
+  "security": {
+    "backfill_end": "2026-08-20",
+    "delist_sample_n": 20,
+    "delist_sample_seed": 20260905
+  },
+  "security_span": {
+    "respan_count": 2
+  },
+  "shares_outstanding": {
+    "thresholds": {
+      "EG7": 0.0
+    }
+  },
+  "short_daily": {
+    "thresholds": {
+      "EG7": 0.05
+    }
+  },
+  "trading_calendar": {
+    "asof_sample_dates": [
+      "2010-01-04",
+      "2015-03-16",
+      "2018-05-04",
+      "2024-03-13",
+      "2026-08-20"
+    ],
+    "asof_sample_tickers": [
+      "000030",
+      "000070",
+      "0001A0",
+      "000660",
+      "003540",
+      "003545",
+      "003547",
+      "005930",
+      "005935",
+      "035720",
+      "036220",
+      "051910",
+      "068270",
+      "069500",
+      "101970",
+      "161890",
+      "207940",
+      "247540",
+      "900050",
+      "900060"
+    ],
+    "backfill_end": "2026-08-20",
+    "calendar_start": "2010-01-04"
+  },
+  "treasury_stock": {
+    "thresholds": {
+      "EG7": 0.0
+    }
+  },
+  "universe_daily": {
+    "admin_signal_window_sessions": 5,
+    "admin_window_td": 365,
+    "adv_window_td": 20,
+    "contract_probe_dates": [
+      "2010-01-04",
+      "2015-03-16",
+      "2016-05-04",
+      "2018-05-04",
+      "2024-03-12",
+      "2024-03-13",
+      "2026-08-20"
+    ],
+    "corp_action_lookahead_sessions": 45,
+    "corp_action_lookback_sessions": 5,
+    "no_trade_run_k": 5
+  },
+  "universe_policy": {
+    "liquid_top_pct": 0.5,
+    "version": "s03c-v4"
+  }
+}

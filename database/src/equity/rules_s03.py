@@ -64,7 +64,7 @@ import duckdb
 from stage.gates import GateResult, GateStatus
 
 from .gates import EquityGateContext, require_const
-from .model import AVAILABLE_NONE, BASIS_VOCAB, EquityTable, register
+from .model import AVAILABLE_NONE, BASIS_VOCAB, EquityTable, FieldProfile, register
 from .rules_s01 import SEC_TYPE_VOCAB, TICKER_LEN
 
 SQL_DIR = Path(__file__).parent / "sql"
@@ -476,6 +476,58 @@ def eg3_universe(ctx: EquityGateContext) -> GateResult:
 
 eg3_universe.gate_name = "EG3_universe"         # type: ignore[attr-defined]
 
+# ── S19 필드 선언 (DESIGN §4-7 EQD-07 — `universe_daily·core`·`mktcap,adv20`) ──
+# 전부 **1 세션** 랙이다: 값 원천이 `stg_listing_daily`·`stg_master_daily`·`stg_disclosure`
+# (stage `lag_known=false` = 공표 시점 미상, STAGE_HANDOFF §2)이고 관리종목 지정·정지 공시는
+# 장중·장후 어느 쪽이든 날 수 있어 당일 지식으로 못 쓴다. 시총·adv20 은 `price_daily` 파생이라
+# 값 자체는 종가 축이지만, 같은 격자 행에 실린 상태 컬럼과 랙을 갈라 두면 소비자가 한 행을 두 랙으로
+# 읽어야 해서 격자 축 랙(1)으로 통일한다 — 종가 축이 필요하면 `price.market_cap` 을 쓴다.
+_UAXIS: tuple[str, str] = ("ticker", "date")
+
+FIELDS_UNIVERSE: tuple[FieldProfile, ...] = (
+    FieldProfile(
+        field_id="universe.status", columns=("status",), label="종목 상태(상장·정지)", unit="",
+        value_type="category", frequency="session", recommended_lag_sessions=1,
+        recommended_lag_days=1, point_in_time=True, requires_confirmation=False,
+        disclosure_basis="KRX 일별 마스터·정지/관리 공시 — 게시 시각 미측정",
+        evidence="universe_daily.status ∈ {listed, suspended}. 정지 판정은 halt_state ∨ "
+                 "corp_action_window ∨ (illiquid ∧ no_trade_run ≥ k)(DESIGN §4-1 S03C).",
+        coverage_axis="grid_session", scope="internal", axis_columns=_UAXIS),
+    FieldProfile(
+        field_id="universe.admin_state", columns=("admin_state",), label="관리종목 여부",
+        unit="", value_type="category", frequency="session", recommended_lag_sessions=1,
+        recommended_lag_days=1, point_in_time=True, requires_confirmation=True,
+        disclosure_basis="KOSDAQ 소속부 일별 스냅샷 / KOSPI 는 지정 공시 창(derived)",
+        evidence="시장 비대칭이 남아 있다 — KOSPI 해제 공시가 3건뿐이라 상태 종료를 못 잰다"
+                 "(GAP-06). basis 는 admin_state_basis 컬럼이 행마다 남긴다.",
+        coverage_axis="grid_session", scope="internal", axis_columns=_UAXIS),
+    FieldProfile(
+        field_id="universe.delist_signal", columns=("signal_delist",), label="상장폐지 신호",
+        unit="", value_type="category", frequency="session", recommended_lag_sessions=1,
+        recommended_lag_days=1, point_in_time=True, requires_confirmation=False,
+        disclosure_basis="거래소·DART 공시 접수일(stg_disclosure.rcept_dt)",
+        evidence="universe_daily.signal_delist — FACTORS 정본 E07(상폐 위험)의 재료. 같은 축의 "
+                 "signal_admin·signal_liquidation·liquidation_window 는 같은 행에 있다.",
+        coverage_axis="grid_session", scope="internal", axis_columns=_UAXIS),
+    FieldProfile(
+        field_id="universe.mktcap", columns=("mktcap_krw",), label="시가총액(격자 축)",
+        unit="KRW", value_type="amount", frequency="session", recommended_lag_sessions=1,
+        recommended_lag_days=1, point_in_time=True, requires_confirmation=False,
+        disclosure_basis="정규장 종가 확정 + KRX 상장주식수 게시",
+        evidence="같은 날 price_daily.mktcap_krw 를 격자에 실은 값(EG3_universe 재계산 술어). "
+                 "가격 행 축이 필요하면 price.market_cap 을 쓴다.",
+        coverage_axis="grid_session", scope="internal", axis_columns=_UAXIS),
+    FieldProfile(
+        field_id="universe.adv20", columns=("adv20_krw",), label="20세션 평균 거래대금",
+        unit="KRW", value_type="amount", frequency="session", recommended_lag_sessions=1,
+        recommended_lag_days=1, point_in_time=True, requires_confirmation=False,
+        disclosure_basis="정규장 마감 집계 20세션 이동평균",
+        evidence="창 미달 구간은 NULL(0 으로 채우지 않는다). 같은 날 순위는 adv20_rank_pct"
+                 "(cume_dist)이고 universe_policy 의 liquid 임계가 그 축을 쓴다.",
+        coverage_axis="grid_session", scope="internal", axis_columns=_UAXIS),
+)
+
+
 UNIVERSE_DAILY = register(EquityTable(
     name="universe_daily",
     grain=("date", "ticker"),
@@ -527,6 +579,7 @@ UNIVERSE_DAILY = register(EquityTable(
             "corp_action_lookback_sessions", "corp_action_lookahead_sessions",
             "admin_signal_window_sessions"),
     extra_gates=(eg3_universe,),
+    field_profiles=FIELDS_UNIVERSE,
 ))
 
 

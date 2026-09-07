@@ -31,7 +31,7 @@ from pathlib import Path
 from stage.gates import GateResult, GateStatus
 
 from .gates import EquityGateContext, SkipGate, require_const
-from .model import EquityTable, register
+from .model import EquityTable, FieldProfile, register
 
 SQL_DIR = Path(__file__).parent / "sql"
 SQL_PATH = SQL_DIR / "disclosure_version.sql"
@@ -353,6 +353,25 @@ def eg8_disclosure_version(ctx: EquityGateContext) -> GateResult:
 eg8_disclosure_version.gate_name = "EG8_disclosure_version"    # type: ignore[attr-defined]
 
 
+# ── S19 필드 선언 (DESIGN §4-7) ──────────────────────────────────────────────
+# `delay_days` 는 FACTORS §7 의 파생 팩터 "공시 지연" 재료다(구 GAP-05 "산출이 26테이블에 없다" 를
+# 4A 가 닫았다). 레지스트리 42 필드에 대응이 없어 equity 내부 스코프이고, 축이 (rcept_no) 라
+# 종목 축으로 쓰려면 소비자가 `corp_ticker` 로 전개한다. 랙 1 세션 — 원천 `stg_disclosure`·
+# `stg_doc_*` 가 전부 stage `lag_known=false` 이고 접수 시각(장중·장후)을 모른다.
+FIELDS_DISCLOSURE: tuple[FieldProfile, ...] = (
+    FieldProfile(
+        field_id="event.disclosure_delay_days", columns=("delay_days",),
+        label="정기보고서 법정기한 대비 지연일수", unit="일", value_type="count",
+        frequency="report", recommended_lag_sessions=1, recommended_lag_days=1,
+        point_in_time=True, requires_confirmation=True,
+        disclosure_basis="정기보고서 접수일(rcept_dt) — 지연은 접수 시점에 확정된다",
+        evidence="disclosure_version.delay_days = rcept_dt − legal_deadline(사업 90일·반기/분기 "
+                 "45일). 사후 확정되는 상폐 라벨보다 먼저 뜨는 신호(FACTORS §7). 음수(기한 전 "
+                 "제출)가 정상값이라 소비자가 부호 규약을 정해야 한다.",
+        coverage_axis="table_rows", scope="internal"),
+)
+
+
 DISCLOSURE_VERSION = register(EquityTable(
     name="disclosure_version",
     grain=("rcept_no",),
@@ -391,6 +410,7 @@ DISCLOSURE_VERSION = register(EquityTable(
     consts=("deadline_days_annual", "deadline_days_interim",
             "date_check_near_days"),
     extra_gates=(eg3_disclosure_version, eg6_disclosure_version, eg8_disclosure_version),
+    field_profiles=FIELDS_DISCLOSURE,
 ))
 
 TABLES: tuple[EquityTable, ...] = (DISCLOSURE_VERSION,)

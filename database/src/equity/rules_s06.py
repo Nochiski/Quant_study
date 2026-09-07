@@ -638,6 +638,13 @@ eg8_adj_jump.gate_name = "EG8"                  # type: ignore[attr-defined]
 
 # ── 선언 ─────────────────────────────────────────────────────────────────────
 
+# ── S19 필드 선언 ────────────────────────────────────────────────────────────
+# **없다.** 조정가 `price.adj_close` 의 선언은 S23 `price_adj_daily` 로 옮겼다(2026-09-06) —
+# 조정가가 뷰가 아니라 표의 컬럼이 되었으므로 소유 테이블은 그 표이고, `dataset_profile` 의
+# grain 이 field_id 라 두 표가 같은 field_id 를 선언하면 키가 중복된다. `adj_factor` 는 계수
+# 표이고 소비자에게 나가는 필드가 없다(커널 어댑터가 `CorporateActionRecord` 로 읽는 축은
+# field_id 가 아니다).
+
 ADJ_FACTOR = register(EquityTable(
     name="adj_factor",
     grain=("ticker", "effective_date", "event_id"),
@@ -645,7 +652,8 @@ ADJ_FACTOR = register(EquityTable(
              "corp_code": "VARCHAR", "event_type": "VARCHAR", "announce_date": "DATE",
              "apply_date": "DATE", "apply_basis": "VARCHAR",
              "price_factor": "DOUBLE", "share_factor": "DOUBLE", "factor_source": "VARCHAR",
-             "factor_ok": "BOOLEAN", "available_date": "DATE", "available_basis": "VARCHAR"},
+             "factor_ok": "BOOLEAN", "no_bar_after_apply": "BOOLEAN",
+             "available_date": "DATE", "available_basis": "VARCHAR"},
     inputs=("corp_event", "price_daily", "trading_calendar", "stg_event_cr", "security",
             "security_span"),
     partition_class="date_axis",

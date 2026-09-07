@@ -35,7 +35,7 @@
 | `no_fixtures` | 픽스처 파일 부재(EG4 는 아래 예외 참조) |
 | `no_cross_source` | 교차 축이 원리적으로 없다(ETF 의 KIS 수정종가 등) |
 | `no_multi_version` | 자연키당 판본이 1개뿐인 테이블(EG6) |
-| `declaration_table` | 행수 등식이 정의되지 않는 선언표(`dataset_profile`·`universe_policy`) |
+| `declaration_table` | 행수 등식이 정의되지 않는 선언표(`dataset_profile`·`factor_readiness`·`universe_policy`) |
 | `not_grid` | 격자 테이블이 아니다(EG9) |
 | `no_coverage` | 데이터 구간이 아직 없어 실행 불가(EG-C ⑥ 의 G05 등) |
 | `not_built` | 의존 테이블 미착수 |
@@ -201,7 +201,7 @@ WHERE (t.partition_class = 'receipt_axis'
 ### EG1 — 격자 등식
 
 - **분류** 폐기형
-- **적용** 24 테이블 (`dataset_profile`·`universe_policy` 는 `skip(declaration_table)`)
+- **적용** 25 테이블 (선언표 3 — `dataset_profile`·`factor_readiness`·`universe_policy` 는 `skip(declaration_table)`)
 - **잡는 위험** §0-3 「생존편향」(행 소실) · 「레짐 편향」(격자 결손)
 - **첫 빌드** 실행
 - **실패 시** 폐기. `_failed` 에 좌·우변과 차이, 차집합 키 표본 200행
@@ -232,10 +232,11 @@ count(equity_table) = <선언 우변>  −  n_dedup  −  Σ n_reject_by_reason
 | EG2-P01 | `available_date` NOT NULL ∨ `available_basis='unknown'` | `n = 0` |
 | EG2-P02 | `available_date ≥ 내용일` (테이블별 내용일 축 선언) | `n = 0` |
 | EG2-P03 | `available_basis` 어휘 폐쇄 | `n = 0` |
-| EG2-P04 | `lag_known=false` 인 stage 원천 → `dataset_profile` 행 ∧ `recommended_lag_days ≥ 1` | `n = 0` |
+| EG2-P04 | `lag_known=false` 인 stage 원천 → `dataset_profile` 행 ∧ **`recommended_lag_sessions ≥ 1`** | `n = 0` |
 | EG2-P05 | 파생 컬럼 `available` = 구성 행 `available` 의 max | `n = 0` |
 | EG2-P06 | `basis='default'` 인 profile 행에 `evidence` 필수 | `n = 0` |
 | EG2-P07 | `coverage_from` 전수 (profile 전 행 NOT NULL) | `n = 0` |
+| EG2-P08 | (S19 2차 신설) `estimated_coverage_pct` 가 정수 분자·분모의 순수 함수 — `0 ≤ n_observed ≤ n_denominator` ∧ `pct = round(100·n_observed/n_denominator, 6)` | `n = 0` |
 
 ```sql
 -- EG2-P01
@@ -263,7 +264,11 @@ WHERE EXISTS (SELECT 1 FROM _reg_input i WHERE i.stg_table = s.stg_table)   -- �
   AND NOT EXISTS (
     SELECT 1 FROM dataset_profile p
     WHERE list_contains(p.source_stage_tables, s.stg_table)
-      AND p.recommended_lag_days >= 1);
+      AND p.recommended_lag_sessions >= 1);
+--   랙 정본은 **세션**이다(FIELD_MAP §1·DESIGN §4-7) — 초안의 `_days` 는 §9 S19 에서 정정.
+--   `_stg_meta` 는 러너가 만드는 뷰지만 equity 빌드 세션에는 없다: 구현(`rules_s19`)은 고정한
+--   equity 파티션의 `_meta.lag_known_inputs`(build.py 가 입력마다 stage lag_known 을 복사한 맵)를
+--   합집합으로 읽어 같은 모집단을 만든다.
 
 -- EG2-P05 : 파생 컬럼 동반 available. `<col>_available_date` 규약 (§5-C4 참조)
 SELECT count(*) AS n FROM fin_std f
@@ -275,9 +280,12 @@ WHERE f.derived_n_rows IS NOT NULL
                            f.period_end - INTERVAL 6 MONTH, f.period_end - INTERVAL 9 MONTH));
 
 -- EG2-P06 / EG2-P07
-SELECT count(*) FILTER (WHERE basis = 'default' AND coalesce(trim(evidence), '') = '')
+SELECT count(*) FILTER (WHERE available_date_basis LIKE '%default%'
+                           AND coalesce(trim(evidence), '') = '')
      + count(*) FILTER (WHERE coverage_from IS NULL) AS n
 FROM dataset_profile;
+--   컬럼명은 `available_date_basis` 다(초안의 `basis` 는 §9 S19 정정). 한 필드가 두 basis 를
+--   섞어 볼 수 있어(`price.adj_close` = default|derived) 동등비교가 아니라 포함 검사다.
 ```
 
 ---
@@ -847,7 +855,7 @@ WHERE g.${VALUE_COL} = 0
 | `consensus_daily.cover_ratio_drop_max`·`cover_ratio_rise_max` | EG9-P05 | 5 | 급락·급증 |
 | `consensus_daily.obs_month_bias_min` | EG-C ⑨ | 5 | 편의 하한 |
 | `<factor>.hand_calc_tol` | EG-C ⑥ | 7 | 손계산 허용오차 |
-| `<table>.material_coverage_min` | EG10 (§6) | 6 | 팩터 재료 커버율 |
+| `factor_readiness.ready_min` | EG10 | 6 | ready 팩터 수 하한. **미등재**(사람 승인 대기) — 초안의 `<table>.material_coverage_min` 은 필드 단위 커버율 하한이었으나 §9 S19·S20 에서 **팩터 단위 판정**으로 바뀌었다: 커버율 0 은 `dataset_profile` 이 그대로 싣고 EG10 이 `blocked(no_observations)` 로 옮긴다 |
 | `security.pre_delist_price_days`·`pre_delist_price_min` | EG15 (§6) | 1 | 폐지 전 가격 존재 |
 | `security_span.respan_verified_n` | EG16 (§6) | 1 | 검증된 재상장 수 |
 
@@ -886,9 +894,11 @@ WHERE g.${VALUE_COL} = 0
 | 24 | `consensus_daily` | 5 | ● | ●(§3-⑲) | ●(P01–P03) · P04 skip(profile 없음) | ●(P01,P07,P13) | ●(FX-5-001…006) | ●(a) · c 는 §9 S17(뷰가 `ASOF_VIEWS` 밖) | ●(P01,P02,P03) | ●(P07) | ●(P07) | ●(P05) · P06 은 §9 S17 대용 | ●⑥⑨ |
 | 25 | `opinion_daily` | 5 | ● | ●(§3-⑳) | ●(P01–P04) | ●(P01,P07) | ●(FX-5-007) | ●(a) | ●(P01,P03) | ● | skip(no_baseline) | ●(P06) | — |
 | 26 | `opinion_broker_daily` | 5 | ● | ●(§3-㉑) | ●(P01–P04) | ●(P01,P07) | ●(FX-5-008) | ●(a) | skip(no_multi_version) | ● | — | ●(P06) | — |
-| 27 | `dataset_profile` | 6 | ● | skip(declaration_table) | ●(P04,P06,P07) | ●(P01) | ●(FX-6-001,002) | ●(a) | skip(no_multi_version) | ● | — | ●(P06 기록형) | ●⑥⑧ |
+| 27 | `dataset_profile` | 6 | ● | skip(declaration_table) | skip(dimension_table) → `EG2_dataset_profile`(P04,P06,P07,P08 + 어휘·범위) | ●(P01) | ●(FX-6-001…009,016…018) | ●(a) | skip(no_multi_version) | ● | — | ●(P06 기록형, 시총 분위) | ●⑥⑧ |
+| 28 | `factor_readiness` | 6 | ● | skip(declaration_table) | skip(dimension_table) | ●(P01) | ●(FX-6-010,011,013,015,019) | ●(a) | skip(no_multi_version) | ● | — | — | — · 판정은 **EG10**(§6) |
+| 29 | `price_adj_daily` | 2 | ● | ●(§3-㉓ 항등식) | ●(P01–P04) | ●(P01) + `EG3_price_adj_daily` | ●(FX-2-011…017) | ●(a) | skip(no_multi_version) | ●(격리 사유 없음 — 항상 0) | — | skip(not_grid) | — · `price.adj_close` 는 §7 소비자 계약 |
 
-**뷰 7종**(`v_universe`·`v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_fin_latest`·`v_consensus`·`v_firm_mktcap`)은 테이블이 아니므로 EG0~EG9 매트릭스에 행이 없고, **EG5c·EG-C·EG11(§6)** 이 담당한다. 이것이 현재 명세의 가장 큰 공백이다(§5-A6). 단 EG11·EG5c 의 고정 표본 규약은 키가 (as_of, ticker, **date**)라 일별 date 축이 있는 뷰만 받는다(`catalog.ASOF_VIEWS`) — `v_consensus` 는 그래서 밖이고 결정성은 S17 e2e 테스트가 대신 본다(§9 S17).
+**뷰 7종**(`v_universe`·`v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_fin_latest`·`v_consensus`·`v_firm_mktcap`; 전방 조정 2종 `v_adj_price_fwd`·`v_adj_volume_fwd` 는 S23 부터 표 `price_adj_daily`(29행)와 **매 빌드 대조**되므로 뷰 공백이 아니다)은 테이블이 아니므로 EG0~EG9 매트릭스에 행이 없고, **EG5c·EG-C·EG11(§6)** 이 담당한다. 이것이 현재 명세의 가장 큰 공백이다(§5-A6). 단 EG11·EG5c 의 고정 표본 규약은 키가 (as_of, ticker, **date**)라 일별 date 축이 있는 뷰만 받는다(`catalog.ASOF_VIEWS`) — `v_consensus` 는 그래서 밖이고 결정성은 S17 e2e 테스트가 대신 본다(§9 S17).
 
 ---
 
@@ -1183,10 +1193,25 @@ SELECT (SELECT count(*) FROM opinion_broker_daily)
      - ((SELECT count(*) FROM stg_analyst_broker) - eg1_tail('opinion_broker_daily')) AS delta;
 ```
 
-### ㉒ `dataset_profile` · `universe_policy`
+### ㉒ `dataset_profile` · `factor_readiness` · `universe_policy`
 ```sql
--- 행수 등식 없음 → skip(declaration_table). EG2-P04/P06/P07 이 커버 조건으로 대신한다
+-- 행수 등식 없음 → skip(declaration_table) (`EquityTable.declaration_table=True`).
+--   `dataset_profile`  : 행수 = 선언 필드 수(`rules_s19.owned_fields()`). 대신 EG2_dataset_profile
+--                        이 P04/P06/P07 + 어휘·범위를 보고, EG9 가 시총 분위 커버율을 기록한다.
+--   `factor_readiness` : 행수 = FACTORS.md 정본 54(`rules_s20.FACTORS`). 대신 EG10 이 전수·사유·
+--                        소유자·시작일 + **ready 재료 컬럼 실물 실재**를 본다.
+-- 둘 다 `_meta.n_src` 는 0 이다(EG1 이 안 도니 우변이 없다) — 행수는 gates[].metrics 가 남긴다.
 ```
+
+---
+
+### ㉓ `price_adj_daily`
+
+```
+count(price_adj_daily) = count(price_daily)
+```
+
+**항등식이다** — 조정은 가격 행 하나하나에 대한 순수 함수라 행이 늘거나 줄지 않고, 격리 사유가 없어 우변에서 뺄 것도 없다(`reject_reasons=()`, EG7 은 항상 0 으로 통과). 등식이 이렇게 약한 대신 값 축을 `EG3_price_adj_daily` 가 **독립 재계산**으로 전건 대조한다: 산출은 ASOF JOIN + 창 누적곱, 게이트는 범위 조인 + GROUP BY 집계로 같은 값을 만들어 값 7축(`adj_open`·`adj_high`·`adj_low`·`adj_close`·`adj_volume_shr`·`cum_price_factor`·`cum_share_factor`)을 비교하고, `n_factors_applied`·`n_unadjusted_events`·`available_date` 도 따로 재계산한다. `n_factors_applied` 은 **완전 일치**(`n_factor_count_mismatch`)와 **방향 있는 초과**(`n_cross_span_factor`) 둘로 센다 — 계수 값이 1 인 사건이 새거나 빠지면 값 축은 안 움직이고 이 수만 어긋난다.
 
 ---
 
@@ -1233,6 +1258,13 @@ SELECT (SELECT count(*) FROM opinion_broker_daily)
 | FX-2-008 | `corp_event` | 공시일 ≠ 효력일 이벤트 1 | `announce_date`, `effective_date`, `effective_basis` | stage:`stg_event_*` | `available_date = announce_date` |
 | FX-2-009 | `adj_factor` | KRX 관측만으로 만든 계수 1 | `available_date`, `available_basis` | hand | 효력일 + 1거래일 / `derived` |
 | FX-2-010 | `v_adj_volume` | (`005930`, 2018-05-03, asof=2018-06-01) | `adj_volume` | hand (원 거래량 × 50) | **곱셈 방향 검증** — 나눗셈이면 여기서만 잡힌다 |
+| FX-2-011 | `price_adj_daily` | (`005930`, 2018-05-03) | `adj_close` | hand (2,650,000 = 원주가) | **전방 조정의 앵커** — 계수는 05-04 부터 접힌다. base = as_of 축이면 53,000 이 된다 |
+| FX-2-012 | `price_adj_daily` | (`005930`, 2018-05-04) | `adj_close`, `cum_share_factor`, `n_factors_applied` | hand (51,900 × 50 = 2,595,000 · 50.0 · 1) | 분할일 앞뒤가 −2.08% 로 이어진다 |
+| FX-2-013 | `price_adj_daily` | (`005930`, 2018-05-04) | `adj_volume_shr` | hand (39,565,391 × 0.02) | **거래량만 반대 축**(price_factor) — FX-2-010 의 전방 판 |
+| FX-2-014 | `price_adj_daily` | (`005930`, 2018-05-04) | `adj_open` | hand (53,000 × 50) | OHLC 는 close 와 같은 계수 |
+| FX-2-015 | `price_adj_daily` | (`247540`, 2022-06-24·06-27) | `adj_close` | hand (497,400 · 135,900 × 3.988773…) | KRX 기준가 축(S06-2) — 배정비율 4.0 이 아니다 |
+| FX-2-016 | `price_adj_daily` | (`247540`, 2022-06-27) | `n_unadjusted_events` | hand (1 = `247540:krx_base:2022-05-09`) | 조정 불완전 구간의 표식 |
+| FX-2-017 | `price_adj_daily` | (`101970`, 2025-03-28) | `cum_share_factor`, `n_unadjusted_events` | hand (1.0 · 0) | **재상장 구간의 누적 초기화** — 폐지 구간 사건 5건이 넘어오지 않는다 |
 
 ### 3단계
 
@@ -1289,10 +1321,39 @@ SELECT (SELECT count(*) FROM opinion_broker_daily)
 
 ### 6단계 (신설 — DESIGN §8 에 없다, §5-A5)
 
+**초안 재정의(2026-09-06, §9 S19 1차·2차)**: ① 초안의 키는 (테이블, 컬럼군)이었으나 DESIGN §4-7
+정본이 grain 을 `field_id` 로 정했고, FX-6-002 가 가리킨 `flow_daily` 는 아직 없는 테이블(S08)이다.
+② **서버 1차 빌드가 EG4 로 막혔다** — `financial.borrowings.coverage_from` 을 절단본 값(2023-11-14)
+으로 굳혔는데 서버는 2016-03-30 이었다. **골든 픽스처는 모집단 비의존 불변식만 담는다**: 창
+(`coverage_from`·`coverage_to`)·커버율·분위 배열·거기서 파생된 판정(`status`·`no_observations`
+사유·`first_usable_date`)은 모집단이 바뀌면 반드시 달라지므로 **절단본 전용 pytest 손계산**으로
+옮겼다. 남은 것은 선언(랙·PIT·basis·cell kinds·`source_stage_tables`·`column_scope`·`table_name`·
+`field_scope`·`requires_confirmation`)과 **선언 조인만으로 정해지는 판정**(요구 필드에 프로파일 행이
+없으면 언제나 `field_unavailable`)뿐이다. 파일은 `src/equity/fixtures/<table>.json`.
+
 | ID | 테이블 | 키 | 기대 컬럼 | 기대값 출처 | 검증 술어 요지 |
 |---|---|---|---|---|---|
-| FX-6-001 | `dataset_profile` | (`price_daily`, `ohlcv`) | `basis`, `recommended_lag_days` | doc:DESIGN §4-7 | `convention`, 0 |
-| FX-6-002 | `dataset_profile` | (`flow_daily`, `kiwoom`) | `recommended_lag_days`, `coverage_from` | doc:DESIGN §4-7 | ≥ 1 · 격자 하한 |
+| FX-6-001 | `dataset_profile` | `price.close` | `available_date_basis`, `recommended_lag_sessions` | decl:rules_s04 | `default`, `0`(가격류 당일 관측) |
+| FX-6-002 | `dataset_profile` | `consensus.forward_eps` | `recommended_lag_sessions` | decl:rules_s17 | `1` — v3 는 collected = base + 1영업일 |
+| FX-6-003 | `dataset_profile` | `price.market_cap` | `recommended_lag_sessions` | decl:rules_s04 | `1` — 주식수가 `stg_listing_daily`(lag_known=false) |
+| FX-6-004 | `dataset_profile` | `event.buyback_amount` | `column_scope` | decl:rules_s05 | `amount_krw`(커버율 0 은 pytest 손계산으로 이동) |
+| FX-6-005 | `dataset_profile` | `classification.sector` | `point_in_time` | decl:rules_s01 | `false`(GAP-07) |
+| FX-6-006 | `dataset_profile` | `price.adj_close` | `table_name`, `available_date_basis`, `field_scope` | decl:rules_s06 · rules_s19 | `v_adj_price_fwd`, `default\|derived`, `internal` |
+| FX-6-007 | `dataset_profile` | `event.insider_net_buy` | `column_scope` | decl:rules_s15 | `qty_change_shr`(롤링 2년 창은 pytest) |
+| FX-6-008 | `dataset_profile` | `financial.borrowings` | `table_name` | decl:rules_s12 | `fin_std`(GAP-02 계정 · 첫 관측일은 pytest) |
+| FX-6-009 | `dataset_profile` | `consensus.eps_dispersion` | `column_scope`, `coverage_basis` | decl:rules_s17 | `est_min,est_max`, `grid_security` |
+| FX-6-016 | `dataset_profile` | `financial.revenue` | `requires_confirmation` | decl:rules_s12 | `true`(GAP-01) |
+| FX-6-017 | `dataset_profile` | `price.volume` | `supported_cell_kinds`, `source_stage_tables` | decl:rules_s19 | 3종 · `price_daily` 전이 폐포 4(EG2-P04 대조축) |
+| FX-6-018 | `dataset_profile` | `universe.admin_state` | `requires_confirmation` | decl:rules_s03 | `true`(GAP-06) |
+| FX-6-010 | `factor_readiness` | `M01` | `required_columns`, `label` | decl:rules_s20 ⋈ profile | `[v_adj_price_fwd.adj_close]` — 결정 6 이 여기 박힌다 |
+| FX-6-011 | `factor_readiness` | `F01` | `blocked_reason`, `status` | decl:프로파일 행 부재 | `field_unavailable: flow.foreign_net_buy`, `blocked` |
+| FX-6-013 | `factor_readiness` | `R04` | `owner`, `blocked_reason` | decl:GAP-09 | `unavailable`, `field_unavailable: benchmark.close` |
+| FX-6-015 | `factor_readiness` | `V01` | `registry_factor_id`, `required_field_ids` | decl:backend/FACTORS.md #11 | `financial.book_to_market`, `[price.market_cap, financial.book_equity]` |
+| FX-6-019 | `factor_readiness` | `Q01` | `required_columns`, `owner` | decl:rules_s20 ⋈ profile | `[fin_std.net_income, fin_std.total_equity]`, `factor_layer` |
+
+절단본 손계산으로 옮긴 실측 단언: `event.insider_net_buy` 창 2024-08-26~2026-08-26 · GAP-02
+3계정 커버·첫 관측일 · `event.buyback_amount`·`event.capital_raise_amount` 커버 0 ·
+M01/V05 `first_usable_date` · E05/E06 `no_observations` · 커버율 ↔ 정수 분자·분모 항등.
 
 ### 부정 픽스처 (§7-5)
 
@@ -1390,24 +1451,44 @@ WORKFLOW §3 단계별 통과 조건과 DESIGN §8 표를 한 줄씩 심사했�
 
 목적(54팩터 재료 · 백테스트 PIT 패널 · 엔진 소비) 관점에서 현 EG0~EG9·EG-C 가 못 잡는 것.
 
-### EG10 — 팩터 재료 커버율
-- **분류** 폐기형(선언 컬럼 실재) + 기록형(커버율) → baseline 승인 후 폐기형
-- **적용** `_reg_factor_material` 이 가리키는 전 테이블. 6단계
-- **왜** FACTORS 54개 중 하나의 재료 컬럼이 조용히 NULL 로 채워져도 현재 어떤 게이트도 실패하지 않는다. V05·V07·Q07·Q08 은 계정 3개(`depreciation`·`borrowings`·`interest_expense`)의 실재 여부에 매달려 있다(DESIGN §6)
-- **상수** `<factor_id>.material_coverage_min`
+### EG10 — 팩터 준비도 (**구현 확정 2026-09-06, `rules_s20.eg10_factor_readiness`**)
+- **분류** 폐기형(전수·사유·소유자·시작일·재료 컬럼 실재) + 기록형(ready 비율·사유 분포)
+- **적용** `factor_readiness` 1테이블. 6단계
+- **왜** FACTORS 54개 중 하나의 재료가 조용히 비어도 현재 어떤 게이트도 실패하지 않는다. 이 층의
+  목적("54 재료가 충분한가")을 pass/fail 로 묻는 술어가 여기밖에 없다
+- **상수** `factor_readiness.ready_min` (미등재 → 그 술어만 빠지고 나머지 폐기형은 그대로 돈다)
+
+초안(`_reg_factor_material` 위의 필드 단위 커버율 + `<factor>.material_coverage_min`)에서
+**팩터 단위 판정**으로 바뀌었다(§9 「EG10 이름」의 결정을 구현이 마저 밀어붙인 것): 커버율은
+`dataset_profile.estimated_coverage_pct` 가 이미 재고 있으므로 EG10 은 그 숫자를 임계로 자르는 대신
+`factor_readiness` 가 그것을 `blocked(no_observations)` 로 옮겼는지를 본다. 필드별 임계를 따로 두면
+같은 사실에 문턱이 둘 생긴다.
 
 ```sql
--- (a) 선언 재료 컬럼 실재 — 폐기형
-SELECT count(*) AS n FROM _reg_factor_material m
-WHERE NOT EXISTS (SELECT 1 FROM duckdb_columns() c
-                  WHERE c.table_name = m."table" AND c.column_name = m."column");
--- (b) 커버율 — coverage_from 이후 유니버스 대비 NOT NULL 비율
-SELECT m.factor_id, m."table", m."column",
-       (SELECT count(*) FILTER (WHERE t.${COL} IS NOT NULL)::DOUBLE / nullif(count(*), 0)
-        FROM query_table(m."table") t
-        WHERE t.available_date >= m.coverage_from) AS cover
-FROM _reg_factor_material m;
--- 통과: cover >= bl(m.factor_id, 'material_coverage_min')
+-- (a) 폐기형 — ready 인데 재료 컬럼이 실물에 없다 (표가 거짓말을 하는 경우)
+--     `table_name` 이 매크로면(v_adj_price_fwd) 빌드 세션에 실체가 없다 → views.SIGNATURES 등재
+--     여부로 보고, 실체 판정은 카탈로그 단계 EG11 이 한다.
+SELECT count(*) AS n FROM factor_readiness f, unnest(f.required_columns) AS u(c)
+WHERE f.status = 'ready'
+  AND NOT EXISTS (SELECT 1 FROM duckdb_columns() d
+                  WHERE d.table_name = split_part(u.c, '.', 1)
+                    AND d.column_name = split_part(u.c, '.', 2));
+-- (b) 폐기형 — 전수·사유·소유자·시작일
+SELECT (SELECT count(*) FROM factor_readiness) - 54
+     + count(*) FILTER (WHERE status = 'blocked'
+                          AND coalesce(trim(blocked_reason), '') = '')
+     + count(*) FILTER (WHERE status = 'ready' AND first_usable_date IS NULL)
+     + count(*) FILTER (WHERE status = 'ready' AND blocked_reason IS NOT NULL)
+     + count(*) FILTER (WHERE owner IS NULL) AS n
+FROM factor_readiness;
+-- (c) 어휘 폐쇄 — 사유 문자열은 `<토큰>: <field_id 들>` 이라 앞부분만 본다
+SELECT count(*) AS n FROM factor_readiness
+WHERE blocked_reason IS NOT NULL
+  AND split_part(blocked_reason, ':', 1) NOT IN
+      ('field_unavailable', 'not_point_in_time', 'lag_unresolved', 'no_observations',
+       'partial_support');
+-- (d) 기록형 → baseline 승인 뒤 폐기형
+--     통과: count(*) FILTER (WHERE status = 'ready') >= bl('factor_readiness', 'ready_min')
 ```
 
 ### EG11 — 뷰 결과 결정성
@@ -1581,7 +1662,7 @@ WHERE p.close IS DISTINCT FROM coalesce(s.close_krw, e.close_krw)
 
 | ID | 이름 | 분류 | 단계 | 신규 상수 | 잡는 위험(§0-3) |
 |---|---|---|---|---|---|
-| EG10 | 팩터 재료 커버율 | 폐기형+기록형 | 6 | `<factor>.material_coverage_min` | (신규) 재료 무성 소실 |
+| EG10 | **팩터 준비도** | 폐기형+기록형 | 6 | `factor_readiness.ready_min`(미등재) | (신규) 재료 무성 소실 · 목적 판정 부재 |
 | EG11 | 뷰 결과 결정성 | 폐기형 | 7 | `<view>.determinism_asof` | 재현성 |
 | EG12 | 단위 접미사 전수 | 폐기형 | 전 | — | (신규) 단위 오적용 |
 | EG13 | `available_date` 미래값 | 폐기형 | 전 | — (기존 상수 재사용) | look-ahead(거울상: 조용한 결측) |
@@ -1624,7 +1705,9 @@ EG5  회귀·재현성 (a·b)
  ↓
 [테이블 커밋]
  ↓
-(7단계 전역) EG10 재료 커버율 · EG11 뷰 결정성 · EG19 as-of 단조성 · EG5c · EG-C ①~⑩
+(6단계) EG2_dataset_profile · EG9 분위 커버 · **EG10 팩터 준비도**
+ ↓
+(7단계 전역) EG11 뷰 결정성 · EG19 as-of 단조성 · EG5c · EG-C ①~⑩
    (①②③④⑤⑩ 은 S07 부터 2단계 직후 `equity contract` 로 선행 실행 — §9 S07)
 ```
 
@@ -1899,6 +1982,47 @@ workspace/dongmin/src/equity/
 | 기록형 | `apply_offset_sessions_max` | + `apply_offset_sessions_max_individual`(자기 창 기준, ≤ window 여야 한다) · `apply_offset_sessions_max_combined`(성분 창 기준). 기존 max 는 combined 포함 실측 그대로 | 지시 |
 | 합성 테스트 | — | 명목 세션 20(감자)·50(액면병합), 세션 70 에 ×4 한 번 → 둘 다 combined @70(앞 멤버 오프셋 50), EG3 pass·`n_apply_outside_window` 0·max 50/개별 0/성분 50 · 점프 95(성분 창 [15, 90] 밖) → 성분 전체 no_price_match · 성분 행을 `price_matched` 로 위장 → EG3 FAIL(창 밖 1 + 같은 날 개별 1) | `test_합성_명목일이_떨어진_성분_*` |
 | 절단본 | combined 0 | 변화 없음(ok 3 nominal · EG8 3차 수치 동일) | DESIGN §10 P23 |
+**S19 `dataset_profile` 구현 정정 (2026-09-06, `rules_s19.py`·`sql/dataset_profile.sql`, 규칙 판본 e1.3.1 → e1.4.0)**
+
+| 항목 | 초안 | 정정 | 근거 |
+|---|---|---|---|
+| EG2-P04 랙 축 | `recommended_lag_days ≥ 1` | **`recommended_lag_sessions ≥ 1`** — 랙 정본은 세션이다(FIELD_MAP §1 「랙 단위」·DESIGN §4-7 본문도 세션으로 적었다). 일 축은 병기만 한다 | DESIGN §4-7 · `rules_s19.eg2_dataset_profile` |
+| EG2-P04 모집단 출처 | `_stg_meta`(러너가 만드는 `read_json('${EQ}/_pinned/*/v=*/**/_meta.json')`) | equity 빌드 세션에는 그 뷰가 없다. 고정한 **equity 파티션의 `_meta.lag_known_inputs`**(build.py 가 입력마다 stage `lag_known` 을 복사해 둔 맵)를 합집합으로 읽는다 — 같은 사실, 실재하는 통로 | `build.py:partitions[].lag_known_inputs` |
+| EG2-P06 컬럼명 | `basis = 'default'` | **`available_date_basis LIKE '%default%'`** — DESIGN §4-7 정본 컬럼명이 `available_date_basis` 이고, 뷰 필드는 두 basis 를 합쳐 싣는다(`price.adj_close` = `default\|derived`)라 동등비교가 성립하지 않는다 | DESIGN §4-7 · §5 |
+| EG2 프레임 적용 | 매트릭스 27행 `EG2 ●(P04,P06,P07)` | 프레임 `gates.eg2_pit` 는 `available_date`·`available_basis` 컬럼을 요구하는데 프로파일에는 없다(카탈로그라 행 자체에 공개시점이 없다) → `available_rule=AVAILABLE_NONE` 으로 `skip(dimension_table)`, P04/P06/P07 은 테이블 특화 `EG2_dataset_profile` 이 판정 | `gates.eg2_pit` |
+| `coverage_by_mktcap_quintile` 타입 | `DOUBLE[5]` | **`DOUBLE[]` + 게이트가 길이 5 검사** — 고정 크기 배열의 parquet 왕복을 이 프레임에서 검증한 적이 없어 리스트로 두고 폭을 술어로 지켰다 | `EG2_dataset_profile.n_quintile_wrong_width` |
+| 커버율 분모 | (미정의) | **`coverage_basis` 4종**. 특히 컨센서스·의견은 `grid_security`(격자의 종목 수) — 월 1회 관측을 일별 셀로 나누면 구조적으로 낮게 나온다(절단본 forward_eps 가 2.3% vs 33.3%). FIELD_MAP §3 의 "커버 종목 804/810" 이 이 축이다 | DESIGN §4-7 · `rules_s19.coverage_rows` |
+| 커버 0 인 필드 | (미정의) | **격리하지 않는다** — 창은 값 → 소유 테이블 → 캘린더 순으로 물러나고 `estimated_coverage_pct = 0` 으로 남는다. 격리하면 EG7 비율이 터지고(66행 중 1건 = 1.5% > 0.001) "필드가 없다" 와 "값이 없다" 가 구별되지 않는다 | `sql/dataset_profile.sql` |
+| FX-6-001·002 키 | (`price_daily`, `ohlcv`) · (`flow_daily`, `kiwoom`) | grain 이 `field_id` 라 키를 필드로 바꾸고, `flow_daily` 는 아직 없는 테이블(S08)이라 실재 필드로 옮겼다 — §4 6단계 표 재정의(FX-6-001~008) | §4 |
+| FX-6-001 기대 basis | `convention` | **`default`** — `price_daily.available_basis` 는 `default` 다(가격류는 공표 시각 미제공, DESIGN §4-2). `convention` 은 equity 가 신설한 어휘지만 이 테이블은 쓰지 않는다 | `rules_s04.PRICE_DAILY.available_basis` |
+| 절단본 한계 | — | stage 절단본 트리에 `_meta.json` 이 없어 `lag_known` 이 전부 미상이고 **EG2-P04 모집단이 빈다**(항진). 기록형 `lag_known_unmeasured_inputs`(24 테이블)로 그 사실을 남기고, 술어는 손으로 만든 `_meta` 하네스 2건으로 검증한다(`stg_fin` 커버 → PASS · `stg_flow_daily_kiwoom` 미커버 → FAIL). **서버 실측에서 모집단이 채워지는지 반드시 확인** | `tests/test_equity_s19_profile.py` |
+
+**S19 서버 1차 실패 2건 — 정정 (2026-09-06 2차, `rules_s19.py`·`sql/dataset_profile.sql`·픽스처)**
+
+| 항목 | 1차 | 정정 | 근거 |
+|---|---|---|---|
+| EG4 픽스처 축 | 절단본 실측값을 그대로 등재(`financial.borrowings.coverage_from` = 2023-11-14 · `event.insider_net_buy.coverage_from` · `event.buyback_amount.estimated_coverage_pct` · `M01`·`V05`·`E05` 의 시작일·사유) | **모집단 비의존 불변식만 남긴다.** 서버(법인 3,478)는 같은 필드의 첫 관측일이 2016-03-30 이라 EG4 가 폐기했다 — 창·커버율·분위와 거기서 파생된 판정은 모집단의 함수다. 옮긴 자리는 **절단본 전용 pytest 손계산**이고, 픽스처는 선언(랙·PIT·basis·cell kinds·`source_stage_tables`·`column_scope`)과 선언 조인만으로 정해지는 판정(`field_unavailable`)만 담는다 | §4 6단계 표 · `tests/test_equity_s19_profile.py` |
+| 분위 `ntile` 의 ORDER BY | `PARTITION BY date ORDER BY mktcap_krw` · `ORDER BY mktcap_krw` | **총순서**로 못박는다 — `… ORDER BY mktcap_krw, ticker`. 유일하지 않은 ORDER BY 는 동률 행의 분위를 SQL 이 정하지 않는다는 뜻이고, 답이 엔진의 행 순서(병렬 스캔·정렬·스필)에 맡겨진다. 서버 같은 입력 두 빌드가 `66:63db8b7d7a57d2b6` / `66:ede4412907a3b47f` 로 갈렸고(EG5a 는 EG4 실패로 `skip(upstream_failed)` 라 잡지 못했다), 최소 재현(동률 6/10 이 경계를 가로지르는 표를 행 순서만 바꿔 3회)에서 tie-break 없으면 커버 배열 2종·있으면 1종임을 확정했다 | `test_분위_경계의_동률은_총순서로만_결정된다` |
+| 분위 계산 횟수 | 필드마다(격자 창 정렬 22회) | **빌드당 1회** — `_grid_quintile`·`_grid_security_quintile` TEMP TABLE 을 굽고 창으로 자른다. 세션 축 ntile 은 `PARTITION BY date` 라 날짜를 잘라도 각 날의 분위가 변하지 않으므로 결과가 같다. 격자 셀 수·종목 수 분모도 창별로 캐시한다(서버 1차 63초의 주범) | `rules_s19.install_grid_quintiles` |
+| 커버율 표현 | `100.0 * count / count` 를 엔진이 계산한 DOUBLE | **정수 분자·분모(`n_observed`·`n_denominator`)를 산출에 싣고** 비율은 파이썬 나눗셈 + 6자리 반올림(`COVERAGE_PCT_DECIMALS`). 분위 배열도 정수 두 개를 받아 같은 함수로 만든다 — 엔진의 DECIMAL/DOUBLE 축약이 값 경로에서 사라지고, 소비자가 표만 보고 재계산할 수 있다. 항등은 `EG2_dataset_profile.n_pct_not_derivable` 이 SQL 로 다시 본다 | DESIGN §4-7 |
+| 재현성 회귀 검사 | 재빌드 1회(EG5a) | **같은 입력 5회 연속 빌드(threads=3) 해시 동일** 을 두 테이블 모두에 추가. 1회 비교로는 순서 의존이 우연히 같은 답을 낼 수 있다 | `test_같은_입력으로_다섯_번_지어도_해시가_같다` |
+| `factor_readiness` 결정성 | 미점검(입력 미커밋으로 서버 미실행) | 리스트 컬럼은 전부 `list_sort(list(DISTINCT …))`(6곳), `first_usable_date` 는 `max(coverage_from)` 라 집계 순서에 무관함을 테스트로 고정 | `test_리스트_컬럼은_정렬돼_있다` |
+
+**S20 `factor_readiness` 구현 정정 (2026-09-06, `rules_s20.py`·`sql/factor_readiness.sql`)**
+
+| 항목 | 초안 | 정정 | 근거 |
+|---|---|---|---|
+| EG10 판정 축 | 필드별 커버율 ≥ `<factor>.material_coverage_min`(`_reg_factor_material` 위) | **팩터 단위 판정** — 커버율은 `dataset_profile` 이 이미 재므로 EG10 은 그 0 이 `blocked(no_observations)` 로 옮겨졌는지를 본다. 필드별 임계를 따로 두면 같은 사실에 문턱이 둘 생긴다. baseline 키도 `factor_readiness.ready_min` 하나로 줄었다 | §6 EG10 · §1-12 |
+| `ready_min` 초기값 | 36 (DESIGN §4-8) | **미등재** — 36 은 제안서 §1-8 이 S08~S10 이 지어진 상태를 전제로 센 값이고, 지금은 F01~F09 아홉이 `field_unavailable` 이라 실측이 31 이다(31 + 7 = 38 ≥ 36 으로 화해). 36 을 넣으면 첫 빌드가 폐기되고 31 을 넣으면 격자가 붙어도 하한이 느슨하다 → 3단계 뒤 사람이 등재 | `baseline_seed_s20.json` |
+| `blocked_reason` 형식 | 토큰 | **`<토큰>: <걸린 field_id 들>`** — 표만 보고 원인을 짚을 수 있어야 인계 문서를 대신한다. 어휘 폐쇄는 `split_part(…, ':', 1)` 로 본다 | `sql/factor_readiness.sql` |
+| `first_usable_date` | ready 만 NOT NULL | 요구 필드 `coverage_from` 의 최댓값이되 **재료가 없거나(field_unavailable) 관측이 0 이면(no_observations) NULL**. `partial_support` 로 막힌 행은 재료가 실재하므로 날짜를 남긴다(조건이 풀리면 그날부터 쓸 수 있다) | `tests/test_equity_s20_readiness.py` |
+| 컬럼 | DESIGN §4-8 의 10 | **+ `label`** — 인계 문서의 "팩터 × 컬럼 × 시작일 표" 가 이 테이블인데 `V01` 만으로는 사람이 못 읽는다 | DESIGN §4-8 |
+| `owner` 의 뜻 | (미정의) | **막힌 것을 푸는 책임자**. ready 행은 계산이 남았으므로 `factor_layer`. 절단본 분포 equity 16 · factor_layer 37 · unavailable 1 | `rules_s20.FactorSpec` |
+| R04(시장 베타) | 제안서 §1-6 "즉시" | **blocked(field_unavailable) · owner `unavailable`** — `index_daily.close_idx` 는 실재하지만 `benchmark.close` 는 FIELD_MAP §2 가 미지원으로 판정한 축이다(GAP-09: 지수가 security 축이 아니다). 데이터가 아니라 계약이 없다 | FIELD_MAP §2 |
+| G04(EPS 성장률) | 제안서 §1-3 "즉시" | **blocked(partial_support)** — `fin_std.eps_basic` 이 주식분할 미조정 원장 값이라(FIELD_MAP §3, S12 실측) 시계열 비율이 분할 구간에서 가짜 점프를 낸다. 제안서는 S12 실측 전 판정이었다 | FIELD_MAP §3 |
+| E05·E06 | 제안서 §1-7 "즉시" | **blocked(no_observations)** — `corp_event` 가 MVP 4유형만 적재해 `treasury_buy`·`rights`·`cb_issue` 행이 0 이다(DESIGN §4-2). 원천(`stg_event_tsstk_aq` 1,951 등)은 실재하므로 S05 후속으로 풀린다. **EG10 이 잡으라고 만든 바로 그 경우** | DESIGN §10 P39 |
+| V05·V07·Q07·Q08 | 제안서 §1-1·§1-2 "조건부(GAP-02)" | **ready** — GAP-02 는 "3계정이 실재하는가" 였고 S12·S19 실측이 **실재한다**로 답했다(`borrowings` 17.5% · `depreciation`·`interest_expense` 15.0%). 대신 커버 시작이 늦어 `first_usable_date` 가 2023-11-14 다 — 조건이 판정에서 **시작일**로 옮겨간 것이다 | DESIGN §10 P38 |
+
 **S21 축소 정정 — 워크벤치 어댑터 · contract `ADAPTERS` · MVP-B 백테스트 (2026-09-05, 절단본 실측 → `backend/src/strategy_workbench/adapters/outbound/equity_duckdb/`)**
 
 | 항목 | 초안(WORKFLOW §3-5·§4 DoD) | 정정 | 근거 |
@@ -2056,3 +2180,143 @@ workspace/dongmin/src/equity/
 | `stg_wise_coverage` 사용처 | WORKFLOW §3-1 S18 입력 목록에만 등장 | **팩트 컬럼으로 내리지 않는다** — stage `write_mode='upsert'`·`available=AVAILABLE_NONE` 인 현재값 라벨이라 팩트 행에 실으면 EG6-P03 이 금지하는 `_current` 컬럼이 된다. `opinion_daily` 의 EG9 커버 대장 대조(`wise_coverage_status`·`n_wise_covered_without_row`)에만 쓴다. `stg_calls_wise` 는 격자 테이블 `fill_kind` 의 근거 축이라 S18 에서는 쓰지 않는다 | `src/stage/rules_wise.py` `STG_WISE_COVERAGE` |
 | baseline 상수 | — | S18 은 새 상수를 **등재하지 않는다**(`baseline_seed_s18.json` 이 이유와 로컬 실측을 기록). EG8 의 `src_overlap_agree_min` 만 사람 승인 대기이고, EG7 비율은 첫 빌드 코드 기본값 → 2회차에 `opinion_daily.thresholds.EG7`·`opinion_broker_daily.thresholds.EG7` 이관 | §1 EG7 · §1-12 등록부 |
 | 규칙 판본 | — | `model.RULES_VERSION` 을 올리지 않는다 — S18 은 **새 테이블 2개** 이고 기존 테이블의 산출을 바꾸지 않는다. 첫 빌드는 `skip(no_previous_build)`, 재빌드 EG5a pass(해시 `819:614dcf63f13f829d`·`249:9a0c62ae8a8931c7` 동일, DESIGN §10 P37) | DESIGN §2 규칙 판본 |
+
+**S08 — `flow_daily` 수급 격자 (2026-09-06, DESIGN §4-3 구현 → `rules_s08.py`·`sql/flow_daily.sql`·`fixtures/flow_daily.json`·`baseline_seed_s08.json`, 규칙 판본 e1.3.1 유지)**
+
+절단본 실측(DESIGN §10 P31): 36,972행 = universe_daily 41,066 − ETF 4,094 · 격리 1,732(pre_calendar 18 + off_grid 1,714) · measured 18,581(커버 50.26%) · src_omitted 6,109 · not_collected 12,282 · 재빌드 해시 동일.
+
+| 항목 | 초안 | 정정 | 근거 |
+|---|---|---|---|
+| §3-⑪ (a) 등식 | `count(T) − count(grid) = 0` (격리 항 없음) | 프레임 `gates.eg1_equation` 은 `expect = rhs − n_reject` 를 강제하므로 좌변 = `count(DISTINCT (date,ticker))`, 우변 = 격자 + **격자 밖 원장 행수**(둘 다 `universe_daily` 를 직접 다시 읽는다) → `expect = 격자`. 이 형태는 격자 밖 행이 격리되지 않고 산출로 **새는** 사고에는 눈이 먼다(격리가 준 만큼 좌변이 늘어 함께 움직인다). 그 축은 `EG3_flow_daily` 의 **`n_row_outside_grid`**(산출 → `universe_daily` 안티조인)와 **`n_grid_cell_missing`**(반대 방향) 두 폐기형이 각각 잡는다 — 부정 픽스처 `flow_grid_leak` 이 'EG1 pass · EG3 FAIL(1,714)' 을 고정한다. 우변에 `(SELECT count(*) FROM out_rej)` 를 넣으면 EG1 하나로 다 잡히지만 `python -m equity gate` 재판정 문맥에는 격리 뷰가 없어(`_cmd_gate` 가 `reject_view=None`) EG1 이 Binder 오류로 죽는다 | `rules_s08.FLOW_DAILY.eg1_rhs_sql` · `tests/test_equity_s08_flow.py::test_격자_밖_행이_새면_EG1이_잡는다`·`::test_gate_재판정은_격리_뷰_없이도_돈다` |
+| §3-⑪ (b) 원장 보존 | `reason IN ('pre_calendar','off_grid')` 로 `_reject_counts` 합산 | `_reject_counts` 는 **사유 축뿐이라 원천을 못 가른다** — 두 원천의 격리가 섞이면 한쪽이 새도 합이 맞을 수 있다. 격리 뷰(`out_rej`)의 `src` 로 갈라 원천별 등식을 세운다: `count(stg_x) = measured(src) + reject(src)`. 별도 게이트 **`EG1_ledger`**(폐기형, EG3 뒤 실행). 격리 뷰가 없는 재판정 문맥에서는 합계 등식(`Σ원장 = Σmeasured + n_reject`)으로 낮춰 세우고 `reject_split_by_src: false` 를 남긴다 | `rules_s08.eg1_ledger` |
+| §3-⑪ (c) 컬럼 계승 | `_reg_vocab` domain `kiwoom_investor_column` | 그 레지스트리 테이블이 없다 → **stage 선언에서 독립 산출**: `rules_kiwoom.STG_FLOW_DAILY_KIWOOM.columns` 중 `unit_scale == 1e6` 인 13개(`_flow_krw` 만 갖는다). 같은 튜플이 산출 컬럼 순서·`input_columns`·KIS 대응표 키의 정본이다 | `rules_s08.KIWOOM_INVESTOR_COLUMNS` |
+| §3-⑪ (d) 격리 건수 회귀 | `n = bl_int(T, 'reject_' || reason)` | **미등재** — 절단본 격리(1,732)는 15티커 중 재상장 2종이 만든 값이라 서버(3,478 중 2)와 축이 다르다. 지금 등재하면 서버 첫 빌드가 잘못된 기준으로 폐기된다. `EG1_ledger.n_reject_by_reason` 기록형으로 남기고 서버 실측 뒤 승격 | GATES §7-3 |
+| EG3-P06 `num_nulls` | `num_nulls(...) = 0` 으로 12컬럼 결측 행 제외 | duckdb 1.5.5 에 `num_nulls` 가 **없다**(Catalog Error). `c IS NOT NULL AND …` 12항으로 같은 술어를 쓴다. 제외 행수는 `n_investor_sum_excluded_null`(절단본 0) | `rules_s08.eg3_flow_daily` |
+| EG3-P06 허용오차 | `flow_daily.investor_sum_tol_krw` 등재 단계 3, 값 미정 | **6,000,000** 등재. 절단본 실측 최댓값은 4,000,000 이지만 값은 **반올림 상한의 유도값**이다 — 키움이 12주체를 각각 백만원 단위로 반올림하므로 합의 오차는 12 × 0.5백만 = ±6백만을 넘을 수 없다. 실측 최댓값을 굳히면 서버(7.6M 행)에서 정당한 반올림이 폐기형 게이트를 깨뜨린다. 단위 오적용·매핑 누락은 오차가 1e8 이상이라 이 값으로도 전부 걸린다 | `baseline_seed_s08.json` `_measured` · P31 |
+| EG7 임계 | 코드 기본값 0.001, 2회차부터 이관 | **첫 빌드부터 `flow_daily.threshold_EG7` = 0.05 등재.** 격자 테이블의 EG7 격리는 결함 행이 아니라 '원장이 격자보다 넓다' 는 사실(캘린더 하한 이전 + 폐지~재상장 티커 재사용)이라 절단본 비율이 0.0448 이다. 0.001 을 쓰면 첫 빌드가 반드시 폐기된다 | P31 · GATES §1 EG7 |
+| EG3-P13 어휘 폐쇄 | 템플릿(컬럼×domain 은 `_reg_column` 이 선언) | `_reg_column` 이 없으므로 `EG3_flow_daily` 가 직접 센다: `src ∉ {kiwoom, kis}`(NULL 은 술어 밖 — `not_collected` 셀은 원천이 없다) · `fill_kind['kind'] ∉ FILL_KINDS` · `fill_kind['evidence'] ∉ FILL_EVIDENCE` · `fill_kind IS NULL` | `model.FILL_KINDS`·`FILL_EVIDENCE` |
+| EG3 단위 방어 | 없음 | **추가(폐기형)** — measured 행을 원장에 **다시 조인**해 13컬럼(키움)·10컬럼+무대응 3 NULL(KIS) 전수 대조(`n_kiwoom_value_mismatch`·`n_kis_value_mismatch`). stage 가 이미 한 ×1e6 을 equity 가 또 하거나 주체를 뒤바꾸면 여기서만 잡힌다(부정 픽스처 `flow_unit_flip`·`flow_swap`). 양방향 정합 `n_measured_without_ledger`·`n_unmeasured_with_ledger`, 격자 재조회 `n_row_outside_grid` 도 폐기형 | `tests/test_equity_s08_flow.py` |
+| FX-3-001~007 | 7건 전부 EG4 골든 픽스처 | **EG4 는 스칼라 컬럼만** 받는다(`CAST(col AS VARCHAR)` 비교) — `fill_kind` 는 STRUCT 라 기대값이 duckdb 의 구조체 렌더링 문자열이 되어 판본에 종속된다. 그래서 fill_kind 픽스처(FX-3-001·003·004)와 KIS 셀 픽스처(FX-3-002·005·007)는 **EG4 에 넣지 않고** `tests/test_equity_s08_flow.py` 가 셀 단위로 검사한다(FX-3-006 12주체 합은 성격상 EG3-P06). EG4 에는 **절단본·서버 양쪽에서 같은 값**인 것만 넣는다 — `fixtures/flow_daily.json` 7건: FX-3-010a/b/c(005930 2018-05-04 외국인·개인·내외국인 = 원장 값) · FX-3-011(2010-01-04 캘린더 하한 안쪽) · FX-3-012(0001A0 문자 티커) · FX-3-013(036220 2020-01-02 폐지 구간 행 부재 = off_grid) · FX-3-014(036220 2015-01-05 미측정 셀 NULL — 0 채움 금지). 절단본 KIS 원장이 0행이라 FX-3-002/005/007 은 **S08-2 로 이월** | 절단본 한계(P31) · P26′ 의 '모집단 의존 픽스처 제거' 선례 |
+| EG8-P05(겹침 0) · EG9 | 매트릭스 12행에 ● | **S08 미구현.** EG8-P05 는 `EG3_flow_daily.n_src_overlap` 기록형(절단본 0)으로 대신하고, EG9 는 상수 5개(`coverage_probe_dates`·`coverage_min`·`evidence_rate_min`·`coverage_return_corr_max`·`corr_min_months`)를 **등재하지 않는다** — 절단본 커버율 50.26% 는 15티커 표본이라 서버(원장 7.6M / 격자 ≈ 9.2M)와 다른 축이고, 지금 굳히면 서버 첫 빌드가 잘못된 기준으로 폐기된다. `coverage_measured`·`evidence_rate`·`n_grid_cells_after_<src>_max` 를 기록형으로 내보내고 서버 실측 뒤 S08 후속에서 붙인다 | `baseline_seed_s08.json` `_seed` |
+| EG9-P04 SQL `stg_units_kis.date` | `u.ticker = g.ticker AND u.status='ok' AND u.date = g.date` | `stg_units_kis` 에 **`date` 컬럼이 없다** — 축은 `(dataset, ticker, window_from, window_to)` 다. 판정은 `dataset='flow' ∧ date BETWEEN window_from AND window_to`. 키움 샤드도 같은 규약(`src_api='ka10060' ∧ date BETWEEN req_start AND req_end`) | 절단본 DESCRIBE |
+| 외국인 3컬럼 | `flow_daily` 컬럼에 포함 | **S08-2 로 이월** — 원천이 `stg_foreign_daily`(ka10008)인데 절단본에 없어 검증축이 0이다. 선언만 하고 NULL 로 두면 FIELD_MAP `flow.foreign_ownership`·F08 이 '있는데 비어 있는' 컬럼을 본다. 선행 조건은 절단본에 `stg_foreign_daily` 를 잘라 넣는 것 | DESIGN §4-3 S08 확정 ① |
+| 절단본 `stg_flow_split_daily` | 입력으로 읽는다 | 절단본은 **0행 · 파티션 0개**(README 의 '0행 테이블은 스키마 보존용 빈 파티션 1개' 규약 누락)라 `read_parquet` 이 IOException 을 던져 입력으로 열 수조차 없다. 테스트가 stage 선언(`rules_kis.STG_FLOW_SPLIT_DAILY.columns[].decimal_type`)에서 **스키마만** 복원한 0행 파티션을 갖는 사본 루트를 만든다(`_repaired_stage_root`, 다른 테이블은 심볼릭 링크). 값은 지어내지 않는다 — KIS 대응표는 별도 손 하네스(합성 3행)로 검사 | `tests/test_equity_s08_flow.py` |
+**S09 — `short_daily` 공매도·대차 격자 구현 정정 (2026-09-06, DESIGN §4-3 → `rules_s09.py`·`sql/short_daily.sql`·`fixtures/short_daily.json`·`baseline_seed_s09.json`, 규칙 판본 상향 없음)**
+
+절단본 실측(DESIGN §10 P32): 격자 **36,972**(= `universe_daily` 41,066 − ETF 4,094) · 격리 **1,042**(전건 `pre_calendar`, 키움 ka10014 2008-06-23~2009-12-30) · 원장 보존 소스별 delta 0(키움 18,265 = 17,223 + 1,042 · KIS 공매도 3,891 · KIS 대차 1,959, dedup 0) · 겹침 셀 0 · 픽스처 25 · 재빌드 EG5a pass.
+
+| 항목 | 초안 | 정정 | 근거 |
+|---|---|---|---|
+| §2 매트릭스 13행 · grain | `flow_daily` 와 같이 `src` 를 PK 에 두는 결합 테이블로 읽음 | `short_daily` 는 grain **(date, ticker)** 이고 원천은 접미사 컬럼(`_kiwoom`·`_kis`)으로 나란히 산다(사용자 확정 09-06). ⑪ (a) 좌변은 `count(*)` — 「src 가 PK 에 들면 `count(DISTINCT (date,ticker))`」 단서는 이 테이블에 해당하지 않는다. `fill_kind` 도 원천마다 하나(`fill_kind_short_kiwoom`·`fill_kind_short_kis`·`fill_kind_loan_kis`) | DESIGN §4-3 구현 결과 ② · 절단본 겹침 0행 |
+| ⑪ (a) 우변 | `count(*) FROM grid` 와 좌변의 차 | 프레임 EG1 은 `lhs = rhs − n_reject` 한 꼴만 받는다 → 우변 = 격자 재계산 + **격자 밖 원장 셀 수**(3원천 UNION 의 distinct (ticker,date) 중 격자에 없는 것). 결과적으로 등식은 `count(out) = 격자` 로 닫히면서 「우리가 격리한 수 = 독립 재계산한 격자 밖 셀 수」까지 함께 검사한다 | `rules_s09.SHORT_DAILY.eg1_rhs_sql` |
+| ⑪ (b) 소스별 원장 보존 | `_reject_counts` 를 읽는 SQL 1개 | 프레임 EG1 이 등식 하나뿐이라 **테이블 특화 훅 `EG1_short_daily`** 로 뗀다(실행 순서상 EG3 뒤). 원천마다 `n_src − n_dedup − n_measured − n_offgrid = 0`, 그리고 `n_offgrid` 는 산출의 `_reject/` 가 아니라 stage ⋈ `universe_daily` 로 **독립 재계산**한다(§5-C 항진명제 금지). `n_dedup` 은 stage `key_unique=false` 인 KIS 두 테이블의 재수집 판본 접힘(= 원장 행수 − distinct (ticker,date))이며, 판본 선택은 PIT(`min(observed_date)`, 동률은 값 컬럼 전순서 — EG5a 재현성) | HANDOFF §2 · `rules_s09.eg1_short_daily` |
+| ⑪ (d) 사유별 정확 건수 | `n = bl_int('${T}', 'reject_' || reason)` | **S09 미등재** — 절단본 수치(1,042)를 등재하면 서버에서 틀린다. 서버 첫 빌드 뒤 오케스트레이터가 `short_daily.reject_pre_calendar`·`reject_off_grid` 를 등재한다. 그때까지 회귀 감시는 EG7 비율 + `EG1_short_daily` 의 `n_reject_<reason>_<src>` 기록형 | `baseline_seed_s09.json._seed` |
+| EG7-P06 임계 | 코드 기본값 0.001 | `pre_calendar` 는 「캘린더 하한 2010-01-04」 라는 **설계가 만드는 구조적 격리**라 0.001 로는 정상 빌드가 첫판부터 폐기된다(로컬 0.02741 · 서버 예상 58,211/1,040만 = 0.0056). `short_daily.thresholds.EG7` **0.05** 를 seed 에 제안값으로 등재(사람 승인 대기) | `baseline_seed_s09.json._measured` |
+| EG3_short_daily 폐기 범위 | 테이블 특화 불변식 일반 | **위반형은 어휘·격자뿐**(사용자 확정 09-06): `fill_kind.kind`·`evidence` 어휘 폐쇄(3원천) · `*_basis` 어휘 폐쇄 · ticker 폭(EG3-P07) · 산출 ⊆ 격자 ∧ 격자 ⊆ 산출(양방향). 대차 음수 잔고·원천 간 비율·단위 미측정 축은 **기록형** — stage 가 keep 한 원장 사실이거나 서버 실측 뒤 baseline 승격을 기다리는 측정치라, 지금 임계를 박으면 사실을 게이트가 지운다 | GATES §0-1 기록형 |
+| EG3_short_daily 기록형 | — | `unit_labels`(산출 컬럼 → stage 가 실제로 잰 단위) · `fill_kind_<src>` 분포(kind:evidence) · `n_lending_balance_negative`·`_krw_negative`·`lending_balance_min_shr` · `n_short_avg_price_kis_null_measured`(원장 '0' = ledger_zero) · `n_kis_acml_invalid` · `n_overlap_src_measured`·`corr_short_volume/value_kis_kiwoom`·`short_volume_ratio_quantiles`(p05/25/50/75/95) · `n_zero_without_log_evidence_<src>`(**EG9-P04 예비 측정**) · `n_measured_with_empty_evidence_<src>` · `n_grid_without_price_axis` · `n_kiwoom_shard_rows`/`_tickers` | `rules_s09.eg3_short_daily` |
+| §4-3 「KRX 가격 행 존재일」 | `fill_kind` 판정 사다리의 조건 | 격자가 이미 보장한다(격자 ⊆ `security_span` ⊆ 상장 존재일; 절단본 위반 0) → 술어에서 빼고 `universe_daily.no_trade_run IS NULL` 로 세어 `n_grid_without_price_axis` 로 기록. 합성 stage 가 1건을 만들어 지표가 움직이는지 확인한다 | DESIGN §4-3 구현 결과 ③ |
+| 로그 축 입력 | 「입력 = equity 2 + stage 3원천」 | 팩트 원천 3 + **로그 축 2**(`stg_shards_kiwoom`·`stg_units_kis`). 이 둘이 빠지면 `fill_kind` 가 `measured`/`not_collected` 두 값으로 무너지고 `evidence` 어휘(shard_done·unit_ok·shard_empty·unit_empty)가 죽어 FX-3-001·004 가 성립하지 않는다. 팬아웃 방어: 키움 샤드는 티커 단위로 접고(min req_start · max req_end · status 우선순위 max), KIS 유닛은 캘린더로 펼쳐 (dataset, ticker, date) 로 접는다 — 창이 겹치는 재수집이 격자를 불리지 못한다 | DESIGN §3 `fill_kind` · `sql/short_daily.sql` shard·unit_day |
+| EG9 (매트릭스 13행 ●P01–P04) | S09 범위 | **S09 미구현** — 상수 5종(`coverage_probe_dates`·`coverage_min`·`evidence_rate_min`·`coverage_return_corr_max`·`corr_min_months`)이 전부 서버 실측이라 첫 빌드는 어차피 `skip(no_baseline)` 이다. 상수가 없는 EG9-P04(미수집→0)만 `EG3_short_daily` 가 기록형 `n_zero_without_log_evidence_<src>` 로 미리 잰다(부정 픽스처로 16,173 까지 움직이는 것을 확인). 서버 baseline 등재와 함께 승격 | §1 EG9 · `baseline_seed_s09.json._seed` |
+| FX-3-009 대상 | `lending_balance_kiwoom_raw`(`stg_lending_daily.rmnd`) | 키움 대차 원장이 입력에 없어(DESIGN §4-3 구현 결과 ①) 같은 규약을 **키움 공매도 평균가**에 적용한다 — `shrts_avg_pric` 은 stage 가 단위를 못 잰 축이라 `short_avg_price_kiwoom_raw` + `short_avg_price_kiwoom_basis`('unknown', 값 없는 셀은 NULL)로 간다. 픽스처 `fx3_009_unit_unknown_raw_value`·`_basis` | STAGE_DESIGN §5 「단위를 모르면 접미사 금지」 |
+| FX-3-001·002·003·004 키 | 서버 사례(2020-06-30 · ka10014 empty 60건 · 샤드 미커버 1,070 등) | 절단본 키로 재지정: FX-3-001(src_omitted/shard_done) = (`036220`, 2010-01-04) · FX-3-002 계열(measured/unit_ok, 폐지 종목) = (`000030`, 2014-11-20) · FX-3-003(로그 없는 셀 → not_collected/none) = (`005930`, 2026-08-20)의 KIS 축과 (`005935`, 2010-01-04)의 키움 축 · **FX-3-004(shard_empty)는 절단본에 사례가 없어** 합성 stage 로 옮긴다(`test_샤드_empty와_유닛_empty는_empty_response다`) | `src/equity/fixtures/short_daily.json` · 절단본 샤드 전건 `done` |
+| 픽스처 비교축 | 스칼라 컬럼 | `fill_kind_*` 는 STRUCT 라 EG4 가 `CAST(col AS VARCHAR)` 로 비교한다 — 기대 문자열은 duckdb 표기 `{'kind': measured, 'evidence': shard_done}`. 값 셀의 짝(`…_value_null`)을 같이 두어 「미수집인데 0」 이 픽스처에서 폐기되게 한다(부정 픽스처 `short_zero_fill` 이 EG3 를 통과하고 EG4 에서 걸린다) | `tests/test_equity_s09_short.py` |
+| 싣지 않는 축 | — | KIS 누적 6컬럼(`acml_*`)·키움 `ovr_shrts_qty_shr` 는 **수집 창의 산물**이라 팩트 테이블 밖(절단본 실측: `ovr_shrts_qty_shr` 는 샤드 요청창 시작부터의 `shrts_qty_shr` 누적합, 005930 2008-06-23~ 전건 일치 → 원값에 새 정보 없음). 두 원천의 종가·전일대비·거래량은 `price_daily` 정본과 중복 | DESIGN §4-3 구현 결과 ④⑤ |
+| 부정 픽스처(§7-5) | — | 6건: 격자 행 제거 → EG1 delta −4,094 · 격리행을 채택으로 승격 → EG1 **통과**·EG1_short_daily delta −1,042(프레임 행수 등식이 못 보는 자리) · 격자 티커 치환 → EG1·(b) 통과·EG3_short_daily `n_grid_missing`=`n_grid_extra`=4,094 · evidence 어휘 파괴 → 36,972 · basis 어휘 파괴 → 36,972 · 미수집 0 채움 → EG3 통과·EG4 폐기. 합성 stage(3티커 × 6세션)가 절단본에 없는 축을 본다: `empty_response` 두 갈래 · 재수집 PIT 접힘 · `off_grid` 격리 · 겹침 상관 1.0·비율 분위수 1.1 · 다른 API 샤드/다른 dataset 유닛은 증거 아님 | `tests/test_equity_s09_short.py` 31건 |
+**S10 `credit_daily` 구현 정정 (2026-09-06, `rules_s10.py`·`sql/credit_daily.sql`)**
+
+| 항목 | 초안 | 정정 | 근거 |
+|---|---|---|---|
+| §3 ⑪ (a)(b) 배치 | 등식 둘 다 EG1 | 프레임 EG1 은 등식 **하나**만 받는다(`eg1_lhs_sql`/`eg1_rhs_sql`) → **(a) 는 프레임 EG1**(좌변 `count(out)`, 우변 `격자 + 격자 밖 원장 행`; 프레임이 `n_reject` 를 빼므로 격자 행수와 격리 건수가 한 등식에서 닫힌다), **(b) 원장 보존은 `EG1_credit_daily` 테이블 특화 훅**(GATES §7-1 순서상 EG3 뒤). 두 등식을 한 스칼라 등식에 합치면 `n_out` 초과와 `n_measured` 부족이 상쇄될 수 있어 나눴다. 부정 픽스처도 분리 — measured 1건을 not_collected 로 바꾸면 (a) 는 통과하고 (b) 만 폐기 | `rules_s10.eg1_credit_daily` · `test_measured를_미수집으로_적으면_EG1_credit_daily가_폐기한다` |
+| ⑪ 격자 술어 | `u.sec_type <> 'etf'` | **`u.sec_type IS DISTINCT FROM 'etf'`** — `<>` 는 `sec_type` NULL 종목을 조용히 격자에서 뺀다(§5-C6 이 EG7-P03 에서 지적한 "게이트가 만드는 생존편향" 과 같은 부류). 절단본·서버 모두 `universe_daily.sec_type` NULL 은 0 이라 값은 같고 규칙만 안전한 쪽으로 닫힌다. 술어 문자열은 `rules_s10.grid_predicate(alias)` 한 곳에서 나와 `.sql`·EG1 우변·EG3 재계산이 같은 정의를 쓴다(`test_격자_술어는_rules_선언과_SQL_리터럴이_같다`) | `sql/credit_daily.sql` `grid` CTE |
+| FX-3-001 "값 0" 의 적용 범위 | 3단계 격자 공통 규약처럼 읽힘 | **`credit_daily` 는 0 을 굽지 않는다**(DESIGN §9 결정 8). measured 셀만 값을 갖고 `src_omitted`·`empty_response`·`not_collected` 는 17축 전부 NULL. 0 채움은 원장 일괄 결측일에 시장 전체 잔고를 0 으로 굳힌다 — 절단본 2018-03-28(전 종목 credit 행 0, 앞뒤 거래일 정상)·2026-08-19·20(P16 백필 08-18 종료). 유닛 창은 '요청 구간' 이라 그 날짜가 응답에 들었는지 말해 주지 않는다. 0 의 뜻은 `fill_kind.kind` 가 나르고 엔진 `CellKind.SOURCE_OMITTED_ZERO` 가 소비 시점에 읽는다. FX-3-001 은 `short_daily` 키움 샤드 축의 사례로 그대로 두고, S09 착수 때 같은 축으로 재심사한다 | `EG3_credit_daily.ledger_gap_dates` · `test_원장_일괄_결측일은_0으로_채우지_않는다` |
+| FX-3-008 | "임의 1행 · 값·단위 접미사 보존" | 키 (`005930`, 2020-01-02) 로 고정: `whol_loan_rmnd_stcn_shr` 2,435,031 · `whol_loan_rmnd_amt` 11,467,248 · `whol_stln_rmnd_stcn_shr` 29,538 · `whol_loan_rmnd_rate_pct` 0.03 · `stlm_date` 2020-01-06(T+2). `fixtures/credit_daily.json` 20 케이스 = FX-3-008 계열 9 + fill_kind 3종 6 + 격자 경계 5(구간 첫날·재상장 첫날·ETF·폐지일·캘린더 하한 이전은 **행 부재**를 NULL 기대로 검사) | `src/equity/fixtures/credit_daily.json` |
+| `*_amt` 단위 | "단위 미상" 만 명시 | 원값 보존 + **`amt_basis` 상수 컬럼 `'unknown'`**(DESIGN §1 basis 어휘) 로 기계가 읽게 한다. `_krw` 접미사는 붙이지 않는다(FX-3-009 규약). 실측 근거는 기록형 `loan_amt_per_market_value` = 금액/(잔고주수 × 원주가) p50 **8.3e-05** — 원화라면 1 근처여야 한다 | `EG3_credit_daily` metrics |
+| EG3_credit_daily 술어 | "음수·단위·잔고 ≤ 상장주식수" | 폐기형 16: 어휘 3(`fill_kind.kind`·`.evidence` 밖 · NULL) + `n_amt_basis_mismatch` + `n_ticker_bad_width` + 격자 2(`n_grid_missing`·`n_grid_extra`, `universe_daily` 재계산) + measured 3(`n_measured_without_src_row`·`n_src_row_without_measured`·`n_measured_value_mismatch` = `stlm_date` + 측정 16축 재조인) + `n_unmeasured_value_present` + `n_stlm_date_before_date` + 잔고 2(`n_balance_negative` · `n_balance_over_shares_out` = 같은 날 `price_daily.shares_out` 재조인). **신규·상환·증감율의 음수는 폐기형이 아니다** — 원천에 실재한다(절단본 6행: 003540 2024-07-02·03 · 036220 2013-11-15·2015-06-08 · 101970 2013-07-03 · 247540 2025-01-10, 병합·감자 정정 추정) → `n_negative_by_column` 기록형 | `rules_s10.eg3_credit_daily` |
+| EG7 임계 | 첫 빌드는 코드 기본값(0.001) | **첫 빌드부터 `credit_daily.thresholds.EG7` = 0.005 를 seed 에 등재**한다. `_reject/pre_calendar` 는 KIS 신용잔고 시작일(2009-11)과 KRX 지수 캘린더 하한(2010-01-04)의 차이라 구조적이고, 절단본 비율 0.002536·서버 추정 0.0023(P11 credit 24,497 / 격자 10.9M)이 기본값을 넘는다. ★ 서버 1차 빌드 뒤 실측의 1.5~2배로 조인다 | `baseline_seed_s10.json` `_measured` |
+| §2 매트릭스 14행 EG8·EG9 | EG8 `skip(no_cross_source)` · EG9 `●(P01,P03,P04)` · P02 `skip(no_log_axis)` | **S10 은 둘 다 붙이지 않는다**(S04 의 EG8-P01 과 같은 규약 — `_meta` 에 항목 자체가 없다). EG8: 신용잔고의 독립 교차 원천이 없다. EG9(레짐 커버리지): 로그 축 독립 재판정은 `stg_calls_kis` 를 함께 읽어야 하고 3단계 세 테이블(flow·short·credit)의 공통 술어로 짜는 편이 낫다 → S08·S09 와 함께 붙인다. 그때까지 커버리지 사실은 `EG3_credit_daily` 의 `fill_kind_evidence_counts`·`n_ledger_gap_dates` 기록형이 나른다 | 매트릭스 14행 |
+| `credit.net_buy` 판정 | "미확인 → S10 에서 판정" | **부재**(FIELD_MAP §2·§3 갱신). 원장 39컬럼에 순매수 축이 없고 후보 `신규 − 상환` 은 잔고 증감과 맞지 않는다 — 융자 17,364/24,711(70.3%), 대주 24,672/24,711(99.8%), 신규·상환 음수 6행. 매 빌드 `EG3_credit_daily.net_buy_axis`·`loan_balance_step`·`stln_balance_step` 이 근거를 갱신하므로 서버 실측에서 뒤집히면 metric 이 먼저 움직인다 | `test_net_buy_축은_원장에_없다` |
+| 규칙 판본 | — | `model.RULES_VERSION` 은 **건드리지 않는다**(e1.3.1). `credit_daily` 는 신설 테이블이라 직전 빌드가 없고 EG5a 가 `skip(no_previous_build)` 로 시작한다 — 기존 테이블 산출을 바꾸는 변경이 아니다 | DESIGN §2 |
+
+**S10 2차 — 잔고 이상 격리 (2026-09-06, 서버 1차 빌드 폐기 대응)**
+
+서버 1차 빌드가 `EG3_credit_daily.n_balance_over_shares_out` **4** 로 폐기됐다 — 격자 9,201,516 · 격리 24,948 · 다른 술어 전부 0 · 같은 판의 `flow_daily`·`short_daily` 는 통과. 잔고주수 > 상장주식수는 불가능한 사실이므로 게이트를 늦추지 않고 원장 행을 격리한다.
+
+| 항목 | 1차 | 2차 정정 | 근거 |
+|---|---|---|---|
+| 격리 어휘 | `pre_calendar`·`off_grid` | **`balance_over_shares` 추가**(EG7-P06 격리형, `_reject/balance_over_shares/`, EG7 분모 포함). 술어 = 격자 안 원장 행 중 `whol_loan_rmnd_stcn_shr > price_daily.shares_out ∨ whol_stln_rmnd_stcn_shr > shares_out`. `shares_out` NULL 은 판정축이 없어 위반이 아니다. 정의는 `rules_s10.over_shares_predicate(alias, shares)` 한 곳에서 나와 `.sql` `over` CTE·EG1 우변·EG3 재계산이 같은 문자열을 쓴다 | `rules_s10.REJECT_REASONS` · `test_잔고_초과_술어…`(격자 술어 테스트에 편입) |
+| 격리 단위 | — | **원장 행만 격리하고 격자 셀은 지우지 않는다.** 그 (date, ticker) 셀은 17축 전부 NULL 로 남아 ⑪(a) 행수 등식이 유지된다(셀째로 버리면 그날 그 종목이 유니버스에서 사라져 생존편향). SQL 은 `base` 에 `drop_value` 플래그를 세우고 원장 조인의 `drop_value` 등호 축 하나로 값을 비운다(아래 성능 행) | `sql/credit_daily.sql` `over`·`base`·`cell` |
+| 셀의 `fill_kind.kind` | — | **`empty_response`**(= `rules_s10.REJECTED_CELL_KIND`, 엔진 `CellKind.MISSING`). `FILL_KINDS` 에 `rejected` 를 **더하지 않는다** — 어휘는 DESIGN §3 · 엔진 `CellKind` 계약이라 슬라이스가 늘릴 축이 아니고, 남은 넷 중 `empty_response` 만이 "원천에 물었고 쓸 값이 없다" 를 뜻한다(`measured` 는 값이 없고, `src_omitted` 는 0 으로 읽히며, `not_collected` 는 수집됐다는 사실과 어긋난다). 한계: 진짜 빈 응답과 값에서 구분되지 않는다 → 어느 셀이 이 경로였는지는 `_reject/balance_over_shares/` 가 키·원값째 보관하고 EG3 가 건수를 대조한다. 3단계 전체에 이 경로가 흔해지면 `rejected` kind + 엔진 `CellKind` 대응 신설이 후속 | DESIGN §9 결정 9 |
+| `fill_kind.evidence` | kind 별 분기 | **로그 사실만으로 정한다** — 그 셀을 덮는 유닛 창이 ok → `unit_ok` / empty → `unit_empty` / 없음 → `none`. 기존 네 kind 에서 값이 전부 같고(절단본 분포 불변), 잔고 이상 셀까지 한 규칙으로 덮는다 | `sql/credit_daily.sql` 최종 SELECT |
+| EG1 우변 | 격자 + 격자 밖 원장 행 | **+ 잔고 이상 원장 행**. 프레임이 `n_reject` 를 빼므로 세 격리 사유가 한 등식에서 닫힌다 — 격리를 빼먹으면 EG1 이 먼저 잡는다(부정 픽스처 delta −1) | `CREDIT_DAILY.eg1_rhs_sql` |
+| ⑪(b) `EG1_credit_daily` | 두 사유 합 | `REJECT_REASONS` 를 그대로 돌므로 **새 사유를 자동으로 받는다**(`n_ledger_delta` = 원장 − measured − Σ격리). 합성 검증에서 measured 24,627 + 85 + 9 + 1 = 24,722 | `rules_s10.eg1_credit_daily` |
+| `n_balance_over_shares_out` | 폐기형(서버에서 4로 실패) | **산출 검사로 그대로 유지**(0 이어야 한다) — 격리했으므로 산출에는 위반이 남지 않는다. 임계를 늦추거나 술어를 지우지 않았다. 폐기형 3 추가: `n_balance_over_shares_reject_delta`(입력에서 다시 센 위반 행수 = `_reject` 건수) · `n_balance_over_shares_cell_measured`(그 키의 셀이 아직 measured) · `n_balance_over_shares_cell_missing`(그 키의 셀이 사라졌다). `n_src_row_without_measured` 는 격리 키를 제외하도록 좁혔다(격리된 원장 행은 measured 셀이 없는 것이 정상) | `rules_s10.eg3_credit_daily` |
+| 기록형 추가 | — | `n_balance_over_shares_rejected`(격리 건수) · `n_balance_over_shares_src`(입력 재계산) | `_meta.gates[EG3_credit_daily].metrics` |
+| 합성 검증 | — | 절단본에는 위반 행이 **0** 이라 stage 사본에서 (161890, 2020-01-02) 융자 잔고 280,837 → 9,999,999,999(그날 상장주식수 22,881,180 초과)로 바꿔 검사한다: 격자 36,972 불변 · 격리 95 · measured 24,627 · 셀 17축 NULL · `fill_kind {empty_response, unit_ok}` · `_reject` 에 원값 보관 · 전 게이트 pass. 격리 경로를 지운 변종은 EG1 이, 우변까지 늦춘 변종은 EG3 가 잡는다 | `test_잔고가_상장주식수를_넘는_원장행은_격리되고_셀은_비어_남는다` · `test_잔고_이상_원장행을_격리하지_않으면_폐기한다` |
+| 서버 4행의 정체 | — | **미확인 가설**: 분할·병합 적용일 전후의 **상장주식수 갱신 지연**. KIS 신용잔고는 사건 반영이 빠르고 KRX `stg_listing_daily.list_shrs`(→ `price_daily.shares_out`)는 변경상장일에 갱신되므로, 병합·감자로 주식수가 줄어드는 날 잔고가 며칠 먼저 새 기준으로 넘어오면 비가 뒤집힌다. 로컬 절단본에 재현 사례가 없어 확인하지 못했다 — 서버에서 `_reject/balance_over_shares/` 의 (ticker, date)를 `adj_factor.apply_date`·`corp_event` 와 대조하면 판별된다. 4행뿐이라 EG7 비율에는 영향이 없다(24,948 → 24,952) | 서버 1차 빌드 `_failed/` 리포트 |
+| EG7 임계 | seed 0.005 | 변경 없음. 서버 격리가 24,948 → 24,952(+4)로 늘어도 격자 9.2M 대비 0.0027 수준이라 임계 안이다 | `baseline_seed_s10.json` |
+| 규칙 판본 | e1.3.1 유지 | 여전히 유지 — `credit_daily` 는 아직 커밋된 빌드가 없으므로(1차는 폐기) EG5a 가 `skip(no_previous_build)` 로 시작한다 | DESIGN §2 |
+| 값 비우기 조인 (성능, 09-06) | `LEFT JOIN stg_credit_daily s ON s.ticker = b.ticker AND s.date = b.date AND NOT b.drop_value` | **한쪽만 보는 술어를 조인 조건에 두지 않는다** — `NOT b.drop_value` 는 좌변(b)만 보므로 DuckDB 가 `JoinCondition` 으로 쓰지 못하고, LEFT OUTER 라 필터로 내리지도 못해 물리계획이 `HASH_JOIN(RIGHT)` → **`BLOCKWISE_NL_JOIN(RIGHT)`** 로 떨어진다(격자 9,226,468 × 원장 8,404,204). 고친 형태는 `LEFT JOIN (SELECT *, false AS drop_value FROM stg_credit_daily) s ON s.ticker = b.ticker AND s.date = b.date AND s.drop_value = b.drop_value` — 원장 쪽은 언제나 false 라 뜻이 같고(양쪽 NULL 없음), 조건이 좌·우 등호라 3키 해시 조인으로 돌아온다. 서버 실측(`.venv` duckdb 1.5.5, `memory_limit='8GB'`, `threads=3`): 빌드 SQL **70분+ (kill) → 6.1초**(375aeb4 판 8.2초), 게이트 SQL 은 원인이 아니었다(EG1 0.07초 · EG3 31.4초 · 프레임 EG1 우변 3.7초). 산출은 동일 — 격자 9,201,516 · 격리 `pre_calendar` 24,497 · `off_grid` 451 · `balance_over_shares` 4 · `n_balance_over_shares_out` 0, EG1·EG3 pass | `sql/credit_daily.sql` `cell` · 서버 `EXPLAIN (FORMAT json)` 물리계획 |
+---
+
+**S21 본판 — 어댑터 필드 3 → 24 · `v_fin_latest` 신설 (2026-09-06, `equity_duckdb/_specs.py`·`_adapter.py`·`views.py`)**
+
+| 항목 | 초안 | 정정 | 근거 |
+|---|---|---|---|
+| 어댑터 필드 수 | FIELD_MAP §2 의 42 전부 | **24** = 표의 23 + 내부 스코프 `price.adj_close`. 빠진 19 의 사유는 셋(원천 부재 10 · S08~S10 미병합 7 · 굽지 않기로 한 2)이고 `_specs.UNSUPPORTED_FIELDS` 가 field_id 마다 문장으로 남긴다. **`flow_daily`·`short_daily`·`credit_daily` 는 이 브랜치에 없다** — S08~S10 은 `equity/s08-s10` 에 있고 `equity/s15-s18` 의 조상이 아니다 | `git merge-base --is-ancestor equity/s08-s10 equity/s15-s18` → false · `database/src/equity/rules_s0{8,9}.py`·`rules_s10.py` 부재 |
+| `v_fin_latest` 접는 축 | DESIGN §5 한 줄("CFS 우선, ttm, has_correction") | **판본(`vintage`)·`fs_div` 만 접고 기간 축은 남긴다.** as_of 로 기간까지 접으면 소비자가 세션마다 매크로를 다시 불러야 한다 — `v_adj_price_fwd` 처럼 as_of 를 컷오프·행 절단으로만 쓰고 세션 절단은 어댑터의 ASOF 조회가 한다. TTM 은 4행 non-null ∧ `period_end` 폭 240~400일 ∧ 창 안 `available_date ≤ 이 행의 available_date` 를 다 만족할 때만 선다(부분합 금지) | `views.TEMPLATES['v_fin_latest']` · DESIGN §5 |
+| `v_fin_latest` 게이트 대상 | (미기재) | **`ASOF_VIEWS` 밖**(`v_consensus` 와 같은 근거 — 표본 키가 (as_of, ticker, **date**)인데 이 뷰에는 일별 date 축이 없다). 카탈로그 매크로 수는 `consensus_daily`·`fin_std`·`disclosure_version` 이 있는 체인에서 **8**, S06 체인(7테이블)에서는 6 + `skip(not_built)` 2 | `catalog.ASOF_VIEWS` · `test_equity_s06_views.py::test_카탈로그는_매크로_6개이고_뷰_게이트를_통과한다` |
+| LATEST 필드의 랙 의미 | "랙 n = n 세션 전 행"(가격 축 기준) | **원천마다 갈린다.** GRID(가격·조정가)는 정확히 n 세션 전 행이고 그 세션에 행이 없으면 셀 없음(재상장 첫날이 직전 구간 값을 물지 않는다). LATEST(재무·컨센서스·의견·배당·자사주·임원지분)는 컷오프 이하의 **마지막 관측**이고 `available_date` 는 그 관측의 공개일이라 as_of 보다 몇 달 앞일 수 있다 — 계약이 요구하는 것은 `available_date ≤ as_of` 뿐이다 | `_adapter._cell` · `test_adapters_equity_duckdb.py::test_latest_fields_never_show_a_filing_before_its_available_date` |
+| grain 축소 규칙 | (미기재 — "equity 는 전개하지 않는다" 만) | 포트가 셀 하나를 요구하므로 어댑터가 줄인다. **선언표에 적어 코드에 흩뿌리지 않는다**: `v_consensus` FY1(관측 달 이후로 끝나는 `target_period` 중 최소) · `opinion_daily` 잰 판본 우선(`coverage_degraded=false`) · `dividend_event` 종류 축 접기(값 있는 행 → 최신 연도 → `stock_knd` 사전순) · `corp_event`·`holder_daily` 같은 공개일 합 | `_specs.SOURCE_SPECS` · FIELD_MAP §3 표 |
+| `classification.sector` | FIELD_MAP §2 "부분/미지원" | **미지원으로 닫는다** — `corp.induty_code` 는 시점축 없는 현재값 라벨이라 과거 세션에 붙이면 look-ahead 다. DESIGN §7 이 이미 `sector_id=None` 을 규약으로 못박았고, 계약 테스트가 "sector 필드를 안 내면 `sector_id` 도 None" 을 강제한다 | `test_raw_observation_port.py::test_port_exposes_raw_facts_only` |
+| `short.short_balance_ratio` | FIELD_MAP §2 "부분" | **미지원으로 내린다(어댑터 판단)** — 분모가 다른 테이블(`price_daily.shares_out`)이라 원천 하나의 컬럼식으로 굽지 못하고, 원장 값 자체가 잔고가 아니라 거래량이다(라벨 정정 필요). S09 병합 때 `short_daily` 에 비율 컬럼을 두거나 레지스트리를 고치는 것이 순서다 | `_specs.UNSUPPORTED_FIELDS` |
+| 계약 테스트 `FIELDS` | 5(`price.close`·`market_cap`·`adj_close`·`financial.book_equity`·`classification.sector`) | **29** 로 넓혔다 — equity 어댑터가 내는 24 + mock 전용 5. `_fields(adapter)` 가 어댑터별로 걸러 주므로 mock 은 미선언 필드를 무시하고, 창 독립·PIT·순서·kind 일치·두 포트 셀 대조 절이 **equity 24필드 전부**에서 돈다 | `backend/tests/contract/test_raw_observation_port.py` |
+| 손 픽스처 | `build_workbench_root` 7테이블 | **15테이블**(+ `corp_ticker`·`fin_std`·`disclosure_version`·`consensus_daily`·`opinion_daily`·`dividend_event`·`corp_event`·`holder_daily`), 카탈로그 매크로 3 → **5**(+ `v_consensus`·`v_fin_latest` 본문 사본). 픽스처가 심는 부정 케이스: 같은 grain 의 CFS/OFS 2행(OFS 값 9,999 — 골라지면 안 된다) · 같은 (ticker, obs_date) 의 v3/wise 2행 · 종류 3행 배당(보통/우선/'-') · 같은 공시일 자사주 2건 + 다른 event_type 1건 · elestock/majorstock 혼재 · 값 전 결측 보고 1건 · 005930·005935 가 같은 법인 | `backend/tests/equity_fixture.py` |
+| 절단본 e2e | 9테이블 · 필드 3 | **16테이블 · 필드 24**, 필드별 1셀 손검산(가격 6 · 재무 3 + PIT 역전 1 · 배당 3 · 컨센서스 3 + 의견 3 · 임원지분 1 · 자사주 부재 1) + **PIT 전수**(두 창 × 24필드, `available_date ≤ as_of` 위반 0). MVP-B 백테스트는 `70e398c` 어댑터와 **바이트 동일**(§10 P40) | `database/tests/test_equity_s21_workbench.py` 13 pass |
+| EG-C ⑥~⑨ | "본판(S19·S20 뒤)에서" | **여전히 미실행**. ⑥⑦(재무 as-of)·⑧(수급 격자)·⑨(컨센서스 obs_month look-ahead)는 `contract.py` 의 EGC 항이고 S21 본판은 어댑터 층만 넓혔다 — ⑧ 은 S08~S10 병합이 선행이다 | `src/equity/contract.py` |
+
+**S21-3 — 격자 3테이블 연결, 어댑터 필드 24 → 30 (2026-09-06, `equity_duckdb/_specs.py`·`_adapter.py` + `EQUITY_FIELD_MAP.md` §2·§3)**
+
+| 항목 | 초안 | 정정 | 근거 |
+|---|---|---|---|
+| 어댑터 필드 수 | S21 본판 24(미병합 7 제외) | **30** = FIELD_MAP §2 의 **29** + 내부 스코프 `price.adj_close`. 더한 6 은 `flow.foreign_net_buy`·`flow.institution_net_buy`·`flow.retail_net_buy`·`short.short_sale_value`·`short.borrowed_quantity`·`credit.margin_balance` 이고 **선언표(`SOURCE_SPECS` +4 · `FIELD_SPECS` +6)에 행만 더했다** — 해석기에 field_id 분기는 여전히 없다. 남는 **13** 의 사유는 둘(원천·컬럼 부재 11 · 굽지 않기로 한 2)로 줄었다 | `_specs.UNSUPPORTED_FIELDS` · `tests/test_adapters_equity_duckdb.py::test_field_specs_cover_every_field_map_id_exactly_once` |
+| FIELD_MAP §2 행 수 | 42 field_id | **47 로 부풀어 있었다** — `equity/s08-s10` 병합이 short 3행·credit 2행을 옛 판본과 새 판본 양쪽으로 남겼고 옛 행은 실재하지 않는 컬럼(`short_daily.short_value_krw`·`short_volume_shr`·`lending_balance_kiwoom_raw` 단독)을 가리켰다. **옛 5행을 지워 42 를 회복**했고(집합 불변 → `check_field_map.py` 판정 불변) §3 집계도 실제 판정으로 재계수했다(지원 14 · 부분 16 · 미지원 10 · 미확인 1 · 부분/미지원 1) | 표를 한 행씩 재계수 · `check_field_map.py` missing 0 |
+| `short.*` 원천 선택 | "두 원천 중 어댑터가 고른다"(S09) | **키움 고정**(`short_value_kiwoom_krw` + `fill_kind_short_kiwoom`). KRX 정본이 없는 축이고 커버가 넓다(절단본 measured 키움 18,265 vs KIS 3,891). **폴백 병합 금지** — 키움이 없는 날 KIS 로 갈아타면 시계열이 원천을 섞는다. 대차(`short.borrowed_quantity`)는 KIS 축뿐이라 선택이 자동이고 `fill_kind_loan_kis` 를 읽는다. 원천마다 `fill_kind` 가 따로라 **읽는 자리(SourceSpec)도 원천마다 하나**다(`short_kiwoom`·`lending_kis` 둘이 같은 relation 을 본다) | DESIGN §4-3 「합치지 않는다」 · FIELD_MAP §2 |
+| `flow_daily` 의 `src` | (미기재 — 빌더는 "조용히 하나를 고르지 않는다") | 포트 grain 은 (security, session, field) 하나뿐이라 어댑터는 고를 수밖에 없다. **GRID 모드에 `pick_order` 를 더해** (ticker, date) 당 1행을 결정적으로 고른다 — 키움 우선 · 동률 `src` 사전순. 값을 섞지 않으며(고른 한 행의 값이 그대로 나간다) 겹치는 셀은 절단본 0, 서버는 `EG3_flow_daily.n_src_overlap` 이 매 빌드 센다. 고르지 않으면 LEFT JOIN 이 격자 행을 불려 어댑터가 "duplicate (ticker, date)" 로 죽는다 | `sql/flow_daily.sql` 행 규칙 ① · DESIGN §11 ⑬ |
+| `fill_kind` → `CellKind` | FIELD_MAP §1 「결측 어휘」 4대응 | **3대응만 성립한다** — `measured`→OBSERVED · `not_collected`→NOT_COLLECTED · `empty_response`→MISSING · **`src_omitted`→MISSING**(SOURCE_OMITTED_ZERO 아님). 워크벤치 도메인이 `SOURCE_OMITTED_ZERO` 셀에 값을 요구하는데(`RawFieldValue.__post_init__`) equity 는 그 자리를 NULL 로 둔다(결정 8) — 도메인 무수정을 택해 라벨을 접고 사유를 필드 프로필 `description` 에 문장으로 실었다. 값이 있는 셀은 `fill_kind` 와 무관하게 OBSERVED 다(계약: 관측 셀은 값을 갖는다) | DESIGN §11 ⑪ · FIELD_MAP §3 |
+| `supported_cell_kinds` | `(OBSERVED, MISSING)` 고정 | **선언에서 나온다** — `SourceSpec.kind_expr` 이 있으면 `(OBSERVED, MISSING, NOT_COLLECTED)`, 없으면 `(OBSERVED, MISSING)`. `COVERAGE_GAP` 은 어느 원천도 내지 않는다(구간·백필 밖은 셀 자체가 없다) | `_adapter._cell_kinds` |
+| 랙 | "S19 전에는 노출하지 않는다"(FIELD_MAP §3 S09 주석) | **랙 0 으로 노출하되 가정임을 카탈로그에 싣는다.** stage 6원천이 전부 `lag_known=false` 이고 **KIS 신용잔고는 실제 T+1 공표**라 랙 0 은 하루치 look-ahead 다 — 근거 문장을 프로필 `available_date_basis` 에 넣고 소비자가 `lag_overrides` 로 물리게 했다. 노출을 미루면 소비층이 필드가 왜 없는지도 못 본다. `recommended_lag_sessions` 정본은 여전히 S19 | DESIGN §11 ⑫ |
+| 손 픽스처 | `build_workbench_root` 15테이블 | **18테이블**(+ `flow_daily`·`short_daily`·`credit_daily`). 한 창 안에서 셀 종류를 다 낸다 — 겹친 셀의 원천 선택(kiwoom vs kis 9,999) · 진짜 0(OBSERVED) · `src_omitted`(MISSING) · `not_collected`(NOT_COLLECTED) · `empty_response`(MISSING) · 음수 대차잔고 · 원장 행 없는 세션(셀 부재) | `backend/tests/equity_fixture.py` |
+| 절단본 e2e | 16테이블 · 필드 24 | **19테이블 · 필드 30**. 격자 손검산 3건(005930 2018-05-04 — 외국인 순매수 −53,845,000,000원 · 공매도 거래대금 103,425,481,000원 · 신용융자 잔고 8,359,855주, 기대값 출처는 stage 원장) + `src_omitted`→MISSING 1건(2026-08-20 신용) + **PIT 전수**(두 창 × 30필드 위반 0) | `database/tests/test_equity_s21_workbench.py` |
+| 계약 테스트 `FIELDS` | 29 | **33** — equity 30 + mock 전용 3(`short.short_balance_ratio`·`event.earnings_surprise`·`classification.sector`). 창 독립·PIT·두 포트 kind 일치 절이 격자 6필드 위에서도 돈다 | `backend/tests/contract/test_raw_observation_port.py` |
+| EG-C ⑧(수급 격자) | "S08~S10 병합이 선행" | **여전히 미실행**. 선행 조건은 사라졌지만 `contract.py` 의 EGC 항 자체가 아직 없다 — S19·S20 뒤 몫이다 | `src/equity/contract.py` |
+
+**S19-2 — 격자 3테이블 `field_profiles` 선언, `dataset_profile` 66 → 72행 (2026-09-06, `rules_s08/s09/s10.py`·`rules_s19.py`)**
+
+| 항목 | 초안 | 정정 | 근거 |
+|---|---|---|---|
+| `dataset_profile` 입력 | 「전 equity 테이블 22」(`SOURCE_TABLES`) | **25** — `flow_daily`·`short_daily`·`credit_daily` 를 더했다. 22 는 격자 3테이블이 아직 없던 때의 수이고, 목록에서 빠져 있으면 `rules_s19.owned_fields()` 가 그 테이블의 선언을 아예 훑지 않는다(테이블이 커밋돼 있어도 프로파일 행이 안 생긴다) | `rules_s19.SOURCE_TABLES` · P39′ 서버 실측이 지목한 원인 |
+| S08~S10 `field_profiles` | 선언 없음(빈 튜플) | **6 필드 선언** — `flow.foreign_net_buy`·`flow.institution_net_buy`·`flow.retail_net_buy`·`short.short_sale_value`·`short.borrowed_quantity`·`credit.margin_balance`. 대상은 어댑터 `_specs.FIELD_SPECS` 가 **실제로 내는** 6과 정확히 같다 | FIELD_MAP §2 · `equity_duckdb/_specs.py` |
+| 선언하지 않는 격자 필드 | (미기재) | `flow.foreign_ownership`·`flow.foreign_limit_exhaustion`(원천 `stg_foreign_daily` 가 S08 입력에 없다 — S08-2) · `flow.pension_net_buy`(FIELD_MAP §2 어휘에 field_id 가 없다) · `short.short_balance_ratio`(공매도량 ÷ 상장주식수 — 비율 계산이 팩터층 몫) · `credit.net_buy`(원천에 축 부재, S10 판정) · KIS 공매도 축·`*_amt`·대주 잔고(field_id 없음/단위 미상). **선언하면 `dataset_profile` 에 '있는데 늘 빈' 행이 생겨 EG10 이 거짓으로 ready 를 낸다** | DESIGN §4-3 · `test_격자_3테이블은_어댑터가_내는_6필드만_선언한다` |
+| 격자 필드 랙 | S21-3 이 어댑터 상수로 **0**(자기 `lag_basis` 가 "가정이고 확정은 `dataset_profile` 몫" 이라 적었다) | **1 세션**(`recommended_lag_days` 도 1). 세 슬라이스의 stage 원장 6종이 전부 `lag_known=false` 이고 신용잔고는 실제 T+1 공표라 0 은 하루치 look-ahead 다 | STAGE_HANDOFF §2 · FIELD_MAP §1 「나머지 전부 1 세션」 · `rules_s10` docstring |
+| `supported_cell_kinds` 유도 | `FILL_KIND_COLUMN in owner.columns` (이름 정확 일치) | **접두 판별** — `short_daily` 는 원천마다 fill_kind 를 두어 컬럼 이름이 `fill_kind_short_kiwoom`·`fill_kind_short_kis`·`fill_kind_loan_kis` 다. 정확 일치만 보면 그 테이블의 두 필드가 격자가 아닌 것으로 잡혀 3종만 받고, 소비자가 `not_collected` 셀을 만나고도 어휘에서 못 찾는다. **격자 3테이블은 FIELD_MAP §1 결측 어휘 5종 전부**를 선언한다(어댑터가 `src_omitted`→MISSING 으로 좁히고 COVERAGE_GAP 을 내지 않는 것은 **포트 층의 좁힘**이고 위 S21-3 행이 기록한다 — equity 선언은 표가 나를 수 있는 어휘 전부다) | `rules_s19.supported_cell_kinds` · DESIGN §4-3 구현 결과 ② |
+| EG2-P04 부정 하네스 | `stg_flow_daily_kiwoom` 을 「어떤 필드도 안 싣는 lag_known=false 원천」의 예로 썼다 | **`stg_foreign_daily` 로 옮겼다** — S19-2 가 `flow.*` 3필드를 랙 1 로 선언해 수급 원장이 덮이므로 옛 예는 이제 PASS 다(그 사실 자체를 같은 테스트가 단언한다). 술어가 항진이 되지 않게 실제로 안 덮이는 원천으로 바꾼다 | `test_어떤_필드도_싣지_않은_lag_known_false_원천은_EG2를_폐기한다` |
+| 골든 픽스처 | `dataset_profile` 17 · `factor_readiness` 10 | `dataset_profile` **27**(+ FX-6-020~023: 격자 필드의 `column_scope`·랙·`supported_cell_kinds`·`coverage_basis`·`unit`·`requires_confirmation`) · `factor_readiness` 10(**FX-6-011 의 키를 F01 → F02 로**). F01 은 이제 ready 이고, `field_unavailable` 의 예로는 재료가 정말 없는 F02(`flow.foreign_ownership`)가 맞다. 모집단 의존 값은 여전히 픽스처에 넣지 않는다(P38′ 교훈) — F03 의 `partial_support` 는 커버율 > 0 이어야 성립하므로 절단본 손계산 테스트가 맡는다 | `src/equity/fixtures/*.json` |
+| EG10 결과 | 31 ready / 23 blocked | **35 ready / 19 blocked** — F01·F06·F07·F09 가 열리고 F03 이 `field_unavailable` → `partial_support`(GAP-03) 로 옮겨 갔다. 사유 분포 `field_unavailable` 10 → **5** · `partial_support` 11 → **12** · `no_observations` 2(불변). **`ready_min` 은 여전히 미등재** — 서버 실측 뒤 사람이 정한다(§4-8 · P39′) | DESIGN §10 P41 |
+
+
+**S23 — 전방 조정가 표 `price_adj_daily` 신설 (2026-09-06, `rules_s23.py`·`sql/price_adj_daily.sql`·`views._FWD_CTE`)**
+
+| 항목 | 초안 | 정정 | 근거 |
+|---|---|---|---|
+| 조정가의 자리 | 카탈로그 매크로 `v_adj_price_fwd` 하나(S21 후속) | **표 `price_adj_daily`(28번째 테이블) + 매크로**. 매크로만 있으면 parquet 을 직접 읽는 소비자(커널 pyarrow 어댑터·노트북)가 못 보고, 카탈로그가 낡거나 없으면 `price.adj_close` 가 통째로 unavailable 이 된다. 전방 조정(결정 09-05)으로 값이 (ticker, date) 의 순수 함수가 된 뒤라야 저장할 수 있다 | DESIGN §4-2 · §11 ① |
+| 누적 범위 | 티커 전체(`PARTITION BY ticker`) | **`(ticker, span_seq)` 안에서만**. 재상장 2종의 폐지 전 구간 계수가 새 구간 가격에 곱해지던 결함이다 — 전방 조정의 앵커는 그 구간의 첫 관측이다. 계수 쪽 구간 부여만 **엄격 부등호**(`fold_date > first_date`)라 구간 첫날 계수는 어떤 행에도 곱해지지 않고, 그래야 "구간 첫 행 누적 = 1" 이 정확히 선다. 매크로 `v_adj_price_fwd`·`v_adj_volume_fwd` 도 같은 규칙으로 고쳤다 | `views._FWD_CTE` · FX-2-017 |
+| EG1 | (신규) | **항등식** `count(price_adj_daily) = count(price_daily)` — 격리 사유가 없다(EG7 항상 0). 등식이 약한 대신 값 축을 EG3 가 독립 재계산으로 전건 대조한다 | §3 ㉓ |
+| EG3 독립 재계산 | (신규) | 산출은 ASOF JOIN + 창 누적곱, 게이트는 **범위 조인 + GROUP BY 집계**로 같은 값을 다시 만든다 — `sql/price_adj_daily.sql` 을 재사용하면 항진명제다. "계수의 구간 = 행의 구간" 과 "행의 앵커 < fold ≤ date" 가 같은 집합이라는 것이 두 형식을 잇는 등식이다 | `rules_s23.install_recalc` |
+| `cum_price × cum_share = 1` 허용오차 | (신규) | 한 계수당 `adj_factor.factor_product_tol_base`(0.01, S06-2 기준가 원천의 KRX 산식 잔여)를 **접힌 수만큼 복리로 편** `(1+tol)^n − 1`. 접힌 계수가 0 이면 정확히 1 을 요구한다. 상수를 복제하지 않고 `adj_factor` 네임스페이스에서 읽는다 | `baseline_seed_s23.json` |
+| 매크로 정합 | "게이트 또는 테스트로 증명" | **매 빌드 EG3 안에서** — `views.install_temp_macros` 로 두 fwd 매크로를 빌드 세션에 올려 as-of 표본(`asof_sample_dates` 5 × `asof_sample_tickers` 20)에서 행 집합·값을 대조한다(상대오차 1e-12). 서버 실측 **319,310행 비교, 차이 0, 최대 상대편차 0.0**(비트 동일) | `rules_s23._macro_mismatch` |
+| 얇은 매크로로 합치기 | 권고 | **채택하지 않았다** — `lag_override` 가 PIT 계약의 일부이고(회귀 테스트가 "아직 공개 전인 계수를 접지 않는다" 를 단언한다) 표에는 랙 축이 없어, 매크로를 표 읽기로 바꾸면 `lag_override` 가 조용한 no-op 이 된다. 두 산출을 남기고 게이트로 묶는 쪽을 택했다 | DESIGN §5 |
+| 커널 연결 | (미기재) | **금지**. 커널은 원주가 bar + `CorporateActionEvent` 로 수량을 조정하므로 조정가를 주면 이중 계산이다. `backtest_engine/adapters/equity_duckdb.py` 가 `price_adj_daily` 를 읽지 않는다는 것을 테스트가 회귀로 지킨다 | DESIGN §7 |
+| 부정 픽스처 | (신규) | 절단본에는 "재상장 + 폐지 전 구간의 ok 계수" 조합이 없어(`n_rows_span_free_diff` = 0, 서버도 0) 구간 누출을 못 잡는다 → **합성 equity 트리**(2구간 재상장 1종)에서 돈다: ① 조정가를 나눗셈으로 뒤집기 → `n_recompute_mismatch`·`n_macro_mismatch` ② 구간 부여를 상수로 바꿔 누출 → `n_cross_span_factor`·`n_span_first_not_unit` ③ `n_unadjusted_events` 를 0 으로 지우기 → `n_unadjusted_mismatch` | `test_equity_s23_price_adj.py` |
+| `dataset_profile` 소유 이동 | `price.adj_close` 를 `adj_factor` 가 뷰 필드(`view_name`)로 선언 | **`price_adj_daily` 가 표 컬럼으로 선언**한다(FX-6-006 `table_name` = `price_adj_daily` · `available_date_basis` = `derived`). 두 표가 같은 field_id 를 선언하면 grain 이 깨지므로 이동이지 추가가 아니다. `rules_s19.SOURCE_TABLES` 25 → **26**, 프로파일 행수 72 불변 | `rules_s19.owned_fields` |
+| EG3 기록형 사건 축 | (신설) | 미조정 사건의 사유별 내역은 **`event_id` 축**으로 센다. (ticker, apply_date) 로 묶으면 같은 날 두 사건이 하나로 접혀 `n_unadjusted_events` 가 세는 축과 갈린다(서버 4,014 → 3,970 으로 44건 유실). `adj_factor.event_id`·`factor_source` 를 EG3 전용 입력 컬럼으로 선언한다(산출식은 읽지 않는다) | `rules_s23` `input_columns` |
+| 조정 OHLC·거래량 노출 | (판단 대상) | **선언하지 않는다** — FIELD_MAP §2 어휘에도 FACTORS 정본 54 의 재료에도 없다(M02 는 원주가 `price.high` 를 쓴다). 표에는 컬럼으로 실려 있어 parquet 소비자는 읽을 수 있다 | FIELD_MAP §2 |

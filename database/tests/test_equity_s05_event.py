@@ -45,6 +45,131 @@ N_DEDUP = 14
 N_BY_TYPE = {"bonus": 1, "capred": 5, "split": 2}
 
 
+# ── 합성 입력 위 산출식 단독 실행 (S06 `run_adj_sql` 과 같은 방식) ──────────────
+# 절단본은 무상증자가 1건뿐이고 그마저 결정공시가 비율을 준다. `ratio` 결측 복구는 자본변동만
+# 있는 무상증자를 요구하므로 합성 입력으로 검증한다(RATIO_RECOVERY.md).
+
+_EVENT_SQL = CORP_EVENT.sql_path.read_text(encoding="utf-8").strip().rstrip(";")
+_EVENT_CONST = {"effective_before_announce_max_days": 2555, "krx_share_change_tol": 0.001,
+                "bonus_ratio_window_sessions": 25}
+
+
+def _lit(v: object) -> str:
+    if v is None:
+        return "NULL"
+    if isinstance(v, bool):
+        return "TRUE" if v else "FALSE"
+    if isinstance(v, int | float):
+        return repr(v)
+    if isinstance(v, date):
+        return f"DATE '{v.isoformat()}'"
+    return "'" + str(v).replace("'", "''") + "'"
+
+
+def _view(con: duckdb.DuckDBPyConnection, name: str, rows_: list[dict[str, object]],
+          types: dict[str, str]) -> None:
+    cols = list(types)
+    if not rows_:
+        sel = ", ".join(f"CAST(NULL AS {types[c]}) AS {c}" for c in cols)
+        con.execute(f"CREATE OR REPLACE TEMP VIEW {name} AS SELECT {sel} WHERE FALSE")
+        return
+    values = ", ".join("(" + ", ".join(f"CAST({_lit(r.get(c))} AS {types[c]})" for c in cols) + ")"
+                       for r in rows_)
+    con.execute(f"CREATE OR REPLACE TEMP VIEW {name} AS SELECT * FROM (VALUES {values}) "
+                f"AS t({', '.join(cols)})")
+
+
+_STG_TYPES: dict[str, dict[str, str]] = {
+    "stg_event_fric": {"rcept_no": "VARCHAR", "corp_code": "VARCHAR", "nstk_asstd": "DATE",
+                       "nstk_ascnt_ps_ostk_ratio": "DOUBLE", "nstk_ascnt_ps_estk_ratio": "DOUBLE",
+                       "nstk_ostk_cnt": "DOUBLE", "nstk_estk_cnt": "DOUBLE",
+                       "bfic_tisstk_ostk": "DOUBLE", "available_date": "DATE",
+                       "available_basis": "VARCHAR"},
+    "stg_event_pifric": {"rcept_no": "VARCHAR", "corp_code": "VARCHAR", "fric_nstk_asstd": "DATE",
+                         "fric_nstk_ascnt_ps_ostk_ratio": "DOUBLE",
+                         "fric_nstk_ascnt_ps_estk_ratio": "DOUBLE", "fric_nstk_ostk_cnt": "DOUBLE",
+                         "fric_nstk_estk_cnt": "DOUBLE", "fric_bfic_tisstk_ostk": "DOUBLE",
+                         "available_date": "DATE", "available_basis": "VARCHAR"},
+    "stg_event_cr": {"rcept_no": "VARCHAR", "corp_code": "VARCHAR", "cr_std": "DATE",
+                     "bfcr_tisstk_ostk": "DOUBLE", "atcr_tisstk_ostk": "DOUBLE",
+                     "cr_rt_ostk_pct": "DOUBLE", "bfcr_tisstk_estk": "DOUBLE",
+                     "atcr_tisstk_estk": "DOUBLE", "cr_rt_estk_pct": "DOUBLE",
+                     "crstk_estk_cnt": "DOUBLE", "available_date": "DATE",
+                     "available_basis": "VARCHAR"},
+    "stg_capital": {"rcept_no": "VARCHAR", "corp_code": "VARCHAR", "isu_dcrs_de": "DATE",
+                    "isu_dcrs_stle": "VARCHAR", "isu_dcrs_stock_knd": "VARCHAR",
+                    "available_date": "DATE", "available_basis": "VARCHAR"},
+    "stg_listing_daily": {"ticker": "VARCHAR", "date": "DATE", "par_value_krw": "DOUBLE",
+                          "list_shrs": "DOUBLE", "available_basis": "VARCHAR"},
+}
+
+
+def run_event_sql(cal: list[date], listing: list[dict[str, object]],
+                  *, capital: list[dict[str, object]] | None = None,
+                  fric: list[dict[str, object]] | None = None,
+                  pifric: list[dict[str, object]] | None = None,
+                  cr: list[dict[str, object]] | None = None,
+                  const: dict[str, object] | None = None) -> dict[str, dict[str, object]]:
+    """`sql/corp_event.sql` 을 합성 입력 뷰 위에서 그대로 실행한다(프레임·게이트 없이 산출식만).
+
+    `listing` 은 (ticker, date, list_shrs[, par_value_krw]) 를 주면 되고 corp_ticker·security_span
+    은 거기서 유도한다 — corp_code = 'C' + ticker, 첫 상장일 = 그 티커의 첫 행.
+    """
+    con = duckdb.connect()
+    try:
+        listing = [{"par_value_krw": 500.0, "available_basis": "measured", **row}
+                   for row in listing]
+        _view(con, "stg_listing_daily", listing, _STG_TYPES["stg_listing_daily"])
+        for name, rows_ in (("stg_capital", capital), ("stg_event_fric", fric),
+                            ("stg_event_pifric", pifric), ("stg_event_cr", cr)):
+            _view(con, name, [{"available_basis": "measured", **r} for r in (rows_ or [])],
+                  _STG_TYPES[name])
+        tickers = sorted({str(r["ticker"]) for r in listing})
+        _view(con, "corp_ticker",
+              [{"ticker": t, "isin8": f"KR7{t}", "corp_code": "C" + t, "is_common": True}
+               for t in tickers],
+              {"ticker": "VARCHAR", "isin8": "VARCHAR", "corp_code": "VARCHAR",
+               "is_common": "BOOLEAN"})
+        _view(con, "security_span",
+              [{"ticker": t, "first_date": min(r["date"] for r in listing if r["ticker"] == t)}
+               for t in tickers],
+              {"ticker": "VARCHAR", "first_date": "DATE"})
+        prev = [None, *cal[:-1]]
+        _view(con, "trading_calendar", [{"date": d, "prev_td": p} for d, p in zip(cal, prev,
+                                                                                 strict=True)],
+              {"date": "DATE", "prev_td": "DATE"})
+        k = {**_EVENT_CONST, **(const or {})}
+        _view(con, "_const", [k], dict.fromkeys(k, "DOUBLE"))
+        rel = con.execute(_EVENT_SQL)
+        cols = [d[0] for d in rel.description]
+        return {str(r[cols.index("event_id")]): dict(zip(cols, r, strict=True))
+                for r in rel.fetchall()}
+    finally:
+        con.close()
+
+
+def sessions(n: int, start: date = date(2020, 1, 6)) -> list[date]:
+    """평일만 n 세션."""
+    out: list[date] = []
+    d = start
+    while len(out) < n:
+        if d.weekday() < 5:
+            out.append(d)
+        d = date.fromordinal(d.toordinal() + 1)
+    return out
+
+
+def flat_listing(ticker: str, cal: list[date], shrs: float,
+                 jumps: dict[int, float] | None = None) -> list[dict[str, object]]:
+    """세션 i 의 상장주식수 = 직전 × jumps[i](없으면 1)."""
+    out: list[dict[str, object]] = []
+    s = shrs
+    for i, d in enumerate(cal):
+        s = s * (jumps or {}).get(i, 1.0)
+        out.append({"ticker": ticker, "date": d, "list_shrs": round(s)})
+    return out
+
+
 def _seed() -> Baseline:
     """S01·S02·S05 seed 병합 — 오케스트레이터가 baseline.json 에 병합하는 것과 같은 모양."""
     merged: dict[str, object] = {}
@@ -555,7 +680,7 @@ def _krx_harness(tol: float) -> duckdb.DuckDBPyConnection:
     for name, cols in _DART_EMPTY.items():
         con.execute(f"CREATE TABLE {name}({cols})")
     con.execute(f"CREATE TABLE _const AS SELECT 2555 AS effective_before_announce_max_days, "
-                f"{tol!r} AS krx_share_change_tol")
+                f"{tol!r} AS krx_share_change_tol, 25 AS bonus_ratio_window_sessions")
     return con
 
 
@@ -618,3 +743,120 @@ def test_방향_불변식_위반이면_EG3_corp_event가_폐기한다(tmp_path: 
     assert g.status is GateStatus.FAIL and g.metrics["n_direction_violation"] == 1
     assert "n_direction_violation=1" in g.detail
     assert _gate(r, "EG4").detail == "upstream_failed"
+
+
+# ── ratio 결측 복구 (RATIO_RECOVERY.md) ──────────────────────────────────────
+
+
+def test_자본변동만_있는_무상증자는_상장주식수_변화로_비율을_유도한다() -> None:
+    """서버 922건 중 bonus 413건이 이 경우다 — 자본변동 표는 발행 수량만 싣고 전 주식수를 안 실어
+    비율을 못 냈다. 분모는 `stg_listing_daily.list_shrs` 에 있고 이미 이 표의 입력이다.
+
+    무상증자 신주는 권리락 뒤 3~4주에 상장되므로 사건일 이후 25세션 안의 주식수 변화로 유도한다
+    (대조군 867건 재현율 76.3% · 중앙값 1.0000).
+    """
+    cal = sessions(60)
+    # 권리락일 = cal[20](자본변동 발행일 cal[21] 의 직전 세션) · 신주 상장은 cal[35] 에 ×3
+    listing = flat_listing("A00001", cal, 1_000_000, jumps={35: 3.0})
+    cap = [{"rcept_no": "20210301000001", "corp_code": "CA00001", "isu_dcrs_de": cal[21],
+            "isu_dcrs_stle": "무상증자", "isu_dcrs_stock_knd": "보통주",
+            "available_date": cal[50]}]
+    out = run_event_sql(cal, listing, capital=cap)
+    row = out[f"A00001:bonus:{cal[20]}"]
+    assert row["event_type"] == "bonus" and row["source"] == "capital"
+    assert row["effective_date"] == cal[20]          # 권리락일 = 발행일 직전 세션
+    assert row["ratio"] == 3.0                        # 3,000,000 / 1,000,000
+    assert row["ratio_basis"] == "krx_shares"         # 공시값이 아니라 유도값임을 밝힌다
+
+
+def test_유도_비율은_방향이_맞을_때만_채택한다() -> None:
+    """주식수가 줄거나 그대로면 무상증자로 볼 수 없다 — 유도하지 않고 결측으로 남긴다.
+
+    서버 대조군에서 방향 필터 없이는 위반이 17~45건 나왔다. 필터가 그것을 구조적으로 0으로 만든다.
+    """
+    cal = sessions(60)
+    cap = [{"rcept_no": "20210301000001", "corp_code": "CA00001", "isu_dcrs_de": cal[21],
+            "isu_dcrs_stle": "무상증자", "isu_dcrs_stock_knd": "보통주",
+            "available_date": cal[50]}]
+    for name, jumps in (("불변", None), ("감소", {35: 0.5})):
+        out = run_event_sql(cal, flat_listing("A00001", cal, 1_000_000, jumps=jumps), capital=cap)
+        row = out[f"A00001:bonus:{cal[20]}"]
+        assert row["ratio"] is None, name
+        assert row["ratio_basis"] == "none", name
+
+
+def test_창_밖의_주식수_변화는_유도에_쓰지_않는다() -> None:
+    """25세션을 넘겨 상장되면 유도하지 않는다 — 창을 넓히면 무관한 증자를 낚는다(대조군 오염 23.7%,
+    그중 유상증자·전환·스톡옵션이 원인이고 corp_event 축에 없어 걸러낼 수 없다)."""
+    cal = sessions(60)
+    listing = flat_listing("A00001", cal, 1_000_000, jumps={50: 3.0})   # 사건 30세션 뒤
+    cap = [{"rcept_no": "20210301000001", "corp_code": "CA00001", "isu_dcrs_de": cal[21],
+            "isu_dcrs_stle": "무상증자", "isu_dcrs_stock_knd": "보통주",
+            "available_date": cal[50]}]
+    row = run_event_sql(cal, listing, capital=cap)[f"A00001:bonus:{cal[20]}"]
+    assert row["ratio"] is None and row["ratio_basis"] == "none"
+
+
+def test_주식수가_거의_안_변하면_유도하지_않는다() -> None:
+    """잡음(스톡옵션·전환 행사 몇 주)을 무상증자로 오인하면 안 된다. 절단본 손픽스처
+    `000660:bonus:2013-05-09` 가 25세션 뒤 +0.007% 인데 방향 필터만으로는 1.00007 이 나왔다.
+
+    `krx_share_change_tol` 을 넘어야 채택한다 — pool 의 `share_unchanged` 가 쓰는 그 임계이고,
+    「주식수가 사실상 안 변한 사건은 가격 조정도 없다」는 같은 판단이다.
+    """
+    cal = sessions(60)
+    cap = [{"rcept_no": "20210301000001", "corp_code": "CA00001", "isu_dcrs_de": cal[21],
+            "isu_dcrs_stle": "무상증자", "isu_dcrs_stock_knd": "보통주",
+            "available_date": cal[50]}]
+    # 임계(0.001) 바로 아래 — 채택하지 않는다
+    noise = run_event_sql(cal, flat_listing("A00001", cal, 1_000_000, jumps={35: 1.0005}),
+                          capital=cap)[f"A00001:bonus:{cal[20]}"]
+    assert noise["ratio"] is None and noise["ratio_basis"] == "none"
+    # 임계 위 — 채택한다
+    real = run_event_sql(cal, flat_listing("A00001", cal, 1_000_000, jumps={35: 1.05}),
+                         capital=cap)[f"A00001:bonus:{cal[20]}"]
+    assert real["ratio"] == 1.05 and real["ratio_basis"] == "krx_shares"
+
+
+def test_감자는_유도하지_않는다() -> None:
+    """감자는 유상증자와 묶여 도는 경우가 많아 창 안에서 주식수가 내려갔다 올라온다 — 서버 대조군
+    75분위가 2.0 이고 방향 위반이 148/516 이었다. 결측으로 남긴다(RATIO_RECOVERY.md §3)."""
+    cal = sessions(60)
+    listing = flat_listing("A00001", cal, 1_000_000, jumps={35: 0.5})
+    cap = [{"rcept_no": "20210301000001", "corp_code": "CA00001", "isu_dcrs_de": cal[21],
+            "isu_dcrs_stle": "무상감자", "isu_dcrs_stock_knd": "보통주",
+            "available_date": cal[50]}]
+    row = run_event_sql(cal, listing, capital=cap)[f"A00001:capred:{cal[21]}"]
+    assert row["event_type"] == "capred"
+    assert row["ratio"] is None and row["ratio_basis"] == "none"
+
+
+def test_게이트가_ratio_basis_어휘와_ratio_정합을_잡는다() -> None:
+    """`none` 은 결측과 정확히 같은 집합이어야 한다 — 어긋나면 소비자가 유도값을 공시값으로 읽는다.
+    유도가 bonus 밖에서 나오는 것도 폐기형으로 막는다(감자는 유도 대상이 아니다)."""
+    cal = sessions(60)
+    listing = flat_listing("A00001", cal, 1_000_000, jumps={35: 3.0})
+    cap = [{"rcept_no": "20210301000001", "corp_code": "CA00001", "isu_dcrs_de": cal[21],
+            "isu_dcrs_stle": "무상증자", "isu_dcrs_stock_knd": "보통주",
+            "available_date": cal[50]}]
+    rows = list(run_event_sql(cal, listing, capital=cap).values())
+    assert {str(r["ratio_basis"]) for r in rows} <= set(rules_s05.RATIO_BASIS_VOCAB)
+    for r in rows:
+        assert (r["ratio"] is None) == (r["ratio_basis"] == "none"), r["event_id"]
+        if r["ratio_basis"] == "krx_shares" and r["source"] != "krx_listing":
+            assert r["event_type"] == "bonus", r["event_id"]
+
+
+def test_공시가_준_비율은_유도로_덮이지_않는다() -> None:
+    """`disclosed` 행은 한 값도 바뀌면 안 된다(G2-3).
+
+    상장주식수가 다르게 움직여도 공시값이 남는다.
+    """
+    cal = sessions(60)
+    listing = flat_listing("A00001", cal, 1_000_000, jumps={35: 5.0})   # 유도하면 5.0 이 나온다
+    fric = [{"rcept_no": "20210301000001", "corp_code": "CA00001", "nstk_asstd": cal[21],
+             "nstk_ascnt_ps_ostk_ratio": 2.0, "nstk_ostk_cnt": 2_000_000.0,
+             "bfic_tisstk_ostk": 1_000_000.0, "available_date": cal[10]}]
+    row = run_event_sql(cal, listing, fric=fric)[f"A00001:bonus:{cal[20]}"]
+    assert row["ratio"] == 3.0                       # 1 + 2.0 — 공시가 준 값
+    assert row["ratio_basis"] == "disclosed"

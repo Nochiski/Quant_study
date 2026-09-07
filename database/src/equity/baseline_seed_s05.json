@@ -7,7 +7,8 @@
   "krx_share_change_tol": 0.001,
   "thresholds": {
    "EG7": 0.0
-  }
+  },
+  "bonus_ratio_window_sessions": 25
  },
  "_measured": [
   {

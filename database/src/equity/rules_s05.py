@@ -58,6 +58,9 @@ REJECT_REASONS: tuple[str, ...] = ("ticker_unresolved", "effective_unresolved", 
 SCOPE_OUT_VOCAB: tuple[str, ...] = ("out_of_calendar", "unlisted_class", "class_unknown",
                                     "pre_listing", "krx_par_only", "share_unchanged")
 # 방향 불변식(EG3_corp_event 폐기형, 원천 무관): ratio 는 주식수 배수이므로 유형이 방향을 못 박는다.
+# 비율의 출처 어휘. `source` 로는 안 갈린다 — 자본변동 행의 비율은 원천이 capital 이지만 값은
+# KRX 상장주식수에서 유도한 것이다(RATIO_RECOVERY.md). 소비자가 공시값과 유도값을 가려 봐야 한다.
+RATIO_BASIS_VOCAB: tuple[str, ...] = ("disclosed", "krx_shares", "none")
 RATIO_ABOVE_ONE: tuple[str, ...] = ("split", "bonus")
 RATIO_BELOW_ONE: tuple[str, ...] = ("reverse_split", "capred")
 TICKER_LEN = 6
@@ -249,6 +252,17 @@ def eg3_corp_event(ctx: EquityGateContext) -> GateResult:
                              f'count(*) AS c FROM "{v}" GROUP BY ALL HAVING c > 1)'),
         "n_ratio_nonpositive": _n(ctx, f'SELECT count(*) FROM "{v}" '
                                        "WHERE ratio IS NOT NULL AND ratio <= 0"),
+        # ratio_basis 어휘 폐쇄 + ratio 와의 정합(RATIO_RECOVERY.md). 'none' 은 결측과 정확히
+        # 같은 집합이어야 한다 — 어긋나면 소비자가 유도값을 공시값으로 오해한다.
+        "n_ratio_basis_outside_vocab": _outside_vocab(ctx, "ratio_basis", RATIO_BASIS_VOCAB),
+        "n_ratio_basis_mismatch": _n(
+            ctx, f'SELECT count(*) FROM "{v}" WHERE '
+                 "(ratio IS NULL) <> (ratio_basis = 'none')"),
+        # 유도는 bonus 에만 건다 — 감자는 유상증자와 묶여 돌아 창 안 주식수가 내려갔다 올라온다
+        # (대조군 75분위 2.0 · 방향 위반 148/516). 유도 행이 capital 원천 bonus 밖에서 나오면 결함.
+        "n_ratio_derived_outside_bonus": _n(
+            ctx, f'SELECT count(*) FROM "{v}" WHERE ratio_basis = \'krx_shares\' '
+                 "AND source <> 'krx_listing' AND event_type <> 'bonus'"),
         # 방향 불변식 — 서버 실측 007195:split:2013-05-24 share_factor 0.833(액면 5,000→1,000 인데
         # 주식수 27,011→22,505)이 S07 EGC-04 에서 format_error 로 거절된 사고의 회귀 게이트
         "n_direction_violation": _n(
@@ -309,6 +323,9 @@ def eg3_corp_event(ctx: EquityGateContext) -> GateResult:
         "n_by_event_type": _counts(ctx, "event_type"),
         "n_by_effective_basis": _counts(ctx, "effective_basis"),
         "n_ratio_null": _n(ctx, f'SELECT count(*) FROM "{v}" WHERE ratio IS NULL'),
+        "n_by_ratio_basis": _counts(ctx, "ratio_basis"),
+        "bonus_ratio_window_sessions": ctx.baseline.get(ctx.rule.name,
+                                                        "bonus_ratio_window_sessions"),
         "max_announce_minus_effective_days": _n(
             ctx, f"SELECT coalesce(max(date_diff('day', effective_date, announce_date)), 0) "
                  f'FROM "{v}"'),
@@ -367,7 +384,8 @@ CORP_EVENT = register(EquityTable(
     grain=("event_id",),
     columns={"event_id": "VARCHAR", "ticker": "VARCHAR", "corp_code": "VARCHAR",
              "event_type": "VARCHAR", "announce_date": "DATE", "effective_date": "DATE",
-             "effective_basis": "VARCHAR", "ratio": "DOUBLE", "amount_krw": "BIGINT",
+             "effective_basis": "VARCHAR", "ratio": "DOUBLE", "ratio_basis": "VARCHAR",
+             "amount_krw": "BIGINT",
              "rcept_no": "VARCHAR", "source": "VARCHAR", "n_src_rows": "BIGINT",
              "available_date": "DATE", "available_basis": "VARCHAR"},
     inputs=("stg_event_fric", "stg_event_pifric", "stg_event_cr", "stg_capital",
@@ -402,7 +420,8 @@ CORP_EVENT = register(EquityTable(
     available_basis=("derived", "default"),
     content_date_column="announce_date",
     reject_reasons=REJECT_REASONS,
-    consts=("effective_before_announce_max_days", "krx_share_change_tol"),
+    consts=("effective_before_announce_max_days", "krx_share_change_tol",
+            "bonus_ratio_window_sessions"),
     extra_gates=(eg3_corp_event,),
     field_profiles=FIELDS_CORP_EVENT,
 ))
@@ -414,5 +433,6 @@ BASELINE_SEED = Path(__file__).parent / "baseline_seed_s05.json"
 
 __all__ = ["BASELINE_SEED", "CANONICAL_KINDS", "COMMON_KINDS", "CORP_EVENT", "EVENT_TYPE_VOCAB",
            "KNOWN_KINDS", "MVP_EVENT_TYPES", "PREFERRED_KINDS", "RATIO_ABOVE_ONE",
+           "RATIO_BASIS_VOCAB",
            "RATIO_BELOW_ONE", "RAW_SOURCE_ROWS", "SCOPE_OUT_VOCAB", "SOURCES", "TABLES",
            "UNLISTED_KINDS", "pool_sql"]

@@ -35,9 +35,10 @@ REGISTRY_DOC = Path(__file__).parents[2] / "backend" / "FACTORS.md"
 # 2026-09-07: corp_event 가 자사주 취득·CB 발행을 싣기 시작해 E05·E06 이 열렸다(E05·E06 / 결정 1).
 # `no_observations` 는 「필드는 선언했는데 값이 한 줄도 없다」였고, 값이 생기며 사유가 사라졌다.
 # 2026-09-07 S08-2: `stg_foreign_daily` 를 flow_daily 에 이어 F02·F08 이 열렸다.
-N_READY = 39
-N_BLOCKED = 15
-BLOCKED_REASON_COUNTS = {"field_unavailable": 3, "partial_support": 12}
+# 2026-09-07 F05: 요구 재료를 실재하는 `short.short_sale_volume` 로 정정해 열렸다.
+N_READY = 40
+N_BLOCKED = 14
+BLOCKED_REASON_COUNTS = {"field_unavailable": 2, "partial_support": 12}
 READINESS_GATES = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG10", "EG4", "EG5a"]
 
 
@@ -141,17 +142,17 @@ def test_수급_공매도_신용_9팩터의_판정은_선언한_필드가_가른
       F04 `flow.pension_net_buy` — `penfnd_etc_krw` 는 실재하지만 키움과 KIS 가 같은 칸을 채운
           적이 0건이라(완전 배타) KIS 의 「기금」이 키움의 「연기금등」과 같은 주체인지 확인할
           축이 없다. 사람 결정이 먼저다(BLOCKED_FACTORS F04)
-      F05 `short.short_balance_ratio` — 공매도량 ÷ 상장주식수라 비율 계산이 팩터층 몫이다
+    (F05 는 2026-09-07 에 열렸다 — 요구 재료가 만들지 않기로 한 필드를 가리키고 있었고,
+    실재하는 `short.short_sale_volume` 로 정정했다. 나눗셈은 여전히 팩터층 몫이다.)
     F03 은 재료가 있으므로 `field_unavailable` 이 아니라 `partial_support`(GAP-03)다.
     """
     _, r = built
     got = dict(_rows(r.out_dir, "SELECT factor_id, coalesce(blocked_reason, 'ready') FROM fr "
                                 "WHERE factor_id LIKE 'F0%' ORDER BY 1"))
     assert sorted(got) == [f"F0{i}" for i in range(1, 10)]
-    assert {f for f, v in got.items() if v == "ready"} == {"F01", "F02", "F06", "F07", "F08",
-                                                           "F09"}
+    assert {f for f, v in got.items() if v == "ready"} == {"F01", "F02", "F05", "F06", "F07",
+                                                           "F08", "F09"}
     assert got["F04"] == "field_unavailable: flow.pension_net_buy"
-    assert got["F05"] == "field_unavailable: short.short_balance_ratio"
     assert got["F03"] == "partial_support: flow.institution_net_buy"
 
 

@@ -22,7 +22,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.10.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.11.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -73,6 +73,13 @@ RULES_VERSION = "e1.10.0"                # BuildRecord.rules_version 에 실린�
 #         (date, ticker) 축이라 행 수는 불변이다. 필드 `flow.foreign_ownership`·
 #         `flow.foreign_limit_exhaustion` 선언(`dataset_profile` 72 → 74, FIELD_MAP §2 42 → 43)
 #         으로 팩터 준비도 **37 → 39**(F02 외국인 보유비중 변화 · F08 한도소진율).
+# e1.11.0: F05 재정의 — 팩터가 `short.short_balance_ratio` 라는 **만들지 않기로 확정한 필드**를
+#         요구하고 있었다(분모 상장주식수가 다른 표에 있어 셀 하나로 굽지 않는다). 실재하는
+#         `short_daily.short_volume_kiwoom_shr` 위에 `short.short_sale_volume` 을 선언하고
+#         팩터 요구 재료를 그것 + `price.shares_outstanding` 으로 바꿨다(나눗셈은 팩터층 몫).
+#         이름도 「공매도 잔고비율」 → 「공매도 거래비중」으로 정정했다 — 진짜 잔고는 취득 불가로
+#         확정됐다(FACTORS §12 F45). `dataset_profile` 74 → 75 · FIELD_MAP §2 43 → 44 ·
+#         팩터 준비도 **39 → 40**.
 
 # DESIGN §1 — stage 4종 + equity 신설 convention
 BASIS_VOCAB: tuple[str, ...] = ("measured", "derived", "convention", "default", "unknown")

@@ -48,10 +48,10 @@ CHAIN: tuple[str, ...] = (
     "opinion_daily", "opinion_broker_daily")
 
 # 2026-09-07 S08-2: `flow.foreign_ownership`·`flow.foreign_limit_exhaustion` 선언(72 → 74).
-N_FIELDS = 74                    # 선언 행수 — 코드가 정본이라 서버에서도 같다
-N_FIELD_MAP_SCOPE = 32           # FIELD_MAP §2 42 어휘 중 프로파일 행을 갖는 것
+N_FIELDS = 75                    # 선언 행수 — 코드가 정본이라 서버에서도 같다
+N_FIELD_MAP_SCOPE = 33           # FIELD_MAP §2 42 어휘 중 프로파일 행을 갖는 것
 N_INTERNAL_SCOPE = 42            # equity 내부 스코프(price.adj_close·fin_std 계정·4B·유니버스 …)
-N_FIELD_MAP_VOCAB = 43           # FIELD_MAP §2 표의 field_id 수 (check_field_map.py 와 같은 축)
+N_FIELD_MAP_VOCAB = 44           # FIELD_MAP §2 표의 field_id 수 (check_field_map.py 와 같은 축)
                                  # 2026-09-07: `flow.foreign_limit_exhaustion` 신설(F08 재료)
 PROFILE_GATES = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG2_dataset_profile", "EG9", "EG4", "EG5a"]
 
@@ -203,6 +203,8 @@ GRID_FIELDS = {
     # S08-2 (2026-09-07) — 원천이 키움 하나뿐이라 src='kis' 행은 NULL 이다
     "flow.foreign_ownership": ("flow_daily", "foreign_wght_pct", "pct", "ratio"),
     "flow.foreign_limit_exhaustion": ("flow_daily", "foreign_limit_exh_pct", "pct", "ratio"),
+    # F05 재정의 (2026-09-07) — 비율이 아니라 거래량이고 나눗셈은 팩터층 몫이다
+    "short.short_sale_volume": ("short_daily", "short_volume_kiwoom_shr", "주", "count"),
 }
 
 

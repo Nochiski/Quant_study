@@ -333,6 +333,21 @@ FIELDS: tuple[FieldProfile, ...] = (
                  "`short_avg_price_kiwoom_raw` + `_basis='unknown'` 로 따로 남는다(FX-3-009).",
         coverage_axis="grid_session", axis_columns=_SAXIS),
     FieldProfile(
+        field_id="short.short_sale_volume", columns=("short_volume_kiwoom_shr",),
+        label="공매도 거래량(키움)", unit="주", value_type="count", frequency="session",
+        recommended_lag_sessions=1, recommended_lag_days=1, point_in_time=True,
+        requires_confirmation=False,
+        disclosure_basis="원장 날짜 = 매매일. 키움 ka10014 는 공표 시각을 주지 않는다"
+                         "(stage lag_known=false) → 익일 지식으로 쓴다",
+        evidence="short_daily.short_volume_kiwoom_shr ← stg_short_daily_kiwoom.shrts_trde_qty_shr. "
+                 "원천은 거래대금과 같은 이유로 키움 고정이다. **F05 가 요구하는 재료가 이것이다** "
+                 "— 팩터 정의는 `short.short_balance_ratio` 를 가리키고 있었는데 그 필드는 "
+                 "만들지 않기로 확정한 것이다(분모 상장주식수가 다른 표에 있어 셀 하나로 굽지 "
+                 "않는다). 비율은 이 값 ÷ `price.shares_outstanding` 로 **팩터층이** 낸다. "
+                 "이름도 잔고가 아니라 거래량이다 — 진짜 공매도 잔고는 취득 불가로 확정됐다"
+                 "(FACTORS §12 F45).",
+        coverage_axis="grid_session", axis_columns=_SAXIS),
+    FieldProfile(
         field_id="short.borrowed_quantity", columns=("lending_balance_kis_shr",),
         label="대차잔고(주식수, KIS)", unit="주", value_type="count", frequency="session",
         recommended_lag_sessions=1, recommended_lag_days=1, point_in_time=True,

@@ -468,6 +468,31 @@ scp database/src/equity/baseline_locked.json kael-server:~/quant-ledger/data/equ
 
 ---
 
+## 8-3. 2026-09-07 사건 유형 확장 (e1.9.0)
+
+`corp_event` 가 **자사주 취득 1,912건 · CB 발행 4,690건**을 싣기 시작했다(3,147 → **9,749행**).
+
+| 표 | 결과 |
+|---|---|
+| `corp_event` | 9,749행 · 2회 빌드 해시 동일 `9749:3befee5c625e778e` · EG5a PASS |
+| `adj_factor` | **해시 불변** `5507:86dceab4e5491482` |
+| `price_adj_daily` | **해시 불변** `10890251:c78a6675e0815512` |
+| `universe_daily` | **해시 불변** `10890251:6fb8d3a84ebb534d` |
+| `dataset_profile` | 커버 상승 — `event.buyback_amount` 0 → 19.7% · `event.capital_raise_amount` 0 → 48.2% |
+| `factor_readiness` | **ready 35 → 37** · blocked 19 → 17 (`no_observations` 사유 소멸) |
+
+**조정 축 세 표의 해시가 그대로인 것이 이 확장의 핵심 성질이다.** 두 유형은 가격 조정 사건이
+아니고(자사주는 주식수 불변·CB 는 그날 주식수 불변) `adj_factor` 가 계수 4유형만 읽으므로
+구조적으로 격리돼 있다. 게이트 둘이 그 격리를 지킨다 — 사실 유형이 `ratio` 를 가지거나 계수
+유형이 `amount_krw` 를 가지면 폐기다.
+
+**유상증자(`stg_event_piic` 5,538행)는 아직 못 싣는다.** 신주배정기준일 컬럼이 없고
+`ssl_bgd`/`ssl_edd` 채움률이 **5.9%** 라 가격 축 효력일을 정할 수 없다. 이것이
+`DECISIONS_PENDING` 결정 1 의 남은 절반이고, **날짜 원천을 먼저 찾아야** 움직인다
+(`unknown_price_only` 1,737건 중 537건이 유상증자다).
+
+---
+
 ## 9. 미해결 후속
 
 정본은 DESIGN §11 이다. 여기엔 **다음 사람이 곧바로 집을 수 있는 것**만 골라 적는다.

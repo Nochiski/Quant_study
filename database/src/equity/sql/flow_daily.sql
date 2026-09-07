@@ -117,17 +117,29 @@ evidence AS (
     FROM grid g
     LEFT JOIN shard_cover sc ON sc.date = g.date AND sc.ticker = g.ticker
     LEFT JOIN unit_cover  uc ON uc.date = g.date AND uc.ticker = g.ticker
+),
+-- ── 외국인 보유 (S08-2, F02·F08) ─────────────────────────────────────────────
+-- 원천은 `stg_foreign_daily`(키움 ka10008) 하나뿐이다 — 순매수 격자의 상보 결합과 달리 **원천
+-- 축이 없다**. 그래서 `src='kiwoom'` 행에만 붙고 KIS 보완 행은 NULL 로 둔다(0 으로 채우지
+-- 않는다). 격자 등식(EG1)은 (date, ticker) 축이라 행 수가 변하지 않는다.
+foreign_own AS (
+    SELECT ticker, date, wght_pct, limit_exh_rt_pct, poss_stkcnt_shr
+    FROM stg_foreign_daily
 )
 -- ① 측정 행
 SELECT l.date, l.ticker, l.src,
        l.ind_invsr_krw, l.frgnr_invsr_krw, l.orgn_krw, l.fnnc_invt_krw, l.insrnc_krw,
        l.invtrt_krw, l.etc_fnnc_krw, l.bank_krw, l.penfnd_etc_krw, l.samo_fund_krw,
        l.natn_krw, l.etc_corp_krw, l.natfor_krw,
+       CASE WHEN l.src = 'kiwoom' THEN fo.wght_pct END          AS foreign_wght_pct,
+       CASE WHEN l.src = 'kiwoom' THEN fo.limit_exh_rt_pct END  AS foreign_limit_exh_pct,
+       CASE WHEN l.src = 'kiwoom' THEN fo.poss_stkcnt_shr END   AS foreign_poss_shr,
        {'kind': 'measured', 'evidence': 'none'} AS fill_kind,
        l.date     AS available_date,
        'default'  AS available_basis,
        NULL       AS reject_reason
 FROM ledger l
+LEFT JOIN foreign_own fo ON fo.ticker = l.ticker AND fo.date = l.date
 WHERE EXISTS (SELECT 1 FROM grid g WHERE g.date = l.date AND g.ticker = l.ticker)
 
 UNION ALL
@@ -135,6 +147,7 @@ UNION ALL
 -- ② 미측정 셀
 SELECT e.date, e.ticker, e.src,
        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+       NULL, NULL, NULL,
        {'kind': e.kind, 'evidence': e.evidence} AS fill_kind,
        e.date     AS available_date,
        'default'  AS available_basis,
@@ -149,6 +162,7 @@ SELECT l.date, l.ticker, l.src,
        l.ind_invsr_krw, l.frgnr_invsr_krw, l.orgn_krw, l.fnnc_invt_krw, l.insrnc_krw,
        l.invtrt_krw, l.etc_fnnc_krw, l.bank_krw, l.penfnd_etc_krw, l.samo_fund_krw,
        l.natn_krw, l.etc_corp_krw, l.natfor_krw,
+       NULL, NULL, NULL,
        {'kind': 'measured', 'evidence': 'none'} AS fill_kind,
        l.date     AS available_date,
        'default'  AS available_basis,

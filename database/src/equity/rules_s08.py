@@ -360,11 +360,16 @@ def _coverage_metrics(ctx: EquityGateContext, out: str) -> dict[str, object]:
 # STAGE_HANDOFF §2 「lag_known=false 는 lag 0 을 적용하면 안 된다」 + FIELD_MAP §1 랙 단위
 # 「나머지 전부 1 세션」 을 그대로 따른다. `available_date = date`(basis default)인 것은 팩트 행의
 # 축이고, 소비 랙은 이 선언이 낸다(테이블 `available_rule` 이 그렇게 적어 두었다).
-# 여기 없는 `flow.foreign_ownership`·`flow.foreign_limit_exhaustion`·`flow.pension_net_buy` 는
-# **선언하지 않는다** — 앞 둘은 원천이 `stg_foreign_daily`(ka10008)라 이 테이블에 컬럼이 없고
-# (S08-2, DESIGN §4-3 구현 결과 ①), `pension_net_buy` 는 `penfnd_etc_krw` 가 실재하지만 FIELD_MAP
-# §2 어휘에 그 field_id 행이 없다. 없는 것을 선언하면 `dataset_profile` 에 '있는데 늘 빈' 행이
-# 생겨 S20 준비도가 거짓으로 ready 가 된다.
+# `flow.pension_net_buy` 는 **선언하지 않는다** — `penfnd_etc_krw` 가 실재하지만 FIELD_MAP §2
+# 어휘에 그 field_id 행이 없고, 무엇보다 **주체 대응을 검증할 축이 없다**: 키움과 KIS 가 같은
+# (ticker, date) 칸을 채운 적이 0건이라(키움 7,540,202 · KIS 939,610, 완전 배타) KIS 의 「기금」이
+# 키움의 「연기금등」과 같은 주체인지 데이터로 확인할 길이 없다. 사람 결정이 먼저다
+# (BLOCKED_FACTORS F04). 없는 것을 선언하면 `dataset_profile` 에 '있는데 늘 빈' 행이 생겨
+# S20 준비도가 거짓으로 ready 가 된다.
+_FOREIGN_NOTE = ("원천은 `stg_foreign_daily`(키움 ka10008) 하나뿐이라 **원천 축이 없다** — "
+                 "`src='kis'` 행에는 값이 없다(0 으로 채우지 않는다). 서버 원장 7,682,844행 · "
+                 "2,602종목 · 2009-10-15 ~ 2026-08-24 이고 세 컬럼 결측 0 이다. 격자 등식(EG1)은 "
+                 "(date, ticker) 축이라 이 컬럼이 붙어도 행 수가 변하지 않는다.")
 _FAXIS: tuple[str, str] = ("ticker", "date")
 _FLOW_DISCLOSURE = ("원장 날짜 = 매매일. 키움 ka10060·KIS 투자자별 매매동향 모두 공표 시각을 "
                     "주지 않는다(stage lag_known=false) → 익일 지식으로 쓴다")
@@ -400,6 +405,23 @@ FIELDS: tuple[FieldProfile, ...] = (
                  "partial_support 다. " + _FLOW_SRC_NOTE,
         coverage_axis="grid_session", axis_columns=_FAXIS),
     FieldProfile(
+        field_id="flow.foreign_ownership", columns=("foreign_wght_pct",),
+        label="외국인 보유비중", unit="pct", value_type="ratio", frequency="session",
+        recommended_lag_sessions=1, recommended_lag_days=1, point_in_time=True,
+        requires_confirmation=False, disclosure_basis=_FLOW_DISCLOSURE,
+        evidence="flow_daily.foreign_wght_pct ← stg_foreign_daily.wght_pct. **퍼센트 단위**"
+                 "(52.79 = 52.79%) — 비율로 쓰려면 소비자가 100 으로 나눈다. " + _FOREIGN_NOTE,
+        coverage_axis="grid_session", axis_columns=_FAXIS),
+    FieldProfile(
+        field_id="flow.foreign_limit_exhaustion", columns=("foreign_limit_exh_pct",),
+        label="외국인 한도소진율", unit="pct", value_type="ratio", frequency="session",
+        recommended_lag_sessions=1, recommended_lag_days=1, point_in_time=True,
+        requires_confirmation=False, disclosure_basis=_FLOW_DISCLOSURE,
+        evidence="flow_daily.foreign_limit_exh_pct ← stg_foreign_daily.limit_exh_rt_pct. "
+                 "**퍼센트 단위**. 외국인 취득 한도가 걸린 업종(통신·항공 등)에서만 보유비중과 "
+                 "갈리고, 한도가 없는 종목은 보유비중과 같은 값이다. " + _FOREIGN_NOTE,
+        coverage_axis="grid_session", axis_columns=_FAXIS),
+    FieldProfile(
         field_id="flow.retail_net_buy", columns=("ind_invsr_krw",),
         label="개인 순매수(대금)", unit="KRW", value_type="amount", frequency="session",
         recommended_lag_sessions=1, recommended_lag_days=1, point_in_time=True,
@@ -424,10 +446,14 @@ FLOW_DAILY = register(EquityTable(
     # 순서만 대조한다 — DESIGN §4-3 이 KIS 를 상보 원천으로 못박아 두 스키마가 함께 결정한다).
     columns={"date": "DATE", "ticker": "VARCHAR", "src": "VARCHAR",
              **_INVESTOR_TYPES,
+             # S08-2 외국인 보유 — 원천이 키움 하나뿐이라 `src='kis'` 행은 NULL 이다.
+             "foreign_wght_pct": "DECIMAL(5,2)",
+             "foreign_limit_exh_pct": "DECIMAL(5,2)",
+             "foreign_poss_shr": "DECIMAL(18,0)",
              "fill_kind": "STRUCT(kind VARCHAR, evidence VARCHAR)",
              "available_date": "DATE", "available_basis": "VARCHAR"},
     inputs=("stg_flow_daily_kiwoom", "stg_flow_split_daily", "stg_shards_kiwoom",
-            "stg_units_kis", "universe_daily", "trading_calendar"),
+            "stg_units_kis", "stg_foreign_daily", "universe_daily", "trading_calendar"),
     partition_class="date_axis",
     partition_key_expr="year(date)",
     available_rule="column:date — 수급(stage lag_known=false), 공표 시각 미제공 → basis default",
@@ -455,6 +481,8 @@ FLOW_DAILY = register(EquityTable(
                                  *(s for _, s in KIS_MAPPING if s is not None)),
         "stg_shards_kiwoom": ("src_api", "ticker", "req_start", "req_end", "status"),
         "stg_units_kis": ("dataset", "ticker", "status", "window_from", "window_to"),
+        "stg_foreign_daily": ("ticker", "date", "wght_pct", "limit_exh_rt_pct",
+                              "poss_stkcnt_shr"),
         "universe_daily": ("date", "ticker", "status", "sec_type"),
         "trading_calendar": ("date",)},
     available_basis=("default",),

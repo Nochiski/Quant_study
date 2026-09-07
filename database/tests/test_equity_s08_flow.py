@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 import duckdb
@@ -605,3 +606,31 @@ def test_시드가_요구_상수를_전부_담는다() -> None:
     # 절단본 실측 최댓값(4e6)보다 크고, 반올림 상한(12주체 × 0.5백만원)과 같다
     assert seed.get("flow_daily", "investor_sum_tol_krw") == 12 * 500_000
     assert seed.get("flow_daily", "investor_sum_tol_krw") > INVESTOR_SUM_ABS_MAX
+
+
+# ── S08-2 외국인 보유 (F02·F08) ──────────────────────────────────────────────
+
+
+def test_외국인_보유비중과_한도소진율이_키움_행에_붙는다(built: build.BuildResult) -> None:
+    """`stg_foreign_daily`(키움 ka10008) 를 격자에 잇는다 — 서버 768만 행 · 2,602종목 ·
+    2009-10-15 ~ 2026-08-24 이고 다섯 컬럼 **결측 0** 이다.
+
+    **원천 축이 없다** — 외국인 보유는 키움 한 곳뿐이라 `src='kis'` 행에는 값이 없다. 격자 등식
+    (EG1)은 (date, ticker) 축이라 행 수가 변하지 않고, 채우지 못한 이유는 `fill_kind` 가 이미
+    나르는 규약을 따른다. 별도 표를 만들지 않은 이유가 이것이다(BLOCKED_FACTORS §2-2 (가)).
+    """
+    assert built.ok and built.out_dir is not None
+    got = _query(built.out_dir,
+                 "SELECT foreign_wght_pct, foreign_limit_exh_pct, foreign_poss_shr FROM f "
+                 "WHERE ticker = '005930' AND date = DATE '2018-05-04' AND src = 'kiwoom'")
+    assert got == [(Decimal("52.79"), Decimal("52.79"), Decimal("3388514370"))]
+
+
+def test_외국인_보유는_키움_행에만_실린다(built: build.BuildResult) -> None:
+    """KIS 보완 행에는 외국인 보유 원천이 없다 — 0 으로 채우지 않고 NULL 로 둔다."""
+    assert built.out_dir is not None
+    n_kis, n_filled = _query(built.out_dir,
+        "SELECT count(*), count(foreign_wght_pct) + count(foreign_poss_shr) "
+        "FROM f WHERE src = 'kis'")[0]
+    assert n_kis, "절단본에 KIS 행이 있어야 이 검사가 성립한다"
+    assert n_filled == 0

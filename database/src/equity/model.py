@@ -22,7 +22,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.9.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.10.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -66,6 +66,13 @@ RULES_VERSION = "e1.9.0"                # BuildRecord.rules_version 에 실린�
 #         폐기형으로 막는다. 팩터 준비도 **35 → 37**(E05 자사주 발표 · E06 유상증자·CB 발행).
 #         유상증자(`stg_event_piic`)는 **아직 못 싣는다** — 신주배정기준일 컬럼이 없고
 #         `ssl_bgd`/`ssl_edd` 채움률이 5.9% 라 가격 축 효력일을 정할 수 없다.
+# e1.10.0: S08-2 외국인 보유 — `flow_daily` 에 `foreign_wght_pct`·`foreign_limit_exh_pct`·
+#         `foreign_poss_shr` 3컬럼 신설(원천 `stg_foreign_daily`, 키움 ka10008, 서버 7,682,844행 ·
+#         2,602종목 · 2009-10-15 ~ 2026-08-24 · 결측 0). **원천 축이 없다** — 외국인 보유는 키움
+#         한 곳뿐이라 `src='kis'` 행은 NULL 이고 0 으로 채우지 않는다. 격자 등식(EG1)은
+#         (date, ticker) 축이라 행 수는 불변이다. 필드 `flow.foreign_ownership`·
+#         `flow.foreign_limit_exhaustion` 선언(`dataset_profile` 72 → 74, FIELD_MAP §2 42 → 43)
+#         으로 팩터 준비도 **37 → 39**(F02 외국인 보유비중 변화 · F08 한도소진율).
 
 # DESIGN §1 — stage 4종 + equity 신설 convention
 BASIS_VOCAB: tuple[str, ...] = ("measured", "derived", "convention", "default", "unknown")

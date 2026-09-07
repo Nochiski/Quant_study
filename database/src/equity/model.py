@@ -22,7 +22,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.7.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.8.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -50,6 +50,12 @@ RULES_VERSION = "e1.7.0"                # BuildRecord.rules_version 에 실린�
 #         (TECH_DEBT §10). equity 는 사건을 버리지 않고 사실만 싣는다 — 정지 중 감자는 보유 수량을
 #         실제로 바꾸고, 26건 중 18건은 거래소가 정지 기간에 기준가를 공표했다. 기존 열의 값은
 #         바뀌지 않지만 선언 컬럼이 늘어 EG5a 비교 대상이 달라진다.
+# e1.8.0: S05 ratio 복구 — `corp_event` 에 `ratio_basis` 열 신설(disclosed·krx_shares·none)하고,
+#         자본변동만 있어 `ratio` 가 비었던 **무상증자**를 KRX 상장주식수 변화로 유도한다
+#         (사건일 직전 값 대비 `bonus_ratio_window_sessions`=25 세션 뒤 값, 증가폭이
+#         `krx_share_change_tol` 초과일 때만). 감자는 유도하지 않는다 — 유상증자와 묶여 돌아
+#         창 안 주식수가 내려갔다 올라온다(대조군 75분위 2.0). 근거·게이트는 RATIO_RECOVERY.md.
+#         `corp_event.ratio` 가 채워지면 `adj_factor` 계수와 `price_adj_daily` 조정가가 바뀐다.
 
 # DESIGN §1 — stage 4종 + equity 신설 convention
 BASIS_VOCAB: tuple[str, ...] = ("measured", "derived", "convention", "default", "unknown")

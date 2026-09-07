@@ -27,6 +27,7 @@ from pathlib import Path
 
 import duckdb
 import pytest
+from conftest import apply_slice_override
 from equity import build, gates, inputs, rules_s19
 from equity.baseline import Baseline, load
 from equity.gates import EquityGateContext
@@ -60,7 +61,7 @@ def _seed() -> Baseline:
         for k, v in load(path).data.items():
             if not k.startswith("_") and k != "measured_at" and isinstance(v, dict):
                 merged.setdefault(k, {}).update(v)
-    return Baseline(dict(merged))
+    return Baseline(apply_slice_override(merged))
 
 
 SEED = _seed()

@@ -38,6 +38,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+from conftest import apply_slice_override
 from equity import (
     build,
     catalog,
@@ -106,7 +107,7 @@ def seed() -> Baseline:
         for k, v in load(p).data.items():
             if not k.startswith("_") and k != "measured_at" and isinstance(v, dict):
                 merged.setdefault(k, {}).update(v)
-    return Baseline(dict(merged))
+    return Baseline(apply_slice_override(merged))
 
 
 @pytest.fixture(scope="module")

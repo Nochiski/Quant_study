@@ -1,6 +1,6 @@
 {
- "_seed": "S03·S03B·S03B-2·S03C (universe_daily · universe_policy) 가 요구하는 baseline 상수. 오케스트레이터가 data/equity/baseline.json 에 병합한다. 전부 산출 규칙 상수(GATES §5-B8 부류)라 게이트 임계가 아니다. no_trade_run_k 는 제안값이며 서버 실측(EG3_universe.no_trade_run_hist) 뒤 사람 승인이 필요하다. liquid_top_pct 는 사용자 선택 상위 비율(09-05 결정, 기본 50%). S03C 세 창(corp_action_lookback_sessions·corp_action_lookahead_sessions·admin_signal_window_sessions)도 제안값 — 서버 EG3_universe.no_trade_reason_counts 를 보고 확정한다.",
- "measured_at": "2026-09-05",
+ "_seed": "S03·S03B·S03B-2·S03C (universe_daily · universe_policy) 가 요구하는 baseline 상수. 오케스트레이터가 data/equity/baseline.json 에 병합한다. 전부 산출 규칙 상수(GATES §5-B8 부류)라 게이트 임계가 아니다. **네 상수(no_trade_run_k 5 · corp_action_lookahead_sessions 45 · corp_action_lookback_sessions 5 · admin_signal_window_sessions 5)는 2026-09-07 서버 실측으로 현재 값 확정**했다 — 사유는 각 _measured[].note. liquid_top_pct 는 사용자 선택 상위 비율(09-05 결정, 기본 50%).",
+ "measured_at": "2026-09-07",
  "universe_daily": {
   "admin_window_td": 365,
   "no_trade_run_k": 5,
@@ -33,10 +33,10 @@
    "kind": "convention",
    "sql": "-- 근거 실측(절단본, 빌드 SQL 과 독립 손계산): 무거래(volume_shr=0) 연속 run 길이 분포 {1×7, 3×3, 10, 12, 22, 49, 55, 66, 116}. halt_state 밖의 긴 run = 000030 22(폐지 전, 공시 없음) · 900050 10·66·116(HK 상장사, 공시 없음) · 900060 해제 뒤 2일 · 101970 해제일 1일. k 별 run 으로만 suspended 되는 행: k=3 211 · k=5 201 · k=10 181 · k=20 148 (halt 126 별도).",
    "inputs": {},
-   "measured_at": "2026-09-05",
+   "measured_at": "2026-09-07",
    "growing": false,
    "used_by": "sql/universe_daily.sql status (price_kind='reference' ∧ no_trade_run ≥ k → suspended) · rules_s03.eg3_universe n_status_halt_mismatch",
-   "note": "**제안값 — 사람 승인 필요.** 목적은 정지 공시 없이 오래 기준가만 찍히는 종목(P6: 지정 뒤 첫 거래 중앙값 4일·p90 562일·재거래 없음 930)을 잡는 것. k=5 = 1거래주(KRX 주 5일) = P6 중앙값(4)+1 이라 '정지의 긴 절반' 부터 잡고, 단일·이틀 무거래(비유동 우선주의 일상)는 잡지 않는다. 절단본에서 잡히는 최단 무공시 정지는 3일(005930·005935 분할 정지 2018-04-30~05-03) — k=5 는 이를 놓치지만 커널이 reference 행을 방출하지 않으므로(§7) 거래 가능성 판정에는 영향이 없고 유니버스 상태에만 남는다. 대안 k=10(2주)·k=20(adv20 창과 같은 1개월)은 잡히는 행이 각각 10%·26% 준다. 서버 빌드 뒤 EG3_universe.no_trade_run_hist(1 / 2-4 / 5-9 / 10-19 / 20+ 행수, halt_state 무관)와 n_suspended_by_run 을 보고 확정한다. 값을 바꾸면 status 이력과 FX-1-012d 픽스처가 같이 바뀐다."
+   "note": "**확정 — 단, 거래소 정지 목록 수집 뒤 재검토(2026-09-07).** 서버 실측에서 이 값은 실전 유니버스에 **완전히 무반응**이다: k 를 1 부터 40 까지 바꿔도 `krx.liquid` 행수·종목수가 하나도 변하지 않는다(liquid 술어의 `no_trade_reason <> 'illiquid'` 가 이미 걸러내기 때문). `krx.common-stock`·`krx.investable` 도 0.01~0.15% 범위에서만 움직인다. 여기서 최적값을 찾는 것은 얻는 게 없다. 재검토 조건: 40세션 이상 무거래가 31,833행인 것은 '거래소 매매거래정지 현황' 을 아직 수집하지 않아 공시 텍스트로 안 잡히는 정지가 illiquid 로 남기 때문이다 (TECH_DEBT §9). 그 원천이 들어오면 분포가 통째로 바뀌므로 그때 다시 본다."
   },
   {
    "table": "universe_daily",
@@ -57,10 +57,10 @@
    "kind": "convention",
    "sql": "-- 근거(서버 P23′, S06 4차): adj_factor 의 가격 대조 창이 [−5, +40] 세션이고, 명목일과 다른 ok 적용일 265건의 오프셋은 중앙값 13.5 · max 개별 40 · 성분 48 세션. 절단본(S03C 로컬): 005930·005935 50:1 분할 apply 2018-05-04 앞 무거래 3세션(04-30~05-03)이 D−5 창 안에 든다.",
    "inputs": {},
-   "measured_at": "2026-09-05",
+   "measured_at": "2026-09-07",
    "growing": false,
    "used_by": "sql/universe_daily.sql ca_win (S03C ③ corp_action_window 창의 뒤쪽 폭) · rules_s03.eg3_universe n_no_trade_reason_recompute_mismatch",
-   "note": "**제안값 — 사람 승인 필요.** D 기준 [D − 5, D + 45] 세션 안에 같은 티커의 adj_factor 적용일이 있으면 그날 무거래는 corp_action_window 다. 뒤쪽(lookback)이 짧은 이유: 사건이 지나간 뒤의 무거래는 사건 때문이 아니라 그 종목이 원래 안 도는 것일 가능성이 커서, 길게 잡으면 illiquid 가 통째로 corp_action_window 로 넘어간다. adj_factor 의 apply 대조 창(−5)과 같은 값으로 맞춰 두 창이 같은 사건 축을 쓰게 한다. 값을 키우면 status suspended 가 늘고(§4-1 새 규칙) liquid 유니버스가 줄어든다."
+   "note": "**확정(2026-09-07).** 조정 배수를 찾을 때 쓰는 뒤쪽 탐색 창과 같은 값으로 두어 두 축이 어긋나지 않게 한다. 값을 바꿔도 전 구간 0.01~0.15% 범위에서만 움직인다."
   },
   {
    "table": "universe_daily",
@@ -69,10 +69,10 @@
    "kind": "convention",
    "sql": "-- 근거(서버 P23′): adj_factor ok 적용일 오프셋 중앙값 13.5 세션 · max 개별 40 · 성분(combined) 48. 감자·병합은 공시 뒤 거래정지가 이어지다 적용일에 재개되므로 '적용일 앞' 이 정지 구간이다.",
    "inputs": {},
-   "measured_at": "2026-09-05",
+   "measured_at": "2026-09-07",
    "growing": false,
    "used_by": "sql/universe_daily.sql ca_win (S03C ③ corp_action_window 창의 앞쪽 폭) · rules_s03.eg3_universe n_no_trade_reason_recompute_mismatch",
-   "note": "**제안값 — 사람 승인 필요.** 앞쪽(lookahead)이 긴 이유: 감자·액면병합의 매매거래정지는 사건 **앞**에 놓이고(정지 → 적용일에 재개) P23′ 오프셋 max 가 개별 40·성분 48 세션이라 40 으로는 성분 사건 일부를 놓친다. 45 는 개별 max 40 을 덮고 성분 max 48 은 못 덮는 절충 — 남는 3 세션짜리 꼬리는 illiquid 로 떨어지고 run ≥ k 면 여전히 suspended 라 엔진 안전 쪽으로 실패한다. 서버 EG3_universe.no_trade_reason_counts 에서 corp_action_window 대 illiquid 비를 보고 48 로 올릴지 판단한다."
+   "note": "**확정(2026-09-07).** 데이터가 지지한다 — 정상적인 변경상장 정지의 중앙값 12~17세션 대비 3배 여유이고 사건의 79%를 덮는다. 60 으로 올려서 추가로 덮는 것은 18건뿐이고 그만큼 유니버스에서 빼는 구간이 넓어진다."
   },
   {
    "table": "universe_daily",
@@ -81,10 +81,10 @@
    "kind": "convention",
    "sql": "-- 근거(서버 P19′): signal_admin 행 1,200 · admin_state true measured 274,524 + derived_kospi_window 39,776. 상태는 몇 달~1년(admin_window_td 365) 이어지지만 지정 '직후' 는 그 앞머리뿐이다.",
    "inputs": {},
-   "measured_at": "2026-09-05",
+   "measured_at": "2026-09-07",
    "growing": false,
    "used_by": "sql/universe_daily.sql reasoned (S03C ④ admin) · rules_s03.eg3_universe n_no_trade_reason_recompute_mismatch",
-   "note": "**제안값 — 사람 승인 필요.** 창 = [지정 신호일, 지정일 + 5세션](td_seq 차 ≤ 5, 지정일 당일 포함). 관리종목 상태 자체를 이유로 쓰지 않는 까닭: admin_state 는 지정 해제까지 이어져 그 기간 무거래를 전부 admin 으로 부르면 illiquid 와 구분이 사라지고, 관리종목 편입은 universe_policy 의 investable(NOT admin_state)이 이미 뺀다. 여기서 잡고 싶은 것은 '지정 공시 직후 며칠 안 도는' 국면뿐이다. no_trade_run_k 와 같은 5(1거래주)로 맞춰 두 임계가 같은 시간 눈금을 쓰게 한다. 값을 키우면 admin 이 늘고 illiquid 가 줄어 status suspended 가 준다."
+   "note": "**확정(2026-09-07).** 이 값은 조절 손잡이가 아니라 **원칙을 코드에 박아 두는 장치**다 — 관리종목 '상태' 는 몇 달씩 가는데 그 기간의 무거래를 전부 관리종목 탓으로 부르면 비유동과 구분이 사라지므로 지정 직후 국면만 그렇게 부른다. 해당 행이 13개뿐이라 튜닝에 의미가 없다."
   },
   {
    "table": "universe_policy",

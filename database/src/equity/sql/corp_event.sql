@@ -298,22 +298,68 @@ out AS (
     SELECT ticker, corp_code, event_type, announce_date, effective_date, effective_basis,
            ratio, rcept_no, source, 1::BIGINT, available_basis, reject_reason
     FROM judged WHERE reject_reason IS NOT NULL
+),
+-- ── ratio 결측 복구: 자본변동만 있는 무상증자 (RATIO_RECOVERY.md) ──────────────
+-- 자본변동 표는 발행 수량만 싣고 **전 주식수를 안 실어** 비율을 못 낸다. 분모는
+-- stg_listing_daily.list_shrs 에 있다. 무상증자 신주는 권리락 뒤 3~4주에 상장되므로 사건일 이후
+-- N세션 시점의 주식수와 사건일 직전 주식수의 비로 유도한다.
+--   · 대조군(공시가 비율을 준 bonus 867건) 재현율 76.3% · 중앙값 1.0000 · 방향 위반 0.
+--   · 감자는 유상증자와 묶여 돌아 창 안에서 주식수가 내려갔다 올라온다(75분위 2.0 · 방향 위반
+--     148/516) → **유도하지 않는다**.
+--   · 어긋나는 23.7% 는 창 안의 유상증자·전환·스톡옵션이 원인이고 과대 추정 방향이다.
+--     adj_factor 가 apply_date 가격으로 검산해 안 맞으면 no_price_match 로 거부하므로
+--     틀린 비율이 조용히 반영될 경로가 없다.
+-- 판정(pool·judged·ranked)은 건드리지 않는다 — 비어 있던 열을 채울 뿐이라 행 수(EG1)가 불변이다.
+listing_seq AS (
+    SELECT ticker, date, list_shrs,
+           row_number() OVER (PARTITION BY ticker ORDER BY date) AS n
+    FROM stg_listing_daily
+    WHERE list_shrs > 0
+),
+bonus_base AS (
+    SELECT o.ticker, o.effective_date, b.n AS n0, b.list_shrs AS shrs_before
+    FROM (SELECT DISTINCT ticker, effective_date FROM out
+          WHERE event_type = 'bonus' AND ratio IS NULL
+            AND ticker IS NOT NULL AND effective_date IS NOT NULL) o
+    ASOF JOIN listing_seq b ON b.ticker = o.ticker AND b.date <= o.effective_date
+),
+bonus_ratio AS (
+    -- 방향·크기 필터: 주식수가 늘지 않았으면 무상증자로 볼 수 없고, 늘어도 krx_share_change_tol
+    -- 이하면 잡음이다(스톡옵션·전환 행사 몇 주). 같은 임계를 pool 의 share_unchanged 가 이미
+    -- 쓴다 — 주식수가 사실상 안 변한 사건은 가격 조정도 없다는 같은 판단이다.
+    SELECT bb.ticker, bb.effective_date, a.list_shrs / bb.shrs_before AS ratio_derived
+    FROM bonus_base bb
+    CROSS JOIN _const k
+    JOIN listing_seq a
+      ON a.ticker = bb.ticker
+     AND a.n = bb.n0 + CAST(k.bonus_ratio_window_sessions AS INTEGER)
+    WHERE bb.shrs_before > 0
+      AND a.list_shrs / bb.shrs_before - 1 > k.krx_share_change_tol
 )
 SELECT
-    coalesce(ticker, '-') || ':' || event_type || ':'
-        || coalesce(CAST(effective_date AS VARCHAR), '-')            AS event_id,
-    ticker,
-    corp_code,
-    event_type,
-    announce_date,
-    effective_date,
-    effective_basis,
-    ratio,
+    coalesce(o.ticker, '-') || ':' || o.event_type || ':'
+        || coalesce(CAST(o.effective_date AS VARCHAR), '-')          AS event_id,
+    o.ticker,
+    o.corp_code,
+    o.event_type,
+    o.announce_date,
+    o.effective_date,
+    o.effective_basis,
+    coalesce(o.ratio, br.ratio_derived)                               AS ratio,
+    -- 비율의 출처. `source` 만으로는 구분되지 않는다 — 자본변동 행의 비율은 원천이 capital 이지만
+    -- 값은 KRX 상장주식수에서 유도한 것이다. 소비자가 공시값과 유도값을 가려 볼 수 있어야 한다.
+    CASE WHEN o.ratio IS NOT NULL AND o.source = 'krx_listing' THEN 'krx_shares'
+         WHEN o.ratio IS NOT NULL                              THEN 'disclosed'
+         WHEN br.ratio_derived IS NOT NULL                     THEN 'krx_shares'
+         ELSE 'none' END                                              AS ratio_basis,
     NULL::BIGINT                                                      AS amount_krw,   -- MVP 밖(유상감자 대가·배당)
-    rcept_no,
-    source,
-    n_src_rows,
-    announce_date                                                     AS available_date,
-    available_basis,
-    reject_reason
-FROM out
+    o.rcept_no,
+    o.source,
+    o.n_src_rows,
+    o.announce_date                                                   AS available_date,
+    o.available_basis,
+    o.reject_reason
+FROM out o
+LEFT JOIN bonus_ratio br
+       ON br.ticker = o.ticker AND br.effective_date = o.effective_date
+      AND o.event_type = 'bonus' AND o.ratio IS NULL

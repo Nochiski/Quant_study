@@ -313,13 +313,18 @@ scp database/src/equity/baseline_locked.json kael-server:~/quant-ledger/data/equ
 `disclosure_version`/`holder_daily`/`audit_opinion`/`shares_outstanding`/`treasury_stock`/`dividend_event` 0.0.
 나머지 표는 미등재 = 코드 기본값 0.001 로 판정된다.
 
-### 5-3. 미등재로 남긴 것 (사람 승인 대기)
+### 5-3. 미등재로 남긴 것
 
-- **`factor_readiness.ready_min`** — EG10 의 ready 하한. 서버 실측은 **ready 35 / blocked 19**(P41′).
-  DESIGN §4-8 의 초기값 36 은 격자 3표를 전제로 센 수이고 실측이 35 라 지금 등재하면 첫 빌드가
-  폐기된다. 35 를 그대로 등재하면 하한이 실측과 같아져 **회귀 감시로는 유효하지만
-  개선 여지를 0 으로 못 박는다**. `blocked` 19 중 `field_unavailable` 이 남아 있는 한
-  이 수는 올라갈 여지가 있으므로 **미등재 유지**를 권고한다(§8 후속).
+- **`factor_readiness.ready_min` — 미등재 확정(2026-09-07).** EG10 의 ready 하한. 서버 실측은
+  **ready 35 / blocked 19**(P41′). DESIGN §4-8 의 초기값 36 은 격자 3표를 전제로 센 수이고
+  실측이 35 라 등재하면 첫 빌드가 폐기된다. 35 를 등재하면 하한이 실측과 같아져 회귀 감시로는
+  유효하지만 개선 여지를 0 으로 못 박는다.
+
+  **등재하지 않기로 확정한 진짜 이유는 그것이 아니라 이 게이트가 아무것도 막지 못한다는 것이다.**
+  `factor_readiness` 는 빌드 순서 **28번째(마지막)** 라, EG10 이 FAIL 해서 이 표를 폐기해도
+  앞선 27표는 **이미 교체된 뒤**다. 즉 하한을 걸어도 잘못된 판을 되돌리지 못하고 준비도 표만
+  낡은 채로 남는다. 회귀를 잡으려면 하한이 아니라 **빌드 순서를 바꾸거나** 오케스트레이터가
+  사슬 단위로 되돌릴 수 있어야 하고, 둘 다 이 결정의 범위 밖이다.
 - `disclosure_version.misjudge_rate_max` — `rules_s11.py:297` 이 읽지만 미등재.
   정정 그룹 표본 오판율(EG6-P07)의 임계이며 표본 판정 절차 자체가 아직 없다.
 - `price_daily.krx_kis_ratio_match_min`(EG8-P01) · `corp_event.detect_recall_min`(EG8-P04) —
@@ -454,7 +459,7 @@ scp database/src/equity/baseline_locked.json kael-server:~/quant-ledger/data/equ
   (그 뷰의 base 는 as_of 라 앵커 개념이 없다). 재상장 종목의 차트 축을 어떻게 볼지는 미결.
 
 ### 운영·검증 축
-- **`factor_readiness.ready_min` 등재 판단**(§5-3).
+- ~~`factor_readiness.ready_min` 등재 판단~~ — **미등재로 확정**(2026-09-07, §5-3).
 - **절단본 생성 스크립트 커밋**(§8 결함).
 - **`catalog.snapshot_id` 에 내용 축 추가 판단**(§7 ⑪) — 지금은 `build_id` 지문뿐이라
   "같은 snapshot = 같은 데이터" 가 성립하지 않는다.

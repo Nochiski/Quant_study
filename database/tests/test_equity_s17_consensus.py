@@ -23,15 +23,22 @@ from pathlib import Path
 
 import duckdb
 import pytest
+from conftest import SLICE_BASELINE_OVERRIDE, apply_slice_override
 from equity import build, catalog, rules_s01, rules_s02, rules_s17, views
 from equity.baseline import Baseline, load
 from equity.gates import GateStatus
 from equity.model import EquityTable
 
 STAGE_SLICE = Path(__file__).parent / "fixtures" / "stage_slice"
-SEED = Baseline({**load(Path(rules_s01.__file__).parent / "baseline_seed_s01.json").data,
-                 **load(Path(rules_s02.__file__).parent / "baseline_seed_s02.json").data,
-                 **load(rules_s17.BASELINE_SEED).data})
+# 시드의 `v3_wise_match_min` 은 서버 확정값 0.93(겹침 5,789행 실측 0.9508)이다. 절단본은 겹침이
+# 45행뿐인 표본이라 그 하한을 못 넘으므로(37/45 = 0.8222) `conftest.SLICE_BASELINE_OVERRIDE` 가
+# 표본용 하한으로 덮는다 — 값이 아니라 표본 크기가 이유다. 허용치(0.01)는 v3 의 DECIMAL(8,0)
+# 저장 정밀도에서 나온 값이라 표본과 무관하고 그대로 쓴다.
+_SLICE_MATCH_MIN = SLICE_BASELINE_OVERRIDE["consensus_daily"]["v3_wise_match_min"]
+SEED = Baseline(apply_slice_override({
+    **load(Path(rules_s01.__file__).parent / "baseline_seed_s01.json").data,
+    **load(Path(rules_s02.__file__).parent / "baseline_seed_s02.json").data,
+    **load(rules_s17.BASELINE_SEED).data}))
 
 N_WISE = 476                 # distinct (ticker, obs_month, target_period, metric) — 손계산
 N_V3 = 199                   # 40 + 39 + 40 + 40 + 40 (003540 은 revenue 결측으로 한 지표 적다)
@@ -330,11 +337,16 @@ def test_겹치는_달은_src_가_다른_2행이다(built: tuple[Path, build.Bui
 
 
 def test_EG8은_같은_관측일에서_두_원천을_비교한다(built: tuple[Path, build.BuildResult]) -> None:
-    """EG8-P07 — 모집단은 (ticker, 관측일, target_period, metric). 절단본 32/45 = 0.7111."""
+    """EG8-P07 — 모집단은 (ticker, 관측일, target_period, metric). 절단본 37/45 = 0.8222.
+
+    허용치는 0.01 이다(2026-09-07 확정). 0.001 이던 동안 32/45 였는데, 늘어난 5건은 원천 차이가
+    아니라 **v3 가 EPS 를 DECIMAL(8,0) 정수로 저장해서** 생기는 반올림이었다 — 서버 겹침
+    5,789행의 상대차 중앙값이 3.78e-05 로 그 반올림 크기와 같다.
+    """
     m = _gate(built[1], "EG8_consensus_daily").metrics
     assert m["n_overlap_rows"] == m["n_overlap_measured"] == N_OVERLAP_KEYS
-    assert m["n_match"] == 32 and abs(m["match_rate"] - 32 / 45) < 1e-12
-    assert m["match_rate"] >= m["v3_wise_match_min"]
+    assert m["n_match"] == 37 and abs(m["match_rate"] - 37 / 45) < 1e-12
+    assert m["match_rate"] >= m["v3_wise_match_min"] == _SLICE_MATCH_MIN
     # 어긋나는 쪽은 반올림이 아니다 — 절단본 최대 10.8%(247540 2026-07-31 eps 312.34 vs 350)
     assert m["max_rel_diff"] > 0.1 and m["median_rel_diff"] < 1e-4
 

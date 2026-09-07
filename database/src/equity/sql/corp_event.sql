@@ -165,18 +165,43 @@ capital AS (
     WHERE isu_dcrs_stle LIKE '%감자%'
        OR (isu_dcrs_stle LIKE '%무상증자%' AND isu_dcrs_stle NOT LIKE '%유상%')
 ),
+-- ── 가격 조정이 아닌 사건 (E05·E06 / 결정 1) ─────────────────────────────────
+-- 자사주 취득은 주식수가 안 변하고(금고주), CB 발행은 그날 주식수가 안 변한다 — 둘 다 시가총액
+-- 불변 관계로 배수를 낼 수 없고 내서도 안 된다. `ratio` NULL · `amount_krw` 가 값을 나른다.
+-- `adj_factor` 는 MVP 4유형만 읽으므로(sql/adj_factor.sql WHERE event_type IN …) 계수 축과
+-- 격리돼 있다. 사건일은 **결정일**이다 — 조정할 가격 효력일이 없고 소비자가 쓰는 축이
+-- 「발표 당일 초과수익」이라 결정일이 곧 사건일이다.
+-- 종류 축이 없다(법인 사실) → cls = 'common' 으로 보통주 티커에만 붙인다.
+tsstk_aq AS (
+    SELECT rcept_no, corp_code, 'event_tsstk_aq' AS source, 'treasury_buy' AS event_type,
+           'common' AS cls, aq_dd AS basis_date,
+           NULL::DOUBLE AS ratio, FALSE AS ratio_given, available_date, available_basis,
+           coalesce(aqpln_prc_ostk, 0) + coalesce(aqpln_prc_estk, 0) AS amount_raw,
+           (aqpln_prc_ostk IS NOT NULL OR aqpln_prc_estk IS NOT NULL) AS amount_given
+    FROM stg_event_tsstk_aq
+),
+cvbd_is AS (
+    SELECT rcept_no, corp_code, 'event_cvbd_is' AS source, 'cb_issue' AS event_type,
+           'common' AS cls, bddd AS basis_date,
+           NULL::DOUBLE AS ratio, FALSE AS ratio_given, available_date, available_basis,
+           coalesce(bd_fta, 0) AS amount_raw, (bd_fta IS NOT NULL) AS amount_given
+    FROM stg_event_cvbd_is
+),
 dart AS (
-    SELECT * FROM fric
-    UNION ALL SELECT * FROM pifric
-    UNION ALL SELECT * FROM cr
-    UNION ALL SELECT * FROM capital
+    SELECT *, NULL::DOUBLE AS amount_raw, FALSE AS amount_given FROM fric
+    UNION ALL SELECT *, NULL::DOUBLE, FALSE FROM pifric
+    UNION ALL SELECT *, NULL::DOUBLE, FALSE FROM cr
+    UNION ALL SELECT *, NULL::DOUBLE, FALSE FROM capital
+    UNION ALL SELECT * FROM tsstk_aq
+    UNION ALL SELECT * FROM cvbd_is
 ),
 dart_leg AS (
     -- announce 폴백: rcept_no 14자리 = 접수일 YYYYMMDD + 일련번호 6자리 → '%Y%m%d%f'(%f = 6자리)
     -- 로 한 번에 파싱해 날짜만 취한다(참조표 미스 → stage available_date NULL·basis unknown).
     -- unlisted·unknown class-row 는 legs 에 없으므로 ticker NULL 1행으로 남아 scope_out 으로 간다.
     SELECT l.ticker, d.corp_code, d.source, d.event_type, d.cls, d.basis_date, d.ratio,
-           d.ratio_given, d.rcept_no,
+           d.ratio_given, CASE WHEN d.amount_given THEN d.amount_raw END AS amount_krw,
+           d.rcept_no,
            coalesce(d.available_date,
                     CAST(try_strptime(d.rcept_no, '%Y%m%d%f') AS DATE))    AS announce_date,
            CASE WHEN d.available_date IS NOT NULL THEN d.available_basis
@@ -209,7 +234,7 @@ krx AS (
                 ELSE 'split' END AS event_type,
            'common' AS cls, l.date AS basis_date,
            CASE WHEN l.prev_shrs > 0 THEN l.list_shrs / l.prev_shrs END AS ratio,
-           TRUE AS ratio_given, NULL::VARCHAR AS rcept_no,
+           TRUE AS ratio_given, NULL::DOUBLE AS amount_krw, NULL::VARCHAR AS rcept_no,
            l.date AS announce_date, l.available_basis,
            l.date AS effective_date, 'krx_shares_change' AS effective_basis
     FROM listing l
@@ -241,11 +266,13 @@ pool AS (
            END AS scope_out
     FROM (
         SELECT ticker, corp_code, source, event_type, cls, basis_date, ratio, ratio_given,
-               rcept_no, announce_date, available_basis, effective_date, effective_basis
+               amount_krw, rcept_no, announce_date, available_basis, effective_date,
+               effective_basis
         FROM dart_leg
         UNION ALL
         SELECT ticker, corp_code, source, event_type, cls, basis_date, ratio, ratio_given,
-               rcept_no, announce_date, available_basis, effective_date, effective_basis
+               amount_krw, rcept_no, announce_date, available_basis, effective_date,
+               effective_basis
         FROM krx
     ) p
     CROSS JOIN cal_bounds b
@@ -292,11 +319,11 @@ ranked AS (
 ),
 out AS (
     SELECT ticker, corp_code, event_type, announce_date, effective_date, effective_basis,
-           ratio, rcept_no, source, n_src_rows, available_basis, reject_reason
+           ratio, amount_krw, rcept_no, source, n_src_rows, available_basis, reject_reason
     FROM ranked WHERE rn = 1
     UNION ALL
     SELECT ticker, corp_code, event_type, announce_date, effective_date, effective_basis,
-           ratio, rcept_no, source, 1::BIGINT, available_basis, reject_reason
+           ratio, amount_krw, rcept_no, source, 1::BIGINT, available_basis, reject_reason
     FROM judged WHERE reject_reason IS NOT NULL
 ),
 -- ── ratio 결측 복구: 자본변동만 있는 무상증자 (RATIO_RECOVERY.md) ──────────────
@@ -352,7 +379,7 @@ SELECT
          WHEN o.ratio IS NOT NULL                              THEN 'disclosed'
          WHEN br.ratio_derived IS NOT NULL                     THEN 'krx_shares'
          ELSE 'none' END                                              AS ratio_basis,
-    NULL::BIGINT                                                      AS amount_krw,   -- MVP 밖(유상감자 대가·배당)
+    CAST(round(o.amount_krw) AS BIGINT)                                AS amount_krw,
     o.rcept_no,
     o.source,
     o.n_src_rows,

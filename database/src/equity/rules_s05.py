@@ -47,11 +47,18 @@ SQL_PATH = SQL_DIR / "corp_event.sql"
 EVENT_TYPE_VOCAB: tuple[str, ...] = (
     "split", "reverse_split", "bonus", "capred", "rights", "spinoff", "merger",
     "stock_dividend", "cash_dividend", "cb_issue", "treasury_buy", "treasury_sell", "other")
-MVP_EVENT_TYPES: tuple[str, ...] = ("split", "reverse_split", "bonus", "capred")
+# **계수를 내는 유형**(adj_factor 가 읽는 4종, `sql/adj_factor.sql` WHERE 절과 같은 집합).
+# 이름이 MVP_ 인 것은 이력이고, 뜻은 「시가총액 불변 관계로 주식수 배수를 낼 수 있는 사건」이다.
+FACTOR_BEARING_TYPES: tuple[str, ...] = ("split", "reverse_split", "bonus", "capred")
+MVP_EVENT_TYPES = FACTOR_BEARING_TYPES        # 옛 이름 (외부 참조 유지)
+# 사실만 싣는 유형 — 가격 조정 사건이 아니다. `ratio` NULL · `amount_krw` 가 값을 나른다.
+# 자사주 취득은 주식수가 안 변하고(금고주), CB 발행은 그날 주식수가 안 변한다.
+FACT_ONLY_TYPES: tuple[str, ...] = ("treasury_buy", "cb_issue")
+LOADED_EVENT_TYPES: tuple[str, ...] = (*FACTOR_BEARING_TYPES, *FACT_ONLY_TYPES)
 EFFECTIVE_BASIS_VOCAB: tuple[str, ...] = (
     "disclosure_body", "krx_shares_change", "krx_notice", "unconfirmed")
 SOURCE_VOCAB: tuple[str, ...] = ("event_fric", "event_pifric", "event_cr", "capital",
-                                 "krx_listing")
+                                 "event_tsstk_aq", "event_cvbd_is", "krx_listing")
 REJECT_REASONS: tuple[str, ...] = ("ticker_unresolved", "effective_unresolved", "ratio_unparsed",
                                    "effective_before_announce")
 # 범위 밖 사유(격리 아님, 기록형) — sql/corp_event.sql pool.scope_out
@@ -220,9 +227,10 @@ def _outside_vocab(ctx: EquityGateContext, column: str, values: tuple[str, ...])
                    f'OR "{column}" NOT IN ({_vocab_sql(values)})')
 
 
-def _counts(ctx: EquityGateContext, column: str) -> dict[str, int]:
+def _counts(ctx: EquityGateContext, column: str, where: str = "TRUE") -> dict[str, int]:
     return {str(r[0]): int(str(r[1])) for r in ctx.con.execute(
-        f'SELECT "{column}", count(*) FROM "{ctx.out_view}" GROUP BY 1 ORDER BY 1').fetchall()}
+        f'SELECT "{column}", count(*) FROM "{ctx.out_view}" WHERE {where} '
+        "GROUP BY 1 ORDER BY 1").fetchall()}
 
 
 def _scope_counts(ctx: EquityGateContext) -> dict[str, dict[str, int]]:
@@ -240,7 +248,16 @@ def eg3_corp_event(ctx: EquityGateContext) -> GateResult:
     v = ctx.out_view
     checks = {
         "n_event_type_outside_vocab": _outside_vocab(ctx, "event_type", EVENT_TYPE_VOCAB),
-        "n_event_type_outside_mvp": _outside_vocab(ctx, "event_type", MVP_EVENT_TYPES),
+        "n_event_type_outside_loaded": _outside_vocab(ctx, "event_type", LOADED_EVENT_TYPES),
+        # 사실만 싣는 유형이 ratio 를 가지면 adj_factor 축과 섞인다 — 자사주·CB 는 시가총액
+        # 불변 관계가 성립하지 않으므로 배수를 내서는 안 된다.
+        "n_fact_only_with_ratio": _n(
+            ctx, f'SELECT count(*) FROM "{v}" WHERE ratio IS NOT NULL AND event_type IN '
+                 f"({_vocab_sql(FACT_ONLY_TYPES)})"),
+        # 반대로 금액은 사실만 싣는 유형에만 실린다(계수 유형의 대가·배당은 MVP 밖).
+        "n_amount_outside_fact_only": _n(
+            ctx, f'SELECT count(*) FROM "{v}" WHERE amount_krw IS NOT NULL AND event_type NOT IN '
+                 f"({_vocab_sql(FACT_ONLY_TYPES)})"),
         "n_effective_basis_outside_vocab": _outside_vocab(ctx, "effective_basis",
                                                           EFFECTIVE_BASIS_VOCAB),
         "n_source_outside_vocab": _outside_vocab(ctx, "source", SOURCE_VOCAB),
@@ -334,7 +351,10 @@ def eg3_corp_event(ctx: EquityGateContext) -> GateResult:
         "n_class_unknown_mvp": n_class_unknown_mvp,
         "n_class_mapped_by_alias": n_class_mapped_by_alias,
         "reject_by_reason": dict(ctx.reject_by_reason),
-        "event_type_vocab": list(EVENT_TYPE_VOCAB), "mvp_event_types": list(MVP_EVENT_TYPES),
+        "event_type_vocab": list(EVENT_TYPE_VOCAB),
+        "factor_bearing_types": list(FACTOR_BEARING_TYPES),
+        "fact_only_types": list(FACT_ONLY_TYPES),
+        "n_amount_null_by_type": _counts(ctx, "event_type", "amount_krw IS NULL"),
         "scope_out_vocab": list(SCOPE_OUT_VOCAB),
     }
     bad = {k: n for k, n in checks.items() if n}
@@ -389,6 +409,7 @@ CORP_EVENT = register(EquityTable(
              "rcept_no": "VARCHAR", "source": "VARCHAR", "n_src_rows": "BIGINT",
              "available_date": "DATE", "available_basis": "VARCHAR"},
     inputs=("stg_event_fric", "stg_event_pifric", "stg_event_cr", "stg_capital",
+            "stg_event_tsstk_aq", "stg_event_cvbd_is",
             "stg_listing_daily", "corp_ticker", "trading_calendar", "security_span"),
     partition_class="receipt_axis",
     # receipt 축이지만 키 식은 year(announce_date) — KRX 파생행은 rcept_no 가 없고, DART 행은
@@ -412,6 +433,10 @@ CORP_EVENT = register(EquityTable(
                          "available_date", "available_basis"),
         "stg_capital": ("rcept_no", "corp_code", "isu_dcrs_de", "isu_dcrs_stle",
                         "isu_dcrs_stock_knd", "available_date", "available_basis"),
+        "stg_event_tsstk_aq": ("rcept_no", "corp_code", "aq_dd", "aqpln_prc_ostk",
+                               "aqpln_prc_estk", "available_date", "available_basis"),
+        "stg_event_cvbd_is": ("rcept_no", "corp_code", "bddd", "bd_fta",
+                              "available_date", "available_basis"),
         "stg_listing_daily": ("ticker", "date", "par_value_krw", "list_shrs",
                               "available_basis"),
         "corp_ticker": ("ticker", "isin8", "corp_code", "is_common"),
@@ -432,7 +457,8 @@ BASELINE_SEED = Path(__file__).parent / "baseline_seed_s05.json"
 """이 슬라이스가 요구하는 상수의 초기값(절단본 실측). 승인 뒤 `baseline.json` 에 병합한다."""
 
 __all__ = ["BASELINE_SEED", "CANONICAL_KINDS", "COMMON_KINDS", "CORP_EVENT", "EVENT_TYPE_VOCAB",
-           "KNOWN_KINDS", "MVP_EVENT_TYPES", "PREFERRED_KINDS", "RATIO_ABOVE_ONE",
+           "FACTOR_BEARING_TYPES", "FACT_ONLY_TYPES", "KNOWN_KINDS", "LOADED_EVENT_TYPES",
+           "MVP_EVENT_TYPES", "PREFERRED_KINDS", "RATIO_ABOVE_ONE",
            "RATIO_BASIS_VOCAB",
            "RATIO_BELOW_ONE", "RAW_SOURCE_ROWS", "SCOPE_OUT_VOCAB", "SOURCES", "TABLES",
            "UNLISTED_KINDS", "pool_sql"]

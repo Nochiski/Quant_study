@@ -32,9 +32,11 @@ from test_equity_s19_profile import SEED, STAGE_SLICE, build_chain
 DOCS = Path(__file__).parents[1] / "docs"
 REGISTRY_DOC = Path(__file__).parents[2] / "backend" / "FACTORS.md"
 
-N_READY = 35
-N_BLOCKED = 19
-BLOCKED_REASON_COUNTS = {"field_unavailable": 5, "partial_support": 12, "no_observations": 2}
+# 2026-09-07: corp_event 가 자사주 취득·CB 발행을 싣기 시작해 E05·E06 이 열렸다(E05·E06 / 결정 1).
+# `no_observations` 는 「필드는 선언했는데 값이 한 줄도 없다」였고, 값이 생기며 사유가 사라졌다.
+N_READY = 37
+N_BLOCKED = 17
+BLOCKED_REASON_COUNTS = {"field_unavailable": 5, "partial_support": 12}
 READINESS_GATES = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG10", "EG4", "EG5a"]
 
 
@@ -222,8 +224,9 @@ def test_커버_실측에_걸린_판정은_손계산으로_잰다(built) -> None
     # 대차잔고는 KIS 유닛이 덮는 구간만 있다 — 가장 늦게 열린 재료가 팩터의 시작일이다
     assert got["F07"] == ("ready", "2014-01-02", None)
     assert got["F09"] == ("ready", "2010-01-04", None)
-    assert got["E05"] == ("blocked", None, "no_observations: event.buyback_amount")
-    assert got["E06"] == ("blocked", None, "no_observations: event.capital_raise_amount")
+    # 자사주·CB 를 싣기 시작하며 둘 다 열렸다 — 시작일은 각 원천의 첫 공시일이다
+    assert got["E05"] == ("ready", "2015-01-23", None)
+    assert got["E06"] == ("ready", "2023-07-18", None)
     # GAP-02 계정이 가장 늦게 열려 V05 의 시작일이 된다
     assert got["V05"] == ("ready", "2023-11-14", None)
 

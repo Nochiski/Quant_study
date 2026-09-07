@@ -321,11 +321,16 @@ def test_가격_필드는_캘린더_전_구간을_덮는다(built) -> None:
 
 
 def test_선언은_있는데_값이_없는_필드는_커버율_0_으로_남는다(built) -> None:
-    """`corp_event` 는 MVP 4유형만 적재해 자사주·유상증자 행이 0 이다 — 격리가 아니라 사실이다."""
+    """2026-09-07 부터 `corp_event` 가 자사주 취득·CB 발행도 싣는다 — 커버가 0 에서 올라간다.
+
+    두 유형은 **가격 조정 사건이 아니다**(주식수가 안 변한다). `ratio` NULL · `amount_krw` 가
+    값을 나르고 `adj_factor` 는 계수 4유형만 읽으므로 조정 축과 격리돼 있다.
+    자사주 금액은 원천 채움률이 100%가 아니라(서버 `aqpln_prc_ostk` 94.7%) 커버가 그만큼 낮다.
+    """
     _, r = built
     got = dict(_rows(r.out_dir, "SELECT field_id, estimated_coverage_pct FROM dp "
                                 "WHERE table_name = 'corp_event' ORDER BY 1"))
-    assert got == {"event.buyback_amount": 0.0, "event.capital_raise_amount": 0.0}
+    assert got == {"event.buyback_amount": 75.609756, "event.capital_raise_amount": 100.0}
     assert r.n_reject == 0
 
 

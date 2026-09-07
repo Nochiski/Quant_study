@@ -22,7 +22,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.8.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.9.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -56,6 +56,16 @@ RULES_VERSION = "e1.8.0"                # BuildRecord.rules_version 에 실린�
 #         `krx_share_change_tol` 초과일 때만). 감자는 유도하지 않는다 — 유상증자와 묶여 돌아
 #         창 안 주식수가 내려갔다 올라온다(대조군 75분위 2.0). 근거·게이트는 RATIO_RECOVERY.md.
 #         `corp_event.ratio` 가 채워지면 `adj_factor` 계수와 `price_adj_daily` 조정가가 바뀐다.
+# e1.9.0: S05 유형 확장 — `corp_event` 가 **자사주 취득(`treasury_buy`)·CB 발행(`cb_issue`)** 을
+#         싣는다(원천 `stg_event_tsstk_aq`·`stg_event_cvbd_is`). 둘은 **가격 조정 사건이 아니다** —
+#         자사주는 주식수가 안 변하고(금고주) CB 는 그날 주식수가 안 변한다. `ratio` NULL ·
+#         `amount_krw` 가 값을 나르며 `adj_factor` 는 계수 4유형만 읽어 조정 축과 격리된다.
+#         `MVP_EVENT_TYPES` 를 `FACTOR_BEARING_TYPES`(계수를 내는 4종)로 재정의하고
+#         `FACT_ONLY_TYPES`(사실만 싣는 2종)를 신설했다. 게이트 축도 「MVP 밖」에서
+#         「적재 어휘 밖」으로 바뀌고, 사실 유형이 ratio 를 갖거나 계수 유형이 금액을 갖는 것을
+#         폐기형으로 막는다. 팩터 준비도 **35 → 37**(E05 자사주 발표 · E06 유상증자·CB 발행).
+#         유상증자(`stg_event_piic`)는 **아직 못 싣는다** — 신주배정기준일 컬럼이 없고
+#         `ssl_bgd`/`ssl_edd` 채움률이 5.9% 라 가격 축 효력일을 정할 수 없다.
 
 # DESIGN §1 — stage 4종 + equity 신설 convention
 BASIS_VOCAB: tuple[str, ...] = ("measured", "derived", "convention", "default", "unknown")

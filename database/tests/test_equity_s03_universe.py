@@ -528,6 +528,24 @@ def test_admin_state_basis는_측정축_유무로_갈린다(built: build.BuildRe
                                  "admin_state_basis = 'derived_kospi_window'") == [(0,)]
 
 
+def test_관리종목은_비대칭을_드러내고_미결_조건을_남기지_않는다() -> None:
+    """E07(상폐 위험)을 막고 있던 것은 데이터가 아니라 **소비 규약이 안 적힌 것**이었다.
+
+    KOSPI 에는 소속부 필드가 없어 관리종목을 지정 공시 창으로 유도하는데(전부
+    `derived_kospi_window` 73종목 35,118세션) 해제 공시가 3건뿐이라 언제 풀렸는지 못 잰다.
+    그래서 관리종목 비율이 KOSDAQ 32.8%(803/2,445) 대 KOSPI 5.8%(73/1,249)로 기운다.
+
+    이 층은 편향을 감추지 않고 드러낸다 — 근거는 `admin_state_basis` 가 행마다 이미 나르고,
+    남은 것은 **시장 간에 직접 비교하지 않는다**는 소비 규약뿐이라 선언의 `evidence` 에 적었다.
+    `requires_confirmation` 이 남길 미결(단위·산출 규칙·축 선택·값의 기준)은 하나도 아니다.
+    """
+    f = next(f for f in rules_s03.FIELDS_UNIVERSE if f.field_id == "universe.admin_state")
+    assert not f.requires_confirmation
+    assert "derived_kospi_window" in f.evidence and "admin_state_basis" in f.evidence
+    assert "시장 간" in f.evidence                      # 소비 규약이 선언 안에 있다
+    assert "stage" in f.evidence                        # 근본 해결의 주인
+
+
 def test_liquidation_window는_개시_공시부터_구간_끝까지(built: build.BuildResult) -> None:
     assert built.out_dir is not None
     assert _runs(built.out_dir, "liquidation_window") == LIQUIDATION_RUNS

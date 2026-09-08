@@ -290,9 +290,13 @@ FACTORS: tuple[FactorSpec, ...] = (
        "FACTORS §7 E06 = 희석 이벤트(piicDecsn·cvbdIsDecsn).", caveat="E05 와 같은 S05 후속."),
     _f("E07", "상폐 위험", ("universe.delist_signal", "universe.admin_state"), "equity",
        "FACTORS §7 E07 = 부도·해산·회생·관리 이벤트. 생존편향 26.75% 제거의 근거.",
-       caveat="KOSPI 관리종목 **해제 공시가 3건뿐**이라 상태 종료를 잴 수 없고 신호가 KOSDAQ 으로 "
-              "기운다(GAP-06). `admin_state_basis` 가 행마다 근거를 남기지만 비대칭 자체는 "
-              "원천 부재라 개선 불가다."),
+       caveat="**소비 규약으로 열었다(2026-09-08)** — KOSPI 관리종목 **해제 공시가 3건뿐**이라 "
+              "상태 종료를 잴 수 없어 고정 길이 창으로 근사하고(`derived_kospi_window` 73종목 "
+              "35,118세션), 그래서 관리종목 비율이 KOSDAQ 32.8%(803/2,445) 대 KOSPI "
+              "5.8%(73/1,249)로 기운다(GAP-06). **이 점수를 시장 간에 직접 비교하지 마라** — "
+              "시장 안에서 순위를 매기거나 `admin_state_basis` 로 거른다. 비대칭을 없앤 것이 "
+              "아니라 `admin_state_basis` 로 드러내 두었다. 근본 해결(거래소 KOSPI 관리종목 "
+              "이력 수집)은 stage 몫이다."),
     _f("E08", "비적정 감사의견", ("event.audit_opinion",), "factor_layer",
        "FACTORS §7 E08 = adt_opinion ≠ 적정. 상장폐지 선행 신호.",
        caveat="`n_source_rows > 1` 인 행은 원장 여러 행이 접힌 것이라 건수 집계에 그대로 쓰면 "

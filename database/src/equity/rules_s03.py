@@ -496,10 +496,24 @@ FIELDS_UNIVERSE: tuple[FieldProfile, ...] = (
     FieldProfile(
         field_id="universe.admin_state", columns=("admin_state",), label="관리종목 여부",
         unit="", value_type="category", frequency="session", recommended_lag_sessions=1,
-        recommended_lag_days=1, point_in_time=True, requires_confirmation=True,
+        recommended_lag_days=1, point_in_time=True, requires_confirmation=False,
         disclosure_basis="KOSDAQ 소속부 일별 스냅샷 / KOSPI 는 지정 공시 창(derived)",
-        evidence="시장 비대칭이 남아 있다 — KOSPI 해제 공시가 3건뿐이라 상태 종료를 못 잰다"
-                 "(GAP-06). basis 는 admin_state_basis 컬럼이 행마다 남긴다.",
+        evidence="**시장 비대칭이 남아 있고, 감추지 않고 드러낸다**(GAP-06). 근거는 행마다 "
+                 "`admin_state_basis` 가 나른다 — 서버 실측(2026-09-07): KOSDAQ 소속부 스냅샷에서 "
+                 "직접 읽은 `measured` 789종목 274,524세션 · KOSDAQ 지정 공시 창 유도 41종목 "
+                 "4,658세션 · **KOSPI 는 전부 `derived_kospi_window` 73종목 35,118세션**이다. "
+                 "KOSPI 에는 소속부 필드가 없어 지정 공시로 유도하는데 **해제 공시가 3건뿐이라 "
+                 "「언제 풀렸는가」를 잴 수 없어** 고정 길이 창으로 근사한다. 그래서 관리종목 "
+                 "비율이 KOSDAQ 32.8%(803/2,445) 대 KOSPI 5.8%(73/1,249)로 기운다. "
+                 "**소비 규약: 이 값에서 낸 상폐위험 점수를 시장 간에 직접 비교하지 않는다** — "
+                 "시장 안에서 순위를 매기거나 `admin_state_basis` 로 거른다(같은 방향의 "
+                 "`universe.delist_signal` 도 KOSDAQ 796종목 대 KOSPI 223종목이다). "
+                 "`requires_confirmation` 을 끈 것은 비대칭이 사라져서가 아니라 **남은 것이 "
+                 "소비 규약이고 그것을 여기 적었기 때문**이다 — 이 층의 미결 어휘는 단위 미측정 · "
+                 "산출 규칙 미확정 · 축 선택 · 값의 기준 미공표뿐이고(model.FieldProfile 규율) "
+                 "그중 어느 것도 아니다. **근본 해결은 이 층 밖이다**: 거래소 KOSPI 관리종목 "
+                 "지정·해제 이력을 수집해 싣는 것은 stage 몫이고, 그때 이 필드의 KOSPI 행이 "
+                 "`derived_kospi_window` 에서 `measured` 로 바뀐다(BLOCKED_FACTORS §7-3 (나)).",
         coverage_axis="grid_session", scope="internal", axis_columns=_UAXIS),
     FieldProfile(
         field_id="universe.delist_signal", columns=("signal_delist",), label="상장폐지 신호",

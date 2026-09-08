@@ -103,7 +103,8 @@ RULES_VERSION = "e1.14.0"                # BuildRecord.rules_version 에 실린�
 #            보고서의 기준). 기준 전환 367행·136법인, 합산식 낀 것 18법인(삼성카드 −12% ·
 #            메리츠 −70% · 한국금융지주 −72% · 한화생명 0→24.6조). `financial.revenue` 플래그
 #            해제 + `financial.revenue_basis`·`_prev` 내부 필드 선언.
-#         ③ G04: 요구 재료를 `financial.eps_basic`(분할 미조정) → `net_income` + `shares_outstanding`.
+#         ③ G04: 요구 재료를 `financial.eps_basic`(분할 미조정) → `net_income` +
+#            `shares_outstanding`.
 #            `FACTORS.md` 정본 계산식 갱신은 사람 승인 항목.
 #         ④ E07: `universe.admin_state` 플래그 해제 — 코스피 창 근사 비대칭을 소비 규약으로 명시.
 #         ⑤ F04: `flow_daily.pension_net_buy_kiwoom_krw` 신설(키움 전용) + `flow.pension_net_buy`

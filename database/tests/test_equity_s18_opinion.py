@@ -100,7 +100,10 @@ def _hybrid_stage(tmp_path: Path, make_stage_tree, synthetic: dict[str, list[dic
 
 
 def _fixture_file(tmp_path: Path, entries: list[dict[str, object]]) -> Path:
-    """합성 하네스용 골든 픽스처 — 정본 픽스처는 절단본 값이라 여기서는 못 쓴다(EG4 는 부재가 실패)."""
+    """합성 하네스용 골든 픽스처.
+
+    정본 픽스처는 절단본 값이라 여기서는 못 쓴다(EG4 는 부재가 실패).
+    """
     p = tmp_path / f"fx_{len(list(tmp_path.glob('fx_*.json')))}.json"
     p.write_text(json.dumps(entries, ensure_ascii=False), encoding="utf-8")
     return p
@@ -376,7 +379,10 @@ def test_최신_관측을_고르면_EG6가_폐기한다(tmp_path: Path, make_sta
 # ── 부정 픽스처: 등급 어휘 밖 ────────────────────────────────────────────────
 
 def test_등급_어휘_밖이면_EG3가_폐기한다(tmp_path: Path, make_stage_tree) -> None:
-    """stage 가 어휘 밖 분류를 내보내면 폐기한다 — equity 는 어휘를 계승만 하고 재계산하지 않는다."""
+    """stage 가 어휘 밖 분류를 내보내면 폐기한다.
+
+    equity 는 어휘를 계승만 하고 재계산하지 않는다.
+    """
     rows = [_broker_row("005930", _D(2026, 9, 1), "KB", _D(2026, 8, 10)),
             _broker_row("005930", _D(2026, 9, 1), "NH투자", _D(2026, 8, 10),
                         opinion="STRONG BUY", opinion_class="STRONGBUY")]

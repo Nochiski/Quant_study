@@ -49,7 +49,8 @@ CHAIN: tuple[str, ...] = (
 
 # 2026-09-07 S08-2: `flow.foreign_ownership`·`flow.foreign_limit_exhaustion` 선언(72 → 74).
 # 2026-09-07 S02-2: `benchmark.close` 선언(75 → 76, R04 시장 베타).
-# 2026-09-08 병렬 4슬라이스: revenue_basis·revenue_basis_prev(내부 2) + pension_net_buy(대응표 1) → 79.
+# 2026-09-08 병렬 4슬라이스: revenue_basis·revenue_basis_prev(내부 2) + pension_net_buy(대응표 1)
+# → 79.
 N_FIELDS = 79                    # 선언 행수 — 코드가 정본이라 서버에서도 같다
 N_FIELD_MAP_SCOPE = 35           # FIELD_MAP §2 42 어휘 중 프로파일 행을 갖는 것
 N_INTERNAL_SCOPE = 44            # equity 내부 스코프(price.adj_close·fin_std 계정·4B·유니버스 …)
@@ -201,7 +202,8 @@ GRID_FIELDS = {
     "flow.institution_net_buy": ("flow_daily", "orgn_krw", "KRW", "amount"),
     "flow.retail_net_buy": ("flow_daily", "ind_invsr_krw", "KRW", "amount"),
     "short.short_sale_value": ("short_daily", "short_value_kiwoom_krw", "KRW", "amount"),
-    "short.borrowed_quantity": ("short_daily", "lending_balance_kis_shr", "주", "count"),
+    # F07 (2026-09-08) — 키움 대차로 정본 이동. 단위는 금액÷(잔고×종가)=1.000000 으로 확정(주)
+    "short.borrowed_quantity": ("short_daily", "lending_balance_kiwoom_shr", "주", "count"),
     "credit.margin_balance": ("credit_daily", "whol_loan_rmnd_stcn_shr", "주", "count"),
     # S08-2 (2026-09-07) — 원천이 키움 하나뿐이라 src='kis' 행은 NULL 이다
     "flow.foreign_ownership": ("flow_daily", "foreign_wght_pct", "pct", "ratio"),
@@ -261,7 +263,7 @@ def test_격자_필드의_stage_원천은_그_테이블의_원장을_포함한�
                    "WHERE table_name IN ('flow_daily', 'short_daily', 'credit_daily')")}
     assert {"stg_flow_daily_kiwoom", "stg_flow_split_daily"} <= got["flow.foreign_net_buy"]
     assert "stg_short_daily_kiwoom" in got["short.short_sale_value"]
-    assert "stg_loan_daily_kis" in got["short.borrowed_quantity"]
+    assert "stg_lending_daily" in got["short.borrowed_quantity"]
     assert "stg_credit_daily" in got["credit.margin_balance"]
 
 
@@ -510,19 +512,19 @@ def test_lag_known_false_인_stage_원천은_세션_랙_1_이상인_행을_요�
 def test_어떤_필드도_싣지_않은_lag_known_false_원천은_EG2를_폐기한다(built) -> None:
     """원천을 실었는데 프로파일 행을 안 만들면 여기서 잡힌다.
 
-    예가 두 번 옮겨졌다. S19-2 전에는 `stg_flow_daily_kiwoom`(S08 격자는 커밋됐는데 선언이 비어
-    있었다), 그다음 `stg_foreign_daily`(S08-2 대기)였다. **2026-09-07 S08-2 로 둘 다 덮였으므로**
-    이제 `stg_lending_daily`(키움 대차, 서버 6,988,296행 · 결측 0 인데 아직 아무 필드도 안 쓴다 —
-    현재 대차잔고는 커버 5.58% 의 KIS 축만 쓴다. BLOCKED_FACTORS §9-2)를 예로 쓴다.
+    예가 세 번 옮겨졌다 — `stg_flow_daily_kiwoom`(S19-2 전) → `stg_foreign_daily`(S08-2 전)
+    → `stg_lending_daily`(09-08 전). **셋 다 이제 덮였다.** 실제 `lag_known=false` 격자 원천 중
+    아무 필드도 안 쓰는 것이 더는 없으므로, 그 사실 자체를 단언하고 「못 덮인 원천」 예는 합성
+    이름으로 둔다 — 게이트는 이름을 보지 않고 선언 유무만 보므로 검사력은 같다.
     """
     eq, r = built
-    for covered_src in ("stg_flow_daily_kiwoom", "stg_foreign_daily"):
+    for covered_src in ("stg_flow_daily_kiwoom", "stg_foreign_daily", "stg_lending_daily"):
         g = rules_s19.eg2_dataset_profile(_profile_ctx(eq, r.out_dir, {covered_src: False}))
         assert g.status is gates.GateStatus.PASS, covered_src
     bad = rules_s19.eg2_dataset_profile(
-        _profile_ctx(eq, r.out_dir, {"stg_lending_daily": False}))
+        _profile_ctx(eq, r.out_dir, {"stg_synthetic_uncovered": False}))
     assert bad.status is gates.GateStatus.FAIL
-    assert bad.metrics["uncovered_lag_known_false"] == ["stg_lending_daily"]
+    assert bad.metrics["uncovered_lag_known_false"] == ["stg_synthetic_uncovered"]
     assert "n_lag_known_false_without_profile=1" in bad.detail
 
 

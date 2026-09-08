@@ -242,7 +242,7 @@ def test_커버_실측에_걸린_판정은_손계산으로_잰다(built) -> None
                    "WHERE factor_id IN ('M01', 'E05', 'E06', 'V05', 'F07', 'F09') ORDER BY 1")}
     assert got["M01"] == ("ready", "2010-01-04", None)
     # 대차잔고는 KIS 유닛이 덮는 구간만 있다 — 가장 늦게 열린 재료가 팩터의 시작일이다
-    assert got["F07"] == ("ready", "2014-01-02", None)
+    assert got["F07"] == ("ready", "2011-07-25", None)   # 09-08 키움 대차로 시작일 앞당겨짐
     assert got["F09"] == ("ready", "2010-01-04", None)
     # 자사주·CB 를 싣기 시작하며 둘 다 열렸다 — 시작일은 각 원천의 첫 공시일이다
     assert got["E05"] == ("ready", "2015-01-23", None)

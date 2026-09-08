@@ -28,6 +28,11 @@
 -- 1차 빌드에서 같은 함정으로 EG1 delta −26). `stg_doc_meta` 는 key_unique=True 지만 접수당 main
 -- 멤버가 여럿일 수 있어 `doc` 이 이미 접는다.
 --
+-- 매출 기준: `revenue_basis` 는 그 행의 매출이 어느 규칙에서 나왔는지, `revenue_basis_prev` 는
+-- **직전 회계연도 같은 보고서**(`bsns_year` − 1, 같은 `report_code`·`fs_div`)가 어느 규칙이었는지를
+-- 남긴다. 둘이 다르면 매출 시계열이 끊긴 것이고(삼성카드 2024 `standard` 4.38조 → 2025
+-- `banking_gross` 3.84조), 그 구간의 성장률을 버릴지는 **팩터층이** 정한다.
+--
 -- PIT: `available_date = rcept_dt`(derived, `stg_disclosure`). `stg_rcept_dt_map` 은 stage 에
 -- 실재하지 않는다(GATES §9). 판본은 `api_restated` 하나 · `restated_unknown = true`(4A).
 -- 격리 4종: non_krw · period_unresolved · rcept_lag_out_of_range · duplicate_vintage.
@@ -347,6 +352,29 @@ wide AS (
     FROM val
     GROUP BY corp_code, bsns_year, reprt_code, fs_div
 ),
+basis_prev AS (
+    -- 직전 회계연도(`bsns_year` − 1) 의 같은 `report_code`·`fs_div` 행이 어떤 매출 기준으로
+    -- 매출을 냈는가. **팩트를 하나 더 싣는 것**이지 성장률을 판정하는 것이 아니다 — 두 값이
+    -- 다른 구간의 성장률을 버릴지는 팩터층이 정한다(WORKFLOW §0-2).
+    -- 조회 원천은 산출에 남는 행뿐이다(격리 제외 · `duplicate_vintage` 로 접힐 grain 제외)
+    -- — 소비자가 보는 표와 좌·우변이 같아야 EG3 가 이 컬럼을 되풀이해 검산할 수 있다.
+    -- 같은 해 같은 보고서가 둘 이상이고 기준이 갈리면 이어 붙일 근거가 없으므로 NULL(모호):
+    -- `val` 의 pick 과 같은 규약이다.
+    SELECT j.corp_code, TRY_CAST(j.bsns_year AS INTEGER)          AS fy,
+           j.report_code, j.fs_div,
+           CASE WHEN count(DISTINCT coalesce(w.revenue_basis, 'unavailable')) = 1
+                THEN min(coalesce(w.revenue_basis, 'unavailable'))
+           END                                                    AS revenue_basis
+    FROM judged j
+    JOIN dup d
+      ON d.corp_code = j.corp_code AND d.period_end = j.period_end
+     AND d.report_code = j.report_code AND d.fs_div = j.fs_div
+    LEFT JOIN wide w
+      ON w.corp_code = j.corp_code AND w.bsns_year = j.bsns_year
+     AND w.reprt_code = j.reprt_code AND w.fs_div = j.fs_div
+    WHERE j.pre_reject IS NULL AND d.n_grain = 1
+    GROUP BY j.corp_code, TRY_CAST(j.bsns_year AS INTEGER), j.report_code, j.fs_div
+),
 q4wide AS (
     SELECT corp_code, bsns_year, fs_div,
            max(v) FILTER (WHERE metric = 'revenue')              AS revenue_q4_derived,
@@ -384,6 +412,7 @@ SELECT
     j.period_end_basis,
     j.currency,
     coalesce(w.revenue_basis, 'unavailable')                    AS revenue_basis,
+    bp.revenue_basis                                            AS revenue_basis_prev,
     TRUE                                                        AS restated_unknown,
     w.revenue, w.cost_of_sales, w.gross_profit, w.op_profit, w.pretax_income,
     w.net_income, w.net_income_owners, w.eps_basic, w.depreciation, w.interest_expense,
@@ -418,6 +447,10 @@ LEFT JOIN cfqwide cq
 LEFT JOIN cfqmeta cm
   ON cm.corp_code = j.corp_code AND cm.bsns_year = j.bsns_year
  AND cm.reprt_code = j.reprt_code AND cm.fs_div = j.fs_div
+LEFT JOIN basis_prev bp
+  ON bp.corp_code = j.corp_code
+ AND bp.fy = TRY_CAST(j.bsns_year AS INTEGER) - 1
+ AND bp.report_code = j.report_code AND bp.fs_div = j.fs_div
 LEFT JOIN dup d
   ON d.corp_code = j.corp_code AND d.period_end = j.period_end
  AND d.report_code = j.report_code AND d.fs_div = j.fs_div

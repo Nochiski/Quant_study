@@ -1,4 +1,5 @@
--- short_daily (S09) — 공매도(키움 ka10014 · KIS kis_short_sale) + 대차(KIS kis_loan_trans) 일별 격자.
+-- short_daily (S09) — 공매도(키움 ka10014 · KIS kis_short_sale) + 대차(키움 ka20068 · KIS
+-- kis_loan_trans) 일별 격자.
 -- grain (date, ticker) · date_axis. DESIGN v1.2 §4-3 · GATES v1.0 §3 ⑪ · §4 FX-3-001·004·009.
 --
 -- 격자 = `universe_daily`(status ∈ {listed, suspended} ∧ sec_type <> 'etf'). universe_daily 자체가
@@ -8,12 +9,17 @@
 -- `_reject/reject_reason=<r>/` 로 가른다. 사유는 둘뿐이다: 캘린더 첫 세션 이전이면 `pre_calendar`,
 -- 그 밖(유니버스에 없는 티커·구간 밖 날짜·ETF·backfill_end 이후)은 전부 `off_grid`.
 --
--- **원천을 합치지 않는다**(사용자 확정 09-06): 같은 사실의 두 원천(키움·KIS 공매도)은 접미사 `_kiwoom`·
--- `_kis` 로 나란히 살고, 어느 쪽을 믿을지는 소비자가 고른다. src 를 PK 에 넣는 대신 컬럼을 벌리는
--- 이유는 두 원천의 커버 구간이 갈라져 있어서다(절단본: KIS 는 폐지 3종, 키움은 존속 8종, 겹침 0행) —
--- src 축을 두면 격자 행이 원천 수만큼 불어나고 EG1 좌변이 count(DISTINCT (date,ticker)) 로 바뀐다.
--- 단위를 stage 가 측정하지 못한 축은 원값 그대로 `_raw` 로 싣고 `*_basis` 를 동반한다
+-- **원천을 합치지 않는다**(사용자 확정 09-06): 같은 사실의 두 원천(키움·KIS 공매도, 키움·KIS 대차)은
+-- 접미사 `_kiwoom`·`_kis` 로 나란히 살고, 어느 쪽을 믿을지는 소비자가 고른다. src 를 PK 에 넣는 대신
+-- 컬럼을 벌리는 이유는 두 원천의 커버 구간이 갈라져 있어서다(절단본: KIS 는 폐지 3종, 키움은 존속 8종,
+-- 겹침 0행) — src 축을 두면 격자 행이 원천 수만큼 불어나고 EG1 좌변이 count(DISTINCT (date,ticker))
+-- 로 바뀐다. 단위를 stage 가 측정하지 못한 축은 원값 그대로 `_raw` 로 싣고 `*_basis` 를 동반한다
 -- (`shrts_avg_pric` — STAGE_DESIGN §5 「단위를 모르면 접미사 금지」).
+--
+-- **키움 대차(ka20068)는 4번째 원천이다**(S09-2, 2026-09-08). 앞의 셋과 같은 규약으로 붙는다 —
+-- 원장 행이 격자 셀 · 접힘 · 격리 중 하나로만 가고(EG1_short_daily), 결측 사유는 제 몫의
+-- `fill_kind_lending_kiwoom` 이 나르며, 증거 축은 `stg_shards_kiwoom` 의 `src_api='ka20068'` 샤드다.
+-- `rmnd` 는 **주 단위로 확정**되어 `_shr` 접미사를 받는다 — 근거는 rules_s09 의 field 선언.
 --
 -- 판본 선택: KIS 두 테이블은 stage 에서 `key_unique=false`(append_only 재수집)라 같은 (ticker, date)
 -- 에 여러 판본이 올 수 있다. PIT 규약(STAGE_HANDOFF §2 「PIT = 같은 키의 min(observed_date)」)대로
@@ -64,6 +70,13 @@ ln AS (
         ORDER BY observed_date, observed_n, new_stcn_shr, rdmp_stcn_shr, rmnd_stcn_shr,
                  rmnd_amt_krw) = 1
 ),
+lk AS (
+    SELECT ticker, date, rmnd, remn_amt_krw
+    FROM stg_lending_daily
+    QUALIFY row_number() OVER (
+        PARTITION BY ticker, date
+        ORDER BY observed_date, observed_n, rmnd, remn_amt_krw) = 1
+),
 shard AS (
     -- (src_api, ticker) 당 요청 1건이 정본이다(절단본 실측: ka10014 8티커 × 1행). 페이징이 여러 행으로
     -- 쪼개져 오더라도 격자 조인이 팬아웃하지 않도록 티커 단위로 접는다 — 창은 [min(req_start),
@@ -73,6 +86,16 @@ shard AS (
            max(CASE status WHEN 'done' THEN 2 WHEN 'empty' THEN 1 ELSE 0 END) AS prio
     FROM stg_shards_kiwoom
     WHERE src_api = 'ka10014'
+    GROUP BY ticker
+),
+shard_lend AS (
+    -- 같은 규약의 대차 샤드(ka20068). `shard` 와 한 CTE 로 묶어 `src_api` 로 가르지 않는 이유는
+    -- 한쪽 테이블에만 걸리는 조인 술어가 해시 조인을 NL 조인으로 떨어뜨리기 때문이다
+    -- (EQUITY_HANDOFF §7 ③ — credit_daily 70분 사고). 미리 걸러 티커 등호 하나로 붙인다.
+    SELECT ticker, min(req_start) AS req_start, max(req_end) AS req_end,
+           max(CASE status WHEN 'done' THEN 2 WHEN 'empty' THEN 1 ELSE 0 END) AS prio
+    FROM stg_shards_kiwoom
+    WHERE src_api = 'ka20068'
     GROUP BY ticker
 ),
 unit_day AS (
@@ -93,7 +116,8 @@ cells AS (
     SELECT s.date, s.ticker, false AS on_grid
     FROM (SELECT ticker, date FROM kw
           UNION SELECT ticker, date FROM ks
-          UNION SELECT ticker, date FROM ln) s
+          UNION SELECT ticker, date FROM ln
+          UNION SELECT ticker, date FROM lk) s
     WHERE NOT EXISTS (SELECT 1 FROM grid g WHERE g.ticker = s.ticker AND g.date = s.date)
 ),
 joined AS (
@@ -105,14 +129,19 @@ joined AS (
            (ks.ticker IS NOT NULL) AS ks_row,
            ln.new_stcn_shr, ln.rdmp_stcn_shr, ln.rmnd_stcn_shr, ln.rmnd_amt_krw,
            (ln.ticker IS NOT NULL) AS ln_row,
+           lk.rmnd, lk.remn_amt_krw,
+           (lk.ticker IS NOT NULL) AS lk_row,
            CASE WHEN c.date BETWEEN sh.req_start AND sh.req_end THEN sh.prio END AS kw_prio,
            us.prio AS ks_prio,
-           ul.prio AS ln_prio
+           ul.prio AS ln_prio,
+           CASE WHEN c.date BETWEEN sl.req_start AND sl.req_end THEN sl.prio END AS lk_prio
     FROM cells c
     LEFT JOIN kw ON kw.ticker = c.ticker AND kw.date = c.date
     LEFT JOIN ks ON ks.ticker = c.ticker AND ks.date = c.date
     LEFT JOIN ln ON ln.ticker = c.ticker AND ln.date = c.date
+    LEFT JOIN lk ON lk.ticker = c.ticker AND lk.date = c.date
     LEFT JOIN shard sh ON sh.ticker = c.ticker
+    LEFT JOIN shard_lend sl ON sl.ticker = c.ticker
     LEFT JOIN unit_day us ON us.dataset = 'short' AND us.ticker = c.ticker AND us.date = c.date
     LEFT JOIN unit_day ul ON ul.dataset = 'loan' AND ul.ticker = c.ticker AND ul.date = c.date
 )
@@ -134,6 +163,8 @@ SELECT
     rdmp_stcn_shr                                           AS lending_redeem_kis_shr,
     rmnd_stcn_shr                                           AS lending_balance_kis_shr,
     rmnd_amt_krw                                            AS lending_balance_kis_krw,
+    rmnd                                                    AS lending_balance_kiwoom_shr,
+    remn_amt_krw                                            AS lending_balance_kiwoom_krw,
     struct_pack(
         kind := CASE WHEN kw_row THEN 'measured'
                      WHEN kw_prio = 2 THEN 'src_omitted'
@@ -158,6 +189,14 @@ SELECT
         evidence := CASE WHEN ln_prio = 2 THEN 'unit_ok'
                          WHEN ln_prio = 1 THEN 'unit_empty'
                          ELSE 'none' END)                   AS fill_kind_loan_kis,
+    struct_pack(
+        kind := CASE WHEN lk_row THEN 'measured'
+                     WHEN lk_prio = 2 THEN 'src_omitted'
+                     WHEN lk_prio = 1 THEN 'empty_response'
+                     ELSE 'not_collected' END,
+        evidence := CASE WHEN lk_prio = 2 THEN 'shard_done'
+                         WHEN lk_prio = 1 THEN 'shard_empty'
+                         ELSE 'none' END)                   AS fill_kind_lending_kiwoom,
     date                                                    AS available_date,
     'default'                                               AS available_basis,
     CASE WHEN on_grid THEN NULL

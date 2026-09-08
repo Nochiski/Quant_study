@@ -89,11 +89,16 @@ FACTORS: tuple[FactorSpec, ...] = (
     _f("V02", "PER", ("price.market_cap", "financial.net_income"), "factor_layer",
        "FACTORS §1 V02 = 시가총액 / 당기순이익. 기간 축(분기 3개월 / 사업 12개월)은 report_code "
        "가 정하므로 TTM 합성은 팩터층 몫이다.", registry="financial.earnings_yield"),
-    _f("V03", "PSR", ("price.market_cap", "financial.revenue"), "equity",
-       "FACTORS §1 V03 = 시가총액 / 매출액.",
-       caveat="금융업 470사는 매출액 개념이 성립하지 않는다 — banking_gross·insurance_gross "
-              "합산식이 미확정(GAP-01, FACTORS §8·§11-7). equity 가 revenue_basis 규칙을 "
-              "확정해야 풀린다.", registry="financial.sales_to_price"),
+    _f("V03", "PSR", ("price.market_cap", "financial.revenue", "financial.revenue_basis"),
+       "equity", "FACTORS §1 V03 = 시가총액 / 매출액.",
+       caveat="**금융업 매출 규칙을 확정했다(2026-09-08)** — 합산식을 새로 정의하지 않고 기준을 "
+              "밝혀 내보낸다(GAP-01 종결). 소비 규약: 횡단면은 financial.revenue_basis = "
+              "'standard' 끼리만 견주고 은행·보험 합산분(banking_gross 39법인 · "
+              "insurance_gross 13법인)은 업종 안에서만 쓴다. 오늘 상장 보통주 2,308 중 합산식 "
+              "27종목이 시총 330조(5.6%)다. standard 로 분류된 증권사도 '영업수익'이 매출로 "
+              "잡혀 PSR 이 구조적 극단값이 되는데 이건 데이터 결함이 아니라 업종 경제학이라 "
+              "equity 가 고칠 것이 아니다(BLOCKED_FACTORS §5-1).",
+       registry="financial.sales_to_price"),
     _f("V04", "PCR", ("price.market_cap", "financial.operating_cash_flow"), "factor_layer",
        "FACTORS §1 V04 = 시가총액 / 영업활동현금흐름(연초누계 축)."),
     _f("V05", "EV/EBITDA", ("price.market_cap", "financial.borrowings", "financial.cash",
@@ -116,9 +121,12 @@ FACTORS: tuple[FactorSpec, ...] = (
        registry="financial.roe"),
     _f("Q02", "ROA", ("financial.net_income", "financial.total_assets"), "factor_layer",
        "FACTORS §2 Q02 = 순이익 / 자산총계.", registry="financial.roa"),
-    _f("Q03", "영업이익률", ("financial.operating_income", "financial.revenue"), "equity",
+    _f("Q03", "영업이익률", ("financial.operating_income", "financial.revenue",
+                          "financial.revenue_basis"), "equity",
        "FACTORS §2 Q03 = 영업이익 / 매출액.",
-       caveat="V03 과 같은 GAP-01 — 금융업 매출액 규칙 미확정.",
+       caveat="V03 과 같은 소비 규약 — financial.revenue_basis = 'standard' 끼리만 횡단면 "
+              "비교하고 은행·보험 합산분은 업종 안에서만 쓴다. 분자(영업이익)는 기준과 무관하게 "
+              "표준계정이라 분모만 갈린다.",
        registry="financial.operating_margin"),
     _f("Q04", "발생액", ("financial.net_income", "financial.operating_cash_flow",
                        "financial.total_assets"), "factor_layer",
@@ -139,18 +147,34 @@ FACTORS: tuple[FactorSpec, ...] = (
        caveat="순영업자산의 계정 조합 정의는 FACTORS §11-3 에서 아직 미결이다 — 재료는 있고 "
               "정의가 팩터층 몫이다."),
     # 3. 성장
-    _f("G01", "매출성장률", ("financial.revenue",), "equity",
-       "FACTORS §3 G01 = (당기 매출 / 전기 매출) − 1.", caveat="V03 과 같은 GAP-01."),
+    _f("G01", "매출성장률", ("financial.revenue", "financial.revenue_basis",
+                          "financial.revenue_basis_prev"), "equity",
+       "FACTORS §3 G01 = (당기 매출 / 전기 매출) − 1. 기준 단절을 가릴 재료를 요구 목록에 "
+       "함께 넣어 「매출만 있으면 계산된다」는 오해를 막는다.",
+       caveat="**매출 기준 단절을 재료로 막는다(2026-09-08)** — financial.revenue_basis 가 "
+              "financial.revenue_basis_prev 와 다르면 그 해 성장률은 결측 처리하라. 서버 현판 "
+              "실측으로 직전 회계연도 대비 기준이 바뀐 행이 367(136법인)이고 그중 합산식이 "
+              "끼어든 것이 18법인 46건이다 — 삼성카드 −12% · 메리츠금융지주 −70% · 한국금융지주 "
+              "−72% 는 전부 가짜이고 한화생명은 직전이 0이라 나눗셈 자체가 성립하지 않는다. "
+              "equity 는 두 라벨을 싣기만 하고 버리지 않는다(WORKFLOW §0-2)."),
     _f("G02", "영업이익성장률", ("financial.operating_income",), "factor_layer",
        "FACTORS §3 G02 = (당기 영업이익 / 전기) − 1."),
     _f("G03", "자산성장률", ("financial.total_assets",), "factor_layer",
        "FACTORS §3 G03 = (당기 자산 / 전기) − 1. 역방향 팩터다.",
        registry="financial.asset_growth"),
-    _f("G04", "EPS 성장률", ("financial.eps_basic",), "equity",
-       "FACTORS §3 G04 = (당기 EPS / 전기) − 1.",
-       caveat="`fin_std.eps_basic` 은 **주식분할 미조정** 원장 값이라(삼성전자 2018 1분기 85,435 "
-              "vs 사업보고서 6,461) 시계열 비율이 분할 구간에서 가짜 점프를 낸다 — adj_factor 로 "
-              "조정한 EPS 축을 equity 가 내야 풀린다(FIELD_MAP §3)."),
+    _f("G04", "EPS 성장률", ("financial.net_income", "price.shares_outstanding"), "equity",
+       "FACTORS §3 G04 = (당기 EPS / 전기) − 1 이고 **EPS = 순이익 ÷ 주식수**다 — 나눗셈은 "
+       "팩터층 몫이라는 F05·V02 와 같은 규약이다.",
+       caveat="**요구 재료를 바꿨다(2026-09-08)** — 옛 선언은 `financial.eps_basic` 을 가리켰는데 "
+              "그 원장 값은 **주식분할 미조정**이라(삼성전자 2018 1분기 85,435 vs 사업보고서 "
+              "6,461 — 50:1 분할) 시계열 비율이 분할 구간에서 13배 가짜 점프를 낸다. 재료를 "
+              "`financial.net_income` + `price.shares_outstanding` 으로 바꾸면 분할이 **주식수 "
+              "변화에 그대로 반영**되므로 가짜 점프가 원리적으로 생기지 않는다. 둘 다 이미 "
+              "선언·커버 완료다(순이익 99.05% · 상장주식수 100%). **`backend/FACTORS.md` 정본의 "
+              "계산식도 「원장 EPS 비율」에서 「순이익 ÷ 주식수의 비율」로 바뀌어야 한다** — "
+              "정본 수정은 사람 승인 항목이라 여기서는 손대지 않았다(BLOCKED_FACTORS §5-3 (가)). "
+              "`financial.eps_basic` 선언은 그대로 남는다(내부 스코프 · "
+              "`requires_confirmation=true`) — 원장이 준 값을 지우지는 않는다."),
     _f("G05", "영업이익 추정치 리비전", ("consensus.forward_op",), "factor_layer",
        "FACTORS §3 G05 = (op(t) / op(t−1M)) − 1.",
        caveat="관측점이 v3 2026-04-03~ 로 짧고, 겹치는 달의 wise·v3 중 어느 축을 쓸지도 팩터층이 "
@@ -210,7 +234,11 @@ FACTORS: tuple[FactorSpec, ...] = (
        registry="flow.institution_net_buy_20d"),
     _f("F04", "연기금 순매수", ("flow.pension_net_buy",), "equity",
        "FACTORS §5 F04 = penfnd_etc 누적. 재료는 키움 ka10060 의 연기금 주체 컬럼.",
-       caveat="F01 과 같은 S08 미구현."),
+       caveat="**키움 전용으로 열었다(2026-09-08)** — KIS 보완분의 「기금」이 키움 「연기금등」과 "
+              "같은 주체인지 **검증할 축이 없다**(두 원천이 같은 (ticker, date) 셀을 채운 적 "
+              "0건, 완전 배타). 주체를 섞는 대신 원천을 좁혔으므로 **KIS 단독 구간 11.1% 는 이 "
+              "팩터에서 결측**이다 — 커버가 필요하면 원장 컬럼 `penfnd_etc_krw` 를 직접 읽되 "
+              "그때 주체가 섞인다는 것을 알고 읽어야 한다."),
     _f("F05", "공매도 거래비중", ("short.short_sale_volume", "price.shares_outstanding"),
        "equity", "FACTORS §5 F05 = 공매도 거래량 / 상장주식수. 재료는 키움 ka10014.",
        caveat="**이름을 정정했다(2026-09-07)** — 이 값은 공매도 잔고가 아니라 **거래량**이다. "
@@ -282,9 +310,13 @@ FACTORS: tuple[FactorSpec, ...] = (
        "FACTORS §7 E06 = 희석 이벤트(piicDecsn·cvbdIsDecsn).", caveat="E05 와 같은 S05 후속."),
     _f("E07", "상폐 위험", ("universe.delist_signal", "universe.admin_state"), "equity",
        "FACTORS §7 E07 = 부도·해산·회생·관리 이벤트. 생존편향 26.75% 제거의 근거.",
-       caveat="KOSPI 관리종목 **해제 공시가 3건뿐**이라 상태 종료를 잴 수 없고 신호가 KOSDAQ 으로 "
-              "기운다(GAP-06). `admin_state_basis` 가 행마다 근거를 남기지만 비대칭 자체는 "
-              "원천 부재라 개선 불가다."),
+       caveat="**소비 규약으로 열었다(2026-09-08)** — KOSPI 관리종목 **해제 공시가 3건뿐**이라 "
+              "상태 종료를 잴 수 없어 고정 길이 창으로 근사하고(`derived_kospi_window` 73종목 "
+              "35,118세션), 그래서 관리종목 비율이 KOSDAQ 32.8%(803/2,445) 대 KOSPI "
+              "5.8%(73/1,249)로 기운다(GAP-06). **이 점수를 시장 간에 직접 비교하지 마라** — "
+              "시장 안에서 순위를 매기거나 `admin_state_basis` 로 거른다. 비대칭을 없앤 것이 "
+              "아니라 `admin_state_basis` 로 드러내 두었다. 근본 해결(거래소 KOSPI 관리종목 "
+              "이력 수집)은 stage 몫이다."),
     _f("E08", "비적정 감사의견", ("event.audit_opinion",), "factor_layer",
        "FACTORS §7 E08 = adt_opinion ≠ 적정. 상장폐지 선행 신호.",
        caveat="`n_source_rows > 1` 인 행은 원장 여러 행이 접힌 것이라 건수 집계에 그대로 쓰면 "

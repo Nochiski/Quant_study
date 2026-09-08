@@ -38,9 +38,10 @@ REGISTRY_DOC = Path(__file__).parents[2] / "backend" / "FACTORS.md"
 # 2026-09-07 F05: 요구 재료를 실재하는 `short.short_sale_volume` 로 정정해 열렸다.
 # 2026-09-07 GAP-03 종결: 「기관」 = 원장 합계로 확정해 F03 이 열렸다.
 # 2026-09-07 S02-2: `benchmark.close` 선언으로 R04(시장 베타)가 열렸다.
-N_READY = 42
-N_BLOCKED = 12
-BLOCKED_REASON_COUNTS = {"field_unavailable": 1, "partial_support": 11}
+# 2026-09-08 병렬 4슬라이스(컨센서스 6 · 재무 3 · G04·E07·F04)로 **54/54 전부 ready**.
+N_READY = 54
+N_BLOCKED = 0
+BLOCKED_REASON_COUNTS: dict[str, int] = {}
 READINESS_GATES = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG10", "EG4", "EG5a"]
 
 
@@ -108,6 +109,19 @@ def test_registry_대응은_레지스트리_50_안에서만_고른다() -> None:
                                if f.registry_factor_id})       # 1:1 (중복 대응 금지)
 
 
+def test_G04는_원장_EPS_가_아니라_순이익과_주식수를_요구한다() -> None:
+    """원장 `eps_basic` 은 **주식분할 미조정**이라 시계열 비율이 분할 구간에서 가짜 점프를 낸다
+    (삼성전자 2018 1분기 85,435 vs 사업보고서 6,461 — 50:1 분할).
+
+    그래서 요구 재료를 순이익 ÷ 주식수로 바꿨다(BLOCKED_FACTORS §5-3 (가)) — 분할은 주식수
+    변화에 그대로 반영되므로 가짜 점프가 원리적으로 생기지 않는다. 나눗셈은 팩터층 몫이라는
+    F05·V02 와 같은 규약이다.
+    """
+    spec = next(f for f in rules_s20.FACTORS if f.factor_id == "G04")
+    assert spec.required_field_ids == ("financial.net_income", "price.shares_outstanding")
+    assert "financial.eps_basic" not in spec.required_field_ids
+
+
 def test_요구_필드는_전부_field_id_문법이다() -> None:
     for f in rules_s20.FACTORS:
         for field_id in f.required_field_ids:
@@ -128,7 +142,7 @@ def test_54행이_지어지고_게이트가_전부_통과한다(built) -> None:
 def test_절단본_준비도는_31_대_23_이다(built) -> None:
     _, r = built
     got = dict(_rows(r.out_dir, "SELECT status, count(*) FROM fr GROUP BY 1 ORDER BY 1"))
-    assert got == {"ready": N_READY, "blocked": N_BLOCKED}
+    assert got == ({"ready": N_READY, "blocked": N_BLOCKED} if N_BLOCKED else {"ready": N_READY})
     m = _gate(r, "EG10").metrics
     assert (m["n_ready"], m["n_blocked"]) == (N_READY, N_BLOCKED)
     assert m["blocked_reason_counts"] == BLOCKED_REASON_COUNTS
@@ -152,9 +166,7 @@ def test_수급_공매도_신용_9팩터의_판정은_선언한_필드가_가른
     got = dict(_rows(r.out_dir, "SELECT factor_id, coalesce(blocked_reason, 'ready') FROM fr "
                                 "WHERE factor_id LIKE 'F0%' ORDER BY 1"))
     assert sorted(got) == [f"F0{i}" for i in range(1, 10)]
-    assert {f for f, v in got.items() if v == "ready"} == {"F01", "F02", "F03", "F05", "F06",
-                                                           "F07", "F08", "F09"}
-    assert got["F04"] == "field_unavailable: flow.pension_net_buy"
+    assert {f for f, v in got.items() if v == "ready"} == {f"F0{i}" for i in range(1, 10)}
 
 
 
@@ -212,9 +224,9 @@ def test_required_columns_는_프로파일에서_유도된다(built) -> None:
     # S08-2 로 F02 의 재료가 격자에 붙었다 — 컬럼이 조인으로 채워진다
     (cols,), = _rows(r.out_dir, "SELECT required_columns FROM fr WHERE factor_id = 'F02'")
     assert list(cols) == ["flow_daily.foreign_wght_pct"]
-    # 프로파일 행이 없는 필드는 컬럼도 없다 — F04 는 요구 재료가 그 하나뿐이라 빈 목록이다
+    # F04 는 2026-09-08 에 키움 전용 컬럼으로 열렸다
     (cols,), = _rows(r.out_dir, "SELECT required_columns FROM fr WHERE factor_id = 'F04'")
-    assert list(cols) == []
+    assert list(cols) == ["flow_daily.pension_net_buy_kiwoom_krw"]
 
 
 def test_커버_실측에_걸린_판정은_손계산으로_잰다(built) -> None:
@@ -230,7 +242,7 @@ def test_커버_실측에_걸린_판정은_손계산으로_잰다(built) -> None
                    "WHERE factor_id IN ('M01', 'E05', 'E06', 'V05', 'F07', 'F09') ORDER BY 1")}
     assert got["M01"] == ("ready", "2010-01-04", None)
     # 대차잔고는 KIS 유닛이 덮는 구간만 있다 — 가장 늦게 열린 재료가 팩터의 시작일이다
-    assert got["F07"] == ("ready", "2014-01-02", None)
+    assert got["F07"] == ("ready", "2011-07-25", None)   # 09-08 키움 대차로 시작일 앞당겨짐
     assert got["F09"] == ("ready", "2010-01-04", None)
     # 자사주·CB 를 싣기 시작하며 둘 다 열렸다 — 시작일은 각 원천의 첫 공시일이다
     assert got["E05"] == ("ready", "2015-01-23", None)

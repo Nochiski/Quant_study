@@ -23,7 +23,7 @@
   "expect": "266425",
   "source": "stage:stg_short_daily_kiwoom.shrts_avg_pric — stage 가 단위를 못 잰 축(접미사 없음)",
   "expect_source": "stage:stg_short_daily_kiwoom.shrts_avg_pric", "fixture_class": "positive",
-  "note": "FX-3-009 규약(단위 미확정 컬럼에 접미사 금지)을 키움 공매도 평균가에 적용한 것. 대차 축은 stg_lending_daily 가 입력에 들어올 때 같은 규약으로 붙는다"},
+  "note": "FX-3-009 규약(단위 미확정 컬럼에 접미사 금지)을 키움 공매도 평균가에 적용한 것. 키움 대차 `rmnd` 도 같은 상태였으나 S09-2 가 단위를 재서 `_shr` 를 받았다"},
 
  {"case": "fx3_009_unit_unknown_basis",
   "key": {"ticker": "005930", "date": "2026-08-20"}, "column": "short_avg_price_kiwoom_basis",
@@ -141,6 +141,39 @@
   "expect_source": "stage:stg_loan_daily_kis.rmnd_stcn_shr", "fixture_class": "positive",
   "note": "원장이 음수 잔고를 준다. abs·0 클립은 사실 왜곡이므로 그대로 나르고 EG3_short_daily 가 건수만 기록한다"},
 
+ {"case": "fx3_lending_kiwoom_measured_balance",
+  "key": {"ticker": "005930", "date": "2026-08-20"}, "column": "lending_balance_kiwoom_shr",
+  "expect": "86571032",
+  "source": "stage:stg_lending_daily.rmnd — 절단본 원자료 1행 그대로",
+  "expect_source": "stage:stg_lending_daily.rmnd", "fixture_class": "positive",
+  "note": "단위 확정의 실례. 같은 행 remn_amt_krw 23,460,750,000,000 ÷ rmnd = 271,000 = 그날 KRX 종가(stg_price_daily.close_krw) → rmnd 는 주(shares)다. 상장주식수 5,846,278,608 대비 1.48%"},
+
+ {"case": "fx3_lending_kiwoom_measured_amount_scaled",
+  "key": {"ticker": "005930", "date": "2026-08-20"}, "column": "lending_balance_kiwoom_krw",
+  "expect": "23460750000000",
+  "source": "stage:stg_lending_daily.remn_amt_krw — 원장 백만원 단위를 stage 가 ×1e6 한 값",
+  "expect_source": "stage:stg_lending_daily.remn_amt_krw", "fixture_class": "positive",
+  "note": "STAGE_HANDOFF §2 「ka20068.remn_amt 백만원 ×1e6」. equity 는 다시 스케일하지 않는다"},
+
+ {"case": "fx3_lending_kiwoom_measured_fill_kind",
+  "key": {"ticker": "005930", "date": "2026-08-20"}, "column": "fill_kind_lending_kiwoom",
+  "expect": "{'kind': measured, 'evidence': shard_done}",
+  "source": "stage:stg_lending_daily(행 있음) + stg_shards_kiwoom(ka20068·005930·done)",
+  "expect_source": "stage", "fixture_class": "positive"},
+
+ {"case": "fx3_lending_kiwoom_no_shard_ticker_not_collected",
+  "key": {"ticker": "005935", "date": "2010-01-04"}, "column": "fill_kind_lending_kiwoom",
+  "expect": "{'kind': not_collected, 'evidence': none}",
+  "source": "stage:stg_shards_kiwoom — ka20068 샤드는 8티커뿐이고 우선주 005935 는 없다",
+  "expect_source": "stage:stg_shards_kiwoom", "fixture_class": "positive",
+  "note": "대차 축에서도 '수집 안 함' 과 '수집했는데 안 줌' 을 가른다"},
+
+ {"case": "fx3_lending_kiwoom_no_shard_value_null",
+  "key": {"ticker": "005935", "date": "2010-01-04"}, "column": "lending_balance_kiwoom_shr",
+  "expect": null,
+  "source": "hand — 미수집 셀은 0 이 아니라 NULL(EG9-P04 「미수집→0」 금지)",
+  "expect_source": "hand", "fixture_class": "positive"},
+
  {"case": "fx3_loan_no_unit_not_collected",
   "key": {"ticker": "900050", "date": "2010-01-04"}, "column": "fill_kind_loan_kis",
   "expect": "{'kind': not_collected, 'evidence': none}",
@@ -156,6 +189,6 @@
  {"case": "fx3_available_basis_default",
   "key": {"ticker": "005930", "date": "2026-08-20"}, "column": "available_basis",
   "expect": "default",
-  "source": "hand — stage 세 원천 전부 available_basis='default'·lag_known=false",
+  "source": "hand — stage 네 원천 전부 available_basis='default'·lag_known=false",
   "expect_source": "hand", "fixture_class": "positive"}
 ]

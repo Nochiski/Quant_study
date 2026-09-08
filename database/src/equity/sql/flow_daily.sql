@@ -126,6 +126,13 @@ foreign_own AS (
     SELECT ticker, date, wght_pct, limit_exh_rt_pct, poss_stkcnt_shr
     FROM stg_foreign_daily
 )
+-- ── 연기금 순매수 (F04, 2026-09-08) ─────────────────────────────────────────
+-- `pension_net_buy_kiwoom_krw` = 키움 `penfnd_etc_krw`(연기금등) **만**. KIS 보완분의
+-- `fund_ntby_tr_pbmn_krw`(기금)는 같은 주체라고 확인한 적이 없고 확인할 축도 없다 — 서버
+-- flow_daily 에서 두 원천이 같은 (ticker, date) 셀을 채운 경우가 0건이라(키움 7,540,202 ·
+-- KIS 939,610, 완전 배타) 값을 맞대 볼 구간 자체가 없다. 그래서 주체가 확정된 키움 축만
+-- 필드로 낸다(BLOCKED_FACTORS §2-2 F04 (가)). 원장이 준 `penfnd_etc_krw` 13주체 컬럼은
+-- 그대로 다 나간다 — 두 원천을 섞어서 읽고 싶은 소비자는 그 컬럼을 직접 읽으면 된다.
 -- ① 측정 행
 SELECT l.date, l.ticker, l.src,
        l.ind_invsr_krw, l.frgnr_invsr_krw, l.orgn_krw, l.fnnc_invt_krw, l.insrnc_krw,
@@ -134,6 +141,7 @@ SELECT l.date, l.ticker, l.src,
        CASE WHEN l.src = 'kiwoom' THEN fo.wght_pct END          AS foreign_wght_pct,
        CASE WHEN l.src = 'kiwoom' THEN fo.limit_exh_rt_pct END  AS foreign_limit_exh_pct,
        CASE WHEN l.src = 'kiwoom' THEN fo.poss_stkcnt_shr END   AS foreign_poss_shr,
+       CASE WHEN l.src = 'kiwoom' THEN l.penfnd_etc_krw END     AS pension_net_buy_kiwoom_krw,
        {'kind': 'measured', 'evidence': 'none'} AS fill_kind,
        l.date     AS available_date,
        'default'  AS available_basis,
@@ -147,7 +155,7 @@ UNION ALL
 -- ② 미측정 셀
 SELECT e.date, e.ticker, e.src,
        NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-       NULL, NULL, NULL,
+       NULL, NULL, NULL, NULL,
        {'kind': e.kind, 'evidence': e.evidence} AS fill_kind,
        e.date     AS available_date,
        'default'  AS available_basis,
@@ -163,6 +171,7 @@ SELECT l.date, l.ticker, l.src,
        l.invtrt_krw, l.etc_fnnc_krw, l.bank_krw, l.penfnd_etc_krw, l.samo_fund_krw,
        l.natn_krw, l.etc_corp_krw, l.natfor_krw,
        NULL, NULL, NULL,
+       CASE WHEN l.src = 'kiwoom' THEN l.penfnd_etc_krw END AS pension_net_buy_kiwoom_krw,
        {'kind': 'measured', 'evidence': 'none'} AS fill_kind,
        l.date     AS available_date,
        'default'  AS available_basis,

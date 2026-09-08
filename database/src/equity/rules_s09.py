@@ -13,17 +13,23 @@ suspended}` ∧ `sec_type <> 'etf'`) 그 자체이고, `trading_calendar` 는 �
 존속 8종, 겹치는 (ticker, date) 0행. stage 가 단위를 측정하지 못한 축(`shrts_avg_pric`)은 원값을
 `_raw` 로 싣고 `short_avg_price_kiwoom_basis`(= 'unknown')를 동반한다.
 
-입력 — equity 2(`trading_calendar`·`universe_daily`) + stage 원천 3(`stg_short_daily_kiwoom`·
-`stg_short_daily_kis`·`stg_loan_daily_kis`) + stage 로그 축 2(`stg_shards_kiwoom`·`stg_units_kis`).
-로그 축은 팩트 원천이 아니라 `fill_kind` 판정의 증거다(DESIGN §3·§4-3 — 이 축이 없으면 `fill_kind`
-가 `measured`/`not_collected` 두 값으로 무너지고 evidence 어휘가 죽는다). 숫자 상수는 없다.
+입력 — equity 2(`trading_calendar`·`universe_daily`) + stage 원천 4(`stg_short_daily_kiwoom`·
+`stg_short_daily_kis`·`stg_loan_daily_kis`·`stg_lending_daily`) + stage 로그 축 2
+(`stg_shards_kiwoom`·`stg_units_kis`). 로그 축은 팩트 원천이 아니라 `fill_kind` 판정의 증거다
+(DESIGN §3·§4-3 — 이 축이 없으면 `fill_kind` 가 `measured`/`not_collected` 두 값으로 무너지고
+evidence 어휘가 죽는다). 숫자 상수는 없다.
 
-**설계와 다른 점 — 대차 키움 축 미탑재**: DESIGN §4-3 은 대차를 `lending_balance_kis_shr` ·
-`lending_balance_kiwoom_raw` 두 축으로 적었지만 키움 대차 원장(`stg_lending_daily`)이 이 슬라이스의
-입력 3원천에 없다(절단본에도 없다). S09 는 KIS 축만 싣고, 키움 축과 「겹침 구간 비율 분포」(= 두
-대차 축의 단위 대조)는 `stg_lending_daily` 가 입력에 들어오는 후속 슬라이스 몫이다.
-EG3_short_daily 의 겹침 지표는 그동안 **공매도 두 원천**(키움 ↔ KIS)의 겹침 구간에 걸어 둔다 —
-같은 사실을 두 원천이 재는 유일한 축이라 단위·정의 어긋남이 여기서 먼저 보인다.
+**키움 대차 축 탑재(S09-2, 2026-09-08)** — DESIGN §4-3 이 요구한 두 번째 대차 축이 들어왔다.
+설계가 `lending_balance_kiwoom_raw`(단위 미확정)로 적었던 컬럼은 **`lending_balance_kiwoom_shr`**
+가 됐다. `stg_lending_daily.rmnd` 의 단위를 재고 **주(shares)로 확정**했기 때문이다 —
+근거는 아래 `short.borrowed_quantity` 선언의 evidence.
+
+**두 대차 축의 「겹침 구간 비율 분포」는 잴 수 없다** — 서버 전수 실측 결과 두 원장이 같은
+(ticker, date) 를 잰 셀이 **0건**이고 공유 티커도 **0개**다(키움 2,602 · KIS 287). KIS 대차는
+키움 API 가 못 주는 폐지 종목을 메우려고 모은 축이라 배타적인 것이 수집 설계다. 그래서 단위 대조를
+원천 간 비율이 아니라 **원장 안의 항등식**으로 했다(같은 원장의 금액 축 ÷ 수량 축 = KRX 종가).
+겹침 지표 자체는 계속 기록형으로 남긴다 — 0 을 사실로 남겨 두어야 나중에 겹침이 생겼을 때
+보인다(`n_lending_overlap_src_measured`).
 
 싣지 않는 축과 이유:
   · KIS 누적 6컬럼(`acml_*`)  — 요청 창 첫 행에서 리셋된다(STAGE_SPEC §2-6, 판독 플래그
@@ -80,6 +86,8 @@ SOURCES: tuple[tuple[str, str, str, str], ...] = (
      "short_volume_kiwoom_shr"),
     ("short_kis", "stg_short_daily_kis", "fill_kind_short_kis", "short_volume_kis_shr"),
     ("loan_kis", "stg_loan_daily_kis", "fill_kind_loan_kis", "lending_balance_kis_shr"),
+    ("lending_kiwoom", "stg_lending_daily", "fill_kind_lending_kiwoom",
+     "lending_balance_kiwoom_shr"),
 )
 
 # 단위 라벨표(기록형) — 산출 컬럼 → stage 가 실제로 측정한 단위. `_raw` 는 「단위를 모르면 접미사
@@ -98,6 +106,10 @@ UNIT_LABELS: dict[str, str] = {
     "lending_redeem_kis_shr": "shares",
     "lending_balance_kis_shr": "shares",
     "lending_balance_kis_krw": "krw (stage ×1e6)",
+    # stage 는 `rmnd` 단위를 못 쟀지만(STAGE_HANDOFF §2 미측정 목록) equity 가 원장 안 항등식으로
+    # 재서 확정했다 — `short.borrowed_quantity` 선언의 evidence 참조.
+    "lending_balance_kiwoom_shr": "shares",
+    "lending_balance_kiwoom_krw": "krw (stage ×1e6)",
 }
 # 겹침 구간 비율 분포에 쓰는 분위수(기록형이라 baseline 상수가 아니다).
 RATIO_QUANTILES: tuple[float, ...] = (0.05, 0.25, 0.5, 0.75, 0.95)
@@ -240,7 +252,9 @@ def eg3_short_daily(ctx: EquityGateContext) -> GateResult:
              WHERE {_q(fk)}.kind = 'measured'
                AND {_q(fk)}.evidence IN ('shard_empty', 'unit_empty')""")
 
-    # ④ 대차 축(기록형) — 음수 잔고는 stage 가 keep 한 원장 사실이다(HANDOFF §3 「음수 2,691 keep」)
+    # ④ 대차 축(기록형) — 음수 잔고는 stage 가 keep 한 원장 사실이다(HANDOFF §3 「음수 2,691」).
+    #    키움 축은 stage 불변식 `rmnd_negative` 가 지켜 서버 실측 0 이지만 세는 자리는 같이 둔다 —
+    #    두 축의 같은 지표가 갈리는 순간이 원천 규약이 갈린 순간이다.
     (n_bal_neg, n_amt_neg, bal_min, n_bal_null, n_avg_kis_null,
      n_avg_kw_null, n_kis_acml_invalid) = _row(ctx, f"""
         SELECT (SELECT count(*) FROM {v} WHERE lending_balance_kis_shr < 0),
@@ -256,9 +270,18 @@ def eg3_short_daily(ctx: EquityGateContext) -> GateResult:
                    AND short_avg_price_kiwoom_raw IS NULL),
                (SELECT count(*) FROM stg_short_daily_kis WHERE NOT acml_valid)""")
 
+    (n_kw_bal_neg, n_kw_amt_neg, kw_bal_min, n_kw_bal_null) = _row(ctx, f"""
+        SELECT (SELECT count(*) FROM {v} WHERE lending_balance_kiwoom_shr < 0),
+               (SELECT count(*) FROM {v} WHERE lending_balance_kiwoom_krw < 0),
+               (SELECT min(lending_balance_kiwoom_shr) FROM {v}),
+               (SELECT count(*) FROM {v}
+                 WHERE fill_kind_lending_kiwoom.kind = 'measured'
+                   AND lending_balance_kiwoom_shr IS NULL)""")
+
     # ⑤ 겹침 구간(기록형) — 같은 (ticker, date) 를 키움·KIS 가 둘 다 잰 셀의 상관·비율 분위수.
-    #     DESIGN §4-3 은 이 지표를 대차 두 축(KIS·키움)에 걸라고 적었지만 키움 대차 원장이 입력에
-    #     없다(모듈 docstring) — 같은 사실을 두 원천이 재는 유일한 축인 공매도에 건다.
+    #     DESIGN §4-3 이 요구한 대차 두 축(⑤-b)과 공매도 두 축(⑤-a) 둘 다 건다. 서버 실측으로
+    #     둘 다 겹침 0 이지만(수집 축이 폐지/존속으로 갈렸다) 0 을 지표로 남겨야 겹침이 생기는
+    #     순간이 보인다 — 상수로 굳히지 않는다.
     q_sel = ", ".join(f"(SELECT quantile_cont(r, {p}) FROM r)" for p in RATIO_QUANTILES)
     overlap = _row(ctx, f"""
         WITH b AS (
@@ -274,8 +297,25 @@ def eg3_short_daily(ctx: EquityGateContext) -> GateResult:
                {q_sel}""")
     n_overlap, corr_qty, corr_val, n_ratio, *ratio_q = overlap
 
+    lend_overlap = _row(ctx, f"""
+        WITH b AS (
+          SELECT lending_balance_kiwoom_shr AS kw_qty, lending_balance_kis_shr AS kis_qty,
+                 lending_balance_kiwoom_krw AS kw_val, lending_balance_kis_krw AS kis_val
+          FROM {v}
+          WHERE fill_kind_lending_kiwoom.kind = 'measured'
+            AND fill_kind_loan_kis.kind = 'measured'),
+             r AS (SELECT *, kis_qty / nullif(kw_qty, 0) AS r FROM b WHERE kw_qty > 0)
+        SELECT (SELECT count(*) FROM b),
+               (SELECT corr(CAST(kw_qty AS DOUBLE), CAST(kis_qty AS DOUBLE)) FROM b),
+               (SELECT corr(CAST(kw_val AS DOUBLE), CAST(kis_val AS DOUBLE)) FROM b),
+               (SELECT count(*) FROM r),
+               {q_sel}""")
+    n_lend_overlap, lend_corr_qty, lend_corr_val, n_lend_ratio, *lend_ratio_q = lend_overlap
+
     n_shard_rows, n_shard_tickers = _row(ctx, """
         SELECT count(*), count(DISTINCT ticker) FROM stg_shards_kiwoom WHERE src_api = 'ka10014'""")
+    n_lend_shard_rows, n_lend_shard_tickers = _row(ctx, """
+        SELECT count(*), count(DISTINCT ticker) FROM stg_shards_kiwoom WHERE src_api = 'ka20068'""")
 
     metrics.update({
         "unit_labels": dict(UNIT_LABELS),
@@ -296,6 +336,21 @@ def eg3_short_daily(ctx: EquityGateContext) -> GateResult:
             for p, q in zip(RATIO_QUANTILES, ratio_q, strict=True)},
         "n_kiwoom_shard_rows": int(str(n_shard_rows)),
         "n_kiwoom_shard_tickers": int(str(n_shard_tickers)),
+        "n_lending_balance_kiwoom_negative": int(str(n_kw_bal_neg)),
+        "n_lending_balance_kiwoom_krw_negative": int(str(n_kw_amt_neg)),
+        "lending_balance_kiwoom_min_shr": None if kw_bal_min is None else str(kw_bal_min),
+        "n_lending_balance_kiwoom_null_measured": int(str(n_kw_bal_null)),
+        "n_lending_overlap_src_measured": int(str(n_lend_overlap)),
+        "corr_lending_balance_kis_kiwoom": (
+            None if lend_corr_qty is None else float(str(lend_corr_qty))),
+        "corr_lending_amount_kis_kiwoom": (
+            None if lend_corr_val is None else float(str(lend_corr_val))),
+        "n_lending_overlap_ratio_rows": int(str(n_lend_ratio)),
+        "lending_balance_ratio_quantiles": {
+            str(p): (None if q is None else float(str(q)))
+            for p, q in zip(RATIO_QUANTILES, lend_ratio_q, strict=True)},
+        "n_kiwoom_lending_shard_rows": int(str(n_lend_shard_rows)),
+        "n_kiwoom_lending_shard_tickers": int(str(n_lend_shard_tickers)),
     })
     return _result("EG3_short_daily", checks, metrics, "fill_kind·basis 어휘 폐쇄 · 격자 일치")
 
@@ -348,20 +403,37 @@ FIELDS: tuple[FieldProfile, ...] = (
                  "(FACTORS §12 F45).",
         coverage_axis="grid_session", axis_columns=_SAXIS),
     FieldProfile(
-        field_id="short.borrowed_quantity", columns=("lending_balance_kis_shr",),
-        label="대차잔고(주식수, KIS)", unit="주", value_type="count", frequency="session",
+        field_id="short.borrowed_quantity", columns=("lending_balance_kiwoom_shr",),
+        label="대차잔고(주식수, 키움)", unit="주", value_type="count", frequency="session",
         recommended_lag_sessions=1, recommended_lag_days=1, point_in_time=True,
         requires_confirmation=False,
-        disclosure_basis="원장 날짜 = 대차 잔량 기준일. KIS kis_loan_trans 는 공표 시각을 주지 "
+        disclosure_basis="원장 날짜 = 대차 잔량 기준일. 키움 ka20068 은 공표 시각을 주지 "
                          "않는다(stage lag_known=false) → 익일 지식으로 쓴다",
-        evidence="short_daily.lending_balance_kis_shr ← stg_loan_daily_kis.rmnd_stcn_shr(주수, "
-                 "stage 측정 단위). **KIS 축뿐이다**(GAP-04) — 키움 대차 원장 stg_lending_daily "
-                 "가 S09 입력에 없어 `lending_balance_kiwoom_raw`(단위 미측정) 는 후속 슬라이스 "
-                 "몫이고, 그래서 고를 원천이 하나뿐이라 축 선택이 미결이 아니다. 좁은 커버"
-                 "(유닛 dataset='loan' 287 티커)는 조건이 아니라 이 행의 "
-                 "estimated_coverage_pct·coverage_from 이 재는 사실이다. 원장이 주는 음수 잔고는 "
-                 "자르지 않고 그대로 보존한다(원칙 ④) — 건수는 EG3_short_daily 기록형. 금액축 "
-                 "`lending_balance_kis_krw`(stage ×1e6)는 별개 컬럼이고 field_id 가 없다.",
+        evidence="short_daily.lending_balance_kiwoom_shr ← stg_lending_daily.rmnd. "
+                 "**GAP-04 종결(2026-09-08)**: stage 가 `rmnd` 의 단위를 못 재 접미사 없이 두었던 "
+                 "축인데(STAGE_HANDOFF §2 미측정 목록), equity 가 서버 전수로 재서 **주(shares)로 "
+                 "확정**했다. 잰 방법은 원천 간 대조가 아니라 **원장 안 항등식 + 외부 자**다 — "
+                 "같은 원장의 금액 축 `remn_amt_krw`(stage 가 백만원 ×1e6 로 이미 측정)를 `rmnd` "
+                 "로 나누면 KRX 종가(`stg_price_daily.close_krw`, 독립 원천)가 나와야 하고, "
+                 "실제로 나온다: 6,414,854셀 중앙값 **1.000000**, 반올림 잡음이 없는 잔고 10억원 "
+                 "이상 3,525,990셀에서 **3,524,517셀(99.958%)이 ±1% 안**(p01 0.99965 · p99 "
+                 "1.00035). 같은 자를 단위가 이미 확정된 KIS 축에 대면 중앙값 0.99960 이라 "
+                 "**키움 축이 더 정확**하다. 예: 005930 2026-08-20 rmnd 86,571,032 × 종가 271,000 "
+                 "= 23,460,750,000,000 = remn_amt_krw. "
+                 "**원천을 KIS 에서 키움으로 옮긴다** — 커버가 넓은 쪽이 정본이라는 이 층의 규칙"
+                 "대로다(격자 셀 6,988,296 대 493,445, 2,602종목 대 287종목). 두 값을 겹치는 "
+                 "셀에서 대조하는 것은 **불가능**하다: 두 원장이 같은 (ticker, date) 를 잰 셀이 "
+                 "0건이고 공유 티커도 0개다(KIS 대차는 키움 API 가 못 주는 폐지 종목을 메우려고 "
+                 "모은 축이다). 그래서 겹침 일치가 아니라 위 항등식이 근거다. "
+                 "KIS 축 `lending_balance_kis_shr` 는 같은 테이블에 그대로 남아 있고 "
+                 "**폴백 병합하지 않는다** — 둘을 coalesce 하면 한 시계열 안에서 원천이 바뀌고 "
+                 "그 자리가 값의 점프로 보인다(`short.short_sale_value` 와 같은 규약). KIS 만 "
+                 "덮는 493,445셀(전부 폐지 종목)은 이 field_id 로 나가지 않으므로 컬럼을 직접 "
+                 "읽어야 한다 — 커버는 이 행의 estimated_coverage_pct 가 재는 사실이다. "
+                 "원장이 주는 음수 잔고는 자르지 않고 보존한다(원칙 ④) — 키움 축은 stage 불변식 "
+                 "`rmnd_negative` 가 지켜 서버 실측 0 이고, 건수는 EG3_short_daily 기록형. "
+                 "금액축 `lending_balance_kiwoom_krw`(stage ×1e6)는 별개 컬럼이고 field_id 가 "
+                 "없다.",
         coverage_axis="grid_session", axis_columns=_SAXIS),
 )
 
@@ -385,21 +457,26 @@ SHORT_DAILY = register(EquityTable(
         "short_volume_ratio_kis_pct": "DECIMAL(8,2)",
         "short_value_ratio_kis_pct": "DECIMAL(7,2)",
         "short_avg_price_kis_krw": "DECIMAL(9,0)",
-        # 대차 — KIS kis_loan_trans (키움 축은 `stg_lending_daily` 가 입력에 들어올 때, docstring)
+        # 대차 — KIS kis_loan_trans
         "lending_new_kis_shr": "DECIMAL(11,0)",
         "lending_redeem_kis_shr": "DECIMAL(10,0)",
         "lending_balance_kis_shr": "DECIMAL(11,0)",
         "lending_balance_kis_krw": "DECIMAL(15,0)",
+        # 대차 — 키움 ka20068 (S09-2). `rmnd` 는 주 단위로 확정돼 `_shr` 를 받는다(FIELDS evidence).
+        # 체결·상환·증감 3컬럼(`dbrt_trde_*`)은 단위를 재지 않아 싣지 않는다 — 잔고만 옮긴다.
+        "lending_balance_kiwoom_shr": "DECIMAL(12,0)",
+        "lending_balance_kiwoom_krw": "DECIMAL(16,0)",
         # 결측 3분류 — 원천마다 하나 (DESIGN §3 격자 테이블 규약)
         "fill_kind_short_kiwoom": "STRUCT(kind VARCHAR, evidence VARCHAR)",
         "fill_kind_short_kis": "STRUCT(kind VARCHAR, evidence VARCHAR)",
         "fill_kind_loan_kis": "STRUCT(kind VARCHAR, evidence VARCHAR)",
+        "fill_kind_lending_kiwoom": "STRUCT(kind VARCHAR, evidence VARCHAR)",
         "available_date": "DATE", "available_basis": "VARCHAR"},
     inputs=("trading_calendar", "universe_daily", "stg_short_daily_kiwoom", "stg_short_daily_kis",
-            "stg_loan_daily_kis", "stg_shards_kiwoom", "stg_units_kis"),
+            "stg_loan_daily_kis", "stg_lending_daily", "stg_shards_kiwoom", "stg_units_kis"),
     partition_class="date_axis",
     partition_key_expr="year(date)",
-    available_rule="column:date — 세 원천 모두 stage lag_known=false·basis default, 공표 시각은 "
+    available_rule="column:date — 네 원천 모두 stage lag_known=false·basis default, 공표 시각은 "
                    "dataset_profile(S19) 몫",
     # GATES §3 ⑪ (a): 좌변 = 산출 행수, 우변 = 격자 재계산 + 격자 밖 원장 셀. 프레임이 우변에서
     # n_reject 를 빼므로 등식은 `count(out) = 격자` 로 닫힌다. (b) 소스별 보존은 EG1_short_daily.
@@ -408,7 +485,8 @@ SHORT_DAILY = register(EquityTable(
         WITH g AS ({_GRID_SQL}),
              s AS (SELECT ticker, date FROM stg_short_daily_kiwoom
                    UNION SELECT ticker, date FROM stg_short_daily_kis
-                   UNION SELECT ticker, date FROM stg_loan_daily_kis)
+                   UNION SELECT ticker, date FROM stg_loan_daily_kis
+                   UNION SELECT ticker, date FROM stg_lending_daily)
         SELECT (SELECT count(*) FROM g)
              + (SELECT count(*) FROM s
                  WHERE NOT EXISTS (SELECT 1 FROM g
@@ -425,6 +503,8 @@ SHORT_DAILY = register(EquityTable(
                                 "acml_valid", "observed_date", "observed_n"),
         "stg_loan_daily_kis": ("ticker", "date", "new_stcn_shr", "rdmp_stcn_shr", "rmnd_stcn_shr",
                                "rmnd_amt_krw", "observed_date", "observed_n"),
+        "stg_lending_daily": ("ticker", "date", "rmnd", "remn_amt_krw", "observed_date",
+                              "observed_n"),
         "stg_shards_kiwoom": ("src_api", "ticker", "req_start", "req_end", "status"),
         "stg_units_kis": ("dataset", "ticker", "status", "window_from", "window_to")},
     available_basis=("default",),

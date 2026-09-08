@@ -448,8 +448,12 @@ def flow_table(rows: list[FlowRow]) -> pa.Table:
 ShortRow = tuple[
     str, date, float | None, float | None, float | None, tuple[str, str], tuple[str, str]
 ]
-"""ticker, date, short_volume_kiwoom_shr, short_value_kiwoom_krw, lending_balance_kis_shr,
-fill_kind_short_kiwoom, fill_kind_loan_kis — 결측 사유가 원천마다 하나다(S09)."""
+"""ticker, date, short_volume_kiwoom_shr, short_value_kiwoom_krw, lending_balance_kiwoom_shr,
+fill_kind_short_kiwoom, fill_kind_lending_kiwoom — 결측 사유가 원천마다 하나다(S09).
+
+대차 축은 S09-2(2026-09-08)에 KIS → 키움(ka20068)으로 옮겼다. 어댑터가 읽는 컬럼만 담는
+합성표라 KIS 축(`lending_balance_kis_shr`·`fill_kind_loan_kis`)은 여기 없다 — 실물
+`short_daily` 에는 둘 다 있다."""
 
 
 def short_table(rows: list[ShortRow]) -> pa.Table:
@@ -459,9 +463,9 @@ def short_table(rows: list[ShortRow]) -> pa.Table:
             "ticker": pa.array([r[0] for r in rows], type=pa.string()),
             "short_volume_kiwoom_shr": _decimal([r[2] for r in rows], pa.decimal128(10, 0)),
             "short_value_kiwoom_krw": _decimal([r[3] for r in rows], pa.decimal128(15, 0)),
-            "lending_balance_kis_shr": _decimal([r[4] for r in rows], pa.decimal128(11, 0)),
+            "lending_balance_kiwoom_shr": _decimal([r[4] for r in rows], pa.decimal128(12, 0)),
             "fill_kind_short_kiwoom": _fill_kind([r[5] for r in rows]),
-            "fill_kind_loan_kis": _fill_kind([r[6] for r in rows]),
+            "fill_kind_lending_kiwoom": _fill_kind([r[6] for r in rows]),
             "available_date": pa.array([r[1] for r in rows], type=pa.date32()),
             "available_basis": pa.array(["default"] * len(rows), type=pa.string()),
         }

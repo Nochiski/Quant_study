@@ -100,7 +100,10 @@ def _hybrid_stage(tmp_path: Path, make_stage_tree, synthetic: dict[str, list[dic
 
 
 def _fixture_file(tmp_path: Path, entries: list[dict[str, object]]) -> Path:
-    """합성 하네스용 골든 픽스처 — 정본 픽스처는 절단본 값이라 여기서는 못 쓴다(EG4 는 부재가 실패)."""
+    """합성 하네스용 골든 픽스처.
+
+    정본 픽스처는 절단본 값이라 여기서는 못 쓴다(EG4 는 부재가 실패).
+    """
     p = tmp_path / f"fx_{len(list(tmp_path.glob('fx_*.json')))}.json"
     p.write_text(json.dumps(entries, ensure_ascii=False), encoding="utf-8")
     return p
@@ -376,7 +379,10 @@ def test_최신_관측을_고르면_EG6가_폐기한다(tmp_path: Path, make_sta
 # ── 부정 픽스처: 등급 어휘 밖 ────────────────────────────────────────────────
 
 def test_등급_어휘_밖이면_EG3가_폐기한다(tmp_path: Path, make_stage_tree) -> None:
-    """stage 가 어휘 밖 분류를 내보내면 폐기한다 — equity 는 어휘를 계승만 하고 재계산하지 않는다."""
+    """stage 가 어휘 밖 분류를 내보내면 폐기한다.
+
+    equity 는 어휘를 계승만 하고 재계산하지 않는다.
+    """
     rows = [_broker_row("005930", _D(2026, 9, 1), "KB", _D(2026, 8, 10)),
             _broker_row("005930", _D(2026, 9, 1), "NH투자", _D(2026, 8, 10),
                         opinion="STRONG BUY", opinion_class="STRONGBUY")]
@@ -590,3 +596,32 @@ def test_합성_트리가_절단본을_건드리지_않는다(tmp_path: Path, ma
     assert not (stage_root / "stg_analyst_broker").is_symlink()       # 합성만 실물 디렉토리
     shutil.rmtree(tmp_path, ignore_errors=True)
     assert before == {p.name: p.stat().st_mtime for p in STAGE_SLICE.iterdir()}
+
+
+def test_의견_규약이_원천_선택을_닫는다() -> None:
+    """G08·G09·G10 의 `partial_support` 를 연 결정 (BLOCKED_FACTORS §6-5 ①~②).
+
+    `consensus_daily` 와 **같은 원칙, 다른 답**이다 — 원칙은 "PIT 근거가 실측인 축을 먼저 고르고
+    다른 축이 빈 구간을 메운다" 인데, 여기서는 v3 의 available_date 가 잰 수집일이 아니라 관측일
+    대용(default + coverage_degraded)이라 measured 인 wise 가 이긴다. 어댑터 pick_order
+    (`coverage_degraded NULLS LAST, src`)가 이미 그렇게 고르고 있어 규약은 그것을 사양으로 올렸다.
+    """
+    fields = {f.field_id: f for f in rules_s18.FIELDS_OPINION}
+    assert set(fields) == {"consensus.target_price", "consensus.recommendation",
+                           "consensus.analyst_count"}
+    assert [f.field_id for f in fields.values() if f.requires_confirmation] == []
+    conv = rules_s18.OPINION_CONVENTION
+    assert all(conv in f.evidence for f in fields.values())
+    assert "wise, available_basis='measured') 우선" in conv          # ① 원천
+    assert "coverage_degraded NULLS LAST, src" in conv               # 어댑터와 같은 규칙
+    assert "등급을 굽지 않는다" in conv                              # ② 단위·등급
+    assert "2026-04 이전" in conv and "0행" in conv                  # ③ 안 연 것
+
+
+def test_의견_필드마다_쓸_수_있는_이력_길이를_적는다() -> None:
+    """G10 만 지금 쓸 수 있고 G08·G09 는 축적 대기다 (BLOCKED_FACTORS §6-2·§6-4)."""
+    ev = {f.field_id: f.evidence for f in rules_s18.FIELDS_OPINION}
+    assert "지금 당장 쓸 수 있다" in ev["consensus.analyst_count"]      # G10 수준값
+    for fid in ("consensus.target_price", "consensus.recommendation"):
+        assert "102" in ev[fid] and "축적 대기" in ev[fid]
+    assert "2,553종목" in ev["consensus.analyst_count"]

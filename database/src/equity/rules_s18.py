@@ -420,10 +420,9 @@ eg9_coverage_broker.gate_name = "EG9"                  # type: ignore[attr-defin
 # ── 선언 ─────────────────────────────────────────────────────────────────────
 
 # ── S19 필드 선언 (DESIGN §4-7 · FIELD_MAP §3 S18 판정) ──────────────────────
-# 셋 다 grain 이 (ticker, obs_date, **src**) 이라 **어댑터가 src 를 골라야 한다** — wise 는
-# `available_basis='measured'`(2일), v3 는 `default` + `coverage_degraded=true`(약 5개월). PIT 를
-# 엄격히 보려면 wise 만, 이력이 필요하면 v3 를 쓰되 available_date 가 잰 수집일이 아님을 받아들여야
-# 한다. 그 선택은 팩터층 몫이고 equity 는 두 축을 다 준다 → `requires_confirmation=True`.
+# 셋 다 grain 이 (ticker, obs_date, **src**) 이라 **누군가 src 를 골라야 한다** — wise 는
+# `available_basis='measured'`(2일), v3 는 `default` + `coverage_degraded=true`(약 5개월). 그
+# 선택을 2026-09-08 에 `OPINION_CONVENTION` 으로 못박아 `requires_confirmation` 을 껐다.
 # 랙 1 세션: v3 축이 stage `lag_known=false`(`stg_v3_analyst_opinions`)라 consensus_daily 와 같은
 # 규약을 적용한다. `opinion_broker_daily` 는 field_id 가 아니다(제공처별 원문 의견은 레지스트리에
 # 대응이 없다 — FIELD_MAP §3) → 선언 없음.
@@ -431,27 +430,55 @@ _OPINION_AXIS: tuple[str, str] = ("ticker", "available_date")
 _OPINION_DISCLOSURE = ("wise = 화면 수집일(fetched_date, measured) / v3 = 수집 시각 컬럼이 없어 "
                        "관측일 그대로(default + coverage_degraded) — 1 세션 뒤부터 쓴다")
 
+# ── 의견 축 소비 규약 (2026-09-08 확정 · BLOCKED_FACTORS §6-5 ①~②) ───────────
+# `consensus_daily` 와 **같은 원칙, 다른 답**이다. 원칙은 「PIT 근거가 실측인 축을 먼저 고르고 다른
+# 축은 그 축이 비는 구간을 메운다」인데, consensus_daily 에서는 두 축이 다 measured 라 더 이른 v3 가
+# 이기고(rules_s17.CONSENSUS_CONVENTION ①), 여기서는 v3 가 `default`(관측일 대용)이고 wise 만
+# measured 라 **wise 가 이긴다**. 어댑터 `_specs.py` 의 opinion pick_order
+# (`coverage_degraded NULLS LAST, src`)가 이미 그렇게 고르고 있어, 규약은 그것을 사양으로 올렸다.
+# 겹치는 구간은 2026-09-01 하루뿐이고 그날 두 원천 값이 5축 전부 일치했다(DESIGN §10 P37 ①).
+OPINION_CONVENTION = (
+    "【규약 2026-09-08】① 원천 우선순위 — 같은 (ticker, obs_date) 에 wise·v3 가 공존하면 **잰 "
+    "판본(wise, available_basis='measured') 우선**이고 v3 는 wise 가 없는 구간"
+    "(2026-04-04~08-31)을 메운다. 어댑터 `_specs.py` 의 opinion pick_order "
+    "(`coverage_degraded NULLS LAST, src`)가 쓰는 규칙을 사양으로 올린 것이다 — consensus_daily "
+    "가 v3 우선인 것과 답이 갈리는 이유는 거기서는 두 축이 다 measured 라 더 이른 v3 가 이기고, "
+    "여기서는 v3 의 available_date 가 잰 수집일이 아니라 관측일 대용(default)이기 때문이다. "
+    "`src` 와 `coverage_degraded` 가 계속 나가므로 소비자가 뒤집을 수 있고, 겹친 하루의 두 원천 "
+    "값은 5축 전부 일치했다(DESIGN §10 P37 ①). "
+    "② 단위 — 목표주가는 원, 의견 점수는 무단위(WISE 척도 원문 그대로), 커버 애널리스트 수는 명. "
+    "등급화·환산은 소비층 몫이고 equity 는 임계로 등급을 굽지 않는다. "
+    "③ 아직 안 연 것 — wise 행의 `available_date` 는 화면 수집일(2026-09-01·02)이라 그 이전은 "
+    "v3 축(2026-04-04~)뿐이고 **2026-04 이전 구간 백테스트에는 의견이 0행**이다(START_HERE §6).")
+
 
 def _opinion(field_id: str, column: str, label: str, unit: str, value_type: str,
              evidence: str) -> FieldProfile:
     return FieldProfile(
         field_id=field_id, columns=(column,), label=label, unit=unit, value_type=value_type,
         frequency="session", recommended_lag_sessions=1, recommended_lag_days=1,
-        point_in_time=True, requires_confirmation=True, disclosure_basis=_OPINION_DISCLOSURE,
-        evidence=evidence, coverage_axis="grid_security", axis_columns=_OPINION_AXIS)
+        point_in_time=True, requires_confirmation=False, disclosure_basis=_OPINION_DISCLOSURE,
+        evidence=f"{evidence} {OPINION_CONVENTION}", coverage_axis="grid_security",
+        axis_columns=_OPINION_AXIS)
 
 
 FIELDS_OPINION: tuple[FieldProfile, ...] = (
     _opinion("consensus.target_price", "target_price_krw", "컨센서스 목표주가", "KRW", "price",
-             "opinion_daily.target_price_krw. 판본이 wise 2일뿐이라 리비전(FACTORS G09)은 축적 "
-             "대기이고 수준값만 즉시 쓸 수 있다. 겹친 5키에서 wise·v3 값이 전부 일치했다(P37 ①)."),
+             "opinion_daily.target_price_krw. FACTORS 정본 G09(목표주가 리비전)의 재료. "
+             "**쓸 수 있는 이력**(BLOCKED_FACTORS §6-2 실측) — v3 관측일 102개"
+             "(2026-04-04~09-01) · 2,553종목 + wise 2일(2026-09-01·02) · 810종목. 수준값은 즉시 "
+             "쓸 수 있고 리비전은 관측이 5개월뿐이라 축적 대기다 — **규약이 닫은 것은 결정이지 "
+             "이력이 아니다.**"),
     _opinion("consensus.recommendation", "opinion_score", "컨센서스 투자의견 점수", "",
              "ratio",
              "WISE 가 이미 접은 의견 점수다 — equity 는 임계로 등급을 굽지 않는다(§1). "
-             "FACTORS 정본 G08(투자의견 리비전)의 재료."),
+             "FACTORS 정본 G08(투자의견 리비전)의 재료. 이력은 consensus.target_price 와 같은 "
+             "축이다(v3 102 관측일 · 2,553종목 / wise 2일 · 810종목) — 리비전은 축적 대기."),
     _opinion("consensus.analyst_count", "analyst_count", "커버 애널리스트 수", "명", "count",
              "커버는 보통주에만 있다(WISE 804 / v3 810, 우선주·ETF·외국주 0). 시총 분위별 "
-             "커버율은 이 프로파일의 coverage_by_mktcap_quintile 이 낸다."),
+             "커버율은 이 프로파일의 coverage_by_mktcap_quintile 이 낸다. FACTORS 정본 G10"
+             "(애널리스트 커버리지 수)의 재료로 **수준값은 지금 당장 쓸 수 있다** — v3 2,553종목 "
+             "× 102 관측일(2026-04-04~09-01, §6-2 실측). 변화분만 축적 대기다."),
 )
 
 
@@ -538,4 +565,5 @@ BASELINE_SEED = Path(__file__).parent / "baseline_seed_s18.json"
 사람 승인 대기라 seed 에 넣지 않는다. 파일이 그 사실과 로컬 실측을 기록한다."""
 
 __all__ = ["BROKER_REJECT_REASONS", "OPINION_BROKER_DAILY", "OPINION_CLASS_VOCAB",
-           "OPINION_DAILY", "OPINION_REJECT_REASONS", "SRC_VOCAB", "TABLES"]
+           "OPINION_CONVENTION", "OPINION_DAILY", "OPINION_REJECT_REASONS",
+           "SRC_VOCAB", "TABLES"]

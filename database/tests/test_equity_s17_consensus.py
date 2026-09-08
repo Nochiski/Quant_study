@@ -507,3 +507,51 @@ def test_뷰_메타는_snapshot_id_와_함께_기록된다(built: tuple[Path, bu
     assert set(meta["builds"]) == {"trading_calendar", "security", "security_span",
                                    "consensus_daily"}
     assert meta["macros"] == [views.SIGNATURES["v_consensus"]]
+
+
+# ── 소비 규약 (2026-09-08 결정 묶음) ─────────────────────────────────────────
+
+def test_컨센서스_규약이_미결_셋을_닫는다() -> None:
+    """G05·G06·G07 의 `partial_support` 를 연 결정 묶음 (BLOCKED_FACTORS §6-5 ①~③).
+
+    막고 있던 것은 두 원천의 **값 불일치가 아니었다** — 겹친 구간의 wise·v3 값은 전부 일치했고
+    (DESIGN §10 P37) EG8 이 매 빌드 그것을 다시 잰다. 남아 있던 미결은 셋뿐이라 셋을 규약으로
+    못박고 플래그를 껐다: ① 겹치는 달은 v3 우선(뷰가 이미 그렇게 접는다) · ② 단위는 행의
+    `unit` 컬럼이 정본(추정 손익은 억원) · ③ 대상기간은 관측월 이후로 끝나는 가장 가까운
+    회계기간(FY1)이고 12개월 선행 합성은 팩터층 몫.
+    """
+    fields = {f.field_id: f for f in rules_s17.FIELDS_CONSENSUS}
+    assert set(fields) == {"consensus.forward_eps", "consensus.forward_sales",
+                           "consensus.eps_dispersion", "consensus.forward_op",
+                           "consensus.forward_ni"}
+    assert [f.field_id for f in fields.values() if f.requires_confirmation] == []
+    conv = rules_s17.CONSENSUS_CONVENTION
+    assert all(conv in f.evidence for f in fields.values())
+    assert "v3 우선" in conv and "v_consensus" in conv            # ① 원천
+    assert "`unit` 컬럼이 정본" in conv and "억원" in conv        # ② 단위
+    assert "FY1" in conv and "12개월 선행" in conv                # ③ 대상기간
+    # ④ 열지 않은 것을 숨기지 않는다 — wise 이력 개방은 사람 승인 대기다(§6-5 ④)
+    assert "2026-04 이전" in conv and "0행" in conv
+
+
+def test_규약의_원천_우선순위가_뷰_본문과_같다() -> None:
+    """규약 ① 은 새 동작이 아니라 `v_consensus` 가 이미 하던 것을 사양으로 올린 것이다."""
+    assert "ORDER BY c.available_date, c.src" in views.TEMPLATES["v_consensus"]
+    # 동률이면 사전순인데 'v3' < 'wise' 라 그때도 v3 가 이긴다 — 규약과 어긋나지 않는다
+    assert min(rules_s17.SRC_VOCAB) == "v3"
+
+
+def test_필드마다_쓸_수_있는_이력_길이를_적는다() -> None:
+    """플래그를 끄는 것과 쓸 수 있게 되는 것은 다르다 (BLOCKED_FACTORS §6-2·§6-4).
+
+    G05·G06 은 재료가 v3 축 하나뿐이고 그 축이 5개월(관측점 4개)이라 리비전 백테스트가
+    성립하지 않는다. 그 사실이 evidence 에 없으면 준비도 표만 보고 "열렸으니 쓸 수 있다" 로
+    읽힌다 — 준비도는 재료의 실재를 판정할 뿐 이력 길이를 판정하지 않는다.
+    """
+    ev = {f.field_id: f.evidence for f in rules_s17.FIELDS_CONSENSUS}
+    for fid in ("consensus.forward_op", "consensus.forward_ni"):
+        assert "5개월" in ev[fid] and "성립하지 않는다" in ev["consensus.forward_op"]
+        assert "2026-08-31" in ev[fid]        # v3 미러가 멈춘 날 — 축적이 저절로 되지 않는다
+    assert "13개월" in ev["consensus.forward_sales"]      # wise 축을 열면 얻는 이력
+    assert "2,566종목" in ev["consensus.forward_eps"] and "5개(2026-04~08)" in ev[
+        "consensus.forward_eps"]

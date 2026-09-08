@@ -218,7 +218,11 @@ FACTORS: tuple[FactorSpec, ...] = (
        registry="flow.institution_net_buy_20d"),
     _f("F04", "연기금 순매수", ("flow.pension_net_buy",), "equity",
        "FACTORS §5 F04 = penfnd_etc 누적. 재료는 키움 ka10060 의 연기금 주체 컬럼.",
-       caveat="F01 과 같은 S08 미구현."),
+       caveat="**키움 전용으로 열었다(2026-09-08)** — KIS 보완분의 「기금」이 키움 「연기금등」과 "
+              "같은 주체인지 **검증할 축이 없다**(두 원천이 같은 (ticker, date) 셀을 채운 적 "
+              "0건, 완전 배타). 주체를 섞는 대신 원천을 좁혔으므로 **KIS 단독 구간 11.1% 는 이 "
+              "팩터에서 결측**이다 — 커버가 필요하면 원장 컬럼 `penfnd_etc_krw` 를 직접 읽되 "
+              "그때 주체가 섞인다는 것을 알고 읽어야 한다."),
     _f("F05", "공매도 거래비중", ("short.short_sale_volume", "price.shares_outstanding"),
        "equity", "FACTORS §5 F05 = 공매도 거래량 / 상장주식수. 재료는 키움 ka10014.",
        caveat="**이름을 정정했다(2026-09-07)** — 이 값은 공매도 잔고가 아니라 **거래량**이다. "

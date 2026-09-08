@@ -634,3 +634,37 @@ def test_외국인_보유는_키움_행에만_실린다(built: build.BuildResult
         "FROM f WHERE src = 'kis'")[0]
     assert n_kis, "절단본에 KIS 행이 있어야 이 검사가 성립한다"
     assert n_filled == 0
+
+
+# ── F04 연기금 순매수 — 키움 전용 (2026-09-08) ───────────────────────────────
+
+
+def test_연기금은_키움_행에만_실리고_KIS_행은_결측이다(kis_harness) -> None:  # noqa: ANN001
+    """`pension_net_buy_kiwoom_krw` 는 원장 `penfnd_etc_krw` 를 **키움 행으로 좁힌** 컬럼이다.
+
+    좁힌 이유는 KIS 대응을 검증할 축이 없다는 것이다 — 서버에서 두 원천이 같은 (ticker, date)
+    셀을 채운 경우가 0건이라(키움 7,540,202 · KIS 939,610, 완전 배타) KIS 의 「기금」이 키움의
+    「연기금등」과 같은 주체인지 맞대 볼 구간 자체가 없다(BLOCKED_FACTORS §2-2 F04 (가)).
+
+    절단본 KIS 원장은 0행이라 이 검사는 손 하네스 위에서만 선다 — 하네스가 003545 에 KIS
+    측정 행을 넣어 「기금 값은 있는데 연기금 필드는 NULL」 이라는 상태를 만든다. 0 으로 채우지
+    않는다(GATES EG9-P04).
+    """
+    stage_root, eq = kis_harness
+    r = build.build_table(FLOW, stage_root, eq, SEED, build_id="b_s08_pension")
+    assert r.ok, _fails(r)
+    assert r.out_dir is not None
+    # KIS 측정 행 — 원장 「기금」은 실렸지만 연기금 필드는 비어 있다
+    assert _query(r.out_dir,
+                  "SELECT penfnd_etc_krw IS NOT NULL, pension_net_buy_kiwoom_krw FROM f "
+                  "WHERE ticker = '003545' AND date = DATE '2018-05-03' AND src = 'kis'",
+                  stage_root) == [(True, None)]
+    # 키움 측정 행 — 원장 값을 그대로 나른다(재환산·재해석 없음)
+    n_kiwoom, n_diff = _query(r.out_dir,
+        "SELECT count(*), count(*) FILTER (WHERE pension_net_buy_kiwoom_krw "
+        "IS DISTINCT FROM penfnd_etc_krw) FROM f "
+        "WHERE src = 'kiwoom' AND fill_kind.kind = 'measured'", stage_root)[0]
+    assert n_kiwoom > 0 and n_diff == 0
+    # src='kis' 행에 값이 실린 곳은 하나도 없다
+    assert _query(r.out_dir, "SELECT count(pension_net_buy_kiwoom_krw) FROM f "
+                             "WHERE src = 'kis'", stage_root) == [(0,)]

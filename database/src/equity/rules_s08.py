@@ -360,12 +360,14 @@ def _coverage_metrics(ctx: EquityGateContext, out: str) -> dict[str, object]:
 # STAGE_HANDOFF §2 「lag_known=false 는 lag 0 을 적용하면 안 된다」 + FIELD_MAP §1 랙 단위
 # 「나머지 전부 1 세션」 을 그대로 따른다. `available_date = date`(basis default)인 것은 팩트 행의
 # 축이고, 소비 랙은 이 선언이 낸다(테이블 `available_rule` 이 그렇게 적어 두었다).
-# `flow.pension_net_buy` 는 **선언하지 않는다** — `penfnd_etc_krw` 가 실재하지만 FIELD_MAP §2
-# 어휘에 그 field_id 행이 없고, 무엇보다 **주체 대응을 검증할 축이 없다**: 키움과 KIS 가 같은
-# (ticker, date) 칸을 채운 적이 0건이라(키움 7,540,202 · KIS 939,610, 완전 배타) KIS 의 「기금」이
-# 키움의 「연기금등」과 같은 주체인지 데이터로 확인할 길이 없다. 사람 결정이 먼저다
-# (BLOCKED_FACTORS F04). 없는 것을 선언하면 `dataset_profile` 에 '있는데 늘 빈' 행이 생겨
-# S20 준비도가 거짓으로 ready 가 된다.
+# `flow.pension_net_buy` 는 **키움 전용으로 선언한다(2026-09-08 결정)**. 미룬 이유는 주체 대응을
+# 검증할 축이 없다는 것이었다 — 키움과 KIS 가 같은 (ticker, date) 칸을 채운 적이 0건이라(키움
+# 7,540,202 · KIS 939,610, 완전 배타) KIS 의 「기금」이 키움의 「연기금등」과 같은 주체인지
+# 데이터로 확인할 길이 없다. 그 확인은 앞으로도 안 된다(겹치는 구간이 원리적으로 없다). 수급
+# 팩터는 **주체의 정체가 곧 신호의 뜻**이라, 11% 커버를 얻으려고 주체를 섞는 것은 「모르는 것을
+# 아는 척하지 않는다」와 정면으로 어긋난다. 그래서 원천을 섞는 대신 **원천을 좁힌 새 컬럼**
+# `pension_net_buy_kiwoom_krw` 를 내고 그 위에 필드를 선언한다(BLOCKED_FACTORS §2-2 F04 (가)).
+# 원장이 준 `penfnd_etc_krw`(두 원천 합집합)는 그대로 다 나가므로 소비자가 직접 읽을 수 있다.
 _FOREIGN_NOTE = ("원천은 `stg_foreign_daily`(키움 ka10008) 하나뿐이라 **원천 축이 없다** — "
                  "`src='kis'` 행에는 값이 없다(0 으로 채우지 않는다). 서버 원장 7,682,844행 · "
                  "2,602종목 · 2009-10-15 ~ 2026-08-24 이고 세 컬럼 결측 0 이다. 격자 등식(EG1)은 "
@@ -430,6 +432,28 @@ FIELDS: tuple[FieldProfile, ...] = (
                  "갈리고, 한도가 없는 종목은 보유비중과 같은 값이다. " + _FOREIGN_NOTE,
         coverage_axis="grid_session", axis_columns=_FAXIS),
     FieldProfile(
+        field_id="flow.pension_net_buy", columns=("pension_net_buy_kiwoom_krw",),
+        label="연기금등 순매수(대금, 키움)", unit="KRW", value_type="amount",
+        frequency="session", recommended_lag_sessions=1, recommended_lag_days=1,
+        point_in_time=True, requires_confirmation=False,
+        disclosure_basis="원장 날짜 = 매매일. 키움 ka10060 은 공표 시각을 주지 않는다"
+                         "(stage lag_known=false) → 익일 지식으로 쓴다",
+        evidence="flow_daily.pension_net_buy_kiwoom_krw = 키움 `penfnd_etc_krw`(연기금등) **만** "
+                 "— `CASE WHEN src='kiwoom'` 으로 좁힌 컬럼이다. 원 단위(stage ×1e6 완료 — "
+                 "재환산 금지). **이 필드가 「한 표 안에서 필드마다 원천이 다를 수 있다」는 규약을 "
+                 "처음 세운다**: 나머지 순매수 필드는 두 원천의 합집합(`_FLOW_SRC_NOTE` 의 "
+                 "pick_order)인데 이것만 키움 축으로 좁혀 있다. 이유는 **KIS 대응을 검증할 축이 "
+                 "없다**는 것이다 — 서버 flow_daily 에서 두 원천이 같은 (ticker, date) 셀을 채운 "
+                 "경우가 **0건**이고(키움 7,540,202 · KIS 939,610, 완전 배타) KIS 의 "
+                 "`fund_ntby_tr_pbmn_krw`(기금)가 키움의 「연기금등」과 같은 주체인지 데이터로 "
+                 "맞대 볼 구간이 없다. 겹침이 원리적으로 없으니 이 검증은 앞으로도 안 된다. "
+                 "**대가는 명시한다**: KIS 단독 939,610셀(전체의 11.1%, 2013년 78,516 → 2026년 "
+                 "2,849 로 매년 고르게 분포)이 이 필드에서 **결측**이 된다 — 0 이 아니라 NULL "
+                 "이고, 그 셀의 `fill_kind` 는 여전히 `measured`(원장 행은 있다)라 결측 사유는 "
+                 "`src='kis'` 라는 사실 자체다. 두 원천을 섞어 읽고 싶은 소비자는 원장 컬럼 "
+                 "`penfnd_etc_krw` 를 직접 읽는다(그 컬럼은 그대로 다 나간다).",
+        coverage_axis="grid_session", axis_columns=_FAXIS),
+    FieldProfile(
         field_id="flow.retail_net_buy", columns=("ind_invsr_krw",),
         label="개인 순매수(대금)", unit="KRW", value_type="amount", frequency="session",
         recommended_lag_sessions=1, recommended_lag_days=1, point_in_time=True,
@@ -458,6 +482,9 @@ FLOW_DAILY = register(EquityTable(
              "foreign_wght_pct": "DECIMAL(5,2)",
              "foreign_limit_exh_pct": "DECIMAL(5,2)",
              "foreign_poss_shr": "DECIMAL(18,0)",
+             # F04 연기금 — 키움 `penfnd_etc_krw` 만. KIS 「기금」과 같은 주체인지 확인할 축이
+             # 없어(겹침 0건) 원천을 섞지 않는다. `src='kis'` 행은 NULL 이다.
+             "pension_net_buy_kiwoom_krw": "DECIMAL(15,0)",
              "fill_kind": "STRUCT(kind VARCHAR, evidence VARCHAR)",
              "available_date": "DATE", "available_basis": "VARCHAR"},
     inputs=("stg_flow_daily_kiwoom", "stg_flow_split_daily", "stg_shards_kiwoom",

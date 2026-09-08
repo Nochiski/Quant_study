@@ -146,11 +146,19 @@ FACTORS: tuple[FactorSpec, ...] = (
     _f("G03", "자산성장률", ("financial.total_assets",), "factor_layer",
        "FACTORS §3 G03 = (당기 자산 / 전기) − 1. 역방향 팩터다.",
        registry="financial.asset_growth"),
-    _f("G04", "EPS 성장률", ("financial.eps_basic",), "equity",
-       "FACTORS §3 G04 = (당기 EPS / 전기) − 1.",
-       caveat="`fin_std.eps_basic` 은 **주식분할 미조정** 원장 값이라(삼성전자 2018 1분기 85,435 "
-              "vs 사업보고서 6,461) 시계열 비율이 분할 구간에서 가짜 점프를 낸다 — adj_factor 로 "
-              "조정한 EPS 축을 equity 가 내야 풀린다(FIELD_MAP §3)."),
+    _f("G04", "EPS 성장률", ("financial.net_income", "price.shares_outstanding"), "equity",
+       "FACTORS §3 G04 = (당기 EPS / 전기) − 1 이고 **EPS = 순이익 ÷ 주식수**다 — 나눗셈은 "
+       "팩터층 몫이라는 F05·V02 와 같은 규약이다.",
+       caveat="**요구 재료를 바꿨다(2026-09-08)** — 옛 선언은 `financial.eps_basic` 을 가리켰는데 "
+              "그 원장 값은 **주식분할 미조정**이라(삼성전자 2018 1분기 85,435 vs 사업보고서 "
+              "6,461 — 50:1 분할) 시계열 비율이 분할 구간에서 13배 가짜 점프를 낸다. 재료를 "
+              "`financial.net_income` + `price.shares_outstanding` 으로 바꾸면 분할이 **주식수 "
+              "변화에 그대로 반영**되므로 가짜 점프가 원리적으로 생기지 않는다. 둘 다 이미 "
+              "선언·커버 완료다(순이익 99.05% · 상장주식수 100%). **`backend/FACTORS.md` 정본의 "
+              "계산식도 「원장 EPS 비율」에서 「순이익 ÷ 주식수의 비율」로 바뀌어야 한다** — "
+              "정본 수정은 사람 승인 항목이라 여기서는 손대지 않았다(BLOCKED_FACTORS §5-3 (가)). "
+              "`financial.eps_basic` 선언은 그대로 남는다(내부 스코프 · "
+              "`requires_confirmation=true`) — 원장이 준 값을 지우지는 않는다."),
     _f("G05", "영업이익 추정치 리비전", ("consensus.forward_op",), "factor_layer",
        "FACTORS §3 G05 = (op(t) / op(t−1M)) − 1.",
        caveat="관측점이 v3 2026-04-03~ 로 짧고, 겹치는 달의 wise·v3 중 어느 축을 쓸지도 팩터층이 "
@@ -210,7 +218,11 @@ FACTORS: tuple[FactorSpec, ...] = (
        registry="flow.institution_net_buy_20d"),
     _f("F04", "연기금 순매수", ("flow.pension_net_buy",), "equity",
        "FACTORS §5 F04 = penfnd_etc 누적. 재료는 키움 ka10060 의 연기금 주체 컬럼.",
-       caveat="F01 과 같은 S08 미구현."),
+       caveat="**키움 전용으로 열었다(2026-09-08)** — KIS 보완분의 「기금」이 키움 「연기금등」과 "
+              "같은 주체인지 **검증할 축이 없다**(두 원천이 같은 (ticker, date) 셀을 채운 적 "
+              "0건, 완전 배타). 주체를 섞는 대신 원천을 좁혔으므로 **KIS 단독 구간 11.1% 는 이 "
+              "팩터에서 결측**이다 — 커버가 필요하면 원장 컬럼 `penfnd_etc_krw` 를 직접 읽되 "
+              "그때 주체가 섞인다는 것을 알고 읽어야 한다."),
     _f("F05", "공매도 거래비중", ("short.short_sale_volume", "price.shares_outstanding"),
        "equity", "FACTORS §5 F05 = 공매도 거래량 / 상장주식수. 재료는 키움 ka10014.",
        caveat="**이름을 정정했다(2026-09-07)** — 이 값은 공매도 잔고가 아니라 **거래량**이다. "
@@ -282,9 +294,13 @@ FACTORS: tuple[FactorSpec, ...] = (
        "FACTORS §7 E06 = 희석 이벤트(piicDecsn·cvbdIsDecsn).", caveat="E05 와 같은 S05 후속."),
     _f("E07", "상폐 위험", ("universe.delist_signal", "universe.admin_state"), "equity",
        "FACTORS §7 E07 = 부도·해산·회생·관리 이벤트. 생존편향 26.75% 제거의 근거.",
-       caveat="KOSPI 관리종목 **해제 공시가 3건뿐**이라 상태 종료를 잴 수 없고 신호가 KOSDAQ 으로 "
-              "기운다(GAP-06). `admin_state_basis` 가 행마다 근거를 남기지만 비대칭 자체는 "
-              "원천 부재라 개선 불가다."),
+       caveat="**소비 규약으로 열었다(2026-09-08)** — KOSPI 관리종목 **해제 공시가 3건뿐**이라 "
+              "상태 종료를 잴 수 없어 고정 길이 창으로 근사하고(`derived_kospi_window` 73종목 "
+              "35,118세션), 그래서 관리종목 비율이 KOSDAQ 32.8%(803/2,445) 대 KOSPI "
+              "5.8%(73/1,249)로 기운다(GAP-06). **이 점수를 시장 간에 직접 비교하지 마라** — "
+              "시장 안에서 순위를 매기거나 `admin_state_basis` 로 거른다. 비대칭을 없앤 것이 "
+              "아니라 `admin_state_basis` 로 드러내 두었다. 근본 해결(거래소 KOSPI 관리종목 "
+              "이력 수집)은 stage 몫이다."),
     _f("E08", "비적정 감사의견", ("event.audit_opinion",), "factor_layer",
        "FACTORS §7 E08 = adt_opinion ≠ 적정. 상장폐지 선행 신호.",
        caveat="`n_source_rows > 1` 인 행은 원장 여러 행이 접힌 것이라 건수 집계에 그대로 쓰면 "

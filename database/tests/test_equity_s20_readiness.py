@@ -108,6 +108,19 @@ def test_registry_대응은_레지스트리_50_안에서만_고른다() -> None:
                                if f.registry_factor_id})       # 1:1 (중복 대응 금지)
 
 
+def test_G04는_원장_EPS_가_아니라_순이익과_주식수를_요구한다() -> None:
+    """원장 `eps_basic` 은 **주식분할 미조정**이라 시계열 비율이 분할 구간에서 가짜 점프를 낸다
+    (삼성전자 2018 1분기 85,435 vs 사업보고서 6,461 — 50:1 분할).
+
+    그래서 요구 재료를 순이익 ÷ 주식수로 바꿨다(BLOCKED_FACTORS §5-3 (가)) — 분할은 주식수
+    변화에 그대로 반영되므로 가짜 점프가 원리적으로 생기지 않는다. 나눗셈은 팩터층 몫이라는
+    F05·V02 와 같은 규약이다.
+    """
+    spec = next(f for f in rules_s20.FACTORS if f.factor_id == "G04")
+    assert spec.required_field_ids == ("financial.net_income", "price.shares_outstanding")
+    assert "financial.eps_basic" not in spec.required_field_ids
+
+
 def test_요구_필드는_전부_field_id_문법이다() -> None:
     for f in rules_s20.FACTORS:
         for field_id in f.required_field_ids:

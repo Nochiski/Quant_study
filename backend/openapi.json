@@ -1,6 +1,37 @@
 {
   "components": {
     "schemas": {
+      "BacktestResultNotReadyDetail": {
+        "properties": {
+          "code": {
+            "const": "backtest.result.not_ready",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "BacktestResultNotReadyDetail",
+        "type": "object"
+      },
+      "BacktestResultNotReadyResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/BacktestResultNotReadyDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "BacktestResultNotReadyResponse",
+        "type": "object"
+      },
       "BacktestRunInvalidDetail": {
         "properties": {
           "code": {
@@ -18,6 +49,37 @@
           "message"
         ],
         "title": "BacktestRunInvalidDetail",
+        "type": "object"
+      },
+      "BacktestRunNotFoundDetail": {
+        "properties": {
+          "code": {
+            "const": "backtest.run.not_found",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "BacktestRunNotFoundDetail",
+        "type": "object"
+      },
+      "BacktestRunNotFoundResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/BacktestRunNotFoundDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "BacktestRunNotFoundResponse",
         "type": "object"
       },
       "BacktestRunResult": {
@@ -195,6 +257,23 @@
           "updated_at"
         ],
         "title": "BacktestRunState",
+        "type": "object"
+      },
+      "BacktestRunSummary": {
+        "description": "One process-lifetime run and the strategy meaning resolved before it started.",
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/BacktestRunState"
+          },
+          "strategy_provenance": {
+            "$ref": "#/components/schemas/StrategyProvenance"
+          }
+        },
+        "required": [
+          "run",
+          "strategy_provenance"
+        ],
+        "title": "BacktestRunSummary",
         "type": "object"
       },
       "BacktestSeries": {
@@ -2989,11 +3068,73 @@
         "title": "OrderStyle",
         "type": "string"
       },
+      "Page_BacktestRunSummary_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BacktestRunSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "offset",
+          "limit"
+        ],
+        "title": "Page",
+        "type": "object"
+      },
       "Page_RevisionSummary_": {
         "properties": {
           "items": {
             "items": {
               "$ref": "#/components/schemas/RevisionSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "offset",
+          "limit"
+        ],
+        "title": "Page",
+        "type": "object"
+      },
+      "Page_StrategySummary_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/StrategySummary"
             },
             "title": "Items",
             "type": "array"
@@ -5552,6 +5693,40 @@
         "title": "StrategySpec",
         "type": "object"
       },
+      "StrategySummary": {
+        "properties": {
+          "latest_revision": {
+            "title": "Latest Revision",
+            "type": "integer"
+          },
+          "spec_hash": {
+            "title": "Spec Hash",
+            "type": "string"
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "strategy_id",
+          "title",
+          "latest_revision",
+          "spec_hash",
+          "updated_at"
+        ],
+        "title": "StrategySummary",
+        "type": "object"
+      },
       "StrategyTargetTrace": {
         "properties": {
           "candidates": {
@@ -6626,6 +6801,75 @@
   "openapi": "3.1.0",
   "paths": {
     "/api/v1/backtests": {
+      "get": {
+        "operationId": "listBacktests",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "strategy_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Strategy Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_BacktestRunSummary_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Backtests"
+      },
       "post": {
         "operationId": "startBacktest",
         "requestBody": {
@@ -6716,6 +6960,16 @@
             },
             "description": "Successful Response"
           },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunNotFoundResponse"
+                }
+              }
+            },
+            "description": "The process-lifetime backtest run does not exist"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -6754,6 +7008,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunNotFoundResponse"
+                }
+              }
+            },
+            "description": "The process-lifetime backtest run does not exist"
           },
           "422": {
             "content": {
@@ -6801,6 +7065,16 @@
             },
             "description": "Successful Response"
           },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunNotFoundResponse"
+                }
+              }
+            },
+            "description": "The process-lifetime backtest run does not exist"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -6813,6 +7087,56 @@
           }
         },
         "summary": "Stream Backtest Events"
+      }
+    },
+    "/api/v1/backtests/{run_id}/request": {
+      "get": {
+        "description": "Expose the server-owned accepted assumptions for audit and exact reruns.",
+        "operationId": "getBacktestRequest",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunSpec"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunNotFoundResponse"
+                }
+              }
+            },
+            "description": "The process-lifetime backtest run does not exist"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Backtest Request"
       }
     },
     "/api/v1/backtests/{run_id}/result": {
@@ -6839,6 +7163,26 @@
               }
             },
             "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunNotFoundResponse"
+                }
+              }
+            },
+            "description": "The process-lifetime backtest run does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResultNotReadyResponse"
+                }
+              }
+            },
+            "description": "The run has not completed with a result"
           },
           "422": {
             "content": {
@@ -7398,6 +7742,59 @@
       }
     },
     "/api/v1/strategies": {
+      "get": {
+        "description": "Latest immutable revision of every strategy, ordered by strategy id.",
+        "operationId": "listStrategies",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_StrategySummary_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Strategies"
+      },
       "post": {
         "operationId": "createStrategy",
         "requestBody": {
@@ -7742,6 +8139,7 @@
             "required": false,
             "schema": {
               "default": 0,
+              "maximum": 9007199254740991,
               "minimum": 0,
               "title": "Offset",
               "type": "integer"

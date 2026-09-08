@@ -65,8 +65,8 @@
 ## M3 executable subset
 
 각 카테고리에서 하나씩, 총 7개 기본 graph를 제공합니다. 모든 graph는 같은 expression node 계약과
-validator/compiler/evaluator를 통과하며 UI(YAML source editor, projection, legacy Quick/Advanced)가
-별도 계산식을 소유하지 않습니다.
+validator/compiler/evaluator를 통과하며 UI(YAML source editor와 read-only projection)가 별도
+계산식을 소유하지 않습니다.
 
 | Category | Executable default | Core operation |
 |---|---|---|

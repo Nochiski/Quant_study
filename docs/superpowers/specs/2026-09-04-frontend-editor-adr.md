@@ -101,6 +101,18 @@ completion/hover(P3-03)"로 읽는다 (WORKFLOW P3-03 갱신).
 - 500 factor node(약 3,000줄) 문서에서 입력 지연 < 16 ms/keystroke, folding·search 정상. worker가 없어
   `yaml` parse가 main thread에서 돌므로 P3-01은 parse를 debounce하고 P6-04에서 측정한다.
 
+### D4. P6-04 production budget 검증
+
+2026-09-06 P6-04에서 실제 `CodeEditorView`와 CodeMirror transaction을 사용하는 500-node·3,000줄
+fixture를 자동 회귀 테스트로 고정했다. 최초 5회 warm-up을 제외한 25회 synchronous input dispatch의 p95가
+16 ms 미만이어야 하며, 같은 fixture에서 YAML folding과 search panel도 함께 동작해야 한다.
+
+production build는 editor를 `code-editor-view-*` lazy chunk 하나로 유지한다. build 뒤 이 chunk를 다시 gzip해
+200 KiB를 넘으면 실패하는 script를 `npm run build`에 연결했고, P6-04 self-check 결과는 131.94 KiB였다.
+구문 색상은 라이트·다크 semantic token을 공유하는 `@lezer/highlight` 1.2.3 직접 의존성으로 정의한다.
+StrategySpec 의미·validation은 계속 backend가 소유하며, 이 성능 테스트와 theme는 editor의 입력·표시 경계만
+검증한다.
+
 ## 4. 대안
 
 - **Monaco + monaco-yaml**: schema completion이 가장 완성도 높지만 gzip 약 1.3 MB, worker 2개, textarea

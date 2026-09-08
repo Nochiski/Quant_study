@@ -1,8 +1,19 @@
-import { useId, useMemo, useState, type ReactNode } from "react";
+import {
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { t } from "../../../shared/config";
+import { useVirtualWindow } from "../../../shared/lib/virtual-window";
 import { Badge, Button, Tabs, panelId, tabId } from "../../../shared/ui";
-import { projectLinkedTraceRows } from "../model/linked-trace";
+import {
+  projectLinkedTraceRows,
+  type LinkedTraceRow,
+} from "../model/linked-trace";
 import { projectTargetTapeRows } from "../model/target-tape";
 import type {
   StrategyDebuggerContext,
@@ -22,6 +33,8 @@ type DebuggerSearchSelection = {
 type StrategyDebuggerProps = {
   context: StrategyDebuggerContext | null;
   unavailableReason: StrategyDebuggerUnavailableReason | null;
+  /** Opaque page-owned identity for the URL generation allowed to receive a trace deep link. */
+  publicationOwnerKey: string;
   asOf?: string;
   security?: string;
   selectedPointer?: string;
@@ -62,6 +75,166 @@ const formatWeight = (value: number | null): string =>
 
 const unavailableMessage = (reason: StrategyDebuggerUnavailableReason) =>
   t(`debugger.unavailable.${reason}`);
+
+const TABLE_ROW_HEIGHT = 64;
+const PIPELINE_ROW_HEIGHT = 324;
+const NODE_CHIP_HEIGHT = 58;
+
+type VirtualTableProps<Row> = {
+  rows: readonly Row[];
+  caption: string;
+  columns: readonly string[];
+  keyFor: (row: Row, index: number) => string;
+  cells: (row: Row, index: number) => ReactNode;
+  footer?: ReactNode;
+};
+
+/** The trace feature owns table meaning; the shared hook owns only scroll-window math. */
+const VirtualTable = <Row,>({
+  rows,
+  caption,
+  columns,
+  keyFor,
+  cells,
+  footer,
+}: VirtualTableProps<Row>) => {
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const virtual = useVirtualWindow(viewportRef, {
+    itemCount: rows.length,
+    itemHeight: TABLE_ROW_HEIGHT,
+    fallbackViewportHeight: 384,
+  });
+  const visible = rows.slice(virtual.start, virtual.end);
+  const spacer = (height: number, key: string) =>
+    height > 0 ? (
+      <tr
+        key={key}
+        className="strategy-debugger__virtual-spacer"
+        aria-hidden="true"
+      >
+        <td colSpan={columns.length} style={{ height }} />
+      </tr>
+    ) : null;
+
+  return (
+    <div
+      ref={viewportRef}
+      className="strategy-debugger__table-wrap strategy-debugger__virtual-viewport"
+      role="region"
+      aria-label={caption}
+      tabIndex={0}
+      data-rendered-rows={visible.length}
+      data-total-rows={rows.length}
+      data-virtualized={virtual.virtualized || undefined}
+      onKeyDown={virtual.onKeyDown}
+      onScroll={virtual.onScroll}
+    >
+      <table
+        className="strategy-debugger__table"
+        aria-rowcount={rows.length + 1}
+      >
+        <caption className="sr-only">{caption}</caption>
+        <thead>
+          <tr aria-rowindex={1}>
+            {columns.map((column) => (
+              <th key={column} scope="col">
+                {column}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {spacer(virtual.paddingBefore, "before")}
+          {visible.map((row, visibleIndex) => {
+            const index = virtual.start + visibleIndex;
+            return (
+              <tr key={keyFor(row, index)} aria-rowindex={index + 2}>
+                {cells(row, index)}
+              </tr>
+            );
+          })}
+          {spacer(virtual.paddingAfter, "after")}
+        </tbody>
+      </table>
+      {footer}
+    </div>
+  );
+};
+
+const VirtualNodeChain = ({
+  nodes,
+  selectedNodeId,
+}: {
+  nodes: LinkedTraceRow["nodes"];
+  selectedNodeId: string;
+}) => {
+  const selectedIndex = nodes.findIndex(
+    (row) => row.node_id === selectedNodeId,
+  );
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const virtual = useVirtualWindow(viewportRef, {
+    itemCount: nodes.length,
+    itemHeight: NODE_CHIP_HEIGHT,
+    fallbackViewportHeight: 174,
+    anchorIndex: selectedIndex < 0 ? null : selectedIndex,
+    overscan: 3,
+    threshold: 24,
+  });
+  return (
+    <div
+      ref={viewportRef}
+      className="strategy-debugger__node-chain"
+      role="list"
+      aria-label={t("debugger.stage.nodes")}
+      tabIndex={0}
+      data-rendered-rows={virtual.end - virtual.start}
+      data-total-rows={nodes.length}
+      data-virtualized={virtual.virtualized || undefined}
+      onKeyDown={virtual.onKeyDown}
+      onScroll={virtual.onScroll}
+    >
+      {virtual.paddingBefore > 0 ? (
+        <span
+          className="strategy-debugger__virtual-block"
+          style={{ height: virtual.paddingBefore }}
+          aria-hidden="true"
+        />
+      ) : null}
+      {nodes.slice(virtual.start, virtual.end).map((nodeRow, visibleIndex) => {
+        const index = virtual.start + visibleIndex;
+        return (
+          <span
+            key={`${nodeRow.security_id}:${nodeRow.node_id}`}
+            role="listitem"
+            aria-posinset={index + 1}
+            aria-setsize={nodes.length}
+            className={
+              nodeRow.node_id === selectedNodeId
+                ? "strategy-debugger__node-chip strategy-debugger__node-chip--selected"
+                : "strategy-debugger__node-chip"
+            }
+          >
+            <code>{nodeRow.node_id}</code>
+            <span>{nodeRow.operation}</span>
+            <span className="strategy-debugger__numeric">
+              {formatNumber(nodeRow.value)}
+            </span>
+            <Badge tone={nodeRow.status === "ok" ? "ok" : "warn"}>
+              {nodeRow.status}
+            </Badge>
+          </span>
+        );
+      })}
+      {virtual.paddingAfter > 0 ? (
+        <span
+          className="strategy-debugger__virtual-block"
+          style={{ height: virtual.paddingAfter }}
+          aria-hidden="true"
+        />
+      ) : null}
+    </div>
+  );
+};
 
 const BLOCKED_MESSAGES = {
   document: "debugger.blocked.document",
@@ -106,144 +279,67 @@ const LinkedTraceResult = ({
   state: StrategyTraceState;
   selectedNodeId: string;
 }) => {
+  const rows =
+    state.kind === "success"
+      ? projectLinkedTraceRows(
+          state.response,
+          state.request.security_ids,
+          state.linkedRows,
+          state.selectedRows,
+        )
+      : [];
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const virtual = useVirtualWindow(viewportRef, {
+    itemCount: rows.length,
+    itemHeight: PIPELINE_ROW_HEIGHT,
+    fallbackViewportHeight: 648,
+    overscan: 1,
+    threshold: 12,
+  });
   if (state.kind !== "success") return null;
   const target = state.response.target;
-  const rows = projectLinkedTraceRows(
-    state.response,
-    state.request.security_ids,
-    state.linkedRows,
-  );
   return (
-    <div className="strategy-debugger__pipeline-list">
-      {rows.map(({ securityId, raw, nodes, construction }) => (
-        <article className="strategy-debugger__pipeline" key={securityId}>
-          <header className="strategy-debugger__pipeline-header">
-            <h3>{securityId}</h3>
-            {construction === null ? (
-              <Badge tone="warn">{t("debugger.target.unavailable")}</Badge>
-            ) : (
-              <>
-                <Badge tone={construction.selected ? "ok" : "neutral"}>
-                  {construction.selected
-                    ? t("debugger.value.selected")
-                    : t("debugger.value.excluded")}
-                </Badge>
-                <Badge
-                  tone={
-                    construction.constraint_effect === "removed"
-                      ? "error"
-                      : construction.constraint_effect === "adjusted"
-                        ? "warn"
-                        : "neutral"
-                  }
-                >
-                  {construction.constraint_effect}
-                </Badge>
-              </>
-            )}
-          </header>
-          <ol className="strategy-debugger__pipeline-stages">
-            <li>
-              <strong>{t("debugger.stage.raw")}</strong>
-              <div className="strategy-debugger__stage-values">
-                {raw.length === 0 ? (
-                  <span>{t("debugger.raw.empty")}</span>
-                ) : (
-                  raw.map((field) => (
-                    <span key={field.field_id}>
-                      <code>{field.field_id}</code>
-                      <span className="strategy-debugger__numeric">
-                        {formatNumber(field.value)}
-                      </span>
-                      <Badge tone={field.kind === "observed" ? "ok" : "warn"}>
-                        {field.kind}
-                      </Badge>
-                      <small>{field.available_date}</small>
-                    </span>
-                  ))
-                )}
-              </div>
-            </li>
-            <li>
-              <strong>{t("debugger.stage.nodes")}</strong>
-              <div className="strategy-debugger__node-chain">
-                {nodes.map((nodeRow) => (
-                  <span
-                    key={nodeRow.node_id}
-                    className={
-                      nodeRow.node_id === selectedNodeId
-                        ? "strategy-debugger__node-chip strategy-debugger__node-chip--selected"
-                        : "strategy-debugger__node-chip"
-                    }
-                  >
-                    <code>{nodeRow.node_id}</code>
-                    <span>{nodeRow.operation}</span>
-                    <span className="strategy-debugger__numeric">
-                      {formatNumber(nodeRow.value)}
-                    </span>
-                    <Badge tone={nodeRow.status === "ok" ? "ok" : "warn"}>
-                      {nodeRow.status}
-                    </Badge>
-                  </span>
-                ))}
-              </div>
-            </li>
-            {construction === null || target === null ? (
-              <li>
-                <strong>{t("debugger.target.unavailable")}</strong>
-                <span>{t("debugger.target.partial")}</span>
-              </li>
-            ) : (
-              <>
-                <li>
-                  <strong>{t("debugger.stage.contribution")}</strong>
-                  <div className="strategy-debugger__stage-values">
-                    {construction.factor_contributions.map((contribution) => (
-                      <span key={contribution.factor_id}>
-                        <code>{contribution.factor_id}</code>
-                        <span>
-                          {contribution.direction} ×{" "}
-                          {formatNumber(contribution.configured_weight)}
-                        </span>
-                        <span className="strategy-debugger__numeric">
-                          {formatNumber(contribution.normalized_contribution)}
-                        </span>
-                        <Badge
-                          tone={contribution.status === "ok" ? "ok" : "warn"}
-                        >
-                          {contribution.status}
-                        </Badge>
-                      </span>
-                    ))}
-                  </div>
-                </li>
-                <li>
-                  <strong>{t("debugger.stage.composite")}</strong>
-                  <span className="strategy-debugger__stage-primary">
-                    {formatNumber(construction.composite_score)}
-                  </span>
-                </li>
-                <li>
-                  <strong>{t("debugger.stage.selection")}</strong>
-                  <span className="strategy-debugger__stage-primary">
-                    {t("debugger.column.rank")} {formatNumber(construction.rank)} ·{" "}
-                    {construction.side ?? t("debugger.value.none")}
-                  </span>
-                  {construction.exclusion_reasons.length > 0 ? (
-                    <code>{construction.exclusion_reasons.join(", ")}</code>
-                  ) : null}
-                </li>
-                <li>
-                  <strong>{t("debugger.stage.unconstrained")}</strong>
-                  <span className="strategy-debugger__stage-primary">
-                    {formatWeight(construction.unconstrained_target_weight)}
-                  </span>
-                </li>
-                <li>
-                  <strong>{t("debugger.stage.constrained")}</strong>
-                  <span className="strategy-debugger__stage-primary">
-                    {formatWeight(construction.constrained_target_weight)}
-                  </span>
+    <div
+      ref={viewportRef}
+      className="strategy-debugger__pipeline-list"
+      role="list"
+      aria-label={t("debugger.tab.trace")}
+      tabIndex={0}
+      data-rendered-rows={virtual.end - virtual.start}
+      data-total-rows={rows.length}
+      data-virtualized={virtual.virtualized || undefined}
+      onKeyDown={virtual.onKeyDown}
+      onScroll={virtual.onScroll}
+    >
+      {virtual.paddingBefore > 0 ? (
+        <div
+          className="strategy-debugger__virtual-block"
+          style={{ height: virtual.paddingBefore }}
+          aria-hidden="true"
+        />
+      ) : null}
+      {rows
+        .slice(virtual.start, virtual.end)
+        .map(({ securityId, raw, nodes, construction }, visibleIndex) => (
+          <article
+            className="strategy-debugger__pipeline"
+            key={securityId}
+            role="listitem"
+            aria-label={securityId}
+            aria-posinset={virtual.start + visibleIndex + 1}
+            aria-setsize={rows.length}
+          >
+            <header className="strategy-debugger__pipeline-header">
+              <h3>{securityId}</h3>
+              {construction === null ? (
+                <Badge tone="warn">{t("debugger.target.unavailable")}</Badge>
+              ) : (
+                <>
+                  <Badge tone={construction.selected ? "ok" : "neutral"}>
+                    {construction.selected
+                      ? t("debugger.value.selected")
+                      : t("debugger.value.excluded")}
+                  </Badge>
                   <Badge
                     tone={
                       construction.constraint_effect === "removed"
@@ -255,27 +351,134 @@ const LinkedTraceResult = ({
                   >
                     {construction.constraint_effect}
                   </Badge>
+                </>
+              )}
+            </header>
+            <ol className="strategy-debugger__pipeline-stages">
+              <li>
+                <strong>{t("debugger.stage.raw")}</strong>
+                <div className="strategy-debugger__stage-values">
+                  {raw.length === 0 ? (
+                    <span>{t("debugger.raw.empty")}</span>
+                  ) : (
+                    raw.map((field) => (
+                      <span key={field.field_id}>
+                        <code>{field.field_id}</code>
+                        <span className="strategy-debugger__numeric">
+                          {formatNumber(field.value)}
+                        </span>
+                        <Badge tone={field.kind === "observed" ? "ok" : "warn"}>
+                          {field.kind}
+                        </Badge>
+                        <small>{field.available_date}</small>
+                      </span>
+                    ))
+                  )}
+                </div>
+              </li>
+              <li>
+                <strong>{t("debugger.stage.nodes")}</strong>
+                <VirtualNodeChain
+                  nodes={nodes}
+                  selectedNodeId={selectedNodeId}
+                />
+              </li>
+              {construction === null || target === null ? (
+                <li>
+                  <strong>{t("debugger.target.unavailable")}</strong>
+                  <span>{t("debugger.target.partial")}</span>
                 </li>
-                {construction.estimated_order_delta !== null ? (
+              ) : (
+                <>
                   <li>
-                    <strong>{t("debugger.stage.orderDelta")}</strong>
-                    <span className="strategy-debugger__stage-primary">
-                      {t("debugger.order.previous")}{" "}
-                      {formatWeight(construction.previous_weight)} →{" "}
-                      {t("debugger.order.delta")}{" "}
-                      {formatWeight(construction.estimated_order_delta)}
-                    </span>
-                    <small>
-                      {target.signal_as_of} → {target.execution_on} ·{" "}
-                      {t("debugger.order.assumption")}
-                    </small>
+                    <strong>{t("debugger.stage.contribution")}</strong>
+                    <div className="strategy-debugger__stage-values">
+                      {construction.factor_contributions.map((contribution) => (
+                        <span key={contribution.factor_id}>
+                          <code>{contribution.factor_id}</code>
+                          <span>
+                            {contribution.direction} ×{" "}
+                            {formatNumber(contribution.configured_weight)}
+                          </span>
+                          <span className="strategy-debugger__numeric">
+                            {formatNumber(contribution.normalized_contribution)}
+                          </span>
+                          <Badge
+                            tone={contribution.status === "ok" ? "ok" : "warn"}
+                          >
+                            {contribution.status}
+                          </Badge>
+                        </span>
+                      ))}
+                    </div>
                   </li>
-                ) : null}
-              </>
-            )}
-          </ol>
-        </article>
-      ))}
+                  <li>
+                    <strong>{t("debugger.stage.composite")}</strong>
+                    <span className="strategy-debugger__stage-primary">
+                      {formatNumber(construction.composite_score)}
+                    </span>
+                  </li>
+                  <li>
+                    <strong>{t("debugger.stage.selection")}</strong>
+                    <span className="strategy-debugger__stage-primary">
+                      {t("debugger.column.rank")}{" "}
+                      {formatNumber(construction.rank)} ·{" "}
+                      {construction.side ?? t("debugger.value.none")}
+                    </span>
+                    {construction.exclusion_reasons.length > 0 ? (
+                      <code>{construction.exclusion_reasons.join(", ")}</code>
+                    ) : null}
+                  </li>
+                  <li>
+                    <strong>{t("debugger.stage.unconstrained")}</strong>
+                    <span className="strategy-debugger__stage-primary">
+                      {formatWeight(construction.unconstrained_target_weight)}
+                    </span>
+                  </li>
+                  <li>
+                    <strong>{t("debugger.stage.constrained")}</strong>
+                    <span className="strategy-debugger__stage-primary">
+                      {formatWeight(construction.constrained_target_weight)}
+                    </span>
+                    <Badge
+                      tone={
+                        construction.constraint_effect === "removed"
+                          ? "error"
+                          : construction.constraint_effect === "adjusted"
+                            ? "warn"
+                            : "neutral"
+                      }
+                    >
+                      {construction.constraint_effect}
+                    </Badge>
+                  </li>
+                  {construction.estimated_order_delta !== null ? (
+                    <li>
+                      <strong>{t("debugger.stage.orderDelta")}</strong>
+                      <span className="strategy-debugger__stage-primary">
+                        {t("debugger.order.previous")}{" "}
+                        {formatWeight(construction.previous_weight)} →{" "}
+                        {t("debugger.order.delta")}{" "}
+                        {formatWeight(construction.estimated_order_delta)}
+                      </span>
+                      <small>
+                        {target.signal_as_of} → {target.execution_on} ·{" "}
+                        {t("debugger.order.assumption")}
+                      </small>
+                    </li>
+                  ) : null}
+                </>
+              )}
+            </ol>
+          </article>
+        ))}
+      {virtual.paddingAfter > 0 ? (
+        <div
+          className="strategy-debugger__virtual-block"
+          style={{ height: virtual.paddingAfter }}
+          aria-hidden="true"
+        />
+      ) : null}
     </div>
   );
 };
@@ -289,46 +492,44 @@ const RawResult = ({ state }: { state: StrategyTraceState }) => {
       </div>
     );
   return (
-    <div className="strategy-debugger__table-wrap">
-      <table className="strategy-debugger__table">
-        <caption className="sr-only">{t("debugger.raw.caption")}</caption>
-        <thead>
-          <tr>
-            <th scope="col">{t("debugger.column.security")}</th>
-            <th scope="col">{t("debugger.column.field")}</th>
-            <th scope="col">{t("debugger.column.value")}</th>
-            <th scope="col">{t("debugger.column.availableDate")}</th>
-            <th scope="col">{t("debugger.column.status")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {state.response.raw.map((row) => (
-            <tr key={`${row.security_id}:${row.field_id}`}>
-              <td>
-                <code>{row.security_id}</code>
-              </td>
-              <td>
-                <code>{row.field_id}</code>
-              </td>
-              <td className="strategy-debugger__numeric">
-                {formatNumber(row.value)}
-              </td>
-              <td>{row.available_date}</td>
-              <td>
-                <Badge tone={row.kind === "observed" ? "ok" : "warn"}>
-                  {row.kind}
-                </Badge>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {state.response.raw_truncated ? (
-        <p className="strategy-debugger__note" role="status">
-          {t("debugger.raw.truncated")}
-        </p>
-      ) : null}
-    </div>
+    <VirtualTable
+      rows={state.response.raw}
+      caption={t("debugger.raw.caption")}
+      columns={[
+        t("debugger.column.security"),
+        t("debugger.column.field"),
+        t("debugger.column.value"),
+        t("debugger.column.availableDate"),
+        t("debugger.column.status"),
+      ]}
+      keyFor={(row) => `${row.security_id}:${row.field_id}`}
+      cells={(row) => (
+        <>
+          <td>
+            <code>{row.security_id}</code>
+          </td>
+          <td>
+            <code>{row.field_id}</code>
+          </td>
+          <td className="strategy-debugger__numeric">
+            {formatNumber(row.value)}
+          </td>
+          <td>{row.available_date}</td>
+          <td>
+            <Badge tone={row.kind === "observed" ? "ok" : "warn"}>
+              {row.kind}
+            </Badge>
+          </td>
+        </>
+      )}
+      footer={
+        state.response.raw_truncated ? (
+          <p className="strategy-debugger__note" role="status">
+            {t("debugger.raw.truncated")}
+          </p>
+        ) : null
+      }
+    />
   );
 };
 
@@ -353,71 +554,67 @@ const TargetResult = ({
     state.selectedRows,
   );
   return (
-    <div className="strategy-debugger__table-wrap">
-      <table className="strategy-debugger__table">
-        <caption className="sr-only">{t("debugger.target.caption")}</caption>
-        <thead>
-          <tr>
-            <th scope="col">{t("debugger.column.security")}</th>
-            <th scope="col">{t("debugger.column.score")}</th>
-            <th scope="col">{t("debugger.column.rank")}</th>
-            <th scope="col">{t("debugger.column.selected")}</th>
-            <th scope="col">{t("debugger.column.exclusion")}</th>
-            <th scope="col">{t("debugger.column.target")}</th>
-            <th scope="col">{t("debugger.column.nodeValue")}</th>
-            <th scope="col">{t("debugger.column.nodeStatus")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.securityId}>
-              <td>
-                <code>{row.securityId}</code>
-              </td>
-              <td className="strategy-debugger__numeric">
-                {formatNumber(row.score)}
-              </td>
-              <td className="strategy-debugger__numeric">
-                {formatNumber(row.rank)}
-              </td>
-              <td>
-                {row.selected === null ? (
-                  "—"
-                ) : (
-                  <Badge tone={row.selected ? "ok" : "neutral"}>
-                    {row.selected
-                      ? t("debugger.value.yes")
-                      : t("debugger.value.no")}
-                  </Badge>
-                )}
-              </td>
-              <td>
-                {row.exclusionReasons.length === 0 ? (
-                  "—"
-                ) : (
-                  <code>{row.exclusionReasons.join(", ")}</code>
-                )}
-              </td>
-              <td className="strategy-debugger__numeric">
-                {formatWeight(row.targetWeight)}
-              </td>
-              <td className="strategy-debugger__numeric">
-                {formatNumber(row.nodeValue)}
-              </td>
-              <td>
-                {row.nodeStatus === null ? (
-                  "—"
-                ) : (
-                  <Badge tone={row.nodeStatus === "ok" ? "ok" : "warn"}>
-                    {row.nodeStatus}
-                  </Badge>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <VirtualTable
+      rows={rows}
+      caption={t("debugger.target.caption")}
+      columns={[
+        t("debugger.column.security"),
+        t("debugger.column.score"),
+        t("debugger.column.rank"),
+        t("debugger.column.selected"),
+        t("debugger.column.exclusion"),
+        t("debugger.column.target"),
+        t("debugger.column.nodeValue"),
+        t("debugger.column.nodeStatus"),
+      ]}
+      keyFor={(row) => row.securityId}
+      cells={(row) => (
+        <>
+          <td>
+            <code>{row.securityId}</code>
+          </td>
+          <td className="strategy-debugger__numeric">
+            {formatNumber(row.score)}
+          </td>
+          <td className="strategy-debugger__numeric">
+            {formatNumber(row.rank)}
+          </td>
+          <td>
+            {row.selected === null ? (
+              "—"
+            ) : (
+              <Badge tone={row.selected ? "ok" : "neutral"}>
+                {row.selected
+                  ? t("debugger.value.yes")
+                  : t("debugger.value.no")}
+              </Badge>
+            )}
+          </td>
+          <td>
+            {row.exclusionReasons.length === 0 ? (
+              "—"
+            ) : (
+              <code>{row.exclusionReasons.join(", ")}</code>
+            )}
+          </td>
+          <td className="strategy-debugger__numeric">
+            {formatWeight(row.targetWeight)}
+          </td>
+          <td className="strategy-debugger__numeric">
+            {formatNumber(row.nodeValue)}
+          </td>
+          <td>
+            {row.nodeStatus === null ? (
+              "—"
+            ) : (
+              <Badge tone={row.nodeStatus === "ok" ? "ok" : "warn"}>
+                {row.nodeStatus}
+              </Badge>
+            )}
+          </td>
+        </>
+      )}
+    />
   );
 };
 
@@ -429,7 +626,9 @@ const NodeResult = ({
   selectedNodeId: string;
 }) => {
   if (state.kind !== "success") return null;
-  const rows = state.selectedRows.filter((row) => row.node_id === selectedNodeId);
+  const rows = state.selectedRows.filter(
+    (row) => row.node_id === selectedNodeId,
+  );
   if (rows.length === 0)
     return (
       <div className="strategy-debugger__state" role="status">
@@ -437,54 +636,54 @@ const NodeResult = ({
       </div>
     );
   return (
-    <div className="strategy-debugger__table-wrap">
-      <table className="strategy-debugger__table">
-        <caption className="sr-only">{t("debugger.node.caption")}</caption>
-        <thead>
-          <tr>
-            <th scope="col">{t("debugger.column.security")}</th>
-            <th scope="col">{t("debugger.column.node")}</th>
-            <th scope="col">{t("debugger.column.operation")}</th>
-            <th scope="col">{t("debugger.column.inputs")}</th>
-            <th scope="col">{t("debugger.column.value")}</th>
-            <th scope="col">{t("debugger.column.status")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={`${row.security_id}:${row.node_id}`}>
-              <td>
-                <code>{row.security_id}</code>
-              </td>
-              <td>
-                <code>{row.node_id}</code>
-              </td>
-              <td>{row.operation}</td>
-              <td>
-                {row.inputs.length === 0
-                  ? "—"
-                  : row.inputs.map((input) => (
-                      <code
-                        key={input.node_id}
-                        className="strategy-debugger__input"
-                      >
-                        {input.node_id}={formatNumber(input.value)}
-                      </code>
-                    ))}
-              </td>
-              <td className="strategy-debugger__numeric">
-                {formatNumber(row.value)}
-              </td>
-              <td>
-                <Badge tone={row.status === "ok" ? "ok" : "warn"}>
-                  {row.status}
-                </Badge>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <VirtualTable
+      rows={rows}
+      caption={t("debugger.node.caption")}
+      columns={[
+        t("debugger.column.security"),
+        t("debugger.column.node"),
+        t("debugger.column.operation"),
+        t("debugger.column.inputs"),
+        t("debugger.column.value"),
+        t("debugger.column.status"),
+      ]}
+      keyFor={(row) => `${row.security_id}:${row.node_id}`}
+      cells={(row) => (
+        <>
+          <td>
+            <code>{row.security_id}</code>
+          </td>
+          <td>
+            <code>{row.node_id}</code>
+          </td>
+          <td>{row.operation}</td>
+          <td>
+            {row.inputs.length === 0 ? (
+              "—"
+            ) : (
+              <span className="strategy-debugger__inputs">
+                {row.inputs.map((input) => (
+                  <code
+                    key={input.node_id}
+                    className="strategy-debugger__input"
+                  >
+                    {input.node_id}={formatNumber(input.value)}
+                  </code>
+                ))}
+              </span>
+            )}
+          </td>
+          <td className="strategy-debugger__numeric">
+            {formatNumber(row.value)}
+          </td>
+          <td>
+            <Badge tone={row.status === "ok" ? "ok" : "warn"}>
+              {row.status}
+            </Badge>
+          </td>
+        </>
+      )}
+    />
   );
 };
 
@@ -521,6 +720,7 @@ const Provenance = ({ state }: { state: StrategyTraceState }) => {
 export const StrategyDebugger = ({
   context,
   unavailableReason,
+  publicationOwnerKey,
   asOf,
   security,
   selectedPointer,
@@ -595,6 +795,28 @@ export const StrategyDebugger = ({
   );
   const trace = useStrategyTrace(context, selection);
   const loading = trace.state.kind === "loading";
+  const latestTraceOwner = useRef<string | null>(null);
+  const latestPublicationOwner = useRef(publicationOwnerKey);
+  const traceOwnerKey =
+    trace.prepared.kind === "ready" ? trace.prepared.ownerKey : null;
+  useLayoutEffect(() => {
+    latestTraceOwner.current = traceOwnerKey;
+  }, [traceOwnerKey]);
+  useLayoutEffect(() => {
+    latestPublicationOwner.current = publicationOwnerKey;
+  }, [publicationOwnerKey]);
+  const mounted = useRef(false);
+  const submittedRequest = useRef<symbol | null>(null);
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      submittedRequest.current = null;
+    };
+  }, []);
+  const supersedeSubmittedRequest = () => {
+    submittedRequest.current = null;
+  };
 
   return (
     <div className="strategy-debugger">
@@ -603,11 +825,29 @@ export const StrategyDebugger = ({
         aria-label={t("debugger.controls")}
         onSubmit={(event) => {
           event.preventDefault();
-          onSearchSelection({
+          if (trace.prepared.kind !== "ready") return;
+          const submittedSelection = {
             asOf: selectedAsOf || undefined,
             security: selectedSecurity || undefined,
+          };
+          const ownerKey = trace.prepared.ownerKey;
+          const submittedPublicationOwner = publicationOwnerKey;
+          const requestId = Symbol("trace-submit");
+          submittedRequest.current = requestId;
+          // The calculation cache owns late data. This component may publish a deep link only
+          // while it still owns the exact document + selection and committed URL generation
+          // that submitted the request.
+          void trace.run().finally(() => {
+            if (
+              mounted.current &&
+              submittedRequest.current === requestId &&
+              latestTraceOwner.current === ownerKey &&
+              latestPublicationOwner.current === submittedPublicationOwner
+            ) {
+              submittedRequest.current = null;
+              onSearchSelection(submittedSelection);
+            }
           });
-          void trace.run();
         }}
       >
         <label>
@@ -621,6 +861,7 @@ export const StrategyDebugger = ({
             aria-describedby={`${idBase}-date-note`}
             disabled={context === null}
             onChange={(event) => {
+              supersedeSubmittedRequest();
               setScope((current) => ({
                 ...current,
                 selectedAsOf: event.target.value,
@@ -642,18 +883,13 @@ export const StrategyDebugger = ({
             autoComplete="off"
             spellCheck={false}
             disabled={context === null}
-            onChange={(event) =>
+            onChange={(event) => {
+              supersedeSubmittedRequest();
               setScope((current) => ({
                 ...current,
                 selectedSecurity: event.target.value,
-              }))
-            }
-            onBlur={(event) =>
-              onSearchSelection({
-                asOf: selectedAsOf || undefined,
-                security: event.target.value || undefined,
-              })
-            }
+              }));
+            }}
           />
         </label>
         <label className="strategy-debugger__holdings-control">
@@ -666,12 +902,13 @@ export const StrategyDebugger = ({
             autoComplete="off"
             spellCheck={false}
             disabled={context === null}
-            onChange={(event) =>
+            onChange={(event) => {
+              supersedeSubmittedRequest();
               setScope((current) => ({
                 ...current,
                 selectedHoldings: event.target.value,
-              }))
-            }
+              }));
+            }}
           />
           <small id={`${idBase}-holdings-note`}>
             {t("debugger.holdings.note")}
@@ -683,6 +920,7 @@ export const StrategyDebugger = ({
             value={factor?.factorId ?? ""}
             disabled={context === null || context.factors.length === 0}
             onChange={(event) => {
+              supersedeSubmittedRequest();
               const next = context?.factors.find(
                 (candidate) => candidate.factorId === event.target.value,
               );
@@ -706,6 +944,7 @@ export const StrategyDebugger = ({
             value={node?.nodeId ?? ""}
             disabled={factor === undefined}
             onChange={(event) => {
+              supersedeSubmittedRequest();
               const next = factor?.nodes.find(
                 (candidate) => candidate.nodeId === event.target.value,
               );
@@ -729,7 +968,14 @@ export const StrategyDebugger = ({
             {loading ? t("debugger.running") : t("debugger.run")}
           </Button>
           {loading ? (
-            <Button size="small" tone="ghost" onClick={trace.cancel}>
+            <Button
+              size="small"
+              tone="ghost"
+              onClick={() => {
+                supersedeSubmittedRequest();
+                trace.cancel();
+              }}
+            >
               {t("debugger.cancel")}
             </Button>
           ) : null}

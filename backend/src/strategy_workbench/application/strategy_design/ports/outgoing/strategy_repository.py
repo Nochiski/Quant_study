@@ -129,12 +129,24 @@ class PageRequest:
     offset: int = 0
     limit: int = 50
     MAX_LIMIT: ClassVar[int] = 500
+    # Shared by memory, SQLite and JavaScript clients without integer coercion or overflow.
+    MAX_OFFSET: ClassVar[int] = 9_007_199_254_740_991
 
     def __post_init__(self) -> None:
-        if self.offset < 0 or not 1 <= self.limit <= self.MAX_LIMIT:
+        valid_offset = (
+            isinstance(self.offset, int)
+            and not isinstance(self.offset, bool)
+            and 0 <= self.offset <= self.MAX_OFFSET
+        )
+        valid_limit = (
+            isinstance(self.limit, int)
+            and not isinstance(self.limit, bool)
+            and 1 <= self.limit <= self.MAX_LIMIT
+        )
+        if not valid_offset or not valid_limit:
             raise ValueError(
                 f"page request out of range — offset={self.offset} limit={self.limit} "
-                f"max_limit={self.MAX_LIMIT}"
+                f"max_offset={self.MAX_OFFSET} max_limit={self.MAX_LIMIT}"
             )
 
 

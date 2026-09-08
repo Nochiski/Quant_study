@@ -64,6 +64,15 @@ class LocalArtifactStore:
             size_bytes=len(payload),
         )
 
+    def discard(self, run_id: str) -> None:
+        """Delete one exact committed run after application-level cancellation wins."""
+
+        target = (self._root / run_id).resolve()
+        if target.parent != self._root:
+            raise ValueError("run id escapes artifact root")
+        if target.exists():
+            shutil.rmtree(target)
+
 
 def _json_value(value: Any) -> Any:
     if value is None or isinstance(value, (bool, int, str)):

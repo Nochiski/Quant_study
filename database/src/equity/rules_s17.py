@@ -432,38 +432,85 @@ _CONS_AXIS: tuple[str, str] = ("ticker", "available_date")
 _CONS_DISCLOSURE = ("wise = 화면 수집일(fetched_date, measured) / v3 = 미러 수집일"
                     "(collected_date) — 관측 시각은 미측정이라 1 세션 뒤부터 쓴다")
 
+# ── 컨센서스 소비 규약 (2026-09-08 확정 · BLOCKED_FACTORS §6-5 ①~③) ──────────
+# 이 다섯 필드가 `requires_confirmation=True` 였던 이유는 **두 원천 값이 어긋나서가 아니다** —
+# 겹치는 구간의 wise·v3 값은 전부 일치했고(DESIGN §10 P37) EG8 이 매 빌드 그것을 다시 잰다.
+# 미결이었던 것은 「두 원천 병기 + 단위 + 대상기간 선택」 셋뿐이고, 셋을 아래 문자열로 못박아
+# 플래그를 끈다. 문자열은 `dataset_profile.evidence` 로 그대로 나가므로 소비자는 표만 보고 규약을
+# 읽는다. **규약은 셋을 고정할 뿐 없는 이력을 만들지 않는다** — 필드마다 쓸 수 있는 이력 길이를
+# 따로 적어 둔 이유다(BLOCKED_FACTORS §6-2·§6-3 실측).
+CONSENSUS_CONVENTION = (
+    "【규약 2026-09-08】① 원천 우선순위 — 겹치는 달은 **v3 우선**이고 wise 는 v3 가 없는 구간을 "
+    "메운다. 뷰 `v_consensus` 가 이미 그렇게 접는다(min(available_date) → 동률이면 src 사전순 "
+    "'v3' < 'wise'): v3 는 2026-04-03 부터 일별로 수집 시각을 실측해 wise 화면 수집일"
+    "(2026-09-01·02)보다 항상 이르다. `src` 컬럼은 계속 나가므로 소비자가 뒤집을 수 있고, 값 "
+    "충돌은 없다 — 겹친 키의 두 값이 전부 일치했다(DESIGN §10 P37). "
+    "② 단위 — 매출·영업이익·순이익 추정치는 **억원**, EPS·BPS 는 원, PER·PBR 은 배, ROE 는 %. "
+    "**행의 `unit` 컬럼이 정본**이고 환산은 이 슬라이스 밖(소비층 어댑터) 몫이다. "
+    "③ 대상기간 — 관측월 이후로 끝나는 가장 가까운 회계기간이 FY1 이다"
+    "(target_period >= strftime(obs_month, '%Y%m') 중 최소 — 어댑터 `_specs.py` 의 "
+    "consensus_eps·consensus_revenue 가 쓰던 규칙을 사양으로 올린 것). **'12개월 선행' 합성은 "
+    "팩터층 몫**이고 equity 는 target_period 별 값만 준다. "
+    "④ 아직 안 연 것 — wise 행의 `available_date` 는 화면 수집일이라 관측월을 3년치 갖고도 "
+    "**2026-04 이전 구간 백테스트에는 컨센서스가 0행**이다(START_HERE §6). 관측월 말일 기준으로 "
+    "여는 안(BLOCKED_FACTORS §6-5 ④)은 사람 승인 대기다.")
+
+# v3 축의 상태 — 2026-09-08 서버 읽기 전용 실측. 사본이 멈춘 것이지 원본이 멈춘 것이 아니다.
+_V3_MIRROR_NOTE = (
+    "**이 축은 2026-08-31 에서 멈춰 있다** — v3 미러 `src/sync_v3_wise.py` 가 daily_wise 체인에서 "
+    "2026-09-02 에 빠졌다(스크립트 주석의 사유는 \"직접 수집이 같은 값을 커버\" 인데 wise 직접 "
+    "수집에는 영업이익·순이익이 없다). 서버 실측(2026-09-08): 사본 "
+    "`wisereport.v3_consensus_revision_daily` 의 max base_date 2026-08-31, 원본 "
+    "`kael-system-v3/quant.db.consensus_revision_daily` 는 09-04 까지 계속 쌓인다. 미러를 재개하면 "
+    "소급 복구되지만 운영 변경이라 사람 승인이 필요하다.")
+
 
 def _cons(field_id: str, columns: tuple[str, ...], metric: str, label: str, unit: str,
           evidence: str, *, scope: str = "field_map") -> FieldProfile:
     return FieldProfile(
         field_id=field_id, columns=columns, label=label, unit=unit, value_type="amount",
         frequency="monthly", recommended_lag_sessions=1, recommended_lag_days=1,
-        point_in_time=True, requires_confirmation=True, disclosure_basis=_CONS_DISCLOSURE,
-        evidence=evidence, coverage_axis="grid_security", scope=scope,
+        point_in_time=True, requires_confirmation=False, disclosure_basis=_CONS_DISCLOSURE,
+        evidence=f"{evidence} {CONSENSUS_CONVENTION}", coverage_axis="grid_security", scope=scope,
         row_filter=f"metric = '{metric}'", axis_columns=_CONS_AXIS)
 
 
 FIELDS_CONSENSUS: tuple[FieldProfile, ...] = (
     _cons("consensus.forward_eps", ("est_mean",), "eps", "컨센서스 EPS 추정치", "원",
-          "consensus_daily.est_mean WHERE metric='eps'. **target_period 별 값만 준다** — "
-          "'12개월 선행' 합성은 팩터층 몫이다(FIELD_MAP §2). 소비는 v_consensus(as_of)."),
+          "consensus_daily.est_mean WHERE metric='eps'. 소비는 v_consensus(as_of). "
+          "**쓸 수 있는 이력**(§6-2 실측) — v3 관측월 5개(2026-04~08) · 768종목, wise 관측월 "
+          "37개(2023-09~2026-09) · 2,566종목이지만 wise 의 PIT 는 수집 이틀(2026-09-01·02)뿐이다. "
+          "wise 화면이 13개월 이동창이라 종목이 실제로 차는 구간도 2025-08(490종목)부터고 그 뒤 "
+          "13개월이 494~612종목이다(§6-3)."),
     _cons("consensus.forward_sales", ("est_mean",), "revenue", "컨센서스 매출 추정치", "억원",
-          "consensus_daily.est_mean WHERE metric='revenue'. **원 단위가 아니다**(억원) — "
-          "스케일 변환은 소비자 몫이고 행의 unit 컬럼이 정본이다."),
+          "consensus_daily.est_mean WHERE metric='revenue'. **원 단위가 아니다**(억원). FACTORS "
+          "정본 G07(매출 추정치 리비전)의 재료. **쓸 수 있는 이력**(§6-2·§6-3 실측) — v3 관측월 "
+          "5개(2026-04~08) · 767종목, 또는 wise 13개월 창(2025-09~2026-09 · 494~612종목). 규약 "
+          "④ 를 열면 컨센서스 여섯 중 **유일하게 1년 넘는 이력**을 갖는 필드다."),
     FieldProfile(
         field_id="consensus.eps_dispersion", columns=("est_min", "est_max"),
         label="컨센서스 EPS 추정치 산포(최소·최대)", unit="원", value_type="amount",
         frequency="monthly", recommended_lag_sessions=1, recommended_lag_days=1,
-        point_in_time=True, requires_confirmation=True, disclosure_basis=_CONS_DISCLOSURE,
+        point_in_time=True, requires_confirmation=False, disclosure_basis=_CONS_DISCLOSURE,
         evidence="**wise 구간에만 있다** — v3 행은 min/max 가 NULL 이라(원장이 안 준다) 겹치는 "
-                 "달에 v_consensus 가 v3 를 고르면 산포는 결측이다(FIELD_MAP §3). 두 컬럼이 "
-                 "함께 있어야 값이 성립하므로 커버율은 둘 다 NOT NULL 인 행으로 잰다.",
+                 "달에 v_consensus 가 규약 ① 대로 v3 를 고르면 산포는 결측이다(FIELD_MAP §3). "
+                 "두 컬럼이 함께 있어야 값이 성립하므로 커버율은 둘 다 NOT NULL 인 행으로 잰다. "
+                 "쓸 수 있는 이력은 wise 축뿐이라 forward_eps 의 wise 절반과 같다. FACTORS 정본 "
+                 "54 중 이 필드를 요구하는 팩터는 없다 — 선언만 있고 준비도 판정에 걸리지 않는다. "
+                 f"{CONSENSUS_CONVENTION}",
         coverage_axis="grid_security", row_filter="metric = 'eps'", axis_columns=_CONS_AXIS),
     _cons("consensus.forward_op", ("est_mean",), "op", "컨센서스 영업이익 추정치", "억원",
           "equity 내부 스코프(레지스트리 42 밖). FACTORS 정본 G05(영업이익 추정치 리비전)의 "
-          "재료 — 리비전은 서로 다른 두 obs_month 관측점을 필요로 한다.", scope="internal"),
+          "재료 — 리비전은 서로 다른 두 obs_month 관측점을 필요로 한다. **쓸 수 있는 이력이 v3 "
+          "5개월뿐이다**(2026-04~08 관측월 · 789종목): wise 컨센서스 화면(cF5001·cF5002)에 "
+          "영업이익이 없어 메울 축이 없다. 관측점 4개로는 리비전 백테스트가 성립하지 않는다 — "
+          "**규약이 닫은 것은 결정이지 이력이 아니다.** "
+          f"{_V3_MIRROR_NOTE}", scope="internal"),
     _cons("consensus.forward_ni", ("est_mean",), "ni", "컨센서스 순이익 추정치", "억원",
-          "equity 내부 스코프. FACTORS 정본 G06(순이익 추정치 리비전)의 재료.", scope="internal"),
+          "equity 내부 스코프. FACTORS 정본 G06(순이익 추정치 리비전)의 재료. 이력 사정은 "
+          "forward_op 과 같다 — **v3 5개월뿐**(2026-04~08 관측월 · 768종목)이고 wise 화면에 "
+          "순이익이 없다. "
+          f"{_V3_MIRROR_NOTE}", scope="internal"),
 )
 
 
@@ -510,6 +557,7 @@ TABLES: tuple[EquityTable, ...] = (CONSENSUS_DAILY,)
 BASELINE_SEED = Path(__file__).parent / "baseline_seed_s17.json"
 """이 슬라이스가 요구하는 상수의 초기값(절단본 실측). 승인 뒤 `baseline.json` 에 병합한다."""
 
-__all__ = ["BASELINE_SEED", "CONSENSUS_DAILY", "EG1_LHS_SQL", "EG1_RHS_SQL", "METRIC_VOCAB",
+__all__ = ["BASELINE_SEED", "CONSENSUS_CONVENTION", "CONSENSUS_DAILY", "EG1_LHS_SQL",
+           "EG1_RHS_SQL", "METRIC_VOCAB",
            "POPULATION_MARKER", "REJECT_REASONS", "SRC_VOCAB", "TABLES", "UNIT_VOCAB",
            "V3_METRICS", "WISE_METRICS", "eg8_overlap_sql", "population_sql"]

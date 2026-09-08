@@ -48,17 +48,28 @@ export type DiscriminatorInfo = {
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-export const resolveRef = (root: JsonSchema, node: JsonSchema): JsonSchema => {
+/**
+ * Resolves backend-owned, document-local references. Invalid, external, oversized, and cyclic
+ * chains are deliberately unavailable: editor assistance must never invent a contract when the
+ * runtime schema cannot be followed unambiguously.
+ */
+export const resolveRef = (
+  root: JsonSchema,
+  node: JsonSchema,
+): JsonSchema | null => {
   let current = node;
-  for (let hops = 0; hops < 16 && typeof current.$ref === "string"; hops += 1) {
+  const visited = new Set<JsonSchema>();
+  for (let hops = 0; typeof current.$ref === "string"; hops += 1) {
+    if (hops >= 16 || visited.has(current)) return null;
+    visited.add(current);
     const ref = current.$ref;
-    if (!ref.startsWith("#/")) return current;
+    if (!ref.startsWith("#/")) return null;
     let target: unknown = root;
     for (const segment of ref.slice(2).split("/")) {
-      if (!isObject(target)) return current;
+      if (!isObject(target)) return null;
       target = target[decodePointerSegment(segment)];
     }
-    if (!isObject(target)) return current;
+    if (!isObject(target)) return null;
     current = target;
   }
   return current;
@@ -67,8 +78,9 @@ export const resolveRef = (root: JsonSchema, node: JsonSchema): JsonSchema => {
 const unwrapNullable = (
   root: JsonSchema,
   node: JsonSchema,
-): { node: JsonSchema; nullable: boolean } => {
+): { node: JsonSchema; nullable: boolean } | null => {
   const resolved = resolveRef(root, node);
+  if (resolved === null) return null;
   if (Array.isArray(resolved.anyOf)) {
     const members = resolved.anyOf.filter(isObject);
     const nonNull = members.filter((m) => m.type !== "null");
@@ -80,10 +92,9 @@ const unwrapNullable = (
             key.startsWith("x-") || key === "default" || key === "examples",
         ),
       );
-      return {
-        node: { ...resolveRef(root, nonNull[0]), ...outer },
-        nullable: true,
-      };
+      const inner = resolveRef(root, nonNull[0]);
+      if (inner === null) return null;
+      return { node: { ...inner, ...outer }, nullable: true };
     }
   }
   return { node: resolved, nullable: false };
@@ -91,6 +102,7 @@ const unwrapNullable = (
 
 const kindOf = (root: JsonSchema, branch: JsonSchema): string | null => {
   const node = resolveRef(root, branch);
+  if (node === null) return null;
   const properties = isObject(node.properties) ? node.properties : {};
   const kind = isObject(properties.kind) ? properties.kind : null;
   return kind && typeof kind.const === "string" ? kind.const : null;
@@ -101,8 +113,9 @@ const resolveUnion = (
   root: JsonSchema,
   node: JsonSchema,
   value: unknown,
-): ResolvedSchema => {
+): ResolvedSchema | null => {
   const base = unwrapNullable(root, node);
+  if (base === null) return null;
   const members = Array.isArray(base.node.oneOf)
     ? base.node.oneOf.filter(isObject)
     : null;
@@ -113,10 +126,12 @@ const resolveUnion = (
       propertyVariants: null,
       propertyRequired: null,
     };
-  const branches = members.map((member) => ({
-    kind: kindOf(root, member) ?? "",
-    node: resolveRef(root, member),
-  }));
+  const branches: { kind: string; node: JsonSchema }[] = [];
+  for (const member of members) {
+    const branch = resolveRef(root, member);
+    if (branch === null) return null;
+    branches.push({ kind: kindOf(root, branch) ?? "", node: branch });
+  }
   const kind =
     isObject(value) && typeof value.kind === "string" ? value.kind : null;
   const chosen =
@@ -158,6 +173,7 @@ const walk = (
   let propertyRequired: boolean | null = null;
   for (const [index, segment] of segments.entries()) {
     const here = resolveUnion(root, current, value);
+    if (here === null) return null;
     const node = here.node;
     if (node.type === "array" && isObject(node.items)) {
       if (!/^\d+$/.test(segment)) return null;
@@ -203,8 +219,10 @@ export const schemaAt = (
       propertyVariants: end.propertyVariants,
       propertyRequired: end.propertyRequired,
     };
+  const resolved = resolveUnion(root, end.node, end.value);
+  if (resolved === null) return null;
   return {
-    ...resolveUnion(root, end.node, end.value),
+    ...resolved,
     propertyRequired: end.propertyRequired,
   };
 };
@@ -231,6 +249,7 @@ export const discriminatorAt = (
   const end = walk(root, pointer, tree);
   if (end === null) return null;
   const base = unwrapNullable(root, end.node);
+  if (base === null) return null;
   if (!Array.isArray(base.node.oneOf)) return null;
   const discriminator = isObject(base.node.discriminator)
     ? base.node.discriminator
@@ -242,6 +261,7 @@ export const discriminatorAt = (
     .filter(isObject)
     .map((member) => {
       const branch = resolveRef(root, member);
+      if (branch === null) return null;
       const properties = isObject(branch.properties) ? branch.properties : {};
       const discriminatorProperty = isObject(properties[propertyName])
         ? properties[propertyName]
@@ -272,13 +292,20 @@ const collectProperties = (
     const required = Array.isArray(node.required) ? node.required : [];
     return Object.entries(properties)
       .filter((entry): entry is [string, JsonSchema] => isObject(entry[1]))
-      .map(([name, schema]) => ({
-        name,
-        schema,
-        required: required.includes(name),
-        branch,
-        variants: null,
-      }));
+      .flatMap(([name, schema]) => {
+        const resolvedSchema = resolveRef(root, schema);
+        return resolvedSchema === null
+          ? []
+          : [
+              {
+                name,
+                schema,
+                required: required.includes(name),
+                branch,
+                variants: null,
+              },
+            ];
+      });
   };
   if (resolved.branches === null) return fromNode(resolved.node, null);
   const seen = new Map<
@@ -289,7 +316,7 @@ const collectProperties = (
     }
   >();
   for (const branch of resolved.branches) {
-    for (const option of fromNode(resolveRef(root, branch.node), branch.kind)) {
+    for (const option of fromNode(branch.node, branch.kind)) {
       const existing = seen.get(option.name);
       const variant = {
         branch: branch.kind,
@@ -300,9 +327,15 @@ const collectProperties = (
       else seen.set(option.name, { name: option.name, variants: [variant] });
     }
   }
-  const sameSchema = (left: JsonSchema, right: JsonSchema): boolean =>
-    JSON.stringify(resolveRef(root, left)) ===
-    JSON.stringify(resolveRef(root, right));
+  const sameSchema = (left: JsonSchema, right: JsonSchema): boolean => {
+    const resolvedLeft = resolveRef(root, left);
+    const resolvedRight = resolveRef(root, right);
+    return (
+      resolvedLeft !== null &&
+      resolvedRight !== null &&
+      JSON.stringify(resolvedLeft) === JSON.stringify(resolvedRight)
+    );
+  };
   // A property is branch-independent only when every branch declares the same schema and
   // requiredness. Keeping the first schema for any other case would fabricate a contract.
   const total = resolved.branches.length;

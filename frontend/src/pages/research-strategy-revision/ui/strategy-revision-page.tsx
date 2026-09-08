@@ -16,7 +16,9 @@ import {
   StrategyDiffPanel,
   StrategyOutline,
   PROJECTION_VIEWS,
+  canValidateDocument,
   currentDiagnostics,
+  currentSpec,
   projectStrategySpec,
   revisionDraftId,
   saveStatusText,
@@ -34,6 +36,10 @@ import {
   type DocumentSource,
   type StrategyView,
 } from "../../../features/edit-strategy";
+import {
+  BacktestRunSettings,
+  useBacktestRunSettings,
+} from "../../../features/run-backtest";
 import { t } from "../../../shared/config";
 import { useNavigate, useParams, useSearch } from "../../../shared/lib/router";
 import { Badge, type CodeEditorHandle } from "../../../shared/ui";
@@ -92,11 +98,26 @@ export const StrategyRevisionPage = () => {
     schemaPending: assist.loading,
   });
   const { validateNow, validating } = useCompileDocument(document, dispatch);
+  const canValidate = !validating && canValidateDocument(document);
   const autosave = useAutosave(document, dispatch, {
     schemaVersion: assist.schemaVersion,
   });
   const executionPlans = useExecutionPlans(document, assist.inspectorSource);
-  const backtest = useRunBacktest(document, executionPlans);
+  const executableSpec = currentSpec(document);
+  const runDateRange = useMemo(
+    () =>
+      executableSpec === null
+        ? null
+        : { start: executableSpec.data.start, end: executableSpec.data.end },
+    [executableSpec],
+  );
+  const runSettings = useBacktestRunSettings(runDateRange);
+  const backtest = useRunBacktest(
+    document,
+    executionPlans,
+    runSettings.requestOptions,
+  );
+  const startBacktest = backtest.run;
   const current =
     document.compiled !== null &&
     document.compiledVersion === document.sourceVersion
@@ -110,6 +131,14 @@ export const StrategyRevisionPage = () => {
   const requested: StrategyView = search.view ?? stored.format;
   const implemented = availableViews.includes(requested);
   const view: StrategyView = implemented ? requested : stored.format;
+  // Include route params as well as the validated search generation; the debug feature only
+  // compares this opaque lease and never interprets router state.
+  const debuggerPublicationOwner = JSON.stringify([
+    ROUTE,
+    strategyId,
+    revision,
+    search,
+  ]);
   const selectPointer = useCallback(
     (
       path: string | undefined,
@@ -148,6 +177,14 @@ export const StrategyRevisionPage = () => {
       onSnippetEditorReady(editor);
     },
     [onOutlineEditorReady, onSnippetEditorReady],
+  );
+  const runBacktest = useCallback(() => void startBacktest(), [startBacktest]);
+  const selectSymbol = useCallback(
+    (pointer: string): void => {
+      outline.requestSourceReveal(pointer);
+      selectPointer(pointer, "outline");
+    },
+    [outline, selectPointer],
   );
 
   // A save can complete while the user is still typing. Keep that newer text on the current
@@ -209,8 +246,14 @@ export const StrategyRevisionPage = () => {
           specHash: current?.specHash ?? null,
         }}
         saveStatus={saveStatusText(document, status)}
-        onRunBacktest={() => void backtest.run()}
+        onRunBacktest={runBacktest}
         runDisabled={!backtest.canRun}
+        onValidate={validateNow}
+        validateDisabled={!canValidate}
+        onSave={save}
+        saveDisabled={!canSave}
+        symbols={outline.symbols}
+        onSelectSymbol={selectSymbol}
         saveTone={saveStatusTone(document, status)}
         view={view}
         sourceView={stored.format}
@@ -230,11 +273,24 @@ export const StrategyRevisionPage = () => {
           <DocumentToolbar
             state={document}
             onValidate={validateNow}
+            canValidate={canValidate}
             validating={validating}
             onSave={save}
             canSave={canSave}
             saving={status.kind === "saving"}
-            onRun={() => void backtest.run()}
+            onRun={runBacktest}
+            canRun={backtest.canRun}
+            runBlockedReason={
+              runSettings.result.valid
+                ? undefined
+                : t("backtest.settings.blocked")
+            }
+            runSettings={
+              <BacktestRunSettings
+                controller={runSettings}
+                disabled={backtest.status.kind === "starting"}
+              />
+            }
             decision={backtest.decision}
             runStatus={backtest.status}
           />
@@ -311,6 +367,7 @@ export const StrategyRevisionPage = () => {
           <StrategyDebuggerPanel
             document={document}
             executionPlans={executionPlans}
+            publicationOwnerKey={debuggerPublicationOwner}
             asOf={search.asOf}
             security={search.security}
             selectedPointer={search.path}

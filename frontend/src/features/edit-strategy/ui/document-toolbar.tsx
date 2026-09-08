@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import { t } from "../../../shared/config";
 import { Badge, Button, Tooltip } from "../../../shared/ui";
 import type { BacktestSourceDecision } from "../model/backtest-source";
@@ -8,11 +10,15 @@ import "./document-toolbar.css";
 type DocumentToolbarProps = {
   state: DocumentState;
   onValidate: () => void;
+  canValidate: boolean;
   validating: boolean;
   onSave: () => void;
   canSave: boolean;
   saving: boolean;
   onRun: () => void;
+  canRun: boolean;
+  runBlockedReason?: string;
+  runSettings?: ReactNode;
   decision: BacktestSourceDecision;
   runStatus: RunBacktestStatus;
 };
@@ -42,11 +48,15 @@ const decisionLabel = (decision: BacktestSourceDecision): string => {
 export const DocumentToolbar = ({
   state,
   onValidate,
+  canValidate,
   validating,
   onSave,
   canSave,
   saving,
   onRun,
+  canRun,
+  runBlockedReason,
+  runSettings,
   decision,
   runStatus,
 }: DocumentToolbarProps) => {
@@ -87,13 +97,13 @@ export const DocumentToolbar = ({
         </div>
       </dl>
       <div className="doc-toolbar__actions">
+        {runSettings}
         <Button
           size="small"
           onClick={onValidate}
-          disabled={
-            validating || state.composing || state.parse?.status !== "ok"
-          }
+          disabled={!canValidate}
           aria-busy={validating || undefined}
+          aria-keyshortcuts="Control+Enter Meta+Enter"
         >
           {t("toolbar.validate")}
         </Button>
@@ -103,17 +113,17 @@ export const DocumentToolbar = ({
           onClick={onSave}
           disabled={!canSave}
           aria-busy={saving || undefined}
+          aria-keyshortcuts="Control+S Meta+S"
         >
           {t("toolbar.saveRevision")}
         </Button>
-        <Tooltip content={decisionLabel(decision)}>
+        <Tooltip content={runBlockedReason ?? decisionLabel(decision)}>
           <Button
             size="small"
             onClick={onRun}
-            disabled={
-              decision.kind === "blocked" || runStatus.kind === "starting"
-            }
+            disabled={!canRun || runStatus.kind === "starting"}
             aria-busy={runStatus.kind === "starting" || undefined}
+            aria-keyshortcuts="Control+Shift+Enter Meta+Shift+Enter"
           >
             {runStatus.kind === "accepted"
               ? t("toolbar.run.open")

@@ -15,3 +15,7 @@ class ArtifactCommit:
 
 class BacktestArtifactStorePort(Protocol):
     def commit(self, result: BacktestRunResult) -> ArtifactCommit: ...
+
+    def discard(self, run_id: str) -> None:
+        """Remove a committed bundle that must not become visible to run consumers."""
+        ...

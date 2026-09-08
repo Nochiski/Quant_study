@@ -129,6 +129,7 @@ backend/
 ```powershell
 cd backend
 uv sync --extra parquet
+uv run maturin develop --manifest-path rust/backtest_core/Cargo.toml --release
 uv run pytest -q
 uv run ruff check src tests examples scripts
 uv run pyright
@@ -138,7 +139,9 @@ uv run python scripts/export_openapi.py openapi.json
 
 `uv run server`의 전략 revision 저장소는 기본적으로 `.local/strategy-revisions.sqlite3`이며
 프로세스를 재시작해도 원문·hash·provenance를 복원한다. 배포별 저장 위치는
-`STRATEGY_WORKBENCH_DB_PATH` 환경 변수로 지정할 수 있다.
+`STRATEGY_WORKBENCH_DB_PATH` 환경 변수로 지정할 수 있다. 기본 Workbench run은 `rust` core를
+선택하므로 실제 백테스트와 browser E2E 전에는 위 확장을 설치한다. 확장이 없을 때는 성능·실행
+의미를 숨기는 Python fallback 대신 `CoreUnavailable`로 실패한다.
 
 Equity mock HTTP 계약은 다음 세 경로로 분리한다.
 

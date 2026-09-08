@@ -27,8 +27,8 @@ app -> pages -> widgets -> features -> entities -> shared
 ## 이름과 owner
 
 - entity는 명사형: `strategy`, `factor`, `experiment`, `metric`, `dataset`.
-- feature는 동사형: `edit-strategy`, `configure-search`, `run-backtest`,
-  `compare-candidates`, `inspect-run`.
+- feature는 동사형: `edit-strategy`, `debug-strategy`, `compare-candidates`,
+  `inspect-run`.
 - `form.ts`, `use-data.ts`, `manager.ts`처럼 slice를 떼면 의미가 사라지는 이름은 금지한다.
 - `shared`나 범용 app/widget에 특정 팩터·전략·실험 분기를 두지 않는다. 그 도메인이 사라질
   때 함께 지울 코드라면 owner slice로 내린다.

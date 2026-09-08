@@ -6,6 +6,55 @@
 (`backend/reference/`의 학습 노트)에서 고정한 전략 I/O 계약을 backend의
 `backtest_engine` 패키지로 구현한다.
 
+> 처음 사용하는 경우 [Strategy Workbench 사용자 매뉴얼](docs/manual/strategy-workbench/README.md)에서
+> 실제 화면을 따라 샘플 전략 작성, 오류 수정, 리비전 저장, 중간 결과 추적, 백테스트까지 진행할 수 있다.
+
+## 바로 실행
+
+Python 3.11 이상, uv, Node.js 22.18 이상이 필요하다. 저장소 루트에서 frontend 의존성을 설치하고
+터미널 두 개로 서버를 실행한다.
+
+```powershell
+npm ci --prefix frontend
+```
+
+```powershell
+# 터미널 1 · FastAPI backend
+uv run server
+```
+
+```powershell
+# 터미널 2 · Vite frontend
+npm run dev
+```
+
+브라우저에서 <http://localhost:5173/>을 연다. backend health endpoint는
+<http://127.0.0.1:8000/api/v1/health>다. 기본 Rust core를 쓰려면 먼저 `backend`에서 다음 확장을
+설치한다. 설치하지 않은 경우 실행 설정에서 `Python reference`를 선택할 수 있다.
+
+```powershell
+cd backend
+uv sync
+uv run maturin develop --manifest-path rust/backtest_core/Cargo.toml --release
+```
+
+## 현재 제품 범위
+
+| 영역                                                        | 상태                                                             |
+| ----------------------------------------------------------- | ---------------------------------------------------------------- |
+| verbose YAML 작성, schema/semantic 검증, Contract Inspector | 구현 완료                                                        |
+| immutable 리비전 저장, 기존 전략 편집, 원문·의미 Diff       | 구현 완료                                                        |
+| 팩터 그래프, TargetTape와 노드별 중간 결과 추적             | 구현 완료                                                        |
+| Python reference·Persistent Rust 백테스트와 전문 결과 화면  | 구현 완료                                                        |
+| 전략·리비전·백테스트 이력과 실행 provenance                 | 구현 완료                                                        |
+| 실제 시장 DB                                                | 기본은 PIT mock adapter이며 실제 DB outbound adapter는 후속 연결 |
+| 배포·실시간·주문·운영 리스크                                | 자동매매 확장을 위한 `향후` 경계이며 아직 실제 주문 기능이 아님  |
+
+YAML 원문은 authoring source, backend의 typed `StrategySpec`은 실행 의미의 단일 정본이다.
+JSON/Form/Graph/Diff는 같은 compile 결과의 read-only projection이며 frontend가 전략 의미나
+`spec_hash`를 별도로 계산하지 않는다. 실제 배포는 편집 중 draft가 아닌
+`strategy_id + revision + spec_hash` 참조만 허용하는 방향으로 확장한다.
+
 ## 구조
 
 ```
@@ -26,10 +75,11 @@ workspace/         # 개인 작업 공간 workspace/<이름>/ — docs·src 추�
 
 Strategy Workbench의 전체 계획과 체크리스트는
 [Strategy Workbench 구현 로드맵](docs/superpowers/specs/2026-09-03-strategy-workbench-roadmap.md)에 있다.
-전략 authoring은 verbose YAML/JSON source로 전환 중이며 계약은
+YAML-first authoring 전환은 완료됐으며 계약은
 [Strategy Authoring Contract ADR](docs/superpowers/specs/2026-09-04-strategy-authoring-contract-adr.md),
 PR 진행은 [docs/planning/strategy-workbench-yaml-ui/PLAN.md](docs/planning/strategy-workbench-yaml-ui/PLAN.md)가
-추적한다. 기존 Quick/Advanced no-code 편집기는 migration 기간 legacy route로 유지된다.
+완료 상태를 추적한다. 전략 작성 화면의 YAML source와 JSON/Form/Graph/Diff projection은 같은
+StrategySpec 계약을 사용한다. Parameter Search는 이 route 위에 연결할 후속 milestone이다.
 Equity DB 계약이 확정되기 전에는 `backend`의 PIT mock adapter가 기준 구현이며, 실제 DB는 같은
 application port를 구현하는 outbound adapter로 교체한다.
 
@@ -62,7 +112,7 @@ Requirements → Capability 검증 → StrategyEvent + 읽기 전용 Context
   택한다. Python 호출은 종목별 Bar가 아니라 시점별 Snapshot과 Action 배치 단위로 한다.
 - 검증은 단위, 손계산 골든, Zipline 대조, 회귀, 계약, 상태 전이 테스트로 나눈다.
 
-## 현재 브랜치 구현 범위
+## 현재 구현 범위
 
 - 로드맵 3단계(`NoAction`, `SetPortfolioTarget`, `LiquidatePosition`)에 더해 4단계
   주문 생명주기를 구현했다 (`docs/superpowers/specs/2026-08-29-order-lifecycle-step4-design.md`):
@@ -70,9 +120,8 @@ Requirements → Capability 검증 → StrategyEvent + 읽기 전용 Context
   - 4b `SubmitOrder`로 MARKET/LIMIT/STOP/STOP_LIMIT, DAY/GTC — 일봉 OHLC 기반 체결 규칙
   - 4c `CancelOrder`/`ReplaceOrder`, `ctx.open_orders()`, 전략에 FILL/ORDER_UPDATE 전달
   - 4d 거래량 참여율 부분체결, IOC/FOK, 슬리피지 포트(`NoSlippage`/`FixedBps`/`VolumeShare`)
-  남은 `NOT_IMPLEMENTED`는 5단계(Basket, 공매도, MARGIN)뿐이며
-  `reference_engine_capabilities()`에 명시된다. LIMIT/STOP·IOC/FOK·`max_participation`은
-  해당 `EngineFeature`를 `requirements()`에 선언한 전략만 쓸 수 있다.
+    LIMIT/STOP·IOC/FOK·`max_participation`은
+    해당 `EngineFeature`를 `requirements()`에 선언한 전략만 쓸 수 있다.
 - 엔진 내부는 `(ts, priority, seq)`로 정렬되는 이벤트 큐 하나로 흐른다:
   `MARKET(대기 주문 체결) → FILL(포트폴리오 반영) → NOTIFY(전략 알림) → SESSION_CLOSE(평가·전략 호출) → ORDER(주문 등록)`.
   T 종가 판단은 T+1 세션부터 체결된다. 주문 생성은 현금·보유를 바꾸지 않고,
@@ -115,7 +164,7 @@ uv run pyright
 uv run python examples/run_demo.py      # PyKRX CSV(005930)로 골든크로스 백테스트
 uv run python examples/run_krx_demo.py  # KRX 원장 parquet 슬라이스로 동일 전략 실행
 uv run python examples/run_krx_demo.py <원장 디렉토리>   # quant-data 빌드 전체 대상
-uv run maturin develop --manifest-path rust/backtest_core/Cargo.toml --release  # Rust 코어(선택)
+uv run maturin develop --manifest-path rust/backtest_core/Cargo.toml --release  # 기본 Workbench 백테스트에 필요
 uv run python examples/run_krx_demo.py --core rust      # Rust 코어로 같은 데모
 ```
 
@@ -135,7 +184,13 @@ npm run dev
 그대로 전달된다(예: `uv run server --port 8123`). 기존처럼 `backend`와 `frontend`
 디렉터리 안에서 각각 실행해도 같은 owner의 설정을 사용한다. 서버가 저장한 전략 revision은
 기본적으로 `backend/.local/strategy-revisions.sqlite3`에 유지된다. 다른 위치가 필요하면 서버
-시작 전에 `STRATEGY_WORKBENCH_DB_PATH`를 설정한다.
+시작 전에 `STRATEGY_WORKBENCH_DB_PATH`를 설정한다. 서버 자체는 Rust 확장 없이도 시작하지만,
+기본 `rust` core 백테스트는 위 `maturin develop` 설치가 없으면 명시적인 `CoreUnavailable`로
+실패하며 Python core로 조용히 대체하지 않는다.
+
+화면별 사용법과 오류 복구는 [사용자 매뉴얼](docs/manual/strategy-workbench/README.md)에 있다.
+매뉴얼 스크린샷은 두 서버를 격리 DB로 실행한 뒤 `frontend`에서
+`npm run docs:capture`로 실제 브라우저 시나리오를 다시 실행해 갱신한다.
 
 ## 검증: Zipline 대조
 
@@ -164,18 +219,20 @@ npm run dev
 
 ## 코딩 규칙
 
-`.claude/rules/` 에 정리되어 있다.
+`CLAUDE.md`, `AGENTS.md`와 `.claude/rules/`에 정리되어 있다. 코드 주석과 GitHub Issue·PR의
+제목, 본문, 댓글, 리뷰는 한글로 작성하며 세부 예외는 `collaboration-language.md`만 정본으로 삼는다.
 
-| 파일 | 범위 | 내용 |
-|---|---|---|
-| `code-style.md` | `**/*.py` | 기존 헬퍼 재사용, 기능/정리 커밋 분리, ruff·pyright 게이트, 네이밍 |
-| `python.md` | `**/*.py` | 성공/실패는 튜플 대신 Result 값 타입으로 |
-| `error-messages.md` | `**/*.py` | 예외·로그에 재현 가능한 컨텍스트 포함 |
-| `testing.md` | `backend/tests/`, `backend/scripts/` | 산출물 파일 존재/내용을 단언하는 테스트 금지 |
-| `pr-review.md` | 전체 | PR 본문 양식, 결함 보고 4요소 |
-| `backend-package-boundary.md` | `backend/**/*.py` | 헥사고날 방향, facade, `DEPENDS_ON`, mock adapter 경계 |
-| `strategy-workbench-sot.md` | `backend/`, `frontend/` | 전략·팩터·지표·상태의 단일 owner |
-| `frontend-fsd.md` | `frontend/src/` | FSD 단방향, slice 격리, public API |
-| `frontend-api-state.md` | frontend API/state | 생성 SDK, 서버·draft·UI 상태 소유권 |
-| `frontend-ui-quality.md` | frontend UI | primitive, token, 접근성, i18n, raw metric |
-| `frontend-testing.md` | frontend test/e2e | 사용자 동작·wire 경계 테스트 |
+| 파일                          | 범위                                 | 내용                                                               |
+| ----------------------------- | ------------------------------------ | ------------------------------------------------------------------ |
+| `code-style.md`               | `**/*.py`                            | 기존 헬퍼 재사용, 기능/정리 커밋 분리, ruff·pyright 게이트, 네이밍 |
+| `python.md`                   | `**/*.py`                            | 성공/실패는 튜플 대신 Result 값 타입으로                           |
+| `error-messages.md`           | `**/*.py`                            | 예외·로그에 재현 가능한 컨텍스트 포함                              |
+| `testing.md`                  | `backend/tests/`, `backend/scripts/` | 산출물 파일 존재/내용을 단언하는 테스트 금지                       |
+| `pr-review.md`                | 전체                                 | PR 본문 양식, 결함 보고 4요소                                      |
+| `collaboration-language.md`   | 전체                                 | 코드 주석·Issue·PR 한글 작성 규칙의 단일 정본                      |
+| `backend-package-boundary.md` | `backend/**/*.py`                    | 헥사고날 방향, facade, `DEPENDS_ON`, mock adapter 경계             |
+| `strategy-workbench-sot.md`   | `backend/`, `frontend/`              | 전략·팩터·지표·상태의 단일 owner                                   |
+| `frontend-fsd.md`             | `frontend/src/`                      | FSD 단방향, slice 격리, public API                                 |
+| `frontend-api-state.md`       | frontend API/state                   | 생성 SDK, 서버·draft·UI 상태 소유권                                |
+| `frontend-ui-quality.md`      | frontend UI                          | primitive, token, 접근성, i18n, raw metric                         |
+| `frontend-testing.md`         | frontend test/e2e                    | 사용자 동작·wire 경계 테스트                                       |

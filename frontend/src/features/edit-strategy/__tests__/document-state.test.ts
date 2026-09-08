@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { parseSource } from "../../../shared/lib/yaml12";
 import {
+  canValidateDocument,
   currentDiagnostics,
   currentCompile,
   currentSpec,
@@ -55,6 +56,7 @@ describe("document state machine", () => {
     state = run(state, { type: "edit", source: "title: a\n" });
     expect(state.phase).toBe("parsing");
     expect(shouldParse(state)).toBe(true);
+    expect(canValidateDocument(state)).toBe(false);
     expect(state.dirty).toBe(true);
 
     state = run(state, {
@@ -65,6 +67,7 @@ describe("document state machine", () => {
     expect(state.phase).toBe("structurally-valid");
     expect(shouldParse(state)).toBe(false);
     expect(shouldCompile(state)).toBe(true);
+    expect(canValidateDocument(state)).toBe(true);
 
     state = run(state, {
       type: "compiled",
@@ -349,6 +352,7 @@ describe("document state machine", () => {
     state = run(state, { type: "edit", source: "title: 한\n" });
     expect(state.phase).toBe("editing");
     expect(shouldParse(state)).toBe(false);
+    expect(canValidateDocument(state)).toBe(false);
     state = run(state, { type: "composing", composing: false });
     expect(state.phase).toBe("parsing");
     expect(shouldParse(state)).toBe(true);

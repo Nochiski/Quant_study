@@ -1,4 +1,3 @@
-/* App-level stylesheet: tokens first, then base rules, then legacy builder styles. */
+/* App-level stylesheet: semantic tokens first, then shared base rules. */
 @import "./tokens.css";
 @import "./base.css";
-@import "./legacy-builder.css";

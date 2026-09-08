@@ -401,6 +401,25 @@ describe("schema-driven completion", () => {
       ),
     ).toBeNull();
   });
+
+  it("does not offer a key whose schema reference is cyclic", async () => {
+    const schema: JsonSchema = {
+      type: "object",
+      properties: { unsafe: { $ref: "#/$defs/A" } },
+      $defs: {
+        A: { $ref: "#/$defs/B" },
+        B: { $ref: "#/$defs/A" },
+      },
+    };
+    const text = "uns";
+    const result = await buildCompletionSource(deps(stateFor(text), schema))({
+      text,
+      offset: text.length,
+      explicit: true,
+    });
+
+    expect(result).toBeNull();
+  });
 });
 
 describe("schema-driven hover", () => {
@@ -480,5 +499,19 @@ describe("schema-driven hover", () => {
     const state = stateFor(YAML);
     const stale = { ...state, sourceVersion: state.sourceVersion + 1 };
     expect(buildHoverSource(deps(stale))(offsetOf(YAML, "  gross"))).toBeNull();
+  });
+
+  it("does not describe a field whose schema reference is cyclic", () => {
+    const schema: JsonSchema = {
+      type: "object",
+      properties: { unsafe: { $ref: "#/$defs/Loop" } },
+      $defs: { Loop: { $ref: "#/$defs/Loop" } },
+    };
+
+    expect(
+      describePointer(deps(stateFor(YAML), schema), "/unsafe", {
+        unsafe: "value",
+      }),
+    ).toBeNull();
   });
 });

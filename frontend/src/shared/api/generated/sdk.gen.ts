@@ -27,6 +27,9 @@ import type {
   ExplainStrategyData,
   ExplainStrategyErrors,
   ExplainStrategyResponses,
+  GetBacktestRequestData,
+  GetBacktestRequestErrors,
+  GetBacktestRequestResponses,
   GetBacktestResultData,
   GetBacktestResultErrors,
   GetBacktestResultResponses,
@@ -58,6 +61,12 @@ import type {
   GetStrategyResponses,
   GetStrategyTemplateData,
   GetStrategyTemplateResponses,
+  ListBacktestsData,
+  ListBacktestsErrors,
+  ListBacktestsResponses,
+  ListStrategiesData,
+  ListStrategiesErrors,
+  ListStrategiesResponses,
   ListStrategyRevisionsData,
   ListStrategyRevisionsErrors,
   ListStrategyRevisionsResponses,
@@ -121,6 +130,18 @@ export type Options<
 };
 
 /**
+ * List Backtests
+ */
+export const listBacktests = <ThrowOnError extends boolean = false>(
+  options?: Options<ListBacktestsData, ThrowOnError>,
+) =>
+  (options?.client ?? client).get<
+    ListBacktestsResponses,
+    ListBacktestsErrors,
+    ThrowOnError
+  >({ url: "/api/v1/backtests", ...options });
+
+/**
  * Start Backtest
  */
 export const startBacktest = <ThrowOnError extends boolean = false>(
@@ -174,6 +195,20 @@ export const streamBacktestEvents = <ThrowOnError extends boolean = false>(
     StreamBacktestEventsErrors,
     ThrowOnError
   >({ url: "/api/v1/backtests/{run_id}/events", ...options });
+
+/**
+ * Get Backtest Request
+ *
+ * Expose the server-owned accepted assumptions for audit and exact reruns.
+ */
+export const getBacktestRequest = <ThrowOnError extends boolean = false>(
+  options: Options<GetBacktestRequestData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetBacktestRequestResponses,
+    GetBacktestRequestErrors,
+    ThrowOnError
+  >({ url: "/api/v1/backtests/{run_id}/request", ...options });
 
 /**
  * Get Backtest Result
@@ -354,6 +389,20 @@ export const previewPortfolio = <ThrowOnError extends boolean = false>(
       ...options.headers,
     },
   });
+
+/**
+ * List Strategies
+ *
+ * Latest immutable revision of every strategy, ordered by strategy id.
+ */
+export const listStrategies = <ThrowOnError extends boolean = false>(
+  options?: Options<ListStrategiesData, ThrowOnError>,
+) =>
+  (options?.client ?? client).get<
+    ListStrategiesResponses,
+    ListStrategiesErrors,
+    ThrowOnError
+  >({ url: "/api/v1/strategies", ...options });
 
 /**
  * Create Strategy

@@ -1,6 +1,27 @@
-import { queryOptions } from "@tanstack/react-query";
+import { queryOptions, type QueryClient } from "@tanstack/react-query";
 
 import { strategyWorkbenchApi } from "../../../shared/api";
+
+export const strategiesKey = () => ["strategies"] as const;
+
+/**
+ * Every successful strategy save changes list membership or its latest-revision projection.
+ * Cancel before removal so an older in-flight page cannot restore stale list state later.
+ */
+export const retireStrategyListQueries = async (
+  queryClient: QueryClient,
+): Promise<void> => {
+  await queryClient.cancelQueries({ queryKey: strategiesKey() });
+  queryClient.removeQueries({ queryKey: strategiesKey() });
+};
+
+export const strategiesQuery = (
+  page: { offset?: number; limit?: number } = {},
+) =>
+  queryOptions({
+    queryKey: [...strategiesKey(), page.offset ?? 0, page.limit ?? 50],
+    queryFn: () => strategyWorkbenchApi.listStrategies(page),
+  });
 
 /** A saved revision's exact document is immutable, so it never goes stale once loaded. */
 export const strategyDocumentQuery = (strategyId: string, revision: number) =>

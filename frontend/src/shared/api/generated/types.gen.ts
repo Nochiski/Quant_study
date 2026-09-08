@@ -5,6 +5,27 @@ export type ClientOptions = {
 };
 
 /**
+ * BacktestResultNotReadyDetail
+ */
+export type BacktestResultNotReadyDetail = {
+  /**
+   * Code
+   */
+  code: "backtest.result.not_ready";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * BacktestResultNotReadyResponse
+ */
+export type BacktestResultNotReadyResponse = {
+  detail: BacktestResultNotReadyDetail;
+};
+
+/**
  * BacktestRunInvalidDetail
  */
 export type BacktestRunInvalidDetail = {
@@ -16,6 +37,27 @@ export type BacktestRunInvalidDetail = {
    * Message
    */
   message: string;
+};
+
+/**
+ * BacktestRunNotFoundDetail
+ */
+export type BacktestRunNotFoundDetail = {
+  /**
+   * Code
+   */
+  code: "backtest.run.not_found";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * BacktestRunNotFoundResponse
+ */
+export type BacktestRunNotFoundResponse = {
+  detail: BacktestRunNotFoundDetail;
 };
 
 /**
@@ -112,6 +154,16 @@ export type BacktestRunState = {
    * Updated At
    */
   updated_at: string;
+};
+
+/**
+ * BacktestRunSummary
+ *
+ * One process-lifetime run and the strategy meaning resolved before it started.
+ */
+export type BacktestRunSummary = {
+  run: BacktestRunState;
+  strategy_provenance: StrategyProvenance;
 };
 
 /**
@@ -1814,11 +1866,55 @@ export type OrderStyle = "market";
 /**
  * Page
  */
+export type PageBacktestRunSummary = {
+  /**
+   * Items
+   */
+  items: Array<BacktestRunSummary>;
+  /**
+   * Limit
+   */
+  limit: number;
+  /**
+   * Offset
+   */
+  offset: number;
+  /**
+   * Total
+   */
+  total: number;
+};
+
+/**
+ * Page
+ */
 export type PageRevisionSummary = {
   /**
    * Items
    */
   items: Array<RevisionSummary>;
+  /**
+   * Limit
+   */
+  limit: number;
+  /**
+   * Offset
+   */
+  offset: number;
+  /**
+   * Total
+   */
+  total: number;
+};
+
+/**
+ * Page
+ */
+export type PageStrategySummary = {
+  /**
+   * Items
+   */
+  items: Array<StrategySummary>;
   /**
    * Limit
    */
@@ -3440,6 +3536,32 @@ export type StrategySpec = {
 };
 
 /**
+ * StrategySummary
+ */
+export type StrategySummary = {
+  /**
+   * Latest Revision
+   */
+  latest_revision: number;
+  /**
+   * Spec Hash
+   */
+  spec_hash: string;
+  /**
+   * Strategy Id
+   */
+  strategy_id: string;
+  /**
+   * Title
+   */
+  title: string;
+  /**
+   * Updated At
+   */
+  updated_at: string;
+};
+
+/**
  * StrategyTargetTrace
  */
 export type StrategyTargetTrace = {
@@ -4095,6 +4217,45 @@ export type WarningSeverity = "info" | "warning";
  */
 export type WeightingMethod = "equal" | "factor_score" | "rank" | "risk";
 
+export type ListBacktestsData = {
+  body?: never;
+  path?: never;
+  query?: {
+    /**
+     * Offset
+     */
+    offset?: number;
+    /**
+     * Limit
+     */
+    limit?: number;
+    /**
+     * Strategy Id
+     */
+    strategy_id?: string | null;
+  };
+  url: "/api/v1/backtests";
+};
+
+export type ListBacktestsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ListBacktestsError = ListBacktestsErrors[keyof ListBacktestsErrors];
+
+export type ListBacktestsResponses = {
+  /**
+   * Successful Response
+   */
+  200: PageBacktestRunSummary;
+};
+
+export type ListBacktestsResponse =
+  ListBacktestsResponses[keyof ListBacktestsResponses];
+
 export type StartBacktestData = {
   body: BacktestRunSpec;
   path?: never;
@@ -4145,6 +4306,10 @@ export type GetBacktestStatusData = {
 
 export type GetBacktestStatusErrors = {
   /**
+   * The process-lifetime backtest run does not exist
+   */
+  404: BacktestRunNotFoundResponse;
+  /**
    * Validation Error
    */
   422: HttpValidationError;
@@ -4176,6 +4341,10 @@ export type CancelBacktestData = {
 };
 
 export type CancelBacktestErrors = {
+  /**
+   * The process-lifetime backtest run does not exist
+   */
+  404: BacktestRunNotFoundResponse;
   /**
    * Validation Error
    */
@@ -4214,6 +4383,10 @@ export type StreamBacktestEventsData = {
 
 export type StreamBacktestEventsErrors = {
   /**
+   * The process-lifetime backtest run does not exist
+   */
+  404: BacktestRunNotFoundResponse;
+  /**
    * Validation Error
    */
   422: HttpValidationError;
@@ -4229,6 +4402,42 @@ export type StreamBacktestEventsResponses = {
   200: unknown;
 };
 
+export type GetBacktestRequestData = {
+  body?: never;
+  path: {
+    /**
+     * Run Id
+     */
+    run_id: string;
+  };
+  query?: never;
+  url: "/api/v1/backtests/{run_id}/request";
+};
+
+export type GetBacktestRequestErrors = {
+  /**
+   * The process-lifetime backtest run does not exist
+   */
+  404: BacktestRunNotFoundResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetBacktestRequestError =
+  GetBacktestRequestErrors[keyof GetBacktestRequestErrors];
+
+export type GetBacktestRequestResponses = {
+  /**
+   * Successful Response
+   */
+  200: BacktestRunSpec;
+};
+
+export type GetBacktestRequestResponse =
+  GetBacktestRequestResponses[keyof GetBacktestRequestResponses];
+
 export type GetBacktestResultData = {
   body?: never;
   path: {
@@ -4242,6 +4451,14 @@ export type GetBacktestResultData = {
 };
 
 export type GetBacktestResultErrors = {
+  /**
+   * The process-lifetime backtest run does not exist
+   */
+  404: BacktestRunNotFoundResponse;
+  /**
+   * The run has not completed with a result
+   */
+  409: BacktestResultNotReadyResponse;
   /**
    * Validation Error
    */
@@ -4576,6 +4793,42 @@ export type PreviewPortfolioResponses = {
 
 export type PreviewPortfolioResponse =
   PreviewPortfolioResponses[keyof PreviewPortfolioResponses];
+
+export type ListStrategiesData = {
+  body?: never;
+  path?: never;
+  query?: {
+    /**
+     * Offset
+     */
+    offset?: number;
+    /**
+     * Limit
+     */
+    limit?: number;
+  };
+  url: "/api/v1/strategies";
+};
+
+export type ListStrategiesErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ListStrategiesError =
+  ListStrategiesErrors[keyof ListStrategiesErrors];
+
+export type ListStrategiesResponses = {
+  /**
+   * Successful Response
+   */
+  200: PageStrategySummary;
+};
+
+export type ListStrategiesResponse =
+  ListStrategiesResponses[keyof ListStrategiesResponses];
 
 export type CreateStrategyData = {
   body: StrategySpec;

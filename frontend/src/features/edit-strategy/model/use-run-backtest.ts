@@ -1,6 +1,9 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { useStartBacktest } from "../../../entities/backtest";
+import {
+  useStartBacktest,
+  type BacktestRunSpec,
+} from "../../../entities/backtest";
 import { useNavigate, useRouter } from "../../../shared/lib/router";
 import {
   decideBacktestSource,
@@ -16,19 +19,23 @@ export type RunBacktestStatus =
   | { kind: "accepted"; runId: string }
   | { kind: "failed"; detail: string };
 
-type DocumentIdentity = Pick<DocumentState, "documentEpoch" | "sourceVersion">;
+export type BacktestRunOptions = Omit<
+  BacktestRunSpec,
+  "strategy" | "strategy_source"
+>;
 
-type RunSnapshot = DocumentIdentity & { pathname: string };
-type OwnedRunStatus = DocumentIdentity & { status: RunBacktestStatus };
+type DocumentIdentity = Pick<DocumentState, "documentEpoch" | "sourceVersion">;
+type RunOwner = DocumentIdentity & { optionsKey: string };
+
+type RunSnapshot = RunOwner & { pathname: string };
+type OwnedRunStatus = RunOwner & { status: RunBacktestStatus };
 
 const IDLE: RunBacktestStatus = { kind: "idle" };
 
-const sameDocument = (
-  left: DocumentIdentity,
-  right: DocumentIdentity,
-): boolean =>
+const sameOwner = (left: RunOwner, right: RunOwner): boolean =>
   left.documentEpoch === right.documentEpoch &&
-  left.sourceVersion === right.sourceVersion;
+  left.sourceVersion === right.sourceVersion &&
+  left.optionsKey === right.optionsKey;
 
 /**
  * Starts a backtest from the editor and moves to the run page (WORKFLOW P3-05). The request
@@ -39,22 +46,30 @@ const sameDocument = (
 export const useRunBacktest = (
   state: DocumentState,
   executionPlans: ExecutionPlansState,
+  options: BacktestRunOptions | null = {},
 ) => {
   const navigate = useNavigate();
   const router = useRouter();
   const start = useStartBacktest();
   const [ownedStatus, setOwnedStatus] = useState<OwnedRunStatus | null>(null);
-  const latestDocument = useRef<DocumentIdentity>({
-    documentEpoch: state.documentEpoch,
-    sourceVersion: state.sourceVersion,
-  });
-  const activeRequest = useRef<symbol | null>(null);
-  useLayoutEffect(() => {
-    latestDocument.current = {
+  const optionsKey = useMemo(() => JSON.stringify(options), [options]);
+  const currentOwner = useMemo<RunOwner>(
+    () => ({
       documentEpoch: state.documentEpoch,
       sourceVersion: state.sourceVersion,
+      optionsKey,
+    }),
+    [optionsKey, state.documentEpoch, state.sourceVersion],
+  );
+  const latestOwner = useRef<RunOwner>(currentOwner);
+  const activeRequest = useRef<symbol | null>(null);
+  useLayoutEffect(() => {
+    latestOwner.current = {
+      documentEpoch: state.documentEpoch,
+      sourceVersion: state.sourceVersion,
+      optionsKey,
     };
-  }, [state.documentEpoch, state.sourceVersion]);
+  }, [optionsKey, state.documentEpoch, state.sourceVersion]);
   const decision = useMemo(
     () =>
       gateBacktestSourceWithFactorPlans(
@@ -64,7 +79,7 @@ export const useRunBacktest = (
     [executionPlans, state],
   );
   const status =
-    ownedStatus !== null && sameDocument(ownedStatus, state)
+    ownedStatus !== null && sameOwner(ownedStatus, currentOwner)
       ? ownedStatus.status
       : IDLE;
 
@@ -79,6 +94,7 @@ export const useRunBacktest = (
     }
     if (
       decision.kind === "blocked" ||
+      options === null ||
       status.kind === "starting" ||
       isPending ||
       activeRequest.current !== null
@@ -87,6 +103,7 @@ export const useRunBacktest = (
     const snapshot: RunSnapshot = {
       documentEpoch: state.documentEpoch,
       sourceVersion: state.sourceVersion,
+      optionsKey,
       pathname: router.state.location.pathname,
     };
     const requestId = Symbol("backtest-request");
@@ -95,6 +112,7 @@ export const useRunBacktest = (
     let runId: string;
     try {
       const accepted = await mutateAsync({
+        ...options,
         strategy_source:
           decision.kind === "saved_revision"
             ? decision.reference
@@ -103,7 +121,7 @@ export const useRunBacktest = (
       runId = accepted.run.run_id;
     } catch (error) {
       if (
-        sameDocument(snapshot, latestDocument.current) &&
+        sameOwner(snapshot, latestOwner.current) &&
         router.state.location.pathname === snapshot.pathname
       ) {
         setOwnedStatus({
@@ -121,7 +139,7 @@ export const useRunBacktest = (
     // The request belongs to the exact text and route that submitted it. A response arriving
     // after an edit or route change must not replace the user's newer screen or its status.
     if (
-      !sameDocument(snapshot, latestDocument.current) ||
+      !sameOwner(snapshot, latestOwner.current) ||
       router.state.location.pathname !== snapshot.pathname
     )
       return;
@@ -136,7 +154,17 @@ export const useRunBacktest = (
       to: "/research/backtests/$runId",
       params: { runId },
     });
-  }, [decision, isPending, mutateAsync, navigate, router, state, status]);
+  }, [
+    decision,
+    isPending,
+    mutateAsync,
+    navigate,
+    options,
+    optionsKey,
+    router,
+    state,
+    status,
+  ]);
 
   return {
     run,
@@ -144,6 +172,7 @@ export const useRunBacktest = (
     status,
     canRun:
       (status.kind === "accepted" || decision.kind !== "blocked") &&
+      options !== null &&
       status.kind !== "starting" &&
       !isPending,
   };

@@ -222,6 +222,8 @@ backend/rust/backtest_core/target/
 backend/rust/backtest_core/uv.lock
 frontend/node_modules/
 frontend/openapi-ts-error-*.log
+frontend/playwright-report/
+frontend/test-results/
 bash.exe.stackdump
 
 # ── 프로젝트 전용 ───────────────────────────────────────────

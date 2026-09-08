@@ -1,0 +1,80 @@
+.backtest-settings {
+  position: relative;
+}
+
+.backtest-settings > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 32px;
+  padding: 0 var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+  cursor: pointer;
+}
+
+.backtest-settings[open] > summary {
+  color: var(--text);
+}
+
+.backtest-settings__popover {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + var(--space-2));
+  right: 0;
+  width: min(520px, calc(100vw - var(--space-6)));
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-popover);
+}
+
+.backtest-settings fieldset {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.backtest-settings label {
+  display: grid;
+  gap: var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.backtest-settings input,
+.backtest-settings select {
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+}
+
+.backtest-settings__range,
+.backtest-settings__errors {
+  margin: var(--space-3) 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.backtest-settings__errors {
+  color: var(--status-error);
+}
+
+.backtest-settings:not([open]) > :not(summary) {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .backtest-settings fieldset {
+    grid-template-columns: 1fr;
+  }
+}

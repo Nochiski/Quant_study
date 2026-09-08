@@ -6,7 +6,7 @@ import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from threading import Event
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.encoders import jsonable_encoder
@@ -20,6 +20,7 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunService,
     BacktestRunSpec,
     BacktestRunState,
+    BacktestRunSummary,
     BacktestStartResponse,
     InvalidBacktestRunError,
     RunStatus,
@@ -100,6 +101,7 @@ from strategy_workbench.application.strategy_design.facade.ports import (
     RevisionSummary,
     StrategyNotFoundError,
     StrategyRevisionConflictError,
+    StrategySummary,
 )
 from strategy_workbench.domain.equity.facade.research_data import (
     ResearchPanelQuery,
@@ -111,6 +113,8 @@ from strategy_workbench.domain.strategy.facade.validation import StrategyValidat
 
 from ._backtest_contract import (
     Backtest422Response,
+    BacktestResultNotReadyResponse,
+    BacktestRunNotFoundResponse,
     BacktestStrategyNotFoundResponse,
     BacktestStrategyStaleResponse,
 )
@@ -118,6 +122,7 @@ from ._execution_error_contract import (
     Portfolio422Response,
     PortfolioRawObservationInvalidDetail,
 )
+from ._pagination import CANONICAL_PAGE_INTEGER_VALIDATOR
 from ._strategy_draft_contract import (
     StrategyDraft422Response,
     StrategyDraftConflictDetail,
@@ -177,6 +182,15 @@ def _backtest_not_found(error: BacktestRunNotFoundError) -> HTTPException:
         status_code=status.HTTP_404_NOT_FOUND,
         detail={"code": "backtest.run.not_found", "message": str(error)},
     )
+
+
+def _backtest_run_not_found_responses() -> dict[int | str, dict[str, Any]]:
+    return {
+        404: {
+            "model": BacktestRunNotFoundResponse,
+            "description": "The process-lifetime backtest run does not exist",
+        }
+    }
 
 
 def _draft_conflict(error: StrategyDraftConflictError) -> HTTPException:
@@ -245,6 +259,28 @@ def create_app(
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get(
+        "/api/v1/backtests",
+        operation_id="listBacktests",
+    )
+    def list_backtests(
+        offset: Annotated[
+            int,
+            Query(ge=0, le=PageRequest.MAX_OFFSET),
+            CANONICAL_PAGE_INTEGER_VALIDATOR,
+        ] = 0,
+        limit: Annotated[
+            int,
+            Query(ge=1, le=PageRequest.MAX_LIMIT),
+            CANONICAL_PAGE_INTEGER_VALIDATOR,
+        ] = 50,
+        strategy_id: str | None = Query(default=None, min_length=1),
+    ) -> Page[BacktestRunSummary]:
+        return backtest_runs.list_runs(
+            PageRequest(offset=offset, limit=limit),
+            strategy_id=strategy_id,
+        )
+
     @app.post(
         "/api/v1/backtests",
         operation_id="startBacktest",
@@ -294,6 +330,7 @@ def create_app(
     @app.get(
         "/api/v1/backtests/{run_id}",
         operation_id="getBacktestStatus",
+        responses=_backtest_run_not_found_responses(),
     )
     def get_backtest_status(run_id: str) -> BacktestRunState:
         try:
@@ -304,6 +341,13 @@ def create_app(
     @app.get(
         "/api/v1/backtests/{run_id}/result",
         operation_id="getBacktestResult",
+        responses={
+            **_backtest_run_not_found_responses(),
+            409: {
+                "model": BacktestResultNotReadyResponse,
+                "description": "The run has not completed with a result",
+            },
+        },
     )
     def get_backtest_result(run_id: str) -> BacktestRunResult:
         try:
@@ -316,9 +360,23 @@ def create_app(
                 detail={"code": "backtest.result.not_ready", "message": str(error)},
             ) from error
 
+    @app.get(
+        "/api/v1/backtests/{run_id}/request",
+        operation_id="getBacktestRequest",
+        responses=_backtest_run_not_found_responses(),
+    )
+    def get_backtest_request(run_id: str) -> BacktestRunSpec:
+        """Expose the server-owned accepted assumptions for audit and exact reruns."""
+
+        try:
+            return backtest_runs.request(run_id)
+        except BacktestRunNotFoundError as error:
+            raise _backtest_not_found(error) from error
+
     @app.post(
         "/api/v1/backtests/{run_id}/cancel",
         operation_id="cancelBacktest",
+        responses=_backtest_run_not_found_responses(),
     )
     def cancel_backtest(run_id: str) -> BacktestRunState:
         try:
@@ -330,7 +388,10 @@ def create_app(
         "/api/v1/backtests/{run_id}/events",
         operation_id="streamBacktestEvents",
         response_class=StreamingResponse,
-        responses={200: {"content": {"text/event-stream": {}}}},
+        responses={
+            **_backtest_run_not_found_responses(),
+            200: {"content": {"text/event-stream": {}}},
+        },
     )
     def stream_backtest_events(
         run_id: str,
@@ -708,8 +769,16 @@ def create_app(
     )
     def list_strategy_revisions(
         strategy_id: str,
-        offset: int = Query(default=0, ge=0),
-        limit: int = Query(default=50, ge=1, le=PageRequest.MAX_LIMIT),
+        offset: Annotated[
+            int,
+            Query(ge=0, le=PageRequest.MAX_OFFSET),
+            CANONICAL_PAGE_INTEGER_VALIDATOR,
+        ] = 0,
+        limit: Annotated[
+            int,
+            Query(ge=1, le=PageRequest.MAX_LIMIT),
+            CANONICAL_PAGE_INTEGER_VALIDATOR,
+        ] = 50,
     ) -> Page[RevisionSummary]:
         """Revision history, ascending by revision, paginated deterministically."""
         try:
@@ -820,6 +889,25 @@ def create_app(
                     "validation": jsonable_encoder(asdict(error.validation)),
                 },
             ) from error
+
+    @app.get(
+        "/api/v1/strategies",
+        operation_id="listStrategies",
+    )
+    def list_strategies(
+        offset: Annotated[
+            int,
+            Query(ge=0, le=PageRequest.MAX_OFFSET),
+            CANONICAL_PAGE_INTEGER_VALIDATOR,
+        ] = 0,
+        limit: Annotated[
+            int,
+            Query(ge=1, le=PageRequest.MAX_LIMIT),
+            CANONICAL_PAGE_INTEGER_VALIDATOR,
+        ] = 50,
+    ) -> Page[StrategySummary]:
+        """Latest immutable revision of every strategy, ordered by strategy id."""
+        return strategy_documents.list_strategies(PageRequest(offset, limit))
 
     @app.get(
         "/api/v1/strategies/{strategy_id}",

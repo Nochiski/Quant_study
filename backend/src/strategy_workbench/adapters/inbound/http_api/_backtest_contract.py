@@ -58,3 +58,25 @@ class BacktestStrategyStaleDetail:
 @dataclass(frozen=True)
 class BacktestStrategyStaleResponse:
     detail: BacktestStrategyStaleDetail
+
+
+@dataclass(frozen=True)
+class BacktestRunNotFoundDetail:
+    code: Literal["backtest.run.not_found"]
+    message: str
+
+
+@dataclass(frozen=True)
+class BacktestRunNotFoundResponse:
+    detail: BacktestRunNotFoundDetail
+
+
+@dataclass(frozen=True)
+class BacktestResultNotReadyDetail:
+    code: Literal["backtest.result.not_ready"]
+    message: str
+
+
+@dataclass(frozen=True)
+class BacktestResultNotReadyResponse:
+    detail: BacktestResultNotReadyDetail

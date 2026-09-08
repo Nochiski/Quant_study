@@ -1,0 +1,342 @@
+/* 백테스트 결과 표현은 이 entity가 소유하며 전략 편집기 수명주기와 분리한다. */
+.run-detail {
+  display: grid;
+  gap: var(--space-5);
+  min-width: 0;
+  padding: var(--space-5);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-large);
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-panel);
+}
+
+.run-detail .run-detail__header,
+.run-detail .raw-metric-panel > header,
+.run-detail .trade-panel > header,
+.run-detail .monthly-panel > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+}
+
+.run-detail .run-detail__header h3 {
+  margin: var(--space-1) 0 var(--space-2);
+  font-size: var(--text-size-display);
+}
+
+.run-detail .run-detail__header p,
+.run-detail .raw-metric-panel header p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.run-detail .section-kicker {
+  color: var(--accent);
+  font-size: var(--text-size-small);
+  font-weight: var(--font-weight-strong);
+  letter-spacing: var(--tracking-wide);
+}
+
+.run-detail .run-id {
+  max-width: 100%;
+  padding: var(--space-2) var(--space-3);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--status-info);
+  font-family: var(--font-mono);
+  font-size: var(--text-size-small);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-detail .metric-highlights {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.run-detail .metric-highlights > div {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: calc(var(--space-6) * 3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-raised);
+}
+
+.run-detail .metric-highlights span {
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.run-detail .metric-highlights strong {
+  align-self: end;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--text-size-title);
+  text-overflow: ellipsis;
+}
+
+.run-detail .metric-highlights small,
+.run-detail .result-table td small {
+  display: block;
+  color: var(--status-warn);
+  font-size: var(--text-size-small);
+}
+
+.run-detail .is-unavailable {
+  color: var(--status-warn);
+}
+
+.run-detail .result-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.run-detail .result-chart,
+.run-detail .monthly-panel,
+.run-detail .raw-metric-panel,
+.run-detail .trade-panel,
+.run-detail .manifest-drawer {
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-large);
+  background: var(--surface-raised);
+}
+
+.run-detail .result-chart header,
+.run-detail .result-chart footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.run-detail .result-chart h4,
+.run-detail .monthly-panel h4,
+.run-detail .raw-metric-panel h4,
+.run-detail .trade-panel h4 {
+  margin: 0;
+  font-size: var(--text-size-body);
+}
+
+.run-detail .chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  font-size: var(--text-size-small);
+  font-weight: var(--font-weight-strong);
+}
+
+.run-detail .result-chart svg {
+  display: block;
+  width: 100%;
+  height: calc(var(--space-6) * 6);
+  margin-top: var(--space-4);
+}
+
+.run-detail .result-chart svg line {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.run-detail .result-chart svg path {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.run-detail .result-chart footer {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-size-small);
+}
+
+.run-detail .monthly-panel header span,
+.run-detail .raw-metric-panel header > span,
+.run-detail .trade-panel header span {
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.run-detail .monthly-grid {
+  display: grid;
+  grid-template-columns: repeat(
+    auto-fit,
+    minmax(calc(var(--space-6) * 3), 1fr)
+  );
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.run-detail .monthly-grid div {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border-radius: var(--radius-medium);
+  font-size: var(--text-size-small);
+}
+
+.run-detail .monthly-grid .is-positive {
+  background: var(--status-ok-soft);
+  color: var(--status-ok);
+}
+
+.run-detail .monthly-grid .is-negative {
+  background: var(--status-error-soft);
+  color: var(--status-error);
+}
+
+.run-detail .result-table-wrap {
+  max-height: calc(var(--space-6) * 14);
+  margin-top: var(--space-3);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+}
+
+.run-detail .result-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-size-small);
+}
+
+.run-detail .result-table th,
+.run-detail .result-table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.run-detail .result-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-subtle);
+  color: var(--text-muted);
+}
+
+.run-detail .result-table code {
+  color: var(--status-info);
+}
+
+.run-detail .is-profit {
+  color: var(--status-ok);
+}
+
+.run-detail .is-loss {
+  color: var(--status-error);
+}
+
+.run-detail .inline-state {
+  margin: var(--space-3) 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.run-detail .manifest-drawer summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: var(--text-size-small);
+  font-weight: var(--font-weight-strong);
+}
+
+.run-detail .manifest-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(calc(var(--space-6) * 9), 0.8fr);
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+
+.run-detail .manifest-grid dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.run-detail .manifest-grid dl div,
+.run-detail .manifest-warnings p {
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-panel);
+}
+
+.run-detail .manifest-grid dt {
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.run-detail .manifest-grid dd {
+  margin: var(--space-1) 0 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--text-size-small);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-detail .manifest-warnings h5 {
+  margin: 0 0 var(--space-2);
+}
+
+.run-detail .manifest-warnings p {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.run-detail .manifest-warnings strong {
+  color: var(--status-warn);
+}
+
+@media (max-width: 1100px) {
+  .run-detail .metric-highlights {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .run-detail .run-detail__header,
+  .run-detail .raw-metric-panel > header,
+  .run-detail .trade-panel > header,
+  .run-detail .monthly-panel > header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .run-detail .result-chart-grid,
+  .run-detail .manifest-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .run-detail .metric-highlights,
+  .run-detail .manifest-grid dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .run-detail {
+    padding: var(--space-3);
+  }
+
+  .run-detail .metric-highlights,
+  .run-detail .manifest-grid dl {
+    grid-template-columns: 1fr;
+  }
+}

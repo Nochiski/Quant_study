@@ -19,7 +19,7 @@ paths:
 | 팩터 **값** | `FactorGraph` 평가 (`domain/factor`) | 계산자는 `application/portfolio_design/_service.py` 하나뿐, 어댑터는 원천 필드만 답한다 |
 | 팩터 값의 공개일 | 그 팩터 plan이 읽는 필드들의 `available_date` 최댓값 | 컴파일러 FUTURE_DATA 가드가 그대로 읽는다 |
 | 리밸런싱 시점의 previous weight | `compile_target_tape`의 프레임 fold | 포트의 `previous_weight`는 첫 프레임 시드로만 쓰인다 |
-| 전략 의미 | immutable, versioned `StrategySpec` | YAML/JSON source를 서버가 compile, Form/Graph는 read-only projection (legacy Quick/Advanced는 migration 기간 유지) |
+| 전략 의미 | immutable, versioned `StrategySpec` | YAML/JSON source를 서버가 compile, Form/Graph는 read-only projection; 별도 Quick/Advanced 편집 모델을 두지 않음 |
 | 파라미터 공간 | `SearchSpec` | trial은 해소된 값만 참조 |
 | 주문·체결·포트폴리오 mutable state | Persistent Rust Engine | Python/API는 명령·조회 |
 | 지표 공식·방향·단위 | backend Metric Registry | UI는 raw metric 표시·포맷 |

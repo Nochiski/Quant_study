@@ -5,6 +5,12 @@ import { useBlocker } from "../../../shared/lib/router";
 import { Button } from "../../../shared/ui";
 import "./dirty-leave-guard.css";
 
+const canRestoreFocus = (element: HTMLElement | null): element is HTMLElement =>
+  element !== null &&
+  element.isConnected &&
+  element.closest("[hidden], [aria-hidden='true']") === null &&
+  !element.matches(":disabled");
+
 /**
  * Blocks in-app navigation (and the browser's unload) while the draft has unsaved changes
  * (WORKFLOW P2-04). The prompt is an in-page alert dialog so the wording is ours and testable;
@@ -25,14 +31,23 @@ export const DirtyLeaveGuard = ({ dirty }: { dirty: boolean }) => {
     withResolver: true,
   });
   const stayButton = useRef<HTMLButtonElement>(null);
+  const restoreFocus = useRef<HTMLElement | null>(null);
   const blocked = blocker.status === "blocked";
   useEffect(() => {
-    if (blocked) stayButton.current?.focus();
+    if (!blocked) return;
+    restoreFocus.current = document.activeElement as HTMLElement | null;
+    queueMicrotask(() => stayButton.current?.focus());
+    return () => {
+      queueMicrotask(() => {
+        if (canRestoreFocus(restoreFocus.current)) restoreFocus.current.focus();
+      });
+    };
   }, [blocked]);
   if (blocker.status !== "blocked") return null;
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Escape") {
       event.preventDefault();
+      event.stopPropagation();
       blocker.reset();
       return;
     }
@@ -40,6 +55,7 @@ export const DirtyLeaveGuard = ({ dirty }: { dirty: boolean }) => {
     const buttons = Array.from(
       event.currentTarget.querySelectorAll<HTMLButtonElement>("button"),
     );
+    if (buttons.length === 0) return;
     const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
     const nextIndex = event.shiftKey
       ? (index - 1 + buttons.length) % buttons.length

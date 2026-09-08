@@ -216,6 +216,9 @@ const traceResponse = (): StrategyTraceResponse => ({
   },
 });
 
+const selectedNodeSentinel = (securityId: string): number =>
+  499_000 + Number(securityId.slice("sec-".length)) + 0.123456;
+
 const pagedTraceResponse = (
   request: StrategyTraceRequest,
 ): StrategyTraceResponse => {
@@ -228,7 +231,9 @@ const pagedTraceResponse = (
       operation: `operation.${nodeId}`,
       as_of: asOf,
       security_id: securityId,
-      value: 0.25,
+      // A selected-node sentinel proves that virtualization displays the exact server value;
+      // it must not derive one from the node or security identity on the client.
+      value: nodeId === "n499" ? selectedNodeSentinel(securityId) : 0.25,
       status: "ok" as const,
       inputs: [],
     })),
@@ -337,6 +342,7 @@ afterAll(() => server.close());
 const props = (debugContext: StrategyDebuggerContext | null = context()) => ({
   context: debugContext,
   unavailableReason: debugContext === null ? ("document" as const) : null,
+  publicationOwnerKey: "route-generation-1",
   asOf: "2026-08-31",
   security: "sec-a, sec-b",
   selectedPointer: "/factors/factors/0/graph/nodes/2",
@@ -459,7 +465,10 @@ describe("StrategyDebugger", () => {
 
   it("pages 6 nodes by 100 securities and keeps every selected output row", async () => {
     const expanded = contextWithNodes(6);
-    const securities = Array.from({ length: 100 }, (_, index) => `sec-${index}`);
+    const securities = Array.from(
+      { length: 100 },
+      (_, index) => `sec-${index}`,
+    );
     server.use(
       http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
         const received = (await request.json()) as StrategyTraceRequest;
@@ -486,8 +495,31 @@ describe("StrategyDebugger", () => {
       true,
     );
     const panel = screen.getByRole("tabpanel", { name: "선택 노드" });
-    expect(within(panel).getAllByRole("row")).toHaveLength(101);
-    expect(within(panel).getAllByText("operation.n5")).toHaveLength(100);
+    const table = within(panel).getByRole("table");
+    const viewport = within(panel).getByRole("region", {
+      name: "선택한 FactorGraph 노드의 실제 계산 결과",
+    });
+    expect(viewport).toContainElement(table);
+    expect(table).toHaveAttribute("aria-rowcount", "101");
+    expect(viewport).toHaveAttribute("data-virtualized", "true");
+    expect(viewport).toHaveAttribute("tabindex", "0");
+    expect(within(panel).getAllByRole("row").length).toBeLessThan(30);
+    expect(within(panel).getAllByText("operation.n5").length).toBeLessThan(30);
+    Object.defineProperty(viewport, "clientHeight", {
+      configurable: true,
+      value: 384,
+    });
+    for (
+      let attempt = 0;
+      attempt < 30 && document.activeElement !== viewport;
+      attempt += 1
+    )
+      await user.tab();
+    expect(viewport).toHaveFocus();
+    await user.keyboard("{End}");
+    expect(await within(panel).findByText("sec-99")).toBeInTheDocument();
+    await user.keyboard("{Home}");
+    expect(await within(panel).findByText("sec-0")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
@@ -512,9 +544,11 @@ describe("StrategyDebugger", () => {
     await user.click(screen.getByRole("tab", { name: "선택 노드" }));
     await user.click(screen.getByRole("button", { name: "추적 실행" }));
 
-    expect(await within(
-      screen.getByRole("tabpanel", { name: "선택 노드" }),
-    ).findByText("operation.n100")).toBeInTheDocument();
+    expect(
+      await within(
+        screen.getByRole("tabpanel", { name: "선택 노드" }),
+      ).findByText("operation.n100"),
+    ).toBeInTheDocument();
     expect(requests.map((request) => request.node_ids?.length)).toEqual([
       64, 37,
     ]);
@@ -523,7 +557,10 @@ describe("StrategyDebugger", () => {
 
   it("caps the aggregate trace and fetches a truncated selected node separately", async () => {
     const expanded = contextWithNodes(81);
-    const securities = Array.from({ length: 100 }, (_, index) => `sec-${index}`);
+    const securities = Array.from(
+      { length: 100 },
+      (_, index) => `sec-${index}`,
+    );
     server.use(
       http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
         const received = (await request.json()) as StrategyTraceRequest;
@@ -543,7 +580,9 @@ describe("StrategyDebugger", () => {
     await user.click(screen.getByRole("tab", { name: "선택 노드" }));
     await user.click(screen.getByRole("button", { name: "추적 실행" }));
 
-    expect(await screen.findByText(/8,000행 예산에서 중단/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/8,000행 예산에서 중단/),
+    ).toBeInTheDocument();
     expect(requests).toHaveLength(21);
     expect(requests.at(-1)).toMatchObject({
       node_ids: ["n80"],
@@ -552,12 +591,118 @@ describe("StrategyDebugger", () => {
       include_raw: false,
     });
     const panel = screen.getByRole("tabpanel", { name: "선택 노드" });
-    expect(within(panel).getAllByRole("row")).toHaveLength(101);
+    expect(within(panel).getByRole("table")).toHaveAttribute(
+      "aria-rowcount",
+      "101",
+    );
+    expect(within(panel).getAllByRole("row").length).toBeLessThan(30);
   }, 15_000);
+
+  it("bounds linked securities and a 500-node chain in the DOM", async () => {
+    const expanded = contextWithNodes(500);
+    const securities = Array.from(
+      { length: 100 },
+      (_, index) => `sec-${index}`,
+    );
+    server.use(
+      http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
+        const received = (await request.json()) as StrategyTraceRequest;
+        requests.push(received);
+        return HttpResponse.json(pagedTraceResponse(received));
+      }),
+    );
+    const user = userEvent.setup();
+    renderDebugger(
+      <StrategyDebugger
+        {...props(expanded)}
+        security={securities.join(",")}
+        selectedPointer="/factors/factors/0/graph/nodes/499"
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    expect(
+      await screen.findByText(/8,000행 예산에서 중단/),
+    ).toBeInTheDocument();
+    const securityList = screen.getByRole("list", { name: "연결 추적" });
+    expect(securityList).toHaveAttribute("data-total-rows", "100");
+    expect(securityList).toHaveAttribute("data-virtualized", "true");
+    expect(securityList).toHaveAttribute("tabindex", "0");
+    expect(
+      Number(securityList.getAttribute("data-rendered-rows")),
+    ).toBeLessThan(10);
+
+    const nodeLists = within(securityList).getAllByRole("list", {
+      name: "2 FactorGraph 노드",
+    });
+    expect(nodeLists.length).toBeLessThan(10);
+    for (const list of nodeLists) {
+      expect(list).toHaveAttribute("data-virtualized", "true");
+      expect(list).toHaveAttribute("tabindex", "0");
+      expect(Number(list.getAttribute("data-rendered-rows"))).toBeLessThan(20);
+    }
+    expect(within(securityList).getAllByText("operation.n499").length).toBe(
+      nodeLists.length,
+    );
+
+    Object.defineProperty(securityList, "clientHeight", {
+      configurable: true,
+      value: 648,
+    });
+    for (
+      let attempt = 0;
+      attempt < 30 && document.activeElement !== securityList;
+      attempt += 1
+    )
+      await user.tab();
+    expect(securityList).toHaveFocus();
+    await user.keyboard("{End}");
+    expect(await within(securityList).findByText("sec-99")).toBeInTheDocument();
+    await user.keyboard("{Home}");
+    expect(await within(securityList).findByText("sec-0")).toBeInTheDocument();
+    await user.keyboard("{End}");
+    expect(await within(securityList).findByText("sec-99")).toBeInTheDocument();
+
+    const visibleNodeList = within(securityList).getAllByRole("list", {
+      name: "2 FactorGraph 노드",
+    })[0]!;
+    const visiblePipeline =
+      visibleNodeList.closest<HTMLElement>('[role="listitem"]')!;
+    const visibleSecurity = within(visiblePipeline).getByRole("heading", {
+      level: 3,
+    }).textContent!;
+    Object.defineProperty(visibleNodeList, "clientHeight", {
+      configurable: true,
+      value: 174,
+    });
+    await user.tab();
+    expect(visibleNodeList).toHaveFocus();
+    const outerScrollTop = securityList.scrollTop;
+    await user.keyboard("{Home}");
+    expect(securityList.scrollTop).toBe(outerScrollTop);
+    expect(
+      await within(visibleNodeList).findByText("operation.n0"),
+    ).toBeInTheDocument();
+    await user.keyboard("{End}");
+    expect(securityList.scrollTop).toBe(outerScrollTop);
+    expect(
+      await within(visibleNodeList).findByText("operation.n499"),
+    ).toBeInTheDocument();
+    expect(
+      within(visibleNodeList).getByText(
+        selectedNodeSentinel(visibleSecurity).toLocaleString("en-US", {
+          maximumFractionDigits: 8,
+        }),
+      ),
+    ).toBeInTheDocument();
+  }, 20_000);
 
   it("discards a fingerprint drift on a later linked-trace page", async () => {
     const expanded = contextWithNodes(6);
-    const securities = Array.from({ length: 100 }, (_, index) => `sec-${index}`);
+    const securities = Array.from(
+      { length: 100 },
+      (_, index) => `sec-${index}`,
+    );
     server.use(
       http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
         const received = (await request.json()) as StrategyTraceRequest;
@@ -599,6 +744,155 @@ describe("StrategyDebugger", () => {
     expect(requests).toHaveLength(1);
     expect(requests[0]).not.toHaveProperty("as_of");
     expect(screen.getByText(/서버가 실제 TargetTape/)).toBeInTheDocument();
+  });
+
+  it("commits a typed security scope and runs the trace in one submit", async () => {
+    const user = userEvent.setup();
+    const onSearchSelection = vi.fn();
+    renderDebugger(
+      <StrategyDebugger
+        {...props()}
+        security={undefined}
+        onSearchSelection={onSearchSelection}
+      />,
+    );
+
+    await user.type(
+      screen.getByRole("textbox", { name: "종목 ID" }),
+      "sec-a, sec-b",
+    );
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+
+    expect(await screen.findByText("3.50%")).toBeInTheDocument();
+    expect(onSearchSelection).toHaveBeenCalledTimes(1);
+    expect(onSearchSelection).toHaveBeenCalledWith({
+      asOf: "2026-08-31",
+      security: "sec-a, sec-b",
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.security_ids).toEqual(["sec-a", "sec-b"]);
+  });
+
+  it("does not let a resolved request restore a superseded URL scope", async () => {
+    let resolveTrace: ((value: StrategyTraceResponse) => void) | undefined;
+    vi.spyOn(strategyWorkbenchApi, "traceStrategy").mockReturnValue(
+      new Promise((resolve) => {
+        resolveTrace = resolve;
+      }),
+    );
+    const onSearchSelection = vi.fn();
+    const initial = props();
+    const view = renderDebugger(
+      <StrategyDebugger {...initial} onSearchSelection={onSearchSelection} />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    await waitFor(() =>
+      expect(strategyWorkbenchApi.traceStrategy).toHaveBeenCalledTimes(1),
+    );
+
+    view.rerender(
+      <StrategyDebugger
+        {...initial}
+        asOf="2026-08-28"
+        security="sec-new"
+        onSearchSelection={onSearchSelection}
+      />,
+    );
+    await act(async () => resolveTrace?.(traceResponse()));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("기준일")).toHaveValue("2026-08-28"),
+    );
+    expect(onSearchSelection).not.toHaveBeenCalled();
+  });
+
+  it("does not publish into a newer opaque route generation with the same trace owner", async () => {
+    let resolveTrace: ((value: StrategyTraceResponse) => void) | undefined;
+    vi.spyOn(strategyWorkbenchApi, "traceStrategy").mockReturnValue(
+      new Promise((resolve) => {
+        resolveTrace = resolve;
+      }),
+    );
+    const onSearchSelection = vi.fn();
+    const initial = props();
+    const view = renderDebugger(
+      <StrategyDebugger {...initial} onSearchSelection={onSearchSelection} />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    await waitFor(() =>
+      expect(strategyWorkbenchApi.traceStrategy).toHaveBeenCalledTimes(1),
+    );
+
+    view.rerender(
+      <StrategyDebugger
+        {...initial}
+        publicationOwnerKey="route-generation-2"
+        onSearchSelection={onSearchSelection}
+      />,
+    );
+    await act(async () => resolveTrace?.(traceResponse()));
+
+    expect(onSearchSelection).not.toHaveBeenCalled();
+  });
+
+  it("does not let a rejected request restore a previous document route", async () => {
+    let rejectTrace: ((reason?: unknown) => void) | undefined;
+    vi.spyOn(strategyWorkbenchApi, "traceStrategy").mockReturnValue(
+      new Promise((_resolve, reject) => {
+        rejectTrace = reject;
+      }),
+    );
+    const onSearchSelection = vi.fn();
+    const initial = props(context());
+    const view = renderDebugger(
+      <StrategyDebugger {...initial} onSearchSelection={onSearchSelection} />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    await waitFor(() =>
+      expect(strategyWorkbenchApi.traceStrategy).toHaveBeenCalledTimes(1),
+    );
+
+    view.rerender(
+      <StrategyDebugger
+        {...props({ ...savedContext(), documentEpoch: 9 })}
+        onSearchSelection={onSearchSelection}
+      />,
+    );
+    await act(async () => rejectTrace?.(new Error("old route failed")));
+
+    await waitFor(() =>
+      expect(screen.getByText("저장 리비전")).toBeInTheDocument(),
+    );
+    expect(onSearchSelection).not.toHaveBeenCalled();
+  });
+
+  it("does not publish a deep link after unmount aborts the request", async () => {
+    let requestSignal: AbortSignal | undefined;
+    vi.spyOn(strategyWorkbenchApi, "traceStrategy").mockImplementation(
+      (_request, signal) => {
+        requestSignal = signal;
+        return new Promise((_resolve, reject) => {
+          signal?.addEventListener("abort", () =>
+            reject(new DOMException("aborted", "AbortError")),
+          );
+        });
+      },
+    );
+    const onSearchSelection = vi.fn();
+    const view = renderDebugger(
+      <StrategyDebugger {...props()} onSearchSelection={onSearchSelection} />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    await waitFor(() => expect(requestSignal).toBeDefined());
+
+    view.unmount();
+
+    await waitFor(() => expect(requestSignal?.aborted).toBe(true));
+    expect(onSearchSelection).not.toHaveBeenCalled();
   });
 
   it("shows raw cell semantics and only requests order deltas for an explicit opening book", async () => {
@@ -739,7 +1033,9 @@ describe("StrategyDebugger", () => {
     const user = userEvent.setup();
     renderDebugger(<StrategyDebugger {...props()} />);
     await user.click(screen.getByRole("button", { name: "추적 실행" }));
-    expect(await screen.findAllByText(/원시 데이터와 노드 계산은 표시/)).toHaveLength(2);
+    expect(
+      await screen.findAllByText(/원시 데이터와 노드 계산은 표시/),
+    ).toHaveLength(2);
     expect(screen.getAllByText("2 FactorGraph 노드")).toHaveLength(2);
     expect(screen.getByText("0.42")).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "TargetTape" }));
@@ -820,7 +1116,10 @@ describe("StrategyDebugger", () => {
 
   it("cancels a later page without publishing a partial aggregate", async () => {
     const expanded = contextWithNodes(6);
-    const securities = Array.from({ length: 100 }, (_, index) => `sec-${index}`);
+    const securities = Array.from(
+      { length: 100 },
+      (_, index) => `sec-${index}`,
+    );
     server.use(
       http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
         const received = (await request.json()) as StrategyTraceRequest;

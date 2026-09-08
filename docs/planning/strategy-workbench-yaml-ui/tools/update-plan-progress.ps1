@@ -13,6 +13,7 @@ if ([string]::IsNullOrWhiteSpace($PlanPath)) {
 $resolvedPlanPath = (Resolve-Path -LiteralPath $PlanPath).Path
 $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $original = [System.IO.File]::ReadAllText($resolvedPlanPath, $utf8NoBom)
+$lineEnding = if ($original.Contains("`r`n")) { "`r`n" } else { "`n" }
 
 $prIdPattern = 'P\d+(?:\.\d+)?-\d{2}'
 $rowPattern = "(?m)^\| \[(?<checked>[ xX])\] \| ``(?<id>$prIdPattern)`` \| (?<title>.*?) \| (?<dependency>.*?) \| ``(?<status>[A-Z_]+)`` \| (?<review>.*?) \|[ \t\r]*$"
@@ -75,6 +76,28 @@ $activeStatuses = @(
     "CHANGES_REQUESTED",
     "APPROVED"
 )
+
+# An active stack is a concurrency set, not a priority-ordered list. Aggregate by explicit
+# workflow severity so reordering parallel_window can never hide a requested change.
+$activeStatusPriority = @(
+    "CHANGES_REQUESTED",
+    "IN_PROGRESS",
+    "SELF_CHECK",
+    "IN_REVIEW",
+    "APPROVED"
+)
+
+function Get-AggregateActiveStatus {
+    param([object[]]$CandidateRows)
+
+    foreach ($status in $activeStatusPriority) {
+        if (@($CandidateRows | Where-Object Status -eq $status).Count -gt 0) {
+            return $status
+        }
+    }
+    return $null
+}
+
 $activeRows = @($rows | Where-Object Status -in $activeStatuses)
 
 $parallelMatch = [regex]::Match($original, '(?m)^parallel_window:\s*\[(?<ids>[^\]]*)\]\s*$')
@@ -144,11 +167,19 @@ $total = $rows.Count
 $merged = @($rows | Where-Object Checked).Count
 $approved = @($rows | Where-Object Status -in @("APPROVED", "MERGED")).Count
 $progress = if ($total -eq 0) { 0 } else { [math]::Round(($merged * 100.0) / $total) }
+$orderedActiveRows = @(
+    foreach ($id in $parallelIds) {
+        if ($rowById.ContainsKey($id) -and $rowById[$id].Status -in $activeStatuses) {
+            $rowById[$id]
+        }
+    }
+)
+$aggregateActiveStatus = Get-AggregateActiveStatus -CandidateRows $activeRows
 
 if ($merged -eq $total) {
     $projectStatus = "COMPLETE"
-} elseif ($activeRows.Count -gt 0) {
-    $projectStatus = $activeRows[0].Status
+} elseif ($null -ne $aggregateActiveStatus) {
+    $projectStatus = $aggregateActiveStatus
 } elseif (@($rows | Where-Object Status -eq "READY").Count -gt 0) {
     $projectStatus = "READY"
 } elseif (@($rows | Where-Object Status -eq "PAUSED").Count -gt 0) {
@@ -157,7 +188,9 @@ if ($merged -eq $total) {
     $projectStatus = "WAITING"
 }
 
-$currentRows = if ($activeRows.Count -gt 0) {
+$currentRows = if ($orderedActiveRows.Count -gt 0) {
+    $orderedActiveRows
+} elseif ($activeRows.Count -gt 0) {
     $activeRows
 } else {
     $readyRows = @($rows | Where-Object Status -eq "READY")
@@ -221,7 +254,9 @@ $frontmatterValues = [ordered]@{
 }
 
 foreach ($entry in $frontmatterValues.GetEnumerator()) {
-    $pattern = "(?m)^$([regex]::Escape($entry.Key)):\s*.*$"
+    # Do not consume the carriage return on CRLF checkouts; otherwise replacing an
+    # already-correct field silently creates mixed line endings and makes -Check fail.
+    $pattern = "(?m)^$([regex]::Escape($entry.Key)):[^\r\n]*"
     if (-not [regex]::IsMatch($updated, $pattern)) {
         throw "$($entry.Key) frontmatter field is missing"
     }
@@ -246,7 +281,7 @@ $summaryLines = @(
     "| Aggregated at | ``$displayTimestamp`` |",
     "<!-- PLAN:SUMMARY:END -->"
 )
-$summary = $summaryLines -join "`n"
+$summary = $summaryLines -join $lineEnding
 $summaryPattern = '(?s)<!-- PLAN:SUMMARY:START -->.*?<!-- PLAN:SUMMARY:END -->'
 if (-not [regex]::IsMatch($updated, $summaryPattern)) {
     throw "Summary markers are missing"
@@ -268,7 +303,7 @@ foreach ($phase in $phaseGoals.Keys) {
     if ($phaseMerged -eq $phaseRows.Count) {
         $phaseStatus = "MERGED"
     } elseif ($phaseActive.Count -gt 0) {
-        $phaseStatus = $phaseActive[0].Status
+        $phaseStatus = Get-AggregateActiveStatus -CandidateRows $phaseActive
     } elseif (@($phaseRows | Where-Object Status -eq "READY").Count -gt 0) {
         $phaseStatus = "READY"
     } elseif (@($phaseRows | Where-Object Status -eq "PAUSED").Count -gt 0) {
@@ -281,7 +316,7 @@ foreach ($phase in $phaseGoals.Keys) {
 
 $phaseLines.Add("| **Total** |  | **$total** | **$merged** | **$progress%** |")
 $phaseLines.Add("<!-- PLAN:PHASES:END -->")
-$phaseSummary = $phaseLines -join "`n"
+$phaseSummary = $phaseLines -join $lineEnding
 $phasePattern = '(?s)<!-- PLAN:PHASES:START -->.*?<!-- PLAN:PHASES:END -->'
 if (-not [regex]::IsMatch($updated, $phasePattern)) {
     throw "Phase summary markers are missing"

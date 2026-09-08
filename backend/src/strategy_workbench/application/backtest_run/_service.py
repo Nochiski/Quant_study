@@ -11,6 +11,8 @@ from strategy_workbench.application.portfolio_design.facade.design import (
     PortfolioPreviewRequest,
 )
 from strategy_workbench.application.strategy_design.facade.ports import (
+    Page,
+    PageRequest,
     StrategyNotFoundError,
     StrategyRepositoryPort,
 )
@@ -60,9 +62,20 @@ class BacktestResultNotReadyError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class BacktestRunSummary:
+    """One process-lifetime run and the strategy meaning resolved before it started."""
+
+    run: BacktestRunState
+    strategy_provenance: StrategyProvenance
+
+
 @dataclass
 class _RunRecord:
     state: BacktestRunState
+    request: BacktestRunSpec
+    provenance: StrategyProvenance
+    accepted_sequence: int
     events: list[RunProgressEvent]
     cancellation: Event
     result: BacktestRunResult | None = None
@@ -88,6 +101,7 @@ class BacktestRunService:
         self._new_id = new_id
         self._now = now
         self._records: dict[str, _RunRecord] = {}
+        self._next_accepted_sequence = 0
         self._lock = RLock()
 
     def start(self, request: BacktestRunSpec) -> BacktestStartResponse:
@@ -134,8 +148,16 @@ class BacktestRunService:
             created_at=created,
             updated_at=created,
         )
-        record = _RunRecord(state=state, events=[], cancellation=Event())
         with self._lock:
+            record = _RunRecord(
+                state=state,
+                request=request,
+                provenance=provenance,
+                accepted_sequence=self._next_accepted_sequence,
+                events=[],
+                cancellation=Event(),
+            )
+            self._next_accepted_sequence += 1
             self._records[run_id] = record
             self._emit(record, RunStatus.QUEUED, 0.0, "queued", "Run accepted")
         Thread(
@@ -149,6 +171,50 @@ class BacktestRunService:
     def state(self, run_id: str) -> BacktestRunState:
         with self._lock:
             return self._record(run_id).state
+
+    def request(self, run_id: str) -> BacktestRunSpec:
+        """Return the normalized request accepted for an in-process run.
+
+        The unresolved request carries exactly one strategy source and is therefore safe to
+        submit again. The resolved execution spec intentionally remains an internal detail until
+        it is committed to the immutable result manifest.
+        """
+
+        with self._lock:
+            return self._record(run_id).request
+
+    def list_runs(
+        self,
+        page: PageRequest,
+        *,
+        strategy_id: str | None = None,
+    ) -> Page[BacktestRunSummary]:
+        """Return an atomic newest-accepted-first snapshot of the in-process run register."""
+
+        with self._lock:
+            ordered = tuple(
+                sorted(
+                    (
+                        record
+                        for record in self._records.values()
+                        if strategy_id is None or record.provenance.strategy_id == strategy_id
+                    ),
+                    key=lambda record: record.accepted_sequence,
+                    reverse=True,
+                )
+            )
+            return Page(
+                items=tuple(
+                    BacktestRunSummary(
+                        run=record.state,
+                        strategy_provenance=record.provenance,
+                    )
+                    for record in ordered[page.offset : page.offset + page.limit]
+                ),
+                total=len(ordered),
+                offset=page.offset,
+                limit=page.limit,
+            )
 
     def result(self, run_id: str) -> BacktestRunResult:
         with self._lock:
@@ -278,20 +344,31 @@ class BacktestRunService:
             self._raise_if_cancelled(record)
             self._update(record, RunStatus.RUNNING, 0.93, "artifact", "Committing artifacts")
             commit = self._artifact_store.commit(result)
+            cancelled_after_commit = False
             with self._lock:
-                record.result = result
-                record.state = replace(
-                    record.state,
-                    artifact_uri=commit.uri,
-                    artifact_sha256=commit.sha256,
-                )
-                self._emit(
-                    record,
-                    RunStatus.COMPLETED,
-                    1.0,
-                    "completed",
-                    "Run completed",
-                )
+                # Completion and cancel acceptance linearize on the same lock. If cancel acquired
+                # it first, the committed bundle is compensation-cleaned and never becomes
+                # observable through state/result. If completion acquired it first, cancel sees a
+                # terminal run and is not accepted.
+                if record.cancellation.is_set():
+                    cancelled_after_commit = True
+                else:
+                    record.result = result
+                    record.state = replace(
+                        record.state,
+                        artifact_uri=commit.uri,
+                        artifact_sha256=commit.sha256,
+                    )
+                    self._emit(
+                        record,
+                        RunStatus.COMPLETED,
+                        1.0,
+                        "completed",
+                        "Run completed",
+                    )
+            if cancelled_after_commit:
+                self._artifact_store.discard(run_id)
+                raise RunCancelledError("run cancelled during artifact commit")
         except RunCancelledError:
             self._update(
                 record, RunStatus.CANCELLED, record.state.progress, "cancelled", "Run cancelled"

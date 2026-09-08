@@ -332,9 +332,13 @@ def test_2018_05_04_격자_3테이블은_stage_원장_값_그대로다(adapter) 
     # ② 공매도 거래대금 — 키움 축 고정(같은 셀의 KIS 축은 not_collected 라 섞이면 결측이 된다)
     short = _cell(r, SPLIT, "005930:1", "short.short_sale_value")
     assert (short.value, short.kind) == (103_425_481_000.0, CellKind.OBSERVED)
-    # 대차는 KIS 축뿐이고 이 셀은 수집 로그가 덮지 않는다 — 결측이되 '안 물어봤다' 로 남는다
+    # 대차 — S09-2(09-08) 로 키움 축(ka20068)이 붙으면서 **결측이던 셀이 관측이 됐다**. 예전에는
+    # KIS 축뿐이라 005930 은 수집 로그가 덮지 않아 NOT_COLLECTED 였다.
+    # 이 셀 자체가 단위 확정의 세 번째 증거다: 50:1 분할 당일이라 잔고가 1,453,095(05-03) →
+    # 46,026,975(05-04)로 뛰고, 금액 ÷ 잔고는 분할 전 2,650,000원 · 분할 후 51,900원으로
+    # 양쪽 다 그날 종가와 같다. 주 단위가 아니면 이 두 값이 동시에 맞을 수 없다.
     lending = _cell(r, SPLIT, "005930:1", "short.borrowed_quantity")
-    assert (lending.value, lending.kind) == (None, CellKind.NOT_COLLECTED)
+    assert (lending.value, lending.kind) == (46_026_975.0, CellKind.OBSERVED)
     # ③ 신용융자 잔고(주식수) — 금액축은 단위 미상이라 내지 않는다
     credit = _cell(r, SPLIT, "005930:1", "credit.margin_balance")
     assert (credit.value, credit.available_date, credit.kind) == (

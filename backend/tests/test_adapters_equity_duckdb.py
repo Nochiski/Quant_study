@@ -36,6 +36,7 @@ from strategy_workbench.application.portfolio_design.facade.design import (
 from strategy_workbench.application.portfolio_design.facade.ports import RawObservationQuery
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.bootstrap.facade.container import build_container
+from strategy_workbench.domain.backtest.facade.runs import WarningSeverity
 from strategy_workbench.domain.equity.facade.research_data import (
     CellKind,
     DataLoadStatus,
@@ -569,6 +570,34 @@ def test_backtest_dataset_drops_reference_rows_and_carries_ok_actions_only(
         "036220:2"
     ] == (WB_SPLIT_DATE, END)
     assert [w.code for w in dataset.warnings] == ["equity.reference_rows_dropped"]
+
+
+def test_backtest_dataset_drops_actions_after_the_last_bar_with_a_warning(
+    tmp_path: Path,
+) -> None:
+    """정지 중 감자·병합처럼 창 안 마지막 bar 뒤에 오는 사건은 엔진이 정산할 세션이 없어
+    run 전체를 죽인다(`CorporateActionWithoutBar`, engine/loop.py). 그 포지션은 이미 마지막
+    체결가에 동결된 상태이므로 어댑터가 사건을 빼고 경고로 남긴다 — 정상 종목의 사건은 그대로."""
+    root = build_workbench_root(
+        tmp_path / "root",
+        extra_factor_rows=[
+            ("000660", WB_HALT_DATE, "000660:capred:2024-01-10", "capred", 0.5, True),
+        ],
+    )
+    dataset = EquityDuckdbAdapter(root).load_backtest_dataset(
+        BacktestDataQuery(START, WB_HALT_DATE, ("000660:1",), None)
+    )
+    assert [b.session for b in dataset.bars] == [START, date(2024, 1, 9)]  # 01-10 은 정지 행
+    assert [(a.session, a.action_type) for a in dataset.corporate_actions] == [
+        (WB_SPLIT_DATE, "split")
+    ]
+    assert [w.code for w in dataset.warnings] == [
+        "equity.reference_rows_dropped",
+        "equity.corporate_action_without_bar_dropped",
+    ]
+    dropped = dataset.warnings[1]
+    assert dropped.severity is WarningSeverity.WARNING
+    assert "dropped=1" in dropped.message and "000660:1@2024-01-10:reverse_split" in dropped.message
 
 
 def test_backtest_dataset_refuses_unknown_and_index_ids(adapter: EquityDuckdbAdapter) -> None:

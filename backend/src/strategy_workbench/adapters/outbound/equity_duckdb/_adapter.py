@@ -45,7 +45,8 @@ unavailable 이 됐다 — 표를 읽으면서 그 의존이 끊겼다(매크로
 생존편향 방지). `load_factor_observations` 는 유니버스 인자가 없어 `RESEARCH_UNIVERSE_ID` 로 답한다.
 `load_backtest_dataset` 은 원주가 bar(`price_kind='reference'` 행·GAP-14 행 미방출, 경고로 건수
 기록) + `security_span` 구간 + `adj_factor` factor_ok 행(S07 과 같은 유형 매핑)이며 `adj_factor` 가
-없으면 예외다 — 분할 구간을 사건 없이 돌리는 백테스트는 조용히 틀린다.
+없으면 예외다 — 분할 구간을 사건 없이 돌리는 백테스트는 조용히 틀린다. 창 안 마지막 bar 뒤의
+사건(정지 중 감자 뒤 상폐)은 엔진이 정산 못 하므로 빼고 경고로 남긴다.
 
 duckdb 는 backend optional extra `equity` 다(`uv sync --extra equity`). 어댑터 생성 시 지연 import
 하고 없으면 `EquityDuckdbSetupError` 로 알린다.
@@ -1020,6 +1021,20 @@ class EquityDuckdbAdapter:
                     )
         bars.sort(key=lambda bar: (bar.session, bar.security_id))
         actions.sort(key=lambda action: (action.session, action.security_id, action.detail))
+        # 창 안 마지막 bar 뒤에 오는 사건(정지 중 감자·병합 뒤 상폐)은 엔진이 정산할 세션이 없어
+        # run 전체를 죽인다(`CorporateActionWithoutBar`, engine/loop.py). 그 포지션은 이미 마지막
+        # 체결가에 동결된 상태이므로 사건을 빼고 경고로 남긴다.
+        last_bar: dict[str, date] = {}
+        for bar in bars:  # session 오름차순이라 마지막 대입이 마지막 bar
+            last_bar[bar.security_id] = bar.session
+        unsettleable = [
+            action
+            for action in actions
+            if action.security_id not in last_bar or last_bar[action.security_id] < action.session
+        ]
+        if unsettleable:
+            skipped = {(a.security_id, a.session, a.detail) for a in unsettleable}
+            actions = [a for a in actions if (a.security_id, a.session, a.detail) not in skipped]
         memberships = tuple(
             UniverseMembershipRecord(
                 security_id=security_id,
@@ -1046,6 +1061,21 @@ class EquityDuckdbAdapter:
                     message=(
                         f"rows with NULL/non-positive or inconsistent OHLC dropped (GAP-14) — "
                         f"dropped={n_invalid}"
+                    ),
+                )
+            )
+        if unsettleable:
+            warnings.append(
+                DataWarning(
+                    code="equity.corporate_action_without_bar_dropped",
+                    message=(
+                        "corporate actions with no traded bar at/after the event inside the "
+                        "window were dropped (position frozen at its last trade) — "
+                        f"dropped={len(unsettleable)} "
+                        + ", ".join(
+                            f"{a.security_id}@{a.session}:{a.action_type}"
+                            for a in unsettleable[:10]
+                        )
                     ),
                 )
             )

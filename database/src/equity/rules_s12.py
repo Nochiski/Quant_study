@@ -28,6 +28,13 @@ fin_map 에 이미 있으므로 새 계정이 아니라 FIELD_MAP §3 의 판정
 API 는 정정이 있으면 정정본의 `rcept_no` 를 돌려주므로 `available_date` = 그 접수일이고
 `rcept_dt − period_end` 가 1년을 넘는 행이 실제로 있다(절단본 최대 445일).
 
+**매출 기준 두 축**: `revenue_basis` 는 그 행의 매출이 어느 규칙에서 나왔는지를,
+`revenue_basis_prev` 는 **직전 회계연도 같은 보고서**(`bsns_year` − 1 · 같은 `report_code`·
+`fs_div`)가 어느 규칙이었는지를 남긴다.
+한 법인 안에서 기준이 바뀌면 매출 시계열이 끊겨 가짜 성장률이 난다 — 삼성카드 2024
+`standard` 4.38조 → 2025 `banking_gross` 3.84조(−12%) · 메리츠금융지주 46.6조 → 14.1조(−70%).
+equity 는 **두 라벨을 싣기만 한다**. 무엇을 버릴지는 팩터층이 정한다(WORKFLOW §0-2).
+
 격리 4종(EG7): `non_krw`(`is_krw` 아님 — 원 단위 축 밖) · `period_unresolved` ·
 `rcept_lag_out_of_range` · `duplicate_vintage`(서로 다른 (bsns_year, reprt_code) 가 같은 grain 으로
 접힘 — 어느 쪽이 옳은지 규칙이 못 고르므로 둘 다 격리한다).
@@ -161,6 +168,14 @@ def acct_values_sql() -> str:
         for m, tier, kind, tokens, sjs, agg, req, basis, fam in acct_rows())
 
 
+# `revenue_basis_prev` 의 조회 축 — 같은 법인·같은 보고서·같은 연결범위의 **직전 회계연도**.
+# `.sql` 의 `basis_prev` 를 베끼지 않고 게이트가 되풀이 계산하는 자리라 술어를 한 곳에 둔다
+# (`o` = 판정 대상 행 · `p` = 직전 회계연도 후보 행).
+PREV_FY_PREDICATE = ("p.corp_code = o.corp_code AND p.report_code = o.report_code "
+                     "AND p.fs_div = o.fs_div AND TRY_CAST(p.bsns_year AS INTEGER) "
+                     "= TRY_CAST(o.bsns_year AS INTEGER) - 1")
+
+
 def _n(ctx: EquityGateContext, sql: str) -> int:
     row = ctx.con.execute(sql).fetchone()
     if row is None:
@@ -260,6 +275,20 @@ def eg3_fin_std(ctx: EquityGateContext) -> GateResult:
         "n_revenue_basis_conflict": _n(
             ctx, f'SELECT count(*) FROM "{v}" WHERE (revenue IS NULL) <> '
                  "(revenue_basis = 'unavailable')"),
+        # 직전 회계연도 기준 — 어휘는 같고, 직전 해가 없으면 NULL 이다
+        "n_revenue_basis_prev_outside_vocab": _n(
+            ctx, f'SELECT count(*) FROM "{v}" WHERE revenue_basis_prev IS NOT NULL '
+                 f"AND revenue_basis_prev NOT IN ({_vocab_sql(REVENUE_BASIS_VOCAB)})"),
+        # 채워진 값은 산출에 실제로 남은 직전 회계연도 행이 증언해야 한다
+        "n_revenue_basis_prev_unwitnessed": _n(
+            ctx, f'SELECT count(*) FROM "{v}" o WHERE o.revenue_basis_prev IS NOT NULL '
+                 f'AND NOT EXISTS (SELECT 1 FROM "{v}" p WHERE {PREV_FY_PREDICATE} '
+                 "AND p.revenue_basis = o.revenue_basis_prev)"),
+        # 반대 방향 — 직전 회계연도 기준이 하나로 모이는데 비워 두면 조인이 끊긴 것이다
+        "n_revenue_basis_prev_missing": _n(
+            ctx, f'SELECT count(*) FROM "{v}" o WHERE o.revenue_basis_prev IS NULL AND ('
+                 f'SELECT count(DISTINCT p.revenue_basis) FROM "{v}" p '
+                 f"WHERE {PREV_FY_PREDICATE}) = 1"),
     }
     metrics: dict[str, object] = {
         # corp.fiscal_month 검산 — **기록형**이다. `corp.fiscal_month` 는 현재값 스냅샷이라
@@ -285,6 +314,16 @@ def eg3_fin_std(ctx: EquityGateContext) -> GateResult:
         "n_by_fs_div": _counts(ctx, "fs_div"),
         "n_by_period_end_basis": _counts(ctx, "period_end_basis"),
         "n_by_revenue_basis": _counts(ctx, "revenue_basis"),
+        "n_by_revenue_basis_prev": _counts(ctx, "revenue_basis_prev"),
+        # **기록형**. 매출 기준이 해를 넘기며 바뀐 행·법인 수 — 「가짜 성장률」이 날 수 있는
+        # 구간의 크기다. 여기서 버리지 않는다(그 판정은 팩터층 몫, WORKFLOW §0-2).
+        "n_revenue_basis_changed": _n(
+            ctx, f'SELECT count(*) FROM "{v}" WHERE revenue_basis_prev IS NOT NULL '
+                 "AND revenue_basis_prev <> revenue_basis"),
+        "n_corp_revenue_basis_changed": _n(
+            ctx, f'SELECT count(DISTINCT corp_code) FROM "{v}" '
+                 "WHERE revenue_basis_prev IS NOT NULL "
+                 "AND revenue_basis_prev <> revenue_basis"),
         "coverage_by_account": _coverage(ctx, ACCOUNTS),
         "coverage_q4_derived": _coverage(ctx, Q4_COLUMNS),
         "coverage_cf_q": _coverage(ctx, CF_Q_COLUMNS),
@@ -386,9 +425,18 @@ FIELDS_FIN: tuple[FieldProfile, ...] = (
          "분기는 3개월·사업보고서는 12개월 값이다(report_code 가 기간을 정한다). TTM 합성은 "
          "팩터층이고 fin_std 에 ttm 컬럼은 없다. 4분기 파생은 net_income_q4_derived."),
     _fin("financial.revenue", "revenue", "매출액", "KRW", "amount",
-         "금융업 470사는 ifrs-full_Revenue 가 성립하지 않아 revenue_basis 가 행마다 산출 규칙을 "
-         "남긴다(banking_gross·insurance_gross 규칙은 미확정 — GAP-01, FACTORS §8).",
-         requires_confirmation=True),
+         "금융업은 ifrs-full_Revenue 가 성립하지 않아 행마다 financial.revenue_basis 가 산출 "
+         "규칙을 남긴다. **소비 규약** — ① 횡단면은 revenue_basis='standard' 끼리만 견주고 "
+         "은행·보험 합산분(banking_gross·insurance_gross)은 업종 안에서만 쓴다. "
+         "② financial.revenue_basis_prev 와 다르면 성장률은 결측으로 버린다. 값은 그대로 "
+         "내보내고 임계는 소비자가 정한다(WORKFLOW §0-2). 근거는 서버 현판 93,986행 실측 — "
+         "기준 분포 standard 92,861행/2,951법인 · unavailable 718/173 · banking_gross 269/39 · "
+         "insurance_gross 138/13. 오늘 상장 보통주 2,308 중 합산식으로 매출을 내는 27종목이 "
+         "시총 330조(5.6%)이고(BLOCKED_FACTORS §5-1), standard 와 합산식을 섞어 쓴 법인이 20 · "
+         "직전 회계연도 대비 기준이 바뀐 행이 367(136법인)이다. 그중 합산식이 끼어든 것은 "
+         "18법인 46건 — 삼성카드 2024 standard 4.38조 → 2025 banking_gross 3.84조(가짜 −12%) · "
+         "메리츠금융지주 46.6조 → 14.1조(−70%) · 한국금융지주 21.2조 → 5.9조(−72%) · "
+         "한화생명 2023 standard 0 → 2024 insurance_gross 24.6조(0으로 나누기)."),
     _fin("financial.total_assets", "total_asset", "자산총계", "KRW", "amount",
          "fin_std.total_asset ← 표준계정 자산총계."),
     _fin("financial.operating_income", "op_profit", "영업이익", "KRW", "amount",
@@ -403,6 +451,22 @@ FIELDS_FIN: tuple[FieldProfile, ...] = (
     _fin("financial.gross_profit", "gross_profit", "매출총이익", "KRW", "amount",
          "fin_map.FIN_MAP['gross_profit'](concept GrossProfit·nm 매출총이익) 실재 — 24계정에 "
          "실었다(DESIGN §10 P30). 금융업은 매출총이익 개념이 없어 결측이 정상이다."),
+    # 매출 기준 두 축 — 계정이 아니라 **라벨**이다. `financial.revenue` 의 소비 규약이 이 둘을
+    # 읽으라고 말하므로 선언하지 않으면 규약이 지킬 수 없는 약속이 된다(값만 내고 근거를 안 내는
+    # 상태). 어휘는 REVENUE_BASIS_VOCAB 로 닫혀 있고 임계·판정은 넣지 않는다.
+    _fin("financial.revenue_basis", "revenue_basis", "매출 산출 기준", "", "category",
+         "fin_std.revenue_basis ∈ {standard, banking_gross, insurance_gross, consensus, "
+         "unavailable}. 매출이 NULL 인 행은 반드시 unavailable 이고(EG3 "
+         "n_revenue_basis_conflict), 합산식은 require 태그가 있을 때만 발동한다(보험 → 은행 "
+         "순). PSR·영업이익률을 한 순위표에 섞을 수 있는지는 이 라벨을 보고 소비자가 정한다.",
+         scope="internal"),
+    _fin("financial.revenue_basis_prev", "revenue_basis_prev", "직전 회계연도 매출 산출 기준",
+         "", "category",
+         "같은 법인·같은 report_code·같은 fs_div 의 bsns_year − 1 행이 쓴 기준. 직전 해가 "
+         "없거나 그 해 기준이 갈리면 NULL 이다. revenue_basis 와 다르면 매출 시계열이 끊긴 "
+         "것이므로 성장률(G01)을 결측 처리하라 — equity 는 판정하지 않고 두 라벨만 싣는다. "
+         "EG3 의 n_revenue_basis_changed·n_corp_revenue_basis_changed 가 끊긴 구간의 크기를 "
+         "기록한다.", scope="internal"),
     # equity 내부 스코프 — FIELD_MAP §3 이 "dataset_profile(S19)이 노출 여부를 정한다" 한 16계정
     _fin("financial.cost_of_sales", "cost_of_sales", "매출원가", "KRW", "amount",
          "equity 내부 스코프. 매출총이익 = 매출 − 매출원가 검산 축.", scope="internal"),
@@ -454,7 +518,8 @@ FIN_STD = register(EquityTable(
              "fs_div": "VARCHAR", "vintage_kind": "VARCHAR",
              "bsns_year": "VARCHAR", "rcept_no": "VARCHAR", "rcept_dt": "DATE",
              "period_start": "DATE", "period_end_basis": "VARCHAR", "currency": "VARCHAR",
-             "revenue_basis": "VARCHAR", "restated_unknown": "BOOLEAN",
+             "revenue_basis": "VARCHAR", "revenue_basis_prev": "VARCHAR",
+             "restated_unknown": "BOOLEAN",
              **{m: _VALUE_COLUMNS[m] for m in ACCOUNTS},
              **{c: _VALUE_COLUMNS[c] for c in Q4_COLUMNS},
              "q4_derived_n_rows": "BIGINT", "q4_derived_available_date": "DATE",
@@ -499,6 +564,7 @@ BASELINE_SEED = Path(__file__).parent / "baseline_seed_s12.json"
 __all__ = ["ACCOUNTS", "BASELINE_SEED", "CF_ACCOUNTS", "CF_PRIOR_REPORT", "CF_Q_COLUMNS",
            "TIER_CONCEPT", "TIER_CONCEPT_ALT", "TIER_NM", "TIER_REVENUE_FALLBACK",
            "EXTRA_ACCOUNTS", "FIN_STD", "FLOW_ACCOUNTS", "PERIOD_END_BASIS_VOCAB",
+           "PREV_FY_PREDICATE",
            "Q4_COLUMNS", "REJECT_REASONS", "REPORT_CODE_VOCAB", "REVENUE_BASIS_VOCAB",
            "STOCK_ACCOUNTS", "TABLES", "VINTAGE_KIND", "VINTAGE_KIND_VOCAB", "acct_rows",
            "acct_values_sql"]

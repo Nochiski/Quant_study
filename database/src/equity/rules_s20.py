@@ -89,11 +89,16 @@ FACTORS: tuple[FactorSpec, ...] = (
     _f("V02", "PER", ("price.market_cap", "financial.net_income"), "factor_layer",
        "FACTORS §1 V02 = 시가총액 / 당기순이익. 기간 축(분기 3개월 / 사업 12개월)은 report_code "
        "가 정하므로 TTM 합성은 팩터층 몫이다.", registry="financial.earnings_yield"),
-    _f("V03", "PSR", ("price.market_cap", "financial.revenue"), "equity",
-       "FACTORS §1 V03 = 시가총액 / 매출액.",
-       caveat="금융업 470사는 매출액 개념이 성립하지 않는다 — banking_gross·insurance_gross "
-              "합산식이 미확정(GAP-01, FACTORS §8·§11-7). equity 가 revenue_basis 규칙을 "
-              "확정해야 풀린다.", registry="financial.sales_to_price"),
+    _f("V03", "PSR", ("price.market_cap", "financial.revenue", "financial.revenue_basis"),
+       "equity", "FACTORS §1 V03 = 시가총액 / 매출액.",
+       caveat="**금융업 매출 규칙을 확정했다(2026-09-08)** — 합산식을 새로 정의하지 않고 기준을 "
+              "밝혀 내보낸다(GAP-01 종결). 소비 규약: 횡단면은 financial.revenue_basis = "
+              "'standard' 끼리만 견주고 은행·보험 합산분(banking_gross 39법인 · "
+              "insurance_gross 13법인)은 업종 안에서만 쓴다. 오늘 상장 보통주 2,308 중 합산식 "
+              "27종목이 시총 330조(5.6%)다. standard 로 분류된 증권사도 '영업수익'이 매출로 "
+              "잡혀 PSR 이 구조적 극단값이 되는데 이건 데이터 결함이 아니라 업종 경제학이라 "
+              "equity 가 고칠 것이 아니다(BLOCKED_FACTORS §5-1).",
+       registry="financial.sales_to_price"),
     _f("V04", "PCR", ("price.market_cap", "financial.operating_cash_flow"), "factor_layer",
        "FACTORS §1 V04 = 시가총액 / 영업활동현금흐름(연초누계 축)."),
     _f("V05", "EV/EBITDA", ("price.market_cap", "financial.borrowings", "financial.cash",
@@ -116,9 +121,12 @@ FACTORS: tuple[FactorSpec, ...] = (
        registry="financial.roe"),
     _f("Q02", "ROA", ("financial.net_income", "financial.total_assets"), "factor_layer",
        "FACTORS §2 Q02 = 순이익 / 자산총계.", registry="financial.roa"),
-    _f("Q03", "영업이익률", ("financial.operating_income", "financial.revenue"), "equity",
+    _f("Q03", "영업이익률", ("financial.operating_income", "financial.revenue",
+                          "financial.revenue_basis"), "equity",
        "FACTORS §2 Q03 = 영업이익 / 매출액.",
-       caveat="V03 과 같은 GAP-01 — 금융업 매출액 규칙 미확정.",
+       caveat="V03 과 같은 소비 규약 — financial.revenue_basis = 'standard' 끼리만 횡단면 "
+              "비교하고 은행·보험 합산분은 업종 안에서만 쓴다. 분자(영업이익)는 기준과 무관하게 "
+              "표준계정이라 분모만 갈린다.",
        registry="financial.operating_margin"),
     _f("Q04", "발생액", ("financial.net_income", "financial.operating_cash_flow",
                        "financial.total_assets"), "factor_layer",
@@ -139,8 +147,16 @@ FACTORS: tuple[FactorSpec, ...] = (
        caveat="순영업자산의 계정 조합 정의는 FACTORS §11-3 에서 아직 미결이다 — 재료는 있고 "
               "정의가 팩터층 몫이다."),
     # 3. 성장
-    _f("G01", "매출성장률", ("financial.revenue",), "equity",
-       "FACTORS §3 G01 = (당기 매출 / 전기 매출) − 1.", caveat="V03 과 같은 GAP-01."),
+    _f("G01", "매출성장률", ("financial.revenue", "financial.revenue_basis",
+                          "financial.revenue_basis_prev"), "equity",
+       "FACTORS §3 G01 = (당기 매출 / 전기 매출) − 1. 기준 단절을 가릴 재료를 요구 목록에 "
+       "함께 넣어 「매출만 있으면 계산된다」는 오해를 막는다.",
+       caveat="**매출 기준 단절을 재료로 막는다(2026-09-08)** — financial.revenue_basis 가 "
+              "financial.revenue_basis_prev 와 다르면 그 해 성장률은 결측 처리하라. 서버 현판 "
+              "실측으로 직전 회계연도 대비 기준이 바뀐 행이 367(136법인)이고 그중 합산식이 "
+              "끼어든 것이 18법인 46건이다 — 삼성카드 −12% · 메리츠금융지주 −70% · 한국금융지주 "
+              "−72% 는 전부 가짜이고 한화생명은 직전이 0이라 나눗셈 자체가 성립하지 않는다. "
+              "equity 는 두 라벨을 싣기만 하고 버리지 않는다(WORKFLOW §0-2)."),
     _f("G02", "영업이익성장률", ("financial.operating_income",), "factor_layer",
        "FACTORS §3 G02 = (당기 영업이익 / 전기) − 1."),
     _f("G03", "자산성장률", ("financial.total_assets",), "factor_layer",

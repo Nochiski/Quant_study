@@ -21,7 +21,7 @@ from pathlib import Path
 from stage.gates import GateResult, GateStatus
 
 from .gates import EquityGateContext, require_const, require_const_date
-from .model import AVAILABLE_NONE, EquityTable, register
+from .model import AVAILABLE_NONE, EquityTable, FieldProfile, register
 
 SQL_DIR = Path(__file__).parent / "sql"
 
@@ -210,6 +210,37 @@ SECURITY_SPAN = register(EquityTable(
     extra_gates=(eg3x_span_invariants, eg16a_respan_count),
 ))
 
+# ── S02-2 벤치마크 필드 (R04 시장 베타) ──────────────────────────────────────
+# 막혀 있던 것은 데이터가 아니라 **선언**이었다. 서버 `index_daily` 는 347,821행 · 코스피 51지수 ·
+# 코스닥 40지수 · 2010-01-04 ~ 2026-08-20 이고 벤치마크로 쓸 코스피·코스닥·코스피 200·코스닥 150
+# 전부 종가가 하루도 빠짐없이 차 있다.
+#
+# 선언하지 않았던 이유는 **주소 체계**다 — 소비 규약이 모든 값을 `security_id = {종목코드}:{구간}`
+# 으로 부르는데 지수는 종목이 아니다. 그래서 커버 축을 종목 격자가 아니라 `table_rows`(표 행수
+# 분모)로 둔다(`fin_std` 계열과 같은 축).
+#
+# **어댑터가 `idx:` 주소를 서빙하는 것은 이 선언과 별개다.** 선언은 「재료가 카탈로그에 있다」는
+# 뜻이고, 실제 소비는 워크벤치 어댑터가 그 접두를 알아보아야 가능하다(엔진 계약 변경 — 예약 접두
+# `idx:` 는 FIELD_MAP §1 에 이미 어휘로 적혀 있고, 소비자 그릇인
+# `BacktestDataQuery.benchmark_security_id` 도 이미 있다). 이 층은 재료를 카탈로그에 올려 두고
+# 통로 개설은 소비층에 넘긴다.
+INDEX_FIELDS: tuple[FieldProfile, ...] = (
+    FieldProfile(
+        field_id="benchmark.close", columns=("close_idx",),
+        label="지수 종가", unit="pt", value_type="price", frequency="session",
+        recommended_lag_sessions=0, recommended_lag_days=0, point_in_time=True,
+        requires_confirmation=False,
+        disclosure_basis="지수는 가격류라 stage 가 공표 시각을 안다(lag_known=true) — 가격 축과 "
+                         "같은 0 세션. 장 마감 뒤 확정값이고 그날 안에 쓸 수 있다",
+        evidence="index_daily.close_idx ← stg_index_daily.close_idx. 커버 축은 **표 행수**"
+                 "(`table_rows`)다 — 지수는 종목이 아니라 종목 격자에 분모가 없다. "
+                 "서버 347,821행 · 코스피 51지수 · 코스닥 40지수 · 2010-01-04 ~ 2026-08-20, "
+                 "벤치마크 4종(코스피·코스닥·코스피 200·코스닥 150) 종가 결측 0. "
+                 "**소비하려면 어댑터가 `idx:` 주소를 알아보아야 한다** — 이 선언은 재료가 "
+                 "카탈로그에 있다는 뜻이고 통로 개설은 소비층 몫이다(FIELD_MAP §1 예약 접두).",
+        coverage_axis="table_rows", axis_columns=("index_class", "index_name", "date")),
+)
+
 INDEX_DAILY = register(EquityTable(
     name="index_daily",
     grain=("index_class", "index_name", "date"),
@@ -232,6 +263,7 @@ INDEX_DAILY = register(EquityTable(
         "open_idx", "high_idx", "low_idx", "volume_shr", "value_krw", "mktcap_krw")},
     available_basis=("default",),
     content_date_column="date",
+    field_profiles=INDEX_FIELDS,
 ))
 
 TABLES: tuple[EquityTable, ...] = (TRADING_CALENDAR, SECURITY_SPAN, INDEX_DAILY)

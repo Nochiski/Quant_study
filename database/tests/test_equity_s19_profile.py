@@ -48,8 +48,9 @@ CHAIN: tuple[str, ...] = (
     "opinion_daily", "opinion_broker_daily")
 
 # 2026-09-07 S08-2: `flow.foreign_ownership`·`flow.foreign_limit_exhaustion` 선언(72 → 74).
-N_FIELDS = 75                    # 선언 행수 — 코드가 정본이라 서버에서도 같다
-N_FIELD_MAP_SCOPE = 33           # FIELD_MAP §2 42 어휘 중 프로파일 행을 갖는 것
+# 2026-09-07 S02-2: `benchmark.close` 선언(75 → 76, R04 시장 베타).
+N_FIELDS = 76                    # 선언 행수 — 코드가 정본이라 서버에서도 같다
+N_FIELD_MAP_SCOPE = 34           # FIELD_MAP §2 42 어휘 중 프로파일 행을 갖는 것
 N_INTERNAL_SCOPE = 42            # equity 내부 스코프(price.adj_close·fin_std 계정·4B·유니버스 …)
 N_FIELD_MAP_VOCAB = 44           # FIELD_MAP §2 표의 field_id 수 (check_field_map.py 와 같은 축)
                                  # 2026-09-07: `flow.foreign_limit_exhaustion` 신설(F08 재료)
@@ -156,8 +157,9 @@ def test_대응표_어휘_중_행이_없는_필드는_어댑터의_unavailable_�
     got = {f for (f,) in _rows(r.out_dir, "SELECT field_id FROM dp")}
     absent = sorted(_field_map_vocab() - got)
     assert absent == sorted([
-        # 원천 부재 10 (FIELD_MAP §3 미지원 + GAP-09 benchmark)
-        "benchmark.close", "flow.block_buy", "flow.block_sell", "credit.net_buy",
+        # 원천 부재 9 (FIELD_MAP §3 미지원). `benchmark.close` 는 2026-09-07 S02-2 로
+        # `index_daily` 위에 선언됐다 — 어댑터의 `idx:` 통로 개설은 별개다
+        "flow.block_buy", "flow.block_sell", "credit.net_buy",
         "credit.collateral_value", "credit.loan_value", "credit.forced_liquidation",
         "event.earnings_surprise", "event.index_membership_change",
         "event.disclosure_sentiment",
@@ -232,15 +234,21 @@ def test_격자_3테이블은_어댑터가_내는_6필드만_선언한다(built)
         assert pit is True, field_id
 
 
-def test_격자_필드_중_미결_조건이_남은_것은_기관_순매수_하나다(built) -> None:
-    """GAP-03 — `orgn` 은 원장의 합계 컬럼인데 기관 7주체 합과 다르고 값의 기준이 공표되지
-    않았다. 합계 컬럼을 쓸지 7주체를 다시 합할지가 소비 측에 남아 S20 이 partial_support 로
-    옮긴다. 나머지 5필드는 단위·산출 규칙·원천 선택이 전부 닫혀 있다."""
+def test_격자_필드에_미결_조건이_남지_않았다(built) -> None:
+    """GAP-03 이 2026-09-07 에 닫히며 격자 축의 미결이 없어졌다.
+
+    `orgn` 은 원장의 합계 컬럼인데 기관 7주체 합과 달라 「합계를 쓸지 7주체를 다시 합할지」가
+    소비 측에 남아 있었다. 서버 전수 실측이 그 질문에 답했다 — **부분의 합으로는 재구성되지
+    않는다**: 7주체 정확 일치 80.9% · 100만원 이내 94.0%, 국가를 더한 8주체도 82.9% / 97.7% 다.
+    어긋나는 방향이 부호 반반(−728,422 / +708,362)이고 결측과 무관해 특정 주체가 빠진 것이
+    아니라 원장 자체의 잡음이다. **원장이 정본**이라는 원칙대로 합계 컬럼을 쓰고, 7주체는
+    그대로 다 나가므로 소비자가 재합산할 수 있다.
+    """
     _, r = built
     got = dict(_rows(r.out_dir, "SELECT field_id, requires_confirmation FROM dp "
                                 "WHERE table_name IN ('flow_daily', 'short_daily', "
                                 "'credit_daily') ORDER BY 1"))
-    assert {k for k, v in got.items() if v} == {"flow.institution_net_buy"}
+    assert {k for k, v in got.items() if v} == set()
 
 
 def test_격자_필드의_stage_원천은_그_테이블의_원장을_포함한다(built) -> None:

@@ -171,3 +171,32 @@ def test_index_name을_뭉개면_EG3가_폐기한다(tmp_path: Path) -> None:
     assert r.status is build.BuildStatus.GATE_FAILED
     eg3 = _gate(r, "EG3")
     assert eg3.status is GateStatus.FAIL and eg3.metrics["n_duplicate_keys"] == 8188
+
+
+# ── R04 시장 베타 — 벤치마크 필드 선언 (2026-09-07) ──────────────────────────
+
+
+def test_벤치마크_종가_필드가_선언된다() -> None:
+    """R04(시장 베타)가 요구하는 `benchmark.close` 를 `index_daily` 위에 선언한다.
+
+    **막혀 있던 것은 데이터가 아니라 선언이었다.** 서버 `index_daily` 는 347,821행 ·
+    코스피 51지수 · 코스닥 40지수 · 2010-01-04 ~ 2026-08-20 이고 벤치마크로 쓸
+    코스피·코스닥·코스피 200·코스닥 150 전부 종가가 하루도 빠짐없이 차 있다.
+
+    선언하지 않았던 이유는 **주소 체계**였다 — 소비 규약이 모든 값을
+    `security_id = {종목코드}:{구간번호}` 로 부르는데 지수는 종목이 아니다. 그래서 커버 축을
+    종목 격자가 아니라 `table_rows`(표 행수 분모)로 둔다. 같은 축을 `fin_std` 계열이 쓴다.
+
+    **어댑터가 `idx:` 주소를 서빙하는 것은 이 선언과 별개**다(엔진 계약 변경). 선언만으로
+    준비도가 열리는 것은 「재료가 카탈로그에 있다」는 뜻이고, 실제 소비는 어댑터가 붙어야
+    가능하다 — 그 경계는 `EQUITY_FIELD_MAP` §1 의 예약 접두 `idx:` 가 이미 어휘로 적어 두었다.
+    """
+    decl = {f.field_id: f for f in rules_s02.INDEX_FIELDS}
+    assert "benchmark.close" in decl
+    f = decl["benchmark.close"]
+    assert f.columns == ("close_idx",)
+    assert f.coverage_axis == "table_rows"
+    assert f.value_type == "price" and f.frequency == "session"
+    # 지수는 가격류라 stage 가 공표 시각을 안다 — 가격 축과 같은 0 세션
+    assert f.recommended_lag_sessions == 0
+    assert not f.requires_confirmation

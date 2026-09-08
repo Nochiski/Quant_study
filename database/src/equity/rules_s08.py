@@ -394,15 +394,23 @@ FIELDS: tuple[FieldProfile, ...] = (
         field_id="flow.institution_net_buy", columns=("orgn_krw",),
         label="기관 순매수(대금)", unit="KRW", value_type="amount", frequency="session",
         recommended_lag_sessions=1, recommended_lag_days=1, point_in_time=True,
-        requires_confirmation=True, disclosure_basis=_FLOW_DISCLOSURE,
+        requires_confirmation=False, disclosure_basis=_FLOW_DISCLOSURE,
         evidence="flow_daily.orgn_krw ← 키움 orgn_krw ∪ KIS orgn_ntby_tr_pbmn_krw. "
-                 "**미결 조건(GAP-03)**: `orgn` 은 원장의 합계 컬럼인데 그 값이 무엇을 합한 것인지 "
-                 "원천이 공표하지 않고, 기관 7주체(fnnc_invt·insrnc·invtrt·etc_fnnc·bank·"
-                 "penfnd_etc·samo_fund) 합과 실제로 다르다(절단본 18,581행 중 10,783행 불일치, "
-                 "편차 최대 2,834억원 — EG3_flow_daily 기록형이 매 빌드 갱신). 그래서 12주체 "
-                 "항등식(EG3-P06)에서도 빠진다. 합계 컬럼을 쓸지 7주체를 다시 합할지는 소비 측이 "
-                 "골라야 하고(FACTORS §11-2), 그 선택이 남아 있는 동안 이 필드는 "
-                 "partial_support 다. " + _FLOW_SRC_NOTE,
+                 "**「기관」 = 원장 합계 컬럼으로 확정(2026-09-07, GAP-03 종결).** `orgn` 이 "
+                 "무엇을 합한 것인지 원천이 공표하지 않아 미결로 두었는데, 서버 전수 실측 결과 "
+                 "**부분의 "
+                 "합으로는 재구성되지 않는다**: 키움 7,537,984행에서 7주체(fnnc_invt·insrnc·"
+                 "invtrt·etc_fnnc·bank·penfnd_etc·samo_fund) 합과 정확히 같은 것이 80.9%, "
+                 "100만원 이내가 94.0% 다. 국가(natn)를 더한 8주체 합도 82.9% / 97.7% 로 나아질 "
+                 "뿐 일치하지 않는다. 어긋나는 방향은 **부호가 정확히 반반**(−728,422 / +708,362)"
+                 "이고 7주체 결측과 무관하며(결측 있는 행 0), 편차 중앙값은 0 · 90분위 100만원 "
+                 "이라 특정 주체가 빠진 것이 아니라 원장 자체의 반올림·집계 잡음이다. "
+                 "**원장이 정본**이라는 이 층의 원칙(WORKFLOW §0-2 정본 우선순위)대로 합계 컬럼을 "
+                 "쓴다. 7주체를 직접 합하고 싶은 소비자를 위해 컬럼 7개는 그대로 다 나가므로 "
+                 "잃는 "
+                 "것이 없고, 불일치 건수는 `EG3_flow_daily` 기록형이 매 빌드 센다. 12주체 항등식"
+                 "(EG3-P06)에서 빠지는 것은 그대로다 — 합계 컬럼이라 항등식의 항이 아니다. "
+                 + _FLOW_SRC_NOTE,
         coverage_axis="grid_session", axis_columns=_FAXIS),
     FieldProfile(
         field_id="flow.foreign_ownership", columns=("foreign_wght_pct",),

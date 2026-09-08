@@ -8,6 +8,24 @@
 
 ---
 
+## 목차
+
+**처음이면 `START_HERE.md` 부터.** 이 문서는 그다음이다.
+
+| 절 | 언제 보나 |
+|---|---|
+| **§0** 하는 일 / 하지 않는 일 | **항상 먼저** — 경계가 무너진 실제 사례 2건 |
+| §1~§2 한 문장 · 29표와 빌드 순서 | 구조를 볼 때 |
+| §3~§4 서버에서 돌리는 법 · 게이트 실패 | 빌드할 때 |
+| §5~§6 baseline 상수 · 판본 규칙 | 상수를 바꿀 때 |
+| §7~§8 알려진 함정 · 절단본 재생성 | 막혔을 때 |
+| **§8-2** 서버 반영 이력 (09-07) | **무엇이 언제 반영됐는지** |
+| §9 미해결 후속 | 다음 작업을 고를 때 |
+| §10 파일 지도 | 코드를 찾을 때 |
+| §11~§13 조정가 · 소비자가 먼저 알 것 · 소비자 기동 | **소비자에게 넘길 때** |
+
+---
+
 ## 0. 이 층이 하는 일과 하지 않는 일 (읽기 전에)
 
 **목적** — WORKFLOW §0 정본: **「날짜 D에, 그 시점에 알 수 있던 정보만으로, 그날 실존한 전
@@ -33,7 +51,7 @@
 
 ## 1. 한 문장
 
-`data/stage/` 의 원장 parquet 을 읽어 **28개 equity 표**(팩트·차원 25 + 선언표 3 —
+`data/stage/` 의 원장 parquet 을 읽어 **29개 equity 표**(팩트·차원 25 + 선언표 3 —
 `declaration_table=True` 는 `universe_policy`·`dataset_profile`·`factor_readiness`)를 짓고,
 `equity.duckdb` 카탈로그(매크로 8)와 워크벤치 어댑터(`equity_duckdb`, 필드 30)를 통해
 백테스트 파이프라인에 point-in-time 관측을 공급한다.
@@ -44,7 +62,7 @@
 
 ---
 
-## 2. 28표와 빌드 의존 순서
+## 2. 29표와 빌드 의존 순서
 
 아래 순서는 각 `EquityTable.inputs` 의 위상 정렬이며, `database/scripts/equity_rebuild_all.sh` 의
 `ORDER` 와 **같은 문자열**이다(둘이 갈리면 스크립트가 아니라 이 표를 고칠 것).
@@ -137,7 +155,7 @@ scripts/run_equity.sh <table> --threads 3 --memory-limit 8GB
 `flock -n /tmp/quant_ledger_equity.lock` 으로 **직렬화**한다(RAM 15GB, 격자 표는 5~7GB 를 쓴다).
 락이 잡혀 있으면 exit 3 으로 즉시 빠진다 — 병렬 빌드는 시도하지 마라.
 
-### 3-3. 28표 전량 재빌드(의존 순서)
+### 3-3. 29표 전량 재빌드(의존 순서)
 
 ```bash
 # 배포 1회 — 러너는 저장소에 산다
@@ -157,7 +175,7 @@ ssh kael-server "cd ~/quant-ledger && chmod +x scripts/equity_rebuild_all.sh && 
 서버 실측 소요는 **409초**(P42, 27표 기준 2회 모두) + `price_adj_daily` 58초(P43). 두 번 돌려 `summary.tsv` 의 `content_hash` 열을
 비교하는 것이 재현성 검사다 — 아래 §7 ⑦ 의 EG5a 한계 때문에 게이트만 믿으면 안 된다.
 
-커밋된 28표를 **빌드 없이 재판정**만 하려면(baseline 상수를 바꾼 뒤 확인용):
+커밋된 29표를 **빌드 없이 재판정**만 하려면(baseline 상수를 바꾼 뒤 확인용):
 
 ```bash
 scp database/scripts/equity_gate_all.sh kael-server:~/quant-ledger/scripts/
@@ -339,7 +357,7 @@ scp database/src/equity/baseline_locked.json kael-server:~/quant-ledger/data/equ
 ### 5-3. 미등재로 남긴 것
 
 - **`factor_readiness.ready_min` — 미등재 확정(2026-09-07).** EG10 의 ready 하한. 서버 실측은
-  **ready 35 / blocked 19**(P41′). DESIGN §4-8 의 초기값 36 은 격자 3표를 전제로 센 수이고
+  **ready 42 / blocked 12**(2026-09-07). DESIGN §4-8 의 초기값 36 은 격자 3표를 전제로 센 수이고
   실측이 35 라 등재하면 첫 빌드가 폐기된다. 35 를 등재하면 하한이 실측과 같아져 회귀 감시로는
   유효하지만 개선 여지를 0 으로 못 박는다.
 
@@ -441,79 +459,70 @@ scp database/src/equity/baseline_locked.json kael-server:~/quant-ledger/data/equ
 
 ---
 
-## 8-2. 2026-09-07 서버 반영 기록
+## 8-2. 서버 반영 이력 — 2026-09-07 (e1.6.0 → e1.13.0)
 
-이 날 서버 `data/equity/` 가 여섯 표 바뀌었다. **판본 `RULES_VERSION` e1.6.0 → e1.8.0**
-(배포 전 코드 백업 `/tmp/equity_backup_e160_20260907T014756Z`, baseline 백업
-`data/equity/baseline.json.bak_s05_ratio`·`.bak_s17_tol`).
+이 날 서버 `data/equity/` 가 크게 움직였다. 배포 전 코드 백업
+`/tmp/equity_backup_e160_20260907T014756Z`, baseline 백업 `baseline.json.bak_s05_ratio`·`.bak_s17_tol`.
 
-| 표 | 무엇이 바뀌었나 | 확인 |
+### 한눈에
+
+| 판본 | 무엇 | 준비도 |
 |---|---|---|
-| `corp_event` | `ratio_basis` 열 신설 · 무상증자 비율 **354건 복구**(`n_ratio_null` 922 → 568) | 2회 빌드 해시 동일 `3147:850cb6ec5c4508f1` · EG5a PASS |
-| `adj_factor` | `no_bar_after_apply` 열 신설(DEFECT-10, 26행) · 무상증자 `factor_ok` 840 → **1,084** · 행수 5,733 → 5,507 | 전 게이트 PASS |
-| `price_adj_daily` | 512종목 조정가 재계산 | 10,890,251행 · 59초 |
-| `universe_daily` | `corp_action_window` 축소 | 10,890,251행 |
-| `dataset_profile`·`factor_readiness` | 하류 갱신 | 72행 · 54행 |
-| `consensus_daily` | 게이트 상수만(오차 1% · 하한 0.93) — **산출 불변** | 해시 그대로 `145316:d0ae713bdd5a6e58` · 2회 EG5a PASS |
+| e1.7.0 | `adj_factor.no_bar_after_apply` 신설 (DEFECT-10, 26행) | 35 |
+| e1.8.0 | `corp_event.ratio_basis` + 무상증자 비율 **354건 복구** | 35 |
+| e1.9.0 | `corp_event` 가 자사주·CB 적재 (3,147 → **9,749행**) | **37** |
+| e1.10.0 | `flow_daily` 에 외국인 보유 3컬럼 | **39** |
+| e1.11.0 | `short.short_sale_volume` 선언 + F05 정정 | **40** |
+| e1.12.0 | 「기관」 = 원장 합계 확정 (GAP-03 종결) | **41** |
+| e1.13.0 | `benchmark.close` 선언 (R04) | **42** |
 
-복구 뒤 실측: 계수를 못 낸 사건 **3,539건** 중 그 사건일에 주가가 10% 넘게 움직인 것은
-**1,162건**뿐이다. 나머지는 계수가 없어도 값이 멀쩡하다 — 「미조정 = 틀림」이 아니라는 근거다
-(`DECISIONS_PENDING.md` 결정 1 §1).
+같은 날 게이트 상수도 하나 바뀌었다 — 컨센서스 허용 오차 0.1% → **1%**, 하한 0.65 → **0.93**
+(산출 불변, `consensus_daily` 해시 그대로).
 
-**어댑터 쪽 두 건도 같은 날 고쳤다**(둘 다 `main` 병합 완료):
-- 워크벤치 어댑터가 `unknown_krx` 어휘를 몰라 그 사건이 든 창의 백테스트가 **전부 죽었다**.
-  엔진 어댑터는 fc6e889 에서 이미 배웠는데 워크벤치는 못 배운 상태였다(서버 factor_ok 55행).
-- 어댑터가 공개시차를 자기 상수(전부 0세션)로 우기고 `dataset_profile` 을 무시했다 —
-  30필드 중 **25개가 한 세션 이르게** 열려 있었다(확정 look-ahead).
-
----
-
-## 8-3. 2026-09-07 사건 유형 확장 (e1.9.0)
-
-`corp_event` 가 **자사주 취득 1,912건 · CB 발행 4,690건**을 싣기 시작했다(3,147 → **9,749행**).
+### 표별 결과
 
 | 표 | 결과 |
 |---|---|
 | `corp_event` | 9,749행 · 2회 빌드 해시 동일 `9749:3befee5c625e778e` · EG5a PASS |
-| `adj_factor` | **해시 불변** `5507:86dceab4e5491482` |
-| `price_adj_daily` | **해시 불변** `10890251:c78a6675e0815512` |
-| `universe_daily` | **해시 불변** `10890251:6fb8d3a84ebb534d` |
-| `dataset_profile` | 커버 상승 — `event.buyback_amount` 0 → 19.7% · `event.capital_raise_amount` 0 → 48.2% |
-| `factor_readiness` | **ready 35 → 37** · blocked 19 → 17 (`no_observations` 사유 소멸) |
+| `adj_factor` | 5,507행 · 무상증자 `factor_ok` 840 → **1,084** |
+| `price_adj_daily` | 10,890,251행 · 512종목 조정가 재계산 |
+| `flow_daily` | 9,201,516행(**불변**) · `9201516:cbb88b0b4a27244a` · EG5a PASS |
+| `dataset_profile` | 72 → **76행** |
+| `factor_readiness` | ready 35 → **42** · blocked 19 → **12** |
 
-**조정 축 세 표의 해시가 그대로인 것이 이 확장의 핵심 성질이다.** 두 유형은 가격 조정 사건이
-아니고(자사주는 주식수 불변·CB 는 그날 주식수 불변) `adj_factor` 가 계수 4유형만 읽으므로
-구조적으로 격리돼 있다. 게이트 둘이 그 격리를 지킨다 — 사실 유형이 `ratio` 를 가지거나 계수
-유형이 `amount_krw` 를 가지면 폐기다.
+### 이 이력에서 남길 두 가지
 
-**유상증자(`stg_event_piic` 5,538행)는 아직 못 싣는다.** 신주배정기준일 컬럼이 없고
+**① 사실 유형은 조정 축을 건드리지 않는다.** 자사주·CB 를 6,602건 실었는데
+`adj_factor`·`price_adj_daily`·`universe_daily` **세 표의 해시가 그대로**였다. 두 유형은 가격
+조정 사건이 아니고(자사주는 주식수 불변·CB 는 그날 주식수 불변) `adj_factor` 가 계수 4유형만
+읽어 구조적으로 격리돼 있다. 폐기형 게이트 둘이 그 격리를 지킨다.
+
+**② 컬럼을 붙여도 행 수는 안 변한다.** 외국인 보유 3컬럼이 붙었는데 `flow_daily` 는
+9,201,516행 그대로다 — 격자 등식(EG1)이 (date, ticker) 축이기 때문이다. 별도 표를 만들지 않은
+이유가 이것이고, 같은 판단이 다음에도 쓰인다.
+
+### 복구 뒤 실측 — 「미조정 = 틀림」이 아니다
+
+계수를 못 낸 사건 **3,539건** 중 그 사건일에 주가가 10% 넘게 움직인 것은 **1,162건**뿐이다.
+나머지는 계수가 없어도 값이 멀쩡하다. 사유 라벨과 실제도 따로 논다 —
+`krx_base_inconsistent` 는 90.7% 가 움직이고 `near_dup_suppressed`·`capred_paid` 214건은
+**0%** 다(그 둘은 고칠 것이 아니라 정상 동작이다). 자세한 것은
+`DECISIONS_PENDING.md` 결정 1.
+
+### 어댑터 쪽 두 건 (같은 날, `main` 병합 완료)
+
+- 워크벤치 어댑터가 `unknown_krx` 어휘를 몰라 그 사건이 든 창의 백테스트가 **전부 죽었다**.
+  엔진 어댑터는 `fc6e889` 에서 이미 배웠는데 워크벤치는 못 배운 상태였다(서버 factor_ok 55행).
+  **두 어댑터는 같은 어휘를 써야 한다.**
+- 어댑터가 공개시차를 자기 상수(전부 0세션)로 우기고 `dataset_profile` 을 무시했다 —
+  30필드 중 **25개가 한 세션 이르게** 열려 있었다(확정 look-ahead).
+
+### 아직 못 하는 것
+
+**유상증자를 못 싣는다.** `stg_event_piic` 5,538행에 신주배정기준일 컬럼이 없고
 `ssl_bgd`/`ssl_edd` 채움률이 **5.9%** 라 가격 축 효력일을 정할 수 없다. 이것이
-`DECISIONS_PENDING` 결정 1 의 남은 절반이고, **날짜 원천을 먼저 찾아야** 움직인다
-(`unknown_price_only` 1,737건 중 537건이 유상증자다).
-
----
-
-## 8-4. 2026-09-07 외국인 보유 연결 (e1.10.0)
-
-`flow_daily` 에 `foreign_wght_pct`·`foreign_limit_exh_pct`·`foreign_poss_shr` 3컬럼이 붙었다.
-원천 `stg_foreign_daily`(키움 ka10008)는 서버 7,682,844행 · 2,602종목 · 2009-10-15 ~ 2026-08-24 ·
-**결측 0** 인데 아무도 읽지 않고 있었다.
-
-| 축 | 결과 |
-|---|---|
-| `flow_daily` | 9,201,516행(**불변**) · 2회 빌드 해시 동일 `9201516:cbb88b0b4a27244a` · EG5a PASS |
-| 채움 | `src='kiwoom'` 7,537,984 / 7,540,202 · **`src='kis'` 0** (원천 축이 없다 — NULL, 0 아님) |
-| `dataset_profile` | 72 → **74행** |
-| `factor_readiness` | **ready 37 → 39** · blocked 17 → 15 |
-| FIELD_MAP §2 어휘 | 42 → **43** (`flow.foreign_limit_exhaustion` 신설 — F08 이 이름으로 요구하는데 행이 없었다) |
-
-**행 수가 안 변한 것이 설계 의도다.** 격자 등식(EG1)은 (date, ticker) 축이라 컬럼이 붙어도
-모집단이 그대로다. 별도 표를 만들지 않은 이유가 이것이다.
-
-**다음으로 같은 성격의 것이 하나 더 있다** — `stg_lending_daily`(키움 대차) 6,988,296행 ·
-2011-07-25 ~ 2026-08-20 · 결측 0 인데 미사용이고, 지금 `short.borrowed_quantity` 는 커버
-**5.58%** 의 KIS 축만 쓴다. 단위만 확인하면 사실상 전 종목으로 뛴다(BLOCKED_FACTORS §9-2).
-EG2 테스트의 「덮이지 않은 `lag_known=false` 원천」 예가 이번에 그리로 옮겨 갔다.
+`DECISIONS_PENDING` 결정 1 의 남은 절반이고, `unknown_price_only` 1,737건 중 **537건**이
+유상증자다. **날짜 원천을 먼저 찾아야** 움직인다.
 
 ---
 
@@ -522,22 +531,33 @@ EG2 테스트의 「덮이지 않은 `lag_known=false` 원천」 예가 이번�
 정본은 DESIGN §11 이다. 여기엔 **다음 사람이 곧바로 집을 수 있는 것**만 골라 적는다.
 
 ### 데이터 축
-- **S08-2 외국인 보유 3컬럼** — `flow_daily.foreign_wght_pct`·`limit_exh_rt_pct`·`foreign_poss_shr`
-  의 원천 `stg_foreign_daily`(키움 ka10008)가 stage 에는 있고 **절단본에 없다**.
-  `flow_daily` 에 컬럼 자체가 없어 팩터 F02·F05 가 `blocked(field_unavailable)`.
-- **키움 대차(`stg_lending_daily`) 미절단** — `short.short_balance_ratio` 미지원의 원인.
+- ~~S08-2 외국인 보유 3컬럼~~ — **완료(e1.10.0, 09-07)**. F02·F08 열림.
+- **키움 대차(`stg_lending_daily`) 미사용** — 서버 6,988,296행 · 2011-07-25 ~ 2026-08-20 ·
+  결측 0 인데 아무도 안 읽는다. 지금 `short.borrowed_quantity` 는 커버 **5.58%** 의 KIS 축만
+  쓴다. **단위만 확인하면 사실상 전 종목으로 뛴다** — 남은 것 중 투입 대비 회수가 가장 크다
+  (BLOCKED_FACTORS §9-2). EG2 테스트의 「덮이지 않은 원천」 예가 09-07 에 이리로 옮겨 왔다.
 - **`classification.sector` PIT 없음** — 현재값 라벨이라 `point_in_time=false`. 업종 PIT 원천 필요.
-- **기준가 불일치 151건** — S06-2 가 남긴 정밀 조정 대상(P27′).
+- **기준가 불일치 719건** — 정밀 조정으로는 안 풀린다. 편차 중앙값 **20.8%** 이고 허용치를
+  2% 로 풀어도 23건만 회수된다. 94% 가 시총 불변 가정이 성립하지 않는 사건이라 **고칠 것은
+  계산이 아니라 사건 분류**다(TECH_DEBT §7).
 - **KRX 매매거래정지 현황 수집** — stage 몫. `halt_state` 의 공시 기반 추정을 대체한다.
 - **재무 원본 판본(4C = S14)** — 문서층 P2 `stg_fin_asreported` 대기.
   그때까지 `fin_std.vintage_kind` 는 `api_restated` 하나뿐이고 PIT 결측은 비랜덤이다.
 
+- **유상증자 적재 — 날짜 원천 없음**. `stg_event_piic` 5,538행에 신주배정기준일 컬럼이 없고
+  `ssl_bgd`/`ssl_edd` 채움률이 5.9% 라 가격 축 효력일을 못 정한다. 결정 1 의 남은 절반이고
+  `unknown_price_only` 1,737건 중 537건이 여기다.
+
 ### 계약·어댑터 축
+- **어댑터 `idx:` 통로 개설** — `benchmark.close` 는 e1.13.0 에 선언됐고(R04 ready) **소비는
+  아직 안 된다**. 워크벤치 어댑터가 `idx:코스피` 형태 주소를 알아보아야 한다. 예약 접두는
+  FIELD_MAP §1 에 어휘로 있고 `BacktestDataQuery.benchmark_security_id` 그릇도 이미 있다.
+  엔진 계약 변경이라 커널 쪽과 함께 정한다.
 - **`src_omitted` → `CellKind` 라벨 손실**(DESIGN §11 ⑪) — 워크벤치 도메인이 값 없는
   `SOURCE_OMITTED_ZERO` 를 거부해 S21-3 이 MISSING 으로 접었다. 소비층이 "0 으로 읽어도 되는 결측"과
   "그냥 결측"을 구분하지 못한다. 해소는 (a) `dataset_profile` 이 값 축·지식 축을 분리하거나
   (b) 워크벤치 도메인 계약 변경.
-- **어댑터 랙 상수 하드코딩**(DESIGN §11 ⑭) — `_specs.py` 의 격자 4원천이 `lag_sessions=0` 인데
+- ~~어댑터 랙 상수 하드코딩~~ — **완료(`8014655`, 09-07)**. 옛 서술: (DESIGN §11 ⑭) — `_specs.py` 의 격자 4원천이 `lag_sessions=0` 인데
   `dataset_profile` 은 1 세션으로 확정했다. `price.market_cap`·`price.shares_outstanding` 도 같다.
   **어댑터가 `dataset_profile` 을 읽어 필드별 랙을 적용하는 형태로 한 번에** 교체해야 한다
   (한 필드군만 고치면 어댑터 안에서 규약이 갈린다).
@@ -589,9 +609,9 @@ EG2 테스트의 「덮이지 않은 `lag_known=false` 원천」 예가 이번�
 | baseline 확정본·시드 | `baseline_locked.json` · `baseline_seed_s<NN>.json` |
 | 워크벤치 어댑터(5포트·필드 30) | `backend/src/strategy_workbench/adapters/outbound/equity_duckdb/` |
 | MVP-B 백테스트 | `database/scripts/run_mvp_backtest.py` |
-| 서버 빌드 러너 | `database/scripts/run_equity.sh`(표 1개) · `equity_rebuild_all.sh`(28표 전량, `ORDER` 에 `price_adj_daily` 포함) · `equity_gate_all.sh`(전량 재판정) · `equity_manifest_row.py`·`equity_gate_metrics.py`(요약·근거 추출) |
+| 서버 빌드 러너 | `database/scripts/run_equity.sh`(표 1개) · `equity_rebuild_all.sh`(29표 전량, `ORDER` 에 `price_adj_daily` 포함) · `equity_gate_all.sh`(전량 재판정) · `equity_manifest_row.py`·`equity_gate_metrics.py`(요약·근거 추출) |
 
-## 조정가 읽는 법 (`price_adj_daily`, S23)
+## 11. 조정가 읽는 법 (`price_adj_daily`, S23)
 
 **무엇인가** — 전방 조정(forward-adjusted) OHLCV 의 저장본이다. `adj_close(d) = close(d) ×
 Π{share_factor : factor_ok ∧ 같은 `security_span` 구간 ∧ greatest(apply_date, available_date) ≤ d}`
@@ -623,7 +643,7 @@ EG2 테스트의 「덮이지 않은 `lag_known=false` 원천」 예가 이번�
 1 이다. 재상장 종목(036220·101970)은 구간마다 누적이 초기화된다 — 폐지 전 구간의 계수는 새 구간에
 넘어오지 않는다.
 
-## 소비자가 먼저 알 것 두 가지 (2026-09-07)
+## 12. 소비자가 먼저 알 것 두 가지
 
 전 종목 백테스트를 서버 실데이터로 처음 돌리면서 드러난 것이다. **둘 다 지금 바로 부딪힌다.**
 
@@ -672,7 +692,7 @@ equity 쪽 몫은 끝났다 — `adj_factor.no_bar_after_apply`(e1.7.0)가 이 �
 
 ---
 
-## 소비자 기동 (워크벤치 · 로컬 데이터)
+## 13. 소비자 기동 (워크벤치 · 로컬 데이터)
 
 **로컬 데이터 내려받기** — `database/scripts/fetch_equity_local.sh <로컬 경로> [minimal|full]`
 - `minimal`(기본) 12표 ≈ 2.1GB: 가격·**조정가**·유니버스·조정계수·기업행위·식별 4표

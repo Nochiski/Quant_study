@@ -22,7 +22,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.11.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.13.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -80,6 +80,21 @@ RULES_VERSION = "e1.11.0"                # BuildRecord.rules_version 에 실린�
 #         이름도 「공매도 잔고비율」 → 「공매도 거래비중」으로 정정했다 — 진짜 잔고는 취득 불가로
 #         확정됐다(FACTORS §12 F45). `dataset_profile` 74 → 75 · FIELD_MAP §2 43 → 44 ·
 #         팩터 준비도 **39 → 40**.
+# e1.12.0: GAP-03 종결 — 「기관」을 **원장 합계 컬럼(`orgn_krw`)** 으로 확정하고
+#         `flow.institution_net_buy` 의 `requires_confirmation` 을 껐다. 서버 전수 실측에서
+#         orgn 은 부분의 합으로 재구성되지 않는다(7주체 정확 일치 80.9% · 100만원 이내 94.0%,
+#         국가를 더한 8주체도 82.9% / 97.7%). 어긋나는 방향이 부호 반반(−728,422 / +708,362)이고
+#         7주체 결측과 무관해 특정 주체 누락이 아니라 원장 자체의 반올림·집계 잡음이다.
+#         원장이 정본이라는 원칙대로 합계를 쓰고 7주체 컬럼은 그대로 다 나간다.
+#         팩터 준비도 **40 → 41** (F03 기관 순매수 강도).
+# e1.13.0: S02-2 벤치마크 — `index_daily` 위에 `benchmark.close` 선언(R04 시장 베타).
+#         막혀 있던 것은 데이터가 아니라 **주소 체계**였다: 서버 347,821행 · 코스피 51지수 ·
+#         코스닥 40지수 · 2010-01-04 ~ 2026-08-20 이고 벤치마크 4종 종가 결측 0 인데, 소비 규약이
+#         모든 값을 `security_id` 로 부르는 반면 지수는 종목이 아니라 선언을 안 했다. 커버 축을
+#         `table_rows`(fin_std 계열과 같은 축)로 두어 해결한다. `dataset_profile` 75 → 76 ·
+#         FIELD_MAP §2 스코프 33 → 34 · 팩터 준비도 **41 → 42**.
+#         **어댑터가 `idx:` 주소를 서빙하는 것은 별개다** — 선언은 재료가 카탈로그에 있다는 뜻이고
+#         통로 개설은 소비층(엔진 계약) 몫이다.
 
 # DESIGN §1 — stage 4종 + equity 신설 convention
 BASIS_VOCAB: tuple[str, ...] = ("measured", "derived", "convention", "default", "unknown")

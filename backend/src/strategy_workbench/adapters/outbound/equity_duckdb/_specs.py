@@ -360,7 +360,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         kind_expr="fill_kind_short_kiwoom['kind']",
     ),
     SourceSpec(
-        name="lending_kis",
+        name="lending_kiwoom",
         dataset_id=SHORT_TABLE,
         relation=SHORT_TABLE,
         is_macro=False,
@@ -376,7 +376,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         lag_basis=_GRID_LAG_BASIS,
         requires=(SHORT_TABLE,),
         frequency="daily",
-        kind_expr="fill_kind_loan_kis['kind']",
+        kind_expr="fill_kind_lending_kiwoom['kind']",
     ),
     SourceSpec(
         name="credit",
@@ -830,22 +830,27 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
     ),
     FieldSpec(
         field_id="short.borrowed_quantity",
-        source="lending_kis",
-        expr="lending_balance_kis_shr",
-        label="대차잔고(주식수, KIS)",
+        source="lending_kiwoom",
+        expr="lending_balance_kiwoom_shr",
+        label="대차잔고(주식수, 키움)",
         unit="shares",
         value_type=FieldValueType.COUNT,
-        verdict="부분",
+        verdict="지원",
         description=(
-            "GAP-04. **KIS 축뿐이다** — 키움 대차 원장(`stg_lending_daily`)이 S09 입력에 없어 "
-            "`lending_balance_kiwoom_raw` 는 후속 슬라이스 몫이고, 두 축의 단위 대조도 그때 "
-            "선다(DESIGN §4-3 구현 결과 ①). 원장이 주는 **음수 잔고는 그대로 보존**한다 — "
-            f"equity 도 어댑터도 자르지 않는다(원칙 ④). {_FILL_KIND_NOTE}."
+            "**GAP-04 종결(S09-2, 2026-09-08)로 원천이 KIS → 키움(ka20068)으로 옮겼다.** "
+            "고른 근거는 공매도 축과 같다 — 커버가 넓은 쪽이다(격자 measured 6,988,296 대 "
+            "493,445, 2,602종목 대 287종목). `rmnd` 는 stage 가 단위를 못 잰 축이었는데 equity 가 "
+            "원장 안 항등식으로 재서 **주 단위 확정**했다(같은 원장의 금액축 ÷ 잔고 = KRX 종가, "
+            "서버 6,414,854셀 중앙값 1.000000). **폴백 병합은 하지 않는다** — 두 대차 원장은 "
+            "겹치는 셀이 0건(공유 티커도 0)이라 KIS 축은 폐지 종목만 덮는데, 없는 날 갈아타면 "
+            "시계열이 원천을 섞는다. KIS 축(`lending_balance_kis_shr`)이 필요하면 그 컬럼을 직접 "
+            "읽는다. 원장이 주는 **음수 잔고는 그대로 보존**한다 — equity 도 어댑터도 자르지 "
+            f"않는다(원칙 ④). {_FILL_KIND_NOTE}."
         ),
         disclosure_basis="원장 날짜(공표 시각 미제공, basis default)",
         evidence=(
-            "short_daily.lending_balance_kis_shr ← stg_loan_daily_kis.rmnd_stcn_shr, 결측 "
-            "사유는 fill_kind_loan_kis(금액축 lending_balance_kis_krw 는 내부 스코프)"
+            "short_daily.lending_balance_kiwoom_shr ← stg_lending_daily.rmnd, 결측 "
+            "사유는 fill_kind_lending_kiwoom(금액축 lending_balance_kiwoom_krw 는 내부 스코프)"
         ),
     ),
     # ── credit_daily (FIELD_MAP §2 credit.*) ─────────────────────────────────

@@ -541,6 +541,8 @@ scp database/src/equity/baseline_locked.json kael-server:~/quant-ledger/data/equ
   백만원 축) ÷ `rmnd` = KRX 종가. 6,414,854셀 중앙값 1.000000. 같은 모양의 F04(연기금)도
   겹침 0 이라 막혀 있는데, **이 방법이 통하는 조건은 「같은 원장 안에 단위가 확정된 짝 컬럼이
   있을 것」** 이다 — F04 에는 그 짝이 없다.
+  어댑터도 같이 옮겼다(`_specs.py` SourceSpec `lending_kis` → `lending_kiwoom`) — field_id 는
+  한 계약이라 한쪽만 옮기면 프로파일은 69%를 광고하고 소비자는 5.6%를 읽는다.
   남은 것: `dbrt_trde_*` 3컬럼(체결·상환·증감)은 단위를 재지 않아 싣지 않았다.
 - **`classification.sector` PIT 없음** — 현재값 라벨이라 `point_in_time=false`. 업종 PIT 원천 필요.
 - **기준가 불일치 719건** — 정밀 조정으로는 안 풀린다. 편차 중앙값 **20.8%** 이고 허용치를

@@ -22,7 +22,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.13.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.14.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -95,6 +95,21 @@ RULES_VERSION = "e1.13.0"                # BuildRecord.rules_version 에 실린�
 #         FIELD_MAP §2 스코프 33 → 34 · 팩터 준비도 **41 → 42**.
 #         **어댑터가 `idx:` 주소를 서빙하는 것은 별개다** — 선언은 재료가 카탈로그에 있다는 뜻이고
 #         통로 개설은 소비층(엔진 계약) 몫이다.
+# e1.14.0: 병렬 4슬라이스(2026-09-08) — **팩터 준비도 54/54 전부 ready** (42 → 54, blocked 0).
+#         ① 컨센서스 6개(G05~G10): 원천 우선순위(consensus_daily 는 v3 우선·opinion_daily 는
+#            wise 우선 — 「PIT 근거가 실측인 축을 먼저」)·단위(억원/원/배)·대상기간(FY1) 규약을
+#            evidence 로 승격하고 `consensus.*` 8필드 플래그 해제. WISE 이력 개방은 하지 않음.
+#         ② 재무 3개(V03·Q03·G01): `fin_std.revenue_basis_prev` 컬럼 신설(직전 회계연도 같은
+#            보고서의 기준). 기준 전환 367행·136법인, 합산식 낀 것 18법인(삼성카드 −12% ·
+#            메리츠 −70% · 한국금융지주 −72% · 한화생명 0→24.6조). `financial.revenue` 플래그
+#            해제 + `financial.revenue_basis`·`_prev` 내부 필드 선언.
+#         ③ G04: 요구 재료를 `financial.eps_basic`(분할 미조정) → `net_income` + `shares_outstanding`.
+#            `FACTORS.md` 정본 계산식 갱신은 사람 승인 항목.
+#         ④ E07: `universe.admin_state` 플래그 해제 — 코스피 창 근사 비대칭을 소비 규약으로 명시.
+#         ⑤ F04: `flow_daily.pension_net_buy_kiwoom_krw` 신설(키움 전용) + `flow.pension_net_buy`
+#            선언. KIS 「기금」 대응은 검증 불가(겹침 0)라 배제 — 한 표 안에서 필드마다 원천이
+#            다를 수 있다는 규약을 이 필드가 처음 세운다.
+#         `dataset_profile` 76 → 79(내부 44 · 대응표 35) · FIELD_MAP §2 44 → 45.
 
 # DESIGN §1 — stage 4종 + equity 신설 convention
 BASIS_VOCAB: tuple[str, ...] = ("measured", "derived", "convention", "default", "unknown")

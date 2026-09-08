@@ -38,9 +38,10 @@ REGISTRY_DOC = Path(__file__).parents[2] / "backend" / "FACTORS.md"
 # 2026-09-07 F05: 요구 재료를 실재하는 `short.short_sale_volume` 로 정정해 열렸다.
 # 2026-09-07 GAP-03 종결: 「기관」 = 원장 합계로 확정해 F03 이 열렸다.
 # 2026-09-07 S02-2: `benchmark.close` 선언으로 R04(시장 베타)가 열렸다.
-N_READY = 42
-N_BLOCKED = 12
-BLOCKED_REASON_COUNTS = {"field_unavailable": 1, "partial_support": 11}
+# 2026-09-08 병렬 4슬라이스(컨센서스 6 · 재무 3 · G04·E07·F04)로 **54/54 전부 ready**.
+N_READY = 54
+N_BLOCKED = 0
+BLOCKED_REASON_COUNTS: dict[str, int] = {}
 READINESS_GATES = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG10", "EG4", "EG5a"]
 
 
@@ -141,7 +142,7 @@ def test_54행이_지어지고_게이트가_전부_통과한다(built) -> None:
 def test_절단본_준비도는_31_대_23_이다(built) -> None:
     _, r = built
     got = dict(_rows(r.out_dir, "SELECT status, count(*) FROM fr GROUP BY 1 ORDER BY 1"))
-    assert got == {"ready": N_READY, "blocked": N_BLOCKED}
+    assert got == ({"ready": N_READY, "blocked": N_BLOCKED} if N_BLOCKED else {"ready": N_READY})
     m = _gate(r, "EG10").metrics
     assert (m["n_ready"], m["n_blocked"]) == (N_READY, N_BLOCKED)
     assert m["blocked_reason_counts"] == BLOCKED_REASON_COUNTS
@@ -165,9 +166,7 @@ def test_수급_공매도_신용_9팩터의_판정은_선언한_필드가_가른
     got = dict(_rows(r.out_dir, "SELECT factor_id, coalesce(blocked_reason, 'ready') FROM fr "
                                 "WHERE factor_id LIKE 'F0%' ORDER BY 1"))
     assert sorted(got) == [f"F0{i}" for i in range(1, 10)]
-    assert {f for f, v in got.items() if v == "ready"} == {"F01", "F02", "F03", "F05", "F06",
-                                                           "F07", "F08", "F09"}
-    assert got["F04"] == "field_unavailable: flow.pension_net_buy"
+    assert {f for f, v in got.items() if v == "ready"} == {f"F0{i}" for i in range(1, 10)}
 
 
 
@@ -225,9 +224,9 @@ def test_required_columns_는_프로파일에서_유도된다(built) -> None:
     # S08-2 로 F02 의 재료가 격자에 붙었다 — 컬럼이 조인으로 채워진다
     (cols,), = _rows(r.out_dir, "SELECT required_columns FROM fr WHERE factor_id = 'F02'")
     assert list(cols) == ["flow_daily.foreign_wght_pct"]
-    # 프로파일 행이 없는 필드는 컬럼도 없다 — F04 는 요구 재료가 그 하나뿐이라 빈 목록이다
+    # F04 는 2026-09-08 에 키움 전용 컬럼으로 열렸다
     (cols,), = _rows(r.out_dir, "SELECT required_columns FROM fr WHERE factor_id = 'F04'")
-    assert list(cols) == []
+    assert list(cols) == ["flow_daily.pension_net_buy_kiwoom_krw"]
 
 
 def test_커버_실측에_걸린_판정은_손계산으로_잰다(built) -> None:

@@ -49,10 +49,11 @@ CHAIN: tuple[str, ...] = (
 
 # 2026-09-07 S08-2: `flow.foreign_ownership`·`flow.foreign_limit_exhaustion` 선언(72 → 74).
 # 2026-09-07 S02-2: `benchmark.close` 선언(75 → 76, R04 시장 베타).
-N_FIELDS = 76                    # 선언 행수 — 코드가 정본이라 서버에서도 같다
-N_FIELD_MAP_SCOPE = 34           # FIELD_MAP §2 42 어휘 중 프로파일 행을 갖는 것
-N_INTERNAL_SCOPE = 42            # equity 내부 스코프(price.adj_close·fin_std 계정·4B·유니버스 …)
-N_FIELD_MAP_VOCAB = 44           # FIELD_MAP §2 표의 field_id 수 (check_field_map.py 와 같은 축)
+# 2026-09-08 병렬 4슬라이스: revenue_basis·revenue_basis_prev(내부 2) + pension_net_buy(대응표 1) → 79.
+N_FIELDS = 79                    # 선언 행수 — 코드가 정본이라 서버에서도 같다
+N_FIELD_MAP_SCOPE = 35           # FIELD_MAP §2 42 어휘 중 프로파일 행을 갖는 것
+N_INTERNAL_SCOPE = 44            # equity 내부 스코프(price.adj_close·fin_std 계정·4B·유니버스 …)
+N_FIELD_MAP_VOCAB = 45           # FIELD_MAP §2 표의 field_id 수 (check_field_map.py 와 같은 축)
                                  # 2026-09-07: `flow.foreign_limit_exhaustion` 신설(F08 재료)
 PROFILE_GATES = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG2_dataset_profile", "EG9", "EG4", "EG5a"]
 
@@ -207,6 +208,8 @@ GRID_FIELDS = {
     "flow.foreign_limit_exhaustion": ("flow_daily", "foreign_limit_exh_pct", "pct", "ratio"),
     # F05 재정의 (2026-09-07) — 비율이 아니라 거래량이고 나눗셈은 팩터층 몫이다
     "short.short_sale_volume": ("short_daily", "short_volume_kiwoom_shr", "주", "count"),
+    # F04 (2026-09-08) — 키움 전용 컬럼. KIS 「기금」과의 주체 대응은 검증 불가(겹침 0)라 배제
+    "flow.pension_net_buy": ("flow_daily", "pension_net_buy_kiwoom_krw", "KRW", "amount"),
 }
 
 

@@ -143,6 +143,16 @@ impl PersistentFeed {
             .collect())
     }
 
+    /// 피드에 등록된 전 종목의 key → symbol. 그날 바가 없는 보유 종목(정지·상폐)을 청산하는
+    /// 주문도 심볼을 찾을 수 있어야 한다 — Python 라우터는 포트폴리오 스냅샷에서 같은 정보를 본다.
+    pub(crate) fn registry_symbols(&self) -> HashMap<String, String> {
+        self.keys
+            .iter()
+            .cloned()
+            .zip(self.symbols.iter().cloned())
+            .collect()
+    }
+
     pub(crate) fn current_marks(&self) -> PyResult<Vec<(String, f64)>> {
         let index = self.current_index()?;
         Ok(self

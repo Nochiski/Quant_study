@@ -261,6 +261,68 @@ def _engine_scenario(
     return engine, result
 
 
+class _TwoNameReplaceStrategy:
+    """두 종목 REPLACE 목표를 순서대로 내는 전략 — 정지·상폐로 바가 끊긴 보유 종목의 청산 시나리오."""
+
+    def __init__(self, script: tuple[StrategyAction | None, ...]) -> None:
+        self._script = script
+        self._calls = 0
+
+    def requirements(self) -> StrategyRequirements:
+        return StrategyRequirements(
+            histories=(
+                HistoryRequest(
+                    instruments=(_DELIST_A, _DELIST_B), field=PriceField.CLOSE, lookback=1
+                ),
+            ),
+            schedule=EverySession(),
+            events=frozenset({EventKind.MARKET}),
+            actions=frozenset({ActionKind.NO_ACTION, ActionKind.SET_PORTFOLIO_TARGET}),
+            features=frozenset(),
+        )
+
+    def on_event(self, ctx: StrategyContext, event: StrategyEvent) -> StrategyDecision:
+        index = self._calls
+        self._calls += 1
+        action = self._script[index] if index < len(self._script) else None
+        if action is None:
+            return StrategyDecision.no_action(ctx.now, "scripted_idle")
+        return StrategyDecision.of(ctx.now, action, f"scripted_{index}")
+
+
+_DELIST_A, _DELIST_B = make_instrument("005930"), make_instrument("000660")
+
+
+def _delisted_replace_scenario(core: str) -> tuple[BacktestEngine, BacktestResult]:
+    """D1 A·B 40% 씩 → D2 시가 체결. B 는 D2 가 마지막 바(상폐). D3 REPLACE 목표에 A 만 남기면
+    B 청산 주문이 나오는데 그날 B 바가 없다 — 주문은 바가 올 때까지 대기해야지 run 이 죽으면 안
+    된다(실데이터 028150 GS홈쇼핑 2021-07 상폐에서 Rust 코어만 실패)."""
+    bars = (
+        make_ohlc(day(1), _DELIST_A, 100.0, 100.0, 100.0, 100.0, volume=1_000),
+        make_ohlc(day(1), _DELIST_B, 50.0, 50.0, 50.0, 50.0, volume=1_000),
+        make_ohlc(day(2), _DELIST_A, 100.0, 100.0, 100.0, 100.0, volume=1_000),
+        make_ohlc(day(2), _DELIST_B, 50.0, 50.0, 50.0, 50.0, volume=1_000),
+        make_ohlc(day(3), _DELIST_A, 110.0, 110.0, 110.0, 110.0, volume=1_000),
+        make_ohlc(day(4), _DELIST_A, 105.0, 105.0, 105.0, 105.0, volume=1_000),
+    )
+    both = SetPortfolioTarget(
+        targets=(WeightTarget(_DELIST_A, 0.4), WeightTarget(_DELIST_B, 0.4)),
+        scope=TargetScope.REPLACE,
+        execution=ExecutionPolicy.market_next_open(),
+    )
+    only_a = SetPortfolioTarget(
+        targets=(WeightTarget(_DELIST_A, 0.4),),
+        scope=TargetScope.REPLACE,
+        execution=ExecutionPolicy.market_next_open(),
+    )
+    return _engine_scenario(
+        core,
+        RunConfig(run_id="d", initial_cash=100_000.0, fee_bps=0.0),
+        _TwoNameReplaceStrategy((both, None, only_a, None)),
+        DataFeed(bars),
+    )
+
+
 ENGINE_SCENARIOS = {
     "golden": lambda core: _engine_scenario(
         core,
@@ -291,6 +353,7 @@ ENGINE_SCENARIOS = {
         DataFeed(test_basket.BARS),
         max_participation=0.1,
     ),
+    "delisted_replace": _delisted_replace_scenario,
     "split": lambda core: _engine_scenario(
         core,
         RunConfig(run_id="c", initial_cash=10_000.0, fee_bps=0.0),

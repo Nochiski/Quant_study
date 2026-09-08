@@ -122,7 +122,25 @@
 | 사본 `wisereport.db/v3_consensus_revision_daily` | **08-31** (동결) |
 | **원본** `kael-system-v3/quant.db/consensus_revision_daily` | **09-04** (계속 쌓임) |
 
-원본이 살아 있으니 미러를 재개하면 소급 복구된다. **운영 변경이라 사용자 승인 사항.**
+**→ 09-08 에 한 번 따라잡았다** (사용자 지시). `sync_v3_wise.py` 를 수동 실행 — 원본 읽기 전용,
+사본은 `INSERT OR IGNORE` 라 안전. 백업 `data/raw/wisereport.db.bak_v3_catchup_20260908T044946Z`.
+
+| 미러 표 | 전 | 후 | 원본과 |
+|---|---|---|---|
+| `v3_consensus_revision_daily` | 63,175 (~08-31) | **65,690 (~09-04)** · 795종목 | 일치 |
+| `v3_analyst_opinions` | 254,925 (~09-01) | **265,057 (~09-07)** | 일치 |
+| `v3_consensus_annual` (변경분 축적) | 18,086 | 18,520 (+434) | — |
+| `v3_consensus_revision_compare` | 978 | 1,496 (+518) | — |
+
+이제 v3(04-03~09-04)와 WISE 직접 수집(09-01~)이 **4일 겹쳐 시계열이 이어진다.** 9/1 이전은 다른
+크롤러(v3)로 모은 일별 데이터라 다시 긁을 수 없으니 그 구간은 이 미러가 유일한 보존본이다.
+
+**아직 두 가지가 남았다.**
+1. **stage 재빌드** — `stg_v3_revision_daily` 는 09-02 판이라 새 행을 모른다. stage 세션이
+   다시 지어야 equity `consensus_daily` 에 반영된다(`src/stage` 는 equity 가 건드리지 않는다).
+2. **앞으로도 이을 것인가** — 크론 `daily_wise.sh` 에 `sync_v3_wise.py` 를 다시 넣을지는
+   **운영 변경이라 사용자 결정.** 넣지 않으면 오늘 따라잡은 09-04 에서 다시 멈춘다.
+   원본(kael-system-v3)은 매일 쌓이므로 언제 넣어도 소급된다.
 
 ### 덤으로 나온 것 — 영업이익·순이익 컨센서스가 WISE 에도 있는데 안 읽고 있다
 

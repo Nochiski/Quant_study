@@ -526,6 +526,49 @@ scp database/src/equity/baseline_locked.json kael-server:~/quant-ledger/data/equ
 
 ---
 
+## 8-3. 서버 반영 이력 — 2026-09-08 (e1.14.0, 병렬 4슬라이스)
+
+에이전트 4개가 `46e0e40` 에서 격리 워크트리로 동시에 작업했고 충돌 없이 병합됐다. 부모 세션이
+판본·S19/S20 상수·골든 픽스처 셋만 한 번에 맞췄다. **팩터 준비도 42 → 54 (blocked 0).**
+
+| 표 | 결과 |
+|---|---|
+| `fin_std` | 93,986행(불변) · `+revenue_basis_prev` · 2회 빌드 해시 동일 `93986:a3046e7a0b2f8c10` |
+| `short_daily` | 9,201,516행(불변) · `+lending_balance_kiwoom_shr` · 해시 동일 `9201516:15b4fb0d4ea2c77d` |
+| `flow_daily` | 9,201,516행(불변) · `+pension_net_buy_kiwoom_krw` · 해시 동일 `9201516:b0bbc4b710b81ddd` |
+| `dataset_profile` | 76 → **79행** (대응표 35 · 내부 44) · 해시 `79:7c43f08da35e9271` |
+| `factor_readiness` | ready 42 → **54** · blocked 12 → **0** · 해시 `54:da7da41cc6e2cb7b` |
+
+`dataset_profile`·`factor_readiness` 의 2회차 EG5a 는 `skip(inputs_changed)` 다 — 앞 세 표를
+그 사이에 다시 지어 입력 판본이 바뀌었기 때문이고, 해시는 두 번 다 같다.
+
+### 이 이력에서 남길 세 가지
+
+**① 겹침이 없으면 다른 자로 잰다.** 키움 대차와 KIS 대차는 같은 셀을 잰 적이 0건이고 공유
+티커도 0개다(KIS 는 폐지 종목 보완용). 단위 검증은 같은 원장 안의 항등식으로 했다 —
+`금액 ÷ (잔고 × KRX 종가) = 1.000000`(중앙값), 잔고 10억 이상 3,524,517셀의 99.958% 가 ±1%.
+50:1 분할일에 분할 전·후 종가를 둘 다 재현한 것이 결정적이다. → 주(shares) 확정.
+연기금(F04)은 같은 모양인데 항등식이 없어 검증 불가로 남았고, 그래서 키움 전용으로 갔다.
+
+**② 「ready」 는 쓸 수 있다는 뜻이 아니다.** G05·G06·G08·G09 는 선언·커버 기준으로는 열렸지만
+관측이 5개월(2026-04~08)뿐이라 리비전 팩터가 성립하지 않는다. `first_usable_date` 가
+2026-04-03 으로 그 사실을 남긴다. 이 넷의 유일한 재료(v3 일별)는 08-31 에 동결됐다(§5-2).
+
+**③ 한 표 안에서 필드마다 원천이 다를 수 있다.** `flow.pension_net_buy` 가 이 규약을 처음 세웠다
+(`pension_net_buy_kiwoom_krw` 는 키움 행만). 다음에 같은 모양이 나오면 이 선례를 따른다.
+
+### 어댑터 쪽 (같이 갔다)
+
+`short.borrowed_quantity` 의 `SourceSpec` 을 `lending_kis` → `lending_kiwoom` 으로 옮겼다.
+field_id 는 한 계약이라 equity 만 옮기면 대장은 69% 를 광고하고 소비자는 5.6% 를 읽는다.
+
+**아직 안 된 것** — 워크벤치 어댑터가 `financial.revenue_basis`·`_prev` 를 안 낸다
+(`_specs.py` 의 `financial.revenue` 가 `verdict="부분"`, "basis 는 내지 않는다" 그대로).
+parquet 을 직접 읽는 소비자는 규약을 지킬 수 있지만 `list_fields()` 30필드로만 접근하면
+못 지킨다. 다음 어댑터 슬라이스.
+
+---
+
 ## 9. 미해결 후속
 
 정본은 DESIGN §11 이다. 여기엔 **다음 사람이 곧바로 집을 수 있는 것**만 골라 적는다.

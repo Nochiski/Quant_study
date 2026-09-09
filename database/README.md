@@ -11,8 +11,8 @@ KRX·키움·KIS·DART·WISE 원장 수집기, stage 층 빌더, 문서층(L1) �
 | 원장 | **KRX·키움 시계열 08-20, KIS 08-18, DART 09-01 에 정지.** WISE·키움 마스터만 매일(`daily_wise.sh` 06:00 KST) |
 | stage | 66테이블 커밋(09-05), 원장 정지 날짜까지 |
 | equity | 28표·규칙 e1.14.0(09-09 전량 재빌드로 단일화)·팩터 준비도 54/54. catalog `2c38be1d58fb03be`·contract pass, baseline 락 바이트 동일(09-09 정렬) |
-| 진행 중 | **일일 증분 플랜** `docs/plans/2026-09-09-daily-incremental.md` — R1~R10 승인(09-09), **P0·P1 완료**(P0 게이트 대기: 키움 프로브 판독 09-15, 키움 앱키 발급), **P2 갭 메우기 진행 중**(키움은 09-12 토요일). **사용자 행동 필요: 키움 앱키 추가 발급**(DECISIONS_PENDING R5 후속) |
-| 크론 | quant-ledger 는 `daily_wise.sh` 하나(09-09 부터 flock + 텔레그램 알림). `daily_dart.sh` 는 09-02 이후 미등록(플랜에서 폐기 예정) |
+| 진행 중 | **일일 증분 플랜** `docs/plans/2026-09-09-daily-incremental.md` — R1~R10 승인(09-09), **P0·P1 완료, P2 키움 제외 완료, P3 크론 가동(09-09 18:10)** — 06:00 수집·08:10 빌드 체인, 키움 단계는 앱키 분리 전까지 제외. 키움 갭은 09-12 토요일 일회성. **사용자 행동 필요: 키움 앱키 추가 발급**(DECISIONS_PENDING R5 후속) |
+| 크론 | 06:00 `daily_ledger.sh`(daily_wise 포함, KIS·DART) · 08:10 `daily_build.sh --no-build`(KRX·건전성) · 매시 키움 프로브(임시) · 09-12 토 키움 갭(일회성). 전부 `QL_SKIP_KW=1`. `daily_dart.sh` 폐기 |
 
 ## 층 구조
 

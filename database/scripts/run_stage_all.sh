@@ -4,6 +4,13 @@
 # 결과: logs/stage_all/<table>.log + logs/stage_all/summary.tsv (status · rows · src · dedup · reject · elapsed)
 set -u
 cd "$(dirname "$0")/.."
+# 2026-09-09 (플랜 P0 Task 0.2): stage·equity 공용 빌드 락. 최외곽만 잡고 자식은 QL_BUILD_LOCK_HELD=1 이면 생략.
+LOCK=/tmp/quant_ledger_build.lock
+if [ -z "${QL_BUILD_LOCK_HELD:-}" ]; then
+  exec 9>"$LOCK"
+  flock -n 9 || { echo "another build is running — lock $LOCK"; exit 3; }
+  export QL_BUILD_LOCK_HELD=1
+fi
 SNAP="$1"; shift
 mkdir -p logs/stage_all
 SUM=logs/stage_all/summary.tsv

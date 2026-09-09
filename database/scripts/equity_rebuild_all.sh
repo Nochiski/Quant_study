@@ -8,6 +8,13 @@ set -uo pipefail
 export LC_ALL=C
 export QL_HOME=/home/kael/quant-ledger PYTHONPATH=/home/kael/quant-ledger/src
 cd "$QL_HOME"
+# 2026-09-09 (플랜 P0 Task 0.2): 락은 여기서 한 번만 잡고 자식 run_equity.sh 는 QL_BUILD_LOCK_HELD=1 로 생략한다.
+LOCK=/tmp/quant_ledger_build.lock
+if [ -z "${QL_BUILD_LOCK_HELD:-}" ]; then
+  exec 9>"$LOCK"
+  flock -n 9 || { echo "another build is running — lock $LOCK"; exit 3; }
+  export QL_BUILD_LOCK_HELD=1
+fi
 PASS="${1:?pass label required}"
 OUT="logs/equity/rebuild_${PASS}"
 mkdir -p "$OUT"

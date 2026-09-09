@@ -6,7 +6,6 @@ v3 키를 35,588~39,002콜 태웠다(reviews/2026-09-09-daily-findings-E §3-2, 
 import importlib
 import sys
 
-
 _IMPORT_TIME_KEYS = "KRX_API_KEY=krx\nKRX_ID=id\nKRX_PW=pw\n"   # api.py:35 가 import 시점에 요구
 
 

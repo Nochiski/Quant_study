@@ -1,5 +1,12 @@
 """정합성 검증용 공통 API 클라이언트. 조회 전용."""
-import os, sys, json, time, warnings, requests
+import json
+import os
+import sys
+import time
+import warnings
+
+import requests
+
 warnings.filterwarnings("ignore")
 
 # 경로를 박아두면 서버에서 뜨지 않는다. 맥(~/Desktop/...)과 서버(~/...)가 다르므로 후보를 순회한다.
@@ -12,7 +19,9 @@ def _find_env():
     raise FileNotFoundError("kael .env 를 찾을 수 없다. QL_ENV 로 지정하라")
 ENV = _find_env()
 _K = {}
-for _l in open(ENV, encoding="utf-8"):
+with open(ENV, encoding="utf-8") as _env_f:
+    _ENV_LINES = _env_f.read().splitlines()
+for _l in _ENV_LINES:
     _l = _l.strip()
     for _k in ("KRX_API_KEY","KRX_ID","KRX_PW","KIS_APP_KEY","KIS_APP_SECRET",
                "KIWOOM_APP_KEY","KIWOOM_SECRET_KEY","DART_API_KEY","DART_API_KEY_2",
@@ -52,10 +61,11 @@ def _kis_token():
     import json as _json
     if os.path.exists(_KIS_CACHE):
         try:
-            c = _json.load(open(_KIS_CACHE))
+            with open(_KIS_CACHE) as _f:
+                c = _json.load(_f)
             if time.time() < c["issued_at"] + 23 * 3600:
                 _kis_tok = c["token"]; return _kis_tok
-        except Exception:
+        except Exception:  # noqa: BLE001, S110  # reason: 토큰 캐시 손상·부재는 아래 재발급으로 복구된다
             pass
     r = requests.post(f"{KIS_BASE}/oauth2/tokenP", timeout=30,
         json={"grant_type":"client_credentials","appkey":_K["KIS_APP_KEY"],
@@ -63,7 +73,8 @@ def _kis_token():
     if "access_token" not in r:
         raise RuntimeError(f"KIS 토큰 발급 실패: {r}")
     _kis_tok = r["access_token"]
-    _json.dump({"token": _kis_tok, "issued_at": time.time()}, open(_KIS_CACHE, "w"))
+    with open(_KIS_CACHE, "w") as _f:
+        _json.dump({"token": _kis_tok, "issued_at": time.time()}, _f)
     return _kis_tok
 
 def kis(url, tr_id, params):
@@ -86,10 +97,11 @@ def _kw_token(force=False):
         return _kw_tok
     if not force:
         try:
-            c = json.load(open(_KW_CACHE))
+            with open(_KW_CACHE) as _f:
+                c = json.load(_f)
             if c.get("exp") and time.time() < c["exp"] - 600:   # 만료 10분 전에 갱신
                 _kw_tok = c["token"]; return _kw_tok
-        except Exception:
+        except Exception:  # noqa: BLE001, S110  # reason: 토큰 캐시 손상·부재는 아래 재발급으로 복구된다
             pass
     r = requests.post(f"{KW_BASE}/oauth2/token", timeout=30,
         headers={"Content-Type":"application/json;charset=UTF-8"},
@@ -100,10 +112,11 @@ def _kw_token(force=False):
     if r.get("expires_dt"):
         try:
             from datetime import datetime as _dt
-            exp = _dt.strptime(str(r["expires_dt"]), "%Y%m%d%H%M%S").timestamp()
-        except Exception:
+            exp = _dt.strptime(str(r["expires_dt"]), "%Y%m%d%H%M%S").timestamp()  # noqa: DTZ007  # reason: 키움 expires_dt 는 KST 벽시계 문자열, 서버 TZ 기준 epoch 비교에만 쓴다
+        except Exception:  # noqa: BLE001, S110  # reason: expires_dt 형식이 바뀌어도 토큰은 유효하다 — exp=None 으로 두고 다음 콜에서 재발급
             pass
-    json.dump({"token": _kw_tok, "exp": exp, "t": time.time()}, open(_KW_CACHE, "w"))
+    with open(_KW_CACHE, "w") as _f:
+        json.dump({"token": _kw_tok, "exp": exp, "t": time.time()}, _f)
     return _kw_tok
 
 def kiwoom(api_id, url, body, cont=None, next_key=None):
@@ -174,6 +187,6 @@ def dart(path, key=None, **params):
         return r.json() if path.endswith(".json") else r.content
     except DartError:
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001  # reason: requests 예외 전부를 DartError 로 감싸 crtfc_key 를 마스킹한다
         msg = str(e).replace(k, "***") if k else str(e)
         raise DartError(f"{type(e).__name__} — path={path} params={safe} :: {msg}") from None

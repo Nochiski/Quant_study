@@ -24,7 +24,7 @@ KST = dt.timezone(dt.timedelta(hours=9))
 KW_SPECS: list[tuple[str, str, str, str | None, str]] = [
     ("ka10008", "/api/dostk/frgnistt", "none", "stk_frgnr", "dt"),
     ("ka10060", "/api/dostk/chart", "dt", None, "dt"),
-    ("ka10014", "/api/dostk/shsa", "range", "shrts", "dt"),
+    ("ka10014", "/api/dostk/shsa", "range", "shrts_trnsn", "dt"),
     ("ka20068", "/api/dostk/slb", "range_all", None, "dt"),
 ]
 

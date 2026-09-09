@@ -51,12 +51,21 @@ export default defineConfig({
     baseURL: "http://localhost:5173",
     locale: "ko-KR",
     timezoneId: "Asia/Seoul",
+    // `locale` 은 navigator.language 와 Intl 만 바꾼다. Windows Chromium 의
+    // `<input type="date">` 자리표시자(yyyy-mm-dd / mm/dd/yyyy)는 브라우저 UI 언어를
+    // 따르므로, 호스트 OS 로케일과 무관하게 기준선이 재현되도록 UI 언어도 고정한다.
+    launchOptions: { args: ["--lang=ko-KR"] },
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
   webServer: [
     {
-      command: "uv run server --host 127.0.0.1 --port 8000",
+      // `uv run server` 는 `--reload` 를 켠다. uvicorn 0.52 의 Windows 재시작은
+      // CTRL_C_EVENT 를 콘솔 전체에 보내 Playwright 까지 함께 종료시키고, CI 러너에서는
+      // `.venv` 안 파일 변경 감지가 곧바로 재시작을 일으켜 브라우저 게이트가 한 번도
+      // 통과하지 못했다. E2E 는 코드가 바뀌지 않으므로 같은 앱을 reload 없이 띄운다.
+      command:
+        "uv run uvicorn strategy_workbench.bootstrap.facade.http:build_runtime_http_app --factory --host 127.0.0.1 --port 8000",
       cwd: backendDirectory,
       env: {
         ...process.env,

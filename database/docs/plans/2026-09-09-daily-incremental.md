@@ -18,7 +18,7 @@
 |---|---|
 | 최종 갱신 | 2026-09-09 — R2~R10 승인, P0 착수(브랜치 `feat/daily-p0`) |
 | 결정 R1~R10 | **전부 승인**(09-09, R1 은 사용자 수정판) |
-| P0 안전장치·정렬 | **진행 중**(09-09) — 0.1 알림·0.2 락·0.3 캘린더·0.4 키 폴백 제거·0.5 GC 완료(G0 #1·#2·#3·#4·#5·#6 통과, 스냅샷 37→24 GB) · 0.6 equity 정렬·0.7 키움 프로브·0.8 앱키 실측·0.9 배포 정렬 진행 |
+| P0 안전장치·정렬 | **진행 중**(09-09) — 0.1~0.5·0.9 완료, 0.6 락 설치 완료(G0#7)·전량 재빌드 진행, 0.7 프로브 가동(09-09 15:05~, 3거래일 = 09-15 판독), 0.8 실측 진행. G0 통과: #1·#2·#3·#4·#5·#6·#7·#12 |
 | P1 원장 증분 코드 | 미착수 |
 | P2 갭 메우기 | 미착수 |
 | P3 원장 크론·관찰 | 미착수 |
@@ -171,8 +171,8 @@
 
 **Files:** Modify `database/src/equity/baseline_locked.json`
 
-- [ ] **Step 1**: 서버 `data/equity/baseline.json` 의 상수 3건(`consensus_daily.v3_wise_match_min 0.93`, `v3_wise_value_tol_rel 0.01`, `corp_event.bonus_ratio_window_sessions 25`)이 09-07 결정인지 `EQUITY_HANDOFF.md` §8 에서 확인. 맞으면 락 파일에 반영, 아니면 서버를 락으로 되돌린다.
-- [ ] **Step 2**: `scripts/check_baseline_lock.py` rc=0 확인.
+- [x] **Step 1**: 서버 `data/equity/baseline.json` 의 상수 3건(`consensus_daily.v3_wise_match_min 0.93`, `v3_wise_value_tol_rel 0.01`, `corp_event.bonus_ratio_window_sessions 25`)이 09-07 결정인지 `EQUITY_HANDOFF.md` §8 에서 확인. 맞으면 락 파일에 반영, 아니면 서버를 락으로 되돌린다.
+- [x] **Step 2**: `scripts/check_baseline_lock.py` rc=0 확인. (09-09: 서버가 09-07 확정값이었고 락이 뒤처진 것 — 락을 서버 상수로 갱신해 설치, 바이트 동일 확인)
 - [ ] **Step 3**: 서버에서 `equity_rebuild_all.sh`(470초) → `python -m equity catalog` → `contract`. 목적: `rules_version` 단일화 + catalog stale 해소. `_catalog_meta.snapshot_id` 가 현재 MANIFEST 지문과 일치해야 한다.
 - [ ] **Step 4**: 커밋(락 파일) + `EQUITY_HANDOFF.md §8` 에 정렬 기록 1줄
 
@@ -180,8 +180,8 @@
 
 **Files:** Create `database/src/probe_kw_timing.py` · 회수 `database/src/probe_krx_timing.py`(서버에만 있음)
 
-- [ ] **Step 1**: `probe_krx_timing.py` 방식으로 ka10008·ka10060·ka10014·ka20068 각 1종목(005930) 을 매시 1콜(일 96콜) 호출해 `data/evidence/kw_timing.db` 에 `(ts_kst, api, target_dt, n_rows, poss_stkcnt_changed)` 기록. **06:00 시점에 전일 `dt` 행이 있고 그 값이 08:00 KRX 공표 이후에도 바뀌지 않는지**가 관측 대상(R1 의 "06:00 추정" 을 확인하는 프로브). KIS credit 도 1종목 매시 1콜로 `deal_date=T-2` 행이 06:00 에 오는지 함께 잰다.
-- [ ] **Step 2**: 임시 크론 `5 * * * *` 등록. **3거래일** 뒤 판독: "T-1 데이터가 확정되는 최초 시각". 06:00 이전이면 R1 그대로, 늦으면 키움 단계만 그 시각으로 미룬다(`--not-before`). 판독 전에는 키움 증분을 돌리지 않는다.
+- [x] **Step 1**: `probe_krx_timing.py` 방식으로 ka10008·ka10060·ka10014·ka20068 각 1종목(005930) 을 매시 1콜(일 96콜) 호출해 `data/evidence/kw_timing.db` 에 `(ts_kst, api, target_dt, n_rows, poss_stkcnt_changed)` 기록. **06:00 시점에 전일 `dt` 행이 있고 그 값이 08:00 KRX 공표 이후에도 바뀌지 않는지**가 관측 대상(R1 의 "06:00 추정" 을 확인하는 프로브). KIS credit 도 1종목 매시 1콜로 `deal_date=T-2` 행이 06:00 에 오는지 함께 잰다.
+- [x] **Step 2**: 임시 크론 `5 * * * *` 등록(09-09 15:05 KST 부터, `src/probe_kw_timing.py`). 첫 관측(09-09 15:15 KST, 장중): 키움 4 TR 모두 T-1(0908) 행 존재, 당일(0909) 장중 행도 이미 응답에 섞임 → `dt<=D` 머지 규칙의 근거. KIS credit 은 `d2=오늘` 로 조회해도 max deal_date 가 0904(T-3) — 06:00 에 T-2 가 오는지가 판독 포인트. **3거래일** 뒤 판독: "T-1 데이터가 확정되는 최초 시각". 06:00 이전이면 R1 그대로, 늦으면 키움 단계만 그 시각으로 미룬다(`--not-before`). 판독 전에는 키움 증분을 돌리지 않는다.
 - [ ] **Step 3**: 판독 결과를 `docs/reviews/2026-09-09-daily-findings-A-*.md` 말미에 추가. 프로브 크론 제거.
 
 ### Task 0.8: 키움·KIS 앱키 실사용량 실측 (콜 0)
@@ -192,9 +192,9 @@
 
 ### Task 0.9: 서버 배포 정렬
 
-- [ ] **Step 1**: `scripts/run_stage_all.sh` 저장소판을 서버로(`rsync`). 서버 전용 `src/equity_s23/`(29모듈)·`src/rebuild_share.py`·`src/probe_krx_timing.py` 는 **저장소로 가져와** 커밋(정본 = 저장소). `sync_v3_wise.py`·`export_csv.py` 는 PR #66 에서 의도적으로 삭제한 것이므로 서버에서도 지운다.
-- [ ] **Step 2**: 배포 명령을 `scripts/deploy.sh` 로 고정: `rsync -avz --delete --exclude='.venv' --exclude='__pycache__' --exclude='.k*_token.json' database/src/ kael-server:~/quant-ledger/src/` + `scripts/`. `--delete` 는 `--dry-run` 검토 후.
-- [ ] **Step 3**: 커밋
+- [x] **Step 1**: 처분 판정(09-09, `reviews` 대신 조사 요약을 여기 기록): `src/equity_s23/` 는 e1.7.0 구본 사본(현행 `src/equity` 의 부분집합, 참조 0건) → **서버 삭제**. `rebuild_share.py` 는 `backend/ops/` 와 md5 동일 → 저장소 정본은 그쪽, 서버엔 `deploy.sh` 가 별도 라인으로 민다. `probe_krx_timing.py` 는 한 번도 안 돌았고(산출 DB 없음) 새 `probe_kw_timing.py` 가 대체 → 회수하지 않고 삭제. `export_csv.py`·`api.py.bak` 삭제. **`sync_v3_wise.py` 는 유지** — `rules_s17.py:458-467` 이 v3 미러 재개를 사람 승인 옵션으로 명시(플랜 초안의 '서버에서도 지운다' 는 철회).
+- [x] **Step 2**: 배포 명령을 `scripts/deploy.sh` 로 고정(dry-run 기본, `--apply`; 토큰 캐시·`sync_v3_wise.py` exclude): `rsync -avz --delete --exclude='.venv' --exclude='__pycache__' --exclude='.k*_token.json' database/src/ kael-server:~/quant-ledger/src/` + `scripts/`. `--delete` 는 `--dry-run` 검토 후.
+- [x] **Step 3**: 커밋 (09-09 `--apply` 실행, 재실행 dry-run 전송·삭제 0 = G0#12)
 
 ### 게이트 G0 — 전부 통과해야 P1 시작
 

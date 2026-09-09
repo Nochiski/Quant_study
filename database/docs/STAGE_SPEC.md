@@ -123,7 +123,7 @@ NXT 시장(~20:00)을 고려할 필요가 없다. `venue_scope='KRX'`가 맞다.
 | `kis_investor_flow.acml_tr_pbmn` | **원** (명세는 백만원이라 주장 — 명세 오류) | 그대로 |
 | `kis_investor_flow.*_ntby_tr_pbmn` | 백만원 | ×1,000,000 |
 | `kis_loan_trans.rmnd_amt` | 백만원 | ×1,000,000 |
-| `kis_credit_balance.*_amt` | **미확정** | ~~적재 보류~~ 싣되 `unit=unknown`·`_krw` 금지 `[→ DESIGN §4·§5 신뢰 불가 값 처방]` |
+| `kis_credit_balance.*_amt` | **만원**(취득금액 기준 — 09-09 I4 확정) | **규칙 미반영**: 현행 `stg_credit_daily` 는 `unit=unknown`·접미사 없음으로 원값 적재, equity `credit_daily.amt_basis='unknown'`. ×10,000 → `_krw` 파생은 stage 규칙 판본 변경 후속 `[→ I4 · DESIGN §4·§5]` |
 | KRX 금액 컬럼 전부 | 원 | 그대로 |
 
 **저가주 판별로 독립 검증했다** — 에이엔피(274원, 거래대금 1,064백만원)의 개인 순매수

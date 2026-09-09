@@ -16,10 +16,10 @@
 
 | 항목 | 값 |
 |---|---|
-| 최종 갱신 | 2026-09-09 — R2~R10 승인, P0 착수(브랜치 `feat/daily-p0`) |
+| 최종 갱신 | 2026-09-09 — P0 작업 완료(게이트 #10·앱키 대기), P1 진행 중(브랜치 `feat/daily-p0`) |
 | 결정 R1~R10 | **전부 승인**(09-09, R1 은 사용자 수정판) |
-| P0 안전장치·정렬 | **진행 중**(09-09) — 0.1~0.5·0.9 완료, 0.6 락 설치 완료(G0#7)·전량 재빌드 진행, 0.7 프로브 가동(09-09 15:05~, 3거래일 = 09-15 판독), 0.8 완료(키움 앱키 분리 필요 → 사용자 행동). G0 통과: #1·#2·#3·#4·#5·#6·#7·#11·#12 |
-| P1 원장 증분 코드 | 미착수 |
+| P0 안전장치·정렬 | **작업 완료, 게이트 2건 대기**(09-09) — 0.1~0.9 전부 완료. G0 통과 #1~#9·#11·#12. 남은 것: **#10 키움 프로브 판독(3거래일 → 09-15)** · **R5 후속 키움 앱키 발급(사용자 행동)**. 이 둘은 P3 키움 단계의 전제이지 P1 코드 작성의 전제가 아니라 P1 을 병행 시작 |
+| P1 원장 증분 코드 | **진행 중**(09-09) — 1.1 공용 모듈·1.2 KRX 가드·1.6 DART 유니버스 완료(테스트·ruff·pyright 통과), 1.3 키움·1.4 KIS·1.5 DART 러너 구현 중(병렬), 1.7·1.8 대기 |
 | P2 갭 메우기 | 미착수 |
 | P3 원장 크론·관찰 | 미착수 |
 | P4 stage 일일 전량 | 미착수 |
@@ -173,8 +173,8 @@
 
 - [x] **Step 1**: 서버 `data/equity/baseline.json` 의 상수 3건(`consensus_daily.v3_wise_match_min 0.93`, `v3_wise_value_tol_rel 0.01`, `corp_event.bonus_ratio_window_sessions 25`)이 09-07 결정인지 `EQUITY_HANDOFF.md` §8 에서 확인. 맞으면 락 파일에 반영, 아니면 서버를 락으로 되돌린다.
 - [x] **Step 2**: `scripts/check_baseline_lock.py` rc=0 확인. (09-09: 서버가 09-07 확정값이었고 락이 뒤처진 것 — 락을 서버 상수로 갱신해 설치, 바이트 동일 확인)
-- [ ] **Step 3**: 서버에서 `equity_rebuild_all.sh`(470초) → `python -m equity catalog` → `contract`. 목적: `rules_version` 단일화 + catalog stale 해소. `_catalog_meta.snapshot_id` 가 현재 MANIFEST 지문과 일치해야 한다.
-- [ ] **Step 4**: 커밋(락 파일) + `EQUITY_HANDOFF.md §8` 에 정렬 기록 1줄
+- [x] **Step 3**: 서버에서 `equity_rebuild_all.sh`(470초) → `python -m equity catalog` → `contract`. 목적: `rules_version` 단일화 + catalog stale 해소. `_catalog_meta.snapshot_id` 가 현재 MANIFEST 지문과 일치해야 한다. **(09-09 실행: pass1 517s · pass2 499s, content_hash 28/28 동일, rules_version 28표 e1.14.0, 게이트 fail 0, catalog `2c38be1d58fb03be` EG5c n_diff 0, contract EGC-01~05·10 pass. `contract` 는 `--engine-src /home/kael/quant-ledger/_engine` 를 줘야 한다 — 기본값 `~/backend/src` 는 서버에 없다 → Task 5.3 `equity_daily.sh` 에 반영)**
+- [x] **Step 4**: 커밋(락 파일 `9c8a24e`) + `EQUITY_HANDOFF.md §8-5` 에 정렬 기록
 
 ### Task 0.7: 키움 확정 시각 프로브 (3거래일 이상)
 
@@ -223,19 +223,19 @@
 
 **Files:** Create `database/src/daily/__init__.py`, `calendar.py`, `universe.py`, `runlog.py` · Test `tests/test_daily_calendar.py`, `test_daily_universe.py`
 
-- [ ] **Step 1** (calendar): `is_trading_day(d)`, `prev_trading_day(d, n=1)` — `data/calendar/kis_holidays.json` + 주말. 파일 없거나 검증 실패 → 경고 로그 + **영업일 가정**(`COLLECT_PLAN §4-1` 0단계). 테스트: 2026-09-24(추석) False, 2026-09-23 True, 파일 없을 때 평일 True.
-- [ ] **Step 2** (universe): `kiwoom_common(con_kw, snap_date=None) -> list[str]` = `backfill_wise.py:182-201` 의 규칙(`upSizeName<>''`)을 옮겨 오고 `backfill_wise.py` 는 이 함수를 import. `with_grace(prev, today, con_kw, days=5)`: 요청 유니버스 = `today ∪ prev(유예 중)`. 오늘 스냅샷에서 사라진 종목을 5거래일 동안 유지하되, **제외는 그 종목의 `ka10008.max(dt)` 가 마지막 마스터 등장일 이상일 때만**(거래정지 종목은 키움이 `rc=0`+0행을 주므로 시간 만료만으로 빼면 마지막 거래일이 영구 누락). **`prev` 가 없는 첫 실행은 `data/jsonl/tickers.txt`(2,602)로 시드**하고, `tickers.txt − kiwoom_common`(≈40종목, 마스터에 있으나 `upSizeName` 공백)을 로그로 남긴다 — 이들을 계속 수집할지는 P6 에서 결정하고, 그 전엔 유예 규칙으로 자연 처리. 상태는 `data/daily/universe_kw.json`. 테스트: 386380(09-04 상장)이 `kiwoom_common` 에 드는지 서버 실측으로 확인해 픽스처에 반영(안 들면 필터 규칙을 재검토).
-- [ ] **Step 3** (runlog): `data/raw/daily_run.db` 테이블 `run(run_id, date, source, started, ended, n_calls, n_rows, status, detail)`. 모든 러너가 시작·종료를 기록. 건전성 판정과 알림이 이 표를 읽는다.
-- [ ] **Step 4**: 테스트 통과 · `ruff`·`pyright` · 커밋
+- [x] **Step 1** (calendar): `is_trading_day(d)`, `prev_trading_day(d, n=1)` — `data/calendar/kis_holidays.json` + 주말. 파일 없거나 검증 실패 → 경고 로그 + **영업일 가정**(`COLLECT_PLAN §4-1` 0단계). 테스트: 2026-09-24(추석) False, 2026-09-23 True, 파일 없을 때 평일 True.
+- [x] **Step 2** (universe): `kiwoom_common(con_kw, snap_date=None) -> list[str]` = `backfill_wise.py:182-201` 의 규칙(`upSizeName<>''`)을 옮겨 오고 `backfill_wise.py` 는 이 함수를 import. `with_grace(prev, today, con_kw, days=5)`: 요청 유니버스 = `today ∪ prev(유예 중)`. 오늘 스냅샷에서 사라진 종목을 5거래일 동안 유지하되, **제외는 그 종목의 `ka10008.max(dt)` 가 마지막 마스터 등장일 이상일 때만**(거래정지 종목은 키움이 `rc=0`+0행을 주므로 시간 만료만으로 빼면 마지막 거래일이 영구 누락). **`prev` 가 없는 첫 실행은 `data/jsonl/tickers.txt`(2,602)로 시드**하고, `tickers.txt − kiwoom_common`(≈40종목, 마스터에 있으나 `upSizeName` 공백)을 로그로 남긴다 — 이들을 계속 수집할지는 P6 에서 결정하고, 그 전엔 유예 규칙으로 자연 처리. 상태는 `data/daily/universe_kw.json`. 테스트: 386380(09-04 상장)이 `kiwoom_common` 에 드는지 서버 실측으로 확인해 픽스처에 반영(안 들면 필터 규칙을 재검토).
+- [x] **Step 3** (runlog): `data/raw/daily_run.db` 테이블 `run(run_id, date, source, started, ended, n_calls, n_rows, status, detail)`. 모든 러너가 시작·종료를 기록. 건전성 판정과 알림이 이 표를 읽는다.
+- [x] **Step 4**: 테스트 통과 · `ruff`·`pyright` · 커밋
 
 ### Task 1.2: KRX — 휴장 오확정 차단 + 재수집 (DEFECT-A-01)
 
 **Files:** Modify `database/src/backfill_krx.py:51-53, 83-84, 109-117` · Test `tests/test_daily_krx_guard.py`
 
-- [ ] **Step 1** 실패 테스트: 캘린더가 거래일이라 하는 날짜에 빈 응답 → `ingest_log.status='pending'`(휴장 아님), `done` 집합에 안 들어감. `--refetch D1,D2` 는 그 날짜의 `ingest_log` 7행을 지우고 다시 받는다.
-- [ ] **Step 2** 구현: `--calendar` 옵션(기본 `data/calendar/kis_holidays.json`). 빈 응답 처리 = 캘린더 휴장이면 `holiday`, 거래일이면 `pending`. `done` 은 `status IN ('ok','holiday')` 유지(pending 은 재시도). `--refetch` 추가.
-- [ ] **Step 3**: `daily_build.sh`(08:10) 의 KRX 단계는 `--from <D> --to <D>` 로 호출하되 **최근 10거래일 중 `pending` 인 날짜를 함께 포함**(어제 못 받은 날은 오늘 자동 재시도). 당일 `pending` 이면 10분 간격 최대 6회 재시도(08:10→09:10) 후 `crit`.
-- [ ] **Step 4**: 테스트 통과 · 커밋 `fix(database): KRX never confirms a trading day as holiday before publication`
+- [x] **Step 1** 실패 테스트: 캘린더가 거래일이라 하는 날짜에 빈 응답 → `ingest_log.status='pending'`(휴장 아님), `done` 집합에 안 들어감. `--refetch D1,D2` 는 그 날짜의 `ingest_log` 7행을 지우고 다시 받는다.
+- [x] **Step 2** 구현: `--calendar` 옵션(기본 `data/calendar/kis_holidays.json`). 빈 응답 처리 = 캘린더 휴장이면 `holiday`, 거래일이면 `pending`. `done` 은 `status IN ('ok','holiday')` 유지(pending 은 재시도). `--refetch` 추가.
+- [x] **Step 3**: `daily_build.sh`(08:10) 의 KRX 단계는 `--from <D> --to <D>` 로 호출하되 **최근 10거래일 중 `pending` 인 날짜를 함께 포함**(어제 못 받은 날은 오늘 자동 재시도). 당일 `pending` 이면 10분 간격 최대 6회 재시도(08:10→09:10) 후 `crit`.
+- [x] **Step 4**: 테스트 통과 · 커밋 `fix(database): KRX never confirms a trading day as holiday before publication`
 
 ### Task 1.3: 키움 증분 러너 `src/daily/kw_daily.py` (DEFECT-A-02, 오염 가드)
 
@@ -271,9 +271,9 @@
 
 **Files:** Modify `database/src/dart_universe.py:18-30` · Test `tests/test_dart_universe.py`
 
-- [ ] **Step 1** 실패 테스트: 티커 집합 = KRX 전기간(`isu_base_info` MIN/MAX) **∪** `ka10099` 최신 스냅샷(현역). `ka10099` 에만 있는 신규 상장(예: 386380)이 `first_year=올해` 로 들어온다.
-- [ ] **Step 2** 구현 + `--kw data/raw/kiwoom.db` 옵션. `corps.txt` 재작성은 `daily_ledger.sh` 에서 **주 1회(월요일)** 실행.
-- [ ] **Step 3**: 테스트 통과 · 커밋
+- [x] **Step 1** 실패 테스트: 티커 집합 = KRX 전기간(`isu_base_info` MIN/MAX) **∪** `ka10099` 최신 스냅샷(현역). `ka10099` 에만 있는 신규 상장(예: 386380)이 `first_year=올해` 로 들어온다.
+- [x] **Step 2** 구현 + `--kw data/raw/kiwoom.db` 옵션. `corps.txt` 재작성은 `daily_ledger.sh` 에서 **주 1회(월요일)** 실행.
+- [x] **Step 3**: 테스트 통과 · 커밋
 
 ### Task 1.7: 원장 건전성 판정 `src/daily/ledger_health.py`
 

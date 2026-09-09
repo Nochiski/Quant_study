@@ -262,7 +262,10 @@ def _engine_scenario(
 
 
 class _TwoNameReplaceStrategy:
-    """두 종목 REPLACE 목표를 순서대로 내는 전략 — 정지·상폐로 바가 끊긴 보유 종목의 청산 시나리오."""
+    """두 종목 REPLACE 목표를 순서대로 내는 전략.
+
+    정지·상폐로 바가 끊긴 보유 종목의 청산 시나리오에 쓴다.
+    """
 
     def __init__(self, script: tuple[StrategyAction | None, ...]) -> None:
         self._script = script

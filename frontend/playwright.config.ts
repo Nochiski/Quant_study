@@ -51,6 +51,10 @@ export default defineConfig({
     baseURL: "http://localhost:5173",
     locale: "ko-KR",
     timezoneId: "Asia/Seoul",
+    // `locale` 은 navigator.language 와 Intl 만 바꾼다. Windows Chromium 의
+    // `<input type="date">` 자리표시자(yyyy-mm-dd / mm/dd/yyyy)는 브라우저 UI 언어를
+    // 따르므로, 호스트 OS 로케일과 무관하게 기준선이 재현되도록 UI 언어도 고정한다.
+    launchOptions: { args: ["--lang=ko-KR"] },
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },

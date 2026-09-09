@@ -377,7 +377,7 @@ def fetch_tr(spec: TrSpec, tickers: Sequence[str], *, date: str, prev_date: str,
     holdings_d: dict[str, str] = {}
     holdings_prev: dict[str, str] = {}
     errors: list[str] = []
-    con = None if dry_run else sqlite3.connect(db_path, timeout=60)
+    con = sqlite3.connect(db_path, timeout=60)      # incoming 은 dry_run 에도 쓴다(스크래치)
     try:
         for ticker in tickers:
             started = time.time()
@@ -448,13 +448,16 @@ def stale_gate(db_path: str, prev_date: str, holdings_d: Mapping[str, str],
 
 def fetch(tickers: Sequence[str], *, date: str, prev_date: str, db_path: str,
           client: ModuleType, dry_run: bool = False) -> FetchResult:
-    """유니버스 × 4 TR 을 종목당 1콜씩 받아 `_kw_incoming_<tr>` 에 세우고 오염 게이트를 판정한다."""
-    if not dry_run:
-        con = sqlite3.connect(db_path, timeout=60)
-        try:
-            clear_incoming(con)
-        finally:
-            con.close()
+    """유니버스 × 4 TR 을 종목당 1콜씩 받아 `_kw_incoming_<tr>` 에 세우고 오염 게이트를 판정한다.
+
+    dry_run 이어도 incoming(스크래치 테이블)은 쓴다 — 원장(`ka*` 본 테이블)·runlog·유니버스 상태만 안 쓴다.
+    그래야 `--merge --dry-run` 이 대조할 대상이 생긴다(G1 서버 드라이런).
+    """
+    con = sqlite3.connect(db_path, timeout=60)
+    try:
+        clear_incoming(con)
+    finally:
+        con.close()
     lock = threading.Lock()
     with ThreadPoolExecutor(max_workers=len(TRS)) as pool:
         futures = [pool.submit(fetch_tr, spec, tickers, date=date, prev_date=prev_date,
@@ -681,7 +684,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     mode.add_argument("--merge", action="store_true", help="KRX 크로스소스 대조 후 원장 머지")
     p.add_argument("--date", default=None, help="대상 거래일 YYYYMMDD (기본: 캘린더상 직전 거래일)")
     p.add_argument("--dry-run", action="store_true",
-                   help="콜은 하되 원장·incoming·daily_run.db·유니버스 상태에 쓰지 않는다")
+                   help="콜은 하되 원장(ka* 본 테이블)·daily_run.db·유니버스 상태에 쓰지 않는다 — incoming 스크래치는 쓴다")
     p.add_argument("--limit", type=int, default=0, help="요청 종목 수 제한(fetch 전용)")
     p.add_argument("--not-before", default=None, help="KST HH:MM 이전이면 rc 3")
     p.add_argument("--db", default=None, help="kiwoom.db 경로 (기본 data/raw/kiwoom.db)")

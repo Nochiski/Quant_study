@@ -57,9 +57,15 @@ echo "════ [$(kst)] daily_build 시작 dry=${DRY:-no} no_build=${NOBUILD
 D="${DATE_ARG:-$($PY -c 'import datetime as dt; from daily import calendar as c
 print(c.load().prev_trading_day(dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()).strftime("%Y%m%d"))')}"
 echo "  대상 거래일 D=$D"
-step "krx" krx_step "$D" \
-&& step "kiwoom merge" $PY -m daily.kw_daily --date "$D" --merge $DRY $LIMIT \
-&& step "ledger_health" $PY -m daily.ledger_health --date "$D"
+if [ -n "$DRY" ]; then
+  echo "  dry-run: KRX 수집 단계는 건너뛴다(backfill_krx.py 에 dry-run 이 없다 — 원장 무변경 보장)"
+  step "kiwoom merge" $PY -m daily.kw_daily --date "$D" --merge $DRY $LIMIT \
+  && step "ledger_health" $PY -m daily.ledger_health --date "$D" --out "$(mktemp -d)"
+else
+  step "krx" krx_step "$D" \
+  && step "kiwoom merge" $PY -m daily.kw_daily --date "$D" --merge $DRY $LIMIT \
+  && step "ledger_health" $PY -m daily.ledger_health --date "$D"
+fi
 RC=$?
 if [ "$RC" -eq 0 ] && [ -z "$NOBUILD" ] && [ -z "$DRY" ]; then
   export QL_BUILD_LOCK_HELD=""     # 빌드 락은 stage_daily.sh 가 잡는다(raw 락은 물려준다)
@@ -72,7 +78,7 @@ echo "════ 종료 rc=$RC $(kst) ════"
 cat "$RUN" >> "$LOG"
 SUMMARY=$(grep -E "^원장 건전성|──── .* 종료|아직 미공표" "$RUN" | tail -8 | tr '\n' ' ' | cut -c1-900)
 if [ -n "$FAILED" ]; then
-  scripts/notify.sh crit "daily_build 실패: $FAILED" "$SUMMARY | 로그 $LOG"
+  [ -z "$DRY" ] && scripts/notify.sh crit "daily_build 실패: $FAILED" "$SUMMARY | 로그 $LOG"
   rm -f "$RUN"; exit 2
 fi
 [ -z "$DRY" ] && scripts/notify.sh info "daily_build 완료" "$SUMMARY"

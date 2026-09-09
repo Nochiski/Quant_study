@@ -70,7 +70,7 @@ fi
 cat "$RUN" >> "$LOG"
 SUMMARY=$(grep -E "^  |──── .* 종료" "$RUN" | tail -8 | tr '\n' ' ' | cut -c1-900)
 if [ -n "$FAILED" ]; then
-  scripts/notify.sh crit "daily_ledger 실패: $FAILED" "$SUMMARY | 로그 $LOG"
+  [ -z "$DRY" ] && scripts/notify.sh crit "daily_ledger 실패: $FAILED" "$SUMMARY | 로그 $LOG"
   rm -f "$RUN"; exit 2
 fi
 [ -z "$DRY" ] && scripts/notify.sh info "daily_ledger 완료" "$SUMMARY"

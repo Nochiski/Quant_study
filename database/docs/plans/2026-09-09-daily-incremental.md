@@ -19,7 +19,7 @@
 | 최종 갱신 | 2026-09-09 — P0 작업 완료(게이트 #10·앱키 대기), P1 진행 중(브랜치 `feat/daily-p0`) |
 | 결정 R1~R10 | **전부 승인**(09-09, R1 은 사용자 수정판) |
 | P0 안전장치·정렬 | **작업 완료, 게이트 2건 대기**(09-09) — 0.1~0.9 전부 완료. G0 통과 #1~#9·#11·#12. 남은 것: **#10 키움 프로브 판독(3거래일 → 09-15)** · **R5 후속 키움 앱키 발급(사용자 행동)**. 이 둘은 P3 키움 단계의 전제이지 P1 코드 작성의 전제가 아니라 P1 을 병행 시작 |
-| P1 원장 증분 코드 | **진행 중**(09-09) — 1.1 공용·1.2 KRX 가드·1.3 키움 러너·1.4 KIS 러너·1.6 DART 유니버스·1.7 건전성 판정 완료(테스트·ruff·pyright 통과), 1.5 DART 러너 구현 중, 1.8 체인 초안 작성 |
+| P1 원장 증분 코드 | **진행 중**(09-09) — 1.1~1.7 전부 완료(테스트 133건·ruff·pyright 통과), 1.8 체인 작성 — G1 서버 드라이런 진행 |
 | P2 갭 메우기 | 미착수 |
 | P3 원장 크론·관찰 | 미착수 |
 | P4 stage 일일 전량 | 미착수 |
@@ -259,13 +259,13 @@
 
 **Files:** Create `database/src/daily/dart_daily.py` · Test `tests/test_daily_dart.py`
 
-- [ ] **Step 1** 실패 테스트(소형 dart.db 픽스처, `report_nm` 표본 20건):
+- [x] **Step 1** 실패 테스트(소형 dart.db 픽스처, `report_nm` 표본 20건):
   - `classify(report_nm) -> ("periodic", bsns_year, reprt_code) | ("major",) | ("holder",) | ("correction", ...) | None`. `(2026.06)` 라벨 → `(2026, "11012")`, 사업보고서 `(2025.12)` → `("2025","11011")`, `[기재정정]` 접두 처리.
   - `plan(D)`: `dart_disclosure WHERE rcept_dt=D AND stock_code<>''` 에서 corp 별 재호출 목록 생성 — periodic → `fin` + 부속 6종을 **해당 reprt_code 로**(B02 해소), major → DS005 15종 전부(stage 4+5, B04 해소), holder → `elestock`·`majorstock`. 정정은 원 유닛과 동일.
   - `unlock(units)`: 대상 유닛의 `ingest_log` 행 삭제(백필 코드의 `ok` 영구 종결 우회, `store()` 는 멱등이라 안전).
-- [ ] **Step 2** 구현. CLI: `--date D` · `--skip-sweep`(스윕 생략, 갭 메우기에서 날짜를 연속 돌릴 때) · `--sweep-from YYYYQn`(기본 = D 가 속한 분기) · `--max-docs N`(기본 3000). 순서(한 프로세스): ① `sweep_disclosure.py --from <sweep-from> --quota-window midnight`(열린 분기 전량, 410~890콜) ② `plan(D)` → `unlock` → `backfill_dart.py --corps <목록> --only <ep> --years <y> --reprt <rc> --quota-window midnight` 를 그룹별 subprocess ③ `backfill_docs.py --max-calls <max-docs>`(`sleep_to_kst_midnight` 진입 방지). 완료 판정은 **`ingest_log.status` 가 아니라 B §7-1~7-3 SQL**(DEFECT-B01 회피).
-- [ ] **Step 3**: 예산 가드 — 오늘 `dart_call_log` k2+k3 > 40,000 이면 중단 + `crit`. `key_id='kael'` 이 1건이라도 생기면 `crit`(P0 이후엔 불가능해야 함).
-- [ ] **Step 4**: 서버 `--date 2026-09-02 --dry-run --limit 5 --skip-sweep` 으로 계획·게이트 출력 검토(corp 5개분 실제 콜 ≤ 100, 원장 무변경) → 테스트 통과 · 커밋
+- [x] **Step 2** 구현. CLI: `--date D` · `--skip-sweep`(스윕 생략, 갭 메우기에서 날짜를 연속 돌릴 때) · `--sweep-from YYYYQn`(기본 = D 가 속한 분기) · `--max-docs N`(기본 3000). 순서(한 프로세스): ① `sweep_disclosure.py --from <sweep-from> --quota-window midnight`(열린 분기 전량, 410~890콜) ② `plan(D)` → `unlock` → `backfill_dart.py --corps <목록> --only <ep> --years <y> --reprt <rc> --quota-window midnight` 를 그룹별 subprocess ③ `backfill_docs.py --max-calls <max-docs>`(`sleep_to_kst_midnight` 진입 방지). 완료 판정은 **`ingest_log.status` 가 아니라 B §7-1~7-3 SQL**(DEFECT-B01 회피).
+- [x] **Step 3**: 예산 가드 — 오늘 `dart_call_log` k2+k3 > 40,000 이면 중단 + `crit`. `key_id='kael'` 이 1건이라도 생기면 `crit`(P0 이후엔 불가능해야 함).
+- [x] **Step 4**: 서버 `--date 2026-09-02 --dry-run --limit 5 --skip-sweep` 으로 계획·게이트 출력 검토(corp 5개분 실제 콜 ≤ 100, 원장 무변경) → 테스트 통과 · 커밋
 
 ### Task 1.6: DART 유니버스 갱신 (DEFECT-B05)
 
@@ -297,7 +297,7 @@
 |---|---|---|---|
 | 1 | 단위 테스트 | `pytest tests/test_daily_*.py tests/test_dart_universe.py tests/test_api_dart_keys.py -q` | 전건 pass |
 | 2 | 린트·타입 | `ruff check src/daily tests` · `pyright src/daily` | 0 |
-| 3 | 기존 회귀 | `pytest tests -q` | 기존 894 + 신규 전건 pass |
+| 3 | 기존 회귀 | `pytest tests -q` | 기존 + 신규 전건 pass. **(09-09: 1,051 pass · 1 fail `test_equity_s07_contract.py::test_FX_N_close_변조_사본은_EGC01_만_FAIL` — main 판 락 파일로 격리 재실행해도 실패하는 기존 실패, 이 브랜치와 무관. PR 본문에 기록)** |
 | 4 | 서버 드라이런 | `daily_ledger.sh --date 2026-08-21 --limit 20 --dry-run` 후 `daily_build.sh --date 2026-08-21 --limit 20 --dry-run --no-build` | 각 단계 rc 0, 총 콜 ≤ 200, 원장·`ingest_log` 행수 전후 동일 |
 | 5 | 오염 가드 | 픽스처로 stale 99% 주입 | rc 2, 머지 안 됨, crit 수신 |
 | 6 | 휴장 가드 | `--date 2026-09-24` | 전 단계 skip, info 1건, `ingest_log` 에 `holiday` 미기록 |

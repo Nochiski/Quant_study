@@ -236,14 +236,15 @@ def test_merge_waits_when_krx_has_no_rows_for_date(tmp_path, monkeypatch):
 
 
 # ── (f) dry-run 은 원장·incoming·runlog·유니버스 상태에 쓰지 않는다 ──────────
-def test_dry_run_calls_but_writes_nothing(tmp_path, monkeypatch):
+def test_dry_run_calls_but_writes_only_incoming_scratch(tmp_path, monkeypatch):
+    """dry-run: 콜은 하고 incoming(스크래치)은 쓰되 원장·runlog·유니버스 상태는 안 쓴다 — merge dry-run 의 대조 대상."""
     calls = []
     _prepare(tmp_path, monkeypatch, calls, ledger_rows=_seed_prev())
     before = _ledger(tmp_path)
     rc = kw_daily.main(["--fetch", "--date", D, "--dry-run", "--limit", "1"])
     assert rc == 0
     assert len(calls) == len(kw_daily.TRS)                         # --limit 1 → TR 당 1콜
-    assert not any(t.startswith("_kw_incoming_") for t in _tables(tmp_path))
+    assert any(t.startswith("_kw_incoming_") for t in _tables(tmp_path))
     assert _ledger(tmp_path) == before
     assert not (tmp_path / "data" / "raw" / "daily_run.db").exists()
     assert not (tmp_path / "data" / "daily" / "universe_kw.json").exists()

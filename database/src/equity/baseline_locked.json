@@ -1,6 +1,6 @@
 {
   "_lock": "S22 확정본 (2026-09-06). 서버 data/equity/baseline.json 과 **바이트 동일**해야 한다 — 검사는 database/scripts/check_baseline_lock.py, 설치는 이 파일을 그대로 scp 로 덮어쓰기. baseline_seed_s*.json 은 슬라이스별 제안 시드이고 정본이 아니다. _measured[] 는 등재된 상수 전건의 근거이며 server_evidence 는 그 표의 커밋된 current_build 게이트 metrics 에서 그대로 읽은 값이다.",
-  "_locked_at": "2026-09-06",
+  "_locked_at": "2026-09-09",
   "_measured": [
     {
       "growing": false,
@@ -201,9 +201,8 @@
       "growing": false,
       "kind": "measured",
       "metric": "v3_wise_match_min",
-      "pending_human_decision": "서버 실측 0.873(5,054/5,789)이 하한 0.65 를 크게 넘지만, 불일치 735건의 원인이 WISE 월간 엔드포인트와 v3 리비전의 추정 모집단 차이인지 아직 규명되지 않았다. 원인 규명 전에 하한을 올리면 원천 차이를 회귀로 오인한다 — 값 유지.",
       "seed": "baseline_seed_s17.json",
-      "seed_note": "★ 절단본 실측 32/45 = 0.7111(tol 0.001). 겹침 모집단이 45행(티커 5 × 월 5 × 202612 × {eps,revenue} − 003540 revenue 결측 5)뿐이라 표본이 작다. 0.65 는 그 아래로 한 칸 둔 제안값이며 사람 승인 필요. 참고 분포: tol 0.01 → 37/45(0.822) · tol 0.05 → 44/45(0.978). 일치율이 낮은 쪽은 반올림이 아니라 두 WISE 엔드포인트(cF5001/cF5002 월간 vs v3 리비전)의 추정 모집단 차이로 보인다 — 서버 실측 뒤 '왜 다른가' 를 먼저 판정하고 하한을 정할 것.",
+      "seed_note": "**확정(2026-09-07 서버 실측).** tol 0.01 에서 서버 일치율 **0.950768**(n_match 5,504 / n_measured 5,789 · 겹침 모집단 6,192). 하한 0.93 은 그 아래 2.08%p 로, 원천 커버리지가 흔들릴 여지를 남기면서 회귀는 잡는다. 절단본 제안값 0.65 는 겹침이 45행뿐인 표본에서 나온 값이었다. 시드의 '왜 다른가를 먼저 판정하라' 는 조건은 충족됐다 — 불일치 735건 배타 분류: 주식 수 기준 차이 23 · v3 정수 반올림 151 · 관측 시점 어긋남 224 · 미규명 337(대부분 1% 미만). 사실상 EPS 문제이고(eps 20.0% vs revenue 5.4%) 근본 원인은 v3 의 DECIMAL(8,0) 저장이다.",
       "server_evidence": {
         "build_id": "b_20260906T095724_220603Z",
         "content_hash": "145316:d0ae713bdd5a6e58",
@@ -218,14 +217,16 @@
       "sql": "SELECT n_match / n_measured FROM (rules_s17.eg8_overlap_sql, tol = v3_wise_value_tol_rel)",
       "table": "consensus_daily",
       "used_by": "EG8-P07 (rules_s17.eg8_consensus_daily.match_rate) — 폐기형 하한",
-      "value": 0.65
+      "value": 0.93,
+      "decided_at": "2026-09-07",
+      "decision": "DECISIONS_PENDING.md 결정 4 · EQUITY_HANDOFF.md §8-2 (서버 실측 일치율 0.950768, tol 0.01 → 하한 0.93)"
     },
     {
       "growing": false,
       "kind": "measured",
       "metric": "v3_wise_value_tol_rel",
       "seed": "baseline_seed_s17.json",
-      "seed_note": "절단본 상대차 중앙값은 revenue 6.1e-6 · eps 6.9e-5 로, 대부분은 v3 컬럼 정밀도(revenue DECIMAL(10,1) · eps DECIMAL(8,0) 반올림)만큼만 다르다. 0.001 은 그 반올림(최대 ~1e-5)보다 두 자릿수 넉넉하면서 실제 원천 차이(절단본 최대 10.8% — 247540 2026-07-31 eps wise 312.34 vs v3 350)는 잡아내는 값이다. ★ 서버에서 metric 별 상대차 분포를 다시 재고 확정.",
+      "seed_note": "**확정(2026-09-07 서버 실측).** 0.001 은 v3 원장의 저장 정밀도보다 촘촘해 정상 데이터를 불일치로 잡고 있었다 — v3 는 EPS 를 DECIMAL(8,0) 정수(원)로 저장하므로 wise 의 소수 추정치와는 반올림만큼 항상 어긋난다. 서버 겹침 5,789행 상대차 중앙값 3.78e-05 로 분포는 매우 촘촘하고, 어긋나는 쪽은 반올림이 아니라 구조적 사유다(주식수 기준 차이 23건 — 전원 최근 분할·병합 종목 · 관측 시점 어긋남 224건). 0.01 은 반올림을 덮고 구조적 차이는 남긴다. tol 0.001 → 일치율 0.873 · **tol 0.01 → 0.9508**.",
       "server_evidence": {
         "build_id": "b_20260906T095724_220603Z",
         "content_hash": "145316:d0ae713bdd5a6e58",
@@ -238,7 +239,9 @@
       "sql": "SELECT quantile_cont(abs(c.est_mean - v.est_mean) / abs(v.est_mean), 0.5) FROM consensus_daily c JOIN v3_obs v ON v.ticker=c.ticker AND v.obs_date=c.obs_date AND v.target_period=c.target_period AND v.metric=c.metric WHERE c.src='wise'  -- rules_s17.eg8_overlap_sql",
       "table": "consensus_daily",
       "used_by": "EG8-P07 (rules_s17.eg8_consensus_daily) — 두 원천 값이 '같다' 고 볼 상대 허용오차",
-      "value": 0.001
+      "value": 0.01,
+      "decided_at": "2026-09-07",
+      "decision": "DECISIONS_PENDING.md 결정 4 · EQUITY_HANDOFF.md §8-2 (서버 실측 일치율 0.950768, tol 0.01 → 하한 0.93)"
     },
     {
       "growing": false,
@@ -1007,6 +1010,16 @@
       "table": "universe_policy",
       "used_by": "sql/universe_policy.sql version 컬럼",
       "value": "s03c-v4"
+    },
+    {
+      "growing": false,
+      "kind": "measured",
+      "metric": "bonus_ratio_window_sessions",
+      "table": "corp_event",
+      "seed": null,
+      "seed_note": "빌드 상수(rules_s05.py · corp_event.sql:362 `k.bonus_ratio_window_sessions`) — 무상증자 비율 유도 창 25세션. 근거 RATIO_RECOVERY.md, 커밋 87ef481(2026-09-07). 09-07 서버 baseline 에만 등재돼 있고 락에 빠져 있던 것을 2026-09-09 플랜 P0 Task 0.6 에서 등재(누락 시 build.py:102-105 KeyError 로 corp_event 이하 빌드 중단).",
+      "used_by": "corp_event 빌드 상수(EquityTable.consts) — 게이트 아님",
+      "decided_at": "2026-09-07"
     }
   ],
   "_pending": {
@@ -1035,8 +1048,8 @@
   "consensus_daily": {
     "cover_ratio_drop_max": 0.7,
     "cover_ratio_rise_max": 16.0,
-    "v3_wise_match_min": 0.65,
-    "v3_wise_value_tol_rel": 0.001
+    "v3_wise_match_min": 0.93,
+    "v3_wise_value_tol_rel": 0.01
   },
   "corp": {
     "financial_ksic_prefix": "64,65,66"
@@ -1047,7 +1060,8 @@
     "near_dup_window_days": 5,
     "thresholds": {
       "EG7": 0.06
-    }
+    },
+    "bonus_ratio_window_sessions": 25
   },
   "corp_ticker": {
     "isin8_len": 8

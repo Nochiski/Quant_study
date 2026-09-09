@@ -136,17 +136,17 @@ DART_BASE = "https://opendart.fss.or.kr/api"
 def dart_keys():
     """(key_id, key) 순서 목록. 앞이 1순위. 여기서 순서가 곧 소진 순서다.
 
-    카엘 프로덕션 키(DART_API_KEY)는 **항상 마지막**이다. 우리 키를 다 쓴 뒤에만
-    나가야 그 시스템의 하루치를 뺏지 않는다. 우리 키는 DART_API_KEY_2 부터
-    번호순으로 붙이면 자동으로 잡힌다 — 키가 늘면 .env 에 넣기만 하면 된다.
+    우리 키(DART_API_KEY_2~_5)만 번호순으로 돌려준다 — 키가 늘면 .env 에 넣기만 하면 된다.
+    카엘 프로덕션 키(DART_API_KEY)는 **목록에 넣지 않는다**(2026-09-09). 예전엔 마지막 폴백이었는데
+    08-28 에 우리 키 2개가 소진되자 그 키로 넘어가 하루 한도의 89% 를 태웠다.
     """
     out = []
     for n in range(2, 6):                       # _2 .. _5
         k = _K.get(f"DART_API_KEY_{n}")
         if k:
             out.append((f"k{n}", k))
-    if _K.get("DART_API_KEY"):
-        out.append(("kael", _K["DART_API_KEY"]))
+    # v3 프로덕션 키(DART_API_KEY)는 폴백에 넣지 않는다 — 08-28 에 우리 키 소진 뒤 자동 폴백으로
+    # 그 키를 35,588콜 태운 사고(플랜 P0 Task 0.4). 우리 키가 없으면 빈 목록이라 호출 쪽이 실패한다.
     return out
 
 class DartError(Exception):

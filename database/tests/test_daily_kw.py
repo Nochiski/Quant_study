@@ -38,8 +38,9 @@ def _kiwoom_db(tmp_path, ledger_rows=()):
     path = tmp_path / "data" / "raw" / "kiwoom.db"
     path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(path)
-    con.execute("CREATE TABLE ka10099_stock_master (snap_date TEXT, code TEXT, upSizeName TEXT)")
-    con.executemany("INSERT INTO ka10099_stock_master VALUES (?,?,?)",
+    con.execute("CREATE TABLE ka10099_stock_master (snap_date TEXT, code TEXT, upSizeName TEXT, "
+                "marketName TEXT DEFAULT '거래소')")
+    con.executemany("INSERT INTO ka10099_stock_master (snap_date, code, upSizeName) VALUES (?,?,?)",
                     [(D, t, "대형주") for t in TICKERS])
     con.execute('CREATE TABLE ka10008_foreign_holdings ('
                 '"ticker" TEXT NOT NULL, "dt" TEXT, "close_pric" TEXT, "trde_qty" TEXT,'

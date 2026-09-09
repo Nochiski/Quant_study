@@ -1,7 +1,9 @@
 """키움 마스터(`ka10099_stock_master`) 기반 요청 유니버스 + 사라진 종목의 유예 규칙. 플랜 R5 / Task 1.1.
 
-보통주 판정 = `upSizeName<>''`(거래소 규모구분은 보통주에만 붙는다) — `backfill_wise.py:182-201` 의
-규칙과 같다(그쪽은 import 시점에 .env 를 요구하는 api 를 끌어오므로 여기서 SQL 한 줄을 반복한다).
+보통주 판정 = `upSizeName<>''`(거래소 규모구분은 보통주에만 붙는다, `backfill_wise.py:182-201` 규칙)
+**또는** `marketName IN ('거래소','코스닥') AND 코드 6번째 자리 = '0'`(우선주는 5·7 등, ETF·ETN 은 marketName 이
+다르다). 두 번째 조건이 없으면 **신규 상장 종목이 빠진다** — 규모구분은 상장 몇 주 뒤에야 붙는다
+(09-09 실측: 스카이랩스 386380 상장 09-04·해치텍 0155E0 08-25·니어스랩 417030 08-24 전부 upSizeName 공백).
 첫 실행은 `data/jsonl/tickers.txt`(백필 유니버스 2,602)로 시드해 마스터에는 있으나 규모구분이 빈
 ≈40종목의 갭이 사라지지 않게 한다(리뷰 2차 #2). 마스터에서 사라진 종목은 `grace_days` 거래일 유예하되,
 제외는 **그 종목의 `ka10008.max(dt)` 가 마지막 등장일 이상일 때만** — 거래정지 종목은 키움이
@@ -37,7 +39,8 @@ def kiwoom_common(con_kw: sqlite3.Connection, snap_date: str | None = None) -> M
     if not snap_date:
         raise ValueError("ka10099_stock_master has no snapshot — master_daily.py has not run")
     rows = con_kw.execute(
-        "SELECT code FROM ka10099_stock_master WHERE snap_date=? AND upSizeName<>'' ORDER BY code",
+        "SELECT code FROM ka10099_stock_master WHERE snap_date=? AND ("
+        " upSizeName<>'' OR (marketName IN ('거래소','코스닥') AND substr(code,6,1)='0')) ORDER BY code",
         (snap_date,)).fetchall()
     return MasterSnapshot(str(snap_date), tuple(str(r[0]) for r in rows))
 

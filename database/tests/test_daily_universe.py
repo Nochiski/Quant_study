@@ -6,26 +6,30 @@ from daily import universe as uni
 
 
 def _kw(tmp_path, master_rows, foreign_rows=()):
+    """master_rows: (snap_date, code, upSizeName[, marketName]) — marketName 생략 시 '거래소'."""
     con = sqlite3.connect(tmp_path / "kiwoom.db")
-    con.execute("CREATE TABLE ka10099_stock_master (snap_date TEXT, code TEXT, upSizeName TEXT)")
-    con.executemany("INSERT INTO ka10099_stock_master VALUES (?,?,?)", master_rows)
+    con.execute("CREATE TABLE ka10099_stock_master (snap_date TEXT, code TEXT, upSizeName TEXT, marketName TEXT)")
+    con.executemany("INSERT INTO ka10099_stock_master VALUES (?,?,?,?)",
+                    [(r + ("거래소",))[:4] for r in master_rows])
     con.execute("CREATE TABLE ka10008_foreign_holdings (ticker TEXT, dt TEXT)")
     con.executemany("INSERT INTO ka10008_foreign_holdings VALUES (?,?)", foreign_rows)
     con.commit()
     return con
 
 
-def test_kiwoom_common_uses_latest_snapshot_and_size_class(tmp_path):
+def test_kiwoom_common_uses_latest_snapshot_size_class_or_new_listing(tmp_path):
     con = _kw(tmp_path, [("20260908", "005930", "대형주"), ("20260909", "005930", "대형주"),
-                         ("20260909", "386380", "소형주"), ("20260909", "005935", ""),  # 우선주
-                         ("20260909", "0238P0", "")])                                  # ETF
+                         ("20260909", "386380", "", "코스닥"),      # 신규 상장: 규모구분 아직 없음 → 포함
+                         ("20260909", "005935", "", "거래소"),      # 우선주(끝자리 5) → 제외
+                         ("20260909", "0238P0", "", "ETF"),         # ETF → 제외
+                         ("20260909", "610111", "", "ETN")])        # ETN → 제외
     snap = uni.kiwoom_common(con)
     assert snap.snap_date == "20260909"
     assert snap.tickers == ("005930", "386380")
 
 
 def test_first_run_seeds_from_tickers_txt_and_logs_difference(tmp_path):
-    con = _kw(tmp_path, [("20260909", "005930", "대형주"), ("20260909", "386380", "소형주")])
+    con = _kw(tmp_path, [("20260909", "005930", "대형주"), ("20260909", "386380", "", "코스닥")])
     seed = tmp_path / "tickers.txt"
     seed.write_text("005930\n000660\n", encoding="utf-8")       # 000660 은 마스터에 upSizeName 공백
     state_path = tmp_path / "universe_kw.json"

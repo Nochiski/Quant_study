@@ -213,8 +213,9 @@ def _ql_home(tmp_path: Path, tickers: tuple[str, ...]) -> Path:
     home = tmp_path / "ql"
     (home / "data" / "raw").mkdir(parents=True)
     kw = sqlite3.connect(home / "data" / "raw" / "kiwoom.db")
-    kw.execute("CREATE TABLE ka10099_stock_master (snap_date TEXT, code TEXT, upSizeName TEXT)")
-    kw.executemany("INSERT INTO ka10099_stock_master VALUES ('20260909',?,'대형주')",
+    kw.execute("CREATE TABLE ka10099_stock_master (snap_date TEXT, code TEXT, upSizeName TEXT, "
+               "marketName TEXT DEFAULT '거래소')")
+    kw.executemany("INSERT INTO ka10099_stock_master (snap_date, code, upSizeName) VALUES ('20260909',?,'대형주')",
                    [(t,) for t in tickers])
     kw.execute("CREATE TABLE ka10008_foreign_holdings (ticker TEXT, dt TEXT)")
     kw.commit()

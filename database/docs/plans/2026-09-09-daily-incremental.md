@@ -16,11 +16,11 @@
 
 | 항목 | 값 |
 |---|---|
-| 최종 갱신 | 2026-09-09 — P0 작업 완료(게이트 #10·앱키 대기), P1 진행 중(브랜치 `feat/daily-p0`) |
+| 최종 갱신 | 2026-09-09 — P1 완료, P2 착수(브랜치 `feat/daily-p0`) |
 | 결정 R1~R10 | **전부 승인**(09-09, R1 은 사용자 수정판) |
 | P0 안전장치·정렬 | **작업 완료, 게이트 2건 대기**(09-09) — 0.1~0.9 전부 완료. G0 통과 #1~#9·#11·#12. 남은 것: **#10 키움 프로브 판독(3거래일 → 09-15)** · **R5 후속 키움 앱키 발급(사용자 행동)**. 이 둘은 P3 키움 단계의 전제이지 P1 코드 작성의 전제가 아니라 P1 을 병행 시작 |
-| P1 원장 증분 코드 | **진행 중**(09-09) — 1.1~1.7 전부 완료(테스트 133건·ruff·pyright 통과), 1.8 체인 작성 — G1 서버 드라이런 진행 |
-| P2 갭 메우기 | 미착수 |
+| P1 원장 증분 코드 | **완료**(09-09) — 1.1~1.8 전부, 신규 테스트 133건·ruff·pyright 통과, G1 서버 드라이런 통과. 전체 회귀 1,051 pass(기존 실패 1건은 main 과 동일) |
+| P2 갭 메우기 | **진행 중**(09-09) — 2.1 KRX 부터. **2.2 키움은 토요일 09-12 에 실행**(v3 daily_all 이 평일만 돌아 그날은 공유 앱키 한도 안) |
 | P3 원장 크론·관찰 | 미착수 |
 | P4 stage 일일 전량 | 미착수 |
 | P5 equity 일일·소비자 | 미착수 |
@@ -287,9 +287,9 @@
 
 **Files:** Create `database/scripts/daily_ledger.sh`, `database/scripts/daily_build.sh` · Modify `daily_wise.sh`(체인의 한 단계로 호출되도록 락 획득 생략 규약 적용)
 
-- [ ] **Step 1** `daily_ledger.sh`(06:00 KST, `flock -n /tmp/quant_ledger_raw.lock`): `sync_calendar.sh` → D = 직전 거래일 판정 → 키움 마스터 + WISE(기존 `daily_wise.sh` 본문, 매일) → (D 가 거래일이 아니면 여기서 info 후 종료) → 키움 4 TR `--fetch`(`--not-before` 프로브값) → KIS credit(`d2=T`) → DART 스윕·상세·문서 → 부분 요약 `notify`. 어느 단계든 rc≠0 이면 **그 단계에서 멈추고 crit**. 월요일엔 `dart_universe.py` 선행. **07:00(v3 토큰 재발급) 전에 끝나야 한다** — 예산 5 + 10 + 16 + 5 ≈ 36분.
-- [ ] **Step 2** `daily_build.sh`(08:10 KST, raw 락 + build 락): KRX `--from D --to D` + 최근 10거래일 `pending` 재수집(10분 간격 최대 6회, ≤ 09:10) → 키움 `--merge`(KRX 대조) → `ledger_health.py` → (필수 게이트 통과 시) `stage_daily.sh` → `equity_daily.sh` → `daily_report.py`. 원장 게이트 실패면 stage·equity 는 돌리지 않는다(어제 판 유지).
-- [ ] **Step 3**: 각 단계 소요를 `daily_run.db` 에 남겨 예산과 대조 · 커밋
+- [x] **Step 1** `daily_ledger.sh`(06:00 KST, `flock -n /tmp/quant_ledger_raw.lock`): `sync_calendar.sh` → D = 직전 거래일 판정 → 키움 마스터 + WISE(기존 `daily_wise.sh` 본문, 매일) → (D 가 거래일이 아니면 여기서 info 후 종료) → 키움 4 TR `--fetch`(`--not-before` 프로브값) → KIS credit(`d2=T`) → DART 스윕·상세·문서 → 부분 요약 `notify`. 어느 단계든 rc≠0 이면 **그 단계에서 멈추고 crit**. 월요일엔 `dart_universe.py` 선행. **07:00(v3 토큰 재발급) 전에 끝나야 한다** — 예산 5 + 10 + 16 + 5 ≈ 36분.
+- [x] **Step 2** `daily_build.sh`(08:10 KST, raw 락 + build 락): KRX `--from D --to D` + 최근 10거래일 `pending` 재수집(10분 간격 최대 6회, ≤ 09:10) → 키움 `--merge`(KRX 대조) → `ledger_health.py` → (필수 게이트 통과 시) `stage_daily.sh` → `equity_daily.sh` → `daily_report.py`. 원장 게이트 실패면 stage·equity 는 돌리지 않는다(어제 판 유지).
+- [x] **Step 3**: 각 단계 소요를 `daily_run.db` 에 남겨 예산과 대조 · 커밋
 
 ### 게이트 G1
 
@@ -298,7 +298,7 @@
 | 1 | 단위 테스트 | `pytest tests/test_daily_*.py tests/test_dart_universe.py tests/test_api_dart_keys.py -q` | 전건 pass |
 | 2 | 린트·타입 | `ruff check src/daily tests` · `pyright src/daily` | 0 |
 | 3 | 기존 회귀 | `pytest tests -q` | 기존 + 신규 전건 pass. **(09-09: 1,051 pass · 1 fail `test_equity_s07_contract.py::test_FX_N_close_변조_사본은_EGC01_만_FAIL` — main 판 락 파일로 격리 재실행해도 실패하는 기존 실패, 이 브랜치와 무관. PR 본문에 기록)** |
-| 4 | 서버 드라이런 | `daily_ledger.sh --date 2026-08-21 --limit 20 --dry-run` 후 `daily_build.sh --date 2026-08-21 --limit 20 --dry-run --no-build` | 각 단계 rc 0, 총 콜 ≤ 200, 원장·`ingest_log` 행수 전후 동일 |
+| 4 | 서버 드라이런 | `daily_ledger.sh --date 20260820 --limit 20 --dry-run` 후 `daily_build.sh --date 20260820 --limit 20 --dry-run --no-build` | **(09-09 통과)** 수집 체인 rc 0(195초, 키움 80콜 stale 5%·KIS 20콜·DART 94콜), 빌드 체인 키움 merge 20/20 대조 pass·원장 무변경, 건전성 14/20 pass — 남은 fail 1 = `kiwoom.master`(08-20 엔 마스터 스냅샷이 없음, 09-01 개시) · skip 5 = 유니버스 상태 파일 미생성(dry-run)·전날 리포트 없음. DART 하위 도구는 dry-run 개념이 없어 제한 콜 결과가 `ingest_log`(+54)·스윕 신규 공시(+23)로 남는다 — 정상 데이터 |
 | 5 | 오염 가드 | 픽스처로 stale 99% 주입 | rc 2, 머지 안 됨, crit 수신 |
 | 6 | 휴장 가드 | `--date 2026-09-24` | 전 단계 skip, info 1건, `ingest_log` 에 `holiday` 미기록 |
 | 7 | 키 | 드라이런 후 `dart_call_log` | `kael` 0건 |
@@ -316,7 +316,7 @@
 
 ### Task 2.2: 키움 — 1회 실행, 오염 재수집 포함
 
-- [ ] `kw_daily.py --date <T-1> --fetch` 뒤 `--merge` **1회씩**(응답 캡 50~372행이 13거래일을 덮으므로 유니버스 × 4 = ≈ 10,300콜, 10분; 리뷰 B3). KRX 13일치(Task 2.1)가 먼저 들어와 있어야 `--merge` 의 대조가 성립한다. `dt=20260824`·`20260821` 은 `INSERT OR REPLACE` 로 덮인다(C-6 (a)).
+- [ ] **토요일 09-12 KST 낮에 실행**(v3 `daily_all` 은 평일만 돌아 그날 공유 앱키 사용량은 우리 10,300 뿐 — 검증 한도 20,000 안. 앱키 분리 전 일회성 갭 메우기의 안전한 시점) — `kw_daily.py --date <T-1> --fetch` 뒤 `--merge` **1회씩**(응답 캡 50~372행이 13거래일을 덮으므로 유니버스 × 4 = ≈ 10,300콜, 10분; 리뷰 B3). KRX 13일치(Task 2.1)가 먼저 들어와 있어야 `--merge` 의 대조가 성립한다. `dt=20260824`·`20260821` 은 `INSERT OR REPLACE` 로 덮인다(C-6 (a)).
 - [ ] 게이트: A §6-2 A~E 를 **08-21 ~ T-1 각 날짜**에 판정(상대 게이트 적용). 특히 `dt=20260824` stale 비율이 99.0% → **≤ 30%**.
 
 ### Task 2.3: KIS credit

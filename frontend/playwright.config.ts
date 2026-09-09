@@ -56,7 +56,12 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: "uv run server --host 127.0.0.1 --port 8000",
+      // `uv run server` 는 `--reload` 를 켠다. uvicorn 0.52 의 Windows 재시작은
+      // CTRL_C_EVENT 를 콘솔 전체에 보내 Playwright 까지 함께 종료시키고, CI 러너에서는
+      // `.venv` 안 파일 변경 감지가 곧바로 재시작을 일으켜 브라우저 게이트가 한 번도
+      // 통과하지 못했다. E2E 는 코드가 바뀌지 않으므로 같은 앱을 reload 없이 띄운다.
+      command:
+        "uv run uvicorn strategy_workbench.bootstrap.facade.http:build_runtime_http_app --factory --host 127.0.0.1 --port 8000",
       cwd: backendDirectory,
       env: {
         ...process.env,

@@ -230,13 +230,15 @@ def check_kis(con: sqlite3.Connection, d_prev: str, d_minus40: str, n_req: int, 
         out.append(Check("kis.credit.rows", Level.WARN, Status.PASS if (ratio >= 0.95 and tk == n) else Status.FAIL,
                          {"n": n, "distinct": tk, "requested": n_req, "ratio": round(ratio, 4)},
                          f"deal_date={d_prev} rows/requested >= 0.95 and distinct = rows (T+2 확정)"))
-    pairs = _count(con, "SELECT COUNT(*) FROM (SELECT req_ticker, deal_date FROM kis_credit_balance "
-                        "WHERE deal_date >= ? GROUP BY 1,2 HAVING COUNT(*) > 1)", (d_minus40,))
+    from daily import (
+        kis_daily,  # payload 동일 중복만 센다(정정은 제외) — 정의를 한 곳에 둔다
+    )
+    pairs = kis_daily.dup_pairs(con, d_minus40)
     if prev_pairs is None:
         out.append(Check("kis.credit.dup_growth", Level.HALT, Status.SKIP, pairs, "전날 리포트 없음 — 기준선 기록"))
     else:
         out.append(Check("kis.credit.dup_growth", Level.HALT, Status.PASS if pairs <= prev_pairs else Status.FAIL,
-                         {"pairs": pairs, "prev": prev_pairs}, "최근 40일 (ticker, deal_date) 중복쌍 증가 0 (DEFECT-A-03)"))
+                         {"pairs": pairs, "prev": prev_pairs}, "최근 40일 payload 동일 중복쌍 증가 0 (DEFECT-A-03; 값이 다른 정정은 제외)"))
     return out
 
 

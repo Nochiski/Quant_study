@@ -2,6 +2,7 @@
 # 08:10 KST 빌드 체인 — KRX(T+1 08:00 공표) → 키움 KRX 대조·머지 → 원장 건전성 → [stage → equity] → 요약.
 # 플랜 P1 Task 1.8 / 결정 R1. P3 에서는 --no-build 로 등록하고 P4·P5 에서 stage·equity 를 켠다.
 #   사용: daily_build.sh [--date YYYYMMDD] [--no-build] [--dry-run] [--limit N]
+#   환경: QL_SKIP_KW=1 이면 키움 merge 를 건너뛰고 건전성 판정의 kiwoom 항목을 skip 한다(앱키 분리 전 임시)
 set -uo pipefail
 cd /home/kael/quant-ledger
 export QL_HOME=/home/kael/quant-ledger PYTHONPATH=/home/kael/quant-ledger/src
@@ -57,14 +58,20 @@ echo "════ [$(kst)] daily_build 시작 dry=${DRY:-no} no_build=${NOBUILD
 D="${DATE_ARG:-$($PY -c 'import datetime as dt; from daily import calendar as c
 print(c.load().prev_trading_day(dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()).strftime("%Y%m%d"))')}"
 echo "  대상 거래일 D=$D"
+HSKIP=""
+if [ -n "${QL_SKIP_KW:-}" ]; then
+  echo "  QL_SKIP_KW=1 — 키움 merge 건너뜀, 건전성 판정에서 kiwoom 항목은 skip"
+  HSKIP="--skip kiwoom"
+fi
+kw_merge() { if [ -n "${QL_SKIP_KW:-}" ]; then return 0; fi; $PY -m daily.kw_daily --date "$D" --merge $DRY $LIMIT; }
 if [ -n "$DRY" ]; then
   echo "  dry-run: KRX 수집 단계는 건너뛴다(backfill_krx.py 에 dry-run 이 없다 — 원장 무변경 보장)"
-  step "kiwoom merge" $PY -m daily.kw_daily --date "$D" --merge $DRY $LIMIT \
-  && step "ledger_health" $PY -m daily.ledger_health --date "$D" --out "$(mktemp -d)"
+  step "kiwoom merge" kw_merge \
+  && step "ledger_health" $PY -m daily.ledger_health --date "$D" --out "$(mktemp -d)" $HSKIP
 else
   step "krx" krx_step "$D" \
-  && step "kiwoom merge" $PY -m daily.kw_daily --date "$D" --merge $DRY $LIMIT \
-  && step "ledger_health" $PY -m daily.ledger_health --date "$D"
+  && step "kiwoom merge" kw_merge \
+  && step "ledger_health" $PY -m daily.ledger_health --date "$D" $HSKIP
 fi
 RC=$?
 if [ "$RC" -eq 0 ] && [ -z "$NOBUILD" ] && [ -z "$DRY" ]; then

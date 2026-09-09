@@ -107,3 +107,11 @@ def test_report_json_roundtrip(tmp_path):
     path = lh.write_report(rep, str(tmp_path / "health"))
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     assert data["ok"] is True and data["checks"][0]["level"] == "required" and "OK" in data["summary"]
+
+
+def test_skip_source_excludes_its_checks(tmp_path):
+    rep = lh.run(D, _paths(tmp_path, krx=_krx(tmp_path, stk=2563), kiwoom=_kw(tmp_path, stale=2540)),
+                 skip=frozenset({"kiwoom"}))
+    names = {c.name for c in rep.checks}
+    assert "kiwoom.skipped" in names and not any(n.startswith("kiwoom.ka") for n in names)
+    assert rep.ok                                                     # 오염 99% 픽스처인데 kiwoom 을 제외했으니 통과

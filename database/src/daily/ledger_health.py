@@ -302,7 +302,9 @@ def check_wise(con: sqlite3.Connection, today_iso: str) -> list[Check]:
     return out
 
 
-def run(d: str, paths: Paths, *, today: dt.date | None = None) -> HealthReport:
+def run(d: str, paths: Paths, *, today: dt.date | None = None,
+        skip: frozenset[str] = frozenset()) -> HealthReport:
+    """skip 에 든 소스(krx·kiwoom·kis·dart·wise)는 판정하지 않고 SKIP 1건으로 기록한다(예: 앱키 분리 전 kiwoom)."""
     cal = _cal.load(paths.calendar)
     dd = dt.date(int(d[:4]), int(d[4:6]), int(d[6:8]))
     d_prev = cal.prev_trading_day(dd).strftime("%Y%m%d")
@@ -329,15 +331,17 @@ def run(d: str, paths: Paths, *, today: dt.date | None = None) -> HealthReport:
     dart = _ro(paths.dart)
     wise = _ro(paths.wise)
     try:
-        if krx is not None:
+        for name in sorted(skip):
+            checks.append(Check(f"{name}.skipped", Level.WARN, Status.SKIP, None, "--skip 로 판정 제외(운영 결정)"))
+        if krx is not None and "krx" not in skip:
             checks += check_krx(krx, d, cal)
-        if kw is not None:
+        if kw is not None and "kiwoom" not in skip:
             checks += check_kiwoom(kw, krx, d, d_prev, n_req)
-        if kis is not None:
+        if kis is not None and "kis" not in skip:
             checks += check_kis(kis, d_prev2, d_minus40, n_req, prev_pairs)
-        if dart is not None:
+        if dart is not None and "dart" not in skip:
             checks += check_dart(dart, d, cal.is_trading_day(dd), kst_start_utc)
-        if wise is not None:
+        if wise is not None and "wise" not in skip:
             checks += check_wise(wise, today.isoformat())
     finally:
         for c in (krx, kw, kis, dart, wise):
@@ -362,13 +366,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--date", required=True, help="판정 대상 거래일 YYYYMMDD (보통 T-1)")
     ap.add_argument("--home", default=os.environ.get("QL_HOME", "/home/kael/quant-ledger"))
     ap.add_argument("--out", default=None, help="리포트 디렉터리 (기본 <home>/logs/health)")
+    ap.add_argument("--skip", default="", help="판정 제외 소스, 쉼표구분 (krx,kiwoom,kis,dart,wise)")
     a = ap.parse_args(argv)
+    skip = frozenset(x.strip() for x in a.skip.split(",") if x.strip())
+    bad = skip - {"krx", "kiwoom", "kis", "dart", "wise"}
+    if bad:
+        raise ValueError(f"unknown --skip source: {sorted(bad)} (allowed: krx,kiwoom,kis,dart,wise)")
     paths = Paths.from_home(a.home)
     out_dir = a.out or os.path.join(a.home, "logs", "health")
     cal = _cal.load(paths.calendar)
     dd = dt.date(int(a.date[:4]), int(a.date[4:6]), int(a.date[6:8]))
     paths.prev_report = os.path.join(out_dir, cal.prev_trading_day(dd).strftime("%Y%m%d") + ".json")
-    rep = run(a.date, paths)
+    rep = run(a.date, paths, skip=skip)
     path = write_report(rep, out_dir)
     print(rep.summary())
     print(f"report: {path}")

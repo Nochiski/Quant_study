@@ -19,7 +19,7 @@
 | 최종 갱신 | 2026-09-09 — P0 작업 완료(게이트 #10·앱키 대기), P1 진행 중(브랜치 `feat/daily-p0`) |
 | 결정 R1~R10 | **전부 승인**(09-09, R1 은 사용자 수정판) |
 | P0 안전장치·정렬 | **작업 완료, 게이트 2건 대기**(09-09) — 0.1~0.9 전부 완료. G0 통과 #1~#9·#11·#12. 남은 것: **#10 키움 프로브 판독(3거래일 → 09-15)** · **R5 후속 키움 앱키 발급(사용자 행동)**. 이 둘은 P3 키움 단계의 전제이지 P1 코드 작성의 전제가 아니라 P1 을 병행 시작 |
-| P1 원장 증분 코드 | **진행 중**(09-09) — 1.1 공용 모듈·1.2 KRX 가드·1.6 DART 유니버스·1.7 건전성 판정 완료(테스트·ruff·pyright 통과), 1.3 키움·1.4 KIS·1.5 DART 러너 구현 중(병렬), 1.8 체인 초안 작성 |
+| P1 원장 증분 코드 | **진행 중**(09-09) — 1.1 공용·1.2 KRX 가드·1.3 키움 러너·1.4 KIS 러너·1.6 DART 유니버스·1.7 건전성 판정 완료(테스트·ruff·pyright 통과), 1.5 DART 러너 구현 중, 1.8 체인 초안 작성 |
 | P2 갭 메우기 | 미착수 |
 | P3 원장 크론·관찰 | 미착수 |
 | P4 stage 일일 전량 | 미착수 |
@@ -241,19 +241,19 @@
 
 **Files:** Create `database/src/daily/kw_daily.py` · Test `tests/test_daily_kw.py`
 
-- [ ] **Step 1** 실패 테스트(소형 kiwoom.db 픽스처): (a) 4 TR × 유니버스 종목당 **1콜**, 응답(캡 50~372행 = 최근 수십 거래일)을 임시 테이블 `_kw_incoming_<tr>` 에 적재 (b) 오염 게이트 — **`dt=D` 행만** 대상으로 `ka10008.poss_stkcnt` 가 D-1 과 동일한 비율 > 30% 면 **머지하지 않고** rc 2 (c) 크로스소스 — `dt=D` 에서 `ka10008.close_pric`(abs) 와 KRX `TDD_CLSPRC` 100% 일치해야 머지 (d) 머지는 응답 중 **`dt <= D` 구간만** `INSERT OR REPLACE`(PK `(ticker, dt)` — 과거 정정은 자연 반영, `dt > D` 인 당일 개장 전 행은 버린다: `ka10008` 은 날짜 인자가 없어 호출 시점 최신 50영업일이 온다 [A §1-2]), `ingest_shard` 무접촉, `daily_run.db` 기록. 즉 갭이 며칠이든 **1회 실행 = 유니버스 × 4콜**.
-- [ ] **Step 2** 구현. **두 단계로 나뉜다(R1)**: `--fetch`(06:00 체인) = 콜 + `_kw_incoming_<tr>` 적재 + 오염 게이트 (b) 만 판정 → 대기. `--merge`(08:10 체인, KRX T-1 도착 후) = 크로스소스 (c) 판정 → (d) 머지. KRX 가 `pending` 이면 머지하지 않고 대기(incoming 은 다음 날 fetch 가 덮는다). 유량은 `api.kiwoom()`(콜당 0.25s) + TR 당 4.4/s, 4 TR 병렬(백필과 동일 실측). 유니버스는 Task 1.1 `kiwoom_common` + `with_grace`. 실행 하한 시각은 P0 프로브 판독값을 `--not-before HH:MM` 로 받아 그 전이면 rc 3.
-- [ ] **Step 3**: `--date 2026-08-21 --limit 20 --dry-run` 을 서버에서 실행해 콜·행 수·게이트 출력 확인(실제 80콜, 원장 무변경).
-- [ ] **Step 4**: 테스트 통과 · 커밋
+- [x] **Step 1** 실패 테스트(소형 kiwoom.db 픽스처): (a) 4 TR × 유니버스 종목당 **1콜**, 응답(캡 50~372행 = 최근 수십 거래일)을 임시 테이블 `_kw_incoming_<tr>` 에 적재 (b) 오염 게이트 — **`dt=D` 행만** 대상으로 `ka10008.poss_stkcnt` 가 D-1 과 동일한 비율 > 30% 면 **머지하지 않고** rc 2 (c) 크로스소스 — `dt=D` 에서 `ka10008.close_pric`(abs) 와 KRX `TDD_CLSPRC` 100% 일치해야 머지 (d) 머지는 응답 중 **`dt <= D` 구간만** `INSERT OR REPLACE`(PK `(ticker, dt)` — 과거 정정은 자연 반영, `dt > D` 인 당일 개장 전 행은 버린다: `ka10008` 은 날짜 인자가 없어 호출 시점 최신 50영업일이 온다 [A §1-2]), `ingest_shard` 무접촉, `daily_run.db` 기록. 즉 갭이 며칠이든 **1회 실행 = 유니버스 × 4콜**.
+- [x] **Step 2** 구현. **두 단계로 나뉜다(R1)**: `--fetch`(06:00 체인) = 콜 + `_kw_incoming_<tr>` 적재 + 오염 게이트 (b) 만 판정 → 대기. `--merge`(08:10 체인, KRX T-1 도착 후) = 크로스소스 (c) 판정 → (d) 머지. KRX 가 `pending` 이면 머지하지 않고 대기(incoming 은 다음 날 fetch 가 덮는다). 유량은 `api.kiwoom()`(콜당 0.25s) + TR 당 4.4/s, 4 TR 병렬(백필과 동일 실측). 유니버스는 Task 1.1 `kiwoom_common` + `with_grace`. 실행 하한 시각은 P0 프로브 판독값을 `--not-before HH:MM` 로 받아 그 전이면 rc 3.
+- [x] **Step 3**: `--date 2026-08-21 --limit 20 --dry-run` 을 서버에서 실행해 콜·행 수·게이트 출력 확인(실제 80콜, 원장 무변경).
+- [x] **Step 4**: 테스트 통과 · 커밋
 
 ### Task 1.4: KIS 신용잔고 증분 `src/daily/kis_daily.py` (DEFECT-A-03)
 
 **Files:** Create `database/src/daily/kis_daily.py` · Test `tests/test_daily_kis.py`
 
-- [ ] **Step 1** 실패 테스트: 같은 `(req_ticker, deal_date)` 에 payload(요청 파라미터·`row_hash`·`collected_at` 제외 전 컬럼)가 동일한 행이 이미 있으면 삽입하지 않는다. 다르면 새 행(정정 보존). 픽스처: 동일 잔고를 `req_d2` 만 바꿔 두 번 → 1행.
-- [ ] **Step 2** 구현: `backfill_kis.py` 의 `SPEC["credit"]`·`api.kis()` 를 import 해 종목당 1콜(창 `d1 = 오늘-40일, d2 = 오늘(T)` — `d2=T` 여야 `deal_date ≤ T-2 = D-1` 이 온다 [A §2-3]; 응답 30행). 저장은 위 "사실 중복 차단" 저장 함수(새 코드, `backfill_dart.store` 미사용). 유니버스 = Task 1.1 의 요청 유니버스(첫 실행은 기존 3,175 와의 차집합을 로그). `kis_ingest_log` 대신 `daily_run.db`.
-- [ ] **Step 3**: 서버 `--limit 20 --dry-run` 실측 → 중복 증가 0 확인(A §6-3 B).
-- [ ] **Step 4**: 테스트 통과 · 커밋
+- [x] **Step 1** 실패 테스트: 같은 `(req_ticker, deal_date)` 에 payload(요청 파라미터·`row_hash`·`collected_at` 제외 전 컬럼)가 동일한 행이 이미 있으면 삽입하지 않는다. 다르면 새 행(정정 보존). 픽스처: 동일 잔고를 `req_d2` 만 바꿔 두 번 → 1행.
+- [x] **Step 2** 구현: `backfill_kis.py` 의 `SPEC["credit"]`·`api.kis()` 를 import 해 종목당 1콜(창 `d1 = 오늘-40일, d2 = 오늘(T)` — `d2=T` 여야 `deal_date ≤ T-2 = D-1` 이 온다 [A §2-3]; 응답 30행). 저장은 위 "사실 중복 차단" 저장 함수(새 코드, `backfill_dart.store` 미사용). 유니버스 = Task 1.1 의 요청 유니버스(첫 실행은 기존 3,175 와의 차집합을 로그). `kis_ingest_log` 대신 `daily_run.db`.
+- [x] **Step 3**: 서버 `--limit 20 --dry-run` 실측 → 중복 증가 0 확인(A §6-3 B).
+- [x] **Step 4**: 테스트 통과 · 커밋
 
 ### Task 1.5: DART 증분 `src/daily/dart_daily.py` (DEFECT-B01~B04)
 

@@ -332,7 +332,7 @@
 
 ### Task 2.5: 유니버스
 
-- [ ] `dart_universe.py --kw data/raw/kiwoom.db` → `corps.txt` 에 386380 포함, `last_year` 갱신
+- [x] `dart_universe.py` (09-09 실행: 3,478 → **3,483** corp, 현역 2,713 → 2,718, 386380 스카이랩스 = 01586923 매핑. 이전 파일 `corps.txt.bak_p2_20260909`)
 - [ ] `ledger_health.py --date <T-1>` 전 항목 pass
 
 ### 게이트 G2

@@ -98,7 +98,7 @@
 | R5 | 키움 | `kw_daily.py` 신설(백필 `backfill_kw.py` 동결). 유니버스 = `ka10099` 최신 스냅샷 `upSizeName<>''`(WISE 와 동일 규칙, 09-09 실측 2,563) **∪ 직전 유니버스**(첫 실행은 `tickers.txt` 2,602 로 시드 — 마스터에는 있으나 `upSizeName` 이 빈 ≈40종목의 갭이 사라지지 않게, 리뷰 2차 #2). 사라진 종목은 **5거래일 유예 후, 그 종목의 `ka10008.max(dt)` 가 마지막 마스터 등장일 이상일 때만** 제외. 응답 중 **`dt <= D` 구간만** 머지(개장 전 당일 행 차단), 오염 게이트는 `dt=D` 에만. **앱키 분리 확정(P0 Task 0.8 실측: v3 12,701 + 10,410 = 23,113 > 20,000) — 별도 키움 앱키 발급이 P3 키움 단계의 전제** | `backfill_kw.py` 에 `--to` 추가(샤드 PK 증식) · v3 investor_flows 1페이지화(−5,068) | [A C-2·C-4·C-7], reviews/2026-09-09-p0-task08 |
 | R6 | KIS | **credit 만** 일일(창 `D-40일 ~ 오늘(T)` — `d2=T` 여야 `deal_date ≤ T-2 = D-1` 까지 온다, 유니버스 크기만큼 콜). KIS 전용 저장 함수로 `(req_ticker, deal_date, payload)` 동일 행 삽입 차단(`req_*` 보존 원칙 유지). flow·short·loan·master 4테이블은 폐지축이라 제외. 창 상한은 `corp_ticker.last_dd` 가 아니라 명시 인자 | KIS 보류·주 1회 · `row_hash` 정의 변경 | [A C-3] |
 | R7 | 휴장일 | v3 `.kis_holidays.json` 을 **복사본**으로 읽고(`data/calendar/kis_holidays.json`, 매일 rsync), 없거나 검증 실패면 **영업일 가정**. KRX 빈 응답은 휴장 확정 근거로 쓰지 않는다 | `holiday.py` 이식(연 40콜) | [A C-5], [E G] |
-| R8 | 알림 | 텔레그램 `CHAT_ID_DATA`, `scripts/notify.sh`(v3 `gpu_alert.sh` 12줄 복제, 쿨다운 포함). 등급 = `COLLECT_PLAN.md §4-4` 3등급 | n8n · 없음 | [E D] |
+| R8 | 알림 | 텔레그램 **`CHAT_ID_LOG`**(사용자 지정 09-09, 초안은 CHAT_ID_DATA), `scripts/notify.sh`(v3 `gpu_alert.sh` 12줄 복제, 쿨다운 포함). 등급 = `COLLECT_PLAN.md §4-4` 3등급 | n8n · 없음 | [E D] |
 | R9 | GC | 스냅샷 keep=3(**빌드 내장**) + 현행 MANIFEST 가 가리키는 세트 보호 — 문서층 동결 4표가 `snap_20260902T230100Z`(dart 6.6 GB)를 영구 고정하므로 상한은 ≈ 60 GB(17.7×3 + 6.6). 그 스냅샷의 프리패스 캐시(`_tmp/doc` 3.7 GB)는 지운다(재파싱은 3~4.5h 로 재현 가능, 의도) · equity `_pinned` keep=3 · `_tmp/doc` 빌드 후 삭제 · `_failed` 30일 · 로그 주간 gzip. `stage.baseline` 자동 실행 **금지**(G9 저하를 스스로 승인하는 경로) | — | [C D2·D5], [D ②], [E H] |
 | R10 | 범위 밖 | 문서층 **파싱** 증분(프리패스 3~4.5h, `t_*_ms` 비결정 선행 수정 필요) · `share/` 리빌드 크론 · KIS 폐지축 4테이블 · 키움 우선주·ETF 확장 · DEFECT-B02 과거분 · `snapshot_id` 일변경으로 인한 `target_tape` 거부·`_asof` 3일 보관 | — | [C D6], [B §8-7], [E §6-3], [D ②] |
 
@@ -128,7 +128,7 @@
 
 **Files:** Create `database/scripts/notify.sh` · Modify `database/scripts/daily_wise.sh`
 
-- [x] **Step 1**: v3 `~/infra/gpu_alert.sh` 를 본떠 작성. `.env` 는 `QL_ENV`(없으면 `~/kael-system-v3/.env`)에서 `BOT_TOKEN`·`CHAT_ID_DATA` 만 export. 인자 `<level> <title> <body>`; `level` 은 `crit|warn|info`. 같은 `title` 은 30분 쿨다운(`/tmp/ql_notify_<hash>`).
+- [x] **Step 1**: v3 `~/infra/gpu_alert.sh` 를 본떠 작성. `.env` 는 `QL_ENV`(없으면 `~/kael-system-v3/.env`)에서 `BOT_TOKEN`·`CHAT_ID_LOG` 만 export(사용자 지정 09-09). 인자 `<level> <title> <body>`; `level` 은 `crit|warn|info`. 같은 `title` 은 30분 쿨다운(`/tmp/ql_notify_<hash>`).
 - [x] **Step 2**: 서버에서 `scripts/notify.sh info "notify test" "P0"` → 텔레그램 수신 확인.
 - [x] **Step 3**: `daily_wise.sh` 끝에 종료코드 검사 추가 — `master_daily` 또는 `backfill_wise` rc≠0, 또는 로그에 `⚠⚠` 가 있으면 `notify.sh crit`. 정상이면 `info` 한 줄(요청 수·n_bad).
 - [x] **Step 4**: 커밋 `ops(database): add telegram notify.sh and wire daily_wise exit check`

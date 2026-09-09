@@ -4,7 +4,7 @@
 
 **Goal:** 2026-08-20 에 멈춘 원장(KRX·키움·KIS·DART)을 오늘까지 메우고, 이후 매 거래일 아침 원장 → stage → equity 가 사람 손 없이 갱신되며, 실패하면 텔레그램으로 사람에게 도달하는 체계를 만든다.
 
-**Architecture:** 하루 한 번 08:30 KST 단일 체인(flock 직렬)이 [캘린더 판정 → KRX → 키움 → KIS → DART·문서 → 원장 건전성 판정 → stage 전량 재빌드 → equity 전량 재빌드 → catalog·contract → 요약 알림] 을 순서대로 돌리고, 각 단계는 실측 기대치로 고정된 게이트를 통과해야 다음 단계로 간다. 기존 06:00 `daily_wise.sh`(키움 마스터·WISE)는 그대로 둔다. 증분 러너는 백필 코드를 건드리지 않고 별도 파일로 신설한다(백필 코드 동결). stage·equity 는 증분 경로가 없으므로 **전량 재빌드**를 매일 산다(실측 22.5분 + 8분, 유휴 창 안).
+**Architecture:** 체인 두 개(flock 직렬). **06:00 KST 수집 체인** [캘린더 → 키움 마스터·WISE → 키움 시계열 fetch → KIS → DART·문서] 은 KRX 를 뺀 전 소스를 받고(다른 플랫폼은 06:00 에 전날 데이터가 있다는 사용자 추정, 키움은 P0 프로브로 확인), **08:10 KST 빌드 체인** [KRX(T+1 08:00 공표) → 키움 KRX 대조·머지 → 원장 건전성 → stage 전량 → equity 전량 → catalog·contract → 요약] 이 이어진다. 각 단계는 실측 기대치로 고정된 게이트를 통과해야 다음 단계로 간다. 기존 `daily_wise.sh` 는 06:00 체인의 첫 단계가 된다. 증분 러너는 백필 코드를 건드리지 않고 별도 파일로 신설한다(백필 코드 동결). stage·equity 는 증분 경로가 없으므로 **전량 재빌드**를 매일 산다(실측 22.5분 + 8분, 유휴 창 안).
 
 **Tech Stack:** Python 3.12 · sqlite3 · duckdb 1.5.5 · bash/cron(UTC) · flock · 텔레그램 Bot API(curl). 서버 `kael-server:~/quant-ledger`, 저장소 `database/`.
 
@@ -16,8 +16,8 @@
 
 | 항목 | 값 |
 |---|---|
-| 최종 갱신 | 2026-09-09 — 플랜 작성·리뷰 2회 반영·PR #95 |
-| 결정 R1~R10 | **승인 대기** (§1) |
+| 최종 갱신 | 2026-09-09 — 플랜 작성·리뷰 2회 반영·PR #95 · **R1 사용자 수정(06:00 수집 + 08:10 빌드)** |
+| 결정 R1~R10 | R1 사용자 확정(09-09) · **R2~R10 승인 대기** (§1) |
 | P0 안전장치·정렬 | 미착수 |
 | P1 원장 증분 코드 | 미착수 |
 | P2 갭 메우기 | 미착수 |
@@ -91,7 +91,7 @@
 
 | # | 쟁점 | **권고** | 대안 | 근거 |
 |---|---|---|---|---|
-| R1 | 실행 시각 | 06:00 `daily_wise`(마스터·WISE) 유지 + **08:30 KST 단일 체인**(KRX→키움→KIS→DART→stage→equity). 키움 단계 시각은 P0 프로브 결과로 확정 | 19:00 당일 배치(KRX 미공표라 불가) · 06:00 통합(KRX 하루 지연) | [E §2 A], [A C-1] |
+| R1 | 실행 시각 | **사용자 수정(09-09)**: **06:00 수집 체인**(키움 마스터·WISE → 키움 시계열 4 TR → KIS credit → DART·문서; KRX 만 빼고 전부) + **08:10 빌드 체인**(KRX → 키움 KRX 대조·머지 → 원장 건전성 → stage → equity). 근거: KRX 만 T+1 08:00 공표이고 나머지 플랫폼은 06:00 이면 전날 데이터가 있을 것으로 **추정** — WISE·DART(접수 마감 18:00)·키움 마스터는 실측 확정, **키움 시계열 4 TR 은 미측정이라 P0 프로브(Task 0.7)가 06:00 기준으로 확인**, KIS credit 은 T+2 확정이라 06:00 에 T-3 까지는 확실하고 T-2 는 창 겹침으로 다음 날 자동 보충. 06:00 체인은 v3 토큰 재발급(07:00) 전에 끝나야 한다 | 08:30 단일 체인(초안) · 19:00 당일 배치(KRX 미공표라 불가) | [E §2 A·§3-3], [A C-1·§2-3] |
 | R2 | stage 갱신 | **매일 전량 재빌드**(스냅샷 5 DB 3.8분 + 22.5분, 스냅샷 keep=3). "영향 테이블만" 은 DART 수집 재개 후 21.5분으로 전량과 같아져 값이 없다(리뷰 B1). 문서층 프리패스 4표는 제외, `stg_doc_index` 는 포함 | 영향 테이블만(변경 판정 코드 + 스냅샷 혼재) · 파티션 증분 빌더(게이트 재설계) | [C D1·D3·§3-4] |
 | R3 | equity 갱신 | **매일 전량 재빌드**(470초) + catalog + contract 를 한 단위로. 날짜 상수 5개를 **파생값**으로 바꾸는 규칙 판본 e1.15.0. EG5c 표본 날짜는 과거 고정, 최신 구간은 EG14 최소판으로 | 상수를 매일 사람이 커밋(자동화 불가) · baseline 자동갱신 구획 | [D ①②③] |
 | R4 | DART | `daily_dart.sh` **폐기**, `dart_daily.py` 신설: 열린 분기 스윕 전량(410~890콜) + 당일 공시에 등장한 corp 만 상세 재호출(정기보고서→fin+부속 6종 × 해당 reprt, 주요사항→DS005 15종 전부 300~510콜, 지분→elestock·majorstock 100~300콜, 정정→같은 유닛) + 문서 ZIP. **일 ≈ 830~2,000콜, 반기 마감일 ≈ 21,000**(용량 80,000). 재호출은 `ingest_log` 행 삭제 방식(백필 코드 무수정). **v3 키 폴백 제거** | report_nm→엔드포인트 매핑표(유지 부담) · `--force-corps` 플래그 | [B §3-5·§8-1·8-2·8-5] |
@@ -180,14 +180,14 @@
 
 **Files:** Create `database/src/probe_kw_timing.py` · 회수 `database/src/probe_krx_timing.py`(서버에만 있음)
 
-- [ ] **Step 1**: `probe_krx_timing.py` 방식으로 ka10008·ka10060 각 1종목(005930) 을 매시 1콜(일 48콜) 호출해 `data/evidence/kw_timing.db` 에 `(ts_kst, api, target_dt, n_rows, poss_stkcnt_changed)` 기록. 개장 전(06:00~08:59)에 전일 `dt` 행이 오는지, 그 값이 하루 동안 바뀌는지가 관측 대상.
-- [ ] **Step 2**: 임시 크론 `5 * * * *` 등록. **3거래일** 뒤 판독: "T-1 데이터가 확정되는 최초 시각". P1 의 `kw_daily.py` 실행 하한(`--not-before`)이 된다. 판독 전에는 키움 증분을 돌리지 않는다.
+- [ ] **Step 1**: `probe_krx_timing.py` 방식으로 ka10008·ka10060·ka10014·ka20068 각 1종목(005930) 을 매시 1콜(일 96콜) 호출해 `data/evidence/kw_timing.db` 에 `(ts_kst, api, target_dt, n_rows, poss_stkcnt_changed)` 기록. **06:00 시점에 전일 `dt` 행이 있고 그 값이 08:00 KRX 공표 이후에도 바뀌지 않는지**가 관측 대상(R1 의 "06:00 추정" 을 확인하는 프로브). KIS credit 도 1종목 매시 1콜로 `deal_date=T-2` 행이 06:00 에 오는지 함께 잰다.
+- [ ] **Step 2**: 임시 크론 `5 * * * *` 등록. **3거래일** 뒤 판독: "T-1 데이터가 확정되는 최초 시각". 06:00 이전이면 R1 그대로, 늦으면 키움 단계만 그 시각으로 미룬다(`--not-before`). 판독 전에는 키움 증분을 돌리지 않는다.
 - [ ] **Step 3**: 판독 결과를 `docs/reviews/2026-09-09-daily-findings-A-*.md` 말미에 추가. 프로브 크론 제거.
 
 ### Task 0.8: 키움·KIS 앱키 실사용량 실측 (콜 0)
 
 - [ ] **Step 1**: v3 로그(`~/logs/kael-v3/pipeline.log`, `daily_prices`·`investor_flows` 단계)로 v3 의 키움·KIS 일일 콜 수를 최근 5거래일 집계.
-- [ ] **Step 2**: 키움 `v3 + 10,410` 이 검증 한도 20,000 을 넘으면 **별도 앱키 발급을 R5 의 전제로 확정**하고 발급을 요청한다. 넘지 않으면 시각 분리(우리 08:45, v3 20:05)로 간다.
+- [ ] **Step 2**: 키움 `v3 + 10,410` 이 검증 한도 20,000 을 넘으면 **별도 앱키 발급을 R5 의 전제로 확정**하고 발급을 요청한다. 넘지 않으면 시각 분리(우리 06:00, v3 20:05)로 간다.
 - [ ] **Step 3**: 결과를 이 문서 R5 옆에 기록.
 
 ### Task 0.9: 서버 배포 정렬
@@ -234,7 +234,7 @@
 
 - [ ] **Step 1** 실패 테스트: 캘린더가 거래일이라 하는 날짜에 빈 응답 → `ingest_log.status='pending'`(휴장 아님), `done` 집합에 안 들어감. `--refetch D1,D2` 는 그 날짜의 `ingest_log` 7행을 지우고 다시 받는다.
 - [ ] **Step 2** 구현: `--calendar` 옵션(기본 `data/calendar/kis_holidays.json`). 빈 응답 처리 = 캘린더 휴장이면 `holiday`, 거래일이면 `pending`. `done` 은 `status IN ('ok','holiday')` 유지(pending 은 재시도). `--refetch` 추가.
-- [ ] **Step 3**: `daily_ledger.sh` 의 KRX 단계는 `--from <D> --to <D>` 로 호출하되 **최근 10거래일 중 `pending` 인 날짜를 함께 포함**(어제 못 받은 날은 오늘 자동 재시도). 당일 `pending` 이면 10분 간격 최대 6회 재시도(08:30→09:30) 후 `crit`.
+- [ ] **Step 3**: `daily_build.sh`(08:10) 의 KRX 단계는 `--from <D> --to <D>` 로 호출하되 **최근 10거래일 중 `pending` 인 날짜를 함께 포함**(어제 못 받은 날은 오늘 자동 재시도). 당일 `pending` 이면 10분 간격 최대 6회 재시도(08:10→09:10) 후 `crit`.
 - [ ] **Step 4**: 테스트 통과 · 커밋 `fix(database): KRX never confirms a trading day as holiday before publication`
 
 ### Task 1.3: 키움 증분 러너 `src/daily/kw_daily.py` (DEFECT-A-02, 오염 가드)
@@ -242,7 +242,7 @@
 **Files:** Create `database/src/daily/kw_daily.py` · Test `tests/test_daily_kw.py`
 
 - [ ] **Step 1** 실패 테스트(소형 kiwoom.db 픽스처): (a) 4 TR × 유니버스 종목당 **1콜**, 응답(캡 50~372행 = 최근 수십 거래일)을 임시 테이블 `_kw_incoming_<tr>` 에 적재 (b) 오염 게이트 — **`dt=D` 행만** 대상으로 `ka10008.poss_stkcnt` 가 D-1 과 동일한 비율 > 30% 면 **머지하지 않고** rc 2 (c) 크로스소스 — `dt=D` 에서 `ka10008.close_pric`(abs) 와 KRX `TDD_CLSPRC` 100% 일치해야 머지 (d) 머지는 응답 중 **`dt <= D` 구간만** `INSERT OR REPLACE`(PK `(ticker, dt)` — 과거 정정은 자연 반영, `dt > D` 인 당일 개장 전 행은 버린다: `ka10008` 은 날짜 인자가 없어 호출 시점 최신 50영업일이 온다 [A §1-2]), `ingest_shard` 무접촉, `daily_run.db` 기록. 즉 갭이 며칠이든 **1회 실행 = 유니버스 × 4콜**.
-- [ ] **Step 2** 구현. 유량은 `api.kiwoom()`(콜당 0.25s) + TR 당 4.4/s, 4 TR 병렬(백필과 동일 실측). 유니버스는 Task 1.1 `kiwoom_common` + `with_grace`. 실행 하한 시각은 P0 프로브 판독값을 `--not-before HH:MM` 로 받아 그 전이면 rc 3.
+- [ ] **Step 2** 구현. **두 단계로 나뉜다(R1)**: `--fetch`(06:00 체인) = 콜 + `_kw_incoming_<tr>` 적재 + 오염 게이트 (b) 만 판정 → 대기. `--merge`(08:10 체인, KRX T-1 도착 후) = 크로스소스 (c) 판정 → (d) 머지. KRX 가 `pending` 이면 머지하지 않고 대기(incoming 은 다음 날 fetch 가 덮는다). 유량은 `api.kiwoom()`(콜당 0.25s) + TR 당 4.4/s, 4 TR 병렬(백필과 동일 실측). 유니버스는 Task 1.1 `kiwoom_common` + `with_grace`. 실행 하한 시각은 P0 프로브 판독값을 `--not-before HH:MM` 로 받아 그 전이면 rc 3.
 - [ ] **Step 3**: `--date 2026-08-21 --limit 20 --dry-run` 을 서버에서 실행해 콜·행 수·게이트 출력 확인(실제 80콜, 원장 무변경).
 - [ ] **Step 4**: 테스트 통과 · 커밋
 
@@ -283,13 +283,13 @@
 - [ ] **Step 2** 기대치 — **유니버스가 요청 목록으로 바뀌므로 종목 단위 테이블은 절대 하한이 아니라 상대 게이트**(리뷰 B2): 키움 ka10008·10060·20068 `행수(dt=D) / 그날 요청 유니버스 ≥ 0.98` · KIS credit `행수(deal_date=D-1) / 요청 유니버스 ≥ 0.95 & tk = n`(실측 응답 2,523~2,530 ÷ 2,563 = 0.985 라 0.98 은 여유 13종목뿐, 리뷰 지적) · ka10014 는 20거래일 평균 대비 ≥ 0.80. 날짜축 테이블은 실측 절대 하한 유지: KRX stk ≥ 920 · ksq ≥ 1,780 · kospi = 51 · kosdaq = 40 · etf ≥ 1,120 · `stk = stk_base` · 마스터 2시장 ≥ 4,200 · DART `rcept_dt=D` ≥ 400(휴장 0) · 문서 `n_never_tried = 0` · WISE `covered×15 + none×2 == n_req`, n_bad 0. 오염 게이트: ka10008 stale ≤ 30% · KRX↔키움 종가·거래량 100%.
 - [ ] **Step 3**: 테스트(픽스처로 각 게이트 pass/fail 1건씩) · 커밋
 
-### Task 1.8: 체인 `scripts/daily_ledger.sh`
+### Task 1.8: 체인 두 개 — `scripts/daily_ledger.sh`(06:00) · `scripts/daily_build.sh`(08:10)
 
-**Files:** Create `database/scripts/daily_ledger.sh`
+**Files:** Create `database/scripts/daily_ledger.sh`, `database/scripts/daily_build.sh` · Modify `daily_wise.sh`(체인의 한 단계로 호출되도록 락 획득 생략 규약 적용)
 
-- [ ] **Step 1**: `flock -n /tmp/quant_ledger_raw.lock` 아래에서 D = 직전 거래일: `sync_calendar.sh` → (거래일 아니면 info 후 종료) → KRX(pending 재시도 포함) → 키움(`--not-before` 프로브값) → KIS credit → DART·문서 → `ledger_health.py` → 요약 `notify`. 어느 단계든 rc≠0 이면 **그 단계에서 멈추고 crit**(뒤 단계로 안 넘어감). 월요일엔 `dart_universe.py` 선행.
-- [ ] **Step 2**: 각 단계 소요를 `daily_run.db` 에 남겨 예산(수집 ≈ 35분)과 대조.
-- [ ] **Step 3**: 커밋
+- [ ] **Step 1** `daily_ledger.sh`(06:00 KST, `flock -n /tmp/quant_ledger_raw.lock`): `sync_calendar.sh` → D = 직전 거래일 판정 → 키움 마스터 + WISE(기존 `daily_wise.sh` 본문, 매일) → (D 가 거래일이 아니면 여기서 info 후 종료) → 키움 4 TR `--fetch`(`--not-before` 프로브값) → KIS credit(`d2=T`) → DART 스윕·상세·문서 → 부분 요약 `notify`. 어느 단계든 rc≠0 이면 **그 단계에서 멈추고 crit**. 월요일엔 `dart_universe.py` 선행. **07:00(v3 토큰 재발급) 전에 끝나야 한다** — 예산 5 + 10 + 16 + 5 ≈ 36분.
+- [ ] **Step 2** `daily_build.sh`(08:10 KST, raw 락 + build 락): KRX `--from D --to D` + 최근 10거래일 `pending` 재수집(10분 간격 최대 6회, ≤ 09:10) → 키움 `--merge`(KRX 대조) → `ledger_health.py` → (필수 게이트 통과 시) `stage_daily.sh` → `equity_daily.sh` → `daily_report.py`. 원장 게이트 실패면 stage·equity 는 돌리지 않는다(어제 판 유지).
+- [ ] **Step 3**: 각 단계 소요를 `daily_run.db` 에 남겨 예산과 대조 · 커밋
 
 ### 게이트 G1
 
@@ -298,14 +298,14 @@
 | 1 | 단위 테스트 | `pytest tests/test_daily_*.py tests/test_dart_universe.py tests/test_api_dart_keys.py -q` | 전건 pass |
 | 2 | 린트·타입 | `ruff check src/daily tests` · `pyright src/daily` | 0 |
 | 3 | 기존 회귀 | `pytest tests -q` | 기존 894 + 신규 전건 pass |
-| 4 | 서버 드라이런 | `daily_ledger.sh --date 2026-08-21 --limit 20 --dry-run` | 각 단계 rc 0, 총 콜 ≤ 200, 원장·`ingest_log` 행수 전후 동일 |
+| 4 | 서버 드라이런 | `daily_ledger.sh --date 2026-08-21 --limit 20 --dry-run` 후 `daily_build.sh --date 2026-08-21 --limit 20 --dry-run --no-build` | 각 단계 rc 0, 총 콜 ≤ 200, 원장·`ingest_log` 행수 전후 동일 |
 | 5 | 오염 가드 | 픽스처로 stale 99% 주입 | rc 2, 머지 안 됨, crit 수신 |
 | 6 | 휴장 가드 | `--date 2026-09-24` | 전 단계 skip, info 1건, `ingest_log` 에 `holiday` 미기록 |
 | 7 | 키 | 드라이런 후 `dart_call_log` | `kael` 0건 |
 
 ---
 
-## 5. Phase 2 — 갭 메우기 (1회, 수동, 08:30 이후)
+## 5. Phase 2 — 갭 메우기 (1회, 수동 — KRX 단계는 08:00 이후)
 
 순서는 의존 순서다. 각 단계는 다음 단계 전에 게이트 SQL 을 통과해야 한다.
 
@@ -316,7 +316,7 @@
 
 ### Task 2.2: 키움 — 1회 실행, 오염 재수집 포함
 
-- [ ] `kw_daily.py --date <T-1>` **1회**(응답 캡 50~372행이 13거래일을 덮으므로 유니버스 × 4 = ≈ 10,300콜, 10분; 리뷰 B3). `dt=20260824`·`20260821` 은 응답 전 구간 `INSERT OR REPLACE` 로 덮인다(C-6 (a)).
+- [ ] `kw_daily.py --date <T-1> --fetch` 뒤 `--merge` **1회씩**(응답 캡 50~372행이 13거래일을 덮으므로 유니버스 × 4 = ≈ 10,300콜, 10분; 리뷰 B3). KRX 13일치(Task 2.1)가 먼저 들어와 있어야 `--merge` 의 대조가 성립한다. `dt=20260824`·`20260821` 은 `INSERT OR REPLACE` 로 덮인다(C-6 (a)).
 - [ ] 게이트: A §6-2 A~E 를 **08-21 ~ T-1 각 날짜**에 판정(상대 게이트 적용). 특히 `dt=20260824` stale 비율이 99.0% → **≤ 30%**.
 
 ### Task 2.3: KIS credit
@@ -352,12 +352,12 @@
 
 ### Task 3.1: crontab 등록
 
-- [ ] `30 23 * * * /bin/bash ~/quant-ledger/scripts/daily_ledger.sh` (UTC 23:30 = **KST 08:30**). 키움 단계는 프로브 판독값이 08:30 보다 늦으면 체인 안에서 그 시각까지 대기.
-- [ ] 기존 `daily_wise.sh` 06:00 유지. `daily_dart.sh` 는 서버에서 삭제(저장소는 `docs/archive/` 로 이동).
+- [ ] `0 21 * * * /bin/bash ~/quant-ledger/scripts/daily_ledger.sh` (UTC 21:00 = **KST 06:00**, 기존 `daily_wise.sh` 크론 줄을 이것으로 교체) · `10 23 * * * /bin/bash ~/quant-ledger/scripts/daily_build.sh` (UTC 23:10 = **KST 08:10**). P3 에서는 `daily_build.sh` 를 `--no-build`(원장 단계까지만)로 등록하고 P4·P5 에서 stage·equity 를 켠다. 키움 단계는 프로브 판독값이 06:00 보다 늦으면 체인 안에서 그 시각까지 대기.
+- [ ] `daily_dart.sh` 는 서버에서 삭제(저장소는 `docs/archive/` 로 이동).
 
 ### Task 3.2: 관찰 5거래일
 
-- [ ] 매일 09:30 전 텔레그램 요약 1건(`info`) 수신. 내용: 소스별 행수·콜 수·소요·게이트 결과.
+- [ ] 매일 06:40 전 수집 요약, 09:15 전 빌드(원장 게이트) 요약 텔레그램 수신. 내용: 소스별 행수·콜 수·소요·게이트 결과.
 - [ ] 실패 시 `crit` 이 왔고, 원인·조치를 `logs/health/<D>.json` 옆 `<D>.note` 에 남긴다.
 
 ### 게이트 G3
@@ -365,8 +365,8 @@
 | # | 검증 | 기대 |
 |---|---|---|
 | 1 | 5거래일 연속 `daily_run.db` status | 전 소스 `ok`, 사람 개입 0회 |
-| 2 | 원장 최신일 | 매일 09:30 에 KRX·키움 = T-1 |
-| 3 | 소요 | 체인 ≤ 45분(실측 예산 35분 + 여유) |
+| 2 | 원장 최신일 | 매일 06:40 에 키움 incoming·KIS(T-2 또는 T-3)·DART = T-1, 09:15 에 KRX·키움 머지 = T-1 |
+| 3 | 소요 | 06:00 체인 ≤ 45분(**07:00 v3 토큰 재발급 전 종료**, 예산 36분) · 08:10 체인 원장 단계 ≤ 20분 |
 | 4 | 예산 | DART 일 ≤ 2,500콜(평시 830~2,000, 리뷰 B6) · 키움 ≤ 10,500 · `kael` 0 |
 | 5 | 비거래일 1회 이상(주말 포함) | 체인이 skip 하고 info 만 보냄 |
 | 6 | 오탐 | `crit` 0건 또는 전건 실제 사고 |
@@ -379,8 +379,8 @@
 
 **Files:** Create `database/scripts/stage_daily.sh`
 
-- [ ] **Step 1**: `daily_ledger.sh` 의 **자식으로 실행**(raw 락을 `QL_RAW_LOCK_HELD=1` 로 물려받아 스냅샷 중 `wisereport.db`(delete 저널) 쓰기가 끼어들지 않게, 설계 `STAGE_DESIGN.md:72`) + 자기 `flock -n /tmp/quant_ledger_build.lock`(자식 `run_stage_all.sh` 는 `QL_BUILD_LOCK_HELD=1` 로 생략) 아래에서 ① 스냅샷 5 DB 1세트(`snapshot.py`, 17.7 GB·3.8분 — `stg_price_daily` 의 G9 가 kiwoom 원장을 직접 조인하므로 `{sources} ∪ {cross_check.db}` 전부 필요, 부분 스냅샷 금지) ② `run_stage_all.sh <snap>`(62표 ORDER; 문서층 프리패스 4표는 캐시가 없어 자동 skip — 의도된 동결, `stg_doc_index` 는 `doc_store` 소스라 매일 재빌드되며 `stg_doc_meta/section` 과 접수번호 집합이 어긋나는 것은 알려진 상태로 문서화) ③ `stage/health.py` ④ 스냅샷 GC(Task 4.2) ⑤ notify.
-- [ ] **Step 2**: 원장 체인(`daily_ledger.sh`)이 실패한 날은 돌리지 않는다(어제 판 유지). `daily_ledger.sh` 성공 직후 호출.
+- [ ] **Step 1**: `daily_build.sh`(08:10) 의 **자식으로 실행**(raw 락을 `QL_RAW_LOCK_HELD=1` 로 물려받아 스냅샷 중 `wisereport.db`(delete 저널) 쓰기가 끼어들지 않게, 설계 `STAGE_DESIGN.md:72`) + 자기 `flock -n /tmp/quant_ledger_build.lock`(자식 `run_stage_all.sh` 는 `QL_BUILD_LOCK_HELD=1` 로 생략) 아래에서 ① 스냅샷 5 DB 1세트(`snapshot.py`, 17.7 GB·3.8분 — `stg_price_daily` 의 G9 가 kiwoom 원장을 직접 조인하므로 `{sources} ∪ {cross_check.db}` 전부 필요, 부분 스냅샷 금지) ② `run_stage_all.sh <snap>`(62표 ORDER; 문서층 프리패스 4표는 캐시가 없어 자동 skip — 의도된 동결, `stg_doc_index` 는 `doc_store` 소스라 매일 재빌드되며 `stg_doc_meta/section` 과 접수번호 집합이 어긋나는 것은 알려진 상태로 문서화) ③ `stage/health.py` ④ 스냅샷 GC(Task 4.2) ⑤ notify.
+- [ ] **Step 2**: 원장 게이트(`ledger_health.py`)가 실패한 날은 돌리지 않는다(어제 판 유지). `daily_build.sh` 가 원장 단계 성공 직후 호출.
 - [ ] **Step 3**: 커밋
 
 ### Task 4.2: 스냅샷 GC 를 빌드에 내장
@@ -490,17 +490,17 @@
 
 | KST | 작업 | 락 | 예산(실측 근거) |
 |---|---|---|---|
-| 06:00 | `daily_wise.sh` — 키움 마스터 2콜 + WISE 15,600 req | raw | 4.7분 |
-| 07:00 | (v3 KIS·키움 토큰 재발급) | — | 우리 체인은 그 뒤 |
+| **06:00** | `daily_ledger.sh` — 캘린더 → 키움 마스터 2콜 + WISE 15,600 req(4.7분) → 키움 4 TR `--fetch`(≈10,300콜, 10분, 오염 게이트만) → KIS credit(≈2,600콜, 16분, `d2=T`) → DART 스윕·상세·문서(830~2,000콜, ≈5분) → 수집 요약 | raw | ≈ 36분 → 06:36 (**07:00 전 종료**) |
+| 07:00 | (v3 KIS·키움 토큰 재발급) | — | 우리 06:00 체인은 끝나 있어야 함 |
 | 07:45 | (v3 DART 증분) | — | 키 분리됨 |
-| 08:00 | KRX T-1 공표 | — | |
-| **08:30** | `daily_ledger.sh` — 캘린더 → KRX(7콜, pending 재시도 ≤ 09:30) → 키움(≈10,300콜, `--not-before` 프로브값, `dt <= D` 만 머지) → KIS credit(≈2,600콜, `d2=T`) → DART 스윕·상세·문서(830~2,000콜) → `ledger_health` | raw | ≈ 35분 → 09:05 |
-| ≈ 09:05 | `stage_daily.sh`(`daily_ledger.sh` 의 자식, raw 락 유지) — 스냅샷 5 DB(3.8분) → 62표 전량(22.5분) → health → GC | raw+build | ≈ 27분 → 09:32 |
-| ≈ 09:32 | `equity_daily.sh` — 28표(470s) → catalog(90s) → contract(9s) → `_pinned` GC → health | build | ≈ 10분 → 09:42 |
-| ≈ 09:45 | `daily_report.py` → 텔레그램 요약 | — | |
+| 08:00 | KRX T-1 공표 (실측 07:55~08:00) | — | |
+| **08:10** | `daily_build.sh` — KRX(7콜 + pending 재수집, 재시도 ≤ 09:10) → 키움 `--merge`(KRX 종가·거래량 100% 대조 후 `dt <= D` 머지) → `ledger_health` | raw | ≈ 5분 → 08:15 |
+| ≈ 08:15 | `stage_daily.sh`(자식, raw 락 유지) — 스냅샷 5 DB(3.8분) → 62표 전량(22.5분) → health → GC | raw+build | ≈ 27분 → 08:42 |
+| ≈ 08:42 | `equity_daily.sh` — 28표(470s) → catalog(90s) → contract(9s) → `_pinned` GC → health | build | ≈ 10분 → 08:52 |
+| ≈ 08:55 | `daily_report.py` → 텔레그램 요약 | — | |
 | 20:05~23:48 | (v3 `daily_all`) | — | 우리 체인과 겹치지 않음 |
 
-전체 ≈ 75분, 08:05~15:30 유휴 창 안. stage·equity 는 같은 `build` 락으로 직렬(RSS 합 > 13 GB 방지). 락은 최외곽만 잡고 자식은 `QL_*_LOCK_HELD` 로 생략한다(Task 0.2). KRX 가 09:30 까지도 `pending` 이면 그날은 원장 체인이 멈추고 stage·equity 는 전날 판을 유지한다.
+06:00 체인 36분 + 08:10 체인 ≈ 45분. 08:05~15:30 유휴 창 안. stage·equity 는 같은 `build` 락으로 직렬(RSS 합 > 13 GB 방지). 락은 최외곽만 잡고 자식은 `QL_*_LOCK_HELD` 로 생략한다(Task 0.2). KRX 가 09:10 까지도 `pending` 이면 그날은 빌드 체인이 멈추고(키움 incoming 은 대기) stage·equity 는 전날 판을 유지한다. 키움 시계열의 06:00 확정은 **추정**이며 P0 프로브가 확인한다 — 늦으면 키움 fetch 만 그 시각으로 옮기고 나머지 시간표는 유지.
 
 ---
 

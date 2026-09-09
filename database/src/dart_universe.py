@@ -3,10 +3,19 @@
 DART corpCode 의 상장사는 3,985 건이지만 그중에는 우리 KRX 원장에 한 번도
 나타나지 않은 종목(비상장 전환·해외상장 등)이 섞여 있다. 원장에 실재하는
 티커와 교집합을 잡아야 헛콜이 안 나간다.
+
+2026-09-09(플랜 P1 Task 1.6, DEFECT-B05): 티커 집합 = KRX 원장 전기간(폐지 종목 포함) ∪ 키움 일별
+마스터 `ka10099_stock_master`(매일 갱신, 상장일 06:00 스냅샷에 신규 종목이 이미 있다). KRX 원장이
+멈춰 있어도 신규 상장사가 유니버스에 들어온다. 키움 DB 가 없으면 KRX 만으로 간다(경고 출력).
 """
-import io, os, sys, zipfile, sqlite3, argparse
-from datetime import datetime
+import argparse
+import io
+import os
+import sqlite3
+import sys
 import xml.etree.ElementTree as ET
+import zipfile
+from datetime import datetime, timedelta, timezone
 
 BASE = os.environ.get("QL_HOME") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "src"))
@@ -14,6 +23,7 @@ import api
 
 DB  = f"{BASE}/data/raw/dart.db"
 KRX = f"{BASE}/data/raw/krx.db"
+KW  = f"{BASE}/data/raw/kiwoom.db"
 
 def krx_tickers(path):
     """KRX 원장 전기간 티커 → (first_dd, last_dd). 날짜축이라 폐지종목이 그대로 남아 있다."""
@@ -29,9 +39,34 @@ def krx_tickers(path):
     con.close()
     return span
 
+
+def kiwoom_tickers(path):
+    """키움 일별 마스터 전 스냅샷 티커 → (first_snap, last_snap). 파일이 없으면 빈 dict + 경고."""
+    if not os.path.exists(path):
+        print(f"  ! 키움 마스터 없음 — KRX 원장만으로 유니버스를 만든다: {path}")
+        return {}
+    con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    span = {tk: (lo, hi) for tk, lo, hi in con.execute(
+        "SELECT code, MIN(snap_date), MAX(snap_date) FROM ka10099_stock_master GROUP BY 1")}
+    con.close()
+    return span
+
+
+def union_spans(*spans):
+    """티커별 (lo, hi) 를 합친다 — 같은 티커는 min(lo), max(hi)."""
+    out = {}
+    for sp in spans:
+        for tk, (lo, hi) in sp.items():
+            if tk in out:
+                lo = min(lo, out[tk][0]); hi = max(hi, out[tk][1])
+            out[tk] = (lo, hi)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--krx", default=KRX)
+    ap.add_argument("--kw", default=KW, help="키움 일별 마스터(kiwoom.db). 신규 상장사 진입 경로")
     ap.add_argument("--out", default=f"{BASE}/data/corps.txt")
     a = ap.parse_args()
 
@@ -42,7 +77,7 @@ def main():
         sc = (e.findtext("stock_code") or "").strip()
         if sc:
             m[sc] = (e.findtext("corp_code"), e.findtext("corp_name"))
-    span = krx_tickers(a.krx)
+    span = union_spans(krx_tickers(a.krx), kiwoom_tickers(a.kw))
     tk = set(span)
     hit  = sorted(tk & set(m))
     miss = sorted(tk - set(m))
@@ -67,7 +102,7 @@ def main():
     #   백필이 이 구간 밖 연도를 안 쏘게 하는 게 목적이다. 게이팅이 없으면
     #   폐지 종목도 올해까지 돌아 corp_year 축이 전건 013 으로 낭비된다.
     #   상장 직전연도 1년 유예 — 상장 첫 해 보고서에 전기 비교값이 실린다.
-    FLOOR, CEIL = 2015, datetime.now().year
+    FLOOR, CEIL = 2015, datetime.now(timezone(timedelta(hours=9))).year   # KST 기준 올해
     with open(a.out, "w") as f:
         for sc in hit:
             cc = m[sc][0]

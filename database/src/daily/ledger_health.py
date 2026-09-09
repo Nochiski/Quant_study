@@ -283,11 +283,14 @@ def check_wise(con: sqlite3.Connection, today_iso: str) -> list[Check]:
     out.append(Check("wise.run", Level.REQUIRED, Status.PASS if (mode == "full" and n_bad == 0 and n_ok == n_req) else Status.FAIL,
                      {"mode": mode, "n_stocks": n_stocks, "n_req": n_req, "n_ok": n_ok, "n_bad": n_bad}, "mode=full, n_bad=0, n_ok=n_req"))
     if _has_table(con, "ws_coverage"):
-        cov = _count(con, "SELECT COUNT(*) FROM ws_coverage WHERE status='covered'")
-        none = _count(con, "SELECT COUNT(*) FROM ws_coverage WHERE status='none'")
+        # 그날 런이 갱신한(checked_at = 오늘 KST) 커버리지 행만 센다 — 런 뒤에 상태가 바뀐 종목이 있으면
+        # 전체 집계로는 등식이 깨진다(09-09 실측: 전체 808/1758 vs 당일 807/1756, n_req 15,617 은 후자와 일치).
+        cov = _count(con, "SELECT COUNT(*) FROM ws_coverage WHERE status='covered' AND date(checked_at, '+9 hours')=?", (today_iso,))
+        none = _count(con, "SELECT COUNT(*) FROM ws_coverage WHERE status='none' AND date(checked_at, '+9 hours')=?", (today_iso,))
         expected = cov * 15 + none * 2
         out.append(Check("wise.req_identity", Level.REQUIRED, Status.PASS if expected == n_req else Status.FAIL,
-                         {"expected": expected, "actual": n_req}, "covered×15 + none×2 == n_req (09-09 실측 15,617 일치)"))
+                         {"expected": expected, "actual": n_req, "covered": cov, "none": none},
+                         "당일 checked_at 기준 covered×15 + none×2 == n_req (09-09 실측 15,617 일치)"))
         rate = cov / (cov + none) if (cov + none) else None
         out.append(Check("wise.cov_rate", Level.WARN, Status.SKIP if rate is None else (Status.PASS if rate >= 0.25 else Status.FAIL),
                          None if rate is None else round(rate, 3), ">= 0.25 (실측 0.315; 미만이면 페이지 개편 의심)"))

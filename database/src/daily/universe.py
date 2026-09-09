@@ -65,8 +65,9 @@ def requested(con_kw: sqlite3.Connection, *, state_path: str | os.PathLike[str],
               seed_path: str | os.PathLike[str] | None, grace_days: int = 5) -> RequestedUniverse:
     """오늘 요청 유니버스를 만들고 상태 파일을 갱신한다.
 
-    상태 파일 = {"asof": snap_date, "grace": {ticker: {"last_seen": 'YYYYMMDD', "missing_days": n}}}.
-    grace 는 "마스터에서 사라졌지만 아직 요청 중인" 종목만 담는다.
+    상태 파일 = {"asof": snap_date, "n_requested": 요청 종목 수, "grace": {ticker: {"last_seen", "missing_days"}}}.
+    grace 는 "마스터에서 사라졌지만 아직 요청 중인" 종목만 담는다. `n_requested` 는 ledger_health 가
+    종목축 테이블의 비율 게이트 분모로 읽는다.
     """
     snap = kiwoom_common(con_kw)
     today = set(snap.tickers)
@@ -100,5 +101,5 @@ def requested(con_kw: sqlite3.Connection, *, state_path: str | os.PathLike[str],
     tickers = tuple(sorted(today | set(grace)))
     os.makedirs(os.path.dirname(os.fspath(state_path)) or ".", exist_ok=True)
     with open(state_path, "w", encoding="utf-8") as f:
-        json.dump({"asof": snap.snap_date, "grace": grace}, f, ensure_ascii=False, indent=1)
+        json.dump({"asof": snap.snap_date, "n_requested": len(tickers), "grace": grace}, f, ensure_ascii=False, indent=1)
     return RequestedUniverse(snap.snap_date, tickers, seeded_only, tuple(sorted(dropped)))

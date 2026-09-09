@@ -33,7 +33,7 @@ def test_first_run_seeds_from_tickers_txt_and_logs_difference(tmp_path):
     assert req.tickers == ("000660", "005930", "386380")         # 시드 ∪ 오늘
     assert req.seeded_only == ("000660",)
     state = json.loads(state_path.read_text(encoding="utf-8"))
-    assert state["asof"] == "20260909"
+    assert state["asof"] == "20260909" and state["n_requested"] == 3     # ledger_health 의 비율 분모
     assert "000660" in state["grace"]
 
 

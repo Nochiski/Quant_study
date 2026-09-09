@@ -236,6 +236,9 @@ bash.exe.stackdump
 .kw_token.json
 *.token
 
+# 편집 중 수동 백업 — 무시 규칙 밖에 있어 `git add -A` 로 딸려 올라간다
+*.bak
+
 # 데이터/산출물 — 코드로 재현하고 git 에는 넣지 않는다
 # (`**/data/` 는 쓰지 않는다 — backend/src/backtest_engine/data/ 같은 패키지까지 가린다)
 *.csv

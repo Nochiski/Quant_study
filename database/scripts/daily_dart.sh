@@ -5,8 +5,8 @@
 #   · 각 단계는 예산 소진·완료 시 스스로 종료. 전부 끝난 날은 전 단계가 즉시 무동작 통과
 #   · 유닛 원자성 검증됨(2026-08-27 검토 C-5) — 중간 종료해도 부분 적재 없음, 재수집 멱등
 #   · 전 작업 완료 확인 후 이 크론 줄을 제거할 것
-cd /home/kael/quant-ledger
-export QL_HOME=/home/kael/quant-ledger
+cd "$HOME/quant-ledger"
+export QL_HOME="$HOME/quant-ledger"
 LOG="logs/daily_dart_$(TZ=Asia/Seoul date +%m%d).log"
 
 {

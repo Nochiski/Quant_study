@@ -4,8 +4,8 @@
 #   사용: daily_build.sh [--date YYYYMMDD] [--no-build] [--dry-run] [--limit N]
 #   환경: QL_SKIP_KW=1 이면 키움 merge 를 건너뛰고 건전성 판정의 kiwoom 항목을 skip 한다(앱키 분리 전 임시)
 set -uo pipefail
-cd /home/kael/quant-ledger
-export QL_HOME=/home/kael/quant-ledger PYTHONPATH=/home/kael/quant-ledger/src
+cd "$HOME/quant-ledger"
+export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
 PY=.venv/bin/python
 LOCK=/tmp/quant_ledger_raw.lock
 if [ -z "${QL_RAW_LOCK_HELD:-}" ]; then

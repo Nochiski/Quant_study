@@ -364,7 +364,8 @@ def write_report(report: HealthReport, out_dir: str) -> str:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--date", required=True, help="판정 대상 거래일 YYYYMMDD (보통 T-1)")
-    ap.add_argument("--home", default=os.environ.get("QL_HOME", "/home/kael/quant-ledger"))
+    ap.add_argument("--home",
+                    default=os.environ.get("QL_HOME", os.path.expanduser("~/quant-ledger")))
     ap.add_argument("--out", default=None, help="리포트 디렉터리 (기본 <home>/logs/health)")
     ap.add_argument("--skip", default="", help="판정 제외 소스, 쉼표구분 (krx,kiwoom,kis,dart,wise)")
     a = ap.parse_args(argv)

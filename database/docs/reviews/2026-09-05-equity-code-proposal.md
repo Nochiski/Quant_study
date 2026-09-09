@@ -1062,7 +1062,7 @@ rsync -av --delete src/equity/     kael-server:~/quant-ledger/src/equity/
 rsync -av          scripts/run_equity.sh scripts/equity_slice_from_stage.py \
                                    kael-server:~/quant-ledger/scripts/
 ```
-stage 와 같은 배치다 — `run_stage.sh` 가 `PYTHONPATH=/home/kael/quant-ledger/src` 를 쓰고 `stage/` 가 그 아래 있다.
+stage 와 같은 배치다 — `run_stage.sh` 가 `PYTHONPATH=~/quant-ledger/src` 를 쓰고 `stage/` 가 그 아래 있다.
 
 ### 7-2. 실행 (`scripts/run_equity.sh`)
 
@@ -1074,8 +1074,8 @@ stage 와 같은 배치다 — `run_stage.sh` 가 `PYTHONPATH=/home/kael/quant-l
 #   사용: scripts/run_equity.sh <table> [--years 2010:2010] [--memory-limit 6GB]
 #   로그: logs/equity_<table>.log · 요약 logs/equity_all/summary.tsv
 #   실행 창: 06:30~익일 05:30 KST (daily_wise 크론 무동작 구간 — run_stage.sh 와 같은 규약)
-cd /home/kael/quant-ledger
-export QL_HOME=/home/kael/quant-ledger PYTHONPATH=/home/kael/quant-ledger/src
+cd ~/quant-ledger
+export QL_HOME=~/quant-ledger PYTHONPATH=~/quant-ledger/src
 TABLE="$1"; shift
 LOG="logs/equity_${TABLE}.log"
 mkdir -p logs data/equity/_tmp/spill

@@ -7,8 +7,8 @@
 #   락 규약 — 최외곽 스크립트만 잡고, 부모가 QL_RAW_LOCK_HELD=1 을 넘기면 자식은 획득을 생략한다
 #   (같은 락 파일을 자식이 다시 열면 별개 open file description 이라 부모와 충돌한다).
 set -o pipefail
-cd /home/kael/quant-ledger
-export QL_HOME=/home/kael/quant-ledger
+cd "$HOME/quant-ledger"
+export QL_HOME="$HOME/quant-ledger"
 LOCK=/tmp/quant_ledger_raw.lock
 if [ -z "${QL_RAW_LOCK_HELD:-}" ]; then
   exec 9>"$LOCK"

@@ -5,7 +5,7 @@
 #   (stage 7.16 GB + equity 6.5 GB > available 13 GB — 빌드는 한 번에 하나만). 최외곽 스크립트만 락을
 #   잡고, 부모가 QL_BUILD_LOCK_HELD=1 을 넘기면 자식은 획득을 생략한다.
 set -euo pipefail
-export QL_HOME=/home/kael/quant-ledger PYTHONPATH=/home/kael/quant-ledger/src
+export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
 TABLE="$1"; shift
 cd "$QL_HOME"
 mkdir -p logs/equity

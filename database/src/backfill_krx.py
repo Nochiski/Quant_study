@@ -6,14 +6,24 @@
     여기서는 직접 requests 를 써서 상태코드를 판정한다.
   · 휴장일은 빈 OutBlock_1 로 온다(에러 아님). 가격 1콜로 판정한 뒤 나머지 엔드포인트를 건너뛴다.
   · 재개: (endpoint, bas_dd) 단위로 ingest_log 에 기록하고 ok/holiday 는 다시 안 친다.
+  · 2026-09-09(플랜 P1 Task 1.2, DEFECT-A-01): 빈 응답이라도 캘린더가 거래일이라 하면 `holiday` 가 아니라
+    `pending` 으로 적는다 — KRX 는 T+1 08:00 KST 에 공표하므로 그 전 실행은 거래일을 휴장으로 영구 확정했다.
+    pending 은 done 에 안 들어가 다음 실행이 다시 친다. `--refetch D1,D2` 는 그 날짜의 기록을 지우고 다시 받는다.
+    캘린더가 없으면 평일 = 거래일로 가정한다(빈 응답을 휴장 근거로 쓰지 않는다).
 """
-import os, sys, json, time, sqlite3, argparse
+import argparse
+import os
+import sqlite3
+import sys
+import time
 from datetime import date, timedelta
+
 import requests
 
 BASE = os.environ.get("QL_HOME") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "src"))
 import api as A
+from daily import calendar as _cal
 
 KRX  = "https://data-dbg.krx.co.kr/svc/apis"
 DB   = f"{BASE}/data/raw/krx.db"
@@ -52,7 +62,7 @@ def call(path, bas_dd):
             if not rows:
                 return [], "holiday"      # 빈 응답 = 휴장·미래일자. 에러가 아니다
             return rows, "ok"
-        except Exception:
+        except Exception:  # noqa: BLE001  # reason: 네트워크·JSON 예외는 재시도 대상, 소진되면 rate 로 보고한다
             time.sleep(0.5)
     return None, "rate"
 
@@ -69,7 +79,13 @@ def main():
     ap.add_argument("--from", dest="frm", default="2010-01-04")
     ap.add_argument("--to",   dest="to",  default="2026-08-20")
     ap.add_argument("--limit", type=int, default=0, help="날짜 수 제한(스모크용)")
+    ap.add_argument("--calendar", default=os.path.join(BASE, "data", "calendar", "kis_holidays.json"),
+                    help="휴장 캐시(JSON). 없으면 평일 = 거래일 가정")
+    ap.add_argument("--refetch", default="", help="다시 받을 날짜 YYYYMMDD 쉼표구분 — ingest_log 를 지우고 재수집")
     a = ap.parse_args()
+    cal = _cal.load(a.calendar)
+    if cal.source != "kis_cache":
+        print(f"  ! {cal.detail}")
 
     os.makedirs(os.path.dirname(DB), exist_ok=True)
     con = sqlite3.connect(DB, timeout=120)
@@ -80,25 +96,32 @@ def main():
       PRIMARY KEY (endpoint, bas_dd))""")
     con.commit()
 
+    refetch = [x.strip() for x in a.refetch.split(",") if x.strip()]
+    for d in refetch:
+        con.execute("DELETE FROM ingest_log WHERE bas_dd=?", (d,))
+    con.commit()
     done = {(r[0], r[1]) for r in con.execute(
         "SELECT endpoint, bas_dd FROM ingest_log WHERE status IN ('ok','holiday')")}
     days = list(bdays(a.frm, a.to))
     if a.limit: days = days[-a.limit:]
+    days = sorted(set(days) | set(refetch))
     print(f"  대상 {len(days):,}일 × {len(EPS)}엔드포인트 = 최대 {len(days)*len(EPS):,}콜")
     print(f"  이미 완료 {len(done):,}건")
 
     gap, calls, t0 = 1.0/RATE, 0, time.time()
-    stat = {"ok":0, "holiday":0, "rate":0, "error":0}
+    stat = {"ok":0, "holiday":0, "pending":0, "rate":0, "error":0}
     for i, d in enumerate(days):
         for path, tbl, key in EPS:
             if (path, d) in done: continue
             s = time.time()
             rows, v = call(path, d); calls += 1
-            stat[v if v in stat else "error"] += 1
             now = time.strftime("%Y-%m-%dT%H:%M:%S")
             if v == "fatal":
                 print(f"  [{path}] 401 Unauthorized — 권한 없음. 이 엔드포인트 건너뜀"); break
-            if v == "ok":
+            note = None
+            if v == "holiday" and cal.is_trading_day(date(int(d[:4]), int(d[4:6]), int(d[6:8]))):
+                v, note = "pending", "empty response on a trading day — not published yet (KRX T+1 08:00 KST)"
+            if v == "ok" and rows:
                 cols = list(rows[0].keys())
                 ddl = ", ".join(f'"{c}" TEXT' for c in cols)
                 con.execute(f'CREATE TABLE IF NOT EXISTS {tbl} ({ddl}, bas_dd_req TEXT, collected_at TEXT, '
@@ -106,21 +129,22 @@ def main():
                 con.executemany(
                     f'INSERT OR REPLACE INTO {tbl} VALUES ({",".join("?"*(len(cols)+2))})',
                     [[r.get(c) for c in cols] + [d, now] for r in rows])
+            stat[v if v in stat else "error"] += 1
             con.execute("INSERT OR REPLACE INTO ingest_log VALUES (?,?,?,?,?,?)",
-                        (path, d, len(rows) if rows else 0, v, None, now))
+                        (path, d, len(rows) if rows else 0, v, note, now))
             con.commit()
-            # 가격(첫 엔드포인트)이 휴장이면 그날 나머지는 안 친다 — 6콜 절약
-            if path == EPS[0][0] and v == "holiday":
+            # 가격(첫 엔드포인트)이 휴장·미공표면 그날 나머지는 안 친다 — 6콜 절약. pending 은 다음 실행이 다시 친다
+            if path == EPS[0][0] and v in ("holiday", "pending"):
                 for p2, _, _ in EPS[1:]:
                     con.execute("INSERT OR REPLACE INTO ingest_log VALUES (?,?,?,?,?,?)",
-                                (p2, d, 0, "holiday", "skipped by price-probe", now))
+                                (p2, d, 0, v, "skipped by price-probe", now))
                 con.commit(); break
             time.sleep(max(0, gap - (time.time() - s)))
         if (i+1) % 20 == 0:
             el = time.time() - t0
-            open(f"{BASE}/logs/progress_krx.txt","w").write(
-                f"{time.strftime('%H:%M:%S')} {i+1}/{len(days)}일 {calls:,}콜 "
-                f"{calls/el:.2f}/s {stat}\n")
+            with open(f"{BASE}/logs/progress_krx.txt", "w") as pf:
+                pf.write(f"{time.strftime('%H:%M:%S')} {i+1}/{len(days)}일 {calls:,}콜 "
+                         f"{calls/el:.2f}/s {stat}\n")
             print(f"  {i+1}/{len(days)}일  {calls:,}콜  {calls/el:.2f}/s  {stat}")
     con.close()
     el = time.time() - t0

@@ -229,7 +229,7 @@ def check_kis(con: sqlite3.Connection, d_prev: str, d_minus40: str, n_req: int, 
         ratio = n / n_req
         out.append(Check("kis.credit.rows", Level.WARN, Status.PASS if (ratio >= 0.95 and tk == n) else Status.FAIL,
                          {"n": n, "distinct": tk, "requested": n_req, "ratio": round(ratio, 4)},
-                         f"deal_date={d_prev} rows/requested >= 0.95 and distinct = rows (T+2 확정)"))
+                         f"deal_date={d_prev} rows/requested >= 0.95 and distinct = rows (D-2, 실측: 조회일 기준 T-3 까지 온다)"))
     from daily import (
         kis_daily,  # payload 동일 중복만 센다(정정은 제외) — 정의를 한 곳에 둔다
     )
@@ -306,6 +306,7 @@ def run(d: str, paths: Paths, *, today: dt.date | None = None) -> HealthReport:
     cal = _cal.load(paths.calendar)
     dd = dt.date(int(d[:4]), int(d[4:6]), int(d[6:8]))
     d_prev = cal.prev_trading_day(dd).strftime("%Y%m%d")
+    d_prev2 = cal.prev_trading_day(dd, n=2).strftime("%Y%m%d")   # KIS 신용잔고 판정일(실측: 조회일 기준 T-3 = D-2)
     d_minus40 = (dd - dt.timedelta(days=40)).strftime("%Y%m%d")
     today = today or dt.datetime.now(KST).date()
     kst_start_utc = (dt.datetime.combine(today, dt.time(0), KST).astimezone(dt.UTC)).strftime("%Y-%m-%dT%H:%M:%S")
@@ -333,7 +334,7 @@ def run(d: str, paths: Paths, *, today: dt.date | None = None) -> HealthReport:
         if kw is not None:
             checks += check_kiwoom(kw, krx, d, d_prev, n_req)
         if kis is not None:
-            checks += check_kis(kis, d_prev, d_minus40, n_req, prev_pairs)
+            checks += check_kis(kis, d_prev2, d_minus40, n_req, prev_pairs)
         if dart is not None:
             checks += check_dart(dart, d, cal.is_trading_day(dd), kst_start_utc)
         if wise is not None:

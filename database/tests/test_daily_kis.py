@@ -243,11 +243,12 @@ def test_dry_run_calls_the_api_but_writes_nothing(api_mod, monkeypatch, tmp_path
     assert not (home / "data" / "daily" / "universe_kw.json").exists()   # 유예 상태도 무변경
 
 
-def test_full_run_writes_the_ledger_and_the_universe_state(api_mod, monkeypatch, tmp_path):
+def test_full_run_writes_the_ledger_and_the_universe_state(  # 판정일 D-2 = 20260904
+        api_mod, monkeypatch, tmp_path):
     tickers = ("000660", "005930", "035420")
     home = _ql_home(tmp_path, tickers)
     monkeypatch.setenv("QL_HOME", str(home))
-    monkeypatch.setattr(api_mod, "kis", _fake_kis({t: [_fact("20260907")] for t in tickers}))
+    monkeypatch.setattr(api_mod, "kis", _fake_kis({t: [_fact("20260904")] for t in tickers}))
 
     rc = kis_daily.main(["--date", "2026-09-08"])
 

@@ -316,7 +316,7 @@ def dup_pairs(con: sqlite3.Connection, since: str) -> int:
 
 def gate(con: sqlite3.Connection, gate_date: str, n_requested: int,
          min_ratio: float = GATE_MIN_RATIO) -> GateResult:
-    """완료 판정. `gate_date`(= D−1) 행수 / 요청 유니버스 ≥ min_ratio 이고 종목당 1행."""
+    """완료 판정. `gate_date`(= D−2, 실측) 행수 / 요청 유니버스 ≥ min_ratio 이고 종목당 1행."""
     n_rows = n_tk = 0
     if _table_exists(con):
         row = con.execute(
@@ -466,7 +466,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     today = dt.datetime.now(KST).date()
     d = _parse_date(a.date) if a.date else cal.prev_trading_day(today)
-    gate_date = cal.prev_trading_day(d)              # KIS 는 T+2 확정 → D 조회분의 최신은 D−1
+    # 실측(09-09 15:15·16:40 KST, T=09-09): d2=T 로 조회해도 max(deal_date)=09-04 = T-3 = D-2. 플랜 초안의 "D-1" 은
+    # T+2 확정을 "T 에 T-2 까지 조회 가능" 으로 읽은 것이었다. 06:00 체인 기준으로 판정일은 D-2 다(프로브가 T-2 를 보이면 상향).
+    gate_date = cal.prev_trading_day(d, n=2)
     d1, d2 = window(today)
 
     req = _requested_tickers(kw_db, state_path=os.path.join(base, "data", "daily",

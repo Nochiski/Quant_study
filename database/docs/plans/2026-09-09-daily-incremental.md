@@ -311,8 +311,8 @@
 
 ### Task 2.1: KRX 13거래일
 
-- [ ] `python src/backfill_krx.py --from 2026-08-21 --to <T-1> --calendar data/calendar/kis_holidays.json` (91콜, 37초)
-- [ ] 게이트: A §6-1 A·B 를 13일 전부, §6-1 C(거래일인데 holiday) **0행**
+- [x] `python src/backfill_krx.py --from 2026-08-21 --to 2026-09-08` (09-09 16:1x KST 실행: 91콜·75초, ok 91 / pending 0)
+- [x] 게이트: A §6-1 A·B 를 13일 전부 통과(stk 942~944 · ksq 1,821~1,823 · kospi 51 · kosdaq 40 · etf 1,161~1,168), §6-1 C **0행**
 
 ### Task 2.2: 키움 — 1회 실행, 오염 재수집 포함
 

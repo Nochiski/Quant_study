@@ -1134,11 +1134,18 @@ WB_PROFILE_ROWS = [
 ]
 
 
-def build_workbench_root(root: Path, *, catalog: bool = True, profile: bool = True) -> Path:
+def build_workbench_root(
+    root: Path,
+    *,
+    catalog: bool = True,
+    profile: bool = True,
+    extra_factor_rows: list[FactorRow] | None = None,
+) -> Path:
     """워크벤치 어댑터 손 픽스처 equity_root 를 만든다.
 
     `catalog=False` 면 equity.duckdb 없음, `profile=False` 면 `dataset_profile` 없음
-    (어댑터가 원천 상수로 폴백하는 구판 루트).
+    (어댑터가 원천 상수로 폴백하는 구판 루트). `extra_factor_rows` 는 `adj_factor` 에 덧붙일
+    사건 행(apply_date = available_date = effective_date).
     """
     prices: list[PriceRow] = []
     universe: list[UniverseRow] = []
@@ -1181,6 +1188,10 @@ def build_workbench_root(root: Path, *, catalog: bool = True, profile: bool = Tr
             ]
         ),
     )
+    factor_dates: list[date | None] = [
+        WB_SPLIT_DATE, date(2024, 1, 3), date(2024, 1, 9),
+        *(r[1] for r in extra_factor_rows or []),
+    ]
     write_equity_table(
         root,
         "adj_factor",
@@ -1192,9 +1203,10 @@ def build_workbench_root(root: Path, *, catalog: bool = True, profile: bool = Tr
                 # share_factor 가 정한다(서버 factor_ok 55행이 이 유형이다).
                 ("036220", date(2024, 1, 9), "036220:krx_base:2024-01-09",
                  "unknown_krx", 0.5, True),
+                *(extra_factor_rows or []),
             ],
-            apply_dates=[WB_SPLIT_DATE, date(2024, 1, 3), date(2024, 1, 9)],
-            available_dates=[WB_SPLIT_DATE, date(2024, 1, 3), date(2024, 1, 9)],
+            apply_dates=factor_dates,
+            available_dates=[d for d in factor_dates if d is not None],
         ),
         year_column="effective_date",
     )

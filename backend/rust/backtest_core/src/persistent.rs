@@ -481,10 +481,16 @@ impl PersistentEngine {
                 .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?
                 .current_closes()?,
         };
-        let fallback_symbols: HashMap<_, _> = bars
-            .iter()
-            .map(|(key, (symbol, _))| (key.clone(), symbol.clone()))
-            .collect();
+        // 심볼 폴백은 그날 바뿐 아니라 피드 등록부 전체에서 찾는다 — 바가 끊긴 보유 종목(정지·상폐)의
+        // REPLACE 청산 주문이 "instrument metadata is missing" 으로 run 을 죽이지 않도록.
+        let mut fallback_symbols: HashMap<String, String> = self
+            .feed
+            .as_ref()
+            .map(PersistentFeed::registry_symbols)
+            .unwrap_or_default();
+        for (key, (symbol, _)) in bars.iter() {
+            fallback_symbols.insert(key.clone(), symbol.clone());
+        }
         let decision_for_orders = decision.clone();
         let (orders, updates, groups, error) = persistent_router::route_basic_decision(
             &self.portfolio,

@@ -9,6 +9,8 @@
 > | 10 | 정지 종목 감자가 run 을 죽인다 | **equity 몫 완료** `ae0b549` — `no_bar_after_apply` 표기. 정산 정책은 커널 몫 |
 > | 1·3·5·6·7·8·9 | | **미완** — 우선순위는 아래 표 |
 >
+> **2026-09-09 조사에서 나온 등재 전 후보**(상세는 `reviews/2026-09-09-daily-findings-*.md`, 처리 순서는 `plans/2026-09-09-daily-incremental.md` §11): stage 스냅샷 GC 없음(37 GB) · stage G5 `src_mtime` 비교 미구현 · equity EG13·EG14·EG19 미구현 · `stg_doc_parse_log` `t_*_ms` 로 content_hash 비결정 · KIS `kis_credit_balance` 중복 1,084,443행(12.1%) · equity `_pinned` GC 없음(≈1 GB/일). **§4 는 문서가 낡았다** — 코드는 `8014655` 로 해결됐고 남은 위험은 `dataset_profile` 부재 시 랙 0 폴백뿐(플랜 Task 5.4).
+>
 > 같은 날 어댑터에서 하나 더 나왔다(문서 항목은 아니다): 워크벤치 어댑터가 `unknown_krx` 어휘를
 > 몰라 그 사건이 든 창의 백테스트가 **전부 죽었다**(`4fd5b34`). 엔진 어댑터는 `fc6e889` 에서 이미
 > 배웠는데 워크벤치는 못 배운 상태였다 — **두 어댑터가 같은 어휘를 써야 한다.**

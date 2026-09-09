@@ -569,6 +569,13 @@ parquet 을 직접 읽는 소비자는 규약을 지킬 수 있지만 `list_fiel
 
 ---
 
+### 8-5. 2026-09-09 — P0 정렬(일일 증분 플랜 Task 0.6)
+
+- baseline 락: 서버 `baseline.json` 이 09-07 확정값(`v3_wise_match_min 0.93`·`v3_wise_value_tol_rel 0.01`·`bonus_ratio_window_sessions 25`)이었고 저장소 락이 뒤처져 있었다 → 락을 서버 상수로 갱신(`9c8a24e`, `_locked_at 2026-09-09`)하고 서버에 설치, `check_baseline_lock.py` 바이트 동일. 이전 서버 파일은 `baseline.json.bak_p0_20260909`.
+- 전량 재빌드 2회(`logs/equity/rebuild_p0pass1` 517s · `rebuild_p0pass2` 499s): content_hash 28/28 동일, `rules_version` 28표 전부 **e1.14.0**(혼재 해소), 게이트 fail 0.
+- `catalog` 지문 `2c38be1d58fb03be`(06:36 UTC), EG5c `n_diff_total=0`. `contract` EGC-01·02·03·04·05·10 pass — **`--engine-src /home/kael/quant-ledger/_engine` 필수**(기본값 `~/backend/src` 는 서버에 없다).
+- 서버 전용 `src/equity_s23/`(e1.7.0 구본 사본) 삭제, 배포는 `scripts/deploy.sh`(저장소 정본). 판정 근거 `reviews/2026-09-09-p0-task06-baseline-lock.md`, `-task09-server-files.md`.
+
 ## 9. 미해결 후속
 
 정본은 DESIGN §11 이다. 여기엔 **다음 사람이 곧바로 집을 수 있는 것**만 골라 적는다.

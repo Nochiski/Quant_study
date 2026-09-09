@@ -4,6 +4,13 @@
 #   로그: logs/stage_<table>.log (경과·최대 RSS 포함). 실행 창: 06:30~익일 05:30 KST (daily_wise 무동작).
 cd /home/kael/quant-ledger
 export QL_HOME=/home/kael/quant-ledger PYTHONPATH=/home/kael/quant-ledger/src
+# 2026-09-09 (플랜 P0 Task 0.2): stage·equity 공용 빌드 락. 최외곽만 잡고 자식은 QL_BUILD_LOCK_HELD=1 이면 생략.
+LOCK=/tmp/quant_ledger_build.lock
+if [ -z "${QL_BUILD_LOCK_HELD:-}" ]; then
+  exec 9>"$LOCK"
+  flock -n 9 || { echo "another build is running — lock $LOCK"; exit 3; }
+  export QL_BUILD_LOCK_HELD=1
+fi
 TABLE="$1"; shift
 LOG="logs/stage_${TABLE}.log"
 {

@@ -31,7 +31,7 @@ from datetime import datetime, timedelta
 
 BASE = os.environ.get("QL_HOME") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "src"))
-import api  # noqa: E402
+import api
 
 DB    = os.path.join(BASE, "data", "raw", "dart.db")
 DOCS  = os.path.join(BASE, "data", "raw", "documents")
@@ -44,11 +44,11 @@ RETRY_MAX, RETRY_BASE = 3, 5.0
 # 사업보고서 LIKE 매칭이 "사업보고서제출기한연장신고서" 를 물지 않게 막는다.
 NOT_REPORT = "report_nm NOT LIKE '%연장신고%'"
 PRIORITIES = {
-    1: ("분할·병합", "(report_nm LIKE '%주식분할결정%' OR report_nm LIKE '%주식병합결정%') "
-                   "AND stock_code <> ''"),
+    1: ("분할·병합", ("(report_nm LIKE '%주식분할결정%' OR report_nm LIKE '%주식병합결정%') "
+                    "AND stock_code <> ''")),
     2: ("사업보고서", f"report_nm LIKE '%사업보고서%' AND {NOT_REPORT} AND stock_code <> ''"),
-    3: ("반기·분기", "(report_nm LIKE '%반기보고서%' OR report_nm LIKE '%분기보고서%') "
-                   f"AND {NOT_REPORT} AND stock_code <> ''"),
+    3: ("반기·분기", ("(report_nm LIKE '%반기보고서%' OR report_nm LIKE '%분기보고서%') "
+                    f"AND {NOT_REPORT} AND stock_code <> ''")),
 }
 
 DDL = """CREATE TABLE IF NOT EXISTS doc_store (
@@ -62,7 +62,7 @@ DDL = """CREATE TABLE IF NOT EXISTS doc_store (
 
 
 def now_utc() -> str:
-    return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+    return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")  # noqa: DTZ003  # reason: 원장 fetched_at 은 naive UTC ISO 형식 — 바꾸면 기존 174,309행과 형식이 갈린다
 
 
 def kst_cut(con: sqlite3.Connection) -> str:
@@ -79,7 +79,7 @@ def used_today(con: sqlite3.Connection, kid: str) -> int:
 
 
 def sleep_to_kst_midnight() -> None:
-    kst = datetime.utcnow() + timedelta(hours=9)
+    kst = datetime.utcnow() + timedelta(hours=9)  # noqa: DTZ003  # reason: 위와 같은 naive UTC 규약, KST 벽시계 계산용
     nxt = (kst + timedelta(days=1)).replace(hour=0, minute=2, second=0, microsecond=0)
     sec = (nxt - kst).total_seconds()
     print(f"  · 전 키 소진 — KST 자정까지 {sec/3600:.1f}h 대기", flush=True)
@@ -125,9 +125,17 @@ def fetch(key: str, rno: str) -> tuple[str, bytes]:
     return "exc", b""
 
 
-def build_plan(con: sqlite3.Connection, priorities: list[int]) -> list[tuple[int, str]]:
-    """(우선순위, rcept_no) 리스트. zip_ok=1 로 이미 받은 것은 뺀다."""
+def build_plan(con: sqlite3.Connection, priorities: list[int],
+               retry_014: bool = False) -> list[tuple[int, str]]:
+    """(우선순위, rcept_no) 리스트. zip_ok=1 로 이미 받은 것은 뺀다.
+
+    2026-09-09: `http_status='014'`(DART "해당 문서 없음")도 뺀다 — 영구 실패라 재시도해도 같은 답이 오는데
+    3,130건이 매 실행 3,000콜·18분을 태웠다(P2 실측). `retry_014=True` 로만 다시 시도한다.
+    """
     done = {r[0] for r in con.execute("SELECT rcept_no FROM doc_store WHERE zip_ok = 1")}
+    if not retry_014:
+        done |= {r[0] for r in con.execute(
+            "SELECT rcept_no FROM doc_store WHERE zip_ok = 0 AND http_status = '014'")}
     plan, seen = [], set()
     for p in priorities:
         label, cond = PRIORITIES[p]
@@ -145,6 +153,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--priority", default="1,2,3", help="수집할 우선순위 (쉼표구분)")
     ap.add_argument("--max-calls", type=int, default=0, help="이번 실행의 콜 상한 (0=무제한)")
+    ap.add_argument("--retry-014", action="store_true", help="DART 014(문서 없음) 확정 건도 다시 시도")
     a = ap.parse_args()
 
     con = sqlite3.connect(DB, timeout=60)   # stage 계열과 동시 실행 대비 busy 대기
@@ -158,7 +167,7 @@ def main() -> None:
         print("  ✖ 사용할 키가 없다 (kael 제외 후 0개)"); return
     print(f"  ① 키 순서 {[k for k, _ in keys]} · 한도 {QUOTA_LIMIT:,}/일 (KST 자정 리셋)", flush=True)
 
-    plan = build_plan(con, [int(p) for p in a.priority.split(",") if p.strip()])
+    plan = build_plan(con, [int(p) for p in a.priority.split(",") if p.strip()], retry_014=a.retry_014)
     if not plan:
         print("  ③ 수집할 것이 없다 — 완료 상태"); return
 

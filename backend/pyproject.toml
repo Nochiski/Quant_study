@@ -19,6 +19,7 @@ parquet = [
 ]
 equity = [
     "duckdb>=1.5",
+    "requests>=2.32",
 ]
 
 [dependency-groups]

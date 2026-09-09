@@ -16,9 +16,9 @@
 
 | 항목 | 값 |
 |---|---|
-| 최종 갱신 | 2026-09-09 — 플랜 작성·리뷰 2회 반영·PR #95 · **R1 사용자 수정(06:00 수집 + 08:10 빌드)** |
-| 결정 R1~R10 | R1 사용자 확정(09-09) · **R2~R10 승인 대기** (§1) |
-| P0 안전장치·정렬 | 미착수 |
+| 최종 갱신 | 2026-09-09 — R2~R10 승인, P0 착수(브랜치 `feat/daily-p0`) |
+| 결정 R1~R10 | **전부 승인**(09-09, R1 은 사용자 수정판) |
+| P0 안전장치·정렬 | **진행 중**(09-09) — 0.1 알림·0.2 락·0.3 캘린더·0.4 키 폴백 제거·0.5 GC 완료(G0 #1·#2·#3·#4·#5·#6 통과, 스냅샷 37→24 GB) · 0.6 equity 정렬·0.7 키움 프로브·0.8 앱키 실측·0.9 배포 정렬 진행 |
 | P1 원장 증분 코드 | 미착수 |
 | P2 갭 메우기 | 미착수 |
 | P3 원장 크론·관찰 | 미착수 |
@@ -128,44 +128,44 @@
 
 **Files:** Create `database/scripts/notify.sh` · Modify `database/scripts/daily_wise.sh`
 
-- [ ] **Step 1**: v3 `~/infra/gpu_alert.sh` 를 본떠 작성. `.env` 는 `QL_ENV`(없으면 `~/kael-system-v3/.env`)에서 `BOT_TOKEN`·`CHAT_ID_DATA` 만 export. 인자 `<level> <title> <body>`; `level` 은 `crit|warn|info`. 같은 `title` 은 30분 쿨다운(`/tmp/ql_notify_<hash>`).
-- [ ] **Step 2**: 서버에서 `scripts/notify.sh info "notify test" "P0"` → 텔레그램 수신 확인.
-- [ ] **Step 3**: `daily_wise.sh` 끝에 종료코드 검사 추가 — `master_daily` 또는 `backfill_wise` rc≠0, 또는 로그에 `⚠⚠` 가 있으면 `notify.sh crit`. 정상이면 `info` 한 줄(요청 수·n_bad).
-- [ ] **Step 4**: 커밋 `ops(database): add telegram notify.sh and wire daily_wise exit check`
+- [x] **Step 1**: v3 `~/infra/gpu_alert.sh` 를 본떠 작성. `.env` 는 `QL_ENV`(없으면 `~/kael-system-v3/.env`)에서 `BOT_TOKEN`·`CHAT_ID_DATA` 만 export. 인자 `<level> <title> <body>`; `level` 은 `crit|warn|info`. 같은 `title` 은 30분 쿨다운(`/tmp/ql_notify_<hash>`).
+- [x] **Step 2**: 서버에서 `scripts/notify.sh info "notify test" "P0"` → 텔레그램 수신 확인.
+- [x] **Step 3**: `daily_wise.sh` 끝에 종료코드 검사 추가 — `master_daily` 또는 `backfill_wise` rc≠0, 또는 로그에 `⚠⚠` 가 있으면 `notify.sh crit`. 정상이면 `info` 한 줄(요청 수·n_bad).
+- [x] **Step 4**: 커밋 `ops(database): add telegram notify.sh and wire daily_wise exit check`
 
 ### Task 0.2: flock 도입
 
 **Files:** Modify `database/scripts/daily_wise.sh`, `run_stage.sh`, `run_stage_all.sh`, `run_equity.sh`
 
-- [ ] **Step 1**: 설계(`STAGE_DESIGN.md:72`)대로 원장 락 `/tmp/quant_ledger_raw.lock` 을 정의한다. `daily_wise.sh` 본문을 `flock -n /tmp/quant_ledger_raw.lock` 아래로 옮기고 획득 실패 시 `notify.sh warn` 후 exit 3.
-- [ ] **Step 2**: `run_stage.sh`·`run_stage_all.sh`·`run_equity.sh` 는 `/tmp/quant_ledger_build.lock` 하나로 통일(stage·equity 공용 — RSS 합이 available 을 넘으므로 **빌드는 하나만**). **락은 최외곽 스크립트만 잡는다**: 자식이 같은 파일을 다시 열어 `flock -n` 하면 별개 open file description 이라 부모와 충돌해 exit 3 이 된다(리뷰 2차 #1, `run_equity.sh:10-11`). 규약 = 락을 잡은 스크립트가 `QL_RAW_LOCK_HELD=1` / `QL_BUILD_LOCK_HELD=1` 을 export 하고, 자식 러너는 그 변수가 있으면 획득을 **생략**한다. `run_equity.sh:10-11` 도 이 규약으로 고친다.
-- [ ] **Step 3**: 서버에서 두 셸을 동시에 띄워 두 번째가 exit 3 으로 즉시 빠지는지, 그리고 부모→자식(`equity_rebuild_all.sh` → `run_equity.sh`)은 통과하는지 둘 다 확인.
-- [ ] **Step 4**: 커밋
+- [x] **Step 1**: 설계(`STAGE_DESIGN.md:72`)대로 원장 락 `/tmp/quant_ledger_raw.lock` 을 정의한다. `daily_wise.sh` 본문을 `flock -n /tmp/quant_ledger_raw.lock` 아래로 옮기고 획득 실패 시 `notify.sh warn` 후 exit 3.
+- [x] **Step 2**: `run_stage.sh`·`run_stage_all.sh`·`run_equity.sh` 는 `/tmp/quant_ledger_build.lock` 하나로 통일(stage·equity 공용 — RSS 합이 available 을 넘으므로 **빌드는 하나만**). **락은 최외곽 스크립트만 잡는다**: 자식이 같은 파일을 다시 열어 `flock -n` 하면 별개 open file description 이라 부모와 충돌해 exit 3 이 된다(리뷰 2차 #1, `run_equity.sh:10-11`). 규약 = 락을 잡은 스크립트가 `QL_RAW_LOCK_HELD=1` / `QL_BUILD_LOCK_HELD=1` 을 export 하고, 자식 러너는 그 변수가 있으면 획득을 **생략**한다. `run_equity.sh:10-11` 도 이 규약으로 고친다.
+- [x] **Step 3**: 서버에서 두 셸을 동시에 띄워 두 번째가 exit 3 으로 즉시 빠지는지, 그리고 부모→자식(`equity_rebuild_all.sh` → `run_equity.sh`)은 통과하는지 둘 다 확인.
+- [x] **Step 4**: 커밋
 
 ### Task 0.3: 휴장일 캘린더 복사본
 
 **Files:** Create `database/scripts/sync_calendar.sh`
 
-- [ ] **Step 1**: `rsync ~/kael-system-v3/data/.kis_holidays.json ~/quant-ledger/data/calendar/kis_holidays.json` + 검증(v3 `holiday.py` 규칙과 동일: `len(holidays) >= 100`, 전건 해당 연도, 토·일 ≥ 90). 실패 시 이전 복사본 유지 + `notify warn`.
-- [ ] **Step 2**: 서버 실행 → `data/calendar/kis_holidays.json` 에 2026-09-24·25 가 있는지 확인.
-- [ ] **Step 3**: 커밋
+- [x] **Step 1**: `rsync ~/kael-system-v3/data/.kis_holidays.json ~/quant-ledger/data/calendar/kis_holidays.json` + 검증(v3 `holiday.py` 규칙과 동일: `len(holidays) >= 100`, 전건 해당 연도, 토·일 ≥ 90). 실패 시 이전 복사본 유지 + `notify warn`.
+- [x] **Step 2**: 서버 실행 → `data/calendar/kis_holidays.json` 에 2026-09-24·25 가 있는지 확인.
+- [x] **Step 3**: 커밋
 
 ### Task 0.4: DART v3 키 폴백 제거
 
 **Files:** Modify `database/src/api.py:148-149` · Test `database/tests/test_api_dart_keys.py`
 
-- [ ] **Step 1**: 실패 테스트 — `_K={"DART_API_KEY":"x","DART_API_KEY_2":"y"}` 일 때 `dart_keys()` 가 `[("k2","y")]` 만 돌려줘야 한다(현재는 `("kael","x")` 포함).
-- [ ] **Step 2**: `api.py:148-149` 두 줄 삭제. `backfill_dart.py` 의 "1순위가 kael 이면 중단" 가드는 그대로 둔다(무해).
-- [ ] **Step 3**: 테스트 통과 · `ruff` · 커밋 `fix(database): never fall back to the v3 production DART key`
+- [x] **Step 1**: 실패 테스트 — `_K={"DART_API_KEY":"x","DART_API_KEY_2":"y"}` 일 때 `dart_keys()` 가 `[("k2","y")]` 만 돌려줘야 한다(현재는 `("kael","x")` 포함).
+- [x] **Step 2**: `api.py:148-149` 두 줄 삭제. `backfill_dart.py` 의 "1순위가 kael 이면 중단" 가드는 그대로 둔다(무해).
+- [x] **Step 3**: 테스트 통과 · `ruff` · 커밋 `fix(database): never fall back to the v3 production DART key`
 
 ### Task 0.5: GC 1회 손정리 + `scripts/gc.sh`
 
 **Files:** Create `database/scripts/gc.sh`
 
-- [ ] **Step 1**: `gc.sh`(`--dry-run` 기본, `--apply`): `data/stage/_tmp/doc/` 삭제 · `data/stage/_failed/`·`data/equity/_failed/` 30일 초과 삭제 · `logs/*.log` 7일 초과 gzip. **스냅샷 GC 는 여기 넣지 않는다** — Task 4.2 에서 빌드에 내장(한 곳에만).
-- [ ] **Step 2**: 스냅샷은 이번 한 번만 손으로: mtime 최신 3세트(`154207Z` 풀·`230100Z` dart·`015712Z` wise = 23.7 GB, 현행 MANIFEST 3종이 가리키는 것과 정확히 일치)만 남기고 4세트 삭제.
-- [ ] **Step 3**: 서버 `gc.sh --dry-run` 검토 → `--apply`. 기대: `data/snapshots` 37 → ≤ 24 GB, `_tmp/doc` 3.7 GB 회수.
-- [ ] **Step 4**: 커밋
+- [x] **Step 1**: `gc.sh`(`--dry-run` 기본, `--apply`): `data/stage/_tmp/doc/` 삭제 · `data/stage/_failed/`·`data/equity/_failed/` 30일 초과 삭제 · `logs/*.log` 7일 초과 gzip. **스냅샷 GC 는 여기 넣지 않는다** — Task 4.2 에서 빌드에 내장(한 곳에만).
+- [x] **Step 2**: 스냅샷은 이번 한 번만 손으로: mtime 최신 3세트(`154207Z` 풀·`230100Z` dart·`015712Z` wise = 23.7 GB, 현행 MANIFEST 3종이 가리키는 것과 정확히 일치)만 남기고 4세트 삭제.
+- [x] **Step 3**: 서버 `gc.sh --dry-run` 검토 → `--apply`. 기대: `data/snapshots` 37 → ≤ 24 GB, `_tmp/doc` 3.7 GB 회수.
+- [x] **Step 4**: 커밋
 
 ### Task 0.6: equity 손정렬
 

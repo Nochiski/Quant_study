@@ -11,8 +11,8 @@ KRX·키움·KIS·DART·WISE 원장 수집기, stage 층 빌더, 문서층(L1) �
 | 원장 | **KRX·키움 시계열 08-20, KIS 08-18, DART 09-01 에 정지.** WISE·키움 마스터만 매일(`daily_wise.sh` 06:00 KST) |
 | stage | 66테이블 커밋(09-05), 원장 정지 날짜까지 |
 | equity | 28표·규칙 e1.14.0·팩터 준비도 54/54(09-08). 서버 catalog 10표 stale, baseline 락 3건 불일치 — 손정렬 필요 |
-| 진행 중 | **일일 증분 플랜** `docs/plans/2026-09-09-daily-incremental.md` (PR #95) — R1(06:00 수집 + 08:10 빌드) 확정, R2~R10 승인 대기, 다음 = P0 |
-| 크론 | quant-ledger 는 `daily_wise.sh` 하나. `daily_dart.sh` 는 09-02 이후 미등록(플랜에서 폐기 예정) |
+| 진행 중 | **일일 증분 플랜** `docs/plans/2026-09-09-daily-incremental.md` — R1~R10 승인(09-09), **P0 진행 중**(0.1~0.5 완료: notify·flock·캘린더·키 폴백 제거·GC) |
+| 크론 | quant-ledger 는 `daily_wise.sh` 하나(09-09 부터 flock + 텔레그램 알림). `daily_dart.sh` 는 09-02 이후 미등록(플랜에서 폐기 예정) |
 
 ## 층 구조
 

@@ -71,6 +71,8 @@ KRX 결측 0·중복 0·OHLC 위반 0·시총 등식 0건 위반·ingest_log 전
 
 ## 5. 제안 순서
 
+> **처리 기록(09-10 15:00)**: 1번 핫픽스 3건 완료 — `52d0f48` (H4 `backfill_wise.probe_coverage`·`ledger_health` 항등식 none×4 / M1 `daily/universe.py` 이탈 진입·거래일 카운트·무조건 만료+`tail_missing` / H5 `dart_daily.SWEEP_LOOKBACK_DAYS=30`·`sweep_disclosure --lookback-days`·`reconcile()` 삭제 허용). 서버 배포·스모크 통과, 09-11 06:00 실행부터 적용. 2~4번은 미착수.
+
 1. **즉시(P3 중 핫픽스, 승인 필요)**: H4 WISE 커버 판정 · M1 유예 3종 · H5 DART 창(`--from` 직전 분기 포함 + 대조 규칙). 셋 다 수집기 코드이고 테스트로 잠글 수 있다.
 2. **P4 전 결정**: M2 키움 merge 방식.
 3. **P5 에서**: H3 KIS 판본 선택 규칙(결정 필요) · H1 adj_factor 확인 + PARVAL 게이트 · M3·M4 · M7.

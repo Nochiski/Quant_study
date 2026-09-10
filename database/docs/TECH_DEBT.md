@@ -11,6 +11,8 @@
 >
 > **2026-09-09 조사에서 나온 등재 전 후보**(상세는 `reviews/2026-09-09-daily-findings-*.md`, 처리 순서는 `plans/2026-09-09-daily-incremental.md` §11): stage 스냅샷 GC 없음(37 GB) · stage G5 `src_mtime` 비교 미구현 · equity EG13·EG14·EG19 미구현 · `stg_doc_parse_log` `t_*_ms` 로 content_hash 비결정 · KIS `kis_credit_balance` 중복 1,084,443행(12.1%) · equity `_pinned` GC 없음(≈1 GB/일). **§4 는 문서가 낡았다** — 코드는 `8014655` 로 해결됐고 남은 위험은 `dataset_profile` 부재 시 랙 0 폴백뿐(플랜 Task 5.4).
 >
+> **2026-09-10 첫 적재분 검수에서 나온 등재 전 후보**(상세·근거는 `reviews/2026-09-10-intake-audit-summary.md`): 키움 폐지 직전 4축 영구 결측 3종목(096610 7세션 등 — 복구 불가, 알려진 구멍) · KIS 재수집 판본 중복 536군이 equity `credit_daily` 격자 유일성을 깨뜨릴 전망(판본 선택 규칙 미정) · 키움 merge `INSERT OR REPLACE` 가 매일 전체 이력을 재기록(`collected_at` 소실) · KIS 잔고율 분모는 공표일(T+2) 주식수 · 액면병합 종목의 KIS 잔고 항등식 파괴 · WISE 커버 판정 오탐·키움 유예 로직·DART 분기 창은 수집기 핫픽스 후보(플랜 P3).
+>
 > 같은 날 어댑터에서 하나 더 나왔다(문서 항목은 아니다): 워크벤치 어댑터가 `unknown_krx` 어휘를
 > 몰라 그 사건이 든 창의 백테스트가 **전부 죽었다**(`4fd5b34`). 엔진 어댑터는 `fc6e889` 에서 이미
 > 배웠는데 워크벤치는 못 배운 상태였다 — **두 어댑터가 같은 어휘를 써야 한다.**

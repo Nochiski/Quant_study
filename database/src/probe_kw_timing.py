@@ -4,6 +4,10 @@
 에 남긴다. 판독 대상은 두 가지다 — ① 06:00 KST 시점에 T-1 행이 이미 있는가 ② 그 행의 값이 08:00 KRX
 공표 이후에도 바뀌지 않는가. `probe_krx_timing.py`(KRX T+1 08:00 을 밝힌 프로브)와 같은 방식이다.
 3거래일 치가 쌓이면 `--report` 로 시각별 표를 뽑는다. 하루 콜 수 = 5 소스 × 24 = 120.
+
+09-10 확장(결정 8 선행 조사): 같은 응답에서 **당일(T) 행**도 함께 기록한다(추가 콜 0). 판독 ③ — T 행이
+몇 시에 자리표시자(전일 복사본·0)에서 확정값으로 바뀌고 그 뒤 밤사이 다시 바뀌지 않는가. 저녁 원장
+체인의 시작 시각 근거다. T 는 오늘이 거래일일 때만 기록한다.
 """
 from __future__ import annotations
 
@@ -82,9 +86,13 @@ def run_once() -> int:
 
     now = dt.datetime.now(KST)
     today = now.date()
-    target = prev_trading_day(today, _holidays()).strftime("%Y%m%d")
+    hol = _holidays()
+    target = prev_trading_day(today, hol).strftime("%Y%m%d")
+    # 오늘이 거래일이면 당일(T) 행도 같은 응답에서 기록한다 — 추가 콜 없음
+    today_s = today.strftime("%Y%m%d")
+    targets = [target] + ([today_s] if prev_trading_day(today + dt.timedelta(days=1), hol) == today else [])
     start = (today - dt.timedelta(days=14)).strftime("%Y%m%d")
-    end = today.strftime("%Y%m%d")
+    end = today_s
     con = _ensure_db()
     ts = now.strftime("%Y-%m-%dT%H:%M:%S")
     n_err = 0
@@ -93,10 +101,11 @@ def run_once() -> int:
             payload, _headers = api.kiwoom(src, url, _kw_body(kind, TICKER, start, end))
             rows = _rows(payload, key)
             dts = [str(r.get(dcol, "")) for r in rows]
-            hit = next((r for r in rows if str(r.get(dcol, "")) == target), None)
-            con.execute("INSERT INTO probe VALUES (?,?,?,?,?,?,?,NULL)",
-                        (ts, src, target, len(rows), int(hit is not None),
-                         max(dts) if dts else None, json.dumps(hit, ensure_ascii=False) if hit else None))
+            for tgt in targets:
+                hit = next((r for r in rows if str(r.get(dcol, "")) == tgt), None)
+                con.execute("INSERT INTO probe VALUES (?,?,?,?,?,?,?,NULL)",
+                            (ts, src, tgt, len(rows), int(hit is not None),
+                             max(dts) if dts else None, json.dumps(hit, ensure_ascii=False) if hit else None))
         except Exception as e:  # noqa: BLE001  # reason: 프로브는 한 소스가 죽어도 나머지를 기록해야 한다
             n_err += 1
             con.execute("INSERT INTO probe VALUES (?,?,?,0,0,NULL,NULL,?)",
@@ -120,7 +129,7 @@ def run_once() -> int:
                     (ts, "kis_credit", t2, f"{type(e).__name__}: {e}"[:300]))
     con.commit()
     con.close()
-    print(f"probe {ts} target={target} kis_target={t2} errors={n_err}")
+    print(f"probe {ts} target={'+'.join(targets)} kis_target={t2} errors={n_err}")
     return 1 if n_err else 0
 
 

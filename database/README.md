@@ -52,7 +52,8 @@ equity      parquet 28표 + equity.duckdb   data/equity/                ← EQUI
 | `DECISIONS_PENDING.md` | 사람이 정해야 할 것 (결정 1~5) |
 | `TECH_DEBT.md` | 기술 부채와 우선순위 |
 | `BLOCKED_FACTORS.md` | 막힌 팩터와 원인 |
-| `plans/2026-09-09-daily-incremental.md` | **일일 증분 플랜** — 6페이즈·게이트, 결정 R1~R10 |
+| `plans/2026-09-11-daily-incremental-v2.md` | **일일 증분 플랜 v2** — 당일 저녁 스코어링(18:05 저녁 슬롯·잠정/확정 빌드), 페이즈 A~D. 시간표·P4 이후의 정본 |
+| `plans/2026-09-09-daily-incremental.md` | 일일 증분 플랜 v1 — P0~P3 결과·결정 R1~R10·결정 6·7 (유효), 시간표·P4~P6 은 v2 로 이관 |
 
 ### 원장 수집
 
@@ -98,7 +99,7 @@ equity      parquet 28표 + equity.duckdb   data/equity/                ← EQUI
 
 읽는 순서 — equity 작업: `START_HERE` → `EQUITY_HANDOFF` §0 → `EQUITY_WORKFLOW` §0~§1.
 문서층 작업: `DOC_LAYER_KICKOFF` → `STAGE_HANDOFF` §4 → `STAGE_DESIGN` §0·§7·§10 → `DOC_DESIGN`.
-일일 증분 작업: `plans/2026-09-09-daily-incremental.md` 상태 블록 → §1 결정 → 현재 페이즈.
+일일 증분 작업: `plans/2026-09-11-daily-incremental-v2.md` 상태 블록 → §1 결정 → 현재 페이즈 (v1 은 P0~P3 기록).
 
 ### 기록 (docs/archive/)
 

@@ -38,10 +38,23 @@ ingest_log.status 의미:
   open      대조는 통과했으나 창 끝이 아직 오지 않았다(진행 중인 분기).
             종결이 아니다 — 다음 실행에서 page 1 부터 통째로 다시 받는다
   partial   페이지 순회 중(창 도중 크래시 시 여기서 멈춘다)
-  mismatch  Σ수신 ≠ total_count. 완료로 적지 않는다
+  mismatch  Σ수신 ≠ total_count, 또는 적재 고유 건수 < total_count(적재 유실). 완료로 적지 않는다.
+            적재 고유 건수 > total_count 는 mismatch 가 아니다 — DART 가 지운 공시가 원장에만
+            남은 것(09-10 실측 6건)이라 ok 로 적고 초과분을 note.excess 에 남긴다
+
+재스윕: 진행 중인 창(끝이 오늘 이후)과 **끝난 지 `--lookback-days` 안인 창**은 상태와 무관하게
+page 1 부터 다시 받는다. 접수일이 지난 공시가 뒤늦게 목록에 나타나기 때문이다(09-10 스윕에서
+08-25 접수 8건이 처음 등장). 기본 0 = 종전 동작(백필용).
 """
-import os, sys, json, time, sqlite3, argparse, re
-from datetime import datetime, timedelta, date
+import argparse
+import json
+import os
+import re
+import sqlite3
+import sys
+import time
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, timedelta
 
 BASE = os.environ.get("QL_HOME") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(BASE, "src"))
@@ -55,7 +68,7 @@ TBL  = "dart_disclosure"     # 원장
 PAGE_COUNT = 100             # DART 상한. 창당 페이지 수를 정하는 값이다
 
 # store() 는 SPEC[name] 의 tbl(+flat) 만 본다. 복제 대신 등록해서 재사용한다.
-bf.SPEC.setdefault(NAME, dict(ep=EP, tbl=TBL, axis="window"))
+bf.SPEC.setdefault(NAME, {"ep": EP, "tbl": TBL, "axis": "window"})
 if bf.SPEC[NAME]["tbl"] != TBL:
     raise RuntimeError(f"backfill_dart.SPEC['{NAME}'].tbl 이 {bf.SPEC[NAME]['tbl']!r} 다 "
                        f"— {TBL!r} 이어야 한다. 원장 테이블이 갈라졌다")
@@ -73,11 +86,30 @@ def parse_point(s, upper):
         y, q = int(m.group(1)), int(m.group(2))
         return date(y, *Q_END[q]) if upper else date(y, 3 * q - 2, 1)
     if re.fullmatch(r"\d{8}", t):
-        return datetime.strptime(t, "%Y%m%d").date()
+        return date(int(t[:4]), int(t[4:6]), int(t[6:8]))
     raise ValueError(f"창 경계 형식이 잘못됐다: {s!r} — YYYYQn 또는 YYYYMMDD")
 
 def q_end(d):
     return date(d.year, *Q_END[(d.month - 1) // 3 + 1])
+
+def is_resweep(end, today, lookback_days):
+    """창(끝 'YYYYMMDD')을 page 1 부터 다시 쓸어담을지 — 진행 중이거나 끝난 지 lookback_days 안이면 참."""
+    cutoff = (date(int(today[:4]), int(today[4:6]), int(today[6:8])) - timedelta(days=lookback_days)).strftime("%Y%m%d")
+    return end >= cutoff
+
+@dataclass(frozen=True)
+class Reconcile:
+    ok: bool
+    excess: int      # 적재 고유 건수 − total_count. DART 측 삭제로 원장에만 남은 공시 수
+    reason: str      # 실패 사유: 'paging'(수신 ≠ total_count) · 'store'(적재 < total_count) · ''
+
+def reconcile(total_count, n_recv, n_db):
+    """창 종료 대조. 앞 등식은 "API 가 가진 전부를 받았나", 뒤 부등식은 "받은 것을 다 적었나"."""
+    if total_count != n_recv:
+        return Reconcile(False, 0, "paging")
+    if n_db < total_count:
+        return Reconcile(False, 0, "store")
+    return Reconcile(True, n_db - total_count, "")
 
 def windows(bgn, end):
     """[bgn,end] 를 분기 경계로 자른다. 각 창 최장 92일 = 실측 통과 상한.
@@ -141,17 +173,19 @@ def stored_rows(con, bgn, end, below=None, distinct=False):
 def stored_rows_all(con):
     return con.execute(f"SELECT COUNT(*) FROM {TBL}").fetchone()[0] if has_ledger(con) else 0
 
-def mark(con, bgn, end, status, n_rows, total_count, total_page, st):
+def mark(con, bgn, end, status, n_rows, total_count, total_page, st, excess=0):
     """유닛 상태 기록. total_count 를 note 에 JSON 으로 남긴다(§6-1 필수조건 3).
 
     컬럼을 명시해서 넣는다 — 위치형이면 ingest_log 에 컬럼이 하나 늘 때 조용히 깨진다."""
-    note = json.dumps({"total_count": total_count, "total_page": total_page, "st": st},
-                      ensure_ascii=False)
+    payload = {"total_count": total_count, "total_page": total_page, "st": st}
+    if excess:
+        payload["excess"] = excess
+    note = json.dumps(payload, ensure_ascii=False)
     con.execute("INSERT OR REPLACE INTO ingest_log "
                 "(name, corp_code, bsns_year, reprt_code, fs_div, status, n_rows, note, ts) "
                 "VALUES (?,?,?,?,?,?,?,?,?)",
                 (NAME, "", bgn, end, "", status, n_rows, note,
-                 datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")))
+                 datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S")))
     con.commit()
 
 
@@ -163,7 +197,7 @@ def call_page(con, kid, key, bgn, end, page_no):
         con.execute("INSERT INTO dart_call_log (endpoint, corp_code, bsns_year, reprt_code, "
                     "fs_div, status, n_rows, ts, key_id) VALUES (?,?,?,?,?,?,?,?,?)",
                     (EP, "", bgn, end, str(page_no), status, n,
-                     datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S"), kid))
+                     datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S"), kid))
         con.commit()
 
     for attempt in range(bf.RETRY_MAX + 1):
@@ -171,12 +205,12 @@ def call_page(con, kid, key, bgn, end, page_no):
             j = api.dart(EP, key=key, bgn_de=bgn, end_de=end,
                          page_no=page_no, page_count=PAGE_COUNT,
                          sort="date", sort_mth="asc")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001  # reason: 어떤 예외든 재시도·콜 로그로 흡수한다(backfill_dart.call 과 같은 정책)
             j = None
             print(f"    ! 콜 실패 — endpoint={EP} window={bgn}-{end} page={page_no} "
                   f"key_id={kid} {type(e).__name__}: {str(e)[:120]}")
         v, st = ("error", "exc") if j is None else bf.classify(j)
-        log(st, 0 if j is None else len(j.get("list") or []))   # 실패도 예산에 계상한다
+        log(st, len(j.get("list") or []) if isinstance(j, dict) else 0)   # 실패도 예산에 계상한다
         time.sleep(bf.PACE)
         if (v != "retry" and st != "exc") or attempt == bf.RETRY_MAX:
             if v == "unknown":
@@ -186,10 +220,11 @@ def call_page(con, kid, key, bgn, end, page_no):
         wait = bf.RETRY_BASE * (2 ** attempt)
         print(f"    · {st} 재시도 {attempt+1}/{bf.RETRY_MAX} — {wait:.0f}초 대기")
         time.sleep(wait)
+    return None, "error", "exc"     # 도달 불가(마지막 attempt 에서 return) — 반환 타입 좁히기용
 
 
 # ── 창 1개 ────────────────────────────────────────────────────────
-def sweep_window(con, bgn, end, keys, blocked, today, budget):
+def sweep_window(con, bgn, end, keys, blocked, today, budget, lookback_days=0):
     """한 창을 page_no 1..total_page 로 끝까지 받는다.
 
     반환 (outcome, n_calls). outcome:
@@ -205,17 +240,19 @@ def sweep_window(con, bgn, end, keys, blocked, today, budget):
     # 20100331 뒤에 20100204 가 섞여 온다) 신규 공시가 꼬리에만 붙는다고 보장할 수 없다.
     # 그래서 page 1 부터 통째로 다시 쓸어담는다 — 한 분기 ≈ 342콜(전체 예산의 1%).
     open_win = end >= today
+    resweep = is_resweep(end, today, lookback_days)     # 진행 중 + 끝난 지 lookback 안
     # mismatch 로 남은 창은 이전 런의 페이지 분할을 신뢰할 수 없다(적재 유실이면
     # resume 이 total_page 와 같아져 page tp+1 만 재조회하다 영구히 못 빠져나온다).
     prev = con.execute(
         "SELECT status FROM ingest_log WHERE name=? AND corp_code='' AND bsns_year=? "
         "AND reprt_code=? AND fs_div=''", (NAME, bgn, end)).fetchone()
-    page = 1 if (open_win or (prev and prev[0] == "mismatch")) else resume + 1
+    page = 1 if (resweep or (prev and prev[0] == "mismatch")) else resume + 1
     n_prior = stored_rows(con, bgn, end, below=page)
     if resume:
         print(f"  ↻ {bgn}-{end} 재개 — 적재된 최대 페이지 {resume} → page {page} 부터"
               f" (기적재 {n_prior:,}행"
               + (", 진행 중인 창이라 전량 재수집" if open_win else
+                 f", 끝난 지 {lookback_days}일 안이라 전량 재수집(늦은 접수분)" if resweep else
                  ", 이전 런 mismatch 라 전량 재수집" if page == 1 else "") + ")")
 
     n_api, calls, tc, tp, st = 0, 0, None, None, None
@@ -224,7 +261,8 @@ def sweep_window(con, bgn, end, keys, blocked, today, budget):
             print(f"  · --max-calls {budget['max_calls']} 도달 — 중단 "
                   f"({bgn}-{end} page {page} 미수신)")
             return "stop", calls
-        kid, key = bf.pick_key(con, keys, blocked)
+        picked = bf.pick_key(con, keys, blocked)     # (kid, key) 또는 (None, None)
+        kid, key = (picked[0], picked[1]) if picked is not None else (None, None)
         if not kid:
             return "stop", calls
         j, v, st = call_page(con, kid, key, bgn, end, page)
@@ -246,6 +284,10 @@ def sweep_window(con, bgn, end, keys, blocked, today, budget):
             mark(con, bgn, end, "partial", n_prior + n_api, tc, tp, st)
             return "bad", calls
 
+        if not isinstance(j, dict):        # v == "ok" 면 dict 다 — api.dart 의 반환 타입(bytes 포함) 좁히기
+            print(f"  ✖ {bgn}-{end} page {page} 응답이 JSON 객체가 아니다({type(j).__name__}) — 창을 완료로 적지 않는다")
+            mark(con, bgn, end, "partial", n_prior + n_api, tc, tp, st)
+            return "bad", calls
         rows, anom = bf.normalize_rows(j, False)
         if anom:
             print(f"  ! {bgn}-{end} page {page} 응답 형태 이상({anom}) — 정규화 경로로 처리했다")
@@ -269,11 +311,15 @@ def sweep_window(con, bgn, end, keys, blocked, today, budget):
     #    둘을 따로 봐야 페이징 누락과 적재 유실이 구분된다.
     n_recv = n_prior + n_api
     n_db   = stored_rows(con, bgn, end, distinct=True)
-    if tc != n_recv or tc != n_db:
-        print(f"  ✖ {bgn}-{end} 대조 실패 — total_count={tc:,} 수신={n_recv:,} 적재={n_db:,}"
+    rc = reconcile(tc, n_recv, n_db)
+    if not rc.ok:
+        print(f"  ✖ {bgn}-{end} 대조 실패({rc.reason}) — total_count={tc:,} 수신={n_recv:,} 적재={n_db:,}"
               f" (총 페이지 {tp}, 이번 런 {calls}콜). 완료로 적지 않는다")
         mark(con, bgn, end, "mismatch", n_recv, tc, tp, st)
         return "bad", calls
+    if rc.excess:
+        print(f"  · {bgn}-{end} 적재 고유 건수가 total_count 보다 {rc.excess}건 많다 — "
+              f"DART 측 삭제 공시로 본다(원장 보존, note.excess)")
 
     if tc == 0 and st == "013":
         # 열린 창의 013 은 "아직 공시 전"(분기 첫날·휴일)일 수 있다 — 종결하면 분기 통손실
@@ -286,7 +332,7 @@ def sweep_window(con, bgn, end, keys, blocked, today, budget):
         return "bad", calls
     else:
         status = "open" if open_win else "ok"
-    mark(con, bgn, end, status, n_recv, tc, tp, st)
+    mark(con, bgn, end, status, n_recv, tc, tp, st, excess=rc.excess)
     print(f"  ✓ {bgn}-{end} {status:<8} total_count={tc:,} 수신={n_recv:,} 적재={n_db:,} "
           f"페이지={tp} 콜={calls}")
     return "done", calls
@@ -298,12 +344,14 @@ def main():
     ap.add_argument("--from", dest="frm", default="2010Q1", help="시작 창 (YYYYQn 또는 YYYYMMDD)")
     ap.add_argument("--to",   dest="to",  default="",       help="끝 창 (기본: 오늘이 든 분기)")
     ap.add_argument("--max-calls", type=int, default=0, help="이 런의 콜 상한 (0=무제한)")
+    ap.add_argument("--lookback-days", type=int, default=0,
+                    help="끝난 지 이 일수 안인 창은 상태와 무관하게 page 1 부터 다시 받는다(늦은 접수분). 0=종전 동작")
     ap.add_argument("--quota-window", default="rolling", choices=["rolling", "midnight"],
                     help="키 소진 계산 창. backfill_dart 와 동일 — 자정 리셋 실측 확정이므로 운영은 midnight 권장")
     a = ap.parse_args()
     bf.QUOTA_WINDOW = a.quota_window   # 미지정 시 bf 기본(rolling)과 동일 — 두 도구의 판정 기준을 일치시킨다
 
-    today = datetime.utcnow().date()
+    today = datetime.now(UTC).date()
     bgn = parse_point(a.frm, upper=False)
     end = parse_point(a.to, upper=True) if a.to else q_end(today)
     if end < bgn:
@@ -349,9 +397,9 @@ def main():
     done = {(r[0], r[1]) for r in con.execute(
         "SELECT bsns_year, reprt_code FROM ingest_log WHERE name = ? AND status IN (?,?)",
         (NAME, *DONE))}
-    todo = [w for w in plan if w not in done]
-    used0 = {kid: bf.budget_used(con, kid) for kid, _ in keys}
     tstr = today.strftime("%Y%m%d")
+    todo = [w for w in plan if w not in done or is_resweep(w[1], tstr, a.lookback_days)]
+    used0 = {kid: bf.budget_used(con, kid) for kid, _ in keys}
     print("  · 키 " + " · ".join(f"{kid} {used0[kid]:,}/{bf.CAPS.get(kid,19500):,}"
                                   for kid, _ in keys))
     print(f"  · 창 {len(plan)}개 ({plan[0][0]}~{plan[-1][1]}) · 완료 {len(plan)-len(todo)} "
@@ -361,7 +409,8 @@ def main():
     budget = {"used": 0, "max_calls": a.max_calls}
     blocked, n_ok, n_bad = set(), 0, 0
     for bgn_s, end_s in todo:
-        out, _ = sweep_window(con, bgn_s, end_s, keys, blocked, tstr, budget)
+        out, _ = sweep_window(con, bgn_s, end_s, keys, blocked, tstr, budget,
+                              lookback_days=a.lookback_days)
         if out == "stop":
             print(f"  ⚠ 중단 — 이어서 실행하면 {bgn_s}-{end_s} 부터 재개한다 "
                   f"(접힌 키: {sorted(blocked) or '없음'})")

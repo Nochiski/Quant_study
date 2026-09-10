@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """WISEreport 컨센서스 리비전 수집 — 원장 (data/raw/wisereport.db).
 
 배경 (2026-09-01 스파이크 실측):
@@ -25,13 +24,12 @@ import os
 import random
 import re
 import sqlite3
-import sys
 import threading
 import time
 import urllib.parse
 import zlib
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import requests
 
@@ -43,6 +41,8 @@ UA   = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) C
 WORKERS = 10
 JITTER  = (0.05, 0.25)
 YYMMS   = 3          # 대상연도: CK=1(당해) 포함 최근 3개 — 2026E·2027E·2028E
+REQ_COVERED = 15     # 커버 종목의 일일 요청 수: 목록 1 + cF5001·cF5002 ×3 + 대체 축 8. ledger_health 항등식이 읽는다
+REQ_NONE    = 4      # 무커버 종목: 목록 1 + cF5001 ×3 — 3개년을 다 본 뒤에만 none (검수 D H1)
 
 DDL = """
 CREATE TABLE IF NOT EXISTS ws_raw (
@@ -96,11 +96,11 @@ def sess() -> requests.Session:
 
 
 def kst_today() -> str:
-    return (datetime.utcnow() + timedelta(hours=9)).strftime("%Y-%m-%d")
+    return (datetime.now(UTC) + timedelta(hours=9)).strftime("%Y-%m-%d")
 
 
 def now_utc() -> str:
-    return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def fetch(cmp_cd: str, ep: str, pkey: str, url: str) -> tuple[str, str, bytes, int, int]:
@@ -120,7 +120,7 @@ def fetch(cmp_cd: str, ep: str, pkey: str, url: str) -> tuple[str, str, bytes, i
 
 
 def dt_today() -> str:
-    return (datetime.utcnow() + timedelta(hours=9)).strftime("%Y%m%d")
+    return (datetime.now(UTC) + timedelta(hours=9)).strftime("%Y%m%d")
 
 
 def jobs_for(cmp_cd: str, yymms: list[str]) -> list[tuple[str, str, str]]:
@@ -177,6 +177,34 @@ def is_covered(cf5001_body: bytes) -> bool:
                 or any(v is not None for v in c1.get("target_price", [])))
     except Exception:  # noqa: BLE001  # reason: 파싱 불능은 커버 판정 보류(covered 취급)와 같다
         return True
+
+
+def probe_coverage(cmp_cd: str, yymms: list[str], fetch_fn) -> tuple[bool, list[tuple[str, str, str, bytes, int, int]]]:
+    """커버 판정 + 연도축 수집. (covered, out 행 목록) 을 돌려준다.
+
+    대상 연도의 cF5001 을 순서대로 보다가 커버가 나오면 즉시 covered 로 확정하고 남은 연도의
+    cF5001 과 cF5002 전부를 받는다(커버 종목의 요청 수는 종전과 같다). **3개년 모두 전값 None 일
+    때만** none 이며 그때 cF5002 는 요청하지 않는다. 09-10 이전에는 당해 연도(yymms[0]) 하나만 보고
+    none 을 확정해 FY2027 추정치가 있는 종목 3개를 잃었다(검수 D H1) — 연말로 갈수록 당해 연도가
+    먼저 비므로 오탐이 늘어난다. 판정 불능(비 ok 응답)은 `is_covered` 와 같은 원칙으로 covered.
+    `fetch_fn(cmp_cd, ep, pk, url) -> (cmp_cd, v, body, nb, ms)`."""
+    jobs = jobs_for(cmp_cd, yymms)[1:]
+    probes = [j for j in jobs if j[0] == "cF5001"]
+    rest = [j for j in jobs if j[0] != "cF5001"]
+    out: list[tuple[str, str, str, bytes, int, int]] = []
+    covered, n_probed = False, 0
+    for ep, pk, url in probes:
+        _, v, body, nb, ms = fetch_fn(cmp_cd, ep, pk, url)
+        out.append((ep, pk, v, body, nb, ms))
+        n_probed += 1
+        if v != "ok" or is_covered(body):
+            covered = True
+            break
+    if covered:
+        for ep, pk, url in probes[n_probed:] + rest:
+            _, v, body, nb, ms = fetch_fn(cmp_cd, ep, pk, url)
+            out.append((ep, pk, v, body, nb, ms))
+    return covered, out
 
 
 def universe(con_w: sqlite3.Connection) -> list[str]:
@@ -242,7 +270,7 @@ def main() -> None:
     badkinds: dict[str, int] = {}
 
     def collect(cmp_cd: str):
-        """한 종목의 일일 세트. 첫 cF5001 이 전값 None 이면 나머지 연도는 건너뛴다."""
+        """한 종목의 일일 세트. 3개년 cF5001 이 전부 전값 None 이면 무커버 — 대체 축은 받지 않는다."""
         out, ymms = [], []
         # 대상연도 목록 — CK=1 포함 최근 YYMMS 개
         ep, pk, url = jobs_for(cmp_cd, [])[0]
@@ -260,14 +288,8 @@ def main() -> None:
         if not ymms:
             y = int(today[:4])
             ymms = [f"{y}12", f"{y+1}12", f"{y+2}12"]
-        covered = True
-        for ep, pk, url in jobs_for(cmp_cd, ymms)[1:]:
-            if not covered and ep in ("cF5001", "cF5002"):
-                continue        # 무커버 확정 후 잔여 연도 요청은 낭비다
-            _, v, body, nb, ms = fetch(cmp_cd, ep, pk, url)
-            out.append((ep, pk, v, body, nb, ms))
-            if ep == "cF5001" and pk == ymms[0] and v == "ok":
-                covered = is_covered(body)
+        covered, probed = probe_coverage(cmp_cd, ymms, fetch)
+        out.extend(probed)
         if covered:
             # v3 대체 축 (2026-09-01 실측 — frq 는 반드시 숫자, 'Y' 를 주면 에러 페이지다):
             #   flag=2 frq=0/1  연간·분기 컨센서스 표 (SALES~EV 11필드, 2028E·추정분기 3개 포함)

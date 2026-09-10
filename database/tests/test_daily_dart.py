@@ -392,7 +392,8 @@ def test_run_sweeps_unlocks_and_calls_backfill_per_group(tmp_path, monkeypatch) 
     r = dd.run(D, home=home, sweep_from="2026Q3")
     assert r.n_unlocked == 2
     sweep = [c for c in seen if c[1].endswith("sweep_disclosure.py")]
-    assert sweep and sweep[0][2:] == ["--from", "2026Q3", "--quota-window", "midnight"]
+    assert sweep and sweep[0][2:] == ["--from", "2026Q3", "--lookback-days", str(dd.SWEEP_LOOKBACK_DAYS),
+                                      "--quota-window", "midnight"]
     backfills = [c for c in seen if c[1].endswith("backfill_dart.py")]
     assert len(backfills) == 2                                   # 정기보고서 1 + DS005 1
     periodic = next(c for c in backfills if "--years" in c)
@@ -418,7 +419,12 @@ def test_run_skip_sweep_and_default_window(tmp_path, monkeypatch) -> None:
     dd.run(D, home=home, skip_sweep=True)
     assert not [c for c in seen if c[1].endswith("sweep_disclosure.py")]
     assert dd.sweep_from_for("20260908") == "2026Q3"
-    assert dd.sweep_from_for("20260101") == "2026Q1"
+    # 분기 첫 30일은 직전 분기부터 — 접수일이 지난 공시가 뒤늦게 목록에 나타난다
+    # (검수 D H3: 09-10 스윕에서 08-25 접수 8건이 처음 나타남). 30일 뒤에는 당 분기만.
+    assert dd.SWEEP_LOOKBACK_DAYS == 30
+    assert dd.sweep_from_for("20261005") == "2026Q3"
+    assert dd.sweep_from_for("20261105") == "2026Q4"
+    assert dd.sweep_from_for("20260101") == "2025Q4"
 
 
 def test_dry_run_does_not_touch_ingest_log_or_runlog(tmp_path, monkeypatch) -> None:

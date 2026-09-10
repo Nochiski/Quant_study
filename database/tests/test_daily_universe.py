@@ -41,16 +41,43 @@ def test_first_run_seeds_from_tickers_txt_and_logs_difference(tmp_path):
     assert "000660" in state["grace"]
 
 
-def test_grace_expires_only_after_last_data_received(tmp_path):
+def test_grace_expires_after_grace_days_and_reports_missing_tail(tmp_path):
     con = _kw(tmp_path, [("20260909", "005930", "대형주")],
               foreign_rows=[("000660", "20260901")])              # 000660 마지막 수집 09-01
     state_path = tmp_path / "universe_kw.json"
-    # 000660 은 09-01 에 마스터에서 마지막으로 보였고 유예 5거래일이 이미 지났지만
-    # ka10008.max(dt)=0901 >= last_seen=0901 이라 "마지막 거래일 데이터 확보" 조건 충족 → 제외
+    # 두 종목 다 유예 5거래일을 채웠다. 000660 은 ka10008.max(dt) >= last_seen 로 꼬리까지 받았고
+    # 000001 은 아무 데이터도 못 받았다 — 그래도 제외한다. 키움은 폐지 종목에 0행을 주므로 더 기다려도
+    # 꼬리는 오지 않고(검수 B F-1·F-4: 4종목이 영구 고착돼 하루 16콜 낭비), 대신 tail_missing 으로 알린다.
     state_path.write_text(json.dumps({"asof": "20260908", "grace": {
-        "000660": {"last_seen": "20260901", "missing_days": 5},
-        "000001": {"last_seen": "20260901", "missing_days": 5}}}), encoding="utf-8")
+        "000660": {"last_seen": "20260901", "missing_days": 4},
+        "000001": {"last_seen": "20260901", "missing_days": 4}}}), encoding="utf-8")
     req = uni.requested(con, state_path=state_path, seed_path=None, grace_days=5)
-    assert "000660" not in req.tickers                            # 제외됨
-    assert "000001" in req.tickers                                # 데이터를 아직 못 받았으면 유예 연장
-    assert req.dropped == ("000660",)
+    assert "000660" not in req.tickers and "000001" not in req.tickers
+    assert req.dropped == ("000001", "000660")
+    assert req.tail_missing == ("000001",)
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["grace"] == {}
+
+
+def test_ticker_gone_from_master_enters_grace_with_last_seen(tmp_path):
+    # 검수 B F-3: 마스터에서 사라진 종목을 유예에 넣는 경로가 첫 실행 시드에만 있었다.
+    con = _kw(tmp_path, [("20260908", "005930", "대형주"), ("20260908", "000660", "중형주"),
+                         ("20260909", "005930", "대형주")])
+    state_path = tmp_path / "universe_kw.json"
+    state_path.write_text(json.dumps({"asof": "20260908", "n_requested": 2, "grace": {}}), encoding="utf-8")
+    req = uni.requested(con, state_path=state_path, seed_path=None, grace_days=5)
+    assert req.tickers == ("000660", "005930")                   # 사라진 날에도 요청한다
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["grace"]["000660"] == {"last_seen": "20260908", "missing_days": 1}
+
+
+def test_same_day_second_call_does_not_advance_grace(tmp_path):
+    # 검수 B F-4: kw_daily 와 kis_daily 가 같은 상태 파일을 하루 두 번 읽는다 — 거래일 단위로만 센다.
+    con = _kw(tmp_path, [("20260909", "005930", "대형주")])
+    state_path = tmp_path / "universe_kw.json"
+    state_path.write_text(json.dumps({"asof": "20260909", "n_requested": 2, "grace": {
+        "000660": {"last_seen": "20260908", "missing_days": 2}}}), encoding="utf-8")
+    req = uni.requested(con, state_path=state_path, seed_path=None, grace_days=5)
+    assert "000660" in req.tickers
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["grace"]["000660"]["missing_days"] == 2

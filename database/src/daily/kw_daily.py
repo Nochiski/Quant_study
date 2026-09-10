@@ -646,7 +646,10 @@ def _run_fetch(*, date: str, prev_date: str, db_path: str, run_db: str, base: st
     tickers = req.tickers[:limit] if limit > 0 else req.tickers
     print(f"[kw_daily] fetch date={date} prev={prev_date} asof={req.asof} "
           f"universe={len(req.tickers)} 요청={len(tickers)} seeded_only={len(req.seeded_only)} "
-          f"dropped={len(req.dropped)} dry_run={dry_run}")
+          f"dropped={len(req.dropped)} tail_missing={len(req.tail_missing)} dry_run={dry_run}")
+    if req.dropped:
+        print(f"[kw_daily] 유예 만료 제외: {','.join(req.dropped)}"
+              + (f" (마지막 등장일 데이터 미수신: {','.join(req.tail_missing)})" if req.tail_missing else ""))
     rid = None if dry_run else runlog.start(run_db, date=date, source=FETCH_SOURCE)
     result = fetch(tickers, date=date, prev_date=prev_date, db_path=db_path,
                    client=_kiwoom_module(), dry_run=dry_run)

@@ -18,6 +18,7 @@ import sys
 from dataclasses import asdict, dataclass
 from enum import Enum
 
+from backfill_wise import REQ_COVERED, REQ_NONE  # 종목당 일일 요청 수의 정본
 from daily import calendar as _cal
 
 KST = dt.timezone(dt.timedelta(hours=9))
@@ -287,10 +288,11 @@ def check_wise(con: sqlite3.Connection, today_iso: str) -> list[Check]:
         # 전체 집계로는 등식이 깨진다(09-09 실측: 전체 808/1758 vs 당일 807/1756, n_req 15,617 은 후자와 일치).
         cov = _count(con, "SELECT COUNT(*) FROM ws_coverage WHERE status='covered' AND date(checked_at, '+9 hours')=?", (today_iso,))
         none = _count(con, "SELECT COUNT(*) FROM ws_coverage WHERE status='none' AND date(checked_at, '+9 hours')=?", (today_iso,))
-        expected = cov * 15 + none * 2
+        expected = cov * REQ_COVERED + none * REQ_NONE
         out.append(Check("wise.req_identity", Level.REQUIRED, Status.PASS if expected == n_req else Status.FAIL,
                          {"expected": expected, "actual": n_req, "covered": cov, "none": none},
-                         "당일 checked_at 기준 covered×15 + none×2 == n_req (09-09 실측 15,617 일치)"))
+                         f"당일 checked_at 기준 covered×{REQ_COVERED} + none×{REQ_NONE} == n_req "
+                         "(무커버 4 = 목록 1 + 3개년 cF5001, 09-10 검수 D H1 이후)"))
         rate = cov / (cov + none) if (cov + none) else None
         out.append(Check("wise.cov_rate", Level.WARN, Status.SKIP if rate is None else (Status.PASS if rate >= 0.25 else Status.FAIL),
                          None if rate is None else round(rate, 3), ">= 0.25 (실측 0.315; 미만이면 페이지 개편 의심)"))

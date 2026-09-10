@@ -471,10 +471,16 @@ def to_date(date_yyyymmdd: str) -> dt.date:
     return dt.date(int(date_yyyymmdd[:4]), int(date_yyyymmdd[4:6]), int(date_yyyymmdd[6:]))
 
 
-def sweep_from_for(date_yyyymmdd: str) -> str:
-    """D 가 속한 표준 분기 창. 좁히면 창 id 가 달라져 원장에 중복 적재된다
+# 직전 분기를 함께 쓸어담는 기간(일). 접수일이 지난 공시가 뒤늦게 목록에 나타난다 — 09-10 스윕에서
+# 08-25 접수 8건이 처음 나타났다(검수 D H3, 16일 지연). 분기 첫 30일은 직전 분기 창도 page 1 부터
+# 다시 받는다(`sweep_disclosure --lookback-days`). 비용은 그 기간에 하루 ≈600콜.
+SWEEP_LOOKBACK_DAYS = 30
+
+
+def sweep_from_for(date_yyyymmdd: str, lookback_days: int = SWEEP_LOOKBACK_DAYS) -> str:
+    """D − lookback 이 속한 표준 분기 창부터. 좁히면 창 id 가 달라져 원장에 중복 적재된다
     (`sweep_disclosure.py:82-90` 주석)."""
-    d = to_date(date_yyyymmdd)
+    d = to_date(date_yyyymmdd) - dt.timedelta(days=lookback_days)
     return f"{d.year}Q{(d.month - 1) // 3 + 1}"
 
 
@@ -582,6 +588,7 @@ def run(date_yyyymmdd: str, *, home: str, skip_sweep: bool = False,
             if not skip_sweep:
                 cmd = [sys.executable, os.path.join(home, "src", "sweep_disclosure.py"),
                        "--from", sweep_from or sweep_from_for(date_yyyymmdd),
+                       "--lookback-days", str(SWEEP_LOOKBACK_DAYS),
                        "--quota-window", "midnight"]
                 if dry_run:
                     cmd += ["--max-calls", str(limit)]

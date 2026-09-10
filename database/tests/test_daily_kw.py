@@ -330,3 +330,47 @@ def test_cross_source_requires_full_match_and_nonzero_overlap():
     check = kw_daily.cross_source(krx, off)
     assert not check.passed and check.n_same_close == 2 and check.n_same_vol == 1
     assert kw_daily.cross_source(krx, {}).passed is False          # 겹치는 종목이 0이면 실패
+
+
+# ── (e) --tr: 외국인 보유(ka10008)만 08:10 체인에서 따로 받는다 (프로브 실측 09-10: T-1 행이 07시 전후 정정) ──
+def test_fetch_tr_filter_stages_only_selected_and_keeps_other_incoming(tmp_path, monkeypatch):
+    calls = []
+    _prepare(tmp_path, monkeypatch, calls, ledger_rows=_seed_prev())
+    # 06:00 체인: ka10008 을 뺀 세 TR. 오염 게이트는 ka10008 대상이라 판정하지 않는다(skipped).
+    assert kw_daily.main(["--fetch", "--date", D, "--tr", "ka10014,ka20068,ka10060"]) == 0
+    assert len(calls) == len(TICKERS) * 3 and not [c for c in calls if c[0] == "ka10008"]
+    con = sqlite3.connect(tmp_path / "data" / "raw" / "kiwoom.db")
+    try:
+        assert not con.execute("SELECT 1 FROM sqlite_master WHERE name='_kw_incoming_ka10008'").fetchone()
+        for api_id in ("ka10014", "ka20068", "ka10060"):
+            assert con.execute(f'SELECT COUNT(*) FROM "_kw_incoming_{api_id}"').fetchone()[0] == len(TICKERS) * 4
+    finally:
+        con.close()
+    run = sqlite3.connect(tmp_path / "data" / "raw" / "daily_run.db")
+    detail = run.execute("SELECT detail FROM run WHERE source='kiwoom_fetch' ORDER BY run_id DESC LIMIT 1").fetchone()[0]
+    run.close()
+    assert "trs=ka10014,ka20068,ka10060" in detail and "basis=skipped" in detail
+    # 08:10 체인: ka10008 만. 앞서 세운 세 incoming 은 비우지 않는다.
+    assert kw_daily.main(["--fetch", "--date", D, "--tr", "ka10008"]) == 0
+    assert len(calls) == len(TICKERS) * 4
+    con = sqlite3.connect(tmp_path / "data" / "raw" / "kiwoom.db")
+    try:
+        for api_id in kw_daily.TRS:
+            assert con.execute(f'SELECT COUNT(*) FROM "_kw_incoming_{api_id}"').fetchone()[0] == len(TICKERS) * 4, api_id
+    finally:
+        con.close()
+    # 머지는 네 incoming 을 모두 본 테이블로 옮긴다
+    _krx_db(tmp_path)
+    assert kw_daily.main(["--merge", "--date", D]) == 0
+    con = sqlite3.connect(tmp_path / "data" / "raw" / "kiwoom.db")
+    try:
+        for api_id, spec in kw_daily.TRS.items():
+            assert con.execute(f'SELECT COUNT(*) FROM "{spec.table}"').fetchone()[0] == len(TICKERS) * 3, api_id
+    finally:
+        con.close()
+
+
+def test_fetch_tr_rejects_unknown_id():
+    import pytest
+    with pytest.raises(SystemExit):
+        kw_daily.main(["--fetch", "--date", D, "--tr", "ka99999"])

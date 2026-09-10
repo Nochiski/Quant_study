@@ -174,9 +174,11 @@ def test_stale_gate_ratio_and_threshold():
 
 
 # ── (c) merge — KRX 전건 일치면 dt <= D 만 머지, dt > D 는 버린다 ─────────────
-def test_merge_writes_only_dates_up_to_d_and_overwrites_by_pk(tmp_path, monkeypatch):
+def test_merge_writes_only_dates_up_to_d_and_keeps_existing_rows(tmp_path, monkeypatch):
     calls = []
-    # 원장 D-1 은 낡은 값("999") — PK (ticker, dt) 로 incoming 값이 덮어써야 한다
+    # 원장 D-1 에 이미 있는 행("999")은 incoming 이 달라도 덮어쓰지 않는다 — 원장은 "처음 본 값"을 지키고
+    # 정정 여부는 changed 건수로만 드러낸다(사용자 결정 09-10: 키움은 과거를 고치지 않는다고 가정,
+    # 검수 B F-5: 매일 155만 행 재기록 + collected_at 소실). 새 (ticker, dt) 만 들어온다.
     stale_ledger = [(t, D_PREV, "1", "1", "999", "ka10008", "old") for t in TICKERS]
     _prepare(tmp_path, monkeypatch, calls, ledger_rows=stale_ledger)
     _krx_db(tmp_path)
@@ -187,9 +189,13 @@ def test_merge_writes_only_dates_up_to_d_and_overwrites_by_pk(tmp_path, monkeypa
     assert [r[1] for r in rows] == [D_OLD, D_PREV, D] * 2          # dt > D 는 들어오지 않았다
     assert D_NEXT not in {r[1] for r in rows}
     by_key = {(t, d): p for t, d, p in rows}
-    assert by_key[("005930", D_PREV)] == CLEAN_POSS[D_PREV]["005930"]
+    assert by_key[("005930", D_PREV)] == "999"                     # 기존 행 보존
+    assert by_key[("005930", D)] == CLEAN_POSS[D]["005930"]        # 새 날짜는 들어왔다
     con = sqlite3.connect(tmp_path / "data" / "raw" / "kiwoom.db")
     try:
+        kept = con.execute('SELECT collected_at FROM ka10008_foreign_holdings WHERE ticker=? AND dt=?',
+                           ("005930", D_PREV)).fetchone()
+        assert kept[0] == "old"                                      # 최초 관측 시각 유지
         for api_id, spec in kw_daily.TRS.items():
             n = con.execute(f'SELECT COUNT(*) FROM "{spec.table}" WHERE dt > ?', (D,)).fetchone()
             assert n[0] == 0, api_id
@@ -205,6 +211,8 @@ def test_merge_writes_only_dates_up_to_d_and_overwrites_by_pk(tmp_path, monkeypa
         run.close()
     assert row[1] == "ok" and row[2] == len(TICKERS) * 3 * len(kw_daily.TRS)
     assert "matched=2 same_close=2 same_vol=2" in row[3]
+    # ka10008: 기존 D-1 행 2건이 값이 달라 changed=2, 나머지 4건(D_OLD·D) 신규. 다른 TR 은 전부 신규
+    assert "changed=2" in row[3] and f"new={len(TICKERS) * 3 * len(kw_daily.TRS) - 2}" in row[3]
 
 
 # ── (d) 크로스소스 불일치 1행이면 머지하지 않는다 ────────────────────────────

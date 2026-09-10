@@ -198,8 +198,10 @@ class CrossCheck:
 @dataclass(frozen=True)
 class TrMerge:
     api_id: str
-    n_merged: int
+    n_merged: int              # incoming 중 dt <= D 인 행(머지 대상)
     n_dropped_future: int
+    n_new: int = 0             # 원장에 없던 (ticker, dt) — 실제 삽입
+    n_changed: int = 0         # 원장에 이미 있고 값이 다른 행 — 덮어쓰지 않고 센다(사용자 결정 09-10)
 
 
 class MergeStatus(Enum):
@@ -533,7 +535,13 @@ def cross_source(krx: Mapping[str, Quote], kiwoom: Mapping[str, Quote]) -> Cross
 
 
 def merge_tr(con: sqlite3.Connection, spec: TrSpec, date: str, dry_run: bool) -> TrMerge:
-    """incoming 의 `dt <= date` 행만 본 테이블로 옮긴다. `dt > date`(당일 개장 전 행)는 버린다."""
+    """incoming 의 `dt <= date` 행 중 **원장에 없는 (ticker, dt) 만** 본 테이블에 넣는다.
+
+    `dt > date`(당일 개장 전 행)는 버린다. 이미 있는 행은 값이 달라도 덮어쓰지 않는다 — 원장은 "처음 본
+    값"과 `collected_at` 을 지키고, 다른 행 수를 `n_changed` 로만 알린다. 종전 `INSERT OR REPLACE` 는
+    응답에 실린 과거 이력 전부(4 TR 합 155만 행, ka10014 는 2008년치까지)를 매일 다시 써 최초 관측
+    시각이 사라지고 원천 정정이 무기록으로 스며들었다(검수 B F-5). 키움은 과거를 고치지 않는다는
+    가정은 사용자 결정(09-10)이며, `n_changed` 가 0 이 아니면 그 가정을 다시 본다."""
     incoming = INCOMING_PREFIX + spec.api_id
     if not _table_exists(con, incoming):
         return TrMerge(spec.api_id, 0, 0)
@@ -546,10 +554,17 @@ def merge_tr(con: sqlite3.Connection, spec: TrSpec, date: str, dry_run: bool) ->
         return TrMerge(spec.api_id, n_take, n_future)
     ensure_table(con, spec.table, cols)
     names = ",".join(f'"{c}"' for c in ["ticker", *cols, "src_api", "collected_at"])
-    con.execute(f'INSERT OR REPLACE INTO "{spec.table}" ({names}) '
+    differs = " OR ".join(f'i."{c}" IS NOT m."{c}"' for c in cols if c != "dt")
+    row_changed = con.execute(
+        f'SELECT COUNT(*) FROM "{incoming}" i JOIN "{spec.table}" m ON m.ticker = i.ticker AND m.dt = i.dt '
+        f'WHERE i.dt <= ? AND ({differs})', (date,)).fetchone()
+    n_changed = 0 if row_changed is None else int(row_changed[0])
+    before = con.total_changes
+    con.execute(f'INSERT OR IGNORE INTO "{spec.table}" ({names}) '
                 f'SELECT {names} FROM "{incoming}" WHERE dt <= ?', (date,))
+    n_new = con.total_changes - before
     con.commit()
-    return TrMerge(spec.api_id, n_take, n_future)
+    return TrMerge(spec.api_id, n_take, n_future, n_new, n_changed)
 
 
 def merge(*, date: str, db_path: str, krx_db: str, dry_run: bool = False) -> MergeResult:
@@ -578,9 +593,11 @@ def merge(*, date: str, db_path: str, krx_db: str, dry_run: bool = False) -> Mer
         con.close()
     rows = sum(m.n_merged for m in merged)
     future = sum(m.n_dropped_future for m in merged)
+    new = sum(m.n_new for m in merged)
+    changed = sum(m.n_changed for m in merged)
     return MergeResult(MergeStatus.OK, date, cross, merged,
-                       head + f" | merged={rows} dropped_future={future} "
-                              f"per_tr={[(m.api_id, m.n_merged) for m in merged]}")
+                       head + f" | merged={rows} new={new} changed={changed} dropped_future={future} "
+                              f"per_tr={[(m.api_id, m.n_merged, m.n_new, m.n_changed) for m in merged]}")
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────

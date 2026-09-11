@@ -5,7 +5,7 @@ import tempfile
 # sweep_disclosure 는 import 시점에 `api` 를 통해 kael .env 를 읽는다(api.py:35). CI 에는 .env 가 없으므로
 # 임시 .env 를 만들어 QL_ENV 로 가리킨다 — test_api_dart_keys 와 같은 방식. 키 값은 더미다.
 if not os.environ.get("QL_ENV"):
-    _env = tempfile.NamedTemporaryFile("w", suffix=".env", delete=False, encoding="utf-8")
+    _env = tempfile.NamedTemporaryFile("w", suffix=".env", delete=False, encoding="utf-8")  # noqa: SIM115  # reason: 파일을 닫은 뒤 경로를 계속 써야 한다
     _env.write("KRX_API_KEY=krx\nKRX_ID=id\nKRX_PW=pw\nDART_API_KEY_2=k2\n")
     _env.close()
     os.environ["QL_ENV"] = _env.name

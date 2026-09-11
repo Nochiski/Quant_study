@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # 06:00 KST 수집 체인 — KRX 를 뺀 전 소스. 플랜 P1 Task 1.8 / 결정 R1.
-#   순서: 캘린더 동기화 → D(직전 거래일) 판정 → 키움 마스터·WISE(daily_wise.sh, 매일) →
-#         [D 미수집이면] 키움 4 TR fetch → KIS credit → DART 스윕·상세·문서 → 수집 요약 알림
+#   순서: 캘린더 동기화 → D(직전 거래일) 판정 → 키움 마스터(daily_wise.sh, 매일) →
+#         [D 미수집이면] 키움 대차 1 TR fetch → KIS credit → DART 스윕·상세·문서 → 수집 요약 알림
 #   어느 단계든 rc≠0 이면 그 단계에서 멈추고 crit. 07:00(v3 토큰 재발급) 전에 끝나야 한다(예산 36분).
 #   사용: daily_ledger.sh [--date YYYYMMDD] [--dry-run] [--limit N]
 #   환경: QL_KW_NOT_BEFORE=HH:MM (키움 fetch 하한 시각, P0 프로브 판독값. 기본 06:00)
 #         QL_SKIP_KW=1 이면 키움 시계열 단계를 건너뛴다(앱키 분리 전 임시)
-#         키움은 세 TR(공매도·대차·투자자)만 여기서 받는다 — 외국인 보유(ka10008)는 T-1 행이 07시 전후에
-#         정정되므로(프로브 실측 09-10) daily_build.sh(08:10) 가 받는다. 사용자 결정 09-10.
+#         키움은 대차(ka20068) 하나만 여기서 받는다 — 투자자·공매도(ka10060·ka10014)는 18:05
+#         daily_evening.sh 가 당일 저녁에 원장 직행으로 받고(결정 V2-1·V2-3), 외국인 보유(ka10008)는
+#         T-1 행이 07시 전후에 정정되므로(프로브 실측 09-10) daily_build.sh(08:10) 가 받는다.
 set -uo pipefail
 cd /home/kael/quant-ledger
 export QL_HOME=/home/kael/quant-ledger PYTHONPATH=/home/kael/quant-ledger/src
@@ -34,6 +35,7 @@ kst() { TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST'; }
 LOG="logs/daily_ledger_$(TZ=Asia/Seoul date +%Y%m%d).log"
 RUN=$(mktemp)
 FAILED=""
+SKIPPED=""   # 건너뜀 사유 — 비어 있지 않으면 완료 알림 제목을 바꾼다(V2-7: 건너뜀도 보고)
 step() {  # step <이름> <명령...> — rc≠0 이면 FAILED 에 이름을 적고 1 반환
   local name="$1"; shift
   echo "──── $name 시작 $(kst) ────"
@@ -48,24 +50,25 @@ scripts/sync_calendar.sh || echo "  ! 캘린더 동기화 실패 — 이전 복�
 D="${DATE_ARG:-$($PY -c 'import datetime as dt; from daily import calendar as c
 print(c.load().prev_trading_day(dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()).strftime("%Y%m%d"))')}"
 echo "  대상 거래일 D=$D"
-# ① 소멸성 축(마스터·WISE)은 매일 — daily_wise.sh 는 raw 락을 물려받는다
+# ① 소멸성 축(키움 마스터)은 매일 — daily_wise.sh 는 raw 락을 물려받는다(WISE 는 18:05 로 이동)
 if [ -z "$DRY" ]; then step "daily_wise" bash scripts/daily_wise.sh || true; fi
 # D 가 이미 수집·판정 완료면 여기서 끝(주말·연휴에 같은 D 를 반복하지 않는다)
 if [ -z "$DRY" ] && $PY -c 'import sys; from daily import runlog
 rows=[r for r in runlog.recent("data/raw/daily_run.db", source="ledger_chain", limit=10) if r.date==sys.argv[1] and r.status=="ok"]
 sys.exit(0 if rows else 1)' "$D"; then
   echo "  D=$D 는 이미 수집 완료 — 종료"
+  SKIPPED="건너뜀(D=$D 이미 수집 완료)"
   echo "════ 종료 $(kst) ════"
 else
   RID=""
   [ -z "$DRY" ] && RID=$($PY -c 'import sys; from daily import runlog; print(runlog.start("data/raw/daily_run.db", date=sys.argv[1], source="ledger_chain"))' "$D")
-  # ② 키움 4 TR fetch(대기 테이블) → ③ KIS credit → ④ DART
+  # ② 키움 대차 1 TR fetch(대기 테이블) → ③ KIS credit → ④ DART
   if [ -n "${QL_SKIP_KW:-}" ]; then
     echo "  QL_SKIP_KW=1 — 키움 시계열 fetch 건너뜀(앱키 분리 전, DECISIONS_PENDING 결정 5 R5 후속)"
     step "kis credit" $PY -m daily.kis_daily --date "$D" $DRY $LIMIT \
     && step "dart" $PY -m daily.dart_daily --date "$D" $DRY $LIMIT
   else
-    step "kiwoom fetch" $PY -m daily.kw_daily --date "$D" --fetch --tr ka10014,ka20068,ka10060 --not-before "${QL_KW_NOT_BEFORE:-06:00}" $DRY $LIMIT \
+    step "kiwoom fetch" $PY -m daily.kw_daily --date "$D" --fetch --tr ka20068 --not-before "${QL_KW_NOT_BEFORE:-06:00}" $DRY $LIMIT \
     && step "kis credit" $PY -m daily.kis_daily --date "$D" $DRY $LIMIT \
     && step "dart" $PY -m daily.dart_daily --date "$D" $DRY $LIMIT
   fi
@@ -82,5 +85,5 @@ if [ -n "$FAILED" ]; then
   [ -z "$DRY" ] && scripts/notify.sh crit "daily_ledger 실패: $FAILED" "$SUMMARY | 로그 $LOG"
   rm -f "$RUN"; exit 2
 fi
-[ -z "$DRY" ] && scripts/notify.sh info "daily_ledger 완료" "$SUMMARY"
+[ -z "$DRY" ] && scripts/notify.sh info "daily_ledger ${SKIPPED:-완료}" "$SUMMARY"
 rm -f "$RUN"

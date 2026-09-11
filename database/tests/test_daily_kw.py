@@ -396,3 +396,78 @@ def test_fetch_tr_rejects_unknown_id():
     import pytest
     with pytest.raises(SystemExit):
         kw_daily.main(["--fetch", "--date", D, "--tr", "ka99999"])
+
+
+# ── (g) --commit: 저녁 슬롯(18:05)은 KRX 대조 없이 원장 직행 (결정 V2-1) ──────────
+def _run_detail(tmp_path, source):
+    con = sqlite3.connect(tmp_path / "data" / "raw" / "daily_run.db")
+    try:
+        return con.execute("SELECT detail FROM run WHERE source=? ORDER BY run_id DESC LIMIT 1",
+                           (source,)).fetchone()[0]
+    finally:
+        con.close()
+
+
+def _count(tmp_path, table, where="1=1", args=()):
+    con = sqlite3.connect(tmp_path / "data" / "raw" / "kiwoom.db")
+    try:
+        return con.execute(f'SELECT COUNT(*) FROM "{table}" WHERE {where}', args).fetchone()[0]
+    finally:
+        con.close()
+
+
+def test_fetch_commit_writes_ledger_directly_and_clears_incoming(tmp_path, monkeypatch, capsys):
+    calls = []
+    _prepare(tmp_path, monkeypatch, calls, ledger_rows=_seed_prev())
+    assert kw_daily.main(["--fetch", "--date", D, "--tr", "ka10060,ka10014", "--commit"]) == 0
+    for api_id in ("ka10060", "ka10014"):
+        table = kw_daily.TRS[api_id].table
+        assert _count(tmp_path, table) == len(TICKERS) * 3, api_id        # D_OLD·D_PREV·D
+        assert _count(tmp_path, table, "dt > ?", (D,)) == 0, api_id       # 당일 개장 전 행은 버린다
+        assert _count(tmp_path, f"_kw_incoming_{api_id}") == 0, api_id    # 08:10 이 다시 보지 않게 비운다
+    detail = _run_detail(tmp_path, "kiwoom_fetch")
+    assert "commit=1" in detail and "new=12" in detail and "changed=0" in detail
+    assert "('ka10060', 6, 6, 0)" in detail and "('ka10014', 6, 6, 0)" in detail
+    assert "[kw_daily] commit" in capsys.readouterr().out
+
+
+def test_merge_after_evening_commit_leaves_committed_trs_empty(tmp_path, monkeypatch):
+    calls = []
+    _prepare(tmp_path, monkeypatch, calls, ledger_rows=_seed_prev())
+    _krx_db(tmp_path)
+    assert kw_daily.main(["--fetch", "--date", D, "--tr", "ka10060,ka10014", "--commit"]) == 0
+    assert kw_daily.main(["--fetch", "--date", D, "--tr", "ka10008,ka20068"]) == 0
+    assert kw_daily.main(["--merge", "--date", D]) == 0
+    detail = _run_detail(tmp_path, "kiwoom_merge")
+    assert "('ka10060', 0, 0, 0)" in detail and "('ka10014', 0, 0, 0)" in detail  # 저녁에 이미 갔다
+    assert "('ka20068', 6, 6, 0)" in detail and "('ka10008', 6, 4, 2)" in detail  # 아침 TR 은 종전대로
+    for api_id in ("ka10060", "ka10014"):
+        assert _count(tmp_path, kw_daily.TRS[api_id].table) == len(TICKERS) * 3, api_id
+
+
+def test_commit_dry_run_writes_nothing_to_ledger(tmp_path, monkeypatch, capsys):
+    calls = []
+    _prepare(tmp_path, monkeypatch, calls, ledger_rows=_seed_prev())
+    assert kw_daily.main(["--fetch", "--date", D, "--tr", "ka10060,ka10014", "--commit",
+                          "--dry-run", "--limit", "1"]) == 0
+    tables = _tables(tmp_path)
+    assert "ka10060_investor_flows" not in tables and "ka10014_short_selling" not in tables
+    assert "_kw_incoming_ka10060" in tables                  # incoming 스크래치는 종전대로 쓴다
+    assert not (tmp_path / "data" / "raw" / "daily_run.db").exists()
+    assert "dry-run: commit 생략" in capsys.readouterr().out
+
+
+def test_commit_skipped_when_stale_gate_fails(tmp_path, monkeypatch):
+    calls = []
+    _prepare(tmp_path, monkeypatch, calls, poss=STALE_POSS, ledger_rows=_seed_prev(STALE_POSS))
+    before = _ledger(tmp_path)
+    assert kw_daily.main(["--fetch", "--date", D, "--tr", "ka10008,ka10060", "--commit"]) == 2
+    assert _ledger(tmp_path) == before                       # 오염 게이트가 막으면 원장 무변경
+    assert "ka10060_investor_flows" not in _tables(tmp_path)
+    assert "commit=1" not in _run_detail(tmp_path, "kiwoom_fetch")
+
+
+def test_commit_with_merge_is_rejected():
+    import pytest
+    with pytest.raises(SystemExit):
+        kw_daily.main(["--merge", "--date", D, "--commit"])

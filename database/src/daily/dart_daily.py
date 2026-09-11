@@ -16,6 +16,17 @@
 재호출하려면 그 유닛의 `ingest_log` 행을 먼저 지워야 한다(`unlock`). `store()` 가 멱등이라
 재호출 자체는 안전하고, 백필 코드는 한 줄도 고치지 않는다(플랜 §4 "백필 코드는 동결").
 
+그 "당일" 의 정의는 접수일이 아니라 **처음 본 날**이다(플랜 v2 §3 Task A.2 Step 5). DART 목록에는
+접수일이 지난 공시가 뒤늦게 나타난다 — 09-10 스윕에서 08-25 접수 8건·09-03 2건·09-07 1건이
+처음 등장했다(검수 09-10 D). `rcept_dt = D` 로만 고르면 그런 공시는 접수일이 D 인 적이 없어
+상세 축을 **영영** 못 받는다. 그래서 대상은 (a) `rcept_dt = D` ∪ (b) 이번 런의 스윕이 시작된
+뒤에 처음 관측된 `rcept_dt < D` 공시다. 최초 관측 시각은 원장의 `collected_at` 인데,
+`backfill_dart.store()` 가 `INSERT OR IGNORE` 라 처음 본 행의 값이 유지된다
+(`backfill_dart.py:480-483`). 다만 재스윕은 같은 공시를 다른 `req_page_no` 로 한 번 더 적재하고
+(요청 파라미터가 행 해시에 들어간다 — `sweep_disclosure.py:158-165`) 그 행의 `collected_at` 은
+오늘이므로, 판정은 행이 아니라 **공시 단위 `MIN(collected_at)`** 로 한다. 행 기준으로 보면
+늦은 공시 1건이 끼어들며 밀려난 그 뒤 전 구간이 통째로 "처음 본 공시" 가 되어 예산이 터진다.
+
 하위 도구는 subprocess 로 부른다 — `sweep_disclosure.py`·`backfill_dart.py`·`backfill_docs.py`.
 import 하지 않는 이유는 `universe.py` 와 같다: 그쪽은 import 시점에 `.env` 를 요구하는 `api` 를
 끌어온다. 그래서 엔드포인트 이름도 여기에 다시 적고(`backfill_dart.py:128-139` 의 STAGES 와
@@ -88,6 +99,7 @@ KAEL_KEY_ID = "kael"           # v3 프로덕션 키. 1콜이라도 나가면 cr
 GATE_MIN_FILINGS = 400
 GATE_MIN_LISTED = 290
 DEFAULT_MAX_DOCS = 3000        # `backfill_docs.sleep_to_kst_midnight()` 진입 방지
+LATE_SAMPLE_MAX = 20           # 늦게 등장한 공시의 rcept_no 표본 상한(로그용). 수는 n_late 가 센다
 
 
 # ── 결과 값 타입 ──────────────────────────────────────────────────────────────────
@@ -136,11 +148,16 @@ class Unit:
 
 @dataclass(frozen=True)
 class DailyPlan:
-    """D일 공시가 만들어 낸 재호출 계획. 콜은 아직 하나도 나가지 않았다."""
+    """D일 공시가 만들어 낸 재호출 계획. 콜은 아직 하나도 나가지 않았다.
+
+    `n_rows`·`n_filings` 는 **접수일이 D 인 공시만** 센다 — 완료 판정의 `filings` 게이트가
+    쓰는 값이라 늦게 등장한 공시를 섞으면 하한 400 의 의미가 흐려진다. 늦게 등장한 쪽은
+    `n_late` 로 따로 센다(게이트가 아니라 기록용).
+    """
 
     date: str
-    n_rows: int                                   # 상장사 공시 행수(중복 제거 전)
-    n_filings: int                                # DISTINCT rcept_no
+    n_rows: int                                   # 접수일 D 인 상장사 공시 행수(중복 제거 전)
+    n_filings: int                                # 접수일 D 인 DISTINCT rcept_no
     units: tuple[Unit, ...]
     kind_counts: dict[str, int]
     periodic_units: tuple[tuple[str, str, str], ...] = ()   # (corp_code, bsns_year, reprt_code)
@@ -148,6 +165,8 @@ class DailyPlan:
     holder_corps: tuple[str, ...] = ()
     unresolved: tuple[tuple[str, str], ...] = ()  # (rcept_no, report_nm) — 라벨을 못 읽은 정기보고서
     bad_corp_codes: tuple[tuple[str, str], ...] = ()        # (rcept_no, corp_code)
+    n_late: int = 0                               # 이번 스윕에서 처음 본 rcept_dt < D 공시 수
+    late_rcept_nos: tuple[str, ...] = ()          # 그 표본(최대 LATE_SAMPLE_MAX 건, 로그용)
 
     @property
     def n_calls_est(self) -> int:
@@ -279,13 +298,52 @@ def _classify_periodic(nm_clean: str, prefixes: tuple[str, ...], is_corr: bool) 
 
 
 # ── 2. 계획 ──────────────────────────────────────────────────────────────────────
-def plan(con: sqlite3.Connection, date_yyyymmdd: str) -> DailyPlan:
-    """D일 상장사 공시를 분류해 재호출 유닛을 만든다. 콜은 나가지 않는다(CQS — 조회 전용)."""
+def late_rows(con: sqlite3.Connection, date_yyyymmdd: str,
+              since_ts: str) -> list[tuple[str, str, str]]:
+    """접수일이 D 이전인데 `since_ts` 이후에 **처음 관측된** 상장사 공시 행.
+
+    두 걸음으로 나눈 이유는 비용이다. 원장은 실측 3.4M 행이고 `collected_at`·`rcept_dt` 에
+    인덱스가 없다. 1단계는 후보(보통 한 자리수)를 고르고, 2단계는 그 후보의 접수일에만
+    걸어 `MIN(collected_at)` 을 잰다 — 전 원장을 rcept_no 로 묶으면 그룹이 300만 개가 된다.
+    한 공시의 모든 행은 같은 `rcept_dt` 를 갖는다(같은 응답 필드라서) — 그래서 접수일로
+    좁혀도 그 공시의 옛 행을 빠뜨리지 않는다. `IN` 에 들어가는 접수일 수는 재스윕 창
+    (`SWEEP_LOOKBACK_DAYS` = 30일 + 그 창이 걸친 분기)만큼이라 수백 건을 넘지 않는다.
+    """
+    cand = [(str(r[0]), str(r[1] or ""), str(r[2] or ""), str(r[3] or "")) for r in con.execute(
+        "SELECT DISTINCT rcept_no, corp_code, report_nm, rcept_dt FROM dart_disclosure "
+        "WHERE collected_at >= ? AND rcept_dt < ? AND stock_code <> '' ORDER BY rcept_no",
+        (since_ts, date_yyyymmdd))]
+    if not cand:
+        return []
+    dates = sorted({d for *_x, d in cand})
+    marks = ",".join("?" * len(dates))             # IN 절은 자리표시자만 조립한다
+    first_seen = {str(r[0]): str(r[1] or "") for r in con.execute(
+        f"SELECT rcept_no, MIN(collected_at) FROM dart_disclosure "
+        f"WHERE rcept_dt IN ({marks}) GROUP BY rcept_no", dates)}
+    # `collected_at` 이 비어 있으면 "" < since_ts 라 옛 공시로 본다 — 안전한 쪽(재호출 안 함)
+    return [(rno, corp, nm) for rno, corp, nm, _dt in cand
+            if first_seen.get(rno, "") >= since_ts]
+
+
+def plan(con: sqlite3.Connection, date_yyyymmdd: str, *,
+         since_ts: str | None = None) -> DailyPlan:
+    """상장사 공시를 분류해 재호출 유닛을 만든다. 콜은 나가지 않는다(CQS — 조회 전용).
+
+    대상은 (a) 접수일이 D 인 공시 ∪ (b) `since_ts`(이번 런의 스윕 시작 시각) 이후에 처음
+    관측된 접수일 D 이전 공시다. `since_ts=None`(= `--skip-sweep`)이면 (b) 는 빈 집합이라
+    종전과 같다. 분류·유닛 생성 규칙은 (a)·(b) 에 똑같이 걸린다 — 늦게 왔다고 다르게
+    다룰 이유가 없고, 다르게 다루면 어느 축이 빠졌는지 나중에 알 수 없다.
+    """
     rows = con.execute(
         "SELECT DISTINCT rcept_no, corp_code, report_nm FROM dart_disclosure "
         "WHERE rcept_dt = ? AND stock_code <> '' ORDER BY rcept_no",
         (date_yyyymmdd,)).fetchall()
     n_filings = len({str(r[0]) for r in rows})
+    n_rows_on_d = len(rows)                        # 게이트가 쓰는 값 — (a) 기준으로 굳힌다
+    late = [] if since_ts is None else late_rows(con, date_yyyymmdd, since_ts)
+    late_nos = tuple(sorted({r[0] for r in late}))
+    # (a) 는 rcept_dt = D, (b) 는 rcept_dt < D 라 두 집합은 서로소다 — 합쳐도 중복이 없다
+    rows = [*rows, *late]
 
     units: set[Unit] = set()
     periodic: set[tuple[str, str, str]] = set()
@@ -318,11 +376,12 @@ def plan(con: sqlite3.Connection, date_yyyymmdd: str) -> DailyPlan:
             holder.add(corp)
             units.update(Unit(ep, corp, "", "") for ep in HOLDER_ENDPOINTS)
 
-    return DailyPlan(date=date_yyyymmdd, n_rows=len(rows), n_filings=n_filings,
+    return DailyPlan(date=date_yyyymmdd, n_rows=n_rows_on_d, n_filings=n_filings,
                      units=tuple(sorted(units)), kind_counts=counts,
                      periodic_units=tuple(sorted(periodic)), major_corps=tuple(sorted(major)),
                      holder_corps=tuple(sorted(holder)), unresolved=tuple(unresolved),
-                     bad_corp_codes=tuple(bad))
+                     bad_corp_codes=tuple(bad), n_late=len(late_nos),
+                     late_rcept_nos=late_nos[:LATE_SAMPLE_MAX])
 
 
 # ── 3. 종결 해제 ─────────────────────────────────────────────────────────────────
@@ -584,6 +643,7 @@ def run(date_yyyymmdd: str, *, home: str, skip_sweep: bool = False,
         rc_backfill: list[int] = []
         rc_docs: int | None = None
         n_unlocked = 0
+        sweep_started_ts: str | None = None
         try:
             if not skip_sweep:
                 cmd = [sys.executable, os.path.join(home, "src", "sweep_disclosure.py"),
@@ -592,9 +652,12 @@ def run(date_yyyymmdd: str, *, home: str, skip_sweep: bool = False,
                        "--quota-window", "midnight"]
                 if dry_run:
                     cmd += ["--max-calls", str(limit)]
+                # 스윕이 적재할 행의 `collected_at` 은 이 시각 이후다. 기동 **직전**에 잡는다 —
+                # 뒤에 잡으면 스윕 도중 들어온 늦은 공시가 창 밖으로 떨어진다.
+                sweep_started_ts = dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%S")
                 rc_sweep = _exec(cmd, cwd=home)
 
-            daily_plan = plan(con, date_yyyymmdd)
+            daily_plan = plan(con, date_yyyymmdd, since_ts=sweep_started_ts)
             groups = group_units(daily_plan.units)
             if not dry_run:
                 n_unlocked = unlock(con, daily_plan.units)
@@ -664,10 +727,15 @@ def _parse_date(s: str) -> str:
 def report(result: DartDailyResult) -> str:
     p = result.plan
     lines = [f"── DART 일일 증분 {result.date} · {result.status.value} (rc {result.exit_code})",
-             f"  공시 {p.n_filings:,}건(상장사 행 {p.n_rows:,}) · 분류 {p.kind_counts}",
+             (f"  공시 {p.n_filings:,}건(상장사 행 {p.n_rows:,}) · late={p.n_late:,} · "
+              f"분류 {p.kind_counts}"),
              (f"  유닛 {len(p.units):,} · 콜 추정 {p.n_calls_est:,} · "
               f"해제 {result.n_unlocked:,} · 실제 콜 {result.n_calls:,}"),
              f"  예산 {result.budget.describe()}"]
+    if p.n_late:
+        # 늦게 등장한 공시 = 접수일이 D 이전인데 이번 스윕에서 처음 본 것. 게이트는 아니다
+        lines.append(f"  ↻ 늦게 등장 {p.n_late:,}건 (표본 {len(p.late_rcept_nos)}): "
+                     f"{list(p.late_rcept_nos)}")
     if p.unresolved:
         lines.append(f"  ⚠ 기간 라벨 미해석 {len(p.unresolved)}건: {p.unresolved[:3]}")
     if p.bad_corp_codes:
@@ -708,8 +776,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                  dry_run=a.dry_run, limit=a.limit, trading_day=trading_day)
     print(report(result))
     if a.json:
-        print(json.dumps({g.name: {"ok": g.ok, **g.metrics} for g in result.gates},
-                         ensure_ascii=False, sort_keys=True))
+        payload: dict[str, object] = {g.name: {"ok": g.ok, **g.metrics} for g in result.gates}
+        # `plan` 은 게이트가 아니다 — 늦게 등장한 공시는 세어서 남기기만 한다(플랜 v2 A.2 Step 5)
+        payload["plan"] = {"n_filings": result.plan.n_filings, "n_late": result.plan.n_late,
+                           "late_rcept_no": list(result.plan.late_rcept_nos)}
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
     return result.exit_code
 
 

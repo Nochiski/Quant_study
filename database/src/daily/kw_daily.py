@@ -8,6 +8,10 @@
 공표다. 그래서 06:00 에는 콜만 하고 `_kw_incoming_<tr>` 에 세워둔 뒤 오염 게이트 (b) 만 판정하고,
 KRX 가 도착한 08:10 에 크로스소스 (c) 를 통과한 것만 원장에 머지한다 (d).
 
+저녁 슬롯(18:05)은 예외다 — `--fetch --commit`(결정 V2-1)은 그날 확정된 투자자·공매도(ka10060·ka10014)를
+KRX 대조 없이 곧장 원장에 넣는다. KRX 는 T+1 08:00 공표라 그날 저녁엔 대조 상대가 아예 없고, 그 이틀치
+지연이 당일 저녁 스코어링을 막기 때문이다. 오염 게이트 (b) 는 그대로 통과 조건이다.
+
 응답이 역방향(최신→과거)이라 1콜이 캡만큼(ka10014 372 · ka10060 100 · ka20068 100 · ka10008 50)
 과거를 함께 준다. 그래서 갭이 며칠이든 **1회 실행 = 유니버스 × 4콜**이다.
 
@@ -214,6 +218,26 @@ class MergeStatus(Enum):
     CROSS_SOURCE_FAILED = "cross_source_failed"
     KRX_PENDING = "krx_pending"
     TOO_EARLY = "too_early"
+
+
+@dataclass(frozen=True)
+class CommitResult:
+    """저녁 직행 머지 결과(결정 V2-1) — KRX 대조 없이 넣은 TR 별 집계."""
+
+    merged: tuple[TrMerge, ...]
+
+    @property
+    def n_new(self) -> int:
+        return sum(m.n_new for m in self.merged)
+
+    @property
+    def n_changed(self) -> int:
+        return sum(m.n_changed for m in self.merged)
+
+    @property
+    def detail(self) -> str:
+        return (f"commit=1 new={self.n_new} changed={self.n_changed} "
+                f"per_tr={[(m.api_id, m.n_merged, m.n_new, m.n_changed) for m in self.merged]}")
 
 
 @dataclass(frozen=True)
@@ -614,6 +638,24 @@ def merge(*, date: str, db_path: str, krx_db: str, dry_run: bool = False) -> Mer
                               f"per_tr={[(m.api_id, m.n_merged, m.n_new, m.n_changed) for m in merged]}")
 
 
+# ── commit (18:05 저녁 슬롯) ──────────────────────────────────────────────────
+def commit_incoming(*, date: str, db_path: str, api_ids: Sequence[str]) -> CommitResult:
+    """선택 TR 의 incoming 을 KRX 대조 없이 본 테이블에 넣고, **넣은 TR 의 incoming 만** 비운다.
+
+    저녁 슬롯(18:05, 결정 V2-1)용이다. 대조 상대인 KRX 는 T+1 08:00 공표라 그날 저녁엔 없다.
+    통과 조건은 오염 게이트 (b) 하나뿐이고(`fetch` 가 판정한다), 넣는 규칙은 `merge_tr` 과 같다 —
+    신규 (ticker, dt) 만 삽입하고 이미 있는 행은 덮어쓰지 않고 `n_changed` 로만 센다.
+    비우는 이유: 08:10 `--merge` 가 같은 행을 다시 보지 않게 한다(아침 체인은 남은 incoming 만 처리).
+    """
+    con = sqlite3.connect(db_path, timeout=60)
+    try:
+        merged = tuple(merge_tr(con, TRS[api_id], date, dry_run=False) for api_id in api_ids)
+        clear_incoming(con, list(api_ids))
+    finally:
+        con.close()
+    return CommitResult(merged)
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 _FETCH_RC = {FetchStatus.OK: 0, FetchStatus.GATE_FAILED: 2, FetchStatus.TOKEN_FAILED: 2,
              FetchStatus.TOO_EARLY: 3}
@@ -662,7 +704,7 @@ def _requested_universe(con: sqlite3.Connection, base: str,
 
 def _run_fetch(*, date: str, prev_date: str, db_path: str, run_db: str, base: str,
                limit: int, dry_run: bool, not_before: str | None,
-               trs: Sequence[str] | None = None) -> int:
+               trs: Sequence[str] | None = None, commit: bool = False) -> int:
     early = _too_early(not_before)
     if early is not None:
         print(f"[kw_daily] fetch date={date} 실행 하한 미달 — {early}", file=sys.stderr)
@@ -686,9 +728,22 @@ def _run_fetch(*, date: str, prev_date: str, db_path: str, run_db: str, base: st
     result = fetch(tickers, date=date, prev_date=prev_date, db_path=db_path,
                    client=_kiwoom_module(), dry_run=dry_run, trs=trs)
     print(f"[kw_daily] fetch status={result.status.value} {result.detail}")
+    detail = result.detail
+    if commit:
+        if dry_run:
+            print("[kw_daily] dry-run: commit 생략 — 원장·daily_run.db 에 쓰지 않는다(incoming 만 남는다)")
+        elif result.ok:
+            committed = commit_incoming(date=date, db_path=db_path,
+                                        api_ids=trs if trs is not None else tuple(TRS))
+            detail += " | " + committed.detail
+            print(f"[kw_daily] commit {committed.detail}")
+        else:
+            print(f"[kw_daily] commit 생략 — fetch status={result.status.value} date={date} "
+                  f"trs={','.join(trs) if trs is not None else 'all'} "
+                  f"(게이트·토큰 실패 시 원장에 넣지 않는다)", file=sys.stderr)
     if rid is not None:
         runlog.finish(run_db, rid, status=result.status.value, n_calls=result.n_calls,
-                      n_rows=result.n_rows, detail=result.detail)
+                      n_rows=result.n_rows, detail=detail)
     return _FETCH_RC[result.status]
 
 
@@ -723,10 +778,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("--limit", type=int, default=0, help="요청 종목 수 제한(fetch 전용)")
     p.add_argument("--not-before", default=None, help="KST HH:MM 이전이면 rc 3")
     p.add_argument("--tr", default=None,
-                   help="fetch 할 TR 을 쉼표로(기본 4개 전부). 운영: 06:00 체인 ka10014,ka20068,ka10060 / 08:10 체인 ka10008")
+                   help="fetch 할 TR 을 쉼표로(기본 4개 전부). 운영: 18:05 체인 ka10060,ka10014(--commit) / "
+                        "06:00 체인 ka20068 / 08:10 체인 ka10008")
+    p.add_argument("--commit", action="store_true",
+                   help="fetch 직후 선택 TR 을 KRX 대조 없이 원장에 넣고 그 incoming 을 비운다 — "
+                        "저녁 슬롯(18:05) 전용, 결정 V2-1. --fetch 와만 쓴다")
     p.add_argument("--db", default=None, help="kiwoom.db 경로 (기본 data/raw/kiwoom.db)")
     p.add_argument("--krx-db", default=None, help="krx.db 경로 (기본 data/raw/krx.db)")
     a = p.parse_args(argv)
+    if a.commit and not a.fetch:
+        p.error("--commit 은 --fetch 와만 쓴다 — --merge(08:10)는 KRX 대조를 통과해야 머지한다")
     trs: tuple[str, ...] | None = None
     if a.tr:
         trs = tuple(t.strip() for t in a.tr.split(",") if t.strip())
@@ -747,7 +808,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if a.fetch:
         return _run_fetch(date=date, prev_date=prev_date, db_path=db_path, run_db=run_db,
                           base=base, limit=a.limit, dry_run=a.dry_run, not_before=a.not_before,
-                          trs=trs)
+                          trs=trs, commit=a.commit)
     return _run_merge(date=date, db_path=db_path, krx_db=krx_db, run_db=run_db,
                       dry_run=a.dry_run, not_before=a.not_before)
 

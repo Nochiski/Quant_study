@@ -271,34 +271,46 @@ def check_dart(con: sqlite3.Connection, d: str, trading_day: bool, kst_day_start
 
 
 # ── WISE (B §7-4) ──────────────────────────────────────────────────────────
-def check_wise(con: sqlite3.Connection, today_iso: str) -> list[Check]:
+def check_wise(con: sqlite3.Connection, d_iso: str, next_iso: str) -> list[Check]:
+    """WISE 스냅샷은 대상일 D 저녁 18:05 에 찍힌다(결정 V2-3) — 판정은 실행일이 아니라 D 의 KST 날짜로 한다.
+
+    전환기에는 옛 방식(D+1 아침 06:00) 스냅샷만 있을 수 있어, D 행이 없으면 next_iso(D+1) 로 폴백하고
+    어느 쪽을 읽었는지 `wise.snapshot_day` 에 남긴다. 둘 다 없으면 종전대로 FAIL.
+    """
     out: list[Check] = []
     if not _has_table(con, "ws_run_log"):
         return out
-    run = con.execute("SELECT run_at, mode, n_stocks, n_req, n_ok, n_bad FROM ws_run_log "
-                      "WHERE date(run_at, '+9 hours') = ? ORDER BY run_at DESC LIMIT 1", (today_iso,)).fetchone()
+    sql = ("SELECT run_at, mode, n_stocks, n_req, n_ok, n_bad FROM ws_run_log "
+           "WHERE date(run_at, '+9 hours') = ? ORDER BY run_at DESC LIMIT 1")
+    day, run = d_iso, con.execute(sql, (d_iso,)).fetchone()
     if run is None:
-        out.append(Check("wise.run", Level.REQUIRED, Status.FAIL, None, f"{today_iso} 실행 1건 (full, n_bad 0)"))
+        day, run = next_iso, con.execute(sql, (next_iso,)).fetchone()
+    out.append(Check("wise.snapshot_day", Level.WARN, Status.SKIP if run is None else Status.PASS,
+                     None if run is None else ("target_day" if day == d_iso else "next_morning"),
+                     f"D({d_iso}) 저녁 스냅샷 — 없으면 D+1({next_iso}) 아침 스냅샷으로 폴백(전환기)"))
+    if run is None:
+        out.append(Check("wise.run", Level.REQUIRED, Status.FAIL, None,
+                         f"{d_iso}(또는 폴백 {next_iso}) 실행 1건 (full, n_bad 0)"))
         return out
     _, mode, n_stocks, n_req, n_ok, n_bad = run
     out.append(Check("wise.run", Level.REQUIRED, Status.PASS if (mode == "full" and n_bad == 0 and n_ok == n_req) else Status.FAIL,
                      {"mode": mode, "n_stocks": n_stocks, "n_req": n_req, "n_ok": n_ok, "n_bad": n_bad}, "mode=full, n_bad=0, n_ok=n_req"))
     cov = none = -1
     if _has_table(con, "ws_coverage"):
-        # 그날 런이 갱신한(checked_at = 오늘 KST) 커버리지 행만 센다 — 런 뒤에 상태가 바뀐 종목이 있으면
+        # 그 런이 갱신한(checked_at = 스냅샷 날짜 KST) 커버리지 행만 센다 — 런 뒤에 상태가 바뀐 종목이 있으면
         # 전체 집계로는 등식이 깨진다(09-09 실측: 전체 808/1758 vs 당일 807/1756, n_req 15,617 은 후자와 일치).
-        cov = _count(con, "SELECT COUNT(*) FROM ws_coverage WHERE status='covered' AND date(checked_at, '+9 hours')=?", (today_iso,))
-        none = _count(con, "SELECT COUNT(*) FROM ws_coverage WHERE status='none' AND date(checked_at, '+9 hours')=?", (today_iso,))
+        cov = _count(con, "SELECT COUNT(*) FROM ws_coverage WHERE status='covered' AND date(checked_at, '+9 hours')=?", (day,))
+        none = _count(con, "SELECT COUNT(*) FROM ws_coverage WHERE status='none' AND date(checked_at, '+9 hours')=?", (day,))
         expected = cov * REQ_COVERED + none * REQ_NONE
         out.append(Check("wise.req_identity", Level.REQUIRED, Status.PASS if expected == n_req else Status.FAIL,
                          {"expected": expected, "actual": n_req, "covered": cov, "none": none},
-                         f"당일 checked_at 기준 covered×{REQ_COVERED} + none×{REQ_NONE} == n_req "
+                         f"{day} checked_at 기준 covered×{REQ_COVERED} + none×{REQ_NONE} == n_req "
                          "(무커버 4 = 목록 1 + 3개년 cF5001, 09-10 검수 D H1 이후)"))
         rate = cov / (cov + none) if (cov + none) else None
         out.append(Check("wise.cov_rate", Level.WARN, Status.SKIP if rate is None else (Status.PASS if rate >= 0.25 else Status.FAIL),
                          None if rate is None else round(rate, 3), ">= 0.25 (실측 0.315; 미만이면 페이지 개편 의심)"))
     if _has_table(con, "ws_raw"):
-        row = con.execute("SELECT COUNT(*), COUNT(DISTINCT cmp_cd) FROM ws_raw WHERE fetched_date=?", (today_iso,)).fetchone()
+        row = con.execute("SELECT COUNT(*), COUNT(DISTINCT cmp_cd) FROM ws_raw WHERE fetched_date=?", (day,)).fetchone()
         n, s = (int(row[0]), int(row[1])) if row else (0, 0)
         # 절대 밴드(15,500~15,700 · 2,560~2,570)는 무커버 4콜 전환(09-10)과 규모구분 갱신(09-11: 2,563→2,610)에
         # 모두 오탐을 냈다 — 기대치는 커버리지 항등식과 유니버스에서 유도한다. 커버리지 표가 없으면 하한만 본다.
@@ -353,7 +365,7 @@ def run(d: str, paths: Paths, *, today: dt.date | None = None,
         if dart is not None and "dart" not in skip:
             checks += check_dart(dart, d, cal.is_trading_day(dd), kst_start_utc)
         if wise is not None and "wise" not in skip:
-            checks += check_wise(wise, today.isoformat())
+            checks += check_wise(wise, dd.isoformat(), (dd + dt.timedelta(days=1)).isoformat())
     finally:
         for c in (krx, kw, kis, dart, wise):
             if c is not None:

@@ -17,7 +17,7 @@
 | 항목 | 값 |
 |---|---|
 | 최종 갱신 | 2026-09-11 14:30 — **사용자 "진행해"**: PR #102 머지(main `22aa249`), 워크트리 `feat/daily-v2-a` 생성, 페이즈 A 착수(구현 에이전트 3갈래: A.1+A.2(1·2) / A.2(5) / A.2(3)+A.4). D 범위 "전부 옮기되 잡별 교체" 확정. 13:30 — 결정 V2-1~8, §2-1 알림 정책(재판정 알림 포함), §2-2 병행기 규칙, A~D 태스크·게이트, B.3 추적, C.2 해석·위키, D 잡별 교체 로드맵(범위 제안 확인 대기)·D.2 v3 DB 처리, §8 작업 수행 방식. 관찰 2/5 통과, 페이즈 A 승인 대기 |
-| 페이즈 A 저녁 원장 슬롯 | **착수**(09-11 14:30, 워크트리 `daily-v2-a`). 크론 등록은 서버 dry-run 스모크 뒤 |
+| 페이즈 A 저녁 원장 슬롯 | **구현 완료**(09-11 15:50): A.1 `--commit`, A.2 `daily_evening.sh`·06:00 축소·건전성 기준일·DART 처음 본 공시, A.4 `watchdog.sh`. 테스트 +14, 전체 회귀 1,082 pass. 남은 것 = 서버 스모크·크론 등록(A.2 Step 4)·문서(A.3) |
 | 페이즈 B 잠정·확정 빌드 | 미착수 (v1 P4·P5 재설계) |
 | 페이즈 C 스코어링 | Kael-alpha 인계 완료(`~/orca/projects/Kael-alpha/handoff/2026-09-10-evening-scoring-pipeline/`) |
 | 페이즈 D 컷오버 | 범위 확정(09-11): 전부 옮기되 잡 하나씩, 비교 통과 뒤 교체(§6 로드맵) |
@@ -104,25 +104,25 @@ v3 코드·DB·크론·키는 **건드리지 않는다**(읽기 전용). 우리 
 ### Task A.1: `kw_daily` 저녁 직행 머지
 
 - [ ] **Step 1** 실패 테스트(`tests/test_daily_kw.py`): `--fetch --tr ka10060,ka10014 --date T --commit` 가 fetch 뒤 두 TR 을 **KRX 대조 없이** `merge_tr` 로 본 테이블에 넣는다(신규 (ticker, dt) 만, 결정 6-1). 오염 게이트는 ka10008 이 없는 호출이라 `basis=skipped`. runlog `source=kiwoom_fetch` detail 에 `commit=1 new=… changed=…`.
-- [ ] **Step 2** 구현: `--commit` 플래그. `fetch()` 결과가 ok 면 `merge_tr` 를 선택 TR 에 대해 호출. `--merge`(08:10)는 남은 incoming(ka10008·ka20068)만 처리하도록 이미 커밋된 TR 의 incoming 을 비운다.
-- [ ] **Step 3** 테스트·린트·커밋.
+- [x] **Step 2** 구현: `--commit` 플래그. `fetch()` 결과가 ok 면 `merge_tr` 를 선택 TR 에 대해 호출. `--merge`(08:10)는 남은 incoming(ka10008·ka20068)만 처리하도록 이미 커밋된 TR 의 incoming 을 비운다.
+- [x] **Step 3** 테스트·린트·커밋.
 
 ### Task A.2: `scripts/daily_evening.sh` (18:05)
 
-- [ ] **Step 1**: raw 락 → 캘린더 동기화 → D = 오늘(거래일 아니면 info 후 종료) → 병렬 3갈래: ① `kw_daily --fetch --tr ka10060,ka10014 --date D --commit --not-before "${QL_EVENING_NOT_BEFORE:-18:00}"` ② `dart_daily --date D` ③ `daily_wise.sh`(WISE 만, 마스터는 06:00 유지) → 세 갈래 rc 취합 → 알림(crit/info). ①·③ 종료 시각을 로그에 남긴다(빌드 트리거 근거).
-- [ ] **Step 2**: `daily_ledger.sh`(06:00)에서 키움 3 TR → **ka20068 만**(`--tr ka20068`), `daily_wise.sh` 호출에서 WISE 제거·마스터만. `daily_build.sh` 는 변경 없음(ka10008 fetch → merge → 건전성).
-- [ ] **Step 3**: `ledger_health` — `kiwoom.ka10060.rows`·`ka10014.trend` 는 D 행이 저녁에 이미 들어와 있으므로 판정 그대로. WISE 항등식은 run_day 기준이라 18:05 스냅샷을 다음 날 08:10 판정에서 `date(run_at,'+9h') = D` 로 읽도록 조정(테스트).
-- [ ] **Step 4**: crontab `5 9 * * 1-5 daily_evening.sh`(18:05 KST). 첫 실행 전 `--dry-run --limit 3` 서버 스모크. 백업 `logs/crontab_backup_v2_<date>.txt`.
+- [x] **Step 1**: raw 락 → 캘린더 동기화 → D = 오늘(거래일 아니면 info 후 종료) → 병렬 3갈래: ① `kw_daily --fetch --tr ka10060,ka10014 --date D --commit --not-before "${QL_EVENING_NOT_BEFORE:-18:00}"` ② `dart_daily --date D` ③ `daily_wise.sh`(WISE 만, 마스터는 06:00 유지) → 세 갈래 rc 취합 → 알림(crit/info). ①·③ 종료 시각을 로그에 남긴다(빌드 트리거 근거).
+- [x] **Step 2**: `daily_ledger.sh`(06:00)에서 키움 3 TR → **ka20068 만**(`--tr ka20068`), `daily_wise.sh` 호출에서 WISE 제거·마스터만. `daily_build.sh` 는 변경 없음(ka10008 fetch → merge → 건전성).
+- [x] **Step 3**: `ledger_health` — `kiwoom.ka10060.rows`·`ka10014.trend` 는 D 행이 저녁에 이미 들어와 있으므로 판정 그대로. WISE 항등식은 run_day 기준이라 18:05 스냅샷을 다음 날 08:10 판정에서 `date(run_at,'+9h') = D` 로 읽도록 조정(테스트).
+- [x] **Step 4**: crontab `5 9 * * 1-5 daily_evening.sh`(18:05 KST). 첫 실행 전 `--dry-run --limit 3` 서버 스모크. 백업 `logs/crontab_backup_v2_<date>.txt`.
 - [ ] **Step 5**: `dart_daily.plan` 대상을 "접수일 = D" 에서 "**이번 스윕에서 처음 본 공시**"(`collected_at >= 런 시작`) 로 바꿔 늦은 접수분의 상세 축을 받는다(검수 후속). 테스트 동반.
 
 ### Task A.3: 문서·기록
 
-- [ ] `README.md` 크론 표, `DECISIONS_PENDING.md` 결정 8 확정, v1 상태 블록에 "v2 로 이관" 표기, WISE 스냅샷 시각 전환일(`ws_run_log` 로 판별 가능)을 STAGE_SPEC WISE 절에 한 줄.
+- [x] `README.md` 크론 표, `DECISIONS_PENDING.md` 결정 8 확정, v1 상태 블록에 "v2 로 이관" 표기, WISE 스냅샷 시각 전환일(`ws_run_log` 로 판별 가능)을 STAGE_SPEC WISE 절에 한 줄.
 
 ### Task A.4: 워치독·알림 정책 (V2-7)
 
 - [ ] `scripts/watchdog.sh`: 18:50·19:35·09:15 KST 에 `data/deliver/latest_evening.json`·스코어 보고 로그·`latest_morning.json` 의 시각을 보고 없으면 crit. 휴장일은 info.
-- [ ] 모든 체인의 "건너뜀" 경로(휴장·이미 완료·락 실패)가 info 를 보내는지 점검. 건전성 warn 항목을 요약에 포함.
+- [x] 모든 체인의 "건너뜀" 경로(휴장·이미 완료·락 실패)가 info 를 보내는지 점검. 건전성 warn 항목을 요약에 포함.
 
 ### 게이트 GA (5거래일, 09-12 ~)
 

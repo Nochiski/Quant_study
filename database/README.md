@@ -12,7 +12,7 @@ KRX·키움·KIS·DART·WISE 원장 수집기, stage 층 빌더, 문서층(L1) �
 | stage | 66테이블 커밋(09-05), 원장 정지 날짜까지 |
 | equity | 28표·규칙 e1.14.0(09-09 전량 재빌드로 단일화)·팩터 준비도 54/54. catalog `2c38be1d58fb03be`·contract pass, baseline 락 바이트 동일(09-09 정렬) |
 | 진행 중 | **일일 증분 플랜** `docs/plans/2026-09-09-daily-incremental.md` — R1~R10 승인(09-09), **P0·P1·P2 완료(키움 갭은 09-09 저녁 즉시 실행), P3 크론 가동(09-09), 관찰 1/5 통과(09-10)** — 06:00 수집·08:10 빌드 체인, 키움 단계 포함(사용자 결정: 공유 앱키로 콜). **첫 적재분 검수**(09-10): high 5·mid 9 → `docs/reviews/2026-09-10-intake-audit-summary.md`. 수집기 핫픽스 3건(WISE 커버 판정·키움 유예·DART 분기 창) 배포 `52d0f48`, 사용자 결정 3건 반영(결정 6: 키움 머지 신규 행만·KIS 최초 관측판(P5)·G3 개정). **사용자 행동 필요: 키움 앱키 추가 발급**(DECISIONS_PENDING R5 후속) |
-| 크론 | 06:00 `daily_ledger.sh`(daily_wise 포함, 키움 공매도·대차·투자자, KIS, DART) · 08:10 `daily_build.sh --no-build`(KRX → 키움 외국인 보유 fetch → 키움 대조·머지 → 건전성; 결정 7) · 매시 키움 프로브(임시, 09-15 제거). `daily_dart.sh` 폐기 |
+| 크론 | **18:05 `daily_evening.sh`**(당일: 키움 투자자·공매도 원장 직행 ∥ DART ∥ WISE 스냅샷, 플랜 v2 페이즈 A) · 18:50/09:15 `watchdog.sh` · 06:00 `daily_ledger.sh`(키움 마스터, 대차, KIS, DART 재스윕) · 08:10 `daily_build.sh --no-build`(KRX → 외국인 보유 → 머지 → 건전성) · 매시 키움 프로브(임시, 09-15 제거) |
 
 ## 층 구조
 
@@ -32,7 +32,7 @@ equity      parquet 28표 + equity.duckdb   data/equity/                ← EQUI
 | 경로 | 내용 |
 |---|---|
 | `src/` | 수집기(`backfill_*.py`, `api.py`, `dart_universe.py`, `sweep_disclosure.py`, `master_daily.py`), stage 패키지(`src/stage/`, `python -m stage --table <t>`), equity 패키지(`src/equity/`, `python -m equity build|gate|catalog|contract`), 파일럿 통합층(`build_*.py`·`finalize.py`·`fin_map.py` — STAGE_DESIGN §8 이 파일럿 보존·로직 재사용으로 명시) |
-| `scripts/` | 서버 크론·러너: `daily_wise.sh`(06:00 KST, 유일 크론), `daily_dart.sh`(미등록), `run_stage.sh`·`run_stage_all.sh`, `run_equity.sh`·`equity_rebuild_all.sh`·`equity_gate_all.sh`, `check_baseline_lock.py`, `fetch_equity_local.sh`, `run_survey*.sh` |
+| `scripts/` | 서버 크론·러너: `daily_evening.sh`(18:05)·`daily_ledger.sh`(06:00)·`daily_build.sh`(08:10)·`watchdog.sh`·`daily_wise.sh`(마스터만), `run_stage.sh`·`run_stage_all.sh`, `run_equity.sh`·`equity_rebuild_all.sh`·`equity_gate_all.sh`, `check_baseline_lock.py`, `fetch_equity_local.sh`, `run_survey*.sh` |
 | `tests/` | stage·equity 테스트 |
 | `survey/`, `survey_out/v2/` | 원장 전 테이블·컬럼 어휘 전수 측정과 결과. stage (p,s)·부호·결측 규칙의 실측 근거. 재생성은 서버에서 `scripts/run_survey_v2.sh` |
 | `eval/table_schema/` | 자유 서식 표 스키마 추론 골든셋 100표 (라벨링 대기) |

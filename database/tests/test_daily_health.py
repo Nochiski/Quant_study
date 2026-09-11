@@ -117,42 +117,74 @@ def test_skip_source_excludes_its_checks(tmp_path):
     assert rep.ok                                                     # 오염 99% 픽스처인데 kiwoom 을 제외했으니 통과
 
 
-def _wise(tmp_path, *, cov=804, none=1759, n_req=None, raw_rows=None, raw_stocks=None):
-    """ws_run_log 1건 + 당일 checked_at 커버리지 + ws_raw(기본은 항등식대로). n_req 기본값은 항등식대로."""
+# WISE 스냅샷 시각 3종 — (run_at UTC, checked_at UTC, fetched_date KST). 대상일 D=20260908 기준.
+_WISE_SNAPSHOT = {
+    "evening": ("2026-09-08T09:05:00", "2026-09-08T09:05:30", "2026-09-08"),       # D 18:05 KST (V2-3)
+    "next_morning": ("2026-09-08T21:04:00", "2026-09-08T21:04:30", "2026-09-09"),  # D+1 06:04 KST (옛 방식)
+    "stale": ("2026-09-04T09:05:00", "2026-09-04T09:05:30", "2026-09-04"),         # D-4 저녁 — 두 기준 다 아님
+}
+
+
+def _wise(tmp_path, *, cov=804, none=1759, n_req=None, raw_rows=None, raw_stocks=None, snapshot="evening"):
+    """ws_run_log 1건 + 같은 런의 checked_at 커버리지 + ws_raw(기본은 항등식대로). n_req 기본값은 항등식대로."""
     n_req = n_req if n_req is not None else cov * 15 + none * 4
     raw_rows = n_req if raw_rows is None else raw_rows
     raw_stocks = cov + none if raw_stocks is None else raw_stocks
+    run_at, checked_at, fetched_date = _WISE_SNAPSHOT[snapshot]
     con = sqlite3.connect(tmp_path / "wise.db")
     con.execute("CREATE TABLE ws_raw (cmp_cd TEXT, ep TEXT, pkey TEXT, fetched_date TEXT)")
-    con.executemany("INSERT INTO ws_raw VALUES (?,?,?,'2026-09-08')",
-                    [(f"{i % raw_stocks:06d}", f"ep{i // raw_stocks}", str(i)) for i in range(raw_rows)])
+    con.executemany("INSERT INTO ws_raw VALUES (?,?,?,?)",
+                    [(f"{i % raw_stocks:06d}", f"ep{i // raw_stocks}", str(i), fetched_date) for i in range(raw_rows)])
     con.execute("CREATE TABLE ws_run_log (run_at TEXT, mode TEXT, n_stocks INTEGER, n_req INTEGER, n_ok INTEGER, n_bad INTEGER, bad_summary TEXT)")
-    con.execute("INSERT INTO ws_run_log VALUES ('2026-09-07T21:04:00','full',?,?,?,0,'{}')", (cov + none, n_req, n_req))
+    con.execute("INSERT INTO ws_run_log VALUES (?,'full',?,?,?,0,'{}')", (run_at, cov + none, n_req, n_req))
     con.execute("CREATE TABLE ws_coverage (cmp_cd TEXT PRIMARY KEY, status TEXT, checked_at TEXT)")
-    con.executemany("INSERT INTO ws_coverage VALUES (?,?,'2026-09-07T21:04:30')",
-                    [(f"{i:06d}", "covered" if i < cov else "none") for i in range(cov + none)])
+    con.executemany("INSERT INTO ws_coverage VALUES (?,?,?)",
+                    [(f"{i:06d}", "covered" if i < cov else "none", checked_at) for i in range(cov + none)])
     con.commit(); con.close()
     return str(tmp_path / "wise.db")
 
 
 def test_wise_request_identity_counts_four_requests_per_uncovered_stock(tmp_path):
     # 검수 D H1 후속: 무커버 판정이 3개년 cF5001 을 다 본 뒤에만 나므로 무커버 종목은 4콜(목록 1 + cF5001 3)이다.
-    import datetime as dt
-    rep = lh.run(D, _paths(tmp_path, wise=_wise(tmp_path)), today=dt.date(2026, 9, 8))
+    rep = lh.run(D, _paths(tmp_path, wise=_wise(tmp_path)))
     ident = next(c for c in rep.checks if c.name == "wise.req_identity")
     assert ident.status is lh.Status.PASS and ident.value["expected"] == 804 * 15 + 1759 * 4
     sub = tmp_path / "b"; sub.mkdir()
-    rep2 = lh.run(D, _paths(sub, wise=_wise(sub, n_req=804 * 15 + 1759 * 2)), today=dt.date(2026, 9, 8))
+    rep2 = lh.run(D, _paths(sub, wise=_wise(sub, n_req=804 * 15 + 1759 * 2)))
     assert next(c for c in rep2.checks if c.name == "wise.req_identity").status is lh.Status.FAIL
 
 
 def test_wise_raw_expectation_derives_from_coverage_not_a_fixed_band(tmp_path):
     # 09-11 실측: 규모구분 갱신으로 유니버스 2,563→2,610, 무커버 4콜 → rows 19,416. 옛 절대 밴드(15,500~15,700 ·
     # 2,560~2,570)는 오탐. 기대치 = covered×15 + none×4 · stocks = covered+none.
-    import datetime as dt
-    rep = lh.run(D, _paths(tmp_path, wise=_wise(tmp_path, cov=816, none=1794)), today=dt.date(2026, 9, 8))
+    rep = lh.run(D, _paths(tmp_path, wise=_wise(tmp_path, cov=816, none=1794)))
     raw = next(c for c in rep.checks if c.name == "wise.raw")
     assert raw.status is lh.Status.PASS and raw.value == {"rows": 816 * 15 + 1794 * 4, "stocks": 2610}
     sub = tmp_path / "b"; sub.mkdir()
-    rep2 = lh.run(D, _paths(sub, wise=_wise(sub, cov=816, none=1794, raw_rows=19000)), today=dt.date(2026, 9, 8))
+    rep2 = lh.run(D, _paths(sub, wise=_wise(sub, cov=816, none=1794, raw_rows=19000)))
     assert next(c for c in rep2.checks if c.name == "wise.raw").status is lh.Status.FAIL
+
+
+def test_wise_snapshot_read_on_target_day_evening(tmp_path):
+    # V2-3: 스냅샷이 06:00(D+1) → 18:05(D) 로 옮겨간다. D+1 아침 판정은 실행일이 아니라 D 의 KST 날짜를 봐야 한다.
+    rep = lh.run(D, _paths(tmp_path, wise=_wise(tmp_path, snapshot="evening")))
+    c = _by(rep)
+    assert c["wise.snapshot_day"].value == "target_day"
+    assert c["wise.run"].status is lh.Status.PASS and c["wise.req_identity"].status is lh.Status.PASS
+    assert c["wise.raw"].status is lh.Status.PASS
+
+
+def test_wise_falls_back_to_next_morning_snapshot(tmp_path):
+    # 전환기: D 저녁 행이 없고 옛 방식(D+1 아침) 행만 있으면 그것으로 판정하되 snapshot_day 에 남긴다.
+    rep = lh.run(D, _paths(tmp_path, wise=_wise(tmp_path, snapshot="next_morning")))
+    c = _by(rep)
+    assert c["wise.snapshot_day"].value == "next_morning"
+    assert c["wise.run"].status is lh.Status.PASS and c["wise.req_identity"].status is lh.Status.PASS
+    assert c["wise.raw"].status is lh.Status.PASS
+
+
+def test_wise_without_either_snapshot_fails(tmp_path):
+    rep = lh.run(D, _paths(tmp_path, wise=_wise(tmp_path, snapshot="stale")))
+    c = _by(rep)
+    assert c["wise.run"].status is lh.Status.FAIL and not rep.ok
+    assert c["wise.snapshot_day"].status is lh.Status.SKIP and c["wise.snapshot_day"].value is None

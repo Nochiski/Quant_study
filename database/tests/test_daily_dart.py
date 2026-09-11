@@ -97,7 +97,7 @@ def test_endpoint_names_match_backfill_dart_stages(tmp_path, monkeypatch) -> Non
 # ── 픽스처 ──────────────────────────────────────────────────────────────────────
 _DDL = (
     ("CREATE TABLE dart_disclosure (row_hash TEXT PRIMARY KEY, rcept_no TEXT, rcept_dt TEXT, "
-     "corp_code TEXT, stock_code TEXT, report_nm TEXT)"),
+     "corp_code TEXT, stock_code TEXT, report_nm TEXT, collected_at TEXT NOT NULL)"),
     ("CREATE TABLE ingest_log (name TEXT NOT NULL, corp_code TEXT NOT NULL, "
      "bsns_year TEXT NOT NULL DEFAULT '', reprt_code TEXT NOT NULL DEFAULT '', "
      "fs_div TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, n_rows INTEGER NOT NULL, "
@@ -110,6 +110,9 @@ _DDL = (
      "fetched_at TEXT NOT NULL)"),
 )
 D = "20260908"
+# rows 에 `collected_at` 을 안 주면 이 값이 붙는다 — D 당일 수집분이라 어느 런의 스윕 시작
+# 시각보다도 과거다(실제 시계는 D 이후). 그래서 "늦게 등장" 판정에 걸리지 않는다.
+_SEEN_BEFORE = "2026-09-08T12:00:00"
 
 
 def _corp_for(i: int) -> str:
@@ -117,7 +120,10 @@ def _corp_for(i: int) -> str:
 
 
 def _make_home(tmp_path, *, rows=None):
-    """표본 20건이 든 dart.db 를 tmp home 에 만든다. rows 를 주면 그것으로 대체한다."""
+    """표본 20건이 든 dart.db 를 tmp home 에 만든다. rows 를 주면 그것으로 대체한다.
+
+    rows 한 건은 `(rcept_no, rcept_dt, corp_code, stock_code, report_nm[, collected_at])` 다.
+    """
     db = tmp_path / "data" / "raw" / "dart.db"
     db.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(db)
@@ -127,8 +133,9 @@ def _make_home(tmp_path, *, rows=None):
         rows = [(f"2026090800{i:04d}", D, _corp_for(i), "005930", nm)
                 for i, (nm, *_rest) in enumerate(SAMPLES)]
     con.executemany(
-        "INSERT INTO dart_disclosure VALUES (?,?,?,?,?,?)",
-        [(f"h{i}", *r) for i, r in enumerate(rows)])
+        "INSERT INTO dart_disclosure VALUES (?,?,?,?,?,?,?)",
+        [(f"h{i}", *r, *((_SEEN_BEFORE,) if len(r) == 5 else ()))
+         for i, r in enumerate(rows)])
     con.commit()
     con.close()
     return str(tmp_path)
@@ -197,6 +204,67 @@ def test_plan_skips_unlisted_and_records_unresolved(tmp_path) -> None:
     assert p.units == () and p.n_filings == 2
     assert [r[0] for r in p.unresolved] == ["20260908000002"]
     assert p.bad_corp_codes == (("20260908000003", "123"),)
+    con.close()
+
+
+def test_plan_includes_late_arriving_filings_first_seen_in_this_sweep(tmp_path) -> None:
+    """접수일이 D 가 아니어도 **이번 스윕에서 처음 본** 공시는 상세 축을 따라가야 한다.
+
+    09-10 스윕에서 08-25 접수 8건이 처음 등장했다(검수 D H3). 종전 `rcept_dt = D` 필터로는
+    그런 공시가 영영 상세를 못 받는다.
+    """
+    since = "2026-09-11T09:00:00"
+    rows = [("20260908000001", D, C1, "005930", "반기보고서 (2026.06)", "2026-09-08T23:00:00"),
+            # D−15일 접수인데 이번 스윕(since 이후)에 처음 나타났다 → 대상
+            ("20260824000001", "20260824", C2, "005930", "주식등의대량보유상황보고서(약식)",
+             "2026-09-11T09:10:00"),
+            # 같은 D−15일 접수지만 어제 이미 봤다 → 대상 아님
+            ("20260824000002", "20260824", C3, "005930", "주식등의대량보유상황보고서(일반)",
+             "2026-09-10T09:10:00")]
+    home = _make_home(tmp_path, rows=rows)
+    con = _con(home)
+
+    p = dd.plan(con, D, since_ts=since)
+    assert (p.n_late, p.late_rcept_nos) == (1, ("20260824000001",))
+    assert p.holder_corps == (C2,)                       # C3 는 늦게 등장한 게 아니다
+    assert p.periodic_units == ((C1, "2026", "11012"),)  # (a) 는 종전 그대로
+    assert {u.corp_code for u in p.units} == {C1, C2}
+    assert p.n_filings == 1 and p.n_rows == 1            # (a) 기준 — 게이트가 쓰는 값
+
+    p0 = dd.plan(con, D)                                 # since_ts 없으면 종전 동작
+    assert (p0.n_late, p0.holder_corps, p0.late_rcept_nos) == (0, (), ())
+    con.close()
+
+
+def test_plan_ignores_old_filings_restored_by_a_page_shift(tmp_path) -> None:
+    """재스윕은 이미 아는 공시를 다른 `req_page_no` 로 한 번 더 적재한다.
+
+    요청 파라미터가 행 해시에 들어가서(`sweep_disclosure.py:158-165` 주석) 그 행의
+    `collected_at` 은 오늘이지만 **공시 자체는 처음 본 게 아니다**. 행이 아니라 공시
+    단위 최초 관측 시각(`MIN(collected_at)`)으로 판정해야 한다.
+    """
+    since = "2026-09-11T09:00:00"
+    nm = "주식등의대량보유상황보고서(약식)"
+    rows = [("20260824000001", "20260824", C2, "005930", nm, "2026-09-01T09:00:00"),
+            ("20260824000001", "20260824", C2, "005930", nm, "2026-09-11T09:10:00")]
+    home = _make_home(tmp_path, rows=rows)
+    con = _con(home)
+    p = dd.plan(con, D, since_ts=since)
+    assert (p.n_late, p.units) == (0, ())
+    con.close()
+
+
+def test_plan_late_sample_is_capped(tmp_path) -> None:
+    """로그용 표본은 최대 `LATE_SAMPLE_MAX` 건. 수는 `n_late` 가 온전히 센다."""
+    since = "2026-09-11T09:00:00"
+    rows = [(f"202608240{i:05d}", "20260824", C1, "005930",
+             "주식등의대량보유상황보고서(약식)", "2026-09-11T09:10:00")
+            for i in range(dd.LATE_SAMPLE_MAX + 5)]
+    home = _make_home(tmp_path, rows=rows)
+    con = _con(home)
+    p = dd.plan(con, D, since_ts=since)
+    assert p.n_late == dd.LATE_SAMPLE_MAX + 5
+    assert len(p.late_rcept_nos) == dd.LATE_SAMPLE_MAX
     con.close()
 
 
@@ -425,6 +493,60 @@ def test_run_skip_sweep_and_default_window(tmp_path, monkeypatch) -> None:
     assert dd.sweep_from_for("20261005") == "2026Q3"
     assert dd.sweep_from_for("20261105") == "2026Q4"
     assert dd.sweep_from_for("20260101") == "2025Q4"
+
+
+# 스윕이 방금 적재한 것처럼 보이게 하는 미래 시각. `run()` 이 스윕 직전에 잡는 시각보다
+# 항상 뒤라서 "이번 스윕에서 처음 봤다" 판정에 걸린다.
+_SEEN_NOW = "2099-01-01T00:00:00"
+
+
+def test_run_follows_filings_that_first_appeared_in_this_sweep(tmp_path, monkeypatch) -> None:
+    rows = [("20260908000001", D, C1, "005930", "기타시장안내"),
+            ("20260824000001", "20260824", C2, "005930",
+             "주식등의대량보유상황보고서(약식)", _SEEN_NOW)]
+    home = _make_home(tmp_path, rows=rows)
+    seen = _fake_exec(monkeypatch)
+
+    r = dd.run(D, home=home, sweep_from="2026Q3")
+    assert r.plan.n_late == 1 and r.plan.holder_corps == (C2,)
+    backfills = [c for c in seen if c[1].endswith("backfill_dart.py")]
+    assert len(backfills) == 1                                   # 지분공시 1그룹
+    only = backfills[0][backfills[0].index("--only") + 1]
+    assert set(only.split(",")) == set(dd.HOLDER_ENDPOINTS)
+    assert "late=1" in dd.report(r) and "20260824000001" in dd.report(r)
+
+
+def test_run_takes_since_ts_before_launching_the_sweep(tmp_path, monkeypatch) -> None:
+    """스윕이 **그 런 도중에** 적재한 행이 잡히려면 since_ts 를 서브프로세스 기동 전에 잡아야 한다."""
+    home = _make_home(tmp_path, rows=[("20260908000001", D, C1, "005930", "기타시장안내")])
+
+    def _spy(cmd, *, cwd):
+        if cmd[1].endswith("sweep_disclosure.py"):
+            con = _con(home)
+            con.execute(
+                "INSERT INTO dart_disclosure VALUES (?,?,?,?,?,?,?)",
+                ("hlate", "20260824000001", "20260824", C2, "005930",
+                 "주식등의대량보유상황보고서(약식)",
+                 dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%S")))
+            con.commit()
+            con.close()
+        return 0
+
+    monkeypatch.setattr(dd, "_exec", _spy)
+    r = dd.run(D, home=home, sweep_from="2026Q3")
+    assert r.plan.n_late == 1 and r.plan.holder_corps == (C2,)
+
+
+def test_run_skip_sweep_does_not_follow_late_filings(tmp_path, monkeypatch) -> None:
+    """`--skip-sweep` 이면 since_ts 가 없다 → (b) 는 빈 집합(종전 동작)."""
+    rows = [("20260824000001", "20260824", C2, "005930",
+             "주식등의대량보유상황보고서(약식)", _SEEN_NOW)]
+    home = _make_home(tmp_path, rows=rows)
+    seen = _fake_exec(monkeypatch)
+
+    r = dd.run(D, home=home, skip_sweep=True)
+    assert r.plan.n_late == 0 and r.plan.units == ()
+    assert not [c for c in seen if c[1].endswith("backfill_dart.py")]
 
 
 def test_dry_run_does_not_touch_ingest_log_or_runlog(tmp_path, monkeypatch) -> None:

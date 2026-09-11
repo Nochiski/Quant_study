@@ -87,6 +87,10 @@ def _health_ok(v: object) -> bool | None:
         for key in ("ok", "status", "health"):
             if key in v:
                 return _health_ok(v[key])
+        # build_chain.sh 의 `health: {"stage": "ok", "equity": "fail"}` — 축별 판정을 모아 하나라도 fail 이면 False
+        inner = [_health_ok(x) for x in v.values()]
+        if inner and all(i is not None for i in inner):
+            return all(inner)
     return None
 
 
@@ -193,6 +197,9 @@ def _basis_section(label: str, reports: dict[str, dict[str, object] | None],
         if value == "health":
             at = str(rep.get("generated_at") or "?")[:19]
             elapsed = rep.get("elapsed_s")
+            if isinstance(elapsed, dict):      # build_chain.sh: {"stage": s, "equity": s}
+                nums = [x for x in elapsed.values() if isinstance(x, int | float)]
+                elapsed = sum(nums) if nums else None
             el = f" {int(elapsed)}초" if isinstance(elapsed, int | float) else ""
             parts.append(f"{basis} {_health_text(rep.get('health'))} {at}{el}")
         else:

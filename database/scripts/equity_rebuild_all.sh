@@ -34,6 +34,7 @@ OUT="logs/equity/rebuild_${PASS}"
 mkdir -p "$OUT"
 SUM="$OUT/summary.tsv"
 : > "$SUM"
+: > "$OUT/STATUS"
 
 ORDER="trading_calendar corp security security_span corp_ticker index_daily price_daily corp_event adj_factor price_adj_daily universe_daily universe_policy flow_daily short_daily credit_daily disclosure_version fin_std holder_daily ownership_snapshot audit_opinion shares_outstanding treasury_stock dividend_event consensus_daily opinion_daily opinion_broker_daily coverage_daily dataset_profile factor_readiness"
 
@@ -45,7 +46,8 @@ for t in $ORDER; do
   scripts/run_equity.sh "$t" --threads 3 --memory-limit 8GB --keep "${QL_EQUITY_KEEP:-10}" $BASIS_ARGS > "$OUT/$t.log" 2>&1
   RC=$?
   T1=$(date +%s)
-  H=$(.venv/bin/python scripts/equity_manifest_row.py "$t")
+  H="-"
+  [ "$RC" -eq 0 ] && H=$(.venv/bin/python scripts/equity_manifest_row.py "$t")   # 실패한 표는 MANIFEST 가 없을 수 있다
   printf '%s\t%s\t%s\t%s\n' "$t" "$RC" "$((T1-T0))" "$H" >> "$SUM"
   echo "    rc=$RC  $((T1-T0))s  $H"
   if [ "$RC" -ne 0 ]; then echo "!!! FAILED $t (rc=$RC) — 중단"; echo "FAILED $t" >> "$OUT/STATUS"; exit "$RC"; fi

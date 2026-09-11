@@ -235,8 +235,8 @@ def eg1_credit_daily(ctx: EquityGateContext) -> GateResult:
 
     프레임 EG1 은 등식 하나만 받으므로(⑪ (a) 격자 행수) 소스 보존 등식은 여기서 본다. 항은
     서로 다른 곳에서 온다 — 원장은 `_pinned/stg_credit_daily`, measured 는 산출 parquet,
-    격리 건수는 `_reject/` 집계 — 라 항진명제가 아니다. 격리 사유 3종(`pre_calendar`·`off_grid`·
-    **`balance_over_shares`**)을 `REJECT_REASONS` 에서 그대로 돌므로 사유가 늘면 자동으로 반영된다.
+    격리 건수는 `_reject/` 집계 — 라 항진명제가 아니다. 격리 사유 4종(`pre_calendar`·`off_grid`·
+    **`balance_over_shares`**·`version_folded`)을 `REJECT_REASONS` 에서 그대로 돌므로 사유가 늘면 자동으로 반영된다.
     """
     v = _q(ctx.out_view)
     n_src = _n(ctx, "SELECT count(*) FROM stg_credit_daily")
@@ -385,6 +385,12 @@ def eg3_credit_daily(ctx: EquityGateContext) -> GateResult:
         SELECT
           (SELECT count(*) FROM ({_version_group_sql()}) WHERE n_versions > 1),
           (SELECT coalesce(sum(n_versions - 1), 0) FROM ({_version_group_sql()}))""")
+    # 같은 KST 수집일에 값이 다른 판본이 둘이면 "최초 관측" 을 날짜 해상도로는 가를 수 없고 2차 정렬
+    # (값 크기)이 고른다(검수 R3-01). 서버 실측 09-11 은 0 — 기록형으로 세고 0 이 아니면 TECH_DEBT B-13.
+    n_version_ties = _row(ctx, """
+        SELECT count(*) FROM (
+          SELECT ticker, date, observed_date, count(*) AS c
+          FROM stg_credit_daily GROUP BY 1, 2, 3 HAVING count(*) > 1)""")[0]
 
     checks = {
         "n_fill_kind_outside_vocab": int(str(n_kind_vocab)),
@@ -465,12 +471,14 @@ def eg3_credit_daily(ctx: EquityGateContext) -> GateResult:
         "n_version_groups": int(str(n_version_groups)),
         "n_version_folded_rejected": int(ctx.reject_by_reason.get("version_folded", 0)),
         "version_pick_rule": "min(observed_date) — 최초 관측판 (DECISIONS 결정 6-2)",
+        "n_version_observed_date_ties": int(str(n_version_ties)),
         "n_measured_evidence_none": int(evidence.get("measured/none", 0)),
         "n_shares_out_null_measured": int(str(n_shares_null)),
         "n_close_compared": int(str(n_close_join)),
         "n_close_ne_price_daily": int(str(n_close_ne)),
         "n_close_null_src": int(str(n_close_null)),
         "n_negative_by_column": n_signed,
+        "n_negative_basis": "all_versions",      # 위 값만 원장 전건 — 나머지 EG3 술어는 채택 판본
         # `*_amt` 단위 추정 — 금액 / (잔고주수 × 원주가). 원화면 1 에 몰려야 한다
         "loan_amt_per_market_value": _quantiles(
             ctx, 'c.whol_loan_rmnd_amt / nullif(c.whol_loan_rmnd_stcn_shr * p."close", 0)',

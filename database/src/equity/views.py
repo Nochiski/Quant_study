@@ -59,9 +59,11 @@ from . import inputs
 
 # 저녁 잠정판 노출 (규칙 e1.15.0 · 결정 V2-2 · 플랜 v2 §4 B.2):
 #   가격 행을 싣는 두 뷰(`v_adj_price`·`v_adj_price_fwd`)가 `price_daily` 의 `basis`
-#   ('krx'·'evening')와 `corp_action_pending` 을 **그대로 통과시킨다**. 조정 계수는 저녁 행에
-#   붙지 않는다 — 계수의 `apply_date`·`available_date` 가 전부 KRX 확정일 이하라 T 행에는 접힐
-#   계수가 없고, 누적계수가 1 로 남는다(`coalesce(..., 1)`). 그래서 잠정 T 행의 조정가 = 원주가다.
+#   ('krx'·'evening')와 `corp_action_pending` 을 **그대로 통과시킨다**. T 행에 **새로** 접힐 계수는
+#   없다(계수의 `apply_date`·`available_date` 가 전부 KRX 확정일 이하). 그래도 두 축의 값은 다르다 —
+#   후방 조정 `v_adj_price` 는 최신일 누적이 1 이라 T 행의 조정가 = 원주가이고, 전방 조정
+#   `v_adj_price_fwd`·표 `price_adj_daily` 는 **과거 사건의 누적 share_factor** 가 T 행에도 그대로
+#   곱해진다(005930 이면 ×50). "T 행 조정가 = 원주가" 는 후방 축에서만 참이다(검수 R2-06 실측).
 #   소비자는 `basis = 'evening'` 과 `corp_action_pending` 두 컬럼으로 「이 값은 키움 잠정치이고,
 #   참이면 기업행위 의심이라 오늘 스코어에서 빼라」를 읽는다. 두 컬럼을 안 보고 쓰면 잠정치가
 #   확정치처럼 보인다 — 그래서 뷰에서 감추지 않는다.

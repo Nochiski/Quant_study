@@ -11,10 +11,10 @@ grain (`ticker`, `date`) · date_axis `year(date)`. 입력은 stage WISE 3표뿐
 
 **커버 판정은 수집기 정본을 옮긴다**(`backfill_wise.is_covered`, 09-10 핫픽스 뒤 3개년 판정):
 cF5001 의 EPS·매출 추정 또는 목표주가 중 하나라도 값이 있으면 covered. stage 에서 그 세 신호는
-`stg_consensus_monthly.consensus`(metric eps·revenue)와 `target_price_krw` 이고, 파싱 불능
-(`metric='parse_failed'`)도 covered 로 센다 — 오판 비용이 비대칭(false-none = 영구 결측)이라
-수집기가 그렇게 두는 것과 같은 규약이다. 절단본에서 이 술어는 `status_current` 7종목을 전건
-재현한다(covered 5 · none 2).
+`stg_consensus_monthly.consensus`(metric 불문 — 차트 항목명 미상 `parse_failed` 행도 값이 있으면
+같은 신호다)와 `target_price_krw` 다. 수집기가 covered 로 두는 "디코드 실패" 는 stage 에 행이
+없어 여기서는 보이지 않는다(TECH_DEBT B-17, 검수 R3-04). 절단본에서 이 술어는 `status_current`
+7종목을 전건 재현한다(covered 5 · none 2).
 
 **이력 컬럼은 전부 PIT 누적**이다 — `first_covered_date`·`last_covered_date`·`streak_days`·
 `first_estimate_month` 는 `date` 이하만 본다. 종목별 상수로 실으면 뒤에 일어난 커버 상실을 과거
@@ -32,9 +32,10 @@ cF5001 의 EPS·매출 추정 또는 목표주가 중 하나라도 값이 있으
                        원값 보존. 기록형: 커버율·날짜별 커버 수·streak 분포·`analyst_count`
                        분위·`stg_wise_coverage.status_current` 대조.
 
-**S19 `dataset_profile` 에는 아직 안 올린다** — `rules_s19.SOURCE_TABLES` 가 코드 고정 목록이고
-그 파일은 이 작업의 소유 밖이다. `consensus.coverage_*` 소비 계약은 `EQUITY_FIELD_MAP.md` 끝
-절에 적어 두었고, 프로파일 등재는 후속이다(`field_profiles=()` 인 이유).
+**S19 `dataset_profile` 에는 아직 안 올린다**(TECH_DEBT B-1) — `rules_s19.SOURCE_TABLES` 가 코드
+고정 목록이다. `consensus.coverage_*` 소비 계약은 `EQUITY_FIELD_MAP.md` 끝 절에 적어 두었고,
+프로파일 등재는 후속이다(`field_profiles=()` 인 이유). 운영 빌드 순서(`equity_rebuild_all.sh`)
+편입은 09-11 에 했다.
 """
 from __future__ import annotations
 
@@ -57,8 +58,9 @@ REJECT_REASONS: tuple[str, ...] = ()
 
 # ── `.sql` 과 공유하는 술어·축 (테스트가 글자로 대조한다) ─────────────────────
 # 커버 판정. `backfill_wise.is_covered` 의 세 신호를 stage 컬럼으로 옮긴 것이다.
-COVERED_PREDICATE = ("consensus IS NOT NULL OR target_price_krw IS NOT NULL "
-                     "OR metric = 'parse_failed'")
+# `metric='parse_failed'` 행(차트 항목명 미상)도 **값이 있을 때만** 커버다 — 수집기는 항목명과 무관하게
+# 값 유무만 본다. cF5001 디코드 실패는 stage 에 행이 없어 여기서 보이지 않는다(TECH_DEBT B-17).
+COVERED_PREDICATE = "consensus IS NOT NULL OR target_price_krw IS NOT NULL"
 # 종목 축 = WISE 요청 유니버스 ∪ 스냅샷에 나타난 종목. `stg_wise_coverage` 를 빼면 무커버 종목이
 # 격자에서 사라져 커버율이 조용히 1 이 된다.
 TICKER_AXIS_SQL = ("SELECT DISTINCT ticker FROM stg_wise_coverage\n"

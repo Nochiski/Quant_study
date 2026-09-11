@@ -26,7 +26,7 @@ fi
 n_gzip=$(find logs -type f -name '*.log' -mtime +"$GZIP_DAYS" -not -path 'logs/health/*' | wc -l | tr -d ' ')
 echo "== gzip: ${GZIP_DAYS}일 초과 .log $n_gzip 건"
 find logs -type f -name '*.log' -mtime +"$GZIP_DAYS" -not -path 'logs/health/*' -print0 \
-  | while IFS= read -r -d '' f; do run gzip -q "$f"; done
+  | while IFS= read -r -d '' f; do run gzip -qf "$f"; done   # -f: 동명 .gz 가 있어도 죽지 않는다(set -e)
 n_purge=$(find logs -type f -name '*.log.gz' -mtime +"$PURGE_DAYS" -not -path 'logs/health/*' | wc -l | tr -d ' ')
 echo "== 삭제: ${PURGE_DAYS}일 초과 .log.gz $n_purge 건"
 find logs -type f -name '*.log.gz' -mtime +"$PURGE_DAYS" -not -path 'logs/health/*' -print0 \

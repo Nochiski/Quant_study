@@ -263,3 +263,34 @@ def test_폐지_티커에_delist_date가_없으면_EG3_security_FAIL(tmp_path: P
     bad = next(g for g in r.gates if g.name == "EG3_security")
     assert bad.status is GateStatus.FAIL
     assert bad.metrics["n_delisted_without_delist_date"] == 3
+
+
+def test_지수만_하루_앞서도_생존_종목이_폐지로_떨어지지_않는다() -> None:
+    """검수 R2-03: 생존 상한을 지수 축(`td` max)으로 잡으면 지수만 T 까지 차고 listing·etf 가 T-1 인
+    stage 상태에서 전 종목이 폐지가 된다(절단본 15/15). 상한은 자기 모집단 축이어야 한다."""
+    import duckdb
+    slice_root = Path(__file__).parent / "fixtures" / "stage_slice"
+    sql = (Path(__file__).parents[1] / "src" / "equity" / "sql" / "security.sql").read_text(
+        encoding="utf-8").rstrip().rstrip(";")
+
+    def run(extra_index_day: str | None) -> tuple[int, int]:
+        con = duckdb.connect()
+        for t in ("stg_index_daily", "stg_listing_daily", "stg_etf_price_daily",
+                  "stg_delisted_master", "stg_corp_map"):
+            con.execute(f"CREATE VIEW _{t} AS SELECT * FROM read_parquet("
+                        f"'{slice_root / t}/**/*.parquet', hive_partitioning=true, union_by_name=true)")
+        extra = f" UNION ALL SELECT DATE '{extra_index_day}'" if extra_index_day else ""
+        con.execute(f"CREATE VIEW stg_index_daily AS SELECT date FROM _stg_index_daily{extra}")
+        for t in ("stg_listing_daily", "stg_etf_price_daily", "stg_delisted_master", "stg_corp_map"):
+            con.execute(f"CREATE VIEW {t} AS SELECT * FROM _{t}")
+        con.execute(f"CREATE TABLE out AS {sql}")
+        row = con.execute("SELECT count(*), count(*) FILTER (WHERE delist_date_krx IS NOT NULL) "
+                          "FROM out").fetchone()
+        con.close()
+        assert row is not None
+        return int(row[0]), int(row[1])
+
+    normal = run(None)
+    index_ahead = run("2026-08-21")
+    assert normal[0] == index_ahead[0]
+    assert index_ahead[1] == normal[1], f"지수만 앞서면 폐지 수가 {normal[1]}→{index_ahead[1]} 로 바뀐다"

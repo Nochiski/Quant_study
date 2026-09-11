@@ -71,8 +71,12 @@ step() {
 }
 snapshot_step() {
   # 5 DB 전부 뜬다. stg_price_daily 의 G9 가 kiwoom 원장을 직접 조인하므로 부분 스냅샷은 금지
-  # (STAGE_DESIGN §2). 저녁 체인은 DART 갈래까지 끝난 뒤에 호출되므로 dart.db 쓰기와 겹치지 않는다.
+  # (STAGE_DESIGN §2). 저녁 체인은 키움·WISE 가 끝나면 바로 호출되고 dart.db 는 아직 쓰는 중일 수 있다 —
+  # 그날 DART 분은 아침 확정판에 들어온다.
   local out; out=$(mktemp)
+  # raw 락은 잡지 않는다. 스냅샷은 읽기 전용 연결의 VACUUM INTO 라 트랜잭션 일관 사본이고, 저녁에는 DART 갈래가
+  # 설계상 아직 쓰는 중일 수 있다(플랜 §2 — DART 는 저녁 스코어링 경로 밖). 락을 잡으면 DART 가 끝날 때까지
+  # 잠정 빌드가 밀린다(검수 R4-01).
   $PY - "$out" <<'PY'
 import sys
 from pathlib import Path
@@ -97,10 +101,12 @@ stage_step() {
 }
 health_step() {
   local skip; skip=$(cat logs/stage_all/skipped.txt 2>/dev/null)
+  # --date 는 대상 거래일(아침 확정판은 T-1), --built-on 은 판이 커밋된 오늘(KST). C1·C2·C5 는 후자로 본다.
   $PY -m stage.health --stage-root data/stage --basis "$BASIS" --date "$D" \
+     --built-on "$(TZ=Asia/Seoul date +%Y%m%d)" \
      --out "logs/health/stage_${D}_${BASIS}.json" --skip "${skip:-}" --started-at "$STARTED_ISO"
 }
-equity_step() { scripts/equity_rebuild_all.sh "$BASIS" --basis "$BASIS"; }
+equity_step() { scripts/equity_rebuild_all.sh "${BASIS}_${D}" --basis "$BASIS"; }   # 로그 logs/equity/rebuild_<basis>_<D>/
 catalog_step() { $PY -m equity catalog; }
 deliver_step() {
   # Kael-alpha·워치독이 읽는 인계 파일. latest_* 는 덮어쓰고 history/ 는 영구 보관한다(B.3 ①층).
@@ -138,10 +144,16 @@ payload = {
 }
 text = json.dumps(payload, ensure_ascii=False, indent=1)
 Path("data/deliver/history").mkdir(parents=True, exist_ok=True)
-Path(f"data/deliver/latest_{basis}.json").write_text(text, encoding="utf-8")
 Path(f"data/deliver/history/{date}_{basis}.json").write_text(text, encoding="utf-8")
-print(f"  인계 latest_{basis}.json stage {len(payload['stage_builds'])}표 "
-      f"equity {len(payload['equity_builds'])}표 snapshot={snap}")
+if h_stage == "ok" and h_equity == "ok":
+    # latest_* 는 소비자(Kael-alpha)가 읽는 포인터 — 실패 판으로 덮으면 health 를 안 읽는 소비자에게
+    # 어제 판이 오늘 판처럼 보인다. 실패는 history 에만 남기고 latest_* 는 마지막 성공 판을 유지한다.
+    Path(f"data/deliver/latest_{basis}.json").write_text(text, encoding="utf-8")
+    print(f"  인계 latest_{basis}.json stage {len(payload['stage_builds'])}표 "
+          f"equity {len(payload['equity_builds'])}표 snapshot={snap}")
+else:
+    print(f"  인계 history/{date}_{basis}.json 만 기록 (stage={h_stage} equity={h_equity} — "
+          f"latest_{basis}.json 은 마지막 성공 판 유지)")
 PY
 }
 gc_step() {
@@ -157,9 +169,15 @@ from pathlib import Path
 from equity import inputs
 from stage import snapshot
 
-protect = snapshot.current_snapshot_ids(Path("data/stage"))
-r = snapshot.gc(Path("data/snapshots"), keep=snapshot.KEEP_DEFAULT, protect=protect)
-print(f"  {r.summary()} (보호 {len(protect)}판)")
+failed = False
+try:
+    protect = snapshot.current_snapshot_ids(Path("data/stage"))
+    r = snapshot.gc(Path("data/snapshots"), keep=snapshot.KEEP_DEFAULT, protect=protect)
+    print(f"  {r.summary()} (보호 {len(protect)}판)")
+except OSError as e:
+    # 스냅샷 하나를 못 지웠다고 _pinned GC 까지 건너뛰면 두 축이 같이 쌓인다 — 기록하고 계속 간다.
+    failed = True
+    print(f"  snapshot gc 실패 ({type(e).__name__}: {e}) — _pinned gc 는 계속 진행")
 
 KEEP_DAYS = 30
 today = dt.date.today()
@@ -192,6 +210,8 @@ print(f"  _pinned gc: 삭제 {g.n_removed} · 참조 유지 {len(g.kept_referenc
       f" (이력 최근 {len(recent)}건 + 월말 {len(month_end)}건 → 보호 id {len(ids)})")
 for e in g.errors:
     print(f"  _pinned gc 오류: {e}")
+if failed or g.errors:
+    raise SystemExit(1)
 PY
 }
 {
@@ -218,10 +238,16 @@ SUMMARY=$(printf 'D=%s snapshot=%s stage %s(%d분) equity %s(%d분) | %s' \
   "$D" "${SNAP:-없음}" "$H_STAGE" "$((STAGE_S / 60))" "$H_EQUITY" "$((EQUITY_S / 60))" \
   "$(grep -E '^stage 건전성|^  스냅샷|^  인계|^  snapshot gc' "$RUN" | tail -4 | tr '\n' ' ')" \
   | cut -c1-900)
-if [ "$H_STAGE" != "ok" ] || [ "$H_EQUITY" != "ok" ]; then
+# 판정: stage·equity 실패 또는 인계 파일 실패 = crit(rc 2). 인계가 실패하면 소비자 포인터가 어제 판이라
+# "준비 완료" 를 보내면 안 된다. GC 실패만 남으면 판은 쓸 수 있으니 준비 info + warn 을 따로 보낸다(V2-7).
+if [ "$H_STAGE" != "ok" ] || [ "$H_EQUITY" != "ok" ] || [[ "$FAILED" == *"인계 파일"* ]]; then
   scripts/notify.sh crit "$LABEL 빌드 실패${FAILED:+: $FAILED}" "$SUMMARY | 로그 $LOG"
   rm -f "$RUN"; exit 2
 fi
 scripts/notify.sh info "$LABEL 준비 $(TZ=Asia/Seoul date +%H:%M)" \
   "$LABEL D=$D 준비 완료 (stage $((STAGE_S / 60))분 · equity $((EQUITY_S / 60))분) | $SUMMARY"
+if [ -n "$FAILED" ]; then
+  scripts/notify.sh warn "$LABEL 빌드 부분 실패: $FAILED" "판은 준비됐으나 후처리가 실패했다 — $SUMMARY | 로그 $LOG"
+  rm -f "$RUN"; exit 1
+fi
 rm -f "$RUN"

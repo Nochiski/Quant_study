@@ -893,6 +893,7 @@ WHERE g.${VALUE_COL} = 0
 | 23 | `dividend_event` | 4B | ● | ●(§3-⑱) | ●(P01–P04) | ●(P01) | ●(FX-4B-004) | ●(a) | skip(no_multi_version) | ●(P07) | — | skip(not_grid) | — |
 | 24 | `consensus_daily` | 5 | ● | ●(§3-⑲) | ●(P01–P03) · P04 skip(profile 없음) | ●(P01,P07,P13) | ●(FX-5-001…006) | ●(a) · c 는 §9 S17(뷰가 `ASOF_VIEWS` 밖) | ●(P01,P02,P03) | ●(P07) | ●(P07) | ●(P05) · P06 은 §9 S17 대용 | ●⑥⑨ |
 | 25 | `opinion_daily` | 5 | ● | ●(§3-⑳) | ●(P01–P04) | ●(P01,P07) | ●(FX-5-007) | ●(a) | ●(P01,P03) | ● | skip(no_baseline) | ●(P06) | — |
+| 26a | `coverage_daily`(S24, 09-11) | 7 | ● | ●(EG3_coverage_daily: 격자·커버 재계산·PIT 불변식) | — | — | ●(FX-24) | — | skip(no_multi_version) | ● | — | ●(기록형 `n_wise_status_mismatch`) | — |
 | 26 | `opinion_broker_daily` | 5 | ● | ●(§3-㉑) | ●(P01–P04) | ●(P01,P07) | ●(FX-5-008) | ●(a) | skip(no_multi_version) | ● | — | ●(P06) | — |
 | 27 | `dataset_profile` | 6 | ● | skip(declaration_table) | skip(dimension_table) → `EG2_dataset_profile`(P04,P06,P07,P08 + 어휘·범위) | ●(P01) | ●(FX-6-001…009,016…018) | ●(a) | skip(no_multi_version) | ● | — | ●(P06 기록형, 시총 분위) | ●⑥⑧ |
 | 28 | `factor_readiness` | 6 | ● | skip(declaration_table) | skip(dimension_table) | ●(P01) | ●(FX-6-010,011,013,015,019) | ●(a) | skip(no_multi_version) | ● | — | — | — · 판정은 **EG10**(§6) |
@@ -2375,7 +2376,8 @@ workspace/dongmin/src/equity/
 | 검사 | 뜻 |
 |---|---|
 | `n_basis_outside_vocab` | `basis` 어휘 폐쇄 — `krx`·`evening` 뿐. NULL 도 위반이다 |
-| `n_evening_dates_over_one` | evening 행은 **최신 1세션에만** 존재한다. 여러 날에 걸리면 KRX 가 여러 날 비었다는 뜻이고, 그 상태로 격자를 만들면 잠정값이 확정판인 척 이력에 남는다 |
+| `n_evening_dates_over_one` | **원천**(`stg_flow_daily_kiwoom`)에서 KRX 최대일을 넘는 날짜 수 − 1. 산출 쪽은 `kw` 술어가 최신 하루로 접어 항상 ≤ 1 이라 산출에서 세면 사문이 된다(검수 R2-02). 키움이 KRX 보다 이틀 이상 앞서면 중간 세션이 통째로 빠지므로 폐기한다 |
+| `n_evening_corp_action_pending_null` | `corp_action_pending` 은 2치다 — NULL 이면 소비자의 `IS NOT TRUE` 거름망을 통과한다(검수 R2-07). 산출식이 CASE 로 닫으므로 0 이어야 한다 |
 | `n_evening_value_mismatch` | evening 행의 종가·거래량이 `stg_flow_daily_kiwoom` 원장과 같은가 (EG20 의 짝 — EG20 은 KRX 행만 본다) |
 | `n_krx_rows_corp_action_pending` | `corp_action_pending` 은 저녁 축 전용이다. krx 행이 참이면 산출식이 샌 것이다 |
 | `n_evening_rows_in_morning_build` | **아침 확정판(`--basis morning`)에 evening 행이 남아 있으면 FAIL** — KRX 가 안 왔는데 확정 딱지를 달았다는 뜻이다. 판은 세션 테이블 `_build`(`build.make_build_meta`)에서 읽는다 |
@@ -2385,6 +2387,14 @@ workspace/dongmin/src/equity/
 
 EG20(원주가 불변)은 **`basis='krx'` 행만** 대조한다 — 저녁 행은 KRX 원장에 아예 없어 전건이
 '변조' 로 잡힌다. 제외 건수는 `n_evening_rows_excluded` 로 남긴다.
+
+### 10-3b. S23 `price_adj_daily` — 잠정 T 행과의 정합 (최종 검수 R2-01·R2-04, 2026-09-11)
+
+- 표에 `basis`·`corp_action_pending` 두 컬럼을 더해 `price_daily` 의 표식을 **그대로 싣는다**. 워크벤치는 이 표를 직접 읽으므로(`ADJ_TABLE`) 뷰만 통과시키면 잠정치가 확정치처럼 보인다.
+- EG3 ⑧(캘린더 세션)은 **`basis='krx'` 행에만** 건다 — 캘린더 상한이 `max(stg_price_daily.date)` 라 저녁 T 는 캘린더 밖이 정상이다. 안 그러면 매일 18:15 저녁 체인이 S23 에서 `n_off_calendar` 로 끊긴다(절단본 전량 체인 실측). 기록형 `n_evening_rows`·`n_evening_off_calendar`.
+- 폐기형 ⑩ `n_basis_ne_price_daily`: 두 표식이 `price_daily` 와 (ticker, date) 전건 동일.
+- 전방 조정이라 T 행에도 **과거 사건의 누적 share_factor** 가 곱해진다(005930 ×50). "T 행 조정가 = 원주가" 는 후방 축 `v_adj_price` 에서만 참이다(R2-06).
+- 백테스트 어댑터(`backtest_engine/adapters/equity_duckdb.py`)는 `basis`(선택 컬럼)를 읽어 `'krx'` 가 아닌 행을 방출하지 않는다 — 잠정 행은 OHLC 가 NULL 이라 STRICT 정책에서 run 전체가 FORMAT_ERROR 로 죽었다(R2-05).
 
 ### 10-4. 판(basis)이 지나가는 자리
 

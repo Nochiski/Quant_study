@@ -156,13 +156,17 @@ def eg3_price_daily(ctx: EquityGateContext) -> GateResult:
     # 이 판이 저녁 잠정판인가 아침 확정판인가 — `build.make_build_meta` 가 올린 세션 테이블.
     build_basis = str(_row(ctx, "SELECT basis FROM _build")[0])
     basis_vocab = ", ".join(f"'{b}'" for b in PRICE_BASIS_VOCAB)
+    n_evening_pending_null = _row(ctx, f"""
+        SELECT count(*) FROM {v}
+         WHERE basis = '{PRICE_BASIS_EVENING}' AND corp_action_pending IS NULL""")[0]
     (n_basis_vocab, n_basis_null, n_evening, n_evening_dates, n_evening_pending,
      n_krx_pending, evening_date, n_evening_mismatch) = _row(ctx, f"""
         SELECT
           (SELECT count(*) FROM {v} WHERE basis NOT IN ({basis_vocab})),
           (SELECT count(*) FROM {v} WHERE basis IS NULL),
           (SELECT count(*) FROM {v} WHERE basis = '{PRICE_BASIS_EVENING}'),
-          (SELECT count(DISTINCT date) FROM {v} WHERE basis = '{PRICE_BASIS_EVENING}'),
+          (SELECT count(DISTINCT date) FROM stg_flow_daily_kiwoom
+            WHERE date > (SELECT max(date) FROM stg_price_daily)),
           (SELECT count(*) FROM {v}
             WHERE basis = '{PRICE_BASIS_EVENING}' AND corp_action_pending),
           (SELECT count(*) FROM {v} WHERE basis = '{PRICE_BASIS_KRX}' AND corp_action_pending),
@@ -176,7 +180,11 @@ def eg3_price_daily(ctx: EquityGateContext) -> GateResult:
         "n_price_kind_outside_vocab": int(str(n_kind_vocab)),
         "n_ticker_bad_width": int(str(n_ticker_bad)),
         "n_basis_outside_vocab": int(str(n_basis_vocab)) + int(str(n_basis_null)),
+        # 원천(키움 원장)에서 센다 — 산출은 `kw` 술어가 이미 최신 하루로 접어 항상 ≤ 1 이다(검수 R2-02).
+        # 키움이 KRX 보다 이틀 이상 앞서면 중간 세션이 통째로 빠지므로 폐기한다.
         "n_evening_dates_over_one": max(int(str(n_evening_dates)) - 1, 0),
+        # `corp_action_pending` 은 2치여야 한다 — NULL 이면 소비자의 `IS NOT TRUE` 거름망을 통과한다(R2-07)
+        "n_evening_corp_action_pending_null": int(str(n_evening_pending_null)),
         # 키움 원장 대조 — evening 행의 종가·거래량은 원천 그대로여야 한다(EG20 의 짝)
         "n_evening_value_mismatch": int(str(n_evening_mismatch)),
         # `corp_action_pending` 은 저녁 축 전용이다 — krx 행이 참이면 산출식이 샌 것이다
@@ -301,7 +309,6 @@ def eg14_recent_sessions(ctx: EquityGateContext) -> GateResult:
 
 
 eg14_recent_sessions.gate_name = "EG14"         # type: ignore[attr-defined]
-
 
 
 # ── S19 필드 선언 (DESIGN §4-7 · FIELD_MAP §2) ────────────────────────────────

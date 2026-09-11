@@ -159,6 +159,33 @@ class TestEquityBarSource:
         assert [b.ts.date() for b in result.bars] == [d(27, 4), d(4)]
         assert result.dropped_rows == 3 and result.repaired_rows == 0
 
+    def test_provisional_evening_rows_are_never_emitted(self, tmp_path: Path) -> None:
+        """규칙 e1.15.0 저녁 잠정 행(basis='evening'): 키움 종가·거래량만 있고 O/H/L 은 NULL 인데
+        volume>0 이라 price_kind='trade' 다. 확정 전 값이라 백테스트 바로 방출하지 않는다 —
+        거르지 않으면 STRICT 정책에서 O/H/L 0.0 으로 run 전체가 FORMAT_ERROR 였다(검수 R2-05)."""
+        import pyarrow as pa
+
+        table = price_table([
+            trade("005930", d(27, 4), 2_650_000),
+            trade("005930", d(4), 51_900),
+            ("005930", d(7), None, None, None, 52_000, 15_000),   # 저녁 잠정 T 행
+        ])
+        table = table.append_column("basis", pa.array(["krx", "krx", "evening"]))
+        write_equity_table(tmp_path, "price_daily", table, year_column="date")
+        result = EquityBarSource(tmp_path).load_bars(BarQuery(instruments=(SAMSUNG,)))
+        assert result.ok, result.detail
+        assert [b.ts.date() for b in result.bars] == [d(27, 4), d(4)]
+
+    def test_only_provisional_rows_is_no_data_with_count(self, tmp_path: Path) -> None:
+        import pyarrow as pa
+
+        table = price_table([("005930", d(7), None, None, None, 52_000, 15_000)])
+        table = table.append_column("basis", pa.array(["evening"]))
+        write_equity_table(tmp_path, "price_daily", table, year_column="date")
+        result = EquityBarSource(tmp_path).load_bars(BarQuery(instruments=(SAMSUNG,)))
+        assert result.status is LoadStatus.NO_DATA
+        assert "provisional_rows=1" in (result.detail or "")
+
     def test_only_reference_rows_is_no_data_with_count(self, tmp_path: Path) -> None:
         write_equity_table(
             tmp_path, "price_daily", price_table([reference("005930", d(2), 100)]),

@@ -16,7 +16,7 @@
 
 | 항목 | 값 |
 |---|---|
-| 최종 갱신 | 2026-09-11 16:40 — **페이즈 B 구현 완료**(워크트리 `feat/daily-v2-b`, 에이전트 4갈래 B1 빌드 체인 / B2 equity 잠정판·e1.15.0 / B3 검수 후속 5건 / B4 운영 P6). 남은 것 = PR·서버 배포·첫 수동 잠정 빌드(`catalog --rebase-asof` 1회)·크론 등록(18:15 build_evening·19:00 watchdog·03:30 backup·일요일 gc)·08:10 `--no-build` 제거. 15:20 — **페이즈 A 가동**(구현·배포·스모크·크론 등록, PR #103). 14:30 — 사용자 "진행해": PR #102 머지(main `22aa249`), 워크트리 `feat/daily-v2-a` 생성, 페이즈 A 착수(구현 에이전트 3갈래: A.1+A.2(1·2) / A.2(5) / A.2(3)+A.4). D 범위 "전부 옮기되 잡별 교체" 확정. 13:30 — 결정 V2-1~8, §2-1 알림 정책(재판정 알림 포함), §2-2 병행기 규칙, A~D 태스크·게이트, B.3 추적, C.2 해석·위키, D 잡별 교체 로드맵(범위 제안 확인 대기)·D.2 v3 DB 처리, §8 작업 수행 방식. 관찰 2/5 통과, 페이즈 A 승인 대기 |
+| 최종 갱신 | 2026-09-11 18:00 — **최종 검수 반영**(리뷰어 4갈래: 결함 상 4·중 20·하 2 수정, PR #104 본문 "최종 검수 반영" 절·TECH_DEBT B-10~B-18). 핵심: 아침 C1 상시 FAIL(`--built-on`), 저녁 S23 체인 단절(캘린더 검사 krx 한정·표식 통과), 잠정 빌드가 DART 종료 대기(인계 파일 2단 기록), 워치독 금요일 사각(매일·D+1 08:00 기준), security 생존 상한 축, 백테스트 어댑터 잠정 행 필터, notify UTF-8·응답 검사. 16:40 — **페이즈 B 구현 완료**(워크트리 `feat/daily-v2-b`, 에이전트 4갈래 B1 빌드 체인 / B2 equity 잠정판·e1.15.0 / B3 검수 후속 5건 / B4 운영 P6). 남은 것 = PR·서버 배포·첫 수동 잠정 빌드(`catalog --rebase-asof` 1회)·크론 등록(18:15 build_evening·19:00 watchdog·03:30 backup·일요일 gc)·08:10 `--no-build` 제거. 15:20 — **페이즈 A 가동**(구현·배포·스모크·크론 등록, PR #103). 14:30 — 사용자 "진행해": PR #102 머지(main `22aa249`), 워크트리 `feat/daily-v2-a` 생성, 페이즈 A 착수(구현 에이전트 3갈래: A.1+A.2(1·2) / A.2(5) / A.2(3)+A.4). D 범위 "전부 옮기되 잡별 교체" 확정. 13:30 — 결정 V2-1~8, §2-1 알림 정책(재판정 알림 포함), §2-2 병행기 규칙, A~D 태스크·게이트, B.3 추적, C.2 해석·위키, D 잡별 교체 로드맵(범위 제안 확인 대기)·D.2 v3 DB 처리, §8 작업 수행 방식. 관찰 2/5 통과, 페이즈 A 승인 대기 |
 | 페이즈 A 저녁 원장 슬롯 | **가동**(09-11 15:20 크론 등록, 첫 실행 09-11 18:05): A.1 `--commit`, A.2 `daily_evening.sh`·06:00 축소·건전성 기준일·DART 처음 본 공시, A.3 STAGE_SPEC §2-21(저녁 슬롯 가용시각·WISE 기준일 전환 09-11), A.4 `watchdog.sh`(18:50·09:15). 서버 dry-run 스모크 rc 0(3갈래 병렬). PR #103. 게이트 GA 관찰 09-11 저녁부터 5거래일 |
 | 페이즈 B 잠정·확정 빌드 | **구현 완료, 배포 대기**(09-11 16:40): B.1 `build_chain.sh`(evening/morning 공통) + `build_evening.sh`(18:15, 원장 완료 대기 ≤18:40) + `build_morning.sh`(08:10 체인 안) + `stage.health` C1~C5 + 스냅샷 GC keep=6 + `watchdog.sh evening_build`(19:00) · B.2 `price_daily` 저녁 T 행(`basis`·`corp_action_pending`, EG14 신설, e1.15.0 상수 유도 3건) + `dataset_profile.basis` + `equity build --basis` · B.3 `deliver/history/` + `gc_pinned`(이력 30일·월말 보호) · v1 5.5 검수 후속 5건(KIS 최초 관측판 `version_folded`, `krx.corp_action_candidates` 게이트, 잔고율 I4b, `coverage_daily` S24, 정정 링크 확인) · P6 `backup_raw.sh`·`rotate_logs.sh`·`daily_report.py`. 회귀·lint 통과(기존 실패 1건 제외). 게이트 GB 는 첫 잠정 빌드부터 5거래일 |
 | 페이즈 C 스코어링 | Kael-alpha 인계 완료(`~/orca/projects/Kael-alpha/handoff/2026-09-10-evening-scoring-pipeline/`) |
@@ -77,7 +77,7 @@
 | 건전성 판정 | info/warn/crit | 20항목 결과. warn 도 보낸다(오늘처럼 통과만 요약하지 않는다) |
 | 부분 완료(예: WISE 커버 222/639 같은 급감, DART 상세 결측, 키움 행수 < 0.98) | warn | 게이트가 건수를 적어 보낸다 |
 | 휴장일 건너뜀 | info | "휴장 — 건너뜀" 도 보낸다(무소식 = 고장과 구분) |
-| **워치독** | crit | 18:50 까지 "잠정판 준비" 없음 · 19:30 까지 스코어 보고 없음 · 09:15 까지 확정판 없음 → 별도 크론이 `deliver/*.json` 시각으로 판정 |
+| **워치독** | crit | 18:50 까지 저녁 원장 보고(`ledger_evening.json`, 키움·WISE rc) 없음 · 19:00 까지 "잠정판 준비"(`latest_evening.json`) 없음 · 19:30 까지 스코어 보고 없음 · 09:15 까지 확정판(`logs/health/<D>.json` + `latest_morning.json`, 매일) 없음 → 별도 크론이 `deliver/*.json` 시각으로 판정 |
 | 오탐 정정·재판정 | info | 실패 알림을 낸 뒤 검사식을 고쳐 재판정하면 그 결과도 보낸다(09-11 `wise.raw` 사례: 실패 알림만 가고 정상 재판정은 알리지 않았음) |
 | dry-run | 없음 | 유일한 예외 |
 
@@ -153,7 +153,7 @@ v3 코드·DB·크론·키는 **건드리지 않는다**(읽기 전용). 우리 
 
 ### Task B.3: 추적 가능성 규약 (V2-8) — "스코어 하나에서 입력까지"
 
-실측(09-10): equity 전량 1판 ≈ 1.2 GB(28표, price_daily 298 MB·credit_daily 400 MB·flow 330 MB), stage 1판 ≈ 1.5 GB(66표), 원장 스냅샷 세트 6.6~17 GB, 디스크 여유 283 GB. 매일 2판을 전부 영구 보관하면 연 ≈600 GB 라 불가 → 3층으로 나눈다.
+실측(09-10): equity 전량 1판 ≈ 1.2 GB(29표, price_daily 298 MB·credit_daily 400 MB·flow 330 MB), stage 1판 ≈ 1.5 GB(66표), 원장 스냅샷 세트 6.6~17 GB, 디스크 여유 283 GB. 매일 2판을 전부 영구 보관하면 연 ≈600 GB 라 불가 → 3층으로 나눈다.
 
 | 층 | 무엇 | 어디 | 크기 | 보관 |
 |---|---|---|---|---|

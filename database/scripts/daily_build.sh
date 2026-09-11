@@ -85,8 +85,9 @@ if [ "$RC" -eq 0 ] && [ -z "$NOBUILD" ] && [ -z "$DRY" ]; then
   # stage·equity·인계 JSON·스냅샷 GC·알림은 전부 build_morning 안에 있다.
   export QL_BUILD_LOCK_HELD=""
   step "build_morning" bash scripts/build_morning.sh --date "$D" || true
-  [ -x scripts/daily_report.py ] && $PY scripts/daily_report.py --date "$D" || true
 fi
+# 통합 일일 리포트는 읽기 전용이라 게이트 실패일·--no-build 에도 돈다(가장 필요한 날이 실패일이다. 검수 R4-03).
+[ -z "$DRY" ] && [ -x scripts/daily_report.py ] && { $PY scripts/daily_report.py --date "$D" || true; }
 echo "════ 종료 rc=$RC $(kst) ════"
 } > "$RUN" 2>&1
 cat "$RUN" >> "$LOG"

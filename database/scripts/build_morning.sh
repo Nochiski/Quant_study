@@ -21,6 +21,11 @@ done
 D="${DATE_ARG:-$($PY -c 'import datetime as dt
 from daily import calendar as c
 print(c.load().prev_trading_day(dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()).strftime("%Y%m%d"))')}"
+if [ -z "$D" ]; then
+  echo "대상 거래일을 계산하지 못했다 — build_chain 이 오늘로 폴백하지 않게 여기서 멈춘다" >&2
+  [ -z "$DRY" ] && scripts/notify.sh crit "확정 빌드 시작 불가 — 대상일 계산 실패" "daily.calendar.prev_trading_day 가 값을 주지 않았다"
+  exit 2
+fi
 mkdir -p logs/morning
 echo "════ [$(TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST')] build_morning D=$D dry=${DRY:-no} ════" \
   | tee -a "logs/morning/build_${D}.log"

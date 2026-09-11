@@ -15,8 +15,8 @@
 -- **`covered` 의 정의는 수집기 정본을 그대로 옮긴다**(`backfill_wise.is_covered`): cF5001 의
 -- EPS·매출 추정 또는 목표주가 중 **하나라도 값이 있으면** 커버다. stage 에서는 그 세 신호가
 -- `stg_consensus_monthly` 의 `consensus`(metric eps·revenue) 와 `target_price_krw` 다.
--- `metric='parse_failed'`(파서가 값 칸을 못 읽은 관측)도 커버로 센다 — 오판 비용이 비대칭이라
--- (false-none = 영구 결측) 수집기가 파싱 불능을 covered 로 두는 것과 같은 규약이다.
+-- metric 은 묻지 않는다 — 차트 항목명 미상(`metric='parse_failed'`) 행도 값이 있으면 같은 신호다
+-- (수집기도 항목명과 무관하게 값 유무만 본다). cF5001 디코드 실패는 stage 에 행이 없어 여기서 안 보인다.
 -- 절단본 교차확인: 이 술어가 `stg_wise_coverage.status_current` 7종목을 전건 재현한다
 -- (covered 5 · none 2). 그 대조는 EG3_coverage_daily 가 기록형으로 매 빌드 센다.
 --
@@ -53,7 +53,7 @@ cov AS (
     -- 그날 그 종목이 커버였는가 — `backfill_wise.is_covered` 와 같은 술어(위 주석)
     SELECT ticker, fetched_date AS date
     FROM stg_consensus_monthly
-    WHERE consensus IS NOT NULL OR target_price_krw IS NOT NULL OR metric = 'parse_failed'
+    WHERE consensus IS NOT NULL OR target_price_krw IS NOT NULL
     GROUP BY ticker, fetched_date
 ),
 est AS (

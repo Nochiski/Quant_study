@@ -100,9 +100,11 @@ src AS (
            k.close_krw, k.volume_shr,
            NULL AS value_krw, NULL AS change_krw, NULL AS shares_out, NULL AS par_value_krw,
            'evening' AS basis,
-           (p.prev_close IS NULL
-            OR abs(CAST(k.close_krw AS DOUBLE) / CAST(nullif(p.prev_close, 0) AS DOUBLE) - 1)
-               > c.evening_jump_abs_max)                  AS corp_action_pending
+           -- 2치로 닫는다: 직전 종가가 없거나 0 이하이거나 키움 종가가 NULL 이면 "판정 불가 = 의심"(TRUE).
+           -- 3치 논리로 NULL 이 새면 소비자의 `IS NOT TRUE` 거름망을 통과한다(검수 R2-07).
+           CASE WHEN p.prev_close IS NULL OR p.prev_close <= 0 OR k.close_krw IS NULL THEN TRUE
+                ELSE abs(CAST(k.close_krw AS DOUBLE) / CAST(p.prev_close AS DOUBLE) - 1)
+                     > c.evening_jump_abs_max END         AS corp_action_pending
     FROM kw k
     LEFT JOIN kw_prev p ON p.ticker = k.ticker
     CROSS JOIN _const c

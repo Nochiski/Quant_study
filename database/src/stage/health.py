@@ -59,6 +59,7 @@ class StageHealth:
     basis: str
     stage_root: str
     checks: tuple[Check, ...]
+    built_on: str = ""      # 판이 커밋된 KST 날짜. 아침 확정판은 date(T-1) 와 다르다 — C1·C2·C5 의 기준
 
     @property
     def ok(self) -> bool:
@@ -77,8 +78,8 @@ class StageHealth:
         return head
 
     def as_dict(self) -> dict[str, object]:
-        return {"date": self.date, "basis": self.basis, "stage_root": self.stage_root,
-                "ok": self.ok, "summary": self.summary(),
+        return {"date": self.date, "basis": self.basis, "built_on": self.built_on,
+                "stage_root": self.stage_root, "ok": self.ok, "summary": self.summary(),
                 "checks": [c.as_dict() for c in self.checks]}
 
 
@@ -234,12 +235,21 @@ def _c5_elapsed(pairs: list[_Pair], date_kst: str, started_at: str | None,
 
 
 def check_stage(stage_root: Path, basis: str, date_kst: str, *,
+                built_on: str | None = None,
                 tables: Mapping[str, str] | None = None, skip: Collection[str] = (),
                 started_at: str | None = None,
                 budget_s: int = BUDGET_S_DEFAULT) -> StageHealth:
-    """C1~C5 를 판정한다. `tables` 는 표 이름 → write_mode (기본은 stage 규칙 전수)."""
+    """C1~C5 를 판정한다. `tables` 는 표 이름 → write_mode (기본은 stage 규칙 전수).
+
+    `date_kst` 는 대상 거래일(리포트·파일명의 D), `built_on` 은 판이 커밋된 KST 날짜다. 저녁 잠정판은
+    둘이 같지만 아침 확정판은 D=T-1 이고 커밋은 T 아침이라 다르다 — C1(오늘 판)·C2(오늘 폐기)·C5(오늘
+    소요)는 `built_on` 으로 본다. 생략하면 `date_kst` 와 같다(저녁·수동 빌드 규약).
+    """
     if len(date_kst) != 8 or not date_kst.isdigit():
         raise ValueError(f"date must be YYYYMMDD: date_kst={date_kst!r}")
+    built_on = built_on or date_kst
+    if len(built_on) != 8 or not built_on.isdigit():
+        raise ValueError(f"built_on must be YYYYMMDD: built_on={built_on!r}")
     if basis not in model.BASIS_PREFIX:
         raise ValueError(f"unknown build basis: basis={basis!r} "
                          f"allowed={sorted(model.BASIS_PREFIX)}")
@@ -247,12 +257,12 @@ def check_stage(stage_root: Path, basis: str, date_kst: str, *,
         name: rule.write_mode for name, rule in rules.RULES.items()}
     skipped = sorted(set(skip) & set(write_modes))
     judged = [_pair(stage_root, t) for t in sorted(write_modes) if t not in skipped]
-    checks = (_c1_fresh(judged, basis, date_kst, skipped),
-              _c2_failed(stage_root, date_kst),
+    checks = (_c1_fresh(judged, basis, built_on, skipped),
+              _c2_failed(stage_root, built_on),
               _c3_monotonic(judged, write_modes),
               _c4_frozen(judged),
-              _c5_elapsed(judged, date_kst, started_at, budget_s))
-    return StageHealth(date_kst, basis, str(stage_root), checks)
+              _c5_elapsed(judged, built_on, started_at, budget_s))
+    return StageHealth(date_kst, basis, str(stage_root), checks, built_on)
 
 
 def _split(raw: str) -> tuple[str, ...]:
@@ -265,14 +275,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--stage-root", type=Path, default=base / "data" / "stage")
     ap.add_argument("--basis", required=True, choices=sorted(model.BASIS_PREFIX))
     ap.add_argument("--date", default=dt.datetime.now(KST).strftime("%Y%m%d"),
-                    help="판정 기준일 (KST YYYYMMDD). 기본은 오늘")
+                    help="대상 거래일 D (KST YYYYMMDD, 리포트·파일명). 기본은 오늘")
+    ap.add_argument("--built-on", default=None,
+                    help="판이 커밋된 KST 날짜 (C1·C2·C5 기준). 기본은 --date 와 같다 — 아침 확정판은 오늘을 준다")
     ap.add_argument("--out", type=Path, help="결과 JSON 경로 (기본 logs/health/stage_<D>_<basis>.json)")
     ap.add_argument("--skip", default="", help="의도적으로 안 지은 표 (쉼표·공백 구분)")
     ap.add_argument("--started-at", help="빌드 시작 시각 ISO (C5. 기본은 오늘 첫 판의 빌드 id 시각)")
     ap.add_argument("--budget-s", type=int, default=BUDGET_S_DEFAULT)
     a = ap.parse_args(argv)
 
-    r = check_stage(a.stage_root, a.basis, a.date, skip=_split(a.skip),
+    r = check_stage(a.stage_root, a.basis, a.date, built_on=a.built_on, skip=_split(a.skip),
                     started_at=a.started_at, budget_s=a.budget_s)
     out = a.out or base / "logs" / "health" / f"stage_{a.date}_{a.basis}.json"
     out.parent.mkdir(parents=True, exist_ok=True)

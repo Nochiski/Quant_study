@@ -114,7 +114,8 @@ def test_krx_corp_action_candidates_flags_parval_and_shares_changes(tmp_path):
 def test_krx_corp_action_candidates_pass_and_skip(tmp_path):
     rep = lh.run(D, _paths(tmp_path, krx=_krx(tmp_path)))
     c = _by(rep)["krx.corp_action_candidates"]
-    assert c.status is lh.Status.PASS and c.value == {"n": 0, "items": []}
+    assert c.status is lh.Status.PASS and c.value["n"] == 0 and c.value["items"] == []
+    assert c.value["judged"] == ["stk", "ksq"] and c.value["skipped"] == []
     sub = tmp_path / "b"; sub.mkdir()
     rep2 = lh.run(D, _paths(sub, krx=_krx(sub, base_prev=False)))
     assert _by(rep2)["krx.corp_action_candidates"].status is lh.Status.SKIP
@@ -239,3 +240,33 @@ def test_wise_without_either_snapshot_fails(tmp_path):
     c = _by(rep)
     assert c["wise.run"].status is lh.Status.FAIL and not rep.ok
     assert c["wise.snapshot_day"].status is lh.Status.SKIP and c["wise.snapshot_day"].value is None
+
+
+# ── 검수 R3-02·R3-03: 기업행위 후보 게이트가 시장별 결측·NULL 을 "0건" 으로 위장하지 않는다 ──
+def test_한_시장의_직전거래일_행이_없으면_그_시장만_SKIP_이고_다른_시장은_판정한다(tmp_path) -> None:
+    """stk 정상 · ksq 만 직전 거래일 base_info 가 비었을 때. ksq 에 심은 액면병합은 대조 상대가 없어
+    잡을 수 없지만, 그 사실이 `skipped` 로 드러나야지 PASS('0건') 로 보이면 안 된다(R3-02)."""
+    krx = _krx(tmp_path, corp_actions=(("ksq", 7, ("500", "5000"), ("28757309", "2875730")),))
+    con = sqlite3.connect(tmp_path / "krx.db")
+    con.execute("DELETE FROM krx_ksq_isu_base_info WHERE bas_dd_req=?", (DP,))
+    con.commit(); con.close()
+    rep = lh.run(D, _paths(tmp_path, krx=krx))
+    c = _by(rep)["krx.corp_action_candidates"]
+    assert c.status is lh.Status.PASS          # stk 는 판정했고 후보 0
+    assert c.value["judged"] == ["stk"]
+    assert any(s.startswith("ksq(") for s in c.value["skipped"]), c.value
+    assert "판정 불가 시장: ksq" in c.expected
+
+
+def test_LIST_SHRS가_NULL이_되면_후보로_뜬다(tmp_path) -> None:
+    """D 쪽 LIST_SHRS 가 NULL(수집 누락) — `<>` 는 NULL 로 떨어져 행이 빠지지만 `IS NOT` 은 잡는다(R3-03)."""
+    krx = _krx(tmp_path)
+    con = sqlite3.connect(tmp_path / "krx.db")
+    con.execute("UPDATE krx_stk_isu_base_info SET LIST_SHRS=NULL "
+                "WHERE bas_dd_req=? AND ISU_SRT_CD='000003'", (D,))
+    con.commit(); con.close()
+    rep = lh.run(D, _paths(tmp_path, krx=krx))
+    c = _by(rep)["krx.corp_action_candidates"]
+    assert c.status is lh.Status.FAIL
+    assert [i["code"] for i in c.value["items"]] == ["000003"]
+    assert c.value["items"][0]["shares_ratio"] is None

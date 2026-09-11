@@ -174,7 +174,7 @@ def main(argv: list[str] | None = None) -> int:
     p_build.add_argument("--build-id")
     p_build.add_argument("--basis", choices=sorted(BUILD_BASES), default=BUILD_BASIS_DEFAULT,
                          help="빌드 판 — evening(저녁 잠정판, build_id 접두 e_) · "
-                              "morning(아침 확정판, m_) · adhoc(기본, b_)")
+                              "morning(아침 확정판, m_) · manual(기본, b_)")
     p_build.add_argument("--keep", type=int, default=manifest.KEEP_DEFAULT)
     p_build.add_argument("--memory-limit", default="6GB")
     p_build.add_argument("--threads", type=int, default=3)

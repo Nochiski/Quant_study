@@ -256,7 +256,10 @@ def _pin_sort_key(build_id: str) -> tuple[str, str]:
 
 
 def _dir_bytes(path: Path) -> int:
-    return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+    """지우면 실제로 돌아오는 바이트 — `_pinned/` 는 stage 원본에 건 하드링크라 다른 링크가 살아 있는
+    파일(`st_nlink > 1`)은 지워도 디스크가 비지 않는다(검수 R2 이의 7)."""
+    return sum(st.st_size for f in path.rglob("*") if f.is_file()
+               for st in (f.stat(),) if st.st_nlink <= 1)
 
 
 def gc_pinned(equity_root: Path, *, keep: int = manifest.KEEP_DEFAULT,

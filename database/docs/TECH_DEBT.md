@@ -913,3 +913,17 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
 | B-8 | pyright 선행 오류 5건(`rules_s02.py:277` axis_columns 3-tuple, `rules_s19.py` `_window` 4건)·ruff 선행 2건(`test_equity_cli.py:31` RUF059, `test_equity_s06_adj.py:1033` C408) — HEAD 에도 동일 | 수술적 변경 범위 밖 | 해당 파일 |
 | B-9 | `gc_pinned` 보호 목록에 Kael-alpha 스코어 manifest 가 아직 안 들어간다(페이즈 C 에서 `out/scores/*/…manifest.json` 의 `equity_builds` 를 합류) | 페이즈 C 산출물이 아직 없음 | `scripts/build_chain.sh` gc_step |
 
+### 최종 검수(09-11, R1~R4) 에서 남긴 항목
+
+| # | 항목 | 왜 미룸 | 위치 |
+|---|---|---|---|
+| B-10 | `stg_doc_*` 4표는 매 빌드 `skipped.txt` 로 C1 밖 — 판 나이 상한(예: 7일) warn 이 없어 노화가 조용하다(R1 이의 4). 문서층 일일 증분(doc_prepass 크론)이 붙을 때 C1 에 skip 표 나이 경보를 함께 | 문서층 증분 설계가 별도 | `src/stage/health.py _c1_fresh`, `scripts/run_stage_all.sh` |
+| B-11 | `stage.snapshot.GcResult` 에 `errors` 축이 없어 `equity.inputs.GcResult` 와 실패 규약이 다르다(R1 청소). 지금은 `build_chain.sh` gc_step 이 예외를 잡아 warn 으로 올린다 | 수술적 범위 밖 | `src/stage/snapshot.py` |
+| B-12 | 백업 primitive: `.backup` 은 외부 쓰기가 계속되면 재시작만 반복한다(R4-04 실측 25.4s vs 0.62s). 지금은 DB 당 `timeout 25m` 으로 막았다. `VACUUM INTO`(스냅샷과 같은 방식, 재시작 없음·압축) 로 바꾸면 결정 9 예산도 준다 | B4 설계 유지, 사용자 결정 9 와 함께 | `scripts/backup_raw.sh` |
+| B-13 | KIS 판본 선택: 같은 KST 수집일에 값이 다른 두 판이 있으면 2차 정렬(`close_krw` ASC 등)이 "최초 관측" 이 아니라 값 크기로 고른다(R3-01). stage `stg_credit_daily` 에 `collected_at` 원값(`observed_ts`)이 없어 날짜 해상도 밖에서는 판별 불가. 지금은 기록형 `n_version_observed_date_ties` 로 세고, 서버 실측(09-11)에서 동률 0 을 확인했다. 동률이 생기면 stage 에 `observed_ts` 를 싣고 정렬 1순위로 | stage 스키마 변경 = 전량 재빌드 | `src/equity/rules_s10.py VERSION_ORDER_COLUMNS`, `src/stage/rules_kis.py` |
+| B-14 | `balance_over_shares` 격리가 판본 축과 상호작용 — 최초 관측판이 백필판이면 소급 환산돼 있어 `price_daily.shares_out`(원주식수)과 축이 어긋난 "이상" 이 뜬다(R3 이의 1). `corp_event` 분할·병합 `apply_date` 와 교차한 기록형 metric 이 필요 | 서버 4행의 정체 확인 뒤 | `src/equity/rules_s10.py` |
+| B-15 | 판본이 어느 컬럼에서 갈리는지(`n_version_diff_by_column`) 기록형 metric 없음(R3 이의 2) — `close_krw` 만 다른 판본은 산출 무영향, 측정축이 다르면 결정 6-2 가 값을 가른다 | 관찰 지표 | `src/equity/rules_s10.py` |
+| B-16 | 원장 건전성 `summary()` 가 WARN 실패를 이름만 싣는다 — `krx.corp_action_candidates` 후보 종목이 텔레그램 요약에 안 뜬다(R3 이의 4) | 요약 포맷 변경 | `src/daily/ledger_health.py summary` |
+| B-17 | S24 `covered`: cF5001 **디코드 실패**(파서가 행을 못 만듦)는 수집기 `is_covered` 가 covered 로 두지만 stage 에 행이 없어 S24 는 `false` 다(R3-04 (a)). `stg_calls_wise`/`ws_run_log` 축으로 세는 기록형 metric 이 필요 | 절단본·서버 실측 0건 | `src/equity/rules_s24.py` |
+| B-18 | `notify.sh` 는 이제 텔레그램 응답 `"ok":true` 를 확인하지만(R4-09), 실패 시 재시도·대체 경로는 없다. 알림 자체가 죽으면 V2-7 전체가 조용해진다 — 워치독이 별도 채널로 가는 것이 다음 수 | 인프라 결정 | `scripts/notify.sh` |
+

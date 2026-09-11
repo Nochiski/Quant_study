@@ -170,7 +170,7 @@
 
 | 컬럼 | 뜻 | 단위·기준 |
 |---|---|---|
-| `covered` | 그날 그 종목에 컨센서스 커버가 있었는가 | bool. 판정은 수집기 정본 `backfill_wise.is_covered` 를 그대로 옮긴 것 — cF5001 의 EPS·매출 추정 또는 목표주가 중 **하나라도 값이 있으면** covered(stage 에서는 `stg_consensus_monthly.consensus` · `target_price_krw`), 파싱 불능(`metric='parse_failed'`)도 covered(오판 비용 비대칭) |
+| `covered` | 그날 그 종목에 컨센서스 커버가 있었는가 | bool. 판정은 수집기 정본 `backfill_wise.is_covered` 를 그대로 옮긴 것 — cF5001 의 EPS·매출 추정 또는 목표주가 중 **하나라도 값이 있으면** covered(stage 에서는 `stg_consensus_monthly.consensus` · `target_price_krw`), metric 은 묻지 않는다(항목명 미상 `parse_failed` 행도 값이 있으면 같은 신호). 디코드 실패(stage 에 행 없음)는 수집기와 달리 covered 로 못 세운다 — TECH_DEBT B-17 |
 | `first_covered_date`·`last_covered_date` | 그 종목의 첫/마지막 커버 관측일 | **`date` 이하 누적(PIT)**. 종목 상수가 아니다 — 상수로 실으면 뒤에 일어난 커버 상실을 과거 행이 미리 아는 look-ahead 다(`disclosure_version` 이 `has_correction` 을 두지 않는 것과 같은 이유) |
 | `streak_days` | 연속 커버 **스냅샷 수**(무커버 행은 0) | 달력 일수가 아니다 — 날짜축이 우리 WISE 스냅샷 일정이라, 스냅샷이 매일이면 일수와 같고 건너뛴 날이 있으면 그만큼 짧다 |
 | `analyst_count` | 그날 커버 애널리스트 수 | 명. `stg_analyst_summary` 의 그날 값 무수정, 없으면 NULL(0 을 굽지 않는다). 정의는 WISE cTB15 추정기관수 = **최근 3개월 투자의견을 낸 증권사 수** |

@@ -174,17 +174,22 @@ def check_krx_corp_actions(con: sqlite3.Connection, d: str, d_prev: str) -> Chec
     것은 이것이 실패가 아니라 **확인 대상**이기 때문이다.
     """
     items: list[dict[str, object]] = []
-    n_prev = 0
+    skipped: list[str] = []      # 판정 불가한 시장 — "0건" 으로 위장하지 않는다(검수 R3-02)
+    judged: list[str] = []
     for market in _CORP_ACTION_MARKETS:
         tbl = f"krx_{market}_isu_base_info"
         if not _has_table(con, tbl) or not _has_columns(con, tbl, CORP_ACTION_COLUMNS):
-            return Check("krx.corp_action_candidates", Level.WARN, Status.SKIP, None,
-                         f"{tbl} 에 {list(CORP_ACTION_COLUMNS)} 축이 없다 — 판정 불가")
-        n_prev += _count(con, f"SELECT COUNT(*) FROM {tbl} WHERE bas_dd_req=?", (d_prev,))
+            skipped.append(f"{market}(축 없음)")
+            continue
+        if _count(con, f"SELECT COUNT(*) FROM {tbl} WHERE bas_dd_req=?", (d_prev,)) == 0:
+            skipped.append(f"{market}({d_prev} 행 0)")
+            continue
+        judged.append(market)
+        # `IS NOT` 은 NULL-safe 다 — 한쪽이 NULL 이면 `<>` 는 NULL 로 떨어져 행이 조용히 빠진다(검수 R3-03).
         rows = con.execute(
             f"SELECT c.ISU_SRT_CD, c.ISU_ABBRV, p.PARVAL, c.PARVAL, p.LIST_SHRS, c.LIST_SHRS "
             f"FROM {tbl} c JOIN {tbl} p ON p.ISU_SRT_CD = c.ISU_SRT_CD AND p.bas_dd_req = ? "
-            "WHERE c.bas_dd_req = ? AND (c.LIST_SHRS <> p.LIST_SHRS OR c.PARVAL <> p.PARVAL)",
+            "WHERE c.bas_dd_req = ? AND (c.LIST_SHRS IS NOT p.LIST_SHRS OR c.PARVAL IS NOT p.PARVAL)",
             (d_prev, d)).fetchall()
         for code, name, pv0, pv1, sh0, sh1 in rows:
             a, b = _krx_number(sh0), _krx_number(sh1)
@@ -195,15 +200,17 @@ def check_krx_corp_actions(con: sqlite3.Connection, d: str, d_prev: str) -> Chec
             items.append({"code": str(code), "name": str(name), "market": market,
                           "parval": [str(pv0), str(pv1)], "shares": [str(sh0), str(sh1)],
                           "shares_ratio": ratio})
-    if n_prev == 0:
+    if not judged:
         return Check("krx.corp_action_candidates", Level.WARN, Status.SKIP, None,
-                     f"직전 거래일({d_prev}) base_info 행 0 — 대조 대상 없음")
+                     f"판정 가능한 시장 없음 — {', '.join(skipped)}")
     items.sort(key=lambda x: (str(x["market"]), str(x["code"])))
+    skip_txt = f" | 판정 불가 시장: {', '.join(skipped)}" if skipped else ""
     return Check("krx.corp_action_candidates", Level.WARN,
                  Status.PASS if not items else Status.FAIL,
-                 {"n": len(items), "items": items[:CORP_ACTION_SAMPLE]},
+                 {"n": len(items), "items": items[:CORP_ACTION_SAMPLE], "judged": judged,
+                  "skipped": skipped},
                  f"{d_prev}→{d} 액면가 변경 또는 주식수 비 ≠ 1(±{SHARES_RATIO_TOL:.1%} 초과) 0건 "
-                 "— 있으면 adj_factor 산출과 대조한다 (검수 H1)")
+                 f"[{', '.join(judged)}]{skip_txt} — 있으면 adj_factor 산출과 대조한다 (검수 H1)")
 
 
 # ── KRX (A §6-1) ───────────────────────────────────────────────────────────

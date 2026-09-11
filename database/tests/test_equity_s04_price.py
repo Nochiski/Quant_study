@@ -704,3 +704,25 @@ def test_EG14_상수가_없으면_skip_no_baseline(tmp_path: Path) -> None:
     g = _gate(r, "EG14")
     assert g.status is GateStatus.SKIP and g.detail == "no_baseline"
     assert g.metrics["missing_metric"] == "price_daily.recent_session_window"
+
+
+def test_키움이_KRX보다_이틀_앞서면_원천_기준으로_폐기한다(tmp_path: Path, make_stage_tree) -> None:
+    """검수 R2-02: 산출의 evening 행은 `kw` 술어가 최신 하루로 접어 항상 한 날짜라
+    `n_evening_dates_over_one` 이 산출에서 세면 사문이다. 원천(키움 원장)에서 KRX 최대일을 넘는
+    날짜가 둘이면 중간 세션이 통째로 빠지므로 폐기해야 한다."""
+    from datetime import timedelta
+    t2 = T_EVENING + timedelta(days=1)
+    rows = list(EVENING_ROWS) + [
+        {"ticker": "005930", "date": t2, "close_krw": 281000, "volume_shr": 21000000},
+        {"ticker": "036220", "date": t2, "close_krw": 10100, "volume_shr": 5100},
+    ]
+    root = _evening_stage_root(tmp_path, make_stage_tree, rows=rows)
+    eq = tmp_path / "equity"
+    r = build.build_table(rules_s02.TRADING_CALENDAR, root, eq, SEED, build_id="e_s02_cal2",
+                          basis="evening")
+    assert r.ok
+    r = _build_price(eq, build_id="e_s04_two_days", stage_root=root, basis="evening")
+    assert not r.ok
+    g = next(x for x in r.gates if x.name == "EG3_price_daily")
+    assert g.status is GateStatus.FAIL
+    assert "n_evening_dates_over_one=1" in g.detail

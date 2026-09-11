@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 커밋된 equity 28표를 확정 baseline 으로 재판정한다(빌드 없음·폐기 없음).
+# 커밋된 equity 29표를 확정 baseline 으로 재판정한다(빌드 없음·폐기 없음).
 # 서버 전용. baseline 상수를 바꾼 뒤 '재빌드가 필요 없는 변경' 임을 확인할 때 쓴다
 #   (재빌드가 필요한 상수 목록은 EQUITY_HANDOFF.md §5-1).
 set -uo pipefail

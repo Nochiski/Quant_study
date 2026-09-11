@@ -26,11 +26,16 @@ mkdir -p logs/evening
 LOG="logs/evening/build_${D}.log"
 say() { echo "$1" | tee -a "$LOG"; }
 
-is_trading_day() {
+is_trading_day() {   # rc 0 거래일 · 1 휴장 · 2 판정 불가(캘린더를 못 읽음 — 휴장으로 위장하지 않는다)
   $PY -c 'import datetime as dt, sys
 from daily import calendar as c
 d = sys.argv[1]
-sys.exit(0 if c.load().is_trading_day(dt.date(int(d[:4]), int(d[4:6]), int(d[6:8]))) else 1)' "$1"
+try:
+    ok = c.load().is_trading_day(dt.date(int(d[:4]), int(d[4:6]), int(d[6:8])))
+except Exception as e:  # noqa: BLE001  # reason: 어떤 예외든 "판정 불가" 로 올려 crit 을 내야 한다
+    print(f"calendar error: {type(e).__name__}: {e}", file=sys.stderr)
+    sys.exit(2)
+sys.exit(0 if ok else 1)' "$1"
 }
 ledger_ready() {
   $PY - "$1" <<'PY'
@@ -54,7 +59,13 @@ PY
 }
 
 say "════ [$(kst)] build_evening D=$D dry=${DRY:-no} ════"
-if ! is_trading_day "$D"; then
+is_trading_day "$D" 2>>"$LOG"; TD=$?
+if [ "$TD" -eq 2 ]; then
+  say "  ✗ D=$D 거래일 판정 실패 — 캘린더를 읽지 못했다"
+  [ -z "$DRY" ] && scripts/notify.sh crit "잠정 빌드 시작 불가 — 거래일 판정 실패" "D=$D | daily.calendar 를 읽지 못했다 | 로그 $LOG"
+  exit 2
+fi
+if [ "$TD" -eq 1 ]; then
   say "  D=$D 는 거래일이 아니다 — 잠정 빌드 건너뜀"
   [ -z "$DRY" ] && scripts/notify.sh info "잠정 빌드 휴장 — 건너뜀" "D=$D | 로그 $LOG"
   exit 0

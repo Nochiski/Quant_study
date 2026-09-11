@@ -4,7 +4,7 @@
 #   예정 크론(서버 TZ=UTC. 등록은 오케스트레이터가 한다):
 #     50 9 * * 1-5  cd /home/kael/quant-ledger && scripts/watchdog.sh evening_ledger   # 18:50 KST
 #      0 10 * * 1-5 cd /home/kael/quant-ledger && scripts/watchdog.sh evening_build    # 19:00 KST
-#     15 0 * * 2-6  cd /home/kael/quant-ledger && scripts/watchdog.sh morning_build    # 09:15 KST
+#     15 0 * * *    cd /home/kael/quant-ledger && scripts/watchdog.sh morning_build    # 09:15 KST 매일 — 금요일 판은 토요일에 지어지고 판정 기준은 "대상일 다음 날 08:00" 이라 실행일의 휴장 여부와 무관(검수 R4-07)
 #   판정 근거는 체인이 남긴 산출물뿐이다 — 원장·API 를 건드리지 않으므로 raw 락도 잡지 않는다.
 #   휴장일(오늘 KST)은 info 후 rc 0. 스코어 워치독은 페이즈 C 에서 case 에 추가한다.
 set -uo pipefail
@@ -24,7 +24,8 @@ TRADING=$($PY -c 'import datetime as dt, sys
 from daily import calendar as c
 d = sys.argv[1]
 print(1 if c.load().is_trading_day(dt.date(int(d[:4]), int(d[4:6]), int(d[6:8]))) else 0)' "$TODAY" 2>/dev/null || echo 1)
-if [ "$TRADING" != "1" ]; then
+# 저녁 두 검사는 "오늘" 을 판정하므로 휴장이면 건너뛴다. morning_build 는 직전 거래일의 확정판을 보므로 매일 돈다.
+if [ "$CHECK" != "morning_build" ] && [ "$TRADING" != "1" ]; then
   scripts/notify.sh info "watchdog $CHECK — 휴장" "$TODAY(KST)는 거래일이 아니다 — 판정 건너뜀"
   exit 0
 fi
@@ -110,9 +111,13 @@ if check == "morning_build":
         out("", f"{path} 없음 — 08:10 확정 빌드가 D={d_prev} 건전성 리포트를 쓰지 못했다", 1)
     mtime = os.path.getmtime(path)
     when = dt.datetime.fromtimestamp(mtime, KST).strftime("%m-%d %H:%M")
-    thresh = dt.datetime.combine(today_d, dt.time(8, 0), KST).timestamp()
+    # 확정판은 대상일 D 의 다음 달력일 08:10 체인이 짓는다(KRX T+1 08:00). 금요일 판은 토요일에 지어지므로
+    # 기준은 "오늘 08:00" 이 아니라 "D+1 08:00" 이다 — 월요일에 금요일 판을 다시 판정해도 오탐하지 않는다.
+    d_prev_d = dt.date(int(d_prev[:4]), int(d_prev[4:6]), int(d_prev[6:8]))
+    expect_d = d_prev_d + dt.timedelta(days=1)
+    thresh = dt.datetime.combine(expect_d, dt.time(8, 0), KST).timestamp()
     if mtime < thresh:
-        out("", f"{path} 가 오늘 08:00 KST 이후 갱신되지 않았다 (마지막 {when} KST) — 확정 빌드 미실행 의심", 1)
+        out("", f"{path} 가 {expect_d:%m-%d} 08:00 KST 이후 갱신되지 않았다 (마지막 {when} KST) — D={d_prev} 확정 빌드 미실행 의심", 1)
     try:
         with open(path, encoding="utf-8") as f:
             rep = json.load(f)
@@ -124,7 +129,26 @@ if check == "morning_build":
     warn_txt = f" | 경고 {', '.join(warns)}" if warns else ""
     if rep.get("ok") is not True:
         out("", f"건전성 FAIL D={d_prev} ({when} KST) 실패 항목: {', '.join(fails) or '미상'}{warn_txt}", 1)
-    out(when.split(" ")[-1], f"D={d_prev} 건전성 OK ({when} KST){warn_txt}", 0)
+    # 원장 건전성이 OK 여도 확정 빌드(build_morning)가 죽으면 판이 없다 — 인계 파일까지 본다(플랜 A.4).
+    lpath = "data/deliver/latest_morning.json"
+    if not os.path.exists(lpath):
+        out("", f"원장 OK 이지만 {lpath} 없음 — 08:10 확정 빌드가 돌지 않았거나 인계 파일을 쓰지 못했다{warn_txt}", 1)
+    try:
+        with open(lpath, encoding="utf-8") as f:
+            lat = json.load(f)
+    except (OSError, ValueError) as e:
+        out("", f"{lpath} 를 읽을 수 없다 ({type(e).__name__}: {e})", 1)
+    lhealth = lat.get("health") if isinstance(lat.get("health"), dict) else {}
+    lgen = str(lat.get("generated_at") or "")
+    lsum = (f"확정판 date={lat.get('date') or '결측'} generated_at={lgen or '결측'} "
+            f"stage={rc_txt(lhealth.get('stage'))} equity={rc_txt(lhealth.get('equity'))} "
+            f"(stage {len(lat.get('stage_builds') or {})}표 · equity {len(lat.get('equity_builds') or {})}표)")
+    if str(lat.get("date") or "") != d_prev:
+        out("", f"원장 OK 이지만 확정판 인계 파일이 D={d_prev} 것이 아니다 — {lsum}{warn_txt}", 1)
+    lbad = [k for k in ("stage", "equity") if lhealth.get(k) != "ok"]
+    if lbad:
+        out("", f"확정판 건전성 실패 {', '.join(lbad)} — {lsum}{warn_txt}", 1)
+    out(when.split(" ")[-1], f"D={d_prev} 원장 건전성 OK ({when} KST) · {lsum}{warn_txt}", 0)
 
 out("", f"판정 로직이 없는 check: {check}", 1)
 PY

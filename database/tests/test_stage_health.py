@@ -229,3 +229,28 @@ def test_build_record_derives_basis_from_the_build_id(tmp_path: Path) -> None:
          "built_at_utc": "2026-09-01T00:00:00+00:00", "n_rows": 1, "content_hash": "1:0"}]}
     (root / "MANIFEST.json").write_text(json.dumps(old), encoding="utf-8")
     assert manifest.load(root / "MANIFEST.json").builds[0].basis == "manual"
+
+
+# ── built_on: 아침 확정판은 대상일(T-1)과 빌드일(T)이 다르다 ──────────────────────
+def test_C1_아침_확정판은_대상일이_전_거래일이어도_빌드일_기준으로_PASS(tmp_path: Path,
+                                                                    make_stage_tree) -> None:
+    """08:10 체인은 D=T-1(전 거래일) 로 판정을 부르지만 판은 T 아침에 커밋된다. C1·C2·C5 는
+    빌드일(`built_on`)로 보고, 리포트의 `date` 만 D 로 남아야 한다."""
+    for t in TABLES:
+        tree = make_stage_tree(tmp_path, t, [{"k": "1"}], build_id="b_seed")
+        _commit(tree.table_root, PREV_BID, n_rows=10, content_hash="10:aa", n_src=10,
+                built_at_utc="2026-09-10T23:30:00+00:00")   # KST 09-11 08:30 아침 판
+    root = tree.stage_root
+    r = health.check_stage(root, basis="morning", date_kst="20260910", built_on="20260911",
+                           tables=TABLES, started_at="2026-09-10T23:10:00+00:00")
+    assert _check(r, "C1").status is health.Status.PASS, _check(r, "C1").detail
+    assert _check(r, "C5").status is health.Status.PASS, _check(r, "C5").detail
+    assert r.date == "20260910" and r.built_on == "20260911"
+    assert r.as_dict()["built_on"] == "20260911"
+
+
+def test_built_on_생략이면_대상일과_같다(tmp_path: Path, make_stage_tree) -> None:
+    root = _all(tmp_path, make_stage_tree)
+    r = _run(root)
+    assert r.built_on == DATE
+    assert _check(r, "C1").status is health.Status.PASS

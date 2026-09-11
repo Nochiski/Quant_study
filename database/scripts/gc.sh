@@ -7,6 +7,8 @@
 set -euo pipefail
 cd "${QL_HOME:-/home/kael/quant-ledger}"
 APPLY=0
+# 주간 정리도 보고한다(결정 V2-7). set -e 로 죽는 어느 줄이든 warn 이 나간다.
+trap 'rc=$?; [ "$APPLY" -eq 1 ] && scripts/notify.sh warn "gc 실패" "gc.sh line $LINENO rc=$rc — 로그를 확인한다" || true' ERR
 case "${1:-}" in
   --apply) APPLY=1 ;;
   ""|--dry-run) APPLY=0 ;;
@@ -27,3 +29,4 @@ for d in data/stage/_failed data/equity/_failed; do
 done
 bash scripts/rotate_logs.sh "$([ "$APPLY" -eq 1 ] && echo --apply || echo --dry-run)"   # 14일 초과 gzip · 90일 초과 gz 삭제 · health 보존
 echo "== done"
+[ "$APPLY" -eq 1 ] && scripts/notify.sh info "gc 완료 $(TZ=Asia/Seoul date +%m-%d\ %H:%M)" "캐시·_failed 정리 + rotate_logs 완료 — 디스크 여유 $(df -Pk . | awk 'NR==2 {printf "%d", $4/1024/1024}') GB" || true

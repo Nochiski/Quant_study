@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 6단계 풀 빌드 — 스냅샷 1세트(5 DB)로 61테이블을 의존 순서대로 빌드한다. 서버(~/quant-ledger)에서 실행.
+# 6단계 풀 빌드 — 스냅샷 1세트(5 DB)로 66테이블(문서층 4 포함)을 의존 순서대로 빌드한다. 서버(~/quant-ledger)에서 실행.
 #   scripts/run_stage_all.sh <snapshot-id> [--basis evening|morning] [table ...]   (테이블 생략 = 전수)
 # 결과: logs/stage_all/<table>.log + logs/stage_all/summary.tsv (status · rows · src · dedup · reject · elapsed)
 #       + logs/stage_all/skipped.txt (안 지은 표 — stage.health 의 --skip 입력. 전수 실행 기준)
@@ -43,9 +43,13 @@ else
   SKIPPED="stg_doc_meta stg_doc_section stg_doc_correction stg_doc_parse_log"
   echo "stg_doc_*: prepass cache for $SNAP missing or gate_failed — run 'PYTHONPATH=src .venv/bin/python -m stage.doc_prepass --snapshot-id $SNAP' first (skipped)"
 fi
-# 안 지은 표를 남긴다 — stage.health 의 C1 이 "의도된 동결" 과 "오늘 판이 없음" 을 구분하는 입력이다.
-printf '%s\n' "$SKIPPED" > logs/stage_all/skipped.txt
-if [ "$#" -gt 0 ]; then ORDER=("$@"); fi
+if [ "$#" -gt 0 ]; then
+  ORDER=("$@")
+else
+  # 안 지은 표를 남긴다 — stage.health 의 C1 이 "의도된 동결" 과 "오늘 판이 없음" 을 구분하는 입력이다.
+  # 부분 실행(표 지정)에서는 전수 기준 파일을 덮지 않는다.
+  printf '%s\n' "$SKIPPED" > logs/stage_all/skipped.txt
+fi
 
 for T in "${ORDER[@]}"; do
   LOG=logs/stage_all/$T.log

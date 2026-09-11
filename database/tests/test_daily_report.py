@@ -54,7 +54,8 @@ def _stage(home: Path, basis: str, *, ok: bool = True, d: str = D) -> None:
         json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
-def _latest(home: Path, basis: str, *, health: object = True, d: str = D, elapsed_s: int = 1342) -> None:
+def _latest(home: Path, basis: str, *, health: object = True, d: str = D,
+            elapsed_s: object = 1342) -> None:
     payload = {"date": d, "basis": basis, "generated_at": "2026-09-10T18:38:20+09:00",
                "health": health, "elapsed_s": elapsed_s}
     (home / "data" / "deliver" / f"latest_{basis}.json").write_text(
@@ -232,3 +233,18 @@ def test_dry_run_은_발송하지_않고_출력만_한다(tmp_path: Path, capsys
     assert rc == 0
     assert sent == []
     assert "원장 건전성" in capsys.readouterr().out
+
+
+def test_build_chain_이_쓰는_dict_모양의_health_와_elapsed_를_판정한다(tmp_path: Path) -> None:
+    """생산자(`build_chain.sh` deliver_step)는 `health: {"stage","equity"}`·`elapsed_s: {"stage","equity"}`
+    dict 를 쓴다. bool·int 픽스처만 통과하던 판정이 실물에서는 보류(info)로 떨어졌다(검수 R4-02)."""
+    home = _full(tmp_path)
+    _latest(home, "evening", health={"stage": "ok", "equity": "fail"},
+            elapsed_s={"stage": 1350, "equity": 480})
+    r = _build(home)
+    assert r.status is dr.ReportStatus.CRIT
+    assert "빌드 evening 게이트 폐기" in r.text
+    assert "1830초" in r.text            # 1350 + 480
+    _latest(home, "evening", health={"stage": "ok", "equity": "ok"},
+            elapsed_s={"stage": 1350, "equity": 480})
+    assert _build(home).status is not dr.ReportStatus.CRIT

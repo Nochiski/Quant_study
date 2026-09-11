@@ -5,7 +5,7 @@
 #   · logs/**/*.log                    7일 초과 gzip
 #   스냅샷(data/snapshots) GC 는 여기 없다 — stage 빌드에 내장한다(플랜 Task 4.2). 한 곳에서만.
 set -euo pipefail
-cd "${QL_HOME:-/home/kael/quant-ledger}"
+cd "${QL_HOME:-$HOME/quant-ledger}"
 APPLY=0
 case "${1:-}" in
   --apply) APPLY=1 ;;

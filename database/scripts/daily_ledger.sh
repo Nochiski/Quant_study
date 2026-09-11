@@ -9,8 +9,8 @@
 #         키움은 세 TR(공매도·대차·투자자)만 여기서 받는다 — 외국인 보유(ka10008)는 T-1 행이 07시 전후에
 #         정정되므로(프로브 실측 09-10) daily_build.sh(08:10) 가 받는다. 사용자 결정 09-10.
 set -uo pipefail
-cd /home/kael/quant-ledger
-export QL_HOME=/home/kael/quant-ledger PYTHONPATH=/home/kael/quant-ledger/src
+cd "$HOME/quant-ledger"
+export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
 PY=.venv/bin/python
 LOCK=/tmp/quant_ledger_raw.lock
 if [ -z "${QL_RAW_LOCK_HELD:-}" ]; then

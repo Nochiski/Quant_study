@@ -12,7 +12,7 @@ import os
 from dataclasses import dataclass
 from typing import Literal
 
-DEFAULT_PATH = os.path.join(os.environ.get("QL_HOME", "/home/kael/quant-ledger"),
+DEFAULT_PATH = os.path.join(os.environ.get("QL_HOME", os.path.expanduser("~/quant-ledger")),
                             "data", "calendar", "kis_holidays.json")
 
 

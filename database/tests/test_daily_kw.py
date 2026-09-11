@@ -73,7 +73,8 @@ def _response_rows(api_id, ticker, poss):
         return [{"dt": d, "close_pric": CLOSE[ticker], "trde_qty": VOL[ticker], "chg_qty": "0",
                  "poss_stkcnt": poss[d][ticker], "wght": "50"} for d in dates]
     if api_id == "ka10014":
-        return [{"dt": d, "close_pric": CLOSE[ticker], "shrts_qty": "10"} for d in dates]
+        return [{"dt": d, "close_pric": CLOSE[ticker], "shrts_qty": "10", "ovr_shrts_qty": str(100 + i)}
+                for i, d in enumerate(dates)]
     if api_id == "ka20068":
         return [{"dt": d, "rmnd": "5"} for d in dates]
     return [{"dt": d, "ind_invsr": "1", "frgnr_invsr": "2"} for d in dates]   # ka10060: 컬럼 추론
@@ -174,9 +175,11 @@ def test_stale_gate_ratio_and_threshold():
 
 
 # ── (c) merge — KRX 전건 일치면 dt <= D 만 머지, dt > D 는 버린다 ─────────────
-def test_merge_writes_only_dates_up_to_d_and_overwrites_by_pk(tmp_path, monkeypatch):
+def test_merge_writes_only_dates_up_to_d_and_keeps_existing_rows(tmp_path, monkeypatch):
     calls = []
-    # 원장 D-1 은 낡은 값("999") — PK (ticker, dt) 로 incoming 값이 덮어써야 한다
+    # 원장 D-1 에 이미 있는 행("999")은 incoming 이 달라도 덮어쓰지 않는다 — 원장은 "처음 본 값"을 지키고
+    # 정정 여부는 changed 건수로만 드러낸다(사용자 결정 09-10: 키움은 과거를 고치지 않는다고 가정,
+    # 검수 B F-5: 매일 155만 행 재기록 + collected_at 소실). 새 (ticker, dt) 만 들어온다.
     stale_ledger = [(t, D_PREV, "1", "1", "999", "ka10008", "old") for t in TICKERS]
     _prepare(tmp_path, monkeypatch, calls, ledger_rows=stale_ledger)
     _krx_db(tmp_path)
@@ -187,9 +190,13 @@ def test_merge_writes_only_dates_up_to_d_and_overwrites_by_pk(tmp_path, monkeypa
     assert [r[1] for r in rows] == [D_OLD, D_PREV, D] * 2          # dt > D 는 들어오지 않았다
     assert D_NEXT not in {r[1] for r in rows}
     by_key = {(t, d): p for t, d, p in rows}
-    assert by_key[("005930", D_PREV)] == CLEAN_POSS[D_PREV]["005930"]
+    assert by_key[("005930", D_PREV)] == "999"                     # 기존 행 보존
+    assert by_key[("005930", D)] == CLEAN_POSS[D]["005930"]        # 새 날짜는 들어왔다
     con = sqlite3.connect(tmp_path / "data" / "raw" / "kiwoom.db")
     try:
+        kept = con.execute('SELECT collected_at FROM ka10008_foreign_holdings WHERE ticker=? AND dt=?',
+                           ("005930", D_PREV)).fetchone()
+        assert kept[0] == "old"                                      # 최초 관측 시각 유지
         for api_id, spec in kw_daily.TRS.items():
             n = con.execute(f'SELECT COUNT(*) FROM "{spec.table}" WHERE dt > ?', (D,)).fetchone()
             assert n[0] == 0, api_id
@@ -205,6 +212,8 @@ def test_merge_writes_only_dates_up_to_d_and_overwrites_by_pk(tmp_path, monkeypa
         run.close()
     assert row[1] == "ok" and row[2] == len(TICKERS) * 3 * len(kw_daily.TRS)
     assert "matched=2 same_close=2 same_vol=2" in row[3]
+    # ka10008: 기존 D-1 행 2건이 값이 달라 changed=2, 나머지 4건(D_OLD·D) 신규. 다른 TR 은 전부 신규
+    assert "changed=2" in row[3] and f"new={len(TICKERS) * 3 * len(kw_daily.TRS) - 2}" in row[3]
 
 
 # ── (d) 크로스소스 불일치 1행이면 머지하지 않는다 ────────────────────────────
@@ -322,3 +331,68 @@ def test_cross_source_requires_full_match_and_nonzero_overlap():
     check = kw_daily.cross_source(krx, off)
     assert not check.passed and check.n_same_close == 2 and check.n_same_vol == 1
     assert kw_daily.cross_source(krx, {}).passed is False          # 겹치는 종목이 0이면 실패
+
+
+# ── (e) --tr: 외국인 보유(ka10008)만 08:10 체인에서 따로 받는다 (프로브 실측 09-10: T-1 행이 07시 전후 정정) ──
+def test_fetch_tr_filter_stages_only_selected_and_keeps_other_incoming(tmp_path, monkeypatch):
+    calls = []
+    _prepare(tmp_path, monkeypatch, calls, ledger_rows=_seed_prev())
+    # 06:00 체인: ka10008 을 뺀 세 TR. 오염 게이트는 ka10008 대상이라 판정하지 않는다(skipped).
+    assert kw_daily.main(["--fetch", "--date", D, "--tr", "ka10014,ka20068,ka10060"]) == 0
+    assert len(calls) == len(TICKERS) * 3 and not [c for c in calls if c[0] == "ka10008"]
+    con = sqlite3.connect(tmp_path / "data" / "raw" / "kiwoom.db")
+    try:
+        assert not con.execute("SELECT 1 FROM sqlite_master WHERE name='_kw_incoming_ka10008'").fetchone()
+        for api_id in ("ka10014", "ka20068", "ka10060"):
+            assert con.execute(f'SELECT COUNT(*) FROM "_kw_incoming_{api_id}"').fetchone()[0] == len(TICKERS) * 4
+    finally:
+        con.close()
+    run = sqlite3.connect(tmp_path / "data" / "raw" / "daily_run.db")
+    detail = run.execute("SELECT detail FROM run WHERE source='kiwoom_fetch' ORDER BY run_id DESC LIMIT 1").fetchone()[0]
+    run.close()
+    assert "trs=ka10014,ka20068,ka10060" in detail and "basis=skipped" in detail
+    # 08:10 체인: ka10008 만. 앞서 세운 세 incoming 은 비우지 않는다.
+    assert kw_daily.main(["--fetch", "--date", D, "--tr", "ka10008"]) == 0
+    assert len(calls) == len(TICKERS) * 4
+    con = sqlite3.connect(tmp_path / "data" / "raw" / "kiwoom.db")
+    try:
+        for api_id in kw_daily.TRS:
+            assert con.execute(f'SELECT COUNT(*) FROM "_kw_incoming_{api_id}"').fetchone()[0] == len(TICKERS) * 4, api_id
+    finally:
+        con.close()
+    # 머지는 네 incoming 을 모두 본 테이블로 옮긴다
+    _krx_db(tmp_path)
+    assert kw_daily.main(["--merge", "--date", D]) == 0
+    con = sqlite3.connect(tmp_path / "data" / "raw" / "kiwoom.db")
+    try:
+        for api_id, spec in kw_daily.TRS.items():
+            assert con.execute(f'SELECT COUNT(*) FROM "{spec.table}"').fetchone()[0] == len(TICKERS) * 3, api_id
+    finally:
+        con.close()
+
+
+def test_merge_ignores_window_relative_columns_when_counting_changes(tmp_path, monkeypatch):
+    # ka10014.ovr_shrts_qty 는 요청 창 안의 누적값이라 같은 dt 라도 매일 달라진다(09-11 실측 changed=685,979).
+    # 원천 정정이 아니므로 changed 에 세지 않는다. 다른 컬럼이 다르면 여전히 센다.
+    calls = []
+    _prepare(tmp_path, monkeypatch, calls, ledger_rows=_seed_prev())
+    con = sqlite3.connect(tmp_path / "data" / "raw" / "kiwoom.db")
+    con.execute('CREATE TABLE ka10014_short_selling ("ticker" TEXT NOT NULL, "dt" TEXT, "close_pric" TEXT, '
+                '"shrts_qty" TEXT, "ovr_shrts_qty" TEXT, "src_api" TEXT, "collected_at" TEXT, PRIMARY KEY ("ticker", "dt"))')
+    con.executemany("INSERT INTO ka10014_short_selling VALUES (?,?,?,?,?,?,?)",
+                    [(t, D_PREV, CLOSE[t], "10", "999", "ka10014", "old") for t in TICKERS])   # ovr 만 다르다
+    con.commit(); con.close()
+    _krx_db(tmp_path)
+    assert kw_daily.main(["--fetch", "--date", D]) == 0
+    assert kw_daily.main(["--merge", "--date", D]) == 0
+    run = sqlite3.connect(tmp_path / "data" / "raw" / "daily_run.db")
+    detail = run.execute("SELECT detail FROM run WHERE source='kiwoom_merge' ORDER BY run_id DESC LIMIT 1").fetchone()[0]
+    run.close()
+    assert "('ka10014', 6, 4, 0)" in detail                       # dt<=D 6행 중 기존 2행: ovr 차이는 무시 → changed 0
+    assert "('ka10008', 6, 4, 2)" in detail                       # ka10008 은 poss 가 달라 여전히 2
+
+
+def test_fetch_tr_rejects_unknown_id():
+    import pytest
+    with pytest.raises(SystemExit):
+        kw_daily.main(["--fetch", "--date", D, "--tr", "ka99999"])

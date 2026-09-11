@@ -63,13 +63,18 @@ if [ -n "${QL_SKIP_KW:-}" ]; then
   echo "  QL_SKIP_KW=1 — 키움 merge 건너뜀, 건전성 판정에서 kiwoom 항목은 skip"
   HSKIP="--skip kiwoom"
 fi
+# 외국인 보유(ka10008)는 T-1 행이 07시 전후에 정정된다(프로브 실측 09-10: 삼성전자·SK하이닉스) — 06:00 이 아니라
+# 여기서 받는다. 다른 세 TR 의 incoming 은 06:00 체인이 세워 둔 것을 그대로 쓴다(--tr 은 자기 TR 만 비운다).
+kw_fetch_fh() { if [ -n "${QL_SKIP_KW:-}" ]; then return 0; fi; $PY -m daily.kw_daily --date "$D" --fetch --tr ka10008 --not-before "${QL_KW_FH_NOT_BEFORE:-07:10}" $DRY $LIMIT; }
 kw_merge() { if [ -n "${QL_SKIP_KW:-}" ]; then return 0; fi; $PY -m daily.kw_daily --date "$D" --merge $DRY $LIMIT; }
 if [ -n "$DRY" ]; then
   echo "  dry-run: KRX 수집 단계는 건너뛴다(backfill_krx.py 에 dry-run 이 없다 — 원장 무변경 보장)"
-  step "kiwoom merge" kw_merge \
+  step "kiwoom fetch ka10008" kw_fetch_fh \
+  && step "kiwoom merge" kw_merge \
   && step "ledger_health" $PY -m daily.ledger_health --date "$D" --out "$(mktemp -d)" $HSKIP
 else
   step "krx" krx_step "$D" \
+  && step "kiwoom fetch ka10008" kw_fetch_fh \
   && step "kiwoom merge" kw_merge \
   && step "ledger_health" $PY -m daily.ledger_health --date "$D" $HSKIP
 fi

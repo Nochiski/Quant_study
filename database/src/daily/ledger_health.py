@@ -18,6 +18,7 @@ import sys
 from dataclasses import asdict, dataclass
 from enum import Enum
 
+from backfill_wise import REQ_COVERED, REQ_NONE  # 종목당 일일 요청 수의 정본
 from daily import calendar as _cal
 
 KST = dt.timezone(dt.timedelta(hours=9))
@@ -282,23 +283,33 @@ def check_wise(con: sqlite3.Connection, today_iso: str) -> list[Check]:
     _, mode, n_stocks, n_req, n_ok, n_bad = run
     out.append(Check("wise.run", Level.REQUIRED, Status.PASS if (mode == "full" and n_bad == 0 and n_ok == n_req) else Status.FAIL,
                      {"mode": mode, "n_stocks": n_stocks, "n_req": n_req, "n_ok": n_ok, "n_bad": n_bad}, "mode=full, n_bad=0, n_ok=n_req"))
+    cov = none = -1
     if _has_table(con, "ws_coverage"):
         # 그날 런이 갱신한(checked_at = 오늘 KST) 커버리지 행만 센다 — 런 뒤에 상태가 바뀐 종목이 있으면
         # 전체 집계로는 등식이 깨진다(09-09 실측: 전체 808/1758 vs 당일 807/1756, n_req 15,617 은 후자와 일치).
         cov = _count(con, "SELECT COUNT(*) FROM ws_coverage WHERE status='covered' AND date(checked_at, '+9 hours')=?", (today_iso,))
         none = _count(con, "SELECT COUNT(*) FROM ws_coverage WHERE status='none' AND date(checked_at, '+9 hours')=?", (today_iso,))
-        expected = cov * 15 + none * 2
+        expected = cov * REQ_COVERED + none * REQ_NONE
         out.append(Check("wise.req_identity", Level.REQUIRED, Status.PASS if expected == n_req else Status.FAIL,
                          {"expected": expected, "actual": n_req, "covered": cov, "none": none},
-                         "당일 checked_at 기준 covered×15 + none×2 == n_req (09-09 실측 15,617 일치)"))
+                         f"당일 checked_at 기준 covered×{REQ_COVERED} + none×{REQ_NONE} == n_req "
+                         "(무커버 4 = 목록 1 + 3개년 cF5001, 09-10 검수 D H1 이후)"))
         rate = cov / (cov + none) if (cov + none) else None
         out.append(Check("wise.cov_rate", Level.WARN, Status.SKIP if rate is None else (Status.PASS if rate >= 0.25 else Status.FAIL),
                          None if rate is None else round(rate, 3), ">= 0.25 (실측 0.315; 미만이면 페이지 개편 의심)"))
     if _has_table(con, "ws_raw"):
         row = con.execute("SELECT COUNT(*), COUNT(DISTINCT cmp_cd) FROM ws_raw WHERE fetched_date=?", (today_iso,)).fetchone()
         n, s = (int(row[0]), int(row[1])) if row else (0, 0)
-        out.append(Check("wise.raw", Level.REQUIRED, Status.PASS if (15500 <= n <= 15700 and 2560 <= s <= 2570) else Status.FAIL,
-                         {"rows": n, "stocks": s}, "rows 15,500~15,700 · stocks 2,560~2,570 (9일 실측 밴드)"))
+        # 절대 밴드(15,500~15,700 · 2,560~2,570)는 무커버 4콜 전환(09-10)과 규모구분 갱신(09-11: 2,563→2,610)에
+        # 모두 오탐을 냈다 — 기대치는 커버리지 항등식과 유니버스에서 유도한다. 커버리지 표가 없으면 하한만 본다.
+        if cov >= 0 and none >= 0:
+            exp_rows, exp_stocks = cov * REQ_COVERED + none * REQ_NONE, cov + none
+            ok = n == exp_rows and s == exp_stocks and s >= 2400
+            expected = f"rows == covered×{REQ_COVERED} + none×{REQ_NONE} ({exp_rows:,}) · stocks == covered+none ({exp_stocks:,}) · stocks >= 2,400"
+        else:
+            ok = n >= 15000 and s >= 2400
+            expected = "커버리지 표 없음 — rows >= 15,000 · stocks >= 2,400"
+        out.append(Check("wise.raw", Level.REQUIRED, Status.PASS if ok else Status.FAIL, {"rows": n, "stocks": s}, expected))
     return out
 
 

@@ -6,6 +6,8 @@
 #   사용: daily_ledger.sh [--date YYYYMMDD] [--dry-run] [--limit N]
 #   환경: QL_KW_NOT_BEFORE=HH:MM (키움 fetch 하한 시각, P0 프로브 판독값. 기본 06:00)
 #         QL_SKIP_KW=1 이면 키움 시계열 단계를 건너뛴다(앱키 분리 전 임시)
+#         키움은 세 TR(공매도·대차·투자자)만 여기서 받는다 — 외국인 보유(ka10008)는 T-1 행이 07시 전후에
+#         정정되므로(프로브 실측 09-10) daily_build.sh(08:10) 가 받는다. 사용자 결정 09-10.
 set -uo pipefail
 cd /home/kael/quant-ledger
 export QL_HOME=/home/kael/quant-ledger PYTHONPATH=/home/kael/quant-ledger/src
@@ -63,7 +65,7 @@ else
     step "kis credit" $PY -m daily.kis_daily --date "$D" $DRY $LIMIT \
     && step "dart" $PY -m daily.dart_daily --date "$D" $DRY $LIMIT
   else
-    step "kiwoom fetch" $PY -m daily.kw_daily --date "$D" --fetch --not-before "${QL_KW_NOT_BEFORE:-06:00}" $DRY $LIMIT \
+    step "kiwoom fetch" $PY -m daily.kw_daily --date "$D" --fetch --tr ka10014,ka20068,ka10060 --not-before "${QL_KW_NOT_BEFORE:-06:00}" $DRY $LIMIT \
     && step "kis credit" $PY -m daily.kis_daily --date "$D" $DRY $LIMIT \
     && step "dart" $PY -m daily.dart_daily --date "$D" $DRY $LIMIT
   fi

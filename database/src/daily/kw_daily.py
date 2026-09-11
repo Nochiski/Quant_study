@@ -42,6 +42,10 @@ MAX_RETRY = 4
 STALE_PCT_MAX = 30.0        # 오염 게이트 (b). 실측 정상일 9.7% / 오염일 99.0% (findings A §3-2)
 GRACE_DAYS = 5              # 유니버스 유예(R5)
 INCOMING_PREFIX = "_kw_incoming_"
+# 요청 창 안에서 0 부터 다시 세는 누적값 — 같은 dt 라도 창이 움직이면 값이 달라진다(STAGE_SPEC §2 ka10014
+# 실측: 372행 창 경계마다 재시작, 프로브 09-11 00:05 자정 창 이동으로 변경). 원천 정정이 아니므로
+# 머지의 `changed` 비교에서 뺀다. 원장에는 원문 그대로 남고 stage 가 `_valid` 로 다룬다.
+WINDOW_RELATIVE_COLS: frozenset[str] = frozenset({"ovr_shrts_qty"})
 FETCH_SOURCE = "kiwoom_fetch"
 MERGE_SOURCE = "kiwoom_merge"
 _META_COLS = ("ticker", "src_api", "collected_at", "fetched_at")
@@ -198,8 +202,10 @@ class CrossCheck:
 @dataclass(frozen=True)
 class TrMerge:
     api_id: str
-    n_merged: int
+    n_merged: int              # incoming 중 dt <= D 인 행(머지 대상)
     n_dropped_future: int
+    n_new: int = 0             # 원장에 없던 (ticker, dt) — 실제 삽입
+    n_changed: int = 0         # 원장에 이미 있고 값이 다른 행 — 덮어쓰지 않고 센다(사용자 결정 09-10)
 
 
 class MergeStatus(Enum):
@@ -355,9 +361,12 @@ def call_tr(client: ModuleType, spec: TrSpec, ticker: str, end_dt: str) -> CallO
 
 
 # ── fetch (06:00 체인) ─────────────────────────────────────────────────────────
-def clear_incoming(con: sqlite3.Connection) -> None:
-    """이번 fetch 가 세울 임시 테이블을 비운다(스키마는 남긴다 — 추론된 컬럼을 잃지 않기 위해)."""
-    for api_id in TRS:
+def clear_incoming(con: sqlite3.Connection, api_ids: Sequence[str] | None = None) -> None:
+    """이번 fetch 가 세울 임시 테이블만 비운다(스키마는 남긴다 — 추론된 컬럼을 잃지 않기 위해).
+
+    `api_ids` 를 주면 그 TR 만 비운다 — 06:00 체인(세 TR)과 08:10 체인(ka10008)이 incoming 을 나눠 세우므로
+    한쪽이 다른 쪽을 지우면 안 된다."""
+    for api_id in (TRS if api_ids is None else api_ids):
         table = INCOMING_PREFIX + api_id
         if _table_exists(con, table):
             con.execute(f'DELETE FROM "{table}"')
@@ -447,31 +456,38 @@ def stale_gate(db_path: str, prev_date: str, holdings_d: Mapping[str, str],
 
 
 def fetch(tickers: Sequence[str], *, date: str, prev_date: str, db_path: str,
-          client: ModuleType, dry_run: bool = False) -> FetchResult:
-    """유니버스 × 4 TR 을 종목당 1콜씩 받아 `_kw_incoming_<tr>` 에 세우고 오염 게이트를 판정한다.
+          client: ModuleType, dry_run: bool = False,
+          trs: Sequence[str] | None = None) -> FetchResult:
+    """유니버스 × 선택 TR 을 종목당 1콜씩 받아 `_kw_incoming_<tr>` 에 세우고 오염 게이트를 판정한다.
 
+    `trs` 가 None 이면 4 TR 전부. 운영은 둘로 나눈다 — 06:00 체인은 ka10014·ka20068·ka10060(T-1 행이
+    00:05 에 이미 확정, 프로브 19회 판독 불변), 08:10 체인은 ka10008(T-1 행이 07시 전후에 정정된다 —
+    09-10 프로브 실측: 삼성전자 +45,960주·SK하이닉스 +30,660주, 사용자 결정 09-10). 오염 게이트(b)는
+    ka10008 대상이라 그 TR 이 없는 호출에서는 `basis='skipped'` 로 통과시킨다.
     dry_run 이어도 incoming(스크래치 테이블)은 쓴다 — 원장(`ka*` 본 테이블)·runlog·유니버스 상태만 안 쓴다.
     그래야 `--merge --dry-run` 이 대조할 대상이 생긴다(G1 서버 드라이런).
     """
+    selected = [TRS[a] for a in (trs if trs is not None else tuple(TRS))]
     con = sqlite3.connect(db_path, timeout=60)
     try:
-        clear_incoming(con)
+        clear_incoming(con, [s.api_id for s in selected])
     finally:
         con.close()
     lock = threading.Lock()
-    with ThreadPoolExecutor(max_workers=len(TRS)) as pool:
+    with ThreadPoolExecutor(max_workers=len(selected)) as pool:
         futures = [pool.submit(fetch_tr, spec, tickers, date=date, prev_date=prev_date,
                                db_path=db_path, client=client, lock=lock, dry_run=dry_run)
-                   for spec in TRS.values()]
+                   for spec in selected]
         stats = [f.result() for f in futures]       # 예외는 여기서 올라온다(조용한 스킵 금지)
     for st in stats:
         print(f"[kw_daily] fetch tr={st.api_id} date={date} 콜={st.n_calls} 행={st.n_rows} "
               f"nodata={st.n_nodata} error={st.n_error}")
-    gate_stat = next(s for s in stats if s.api_id == GATE_TR)
-    gate = stale_gate(db_path, prev_date, gate_stat.holdings_d, gate_stat.holdings_prev)
+    gate_stat = next((s for s in stats if s.api_id == GATE_TR), None)
+    gate = (StaleGate(0, 0, "skipped") if gate_stat is None
+            else stale_gate(db_path, prev_date, gate_stat.holdings_d, gate_stat.holdings_prev))
     n_calls = sum(s.n_calls for s in stats)
     n_rows = sum(s.n_rows for s in stats)
-    detail = (f"universe={len(tickers)} calls={n_calls} rows={n_rows} "
+    detail = (f"trs={','.join(s.api_id for s in selected)} universe={len(tickers)} calls={n_calls} rows={n_rows} "
               f"stale={gate.n_stale}/{gate.n_compared} pct={gate.pct} basis={gate.basis} "
               f"errors={sum(s.n_error for s in stats)}")
     bad = [s for s in stats if s.token_failed]
@@ -533,7 +549,13 @@ def cross_source(krx: Mapping[str, Quote], kiwoom: Mapping[str, Quote]) -> Cross
 
 
 def merge_tr(con: sqlite3.Connection, spec: TrSpec, date: str, dry_run: bool) -> TrMerge:
-    """incoming 의 `dt <= date` 행만 본 테이블로 옮긴다. `dt > date`(당일 개장 전 행)는 버린다."""
+    """incoming 의 `dt <= date` 행 중 **원장에 없는 (ticker, dt) 만** 본 테이블에 넣는다.
+
+    `dt > date`(당일 개장 전 행)는 버린다. 이미 있는 행은 값이 달라도 덮어쓰지 않는다 — 원장은 "처음 본
+    값"과 `collected_at` 을 지키고, 다른 행 수를 `n_changed` 로만 알린다. 종전 `INSERT OR REPLACE` 는
+    응답에 실린 과거 이력 전부(4 TR 합 155만 행, ka10014 는 2008년치까지)를 매일 다시 써 최초 관측
+    시각이 사라지고 원천 정정이 무기록으로 스며들었다(검수 B F-5). 키움은 과거를 고치지 않는다는
+    가정은 사용자 결정(09-10)이며, `n_changed` 가 0 이 아니면 그 가정을 다시 본다."""
     incoming = INCOMING_PREFIX + spec.api_id
     if not _table_exists(con, incoming):
         return TrMerge(spec.api_id, 0, 0)
@@ -546,10 +568,17 @@ def merge_tr(con: sqlite3.Connection, spec: TrSpec, date: str, dry_run: bool) ->
         return TrMerge(spec.api_id, n_take, n_future)
     ensure_table(con, spec.table, cols)
     names = ",".join(f'"{c}"' for c in ["ticker", *cols, "src_api", "collected_at"])
-    con.execute(f'INSERT OR REPLACE INTO "{spec.table}" ({names}) '
+    differs = " OR ".join(f'i."{c}" IS NOT m."{c}"' for c in cols if c != "dt" and c not in WINDOW_RELATIVE_COLS)
+    row_changed = con.execute(
+        f'SELECT COUNT(*) FROM "{incoming}" i JOIN "{spec.table}" m ON m.ticker = i.ticker AND m.dt = i.dt '
+        f'WHERE i.dt <= ? AND ({differs})', (date,)).fetchone()
+    n_changed = 0 if row_changed is None else int(row_changed[0])
+    before = con.total_changes
+    con.execute(f'INSERT OR IGNORE INTO "{spec.table}" ({names}) '
                 f'SELECT {names} FROM "{incoming}" WHERE dt <= ?', (date,))
+    n_new = con.total_changes - before
     con.commit()
-    return TrMerge(spec.api_id, n_take, n_future)
+    return TrMerge(spec.api_id, n_take, n_future, n_new, n_changed)
 
 
 def merge(*, date: str, db_path: str, krx_db: str, dry_run: bool = False) -> MergeResult:
@@ -578,9 +607,11 @@ def merge(*, date: str, db_path: str, krx_db: str, dry_run: bool = False) -> Mer
         con.close()
     rows = sum(m.n_merged for m in merged)
     future = sum(m.n_dropped_future for m in merged)
+    new = sum(m.n_new for m in merged)
+    changed = sum(m.n_changed for m in merged)
     return MergeResult(MergeStatus.OK, date, cross, merged,
-                       head + f" | merged={rows} dropped_future={future} "
-                              f"per_tr={[(m.api_id, m.n_merged) for m in merged]}")
+                       head + f" | merged={rows} new={new} changed={changed} dropped_future={future} "
+                              f"per_tr={[(m.api_id, m.n_merged, m.n_new, m.n_changed) for m in merged]}")
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -630,7 +661,8 @@ def _requested_universe(con: sqlite3.Connection, base: str,
 
 
 def _run_fetch(*, date: str, prev_date: str, db_path: str, run_db: str, base: str,
-               limit: int, dry_run: bool, not_before: str | None) -> int:
+               limit: int, dry_run: bool, not_before: str | None,
+               trs: Sequence[str] | None = None) -> int:
     early = _too_early(not_before)
     if early is not None:
         print(f"[kw_daily] fetch date={date} 실행 하한 미달 — {early}", file=sys.stderr)
@@ -646,10 +678,13 @@ def _run_fetch(*, date: str, prev_date: str, db_path: str, run_db: str, base: st
     tickers = req.tickers[:limit] if limit > 0 else req.tickers
     print(f"[kw_daily] fetch date={date} prev={prev_date} asof={req.asof} "
           f"universe={len(req.tickers)} 요청={len(tickers)} seeded_only={len(req.seeded_only)} "
-          f"dropped={len(req.dropped)} dry_run={dry_run}")
+          f"dropped={len(req.dropped)} tail_missing={len(req.tail_missing)} dry_run={dry_run}")
+    if req.dropped:
+        print(f"[kw_daily] 유예 만료 제외: {','.join(req.dropped)}"
+              + (f" (마지막 등장일 데이터 미수신: {','.join(req.tail_missing)})" if req.tail_missing else ""))
     rid = None if dry_run else runlog.start(run_db, date=date, source=FETCH_SOURCE)
     result = fetch(tickers, date=date, prev_date=prev_date, db_path=db_path,
-                   client=_kiwoom_module(), dry_run=dry_run)
+                   client=_kiwoom_module(), dry_run=dry_run, trs=trs)
     print(f"[kw_daily] fetch status={result.status.value} {result.detail}")
     if rid is not None:
         runlog.finish(run_db, rid, status=result.status.value, n_calls=result.n_calls,
@@ -687,9 +722,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                    help="콜은 하되 원장(ka* 본 테이블)·daily_run.db·유니버스 상태에 쓰지 않는다 — incoming 스크래치는 쓴다")
     p.add_argument("--limit", type=int, default=0, help="요청 종목 수 제한(fetch 전용)")
     p.add_argument("--not-before", default=None, help="KST HH:MM 이전이면 rc 3")
+    p.add_argument("--tr", default=None,
+                   help="fetch 할 TR 을 쉼표로(기본 4개 전부). 운영: 06:00 체인 ka10014,ka20068,ka10060 / 08:10 체인 ka10008")
     p.add_argument("--db", default=None, help="kiwoom.db 경로 (기본 data/raw/kiwoom.db)")
     p.add_argument("--krx-db", default=None, help="krx.db 경로 (기본 data/raw/krx.db)")
     a = p.parse_args(argv)
+    trs: tuple[str, ...] | None = None
+    if a.tr:
+        trs = tuple(t.strip() for t in a.tr.split(",") if t.strip())
+        unknown = [t for t in trs if t not in TRS]
+        if unknown or not trs:
+            p.error(f"--tr 에 모르는 TR: {unknown} (가능: {','.join(TRS)})")
 
     base = _base()
     cal = trading_calendar.load(os.path.join(base, "data", "calendar", "kis_holidays.json"))
@@ -703,7 +746,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if a.fetch:
         return _run_fetch(date=date, prev_date=prev_date, db_path=db_path, run_db=run_db,
-                          base=base, limit=a.limit, dry_run=a.dry_run, not_before=a.not_before)
+                          base=base, limit=a.limit, dry_run=a.dry_run, not_before=a.not_before,
+                          trs=trs)
     return _run_merge(date=date, db_path=db_path, krx_db=krx_db, run_db=run_db,
                       dry_run=a.dry_run, not_before=a.not_before)
 

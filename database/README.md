@@ -8,11 +8,11 @@ KRX·키움·KIS·DART·WISE 원장 수집기, stage 층 빌더, 문서층(L1) �
 
 | 항목 | 값 |
 |---|---|
-| 원장 | **09-09 갭 메우기 완료** — KRX·키움 09-08, KIS 신용잔고 09-04(조회일 기준 T-3 규칙), DART 09-09, WISE 09-09. 09-10 부터 일일 체인이 유지 |
+| 원장 | **일일 체인 유지 중(09-10 첫 실행 통과)** — KRX·키움 09-09, KIS 신용잔고 09-07(조회일 기준 T-3 규칙), DART 09-09, WISE 09-10 |
 | stage | 66테이블 커밋(09-05), 원장 정지 날짜까지 |
 | equity | 28표·규칙 e1.14.0(09-09 전량 재빌드로 단일화)·팩터 준비도 54/54. catalog `2c38be1d58fb03be`·contract pass, baseline 락 바이트 동일(09-09 정렬) |
-| 진행 중 | **일일 증분 플랜** `docs/plans/2026-09-09-daily-incremental.md` — R1~R10 승인(09-09), **P0·P1·P2 완료(키움 갭은 09-09 저녁 즉시 실행), P3 크론 가동(09-09)** — 06:00 수집·08:10 빌드 체인, 키움 단계 포함(사용자 결정: 공유 앱키로 콜). **사용자 행동 필요: 키움 앱키 추가 발급**(DECISIONS_PENDING R5 후속) |
-| 크론 | 06:00 `daily_ledger.sh`(daily_wise 포함, 키움 시계열·KIS·DART) · 08:10 `daily_build.sh --no-build`(KRX·키움 대조·건전성) · 매시 키움 프로브(임시, 09-15 제거). `daily_dart.sh` 폐기 |
+| 진행 중 | **일일 증분 플랜** `docs/plans/2026-09-09-daily-incremental.md` — R1~R10 승인(09-09), **P0·P1·P2 완료(키움 갭은 09-09 저녁 즉시 실행), P3 크론 가동(09-09), 관찰 1/5 통과(09-10)** — 06:00 수집·08:10 빌드 체인, 키움 단계 포함(사용자 결정: 공유 앱키로 콜). **첫 적재분 검수**(09-10): high 5·mid 9 → `docs/reviews/2026-09-10-intake-audit-summary.md`. 수집기 핫픽스 3건(WISE 커버 판정·키움 유예·DART 분기 창) 배포 `52d0f48`, 사용자 결정 3건 반영(결정 6: 키움 머지 신규 행만·KIS 최초 관측판(P5)·G3 개정). **사용자 행동 필요: 키움 앱키 추가 발급**(DECISIONS_PENDING R5 후속) |
+| 크론 | 06:00 `daily_ledger.sh`(daily_wise 포함, 키움 공매도·대차·투자자, KIS, DART) · 08:10 `daily_build.sh --no-build`(KRX → 키움 외국인 보유 fetch → 키움 대조·머지 → 건전성; 결정 7) · 매시 키움 프로브(임시, 09-15 제거). `daily_dart.sh` 폐기 |
 
 ## 층 구조
 
@@ -52,7 +52,8 @@ equity      parquet 28표 + equity.duckdb   data/equity/                ← EQUI
 | `DECISIONS_PENDING.md` | 사람이 정해야 할 것 (결정 1~5) |
 | `TECH_DEBT.md` | 기술 부채와 우선순위 |
 | `BLOCKED_FACTORS.md` | 막힌 팩터와 원인 |
-| `plans/2026-09-09-daily-incremental.md` | **일일 증분 플랜** — 6페이즈·게이트, 결정 R1~R10 |
+| `plans/2026-09-11-daily-incremental-v2.md` | **일일 증분 플랜 v2** — 당일 저녁 스코어링(18:05 저녁 슬롯·잠정/확정 빌드), 페이즈 A~D. 시간표·P4 이후의 정본 |
+| `plans/2026-09-09-daily-incremental.md` | 일일 증분 플랜 v1 — P0~P3 결과·결정 R1~R10·결정 6·7 (유효), 시간표·P4~P6 은 v2 로 이관 |
 
 ### 원장 수집
 
@@ -94,10 +95,11 @@ equity      parquet 28표 + equity.duckdb   data/equity/                ← EQUI
 |---|---|
 | `2026-09-05-equity-*.md` (4건) | equity v1.1 → v1.2 제안서 |
 | `2026-09-09-daily-findings-A~E-*.md` (5건) | 일일 증분 플랜 근거: 원장 A(KRX·키움·KIS)·B(DART·문서·WISE), stage, equity, 운영·타이밍 |
+| `2026-09-10-intake-audit-summary.md` + `-{A-krx,B-kiwoom,C-kis,D-dart-wise}.md` | 일일 증분 첫 적재분(D=09-09) 검수 — 종합 판정·조치 제안 + 소스별 검사표·재현 SQL |
 
 읽는 순서 — equity 작업: `START_HERE` → `EQUITY_HANDOFF` §0 → `EQUITY_WORKFLOW` §0~§1.
 문서층 작업: `DOC_LAYER_KICKOFF` → `STAGE_HANDOFF` §4 → `STAGE_DESIGN` §0·§7·§10 → `DOC_DESIGN`.
-일일 증분 작업: `plans/2026-09-09-daily-incremental.md` 상태 블록 → §1 결정 → 현재 페이즈.
+일일 증분 작업: `plans/2026-09-11-daily-incremental-v2.md` 상태 블록 → §1 결정 → 현재 페이즈 (v1 은 P0~P3 기록).
 
 ### 기록 (docs/archive/)
 

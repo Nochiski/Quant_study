@@ -214,7 +214,8 @@ def test_gate_g1_row_equation_holds(snap: snapshot.Snapshot, tmp_path: Path) -> 
     r = _built(snap, tmp_path)
     g = _gate(r, "G1")
     assert g.status is gates.GateStatus.PASS
-    assert g.metrics == {"n_src": 7, "fanout": 1, "n_dedup": 0, "n_reject": 0, "n_stage": 7}
+    assert g.metrics == {"n_src": 7, "fanout": 1, "n_dedup": 0, "n_dedup_same_day": 0,
+                         "n_reject": 0, "n_stage": 7}
 
 
 def test_gate_g3_detects_mktcap_identity_violation(raw: dict[str, Path], tmp_path: Path) -> None:

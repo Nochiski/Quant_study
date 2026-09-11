@@ -4,6 +4,7 @@ from pathlib import Path
 
 import duckdb
 import pytest
+
 from stage import build, gates, manifest, rules, snapshot
 
 DISC_COLS = ["row_hash", "corp_cls", "corp_code", "corp_name", "flr_nm", "rcept_dt", "rcept_no",
@@ -144,14 +145,18 @@ def test_map_writes_single_partition_without_year_dirs(
     assert _gate(r, "G6").status is gates.GateStatus.PASS   # append_only → 판본 보존 게이트 실행
 
 
-def test_map_conflicting_rcept_dt_fails_key_uniqueness(tmp_path: Path) -> None:
+def test_map_conflicting_rcept_dt_on_the_same_day_folds_to_one_row(tmp_path: Path) -> None:
+    """같은 rcept_no 가 같은 관측일에 다른 rcept_dt 로 두 번 오면(페이지 경계·재스윕) 예전엔 G3 키
+    유일성으로 폐기했다. 2026-09-11 계약: 같은 날 판본은 마지막 관측으로 접는다(n_dedup_same_day 1) —
+    모순 자체는 원장에 남고, 접힌 건수가 G1 metrics 에 기록된다(TECH_DEBT B-19)."""
     d = tmp_path / "raw2"
     d.mkdir()
     _write_dart(d / "dart.db", DISC_ROWS + [_disc(R_SAMSUNG, "20250312", page="3")], FIN_ROWS)
     s = snapshot.make_snapshot({"dart": d / "dart.db"}, tmp_path / "snapshots", snapshot_id="s2")
     r = _build("stg_rcept_dt_map", s, tmp_path)
-    assert r.status is build.BuildStatus.GATE_FAILED
-    assert _gate(r, "G3").metrics["key_uniqueness_violations"] == 1
+    assert r.status is build.BuildStatus.OK, [(g.name, g.detail) for g in r.gates]
+    assert _gate(r, "G3").metrics["key_uniqueness_violations"] == 0
+    assert _gate(r, "G1").metrics["n_dedup_same_day"] == 1
 
 
 # ── S2: stg_fin ────────────────────────────────────────────────────────────────
@@ -235,16 +240,18 @@ def test_fin_rejects_out_of_range_receipt_year(tmp_path: Path) -> None:
     assert r.n_reject == 1 and r.n_rows == 5
 
 
-def test_fin_g6_fails_when_same_key_differs_in_payload_on_same_observed_date(
+def test_fin_same_key_differing_payload_on_the_same_observed_date_keeps_the_last_observation(
     tmp_path: Path
 ) -> None:
+    """같은 8키, 다른 값, 같은 관측일 — 예전엔 G6 폐기(2026-09-11 첫 저녁 슬롯에서 stg_fin 86건으로 실제
+    발생: 06:47 재스윕 + 18:05 저녁 스윕). 이제는 그날의 마지막 관측(23:00 KST, amt=1)이 판이다."""
     d = tmp_path / "raw4"
     d.mkdir()
-    # 같은 8키, 다른 값, 같은 관측일
-    dup = _fin(R_SAMSUNG, amt="1", collected="2026-08-30T14:00:00")   # 23:00 KST 같은 날
+    dup = _fin(R_SAMSUNG, amt="1", collected="2026-08-30T14:00:00")   # 23:00 KST 같은 날, 더 늦은 관측
     _write_dart(d / "dart.db", DISC_ROWS, FIN_ROWS + [dup])
     s = snapshot.make_snapshot({"dart": d / "dart.db"}, tmp_path / "snapshots", snapshot_id="s4")
     _build("stg_rcept_dt_map", s, tmp_path)
     r = _build("stg_fin", s, tmp_path)
-    assert r.status is build.BuildStatus.GATE_FAILED
-    assert _gate(r, "G6").metrics["n_dup"] == 1
+    assert r.status is build.BuildStatus.OK, [(g.name, g.detail) for g in r.gates]
+    assert _gate(r, "G6").metrics["n_dup"] == 0
+    assert _gate(r, "G1").metrics["n_dedup_same_day"] == 1

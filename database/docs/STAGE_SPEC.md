@@ -265,6 +265,8 @@ KRX가 거래를 인정하는 건 59건(0.07%)뿐이다. 반면 `kis_loan_trans.
 스키마 보장이 아니다.** `kis_investor_flow`는 수정주가 컬럼을 포함하므로 재수집 시 값이
 바뀔 수 있다. **접기 전에 충돌 카운트를 매 빌드마다 검사한다.** ~~0이 아니면 실패시킨다~~ `[→ DESIGN 결정 ④′: payload 상이 = 전 행 보존, 판본 좌표 (available_date, observed_date). 충돌 비율은 G6 에 기록]`
 
+> **[09-11 계약 추가 — 같은 날 판본 접기]** 판본 좌표가 `observed_date`(KST 날짜)라 같은 키의 **같은 날** 페이로드가 다른 관측은 두 판으로 표현할 수 없다. 페이즈 A 로 DART 가 하루 두 번(06:47 재스윕·18:05 저녁 스윕) 관측되면서 첫 저녁 슬롯(09-11)에서 `stg_disclosure` 7건·`stg_fin` 86건이 G6 으로 폐기됐다. 규칙: **그날의 판 = 그날의 마지막 관측**(`collected_at` 최댓값; 동률이면 payload_hash 순) 이고 접힌 행은 `n_dedup` 에 포함되며 G1 metrics `n_dedup_same_day` 로 따로 센다(`stage/build.py _stage_sql` `rn_day`). `versioned=False`(콜·유닛 로그)와 관측일 없는 표는 접지 않는다. G6 은 그대로 남아 구성 오류를 잡는다. 모순 관측(같은 날 다른 `rcept_dt` 등)이 조용히 접히는 것은 TECH_DEBT B-19.
+
 ### 2-13. DART 보조원장은 집계행이 섞여 온다
 
 | 원장 | 집계행 | 규모 |

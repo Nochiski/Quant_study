@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# 08:10 KST 빌드 체인 — KRX(T+1 08:00 공표) → 키움 KRX 대조·머지 → 원장 건전성 → [stage → equity] → 요약.
-# 플랜 P1 Task 1.8 / 결정 R1. P3 에서는 --no-build 로 등록하고 P4·P5 에서 stage·equity 를 켠다.
+# 08:10 KST 빌드 체인 — KRX(T+1 08:00 공표) → 키움 KRX 대조·머지 → 원장 건전성 → 확정 빌드 → 요약.
+# 플랜 P1 Task 1.8 / 결정 R1. 확정 빌드(stage·equity basis=morning)는 scripts/build_morning.sh 가 한다
+# (플랜 v2 Task B.1). `--no-build` 를 주면 원장 단계에서 멈춘다 — 크론의 --no-build 는 오케스트레이터가 뗀다.
 #   사용: daily_build.sh [--date YYYYMMDD] [--no-build] [--dry-run] [--limit N]
 #   환경: QL_SKIP_KW=1 이면 키움 merge 를 건너뛰고 건전성 판정의 kiwoom 항목을 skip 한다(앱키 분리 전 임시)
 set -uo pipefail
@@ -80,9 +81,10 @@ else
 fi
 RC=$?
 if [ "$RC" -eq 0 ] && [ -z "$NOBUILD" ] && [ -z "$DRY" ]; then
-  export QL_BUILD_LOCK_HELD=""     # 빌드 락은 stage_daily.sh 가 잡는다(raw 락은 물려준다)
-  [ -x scripts/stage_daily.sh ] && step "stage" bash scripts/stage_daily.sh || true
-  [ -z "$FAILED" ] && [ -x scripts/equity_daily.sh ] && step "equity" bash scripts/equity_daily.sh || true
+  # 원장 게이트가 통과한 날만 확정판을 짓는다. 빌드 락은 build_chain 이 새로 잡고(raw 락은 물려준다),
+  # stage·equity·인계 JSON·스냅샷 GC·알림은 전부 build_morning 안에 있다.
+  export QL_BUILD_LOCK_HELD=""
+  step "build_morning" bash scripts/build_morning.sh --date "$D" || true
   [ -x scripts/daily_report.py ] && $PY scripts/daily_report.py --date "$D" || true
 fi
 echo "════ 종료 rc=$RC $(kst) ════"

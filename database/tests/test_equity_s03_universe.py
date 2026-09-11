@@ -28,7 +28,15 @@ from pathlib import Path
 
 import duckdb
 import pytest
-from equity import build, rules_s01, rules_s02, rules_s03, rules_s04, rules_s05, rules_s06
+from equity import (
+    build,
+    rules_s01,
+    rules_s02,
+    rules_s03,
+    rules_s04,
+    rules_s05,
+    rules_s06,
+)
 from equity.baseline import Baseline, load
 from equity.gates import GateStatus
 from equity.model import EquityTable
@@ -41,7 +49,8 @@ def _seed() -> Baseline:
     S05·S06 상수까지 필요해졌다(test_equity_s21_workbench.seed 와 같은 규약)."""
     merged: dict[str, dict[str, object]] = {}
     for p in (rules_s01.BASELINE_SEED, Path(rules_s02.__file__).parent / "baseline_seed_s02.json",
-              rules_s03.BASELINE_SEED, rules_s05.BASELINE_SEED, rules_s06.BASELINE_SEED):
+              rules_s03.BASELINE_SEED, rules_s04.BASELINE_SEED,
+              rules_s05.BASELINE_SEED, rules_s06.BASELINE_SEED):
         for k, v in load(p).data.items():
             if not k.startswith("_") and k != "measured_at" and isinstance(v, dict):
                 merged.setdefault(k, {}).update(v)

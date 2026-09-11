@@ -16,9 +16,9 @@
 
 | 항목 | 값 |
 |---|---|
-| 최종 갱신 | 2026-09-11 15:20 — **페이즈 A 가동**(구현·배포·스모크·크론 등록, PR #103). 14:30 — 사용자 "진행해": PR #102 머지(main `22aa249`), 워크트리 `feat/daily-v2-a` 생성, 페이즈 A 착수(구현 에이전트 3갈래: A.1+A.2(1·2) / A.2(5) / A.2(3)+A.4). D 범위 "전부 옮기되 잡별 교체" 확정. 13:30 — 결정 V2-1~8, §2-1 알림 정책(재판정 알림 포함), §2-2 병행기 규칙, A~D 태스크·게이트, B.3 추적, C.2 해석·위키, D 잡별 교체 로드맵(범위 제안 확인 대기)·D.2 v3 DB 처리, §8 작업 수행 방식. 관찰 2/5 통과, 페이즈 A 승인 대기 |
-| 페이즈 A 저녁 원장 슬롯 | **가동**(09-11 15:20 크론 등록, 첫 실행 09-11 18:05): A.1 `--commit`, A.2 `daily_evening.sh`·06:00 축소·건전성 기준일·DART 처음 본 공시, A.4 `watchdog.sh`(18:50·09:15). 서버 dry-run 스모크 rc 0(3갈래 병렬). PR #103. 게이트 GA 관찰 09-11 저녁부터 5거래일. 남은 것 = A.3 문서 마무리(STAGE_SPEC WISE 전환일) |
-| 페이즈 B 잠정·확정 빌드 | 미착수 (v1 P4·P5 재설계) |
+| 최종 갱신 | 2026-09-11 16:40 — **페이즈 B 구현 완료**(워크트리 `feat/daily-v2-b`, 에이전트 4갈래 B1 빌드 체인 / B2 equity 잠정판·e1.15.0 / B3 검수 후속 5건 / B4 운영 P6). 남은 것 = PR·서버 배포·첫 수동 잠정 빌드(`catalog --rebase-asof` 1회)·크론 등록(18:15 build_evening·19:00 watchdog·03:30 backup·일요일 gc)·08:10 `--no-build` 제거. 15:20 — **페이즈 A 가동**(구현·배포·스모크·크론 등록, PR #103). 14:30 — 사용자 "진행해": PR #102 머지(main `22aa249`), 워크트리 `feat/daily-v2-a` 생성, 페이즈 A 착수(구현 에이전트 3갈래: A.1+A.2(1·2) / A.2(5) / A.2(3)+A.4). D 범위 "전부 옮기되 잡별 교체" 확정. 13:30 — 결정 V2-1~8, §2-1 알림 정책(재판정 알림 포함), §2-2 병행기 규칙, A~D 태스크·게이트, B.3 추적, C.2 해석·위키, D 잡별 교체 로드맵(범위 제안 확인 대기)·D.2 v3 DB 처리, §8 작업 수행 방식. 관찰 2/5 통과, 페이즈 A 승인 대기 |
+| 페이즈 A 저녁 원장 슬롯 | **가동**(09-11 15:20 크론 등록, 첫 실행 09-11 18:05): A.1 `--commit`, A.2 `daily_evening.sh`·06:00 축소·건전성 기준일·DART 처음 본 공시, A.3 STAGE_SPEC §2-21(저녁 슬롯 가용시각·WISE 기준일 전환 09-11), A.4 `watchdog.sh`(18:50·09:15). 서버 dry-run 스모크 rc 0(3갈래 병렬). PR #103. 게이트 GA 관찰 09-11 저녁부터 5거래일 |
+| 페이즈 B 잠정·확정 빌드 | **구현 완료, 배포 대기**(09-11 16:40): B.1 `build_chain.sh`(evening/morning 공통) + `build_evening.sh`(18:15, 원장 완료 대기 ≤18:40) + `build_morning.sh`(08:10 체인 안) + `stage.health` C1~C5 + 스냅샷 GC keep=6 + `watchdog.sh evening_build`(19:00) · B.2 `price_daily` 저녁 T 행(`basis`·`corp_action_pending`, EG14 신설, e1.15.0 상수 유도 3건) + `dataset_profile.basis` + `equity build --basis` · B.3 `deliver/history/` + `gc_pinned`(이력 30일·월말 보호) · v1 5.5 검수 후속 5건(KIS 최초 관측판 `version_folded`, `krx.corp_action_candidates` 게이트, 잔고율 I4b, `coverage_daily` S24, 정정 링크 확인) · P6 `backup_raw.sh`·`rotate_logs.sh`·`daily_report.py`. 회귀·lint 통과(기존 실패 1건 제외). 게이트 GB 는 첫 잠정 빌드부터 5거래일 |
 | 페이즈 C 스코어링 | Kael-alpha 인계 완료(`~/orca/projects/Kael-alpha/handoff/2026-09-10-evening-scoring-pipeline/`) |
 | 페이즈 D 컷오버 | 범위 확정(09-11): 전부 옮기되 잡 하나씩, 비교 통과 뒤 교체(§6 로드맵) |
 | 선행 조사 | 프로브 09-10 밤 판독: 투자자 순매수 18:56 이후 불변, 공매도 거래량 불변(누적 필드만 자정 창 이동), **대차 당일 행 20:05 확정**, **외국인 보유 당일 행 21:05 확정**(다음 날 07:05 까지 불변). 남은 것 = 16:05~18:05 판독(09-11 저녁) |
@@ -139,17 +139,17 @@ v3 코드·DB·크론·키는 **건드리지 않는다**(읽기 전용). 우리 
 
 ### Task B.1: stage 저녁·아침 2회 빌드
 
-- [ ] `build_evening.sh`(18:15, 키움·WISE 완료 신호 뒤): 빌드 락 → stage 전량 재빌드 → equity → 텔레그램 "잠정판 준비 hh:mm". DART 가 아직 쓰는 중이면 dart.db 는 **직전 스냅샷**을 쓴다(저녁 스코어링 경로 밖).
-- [ ] 아침 `daily_build.sh` 뒤 stage·equity 확정 빌드(v1 P4·P5 의 stage_daily/equity_daily 를 그대로 쓰되 이름을 `build_morning`).
-- [ ] 스냅샷 GC keep=3 → 저녁·아침 2판/일이므로 keep=6.
+- [x] `build_evening.sh`(18:15, 키움·WISE 완료 신호 뒤): 빌드 락 → stage 전량 재빌드 → equity → 텔레그램 "잠정판 준비 hh:mm". DART 가 아직 쓰는 중이면 dart.db 는 **직전 스냅샷**을 쓴다(저녁 스코어링 경로 밖). — 09-11 구현: `ledger_evening.json`(kiwoom_rc·wise_rc==0) 을 60초 간격으로 기다리되 한도 18:40(`QL_EVENING_BUILD_DEADLINE`), 실제 체인은 `build_chain.sh evening`. 인계 파일은 세 갈래가 다 끝난 뒤 쓰이므로 dart.db 도 이미 닫혀 있다(직전 스냅샷 규칙은 불필요).
+- [x] 아침 `daily_build.sh` 뒤 stage·equity 확정 빌드(v1 P4·P5 의 stage_daily/equity_daily 를 그대로 쓰되 이름을 `build_morning`). — `build_morning.sh` → `build_chain.sh morning`, D 는 daily_build 의 T-1. 저녁·아침이 같은 체인을 돌아 규칙이 갈릴 수 없다.
+- [x] 스냅샷 GC keep=3 → 저녁·아침 2판/일이므로 keep=6. — `stage.snapshot.gc(keep=6, protect=현재 stage 판의 snapshot_id)`, `build_chain.sh` 끝에서 호출.
 - [ ] 단축 옵션(GA 뒤 결정): 저녁은 키움·WISE 관련 stage 테이블만 재빌드하는 증분 경로 — 22분 → ≈10분.
 
 ### Task B.2: equity 잠정 행 규약
 
-- [ ] `price_daily` 에 T 행을 키움 종가·거래량으로 채우고 `basis='evening'`. 아침 KRX 행이 `basis='krx'` 로 덮는다(EG 게이트: evening 행이 krx 행과 다르면 metric 기록, 폐기 아님).
-- [ ] 기업행위 의심 종목(T 수익률 절대값 > 30% 또는 주식수 급변) 은 `flag=corp_action_pending` 으로 표시 — 소비자가 제외한다. 아침 `adj_factor` 산출 뒤 해제.
-- [ ] `dataset_profile` 에 `basis` 와 잠정판 생성 시각. 워크벤치·커널 어댑터가 잠정판을 구분해 표시.
-- [ ] v1 Task 5.5(검수 후속 5건: KIS 최초 관측판·액면병합 확인·잔고율 라벨·WISE 커버 이력·정정 링크)를 여기서 함께.
+- [x] `price_daily` 에 T 행을 키움 종가·거래량으로 채우고 `basis='evening'`. 아침 KRX 행이 `basis='krx'` 로 덮는다(EG 게이트: evening 행이 krx 행과 다르면 metric 기록, 폐기 아님). — 09-11: T 행은 `stg_flow_daily_kiwoom` 의 `max(date) > max(stg_price_daily.date)` 인 날만 생기고 아침에 KRX 가 오면 0행이 되어 **자연 교체**된다(덮어쓰기 없음). OHLC·거래대금·주식수는 NULL. EG14(최근 5 KRX 세션 행수 ≥ 98%·종가 NULL 0) 신설, 저녁 세션은 `evening_coverage_ratio` 기록형. 캘린더·`universe_daily` 격자는 T 로 늘리지 않았다 — 저녁 스코어링은 `price_daily`/`v_adj_price_fwd` 에서 T 가격을 직접 읽는 전제(격자까지 필요하면 후속 결정).
+- [x] 기업행위 의심 종목(T 수익률 절대값 > 30% 또는 주식수 급변) 은 `flag=corp_action_pending` 으로 표시 — 소비자가 제외한다. 아침 `adj_factor` 산출 뒤 해제. — `corp_action_pending = prev_close IS NULL OR |close/prev_close−1| > evening_jump_abs_max(0.3)`. 주식수는 저녁 행에 없어 판정 밖(원장 건전성 `krx.corp_action_candidates` 가 아침에 잡는다). 해제는 아침 자연 교체로.
+- [x] `dataset_profile` 에 `basis` 와 잠정판 생성 시각. 워크벤치·커널 어댑터가 잠정판을 구분해 표시. — `basis` 컬럼(manual/evening/morning)만 실었다. **생성 시각은 싣지 않는다**: 산출 컬럼에 빌드 시각이 들어가면 같은 입력의 재빌드 해시가 달라져 EG5a 가 매번 깨진다. 시각 정본 = MANIFEST `built_at_utc`·`_catalog_meta.written_at_utc`(EQUITY_GATES §10-4). 어댑터 노출은 페이즈 C(Kael-alpha) 몫.
+- [x] v1 Task 5.5(검수 후속 5건: KIS 최초 관측판·액면병합 확인·잔고율 라벨·WISE 커버 이력·정정 링크)를 여기서 함께. — 09-11 B3: `credit_daily` 판본 CTE(`observed_date` 최소, 동률이면 19축) + `version_folded` 격리 + EG3 `n_versions_folded` · `ledger_health` `krx.corp_action_candidates`(액면가 변경 또는 주식수 ±0.5%, WARN) · `rules_kis` I4b 라벨(분모 = 공표일 주식수) + equity 검산 metric 2축 · equity `coverage_daily`(S24, PIT 누적 first/last_covered·streak·analyst_count) · 정정 링크는 결함 없음(기재정정 93/93·첨부정정 4/4 유일 링크) — 코드 미수정.
 
 ### Task B.3: 추적 가능성 규약 (V2-8) — "스코어 하나에서 입력까지"
 
@@ -159,10 +159,10 @@ v3 코드·DB·크론·키는 **건드리지 않는다**(읽기 전용). 우리 
 |---|---|---|---|---|
 | ① 실행 manifest | equity 빌드 id + 표별 판 id·내용 해시, 팩터 레지스트리 버전, 모델 설정 해시, 유니버스 정책 id, 코드 커밋, 제외 종목 목록, 생성 시각 | Kael-alpha `out/scores/<model>/<date>_<basis>.manifest.json` + 파이프라인 `deliver/history/<date>_<basis>.json` | 수 KB | **영구** |
 | ② 팩터 패널 | 종목×팩터 값(long parquet), basis 표식 | Kael-alpha `out/factors/<date>_<basis>.parquet` | < 1 MB/일 | **영구** — 모델 재계산은 equity 없이 여기서 |
-| ③ equity 입력 판 | 스코어링이 참조한 빌드 전체(28표) | `data/equity/<표>/v=e_…`, `v=m_…` + `_pinned` | 1.2 GB/판 | 참조된 판은 GC 제외 **30일**(≈72 GB), **월말 확정판은 영구 봉인**(≈15 GB/년), 그 밖은 GC |
-| ④ 원장 | raw 5 DB | `data/raw` (append-only, KIS·DART 판본 보존, 키움 신규 행만, WISE 일별 스냅샷) | 45 GB | 영구. observed_date 축으로 어느 시점 stage 도 재빌드 가능(G6). 온라인 백업 7일 + 월 1회(P6) |
+| ③ equity 입력 판 | 스코어링이 참조한 빌드 전체(29표) | `data/equity/<표>/v=e_…`, `v=m_…` + `_pinned` | 1.2 GB/판(equity) · 1.5 GB/판(`_pinned` stage 입력) | **09-11 구현**: equity 판 자체는 표별 keep 10(5거래일×2, `QL_EQUITY_KEEP`). 추적은 `_pinned/` 의 stage 입력 판으로 — `deliver/history` 가 가리키는 판을 **30일** 보호, **월말 확정판(그 달 마지막 morning) 은 영구** 보호(`equity.inputs.gc_pinned`, `build_chain.sh` gc_step). 같은 입력이면 재빌드가 같다(EG5a)는 것이 근거 |
+| ④ 원장 | raw 5 DB | `data/raw` (append-only, KIS·DART 판본 보존, 키움 신규 행만, WISE 일별 스냅샷) | 18 GB(09-11 실측: dart 6.8·krx 3.9·kiwoom 3.8·kis 3.4·wise 0.4) | 영구. observed_date 축으로 어느 시점 stage 도 재빌드 가능(G6). 온라인 백업 7일 + 월 1회(P6) |
 
-- [ ] 파이프라인: `deliver/latest_*.json` 을 `deliver/history/` 에 날짜·basis 별로 복사. equity GC(`gc_pinned`)가 `deliver/history` 와 Kael-alpha manifest 가 가리키는 판을 30일간 보호하고 월말 판은 영구 보호. 스냅샷 GC keep=6 유지.
+- [x] 파이프라인: `deliver/latest_*.json` 을 `deliver/history/` 에 날짜·basis 별로 복사. equity GC(`gc_pinned`)가 `deliver/history` 와 Kael-alpha manifest 가 가리키는 판을 30일간 보호하고 월말 판은 영구 보호. 스냅샷 GC keep=6 유지. — 09-11 구현(`build_chain.sh` deliver_step·gc_step). Kael-alpha manifest 참조는 페이즈 C 에서 보호 목록에 합류. **디스크 예산은 결정 9(DECISIONS_PENDING) 참조** — 백업 7일(≈128 GB) + `_pinned` 30일(≤90 GB) + 스냅샷 6판(≈48 GB) 이 여유 281 GB 에 근접한다.
 - [ ] Kael-alpha: 실행마다 ①·② 기록. manifest 없는 스코어는 게이트 GC 실패로 간주.
 - [ ] 검증: 임의의 과거 스코어 1건을 골라 manifest → 팩터 패널 → equity 판 순으로 되짚어 같은 스코어가 재현되는지(연 1회 이상, 첫 회는 GB 안에서).
 

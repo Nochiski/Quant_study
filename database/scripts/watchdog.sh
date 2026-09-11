@@ -1,20 +1,22 @@
 #!/usr/bin/env bash
 # 워치독 — 예정 시각까지 체인 보고가 없거나 실패면 crit. 플랜 v2 Task A.4 / 결정 V2-7(조용한 실패 금지).
-#   사용: scripts/watchdog.sh <evening_ledger|morning_build>
+#   사용: scripts/watchdog.sh <evening_ledger|evening_build|morning_build>
 #   예정 크론(서버 TZ=UTC. 등록은 오케스트레이터가 한다):
 #     50 9 * * 1-5  cd /home/kael/quant-ledger && scripts/watchdog.sh evening_ledger   # 18:50 KST
+#      0 10 * * 1-5 cd /home/kael/quant-ledger && scripts/watchdog.sh evening_build    # 19:00 KST
 #     15 0 * * 2-6  cd /home/kael/quant-ledger && scripts/watchdog.sh morning_build    # 09:15 KST
 #   판정 근거는 체인이 남긴 산출물뿐이다 — 원장·API 를 건드리지 않으므로 raw 락도 잡지 않는다.
-#   휴장일(오늘 KST)은 info 후 rc 0. 잠정 빌드·스코어 워치독은 페이즈 B·C 에서 case 에 추가한다.
+#   휴장일(오늘 KST)은 info 후 rc 0. 스코어 워치독은 페이즈 C 에서 case 에 추가한다.
 set -uo pipefail
 cd /home/kael/quant-ledger
 export QL_HOME=/home/kael/quant-ledger PYTHONPATH=/home/kael/quant-ledger/src
 PY=.venv/bin/python
-CHECK="${1:?usage: watchdog.sh <evening_ledger|morning_build>}"
+CHECK="${1:?usage: watchdog.sh <evening_ledger|evening_build|morning_build>}"
 case "$CHECK" in
   evening_ledger) TITLE_OK="watchdog evening_ledger 정상"; TITLE_BAD="watchdog: 18:50 까지 저녁 원장 보고 없음/실패" ;;
+  evening_build)  TITLE_OK="watchdog evening_build 정상";  TITLE_BAD="watchdog: 19:00 까지 잠정판 보고 없음/실패" ;;
   morning_build)  TITLE_OK="watchdog morning_build 정상";  TITLE_BAD="watchdog: 09:15 까지 확정 빌드 보고 없음/실패" ;;
-  *) echo "unknown check: $CHECK (allowed: evening_ledger, morning_build)" >&2; exit 2 ;;
+  *) echo "unknown check: $CHECK (allowed: evening_ledger, evening_build, morning_build)" >&2; exit 2 ;;
 esac
 TODAY=$(TZ=Asia/Seoul date +%Y%m%d)
 # 오늘이 거래일인가 — 캘린더를 못 읽으면 1(거래일)로 본다. 조용히 넘어가는 쪽이 아니라 판정하는 쪽으로 기운다.
@@ -69,6 +71,36 @@ if check == "evening_ledger":
     if bad:
         out("", f"실패/미완 단계 {', '.join(bad)} — {summary}", 1)
     out(fin.replace(" ", "T").split("T")[-1][:5], summary, 0)
+
+if check == "evening_build":
+    # 18:15 잠정 빌드가 남긴 인계 파일. stage·equity 둘 다 ok 여야 Kael-alpha 가 스코어를 낼 수 있다.
+    path = "data/deliver/latest_evening.json"
+    if not os.path.exists(path):
+        out("", f"{path} 없음 — 18:15 잠정 빌드가 돌지 않았거나 인계 파일을 쓰지 못했다", 1)
+    try:
+        with open(path, encoding="utf-8") as f:
+            rep = json.load(f)
+    except (OSError, ValueError) as e:
+        out("", f"{path} 를 읽을 수 없다 ({type(e).__name__}: {e})", 1)
+    health = rep.get("health") if isinstance(rep.get("health"), dict) else {}
+    elapsed = rep.get("elapsed_s") if isinstance(rep.get("elapsed_s"), dict) else {}
+    gen = str(rep.get("generated_at") or "")
+    summary = (f"date={rep.get('date') or '결측'} generated_at={gen or '결측'} "
+               f"stage={rc_txt(health.get('stage'))} equity={rc_txt(health.get('equity'))} "
+               f"snapshot={rep.get('stage_snapshot_id') or '결측'} "
+               f"stage {rc_txt(elapsed.get('stage'))}s · equity {rc_txt(elapsed.get('equity'))}s "
+               f"(stage {len(rep.get('stage_builds') or {})}표 · equity {len(rep.get('equity_builds') or {})}표)")
+    if str(rep.get("date") or "") != today:
+        out("", f"인계 파일이 오늘({today}) 것이 아니다 — {summary}", 1)
+    bad = [k for k in ("stage", "equity") if health.get(k) != "ok"]
+    if bad:
+        out("", f"건전성 실패 {', '.join(bad)} — {summary}", 1)
+    try:    # generated_at 은 UTC 다 — 제목에 다는 시각은 KST 로 바꾼다(19:00 판정인데 10:00 으로 보이면 안 된다)
+        stamp = dt.datetime.strptime(gen, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=dt.timezone.utc).astimezone(KST).strftime("%H:%M")
+    except ValueError:
+        stamp = ""
+    out(stamp, summary, 0)
 
 if check == "morning_build":
     from daily import calendar as cal_mod

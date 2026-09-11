@@ -894,3 +894,22 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
 | 7 | 서버 `adj_factor.factor_source` 분포, `price_daily` 재계산 편차 719건 전건, `sql/adj_factor.sql:66-89·360-390·404-406`, DESIGN §10 P43 |
 | 8 | 서버 `logs/equity/*.log` 의 `ok table=` 행 28표, EG3 블록 읽기 전용 재측정 6건, `rules_s10.py:225-315`, DESIGN §10 P33′ |
 | 9 | 서버 `stg_master_daily`(2026-09-01·02, 125종목 정지) × `universe_daily`(2026-08-20) 대조, `universe_daily.no_trade_reason` 전량 분포, `sql/universe_daily.sql:10-50·101-105·170·200-215`, `COLLECT_PLAN.md` E2·R4-2, `DATA_CATALOG.md` MS-04·MS-05·DS-02 |
+
+---
+
+## 페이즈 B 후속 (2026-09-11, 워크트리 `feat/daily-v2-b` 통합 시점 기록)
+
+지금 손해는 없고 다음 손에 묶어서 처리할 항목. 각 항목의 근거는 해당 에이전트 보고(플랜 v2 §4 상태 블록).
+
+| # | 항목 | 왜 미룸 | 위치 |
+|---|---|---|---|
+| B-1 | `coverage_daily`(S24) 가 `dataset_profile` 에 미등재 — `rules_s19.SOURCE_TABLES` 고정 목록·`FieldProfile` 미선언이라 어댑터에 안 보인다 | S19 는 B2 소유였고 병렬 충돌 회피 | `src/equity/rules_s19.py`, `docs/EQUITY_FIELD_MAP.md` §5 |
+| B-2 | `docs/EQUITY_GATES.md` 에 EG3_credit_daily 새 metric(`n_versions_folded` 등)·EG3_coverage_daily 미기재 — 코드 docstring 에만 있다 | B2 가 같은 문서 §10 을 쓰고 있어 충돌 회피 | `src/equity/rules_s10.py`, `rules_s24.py` |
+| B-3 | EG3_credit_daily 가 판본 선택 윈도(19키)를 한 빌드에 ~8회 평가 — 서버 원장 8.4M 행에서 시간 미확인. 느리면 게이트 안에서 TEMP TABLE 1회 물질화 | 절단본에선 47s 로 문제 없음 | `src/equity/rules_s10.py first_version_sql()` |
+| B-4 | `[첨부정정]` 회귀 테스트 없음(s11 픽스처는 `[기재정정]`·`[첨부추가]` 만) — 링크 로직은 대칭이라 결함은 아님 | 명세가 "결함 없으면 근거만" | `tests/test_equity_s11_disclosure.py` |
+| B-5 | `baseline_locked.json` 의 e1.15.0 신규 상수 3건 `server_evidence: null` — 첫 서버 빌드 뒤 채운다 | 서버 실행은 오케스트레이터만 | `src/equity/baseline_locked.json` |
+| B-6 | 첫 서버 `equity catalog` 는 EG5c FAIL — 뷰에 `basis`·`corp_action_pending` 이 늘어 `_asof/` 표본 해시가 바뀐다. `catalog --rebase-asof` 1회 승인 필요(e1.6.0 전례) | 사람 승인 절차 | `docs/EQUITY_GATES.md` §10 |
+| B-7 | 저녁 T 행이 `trading_calendar`·`universe_daily` 격자 밖 — 스코어링이 격자를 요구하면 `rules_s02`/`rules_s03` 을 T 로 늘리는 결정 필요 | 페이즈 C 가 요구를 확정한 뒤 | `src/equity/rules_s04.py` 설계 판단 2 |
+| B-8 | pyright 선행 오류 5건(`rules_s02.py:277` axis_columns 3-tuple, `rules_s19.py` `_window` 4건)·ruff 선행 2건(`test_equity_cli.py:31` RUF059, `test_equity_s06_adj.py:1033` C408) — HEAD 에도 동일 | 수술적 변경 범위 밖 | 해당 파일 |
+| B-9 | `gc_pinned` 보호 목록에 Kael-alpha 스코어 manifest 가 아직 안 들어간다(페이즈 C 에서 `out/scores/*/…manifest.json` 의 `equity_builds` 를 합류) | 페이즈 C 산출물이 아직 없음 | `scripts/build_chain.sh` gc_step |
+

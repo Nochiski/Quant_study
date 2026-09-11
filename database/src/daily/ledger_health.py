@@ -134,8 +134,80 @@ def _requested_size(state_path: str) -> int:
         return 0
 
 
+# ── KRX 기업행위 후보 (검수 종합 H1 · A §2 A01·A02) ───────────────────────
+# 액면가가 그대로여도 상장주식수는 전환·증자·소각으로 매일 조금씩 움직인다 — 09-09 전수 6건 중
+# 4건이 그런 변동(0.994~1.050)이었다. 그래서 잡는 기준은 "액면가 변경" 또는 "주식수 비가 1 에서
+# 이만큼 넘게 벗어남" 둘이다. 0.5% 는 A02 의 최소 실측(019550 −0.58%)보다 낮게 잡은 값이다.
+SHARES_RATIO_TOL = 0.005
+# `value` 에 실을 종목 표본 상한 — 리포트 JSON 이 부풀지 않게 자른다(건수는 `n` 이 전부 센다).
+CORP_ACTION_SAMPLE = 30
+# 판정에 필요한 `krx_*_isu_base_info` 축. 하나라도 없으면 SKIP 이다(옛 스키마 원장 방어).
+CORP_ACTION_COLUMNS = ("ISU_SRT_CD", "ISU_ABBRV", "PARVAL", "LIST_SHRS")
+_CORP_ACTION_MARKETS = ("stk", "ksq")
+
+
+def _has_columns(con: sqlite3.Connection, table: str, cols: tuple[str, ...]) -> bool:
+    have = {str(r[1]) for r in con.execute(f"PRAGMA table_info({table})")}
+    return all(c in have for c in cols)
+
+
+def _krx_number(v: object) -> float | None:
+    """KRX 수치 문자열(천단위 쉼표 포함) → float. 빈 값·`'-'`·비수치는 None."""
+    if v is None:
+        return None
+    s = str(v).replace(",", "").strip()
+    if s in ("", "-"):
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def check_krx_corp_actions(con: sqlite3.Connection, d: str, d_prev: str) -> Check:
+    """D 와 직전 거래일의 `*_isu_base_info` 를 `ISU_SRT_CD` 로 조인해 기업행위 후보를 뽑는다.
+
+    원장은 정확한데 하류가 조용히 틀리는 종류다(검수 종합 H1): 액면병합 종목의 종가를 그대로
+    이으면 001290 은 +345%, 273060 은 +380% 로 계상되고(실제 −10.9%/−4.1%) 모멘텀·변동성
+    크로스섹션이 그 하루에 통째로 뒤집힌다. 행수·status 게이트로는 잡히지 않으므로 "기업행위가
+    있었을 법한 종목" 을 매일 목록으로 남겨 `adj_factor` 산출과 대조할 수 있게 한다. warn 등급인
+    것은 이것이 실패가 아니라 **확인 대상**이기 때문이다.
+    """
+    items: list[dict[str, object]] = []
+    n_prev = 0
+    for market in _CORP_ACTION_MARKETS:
+        tbl = f"krx_{market}_isu_base_info"
+        if not _has_table(con, tbl) or not _has_columns(con, tbl, CORP_ACTION_COLUMNS):
+            return Check("krx.corp_action_candidates", Level.WARN, Status.SKIP, None,
+                         f"{tbl} 에 {list(CORP_ACTION_COLUMNS)} 축이 없다 — 판정 불가")
+        n_prev += _count(con, f"SELECT COUNT(*) FROM {tbl} WHERE bas_dd_req=?", (d_prev,))
+        rows = con.execute(
+            f"SELECT c.ISU_SRT_CD, c.ISU_ABBRV, p.PARVAL, c.PARVAL, p.LIST_SHRS, c.LIST_SHRS "
+            f"FROM {tbl} c JOIN {tbl} p ON p.ISU_SRT_CD = c.ISU_SRT_CD AND p.bas_dd_req = ? "
+            "WHERE c.bas_dd_req = ? AND (c.LIST_SHRS <> p.LIST_SHRS OR c.PARVAL <> p.PARVAL)",
+            (d_prev, d)).fetchall()
+        for code, name, pv0, pv1, sh0, sh1 in rows:
+            a, b = _krx_number(sh0), _krx_number(sh1)
+            ratio = round(b / a, 6) if (a and b is not None) else None
+            if (_krx_number(pv0) == _krx_number(pv1)
+                    and ratio is not None and abs(ratio - 1) <= SHARES_RATIO_TOL):
+                continue
+            items.append({"code": str(code), "name": str(name), "market": market,
+                          "parval": [str(pv0), str(pv1)], "shares": [str(sh0), str(sh1)],
+                          "shares_ratio": ratio})
+    if n_prev == 0:
+        return Check("krx.corp_action_candidates", Level.WARN, Status.SKIP, None,
+                     f"직전 거래일({d_prev}) base_info 행 0 — 대조 대상 없음")
+    items.sort(key=lambda x: (str(x["market"]), str(x["code"])))
+    return Check("krx.corp_action_candidates", Level.WARN,
+                 Status.PASS if not items else Status.FAIL,
+                 {"n": len(items), "items": items[:CORP_ACTION_SAMPLE]},
+                 f"{d_prev}→{d} 액면가 변경 또는 주식수 비 ≠ 1(±{SHARES_RATIO_TOL:.1%} 초과) 0건 "
+                 "— 있으면 adj_factor 산출과 대조한다 (검수 H1)")
+
+
 # ── KRX (A §6-1) ───────────────────────────────────────────────────────────
-def check_krx(con: sqlite3.Connection, d: str, cal: _cal.Calendar) -> list[Check]:
+def check_krx(con: sqlite3.Connection, d: str, d_prev: str, cal: _cal.Calendar) -> list[Check]:
     out: list[Check] = []
     rows = con.execute("SELECT endpoint, status FROM ingest_log WHERE bas_dd=?", (d,)).fetchall()
     n_ok = sum(1 for _, s in rows if s == "ok")
@@ -161,6 +233,7 @@ def check_krx(con: sqlite3.Connection, d: str, cal: _cal.Calendar) -> list[Check
               and cnt["krx_ksq_bydd_trd"] == cnt["krx_ksq_isu_base_info"])
         out.append(Check("krx.rows", Level.REQUIRED, Status.PASS if ok else Status.FAIL, cnt,
                          "stk>=920 ksq>=1780 kospi=51 kosdaq=40 etf>=1120, stk=stk_base, ksq=ksq_base (20거래일 실측)"))
+    out.append(check_krx_corp_actions(con, d, d_prev))
     return out
 
 
@@ -357,7 +430,7 @@ def run(d: str, paths: Paths, *, today: dt.date | None = None,
         for name in sorted(skip):
             checks.append(Check(f"{name}.skipped", Level.WARN, Status.SKIP, None, "--skip 로 판정 제외(운영 결정)"))
         if krx is not None and "krx" not in skip:
-            checks += check_krx(krx, d, cal)
+            checks += check_krx(krx, d, d_prev, cal)
         if kw is not None and "kiwoom" not in skip:
             checks += check_kiwoom(kw, krx, d, d_prev, n_req)
         if kis is not None and "kis" not in skip:

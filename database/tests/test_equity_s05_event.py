@@ -24,7 +24,7 @@ from pathlib import Path
 
 import duckdb
 import pytest
-from equity import build, rules_s01, rules_s02, rules_s05
+from equity import build, rules_s01, rules_s02, rules_s04, rules_s05
 from equity.baseline import Baseline, load
 from equity.gates import GateStatus
 from equity.model import EquityTable
@@ -185,7 +185,7 @@ def _seed() -> Baseline:
     """S01·S02·S05 seed 병합 — 오케스트레이터가 baseline.json 에 병합하는 것과 같은 모양."""
     merged: dict[str, object] = {}
     for p in (rules_s01.BASELINE_SEED, Path(rules_s02.__file__).parent / "baseline_seed_s02.json",
-              rules_s05.BASELINE_SEED):
+              rules_s04.BASELINE_SEED, rules_s05.BASELINE_SEED):
         merged.update({k: v for k, v in load(p).data.items()
                        if not k.startswith("_") and k != "measured_at"})
     return Baseline(merged)

@@ -11,6 +11,14 @@
   (`kis_investor_flow.*_ntby_tr_pbmn` · `kis_loan_trans.rmnd_amt`). §9 가 G4 픽스처를 강제한다.
 - 접미사 없음: 금액인데 원장 단위 미측정(`kis_credit_balance.*_amt` 6컬럼 · flow 의
   seln/shnu/askp/bidp 대금 · loan `prdy_vrss`). §5 "싣는다 + 기계 판독" 처방.
+
+비율 컬럼의 **분모 기준일**(SPEC I4 · 검수 종합 M3, 09-10 재검산) — `kis_credit_balance` 의
+`whol_loan_rmnd_rate`·`whol_stln_rmnd_rate` 는 `deal_date` 시점이 아니라 **공표일(= `stlm_date`,
+T+2) 시점 상장주식수**를 분모로 쓴다. 같은 콜(09-09 16:33)에서 온 363260 모비데이즈의 09-03 행
+0.40(액면병합 전 분모)과 09-04 행 0.61(병합 후 분모)이 갈린 것이 근거다 — 조회 시점 재계산이면
+두 행의 분모가 같아야 한다. look-ahead 는 아니지만 `deal_date` 주식수로 검산하면 T~T+2 사이
+주식수가 바뀐 종목(09-07 기준 15종목)에서 어긋난다. 소비층 검산은 `stlm_date` 주식수로 한다
+(equity `EG3_credit_daily.loan_rate_vs_shares_ratio_stlm_date`).
 """
 from __future__ import annotations
 
@@ -315,6 +323,8 @@ STG_CREDIT_DAILY = TableRule(
         _unit_unknown("whol_loan_rdmp_amt", 9),
         _shr("whol_loan_rdmp_stcn", 8),
         _unit_unknown("whol_loan_rmnd_amt", 9),
+        # 분모는 deal_date 가 아니라 **공표일(stlm_date, T+2) 상장주식수** (§ 모듈 docstring ·
+        # SPEC I4 · 검수 종합 M3). 원값 그대로 싣고 기준일은 문서·게이트가 나른다.
         _pct("whol_loan_rmnd_rate", 4),
         _shr("whol_loan_rmnd_stcn", 8),
         _pct("whol_stln_gvrt", 5),
@@ -323,6 +333,7 @@ STG_CREDIT_DAILY = TableRule(
         _unit_unknown("whol_stln_rdmp_amt", 7),
         _shr("whol_stln_rdmp_stcn", 6),
         _unit_unknown("whol_stln_rmnd_amt", 7),
+        # 융자 잔고비율과 같은 분모 규약 — 공표일(stlm_date, T+2) 상장주식수 기준.
         _pct("whol_stln_rmnd_rate", 3),
         _shr("whol_stln_rmnd_stcn", 7),
     ),

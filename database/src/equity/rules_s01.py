@@ -183,7 +183,7 @@ SECURITY = register(EquityTable(
         "stg_delisted_master": ("ticker", "lstg_abol_dt"),
         "stg_index_daily": ("date",),
         "stg_corp_map": ("ticker", "corp_code")},
-    consts=("backfill_end",),
+    # 상수 없음 — 백필 상한은 `security.sql` 이 자기 거래일 축(td)의 max 로 유도한다(e1.15.0)
     extra_gates=(eg3_security,),
 ))
 

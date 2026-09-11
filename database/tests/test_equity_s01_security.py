@@ -114,8 +114,9 @@ def test_마지막_존재일이_backfill_end면_생존이다(built: build.BuildR
                                  "WHERE ticker IN ('036220', '101970', '069500') ORDER BY 1")
     assert rows == [("036220", None, "unknown"), ("069500", None, "unknown"),
                     ("101970", None, "unknown")]
-    assert SECURITY.consts == ("backfill_end",)
-    assert str(_baseline().get("security", "backfill_end")) == BACKFILL_END.isoformat()
+    # 규칙 e1.15.0 — 백필 상한은 baseline 상수가 아니라 `security.sql` 의 거래일 축 max 다.
+    assert SECURITY.consts == ()
+    assert _baseline().get("security", "backfill_end") is None
 
 
 def test_KIS가_폐지라_한_티커는_delist_date를_갖는다(built: build.BuildResult) -> None:

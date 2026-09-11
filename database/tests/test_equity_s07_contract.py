@@ -19,7 +19,15 @@ from typing import Any
 
 import duckdb
 import pytest
-from equity import build, contract, rules_s01, rules_s02, rules_s04, rules_s05, rules_s06
+from equity import (
+    build,
+    contract,
+    rules_s01,
+    rules_s02,
+    rules_s04,
+    rules_s05,
+    rules_s06,
+)
 from equity.baseline import Baseline, load
 from equity.gates import GateStatus
 from stage import manifest
@@ -40,7 +48,8 @@ def seed() -> Baseline:
     `security.backfill_end` 와 같은 테이블에 살아 얕은 update 로는 덮인다."""
     merged: dict[str, dict[str, object]] = {}
     for p in (rules_s01.BASELINE_SEED, Path(rules_s02.__file__).parent / "baseline_seed_s02.json",
-              rules_s05.BASELINE_SEED, rules_s06.BASELINE_SEED, SEED_S07):
+              rules_s04.BASELINE_SEED, rules_s05.BASELINE_SEED,
+              rules_s06.BASELINE_SEED, SEED_S07):
         for k, v in load(p).data.items():
             if not k.startswith("_") and k != "measured_at" and isinstance(v, dict):
                 merged.setdefault(k, {}).update(v)

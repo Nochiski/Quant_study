@@ -9,7 +9,6 @@ from datetime import date
 from pathlib import Path
 
 import duckdb
-import pytest
 from equity import build, rules_s02
 from equity.baseline import Baseline, load
 from equity.gates import GateStatus
@@ -189,23 +188,75 @@ def test_baseline_없으면_EG17은_skip_no_baseline(tmp_path: Path) -> None:
     assert eg17.metrics["missing_metric"] == "trading_calendar.calendar_start"
 
 
-@pytest.mark.parametrize(("metric", "bad", "expect_in_detail"), [
-    ("backfill_end", "2026-08-19", "max(date) expected 2026-08-19"),
-    ("calendar_start", "2010-01-05", "min(date) expected 2010-01-05"),
-])
-def test_양_끝이_baseline과_다르면_EG17_폐기(tmp_path: Path, metric: str, bad: str,
-                                            expect_in_detail: str) -> None:
-    """원천이 잘려 캘린더가 짧아지는 사고 — 행수 등식은 새 원천에 맞춰 같이 줄어 통과한다."""
-    tc = {**SEED.table("trading_calendar"), metric: bad}
+def test_하한이_baseline과_다르면_EG17_폐기(tmp_path: Path) -> None:
+    """원천이 앞에서 잘리는 사고 — 행수 등식은 새 원천에 맞춰 같이 줄어 통과한다."""
+    tc = {**SEED.table("trading_calendar"), "calendar_start": "2010-01-05"}
     r = _build(tmp_path, baseline=Baseline({**SEED.data, "trading_calendar": tc}))
     assert r.status is build.BuildStatus.GATE_FAILED
     eg17 = _gate(r, "EG17")
-    assert eg17.status is GateStatus.FAIL and expect_in_detail in eg17.detail
+    assert eg17.status is GateStatus.FAIL and "min(date) expected 2010-01-05" in eg17.detail
+
+
+# ── EG17 상한 유도 (규칙 e1.15.0 · 플랜 v2 §4 B.2) ───────────────────────────
+
+def test_상한은_baseline_상수가_아니라_stage에서_유도한다(tmp_path: Path) -> None:
+    """`backfill_end` 를 아예 안 등재해도(또는 틀린 값을 등재해도) 판정이 선다 —
+    거래일이 하루 늘 때마다 사람이 상수를 올려야 하던 고장(v1 §7 D)을 없앤 것이 이 변경이다."""
+    tc = {k: v for k, v in SEED.table("trading_calendar").items() if k != "backfill_end"}
+    r = _build(tmp_path, baseline=Baseline({**SEED.data, "trading_calendar": tc}))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    eg17 = _gate(r, "EG17")
+    assert eg17.status is GateStatus.PASS
+    assert eg17.metrics["max_date"] == LAST_TD.isoformat()
+    assert eg17.metrics["stage_max_date"] == LAST_TD.isoformat()
+    assert eg17.metrics["backfill_end"] == LAST_TD.isoformat()
+    assert eg17.metrics["backfill_end_basis"] == "derived:max(stg_price_daily.date)"
+    assert eg17.metrics["previous_max_date"] is None            # 첫 빌드 — 퇴행 판정축 없음
+    assert "stg_price_daily" in rules_s02.TRADING_CALENDAR.inputs
+
+
+def _short_calendar(tmp_path: Path, name: str) -> EquityTable:
+    """마지막 거래일 하루가 빠진 캘린더. EG1 우변도 같이 줄여 **행수 등식은 서게** 만든다 —
+    원천이 조용히 짧아지는 사고는 행수로는 안 보인다는 것이 EG17 상한 술어의 존재 이유다."""
+    cut = f"WHERE date < DATE '{LAST_TD.isoformat()}'"
+    p = tmp_path / f"{name}.sql"
+    p.write_text(f"""
+        SELECT d.date AS date,
+               lag(d.date) OVER (ORDER BY d.date) AS prev_td,
+               lead(d.date) OVER (ORDER BY d.date) AS next_td,
+               NULL::VARCHAR AS reject_reason
+        FROM (SELECT DISTINCT date FROM stg_index_daily {cut}) d""", encoding="utf-8")
+    return EquityTable(**{**rules_s02.TRADING_CALENDAR.__dict__, "name": name, "sql_path": p,
+                          "eg1_rhs_sql": "SELECT count(DISTINCT date) FROM stg_index_daily "
+                                         + cut})
+
+
+def test_캘린더_상한이_stage_가격_상한과_다르면_EG17_폐기(tmp_path: Path) -> None:
+    """캘린더(KRX 지수)만 하루 짧은 판 — 격자와 가격 원장이 어긋난다."""
+    r = _build(tmp_path, rule=_short_calendar(tmp_path, "cal_short"))
+    assert r.status is build.BuildStatus.GATE_FAILED
+    assert _gate(r, "EG1").status is GateStatus.PASS          # 행수 등식은 선다
+    eg17 = _gate(r, "EG17")
+    assert eg17.status is GateStatus.FAIL
+    assert f"!= stage max(stg_price_daily.date) {LAST_TD.isoformat()}" in eg17.detail
+
+
+def test_직전_빌드보다_짧아지면_EG17_폐기(tmp_path: Path) -> None:
+    """퇴행 금지 — 옛 `backfill_end` 상수가 하던 '조용히 짧아진 원천' 감시를 직전 빌드가 한다."""
+    eq = tmp_path / "equity"
+    ok = build.build_table(rules_s02.TRADING_CALENDAR, STAGE_SLICE, eq, SEED, build_id="b_cal_1")
+    assert ok.ok, [(g.name, g.status.value, g.detail) for g in ok.gates]
+    assert _gate(ok, "EG17").metrics["max_date"] == LAST_TD.isoformat()
+    rule = _short_calendar(tmp_path, "trading_calendar")      # 같은 표의 다음 판
+    r = build.build_table(rule, STAGE_SLICE, eq, SEED, build_id="b_cal_2")
+    assert r.status is build.BuildStatus.GATE_FAILED
+    eg17 = _gate(r, "EG17")
+    assert eg17.metrics["previous_max_date"] == LAST_TD.isoformat()
+    assert "calendar regressed" in eg17.detail
 
 
 def test_seed_baseline이_설계값을_싣는다() -> None:
     assert SEED.get("trading_calendar", "calendar_start") == "2010-01-04"
-    assert SEED.get("trading_calendar", "backfill_end") == "2026-08-20"
     dates = SEED.get("trading_calendar", "asof_sample_dates")
     tickers = SEED.get("trading_calendar", "asof_sample_tickers")
     assert isinstance(dates, list) and len(dates) == 5

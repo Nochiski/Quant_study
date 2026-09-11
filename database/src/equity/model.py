@@ -11,10 +11,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from stage import model as stage_model
+
 if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 model 을 읽는다
     from collections.abc import Callable
 
     import duckdb
+    from stage import manifest
     from stage.gates import GateResult
 
     from .gates import EquityGateContext
@@ -22,7 +25,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.14.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.15.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -111,6 +114,41 @@ RULES_VERSION = "e1.14.0"                # BuildRecord.rules_version 에 실린�
 #            선언. KIS 「기금」 대응은 검증 불가(겹침 0)라 배제 — 한 표 안에서 필드마다 원천이
 #            다를 수 있다는 규약을 이 필드가 처음 세운다.
 #         `dataset_profile` 76 → 79(내부 44 · 대응표 35) · FIELD_MAP §2 44 → 45.
+
+# e1.15.0: 일일 증분 v2 페이즈 B.2 — **날짜 상수 파생 + 저녁 잠정판**. 셋이 산출·판정을 바꾼다:
+#         ① 날짜 상수 3개(`trading_calendar.backfill_end`·`security.backfill_end`·
+#            `adj_factor.asof_for_jump_check`)를 baseline 상수에서 **유도값**으로 바꿨다. EG17 의
+#            상한 술어는 「캘린더 max == stage `stg_price_daily` max」 + 「직전 빌드 max 이상
+#            (퇴행 금지)」이고, `security.sql` 은 자기 거래일 축(`td`)의 max 를 쓴다. 새 거래일이
+#            들어올 때마다 사람이 상수를 올려야 하던 고장(v1 §7 D)이 사라진다.
+#         ② `price_daily` 에 **잠정 T 행**(결정 V2-2)과 컬럼 `basis`(krx·evening)·
+#            `corp_action_pending` 이 생겼다. KRX 에 없는 최신 거래일이 키움
+#            `stg_flow_daily_kiwoom`(ka10060)에 있으면 그 종가·거래량으로 T 행을 만든다 —
+#            OHLC·거래대금·주식수는 NULL 이고 시총도 NULL 이다. 아침 확정판에서 KRX 행이
+#            자연 교체한다(같은 (ticker,date) 가 KRX 에 생기면 evening 행은 만들어지지 않는다).
+#         ③ 새 게이트 **EG14**(price_daily) — 최신 KRX 세션 창의 행수가 유니버스 대비
+#            `recent_session_row_ratio_min` 이상이고 종가 NULL 0. 고정 표본(EG5c)이 과거 날짜로
+#            굳은 대신 최신 구간을 보는 축이다.
+#         빌드 축에도 판(basis)이 생겼다 — `--basis evening|morning` → build_id 접두 `e_`/`m_`
+#         (기본 `b_`)이고 `_meta.json`·MANIFEST `BuildRecord.basis` 에 실린다(어휘는 stage 정본).
+
+# ── 빌드 판(basis) — 저녁 잠정판 / 아침 확정판 (플랜 v2 §4 B.1·B.2) ────────────
+# 어휘·접두어·빌드 id 규약은 **stage 가 정본**이다(`stage.model.BASIS_PREFIX`) — 두 층이 같은
+# `_pinned` 규약으로 서로의 MANIFEST 를 읽으므로 접두어 대응표가 갈리면 판이 조용히 어긋난다.
+# 여기서는 equity 쪽 이름만 붙여 재수출한다.
+BUILD_BASES: tuple[str, ...] = tuple(sorted(stage_model.BASIS_PREFIX))
+BUILD_BASIS_DEFAULT = stage_model.BASIS_MANUAL     # `--basis` 없이 지은 판 (build_id 접두 `b_`)
+# `price_daily.basis` 행 어휘 — 그 **행의 값이 어느 원천에서 왔는가** (결정 V2-2). 빌드 판
+# (위 BUILD_BASES)과 이름이 겹치지만 축이 다르다: 저녁 빌드가 지은 표에도 KRX 행이 대부분이다.
+PRICE_BASIS_KRX = "krx"
+PRICE_BASIS_EVENING = "evening"
+PRICE_BASIS_VOCAB: tuple[str, ...] = (PRICE_BASIS_KRX, PRICE_BASIS_EVENING)
+
+
+def record_basis(record: manifest.BuildRecord) -> str:
+    """커밋된 빌드의 판. 필드가 없던 옛 기록은 build_id 접두어로 읽는다(stage 와 같은 규칙)."""
+    return record.basis or stage_model.basis_of_build_id(record.build_id)
+
 
 # DESIGN §1 — stage 4종 + equity 신설 convention
 BASIS_VOCAB: tuple[str, ...] = ("measured", "derived", "convention", "default", "unknown")

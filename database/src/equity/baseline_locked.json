@@ -1,6 +1,11 @@
 {
-  "_lock": "S22 확정본 (2026-09-06). 서버 data/equity/baseline.json 과 **바이트 동일**해야 한다 — 검사는 database/scripts/check_baseline_lock.py, 설치는 이 파일을 그대로 scp 로 덮어쓰기. baseline_seed_s*.json 은 슬라이스별 제안 시드이고 정본이 아니다. _measured[] 는 등재된 상수 전건의 근거이며 server_evidence 는 그 표의 커밋된 current_build 게이트 metrics 에서 그대로 읽은 값이다.",
-  "_locked_at": "2026-09-09",
+  "_derived": {
+    "adj_factor.asof_for_jump_check": "규칙 e1.15.0 에서 **유도값으로 전환**. EG8 이 `max(price_daily.date WHERE basis='krx')` 로 잡는다 — 저녁 잠정판의 키움 T 행(basis='evening')에는 계수가 없어 as-of 를 그 날로 올리면 점프가 생긴다.",
+    "security.backfill_end": "규칙 e1.15.0 에서 **유도값으로 전환**. `security.sql` 이 자기 거래일 축(td = stg_index_daily distinct date)의 max 를 쓴다. trading_calendar 쪽과 같은 날짜임은 EG17 이 증명한다.",
+    "trading_calendar.backfill_end": "규칙 e1.15.0 에서 **유도값으로 전환**(플랜 v2 §4 B.2 · v1 §8 Task 5.1). EG17 이 `max(trading_calendar.date) == max(stg_price_daily.date)` 와 `>= 직전 빌드 max`(퇴행 금지) 두 술어로 대신 본다. 상수로 두면 거래일이 하루 늘 때마다 사람이 올려야 하고 안 올리면 매일 빌드가 폐기된다."
+  },
+  "_lock": "S22 확정본 (2026-09-06). 서버 data/equity/baseline.json 과 **바이트 동일**해야 한다 — 검사는 database/scripts/check_baseline_lock.py, 설치는 이 파일을 그대로 scp 로 덮어쓰기. baseline_seed_s*.json 은 슬라이스별 제안 시드이고 정본이 아니다. _measured[] 는 등재된 상수 전건의 근거이며 server_evidence 는 그 표의 커밋된 current_build 게이트 metrics 에서 그대로 읽은 값이다. 2026-09-11(규칙 e1.15.0 · 플랜 v2 §4 B.2): 날짜 상수 3건(trading_calendar.backfill_end · security.backfill_end · adj_factor.asof_for_jump_check)을 **등재 해제**하고 유도값으로 바꿨다 — 사유는 _derived[] 에 남긴다. price_daily 에 저녁 잠정판 상수 3건(evening_jump_abs_max · recent_session_window · recent_session_row_ratio_min)을 새로 등재했다. server_evidence 는 첫 서버 빌드 뒤 오케스트레이터가 채운다.",
+  "_locked_at": "2026-09-11",
   "_measured": [
     {
       "growing": false,
@@ -48,17 +53,6 @@
       "table": "adj_factor",
       "used_by": "EG8-P03 (rules_s06.eg8_adj_jump.n_volume_ratio_out_of_band): 집합 중앙값 ∈ [1/band, band] · 부정 픽스처 FX-N-006",
       "value": 3.0
-    },
-    {
-      "growing": true,
-      "kind": "measured",
-      "metric": "asof_for_jump_check",
-      "seed": "baseline_seed_s06.json",
-      "seed_note": "backfill_end 와 같은 값. 전 이벤트의 apply_date·available_date 가 이 날 이하라 모든 ok 계수가 반영된 조정가로 점프를 잰다. 백필이 재개되면 backfill_end 와 함께 갱신(growing=true). 미등재면 게이트는 price_daily max(date) 로 대신 재고 skip(no_baseline) 에 측정치를 남긴다.",
-      "sql": "SELECT CAST(max(date) AS VARCHAR) FROM stg_index_daily  -- = trading_calendar.backfill_end",
-      "table": "adj_factor",
-      "used_by": "EG8-P02·P03 (rules_s06.eg8_adj_jump) — v_adj_price/v_adj_volume 를 부르는 고정 as_of",
-      "value": "2026-08-20"
     },
     {
       "growing": false,
@@ -198,6 +192,8 @@
       "value": 16.0
     },
     {
+      "decided_at": "2026-09-07",
+      "decision": "DECISIONS_PENDING.md 결정 4 · EQUITY_HANDOFF.md §8-2 (서버 실측 일치율 0.950768, tol 0.01 → 하한 0.93)",
       "growing": false,
       "kind": "measured",
       "metric": "v3_wise_match_min",
@@ -217,11 +213,11 @@
       "sql": "SELECT n_match / n_measured FROM (rules_s17.eg8_overlap_sql, tol = v3_wise_value_tol_rel)",
       "table": "consensus_daily",
       "used_by": "EG8-P07 (rules_s17.eg8_consensus_daily.match_rate) — 폐기형 하한",
-      "value": 0.93,
-      "decided_at": "2026-09-07",
-      "decision": "DECISIONS_PENDING.md 결정 4 · EQUITY_HANDOFF.md §8-2 (서버 실측 일치율 0.950768, tol 0.01 → 하한 0.93)"
+      "value": 0.93
     },
     {
+      "decided_at": "2026-09-07",
+      "decision": "DECISIONS_PENDING.md 결정 4 · EQUITY_HANDOFF.md §8-2 (서버 실측 일치율 0.950768, tol 0.01 → 하한 0.93)",
       "growing": false,
       "kind": "measured",
       "metric": "v3_wise_value_tol_rel",
@@ -239,9 +235,7 @@
       "sql": "SELECT quantile_cont(abs(c.est_mean - v.est_mean) / abs(v.est_mean), 0.5) FROM consensus_daily c JOIN v3_obs v ON v.ticker=c.ticker AND v.obs_date=c.obs_date AND v.target_period=c.target_period AND v.metric=c.metric WHERE c.src='wise'  -- rules_s17.eg8_overlap_sql",
       "table": "consensus_daily",
       "used_by": "EG8-P07 (rules_s17.eg8_consensus_daily) — 두 원천 값이 '같다' 고 볼 상대 허용오차",
-      "value": 0.01,
-      "decided_at": "2026-09-07",
-      "decision": "DECISIONS_PENDING.md 결정 4 · EQUITY_HANDOFF.md §8-2 (서버 실측 일치율 0.950768, tol 0.01 → 하한 0.93)"
+      "value": 0.01
     },
     {
       "growing": false,
@@ -251,6 +245,16 @@
       "seed_note": "KSIC 대분류 K(금융·보험) 중분류 64 금융업 · 65 보험·연금 · 66 금융지원서비스. EQUITY_DESIGN v1.2 §4-1 induty_class 규칙. 쉼표 구분 문자열로 싣고 SQL 이 str_split 으로 푼다",
       "table": "corp",
       "value": "64,65,66"
+    },
+    {
+      "decided_at": "2026-09-07",
+      "growing": false,
+      "kind": "measured",
+      "metric": "bonus_ratio_window_sessions",
+      "seed": null,
+      "seed_note": "빌드 상수(rules_s05.py · corp_event.sql:362 `k.bonus_ratio_window_sessions`) — 무상증자 비율 유도 창 25세션. 근거 RATIO_RECOVERY.md, 커밋 87ef481(2026-09-07). 09-07 서버 baseline 에만 등재돼 있고 락에 빠져 있던 것을 2026-09-09 플랜 P0 Task 0.6 에서 등재(누락 시 build.py:102-105 KeyError 로 corp_event 이하 빌드 중단).",
+      "table": "corp_event",
+      "used_by": "corp_event 빌드 상수(EquityTable.consts) — 게이트 아님"
     },
     {
       "growing": true,
@@ -731,14 +735,40 @@
       "value": 0.001
     },
     {
-      "growing": true,
-      "kind": "measured",
-      "metric": "backfill_end",
-      "seed": "baseline_seed_s01.json",
-      "seed_note": "백필 상한 거래일. 이 날까지 listing/etf 행이 있는 종목은 '아직 살아 있다' — delist_date_krx NULL·basis unknown. EQUITY_DESIGN v1.2 §4-1·§10 P16. trading_calendar.backfill_end(S02)와 같은 값이어야 한다",
-      "sql": "SELECT max(date) FROM stg_index_daily",
-      "table": "security",
-      "value": "2026-08-20"
+      "growing": false,
+      "kind": "convention",
+      "metric": "evening_jump_abs_max",
+      "seed": "baseline_seed_s04.json",
+      "seed_note": "결정 V2-2 — 저녁 잠정 T 행(키움 종가)에서 직전 KRX 종가 대비 절대수익률이 이 값을 넘으면 기업행위 의심(`corp_action_pending=TRUE`)으로 표시한다. 0.30 은 일반 세션 가격제한폭(±30%)이라 그 밖의 움직임은 분할·병합·감자 같은 기업행위이거나 거래 재개다. 저녁에는 KRX 기본정보가 없어 계수를 만들 수 없으므로 값을 고치지 않고 **표식만** 단다 — 소비자가 그날 스코어에서 뺀다.",
+      "server_evidence": null,
+      "sql": null,
+      "table": "price_daily",
+      "used_by": "sql/price_daily.sql (`_const.evening_jump_abs_max`) · EG3_price_daily 기록형 metric",
+      "value": 0.3
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "recent_session_row_ratio_min",
+      "seed": "baseline_seed_s04.json",
+      "seed_note": "EG14 하한 — 최신 세션 행수 / 그날 KRX 마스터 유니버스. 서버 유니버스 ≈ 3,924 가 하루 0.7 신규 · 0.5 소멸이라(v1 §8 Task 5.1 Step 2) 2% 여유면 정상 변동을 덮고 수집이 잘린 날(행수 급감)은 잡는다.",
+      "server_evidence": null,
+      "sql": "SELECT count(*) FROM price_daily WHERE date = <세션> / (SELECT count(DISTINCT ticker) FROM stg_listing_daily WHERE date = max(date))",
+      "table": "price_daily",
+      "used_by": "EG14 (rules_s04.eg14_recent_sessions)",
+      "value": 0.98
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "recent_session_window",
+      "seed": "baseline_seed_s04.json",
+      "seed_note": "EG14 가 보는 최신 KRX 세션 수. 5 = 한 주. 고정 표본(`asof_sample_dates`)이 과거 날짜로 굳었으므로 최신 구간은 이 창이 본다(플랜 v2 §4 B.2 §2).",
+      "server_evidence": null,
+      "sql": null,
+      "table": "price_daily",
+      "used_by": "EG14 (rules_s04.eg14_recent_sessions)",
+      "value": 5
     },
     {
       "growing": false,
@@ -860,17 +890,6 @@
         "900050",
         "900060"
       ]
-    },
-    {
-      "growing": true,
-      "kind": "measured",
-      "metric": "backfill_end",
-      "seed": "baseline_seed_s02.json",
-      "seed_note": "GATES §1-12 는 측정 SQL 을 max(date) of stg_listing_daily 로 적었다. DESIGN v1.2 §4-1 이 캘린더를 stg_index_daily distinct date 로 확정했으므로 이 seed 는 stg_index_daily 로 측정한다. 절단본에서 두 값은 같다(2026-08-20). 수집이 진행되면 커지는 값이라 growing=true — 백필이 재개되면 오케스트레이터가 재측정해 갱신한다.",
-      "sql": "SELECT CAST(max(date) AS VARCHAR) FROM stg_index_daily",
-      "table": "trading_calendar",
-      "used_by": "EG17 (rules_s02) · security_span.end_reason='coverage_gap' 경계 · GATES §3 ③(e)",
-      "value": "2026-08-20"
     },
     {
       "growing": false,
@@ -1010,16 +1029,6 @@
       "table": "universe_policy",
       "used_by": "sql/universe_policy.sql version 컬럼",
       "value": "s03c-v4"
-    },
-    {
-      "growing": false,
-      "kind": "measured",
-      "metric": "bonus_ratio_window_sessions",
-      "table": "corp_event",
-      "seed": null,
-      "seed_note": "빌드 상수(rules_s05.py · corp_event.sql:362 `k.bonus_ratio_window_sessions`) — 무상증자 비율 유도 창 25세션. 근거 RATIO_RECOVERY.md, 커밋 87ef481(2026-09-07). 09-07 서버 baseline 에만 등재돼 있고 락에 빠져 있던 것을 2026-09-09 플랜 P0 Task 0.6 에서 등재(누락 시 build.py:102-105 KeyError 로 corp_event 이하 빌드 중단).",
-      "used_by": "corp_event 빌드 상수(EquityTable.consts) — 게이트 아님",
-      "decided_at": "2026-09-07"
     }
   ],
   "_pending": {
@@ -1031,7 +1040,6 @@
   "adj_factor": {
     "adj_return_jump_max": 1.0,
     "adj_volume_ratio_band": 3.0,
-    "asof_for_jump_check": "2026-08-20",
     "base_match_window_sessions": 5,
     "base_price_tol_rel": 0.002,
     "factor_product_tol_base": 0.01,
@@ -1055,13 +1063,13 @@
     "financial_ksic_prefix": "64,65,66"
   },
   "corp_event": {
+    "bonus_ratio_window_sessions": 25,
     "effective_before_announce_max_days": 2555,
     "krx_share_change_tol": 0.001,
     "near_dup_window_days": 5,
     "thresholds": {
       "EG7": 0.06
-    },
-    "bonus_ratio_window_sessions": 25
+    }
   },
   "corp_ticker": {
     "isin8_len": 8
@@ -1124,8 +1132,12 @@
       "EG7": 0.001
     }
   },
+  "price_daily": {
+    "evening_jump_abs_max": 0.3,
+    "recent_session_row_ratio_min": 0.98,
+    "recent_session_window": 5
+  },
   "security": {
-    "backfill_end": "2026-08-20",
     "delist_sample_n": 20,
     "delist_sample_seed": 20260905
   },
@@ -1172,7 +1184,6 @@
       "900050",
       "900060"
     ],
-    "backfill_end": "2026-08-20",
     "calendar_start": "2010-01-04"
   },
   "treasury_stock": {

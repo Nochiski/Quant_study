@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # equity 테이블 1개 빌드 — 서버 전용. 사용: scripts/run_equity.sh <table> [equity CLI 추가 인자]
+# 추가 인자는 `python -m equity build` 로 그대로 넘어간다 — `--basis evening|morning` 포함.
 # stage 규약(run_stage.sh)과 같다: QL_HOME·PYTHONPATH 고정, /usr/bin/time -v 로 RSS·초 기록, flock 직렬.
 # 2026-09-09 (플랜 P0 Task 0.2): 락은 stage·equity 공용 /tmp/quant_ledger_build.lock 하나로 통일했다
 #   (stage 7.16 GB + equity 6.5 GB > available 13 GB — 빌드는 한 번에 하나만). 최외곽 스크립트만 락을

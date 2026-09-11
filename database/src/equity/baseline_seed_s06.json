@@ -2,7 +2,6 @@
  "_seed": "S06 adj_factor(+ 뷰 v_cum_adj·v_adj_price·v_adj_volume·v_firm_mktcap) 가 요구하는 baseline 상수. 오케스트레이터가 data/equity/baseline.json 에 병합한다. value 는 tests/fixtures/stage_slice 절단본 실측 + 서버 1차·2차 빌드 실측(09-05, EG8 실패 → apply_date 도입 → 행 대 행 수익률·거래량 중앙값 비 집합 통계)에 근거한 초기값이고, 서버 재측정이 필요한 항목은 _measured[].note 가 ★ 로 지목한다. adj_factor.factor_product_tol 은 등재하지 않는다 — EG3-P04 허용오차는 baseline 상수가 아니라 산출 정밀도(rules_s06.FACTOR_PRODUCT_TOL, DOUBLE 역수 곱 반올림)다. _asof/ 표본·EG11·EG5c·EG3-P05 는 S02 의 trading_calendar.asof_sample_dates·asof_sample_tickers 를 그대로 쓴다(새 키 없음). 근접 중복 창은 corp_event.near_dup_window_days 를 _const 로 복제 없이 읽는다. S06-2(09-05, KRX 기준가 원천 krx_base_price)가 base_price_tol_rel·base_match_window_sessions·factor_product_tol_base 를 더했다(설계 seed 값 그대로, 절단본 실측으로 확인 — ★ 서버 재측정은 _measured[].note). 같은 날 주식수 변화 허용치는 corp_event.krx_share_change_tol 을 _const 로 복제 없이 읽는다.",
  "measured_at": "2026-09-05",
  "adj_factor": {
-  "asof_for_jump_check": "2026-08-20",
   "adj_return_jump_max": 1.0,
   "adj_volume_ratio_band": 3.0,
   "price_match_tol_rel": 0.15,
@@ -14,19 +13,6 @@
   "factor_product_tol_base": 0.01
  },
  "_measured": [
-  {
-   "table": "adj_factor",
-   "metric": "asof_for_jump_check",
-   "inputs": {
-    "stg_index_daily": "b_20260902T162449_297822Z"
-   },
-   "sql": "SELECT CAST(max(date) AS VARCHAR) FROM stg_index_daily  -- = trading_calendar.backfill_end",
-   "value": "2026-08-20",
-   "measured_at": "2026-09-05",
-   "growing": true,
-   "used_by": "EG8-P02·P03 (rules_s06.eg8_adj_jump) — v_adj_price/v_adj_volume 를 부르는 고정 as_of",
-   "note": "backfill_end 와 같은 값. 전 이벤트의 apply_date·available_date 가 이 날 이하라 모든 ok 계수가 반영된 조정가로 점프를 잰다. 백필이 재개되면 backfill_end 와 함께 갱신(growing=true). 미등재면 게이트는 price_daily max(date) 로 대신 재고 skip(no_baseline) 에 측정치를 남긴다."
-  },
   {
    "table": "adj_factor",
    "metric": "adj_return_jump_max",
@@ -140,5 +126,8 @@
    "used_by": "krx_base_price ok 판정(mktcap_neutral vs krx_base_inconsistent) · EG3-P04 기준가 행",
    "note": "설계 seed 값. 절단본 실측 곱: 005930 0.02 × 50 = 1.0 · 005935 0.02 × 50 = 1.0(정확) · 247540 은 같은 날 주식수 변화가 없어 1/price_factor → 1.0. 기준가 비율이 corp_event ratio 와 어긋나는 크기는 247540 |0.2507 × 4 − 1| = 0.0028(KRX 기준가 124,700 vs 497,400/4 = 124,350 — 자기주식 신주 미배정 등 KRX 산식)이라 0.01 안. ETF 분배락은 원천 밖이라 곱 검사에 오지 않는다(절단본 069500 후보 36 중 14 가 우연히 0.01 안 — 제외 근거). ★ 서버 실측: unknown_krx 행의 곱 분포로 krx_base_inconsistent 경계 확인."
   }
- ]
+ ],
+ "_derived": {
+  "adj_factor.asof_for_jump_check": "규칙 e1.15.0 에서 **유도값으로 전환**. EG8 이 `max(price_daily.date WHERE basis='krx')` 로 잡는다 — 저녁 잠정판의 키움 T 행(basis='evening')에는 계수가 없어 as-of 를 그 날로 올리면 점프가 생긴다."
+ }
 }

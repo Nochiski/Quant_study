@@ -6,9 +6,39 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 RULES_VERSION = "2.2.3"
 PS_HEADROOM_DIGITS = 2   # survey 최대 자릿수 + 2 (성장 여유). 초과 = cast_failed → G2
+
+# 빌드 basis — 하루 2판 규약 (플랜 v2 §4 Task B.1). 빌드 id 접두어가 판을 구분한다:
+# 저녁 잠정판 `e_`(키움 종가 축) · 아침 확정판 `m_`(KRX 축) · 사람이 돌린 판 `b_`.
+# equity 층도 같은 접두어를 쓴다 — MANIFEST 의 `basis` 는 이 접두어에서 파생한다.
+BASIS_MANUAL = "manual"
+BASIS_PREFIX: dict[str, str] = {"evening": "e_", "morning": "m_", BASIS_MANUAL: "b_"}
+_BASIS_BY_PREFIX: dict[str, str] = {v: k for k, v in BASIS_PREFIX.items()}
+BUILD_ID_TIME_FORMAT = "%Y%m%dT%H%M%S_%fZ"
+
+
+def make_build_id(basis: str, now: datetime | None = None) -> str:
+    """`<접두어><UTC 시각>` 빌드 id. 모르는 basis 는 예외 — 조용히 `b_` 로 떨어지지 않는다."""
+    if basis not in BASIS_PREFIX:
+        raise ValueError(f"unknown build basis: basis={basis!r} allowed={sorted(BASIS_PREFIX)}")
+    return BASIS_PREFIX[basis] + (now or datetime.now(UTC)).strftime(BUILD_ID_TIME_FORMAT)
+
+
+def basis_of_build_id(build_id: str) -> str:
+    """빌드 id 접두어 → basis. 모르는 접두어(구 레코드·픽스처 포함)는 manual."""
+    return _BASIS_BY_PREFIX.get(build_id[:2], BASIS_MANUAL)
+
+
+def build_id_time(build_id: str) -> datetime | None:
+    """빌드 id 가 박은 UTC 시작 시각. 형식이 다른 id(테스트 픽스처 등)는 None."""
+    try:
+        return datetime.strptime(build_id[2:], BUILD_ID_TIME_FORMAT).replace(tzinfo=UTC)
+    except ValueError:
+        return None
+
 
 KIND_TEXT = "text"
 KIND_NUMERIC = "numeric"

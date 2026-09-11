@@ -128,3 +128,61 @@ uv run --no-project --python 3.11 --with pytest --with duckdb --with requests py
 ## 작업 규칙
 
 - 작업 단위(조사·플랜·태스크·페이즈)가 끝날 때마다 **같은 커밋에서 상태 문서를 갱신**한다: 플랜의 상태 블록·체크박스, 이 README 의 상태 표, `START_HERE.md` §4, 새 결정은 `DECISIONS_PENDING.md`, 새 부채는 `TECH_DEBT.md`.
+
+## 운영 (P6)
+
+일일 파이프라인의 크론·백업·로그·리포트 규칙. 스크립트는 전부 서버 `~/quant-ledger` 에서 돌고,
+서버 TZ 는 UTC 라 **crontab 시각 = KST − 9** 이다. 크론 등록·배포는 오케스트레이터만 한다.
+
+### 크론 전체표
+
+| KST | crontab (UTC) | 스크립트 | 상태 |
+|---|---|---|---|
+| 03:30 | `30 18 * * *` | `backup_raw.sh` — 원장 6 DB 온라인 백업 (v3 자기 백업 03:00 뒤) | 예정 |
+| 06:00 | `0 21 * * *` | `daily_ledger.sh` — 캘린더 → 키움 마스터 → 대차(ka20068) → KIS 신용 → DART 재스윕 | 가동 |
+| 07:10 | (08:10 체인 안) | 키움 외국인 보유 ka10008 — `daily_build.sh` 의 `--not-before 07:10` 하한 (결정 7) | 가동 |
+| 08:10 | `10 23 * * *` | `daily_build.sh` — KRX → ka10008 → 머지 → `ledger_health` → stage·equity → `daily_report.py` | 가동 (빌드 단계는 B.1) |
+| 09:15 | `15 0 * * 2-6` | `watchdog.sh morning_build` — 확정판 보고 없음/실패면 crit | 가동 |
+| 18:05 | `5 9 * * 1-5` | `daily_evening.sh` — 키움 ka10060·ka10014 원장 직행 ∥ DART ∥ WISE | 가동 |
+| 18:15 | `15 9 * * 1-5` | `build_evening.sh` — 잠정 빌드(stage → equity, `basis=evening`) | 예정 (B.1) |
+| 18:50 | `50 9 * * 1-5` | `watchdog.sh evening_ledger` — 저녁 원장 보고 없음/실패면 crit | 가동 |
+| 19:00 | — | Kael-alpha 스코어 보고 목표 (상한 19:30) | 예정 (페이즈 C) |
+| 일요일 04:30 | `30 19 * * 6` | `gc.sh --apply` — 캐시·`_failed`·로그 정리, 끝에서 `rotate_logs.sh` 호출 | 예정 |
+| 매시 | — | 키움 확정 시각 프로브 (임시, 09-15 판독 후 제거) | 가동 |
+
+### 원장 백업 — `scripts/backup_raw.sh`
+
+- 위치: `~/backups/quant-ledger/<YYYYMMDD>/{krx,kiwoom,kis,dart,wisereport,daily_run}.db` (`QL_BACKUP_ROOT` 로 변경).
+- 방식: `sqlite3 .backup` **온라인 백업만**. 원장이 45 GB 라 `cp`·`rsync`·하드링크는 금지고, 원장 락도 잡지
+  않는다(45 GB 를 뜨는 동안 수집 체인이 막힌다). 03:30 은 어느 체인과도 겹치지 않는다.
+- 판정: DB 별로 격리해 하나가 실패해도 나머지를 끝까지 뜨고, 실패 목록을 모아 crit 한 번. 사본마다
+  `PRAGMA integrity_check` 가 `ok` 여야 하며 실패한 사본은 지운다. 성공한 사본은 `journal_mode=DELETE` 로
+  바꿔 WAL 잔재(`-wal`·`-shm`)를 남기지 않는다.
+- 보관: **최근 7일 + 매월 1일 사본은 영구**(디렉터리 이름 끝 두 자리로 판별). 이번 백업이 실패한 날에는
+  보관 정리를 건너뛴다 — 실패한 날 옛 사본까지 지우면 백업이 한 번에 사라진다.
+- 중단 조건: 백업 대상 파일시스템 여유 < 60 GB 면 뜨기 전에 crit 후 중단.
+
+### 로그 — `scripts/gc.sh` · `scripts/rotate_logs.sh`
+
+- 체인 로그는 `logs/<체인>_<YYYYMMDD>.log`, 저녁 슬롯의 병렬 갈래는 `logs/evening_{kiwoom,dart,wise}_<D>.log`.
+- `gc.sh`(일요일, 기본 dry-run / `--apply`): `data/stage/_tmp/doc` 캐시 삭제, `_failed` 30일 초과 삭제.
+  로그는 직접 건드리지 않고 끝에서 같은 모드로 `rotate_logs.sh` 를 호출한다(2026-09-11 자체 7일 gzip 줄 제거).
+- `rotate_logs.sh`: `*.log` 14일 초과 gzip, `*.log.gz` 90일 초과 삭제. `logs/health/**` 는 **절대 건드리지
+  않는다** — 워치독과 일일 리포트가 `logs/health/<D>.json`·`stage_<D>_<basis>.json` 을 읽고, 건전성 판정이
+  전날 리포트를 기준선(KIS 중복쌍 증가분)으로 쓴다. 로그 gzip 규칙은 이 파일 한 곳뿐이다.
+
+### 통합 일일 리포트 — `scripts/daily_report.py`
+
+`daily_build.sh` 끝(≈08:55 KST)에서 `--date D` 로 한 번 돈다. 입력은 전부 읽기 전용이다 —
+`logs/health/<D>.json`(원장) · `logs/health/stage_<D>_<basis>.json` · `data/deliver/latest_{evening,morning}.json` ·
+`data/deliver/ledger_evening.json` · `data/raw/daily_run.db`(`mode=ro`) · 디스크 여유 · `/tmp/quant_ledger_*.lock`.
+`--dry-run` 은 발송 없이 메시지만 출력한다.
+
+| 등급 | 조건 | 행동 |
+|---|---|---|
+| crit (즉시) | 수집 실패(런 `failed`·저녁 원장 rc≠0) · 게이트 폐기(stage·빌드 health 실패) · `kael` 키 사용(건전성 halt) · 디스크 여유 < 50 GB | `notify.sh crit` (쿨다운 없음) |
+| warn | 건전성 warn 항목 실패, 아직 `running` 인 런 | `notify.sh warn` |
+| info | 그 밖의 일일 요약 | `notify.sh info` |
+
+입력 파일이 없거나 날짜가 D 와 다르면 메시지 끝 "없음" 목록에만 적고 **등급을 올리지 않는다** —
+보고 누락 판정은 워치독(`watchdog.sh`)의 몫이다(플랜 v2 §2-1).

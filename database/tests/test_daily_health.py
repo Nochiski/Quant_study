@@ -14,17 +14,37 @@ def _cal(tmp_path, holidays=()):
     return str(p)
 
 
-def _krx(tmp_path, *, statuses="ok", stk=942, ksq=1820, kospi=51, kosdaq=40, etf=1150, base_mismatch=False):
+# 기업행위 후보 픽스처 — (시장, 종목 인덱스, 액면가 전/후, 주식수 전/후). 09-09 서버 실측 형태.
+_PARVAL, _LIST_SHRS = "500", "1000000"
+
+
+def _krx(tmp_path, *, statuses="ok", stk=942, ksq=1820, kospi=51, kosdaq=40, etf=1150, base_mismatch=False,
+         corp_actions=(), base_prev=True):
+    """`base_prev=False` 면 직전 거래일 `*_isu_base_info` 행을 아예 넣지 않는다(판정 불가 경로)."""
     con = sqlite3.connect(tmp_path / "krx.db")
     con.execute("CREATE TABLE ingest_log (endpoint TEXT, bas_dd TEXT, n_rows INTEGER, status TEXT, note TEXT, collected_at TEXT)")
     eps = ["sto/stk_bydd_trd", "sto/ksq_bydd_trd", "sto/stk_isu_base_info", "sto/ksq_isu_base_info",
            "idx/kospi_dd_trd", "idx/kosdaq_dd_trd", "etp/etf_bydd_trd"]
     con.executemany("INSERT INTO ingest_log VALUES (?,?,0,?,NULL,'t')", [(e, D, statuses) for e in eps])
+    base = {"stk": {}, "ksq": {}}
+    for market, i, parval, shrs in corp_actions:
+        base[market][i] = (parval, shrs)
     for tbl, n in (("krx_stk_bydd_trd", stk), ("krx_ksq_bydd_trd", ksq),
-                   ("krx_stk_isu_base_info", stk - (1 if base_mismatch else 0)), ("krx_ksq_isu_base_info", ksq),
                    ("krx_kospi_dd_trd", kospi), ("krx_kosdaq_dd_trd", kosdaq), ("krx_etf_bydd_trd", etf)):
         con.execute(f"CREATE TABLE {tbl} (bas_dd_req TEXT, ISU_CD TEXT, TDD_CLSPRC TEXT, ACC_TRDVOL TEXT)")
         con.executemany(f"INSERT INTO {tbl} VALUES (?,?,?,?)", [(D, f"{i:06d}", "1000", "10") for i in range(n)])
+    for market, n in (("stk", stk - (1 if base_mismatch else 0)), ("ksq", ksq)):
+        tbl = f"krx_{market}_isu_base_info"
+        con.execute(f"CREATE TABLE {tbl} (bas_dd_req TEXT, ISU_CD TEXT, ISU_SRT_CD TEXT, ISU_ABBRV TEXT, "
+                    "PARVAL TEXT, LIST_SHRS TEXT)")
+        rows = []
+        for i in range(n):
+            parval, shrs = base[market].get(i, ((_PARVAL, _PARVAL), (_LIST_SHRS, _LIST_SHRS)))
+            code = f"{i:06d}"
+            rows.append((D, f"KR7{code}003", code, f"종목{i}", parval[1], shrs[1]))
+            if base_prev:
+                rows.append((DP, f"KR7{code}003", code, f"종목{i}", parval[0], shrs[0]))
+        con.executemany(f"INSERT INTO {tbl} VALUES (?,?,?,?,?,?)", rows)
     con.commit(); con.close()
     return str(tmp_path / "krx.db")
 
@@ -67,6 +87,37 @@ def test_krx_all_ok_passes(tmp_path):
     c = _by(rep)
     assert c["krx.ingest_log"].status is lh.Status.PASS and c["krx.rows"].status is lh.Status.PASS
     assert c["krx.holiday_misfire"].status is lh.Status.PASS and rep.ok
+
+
+def test_krx_corp_action_candidates_flags_parval_and_shares_changes(tmp_path):
+    """검수 종합 H1 — 액면병합·주식수 변동은 원장이 정확해도 하류에서 조용히 틀린다.
+
+    09-09 실측 형태 두 건(001290 액면병합 1,000→5,000 · 주식수 ÷5 / 099190 액면가 불변 주식수
+    +1.89%)과 문턱 아래 변동 한 건(+0.04%)을 넣어 앞 둘만 잡히는지 본다.
+    """
+    krx = _krx(tmp_path, corp_actions=(
+        ("stk", 3, ("1000", "5000"), ("108337120", "21667424")),      # 액면병합
+        ("ksq", 7, ("500", "500"), ("28757309", "29301512")),          # 주식수 +1.89%
+        ("ksq", 9, ("500", "500"), ("1000000", "1000400")),            # +0.04% — 문턱 아래
+    ))
+    rep = lh.run(D, _paths(tmp_path, krx=krx))
+    c = _by(rep)["krx.corp_action_candidates"]
+    assert c.level is lh.Level.WARN and c.status is lh.Status.FAIL
+    assert c.value["n"] == 2
+    got = {i["code"]: i for i in c.value["items"]}
+    assert set(got) == {"000003", "000007"}
+    assert got["000003"]["parval"] == ["1000", "5000"] and got["000003"]["shares_ratio"] == 0.2
+    assert got["000007"]["parval"] == ["500", "500"] and got["000007"]["shares_ratio"] == 1.018924
+    assert rep.ok                                                      # warn 은 rc 를 바꾸지 않는다
+
+
+def test_krx_corp_action_candidates_pass_and_skip(tmp_path):
+    rep = lh.run(D, _paths(tmp_path, krx=_krx(tmp_path)))
+    c = _by(rep)["krx.corp_action_candidates"]
+    assert c.status is lh.Status.PASS and c.value == {"n": 0, "items": []}
+    sub = tmp_path / "b"; sub.mkdir()
+    rep2 = lh.run(D, _paths(sub, krx=_krx(sub, base_prev=False)))
+    assert _by(rep2)["krx.corp_action_candidates"].status is lh.Status.SKIP
 
 
 def test_krx_base_mismatch_and_pending_fail(tmp_path):

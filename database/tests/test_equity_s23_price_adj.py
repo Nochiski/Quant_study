@@ -370,11 +370,15 @@ def _synth_root(root: Path) -> Path:
     px = ", ".join(
         f"('036220', DATE '{d}', CAST({100 + i} AS DECIMAL(9,0)), "
         f"CAST({110 + i} AS DECIMAL(9,0)), CAST({90 + i} AS DECIMAL(9,0)), "
-        f"CAST({100 + i} AS DECIMAL(9,0)), CAST({1000 + i} AS DECIMAL(13,0)), 'trade')"
+        f"CAST({100 + i} AS DECIMAL(9,0)), CAST({1000 + i} AS DECIMAL(13,0)), 'trade', "
+        "'krx', FALSE)"
         for i, d in enumerate(SYNTH_PRICE_DATES))
+    # `basis`·`corp_action_pending` 은 e1.15.0 의 저녁 잠정판 축 — 이 합성 트리는 전부 KRX 확정
+    # 행이다. 매크로 `v_adj_price_fwd` 가 그대로 통과시키므로 선언 컬럼에 있어야 한다.
     _write_equity_table(root, "price_daily",
                         f"SELECT * FROM (VALUES {px}) AS t(ticker, date, open, high, low, close, "
-                        "volume_shr, price_kind)", partition_expr="year(date)")
+                        "volume_shr, price_kind, basis, corp_action_pending)",
+                        partition_expr="year(date)")
     fac = ("('036220:split:2020-01-03', '036220', DATE '2020-01-03', DATE '2020-01-03', "
            "0.1, 10.0, TRUE, 'mktcap_neutral'), "
            "('036220:capred:2020-01-06', '036220', DATE '2020-01-06', DATE '2020-01-06', "

@@ -441,8 +441,10 @@ PRICE_ADJ_DAILY = register(EquityTable(
     input_columns={
         # `price_kind` 는 산출식이 아니라 EG3 의 매크로 정합 대조가 읽는다 — 매크로
         # `v_adj_price_fwd` 가 원주가 행 축을 그대로 싣기 때문이다(표는 안 싣는다).
+        # `basis`·`corp_action_pending` 도 산출식이 아니라 매크로가 읽는다 — `v_adj_price_fwd` 가
+        # 저녁 잠정판 표식을 소비자에게 그대로 통과시키기 때문이다(e1.15.0, views.py).
         "price_daily": ("ticker", "date", "open", "high", "low", "close", "volume_shr",
-                        "price_kind"),
+                        "price_kind", "basis", "corp_action_pending"),
         # `factor_source`·`event_id` 는 산출식이 아니라 EG3 기록형(미조정 사건의 사유별 내역)이
         # 읽는다 — 사건 축은 event_id 다(같은 날 두 사건을 접으면 세는 축이 갈린다).
         "adj_factor": ("ticker", "apply_date", "available_date", "price_factor", "share_factor",

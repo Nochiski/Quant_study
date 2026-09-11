@@ -45,7 +45,8 @@ def _seed() -> Baseline:
     """S01·S02·S03·S05·S06 상류 seed + S10 자기 seed 를 테이블 단위로 병합."""
     merged: dict[str, dict[str, object]] = {}
     for p in (rules_s01.BASELINE_SEED, Path(rules_s02.__file__).parent / "baseline_seed_s02.json",
-              rules_s03.BASELINE_SEED, rules_s05.BASELINE_SEED, rules_s06.BASELINE_SEED,
+              rules_s03.BASELINE_SEED, rules_s04.BASELINE_SEED,
+              rules_s05.BASELINE_SEED, rules_s06.BASELINE_SEED,
               rules_s10.BASELINE_SEED):
         for k, v in load(p).data.items():
             if not k.startswith("_") and k != "measured_at" and isinstance(v, dict):
@@ -71,6 +72,7 @@ N_PRE_CALENDAR = 85
 N_OFF_GRID = 9
 N_SRC_OMITTED = 62
 N_OVER_SHARES = 0                    # 절단본에는 잔고 > 상장주식수 원장 행이 없다(합성 검사)
+N_VERSION_FOLDED = 0                 # 절단본 원장은 (ticker, date) 가 유일하다(합성 검사)
 # 합성 잔고 이상 행 — 절단본 (161890, 2020-01-02) 융자 잔고 280,837 · 상장주식수 22,881,180
 OVER_TICKER, OVER_DATE = "161890", date(2020, 1, 2)
 OVER_VALUE = 9999999999              # DECIMAL(10,0) 상한. 어느 날 상장주식수보다도 크다
@@ -222,7 +224,8 @@ def test_원장_행은_measured거나_격리된다(built: build.BuildResult) -> 
     m = _metrics(r, "EG1_credit_daily")
     assert m["n_ledger_delta"] == 0 and m["n_reject_outside_declared"] == 0
     assert m["n_reject_by_reason"] == {"pre_calendar": N_PRE_CALENDAR, "off_grid": N_OFF_GRID,
-                                      "balance_over_shares": N_OVER_SHARES}
+                                      "balance_over_shares": N_OVER_SHARES,
+                                      "version_folded": N_VERSION_FOLDED}
 
 
 def test_격리는_사유별_디렉토리로_간다(built: build.BuildResult) -> None:
@@ -398,6 +401,19 @@ def test_격자_술어는_rules_선언과_SQL_리터럴이_같다() -> None:
     assert rules_s10.grid_predicate() in CREDIT.eg1_rhs_sql
 
 
+def test_판본_선택_술어는_rules_선언과_SQL_리터럴이_같다() -> None:
+    """`VERSION_RANKED_SQL` 이 `.sql` `ver` CTE·EG1 우변·EG3 재선택의 단일 정의다(결정 6-2)."""
+    assert rules_s10.VERSION_RANKED_SQL in _body()
+    assert rules_s10.VERSION_RANKED_SQL in CREDIT.eg1_rhs_sql
+    assert rules_s10.first_version_sql() in CREDIT.eg1_rhs_sql
+    # 정렬 1순위는 최초 관측 축이고, 나머지는 동률을 깨는 payload 전건이다
+    assert rules_s10.VERSION_ORDER_COLUMNS[0] == "observed_date"
+    assert set(rules_s10.MEASURE_COLUMNS) <= set(rules_s10.VERSION_ORDER_COLUMNS)
+    # 접힌 판본도 선언 어휘 안에서 격리된다
+    assert "version_folded" in CREDIT.reject_reasons
+    assert "observed_date" in CREDIT.input_columns["stg_credit_daily"]
+
+
 def test_상수는_seed에_임계_하나뿐이다() -> None:
     assert CREDIT.consts == ()
     seed = load(rules_s10.BASELINE_SEED)
@@ -472,7 +488,7 @@ def test_잔고가_상장주식수를_넘는_원장행은_격리되고_셀은_�
     assert b["n_ledger_delta"] == 0
     assert b["n_measured_cells"] == N_MEASURED - 1
     assert b["n_reject_by_reason"] == {"pre_calendar": N_PRE_CALENDAR, "off_grid": N_OFF_GRID,
-                                       "balance_over_shares": 1}
+                                       "balance_over_shares": 1, "version_folded": 0}
     # 산출 셀은 남아 있고 값이 없다
     assert r.out_dir is not None
     cell = _query(r.out_dir, "SELECT CAST(fill_kind AS VARCHAR), whol_loan_rmnd_stcn_shr, "
@@ -500,6 +516,135 @@ def test_잔고가_상장주식수를_넘는_원장행은_격리되고_셀은_�
     assert m["n_unmeasured_value_present"] == 0
 
 
+# ── 판본 선택 (결정 6-2 · 검수 종합 H3) ──────────────────────────────────────
+
+# 재수집 판본 합성 대상 — 절단본 (161890, 2020-01-02) 을 한 번 더 싣되 `observed_date` 를 뒤로
+# 밀고 융자 잔고를 바꾼다. 서버 실측 형태(001290 2026-08-18 close_krw 969 → 4,845)를 그대로
+# 옮긴 것이다: KIS 가 기업행위 뒤 재수집분의 가격·주수를 소급 환산해 payload 가 달라진다.
+VER_TICKER, VER_DATE = "161890", date(2020, 1, 2)
+VER_LATER_VALUE = 1234567          # 상장주식수(22,881,180)보다 작아 balance_over_shares 가 아니다
+
+
+def _stage_with_two_versions(tmp_path: Path) -> tuple[Path, Decimal, date]:
+    """절단본을 복사해 한 좌표에 **나중에 관측된 두 번째 판본**을 더한 stage 루트.
+
+    돌려주는 것은 (루트, 최초판 융자 잔고, 최초판 observed_date) 다 — 채택이 최초판인지 보려면
+    손계산 기대값이 있어야 한다.
+    """
+    root = tmp_path / "stage_ver"
+    for table in ("stg_credit_daily", "stg_units_kis"):
+        shutil.copytree(STAGE_SLICE / table, root / table)
+    part = next((root / "stg_credit_daily").glob(f"v=*/year={VER_DATE.year}/*.parquet"))
+    con = duckdb.connect()
+    try:
+        con.execute(f"CREATE TEMP TABLE t AS SELECT * FROM read_parquet('{part}')")
+        where = f"ticker = '{VER_TICKER}' AND date = DATE '{VER_DATE.isoformat()}'"
+        row = con.execute("SELECT whol_loan_rmnd_stcn_shr, observed_date FROM t "
+                          f"WHERE {where}").fetchone()
+        assert row is not None, (VER_TICKER, VER_DATE)
+        first_value, first_observed = Decimal(row[0]), row[1]
+        con.execute(f"INSERT INTO t SELECT * FROM t WHERE {where}")
+        # 나중 판본만 골라 고친다 — 방금 넣은 행은 아직 최초판과 값이 같으므로 순서로 못 가른다.
+        con.execute(f"""UPDATE t SET whol_loan_rmnd_stcn_shr = {VER_LATER_VALUE},
+                                     observed_date = observed_date + INTERVAL 30 DAY
+                        WHERE {where} AND rowid = (SELECT max(rowid) FROM t WHERE {where})""")
+        con.execute(f"COPY t TO '{part}' (FORMAT PARQUET)")
+    finally:
+        con.close()
+    return root, first_value, first_observed
+
+
+def test_재수집_판본은_최초_관측판만_채택하고_나머지는_격리한다(chain: Path,
+                                                          tmp_path: Path) -> None:
+    """결정 6-2 — 같은 (ticker, date) 에 값이 다른 판본이 있으면 **먼저 본 값**이 격자에 실린다.
+
+    최신판을 고르면 과거 셀 값이 뒤에 일어난 기업행위로 소급해 바뀌어 look-ahead 가 된다.
+    접힌 판본은 버리지 않고 `_reject/version_folded/` 에 **자기 원값째** 남는다.
+    """
+    stage, first_value, _ = _stage_with_two_versions(tmp_path)
+    r = build.build_table(CREDIT, stage, chain, SEED, build_id="b_s10_ver")
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    # ⑪(a): 격자 행수 불변 · 격리가 1건 는다
+    assert r.n_rows == N_GRID
+    assert r.n_reject == N_PRE_CALENDAR + N_OFF_GRID + 1
+    assert _gate(r, "EG1").metrics["delta"] == 0
+    # ⑪(b): 원장이 1행 늘었고 그 1행이 격리로 간다 — measured 는 그대로다
+    b = _metrics(r, "EG1_credit_daily")
+    assert b["n_src_rows"] == N_SRC + 1
+    assert b["n_measured_cells"] == N_MEASURED
+    assert b["n_ledger_delta"] == 0
+    assert b["n_reject_by_reason"] == {"pre_calendar": N_PRE_CALENDAR, "off_grid": N_OFF_GRID,
+                                       "balance_over_shares": 0, "version_folded": 1}
+    # 채택된 셀은 **최초판** 값이다
+    assert r.out_dir is not None
+    cell = _query(r.out_dir, "SELECT whol_loan_rmnd_stcn_shr FROM cd "
+                             f"WHERE ticker = '{VER_TICKER}' AND date = DATE "
+                             f"'{VER_DATE.isoformat()}'")
+    assert cell == [(first_value,)]
+    assert first_value != Decimal(VER_LATER_VALUE)
+    # 접힌 판본은 자기 원값째 격리된다(채택판 값이 복사되지 않는다)
+    assert (r.out_dir / "_reject" / "reject_reason=version_folded").is_dir()
+    assert _query(r.out_dir, "SELECT ticker, date, whol_loan_rmnd_stcn_shr FROM rej "
+                             "WHERE reject_reason = 'version_folded'") == [
+        (VER_TICKER, VER_DATE, Decimal(VER_LATER_VALUE))]
+    # 게이트 metric — 입력에서 다시 센 판본 수와 격리 건수가 맞는다
+    m = _metrics(r, "EG3_credit_daily")
+    assert m["n_versions_folded"] == 1 and m["n_version_groups"] == 1
+    assert m["n_version_folded_rejected"] == 1
+    assert m["n_version_folded_reject_delta"] == 0
+    assert m["n_src_row_without_measured"] == 0     # 격리된 판본은 이 술어에서 빠진다
+    assert m["n_measured_value_mismatch"] == 0      # 판본 재선택과 산출이 같은 행을 골랐다
+
+
+def test_판본을_접지_않으면_격자_유일성이_폐기한다(chain: Path, tmp_path: Path) -> None:
+    """판본 선택 규칙이 없던 상태(검수 종합 H3 "빌드 실패 예상")를 부정 픽스처로 재현한다.
+
+    값 조인에서 판본 축을 빼면 격자 셀 하나가 판본 수만큼 팬아웃한다. 행수 등식 ⑪(a)는
+    **통과한다** — 좌변이 1 늘고 우변의 접힌 판본 항이 그 1 을 이미 세고 있기 때문이다. 그래서
+    유일한 방어선은 프레임 EG3 의 PK 유일성이고, 이것이 검수가 예상한 실패 지점이다.
+    """
+    stage, _, _ = _stage_with_two_versions(tmp_path)
+    join_axis = "          AND s.version_rn = b.version_pick AND s.drop_value = b.drop_value"
+    sql = _body().replace(join_axis, "          AND s.drop_value = b.drop_value")
+    assert sql != _body()
+    # 접힌 판본 가지도 함께 지운다 — 남겨 두면 같은 행이 채택·격리 양쪽에 선다
+    folded_branch = (
+        "    UNION ALL\n"
+        "    -- 접힌 판본. 자기 `version_rn` 을 조인 축으로 달고 내려가 "
+        "**자기 원값**을 싣는다.\n"
+        "    SELECT f.date, f.ticker, 'version_folded', false, f.version_rn\n"
+        "    FROM ver f\n"
+        "    WHERE f.version_rn > 1\n")
+    assert folded_branch in sql
+    sql = sql.replace(folded_branch, "")
+    lax = _variant(tmp_path, "credit_no_version_pick", sql)
+    r = build.build_table(lax, stage, chain, _baseline_for(lax), build_id="b_s10_ver_bad")
+    assert r.status is build.BuildStatus.GATE_FAILED
+    assert r.n_rows == N_GRID + 1                      # 격자 셀 하나가 두 판본으로 갈라졌다
+    assert _gate(r, "EG1").status is GateStatus.PASS   # 행수 등식만으로는 못 잡는다
+    eg3 = _gate(r, "EG3")
+    assert eg3.status is GateStatus.FAIL
+    assert eg3.metrics["n_duplicate_keys"] == 1
+
+
+def test_최신판을_고르면_EG3가_폐기한다(chain: Path, tmp_path: Path) -> None:
+    """정렬을 뒤집으면(= 최신 관측판 채택) 셀에 소급 환산판이 실린다 — 결정 6-2 의 반대.
+
+    게이트는 산출을 믿지 않고 **입력에서 최초 관측판을 다시 골라** 원값을 대조하므로
+    (`first_version_sql()`), 채택 판본이 바뀌면 `n_measured_value_mismatch` 가 잡는다.
+    """
+    stage, first_value, _ = _stage_with_two_versions(tmp_path)
+    sql = _body().replace('c."observed_date" NULLS LAST', 'c."observed_date" DESC NULLS LAST')
+    assert sql != _body()
+    rev = _variant(tmp_path, "credit_latest_version", sql)
+    r = build.build_table(rev, stage, chain, _baseline_for(rev), build_id="b_s10_ver_latest")
+    assert r.status is build.BuildStatus.GATE_FAILED
+    g = _gate(r, "EG3_credit_daily")
+    assert g.status is GateStatus.FAIL
+    assert g.metrics["n_measured_value_mismatch"] == 1
+    assert first_value != Decimal(VER_LATER_VALUE)
+
+
 def test_잔고_이상_원장행을_격리하지_않으면_폐기한다(chain: Path, tmp_path: Path) -> None:
     """격리 경로를 지우면(= 서버 1차 빌드 상태) 방어가 두 겹으로 선다.
 
@@ -507,8 +652,8 @@ def test_잔고_이상_원장행을_격리하지_않으면_폐기한다(chain: P
     ② EG3_credit_daily — 우변까지 같이 늦춰 EG1 을 통과시켜도 `n_balance_over_shares_out` 이 잡는다.
     """
     stage = _stage_with_over_shares(tmp_path)
-    sql = _body().replace("    UNION ALL\n    SELECT o.date, o.ticker, 'balance_over_shares', false"
-                          "\n    FROM over o\n", "")
+    sql = _body().replace("    UNION ALL\n    SELECT o.date, o.ticker, 'balance_over_shares', "
+                          "false, CAST(1 AS BIGINT)\n    FROM over o\n", "")
     assert sql != _body()
     sql = sql.replace("EXISTS (SELECT 1 FROM over o WHERE o.ticker = g.ticker AND o.date = g.date)",
                       "false")

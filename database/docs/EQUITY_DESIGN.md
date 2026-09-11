@@ -475,3 +475,73 @@ EG-C 실행(S07): `python -m equity --root <equity_root> contract [--engine-src 
 
 **4A 구현 (09-06)**: S11 `disclosure_version`·S12 `fin_std` — §4-4 확정 문구·§10 P29·P30, `EQUITY_GATES.md` §1-12·§2 매트릭스 16·17행·§9 4A 블록, `EQUITY_FIELD_MAP.md` §2·§3. 정정: `no_label` 격리 폐기(행 유지) · `stg_rcept_dt_map` → `stg_disclosure.rcept_dt` · E-G7 분모에서 정정본 제외 · `rcept_lag_p99_days` 는 백분위가 아니라 범위 상한 · `correction_link` baseline 키를 `disclosure_version.*` 로 이관 · `gross_profit` 은 fin_map 실재라 계정 24(21+3).
 
+
+---
+
+## 13. v1.3 잠정판 — 저녁 잠정 T 행과 날짜 상수 파생 (규칙 e1.15.0, 플랜 v2 §4 Task B.2, 2026-09-11)
+
+### 13-1. 왜
+
+KRX 공식 시세는 T+1 08:00 에 온다. 그날 저녁(18:15) 스코어링을 하려면 T 종가가 있어야 하는데,
+18:05 시점에 T 가격을 주는 원천은 키움 ka10060(`stg_flow_daily_kiwoom`)뿐이다. 사용자 결정
+V2-2 가 「잠정 가격 축 = 키움 종가, 그날 ±30% 넘게 뛴 종목은 저녁 스코어에서 제외」다.
+
+### 13-2. `price_daily` 의 두 행 종류
+
+| 컬럼 | `basis='krx'` | `basis='evening'` |
+|---|---|---|
+| 원천 | `stg_price_daily` ∪ `stg_etf_price_daily` | `stg_flow_daily_kiwoom` (ka10060) |
+| `close` · `volume_shr` | KRX 원장 그대로 | 키움 원장 그대로 |
+| `open`·`high`·`low`·`value_krw`·`shares_out`·`mktcap_krw`·`change_krw`·`base_price_krw`·`par_value_krw` | KRX | **전부 NULL** (원칙 ④ — 채우지 않는다) |
+| `price_kind` | volume 부호 | volume 부호(같은 규칙) |
+| `corp_action_pending` | 항상 FALSE | `prev_close` 없음 ∨ `abs(close/prev_close − 1) > _const.evening_jump_abs_max`(0.30) |
+| `available_date`·`available_basis` | `date` · `default` | 같다 |
+
+행을 고르는 술어: `stg_flow_daily_kiwoom` 에서 `date > max(stg_price_daily.date)` **AND**
+`date = max(stg_flow_daily_kiwoom.date)`. 두 조건이 다 필요하다 — 앞엣것만 걸면 키움이 앞서 있는
+여러 날이 한꺼번에 들어오고, 뒤엣것만 걸면 아침 확정판에서 KRX 와 겹쳐 (ticker, date) 가 중복된다.
+`prev_close` 는 그 티커의 **마지막 KRX 종가**(참고가 행 포함)다 — 정지 중이던 종목도 마지막으로
+공표된 값이 비교축이다.
+
+**자연 교체**: 아침에 KRX 행이 오면 `max(stg_price_daily.date)` 가 T 로 올라가 위 술어가 0행을
+낸다. 덮어쓰기도 삭제도 없고, 같은 (ticker, date) 에 KRX 행 하나만 남는다.
+
+**캘린더 밖 격리(`off_calendar`)는 `basis='krx'` 행에만 건다.** 캘린더 상한은 EG17 이
+`max(stg_price_daily.date)` 로 고정하므로 저녁 T 는 아직 캘린더에 없는 것이 정상이다. 여기서
+격리하면 잠정판이 그날 가격을 통째로 잃는다.
+
+**저녁 T 행은 캘린더·유니버스 격자 밖에 있다.** `trading_calendar`·`universe_daily` 는 KRX 축을
+그대로 쓰므로 T 세션 격자가 없고, `price_adj_daily` 의 T 행은 접힐 계수가 없어 누적계수 1(=
+조정가 = 원주가)로 남는다. 저녁 스코어링은 T 가격을 `price_daily`·`v_adj_price_fwd` 에서 직접
+읽는다. 격자까지 T 로 늘리는 것은 이 변경의 범위 밖이다(후속 판단 대상).
+
+### 13-3. 날짜 상수 파생화
+
+`trading_calendar.backfill_end`·`security.backfill_end`·`adj_factor.asof_for_jump_check` 세
+상수를 등재 해제하고 stage·산출에서 유도한다. 술어와 근거는 `EQUITY_GATES.md` §10-1.
+`baseline_locked.json` 은 `_derived[]` 에 세 건의 전환 사유를 싣고, `price_daily` 에 상수 셋
+(`evening_jump_abs_max`·`recent_session_window`·`recent_session_row_ratio_min`)을 새로 등재한다.
+
+### 13-4. 판(basis)
+
+빌드 판은 `--basis evening|morning`(기본 `manual`)이고 어휘·접두어 정본은 **stage**
+(`stage.model.BASIS_PREFIX`)다 — 두 층이 같은 `_pinned` 규약으로 서로의 MANIFEST 를 읽으므로
+접두어 대응표가 갈리면 판이 조용히 어긋난다. equity 는 `model.BUILD_BASES`·`record_basis()` 로
+재수출만 한다. 판이 실리는 자리는 `EQUITY_GATES.md` §10-4.
+
+소비자 노출: `views.py` 의 `v_adj_price`·`v_adj_price_fwd` 가 `basis`·`corp_action_pending` 을
+그대로 통과시키고, `dataset_profile` 이 행마다 `basis` 를 싣는다. `price.close` 의 `evidence` 에
+「evening 판은 키움 종가·OHLC NULL」을 명시한다 — 문서가 아니라 이 선언이 소비자에게 가는 정본이다.
+
+두 컬럼이 늘어 `_asof/` 표본 해시가 달라지므로 **서버 첫 `catalog` 는 EG5c 가 FAIL 한다** —
+사람이 `catalog --rebase-asof` 로 승인해야 한다(e1.6.0 전례와 같은 경로).
+
+### 13-5. `_pinned` GC
+
+`inputs.gc_pinned(equity_root, keep=..., protect=[...])` — 남기는 축 셋의 합집합: ① 현행 equity
+`BuildRecord.inputs` 가 가리키는 판(`current_build` 만이 아니라 MANIFEST 에 남은 **전 빌드** —
+`gate --build <옛 판>` 재판정이 `_pinned/` 를 다시 연다) ② 호출자가 준 `protect` build_id
+(전달 규약이 가리키는 판: `data/deliver/history/*.json` 30일 + 월말 영구, 플랜 v2 §4 B.3 ③)
+③ 표별 최신 `keep` 판. `manifest.commit()` 을 부르지 않는다 — 그 함수는 keep 밖 `v=` 를 자기
+규칙으로 rmtree 해서 보호 축 ①②를 무시한다. 판정 결과는 `GcResult`(지운 것 + **남긴 이유별**
+목록 + 회수 바이트)로 돌려준다.

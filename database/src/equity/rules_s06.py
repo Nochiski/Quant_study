@@ -48,7 +48,7 @@ from stage.gates import GateResult, GateStatus
 
 from . import views
 from .gates import EquityGateContext, SkipGate, require_const
-from .model import EquityTable, register
+from .model import PRICE_BASIS_KRX, EquityTable, register
 from .rules_s01 import TICKER_LEN
 from .rules_s05 import MVP_EVENT_TYPES
 
@@ -550,23 +550,29 @@ def _jump_table(ctx: EquityGateContext, asof: str) -> None:
 
 
 def eg8_adj_jump(ctx: EquityGateContext) -> GateResult:
-    """EG8-P02·P03 (asof = `asof_for_jump_check`, factor_ok 이벤트의 **apply_date** 기준).
+    """EG8-P02·P03 (asof = KRX 확정 행의 최신일 — e1.15.0 유도값, factor_ok 이벤트의
+    **apply_date** 기준).
 
     P02 |수정수익률(행 대 행)| ≤ `adj_return_jump_max` — 건별.
     P03 이벤트 집합의 조정 거래량 20세션 중앙값 비 `median_after / median_before` 의 **중앙값** ∈
         [1/band, band], band = `adj_volume_ratio_band` — 집합 통계. 얇은 종목의 재개일 급증은
         정상이라 건별 임계는 의미가 없고, 목적은 계수 방향 오류(÷↔×, share_factor² 배) 탐지다.
         분포 p10/p50/p90/p99·max·> 10 건수·중앙값 미정의(정지 구간) 건수는 기록형.
-    상수가 없어도 측정은 한다: asof 는 price_daily 의 max(date) 로 대신 잡고(`asof_basis`),
-    결과는 skip(no_baseline) 의 metrics 에 남는다(GATES §7-3 ①). 기록형 보조 축:
+    임계 상수(`adj_return_jump_max`·`adj_volume_ratio_band`)가 없어도 측정은 한다 — 결과는
+    skip(no_baseline) 의 metrics 에 남는다(GATES §7-3 ①). 기록형 보조 축:
     |수정수익률| > 0.30(일반 세션 가격제한폭) 건수 — 거래 재개 첫날은 제한폭이 없어 판정축이
     아니다.
     """
-    asof = ctx.baseline.get(ctx.rule.name, "asof_for_jump_check")
-    asof_basis = "baseline"
+    # 규칙 e1.15.0 — as-of 는 baseline 상수가 아니라 **KRX 확정 행의 최신일**에서 유도한다
+    # (플랜 v2 §4 B.2 · v1 §8 Task 5.1). 저녁 잠정판의 키움 T 행(basis='evening')에는 계수가
+    # 없으므로 그 날짜로 as-of 를 올리면 아직 반영 못 한 사건이 점프로 잡힌다. 상수로 두면
+    # 거래일이 늘 때마다 사람이 올려야 하는 것도 같은 고장이다.
+    asof_basis = "derived:max(price_daily.date WHERE basis='krx')"
+    (asof,) = _row(ctx, "SELECT CAST(max(date) AS VARCHAR) FROM price_daily "
+                        f"WHERE basis = '{PRICE_BASIS_KRX}'")
     if asof is None:
-        asof = str(_row(ctx, "SELECT CAST(max(date) AS VARCHAR) FROM price_daily")[0])
-        asof_basis = "max_price_date"
+        raise SkipGate("no_coverage", {"asof_basis": asof_basis,
+                                       "detail": "price_daily 에 basis='krx' 행이 없다"})
     _jump_table(ctx, str(asof))
     (n_ok, n_ok_price, n_ok_no_prev, max_ret, n_ret_over_030, n_ratio_judged, n_ratio_undef,
      ratio_med, q10, q90, q99, ratio_max, n_ratio_over, max_day_jump, n_unadj_price,
@@ -619,9 +625,6 @@ def eg8_adj_jump(ctx: EquityGateContext) -> GateResult:
         "volume_median_window": VOLUME_MEDIAN_WINDOW,
         "events": sample,
     }
-    if asof_basis != "baseline":
-        raise SkipGate("no_baseline", {"missing_metric": f"{ctx.rule.name}.asof_for_jump_check",
-                                       **metrics})
     ret_max = require_const(ctx, "adj_return_jump_max", metrics)
     band = require_const(ctx, "adj_volume_ratio_band", metrics)
     n_ret_over = _n(ctx, f"SELECT count(*) FROM _eg8 WHERE factor_ok "
@@ -678,8 +681,12 @@ ADJ_FACTOR = register(EquityTable(
     input_columns={
         "corp_event": ("event_id", "ticker", "corp_code", "event_type", "announce_date",
                        "effective_date", "effective_basis", "ratio", "rcept_no", "source"),
+        # `basis` 는 산출식이 아니라 EG8 의 as-of 유도가 읽는다 (e1.15.0) — 저녁 잠정 T 행을
+        # as-of 에서 빼야 아직 계수가 없는 날이 점프로 잡히지 않는다. `corp_action_pending` 은
+        # EG8 이 세션에 올리는 매크로 `v_adj_price` 가 그대로 통과시키는 컬럼이다(views.py).
         "price_daily": ("ticker", "date", "open", "high", "low", "close", "volume_shr",
-                        "price_kind", "base_price_krw", "shares_out"),
+                        "price_kind", "base_price_krw", "shares_out", "basis",
+                        "corp_action_pending"),
         "trading_calendar": ("date",),
         "stg_event_cr": ("rcept_no", "corp_code", "cr_mth", "cr_rs"),
         "security": ("ticker", "sec_type", "corp_code"),

@@ -57,6 +57,14 @@ import duckdb
 
 from . import inputs
 
+# 저녁 잠정판 노출 (규칙 e1.15.0 · 결정 V2-2 · 플랜 v2 §4 B.2):
+#   가격 행을 싣는 두 뷰(`v_adj_price`·`v_adj_price_fwd`)가 `price_daily` 의 `basis`
+#   ('krx'·'evening')와 `corp_action_pending` 을 **그대로 통과시킨다**. 조정 계수는 저녁 행에
+#   붙지 않는다 — 계수의 `apply_date`·`available_date` 가 전부 KRX 확정일 이하라 T 행에는 접힐
+#   계수가 없고, 누적계수가 1 로 남는다(`coalesce(..., 1)`). 그래서 잠정 T 행의 조정가 = 원주가다.
+#   소비자는 `basis = 'evening'` 과 `corp_action_pending` 두 컬럼으로 「이 값은 키움 잠정치이고,
+#   참이면 기업행위 의심이라 오늘 스코어에서 빼라」를 읽는다. 두 컬럼을 안 보고 쓰면 잠정치가
+#   확정치처럼 보인다 — 그래서 뷰에서 감추지 않는다.
 FACTOR_LAG_SESSIONS = 0     # 계수 available_date 컷오프 기본 랙(세션). 위 docstring 근거
 PRICE_LAG_SESSIONS = 0      # 가격 행 컷오프 랙(세션) — 0 이라 `date <= as_of` 와 같다
 CONSENSUS_LAG_SESSIONS = 0  # 컨센서스 available_date 컷오프 기본 랙(세션). 아래 v_consensus 근거
@@ -144,6 +152,7 @@ px AS (
 ),
 fwd AS (
     SELECT p.ticker, p.date, p.open, p.high, p.low, p.close, p.volume_shr, p.price_kind,
+           p.basis, p.corp_action_pending,
            coalesce(c.cum_price_factor, 1) AS cum_price_factor,
            coalesce(c.cum_share_factor, 1) AS cum_share_factor,
            greatest(p.date, coalesce(c.available_date, p.date)) AS available_date
@@ -187,6 +196,7 @@ ASOF LEFT JOIN suf s ON s.ticker = p.ticker AND p.date < s.apply_date
     # 원주가 × 누적 가격계수 (FIELD_MAP price.adj_close). 원주가 컬럼은 그대로 함께 낸다(결정 6).
     "v_adj_price": """
 SELECT p.ticker, p.date, p.open, p.high, p.low, p.close, p.volume_shr, p.price_kind,
+       p.basis, p.corp_action_pending,
        c.cum_price_factor, c.cum_share_factor,
        p.open  * c.cum_price_factor AS adj_open,
        p.high  * c.cum_price_factor AS adj_high,
@@ -207,6 +217,7 @@ JOIN v_cum_adj(as_of, lag_override := lag_override) c ON c.ticker = p.ticker AND
     # 곱셈이다 — 나눗셈이면 분할 뒤 가격이 1/2500 로 떨어진다(FX-N-006 류, test_equity_s06_views).
     "v_adj_price_fwd": _FWD_CTE + """
 SELECT ticker, date, open, high, low, close, volume_shr, price_kind,
+       basis, corp_action_pending,
        cum_price_factor, cum_share_factor, available_date,
        open  * cum_share_factor AS adj_open,
        high  * cum_share_factor AS adj_high,

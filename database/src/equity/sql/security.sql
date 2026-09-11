@@ -1,10 +1,15 @@
 -- security (S01) — grain ticker. 모집단 = (stg_listing_daily ∪ stg_etf_price_daily) distinct ticker.
--- DESIGN v1.2 §4-1 · GATES §3-②. 상수는 _const.backfill_end 하나.
+-- DESIGN v1.2 §4-1 · GATES §3-②. 숫자·날짜 상수는 없다 —
+--   백필 상한은 규칙 e1.15.0 부터 baseline 상수(`security.backfill_end`)가 아니라 이 SQL 안의
+--   거래일 축 `td` 의 max 에서 **유도**한다. 거래일이 하루 늘 때마다 사람이 상수를 올려야 하던
+--   고장을 없앤다(플랜 v2 §4 B.2 · v1 §8 Task 5.1). `td` = stg_index_daily distinct date 이고
+--   EG17 이 매 빌드 `max(trading_calendar) == max(stg_price_daily.date)` 를 증명하므로
+--   두 층의 상한은 같은 날짜다.
 --
 -- 폐지일 두 축(정본 우선순위 = KRX):
 --   delist_date_krx = listing/etf 마지막 존재일의 **다음 거래일**. 거래일 축은 stg_index_daily
 --     distinct date 로 이 SQL 안에서 만든다(trading_calendar 는 S02 산출이라 입력이 될 수 없다).
---     마지막 존재일이 backfill_end 면 아직 살아 있는 것이므로 NULL/basis unknown.
+--     마지막 존재일이 백필 상한(= max(td))이면 아직 살아 있는 것이므로 NULL/basis unknown.
 --   delist_date_kis = stg_delisted_master.lstg_abol_dt (대조축).
 -- sec_type 은 전 이력 어휘(P11) 매핑. spac 은 common 보다 우선하고, 어휘 밖은 'other' 로 두되
 -- **행을 유지**한다(격리하면 게이트가 생존편향을 만든다 — GATES §5-C6).
@@ -66,7 +71,7 @@ resolved AS (
             ELSE 'other'
         END                                                  AS sec_type,
         l.list_date                                          AS list_date,
-        CASE WHEN d.last_date >= CAST(k.backfill_end AS DATE) THEN NULL
+        CASE WHEN d.last_date >= (SELECT max(t.date) FROM td t) THEN NULL
              ELSE (SELECT min(t.date) FROM td t WHERE t.date > d.last_date) END
                                                              AS delist_date_krx,
         x.delist_date_kis                                    AS delist_date_kis
@@ -76,7 +81,6 @@ resolved AS (
     LEFT JOIN spac s ON s.ticker = d.ticker
     LEFT JOIN kis x ON x.ticker = d.ticker
     LEFT JOIN corp_map cm ON cm.ticker = d.ticker
-    CROSS JOIN _const k
 )
 SELECT
     ticker,

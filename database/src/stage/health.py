@@ -227,9 +227,15 @@ def _c5_elapsed(pairs: list[_Pair], date_kst: str, started_at: str | None,
         begin = begin.replace(tzinfo=dt.UTC)
     end = max(e if e.tzinfo else e.replace(tzinfo=dt.UTC) for e in ends)
     elapsed = (end - begin).total_seconds()
-    return Check("C5", Status.FAIL if elapsed > budget_s else Status.PASS,
-                 f"{len(today)}표 {elapsed / 60:.1f}분 (예산 {budget_s / 60:.0f}분)",
-                 {"elapsed_s": elapsed, "budget_s": budget_s, "n_builds": len(today),
+    # 예산 초과는 기록형이다(2026-09-12 계약 변경): 3차 재빌드에서 stage 42.8분 > 40분으로 C5 가 FAIL 해 옳은
+    # 판을 통째로 버리고 equity 를 건너뛰었다. 느린 것은 슬롯을 놓친 것이지 판이 틀린 것이 아니다 — 워치독이
+    # 시각으로 잡고, 여기서는 `over_budget` 로 남겨 소요 추세를 본다.
+    over = elapsed > budget_s
+    return Check("C5", Status.PASS,
+                 f"{len(today)}표 {elapsed / 60:.1f}분 (예산 {budget_s / 60:.0f}분"
+                 f"{' — 초과, 기록만' if over else ''})",
+                 {"elapsed_s": elapsed, "budget_s": budget_s, "over_budget": over,
+                  "n_builds": len(today),
                   "started_at": begin.isoformat(timespec="seconds"),
                   "finished_at": end.isoformat(timespec="seconds")})
 

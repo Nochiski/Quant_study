@@ -175,9 +175,11 @@ def test_c5_measures_from_the_first_build_id_to_the_last_commit(tmp_path: Path,
     assert c5.metrics["elapsed_s"] == 1200.0      # 09:15:00 빌드 id → 09:35:00 커밋
 
 
-def test_c5_fails_when_the_run_exceeds_the_budget(tmp_path: Path, make_stage_tree) -> None:
+def test_c5_records_over_budget_without_failing(tmp_path: Path, make_stage_tree) -> None:
     c5 = _check(_run(_all(tmp_path, make_stage_tree), budget_s=600), "C5")
-    assert c5.status is health.Status.FAIL and c5.metrics["budget_s"] == 600
+    # 2026-09-12 계약 변경: 예산 초과는 기록형(over_budget) — 느린 판을 버리지 않는다
+    assert c5.status is health.Status.PASS and c5.metrics["budget_s"] == 600
+    assert c5.metrics["over_budget"] is True and "초과" in c5.detail
 
 
 def test_c5_uses_started_at_when_the_chain_reports_the_snapshot_start(tmp_path: Path,

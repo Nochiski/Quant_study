@@ -146,7 +146,7 @@ uv run --no-project --python 3.11 --with pytest --with duckdb --with requests py
 | 18:05 | `5 9 * * 1-5` | `daily_evening.sh` — 키움 ka10060·ka10014 원장 직행 ∥ DART ∥ WISE | 가동 |
 | 18:15 | `15 9 * * 1-5` | `build_evening.sh` — 잠정 빌드(stage → equity, `basis=evening`) | 가동 (09-11 18:50 등록) |
 | 18:50 | `50 9 * * 1-5` | `watchdog.sh evening_ledger` — 저녁 원장 보고 없음/실패면 crit | 가동 |
-| 19:00 | `0 10 * * 1-5` | `watchdog.sh evening_build` — `latest_evening.json` 이 오늘 것이 아니거나 health 실패면 crit | 가동 (09-11 18:50 등록) |
+| 19:20 | `20 10 * * 1-5` | `watchdog.sh evening_build` — `latest_evening.json` 이 오늘 것이 아니거나 health 실패면 crit. 09-12 19:00→19:20(stage 실측 30~43분; 19:00 목표는 B.1 단축 옵션 뒤) | 가동 |
 | 19:00 | — | Kael-alpha 스코어 보고 목표 (상한 19:30) | 예정 (페이즈 C) |
 | 일요일 04:30 | `30 19 * * 6` | `gc.sh --apply` — 캐시·`_failed` 정리, 끝에서 `rotate_logs.sh` 호출, 완료 info / 실패 warn | 가동 (09-11 18:50 등록) |
 | 매시 | — | 키움 확정 시각 프로브 (임시, 09-15 판독 후 제거) | 가동 |

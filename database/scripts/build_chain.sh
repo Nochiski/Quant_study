@@ -36,7 +36,7 @@ if [ -n "$DRY" ]; then
   echo "  1. 빌드 락 /tmp/quant_ledger_build.lock flock -n (자식은 QL_BUILD_LOCK_HELD=1)"
   echo "  2. 스냅샷: stage.snapshot.make_snapshot(data/raw 5 DB → data/snapshots/snap_<ts>)"
   echo "  3. stage:  scripts/run_stage_all.sh <snap> --basis $BASIS   (66표, ≈22.5분)"
-  echo "  4. 건전성: $PY -m stage.health --basis $BASIS --date $D --out logs/health/stage_${D}_${BASIS}.json"
+  echo "  4. 건전성: $PY -m stage.health --basis $BASIS --date $D --built-on $(TZ=Asia/Seoul date +%Y%m%d) --out logs/health/stage_${D}_${BASIS}.json"
   echo "  5. equity: scripts/equity_rebuild_all.sh $BASIS --basis $BASIS   (29표, ≈8분)"
   echo "  6. 카탈로그: $PY -m equity catalog"
   echo "  7. 인계:   data/deliver/latest_${BASIS}.json + data/deliver/history/${D}_${BASIS}.json"

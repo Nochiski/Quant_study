@@ -26,9 +26,9 @@
   "source": "hand — 절단본 distinct date 정렬 뒤 5개 2026-08-13·14·18·19·20",
   "expect_source": "hand", "fixture_class": "positive"},
 
- {"case": "last_td_next_is_null",
-  "key": {"date": "2026-08-20"}, "column": "next_td", "expect": null,
-  "source": "hand — 절단본 stg_index_daily distinct date 최대값 = backfill_end",
+ {"case": "penultimate_td_next",
+  "key": {"date": "2026-08-19"}, "column": "next_td", "expect": "2026-08-20",
+  "source": "hand — 절단본 distinct date 정렬 뒤 5개 2026-08-13·14·18·19·20",
   "expect_source": "hand", "fixture_class": "positive",
-  "note": "마지막 거래일의 next_td 가 NULL 이 아니면 coverage 밖 날짜를 캘린더가 만들어 낸 것이다"}
+  "note": "규칙 e1.15.0 부터 캘린더 상한이 stage 최대일에서 유도되어 매일 늘어난다. 옛 case last_td_next_is_null(2026-08-20 의 next_td = NULL)은 절단본에서만 참이고 서버에서는 08-21 이 나와 첫 잠정 빌드(09-11 18:50)를 깨뜨렸다. 마지막 날의 next_td NULL 은 SQL 의 lead() 구성상 항상 성립하고 EG17 n_next_td_broken 이 매 빌드 재검사하므로 여기서는 상한에 묶이지 않는 이웃 관계만 고정한다"}
 ]

@@ -138,17 +138,17 @@ uv run --no-project --python 3.11 --with pytest --with duckdb --with requests py
 
 | KST | crontab (UTC) | 스크립트 | 상태 |
 |---|---|---|---|
-| 03:30 | `30 18 * * *` | `backup_raw.sh` — 원장 6 DB 온라인 백업 (v3 자기 백업 03:00 뒤) | 예정 |
+| 03:30 | `30 18 * * *` | `backup_raw.sh` — 원장 6 DB 온라인 백업 (v3 자기 백업 03:00 뒤) | 가동 (09-11 18:50 등록, 첫 실행 09-12) |
 | 06:00 | `0 21 * * *` | `daily_ledger.sh` — 캘린더 → 키움 마스터 → 대차(ka20068) → KIS 신용 → DART 재스윕 | 가동 |
 | 07:10 | (08:10 체인 안) | 키움 외국인 보유 ka10008 — `daily_build.sh` 의 `--not-before 07:10` 하한 (결정 7) | 가동 |
-| 08:10 | `10 23 * * *` | `daily_build.sh` — KRX → ka10008 → 머지 → `ledger_health` → `build_morning.sh`(확정판) → `daily_report.py` | 원장 단계 가동 · 확정 빌드는 `--no-build` 제거 뒤(예정) |
-| 09:15 | `15 0 * * *` | `watchdog.sh morning_build` — 직전 거래일 원장 건전성 + `latest_morning.json`(D+1 08:00 이후·health ok) 없음/실패면 crit. 매일(금요일 판은 토요일에 지어진다) | 가동(09-11 요일 수정, 매일화는 배포 시) |
+| 08:10 | `10 23 * * *` | `daily_build.sh` — KRX → ka10008 → 머지 → `ledger_health` → `build_morning.sh`(확정판) → `daily_report.py` | 가동 (09-11 18:50 `--no-build` 제거, 첫 확정 빌드 09-12 08:10) |
+| 09:15 | `15 0 * * *` | `watchdog.sh morning_build` — 직전 거래일 원장 건전성 + `latest_morning.json`(D+1 08:00 이후·health ok) 없음/실패면 crit. 매일(금요일 판은 토요일에 지어진다) | 가동 (09-11 18:50 매일로 등록) |
 | 18:05 | `5 9 * * 1-5` | `daily_evening.sh` — 키움 ka10060·ka10014 원장 직행 ∥ DART ∥ WISE | 가동 |
-| 18:15 | `15 9 * * 1-5` | `build_evening.sh` — 잠정 빌드(stage → equity, `basis=evening`) | 예정 (B.1) |
+| 18:15 | `15 9 * * 1-5` | `build_evening.sh` — 잠정 빌드(stage → equity, `basis=evening`) | 가동 (09-11 18:50 등록) |
 | 18:50 | `50 9 * * 1-5` | `watchdog.sh evening_ledger` — 저녁 원장 보고 없음/실패면 crit | 가동 |
-| 19:00 | `0 10 * * 1-5` | `watchdog.sh evening_build` — `latest_evening.json` 이 오늘 것이 아니거나 health 실패면 crit | 예정 (B.1) |
+| 19:00 | `0 10 * * 1-5` | `watchdog.sh evening_build` — `latest_evening.json` 이 오늘 것이 아니거나 health 실패면 crit | 가동 (09-11 18:50 등록) |
 | 19:00 | — | Kael-alpha 스코어 보고 목표 (상한 19:30) | 예정 (페이즈 C) |
-| 일요일 04:30 | `30 19 * * 6` | `gc.sh --apply` — 캐시·`_failed` 정리, 끝에서 `rotate_logs.sh` 호출, 완료 info / 실패 warn | 예정 |
+| 일요일 04:30 | `30 19 * * 6` | `gc.sh --apply` — 캐시·`_failed` 정리, 끝에서 `rotate_logs.sh` 호출, 완료 info / 실패 warn | 가동 (09-11 18:50 등록) |
 | 매시 | — | 키움 확정 시각 프로브 (임시, 09-15 판독 후 제거) | 가동 |
 
 ### 원장 백업 — `scripts/backup_raw.sh`

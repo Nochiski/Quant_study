@@ -10,7 +10,7 @@ if not os.environ.get("QL_ENV"):
     _env.close()
     os.environ["QL_ENV"] = _env.name
 
-import sweep_disclosure as sd  # noqa: E402  # reason: 위 QL_ENV 설정이 import 보다 먼저여야 한다
+import sweep_disclosure as sd  # reason: 위 QL_ENV 설정이 import 보다 먼저여야 한다
 
 
 def test_reconcile_accepts_ledger_excess_as_source_side_deletion():

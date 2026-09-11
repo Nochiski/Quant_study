@@ -42,6 +42,10 @@ MAX_RETRY = 4
 STALE_PCT_MAX = 30.0        # 오염 게이트 (b). 실측 정상일 9.7% / 오염일 99.0% (findings A §3-2)
 GRACE_DAYS = 5              # 유니버스 유예(R5)
 INCOMING_PREFIX = "_kw_incoming_"
+# 요청 창 안에서 0 부터 다시 세는 누적값 — 같은 dt 라도 창이 움직이면 값이 달라진다(STAGE_SPEC §2 ka10014
+# 실측: 372행 창 경계마다 재시작, 프로브 09-11 00:05 자정 창 이동으로 변경). 원천 정정이 아니므로
+# 머지의 `changed` 비교에서 뺀다. 원장에는 원문 그대로 남고 stage 가 `_valid` 로 다룬다.
+WINDOW_RELATIVE_COLS: frozenset[str] = frozenset({"ovr_shrts_qty"})
 FETCH_SOURCE = "kiwoom_fetch"
 MERGE_SOURCE = "kiwoom_merge"
 _META_COLS = ("ticker", "src_api", "collected_at", "fetched_at")
@@ -564,7 +568,7 @@ def merge_tr(con: sqlite3.Connection, spec: TrSpec, date: str, dry_run: bool) ->
         return TrMerge(spec.api_id, n_take, n_future)
     ensure_table(con, spec.table, cols)
     names = ",".join(f'"{c}"' for c in ["ticker", *cols, "src_api", "collected_at"])
-    differs = " OR ".join(f'i."{c}" IS NOT m."{c}"' for c in cols if c != "dt")
+    differs = " OR ".join(f'i."{c}" IS NOT m."{c}"' for c in cols if c != "dt" and c not in WINDOW_RELATIVE_COLS)
     row_changed = con.execute(
         f'SELECT COUNT(*) FROM "{incoming}" i JOIN "{spec.table}" m ON m.ticker = i.ticker AND m.dt = i.dt '
         f'WHERE i.dt <= ? AND ({differs})', (date,)).fetchone()

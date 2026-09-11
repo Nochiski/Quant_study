@@ -117,10 +117,15 @@ def test_skip_source_excludes_its_checks(tmp_path):
     assert rep.ok                                                     # 오염 99% 픽스처인데 kiwoom 을 제외했으니 통과
 
 
-def _wise(tmp_path, *, cov=804, none=1759, n_req=None):
-    """ws_run_log 1건 + 당일 checked_at 커버리지. n_req 기본값은 항등식대로."""
+def _wise(tmp_path, *, cov=804, none=1759, n_req=None, raw_rows=None, raw_stocks=None):
+    """ws_run_log 1건 + 당일 checked_at 커버리지 + ws_raw(기본은 항등식대로). n_req 기본값은 항등식대로."""
     n_req = n_req if n_req is not None else cov * 15 + none * 4
+    raw_rows = n_req if raw_rows is None else raw_rows
+    raw_stocks = cov + none if raw_stocks is None else raw_stocks
     con = sqlite3.connect(tmp_path / "wise.db")
+    con.execute("CREATE TABLE ws_raw (cmp_cd TEXT, ep TEXT, pkey TEXT, fetched_date TEXT)")
+    con.executemany("INSERT INTO ws_raw VALUES (?,?,?,'2026-09-08')",
+                    [(f"{i % raw_stocks:06d}", f"ep{i // raw_stocks}", str(i)) for i in range(raw_rows)])
     con.execute("CREATE TABLE ws_run_log (run_at TEXT, mode TEXT, n_stocks INTEGER, n_req INTEGER, n_ok INTEGER, n_bad INTEGER, bad_summary TEXT)")
     con.execute("INSERT INTO ws_run_log VALUES ('2026-09-07T21:04:00','full',?,?,?,0,'{}')", (cov + none, n_req, n_req))
     con.execute("CREATE TABLE ws_coverage (cmp_cd TEXT PRIMARY KEY, status TEXT, checked_at TEXT)")
@@ -139,3 +144,15 @@ def test_wise_request_identity_counts_four_requests_per_uncovered_stock(tmp_path
     sub = tmp_path / "b"; sub.mkdir()
     rep2 = lh.run(D, _paths(sub, wise=_wise(sub, n_req=804 * 15 + 1759 * 2)), today=dt.date(2026, 9, 8))
     assert next(c for c in rep2.checks if c.name == "wise.req_identity").status is lh.Status.FAIL
+
+
+def test_wise_raw_expectation_derives_from_coverage_not_a_fixed_band(tmp_path):
+    # 09-11 실측: 규모구분 갱신으로 유니버스 2,563→2,610, 무커버 4콜 → rows 19,416. 옛 절대 밴드(15,500~15,700 ·
+    # 2,560~2,570)는 오탐. 기대치 = covered×15 + none×4 · stocks = covered+none.
+    import datetime as dt
+    rep = lh.run(D, _paths(tmp_path, wise=_wise(tmp_path, cov=816, none=1794)), today=dt.date(2026, 9, 8))
+    raw = next(c for c in rep.checks if c.name == "wise.raw")
+    assert raw.status is lh.Status.PASS and raw.value == {"rows": 816 * 15 + 1794 * 4, "stocks": 2610}
+    sub = tmp_path / "b"; sub.mkdir()
+    rep2 = lh.run(D, _paths(sub, wise=_wise(sub, cov=816, none=1794, raw_rows=19000)), today=dt.date(2026, 9, 8))
+    assert next(c for c in rep2.checks if c.name == "wise.raw").status is lh.Status.FAIL

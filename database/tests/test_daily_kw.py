@@ -73,7 +73,8 @@ def _response_rows(api_id, ticker, poss):
         return [{"dt": d, "close_pric": CLOSE[ticker], "trde_qty": VOL[ticker], "chg_qty": "0",
                  "poss_stkcnt": poss[d][ticker], "wght": "50"} for d in dates]
     if api_id == "ka10014":
-        return [{"dt": d, "close_pric": CLOSE[ticker], "shrts_qty": "10"} for d in dates]
+        return [{"dt": d, "close_pric": CLOSE[ticker], "shrts_qty": "10", "ovr_shrts_qty": str(100 + i)}
+                for i, d in enumerate(dates)]
     if api_id == "ka20068":
         return [{"dt": d, "rmnd": "5"} for d in dates]
     return [{"dt": d, "ind_invsr": "1", "frgnr_invsr": "2"} for d in dates]   # ka10060: 컬럼 추론
@@ -368,6 +369,27 @@ def test_fetch_tr_filter_stages_only_selected_and_keeps_other_incoming(tmp_path,
             assert con.execute(f'SELECT COUNT(*) FROM "{spec.table}"').fetchone()[0] == len(TICKERS) * 3, api_id
     finally:
         con.close()
+
+
+def test_merge_ignores_window_relative_columns_when_counting_changes(tmp_path, monkeypatch):
+    # ka10014.ovr_shrts_qty 는 요청 창 안의 누적값이라 같은 dt 라도 매일 달라진다(09-11 실측 changed=685,979).
+    # 원천 정정이 아니므로 changed 에 세지 않는다. 다른 컬럼이 다르면 여전히 센다.
+    calls = []
+    _prepare(tmp_path, monkeypatch, calls, ledger_rows=_seed_prev())
+    con = sqlite3.connect(tmp_path / "data" / "raw" / "kiwoom.db")
+    con.execute('CREATE TABLE ka10014_short_selling ("ticker" TEXT NOT NULL, "dt" TEXT, "close_pric" TEXT, '
+                '"shrts_qty" TEXT, "ovr_shrts_qty" TEXT, "src_api" TEXT, "collected_at" TEXT, PRIMARY KEY ("ticker", "dt"))')
+    con.executemany("INSERT INTO ka10014_short_selling VALUES (?,?,?,?,?,?,?)",
+                    [(t, D_PREV, CLOSE[t], "10", "999", "ka10014", "old") for t in TICKERS])   # ovr 만 다르다
+    con.commit(); con.close()
+    _krx_db(tmp_path)
+    assert kw_daily.main(["--fetch", "--date", D]) == 0
+    assert kw_daily.main(["--merge", "--date", D]) == 0
+    run = sqlite3.connect(tmp_path / "data" / "raw" / "daily_run.db")
+    detail = run.execute("SELECT detail FROM run WHERE source='kiwoom_merge' ORDER BY run_id DESC LIMIT 1").fetchone()[0]
+    run.close()
+    assert "('ka10014', 6, 4, 0)" in detail                       # dt<=D 6행 중 기존 2행: ovr 차이는 무시 → changed 0
+    assert "('ka10008', 6, 4, 2)" in detail                       # ka10008 은 poss 가 달라 여전히 2
 
 
 def test_fetch_tr_rejects_unknown_id():

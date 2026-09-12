@@ -22,10 +22,11 @@ from pathlib import Path
 
 import duckdb
 from stage import manifest
+from stage import model as stage_model
 
 from . import gates, inputs
 from .baseline import Baseline
-from .model import RULES_VERSION, EquityTable
+from .model import BUILD_BASIS_DEFAULT, RULES_VERSION, EquityTable
 
 
 class BuildStatus(Enum):
@@ -38,6 +39,7 @@ class BuildResult:
     status: BuildStatus
     table: str
     build_id: str
+    basis: str                      # 빌드 판 — adhoc/evening/morning (model.BUILD_BASES)
     inputs: dict[str, str]
     n_rows: int
     n_reject: int
@@ -89,6 +91,17 @@ def _lit(v: object) -> str:
     return "'" + str(v).replace("'", "''") + "'"
 
 
+def make_build_meta(con: duckdb.DuckDBPyConnection, basis: str, build_id: str) -> None:
+    """빌드 판·id 를 1행 임시 테이블 `_build` 로 올린다 (`_const` 와 같은 통로).
+
+    게이트가 "이 판이 저녁 잠정판인가 아침 확정판인가" 를 SQL 로 볼 수 있어야 한다 —
+    `EquityGateContext` 는 stage `GateResult` 규약을 공유하는 공용 타입이라 equity 전용 축을
+    필드로 늘리지 않고 세션 테이블로 나른다. 재판정(`__main__ gate`)도 같은 함수를 부른다.
+    """
+    con.execute(f"CREATE OR REPLACE TEMP TABLE _build AS "
+                f"SELECT {_lit(basis)} AS basis, {_lit(build_id)} AS build_id")
+
+
 def make_consts(con: duckdb.DuckDBPyConnection, rule: EquityTable, baseline: Baseline) -> None:
     """`rule.consts` 를 baseline 에서 꺼내 1행 wide 임시 테이블 `_const` 로 올린다.
 
@@ -124,7 +137,7 @@ def _previous_record(table_root: Path) -> manifest.BuildRecord | None:
 def build_table(rule: EquityTable, stage_root: Path, equity_root: Path, baseline: Baseline, *,
                 keep: int = manifest.KEEP_DEFAULT, memory_limit: str = "6GB", threads: int = 3,
                 temp_dir: Path | None = None, build_id: str | None = None,
-                fixtures_path: Path | None = None,
+                basis: str = BUILD_BASIS_DEFAULT, fixtures_path: Path | None = None,
                 gate_thresholds: dict[str, float] | None = None) -> BuildResult:
     """테이블 1개를 고정 stage 입력에서 빌드한다. 결과는 status 로, 예외는 버그·환경 오류에만."""
     if rule.build_by_year:
@@ -132,7 +145,10 @@ def build_table(rule: EquityTable, stage_root: Path, equity_root: Path, baseline
             f"build_by_year loop is not implemented yet (T7 범위) — table={rule.name}. "
             "전 구간을 한 번에 물면 duckdb 가 스필한다: 연도 루프를 붙이기 전에는 빌드하지 않는다")
     t0 = time.time()
-    bid = build_id or datetime.now(UTC).strftime("b_%Y%m%dT%H%M%S_%fZ")
+    # `--build-id` 를 직접 주면 **그 접두어가 판**이다 — id 와 basis 가 갈리면 재판정이 다른 판을
+    # 본다. stage `__main__` 과 같은 규칙(플랜 v2 B.1).
+    bid = build_id or stage_model.make_build_id(basis)
+    basis = stage_model.basis_of_build_id(bid)
     table_root = equity_root / rule.name
     tmp_root = equity_root / "_tmp" / bid
     tmp_table = tmp_root / rule.name
@@ -152,6 +168,7 @@ def build_table(rule: EquityTable, stage_root: Path, equity_root: Path, baseline
         inputs.create_views(con, pinned,
                             {t: list(rule.declared_columns(t)) for t in rule.inputs})
         make_consts(con, rule, baseline)
+        make_build_meta(con, basis, bid)
         if rule.declarations is not None:
             rule.declarations(con, rule)     # S19·S20 선언표 — `_const` 와 같은 통로
 
@@ -219,20 +236,22 @@ def build_table(rule: EquityTable, stage_root: Path, equity_root: Path, baseline
         if failed:
             report = equity_root / "_failed" / f"{bid}.json"
             _write_json(report, {
-                "table": rule.name, "build_id": bid, "snapshot_id": "", "inputs": pinned_ids,
+                "table": rule.name, "build_id": bid, "basis": basis, "snapshot_id": "",
+                "inputs": pinned_ids,
                 "n_src": n_src, "n_rows": n_ok, "n_reject": n_reject,
                 "n_reject_by_reason": reject_by_reason,
                 "first_failed_gate": failed[0].name, "gates": gate_dicts})
             shutil.rmtree(tmp_root, ignore_errors=True)
-            return BuildResult(BuildStatus.GATE_FAILED, rule.name, bid, pinned_ids, n_ok,
-                               n_reject, content_hash, [], results, round(time.time() - t0, 1),
-                               None, report)
+            return BuildResult(BuildStatus.GATE_FAILED, rule.name, bid, basis, pinned_ids,
+                               n_ok, n_reject, content_hash, [], results,
+                               round(time.time() - t0, 1), None, report)
 
         elapsed = round(time.time() - t0, 1)
         partitions: list[dict[str, object]] = []
         for label, n, pdir in part_dirs:
             meta: dict[str, object] = {
-                "table": rule.name, "build_id": bid, "partition": label, "n_rows": n,
+                "table": rule.name, "build_id": bid, "basis": basis,
+                "partition": label, "n_rows": n,
                 "n_src": n_src, "n_dedup": 0, "n_reject": n_reject,
                 "n_reject_by_reason": reject_by_reason, "inputs": pinned_ids, "snapshot_id": "",
                 "rules_version": RULES_VERSION, "content_hash": content_hash,
@@ -253,9 +272,9 @@ def build_table(rule: EquityTable, stage_root: Path, equity_root: Path, baseline
     shutil.move(str(tmp_table), str(final_dir))
     shutil.rmtree(tmp_root, ignore_errors=True)
     manifest.commit(table_root, manifest.BuildRecord(
-        build_id=bid, snapshot_id="", rules_version=RULES_VERSION,
+        build_id=bid, snapshot_id="", rules_version=RULES_VERSION, basis=basis,
         built_at_utc=datetime.now(UTC).isoformat(timespec="seconds"), n_rows=n_ok,
         content_hash=content_hash, partitions=partitions, gates=gate_dicts,
         inputs=pinned_ids), keep=keep)
-    return BuildResult(BuildStatus.OK, rule.name, bid, pinned_ids, n_ok, n_reject, content_hash,
-                       partitions, results, elapsed, final_dir, None)
+    return BuildResult(BuildStatus.OK, rule.name, bid, basis, pinned_ids, n_ok, n_reject,
+                       content_hash, partitions, results, elapsed, final_dir, None)

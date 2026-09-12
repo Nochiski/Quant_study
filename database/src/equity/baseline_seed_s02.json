@@ -3,7 +3,6 @@
  "measured_at": "2026-09-05",
  "trading_calendar": {
   "calendar_start": "2010-01-04",
-  "backfill_end": "2026-08-20",
   "asof_sample_dates": [
    "2010-01-04",
    "2015-03-16",
@@ -45,20 +44,6 @@
    "growing": false,
    "used_by": "EG17 (rules_s02.eg17_calendar_integrity)",
    "note": "KRX API 하한(MEMORY dart-universe-2010-floor). 성장하지 않는 하한이라 growing=false — 값이 뒤로 밀리면 원천이 잘린 것이다."
-  },
-  {
-   "table": "trading_calendar",
-   "metric": "backfill_end",
-   "inputs": {
-    "stg_index_daily": "b_20260902T162449_297822Z",
-    "stg_listing_daily": "b_20260902T162451_832365Z"
-   },
-   "sql": "SELECT CAST(max(date) AS VARCHAR) FROM stg_index_daily",
-   "value": "2026-08-20",
-   "measured_at": "2026-09-05",
-   "growing": true,
-   "used_by": "EG17 (rules_s02) · security_span.end_reason='coverage_gap' 경계 · GATES §3 ③(e)",
-   "note": "GATES §1-12 는 측정 SQL 을 max(date) of stg_listing_daily 로 적었다. DESIGN v1.2 §4-1 이 캘린더를 stg_index_daily distinct date 로 확정했으므로 이 seed 는 stg_index_daily 로 측정한다. 절단본에서 두 값은 같다(2026-08-20). 수집이 진행되면 커지는 값이라 growing=true — 백필이 재개되면 오케스트레이터가 재측정해 갱신한다."
   },
   {
    "table": "trading_calendar",
@@ -124,5 +109,8 @@
    "used_by": "EG16a (rules_s02.eg16a_respan_count) · GATES §3 ③(c)",
    "note": "036220·101970 두 종목뿐(DESIGN §10 P8). 절단본은 재상장 2종을 일부러 담았으므로 전수 유니버스와 값이 같다. 이 수가 늘면 수집 결손이 가짜 재상장으로 읽힌 것이다 — 늘어난 티커를 확인하기 전에 baseline 을 올리지 말 것."
   }
- ]
+ ],
+ "_derived": {
+  "trading_calendar.backfill_end": "규칙 e1.15.0 에서 **유도값으로 전환**(플랜 v2 §4 B.2 · v1 §8 Task 5.1). EG17 이 `max(trading_calendar.date) == max(stg_price_daily.date)` 와 `>= 직전 빌드 max`(퇴행 금지) 두 술어로 대신 본다. 상수로 두면 거래일이 하루 늘 때마다 사람이 올려야 하고 안 올리면 매일 빌드가 폐기된다."
+ }
 }

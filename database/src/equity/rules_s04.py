@@ -7,8 +7,14 @@ S06-2(09-05)가 KRX 기준가 축을 더했다 — `change_krw`(stage 그대로)
 change`(그날 KRX 기준가). 원주가 축은 그대로이고(EG20 불변), S06 `adj_factor` 의 `krx_base_price`
 원천이 읽는다.
 
-입력 — stage 3(`stg_price_daily`·`stg_etf_price_daily`·`stg_listing_daily`) + equity
-`trading_calendar`(캘린더 밖 날짜 격리 축). 숫자 상수는 없다(`baseline_seed_s04.json` 참조).
+e1.15.0(플랜 v2 §4 B.2 · 결정 V2-2)이 **저녁 잠정 T 행**을 더했다 — KRX 에 없는 최신 거래일이
+키움 `stg_flow_daily_kiwoom`(ka10060)에 있으면 그 종가·거래량으로 행을 만들고 컬럼 `basis`
+('krx'·'evening')가 행마다 원천을 말한다. `corp_action_pending` 은 저녁 행의 기업행위 의심 표식이다.
+
+입력 — stage 4(`stg_price_daily`·`stg_etf_price_daily`·`stg_listing_daily`·
+`stg_flow_daily_kiwoom`) + equity `trading_calendar`(캘린더 밖 날짜 격리 축). 상수는 셋
+(`evening_jump_abs_max`·`recent_session_window`·`recent_session_row_ratio_min`,
+`baseline_seed_s04.json`).
 
 테이블 특화 술어(`extra_gates`):
   EG3_price_daily — 두 원천 (ticker,date) 교집합 0(GATES §3 ⑧ 두 번째 식) · `price_kind` 어휘
@@ -18,7 +24,9 @@ change`(그날 KRX 기준가). 원주가 축은 그대로이고(EG20 불변), S0
                     직전 행이 있는 거래 행에서 `base_price_krw = 직전 행 close` 비율(기대 ≈ 99.9%)·
                     불일치 건수·NULL 건수
   EG20            — 원주가 불변: 산출 OHLC·`volume_shr`·`value_krw` 를 stage 와 독립 재조인해
-                    다른 행 0
+                    다른 행 0. **basis='krx' 행만** — 저녁 행은 KRX 원장에 없다
+  EG14            — 최신 구간 수집 완결성: 최신 KRX 세션 `recent_session_window` 개의 행수가
+                    유니버스 대비 하한 이상이고 종가 NULL 0 (e1.15.0)
   EG8-P01(KIS 수정종가 대조)은 독립 KIS 가격 stage 테이블이 없고 계수(S06)가 있어야 대조가 되므로
   S06 이후로 미룬다 — 여기서는 붙이지 않는다.
 """
@@ -28,8 +36,15 @@ from pathlib import Path
 
 from stage.gates import GateResult, GateStatus
 
-from .gates import EquityGateContext
-from .model import EquityTable, FieldProfile, register
+from .gates import EquityGateContext, require_const
+from .model import (
+    PRICE_BASIS_EVENING,
+    PRICE_BASIS_KRX,
+    PRICE_BASIS_VOCAB,
+    EquityTable,
+    FieldProfile,
+    register,
+)
 from .rules_s01 import TICKER_LEN
 
 SQL_DIR = Path(__file__).parent / "sql"
@@ -56,6 +71,10 @@ def _row(ctx: EquityGateContext, sql: str) -> tuple[object, ...]:
 
 def _q(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
+
+
+def _n(ctx: EquityGateContext, sql: str) -> int:
+    return int(str(_row(ctx, sql)[0]))
 
 
 def _result(name: str, checks: dict[str, int], metrics: dict[str, object],
@@ -131,10 +150,48 @@ def eg3_price_daily(ctx: EquityGateContext) -> GateResult:
         FROM x""")
     kinds = {str(r[0]): int(str(r[1])) for r in ctx.con.execute(
         f"SELECT price_kind, count(*) FROM {v} GROUP BY 1 ORDER BY 1").fetchall()}
+    # 저녁 잠정 행 축(e1.15.0 · 결정 V2-2) — 어휘 폐쇄 + "최신 1세션에만" 은 폐기형이다.
+    # evening 행이 여러 날에 걸리면 KRX 가 여러 날 비었다는 뜻이고, 그 상태로 격자를 만들면
+    # 잠정값이 확정판인 척 이력에 남는다.
+    # 이 판이 저녁 잠정판인가 아침 확정판인가 — `build.make_build_meta` 가 올린 세션 테이블.
+    build_basis = str(_row(ctx, "SELECT basis FROM _build")[0])
+    basis_vocab = ", ".join(f"'{b}'" for b in PRICE_BASIS_VOCAB)
+    n_evening_pending_null = _row(ctx, f"""
+        SELECT count(*) FROM {v}
+         WHERE basis = '{PRICE_BASIS_EVENING}' AND corp_action_pending IS NULL""")[0]
+    (n_basis_vocab, n_basis_null, n_evening, n_evening_dates, n_evening_pending,
+     n_krx_pending, evening_date, n_evening_mismatch) = _row(ctx, f"""
+        SELECT
+          (SELECT count(*) FROM {v} WHERE basis NOT IN ({basis_vocab})),
+          (SELECT count(*) FROM {v} WHERE basis IS NULL),
+          (SELECT count(*) FROM {v} WHERE basis = '{PRICE_BASIS_EVENING}'),
+          (SELECT count(DISTINCT date) FROM stg_flow_daily_kiwoom
+            WHERE date > (SELECT max(date) FROM stg_price_daily)),
+          (SELECT count(*) FROM {v}
+            WHERE basis = '{PRICE_BASIS_EVENING}' AND corp_action_pending),
+          (SELECT count(*) FROM {v} WHERE basis = '{PRICE_BASIS_KRX}' AND corp_action_pending),
+          (SELECT CAST(max(date) AS VARCHAR) FROM {v} WHERE basis = '{PRICE_BASIS_EVENING}'),
+          (SELECT count(*) FROM {v} p JOIN stg_flow_daily_kiwoom f USING (ticker, date)
+            WHERE p.basis = '{PRICE_BASIS_EVENING}'
+              AND (p."close" IS DISTINCT FROM f.close_krw
+                   OR p.volume_shr IS DISTINCT FROM f.volume_shr))""")
     checks = {
         "n_src_overlap": int(str(n_overlap)),
         "n_price_kind_outside_vocab": int(str(n_kind_vocab)),
         "n_ticker_bad_width": int(str(n_ticker_bad)),
+        "n_basis_outside_vocab": int(str(n_basis_vocab)) + int(str(n_basis_null)),
+        # 원천(키움 원장)에서 센다 — 산출은 `kw` 술어가 이미 최신 하루로 접어 항상 ≤ 1 이다(검수 R2-02).
+        # 키움이 KRX 보다 이틀 이상 앞서면 중간 세션이 통째로 빠지므로 폐기한다.
+        "n_evening_dates_over_one": max(int(str(n_evening_dates)) - 1, 0),
+        # `corp_action_pending` 은 2치여야 한다 — NULL 이면 소비자의 `IS NOT TRUE` 거름망을 통과한다(R2-07)
+        "n_evening_corp_action_pending_null": int(str(n_evening_pending_null)),
+        # 키움 원장 대조 — evening 행의 종가·거래량은 원천 그대로여야 한다(EG20 의 짝)
+        "n_evening_value_mismatch": int(str(n_evening_mismatch)),
+        # `corp_action_pending` 은 저녁 축 전용이다 — krx 행이 참이면 산출식이 샌 것이다
+        "n_krx_rows_corp_action_pending": int(str(n_krx_pending)),
+        # 아침 확정판(basis=morning)에 잠정 행이 남아 있으면 KRX 가 안 온 것이다. 그대로 통과시키면
+        # 잠정 종가가 '확정' 딱지를 달고 이력에 굳는다(플랜 v2 §4 B.2 §3 게이트).
+        "n_evening_rows_in_morning_build": (int(str(n_evening)) if build_basis == "morning" else 0),
     }
     metrics: dict[str, object] = {
         "n_open_null_volume_pos": int(str(n_open_null_vol)),        # GAP-14 (DESIGN §4-2)
@@ -160,6 +217,10 @@ def eg3_price_daily(ctx: EquityGateContext) -> GateResult:
                                         if int(str(n_trade_with_prev)) else None),
         "price_kind_counts": kinds,
         "price_kind_vocab": list(PRICE_KINDS),
+        "n_evening_rows": int(str(n_evening)),                       # 저녁 잠정판 축(기록형)
+        "evening_date": None if evening_date is None else str(evening_date),
+        "n_evening_corp_action_pending": int(str(n_evening_pending)),
+        "basis_vocab": list(PRICE_BASIS_VOCAB), "build_basis": build_basis,
     }
     return _result("EG3_price_daily", checks, metrics, "원천 교집합 0 · price_kind 어휘 폐쇄")
 
@@ -179,17 +240,75 @@ def eg20_raw_price(ctx: EquityGateContext) -> GateResult:
                     for o, c in _RAW_COLUMNS)
     row = _row(ctx, f"""
         SELECT count(*), {sel}
-        FROM {v} p
+        FROM (SELECT * FROM {v} WHERE basis = '{PRICE_BASIS_KRX}') p
         LEFT JOIN stg_price_daily s ON s.ticker = p.ticker AND s.date = p.date
         LEFT JOIN stg_etf_price_daily e ON e.ticker = p.ticker AND e.date = p.date""")
     n_rows, *changed = (int(str(x)) for x in row)
     checks = {f"n_{o}_changed": n for (o, _), n in zip(_RAW_COLUMNS, changed, strict=True)}
-    return _result("EG20", checks, {"n_rows_checked": n_rows,
+    # 저녁 잠정 행은 KRX 원장에 아예 없다(원천이 키움) — 여기서 세면 전건이 '변조' 로 잡힌다.
+    # 그 행들의 원값 불변은 EG14 의 `n_evening_value_mismatch` 가 키움 원장으로 본다.
+    n_evening = _n(ctx, f"SELECT count(*) FROM {v} WHERE basis = '{PRICE_BASIS_EVENING}'")
+    return _result("EG20", checks, {"n_rows_checked": n_rows, "n_evening_rows_excluded": n_evening,
                                     "raw_columns": [o for o, _ in _RAW_COLUMNS]},
                    "원주가·원거래량 불변")
 
 
 eg20_raw_price.gate_name = "EG20"               # type: ignore[attr-defined]
+
+
+def eg14_recent_sessions(ctx: EquityGateContext) -> GateResult:
+    """EG14 (규칙 e1.15.0 · 플랜 v2 §4 B.2 §2) — **최신 구간 수집 완결성**.
+
+    EG5c 의 as-of 표본(`asof_sample_dates`)은 과거 고정일로 굳혀 재현성 축으로 쓴다. 그러면 어제
+    들어온 데이터가 반쯤 비어도 어떤 게이트도 보지 않는다 — 그 자리를 이 게이트가 맡는다.
+
+    술어(폐기형) — 최신 **KRX 세션** `recent_session_window` 개마다:
+      ① 행수 ≥ `recent_session_row_ratio_min` × 그날 KRX 마스터 유니버스
+         (= `stg_listing_daily` 최신일 종목 수 + `stg_etf_price_daily` 최신일 종목 수)
+      ② 종가 NULL 0 — 행은 있는데 값이 빈 세션은 수집 실패이지 휴장이 아니다
+    저녁 잠정판(basis='evening')의 T 세션은 **판정 밖**이다. 키움 커버(≈2,655종목)가 KRX 유니버스
+    (≈3,924)보다 구조적으로 작아 같은 잣대를 들이대면 매일 저녁 빌드가 폐기된다 — 그 세션의
+    커버율은 기록형 `evening_coverage_ratio` 로 남기고, 값 대조는 EG3_price_daily 의
+    `n_evening_value_mismatch` 가 키움 원장으로 본다.
+    """
+    v = _q(ctx.out_view)
+    window = int(require_const(ctx, "recent_session_window"))
+    ratio_min = require_const(ctx, "recent_session_row_ratio_min")
+    universe_n = _n(ctx, """
+        SELECT (SELECT count(DISTINCT ticker) FROM stg_listing_daily
+                 WHERE date = (SELECT max(date) FROM stg_listing_daily))
+             + (SELECT count(DISTINCT ticker) FROM stg_etf_price_daily
+                 WHERE date = (SELECT max(date) FROM stg_etf_price_daily))""")
+    rows = ctx.con.execute(f"""
+        SELECT CAST(date AS VARCHAR), count(*), count(*) FILTER (WHERE "close" IS NULL)
+        FROM {v} WHERE basis = '{PRICE_BASIS_KRX}'
+        GROUP BY date ORDER BY date DESC LIMIT {window}""").fetchall()
+    sessions = [{"date": str(r[0]), "n_rows": int(str(r[1])), "n_close_null": int(str(r[2])),
+                 "row_ratio": (int(str(r[1])) / universe_n) if universe_n else None}
+                for r in rows]
+    thin = [d["date"] for d in sessions
+            if universe_n and d["n_rows"] < ratio_min * universe_n]
+    null_close = [d["date"] for d in sessions if d["n_close_null"]]
+    (n_evening, n_evening_tickers) = _row(ctx, f"""
+        SELECT count(*), count(DISTINCT ticker) FROM {v}
+         WHERE basis = '{PRICE_BASIS_EVENING}'""")
+    checks = {
+        "n_thin_sessions": len(thin),
+        "n_sessions_with_null_close": len(null_close),
+        # 창을 채울 세션이 없으면 원천이 통째로 비었다는 뜻이다 — 통과로 세지 않는다
+        "n_missing_sessions": max(window - len(sessions), 0),
+    }
+    metrics: dict[str, object] = {
+        "recent_session_window": window, "recent_session_row_ratio_min": ratio_min,
+        "universe_n": universe_n, "sessions": sessions,
+        "thin_sessions": thin, "sessions_with_null_close": null_close,
+        "n_evening_rows": int(str(n_evening)),
+        "evening_coverage_ratio": (int(str(n_evening_tickers)) / universe_n) if universe_n else None,
+    }
+    return _result("EG14", checks, metrics, "최신 세션 행수·종가 완결")
+
+
+eg14_recent_sessions.gate_name = "EG14"         # type: ignore[attr-defined]
 
 
 # ── S19 필드 선언 (DESIGN §4-7 · FIELD_MAP §2) ────────────────────────────────
@@ -209,7 +328,11 @@ FIELDS: tuple[FieldProfile, ...] = (
         recommended_lag_days=0, point_in_time=True, requires_confirmation=False,
         disclosure_basis="정규장 종가 확정(세션 마감)",
         evidence="price_daily.close ← stg_price_daily ∪ stg_etf_price_daily (EG20 원주가 불변). "
-                 "분할·증자 조정 없음(원칙 ②) — 조정 축은 price.adj_close(전방 조정).",
+                 "분할·증자 조정 없음(원칙 ②) — 조정 축은 price.adj_close(전방 조정). "
+                 "**evening 판은 키움 종가·OHLC NULL** — 저녁 잠정판(basis='evening')의 최신 "
+                 "거래일 행은 KRX 가 아직 안 와서 키움 ka10060 종가로 채우고 시·고·저가와 "
+                 "거래대금·주식수·시총은 NULL 이다. 그 행은 `basis`·`corp_action_pending` 두 "
+                 "컬럼으로 표시되며 아침 확정판에서 KRX 행으로 자연 교체된다(결정 V2-2).",
         coverage_axis="grid_session", axis_columns=_AXIS),
     FieldProfile(
         field_id="price.open", columns=("open",), label="시가(원주가)", unit="KRW",
@@ -287,15 +410,24 @@ PRICE_DAILY = register(EquityTable(
              # S06-2: KRX 전일 대비(stage 그대로) · 기준가 = close − change(DECIMAL 차, (10,0))
              "change_krw": "DECIMAL(9,0)", "base_price_krw": "DECIMAL(10,0)",
              "par_value_krw": "DECIMAL(9,2)",
-             "price_kind": "VARCHAR", "available_date": "DATE", "available_basis": "VARCHAR"},
-    inputs=("stg_price_daily", "stg_etf_price_daily", "stg_listing_daily", "trading_calendar"),
+             "price_kind": "VARCHAR",
+             # e1.15.0 — 행 원천 축(krx·evening)과 저녁 기업행위 의심 표식 (결정 V2-2)
+             "basis": "VARCHAR", "corp_action_pending": "BOOLEAN",
+             "available_date": "DATE", "available_basis": "VARCHAR"},
+    inputs=("stg_price_daily", "stg_etf_price_daily", "stg_listing_daily",
+            "stg_flow_daily_kiwoom", "trading_calendar"),
     partition_class="date_axis",
     partition_key_expr="year(date)",
     available_rule="column:date — 가격류(stage lag_known=true), 공표 시각 미제공 → basis default",
     # GATES §3 ⑧: 좌변 행수 = 두 원천 행수 합 − reject. 교집합 0 은 EG3-P01·EG3_price_daily 가 본다.
     eg1_lhs_sql="SELECT count(*) FROM out_pq",
+    # 세 번째 항 = 저녁 잠정 T 행. `sql/price_daily.sql` 의 `kw` CTE 와 **글자 그대로 같은 술어**
+    # 여야 한다 — 한쪽만 고치면 등식이 조용히 깨진다(e1.15.0).
     eg1_rhs_sql=("SELECT (SELECT count(*) FROM stg_price_daily) "
-                 "+ (SELECT count(*) FROM stg_etf_price_daily)"),
+                 "+ (SELECT count(*) FROM stg_etf_price_daily) "
+                 "+ (SELECT count(*) FROM stg_flow_daily_kiwoom f "
+                 "    WHERE f.date > (SELECT max(date) FROM stg_price_daily) "
+                 "      AND f.date = (SELECT max(date) FROM stg_flow_daily_kiwoom))"),
     sql_path=SQL_DIR / "price_daily.sql",
     input_columns={
         "stg_price_daily": ("ticker", "date", "open_krw", "high_krw", "low_krw", "close_krw",
@@ -304,11 +436,16 @@ PRICE_DAILY = register(EquityTable(
                                 "change_krw", "volume_shr", "value_krw", "mktcap_krw",
                                 "list_shrs"),
         "stg_listing_daily": ("ticker", "date", "par_value_krw", "list_shrs"),
+        # 저녁 잠정 T 행의 원천 — 키움 ka10060 은 종가·거래량 두 축만 쓴다(수급 컬럼은 S08 몫)
+        "stg_flow_daily_kiwoom": ("ticker", "date", "close_krw", "volume_shr"),
         "trading_calendar": ("date",)},
     available_basis=("default",),
     content_date_column="date",
     reject_reasons=REJECT_REASONS,
-    extra_gates=(eg3_price_daily, eg20_raw_price),
+    # `_const` 는 **SQL 이 읽는 상수만** 싣는다 — 여기 올린 키는 미등재면 빌드가 예외로 죽는다.
+    # EG14 의 두 상수는 게이트가 `require_const` 로 읽어 미등재를 skip(no_baseline) 으로 흘린다.
+    consts=("evening_jump_abs_max",),
+    extra_gates=(eg3_price_daily, eg20_raw_price, eg14_recent_sessions),
     field_profiles=FIELDS,
 ))
 

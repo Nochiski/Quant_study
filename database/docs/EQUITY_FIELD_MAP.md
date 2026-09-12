@@ -163,3 +163,19 @@
 
 - 레지스트리(`backend/FACTORS.md`)가 바뀌면 이 표를 같은 PR 에서 갱신한다. `check_field_map.py` 는 레지스트리 필드 집합 − 표 필드 집합 = ∅ 를 검사한다.
 - 판정 변경은 근거(슬라이스·실측 절)를 남긴다.
+
+## 5. `consensus.coverage_*` — S24 `coverage_daily` (2026-09-11, 사용자 요청 09-10)
+
+"애널리스트가 몇 명 붙어 추정치를 내는지" 를 데이터 밀도 지표로 쓰려면 수준값(`opinion_daily.analyst_count`)만으로는 부족하고 **언제부터 붙었나 / 언제 끊겼나** 가 필요하다. 그런데 원장의 커버 판정(`ws_coverage`)은 `upsert` 라 현재 상태 한 줄만 남는다(stage `stg_wise_coverage.status_current`, `available=AVAILABLE_NONE`). S24 는 WISE 스냅샷 원문의 날짜축으로 그 이력을 복원한다.
+
+| 컬럼 | 뜻 | 단위·기준 |
+|---|---|---|
+| `covered` | 그날 그 종목에 컨센서스 커버가 있었는가 | bool. 판정은 수집기 정본 `backfill_wise.is_covered` 를 그대로 옮긴 것 — cF5001 의 EPS·매출 추정 또는 목표주가 중 **하나라도 값이 있으면** covered(stage 에서는 `stg_consensus_monthly.consensus` · `target_price_krw`), metric 은 묻지 않는다(항목명 미상 `parse_failed` 행도 값이 있으면 같은 신호). 디코드 실패(stage 에 행 없음)는 수집기와 달리 covered 로 못 세운다 — TECH_DEBT B-17 |
+| `first_covered_date`·`last_covered_date` | 그 종목의 첫/마지막 커버 관측일 | **`date` 이하 누적(PIT)**. 종목 상수가 아니다 — 상수로 실으면 뒤에 일어난 커버 상실을 과거 행이 미리 아는 look-ahead 다(`disclosure_version` 이 `has_correction` 을 두지 않는 것과 같은 이유) |
+| `streak_days` | 연속 커버 **스냅샷 수**(무커버 행은 0) | 달력 일수가 아니다 — 날짜축이 우리 WISE 스냅샷 일정이라, 스냅샷이 매일이면 일수와 같고 건너뛴 날이 있으면 그만큼 짧다 |
+| `analyst_count` | 그날 커버 애널리스트 수 | 명. `stg_analyst_summary` 의 그날 값 무수정, 없으면 NULL(0 을 굽지 않는다). 정의는 WISE cTB15 추정기관수 = **최근 3개월 투자의견을 낸 증권사 수** |
+| `first_estimate_month`·`first_estimate_basis` | 추정치가 처음 붙은 **달** | 월 1일 DATE + basis(`monthly` \| `none`). 우리 스냅샷 이력은 2026-09-01 부터라 그 이전의 커버 시작일을 날짜로 말할 수 없어, 월별 컨센서스 시계열(`obs_date`)의 첫 non-null 달이 대신 답한다. 기준이 다르므로 basis 로 밝힌다 |
+
+- **격자 = (WISE 요청 유니버스 종목) × (스냅샷 날짜)** 다. 종목 축에 `stg_wise_coverage` 를 넣는 것이 핵심이다 — 무커버 종목은 스냅샷 표에 행이 없거나 전값 NULL 이라 관측 표만으로 격자를 세우면 `covered=false` 칸 자체가 사라져 커버율이 조용히 1 이 된다(GATES §5-C6 생존편향과 같은 함정).
+- **아직 `dataset_profile`(S19)에 올리지 않았다.** `rules_s19.SOURCE_TABLES` 가 코드 고정 목록이고 이 작업의 소유 밖이라 `coverage_daily.field_profiles = ()` 이다. 어댑터에 `consensus.coverage_*` 를 노출하려면 ① `SOURCE_TABLES` 에 `coverage_daily` 추가 ② `FieldProfile`(scope `internal` — FACTORS 정본 54 에 대응 어휘가 없다) 선언 ③ `scripts/equity_rebuild_all.sh` 순서에 편입, 셋이 후속이다.
+- 절단본 교차확인: `covered` 술어가 `stg_wise_coverage.status_current` 7종목을 전건 재현한다(covered 5 · none 2). 이 대조는 `EG3_coverage_daily` 의 `n_wise_status_mismatch` 가 매 빌드 기록형으로 센다(같은 날짜끼리만 — 원장 쪽에 이력이 없어 다른 날과 비교하면 "그 뒤에 상태가 바뀌었다" 를 오차로 읽는다).

@@ -59,6 +59,7 @@ class GateContext:
     current_year: int
     lookup_miss: int | None = None          # available lookup 미스 행수 (참조표 없는 테이블은 None)
     parse_metrics: dict[str, object] | None = None   # blob 파서 계상 (blob 테이블 아니면 None)
+    n_dedup_same_day: int = 0     # n_dedup 에 포함된 "같은 날 판본 접기" 건수(build._stage_sql rn_day)
 
 
 def _one(con: duckdb.DuckDBPyConnection, sql: str) -> tuple[object, ...]:
@@ -107,6 +108,7 @@ def g1_row_equation(ctx: GateContext) -> GateResult:
     return GateResult("G1", GateStatus.PASS if ok else GateStatus.FAIL,
                       f"stage={ctx.n_stage} expected={expect}",
                       {"n_src": ctx.n_src, "fanout": ctx.rule.fanout, "n_dedup": ctx.n_dedup,
+                       "n_dedup_same_day": ctx.n_dedup_same_day,
                        "n_reject": ctx.n_reject, "n_stage": ctx.n_stage})
 
 

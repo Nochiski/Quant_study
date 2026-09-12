@@ -245,8 +245,9 @@ def eg3_price_adj_daily(ctx: EquityGateContext) -> GateResult:
       ⑥ 구간 밖 계수 유입 0 — 접힌 수가 구간 안 계수 수를 **넘지** 않는다(⑤ 의 부분집합이지만
          방향을 이름으로 남긴다: 누출인지 누락인지가 진단에서 갈린다)
       ⑦ `available_date = date` ∧ basis 'derived' (fold 규약의 귀결을 산출로 증명한다)
-      ⑧ `date` 가 캘린더 세션 ∧ ticker 6자리
+      ⑧ `date` 가 캘린더 세션(**basis='krx' 행만** — 저녁 T 행은 캘린더 밖이 정상) ∧ ticker 6자리
       ⑨ 매크로(`v_adj_price_fwd`·`v_adj_volume_fwd`) 정합 — `_macro_mismatch`
+      ⑩ `basis`·`corp_action_pending` 이 price_daily 와 전건 동일(표식 유실 0)
 
     기록형: 구간 없는 행 수 · 구간 규칙을 껐을 때 달라지는 행 수(= 이전 구간 계수 누출 크기) ·
     미조정 사건이 걸린 행·종목 수와 비율 · **사유(`factor_source`)별 내역** · 누적계수 분포 ·
@@ -277,7 +278,19 @@ def eg3_price_adj_daily(ctx: EquityGateContext) -> GateResult:
           (SELECT count(*) FROM {v} WHERE ticker IS NULL OR typeof(ticker) <> 'VARCHAR'
              OR length(ticker) <> {TICKER_LEN}),
           (SELECT count(*) FROM {v} o
-             WHERE NOT EXISTS (SELECT 1 FROM trading_calendar c WHERE c.date = o.date))""")
+             WHERE o.basis = 'krx'
+               AND NOT EXISTS (SELECT 1 FROM trading_calendar c WHERE c.date = o.date))""")
+    # 저녁 잠정 T 행(e1.15.0): 캘린더 상한은 KRX 최대일이라 T 는 캘린더 밖이 정상이다 — 위 ⑧ 을
+    # krx 행에만 걸고(검수 R2-01), 표식 두 컬럼이 price_daily 와 글자 그대로 같은지는 폐기형으로 본다.
+    n_basis_ne, n_evening_rows, n_evening_off_cal = _row(ctx, f"""
+        SELECT
+          (SELECT count(*) FROM {v} o JOIN price_daily p USING (ticker, date)
+             WHERE o.basis IS DISTINCT FROM p.basis
+                OR o.corp_action_pending IS DISTINCT FROM p.corp_action_pending),
+          (SELECT count(*) FROM {v} WHERE basis = 'evening'),
+          (SELECT count(*) FROM {v} o
+             WHERE o.basis = 'evening'
+               AND NOT EXISTS (SELECT 1 FROM trading_calendar c WHERE c.date = o.date))""")
     # 독립 재계산 대조 — 값 8축 + available_date. NULL 은 NULL 로 같아야 한다.
     num_axes = (("adj_open", "raw_open * r_cum_share_factor"),
                 ("adj_high", "raw_high * r_cum_share_factor"),
@@ -360,9 +373,13 @@ def eg3_price_adj_daily(ctx: EquityGateContext) -> GateResult:
         "n_available_basis_not_derived": int(str(n_basis_bad)),
         "n_ticker_malformed": int(str(n_ticker_bad)),
         "n_off_calendar": int(str(n_off_cal)),
+        "n_basis_ne_price_daily": int(str(n_basis_ne)),
         "n_macro_mismatch": n_macro_bad,
     }
     metrics: dict[str, object] = {
+        # 저녁 잠정 행 — 캘린더 밖 T 행 수를 기록형으로 남긴다(⑧ 에서 뺀 만큼)
+        "n_evening_rows": int(str(n_evening_rows)),
+        "n_evening_off_calendar": int(str(n_evening_off_cal)),
         "n_rows": n_out,
         "n_rows_adjusted": int(str(n_rows_adjusted)),
         "n_rows_without_span": int(str(n_no_span)),
@@ -412,7 +429,10 @@ FIELDS: tuple[FieldProfile, ...] = (
                  "v_adj_price_fwd 는 같은 값을 내는 읽기 경로이고 매 빌드 EG3_price_adj_daily 가 "
                  "동일성을 증명한다. **FIELD_MAP §2 의 42 어휘 밖**(equity 내부 스코프, §3) 이라 "
                  "field_scope='internal' 이다. n_unadjusted_events > 0 인 구간은 조정이 "
-                 "불완전하다 — 소비자가 거를 축이다.",
+                 "불완전하다 — 소비자가 거를 축이다. 저녁 잠정판(e1.15.0)에서는 basis='evening' "
+                 "T 행이 있고 그 adj_close = 키움 종가 × 그날까지의 누적 share_factor(과거 사건 "
+                 "누적 — 전방 조정이라 1 이 아니다), OHLC 조정값은 NULL 이다. corp_action_pending "
+                 "이 참이면 오늘 스코어에서 뺀다(결정 V2-2).",
         coverage_axis="grid_session", scope="internal", axis_columns=("ticker", "date")),
 )
 
@@ -426,7 +446,9 @@ PRICE_ADJ_DAILY = register(EquityTable(
              "adj_close": "DOUBLE", "adj_volume_shr": "DOUBLE",
              "cum_price_factor": "DOUBLE", "cum_share_factor": "DOUBLE",
              "n_factors_applied": "BIGINT", "n_unadjusted_events": "BIGINT",
-             "available_date": "DATE", "available_basis": "VARCHAR"},
+             "available_date": "DATE", "available_basis": "VARCHAR",
+             # 저녁 잠정판 표식 — price_daily 의 값을 그대로 싣는다(e1.15.0, 검수 R2-04)
+             "basis": "VARCHAR", "corp_action_pending": "BOOLEAN"},
     inputs=("price_daily", "adj_factor", "security_span", "trading_calendar"),
     partition_class="date_axis",
     partition_key_expr="year(date)",
@@ -441,8 +463,10 @@ PRICE_ADJ_DAILY = register(EquityTable(
     input_columns={
         # `price_kind` 는 산출식이 아니라 EG3 의 매크로 정합 대조가 읽는다 — 매크로
         # `v_adj_price_fwd` 가 원주가 행 축을 그대로 싣기 때문이다(표는 안 싣는다).
+        # `basis`·`corp_action_pending` 도 산출식이 아니라 매크로가 읽는다 — `v_adj_price_fwd` 가
+        # 저녁 잠정판 표식을 소비자에게 그대로 통과시키기 때문이다(e1.15.0, views.py).
         "price_daily": ("ticker", "date", "open", "high", "low", "close", "volume_shr",
-                        "price_kind"),
+                        "price_kind", "basis", "corp_action_pending"),
         # `factor_source`·`event_id` 는 산출식이 아니라 EG3 기록형(미조정 사건의 사유별 내역)이
         # 읽는다 — 사건 축은 event_id 다(같은 날 두 사건을 접으면 세는 축이 갈린다).
         "adj_factor": ("ticker", "apply_date", "available_date", "price_factor", "share_factor",

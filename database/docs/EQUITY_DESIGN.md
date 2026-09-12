@@ -108,7 +108,7 @@
 **`adj_factor` v3 — S06-2 KRX 기준가 원천(설계 확정 09-05 20:50 · **구현 09-05**, 로컬 실측 P27, GATES §9 S06-2 — 사용자: 계수 못 건 사건·2015 이전을 "엔진이 올바르게" 처리)** — 근거: `stg_price_daily`·`stg_etf_price_daily` 에 **`change_krw`(KRX `CMPPREVDD_PRC`, 전일 대비)** 가 있어 그날 KRX 기준가 = `close − change_krw` 를 복원할 수 있다(STAGE_SPEC §2 실측 "기준가≠전일종가 5,214건", DATA_CATALOG PR-05). (1) **`price_daily` 컬럼 추가** `change_krw`·`base_price_krw`(= close − change, change NULL 이면 NULL; `shares_out` 다음). 게이트 `EG3_price_daily`: 거래 행에서 `base_price = 직전 행 close` 인 비율(기대 ≈ 99.9%)·불일치 건수·NULL 건수 기록, EG20 은 그대로(원주가 불변). (2) **`adj_factor` 원천 `krx_base_price`**: 후보 = 같은 티커의 직전 **행** close 대비 `base_price_krw / prev_close` 가 1 이 아닌 (ticker, date)(`base_price_tol_rel` seed 0.002 — 기준가는 정확값이라 tight). 분류(원천 판정 CTE, 우선순위): (a) 기존 MVP 사건(corp_event, apply/명목 세션 ± `base_match_window_sessions` seed 5 — 성분(combined)이면 성분 곱)과 비율이 `price_match_tol` 안에서 맞으면 **그 사건의 계수를 기준가 비율로 교체**: `price_factor = base/prev_close`, `share_factor` = 같은 날 `shares_out` 변화비(|비−1| > `krx_share_change_tol` 이면) 아니면 `1/price_factor`, `apply_date` = 그날, `apply_basis='krx_base_price'`, `factor_source='mktcap_neutral'`(곱이 1 ± `factor_product_tol_base` seed 0.01 안일 때; 밖이면 `krx_base_inconsistent` ok=false). 기존 `no_price_match` 830 중 창 안에 기준가 사건이 있는 것은 여기서 살아난다. (b) 기존 사건과 안 맞고 **같은 날 `shares_out` 변화**가 있으면 새 행: `event_id = '{ticker}:krx_base:{date}'`, `event_type='unknown_krx'`(어휘 추가), `corp_code`·`announce_date` = date, `available_date` = 다음 세션, 계수는 (a) 와 같은 식, ok 는 곱 검사 통과 시(2010~2014 DART 공백기의 무상증자·감자가 여기로 온다). (c) 기존 사건과 안 맞고 주식수 불변이며 **전일 무거래**(직전 행 reference) → 정지 재개 가격 재발견, 사건 아님(`n_base_price_rediscovery` 기록). (d) 그 외(주식수 불변·전일 거래 있음 — 유상증자 권리락·배당락·주식배당 등) → `event_type='unknown_price_only'`, **ok=false**(시총 불변이 아니고 MVP 밖), 기록형 `n_base_price_only_by_month`. grain (ticker, effective_date, event_id) 유지 — (b)(d) 의 effective_date = date. (3) EG1 = corp_event MVP 행수 + (b)(d) 신규 행수(원천 등록표에 `krx_base_price` 추가, 독립 재계산). EG3_adj_factor: `apply_basis` 어휘 + `krx_base_price`, ok 행 곱 검사(base 원천은 `factor_product_tol_base`), (a) 교체 건수·(b)(c)(d) 건수·잔여 `no_price_match` 건수 기록. **EG8 재측정** — 기준가로 적용일이 정확해지므로 `adj_return_jump_max` 를 조일 수 있는지 서버 실측 후 판단(P23′ max 0.190). (4) 뷰·어댑터 변경 없음(계수 표만 바뀜). (5) 엔진 측 처리: 여전히 ok=false 인 사건(폐지 기간 88건·inconsistent) 은 `universe_daily` S03C 의 `corp_action_window` 가 그 종목을 사건 전후 창에서 `suspended` 로 두어 엔진이 보유·진입하지 않게 한다 — 값을 만들어 채우지 않는다. 검증 픽스처: 005930 2018-05-04 기준가 53,000 = 2,650,000/50 → price_factor 0.02 · 247540 2022-06-27 기준가 124,350 = 497,400/4 · 절단본 101970 감자(폐지 기간, 가격 없음 → 그대로 no_price_match). 서버 예상: price_daily 재빌드 22s, adj_factor 행 3,147 + 신규 수천(기준가 사건 5,214 중 (b)(d)), 카탈로그·계약 재실행, EG5a 는 판본 상향(e1.3.0) 뒤 재빌드로.
 - **구현 결과 · 설계와 다른 점(09-05, P27 · GATES §9 S06-2)**: ① **ETF 는 기준가 원천 밖**(`security.sec_type='etf'` 입력 추가) — ETF 분배락이 기준가를 바꾸고 상장좌수는 설정·환매로 거의 매일 바뀌어 (b) 의 "같은 날 주식수 변화" 가 사건의 증거가 아니다. 절단본 069500 후보 36 중 **14 가 곱 검사를 우연히 통과**해 설계대로면 계수 ≈ 1.00x 의 가짜 `unknown_krx` ok 행(엔진 SPLIT 수량 조정)이 되고, 나머지는 (d) 행으로 분배락마다 adj_factor 가 불어난다(서버 ETF 1,416 × 분배 수십 회). ② **구간 첫날 제외**(`security_span.first_date` 입력 추가) — 재상장 첫 행의 "직전 행" 은 수년 전 옛 구간 종가(036220 2024-03-13 r 5.7 · 101970 2025-03-28 r 22.5)라 사건이 아니다(IPO 첫 행은 직전 행이 없어 자연 제외). ③ **반증 규칙** — ok 사건의 apply_date 에 기준가 후보가 있는데 비율이 tol 밖이면 (a) 로 묶이지 않고 사건을 `krx_base_inconsistent`(ok=false, 매칭 결과 basis 유지)로 내리고 후보는 (b)/(d) 로 간다: 같은 (ticker, apply_date) 에 두 원천이 다른 값을 낸 채 둘 다 ok 면 이중 적용이다. ④ (a) 단위 ↔ 후보는 1:1(dev·거리 최소 쌍) · 성분(combined)은 멤버 전부 같은 날로 옮기고 루트(min event_id)가 잔여 r/Π(다른 멤버 pf) 를 갖는다. ⑤ **247540 기준가는 124,700**(497,400/4 = 124,350 아님 — 자기주식 신주 미배정 등 KRX 산식): price_factor 0.2507 · 같은 날 주식수 불변(신주 상장 07-15)이라 share_factor = 1/pf = **3.9888** ≠ ratio 4.0(0.28%, EG3 기록형 `krx_share_factor_ratio_dev_max`). 무상증자는 권리락일과 신주 상장일이 2~3주 떨어져 **(b) 로 오는 것은 액면분할·감자(변경상장일 = 기준가 변경일)뿐**이고 DART 공백기 무상증자 권리락은 (d) `unknown_price_only` ok=false 로 남는다(설계 문구 "무상증자·감자가 (b) 로" 는 감자만 해당). ⑥ (b)(d) 신규 행의 `corp_code` 는 `security.corp_code`(설계의 "corp_code·announce_date = date" 는 announce 만 date). EG1 우변의 (b)(d) 수 = 후보(비ETF·구간 첫날 아님, `rules_s06._BASE_PRICE_CANDIDATES_CTE` 독립 정의) − (c) 재발견 − (a) 소비 날짜(산출의 (ticker, apply_date) 를 읽는 유일한 항).
 
-**`price_adj_daily`** (S23, `rules_s23.py` · `sql/price_adj_daily.sql`, **구현 2026-09-06**) — grain (`ticker`, `date`) · date_axis(`year(date)`) — 입력 equity `price_daily`·`adj_factor`·`security_span`·`trading_calendar`. **전방 조정(forward-adjusted) OHLCV 의 저장본**이다. 조정가는 S21 후속(09-05)까지 duckdb 매크로 `v_adj_price_fwd` 로만 존재했고, 그래서 (a) parquet 을 직접 읽는 소비자(커널 pyarrow 어댑터·분석 노트북)는 못 봤고 (b) 카탈로그가 낡거나(snapshot 불일치) 없으면 `price.adj_close` 가 통째로 `unavailable` 이 됐다. 09-05 결정으로 전방 조정을 택해 값이 **(ticker, date) 의 순수 함수**가 됐으므로 이제 저장할 수 있다.
+**`price_adj_daily`** (S23, `rules_s23.py` · `sql/price_adj_daily.sql`, **구현 2026-09-06**, e1.15.0 에서 `basis`·`corp_action_pending` 두 컬럼 추가 — price_daily 의 표식을 그대로 싣는다) — grain (`ticker`, `date`) · date_axis(`year(date)`) — 입력 equity `price_daily`·`adj_factor`·`security_span`·`trading_calendar`. **전방 조정(forward-adjusted) OHLCV 의 저장본**이다. 조정가는 S21 후속(09-05)까지 duckdb 매크로 `v_adj_price_fwd` 로만 존재했고, 그래서 (a) parquet 을 직접 읽는 소비자(커널 pyarrow 어댑터·분석 노트북)는 못 봤고 (b) 카탈로그가 낡거나(snapshot 불일치) 없으면 `price.adj_close` 가 통째로 `unavailable` 이 됐다. 09-05 결정으로 전방 조정을 택해 값이 **(ticker, date) 의 순수 함수**가 됐으므로 이제 저장할 수 있다.
 
 - 컬럼 순서 `ticker`·`date`·`adj_open`·`adj_high`·`adj_low`·`adj_close`(원 KRW, DOUBLE)·`adj_volume_shr`·`cum_price_factor`·`cum_share_factor`·`n_factors_applied`·`n_unadjusted_events`·`available_date`·`available_basis`. **원주가는 싣지 않는다** — 정본은 `price_daily` 이고 같은 값을 두 표에 두면 드리프트가 생긴다. **`price_daily` 에 컬럼을 더하지도 않는다** — `adj_factor` 가 `price_daily` 를 입력으로 쓰므로 순환이 된다.
 - **산출**: `adj_close(d) = close(d) × Π{share_factor : factor_ok ∧ 같은 구간 ∧ fold_date ≤ d}`, `fold_date = greatest(apply_date, available_date)`(§5·§11 ①(i) 규약 — 적용 세션이 와도 공개 전인 계수는 공개 세션부터 접는다). `adj_volume_shr = volume_shr × Π price_factor`(반대 축 — 분할 뒤 거래량을 분할 전 주식수 척도로 내린다). OHLC 는 close 와 같은 계수다.
@@ -475,3 +475,76 @@ EG-C 실행(S07): `python -m equity --root <equity_root> contract [--engine-src 
 
 **4A 구현 (09-06)**: S11 `disclosure_version`·S12 `fin_std` — §4-4 확정 문구·§10 P29·P30, `EQUITY_GATES.md` §1-12·§2 매트릭스 16·17행·§9 4A 블록, `EQUITY_FIELD_MAP.md` §2·§3. 정정: `no_label` 격리 폐기(행 유지) · `stg_rcept_dt_map` → `stg_disclosure.rcept_dt` · E-G7 분모에서 정정본 제외 · `rcept_lag_p99_days` 는 백분위가 아니라 범위 상한 · `correction_link` baseline 키를 `disclosure_version.*` 로 이관 · `gross_profit` 은 fin_map 실재라 계정 24(21+3).
 
+
+---
+
+## 13. v1.3 잠정판 — 저녁 잠정 T 행과 날짜 상수 파생 (규칙 e1.15.0, 플랜 v2 §4 Task B.2, 2026-09-11)
+
+### 13-1. 왜
+
+KRX 공식 시세는 T+1 08:00 에 온다. 그날 저녁(18:15) 스코어링을 하려면 T 종가가 있어야 하는데,
+18:05 시점에 T 가격을 주는 원천은 키움 ka10060(`stg_flow_daily_kiwoom`)뿐이다. 사용자 결정
+V2-2 가 「잠정 가격 축 = 키움 종가, 그날 ±30% 넘게 뛴 종목은 저녁 스코어에서 제외」다.
+
+### 13-2. `price_daily` 의 두 행 종류
+
+| 컬럼 | `basis='krx'` | `basis='evening'` |
+|---|---|---|
+| 원천 | `stg_price_daily` ∪ `stg_etf_price_daily` | `stg_flow_daily_kiwoom` (ka10060) |
+| `close` · `volume_shr` | KRX 원장 그대로 | 키움 원장 그대로 |
+| `open`·`high`·`low`·`value_krw`·`shares_out`·`mktcap_krw`·`change_krw`·`base_price_krw`·`par_value_krw` | KRX | **전부 NULL** (원칙 ④ — 채우지 않는다) |
+| `price_kind` | volume 부호 | volume 부호(같은 규칙) |
+| `corp_action_pending` | 항상 FALSE | `prev_close` 없음 ∨ `abs(close/prev_close − 1) > _const.evening_jump_abs_max`(0.30) |
+| `available_date`·`available_basis` | `date` · `default` | 같다 |
+
+행을 고르는 술어: `stg_flow_daily_kiwoom` 에서 `date > max(stg_price_daily.date)` **AND**
+`date = max(stg_flow_daily_kiwoom.date)`. 두 조건이 다 필요하다 — 앞엣것만 걸면 키움이 앞서 있는
+여러 날이 한꺼번에 들어오고, 뒤엣것만 걸면 아침 확정판에서 KRX 와 겹쳐 (ticker, date) 가 중복된다.
+`prev_close` 는 그 티커의 **마지막 KRX 종가**(참고가 행 포함)다 — 정지 중이던 종목도 마지막으로
+공표된 값이 비교축이다.
+
+**자연 교체**: 아침에 KRX 행이 오면 `max(stg_price_daily.date)` 가 T 로 올라가 위 술어가 0행을
+낸다. 덮어쓰기도 삭제도 없고, 같은 (ticker, date) 에 KRX 행 하나만 남는다.
+
+**캘린더 밖 격리(`off_calendar`)는 `basis='krx'` 행에만 건다.** 캘린더 상한은 EG17 이
+`max(stg_price_daily.date)` 로 고정하므로 저녁 T 는 아직 캘린더에 없는 것이 정상이다. 여기서
+격리하면 잠정판이 그날 가격을 통째로 잃는다.
+
+**저녁 T 행은 캘린더·유니버스 격자 밖에 있다.** `trading_calendar`·`universe_daily` 는 KRX 축을
+그대로 쓰므로 T 세션 격자가 없다. `price_adj_daily` 의 T 행에 **새로** 접힐 계수는 없지만 전방
+조정이라 **과거 사건의 누적 share_factor 가 그대로 곱해진다**(005930 이면 ×50 — "조정가 = 원주가"
+는 후방 축 `v_adj_price` 에서만 참, 검수 R2-06). 표는 `basis`·`corp_action_pending` 을 price_daily
+에서 그대로 싣고(§4-2, 검수 R2-04) EG3 의 캘린더 검사는 krx 행에만 건다(R2-01). 저녁 스코어링은
+T 가격을 `price_daily`·`price_adj_daily`·`v_adj_price_fwd` 에서 직접 읽는다. 격자까지 T 로 늘리는
+것은 이 변경의 범위 밖이다(후속 판단 대상).
+
+### 13-3. 날짜 상수 파생화
+
+`trading_calendar.backfill_end`·`security.backfill_end`·`adj_factor.asof_for_jump_check` 세
+상수를 등재 해제하고 stage·산출에서 유도한다. 술어와 근거는 `EQUITY_GATES.md` §10-1.
+`baseline_locked.json` 은 `_derived[]` 에 세 건의 전환 사유를 싣고, `price_daily` 에 상수 셋
+(`evening_jump_abs_max`·`recent_session_window`·`recent_session_row_ratio_min`)을 새로 등재한다.
+
+### 13-4. 판(basis)
+
+빌드 판은 `--basis evening|morning`(기본 `manual`)이고 어휘·접두어 정본은 **stage**
+(`stage.model.BASIS_PREFIX`)다 — 두 층이 같은 `_pinned` 규약으로 서로의 MANIFEST 를 읽으므로
+접두어 대응표가 갈리면 판이 조용히 어긋난다. equity 는 `model.BUILD_BASES`·`record_basis()` 로
+재수출만 한다. 판이 실리는 자리는 `EQUITY_GATES.md` §10-4.
+
+소비자 노출: `views.py` 의 `v_adj_price`·`v_adj_price_fwd` 가 `basis`·`corp_action_pending` 을
+그대로 통과시키고, `dataset_profile` 이 행마다 `basis` 를 싣는다. `price.close` 의 `evidence` 에
+「evening 판은 키움 종가·OHLC NULL」을 명시한다 — 문서가 아니라 이 선언이 소비자에게 가는 정본이다.
+
+두 컬럼이 늘어 `_asof/` 표본 해시가 달라지므로 **서버 첫 `catalog` 는 EG5c 가 FAIL 한다** —
+사람이 `catalog --rebase-asof` 로 승인해야 한다(e1.6.0 전례와 같은 경로).
+
+### 13-5. `_pinned` GC
+
+`inputs.gc_pinned(equity_root, keep=..., protect=[...])` — 남기는 축 셋의 합집합: ① 현행 equity
+`BuildRecord.inputs` 가 가리키는 판(`current_build` 만이 아니라 MANIFEST 에 남은 **전 빌드** —
+`gate --build <옛 판>` 재판정이 `_pinned/` 를 다시 연다) ② 호출자가 준 `protect` build_id
+(전달 규약이 가리키는 판: `data/deliver/history/*.json` 30일 + 월말 영구, 플랜 v2 §4 B.3 ③)
+③ 표별 최신 `keep` 판. `manifest.commit()` 을 부르지 않는다 — 그 함수는 keep 밖 `v=` 를 자기
+규칙으로 rmtree 해서 보호 축 ①②를 무시한다. 판정 결과는 `GcResult`(지운 것 + **남긴 이유별**
+목록 + 회수 바이트)로 돌려준다.

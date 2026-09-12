@@ -32,6 +32,7 @@ from stage.gates import GateResult, GateStatus
 
 from . import views
 from .baseline import Baseline
+from .model import record_basis
 
 CATALOG_NAME = "equity.duckdb"
 META_NAME = "_catalog_meta.json"
@@ -61,6 +62,22 @@ def table_builds(equity_root: Path) -> dict[str, str]:
         m = manifest.load(d / "MANIFEST.json")
         if m.current_build is not None:
             out[d.name] = m.current_build
+    return out
+
+
+def table_bases(equity_root: Path) -> dict[str, str]:
+    """커밋된 equity 테이블 → 그 판(`model.BUILD_BASES`). 저녁 잠정판이 섞인 카탈로그를
+    소비자가 알아볼 수 있어야 한다(플랜 v2 §4 B.2 `--basis`)."""
+    out: dict[str, str] = {}
+    if not equity_root.exists():
+        return out
+    for d in sorted(equity_root.iterdir()):
+        if not d.is_dir() or d.name.startswith("_") or d.name.startswith("."):
+            continue
+        m = manifest.load(d / "MANIFEST.json")
+        rec = next((b for b in m.builds if b.build_id == m.current_build), None)
+        if rec is not None:
+            out[d.name] = record_basis(rec)
     return out
 
 
@@ -122,9 +139,14 @@ def _commit(equity_root: Path, tmp: Path, macros: dict[str, str], gates: list[Ga
     dst = equity_root / CATALOG_NAME
     os.replace(tmp, dst)        # 파일 원자 교체 — 유일한 전환 지점(MANIFEST 규약과 같다)
     builds = table_builds(equity_root)
+    bases = table_bases(equity_root)
+    distinct = sorted(set(bases.values()))
     _write_json(equity_root / META_NAME, {
         "snapshot_id": snapshot_id(builds), "builds": builds, "macros": sorted(macros),
         "macros_skipped": dict(skipped), "gates": [g.as_dict() for g in gates],
+        # 판이 표마다 갈릴 수 있다(저녁에 가격 계열만 다시 짓는 증분 경로) — 전량 목록과
+        # 「한 판인가」 요약을 함께 싣는다.
+        "table_basis": bases, "basis": distinct[0] if len(distinct) == 1 else "mixed",
         "asof": asof, "written_at_utc": _now()})
     return dst
 
@@ -432,5 +454,5 @@ def publish(equity_root: Path, baseline: Baseline, *, keep: int = ASOF_KEEP,
 
 
 __all__ = ["ASOF_DIR", "ASOF_KEEP", "ASOF_VIEWS", "CATALOG_NAME", "META_NAME", "CatalogResult",
-           "build_catalog_file", "publish", "sample_sql", "snapshot_id", "table_builds",
-           "write_catalog"]
+           "build_catalog_file", "publish", "sample_sql", "snapshot_id", "table_bases",
+           "table_builds", "write_catalog"]

@@ -2,6 +2,8 @@
 
   pin     <stg_table>   stage current_build 를 `_pinned/` 에 하드링크로 고정
   build   <table>       빌드 → 게이트 → 통과 시 MANIFEST 교체
+                        `--basis evening|morning` 이 빌드 판을 정한다(build_id 접두
+                        `e_`/`m_`, 기본 `b_`; 플랜 v2 §4 B.2)
   gate    <table>       커밋된 current_build 를 재판정만 한다 (폐기 없음)
   catalog               equity.duckdb 재생성 (빌드·GC 뒤에는 반드시) + 뷰 게이트 EG11·EG5c·EG3-P05
                         + `_asof/<view>/<snapshot_id>/` 표본. 게이트 실패면 카탈로그를 교체하지
@@ -48,9 +50,10 @@ from . import (
     rules_s19,  # noqa: F401  # reason: 등록 부작용 — S19 공개시점 대장 dataset_profile
     rules_s20,  # noqa: F401  # reason: 등록 부작용 — S20 팩터 준비도 factor_readiness
     rules_s23,  # noqa: F401  # reason: 등록 부작용 — S23 전방 조정가 price_adj_daily
+    rules_s24,  # noqa: F401  # reason: 등록 부작용 — S24 WISE 커버 이력 coverage_daily
     rules_sample,  # noqa: F401  # reason: T0 샘플 테이블
 )
-from .model import RULES
+from .model import BUILD_BASES, BUILD_BASIS_DEFAULT, RULES, record_basis
 
 
 def _print_gates(results: list[gates.GateResult]) -> None:
@@ -70,9 +73,9 @@ def _cmd_build(a: argparse.Namespace) -> int:
     bl = baseline_mod.load(a.baseline or baseline_mod.path_for(a.root))
     r = build.build_table(rule, a.stage_root, a.root, bl, keep=a.keep,
                           memory_limit=a.memory_limit, threads=a.threads,
-                          build_id=a.build_id)
-    print(f"{r.status.value} table={r.table} build={r.build_id} rows={r.n_rows:,} "
-          f"reject={r.n_reject:,} hash={r.content_hash} {r.elapsed_s}s")
+                          build_id=a.build_id, basis=a.basis)
+    print(f"{r.status.value} table={r.table} build={r.build_id} basis={r.basis} "
+          f"rows={r.n_rows:,} reject={r.n_reject:,} hash={r.content_hash} {r.elapsed_s}s")
     _print_gates(r.gates)
     if r.failed_report:
         print(f"  failed report: {r.failed_report}")
@@ -101,6 +104,7 @@ def _cmd_gate(a: argparse.Namespace) -> int:
         # 게이트 SQL(EG1 우변·extra_gates)이 빌드 때와 같은 `_const` 를 볼 수 있어야 재판정이 된다
         # — S05 corp_event 의 EG1 우변이 pool CTE(krx_share_change_tol) 를 재사용한다.
         build.make_consts(con, rule, bl)
+        build.make_build_meta(con, record_basis(rec), rec.build_id)
         if rule.declarations is not None:
             rule.declarations(con, rule)    # S19·S20 — 재판정도 같은 선언표 위에서 돈다
         # `v=<build_id>` 도 하이브 컬럼으로 붙는다 — 선언 스키마 대조를 위해 걷어낸다.
@@ -124,7 +128,7 @@ def _cmd_gate(a: argparse.Namespace) -> int:
         con.close()
     n_fail = sum(1 for g in results if g.status is gates.GateStatus.FAIL)
     print(f"{'gate_failed' if n_fail else 'ok'} table={rule.name} build={rec.build_id} "
-          f"rows={n_out:,} fail={n_fail}")
+          f"basis={record_basis(rec)} rows={n_out:,} fail={n_fail}")
     _print_gates(results)
     return 1 if n_fail else 0
 
@@ -168,6 +172,9 @@ def main(argv: list[str] | None = None) -> int:
     p_build = sub.add_parser("build", help="빌드 → 게이트 → MANIFEST 교체")
     p_build.add_argument("table", choices=sorted(RULES))
     p_build.add_argument("--build-id")
+    p_build.add_argument("--basis", choices=sorted(BUILD_BASES), default=BUILD_BASIS_DEFAULT,
+                         help="빌드 판 — evening(저녁 잠정판, build_id 접두 e_) · "
+                              "morning(아침 확정판, m_) · manual(기본, b_)")
     p_build.add_argument("--keep", type=int, default=manifest.KEEP_DEFAULT)
     p_build.add_argument("--memory-limit", default="6GB")
     p_build.add_argument("--threads", type=int, default=3)

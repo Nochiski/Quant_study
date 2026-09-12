@@ -39,8 +39,12 @@
 --
 -- 격리 없음: 조정은 가격 행 하나하나에 대한 순수 함수라 버릴 행이 없다. trading_calendar 는
 -- 산출식이 아니라 게이트(EG3 의 캘린더 독립 재검사)가 읽는 입력이다.
+-- 저녁 잠정 T 행(e1.15.0): `price_daily.basis`·`corp_action_pending` 을 **그대로 싣는다** — 이 표는
+-- 소비자(워크벤치 `ADJ_TABLE`)가 직접 읽으므로 뷰만 표식을 통과시키면 잠정치가 확정치처럼 보인다
+-- (검수 R2-04). T 행은 캘린더 밖이라 EG3 의 캘린더 검사는 basis='krx' 행에만 건다(검수 R2-01).
 WITH px AS (
     SELECT p.ticker, p.date, p.open, p.high, p.low, p.close, p.volume_shr,
+           p.basis, p.corp_action_pending,
            coalesce(s.span_seq, 0) AS span_seq
     FROM price_daily p
     ASOF LEFT JOIN security_span s
@@ -99,6 +103,7 @@ badcum AS (
 ),
 joined AS (
     SELECT p.ticker, p.date, p.span_seq, p.open, p.high, p.low, p.close, p.volume_shr,
+           p.basis, p.corp_action_pending,
            coalesce(c.cum_price_factor, 1)  AS cum_price_factor,
            coalesce(c.cum_share_factor, 1)  AS cum_share_factor,
            coalesce(c.n_factors_applied, 0) AS n_factors_applied,
@@ -127,5 +132,7 @@ SELECT
     CAST(u.n_unadjusted_events AS BIGINT)          AS n_unadjusted_events,
     greatest(u.date, coalesce(u.factor_available_date, u.date)) AS available_date,
     'derived'                                      AS available_basis,
+    u.basis                                        AS basis,
+    u.corp_action_pending                          AS corp_action_pending,
     NULL::VARCHAR                                  AS reject_reason
 FROM unadj u

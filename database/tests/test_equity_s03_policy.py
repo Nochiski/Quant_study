@@ -15,7 +15,15 @@ from pathlib import Path
 
 import duckdb
 import pytest
-from equity import build, rules_s01, rules_s02, rules_s03, rules_s04, rules_s05, rules_s06
+from equity import (
+    build,
+    rules_s01,
+    rules_s02,
+    rules_s03,
+    rules_s04,
+    rules_s05,
+    rules_s06,
+)
 from equity.baseline import Baseline, load
 from equity.gates import GateStatus
 from equity.model import EquityTable
@@ -29,7 +37,8 @@ def _seed() -> Baseline:
     merged: dict[str, dict[str, object]] = {}
     for path in (rules_s01.BASELINE_SEED,
                  Path(rules_s02.__file__).parent / "baseline_seed_s02.json",
-                 rules_s03.BASELINE_SEED, rules_s05.BASELINE_SEED, rules_s06.BASELINE_SEED):
+                 rules_s03.BASELINE_SEED, rules_s04.BASELINE_SEED,
+                 rules_s05.BASELINE_SEED, rules_s06.BASELINE_SEED):
         for k, v in load(path).data.items():
             if not k.startswith("_") and k != "measured_at" and isinstance(v, dict):
                 merged.setdefault(k, {}).update(v)

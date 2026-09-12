@@ -63,7 +63,8 @@ def seed() -> Baseline:
     """S01·S02·S05·S06 seed 병합 — 오케스트레이터가 baseline.json 에 병합하는 것과 같은 모양."""
     merged: dict[str, object] = {}
     for p in (rules_s01.BASELINE_SEED, Path(rules_s02.__file__).parent / "baseline_seed_s02.json",
-              rules_s05.BASELINE_SEED, rules_s06.BASELINE_SEED):
+              rules_s04.BASELINE_SEED, rules_s05.BASELINE_SEED,
+              rules_s06.BASELINE_SEED):
         merged.update({k: v for k, v in load(p).data.items()
                        if not k.startswith("_") and k != "measured_at"})
     return Baseline(merged)
@@ -272,7 +273,9 @@ def test_EG8_점프는_apply_date의_조정가로_재고_원주가_점프는_사
     eg8 = _gate(built, "EG8")
     assert eg8.status is GateStatus.PASS
     m = eg8.metrics
-    assert m["asof_basis"] == "baseline" and m["asof_used"] == "2026-08-20"
+    # 규칙 e1.15.0 — as-of 는 상수가 아니라 KRX 확정 행의 최신일에서 유도한다
+    assert m["asof_basis"] == "derived:max(price_daily.date WHERE basis='krx')"
+    assert m["asof_used"] == "2026-08-20"
     assert m["n_ok_events"] == N_OK and m["n_ok_events_with_price"] == 3
     assert m["n_return_jump_over"] == 0 and m["n_volume_ratio_out_of_band"] == 0
     assert m["n_ok_abs_adj_return_over_030"] == 0
@@ -303,8 +306,10 @@ def test_점프_상수가_없으면_EG8은_skip이되_metric은_계산한다(tmp
     assert r.ok
     eg8 = _gate(r, "EG8")
     assert eg8.status is GateStatus.SKIP and eg8.detail == "no_baseline"
-    assert eg8.metrics["missing_metric"] == "adj_factor.asof_for_jump_check"
-    assert eg8.metrics["asof_basis"] == "max_price_date"
+    assert eg8.metrics["missing_metric"] == "adj_factor.adj_return_jump_max"
+    # as-of 는 상수가 아니라 유도값이라 상수를 다 빼도 계속 잡힌다(e1.15.0)
+    assert eg8.metrics["asof_used"] == "2026-08-20"
+    assert eg8.metrics["asof_basis"] == "derived:max(price_daily.date WHERE basis='krx')"
     assert eg8.metrics["asof_used"] == "2026-08-20"
     assert eg8.metrics["max_abs_adj_return_jump"] == pytest.approx(MAX_ADJ_RETURN)
 

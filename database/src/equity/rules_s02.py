@@ -8,7 +8,8 @@
 다시 만든다(층 계약 — 입력은 stage `_pinned/` 뿐). 두 정의의 일치는 EG3x 등식이 지킨다.
 
 테이블 특화 술어는 `EquityTable.extra_gates` 훅으로 붙는다:
-  EG17  (`trading_calendar`) — 캘린더 무결성: prev/next 체인 · 주말 0 · 중복 0 · 양 끝 상수
+  EG17  (`trading_calendar`) — 캘린더 무결성: prev/next 체인 · 주말 0 · 중복 0 ·
+                               하한 상수 · **상한 유도**(stage max + 퇴행 금지, e1.15.0)
   EG3x  (`security_span`)    — 구간 비중첩(EG3-P03) · 캘린더 완결성 · end_reason 어휘
   EG16a (`security_span`)    — 재상장 티커 수 = baseline (EG16 의 상수 절반. 나머지 반인
                                "공백이 폐지·신규상장 신호로 설명되는가" 는 `universe_daily`·
@@ -48,16 +49,41 @@ def _const_date(ctx: EquityGateContext, metric: str) -> str:
 
 # ── trading_calendar ─────────────────────────────────────────────────────────
 
+def _previous_metric(ctx: EquityGateContext, gate: str, key: str) -> str | None:
+    """직전 커밋 빌드가 남긴 게이트 metric. 없으면 None — 첫 빌드·옛 기록은 판정축이 없다."""
+    prev = ctx.previous
+    if prev is None:
+        return None
+    for g in prev.gates:
+        if not isinstance(g, dict) or g.get("name") != gate:
+            continue
+        metrics = g.get("metrics")
+        if isinstance(metrics, dict) and metrics.get(key) is not None:
+            return str(metrics[key])
+    return None
+
+
 def eg17_calendar_integrity(ctx: EquityGateContext) -> GateResult:
     """EG17 (GATES §6) — 캘린더 무결성.
 
     격자 전체가 이 축 위에 얹힌다. `prev_td` 체인이 한 칸 어긋나면 모든 룩백 팩터가 하루씩
-    밀리는데 EG1(행수)은 그것을 못 본다. 양 끝은 baseline 상수로 못 박는다 — 원천이 잘리면
-    조용히 짧아진 캘린더가 통과하는 것을 막는다.
+    밀리는데 EG1(행수)은 그것을 못 본다.
+
+    **상한 술어는 규칙 e1.15.0 에서 바뀌었다**(플랜 v2 §4 B.2, v1 §8 Task 5.1). 예전에는
+    `backfill_end` 라는 baseline 날짜 상수와 정확히 같기를 요구했는데, 그러면 **거래일이 하루
+    늘 때마다 사람이 상수를 올려야** 하고 안 올리면 매일 빌드가 폐기된다(v1 §7 D 고장). 대신
+    stage 원천에서 유도한 두 술어로 같은 것을 지킨다:
+      ① `max(캘린더) == max(stg_price_daily.date)` — 캘린더(KRX 지수)와 가격 원장이 같은 날까지
+         차 있는가. 한쪽만 잘리면 격자와 가격이 어긋난다
+      ② `max(캘린더) >= 직전 빌드의 max` — **퇴행 금지**. 원천이 조용히 짧아진 판이 통과하는 것을
+         막던 옛 상수의 역할을 직전 빌드 기록이 대신한다(첫 빌드는 판정축 없음 = 통과)
+    하한 `calendar_start` 는 그대로 상수다 — KRX API 하한이라 자라지 않는다(growing=false).
     """
     v = _q(ctx.out_view)
     start = _const_date(ctx, "calendar_start")
-    end = _const_date(ctx, "backfill_end")
+    (stage_max,) = _row(ctx, "SELECT CAST(max(date) AS VARCHAR) FROM stg_price_daily")
+    end = None if stage_max is None else str(stage_max)
+    prev_max = _previous_metric(ctx, "EG17", "max_date")
     n_next, n_prev, n_weekend, n_dup, n_order, got_min, got_max = _row(ctx, f"""
         SELECT
           (SELECT count(*) FROM {v} a WHERE a.next_td IS DISTINCT FROM
@@ -73,7 +99,11 @@ def eg17_calendar_integrity(ctx: EquityGateContext) -> GateResult:
         "n_next_td_broken": int(str(n_next)), "n_prev_td_broken": int(str(n_prev)),
         "n_weekend": int(str(n_weekend)), "n_duplicate_date": int(str(n_dup)),
         "n_not_monotonic": int(str(n_order)), "min_date": str(got_min), "max_date": str(got_max),
-        "calendar_start": start, "backfill_end": end}
+        "calendar_start": start,
+        # `backfill_end` 는 이제 상수가 아니라 **이 빌드가 유도한 값**이다. 키 이름을 유지하는
+        # 이유는 이 metric 을 읽는 쪽(운영 판정·문서)이 이미 이 이름을 쓰기 때문이다.
+        "backfill_end": str(got_max), "stage_max_date": end, "previous_max_date": prev_max,
+        "backfill_end_basis": "derived:max(stg_price_daily.date)"}
     why: list[str] = []
     if int(str(n_next)):
         why.append(f"next_td chain broken rows={n_next}")
@@ -87,8 +117,12 @@ def eg17_calendar_integrity(ctx: EquityGateContext) -> GateResult:
         why.append(f"prev_td not strictly earlier rows={n_order}")
     if str(got_min) != start:
         why.append(f"min(date) expected {start} got {got_min}")
-    if str(got_max) != end:
-        why.append(f"max(date) expected {end} got {got_max}")
+    if end is None:
+        why.append("stg_price_daily has no row — 유도 상한을 못 잡는다")
+    elif str(got_max) != end:
+        why.append(f"max(date) {got_max} != stage max(stg_price_daily.date) {end}")
+    if prev_max is not None and str(got_max) < prev_max:
+        why.append(f"calendar regressed: max(date) {got_max} < previous build {prev_max}")
     return GateResult("EG17", GateStatus.PASS if not why else GateStatus.FAIL,
                       "캘린더 무결" if not why else "; ".join(why), metrics)
 
@@ -178,14 +212,16 @@ TRADING_CALENDAR = register(EquityTable(
     name="trading_calendar",
     grain=("date",),
     columns={"date": "DATE", "prev_td": "DATE", "next_td": "DATE"},
-    inputs=("stg_index_daily",),
+    # `stg_price_daily` 는 **산출에 안 쓰인다** — EG17 의 유도 상한(규칙 e1.15.0)이 읽는 축이다.
+    # 캘린더 본문은 그대로 `stg_index_daily` distinct date 다(DESIGN §4-1).
+    inputs=("stg_index_daily", "stg_price_daily"),
     partition_class="whole",
     partition_key_expr=None,
     available_rule=AVAILABLE_NONE,      # 차원 테이블 — 거래일이 열렸다는 사실에 공개시점이 없다
     eg1_lhs_sql="SELECT count(*) FROM out_pq",
     eg1_rhs_sql="SELECT count(DISTINCT date) FROM stg_index_daily",
     sql_path=SQL_DIR / "trading_calendar.sql",
-    input_columns={"stg_index_daily": ("date",)},
+    input_columns={"stg_index_daily": ("date",), "stg_price_daily": ("date",)},
     extra_gates=(eg17_calendar_integrity,),
 ))
 

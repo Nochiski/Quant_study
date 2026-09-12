@@ -13,6 +13,8 @@ import shutil
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from .model import basis_of_build_id
+
 KEEP_DEFAULT = 3
 
 
@@ -28,6 +30,14 @@ class BuildRecord:
     gates: list[dict[str, object]] = field(default_factory=list)
     # equity 층 전용: 입력 stage 테이블 → 고정한 build_id. stage 빌드는 빈 dict (EQUITY_WORKFLOW §1)
     inputs: dict[str, str] = field(default_factory=dict)
+    # 저녁 잠정판 evening · 아침 확정판 morning · 그 밖 manual (플랜 v2 Task B.1).
+    # 비워 두면 빌드 id 접두어에서 채운다 — 필드가 없는 구 레코드도 같은 규칙으로 읽힌다.
+    basis: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.basis:
+            # frozen dataclass 의 표준 관용구 — 파생 필드를 생성 시점에 한 번만 채운다
+            object.__setattr__(self, "basis", basis_of_build_id(self.build_id))
 
 
 @dataclass

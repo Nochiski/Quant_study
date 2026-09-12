@@ -1,6 +1,44 @@
 {
- "_seed": "S04 (price_daily) 는 baseline 상수를 새로 요구하지 않는다 — 산출식에 임계·리터럴이 없고(원주가 무수정 · mktcap = close × shares_out · price_kind = volume 부호), 게이트도 등식·어휘 폐쇄뿐이다. EG7 격리 비율은 첫 빌드 코드 기본값(gates.DEFAULT_THRESHOLDS['EG7'])을 쓰고, 2회차 이관 시 오케스트레이터가 서버 실측으로 price_daily.thresholds.EG7 을 등재한다(GATES §1 EG7). EG8-P01 의 price_daily.krx_kis_ratio_match_min 은 S06(adj_factor) 이후 — 독립 KIS 가격 stage 테이블이 없고 계수가 있어야 대조가 된다. 기록형 metric(GAP-14 n_open_null_volume_pos · n_off_calendar · n_shares_out_null_stock · n_mktcap_stage_mismatch 등)은 _meta.gates[EG3_price_daily].metrics 에 남고 승격 여부는 서버 실측 뒤 판단한다. S06-2(09-05, `change_krw`·`base_price_krw` 추가) 도 상수를 더하지 않는다 — 기준가 축은 산출식이 뺄셈 하나이고, 기준가 = 직전 행 close 비율·불일치·NULL 건수(n_base_price_*·base_price_match_rate_trade)는 EG3_price_daily 기록형 metric 이다. 기준가 원천의 판정 상수(base_price_tol_rel·base_match_window_sessions·factor_product_tol_base)는 adj_factor 네임스페이스(baseline_seed_s06.json)에 산다.",
- "measured_at": "2026-09-05",
- "price_daily": {},
- "_measured": []
+ "_seed": "S04 (price_daily) 는 baseline 상수를 새로 요구하지 않는다 — 산출식에 임계·리터럴이 없고(원주가 무수정 · mktcap = close × shares_out · price_kind = volume 부호), 게이트도 등식·어휘 폐쇄뿐이다. EG7 격리 비율은 첫 빌드 코드 기본값(gates.DEFAULT_THRESHOLDS['EG7'])을 쓰고, 2회차 이관 시 오케스트레이터가 서버 실측으로 price_daily.thresholds.EG7 을 등재한다(GATES §1 EG7). EG8-P01 의 price_daily.krx_kis_ratio_match_min 은 S06(adj_factor) 이후 — 독립 KIS 가격 stage 테이블이 없고 계수가 있어야 대조가 된다. 기록형 metric(GAP-14 n_open_null_volume_pos · n_off_calendar · n_shares_out_null_stock · n_mktcap_stage_mismatch 등)은 _meta.gates[EG3_price_daily].metrics 에 남고 승격 여부는 서버 실측 뒤 판단한다. S06-2(09-05, `change_krw`·`base_price_krw` 추가) 도 상수를 더하지 않는다 — 기준가 축은 산출식이 뺄셈 하나이고, 기준가 = 직전 행 close 비율·불일치·NULL 건수(n_base_price_*·base_price_match_rate_trade)는 EG3_price_daily 기록형 metric 이다. 기준가 원천의 판정 상수(base_price_tol_rel·base_match_window_sessions·factor_product_tol_base)는 adj_factor 네임스페이스(baseline_seed_s06.json)에 산다. **e1.15.0(플랜 v2 §4 B.2)부터는 상수 3건을 요구한다**: `evening_jump_abs_max`(저녁 잠정 T 행의 기업행위 의심 임계, sql/price_daily.sql 이 `_const` 로 읽는다) · `recent_session_window`·`recent_session_row_ratio_min`(EG14 최신 세션 창과 행수 하한). 셋 다 서버 실측이 아니라 규약값이라 kind=convention 이고, 확정본은 baseline_locked.json 이다.",
+ "measured_at": "2026-09-11",
+ "price_daily": {
+  "evening_jump_abs_max": 0.3,
+  "recent_session_row_ratio_min": 0.98,
+  "recent_session_window": 5
+ },
+ "_measured": [
+  {
+   "growing": false,
+   "kind": "convention",
+   "metric": "evening_jump_abs_max",
+   "seed": "baseline_seed_s04.json",
+   "seed_note": "결정 V2-2 — 저녁 잠정 T 행(키움 종가)에서 직전 KRX 종가 대비 절대수익률이 이 값을 넘으면 기업행위 의심(`corp_action_pending=TRUE`)으로 표시한다. 0.30 은 일반 세션 가격제한폭(±30%)이라 그 밖의 움직임은 분할·병합·감자 같은 기업행위이거나 거래 재개다. 저녁에는 KRX 기본정보가 없어 계수를 만들 수 없으므로 값을 고치지 않고 **표식만** 단다 — 소비자가 그날 스코어에서 뺀다.",
+   "sql": null,
+   "table": "price_daily",
+   "used_by": "sql/price_daily.sql (`_const.evening_jump_abs_max`) · EG3_price_daily 기록형 metric",
+   "value": 0.3
+  },
+  {
+   "growing": false,
+   "kind": "convention",
+   "metric": "recent_session_row_ratio_min",
+   "seed": "baseline_seed_s04.json",
+   "seed_note": "EG14 하한 — 최신 세션 행수 / 그날 KRX 마스터 유니버스. 서버 유니버스 ≈ 3,924 가 하루 0.7 신규 · 0.5 소멸이라(v1 §8 Task 5.1 Step 2) 2% 여유면 정상 변동을 덮고 수집이 잘린 날(행수 급감)은 잡는다.",
+   "sql": "SELECT count(*) FROM price_daily WHERE date = <세션> / (SELECT count(DISTINCT ticker) FROM stg_listing_daily WHERE date = max(date))",
+   "table": "price_daily",
+   "used_by": "EG14 (rules_s04.eg14_recent_sessions)",
+   "value": 0.98
+  },
+  {
+   "growing": false,
+   "kind": "convention",
+   "metric": "recent_session_window",
+   "seed": "baseline_seed_s04.json",
+   "seed_note": "EG14 가 보는 최신 KRX 세션 수. 5 = 한 주. 고정 표본(`asof_sample_dates`)이 과거 날짜로 굳었으므로 최신 구간은 이 창이 본다(플랜 v2 §4 B.2 §2).",
+   "sql": null,
+   "table": "price_daily",
+   "used_by": "EG14 (rules_s04.eg14_recent_sessions)",
+   "value": 5
+  }
+ ]
 }

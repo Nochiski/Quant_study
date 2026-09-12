@@ -554,3 +554,34 @@ def test_meta_에_게이트_판정이_남는다(built) -> None:
     assert meta["table"] == "dataset_profile"
     assert [g["name"] for g in meta["gates"]] == PROFILE_GATES
     assert meta["n_rows"] == N_FIELDS
+
+
+# ── 판(basis) 노출 (규칙 e1.15.0 · 플랜 v2 §4 B.2) ───────────────────────────
+
+def test_대장_행마다_어느_판에서_나왔는지가_실린다(built) -> None:
+    """소비자가 `list_fields()` 한 번으로 「지금 보는 데이터셋이 잠정판인가」를 읽어야 한다."""
+    r = built[1]
+    out_dir = r.out_dir
+    assert out_dir is not None
+    assert "basis" in rules_s19.DATASET_PROFILE.columns
+    assert _rows(out_dir, "SELECT DISTINCT basis FROM dp") == [("manual",)]
+    assert r.basis == "manual"
+
+
+def test_저녁_판으로_지으면_대장_basis도_evening이다(tmp_path: Path) -> None:
+    eq = tmp_path / "equity"
+    build_chain(eq)
+    r = build.build_table(rules_s19.DATASET_PROFILE, STAGE_SLICE, eq, SEED,
+                          build_id="e_dataset_profile", basis="evening")
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    assert r.basis == "evening" and r.out_dir is not None
+    assert _rows(r.out_dir, "SELECT DISTINCT basis FROM dp") == [("evening",)]
+
+
+def test_price_close_프로파일이_저녁_판_규약을_적는다(built) -> None:
+    """evidence 는 문서가 아니라 선언이 정본이다 — 잠정판 규약도 여기 실려야 소비자에게 간다."""
+    out_dir = built[1].out_dir
+    assert out_dir is not None
+    (evidence,) = _rows(out_dir, "SELECT evidence FROM dp WHERE field_id = 'price.close'")[0]
+    assert "evening 판은 키움 종가·OHLC NULL" in str(evidence)
+    assert "corp_action_pending" in str(evidence)

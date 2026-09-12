@@ -894,3 +894,37 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
 | 7 | 서버 `adj_factor.factor_source` 분포, `price_daily` 재계산 편차 719건 전건, `sql/adj_factor.sql:66-89·360-390·404-406`, DESIGN §10 P43 |
 | 8 | 서버 `logs/equity/*.log` 의 `ok table=` 행 28표, EG3 블록 읽기 전용 재측정 6건, `rules_s10.py:225-315`, DESIGN §10 P33′ |
 | 9 | 서버 `stg_master_daily`(2026-09-01·02, 125종목 정지) × `universe_daily`(2026-08-20) 대조, `universe_daily.no_trade_reason` 전량 분포, `sql/universe_daily.sql:10-50·101-105·170·200-215`, `COLLECT_PLAN.md` E2·R4-2, `DATA_CATALOG.md` MS-04·MS-05·DS-02 |
+
+---
+
+## 페이즈 B 후속 (2026-09-11, 워크트리 `feat/daily-v2-b` 통합 시점 기록)
+
+지금 손해는 없고 다음 손에 묶어서 처리할 항목. 각 항목의 근거는 해당 에이전트 보고(플랜 v2 §4 상태 블록).
+
+| # | 항목 | 왜 미룸 | 위치 |
+|---|---|---|---|
+| B-1 | `coverage_daily`(S24) 가 `dataset_profile` 에 미등재 — `rules_s19.SOURCE_TABLES` 고정 목록·`FieldProfile` 미선언이라 어댑터에 안 보인다 | S19 는 B2 소유였고 병렬 충돌 회피 | `src/equity/rules_s19.py`, `docs/EQUITY_FIELD_MAP.md` §5 |
+| B-2 | `docs/EQUITY_GATES.md` 에 EG3_credit_daily 새 metric(`n_versions_folded` 등)·EG3_coverage_daily 미기재 — 코드 docstring 에만 있다 | B2 가 같은 문서 §10 을 쓰고 있어 충돌 회피 | `src/equity/rules_s10.py`, `rules_s24.py` |
+| B-3 | EG3_credit_daily 가 판본 선택 윈도(19키)를 한 빌드에 ~8회 평가 — 서버 원장 8.4M 행에서 시간 미확인. 느리면 게이트 안에서 TEMP TABLE 1회 물질화 | 절단본에선 47s 로 문제 없음 | `src/equity/rules_s10.py first_version_sql()` |
+| B-4 | `[첨부정정]` 회귀 테스트 없음(s11 픽스처는 `[기재정정]`·`[첨부추가]` 만) — 링크 로직은 대칭이라 결함은 아님 | 명세가 "결함 없으면 근거만" | `tests/test_equity_s11_disclosure.py` |
+| B-5 | `baseline_locked.json` 의 e1.15.0 신규 상수 3건 `server_evidence: null` — 첫 서버 빌드 뒤 채운다 | 서버 실행은 오케스트레이터만 | `src/equity/baseline_locked.json` |
+| B-6 | 첫 서버 `equity catalog` 는 EG5c FAIL — 뷰에 `basis`·`corp_action_pending` 이 늘어 `_asof/` 표본 해시가 바뀐다. `catalog --rebase-asof` 1회 승인 필요(e1.6.0 전례) | 사람 승인 절차 | `docs/EQUITY_GATES.md` §10 |
+| B-7 | 저녁 T 행이 `trading_calendar`·`universe_daily` 격자 밖 — 스코어링이 격자를 요구하면 `rules_s02`/`rules_s03` 을 T 로 늘리는 결정 필요 | 페이즈 C 가 요구를 확정한 뒤 | `src/equity/rules_s04.py` 설계 판단 2 |
+| B-8 | pyright 선행 오류 5건(`rules_s02.py:277` axis_columns 3-tuple, `rules_s19.py` `_window` 4건)·ruff 선행 2건(`test_equity_cli.py:31` RUF059, `test_equity_s06_adj.py:1033` C408) — HEAD 에도 동일 | 수술적 변경 범위 밖 | 해당 파일 |
+| B-9 | `gc_pinned` 보호 목록에 Kael-alpha 스코어 manifest 가 아직 안 들어간다(페이즈 C 에서 `out/scores/*/…manifest.json` 의 `equity_builds` 를 합류) | 페이즈 C 산출물이 아직 없음 | `scripts/build_chain.sh` gc_step |
+
+### 최종 검수(09-11, R1~R4) 에서 남긴 항목
+
+| # | 항목 | 왜 미룸 | 위치 |
+|---|---|---|---|
+| B-10 | `stg_doc_*` 4표는 매 빌드 `skipped.txt` 로 C1 밖 — 판 나이 상한(예: 7일) warn 이 없어 노화가 조용하다(R1 이의 4). 문서층 일일 증분(doc_prepass 크론)이 붙을 때 C1 에 skip 표 나이 경보를 함께 | 문서층 증분 설계가 별도 | `src/stage/health.py _c1_fresh`, `scripts/run_stage_all.sh` |
+| B-11 | `stage.snapshot.GcResult` 에 `errors` 축이 없어 `equity.inputs.GcResult` 와 실패 규약이 다르다(R1 청소). 지금은 `build_chain.sh` gc_step 이 예외를 잡아 warn 으로 올린다 | 수술적 범위 밖 | `src/stage/snapshot.py` |
+| B-12 | 백업 primitive: `.backup` 은 외부 쓰기가 계속되면 재시작만 반복한다(R4-04 실측 25.4s vs 0.62s). 지금은 DB 당 `timeout 25m` 으로 막았다. `VACUUM INTO`(스냅샷과 같은 방식, 재시작 없음·압축) 로 바꾸면 결정 9 예산도 준다 | B4 설계 유지, 사용자 결정 9 와 함께 | `scripts/backup_raw.sh` |
+| B-13 | KIS 판본 선택: 같은 KST 수집일에 값이 다른 두 판이 있으면 2차 정렬(`close_krw` ASC 등)이 "최초 관측" 이 아니라 값 크기로 고른다(R3-01). stage `stg_credit_daily` 에 `collected_at` 원값(`observed_ts`)이 없어 날짜 해상도 밖에서는 판별 불가. 지금은 기록형 `n_version_observed_date_ties` 로 세고, 서버 실측(09-11)에서 동률 0 을 확인했다. 동률이 생기면 stage 에 `observed_ts` 를 싣고 정렬 1순위로 | stage 스키마 변경 = 전량 재빌드 | `src/equity/rules_s10.py VERSION_ORDER_COLUMNS`, `src/stage/rules_kis.py` |
+| B-14 | `balance_over_shares` 격리가 판본 축과 상호작용 — 최초 관측판이 백필판이면 소급 환산돼 있어 `price_daily.shares_out`(원주식수)과 축이 어긋난 "이상" 이 뜬다(R3 이의 1). `corp_event` 분할·병합 `apply_date` 와 교차한 기록형 metric 이 필요 | 서버 4행의 정체 확인 뒤 | `src/equity/rules_s10.py` |
+| B-15 | 판본이 어느 컬럼에서 갈리는지(`n_version_diff_by_column`) 기록형 metric 없음(R3 이의 2) — `close_krw` 만 다른 판본은 산출 무영향, 측정축이 다르면 결정 6-2 가 값을 가른다 | 관찰 지표 | `src/equity/rules_s10.py` |
+| B-16 | 원장 건전성 `summary()` 가 WARN 실패를 이름만 싣는다 — `krx.corp_action_candidates` 후보 종목이 텔레그램 요약에 안 뜬다(R3 이의 4) | 요약 포맷 변경 | `src/daily/ledger_health.py summary` |
+| B-17 | S24 `covered`: cF5001 **디코드 실패**(파서가 행을 못 만듦)는 수집기 `is_covered` 가 covered 로 두지만 stage 에 행이 없어 S24 는 `false` 다(R3-04 (a)). `stg_calls_wise`/`ws_run_log` 축으로 세는 기록형 metric 이 필요 | 절단본·서버 실측 0건 | `src/equity/rules_s24.py` |
+| B-18 | `notify.sh` 는 이제 텔레그램 응답 `"ok":true` 를 확인하지만(R4-09), 실패 시 재시도·대체 경로는 없다. 알림 자체가 죽으면 V2-7 전체가 조용해진다 — 워치독이 별도 채널로 가는 것이 다음 수 | 인프라 결정 | `scripts/notify.sh` |
+| B-19 | 같은 날 판본 접기(09-11, `stage/build.py rn_day`)가 같은 키의 **모순 관측**(예: 같은 날 다른 `rcept_dt`)도 조용히 마지막 관측으로 접는다. 접힌 건수는 G1 `n_dedup_same_day` 로 남지만 임계·알림이 없다 — 표별 기대치(예: DART 정정일 0.5%)를 넘으면 warn 하는 기록형 검사가 다음 수 | 첫 저녁 슬롯 장애 복구가 우선 | `src/stage/build.py`, `src/stage/gates.py g1` |
+

@@ -370,11 +370,15 @@ def _synth_root(root: Path) -> Path:
     px = ", ".join(
         f"('036220', DATE '{d}', CAST({100 + i} AS DECIMAL(9,0)), "
         f"CAST({110 + i} AS DECIMAL(9,0)), CAST({90 + i} AS DECIMAL(9,0)), "
-        f"CAST({100 + i} AS DECIMAL(9,0)), CAST({1000 + i} AS DECIMAL(13,0)), 'trade')"
+        f"CAST({100 + i} AS DECIMAL(9,0)), CAST({1000 + i} AS DECIMAL(13,0)), 'trade', "
+        "'krx', FALSE)"
         for i, d in enumerate(SYNTH_PRICE_DATES))
+    # `basis`·`corp_action_pending` 은 e1.15.0 의 저녁 잠정판 축 — 이 합성 트리는 전부 KRX 확정
+    # 행이다. 매크로 `v_adj_price_fwd` 가 그대로 통과시키므로 선언 컬럼에 있어야 한다.
     _write_equity_table(root, "price_daily",
                         f"SELECT * FROM (VALUES {px}) AS t(ticker, date, open, high, low, close, "
-                        "volume_shr, price_kind)", partition_expr="year(date)")
+                        "volume_shr, price_kind, basis, corp_action_pending)",
+                        partition_expr="year(date)")
     fac = ("('036220:split:2020-01-03', '036220', DATE '2020-01-03', DATE '2020-01-03', "
            "0.1, 10.0, TRUE, 'mktcap_neutral'), "
            "('036220:capred:2020-01-06', '036220', DATE '2020-01-06', DATE '2020-01-06', "
@@ -520,3 +524,47 @@ def test_커널_어댑터는_조정가_표를_읽지_않는다() -> None:
               / "equity_duckdb.py")
     assert kernel.exists(), kernel
     assert "price_adj_daily" not in kernel.read_text(encoding="utf-8")
+
+
+# ── 검수 R2-01·R2-04: 저녁 잠정 T 행이 있는 price_daily 위에서 S23 이 서고 표식을 싣는다 ──
+def test_저녁_잠정_T_행이_있어도_price_adj_daily_가_지어지고_표식을_싣는다(
+        tmp_path_factory: pytest.TempPathFactory) -> None:
+    """절단본 + 키움 T 행 3건으로 trading_calendar → … → price_adj_daily 를 basis=evening 으로 잇는다.
+    T 는 캘린더 밖이 정상이라 EG3 ⑧ 은 krx 행에만 걸려야 하고(안 그러면 매일 18:15 S23 에서 체인이
+    끊긴다), `basis`·`corp_action_pending` 은 price_daily 값 그대로 실려야 한다."""
+    import test_equity_s04_price as P4
+    import test_equity_s19_profile as P19
+    from conftest import _make_stage_tree
+
+    tmp = tmp_path_factory.mktemp("s23_evening")
+    root = P4._evening_stage_root(tmp, _make_stage_tree)
+    eq = tmp / "equity"
+    chain = P19.CHAIN[:P19.CHAIN.index("price_adj_daily") + 1]
+    for name in chain:
+        r = build.build_table(P19.RULES[name], root, eq, P19.SEED, build_id=f"e_{name}",
+                              basis="evening")
+        assert r.ok, (name, [(g.name, g.status.value, g.detail) for g in r.gates
+                             if g.status.value == "fail"])
+    con = duckdb.connect()
+    con.execute(f"CREATE VIEW adj AS SELECT * FROM read_parquet("
+                f"'{eq / 'price_adj_daily'}/v=e_price_adj_daily/**/*.parquet', hive_partitioning=true)")
+    con.execute(f"CREATE VIEW px AS SELECT * FROM read_parquet("
+                f"'{eq / 'price_daily'}/v=e_price_daily/**/*.parquet', hive_partitioning=true)")
+    n_evening, _ = con.execute(
+        "SELECT count(*), count(*) FILTER (WHERE corp_action_pending) FROM adj "
+        "WHERE basis = 'evening'").fetchone()
+    assert n_evening == len(P4.EVENING_ROWS)
+    n_diff = con.execute(
+        "SELECT count(*) FROM adj a JOIN px p USING (ticker, date) "
+        "WHERE a.basis IS DISTINCT FROM p.basis "
+        "   OR a.corp_action_pending IS DISTINCT FROM p.corp_action_pending").fetchone()[0]
+    assert n_diff == 0
+    # 전방 조정: T 행에도 과거 사건의 누적 share_factor 가 곱해진다 (005930 50:1 분할, R2-06)
+    adj, cum = con.execute(
+        "SELECT adj_close, cum_share_factor FROM adj WHERE ticker='005930' AND basis='evening'"
+    ).fetchone()
+    assert cum == 50.0 and adj == 280000 * 50
+    n_null = con.execute("SELECT count(*) FROM adj WHERE basis='evening' "
+                         "AND (adj_open IS NOT NULL OR adj_high IS NOT NULL)").fetchone()[0]
+    assert n_null == 0
+    con.close()

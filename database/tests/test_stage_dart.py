@@ -12,6 +12,7 @@ from typing import Any
 
 import duckdb
 import pytest
+
 from stage import build, gates, rules, snapshot
 
 # ── 원장 실물 컬럼 (survey_out/v2 <db>.<table>.json 의 columns 전수) ────────────────────────────
@@ -598,3 +599,28 @@ def test_ingest_log_lands_as_a_single_whole_partition(
     con = _read(stage, r)
     got = _one(con, "SELECT status, n_rows, note, observed_date FROM t WHERE name = 'fin'")
     assert got[:3] == ("no_data", 0, "013") and str(got[3]) == "2026-09-02"
+
+
+def test_같은_날_페이로드가_다른_두_관측은_그날의_마지막_관측으로_접힌다(tmp_path: Path) -> None:
+    """2026-09-11 첫 저녁 슬롯: DART 06:47 재스윕과 18:05 저녁 스윕이 같은 KST 날짜에 같은 rcept_no 를
+    다른 페이로드로 두 번 관측 → (natural_key, observed_date) 중복으로 G6 이 stg_disclosure·stg_fin 을
+    폐기했다. 판본 축이 날짜라 같은 날 두 판은 표현할 수 없다 — 그날의 마지막 관측을 판으로 삼고
+    나머지는 n_dedup_same_day 로 센다. 이 폴드는 콜 로그(versioned=False)에는 적용되지 않는다."""
+    r_x = "20250311000999"
+    morning = _disc(r_x, "20250311", rm="유", collected_at="2026-08-29T22:12:00")      # 08-30 07:12 KST
+    evening = _disc(r_x, "20250311", rm="유정", collected_at="2026-08-30T09:42:00")    # 08-30 18:42 KST
+    ledger = {**LEDGER, "dart_disclosure": [*LEDGER["dart_disclosure"], morning, evening]}
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    _write_dart(raw / "dart.db", ledger)
+    snap = snapshot.make_snapshot({"dart": raw / "dart.db"}, tmp_path / "snapshots",
+                                  snapshot_id="snap_sameday")
+    build.build_table(rules.RULES["stg_rcept_dt_map"], snap, tmp_path / "stage")
+    r = _build("stg_disclosure", (snap, tmp_path), gate_thresholds={"G7": 0.5})
+    assert _gate(r, "G6").status is gates.GateStatus.PASS
+    con = _read((snap, tmp_path), r)
+    rows = con.execute(f"SELECT rm_corrected_later, observed_date, observed_n FROM t "
+                       f"WHERE rcept_no = '{r_x}'").fetchall()
+    assert len(rows) == 1
+    assert rows[0][0] is True and str(rows[0][1]) == "2026-08-30"     # 저녁(마지막) 관측이 그날의 판
+    assert _gate(r, "G1").metrics["n_dedup_same_day"] == 1

@@ -893,6 +893,7 @@ WHERE g.${VALUE_COL} = 0
 | 23 | `dividend_event` | 4B | ● | ●(§3-⑱) | ●(P01–P04) | ●(P01) | ●(FX-4B-004) | ●(a) | skip(no_multi_version) | ●(P07) | — | skip(not_grid) | — |
 | 24 | `consensus_daily` | 5 | ● | ●(§3-⑲) | ●(P01–P03) · P04 skip(profile 없음) | ●(P01,P07,P13) | ●(FX-5-001…006) | ●(a) · c 는 §9 S17(뷰가 `ASOF_VIEWS` 밖) | ●(P01,P02,P03) | ●(P07) | ●(P07) | ●(P05) · P06 은 §9 S17 대용 | ●⑥⑨ |
 | 25 | `opinion_daily` | 5 | ● | ●(§3-⑳) | ●(P01–P04) | ●(P01,P07) | ●(FX-5-007) | ●(a) | ●(P01,P03) | ● | skip(no_baseline) | ●(P06) | — |
+| 26a | `coverage_daily`(S24, 09-11) | 7 | ● | ●(EG3_coverage_daily: 격자·커버 재계산·PIT 불변식) | — | — | ●(FX-24) | — | skip(no_multi_version) | ● | — | ●(기록형 `n_wise_status_mismatch`) | — |
 | 26 | `opinion_broker_daily` | 5 | ● | ●(§3-㉑) | ●(P01–P04) | ●(P01,P07) | ●(FX-5-008) | ●(a) | skip(no_multi_version) | ● | — | ●(P06) | — |
 | 27 | `dataset_profile` | 6 | ● | skip(declaration_table) | skip(dimension_table) → `EG2_dataset_profile`(P04,P06,P07,P08 + 어휘·범위) | ●(P01) | ●(FX-6-001…009,016…018) | ●(a) | skip(no_multi_version) | ● | — | ●(P06 기록형, 시총 분위) | ●⑥⑧ |
 | 28 | `factor_readiness` | 6 | ● | skip(declaration_table) | skip(dimension_table) | ●(P01) | ●(FX-6-010,011,013,015,019) | ●(a) | skip(no_multi_version) | ● | — | — | — · 판정은 **EG10**(§6) |
@@ -2320,3 +2321,88 @@ workspace/dongmin/src/equity/
 | `dataset_profile` 소유 이동 | `price.adj_close` 를 `adj_factor` 가 뷰 필드(`view_name`)로 선언 | **`price_adj_daily` 가 표 컬럼으로 선언**한다(FX-6-006 `table_name` = `price_adj_daily` · `available_date_basis` = `derived`). 두 표가 같은 field_id 를 선언하면 grain 이 깨지므로 이동이지 추가가 아니다. `rules_s19.SOURCE_TABLES` 25 → **26**, 프로파일 행수 72 불변 | `rules_s19.owned_fields` |
 | EG3 기록형 사건 축 | (신설) | 미조정 사건의 사유별 내역은 **`event_id` 축**으로 센다. (ticker, apply_date) 로 묶으면 같은 날 두 사건이 하나로 접혀 `n_unadjusted_events` 가 세는 축과 갈린다(서버 4,014 → 3,970 으로 44건 유실). `adj_factor.event_id`·`factor_source` 를 EG3 전용 입력 컬럼으로 선언한다(산출식은 읽지 않는다) | `rules_s23` `input_columns` |
 | 조정 OHLC·거래량 노출 | (판단 대상) | **선언하지 않는다** — FIELD_MAP §2 어휘에도 FACTORS 정본 54 의 재료에도 없다(M02 는 원주가 `price.high` 를 쓴다). 표에는 컬럼으로 실려 있어 parquet 소비자는 읽을 수 있다 | FIELD_MAP §2 |
+
+---
+
+## 10. v1.3 잠정판 — 규칙 e1.15.0 (플랜 v2 §4 Task B.2, 2026-09-11)
+
+일일 증분 v2 의 저녁 슬롯이 들어오면서 게이트 세 곳이 바뀐다. 앞 절들은 그대로 두고 여기에만 적는다.
+
+### 10-1. EG17 상한 술어 교체 — 날짜 상수 파생화
+
+| 항목 | v1.0 | **v1.3** |
+|---|---|---|
+| 상한 판정 | `max(trading_calendar.date) == bl('trading_calendar','backfill_end')` | ① `max(trading_calendar.date) == max(stg_price_daily.date)` **AND** ② `max(date) >= 직전 커밋 빌드의 EG17 metric `max_date`(퇴행 금지) |
+| 하한 판정 | `min(date) == bl('trading_calendar','calendar_start')` | 그대로 (KRX API 하한이라 자라지 않는다, growing=false) |
+| 등재 상수 | `trading_calendar.backfill_end` | **등재 해제** — `baseline_locked.json` 의 `_derived[]` 에 사유를 남긴다 |
+| 입력 | `stg_index_daily` | `stg_index_daily` + **`stg_price_daily`**(산출에 안 쓰이고 EG17 이 상한을 읽는 축) |
+| metric | `backfill_end`(상수) | `backfill_end`(이 빌드의 `max_date`) · `stage_max_date` · `previous_max_date` · `backfill_end_basis` |
+
+왜 바꾸는가: 상수로 두면 **거래일이 하루 늘 때마다 사람이 값을 올려야** 하고, 안 올리면 매일
+`trading_calendar` 빌드가 폐기돼 체인 전체가 선다(v1 플랜 §7 D 고장). 상수가 하던 일은 둘이었다 —
+「원천이 조용히 잘리는 것을 막는다」와 「어디까지 찼는지 적어 둔다」. 앞엣것은 ②(직전 빌드 대비
+퇴행 금지)가, 뒤엣것은 metric 기록이 대신한다. ①은 상수가 못 하던 검사까지 더한다: 캘린더(KRX
+지수)와 가격 원장이 **서로 다른 날까지 차 있는 상태**를 잡는다.
+
+같은 규칙으로 파생화한 상수 둘:
+
+| 상수 | 새 유도 | 읽는 곳 |
+|---|---|---|
+| `security.backfill_end` | `sql/security.sql` 안의 거래일 축 `td`(= `stg_index_daily` distinct date)의 max | 생존 판정 `last_date >= max(td)` → `delist_date_krx` NULL |
+| `adj_factor.asof_for_jump_check` | `max(price_daily.date WHERE basis='krx')` | EG8-P02·P03 의 as-of. **저녁 잠정 T 행을 뺀다** — 그 날에는 계수가 없어 as-of 를 올리면 점프가 생긴다 |
+
+고정 표본(`trading_calendar.asof_sample_dates`·`universe_daily.contract_probe_dates`)의 최신
+항목은 **과거 고정일 2026-08-20 그대로** 둔다. 재현성 축(EG5c·EG11·EGC-02)은 움직이지 않는 표본
+위에서만 성립하기 때문이다. 대신 최신 구간은 아래 EG14 가 본다.
+
+### 10-2. EG14 (신설, `price_daily`, 폐기형) — 최신 구간 수집 완결성
+
+| 항목 | 내용 |
+|---|---|
+| 대상 | `price_daily` (`rules_s04.eg14_recent_sessions`) |
+| 술어 | 최신 **KRX 세션**(`basis='krx'`) `recent_session_window` 개마다 ① 행수 ≥ `recent_session_row_ratio_min` × 유니버스 ② 종가 NULL 0 ③ 창을 채울 세션이 있을 것(`n_missing_sessions` = 0) |
+| 유니버스 | `stg_listing_daily` 최신일 종목 수 + `stg_etf_price_daily` 최신일 종목 수 (그날 KRX 마스터 모집단) |
+| 상수 | `price_daily.recent_session_window` = 5(한 주) · `price_daily.recent_session_row_ratio_min` = 0.98. 미등재면 `skip(no_baseline)` (게이트가 `require_const` 로 읽는다 — `rule.consts` 에 올리지 않는다) |
+| 기록형 | `sessions`(세션별 행수·NULL 종가·비율) · `thin_sessions` · `sessions_with_null_close` · `n_evening_rows` · `evening_coverage_ratio` |
+| 저녁 세션 | **판정 밖**. 키움 커버(≈2,655종목)가 KRX 유니버스(≈3,924)보다 구조적으로 작아 같은 잣대를 들이대면 매일 저녁 빌드가 폐기된다. 그 행의 값 대조는 EG3_price_daily 의 `n_evening_value_mismatch` 가 키움 원장으로 한다 |
+
+근거: 실측 유니버스 ≈ 3,924 가 하루 0.7 신규 · 0.5 소멸이라 2% 여유면 정상 변동을 덮고 수집이
+잘린 날은 잡는다(v1 플랜 §8 Task 5.1 Step 2).
+
+### 10-3. EG3_price_daily 확장 — 저녁 잠정 행 축 (결정 V2-2)
+
+폐기형으로 추가된 검사(전부 0 이어야 통과):
+
+| 검사 | 뜻 |
+|---|---|
+| `n_basis_outside_vocab` | `basis` 어휘 폐쇄 — `krx`·`evening` 뿐. NULL 도 위반이다 |
+| `n_evening_dates_over_one` | **원천**(`stg_flow_daily_kiwoom`)에서 KRX 최대일을 넘는 날짜 수 − 1. 산출 쪽은 `kw` 술어가 최신 하루로 접어 항상 ≤ 1 이라 산출에서 세면 사문이 된다(검수 R2-02). 키움이 KRX 보다 이틀 이상 앞서면 중간 세션이 통째로 빠지므로 폐기한다 |
+| `n_evening_corp_action_pending_null` | `corp_action_pending` 은 2치다 — NULL 이면 소비자의 `IS NOT TRUE` 거름망을 통과한다(검수 R2-07). 산출식이 CASE 로 닫으므로 0 이어야 한다 |
+| `n_evening_value_mismatch` | evening 행의 종가·거래량이 `stg_flow_daily_kiwoom` 원장과 같은가 (EG20 의 짝 — EG20 은 KRX 행만 본다) |
+| `n_krx_rows_corp_action_pending` | `corp_action_pending` 은 저녁 축 전용이다. krx 행이 참이면 산출식이 샌 것이다 |
+| `n_evening_rows_in_morning_build` | **아침 확정판(`--basis morning`)에 evening 행이 남아 있으면 FAIL** — KRX 가 안 왔는데 확정 딱지를 달았다는 뜻이다. 판은 세션 테이블 `_build`(`build.make_build_meta`)에서 읽는다 |
+
+기록형 metric: `n_evening_rows` · `evening_date` · `n_evening_corp_action_pending` ·
+`basis_vocab` · `build_basis`.
+
+EG20(원주가 불변)은 **`basis='krx'` 행만** 대조한다 — 저녁 행은 KRX 원장에 아예 없어 전건이
+'변조' 로 잡힌다. 제외 건수는 `n_evening_rows_excluded` 로 남긴다.
+
+### 10-3b. S23 `price_adj_daily` — 잠정 T 행과의 정합 (최종 검수 R2-01·R2-04, 2026-09-11)
+
+- 표에 `basis`·`corp_action_pending` 두 컬럼을 더해 `price_daily` 의 표식을 **그대로 싣는다**. 워크벤치는 이 표를 직접 읽으므로(`ADJ_TABLE`) 뷰만 통과시키면 잠정치가 확정치처럼 보인다.
+- EG3 ⑧(캘린더 세션)은 **`basis='krx'` 행에만** 건다 — 캘린더 상한이 `max(stg_price_daily.date)` 라 저녁 T 는 캘린더 밖이 정상이다. 안 그러면 매일 18:15 저녁 체인이 S23 에서 `n_off_calendar` 로 끊긴다(절단본 전량 체인 실측). 기록형 `n_evening_rows`·`n_evening_off_calendar`.
+- 폐기형 ⑩ `n_basis_ne_price_daily`: 두 표식이 `price_daily` 와 (ticker, date) 전건 동일.
+- 전방 조정이라 T 행에도 **과거 사건의 누적 share_factor** 가 곱해진다(005930 ×50). "T 행 조정가 = 원주가" 는 후방 축 `v_adj_price` 에서만 참이다(R2-06).
+- 백테스트 어댑터(`backtest_engine/adapters/equity_duckdb.py`)는 `basis`(선택 컬럼)를 읽어 `'krx'` 가 아닌 행을 방출하지 않는다 — 잠정 행은 OHLC 가 NULL 이라 STRICT 정책에서 run 전체가 FORMAT_ERROR 로 죽었다(R2-05).
+
+### 10-4. 판(basis)이 지나가는 자리
+
+`--basis evening|morning`(기본 `manual`) → build_id 접두 `e_`/`m_`/`b_`(어휘 정본은
+`stage.model.BASIS_PREFIX`) → `BuildRecord.basis` · 파티션 `_meta.json.basis` ·
+`_catalog_meta.json` 의 `basis`·`table_basis` · 선언표 `dataset_profile.basis` ·
+소비자 뷰 `v_adj_price`·`v_adj_price_fwd` 의 `basis`·`corp_action_pending`.
+
+**빌드 시각은 산출에 싣지 않는다.** `dataset_profile` 에 `generated_at` 을 컬럼으로 두면 같은
+입력으로 다시 지어도 값이 달라져 EG5a(같은 inputs → 파티션 content_hash 동일)가 매번 깨진다.
+시각의 정본은 MANIFEST `built_at_utc` 와 `_catalog_meta.json` 의 `written_at_utc` 다.

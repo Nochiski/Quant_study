@@ -9,6 +9,7 @@ import sqlite3
 from pathlib import Path
 
 import duckdb
+
 from stage import build, gates, model, snapshot
 
 
@@ -157,10 +158,17 @@ def test_unversioned_log_table_skips_g6_and_keeps_both_rows(tmp_path: Path) -> N
     assert g6.status is gates.GateStatus.SKIP and g6.detail == "unversioned"
 
 
-def test_versioned_append_only_table_still_fails_g6_on_same_day_duplicates(tmp_path: Path) -> None:
+def test_versioned_append_only_table_folds_same_day_duplicates_to_the_last_observation(
+        tmp_path: Path) -> None:
+    """2026-09-11 계약 변경: 판본 축이 observed_date(날짜)라 같은 키의 같은 날 다른 페이로드는 표현할 수
+    없다 — 예전엔 G6 이 표를 폐기했지만(첫 저녁 슬롯에서 DART 아침·저녁 이중 관측으로 실제 발생),
+    이제는 그날의 마지막 관측을 판으로 접고 n_dedup_same_day 로 센다. 콜 로그(versioned=False)는 그대로."""
     r = build.build_table(_log_rule(versioned=True), _log_snap(tmp_path), tmp_path / "stage")
-    assert r.status is build.BuildStatus.GATE_FAILED
-    assert next(g for g in r.gates if g.name == "G6").status is gates.GateStatus.FAIL
+    assert r.status is build.BuildStatus.OK, [(g.name, g.detail) for g in r.gates]
+    assert next(g for g in r.gates if g.name == "G6").status is gates.GateStatus.PASS
+    g1 = next(g for g in r.gates if g.name == "G1")
+    assert g1.metrics["n_dedup_same_day"] >= 1
+    assert g1.metrics["n_dedup"] >= g1.metrics["n_dedup_same_day"]
 
 
 def test_observed_year_floor_admits_1999_dart_receipts() -> None:

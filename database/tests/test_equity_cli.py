@@ -113,3 +113,57 @@ def test_gate는_빌드와_같은_const를_만든다(tmp_path: Path, make_stage_
     assert main([*base, "--baseline", str(bl), "gate", "const_gate_table"]) == 0
     out = capsys.readouterr().out
     assert "ok table=const_gate_table" in out and "'lhs': 2, 'rhs': 2" in out
+
+
+# ── `--basis` 빌드 판 (플랜 v2 §4 B.1·B.2) ───────────────────────────────────
+
+def test_basis는_build_id_접두어와_MANIFEST에_실린다(
+        tmp_path: Path, make_stage_tree, capsys) -> None:
+    base, eq = _env(tmp_path, make_stage_tree)
+    assert main([*base, "build", "sample_table", "--basis", "evening"]) == 0
+    assert "basis=evening" in capsys.readouterr().out
+    m = manifest.load(eq / "sample_table" / "MANIFEST.json")
+    assert m.current_build is not None and m.current_build.startswith("e_")
+    rec = next(b for b in m.builds if b.build_id == m.current_build)
+    assert rec.basis == "evening"
+    meta = json.loads((eq / "sample_table" / f"v={rec.build_id}" / "_meta.json")
+                      .read_text(encoding="utf-8"))
+    assert meta["basis"] == "evening"
+    assert main([*base, "gate", "sample_table"]) == 0        # 재판정도 같은 판을 본다
+    assert "basis=evening" in capsys.readouterr().out
+
+
+def test_basis_기본값은_manual이고_접두어는_b(tmp_path: Path, make_stage_tree, capsys) -> None:
+    base, eq = _env(tmp_path, make_stage_tree)
+    assert main([*base, "build", "sample_table"]) == 0
+    assert "basis=manual" in capsys.readouterr().out
+    m = manifest.load(eq / "sample_table" / "MANIFEST.json")
+    assert m.current_build is not None and m.current_build.startswith("b_")
+
+
+def test_build_id를_직접_주면_그_접두어가_판이다(
+        tmp_path: Path, make_stage_tree, capsys) -> None:
+    """id 와 basis 가 갈리면 재판정이 다른 판을 본다 — 접두어가 정본이다."""
+    base, eq = _env(tmp_path, make_stage_tree)
+    assert main([*base, "build", "sample_table", "--build-id", "m_eq_1",
+                 "--basis", "evening"]) == 0
+    assert "basis=morning" in capsys.readouterr().out
+    rec = manifest.load(eq / "sample_table" / "MANIFEST.json").builds[-1]
+    assert rec.build_id == "m_eq_1" and rec.basis == "morning"
+
+
+def test_어휘_밖_basis는_argparse_에러(tmp_path: Path, make_stage_tree) -> None:
+    base, _ = _env(tmp_path, make_stage_tree)
+    with pytest.raises(SystemExit) as e:
+        main([*base, "build", "sample_table", "--basis", "저녁"])
+    assert e.value.code == 2
+
+
+def test_catalog_meta에_판이_실린다(tmp_path: Path, make_stage_tree, capsys) -> None:
+    base, eq = _env(tmp_path, make_stage_tree)
+    assert main([*base, "build", "sample_table", "--basis", "evening"]) == 0
+    capsys.readouterr()
+    assert main([*base, "catalog"]) == 0
+    meta = json.loads((eq / "_catalog_meta.json").read_text(encoding="utf-8"))
+    assert meta["basis"] == "evening"
+    assert meta["table_basis"]["sample_table"] == "evening"

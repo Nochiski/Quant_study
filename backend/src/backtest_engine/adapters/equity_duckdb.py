@@ -82,7 +82,12 @@ EVENT_TYPE_MAP: dict[str, CorporateActionType] = {
 # FORMAT_ERROR 가 맞다 — 시총 불변이 아닌 사건을 분할로 적용하면 안 된다.
 RATIO_DIRECTED_EVENT_TYPES: frozenset[str] = frozenset({"unknown_krx"})
 
-_PRICE_COLUMNS = ("date", "open", "high", "low", "close", "volume_shr", "price_kind")
+_PRICE_COLUMNS = ("date", "open", "high", "low", "close", "volume_shr", "price_kind", "basis")
+# `basis` 는 규칙 e1.15.0 부터 있다(저녁 잠정판 'evening' / KRX 확정 'krx'). 옛 판에는 없으므로
+# 선택 컬럼이고, 백테스트는 잠정 행(OHLC NULL·키움 종가)을 절대 소비하지 않는다 — 'krx' 가 아닌
+# 행은 방출하지 않는다.
+_PRICE_OPTIONAL_COLUMNS = frozenset({"basis"})
+_PRICE_BASIS_CONFIRMED = "krx"
 _SPAN_COLUMNS = ("ticker", "span_seq", "first_date", "last_date", "end_reason")
 _FACTOR_COLUMNS = (
     "ticker", "effective_date", "event_id", "event_type", "share_factor", "factor_ok"
@@ -418,7 +423,13 @@ class EquityBarSource:
             filters.append(("date", ">=", start))
         if end is not None:
             filters.append(("date", "<=", end))
-        records = _read_rows(_parquet_files(build, start, end), _PRICE_COLUMNS, filters, build)
+        records = _read_rows(
+            _parquet_files(build, start, end),
+            _PRICE_COLUMNS,
+            filters,
+            build,
+            optional=_PRICE_OPTIONAL_COLUMNS,
+        )
         if not records:
             return LoadResult(
                 bars=(),
@@ -431,9 +442,14 @@ class EquityBarSource:
         records.sort(key=lambda r: _as_date(r["date"], "date"))
         previous: date | None = None
         n_reference = 0
+        n_provisional = 0
         raw_bars: list[RawBar] = []
         for record in records:
             session = _as_date(record["date"], "date")
+            basis = record.get("basis")
+            if basis is not None and basis != _PRICE_BASIS_CONFIRMED:
+                n_provisional += 1  # 저녁 잠정 행 — 확정 전 값이라 백테스트 바로 방출하지 않는다
+                continue
             if previous is not None and session == previous:
                 return LoadResult(
                     bars=(),
@@ -464,7 +480,8 @@ class EquityBarSource:
                 status=LoadStatus.NO_DATA,
                 detail=(
                     f"no tradable rows — symbol={instrument.symbol} root={self._root} "
-                    f"{build.label} start={start} end={end} reference_rows={n_reference}"
+                    f"{build.label} start={start} end={end} reference_rows={n_reference} "
+                    f"provisional_rows={n_provisional}"
                 ),
             )
         result = clean_raw_bars(

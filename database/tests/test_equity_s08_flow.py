@@ -147,7 +147,8 @@ def _repaired_stage_root(base: Path) -> Path:
 def _seed() -> Baseline:
     merged: dict[str, dict[str, object]] = {}
     for p in (rules_s01.BASELINE_SEED, Path(rules_s02.__file__).parent / "baseline_seed_s02.json",
-              rules_s03.BASELINE_SEED, rules_s05.BASELINE_SEED, rules_s06.BASELINE_SEED,
+              rules_s03.BASELINE_SEED, rules_s04.BASELINE_SEED,
+              rules_s05.BASELINE_SEED, rules_s06.BASELINE_SEED,
               rules_s08.BASELINE_SEED):
         for k, v in load(p).data.items():
             if not k.startswith("_") and k != "measured_at" and isinstance(v, dict):

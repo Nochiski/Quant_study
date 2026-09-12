@@ -19,6 +19,8 @@ if [ -z "${BOT_TOKEN:-}" ] || [ -z "${CHAT_ID_LOG:-}" ]; then
   echo "notify: BOT_TOKEN / CHAT_ID_LOG missing in $ENV_FILE" >&2
   exit 2
 fi
+# 크론 로캘이 C/POSIX 면 ${TEXT:0:3900} 이 바이트 절단이라 한글 중간이 잘려 텔레그램이 400 을 낸다(검수 R4-09).
+case "${LC_ALL:-${LANG:-}}" in *UTF-8*|*utf8*) ;; *) export LC_ALL=C.UTF-8 ;; esac
 STAMP="/tmp/ql_notify_$(printf '%s' "$TITLE" | md5sum | cut -c1-12)"
 NOW=$(date +%s)
 LAST=0
@@ -34,12 +36,15 @@ case "$LEVEL" in
 esac
 TEXT="${ICON} [quant-ledger] ${TITLE}
 ${BODY}"
-if curl -s -m 20 "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+RESP=$(curl -s -m 20 "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
      --data-urlencode "chat_id=${CHAT_ID_LOG}" \
-     --data-urlencode "text=${TEXT:0:3900}" >/dev/null; then
+     --data-urlencode "text=${TEXT:0:3900}")
+CRC=$?
+# curl 은 HTTP 400 에도 rc 0 이다 — 응답 본문의 "ok":true 까지 봐야 "보냈다" 다.
+if [ "$CRC" -eq 0 ] && printf '%s' "$RESP" | grep -q '"ok":true'; then
   touch "$STAMP"
   echo "notify: sent ($LEVEL: $TITLE)"
 else
-  echo "notify: send failed ($LEVEL: $TITLE)" >&2
+  echo "notify: send failed ($LEVEL: $TITLE) curl_rc=$CRC resp=${RESP:0:200}" >&2
   exit 1
 fi

@@ -32,6 +32,23 @@ while [ $# -gt 0 ]; do
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
+deliver_json() {
+  # 18:15 잠정 빌드·워치독이 읽는 인계 파일. dart_rc 가 빈 문자열이면 아직 도는 중(null) — 빌드 조건이 아니다.
+  # 임시 파일에 쓰고 원자 교체한다(읽는 쪽이 부분 JSON 을 보지 않게).
+  $PY -c 'import datetime as dt, json, os, sys
+d, rc_kw, rc_dart, rc_wise, kw_at, wise_at = sys.argv[1:7]
+os.makedirs("data/deliver", exist_ok=True)
+payload = {"date": d,
+           "finished_at": dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+           "kiwoom_rc": int(rc_kw), "dart_rc": (int(rc_dart) if rc_dart != "" else None),
+           "wise_rc": int(rc_wise), "dart_done": rc_dart != "",
+           "kiwoom_done_at": kw_at or None, "wise_done_at": wise_at or None}
+tmp = "data/deliver/ledger_evening.json.tmp"
+with open(tmp, "w", encoding="utf-8") as f:
+    json.dump(payload, f, ensure_ascii=False, indent=1)
+os.replace(tmp, "data/deliver/ledger_evening.json")
+print("  deliver/ledger_evening.json 기록 " + json.dumps(payload, ensure_ascii=False))' "$@"
+}
 kst() { TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST'; }
 LOG="logs/daily_evening_$(TZ=Asia/Seoul date +%Y%m%d).log"
 RUN=$(mktemp)
@@ -94,16 +111,21 @@ else
   branch_kiwoom > "$KW_LOG"   2>&1 & PID_KW=$!
   branch_dart   > "$DART_LOG" 2>&1 & PID_DART=$!
   branch_wise   > "$WISE_LOG" 2>&1 & PID_WISE=$!
+  # 잠정 빌드(18:15 build_evening.sh)의 조건은 키움·WISE 둘뿐이다(플랜 §2). DART 는 30분짜리라 그 종료를
+  # 기다리면 빌드가 18:35 뒤로 밀리고 19:00 워치독이 매일 오탐한다(검수 R4-01). 그래서 인계 파일을 두 번 쓴다 —
+  # 키움·WISE 가 끝나면 dart_rc=null 로 먼저(빌드 트리거), DART 가 끝나면 최종값으로 다시.
   wait "$PID_KW";   RC_KW=$?
-  wait "$PID_DART"; RC_DART=$?
   wait "$PID_WISE"; RC_WISE=$?
+  KW_DONE=$(grep -m1 '^DONE_AT=' "$KW_LOG" | cut -d= -f2-)
+  WISE_DONE=$(grep -m1 '^DONE_AT=' "$WISE_LOG" | cut -d= -f2-)
+  echo "  종료 시각 — 키움 ${KW_DONE:-미기록} · WISE ${WISE_DONE:-미기록} (18:15 잠정 빌드 트리거 근거) $(kst)"
+  [ -z "$DRY" ] && deliver_json "$D" "$RC_KW" "" "$RC_WISE" "$KW_DONE" "$WISE_DONE"
+  wait "$PID_DART"; RC_DART=$?
+  echo "  DART 종료 rc=$RC_DART $(kst)"
   for f in "$KW_LOG" "$DART_LOG" "$WISE_LOG"; do
     echo "──── 갈래 로그 $f ────"
     cat "$f"
   done
-  KW_DONE=$(grep -m1 '^DONE_AT=' "$KW_LOG" | cut -d= -f2-)
-  WISE_DONE=$(grep -m1 '^DONE_AT=' "$WISE_LOG" | cut -d= -f2-)
-  echo "  종료 시각 — 키움 ${KW_DONE:-미기록} · WISE ${WISE_DONE:-미기록} (18:15 잠정 빌드 트리거 근거)"
   [ "$RC_KW" -ne 0 ]   && FAILED="$FAILED 키움(rc=$RC_KW)"
   [ "$RC_DART" -ne 0 ] && FAILED="$FAILED DART(rc=$RC_DART)"
   [ "$RC_WISE" -ne 0 ] && FAILED="$FAILED WISE(rc=$RC_WISE)"
@@ -112,20 +134,7 @@ else
       "$RID" "$([ -z "$FAILED" ] && echo ok || echo failed)" \
       "kiwoom_rc=$RC_KW dart_rc=$RC_DART wise_rc=$RC_WISE kiwoom_done_at=${KW_DONE:-none} wise_done_at=${WISE_DONE:-none}${FAILED:+ failed=$FAILED}"
   fi
-  if [ -z "$DRY" ]; then
-    # 18:15 잠정 빌드·워치독이 읽는 인계 파일. 빌드가 "언제 무엇이 끝났는가" 를 여기서만 본다.
-    $PY -c 'import datetime as dt, json, os, sys
-d, rc_kw, rc_dart, rc_wise, kw_at, wise_at = sys.argv[1:7]
-os.makedirs("data/deliver", exist_ok=True)
-payload = {"date": d,
-           "finished_at": dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-           "kiwoom_rc": int(rc_kw), "dart_rc": int(rc_dart), "wise_rc": int(rc_wise),
-           "kiwoom_done_at": kw_at or None, "wise_done_at": wise_at or None}
-with open("data/deliver/ledger_evening.json", "w", encoding="utf-8") as f:
-    json.dump(payload, f, ensure_ascii=False, indent=1)
-print("  deliver/ledger_evening.json 기록 " + json.dumps(payload, ensure_ascii=False))' \
-      "$D" "$RC_KW" "$RC_DART" "$RC_WISE" "$KW_DONE" "$WISE_DONE"
-  fi
+  [ -z "$DRY" ] && deliver_json "$D" "$RC_KW" "$RC_DART" "$RC_WISE" "$KW_DONE" "$WISE_DONE"
 fi
 echo "════ 종료 키움=$RC_KW DART=$RC_DART WISE=$RC_WISE $(kst) ════"
 } > "$RUN" 2>&1

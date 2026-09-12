@@ -15,6 +15,9 @@ grain `field_id` — 어댑터 `list_fields()`(`DatasetFieldProfile`)의 원천�
         그 항등을 게이트가 SQL 로 다시 확인한다 — 산출에 실리는 유일한 부동소수라 엔진의 축약
         순서가 content_hash 에 섞이지 않게 못박는 장치다(§9 S19 2차, 서버 해시 불일치).
 
+컬럼 `basis`(e1.15.0)는 이 대장이 나온 **빌드 판**이다 — `--basis evening` 으로 지은 잠정판인지
+소비자가 `list_fields()` 한 번으로 안다(플랜 v2 §4 B.2).
+
 선언표라 EG1 은 `skip(declaration_table)`(GATES §3 ㉒), 차원표라 프레임 EG2 는
 `skip(dimension_table)` 이고 **EG2-P04/P06/P07 은 `EG2_dataset_profile` 이 대신 판정**한다.
 
@@ -565,7 +568,12 @@ DATASET_PROFILE = register(EquityTable(
              "coverage_from": "DATE", "coverage_to": "DATE", "coverage_basis": "VARCHAR",
              "estimated_coverage_pct": "DOUBLE", "n_observed": "BIGINT",
              "n_denominator": "BIGINT", "coverage_by_mktcap_quintile": "DOUBLE[]",
-             "field_scope": "VARCHAR"},
+             "field_scope": "VARCHAR",
+             # e1.15.0 — 이 대장이 어느 판에서 나왔는가(manual·evening·morning). 소비자가
+             # `list_fields()` 한 번으로 잠정판 여부를 읽는다. **빌드 시각은 싣지 않는다** —
+             # 같은 입력으로 다시 지으면 값이 달라져 EG5a(같은 inputs → content_hash 동일)가
+             # 매번 깨진다. 시각의 정본은 MANIFEST `built_at_utc` 와 `_catalog_meta.written_at_utc`.
+             "basis": "VARCHAR"},
     inputs=SOURCE_TABLES,
     partition_class="whole",
     partition_key_expr=None,

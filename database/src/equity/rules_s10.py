@@ -4,7 +4,17 @@ EG7-P06 · §4 FX-3-008).
 3단계 격자 테이블의 첫 구현이다. 사실은 `stg_credit_daily`(KIS 신용잔고) 하나뿐이고, equity 가
 더하는 것은 셋이다 — ① 격자(캘린더 × `universe_daily`)로 **없는 날을 행으로 만든다** ②
 `stg_units_kis`(dataset='credit') 수집 로그로 그 빈칸의 이유를 `fill_kind` 로 적는다 ③ 쓸 수 없는
-원장 행을 버리지 않고 `_reject/{pre_calendar, off_grid, balance_over_shares}` 로 격리한다.
+원장 행을 버리지 않고 `_reject/{version_folded, pre_calendar, off_grid, balance_over_shares}` 로
+격리한다.
+
+**판본 선택(S10 3차, 09-11 · 결정 6-2 · 검수 종합 H3)** — `stg_credit_daily` 는 append_only ·
+`key_unique=False` 라 같은 (ticker, date) 에 값이 다른 재수집 판본이 공존한다(서버 실측 536군 ·
+2026년 505군 · 29종목). 원인은 KIS 가 `stck_prpr` 등 가격을 조회 시점 수정주가로 **소급 환산**해
+주는 것이라 기업행위 뒤 재수집하면 payload 가 달라지는 데 있다. equity 는 (ticker, date) 당
+**`observed_date` 최소 = 최초 관측판** 하나만 채택하고(그날 시점에 볼 수 있던 값), 나머지는
+`_reject/version_folded/` 로 원값째 격리한다. 선택하지 않으면 격자 조인이 팬아웃해 프레임 EG3 의
+격자 유일성에서 빌드가 폐기된다. 정렬 동률은 우리가 나르는 payload 전부로 깨서 재현성(EG5a)을
+지킨다 — stage 산출에 `collected_at` 원값 컬럼이 없기 때문이다.
 
 **잔고 이상 격리(S10 2차, 09-06)** — 서버 1차 빌드가 `EG3_credit_daily.n_balance_over_shares_out`
 4행으로 폐기됐다(격자 9,201,516 · 다른 술어 전부 0). 잔고주수는 상장주식수를 넘을 수 없으므로 그
@@ -50,7 +60,8 @@ EG3_credit_daily 의 `net_buy_axis`·`n_loan_balance_step_*` 기록형 metric �
 
 테이블 특화 술어(`extra_gates`, 프레임은 EG3 뒤에 실행한다 — GATES §7-1):
   EG1_credit_daily — GATES §3 ⑪ **(b)** 원장 보존 등식. `count(stg_credit_daily) = measured 셀
-                     + reject(pre_calendar) + reject(off_grid)`. ⑪ (a) 격자 행수 등식은 프레임
+                     + reject(version_folded) + reject(pre_calendar) + reject(off_grid)
+                     + reject(balance_over_shares)`. ⑪ (a) 격자 행수 등식은 프레임
                      EG1 이 본다(등식 1개 규약) — 좌변 `count(out)`, 우변 `격자 + 격자 밖 원장 행`.
   EG3_credit_daily — 어휘 폐쇄(`fill_kind.kind`·`.evidence`·`amt_basis`) · 격자 양방향 일치 ·
                      measured 셀 원값 보존(stage 재조인) · 잔고 음수 0 · **잔고 ≤ 같은 날
@@ -59,8 +70,10 @@ EG3_credit_daily 의 `net_buy_axis`·`n_loan_balance_step_*` 기록형 metric �
                      `_reject/balance_over_shares/` 건수 · 그 키의 산출 셀이 남아 있고 measured 가
                      아니다). 나머지는 기록형 metric(GATES §0-1): fill_kind 분포 ·
                      격리 사유별 건수 · KIS 수정종가 대조 · `*_amt` 단위 추정비 · 잔고비율 대
-                     상장주식수 비 · 음수 신규/상환/증감율 · 원장 일괄 결측 의심일 ·
-                     net_buy 판정 근거.
+                     상장주식수 비(**deal_date·stlm_date 두 기준일**, 검수 M3) · 음수
+                     신규/상환/증감율 · 원장 일괄 결측 의심일 · net_buy 판정 근거 ·
+                     판본 분포(`n_versions_folded`·`n_version_groups`). 판본 대조
+                     (`n_version_folded_reject_delta`)는 폐기형이다.
 """
 from __future__ import annotations
 
@@ -85,7 +98,11 @@ GRID_EXCLUDED_SEC_TYPE = "etf"
 # 1차 빌드가 이 4행 때문에 EG3_credit_daily 로 폐기됐다 — 잔고는 상장주식수를 넘을 수 없으므로
 # 원장 이상이고, 격리해야 신용잔고비율 > 100% 셀이 소비층까지 가지 않는다. 격리되는 것은 **원장
 # 행**이고 격자 셀은 값 없이 남는다(§ `sql/credit_daily.sql` `over`·`drop_value`).
-REJECT_REASONS: tuple[str, ...] = ("pre_calendar", "off_grid", "balance_over_shares")
+# `version_folded`(S10 3차, 09-11 · 결정 6-2): 같은 (ticker, date) 에 값이 다른 재수집 판본이
+# 여럿일 때 **최초 관측판이 아닌** 원장 행. 네 사유는 배타적이고 `version_folded` 가 가장 먼저
+# 판정된다 — 채택되지 않은 판본은 격자·캘린더 술어를 다시 묻지 않는다.
+REJECT_REASONS: tuple[str, ...] = ("pre_calendar", "off_grid", "balance_over_shares",
+                                   "version_folded")
 # 잔고 이상으로 값을 지운 격자 셀의 `fill_kind.kind`. `FILL_KINDS` 에 'rejected' 가 없고 어휘는
 # DESIGN §3 · 엔진 `CellKind` 계약이라 여기서 늘리지 않는다 — 남은 넷 중 `empty_response`(→ 엔진
 # `MISSING`)만이 "원천에 물었고 쓸 값이 없다" 를 뜻해 가장 정직하다.
@@ -142,6 +159,46 @@ def _vocab_sql(values: tuple[str, ...]) -> str:
     return ", ".join("'" + v.replace("'", "''") + "'" for v in values)
 
 
+# ── 판본 선택 (결정 6-2, 검수 종합 H3) ───────────────────────────────────────
+# `stg_credit_daily` 는 `write_mode='append_only'` · `key_unique=False` 라(rules_kis.py) 같은
+# (ticker, date) 에 값이 다른 판본이 공존한다 — 서버 실측 536군(2026년 505군 · 29종목, 예:
+# 001290 2026-08-18 `close_krw` 969 vs 4,845). 원인은 KIS 가 `stck_prpr` 등 가격을 **조회 시점
+# 수정주가로 소급 환산**해 주는 것이고, 기업행위 뒤 재수집하면 payload 가 달라져 stage 가 접지
+# 못한다. 판본 선택 규칙이 없으면 equity 격자 조인이 팬아웃해 `gates.py` 격자 유일성(EG3-P01)에서
+# 빌드가 폐기된다.
+#
+# **결정 6-2 = 최초 관측판**: 그날 시점에 볼 수 있던 값을 쓴다. 가격 조정은 `adj_factor`(S06) 몫
+# 이고 KIS 가격 컬럼은 가격 축이 아니다(STAGE_SPEC §4 KIS). 최신판을 고르면 과거 격자 셀의 값이
+# 뒤에 일어난 기업행위로 소급해 바뀌어 look-ahead 가 된다.
+#
+# 정렬 키는 `observed_date`(= stage 가 `collected_at` KST 를 날짜로 접은 축) 최소다. stage 산출에
+# `collected_at` 원값 컬럼이 없으므로 **같은 날 두 판** 은 이 축으로 갈리지 않는다 — 재현성(EG5a)
+# 을 위해 우리가 나르는 payload 전부를 2차 정렬 키로 세운다. 이 목록에서까지 동률이면 두 행은
+# 우리가 읽는 모든 컬럼이 같아 어느 쪽을 골라도 산출이 같다.
+VERSION_ORDER_COLUMNS: tuple[str, ...] = ("observed_date", "stlm_date", "close_krw",
+                                          *MEASURE_COLUMNS)
+
+
+def _version_order() -> str:
+    sep = ",\n" + " " * 39
+    return sep.join(f"c.{_q(c)} NULLS LAST" for c in VERSION_ORDER_COLUMNS)
+
+
+# `sql/credit_daily.sql` 의 `ver` CTE 본문과 **글자 그대로** 같다
+# (`test_판본_선택_술어는_rules_선언과_SQL_리터럴이_같다` 가 대조). 들여쓰기까지 맞춘 것은 SQL
+# 쪽이 이 문자열을 그대로 품게 해 정의가 두 벌로 갈라지지 않게 하기 위해서다.
+VERSION_RANKED_SQL = (
+    "    SELECT c.*,\n"
+    "           row_number() OVER (PARTITION BY c.ticker, c.date\n"
+    f"                              ORDER BY {_version_order()}) AS version_rn\n"
+    "    FROM stg_credit_daily c")
+
+
+def first_version_sql() -> str:
+    """(ticker, date) 당 **최초 관측판** 한 행. 게이트가 산출을 읽지 않고 입력에서 다시 고른다."""
+    return f"SELECT * FROM (\n{VERSION_RANKED_SQL}\n) WHERE version_rn = 1"
+
+
 def grid_predicate(alias: str = "") -> str:
     """`universe_daily` 위 격자 술어. `sql/credit_daily.sql`·EG1 우변·EG3 재계산이 같은 정의를
     쓰도록 한 곳에서 만든다(`test_격자_술어는_rules_선언과_SQL_리터럴이_같다` 가 대조)."""
@@ -178,8 +235,8 @@ def eg1_credit_daily(ctx: EquityGateContext) -> GateResult:
 
     프레임 EG1 은 등식 하나만 받으므로(⑪ (a) 격자 행수) 소스 보존 등식은 여기서 본다. 항은
     서로 다른 곳에서 온다 — 원장은 `_pinned/stg_credit_daily`, measured 는 산출 parquet,
-    격리 건수는 `_reject/` 집계 — 라 항진명제가 아니다. 격리 사유 3종(`pre_calendar`·`off_grid`·
-    **`balance_over_shares`**)을 `REJECT_REASONS` 에서 그대로 돌므로 사유가 늘면 자동으로 반영된다.
+    격리 건수는 `_reject/` 집계 — 라 항진명제가 아니다. 격리 사유 4종(`pre_calendar`·`off_grid`·
+    **`balance_over_shares`**·`version_folded`)을 `REJECT_REASONS` 에서 그대로 돌므로 사유가 늘면 자동으로 반영된다.
     """
     v = _q(ctx.out_view)
     n_src = _n(ctx, "SELECT count(*) FROM stg_credit_daily")
@@ -214,12 +271,20 @@ def over_shares_predicate(alias: str, shares: str) -> str:
 
 
 def _over_shares_sql() -> str:
-    """격자 안이면서 잔고 이상인 **원장 행**의 키 — 입력(`stg_credit_daily`·`universe_daily`·
-    `price_daily`)에서만 다시 센다. 산출을 읽지 않으므로 격리 건수 대조가 항진명제가 아니다."""
-    return (f"SELECT c.ticker, c.date FROM stg_credit_daily c "
+    """격자 안이면서 잔고 이상인 **채택 판본 원장 행**의 키 — 입력(`stg_credit_daily`·
+    `universe_daily`·`price_daily`)에서만 다시 센다. 산출을 읽지 않으므로 격리 건수 대조가
+    항진명제가 아니다. 접힌 판본은 `version_folded` 로 이미 격리되므로 여기서 다시 세면
+    사유가 겹쳐 `n_balance_over_shares_reject_delta` 가 거짓으로 어긋난다."""
+    return (f"SELECT c.ticker, c.date FROM ({first_version_sql()}) c "
             f"JOIN ({_grid_sql()}) g ON g.ticker = c.ticker AND g.date = c.date "
             "JOIN price_daily p ON p.ticker = c.ticker AND p.date = c.date "
             f"WHERE p.shares_out IS NOT NULL AND ({over_shares_predicate('c', 'p')})")
+
+
+def _version_group_sql() -> str:
+    """(ticker, date) 당 판본 수 — 입력에서만 센다(`n_version_groups`·`n_versions_folded`)."""
+    return ("SELECT ticker, date, count(*) AS n_versions "
+            "FROM stg_credit_daily GROUP BY ticker, date")
 
 
 def eg3_credit_daily(ctx: EquityGateContext) -> GateResult:
@@ -262,15 +327,19 @@ def eg3_credit_daily(ctx: EquityGateContext) -> GateResult:
                                WHERE g.date = c.date AND g.ticker = c.ticker)),
           (SELECT count(*) FROM ({grid}))""")
 
-    # ③ measured 셀 ↔ 원장 행 양방향 + 원값 보존(17축 전건 재조인)
+    # ③ measured 셀 ↔ **채택 판본** 원장 행 양방향 + 원값 보존(17축 전건 재조인).
+    #    원장 쪽은 전부 `first_version_sql()` 로 다시 고른다 — 접힌 판본까지 세면 (ticker, date)
+    #    조인이 팬아웃해 원값 대조가 거짓으로 어긋나고, 격리된 판본이 "measured 가 없는 원장 행"
+    #    으로 잘못 잡힌다. 채택이 최초 관측판인지 자체는 이 재선택이 독립으로 확인한다.
     keep = ("stlm_date", *MEASURE_COLUMNS)
     diff = " OR ".join(f"c.{_q(k)} IS DISTINCT FROM s.{_q(k)}" for k in keep)
+    picked = first_version_sql()
     n_measured_no_src, n_src_no_measured, n_value_mismatch = _row(ctx, f"""
         SELECT
           (SELECT count(*) FROM {v} c WHERE c.fill_kind.kind = 'measured'
-             AND NOT EXISTS (SELECT 1 FROM stg_credit_daily s
+             AND NOT EXISTS (SELECT 1 FROM ({picked}) s
                               WHERE s.ticker = c.ticker AND s.date = c.date)),
-          (SELECT count(*) FROM stg_credit_daily s
+          (SELECT count(*) FROM ({picked}) s
              WHERE EXISTS (SELECT 1 FROM ({grid}) g
                             WHERE g.ticker = s.ticker AND g.date = s.date)
                AND NOT EXISTS (SELECT 1 FROM ({over_src}) o
@@ -278,7 +347,7 @@ def eg3_credit_daily(ctx: EquityGateContext) -> GateResult:
                AND NOT EXISTS (SELECT 1 FROM {v} c
                                 WHERE c.ticker = s.ticker AND c.date = s.date
                                   AND c.fill_kind.kind = 'measured')),
-          (SELECT count(*) FROM {v} c JOIN stg_credit_daily s USING (ticker, date)
+          (SELECT count(*) FROM {v} c JOIN ({picked}) s USING (ticker, date)
             WHERE c.fill_kind.kind = 'measured' AND ({diff}))""")
 
     # ④ 채움 규약 — measured 아닌 셀은 전 축 NULL(0 을 굽지 않는다) · 결제일은 거래일 이후
@@ -309,6 +378,20 @@ def eg3_credit_daily(ctx: EquityGateContext) -> GateResult:
             WHERE NOT EXISTS (SELECT 1 FROM {v} c
                                WHERE c.ticker = o.ticker AND c.date = o.date))""")
 
+    # ⑥ 판본 선택 대조(결정 6-2) — 접힌 판본 수를 **입력에서** 다시 세어 격리 건수와 맞춘다.
+    #    산출을 읽지 않으므로 항진명제가 아니다. 접힌 판본이 산출에 남아 있으면(= 채택되면)
+    #    프레임 EG3 의 격자 유일성이 먼저 잡지만, 여기서도 사유별 건수로 한 번 더 본다.
+    n_version_groups, n_versions_folded = _row(ctx, f"""
+        SELECT
+          (SELECT count(*) FROM ({_version_group_sql()}) WHERE n_versions > 1),
+          (SELECT coalesce(sum(n_versions - 1), 0) FROM ({_version_group_sql()}))""")
+    # 같은 KST 수집일에 값이 다른 판본이 둘이면 "최초 관측" 을 날짜 해상도로는 가를 수 없고 2차 정렬
+    # (값 크기)이 고른다(검수 R3-01). 서버 실측 09-11 은 0 — 기록형으로 세고 0 이 아니면 TECH_DEBT B-13.
+    n_version_ties = _row(ctx, """
+        SELECT count(*) FROM (
+          SELECT ticker, date, observed_date, count(*) AS c
+          FROM stg_credit_daily GROUP BY 1, 2, 3 HAVING count(*) > 1)""")[0]
+
     checks = {
         "n_fill_kind_outside_vocab": int(str(n_kind_vocab)),
         "n_fill_evidence_outside_vocab": int(str(n_evidence_vocab)),
@@ -328,6 +411,8 @@ def eg3_credit_daily(ctx: EquityGateContext) -> GateResult:
             int(str(n_over_src)) - int(ctx.reject_by_reason.get("balance_over_shares", 0)),
         "n_balance_over_shares_cell_measured": int(str(n_over_cell_measured)),
         "n_balance_over_shares_cell_missing": int(str(n_over_cell_missing)),
+        "n_version_folded_reject_delta":
+            int(str(n_versions_folded)) - int(ctx.reject_by_reason.get("version_folded", 0)),
     }
 
     # ── 기록형 ──────────────────────────────────────────────────────────────
@@ -341,9 +426,10 @@ def eg3_credit_daily(ctx: EquityGateContext) -> GateResult:
         SELECT count(*), count(*) FILTER (WHERE s.close_krw IS DISTINCT FROM p."close"),
                count(*) FILTER (WHERE s.close_krw IS NULL)
         FROM {v} c
-        JOIN stg_credit_daily s USING (ticker, date)
+        JOIN ({picked}) s USING (ticker, date)
         JOIN price_daily p USING (ticker, date)
         WHERE c.fill_kind.kind = 'measured'""")
+    # 원천 사실이라 **판본을 고르기 전 원장 전건**을 센다(접힌 판본의 음수도 원천에 실재한다).
     n_signed = {c: _n(ctx, f"SELECT count(*) FROM stg_credit_daily WHERE {_q(c)} < 0")
                 for c in SIGNED_COLUMNS}
     # 원장 일괄 결측 의심일 — 격자에 종목이 있는데 그날 measured 셀이 하나도 없다. 0 채움을
@@ -353,7 +439,9 @@ def eg3_credit_daily(ctx: EquityGateContext) -> GateResult:
         HAVING count(*) FILTER (WHERE fill_kind.kind = 'measured') = 0
            AND count(*) FILTER (WHERE fill_kind.kind = 'src_omitted') > 0
         ORDER BY date""").fetchall()]
-    # net_buy 판정 근거 — 잔고 증감이 신규 − 상환과 맞는 연속 쌍의 비율(원장 위 독립 계산)
+    # net_buy 판정 근거 — 잔고 증감이 신규 − 상환과 맞는 연속 쌍의 비율(원장 위 독립 계산).
+    # `lag()` 가 시계열을 보므로 **채택 판본만** 쓴다 — 접힌 판본이 섞이면 같은 날이 두 번 와서
+    # 증감이 0 인 가짜 쌍이 생긴다.
     step = {}
     for side in ("loan", "stln"):
         pairs, match = _row(ctx, f"""
@@ -361,7 +449,7 @@ def eg3_credit_daily(ctx: EquityGateContext) -> GateResult:
               SELECT whol_{side}_rmnd_stcn_shr AS r, whol_{side}_new_stcn_shr AS n,
                      whol_{side}_rdmp_stcn_shr AS d,
                      lag(whol_{side}_rmnd_stcn_shr) OVER (PARTITION BY ticker ORDER BY date) AS pr
-              FROM stg_credit_daily)
+              FROM ({picked}))
             SELECT count(*) FILTER (WHERE pr IS NOT NULL),
                    count(*) FILTER (WHERE pr IS NOT NULL AND r - pr = n - d)
             FROM x""")
@@ -377,23 +465,43 @@ def eg3_credit_daily(ctx: EquityGateContext) -> GateResult:
         "n_balance_over_shares_rejected":
             int(ctx.reject_by_reason.get("balance_over_shares", 0)),
         "n_balance_over_shares_src": int(str(n_over_src)),
+        # 판본 선택(결정 6-2) — 입력에서 다시 센 접힌 판본 수·판본이 여럿인 좌표 수와,
+        # 실제로 `_reject/version_folded/` 로 간 건수. 셋이 어긋나면 위 checks 가 폐기한다.
+        "n_versions_folded": int(str(n_versions_folded)),
+        "n_version_groups": int(str(n_version_groups)),
+        "n_version_folded_rejected": int(ctx.reject_by_reason.get("version_folded", 0)),
+        "version_pick_rule": "min(observed_date) — 최초 관측판 (DECISIONS 결정 6-2)",
+        "n_version_observed_date_ties": int(str(n_version_ties)),
         "n_measured_evidence_none": int(evidence.get("measured/none", 0)),
         "n_shares_out_null_measured": int(str(n_shares_null)),
         "n_close_compared": int(str(n_close_join)),
         "n_close_ne_price_daily": int(str(n_close_ne)),
         "n_close_null_src": int(str(n_close_null)),
         "n_negative_by_column": n_signed,
+        "n_negative_basis": "all_versions",      # 위 값만 원장 전건 — 나머지 EG3 술어는 채택 판본
         # `*_amt` 단위 추정 — 금액 / (잔고주수 × 원주가). 원화면 1 에 몰려야 한다
         "loan_amt_per_market_value": _quantiles(
             ctx, 'c.whol_loan_rmnd_amt / nullif(c.whol_loan_rmnd_stcn_shr * p."close", 0)',
             f'{v} c JOIN price_daily p USING (ticker, date) '
             "WHERE c.whol_loan_rmnd_stcn_shr > 0"),
-        # 잔고비율 대 (잔고주수 / 상장주식수 × 100) — 1 근처면 KIS 비율의 분모가 상장주식수다
-        "loan_rate_vs_shares_ratio": _quantiles(
+        # 잔고비율 대 (잔고주수 / 상장주식수 × 100) — 1 근처면 KIS 비율의 분모가 상장주식수다.
+        # **기준일 두 축을 나란히 잰다**(검수 종합 M3, 09-10 재검산): KIS 가 쓰는 분모는
+        # deal_date 주식수가 아니라 **공표일(= 결제일 `stlm_date`, T+2) 시점 상장주식수**다 —
+        # 같은 콜(09-09 16:33)에서 온 363260 09-03 행 0.40(병합 전 분모)과 09-04 행 0.61(병합 후
+        # 분모)이 갈린 것이 근거다. 그래서 `_deal_date` 는 기업행위 구간에서 1 에서 벗어나고
+        # `_stlm_date` 가 1 에 붙는다. 폐기형으로 묶지 않고 기록형으로 두는 이유는 이것이
+        # 원천 규약이지 이 테이블의 결함이 아니기 때문이다(§1 "원천 사실은 기록").
+        "loan_rate_vs_shares_ratio_deal_date": _quantiles(
             ctx, "c.whol_loan_rmnd_rate_pct / nullif(c.whol_loan_rmnd_stcn_shr * 100.0 "
                  "/ nullif(p.shares_out, 0), 0)",
             f"{v} c JOIN price_daily p USING (ticker, date) "
             "WHERE c.whol_loan_rmnd_stcn_shr > 0"),
+        "loan_rate_vs_shares_ratio_stlm_date": _quantiles(
+            ctx, "c.whol_loan_rmnd_rate_pct / nullif(c.whol_loan_rmnd_stcn_shr * 100.0 "
+                 "/ nullif(p2.shares_out, 0), 0)",
+            f"{v} c JOIN price_daily p2 ON p2.ticker = c.ticker AND p2.date = c.stlm_date "
+            "WHERE c.whol_loan_rmnd_stcn_shr > 0"),
+        "loan_rate_shares_basis": "stlm_date (공표일 T+2 상장주식수 — 검수 종합 M3)",
         "loan_balance_over_shares_ratio": _quantiles(
             ctx, "c.whol_loan_rmnd_stcn_shr / nullif(p.shares_out, 0)",
             f"{v} c JOIN price_daily p USING (ticker, date)"),
@@ -484,20 +592,25 @@ CREDIT_DAILY = register(EquityTable(
     build_by_year=False,
     available_rule=("column:date — KIS 신용잔고 일별 스냅샷(stage 가 date·default 로 확정). "
                     "공표 랙(T+1)은 팩트 행이 아니라 dataset_profile.recommended_lag_sessions"),
-    # GATES §3 ⑪ (a): 좌변 = 격자 행수. 우변은 격자 + 격자 밖 원장 행(= 격리 후보)이고 프레임이
-    # n_reject 를 빼므로 두 축이 한 등식에서 닫힌다. (b) 원장 보존은 EG1_credit_daily.
+    # GATES §3 ⑪ (a): 좌변 = 격자 행수. 우변은 격자 + 격자 밖 **채택 판본** 원장 행(= 격리 후보)
+    # + 잔고 이상 + 접힌 판본이고 프레임이 n_reject 를 빼므로 두 축이 한 등식에서 닫힌다.
+    # 격자 밖 항이 채택 판본만 세는 것이 중요하다 — 원장 전건으로 세면 접힌 판본이 두 항에 겹쳐
+    # 잡혀 우변이 부풀고 등식이 깨진다. (b) 원장 보존은 EG1_credit_daily.
     eg1_lhs_sql="SELECT count(*) FROM out_pq",
     eg1_rhs_sql=(f"SELECT (SELECT count(*) FROM universe_daily WHERE {grid_predicate()}) "
-                 "+ (SELECT count(*) FROM stg_credit_daily c WHERE NOT EXISTS ("
+                 f"+ (SELECT count(*) FROM ({first_version_sql()}) c WHERE NOT EXISTS ("
                  "SELECT 1 FROM universe_daily u WHERE u.ticker = c.ticker AND u.date = c.date "
                  f"AND {grid_predicate('u')})) "
-                 f"+ (SELECT count(*) FROM ({_over_shares_sql()}))"),
+                 f"+ (SELECT count(*) FROM ({_over_shares_sql()})) "
+                 f"+ (SELECT coalesce(sum(n_versions - 1), 0) FROM ({_version_group_sql()}))"),
     sql_path=SQL_DIR / "credit_daily.sql",
     input_columns={
         "trading_calendar": ("date",),
         "universe_daily": ("date", "ticker", "status", "sec_type"),
         "price_daily": ("ticker", "date", "close", "shares_out"),
-        "stg_credit_daily": ("ticker", "date", "stlm_date", "close_krw", *MEASURE_COLUMNS),
+        # `observed_date` 는 판본 선택 축이다(결정 6-2) — 값으로 나르지 않고 고르는 데만 쓴다.
+        "stg_credit_daily": ("ticker", "date", "stlm_date", "close_krw", *MEASURE_COLUMNS,
+                             "observed_date"),
         "stg_units_kis": ("dataset", "ticker", "status", "window_from", "window_to")},
     available_basis=("default",),
     content_date_column="date",
@@ -513,4 +626,5 @@ BASELINE_SEED = Path(__file__).parent / "baseline_seed_s10.json"
 
 __all__ = ["BALANCE_SHARE_COLUMNS", "BASELINE_SEED", "CREDIT_DAILY", "FIELDS",
            "MEASURE_COLUMNS", "REJECTED_CELL_KIND", "REJECT_REASONS", "TABLES", "UNIT_DATASET",
-           "grid_predicate", "over_shares_predicate"]
+           "VERSION_ORDER_COLUMNS", "VERSION_RANKED_SQL", "first_version_sql", "grid_predicate",
+           "over_shares_predicate"]

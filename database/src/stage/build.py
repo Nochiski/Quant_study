@@ -248,6 +248,16 @@ def _stage_sql(rule: TableRule, src_view: str, src_cols: list[str],
     # 원장 컬럼은 raw__ 접두사로 분리 — duckdb 식별자는 대소문자 무시(LIST_SHRS = list_shrs)
     raw_sel = ", ".join(f"s.{_q(c)} AS {_q('raw__' + c)}" for c in src_cols)
     nk = ", ".join(_q(k) for k in rule.natural_key)
+    # 같은 날 판본 접기(2026-09-11): 판본 축은 observed_date(KST 날짜)라 같은 키가 하루에 페이로드가 다른
+    # 관측을 두 번 가지면(예: DART 06:47 재스윕 + 18:05 저녁 스윕, 같은 날 정정) G6 이 표를 폐기했다.
+    # 그날의 판 = **그날의 마지막 관측**(collected_at 최댓값)으로 접고 나머지는 n_dedup_same_day 로 센다.
+    # 콜·유닛 로그(versioned=False)와 관측일이 없는 표는 접지 않는다 — 같은 키가 하루 여러 번이 정상이다.
+    if rule.observed_src and getattr(rule, "versioned", True):
+        rn_day_expr = (f"CASE WHEN r.rn = 1 THEN row_number() OVER ("
+                       f"PARTITION BY {nk}, observed_date, reject_reason, (r.rn = 1) "
+                       f"ORDER BY s_observed_raw DESC, payload_hash) ELSE 0 END")
+    else:
+        rn_day_expr = "1"
     return f"""
 WITH cast_ AS (
   SELECT {raw_sel}, s._src, {", ".join(sel)},
@@ -266,12 +276,16 @@ WITH cast_ AS (
               {out_of_range}
          END AS reject_reason
   FROM mk m
+), ranked AS (
+  SELECT f.*,
+         row_number() OVER (PARTITION BY {nk}, payload_hash, reject_reason
+                            ORDER BY observed_date{order_obs}) AS rn,
+         count(*) OVER (PARTITION BY {nk}, payload_hash, reject_reason) AS observed_n
+  FROM flagged f
 )
-SELECT f.*,
-       row_number() OVER (PARTITION BY {nk}, payload_hash, reject_reason
-                          ORDER BY observed_date{order_obs}) AS rn,
-       count(*) OVER (PARTITION BY {nk}, payload_hash, reject_reason) AS observed_n
-FROM flagged f"""
+SELECT r.*,
+       {rn_day_expr} AS rn_day
+FROM ranked r"""
 
 
 def _output_columns(rule: TableRule) -> list[str]:
@@ -469,14 +483,16 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
             SELECT {out_cols}, {avail_sel}, a.observed_date, a.observed_n, a._src,
                    CASE WHEN len(a._cast_fail_cols) > 0 THEN 'partial' ELSE 'ok' END AS _src_flag,
                    a._cast_fail_cols, a.miss_kind{year_sel}
-            FROM stage_all a {avail_join} WHERE a.rn = 1 AND a.reject_reason IS NULL""")
+            FROM stage_all a {avail_join}
+            WHERE a.rn = 1 AND a.rn_day <= 1 AND a.reject_reason IS NULL""")
         raw_cols = ", ".join(f"{_q('raw__' + c)} AS {_q(c)}" for c in src_cols)
         con.execute(f"""CREATE OR REPLACE TEMP VIEW stage_rej AS
             SELECT {raw_cols}, _src, 'G7' AS reject_gate, reject_reason
-            FROM stage_all WHERE rn = 1 AND reject_reason IS NOT NULL""")
+            FROM stage_all WHERE rn = 1 AND rn_day <= 1 AND reject_reason IS NOT NULL""")
         n_src = _count(con, "SELECT count(*) FROM src_all")
         n_reject = _count(con, "SELECT count(*) FROM stage_rej")
-        n_dedup = _count(con, "SELECT count(*) FROM stage_all WHERE rn > 1")
+        n_dedup_same_day = _count(con, "SELECT count(*) FROM stage_all WHERE rn = 1 AND rn_day > 1")
+        n_dedup = _count(con, "SELECT count(*) FROM stage_all WHERE rn > 1") + n_dedup_same_day
         lookup_miss = None
         if rule.available.kind == "lookup":
             lookup_miss = _count(con, "SELECT count(*) FROM stage_ok "
@@ -515,7 +531,7 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
             cross_alias = rule.cross_check.db
         ctx = gates.GateContext(
             con=con, rule=rule, src_view="src_all", stage_view="stage_pq", reject_view="stage_rej",
-            n_src=n_src, n_dedup=n_dedup, n_reject=n_reject, n_stage=n_stage,
+            n_src=n_src, n_dedup=n_dedup, n_dedup_same_day=n_dedup_same_day, n_reject=n_reject, n_stage=n_stage,
             thresholds=thresholds, fixtures=fixtures, baseline=baseline,
             previous_g1=_previous_g1(table_root), cross_alias=cross_alias, current_year=now_year,
             lookup_miss=lookup_miss, parse_metrics=parse_metrics)
@@ -546,6 +562,7 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
             meta: dict[str, object] = {
                 "table": rule.name, "build_id": bid, "partition": label or "whole",
                 "n_rows": n, "n_src": n_src, "fanout": rule.fanout, "n_dedup": n_dedup,
+                "n_dedup_same_day": n_dedup_same_day,
                 "n_reject": n_reject, "n_out_of_range": g7.metrics.get("n_out_of_range"),
                 "src_bytes": sum(f.bytes for f in src_files),
                 "src_mtime": max((f.src_mtime for f in src_files), default=0.0),

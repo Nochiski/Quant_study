@@ -9,6 +9,9 @@
 --   status 어휘에 'delisted' 는 없다(폐지일엔 구간이 없다, S03) — 술어는 그대로 둔다.
 --
 -- 격리(EG7-P06 격리형, 행을 버리지 않고 `_reject/<reason>/` 으로). 대상은 원장 행이다:
+--   version_folded      = 같은 (ticker, date) 의 재수집 판본 중 **최초 관측판이 아닌** 행
+--                         (결정 6-2 · 검수 종합 H3, 아래 `ver`·`src` CTE). 가장 먼저 판정되므로
+--                         접힌 판본은 아래 세 술어를 다시 묻지 않는다.
 --   pre_calendar        = `date < min(trading_calendar.date)` (캘린더 하한 이전. 절단본 85행 = 2009년)
 --   off_grid            = 캘린더 안이지만 그 (ticker, date) 격자 셀이 없다 — 상장 전·재상장 공백
 --                         기간에 KIS 가 돌려준 행(절단본 9행, 전부 `_src_flag='partial'`)
@@ -46,6 +49,19 @@
 --   대응(FIELD_MAP §1)이 소비 시점에 0 으로 읽는다 — 값 축과 지식 축을 섞지 않는다.
 --   원장 일괄 결측 의심일(격자에 종목이 있는데 measured 가 0 인 날)은 EG3_credit_daily 기록형.
 --
+-- **판본 선택 = 최초 관측판**(결정 6-2, 검수 종합 H3). `stg_credit_daily` 는 append_only ·
+-- `key_unique=False` 라 같은 (ticker, date) 에 값이 다른 판본이 공존한다 — KIS 가 `stck_prpr` 등
+-- 가격을 조회 시점 수정주가로 **소급 환산**해 주므로 기업행위 뒤 재수집하면 payload 가 달라지고
+-- stage 가 접지 못한다(서버 실측 536군 · 2026년 505군 · 29종목, 001290 2026-08-18 close_krw
+-- 969 vs 4,845). 판본 선택 없이 조인하면 격자 조인이 팬아웃해 EG3 격자 유일성에서 빌드가 폐기된다.
+-- 고르는 것은 `observed_date` 가 가장 이른 행 = **그날 시점에 볼 수 있던 값**이다. 최신판을 고르면
+-- 과거 셀 값이 뒤에 일어난 기업행위로 소급해 바뀌어 look-ahead 가 된다(가격 조정은 `adj_factor`
+-- 몫이고 KIS 가격 컬럼은 가격 축이 아니다 — STAGE_SPEC §4 KIS). stage 산출에 `collected_at` 원값이
+-- 없어 같은 날 두 판은 `observed_date` 로 갈리지 않으므로, 재현성(EG5a)을 위해 우리가 나르는 payload
+-- 전부를 2차 정렬 키로 세운다(`rules_s10.VERSION_ORDER_COLUMNS`). 접힌 판본은 버리지 않고
+-- `_reject/version_folded/` 에 **원값째** 남는다 — `base` 가 자기 `version_rn` 을 조인 축으로 달고
+-- 내려보내므로 채택판 값이 아니라 자기 값을 나른다.
+--
 -- 나르지 않는 것: `stg_credit_daily` 의 가격 에코(close/open/high/low·prdy_*·acml_vol_shr).
 --   `price_basis_close = 'adjusted_asof_collect'` — 수집 시점 기준 수정종가라 PIT 축이 아니고,
 --   원주가 정본은 `price_daily`(원칙 ②)다. 두 축의 어긋남은 EG3_credit_daily 가 기록형으로 센다.
@@ -58,6 +74,35 @@
 -- 규약). `stlm_date`(결제일, date + 2~12일)는 미래 날짜지만 available 축이 아니라 **보존 컬럼**이다.
 WITH cal AS (
     SELECT min(date) AS first_date FROM trading_calendar
+),
+ver AS (
+    -- 판본 순위. 본문은 `rules_s10.VERSION_RANKED_SQL` 과 글자 그대로 같다(테스트가 대조).
+    SELECT c.*,
+           row_number() OVER (PARTITION BY c.ticker, c.date
+                              ORDER BY c."observed_date" NULLS LAST,
+                                       c."stlm_date" NULLS LAST,
+                                       c."close_krw" NULLS LAST,
+                                       c."whol_loan_new_stcn_shr" NULLS LAST,
+                                       c."whol_loan_rdmp_stcn_shr" NULLS LAST,
+                                       c."whol_loan_rmnd_stcn_shr" NULLS LAST,
+                                       c."whol_loan_new_amt" NULLS LAST,
+                                       c."whol_loan_rdmp_amt" NULLS LAST,
+                                       c."whol_loan_rmnd_amt" NULLS LAST,
+                                       c."whol_loan_rmnd_rate_pct" NULLS LAST,
+                                       c."whol_loan_gvrt_pct" NULLS LAST,
+                                       c."whol_stln_new_stcn_shr" NULLS LAST,
+                                       c."whol_stln_rdmp_stcn_shr" NULLS LAST,
+                                       c."whol_stln_rmnd_stcn_shr" NULLS LAST,
+                                       c."whol_stln_new_amt" NULLS LAST,
+                                       c."whol_stln_rdmp_amt" NULLS LAST,
+                                       c."whol_stln_rmnd_amt" NULLS LAST,
+                                       c."whol_stln_rmnd_rate_pct" NULLS LAST,
+                                       c."whol_stln_gvrt_pct" NULLS LAST) AS version_rn
+    FROM stg_credit_daily c
+),
+src AS (
+    -- 채택 판본 = (ticker, date) 당 최초 관측판 하나. 아래 격자·격리 술어는 전부 이것을 본다.
+    SELECT * FROM ver WHERE version_rn = 1
 ),
 grid AS (
     SELECT u.date, u.ticker
@@ -91,30 +136,37 @@ island AS (
 over AS (
     -- 격자 안이면서 잔고주수 > 그날 상장주식수인 원장 행. `shares_out` NULL 은 판정 밖이다.
     SELECT c.ticker, c.date
-    FROM stg_credit_daily c
+    FROM src c
     JOIN grid g       ON g.ticker = c.ticker AND g.date = c.date
     JOIN price_daily p ON p.ticker = c.ticker AND p.date = c.date
     WHERE p.shares_out IS NOT NULL
       AND (c.whol_loan_rmnd_stcn_shr > p.shares_out OR c.whol_stln_rmnd_stcn_shr > p.shares_out)
 ),
 base AS (
-    -- 격자 셀(채택) + 격자 밖 원장 행(격리) + 잔고 이상 원장 행(격리).
+    -- 격자 셀(채택) + 격자 밖 원장 행(격리) + 잔고 이상 원장 행(격리) + 접힌 판본(격리).
     -- `drop_value` 는 격자 셀 쪽에만 선다 — 그 셀은 값을 받지 않고, 같은 키의 원장 행은
-    -- `_reject/balance_over_shares/` 에 원값째로 남는다.
+    -- `_reject/balance_over_shares/` 에 원값째로 남는다. `version_pick` 은 "이 행이 어느 판본의
+    -- 값을 받을 것인가" 다 — 채택 판본을 보는 세 가지는 1, 접힌 판본만 자기 순위를 쓴다.
     SELECT g.date, g.ticker, NULL::VARCHAR AS reject_reason,
            EXISTS (SELECT 1 FROM over o WHERE o.ticker = g.ticker AND o.date = g.date)
-                                        AS drop_value
+                                        AS drop_value,
+           CAST(1 AS BIGINT)            AS version_pick
     FROM grid g
     UNION ALL
     SELECT c.date, c.ticker,
            CASE WHEN c.date < (SELECT first_date FROM cal) THEN 'pre_calendar'
                 ELSE 'off_grid' END,
-           false
-    FROM stg_credit_daily c
+           false, CAST(1 AS BIGINT)
+    FROM src c
     WHERE NOT EXISTS (SELECT 1 FROM grid g WHERE g.ticker = c.ticker AND g.date = c.date)
     UNION ALL
-    SELECT o.date, o.ticker, 'balance_over_shares', false
+    SELECT o.date, o.ticker, 'balance_over_shares', false, CAST(1 AS BIGINT)
     FROM over o
+    UNION ALL
+    -- 접힌 판본. 자기 `version_rn` 을 조인 축으로 달고 내려가 **자기 원값**을 싣는다.
+    SELECT f.date, f.ticker, 'version_folded', false, f.version_rn
+    FROM ver f
+    WHERE f.version_rn > 1
 ),
 cell AS (
     SELECT b.date, b.ticker, b.reject_reason, b.drop_value,
@@ -135,8 +187,11 @@ cell AS (
     -- b.drop_value` 로 쓰면 안 된다 — 한쪽(b)만 보는 술어는 DuckDB 가 조인 조건으로 쓰지 못하고
     -- LEFT JOIN 이라 필터로 내리지도 못해, 해시 조인이 BLOCKWISE_NL_JOIN(격자 9.2M × 원장
     -- 8.4M)으로 떨어진다. 서버 실측 6초 → 70분+ (S10 2차, 09-06).
-    LEFT JOIN (SELECT *, false AS drop_value FROM stg_credit_daily) s
-           ON s.ticker = b.ticker AND s.date = b.date AND s.drop_value = b.drop_value
+    -- 판본 축(`version_rn` = `version_pick`)도 등호 조인이다 — 격자 셀·격리 원장 행은 1, 접힌
+    -- 판본은 자기 순위를 들고 오므로 한 조인으로 "누구의 값인가" 가 갈린다.
+    LEFT JOIN (SELECT *, false AS drop_value FROM ver) s
+           ON s.ticker = b.ticker AND s.date = b.date
+          AND s.version_rn = b.version_pick AND s.drop_value = b.drop_value
     LEFT JOIN island iok ON iok.ticker = b.ticker AND iok.status = 'ok'
                         AND b.date BETWEEN iok.wf AND iok.wt
     LEFT JOIN island iem ON iem.ticker = b.ticker AND iem.status = 'empty'

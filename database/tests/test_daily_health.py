@@ -270,3 +270,14 @@ def test_LIST_SHRS가_NULL이_되면_후보로_뜬다(tmp_path) -> None:
     assert c.status is lh.Status.FAIL
     assert [i["code"] for i in c.value["items"]] == ["000003"]
     assert c.value["items"][0]["shares_ratio"] is None
+
+
+def test_KRX_지수가_추가돼도_행수_검사는_통과한다(tmp_path) -> None:
+    """09-12 08:10 실전: KRX 가 09-11 에 '코스피 200 25/50' 계열 지수 3개를 추가해 코스피 지수 행이 51→54 가 됐고
+    등호 검사가 원장 건전성을 FAIL 시켜 확정 빌드가 막혔다. 지수 행수는 하한이다 — 줄어드는 쪽만 위험하다."""
+    krx = _krx(tmp_path, kospi=54)
+    rep = lh.run(D, _paths(tmp_path, krx=krx))
+    assert _by(rep)["krx.rows"].status is lh.Status.PASS
+    krx = _krx(tmp_path, kospi=50)
+    rep = lh.run(D, _paths(tmp_path, krx=krx))
+    assert _by(rep)["krx.rows"].status is lh.Status.FAIL

@@ -234,12 +234,13 @@ def check_krx(con: sqlite3.Connection, d: str, d_prev: str, cal: _cal.Calendar) 
                     "krx_kospi_dd_trd", "krx_kosdaq_dd_trd", "krx_etf_bydd_trd"):
             cnt[tbl] = _count(con, f"SELECT COUNT(*) FROM {tbl} WHERE bas_dd_req=?", (d,)) if _has_table(con, tbl) else 0
         ok = (cnt["krx_stk_bydd_trd"] >= 920 and cnt["krx_ksq_bydd_trd"] >= 1780
-              and cnt["krx_kospi_dd_trd"] == 51 and cnt["krx_kosdaq_dd_trd"] == 40
+              and cnt["krx_kospi_dd_trd"] >= 51 and cnt["krx_kosdaq_dd_trd"] >= 40
               and cnt["krx_etf_bydd_trd"] >= 1120
               and cnt["krx_stk_bydd_trd"] == cnt["krx_stk_isu_base_info"]
               and cnt["krx_ksq_bydd_trd"] == cnt["krx_ksq_isu_base_info"])
         out.append(Check("krx.rows", Level.REQUIRED, Status.PASS if ok else Status.FAIL, cnt,
-                         "stk>=920 ksq>=1780 kospi=51 kosdaq=40 etf>=1120, stk=stk_base, ksq=ksq_base (20거래일 실측)"))
+                         "stk>=920 ksq>=1780 kospi>=51 kosdaq>=40 etf>=1120, stk=stk_base, ksq=ksq_base "
+                         "(20거래일 실측. 지수는 하한 — 09-11 KRX 가 코스피 200 25/50 계열 3개를 추가해 51→54)"))
     out.append(check_krx_corp_actions(con, d, d_prev))
     return out
 

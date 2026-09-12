@@ -176,13 +176,18 @@ def _c3_monotonic(pairs: list[_Pair], write_modes: Mapping[str, str]) -> Check:
                  {"n_checked": n_checked, "decreased": decreased})
 
 
-def _c4_frozen(pairs: list[_Pair]) -> Check:
-    """소스 계수가 안 움직인 표는 해시도 그대로여야 한다 — 재빌드 없이 재현성을 본다."""
+def _c4_frozen(pairs: list[_Pair], unversioned: Collection[str] = ()) -> Check:
+    """소스 계수가 안 움직인 표는 해시도 그대로여야 한다 — 재빌드 없이 재현성을 본다.
+
+    `unversioned`(콜·유닛 로그, `versioned=False`)는 대조하지 않는다 — 원장 로그는 행이 늘지 않아도
+    상태 컬럼이 제자리에서 바뀐다(`ingest_log` 유닛 status). 09-12 아침 `stg_units_dart` 가 계수 동일·
+    해시 상이로 C4 를 깨뜨렸다.
+    """
     keys = ("n_src", "n_dedup", "n_reject")
     mismatched: list[dict[str, object]] = []
     n_frozen = n_compared = 0
     for p in pairs:
-        if p.table in C4_EXCLUDE or p.current is None or p.previous is None:
+        if p.table in C4_EXCLUDE or p.table in unversioned or p.current is None or p.previous is None:
             continue
         cur_g1, prev_g1 = _g1(p.current), _g1(p.previous)
         if cur_g1 is None or prev_g1 is None:
@@ -261,12 +266,14 @@ def check_stage(stage_root: Path, basis: str, date_kst: str, *,
                          f"allowed={sorted(model.BASIS_PREFIX)}")
     write_modes = dict(tables) if tables is not None else {
         name: rule.write_mode for name, rule in rules.RULES.items()}
+    unversioned = {name for name, rule in rules.RULES.items()
+                   if name in write_modes and not getattr(rule, "versioned", True)}
     skipped = sorted(set(skip) & set(write_modes))
     judged = [_pair(stage_root, t) for t in sorted(write_modes) if t not in skipped]
     checks = (_c1_fresh(judged, basis, built_on, skipped),
               _c2_failed(stage_root, built_on),
               _c3_monotonic(judged, write_modes),
-              _c4_frozen(judged),
+              _c4_frozen(judged, unversioned),
               _c5_elapsed(judged, built_on, started_at, budget_s))
     return StageHealth(date_kst, basis, str(stage_root), checks, built_on)
 

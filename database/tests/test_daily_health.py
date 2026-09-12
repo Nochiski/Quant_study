@@ -278,6 +278,9 @@ def test_KRX_지수가_추가돼도_행수_검사는_통과한다(tmp_path) -> N
     krx = _krx(tmp_path, kospi=54)
     rep = lh.run(D, _paths(tmp_path, krx=krx))
     assert _by(rep)["krx.rows"].status is lh.Status.PASS
+
+
+def test_KRX_지수가_줄면_행수_검사는_실패한다(tmp_path) -> None:
     krx = _krx(tmp_path, kospi=50)
     rep = lh.run(D, _paths(tmp_path, krx=krx))
     assert _by(rep)["krx.rows"].status is lh.Status.FAIL

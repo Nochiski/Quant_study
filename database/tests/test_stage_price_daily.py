@@ -5,6 +5,7 @@ from pathlib import Path
 
 import duckdb
 import pytest
+
 from stage import build, gates, manifest, rules, snapshot
 
 KRX_COLS = ["BAS_DD", "ISU_CD", "ISU_NM", "MKT_NM", "SECT_TP_NM", "TDD_CLSPRC", "CMPPREVDD_PRC",
@@ -56,10 +57,12 @@ def _write_kiwoom(path: Path) -> None:
     con = sqlite3.connect(path)
     con.execute("CREATE TABLE ka10060_investor_flows (ticker TEXT, dt TEXT, cur_prc TEXT, "
                 "acc_trde_prica TEXT, collected_at TEXT)")
+    # collected_at = UTC. G9 는 다음 날(KST) 이후 관측만 대조한다(결정 10) — 당일 저녁 관측은 잠정치.
     con.executemany("INSERT INTO ka10060_investor_flows VALUES (?,?,?,?,?)", [
-        ("005930", "20180503", "-2650000", "100", "x"),   # 부호 접두 = 방향 표시자 → abs 일치
-        ("005930", "20180504", "+51900", "500", "x"),
-        ("035720", "20180503", "10000", "11", "x"),       # 거래량 1 차이 → 거래량 불일치 1건
+        ("005930", "20180503", "-2650000", "100", "2018-05-03T21:05:00"),   # 부호 접두 → abs 일치 (KST 05-04)
+        ("005930", "20180504", "+51900", "500", "2018-05-04T21:05:00"),     # KST 05-05
+        ("035720", "20180503", "10000", "11", "2018-05-03T21:05:00"),       # 거래량 1 차이 → 불일치 1건
+        ("005930", "20180504", "+51900", "999", "2018-05-04T09:10:00"),     # 당일 18:10 KST 저녁 관측 → 대조 제외
     ])
     con.commit()
     con.close()
@@ -254,7 +257,7 @@ def test_gate_g9_cross_source_match_against_kiwoom(snap: snapshot.Snapshot, tmp_
     r = _built(snap, tmp_path)
     g = _gate(r, "G9")
     assert g.status is gates.GateStatus.PASS
-    assert g.metrics["close_joined"] == 3
+    assert g.metrics["close_joined"] == 3          # 당일 저녁 관측(volume 999) 은 대조에서 빠진다(결정 10)
     assert g.metrics["close_match_ratio"] == 1.0
     assert g.metrics["volume_match_ratio"] == pytest.approx(2 / 3)
 

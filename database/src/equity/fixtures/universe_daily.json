@@ -40,12 +40,12 @@
  {
   "case": "FX-1-011b",
   "key": {
-   "date": "2026-08-21",
+   "date": "2026-08-23",
    "ticker": "005930"
   },
   "column": "status",
   "expect": null,
-  "source": "hand — backfill_end 다음 날(2026-08-21 금)은 캘린더에 없어 격자 행이 없다",
+  "source": "hand — 일요일(2026-08-23)은 캘린더에 없어 격자 행이 없다. 옛 값 2026-08-21(backfill_end 다음 날)은 상한이 매일 늘어나는 e1.15.0 부터 서버에서 행이 생겨 깨졌다(09-13 진단 실행)",
   "expect_source": "hand",
   "fixture_class": "positive",
   "note": "행 부재 = NULL 기대로 표현한다(EG4 규약). coverage_gap 행을 만들면 여기서 'coverage_gap' 이 나와 실패한다"

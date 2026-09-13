@@ -147,17 +147,31 @@ def _c1_fresh(pairs: list[_Pair], basis: str, date_kst: str, skipped: list[str])
                   "stale": stale, "basis_mismatch": mismatch, "skipped": skipped})
 
 
-def _c2_failed(stage_root: Path, date_kst: str) -> Check:
+def _c2_failed(stage_root: Path, date_kst: str, started_at: str | None = None) -> Check:
+    """이번 체인이 낸 게이트 폐기. `started_at`(체인 시작 UTC) 이 있으면 그 뒤에 생긴 `_failed/` 만 센다 —
+    같은 날 앞선 실행이 남긴 폐기 파일을 세면 재실행이 영영 통과하지 못한다(09-12 12:49 실측: 10:11 실행의
+    stg_price_daily 폐기 파일이 12:00 재실행의 C2 를 깨뜨렸다). `started_at` 이 없으면 종전대로 오늘 날짜."""
     d = stage_root / "_failed"
     files = sorted(p.stem for p in d.glob("*.json")) if d.is_dir() else []
+    since: dt.datetime | None = None
+    if started_at:
+        since = dt.datetime.fromisoformat(started_at)
+        if since.tzinfo is None:
+            since = since.replace(tzinfo=dt.UTC)
     today = []
     for bid in files:
         when = model.build_id_time(bid)
-        if when is not None and when.astimezone(KST).strftime("%Y%m%d") == date_kst:
+        if when is None:
+            continue
+        if since is not None:
+            if when >= since:
+                today.append(bid)
+        elif when.astimezone(KST).strftime("%Y%m%d") == date_kst:
             today.append(bid)
-    detail = f"오늘 게이트 폐기 {len(today)}건 (누적 {len(files)}건)" + _listed("폐기", today)
+    scope = f"체인 시작({since.astimezone(KST):%H:%M} KST) 이후" if since else "오늘"
+    detail = f"{scope} 게이트 폐기 {len(today)}건 (누적 {len(files)}건)" + _listed("폐기", today)
     return Check("C2", Status.FAIL if today else Status.PASS, detail,
-                 {"today": today, "n_files": len(files)})
+                 {"today": today, "n_files": len(files), "since": started_at})
 
 
 def _c3_monotonic(pairs: list[_Pair], write_modes: Mapping[str, str]) -> Check:
@@ -271,7 +285,7 @@ def check_stage(stage_root: Path, basis: str, date_kst: str, *,
     skipped = sorted(set(skip) & set(write_modes))
     judged = [_pair(stage_root, t) for t in sorted(write_modes) if t not in skipped]
     checks = (_c1_fresh(judged, basis, built_on, skipped),
-              _c2_failed(stage_root, built_on),
+              _c2_failed(stage_root, built_on, started_at),
               _c3_monotonic(judged, write_modes),
               _c4_frozen(judged, unversioned),
               _c5_elapsed(judged, built_on, started_at, budget_s))

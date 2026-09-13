@@ -39,6 +39,7 @@ SUM="$OUT/summary.tsv"
 ORDER="trading_calendar corp security security_span corp_ticker index_daily price_daily corp_event adj_factor price_adj_daily universe_daily universe_policy flow_daily short_daily credit_daily disclosure_version fin_std holder_daily ownership_snapshot audit_opinion shares_outstanding treasury_stock dividend_event consensus_daily opinion_daily opinion_broker_daily coverage_daily dataset_profile factor_readiness"
 
 T_ALL0=$(date +%s)
+ANY_FAIL=""
 for t in $ORDER; do
   T0=$(date +%s)
   echo "=== [$PASS] build $t  basis=${BASIS:-manual}  $(date -u +%FT%TZ)"
@@ -50,7 +51,16 @@ for t in $ORDER; do
   [ "$RC" -eq 0 ] && H=$(.venv/bin/python scripts/equity_manifest_row.py "$t")   # 실패한 표는 MANIFEST 가 없을 수 있다
   printf '%s\t%s\t%s\t%s\n' "$t" "$RC" "$((T1-T0))" "$H" >> "$SUM"
   echo "    rc=$RC  $((T1-T0))s  $H"
-  if [ "$RC" -ne 0 ]; then echo "!!! FAILED $t (rc=$RC) — 중단"; echo "FAILED $t" >> "$OUT/STATUS"; exit "$RC"; fi
+  if [ "$RC" -ne 0 ]; then
+    echo "FAILED $t" >> "$OUT/STATUS"
+    if [ -n "${QL_EQUITY_CONTINUE:-}" ]; then
+      # 진단 모드(2026-09-13): 첫 실패에서 멈추지 않고 끝까지 돌아 실패 표를 한 번에 모은다. 하류 표는
+      # 상류 실패 판(이전 판)을 입력으로 쓰므로 결과 판은 운영에 쓰지 않는다 — summary.tsv 만 읽는다.
+      echo "!!! FAILED $t (rc=$RC) — QL_EQUITY_CONTINUE 라 계속"; ANY_FAIL=1; continue
+    fi
+    echo "!!! FAILED $t (rc=$RC) — 중단"; exit "$RC"
+  fi
 done
 T_ALL1=$(date +%s)
-echo "TOTAL $((T_ALL1-T_ALL0))s" | tee "$OUT/STATUS"
+echo "TOTAL $((T_ALL1-T_ALL0))s" | tee -a "$OUT/STATUS"
+[ -n "$ANY_FAIL" ] && { echo "!!! 진단 모드 — 실패 표: $(grep FAILED "$OUT/STATUS" | tr '\n' ' ')"; exit 1; }

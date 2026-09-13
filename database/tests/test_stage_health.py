@@ -116,6 +116,22 @@ def test_c2_counts_only_failed_reports_from_today(tmp_path: Path, make_stage_tre
     assert c2.metrics["today"] == ["e_20260911T092000_000000Z"]
 
 
+def test_c2_with_started_at_ignores_failures_from_an_earlier_run_the_same_day(
+        tmp_path: Path, make_stage_tree) -> None:
+    """09-12 12:49 실측: 10:11 실행이 남긴 폐기 파일이 12:00 재실행의 C2 를 깨뜨렸다. 체인 시작 시각을 주면
+    그 이후의 폐기만 센다 — 같은 날 앞선 실행의 폐기는 고쳐서 다시 지은 것이라 이번 판의 문제가 아니다."""
+    root = _all(tmp_path, make_stage_tree)
+    failed = root / "_failed"
+    failed.mkdir()
+    (failed / "e_20260911T012000_000000Z.json").write_text("{}", encoding="utf-8")   # 오늘 10:20 KST, 이전 실행
+    c2 = _check(_run(root, started_at="2026-09-11T02:00:00+00:00"), "C2")             # 체인 시작 11:00 KST
+    assert c2.status is health.Status.PASS and c2.metrics["today"] == []
+    (failed / "e_20260911T092000_000000Z.json").write_text("{}", encoding="utf-8")   # 18:20 KST, 이번 체인
+    c2 = _check(_run(root, started_at="2026-09-11T02:00:00+00:00"), "C2")
+    assert c2.status is health.Status.FAIL and c2.metrics["today"] == ["e_20260911T092000_000000Z"]
+    assert "체인 시작" in c2.detail
+
+
 # ── C3 append_only 행수 비감소 ──────────────────────────────────────────────
 
 

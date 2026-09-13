@@ -1,86 +1,205 @@
 [
- {"case": "fx_3_008_loan_balance_shares_005930_20200102",
-  "key": {"ticker": "005930", "date": "2020-01-02"},
-  "column": "whol_loan_rmnd_stcn_shr", "expect": "2435031",
-  "source": "stage:stg_credit_daily — FX-3-008 값·단위 접미사 보존(주수, 무수정)"},
- {"case": "fx_3_008_loan_balance_amount_005930_20200102",
-  "key": {"ticker": "005930", "date": "2020-01-02"},
-  "column": "whol_loan_rmnd_amt", "expect": "11467248",
-  "source": "stage:stg_credit_daily — 단위 미상 금액은 원값 그대로(_krw 접미사 금지)"},
- {"case": "fx_3_008_amt_basis_unknown_005930_20200102",
-  "key": {"ticker": "005930", "date": "2020-01-02"},
-  "column": "amt_basis", "expect": "unknown",
-  "source": "doc:STAGE_HANDOFF §1·§4 — *_amt 6컬럼 단위 미상"},
- {"case": "stln_balance_shares_005930_20200102",
-  "key": {"ticker": "005930", "date": "2020-01-02"},
-  "column": "whol_stln_rmnd_stcn_shr", "expect": "29538",
-  "source": "stage:stg_credit_daily — 대주 잔고 주수"},
- {"case": "loan_balance_rate_005930_20200102",
-  "key": {"ticker": "005930", "date": "2020-01-02"},
-  "column": "whol_loan_rmnd_rate_pct", "expect": "0.03",
-  "source": "stage:stg_credit_daily — 비율 축은 반올림 2자리 그대로"},
- {"case": "stlm_date_t_plus_2_005930_20200102",
-  "key": {"ticker": "005930", "date": "2020-01-02"},
-  "column": "stlm_date", "expect": "2020-01-06",
-  "source": "hand — 2020-01-02(목) + 2 영업일 = 01-06(월). stlm_date 는 보존 컬럼이다"},
- {"case": "fill_kind_measured_005930_20200102",
-  "key": {"ticker": "005930", "date": "2020-01-02"},
-  "column": "fill_kind", "expect": "{'kind': measured, 'evidence': unit_ok}",
-  "source": "hand — 원장 행이 있고 그 셀을 덮는 ok 유닛 창이 있다"},
- {"case": "available_date_is_date_005930_20200102",
-  "key": {"ticker": "005930", "date": "2020-01-02"},
-  "column": "available_date", "expect": "2020-01-02",
-  "source": "doc:DESIGN §2 — 일별 스냅샷 관례. 공표 랙은 dataset_profile"},
- {"case": "available_basis_default_005930_20200102",
-  "key": {"ticker": "005930", "date": "2020-01-02"},
-  "column": "available_basis", "expect": "default",
-  "source": "doc:DESIGN §2"},
-
- {"case": "fill_kind_src_omitted_000030_20180328",
-  "key": {"ticker": "000030", "date": "2018-03-28"},
-  "column": "fill_kind", "expect": "{'kind': src_omitted, 'evidence': unit_ok}",
-  "source": "stage:stg_units_kis — 원장 행 없음 ∧ ok 유닛 창이 그 날을 덮는다"},
- {"case": "src_omitted_keeps_null_000030_20180328",
-  "key": {"ticker": "000030", "date": "2018-03-28"},
-  "column": "whol_loan_rmnd_stcn_shr", "expect": null,
-  "source": "hand — 2018-03-28 은 전 종목 원장 결측일(앞뒤 거래일은 정상). 0 을 굽지 않는다"},
- {"case": "src_omitted_keeps_null_stlm_000030_20180328",
-  "key": {"ticker": "000030", "date": "2018-03-28"},
-  "column": "stlm_date", "expect": null,
-  "source": "hand — 원장 행이 없으면 결제일도 없다"},
- {"case": "backfill_end_gap_src_omitted_005930_20260820",
-  "key": {"ticker": "005930", "date": "2026-08-20"},
-  "column": "whol_loan_rmnd_stcn_shr", "expect": null,
-  "source": "doc:DESIGN §10 P16 — credit 백필 08-18 종료, 캘린더는 08-20"},
-
- {"case": "fill_kind_not_collected_003545_20100104",
-  "key": {"ticker": "003545", "date": "2010-01-04"},
-  "column": "fill_kind", "expect": "{'kind': not_collected, 'evidence': none}",
-  "source": "stage:stg_units_kis — 003545 는 credit 유닛이 하나도 없다(우선주 미수집)"},
- {"case": "not_collected_keeps_null_003545_20100104",
-  "key": {"ticker": "003545", "date": "2010-01-04"},
-  "column": "whol_loan_rmnd_amt", "expect": null,
-  "source": "hand — 미수집 셀은 전 축 NULL(원칙 ④)"},
-
- {"case": "span_first_day_measured_000030_20141119",
-  "key": {"ticker": "000030", "date": "2014-11-19"},
-  "column": "whol_loan_rmnd_stcn_shr", "expect": "849009",
-  "source": "stage:stg_credit_daily — 구간 첫날. 그 앞 11-17·18 원장 행은 _reject/off_grid"},
- {"case": "relisted_first_day_measured_036220_20240313",
-  "key": {"ticker": "036220", "date": "2024-03-13"},
-  "column": "whol_loan_rmnd_stcn_shr", "expect": "12079",
-  "source": "stage:stg_credit_daily — 재상장 첫날. 공백 기간 03-11·12 는 _reject/off_grid"},
-
- {"case": "etf_is_outside_grid_069500_20100104",
-  "key": {"ticker": "069500", "date": "2010-01-04"},
-  "column": "ticker", "expect": null,
-  "source": "doc:DESIGN §4-3 — 격자는 sec_type ∉ {etf}. ETF 행은 아예 없다"},
- {"case": "delisted_day_outside_grid_000030_20190213",
-  "key": {"ticker": "000030", "date": "2019-02-13"},
-  "column": "ticker", "expect": null,
-  "source": "hand — 000030 구간 마지막 거래일은 2019-02-12(폐지일엔 구간이 없다)"},
- {"case": "pre_calendar_day_outside_grid_000660_20091211",
-  "key": {"ticker": "000660", "date": "2009-12-11"},
-  "column": "ticker", "expect": null,
-  "source": "hand — 캘린더 하한 2010-01-04 이전 원장 행은 _reject/pre_calendar"}
+ {
+  "case": "fx_3_008_loan_balance_shares_005930_20200102",
+  "key": {
+   "ticker": "005930",
+   "date": "2020-01-02"
+  },
+  "column": "whol_loan_rmnd_stcn_shr",
+  "expect": "2435031",
+  "source": "stage:stg_credit_daily — FX-3-008 값·단위 접미사 보존(주수, 무수정)"
+ },
+ {
+  "case": "fx_3_008_loan_balance_amount_005930_20200102",
+  "key": {
+   "ticker": "005930",
+   "date": "2020-01-02"
+  },
+  "column": "whol_loan_rmnd_amt",
+  "expect": "11467248",
+  "source": "stage:stg_credit_daily — 단위 미상 금액은 원값 그대로(_krw 접미사 금지)"
+ },
+ {
+  "case": "fx_3_008_amt_basis_unknown_005930_20200102",
+  "key": {
+   "ticker": "005930",
+   "date": "2020-01-02"
+  },
+  "column": "amt_basis",
+  "expect": "unknown",
+  "source": "doc:STAGE_HANDOFF §1·§4 — *_amt 6컬럼 단위 미상"
+ },
+ {
+  "case": "stln_balance_shares_005930_20200102",
+  "key": {
+   "ticker": "005930",
+   "date": "2020-01-02"
+  },
+  "column": "whol_stln_rmnd_stcn_shr",
+  "expect": "29538",
+  "source": "stage:stg_credit_daily — 대주 잔고 주수"
+ },
+ {
+  "case": "loan_balance_rate_005930_20200102",
+  "key": {
+   "ticker": "005930",
+   "date": "2020-01-02"
+  },
+  "column": "whol_loan_rmnd_rate_pct",
+  "expect": "0.03",
+  "source": "stage:stg_credit_daily — 비율 축은 반올림 2자리 그대로"
+ },
+ {
+  "case": "stlm_date_t_plus_2_005930_20200102",
+  "key": {
+   "ticker": "005930",
+   "date": "2020-01-02"
+  },
+  "column": "stlm_date",
+  "expect": "2020-01-06",
+  "source": "hand — 2020-01-02(목) + 2 영업일 = 01-06(월). stlm_date 는 보존 컬럼이다"
+ },
+ {
+  "case": "fill_kind_measured_005930_20200102",
+  "key": {
+   "ticker": "005930",
+   "date": "2020-01-02"
+  },
+  "column": "fill_kind",
+  "expect": "{'kind': measured, 'evidence': unit_ok}",
+  "source": "hand — 원장 행이 있고 그 셀을 덮는 ok 유닛 창이 있다"
+ },
+ {
+  "case": "available_date_is_date_005930_20200102",
+  "key": {
+   "ticker": "005930",
+   "date": "2020-01-02"
+  },
+  "column": "available_date",
+  "expect": "2020-01-02",
+  "source": "doc:DESIGN §2 — 일별 스냅샷 관례. 공표 랙은 dataset_profile"
+ },
+ {
+  "case": "available_basis_default_005930_20200102",
+  "key": {
+   "ticker": "005930",
+   "date": "2020-01-02"
+  },
+  "column": "available_basis",
+  "expect": "default",
+  "source": "doc:DESIGN §2"
+ },
+ {
+  "case": "fill_kind_src_omitted_000030_20180328",
+  "key": {
+   "ticker": "000030",
+   "date": "2018-03-28"
+  },
+  "column": "fill_kind",
+  "expect": "{'kind': src_omitted, 'evidence': unit_ok}",
+  "source": "stage:stg_units_kis — 원장 행 없음 ∧ ok 유닛 창이 그 날을 덮는다"
+ },
+ {
+  "case": "src_omitted_keeps_null_000030_20180328",
+  "key": {
+   "ticker": "000030",
+   "date": "2018-03-28"
+  },
+  "column": "whol_loan_rmnd_stcn_shr",
+  "expect": null,
+  "source": "hand — 2018-03-28 은 전 종목 원장 결측일(앞뒤 거래일은 정상). 0 을 굽지 않는다"
+ },
+ {
+  "case": "src_omitted_keeps_null_stlm_000030_20180328",
+  "key": {
+   "ticker": "000030",
+   "date": "2018-03-28"
+  },
+  "column": "stlm_date",
+  "expect": null,
+  "source": "hand — 원장 행이 없으면 결제일도 없다"
+ },
+ {
+  "case": "first_observed_value_005930_20260818",
+  "key": {
+   "ticker": "005930",
+   "date": "2026-08-18"
+  },
+  "column": "whol_loan_rmnd_stcn_shr",
+  "expect": "22769350",
+  "source": "hand — 절단본 stg_credit_daily 005930 2026-08-18 최초 관측판(observed_date 2026-08-27) 값. 최초 관측판 규칙(결정 6-2)이라 재수집 판본이 늘어도 불변",
+  "expect_source": "hand",
+  "fixture_class": "positive",
+  "note": "옛 case backfill_end_gap_src_omitted_005930_20260820(8/20 = 절단본 credit 백필 끝 뒤라 None)은 실서버에서 8/20 값이 채워져 깨졌다(09-13 6차 확정 빌드: got 23803501). T+2 공백은 원장이 자라면 사라지는 절단본 특성이라 고정할 수 없다"
+ },
+ {
+  "case": "fill_kind_not_collected_003545_20100104",
+  "key": {
+   "ticker": "003545",
+   "date": "2010-01-04"
+  },
+  "column": "fill_kind",
+  "expect": "{'kind': not_collected, 'evidence': none}",
+  "source": "stage:stg_units_kis — 003545 는 credit 유닛이 하나도 없다(우선주 미수집)"
+ },
+ {
+  "case": "not_collected_keeps_null_003545_20100104",
+  "key": {
+   "ticker": "003545",
+   "date": "2010-01-04"
+  },
+  "column": "whol_loan_rmnd_amt",
+  "expect": null,
+  "source": "hand — 미수집 셀은 전 축 NULL(원칙 ④)"
+ },
+ {
+  "case": "span_first_day_measured_000030_20141119",
+  "key": {
+   "ticker": "000030",
+   "date": "2014-11-19"
+  },
+  "column": "whol_loan_rmnd_stcn_shr",
+  "expect": "849009",
+  "source": "stage:stg_credit_daily — 구간 첫날. 그 앞 11-17·18 원장 행은 _reject/off_grid"
+ },
+ {
+  "case": "relisted_first_day_measured_036220_20240313",
+  "key": {
+   "ticker": "036220",
+   "date": "2024-03-13"
+  },
+  "column": "whol_loan_rmnd_stcn_shr",
+  "expect": "12079",
+  "source": "stage:stg_credit_daily — 재상장 첫날. 공백 기간 03-11·12 는 _reject/off_grid"
+ },
+ {
+  "case": "etf_is_outside_grid_069500_20100104",
+  "key": {
+   "ticker": "069500",
+   "date": "2010-01-04"
+  },
+  "column": "ticker",
+  "expect": null,
+  "source": "doc:DESIGN §4-3 — 격자는 sec_type ∉ {etf}. ETF 행은 아예 없다"
+ },
+ {
+  "case": "delisted_day_outside_grid_000030_20190213",
+  "key": {
+   "ticker": "000030",
+   "date": "2019-02-13"
+  },
+  "column": "ticker",
+  "expect": null,
+  "source": "hand — 000030 구간 마지막 거래일은 2019-02-12(폐지일엔 구간이 없다)"
+ },
+ {
+  "case": "pre_calendar_day_outside_grid_000660_20091211",
+  "key": {
+   "ticker": "000660",
+   "date": "2009-12-11"
+  },
+  "column": "ticker",
+  "expect": null,
+  "source": "hand — 캘린더 하한 2010-01-04 이전 원장 행은 _reject/pre_calendar"
+ }
 ]

@@ -58,9 +58,16 @@ KW_LOG=""; DART_LOG=""; WISE_LOG=""; KW_DONE=""; WISE_DONE=""
 # 세 갈래는 서로 다른 원장(kiwoom.db · dart.db · wise.db)만 건드리므로 병렬이 안전하다.
 # 각자 자기 로그에 쓰고 rc 는 `wait <pid>` 로 따로 받는다 — 하나가 죽어도 나머지는 끝까지 간다.
 branch_kiwoom() {
-  echo "──── 키움 fetch+commit 시작 $(kst) ────"
+  # 키움 거래량은 18:05 에 시간외 반영 전 값이라(09-11 실측 315/2,650 이 KRX 확정치보다 작음) 19:05 부터가
+  # 최종이다(프로브: 19:05 갱신 뒤 다음 날 07:05 까지 불변). 사용자 결정(09-13, 결정 10-(d)): 키움 갈래만
+  # 19:05 까지 기다렸다 받는다. DART·WISE 는 18:05 그대로. dry-run 은 기다리지 않는다.
+  local wait_until="${QL_KW_EVENING_HHMM:-1905}"
+  if [ -z "$DRY" ]; then
+    while [ "$(TZ=Asia/Seoul date +%H%M)" -lt "$wait_until" ]; do sleep 60; done
+  fi
+  echo "──── 키움 fetch+commit 시작 $(kst) (하한 ${wait_until:0:2}:${wait_until:2:2} KST) ────"
   $PY -m daily.kw_daily --date "$D" --fetch --tr ka10060,ka10014 --commit \
-     --not-before "${QL_EVENING_NOT_BEFORE:-18:00}" $DRY $LIMIT
+     --not-before "${QL_EVENING_NOT_BEFORE:-19:00}" $DRY $LIMIT
   local rc=$?
   echo "DONE_AT=$(TZ=Asia/Seoul date '+%Y-%m-%dT%H:%M:%S+09:00')"
   echo "──── 키움 종료 rc=$rc $(kst) ────"

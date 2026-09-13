@@ -12,6 +12,7 @@ from pathlib import Path
 
 import duckdb
 import pytest
+
 from equity import build, rules_s01
 from equity.baseline import load as baseline_load
 from equity.gates import GateStatus
@@ -294,3 +295,40 @@ def test_지수만_하루_앞서도_생존_종목이_폐지로_떨어지지_않�
     index_ahead = run("2026-08-21")
     assert normal[0] == index_ahead[0]
     assert index_ahead[1] == normal[1], f"지수만 앞서면 폐지 수가 {normal[1]}→{index_ahead[1]} 로 바뀐다"
+
+
+# ── 검수·실전 09-12: 회사 정보 미수집 신규 상장사는 표 폐기가 아니라 기록형 + 상한 ───────────────
+def _corp_stage(tmp_path: Path, make_stage_tree, n_missing: int) -> Path:
+    corps = [{"ticker": f"T{i:05d}", "corp_code": f"{i:08d}", "corp_name_current": f"법인{i}"}
+             for i in range(1, n_missing + 2)]
+    make_stage_tree(tmp_path, "stg_corp_map", corps)
+    make_stage_tree(tmp_path, "stg_company", [
+        {"corp_code": "00000001", "acc_mt": "12", "induty_code_current": "26112",
+         "observed_date": BACKFILL_END}])
+    return tmp_path / "stage"
+
+
+def test_회사정보가_아직_없는_신규_corp는_기록형이고_상한_안이면_통과한다(tmp_path: Path,
+                                                                     make_stage_tree) -> None:
+    """09-12 확정 빌드: 유니버스에 들어온 신규 상장사 5곳이 `stg_company` 관측이 없어 induty 공란 5 → EG3_corp 가
+    표 전체를 폐기했다. 미수집 corp 는 `n_company_missing` 으로 세고 상한(max(20건, 1%))을 넘을 때만 폐기한다."""
+    root = _corp_stage(tmp_path, make_stage_tree, n_missing=5)
+    fx = _fixtures(tmp_path, [{"case": "known", "key": {"corp_code": "00000001"}, "column": "induty_code",
+                               "expect": "26112", "source": "hand"}])
+    r = build.build_table(rules_s01.CORP, root, tmp_path / "equity", _baseline(), build_id="b_corp_gap",
+                          fixtures_path=fx)
+    assert r.ok, _fail_names(r)
+    g = next(g for g in r.gates if g.name == "EG3_corp")
+    assert g.metrics["n_company_missing"] == 5 and g.metrics["n_induty_code_blank"] == 0
+    assert g.metrics["n_company_missing_over_limit"] == 0
+
+
+def test_회사정보_미수집이_상한을_넘으면_폐기한다(tmp_path: Path, make_stage_tree) -> None:
+    root = _corp_stage(tmp_path, make_stage_tree, n_missing=21)
+    fx = _fixtures(tmp_path, [{"case": "known", "key": {"corp_code": "00000001"}, "column": "induty_code",
+                               "expect": "26112", "source": "hand"}])
+    r = build.build_table(rules_s01.CORP, root, tmp_path / "equity", _baseline(), build_id="b_corp_gap2",
+                          fixtures_path=fx)
+    assert not r.ok
+    g = next(g for g in r.gates if g.name == "EG3_corp")
+    assert g.metrics["n_company_missing_over_limit"] == 1 and g.metrics["n_company_missing"] == 21

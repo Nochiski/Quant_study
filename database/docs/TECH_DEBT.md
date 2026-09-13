@@ -927,4 +927,7 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
 | B-17 | S24 `covered`: cF5001 **디코드 실패**(파서가 행을 못 만듦)는 수집기 `is_covered` 가 covered 로 두지만 stage 에 행이 없어 S24 는 `false` 다(R3-04 (a)). `stg_calls_wise`/`ws_run_log` 축으로 세는 기록형 metric 이 필요 | 절단본·서버 실측 0건 | `src/equity/rules_s24.py` |
 | B-18 | `notify.sh` 는 이제 텔레그램 응답 `"ok":true` 를 확인하지만(R4-09), 실패 시 재시도·대체 경로는 없다. 알림 자체가 죽으면 V2-7 전체가 조용해진다 — 워치독이 별도 채널로 가는 것이 다음 수 | 인프라 결정 | `scripts/notify.sh` |
 | B-19 | 같은 날 판본 접기(09-11, `stage/build.py rn_day`)가 같은 키의 **모순 관측**(예: 같은 날 다른 `rcept_dt`)도 조용히 마지막 관측으로 접는다. 접힌 건수는 G1 `n_dedup_same_day` 로 남지만 임계·알림이 없다 — 표별 기대치(예: DART 정정일 0.5%)를 넘으면 warn 하는 기록형 검사가 다음 수 | 첫 저녁 슬롯 장애 복구가 우선 | `src/stage/build.py`, `src/stage/gates.py g1` |
+| B-20 | 08:10 체인이 주말·휴일에도 `ka10008` 을 D(직전 거래일)로 다시 받는다(09-13 일요일 2,651콜, 머지 0 신규). KRX 단계의 "이미 완료" 처럼 ka10008 도 D 행이 이미 머지돼 있으면 건너뛰어야 한다 | 콜 낭비뿐(한도 안) | `scripts/daily_build.sh` kiwoom fetch 단계 |
+| B-22 | 19:00 스코어링 목표는 키움 19:05 수집(결정 10-(d)) 뒤 ≈20:15 로 밀렸다. 플랜 v2 B.1 "단축 옵션"(저녁엔 키움·WISE 관련 stage 표만 재빌드, 22.5→≈10분)을 앞당겨야 목표가 선다. 아울러 stage 전량 소요가 30~52분으로 계획(22.5분)보다 길다 — 병목 표 실측이 먼저 | 확정 빌드 완주가 우선 | `scripts/run_stage_all.sh`, `scripts/build_chain.sh` |
+| B-21 | 신규 상장사가 유니버스(`dart_corp_map`)에 들어와도 `dart_company` 를 받는 경로가 일일 체인에 없었다(09-12 확정 빌드 equity `corp` EG3 폐기). `scripts/dart_company_gap.sh` 를 06:00 체인에 붙여 메우지만, `dart_daily` 안에서 신규 corp 를 유닛으로 다루는 편이 정본이다 | 임시 스크립트로 충분 | `src/daily/dart_daily.py`, `scripts/daily_ledger.sh` |
 

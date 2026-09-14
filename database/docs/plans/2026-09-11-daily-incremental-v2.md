@@ -141,7 +141,7 @@ v3 코드·DB·크론·키는 **건드리지 않는다**(읽기 전용). 우리 
 
 - [x] `build_evening.sh`(18:15, 키움·WISE 완료 신호 뒤): 빌드 락 → stage 전량 재빌드 → equity → 텔레그램 "잠정판 준비 hh:mm". DART 가 아직 쓰는 중이면 dart.db 는 **직전 스냅샷**을 쓴다(저녁 스코어링 경로 밖). — 09-11 구현: `ledger_evening.json`(kiwoom_rc·wise_rc==0) 을 60초 간격으로 기다리되 한도 18:40(`QL_EVENING_BUILD_DEADLINE`), 실제 체인은 `build_chain.sh evening`. 인계 파일은 세 갈래가 다 끝난 뒤 쓰이므로 dart.db 도 이미 닫혀 있다(직전 스냅샷 규칙은 불필요).
 - [x] 아침 `daily_build.sh` 뒤 stage·equity 확정 빌드(v1 P4·P5 의 stage_daily/equity_daily 를 그대로 쓰되 이름을 `build_morning`). — `build_morning.sh` → `build_chain.sh morning`, D 는 daily_build 의 T-1. 저녁·아침이 같은 체인을 돌아 규칙이 갈릴 수 없다.
-- [x] 스냅샷 GC keep=3 → 저녁·아침 2판/일이므로 keep=6. — `stage.snapshot.gc(keep=6, protect=현재 stage 판의 snapshot_id)`, `build_chain.sh` 끝에서 호출.
+- [x] 스냅샷 GC keep=3 → 저녁·아침 2판/일이므로 keep=6. — `stage.snapshot.gc(keep, protect=현재 stage 판의 snapshot_id)`, `build_chain.sh` 끝에서 호출. **09-14 결정 9: 판당 16 GB 실측으로 keep=3 으로 되돌림.**
 - [ ] 단축 옵션(GA 뒤 결정): 저녁은 키움·WISE 관련 stage 테이블만 재빌드하는 증분 경로 — 22분 → ≈10분.
 
 ### Task B.2: equity 잠정 행 규약

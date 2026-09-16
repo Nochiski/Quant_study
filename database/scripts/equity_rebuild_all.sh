@@ -63,4 +63,10 @@ for t in $ORDER; do
 done
 T_ALL1=$(date +%s)
 echo "TOTAL $((T_ALL1-T_ALL0))s" | tee -a "$OUT/STATUS"
-[ -n "$ANY_FAIL" ] && { echo "!!! 진단 모드 — 실패 표: $(grep FAILED "$OUT/STATUS" | tr '\n' ' ')"; exit 1; }
+# 마지막 명령이 `[ -n ] && {…}` 이면 실패 표가 없을 때 `[` 의 rc 1 이 스크립트 종료 코드가 된다 —
+# 09-17 00:33 진단 실측: 29표 전부 rc 0 인데 종료 rc 1(09-13 7a885f4 이후 성공 경로가 한 번도 안 돌았다).
+if [ -n "$ANY_FAIL" ]; then
+  echo "!!! 진단 모드 — 실패 표: $(grep FAILED "$OUT/STATUS" | tr '\n' ' ')"
+  exit 1
+fi
+exit 0

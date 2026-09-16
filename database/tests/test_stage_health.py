@@ -86,6 +86,22 @@ def test_c1_flags_a_table_built_on_another_basis(tmp_path: Path, make_stage_tree
     assert c1.metrics["basis_mismatch"] == ["stg_b"]
 
 
+def test_c1_uses_chain_start_instead_of_kst_date_when_started_at_is_given(
+        tmp_path: Path, make_stage_tree) -> None:
+    """자정을 넘긴 체인: 23:40 KST 에 커밋된 판은 KST 날짜가 어제지만 체인 시작(23:36) 뒤라 오늘 판이다.
+    반대로 KST 날짜가 오늘이어도 체인 시작 전에 커밋된 판은 오늘 판이 아니다."""
+    root = _all(tmp_path, make_stage_tree)
+    _commit(root / "stg_a", "e_20260910T144000_000000Z", n_rows=12, content_hash="12:bb",
+            n_src=12, built_at_utc="2026-09-10T14:40:00+00:00")     # KST 09-10 23:40
+    c1 = _check(_run(root, started_at="2026-09-10T14:36:00+00:00"), "C1")   # 체인 시작 23:36 KST
+    assert c1.status is health.Status.PASS and c1.metrics["stale"] == []
+    assert "체인 시작(23:36 KST) 이후" in c1.detail
+    c1 = _check(_run(root), "C1")                                     # started_at 없으면 종전대로 날짜
+    assert c1.status is health.Status.FAIL and c1.metrics["stale"] == ["stg_a"]
+    c1 = _check(_run(root, started_at="2026-09-11T10:00:00+00:00"), "C1")   # 둘 다 시작 전 판
+    assert c1.status is health.Status.FAIL and c1.metrics["stale"] == ["stg_a", "stg_b"]
+
+
 def test_c1_reports_a_table_with_no_manifest_as_missing(tmp_path: Path, make_stage_tree) -> None:
     root = _all(tmp_path, make_stage_tree)
     c1 = _check(_run(root, tables={**TABLES, "stg_never": "append_only"}), "C1")
@@ -173,6 +189,17 @@ def test_c4_passes_when_the_frozen_table_reproduces_the_same_hash(tmp_path: Path
             built_at_utc=CUR_BUILT_AT)
     c4 = _check(_run(root), "C4")
     assert c4.status is health.Status.PASS and c4.metrics["n_frozen"] == 1
+
+
+def test_c4_ignores_the_daily_overwritten_wise_coverage_table(tmp_path: Path,
+                                                             make_stage_tree) -> None:
+    """ws_coverage 는 종목당 한 행을 매일 덮어쓴다 — 계수는 그대로, 해시는 매일 다르다. C4 대상이 아니다."""
+    root = _all(tmp_path, make_stage_tree)
+    _tree(tmp_path, make_stage_tree, "stg_wise_coverage")
+    _commit(root / "stg_wise_coverage", CUR_BID, n_rows=10, content_hash="10:zz", n_src=10,
+            built_at_utc=CUR_BUILT_AT)
+    c4 = _check(_run(root, tables={**TABLES, "stg_wise_coverage": "upsert"}), "C4")
+    assert c4.status is health.Status.PASS and c4.metrics["mismatched"] == []
 
 
 def test_c4_skips_tables_whose_source_grew(tmp_path: Path, make_stage_tree) -> None:

@@ -32,7 +32,9 @@ from . import manifest, model, rules
 KST = dt.timezone(dt.timedelta(hours=9))
 BUDGET_S_DEFAULT = 2400          # C5 — 스냅샷 3.8분 + 전량 빌드 22.5분 실측에 여유를 준 40분
 # 문서층 파싱 로그는 파싱 순서·소요가 행에 들어가 소스가 동결돼도 해시가 흔들린다 (v1 Task 4.3)
-C4_EXCLUDE = frozenset({"stg_doc_parse_log"})
+# stg_wise_coverage 의 원장 `ws_coverage` 는 종목당 한 행을 매일 덮어쓴다(checked_at 이동, 행수 2,614 불변) —
+# 계수가 그대로인데 내용이 바뀌는 것이 정상이라 C4 의 "동결" 술어가 맞지 않는다(09-17 00:14 진단 실측).
+C4_EXCLUDE = frozenset({"stg_doc_parse_log", "stg_wise_coverage"})
 
 
 class Status(str, Enum):
@@ -101,8 +103,8 @@ def _pair(stage_root: Path, table: str) -> _Pair:
     return _Pair(table, cur, prev)
 
 
-def _kst_date(rec: manifest.BuildRecord) -> str | None:
-    """판이 커밋된 KST 날짜. 아침 판은 UTC 로 전날이라 시간대 변환을 건너뛰면 안 된다."""
+def _built_time(rec: manifest.BuildRecord) -> dt.datetime | None:
+    """판이 커밋된 시각(UTC aware). `built_at_utc` 가 깨져 있으면 빌드 id 의 시각으로 대신한다."""
     try:
         when = dt.datetime.fromisoformat(rec.built_at_utc)
     except ValueError:
@@ -111,7 +113,20 @@ def _kst_date(rec: manifest.BuildRecord) -> str | None:
         return None
     if when.tzinfo is None:
         when = when.replace(tzinfo=dt.UTC)
-    return when.astimezone(KST).strftime("%Y%m%d")
+    return when
+
+
+def _kst_date(rec: manifest.BuildRecord) -> str | None:
+    """판이 커밋된 KST 날짜. 아침 판은 UTC 로 전날이라 시간대 변환을 건너뛰면 안 된다."""
+    when = _built_time(rec)
+    return None if when is None else when.astimezone(KST).strftime("%Y%m%d")
+
+
+def _since(started_at: str | None) -> dt.datetime | None:
+    if not started_at:
+        return None
+    since = dt.datetime.fromisoformat(started_at)
+    return since.replace(tzinfo=dt.UTC) if since.tzinfo is None else since
 
 
 def _listed(label: str, names: list[str], limit: int = 8) -> str:
@@ -131,15 +146,26 @@ def _g1(rec: manifest.BuildRecord) -> dict[str, object] | None:
     return None
 
 
-def _c1_fresh(pairs: list[_Pair], basis: str, date_kst: str, skipped: list[str]) -> Check:
+def _c1_fresh(pairs: list[_Pair], basis: str, date_kst: str, skipped: list[str],
+              started_at: str | None = None) -> Check:
+    """오늘 판 = `started_at`(체인 시작 UTC) 이 있으면 **그 뒤에 커밋된 판**, 없으면 KST 날짜가 `date_kst` 인 판.
+    날짜만 보면 자정을 넘긴 체인이 갈라진다 — 09-17 00:14 진단 실측: 23:36 시작 체인의 앞 19표(23:36~23:59)가
+    "오늘 판 아님" 으로 폐기됐다. 시각 기준이면 재실행·자정 통과 모두 한 술어로 맞는다."""
+    since = _since(started_at)
+
+    def fresh(rec: manifest.BuildRecord) -> bool:
+        if since is not None:
+            when = _built_time(rec)
+            return when is not None and when >= since
+        return _kst_date(rec) == date_kst
+
     missing = [p.table for p in pairs if p.current is None]
-    stale = [p.table for p in pairs
-             if p.current is not None and _kst_date(p.current) != date_kst]
+    stale = [p.table for p in pairs if p.current is not None and not fresh(p.current)]
     mismatch = [p.table for p in pairs
-                if p.current is not None and _kst_date(p.current) == date_kst
-                and p.current.basis != basis]
+                if p.current is not None and fresh(p.current) and p.current.basis != basis]
     bad = missing + stale + mismatch
-    detail = (f"{len(pairs) - len(bad)}/{len(pairs)}표가 {date_kst} {basis} 판"
+    scope = f"체인 시작({since.astimezone(KST):%H:%M} KST) 이후" if since else date_kst
+    detail = (f"{len(pairs) - len(bad)}/{len(pairs)}표가 {scope} {basis} 판"
               + _listed("판 없음", missing) + _listed("오늘 판 아님", stale)
               + _listed("basis 불일치", mismatch) + _listed("건너뜀", skipped))
     return Check("C1", Status.FAIL if bad else Status.PASS, detail,
@@ -153,11 +179,7 @@ def _c2_failed(stage_root: Path, date_kst: str, started_at: str | None = None) -
     stg_price_daily 폐기 파일이 12:00 재실행의 C2 를 깨뜨렸다). `started_at` 이 없으면 종전대로 오늘 날짜."""
     d = stage_root / "_failed"
     files = sorted(p.stem for p in d.glob("*.json")) if d.is_dir() else []
-    since: dt.datetime | None = None
-    if started_at:
-        since = dt.datetime.fromisoformat(started_at)
-        if since.tzinfo is None:
-            since = since.replace(tzinfo=dt.UTC)
+    since = _since(started_at)
     today = []
     for bid in files:
         when = model.build_id_time(bid)
@@ -284,7 +306,7 @@ def check_stage(stage_root: Path, basis: str, date_kst: str, *,
                    if name in write_modes and not getattr(rule, "versioned", True)}
     skipped = sorted(set(skip) & set(write_modes))
     judged = [_pair(stage_root, t) for t in sorted(write_modes) if t not in skipped]
-    checks = (_c1_fresh(judged, basis, built_on, skipped),
+    checks = (_c1_fresh(judged, basis, built_on, skipped, started_at),
               _c2_failed(stage_root, built_on, started_at),
               _c3_monotonic(judged, write_modes),
               _c4_frozen(judged, unversioned),

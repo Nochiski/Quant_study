@@ -143,13 +143,13 @@ uv run --no-project --python 3.11 --with pytest --with duckdb --with requests py
 | 07:10 | (08:10 체인 안) | 키움 외국인 보유 ka10008 — `daily_build.sh` 의 `--not-before 07:10` 하한 (결정 7) | 가동 |
 | 08:10 | `10 23 * * *` | `daily_build.sh` — KRX → ka10008 → 머지 → `ledger_health` → `build_morning.sh`(확정판) → `daily_report.py` | 가동 (09-11 18:50 `--no-build` 제거, 첫 확정 빌드 09-12 08:10) |
 | 09:15 | `15 0 * * *` | `watchdog.sh morning_build` — 직전 거래일 원장 건전성 + `latest_morning.json`(D+1 08:00 이후·health ok) 없음/실패면 crit. 매일(금요일 판은 토요일에 지어진다) | 보류 중(09-12) — 확정 빌드 완주 뒤 복구 |
-| 18:05 | `5 9 * * 1-5` | `daily_evening.sh` — DART ∥ WISE 즉시, 키움 ka10060·ka10014 는 **19:05 까지 기다렸다** 원장 직행(09-13 결정 10-(d): 18:05 거래량은 시간외 반영 전) | 가동 |
-| 18:15 | `15 9 * * 1-5` | `build_evening.sh` — 키움·WISE 인계(≈19:20)를 기다렸다 잠정 빌드(stage → equity, `basis=evening`), 한도 19:45 | 보류 중(09-12) — 확정 빌드 완주 뒤 복구 |
-| 19:40 | `40 10 * * 1-5` | `watchdog.sh evening_ledger` — 저녁 원장 보고 없음/실패면 crit (09-13 18:50→19:40) | 가동 |
-| 20:30 | `30 11 * * 1-5` | `watchdog.sh evening_build` — `latest_evening.json` 이 오늘 것이 아니거나 health 실패면 crit (09-13: 키움 19:05 + stage 30~50분 + equity 8분 → 잠정판 ≈20:15) | 보류 중 — 확정 빌드 완주 뒤 복구 |
-| 19:00 | — | Kael-alpha 스코어 보고 목표 (상한 19:30) — **현재 파이프라인으로는 ≈20:15**. 저녁 단축 빌드(키움·WISE 관련 표만) 없이는 불가 | 예정 (페이즈 C, B.1 단축 옵션 선행) |
+| 18:05 | `5 9 * * 1-5` | `daily_evening.sh` — DART ∥ WISE 즉시, 키움 ka10060·ka10014 는 **21:05 까지 기다렸다** 원장 직행(결정 11: KRX 애프터마켓 20:00 마감, 키움 집계 20:15 정착, kael-v3 20:05 앱키 공유 회피) | 가동 |
+| 21:20 | `20 12 * * 1-5` | `build_evening.sh` — 키움·WISE 인계(≈21:20)를 기다렸다 잠정 빌드(stage → equity, `basis=evening`), 한도 21:45 | 보류 중(09-12) — 단계별 재개(결정 11-(e)) |
+| 21:50 | `50 12 * * 1-5` | `watchdog.sh evening_ledger` — 저녁 원장 보고 없음/실패면 crit | 가동 |
+| 23:00 | `0 14 * * 1-5` | `watchdog.sh evening_build` — `latest_evening.json` 이 오늘 것이 아니거나 health 실패면 crit (키움 21:05 + 빌드 21:20 + stage 30~50분 + equity 8분) | 보류 중 — 단계별 재개 |
+| 22:30 | — | Kael-alpha 스코어 보고 목표(결정 11; 옛 19:00 목표는 애프터마켓으로 무효). 저녁 단축 빌드(B.1)로 ≈21:35 까지 당길 수 있다 | 예정 (페이즈 C) |
 | 일요일 04:30 | `30 19 * * 6` | `gc.sh --apply` — 캐시·`_failed` 정리, 끝에서 `rotate_logs.sh` 호출, 완료 info / 실패 warn | 가동 (09-11 18:50 등록) |
-| 매시 | — | 키움 확정 시각 프로브 (임시, 09-15 판독 후 제거) | 가동 |
+| ~~매시~~ | — | ~~키움 확정 시각 프로브~~ (09-16 제거 — 09-14 촘촘 프로브로 20:15 정착 확인, `data/evidence/after_market_20260914.db`) | 제거 |
 
 ### 원장 백업 — `scripts/backup_raw.sh`
 

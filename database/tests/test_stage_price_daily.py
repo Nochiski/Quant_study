@@ -57,13 +57,14 @@ def _write_kiwoom(path: Path) -> None:
     con = sqlite3.connect(path)
     con.execute("CREATE TABLE ka10060_investor_flows (ticker TEXT, dt TEXT, cur_prc TEXT, "
                 "acc_trde_prica TEXT, collected_at TEXT)")
-    # collected_at = UTC. G9 는 다음 날(KST) 이후 관측만 대조한다(결정 10) — 당일 저녁 관측은 잠정치.
+    # collected_at = UTC. G9 는 당일 20:00 KST 이후 관측만 대조한다(결정 10 → 11) — 그 전 저녁 관측은 잠정치.
     con.executemany("INSERT INTO ka10060_investor_flows VALUES (?,?,?,?,?)", [
         ("005930", "20180503", "-2650000", "100", "2018-05-03T21:05:00"),   # 부호 접두 → abs 일치 (KST 05-04)
         ("005930", "20180504", "+51900", "500", "2018-05-04T21:05:00"),     # KST 05-05
-        ("035720", "20180503", "10000", "11", "2018-05-03T21:05:00"),       # 거래량 1 차이 → 불일치 1건
+        ("035720", "20180503", "10001", "11", "2018-05-03T21:05:00"),       # 종가·거래량 1 차이 → 종가는 기록만, 거래량 불일치 1건
         ("005930", "20180504", "+51900", "999", "2018-05-04T09:10:00"),     # 당일 18:10 KST 관측 → 잠정, 대조 제외
-        ("005930", "20180504", "+51900", "500", "2018-05-04T10:10:00"),     # 당일 19:10 KST 관측 → 최종, 대조 포함
+        ("005930", "20180504", "+51900", "500", "2018-05-04T10:40:00"),     # 당일 19:40 KST 관측 → 애프터마켓 중, 대조 제외
+        ("005930", "20180504", "+51900", "500", "2018-05-04T12:10:00"),     # 당일 21:10 KST 관측 → 최종, 대조 포함
     ])
     con.commit()
     con.close()
@@ -258,8 +259,8 @@ def test_gate_g9_cross_source_match_against_kiwoom(snap: snapshot.Snapshot, tmp_
     r = _built(snap, tmp_path)
     g = _gate(r, "G9")
     assert g.status is gates.GateStatus.PASS
-    assert g.metrics["close_joined"] == 4          # 18:10 관측(volume 999)은 빠지고 19:10 관측은 들어간다(결정 10)
-    assert g.metrics["close_match_ratio"] == 1.0
+    assert g.metrics["close_joined"] == 4          # 18:10·19:40 관측은 빠지고 21:10 관측만 들어간다(결정 11: 20:00 컷오프)
+    assert g.metrics["close_match_ratio"] == pytest.approx(3 / 4)   # 종가 불일치 1건은 기록만 — 판정에 안 들어간다
     assert g.metrics["volume_match_ratio"] == pytest.approx(3 / 4)
 
 

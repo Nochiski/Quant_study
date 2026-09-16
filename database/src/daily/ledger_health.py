@@ -286,10 +286,11 @@ def check_kiwoom(con: sqlite3.Connection, krx: sqlite3.Connection | None, d: str
                         same_v += int(int(vol) == k[tk][1])
                     except (TypeError, ValueError):
                         pass
-            ok = matched > 0 and same_c == matched and same_v == matched
+            # 거래량만 판정, 종가 일치 수는 기록만 — 09-14 애프터마켓 뒤 키움 종가는 장후 체결가(결정 11)
+            ok = matched > 0 and same_v == matched
             out.append(Check("kiwoom.krx_cross", Level.REQUIRED, Status.PASS if ok else (Status.SKIP if matched == 0 else Status.FAIL),
                              {"matched": matched, "same_close": same_c, "same_vol": same_v},
-                             "종가·거래량 100% 일치 (08-20 실측 2,602/2,602)"))
+                             "거래량 100% 일치 (08-20 실측 2,602/2,602) · 종가는 기록만(09-14~ 애프터마켓)"))
     if _has_table(con, "ka10099_stock_master"):
         row = con.execute("SELECT COUNT(*), COUNT(DISTINCT mrkt_tp) FROM ka10099_stock_master WHERE snap_date=?", (d,)).fetchone()
         n, mk = (int(row[0]), int(row[1])) if row else (0, 0)

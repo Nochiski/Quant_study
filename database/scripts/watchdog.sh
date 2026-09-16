@@ -4,7 +4,7 @@
 #   예정 크론(서버 TZ=UTC. 등록은 오케스트레이터가 한다):
 #     50 12 * * 1-5 cd /home/kael/quant-ledger && scripts/watchdog.sh evening_ledger   # 21:50 KST (결정 11: 키움 저녁 수집 21:05)
 #     0 14 * * 1-5  cd /home/kael/quant-ledger && scripts/watchdog.sh evening_build    # 23:00 KST (키움 21:05 + 빌드 21:20 + stage 30~50분 + equity 8분)
-#     15 0 * * *    cd /home/kael/quant-ledger && scripts/watchdog.sh morning_build    # 09:15 KST 매일 — 금요일 판은 토요일에 지어지고 판정 기준은 "대상일 다음 날 08:00" 이라 실행일의 휴장 여부와 무관(검수 R4-07)
+#     45 0 * * *    cd /home/kael/quant-ledger && scripts/watchdog.sh morning_build    # 09:45 KST 매일 (09-17: stage 38.5분 + equity 9분 → 확정판 ≈09:20) — 금요일 판은 토요일에 지어지고 판정 기준은 "대상일 다음 날 08:00" 이라 실행일의 휴장 여부와 무관(검수 R4-07)
 #   판정 근거는 체인이 남긴 산출물뿐이다 — 원장·API 를 건드리지 않으므로 raw 락도 잡지 않는다.
 #   휴장일(오늘 KST)은 info 후 rc 0. 스코어 워치독은 페이즈 C 에서 case 에 추가한다.
 set -uo pipefail
@@ -15,7 +15,7 @@ CHECK="${1:?usage: watchdog.sh <evening_ledger|evening_build|morning_build>}"
 case "$CHECK" in
   evening_ledger) TITLE_OK="watchdog evening_ledger 정상"; TITLE_BAD="watchdog: 21:50 까지 저녁 원장 보고 없음/실패" ;;
   evening_build)  TITLE_OK="watchdog evening_build 정상";  TITLE_BAD="watchdog: 23:00 까지 잠정판 보고 없음/실패" ;;
-  morning_build)  TITLE_OK="watchdog morning_build 정상";  TITLE_BAD="watchdog: 09:15 까지 확정 빌드 보고 없음/실패" ;;
+  morning_build)  TITLE_OK="watchdog morning_build 정상";  TITLE_BAD="watchdog: 09:45 까지 확정 빌드 보고 없음/실패" ;;
   *) echo "unknown check: $CHECK (allowed: evening_ledger, evening_build, morning_build)" >&2; exit 2 ;;
 esac
 TODAY=$(TZ=Asia/Seoul date +%Y%m%d)

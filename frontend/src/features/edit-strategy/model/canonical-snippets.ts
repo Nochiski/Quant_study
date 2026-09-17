@@ -30,10 +30,9 @@ export type CanonicalSnippet = {
   category: SnippetCategory;
   /** Backend field name or factor label. */
   label: string;
-  /** Section snippets add a root key; factor snippets can also add an item to factors.factors. */
+  /** Section snippets add a root key; factor snippets append an item to the root `factors` sequence. */
   kind: "section" | "factor";
   sectionKey: string;
-  collectionKey: string | null;
   identity: { field: string; value: unknown } | null;
   value: unknown;
 };
@@ -153,50 +152,46 @@ const rootProperty = (schema: JsonSchema, key: string): JsonSchema | null => {
 };
 
 type FactorAuthoringContract = {
+  /** Root key of the factor sequence (schema 1.1: `factors` is a top-level array). */
   sectionKey: string;
-  collectionKey: string;
   item: JsonSchema;
 };
 
+/**
+ * Finds the root array whose item type carries the backend `x-authoring-*` markers. The key name
+ * is read from the schema, never assumed, so the UI keeps no copy of the document layout.
+ */
 const factorAuthoringContract = (
   schema: JsonSchema,
 ): FactorAuthoringContract | null => {
   const root = isRecord(schema.properties) ? schema.properties : {};
   for (const [sectionKey, candidate] of Object.entries(root)) {
     if (!isRecord(candidate)) continue;
-    const section = resolveRef(schema, candidate);
-    if (section === null) continue;
-    const properties = isRecord(section.properties) ? section.properties : {};
-    for (const [collectionKey, collectionCandidate] of Object.entries(
-      properties,
-    )) {
-      if (!isRecord(collectionCandidate)) continue;
-      const collection = resolveRef(schema, collectionCandidate);
-      if (collection === null) continue;
-      if (collection.type !== "array" || !isRecord(collection.items)) continue;
-      const item = resolveRef(schema, collection.items);
-      if (item === null) continue;
-      const itemProperties = isRecord(item.properties) ? item.properties : {};
-      const required = Array.isArray(item.required)
-        ? item.required.filter((key): key is string => typeof key === "string")
-        : [];
-      const mapped = required.every((key) => {
-        const property = itemProperties[key];
-        return (
-          isRecord(property) &&
-          (typeof property["x-authoring-source"] === "string" ||
-            owns(property, "x-authoring-default"))
-        );
-      });
-      if (
-        mapped &&
-        Object.values(itemProperties).some(
-          (property) =>
-            isRecord(property) && property["x-authoring-identity"] === true,
-        )
+    const collection = resolveRef(schema, candidate);
+    if (collection === null) continue;
+    if (collection.type !== "array" || !isRecord(collection.items)) continue;
+    const item = resolveRef(schema, collection.items);
+    if (item === null) continue;
+    const itemProperties = isRecord(item.properties) ? item.properties : {};
+    const required = Array.isArray(item.required)
+      ? item.required.filter((key): key is string => typeof key === "string")
+      : [];
+    const mapped = required.every((key) => {
+      const property = itemProperties[key];
+      return (
+        isRecord(property) &&
+        (typeof property["x-authoring-source"] === "string" ||
+          owns(property, "x-authoring-default"))
+      );
+    });
+    if (
+      mapped &&
+      Object.values(itemProperties).some(
+        (property) =>
+          isRecord(property) && property["x-authoring-identity"] === true,
       )
-        return { sectionKey, collectionKey, item };
-    }
+    )
+      return { sectionKey, item };
   }
   return null;
 };
@@ -251,7 +246,6 @@ export const buildCanonicalSnippetCatalog = (
         label: category,
         kind: "section",
         sectionKey: category,
-        collectionKey: null,
         identity: null,
         value: materializeSchemaValue(schema, property),
       });
@@ -273,7 +267,6 @@ export const buildCanonicalSnippetCatalog = (
       label: factor.label,
       kind: "factor",
       sectionKey: contract.sectionKey,
-      collectionKey: contract.collectionKey,
       identity: preset.identity,
       value: preset.value,
     });
@@ -309,28 +302,18 @@ const fragmentFor = (
     };
   }
 
-  if (snippet.collectionKey === null)
-    return { status: "error", reason: "cursor-context" };
-  const sectionPointer = `/${escapePointerSegment(snippet.sectionKey)}`;
-  const collectionPointer = `${sectionPointer}/${escapePointerSegment(snippet.collectionKey)}`;
+  // schema 1.1: `factors` 시퀀스 안(항목 추가)이거나, 아직 `factors`가 없는 루트(시퀀스 신설)만 허용한다.
+  const sequencePointer = `/${escapePointerSegment(snippet.sectionKey)}`;
   if (prefix !== "" && !snippet.sectionKey.startsWith(prefix))
     return { status: "error", reason: "cursor-context" };
-  if (pointer === collectionPointer && prefix === "")
+  if (pointer === sequencePointer && prefix === "")
     return { status: "ok", fragment: yamlFragment([snippet.value]) };
-  if (pointer === sectionPointer && !siblings.includes(snippet.collectionKey)) {
-    return {
-      status: "ok",
-      fragment: yamlFragment({ [snippet.collectionKey]: [snippet.value] }),
-    };
-  }
   if (pointer === "") {
-    if (siblings.includes("factors"))
+    if (siblings.includes(snippet.sectionKey))
       return { status: "error", reason: "duplicate" };
     return {
       status: "ok",
-      fragment: yamlFragment({
-        [snippet.sectionKey]: { [snippet.collectionKey]: [snippet.value] },
-      }),
+      fragment: yamlFragment({ [snippet.sectionKey]: [snippet.value] }),
     };
   }
   return { status: "error", reason: "cursor-context" };
@@ -340,14 +323,8 @@ const containsSnippetIdentity = (
   tree: Record<string, unknown>,
   snippet: CanonicalSnippet,
 ): boolean => {
-  if (
-    snippet.kind !== "factor" ||
-    snippet.collectionKey === null ||
-    snippet.identity === null
-  )
-    return false;
-  const section = tree[snippet.sectionKey];
-  const collection = isRecord(section) ? section[snippet.collectionKey] : null;
+  if (snippet.kind !== "factor" || snippet.identity === null) return false;
+  const collection = tree[snippet.sectionKey];
   return (
     Array.isArray(collection) &&
     collection.some(

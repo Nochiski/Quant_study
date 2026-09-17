@@ -14,9 +14,9 @@ const FIXTURE = JSON.parse(
 ) as StrategySpec;
 const SPEC: StrategySpec = {
   ...FIXTURE,
-  factors: { factors: [FIXTURE.factors.factors[0]!] },
+  factors: [FIXTURE.factors[0]!],
 };
-const FACTOR = SPEC.factors.factors[0]!;
+const FACTOR = SPEC.factors[0]!;
 
 const documentState = (): DocumentState => ({
   ...initialDocumentState("yaml", "current source"),
@@ -30,7 +30,7 @@ const documentState = (): DocumentState => ({
     spec: SPEC,
     canonicalJson: JSON.stringify(SPEC),
     specHash: "spec-hash",
-    schemaVersion: "1.0",
+    schemaVersion: "1.1",
     sourceHash: "source-hash",
     diagnostics: [],
   },
@@ -121,19 +121,19 @@ describe("Strategy IDE debugger composition", () => {
             {
               factorId: "momentum",
               label: FACTOR.label,
-              pointer: "/factors/factors/0/graph",
+              pointer: "/factors/0/graph",
               outputNodeId: "mom_252",
               expectedPlanHash: "plan-hash",
               nodes: [
                 {
                   nodeId: "close",
                   operation: "field",
-                  pointer: "/factors/factors/0/graph/nodes/0",
+                  pointer: "/factors/0/graph/nodes/0",
                 },
                 {
                   nodeId: "mom_252",
                   operation: "time_series.momentum",
-                  pointer: "/factors/factors/0/graph/nodes/1",
+                  pointer: "/factors/0/graph/nodes/1",
                 },
               ],
             },

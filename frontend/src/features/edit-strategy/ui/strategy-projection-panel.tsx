@@ -35,10 +35,11 @@ export const StrategyProjectionPanel = ({
         description: projection.spec.description,
       },
     },
+    // schema 1.1: 컴파일된 spec은 모든 단계를 채워 보내지만 계약상 선택 필드이므로 빈 단계도 그대로 그린다.
     { id: "data", values: projection.spec.data },
-    { id: "portfolio", values: projection.spec.portfolio },
-    { id: "risk", values: projection.spec.risk },
-    { id: "execution", values: projection.spec.execution },
+    { id: "portfolio", values: projection.spec.portfolio ?? {} },
+    { id: "risk", values: projection.spec.risk ?? {} },
+    { id: "execution", values: projection.spec.execution ?? {} },
   ] as const;
 
   return (

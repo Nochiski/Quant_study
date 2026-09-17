@@ -119,7 +119,7 @@ describe("canonical StrategySpec snippets", () => {
 
   it("replaces a partial root key and validates the complete next YAML document", () => {
     const snippet = findSnippet(catalog(), "section:signal");
-    const source = 'schema_version: "1.0"\nsig';
+    const source = 'schema_version: "1.1"\nsig';
     const result = planSnippetEdit(
       source,
       "yaml",
@@ -130,7 +130,7 @@ describe("canonical StrategySpec snippets", () => {
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
     expect(result.edit.nextSource).toBe(
-      'schema_version: "1.0"\nsignal:\n  method: weighted_sum\n  entry_percentile: 0.1\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null',
+      'schema_version: "1.1"\nsignal:\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null',
     );
     expect(result.edit).toMatchObject({
       from: source.length - 3,
@@ -140,8 +140,7 @@ describe("canonical StrategySpec snippets", () => {
 
   it("rejects a duplicate catalog factor without becoming a semantic validator", () => {
     const snippet = findSnippet(catalog(), "factor:server.momentum");
-    const source =
-      "factors:\n  factors:\n    - factor_id: server.momentum\n    ";
+    const source = "factors:\n  - factor_id: server.momentum\n  ";
     expect(
       planSnippetEdit(
         source,
@@ -153,9 +152,9 @@ describe("canonical StrategySpec snippets", () => {
   });
 
   it.each([
-    ['schema_version: "1.0"\r\nsig\r\nrisk: {}\r\n', "\r\nrisk: {}\r\n"],
-    ['schema_version: "1.0"\r\nsig', ""],
-    ['schema_version: "1.0"\r\nsig\r\n\r\nrisk: {}', "\r\n\r\nrisk: {}"],
+    ['schema_version: "1.1"\r\nsig\r\nrisk: {}\r\n', "\r\nrisk: {}\r\n"],
+    ['schema_version: "1.1"\r\nsig', ""],
+    ['schema_version: "1.1"\r\nsig\r\n\r\nrisk: {}', "\r\n\r\nrisk: {}"],
   ])("preserves CRLF at a partial-key boundary", (source, suffix) => {
     const snippet = findSnippet(catalog(), "section:signal");
     const cursor = source.indexOf("sig") + 3;
@@ -173,7 +172,7 @@ describe("canonical StrategySpec snippets", () => {
 
   it("inserts a catalog factor as an indented array item at the cursor", () => {
     const snippet = findSnippet(catalog(), "factor:server.momentum");
-    const source = 'schema_version: "1.0"\nfactors:\n  factors:\n    ';
+    const source = 'schema_version: "1.1"\nfactors:\n  ';
     const result = planSnippetEdit(
       source,
       "yaml",
@@ -185,10 +184,10 @@ describe("canonical StrategySpec snippets", () => {
     if (result.status !== "ok") return;
     expect(result.edit.insert).toContain("- factor_id: server.momentum");
     expect(result.edit.insert).toContain(
-      "      graph:\n        nodes:\n          - kind: field",
+      "    graph:\n      nodes:\n        - kind: field",
     );
     expect(result.edit.nextSource).toContain(
-      "  factors:\n    - factor_id: server.momentum",
+      "factors:\n  - factor_id: server.momentum",
     );
   });
 

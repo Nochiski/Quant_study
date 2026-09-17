@@ -36,10 +36,7 @@ describe("parseSource", () => {
       "max_name_weight",
     );
     expect(
-      slice(
-        text,
-        parsed.valueRanges.get("/factors/factors/0/graph/nodes/1/window")!,
-      ),
+      slice(text, parsed.valueRanges.get("/factors/0/graph/nodes/1/window")!),
     ).toBe("252");
     expect(parsed.valueRanges.get("/risk/max_name_weight")!.start).toEqual({
       line: text

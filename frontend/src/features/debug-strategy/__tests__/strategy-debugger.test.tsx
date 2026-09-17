@@ -53,14 +53,14 @@ const context = (sourceVersion = 3): StrategyDebuggerContext => ({
     {
       factorId: "momentum",
       label: "Momentum",
-      pointer: "/factors/factors/0/graph",
+      pointer: "/factors/0/graph",
       outputNodeId: "ranked",
       expectedPlanHash: "plan-hash",
       nodes: [
         {
           nodeId: "ranked",
           operation: "cross_sectional.rank",
-          pointer: "/factors/factors/0/graph/nodes/2",
+          pointer: "/factors/0/graph/nodes/2",
         },
       ],
     },
@@ -86,7 +86,7 @@ const traceResponse = (): StrategyTraceResponse => ({
   as_of: "2026-08-31",
   provenance: {
     kind: "inline_draft",
-    schema_version: "1.0",
+    schema_version: "1.1",
     spec_hash: "spec-hash",
     source_hash: "source-hash",
     strategy_id: null,
@@ -252,7 +252,7 @@ const pagedTraceResponse = (
       source.kind === "saved_revision"
         ? {
             kind: "saved_revision",
-            schema_version: "1.0",
+            schema_version: "1.1",
             spec_hash: "spec-hash",
             source_hash: null,
             strategy_id: source.strategy_id,
@@ -260,7 +260,7 @@ const pagedTraceResponse = (
           }
         : {
             kind: "inline_draft",
-            schema_version: "1.0",
+            schema_version: "1.1",
             spec_hash: "spec-hash",
             source_hash: source.source_hash ?? null,
             strategy_id: null,
@@ -345,7 +345,7 @@ const props = (debugContext: StrategyDebuggerContext | null = context()) => ({
   publicationOwnerKey: "route-generation-1",
   asOf: "2026-08-31",
   security: "sec-a, sec-b",
-  selectedPointer: "/factors/factors/0/graph/nodes/2",
+  selectedPointer: "/factors/0/graph/nodes/2",
   onSearchSelection: vi.fn(),
   onSelectPointer: vi.fn(),
   executionPlan: <div>backend execution plan</div>,
@@ -356,7 +356,7 @@ const contextWithNodes = (count: number): StrategyDebuggerContext => {
   expanded.factors[0]!.nodes = Array.from({ length: count }, (_, index) => ({
     nodeId: `n${index}`,
     operation: `operation.n${index}`,
-    pointer: `/factors/factors/0/graph/nodes/${index}`,
+    pointer: `/factors/0/graph/nodes/${index}`,
   }));
   expanded.factors[0]!.outputNodeId = `n${count - 1}`;
   return expanded;
@@ -411,7 +411,7 @@ describe("StrategyDebugger", () => {
     expandedContext.factors[0]!.nodes.unshift({
       nodeId: "close",
       operation: "field",
-      pointer: "/factors/factors/0/graph/nodes/0",
+      pointer: "/factors/0/graph/nodes/0",
     });
     server.use(
       http.post(`${API}/api/v1/strategies/debug/trace`, () => {
@@ -481,7 +481,7 @@ describe("StrategyDebugger", () => {
       <StrategyDebugger
         {...props(expanded)}
         security={securities.join(",")}
-        selectedPointer="/factors/factors/0/graph/nodes/5"
+        selectedPointer="/factors/0/graph/nodes/5"
       />,
     );
 
@@ -537,7 +537,7 @@ describe("StrategyDebugger", () => {
       <StrategyDebugger
         {...props(expanded)}
         security="sec-a"
-        selectedPointer="/factors/factors/0/graph/nodes/100"
+        selectedPointer="/factors/0/graph/nodes/100"
       />,
     );
 
@@ -573,7 +573,7 @@ describe("StrategyDebugger", () => {
       <StrategyDebugger
         {...props(expanded)}
         security={securities.join(",")}
-        selectedPointer="/factors/factors/0/graph/nodes/80"
+        selectedPointer="/factors/0/graph/nodes/80"
       />,
     );
 
@@ -616,7 +616,7 @@ describe("StrategyDebugger", () => {
       <StrategyDebugger
         {...props(expanded)}
         security={securities.join(",")}
-        selectedPointer="/factors/factors/0/graph/nodes/499"
+        selectedPointer="/factors/0/graph/nodes/499"
       />,
     );
 
@@ -720,7 +720,7 @@ describe("StrategyDebugger", () => {
       <StrategyDebugger
         {...props(expanded)}
         security={securities.join(",")}
-        selectedPointer="/factors/factors/0/graph/nodes/5"
+        selectedPointer="/factors/0/graph/nodes/5"
       />,
     );
 
@@ -1052,19 +1052,19 @@ describe("StrategyDebugger", () => {
     expanded.factors[0]!.nodes.unshift({
       nodeId: "close",
       operation: "field",
-      pointer: "/factors/factors/0/graph/nodes/0",
+      pointer: "/factors/0/graph/nodes/0",
     });
     expanded.factors.push({
       factorId: "quality",
       label: "Quality",
-      pointer: "/factors/factors/1/graph",
+      pointer: "/factors/1/graph",
       outputNodeId: "quality-score",
       expectedPlanHash: "quality-plan",
       nodes: [
         {
           nodeId: "quality-score",
           operation: "field",
-          pointer: "/factors/factors/1/graph/nodes/0",
+          pointer: "/factors/1/graph/nodes/0",
         },
       ],
     });
@@ -1080,14 +1080,14 @@ describe("StrategyDebugger", () => {
       "close",
     );
     expect(onSelectPointer).toHaveBeenLastCalledWith(
-      "/factors/factors/0/graph/nodes/0",
+      "/factors/0/graph/nodes/0",
     );
     await user.selectOptions(
       screen.getByRole("combobox", { name: "팩터" }),
       "quality",
     );
     expect(onSelectPointer).toHaveBeenLastCalledWith(
-      "/factors/factors/1/graph/nodes/0",
+      "/factors/1/graph/nodes/0",
     );
   });
 
@@ -1133,7 +1133,7 @@ describe("StrategyDebugger", () => {
       <StrategyDebugger
         {...props(expanded)}
         security={securities.join(",")}
-        selectedPointer="/factors/factors/0/graph/nodes/5"
+        selectedPointer="/factors/0/graph/nodes/5"
       />,
     );
     await user.click(screen.getByRole("tab", { name: "실행 계획" }));

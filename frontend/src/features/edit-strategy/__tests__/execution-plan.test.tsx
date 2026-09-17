@@ -33,32 +33,30 @@ const API = "http://localhost:8000";
 const FIXTURE_SPEC = JSON.parse(
   readBackendFixture("strategy_documents/quality_momentum.legacy.json"),
 ) as StrategySpec;
-const MOMENTUM_FACTOR = FIXTURE_SPEC.factors.factors[0]!;
+const MOMENTUM_FACTOR = FIXTURE_SPEC.factors[0]!;
 const SPEC: StrategySpec = {
   ...FIXTURE_SPEC,
   title: "멀티 팩터",
-  factors: {
-    factors: [
-      MOMENTUM_FACTOR,
-      {
-        ...MOMENTUM_FACTOR,
-        factor_id: "quality",
-        label: "퀄리티",
-        weight: 0.4,
-        graph: {
-          nodes: [
-            {
-              node_id: "book",
-              field_id: "financial.book_equity",
-              kind: "field",
-            },
-          ],
-          output_node_id: "book",
-          missing_policy: "keep",
-        },
+  factors: [
+    MOMENTUM_FACTOR,
+    {
+      ...MOMENTUM_FACTOR,
+      factor_id: "quality",
+      label: "퀄리티",
+      weight: 0.4,
+      graph: {
+        nodes: [
+          {
+            node_id: "book",
+            field_id: "financial.book_equity",
+            kind: "field",
+          },
+        ],
+        output_node_id: "book",
+        missing_policy: "keep",
       },
-    ],
-  },
+    },
+  ],
 };
 
 const catalogField = (
@@ -135,7 +133,7 @@ const METADATA: ContractInspectorSource = {
   schema: {
     schema: { type: "object" },
     schema_hash: "schema-hash",
-    schema_version: "1.0",
+    schema_version: "1.1",
   },
   contract: {
     contract: {
@@ -144,7 +142,7 @@ const METADATA: ContractInspectorSource = {
       factor_registry_version: "registry-v1",
       fields: [],
       schema_hash: "schema-hash",
-      schema_version: "1.0",
+      schema_version: "1.1",
     },
     equity_catalog_url: "/api/v1/equity/catalog",
     factor_catalog_url: "/api/v1/factors/catalog",
@@ -168,7 +166,7 @@ const currentState = (): DocumentState => ({
     spec: SPEC,
     canonicalJson: JSON.stringify(SPEC),
     specHash: "s".repeat(64),
-    schemaVersion: "1.0",
+    schemaVersion: "1.1",
     sourceHash: "x".repeat(64),
     diagnostics: [],
   },
@@ -343,7 +341,7 @@ describe("execution plan orchestration", () => {
       status: "incompatible",
       resource: "schema-contract",
       expected: "2.0",
-      actual: "1.0:1.0",
+      actual: "1.1:1.1",
     });
     const { result } = renderHook(
       () => useExecutionPlans(currentState(), nextRuntime),
@@ -471,20 +469,18 @@ describe("execution plan orchestration", () => {
     expect(prepared.status).toBe("prepared");
     if (prepared.status !== "prepared") return;
 
-    expect(factorNodePointer(1, 0)).toBe("/factors/factors/1/graph/nodes/0");
+    expect(factorNodePointer(1, 0)).toBe("/factors/1/graph/nodes/0");
     expect(nodePointerById(prepared.requests[0], "mom_252")).toBe(
-      "/factors/factors/0/graph/nodes/1",
+      "/factors/0/graph/nodes/1",
     );
     expect(nodePointerById(prepared.requests[0], "missing")).toBeNull();
-    expect(
-      factorIndexAtPointer("/factors/factors/1/graph/nodes/0/field_id"),
-    ).toBe(1);
+    expect(factorIndexAtPointer("/factors/1/graph/nodes/0/field_id")).toBe(1);
     expect(factorIndexAtPointer("/risk/max_name_weight")).toBeNull();
-    expect(factorIndexAtPointer("/factors/factors/01/graph")).toBeNull();
+    expect(factorIndexAtPointer("/factors/01/graph")).toBeNull();
     expect(
       pointerSelectsNode(
-        "/factors/factors/1/graph/nodes/0/field_id",
-        "/factors/factors/1/graph/nodes/0",
+        "/factors/1/graph/nodes/0/field_id",
+        "/factors/1/graph/nodes/0",
       ),
     ).toBe(true);
   });

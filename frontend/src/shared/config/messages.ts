@@ -438,7 +438,6 @@ const ko = {
   "contract.yes": "예",
   "contract.no": "아니요",
   "contract.sessions": "세션",
-  "strategy.contract.signal.entry_percentile": "신호에서 선택할 상위 비율",
   "strategy.contract.portfolio.selection_count":
     "롱 포트폴리오에 선택할 종목 수",
   "strategy.contract.portfolio.short_selection_count":
@@ -1193,8 +1192,6 @@ export const messages = {
     "contract.yes": "Yes",
     "contract.no": "No",
     "contract.sessions": "sessions",
-    "strategy.contract.signal.entry_percentile":
-      "Top fraction selected by the signal",
     "strategy.contract.portfolio.selection_count":
       "Number of names in the long portfolio",
     "strategy.contract.portfolio.short_selection_count":

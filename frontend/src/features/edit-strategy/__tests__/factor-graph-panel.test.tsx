@@ -193,7 +193,7 @@ describe("FactorGraph projection", () => {
     ]);
     expect(factor.nodes[0]).toMatchObject({
       planned: true,
-      pointer: "/factors/factors/0/graph/nodes/1",
+      pointer: "/factors/0/graph/nodes/1",
       outputType: "numeric_series",
       outputUnit: "KRW",
       minimumHistorySessions: 1,
@@ -226,7 +226,7 @@ describe("FactorGraph projection", () => {
       nodeId: "orphan",
       planned: false,
       sequence: null,
-      pointer: "/factors/factors/0/graph/nodes/5",
+      pointer: "/factors/0/graph/nodes/5",
       outputType: "numeric_series",
       outputUnit: "KRW",
       minimumHistorySessions: 1,
@@ -278,7 +278,7 @@ describe("FactorGraphPanel", () => {
       <FactorGraphPanel
         state={readyState()}
         diagnostics={[]}
-        selectedPointer="/factors/factors/0/graph/nodes/0/true_node_id"
+        selectedPointer="/factors/0/graph/nodes/0/true_node_id"
         onSelectPointer={onSelectPointer}
         onOpenSource={onOpenSource}
       />,
@@ -308,7 +308,7 @@ describe("FactorGraphPanel", () => {
       screen.getByRole("button", { name: "그래프 노드 선택: signal" }),
     );
     expect(onSelectPointer).toHaveBeenLastCalledWith(
-      "/factors/factors/0/graph/nodes/0",
+      "/factors/0/graph/nodes/0",
     );
     await user.click(
       screen.getByRole("button", {
@@ -316,12 +316,10 @@ describe("FactorGraphPanel", () => {
       }),
     );
     expect(onSelectPointer).toHaveBeenLastCalledWith(
-      "/factors/factors/0/graph/nodes/2",
+      "/factors/0/graph/nodes/2",
     );
     await user.click(within(signal as HTMLElement).getByText("소스에서 열기"));
-    expect(onOpenSource).toHaveBeenLastCalledWith(
-      "/factors/factors/0/graph/nodes/0",
-    );
+    expect(onOpenSource).toHaveBeenLastCalledWith("/factors/0/graph/nodes/0");
   });
 
   it("hides stale graph data and exposes current backend graph diagnostics", async () => {
@@ -335,7 +333,7 @@ describe("FactorGraphPanel", () => {
             code: "factor.graph.missing_input",
             kind: "semantic",
             severity: "error",
-            pointer: "/factors/factors/0/graph/nodes/2/input_node_id",
+            pointer: "/factors/0/graph/nodes/2/input_node_id",
             nodeId: "momentum",
             message: "input node does not exist",
             range: null,
@@ -353,7 +351,7 @@ describe("FactorGraphPanel", () => {
     ).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "소스에서 열기" }));
     expect(onOpenSource).toHaveBeenCalledWith(
-      "/factors/factors/0/graph/nodes/2/input_node_id",
+      "/factors/0/graph/nodes/2/input_node_id",
     );
   });
 
@@ -384,11 +382,9 @@ describe("FactorGraphPanel", () => {
       }),
     );
     expect(onSelectPointer).toHaveBeenLastCalledWith(
-      "/factors/factors/0/graph/nodes/5",
+      "/factors/0/graph/nodes/5",
     );
     await user.click(within(orphan).getByText("소스에서 열기"));
-    expect(onOpenSource).toHaveBeenLastCalledWith(
-      "/factors/factors/0/graph/nodes/5",
-    );
+    expect(onOpenSource).toHaveBeenLastCalledWith("/factors/0/graph/nodes/5");
   });
 });

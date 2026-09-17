@@ -81,7 +81,7 @@ export const prepareExecutionPlans = (
 ): PreparedPlans => {
   const spec = currentSpec(state);
   if (spec === null) return { status: "blocked", reason: blockedReason(state) };
-  if (spec.factors.factors.length === 0) return { status: "empty" };
+  if (spec.factors.length === 0) return { status: "empty" };
   if (source.schema === null || source.contract === null) {
     return source.state.schema === "loading" ||
       source.state.contract === "loading"
@@ -146,8 +146,8 @@ const buildFactorPlanRequests = (spec: StrategySpec): FactorPlanRequest[] => {
   const parameterIds = (spec.parameters ?? []).map(
     (parameter) => parameter.parameter_id,
   );
-  const factorIds = spec.factors.factors.map((factor) => factor.factor_id);
-  return spec.factors.factors.map((factor, factorIndex) => ({
+  const factorIds = spec.factors.map((factor) => factor.factor_id);
+  return spec.factors.map((factor, factorIndex) => ({
     factorIndex,
     factorId: factor.factor_id,
     label: factor.label,
@@ -160,8 +160,9 @@ const buildFactorPlanRequests = (spec: StrategySpec): FactorPlanRequest[] => {
   }));
 };
 
+/** schema 1.1: `factors` is the root sequence, so a factor's graph lives at `/factors/{i}/graph`. */
 export const factorGraphPointer = (factorIndex: number): string =>
-  `/factors/factors/${factorIndex}/graph`;
+  `/factors/${factorIndex}/graph`;
 
 export const factorNodePointer = (
   factorIndex: number,
@@ -171,7 +172,7 @@ export const factorNodePointer = (
 export const factorIndexAtPointer = (
   pointer: string | undefined,
 ): number | null => {
-  const match = /^\/factors\/factors\/(0|[1-9]\d*)(?:\/|$)/.exec(pointer ?? "");
+  const match = /^\/factors\/(0|[1-9]\d*)(?:\/|$)/.exec(pointer ?? "");
   if (match === null) return null;
   const index = Number(match[1]);
   return Number.isSafeInteger(index) ? index : null;

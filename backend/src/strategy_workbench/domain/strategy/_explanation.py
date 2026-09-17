@@ -18,7 +18,7 @@ class StrategyExplanation:
 
 
 def explain_strategy(spec: StrategySpec) -> StrategyExplanation:
-    factor_names = tuple(factor.label for factor in spec.factors.factors)
+    factor_names = tuple(factor.label for factor in spec.factors)
     return StrategyExplanation(
         steps=(
             StrategyExplanationStep(

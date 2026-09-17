@@ -50,7 +50,6 @@ from strategy_workbench.domain.strategy.facade.specification import (
     FactorDirection,
     FactorGraph,
     FactorSignal,
-    FactorStep,
     FieldNode,
     Market,
     RebalanceFrequency,
@@ -702,24 +701,22 @@ def _momentum_spec(field_id: str) -> StrategySpec:
     return replace(
         template,
         data=DataStep(market=Market.KRX, start=START, end=END, universe_id="krx.common-stock"),
-        factors=FactorStep(
-            factors=(
-                FactorSignal(
-                    factor_id="mom_3",
-                    label="3세션 모멘텀",
-                    direction=FactorDirection.HIGH,
-                    weight=1.0,
-                    graph=FactorGraph(
-                        nodes=(
-                            FieldNode("px", field_id, "field"),
-                            TimeSeriesNode(
-                                "mom", TimeSeriesOperator.MOMENTUM, "px", 3, "time_series"
-                            ),
+        factors=(
+            FactorSignal(
+                factor_id="mom_3",
+                label="3세션 모멘텀",
+                direction=FactorDirection.HIGH,
+                weight=1.0,
+                graph=FactorGraph(
+                    nodes=(
+                        FieldNode("px", field_id, "field"),
+                        TimeSeriesNode(
+                            "mom", TimeSeriesOperator.MOMENTUM, "px", 3, "time_series"
                         ),
-                        output_node_id="mom",
                     ),
+                    output_node_id="mom",
                 ),
-            )
+            ),
         ),
         portfolio=replace(
             template.portfolio,

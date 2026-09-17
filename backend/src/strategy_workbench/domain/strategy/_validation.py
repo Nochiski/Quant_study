@@ -152,7 +152,7 @@ def validate_strategy(spec: StrategySpec) -> StrategyValidation:
                 "strategy.data.universe_empty", "data.universe_id", "유니버스를 선택하세요."
             )
         )
-    if not spec.factors.factors:
+    if not spec.factors:
         issues.append(
             semantic_issue("strategy.factor.required", "factors", "팩터를 하나 이상 추가하세요.")
         )
@@ -258,7 +258,7 @@ def validate_strategy(spec: StrategySpec) -> StrategyValidation:
                     )
                 )
 
-    factor_ids = [factor.factor_id for factor in spec.factors.factors]
+    factor_ids = [factor.factor_id for factor in spec.factors]
     if len(factor_ids) != len(set(factor_ids)):
         issues.append(
             semantic_issue("strategy.factor.duplicate", "factors", "팩터 ID는 중복될 수 없습니다.")
@@ -276,8 +276,8 @@ def validate_strategy(spec: StrategySpec) -> StrategyValidation:
         if not isinstance(parameter, ChoiceParameter)
         or all(_is_number(choice) for choice in (parameter.default, *parameter.choices))
     }
-    for factor_index, factor in enumerate(spec.factors.factors):
-        base = f"factors.factors.{factor_index}"
+    for factor_index, factor in enumerate(spec.factors):
+        base = f"factors.{factor_index}"
         for node_index, node in enumerate(factor.graph.nodes):
             if (
                 isinstance(node, ParameterNode)

@@ -94,7 +94,7 @@ class StrategyTraceService:
                 "trace as_of is outside the strategy data range — "
                 f"as_of={request.as_of} range={spec.data.start}..{spec.data.end}"
             )
-        factors = {factor.factor_id: factor for factor in spec.factors.factors}
+        factors = {factor.factor_id: factor for factor in spec.factors}
         if request.factor_id not in factors:
             raise InvalidStrategyTraceRequestError(
                 "trace factor_id is not present in the strategy — "

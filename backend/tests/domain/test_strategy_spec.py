@@ -10,7 +10,6 @@ from strategy_workbench.application.strategy_design.facade.design import Strateg
 from strategy_workbench.domain.strategy.facade.specification import (
     FactorGraph,
     FactorSignal,
-    FactorStep,
     FloatParameter,
     ParameterNode,
     StrategyIdentity,
@@ -39,7 +38,7 @@ def test_canonical_hash_ignores_storage_identity_but_tracks_semantics() -> None:
 def test_validation_reports_unknown_parameter_and_invalid_bounds() -> None:
     spec = _template()
     bad_factor = replace(
-        spec.factors.factors[0],
+        spec.factors[0],
         graph=FactorGraph(
             nodes=(
                 ParameterNode(
@@ -53,7 +52,7 @@ def test_validation_reports_unknown_parameter_and_invalid_bounds() -> None:
     )
     invalid = replace(
         spec,
-        factors=FactorStep((bad_factor,)),
+        factors=(bad_factor,),
         parameters=(
             FloatParameter(
                 parameter_id="lookback",
@@ -90,4 +89,4 @@ def test_explanation_preserves_pipeline_order() -> None:
         "risk",
         "execution",
     )
-    assert isinstance(spec.factors.factors[0], FactorSignal)
+    assert isinstance(spec.factors[0], FactorSignal)

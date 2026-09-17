@@ -37,7 +37,7 @@ def _saved_template(client: TestClient) -> dict[str, Any]:
     """Save the JSON template as a document revision so the run can reference it."""
     template = client.get("/api/v1/strategies/template").json()
     template.pop("identity")
-    template["schema_version"] = "1.0"
+    template["schema_version"] = "1.1"
     source = json.dumps(template, ensure_ascii=False, indent=2, default=str)
     created = client.post("/api/v1/strategy-documents", json={"source": source, "format": "json"})
     assert created.status_code == 201, created.text
@@ -85,7 +85,7 @@ def test_run_by_saved_revision_records_the_exact_revision_in_the_manifest() -> N
     assert manifest["strategy_provenance"] == {
         "kind": "saved_revision",
         "spec_hash": document["spec_hash"],
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "strategy_id": document["strategy_id"],
         "revision": 1,
         "source_hash": document["source_hash"],

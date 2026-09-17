@@ -1,5 +1,5 @@
-# unknown key fixture: risk.max_name_weight 오타. typed hydrate가 무시하면 default 0.1로 조용히 대체된다.
-schema_version: "1.0"
+# unknown key fixture: risk.max_name_wieght 오타. typed hydrate가 무시하면 default 0.1로 조용히 대체된다.
+schema_version: "1.1"
 title: "퀄리티 모멘텀"
 description: ""
 data:
@@ -11,23 +11,22 @@ data:
 eligibility:
   rules: []
 factors:
-  factors:
-    - factor_id: momentum
-      label: "모멘텀"
-      direction: high
-      weight: 0.6
-      graph:
-        nodes:
-          - node_id: close
-            field_id: price.close
-            kind: field
-          - node_id: mom_252
-            operator: momentum
-            input_node_id: close
-            window: 252
-            kind: time_series
-        output_node_id: mom_252
-        missing_policy: drop
+  - factor_id: momentum
+    label: "모멘텀"
+    direction: high
+    weight: 0.6
+    graph:
+      nodes:
+        - kind: field
+          node_id: close
+          field_id: price.close
+        - kind: time_series
+          node_id: mom_252
+          operator: momentum
+          input_node_id: close
+          window: 252
+      output_node_id: mom_252
+      missing_policy: drop
 signal:
   method: weighted_sum
 portfolio:

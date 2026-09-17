@@ -18,7 +18,7 @@ def _body(source: str, expected_version: int = 0) -> dict[str, object]:
         "expected_version": expected_version,
         "source": source,
         "format": "yaml",
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "strategy_id": None,
         "base_revision": None,
         "base_spec_hash": None,
@@ -92,7 +92,7 @@ def test_non_utf8_scalar_source_is_a_typed_rejection_and_is_not_persisted() -> N
     client = TestClient(build_http_app(), raise_server_exceptions=False)
     payload = (
         b'{"expected_version":0,"source":"\\ud800","format":"yaml",'
-        b'"schema_version":"1.0","strategy_id":null,"base_revision":null,'
+        b'"schema_version":"1.1","strategy_id":null,"base_revision":null,'
         b'"base_spec_hash":null}'
     )
 

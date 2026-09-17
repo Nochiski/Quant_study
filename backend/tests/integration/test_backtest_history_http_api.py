@@ -12,7 +12,7 @@ from strategy_workbench.bootstrap.facade.http import build_http_app
 def _saved_document(client: TestClient) -> dict[str, Any]:
     template = client.get("/api/v1/strategies/template").json()
     template.pop("identity")
-    template["schema_version"] = "1.0"
+    template["schema_version"] = "1.1"
     response = client.post(
         "/api/v1/strategy-documents",
         json={
@@ -63,7 +63,7 @@ def test_backtest_history_is_newest_first_paginated_and_filterable() -> None:
     assert payload["items"][0]["strategy_provenance"] == {
         "kind": "inline_draft",
         "spec_hash": document["spec_hash"],
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "strategy_id": None,
         "revision": None,
         "source_hash": inline_source_hash,
@@ -71,7 +71,7 @@ def test_backtest_history_is_newest_first_paginated_and_filterable() -> None:
     assert payload["items"][1]["strategy_provenance"] == {
         "kind": "saved_revision",
         "spec_hash": document["spec_hash"],
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "strategy_id": document["strategy_id"],
         "revision": document["revision"],
         "source_hash": document["source_hash"],
@@ -134,7 +134,7 @@ def test_all_page_endpoints_reject_noncanonical_integer_wire_forms() -> None:
     )
 
     for endpoint in endpoints:
-        for value in ("1.0", "01", "+1", " 1 ", "9_0"):
+        for value in ("1.1", "01", "+1", " 1 ", "9_0"):
             response = client.get(endpoint, params={"offset": value})
             assert response.status_code == 422, (endpoint, value, response.text)
         response = client.get(endpoint, params={"limit": "1.0"})

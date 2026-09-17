@@ -15,7 +15,6 @@ from strategy_workbench.domain.strategy.facade.specification import (
     FactorDirection,
     FactorGraph,
     FactorSignal,
-    FactorStep,
     FieldNode,
     Market,
     PortfolioStep,
@@ -78,25 +77,23 @@ class StrategyDesignService:
                 universe_id="krx.common-stock",
             ),
             eligibility=EligibilityStep(),
-            factors=FactorStep(
-                factors=(
-                    FactorSignal(
-                        factor_id="price.close",
-                        label="종가",
-                        direction=FactorDirection.HIGH,
-                        weight=1.0,
-                        graph=FactorGraph(
-                            nodes=(
-                                FieldNode(
-                                    node_id="close",
-                                    field_id="price.close",
-                                    kind="field",
-                                ),
+            factors=(
+                FactorSignal(
+                    factor_id="price.close",
+                    label="종가",
+                    direction=FactorDirection.HIGH,
+                    weight=1.0,
+                    graph=FactorGraph(
+                        nodes=(
+                            FieldNode(
+                                node_id="close",
+                                field_id="price.close",
+                                kind="field",
                             ),
-                            output_node_id="close",
                         ),
+                        output_node_id="close",
                     ),
-                )
+                ),
             ),
             signal=SignalStep(),
             portfolio=PortfolioStep(),

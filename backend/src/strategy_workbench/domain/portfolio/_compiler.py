@@ -482,7 +482,7 @@ def _score_candidate(
     score = 0.0
     denominator = 0.0
     contributions: list[FactorContributionTrace] = []
-    for factor in spec.factors.factors:
+    for factor in spec.factors:
         value = factors.get(factor.factor_id)
         if value is None or value.value is None:
             reasons.append(ExclusionReason.MISSING_FACTOR)

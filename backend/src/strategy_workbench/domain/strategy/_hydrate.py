@@ -23,7 +23,7 @@ from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
 
 from ._models import StrategyIdentity, StrategySpec
 
-SUPPORTED_SCHEMA_VERSIONS: tuple[str, ...] = ("1.0",)
+SUPPORTED_SCHEMA_VERSIONS: tuple[str, ...] = ("1.1",)
 
 # reason: sentinel shared by every hydrate branch; the walker is generic over dataclass hints,
 # so its intermediate values are `Any` until the top-level isinstance(StrategySpec) check.
@@ -267,6 +267,7 @@ def _hydrate_dataclass(tp: type, value: object, pointer: str, issues: list[Struc
             )
             failed = True
     kwargs: dict[str, Any] = {}
+    derived_from: dict[str, str] = {}
     for name, field in fields.items():
         if name in value:
             hydrated = _hydrate(hints[name], value[name], _child(pointer, name), issues)
@@ -274,11 +275,17 @@ def _hydrate_dataclass(tp: type, value: object, pointer: str, issues: list[Struc
                 failed = True
             else:
                 kwargs[name] = hydrated
+        elif "default-from" in field.metadata:
+            # 파생 기본값(예: FactorSignal.label ← factor_id). 원천 필드가 없으면 그 필드의
+            # missing_field 이슈가 이미 실패를 만든다.
+            derived_from[name] = str(field.metadata["default-from"])
         elif field.default is dataclasses.MISSING and field.default_factory is dataclasses.MISSING:
             _issue(issues, "structure.missing_field", _child(pointer, name), f"{name} is required")
             failed = True
     if failed:
         return _MISSING
+    for name, source in derived_from.items():
+        kwargs[name] = kwargs[source]
     return tp(**kwargs)
 
 

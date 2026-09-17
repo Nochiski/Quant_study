@@ -69,8 +69,10 @@ fixture와 hash golden을 1.1로 옮긴다.
 - 다음이 생략된 문서가 hydrate되고, 명시한 문서와 같은 `spec_hash`를 낸다: `description`,
   `eligibility`, `signal`, `portfolio`, `risk`, `execution`, `data.market`, 팩터 `label`, `weight`.
 - 생략된 팩터 `label`은 `factor_id`와 같다.
-- runtime schema에서 모든 노드 `$defs`의 첫 property가 `kind`다. `factors` property에
-  `x-defines: factor`가 있다. `label`은 required가 아니고 `x-default-from: factor_id`를 가진다.
+- runtime schema에서 모든 노드 `$defs`의 첫 property가 `kind`다. `label`은 required가 아니고
+  `x-default-from: factor_id`를 가진다. `factors`에 `x-defines`를 두지 않는다: 문서 안에서 팩터를
+  참조하는 `x-reference` namespace가 없어 "defines ↔ references" 불변식을 깨기 때문이다(P2-01은
+  항목의 `x-authoring-identity`로 컬렉션을 찾는다).
 - fixture `quality_momentum.yaml`(verbose 1.1), `.json`, `.legacy.json`, `.minimal.yaml`(생략형)이
   같은 hash를 낸다. 기존 1.0 fixture는 `quality_momentum.v1_0.yaml`로 보존한다(P1-03 golden).
 - hash 알고리즘 golden은 모델과 무관한 literal payload로 고정된다(아래 Step 6).
@@ -89,7 +91,6 @@ scalar constraint catalog, 검증 코드 registry.
 - Modify: `backend/src/strategy_workbench/domain/strategy/_validation.py`
 - Modify: `backend/src/strategy_workbench/domain/strategy/_explanation.py`, `_diff.py` (factors 경로)
 - Modify: `backend/src/strategy_workbench/domain/strategy/facade/specification.py` (`FactorStep` export 제거)
-- Modify: `backend/src/strategy_workbench/domain/factor/_nodes.py` (`kw_only`, `kind` 첫 필드)
 - Modify: `backend/src/strategy_workbench/domain/portfolio/_compiler.py`,
   `application/portfolio_design/_service.py`, `_trace_service.py`, `application/strategy_design/_service.py`
 - Modify: `backend/tests/fixtures/strategy_documents/*`, `backend/tests/contract/test_strategy_authoring_fixtures.py`,
@@ -172,7 +173,6 @@ execution:
 - [ ] **Step 4: 모델 변경** — `_models.py`
 
 ```python
-DEFINES_FACTOR = {"defines": "factor"}
 DEFAULT_FROM_FACTOR_ID = {"default-from": "factor_id"}
 
 
@@ -202,7 +202,7 @@ class StrategySpec:
     description: str = ""
     data: DataStep
     eligibility: EligibilityStep = EligibilityStep()
-    factors: tuple[FactorSignal, ...] = field(metadata=DEFINES_FACTOR)
+    factors: tuple[FactorSignal, ...]
     signal: SignalStep = SignalStep()
     portfolio: PortfolioStep = PortfolioStep()
     risk: RiskStep = RiskStep()
@@ -210,8 +210,8 @@ class StrategySpec:
     parameters: tuple[ParameterDefinition, ...] = field(default=(), metadata=DEFINES_PARAMETER)
 ```
 
-  `FactorStep` 삭제. `_nodes.py`의 모든 노드 dataclass를 `@dataclass(frozen=True, kw_only=True)`로
-  바꾸고 `kind: Literal["..."]`를 첫 필드로 옮긴다(값·의미 불변).
+  `FactorStep` 삭제. 노드 dataclass는 그대로 둔다(positional 생성 호출이 registry·테스트에 많다).
+  `kind` 우선 순서는 Step 5의 schema builder가 property 정렬로 만든다.
 
 - [ ] **Step 5: hydrate·schema 변경**
 
@@ -237,7 +237,7 @@ class StrategySpec:
   `"factors.factors.{i}"` → `"factors.{i}"`, `"/factors/factors/{i}"` → `"/factors/{i}"`를
   `_validation.py`, `_explanation.py`, `_diff.py`, `_compiler.py`, `_service.py`(portfolio_design),
   `_trace_service.py`, `strategy_design/_service.py`(`FactorStep(...)` → tuple)에서 바꾼다.
-  `facade/specification.py` export에서 `FactorStep` 제거, `DEFINES_FACTOR` 노출 불필요.
+  `facade/specification.py` export에서 `FactorStep` 제거.
 
   hash 알고리즘 golden 교체 — `test_strategy_authoring_fixtures.py`:
 

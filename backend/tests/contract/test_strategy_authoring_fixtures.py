@@ -19,6 +19,7 @@ P0-03 cross-runtime fixture와 P1-02 codec이 이 loader를 대체한다.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import replace
 from datetime import date
@@ -47,10 +48,12 @@ FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_docum
 
 # 같은 의미의 YAML/JSON/legacy JSON fixture가 공유하는 canonical hash.
 # 재생성: strategy_spec_hash(hydrate_authoring_document(yaml.safe_load(quality_momentum.yaml)))
-QUALITY_MOMENTUM_SPEC_HASH = "9eb6872a3ca250dfb78b0887e5b236a98b24fb2ccdf2d6af0540218d49e998fe"
-# StrategyDesignService.template()의 2026-09-03 기준 hash. 알고리즘 변경 감지용 golden.
-# 재생성: strategy_spec_hash(_template()) — 값이 바뀌면 hash 알고리즘이 바뀐 것이다.
-TEMPLATE_SPEC_HASH_2026_09_03 = "d6c0e1da4b05490bfa94b3b4c0c605fd4d6bca625f44d06c577b181f7911f2d4"
+QUALITY_MOMENTUM_SPEC_HASH = "04a3bb86bb541f0503e80b17600196067c17faccf584114ccff7049a960733a2"
+# hash 알고리즘 golden. 모델 모양과 무관하게 canonical 직렬화 규칙(sort_keys·최소 separator·
+# allow_nan=False·sha256)만 고정한다. payload는 2026-09-04 schema 1.0 fixture의 canonical payload를
+# literal 파일로 옮긴 것이라 모델이 1.1로 바뀌어도 값이 변하지 않는다. 값이 바뀌면 알고리즘이 바뀐
+# 것이다.
+ALGORITHM_HASH_2026_09_04 = "9eb6872a3ca250dfb78b0887e5b236a98b24fb2ccdf2d6af0540218d49e998fe"
 
 DRAFT_IDENTITY = StrategyIdentity(strategy_id="draft", revision=0)
 
@@ -103,7 +106,7 @@ def test_verbose_yaml_example_hydrates_to_strategy_spec() -> None:
     assert spec.title == "퀄리티 모멘텀"
     assert spec.data.start == date(2021, 1, 1)
     assert spec.risk.max_name_weight == 0.05
-    assert spec.factors.factors[0].graph.output_node_id == "mom_252"
+    assert spec.factors[0].graph.output_node_id == "mom_252"
     assert strategy_spec_hash(spec) == QUALITY_MOMENTUM_SPEC_HASH
 
 
@@ -129,10 +132,10 @@ def test_same_meaning_sources_share_one_spec_hash(name: str) -> None:
 def test_int_and_float_literals_hydrate_to_the_same_spec() -> None:
     document = _load_json("quality_momentum.json")
     assert document["execution"]["fee_bps"] == 15  # fixture는 일부러 int로 적는다.
-    document["factors"]["factors"][0]["weight"] = 1
+    document["factors"][0]["weight"] = 1
     variant = dict(document)
     variant["factors"] = json.loads(json.dumps(document["factors"]))
-    variant["factors"]["factors"][0]["weight"] = 1.0
+    variant["factors"][0]["weight"] = 1.0
 
     assert strategy_spec_hash(hydrate_authoring_document(document)) == strategy_spec_hash(
         hydrate_authoring_document(variant)
@@ -154,7 +157,57 @@ def test_canonical_round_trip_preserves_everything_except_identity() -> None:
 
 
 def test_existing_hash_algorithm_is_unchanged() -> None:
-    assert strategy_spec_hash(_template()) == TEMPLATE_SPEC_HASH_2026_09_03
+    payload = _load_json("canonical_payload.v1_0.json")
+    encoded = json.dumps(
+        payload, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    assert hashlib.sha256(encoded).hexdigest() == ALGORITHM_HASH_2026_09_04
+
+
+def test_minimal_document_hydrates_to_the_same_hash() -> None:
+    """생략된 섹션·market·label·weight는 기본값으로 채워져 verbose 문서와 같은 hash를 낸다 (S3)."""
+    verbose = hydrate_authoring_document(_load_yaml("quality_momentum.yaml"))
+    minimal_document = _load_yaml("quality_momentum.minimal.yaml")
+    for key in ("description", "eligibility", "parameters"):
+        assert key not in minimal_document
+    assert "market" not in minimal_document["data"]
+    minimal = hydrate_authoring_document(minimal_document)
+
+    assert strategy_spec_hash(minimal) == strategy_spec_hash(verbose) == QUALITY_MOMENTUM_SPEC_HASH
+
+
+def test_factor_label_defaults_to_factor_id_and_weight_to_one() -> None:
+    document = _load_yaml("quality_momentum.minimal.yaml")
+    del document["factors"][0]["label"]
+    del document["factors"][0]["weight"]
+
+    spec = hydrate_authoring_document(document)
+
+    assert spec.factors[0].label == "momentum"
+    assert spec.factors[0].weight == 1.0
+
+
+def test_schema_1_0_document_is_rejected() -> None:
+    """1.0 문서는 새 입력으로 받지 않는다. P1-03/04의 업그레이드 경로로만 들어온다 (spec D2)."""
+    result = hydrate_strategy_document(
+        _load_yaml("quality_momentum.v1_0.yaml"), identity=DRAFT_IDENTITY
+    )
+
+    assert not result.ok
+    assert [issue.code for issue in result.issues] == ["structure.unsupported_schema_version"]
+
+
+def test_nested_factors_shape_is_a_type_mismatch() -> None:
+    """1.0의 `factors: {factors: [...]}`는 1.1에서 sequence 자리의 mapping이다 (S1)."""
+    document = _load_yaml("quality_momentum.yaml")
+    document["factors"] = {"factors": document["factors"]}
+
+    result = hydrate_strategy_document(document, identity=DRAFT_IDENTITY)
+
+    assert not result.ok
+    assert [(issue.code, issue.pointer) for issue in result.issues] == [
+        ("structure.type_mismatch", "/factors")
+    ]
 
 
 def test_syntax_invalid_yaml_never_becomes_a_spec() -> None:

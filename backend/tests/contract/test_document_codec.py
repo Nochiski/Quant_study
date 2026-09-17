@@ -29,7 +29,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
 )
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
-QUALITY_MOMENTUM_SPEC_HASH = "9eb6872a3ca250dfb78b0887e5b236a98b24fb2ccdf2d6af0540218d49e998fe"
+QUALITY_MOMENTUM_SPEC_HASH = "04a3bb86bb541f0503e80b17600196067c17faccf584114ccff7049a960733a2"
 
 
 def _source(name: str) -> str:
@@ -52,7 +52,7 @@ def test_yaml_with_comments_parses_to_the_same_tree_as_json() -> None:
     assert yaml_doc.tree is not None and json_doc.tree is not None
     yaml_tree = json.loads(json.dumps(yaml_doc.tree))
     assert yaml_tree["risk"] == {"max_name_weight": 0.05}
-    assert yaml_tree["factors"]["factors"][0]["graph"]["nodes"][1]["window"] == 252
+    assert yaml_tree["factors"][0]["graph"]["nodes"][1]["window"] == 252
     # The JSON twin spells some defaults out; both hydrate to the same spec hash below.
     assert yaml_doc.tree["title"] == json_doc.tree["title"]
 
@@ -98,7 +98,7 @@ def test_source_map_points_at_the_exact_scalar_and_key() -> None:
         "max_name_weight"
     )
 
-    node_range = parsed.locate("/factors/factors/0/graph/nodes/1/window")
+    node_range = parsed.locate("/factors/0/graph/nodes/1/window")
     assert node_range is not None
     assert text[node_range.start.offset : node_range.end.offset] == "252"
 
@@ -108,8 +108,8 @@ def test_missing_pointer_falls_back_to_the_nearest_parent_range() -> None:
 
     assert parsed.locate("/data/end_date") == parsed.value_ranges["/data"]
     assert (
-        parsed.locate("/factors/factors/0/graph/nodes/9/kind")
-        == parsed.value_ranges["/factors/factors/0/graph/nodes"]
+        parsed.locate("/factors/0/graph/nodes/9/kind")
+        == parsed.value_ranges["/factors/0/graph/nodes"]
     )
     assert parsed.locate("/nowhere/deep") == parsed.value_ranges[""]
 

@@ -22,8 +22,8 @@ def test_schema_endpoint_serves_the_runtime_schema_with_its_hash_as_etag() -> No
     )
     assert body["schema_hash"] == hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     assert response.headers["ETag"] == f'"{body["schema_hash"]}"'
-    assert body["schema_version"] == "1.0"
-    assert body["schema"]["properties"]["schema_version"] == {"type": "string", "const": "1.0"}
+    assert body["schema_version"] == "1.1"
+    assert body["schema"]["properties"]["schema_version"] == {"type": "string", "const": "1.1"}
     assert body["schema"]["additionalProperties"] is False
 
 

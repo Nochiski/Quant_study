@@ -6,7 +6,7 @@ current_phase: P1
 current_pr: P1-01,P1-02,P1-03,P1-04
 active_prs: [P1-01, P1-02, P1-03, P1-04]
 parallel_window: [P1-01, P1-02, P1-03, P1-04]
-last_updated: 2026-09-18T00:43:01+09:00
+last_updated: 2026-09-18T01:08:56+09:00
 planned_prs: 17
 merged_prs: 0
 approved_prs: 3
@@ -29,7 +29,7 @@ progress_percent: 0
 | Active PR | `P1-01, P1-02, P1-03, P1-04` |
 | Progress | `0 / 17 merged (0%)` |
 | Approved | `3 / 17` |
-| Aggregated at | `2026-09-18 00:43 KST` |
+| Aggregated at | `2026-09-18 01:08 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -43,6 +43,8 @@ progress_percent: 0
 - Form/Graph 편집은 JSON Pointer 범위의 source 트랜잭션이다. 별도 편집 모델을 두지 않는다(ADR D5 개정).
 - P1 backend PR은 `backend/openapi.json`만 재생성하고 frontend generated SDK는 P2-01이 갱신한다.
 - reviewer 서브에이전트는 Opus로만 배정한다. Phase 종료마다 SoT·책임분리 점검 서브에이전트를 돌린다.
+- 알려진 기존 결함(이 initiative 범위 밖, 별도 이슈 후보): safe codec이 YAML 1.1 value 태그 스칼라 `=`를
+  `parse()` 밖으로 `ConstructorError`로 던져 `/compile`·`/upgrade`가 500이 난다(P1-04 리뷰 관찰, base부터 재현).
 - 알려진 간격(P1 merge ~ P5-03): `docs/manual/strategy-workbench/README.md`와 이전 initiative WORKFLOW 2.2의
   YAML 예시가 1.0 모양(`factors.factors`, `signal.method`)이라 그대로 따라 치면 unknown key다. 문서 개정은
   P5-03이 소유한다.
@@ -90,10 +92,10 @@ progress_percent: 0
 | Non-goals | 적용 조건 경고(P1-05), frontend 배너(P2-02), SDK(P2-01) |
 | Branch/worktree | `feat/gui-p1-04-upgrade-endpoint` (base `feat/gui-p1-03-upgrade-and-frozen-1-0` `9ce5a7d`) |
 | Base SHA | `9ce5a7d` |
-| Head SHA | `0a70484` (diff freeze; feat + requires_upgrade required refactor 2 commit) |
+| Head SHA | `92800f7` (review 후속 2; P1 `5bd97fe`; diff freeze `0a70484`) |
 | Diff stat | handwritten 10 files +181/−10 + 신규 7 files(adapter·contract·테스트 3·golden 2); generated 제외 |
 | Focused tests | 어댑터 6·서비스 8·HTTP 5 = 19 신규(26 with architecture) |
-| Full gate | backend pytest 1,276 passed · Ruff check clean · Pyright 0 |
+| Full gate | backend pytest 1,279 passed · Ruff check clean · Pyright 0 · 추적 openapi == live |
 
 ---
 
@@ -190,6 +192,7 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-18 KST | Claude | `review_gui_p1_04` REQUEST_CHANGES(P1-001 openapi 미재생성, P1-002 422 union 누락; P2 5) → P1 후속 `5bd97fe`(union에 invalid 추가, 재생성, 추적 openapi 동기 테스트), P2 후속 `92800f7`(주석 재배치·비어 버린 섹션만·CRLF 통일·예외 분리·재parse 제거), 1,279 passed, 같은 reviewer 재검토 요청. 스코프 밖: 기존 codec `x: =` 500 결함은 별도 이슈 후보로 기록 | 13.5 재검토 |
 | 2026-09-18 KST | Claude | P1-04 구현·self-check(1,276 passed) → diff freeze `0a70484`, stacked PR(base P1-03), `review_gui_p1_04`(opus) 배정 → IN_REVIEW. 결정: 422 코드 `strategy_document.not_upgradeable`·`strategy_document.upgrade_drift`(기존 `strategy_document.invalid` namespace), 비어 버린 섹션의 주석 잔해는 어댑터가 제거 | 13.3 diff freeze |
 | 2026-09-18 KST | Claude | `review_gui_p1_03` 후속 확인 APPROVE 유지 → P1-03 APPROVED. P1-04 IN_PROGRESS, 브랜치 `feat/gui-p1-04-upgrade-endpoint`(base P1-03 `9ce5a7d`) | 13.5 판정 |
 | 2026-09-18 KST | Claude | `review_gui_p1_03` APPROVE(P0/P1 0, P2 5) → 후속 `8bd0185`(requires_upgrade를 JSON API·목록·history에, schema_version 검증 422, 메시지 진단, hash owner 단일화, 재바인딩 계약 테스트, WORKFLOW 문구·P2-02 분기 기록), 1,257 passed, 같은 reviewer 확인 요청 | 13.5 |

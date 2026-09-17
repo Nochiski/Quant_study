@@ -92,6 +92,7 @@ const document = (
   spec_hash: `${revision}`.repeat(64).slice(0, 64),
   origin: "document",
   generated: false,
+  requires_upgrade: false,
   created_at: "2026-09-04T09:30:00+00:00",
 });
 
@@ -2696,6 +2697,48 @@ describe("backtest from the editor (P3-05)", () => {
       "/research/strategies/s1/revisions/1",
     );
     expect(screen.queryByText(/run-stale.*접수됨/)).not.toBeInTheDocument();
+  });
+
+  it("explains a saved 1.0 revision the backend refuses to run and disables the run control", async () => {
+    server.use(
+      http.post(`${API}/api/v1/backtests`, async ({ request }) => {
+        started.push((await request.json()) as Record<string, unknown>);
+        return HttpResponse.json(
+          {
+            detail: {
+              code: "backtest.strategy.requires_upgrade",
+              message: "strategy s1 revision 2 is a frozen schema 1.0 row",
+            },
+          },
+          { status: 422 },
+        );
+      }),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2");
+    await editor();
+    const run = screen.getByRole("button", { name: /백테스트 실행/ });
+    await waitFor(() => expect(run).toBeEnabled());
+    await user.click(run);
+
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]).toMatchObject({
+      strategy_source: {
+        kind: "saved_revision",
+        strategy_id: "s1",
+        revision: 2,
+      },
+    });
+    const banner = await screen.findByRole("region", {
+      name: "schema 1.0 문서",
+    });
+    expect(banner).toHaveTextContent(
+      "저장된 1.0 revision으로는 백테스트를 실행할 수 없습니다",
+    );
+    expect(run).toBeDisabled();
+    expect(history.location.pathname).toBe(
+      "/research/strategies/s1/revisions/2",
+    );
   });
 });
 

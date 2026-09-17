@@ -8,7 +8,7 @@ import {
 } from "../../../entities/strategy";
 import { t } from "../../../shared/config";
 import { Link, useNavigate, useSearch } from "../../../shared/lib/router";
-import { Button, EmptyState } from "../../../shared/ui";
+import { Badge, Button, EmptyState } from "../../../shared/ui";
 import "../../../shared/ui/data-list.css";
 
 const ROUTE = "/research/strategies";
@@ -83,7 +83,15 @@ const RevisionRows = ({
           <tbody>
             {revisions.data.items.map((revision) => (
               <tr key={revision.revision}>
-                <td>v{revision.revision}</td>
+                <td>
+                  v{revision.revision}
+                  {revision.requires_upgrade ? (
+                    <>
+                      {" "}
+                      <Badge tone="warn">{t("history.frozen")}</Badge>
+                    </>
+                  ) : null}
+                </td>
                 <td>{displayTime(revision.created_at)}</td>
                 <td>
                   {revision.source_format ?? revision.origin}
@@ -189,7 +197,15 @@ const StrategyRow = ({ strategy }: { strategy: StrategySummary }) => {
             <code>{strategy.strategy_id}</code>
           </span>
         </td>
-        <td>v{strategy.latest_revision}</td>
+        <td>
+          v{strategy.latest_revision}
+          {strategy.requires_upgrade ? (
+            <>
+              {" "}
+              <Badge tone="warn">{t("history.frozen")}</Badge>
+            </>
+          ) : null}
+        </td>
         <td>{displayTime(strategy.updated_at)}</td>
         <td>
           <code className="data-list-page__hash" title={strategy.spec_hash}>

@@ -137,3 +137,14 @@ def seed_frozen_rows(
 
 def utc_now_text() -> str:
     return datetime.now(UTC).isoformat(timespec="microseconds")
+
+
+if __name__ == "__main__":
+    # frontend Playwright(P2-02)가 격리 SQLite에 동결 row를 심을 때 부른다:
+    # `python tests/frozen_revision_rows.py <db>`.
+    import sys
+
+    if len(sys.argv) != 2:
+        raise SystemExit("usage: frozen_revision_rows.py <sqlite path>")
+    seeded = seed_frozen_rows(Path(sys.argv[1]))
+    print(", ".join(f"{row.strategy_id}@{row.revision}" for row in seeded.values()))

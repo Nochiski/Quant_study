@@ -15,6 +15,7 @@ import {
   StrategyProjectionPanel,
   StrategyDiffPanel,
   StrategyOutline,
+  UpgradeBanner,
   PROJECTION_VIEWS,
   canValidateDocument,
   currentDiagnostics,
@@ -33,6 +34,7 @@ import {
   useOutlineNavigation,
   useSnippetInsertion,
   useStrategyDocument,
+  useUpgradeDocument,
   type DocumentSource,
   type StrategyView,
 } from "../../../features/edit-strategy";
@@ -118,6 +120,20 @@ export const StrategyRevisionPage = () => {
     runSettings.requestOptions,
   );
   const startBacktest = backtest.run;
+  // 저장된 1.0 revision 참조로 보낸 실행을 backend가 거부한 경우: 같은 배너로 안내하고 실행을 막는다.
+  const backtestRejectedForUpgrade =
+    backtest.status.kind === "failed" &&
+    backtest.status.code === "backtest.strategy.requires_upgrade";
+  const canRun = backtest.canRun && !backtestRejectedForUpgrade;
+  const storedMeta = useMemo(
+    () => ({
+      revision: stored.revision,
+      generated: stored.generated,
+      requires_upgrade: stored.requires_upgrade,
+    }),
+    [stored.generated, stored.requires_upgrade, stored.revision],
+  );
+  const documentUpgrade = useUpgradeDocument(document, storedMeta);
   const current =
     document.compiled !== null &&
     document.compiledVersion === document.sourceVersion
@@ -171,12 +187,14 @@ export const StrategyRevisionPage = () => {
   );
   const onOutlineEditorReady = outline.onEditorReady;
   const onSnippetEditorReady = snippets.onEditorReady;
+  const onUpgradeEditorReady = documentUpgrade.onEditorReady;
   const onEditorReady = useCallback(
     (editor: CodeEditorHandle | null): void => {
       onOutlineEditorReady(editor);
       onSnippetEditorReady(editor);
+      onUpgradeEditorReady(editor);
     },
-    [onOutlineEditorReady, onSnippetEditorReady],
+    [onOutlineEditorReady, onSnippetEditorReady, onUpgradeEditorReady],
   );
   const runBacktest = useCallback(() => void startBacktest(), [startBacktest]);
   const selectSymbol = useCallback(
@@ -247,7 +265,7 @@ export const StrategyRevisionPage = () => {
         }}
         saveStatus={saveStatusText(document, status)}
         onRunBacktest={runBacktest}
-        runDisabled={!backtest.canRun}
+        runDisabled={!canRun}
         onValidate={validateNow}
         validateDisabled={!canValidate}
         onSave={save}
@@ -279,11 +297,13 @@ export const StrategyRevisionPage = () => {
             canSave={canSave}
             saving={status.kind === "saving"}
             onRun={runBacktest}
-            canRun={backtest.canRun}
+            canRun={canRun}
             runBlockedReason={
-              runSettings.result.valid
-                ? undefined
-                : t("backtest.settings.blocked")
+              backtestRejectedForUpgrade
+                ? t("upgrade.backtestBlocked")
+                : runSettings.result.valid
+                  ? undefined
+                  : t("backtest.settings.blocked")
             }
             runSettings={
               <BacktestRunSettings
@@ -325,19 +345,25 @@ export const StrategyRevisionPage = () => {
           ),
         }}
         notice={
-          status.kind === "conflict" &&
-          status.strategyId !== null &&
-          status.baseRevision !== null &&
-          status.latestRevision !== null ? (
-            <ConflictBanner
-              strategyId={status.strategyId}
-              baseRevision={status.baseRevision}
-              latestRevision={status.latestRevision}
-              source={document.source}
-              onCreateRevision={createRevisionFromConflict}
-              canCreateRevision={canCreateRevisionFromConflict}
+          <>
+            <UpgradeBanner
+              upgrade={documentUpgrade}
+              backtestRejected={backtestRejectedForUpgrade}
             />
-          ) : undefined
+            {status.kind === "conflict" &&
+            status.strategyId !== null &&
+            status.baseRevision !== null &&
+            status.latestRevision !== null ? (
+              <ConflictBanner
+                strategyId={status.strategyId}
+                baseRevision={status.baseRevision}
+                latestRevision={status.latestRevision}
+                source={document.source}
+                onCreateRevision={createRevisionFromConflict}
+                canCreateRevision={canCreateRevisionFromConflict}
+              />
+            ) : null}
+          </>
         }
         outline={
           <StrategyOutline

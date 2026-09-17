@@ -78,6 +78,18 @@ export {
 } from "./model/server-draft";
 export { useServerDraft, type ServerDraftSync } from "./model/use-server-draft";
 export { ConflictBanner } from "./ui/conflict-banner";
+export { UpgradeBanner } from "./ui/upgrade-banner";
+export {
+  decideDocumentUpgrade,
+  LEGACY_SCHEMA_VERSION,
+  type StoredRevisionMeta,
+  type UpgradeAvailability,
+} from "./model/document-upgrade";
+export {
+  useUpgradeDocument,
+  type DocumentUpgrade,
+  type UpgradeStatus,
+} from "./model/use-upgrade-document";
 export { SourceEditor } from "./ui/source-editor";
 export { StrategyOutline } from "./ui/strategy-outline";
 export { ContractInspector } from "./ui/contract-inspector";

@@ -22,6 +22,7 @@ import {
   saveStrategyDraft,
   startBacktest,
   traceStrategy as postStrategyTrace,
+  upgradeStrategyDocument,
 } from "./generated/sdk.gen";
 import type {
   BacktestRunResult,
@@ -68,6 +69,7 @@ import type {
   StrategySummary,
   StrategyTraceRequest,
   StrategyTraceResponse,
+  UpgradedDocument,
 } from "./generated/types.gen";
 
 export const configureStrategyWorkbenchApi = (baseUrl: string): void => {
@@ -421,6 +423,15 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "compileStrategyDocument");
   },
 
+  /** 1.0 텍스트를 1.1로 다시 쓴 source와 그 compile 결과. 실패(422)는 텍스트를 바꾸지 않는다. */
+  async upgradeStrategyDocument(
+    request: CompileRequest,
+    signal?: AbortSignal,
+  ): Promise<UpgradedDocument> {
+    const response = await upgradeStrategyDocument({ body: request, signal });
+    return unwrap(response, "upgradeStrategyDocument");
+  },
+
   async getStrategyDocumentSchema(): Promise<StrategyDocumentSchema> {
     const response = await getStrategyDocumentSchema();
     return unwrap(response, "getStrategyDocumentSchema");
@@ -518,4 +529,5 @@ export type {
   StrategySummary,
   StrategyTraceRequest,
   StrategyTraceResponse,
+  UpgradedDocument,
 };

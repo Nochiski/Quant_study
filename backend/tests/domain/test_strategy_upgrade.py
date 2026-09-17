@@ -75,7 +75,7 @@ def test_frozen_means_any_version_other_than_current() -> None:
     assert is_frozen_schema_version("1.2")
 
 
-@pytest.mark.parametrize("version", ["1.1", "2.0", 1.0, None])
+@pytest.mark.parametrize("version", [CURRENT_SCHEMA_VERSION, "2.0", 1.0, None])
 def test_only_schema_1_0_is_upgradeable(version: object) -> None:
     document = _yaml("quality_momentum.v1_0.yaml")
     if version is None:
@@ -173,4 +173,7 @@ def test_steps_apply_identically_to_ruamel_round_trip_containers() -> None:
         yaml.safe_load(text)
     )
     assert dumped.startswith("# P0-01 golden authoring fixture")  # 선두 주석 보존
-    assert "schema_version: '1.1'" in dumped or 'schema_version: "1.1"' in dumped
+    assert (
+        f"schema_version: '{CURRENT_SCHEMA_VERSION}'" in dumped
+        or f'schema_version: "{CURRENT_SCHEMA_VERSION}"' in dumped
+    )

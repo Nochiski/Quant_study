@@ -8,8 +8,9 @@
   줄끝 주석과 그 키 **위**의 독립 주석은 키와 함께 사라지고, 그 키 **아래**의 독립 주석(다음 키를
   설명하는 주석)은 자리를 지킨다. 이 규칙은 어떤 step이 어떤 mapping에서 키를 지우든 같다: 어댑터는
   step 적용 전후의 키 집합 차이로 삭제를 알아내며 삭제 목록을 따로 갖지 않는다(Phase 1 감사
-  DEFECT-P1X-002). 시퀀스 항목 mapping의 **첫** 키가 지워질 때 그 위의 독립 주석만은 옮길 자리가
-  없어 사라진다. 통째로 갈아끼운 `factors.factors` 안쪽 키의 줄끝 주석은 바깥 키로 옮겨진다.
+  DEFECT-P1X-002). 시퀀스 항목 mapping의 **첫** 키가 지워질 때만 예외가 하나 있다: 그 위의 독립
+  주석은 항목 슬롯이 소유해 (지워진 키를 설명하던 것이지만) 그대로 남고, 아래 주석은 다음 남는 키
+  앞으로 옮겨진다. 통째로 갈아끼운 `factors.factors` 안쪽 키의 줄끝 주석은 바깥 키로 옮겨진다.
   줄바꿈은 LF로 통일되고 여러 줄 flow style은 한 줄로 접힌다.
 - JSON: 주석이 없으므로 dict 변환 뒤 원문의 들여쓰기 폭으로 다시 직렬화한다.
 
@@ -131,6 +132,8 @@ def _relocate_comments_of_removed_keys(snapshots: list[_MappingSnapshot]) -> Non
     사라지고 **위**(지워진 키를 설명하던) 주석은 앞 키에 붙어 남는다 — 독자를 오도하는 반대 결과다.
     step 적용 뒤 mapping마다 "사라진 키의 연속 구간"을 찾아, 구간 마지막 키의 아래 주석을 구간 앞
     형제(없으면 부모 키)의 꼬리로 옮기고 그 형제의 원래 꼬리(지워진 키를 설명하던 주석)는 버린다.
+    시퀀스 항목 mapping의 첫 키가 지워지면 부모 키가 없으므로 아래 주석을 다음 남는 키의 앞 주석
+    슬롯에 넣는다(P1-06 리뷰 P2-001).
     """
     for snapshot in snapshots:
         block = snapshot.block
@@ -148,7 +151,20 @@ def _relocate_comments_of_removed_keys(snapshots: list[_MappingSnapshot]) -> Non
                 _set_tail(block, keys[start - 1], below)
             elif snapshot.parent is not None and snapshot.parent_key is not None:
                 _set_tail(snapshot.parent, snapshot.parent_key, below)
-            # 시퀀스 항목의 첫 키: 위의 주석이 항목 슬롯에 있어 옮길 곳이 없다(모듈 docstring).
+            elif below and index < len(keys):
+                _prepend_before_key(block, keys[index], below)
+            # 남는 키가 하나도 없는 시퀀스 항목: 옮길 곳이 없어 아래 주석은 사라진다.
+
+
+def _prepend_before_key(owner: CommentedMap, key: str, lines: str) -> None:
+    """`key` 줄 앞에 독립 주석 줄들을 둔다(ruamel `ca.items[key]` 슬롯 [1] = 키 앞 주석 토큰들)."""
+    moved = CommentToken(lines, CommentMark(0))
+    slot = owner.ca.items.get(key)
+    if slot is None:
+        owner.ca.items[key] = [None, [moved], None, None]
+        return
+    existing = slot[1] if len(slot) > 1 and slot[1] is not None else []
+    slot[1] = [moved, *existing]
 
 
 def _finish_emptied_sections(

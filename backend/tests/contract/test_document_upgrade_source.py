@@ -138,6 +138,31 @@ def test_periods_removed_from_an_alias_node_keeps_the_comment_below_it() -> None
     )
 
 
+def test_first_key_removed_from_a_sequence_item_keeps_the_comment_below_it() -> None:
+    """P1-06 리뷰 P2-001: 노드의 첫 키가 지워지면 부모 키가 없으므로 아래 주석은 다음 키 앞에
+    남는다. 위 주석은 항목 슬롯 소유라 그대로 남는다(문서화된 예외)."""
+    source = _read("quality_momentum.v1_0.commented.yaml").replace(
+        f"          - node_id: z{LF}",
+        f"          # z 위 주석 (항목 슬롯){LF}"
+        f"          - periods: 3   # periods 줄끝{LF}"
+        f"            # 아래 주석 — node_id 설명{LF}"
+        f"            node_id: z{LF}",
+    )
+    assert "periods: 3" in source
+
+    upgraded = RuamelDocumentCodec().upgrade_source(source, format=SourceFormat.YAML)
+
+    assert "periods" not in upgraded
+    assert "# z 위 주석 (항목 슬롯)" in upgraded
+    assert f"# 아래 주석 — node_id 설명{LF}" in upgraded
+    assert upgraded.index("# 아래 주석 — node_id 설명") < upgraded.index("node_id: z")
+    reparsed = RuamelDocumentCodec().parse(upgraded, format=SourceFormat.YAML)
+    assert reparsed.ok and reparsed.tree is not None
+    assert json.loads(json.dumps(reparsed.tree)) == json.loads(
+        json.dumps(upgrade_document_1_0(yaml.safe_load(source)))
+    )
+
+
 def test_crlf_source_is_normalised_to_lf() -> None:
     source = _read("quality_momentum.v1_0.yaml").replace(LF, CR + LF)
 

@@ -12,16 +12,16 @@
   "cores": {
     "rust": {
       "samples_seconds": [
-        0.538043500011554,
-        0.5511168000084581,
-        0.6027993000025162
+        0.5414412000100128,
+        0.5485257999971509,
+        0.4993909999902826
       ],
-      "median_seconds": 0.5511168000084581,
+      "median_seconds": 0.5414412000100128,
       "speedup_vs_python": null,
       "final_equity": 2321985873.9513392,
       "orders": 22243,
       "fills": 22155,
-      "process_peak_rss_bytes": 260694016
+      "process_peak_rss_bytes": 219115520
     }
   }
 }

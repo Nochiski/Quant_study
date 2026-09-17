@@ -136,7 +136,7 @@ impl PersistentEngine {
                     ))
                 })?;
                 kept_wires.push(target.clone());
-                kept.push((instrument_id, "weight".to_string(), weight, 0));
+                kept.push((instrument_id, true, weight, 0));
                 continue;
             }
             // bar 없는 종목: 보유 중이면 수량 유지, 미보유면 제외 (예산은 현금에 남는다).
@@ -152,7 +152,7 @@ impl PersistentEngine {
                     None,
                     Some(held.to_string()),
                 ));
-                kept.push((instrument_id, "quantity".to_string(), 0.0, held));
+                kept.push((instrument_id, false, 0.0, held));
             }
         }
         let reason = if no_bar.is_empty() {
@@ -306,13 +306,7 @@ mod tests {
             framed.reason,
             "target_tape:2018-04-27 no_bar=('005930', '000030')"
         );
-        assert_eq!(
-            framed.kept,
-            vec![
-                (0, "weight".to_string(), 0.4, 0),
-                (1, "quantity".to_string(), 0.0, 12),
-            ]
-        );
+        assert_eq!(framed.kept, vec![(0, true, 0.4, 0), (1, false, 0.0, 12),]);
         assert_eq!(
             framed.no_bar,
             vec!["005930".to_string(), "000030".to_string()]
@@ -347,7 +341,7 @@ mod tests {
         };
         let framed = native.as_ref().unwrap();
         assert_eq!(framed.reason, "target_tape:2018-04-27");
-        assert_eq!(framed.kept, vec![(0, "weight".to_string(), 0.7, 0)]);
+        assert_eq!(framed.kept, vec![(0, true, 0.7, 0)]);
         assert!(framed.no_bar.is_empty());
         // 0.7 × 100,000 / 101 = 693주 주문이 세션 1 시가에 체결된다.
         assert_eq!(runtime.portfolio.held_qty(A), 693);

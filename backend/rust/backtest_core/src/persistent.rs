@@ -8,7 +8,7 @@ use crate::persistent_router::{
 };
 use crate::portfolio::{Portfolio, SnapshotTuple};
 use crate::quote::parse_decimal_ratio;
-use crate::records::{RecordStore, RecordWire};
+use crate::records::{RecordIndexWire, RecordStore};
 use crate::session::{self, BarTuple, EntryTuple, Op};
 use crate::tape::NativeTape;
 use pyo3::exceptions::{PyKeyError, PyValueError};
@@ -560,15 +560,25 @@ impl PersistentEngine {
         self.submit_internal(token, decision, None)
     }
 
-    /// 잔여 주문 취소 기록 후 전체 레코드 배치를 돌려준다.
-    fn finish(&mut self, py: Python<'_>) -> PyResult<Vec<RecordWire>> {
+    /// 잔여 주문 취소 기록 후 레코드 인덱스 `(seq, session_index, kind)`를 돌려준다.
+    /// 큐 arena는 더 쓰지 않으므로 여기서 해제한다.
+    fn finish(&mut self) -> PyResult<Vec<RecordIndexWire>> {
         self.finish_internal()?;
-        self.records.batch(py)
+        self.queued = Vec::new();
+        // tape 프레임은 결정 생성에만 쓰였다 — 재구성 정보는 DECISION 레코드에 있다.
+        self.tape = None;
+        self.event_queue = NativeEventQueue::default();
+        Ok(self.records.index())
     }
 
-    /// 종료 여부와 무관한 현재 레코드 배치 (전략 예외 시 partial trace 조회용).
-    fn record_batch(&self, py: Python<'_>) -> PyResult<Vec<RecordWire>> {
-        self.records.batch(py)
+    /// 종료 여부와 무관한 현재 레코드 인덱스 (전략 예외 시 partial trace 조회용).
+    fn record_batch(&self) -> Vec<RecordIndexWire> {
+        self.records.index()
+    }
+
+    /// 레코드 하나의 payload wire. Python이 공개 객체를 만들 때만 호출한다.
+    fn record_payload(&self, py: Python<'_>, seq: usize) -> PyResult<PyObject> {
+        self.records.payload(py, seq)
     }
 
     fn record_count(&self) -> usize {

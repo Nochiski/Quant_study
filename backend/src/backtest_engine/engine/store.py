@@ -249,7 +249,7 @@ class PersistentEventStore(EventStore):
         self._tape_frames: dict[int, TapeFrame] = {}
         self._decision_index: dict[str, tuple[int, Any]] = {}
         self._decision_index_len = -1
-        self._finished_batch: list[tuple[int, int, int, Any]] | None = None
+        self._finished_batch: list[tuple[int, int, int]] | None = None
         self._materialized: dict[int, RecordPayload] = {}
         self._records_cache: tuple[Record, ...] | None = None
 
@@ -295,11 +295,11 @@ class PersistentEventStore(EventStore):
         # decision_id → (session_index, native) 인덱스를 다시 만든다.
         if self._decision_index_len != len(batch):
             decision_code = _RECORD_KIND_CODES[RecordKind.DECISION]
-            self._decision_index = {
-                payload[0]: (session_index, payload[1])
-                for _seq, session_index, code, payload in batch
-                if code == decision_code
-            }
+            self._decision_index = {}
+            for seq, session_index, code in batch:
+                if code == decision_code:
+                    decision_id_wire, native = self._payload(seq)
+                    self._decision_index[decision_id_wire] = (session_index, native)
             self._decision_index_len = len(batch)
         found = self._decision_index.get(decision_id)
         if found is None:
@@ -331,9 +331,9 @@ class PersistentEventStore(EventStore):
         else:
             frame = self._tape_frames[frame_session]
             kept: list[PositionTarget] = []
-            for instrument_id, kind, weight, quantity in kept_wires:
+            for instrument_id, is_weight, weight, quantity in kept_wires:
                 instrument = self._instruments[instrument_id]
-                if kind == "weight":
+                if is_weight:
                     kept.append(WeightTarget(instrument=instrument, weight=weight))
                 else:
                     kept.append(QuantityTarget(instrument=instrument, quantity=Decimal(quantity)))
@@ -454,15 +454,19 @@ class PersistentEventStore(EventStore):
 
     # --- 레코드 조회 -------------------------------------------------------------
 
-    def _batch(self) -> list[tuple[int, int, int, Any]]:
+    def _batch(self) -> list[tuple[int, int, int]]:
+        """레코드 인덱스 `(seq, session_index, kind_code)`. payload는 `_payload(seq)`로 읽는다."""
         if self._finished_batch is not None:
             return self._finished_batch
         # 종료 전(전략 예외 등)에는 Rust가 지금까지 쌓은 partial trace를 그대로 읽는다.
         return self._runtime.record_batch()
 
-    def _materialize(
-        self, seq: int, session_index: int, kind_code: int, payload: Any
-    ) -> RecordPayload:
+    def _payload(self, seq: int) -> Any:
+        # 배치 전체를 tuple로 복제하지 않고 레코드마다 한 번만 Rust wire를 읽는다 — Rust 레코드·
+        # Python tuple·공개 객체가 동시에 사는 구간을 없애 peak RSS를 낮춘다.
+        return self._runtime.record_payload(seq)
+
+    def _materialize(self, seq: int, session_index: int, kind_code: int) -> RecordPayload:
         cached = self._materialized.get(seq)
         if cached is not None:
             return cached
@@ -471,7 +475,10 @@ class PersistentEventStore(EventStore):
         built: RecordPayload
         if kind is RecordKind.MARKET:
             built = self._market_snapshots[session_index]
-        elif kind is RecordKind.DECISION:
+            self._materialized[seq] = built
+            return built
+        payload = self._payload(seq)
+        if kind is RecordKind.DECISION:
             decision_id, native = payload
             built = DecisionRecord(decision_id, self._decision(ts, decision_id, native))
         elif kind is RecordKind.ORDER:
@@ -518,17 +525,17 @@ class PersistentEventStore(EventStore):
                     seq=seq,
                     ts=self._sessions[session_index],
                     kind=_RECORD_KINDS[kind_code],
-                    payload=self._materialize(seq, session_index, kind_code, payload),
+                    payload=self._materialize(seq, session_index, kind_code),
                 )
-                for seq, session_index, kind_code, payload in self._batch()
+                for seq, session_index, kind_code in self._batch()
             )
         return self._records_cache
 
     def _payloads(self, kind: RecordKind) -> tuple[RecordPayload, ...]:
         kind_code = _RECORD_KIND_CODES[kind]
         return tuple(
-            self._materialize(seq, session_index, code, payload)
-            for seq, session_index, code, payload in self._batch()
+            self._materialize(seq, session_index, code)
+            for seq, session_index, code in self._batch()
             if code == kind_code
         )
 
@@ -536,7 +543,7 @@ class PersistentEventStore(EventStore):
         """디버그용 원시 Rust 레코드 인덱스 `(seq, session_index, kind, seq)`."""
         return tuple(
             (seq, session_index, _RECORD_KINDS[kind_code].value, seq)
-            for seq, session_index, kind_code, _payload in self._batch()
+            for seq, session_index, kind_code in self._batch()
         )
 
     def equity_values(self) -> tuple[float, ...]:

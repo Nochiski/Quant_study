@@ -24,6 +24,17 @@ class InstrumentId:
     asset_class: AssetClass
     currency: str
 
+    def __post_init__(self) -> None:
+        # 스냅샷 중복 검사·bar 인덱스·포지션 조회가 세션마다 종목 수만큼 이 값을 해시한다.
+        # Enum 필드 해시가 Python 수준 호출이라 생성 시 한 번만 계산해 둔다. 필드가 아니므로
+        # ==, repr, fields(), trace 직렬화에는 나타나지 않는다.
+        object.__setattr__(
+            self, "_hash", hash((self.venue, self.symbol, self.asset_class, self.currency))
+        )
+
+    def __hash__(self) -> int:
+        return self._hash  # type: ignore[attr-defined]  # __post_init__에서 채운 캐시
+
 
 @dataclass(frozen=True)
 class Money:

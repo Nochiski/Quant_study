@@ -44,7 +44,7 @@ class SavedStrategy:
     spec_hash: str
     # 은퇴한 schema 버전으로 동결된 revision (spec D2). spec은 업그레이드 변환을 거친 1.1 모양이고
     # spec_hash는 저장된 값이라 서로 재계산 관계가 아니다.
-    requires_upgrade: bool = False
+    requires_upgrade: bool
 
 
 class InvalidStrategyError(ValueError):

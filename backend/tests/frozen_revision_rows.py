@@ -75,28 +75,32 @@ def seed_frozen_rows(
     spec_json: str | None = None,
     spec_hash: str | None = None,
     source_hash: str | None = None,
+    id_suffix: str = "",
 ) -> dict[str, FrozenRow]:
     """Create the schema through the repository, then insert 1.0 rows with raw SQL.
 
     Overrides let a test tamper with exactly one column; the defaults are internally consistent.
+    `id_suffix`는 e2e가 시도마다 고유한 전략 id(`frozen-doc-<suffix>`)를 심을 때 쓴다.
     """
     open_repository(path).close()
     stored_json = frozen_spec_json() if spec_json is None else spec_json
     stored_hash = FROZEN_SPEC_HASH if spec_hash is None else spec_hash
     rows: dict[str, FrozenRow] = {}
+    document_id = f"frozen-doc{id_suffix}"
+    legacy_id = f"frozen-legacy{id_suffix}"
     with sqlite3.connect(path) as connection:
         if document_row:
             text = frozen_source_text()
             text_hash = _sha256(text) if source_hash is None else source_hash
-            rows["document"] = FrozenRow("frozen-doc", 1, stored_json, stored_hash, text, text_hash)
+            rows["document"] = FrozenRow(document_id, 1, stored_json, stored_hash, text, text_hash)
             connection.execute(
                 "INSERT INTO strategy_heads (strategy_id, latest_revision) VALUES (?, ?)",
-                ("frozen-doc", 1),
+                (document_id, 1),
             )
             connection.execute(
                 "INSERT INTO strategy_revisions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    "frozen-doc",
+                    document_id,
                     1,
                     "1.0",
                     stored_json,
@@ -110,15 +114,15 @@ def seed_frozen_rows(
                 ),
             )
         if legacy_row:
-            rows["legacy"] = FrozenRow("frozen-legacy", 1, stored_json, stored_hash, None, None)
+            rows["legacy"] = FrozenRow(legacy_id, 1, stored_json, stored_hash, None, None)
             connection.execute(
                 "INSERT INTO strategy_heads (strategy_id, latest_revision) VALUES (?, ?)",
-                ("frozen-legacy", 1),
+                (legacy_id, 1),
             )
             connection.execute(
                 "INSERT INTO strategy_revisions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    "frozen-legacy",
+                    legacy_id,
                     1,
                     "1.0",
                     stored_json,
@@ -139,40 +143,21 @@ def utc_now_text() -> str:
     return datetime.now(UTC).isoformat(timespec="microseconds")
 
 
-FROZEN_STRATEGY_IDS = ("frozen-doc", "frozen-legacy")
 E2E_DB_ENV = "STRATEGY_WORKBENCH_E2E_DB"
-
-
-def frozen_rows_present(path: Path) -> bool:
-    """이전 실행이 심어 둔 동결 전략 head가 하나라도 있는가.
-
-    revision은 트리거로 불변이라 지울 수 없으므로 "있으면 그대로 둔다"가 멱등의 전부다.
-    """
-    if not path.exists():
-        return False
-    placeholders = ", ".join("?" for _ in FROZEN_STRATEGY_IDS)
-    with sqlite3.connect(path) as connection:
-        row = connection.execute(
-            f"SELECT COUNT(*) FROM strategy_heads WHERE strategy_id IN ({placeholders})",  # noqa: S608  # reason: 값은 바인딩, 자리표시자만 조립
-            FROZEN_STRATEGY_IDS,
-        ).fetchone()
-    return bool(row and row[0])
+E2E_SUFFIX_ENV = "STRATEGY_WORKBENCH_E2E_SEED_SUFFIX"
 
 
 if __name__ == "__main__":
     # frontend Playwright(P2-02)가 격리 SQLite에 동결 row를 심을 때 부른다. 경로는 인자 하나 또는
-    # `STRATEGY_WORKBENCH_E2E_DB`(shell 인자 분리를 피하려는 e2e 호출부). serial 그룹 재시도가
-    # 같은 DB를 다시 쓰므로 CLI 경로만 멱등이다: 이미 심어져 있으면 그대로 두고 성공한다(revision
-    # 삭제는 트리거가 막으므로 e2e가 "다음 revision 번호"를 API로 읽는다).
+    # `STRATEGY_WORKBENCH_E2E_DB`(shell 인자 분리를 피하려는 e2e 호출부). revision은 트리거로
+    # 불변이라 재시도가 같은 DB를 다시 쓰면 지울 수 없으므로, e2e는 시도마다
+    # `STRATEGY_WORKBENCH_E2E_SEED_SUFFIX`로 고유한 전략 id를 심는다(같은 id를 두 번 심으면
+    # 여기서도 fail-closed).
     import os
     import sys
 
     argument = sys.argv[1] if len(sys.argv) == 2 else os.environ.get(E2E_DB_ENV)
     if len(sys.argv) > 2 or not argument:
         raise SystemExit(f"usage: frozen_revision_rows.py <sqlite path> (or {E2E_DB_ENV}=<path>)")
-    database = Path(argument)
-    if frozen_rows_present(database):
-        print("frozen rows already present: kept")
-    else:
-        seeded = seed_frozen_rows(database)
-        print(", ".join(f"{row.strategy_id}@{row.revision}" for row in seeded.values()))
+    seeded = seed_frozen_rows(Path(argument), id_suffix=os.environ.get(E2E_SUFFIX_ENV, ""))
+    print(", ".join(f"{row.strategy_id}@{row.revision}" for row in seeded.values()))

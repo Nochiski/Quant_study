@@ -99,7 +99,7 @@ export const useUpgradeDocument = (
         current.replaceRange(0, current.getText().length, upgraded.source);
         current.scrollTo(0);
         current.focus();
-        // setText가 낸 change가 reducer `edit`로 이미 흘렀으므로 다음 버전이 소유자다.
+        // replaceRange가 낸 change가 reducer `edit`로 이미 흘렀으므로 다음 버전이 소유자다.
         setStatus(
           { kind: "applied" },
           `${state.documentEpoch}:${state.sourceVersion + 1}:${state.savedVersion}`,

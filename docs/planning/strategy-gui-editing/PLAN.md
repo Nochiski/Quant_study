@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: strategy-gui-editing
-project_status: IN_PROGRESS
+project_status: IN_REVIEW
 current_phase: P1
 current_pr: P1-01,P1-02,P1-03,P1-04,P1-05
 active_prs: [P1-01, P1-02, P1-03, P1-04, P1-05]
 parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05]
-last_updated: 2026-09-18T01:44:28+09:00
+last_updated: 2026-09-18T01:44:47+09:00
 planned_prs: 17
 merged_prs: 0
 approved_prs: 4
@@ -23,7 +23,7 @@ progress_percent: 0
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_PROGRESS` |
+| Project status | `IN_REVIEW` |
 | Current phase | `P1` |
 | Current/next PR | `P1-01,P1-02,P1-03,P1-04,P1-05` |
 | Active PR | `P1-01, P1-02, P1-03, P1-04, P1-05` |
@@ -74,7 +74,7 @@ progress_percent: 0
 <!-- PLAN:PHASES:START -->
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
-| P1 | Backend schema 1.1 | 5 | 0 | `IN_PROGRESS` |
+| P1 | Backend schema 1.1 | 5 | 0 | `IN_REVIEW` |
 | P2 | Frontend 1.1 and upgrade UI | 3 | 0 | `WAITING` |
 | P3 | Source transactions | 2 | 0 | `WAITING` |
 | P4 | Form editing | 4 | 0 | `WAITING` |
@@ -92,10 +92,10 @@ progress_percent: 0
 | Non-goals | frontend 표시(P2-03), 노드 단위 pointer(demean의 quantile 등)는 후속 판단 |
 | Branch/worktree | `feat/gui-p1-05-field-applicability` (base `feat/gui-p1-04-upgrade-endpoint` `294864c`) |
 | Base SHA | `294864c` |
-| Head SHA | — |
-| Diff stat | — |
-| Focused tests | — |
-| Full gate | — |
+| Head SHA | `b94d4ce` (diff freeze) |
+| Diff stat | handwritten 7 files +206/−5 + 신규 테스트 1(181줄); generated 제외 |
+| Focused tests | applicability 20·document HTTP 13·constraints·application |
+| Full gate | backend pytest 1,310 passed · Ruff check clean · Pyright 0 · 추적 openapi == live |
 
 ---
 
@@ -107,7 +107,7 @@ progress_percent: 0
 | [ ] | `P1-02` | 미사용 필드 3개·enum 제거, unary alias 제거, `cross_sectional: demean` | P1-01 | `APPROVED` | [#111](https://github.com/Nochiski/Quant_study/pull/111) · `review_gui_p1_02` APPROVE (P0/P1 0, P2 3 후속 반영 후 유지) · `9a5cccb` |
 | [ ] | `P1-03` | `_upgrade.py` dict 변환, 1.0 row 동결 읽기, saved-reference backtest 422 | P1-02 | `APPROVED` | [#112](https://github.com/Nochiski/Quant_study/pull/112) · `review_gui_p1_03` APPROVE (P0/P1 0, P2 5 후속 반영 후 유지) · `8bd0185` |
 | [ ] | `P1-04` | `POST /strategy-documents/upgrade` (ruamel rt, drift fail-closed) | P1-03 | `APPROVED` | [#113](https://github.com/Nochiski/Quant_study/pull/113) · `review_gui_p1_04` APPROVE (4차; P1 4·P2 7 해소) · `f7049fa` |
-| [ ] | `P1-05` | `FIELD_APPLICABILITY`, compile warning, `x-applicable-when` | P1-02 | `IN_PROGRESS` | — |
+| [ ] | `P1-05` | `FIELD_APPLICABILITY`, compile warning, `x-applicable-when` | P1-02 | `IN_REVIEW` | `review_gui_p1_05` (opus) 배정 |
 
 Phase exit:
 
@@ -194,6 +194,7 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-18 KST | Claude | P1-05 구현·self-check(1,310 passed) → diff freeze `b94d4ce`, stacked PR(base P1-04), `review_gui_p1_05`(opus) 배정 → IN_REVIEW. 결정: 기존 error 규칙이 소유한 3행은 warning 없이 스키마 노출만(`owned_by_error`), 기본값과 같은 명시값은 경고 없음(canonical 문서가 조용하도록) | 13.3 diff freeze |
 | 2026-09-18 KST | Claude | `review_gui_p1_04` 4차 APPROVE → P1-04 APPROVED. P1-05 IN_PROGRESS, 브랜치 `feat/gui-p1-05-field-applicability`(base P1-04 `294864c`) | 13.5 판정 |
 | 2026-09-18 KST | Claude | `review_gui_p1_04` 3차 REQUEST_CHANGES(P1-004 인접 두 빈 섹션에서 set 순회 순서·슬롯 pop 탓에 출력 비결정) → 후속 `f7049fa`(문서 순서 고정, 줄끝 슬롯만 비움, 결정성 테스트, drift 강등 시 warning 로그), 1,289 passed, 4차 검토 요청 | 13.5 재검토 |
 | 2026-09-18 KST | Claude | `review_gui_p1_04` 재검토 REQUEST_CHANGES(P1-003 `#####` 줄끝 주석 섹션이 비면 IndexError 500 회귀, P2-006 빈 섹션 경로 아래 주석 소실, P2-007 주석 텍스트 변형) → 후속 `d529401`(원본 토큰 보존, 꼬리를 다음 최상위 키로, 어댑터 예외 전부 drift 422), 1,287 passed, 재검토 요청 | 13.5 재검토 |

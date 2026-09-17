@@ -6,10 +6,10 @@ current_phase: P1,P2
 current_pr: P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03
 active_prs: [P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03]
 parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02, P1-06, P2-03]
-last_updated: 2026-09-18T03:52:52+09:00
+last_updated: 2026-09-18T03:55:52+09:00
 planned_prs: 18
 merged_prs: 0
-approved_prs: 7
+approved_prs: 8
 progress_percent: 0
 ---
 
@@ -28,8 +28,8 @@ progress_percent: 0
 | Current/next PR | `P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03` |
 | Active PR | `P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03` |
 | Progress | `0 / 18 merged (0%)` |
-| Approved | `7 / 18` |
-| Aggregated at | `2026-09-18 03:52 KST` |
+| Approved | `8 / 18` |
+| Aggregated at | `2026-09-18 03:55 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -123,7 +123,7 @@ Phase exit:
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [ ] | `P2-01` | generated SDK 1.1, pointer helper·snippet·outline·plan·graph·debugger 적응 | P1-05 | `APPROVED` | [#115](https://github.com/Nochiski/Quant_study/pull/115) · `review_gui_p2_01` APPROVE (P0/P1 0, P2 6 → 후속은 P2-02 브랜치에서) · `802d6e2` |
-| [ ] | `P2-02` | 1.0 문서 업그레이드 배너·동작, e2e fixture/spec 1.1 | P2-01, P1-04 | `IN_REVIEW` | [#116](https://github.com/Nochiski/Quant_study/pull/116) · `review_gui_p2_02` 1차 REQUEST_CHANGES(P1 2·P2 6) → `8f4c090` 2차 REQUEST_CHANGES(P1-001 잔존: 재시도 409) → `6278c40` 3차 재검토 중 |
+| [ ] | `P2-02` | 1.0 문서 업그레이드 배너·동작, e2e fixture/spec 1.1 | P2-01, P1-04 | `APPROVED` | [#116](https://github.com/Nochiski/Quant_study/pull/116) · `review_gui_p2_02` 3차 APPROVE (1차 P1 2·P2 6 → 2차 P1-001 잔존 → 3차 해소) · `6278c40` |
 | [ ] | `P2-03` | Contract Inspector·Problems 적용 조건 표시 | P2-01, P1-05 | `IN_REVIEW` | [#118](https://github.com/Nochiski/Quant_study/pull/118) · `review_gui_p2_03` 배정 · diff freeze `6ec933f` |
 
 Phase exit:
@@ -180,6 +180,7 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
+| P2-02 | `review_gui_p2_02` | `2a16ebe` | `6278c40` | APPROVE (1차 REQUEST_CHANGES P1-001 e2e seeding 비멱등·P1-002 undo 격리·P2 6 → 2차 P1-001 잔존(재시도 시 `/revisions/1` 저장 409) → 3차 시도별 고유 전략 id로 해소; seeding CLI 4케이스·`--repeat-each 2` 10 passed 실측) | 2 (해소) | suffix가 ms 타임스탬프(충돌 시 fail-closed), 정규식에 id 보간(base36·하이픈만), 동결 전략이 시도마다 누적(목록 페이지 20) | 2026-09-18 |
 | P1-06 | `review_gui_p1_06` | `af816a3` | `e77f7ce` | APPROVE (P0/P1 0, P2 3: 시퀀스 항목 첫 키 삭제 시 docstring과 반대로 아래 주석 소실 → 다음 키 앞 주석 슬롯으로 이동 구현, 버전 리터럴 테스트 가드, WORKFLOW 잔재 2곳; relocation probe 4종·0.9/1.2/2.0 row fail-closed 실측) | 0 | 1.1→1.2 도입 시 변환 step 미존재(의도된 제한, 테스트가 상수를 읽어 실패로 드러남); 중첩 mapping이 비는 경우 `_finish_emptied_sections` 미적용(현행 step으로 도달 불가) | 2026-09-18 |
 | P2-01 | `review_gui_p2_01` | `66e1002` | `802d6e2` | APPROVE (P0/P1 0, P2 6: 영문 주석 4, 409 mock의 계약 외 `requires_upgrade`, 문서 mock의 `requires_upgrade` 누락, 팩터 컬렉션 탐색 첫 매치 의존(fail-open), WORKFLOW P2-01 `x-defines: factor` 문구 stale, synthetic 스키마의 `method` 잔재; 스니펫 매트릭스 6케이스·pointer 정규식 8입력·SDK 재생성 diff 0 실측) | 0 | 프로덕션 build·런타임 e2e는 reviewer가 직접 확인 못함(P2-02에서 e2e green 실측); P2-003은 P2-02가 `document()` mock에 `requires_upgrade: false`를 넣어 해소, 나머지 P2는 P2-02 브랜치 후속 커밋 | 2026-09-18 |
 | P1-05 | `review_gui_p1_05` | `294864c` | `3c70001` | APPROVE (1차 REQUEST_CHANGES P1-001 생성 SDK 미동기는 WORKFLOW 1절 스택 정책 확인 후 reviewer 철회; P2-002 AND 조건·P2-003/004 동일 모양·owned_by_error 해소 실측) | 0 | `_explanation.py`가 percentile 모드에서도 `selection_count`를 "N종목"으로 단언(기존 결함, cleanup 후보); i18n `strategy.contract.applicable.*` 키는 P2-03; spec D4 문구·표(7행→8행, validator 발행)는 P5-03 개정 | 2026-09-18 |
@@ -206,6 +207,7 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-18 KST | Claude | `review_gui_p2_02` 3차 APPROVE → P2-02 APPROVED. `review_gui_p1_06` 후속 `e77f7ce` 확인(P2-001 해소, P2-002 부분: 1.1 row를 1.2에서 읽는 시나리오 테스트 없음 → 1.2 도입 PR 몫으로 기록, P2-003 해소; nit: `_prepend_before_key`를 `_finish_emptied_sections`에서도 재사용, 시퀀스 항목 `-` 한 글자 줄 렌더 모양 단언 → cleanup 후보). Phase 2 exit 감사 `audit_gui_phase2`(opus) 착수 | 13.5 판정 · 8절 |
 | 2026-09-18 KST | Claude | P2-02 2차 REQUEST_CHANGES(P1-001 잔존: 재시도 시 `/revisions/1` 저장이 409) → 3차 후속 `6278c40`(시도마다 고유 전략 id seeding, `--repeat-each 2` 10 passed) 재검토 요청. `review_gui_p1_06` APPROVE(P2 3) → 후속 `e77f7ce`(시퀀스 항목 첫 키 아래 주석 보존, 버전 리터럴 가드, WORKFLOW 잔재) → P1-06 APPROVED. 스택 rebase: P1-06 → P2-02 `6278c40`, P2-03 → P1-06 `e77f7ce`. P2-03 구현 → diff freeze `6ec933f`, stacked PR #118(base P1-06), `review_gui_p2_03`(opus) 배정 → IN_REVIEW. 결정: Inspector·hover는 parse tree로 판정(조건 필드 없으면 판정 불가, 기본값 미복제), Form은 컴파일된 spec으로 판정 | 13.3·13.5 |
 | 2026-09-18 KST | Claude | 계획 외 PR `P1-06`(감사 후속) 추가: DEFECT-P1X-001~004 수정, 규칙 문서·spec D4 갱신, P2-01 리뷰 P2-001~006 후속 → diff freeze `11576cc`, stacked PR #117(base P2-02), `review_gui_p1_06`(opus) 배정 → IN_REVIEW. Phase 1 exit 3항 체크. 소유자 확인 필요: PR 추가(17→18), `collaboration-language.md` docstring 정책 제안 보류 | 8절 Phase 종료 gate · 13.3 |
 | 2026-09-18 KST | Claude | `review_gui_p2_02` 1차 REQUEST_CHANGES(P1-001 e2e seeding 비멱등, P1-002 undo 격리 누락; P2-001~006) → 후속 `8f4c090`(CLI "있으면 그대로", 다음 revision 번호 API 조회, env 경로, `replaceRange` 격리, `upgradeable` 우선, saved 회귀 테스트, 422 번역, Pick 파생) + 기준선 갱신 `6d95226`(strict e2e 17 passed) → 같은 reviewer 재검토 요청 | 13.5 재검토 |

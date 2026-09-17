@@ -468,6 +468,7 @@ class BacktestEngine:
                 raise RuntimeError(
                     "persistent Rust router does not support a returned strategy action"
                 )
+            store.stage_decision(decision)
             decision_id, error_wire = runtime.submit_decision(
                 frame.token, decision_to_wire(decision)
             )
@@ -518,7 +519,7 @@ class BacktestEngine:
         runtime.load_target_tape(rows, strategy.idle_reason)
 
     @staticmethod
-    def _drive(runtime: Any) -> Any | None:
+    def _drive(runtime: Any) -> Any | None:  # reason: pyo3 확장 모듈(backtest_core) stub 부재
         """Rust 드라이버를 한 번 전진시키고, 도메인 오류 접두어를 엔진 예외로 바꾼다."""
         try:
             return runtime.drive()

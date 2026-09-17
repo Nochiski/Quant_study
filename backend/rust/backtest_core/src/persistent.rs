@@ -4,8 +4,7 @@ use crate::driver::{CorporateActionEntry, Queued, RunSettings};
 use crate::event_queue::NativeEventQueue;
 use crate::feed::PersistentFeed;
 use crate::persistent_router::{
-    self, CloseWire, DecisionWire, ExecutionWire, RouteError, RoutedGroup, RoutedOrder,
-    RoutedUpdate, RouterConfig, TargetWire,
+    DecisionWire, ExecutionWire, RouteError, RoutedOrder, RouterConfig, TargetWire,
 };
 use crate::portfolio::{Portfolio, SnapshotTuple};
 use crate::quote::parse_decimal_ratio;
@@ -29,13 +28,6 @@ type GroupTuple = (String, String, Vec<String>);
 type OrderState = (String, i64, bool);
 type CostTuple = (String, Option<String>, f64);
 type CorporateActionTuple = (i64, i64, f64, f64, f64);
-type RouteResponse = (
-    String,
-    Vec<RoutedOrder>,
-    Vec<RoutedUpdate>,
-    Vec<RoutedGroup>,
-    Option<RouteError>,
-);
 
 fn scaled_corporate_action_quantity(quantity: i64, ratio: &str) -> PyResult<(i64, f64)> {
     const QUANTUM: i128 = 1_000_000_000;
@@ -627,69 +619,6 @@ impl PersistentEngine {
 
     pub(crate) fn configure_router(&mut self, actions: Vec<String>, features: Vec<String>) {
         self.router_config.configure(actions, features);
-    }
-
-    #[pyo3(signature = (decision, bars=None))]
-    fn route_basic_decision(
-        &mut self,
-        decision: DecisionWire,
-        bars: Option<HashMap<String, CloseWire>>,
-    ) -> PyResult<RouteResponse> {
-        let decision_id = Self::next_id(&mut self.decision_seq, 'D');
-        let bars = match bars {
-            Some(bars) => bars,
-            None => self
-                .feed
-                .as_ref()
-                .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?
-                .current_closes()?,
-        };
-        // 심볼 폴백은 그날 바뿐 아니라 피드 등록부 전체에서 찾는다 — 바가 끊긴 보유 종목(정지·상폐)의
-        // REPLACE 청산 주문이 "instrument metadata is missing" 으로 run 을 죽이지 않도록.
-        let mut fallback_symbols: HashMap<String, String> = self
-            .feed
-            .as_ref()
-            .map(PersistentFeed::registry_symbols)
-            .unwrap_or_default();
-        for (key, (symbol, _)) in bars.iter() {
-            fallback_symbols.insert(key.clone(), symbol.clone());
-        }
-        let decision_for_orders = decision.clone();
-        let (orders, updates, groups, error) = persistent_router::route_basic_decision(
-            &self.portfolio,
-            &mut self.orders,
-            &self.router_config,
-            &mut self.order_seq,
-            &mut self.group_seq,
-            self.allow_short,
-            &decision_id,
-            decision,
-            bars,
-        )?;
-        if error.is_none() {
-            let staged_orders = orders
-                .iter()
-                .map(|order| {
-                    StoredOrder::from_routed(
-                        order,
-                        &decision_for_orders,
-                        fallback_symbols.get(&order.1).map(String::as_str),
-                        &decision_id,
-                    )
-                })
-                .collect::<PyResult<Vec<_>>>()?;
-            let staged_groups: Vec<StoredGroup> = groups
-                .iter()
-                .map(|group| StoredGroup {
-                    group_id: group.0.clone(),
-                    policy: group.1.clone(),
-                    order_ids: group.2.clone(),
-                })
-                .collect();
-            self.pending_orders.extend(staged_orders);
-            self.pending_groups.extend(staged_groups);
-        }
-        Ok((decision_id, orders, updates, groups, error))
     }
 
     fn fail_callback(&mut self, token: u64, detail: String) -> PyResult<()> {

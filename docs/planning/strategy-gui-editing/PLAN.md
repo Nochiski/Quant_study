@@ -6,7 +6,7 @@ current_phase: P1
 current_pr: P1-01,P1-02,P1-03
 active_prs: [P1-01, P1-02, P1-03]
 parallel_window: [P1-01, P1-02, P1-03]
-last_updated: 2026-09-18T00:08:30+09:00
+last_updated: 2026-09-18T00:28:11+09:00
 planned_prs: 17
 merged_prs: 0
 approved_prs: 2
@@ -29,7 +29,7 @@ progress_percent: 0
 | Active PR | `P1-01, P1-02, P1-03` |
 | Progress | `0 / 17 merged (0%)` |
 | Approved | `2 / 17` |
-| Aggregated at | `2026-09-18 00:08 KST` |
+| Aggregated at | `2026-09-18 00:28 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -90,10 +90,10 @@ progress_percent: 0
 | Non-goals | source 텍스트(주석 보존) 변환·endpoint(P1-04), 적용 조건 경고(P1-05), frontend(P2) |
 | Branch/worktree | `feat/gui-p1-03-upgrade-and-frozen-1-0` (base `feat/gui-p1-02-dead-fields-unary-alias` `9ea8854`) |
 | Base SHA | `9ea8854` |
-| Head SHA | `7312c1a` (diff freeze) |
+| Head SHA | `8bd0185` (review 후속; diff freeze `7312c1a`) |
 | Diff stat | handwritten 12 files +175/−22 + 신규 5 files(_upgrade.py, 테스트 헬퍼·테스트 3); generated 제외 |
 | Focused tests | upgrade 8·frozen repository 8·frozen HTTP 3 = 21 passed |
-| Full gate | backend pytest 1,253 passed · Ruff check clean · Pyright 0 |
+| Full gate | backend pytest 1,257 passed · Ruff check clean · Pyright 0 |
 
 ---
 
@@ -188,6 +188,7 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-18 KST | Claude | `review_gui_p1_03` APPROVE(P0/P1 0, P2 5) → 후속 `8bd0185`(requires_upgrade를 JSON API·목록·history에, schema_version 검증 422, 메시지 진단, hash owner 단일화, 재바인딩 계약 테스트, WORKFLOW 문구·P2-02 분기 기록), 1,257 passed, 같은 reviewer 확인 요청 | 13.5 |
 | 2026-09-18 KST | Claude | P1-03 구현·self-check(1,253 passed) → diff freeze `7312c1a`, stacked PR(base P1-02), `review_gui_p1_03`(opus) 배정 → IN_REVIEW. 결정: 422 코드는 기존 namespace를 따라 `backtest.strategy.requires_upgrade`·`trace.strategy.requires_upgrade`(WORKFLOW의 `strategy_revision_requires_upgrade` 표기 대체) | 13.3 diff freeze |
 | 2026-09-17 KST | Claude | `review_gui_p1_02` 후속 확인 APPROVE 유지 → P1-02 APPROVED. P1-03 IN_PROGRESS, 브랜치 `feat/gui-p1-03-upgrade-and-frozen-1-0`(base P1-02 `9ea8854`) | 13.5 판정 |
 | 2026-09-17 KST | Claude | `review_gui_p1_02` APPROVE(P0/P1 0, P2 3) → P2-001~003 후속 `9a5cccb`(unary fallthrough 제거, 설명 문구 모델 사실만, demean 문서 hydrate 테스트), 1,232 passed, 같은 reviewer 확인 요청 | 13.5 |

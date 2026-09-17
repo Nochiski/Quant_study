@@ -674,7 +674,7 @@ impl PersistentEngine {
         // 남은 주문은 결과에서 조용히 사라지지 않도록 취소로 기록한다. 마지막 세션에 낸
         // DAY/IOC/FOK는 "당일 만료", GTC만 "run 종료"가 사유다.
         self.orders.append(&mut self.pending_orders);
-        let remaining: Vec<StoredOrder> = self.orders.drain(..).collect();
+        let remaining = std::mem::take(&mut self.orders);
         if !remaining.is_empty() {
             let last = self
                 .feed_ref()?

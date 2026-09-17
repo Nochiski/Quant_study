@@ -212,7 +212,7 @@ return BacktestResult.lazy(run_id, snapshots=store.snapshots, orders=store.order
 - Modify: `backend/src/backtest_engine/types/instruments.py`
 - Test: `backend/tests/test_types.py`
 
-- [ ] **Step 1: 실패 테스트**
+- [x] **Step 1: 실패 테스트**
 
 ```python
 def test_instrument_id_hash_is_cached_and_equals_field_tuple_hash() -> None:
@@ -222,10 +222,10 @@ def test_instrument_id_hash_is_cached_and_equals_field_tuple_hash() -> None:
     assert "_hash" not in {f.name for f in fields(instrument)}
 ```
 
-- [ ] **Step 2: 실행해 실패 확인** — `uv run pytest tests/test_types.py -k hash_is_cached -q` → `AttributeError`가 아니라 첫 assert가 통과하고 마지막 assert만 통과하므로, 캐시 유무를 검증하려면 `InstrumentId.__hash__ is not object.__hash__`와 `instrument.__dict__["_hash"]` 존재를 함께 단언한다.
-- [ ] **Step 3: 구현** — `__post_init__`에서 `object.__setattr__(self, "_hash", hash((venue, symbol, asset_class, currency)))`, `__hash__`는 `_hash` 반환. 주석(한글)으로 이유 기재: 스냅샷·bar 인덱스에서 세션마다 수십만 번 해시된다.
-- [ ] **Step 4: 통과 확인, 전체 `uv run pytest -q`**
-- [ ] **Step 5: 커밋** `perf(types): InstrumentId 해시를 생성 시 한 번만 계산`
+- [x] **Step 2: 실행해 실패 확인** — `uv run pytest tests/test_types.py -k hash_is_cached -q` → `AttributeError`가 아니라 첫 assert가 통과하고 마지막 assert만 통과하므로, 캐시 유무를 검증하려면 `InstrumentId.__hash__ is not object.__hash__`와 `instrument.__dict__["_hash"]` 존재를 함께 단언한다.
+- [x] **Step 3: 구현** — `__post_init__`에서 `object.__setattr__(self, "_hash", hash((venue, symbol, asset_class, currency)))`, `__hash__`는 `_hash` 반환. 주석(한글)으로 이유 기재: 스냅샷·bar 인덱스에서 세션마다 수십만 번 해시된다.
+- [x] **Step 4: 통과 확인, 전체 `uv run pytest -q`**
+- [x] **Step 5: 커밋** `perf(types): InstrumentId 해시를 생성 시 한 번만 계산`
 
 ### Task A2: Rust 레코드 스토어 (`records.rs`)
 
@@ -234,8 +234,8 @@ def test_instrument_id_hash_is_cached_and_equals_field_tuple_hash() -> None:
 - Delete: `backend/rust/backtest_core/src/compact_store.rs`
 - Modify: `lib.rs`, `persistent.rs` (필드 교체)
 
-- [ ] **Step 1: Rust 단위 테스트 작성** — `records.rs` 안 `#[cfg(test)]`: append 순서로 seq 증가, `finish()` 이후 append 거부, `equity_series()`가 SNAPSHOT만 순서대로, `traded_notional()`이 FILL의 `qty as f64 * price` 순차 누산.
-- [ ] **Step 2: 구현**
+- [x] **Step 1: Rust 단위 테스트 작성** — `records.rs` 안 `#[cfg(test)]`: append 순서로 seq 증가, `finish()` 이후 append 거부, `equity_series()`가 SNAPSHOT만 순서대로, `traded_notional()`이 FILL의 `qty as f64 * price` 순차 누산.
+- [x] **Step 2: 구현**
 
 ```rust
 pub(crate) const KIND_MARKET: u8 = 0; // … KIND_COST = 8
@@ -254,54 +254,54 @@ impl RecordStore { append(session_index, payload) -> PyResult<()>; finish(); bat
 
 `OrderWire`/`FillWire`/`SnapshotWire`는 `IntoPyObject`로 위 wire 계약의 tuple을 만든다 (`PyTuple::new`).
 
-- [ ] **Step 3: `cargo test`** 통과, `cargo clippy -D warnings` 통과
-- [ ] **Step 4: 커밋** `feat(rust): Rust-native 레코드 스토어 추가`
+- [x] **Step 3: `cargo test`** 통과, `cargo clippy -D warnings` 통과
+- [x] **Step 4: 커밋** `feat(rust): Rust-native 레코드 스토어 추가`
 
 ### Task A3: `StoredOrder` 확장, feed 조회, 문자열 헬퍼
 
 **Files:** `persistent.rs`, `feed.rs`, `session.rs`
 
-- [ ] **Step 1:** `StoredOrder`에 `decision_id: String, action_index: usize, leg_index: Option<usize>` 추가. `from_routed`가 `decision_id`를 받아 채움. `from_tuple`(legacy `place_order`)은 빈 문자열/0/None.
-- [ ] **Step 2:** `PersistentFeed`에 `key_index: HashMap<String, u32>` 구축, `instrument_id(&str) -> Option<u32>`, `has_bar(session, key) -> bool`, `open_at(session, key) -> Option<f64>`, `session_len()`.
-- [ ] **Step 3:** `session.rs`의 `py_float`, `py_list`를 `pub(crate)`. `py_tuple(items: &[String]) -> String` 추가 (`('a',)`, `('a', 'b')`, `()`), 단위 테스트.
-- [ ] **Step 4:** `cargo test` / clippy, 커밋 `refactor(rust): 드라이버가 쓸 주문 메타·feed 조회·문자열 헬퍼`
+- [x] **Step 1:** `StoredOrder`에 `decision_id: String, action_index: usize, leg_index: Option<usize>` 추가. `from_routed`가 `decision_id`를 받아 채움. `from_tuple`(legacy `place_order`)은 빈 문자열/0/None.
+- [x] **Step 2:** `PersistentFeed`에 `key_index: HashMap<String, u32>` 구축, `instrument_id(&str) -> Option<u32>`, `has_bar(session, key) -> bool`, `open_at(session, key) -> Option<f64>`, `session_len()`.
+- [x] **Step 3:** `session.rs`의 `py_float`, `py_list`를 `pub(crate)`. `py_tuple(items: &[String]) -> String` 추가 (`('a',)`, `('a', 'b')`, `()`), 단위 테스트.
+- [x] **Step 4:** `cargo test` / clippy, 커밋 `refactor(rust): 드라이버가 쓸 주문 메타·feed 조회·문자열 헬퍼`
 
 ### Task A4: 드라이버 (`driver.rs`) + pymethods
 
 **Files:** Create `driver.rs`; Modify `persistent.rs`, `callback.rs`, `lib.rs`
 
-- [ ] **Step 1: Rust 단위 테스트 (driver.rs)** — 1종목 2세션 feed, `configure_run` every_session, warmup 0: `drive()` 첫 프레임이 session 0 "market", `submit_decision`에 NoAction wire → 두 번째 프레임 session 1, 세 번째 `None`; `finish()` 배치 kinds가 `[MARKET, SNAPSHOT, DECISION, MARKET, SNAPSHOT, DECISION]`. 두 번째 테스트: warmup 2면 프레임 없이 `None`. 세 번째: 매수 주문을 넣는 DecisionWire(SetPortfolioTarget weight 0.5) 제출 후 다음 세션 배치에 `ORDER`(세션 0, SESSION_CLOSE 뒤) → `MARKET`(1) → `ORDER_UPDATE(filled)` → `FILL` 순서.
-- [ ] **Step 2: 구현** — 위 알고리즘. `Queued` enum: `Market(usize) | Fill(FillWire) | Notify(NotifyPayload) | SessionClose(usize) | Order(OrderWire)`; `NotifyPayload = Fill(FillWire) | OrderUpdate{..} | CorporateAction(usize)`. `NativeEventQueue.push(session_index as i64, priority, token)` with token = `queued.len()` index. `PersistentEngine` 필드 추가: `run: Option<RunConfig>`, `corporate_actions: Vec<CaEntry>`, `ca_by_session: HashMap<usize, Vec<usize>>`, `queued: Vec<Queued>`, `records: RecordStore`, `awaiting_session: usize`, `started: bool`.
-- [ ] **Step 3: pymethods** — `configure_run`, `load_corporate_actions`, `drive`, `finish`(교체), `record_batch`(교체), `equity_series`, `traded_notional`, `submit_decision`(반환형 교체). 제거: `queue_push/queue_pop/queue_len/record_append/record_extend`. `CallbackFrame`에 `event: PyObject`, `snapshot: PyObject`, `open_orders: PyObject` getter.
-- [ ] **Step 4:** `cargo test`, `cargo clippy -D warnings`, `cargo fmt --check`, `uv run maturin develop --release`
-- [ ] **Step 5: 커밋** `feat(rust): drive()/finish() 세션 루프 드라이버`
+- [x] **Step 1: Rust 단위 테스트 (driver.rs)** — 1종목 2세션 feed, `configure_run` every_session, warmup 0: `drive()` 첫 프레임이 session 0 "market", `submit_decision`에 NoAction wire → 두 번째 프레임 session 1, 세 번째 `None`; `finish()` 배치 kinds가 `[MARKET, SNAPSHOT, DECISION, MARKET, SNAPSHOT, DECISION]`. 두 번째 테스트: warmup 2면 프레임 없이 `None`. 세 번째: 매수 주문을 넣는 DecisionWire(SetPortfolioTarget weight 0.5) 제출 후 다음 세션 배치에 `ORDER`(세션 0, SESSION_CLOSE 뒤) → `MARKET`(1) → `ORDER_UPDATE(filled)` → `FILL` 순서.
+- [x] **Step 2: 구현** — 위 알고리즘. `Queued` enum: `Market(usize) | Fill(FillWire) | Notify(NotifyPayload) | SessionClose(usize) | Order(OrderWire)`; `NotifyPayload = Fill(FillWire) | OrderUpdate{..} | CorporateAction(usize)`. `NativeEventQueue.push(session_index as i64, priority, token)` with token = `queued.len()` index. `PersistentEngine` 필드 추가: `run: Option<RunConfig>`, `corporate_actions: Vec<CaEntry>`, `ca_by_session: HashMap<usize, Vec<usize>>`, `queued: Vec<Queued>`, `records: RecordStore`, `awaiting_session: usize`, `started: bool`.
+- [x] **Step 3: pymethods** — `configure_run`, `load_corporate_actions`, `drive`, `finish`(교체), `record_batch`(교체), `equity_series`, `traded_notional`, `submit_decision`(반환형 교체). 제거: `queue_push/queue_pop/queue_len/record_append/record_extend`. `CallbackFrame`에 `event: PyObject`, `snapshot: PyObject`, `open_orders: PyObject` getter.
+- [x] **Step 4:** `cargo test`, `cargo clippy -D warnings`, `cargo fmt --check`, `uv run maturin develop --release`
+- [x] **Step 5: 커밋** `feat(rust): drive()/finish() 세션 루프 드라이버`
 
 ### Task A5: Python store·context·loop 재작성
 
 **Files:** `engine/store.py`, `engine/context.py`, `engine/loop.py`, `engine/core.py`, `engine/wire.py`, `engine/queue.py`, `types/results.py`; Delete `engine/compact.py`
 
-- [ ] **Step 1: 실패 테스트** — `tests/test_rust_driver.py`:
+- [x] **Step 1: 실패 테스트** — `tests/test_rust_driver.py`:
   - `test_persistent_run_makes_no_per_session_ffi`: CountingRuntime 프록시로 `drive` 호출 수 == decision tape 길이 + 1, `process_market_index`·`activate_pending`·`close_current_session`·`queue_push` 호출 0, `configure_run`·`load_feed`·`load_corporate_actions`·`finish` 각 1.
   - `test_golden_trace_identical_with_driver`: 기존 `ENGINE_SCENARIOS["golden"]` python vs rust `trace_bytes` 동일 (test_core_parity가 이미 커버 — 여기서는 rust 단독 실행이 `EquityWipedOut`·`NegativeCashError` 접두어를 매핑하는지: 초기 현금 소액 + 마진 없이 큰 주문 시나리오는 라우터가 거르므로, `equity_wiped_out`은 숏 포지션 폭등 시나리오(`test_short_selling` 픽스처 변형)로 재현).
   - `test_context_snapshot_is_fixed_at_callback_time`: 전략이 ctx를 보관하고 run 종료 후 `ctx.position_qty`를 읽어도 콜백 시점 값.
-- [ ] **Step 2: `store.py`** — `PersistentEventStore.__init__(runtime, sessions, instruments, market_snapshots, corporate_actions)`; `register_decision`, `frame_event(frame)`, `snapshot_from_wire(session_index, wire)`, `order_from_wire`, `fill_from_wire`, `records`(lazy, seq 순), `_payloads(kind)`, `snapshots()`, `orders()`, `fills()`, `compact_trace()` → `(seq, session_index, kind_value, seq)`, `finish()` → `runtime.finish()` 배치 보관. ORDER의 `source_action`은 `decisions[decision_id].actions[action_index]`(leg_index 있으면 `.legs[leg_index]`).
-- [ ] **Step 3: `context.py`** — `RustStrategyContext` 독립 frozen dataclass(`now, frame, store, history_store, declared, universe_source`), `snapshot`·`_lazy_open_orders`는 `cached_property`. `StrategyContext` 프로토콜 메서드 전부 구현.
-- [ ] **Step 4: `loop.py`** — `_execute`에서 `if run.persistent_runtime is not None: return self._execute_persistent(...)`; `_execute_persistent` 위 의사코드; `_on_market_persistent`, `_record_compact_update`, Compact* import·match 분기 제거. `_Run`에서 `PersistentOrderManager`·`PersistentEventQueue` 생성 제거(persistent일 때 `order_manager=None`, `queue=None`, `router=None`).
-- [ ] **Step 5: `core.py`** — `PersistentOrderManager` 삭제, `PersistentPortfolio`는 `register_instruments`/`snapshot`(ctx용 아님, 삭제 가능)만 남기거나 통째로 삭제하고 `_Run.portfolio`를 persistent에서 None으로. `make_persistent_runtime` 유지.
-- [ ] **Step 6: `wire.py`, `queue.py`, `results.py`** — 위 파일 구조표대로. `BacktestResult.lazy(snapshots=Callable)`.
-- [ ] **Step 7: 테스트 갱신** — `test_core_parity.py`: `test_promoted_rust_sends_one_decision_batch_per_callback`를 새 계약으로(위 A5-1로 이동 후 삭제), `test_persistent_event_queue_matches_timestamp_priority_and_fifo_order` 삭제(Rust `event_queue.rs` 테스트가 커버), `test_persistent_callback_tokens_reject_stale_and_double_submit`는 `configure_run` 후 `drive()`로 프레임 획득하도록, `test_persistent_finish_keeps_order_fill_results_lazy_and_compact_traceable`는 `PersistentEventStore.order_from_wire/fill_from_wire`를 패치해 materialize 횟수 검증.
-- [ ] **Step 8: 게이트** — `uv run pytest -q`, `ruff`, `pyright`
-- [ ] **Step 9: 커밋** `feat(engine): persistent 경로를 Rust drive() 루프로 전환`
+- [x] **Step 2: `store.py`** — `PersistentEventStore.__init__(runtime, sessions, instruments, market_snapshots, corporate_actions)`; `register_decision`, `frame_event(frame)`, `snapshot_from_wire(session_index, wire)`, `order_from_wire`, `fill_from_wire`, `records`(lazy, seq 순), `_payloads(kind)`, `snapshots()`, `orders()`, `fills()`, `compact_trace()` → `(seq, session_index, kind_value, seq)`, `finish()` → `runtime.finish()` 배치 보관. ORDER의 `source_action`은 `decisions[decision_id].actions[action_index]`(leg_index 있으면 `.legs[leg_index]`).
+- [x] **Step 3: `context.py`** — `RustStrategyContext` 독립 frozen dataclass(`now, frame, store, history_store, declared, universe_source`), `snapshot`·`_lazy_open_orders`는 `cached_property`. `StrategyContext` 프로토콜 메서드 전부 구현.
+- [x] **Step 4: `loop.py`** — `_execute`에서 `if run.persistent_runtime is not None: return self._execute_persistent(...)`; `_execute_persistent` 위 의사코드; `_on_market_persistent`, `_record_compact_update`, Compact* import·match 분기 제거. `_Run`에서 `PersistentOrderManager`·`PersistentEventQueue` 생성 제거(persistent일 때 `order_manager=None`, `queue=None`, `router=None`).
+- [x] **Step 5: `core.py`** — `PersistentOrderManager` 삭제, `PersistentPortfolio`는 `register_instruments`/`snapshot`(ctx용 아님, 삭제 가능)만 남기거나 통째로 삭제하고 `_Run.portfolio`를 persistent에서 None으로. `make_persistent_runtime` 유지.
+- [x] **Step 6: `wire.py`, `queue.py`, `results.py`** — 위 파일 구조표대로. `BacktestResult.lazy(snapshots=Callable)`.
+- [x] **Step 7: 테스트 갱신** — `test_core_parity.py`: `test_promoted_rust_sends_one_decision_batch_per_callback`를 새 계약으로(위 A5-1로 이동 후 삭제), `test_persistent_event_queue_matches_timestamp_priority_and_fifo_order` 삭제(Rust `event_queue.rs` 테스트가 커버), `test_persistent_callback_tokens_reject_stale_and_double_submit`는 `configure_run` 후 `drive()`로 프레임 획득하도록, `test_persistent_finish_keeps_order_fill_results_lazy_and_compact_traceable`는 `PersistentEventStore.order_from_wire/fill_from_wire`를 패치해 materialize 횟수 검증.
+- [x] **Step 8: 게이트** — `uv run pytest -q`, `ruff`, `pyright`
+- [x] **Step 9: 커밋** `feat(engine): persistent 경로를 Rust drive() 루프로 전환`
 
-### Task A6: 벤치 확인 + PR A
+### Task A6: 벤치 확인 + PR A (#107)
 
-- [ ] `uv run python scripts/bench_universe.py tests/fixtures/krx_parquet --instruments 100 --synthetic --core all --warmup 1 --repeat 3` 결과를 PR 본문에 기록 (목표: rust ≤ 0.6초)
-- [ ] `--profile`로 남은 Python 시간이 전략 콜백·최종 materialization뿐인지 확인
-- [ ] 브랜치 push, `gh pr create --base main` (pr-review.md 양식), Opus 리뷰어 서브에이전트 1명 → 수정 → 재리뷰 APPROVE
+- [x] `uv run python scripts/bench_universe.py tests/fixtures/krx_parquet --instruments 100 --synthetic --core all --warmup 1 --repeat 3` 결과를 PR 본문에 기록 (목표: rust ≤ 0.6초)
+- [x] `--profile`로 남은 Python 시간이 전략 콜백·최종 materialization뿐인지 확인
+- [x] 브랜치 push, `gh pr create --base main` (pr-review.md 양식), Opus 리뷰어 서브에이전트 1명 → 수정 → 재리뷰 APPROVE
 
 ---
 
-## PR B — 선언형 tape 네이티브 결정 (브랜치 `feat/rust-tape-native`, base `feat/rust-loop-driver`)
+## PR B — 선언형 tape 네이티브 결정 (브랜치 `feat/rust-tape-native`, base `feat/rust-loop-driver`, #109)
 
 ### Task B1: 엔진 측 선언형 tape 계약
 
@@ -325,29 +325,29 @@ def evaluate_tape(frames, idle_reason, event, ctx) -> StrategyDecision:
     # return StrategyDecision.of(event.ts, replace(frame.action, targets=kept), reason)
 ```
 
-- [ ] 테스트: `test_target_tape_strategy.py`의 두 케이스를 `evaluate_tape`로 옮겨 동일 결과 단언 (reason 문자열 포함).
+- [x] 테스트: `test_target_tape_strategy.py`의 두 케이스를 `evaluate_tape`로 옮겨 동일 결과 단언 (reason 문자열 포함).
 
 ### Task B2: Rust tape (`tape.rs`)
 
-- [ ] `load_target_tape(frames: Vec<(usize session_index, Vec<TargetWire>, ExecutionWire, String scope, String reason)>, idle_reason: String)`
-- [ ] `drive()`에서 프레임을 돌려주기 직전 `self.tape.is_some()`이면 Rust가 결정을 만든다: market 콜백 → 해당 세션 frame 없으면 NoAction(idle_reason); 있으면 no-bar 규칙(`feed.has_bar`, `portfolio.held_qty`)으로 kept `TargetWire` 목록과 untradable symbols → reason → `DecisionWire(1, ts, reason, [("set_portfolio_target", kept, scope, execution, None, [])])`; 비-market 콜백 → NoAction(idle_reason). 그 뒤 `submit_decision` 내부 함수를 같은 세션으로 호출. DECISION 레코드의 `native = Some(NativeDecision { frame_session: Option<usize>, kept: Vec<(u32, kind, f64|i64)>, no_bar: Vec<String>, reason })`.
-- [ ] Rust 단위 테스트: 보유 종목 bar 없음 → QuantityTarget 유지, 미보유 → 제외, reason 포맷 `target_tape:2018-04-27 no_bar=('005930:1', '000030:1')`.
+- [x] `load_target_tape(frames: Vec<(usize session_index, Vec<TargetWire>, ExecutionWire, String scope, String reason)>, idle_reason: String)`
+- [x] `drive()`에서 프레임을 돌려주기 직전 `self.tape.is_some()`이면 Rust가 결정을 만든다: market 콜백 → 해당 세션 frame 없으면 NoAction(idle_reason); 있으면 no-bar 규칙(`feed.has_bar`, `portfolio.held_qty`)으로 kept `TargetWire` 목록과 untradable symbols → reason → `DecisionWire(1, ts, reason, [("set_portfolio_target", kept, scope, execution, None, [])])`; 비-market 콜백 → NoAction(idle_reason). 그 뒤 `submit_decision` 내부 함수를 같은 세션으로 호출. DECISION 레코드의 `native = Some(NativeDecision { frame_session: Option<usize>, kept: Vec<(u32, kind, f64|i64)>, no_bar: Vec<String>, reason })`.
+- [x] Rust 단위 테스트: 보유 종목 bar 없음 → QuantityTarget 유지, 미보유 → 제외, reason 포맷 `target_tape:2018-04-27 no_bar=('005930:1', '000030:1')`.
 
 ### Task B3: Python 연결
 
-- [ ] `loop.py::_execute_persistent`: `isinstance`가 아니라 `hasattr(strategy, "tape_frames")`로 선언형 판단 → 세션 date → index 매핑 후 `load_target_tape`; drive 루프는 그대로(프레임이 오지 않음).
-- [ ] `store.py`: DECISION payload `native`가 있으면 `StrategyDecision`을 `TapeFrame.action`에서 재구성 (`replace(action, targets=kept)`; kept는 wire → `WeightTarget`/`QuantityTarget(Decimal)`), 없으면 `no_action(ts, idle_reason)`.
-- [ ] `_adapter.py`: `TargetTapeStrategy`에 `idle_reason = "target_tape_idle"`, `tape_frames()`(frame.signal_as_of → `TapeFrame(bridge.to_target_action(frame, max_participation), f"target_tape:{iso}")`), `on_event`는 `evaluate_tape` 위임.
-- [ ] parity 테스트(`tests/test_core_parity.py`): 같은 tape 전략을 python core와 rust core로 돌려 `trace_bytes` 동일, rust 경로 decision tape 비어 있음, `drive` 호출 1회.
-- [ ] 게이트 통과 후 커밋, stacked PR 생성, Opus 리뷰
+- [x] `loop.py::_execute_persistent`: `isinstance`가 아니라 `hasattr(strategy, "tape_frames")`로 선언형 판단 → 세션 date → index 매핑 후 `load_target_tape`; drive 루프는 그대로(프레임이 오지 않음).
+- [x] `store.py`: DECISION payload `native`가 있으면 `StrategyDecision`을 `TapeFrame.action`에서 재구성 (`replace(action, targets=kept)`; kept는 wire → `WeightTarget`/`QuantityTarget(Decimal)`), 없으면 `no_action(ts, idle_reason)`.
+- [x] `_adapter.py`: `TargetTapeStrategy`에 `idle_reason = "target_tape_idle"`, `tape_frames()`(frame.signal_as_of → `TapeFrame(bridge.to_target_action(frame, max_participation), f"target_tape:{iso}")`), `on_event`는 `evaluate_tape` 위임.
+- [x] parity 테스트(`tests/test_core_parity.py`): 같은 tape 전략을 python core와 rust core로 돌려 `trace_bytes` 동일, rust 경로 decision tape 비어 있음, `drive` 호출 1회.
+- [x] 게이트 통과 후 커밋, stacked PR 생성, Opus 리뷰
 
 ---
 
 ## PR C — 벤치·문서 (브랜치 `feat/rust-loop-bench`, base `feat/rust-tape-native`)
 
-- [ ] `scripts/bench_universe.py --strategy {callback,tape}`: `tape`는 `EqualWeightRebalance`와 같은 목표를 `DeclarativeTapeStrategy`로 미리 만든 표 (5세션마다 동일 비중)
-- [ ] 측정: 100/300종목 synthetic × {callback, tape} × {python, rust}, 실제 4종목 fixture. `benchmarks/baseline/rust-loop-100.json`, `rust-loop-300.json`, `rust-loop-real-fixture.json`
-- [ ] 스펙 문서 "현재 재개 지점"·M6 판정 갱신, `docs/rust-python-benchmark-report.html` 수치 갱신, 이슈 #98 댓글로 최종 배수 보고
+- [x] `scripts/bench_universe.py --strategy {callback,tape}`: `tape`는 `EqualWeightRebalance`와 같은 목표를 `DeclarativeTapeStrategy`로 미리 만든 표 (5세션마다 동일 비중)
+- [x] 측정: 100/300종목 synthetic × {callback, tape} × {python, rust}, 실제 4종목 fixture. `benchmarks/baseline/rust-loop-100.json`, `rust-loop-300.json`, `rust-loop-real-fixture.json`
+- [x] 스펙 문서 "현재 재개 지점"·M6 판정 갱신, `docs/rust-python-benchmark-report.html` 수치 갱신, 이슈 #98 댓글로 최종 배수 보고
 - [ ] stacked PR, Opus 리뷰
 
 ---

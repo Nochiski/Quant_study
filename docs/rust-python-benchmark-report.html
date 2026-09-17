@@ -526,15 +526,15 @@
   <main class="page">
     <header>
       <div>
-        <div class="eyebrow">Persistent Rust Engine · M6</div>
-        <h1>Rust는 이제<br><span style="color:var(--green)">엔진 전체의 상태</span>를 가진다.</h1>
-        <p class="lede">부분 세션 가속기를 persistent runtime으로 승격했습니다. 전략 API는 Python에 남고 주문·포지션·히스토리·라우팅·큐·회계 상태는 세션 사이에도 Rust에 유지됩니다.</p>
+        <div class="eyebrow">Persistent Rust Engine · Loop driver (2026-09-17)</div>
+        <h1>Rust가 이제<br><span style="color:var(--green)">세션 루프 전체</span>를 돌린다.</h1>
+        <p class="lede">MARKET→FILL→NOTIFY→SESSION_CLOSE→ORDER 드레인을 Rust <code>drive()</code>가 소유합니다. Python은 전략 콜백과 종료 배치에서만 왕복하고, 선언형 tape 전략은 콜백 없이 완주합니다.</p>
       </div>
       <div class="badges" aria-label="측정 조건">
-        <span class="badge good">✓ 540 Python tests</span>
-        <span class="badge good">✓ 13 Rust tests</span>
+        <span class="badge good">✓ 1189 Python tests</span>
+        <span class="badge good">✓ 22 Rust tests</span>
         <span class="badge">Rust --release</span>
-        <span class="badge">2026-09-03</span>
+        <span class="badge">2026-09-17</span>
       </div>
     </header>
 
@@ -542,8 +542,76 @@
       <article class="card">
         <div class="section-title">
           <div>
-            <div class="metric-kicker">100 instruments · order-heavy</div>
-            <h2>승격 후 실행 시간 중앙값</h2>
+            <div class="metric-kicker">100 instruments · order-heavy · 2026-09-17</div>
+            <h2>루프 드라이버 이후 실행 시간 중앙값</h2>
+          </div>
+          <p>낮을수록 좋음</p>
+        </div>
+
+        <div class="benchmark" role="img" aria-label="callback 전략 100종목: Python 2.876초, Legacy Rust 2.870초, Rust 0.681초">
+          <div class="bench-row">
+            <div class="engine-name python">Python</div>
+            <div class="track"><div class="bar python" style="--w:100%"></div></div>
+            <div class="bench-value">2.876s</div>
+          </div>
+          <div class="bench-row">
+            <div class="engine-name legacy">Legacy</div>
+            <div class="track"><div class="bar legacy" style="--w:99.8%"></div></div>
+            <div class="bench-value">2.870s</div>
+          </div>
+          <div class="bench-row">
+            <div class="engine-name rust">Rust</div>
+            <div class="track"><div class="bar rust" style="--w:23.7%"></div></div>
+            <div class="bench-value">0.681s</div>
+          </div>
+        </div>
+        <div class="axis"><span>0s</span><span>0.7s</span><span>1.4s</span><span>2.2s</span><span>2.9s</span></div>
+        <div class="benchmark" role="img" aria-label="tape 전략 100종목: Python 2.566초, Rust 0.543초" style="margin-top:14px">
+          <div class="bench-row">
+            <div class="engine-name python">Python · tape</div>
+            <div class="track"><div class="bar python" style="--w:100%"></div></div>
+            <div class="bench-value">2.566s</div>
+          </div>
+          <div class="bench-row">
+            <div class="engine-name rust">Rust · tape</div>
+            <div class="track"><div class="bar rust" style="--w:21.2%"></div></div>
+            <div class="bench-value">0.543s</div>
+          </div>
+        </div>
+        <div class="axis"><span>0s</span><span>0.6s</span><span>1.3s</span><span>1.9s</span><span>2.6s</span></div>
+
+        <div class="workload">
+          <span>100 instruments</span>
+          <span>1,231 sessions</span>
+          <span>123,100 bars</span>
+          <span>22,243 orders</span>
+          <span>22,155 fills</span>
+        </div>
+        <div class="insight" style="margin-top:14px"><strong>전체 매트릭스:</strong> 300종목 callback 7.378s → 2.080s (3.55×), tape 7.620s → 1.703s (4.47×) · 실제 4종목 fixture callback 0.215s → 0.069s (3.13×), tape 0.192s → 0.037s (5.18×). 측정 중 다른 프로세스가 CPU 85~97%를 점유해 절대값은 부풀려졌고 배수는 같은 실행 안의 교차 비교입니다.</div>
+      </article>
+
+      <aside class="card">
+        <div class="metric-kicker">Python 대비</div>
+        <div class="big-number">4.22×</div>
+        <div class="result-copy">callback 전략에서 실행 시간을 <strong>76.3%</strong> 줄였습니다. 선언형 tape는 <strong>4.73×</strong>.</div>
+        <div class="delta">
+          <div><span>세션당 FFI</span><strong style="color:var(--green)">0회</strong></div>
+          <div><span>결과 차이</span><strong style="color:var(--green)">0</strong></div>
+        </div>
+        <div class="small-result">
+          <div><span>측정 반복</span><strong>5회</strong></div>
+          <div><span>워밍업</span><strong>1회</strong></div>
+          <div><span>이전 (M6)</span><strong>1.72×</strong></div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="grid hero-grid">
+      <article class="card">
+        <div class="section-title">
+          <div>
+            <div class="metric-kicker">100 instruments · M6 promotion · 2026-09-03 (기록)</div>
+            <h2>루프 드라이버 이전, M6 승격 시점 중앙값</h2>
           </div>
           <p>낮을수록 좋음</p>
         </div>
@@ -595,28 +663,28 @@
     <section class="section card target">
       <div class="section-title">
         <div>
-          <div class="metric-kicker">Current architecture</div>
+          <div class="metric-kicker">Current architecture · 2026-09-17</div>
           <h2>지금 실행되는 구조</h2>
         </div>
-        <p>부분 가속기 → Persistent Rust Engine</p>
+        <p>Persistent Rust Engine이 세션 루프까지 돌린다</p>
       </div>
 
       <div class="target-flow" aria-label="현재 persistent 백테스트 실행 경로">
         <div class="target-node">
           <h3>Python Strategy</h3>
-          <p>선언된 callback에서 전략 판단만 반환합니다.</p>
-          <div class="chips"><span>Requirements</span><span>Decision</span></div>
+          <p>선언된 callback에서 전략 판단만 반환합니다. 선언형 tape 전략은 표를 한 번 넘기고 callback 없이 완주합니다.</p>
+          <div class="chips"><span>Requirements</span><span>Decision</span><span>Tape frames</span></div>
         </div>
         <div class="arrow">→</div>
         <div class="target-node core">
           <h3 style="color:var(--green)">Persistent Rust Engine</h3>
-          <p>세션 사이 상태와 callback token lifecycle을 단일 소유합니다.</p>
-          <div class="chips"><span>Orders</span><span>Positions</span><span>History</span><span>Routing</span><span>Queue</span><span>Accounting</span></div>
+          <p><code>drive()</code>가 MARKET→FILL→NOTIFY→SESSION_CLOSE→ORDER 드레인과 자본변동·비용·스냅샷 기록을 세션당 FFI 없이 진행합니다.</p>
+          <div class="chips"><span>Session loop</span><span>Orders</span><span>Positions</span><span>History</span><span>Routing</span><span>Queue</span><span>Records</span><span>Accounting</span><span>Tape decisions</span></div>
         </div>
         <div class="arrow">→</div>
         <div class="target-node">
           <h3>Python Result</h3>
-          <p>종료 batch를 받고 주문·체결을 요청 시점에 materialize합니다.</p>
+          <p>종료 batch를 받고 스냅샷·주문·체결을 요청 시점에 materialize합니다.</p>
           <div class="chips"><span>Metrics</span><span>Lazy tuples</span><span>Trace</span></div>
         </div>
       </div>
@@ -626,6 +694,7 @@
         <div class="current-step"><span>M2 · ROUTER</span><strong>Decision과 주문 lifecycle</strong></div>
         <div class="current-step"><span>M3–M4 · LOOP</span><strong>Feed·History·Queue·Callback</strong></div>
         <div class="current-step"><span>M5 · RESULT</span><strong>Compact store와 lazy batch</strong></div>
+        <div class="current-step"><span>2026-09-17 · DRIVER</span><strong>세션 루프·레코드·tape 결정 (FFI 0회)</strong></div>
       </div>
 
       <div class="insight"><strong>승격:</strong> 이제 <code>BacktestEngine(..., core="rust")</code>가 persistent runtime을 선택합니다. 구 세션 코어는 <code>rust_legacy</code>로만 접근 가능하며 deprecation warning을 냅니다.</div>
@@ -635,8 +704,8 @@
       <article class="card">
         <div class="section-title">
           <div>
-            <div class="metric-kicker">300 instruments · scaled KRX path</div>
-            <h2>규모를 3배로 키우면</h2>
+            <div class="metric-kicker">300 instruments · M6 · 2026-09-03 (기록)</div>
+            <h2>규모를 3배로 키우면 (M6 시점)</h2>
           </div>
         </div>
         <div class="benchmark" role="img" aria-label="300종목 Python 5.312초, Legacy Rust 5.457초, Persistent Rust 3.282초">
@@ -656,23 +725,24 @@
             <div class="bench-value">3.282s</div>
           </div>
         </div>
-        <div class="insight"><strong>결과:</strong> Python 대비 <strong>1.618×</strong>. 2× 목표에는 아직 19.1%의 실행 시간 절감이 더 필요하지만 최소 1.5× 게이트는 통과했습니다.</div>
+        <div class="insight"><strong>M6 시점 결과:</strong> Python 대비 <strong>1.618×</strong>. 2026-09-17 루프 드라이버 이후에는 callback 3.55×, tape 4.47×로 2× 목표를 통과했습니다.</div>
       </article>
 
       <article class="card">
-        <div class="metric-kicker">Compatibility & memory</div>
+        <div class="metric-kicker">Compatibility & memory · 2026-09-17</div>
         <h2 style="margin:6px 0 8px">공개 동작은 그대로</h2>
-        <p style="color:var(--muted);font-size:14px">전체 EventStore trace, ID, 오류 순서와 BacktestResult tuple API를 Python reference와 동일하게 유지합니다.</p>
+        <p style="color:var(--muted);font-size:14px">전체 EventStore trace, ID, 오류 순서와 BacktestResult tuple API를 Python reference와 동일하게 유지합니다. Peak RSS는 100종목 코어별 단독 프로세스 측정입니다.</p>
         <div class="small-result">
-          <div><span>Peak RSS 비율</span><strong style="color:var(--green)">1.169×</strong></div>
+          <div><span>RSS · callback</span><strong style="color:var(--green)">1.23×</strong></div>
+          <div><span>RSS · tape</span><strong style="color:var(--pink)">1.27×</strong></div>
           <div><span>허용 기준</span><strong>≤ 1.25×</strong></div>
-          <div><span>Trace 차이</span><strong style="color:var(--green)">0</strong></div>
         </div>
         <div class="small-result">
-          <div><span>실제 fixture</span><strong>4종목</strong></div>
-          <div><span>Python</span><strong style="color:var(--python)">0.143s</strong></div>
-          <div><span>Rust</span><strong style="color:var(--rust)">0.105s</strong></div>
+          <div><span>실제 fixture 4종목</span><strong>callback / tape</strong></div>
+          <div><span>Python</span><strong style="color:var(--python)">0.215s / 0.192s</strong></div>
+          <div><span>Rust</span><strong style="color:var(--rust)">0.069s / 0.037s</strong></div>
         </div>
+        <div class="insight" style="margin-top:14px"><strong>RSS 게이트:</strong> callback 경로는 통과, tape 경로는 1.27×로 근접 미달입니다 (M6 시점 1.169×). Trace 차이 0.</div>
         <div class="insight" style="margin-top:18px"><strong>데이터 범위:</strong> 저장소 fixture의 전 기간 완주 종목은 4개입니다. 100/300 수치는 실제 KRX 가격 경로를 결정론적으로 복제한 주문 집중 확장 부하입니다.</div>
       </article>
     </section>
@@ -695,7 +765,7 @@
 
     <footer>
       <span>Ryzen 5 5600X · 16GB RAM · Python 3.11 · Rust 1.93 · Windows 10</span>
-      <span>engine.run() wall-clock · 데이터 로딩 제외 · M6 promotion benchmark</span>
+      <span>engine.run() wall-clock · 데이터 로딩·tape 표 생성 제외 · 2026-09-17 loop-driver benchmark (M6 수치는 기록)</span>
     </footer>
   </main>
 </body>

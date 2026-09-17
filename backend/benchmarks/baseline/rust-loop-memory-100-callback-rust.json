@@ -1,0 +1,27 @@
+{
+  "workload": {
+    "instruments": 100,
+    "sessions": 1231,
+    "bars": 123100,
+    "rebalance_every": 5,
+    "strategy": "callback",
+    "synthetic": true,
+    "repeat": 3,
+    "warmup": 1
+  },
+  "cores": {
+    "rust": {
+      "samples_seconds": [
+        0.5414412000100128,
+        0.5485257999971509,
+        0.4993909999902826
+      ],
+      "median_seconds": 0.5414412000100128,
+      "speedup_vs_python": null,
+      "final_equity": 2321985873.9513392,
+      "orders": 22243,
+      "fills": 22155,
+      "process_peak_rss_bytes": 219115520
+    }
+  }
+}

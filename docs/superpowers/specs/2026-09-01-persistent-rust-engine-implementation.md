@@ -1,7 +1,7 @@
 # Persistent Rust Engine 구현 계획
 
 작성일: 2026-09-01
-상태: M0~M6 기능 구현 완료 — 2×/FFI 최적화 후속 필요
+상태: M0~M6 완료 + 2026-09-17 Rust 루프 드라이버(세션당 FFI 0회) 완료
 목표 브랜치: `main`
 기준 커밋: `f93c4f5` (`refactor: split Rust backtest core into modules`)
 
@@ -16,6 +16,49 @@
 - 코드를 작성했어도 테스트가 끝나지 않았으면 `[x]`로 바꾸지 않는다.
 - 각 PR 단위가 끝날 때 이 문서의 체크박스, 검증 기록, 다음 작업을 함께 갱신한다.
 - 기존 `core="python"`과 `core="rust"` 경로는 최종 전환 전까지 삭제하지 않는다.
+
+## 2026-09-17 Rust 루프 드라이버 체크포인트 (#98, PR #107 → #109 → 벤치 PR)
+
+- 세션 루프(MARKET→FILL→NOTIFY→SESSION_CLOSE→ORDER 드레인, 자본변동, 비용·스냅샷 기록,
+  잔여 주문 취소)를 Rust `PersistentEngine::drive()`/`submit_decision()`/`finish()`가 소유한다.
+  구현: `rust/backtest_core/src/driver.rs`, `records.rs`, Python `engine/loop.py::_execute_persistent`.
+- Python↔Rust 왕복은 전략 콜백(`drive` → `on_event` → `submit_decision`)과 적재·종료 배치에서만
+  일어난다. `tests/test_core_parity.py::test_promoted_rust_makes_no_per_session_ffi`가 세션 단위
+  호출 0회를 고정한다.
+- 큐 payload·레코드 payload는 Rust wire이며 Python `PersistentEventStore`가 `finish()` 배치를
+  seq 순서로 lazy materialize한다. 콜백 프레임은 포트폴리오·대기 주문을 콜백 시점에 고정하고
+  `RustStrategyContext`가 읽을 때만 공개 객체를 만든다.
+- 선언형 tape(`DeclarativeTapeStrategy`, 워크벤치 `TargetTapeStrategy`)는 `load_target_tape`로
+  적재돼 Rust `tape.rs`가 결정까지 생성한다 — Python 콜백 0회. 규칙 정본은
+  `engine/tape.py::evaluate_tape`.
+- 측정 (`scripts/bench_universe.py --warmup 1 --repeat 5`, 2026-09-17, 동일 프로세스 교차 실행,
+  측정 중 다른 프로세스가 CPU 85~97%를 점유해 절대값은 부풀려짐 — 배수는 같은 실행 안의 비교):
+
+| 워크로드 | python | rust_legacy | rust | rust / python |
+|---|---|---|---|---|
+| 100종목 synthetic · callback | 2.876초 | 2.870초 | 0.681초 | **4.22배** |
+| 100종목 synthetic · tape | 2.566초 | 2.662초 | 0.543초 | **4.73배** |
+| 300종목 synthetic · callback | 7.378초 | 8.180초 | 2.080초 | **3.55배** |
+| 300종목 synthetic · tape | 7.620초 | 7.767초 | 1.703초 | **4.47배** |
+| 실제 4종목 fixture · callback | 0.215초 | 0.223초 | 0.069초 | **3.13배** |
+| 실제 4종목 fixture · tape | 0.192초 | 0.242초 | 0.037초 | **5.18배** |
+
+- 원본 산출물: `benchmarks/baseline/rust-loop-100-callback.json`, `rust-loop-100-tape.json`,
+  `rust-loop-300-callback.json`, `rust-loop-300-tape.json`, `rust-loop-real-fixture-callback.json`,
+  `rust-loop-real-fixture-tape.json`. tape 표(`EqualWeightTape`) 생성은 타이머 밖이다 — 워크벤치에서도
+  tape는 상류(`compile_target_tape`)에서 만들어 엔진에 넘기므로 `engine.run()` 비용만 잰다.
+- orders/fills/최종 equity는 워크로드마다 세 코어가 동일. 전체 스위트 1192 passed(리뷰 반영 후), parity 201 passed,
+  Rust 단위 테스트 22 passed.
+- 격리 프로세스 peak RSS (100종목, `--core` 단독 실행, `benchmarks/baseline/rust-loop-memory-100-*.json`):
+  callback python 169.8 MiB / rust 209.0 MiB = 1.23배(게이트 1.25배 **통과**), tape python 170.4 MiB /
+  rust 216.7 MiB = 1.27배(**근접 미달**). 첫 측정은 1.46/1.55배였는데 종료 배치가 Rust wire를 Python
+  tuple로 한 번에 복제하는 구간이 원인이라, 레코드 인덱스만 넘기고 payload는 `record_payload(seq)`로
+  필요할 때 읽도록 바꾸고 종료 시 큐 arena·tape 프레임을 해제했다.
+- 최종 게이트 판정: 세션당 FFI 0회 **통과**. 100종목 callback 4.22배(목표 2배 **통과**),
+  tape 경로 4.73배(최소 3배 **통과**, 목표 5배는 근접 미달). 300종목 callback 3.55배·tape 4.47배(목표 2배 **통과**).
+  4종목 fixture 회귀 없음(3.13~5.18배 향상).
+- 남은 Python 시간: feed 적재(열 comprehension), 전략 콜백 본체와 `decision_to_wire`, 결과 조회 시
+  `record_payload(seq)` FFI(레코드당 1회, 100종목이면 수만 회 — RSS와 맞바꾼 선택)와 스냅샷 materialization. 다음 병목은 워크벤치의 결과 변환·분석 지표(엔진 밖).
 
 ## 2026-09-01 체크포인트
 
@@ -87,10 +130,11 @@
 
 > 이 블록은 작업을 진행할 때마다 최신 상태로 덮어쓴다.
 
-- 현재 단계: M6 — 하드닝과 전환
-- 현재 작업: M0~M6 기능 체크리스트 완료
-- 마지막 완료 항목: 공개 `rust` 승격, panic poison, edge-case/벤치마크/문서 검증
-- 다음 작업: callback-to-callback Rust driver로 세션별 FFI를 제거하고 2× 목표 재측정
+- 현재 단계: #98 Rust 루프 드라이버 — 구현·측정 완료, PR 스택 리뷰 중
+- 현재 작업: PR #107(드라이버) → #109(tape 네이티브) → 벤치·문서 PR
+- 마지막 완료 항목: 세션당 FFI 0회, 선언형 tape 콜백 0회, 벤치 매트릭스 6종 측정
+- 다음 작업: 워크벤치 end-to-end(결과 변환·분석 지표) 구간별 측정으로 다음 병목 확인 (#98 Phase 3-2),
+  Python 코어 삭제 범위는 별도 이슈(#98 Phase 3-4)
 - 알려진 blocker: 없음
 - 작업 트리의 기존 사용자/선행 변경: 없음
 - 마지막 검증:
@@ -372,7 +416,7 @@ Router는 이 단계에서 유지해 변경 폭을 제한한다.
 - 결과 패리티: 100%.
 - 세션당 FFI: 0회. 전략 callback과 종료 batch에서만 왕복.
 
-M6 측정 판정:
+M6 측정 판정 (2026-09-03):
 
 - 100종목 최소 1.5배: **통과(1.719배)**. 목표 2배는 미달.
 - 300종목 목표 2배: **미달(1.618배)**.
@@ -381,11 +425,21 @@ M6 측정 판정:
 - 세션당 FFI 0회: **미달**. persistent state 재마샬링은 제거했지만 Python event loop에서
   session market/close와 queue 어댑터를 호출한다.
 
-후속 최적화 백로그(위 67개 기능 체크리스트와 별도):
+2026-09-17 재판정 (Rust 루프 드라이버, 위 체크포인트 표):
 
-- Rust가 다음 전략 callback까지 market, fill, update, close와 queue drain을 진행하는 driver API.
-- callback frame의 portfolio/open-order/history view를 compact 또는 lazy batch로 묶어 왕복 수 축소.
-- 서로 다른 실제 종목 100/300개를 포함한 외부 원장으로 성능 게이트 재검증.
+- 100종목 목표 2배: **통과(callback 4.22배, tape 4.73배)**.
+- 300종목 목표 2배: **통과(callback 3.55배, tape 4.47배)**.
+- 4종목 fixture 회귀 금지: **통과(3.13~5.18배 향상)**.
+- 세션당 FFI 0회: **통과**. 왕복은 전략 콜백과 적재·종료 배치뿐이다.
+- Peak RSS 1.25배 이하: callback **통과(1.23배)**, tape **근접 미달(1.27배)**.
+
+후속 백로그:
+
+- [x] Rust가 다음 전략 callback까지 market, fill, update, close와 queue drain을 진행하는 driver API.
+- [x] callback frame의 portfolio/open-order view를 콜백 시점 wire로 고정하고 lazy 변환.
+- [ ] 서로 다른 실제 종목 100/300개를 포함한 외부 원장으로 성능 게이트 재검증.
+- [ ] 워크벤치 end-to-end 구간별 측정 (#98 Phase 3-2).
+- [x] 종료 배치를 레코드 단위 lazy payload 조회로 (callback 1.23배). tape 1.27배는 후속.
 
 ## 첫 구현 슬라이스 상세
 

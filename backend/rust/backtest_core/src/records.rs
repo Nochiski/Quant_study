@@ -20,8 +20,10 @@ pub(crate) const KIND_CORPORATE_ACTION: u8 = 6;
 pub(crate) const KIND_CORPORATE_ACTION_APPLIED: u8 = 7;
 pub(crate) const KIND_COST: u8 = 8;
 
-/// `(seq, session_index, kind, payload)` — Python `PersistentEventStore`가 소비하는 배치 행.
-pub(crate) type RecordWire = (u64, usize, u8, PyObject);
+/// `(seq, session_index, kind)` — Python `PersistentEventStore`가 소비하는 레코드 인덱스 행.
+/// payload는 `record_payload(seq)`로 필요할 때만 변환한다 — 배치 전체를 tuple로 복제하면 Rust
+/// wire·Python tuple·공개 객체가 동시에 살아 peak RSS가 커진다.
+pub(crate) type RecordIndexWire = (u64, usize, u8);
 
 pub(crate) fn to_object<'py, T>(py: Python<'py>, value: T) -> PyResult<PyObject>
 where
@@ -134,8 +136,9 @@ impl SnapshotWire {
 pub(crate) struct NativeDecision {
     /// 결정을 만든 tape 프레임의 세션 index. None이면 idle(NoAction).
     pub(crate) frame_session: Option<usize>,
-    /// 유지된 목표: `(instrument_id, "weight"|"quantity", weight, quantity)`.
-    pub(crate) kept: Vec<(u32, String, f64, i64)>,
+    /// 유지된 목표: `(instrument_id, is_weight, weight, quantity)`. 결정당 종목 수만큼 쌓이므로
+    /// 문자열 대신 bool로 둔다.
+    pub(crate) kept: Vec<(u32, bool, f64, i64)>,
     pub(crate) no_bar: Vec<String>,
     pub(crate) reason: String,
 }
@@ -294,19 +297,22 @@ impl RecordStore {
         &self.records
     }
 
-    pub(crate) fn batch(&self, py: Python<'_>) -> PyResult<Vec<RecordWire>> {
+    pub(crate) fn index(&self) -> Vec<RecordIndexWire> {
         self.records
             .iter()
             .enumerate()
-            .map(|(seq, record)| {
-                Ok((
-                    seq as u64,
-                    record.session_index,
-                    record.payload.kind(),
-                    record.payload.to_py(py)?,
-                ))
-            })
+            .map(|(seq, record)| (seq as u64, record.session_index, record.payload.kind()))
             .collect()
+    }
+
+    pub(crate) fn payload(&self, py: Python<'_>, seq: usize) -> PyResult<PyObject> {
+        let record = self.records.get(seq).ok_or_else(|| {
+            PyIndexError::new_err(format!(
+                "record seq out of range — seq={seq} records={}",
+                self.records.len()
+            ))
+        })?;
+        record.payload.to_py(py)
     }
 
     /// SNAPSHOT record 순서의 equity — metrics 입력.

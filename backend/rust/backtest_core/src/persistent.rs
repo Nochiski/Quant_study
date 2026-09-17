@@ -4,12 +4,11 @@ use crate::driver::{CorporateActionEntry, Queued, RunSettings};
 use crate::event_queue::NativeEventQueue;
 use crate::feed::PersistentFeed;
 use crate::persistent_router::{
-    self, CloseWire, DecisionWire, ExecutionWire, RouteError, RoutedGroup, RoutedOrder,
-    RoutedUpdate, RouterConfig, TargetWire,
+    DecisionWire, ExecutionWire, RouteError, RoutedOrder, RouterConfig, TargetWire,
 };
 use crate::portfolio::{Portfolio, SnapshotTuple};
 use crate::quote::parse_decimal_ratio;
-use crate::records::{RecordStore, RecordWire};
+use crate::records::{RecordIndexWire, RecordStore};
 use crate::session::{self, BarTuple, EntryTuple, Op};
 use crate::tape::NativeTape;
 use pyo3::exceptions::{PyKeyError, PyValueError};
@@ -29,13 +28,6 @@ type GroupTuple = (String, String, Vec<String>);
 type OrderState = (String, i64, bool);
 type CostTuple = (String, Option<String>, f64);
 type CorporateActionTuple = (i64, i64, f64, f64, f64);
-type RouteResponse = (
-    String,
-    Vec<RoutedOrder>,
-    Vec<RoutedUpdate>,
-    Vec<RoutedGroup>,
-    Option<RouteError>,
-);
 
 fn scaled_corporate_action_quantity(quantity: i64, ratio: &str) -> PyResult<(i64, f64)> {
     const QUANTUM: i128 = 1_000_000_000;
@@ -568,15 +560,25 @@ impl PersistentEngine {
         self.submit_internal(token, decision, None)
     }
 
-    /// 잔여 주문 취소 기록 후 전체 레코드 배치를 돌려준다.
-    fn finish(&mut self, py: Python<'_>) -> PyResult<Vec<RecordWire>> {
+    /// 잔여 주문 취소 기록 후 레코드 인덱스 `(seq, session_index, kind)`를 돌려준다.
+    /// 큐 arena는 더 쓰지 않으므로 여기서 해제한다.
+    fn finish(&mut self) -> PyResult<Vec<RecordIndexWire>> {
         self.finish_internal()?;
-        self.records.batch(py)
+        self.queued = Vec::new();
+        // tape 프레임은 결정 생성에만 쓰였다 — 재구성 정보는 DECISION 레코드에 있다.
+        self.tape = None;
+        self.event_queue = NativeEventQueue::default();
+        Ok(self.records.index())
     }
 
-    /// 종료 여부와 무관한 현재 레코드 배치 (전략 예외 시 partial trace 조회용).
-    fn record_batch(&self, py: Python<'_>) -> PyResult<Vec<RecordWire>> {
-        self.records.batch(py)
+    /// 종료 여부와 무관한 현재 레코드 인덱스 (전략 예외 시 partial trace 조회용).
+    fn record_batch(&self) -> Vec<RecordIndexWire> {
+        self.records.index()
+    }
+
+    /// 레코드 하나의 payload wire. Python이 공개 객체를 만들 때만 호출한다.
+    fn record_payload(&self, py: Python<'_>, seq: usize) -> PyResult<PyObject> {
+        self.records.payload(py, seq)
     }
 
     fn record_count(&self) -> usize {
@@ -627,69 +629,6 @@ impl PersistentEngine {
 
     pub(crate) fn configure_router(&mut self, actions: Vec<String>, features: Vec<String>) {
         self.router_config.configure(actions, features);
-    }
-
-    #[pyo3(signature = (decision, bars=None))]
-    fn route_basic_decision(
-        &mut self,
-        decision: DecisionWire,
-        bars: Option<HashMap<String, CloseWire>>,
-    ) -> PyResult<RouteResponse> {
-        let decision_id = Self::next_id(&mut self.decision_seq, 'D');
-        let bars = match bars {
-            Some(bars) => bars,
-            None => self
-                .feed
-                .as_ref()
-                .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?
-                .current_closes()?,
-        };
-        // 심볼 폴백은 그날 바뿐 아니라 피드 등록부 전체에서 찾는다 — 바가 끊긴 보유 종목(정지·상폐)의
-        // REPLACE 청산 주문이 "instrument metadata is missing" 으로 run 을 죽이지 않도록.
-        let mut fallback_symbols: HashMap<String, String> = self
-            .feed
-            .as_ref()
-            .map(PersistentFeed::registry_symbols)
-            .unwrap_or_default();
-        for (key, (symbol, _)) in bars.iter() {
-            fallback_symbols.insert(key.clone(), symbol.clone());
-        }
-        let decision_for_orders = decision.clone();
-        let (orders, updates, groups, error) = persistent_router::route_basic_decision(
-            &self.portfolio,
-            &mut self.orders,
-            &self.router_config,
-            &mut self.order_seq,
-            &mut self.group_seq,
-            self.allow_short,
-            &decision_id,
-            decision,
-            bars,
-        )?;
-        if error.is_none() {
-            let staged_orders = orders
-                .iter()
-                .map(|order| {
-                    StoredOrder::from_routed(
-                        order,
-                        &decision_for_orders,
-                        fallback_symbols.get(&order.1).map(String::as_str),
-                        &decision_id,
-                    )
-                })
-                .collect::<PyResult<Vec<_>>>()?;
-            let staged_groups: Vec<StoredGroup> = groups
-                .iter()
-                .map(|group| StoredGroup {
-                    group_id: group.0.clone(),
-                    policy: group.1.clone(),
-                    order_ids: group.2.clone(),
-                })
-                .collect();
-            self.pending_orders.extend(staged_orders);
-            self.pending_groups.extend(staged_groups);
-        }
-        Ok((decision_id, orders, updates, groups, error))
     }
 
     fn fail_callback(&mut self, token: u64, detail: String) -> PyResult<()> {

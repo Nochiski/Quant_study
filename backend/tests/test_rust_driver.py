@@ -93,3 +93,42 @@ def test_python_strategy_sees_feed_snapshot_objects_for_market_callbacks() -> No
     assert [event is snapshot for event, snapshot in zip(seen, feed.snapshots(), strict=True)] == [
         True
     ] * len(GOLDEN_BARS)
+
+
+@RUST_ONLY
+def test_partial_trace_keeps_decision_when_submit_fails_after_recording(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DEFECT-001: Rust가 DECISION을 기록한 뒤 submit이 실패해도 partial trace가 결정을 복원한다."""
+    from typing import Any
+
+    from backtest_engine.engine import loop as loop_module
+    from backtest_engine.engine.store import RecordKind
+
+    real_factory = loop_module.make_persistent_runtime
+
+    class FailingRuntime:
+        def __init__(self, inner: Any) -> None:
+            self.inner = inner
+
+        def submit_decision(self, *args: object) -> object:
+            # Rust 쪽 기록(DECISION)까지 끝난 뒤 Python이 decision_id를 받지 못하는 상황을 만든다.
+            self.inner.submit_decision(*args)
+            raise ValueError("submit exploded after recording")
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self.inner, name)
+
+    monkeypatch.setattr(
+        loop_module,
+        "make_persistent_runtime",
+        lambda *args, **kwargs: FailingRuntime(real_factory(*args, **kwargs)),
+    )
+    engine = BacktestEngine(RunConfig(run_id="submit-fails", initial_cash=100_000.0), core="rust")
+    with pytest.raises(ValueError, match="submit exploded"):
+        engine.run(ScriptedStrategy(script=(target_70pct(),)), DataFeed(GOLDEN_BARS))
+    kinds = [record.kind for record in engine.event_store.records]
+    assert kinds == [RecordKind.MARKET, RecordKind.SNAPSHOT, RecordKind.DECISION]
+    decision = engine.event_store.decisions()[0]
+    assert decision.decision_id == "D-000001"
+    assert decision.decision.actions == (target_70pct(),)

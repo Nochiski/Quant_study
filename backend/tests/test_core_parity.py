@@ -993,7 +993,7 @@ def test_persistent_callback_tokens_reject_stale_and_double_submit() -> None:
     with pytest.raises(ValueError, match="no callback is awaiting"):
         runtime.submit_decision(frame.token, decision)
     assert runtime.drive() is None
-    kinds = [kind for _seq, _session, kind, _payload in runtime.finish()]
+    kinds = [kind for _seq, _session, kind in runtime.finish()]
     assert kinds == [0, 5, 1]  # MARKET, SNAPSHOT, DECISION
 
 

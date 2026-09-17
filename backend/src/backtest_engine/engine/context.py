@@ -189,7 +189,7 @@ class RustStrategyContext:
     """
 
     now: datetime
-    frame: Any
+    frame: Any  # reason: pyo3 CallbackFrame — 확장 모듈 stub 부재, getter는 store가 해석
     store: PersistentEventStore
     history_store: HistoryStore
     declared: frozenset[HistoryRequest] = field(default_factory=frozenset)

@@ -8,6 +8,7 @@
 use crate::callback::CallbackFrame;
 use crate::persistent::{Lifecycle, PersistentEngine, StoredGroup, StoredOrder};
 use crate::persistent_router::{self, DecisionWire, RouteError};
+use crate::portfolio::SnapshotTuple;
 use crate::records::{to_object, FillWire, NativeDecision, OrderWire, RecordPayload, SnapshotWire};
 use crate::session::py_float;
 use pyo3::exceptions::PyValueError;
@@ -187,7 +188,13 @@ impl PersistentEngine {
     }
 
     pub(crate) fn snapshot_wire(&self) -> PyResult<SnapshotWire> {
-        let (cash, rows, equity, gross_exposure) = self.portfolio.snapshot()?;
+        self.snapshot_wire_from(self.portfolio.snapshot()?)
+    }
+
+    /// 포트폴리오 스냅샷 튜플의 key를 instrument id로 바꾼다 — `close_current_session`이 이미
+    /// 만든 스냅샷을 재사용해 세션마다 원장을 두 번 훑지 않는다.
+    fn snapshot_wire_from(&self, snapshot: SnapshotTuple) -> PyResult<SnapshotWire> {
+        let (cash, rows, equity, gross_exposure) = snapshot;
         let rows = rows
             .into_iter()
             .map(|(key, quantity, average, mark, market_value, unrealized)| {
@@ -216,8 +223,8 @@ impl PersistentEngine {
             .collect()
     }
 
-    /// 콜백 프레임을 만들고 runtime을 AwaitingDecision으로 전환한다. payload는 Rust wire로
-    /// 보관하고 Python getter가 읽을 때만 변환한다 — 전략이 안 읽는 세션은 변환 비용이 없다.
+    /// 콜백 프레임을 만들고 runtime을 AwaitingDecision으로 전환한다. 포트폴리오·대기 주문은
+    /// 콜백 시점 계약상 여기서 Rust wire로 clone하고, Python 객체 변환은 getter가 읽을 때만 한다.
     fn make_frame(
         &mut self,
         event_kind: &str,
@@ -486,7 +493,7 @@ impl PersistentEngine {
     /// `loop._on_session_close`: 비용·스냅샷 기록 후 일정과 warmup을 만족하면 스냅샷을 돌려준다.
     fn on_session_close(&mut self, session: usize) -> PyResult<Option<SnapshotWire>> {
         let settings = self.settings()?.clone();
-        let (should_dispatch, costs, _) = self.close_current_session(
+        let (should_dispatch, costs, closed) = self.close_current_session(
             &settings.schedule,
             settings.short_borrow_bps_annual,
             settings.margin_interest_bps_annual,
@@ -506,7 +513,7 @@ impl PersistentEngine {
                 },
             )?;
         }
-        let snapshot = self.snapshot_wire()?;
+        let snapshot = self.snapshot_wire_from(closed)?;
         if snapshot.equity < 0.0 {
             let feed = self.feed_ref()?;
             let positions: Vec<String> = snapshot

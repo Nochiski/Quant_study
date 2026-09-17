@@ -98,7 +98,7 @@ def supports_basic_decision(decision: StrategyDecision) -> bool:
     )
 
 
-def _execution_wire(
+def execution_wire(
     action: SetPortfolioTarget | SetPositionTarget | AdjustPosition | LiquidatePosition,
 ) -> ExecutionWire:
     execution = action.execution
@@ -110,7 +110,7 @@ def _execution_wire(
     )
 
 
-def _target_wire(target: PositionTarget) -> TargetWire:
+def target_wire(target: PositionTarget) -> TargetWire:
     key = instrument_key(target.instrument)
     common = (key, target.instrument.symbol, target.instrument.currency)
     if isinstance(target, WeightTarget):
@@ -185,7 +185,7 @@ def _basket_leg_wire(
 ) -> BasketLegWire:
     kind = kind_of(leg).value
     if isinstance(leg, SetPositionTarget):
-        return kind, _target_wire(leg.target), _execution_wire(leg), None, None
+        return kind, target_wire(leg.target), execution_wire(leg), None, None
     if isinstance(leg, AdjustPosition):
         if isinstance(leg.delta, QuantityDelta):
             target = _instrument_wire("quantity_delta", leg, value=str(leg.delta.quantity))
@@ -196,10 +196,10 @@ def _basket_leg_wire(
                 money_currency=leg.delta.notional.currency,
                 value=str(leg.delta.notional.amount),
             )
-        return kind, target, _execution_wire(leg), None, None
+        return kind, target, execution_wire(leg), None, None
     if isinstance(leg, LiquidatePosition):
         modifier = f"{str(leg.cancel_open_orders).lower()}|{leg.persistence.value}"
-        return kind, _instrument_wire("liquidate", leg), _execution_wire(leg), None, modifier
+        return kind, _instrument_wire("liquidate", leg), execution_wire(leg), None, modifier
     if isinstance(leg, SubmitOrder):
         return kind, None, None, _request_wire(leg.request), None
     raise TypeError(f"unsupported basket leg wire — got {type(leg).__name__}")
@@ -215,16 +215,16 @@ def decision_to_wire(decision: StrategyDecision) -> DecisionWire:
             actions.append(
                 (
                     kind,
-                    [_target_wire(target) for target in action.targets],
+                    [target_wire(target) for target in action.targets],
                     action.scope.value,
-                    _execution_wire(action),
+                    execution_wire(action),
                     None,
                     [],
                 )
             )
         elif isinstance(action, SetPositionTarget):
             actions.append(
-                (kind, [_target_wire(action.target)], None, _execution_wire(action), None, [])
+                (kind, [target_wire(action.target)], None, execution_wire(action), None, [])
             )
         elif isinstance(action, AdjustPosition):
             if isinstance(action.delta, QuantityDelta):
@@ -240,11 +240,11 @@ def decision_to_wire(decision: StrategyDecision) -> DecisionWire:
                 )
             else:
                 raise TypeError(f"unsupported delta wire — got {type(action.delta).__name__}")
-            actions.append((kind, [target], None, _execution_wire(action), None, []))
+            actions.append((kind, [target], None, execution_wire(action), None, []))
         elif isinstance(action, LiquidatePosition):
             target = _instrument_wire("liquidate", action)
             modifier = f"{str(action.cancel_open_orders).lower()}|{action.persistence.value}"
-            actions.append((kind, [target], modifier, _execution_wire(action), None, []))
+            actions.append((kind, [target], modifier, execution_wire(action), None, []))
         elif isinstance(action, SubmitOrder):
             actions.append((kind, [], None, None, _request_wire(action.request), []))
         elif isinstance(action, CancelOrder):

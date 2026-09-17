@@ -1,0 +1,274 @@
+"""선언형 tape: Python reference 규칙(`evaluate_tape`)과 Rust 네이티브 경로의 패리티.
+
+bar 없는 종목(거래정지·기준가 세션) 처리 규칙과, Rust 경로가 Python 콜백 없이 같은 trace를
+남기는지 검사한다.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from datetime import date, datetime, time
+from decimal import Decimal
+from typing import Any
+
+import pytest
+
+from backtest_engine import BacktestEngine, RunConfig
+from backtest_engine.data.feed import DataFeed
+from backtest_engine.engine.core import core_available
+from backtest_engine.engine.tape import evaluate_tape, is_declarative_tape
+from backtest_engine.types.actions import (
+    ActionKind,
+    ExecutionPolicy,
+    QuantityTarget,
+    SetPortfolioTarget,
+    TargetScope,
+    WeightTarget,
+)
+from backtest_engine.types.decision import StrategyDecision
+from backtest_engine.types.events import StrategyEvent
+from backtest_engine.types.instruments import InstrumentId
+from backtest_engine.types.market import MarketSnapshot, PriceWindow
+from backtest_engine.types.requirements import (
+    EventKind,
+    EverySession,
+    HistoryRequest,
+    StrategyRequirements,
+)
+from backtest_engine.types.strategy import StrategyContext
+from backtest_engine.types.tape import TapeFrame
+from tests.conftest import day, make_bar, make_instrument
+
+RUST_ONLY = pytest.mark.skipif(not core_available("rust"), reason="rust core not built")
+SIGNAL = date(2018, 4, 27)
+A, B, C = make_instrument("000660:1"), make_instrument("005930:1"), make_instrument("000030:1")
+
+
+class _Context:
+    def __init__(self, now: datetime, positions: dict[str, Decimal]) -> None:
+        self.now = now
+        self._positions = positions
+
+    def history(self, request: HistoryRequest) -> PriceWindow:
+        raise NotImplementedError("tape strategy declares no history")
+
+    def current_weight(self, instrument: InstrumentId) -> float:
+        return 0.0
+
+    def position_qty(self, instrument: InstrumentId) -> Decimal:
+        return self._positions.get(instrument.symbol, Decimal(0))
+
+    def cash(self) -> float:
+        return 0.0
+
+    def portfolio_value(self) -> float:
+        return 0.0
+
+    def universe(self) -> frozenset[InstrumentId]:
+        return frozenset()
+
+    def open_orders(self, instrument: InstrumentId | None = None) -> tuple[Any, ...]:
+        return ()
+
+
+def _frame(*targets: tuple[InstrumentId, float]) -> TapeFrame:
+    return TapeFrame(
+        action=SetPortfolioTarget(
+            targets=tuple(WeightTarget(instrument, weight) for instrument, weight in targets),
+            scope=TargetScope.REPLACE,
+            execution=ExecutionPolicy.market_next_open(),
+        ),
+        reason=f"target_tape:{SIGNAL.isoformat()}",
+    )
+
+
+def test_tape_frame_rejects_non_weight_targets() -> None:
+    with pytest.raises(TypeError, match="must be WeightTarget"):
+        TapeFrame(
+            action=SetPortfolioTarget(
+                targets=(QuantityTarget(A, Decimal(1)),),
+                scope=TargetScope.REPLACE,
+                execution=ExecutionPolicy.market_next_open(),
+            ),
+            reason="r",
+        )
+
+
+def test_targets_without_a_bar_are_held_when_owned_and_skipped_otherwise() -> None:
+    ts = datetime.combine(SIGNAL, time(15, 30))
+    snapshot = MarketSnapshot(ts=ts, bars=(make_bar(ts, A, 100.0, 101.0),))
+    frames = {SIGNAL: _frame((A, 0.4), (B, 0.4), (C, 0.2))}
+
+    decision = evaluate_tape(
+        frames, "target_tape_idle", _Context(ts, {"005930:1": Decimal(12)}), snapshot
+    )
+
+    action = decision.actions[0]
+    assert isinstance(action, SetPortfolioTarget)
+    assert action.targets == (
+        WeightTarget(A, 0.4),
+        QuantityTarget(B, Decimal(12)),  # 보유 중 → 수량 유지
+    )  # C는 미보유 + bar 없음 → 건너뜀 (예산은 현금에 남는다)
+    assert decision.reason == "target_tape:2018-04-27 no_bar=('005930:1', '000030:1')"
+
+
+def test_frames_with_every_instrument_priced_pass_through_unchanged() -> None:
+    ts = datetime.combine(SIGNAL, time(15, 30))
+    snapshot = MarketSnapshot(ts=ts, bars=(make_bar(ts, A, 100.0, 101.0),))
+
+    decision = evaluate_tape({SIGNAL: _frame((A, 0.7))}, "idle", _Context(ts, {}), snapshot)
+
+    action = decision.actions[0]
+    assert isinstance(action, SetPortfolioTarget)
+    assert action.targets == (WeightTarget(A, 0.7),)
+    assert decision.reason == "target_tape:2018-04-27"
+
+
+def test_sessions_without_a_frame_and_non_market_events_are_idle() -> None:
+    ts = datetime.combine(SIGNAL, time(15, 30))
+    snapshot = MarketSnapshot(ts=ts, bars=(make_bar(ts, A, 100.0, 101.0),))
+    idle = evaluate_tape({}, "target_tape_idle", _Context(ts, {}), snapshot)
+    assert idle == StrategyDecision.no_action(ts, "target_tape_idle")
+
+
+# --- Rust 네이티브 경로 패리티 ------------------------------------------------------
+
+
+class _TapeStrategy:
+    """`DeclarativeTapeStrategy`를 구현하는 최소 전략. python 경로는 on_event, rust 경로는 tape."""
+
+    idle_reason = "tape_idle"
+
+    def __init__(self, frames: Mapping[date, TapeFrame]) -> None:
+        self._frames = frames
+        self.callbacks = 0
+
+    def requirements(self) -> StrategyRequirements:
+        return StrategyRequirements(
+            histories=(),
+            schedule=EverySession(),
+            events=frozenset({EventKind.MARKET}),
+            actions=frozenset({ActionKind.NO_ACTION, ActionKind.SET_PORTFOLIO_TARGET}),
+            features=frozenset(),
+        )
+
+    def tape_frames(self) -> Mapping[date, TapeFrame]:
+        return self._frames
+
+    def on_event(self, ctx: StrategyContext, event: StrategyEvent) -> StrategyDecision:
+        self.callbacks += 1
+        return evaluate_tape(self._frames, self.idle_reason, ctx, event)
+
+
+_X, _Y = make_instrument("005930"), make_instrument("000660")
+
+
+def _delisting_feed() -> DataFeed:
+    """D1·D2 X·Y 거래, D3부터 Y 상폐. D3 프레임은 Y(보유·bar 없음)·미보유 C를 함께 요구한다."""
+    return DataFeed(
+        (
+            make_bar(day(1), _X, 100.0, 100.0),
+            make_bar(day(1), _Y, 50.0, 50.0),
+            make_bar(day(2), _X, 100.0, 100.0),
+            make_bar(day(2), _Y, 50.0, 50.0),
+            make_bar(day(3), _X, 110.0, 110.0),
+            make_bar(day(4), _X, 105.0, 105.0),
+        )
+    )
+
+
+def _delisting_frames() -> dict[date, TapeFrame]:
+    def frame(*targets: tuple[InstrumentId, float], reason: str) -> TapeFrame:
+        return TapeFrame(
+            action=SetPortfolioTarget(
+                targets=tuple(WeightTarget(instrument, weight) for instrument, weight in targets),
+                scope=TargetScope.REPLACE,
+                execution=ExecutionPolicy.market_next_open(),
+            ),
+            reason=reason,
+        )
+
+    return {
+        day(1).date(): frame((_X, 0.4), (_Y, 0.4), reason="tape:d1"),
+        day(3).date(): frame((_X, 0.4), (_Y, 0.4), (C, 0.1), reason="tape:d3"),
+        # 세션이 아닌 날짜의 프레임은 두 경로 모두 무시한다.
+        date(2030, 1, 1): frame((_X, 1.0), reason="tape:never"),
+    }
+
+
+def test_declarative_tape_protocol_is_detected() -> None:
+    assert is_declarative_tape(_TapeStrategy({}))
+    assert not is_declarative_tape(object())
+
+
+@RUST_ONLY
+def test_rust_tape_path_matches_python_trace_without_callbacks() -> None:
+    engines: dict[str, BacktestEngine] = {}
+    strategies: dict[str, _TapeStrategy] = {}
+    results = {}
+    for core in ("python", "rust"):
+        # C는 feed에 한 번도 나오지 않는 종목 — 두 경로 모두 미보유 no_bar로 건너뛰어야 한다.
+        strategy = _TapeStrategy(_delisting_frames())
+        engine = BacktestEngine(RunConfig(run_id="tape", initial_cash=100_000.0), core=core)
+        results[core] = engine.run(strategy, _delisting_feed())
+        engines[core] = engine
+        strategies[core] = strategy
+
+    assert results["python"] == results["rust"]
+    python_store, rust_store = engines["python"].event_store, engines["rust"].event_store
+    assert python_store.trace_bytes() == rust_store.trace_bytes()
+    assert strategies["python"].callbacks == 4
+    assert strategies["rust"].callbacks == 0
+    assert rust_store.decision_tape == ()
+    reasons = [record.decision.reason for record in rust_store.decisions()]
+    assert reasons == [
+        "tape:d1",
+        "tape_idle",
+        "tape:d3 no_bar=('000660', '000030:1')",
+        "tape_idle",
+    ]
+    # D3: Y는 보유 중이라 수량 고정 → 청산 주문이 나오지 않고 X만 리밸런싱된다.
+    assert [order.instrument.symbol for order in results["rust"].orders] == [
+        "005930",
+        "000660",
+        "005930",
+    ]
+
+
+@RUST_ONLY
+def test_rust_tape_path_makes_one_drive_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    from collections import Counter
+
+    from backtest_engine.engine import loop as loop_module
+
+    real_factory = loop_module.make_persistent_runtime
+    calls: Counter[str] = Counter()
+
+    class CountingRuntime:
+        def __init__(self, inner: Any) -> None:
+            self.inner = inner
+
+        def __getattr__(self, name: str) -> Any:
+            attribute = getattr(self.inner, name)
+            if not callable(attribute):
+                return attribute
+
+            def counted(*args: object, **kwargs: object) -> object:
+                calls[name] += 1
+                return attribute(*args, **kwargs)
+
+            return counted
+
+    monkeypatch.setattr(
+        loop_module,
+        "make_persistent_runtime",
+        lambda *args, **kwargs: CountingRuntime(real_factory(*args, **kwargs)),
+    )
+    frames = {day(1).date(): _delisting_frames()[day(1).date()]}
+    engine = BacktestEngine(RunConfig(run_id="tape-ffi", initial_cash=100_000.0), core="rust")
+    result = engine.run(_TapeStrategy(frames), _delisting_feed())
+    assert calls["drive"] == 1
+    assert calls["submit_decision"] == 0
+    assert calls["load_target_tape"] == 1
+    assert len(result.orders) == 2
+    assert len(engine.event_store.decisions()) == 4

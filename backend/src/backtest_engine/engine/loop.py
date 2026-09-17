@@ -70,7 +70,14 @@ from backtest_engine.engine.store import (
     PersistentEventStore,
     RecordKind,
 )
-from backtest_engine.engine.wire import decision_to_wire, route_error, supports_basic_decision
+from backtest_engine.engine.tape import is_declarative_tape
+from backtest_engine.engine.wire import (
+    decision_to_wire,
+    execution_wire,
+    route_error,
+    supports_basic_decision,
+    target_wire,
+)
 from backtest_engine.errors import (
     CoreUnavailable,
     CorporateActionsNotProvided,
@@ -106,6 +113,7 @@ from backtest_engine.types.requirements import (
 )
 from backtest_engine.types.results import BacktestResult, RunConfig
 from backtest_engine.types.strategy import Strategy
+from backtest_engine.types.tape import DeclarativeTapeStrategy, TapeFrame
 
 
 class _Run:
@@ -432,6 +440,10 @@ class BacktestEngine:
             )
         store.bind_corporate_actions(corporate_actions)
         runtime.load_corporate_actions(rows)
+        if is_declarative_tape(run.strategy):
+            # 결정 표를 Rust에 넘기면 drive()가 콜백 없이 완주한다 — 아래 루프는 프레임을
+            # 받지 않는다.
+            self._load_target_tape(run, feed, store)
 
         while (frame := self._drive(runtime)) is not None:
             event = store.frame_event(frame)
@@ -479,12 +491,44 @@ class BacktestEngine:
         )
 
     @staticmethod
+    def _load_target_tape(run: _Run, feed: DataFeed, store: PersistentEventStore) -> None:
+        runtime = run.persistent_runtime
+        strategy = run.strategy
+        if runtime is None or not isinstance(strategy, DeclarativeTapeStrategy):
+            raise CoreUnavailable("declarative tape requires the persistent runtime")
+        session_by_date = {ts.date(): index for index, ts in enumerate(feed.sessions)}
+        frames_by_session: dict[int, TapeFrame] = {}
+        rows = []
+        for frame_date, frame in strategy.tape_frames().items():
+            session_index = session_by_date.get(frame_date)
+            if session_index is None:
+                # 세션이 아닌 날짜의 프레임은 Python 경로에서도 dict 조회에 실패해 무시된다.
+                continue
+            frames_by_session[session_index] = frame
+            rows.append(
+                (
+                    session_index,
+                    [target_wire(target) for target in frame.action.targets],
+                    frame.action.scope.value,
+                    execution_wire(frame.action),
+                    frame.reason,
+                )
+            )
+        store.bind_tape(frames_by_session, strategy.idle_reason)
+        runtime.load_target_tape(rows, strategy.idle_reason)
+
+    @staticmethod
     def _drive(runtime: Any) -> Any | None:
         """Rust 드라이버를 한 번 전진시키고, 도메인 오류 접두어를 엔진 예외로 바꾼다."""
         try:
             return runtime.drive()
         except ValueError as error:
             message = str(error)
+            if message.startswith("route_error:"):
+                _, code, detail = message.split(":", 2)
+                routing_error = route_error((code, detail))
+                if routing_error is not None:
+                    raise routing_error from error
             if message.startswith("equity_wiped_out: "):
                 raise EquityWipedOut(message.removeprefix("equity_wiped_out: ")) from error
             if message.startswith("negative_position: "):

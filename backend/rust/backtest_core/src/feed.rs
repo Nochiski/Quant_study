@@ -116,6 +116,10 @@ impl PersistentFeed {
             .find(|row| self.instrument_ids[*row] == instrument_id)
     }
 
+    pub(crate) fn has_bar(&self, session: usize, key: &str) -> bool {
+        self.row_of(session, key).is_some()
+    }
+
     pub(crate) fn open_at(&self, session: usize, key: &str) -> Option<f64> {
         self.row_of(session, key).map(|row| self.opens[row])
     }
@@ -330,6 +334,8 @@ mod tests {
         assert_eq!(feed.instrument_id("B"), Some(1));
         assert_eq!(feed.instrument_id("Z"), None);
         assert_eq!(feed.open_at(1, "A"), None);
+        assert!(feed.has_bar(0, "B"));
+        assert!(!feed.has_bar(1, "A"));
         assert_eq!(feed.open_at(1, "B"), Some(21.0));
         assert_eq!(feed.symbol_of(0), "AAA");
         assert_eq!(feed.session_len(), 2);

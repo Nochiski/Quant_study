@@ -1,15 +1,15 @@
 ---
 plan_version: 2
 project: strategy-gui-editing
-project_status: IN_REVIEW
+project_status: IN_PROGRESS
 current_phase: P1
-current_pr: P1-01,P1-02
-active_prs: [P1-01, P1-02]
-parallel_window: [P1-01, P1-02]
-last_updated: 2026-09-17T23:49:54+09:00
+current_pr: P1-01,P1-02,P1-03
+active_prs: [P1-01, P1-02, P1-03]
+parallel_window: [P1-01, P1-02, P1-03]
+last_updated: 2026-09-17T23:54:10+09:00
 planned_prs: 17
 merged_prs: 0
-approved_prs: 1
+approved_prs: 2
 progress_percent: 0
 ---
 
@@ -23,13 +23,13 @@ progress_percent: 0
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_REVIEW` |
+| Project status | `IN_PROGRESS` |
 | Current phase | `P1` |
-| Current/next PR | `P1-01,P1-02` |
-| Active PR | `P1-01, P1-02` |
+| Current/next PR | `P1-01,P1-02,P1-03` |
+| Active PR | `P1-01, P1-02, P1-03` |
 | Progress | `0 / 17 merged (0%)` |
-| Approved | `1 / 17` |
-| Aggregated at | `2026-09-17 23:49 KST` |
+| Approved | `2 / 17` |
+| Aggregated at | `2026-09-17 23:54 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -72,7 +72,7 @@ progress_percent: 0
 <!-- PLAN:PHASES:START -->
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
-| P1 | Backend schema 1.1 | 5 | 0 | `IN_REVIEW` |
+| P1 | Backend schema 1.1 | 5 | 0 | `IN_PROGRESS` |
 | P2 | Frontend 1.1 and upgrade UI | 3 | 0 | `WAITING` |
 | P3 | Source transactions | 2 | 0 | `WAITING` |
 | P4 | Form editing | 4 | 0 | `WAITING` |
@@ -84,16 +84,16 @@ progress_percent: 0
 
 | 항목 | 값 |
 |---|---|
-| PR | `P1-02` |
-| Intent | 미사용 필드 `signal.method`·`signal.entry_percentile`·`execution.order_style`과 enum 제거, `unary` alias(rank/zscore/winsorize/neutralize) 제거, `cross_sectional: demean` 추가 |
-| Acceptance | WORKFLOW P1-02 |
-| Non-goals | 1.0 읽기·업그레이드(P1-03/04), 적용 조건 경고(P1-05), frontend(P2) |
-| Branch/worktree | `feat/gui-p1-02-dead-fields-unary-alias` (base `feat/gui-p1-01-schema-1-1-model` `5d28996`) |
-| Base SHA | `5d28996` |
-| Head SHA | `9a5cccb` (P2 후속; diff freeze `aae4c23`) |
-| Diff stat | handwritten 20 files +79/−92 + P2 후속 4 files; generated `openapi.json`·`runtime-schema.json` 제외 |
-| Focused tests | hydrate unknown_key 3·invalid_enum 4·demean 문서 1, demean parity 1, 설명 문구 1, document API 12 |
-| Full gate | backend pytest 1,232 passed · Ruff check clean · Pyright 0 |
+| PR | `P1-03` |
+| Intent | `_upgrade.py` 1.0→1.1 dict 변환(단일 규칙), repository codec의 1.0 row 동결 읽기, saved-reference backtest 거부(422), 동결 표시(`requires_upgrade`) |
+| Acceptance | WORKFLOW P1-03 |
+| Non-goals | source 텍스트(주석 보존) 변환·endpoint(P1-04), 적용 조건 경고(P1-05), frontend(P2) |
+| Branch/worktree | `feat/gui-p1-03-upgrade-and-frozen-1-0` (base `feat/gui-p1-02-dead-fields-unary-alias` `9ea8854`) |
+| Base SHA | `9ea8854` |
+| Head SHA | — |
+| Diff stat | — |
+| Focused tests | — |
+| Full gate | — |
 
 ---
 
@@ -102,8 +102,8 @@ progress_percent: 0
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [ ] | `P1-01` | 모델 1.1: `factors` 평탄화, 선택 보일러플레이트, `kind` 우선, fixture·hash golden | 없음 | `APPROVED` | [#108](https://github.com/Nochiski/Quant_study/pull/108) · `review_gui_p1_01` APPROVE (REQUEST_CHANGES P1 1/P2 7 해소) · `5d28996` |
-| [ ] | `P1-02` | 미사용 필드 3개·enum 제거, unary alias 제거, `cross_sectional: demean` | P1-01 | `IN_REVIEW` | `review_gui_p1_02` (opus) 배정 |
-| [ ] | `P1-03` | `_upgrade.py` dict 변환, 1.0 row 동결 읽기, saved-reference backtest 422 | P1-02 | `WAITING` | — |
+| [ ] | `P1-02` | 미사용 필드 3개·enum 제거, unary alias 제거, `cross_sectional: demean` | P1-01 | `APPROVED` | [#111](https://github.com/Nochiski/Quant_study/pull/111) · `review_gui_p1_02` APPROVE (P0/P1 0, P2 3 후속 반영 후 유지) · `9a5cccb` |
+| [ ] | `P1-03` | `_upgrade.py` dict 변환, 1.0 row 동결 읽기, saved-reference backtest 422 | P1-02 | `IN_PROGRESS` | — |
 | [ ] | `P1-04` | `POST /strategy-documents/upgrade` (ruamel rt, drift fail-closed) | P1-03 | `WAITING` | — |
 | [ ] | `P1-05` | `FIELD_APPLICABILITY`, compile warning, `x-applicable-when` | P1-02 | `WAITING` | — |
 
@@ -174,18 +174,21 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
+| P1-02 | `review_gui_p1_02` | `5d28996` | `9a5cccb` | APPROVE (P0/P1 0, P2-001~003 후속 `fcc3c8c` 확인 후 유지; 적대적 hydrate 10건, demean parity 무작위 200 + 경계 4) | 0 | demean 노드도 winsorize 전용 quantile 파라미터를 받음(P1-05 적용 조건표 후보), enum 순서 미고정, minimal fixture의 `signal` 생략 미단언 | 2026-09-17 |
 | P1-01 | `review_gui_p1_01` | `3aa95d0` | `5d28996` | APPROVE (1차 REQUEST_CHANGES P1-001 계약 의도 단언 부재·P2 7건 → `1d885f5`·`d545f53` 반영, 변이 검증 3종·적대적 hydrate 27종 통과) | 1 (해소) | `default-from` 가드는 생략 시에만 실행(지연 검사, schema builder 불변식은 두 번째 default-from 도입 시 검토); `contract_hash`가 FieldContract 행 모양을 덮지 않음(schema const 변경으로 이번엔 무효화됨); 1.0 row는 P1-03까지 읽기 불가(의도) | 2026-09-17 |
 
 ## 검증 기록
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
+| P1-02 | hydrate unknown_key 3·invalid_enum 4·demean 문서 1, demean parity 1, 설명 문구 1 | backend pytest 1,232·Ruff check·Pyright 0; reviewer 독립 재실행 동일 | `openapi.json`·`runtime-schema.json` 재생성 후 diff 0 | 해당 없음 | 원격 CI backend job 대상, browser-e2e 알려진 빨간불 | 2026-09-17 |
 | P1-01 | contract fixtures 15·schema 3 신규·hydrate 가드 1·JSON API label 비대칭 1 | backend pytest 1,228·Ruff check·Pyright 0; reviewer 독립 재실행 동일 | `openapi.json`·`runtime-schema.json` 재생성 후 diff 0 (frontend SDK는 P2-01) | 해당 없음(backend) | 원격 CI: backend job 대상, browser-e2e는 알려진 빨간불(WORKFLOW 1절) | 2026-09-17 |
 
 ## 변경 기록
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-17 KST | Claude | `review_gui_p1_02` 후속 확인 APPROVE 유지 → P1-02 APPROVED. P1-03 IN_PROGRESS, 브랜치 `feat/gui-p1-03-upgrade-and-frozen-1-0`(base P1-02 `9ea8854`) | 13.5 판정 |
 | 2026-09-17 KST | Claude | `review_gui_p1_02` APPROVE(P0/P1 0, P2 3) → P2-001~003 후속 `9a5cccb`(unary fallthrough 제거, 설명 문구 모델 사실만, demean 문서 hydrate 테스트), 1,232 passed, 같은 reviewer 확인 요청 | 13.5 |
 | 2026-09-17 KST | Claude | P1-02 구현·self-check(1,231 passed) → diff freeze `aae4c23`, stacked PR(base P1-01), `review_gui_p1_02`(opus) 배정 → IN_REVIEW | 13.3 diff freeze |
 | 2026-09-17 KST | Claude | `review_gui_p1_01` 재검토 APPROVE(`5d28996`) → P1-01 APPROVED. 로컬 main merge 대신 선언된 스택으로 진행(절차 조정 기록). P1-02 IN_PROGRESS, 브랜치 `feat/gui-p1-02-dead-fields-unary-alias`(base P1-01) | 13.5 판정 |

@@ -13,6 +13,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
 )
@@ -153,6 +155,47 @@ def test_template_and_golden_fixture_pass_the_runtime_schema() -> None:
     _check(schema, schema, _template_document(), "")
     fixture = json.loads((FIXTURES / "quality_momentum.json").read_text(encoding="utf-8"))
     _check(schema, schema, fixture, "")
+
+
+def test_kind_is_the_first_property_of_every_discriminated_branch() -> None:
+    """schema 1.1 S5: editor·snippet·fixture가 노드 종류를 먼저 읽도록 `kind`가 첫 property다."""
+    schema = strategy_document_schema()
+    branches = [
+        *schema["$defs"]["FactorGraph"]["properties"]["nodes"]["items"]["oneOf"],
+        *schema["properties"]["parameters"]["items"]["oneOf"],
+    ]
+    assert branches
+    for option in branches:
+        branch = _resolve(schema, option)
+        assert list(branch["properties"])[0] == "kind", branch["title"]
+
+
+def test_factor_label_is_optional_and_derived_from_factor_id() -> None:
+    """schema 1.1 S3: `label`은 required가 아니며 hydrate가 factor_id를 넣는다."""
+    schema = strategy_document_schema()
+    factor = schema["$defs"]["FactorSignal"]
+    assert factor["properties"]["label"]["x-default-from"] == "factor_id"
+    assert "label" not in factor["required"]
+    assert "factor_id" in factor["required"]
+    assert "default" not in factor["properties"]["label"]
+    contracts = {row.pointer: row for row in strategy_field_contracts()}
+    label = contracts["/factors/*/label"]
+    assert not label.required and not label.has_default
+
+
+def test_minimal_document_passes_the_runtime_schema() -> None:
+    """schema 1.1 S3: hydrate가 받아 주는 생략형 문서를 runtime schema도 통과시킨다."""
+    schema = strategy_document_schema()
+    minimal = yaml.safe_load(
+        (FIXTURES / "quality_momentum.minimal.yaml").read_text(encoding="utf-8")
+    )
+    for key in ("description", "eligibility", "parameters"):
+        assert key not in minimal
+    assert "market" not in minimal["data"]
+    _check(schema, schema, minimal, "")
+    without_label = json.loads(json.dumps(minimal))
+    del without_label["factors"][0]["label"]
+    _check(schema, schema, without_label, "")
 
 
 def test_every_factor_node_kind_is_a_discriminated_branch() -> None:

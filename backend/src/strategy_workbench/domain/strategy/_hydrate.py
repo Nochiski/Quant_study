@@ -276,9 +276,22 @@ def _hydrate_dataclass(tp: type, value: object, pointer: str, issues: list[Struc
             else:
                 kwargs[name] = hydrated
         elif "default-from" in field.metadata:
-            # 파생 기본값(예: FactorSignal.label ← factor_id). 원천 필드가 없으면 그 필드의
-            # missing_field 이슈가 이미 실패를 만든다.
-            derived_from[name] = str(field.metadata["default-from"])
+            # 파생 기본값(예: FactorSignal.label ← factor_id). 원천은 같은 dataclass의 필수 필드여야
+            # 한다: 그래야 원천이 문서에 없을 때 그 필드의 missing_field 이슈가 실패를 만들고, 아래
+            # 복사 단계가 KeyError 없이 성립한다. 어긋나면 사용자 문서가 아니라 모델 선언 오류다.
+            source = str(field.metadata["default-from"])
+            source_field = fields.get(source)
+            if (
+                source_field is None
+                or source_field.default is not dataclasses.MISSING
+                or source_field.default_factory is not dataclasses.MISSING
+                or "default-from" in source_field.metadata
+            ):
+                raise TypeError(
+                    "default-from must name a required field of the same dataclass — "
+                    f"type={tp.__name__} field={name!r} source={source!r}"
+                )
+            derived_from[name] = source
         elif field.default is dataclasses.MISSING and field.default_factory is dataclasses.MISSING:
             _issue(issues, "structure.missing_field", _child(pointer, name), f"{name} is required")
             failed = True

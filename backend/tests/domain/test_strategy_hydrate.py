@@ -285,3 +285,39 @@ def test_sequence_index_pointers_and_non_sequence_values() -> None:
     codes = _issue_codes(document)
     assert ("structure.type_mismatch", "/eligibility/rules") in codes
     assert ("structure.type_mismatch", "/factors/0/graph/nodes/1/window") in codes
+
+
+def test_default_from_must_name_a_required_sibling_field() -> None:
+    """`default-from`은 모델 선언 계약이다. 원천이 없거나 선택 필드면 사용자 문서 오류가 아니라
+    TypeError로 즉시 드러나야 한다(원천이 문서에 없을 때 KeyError로 새는 것을 막는다)."""
+    from dataclasses import dataclass, field
+
+    from strategy_workbench.domain.strategy._hydrate import _hydrate
+
+    @dataclass(frozen=True, kw_only=True)
+    class OptionalSource:
+        name: str = "n"
+        label: str = field(metadata={"default-from": "name"})
+
+    @dataclass(frozen=True, kw_only=True)
+    class MissingSource:
+        label: str = field(metadata={"default-from": "nope"})
+
+    for bad in (OptionalSource, MissingSource):
+        with pytest.raises(TypeError, match="default-from must name a required field"):
+            _hydrate(bad, {}, "", [])
+
+    @dataclass(frozen=True, kw_only=True)
+    class Good:
+        name: str
+        label: str = field(metadata={"default-from": "name"})
+
+    issues: list[Any] = []
+    assert _hydrate(Good, {"name": "x"}, "", issues) == Good(name="x", label="x")
+    assert _hydrate(Good, {"name": "x", "label": "y"}, "", issues) == Good(name="x", label="y")
+    assert issues == []
+    missing: list[Any] = []
+    _hydrate(Good, {}, "", missing)
+    assert [(issue.code, issue.pointer) for issue in missing] == [
+        ("structure.missing_field", "/name")
+    ]

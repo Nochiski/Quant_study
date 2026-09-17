@@ -54,6 +54,15 @@ class StaleStrategyReferenceError(RuntimeError):
     """The saved revision exists but its spec_hash differs from what the caller expected."""
 
 
+class StrategyRevisionRequiresUpgradeError(RuntimeError):
+    """The saved revision is frozen under a retired schema version (spec D2).
+
+    Its stored hash cannot equal the hash of the spec that would execute, so a run manifest
+    could not name a reproducible saved reference. The author upgrades the source and saves a
+    new revision, which is then runnable.
+    """
+
+
 class BacktestRunNotFoundError(KeyError):
     pass
 
@@ -271,6 +280,13 @@ class BacktestRunService:
                     "saved strategy revision not found — "
                     f"strategy_id={source.strategy_id} revision={source.revision}"
                 ) from error
+            if record.requires_upgrade:
+                raise StrategyRevisionRequiresUpgradeError(
+                    "saved revision is frozen under a retired schema version and must be "
+                    "upgraded and saved again before it can run — "
+                    f"strategy_id={source.strategy_id} revision={source.revision} "
+                    f"schema_version={record.spec.identity.schema_version}"
+                )
             if record.spec_hash != source.expected_spec_hash:
                 raise StaleStrategyReferenceError(
                     "saved revision hash mismatch — "

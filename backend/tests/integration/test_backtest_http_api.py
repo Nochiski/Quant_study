@@ -272,6 +272,7 @@ def test_start_backtest_openapi_declares_every_actual_preflight_error() -> None:
     assert detail["discriminator"]["propertyName"] == "code"
     assert set(detail["discriminator"]["mapping"]) == {
         "backtest.run.invalid",
+        "backtest.strategy.requires_upgrade",
         "portfolio.data.unavailable",
         "portfolio.raw_observation.invalid",
         "portfolio.strategy.invalid",

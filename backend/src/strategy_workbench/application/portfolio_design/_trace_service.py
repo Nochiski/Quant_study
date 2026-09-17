@@ -58,6 +58,10 @@ class StaleStrategyTraceSourceError(RuntimeError):
     """The saved revision's server hash differs from the caller's expected hash."""
 
 
+class StrategyTraceSourceRequiresUpgradeError(RuntimeError):
+    """The saved revision is frozen under a retired schema version; trace it after upgrading."""
+
+
 class StrategyTraceCancelledError(RuntimeError):
     """The caller disconnected or otherwise cancelled a trace calculation."""
 
@@ -229,6 +233,13 @@ class StrategyTraceService:
                     "saved strategy revision not found for trace — "
                     f"strategy_id={source.strategy_id} revision={source.revision}"
                 ) from error
+            if record.requires_upgrade:
+                raise StrategyTraceSourceRequiresUpgradeError(
+                    "saved strategy revision is frozen under a retired schema version and must "
+                    "be upgraded and saved again before it can be traced — "
+                    f"strategy_id={source.strategy_id} revision={source.revision} "
+                    f"schema_version={record.spec.identity.schema_version}"
+                )
             if record.spec_hash != source.expected_spec_hash:
                 raise StaleStrategyTraceSourceError(
                     "saved strategy revision hash mismatch for trace — "

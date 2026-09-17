@@ -26,6 +26,7 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     RunStatus,
     StaleStrategyReferenceError,
     StrategyReferenceNotFoundError,
+    StrategyRevisionRequiresUpgradeError,
 )
 from strategy_workbench.application.equity_workspace.facade.workspace import (
     EquityWorkspaceService,
@@ -68,6 +69,7 @@ from strategy_workbench.application.portfolio_design.facade.trace import (
     StrategyTraceResponse,
     StrategyTraceService,
     StrategyTraceSourceNotFoundError,
+    StrategyTraceSourceRequiresUpgradeError,
 )
 from strategy_workbench.application.strategy_authoring.facade.authoring import (
     CompiledDocument,
@@ -138,6 +140,7 @@ from ._trace_contract import (
     TraceRequestInvalidDetail,
     TraceStrategyNotFoundDetail,
     TraceStrategyNotFoundResponse,
+    TraceStrategyRequiresUpgradeDetail,
     TraceStrategyStaleDetail,
     TraceStrategyStaleResponse,
     apply_trace_openapi_contract,
@@ -318,6 +321,11 @@ def create_app(
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={"code": "backtest.strategy.stale", "message": str(error)},
+            ) from error
+        except StrategyRevisionRequiresUpgradeError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={"code": "backtest.strategy.requires_upgrade", "message": str(error)},
             ) from error
 
         except (
@@ -502,6 +510,15 @@ def create_app(
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=asdict(detail),
+            ) from error
+        except StrategyTraceSourceRequiresUpgradeError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=asdict(
+                    TraceStrategyRequiresUpgradeDetail(
+                        "trace.strategy.requires_upgrade", str(error)
+                    )
+                ),
             ) from error
         except IncompatiblePortfolioRequestError as error:
             detail = TraceEngineIncompatibleDetail("trace.engine.incompatible", error.compatibility)

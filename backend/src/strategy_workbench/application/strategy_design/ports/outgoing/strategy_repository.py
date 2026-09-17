@@ -26,7 +26,11 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import ClassVar, Generic, Protocol, TypeVar
 
-from strategy_workbench.domain.strategy.facade.document import SourceFormat, source_hash_of
+from strategy_workbench.domain.strategy.facade.document import (
+    CURRENT_SCHEMA_VERSION,
+    SourceFormat,
+    source_hash_of,
+)
 from strategy_workbench.domain.strategy.facade.specification import (
     StrategySpec,
     strategy_spec_hash,
@@ -103,14 +107,29 @@ class StrategyRevisionRecord:
     def revision(self) -> int:
         return self.spec.identity.revision
 
+    @property
+    def requires_upgrade(self) -> bool:
+        """A frozen revision stored under a retired schema version (spec D2).
+
+        Its `spec` is the stored payload read through the domain upgrade transform so history,
+        diff and display keep working; its `spec_hash` is the stored value from that retired
+        version and is never recomputed. Execution by saved reference is refused until the author
+        upgrades the source and saves a new revision.
+        """
+        return self.spec.identity.schema_version != CURRENT_SCHEMA_VERSION
+
     def __post_init__(self) -> None:
-        expected = strategy_spec_hash(self.spec)
-        if self.spec_hash != expected:
-            raise ValueError(
-                "revision spec_hash does not match its spec — "
-                f"strategy_id={self.strategy_id} revision={self.revision} "
-                f"given={self.spec_hash} expected={expected}"
-            )
+        # 현재 schema 버전에서만 hash를 재계산해 검증한다. 동결 revision의 hash는 은퇴한
+        # 버전의 canonical 모양으로 만든 값이라 1.1 모델로는 재현할 수 없고, 저장된 값이
+        # 곧 정본이다.
+        if not self.requires_upgrade:
+            expected = strategy_spec_hash(self.spec)
+            if self.spec_hash != expected:
+                raise ValueError(
+                    "revision spec_hash does not match its spec — "
+                    f"strategy_id={self.strategy_id} revision={self.revision} "
+                    f"given={self.spec_hash} expected={expected}"
+                )
         if self.source is not None and self.provenance.origin is not RevisionOrigin.DOCUMENT:
             raise ValueError(
                 "a revision with source text must have document provenance — "

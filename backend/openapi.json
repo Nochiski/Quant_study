@@ -359,6 +359,25 @@
         "title": "BacktestStrategyNotFoundResponse",
         "type": "object"
       },
+      "BacktestStrategyRequiresUpgradeDetail": {
+        "properties": {
+          "code": {
+            "const": "backtest.strategy.requires_upgrade",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "BacktestStrategyRequiresUpgradeDetail",
+        "type": "object"
+      },
       "BacktestStrategyStaleDetail": {
         "properties": {
           "code": {
@@ -396,6 +415,7 @@
             "discriminator": {
               "mapping": {
                 "backtest.run.invalid": "#/components/schemas/BacktestRunInvalidDetail",
+                "backtest.strategy.requires_upgrade": "#/components/schemas/BacktestStrategyRequiresUpgradeDetail",
                 "portfolio.data.unavailable": "#/components/schemas/PortfolioDataUnavailableDetail",
                 "portfolio.raw_observation.invalid": "#/components/schemas/PortfolioRawObservationInvalidDetail",
                 "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail"
@@ -405,6 +425,9 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/BacktestRunInvalidDetail"
+              },
+              {
+                "$ref": "#/components/schemas/BacktestStrategyRequiresUpgradeDetail"
               },
               {
                 "$ref": "#/components/schemas/PortfolioStrategyInvalidDetail"
@@ -5108,6 +5131,10 @@
           "origin": {
             "$ref": "#/components/schemas/RevisionOrigin"
           },
+          "requires_upgrade": {
+            "title": "Requires Upgrade",
+            "type": "boolean"
+          },
           "revision": {
             "title": "Revision",
             "type": "integer"
@@ -5147,7 +5174,8 @@
           "schema_version",
           "origin",
           "created_at",
-          "generated"
+          "generated",
+          "requires_upgrade"
         ],
         "title": "StrategyDocument",
         "type": "object"
@@ -6368,6 +6396,25 @@
         "title": "TraceStrategyNotFoundResponse",
         "type": "object"
       },
+      "TraceStrategyRequiresUpgradeDetail": {
+        "properties": {
+          "code": {
+            "const": "trace.strategy.requires_upgrade",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "TraceStrategyRequiresUpgradeDetail",
+        "type": "object"
+      },
       "TraceStrategyStaleDetail": {
         "properties": {
           "code": {
@@ -6409,13 +6456,17 @@
                 "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail",
                 "trace.capability.unsupported": "#/components/schemas/TraceCapabilityUnsupportedDetail",
                 "trace.engine.incompatible": "#/components/schemas/TraceEngineIncompatibleDetail",
-                "trace.request.invalid": "#/components/schemas/TraceRequestInvalidDetail"
+                "trace.request.invalid": "#/components/schemas/TraceRequestInvalidDetail",
+                "trace.strategy.requires_upgrade": "#/components/schemas/TraceStrategyRequiresUpgradeDetail"
               },
               "propertyName": "code"
             },
             "oneOf": [
               {
                 "$ref": "#/components/schemas/TraceRequestInvalidDetail"
+              },
+              {
+                "$ref": "#/components/schemas/TraceStrategyRequiresUpgradeDetail"
               },
               {
                 "$ref": "#/components/schemas/TraceEngineIncompatibleDetail"

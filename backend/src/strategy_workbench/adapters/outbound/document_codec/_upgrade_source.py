@@ -120,20 +120,40 @@ def _finish_emptied_sections(
 ) -> None:
     """이번 변환으로 비어 버린 섹션만 손본다.
 
-    삭제 키 하나만 있던 섹션은 빈 `CommentedMap`이 되는데, 섹션 키 슬롯 꼬리에 남은 독립 주석이 빈
-    mapping 앞에 찍혀 `{}`가 열 0에 오고 그 텍스트는 다시 parse되지 않는다. 섹션 키의 줄끝 주석은
-    섹션 자체를 설명하므로 남기고, 꼬리(사라진 필드를 설명하던 주석)만 버린다. 원래부터 비어 있던
-    섹션은 건드리지 않는다.
+    삭제 키만 있던 섹션은 빈 `CommentedMap`이 되는데, ruamel은 섹션 키 슬롯 꼬리의 독립 주석을 빈
+    mapping 앞에 찍어 `{}`가 열 0에 오고 그 텍스트는 다시 parse되지 않는다. 그 꼬리는
+    `_relocate_comments_of_removed_keys`가 남겨 둔 "다음 키를 설명하는 주석"이므로 다음 최상위 키의
+    앞 주석으로 옮기고, 섹션 키의 줄끝 주석 토큰은 텍스트를 바꾸지 않고 그대로 둔다. 섹션이 문서의
+    마지막 키면 옮길 곳이 없어 그 꼬리는 사라진다. 원래부터 비어 있던 섹션은 건드리지 않는다.
     """
     for section, before in keys_before.items():
         block = document.get(section)
         if not before or not isinstance(block, CommentedMap) or len(block) > 0:
             continue
-        eol, _tail = _split_token(_eol_token(document, section))
+        token = _eol_token(document, section)
+        head, tail = _split_token(token)
         document[section] = CommentedMap()
-        document.ca.items.pop(section, None)
-        if eol:
-            document.yaml_add_eol_comment(eol.lstrip("# ").rstrip(), key=section)
+        if token is not None:
+            if head:
+                token.value = (
+                    f"{head}\n"  # 원본 토큰을 그대로 두면 `#`·`##` 같은 주석도 변형되지 않는다
+                )
+            else:
+                document.ca.items.pop(section, None)
+        if not tail:
+            continue
+        keys = [str(key) for key in document.keys()]
+        following = keys[keys.index(section) + 1 :]
+        if not following:
+            continue
+        next_key = following[0]
+        moved = CommentToken(tail, CommentMark(0))
+        slot = document.ca.items.get(next_key)
+        if slot is None:
+            document.ca.items[next_key] = [None, [moved], None, None]
+        else:
+            existing = slot[1] if len(slot) > 1 and slot[1] is not None else []
+            slot[1] = [moved, *existing]
 
 
 def upgrade_yaml_source(source: str) -> str:

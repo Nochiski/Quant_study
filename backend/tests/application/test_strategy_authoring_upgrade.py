@@ -125,3 +125,17 @@ def test_rewritten_text_that_does_not_parse_is_drift_too() -> None:
         _service(_DriftingCodec("schema_version: [unclosed")).upgrade(
             CompileRequest(source, SourceFormat.YAML)
         )
+
+
+class _CrashingCodec(_DriftingCodec):
+    def upgrade_source(self, source: str, *, format: SourceFormat) -> str:
+        raise IndexError("string index out of range")  # ruamel 내부 오류를 흉내 낸다
+
+
+def test_any_adapter_failure_is_a_drift_not_a_server_error() -> None:
+    """P1-04 재검토 P1-003: untrusted input이 어댑터 안에서 무엇을 던지든 500이 아니라 422
+    drift다."""
+    source = _read("quality_momentum.v1_0.yaml")
+
+    with pytest.raises(DocumentUpgradeDriftError, match="rewrite failed: IndexError"):
+        _service(_CrashingCodec("")).upgrade(CompileRequest(source, SourceFormat.YAML))

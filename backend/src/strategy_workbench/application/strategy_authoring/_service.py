@@ -205,10 +205,14 @@ class StrategyAuthoringService:
         expected = upgrade_document_1_0(parsed.tree)
         try:
             upgraded = self._codec.upgrade_source(request.source, format=request.format)
-        except ValueError as error:
-            # 어댑터의 전제 위반(rt loader가 safe parse와 다르게 읽는 문서 등)은 untrusted input에
-            # 대한 500이 아니라 drift로 강등한다: 두 경로가 같은 문서를 다르게 봤다는 뜻이다.
-            raise DocumentUpgradeDriftError("", f"rewrite failed: {error}") from error
+        except Exception as error:  # noqa: BLE001  # reason: 아래 설명대로 어떤 어댑터 실패든 drift다
+            # 어댑터의 전제 위반(rt loader가 safe parse와 다르게 읽는 문서, ruamel이 특정 주석
+            # 배치에서 던지는 IndexError 등)은 untrusted input에 대한 500이 아니라 drift로 강등한다.
+            # safe parse는 이미 통과했으므로 두 경로가 같은 문서를 다르게 봤다는 뜻이고, 응답은
+            # 422 계약 안에 있다.
+            raise DocumentUpgradeDriftError(
+                "", f"rewrite failed: {type(error).__name__}: {error}"
+            ) from error
         reparsed = self._codec.parse(upgraded, format=request.format)
         if not reparsed.ok or reparsed.tree is None:
             detail = ", ".join(f"{d.code}@{d.pointer}" for d in reparsed.diagnostics[:3])

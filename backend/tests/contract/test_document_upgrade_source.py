@@ -73,9 +73,41 @@ def test_emptied_section_keeps_its_eol_comment_and_untouched_sections_keep_their
 
     upgraded = RuamelDocumentCodec().upgrade_source(source, format=SourceFormat.YAML)
 
-    assert f"signal: {{}}  # 신호 섹션{LF}" in upgraded
+    assert f"signal: {{}} # 신호 섹션{LF}" in upgraded  # 빈 flow mapping 뒤 원본 토큰 그대로
     assert "# method 위" not in upgraded
     assert "parameters: []   # 비어 있음" in upgraded  # 원래부터 빈 값은 건드리지 않는다
+    reparsed = RuamelDocumentCodec().parse(upgraded, format=SourceFormat.YAML)
+    assert reparsed.ok and reparsed.tree is not None and reparsed.tree["signal"] == {}
+
+
+@pytest.mark.parametrize("eol", ["#", "##", "#####", "# ", "## 이중 해시 # 안쪽", "#-"])
+def test_emptied_section_eol_comment_is_kept_verbatim(eol: str) -> None:
+    """P1-04 재검토 P1-003·P2-007: 내용 없는 `#####`도 500이 아니고, 주석 텍스트는 변형되지
+    않는다."""
+    source = _read("quality_momentum.v1_0.yaml").replace(
+        f"signal:{LF}  method: weighted_sum{LF}", f"signal:  {eol}{LF}  method: weighted_sum{LF}"
+    )
+
+    upgraded = RuamelDocumentCodec().upgrade_source(source, format=SourceFormat.YAML)
+
+    assert f"signal: {{}} {eol}{LF}" in upgraded
+    reparsed = RuamelDocumentCodec().parse(upgraded, format=SourceFormat.YAML)
+    assert reparsed.ok and reparsed.tree is not None and reparsed.tree["signal"] == {}
+
+
+def test_emptied_section_moves_the_comment_describing_the_next_key() -> None:
+    """P1-04 재검토 P2-006: 섹션이 비어도 삭제 키 아래의 독립 주석(다음 최상위 키 설명)은 남는다."""
+    source = _read("quality_momentum.v1_0.yaml").replace(
+        f"signal:{LF}  method: weighted_sum{LF}portfolio:{LF}",
+        f"signal:   # 신호 섹션{LF}  # method 위{LF}  method: weighted_sum{LF}"
+        f"# portfolio 설명 (열 0){LF}portfolio:{LF}",
+    )
+    assert "# portfolio 설명 (열 0)" in source
+
+    upgraded = RuamelDocumentCodec().upgrade_source(source, format=SourceFormat.YAML)
+
+    assert f"signal: {{}} # 신호 섹션{LF}# portfolio 설명 (열 0){LF}portfolio:{LF}" in upgraded
+    assert "# method 위" not in upgraded
     reparsed = RuamelDocumentCodec().parse(upgraded, format=SourceFormat.YAML)
     assert reparsed.ok and reparsed.tree is not None and reparsed.tree["signal"] == {}
 

@@ -6,7 +6,7 @@ current_phase: P1,P2
 current_pr: P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02
 active_prs: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02]
 parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02]
-last_updated: 2026-09-18T02:53:02+09:00
+last_updated: 2026-09-18T03:13:36+09:00
 planned_prs: 17
 merged_prs: 0
 approved_prs: 6
@@ -29,7 +29,7 @@ progress_percent: 0
 | Active PR | `P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02` |
 | Progress | `0 / 17 merged (0%)` |
 | Approved | `6 / 17` |
-| Aggregated at | `2026-09-18 02:53 KST` |
+| Aggregated at | `2026-09-18 03:13 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -94,7 +94,7 @@ progress_percent: 0
 | Non-goals | `x-applicable-when` 표시(P2-03), trace 422 안내(debugger는 saved reference를 쓰지 않음) |
 | Branch/worktree | `feat/gui-p2-02-upgrade-ui` (base `feat/gui-p2-01-frontend-sdk-1-1` `2a16ebe`) |
 | Base SHA | `2a16ebe` |
-| Head SHA | `b7f8de1` (diff freeze) |
+| Head SHA | `8f4c090` (review 후속; diff freeze `b7f8de1`, 기준선 `6d95226`) |
 | Diff stat | 19 files +1,068/−33 (신규 src 4 + 테스트 2 + e2e runtime 1, backend 테스트 헬퍼 CLI 1) |
 | Focused tests | document-upgrade 3 · upgrade-banner 4 · router frozen 배지 1 · document-routes backtest 422 1 · e2e chromium-workflow 5(신규 1) |
 | Full gate | Vitest 464 passed(40 files) · typecheck · lint 0 warnings · build · Playwright tsconfig typecheck · backend frozen/upgrade 25 passed·Ruff·Pyright · `npm run test:e2e -- --project chromium-workflow` 5 passed |
@@ -122,7 +122,7 @@ Phase exit:
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [ ] | `P2-01` | generated SDK 1.1, pointer helper·snippet·outline·plan·graph·debugger 적응 | P1-05 | `APPROVED` | [#115](https://github.com/Nochiski/Quant_study/pull/115) · `review_gui_p2_01` APPROVE (P0/P1 0, P2 6 → 후속은 P2-02 브랜치에서) · `802d6e2` |
-| [ ] | `P2-02` | 1.0 문서 업그레이드 배너·동작, e2e fixture/spec 1.1 | P2-01, P1-04 | `IN_REVIEW` | [#116](https://github.com/Nochiski/Quant_study/pull/116) · `review_gui_p2_02` 배정 · diff freeze `b7f8de1` |
+| [ ] | `P2-02` | 1.0 문서 업그레이드 배너·동작, e2e fixture/spec 1.1 | P2-01, P1-04 | `IN_REVIEW` | [#116](https://github.com/Nochiski/Quant_study/pull/116) · `review_gui_p2_02` 1차 REQUEST_CHANGES(P1 2·P2 6) → 후속 `8f4c090` 재검토 중 |
 | [ ] | `P2-03` | Contract Inspector·Problems 적용 조건 표시 | P2-01, P1-05 | `WAITING` | — |
 
 Phase exit:
@@ -202,6 +202,7 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-18 KST | Claude | `review_gui_p2_02` 1차 REQUEST_CHANGES(P1-001 e2e seeding 비멱등, P1-002 undo 격리 누락; P2-001~006) → 후속 `8f4c090`(CLI "있으면 그대로", 다음 revision 번호 API 조회, env 경로, `replaceRange` 격리, `upgradeable` 우선, saved 회귀 테스트, 422 번역, Pick 파생) + 기준선 갱신 `6d95226`(strict e2e 17 passed) → 같은 reviewer 재검토 요청 | 13.5 재검토 |
 | 2026-09-18 KST | Claude | `review_gui_p2_01` APPROVE → P2-01 APPROVED. `audit_gui_phase1` 결과 수신: blocking 0, DEFECT-P1X-001(schema 버전 상수 이중 owner)·002(`periods` 삭제 시 아래 주석 소실)·003(동결 술어 어댑터/port 불일치)·004(`DocumentUpgradeSyntaxError` 메시지), 문서 액션 8(SoT 4행+금지 1, boundary 2, frontend-testing 1, collaboration-language docstring 정책 1[규칙 변경이라 소유자 확인 필요], spec D4). 조치는 P1-06(감사 후속, backend+docs) PR로 묶는다 | 13.5 판정 · 8절 Phase 종료 gate |
 | 2026-09-18 KST | Claude | P2-02 구현·self-check(Vitest 464, e2e workflow 5 passed) → diff freeze `b7f8de1`, stacked PR #116(base P2-01), `review_gui_p2_02`(opus) 배정 → IN_REVIEW. 결정: 배너 판정은 backend 진단 + parse tree `schema_version`(지원 버전은 backend 소유), 적용은 `setText` 한 번(reducer에 교체 action 추가 안 함), e2e 1.0 row는 backend 테스트 헬퍼 CLI로 seeding, 배너 상태는 `sourceVersion·savedVersion`에 묶음(첫 e2e에서 저장 후 안내가 남는 결함 발견·수정) | 13.3 diff freeze |
 | 2026-09-18 KST | Claude | P2-01 구현·self-check(Vitest 455, typecheck·lint·build, SDK 재생성 diff 0) → diff freeze `802d6e2`, stacked PR #115(base P1-05), `review_gui_p2_01`(opus) 배정 → IN_REVIEW. 결정: 팩터 컬렉션은 루트 배열 + `x-authoring-identity`로 탐색(키 이름 미가정), 루트에 `factors`가 이미 있으면 스니펫 `duplicate`, optional이 된 단계는 빈 객체 렌더(기본값 복제 없음) | 13.3 diff freeze |

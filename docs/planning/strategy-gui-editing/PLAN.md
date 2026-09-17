@@ -3,11 +3,11 @@ plan_version: 2
 project: strategy-gui-editing
 project_status: IN_REVIEW
 current_phase: P1,P2
-current_pr: P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02
-active_prs: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02]
-parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02]
-last_updated: 2026-09-18T03:13:36+09:00
-planned_prs: 17
+current_pr: P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06
+active_prs: [P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02]
+parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02, P1-06]
+last_updated: 2026-09-18T03:25:25+09:00
+planned_prs: 18
 merged_prs: 0
 approved_prs: 6
 progress_percent: 0
@@ -25,11 +25,11 @@ progress_percent: 0
 |---|---|
 | Project status | `IN_REVIEW` |
 | Current phase | `P1,P2` |
-| Current/next PR | `P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02` |
-| Active PR | `P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02` |
-| Progress | `0 / 17 merged (0%)` |
-| Approved | `6 / 17` |
-| Aggregated at | `2026-09-18 03:13 KST` |
+| Current/next PR | `P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06` |
+| Active PR | `P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02` |
+| Progress | `0 / 18 merged (0%)` |
+| Approved | `6 / 18` |
+| Aggregated at | `2026-09-18 03:25 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -76,28 +76,28 @@ progress_percent: 0
 <!-- PLAN:PHASES:START -->
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
-| P1 | Backend schema 1.1 | 5 | 0 | `APPROVED` |
+| P1 | Backend schema 1.1 | 6 | 0 | `IN_REVIEW` |
 | P2 | Frontend 1.1 and upgrade UI | 3 | 0 | `IN_REVIEW` |
 | P3 | Source transactions | 2 | 0 | `WAITING` |
 | P4 | Form editing | 4 | 0 | `WAITING` |
 | P5 | Graph editing | 3 | 0 | `WAITING` |
-| **Total** |  | **17** | **0** | **0%** |
+| **Total** |  | **18** | **0** | **0%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
 
 | 항목 | 값 |
 |---|---|
-| PR | `P2-02` |
-| Intent | 1.0 revision을 열면 `UpgradeBanner` → `POST /strategy-documents/upgrade` → `setText`(undo 1단계) → dirty·1.1 compile; legacy 동결 row는 새 revision 저장만 안내; 목록·history 동결 배지; backtest 422 안내; e2e "1.0 열기 → 업그레이드 → 저장 → backtest" |
-| Acceptance | WORKFLOW P2-02 |
-| Non-goals | `x-applicable-when` 표시(P2-03), trace 422 안내(debugger는 saved reference를 쓰지 않음) |
-| Branch/worktree | `feat/gui-p2-02-upgrade-ui` (base `feat/gui-p2-01-frontend-sdk-1-1` `2a16ebe`) |
-| Base SHA | `2a16ebe` |
-| Head SHA | `8f4c090` (review 후속; diff freeze `b7f8de1`, 기준선 `6d95226`) |
-| Diff stat | 19 files +1,068/−33 (신규 src 4 + 테스트 2 + e2e runtime 1, backend 테스트 헬퍼 CLI 1) |
-| Focused tests | document-upgrade 3 · upgrade-banner 4 · router frozen 배지 1 · document-routes backtest 422 1 · e2e chromium-workflow 5(신규 1) |
-| Full gate | Vitest 464 passed(40 files) · typecheck · lint 0 warnings · build · Playwright tsconfig typecheck · backend frozen/upgrade 25 passed·Ruff·Pyright · `npm run test:e2e -- --project chromium-workflow` 5 passed |
+| PR | `P1-06` (감사 후속, 계획 외 추가) |
+| Intent | Phase 1 감사 DEFECT-P1X-001~004 조치(schema 버전 owner 단일화, 동결 술어 통일, 주석 재배치 일반화, 예외 메시지)와 규칙 문서 4건·spec D4 갱신, P2-01 리뷰 P2 6건 후속 |
+| Acceptance | 감사 보고서 §3·결함 4건, `review_gui_p2_01` P2-001~006 |
+| Non-goals | `collaboration-language.md` docstring 정책(규칙 변경, 소유자 결정), 1.1→1.2 변환 step |
+| Branch/worktree | `feat/gui-p1-06-audit-followup` (base `feat/gui-p2-02-upgrade-ui` `af816a3`) |
+| Base SHA | `af816a3` |
+| Head SHA | `11576cc` (diff freeze; backend `c4bdd08` + frontend 후속 `11576cc`) |
+| Diff stat | backend src 8·tests 3, 규칙 3·spec 1, frontend src 2·tests 3, WORKFLOW 1 |
+| Focused tests | upgrade-source 18(신규 1) · strategy_upgrade(신규 1) · authoring_upgrade 메시지 · canonical-snippets 모호성 1 |
+| Full gate | backend pytest 1,315·Ruff·Pyright 0·openapi/runtime-schema diff 0 · frontend Vitest 468(40 files)·typecheck·lint·build |
 
 ---
 
@@ -110,12 +110,13 @@ progress_percent: 0
 | [ ] | `P1-03` | `_upgrade.py` dict 변환, 1.0 row 동결 읽기, saved-reference backtest 422 | P1-02 | `APPROVED` | [#112](https://github.com/Nochiski/Quant_study/pull/112) · `review_gui_p1_03` APPROVE (P0/P1 0, P2 5 후속 반영 후 유지) · `8bd0185` |
 | [ ] | `P1-04` | `POST /strategy-documents/upgrade` (ruamel rt, drift fail-closed) | P1-03 | `APPROVED` | [#113](https://github.com/Nochiski/Quant_study/pull/113) · `review_gui_p1_04` APPROVE (4차; P1 4·P2 7 해소) · `f7049fa` |
 | [ ] | `P1-05` | `FIELD_APPLICABILITY`, compile warning, `x-applicable-when` | P1-02 | `APPROVED` | [#114](https://github.com/Nochiski/Quant_study/pull/114) · `review_gui_p1_05` APPROVE (P1-001 철회, P2-002~004 해소) · `3c70001` |
+| [ ] | `P1-06` | Phase 1 감사 후속: schema 버전 owner 단일화, 동결 술어 통일, 주석 재배치 일반화, 규칙·spec D4 갱신, P2-01 리뷰 후속 | P1-05, P2-02 | `IN_REVIEW` | [#117](https://github.com/Nochiski/Quant_study/pull/117) · `review_gui_p1_06` 배정 · diff freeze `11576cc` |
 
 Phase exit:
 
 - [x] 1.1 fixture 4종 같은 hash, 1.0 fixture 거부, 업그레이드 golden 통과 (P1-01·P1-03·P1-04).
 - [x] 1.0 row 동결 읽기와 변조 fail-closed (P1-03).
-- [ ] SoT·책임분리 점검 서브에이전트 결과 기록, `strategy-workbench-sot.md` owner 행 추가.
+- [x] SoT·책임분리 점검 서브에이전트 결과 기록(`audit_gui_phase1`: blocking 0, DEFECT-P1X-001~004, 문서 액션 8), `strategy-workbench-sot.md` owner 행 4개 추가 → P1-06 #117. 미결: `collaboration-language.md` docstring 언어 정책은 소유자 결정.
 
 ## P2 — frontend 1.1
 
@@ -190,6 +191,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
+| P1-06 | upgrade-source `periods` 주석 1·frozen 술어 1·syntax 메시지 1·팩터 컬렉션 모호성 1 | backend pytest 1,315·Ruff·Pyright 0; frontend Vitest 468·typecheck·lint·build | `openapi.json`·`runtime-schema.json` 재생성 diff 0, SDK 무변경 | 해당 없음 | 원격 CI backend·frontend job 대상 | 2026-09-18 |
 | P2-02 | document-upgrade 3·upgrade-banner 4(MSW 성공+undo/422 drift/네트워크/legacy 동결)·router 배지 1·document-routes backtest 422 1 | Vitest 464 passed(40 files)·typecheck·lint·build·Playwright tsconfig typecheck·backend 25 passed·Ruff·Pyright | SDK 무변경(P2-01 상태 유지) | e2e chromium-workflow 5 passed: 1.0 row seeding → 배너 → 업그레이드 200 → 검증 통과 → v2 저장(1.1 golden과 같은 spec hash) → saved_revision backtest completed → legacy 동결 배너 → 목록 배지 | 원격 CI frontend·browser-e2e green 기대(P1-01부터 알려진 빨간불 해소) | 2026-09-18 |
 | P2-01 | canonical-snippets 9·execution-plan 7·schema-navigator 13·schema-assist 17·cursor 10·backtest-error-contract 1 | Vitest 455 passed(38 files)·typecheck·lint 0 warnings·build·Playwright tsconfig typecheck | 커밋 후 `npm run api:generate` 재실행, `src/shared/api/generated`·`backend/openapi.json` diff 0 | 해당 없음(타입·pointer·스니펫 적응) | 원격 CI frontend job green 기대(P1-01부터 알려진 빨간불 해소), browser-e2e는 P2-02까지 빨간불 | 2026-09-18 |
 | P1-05 | applicability 25·document HTTP 13·constraints·schema·application | backend pytest 1,313·Ruff check·Pyright 0; reviewer 독립 재실행 동일 + frontend Vitest 31 실패가 전부 기존(1.1 fixture) 실패임을 확인 | `openapi.json`·`runtime-schema.json` 재생성 diff 0 | 해당 없음 | 원격 CI backend job 대상; frontend·browser-e2e 알려진 빨간불(P2-01/02 exit) | 2026-09-18 |
@@ -202,6 +204,7 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-18 KST | Claude | 계획 외 PR `P1-06`(감사 후속) 추가: DEFECT-P1X-001~004 수정, 규칙 문서·spec D4 갱신, P2-01 리뷰 P2-001~006 후속 → diff freeze `11576cc`, stacked PR #117(base P2-02), `review_gui_p1_06`(opus) 배정 → IN_REVIEW. Phase 1 exit 3항 체크. 소유자 확인 필요: PR 추가(17→18), `collaboration-language.md` docstring 정책 제안 보류 | 8절 Phase 종료 gate · 13.3 |
 | 2026-09-18 KST | Claude | `review_gui_p2_02` 1차 REQUEST_CHANGES(P1-001 e2e seeding 비멱등, P1-002 undo 격리 누락; P2-001~006) → 후속 `8f4c090`(CLI "있으면 그대로", 다음 revision 번호 API 조회, env 경로, `replaceRange` 격리, `upgradeable` 우선, saved 회귀 테스트, 422 번역, Pick 파생) + 기준선 갱신 `6d95226`(strict e2e 17 passed) → 같은 reviewer 재검토 요청 | 13.5 재검토 |
 | 2026-09-18 KST | Claude | `review_gui_p2_01` APPROVE → P2-01 APPROVED. `audit_gui_phase1` 결과 수신: blocking 0, DEFECT-P1X-001(schema 버전 상수 이중 owner)·002(`periods` 삭제 시 아래 주석 소실)·003(동결 술어 어댑터/port 불일치)·004(`DocumentUpgradeSyntaxError` 메시지), 문서 액션 8(SoT 4행+금지 1, boundary 2, frontend-testing 1, collaboration-language docstring 정책 1[규칙 변경이라 소유자 확인 필요], spec D4). 조치는 P1-06(감사 후속, backend+docs) PR로 묶는다 | 13.5 판정 · 8절 Phase 종료 gate |
 | 2026-09-18 KST | Claude | P2-02 구현·self-check(Vitest 464, e2e workflow 5 passed) → diff freeze `b7f8de1`, stacked PR #116(base P2-01), `review_gui_p2_02`(opus) 배정 → IN_REVIEW. 결정: 배너 판정은 backend 진단 + parse tree `schema_version`(지원 버전은 backend 소유), 적용은 `setText` 한 번(reducer에 교체 action 추가 안 함), e2e 1.0 row는 backend 테스트 헬퍼 CLI로 seeding, 배너 상태는 `sourceVersion·savedVersion`에 묶음(첫 e2e에서 저장 후 안내가 남는 결함 발견·수정) | 13.3 diff freeze |

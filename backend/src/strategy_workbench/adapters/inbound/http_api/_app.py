@@ -74,6 +74,9 @@ from strategy_workbench.application.portfolio_design.facade.trace import (
 from strategy_workbench.application.strategy_authoring.facade.authoring import (
     CompiledDocument,
     CompileRequest,
+    DocumentNotUpgradeableError,
+    DocumentUpgradeDriftError,
+    DocumentUpgradeSyntaxError,
     InvalidStrategyDocumentError,
     InvalidStrategyDraftError,
     ReviseDocumentRequest,
@@ -87,6 +90,7 @@ from strategy_workbench.application.strategy_authoring.facade.authoring import (
     StrategyDocumentService,
     StrategyDraft,
     StrategyDraftService,
+    UpgradedDocument,
 )
 from strategy_workbench.application.strategy_authoring.facade.ports import (
     StrategyDraftConflictError,
@@ -125,6 +129,11 @@ from ._execution_error_contract import (
     PortfolioRawObservationInvalidDetail,
 )
 from ._pagination import CANONICAL_PAGE_INTEGER_VALIDATOR
+from ._strategy_document_contract import (
+    StrategyDocumentNotUpgradeableDetail,
+    StrategyDocumentUpgrade422Response,
+    StrategyDocumentUpgradeDriftDetail,
+)
 from ._strategy_draft_contract import (
     StrategyDraft422Response,
     StrategyDraftConflictDetail,
@@ -745,6 +754,48 @@ def create_app(
         return strategy_authoring.compile(request)
 
     @app.post(
+        "/api/v1/strategy-documents/upgrade",
+        operation_id="upgradeStrategyDocument",
+        responses={
+            422: {
+                "model": StrategyDocumentUpgrade422Response,
+                "description": "Syntax errors, a non-1.0 document, or upgrade rule drift",
+            },
+        },
+    )
+    def upgrade_strategy_document(request: CompileRequest) -> UpgradedDocument:
+        """Rewrite a schema 1.0 source as 1.1 (comments and order kept) and compile the result.
+
+        The rewrite must parse to exactly what the domain dict transform yields; otherwise the
+        service refuses with `strategy_document.upgrade_drift` rather than returning text that
+        would silently mean something else (spec D3).
+        """
+        try:
+            return strategy_authoring.upgrade(request)
+        except DocumentUpgradeSyntaxError as error:
+            raise _invalid_document_compiled(error.compiled) from error
+        except DocumentNotUpgradeableError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=asdict(
+                    StrategyDocumentNotUpgradeableDetail(
+                        "strategy_document.not_upgradeable",
+                        None if error.schema_version is None else str(error.schema_version),
+                        str(error),
+                    )
+                ),
+            ) from error
+        except DocumentUpgradeDriftError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=asdict(
+                    StrategyDocumentUpgradeDriftDetail(
+                        "strategy_document.upgrade_drift", error.pointer, str(error)
+                    )
+                ),
+            ) from error
+
+    @app.post(
         "/api/v1/strategy-documents",
         operation_id="createStrategyDocument",
         status_code=status.HTTP_201_CREATED,
@@ -1004,7 +1055,10 @@ def _strategy_not_found(error: StrategyNotFoundError) -> HTTPException:
 
 
 def _invalid_document(error: InvalidStrategyDocumentError) -> HTTPException:
-    compiled = error.compiled
+    return _invalid_document_compiled(error.compiled)
+
+
+def _invalid_document_compiled(compiled: CompiledDocument) -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         detail={

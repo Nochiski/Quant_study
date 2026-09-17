@@ -10,6 +10,7 @@ from strategy_workbench.domain.strategy._hydrate import (
 from strategy_workbench.domain.strategy._source import SourceFormat, source_hash_of
 from strategy_workbench.domain.strategy._upgrade import (
     LEGACY_SCHEMA_VERSION,
+    REMOVED_FIELDS,
     UPGRADE_STEPS,
     DocumentNotUpgradeableError,
     apply_upgrade_steps,
@@ -20,6 +21,7 @@ from strategy_workbench.domain.strategy._upgrade import (
 __all__ = [
     "CURRENT_SCHEMA_VERSION",
     "LEGACY_SCHEMA_VERSION",
+    "REMOVED_FIELDS",
     "SUPPORTED_SCHEMA_VERSIONS",
     "UPGRADE_STEPS",
     "DocumentNotUpgradeableError",

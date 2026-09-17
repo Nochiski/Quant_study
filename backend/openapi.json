@@ -5255,6 +5255,49 @@
         "title": "StrategyDocumentContractResponse",
         "type": "object"
       },
+      "StrategyDocumentNotUpgradeableDetail": {
+        "properties": {
+          "code": {
+            "const": "strategy_document.not_upgradeable",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "schema_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Version"
+          }
+        },
+        "required": [
+          "code",
+          "schema_version",
+          "message"
+        ],
+        "title": "StrategyDocumentNotUpgradeableDetail",
+        "type": "object"
+      },
+      "StrategyDocumentNotUpgradeableResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/StrategyDocumentNotUpgradeableDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "StrategyDocumentNotUpgradeableResponse",
+        "type": "object"
+      },
       "StrategyDocumentSchema": {
         "description": "Runtime JSON Schema of the authoring document; `schema_hash` is the ETag.",
         "properties": {
@@ -5278,6 +5321,42 @@
           "schema"
         ],
         "title": "StrategyDocumentSchema",
+        "type": "object"
+      },
+      "StrategyDocumentUpgradeDriftDetail": {
+        "properties": {
+          "code": {
+            "const": "strategy_document.upgrade_drift",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "pointer": {
+            "title": "Pointer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "pointer",
+          "message"
+        ],
+        "title": "StrategyDocumentUpgradeDriftDetail",
+        "type": "object"
+      },
+      "StrategyDocumentUpgradeDriftResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/StrategyDocumentUpgradeDriftDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "StrategyDocumentUpgradeDriftResponse",
         "type": "object"
       },
       "StrategyDraft": {
@@ -6730,6 +6809,33 @@
           "coverage"
         ],
         "title": "UniversePreview",
+        "type": "object"
+      },
+      "UpgradedDocument": {
+        "description": "A 1.0 source rewritten as 1.1 text plus what that text compiles to (spec D3).",
+        "properties": {
+          "compiled": {
+            "$ref": "#/components/schemas/CompiledDocument"
+          },
+          "format": {
+            "$ref": "#/components/schemas/SourceFormat"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "source_hash": {
+            "title": "Source Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "format",
+          "source",
+          "source_hash",
+          "compiled"
+        ],
+        "title": "UpgradedDocument",
         "type": "object"
       },
       "ValidationError": {
@@ -8523,6 +8629,56 @@
           }
         },
         "summary": "Strategy Document Schema"
+      }
+    },
+    "/api/v1/strategy-documents/upgrade": {
+      "post": {
+        "description": "Rewrite a schema 1.0 source as 1.1 (comments and order kept) and compile the result.\n\nThe rewrite must parse to exactly what the domain dict transform yields; otherwise the\nservice refuses with `strategy_document.upgrade_drift` rather than returning text that\nwould silently mean something else (spec D3).",
+        "operationId": "upgradeStrategyDocument",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpgradedDocument"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/StrategyDocumentNotUpgradeableResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/StrategyDocumentUpgradeDriftResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationResponse"
+                    }
+                  ],
+                  "title": "Response 422 Upgradestrategydocument"
+                }
+              }
+            },
+            "description": "Syntax errors, a non-1.0 document, or upgrade rule drift"
+          }
+        },
+        "summary": "Upgrade Strategy Document"
       }
     },
     "/api/v1/strategy-documents/{strategy_id}/revisions": {

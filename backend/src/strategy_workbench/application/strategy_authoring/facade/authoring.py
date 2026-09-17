@@ -18,15 +18,22 @@ from strategy_workbench.application.strategy_authoring._service import (
     DRAFT_IDENTITY,
     CompiledDocument,
     CompileRequest,
+    DocumentNotUpgradeableError,
+    DocumentUpgradeDriftError,
+    DocumentUpgradeSyntaxError,
     StrategyAuthoringService,
     StrategyDocumentContract,
     StrategyDocumentSchema,
+    UpgradedDocument,
 )
 
 __all__ = [
     "DRAFT_IDENTITY",
     "CompileRequest",
     "CompiledDocument",
+    "DocumentNotUpgradeableError",
+    "DocumentUpgradeDriftError",
+    "DocumentUpgradeSyntaxError",
     "InvalidStrategyDocumentError",
     "InvalidStrategyDraftError",
     "ReviseDocumentRequest",
@@ -40,4 +47,5 @@ __all__ = [
     "StrategyDocumentSchema",
     "StrategyDraft",
     "StrategyDraftService",
+    "UpgradedDocument",
 ]

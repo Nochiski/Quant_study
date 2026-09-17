@@ -31,7 +31,7 @@ _UNARY_ALIASES: Mapping[str, tuple[str, str]] = {
     "winsorize": ("cross_sectional", "winsorize"),
     "neutralize": ("cross_sectional", "demean"),
 }
-_REMOVED_FIELDS: tuple[tuple[str, str], ...] = (
+REMOVED_FIELDS: tuple[tuple[str, str], ...] = (
     ("signal", "method"),
     ("signal", "entry_percentile"),
     ("execution", "order_style"),
@@ -55,7 +55,7 @@ def _step_flatten_factors(document: MutableMapping[str, object]) -> None:
 
 
 def _step_remove_dead_fields(document: MutableMapping[str, object]) -> None:
-    for section, key in _REMOVED_FIELDS:
+    for section, key in REMOVED_FIELDS:
         block = document.get(section)
         if isinstance(block, MutableMapping) and key in block:
             del block[key]

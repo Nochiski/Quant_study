@@ -62,6 +62,8 @@ from strategy_workbench.application.strategy_authoring.facade.ports import (
     source_hash_of,
 )
 
+from ._upgrade_source import upgrade_json_source, upgrade_yaml_source
+
 _TIMESTAMP_TAG = "tag:yaml.org,2002:timestamp"
 _MERGE_TAG = "tag:yaml.org,2002:merge"
 _NUMBER_TAGS = ("tag:yaml.org,2002:int", "tag:yaml.org,2002:float")
@@ -103,6 +105,11 @@ def _escape(key: str) -> str:
 class RuamelDocumentCodec:
     def __init__(self, limits: CodecLimits | None = None) -> None:
         self._limits = limits or CodecLimits()
+
+    def upgrade_source(self, source: str, *, format: SourceFormat) -> str:
+        if format is SourceFormat.JSON:
+            return upgrade_json_source(source)
+        return upgrade_yaml_source(source)
 
     def parse(self, source: str, *, format: SourceFormat) -> ParsedDocument:
         try:

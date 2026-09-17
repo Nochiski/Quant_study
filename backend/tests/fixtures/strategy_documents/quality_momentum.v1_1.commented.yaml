@@ -1,0 +1,46 @@
+# P1-04 업그레이드 golden: 주석·따옴표·키 순서가 섞인 1.0 문서.
+# 리뷰 지적 3종을 덮는다 — 안쪽 factors 줄끝 주석(바깥 키로 옮겨짐), 바깥 독립 주석 뒤 시퀀스, 삭제 키의 주석.
+schema_version: "1.1"
+title: "퀄리티 모멘텀"
+description: ""
+data:
+  market: KRX
+  start: "2021-01-01"
+  end: "2026-08-31"
+  universe_id: krx.common-stock
+  frequency: daily
+eligibility:
+  rules: []   # 적격성 규칙 없음
+
+# 팩터 목록 (바깥 독립 주석)
+factors:    # 안쪽 키 줄끝 주석 — 평탄화되며 바깥 factors 키로 옮겨진다
+  - factor_id: momentum
+    label: "모멘텀"
+    direction: high
+    weight: 0.6
+    graph:
+      nodes:
+        - node_id: close     # 종가
+          field_id: price.close
+          kind: field
+        - node_id: z
+          operator: zscore
+          input_node_id: close
+          kind: cross_sectional # 1.0 alias
+        - node_id: mom_252
+          operator: momentum
+          input_node_id: close
+          window: 252
+          kind: time_series
+      output_node_id: mom_252
+      missing_policy: drop
+signal: {}
+portfolio:
+  selection_count: 20
+  rebalance: monthly
+risk:
+  max_name_weight: 0.05
+execution:
+  timing: next_open
+  fee_bps: 15.0   # 수수료 bp
+parameters: []

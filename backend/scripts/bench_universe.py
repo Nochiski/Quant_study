@@ -138,7 +138,9 @@ class EqualWeightRebalance:
 class EqualWeightTape:
     """`EqualWeightRebalance`와 같은 목표를 세션 날짜 → 프레임 표로 미리 만든 선언형 전략.
 
-    콜백 k(1부터)는 세션 k-1이므로 `k % every == 1`은 `session_index % every == 0`이다.
+    콜백 k(1부터)는 세션 k-1이므로 `k % every == 1`은 `session_index % every == 0`이다. 이 동치는
+    callback 전략의 warmup(lookback=1)이 첫 세션 dispatch를 미루지 않을 때만 성립한다 — lookback을
+    올리면 두 전략의 리밸런싱 세션이 어긋나므로 그때는 이 표도 같은 warmup만큼 밀어야 한다.
     """
 
     idle_reason = "tape_idle"

@@ -43,8 +43,16 @@
 | 실제 4종목 fixture · callback | 0.215초 | 0.223초 | 0.069초 | **3.13배** |
 | 실제 4종목 fixture · tape | 0.192초 | 0.242초 | 0.037초 | **5.18배** |
 
+- 원본 산출물: `benchmarks/baseline/rust-loop-100-callback.json`, `rust-loop-100-tape.json`,
+  `rust-loop-300-callback.json`, `rust-loop-300-tape.json`, `rust-loop-real-fixture-callback.json`,
+  `rust-loop-real-fixture-tape.json`. tape 표(`EqualWeightTape`) 생성은 타이머 밖이다 — 워크벤치에서도
+  tape는 상류(`compile_target_tape`)에서 만들어 엔진에 넘기므로 `engine.run()` 비용만 잰다.
 - orders/fills/최종 equity는 워크로드마다 세 코어가 동일. 전체 스위트 1192 passed(리뷰 반영 후), parity 201 passed,
   Rust 단위 테스트 22 passed.
+- 격리 프로세스 peak RSS (100종목, `--core` 단독 실행, `benchmarks/baseline/rust-loop-memory-100-*.json`):
+  callback python 170.2 MiB / rust 248.6 MiB = 1.46배, tape python 170.4 MiB / rust 264.0 MiB = 1.55배.
+  #98이 선언한 1.25배 게이트 **미달** — 원인은 종료 배치가 Rust wire를 Python tuple로 한 번에 복제해
+  Rust 레코드·Python tuple·materialize된 공개 객체가 동시에 살아 있는 구간이다. 후속 항목으로 남긴다.
 - 최종 게이트 판정: 세션당 FFI 0회 **통과**. 100종목 callback 4.22배(목표 2배 **통과**),
   tape 경로 4.73배(최소 3배 **통과**, 목표 5배는 근접 미달). 300종목 callback 3.55배·tape 4.47배(목표 2배 **통과**).
   4종목 fixture 회귀 없음(3.13~5.18배 향상).
@@ -422,6 +430,7 @@ M6 측정 판정 (2026-09-03):
 - 300종목 목표 2배: **통과(callback 3.55배, tape 4.47배)**.
 - 4종목 fixture 회귀 금지: **통과(3.13~5.18배 향상)**.
 - 세션당 FFI 0회: **통과**. 왕복은 전략 콜백과 적재·종료 배치뿐이다.
+- Peak RSS 1.25배 이하: **미달(1.46~1.55배)**. 종료 배치의 tuple 복제가 원인, 후속 백로그.
 
 후속 백로그:
 
@@ -429,6 +438,7 @@ M6 측정 판정 (2026-09-03):
 - [x] callback frame의 portfolio/open-order view를 콜백 시점 wire로 고정하고 lazy 변환.
 - [ ] 서로 다른 실제 종목 100/300개를 포함한 외부 원장으로 성능 게이트 재검증.
 - [ ] 워크벤치 end-to-end 구간별 측정 (#98 Phase 3-2).
+- [ ] 종료 배치를 레코드 단위 lazy payload 조회로 바꿔 peak RSS를 1.25배 이하로 (#98 RSS 게이트).
 
 ## 첫 구현 슬라이스 상세
 

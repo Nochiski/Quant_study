@@ -75,6 +75,7 @@ from backtest_engine.engine.wire import (
     decision_to_wire,
     execution_wire,
     route_error,
+    route_error_from,
     supports_basic_decision,
     target_wire,
 )
@@ -529,9 +530,7 @@ class BacktestEngine:
             message = str(error)
             if message.startswith("route_error:"):
                 _, code, detail = message.split(":", 2)
-                routing_error = route_error((code, detail))
-                if routing_error is not None:
-                    raise routing_error from error
+                raise route_error_from((code, detail)) from error
             if message.startswith("equity_wiped_out: "):
                 raise EquityWipedOut(message.removeprefix("equity_wiped_out: ")) from error
             if message.startswith("negative_position: "):

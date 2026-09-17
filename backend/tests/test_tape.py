@@ -343,9 +343,13 @@ def test_tape_order_materialization_indexes_decisions_once(
     orders = result.orders
     assert len(orders) == 3
     # `_batch()`는 캐시된 리스트를 돌려주는 O(1) 호출이다 (ORDER 순회 1회 + 주문당 1회).
-    # 비용이 큰 결정 인덱스 구축은 배치 길이가 같은 동안 한 번만 일어난다.
+    # 실질 가드는 결정 인덱스가 배치 길이 기준으로 한 번만 만들어졌다는 아래 단언이다.
     store = engine.event_store
     assert isinstance(store, PersistentEventStore)
     assert batch_calls == len(orders) + 1
     assert store._decision_index_len == len(store._batch())
     assert set(store._decision_index) == {f"D-{n:06d}" for n in range(1, 5)}
+    # 인덱스 구축 이후 추가 조회는 인덱스를 다시 만들지 않는다.
+    rebuilt = store._decision_index
+    assert result.fills is not None
+    assert store._decision_index is rebuilt

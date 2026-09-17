@@ -565,7 +565,7 @@
             <div class="bench-value">0.681s</div>
           </div>
         </div>
-        <div class="axis"><span>0s</span><span>0.7s</span><span>1.4s</span><span>2.1s</span><span>2.9s</span></div>
+        <div class="axis"><span>0s</span><span>0.7s</span><span>1.4s</span><span>2.2s</span><span>2.9s</span></div>
         <div class="benchmark" role="img" aria-label="tape 전략 100종목: Python 2.566초, Rust 0.543초" style="margin-top:14px">
           <div class="bench-row">
             <div class="engine-name python">Python · tape</div>
@@ -663,28 +663,28 @@
     <section class="section card target">
       <div class="section-title">
         <div>
-          <div class="metric-kicker">Current architecture</div>
+          <div class="metric-kicker">Current architecture · 2026-09-17</div>
           <h2>지금 실행되는 구조</h2>
         </div>
-        <p>부분 가속기 → Persistent Rust Engine</p>
+        <p>Persistent Rust Engine이 세션 루프까지 돌린다</p>
       </div>
 
       <div class="target-flow" aria-label="현재 persistent 백테스트 실행 경로">
         <div class="target-node">
           <h3>Python Strategy</h3>
-          <p>선언된 callback에서 전략 판단만 반환합니다.</p>
-          <div class="chips"><span>Requirements</span><span>Decision</span></div>
+          <p>선언된 callback에서 전략 판단만 반환합니다. 선언형 tape 전략은 표를 한 번 넘기고 callback 없이 완주합니다.</p>
+          <div class="chips"><span>Requirements</span><span>Decision</span><span>Tape frames</span></div>
         </div>
         <div class="arrow">→</div>
         <div class="target-node core">
           <h3 style="color:var(--green)">Persistent Rust Engine</h3>
-          <p>세션 사이 상태와 callback token lifecycle을 단일 소유합니다.</p>
-          <div class="chips"><span>Orders</span><span>Positions</span><span>History</span><span>Routing</span><span>Queue</span><span>Accounting</span></div>
+          <p><code>drive()</code>가 MARKET→FILL→NOTIFY→SESSION_CLOSE→ORDER 드레인과 자본변동·비용·스냅샷 기록을 세션당 FFI 없이 진행합니다.</p>
+          <div class="chips"><span>Session loop</span><span>Orders</span><span>Positions</span><span>History</span><span>Routing</span><span>Queue</span><span>Records</span><span>Accounting</span><span>Tape decisions</span></div>
         </div>
         <div class="arrow">→</div>
         <div class="target-node">
           <h3>Python Result</h3>
-          <p>종료 batch를 받고 주문·체결을 요청 시점에 materialize합니다.</p>
+          <p>종료 batch를 받고 스냅샷·주문·체결을 요청 시점에 materialize합니다.</p>
           <div class="chips"><span>Metrics</span><span>Lazy tuples</span><span>Trace</span></div>
         </div>
       </div>
@@ -694,6 +694,7 @@
         <div class="current-step"><span>M2 · ROUTER</span><strong>Decision과 주문 lifecycle</strong></div>
         <div class="current-step"><span>M3–M4 · LOOP</span><strong>Feed·History·Queue·Callback</strong></div>
         <div class="current-step"><span>M5 · RESULT</span><strong>Compact store와 lazy batch</strong></div>
+        <div class="current-step"><span>2026-09-17 · DRIVER</span><strong>세션 루프·레코드·tape 결정 (FFI 0회)</strong></div>
       </div>
 
       <div class="insight"><strong>승격:</strong> 이제 <code>BacktestEngine(..., core="rust")</code>가 persistent runtime을 선택합니다. 구 세션 코어는 <code>rust_legacy</code>로만 접근 가능하며 deprecation warning을 냅니다.</div>
@@ -763,7 +764,7 @@
 
     <footer>
       <span>Ryzen 5 5600X · 16GB RAM · Python 3.11 · Rust 1.93 · Windows 10</span>
-      <span>engine.run() wall-clock · 데이터 로딩 제외 · M6 promotion benchmark</span>
+      <span>engine.run() wall-clock · 데이터 로딩·tape 표 생성 제외 · 2026-09-17 loop-driver benchmark (M6 수치는 기록)</span>
     </footer>
   </main>
 </body>

@@ -1,0 +1,890 @@
+//! Persistent runtime의 세션 루프 드라이버.
+//!
+//! Python `engine/loop.py`의 `_execute`/`_on_market`/`_on_session_close`/`_dispatch`가 하던
+//! MARKET → FILL → NOTIFY → SESSION_CLOSE → ORDER 드레인을 Rust 안에서 진행한다. Python은
+//! 전략 콜백이 필요할 때만 `CallbackFrame`을 받고 `submit_decision`으로 돌려준다. 레코드
+//! 순서·ID·오류 시점은 Python reference와 같아야 하며 `tests/test_core_parity.py`가 고정한다.
+
+use crate::callback::CallbackFrame;
+use crate::persistent::{Lifecycle, PersistentEngine, StoredGroup, StoredOrder};
+use crate::persistent_router::{self, DecisionWire, RouteError};
+use crate::records::{to_object, FillWire, NativeDecision, OrderWire, RecordPayload, SnapshotWire};
+use crate::session::py_float;
+use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
+use std::collections::HashMap;
+
+/// Python `EventPriority`와 같은 값. 같은 세션 안에서 숫자가 작을수록 먼저 처리한다.
+pub(crate) const PRIORITY_MARKET: u8 = 10;
+pub(crate) const PRIORITY_FILL: u8 = 20;
+pub(crate) const PRIORITY_NOTIFY: u8 = 25;
+pub(crate) const PRIORITY_SESSION_CLOSE: u8 = 30;
+pub(crate) const PRIORITY_ORDER: u8 = 40;
+
+/// `configure_run`으로 한 번 받는 실행 설정 (RunConfig + requirements 일부).
+#[derive(Clone, Debug)]
+pub(crate) struct RunSettings {
+    pub(crate) fee_rate: f64,
+    pub(crate) default_participation: Option<String>,
+    pub(crate) slippage: (String, f64, f64),
+    pub(crate) schedule: String,
+    pub(crate) short_borrow_bps_annual: f64,
+    pub(crate) margin_interest_bps_annual: f64,
+    pub(crate) annualization_days: u32,
+    pub(crate) warmup_sessions: usize,
+    pub(crate) notify_fill: bool,
+    pub(crate) notify_order_update: bool,
+    pub(crate) notify_corporate_action: bool,
+}
+
+/// 정산 세션이 확정된 자본변동 사건. index는 Python side table의 위치다.
+#[derive(Clone, Debug)]
+pub(crate) struct CorporateActionEntry {
+    pub(crate) key: String,
+    pub(crate) symbol: String,
+    pub(crate) action_type: String,
+    pub(crate) ratio: String,
+    pub(crate) event_ts: String,
+    pub(crate) confirmed: bool,
+}
+
+/// 전략에 전달할 알림 payload (requirements().events에 선언된 것만 큐에 실린다).
+#[derive(Clone, Debug)]
+pub(crate) enum NotifyPayload {
+    Fill(FillWire),
+    OrderUpdate {
+        order_id: String,
+        status: String,
+        detail: Option<String>,
+    },
+    CorporateAction(usize),
+}
+
+impl NotifyPayload {
+    pub(crate) fn event_kind(&self) -> &'static str {
+        match self {
+            NotifyPayload::Fill(_) => "fill",
+            NotifyPayload::OrderUpdate { .. } => "order_update",
+            NotifyPayload::CorporateAction(_) => "corporate_action",
+        }
+    }
+
+    pub(crate) fn to_py(&self, py: Python<'_>) -> PyResult<PyObject> {
+        match self {
+            NotifyPayload::Fill(fill) => fill.to_py(py),
+            NotifyPayload::OrderUpdate {
+                order_id,
+                status,
+                detail,
+            } => to_object(py, (order_id.as_str(), status.as_str(), detail.as_deref())),
+            NotifyPayload::CorporateAction(index) => to_object(py, *index),
+        }
+    }
+}
+
+/// 큐 payload. token은 `queued` Vec의 index다.
+#[derive(Clone, Debug)]
+pub(crate) enum Queued {
+    Market(usize),
+    Fill(FillWire),
+    Notify(NotifyPayload),
+    SessionClose(usize),
+    Order(OrderWire),
+}
+
+impl PersistentEngine {
+    fn settings(&self) -> PyResult<&RunSettings> {
+        self.run.as_ref().ok_or_else(|| {
+            PyValueError::new_err("persistent run is not configured — call configure_run first")
+        })
+    }
+
+    fn feed_ref(&self) -> PyResult<&crate::feed::PersistentFeed> {
+        self.feed
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))
+    }
+
+    fn instrument_id_for_key(&self, key: &str) -> PyResult<u32> {
+        self.feed_ref()?.instrument_id(key).ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "instrument is not in the loaded feed registry — key={key}"
+            ))
+        })
+    }
+
+    fn push(&mut self, session: usize, priority: u8, payload: Queued) -> PyResult<()> {
+        let token = self.queued.len() as u64;
+        self.queued.push(Some(payload));
+        self.event_queue.push(session as i64, priority, token)
+    }
+
+    fn pop(&mut self) -> PyResult<Option<Queued>> {
+        if self.event_queue.len() == 0 {
+            return Ok(None);
+        }
+        let token = self.event_queue.pop()? as usize;
+        let payload = self
+            .queued
+            .get_mut(token)
+            .and_then(Option::take)
+            .ok_or_else(|| {
+                PyValueError::new_err(format!("queue token has no payload — token={token}"))
+            })?;
+        Ok(Some(payload))
+    }
+
+    fn record(&mut self, session: usize, payload: RecordPayload) -> PyResult<()> {
+        self.records.append(session, payload)
+    }
+
+    /// ORDER_UPDATE 레코드 + 선언 시 NOTIFY 큐 적재 (`loop._record_compact_update`).
+    fn record_update(
+        &mut self,
+        session: usize,
+        order_id: String,
+        status: String,
+        detail: Option<String>,
+    ) -> PyResult<()> {
+        let notify = self.settings()?.notify_order_update;
+        self.record(
+            session,
+            RecordPayload::OrderUpdate {
+                order_id: order_id.clone(),
+                status: status.clone(),
+                detail: detail.clone(),
+            },
+        )?;
+        if notify {
+            self.push(
+                session,
+                PRIORITY_NOTIFY,
+                Queued::Notify(NotifyPayload::OrderUpdate {
+                    order_id,
+                    status,
+                    detail,
+                }),
+            )?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn order_wire(&self, order: &StoredOrder) -> PyResult<OrderWire> {
+        Ok(OrderWire {
+            order_id: order.order_id.clone(),
+            decision_id: order.decision_id.clone(),
+            instrument_id: self.instrument_id_for_key(&order.key)?,
+            quantity: order.quantity,
+            side: order.side.clone(),
+            order_type: order.order_type.clone(),
+            limit_text: order.limit_text.clone(),
+            stop_text: order.stop_text.clone(),
+            tif: order.tif.clone(),
+            group_id: order.group_id.clone(),
+            action_index: order.action_index,
+            leg_index: order.leg_index,
+        })
+    }
+
+    pub(crate) fn snapshot_wire(&self) -> PyResult<SnapshotWire> {
+        let (cash, rows, equity, gross_exposure) = self.portfolio.snapshot()?;
+        let rows = rows
+            .into_iter()
+            .map(|(key, quantity, average, mark, market_value, unrealized)| {
+                Ok((
+                    self.instrument_id_for_key(&key)?,
+                    quantity,
+                    average,
+                    mark,
+                    market_value,
+                    unrealized,
+                ))
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        Ok(SnapshotWire {
+            cash,
+            rows,
+            equity,
+            gross_exposure,
+        })
+    }
+
+    fn open_orders_wire(&self) -> PyResult<Vec<(OrderWire, i64)>> {
+        self.orders
+            .iter()
+            .map(|order| Ok((self.order_wire(order)?, order.remaining)))
+            .collect()
+    }
+
+    /// 콜백 프레임을 만들고 runtime을 AwaitingDecision으로 전환한다. payload는 Rust wire로
+    /// 보관하고 Python getter가 읽을 때만 변환한다 — 전략이 안 읽는 세션은 변환 비용이 없다.
+    fn make_frame(
+        &mut self,
+        event_kind: &str,
+        session: usize,
+        event: Option<NotifyPayload>,
+        snapshot: SnapshotWire,
+    ) -> PyResult<CallbackFrame> {
+        let ts = self.feed_ref()?.session_at(session)?.to_string();
+        self.callback_seq = self.callback_seq.checked_add(1).ok_or_else(|| {
+            PyValueError::new_err("persistent callback token sequence exhausted u64")
+        })?;
+        let token = self.callback_seq;
+        let open_orders = self.open_orders_wire()?;
+        self.lifecycle = Lifecycle::AwaitingDecision(token);
+        self.awaiting_session = session;
+        Ok(CallbackFrame {
+            token,
+            event_kind: event_kind.to_string(),
+            session_index: session,
+            ts,
+            event,
+            snapshot,
+            open_orders,
+        })
+    }
+
+    fn session_count(&self) -> PyResult<usize> {
+        Ok(self.feed_ref()?.current_session_count())
+    }
+
+    fn current_session(&self) -> PyResult<usize> {
+        let count = self.session_count()?;
+        count.checked_sub(1).ok_or_else(|| {
+            PyValueError::new_err("persistent feed has no current session — process market first")
+        })
+    }
+
+    /// 다음 전략 콜백까지 세션을 진행한다. 콜백이 더 없으면 `None`.
+    pub(crate) fn drive_internal(&mut self) -> PyResult<Option<CallbackFrame>> {
+        match self.lifecycle {
+            Lifecycle::AwaitingDecision(token) => {
+                return Err(PyValueError::new_err(format!(
+                    "callback already awaiting a decision — token={token}"
+                )))
+            }
+            Lifecycle::Failed => {
+                return Err(PyValueError::new_err(format!(
+                    "persistent runtime is failed — detail={:?}",
+                    self.failure_message
+                )))
+            }
+            Lifecycle::Finished => {
+                return Err(PyValueError::new_err(
+                    "persistent runtime is already finished",
+                ))
+            }
+            Lifecycle::Ready | Lifecycle::Running => {}
+        }
+        self.settings()?;
+        if !self.started {
+            // Python `_execute`처럼 모든 세션의 MARKET 이벤트를 먼저 큐에 싣는다.
+            let sessions = self.feed_ref()?.session_len();
+            for session in 0..sessions {
+                self.push(session, PRIORITY_MARKET, Queued::Market(session))?;
+            }
+            self.started = true;
+            self.lifecycle = Lifecycle::Running;
+        }
+        while let Some(event) = self.pop()? {
+            match event {
+                Queued::Market(session) => self.on_market(session)?,
+                Queued::Fill(fill) => {
+                    let session = self.current_session()?;
+                    self.record(session, RecordPayload::Fill(fill))?;
+                }
+                Queued::Notify(payload) => {
+                    let session = self.current_session()?;
+                    if self.session_count()? < self.settings()?.warmup_sessions {
+                        continue;
+                    }
+                    let snapshot = self.snapshot_wire()?;
+                    let kind = payload.event_kind();
+                    return Ok(Some(self.make_frame(
+                        kind,
+                        session,
+                        Some(payload),
+                        snapshot,
+                    )?));
+                }
+                Queued::SessionClose(session) => {
+                    if let Some(snapshot) = self.on_session_close(session)? {
+                        return Ok(Some(self.make_frame("market", session, None, snapshot)?));
+                    }
+                }
+                Queued::Order(order) => {
+                    let session = self.current_session()?;
+                    self.record(session, RecordPayload::Order(order))?;
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// `loop._on_market` + `_on_market_persistent` + `_apply_corporate_action`.
+    fn on_market(&mut self, session: usize) -> PyResult<()> {
+        self.record(session, RecordPayload::Market)?;
+        if self.debug_panic_on_market {
+            panic!("forced persistent runtime panic for boundary verification");
+        }
+        // 이전 세션 ORDER priority에서 공개된 주문을 일괄 활성화한다. 자본변동 취소가
+        // 해당 주문까지 볼 수 있어야 하므로 corporate action 처리보다 앞선다.
+        self.activate_pending_internal()?;
+
+        let actions: Vec<usize> = self
+            .ca_by_session
+            .get(&session)
+            .cloned()
+            .unwrap_or_default();
+        for index in actions {
+            self.apply_corporate_action_entry(session, index)?;
+        }
+
+        let settings = self.settings()?.clone();
+        // 체결 payload가 필요한 주문 메타를 처리 전에 잡아둔다 — 전량 체결된 주문은 ops 적용
+        // 중 제거된다.
+        let order_meta: HashMap<String, (u32, String)> = self
+            .orders
+            .iter()
+            .map(|order| {
+                Ok((
+                    order.order_id.clone(),
+                    (self.instrument_id_for_key(&order.key)?, order.side.clone()),
+                ))
+            })
+            .collect::<PyResult<_>>()?;
+        let ops = self.process_market_index(
+            session,
+            settings.fee_rate,
+            settings.default_participation.as_deref(),
+            settings.slippage.clone(),
+        )?;
+        for (kind, order_id, quantity, price, slip, fee, payload) in ops {
+            match kind.as_str() {
+                "fill" => {
+                    let (instrument_id, side) =
+                        order_meta.get(&order_id).cloned().ok_or_else(|| {
+                            PyValueError::new_err(format!(
+                                "rust core filled an order that is not open — order_id={order_id}"
+                            ))
+                        })?;
+                    let fill = FillWire {
+                        fill_id: payload,
+                        order_id,
+                        instrument_id,
+                        quantity,
+                        side,
+                        price,
+                        fee,
+                        slippage_per_share: slip,
+                    };
+                    self.push(session, PRIORITY_FILL, Queued::Fill(fill.clone()))?;
+                    if settings.notify_fill {
+                        self.push(
+                            session,
+                            PRIORITY_NOTIFY,
+                            Queued::Notify(NotifyPayload::Fill(fill)),
+                        )?;
+                    }
+                }
+                "update" => {
+                    let (status, detail) = match payload.split_once('|') {
+                        Some((status, detail)) => (status.to_string(), detail.to_string()),
+                        None => (payload.clone(), String::new()),
+                    };
+                    let detail = if detail.is_empty() {
+                        None
+                    } else {
+                        Some(detail)
+                    };
+                    self.record_update(session, order_id, status, detail)?;
+                }
+                // mutable 상태는 process_market 안에서 이미 적용됐다.
+                "trigger" | "remove" | "drop_group" => {}
+                other => {
+                    return Err(PyValueError::new_err(format!(
+                        "unknown op from persistent rust core — kind={other:?}"
+                    )))
+                }
+            }
+        }
+        self.push(
+            session,
+            PRIORITY_SESSION_CLOSE,
+            Queued::SessionClose(session),
+        )
+    }
+
+    fn apply_corporate_action_entry(&mut self, session: usize, index: usize) -> PyResult<()> {
+        let entry = self.corporate_actions[index].clone();
+        self.record(session, RecordPayload::CorporateAction(index))?;
+        let remaining_by_id: HashMap<String, i64> = self
+            .orders
+            .iter()
+            .map(|order| (order.order_id.clone(), order.remaining))
+            .collect();
+        if entry.confirmed {
+            // 가격 수준이 무의미해지는 확인된 분할·병합만 대기 주문을 취소한다 (스펙 결정 3).
+            let session_ts = self.feed_ref()?.session_at(session)?.to_string();
+            let cancelled = self.cancel_for_key(&entry.key);
+            for order_id in cancelled {
+                let remaining = remaining_by_id.get(&order_id).copied().unwrap_or(0);
+                let detail = format!(
+                    "cancelled by corporate action — instrument={} action={} ratio={} \
+                     event_ts={} settled_at={} remaining={}",
+                    entry.symbol,
+                    entry.action_type,
+                    entry.ratio,
+                    entry.event_ts,
+                    session_ts,
+                    remaining
+                );
+                self.record_update(session, order_id, "cancelled".to_string(), Some(detail))?;
+            }
+            let settlement_price =
+                self.feed_ref()?
+                    .open_at(session, &entry.key)
+                    .ok_or_else(|| {
+                        PyValueError::new_err(format!(
+                            "corporate action settlement session has no bar — instrument={} \
+                         session={session_ts}",
+                            entry.symbol
+                        ))
+                    })?;
+            let applied =
+                self.apply_corporate_action_ratio(&entry.key, &entry.ratio, settlement_price)?;
+            if let Some((old_quantity, new_quantity, old_average, new_average, cash_paid)) = applied
+            {
+                self.record(
+                    session,
+                    RecordPayload::CorporateActionApplied {
+                        corporate_action: index,
+                        old_quantity,
+                        new_quantity,
+                        old_average_price: old_average,
+                        new_average_price: new_average,
+                        cash_paid,
+                    },
+                )?;
+            }
+        }
+        if self.settings()?.notify_corporate_action {
+            self.push(
+                session,
+                PRIORITY_NOTIFY,
+                Queued::Notify(NotifyPayload::CorporateAction(index)),
+            )?;
+        }
+        Ok(())
+    }
+
+    /// `loop._on_session_close`: 비용·스냅샷 기록 후 일정과 warmup을 만족하면 스냅샷을 돌려준다.
+    fn on_session_close(&mut self, session: usize) -> PyResult<Option<SnapshotWire>> {
+        let settings = self.settings()?.clone();
+        let (should_dispatch, costs, _) = self.close_current_session(
+            &settings.schedule,
+            settings.short_borrow_bps_annual,
+            settings.margin_interest_bps_annual,
+            settings.annualization_days,
+        )?;
+        for (kind, key, amount) in costs {
+            let instrument_id = match key {
+                Some(key) => Some(self.instrument_id_for_key(&key)?),
+                None => None,
+            };
+            self.record(
+                session,
+                RecordPayload::Cost {
+                    kind,
+                    instrument_id,
+                    amount,
+                },
+            )?;
+        }
+        let snapshot = self.snapshot_wire()?;
+        if snapshot.equity < 0.0 {
+            let feed = self.feed_ref()?;
+            let positions: Vec<String> = snapshot
+                .rows
+                .iter()
+                .map(|row| format!("('{}', '{}')", feed.symbol_of(row.0), row.1))
+                .collect();
+            return Err(PyValueError::new_err(format!(
+                "equity_wiped_out: equity fell below zero at session close — ts={} equity={} \
+                 cash={} positions=[{}]",
+                feed.session_at(session)?,
+                py_float(snapshot.equity),
+                py_float(snapshot.cash),
+                positions.join(", ")
+            )));
+        }
+        self.record(session, RecordPayload::Snapshot(snapshot.clone()))?;
+        if should_dispatch && self.session_count()? >= settings.warmup_sessions {
+            return Ok(Some(snapshot));
+        }
+        Ok(None)
+    }
+
+    /// `loop._dispatch`의 결정 이후 절반: DECISION 기록 → 라우팅 → ORDER_UPDATE 기록 → ORDER 큐.
+    pub(crate) fn submit_internal(
+        &mut self,
+        token: u64,
+        decision: DecisionWire,
+        native: Option<NativeDecision>,
+    ) -> PyResult<(String, Option<RouteError>)> {
+        match self.lifecycle {
+            Lifecycle::AwaitingDecision(expected) if token == expected => {}
+            Lifecycle::AwaitingDecision(expected) => {
+                return Err(PyValueError::new_err(format!(
+                    "stale callback token — expected={expected} got={token}"
+                )))
+            }
+            Lifecycle::Failed => {
+                return Err(PyValueError::new_err(format!(
+                    "persistent runtime is failed — detail={:?}",
+                    self.failure_message
+                )))
+            }
+            Lifecycle::Finished => {
+                return Err(PyValueError::new_err(
+                    "persistent runtime is already finished",
+                ))
+            }
+            Lifecycle::Ready | Lifecycle::Running => {
+                return Err(PyValueError::new_err(format!(
+                    "no callback is awaiting a decision — token={token}"
+                )))
+            }
+        }
+        let session = self.awaiting_session;
+        let decision_id = Self::next_id(&mut self.decision_seq, 'D');
+        // 라우팅 오류여도 DECISION은 남는다 — Python `_dispatch`가 raise 전에 기록한다.
+        self.record(
+            session,
+            RecordPayload::Decision {
+                decision_id: decision_id.clone(),
+                native,
+            },
+        )?;
+        let (orders, updates, error) = match self.route_with_id(&decision_id, decision) {
+            Ok(routed) => routed,
+            Err(error) => {
+                self.lifecycle = Lifecycle::Failed;
+                self.failure_message = Some(error.to_string());
+                return Err(error);
+            }
+        };
+        if let Some(error) = error {
+            self.lifecycle = Lifecycle::Failed;
+            self.failure_message = Some(error.1.clone());
+            return Ok((decision_id, Some(error)));
+        }
+        for (order_id, status, detail) in updates {
+            self.record_update(session, order_id, status, Some(detail))?;
+        }
+        for order in orders {
+            self.push(session, PRIORITY_ORDER, Queued::Order(order))?;
+        }
+        self.lifecycle = Lifecycle::Running;
+        Ok((decision_id, None))
+    }
+
+    /// 라우터를 돌리고 신규 주문·그룹을 pending 영역에 저장한다. 반환 주문은 ORDER 레코드용 wire.
+    #[allow(clippy::type_complexity)]
+    fn route_with_id(
+        &mut self,
+        decision_id: &str,
+        decision: DecisionWire,
+    ) -> PyResult<(
+        Vec<OrderWire>,
+        Vec<(String, String, String)>,
+        Option<RouteError>,
+    )> {
+        let bars = self.feed_ref()?.current_closes()?;
+        // 심볼 폴백은 그날 바뿐 아니라 피드 등록부 전체에서 찾는다 — 바가 끊긴 보유 종목(정지·상폐)의
+        // REPLACE 청산 주문이 "instrument metadata is missing" 으로 run 을 죽이지 않도록.
+        let mut fallback_symbols: HashMap<String, String> = self.feed_ref()?.registry_symbols();
+        for (key, (symbol, _)) in bars.iter() {
+            fallback_symbols.insert(key.clone(), symbol.clone());
+        }
+        let decision_for_orders = decision.clone();
+        let (orders, updates, groups, error) = persistent_router::route_basic_decision(
+            &self.portfolio,
+            &mut self.orders,
+            &self.router_config,
+            &mut self.order_seq,
+            &mut self.group_seq,
+            self.allow_short,
+            decision_id,
+            decision,
+            bars,
+        )?;
+        if error.is_some() {
+            return Ok((Vec::new(), updates, error));
+        }
+        let staged_orders = orders
+            .iter()
+            .map(|order| {
+                StoredOrder::from_routed(
+                    order,
+                    &decision_for_orders,
+                    fallback_symbols.get(&order.1).map(String::as_str),
+                    decision_id,
+                )
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        let wires = staged_orders
+            .iter()
+            .map(|order| self.order_wire(order))
+            .collect::<PyResult<Vec<_>>>()?;
+        let staged_groups: Vec<StoredGroup> = groups
+            .iter()
+            .map(|group| StoredGroup {
+                group_id: group.0.clone(),
+                policy: group.1.clone(),
+                order_ids: group.2.clone(),
+            })
+            .collect();
+        self.pending_orders.extend(staged_orders);
+        self.pending_groups.extend(staged_groups);
+        Ok((wires, updates, None))
+    }
+
+    /// `loop._execute` 종료부: 잔여 주문을 취소 레코드로 남기고 스토어를 닫는다.
+    pub(crate) fn finish_internal(&mut self) -> PyResult<()> {
+        match self.lifecycle {
+            Lifecycle::AwaitingDecision(token) => {
+                return Err(PyValueError::new_err(format!(
+                    "cannot finish while callback awaits a decision — token={token}"
+                )))
+            }
+            Lifecycle::Failed => {
+                return Err(PyValueError::new_err(format!(
+                    "cannot finish failed persistent runtime — detail={:?}",
+                    self.failure_message
+                )))
+            }
+            Lifecycle::Finished => {
+                return Err(PyValueError::new_err(
+                    "persistent runtime finish called more than once",
+                ))
+            }
+            Lifecycle::Ready | Lifecycle::Running => {}
+        }
+        // 남은 주문은 결과에서 조용히 사라지지 않도록 취소로 기록한다. 마지막 세션에 낸
+        // DAY/IOC/FOK는 "당일 만료", GTC만 "run 종료"가 사유다.
+        self.orders.append(&mut self.pending_orders);
+        let remaining = std::mem::take(&mut self.orders);
+        if !remaining.is_empty() {
+            let last = self
+                .feed_ref()?
+                .session_len()
+                .checked_sub(1)
+                .ok_or_else(|| {
+                    PyValueError::new_err("orders remain but the feed has no sessions")
+                })?;
+            for order in remaining {
+                let reason = if order.tif == "gtc" {
+                    "run ended with GTC order still open — ".to_string()
+                } else {
+                    format!("{} order expired at last session — ", order.tif)
+                };
+                self.record(
+                    last,
+                    RecordPayload::OrderUpdate {
+                        order_id: order.order_id,
+                        status: "cancelled".to_string(),
+                        detail: Some(format!(
+                            "{reason}instrument={} remaining={}",
+                            order.symbol, order.remaining
+                        )),
+                    },
+                )?;
+            }
+        }
+        self.lifecycle = Lifecycle::Finished;
+        self.records.finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::records::{
+        KIND_DECISION, KIND_FILL, KIND_MARKET, KIND_ORDER, KIND_ORDER_UPDATE, KIND_SNAPSHOT,
+    };
+
+    const KEY: &str = "XKRX:005930:equity:KRW";
+
+    fn settings(warmup: usize) -> RunSettings {
+        RunSettings {
+            fee_rate: 0.0,
+            default_participation: None,
+            slippage: ("none".into(), 0.0, 0.0),
+            schedule: "every_session".into(),
+            short_borrow_bps_annual: 0.0,
+            margin_interest_bps_annual: 0.0,
+            annualization_days: 252,
+            warmup_sessions: warmup,
+            notify_fill: false,
+            notify_order_update: false,
+            notify_corporate_action: false,
+        }
+    }
+
+    fn runtime(warmup: usize) -> PersistentEngine {
+        let mut runtime = PersistentEngine::new(100_000.0, false, false, 1.0).unwrap();
+        runtime
+            .load_feed(
+                vec![KEY.into()],
+                vec!["005930".into()],
+                vec!["2026-08-01 00:00:00".into(), "2026-08-02 00:00:00".into()],
+                vec![0, 1, 2],
+                vec![0, 0],
+                vec![100.0, 110.0],
+                vec![100.0, 120.0],
+                vec![100.0, 110.0],
+                vec![100.0, 120.0],
+                vec![1_000, 1_000],
+            )
+            .unwrap();
+        runtime.configure_router(
+            vec!["no_action".into(), "set_portfolio_target".into()],
+            vec![],
+        );
+        runtime.run = Some(settings(warmup));
+        runtime
+    }
+
+    fn no_action(ts: &str) -> DecisionWire {
+        (
+            1,
+            ts.to_string(),
+            None,
+            vec![("no_action".into(), vec![], None, None, None, vec![])],
+        )
+    }
+
+    fn target(ts: &str, weight: f64) -> DecisionWire {
+        (
+            1,
+            ts.to_string(),
+            None,
+            vec![(
+                "set_portfolio_target".into(),
+                vec![(
+                    "weight".into(),
+                    KEY.into(),
+                    "005930".into(),
+                    "KRW".into(),
+                    None,
+                    Some(weight),
+                    None,
+                )],
+                Some("replace".into()),
+                Some(("market".into(), "next_open".into(), "day".into(), None)),
+                None,
+                vec![],
+            )],
+        )
+    }
+
+    fn kinds(runtime: &PersistentEngine) -> Vec<u8> {
+        runtime
+            .records
+            .records()
+            .iter()
+            .map(|record| record.payload.kind())
+            .collect()
+    }
+
+    #[test]
+    fn drive_returns_one_market_frame_per_scheduled_session_then_none() {
+        let mut runtime = runtime(0);
+        let first = runtime.drive_internal().unwrap().unwrap();
+        assert_eq!(
+            (first.token, first.session_index, first.event_kind.as_str()),
+            (1, 0, "market")
+        );
+        assert!(first.event.is_none());
+        let (decision_id, error) = runtime
+            .submit_internal(first.token, no_action(&first.ts), None)
+            .unwrap();
+        assert_eq!((decision_id.as_str(), error), ("D-000001", None));
+        let second = runtime.drive_internal().unwrap().unwrap();
+        assert_eq!((second.token, second.session_index), (2, 1));
+        runtime
+            .submit_internal(second.token, no_action(&second.ts), None)
+            .unwrap();
+        assert!(runtime.drive_internal().unwrap().is_none());
+        runtime.finish_internal().unwrap();
+        assert_eq!(
+            kinds(&runtime),
+            vec![
+                KIND_MARKET,
+                KIND_SNAPSHOT,
+                KIND_DECISION,
+                KIND_MARKET,
+                KIND_SNAPSHOT,
+                KIND_DECISION,
+            ]
+        );
+        assert_eq!(runtime.lifecycle_state(), "finished");
+    }
+
+    #[test]
+    fn warmup_skips_callbacks_but_still_records_sessions() {
+        let mut runtime = runtime(3);
+        assert!(runtime.drive_internal().unwrap().is_none());
+        assert_eq!(
+            kinds(&runtime),
+            vec![KIND_MARKET, KIND_SNAPSHOT, KIND_MARKET, KIND_SNAPSHOT]
+        );
+    }
+
+    #[test]
+    fn orders_are_recorded_after_close_and_filled_next_session() {
+        let mut runtime = runtime(0);
+        let first = runtime.drive_internal().unwrap().unwrap();
+        runtime
+            .submit_internal(first.token, target(&first.ts, 0.5), None)
+            .unwrap();
+        let second = runtime.drive_internal().unwrap().unwrap();
+        assert_eq!(second.session_index, 1);
+        runtime
+            .submit_internal(second.token, no_action(&second.ts), None)
+            .unwrap();
+        assert!(runtime.drive_internal().unwrap().is_none());
+        runtime.finish_internal().unwrap();
+        assert_eq!(
+            kinds(&runtime),
+            vec![
+                KIND_MARKET,
+                KIND_SNAPSHOT,
+                KIND_DECISION,
+                KIND_ORDER,
+                KIND_MARKET,
+                KIND_ORDER_UPDATE,
+                KIND_FILL,
+                KIND_SNAPSHOT,
+                KIND_DECISION,
+            ]
+        );
+        assert_eq!(runtime.records.traded_notional(), 500.0 * 110.0);
+        assert_eq!(runtime.portfolio.held_qty(KEY), 500);
+    }
+
+    #[test]
+    fn drive_rejects_reentry_while_awaiting_decision() {
+        let mut runtime = runtime(0);
+        let frame = runtime.drive_internal().unwrap().unwrap();
+        // PyErr 메시지 포맷은 GIL이 필요하므로 (cargo test에는 인터프리터가 없다) 실패 여부만
+        // 단언한다. 메시지 접두어는 tests/test_rust_driver.py가 고정한다.
+        assert!(runtime.drive_internal().is_err());
+        assert!(matches!(runtime.lifecycle, Lifecycle::AwaitingDecision(1)));
+        assert!(runtime
+            .submit_internal(frame.token + 1, no_action(&frame.ts), None)
+            .is_err());
+        assert!(matches!(runtime.lifecycle, Lifecycle::AwaitingDecision(1)));
+    }
+}

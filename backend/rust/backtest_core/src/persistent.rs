@@ -1,6 +1,6 @@
 use crate::buying_power::BuyingPower;
 use crate::callback::CallbackFrame;
-use crate::compact_store::{AppendWire, CompactRecordStore, RecordWire};
+use crate::driver::{CorporateActionEntry, Queued, RunSettings};
 use crate::event_queue::NativeEventQueue;
 use crate::feed::PersistentFeed;
 use crate::persistent_router::{
@@ -8,13 +8,14 @@ use crate::persistent_router::{
 };
 use crate::portfolio::{Portfolio, SnapshotTuple};
 use crate::quote::parse_decimal_ratio;
+use crate::records::{RecordStore, RecordWire};
 use crate::session::{self, BarTuple, EntryTuple, Op};
 use pyo3::exceptions::{PyKeyError, PyValueError};
 use pyo3::prelude::*;
 use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
-enum Lifecycle {
+pub(crate) enum Lifecycle {
     Ready,
     Running,
     AwaitingDecision(u64),
@@ -74,18 +75,24 @@ fn scaled_corporate_action_quantity(quantity: i64, ratio: &str) -> PyResult<(i64
 pub(crate) struct StoredOrder {
     pub(crate) order_id: String,
     pub(crate) key: String,
-    symbol: String,
+    pub(crate) symbol: String,
     pub(crate) side: String,
-    order_type: String,
+    pub(crate) order_type: String,
     limit_price: Option<f64>,
     stop_price: Option<f64>,
-    limit_text: Option<String>,
-    stop_text: Option<String>,
-    tif: String,
+    pub(crate) limit_text: Option<String>,
+    pub(crate) stop_text: Option<String>,
+    pub(crate) tif: String,
+    /// 최초 주문 수량 (ORDER 레코드용). `remaining`은 체결·정정으로 줄어든다.
+    pub(crate) quantity: i64,
     pub(crate) remaining: i64,
     triggered: bool,
-    group_id: Option<String>,
+    pub(crate) group_id: Option<String>,
     participation: Option<String>,
+    /// 결정 추적 메타. 레거시 `place_order` 경로에서는 비어 있다.
+    pub(crate) decision_id: String,
+    pub(crate) action_index: usize,
+    pub(crate) leg_index: Option<usize>,
 }
 
 impl StoredOrder {
@@ -108,10 +115,14 @@ impl StoredOrder {
             limit_text,
             stop_text,
             tif: value.6,
+            quantity: value.7,
             remaining: value.7,
             triggered: value.8,
             group_id: value.9,
             participation: value.10,
+            decision_id: String::new(),
+            action_index: 0,
+            leg_index: None,
         })
     }
 
@@ -136,10 +147,11 @@ impl StoredOrder {
         )
     }
 
-    fn from_routed(
+    pub(crate) fn from_routed(
         value: &RoutedOrder,
         decision: &DecisionWire,
         fallback_symbol: Option<&str>,
+        decision_id: &str,
     ) -> PyResult<Self> {
         let action = decision.3.get(value.9).ok_or_else(|| {
             PyValueError::new_err(format!(
@@ -202,19 +214,23 @@ impl StoredOrder {
             limit_text: value.5.clone(),
             stop_text: value.6.clone(),
             tif: value.7.clone(),
+            quantity: value.2,
             remaining: value.2,
             triggered: false,
             group_id: value.8.clone(),
             participation: participation.map(|value| value.to_string()),
+            decision_id: decision_id.to_string(),
+            action_index: value.9,
+            leg_index: value.10,
         })
     }
 }
 
 #[derive(Clone, Debug)]
-struct StoredGroup {
-    group_id: String,
-    policy: String,
-    order_ids: Vec<String>,
+pub(crate) struct StoredGroup {
+    pub(crate) group_id: String,
+    pub(crate) policy: String,
+    pub(crate) order_ids: Vec<String>,
 }
 
 impl StoredGroup {
@@ -227,30 +243,38 @@ impl StoredGroup {
     }
 }
 
-/// 세션 사이에 포트폴리오·대기 주문·그룹·식별자 시퀀스를 유지하는 첫 persistent runtime.
+/// 세션 루프 전체를 소유하는 persistent runtime.
 ///
-/// 전략·Router·EventQueue는 M1 동안 Python에 남고, mutable 주문 상태의 단일 진실 원천만
-/// 이 객체로 옮긴다. `process_market`에는 Bar만 전달하며 open entries/groups는 내부 상태를 쓴다.
+/// feed·큐·레코드·주문·그룹·포트폴리오·ID 시퀀스·자본변동 일정이 여기 있고, Python은 전략
+/// 콜백(`drive()` → `submit_decision()`)과 결과 조회(`finish()` 배치)에서만 왕복한다.
+/// 세션 진행 로직은 `driver.rs`에 있다.
 #[pyclass]
 pub(crate) struct PersistentEngine {
-    portfolio: Portfolio,
-    orders: Vec<StoredOrder>,
-    groups: Vec<StoredGroup>,
-    pending_orders: Vec<StoredOrder>,
-    pending_groups: Vec<StoredGroup>,
-    event_queue: NativeEventQueue,
-    lifecycle: Lifecycle,
-    callback_seq: u64,
-    failure_message: Option<String>,
-    record_store: CompactRecordStore,
-    decision_seq: u64,
-    order_seq: u64,
-    fill_seq: u64,
-    group_seq: u64,
-    leverage: f64,
-    allow_short: bool,
-    router_config: RouterConfig,
-    feed: Option<PersistentFeed>,
+    pub(crate) portfolio: Portfolio,
+    pub(crate) orders: Vec<StoredOrder>,
+    pub(crate) groups: Vec<StoredGroup>,
+    pub(crate) pending_orders: Vec<StoredOrder>,
+    pub(crate) pending_groups: Vec<StoredGroup>,
+    pub(crate) event_queue: NativeEventQueue,
+    pub(crate) queued: Vec<Option<Queued>>,
+    pub(crate) lifecycle: Lifecycle,
+    pub(crate) callback_seq: u64,
+    pub(crate) awaiting_session: usize,
+    pub(crate) started: bool,
+    pub(crate) failure_message: Option<String>,
+    pub(crate) records: RecordStore,
+    pub(crate) decision_seq: u64,
+    pub(crate) order_seq: u64,
+    pub(crate) fill_seq: u64,
+    pub(crate) group_seq: u64,
+    pub(crate) leverage: f64,
+    pub(crate) allow_short: bool,
+    pub(crate) router_config: RouterConfig,
+    pub(crate) feed: Option<PersistentFeed>,
+    pub(crate) run: Option<RunSettings>,
+    pub(crate) corporate_actions: Vec<CorporateActionEntry>,
+    pub(crate) ca_by_session: HashMap<usize, Vec<usize>>,
+    pub(crate) debug_panic_on_market: bool,
 }
 
 impl PersistentEngine {
@@ -286,7 +310,7 @@ impl PersistentEngine {
         Ok(new_remaining)
     }
 
-    fn next_id(sequence: &mut u64, prefix: char) -> String {
+    pub(crate) fn next_id(sequence: &mut u64, prefix: char) -> String {
         *sequence += 1;
         format!("{prefix}-{:06}", *sequence)
     }
@@ -369,7 +393,7 @@ impl PersistentEngine {
         Ok(ops)
     }
 
-    fn activate_pending_internal(&mut self) -> PyResult<()> {
+    pub(crate) fn activate_pending_internal(&mut self) -> PyResult<()> {
         if let Some(order) = self.pending_orders.iter().find(|pending| {
             self.orders
                 .iter()
@@ -400,7 +424,7 @@ impl PersistentEngine {
 impl PersistentEngine {
     #[new]
     #[pyo3(signature = (initial_cash, allow_short=false, allow_margin=false, leverage=1.0))]
-    fn new(
+    pub(crate) fn new(
         initial_cash: f64,
         allow_short: bool,
         allow_margin: bool,
@@ -418,10 +442,13 @@ impl PersistentEngine {
             pending_orders: Vec::new(),
             pending_groups: Vec::new(),
             event_queue: NativeEventQueue::default(),
+            queued: Vec::new(),
             lifecycle: Lifecycle::Ready,
             callback_seq: 0,
+            awaiting_session: 0,
+            started: false,
             failure_message: None,
-            record_store: CompactRecordStore::default(),
+            records: RecordStore::default(),
             decision_seq: 0,
             order_seq: 0,
             fill_seq: 0,
@@ -430,11 +457,132 @@ impl PersistentEngine {
             allow_short,
             router_config: RouterConfig::default(),
             feed: None,
+            run: None,
+            corporate_actions: Vec::new(),
+            ca_by_session: HashMap::new(),
+            debug_panic_on_market: false,
         })
     }
 
+    /// RunConfig와 requirements에서 온 실행 설정. `drive()` 전에 한 번 호출한다.
     #[allow(clippy::too_many_arguments)]
-    fn load_feed(
+    #[pyo3(signature = (fee_rate, default_participation, slippage, schedule, short_borrow_bps_annual, margin_interest_bps_annual, annualization_days, warmup_sessions, notify_fill, notify_order_update, notify_corporate_action))]
+    fn configure_run(
+        &mut self,
+        fee_rate: f64,
+        default_participation: Option<String>,
+        slippage: (String, f64, f64),
+        schedule: String,
+        short_borrow_bps_annual: f64,
+        margin_interest_bps_annual: f64,
+        annualization_days: u32,
+        warmup_sessions: usize,
+        notify_fill: bool,
+        notify_order_update: bool,
+        notify_corporate_action: bool,
+    ) -> PyResult<()> {
+        if !matches!(schedule.as_str(), "every_session" | "month_end") {
+            return Err(PyValueError::new_err(format!(
+                "unsupported persistent schedule — schedule={schedule:?}"
+            )));
+        }
+        self.run = Some(RunSettings {
+            fee_rate,
+            default_participation,
+            slippage,
+            schedule,
+            short_borrow_bps_annual,
+            margin_interest_bps_annual,
+            annualization_days,
+            warmup_sessions,
+            notify_fill,
+            notify_order_update,
+            notify_corporate_action,
+        });
+        Ok(())
+    }
+
+    /// 정산 세션이 확정된 자본변동 목록. 입력 순서가 같은 세션 안의 적용 순서다.
+    #[allow(clippy::type_complexity)]
+    fn load_corporate_actions(
+        &mut self,
+        actions: Vec<(usize, String, String, String, String, String, bool)>,
+    ) -> PyResult<()> {
+        let sessions = self
+            .feed
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?
+            .session_len();
+        self.corporate_actions.clear();
+        self.ca_by_session.clear();
+        for (index, (session_index, key, symbol, action_type, ratio, event_ts, confirmed)) in
+            actions.into_iter().enumerate()
+        {
+            if session_index >= sessions {
+                return Err(PyValueError::new_err(format!(
+                    "corporate action session index out of range — index={session_index} sessions={sessions}"
+                )));
+            }
+            self.corporate_actions.push(CorporateActionEntry {
+                key,
+                symbol,
+                action_type,
+                ratio,
+                event_ts,
+                confirmed,
+            });
+            self.ca_by_session
+                .entry(session_index)
+                .or_default()
+                .push(index);
+        }
+        Ok(())
+    }
+
+    /// 다음 전략 콜백까지 세션을 진행한다. 콜백이 더 없으면 `None`.
+    fn drive(&mut self) -> PyResult<Option<CallbackFrame>> {
+        self.drive_internal()
+    }
+
+    /// 전략 결정을 라우팅하고 `(decision_id, route_error)`를 돌려준다.
+    fn submit_decision(
+        &mut self,
+        token: u64,
+        decision: DecisionWire,
+    ) -> PyResult<(String, Option<RouteError>)> {
+        self.submit_internal(token, decision, None)
+    }
+
+    /// 잔여 주문 취소 기록 후 전체 레코드 배치를 돌려준다.
+    fn finish(&mut self, py: Python<'_>) -> PyResult<Vec<RecordWire>> {
+        self.finish_internal()?;
+        self.records.batch(py)
+    }
+
+    /// 종료 여부와 무관한 현재 레코드 배치 (전략 예외 시 partial trace 조회용).
+    fn record_batch(&self, py: Python<'_>) -> PyResult<Vec<RecordWire>> {
+        self.records.batch(py)
+    }
+
+    fn record_count(&self) -> usize {
+        self.records.len()
+    }
+
+    fn equity_series(&self) -> Vec<f64> {
+        self.records.equity_series()
+    }
+
+    fn traded_notional(&self) -> f64 {
+        self.records.traded_notional()
+    }
+
+    #[doc(hidden)]
+    fn _debug_force_panic_on_market(&mut self) {
+        self.debug_panic_on_market = true;
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn load_feed(
         &mut self,
         keys: Vec<String>,
         symbols: Vec<String>,
@@ -462,7 +610,7 @@ impl PersistentEngine {
         Ok(())
     }
 
-    fn configure_router(&mut self, actions: Vec<String>, features: Vec<String>) {
+    pub(crate) fn configure_router(&mut self, actions: Vec<String>, features: Vec<String>) {
         self.router_config.configure(actions, features);
     }
 
@@ -511,6 +659,7 @@ impl PersistentEngine {
                         order,
                         &decision_for_orders,
                         fallback_symbols.get(&order.1).map(String::as_str),
+                        &decision_id,
                     )
                 })
                 .collect::<PyResult<Vec<_>>>()?;
@@ -526,100 +675,6 @@ impl PersistentEngine {
             self.pending_groups.extend(staged_groups);
         }
         Ok((decision_id, orders, updates, groups, error))
-    }
-
-    fn run_until_callback(
-        &mut self,
-        event_kind: &str,
-        session_index: usize,
-    ) -> PyResult<CallbackFrame> {
-        match self.lifecycle {
-            Lifecycle::AwaitingDecision(token) => {
-                return Err(PyValueError::new_err(format!(
-                    "callback already awaiting a decision — token={token}"
-                )))
-            }
-            Lifecycle::Failed => {
-                return Err(PyValueError::new_err(format!(
-                    "persistent runtime is failed — detail={:?}",
-                    self.failure_message
-                )))
-            }
-            Lifecycle::Finished => {
-                return Err(PyValueError::new_err(
-                    "persistent runtime is already finished",
-                ))
-            }
-            Lifecycle::Ready | Lifecycle::Running => {}
-        }
-        if !matches!(
-            event_kind,
-            "market" | "fill" | "order_update" | "corporate_action"
-        ) {
-            return Err(PyValueError::new_err(format!(
-                "unsupported callback event kind — kind={event_kind:?}"
-            )));
-        }
-        let ts = self
-            .feed
-            .as_ref()
-            .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?
-            .session_at(session_index)?
-            .to_string();
-        self.callback_seq = self.callback_seq.checked_add(1).ok_or_else(|| {
-            PyValueError::new_err("persistent callback token sequence exhausted u64")
-        })?;
-        let token = self.callback_seq;
-        self.lifecycle = Lifecycle::AwaitingDecision(token);
-        Ok(CallbackFrame {
-            token,
-            event_kind: event_kind.to_string(),
-            session_index,
-            ts,
-        })
-    }
-
-    fn submit_decision(&mut self, token: u64, decision: DecisionWire) -> PyResult<RouteResponse> {
-        match self.lifecycle {
-            Lifecycle::AwaitingDecision(expected) if token == expected => {}
-            Lifecycle::AwaitingDecision(expected) => {
-                return Err(PyValueError::new_err(format!(
-                    "stale callback token — expected={expected} got={token}"
-                )))
-            }
-            Lifecycle::Failed => {
-                return Err(PyValueError::new_err(format!(
-                    "persistent runtime is failed — detail={:?}",
-                    self.failure_message
-                )))
-            }
-            Lifecycle::Finished => {
-                return Err(PyValueError::new_err(
-                    "persistent runtime is already finished",
-                ))
-            }
-            Lifecycle::Ready | Lifecycle::Running => {
-                return Err(PyValueError::new_err(format!(
-                    "no callback is awaiting a decision — token={token}"
-                )))
-            }
-        }
-        match self.route_basic_decision(decision, None) {
-            Ok(response) => {
-                if response.4.is_some() {
-                    self.lifecycle = Lifecycle::Failed;
-                    self.failure_message = response.4.as_ref().map(|error| error.1.clone());
-                } else {
-                    self.lifecycle = Lifecycle::Running;
-                }
-                Ok(response)
-            }
-            Err(error) => {
-                self.lifecycle = Lifecycle::Failed;
-                self.failure_message = Some(error.to_string());
-                Err(error)
-            }
-        }
     }
 
     fn fail_callback(&mut self, token: u64, detail: String) -> PyResult<()> {
@@ -639,26 +694,7 @@ impl PersistentEngine {
         }
     }
 
-    fn finish_callbacks(&mut self) -> PyResult<()> {
-        match self.lifecycle {
-            Lifecycle::AwaitingDecision(token) => Err(PyValueError::new_err(format!(
-                "cannot finish while callback awaits a decision — token={token}"
-            ))),
-            Lifecycle::Failed => Err(PyValueError::new_err(format!(
-                "cannot finish failed persistent runtime — detail={:?}",
-                self.failure_message
-            ))),
-            Lifecycle::Finished => Err(PyValueError::new_err(
-                "persistent runtime finish called more than once",
-            )),
-            Lifecycle::Ready | Lifecycle::Running => {
-                self.lifecycle = Lifecycle::Finished;
-                Ok(())
-            }
-        }
-    }
-
-    fn lifecycle_state(&self) -> &'static str {
+    pub(crate) fn lifecycle_state(&self) -> &'static str {
         match self.lifecycle {
             Lifecycle::Ready => "ready",
             Lifecycle::Running => "running",
@@ -678,48 +714,8 @@ impl PersistentEngine {
         self.failure_message = Some(detail);
     }
 
-    #[doc(hidden)]
-    fn _debug_force_panic(&self) {
-        panic!("forced persistent runtime panic for boundary verification");
-    }
-
     fn activate_pending(&mut self) -> PyResult<()> {
         self.activate_pending_internal()
-    }
-
-    fn queue_push(&mut self, timestamp_micros: i64, priority: u8, token: u64) -> PyResult<()> {
-        self.event_queue.push(timestamp_micros, priority, token)
-    }
-
-    fn queue_pop(&mut self) -> PyResult<u64> {
-        self.event_queue.pop()
-    }
-
-    fn queue_len(&self) -> usize {
-        self.event_queue.len()
-    }
-
-    fn record_append(
-        &mut self,
-        timestamp_micros: i64,
-        kind: u8,
-        payload_token: u64,
-    ) -> PyResult<()> {
-        self.record_store
-            .append(timestamp_micros, kind, payload_token)
-    }
-
-    fn record_batch(&self) -> Vec<RecordWire> {
-        self.record_store.batch()
-    }
-
-    fn record_extend(&mut self, records: Vec<AppendWire>) -> PyResult<()> {
-        self.record_store.extend(records)
-    }
-
-    fn finish(&mut self) -> PyResult<Vec<RecordWire>> {
-        self.finish_callbacks()?;
-        self.record_store.finish()
     }
 
     fn next_decision_id(&mut self) -> String {
@@ -810,7 +806,7 @@ impl PersistentEngine {
         Ok(())
     }
 
-    fn cancel_for_key(&mut self, key: &str) -> Vec<String> {
+    pub(crate) fn cancel_for_key(&mut self, key: &str) -> Vec<String> {
         let mut cancelled = Vec::new();
         self.orders.retain(|order| {
             if order.key == key {
@@ -844,7 +840,7 @@ impl PersistentEngine {
     }
 
     #[pyo3(signature = (session_index, fee_rate, default_participation, slippage))]
-    fn process_market_index(
+    pub(crate) fn process_market_index(
         &mut self,
         session_index: usize,
         fee_rate: f64,
@@ -872,7 +868,7 @@ impl PersistentEngine {
         Ok(())
     }
 
-    fn close_current_session(
+    pub(crate) fn close_current_session(
         &mut self,
         schedule: &str,
         short_borrow_bps_annual: f64,
@@ -983,7 +979,7 @@ impl PersistentEngine {
         )
     }
 
-    fn apply_corporate_action_ratio(
+    pub(crate) fn apply_corporate_action_ratio(
         &mut self,
         key: &str,
         ratio: &str,

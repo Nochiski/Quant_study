@@ -12,21 +12,26 @@ from dataclasses import dataclass, fields, is_dataclass
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Any, cast
+from typing import Any
 
-from backtest_engine.engine.compact import CompactFill, CompactRecordPayload, materialize_payload
+from backtest_engine.types.actions import BasketAction
 from backtest_engine.types.decision import StrategyDecision
 from backtest_engine.types.events import (
     CorporateActionApplied,
     CorporateActionEvent,
     CostAccrued,
+    CostKind,
     FillEvent,
+    OpenOrderSnapshot,
     OrderEvent,
+    OrderStatus,
     OrderUpdateEvent,
     StrategyEvent,
 )
+from backtest_engine.types.instruments import InstrumentId
 from backtest_engine.types.market import MarketSnapshot
-from backtest_engine.types.portfolio import PortfolioSnapshot
+from backtest_engine.types.orders import OrderType, Side, TimeInForce
+from backtest_engine.types.portfolio import PortfolioSnapshot, Position
 
 
 class RecordKind(Enum):
@@ -215,129 +220,245 @@ class EventStore:
 
 
 class PersistentEventStore(EventStore):
-    """Rust append-only index + Python lazy public-object materialization adapter."""
+    """Rust runtime이 소유한 레코드 배치를 공개 Event 객체로 lazy materialize하는 어댑터.
+
+    실행 중에는 Python 객체를 만들지 않는다. Rust 레코드 payload는 원시 wire이고, Python 객체가
+    필요한 payload(DECISION의 결정 객체, CORPORATE_ACTION의 입력 사건, MARKET의 feed snapshot)만
+    side table로 보관한다. `records`/`orders()`/`fills()`는 최초 조회 시 seq 순서로 만든다.
+    """
 
     def __init__(self, runtime: Any) -> None:
+        super().__init__()
         self._runtime = runtime
-        self._payloads_by_token: dict[
-            int, tuple[datetime, RecordPayload | CompactRecordPayload]
-        ] = {}
-        self._payload_token = 0
+        self._sessions: tuple[datetime, ...] = ()
+        self._instruments: tuple[InstrumentId, ...] = ()
+        self._market_snapshots: tuple[MarketSnapshot, ...] = ()
+        self._corporate_actions: tuple[CorporateActionEvent, ...] = ()
+        self._decisions: dict[str, StrategyDecision] = {}
+        self._finished_batch: list[tuple[int, int, int, Any]] | None = None
+        self._materialized: dict[int, RecordPayload] = {}
         self._records_cache: tuple[Record, ...] | None = None
-        self._payload_cache: dict[RecordKind, tuple[RecordPayload, ...]] = {}
-        self._finished_batch: list[tuple[int, int, int, int]] | None = None
-        self._pending_records: list[tuple[int, int, int]] = []
-        self._timestamp_cache: dict[datetime, int] = {}
-        self._decision_tape: list[DecisionTapeEntry] = []
 
-    @staticmethod
-    def _timestamp_micros(ts: datetime) -> int:
-        offset = ts.utcoffset()
-        normalized = ts if offset is None else ts - offset
-        return (
-            (
-                (
-                    (normalized.toordinal() * 24 + normalized.hour) * 60
-                    + normalized.minute
-                )
-                * 60
-                + normalized.second
+    # --- 실행 중 등록 ---------------------------------------------------------
+
+    def bind_feed(
+        self,
+        sessions: tuple[datetime, ...],
+        instruments: tuple[InstrumentId, ...],
+        market_snapshots: tuple[MarketSnapshot, ...],
+    ) -> None:
+        self._sessions = sessions
+        self._instruments = instruments
+        self._market_snapshots = market_snapshots
+
+    def bind_corporate_actions(self, actions: tuple[CorporateActionEvent, ...]) -> None:
+        self._corporate_actions = actions
+
+    def register_decision(self, decision_id: str, decision: StrategyDecision) -> None:
+        self._decisions[decision_id] = decision
+
+    def finish(self) -> None:
+        self._finished_batch = self._runtime.finish()
+        self._records_cache = None
+
+    # --- wire → 공개 타입 -----------------------------------------------------
+
+    def session_ts(self, session_index: int) -> datetime:
+        return self._sessions[session_index]
+
+    def snapshot_from_wire(self, ts: datetime, wire: tuple[Any, ...]) -> PortfolioSnapshot:
+        cash, rows, equity, gross_exposure = wire
+        instruments = self._instruments
+        # Rust 원장이 삽입 순서를 보존하므로 행 순서가 곧 Python dict 순서다.
+        positions = tuple(
+            Position(
+                instrument=instruments[instrument_id],
+                quantity=Decimal(quantity),
+                average_price=average_price,
+                market_price=market_price,
+                market_value=market_value,
+                unrealized_pnl=unrealized_pnl,
             )
-            * 1_000_000
-            + normalized.microsecond
+            for (
+                instrument_id,
+                quantity,
+                average_price,
+                market_price,
+                market_value,
+                unrealized_pnl,
+            ) in rows
+        )
+        return PortfolioSnapshot(
+            ts=ts, cash=cash, positions=positions, equity=equity, gross_exposure=gross_exposure
         )
 
-    def append(
-        self,
-        ts: datetime,
-        kind: RecordKind,
-        payload: RecordPayload | CompactRecordPayload,
-    ) -> None:
-        self._payload_token += 1
-        token = self._payload_token
-        timestamp_micros = self._timestamp_cache.get(ts)
-        if timestamp_micros is None:
-            timestamp_micros = self._timestamp_micros(ts)
-            self._timestamp_cache[ts] = timestamp_micros
-        self._pending_records.append((timestamp_micros, _RECORD_KIND_CODES[kind], token))
-        self._payloads_by_token[token] = (ts, payload)
-        self._records_cache = None
-        self._payload_cache.pop(kind, None)
-        if len(self._pending_records) >= 1_024:
-            self._flush()
+    def order_from_wire(self, ts: datetime, wire: tuple[Any, ...]) -> OrderEvent:
+        (
+            order_id,
+            decision_id,
+            instrument_id,
+            quantity,
+            side,
+            order_type,
+            limit_text,
+            stop_text,
+            time_in_force,
+            group_id,
+            action_index,
+            leg_index,
+        ) = wire
+        action = self._decisions[decision_id].actions[action_index]
+        source_action = (
+            action.legs[leg_index]
+            if isinstance(action, BasketAction) and leg_index is not None
+            else action
+        )
+        return OrderEvent(
+            order_id=order_id,
+            decision_id=decision_id,
+            ts=ts,
+            instrument=self._instruments[instrument_id],
+            quantity=Decimal(quantity),
+            side=Side(side),
+            source_action=source_action,
+            order_type=OrderType(order_type),
+            limit_price=None if limit_text is None else Decimal(limit_text),
+            stop_price=None if stop_text is None else Decimal(stop_text),
+            time_in_force=TimeInForce(time_in_force),
+            group_id=group_id,
+        )
 
-    def _flush(self) -> None:
-        if not self._pending_records:
-            return
-        self._runtime.record_extend(self._pending_records)
-        self._pending_records = []
+    def fill_from_wire(self, ts: datetime, wire: tuple[Any, ...]) -> FillEvent:
+        fill_id, order_id, instrument_id, quantity, side, price, fee, slippage_per_share = wire
+        return FillEvent(
+            fill_id=fill_id,
+            order_id=order_id,
+            ts=ts,
+            instrument=self._instruments[instrument_id],
+            quantity=Decimal(quantity),
+            side=Side(side),
+            price=price,
+            fee=fee,
+            slippage_per_share=slippage_per_share,
+        )
+
+    def order_update_from_wire(self, ts: datetime, wire: tuple[Any, ...]) -> OrderUpdateEvent:
+        order_id, status, detail = wire
+        return OrderUpdateEvent(ts=ts, order_id=order_id, status=OrderStatus(status), detail=detail)
+
+    def open_orders_from_wire(
+        self, ts: datetime, rows: list[tuple[tuple[Any, ...], int]]
+    ) -> tuple[OpenOrderSnapshot, ...]:
+        return tuple(
+            OpenOrderSnapshot(order=self.order_from_wire(ts, wire), remaining=Decimal(remaining))
+            for wire, remaining in rows
+        )
+
+    def frame_event(self, frame: Any) -> StrategyEvent:
+        """콜백 프레임의 이벤트 payload를 전략에 건넬 공개 이벤트로 바꾼다."""
+        ts = self._sessions[frame.session_index]
+        kind = frame.event_kind
+        if kind == "market":
+            return self._market_snapshots[frame.session_index]
+        if kind == "fill":
+            return self.fill_from_wire(ts, frame.event)
+        if kind == "order_update":
+            return self.order_update_from_wire(ts, frame.event)
+        if kind == "corporate_action":
+            return self._corporate_actions[frame.event]
+        raise TypeError(f"unsupported strategy callback event — kind={kind!r}")
+
+    # --- 레코드 조회 -------------------------------------------------------------
+
+    def _batch(self) -> list[tuple[int, int, int, Any]]:
+        if self._finished_batch is not None:
+            return self._finished_batch
+        # 종료 전(전략 예외 등)에는 Rust가 지금까지 쌓은 partial trace를 그대로 읽는다.
+        return self._runtime.record_batch()
+
+    def _materialize(
+        self, seq: int, session_index: int, kind_code: int, payload: Any
+    ) -> RecordPayload:
+        cached = self._materialized.get(seq)
+        if cached is not None:
+            return cached
+        ts = self._sessions[session_index]
+        kind = _RECORD_KINDS[kind_code]
+        built: RecordPayload
+        if kind is RecordKind.MARKET:
+            built = self._market_snapshots[session_index]
+        elif kind is RecordKind.DECISION:
+            decision_id, _native = payload
+            built = DecisionRecord(decision_id, self._decisions[decision_id])
+        elif kind is RecordKind.ORDER:
+            built = self.order_from_wire(ts, payload)
+        elif kind is RecordKind.ORDER_UPDATE:
+            built = self.order_update_from_wire(ts, payload)
+        elif kind is RecordKind.FILL:
+            built = self.fill_from_wire(ts, payload)
+        elif kind is RecordKind.SNAPSHOT:
+            built = self.snapshot_from_wire(ts, payload)
+        elif kind is RecordKind.CORPORATE_ACTION:
+            built = self._corporate_actions[payload]
+        elif kind is RecordKind.CORPORATE_ACTION_APPLIED:
+            index, old_quantity, new_quantity, old_average, new_average, cash_paid = payload
+            action = self._corporate_actions[index]
+            built = CorporateActionApplied(
+                ts=ts,
+                instrument=action.instrument,
+                action=action,
+                old_quantity=Decimal(old_quantity),
+                new_quantity=Decimal(new_quantity),
+                old_average_price=old_average,
+                new_average_price=new_average,
+                cash_paid=cash_paid,
+            )
+        elif kind is RecordKind.COST:
+            cost_kind, instrument_id, amount = payload
+            built = CostAccrued(
+                ts=ts,
+                kind=CostKind(cost_kind),
+                instrument=None if instrument_id is None else self._instruments[instrument_id],
+                amount=amount,
+            )
+        else:
+            raise TypeError(f"unsupported persistent record kind — kind={kind!r}")
+        self._materialized[seq] = built
+        return built
 
     @property
     def records(self) -> tuple[Record, ...]:
         if self._records_cache is None:
-            batch = self._batch()
             self._records_cache = tuple(
                 Record(
                     seq=seq,
-                    ts=self._payloads_by_token[token][0],
+                    ts=self._sessions[session_index],
                     kind=_RECORD_KINDS[kind_code],
-                    payload=self._materialize_token(token),
+                    payload=self._materialize(seq, session_index, kind_code, payload),
                 )
-                for seq, _timestamp_micros, kind_code, token in batch
+                for seq, session_index, kind_code, payload in self._batch()
             )
         return self._records_cache
 
-    def _batch(self) -> list[tuple[int, int, int, int]]:
-        self._flush()
-        return (
-            self._finished_batch
-            if self._finished_batch is not None
-            else self._runtime.record_batch()
-        )
-
-    def _materialize_token(self, token: int) -> RecordPayload:
-        ts, payload = self._payloads_by_token[token]
-        materialized = cast(RecordPayload, materialize_payload(payload))
-        if materialized is not payload:
-            # 결과와 EventStore가 동일 객체를 공유하도록 compact payload를 즉시 놓는다.
-            self._payloads_by_token[token] = (ts, materialized)
-        return materialized
-
-    def finish(self) -> None:
-        self._flush()
-        self._finished_batch = self._runtime.finish()
-        self._records_cache = None
-        self._payload_cache.clear()
-
     def _payloads(self, kind: RecordKind) -> tuple[RecordPayload, ...]:
-        cached = self._payload_cache.get(kind)
-        if cached is None:
-            kind_code = _RECORD_KIND_CODES[kind]
-            cached = tuple(
-                self._materialize_token(token)
-                for _seq, _timestamp_micros, code, token in self._batch()
-                if code == kind_code
-            )
-            self._payload_cache[kind] = cached
-        return cached
+        kind_code = _RECORD_KIND_CODES[kind]
+        return tuple(
+            self._materialize(seq, session_index, code, payload)
+            for seq, session_index, code, payload in self._batch()
+            if code == kind_code
+        )
 
     def compact_trace(self) -> tuple[tuple[int, int, str, int], ...]:
-        """Return the primitive Rust record index for low-overhead debugging."""
+        """디버그용 원시 Rust 레코드 인덱스 `(seq, session_index, kind, seq)`."""
         return tuple(
-            (seq, timestamp_micros, _RECORD_KINDS[kind_code].value, token)
-            for seq, timestamp_micros, kind_code, token in self._batch()
+            (seq, session_index, _RECORD_KINDS[kind_code].value, seq)
+            for seq, session_index, kind_code, _payload in self._batch()
         )
 
+    def equity_values(self) -> tuple[float, ...]:
+        """SNAPSHOT 레코드 순서의 equity — Event 객체 없이 metrics를 계산한다."""
+        return tuple(self._runtime.equity_series())
+
     def traded_notional(self) -> float:
-        """Sum fill notional directly from compact payloads for batch metrics."""
-        kind_code = _RECORD_KIND_CODES[RecordKind.FILL]
-        total = 0.0
-        for _seq, _timestamp_micros, code, token in self._batch():
-            if code != kind_code:
-                continue
-            payload = self._payloads_by_token[token][1]
-            if isinstance(payload, CompactFill):
-                total += payload.quantity * payload.price
-            elif isinstance(payload, FillEvent):
-                total += float(payload.quantity) * payload.price
-        return total
+        """FILL 레코드 순서로 누산한 체결 금액 (Rust가 같은 결합 순서로 계산)."""
+        return float(self._runtime.traded_notional())

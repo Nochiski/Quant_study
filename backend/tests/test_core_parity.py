@@ -821,9 +821,12 @@ def test_all_actions_randomized_trace_matches_persistent_rust(seed: int) -> None
 
 
 @RUST_ONLY
-def test_promoted_rust_sends_one_decision_batch_per_callback(
+def test_promoted_rust_makes_no_per_session_ffi(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """세션 루프는 Rust가 돌린다 — Python↔Rust 왕복은 전략 콜백과 적재·종료에서만 일어난다."""
+    from collections import Counter
+
     from backtest_engine.engine import loop as loop_module
 
     real_factory = loop_module.make_persistent_runtime
@@ -832,48 +835,18 @@ def test_promoted_rust_sends_one_decision_batch_per_callback(
     class CountingRuntime:
         def __init__(self, inner: Any) -> None:
             self.inner = inner
-            self.route_calls = 0
-            self.load_feed_calls = 0
-            self.indexed_market_calls = 0
-            self.legacy_market_calls = 0
-            self.activate_pending_calls = 0
-            self.place_order_calls = 0
-            self.register_group_calls = 0
-
-        def load_feed(self, *args: object) -> object:
-            self.load_feed_calls += 1
-            return self.inner.load_feed(*args)
-
-        def route_basic_decision(self, *args: object) -> object:
-            self.route_calls += 1
-            return self.inner.route_basic_decision(*args)
-
-        def submit_decision(self, *args: object) -> object:
-            self.route_calls += 1
-            return self.inner.submit_decision(*args)
-
-        def process_market_index(self, *args: object) -> object:
-            self.indexed_market_calls += 1
-            return self.inner.process_market_index(*args)
-
-        def process_market(self, *args: object) -> object:
-            self.legacy_market_calls += 1
-            return self.inner.process_market(*args)
-
-        def activate_pending(self, *args: object) -> object:
-            self.activate_pending_calls += 1
-            return self.inner.activate_pending(*args)
-
-        def place_order(self, *args: object) -> object:
-            self.place_order_calls += 1
-            return self.inner.place_order(*args)
-
-        def register_group(self, *args: object) -> object:
-            self.register_group_calls += 1
-            return self.inner.register_group(*args)
+            self.calls: Counter[str] = Counter()
 
         def __getattr__(self, name: str) -> Any:
-            return getattr(self.inner, name)
+            attribute = getattr(self.inner, name)
+            if not callable(attribute):
+                return attribute
+
+            def counted(*args: object, **kwargs: object) -> object:
+                self.calls[name] += 1
+                return attribute(*args, **kwargs)
+
+            return counted
 
     def counting_factory(*args: Any, **kwargs: Any) -> CountingRuntime:
         proxy = CountingRuntime(real_factory(*args, **kwargs))
@@ -882,18 +855,43 @@ def test_promoted_rust_sends_one_decision_batch_per_callback(
 
     monkeypatch.setattr(loop_module, "make_persistent_runtime", counting_factory)
     engine = BacktestEngine(RunConfig(run_id="ffi-count", initial_cash=100_000.0), core="rust")
-    engine.run(
+    result = engine.run(
         ScriptedStrategy(script=(target_70pct(), None, liquidate(), None)),
         DataFeed(GOLDEN_BARS),
     )
     assert len(proxies) == 1
-    assert proxies[0].route_calls == len(engine.event_store.decision_tape)
-    assert proxies[0].load_feed_calls == 1
-    assert proxies[0].indexed_market_calls == len(GOLDEN_BARS)
-    assert proxies[0].legacy_market_calls == 0
-    assert proxies[0].activate_pending_calls == 2
-    assert proxies[0].place_order_calls == 0
-    assert proxies[0].register_group_calls == 0
+    calls = proxies[0].calls
+    callbacks = len(engine.event_store.decision_tape)
+    assert callbacks == len(GOLDEN_BARS)
+    assert calls["submit_decision"] == callbacks
+    assert calls["drive"] == callbacks + 1
+    assert calls["load_feed"] == 1
+    assert calls["configure_router"] == 1
+    assert calls["configure_run"] == 1
+    assert calls["load_corporate_actions"] == 1
+    assert calls["finish"] == 1
+    # 세션 단위 왕복은 없다.
+    for name in (
+        "process_market_index",
+        "process_market",
+        "activate_pending",
+        "close_current_session",
+        "mark_current_session",
+        "queue_push",
+        "queue_pop",
+        "record_append",
+        "record_extend",
+        "portfolio_snapshot",
+        "open_order_states",
+        "place_order",
+        "register_group",
+    ):
+        assert calls[name] == 0, name
+    # 결과·지표 조회는 종료 배치와 Rust 누산값만 쓴다.
+    assert len(result.fills) == 2
+    assert calls["record_batch"] == 0
+    assert calls["equity_series"] == 1
+    assert calls["traded_notional"] == 1
     assert proxies[0].inner.lifecycle_state() == "finished"
 
 
@@ -911,8 +909,10 @@ def test_rust_panic_becomes_engine_error_and_poisons_runtime(
         def __init__(self, inner: Any) -> None:
             self.inner = inner
 
-        def process_market_index(self, *_args: object) -> object:
-            return self.inner._debug_force_panic()
+        def drive(self) -> object:
+            # 첫 세션 MARKET 레코드를 남긴 직후 Rust 내부에서 panic이 나게 한다.
+            self.inner._debug_force_panic_on_market()
+            return self.inner.drive()
 
         def __getattr__(self, name: str) -> Any:
             return getattr(self.inner, name)
@@ -954,36 +954,6 @@ def test_empty_feed_fails_identically_after_clean_finish(core_name: str) -> None
 
 
 @RUST_ONLY
-def test_persistent_event_queue_matches_timestamp_priority_and_fifo_order() -> None:
-    from backtest_engine.engine.queue import (
-        EventPriority,
-        MarketArrived,
-        PersistentEventQueue,
-        SessionClose,
-    )
-
-    runtime = make_persistent_runtime(
-        100_000.0, allow_short=False, allow_margin=False, leverage=1.0
-    )
-    queue = PersistentEventQueue(runtime)
-    late = MarketArrived(make_snapshot(day(2), make_bar(day(2), INSTRUMENT, 100.0, 100.0)))
-    close = SessionClose(make_snapshot(day(1), make_bar(day(1), INSTRUMENT, 100.0, 100.0)))
-    first = MarketArrived(make_snapshot(day(1), make_bar(day(1), INSTRUMENT, 100.0, 100.0)))
-    second = MarketArrived(make_snapshot(day(1), make_bar(day(1), INSTRUMENT, 101.0, 101.0)))
-    queue.push(day(2), EventPriority.MARKET, late)
-    queue.push(day(1), EventPriority.SESSION_CLOSE, close)
-    queue.push(day(1), EventPriority.MARKET, first)
-    queue.push(day(1), EventPriority.MARKET, second)
-    assert len(queue) == 4
-    assert [queue.pop(), queue.pop(), queue.pop(), queue.pop()] == [
-        first,
-        second,
-        close,
-        late,
-    ]
-
-
-@RUST_ONLY
 def test_persistent_callback_tokens_reject_stale_and_double_submit() -> None:
     from backtest_engine.engine.wire import decision_to_wire
 
@@ -1003,17 +973,28 @@ def test_persistent_callback_tokens_reject_stale_and_double_submit() -> None:
         [100.0],
         [1_000],
     )
-    runtime.process_market_index(0, 0.0, None, ("none", 0.0, 0.0))
-    frame = runtime.run_until_callback("market", 0)
+    runtime.configure_run(
+        0.0, None, ("none", 0.0, 0.0), "every_session", 0.0, 0.0, 252, 0, False, False, False
+    )
+    frame = runtime.drive()
     assert frame.token == 1
     assert frame.event_kind == "market"
     assert frame.session_index == 0
+    assert frame.event is None
+    assert frame.snapshot == (100_000.0, [], 100_000.0, 0.0)
+    assert frame.open_orders == []
+    with pytest.raises(ValueError, match="callback already awaiting"):
+        runtime.drive()
     decision = decision_to_wire(StrategyDecision.no_action(day(1), "token"))
     with pytest.raises(ValueError, match="stale callback token"):
         runtime.submit_decision(frame.token + 1, decision)
-    runtime.submit_decision(frame.token, decision)
+    decision_id, error = runtime.submit_decision(frame.token, decision)
+    assert (decision_id, error) == ("D-000001", None)
     with pytest.raises(ValueError, match="no callback is awaiting"):
         runtime.submit_decision(frame.token, decision)
+    assert runtime.drive() is None
+    kinds = [kind for _seq, _session, kind, _payload in runtime.finish()]
+    assert kinds == [0, 5, 1]  # MARKET, SNAPSHOT, DECISION
 
 
 @RUST_ONLY
@@ -1067,33 +1048,32 @@ def test_persistent_strategy_exception_poison_runtime_and_preserves_partial_trac
 def test_persistent_finish_keeps_order_fill_results_lazy_and_compact_traceable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from backtest_engine.engine.compact import CompactFill, CompactOrder
     from backtest_engine.engine.store import PersistentEventStore, RecordKind
 
     finished = False
     materialized = {"order": 0, "fill": 0}
     real_finish = PersistentEventStore.finish
-    real_order_materialize = CompactOrder.materialize
-    real_fill_materialize = CompactFill.materialize
+    real_order_materialize = PersistentEventStore.order_from_wire
+    real_fill_materialize = PersistentEventStore.fill_from_wire
 
     def tracked_finish(store: PersistentEventStore) -> None:
         nonlocal finished
         real_finish(store)
         finished = True
 
-    def tracked_order(order: CompactOrder) -> OrderEvent:
+    def tracked_order(store: PersistentEventStore, ts: Any, wire: Any) -> OrderEvent:
         assert finished, "public OrderEvent was allocated before finish()"
         materialized["order"] += 1
-        return real_order_materialize(order)
+        return real_order_materialize(store, ts, wire)
 
-    def tracked_fill(fill: CompactFill) -> FillEvent:
+    def tracked_fill(store: PersistentEventStore, ts: Any, wire: Any) -> FillEvent:
         assert finished, "public FillEvent was allocated before finish()"
         materialized["fill"] += 1
-        return real_fill_materialize(fill)
+        return real_fill_materialize(store, ts, wire)
 
     monkeypatch.setattr(PersistentEventStore, "finish", tracked_finish)
-    monkeypatch.setattr(CompactOrder, "materialize", tracked_order)
-    monkeypatch.setattr(CompactFill, "materialize", tracked_fill)
+    monkeypatch.setattr(PersistentEventStore, "order_from_wire", tracked_order)
+    monkeypatch.setattr(PersistentEventStore, "fill_from_wire", tracked_fill)
 
     engine = BacktestEngine(
         RunConfig(run_id="lazy-result", initial_cash=100_000.0, fee_bps=10.0),

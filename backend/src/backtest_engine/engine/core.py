@@ -21,22 +21,18 @@ from backtest_engine.engine.broker import (
     QuoteCore,
     QuoteNumbers,
 )
-from backtest_engine.engine.compact import CompactOrder
-from backtest_engine.engine.orders import BasketGroup, OpenOrder, OrderManager
 from backtest_engine.engine.portfolio import Portfolio as PythonPortfolio
 from backtest_engine.engine.portfolio import scale_quantity
 from backtest_engine.engine.pricing import PriceDecision, execution_price
 from backtest_engine.engine.slippage import FixedBpsSlippage, NoSlippage, VolumeShareSlippage
 from backtest_engine.errors import CoreUnavailable, NegativeCashError, NegativePositionError
 from backtest_engine.ports.execution import SlippageModel
-from backtest_engine.types.actions import GroupPolicy
 from backtest_engine.types.events import (
     CorporateActionApplied,
     CorporateActionEvent,
     CostAccrued,
     CostKind,
     FillEvent,
-    OpenOrderSnapshot,
     OrderEvent,
 )
 from backtest_engine.types.instruments import InstrumentId
@@ -272,9 +268,7 @@ class PersistentPortfolio:
             )
         key = instrument_key(fill.instrument)
         try:
-            self._inner.apply_fill(
-                key, fill.side.value, int(fill.quantity), fill.price, fill.fee
-            )
+            self._inner.apply_fill(key, fill.side.value, int(fill.quantity), fill.price, fill.fee)
         except ValueError as error:
             message = str(error)
             if message.startswith("negative_position:"):
@@ -308,9 +302,7 @@ class PersistentPortfolio:
                 f"corporate action settlement price must be > 0 — "
                 f"instrument={action.instrument.symbol} ts={action.ts} price={settlement_price}"
             )
-        applied = self._inner.apply_corporate_action_ratio(
-            key, str(action.ratio), settlement_price
-        )
+        applied = self._inner.apply_corporate_action_ratio(key, str(action.ratio), settlement_price)
         if applied is None:
             return None
         old_quantity_raw, new_quantity_raw, old_average, new_average, cash_paid = applied
@@ -409,160 +401,6 @@ class PersistentPortfolio:
             gross_exposure=gross_exposure,
         )
         return built
-
-
-class PersistentOrderManager(OrderManager):
-    """mutable 주문 상태는 Rust runtime만 소유하고 Python에는 immutable OrderEvent만 보관한다."""
-
-    def __init__(self, runtime: Any) -> None:
-        self._runtime = runtime
-        self._orders: dict[str, CompactOrder] = {}
-        self._has_pending = False
-
-    def _states(self) -> dict[str, tuple[int, bool]]:
-        return {
-            order_id: (remaining, triggered)
-            for order_id, remaining, triggered in self._runtime.open_order_states()
-        }
-
-    def _entry(self, order_id: str, remaining: int, triggered: bool) -> OpenOrder:
-        return OpenOrder(
-            order=self._orders[order_id].materialize(),
-            remaining=Decimal(remaining),
-            triggered=triggered,
-        )
-
-    def next_decision_id(self) -> str:
-        return cast(str, self._runtime.next_decision_id())
-
-    def next_order_id(self) -> str:
-        return cast(str, self._runtime.next_order_id())
-
-    def next_fill_id(self) -> str:
-        return cast(str, self._runtime.next_fill_id())
-
-    def next_group_id(self) -> str:
-        return cast(str, self._runtime.next_group_id())
-
-    def register_group(self, group: BasketGroup) -> None:
-        # Rust Router가 그룹을 같은 route 호출 안에서 pending 상태로 저장한다.
-        del group
-        self._has_pending = True
-
-    def activate_pending(self) -> None:
-        """ORDER priority에서 노출된 주문을 다음 MARKET 직전에 Rust에서 일괄 활성화한다."""
-        if not self._has_pending:
-            return
-        self._runtime.activate_pending()
-        self._has_pending = False
-
-    def open_groups(self) -> tuple[BasketGroup, ...]:
-        return tuple(
-            BasketGroup(group_id, GroupPolicy(policy), tuple(order_ids))
-            for group_id, policy, order_ids in self._runtime.open_group_states()
-        )
-
-    def group_entries(self, group_id: str) -> tuple[OpenOrder, ...]:
-        states = self._states()
-        group = next(group for group in self.open_groups() if group.group_id == group_id)
-        return tuple(
-            self._entry(order_id, *states[order_id])
-            for order_id in group.order_ids
-            if order_id in states
-        )
-
-    def drop_group(self, group_id: str) -> None:
-        self._runtime.drop_group(group_id)
-
-    def place(self, order: OrderEvent) -> None:
-        if order.quantity != order.quantity.to_integral_value():
-            raise ValueError(
-                f"rust core supports integer share quantities only — "
-                f"order_id={order.order_id} quantity={order.quantity}"
-            )
-        # mutable 주문은 route 호출에서 이미 Rust pending 영역에 저장됐다. 여기서는 공개
-        # EventStore/context materialization에 필요한 immutable 객체만 기억한다.
-        self.place_compact(CompactOrder.from_event(order))
-
-    def place_compact(self, order: CompactOrder) -> None:
-        self._orders[order.order_id] = order
-        self._has_pending = True
-
-    def order_compact(self, order_id: str) -> CompactOrder:
-        return self._orders[order_id]
-
-    def compact_open_entries(self) -> tuple[tuple[CompactOrder, int, bool], ...]:
-        return tuple(
-            (self._orders[order_id], remaining, triggered)
-            for order_id, remaining, triggered in self._runtime.open_order_states()
-        )
-
-    def compact_open_orders(self) -> tuple[tuple[CompactOrder, int], ...]:
-        return tuple(
-            (order, remaining)
-            for order, remaining, _triggered in self.compact_open_entries()
-        )
-
-    def open_orders(self) -> tuple[OpenOrderSnapshot, ...]:
-        return tuple(
-            OpenOrderSnapshot(order=entry.order, remaining=entry.remaining)
-            for entry in self.open_entries()
-        )
-
-    def open_entries(self) -> tuple[OpenOrder, ...]:
-        return tuple(
-            self._entry(order_id, remaining, triggered)
-            for order_id, remaining, triggered in self._runtime.open_order_states()
-        )
-
-    def get(self, order_id: str) -> OpenOrder | None:
-        state = self._states().get(order_id)
-        return None if state is None else self._entry(order_id, *state)
-
-    def order_event(self, order_id: str) -> OrderEvent:
-        return self._orders[order_id].materialize()
-
-    def settle(self, order_id: str, filled: Decimal) -> Decimal:
-        if filled != filled.to_integral_value():
-            raise ValueError(
-                f"rust core supports integer share quantities only — "
-                f"order_id={order_id} quantity={filled}"
-            )
-        return Decimal(self._runtime.settle_order(order_id, int(filled)))
-
-    def mark_triggered(self, order_id: str) -> None:
-        self._runtime.mark_triggered(order_id)
-
-    def remove(self, order_id: str) -> OpenOrder:
-        _, remaining, triggered = self._runtime.remove_order(order_id)
-        return self._entry(order_id, remaining, triggered)
-
-    def cancel_for_instrument(self, instrument: InstrumentId) -> tuple[OrderEvent, ...]:
-        return tuple(
-            order.materialize() for order in self.cancel_compact_for_instrument(instrument)
-        )
-
-    def cancel_compact_for_instrument(
-        self, instrument: InstrumentId
-    ) -> tuple[CompactOrder, ...]:
-        order_ids = self._runtime.cancel_for_key(instrument_key(instrument))
-        return tuple(self._orders[order_id] for order_id in order_ids)
-
-    def drain(self) -> tuple[OpenOrder, ...]:
-        return tuple(
-            OpenOrder(
-                order=order.materialize(),
-                remaining=Decimal(remaining),
-                triggered=triggered,
-            )
-            for order, remaining, triggered in self.drain_compact()
-        )
-
-    def drain_compact(self) -> tuple[tuple[CompactOrder, int, bool], ...]:
-        return tuple(
-            (self._orders[order_id], remaining, triggered)
-            for order_id, remaining, triggered in self._runtime.drain_orders()
-        )
 
 
 def make_persistent_runtime(

@@ -503,8 +503,13 @@ export const planSourceOperation = (source: string, format: SourceFormat, op: So
 - `insert-item`: 부모 sequence 끝(또는 `index`) 에 `- ...` fragment. `[]`면 block sequence로 교체.
 - `remove`: key range 시작 줄부터 value range 끝 줄까지 삭제. 삭제로 부모 mapping이 비면
   `key: {}`, sequence가 비면 `key: []`로 남긴다(구조 유지).
-- 들여쓰기 폭은 문서에서 감지(첫 중첩 키), EOL은 `\r\n` 감지. 모든 연산은
-  `parseSource(nextSource).status === "ok"` preflight.
+- 들여쓰기 폭은 문서에서 감지(mapping 아래 첫 중첩 키의 열 → 없으면 첫 시퀀스 항목의 `-` 열 → 2;
+  빈 컨테이너 확장에만 쓰이고 일반 삽입은 형제의 실제 열을 복사), EOL은 `\r\n`/`\n` 다수결.
+  모든 연산은 `parseSource(nextSource).status === "ok"` preflight.
+- 알려진 제한(P3-01 리뷰): 내용이 있는 flow 컬렉션(`{x: 1}`, `[1, 2]`) 안은 편집하지 않는다(fail-closed,
+  사유는 `parse`/`not-sequence`/`not-found`). 값이 비어 있는 `key:` 부모에 `insert-key`는 `not-mapping`이다
+  (P4-02 착수 전 확장 여부 결정). 삭제된 키/항목 **위**의 독립 주석은 그 자리에 남는다(어느 키의 주석인지
+  YAML이 답하지 않으므로 보수적으로 보존).
 - 범위는 `parseSource`의 `valueRanges`/`keyRanges`에서 **정확히 그 pointer로** 읽는다.
   `locateRange`는 pointer가 없으면 조상 범위로 fallback하므로 `replace-scalar`·`remove`에 쓰면 부모
   전체를 지운다. 없는 pointer는 `not-found`다(Phase 2 감사 4.5). mapping/sequence 노드의 range는

@@ -255,6 +255,69 @@ describe("nested sequences and dash-line keys", () => {
   });
 });
 
+describe("comments and block scalars (review P1-1·P1-2)", () => {
+  it("keeps the comment that follows a block scalar when removing, inserting or replacing around it", () => {
+    const source = "a: |\n  l1\n  l2\n# b 설명\nb: 2\n";
+    expect(ok(source, { kind: "remove", pointer: "/a" }).nextSource).toBe(
+      "# b 설명\nb: 2\n",
+    );
+    expect(
+      ok(source, { kind: "insert-key", parentPointer: "", key: "c", value: 3 })
+        .nextSource,
+    ).toBe("a: |\n  l1\n  l2\n# b 설명\nb: 2\nc: 3\n");
+    expect(
+      ok(source, { kind: "replace-scalar", pointer: "/a", value: "x" })
+        .nextSource,
+    ).toBe("a: x\n# b 설명\nb: 2\n");
+    const nested = "m:\n  a: 1\n  b: |\n    l1\n# z 설명\nz: 0\n";
+    expect(
+      ok(nested, {
+        kind: "insert-key",
+        parentPointer: "/m",
+        key: "c",
+        value: 3,
+      }).nextSource,
+    ).toBe("m:\n  a: 1\n  b: |\n    l1\n  c: 3\n# z 설명\nz: 0\n");
+    expect(
+      ok("a: |\n  l1\n", { kind: "replace-scalar", pointer: "/a", value: "x" })
+        .nextSource,
+    ).toBe("a: x\n");
+  });
+
+  it("removes a sequence item or a dash-line key without deleting the comment that describes the next one", () => {
+    const items = "a:\n  - x\n  # y 설명\n  - y\nb: 1\n";
+    expect(ok(items, { kind: "remove", pointer: "/a/0" }).nextSource).toBe(
+      "a:\n  # y 설명\n  - y\nb: 1\n",
+    );
+    const keys = "a:\n  - k: 1\n    # m 설명\n    m: 2\n";
+    expect(ok(keys, { kind: "remove", pointer: "/a/0/k" }).nextSource).toBe(
+      "a:\n  - # m 설명\n    m: 2\n",
+    );
+    const nested = "a:\n  - - x\n  # 다음 설명\n  - - z\n";
+    expect(ok(nested, { kind: "remove", pointer: "/a/0" }).nextSource).toBe(
+      "a:\n  # 다음 설명\n  - - z\n",
+    );
+  });
+
+  it("expands `- []` and `- {}` without leaving a trailing space", () => {
+    expect(
+      ok("a:\n  - []\n", {
+        kind: "insert-item",
+        parentPointer: "/a/0",
+        value: 1,
+      }).nextSource,
+    ).toBe("a:\n  -\n    - 1\n");
+    expect(
+      ok("a:\n  - {}\n", {
+        kind: "insert-key",
+        parentPointer: "/a/0",
+        key: "k",
+        value: 1,
+      }).nextSource,
+    ).toBe("a:\n  -\n    k: 1\n");
+  });
+});
+
 describe("golden document", () => {
   it("round-trips every scalar of the 1.1 golden through replace-scalar with the same value", () => {
     const parsed = parseSource(GOLDEN, "yaml");

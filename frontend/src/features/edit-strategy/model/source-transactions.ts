@@ -1,6 +1,7 @@
 import { stringify } from "yaml";
 
 import {
+  escapePointerSegment,
   parseSource,
   pointerSegments,
   valueAtPointer,
@@ -139,8 +140,12 @@ export const applyToTree = (
   }
 };
 
-const detectEol = (source: string): Eol =>
-  source.includes("\r\n") ? "\r\n" : "\n";
+/** 문서의 줄 종결자: 혼재하면 다수결(P3-01 리뷰 P2-9). */
+const detectEol = (source: string): Eol => {
+  const crlf = source.split("\r\n").length - 1;
+  const lf = source.split("\n").length - 1 - crlf;
+  return crlf > lf ? "\r\n" : "\n";
+};
 
 /**
  * 문서의 들여쓰기 폭. mapping 아래 첫 중첩 키의 열(부모 키 열 기준)을 쓰고, 그런 키가 없으면 첫
@@ -224,8 +229,7 @@ const childKeyColumn = (
   return null;
 };
 
-const escape = (segment: string): string =>
-  segment.replaceAll("~", "~0").replaceAll("/", "~1");
+const escape = escapePointerSegment;
 
 const parentPointerOf = (pointer: string): string => {
   const segments = pointerSegments(pointer);
@@ -246,9 +250,16 @@ const planReplaceScalar = (
   const current = valueAt(parsed.tree, op.pointer);
   if (!isScalar(current)) return "not-scalar";
   const literal = scalarLiteral(op.value);
+  // block scalar의 range는 줄바꿈까지 포함하므로 내용 끝까지만 교체한다(P3-01 리뷰 P2-8).
+  let to = range.end.offset;
+  while (
+    to > range.start.offset &&
+    (source[to - 1] === "\n" || source[to - 1] === "\r")
+  )
+    to -= 1;
   return {
     from: range.start.offset,
-    to: range.end.offset,
+    to,
     insert: literal,
     cursor: range.start.offset + literal.length,
   };
@@ -263,7 +274,7 @@ const contentEnd = (
   source: string,
   parsed: Extract<ParsedSource, { status: "ok" }>,
   pointer: string,
-): number => {
+): number | null => {
   const within = (candidate: string): boolean =>
     pointer === ""
       ? true
@@ -281,7 +292,11 @@ const contentEnd = (
       (Array.isArray(value) && value.length === 0);
     if (leaf) end = Math.max(end, range.end.offset);
   }
-  return end < 0 ? lineEndOf(source, 0) : end;
+  if (end < 0) return null;
+  // block scalar(`|`/`>`)의 값 range는 마지막 줄바꿈까지 포함한다(P3-01 리뷰 P1-1): 내용의 끝으로 되돌린다.
+  while (end > 0 && (source[end - 1] === "\n" || source[end - 1] === "\r"))
+    end -= 1;
+  return end;
 };
 
 /** `key:` 바로 뒤 offset. 빈 컨테이너(`{}`/`[]`)를 block으로 바꾸거나 컨테이너를 비울 때의 교체 시작점. */
@@ -310,17 +325,21 @@ const planInsertKey = (
   const fragment = yamlBlock({ [op.key]: op.value });
   if (op.parentPointer === "") {
     // 루트: 마지막 내용 줄 뒤에 새 최상위 키.
-    const at = lineEndOf(source, contentEnd(source, parsed, ""));
+    const rootEnd = contentEnd(source, parsed, "");
+    if (rootEnd === null) return "not-found";
+    const at = lineEndOf(source, rootEnd);
     const insert = `${eol}${indentLines(fragment, "", eol)}`;
     return { from: at, to: at, insert, cursor: at + insert.length };
   }
   const parentRange = parsed.valueRanges.get(op.parentPointer)!;
   const existingColumn = childKeyColumn(parsed, op.parentPointer, parent);
   if (existingColumn === null) {
-    // flow `{}`: `key:` 뒤부터 value 끝까지를 block mapping으로 교체.
+    // flow `{}`: `key:` 뒤(시퀀스 항목이면 `-` 뒤)부터 value 끝까지를 block mapping으로 교체.
     const keyRange = parsed.keyRanges.get(op.parentPointer);
+    const dash = dashOffsetOf(source, parentRange.start.offset);
     const from =
-      afterColon(source, parsed, op.parentPointer) ?? parentRange.start.offset;
+      afterColon(source, parsed, op.parentPointer) ??
+      (dash === null ? parentRange.start.offset : dash + 1);
     const parentColumn =
       keyRange?.start.column ?? Math.max(0, parentRange.start.column - unit);
     const indent = " ".repeat(parentColumn + unit);
@@ -333,7 +352,9 @@ const planInsertKey = (
     };
   }
   const indent = " ".repeat(existingColumn);
-  const at = lineEndOf(source, contentEnd(source, parsed, op.parentPointer));
+  const parentEnd = contentEnd(source, parsed, op.parentPointer);
+  if (parentEnd === null) return "not-found";
+  const at = lineEndOf(source, parentEnd);
   const insert = `${eol}${indent}${indentLines(fragment, indent, eol)}`;
   return { from: at, to: at, insert, cursor: at + insert.length };
 };
@@ -353,10 +374,12 @@ const planInsertItem = (
   const fragment = yamlBlock([op.value]); // `- ...` 로 시작
   const parentRange = parsed.valueRanges.get(op.parentPointer)!;
   if (parent.length === 0) {
-    // flow `[]`: `key:` 뒤부터 block sequence로 교체. 항목은 부모 키 열 + 들여쓰기 폭.
+    // flow `[]`: `key:` 뒤(시퀀스 항목이면 `-` 뒤)부터 block sequence로 교체. 항목은 부모 키 열 + 폭.
     const keyRange = parsed.keyRanges.get(op.parentPointer);
+    const dash = dashOffsetOf(source, parentRange.start.offset);
     const from =
-      afterColon(source, parsed, op.parentPointer) ?? parentRange.start.offset;
+      afterColon(source, parsed, op.parentPointer) ??
+      (dash === null ? parentRange.start.offset : dash + 1);
     const parentColumn =
       keyRange?.start.column ?? Math.max(0, parentRange.start.column - unit);
     const indent = " ".repeat(parentColumn + unit);
@@ -382,6 +405,8 @@ const planInsertItem = (
     const dash =
       target === undefined ? null : dashOffsetOf(source, target.start.offset);
     if (dash === null) return "not-sequence";
+    // 대상 항목 위의 독립 주석은 대상을 설명하므로 새 항목은 그 주석보다 **위**가 아니라 `-` 자리에
+    // 들어간다(주석은 새 항목이 아니라 밀려난 대상과 함께 남는다).
     // 대상 항목의 `-` 자리에 새 항목을 넣고 대상은 다음 줄로 밀린다.
     const insert = `${indentLines(fragment, indent, eol)}${eol}${indent}`;
     return {
@@ -391,10 +416,13 @@ const planInsertItem = (
       cursor: dash + insert.length - eol.length - indent.length,
     };
   }
-  const at = lineEndOf(
+  const lastEnd = contentEnd(
     source,
-    contentEnd(source, parsed, `${op.parentPointer}/${parent.length - 1}`),
+    parsed,
+    `${op.parentPointer}/${parent.length - 1}`,
   );
+  if (lastEnd === null) return "not-found";
+  const at = lineEndOf(source, lastEnd);
   const insert = `${eol}${indent}${indentLines(fragment, indent, eol)}`;
   return { from: at, to: at, insert, cursor: at + insert.length };
 };
@@ -420,66 +448,86 @@ const planRemove = (
     const colon = afterColon(source, parsed, parentPointer);
     const parentRange = parsed.valueRanges.get(parentPointer);
     if (colon === null && parentRange === undefined) return "not-found";
-    const from = colon ?? parentRange!.start.offset;
     const to = contentEnd(source, parsed, parentPointer);
+    if (to === null) return "not-found";
+    const dash =
+      colon === null ? dashOffsetOf(source, parentRange!.start.offset) : null;
+    const from =
+      colon ?? (dash === null ? parentRange!.start.offset : dash + 1);
     const empty = Array.isArray(parent) ? "[]" : "{}";
-    const insert = colon === null ? empty : ` ${empty}`;
+    const insert = ` ${empty}`;
     return { from, to, insert, cursor: from + insert.length };
   }
   const segments = pointerSegments(op.pointer);
   const own = segments[segments.length - 1]!;
   const valueRange = parsed.valueRanges.get(op.pointer);
   if (Array.isArray(parent)) {
-    // 시퀀스 항목: 자기 `-`부터 다음 항목의 `-` 직전까지(마지막 항목이면 앞 항목 내용 끝부터 자기 끝까지).
+    // 시퀀스 항목: 자기 `-`가 줄을 여는 보통의 항목은 mapping 키 삭제와 같은 규칙(자기 줄들만, 다음
+    // 항목을 설명하는 주석은 남김)으로 지운다. `- - x`처럼 바깥 `-`와 한 줄을 나눠 쓰는 안쪽 첫
+    // 항목만 다음 항목의 `-`까지 지워 다음 항목을 그 줄로 끌어올린다(P3-01 리뷰 P1-2).
     const index = Number(own);
     const dash =
       valueRange === undefined
         ? null
         : dashOffsetOf(source, valueRange.start.offset);
     if (dash === null) return "not-found";
-    if (index + 1 < parent.length) {
-      const next = parsed.valueRanges.get(`${parentPointer}/${index + 1}`);
-      const nextDash =
-        next === undefined ? null : dashOffsetOf(source, next.start.offset);
-      if (nextDash === null) return "not-found";
-      return { from: dash, to: nextDash, insert: "", cursor: dash };
+    const ownEnd = contentEnd(source, parsed, op.pointer);
+    if (ownEnd === null) return "not-found";
+    if (!onDashLine(source, dash) || index + 1 >= parent.length) {
+      return removeLines(source, lineStartOf(source, dash), ownEnd, eol);
     }
-    const from = lineEndOf(
-      source,
-      contentEnd(source, parsed, `${parentPointer}/${index - 1}`),
-    );
-    const to = lineEndOf(source, contentEnd(source, parsed, op.pointer));
-    return { from, to, insert: "", cursor: from };
+    const next = parsed.valueRanges.get(`${parentPointer}/${index + 1}`);
+    const nextDash =
+      next === undefined ? null : dashOffsetOf(source, next.start.offset);
+    if (nextDash === null) return "not-found";
+    return { from: dash, to: nextDash, insert: "", cursor: dash };
   }
   const keyRange = parsed.keyRanges.get(op.pointer)!;
   const siblings = Object.keys(parent as Record<string, unknown>);
   const position = siblings.indexOf(own);
   const following = siblings[position + 1];
   if (onDashLine(source, keyRange.start.offset)) {
-    // `- key: v` 첫 키: `-`는 남기고 키부터 다음 키 시작(또는 자기 내용 끝)까지 지운다.
-    if (following !== undefined) {
-      const nextKey = parsed.keyRanges.get(
-        `${parentPointer}/${escape(following)}`,
-      )!;
-      return {
-        from: keyRange.start.offset,
-        to: nextKey.start.offset,
-        insert: "",
-        cursor: keyRange.start.offset,
-      };
-    }
-    // 뒤 형제가 없고 `-` 줄의 유일한 키가 아닌 경우는 위 emptiesParent가 이미 다뤘다.
-    return "not-found";
+    // `- key: v` 첫 키: `-`는 남기고 키부터 자기 내용 줄 끝까지 지운 뒤, 다음 줄의 들여쓰기를 걷어
+    // 다음 줄 내용(주석이든 다음 키든)이 `- ` 바로 뒤에 오게 한다(주석 보존, P3-01 리뷰 P1-2).
+    if (following === undefined) return "not-found";
+    const ownEnd = contentEnd(source, parsed, op.pointer);
+    if (ownEnd === null) return "not-found";
+    const endOfLine = lineEndOf(source, ownEnd);
+    const nextLineStart = endOfLine + eol.length;
+    const nextContent =
+      nextLineStart + source.slice(nextLineStart).search(/\S|$/);
+    return {
+      from: keyRange.start.offset,
+      to: nextContent,
+      insert: "",
+      cursor: keyRange.start.offset,
+    };
   }
-  const from = lineStartOf(source, keyRange.start.offset);
-  const endOfContentLine = lineEndOf(
+  const ownEnd = contentEnd(source, parsed, op.pointer);
+  if (ownEnd === null) return "not-found";
+  return removeLines(
     source,
-    contentEnd(source, parsed, op.pointer),
+    lineStartOf(source, keyRange.start.offset),
+    ownEnd,
+    eol,
   );
-  // 줄 전체(EOL 포함)를 지운다. 마지막 줄이면 앞 EOL을 지운다.
+};
+
+/** `from` 줄부터 `contentEnd`가 속한 줄까지 통째로(EOL 포함) 지운다. 마지막 줄이면 앞 EOL을 지운다. */
+const removeLines = (
+  source: string,
+  from: number,
+  ownEnd: number,
+  eol: Eol,
+): Plan => {
+  const endOfContentLine = lineEndOf(source, ownEnd);
   if (endOfContentLine < source.length) {
-    const to = endOfContentLine + eol.length;
-    return { from, to, insert: "", cursor: from };
+    return {
+      from,
+      to: endOfContentLine + eol.length,
+      insert: "",
+      cursor: from,
+    };
   }
   const previousEol = Math.max(0, from - eol.length);
   return {

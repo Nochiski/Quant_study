@@ -2,9 +2,10 @@ import fc from "fast-check";
 import { stringify } from "yaml";
 
 /**
- * property test용 임의 1.1 문서 생성기(WORKFLOW P3-01). 실제 계약의 필드 목록을 복제하지 않는다:
- * 트랜잭션은 pointer·range만 보므로 "block 스타일 mapping/sequence/scalar가 섞인 YAML"이면 충분하다.
- * 키는 YAML plain 키로 안전한 식별자만, 문자열 값은 `yaml.stringify`가 왕복 가능한 것만 만든다.
+ * property test용 임의 YAML 문서 생성기(WORKFLOW P3-01). 실제 계약의 필드 목록을 복제하지 않는다:
+ * 트랜잭션은 pointer·range만 보므로 "block 스타일 mapping/sequence/scalar에 주석·빈 컨테이너·block
+ * scalar가 섞인 YAML"이면 충분하다. 키는 YAML plain 키로 안전한 식별자만 만든다(따옴표가 필요한 키는
+ * 범위 밖, P3-01 리뷰 P2-3에 기록).
  */
 export type ArbitraryTree = Record<string, unknown>;
 
@@ -26,12 +27,9 @@ const scalar = fc.oneof(
     .map((s) => s.trim())
     .filter((s) => s.length > 0),
   fc.constantFrom("1.0", "2026-01-02", "yes", "", "a: b", "#tag", "- item"),
+  // 여러 줄 문자열 → `yaml.stringify`가 block scalar(`|-`)로 찍는다.
+  fc.constantFrom("l1\nl2", "first\nsecond\nthird"),
 );
-
-const leafMapping = fc.dictionary(identifier, scalar, {
-  minKeys: 1,
-  maxKeys: 4,
-});
 
 const node = fc.letrec<{
   value: unknown;
@@ -44,24 +42,52 @@ const node = fc.letrec<{
     tie("mapping"),
     tie("sequence"),
   ),
-  mapping: fc.dictionary(identifier, tie("value"), { minKeys: 1, maxKeys: 4 }),
-  sequence: fc.array(tie("value"), { minLength: 1, maxLength: 3 }),
+  mapping: fc.dictionary(identifier, tie("value"), { minKeys: 0, maxKeys: 4 }),
+  sequence: fc.array(tie("value"), { minLength: 0, maxLength: 3 }),
 }));
 
 /** 루트는 mapping이며 `schema_version`을 첫 키로 둔다(문서 모양). */
 export const strategyDocumentArbitrary = (): fc.Arbitrary<ArbitraryTree> =>
   fc
     .tuple(
-      leafMapping,
+      fc.dictionary(identifier, scalar, { minKeys: 1, maxKeys: 4 }),
       fc.dictionary(identifier, node.value, { minKeys: 0, maxKeys: 4 }),
     )
     .map(([leaf, rest]) => ({ schema_version: "1.1", ...leaf, ...rest }));
 
+/** 줄 인덱스 목록: 각 줄 앞에 그 줄의 들여쓰기로 `# c<n>` 주석 줄을 넣을지 결정한다. */
+export const commentPlanArbitrary = (): fc.Arbitrary<readonly number[]> =>
+  fc.uniqueArray(fc.nat(40), { maxLength: 3 });
+
+/**
+ * tree → YAML 텍스트. 주석은 block scalar 본문 안이 아닌 줄 앞에만 넣는다(들여쓰기가 같은 다음 줄의
+ * 주석으로 읽힌다). 결과 텍스트가 정본이므로 property는 이 텍스트를 다시 parse한 tree를 기준으로 삼는다.
+ */
 export const toYaml = (
   tree: ArbitraryTree,
   eol: "\n" | "\r\n" = "\n",
+  commentBefore: readonly number[] = [],
 ): string => {
-  const text = stringify(tree, { lineWidth: 0 });
+  const lines = stringify(tree, { lineWidth: 0 })
+    .replace(/\n$/, "")
+    .split("\n");
+  const out: string[] = [];
+  let inBlockScalar = false;
+  let blockIndent = 0;
+  lines.forEach((line, index) => {
+    const indent = line.length - line.trimStart().length;
+    if (inBlockScalar && line.trim() !== "" && indent <= blockIndent)
+      inBlockScalar = false;
+    if (!inBlockScalar && commentBefore.includes(index)) {
+      out.push(`${" ".repeat(indent)}# c${index}`);
+    }
+    out.push(line);
+    if (!inBlockScalar && /(^|\s)[|>][-+]?$/.test(line)) {
+      inBlockScalar = true;
+      blockIndent = indent;
+    }
+  });
+  const text = `${out.join("\n")}\n`;
   return eol === "\n" ? text : text.replaceAll("\n", "\r\n");
 };
 

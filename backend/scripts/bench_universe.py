@@ -3,9 +3,15 @@
 실제 KRX fixture 또는 그 가격 경로를 복제한 synthetic universe에서 실행 시간, 결과 signature,
 peak RSS와 raw sample을 기록한다.
 
+전략 형태는 둘이다. `callback`은 세션마다 Python `on_event`가 호출되는 일반 전략,
+`tape`는 같은 목표를 미리 표로 만든 선언형 전략(`DeclarativeTapeStrategy`)이라 persistent Rust
+코어에서 Python 콜백 없이 완주한다 (워크벤치 TargetTape 경로와 같은 형태).
+
 사용법:
     uv run python scripts/bench_universe.py <원장 디렉토리> --instruments 100 --core python
     uv run python scripts/bench_universe.py <원장 디렉토리> --instruments 100 --core all --profile
+    uv run python scripts/bench_universe.py <원장 디렉토리> --instruments 100 --core all \
+        --strategy tape
 """
 
 from __future__ import annotations
@@ -19,12 +25,14 @@ import pstats
 import statistics
 import sys
 import time
+from collections.abc import Mapping
 from datetime import date
 from pathlib import Path
 
 from backtest_engine import BacktestEngine, RunConfig
 from backtest_engine.adapters.krx_parquet import KrxParquetBarSource, KrxParquetUniverseSource
 from backtest_engine.data.feed import DataFeed
+from backtest_engine.engine.tape import evaluate_tape
 from backtest_engine.ports.market_data import BarQuery, OhlcPolicy
 from backtest_engine.ports.universe import UniverseQuery
 from backtest_engine.types.actions import (
@@ -45,6 +53,7 @@ from backtest_engine.types.requirements import (
     StrategyRequirements,
 )
 from backtest_engine.types.strategy import StrategyContext
+from backtest_engine.types.tape import TapeFrame
 
 
 def peak_rss_bytes() -> int:
@@ -126,6 +135,52 @@ class EqualWeightRebalance:
         )
 
 
+class EqualWeightTape:
+    """`EqualWeightRebalance`와 같은 목표를 세션 날짜 → 프레임 표로 미리 만든 선언형 전략.
+
+    콜백 k(1부터)는 세션 k-1이므로 `k % every == 1`은 `session_index % every == 0`이다.
+    """
+
+    idle_reason = "tape_idle"
+
+    def __init__(
+        self, instruments: tuple[InstrumentId, ...], every: int, allocation: float, feed: DataFeed
+    ) -> None:
+        universe = frozenset(instruments)
+        frames: dict[date, TapeFrame] = {}
+        for session_index, snapshot in enumerate(feed.snapshots()):
+            if session_index % every != 0:
+                continue
+            active = tuple(bar.instrument for bar in snapshot.bars if bar.instrument in universe)
+            if not active:
+                continue
+            weight = allocation / len(active)
+            frames[snapshot.ts.date()] = TapeFrame(
+                action=SetPortfolioTarget(
+                    targets=tuple(WeightTarget(i, weight) for i in active),
+                    scope=TargetScope.REPLACE,
+                    execution=ExecutionPolicy.market_next_open(),
+                ),
+                reason=f"tape:{session_index}",
+            )
+        self._frames = frames
+
+    def requirements(self) -> StrategyRequirements:
+        return StrategyRequirements(
+            histories=(),
+            schedule=EverySession(),
+            events=frozenset({EventKind.MARKET}),
+            actions=frozenset({ActionKind.NO_ACTION, ActionKind.SET_PORTFOLIO_TARGET}),
+            features=frozenset(),
+        )
+
+    def tape_frames(self) -> Mapping[date, TapeFrame]:
+        return self._frames
+
+    def on_event(self, ctx: StrategyContext, event: StrategyEvent) -> StrategyDecision:
+        return evaluate_tape(self._frames, self.idle_reason, ctx, event)
+
+
 def synthetic_universe(
     bars: tuple[Bar, ...], size: int
 ) -> tuple[tuple[InstrumentId, ...], tuple[Bar, ...]]:
@@ -167,6 +222,7 @@ def main(argv: list[str]) -> int:
         default="python",
     )
     parser.add_argument("--every", type=int, default=5)
+    parser.add_argument("--strategy", choices=("callback", "tape"), default="callback")
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--warmup", type=int, default=0)
     parser.add_argument("--synthetic", action="store_true")
@@ -206,7 +262,8 @@ def main(argv: list[str]) -> int:
     cores = ("python", "rust_legacy", "rust") if args.core == "all" else (args.core,)
     print(
         f"instruments={len(instruments)} sessions={len(feed)} "
-        f"bars={len(bars)} cores={','.join(cores)} repeat={args.repeat} warmup={args.warmup}"
+        f"bars={len(bars)} cores={','.join(cores)} strategy={args.strategy} "
+        f"repeat={args.repeat} warmup={args.warmup}"
     )
 
     def run_once(core: str) -> tuple[float, tuple[float, int, int]]:
@@ -214,7 +271,11 @@ def main(argv: list[str]) -> int:
             RunConfig(run_id=f"bench-{core}", initial_cash=1_000_000_000, fee_bps=15),
             core=core,
         )
-        strategy = EqualWeightRebalance(instruments, args.every, 0.9)
+        strategy = (
+            EqualWeightTape(instruments, args.every, 0.9, feed)
+            if args.strategy == "tape"
+            else EqualWeightRebalance(instruments, args.every, 0.9)
+        )
         profiler = cProfile.Profile() if args.profile else None
         if profiler is not None:
             profiler.enable()
@@ -250,6 +311,7 @@ def main(argv: list[str]) -> int:
             "sessions": len(feed),
             "bars": len(bars),
             "rebalance_every": args.every,
+            "strategy": args.strategy,
             "synthetic": args.synthetic,
             "repeat": args.repeat,
             "warmup": args.warmup,

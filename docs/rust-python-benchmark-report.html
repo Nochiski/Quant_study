@@ -526,17 +526,87 @@
   <main class="page">
     <header>
       <div>
-        <div class="eyebrow">Persistent Rust Engine · M6</div>
-        <h1>Rust는 이제<br><span style="color:var(--green)">엔진 전체의 상태</span>를 가진다.</h1>
-        <p class="lede">부분 세션 가속기를 persistent runtime으로 승격했습니다. 전략 API는 Python에 남고 주문·포지션·히스토리·라우팅·큐·회계 상태는 세션 사이에도 Rust에 유지됩니다.</p>
+        <div class="eyebrow">Persistent Rust Engine · Loop driver (2026-09-17)</div>
+        <h1>Rust가 이제<br><span style="color:var(--green)">세션 루프 전체</span>를 돌린다.</h1>
+        <p class="lede">MARKET→FILL→NOTIFY→SESSION_CLOSE→ORDER 드레인을 Rust <code>drive()</code>가 소유합니다. Python은 전략 콜백과 종료 배치에서만 왕복하고, 선언형 tape 전략은 콜백 없이 완주합니다.</p>
       </div>
       <div class="badges" aria-label="측정 조건">
-        <span class="badge good">✓ 540 Python tests</span>
-        <span class="badge good">✓ 13 Rust tests</span>
+        <span class="badge good">✓ 1189 Python tests</span>
+        <span class="badge good">✓ 22 Rust tests</span>
         <span class="badge">Rust --release</span>
-        <span class="badge">2026-09-03</span>
+        <span class="badge">2026-09-17</span>
       </div>
     </header>
+
+    <section class="grid hero-grid">
+      <article class="card">
+        <div class="section-title">
+          <div>
+            <div class="metric-kicker">100 instruments · order-heavy · 2026-09-17</div>
+            <h2>루프 드라이버 이후 실행 시간 중앙값</h2>
+          </div>
+          <p>낮을수록 좋음</p>
+        </div>
+
+        <div class="benchmark" role="img" aria-label="callback 전략: Python 2.876초, Legacy Rust 2.870초, Rust 0.681초. tape 전략: Python 2.566초, Rust 0.543초">
+          <div class="bench-row">
+            <div class="engine-name python">Python</div>
+            <div class="track"><div class="bar python" style="--w:100%"></div></div>
+            <div class="bench-value">2.876s</div>
+          </div>
+          <div class="bench-row">
+            <div class="engine-name legacy">Legacy</div>
+            <div class="track"><div class="bar legacy" style="--w:99.8%"></div></div>
+            <div class="bench-value">2.870s</div>
+          </div>
+          <div class="bench-row">
+            <div class="engine-name rust">Rust</div>
+            <div class="track"><div class="bar rust" style="--w:23.7%"></div></div>
+            <div class="bench-value">0.681s</div>
+          </div>
+          <div class="bench-row">
+            <div class="engine-name rust">Rust · tape</div>
+            <div class="track"><div class="bar rust" style="--w:18.9%"></div></div>
+            <div class="bench-value">0.543s</div>
+          </div>
+        </div>
+        <div class="axis"><span>0s</span><span>0.7s</span><span>1.4s</span><span>2.1s</span><span>2.9s</span></div>
+
+        <div class="workload">
+          <span>100 instruments</span>
+          <span>1,231 sessions</span>
+          <span>123,100 bars</span>
+          <span>22,243 orders</span>
+          <span>22,155 fills</span>
+        </div>
+        <div class="insight" style="margin-top:14px"><strong>전체 매트릭스:</strong> 300종목 callback 7.378s → 2.080s (3.55×), tape 7.620s → 1.703s (4.47×) · 실제 4종목 fixture callback 0.215s → 0.069s (3.13×), tape 0.192s → 0.037s (5.18×). 측정 중 다른 프로세스가 CPU 85~97%를 점유해 절대값은 부풀려졌고 배수는 같은 실행 안의 교차 비교입니다.</div>
+      </article>
+
+      <aside class="card">
+        <div class="metric-kicker">Python 대비</div>
+        <div class="big-number">4.22×</div>
+        <div class="result-copy">callback 전략에서 실행 시간을 <strong>76.3%</strong> 줄였습니다. 선언형 tape는 <strong>4.73×</strong>.</div>
+        <div class="delta">
+          <div><span>세션당 FFI</span><strong style="color:var(--green)">0회</strong></div>
+          <div><span>결과 차이</span><strong style="color:var(--green)">0</strong></div>
+        </div>
+        <div class="small-result">
+          <div><span>측정 반복</span><strong>5회</strong></div>
+          <div><span>워밍업</span><strong>1회</strong></div>
+          <div><span>이전 (M6)</span><strong>1.72×</strong></div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="section card">
+      <div class="section-title">
+        <div>
+          <div class="metric-kicker">M6 promotion · 2026-09-03 (기록 보존)</div>
+          <h2>루프 드라이버 이전 측정</h2>
+        </div>
+        <p>아래는 세션당 FFI가 남아 있던 M6 승격 시점의 수치입니다</p>
+      </div>
+    </section>
 
     <section class="grid hero-grid">
       <article class="card">

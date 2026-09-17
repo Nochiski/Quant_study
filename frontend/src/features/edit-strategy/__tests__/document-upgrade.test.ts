@@ -84,6 +84,14 @@ describe("decideDocumentUpgrade", () => {
     expect(decideDocumentUpgrade(stale, STORED)).toEqual({ kind: "none" });
   });
 
+  it("lets 1.0 text pasted into a generated frozen row upgrade instead of dead-ending", () => {
+    // P2-02 리뷰 P2-001: 봉투(legacy 동결)보다 현재 텍스트(1.0)가 우선한다.
+    const frozen = { revision: 1, generated: true, requires_upgrade: true };
+    expect(
+      decideDocumentUpgrade(settled(LEGACY, [UNSUPPORTED]), frozen),
+    ).toEqual({ kind: "upgradeable" });
+  });
+
   it("marks a generated frozen row as save-only while it is still the base", () => {
     const frozen = { revision: 1, generated: true, requires_upgrade: true };
     expect(decideDocumentUpgrade(settled(CURRENT), frozen)).toEqual({

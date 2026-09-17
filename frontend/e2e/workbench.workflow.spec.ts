@@ -17,6 +17,7 @@ import {
   getBacktestResult,
   getStrategyDocument,
   getStrategyTemplate,
+  listStrategyRevisions,
   traceStrategy,
   type BacktestRunSpec,
   type BacktestRunState,
@@ -124,15 +125,19 @@ const expectBacktestResultPresentation = async (page: Page) => {
 /**
  * schema 1.0 동결 row 두 개(`frozen-doc`: 1.0 YAML 원문, `frozen-legacy`: source 없는 legacy JSON)를
  * backend 테스트 헬퍼로 격리 SQLite에 직접 심는다. 1.0 인코더는 더 이상 없으므로 API로는 만들 수 없다.
+ * 헬퍼 CLI는 멱등이라(이미 있으면 그대로 둠) serial 그룹 재시도에서도 안전하다. revision은 불변이라
+ * 재시도 뒤에는 `frozen-doc` 위에 이전 시도의 revision이 남으므로 시나리오는 다음 번호를 API로 읽는다.
+ * DB 경로는 공백이 있어도 shell이 쪼개지 않도록 인자가 아니라 환경 변수로 넘긴다.
  */
 const seedFrozenRevisionRows = () => {
   const result = spawnSync(
     "uv",
-    ["run", "python", "tests/frozen_revision_rows.py", runtimeDatabasePath()],
+    ["run", "python", "tests/frozen_revision_rows.py"],
     {
       cwd: resolve(ownDirectory, "../../backend"),
       encoding: "utf8",
       shell: process.platform === "win32",
+      env: { ...process.env, STRATEGY_WORKBENCH_E2E_DB: runtimeDatabasePath() },
     },
   );
   if (result.status !== 0) {
@@ -1021,6 +1026,16 @@ test.describe("professional YAML workflow", () => {
     page,
   }) => {
     seedFrozenRevisionRows();
+    const nextRevision =
+      requireData(
+        (
+          await listStrategyRevisions({
+            client: apiClient,
+            path: { strategy_id: "frozen-doc" },
+          })
+        ).data,
+        "list frozen-doc revisions",
+      ).total + 1;
     const banner = page.getByRole("region", { name: "schema 1.0 문서" });
     const upgrade = banner.getByRole("button", { name: "1.1로 업그레이드" });
 
@@ -1044,13 +1059,13 @@ test.describe("professional YAML workflow", () => {
     expect(source).not.toContain("  factors:\n");
     await expectPhase(page, "검증 통과");
 
-    await saveAndWaitForRevision(page, 2);
+    await saveAndWaitForRevision(page, nextRevision);
     await expect(banner).toHaveCount(0);
     const savedV2 = requireData(
       (
         await getStrategyDocument({
           client: apiClient,
-          path: { strategy_id: "frozen-doc", revision: 2 },
+          path: { strategy_id: "frozen-doc", revision: nextRevision },
         })
       ).data,
       "get upgraded frozen-doc revision",
@@ -1080,7 +1095,7 @@ test.describe("professional YAML workflow", () => {
       strategy_source: {
         kind: "saved_revision",
         strategy_id: "frozen-doc",
-        revision: 2,
+        revision: nextRevision,
         expected_spec_hash: savedV2.spec_hash,
       },
     });
@@ -1109,7 +1124,7 @@ test.describe("professional YAML workflow", () => {
       .getByRole("row")
       .filter({ hasText: "frozen-doc" })
       .first();
-    await expect(docRow).toContainText("v2");
+    await expect(docRow).toContainText(`v${nextRevision}`);
     await expect(docRow).not.toContainText("1.0 동결");
     await docRow.getByRole("button", { name: /Revision 펼치기/u }).click();
     const revisions = page.getByRole("region", {
@@ -1119,7 +1134,7 @@ test.describe("professional YAML workflow", () => {
       revisions.getByRole("row").filter({ hasText: "v1" }),
     ).toContainText("1.0 동결");
     await expect(
-      revisions.getByRole("row").filter({ hasText: "v2" }),
+      revisions.getByRole("row").filter({ hasText: `v${nextRevision}` }),
     ).not.toContainText("1.0 동결");
   });
 });

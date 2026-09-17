@@ -118,6 +118,23 @@ const Harness = ({
     <>
       <output data-testid="dirty">{String(state.dirty)}</output>
       <output data-testid="phase">{state.phase}</output>
+      <button
+        type="button"
+        onClick={() =>
+          dispatch({
+            type: "saved",
+            strategyId: "frozen-doc",
+            revision: 2,
+            specHash: "h".repeat(64),
+            canonicalJson: null,
+            source: state.source,
+            documentEpoch: state.documentEpoch,
+            sourceVersion: state.sourceVersion,
+          })
+        }
+      >
+        Commit revision
+      </button>
       <UpgradeBanner upgrade={upgrade} />
       <SourceEditor
         state={state}
@@ -183,6 +200,51 @@ describe("schema 1.0 upgrade banner", () => {
       undo(view);
     });
     expect(view.state.doc.toString()).toBe(LEGACY);
+  });
+
+  it("keeps the upgrade as its own undo step even when the user types right after it", async () => {
+    // P2-02 리뷰 P1-002: 500ms 안에 친 글자와 업그레이드가 한 undo로 묶이면 안 된다.
+    const view = await mount();
+    await waitFor(() => expect(upgradeButton()).toBeEnabled());
+    fireEvent.click(upgradeButton());
+    await waitFor(() => expect(view.state.doc.toString()).toBe(UPGRADED));
+
+    act(() => {
+      view.dispatch({
+        changes: { from: view.state.doc.length, insert: "z" },
+        userEvent: "input.type",
+      });
+    });
+    expect(view.state.doc.toString()).toBe(`${UPGRADED}z`);
+    act(() => {
+      undo(view);
+    });
+    expect(view.state.doc.toString()).toBe(UPGRADED);
+    act(() => {
+      undo(view);
+    });
+    expect(view.state.doc.toString()).toBe(LEGACY);
+  });
+
+  it("drops the applied notice once the text is saved as a new revision", async () => {
+    // P2-02 리뷰 P2-003: 상태는 savedVersion에도 묶인다.
+    const view = await mount();
+    await waitFor(() => expect(upgradeButton()).toBeEnabled());
+    fireEvent.click(upgradeButton());
+    await waitFor(() => expect(view.state.doc.toString()).toBe(UPGRADED));
+    expect(
+      await screen.findByText(
+        "1.1로 다시 썼습니다. 검토 후 새 revision으로 저장하세요.",
+      ),
+    ).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Commit revision" }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("region", { name: "schema 1.0 문서" }),
+      ).toBeNull(),
+    );
   });
 
   it("keeps the source untouched and names the backend refusal on 422 drift", async () => {

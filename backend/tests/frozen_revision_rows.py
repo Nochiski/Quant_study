@@ -139,12 +139,40 @@ def utc_now_text() -> str:
     return datetime.now(UTC).isoformat(timespec="microseconds")
 
 
+FROZEN_STRATEGY_IDS = ("frozen-doc", "frozen-legacy")
+E2E_DB_ENV = "STRATEGY_WORKBENCH_E2E_DB"
+
+
+def frozen_rows_present(path: Path) -> bool:
+    """이전 실행이 심어 둔 동결 전략 head가 하나라도 있는가.
+
+    revision은 트리거로 불변이라 지울 수 없으므로 "있으면 그대로 둔다"가 멱등의 전부다.
+    """
+    if not path.exists():
+        return False
+    placeholders = ", ".join("?" for _ in FROZEN_STRATEGY_IDS)
+    with sqlite3.connect(path) as connection:
+        row = connection.execute(
+            f"SELECT COUNT(*) FROM strategy_heads WHERE strategy_id IN ({placeholders})",  # noqa: S608  # reason: 값은 바인딩, 자리표시자만 조립
+            FROZEN_STRATEGY_IDS,
+        ).fetchone()
+    return bool(row and row[0])
+
+
 if __name__ == "__main__":
-    # frontend Playwright(P2-02)가 격리 SQLite에 동결 row를 심을 때 부른다:
-    # `python tests/frozen_revision_rows.py <db>`.
+    # frontend Playwright(P2-02)가 격리 SQLite에 동결 row를 심을 때 부른다. 경로는 인자 하나 또는
+    # `STRATEGY_WORKBENCH_E2E_DB`(shell 인자 분리를 피하려는 e2e 호출부). serial 그룹 재시도가
+    # 같은 DB를 다시 쓰므로 CLI 경로만 멱등이다: 이미 심어져 있으면 그대로 두고 성공한다(revision
+    # 삭제는 트리거가 막으므로 e2e가 "다음 revision 번호"를 API로 읽는다).
+    import os
     import sys
 
-    if len(sys.argv) != 2:
-        raise SystemExit("usage: frozen_revision_rows.py <sqlite path>")
-    seeded = seed_frozen_rows(Path(sys.argv[1]))
-    print(", ".join(f"{row.strategy_id}@{row.revision}" for row in seeded.values()))
+    argument = sys.argv[1] if len(sys.argv) == 2 else os.environ.get(E2E_DB_ENV)
+    if len(sys.argv) > 2 or not argument:
+        raise SystemExit(f"usage: frozen_revision_rows.py <sqlite path> (or {E2E_DB_ENV}=<path>)")
+    database = Path(argument)
+    if frozen_rows_present(database):
+        print("frozen rows already present: kept")
+    else:
+        seeded = seed_frozen_rows(database)
+        print(", ".join(f"{row.strategy_id}@{row.revision}" for row in seeded.values()))

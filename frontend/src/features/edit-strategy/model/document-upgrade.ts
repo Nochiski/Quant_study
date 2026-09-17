@@ -1,15 +1,15 @@
+import type { StrategyDocument } from "../../../shared/api";
 import type { DocumentState } from "./document-state";
 
 /** schema 1.0 문서를 1.1로 다시 쓰는 backend 변환의 입력 버전(spec D2·D3). */
 export const LEGACY_SCHEMA_VERSION = "1.0";
 const UNSUPPORTED_VERSION_CODE = "structure.unsupported_schema_version";
 
-/** 열린 revision 중 배너 판정에 필요한 봉투 정보만 받는다(문서 응답 전체를 복제하지 않음). */
-export type StoredRevisionMeta = {
-  revision: number;
-  generated: boolean;
-  requires_upgrade: boolean;
-};
+/** 열린 revision 중 배너 판정에 필요한 봉투 필드만 받는다(생성 타입에서 파생, 복제 아님). */
+export type StoredRevisionMeta = Pick<
+  StrategyDocument,
+  "revision" | "generated" | "requires_upgrade"
+>;
 
 /**
  * 업그레이드 배너가 무엇을 제안할지(WORKFLOW P2-02).
@@ -48,6 +48,13 @@ export const decideDocumentUpgrade = (
   state: DocumentState,
   stored: StoredRevisionMeta | null,
 ): UpgradeAvailability => {
+  // 현재 텍스트가 우선한다: legacy 동결 row를 열었더라도 편집기에 1.0 텍스트를 넣었으면 업그레이드가
+  // 유일한 진행 경로다(P2-02 리뷰 P2-001).
+  if (
+    compileRejectsSchemaVersion(state) &&
+    currentTreeSchemaVersion(state) === LEGACY_SCHEMA_VERSION
+  )
+    return { kind: "upgradeable" };
   if (
     stored !== null &&
     stored.requires_upgrade &&
@@ -55,10 +62,5 @@ export const decideDocumentUpgrade = (
     state.baseRevision === stored.revision
   )
     return { kind: "frozen-generated" };
-  if (
-    compileRejectsSchemaVersion(state) &&
-    currentTreeSchemaVersion(state) === LEGACY_SCHEMA_VERSION
-  )
-    return { kind: "upgradeable" };
   return { kind: "none" };
 };

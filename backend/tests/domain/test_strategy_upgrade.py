@@ -14,7 +14,7 @@ from ruamel.yaml import YAML
 
 from strategy_workbench.domain.strategy.facade.document import (
     UPGRADE_STEPS,
-    DocumentNotUpgradeableError,
+    NotALegacyDocumentError,
     apply_upgrade_steps,
     hydrate_strategy_document,
     is_legacy_document,
@@ -71,7 +71,7 @@ def test_only_schema_1_0_is_upgradeable(version: object) -> None:
         document["schema_version"] = version
 
     assert not is_legacy_document(document)
-    with pytest.raises(DocumentNotUpgradeableError, match="only schema 1.0"):
+    with pytest.raises(NotALegacyDocumentError, match="only schema 1.0"):
         upgrade_document_1_0(document)
 
 

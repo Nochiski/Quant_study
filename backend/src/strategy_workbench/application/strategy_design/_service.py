@@ -122,11 +122,15 @@ class StrategyDesignService:
         )
         record = self._legacy_record(saved)
         self._repository.add(record)
-        return SavedStrategy(record.spec, record.spec_hash, record.requires_upgrade)
+        return SavedStrategy(
+            spec=record.spec, spec_hash=record.spec_hash, requires_upgrade=record.requires_upgrade
+        )
 
     def get(self, strategy_id: str, revision: int | None = None) -> SavedStrategy:
         record = self._repository.get(strategy_id, revision)
-        return SavedStrategy(record.spec, record.spec_hash, record.requires_upgrade)
+        return SavedStrategy(
+            spec=record.spec, spec_hash=record.spec_hash, requires_upgrade=record.requires_upgrade
+        )
 
     def revise(
         self,
@@ -153,7 +157,9 @@ class StrategyDesignService:
         )
         record = self._legacy_record(saved)
         self._repository.append(record, expected_revision=expected_revision)
-        return SavedStrategy(record.spec, record.spec_hash, record.requires_upgrade)
+        return SavedStrategy(
+            spec=record.spec, spec_hash=record.spec_hash, requires_upgrade=record.requires_upgrade
+        )
 
     def _legacy_record(self, spec: StrategySpec) -> StrategyRevisionRecord:
         """JSON spec API revisions carry no source text (authoring ADR D9 migration)."""

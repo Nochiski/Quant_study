@@ -1,5 +1,6 @@
 # P1-04 업그레이드 golden: 주석·따옴표·키 순서가 섞인 1.0 문서.
-# 리뷰 지적 3종을 덮는다 — 안쪽 factors 줄끝 주석(바깥 키로 옮겨짐), 바깥 독립 주석 뒤 시퀀스, 삭제 키의 주석.
+# 덮는 경우: 안쪽 factors 줄끝 주석(바깥 키로 옮겨짐), 바깥 독립 주석 뒤 시퀀스, 삭제 키 위·아래·줄끝 주석,
+# 섹션 줄끝 주석, 최상위 다음 키를 설명하는 주석.
 schema_version: "1.0"
 title: "퀄리티 모멘텀"
 description: ""
@@ -35,9 +36,13 @@ factors:
             kind: time_series
         output_node_id: mom_252
         missing_policy: drop
-signal:
-  # method 위 독립 주석 — 필드가 사라지므로 함께 사라진다
+signal:   # 신호 섹션 줄끝 주석 — 섹션은 남으므로 유지된다
+  # method 위 독립 주석 — 삭제 키를 설명하므로 함께 사라진다
   method: weighted_sum  # 삭제 키 줄끝 주석
+  # entry 위 독립 주석 — 삭제 키를 설명하므로 함께 사라진다
+  entry_percentile: 0.1
+  # score 위 독립 주석 — 남는 키를 설명하므로 자리를 지킨다
+  score_threshold: 1.5
 portfolio:
   selection_count: 20
   rebalance: monthly
@@ -45,6 +50,9 @@ risk:
   max_name_weight: 0.05
 execution:
   timing: next_open
+  # 주문 방식 설명 — 삭제 키 위 독립 주석, 함께 사라진다
   order_style: market  # 삭제 키
+  # 수수료 설명 — 삭제 키 아래 독립 주석, 남는 키를 설명하므로 자리를 지킨다
   fee_bps: 15.0   # 수수료 bp
+# parameters 위 독립 주석 — 최상위 다음 키를 설명한다
 parameters: []

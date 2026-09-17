@@ -40,7 +40,7 @@ REMOVED_FIELDS: tuple[tuple[str, str], ...] = (
 UpgradeStep = Callable[[MutableMapping[str, object]], None]
 
 
-class DocumentNotUpgradeableError(ValueError):
+class NotALegacyDocumentError(ValueError):
     """The document is not a schema 1.0 document, so no upgrade rule applies."""
 
 
@@ -100,7 +100,7 @@ def is_legacy_document(document: Mapping[str, object]) -> bool:
 def apply_upgrade_steps(document: MutableMapping[str, object]) -> None:
     """Mutate a 1.0 document (plain or ruamel containers) into 1.1 in place."""
     if not is_legacy_document(document):
-        raise DocumentNotUpgradeableError(
+        raise NotALegacyDocumentError(
             "only schema 1.0 documents can be upgraded — "
             f"schema_version={document.get('schema_version')!r} "
             f"expected={LEGACY_SCHEMA_VERSION!r}"

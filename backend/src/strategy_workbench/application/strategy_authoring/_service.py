@@ -203,7 +203,12 @@ class StrategyAuthoringService:
         if not is_legacy_document(parsed.tree):
             raise DocumentNotUpgradeableError(parsed.tree.get("schema_version"))
         expected = upgrade_document_1_0(parsed.tree)
-        upgraded = self._codec.upgrade_source(request.source, format=request.format)
+        try:
+            upgraded = self._codec.upgrade_source(request.source, format=request.format)
+        except ValueError as error:
+            # 어댑터의 전제 위반(rt loader가 safe parse와 다르게 읽는 문서 등)은 untrusted input에
+            # 대한 500이 아니라 drift로 강등한다: 두 경로가 같은 문서를 다르게 봤다는 뜻이다.
+            raise DocumentUpgradeDriftError("", f"rewrite failed: {error}") from error
         reparsed = self._codec.parse(upgraded, format=request.format)
         if not reparsed.ok or reparsed.tree is None:
             detail = ", ".join(f"{d.code}@{d.pointer}" for d in reparsed.diagnostics[:3])
@@ -211,7 +216,7 @@ class StrategyAuthoringService:
         mismatch = _first_mismatch(expected, reparsed.tree, "")
         if mismatch is not None:
             raise DocumentUpgradeDriftError(*mismatch)
-        compiled = self.compile(CompileRequest(upgraded, request.format))
+        compiled = self._compile_parsed(reparsed)
         return UpgradedDocument(
             format=request.format,
             source=upgraded,
@@ -220,7 +225,9 @@ class StrategyAuthoringService:
         )
 
     def compile(self, request: CompileRequest) -> CompiledDocument:
-        parsed = self._codec.parse(request.source, format=request.format)
+        return self._compile_parsed(self._codec.parse(request.source, format=request.format))
+
+    def _compile_parsed(self, parsed: ParsedDocument) -> CompiledDocument:
         if not parsed.ok or parsed.tree is None:
             return _rejected(parsed, None, parsed.diagnostics)
 

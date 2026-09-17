@@ -6,10 +6,10 @@ current_phase: P1,P2,P3
 current_pr: P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01
 active_prs: [P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01]
 parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02, P1-06, P2-03, P3-01]
-last_updated: 2026-09-18T04:29:08+09:00
+last_updated: 2026-09-18T04:30:35+09:00
 planned_prs: 18
 merged_prs: 0
-approved_prs: 8
+approved_prs: 9
 progress_percent: 0
 ---
 
@@ -28,8 +28,8 @@ progress_percent: 0
 | Current/next PR | `P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01` |
 | Active PR | `P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01` |
 | Progress | `0 / 18 merged (0%)` |
-| Approved | `8 / 18` |
-| Aggregated at | `2026-09-18 04:29 KST` |
+| Approved | `9 / 18` |
+| Aggregated at | `2026-09-18 04:30 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -77,7 +77,7 @@ progress_percent: 0
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
 | P1 | Backend schema 1.1 | 6 | 0 | `APPROVED` |
-| P2 | Frontend 1.1 and upgrade UI | 3 | 0 | `IN_REVIEW` |
+| P2 | Frontend 1.1 and upgrade UI | 3 | 0 | `APPROVED` |
 | P3 | Source transactions | 2 | 0 | `IN_REVIEW` |
 | P4 | Form editing | 4 | 0 | `WAITING` |
 | P5 | Graph editing | 3 | 0 | `WAITING` |
@@ -124,7 +124,7 @@ Phase exit:
 |---|---|---|---|---|---|
 | [ ] | `P2-01` | generated SDK 1.1, pointer helper·snippet·outline·plan·graph·debugger 적응 | P1-05 | `APPROVED` | [#115](https://github.com/Nochiski/Quant_study/pull/115) · `review_gui_p2_01` APPROVE (P0/P1 0, P2 6 → 후속은 P2-02 브랜치에서) · `802d6e2` |
 | [ ] | `P2-02` | 1.0 문서 업그레이드 배너·동작, e2e fixture/spec 1.1 | P2-01, P1-04 | `APPROVED` | [#116](https://github.com/Nochiski/Quant_study/pull/116) · `review_gui_p2_02` 3차 APPROVE (1차 P1 2·P2 6 → 2차 P1-001 잔존 → 3차 해소) · `6278c40` |
-| [ ] | `P2-03` | Contract Inspector·Problems 적용 조건 표시 | P2-01, P1-05 | `IN_REVIEW` | [#118](https://github.com/Nochiski/Quant_study/pull/118) · `review_gui_p2_03` 1차 REQUEST_CHANGES(P1 1·P2 8) → 후속 `abafcc7` 재검토 중 |
+| [ ] | `P2-03` | Contract Inspector·Problems 적용 조건 표시 | P2-01, P1-05 | `APPROVED` | [#118](https://github.com/Nochiski/Quant_study/pull/118) · `review_gui_p2_03` 2차 APPROVE (1차 P1 1·P2 8 해소; 8문서×8행 판정 대조 일치) · `abafcc7` |
 
 Phase exit:
 
@@ -180,6 +180,7 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
+| P2-03 | `review_gui_p2_03` | `e77f7ce` | `abafcc7` | APPROVE (1차 REQUEST_CHANGES DEFECT-118-01 Form 배지가 backend가 침묵시킨 기본값 필드에 경고 + P2 8 → 후속: 배지 = compile 경고 pointer, 발행 기본값 resolver, 글리프, signal 섹션, 문구 키 커버리지, `valueAtPointer` 공유, 중립 문구; 2차 실측 Form 배지 = backend 경고 pointer 8문서 일치, Inspector 판정 = `applies_to` 64건 일치) | 1 (해소) | nit 4: `contract.applicable.unknown` 문구가 옛 동작 서술(현재 도달 불가), `fromDefault` 미표시, i18n 커버리지 테스트가 한 단계만 탐색(재귀와 결과 동일), `STARTER` 별칭 중복 → P3-02 cleanup 커밋 후보 | 2026-09-18 |
 | P2-02 | `review_gui_p2_02` | `2a16ebe` | `6278c40` | APPROVE (1차 REQUEST_CHANGES P1-001 e2e seeding 비멱등·P1-002 undo 격리·P2 6 → 2차 P1-001 잔존(재시도 시 `/revisions/1` 저장 409) → 3차 시도별 고유 전략 id로 해소; seeding CLI 4케이스·`--repeat-each 2` 10 passed 실측) | 2 (해소) | suffix가 ms 타임스탬프(충돌 시 fail-closed), 정규식에 id 보간(base36·하이픈만), 동결 전략이 시도마다 누적(목록 페이지 20) | 2026-09-18 |
 | P1-06 | `review_gui_p1_06` | `af816a3` | `e77f7ce` | APPROVE (P0/P1 0, P2 3: 시퀀스 항목 첫 키 삭제 시 docstring과 반대로 아래 주석 소실 → 다음 키 앞 주석 슬롯으로 이동 구현, 버전 리터럴 테스트 가드, WORKFLOW 잔재 2곳; relocation probe 4종·0.9/1.2/2.0 row fail-closed 실측) | 0 | 1.1→1.2 도입 시 변환 step 미존재(의도된 제한, 테스트가 상수를 읽어 실패로 드러남); 중첩 mapping이 비는 경우 `_finish_emptied_sections` 미적용(현행 step으로 도달 불가) | 2026-09-18 |
 | P2-01 | `review_gui_p2_01` | `66e1002` | `802d6e2` | APPROVE (P0/P1 0, P2 6: 영문 주석 4, 409 mock의 계약 외 `requires_upgrade`, 문서 mock의 `requires_upgrade` 누락, 팩터 컬렉션 탐색 첫 매치 의존(fail-open), WORKFLOW P2-01 `x-defines: factor` 문구 stale, synthetic 스키마의 `method` 잔재; 스니펫 매트릭스 6케이스·pointer 정규식 8입력·SDK 재생성 diff 0 실측) | 0 | 프로덕션 build·런타임 e2e는 reviewer가 직접 확인 못함(P2-02에서 e2e green 실측); P2-003은 P2-02가 `document()` mock에 `requires_upgrade: false`를 넣어 해소, 나머지 P2는 P2-02 브랜치 후속 커밋 | 2026-09-18 |
@@ -208,6 +209,7 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-18 KST | Claude | `review_gui_p2_03` 2차 APPROVE → P2-03 APPROVED. Phase 2 PR 3/3 승인. nit 4건(118-10~13)은 P3-02 cleanup 커밋 후보로 기록 | 13.5 판정 |
 | 2026-09-18 KST | Claude | P3-01 구현·self-check(단위 10·property 3000회·Vitest 490) → diff freeze `2fba821`, stacked PR #119(base P2-03), `review_gui_p3_01`(opus) 배정 → IN_REVIEW. 결정: 삽입·삭제 경계는 노드 range가 아니라 leaf·키 범위 최댓값(노드 range가 뒤 주석 줄 포함), 시퀀스 항목은 자기 `-`에 앵커(`- - x`·`- key:` 첫 키), 성공 판정은 preflight parse + `applyToTree` deep-equal, fast-check는 WORKFLOW가 계획한 devDependency. 감사 4.2 SoT 행·4.5 WORKFLOW 규칙 반영 | 13.3 diff freeze |
 | 2026-09-18 KST | Claude | `review_gui_p2_03` 1차 REQUEST_CHANGES(P1 DEFECT-118-01: Form 배지가 backend가 침묵시킨 기본값 필드에 경고; P2 8) + `audit_gui_phase2` 수신(blocking 0; DEFECT-P2X-001 STARTER 버전 리터럴, 002 `LEGACY_SCHEMA_VERSION` 리터럴이 다음 은퇴 시 배너 소멸, 003 Form에 signal 섹션 없음, 004 description_key 미번역 silent, 005 진단 문장 이중 owner; Phase 3 위험 5: `planSnippetEdit` 규칙 절반이 P3-01과 겹침, `locateRange` 조상 fallback을 remove에 쓰면 문서 파괴, `replaceRange` 격리 소비자 단일화, Form/Inspector 판정 입력 차이 기록, boolean 조건 비교 방식 차이) → 후속 `076e8d8`: Form 배지 = compile 경고 pointer, Inspector는 발행 기본값으로 판정, 글리프, signal 섹션, 문구 키 커버리지 테스트, `valueAtPointer` 공유, 중립 문구, 버전 리터럴 판정 제거, STARTER 단언 테스트, 규칙 문서 3개 → 재검토 요청. Phase 2 exit 3항 체크. 결정: 진단 message는 backend 한글 문장 통과(감사 5(b)), Form/Inspector 판정 입력 차이는 P4-01 착수 시 결정 | 13.5 · 8절 |
 | 2026-09-18 KST | Claude | `review_gui_p2_02` 3차 APPROVE → P2-02 APPROVED. `review_gui_p1_06` 후속 `e77f7ce` 확인(P2-001 해소, P2-002 부분: 1.1 row를 1.2에서 읽는 시나리오 테스트 없음 → 1.2 도입 PR 몫으로 기록, P2-003 해소; nit: `_prepend_before_key`를 `_finish_emptied_sections`에서도 재사용, 시퀀스 항목 `-` 한 글자 줄 렌더 모양 단언 → cleanup 후보). Phase 2 exit 감사 `audit_gui_phase2`(opus) 착수 | 13.5 판정 · 8절 |

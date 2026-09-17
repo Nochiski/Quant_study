@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: strategy-gui-editing
-project_status: IN_PROGRESS
+project_status: IN_REVIEW
 current_phase: P1
 current_pr: P1-01,P1-02,P1-03,P1-04
 active_prs: [P1-01, P1-02, P1-03, P1-04]
 parallel_window: [P1-01, P1-02, P1-03, P1-04]
-last_updated: 2026-09-18T00:33:18+09:00
+last_updated: 2026-09-18T00:43:01+09:00
 planned_prs: 17
 merged_prs: 0
 approved_prs: 3
@@ -23,13 +23,13 @@ progress_percent: 0
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_PROGRESS` |
+| Project status | `IN_REVIEW` |
 | Current phase | `P1` |
 | Current/next PR | `P1-01,P1-02,P1-03,P1-04` |
 | Active PR | `P1-01, P1-02, P1-03, P1-04` |
 | Progress | `0 / 17 merged (0%)` |
 | Approved | `3 / 17` |
-| Aggregated at | `2026-09-18 00:33 KST` |
+| Aggregated at | `2026-09-18 00:43 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -72,7 +72,7 @@ progress_percent: 0
 <!-- PLAN:PHASES:START -->
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
-| P1 | Backend schema 1.1 | 5 | 0 | `IN_PROGRESS` |
+| P1 | Backend schema 1.1 | 5 | 0 | `IN_REVIEW` |
 | P2 | Frontend 1.1 and upgrade UI | 3 | 0 | `WAITING` |
 | P3 | Source transactions | 2 | 0 | `WAITING` |
 | P4 | Form editing | 4 | 0 | `WAITING` |
@@ -90,10 +90,10 @@ progress_percent: 0
 | Non-goals | 적용 조건 경고(P1-05), frontend 배너(P2-02), SDK(P2-01) |
 | Branch/worktree | `feat/gui-p1-04-upgrade-endpoint` (base `feat/gui-p1-03-upgrade-and-frozen-1-0` `9ce5a7d`) |
 | Base SHA | `9ce5a7d` |
-| Head SHA | — |
-| Diff stat | — |
-| Focused tests | — |
-| Full gate | — |
+| Head SHA | `0a70484` (diff freeze; feat + requires_upgrade required refactor 2 commit) |
+| Diff stat | handwritten 10 files +181/−10 + 신규 7 files(adapter·contract·테스트 3·golden 2); generated 제외 |
+| Focused tests | 어댑터 6·서비스 8·HTTP 5 = 19 신규(26 with architecture) |
+| Full gate | backend pytest 1,276 passed · Ruff check clean · Pyright 0 |
 
 ---
 
@@ -104,7 +104,7 @@ progress_percent: 0
 | [ ] | `P1-01` | 모델 1.1: `factors` 평탄화, 선택 보일러플레이트, `kind` 우선, fixture·hash golden | 없음 | `APPROVED` | [#108](https://github.com/Nochiski/Quant_study/pull/108) · `review_gui_p1_01` APPROVE (REQUEST_CHANGES P1 1/P2 7 해소) · `5d28996` |
 | [ ] | `P1-02` | 미사용 필드 3개·enum 제거, unary alias 제거, `cross_sectional: demean` | P1-01 | `APPROVED` | [#111](https://github.com/Nochiski/Quant_study/pull/111) · `review_gui_p1_02` APPROVE (P0/P1 0, P2 3 후속 반영 후 유지) · `9a5cccb` |
 | [ ] | `P1-03` | `_upgrade.py` dict 변환, 1.0 row 동결 읽기, saved-reference backtest 422 | P1-02 | `APPROVED` | [#112](https://github.com/Nochiski/Quant_study/pull/112) · `review_gui_p1_03` APPROVE (P0/P1 0, P2 5 후속 반영 후 유지) · `8bd0185` |
-| [ ] | `P1-04` | `POST /strategy-documents/upgrade` (ruamel rt, drift fail-closed) | P1-03 | `IN_PROGRESS` | — |
+| [ ] | `P1-04` | `POST /strategy-documents/upgrade` (ruamel rt, drift fail-closed) | P1-03 | `IN_REVIEW` | `review_gui_p1_04` (opus) 배정 |
 | [ ] | `P1-05` | `FIELD_APPLICABILITY`, compile warning, `x-applicable-when` | P1-02 | `WAITING` | — |
 
 Phase exit:
@@ -190,6 +190,7 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-18 KST | Claude | P1-04 구현·self-check(1,276 passed) → diff freeze `0a70484`, stacked PR(base P1-03), `review_gui_p1_04`(opus) 배정 → IN_REVIEW. 결정: 422 코드 `strategy_document.not_upgradeable`·`strategy_document.upgrade_drift`(기존 `strategy_document.invalid` namespace), 비어 버린 섹션의 주석 잔해는 어댑터가 제거 | 13.3 diff freeze |
 | 2026-09-18 KST | Claude | `review_gui_p1_03` 후속 확인 APPROVE 유지 → P1-03 APPROVED. P1-04 IN_PROGRESS, 브랜치 `feat/gui-p1-04-upgrade-endpoint`(base P1-03 `9ce5a7d`) | 13.5 판정 |
 | 2026-09-18 KST | Claude | `review_gui_p1_03` APPROVE(P0/P1 0, P2 5) → 후속 `8bd0185`(requires_upgrade를 JSON API·목록·history에, schema_version 검증 422, 메시지 진단, hash owner 단일화, 재바인딩 계약 테스트, WORKFLOW 문구·P2-02 분기 기록), 1,257 passed, 같은 reviewer 확인 요청 | 13.5 |
 | 2026-09-18 KST | Claude | P1-03 구현·self-check(1,253 passed) → diff freeze `7312c1a`, stacked PR(base P1-02), `review_gui_p1_03`(opus) 배정 → IN_REVIEW. 결정: 422 코드는 기존 namespace를 따라 `backtest.strategy.requires_upgrade`·`trace.strategy.requires_upgrade`(WORKFLOW의 `strategy_revision_requires_upgrade` 표기 대체) | 13.3 diff freeze |

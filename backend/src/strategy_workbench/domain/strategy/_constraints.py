@@ -82,6 +82,98 @@ class ScalarConstraint:
         return True
 
 
+@dataclass(frozen=True)
+class ApplicabilityCondition:
+    """When a field is read by the pipeline: another field `equals` a value, or is `not_null`.
+
+    The condition is data so the runtime schema can publish it (`x-applicable-when`) and the
+    validator can evaluate it from the same row; neither restates the rule.
+    """
+
+    pointer: str
+    equals: str | None = None
+    not_null: bool = False
+
+    def __post_init__(self) -> None:
+        if (self.equals is None) == (not self.not_null):
+            raise ValueError(
+                "applicability condition must be exactly one of equals/not_null — "
+                f"pointer={self.pointer!r} equals={self.equals!r} not_null={self.not_null}"
+            )
+
+    def holds_for(self, spec: StrategySpec) -> bool:
+        value = resolve_scalar(spec, self.pointer)
+        if self.not_null:
+            return value is not None
+        return value is not None and str(getattr(value, "value", value)) == self.equals
+
+
+@dataclass(frozen=True)
+class FieldApplicability:
+    """A flat field that the pipeline reads only in one mode (spec D4).
+
+    Writing it in another mode is not an error — the flat 1.1 shape keeps defaults for every
+    field — but the value has no effect, so compile reports a warning when the document sets it
+    explicitly.
+    """
+
+    pointer: str
+    condition: ApplicabilityCondition
+    description_key: str
+    # 이미 blocking error 규칙이 같은 관계를 소유하는 행: 스키마에는 조건을 노출하되 validator는
+    # 그 error 하나만 낸다(같은 사실을 warning으로 두 번 보고하지 않는다).
+    owned_by_error: str | None = None
+
+    @property
+    def path(self) -> str:
+        return self.pointer.strip("/").replace("/", ".")
+
+    def applies_to(self, spec: StrategySpec) -> bool:
+        return self.condition.holds_for(spec)
+
+
+FIELD_APPLICABILITY: tuple[FieldApplicability, ...] = (
+    FieldApplicability(
+        "/portfolio/short_selection_count",
+        ApplicabilityCondition("/portfolio/side", equals="long_short"),
+        "strategy.contract.applicable.short_selection_count",
+    ),
+    FieldApplicability(
+        "/portfolio/selection_percentile",
+        ApplicabilityCondition("/portfolio/selection_method", equals="percentile"),
+        "strategy.contract.applicable.selection_percentile",
+    ),
+    FieldApplicability(
+        "/portfolio/rebalance_every_n_sessions",
+        ApplicabilityCondition("/portfolio/rebalance", equals="every_n_sessions"),
+        "strategy.contract.applicable.rebalance_every_n_sessions",
+    ),
+    FieldApplicability(
+        "/portfolio/minimum_liquidity",
+        ApplicabilityCondition("/portfolio/liquidity_field_id", not_null=True),
+        "strategy.contract.applicable.minimum_liquidity",
+        owned_by_error="strategy.portfolio.liquidity_field",
+    ),
+    FieldApplicability(
+        "/risk/sector_neutral",
+        ApplicabilityCondition("/portfolio/side", equals="long_short"),
+        "strategy.contract.applicable.sector_neutral",
+        owned_by_error="strategy.risk.sector_neutral_side",
+    ),
+    FieldApplicability(
+        "/risk/risk_field_id",
+        ApplicabilityCondition("/portfolio/weighting", equals="risk"),
+        "strategy.contract.applicable.risk_field_id",
+    ),
+    FieldApplicability(
+        "/signal/regime_minimum",
+        ApplicabilityCondition("/signal/regime_field_id", not_null=True),
+        "strategy.contract.applicable.regime_minimum",
+        owned_by_error="strategy.signal.regime_field",
+    ),
+)
+
+
 STRATEGY_SCALAR_CONSTRAINTS: tuple[ScalarConstraint, ...] = (
     ScalarConstraint(
         pointer="/portfolio/selection_count",
@@ -237,6 +329,7 @@ STRATEGY_SCALAR_CONSTRAINTS: tuple[ScalarConstraint, ...] = (
 SEMANTIC_ONLY_CODES: frozenset[str] = frozenset(
     {
         "strategy.schema_version.unsupported",
+        "strategy.field.inapplicable",
         "strategy.title.empty",
         "strategy.data.date_order",
         "strategy.data.universe_empty",
@@ -275,6 +368,10 @@ EXPRESSION_CODES: frozenset[str] = frozenset(
         "strategy.expression.calculation_non_finite",
     }
 )
+
+
+def field_applicability_index() -> Mapping[str, FieldApplicability]:
+    return {row.pointer: row for row in FIELD_APPLICABILITY}
 
 
 def scalar_constraint_index() -> Mapping[str, ScalarConstraint]:

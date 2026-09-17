@@ -1,6 +1,46 @@
 {
   "components": {
     "schemas": {
+      "ApplicableWhen": {
+        "properties": {
+          "description_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description Key"
+          },
+          "equals": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Equals"
+          },
+          "not_null": {
+            "default": false,
+            "title": "Not Null",
+            "type": "boolean"
+          },
+          "pointer": {
+            "title": "Pointer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pointer"
+        ],
+        "title": "ApplicableWhen",
+        "type": "object"
+      },
       "BacktestResultNotReadyDetail": {
         "properties": {
           "code": {
@@ -2355,6 +2395,16 @@
       "FieldContract": {
         "description": "One scalar authoring path with everything an editor needs to explain it.\n\n`pointer` is a JSON Pointer template: array positions are written as an asterisk\n(for example the factor weight row is `/factors/<asterisk>/weight`). Rows of a\ndiscriminated union share the pointer and differ by `branch` (the member's `kind`).\nBounds and metadata come from the constraint catalog; type, enum, nullability, required\nand default come from the model.",
         "properties": {
+          "applicable_when": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApplicableWhen"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "applied_stage": {
             "anyOf": [
               {

@@ -32,7 +32,12 @@ from datetime import date
 from enum import Enum
 from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
 
-from ._constraints import ScalarConstraint, scalar_constraint_index
+from ._constraints import (
+    FieldApplicability,
+    ScalarConstraint,
+    field_applicability_index,
+    scalar_constraint_index,
+)
 from ._hydrate import SUPPORTED_SCHEMA_VERSIONS, _kind_of
 from ._models import StrategySpec
 
@@ -72,6 +77,15 @@ class FieldContract:
     display_unit: str | None = None
     example: object = None
     applied_stage: str | None = None
+    description_key: str | None = None
+    applicable_when: ApplicableWhen | None = None  # `x-applicable-when`: mode that reads the field
+
+
+@dataclass(frozen=True)
+class ApplicableWhen:
+    pointer: str
+    equals: str | None = None
+    not_null: bool = False
     description_key: str | None = None
 
 
@@ -122,6 +136,7 @@ def strategy_field_contracts() -> tuple[FieldContract, ...]:
 class _SchemaBuilder:
     def __init__(self, constraints: Mapping[str, ScalarConstraint]) -> None:
         self._constraints = constraints
+        self._applicability = field_applicability_index()
         self.defs: dict[str, dict[str, Any]] = {}
         self.contracts: list[FieldContract] = []
         self._seen: set[str] = set()
@@ -196,6 +211,9 @@ class _SchemaBuilder:
             constraint = self._constraints.get(child)
             if constraint is not None:
                 schema = {**schema, **_constraint_schema(constraint)}
+            applicability = self._applicability.get(child)
+            if applicability is not None:
+                schema = {**schema, "x-applicable-when": _applicability_schema(applicability)}
             for marker in (
                 "catalog",
                 "reference",
@@ -237,6 +255,7 @@ class _SchemaBuilder:
         inner = schema["anyOf"][0] if nullable else schema
         json_type = inner.get("type")
         constraint = self._constraints.get(pointer)
+        applicability = self._applicability.get(pointer)
         self.contracts.append(
             FieldContract(
                 pointer=pointer,
@@ -260,6 +279,9 @@ class _SchemaBuilder:
                 display_unit=constraint.display_unit if constraint else None,
                 example=constraint.example if constraint else None,
                 applied_stage=constraint.stage.value if constraint else None,
+                applicable_when=(
+                    _applicable_when(applicability) if applicability is not None else None
+                ),
                 description_key=constraint.description_key or None if constraint else None,
             )
         )
@@ -289,6 +311,25 @@ def _json_type(value: object) -> str:
     if isinstance(value, float):
         return "number"
     return "string"
+
+
+def _applicability_schema(row: FieldApplicability) -> dict[str, Any]:
+    schema: dict[str, Any] = {"pointer": row.condition.pointer}
+    if row.condition.equals is not None:
+        schema["equals"] = row.condition.equals
+    else:
+        schema["not_null"] = True
+    schema["description_key"] = row.description_key
+    return schema
+
+
+def _applicable_when(row: FieldApplicability) -> ApplicableWhen:
+    return ApplicableWhen(
+        pointer=row.condition.pointer,
+        equals=row.condition.equals,
+        not_null=row.condition.not_null,
+        description_key=row.description_key,
+    )
 
 
 def _constraint_schema(constraint: ScalarConstraint) -> dict[str, Any]:

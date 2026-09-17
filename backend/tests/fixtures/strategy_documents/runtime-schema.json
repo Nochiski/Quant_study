@@ -722,7 +722,12 @@
               "type": "null"
             }
           ],
-          "default": null
+          "default": null,
+          "x-applicable-when": {
+            "pointer": "/signal/regime_field_id",
+            "not_null": true,
+            "description_key": "strategy.contract.applicable.regime_minimum"
+          }
         }
       },
       "required": [],
@@ -788,7 +793,12 @@
           "examples": [
             20
           ],
-          "x-description-key": "strategy.contract.portfolio.short_selection_count"
+          "x-description-key": "strategy.contract.portfolio.short_selection_count",
+          "x-applicable-when": {
+            "pointer": "/portfolio/side",
+            "equals": "long_short",
+            "description_key": "strategy.contract.applicable.short_selection_count"
+          }
         },
         "selection_percentile": {
           "type": "number",
@@ -801,7 +811,12 @@
           "examples": [
             0.1
           ],
-          "x-description-key": "strategy.contract.portfolio.selection_percentile"
+          "x-description-key": "strategy.contract.portfolio.selection_percentile",
+          "x-applicable-when": {
+            "pointer": "/portfolio/selection_method",
+            "equals": "percentile",
+            "description_key": "strategy.contract.applicable.selection_percentile"
+          }
         },
         "rebalance_every_n_sessions": {
           "type": "integer",
@@ -812,7 +827,12 @@
           "examples": [
             21
           ],
-          "x-description-key": "strategy.contract.portfolio.rebalance_every_n_sessions"
+          "x-description-key": "strategy.contract.portfolio.rebalance_every_n_sessions",
+          "x-applicable-when": {
+            "pointer": "/portfolio/rebalance",
+            "equals": "every_n_sessions",
+            "description_key": "strategy.contract.applicable.rebalance_every_n_sessions"
+          }
         },
         "turnover_buffer_count": {
           "type": "integer",
@@ -863,7 +883,12 @@
           "x-unit": "field",
           "x-applied-stage": "eligibility",
           "minimum": 0.0,
-          "x-description-key": "strategy.contract.portfolio.minimum_liquidity"
+          "x-description-key": "strategy.contract.portfolio.minimum_liquidity",
+          "x-applicable-when": {
+            "pointer": "/portfolio/liquidity_field_id",
+            "not_null": true,
+            "description_key": "strategy.contract.applicable.minimum_liquidity"
+          }
         }
       },
       "required": [],
@@ -917,7 +942,12 @@
         },
         "sector_neutral": {
           "type": "boolean",
-          "default": false
+          "default": false,
+          "x-applicable-when": {
+            "pointer": "/portfolio/side",
+            "equals": "long_short",
+            "description_key": "strategy.contract.applicable.sector_neutral"
+          }
         },
         "risk_field_id": {
           "anyOf": [
@@ -929,6 +959,11 @@
             }
           ],
           "default": null,
+          "x-applicable-when": {
+            "pointer": "/portfolio/weighting",
+            "equals": "risk",
+            "description_key": "strategy.contract.applicable.risk_field_id"
+          },
           "x-catalog": "equity-field"
         }
       },

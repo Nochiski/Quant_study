@@ -40,7 +40,7 @@ def test_warning_only_validation_keeps_spec_and_hash(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(
         _service,
         "validate_strategy",
-        lambda spec: StrategyValidation(valid=True, issues=(warning,)),
+        lambda spec, **_: StrategyValidation(valid=True, issues=(warning,)),
     )
     service = StrategyAuthoringService(
         RuamelDocumentCodec(), factor_registry_version="r", dataset_snapshot_id=lambda: "s"

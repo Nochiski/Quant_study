@@ -112,6 +112,32 @@ def test_emptied_section_moves_the_comment_describing_the_next_key() -> None:
     assert reparsed.ok and reparsed.tree is not None and reparsed.tree["signal"] == {}
 
 
+def test_periods_removed_from_an_alias_node_keeps_the_comment_below_it() -> None:
+    """Phase 1 감사 DEFECT-P1X-002: 노드 안 `periods` 삭제(unary alias step)도 섹션 키 삭제와 같은
+    주석 규칙을 따른다 — 줄끝 주석은 사라지고 아래 독립 주석(다음 키 설명)은 남는다."""
+    source = _read("quality_momentum.v1_0.commented.yaml").replace(
+        f"            kind: unary   # 1.0 alias{LF}",
+        f"            kind: unary   # 1.0 alias{LF}"
+        f"            periods: 3  # lag 전용, 무시되던 값{LF}"
+        f"            # 아래는 다음 노드 설명{LF}",
+    )
+    assert "periods: 3" in source
+
+    upgraded = RuamelDocumentCodec().upgrade_source(source, format=SourceFormat.YAML)
+
+    assert "periods" not in upgraded and "lag 전용" not in upgraded
+    # 아래 주석은 원래 열(12칸)을 지키고, 시퀀스 항목은 loader 들여쓰기 규칙으로 다시 찍힌다.
+    assert (
+        f"kind: cross_sectional # 1.0 alias{LF}            # 아래는 다음 노드 설명{LF}"
+        f"        - node_id: mom_252{LF}"
+    ) in upgraded
+    reparsed = RuamelDocumentCodec().parse(upgraded, format=SourceFormat.YAML)
+    assert reparsed.ok and reparsed.tree is not None
+    assert json.loads(json.dumps(reparsed.tree)) == json.loads(
+        json.dumps(upgrade_document_1_0(yaml.safe_load(source)))
+    )
+
+
 def test_crlf_source_is_normalised_to_lf() -> None:
     source = _read("quality_momentum.v1_0.yaml").replace(LF, CR + LF)
 

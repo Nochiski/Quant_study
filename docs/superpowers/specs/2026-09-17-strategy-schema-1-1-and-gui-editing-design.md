@@ -137,23 +137,34 @@ revision row는 immutable trigger로 보호되므로 재해시나 in-place 변�
 ### D4. 적용 불가 필드 경고의 owner
 
 필드 적용 조건표는 `domain/strategy/_constraints.py`에 `FIELD_APPLICABILITY`로 둔다. 행은
-`(pointer, predicate(spec) -> bool, description_key)`이며 예시는 다음과 같다.
+`(pointer, conditions, description_key, owned_by_error)`이며 `conditions`는
+`ApplicabilityCondition(pointer, equals | not_null)`의 AND 조합이다. 판정 predicate는 이 조건
+데이터에서 파생되므로 선언(스키마 노출)과 판정(validator)이 갈라질 수 없다. 표는 다음과 같다
+(P1-05 구현·Phase 1 감사로 8행 확정).
 
-| pointer | 읽히는 조건 |
-|---|---|
-| `/portfolio/short_selection_count` | `portfolio.side == long_short` |
-| `/portfolio/selection_percentile` | `portfolio.selection_method == percentile` |
-| `/portfolio/rebalance_every_n_sessions` | `portfolio.rebalance == every_n_sessions` |
-| `/portfolio/minimum_liquidity` | `portfolio.liquidity_field_id != null` |
-| `/risk/sector_neutral` | `portfolio.side == long_short` |
-| `/risk/risk_field_id` | `portfolio.weighting == risk` |
-| `/signal/regime_minimum` | `signal.regime_field_id != null` |
+| pointer | 읽히는 조건 | owned_by_error |
+|---|---|---|
+| `/portfolio/selection_count` | `portfolio.selection_method == top_n` | — |
+| `/portfolio/short_selection_count` | `portfolio.side == long_short` 그리고 `portfolio.selection_method == top_n` | — |
+| `/portfolio/selection_percentile` | `portfolio.selection_method == percentile` | — |
+| `/portfolio/rebalance_every_n_sessions` | `portfolio.rebalance == every_n_sessions` | — |
+| `/portfolio/minimum_liquidity` | `portfolio.liquidity_field_id != null` | `strategy.portfolio.liquidity_field` |
+| `/risk/sector_neutral` | `portfolio.side == long_short` | `strategy.risk.sector_neutral_side` |
+| `/risk/risk_field_id` | `portfolio.weighting == risk` | — |
+| `/signal/regime_minimum` | `signal.regime_field_id != null` | `strategy.signal.regime_field` |
 
-컴파일 서비스가 parse tree에 그 pointer가 **명시적으로 존재**할 때만 검사한다. hydrate된 spec은
-기본값과 명시값을 구분하지 못하므로 검사는 application `compile`에서 한다. severity는 warning이라
-Save·Backtest를 막지 않는다. runtime schema는 같은 표를 `x-applicable-when`으로 노출해 Contract
-Inspector와 Form이 "현재 모드에서 읽히지 않음"을 표시한다. 코드 `strategy.field.inapplicable`는
-`SEMANTIC_ONLY_CODES`에 등록한다.
+validator(`validate_strategy(spec, written_pointers=...)`)는 parse tree에 그 pointer가 **명시적으로
+존재**하고 값이 모델 기본값과 **다를** 때만 warning을 낸다. hydrate된 spec은 기본값과 명시값을
+구분하지 못하므로 compile 서비스가 `key_ranges`의 pointer를 넘긴다. 기본값과 같은 명시값은
+경고하지 않는다: canonical 문서(JSON 투영, legacy generated source, 포맷 변환 결과)는 모든 기본값을
+적기 때문이다. severity는 warning이라 Save·Backtest를 막지 않는다.
+
+`owned_by_error`가 있는 행은 이미 blocking error 규칙이 같은 관계를 소유한다. 그런 행은 runtime
+schema와 contract에 조건을 노출하되 validator는 그 error 하나만 내고 warning을 두 번 내지 않는다.
+runtime schema는 같은 표를 `x-applicable-when`(`all_of`·`description_key`·`owned_by_error`)으로,
+contract는 `FieldContract.applicable_when`으로 같은 JSON 모양으로 노출해 Contract Inspector와 Form이
+"현재 모드에서 읽히지 않음"을 표시한다. 코드 `strategy.field.inapplicable`는 `SEMANTIC_ONLY_CODES`에
+등록한다.
 
 ### D5. Form·Graph 편집은 source 트랜잭션이다 (ADR D5 개정)
 

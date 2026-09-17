@@ -13,10 +13,13 @@ import yaml
 from ruamel.yaml import YAML
 
 from strategy_workbench.domain.strategy.facade.document import (
+    CURRENT_SCHEMA_VERSION,
+    LEGACY_SCHEMA_VERSION,
     UPGRADE_STEPS,
     NotALegacyDocumentError,
     apply_upgrade_steps,
     hydrate_strategy_document,
+    is_frozen_schema_version,
     is_legacy_document,
     upgrade_document_1_0,
 )
@@ -60,6 +63,16 @@ def test_upgrade_does_not_mutate_its_input() -> None:
     upgrade_document_1_0(document)
 
     assert document == snapshot
+
+
+def test_frozen_means_any_version_other_than_current() -> None:
+    """Phase 1 감사 DEFECT-P1X-001·003: 현재 버전은 모델 기본값과 같은 상수 하나이고, 동결 술어는
+    `== "1.0"`이 아니라 `!= CURRENT`다(1.2 도입 때 1.1 row도 동결이 된다)."""
+    assert StrategyIdentity("x", 1).schema_version == CURRENT_SCHEMA_VERSION
+    assert not is_frozen_schema_version(CURRENT_SCHEMA_VERSION)
+    assert is_frozen_schema_version(LEGACY_SCHEMA_VERSION)
+    assert is_frozen_schema_version("0.9")
+    assert is_frozen_schema_version("1.2")
 
 
 @pytest.mark.parametrize("version", ["1.1", "2.0", 1.0, None])

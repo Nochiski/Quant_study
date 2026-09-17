@@ -24,11 +24,9 @@ from datetime import date, datetime
 from enum import Enum, StrEnum
 from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
 
-from ._models import StrategyIdentity, StrategySpec
+from ._models import CURRENT_SCHEMA_VERSION, StrategyIdentity, StrategySpec
 
-# 새 문서로 받는 유일한 버전. 1.0 문서·저장 row는 `_upgrade.py`의 변환을 거쳐서만 들어온다
-# (spec D2·D3).
-CURRENT_SCHEMA_VERSION = "1.1"
+# 새 문서로 받는 버전 집합. 현재 버전 상수의 owner는 `_models.py`다(모델 기본값과 같은 값).
 SUPPORTED_SCHEMA_VERSIONS: tuple[str, ...] = (CURRENT_SCHEMA_VERSION,)
 
 # reason: sentinel shared by every hydrate branch; the walker is generic over dataclass hints,

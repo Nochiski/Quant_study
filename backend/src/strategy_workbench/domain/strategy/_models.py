@@ -7,6 +7,11 @@ from typing import Literal, TypeAlias
 
 from strategy_workbench.domain.factor.facade.expression import FactorGraph
 
+# 새 문서로 받는 유일한 authoring schema 버전. 모델 기본값·hydrate·스키마·어댑터가 전부 이 상수를
+# 읽는다(Phase 1 감사 DEFECT-P1X-001: 리터럴을 두 곳에 적지 않는다). 1.0 문서·저장 row는
+# `_upgrade.py`의 변환을 거쳐서만 들어온다(spec D2·D3).
+CURRENT_SCHEMA_VERSION = "1.1"
+
 # Editor metadata for identifier fields (see domain.factor._nodes for the node-side markers).
 CATALOG_UNIVERSE = {"catalog": "universe"}
 CATALOG_EQUITY_FIELD = {"catalog": "equity-field"}
@@ -76,7 +81,7 @@ class ExecutionTiming(StrEnum):
 class StrategyIdentity:
     strategy_id: str
     revision: int
-    schema_version: str = "1.1"
+    schema_version: str = CURRENT_SCHEMA_VERSION
 
 
 @dataclass(frozen=True, kw_only=True)

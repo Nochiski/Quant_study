@@ -92,7 +92,11 @@ class DocumentUpgradeSyntaxError(ValueError):
     """The source does not parse; the compile outcome carries the syntax diagnostics."""
 
     def __init__(self, compiled: CompiledDocument) -> None:
-        super().__init__("source has syntax errors and cannot be upgraded")
+        codes = [diagnostic.code for diagnostic in compiled.diagnostics[:3]]
+        super().__init__(
+            "source has syntax errors and cannot be upgraded — "
+            f"format={compiled.format.value} source_hash={compiled.source_hash} codes={codes}"
+        )
         self.compiled = compiled
 
 

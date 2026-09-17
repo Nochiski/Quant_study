@@ -22,6 +22,10 @@ paths:
 - YAML 1.2 허용/거부 집합의 owner는 `backend/tests/fixtures/strategy_documents/yaml12/manifest.json`
   하나다. frontend `yaml` cross-runtime test와 backend codec test가 같은 manifest를 실행하며, 한쪽
   fixture만 추가·수정하지 않는다.
+- backend 모델에서 생성되는 공유 fixture(`backend/tests/fixtures/strategy_documents/runtime-schema.json`,
+  `quality_momentum.*`)의 owner는 backend다. frontend 테스트는 `readBackendFixture`로 읽기만 하고
+  복사본이나 손으로 쓴 축약본을 만들지 않는다. 모델이 바뀌면 backend가
+  `uv run python tools/export_runtime_schema.py`로 재생성한 결과를 그대로 쓴다.
 - UI/API/i18n 변경 시 관련 Playwright spec의 test id, 문구, API path 영향을 검색하고 함께
   수정한다.
 - mock 성공 경로뿐 아니라 PIT 경고, invalid spec, failed/pruned trial, cancellation, 부분 결과

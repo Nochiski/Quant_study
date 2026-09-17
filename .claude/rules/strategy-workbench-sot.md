@@ -20,6 +20,10 @@ paths:
 | 팩터 값의 공개일 | 그 팩터 plan이 읽는 필드들의 `available_date` 최댓값 | 컴파일러 FUTURE_DATA 가드가 그대로 읽는다 |
 | 리밸런싱 시점의 previous weight | `compile_target_tape`의 프레임 fold | 포트의 `previous_weight`는 첫 프레임 시드로만 쓰인다 |
 | 전략 의미 | immutable, versioned `StrategySpec` | YAML/JSON source를 서버가 compile, Form/Graph는 read-only projection; 별도 Quick/Advanced 편집 모델을 두지 않음 |
+| authoring schema 버전 | `domain/strategy/_models.py`의 `CURRENT_SCHEMA_VERSION`(`_hydrate.py`의 `SUPPORTED_SCHEMA_VERSIONS`가 파생), 은퇴 버전은 `domain/strategy/_upgrade.py`의 `LEGACY_SCHEMA_VERSION` | 모델 기본값·스키마·검증·어댑터·테스트는 이 상수를 읽는다. `"1.1"`/`"1.0"` 리터럴을 다시 적지 않는다 |
+| 1.0 → 1.1 문서 업그레이드 변환 | `domain/strategy/_upgrade.py`의 `UPGRADE_STEPS` | dict 경로(repository codec, legacy generated source)와 source 경로(`adapters/outbound/document_codec/_upgrade_source.py`)가 같은 step을 적용한다. 어댑터는 주석·순서 보존만 맡고, 두 경로가 다른 tree를 내면 application이 `strategy_document.upgrade_drift` 422로 거부한다. frontend는 변환 규칙을 알지 않고 응답 원문을 그대로 적용한다 |
+| 필드 적용 조건(모드별로 읽히는 필드) | `domain/strategy/_constraints.py`의 `FIELD_APPLICABILITY` | 같은 행에서 validator가 `strategy.field.inapplicable` warning을, runtime schema가 `x-applicable-when`을, contract가 `FieldContract.applicable_when`을 낸다. 이미 blocking error가 소유한 관계는 `owned_by_error`로 표시하고 warning을 두 번 내지 않는다 |
+| revision의 동결(업그레이드 필요) 여부 | `domain/strategy/_upgrade.py`의 `is_frozen_schema_version`을 `StrategyRevisionRecord.requires_upgrade`(`application/strategy_design/ports/outgoing/strategy_repository.py`)가 적용 | 목록·history·문서 응답·saved-reference 실행 거부가 이 property를 그대로 전달한다. 어댑터와 HTTP 계층이 `schema_version`을 다시 비교해 동결을 판정하지 않는다 |
 | 파라미터 공간 | `SearchSpec` | trial은 해소된 값만 참조 |
 | 주문·체결·포트폴리오 mutable state | Persistent Rust Engine | Python/API는 명령·조회 |
 | 지표 공식·방향·단위 | backend Metric Registry | UI는 raw metric 표시·포맷 |
@@ -46,5 +50,7 @@ paths:
 - 캐시를 SoT로 취급하지 않는다. 캐시 키는 입력 spec hash, 데이터 snapshot, registry/engine
   version, cost model, seed를 모두 포함한다.
 - 실패·pruned trial을 결과에서 지우지 않는다. 전체 trial 수와 실패 이유는 audit 대상이다.
+- frontend에 1.0 → 1.1 업그레이드 규칙과 필드 적용 조건표를 복제하지 않는다. 업그레이드는
+  `POST /api/v1/strategy-documents/upgrade`가 돌려준 원문을 편집기 범위 교체 한 번으로 적용한다.
 
 같은 사실이 두 위치에서 변경되어야 한다면 구현을 멈추고 owner를 한 곳으로 합친다.

@@ -15,9 +15,9 @@ from strategy_workbench.application.strategy_design.facade.ports import (
 )
 from strategy_workbench.domain.strategy.facade.document import (
     CURRENT_SCHEMA_VERSION,
-    LEGACY_SCHEMA_VERSION,
     SourceFormat,
     hydrate_strategy_document,
+    is_frozen_schema_version,
     upgrade_document_1_0,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
@@ -82,9 +82,13 @@ def decode_record(
         if payload.get("schema_version") != schema_version:
             raise ValueError("schema_version column does not match the canonical strategy payload")
         spec_hash = required_text(row, "spec_hash")
-        frozen = schema_version == LEGACY_SCHEMA_VERSION
+        # 동결 판정 술어는 port와 같은 domain 함수 하나다(DEFECT-P1X-003). 은퇴 버전이 1.0이
+        # 아니면 `upgrade_document_1_0`이 NotALegacyDocumentError(ValueError)로 fail-closed한다.
+        frozen = is_frozen_schema_version(schema_version)
         if frozen:
-            spec = _decode_frozen_spec(payload, spec_json, spec_hash, strategy_id, revision)
+            spec = _decode_frozen_spec(
+                payload, spec_json, spec_hash, strategy_id, revision, schema_version
+            )
         else:
             hydration = hydrate_strategy_document(
                 _as_document(payload),
@@ -139,14 +143,19 @@ def _as_document(payload: dict[str, Any]) -> Mapping[str, object]:
 
 
 def _decode_frozen_spec(
-    payload: dict[str, Any], spec_json: str, spec_hash: str, strategy_id: str, revision: int
+    payload: dict[str, Any],
+    spec_json: str,
+    spec_hash: str,
+    strategy_id: str,
+    revision: int,
+    schema_version: str,
 ) -> StrategySpec:
     """Read a retired-schema row without a model for that schema (spec D2).
 
     The 1.0 model no longer exists, so "the source compiles to the stored spec" cannot be
     re-proven. The row is immutable and was proven when written; what is verified here is that
     the stored bytes are what the hash column claims and that the domain upgrade transform still
-    understands them. The spec keeps `schema_version` 1.0 as its frozen marker.
+    understands them. The spec keeps the row's retired `schema_version` as its frozen marker.
     """
     computed = canonical_json_spec_hash(spec_json)
     if computed != spec_hash:
@@ -165,7 +174,8 @@ def _decode_frozen_spec(
             f"strategy_id={strategy_id} revision={revision} issues={detail}"
         )
     spec = hydration.spec
-    return replace(spec, identity=replace(spec.identity, schema_version=LEGACY_SCHEMA_VERSION))
+    # 동결 표식은 row가 저장된 그 버전이다(1.0만이 아니라 은퇴한 모든 버전).
+    return replace(spec, identity=replace(spec.identity, schema_version=schema_version))
 
 
 def _verify_source_spec(

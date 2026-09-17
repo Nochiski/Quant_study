@@ -1,7 +1,7 @@
 //! 선언형 목표 tape: Rust가 전략 결정까지 만들어 Python 콜백 없이 완주한다.
 //!
 //! 규칙은 Python reference `backtest_engine/engine/tape.py::evaluate_tape`와 같아야 하며
-//! `tests/test_core_parity.py`가 두 경로의 trace를 대조한다.
+//! `tests/test_tape.py`가 두 경로의 trace를 대조한다.
 //!
 //! - market 콜백: 세션 날짜에 프레임이 있으면 그 프레임의 `SetPortfolioTarget`, 없으면
 //!   `NoAction(idle_reason)`.

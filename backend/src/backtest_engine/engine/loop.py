@@ -18,7 +18,7 @@ import importlib
 import warnings
 from collections import defaultdict
 from collections.abc import Callable, Iterable
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -497,24 +497,26 @@ class BacktestEngine:
         strategy = run.strategy
         if runtime is None or not isinstance(strategy, DeclarativeTapeStrategy):
             raise CoreUnavailable("declarative tape requires the persistent runtime")
-        session_by_date = {ts.date(): index for index, ts in enumerate(feed.sessions)}
+        # Python 경로는 `frames.get(event.ts.date())`이므로 같은 날짜의 세션(일중 다중 세션)이
+        # 여럿이면 모두 같은 프레임을 받는다. 날짜당 index 목록으로 매핑해 Rust에도 같게 배정한다.
+        sessions_by_date: dict[date, list[int]] = {}
+        for index, ts in enumerate(feed.sessions):
+            sessions_by_date.setdefault(ts.date(), []).append(index)
         frames_by_session: dict[int, TapeFrame] = {}
         rows = []
         for frame_date, frame in strategy.tape_frames().items():
-            session_index = session_by_date.get(frame_date)
-            if session_index is None:
-                # 세션이 아닌 날짜의 프레임은 Python 경로에서도 dict 조회에 실패해 무시된다.
-                continue
-            frames_by_session[session_index] = frame
-            rows.append(
-                (
-                    session_index,
-                    [target_wire(target) for target in frame.action.targets],
-                    frame.action.scope.value,
-                    execution_wire(frame.action),
-                    frame.reason,
+            # 세션이 아닌 날짜의 프레임은 Python 경로에서도 dict 조회에 실패해 무시된다.
+            for session_index in sessions_by_date.get(frame_date, ()):
+                frames_by_session[session_index] = frame
+                rows.append(
+                    (
+                        session_index,
+                        [target_wire(target) for target in frame.action.targets],
+                        frame.action.scope.value,
+                        execution_wire(frame.action),
+                        frame.reason,
+                    )
                 )
-            )
         store.bind_tape(frames_by_session, strategy.idle_reason)
         runtime.load_target_tape(rows, strategy.idle_reason)
 

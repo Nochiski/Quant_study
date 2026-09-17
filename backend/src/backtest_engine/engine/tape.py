@@ -1,7 +1,7 @@
 """선언형 tape 결정 규칙의 Python reference.
 
 Rust `backtest_core/src/tape.rs`가 같은 규칙으로 결정을 만든다. 규칙을 바꾸면 두 곳을 함께
-바꾸고 `tests/test_core_parity.py`의 tape 시나리오로 trace가 같은지 확인한다.
+바꾸고 `tests/test_tape.py`의 python·rust 패리티 시나리오로 trace가 같은지 확인한다.
 """
 
 from __future__ import annotations

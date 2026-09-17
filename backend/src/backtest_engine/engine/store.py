@@ -248,6 +248,8 @@ class PersistentEventStore(EventStore):
         self._staged_decision: StrategyDecision | None = None
         self._tape_frames: dict[int, TapeFrame] = {}
         self._tape_idle_reason: str | None = None
+        self._decision_index: dict[str, tuple[int, Any]] = {}
+        self._decision_index_len = -1
         self._finished_batch: list[tuple[int, int, int, Any]] | None = None
         self._materialized: dict[int, RecordPayload] = {}
         self._records_cache: tuple[Record, ...] | None = None
@@ -289,14 +291,25 @@ class PersistentEventStore(EventStore):
         registered = self._decisions.get(decision_id)
         if registered is not None:
             return registered
-        decision_code = _RECORD_KIND_CODES[RecordKind.DECISION]
-        for _seq, session_index, code, payload in self._batch():
-            if code == decision_code and payload[0] == decision_id:
-                return self._decision(self._sessions[session_index], decision_id, payload[1])
-        raise KeyError(
-            f"order references a decision that is not in the record batch — "
-            f"decision_id={decision_id} records={len(self._batch())}"
-        )
+        batch = self._batch()
+        # 결정마다 배치를 선형 스캔하면 주문 수 × 레코드 수로 커진다 — 배치 길이가 바뀔 때만
+        # decision_id → (session_index, native) 인덱스를 다시 만든다.
+        if self._decision_index_len != len(batch):
+            decision_code = _RECORD_KIND_CODES[RecordKind.DECISION]
+            self._decision_index = {
+                payload[0]: (session_index, payload[1])
+                for _seq, session_index, code, payload in batch
+                if code == decision_code
+            }
+            self._decision_index_len = len(batch)
+        found = self._decision_index.get(decision_id)
+        if found is None:
+            raise KeyError(
+                f"order references a decision that is not in the record batch — "
+                f"decision_id={decision_id} records={len(batch)}"
+            )
+        session_index, native = found
+        return self._decision(self._sessions[session_index], decision_id, native)
 
     def _decision(self, ts: datetime, decision_id: str, native: Any) -> StrategyDecision:
         """Python이 제출한 결정은 side table에서, Rust tape가 만든 결정은 재구성 정보에서 만든다."""

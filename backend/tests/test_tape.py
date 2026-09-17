@@ -272,3 +272,80 @@ def test_rust_tape_path_makes_one_drive_call(monkeypatch: pytest.MonkeyPatch) ->
     assert calls["load_target_tape"] == 1
     assert len(result.orders) == 2
     assert len(engine.event_store.decisions()) == 4
+
+
+@RUST_ONLY
+def test_rust_tape_applies_a_frame_to_every_session_on_that_date() -> None:
+    """DEFECT-201: 같은 날짜에 세션이 둘(일중)이면 Python처럼 두 세션 모두 프레임을 받는다."""
+
+    def session(day_of_month: int, hour: int) -> datetime:
+        return datetime(2026, 8, day_of_month, hour, 30)
+
+    bars = tuple(
+        make_bar(ts, instrument, 100.0, 100.0)
+        for ts in (session(1, 9), session(1, 15), session(2, 9), session(2, 15))
+        for instrument in (_X, _Y)
+    )
+    frames = {
+        date(2026, 8, 1): TapeFrame(
+            action=SetPortfolioTarget(
+                targets=(WeightTarget(_X, 0.5), WeightTarget(_Y, 0.3)),
+                scope=TargetScope.REPLACE,
+                execution=ExecutionPolicy.market_next_open(),
+            ),
+            reason="tape:d1",
+        )
+    }
+    outcomes = {}
+    for core in ("python", "rust"):
+        engine = BacktestEngine(RunConfig(run_id="intraday", initial_cash=100_000.0), core=core)
+        result = engine.run(_TapeStrategy(frames), DataFeed(bars))
+        outcomes[core] = (
+            result,
+            engine.event_store.trace_bytes(),
+            [record.decision.reason for record in engine.event_store.decisions()],
+        )
+    assert outcomes["python"][2] == ["tape:d1", "tape:d1", "tape_idle", "tape_idle"]
+    assert outcomes["python"] == outcomes["rust"]
+
+
+@RUST_ONLY
+def test_tape_order_materialization_indexes_decisions_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DEFECT-202: tape 경로의 orders 최초 조회가 결정마다 배치를 다시 훑지 않는다."""
+    from backtest_engine.engine.store import PersistentEventStore
+
+    batch_calls = 0
+    real_batch = PersistentEventStore._batch
+
+    def counting_batch(store: PersistentEventStore) -> list[Any]:
+        nonlocal batch_calls
+        batch_calls += 1
+        return real_batch(store)
+
+    monkeypatch.setattr(PersistentEventStore, "_batch", counting_batch)
+    frames = {
+        day(n).date(): TapeFrame(
+            action=SetPortfolioTarget(
+                targets=(WeightTarget(_X, 0.1 * n),),
+                scope=TargetScope.REPLACE,
+                execution=ExecutionPolicy.market_next_open(),
+            ),
+            reason=f"tape:d{n}",
+        )
+        for n in (1, 2, 3)
+    }
+    bars = tuple(make_bar(day(n), _X, 100.0, 100.0) for n in (1, 2, 3, 4))
+    engine = BacktestEngine(RunConfig(run_id="index-once", initial_cash=100_000.0), core="rust")
+    result = engine.run(_TapeStrategy(frames), DataFeed(bars))
+    batch_calls = 0
+    orders = result.orders
+    assert len(orders) == 3
+    # `_batch()`는 캐시된 리스트를 돌려주는 O(1) 호출이다 (ORDER 순회 1회 + 주문당 1회).
+    # 비용이 큰 결정 인덱스 구축은 배치 길이가 같은 동안 한 번만 일어난다.
+    store = engine.event_store
+    assert isinstance(store, PersistentEventStore)
+    assert batch_calls == len(orders) + 1
+    assert store._decision_index_len == len(store._batch())
+    assert set(store._decision_index) == {f"D-{n:06d}" for n in range(1, 5)}

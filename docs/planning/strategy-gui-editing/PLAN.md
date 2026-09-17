@@ -6,7 +6,7 @@ current_phase: P1
 current_pr: P1-01,P1-02
 active_prs: [P1-01, P1-02]
 parallel_window: [P1-01, P1-02]
-last_updated: 2026-09-17T23:38:04+09:00
+last_updated: 2026-09-17T23:49:54+09:00
 planned_prs: 17
 merged_prs: 0
 approved_prs: 1
@@ -29,7 +29,7 @@ progress_percent: 0
 | Active PR | `P1-01, P1-02` |
 | Progress | `0 / 17 merged (0%)` |
 | Approved | `1 / 17` |
-| Aggregated at | `2026-09-17 23:38 KST` |
+| Aggregated at | `2026-09-17 23:49 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -90,10 +90,10 @@ progress_percent: 0
 | Non-goals | 1.0 읽기·업그레이드(P1-03/04), 적용 조건 경고(P1-05), frontend(P2) |
 | Branch/worktree | `feat/gui-p1-02-dead-fields-unary-alias` (base `feat/gui-p1-01-schema-1-1-model` `5d28996`) |
 | Base SHA | `5d28996` |
-| Head SHA | `aae4c23` (diff freeze) |
-| Diff stat | handwritten 20 files +79/−92; generated `openapi.json`·`runtime-schema.json` 제외 |
-| Focused tests | hydrate unknown_key 3·invalid_enum 4, demean parity 1, document API 12 |
-| Full gate | backend pytest 1,231 passed · Ruff check clean · Pyright 0 |
+| Head SHA | `9a5cccb` (P2 후속; diff freeze `aae4c23`) |
+| Diff stat | handwritten 20 files +79/−92 + P2 후속 4 files; generated `openapi.json`·`runtime-schema.json` 제외 |
+| Focused tests | hydrate unknown_key 3·invalid_enum 4·demean 문서 1, demean parity 1, 설명 문구 1, document API 12 |
+| Full gate | backend pytest 1,232 passed · Ruff check clean · Pyright 0 |
 
 ---
 
@@ -186,6 +186,7 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-17 KST | Claude | `review_gui_p1_02` APPROVE(P0/P1 0, P2 3) → P2-001~003 후속 `9a5cccb`(unary fallthrough 제거, 설명 문구 모델 사실만, demean 문서 hydrate 테스트), 1,232 passed, 같은 reviewer 확인 요청 | 13.5 |
 | 2026-09-17 KST | Claude | P1-02 구현·self-check(1,231 passed) → diff freeze `aae4c23`, stacked PR(base P1-01), `review_gui_p1_02`(opus) 배정 → IN_REVIEW | 13.3 diff freeze |
 | 2026-09-17 KST | Claude | `review_gui_p1_01` 재검토 APPROVE(`5d28996`) → P1-01 APPROVED. 로컬 main merge 대신 선언된 스택으로 진행(절차 조정 기록). P1-02 IN_PROGRESS, 브랜치 `feat/gui-p1-02-dead-fields-unary-alias`(base P1-01) | 13.5 판정 |
 | 2026-09-17 KST | Claude | 리뷰 잔여 P2-003~008 반영 `d545f53`(canonical_payload_json 인코더, FieldContract.default_from, 죽은 헬퍼·docstring·치환 복원, label 비대칭 pin). backend 1,228 passed. reviewer 스코프 밖 관찰(P1 PR에서 browser-e2e 빨간불)을 WORKFLOW 1절에 알려진 상태로 기록 | 13.5 재검토 |

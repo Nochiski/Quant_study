@@ -43,10 +43,10 @@
 | 실제 4종목 fixture · callback | 0.215초 | 0.223초 | 0.069초 | **3.13배** |
 | 실제 4종목 fixture · tape | 0.192초 | 0.242초 | 0.037초 | **5.18배** |
 
-- orders/fills/최종 equity는 워크로드마다 세 코어가 동일. 전체 스위트 1189 passed, parity 204 passed,
+- orders/fills/최종 equity는 워크로드마다 세 코어가 동일. 전체 스위트 1192 passed(리뷰 반영 후), parity 201 passed,
   Rust 단위 테스트 22 passed.
-- 최종 게이트 판정: 세션당 FFI 0회 **통과**. 100종목 callback 3.55~4.22배(목표 2배 **통과**),
-  tape 경로 4.73배(최소 3배 **통과**, 목표 5배는 근접 미달). 300종목 3.55~4.47배(목표 2배 **통과**).
+- 최종 게이트 판정: 세션당 FFI 0회 **통과**. 100종목 callback 4.22배(목표 2배 **통과**),
+  tape 경로 4.73배(최소 3배 **통과**, 목표 5배는 근접 미달). 300종목 callback 3.55배·tape 4.47배(목표 2배 **통과**).
   4종목 fixture 회귀 없음(3.13~5.18배 향상).
 - 남은 Python 시간: feed 적재(열 comprehension), 전략 콜백 본체와 `decision_to_wire`, 종료 배치의
   tuple 변환과 스냅샷 materialization. 다음 병목은 워크벤치의 결과 변환·분석 지표(엔진 밖).

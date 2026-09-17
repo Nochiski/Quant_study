@@ -548,7 +548,7 @@
           <p>낮을수록 좋음</p>
         </div>
 
-        <div class="benchmark" role="img" aria-label="callback 전략: Python 2.876초, Legacy Rust 2.870초, Rust 0.681초. tape 전략: Python 2.566초, Rust 0.543초">
+        <div class="benchmark" role="img" aria-label="callback 전략 100종목: Python 2.876초, Legacy Rust 2.870초, Rust 0.681초">
           <div class="bench-row">
             <div class="engine-name python">Python</div>
             <div class="track"><div class="bar python" style="--w:100%"></div></div>
@@ -564,13 +564,21 @@
             <div class="track"><div class="bar rust" style="--w:23.7%"></div></div>
             <div class="bench-value">0.681s</div>
           </div>
+        </div>
+        <div class="axis"><span>0s</span><span>0.7s</span><span>1.4s</span><span>2.1s</span><span>2.9s</span></div>
+        <div class="benchmark" role="img" aria-label="tape 전략 100종목: Python 2.566초, Rust 0.543초" style="margin-top:14px">
+          <div class="bench-row">
+            <div class="engine-name python">Python · tape</div>
+            <div class="track"><div class="bar python" style="--w:100%"></div></div>
+            <div class="bench-value">2.566s</div>
+          </div>
           <div class="bench-row">
             <div class="engine-name rust">Rust · tape</div>
-            <div class="track"><div class="bar rust" style="--w:18.9%"></div></div>
+            <div class="track"><div class="bar rust" style="--w:21.2%"></div></div>
             <div class="bench-value">0.543s</div>
           </div>
         </div>
-        <div class="axis"><span>0s</span><span>0.7s</span><span>1.4s</span><span>2.1s</span><span>2.9s</span></div>
+        <div class="axis"><span>0s</span><span>0.6s</span><span>1.3s</span><span>1.9s</span><span>2.6s</span></div>
 
         <div class="workload">
           <span>100 instruments</span>
@@ -598,22 +606,12 @@
       </aside>
     </section>
 
-    <section class="section card">
-      <div class="section-title">
-        <div>
-          <div class="metric-kicker">M6 promotion · 2026-09-03 (기록 보존)</div>
-          <h2>루프 드라이버 이전 측정</h2>
-        </div>
-        <p>아래는 세션당 FFI가 남아 있던 M6 승격 시점의 수치입니다</p>
-      </div>
-    </section>
-
     <section class="grid hero-grid">
       <article class="card">
         <div class="section-title">
           <div>
-            <div class="metric-kicker">100 instruments · order-heavy</div>
-            <h2>승격 후 실행 시간 중앙값</h2>
+            <div class="metric-kicker">100 instruments · M6 promotion · 2026-09-03 (기록)</div>
+            <h2>루프 드라이버 이전, M6 승격 시점 중앙값</h2>
           </div>
           <p>낮을수록 좋음</p>
         </div>
@@ -705,8 +703,8 @@
       <article class="card">
         <div class="section-title">
           <div>
-            <div class="metric-kicker">300 instruments · scaled KRX path</div>
-            <h2>규모를 3배로 키우면</h2>
+            <div class="metric-kicker">300 instruments · M6 · 2026-09-03 (기록)</div>
+            <h2>규모를 3배로 키우면 (M6 시점)</h2>
           </div>
         </div>
         <div class="benchmark" role="img" aria-label="300종목 Python 5.312초, Legacy Rust 5.457초, Persistent Rust 3.282초">
@@ -726,7 +724,7 @@
             <div class="bench-value">3.282s</div>
           </div>
         </div>
-        <div class="insight"><strong>결과:</strong> Python 대비 <strong>1.618×</strong>. 2× 목표에는 아직 19.1%의 실행 시간 절감이 더 필요하지만 최소 1.5× 게이트는 통과했습니다.</div>
+        <div class="insight"><strong>M6 시점 결과:</strong> Python 대비 <strong>1.618×</strong>. 2026-09-17 루프 드라이버 이후에는 callback 3.55×, tape 4.47×로 2× 목표를 통과했습니다.</div>
       </article>
 
       <article class="card">

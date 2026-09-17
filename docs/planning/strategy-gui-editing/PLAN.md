@@ -6,10 +6,10 @@ current_phase: P1,P2
 current_pr: P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02
 active_prs: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02]
 parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02]
-last_updated: 2026-09-18T02:48:50+09:00
+last_updated: 2026-09-18T02:53:02+09:00
 planned_prs: 17
 merged_prs: 0
-approved_prs: 5
+approved_prs: 6
 progress_percent: 0
 ---
 
@@ -28,8 +28,8 @@ progress_percent: 0
 | Current/next PR | `P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02` |
 | Active PR | `P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02` |
 | Progress | `0 / 17 merged (0%)` |
-| Approved | `5 / 17` |
-| Aggregated at | `2026-09-18 02:48 KST` |
+| Approved | `6 / 17` |
+| Aggregated at | `2026-09-18 02:53 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -121,7 +121,7 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P2-01` | generated SDK 1.1, pointer helper·snippet·outline·plan·graph·debugger 적응 | P1-05 | `IN_REVIEW` | [#115](https://github.com/Nochiski/Quant_study/pull/115) · `review_gui_p2_01` 배정 · diff freeze `802d6e2` |
+| [ ] | `P2-01` | generated SDK 1.1, pointer helper·snippet·outline·plan·graph·debugger 적응 | P1-05 | `APPROVED` | [#115](https://github.com/Nochiski/Quant_study/pull/115) · `review_gui_p2_01` APPROVE (P0/P1 0, P2 6 → 후속은 P2-02 브랜치에서) · `802d6e2` |
 | [ ] | `P2-02` | 1.0 문서 업그레이드 배너·동작, e2e fixture/spec 1.1 | P2-01, P1-04 | `IN_REVIEW` | [#116](https://github.com/Nochiski/Quant_study/pull/116) · `review_gui_p2_02` 배정 · diff freeze `b7f8de1` |
 | [ ] | `P2-03` | Contract Inspector·Problems 적용 조건 표시 | P2-01, P1-05 | `WAITING` | — |
 
@@ -179,6 +179,7 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
+| P2-01 | `review_gui_p2_01` | `66e1002` | `802d6e2` | APPROVE (P0/P1 0, P2 6: 영문 주석 4, 409 mock의 계약 외 `requires_upgrade`, 문서 mock의 `requires_upgrade` 누락, 팩터 컬렉션 탐색 첫 매치 의존(fail-open), WORKFLOW P2-01 `x-defines: factor` 문구 stale, synthetic 스키마의 `method` 잔재; 스니펫 매트릭스 6케이스·pointer 정규식 8입력·SDK 재생성 diff 0 실측) | 0 | 프로덕션 build·런타임 e2e는 reviewer가 직접 확인 못함(P2-02에서 e2e green 실측); P2-003은 P2-02가 `document()` mock에 `requires_upgrade: false`를 넣어 해소, 나머지 P2는 P2-02 브랜치 후속 커밋 | 2026-09-18 |
 | P1-05 | `review_gui_p1_05` | `294864c` | `3c70001` | APPROVE (1차 REQUEST_CHANGES P1-001 생성 SDK 미동기는 WORKFLOW 1절 스택 정책 확인 후 reviewer 철회; P2-002 AND 조건·P2-003/004 동일 모양·owned_by_error 해소 실측) | 0 | `_explanation.py`가 percentile 모드에서도 `selection_count`를 "N종목"으로 단언(기존 결함, cleanup 후보); i18n `strategy.contract.applicable.*` 키는 P2-03; spec D4 문구·표(7행→8행, validator 발행)는 P5-03 개정 | 2026-09-18 |
 | P1-04 | `review_gui_p1_04` | `9ce5a7d` | `f7049fa` | APPROVE (1차 REQUEST_CHANGES P1-001 openapi 미재생성·P1-002 422 union 누락·P2 5 → 2차 P1-003 `#####` 500 회귀·P2-006/007 → 3차 P1-004 인접 빈 섹션 비결정 → 4차 APPROVE; 시드 8종×2 배치 결정성, 프로브 전량 재실행) | 4 (해소) | 비어 버린 섹션이 마지막 키면 아래 주석 소실(설계상), 옮겨진 주석의 들여쓰기 유지, `except Exception` 강등은 로그로 구분; 기존 codec `x: =` 500은 별도 이슈 후보 | 2026-09-18 |
 | P1-03 | `review_gui_p1_03` | `9ea8854` | `8bd0185` | APPROVE (P0/P1 0, P2-001~005 후속 확인 후 유지; 적대적 프로브 6종, 동결 head 위 1.1 append·pagination·업그레이드→저장→실행 e2e, CST parity) | 0 | `requires_upgrade` 3개가 dataclass 기본값 탓에 SDK에서 optional로 생성됨(P1-04에서 required로 정리); P1-04 CST golden이 덮어야 할 주석 손실 3종(안쪽 `factors:` 줄끝 주석, 바깥 독립 주석 뒤 시퀀스 들여쓰기, 삭제 키의 주석) | 2026-09-18 |
@@ -201,6 +202,7 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-18 KST | Claude | `review_gui_p2_01` APPROVE → P2-01 APPROVED. `audit_gui_phase1` 결과 수신: blocking 0, DEFECT-P1X-001(schema 버전 상수 이중 owner)·002(`periods` 삭제 시 아래 주석 소실)·003(동결 술어 어댑터/port 불일치)·004(`DocumentUpgradeSyntaxError` 메시지), 문서 액션 8(SoT 4행+금지 1, boundary 2, frontend-testing 1, collaboration-language docstring 정책 1[규칙 변경이라 소유자 확인 필요], spec D4). 조치는 P1-06(감사 후속, backend+docs) PR로 묶는다 | 13.5 판정 · 8절 Phase 종료 gate |
 | 2026-09-18 KST | Claude | P2-02 구현·self-check(Vitest 464, e2e workflow 5 passed) → diff freeze `b7f8de1`, stacked PR #116(base P2-01), `review_gui_p2_02`(opus) 배정 → IN_REVIEW. 결정: 배너 판정은 backend 진단 + parse tree `schema_version`(지원 버전은 backend 소유), 적용은 `setText` 한 번(reducer에 교체 action 추가 안 함), e2e 1.0 row는 backend 테스트 헬퍼 CLI로 seeding, 배너 상태는 `sourceVersion·savedVersion`에 묶음(첫 e2e에서 저장 후 안내가 남는 결함 발견·수정) | 13.3 diff freeze |
 | 2026-09-18 KST | Claude | P2-01 구현·self-check(Vitest 455, typecheck·lint·build, SDK 재생성 diff 0) → diff freeze `802d6e2`, stacked PR #115(base P1-05), `review_gui_p2_01`(opus) 배정 → IN_REVIEW. 결정: 팩터 컬렉션은 루트 배열 + `x-authoring-identity`로 탐색(키 이름 미가정), 루트에 `factors`가 이미 있으면 스니펫 `duplicate`, optional이 된 단계는 빈 객체 렌더(기본값 복제 없음) | 13.3 diff freeze |
 | 2026-09-18 KST | Claude | `review_gui_p1_05` 재검토 APPROVE(P1-001 철회) → P1-05 APPROVED. Phase 1 PR 5/5 승인, Phase exit SoT·책임분리 점검 서브에이전트 착수 | 13.5 판정 |

@@ -181,6 +181,7 @@ def test_factor_label_is_optional_and_derived_from_factor_id() -> None:
     contracts = {row.pointer: row for row in strategy_field_contracts()}
     label = contracts["/factors/*/label"]
     assert not label.required and not label.has_default
+    assert label.default_from == "factor_id"
 
 
 def test_minimal_document_passes_the_runtime_schema() -> None:

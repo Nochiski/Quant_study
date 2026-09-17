@@ -5,7 +5,10 @@ ADR: docs/superpowers/specs/2026-09-04-strategy-authoring-contract-adr.md (D1, D
 - The payload shape is derived from the dataclass type hints, so there is no second DTO.
 - Unknown keys at any depth, missing required fields, type mismatches, unknown `kind`
   discriminators, bad enum/date literals and unsupported schema versions are structural
-  issues with a JSON Pointer. Nothing is silently defaulted.
+  issues with a JSON Pointer. Only what the model declares as a default is filled in — a
+  dataclass default (schema 1.1 makes the boilerplate sections, `data.market`, factor `weight`
+  optional this way) or a `default-from` sibling field (`label` ← `factor_id`); a missing
+  required field is never guessed.
 - Typed scalar fields normalise `1`/`1.0`, ISO date strings and enum strings; the
   `ParameterValue` union keeps bool/str as-is and folds integral floats to int.
 """

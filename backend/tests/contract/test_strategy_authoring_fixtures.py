@@ -29,10 +29,6 @@ from typing import Any
 import pytest
 import yaml
 
-from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
-    InMemoryStrategyRepository,
-)
-from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.domain.strategy.facade.document import (
     hydrate_saved_strategy,
     hydrate_strategy_document,
@@ -40,6 +36,7 @@ from strategy_workbench.domain.strategy.facade.document import (
 from strategy_workbench.domain.strategy.facade.specification import (
     StrategyIdentity,
     StrategySpec,
+    canonical_payload_json,
     canonical_strategy_payload,
     strategy_spec_hash,
 )
@@ -91,12 +88,6 @@ def hydrate_authoring_document(
             f"structural issues — {[(issue.code, issue.pointer) for issue in result.issues]}"
         )
     return result.spec
-
-
-def _template(today: date = date(2026, 9, 3)) -> StrategySpec:
-    return StrategyDesignService(
-        InMemoryStrategyRepository(), new_id=lambda: "unused", today=lambda: today
-    ).template()
 
 
 def test_verbose_yaml_example_hydrates_to_strategy_spec() -> None:
@@ -158,9 +149,7 @@ def test_canonical_round_trip_preserves_everything_except_identity() -> None:
 
 def test_existing_hash_algorithm_is_unchanged() -> None:
     payload = _load_json("canonical_payload.v1_0.json")
-    encoded = json.dumps(
-        payload, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
+    encoded = canonical_payload_json(payload).encode("utf-8")
     assert hashlib.sha256(encoded).hexdigest() == ALGORITHM_HASH_2026_09_04
 
 

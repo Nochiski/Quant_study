@@ -2382,6 +2382,17 @@
           "default": {
             "title": "Default"
           },
+          "default_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default From"
+          },
           "description_key": {
             "anyOf": [
               {

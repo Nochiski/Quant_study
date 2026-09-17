@@ -24,6 +24,7 @@ from strategy_workbench.domain.factor.facade.expression import (
     UnaryOperator,
 )
 from strategy_workbench.domain.strategy._canonical import (
+    canonical_payload_json,
     canonical_strategy_json,
     canonical_strategy_payload,
     strategy_spec_hash,
@@ -107,6 +108,7 @@ __all__ = [
     "UnaryNode",
     "UnaryOperator",
     "WeightingMethod",
+    "canonical_payload_json",
     "canonical_strategy_json",
     "canonical_strategy_payload",
     "strategy_spec_hash",

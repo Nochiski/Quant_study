@@ -58,6 +58,7 @@ class FieldContract:
     nullable: bool = False
     default: object = None
     has_default: bool = False
+    default_from: str | None = None  # `x-default-from`: sibling field hydrate copies when absent
     enum: tuple[str, ...] | None = None
     const: str | None = None
     format: str | None = None
@@ -245,6 +246,7 @@ class _SchemaBuilder:
                 nullable=nullable,
                 default=_json_value(default) if has_default else None,
                 has_default=has_default,
+                default_from=schema.get("x-default-from"),
                 enum=tuple(inner["enum"]) if "enum" in inner else None,
                 const=inner.get("const"),
                 format=inner.get("format"),

@@ -134,7 +134,7 @@ def test_all_page_endpoints_reject_noncanonical_integer_wire_forms() -> None:
     )
 
     for endpoint in endpoints:
-        for value in ("1.1", "01", "+1", " 1 ", "9_0"):
+        for value in ("1.0", "01", "+1", " 1 ", "9_0"):
             response = client.get(endpoint, params={"offset": value})
             assert response.status_code == 422, (endpoint, value, response.text)
         response = client.get(endpoint, params={"limit": "1.0"})

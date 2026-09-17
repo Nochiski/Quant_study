@@ -10,11 +10,10 @@ import functools
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from backtest_engine.engine.compact import CompactOrder
 from backtest_engine.errors import (
     InsufficientHistoryError,
     UndeclaredDataAccess,
@@ -26,6 +25,9 @@ from backtest_engine.types.instruments import InstrumentId
 from backtest_engine.types.market import MarketSnapshot, PriceField, PriceWindow
 from backtest_engine.types.portfolio import PortfolioSnapshot
 from backtest_engine.types.requirements import HistoryRequest
+
+if TYPE_CHECKING:
+    from backtest_engine.engine.store import PersistentEventStore
 
 
 class HistoryStore:
@@ -178,24 +180,59 @@ class EngineStrategyContext:
 
 
 @dataclass(frozen=True, eq=False)
-class RustStrategyContext(EngineStrategyContext):
-    """Rust callback token에 묶인 전략 조회 뷰.
+class RustStrategyContext:
+    """Rust callback frame에 묶인 전략 조회 뷰.
 
-    snapshot/open orders는 callback 생성 시점 값으로 고정되고 history는 `now`를 end로 사용해
-    context를 보관했다가 나중에 읽어도 미래 상태가 섞이지 않는다.
+    포트폴리오·대기 주문은 Rust가 콜백 시점에 고정한 wire이며 전략이 실제로 읽을 때만 공개
+    객체로 만든다. history는 `now`를 end로 사용하므로 context를 보관했다가 나중에 읽어도
+    미래 상태가 섞이지 않는다.
     """
 
-    callback_token: int = 0
-    compact_open_orders: tuple[tuple[CompactOrder, int], ...] = ()
+    now: datetime
+    frame: Any
+    store: PersistentEventStore
+    history_store: HistoryStore
+    declared: frozenset[HistoryRequest] = field(default_factory=frozenset)
+    universe_source: UniverseResult | None = None
 
     @functools.cached_property
-    def _lazy_open_orders(self) -> tuple[OpenOrderSnapshot, ...]:
-        return tuple(
-            OpenOrderSnapshot(order=order.materialize(), remaining=Decimal(remaining))
-            for order, remaining in self.compact_open_orders
-        )
+    def snapshot(self) -> PortfolioSnapshot:
+        return self.store.snapshot_from_wire(self.now, self.frame.snapshot)
+
+    @functools.cached_property
+    def _open_orders(self) -> tuple[OpenOrderSnapshot, ...]:
+        return self.store.open_orders_from_wire(self.now, self.frame.open_orders)
+
+    def history(self, request: HistoryRequest) -> PriceWindow:
+        if request not in self.declared:
+            raise UndeclaredDataAccess(
+                f"history request was not declared in requirements() — "
+                f"requested field={request.field.value} lookback={request.lookback} "
+                f"instruments={[i.symbol for i in request.instruments]} "
+                f"declared_count={len(self.declared)}"
+            )
+        return self.history_store.window(request=request, end=self.now)
+
+    def current_weight(self, instrument: InstrumentId) -> float:
+        return self.snapshot.weight(instrument)
+
+    def position_qty(self, instrument: InstrumentId) -> Decimal:
+        return self.snapshot.position_qty(instrument)
+
+    def cash(self) -> float:
+        return self.snapshot.cash
+
+    def portfolio_value(self) -> float:
+        return self.snapshot.equity
+
+    def universe(self) -> frozenset[InstrumentId]:
+        if self.universe_source is None:
+            raise UniverseNotProvided(
+                f"ctx.universe() requires BacktestEngine.run(..., universe=...) — now={self.now}"
+            )
+        return self.universe_source.members(self.now.date())
 
     def open_orders(self, instrument: InstrumentId | None = None) -> tuple[OpenOrderSnapshot, ...]:
         if instrument is None:
-            return self._lazy_open_orders
-        return tuple(order for order in self._lazy_open_orders if order.instrument == instrument)
+            return self._open_orders
+        return tuple(order for order in self._open_orders if order.instrument == instrument)

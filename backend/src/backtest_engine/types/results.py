@@ -90,12 +90,12 @@ class BacktestResult:
         cls,
         *,
         run_id: str,
-        snapshots: tuple[PortfolioSnapshot, ...],
+        snapshots: Callable[[], tuple[PortfolioSnapshot, ...]],
         orders: Callable[[], tuple[OrderEvent, ...]],
         fills: Callable[[], tuple[FillEvent, ...]],
         metrics: PerformanceMetrics,
     ) -> BacktestResult:
-        """Build a result whose order/fill tuples materialize on first access."""
+        """snapshots/orders/fills tuple을 최초 접근 시에만 만드는 결과."""
         return _LazyBacktestResult(run_id, snapshots, orders, fills, metrics)
 
     def __eq__(self, other: object) -> bool:
@@ -114,26 +114,37 @@ class BacktestResult:
 
 
 class _LazyBacktestResult(BacktestResult):
+    _snapshot_loader: Callable[[], tuple[PortfolioSnapshot, ...]]
     _order_loader: Callable[[], tuple[OrderEvent, ...]]
     _fill_loader: Callable[[], tuple[FillEvent, ...]]
+    _snapshots_cache: tuple[PortfolioSnapshot, ...] | None
     _orders_cache: tuple[OrderEvent, ...] | None
     _fills_cache: tuple[FillEvent, ...] | None
 
     def __init__(
         self,
         run_id: str,
-        snapshots: tuple[PortfolioSnapshot, ...],
+        snapshot_loader: Callable[[], tuple[PortfolioSnapshot, ...]],
         order_loader: Callable[[], tuple[OrderEvent, ...]],
         fill_loader: Callable[[], tuple[FillEvent, ...]],
         metrics: PerformanceMetrics,
     ) -> None:
         object.__setattr__(self, "run_id", run_id)
-        object.__setattr__(self, "snapshots", snapshots)
         object.__setattr__(self, "metrics", metrics)
+        object.__setattr__(self, "_snapshot_loader", snapshot_loader)
         object.__setattr__(self, "_order_loader", order_loader)
         object.__setattr__(self, "_fill_loader", fill_loader)
+        object.__setattr__(self, "_snapshots_cache", None)
         object.__setattr__(self, "_orders_cache", None)
         object.__setattr__(self, "_fills_cache", None)
+
+    @property
+    def snapshots(self) -> tuple[PortfolioSnapshot, ...]:
+        cached = self._snapshots_cache
+        if cached is None:
+            cached = self._snapshot_loader()
+            object.__setattr__(self, "_snapshots_cache", cached)
+        return cached
 
     @property
     def orders(self) -> tuple[OrderEvent, ...]:

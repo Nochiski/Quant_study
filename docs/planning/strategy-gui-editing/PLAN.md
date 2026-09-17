@@ -6,7 +6,7 @@ current_phase: P1
 current_pr: P1-01,P1-02,P1-03,P1-04
 active_prs: [P1-01, P1-02, P1-03, P1-04]
 parallel_window: [P1-01, P1-02, P1-03, P1-04]
-last_updated: 2026-09-18T01:08:56+09:00
+last_updated: 2026-09-18T01:21:21+09:00
 planned_prs: 17
 merged_prs: 0
 approved_prs: 3
@@ -29,7 +29,7 @@ progress_percent: 0
 | Active PR | `P1-01, P1-02, P1-03, P1-04` |
 | Progress | `0 / 17 merged (0%)` |
 | Approved | `3 / 17` |
-| Aggregated at | `2026-09-18 01:08 KST` |
+| Aggregated at | `2026-09-18 01:21 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -92,10 +92,10 @@ progress_percent: 0
 | Non-goals | 적용 조건 경고(P1-05), frontend 배너(P2-02), SDK(P2-01) |
 | Branch/worktree | `feat/gui-p1-04-upgrade-endpoint` (base `feat/gui-p1-03-upgrade-and-frozen-1-0` `9ce5a7d`) |
 | Base SHA | `9ce5a7d` |
-| Head SHA | `92800f7` (review 후속 2; P1 `5bd97fe`; diff freeze `0a70484`) |
+| Head SHA | `d529401` (재검토 후속; 후속 2 `92800f7`; P1 `5bd97fe`; diff freeze `0a70484`) |
 | Diff stat | handwritten 10 files +181/−10 + 신규 7 files(adapter·contract·테스트 3·golden 2); generated 제외 |
 | Focused tests | 어댑터 6·서비스 8·HTTP 5 = 19 신규(26 with architecture) |
-| Full gate | backend pytest 1,279 passed · Ruff check clean · Pyright 0 · 추적 openapi == live |
+| Full gate | backend pytest 1,287 passed · Ruff check clean · Pyright 0 · 추적 openapi == live |
 
 ---
 
@@ -192,6 +192,7 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-18 KST | Claude | `review_gui_p1_04` 재검토 REQUEST_CHANGES(P1-003 `#####` 줄끝 주석 섹션이 비면 IndexError 500 회귀, P2-006 빈 섹션 경로 아래 주석 소실, P2-007 주석 텍스트 변형) → 후속 `d529401`(원본 토큰 보존, 꼬리를 다음 최상위 키로, 어댑터 예외 전부 drift 422), 1,287 passed, 재검토 요청 | 13.5 재검토 |
 | 2026-09-18 KST | Claude | `review_gui_p1_04` REQUEST_CHANGES(P1-001 openapi 미재생성, P1-002 422 union 누락; P2 5) → P1 후속 `5bd97fe`(union에 invalid 추가, 재생성, 추적 openapi 동기 테스트), P2 후속 `92800f7`(주석 재배치·비어 버린 섹션만·CRLF 통일·예외 분리·재parse 제거), 1,279 passed, 같은 reviewer 재검토 요청. 스코프 밖: 기존 codec `x: =` 500 결함은 별도 이슈 후보로 기록 | 13.5 재검토 |
 | 2026-09-18 KST | Claude | P1-04 구현·self-check(1,276 passed) → diff freeze `0a70484`, stacked PR(base P1-03), `review_gui_p1_04`(opus) 배정 → IN_REVIEW. 결정: 422 코드 `strategy_document.not_upgradeable`·`strategy_document.upgrade_drift`(기존 `strategy_document.invalid` namespace), 비어 버린 섹션의 주석 잔해는 어댑터가 제거 | 13.3 diff freeze |
 | 2026-09-18 KST | Claude | `review_gui_p1_03` 후속 확인 APPROVE 유지 → P1-03 APPROVED. P1-04 IN_PROGRESS, 브랜치 `feat/gui-p1-04-upgrade-endpoint`(base P1-03 `9ce5a7d`) | 13.5 판정 |

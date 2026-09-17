@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: strategy-gui-editing
-project_status: SELF_CHECK
+project_status: IN_REVIEW
 current_phase: P1
 current_pr: P1-01
 active_prs: [P1-01]
 parallel_window: []
-last_updated: 2026-09-17T22:53:54+09:00
+last_updated: 2026-09-17T22:56:42+09:00
 planned_prs: 17
 merged_prs: 0
 approved_prs: 0
@@ -23,13 +23,13 @@ progress_percent: 0
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `SELF_CHECK` |
+| Project status | `IN_REVIEW` |
 | Current phase | `P1` |
 | Current/next PR | `P1-01` |
 | Active PR | `P1-01` |
 | Progress | `0 / 17 merged (0%)` |
 | Approved | `0 / 17` |
-| Aggregated at | `2026-09-17 22:53 KST` |
+| Aggregated at | `2026-09-17 22:56 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -66,7 +66,7 @@ progress_percent: 0
 <!-- PLAN:PHASES:START -->
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
-| P1 | Backend schema 1.1 | 5 | 0 | `SELF_CHECK` |
+| P1 | Backend schema 1.1 | 5 | 0 | `IN_REVIEW` |
 | P2 | Frontend 1.1 and upgrade UI | 3 | 0 | `WAITING` |
 | P3 | Source transactions | 2 | 0 | `WAITING` |
 | P4 | Form editing | 4 | 0 | `WAITING` |
@@ -84,7 +84,7 @@ progress_percent: 0
 | Non-goals | 미사용 필드·unary alias 제거(P1-02), 1.0 읽기·업그레이드(P1-03/04), frontend(P2) |
 | Branch/worktree | `feat/gui-p1-01-schema-1-1-model` (worktree `scad`) |
 | Base SHA | `3aa95d0` (기획 패키지 commit, PR #106) |
-| Head SHA | diff freeze 시 기록 |
+| Head SHA | `9fab26b` (diff freeze, PR [#108](https://github.com/Nochiski/Quant_study/pull/108)) |
 | Diff stat | handwritten 37 files +377/−327 + fixture 3개 신규 154줄; generated `openapi.json`·`runtime-schema.json` 제외 |
 | Focused tests | `tests/contract/test_strategy_authoring_fixtures.py` 15 passed (신규 5: minimal 동일 hash, label/weight 기본값, 1.0 거부, nested factors type_mismatch, 알고리즘 golden) |
 | Full gate | backend pytest 1,223 passed · Ruff check clean · Ruff format(변경 파일 중 이 PR이 만든 drift 3개 정리, 기존 drift 3개는 범위 밖) · Pyright 0 errors |
@@ -95,7 +95,7 @@ progress_percent: 0
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P1-01` | 모델 1.1: `factors` 평탄화, 선택 보일러플레이트, `kind` 우선, fixture·hash golden | 없음 | `SELF_CHECK` | — |
+| [ ] | `P1-01` | 모델 1.1: `factors` 평탄화, 선택 보일러플레이트, `kind` 우선, fixture·hash golden | 없음 | `IN_REVIEW` | `review_gui_p1_01` (opus) 배정 · [#108](https://github.com/Nochiski/Quant_study/pull/108) |
 | [ ] | `P1-02` | 미사용 필드 3개·enum 제거, unary alias 제거, `cross_sectional: demean` | P1-01 | `WAITING` | — |
 | [ ] | `P1-03` | `_upgrade.py` dict 변환, 1.0 row 동결 읽기, saved-reference backtest 422 | P1-02 | `WAITING` | — |
 | [ ] | `P1-04` | `POST /strategy-documents/upgrade` (ruamel rt, drift fail-closed) | P1-03 | `WAITING` | — |
@@ -178,6 +178,7 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-17 KST | Claude | P1-01 diff freeze `9fab26b`, PR #108(base #106), `review_gui_p1_01`(opus) 배정 → IN_REVIEW | 13.3 diff freeze |
 | 2026-09-17 KST | Claude | P1-01 구현 완료 → SELF_CHECK. 결정: 노드 dataclass는 `kw_only`로 바꾸지 않고 schema builder가 `kind`를 첫 property로 정렬(positional 생성 호출 다수), `factors`에 `x-defines`를 두지 않음(defines↔references 불변식). Rust core는 worktree venv에 `maturin develop`로 빌드 | 13.2 self-check |
 | 2026-09-17 KST | Claude | 설계 spec, 기획 패키지(README/WORKFLOW/PLAN/tools) 생성. 17 PR tracker. 스택 바닥 PR [#106](https://github.com/Nochiski/Quant_study/pull/106) | 제품 소유자 결정 |
 

@@ -57,8 +57,8 @@
 - 최종 게이트 판정: 세션당 FFI 0회 **통과**. 100종목 callback 4.22배(목표 2배 **통과**),
   tape 경로 4.73배(최소 3배 **통과**, 목표 5배는 근접 미달). 300종목 callback 3.55배·tape 4.47배(목표 2배 **통과**).
   4종목 fixture 회귀 없음(3.13~5.18배 향상).
-- 남은 Python 시간: feed 적재(열 comprehension), 전략 콜백 본체와 `decision_to_wire`, 종료 배치의
-  tuple 변환과 스냅샷 materialization. 다음 병목은 워크벤치의 결과 변환·분석 지표(엔진 밖).
+- 남은 Python 시간: feed 적재(열 comprehension), 전략 콜백 본체와 `decision_to_wire`, 결과 조회 시
+  `record_payload(seq)` FFI(레코드당 1회, 100종목이면 수만 회 — RSS와 맞바꾼 선택)와 스냅샷 materialization. 다음 병목은 워크벤치의 결과 변환·분석 지표(엔진 밖).
 
 ## 2026-09-01 체크포인트
 

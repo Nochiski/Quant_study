@@ -729,19 +729,20 @@
       </article>
 
       <article class="card">
-        <div class="metric-kicker">Compatibility & memory</div>
+        <div class="metric-kicker">Compatibility & memory · 2026-09-17</div>
         <h2 style="margin:6px 0 8px">공개 동작은 그대로</h2>
-        <p style="color:var(--muted);font-size:14px">전체 EventStore trace, ID, 오류 순서와 BacktestResult tuple API를 Python reference와 동일하게 유지합니다.</p>
+        <p style="color:var(--muted);font-size:14px">전체 EventStore trace, ID, 오류 순서와 BacktestResult tuple API를 Python reference와 동일하게 유지합니다. Peak RSS는 100종목 코어별 단독 프로세스 측정입니다.</p>
         <div class="small-result">
-          <div><span>Peak RSS 비율</span><strong style="color:var(--green)">1.169×</strong></div>
+          <div><span>RSS · callback</span><strong style="color:var(--green)">1.23×</strong></div>
+          <div><span>RSS · tape</span><strong style="color:var(--pink)">1.27×</strong></div>
           <div><span>허용 기준</span><strong>≤ 1.25×</strong></div>
-          <div><span>Trace 차이</span><strong style="color:var(--green)">0</strong></div>
         </div>
         <div class="small-result">
-          <div><span>실제 fixture</span><strong>4종목</strong></div>
-          <div><span>Python</span><strong style="color:var(--python)">0.143s</strong></div>
-          <div><span>Rust</span><strong style="color:var(--rust)">0.105s</strong></div>
+          <div><span>실제 fixture 4종목</span><strong>callback / tape</strong></div>
+          <div><span>Python</span><strong style="color:var(--python)">0.215s / 0.192s</strong></div>
+          <div><span>Rust</span><strong style="color:var(--rust)">0.069s / 0.037s</strong></div>
         </div>
+        <div class="insight" style="margin-top:14px"><strong>RSS 게이트:</strong> callback 경로는 통과, tape 경로는 1.27×로 근접 미달입니다 (M6 시점 1.169×). Trace 차이 0.</div>
         <div class="insight" style="margin-top:18px"><strong>데이터 범위:</strong> 저장소 fixture의 전 기간 완주 종목은 4개입니다. 100/300 수치는 실제 KRX 가격 경로를 결정론적으로 복제한 주문 집중 확장 부하입니다.</div>
       </article>
     </section>

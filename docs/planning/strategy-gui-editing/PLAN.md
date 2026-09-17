@@ -6,7 +6,7 @@ current_phase: P1
 current_pr: P1-01,P1-02,P1-03,P1-04,P1-05
 active_prs: [P1-01, P1-02, P1-03, P1-04, P1-05]
 parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05]
-last_updated: 2026-09-18T01:35:23+09:00
+last_updated: 2026-09-18T01:44:28+09:00
 planned_prs: 17
 merged_prs: 0
 approved_prs: 4
@@ -29,7 +29,7 @@ progress_percent: 0
 | Active PR | `P1-01, P1-02, P1-03, P1-04, P1-05` |
 | Progress | `0 / 17 merged (0%)` |
 | Approved | `4 / 17` |
-| Aggregated at | `2026-09-18 01:35 KST` |
+| Aggregated at | `2026-09-18 01:44 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는

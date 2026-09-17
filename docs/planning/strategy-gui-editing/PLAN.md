@@ -3,10 +3,10 @@ plan_version: 2
 project: strategy-gui-editing
 project_status: IN_REVIEW
 current_phase: P1,P2
-current_pr: P1-01,P1-02,P1-03,P1-04,P1-05,P2-01
-active_prs: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01]
-parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01]
-last_updated: 2026-09-18T02:28:42+09:00
+current_pr: P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02
+active_prs: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02]
+parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02]
+last_updated: 2026-09-18T02:48:50+09:00
 planned_prs: 17
 merged_prs: 0
 approved_prs: 5
@@ -25,11 +25,11 @@ progress_percent: 0
 |---|---|
 | Project status | `IN_REVIEW` |
 | Current phase | `P1,P2` |
-| Current/next PR | `P1-01,P1-02,P1-03,P1-04,P1-05,P2-01` |
-| Active PR | `P1-01, P1-02, P1-03, P1-04, P1-05, P2-01` |
+| Current/next PR | `P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02` |
+| Active PR | `P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02` |
 | Progress | `0 / 17 merged (0%)` |
 | Approved | `5 / 17` |
-| Aggregated at | `2026-09-18 02:28 KST` |
+| Aggregated at | `2026-09-18 02:48 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -88,16 +88,16 @@ progress_percent: 0
 
 | 항목 | 값 |
 |---|---|
-| PR | `P2-01` |
-| Intent | `npm run api:generate`로 generated SDK를 1.1로 갱신하고 `spec.factors.factors`·`/factors/factors/{i}` pointer를 쓰던 frontend 소스·테스트를 루트 시퀀스 `factors`로 옮긴다 |
-| Acceptance | WORKFLOW P2-01 (팩터 컬렉션은 P1-01 조정대로 항목의 `x-authoring-identity`로 찾음) |
-| Non-goals | 업그레이드 배너·e2e 실행(P2-02), `x-applicable-when` 표시(P2-03) |
-| Branch/worktree | `feat/gui-p2-01-frontend-sdk-1-1` (base `feat/gui-p1-05-field-applicability` `66e1002`) |
-| Base SHA | `66e1002` |
-| Head SHA | `802d6e2` (diff freeze) |
-| Diff stat | src 8 files +54/−76, 테스트 25 files + e2e 1, generated 17 files(줄 수 제외) |
-| Focused tests | canonical-snippets 9·execution-plan 7·schema-navigator 13·schema-assist 17·cursor·backtest-error-contract |
-| Full gate | Vitest 455 passed(38 files) · typecheck · lint 0 warnings · build(editor 131.9 KiB gzip) · Playwright tsconfig typecheck · `api:generate` 재생성 diff 0 |
+| PR | `P2-02` |
+| Intent | 1.0 revision을 열면 `UpgradeBanner` → `POST /strategy-documents/upgrade` → `setText`(undo 1단계) → dirty·1.1 compile; legacy 동결 row는 새 revision 저장만 안내; 목록·history 동결 배지; backtest 422 안내; e2e "1.0 열기 → 업그레이드 → 저장 → backtest" |
+| Acceptance | WORKFLOW P2-02 |
+| Non-goals | `x-applicable-when` 표시(P2-03), trace 422 안내(debugger는 saved reference를 쓰지 않음) |
+| Branch/worktree | `feat/gui-p2-02-upgrade-ui` (base `feat/gui-p2-01-frontend-sdk-1-1` `2a16ebe`) |
+| Base SHA | `2a16ebe` |
+| Head SHA | `b7f8de1` (diff freeze) |
+| Diff stat | 19 files +1,068/−33 (신규 src 4 + 테스트 2 + e2e runtime 1, backend 테스트 헬퍼 CLI 1) |
+| Focused tests | document-upgrade 3 · upgrade-banner 4 · router frozen 배지 1 · document-routes backtest 422 1 · e2e chromium-workflow 5(신규 1) |
+| Full gate | Vitest 464 passed(40 files) · typecheck · lint 0 warnings · build · Playwright tsconfig typecheck · backend frozen/upgrade 25 passed·Ruff·Pyright · `npm run test:e2e -- --project chromium-workflow` 5 passed |
 
 ---
 
@@ -122,7 +122,7 @@ Phase exit:
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [ ] | `P2-01` | generated SDK 1.1, pointer helper·snippet·outline·plan·graph·debugger 적응 | P1-05 | `IN_REVIEW` | [#115](https://github.com/Nochiski/Quant_study/pull/115) · `review_gui_p2_01` 배정 · diff freeze `802d6e2` |
-| [ ] | `P2-02` | 1.0 문서 업그레이드 배너·동작, e2e fixture/spec 1.1 | P2-01, P1-04 | `WAITING` | — |
+| [ ] | `P2-02` | 1.0 문서 업그레이드 배너·동작, e2e fixture/spec 1.1 | P2-01, P1-04 | `IN_REVIEW` | [#116](https://github.com/Nochiski/Quant_study/pull/116) · `review_gui_p2_02` 배정 · diff freeze `b7f8de1` |
 | [ ] | `P2-03` | Contract Inspector·Problems 적용 조건 표시 | P2-01, P1-05 | `WAITING` | — |
 
 Phase exit:
@@ -189,6 +189,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
+| P2-02 | document-upgrade 3·upgrade-banner 4(MSW 성공+undo/422 drift/네트워크/legacy 동결)·router 배지 1·document-routes backtest 422 1 | Vitest 464 passed(40 files)·typecheck·lint·build·Playwright tsconfig typecheck·backend 25 passed·Ruff·Pyright | SDK 무변경(P2-01 상태 유지) | e2e chromium-workflow 5 passed: 1.0 row seeding → 배너 → 업그레이드 200 → 검증 통과 → v2 저장(1.1 golden과 같은 spec hash) → saved_revision backtest completed → legacy 동결 배너 → 목록 배지 | 원격 CI frontend·browser-e2e green 기대(P1-01부터 알려진 빨간불 해소) | 2026-09-18 |
 | P2-01 | canonical-snippets 9·execution-plan 7·schema-navigator 13·schema-assist 17·cursor 10·backtest-error-contract 1 | Vitest 455 passed(38 files)·typecheck·lint 0 warnings·build·Playwright tsconfig typecheck | 커밋 후 `npm run api:generate` 재실행, `src/shared/api/generated`·`backend/openapi.json` diff 0 | 해당 없음(타입·pointer·스니펫 적응) | 원격 CI frontend job green 기대(P1-01부터 알려진 빨간불 해소), browser-e2e는 P2-02까지 빨간불 | 2026-09-18 |
 | P1-05 | applicability 25·document HTTP 13·constraints·schema·application | backend pytest 1,313·Ruff check·Pyright 0; reviewer 독립 재실행 동일 + frontend Vitest 31 실패가 전부 기존(1.1 fixture) 실패임을 확인 | `openapi.json`·`runtime-schema.json` 재생성 diff 0 | 해당 없음 | 원격 CI backend job 대상; frontend·browser-e2e 알려진 빨간불(P2-01/02 exit) | 2026-09-18 |
 | P1-04 | 어댑터 17·서비스 9·HTTP 5·openapi 동기 1 | backend pytest 1,289·Ruff check·Pyright 0; reviewer 독립 재실행 동일 | `openapi.json` 재생성 diff 0 + 추적 동기 테스트 | 해당 없음 | 원격 CI backend job 대상, browser-e2e 알려진 빨간불 | 2026-09-18 |
@@ -200,6 +201,7 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-18 KST | Claude | P2-02 구현·self-check(Vitest 464, e2e workflow 5 passed) → diff freeze `b7f8de1`, stacked PR #116(base P2-01), `review_gui_p2_02`(opus) 배정 → IN_REVIEW. 결정: 배너 판정은 backend 진단 + parse tree `schema_version`(지원 버전은 backend 소유), 적용은 `setText` 한 번(reducer에 교체 action 추가 안 함), e2e 1.0 row는 backend 테스트 헬퍼 CLI로 seeding, 배너 상태는 `sourceVersion·savedVersion`에 묶음(첫 e2e에서 저장 후 안내가 남는 결함 발견·수정) | 13.3 diff freeze |
 | 2026-09-18 KST | Claude | P2-01 구현·self-check(Vitest 455, typecheck·lint·build, SDK 재생성 diff 0) → diff freeze `802d6e2`, stacked PR #115(base P1-05), `review_gui_p2_01`(opus) 배정 → IN_REVIEW. 결정: 팩터 컬렉션은 루트 배열 + `x-authoring-identity`로 탐색(키 이름 미가정), 루트에 `factors`가 이미 있으면 스니펫 `duplicate`, optional이 된 단계는 빈 객체 렌더(기본값 복제 없음) | 13.3 diff freeze |
 | 2026-09-18 KST | Claude | `review_gui_p1_05` 재검토 APPROVE(P1-001 철회) → P1-05 APPROVED. Phase 1 PR 5/5 승인, Phase exit SoT·책임분리 점검 서브에이전트 착수 | 13.5 판정 |
 | 2026-09-18 KST | Claude | `review_gui_p1_05` REQUEST_CHANGES(P1-001 생성 SDK 미동기 — 스택 결정으로 P2-01에서 해소, WORKFLOW 1절에 `api:generate` 게이트까지 명시; P2-002~004) → 후속 `3c70001`(AND 조건, selection_count 행, 동일 모양, owned_by_error 노출), 1,313 passed, 재검토 요청 | 13.5 재검토 |

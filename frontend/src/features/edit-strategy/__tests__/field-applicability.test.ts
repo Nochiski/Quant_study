@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import type { ApplicableWhen, FieldContract } from "../../../shared/api";
+import type { ApplicableWhen } from "../../../shared/api";
+import { tOptional } from "../../../shared/config";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import {
-  applicabilityByPointer,
   isApplicableWhen,
   projectApplicability,
+  type DefaultResolver,
 } from "../model/field-applicability";
 import type { JsonSchema } from "../model/schema-navigator";
 
@@ -23,8 +24,21 @@ const whenOf = (definition: string, property: string): ApplicableWhen => {
   return value;
 };
 
+/** 발행된 기본값 조회: runtime schema property `default`(PortfolioStep 한정, 테스트용). */
+const schemaDefaults: DefaultResolver = (pointer) => {
+  const [section, key] = pointer.slice(1).split("/");
+  const defs = SCHEMA.$defs as Record<string, JsonSchema>;
+  const definition = section === "portfolio" ? "PortfolioStep" : "SignalStep";
+  const property = (defs[definition]!.properties as Record<string, JsonSchema>)[
+    key!
+  ];
+  return property && Object.hasOwn(property, "default")
+    ? { has: true, value: property.default }
+    : { has: false, value: undefined };
+};
+
 describe("field applicability projection", () => {
-  it("reads the AND conditions from the backend row and judges them on the current tree", () => {
+  it("reads the AND conditions from the backend row and judges them on the written tree", () => {
     const when = whenOf("PortfolioStep", "short_selection_count");
     expect(when.all_of.map((c) => c.pointer)).toEqual([
       "/portfolio/side",
@@ -47,7 +61,7 @@ describe("field applicability projection", () => {
     expect(percentile.conditions.map((c) => c.holds)).toEqual([true, false]);
   });
 
-  it("never fills in backend defaults: an unwritten condition field is undecided, a false one wins", () => {
+  it("is undecided without a written value or a published default, and never invents one", () => {
     const when = whenOf("PortfolioStep", "short_selection_count");
     expect(projectApplicability(when, { portfolio: {} }).applicable).toBeNull();
     expect(projectApplicability(when, undefined).applicable).toBeNull();
@@ -55,23 +69,36 @@ describe("field applicability projection", () => {
       projectApplicability(when, { portfolio: { side: "long_only" } })
         .applicable,
     ).toBe(false);
+    // not_null도 같은 규칙: 문서에 없고 발행 기본값도 없으면 판정 불가(P2-03 리뷰 118-02).
+    const liquidity = whenOf("PortfolioStep", "minimum_liquidity");
+    expect(
+      projectApplicability(liquidity, { portfolio: {} }).applicable,
+    ).toBeNull();
   });
 
-  it("judges not_null rows by presence and carries the owning error code", () => {
-    const when = whenOf("PortfolioStep", "minimum_liquidity");
-    expect(when.owned_by_error).toBe("strategy.portfolio.liquidity_field");
-    expect(
-      projectApplicability(when, { portfolio: { liquidity_field_id: null } })
-        .applicable,
-    ).toBe(false);
-    expect(
-      projectApplicability(when, {
-        portfolio: { liquidity_field_id: "price.trading_value" },
-      }).applicable,
-    ).toBe(true);
-    expect(projectApplicability(when, { portfolio: {} }).applicable).toBe(
-      false,
+  it("judges unwritten condition fields on the backend-published default when a resolver is given", () => {
+    const when = whenOf("PortfolioStep", "short_selection_count");
+    const decided = projectApplicability(
+      when,
+      { portfolio: {} },
+      schemaDefaults,
     );
+    // PortfolioStep 기본값: side long_only, selection_method top_n → long_short 조건이 거짓.
+    expect(decided.applicable).toBe(false);
+    expect(decided.conditions.map((c) => c.fromDefault)).toEqual([true, true]);
+    const liquidity = whenOf("PortfolioStep", "minimum_liquidity");
+    expect(liquidity.owned_by_error).toBe("strategy.portfolio.liquidity_field");
+    expect(
+      projectApplicability(liquidity, { portfolio: {} }, schemaDefaults)
+        .applicable,
+    ).toBe(false); // 기본값 null → not_null 거짓
+    expect(
+      projectApplicability(
+        liquidity,
+        { portfolio: { liquidity_field_id: "price.trading_value" } },
+        schemaDefaults,
+      ).applicable,
+    ).toBe(true);
   });
 
   it("rejects malformed schema rows at the boundary", () => {
@@ -85,29 +112,30 @@ describe("field applicability projection", () => {
     ).toBe(false);
   });
 
-  it("maps every contract row with a condition by pointer and skips branch rows", () => {
-    const contract: FieldContract[] = [
-      {
-        pointer: "/portfolio/selection_percentile",
-        type: "number",
-        required: false,
-        example: null,
-        applicable_when: whenOf("PortfolioStep", "selection_percentile"),
-      },
-      {
-        pointer: "/factors/*/graph/nodes/*/field_id",
-        branch: "field",
-        type: "string",
-        required: true,
-        example: null,
-        applicable_when: whenOf("PortfolioStep", "selection_percentile"),
-      },
-      { pointer: "/title", type: "string", required: true, example: null },
-    ];
-    const map = applicabilityByPointer(contract, {
-      portfolio: { selection_method: "top_n" },
-    });
-    expect([...map.keys()]).toEqual(["/portfolio/selection_percentile"]);
-    expect(map.get("/portfolio/selection_percentile")?.applicable).toBe(false);
+  it("has a translation for every description key the backend publishes (P2-03 리뷰 118-07)", () => {
+    const defs = SCHEMA.$defs as Record<string, JsonSchema>;
+    const keys = Object.values(defs)
+      .flatMap((definition) =>
+        Object.values(
+          (definition.properties ?? {}) as Record<string, JsonSchema>,
+        ),
+      )
+      .map((property) => property["x-applicable-when"])
+      .filter(isApplicableWhen)
+      .map((when) => when.description_key);
+    expect(keys).toHaveLength(8);
+    for (const key of keys) expect(tOptional(key), key).not.toBeNull();
+    // 같은 구멍이 필드 설명 키에도 있다(Phase 2 감사 DEFECT-P2X-004): schema가 발행한 키는 전부 번역된다.
+    const descriptionKeys = Object.values(defs)
+      .flatMap((definition) =>
+        Object.values(
+          (definition.properties ?? {}) as Record<string, JsonSchema>,
+        ),
+      )
+      .map((property) => property["x-description-key"])
+      .filter((key): key is string => typeof key === "string");
+    expect(descriptionKeys.length).toBeGreaterThan(0);
+    for (const key of descriptionKeys)
+      expect(tOptional(key), key).not.toBeNull();
   });
 });

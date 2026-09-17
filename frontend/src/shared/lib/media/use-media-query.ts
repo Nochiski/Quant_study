@@ -4,7 +4,10 @@ import { useSyncExternalStore } from "react";
 export const useMediaQuery = (query: string): boolean =>
   useSyncExternalStore(
     (onChange) => {
-      if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      if (
+        typeof window === "undefined" ||
+        typeof window.matchMedia !== "function"
+      ) {
         return () => {};
       }
       const list = window.matchMedia(query);

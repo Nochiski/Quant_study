@@ -20,7 +20,7 @@ paths:
 | 팩터 값의 공개일 | 그 팩터 plan이 읽는 필드들의 `available_date` 최댓값 | 컴파일러 FUTURE_DATA 가드가 그대로 읽는다 |
 | 리밸런싱 시점의 previous weight | `compile_target_tape`의 프레임 fold | 포트의 `previous_weight`는 첫 프레임 시드로만 쓰인다 |
 | 전략 의미 | immutable, versioned `StrategySpec` | YAML/JSON source를 서버가 compile, Form/Graph는 read-only projection; 별도 Quick/Advanced 편집 모델을 두지 않음 |
-| authoring schema 버전 | `domain/strategy/_models.py`의 `CURRENT_SCHEMA_VERSION`(`_hydrate.py`의 `SUPPORTED_SCHEMA_VERSIONS`가 파생), 은퇴 버전은 `domain/strategy/_upgrade.py`의 `LEGACY_SCHEMA_VERSION` | 모델 기본값·스키마·검증·어댑터·테스트는 이 상수를 읽는다. `"1.1"`/`"1.0"` 리터럴을 다시 적지 않는다 |
+| authoring schema 버전 | `domain/strategy/_models.py`의 `CURRENT_SCHEMA_VERSION`(`_hydrate.py`의 `SUPPORTED_SCHEMA_VERSIONS`가 파생), 은퇴 버전은 `domain/strategy/_upgrade.py`의 `LEGACY_SCHEMA_VERSION` | 모델 기본값·스키마·검증·어댑터·테스트는 이 상수를 읽는다. `"1.1"`/`"1.0"` 리터럴을 다시 적지 않는다. frontend도 같다: 동결/업그레이드 판정은 `requires_upgrade`와 compile 진단으로만 하고 은퇴 버전 문자열을 갖지 않는다. 버전 리터럴을 남겨야 하면(새 문서 템플릿) 그 값이 runtime schema `schema_version.const`와 같은지 단언하는 테스트를 같은 PR에 넣는다 |
 | 1.0 → 1.1 문서 업그레이드 변환 | `domain/strategy/_upgrade.py`의 `UPGRADE_STEPS` | dict 경로(repository codec, legacy generated source)와 source 경로(`adapters/outbound/document_codec/_upgrade_source.py`)가 같은 step을 적용한다. 어댑터는 주석·순서 보존만 맡고, 두 경로가 다른 tree를 내면 application이 `strategy_document.upgrade_drift` 422로 거부한다. frontend는 변환 규칙을 알지 않고 응답 원문을 그대로 적용한다 |
 | 필드 적용 조건(모드별로 읽히는 필드) | `domain/strategy/_constraints.py`의 `FIELD_APPLICABILITY` | 같은 행에서 validator가 `strategy.field.inapplicable` warning을, runtime schema가 `x-applicable-when`을, contract가 `FieldContract.applicable_when`을 낸다. 이미 blocking error가 소유한 관계는 `owned_by_error`로 표시하고 warning을 두 번 내지 않는다 |
 | revision의 동결(업그레이드 필요) 여부 | `domain/strategy/_upgrade.py`의 `is_frozen_schema_version`을 `StrategyRevisionRecord.requires_upgrade`(`application/strategy_design/ports/outgoing/strategy_repository.py`)가 적용 | 목록·history·문서 응답·saved-reference 실행 거부가 이 property를 그대로 전달한다. 어댑터와 HTTP 계층이 `schema_version`을 다시 비교해 동결을 판정하지 않는다 |
@@ -34,7 +34,7 @@ paths:
 | 저장된 authoring source 텍스트·`source_hash` | strategy revision envelope (`source`, `source_hash`) | 서버는 exact text를 그대로 보관, UI는 표시·편집 시작점으로만 사용 |
 | YAML 1.2 허용/거부 집합 | `backend/tests/fixtures/strategy_documents/yaml12/manifest.json` | backend codec test와 frontend `yaml` cross-runtime test가 같은 manifest를 실행 |
 | 실행 차단(blocking) 판정 | backend compile diagnostics의 error severity | frontend syntax marker는 advisory, 실행 가능 여부를 판단하지 않음 |
-| authoring 진단 코드 | `strategy.*`는 domain 코드 레지스트리, `structure.*`는 domain hydrate, codec 코드(`document.*`/`yaml.*`/`<format>.syntax`)는 `ports/outgoing/document_codec.py` | frontend는 코드 → 메시지·마커 매핑만, 코드를 새로 만들지 않는다 |
+| authoring 진단 코드 | `strategy.*`는 domain 코드 레지스트리, `structure.*`는 domain hydrate, codec 코드(`document.*`/`yaml.*`/`<format>.syntax`)는 `ports/outgoing/document_codec.py` | frontend는 코드 → 마커 매핑과 422 코드 번역(`upgrade.error.<code>`·`backtest.error.<code>`)만 한다. compile 진단의 `message`는 backend가 한글 문장으로 완성해 보내고 Problems panel은 그대로 보여준다(frontend가 다시 조립·번역하지 않음, Phase 2 감사 DEFECT-P2X-005(b)); 코드를 새로 만들지 않는다 |
 | URL 선택 상태(view/path/date/security) | TanStack Router search (`validateSearch`) | widget은 읽기만, 기본값은 URL에 쓰지 않음 |
 
 ## 금지

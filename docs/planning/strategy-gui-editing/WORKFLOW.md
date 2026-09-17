@@ -441,8 +441,10 @@ predicate가 선언에서 파생됨(행마다 `condition`으로 재계산한 결
 
 **Acceptance**
 
-- compile 진단에 `structure.unsupported_schema_version`이 있고 parse tree `schema_version === "1.0"`이면
-  편집기 위에 `UpgradeBanner`(feature `edit-strategy/ui/upgrade-banner.tsx`) 표시.
+- compile 진단에 `structure.unsupported_schema_version`이 있으면 편집기 위에
+  `UpgradeBanner`(feature `edit-strategy/ui/upgrade-banner.tsx`) 표시. frontend는 은퇴 버전 문자열을
+  갖지 않는다(Phase 2 감사 DEFECT-P2X-002 조정): 변환 불가 버전은 endpoint의 422
+  `strategy_document.not_upgradeable` 문구로 드러난다.
 - 클릭 → `POST /strategy-documents/upgrade`(TanStack mutation) → 응답 source를
   `CodeEditorHandle.setText`로 적용(undo 1단계) → 문서가 dirty·1.1 compile 흐름.
 - 실패(422 drift/not_upgradeable/네트워크)는 배너 안 오류 문구, source 불변.

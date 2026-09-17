@@ -489,16 +489,20 @@ describe("field applicability in the contract projection (P2-03)", () => {
     });
   });
 
-  it("falls back to the schema's x-applicable-when and stays undecided without the condition field", () => {
-    // CONTRACT에는 short_selection_count 행이 없다: runtime schema 마커에서 같은 모양을 읽는다.
-    const undecided = projectContractField(
+  it("falls back to the schema's x-applicable-when and judges unwritten conditions on published defaults", () => {
+    // CONTRACT에는 short_selection_count 행이 없다: runtime schema 마커에서 같은 모양을 읽고,
+    // 문서에 portfolio가 없으므로 schema `default`(side long_only)로 판정한다.
+    const byDefault = projectContractField(
       SCHEMA,
       CONTRACT,
       "/portfolio/short_selection_count",
       TREE,
     );
-    expect(undecided?.applicability?.applicable).toBeNull();
-    expect(undecided?.applicability?.conditions.map((c) => c.path)).toEqual([
+    expect(byDefault?.applicability?.applicable).toBe(false);
+    expect(
+      byDefault?.applicability?.conditions.map((c) => c.fromDefault),
+    ).toEqual([true, true]);
+    expect(byDefault?.applicability?.conditions.map((c) => c.path)).toEqual([
       "portfolio.side",
       "portfolio.selection_method",
     ]);
@@ -528,7 +532,7 @@ describe("field applicability in the contract projection (P2-03)", () => {
       screen.getByRole("heading", { name: "적용 조건" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("portfolio.liquidity_field_id 설정"),
+      screen.getByText("✕ portfolio.liquidity_field_id 설정"),
     ).toHaveAttribute("data-holds", "false");
     expect(
       screen.getByText("strategy.portfolio.liquidity_field"),
@@ -538,9 +542,7 @@ describe("field applicability in the contract projection (P2-03)", () => {
         "현재 문서에서는 읽히지 않습니다. portfolio.liquidity_field_id 설정일 때만 적용됩니다.",
       ),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText("유동성 필드가 지정된 경우의 최소 유동성"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("최소 유동성 하한")).toBeInTheDocument();
   });
 });
 

@@ -265,12 +265,18 @@ const ApplicabilitySection = ({
               {applicability.conditions.map((condition) => (
                 <code
                   key={condition.pointer}
+                  className="contract-inspector__condition"
                   data-holds={
                     condition.holds === null
                       ? "unknown"
                       : String(condition.holds)
                   }
                 >
+                  {condition.holds === true
+                    ? "✓ "
+                    : condition.holds === false
+                      ? "✕ "
+                      : "? "}
                   {condition.equals === null
                     ? t("contract.applicable.condition.set").replace(
                         "{path}",

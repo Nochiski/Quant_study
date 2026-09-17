@@ -344,6 +344,7 @@ const ko = {
   "projection.specHash": "backend spec hash",
   "projection.section.metadata": "기본 정보",
   "projection.section.data": "데이터",
+  "projection.section.signal": "신호",
   "projection.section.portfolio": "포트폴리오",
   "projection.section.risk": "리스크",
   "projection.section.execution": "실행",
@@ -449,20 +450,17 @@ const ko = {
   "contract.applicable.condition.set": "{path} 설정",
   "contract.applicable.and": " 그리고 ",
   "strategy.contract.applicable.selection_count":
-    "top_n 선택에서 롱 포트폴리오 종목 수",
+    "롱 포트폴리오에 선택할 종목 수",
   "strategy.contract.applicable.short_selection_count":
-    "long_short·top_n에서 숏 포트폴리오 종목 수",
+    "숏 포트폴리오에 선택할 종목 수",
   "strategy.contract.applicable.selection_percentile":
-    "percentile 선택에서 상위 비율",
+    "점수 상위에서 선택할 비율",
   "strategy.contract.applicable.rebalance_every_n_sessions":
-    "every_n_sessions 리밸런싱 주기(세션)",
-  "strategy.contract.applicable.minimum_liquidity":
-    "유동성 필드가 지정된 경우의 최소 유동성",
-  "strategy.contract.applicable.sector_neutral":
-    "long_short에서 섹터 중립 여부",
-  "strategy.contract.applicable.risk_field_id": "risk 가중에서 위험 필드",
-  "strategy.contract.applicable.regime_minimum":
-    "레짐 필드가 지정된 경우의 최소 레짐 값",
+    "리밸런싱 주기(세션 수)",
+  "strategy.contract.applicable.minimum_liquidity": "최소 유동성 하한",
+  "strategy.contract.applicable.sector_neutral": "섹터 중립 여부",
+  "strategy.contract.applicable.risk_field_id": "위험 가중에 쓰는 필드",
+  "strategy.contract.applicable.regime_minimum": "레짐 값 하한",
   "strategy.contract.portfolio.selection_count":
     "롱 포트폴리오에 선택할 종목 수",
   "strategy.contract.portfolio.short_selection_count":
@@ -1145,6 +1143,7 @@ export const messages = {
     "projection.specHash": "Backend spec hash",
     "projection.section.metadata": "Basics",
     "projection.section.data": "Data",
+    "projection.section.signal": "Signal",
     "projection.section.portfolio": "Portfolio",
     "projection.section.risk": "Risk",
     "projection.section.execution": "Execution",
@@ -1251,21 +1250,18 @@ export const messages = {
     "contract.applicable.condition.set": "{path} set",
     "contract.applicable.and": " and ",
     "strategy.contract.applicable.selection_count":
-      "Long-side name count under top_n selection",
+      "Number of names in the long portfolio",
     "strategy.contract.applicable.short_selection_count":
-      "Short-side name count under long_short and top_n",
+      "Number of names in the short portfolio",
     "strategy.contract.applicable.selection_percentile":
-      "Top fraction under percentile selection",
+      "Fraction selected from the top of the score",
     "strategy.contract.applicable.rebalance_every_n_sessions":
-      "Rebalance interval in sessions under every_n_sessions",
-    "strategy.contract.applicable.minimum_liquidity":
-      "Minimum liquidity when a liquidity field is set",
-    "strategy.contract.applicable.sector_neutral":
-      "Sector neutrality under long_short",
+      "Rebalance interval in sessions",
+    "strategy.contract.applicable.minimum_liquidity": "Minimum liquidity floor",
+    "strategy.contract.applicable.sector_neutral": "Sector neutrality",
     "strategy.contract.applicable.risk_field_id":
-      "Risk field under risk weighting",
-    "strategy.contract.applicable.regime_minimum":
-      "Minimum regime value when a regime field is set",
+      "Field used for risk weighting",
+    "strategy.contract.applicable.regime_minimum": "Regime value floor",
     "strategy.contract.portfolio.selection_count":
       "Number of names in the long portfolio",
     "strategy.contract.portfolio.short_selection_count":

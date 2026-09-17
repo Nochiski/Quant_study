@@ -389,7 +389,8 @@ export const responseMatchesStrategyTrace = (
     ) &&
     response.raw.every(
       (row) =>
-        row.as_of === response.as_of && requestedSecurities.has(row.security_id),
+        row.as_of === response.as_of &&
+        requestedSecurities.has(row.security_id),
     ) &&
     (response.target === null ||
       (response.target.signal_as_of === response.as_of &&

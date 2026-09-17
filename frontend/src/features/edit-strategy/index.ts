@@ -81,7 +81,6 @@ export { ConflictBanner } from "./ui/conflict-banner";
 export { UpgradeBanner } from "./ui/upgrade-banner";
 export {
   decideDocumentUpgrade,
-  LEGACY_SCHEMA_VERSION,
   type StoredRevisionMeta,
   type UpgradeAvailability,
 } from "./model/document-upgrade";
@@ -105,11 +104,11 @@ export {
   type DraftSemanticDiff,
 } from "./model/diff-projection";
 export {
-  applicabilityByPointer,
   describeApplicabilityConditions,
   isApplicableWhen,
   projectApplicability,
   type ApplicabilityCondition,
+  type DefaultResolver,
   type FieldApplicability,
 } from "./model/field-applicability";
 export {

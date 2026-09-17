@@ -439,18 +439,18 @@ describe("schema-driven hover", () => {
       state.parse!.tree,
     );
     expect(lines).toContain("적용 조건: portfolio.side = long_short");
-    // 문서에 portfolio가 없어 판정 불가: "읽히지 않음" 배지는 붙지 않는다.
-    expect(lines).not.toContain("현재 모드에서 읽히지 않음");
-    const longOnly = stateFor(`${YAML}portfolio:
-  side: long_only
+    // 문서에 portfolio가 없어도 schema가 발행한 기본값(long_only)으로 판정한다.
+    expect(lines).toContain("현재 모드에서 읽히지 않음");
+    const longShort = stateFor(`${YAML}portfolio:
+  side: long_short
 `);
     expect(
       describePointer(
-        deps(longOnly),
+        deps(longShort),
         "/risk/sector_neutral",
-        longOnly.parse!.tree,
+        longShort.parse!.tree,
       ),
-    ).toContain("현재 모드에서 읽히지 않음");
+    ).not.toContain("현재 모드에서 읽히지 않음");
   });
 
   it("keeps requiredness shared by every unresolved union branch", () => {

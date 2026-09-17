@@ -17,7 +17,6 @@ import {
   currentDiagnostics,
   currentSpec,
   createNewDraftId,
-  applicabilityByPointer,
   projectStrategySpec,
   revisionDraftId,
   saveStatusText,
@@ -47,7 +46,12 @@ import {
   StrategyIde,
 } from "../../../widgets/strategy-ide";
 
-const STARTER = 'schema_version: "1.1"\ntitle: ""\n';
+/**
+ * 새 문서 시작 텍스트. `schema_version` 리터럴은 backend runtime schema의 `const`와 같아야 하며
+ * `__tests__/new-strategy-starter.test.ts`가 fixture로 단언한다(Phase 2 감사 DEFECT-P2X-001).
+ */
+export const NEW_STRATEGY_STARTER = 'schema_version: "1.1"\ntitle: ""\n';
+const STARTER = NEW_STRATEGY_STARTER;
 const ROUTE = "/research/strategies/new";
 const NEW_DRAFT: DocumentSource = {
   kind: "new",
@@ -110,14 +114,6 @@ export const NewStrategyPage = () => {
       ? document.compiled
       : null;
   const projection = projectStrategySpec(document);
-  const contractRows = assist.inspectorSource.contract?.contract.fields;
-  const formApplicability = useMemo(
-    () =>
-      projection.status === "ready" && contractRows !== undefined
-        ? applicabilityByPointer(contractRows, projection.spec)
-        : undefined,
-    [contractRows, projection],
-  );
   const availableViews: readonly StrategyView[] = PROJECTION_VIEWS;
   const requested: StrategyView = search.view ?? document.format;
   const implemented = availableViews.includes(requested);
@@ -275,13 +271,7 @@ export const NewStrategyPage = () => {
         }
         projections={{
           json: <StrategyProjectionPanel projection={projection} view="json" />,
-          form: (
-            <StrategyProjectionPanel
-              projection={projection}
-              view="form"
-              applicability={formApplicability}
-            />
-          ),
+          form: <StrategyProjectionPanel projection={projection} view="form" />,
           graph: (
             <FactorGraphPanel
               state={executionPlans}

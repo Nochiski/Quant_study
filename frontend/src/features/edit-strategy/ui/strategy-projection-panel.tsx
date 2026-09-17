@@ -1,14 +1,11 @@
 import { t } from "../../../shared/config";
 import { Badge } from "../../../shared/ui";
-import type { FieldApplicability } from "../model/field-applicability";
 import type { StrategyProjection } from "../model/strategy-projection";
 import "./strategy-projection-panel.css";
 
 type StrategyProjectionPanelProps = {
   projection: StrategyProjection;
   view: "json" | "form";
-  /** pointer별 조건표 판정(P2-03). 컴파일된 spec은 기본값이 채워져 있어 판정이 확정된다. */
-  applicability?: ReadonlyMap<string, FieldApplicability>;
 };
 
 const valueText = (value: unknown): string => {
@@ -21,7 +18,6 @@ const valueText = (value: unknown): string => {
 export const StrategyProjectionPanel = ({
   projection,
   view,
-  applicability,
 }: StrategyProjectionPanelProps) => {
   if (projection.status === "unavailable") {
     return (
@@ -41,6 +37,7 @@ export const StrategyProjectionPanel = ({
     },
     // schema 1.1: 컴파일된 spec은 모든 단계를 채워 보내지만 계약상 선택 필드이므로 빈 단계도 그대로 그린다.
     { id: "data", values: projection.spec.data },
+    { id: "signal", values: projection.spec.signal ?? {} },
     { id: "portfolio", values: projection.spec.portfolio ?? {} },
     { id: "risk", values: projection.spec.risk ?? {} },
     { id: "execution", values: projection.spec.execution ?? {} },
@@ -96,8 +93,9 @@ export const StrategyProjectionPanel = ({
                     section.id === "metadata"
                       ? `/${field}`
                       : `/${section.id}/${field}`;
+                  // 배지의 근거는 backend compile 경고 그대로다(P2-03 리뷰 DEFECT-118-01).
                   const inapplicable =
-                    applicability?.get(pointer)?.applicable === false;
+                    projection.inapplicablePointers.has(pointer);
                   return (
                     <div key={field}>
                       <dt>

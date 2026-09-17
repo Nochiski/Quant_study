@@ -121,9 +121,7 @@ export const useAutosave = (
       // pre-save base key even if later edits keep the document dirty. A document load changes
       // the epoch and must keep its recovery record.
       clearDraft(storage, before.key);
-      setLastWrite((current) =>
-        current?.key === before.key ? null : current,
-      );
+      setLastWrite((current) => (current?.key === before.key ? null : current));
     }
     if (!state.dirty || state.composing) return;
     const timer = setTimeout(() => {

@@ -25,6 +25,7 @@ import {
   upgradeStrategyDocument,
 } from "./generated/sdk.gen";
 import type {
+  ApplicableWhen,
   BacktestRunResult,
   BacktestRunSpec,
   BacktestRunState,
@@ -489,6 +490,7 @@ export type EquityCatalogQuery = NonNullable<GetEquityCatalogData["query"]>;
 export type FactorCatalogQuery = NonNullable<GetFactorCatalogData["query"]>;
 
 export type {
+  ApplicableWhen,
   BacktestRunResult,
   BacktestRunSpec,
   BacktestRunState,

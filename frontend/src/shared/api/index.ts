@@ -2,6 +2,7 @@ export {
   ApiRequestError,
   configureStrategyWorkbenchApi,
   strategyWorkbenchApi,
+  type ApplicableWhen,
   type BacktestRunResult,
   type BacktestRunSpec,
   type BacktestRunState,

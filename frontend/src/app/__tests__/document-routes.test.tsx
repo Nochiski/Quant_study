@@ -151,7 +151,7 @@ const SIGNAL_SCHEMA_RESPONSE = {
       signal: {
         type: "object",
         properties: {
-          method: { type: "string", default: "weighted_sum" },
+          regime_minimum: { type: "number", default: 0.5 },
         },
       },
     },
@@ -366,7 +366,6 @@ const server = setupServer(
               code: "strategy.revision_conflict",
               message: "another author saved first",
               latest_revision: 3,
-              requires_upgrade: false,
             },
           },
           { status: 409 },
@@ -745,7 +744,7 @@ describe("document routes (P2-04)", () => {
     );
 
     expect(view.state.doc.toString()).toBe(
-      `${prefix}signal:\n  method: weighted_sum`,
+      `${prefix}signal:\n  regime_minimum: 0.5`,
     );
     expect(
       screen.getByText(/YAML 문법 검사를 통과했습니다/),
@@ -768,7 +767,7 @@ describe("document routes (P2-04)", () => {
       "같은 항목이 이미 존재합니다",
     );
     expect(view.state.doc.toString()).toBe(
-      `${prefix}signal:\n  method: weighted_sum\n`,
+      `${prefix}signal:\n  regime_minimum: 0.5\n`,
     );
 
     act(() =>
@@ -2856,7 +2855,6 @@ describe("revision conflict (P3-07)", () => {
                 code: "strategy.revision_conflict",
                 message: "message wording is not an identity contract",
                 latest_revision: 3,
-                requires_upgrade: false,
               },
             },
             { status: 409 },
@@ -2909,7 +2907,6 @@ describe("revision conflict (P3-07)", () => {
                   code: "strategy.revision_conflict",
                   message: "another author saved first",
                   latest_revision: 3,
-                  requires_upgrade: false,
                 },
               },
               { status: 409 },

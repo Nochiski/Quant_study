@@ -160,7 +160,7 @@ const buildFactorPlanRequests = (spec: StrategySpec): FactorPlanRequest[] => {
   }));
 };
 
-/** schema 1.1: `factors` is the root sequence, so a factor's graph lives at `/factors/{i}/graph`. */
+/** schema 1.1: `factors`가 루트 시퀀스이므로 팩터 그래프는 `/factors/{i}/graph`에 있다. */
 export const factorGraphPointer = (factorIndex: number): string =>
   `/factors/${factorIndex}/graph`;
 

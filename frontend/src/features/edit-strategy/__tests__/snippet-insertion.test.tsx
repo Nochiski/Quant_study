@@ -22,7 +22,7 @@ const SIGNAL_SCHEMA: JsonSchema = {
   properties: {
     signal: {
       type: "object",
-      properties: { method: { type: "string", default: "weighted_sum" } },
+      properties: { regime_minimum: { type: "number", default: 0.5 } },
     },
   },
 };
@@ -34,7 +34,7 @@ const SIGNAL_SNIPPET: CanonicalSnippet = {
   kind: "section",
   sectionKey: "signal",
   identity: null,
-  value: { method: "weighted_sum" },
+  value: { regime_minimum: 0.5 },
 };
 
 const editorHandle: CodeEditorHandle = {

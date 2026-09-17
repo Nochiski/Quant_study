@@ -420,8 +420,9 @@ predicate가 선언에서 파생됨(행마다 `condition`으로 재계산한 결
 
 - `use-execution-plans.ts`: `factorGraphPointer(i) === "/factors/${i}/graph"`,
   `factorIndexAtPointer("/factors/3/graph/nodes/1") === 3`.
-- `canonical-snippets.ts`: 팩터 collection을 키 이름이 아니라 runtime schema의 `x-defines: factor`로
-  찾는다. 팩터 스니펫은 root sequence 항목으로 삽입되며 `factors` 키가 없으면 `factors:` + 항목을
+- `canonical-snippets.ts`: 팩터 collection을 키 이름이 아니라 항목의 `x-authoring-identity`
+  마커로 찾는다(P1-01 조정: `factors`에 `x-defines`를 두지 않음). 마커가 붙은 루트 배열이 둘 이상이면
+  fail-closed. 팩터 스니펫은 root sequence 항목으로 삽입되며 `factors` 키가 없으면 `factors:` + 항목을
   삽입한다. 스니펫 value에 `label`은 catalog label, `weight`는 `x-authoring-default`.
 - `strategy-debugger-context.ts`, `execution-plan-panel.tsx`, `factor-graph-panel.tsx`,
   `strategy-outline.ts`가 `spec.factors`를 쓴다.

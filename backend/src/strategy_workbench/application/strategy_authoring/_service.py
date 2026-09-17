@@ -17,6 +17,7 @@ excluded from `spec_hash`, and the save flow (P1-06/P1-07) assigns the real stra
 from __future__ import annotations
 
 import hashlib
+import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from functools import cached_property
@@ -54,6 +55,8 @@ from .ports.outgoing.document_codec import (
     SourceFormat,
     SourceRange,
 )
+
+logger = logging.getLogger(__name__)
 
 DRAFT_IDENTITY = StrategyIdentity(strategy_id="draft", revision=0)
 
@@ -210,6 +213,13 @@ class StrategyAuthoringService:
             # 배치에서 던지는 IndexError 등)은 untrusted input에 대한 500이 아니라 drift로 강등한다.
             # safe parse는 이미 통과했으므로 두 경로가 같은 문서를 다르게 봤다는 뜻이고, 응답은
             # 422 계약 안에 있다.
+            logger.warning(
+                "document upgrade rewrite failed in the codec adapter — treating as drift "
+                "(format=%s, error=%s: %s)",
+                request.format.value,
+                type(error).__name__,
+                error,
+            )
             raise DocumentUpgradeDriftError(
                 "", f"rewrite failed: {type(error).__name__}: {error}"
             ) from error

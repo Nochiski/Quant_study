@@ -139,7 +139,9 @@ def _finish_emptied_sections(
                     f"{head}\n"  # 원본 토큰을 그대로 두면 `#`·`##` 같은 주석도 변형되지 않는다
                 )
             else:
-                document.ca.items.pop(section, None)
+                # 줄끝 슬롯만 비운다. 슬롯을 통째로 pop하면 직전에 처리된 앞 섹션이 이 키의 앞 주석
+                # 슬롯([1])으로 옮겨 둔 "다음 키 설명" 주석까지 사라진다.
+                document.ca.items[section][_EOL_SLOT] = None
         if not tail:
             continue
         keys = [str(key) for key in document.keys()]
@@ -162,10 +164,13 @@ def upgrade_yaml_source(source: str) -> str:
     document = loader.load(source.replace("\r\n", "\n"))
     if not isinstance(document, CommentedMap):
         raise ValueError(f"YAML source root must be a mapping — got={type(document).__name__}")
+    # 문서 순서로 순회한다: set 순서(hash randomization)에 기대면 출력이 프로세스마다 달라진다.
+    removed_sections = {section for section, _key in REMOVED_FIELDS}
     keys_before = {
-        section: tuple(str(key) for key in block.keys())
-        for section in {section for section, _key in REMOVED_FIELDS}
-        if isinstance(block := document.get(section), CommentedMap)
+        str(section): tuple(str(key) for key in block.keys())
+        for section in document.keys()
+        if str(section) in removed_sections
+        and isinstance(block := document.get(section), CommentedMap)
     }
     _relocate_comments_of_removed_keys(document)
     apply_upgrade_steps(document)

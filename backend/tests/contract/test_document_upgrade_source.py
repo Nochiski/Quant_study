@@ -170,3 +170,46 @@ def test_json_upgrade_keeps_indent_width_and_trailing_newline(indent: int, trail
     assert upgraded.splitlines()[1].startswith(" " * indent + '"')
     assert json.loads(upgraded) == upgrade_document_1_0(document)
     assert json.loads(upgraded)["schema_version"] == "1.1"
+
+
+@pytest.mark.parametrize("first", ["signal", "execution"])
+def test_adjacent_emptied_sections_keep_the_comment_between_them_deterministically(
+    first: str,
+) -> None:
+    """P1-04 3차 검토 P1-004: 인접한 두 섹션이 함께 비어도 처리 순서와 무관하게 사이 주석이
+    남는다."""
+    second = "execution" if first == "signal" else "signal"
+    first_block = (
+        f"{first}:{LF}  method: weighted_sum{LF}"
+        if first == "signal"
+        else f"{first}:{LF}  order_style: market{LF}"
+    )
+    second_block = (
+        f"{second}:{LF}  order_style: market{LF}"
+        if second == "execution"
+        else f"{second}:{LF}  method: weighted_sum{LF}"
+    )
+    base = _read("quality_momentum.v1_0.yaml")
+    base = base.replace(f"signal:{LF}  method: weighted_sum{LF}", "")
+    base = base.replace(f"execution:{LF}  timing: next_open{LF}  fee_bps: 15.0{LF}", "")
+    source = base.replace(
+        f"parameters: []{LF}",
+        f"{first_block}# {second} 설명 — 살아남는 키를 설명한다{LF}{second_block}"
+        f"# parameters 설명{LF}parameters: []{LF}",
+    )
+    assert f"# {second} 설명" in source
+
+    outputs = {
+        RuamelDocumentCodec().upgrade_source(source, format=SourceFormat.YAML) for _ in range(3)
+    }
+
+    assert len(outputs) == 1
+    upgraded = outputs.pop()
+    assert (
+        f"{first}: {{}}{LF}# {second} 설명 — 살아남는 키를 설명한다{LF}{second}: {{}}{LF}"
+        in upgraded
+    )
+    assert f"# parameters 설명{LF}parameters: []{LF}" in upgraded
+    reparsed = RuamelDocumentCodec().parse(upgraded, format=SourceFormat.YAML)
+    assert reparsed.ok and reparsed.tree is not None
+    assert reparsed.tree[first] == {} and reparsed.tree[second] == {}

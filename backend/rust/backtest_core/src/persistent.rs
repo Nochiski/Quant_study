@@ -4,12 +4,14 @@ use crate::driver::{CorporateActionEntry, Queued, RunSettings};
 use crate::event_queue::NativeEventQueue;
 use crate::feed::PersistentFeed;
 use crate::persistent_router::{
-    self, CloseWire, DecisionWire, RouteError, RoutedGroup, RoutedOrder, RoutedUpdate, RouterConfig,
+    self, CloseWire, DecisionWire, ExecutionWire, RouteError, RoutedGroup, RoutedOrder,
+    RoutedUpdate, RouterConfig, TargetWire,
 };
 use crate::portfolio::{Portfolio, SnapshotTuple};
 use crate::quote::parse_decimal_ratio;
 use crate::records::{RecordStore, RecordWire};
 use crate::session::{self, BarTuple, EntryTuple, Op};
+use crate::tape::NativeTape;
 use pyo3::exceptions::{PyKeyError, PyValueError};
 use pyo3::prelude::*;
 use std::collections::HashMap;
@@ -275,6 +277,8 @@ pub(crate) struct PersistentEngine {
     pub(crate) corporate_actions: Vec<CorporateActionEntry>,
     pub(crate) ca_by_session: HashMap<usize, Vec<usize>>,
     pub(crate) debug_panic_on_market: bool,
+    /// 선언형 tape. 있으면 `drive()`가 콜백을 Python에 넘기지 않고 Rust에서 결정한다.
+    pub(crate) tape: Option<NativeTape>,
 }
 
 impl PersistentEngine {
@@ -461,7 +465,18 @@ impl PersistentEngine {
             corporate_actions: Vec::new(),
             ca_by_session: HashMap::new(),
             debug_panic_on_market: false,
+            tape: None,
         })
+    }
+
+    /// 선언형 tape 적재: `(session_index, weight targets, scope, execution, reason)` 목록과 idle 사유.
+    #[allow(clippy::type_complexity)]
+    fn load_target_tape(
+        &mut self,
+        frames: Vec<(usize, Vec<TargetWire>, String, ExecutionWire, String)>,
+        idle_reason: String,
+    ) -> PyResult<()> {
+        self.load_target_tape_internal(frames, idle_reason)
     }
 
     /// RunConfig와 requirements에서 온 실행 설정. `drive()` 전에 한 번 호출한다.

@@ -300,16 +300,21 @@ impl PersistentEngine {
                     }
                     let snapshot = self.snapshot_wire()?;
                     let kind = payload.event_kind();
-                    return Ok(Some(self.make_frame(
-                        kind,
-                        session,
-                        Some(payload),
-                        snapshot,
-                    )?));
+                    let frame = self.make_frame(kind, session, Some(payload), snapshot)?;
+                    if self.tape.is_some() {
+                        self.submit_native(&frame)?;
+                        continue;
+                    }
+                    return Ok(Some(frame));
                 }
                 Queued::SessionClose(session) => {
                     if let Some(snapshot) = self.on_session_close(session)? {
-                        return Ok(Some(self.make_frame("market", session, None, snapshot)?));
+                        let frame = self.make_frame("market", session, None, snapshot)?;
+                        if self.tape.is_some() {
+                            self.submit_native(&frame)?;
+                            continue;
+                        }
+                        return Ok(Some(frame));
                     }
                 }
                 Queued::Order(order) => {

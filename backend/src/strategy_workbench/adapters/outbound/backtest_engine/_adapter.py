@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
 
 from backtest_engine import BacktestEngine, RunConfig
 from backtest_engine.data.feed import DataFeed
 from backtest_engine.engine.slippage import FixedBpsSlippage
+from backtest_engine.engine.tape import evaluate_tape
 from backtest_engine.ports.market_data import LoadStatus
 from backtest_engine.ports.universe import Membership, UniverseResult
-from backtest_engine.types.actions import PositionTarget, QuantityTarget
 from backtest_engine.types.decision import StrategyDecision
 from backtest_engine.types.events import (
     CorporateActionEvent,
@@ -18,10 +19,11 @@ from backtest_engine.types.events import (
     StrategyEvent,
 )
 from backtest_engine.types.instruments import AssetClass, InstrumentId
-from backtest_engine.types.market import Bar, MarketSnapshot
+from backtest_engine.types.market import Bar
 from backtest_engine.types.orders import Side
 from backtest_engine.types.requirements import StrategyRequirements
 from backtest_engine.types.strategy import StrategyContext
+from backtest_engine.types.tape import TapeFrame
 from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import (
     BacktestEnginePortfolioAdapter,
 )
@@ -62,6 +64,16 @@ def _instrument(security_id: str) -> InstrumentId:
 
 
 class TargetTapeStrategy:
+    """컴파일된 TargetTape를 엔진 전략으로 노출한다.
+
+    선언형 tape(`DeclarativeTapeStrategy`)이므로 persistent Rust 경로는 `tape_frames()`를 적재해
+    콜백 없이 실행하고, Python 경로는 `on_event()`가 같은 규칙(`evaluate_tape`)을 적용한다.
+    bar 없는 종목 처리(거래정지·기준가 세션은 equity 피드에 행이 없다)는 `evaluate_tape`가
+    단일 정본이다.
+    """
+
+    idle_reason = "target_tape_idle"
+
     def __init__(
         self,
         spec: StrategySpec,
@@ -69,49 +81,25 @@ class TargetTapeStrategy:
         portfolio_bridge: BacktestEnginePortfolioAdapter,
     ) -> None:
         self._spec = spec
-        self._frames = {frame.signal_as_of: frame for frame in tape.frames}
         self._bridge = portfolio_bridge
+        self._frames: dict[date, TapeFrame] = {
+            frame.signal_as_of: TapeFrame(
+                action=portfolio_bridge.to_target_action(
+                    frame, max_participation=spec.execution.participation_rate
+                ),
+                reason=f"target_tape:{frame.signal_as_of.isoformat()}",
+            )
+            for frame in tape.frames
+        }
 
     def requirements(self) -> StrategyRequirements:
         return self._bridge.requirements(self._spec)
 
+    def tape_frames(self) -> Mapping[date, TapeFrame]:
+        return self._frames
+
     def on_event(self, ctx: StrategyContext, event: StrategyEvent) -> StrategyDecision:
-        if not isinstance(event, MarketSnapshot):
-            return StrategyDecision.no_action(ctx.now, "target_tape_idle")
-        frame = self._frames.get(event.ts.date())
-        if frame is None:
-            return StrategyDecision.no_action(ctx.now, "target_tape_idle")
-        action = self._bridge.to_target_action(
-            frame,
-            max_participation=self._spec.execution.participation_rate,
-        )
-        targets, untradable = _tradable_targets(action.targets, event, ctx)
-        reason = f"target_tape:{frame.signal_as_of.isoformat()}"
-        if untradable:
-            reason += f" no_bar={untradable}"
-        return StrategyDecision.of(ctx.now, replace(action, targets=targets), reason)
-
-
-def _tradable_targets(
-    targets: tuple[PositionTarget, ...], snapshot: MarketSnapshot, ctx: StrategyContext
-) -> tuple[tuple[PositionTarget, ...], tuple[str, ...]]:
-    """The kernel sizes a weight target off this session's close, so a target whose instrument
-    has no bar today (trading halt, reference-price session — equity feeds omit those rows)
-    cannot be routed: it is held at its current quantity when held, and skipped when not. The
-    skipped budget stays in cash until the next frame; the symbols are reported in the decision
-    reason so the run manifest keeps the trace (KRX halts are routine, e.g. 005930 2018-04-30).
-    """
-    kept: list[PositionTarget] = []
-    untradable: list[str] = []
-    for target in targets:
-        if snapshot.has(target.instrument):
-            kept.append(target)
-            continue
-        untradable.append(target.instrument.symbol)
-        held = ctx.position_qty(target.instrument)
-        if held != 0:
-            kept.append(QuantityTarget(instrument=target.instrument, quantity=held))
-    return tuple(kept), tuple(untradable)
+        return evaluate_tape(self._frames, self.idle_reason, ctx, event)
 
 
 class BacktestEngineExecutorAdapter:

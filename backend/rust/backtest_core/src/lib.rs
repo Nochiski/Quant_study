@@ -20,6 +20,7 @@ mod portfolio;
 mod quote;
 mod records;
 mod session;
+mod tape;
 
 use pyo3::prelude::*;
 

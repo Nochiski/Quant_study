@@ -161,8 +161,9 @@ export const StrategyOutline = ({
         break;
       case "End": {
         event.preventDefault();
-        const items =
-          tree.current?.querySelectorAll<HTMLElement>('[role="treeitem"]');
+        const items = tree.current?.querySelectorAll<HTMLElement>(
+          '[role="treeitem"]',
+        );
         items?.item(items.length - 1).focus();
         break;
       }
@@ -177,7 +178,8 @@ export const StrategyOutline = ({
         if (open && node.children.length > 0) {
           onCollapse(node);
           toggle(node.id, open);
-        } else parentItem(event.currentTarget)?.focus();
+        }
+        else parentItem(event.currentTarget)?.focus();
         break;
       case "Enter":
       case " ":
@@ -234,21 +236,15 @@ export const StrategyOutline = ({
             <span className="strategy-outline__index">#{node.arrayIndex}</span>
           ) : null}
           {node.arrayIndex === null ? (
-            <span className="strategy-outline__label">
-              {visibleLabel(node)}
-            </span>
+            <span className="strategy-outline__label">{visibleLabel(node)}</span>
           ) : null}
           {node.semanticIdentity ? (
             <span className="strategy-outline__identity">
-              {node.semanticIdentity.namespace}_id ·{" "}
-              {node.semanticIdentity.value}
+              {node.semanticIdentity.namespace}_id · {node.semanticIdentity.value}
             </span>
           ) : null}
           {!node.present ? (
-            <span
-              className="strategy-outline__missing"
-              aria-label={t("ide.outline.missing")}
-            >
+            <span className="strategy-outline__missing" aria-label={t("ide.outline.missing")}>
               ○
             </span>
           ) : null}

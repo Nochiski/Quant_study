@@ -102,7 +102,10 @@ const selectedRowsAreComplete = (
 };
 
 /** Page/chunk server rows by identity only; no factor or portfolio value is calculated here. */
-const fetchTraceBundle = async (prepared: ReadyTrace, signal: AbortSignal) => {
+const fetchTraceBundle = async (
+  prepared: ReadyTrace,
+  signal: AbortSignal,
+) => {
   let anchor: StrategyTraceResponse | null = null;
   let remainingBudget: number = STRATEGY_TRACE_CLIENT_BUDGET.totalRows;
   let linkedTruncated = false;
@@ -133,10 +136,7 @@ const fetchTraceBundle = async (prepared: ReadyTrace, signal: AbortSignal) => {
       if (anchor === null) anchor = page;
       else if (!sameCalculation(anchor, page))
         throw new DiscardedStrategyTraceResponse();
-      if (
-        !pageRequest.include_raw &&
-        (page.raw.length > 0 || page.raw_truncated)
-      )
+      if (!pageRequest.include_raw && (page.raw.length > 0 || page.raw_truncated))
         throw new DiscardedStrategyTraceResponse();
       if (page.trace.returned !== limit)
         throw new DiscardedStrategyTraceResponse();
@@ -149,7 +149,8 @@ const fetchTraceBundle = async (prepared: ReadyTrace, signal: AbortSignal) => {
       offset += page.trace.returned;
       remainingBudget -= page.trace.returned;
       if (!page.trace.has_more) {
-        if (offset !== expectedRows) throw new DiscardedStrategyTraceResponse();
+        if (offset !== expectedRows)
+          throw new DiscardedStrategyTraceResponse();
         break;
       }
     }

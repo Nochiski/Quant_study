@@ -30,7 +30,9 @@ export const RecoveryBanner = ({ recovery }: RecoveryBannerProps) => {
   return (
     <section className="recovery" aria-label={t("recovery.title")}>
       <div className="recovery__summary">
-        <Badge tone={restorable ? "info" : "warn"}>{t("recovery.title")}</Badge>
+        <Badge tone={restorable ? "info" : "warn"}>
+          {t("recovery.title")}
+        </Badge>
         <span>
           {t("recovery.savedAt")}: {shortTime(record.savedAt)}
         </span>

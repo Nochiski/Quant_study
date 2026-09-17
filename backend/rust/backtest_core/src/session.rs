@@ -97,7 +97,7 @@ fn slippage_per_share(
 }
 
 /// Python `repr(float)`와 같은 표기 (정수값은 `100000.0`).
-fn py_float(value: f64) -> String {
+pub(crate) fn py_float(value: f64) -> String {
     if value.is_nan() {
         return "nan".to_string();
     }

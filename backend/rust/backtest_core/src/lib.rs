@@ -10,7 +10,7 @@
 
 mod buying_power;
 mod callback;
-mod compact_store;
+mod driver;
 mod event_queue;
 mod execution;
 mod feed;
@@ -18,6 +18,7 @@ mod persistent;
 mod persistent_router;
 mod portfolio;
 mod quote;
+mod records;
 mod session;
 
 use pyo3::prelude::*;

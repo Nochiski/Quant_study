@@ -17,6 +17,8 @@ pub(crate) struct PersistentFeed {
     closes: Vec<f64>,
     volumes: Vec<i64>,
     current_session: Option<usize>,
+    /// key → instrument id. 세션 루프가 주문·포지션 key를 wire의 정수 id로 바꿀 때 쓴다.
+    key_index: HashMap<String, u32>,
 }
 
 impl PersistentFeed {
@@ -74,6 +76,11 @@ impl PersistentFeed {
                 keys.len()
             )));
         }
+        let key_index = keys
+            .iter()
+            .enumerate()
+            .map(|(index, key)| (key.clone(), index as u32))
+            .collect();
         Ok(Self {
             keys,
             symbols,
@@ -86,7 +93,31 @@ impl PersistentFeed {
             closes,
             volumes,
             current_session: None,
+            key_index,
         })
+    }
+
+    pub(crate) fn session_len(&self) -> usize {
+        self.sessions.len()
+    }
+
+    pub(crate) fn instrument_id(&self, key: &str) -> Option<u32> {
+        self.key_index.get(key).copied()
+    }
+
+    pub(crate) fn symbol_of(&self, instrument_id: u32) -> &str {
+        &self.symbols[instrument_id as usize]
+    }
+
+    /// 세션에 해당 종목 bar가 있으면 그 행 번호.
+    fn row_of(&self, session: usize, key: &str) -> Option<usize> {
+        let instrument_id = self.instrument_id(key)?;
+        self.row_range(session)
+            .find(|row| self.instrument_ids[*row] == instrument_id)
+    }
+
+    pub(crate) fn open_at(&self, session: usize, key: &str) -> Option<f64> {
+        self.row_of(session, key).map(|row| self.opens[row])
     }
 
     pub(crate) fn set_current(&mut self, index: usize) -> PyResult<()> {
@@ -296,6 +327,12 @@ mod tests {
         assert_eq!(feed.settlement_session_index("A", "D1"), Some(0));
         assert_eq!(feed.settlement_session_index("A", "D2"), None);
         assert_eq!(feed.settlement_session_index("B", "D1.5"), Some(1));
+        assert_eq!(feed.instrument_id("B"), Some(1));
+        assert_eq!(feed.instrument_id("Z"), None);
+        assert_eq!(feed.open_at(1, "A"), None);
+        assert_eq!(feed.open_at(1, "B"), Some(21.0));
+        assert_eq!(feed.symbol_of(0), "AAA");
+        assert_eq!(feed.session_len(), 2);
     }
 
     #[test]

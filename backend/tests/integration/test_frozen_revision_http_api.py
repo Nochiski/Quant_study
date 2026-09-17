@@ -95,3 +95,35 @@ def test_saved_reference_trace_of_a_frozen_revision_is_refused(tmp_path: Path) -
     assert detail["code"] == "trace.strategy.requires_upgrade"
     assert "frozen-legacy" in detail["message"]
     TypeAdapter(Trace422Response).validate_python(response.json())
+
+
+def test_json_spec_api_marks_frozen_revisions_and_lists(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+
+    saved = client.get("/api/v1/strategies/frozen-doc")
+    listed = client.get("/api/v1/strategies")
+    history = client.get("/api/v1/strategies/frozen-doc/revisions")
+
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["requires_upgrade"] is True
+    assert saved.json()["spec_hash"] == FROZEN_SPEC_HASH
+    frozen_items = [
+        item for item in listed.json()["items"] if item["strategy_id"].startswith("frozen-")
+    ]
+    assert frozen_items and all(item["requires_upgrade"] for item in frozen_items)
+    assert history.status_code == 200, history.text
+    assert [item["requires_upgrade"] for item in history.json()["items"]] == [True]
+
+
+def test_json_spec_api_rejects_a_retired_schema_version_with_422(tmp_path: Path) -> None:
+    """동결 응답의 spec을 그대로 되보내는 왕복이 저장소 500이 아니라 검증 422로 끝난다."""
+    client = _client(tmp_path)
+    spec = client.get("/api/v1/strategies/frozen-doc").json()["spec"]
+
+    response = client.post("/api/v1/strategies", json=spec)
+
+    assert response.status_code == 422, response.text
+    detail = response.json()["detail"]
+    assert detail["code"] == "strategy.invalid"
+    codes = {issue["code"] for issue in detail["validation"]["issues"]}
+    assert "strategy.schema_version.unsupported" in codes

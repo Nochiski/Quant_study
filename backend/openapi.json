@@ -4532,6 +4532,11 @@
           "origin": {
             "$ref": "#/components/schemas/RevisionOrigin"
           },
+          "requires_upgrade": {
+            "default": false,
+            "title": "Requires Upgrade",
+            "type": "boolean"
+          },
           "revision": {
             "title": "Revision",
             "type": "integer"
@@ -4898,6 +4903,11 @@
       },
       "SavedStrategy": {
         "properties": {
+          "requires_upgrade": {
+            "default": false,
+            "title": "Requires Upgrade",
+            "type": "boolean"
+          },
           "spec": {
             "$ref": "#/components/schemas/StrategySpec"
           },
@@ -5722,6 +5732,11 @@
           "latest_revision": {
             "title": "Latest Revision",
             "type": "integer"
+          },
+          "requires_upgrade": {
+            "default": false,
+            "title": "Requires Upgrade",
+            "type": "boolean"
           },
           "spec_hash": {
             "title": "Spec Hash",

@@ -179,3 +179,57 @@ def test_current_schema_records_keep_the_strict_source_binding(tmp_path: Path) -
     with pytest.raises(StrategyRepositoryStorageError, match="different StrategySpec"):
         with open_repository(path) as repository:
             repository.get("cur", 1)
+
+
+def test_frozen_row_source_text_is_not_rebound_to_the_stored_spec(tmp_path: Path) -> None:
+    """의식적으로 포기한 검증을 계약으로 고정한다(spec D2): 1.0 row에서는 "source가 stored spec으로
+    컴파일된다"를 재증명할 1.0 모델이 없다. source_hash가 맞는 한 원문이 spec과 무관해도 읽힌다.
+    1.1 row의 같은 변조는 `test_current_schema_records_keep_the_strict_source_binding`이
+    거부한다."""
+    path = tmp_path / "rebound.sqlite3"
+    seed_frozen_rows(path, document_row=False, legacy_row=False)
+    unrelated = (
+        (FIXTURES / "quality_momentum.yaml")
+        .read_text(encoding="utf-8")
+        .replace("max_name_weight: 0.05", "max_name_weight: 0.42")
+    )
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "INSERT INTO strategy_heads (strategy_id, latest_revision) VALUES (?, ?)",
+            ("rebound", 1),
+        )
+        connection.execute(
+            "INSERT INTO strategy_revisions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "rebound",
+                1,
+                "1.0",
+                frozen_spec_json(),
+                FROZEN_SPEC_HASH,
+                "yaml",
+                unrelated,
+                hashlib.sha256(unrelated.encode("utf-8")).hexdigest(),
+                "document",
+                "2026-09-17T00:00:00.000000+00:00",
+                None,
+            ),
+        )
+        connection.commit()
+
+    with open_repository(path) as repository:
+        record = repository.get("rebound", 1)
+
+    assert record.requires_upgrade
+    assert record.source is not None and "max_name_weight: 0.42" in record.source.text
+    assert record.spec.risk.max_name_weight == 0.05  # spec은 stored payload, source와 무관
+
+
+def test_summaries_carry_the_frozen_marker(tmp_path: Path) -> None:
+    path = tmp_path / "summaries.sqlite3"
+    seed_frozen_rows(path)
+    with open_repository(path) as repository:
+        strategies = repository.list_strategies(PageRequest())
+        history = repository.history("frozen-legacy", PageRequest())
+
+    assert all(summary.requires_upgrade for summary in strategies.items)
+    assert [summary.requires_upgrade for summary in history.items] == [True]

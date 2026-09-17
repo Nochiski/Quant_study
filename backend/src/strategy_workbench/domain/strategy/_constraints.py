@@ -236,6 +236,7 @@ STRATEGY_SCALAR_CONSTRAINTS: tuple[ScalarConstraint, ...] = (
 # Validation codes that are cross-field, graph or parameter rules: owned by the validator only.
 SEMANTIC_ONLY_CODES: frozenset[str] = frozenset(
     {
+        "strategy.schema_version.unsupported",
         "strategy.title.empty",
         "strategy.data.date_order",
         "strategy.data.universe_empty",

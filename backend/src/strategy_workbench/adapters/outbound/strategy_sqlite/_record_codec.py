@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import sqlite3
 from collections.abc import Callable, Mapping
@@ -24,6 +23,7 @@ from strategy_workbench.domain.strategy.facade.document import (
 from strategy_workbench.domain.strategy.facade.specification import (
     StrategyIdentity,
     StrategySpec,
+    canonical_json_spec_hash,
     canonical_strategy_json,
 )
 
@@ -60,7 +60,7 @@ def encode_record(
         )
     except (TypeError, ValueError) as error:
         raise StrategyRepositoryStorageError(
-            "strategy revision cannot be persisted because its source and spec disagree -- "
+            "strategy revision cannot be persisted -- "
             f"strategy_id={record.strategy_id} revision={record.revision}: {error}"
         ) from error
 
@@ -148,15 +148,22 @@ def _decode_frozen_spec(
     the stored bytes are what the hash column claims and that the domain upgrade transform still
     understands them. The spec keeps `schema_version` 1.0 as its frozen marker.
     """
-    if hashlib.sha256(spec_json.encode("utf-8")).hexdigest() != spec_hash:
-        raise ValueError("frozen spec_json bytes do not match the stored spec_hash")
+    computed = canonical_json_spec_hash(spec_json)
+    if computed != spec_hash:
+        raise ValueError(
+            "frozen spec_json bytes do not match the stored spec_hash -- "
+            f"strategy_id={strategy_id} revision={revision} computed={computed} stored={spec_hash}"
+        )
     upgraded = upgrade_document_1_0(payload)
     hydration = hydrate_strategy_document(
         upgraded, identity=StrategyIdentity(strategy_id, revision, CURRENT_SCHEMA_VERSION)
     )
     if not hydration.ok or hydration.spec is None:
         detail = ", ".join(f"{issue.code}@{issue.pointer}" for issue in hydration.issues[:5])
-        raise ValueError(f"frozen strategy payload cannot be upgraded — {detail}")
+        raise ValueError(
+            "frozen strategy payload cannot be upgraded -- "
+            f"strategy_id={strategy_id} revision={revision} issues={detail}"
+        )
     spec = hydration.spec
     return replace(spec, identity=replace(spec.identity, schema_version=LEGACY_SCHEMA_VERSION))
 

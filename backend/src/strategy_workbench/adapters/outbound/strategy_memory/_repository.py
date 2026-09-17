@@ -75,6 +75,7 @@ class InMemoryStrategyRepository:
                     latest_revision=revisions[-1].revision,
                     spec_hash=revisions[-1].spec_hash,
                     updated_at=revisions[-1].provenance.created_at,
+                    requires_upgrade=revisions[-1].requires_upgrade,
                 )
                 for strategy_id, revisions in sorted(self._items.items())
             ]
@@ -92,6 +93,7 @@ class InMemoryStrategyRepository:
                     source_format=record.source.format if record.source else None,
                     source_hash=record.source.source_hash if record.source else None,
                     change_note=record.provenance.change_note,
+                    requires_upgrade=record.requires_upgrade,
                 )
                 for record in self._revisions(strategy_id)
             ]

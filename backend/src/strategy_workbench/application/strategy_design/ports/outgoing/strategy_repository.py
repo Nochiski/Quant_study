@@ -184,6 +184,8 @@ class StrategySummary:
     latest_revision: int
     spec_hash: str
     updated_at: datetime
+    # 최신 revision이 은퇴한 schema 버전으로 동결되어 있으면 True (spec D2)
+    requires_upgrade: bool = False
 
 
 @dataclass(frozen=True)
@@ -196,6 +198,7 @@ class RevisionSummary:
     source_format: SourceFormat | None
     source_hash: str | None
     change_note: str | None = None
+    requires_upgrade: bool = False
 
 
 class StrategyRepositoryPort(Protocol):

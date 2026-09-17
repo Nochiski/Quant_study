@@ -129,13 +129,14 @@ impl PersistentEngine {
                 continue;
             };
             if feed.has_bar(frame.session_index, &target.1) {
+                let weight = target.5.ok_or_else(|| {
+                    PyValueError::new_err(format!(
+                        "tape weight target has no weight — session={} symbol={}",
+                        frame.session_index, target.2
+                    ))
+                })?;
                 kept_wires.push(target.clone());
-                kept.push((
-                    instrument_id,
-                    "weight".to_string(),
-                    target.5.unwrap_or(f64::NAN),
-                    0,
-                ));
+                kept.push((instrument_id, "weight".to_string(), weight, 0));
                 continue;
             }
             // bar 없는 종목: 보유 중이면 수량 유지, 미보유면 제외 (예산은 현금에 남는다).

@@ -247,7 +247,6 @@ class PersistentEventStore(EventStore):
         # 결정을 partial trace의 마지막 DECISION 레코드에 붙인다.
         self._staged_decision: StrategyDecision | None = None
         self._tape_frames: dict[int, TapeFrame] = {}
-        self._tape_idle_reason: str | None = None
         self._decision_index: dict[str, tuple[int, Any]] = {}
         self._decision_index_len = -1
         self._finished_batch: list[tuple[int, int, int, Any]] | None = None
@@ -282,9 +281,9 @@ class PersistentEventStore(EventStore):
         self._decisions[decision_id] = decision
         self._staged_decision = None
 
-    def bind_tape(self, frames_by_session: dict[int, TapeFrame], idle_reason: str) -> None:
+    def bind_tape(self, frames_by_session: dict[int, TapeFrame]) -> None:
+        # idle 사유는 Rust가 DECISION payload의 reason으로 돌려주므로 여기서는 프레임만 보관한다.
         self._tape_frames = frames_by_session
-        self._tape_idle_reason = idle_reason
 
     def _decision_by_id(self, decision_id: str) -> StrategyDecision:
         """ORDER/open order 복원용. tape 결정은 DECISION 레코드를 찾아 먼저 재구성한다."""

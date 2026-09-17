@@ -517,7 +517,7 @@ class BacktestEngine:
                         frame.reason,
                     )
                 )
-        store.bind_tape(frames_by_session, strategy.idle_reason)
+        store.bind_tape(frames_by_session)
         runtime.load_target_tape(rows, strategy.idle_reason)
 
     @staticmethod

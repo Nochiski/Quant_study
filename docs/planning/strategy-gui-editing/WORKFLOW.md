@@ -505,6 +505,11 @@ export const planSourceOperation = (source: string, format: SourceFormat, op: So
   `key: {}`, sequence가 비면 `key: []`로 남긴다(구조 유지).
 - 들여쓰기 폭은 문서에서 감지(첫 중첩 키), EOL은 `\r\n` 감지. 모든 연산은
   `parseSource(nextSource).status === "ok"` preflight.
+- 범위는 `parseSource`의 `valueRanges`/`keyRanges`에서 **정확히 그 pointer로** 읽는다.
+  `locateRange`는 pointer가 없으면 조상 범위로 fallback하므로 `replace-scalar`·`remove`에 쓰면 부모
+  전체를 지운다. 없는 pointer는 `not-found`다(Phase 2 감사 4.5). mapping/sequence 노드의 range는
+  뒤따르는 주석 줄까지 포함할 수 있으므로 삽입·삭제 경계는 leaf(스칼라·빈 컨테이너)·키 범위의
+  최댓값으로 잡는다.
 - property test(`fast-check` 추가): 임의 1.1 문서 생성기 × 임의 유효 연산에 대해
   `parseSource(nextSource).tree`가 tree 연산(`applyToTree`) 결과와 deep-equal이고, 연산 범위 밖의
   줄은 바이트 동일.

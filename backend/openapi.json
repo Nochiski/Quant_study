@@ -4533,7 +4533,6 @@
             "$ref": "#/components/schemas/RevisionOrigin"
           },
           "requires_upgrade": {
-            "default": false,
             "title": "Requires Upgrade",
             "type": "boolean"
           },
@@ -4578,7 +4577,8 @@
           "origin",
           "created_at",
           "source_format",
-          "source_hash"
+          "source_hash",
+          "requires_upgrade"
         ],
         "title": "RevisionSummary",
         "type": "object"
@@ -4904,7 +4904,6 @@
       "SavedStrategy": {
         "properties": {
           "requires_upgrade": {
-            "default": false,
             "title": "Requires Upgrade",
             "type": "boolean"
           },
@@ -4918,7 +4917,8 @@
         },
         "required": [
           "spec",
-          "spec_hash"
+          "spec_hash",
+          "requires_upgrade"
         ],
         "title": "SavedStrategy",
         "type": "object"
@@ -5253,6 +5253,58 @@
           "equity_catalog_url"
         ],
         "title": "StrategyDocumentContractResponse",
+        "type": "object"
+      },
+      "StrategyDocumentInvalidDetail": {
+        "description": "`_invalid_document_compiled`가 내보내는 모양: compile·save·revise·upgrade가 공유한다.",
+        "properties": {
+          "code": {
+            "const": "strategy_document.invalid",
+            "title": "Code",
+            "type": "string"
+          },
+          "diagnostics": {
+            "items": {
+              "$ref": "#/components/schemas/SourceDiagnostic"
+            },
+            "title": "Diagnostics",
+            "type": "array"
+          },
+          "schema_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Version"
+          },
+          "source_hash": {
+            "title": "Source Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "source_hash",
+          "schema_version",
+          "diagnostics"
+        ],
+        "title": "StrategyDocumentInvalidDetail",
+        "type": "object"
+      },
+      "StrategyDocumentInvalidResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/StrategyDocumentInvalidDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "StrategyDocumentInvalidResponse",
         "type": "object"
       },
       "StrategyDocumentNotUpgradeableDetail": {
@@ -5813,7 +5865,6 @@
             "type": "integer"
           },
           "requires_upgrade": {
-            "default": false,
             "title": "Requires Upgrade",
             "type": "boolean"
           },
@@ -5840,7 +5891,8 @@
           "title",
           "latest_revision",
           "spec_hash",
-          "updated_at"
+          "updated_at",
+          "requires_upgrade"
         ],
         "title": "StrategySummary",
         "type": "object"
@@ -8661,6 +8713,9 @@
               "application/json": {
                 "schema": {
                   "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/StrategyDocumentInvalidResponse"
+                    },
                     {
                       "$ref": "#/components/schemas/StrategyDocumentNotUpgradeableResponse"
                     },

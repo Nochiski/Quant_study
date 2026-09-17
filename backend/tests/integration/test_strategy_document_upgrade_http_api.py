@@ -71,6 +71,7 @@ def test_upgrade_of_a_syntax_invalid_document_is_422_with_diagnostics() -> None:
     detail = response.json()["detail"]
     assert detail["code"] == "strategy_document.invalid"
     assert detail["diagnostics"] and detail["diagnostics"][0]["kind"] == "syntax"
+    TypeAdapter(StrategyDocumentUpgrade422Response).validate_python(response.json())
 
 
 def test_upgrade_json_source_keeps_json_format() -> None:

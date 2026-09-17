@@ -2,11 +2,11 @@
 plan_version: 2
 project: strategy-gui-editing
 project_status: IN_REVIEW
-current_phase: P1,P2
-current_pr: P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03
-active_prs: [P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03]
-parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02, P1-06, P2-03]
-last_updated: 2026-09-18T04:18:43+09:00
+current_phase: P1,P2,P3
+current_pr: P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01
+active_prs: [P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01]
+parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02, P1-06, P2-03, P3-01]
+last_updated: 2026-09-18T04:29:08+09:00
 planned_prs: 18
 merged_prs: 0
 approved_prs: 8
@@ -24,12 +24,12 @@ progress_percent: 0
 | Field | Value |
 |---|---|
 | Project status | `IN_REVIEW` |
-| Current phase | `P1,P2` |
-| Current/next PR | `P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03` |
-| Active PR | `P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03` |
+| Current phase | `P1,P2,P3` |
+| Current/next PR | `P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01` |
+| Active PR | `P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01` |
 | Progress | `0 / 18 merged (0%)` |
 | Approved | `8 / 18` |
-| Aggregated at | `2026-09-18 04:18 KST` |
+| Aggregated at | `2026-09-18 04:29 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -78,7 +78,7 @@ progress_percent: 0
 |---|---|---:|---:|---|
 | P1 | Backend schema 1.1 | 6 | 0 | `APPROVED` |
 | P2 | Frontend 1.1 and upgrade UI | 3 | 0 | `IN_REVIEW` |
-| P3 | Source transactions | 2 | 0 | `WAITING` |
+| P3 | Source transactions | 2 | 0 | `IN_REVIEW` |
 | P4 | Form editing | 4 | 0 | `WAITING` |
 | P5 | Graph editing | 3 | 0 | `WAITING` |
 | **Total** |  | **18** | **0** | **0%** |
@@ -88,16 +88,16 @@ progress_percent: 0
 
 | 항목 | 값 |
 |---|---|
-| PR | `P2-03` |
-| Intent | Contract Inspector·hover·read-only Form에 backend 조건표(`applicable_when`/`x-applicable-when`)와 "현재 모드에서 읽히지 않음"을 표시 |
-| Acceptance | WORKFLOW P2-03 |
-| Non-goals | Form 편집(P4), trace 422 안내, Problems 코드→메시지 매핑(backend 문구 그대로) |
-| Branch/worktree | `feat/gui-p2-03-applicable-when` (base `feat/gui-p1-06-audit-followup` `e77f7ce`) |
-| Base SHA | `e77f7ce` |
-| Head SHA | `abafcc7` (review 후속 `076e8d8` + 포맷 되돌림; diff freeze `6ec933f`) |
-| Diff stat | 신규 model 1 + test 1, contract-inspector model/ui, schema-assist, projection panel, 페이지 2, api 타입 노출, messages |
-| Focused tests | field-applicability 5 · contract projection/UI 3 · hover 1 · Form 배지 1 |
-| Full gate | Vitest 478 passed(41 files) · typecheck · lint · build |
+| PR | `P3-01` |
+| Intent | spec D5 source 트랜잭션 원시 연산 4종(`replace-scalar`·`insert-key`·`insert-item`·`remove`)을 순수 함수 `planSourceOperation`으로, preflight(parse ok ∧ tree == `applyToTree`), property test |
+| Acceptance | WORKFLOW P3-01(+감사 4.5 `not-found`·주석 경계 규칙) |
+| Non-goals | 편집기 연결·스니펫 재구성(P3-02), JSON 편집 |
+| Branch/worktree | `feat/gui-p3-01-source-transactions` (base `feat/gui-p2-03-applicable-when` `610a17c`) |
+| Base SHA | `610a17c` |
+| Head SHA | `2fba821` (diff freeze) |
+| Diff stat | 신규 model 1·arbitrary 1·테스트 2, package.json/lock(fast-check), SoT 1행, WORKFLOW 1 |
+| Focused tests | source-transactions 10 · property 1(300회 기본, 3000회 로컬 통과) |
+| Full gate | Vitest 490 passed(44 files) · typecheck · lint · build |
 
 ---
 
@@ -136,7 +136,7 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P3-01` | `source-transactions.ts` 원시 연산 4종, preflight, property test | P2-01 | `WAITING` | — |
+| [ ] | `P3-01` | `source-transactions.ts` 원시 연산 4종, preflight, property test | P2-01 | `IN_REVIEW` | [#119](https://github.com/Nochiski/Quant_study/pull/119) · `review_gui_p3_01` 배정 · diff freeze `2fba821` |
 | [ ] | `P3-02` | `useSourceTransactions`, 스니펫 삽입 재구성 | P3-01 | `WAITING` | — |
 
 Phase exit:
@@ -193,6 +193,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
+| P3-01 | source-transactions 10·property 1(`FC_NUM_RUNS=3000` 통과) | Vitest 490 passed(44 files)·typecheck·lint·build | 해당 없음(SDK 무변경) | 해당 없음(순수 함수) | 원격 CI frontend job 대상 | 2026-09-18 |
 | P2-03 | field-applicability 5·contract projection/UI 3·hover 1·Form 배지 1 | Vitest 478 passed(41 files)·typecheck·lint·build | SDK 무변경(`ApplicableWhen` 타입 재수출만) | 해당 없음 | 원격 CI frontend job 대상 | 2026-09-18 |
 | P1-06 | upgrade-source `periods` 주석 1·frozen 술어 1·syntax 메시지 1·팩터 컬렉션 모호성 1 | backend pytest 1,315·Ruff·Pyright 0; frontend Vitest 468·typecheck·lint·build | `openapi.json`·`runtime-schema.json` 재생성 diff 0, SDK 무변경 | 해당 없음 | 원격 CI backend·frontend job 대상 | 2026-09-18 |
 | P2-02 | document-upgrade 3·upgrade-banner 4(MSW 성공+undo/422 drift/네트워크/legacy 동결)·router 배지 1·document-routes backtest 422 1 | Vitest 464 passed(40 files)·typecheck·lint·build·Playwright tsconfig typecheck·backend 25 passed·Ruff·Pyright | SDK 무변경(P2-01 상태 유지) | e2e chromium-workflow 5 passed: 1.0 row seeding → 배너 → 업그레이드 200 → 검증 통과 → v2 저장(1.1 golden과 같은 spec hash) → saved_revision backtest completed → legacy 동결 배너 → 목록 배지 | 원격 CI frontend·browser-e2e green 기대(P1-01부터 알려진 빨간불 해소) | 2026-09-18 |
@@ -207,6 +208,7 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-18 KST | Claude | P3-01 구현·self-check(단위 10·property 3000회·Vitest 490) → diff freeze `2fba821`, stacked PR #119(base P2-03), `review_gui_p3_01`(opus) 배정 → IN_REVIEW. 결정: 삽입·삭제 경계는 노드 range가 아니라 leaf·키 범위 최댓값(노드 range가 뒤 주석 줄 포함), 시퀀스 항목은 자기 `-`에 앵커(`- - x`·`- key:` 첫 키), 성공 판정은 preflight parse + `applyToTree` deep-equal, fast-check는 WORKFLOW가 계획한 devDependency. 감사 4.2 SoT 행·4.5 WORKFLOW 규칙 반영 | 13.3 diff freeze |
 | 2026-09-18 KST | Claude | `review_gui_p2_03` 1차 REQUEST_CHANGES(P1 DEFECT-118-01: Form 배지가 backend가 침묵시킨 기본값 필드에 경고; P2 8) + `audit_gui_phase2` 수신(blocking 0; DEFECT-P2X-001 STARTER 버전 리터럴, 002 `LEGACY_SCHEMA_VERSION` 리터럴이 다음 은퇴 시 배너 소멸, 003 Form에 signal 섹션 없음, 004 description_key 미번역 silent, 005 진단 문장 이중 owner; Phase 3 위험 5: `planSnippetEdit` 규칙 절반이 P3-01과 겹침, `locateRange` 조상 fallback을 remove에 쓰면 문서 파괴, `replaceRange` 격리 소비자 단일화, Form/Inspector 판정 입력 차이 기록, boolean 조건 비교 방식 차이) → 후속 `076e8d8`: Form 배지 = compile 경고 pointer, Inspector는 발행 기본값으로 판정, 글리프, signal 섹션, 문구 키 커버리지 테스트, `valueAtPointer` 공유, 중립 문구, 버전 리터럴 판정 제거, STARTER 단언 테스트, 규칙 문서 3개 → 재검토 요청. Phase 2 exit 3항 체크. 결정: 진단 message는 backend 한글 문장 통과(감사 5(b)), Form/Inspector 판정 입력 차이는 P4-01 착수 시 결정 | 13.5 · 8절 |
 | 2026-09-18 KST | Claude | `review_gui_p2_02` 3차 APPROVE → P2-02 APPROVED. `review_gui_p1_06` 후속 `e77f7ce` 확인(P2-001 해소, P2-002 부분: 1.1 row를 1.2에서 읽는 시나리오 테스트 없음 → 1.2 도입 PR 몫으로 기록, P2-003 해소; nit: `_prepend_before_key`를 `_finish_emptied_sections`에서도 재사용, 시퀀스 항목 `-` 한 글자 줄 렌더 모양 단언 → cleanup 후보). Phase 2 exit 감사 `audit_gui_phase2`(opus) 착수 | 13.5 판정 · 8절 |
 | 2026-09-18 KST | Claude | P2-02 2차 REQUEST_CHANGES(P1-001 잔존: 재시도 시 `/revisions/1` 저장이 409) → 3차 후속 `6278c40`(시도마다 고유 전략 id seeding, `--repeat-each 2` 10 passed) 재검토 요청. `review_gui_p1_06` APPROVE(P2 3) → 후속 `e77f7ce`(시퀀스 항목 첫 키 아래 주석 보존, 버전 리터럴 가드, WORKFLOW 잔재) → P1-06 APPROVED. 스택 rebase: P1-06 → P2-02 `6278c40`, P2-03 → P1-06 `e77f7ce`. P2-03 구현 → diff freeze `6ec933f`, stacked PR #118(base P1-06), `review_gui_p2_03`(opus) 배정 → IN_REVIEW. 결정: Inspector·hover는 parse tree로 판정(조건 필드 없으면 판정 불가, 기본값 미복제), Form은 컴파일된 spec으로 판정 | 13.3·13.5 |

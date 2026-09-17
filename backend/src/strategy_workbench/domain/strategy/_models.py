@@ -44,11 +44,6 @@ class FactorDirection(StrEnum):
     LOW = "low"
 
 
-class SignalMethod(StrEnum):
-    WEIGHTED_SUM = "weighted_sum"
-    RANK_THRESHOLD = "rank_threshold"
-
-
 class PortfolioSide(StrEnum):
     LONG_ONLY = "long_only"
     LONG_SHORT = "long_short"
@@ -75,10 +70,6 @@ class RebalanceFrequency(StrEnum):
 
 class ExecutionTiming(StrEnum):
     NEXT_OPEN = "next_open"
-
-
-class OrderStyle(StrEnum):
-    MARKET = "market"
 
 
 @dataclass(frozen=True)
@@ -121,8 +112,6 @@ class FactorSignal:
 
 @dataclass(frozen=True)
 class SignalStep:
-    method: SignalMethod = SignalMethod.WEIGHTED_SUM
-    entry_percentile: float = 0.1
     score_threshold: float | None = None
     regime_field_id: str | None = field(default=None, metadata=CATALOG_EQUITY_FIELD)
     regime_minimum: float | None = None
@@ -157,7 +146,6 @@ class RiskStep:
 @dataclass(frozen=True)
 class ExecutionStep:
     timing: ExecutionTiming = ExecutionTiming.NEXT_OPEN
-    order_style: OrderStyle = OrderStyle.MARKET
     participation_rate: float = 0.1
     fee_bps: float = 15.0
     slippage_bps: float = 10.0

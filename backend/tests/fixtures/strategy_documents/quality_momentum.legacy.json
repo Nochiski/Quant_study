@@ -44,8 +44,6 @@
     }
   ],
   "signal": {
-    "method": "weighted_sum",
-    "entry_percentile": 0.1,
     "score_threshold": null,
     "regime_field_id": null,
     "regime_minimum": null
@@ -74,7 +72,6 @@
   },
   "execution": {
     "timing": "next_open",
-    "order_style": "market",
     "participation_rate": 0.1,
     "fee_bps": 15.0,
     "slippage_bps": 10.0

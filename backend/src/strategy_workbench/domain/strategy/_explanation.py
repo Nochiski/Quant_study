@@ -28,7 +28,7 @@ def explain_strategy(spec: StrategySpec) -> StrategyExplanation:
             ),
             StrategyExplanationStep(
                 "signal",
-                f"팩터 {len(factor_names)}개를 {spec.signal.method} 방식으로 결합",
+                f"팩터 {len(factor_names)}개를 방향·가중치 가중합으로 결합",
                 factor_names,
             ),
             StrategyExplanationStep(
@@ -52,7 +52,7 @@ def explain_strategy(spec: StrategySpec) -> StrategyExplanation:
             ),
             StrategyExplanationStep(
                 "execution",
-                f"{spec.execution.timing} · {spec.execution.order_style}",
+                f"{spec.execution.timing} · 시장가",
                 (
                     f"수수료 {spec.execution.fee_bps:.1f}bp",
                     f"슬리피지 {spec.execution.slippage_bps:.1f}bp",

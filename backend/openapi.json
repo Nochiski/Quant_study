@@ -868,7 +868,8 @@
         "enum": [
           "rank",
           "zscore",
-          "winsorize"
+          "winsorize",
+          "demean"
         ],
         "title": "CrossSectionalOperator",
         "type": "string"
@@ -1345,10 +1346,6 @@
             "default": 15.0,
             "title": "Fee Bps",
             "type": "number"
-          },
-          "order_style": {
-            "$ref": "#/components/schemas/OrderStyle",
-            "default": "market"
           },
           "participation_rate": {
             "default": 0.1,
@@ -3054,13 +3051,6 @@
           "scalar"
         ],
         "title": "NodeValueType",
-        "type": "string"
-      },
-      "OrderStyle": {
-        "enum": [
-          "market"
-        ],
-        "title": "OrderStyle",
         "type": "string"
       },
       "Page_BacktestRunSummary_": {
@@ -4960,25 +4950,8 @@
         "title": "SelectionMethod",
         "type": "string"
       },
-      "SignalMethod": {
-        "enum": [
-          "weighted_sum",
-          "rank_threshold"
-        ],
-        "title": "SignalMethod",
-        "type": "string"
-      },
       "SignalStep": {
         "properties": {
-          "entry_percentile": {
-            "default": 0.1,
-            "title": "Entry Percentile",
-            "type": "number"
-          },
-          "method": {
-            "$ref": "#/components/schemas/SignalMethod",
-            "default": "weighted_sum"
-          },
           "regime_field_id": {
             "anyOf": [
               {
@@ -5640,7 +5613,6 @@
             "$ref": "#/components/schemas/ExecutionStep",
             "default": {
               "fee_bps": 15.0,
-              "order_style": "market",
               "participation_rate": 0.1,
               "slippage_bps": 10.0,
               "timing": "next_open"
@@ -5701,10 +5673,7 @@
           },
           "signal": {
             "$ref": "#/components/schemas/SignalStep",
-            "default": {
-              "entry_percentile": 0.1,
-              "method": "weighted_sum"
-            }
+            "default": {}
           },
           "title": {
             "title": "Title",
@@ -6527,11 +6496,7 @@
       "UnaryOperator": {
         "enum": [
           "negate",
-          "lag",
-          "rank",
-          "zscore",
-          "winsorize",
-          "neutralize"
+          "lag"
         ],
         "title": "UnaryOperator",
         "type": "string"

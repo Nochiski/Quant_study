@@ -297,9 +297,30 @@ def test_rank_group_and_median_fill_all_use_the_member_peer_group() -> None:
 
     for node in (
         CrossSectionalNode("out", CrossSectionalOperator.RANK, "source", "cross_sectional"),
-        UnaryNode("out", UnaryOperator.NEUTRALIZE, "source", "unary"),
+        CrossSectionalNode("out", CrossSectionalOperator.DEMEAN, "source", "cross_sectional"),
         GroupNode("out", GroupOperator.NEUTRALIZE, "source", "sector", "group"),
     ):
         alone = outputs(node, (*members, missing_member))
         mixed = outputs(node, (*members, missing_member, outsider))
         assert {key: mixed[key] for key in alone} == alone, node
+
+
+def test_cross_sectional_demean_subtracts_the_member_peer_mean() -> None:
+    """schema 1.1 S4: 1.0의 `unary: neutralize`가 하던 계산이 `cross_sectional: demean`으로 남는다.
+    같은 날 유니버스 구성원의 평균을 빼며, 비구성원은 자기 횡단면에서 따로 계산된다."""
+    members = (_member_row(2, "s1", 4.0, member=True), _member_row(2, "s2", 2.0, member=True))
+    outsider = _member_row(2, "s3", 999.0, member=False)
+    graph = FactorGraph(
+        nodes=(
+            FieldNode("source", "value", "field"),
+            CrossSectionalNode("out", CrossSectionalOperator.DEMEAN, "source", "cross_sectional"),
+        ),
+        output_node_id="out",
+    )
+
+    values = {
+        v.security_id: v.value
+        for v in evaluate_factor_graph(graph, observations=(*members, outsider)).values
+    }
+
+    assert values == {"s1": 1.0, "s2": -1.0, "s3": 0.0}

@@ -77,14 +77,14 @@ from strategy_workbench.domain.factor.facade.evaluation import (
 from strategy_workbench.domain.factor.facade.expression import (
     BinaryNode,
     BinaryOperator,
+    CrossSectionalNode,
+    CrossSectionalOperator,
     FactorGraph,
     FieldNode,
     ParameterNode,
     SavedFactorNode,
     TimeSeriesNode,
     TimeSeriesOperator,
-    UnaryNode,
-    UnaryOperator,
 )
 from strategy_workbench.domain.factor.facade.registry import build_default_factor_registry
 from strategy_workbench.domain.factor.facade.trace import trace_factor_graph
@@ -859,7 +859,7 @@ def test_non_members_do_not_enter_the_member_cross_section() -> None:
         graph=FactorGraph(
             nodes=(
                 FieldNode("close", "price.close", "field"),
-                UnaryNode("z", UnaryOperator.ZSCORE, "close", "unary"),
+                CrossSectionalNode("z", CrossSectionalOperator.ZSCORE, "close", "cross_sectional"),
             ),
             output_node_id="z",
         ),

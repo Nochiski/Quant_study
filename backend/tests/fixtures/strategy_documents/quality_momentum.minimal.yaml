@@ -21,8 +21,6 @@ factors:
           input_node_id: close
           window: 252
       output_node_id: mom_252
-signal:
-  method: weighted_sum
 portfolio:
   selection_count: 20
 risk:

@@ -368,42 +368,7 @@ def _unary(
             -value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
             for value in _checkpointed(values, checkpoint)
         ]
-    if node.operator is UnaryOperator.LAG:
-        return _lag(values, observations, node.periods or 0, checkpoint=checkpoint)
-    if node.operator is UnaryOperator.NEUTRALIZE:
-        return _cross_sectional_demean(values, observations, checkpoint=checkpoint)
-    synthetic = CrossSectionalNode(
-        node_id=node.node_id,
-        operator={
-            UnaryOperator.RANK: CrossSectionalOperator.RANK,
-            UnaryOperator.ZSCORE: CrossSectionalOperator.ZSCORE,
-            UnaryOperator.WINSORIZE: CrossSectionalOperator.WINSORIZE,
-        }[node.operator],
-        input_node_id=node.input_node_id,
-        kind="cross_sectional",
-    )
-    return _cross_sectional(synthetic, values, observations, checkpoint=checkpoint)
-
-
-def _cross_sectional_demean(
-    values: list[FactorComputedValue],
-    observations: tuple[FactorObservation, ...],
-    *,
-    checkpoint: Callable[[], None] = _noop_checkpoint,
-) -> list[FactorComputedValue]:
-    result: list[FactorComputedValue] = [None] * len(values)
-    for indices in _checkpointed(
-        _cross_section_indices(observations, checkpoint=checkpoint).values(), checkpoint
-    ):
-        numeric = [
-            (index, number)
-            for index in _checkpointed(indices, checkpoint)
-            if (number := _as_number(values[index])) is not None
-        ]
-        center = mean(value for _, value in numeric) if numeric else 0.0
-        for index, value in _checkpointed(numeric, checkpoint):
-            result[index] = value - center
-    return result
+    return _lag(values, observations, node.periods or 0, checkpoint=checkpoint)
 
 
 def _time_series(
@@ -456,7 +421,11 @@ def _cross_sectional(
         ]
         if not numeric:
             continue
-        if node.operator is CrossSectionalOperator.RANK:
+        if node.operator is CrossSectionalOperator.DEMEAN:
+            center = mean(value for _, value in numeric)
+            for index, value in _checkpointed(numeric, checkpoint):
+                result[index] = value - center
+        elif node.operator is CrossSectionalOperator.RANK:
             ranked = rank_items(numeric)
             denominator = max(len(ranked) - 1, 1)
             for index, rank in _checkpointed(ranked.items(), checkpoint):

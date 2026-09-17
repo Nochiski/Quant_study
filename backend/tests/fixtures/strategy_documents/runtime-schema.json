@@ -33,8 +33,6 @@
     "signal": {
       "$ref": "#/$defs/SignalStep",
       "default": {
-        "method": "weighted_sum",
-        "entry_percentile": 0.1,
         "score_threshold": null,
         "regime_field_id": null,
         "regime_minimum": null
@@ -72,7 +70,6 @@
       "$ref": "#/$defs/ExecutionStep",
       "default": {
         "timing": "next_open",
-        "order_style": "market",
         "participation_rate": 0.1,
         "fee_bps": 15.0,
         "slippage_bps": 10.0
@@ -275,11 +272,7 @@
           "type": "string",
           "enum": [
             "negate",
-            "lag",
-            "rank",
-            "zscore",
-            "winsorize",
-            "neutralize"
+            "lag"
           ]
         },
         "input_node_id": {
@@ -403,7 +396,8 @@
           "enum": [
             "rank",
             "zscore",
-            "winsorize"
+            "winsorize",
+            "demean"
           ]
         },
         "input_node_id": {
@@ -696,27 +690,6 @@
       "type": "object",
       "title": "SignalStep",
       "properties": {
-        "method": {
-          "type": "string",
-          "enum": [
-            "weighted_sum",
-            "rank_threshold"
-          ],
-          "default": "weighted_sum"
-        },
-        "entry_percentile": {
-          "type": "number",
-          "default": 0.1,
-          "x-unit": "ratio",
-          "x-applied-stage": "signal",
-          "exclusiveMinimum": 0.0,
-          "maximum": 1.0,
-          "x-display-unit": "%",
-          "examples": [
-            0.1
-          ],
-          "x-description-key": "strategy.contract.signal.entry_percentile"
-        },
         "score_threshold": {
           "anyOf": [
             {
@@ -972,13 +945,6 @@
             "next_open"
           ],
           "default": "next_open"
-        },
-        "order_style": {
-          "type": "string",
-          "enum": [
-            "market"
-          ],
-          "default": "market"
         },
         "participation_rate": {
           "type": "number",

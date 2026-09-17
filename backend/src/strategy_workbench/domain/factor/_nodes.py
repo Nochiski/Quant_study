@@ -16,13 +16,10 @@ REFERENCE_PARAMETER = {"reference": "parameter"}
 DEFINES_NODE = {"defines": "node"}
 
 
+# 요소별 변환만 남긴다(schema 1.1 S4). 횡단면 순위·표준화·윈저화·demean은 CrossSectionalOperator다.
 class UnaryOperator(StrEnum):
     NEGATE = "negate"
     LAG = "lag"
-    RANK = "rank"
-    ZSCORE = "zscore"
-    WINSORIZE = "winsorize"
-    NEUTRALIZE = "neutralize"
 
 
 class BinaryOperator(StrEnum):
@@ -45,6 +42,7 @@ class CrossSectionalOperator(StrEnum):
     RANK = "rank"
     ZSCORE = "zscore"
     WINSORIZE = "winsorize"
+    DEMEAN = "demean"  # 같은 날 유니버스 평균을 뺀다 (1.0의 `unary: neutralize`)
 
 
 class GroupOperator(StrEnum):

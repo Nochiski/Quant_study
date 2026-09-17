@@ -100,6 +100,20 @@ class ApplicabilityCondition:
                 "applicability condition must be exactly one of equals/not_null — "
                 f"pointer={self.pointer!r} equals={self.equals!r} not_null={self.not_null}"
             )
+        if self.equals is not None and not isinstance(self.equals, str):
+            # 프론트는 `x-applicable-when.equals`를 JSON 값 그대로 비교한다. 문자열(enum 값)만
+            # 허용해야 Python 쪽 `str(value)` 비교와 어긋나지 않는다.
+            raise TypeError(
+                "applicability `equals` must be the enum's string value — "
+                f"pointer={self.pointer!r} equals={self.equals!r}"
+            )
+
+    @property
+    def path(self) -> str:
+        return self.pointer.strip("/").replace("/", ".")
+
+    def describe(self) -> str:
+        return f"{self.path} = {self.equals}" if self.equals is not None else f"{self.path} 설정"
 
     def holds_for(self, spec: StrategySpec) -> bool:
         value = resolve_scalar(spec, self.pointer)
@@ -118,7 +132,8 @@ class FieldApplicability:
     """
 
     pointer: str
-    condition: ApplicabilityCondition
+    # 모두 성립해야 읽힌다(AND). 예: short_selection_count는 long_short이면서 top_n일 때만.
+    conditions: tuple[ApplicabilityCondition, ...]
     description_key: str
     # 이미 blocking error 규칙이 같은 관계를 소유하는 행: 스키마에는 조건을 노출하되 validator는
     # 그 error 하나만 낸다(같은 사실을 warning으로 두 번 보고하지 않는다).
@@ -128,46 +143,61 @@ class FieldApplicability:
     def path(self) -> str:
         return self.pointer.strip("/").replace("/", ".")
 
+    def __post_init__(self) -> None:
+        if not self.conditions:
+            raise ValueError(f"field applicability needs a condition — pointer={self.pointer!r}")
+
     def applies_to(self, spec: StrategySpec) -> bool:
-        return self.condition.holds_for(spec)
+        return all(condition.holds_for(spec) for condition in self.conditions)
 
 
 FIELD_APPLICABILITY: tuple[FieldApplicability, ...] = (
+    # `_compiler.py::_selection_counts`: top_n이면 selection_count(+long_short이면
+    # short_selection_count),
+    # percentile이면 selection_percentile로 양쪽 count를 계산한다.
+    FieldApplicability(
+        "/portfolio/selection_count",
+        (ApplicabilityCondition("/portfolio/selection_method", equals="top_n"),),
+        "strategy.contract.applicable.selection_count",
+    ),
     FieldApplicability(
         "/portfolio/short_selection_count",
-        ApplicabilityCondition("/portfolio/side", equals="long_short"),
+        (
+            ApplicabilityCondition("/portfolio/side", equals="long_short"),
+            ApplicabilityCondition("/portfolio/selection_method", equals="top_n"),
+        ),
         "strategy.contract.applicable.short_selection_count",
     ),
     FieldApplicability(
         "/portfolio/selection_percentile",
-        ApplicabilityCondition("/portfolio/selection_method", equals="percentile"),
+        (ApplicabilityCondition("/portfolio/selection_method", equals="percentile"),),
         "strategy.contract.applicable.selection_percentile",
     ),
     FieldApplicability(
         "/portfolio/rebalance_every_n_sessions",
-        ApplicabilityCondition("/portfolio/rebalance", equals="every_n_sessions"),
+        (ApplicabilityCondition("/portfolio/rebalance", equals="every_n_sessions"),),
         "strategy.contract.applicable.rebalance_every_n_sessions",
     ),
     FieldApplicability(
         "/portfolio/minimum_liquidity",
-        ApplicabilityCondition("/portfolio/liquidity_field_id", not_null=True),
+        (ApplicabilityCondition("/portfolio/liquidity_field_id", not_null=True),),
         "strategy.contract.applicable.minimum_liquidity",
         owned_by_error="strategy.portfolio.liquidity_field",
     ),
     FieldApplicability(
         "/risk/sector_neutral",
-        ApplicabilityCondition("/portfolio/side", equals="long_short"),
+        (ApplicabilityCondition("/portfolio/side", equals="long_short"),),
         "strategy.contract.applicable.sector_neutral",
         owned_by_error="strategy.risk.sector_neutral_side",
     ),
     FieldApplicability(
         "/risk/risk_field_id",
-        ApplicabilityCondition("/portfolio/weighting", equals="risk"),
+        (ApplicabilityCondition("/portfolio/weighting", equals="risk"),),
         "strategy.contract.applicable.risk_field_id",
     ),
     FieldApplicability(
         "/signal/regime_minimum",
-        ApplicabilityCondition("/signal/regime_field_id", not_null=True),
+        (ApplicabilityCondition("/signal/regime_field_id", not_null=True),),
         "strategy.contract.applicable.regime_minimum",
         owned_by_error="strategy.signal.regime_field",
     ),

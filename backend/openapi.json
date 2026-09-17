@@ -1,19 +1,8 @@
 {
   "components": {
     "schemas": {
-      "ApplicableWhen": {
+      "ApplicableCondition": {
         "properties": {
-          "description_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description Key"
-          },
           "equals": {
             "anyOf": [
               {
@@ -26,7 +15,6 @@
             "title": "Equals"
           },
           "not_null": {
-            "default": false,
             "title": "Not Null",
             "type": "boolean"
           },
@@ -36,7 +24,43 @@
           }
         },
         "required": [
-          "pointer"
+          "pointer",
+          "equals",
+          "not_null"
+        ],
+        "title": "ApplicableCondition",
+        "type": "object"
+      },
+      "ApplicableWhen": {
+        "description": "Same row as `FIELD_APPLICABILITY`, in the shape both the schema and the contract publish.\n\n`all_of` must all hold for the field to be read. `owned_by_error` names the blocking rule that\nreports a violation instead of the `strategy.field.inapplicable` warning.",
+        "properties": {
+          "all_of": {
+            "items": {
+              "$ref": "#/components/schemas/ApplicableCondition"
+            },
+            "title": "All Of",
+            "type": "array"
+          },
+          "description_key": {
+            "title": "Description Key",
+            "type": "string"
+          },
+          "owned_by_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owned By Error"
+          }
+        },
+        "required": [
+          "all_of",
+          "description_key",
+          "owned_by_error"
         ],
         "title": "ApplicableWhen",
         "type": "object"

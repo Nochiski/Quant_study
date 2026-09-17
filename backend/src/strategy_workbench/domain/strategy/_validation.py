@@ -148,11 +148,8 @@ def validate_strategy(
             continue
         if resolve_scalar(spec, applicability.pointer) == field_default(applicability.pointer):
             continue
-        condition = applicability.condition
-        expectation = (
-            f"{condition.pointer.strip('/').replace('/', '.')} = {condition.equals}"
-            if condition.equals is not None
-            else f"{condition.pointer.strip('/').replace('/', '.')} 설정"
+        expectation = " 그리고 ".join(
+            condition.describe() for condition in applicability.conditions
         )
         issues.append(
             semantic_issue(

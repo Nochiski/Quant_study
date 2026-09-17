@@ -17,6 +17,11 @@ import {
   pointerSegments,
   templatePointer,
 } from "../../../shared/lib/yaml12";
+import {
+  isApplicableWhen,
+  projectApplicability,
+  type FieldApplicability,
+} from "./field-applicability";
 import { discriminatorAt, schemaAt, type JsonSchema } from "./schema-navigator";
 
 export type ContractResourceState = "loading" | "ready" | "error";
@@ -81,6 +86,8 @@ export type ContractFieldProjection = {
   discriminator: ContractDiscriminator | null;
   /** Branches that define this property differently; metadata is withheld until kind resolves. */
   unresolvedBranches: readonly string[] | null;
+  /** backend 조건표 행(`applicable_when`/`x-applicable-when`)의 현재 문서 판정. 행이 없으면 null. */
+  applicability: FieldApplicability | null;
 };
 
 export type ContractCatalogProjection =
@@ -350,6 +357,13 @@ export const projectContractField = (
     branchDependent || unresolvedDiscriminatorProperty
       ? undefined
       : (row?.const ?? node.const);
+  // typed contract 행을 우선하고, 같은 모양의 runtime schema 마커는 경계 검사를 거쳐 받는다.
+  const applicableWhen = branchDependent
+    ? null
+    : (row?.applicable_when ??
+      (isApplicableWhen(node["x-applicable-when"])
+        ? node["x-applicable-when"]
+        : null));
   const shape =
     pointer === ""
       ? "root"
@@ -415,6 +429,10 @@ export const projectContractField = (
     },
     discriminator,
     unresolvedBranches,
+    applicability:
+      applicableWhen === null
+        ? null
+        : projectApplicability(applicableWhen, tree),
   };
 };
 

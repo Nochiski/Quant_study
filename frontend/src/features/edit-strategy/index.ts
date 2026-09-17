@@ -105,6 +105,14 @@ export {
   type DraftSemanticDiff,
 } from "./model/diff-projection";
 export {
+  applicabilityByPointer,
+  describeApplicabilityConditions,
+  isApplicableWhen,
+  projectApplicability,
+  type ApplicabilityCondition,
+  type FieldApplicability,
+} from "./model/field-applicability";
+export {
   projectContractField,
   projectContractInspector,
   type ContractFieldProjection,

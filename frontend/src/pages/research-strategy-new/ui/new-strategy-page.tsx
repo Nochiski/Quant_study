@@ -17,6 +17,7 @@ import {
   currentDiagnostics,
   currentSpec,
   createNewDraftId,
+  applicabilityByPointer,
   projectStrategySpec,
   revisionDraftId,
   saveStatusText,
@@ -109,6 +110,14 @@ export const NewStrategyPage = () => {
       ? document.compiled
       : null;
   const projection = projectStrategySpec(document);
+  const contractRows = assist.inspectorSource.contract?.contract.fields;
+  const formApplicability = useMemo(
+    () =>
+      projection.status === "ready" && contractRows !== undefined
+        ? applicabilityByPointer(contractRows, projection.spec)
+        : undefined,
+    [contractRows, projection],
+  );
   const availableViews: readonly StrategyView[] = PROJECTION_VIEWS;
   const requested: StrategyView = search.view ?? document.format;
   const implemented = availableViews.includes(requested);
@@ -266,7 +275,13 @@ export const NewStrategyPage = () => {
         }
         projections={{
           json: <StrategyProjectionPanel projection={projection} view="json" />,
-          form: <StrategyProjectionPanel projection={projection} view="form" />,
+          form: (
+            <StrategyProjectionPanel
+              projection={projection}
+              view="form"
+              applicability={formApplicability}
+            />
+          ),
           graph: (
             <FactorGraphPanel
               state={executionPlans}

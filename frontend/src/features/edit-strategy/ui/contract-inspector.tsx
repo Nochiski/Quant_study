@@ -8,6 +8,10 @@ import {
   type ContractCatalogProjection,
   type ContractInspectorSource,
 } from "../model/contract-inspector";
+import {
+  describeApplicabilityConditions,
+  type FieldApplicability,
+} from "../model/field-applicability";
 import "./contract-inspector.css";
 
 type ContractInspectorProps = {
@@ -230,6 +234,76 @@ const CatalogDetails = ({
   );
 };
 
+/** 조건표 행의 판정(WORKFLOW P2-03): 조건 목록과 "지금 읽히는가"를 backend 문구 키로 보여준다. */
+const ApplicabilitySection = ({
+  applicability,
+}: {
+  applicability: FieldApplicability;
+}) => {
+  const conditions = describeApplicabilityConditions(applicability);
+  const description = tOptional(applicability.descriptionKey);
+  const verdict =
+    applicability.applicable === true
+      ? t("contract.applicable.holds")
+      : applicability.applicable === false
+        ? t("contract.applicable.inapplicable").replace(
+            "{conditions}",
+            conditions,
+          )
+        : t("contract.applicable.unknown");
+  return (
+    <section className="contract-inspector__section">
+      <h3>{t("contract.applicableWhen")}</h3>
+      <Rows
+        rows={[
+          [
+            t("contract.applicableWhen"),
+            <span
+              key="conditions"
+              className="contract-inspector__inline-values"
+            >
+              {applicability.conditions.map((condition) => (
+                <code
+                  key={condition.pointer}
+                  data-holds={
+                    condition.holds === null
+                      ? "unknown"
+                      : String(condition.holds)
+                  }
+                >
+                  {condition.equals === null
+                    ? t("contract.applicable.condition.set").replace(
+                        "{path}",
+                        condition.path,
+                      )
+                    : `${condition.path} = ${condition.equals}`}
+                </code>
+              ))}
+            </span>,
+          ],
+          ...(applicability.ownedByError
+            ? ([
+                [
+                  t("contract.applicable.ownedByError"),
+                  <code key="owner">{applicability.ownedByError}</code>,
+                ],
+              ] as [string, ReactNode][])
+            : []),
+        ]}
+      />
+      <p
+        className={`contract-inspector__notice${applicability.applicable === false ? " contract-inspector__notice--warn" : ""}`}
+        role="status"
+      >
+        {verdict}
+      </p>
+      {description ? (
+        <p className="contract-inspector__notice">{description}</p>
+      ) : null}
+    </section>
+  );
+};
+
 /** Backend-owned contract projection for the URL-owned selected JSON Pointer. */
 export const ContractInspector = ({
   source,
@@ -417,6 +491,10 @@ export const ContractInspector = ({
           </div>
         ) : null}
       </section>
+
+      {field.applicability ? (
+        <ApplicabilitySection applicability={field.applicability} />
+      ) : null}
 
       {field.discriminator ? (
         <section className="contract-inspector__section">

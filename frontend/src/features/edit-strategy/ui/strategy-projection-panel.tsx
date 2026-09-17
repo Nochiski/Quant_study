@@ -1,11 +1,14 @@
 import { t } from "../../../shared/config";
 import { Badge } from "../../../shared/ui";
+import type { FieldApplicability } from "../model/field-applicability";
 import type { StrategyProjection } from "../model/strategy-projection";
 import "./strategy-projection-panel.css";
 
 type StrategyProjectionPanelProps = {
   projection: StrategyProjection;
   view: "json" | "form";
+  /** pointer별 조건표 판정(P2-03). 컴파일된 spec은 기본값이 채워져 있어 판정이 확정된다. */
+  applicability?: ReadonlyMap<string, FieldApplicability>;
 };
 
 const valueText = (value: unknown): string => {
@@ -18,6 +21,7 @@ const valueText = (value: unknown): string => {
 export const StrategyProjectionPanel = ({
   projection,
   view,
+  applicability,
 }: StrategyProjectionPanelProps) => {
   if (projection.status === "unavailable") {
     return (
@@ -87,16 +91,32 @@ export const StrategyProjectionPanel = ({
             <section key={section.id}>
               <h2>{t(`projection.section.${section.id}`)}</h2>
               <dl>
-                {Object.entries(section.values).map(([field, value]) => (
-                  <div key={field}>
-                    <dt>
-                      <code>{field}</code>
-                    </dt>
-                    <dd>
-                      <code>{valueText(value)}</code>
-                    </dd>
-                  </div>
-                ))}
+                {Object.entries(section.values).map(([field, value]) => {
+                  const pointer =
+                    section.id === "metadata"
+                      ? `/${field}`
+                      : `/${section.id}/${field}`;
+                  const inapplicable =
+                    applicability?.get(pointer)?.applicable === false;
+                  return (
+                    <div key={field}>
+                      <dt>
+                        <code>{field}</code>
+                      </dt>
+                      <dd>
+                        <code>{valueText(value)}</code>
+                        {inapplicable ? (
+                          <>
+                            {" "}
+                            <Badge tone="warn">
+                              {t("contract.applicable.badge")}
+                            </Badge>
+                          </>
+                        ) : null}
+                      </dd>
+                    </div>
+                  );
+                })}
               </dl>
             </section>
           ))}

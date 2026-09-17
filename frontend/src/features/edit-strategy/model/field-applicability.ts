@@ -1,4 +1,5 @@
 import type { ApplicableWhen, FieldContract } from "../../../shared/api";
+import { t } from "../../../shared/config";
 import { pointerSegments } from "../../../shared/lib/yaml12";
 
 /**
@@ -105,6 +106,21 @@ export const projectApplicability = (
     applicable,
   };
 };
+
+/** "portfolio.side = long_short 그리고 portfolio.selection_method = top_n" 같은 문구. */
+export const describeApplicabilityConditions = (
+  applicability: FieldApplicability,
+): string =>
+  applicability.conditions
+    .map((condition) =>
+      condition.equals === null
+        ? t("contract.applicable.condition.set").replace(
+            "{path}",
+            condition.path,
+          )
+        : `${condition.path} = ${condition.equals}`,
+    )
+    .join(t("contract.applicable.and"));
 
 /**
  * contract의 모든 조건 행을 pointer별로 판정한다. Form 투영이 필드 옆에 "읽히지 않음"을 붙일 때 쓴다.

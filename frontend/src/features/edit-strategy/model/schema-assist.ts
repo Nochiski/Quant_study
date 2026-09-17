@@ -31,6 +31,7 @@ import {
   isSchemaContractCompatible,
   projectContractField,
 } from "./contract-inspector";
+import { describeApplicabilityConditions } from "./field-applicability";
 import {
   definingArrayFor,
   propertyOptions,
@@ -320,6 +321,13 @@ export const describePointer = (
     lines.push(`${t("assist.source")}: ${catalogLabel(field.catalog)}`);
   if (field.reference)
     lines.push(`${t("assist.source")}: ${referenceLabel(field.reference)}`);
+  if (field.applicability) {
+    lines.push(
+      `${t("contract.applicableWhen")}: ${describeApplicabilityConditions(field.applicability)}`,
+    );
+    if (field.applicability.applicable === false)
+      lines.push(t("contract.applicable.badge"));
+  }
   return lines;
 };
 

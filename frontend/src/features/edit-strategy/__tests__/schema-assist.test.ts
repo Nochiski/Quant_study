@@ -431,6 +431,28 @@ describe("schema-driven hover", () => {
     expect(lines?.some((line) => line.startsWith("예시:"))).toBe(false);
   });
 
+  it("adds the backend applicability condition to the hover lines (P2-03)", () => {
+    const state = stateFor(YAML);
+    const lines = describePointer(
+      deps(state),
+      "/risk/sector_neutral",
+      state.parse!.tree,
+    );
+    expect(lines).toContain("적용 조건: portfolio.side = long_short");
+    // 문서에 portfolio가 없어 판정 불가: "읽히지 않음" 배지는 붙지 않는다.
+    expect(lines).not.toContain("현재 모드에서 읽히지 않음");
+    const longOnly = stateFor(`${YAML}portfolio:
+  side: long_only
+`);
+    expect(
+      describePointer(
+        deps(longOnly),
+        "/risk/sector_neutral",
+        longOnly.parse!.tree,
+      ),
+    ).toContain("현재 모드에서 읽히지 않음");
+  });
+
   it("keeps requiredness shared by every unresolved union branch", () => {
     const state = stateFor(YAML);
     for (const pointer of [

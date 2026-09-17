@@ -10,6 +10,7 @@ import {
   type CompileOutcome,
   type DocumentState,
 } from "../model/document-state";
+import { projectApplicability } from "../model/field-applicability";
 import { projectStrategySpec } from "../model/strategy-projection";
 import { StrategyProjectionPanel } from "../ui/strategy-projection-panel";
 
@@ -173,6 +174,37 @@ describe("StrategySpec projection UI", () => {
     expect(screen.queryByText("strategy_id")).not.toBeInTheDocument();
     expect(screen.queryByText("revision")).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  it("marks fields the backend condition table says are not read in this mode (P2-03)", () => {
+    if (ready.status !== "ready") throw new Error("fixture must project");
+    // 컴파일된 spec(weighting: equal)에서 risk 가중 전용 필드는 읽히지 않는다.
+    const notRead = projectApplicability(
+      {
+        all_of: [
+          { pointer: "/portfolio/weighting", equals: "risk", not_null: false },
+        ],
+        description_key: "strategy.contract.applicable.risk_field_id",
+        owned_by_error: null,
+      },
+      ready.spec,
+    );
+    expect(notRead.applicable).toBe(false);
+    render(
+      <StrategyProjectionPanel
+        projection={ready}
+        view="form"
+        applicability={
+          new Map([
+            ["/portfolio/selection_count", notRead],
+            ["/portfolio/rebalance", { ...notRead, applicable: true }],
+          ])
+        }
+      />,
+    );
+    const badges = screen.getAllByText("현재 모드에서 읽히지 않음");
+    expect(badges).toHaveLength(1);
+    expect(badges[0]!.closest("div")).toHaveTextContent("selection_count");
   });
 
   it("labels stale and unavailable projections without offering them as current", () => {

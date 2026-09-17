@@ -17,6 +17,7 @@ import {
   StrategyOutline,
   UpgradeBanner,
   PROJECTION_VIEWS,
+  applicabilityByPointer,
   canValidateDocument,
   currentDiagnostics,
   currentSpec,
@@ -140,6 +141,14 @@ export const StrategyRevisionPage = () => {
       ? document.compiled
       : null;
   const projection = projectStrategySpec(document);
+  const contractRows = assist.inspectorSource.contract?.contract.fields;
+  const formApplicability = useMemo(
+    () =>
+      projection.status === "ready" && contractRows !== undefined
+        ? applicabilityByPointer(contractRows, projection.spec)
+        : undefined,
+    [contractRows, projection],
+  );
   const availableViews: readonly StrategyView[] =
     stored.format === "yaml"
       ? PROJECTION_VIEWS
@@ -320,7 +329,13 @@ export const StrategyRevisionPage = () => {
             stored.format === "yaml" ? (
               <StrategyProjectionPanel projection={projection} view="json" />
             ) : undefined,
-          form: <StrategyProjectionPanel projection={projection} view="form" />,
+          form: (
+            <StrategyProjectionPanel
+              projection={projection}
+              view="form"
+              applicability={formApplicability}
+            />
+          ),
           graph: (
             <FactorGraphPanel
               state={executionPlans}

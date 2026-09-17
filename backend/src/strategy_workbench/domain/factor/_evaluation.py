@@ -368,7 +368,11 @@ def _unary(
             -value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
             for value in _checkpointed(values, checkpoint)
         ]
-    return _lag(values, observations, node.periods or 0, checkpoint=checkpoint)
+    if node.operator is UnaryOperator.LAG:
+        return _lag(values, observations, node.periods or 0, checkpoint=checkpoint)
+    raise ValueError(  # pragma: no cover - enum은 두 멤버뿐, 새 멤버는 여기서 즉시 드러난다
+        f"unary operator has no evaluation — operator={node.operator!r} node_id={node.node_id!r}"
+    )
 
 
 def _time_series(

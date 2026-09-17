@@ -43,6 +43,9 @@ progress_percent: 0
 - Form/Graph 편집은 JSON Pointer 범위의 source 트랜잭션이다. 별도 편집 모델을 두지 않는다(ADR D5 개정).
 - P1 backend PR은 `backend/openapi.json`만 재생성하고 frontend generated SDK는 P2-01이 갱신한다.
 - reviewer 서브에이전트는 Opus로만 배정한다. Phase 종료마다 SoT·책임분리 점검 서브에이전트를 돌린다.
+- 알려진 간격(P1 merge ~ P5-03): `docs/manual/strategy-workbench/README.md`와 이전 initiative WORKFLOW 2.2의
+  YAML 예시가 1.0 모양(`factors.factors`, `signal.method`)이라 그대로 따라 치면 unknown key다. 문서 개정은
+  P5-03이 소유한다.
 - 2026-09-17 절차 조정: 이 세션은 격리 worktree(`scad`)에서 돌고 로컬 `main`은 원본 checkout에 체크아웃되어
   있어 직접 merge하지 않는다. APPROVE된 PR은 `APPROVED`로 두고 다음 PR의 base 브랜치가 된다(선언된 스택,
   `parallel_window`에 전부 기록). `MERGED`는 GitHub에서 PR이 병합될 때 제품 소유자 확인 후 표기한다.

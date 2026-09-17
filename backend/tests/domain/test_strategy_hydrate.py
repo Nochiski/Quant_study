@@ -344,6 +344,25 @@ def test_removed_1_0_fields_are_unknown_keys(section: str, key: str, value: obje
     ]
 
 
+def test_cross_sectional_demean_hydrates_from_a_document() -> None:
+    """schema 1.1 S4: GUI가 노출하는 `cross_sectional: demean`을 문서 입구가 받아 준다."""
+    document = copy.deepcopy(_document())
+    document["factors"][0]["graph"]["nodes"].append(
+        {
+            "kind": "cross_sectional",
+            "node_id": "dm",
+            "operator": "demean",
+            "input_node_id": "mom_252",
+        }
+    )
+    document["factors"][0]["graph"]["output_node_id"] = "dm"
+
+    spec = _hydrate_ok(document)
+
+    node = spec.factors[0].graph.nodes[-1]
+    assert node.kind == "cross_sectional" and str(node.operator) == "demean"
+
+
 @pytest.mark.parametrize("operator", ["rank", "zscore", "winsorize", "neutralize"])
 def test_unary_aliases_of_cross_sectional_operators_are_gone(operator: str) -> None:
     """schema 1.1 S4: 횡단면 변환은 `cross_sectional`로만 쓴다. `unary`에는 negate·lag만 남는다."""

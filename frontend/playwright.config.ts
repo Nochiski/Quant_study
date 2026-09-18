@@ -98,5 +98,16 @@ export default defineConfig({
         colorScheme: "light" as const,
       },
     },
+    {
+      // 실데이터(duckdb 어댑터) 백테스트 시나리오. spec 이 환경변수를 보고 스스로 skip 하므로
+      // CI(mock)에서는 항상 skipped 로 남고, 로컬에서 `--project real-equity` 로만 의미가 있다.
+      name: "real-equity",
+      testMatch: /workbench\.real-equity\.spec\.ts/u,
+      use: {
+        browserName: "chromium" as const,
+        viewport: { width: 1440, height: 900 },
+        colorScheme: "light" as const,
+      },
+    },
   ],
 });

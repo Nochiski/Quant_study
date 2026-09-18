@@ -1,7 +1,7 @@
 # 원장 서버 SFTP 동기화 · 실데이터 E2E 백테스트 설계
 
 - **작성일**: 2026-09-19
-- **상태**: 설계 확정 → 구현 착수
+- **상태**: 구현 완료(2026-09-19) — `database/src/ledger_sync/`, `frontend/e2e/workbench.real-equity.spec.ts`. 실측은 `database/docs/LEDGER_SYNC.md` §4·PR 본문
 - **대상**: 카엘 서버(`210.217.23.47`, 계정 `quantshare`, SFTP 전용·읽기 전용)의 `equity` 층을 로컬로
   받아 워크벤치·엔진이 읽게 하고, 이후 매일 증분으로 따라가며, 실데이터 위에서 그래프를 편집한 전략의
   백테스트를 E2E 로 검증한다.
@@ -69,7 +69,7 @@
 | `ledger_sync/pull.py` | 계획 실행. `_incoming` 수신·크기 대조·rename·MANIFEST 기록·state 갱신·구판본 gc. 끝나면 원격 MANIFEST 를 다시 읽어 수신 중 판본이 바뀐 테이블을 `drifted` 로 보고 | remote, plan, state |
 | `ledger_sync/verify.py` | `manifest`(current_build 일치) · `files`(원격 목록 이름·크기 = 로컬, reused 파티션은 크기 대조 제외) · `hash`(duckdb 로 파티션 content_hash 재계산 = MANIFEST). 결과는 값(`VerifyReport`)이고 CLI 가 종료 코드로 바꾼다 | remote, layout, duckdb(hash 만) |
 | `ledger_sync/__main__.py` | argparse CLI. 사람용 표 + `--json` | 위 전부 |
-| `database/scripts/ledger_sync.ps1` · `.sh` | `uv run --no-project --python 3.12 --with paramiko --with duckdb python -m ledger_sync` 래퍼 | uv |
+| `database/scripts/ledger_sync.ps1` · `.sh` | `uv run --project backend --with paramiko python -m ledger_sync` 래퍼(backend 환경의 duckdb·pyarrow 를 그대로 쓴다) · `register_daily_sync.ps1` 은 Windows 작업 스케줄러에 `sync` 를 매일 등록 | uv |
 
 ### 데이터 흐름 (pull)
 
@@ -104,8 +104,8 @@
 
 ### E2E (실데이터 백테스트)
 
-- `frontend/e2e/workbench.real-equity.spec.ts`, 새 Playwright project `real-equity`(1440×900 light 한 개). `STRATEGY_WORKBENCH_EQUITY_ROOT` 가 없으면 project 를 `test.skip` 한다 — CI 는 mock 그대로.
-- 시나리오: 워크벤치에서 실데이터 대상 샘플 전략(`price.momentum_12_1`, 유니버스 KRX 전체, 2024-01~2024-06)을 YAML 로 만들고 저장 → Graph 편집기에서 노드 추가·입력 재배선 → 플랜 갱신·리비전 저장 → 백테스트 실행 → 완료 상태와 체결·스냅샷 수 > 0 확인.
+- `frontend/e2e/workbench.real-equity.spec.ts`, 새 Playwright project `real-equity`(1440×900 light 한 개). `STRATEGY_WORKBENCH_EQUITY_ADAPTER=duckdb` 와 `STRATEGY_WORKBENCH_EQUITY_ROOT` 가 없으면 `test.skip` 한다 — CI 는 mock 그대로.
+- 시나리오: 워크벤치에서 골든 fixture(252 세션 모멘텀, 유니버스 `krx.common-stock`)의 기간만 2024-01-02~2024-06-28 로 바꿔 저장 → Graph 편집기에서 `price.open` field 노드 추가·`mom_252` 입력 재배선 → YAML 재검증·리비전 2 저장(spec_hash = compile 결과) → 백테스트 실행(`POST /api/v1/backtests` 는 TargetTape 를 동기로 만들어 실데이터에서 약 80초 뒤 202) → 완료 상태, 실데이터 snapshot id(16 hex), 체결·스냅샷·자본곡선 > 0, `total_return` 값 존재 확인.
 - backend 는 Playwright webServer 가 `process.env` 를 그대로 넘기므로 `STRATEGY_WORKBENCH_EQUITY_ADAPTER=duckdb` + ROOT 만 설정하면 된다. 실행: `npm run test:e2e -- --project real-equity`.
 
 ## 제약사항

@@ -267,7 +267,7 @@ Expected: 코어당 `run=… materialize=… total=… speedup=…x` 줄, 세 �
 
 ### Task 3.1: `PersistentPortfolio`와 `make_portfolio("rust")` 삭제
 
-- [ ] **Step 1**: `make_portfolio`의 `PERSISTENT_RUST_CORES` 분기를 다음으로 바꾼다.
+- [x] **Step 1**: `make_portfolio`의 `PERSISTENT_RUST_CORES` 분기를 다음으로 바꾼다.
 
 ```python
     if core in PERSISTENT_RUST_CORES:
@@ -278,31 +278,40 @@ Expected: 코어당 `run=… materialize=… total=… speedup=…x` 줄, 세 �
         )
 ```
 
-- [ ] **Step 2**: `core.py:249-403` `PersistentPortfolio` 클래스와 그것만 쓰는 import를 삭제한다. `PersistentOrderManager`가 남아 있으면 같이 확인해 삭제.
-- [ ] **Step 3**: 테스트 이전. `tests/test_core_parity.py::RUST_ENGINE_CORES`를 쓰는 `test_portfolio_scenario_identical_across_cores`는 파라미터를 `["rust_legacy"]`로 좁힌다(엔진 코어 parity는 이미 trace 테스트가 덮는다). `core` fixture를 쓰는 `test_portfolio_errors_map_to_domain_exceptions`는 `["python", "rust_legacy"]`. `:420-421`, `:434`(DEFECT-603)과 `tests/test_lookup_index.py:93,175`의 `"rust"` → `"rust_legacy"`. `test_unavailable_core_is_an_error_not_a_fallback` 옆에 `make_portfolio("rust")`가 `CoreUnavailable`을 내는 테스트를 추가한다.
-- [ ] **Step 4**: 게이트, 커밋 `refactor(engine): 엔진 경로에서 도달 불가한 PersistentPortfolio 제거`.
+- [x] **Step 2**: `core.py:249-403` `PersistentPortfolio` 클래스와 그것만 쓰는 import를 삭제한다. `PersistentOrderManager`가 남아 있으면 같이 확인해 삭제.
+- [x] **Step 3**: 테스트 이전. `tests/test_core_parity.py::RUST_ENGINE_CORES`를 쓰는 `test_portfolio_scenario_identical_across_cores`는 파라미터를 `["rust_legacy"]`로 좁힌다(엔진 코어 parity는 이미 trace 테스트가 덮는다). `core` fixture를 쓰는 `test_portfolio_errors_map_to_domain_exceptions`는 `["python", "rust_legacy"]`. `:420-421`, `:434`(DEFECT-603)과 `tests/test_lookup_index.py:93,175`의 `"rust"` → `"rust_legacy"`. `test_unavailable_core_is_an_error_not_a_fallback` 옆에 `make_portfolio("rust")`가 `CoreUnavailable`을 내는 테스트를 추가한다.
+- [x] **Step 4**: 게이트, 커밋 `refactor(engine): 엔진 경로에서 도달 불가한 PersistentPortfolio 제거` (`ba669cd`).
 
 ### Task 3.2: Rust 죽은 `#[pymethods]` 제거
 
-- [ ] **Step 1**: Python 호출부 0개를 다시 확인한다.
+- [x] **Step 1**: Python 호출부 0개를 다시 확인한다.
 
 ```bash
 for m in place_order register_group open_order_states open_group_states drop_group remove_order settle_order mark_triggered drain_orders next_decision_id next_order_id next_fill_id next_group_id activate_pending record_count failure_detail process_market apply_fill charge apply_corporate_action mark cash held_qty average_price portfolio_snapshot mark_current_session close_current_session current_session_count; do echo "$m: $(grep -rn "runtime\.$m(\|_inner\.$m(\|\.inner\.$m(" src tests scripts --include=*.py | wc -l)"; done
 ```
 
-- [ ] **Step 2**: 0개인 메서드를 `#[pymethods]` 블록에서 제거한다. 드라이버가 내부에서 쓰는 것(`close_current_session`, `activate_pending_internal`, `apply_corporate_action_ratio`, `process_market_index`)은 일반 `impl PersistentEngine` 블록의 `pub(crate)`로 옮긴다. Rust 단위 테스트가 쓰는 것(`persistent.rs` `mod tests`의 `place_order`·`process_market` 등)은 `#[cfg(test)]` 헬퍼로 내리거나 테스트를 드라이버 경유로 고친다. `failure_detail` getter는 `tests/test_core_parity.py:931,1040`이 읽으므로 유지. `lifecycle_state`, `_debug_force_panic_on_market` 유지.
-- [ ] **Step 3**: `tests/test_core_parity.py::test_promoted_rust_makes_no_per_session_ffi`의 "0회" 이름 목록에서 삭제된 이름을 빼고, 대신 `set(dir(proxies[0].inner))`에 삭제된 이름이 없음을 단언하는 줄을 추가한다 (공개 API 축소 고정).
-- [ ] **Step 4**: 게이트, 커밋 `refactor(rust): Python 호출부가 없는 PersistentEngine 공개 메서드 제거`.
+- [x] **Step 2**: 0개인 메서드를 `#[pymethods]` 블록에서 제거한다. 드라이버가 내부에서 쓰는 것(`close_current_session`, `activate_pending_internal`, `apply_corporate_action_ratio`, `process_market_index`)은 일반 `impl PersistentEngine` 블록의 `pub(crate)`로 옮긴다. Rust 단위 테스트가 쓰는 것(`persistent.rs` `mod tests`의 `place_order`·`process_market` 등)은 `#[cfg(test)]` 헬퍼로 내리거나 테스트를 드라이버 경유로 고친다. `failure_detail` getter는 `tests/test_core_parity.py:931,1040`이 읽으므로 유지. `lifecycle_state`, `_debug_force_panic_on_market` 유지.
+- [x] **Step 3**: `tests/test_core_parity.py::test_promoted_rust_makes_no_per_session_ffi`의 "0회" 이름 목록에서 삭제된 이름을 빼고, 대신 `set(dir(proxies[0].inner))`에 삭제된 이름이 없음을 단언하는 줄을 추가한다 (공개 API 축소 고정).
+- [x] **Step 4**: 게이트, 커밋 `refactor(rust): Python 호출부가 없는 PersistentEngine 공개 메서드 제거` (`4eb3a77`).
+- 삭제 목록: `record_count`, `activate_pending`, `next_decision_id`, `next_order_id`, `next_fill_id`, `next_group_id`, `place_order`, `register_group`, `open_order_states`, `open_group_states`, `drop_group`, `remove_order`, `settle_order`, `mark_triggered`, `drain_orders`, `process_market`, `mark_current_session`, `apply_fill`, `charge`, `apply_corporate_action`, `mark`, `cash`, `held_qty`, `average_price`, `portfolio_snapshot`. `pub(crate)`로 이동: `cancel_for_key`, `process_market_index`, `close_current_session`, `apply_corporate_action_ratio`. 함께 죽은 `OrderState` 별칭·`StoredOrder::from_tuple`·`RecordStore::len`도 제거했다.
 
 ### Task 3.3: Python 정리
 
-- [ ] `loop.py:143-159`: persistent 분기에서 `self.order_manager = OrderManager()` 제거, 타입을 `OrderManager | None`으로 하고 python 경로 진입 시 `None` 검사(`_ledger` 패턴처럼 `_order_manager(run)` 헬퍼). `run.queue`·`run.corporate_actions`도 persistent에서 만들지 않는다면 같은 처리.
-- [ ] `store.py:542-547` `compact_trace`를 `(seq, session_index, kind)` 3-튜플로 바꾸고 호출부(`tests/`)를 맞춘다.
-- [ ] `wire.py:270-273` `route_error` 삭제, 호출부 `loop.py`에서 `if error_wire is not None: raise route_error_from(error_wire)`.
-- [ ] `loop.py:432,583` `tuple(feed.snapshots())` 이중 생성: `DataFeed`에 `snapshot_tuple` 속성이 없다면 `_load_persistent_feed`가 `(instruments, snapshots)`를 돌려주게 해 한 번만 만든다.
-- [ ] `types/instruments.py:36`: `return self._hash  # pyright: ignore[reportAttributeAccessIssue]  # reason: __post_init__이 object.__setattr__로 채우는 캐시 필드`. 실제 pyright 룰명은 실행해 확인.
-- [ ] `tests/test_target_tape_strategy.py:78-113` 두 테스트를 "어댑터는 `evaluate_tape`에 위임하고 `target_tape:<iso>` 접두어·`idle_reason`만 붙인다"를 검증하는 한 테스트로 줄인다 (no_bar 규칙 자체는 `tests/test_tape.py`가 소유).
-- [ ] 커밋 `refactor(engine): persistent 경로 죽은 코드·규칙 위반 정리`.
+- [x] `loop.py:143-159`: persistent 분기에서 `self.order_manager = OrderManager()` 제거, 타입을 `OrderManager | None`으로 하고 python 경로 진입 시 `None` 검사(`_ledger` 패턴처럼 `_order_manager(run)` 헬퍼). `run.queue`·`run.corporate_actions`도 persistent에서 만들지 않는다면 같은 처리.
+- [x] `store.py:542-547` `compact_trace`를 `(seq, session_index, kind)` 3-튜플로 바꾸고 호출부(`tests/`)를 맞춘다.
+- [x] `wire.py:270-273` `route_error` 삭제, 호출부 `loop.py`에서 `if error_wire is not None: raise route_error_from(error_wire)`.
+- [x] `loop.py:432,583` `tuple(feed.snapshots())` 이중 생성: `DataFeed`에 `snapshot_tuple` 속성이 없다면 `_load_persistent_feed`가 `(instruments, snapshots)`를 돌려주게 해 한 번만 만든다.
+- [x] `types/instruments.py:36`: `return self._hash  # pyright: ignore[reportAttributeAccessIssue]  # reason: __post_init__이 object.__setattr__로 채우는 캐시 필드`. 실제 pyright 룰명은 실행해 확인.
+- [x] `tests/test_target_tape_strategy.py:78-113` 두 테스트를 "어댑터는 `evaluate_tape`에 위임하고 `target_tape:<iso>` 접두어·`idle_reason`만 붙인다"를 검증하는 한 테스트로 줄인다 (no_bar 규칙 자체는 `tests/test_tape.py`가 소유).
+- [x] 커밋 `refactor(engine): persistent 경로 죽은 코드·규칙 위반 정리` (`a1f872d`).
+- 결과: `tests/test_core_parity.py` 통과 수 205 → 203 (포트폴리오 단독 parity −2, 도메인 예외 매핑 −2, persistent 거절 테스트 +2). 전체 스위트 1200 → 1197 passed / 13 skipped (위 −2, `test_target_tape_strategy.py` 중복 테스트 통합 −1).
+
+### 리뷰 반영 (`cb174e5`)
+
+- [x] FFI 테스트의 `queue_push`·`queue_pop`·`record_append`·`record_extend` 0회 단언은 Rust에 없는 이름이라 공허했다. 삭제하고 삭제 메서드 블랙리스트도 공개 이름 전체 집합 단언으로 바꿨다.
+- [x] 엔진 레벨 parity에 `flip` 시나리오 추가 — 롱 +5에서 한 번의 매도 13주로 −8까지 넘어가 평단이 리셋되는 경로(`test_short_selling` 헬퍼 재사용).
+- [x] `identifiers_are_deterministic`을 드라이버 경로 테스트 `identifier_prefixes_come_from_the_paths_that_mint_them`(driver.rs)으로 대체 — `submit_internal`의 D, 라우터의 O·G, `apply_market_ops`의 F를 실제로 읽는다.
+- 결과: `tests/test_core_parity.py` 203 → 206(`flip` 3파라미터), 전체 1197 → 1200 passed / 13 skipped. Rust 테스트 24개 유지.
 
 ### AC
 
@@ -335,7 +344,7 @@ for m in place_order register_group open_order_states open_group_states drop_gro
 
 ### Task 4.3: `process_market_index` 공개 해제 (SoT-3)
 
-- [ ] `#[pymethods]`에서 빼고 `pub(crate)`만 남긴다. FFI 테스트 이름 목록에서 제거하고 `dir()` 부재 단언에 추가. 커밋 `refactor(rust): process_market_index를 드라이버 내부 API로`.
+- [x] PR 3 Task 3.2(`4eb3a77`)에서 함께 처리했다 — `#[pymethods]`에서 빼 `pub(crate)`로 옮겼고, FFI 테스트의 `dir()` 부재 단언에도 들어 있다. PR 4에서는 할 일이 없다.
 
 ### Task 4.4: no_bar 문자열 조립을 Python으로 (SoT-4')
 
@@ -594,7 +603,7 @@ PR 9까지 반영 후 100종목 tape에서 feed 적재(`_load_persistent_feed` +
 |---|---|---|---|---|
 | 1 | `fix/bench-honest-boundary` | 리뷰 APPROVE·PR 생성 | #123 | Opus APPROVE (A01·A02 반영) |
 | 2 | `fix/driver-failed-lifecycle` | 리뷰 APPROVE·PR 생성 | #124 | Opus APPROVE (권고 3건 반영) |
-| 3 | `refactor/drop-dead-persistent-api` | 대기 | | |
+| 3 | `refactor/drop-dead-persistent-api` | 리뷰 APPROVE·PR 생성 | #127 | Opus APPROVE (Minor 3건 반영) |
 | 4 | `refactor/rust-owns-wire-constants` | 대기 | | |
 | 5 | `refactor/python-sot-context-tape-marker` | 대기 | | |
 | 6 | `perf/materialize-by-kind` | 대기 | | |

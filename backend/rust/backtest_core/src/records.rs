@@ -288,10 +288,6 @@ impl RecordStore {
         Ok(())
     }
 
-    pub(crate) fn len(&self) -> usize {
-        self.records.len()
-    }
-
     #[cfg(test)]
     pub(crate) fn records(&self) -> &[NativeRecord] {
         &self.records
@@ -374,7 +370,6 @@ mod tests {
         assert!(store.finish().is_err());
         let kinds: Vec<u8> = store.records().iter().map(|r| r.payload.kind()).collect();
         assert_eq!(kinds, vec![KIND_MARKET, KIND_SNAPSHOT]);
-        assert_eq!(store.len(), 2);
     }
 
     #[test]

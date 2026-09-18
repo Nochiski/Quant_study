@@ -539,10 +539,10 @@ class PersistentEventStore(EventStore):
             if code == kind_code
         )
 
-    def compact_trace(self) -> tuple[tuple[int, int, str, int], ...]:
-        """디버그용 원시 Rust 레코드 인덱스 `(seq, session_index, kind, seq)`."""
+    def compact_trace(self) -> tuple[tuple[int, int, str], ...]:
+        """디버그용 원시 Rust 레코드 인덱스 `(seq, session_index, kind)`."""
         return tuple(
-            (seq, session_index, _RECORD_KINDS[kind_code].value, seq)
+            (seq, session_index, _RECORD_KINDS[kind_code].value)
             for seq, session_index, kind_code in self._batch()
         )
 

@@ -31,7 +31,6 @@ from backtest_engine.types.events import (
     CorporateActionApplied,
     CorporateActionEvent,
     CostAccrued,
-    CostKind,
     FillEvent,
     OrderEvent,
 )
@@ -39,8 +38,6 @@ from backtest_engine.types.instruments import InstrumentId
 from backtest_engine.types.market import Bar, MarketSnapshot
 from backtest_engine.types.orders import Side
 from backtest_engine.types.portfolio import PortfolioSnapshot, Position
-from backtest_engine.types.requirements import EverySession, MonthEndSession, Schedule
-from backtest_engine.types.results import RunConfig
 
 CORES = ("python", "rust", "rust_legacy", "rust_persistent")
 RUST_CORES = frozenset({"rust", "rust_legacy", "rust_persistent"})
@@ -244,163 +241,6 @@ class RustPortfolio:
         return PortfolioSnapshot(
             ts=ts, cash=cash, positions=positions, equity=equity, gross_exposure=gross_exposure
         )
-
-
-class PersistentPortfolio:
-    """`PersistentEngine`이 소유한 포트폴리오의 Python 도메인 어댑터."""
-
-    def __init__(self, runtime: Any) -> None:
-        self._inner = runtime
-        self._instruments: dict[str, InstrumentId] = {}
-        self._snapshot_cache: tuple[datetime, PortfolioSnapshot] | None = None
-        self._feed_loaded = False
-
-    def register_instruments(self, instruments: tuple[InstrumentId, ...]) -> None:
-        for instrument in instruments:
-            self._instruments.setdefault(instrument_key(instrument), instrument)
-        self._feed_loaded = True
-
-    def apply(self, fill: FillEvent) -> None:
-        if fill.quantity != fill.quantity.to_integral_value():
-            raise ValueError(
-                f"rust core supports integer share quantities only — fill_id={fill.fill_id} "
-                f"quantity={fill.quantity}"
-            )
-        key = instrument_key(fill.instrument)
-        try:
-            self._inner.apply_fill(key, fill.side.value, int(fill.quantity), fill.price, fill.fee)
-        except ValueError as error:
-            message = str(error)
-            if message.startswith("negative_position:"):
-                raise NegativePositionError(
-                    f"{message.removeprefix('negative_position: ')} fill_id={fill.fill_id}"
-                ) from error
-            if message.startswith("negative_cash:"):
-                raise NegativeCashError(
-                    f"{message.removeprefix('negative_cash: ')} fill_id={fill.fill_id}"
-                ) from error
-            raise
-        self._instruments.setdefault(key, fill.instrument)
-        self._snapshot_cache = None
-
-    def charge(self, cost: CostAccrued) -> None:
-        self._inner.charge(cost.amount)
-        self._snapshot_cache = None
-
-    def apply_corporate_action(
-        self,
-        action: CorporateActionEvent,
-        settlement_price: float,
-        settled_at: datetime | None = None,
-    ) -> CorporateActionApplied | None:
-        key = instrument_key(action.instrument)
-        old_quantity = Decimal(self._inner.held_qty(key))
-        if old_quantity == 0:
-            return None
-        if settlement_price <= 0:
-            raise ValueError(
-                f"corporate action settlement price must be > 0 — "
-                f"instrument={action.instrument.symbol} ts={action.ts} price={settlement_price}"
-            )
-        applied = self._inner.apply_corporate_action_ratio(key, str(action.ratio), settlement_price)
-        if applied is None:
-            return None
-        old_quantity_raw, new_quantity_raw, old_average, new_average, cash_paid = applied
-        old_quantity = Decimal(old_quantity_raw)
-        new_quantity = Decimal(new_quantity_raw)
-        self._snapshot_cache = None
-        return CorporateActionApplied(
-            ts=settled_at if settled_at is not None else action.ts,
-            instrument=action.instrument,
-            action=action,
-            old_quantity=old_quantity,
-            new_quantity=new_quantity,
-            old_average_price=old_average,
-            new_average_price=new_average,
-            cash_paid=cash_paid,
-        )
-
-    def mark(self, snapshot: MarketSnapshot) -> None:
-        if self._feed_loaded:
-            self._inner.mark_current_session()
-        else:
-            self._inner.mark([(instrument_key(bar.instrument), bar.close) for bar in snapshot.bars])
-            for bar in snapshot.bars:
-                self._instruments.setdefault(instrument_key(bar.instrument), bar.instrument)
-        self._snapshot_cache = None
-
-    @property
-    def cash(self) -> float:
-        return float(self._inner.cash)
-
-    def held_qty(self, instrument: InstrumentId) -> Decimal:
-        return Decimal(self._inner.held_qty(instrument_key(instrument)))
-
-    def snapshot(self, ts: datetime) -> PortfolioSnapshot:
-        if self._snapshot_cache is not None and self._snapshot_cache[0] == ts:
-            return self._snapshot_cache[1]
-        cash, rows, equity, gross_exposure = self._inner.portfolio_snapshot()
-        built = self._snapshot_from_wire(ts, cash, rows, equity, gross_exposure)
-        self._snapshot_cache = (ts, built)
-        return built
-
-    def close_session(
-        self, ts: datetime, config: RunConfig, schedule: Schedule
-    ) -> tuple[bool, tuple[CostAccrued, ...], PortfolioSnapshot]:
-        """종가 평가와 세션 비용 차감을 Rust에서 한 번에 수행한다."""
-        if isinstance(schedule, EverySession):
-            schedule_wire = "every_session"
-        elif isinstance(schedule, MonthEndSession):
-            schedule_wire = "month_end"
-        else:
-            raise TypeError(f"unsupported persistent schedule — got {type(schedule).__name__}")
-        should_dispatch, cost_rows, snapshot_wire = self._inner.close_current_session(
-            schedule_wire,
-            config.short_borrow_bps_annual,
-            config.margin_interest_bps_annual,
-            config.annualization_days,
-        )
-        costs = tuple(
-            CostAccrued(
-                ts=ts,
-                kind=CostKind(kind),
-                instrument=None if key is None else self._instruments[key],
-                amount=amount,
-            )
-            for kind, key, amount in cost_rows
-        )
-        cash, rows, equity, gross_exposure = snapshot_wire
-        built = self._snapshot_from_wire(ts, cash, rows, equity, gross_exposure)
-        self._snapshot_cache = (ts, built)
-        return should_dispatch, costs, built
-
-    def _snapshot_from_wire(
-        self,
-        ts: datetime,
-        cash: float,
-        rows: list[tuple[str, int, float, float, float, float]],
-        equity: float,
-        gross_exposure: float,
-    ) -> PortfolioSnapshot:
-        positions = tuple(
-            Position(
-                instrument=self._instruments[key],
-                quantity=Decimal(quantity),
-                average_price=average_price,
-                market_price=market_price,
-                market_value=market_value,
-                unrealized_pnl=unrealized_pnl,
-            )
-            for key, quantity, average_price, market_price, market_value, unrealized_pnl in rows
-        )
-        built = PortfolioSnapshot(
-            ts=ts,
-            cash=cash,
-            positions=positions,
-            equity=equity,
-            gross_exposure=gross_exposure,
-        )
-        return built
 
 
 @functools.cache
@@ -607,11 +447,9 @@ def make_portfolio(
     if core == "rust_legacy":
         return RustPortfolio(initial_cash, allow_short=allow_short, allow_margin=allow_margin)
     if core in PERSISTENT_RUST_CORES:
-        runtime = make_persistent_runtime(
-            initial_cash,
-            allow_short=allow_short,
-            allow_margin=allow_margin,
-            leverage=1.0,
+        raise CoreUnavailable(
+            f"core={core!r} owns its portfolio inside PersistentEngine — "
+            "use BacktestEngine(core=...) for engine runs, or core='rust_legacy' for the "
+            "standalone backtest_core.Portfolio adapter"
         )
-        return PersistentPortfolio(runtime)
     return PythonPortfolio(initial_cash, allow_short=allow_short, allow_margin=allow_margin)

@@ -98,19 +98,28 @@ from tests.test_engine_golden import (
 
 INSTRUMENT = make_instrument()
 RUST_ONLY = pytest.mark.skipif(not core_available("rust"), reason="backtest_core 확장 없음")
+# rust_legacy(= backtest_core.Portfolio 단독 어댑터)를 직접 쓰는 테스트용.
+# deprecation 경고는 의도된 것이라 무시한다.
+LEGACY_DEPRECATION = pytest.mark.filterwarnings("ignore:.*deprecated.*:DeprecationWarning")
 RUST_ENGINE_CORES = [
     pytest.param("rust", marks=RUST_ONLY, id="rust"),
     pytest.param("rust_persistent", marks=RUST_ONLY, id="rust_persistent"),
     pytest.param(
         "rust_legacy",
-        marks=[
-            RUST_ONLY,
-            pytest.mark.filterwarnings("ignore:.*deprecated.*:DeprecationWarning"),
-        ],
+        marks=[RUST_ONLY, LEGACY_DEPRECATION],
         id="rust_legacy",
     ),
 ]
 CORES = ["python", *RUST_ENGINE_CORES]
+# make_portfolio가 단독 원장을 돌려주는 코어. persistent 코어는 PersistentEngine이 원장을 소유한다.
+STANDALONE_PORTFOLIO_CORES = [
+    "python",
+    pytest.param(
+        "rust_legacy",
+        marks=[RUST_ONLY, LEGACY_DEPRECATION],
+        id="rust_legacy",
+    ),
+]
 
 
 @pytest.fixture(params=CORES)
@@ -222,15 +231,18 @@ def scenario(portfolio: PortfolioLedger) -> list[tuple[object, ...]]:
     return trace
 
 
-@pytest.mark.parametrize("rust_core", RUST_ENGINE_CORES)
-def test_portfolio_scenario_identical_across_cores(rust_core: str) -> None:
+@RUST_ONLY
+@LEGACY_DEPRECATION
+def test_portfolio_scenario_identical_across_cores() -> None:
+    """포트폴리오 단독 회계의 parity oracle. 엔진 코어 parity는 trace 비교 테스트가 덮는다."""
     python = scenario(make_portfolio("python", 100_000.0, allow_short=True, allow_margin=False))
-    rust = scenario(make_portfolio(rust_core, 100_000.0, allow_short=True, allow_margin=False))
+    rust = scenario(make_portfolio("rust_legacy", 100_000.0, allow_short=True, allow_margin=False))
     assert python == rust
 
 
-def test_portfolio_errors_map_to_domain_exceptions(core: str) -> None:
-    portfolio = make_portfolio(core, 500.0)
+@pytest.mark.parametrize("core_name", STANDALONE_PORTFOLIO_CORES)
+def test_portfolio_errors_map_to_domain_exceptions(core_name: str) -> None:
+    portfolio = make_portfolio(core_name, 500.0)
     with pytest.raises(NegativeCashError, match="cash"):
         portfolio.apply(fill(Side.BUY, 10, 100.0))
     with pytest.raises(NegativePositionError, match="sell"):
@@ -240,6 +252,14 @@ def test_portfolio_errors_map_to_domain_exceptions(core: str) -> None:
 def test_unavailable_core_is_an_error_not_a_fallback() -> None:
     with pytest.raises(CoreUnavailable, match="nope"):
         make_portfolio("nope", 1.0)
+
+
+@RUST_ONLY
+@pytest.mark.parametrize("core_name", ["rust", "rust_persistent"])
+def test_persistent_core_has_no_standalone_portfolio(core_name: str) -> None:
+    """persistent 코어는 PersistentEngine이 원장을 소유한다 — 단독 어댑터를 주면 안 된다."""
+    with pytest.raises(CoreUnavailable, match="owns its portfolio inside PersistentEngine"):
+        make_portfolio(core_name, 1_000.0)
 
 
 # --- Engine result diff ---------------------------------------------------------
@@ -343,6 +363,16 @@ ENGINE_SCENARIOS = {
         ),
         DataFeed(test_short_selling.BARS),
     ),
+    # 롱 보유에서 한 번의 체결로 숏으로 넘어간다(평단 리셋). 포트폴리오 단독 시나리오만
+    # 덮던 방향 전환을 엔진 레벨 trace로도 고정한다.
+    "flip": lambda core: _engine_scenario(
+        core,
+        RunConfig(run_id="f", initial_cash=10_000.0, fee_bps=0.0, short_borrow_bps_annual=252.0),
+        test_short_selling.ShortStrategy(
+            (test_short_selling.target(5), test_short_selling.target(-8))
+        ),
+        DataFeed(test_short_selling.BARS),
+    ),
     "margin": lambda core: _engine_scenario(
         core,
         test_margin.config(),
@@ -420,7 +450,7 @@ def test_multi_instrument_equity_is_bit_identical_in_insertion_order() -> None:
         return (s.cash, s.equity, s.gross_exposure, tuple(p.instrument.symbol for p in s.positions))
 
     python = scenario(make_portfolio("python", 3_305_944.3718483075, allow_short=True))
-    rust = scenario(make_portfolio("rust", 3_305_944.3718483075, allow_short=True))
+    rust = scenario(make_portfolio("rust_legacy", 3_305_944.3718483075, allow_short=True))
     assert python == rust
 
 
@@ -432,7 +462,7 @@ def test_instruments_differing_only_in_currency_are_distinct_positions() -> None
     krw = InstrumentId(venue="XKRX", symbol="005930", asset_class=AssetClass.EQUITY, currency="KRW")
     usd = InstrumentId(venue="XKRX", symbol="005930", asset_class=AssetClass.EQUITY, currency="USD")
     results = []
-    for core_name in ("python", "rust"):
+    for core_name in ("python", "rust_legacy"):
         portfolio = make_portfolio(core_name, 1_000_000.0)
         for seq, instrument in enumerate((krw, usd), start=1):
             portfolio.apply(
@@ -872,23 +902,29 @@ def test_promoted_rust_makes_no_per_session_ffi(
     assert calls["configure_run"] == 1
     assert calls["load_corporate_actions"] == 1
     assert calls["finish"] == 1
-    # 세션 단위 왕복은 없다.
-    for name in (
-        "process_market_index",
-        "process_market",
-        "activate_pending",
-        "close_current_session",
-        "mark_current_session",
-        "queue_push",
-        "queue_pop",
-        "record_append",
-        "record_extend",
-        "portfolio_snapshot",
-        "open_order_states",
-        "place_order",
-        "register_group",
-    ):
-        assert calls[name] == 0, name
+    # Rust가 세션 루프를 소유하므로 공개 메서드는 적재·콜백·종료·조회뿐이다. 블랙리스트가
+    # 아니라 전체 집합을 고정한다 — 사라진 메서드의 재노출과 새 메서드 추가를 함께 잡는다.
+    assert {name for name in dir(proxies[0].inner) if not name.startswith("_")} == {
+        "configure_router",
+        "configure_run",
+        "current_session_count",
+        "drive",
+        "equity_series",
+        "fail_callback",
+        "failure_detail",
+        "finish",
+        "history_window",
+        "lifecycle_state",
+        "load_corporate_actions",
+        "load_feed",
+        "load_target_tape",
+        "poison",
+        "record_batch",
+        "record_payload",
+        "settlement_session_index",
+        "submit_decision",
+        "traded_notional",
+    }
     # 결과·지표 조회는 종료 배치와 Rust 누산값만 쓴다.
     assert len(result.fills) == 2
     assert calls["record_batch"] == 0

@@ -25,7 +25,6 @@ pub(crate) enum Lifecycle {
 }
 
 type GroupTuple = (String, String, Vec<String>);
-type OrderState = (String, i64, bool);
 type CostTuple = (String, Option<String>, f64);
 type CorporateActionTuple = (i64, i64, f64, f64, f64);
 
@@ -83,43 +82,13 @@ pub(crate) struct StoredOrder {
     triggered: bool,
     pub(crate) group_id: Option<String>,
     participation: Option<String>,
-    /// 결정 추적 메타. 레거시 `place_order` 경로에서는 비어 있다.
+    /// 결정 추적 메타. 드라이버가 결정을 주문으로 풀 때 채운다.
     pub(crate) decision_id: String,
     pub(crate) action_index: usize,
     pub(crate) leg_index: Option<usize>,
 }
 
 impl StoredOrder {
-    fn from_tuple(value: EntryTuple) -> PyResult<Self> {
-        if value.7 <= 0 {
-            return Err(PyValueError::new_err(format!(
-                "order remaining must be > 0 — order_id={} remaining={}",
-                value.0, value.7
-            )));
-        }
-        let (limit_price, stop_price, limit_text, stop_text) = value.5;
-        Ok(Self {
-            order_id: value.0,
-            key: value.1,
-            symbol: value.2,
-            side: value.3,
-            order_type: value.4,
-            limit_price,
-            stop_price,
-            limit_text,
-            stop_text,
-            tif: value.6,
-            quantity: value.7,
-            remaining: value.7,
-            triggered: value.8,
-            group_id: value.9,
-            participation: value.10,
-            decision_id: String::new(),
-            action_index: 0,
-            leg_index: None,
-        })
-    }
-
     fn as_tuple(&self) -> EntryTuple {
         (
             self.order_id.clone(),
@@ -414,6 +383,127 @@ impl PersistentEngine {
         self.groups.append(&mut self.pending_groups);
         Ok(())
     }
+
+    pub(crate) fn cancel_for_key(&mut self, key: &str) -> Vec<String> {
+        let mut cancelled = Vec::new();
+        self.orders.retain(|order| {
+            if order.key == key {
+                cancelled.push(order.order_id.clone());
+                false
+            } else {
+                true
+            }
+        });
+        cancelled
+    }
+
+    pub(crate) fn process_market_index(
+        &mut self,
+        session_index: usize,
+        fee_rate: f64,
+        default_participation: Option<&str>,
+        slippage: (String, f64, f64),
+    ) -> PyResult<Vec<Op>> {
+        let (ts, bars) = {
+            let feed = self
+                .feed
+                .as_mut()
+                .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?;
+            feed.set_current(session_index)?;
+            feed.session_market(session_index)
+        };
+        self.process_market_values(&ts, bars, fee_rate, default_participation, slippage)
+    }
+
+    pub(crate) fn close_current_session(
+        &mut self,
+        schedule: &str,
+        short_borrow_bps_annual: f64,
+        margin_interest_bps_annual: f64,
+        annualization_days: u32,
+    ) -> PyResult<(bool, Vec<CostTuple>, SnapshotTuple)> {
+        if short_borrow_bps_annual < 0.0 || margin_interest_bps_annual < 0.0 {
+            return Err(PyValueError::new_err(format!(
+                "annual cost rates must be >= 0 — short_borrow_bps_annual={short_borrow_bps_annual} margin_interest_bps_annual={margin_interest_bps_annual}"
+            )));
+        }
+        if annualization_days == 0 {
+            return Err(PyValueError::new_err(
+                "annualization_days must be > 0 — annualization_days=0",
+            ));
+        }
+        let feed = self
+            .feed
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?;
+        let should_dispatch = feed.schedule_matches(schedule)?;
+        let marks = feed.current_marks()?;
+        self.portfolio.mark(marks);
+        let (cash, positions, _, _) = self.portfolio.snapshot()?;
+        let borrow_daily = short_borrow_bps_annual / 10_000.0 / f64::from(annualization_days);
+        let mut costs = Vec::new();
+        if borrow_daily > 0.0 {
+            for position in &positions {
+                if position.1 < 0 {
+                    let amount = position.4.abs() * borrow_daily;
+                    if amount > 0.0 {
+                        costs.push(("short_borrow".to_string(), Some(position.0.clone()), amount));
+                    }
+                }
+            }
+        }
+        let interest_daily = margin_interest_bps_annual / 10_000.0 / f64::from(annualization_days);
+        if interest_daily > 0.0 && cash < 0.0 {
+            let amount = -cash * interest_daily;
+            if amount > 0.0 {
+                costs.push(("margin_interest".to_string(), None, amount));
+            }
+        }
+        for cost in &costs {
+            self.portfolio.charge(cost.2)?;
+        }
+        Ok((should_dispatch, costs, self.portfolio.snapshot()?))
+    }
+
+    pub(crate) fn apply_corporate_action_ratio(
+        &mut self,
+        key: &str,
+        ratio: &str,
+        settlement_price: f64,
+    ) -> PyResult<Option<CorporateActionTuple>> {
+        let old_quantity = self.portfolio.held_qty(key);
+        if old_quantity == 0 {
+            return Ok(None);
+        }
+        if settlement_price <= 0.0 {
+            return Err(PyValueError::new_err(format!(
+                "corporate action settlement price must be > 0 — key={key} price={settlement_price}"
+            )));
+        }
+        let old_average = self.portfolio.average_price(key).ok_or_else(|| {
+            PyValueError::new_err(format!("portfolio quantity has no ledger — key={key}"))
+        })?;
+        let ratio_value = ratio.parse::<f64>().map_err(|_| {
+            PyValueError::new_err(format!("invalid corporate action ratio — ratio={ratio:?}"))
+        })?;
+        let (new_quantity, fractional) = scaled_corporate_action_quantity(old_quantity, ratio)?;
+        let cash_paid = fractional * settlement_price;
+        let new_average = old_average / ratio_value;
+        self.portfolio.apply_corporate_action(
+            key,
+            new_quantity,
+            new_average,
+            cash_paid,
+            settlement_price,
+        )?;
+        Ok(Some((
+            old_quantity,
+            new_quantity,
+            old_average,
+            new_average,
+            cash_paid,
+        )))
+    }
 }
 
 #[pymethods]
@@ -581,10 +671,6 @@ impl PersistentEngine {
         self.records.payload(py, seq)
     }
 
-    fn record_count(&self) -> usize {
-        self.records.len()
-    }
-
     fn equity_series(&self) -> Vec<f64> {
         self.records.equity_series()
     }
@@ -668,210 +754,6 @@ impl PersistentEngine {
         self.failure_message = Some(detail);
     }
 
-    fn activate_pending(&mut self) -> PyResult<()> {
-        self.activate_pending_internal()
-    }
-
-    fn next_decision_id(&mut self) -> String {
-        Self::next_id(&mut self.decision_seq, 'D')
-    }
-
-    fn next_order_id(&mut self) -> String {
-        Self::next_id(&mut self.order_seq, 'O')
-    }
-
-    fn next_fill_id(&mut self) -> String {
-        Self::next_id(&mut self.fill_seq, 'F')
-    }
-
-    fn next_group_id(&mut self) -> String {
-        Self::next_id(&mut self.group_seq, 'G')
-    }
-
-    fn place_order(&mut self, order: EntryTuple) -> PyResult<()> {
-        let order = StoredOrder::from_tuple(order)?;
-        if self.order_index(&order.order_id).is_some() {
-            return Err(PyValueError::new_err(format!(
-                "duplicate order id — order_id={}",
-                order.order_id
-            )));
-        }
-        self.orders.push(order);
-        Ok(())
-    }
-
-    fn register_group(
-        &mut self,
-        group_id: String,
-        policy: String,
-        order_ids: Vec<String>,
-    ) -> PyResult<()> {
-        if self.groups.iter().any(|group| group.group_id == group_id) {
-            return Err(PyValueError::new_err(format!(
-                "duplicate basket group id — group_id={group_id}"
-            )));
-        }
-        self.groups.push(StoredGroup {
-            group_id,
-            policy,
-            order_ids,
-        });
-        Ok(())
-    }
-
-    fn open_order_states(&self) -> Vec<OrderState> {
-        self.orders
-            .iter()
-            .map(|order| (order.order_id.clone(), order.remaining, order.triggered))
-            .collect()
-    }
-
-    fn open_group_states(&self) -> Vec<GroupTuple> {
-        self.groups
-            .iter()
-            .filter(|group| self.group_is_open(group))
-            .map(StoredGroup::as_tuple)
-            .collect()
-    }
-
-    fn drop_group(&mut self, group_id: &str) {
-        if let Some(index) = self
-            .groups
-            .iter()
-            .position(|group| group.group_id == group_id)
-        {
-            self.groups.remove(index);
-        }
-    }
-
-    fn remove_order(&mut self, order_id: &str) -> PyResult<OrderState> {
-        let index = self.require_order_index(order_id)?;
-        let order = self.remove_order_at(index);
-        Ok((order.order_id, order.remaining, order.triggered))
-    }
-
-    fn settle_order(&mut self, order_id: &str, filled: i64) -> PyResult<i64> {
-        self.settle_internal(order_id, filled)
-    }
-
-    fn mark_triggered(&mut self, order_id: &str) -> PyResult<()> {
-        let index = self.require_order_index(order_id)?;
-        self.orders[index].triggered = true;
-        Ok(())
-    }
-
-    pub(crate) fn cancel_for_key(&mut self, key: &str) -> Vec<String> {
-        let mut cancelled = Vec::new();
-        self.orders.retain(|order| {
-            if order.key == key {
-                cancelled.push(order.order_id.clone());
-                false
-            } else {
-                true
-            }
-        });
-        cancelled
-    }
-
-    fn drain_orders(&mut self) -> Vec<OrderState> {
-        self.orders.append(&mut self.pending_orders);
-        self.orders
-            .drain(..)
-            .map(|order| (order.order_id, order.remaining, order.triggered))
-            .collect()
-    }
-
-    #[pyo3(signature = (ts, bars, fee_rate, default_participation, slippage))]
-    fn process_market(
-        &mut self,
-        ts: &str,
-        bars: HashMap<String, BarTuple>,
-        fee_rate: f64,
-        default_participation: Option<&str>,
-        slippage: (String, f64, f64),
-    ) -> PyResult<Vec<Op>> {
-        self.process_market_values(ts, bars, fee_rate, default_participation, slippage)
-    }
-
-    #[pyo3(signature = (session_index, fee_rate, default_participation, slippage))]
-    pub(crate) fn process_market_index(
-        &mut self,
-        session_index: usize,
-        fee_rate: f64,
-        default_participation: Option<&str>,
-        slippage: (String, f64, f64),
-    ) -> PyResult<Vec<Op>> {
-        let (ts, bars) = {
-            let feed = self
-                .feed
-                .as_mut()
-                .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?;
-            feed.set_current(session_index)?;
-            feed.session_market(session_index)
-        };
-        self.process_market_values(&ts, bars, fee_rate, default_participation, slippage)
-    }
-
-    fn mark_current_session(&mut self) -> PyResult<()> {
-        let marks = self
-            .feed
-            .as_ref()
-            .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?
-            .current_marks()?;
-        self.portfolio.mark(marks);
-        Ok(())
-    }
-
-    pub(crate) fn close_current_session(
-        &mut self,
-        schedule: &str,
-        short_borrow_bps_annual: f64,
-        margin_interest_bps_annual: f64,
-        annualization_days: u32,
-    ) -> PyResult<(bool, Vec<CostTuple>, SnapshotTuple)> {
-        if short_borrow_bps_annual < 0.0 || margin_interest_bps_annual < 0.0 {
-            return Err(PyValueError::new_err(format!(
-                "annual cost rates must be >= 0 — short_borrow_bps_annual={short_borrow_bps_annual} margin_interest_bps_annual={margin_interest_bps_annual}"
-            )));
-        }
-        if annualization_days == 0 {
-            return Err(PyValueError::new_err(
-                "annualization_days must be > 0 — annualization_days=0",
-            ));
-        }
-        let feed = self
-            .feed
-            .as_ref()
-            .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?;
-        let should_dispatch = feed.schedule_matches(schedule)?;
-        let marks = feed.current_marks()?;
-        self.portfolio.mark(marks);
-        let (cash, positions, _, _) = self.portfolio.snapshot()?;
-        let borrow_daily = short_borrow_bps_annual / 10_000.0 / f64::from(annualization_days);
-        let mut costs = Vec::new();
-        if borrow_daily > 0.0 {
-            for position in &positions {
-                if position.1 < 0 {
-                    let amount = position.4.abs() * borrow_daily;
-                    if amount > 0.0 {
-                        costs.push(("short_borrow".to_string(), Some(position.0.clone()), amount));
-                    }
-                }
-            }
-        }
-        let interest_daily = margin_interest_bps_annual / 10_000.0 / f64::from(annualization_days);
-        if interest_daily > 0.0 && cash < 0.0 {
-            let amount = -cash * interest_daily;
-            if amount > 0.0 {
-                costs.push(("margin_interest".to_string(), None, amount));
-            }
-        }
-        for cost in &costs {
-            self.portfolio.charge(cost.2)?;
-        }
-        Ok((should_dispatch, costs, self.portfolio.snapshot()?))
-    }
-
     fn current_session_count(&self) -> PyResult<usize> {
         Ok(self
             .feed
@@ -900,99 +782,6 @@ impl PersistentEngine {
             .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?
             .history_window(&keys, field, lookback, end)
     }
-
-    fn apply_fill(
-        &mut self,
-        key: &str,
-        side: &str,
-        quantity: i64,
-        price: f64,
-        fee: f64,
-    ) -> PyResult<()> {
-        self.portfolio.apply(key, side, quantity, price, fee)
-    }
-
-    fn charge(&mut self, amount: f64) -> PyResult<()> {
-        self.portfolio.charge(amount)
-    }
-
-    fn apply_corporate_action(
-        &mut self,
-        key: &str,
-        new_quantity: i64,
-        new_average_price: f64,
-        cash_paid: f64,
-        settlement_price: f64,
-    ) -> PyResult<()> {
-        self.portfolio.apply_corporate_action(
-            key,
-            new_quantity,
-            new_average_price,
-            cash_paid,
-            settlement_price,
-        )
-    }
-
-    pub(crate) fn apply_corporate_action_ratio(
-        &mut self,
-        key: &str,
-        ratio: &str,
-        settlement_price: f64,
-    ) -> PyResult<Option<CorporateActionTuple>> {
-        let old_quantity = self.portfolio.held_qty(key);
-        if old_quantity == 0 {
-            return Ok(None);
-        }
-        if settlement_price <= 0.0 {
-            return Err(PyValueError::new_err(format!(
-                "corporate action settlement price must be > 0 — key={key} price={settlement_price}"
-            )));
-        }
-        let old_average = self.portfolio.average_price(key).ok_or_else(|| {
-            PyValueError::new_err(format!("portfolio quantity has no ledger — key={key}"))
-        })?;
-        let ratio_value = ratio.parse::<f64>().map_err(|_| {
-            PyValueError::new_err(format!("invalid corporate action ratio — ratio={ratio:?}"))
-        })?;
-        let (new_quantity, fractional) = scaled_corporate_action_quantity(old_quantity, ratio)?;
-        let cash_paid = fractional * settlement_price;
-        let new_average = old_average / ratio_value;
-        self.portfolio.apply_corporate_action(
-            key,
-            new_quantity,
-            new_average,
-            cash_paid,
-            settlement_price,
-        )?;
-        Ok(Some((
-            old_quantity,
-            new_quantity,
-            old_average,
-            new_average,
-            cash_paid,
-        )))
-    }
-
-    fn mark(&mut self, closes: Vec<(String, f64)>) {
-        self.portfolio.mark(closes);
-    }
-
-    #[getter]
-    fn cash(&self) -> f64 {
-        self.portfolio.cash()
-    }
-
-    fn held_qty(&self, key: &str) -> i64 {
-        self.portfolio.held_qty(key)
-    }
-
-    fn average_price(&self, key: &str) -> Option<f64> {
-        self.portfolio.average_price(key)
-    }
-
-    fn portfolio_snapshot(&self) -> PyResult<SnapshotTuple> {
-        self.portfolio.snapshot()
-    }
 }
 
 pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -1004,20 +793,27 @@ pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
 mod tests {
     use super::*;
 
-    fn market_order(order_id: &str) -> EntryTuple {
-        (
-            order_id.to_string(),
-            "X:ONE:equity:KRW".to_string(),
-            "ONE".to_string(),
-            "buy".to_string(),
-            "market".to_string(),
-            (None, None, None, None),
-            "day".to_string(),
-            10,
-            false,
-            None,
-            None,
-        )
+    fn market_order(order_id: &str) -> StoredOrder {
+        StoredOrder {
+            order_id: order_id.to_string(),
+            key: "X:ONE:equity:KRW".to_string(),
+            symbol: "ONE".to_string(),
+            side: "buy".to_string(),
+            order_type: "market".to_string(),
+            limit_price: None,
+            stop_price: None,
+            limit_text: None,
+            stop_text: None,
+            tif: "day".to_string(),
+            quantity: 10,
+            remaining: 10,
+            triggered: false,
+            group_id: None,
+            participation: None,
+            decision_id: String::new(),
+            action_index: 0,
+            leg_index: None,
+        }
     }
 
     #[test]
@@ -1034,22 +830,13 @@ mod tests {
     }
 
     #[test]
-    fn identifiers_are_deterministic() {
-        let mut runtime = PersistentEngine::new(10_000.0, false, false, 1.0).unwrap();
-        assert_eq!(runtime.next_decision_id(), "D-000001");
-        assert_eq!(runtime.next_order_id(), "O-000001");
-        assert_eq!(runtime.next_fill_id(), "F-000001");
-        assert_eq!(runtime.next_group_id(), "G-000001");
-    }
-
-    #[test]
     fn market_processing_mutates_persistent_order_state() {
         let mut runtime = PersistentEngine::new(10_000.0, false, false, 1.0).unwrap();
-        runtime.place_order(market_order("O-000001")).unwrap();
+        runtime.orders.push(market_order("O-000001"));
         let bars = HashMap::from([("X:ONE:equity:KRW".to_string(), (100.0, 110.0, 90.0, 1_000))]);
 
         let ops = runtime
-            .process_market(
+            .process_market_values(
                 "2026-01-02 00:00:00",
                 bars,
                 0.0,
@@ -1058,7 +845,7 @@ mod tests {
             )
             .unwrap();
 
-        assert!(runtime.open_order_states().is_empty());
+        assert!(runtime.orders.is_empty());
         assert_eq!(ops[0].0, "fill");
         assert_eq!(ops[0].6, "F-000001");
         assert_eq!(runtime.portfolio.held_qty("X:ONE:equity:KRW"), 10);

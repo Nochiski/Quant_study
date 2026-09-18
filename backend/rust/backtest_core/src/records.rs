@@ -673,11 +673,23 @@ mod tests {
 
     /// 레코드 배열은 payload 종류와 무관하게 이 크기로 상주한다 — 가장 큰 wire를 `Box`로
     /// 빼 둔 구조가 무너지면(어느 variant를 인라인으로 되돌리면) 여기서 먼저 깨진다.
-    /// 값은 64-bit 대상에서 잰 실측치다.
+    ///
+    /// 정확값이 아니라 상한을 단언한다. rustc가 enum 레이아웃(niche 활용 등)을 바꾸면
+    /// 정확값은 우리 코드와 무관하게 흔들리지만, 구조가 무너지면 상한은 크게 넘긴다
+    /// (인라인으로 되돌리면 `RecordPayload`가 240B, `NativeRecord`가 248B다).
+    /// 2026-09-18 x86_64 실측: `RecordPayload` 40B, `NativeRecord` 48B.
     #[test]
     fn record_payload_stays_small_enough_for_a_dense_record_array() {
-        assert_eq!(std::mem::size_of::<RecordPayload>(), 40);
-        assert_eq!(std::mem::size_of::<NativeRecord>(), 48);
+        assert!(
+            std::mem::size_of::<RecordPayload>() <= 48,
+            "{}",
+            std::mem::size_of::<RecordPayload>()
+        );
+        assert!(
+            std::mem::size_of::<NativeRecord>() <= 64,
+            "{}",
+            std::mem::size_of::<NativeRecord>()
+        );
         // 인라인으로 두면 레코드 한 자리가 이만큼으로 부푸는 wire들.
         assert!(std::mem::size_of::<OrderWire>() >= 200);
         assert!(std::mem::size_of::<FillWire>() >= 96);

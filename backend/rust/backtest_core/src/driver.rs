@@ -871,6 +871,24 @@ mod tests {
         runtime
     }
 
+    /// arena 한 자리의 크기 tripwire. `Queued`의 큰 variant를 인라인으로 되돌리면
+    /// `OrderWire` 크기(약 232B)로 부풀어, 자리 수를 묶어 둔 free-list의 효과가 지워진다.
+    /// `RecordPayload` 쪽과 같은 이유로 정확값이 아니라 상한을 단언한다.
+    /// 2026-09-18 x86_64 실측: `Queued`·`Option<Queued>`·`NotifyPayload` 모두 16B.
+    #[test]
+    fn queued_slot_stays_small_enough_for_a_bounded_arena() {
+        assert!(
+            std::mem::size_of::<Option<Queued>>() <= 24,
+            "{}",
+            std::mem::size_of::<Option<Queued>>()
+        );
+        assert!(
+            std::mem::size_of::<NotifyPayload>() <= 24,
+            "{}",
+            std::mem::size_of::<NotifyPayload>()
+        );
+    }
+
     /// arena는 run 전체의 이벤트 수가 아니라 "동시에 큐에 떠 있는 이벤트 수"만큼만 커야 한다.
     ///
     /// `drain_until_callback`이 시작할 때 세션마다 MARKET을 하나씩 미리 싣기 때문에 하한은

@@ -912,6 +912,9 @@ export const suggestNodeId = (tree, factorPointer, base: string): string;   // b
   README·frontend/README, SoT "전략 의미" 행(Form·Graph 편집 = source 트랜잭션). `backend/FACTORS.md`에는
   Form/Graph 서술이 없어 변경 없음. DAG 카드 안 편집 컨트롤 병합은 하지 않는다(투영과 편집 목록을 별개
   표면으로 유지 — 카드는 backend plan 순서, 목록은 문서 순서라 두 순서를 한 표면에 섞지 않는다).
+  `useSourceTransactions.disabled`의 `syntax`는 같은 버전의 parse가 **실패**했을 때만이다 — parse 디바운스
+  대기 구간은 잠그지 않는다(계획은 live 텍스트 preflight; P5-02 리뷰 DEFECT-132-03·P4-04 리뷰 base 관찰).
+  Form STALE 판정(P4-04 후속)과 같은 기준이라 배지와 잠금이 함께 움직인다.
 
 **Phase 5 exit**: SoT·책임분리 최종 점검. 전체 e2e green. initiative COMPLETE.
 

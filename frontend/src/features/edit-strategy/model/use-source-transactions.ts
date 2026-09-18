@@ -71,7 +71,7 @@ export type SourceTransactions = {
    */
   feedbackFor: (owner: string) => TransactionFeedback;
   onEditorReady: (editor: CodeEditorHandle | null) => void;
-  /** yaml 문서이고, 편집기가 활성·준비됐고, IME 조합 중이 아니며, 현재 텍스트의 parse가 ok인 상태. */
+  /** yaml 문서이고, 편집기가 활성·준비됐고, IME 조합 중이 아니며, 현재 버전의 parse가 실패하지 않은 상태(parse 대기 중은 허용). */
   enabled: boolean;
   /** `enabled`가 거짓인 이유. UI가 같은 사실을 다시 계산하지 않는다(Phase 3 감사 R3). */
   disabled: TransactionDisabledReason | null;
@@ -119,9 +119,12 @@ export const useSourceTransactions = (
     editor.current = next;
     setEditorReady(next !== null);
   }, []);
-  const parseCurrent =
+  // "구문 오류"는 같은 버전의 parse가 실패했을 때만이다. parse 디바운스 대기 구간은 잠그지 않는다 — 계획은
+  // 편집기 live 텍스트를 다시 parse해 세우므로(preflight) 대기 중에도 안전하고, 잠그면 연속 확정(노드 추가 →
+  // 속성 → 출력)마다 150ms씩 컨트롤이 죽는다(P5-02 리뷰 DEFECT-132-03, P4-04 리뷰 base 관찰).
+  const parseFailed =
     state.parse !== null &&
-    state.parse.status === "ok" &&
+    state.parse.status !== "ok" &&
     state.parsedVersion === state.sourceVersion;
   const disabled: TransactionDisabledReason | null =
     state.format !== "yaml"
@@ -130,7 +133,7 @@ export const useSourceTransactions = (
         ? "inactive"
         : state.composing
           ? "composing"
-          : !parseCurrent
+          : parseFailed
             ? "syntax"
             : !editorReady
               ? "editor"

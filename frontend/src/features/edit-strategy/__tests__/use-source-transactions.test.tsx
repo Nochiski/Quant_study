@@ -175,7 +175,14 @@ describe("useSourceTransactions", () => {
       { initialProps: { state: stale } },
     );
     act(() => result.current.onEditorReady(editor.handle));
-    expect(result.current.enabled).toBe(false);
+    // parse 대기(버전 지연)는 잠그지 않는다(P5-03: 계획은 편집기 live 텍스트로 세운다). 같은 버전의 parse 실패만 `syntax`.
+    expect(result.current.enabled).toBe(true);
+    expect(result.current.disabled).toBeNull();
+    const broken = parseSource("risk: [", "yaml");
+    rerender({
+      state: { ...parsedState(SOURCE), parse: broken, source: "risk: [" },
+    });
+    expect(result.current.disabled).toBe("syntax");
 
     rerender({ state: parsedState(SOURCE) });
     expect(result.current.enabled).toBe(true);
@@ -233,9 +240,13 @@ describe("useSourceTransactions", () => {
       render({ ...parsedState(SOURCE), composing: true }).result.current
         .disabled,
     ).toBe("composing");
+    // 같은 버전의 parse가 실패했을 때만 syntax. parse가 아직 없는 초기 상태는 잠그지 않는다(P5-03).
+    expect(render(parsedState("risk: [")).result.current.disabled).toBe(
+      "syntax",
+    );
     expect(
       render(initialDocumentState("yaml", SOURCE)).result.current.disabled,
-    ).toBe("syntax");
+    ).toBe("editor");
     const ready = render(parsedState(SOURCE));
     expect(ready.result.current.disabled).toBe("editor");
     act(() => ready.result.current.onEditorReady(editor.handle));
@@ -249,7 +260,8 @@ describe("useSourceTransactions", () => {
       useSourceTransactions(initialDocumentState("yaml", SOURCE)),
     );
     act(() => result.current.onEditorReady(editor.handle));
-    expect(result.current.enabled).toBe(false);
+    // reducer parse가 없어도(대기) 잠그지 않는다 — 계획은 편집기 live 텍스트로 세운다(P5-03).
+    expect(result.current.enabled).toBe(true);
     act(() =>
       result.current.apply(
         {

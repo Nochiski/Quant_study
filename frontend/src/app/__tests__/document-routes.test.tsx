@@ -26,6 +26,9 @@ import {
   vi,
 } from "vitest";
 
+// page 트리가 Form·Graph 편집기까지 그리게 되어(P4·P5) 전체 실행 부하에서 5s를 넘기는 케이스가 생겼다.
+vi.setConfig({ testTimeout: 15_000 });
+
 import { backtestHistoryQuery } from "../../entities/backtest";
 import { strategiesQuery } from "../../entities/strategy";
 import {
@@ -526,12 +529,15 @@ describe("professional keyboard workflow (P6-03)", () => {
       expect(history.location.search).not.toContain("view=json");
     });
     const view = await editor();
-    expect(
-      view.state.sliceDoc(
-        view.state.selection.main.from,
-        view.state.selection.main.to,
-      ),
-    ).toBe("퀄리티 모멘텀");
+    // reveal은 route 전환 뒤 비동기로 선택을 옮긴다 — 부하 중에는 한 틱 늦는다(P5-03: 전체 실행 flake).
+    await waitFor(() =>
+      expect(
+        view.state.sliceDoc(
+          view.state.selection.main.from,
+          view.state.selection.main.to,
+        ),
+      ).toBe("퀄리티 모멘텀"),
+    );
     expect(view.hasFocus).toBe(true);
   });
 

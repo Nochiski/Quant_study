@@ -5,6 +5,47 @@ export type ClientOptions = {
 };
 
 /**
+ * ApplicableCondition
+ */
+export type ApplicableCondition = {
+  /**
+   * Equals
+   */
+  equals: string | null;
+  /**
+   * Not Null
+   */
+  not_null: boolean;
+  /**
+   * Pointer
+   */
+  pointer: string;
+};
+
+/**
+ * ApplicableWhen
+ *
+ * Same row as `FIELD_APPLICABILITY`, in the shape both the schema and the contract publish.
+ *
+ * `all_of` must all hold for the field to be read. `owned_by_error` names the blocking rule that
+ * reports a violation instead of the `strategy.field.inapplicable` warning.
+ */
+export type ApplicableWhen = {
+  /**
+   * All Of
+   */
+  all_of: Array<ApplicableCondition>;
+  /**
+   * Description Key
+   */
+  description_key: string;
+  /**
+   * Owned By Error
+   */
+  owned_by_error: string | null;
+};
+
+/**
  * BacktestResultNotReadyDetail
  */
 export type BacktestResultNotReadyDetail = {
@@ -217,6 +258,20 @@ export type BacktestStrategyNotFoundResponse = {
 };
 
 /**
+ * BacktestStrategyRequiresUpgradeDetail
+ */
+export type BacktestStrategyRequiresUpgradeDetail = {
+  /**
+   * Code
+   */
+  code: "backtest.strategy.requires_upgrade";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
  * BacktestStrategyStaleDetail
  */
 export type BacktestStrategyStaleDetail = {
@@ -248,6 +303,9 @@ export type BacktestUnprocessableResponse = {
     | ({
         code: "backtest.run.invalid";
       } & BacktestRunInvalidDetail)
+    | ({
+        code: "backtest.strategy.requires_upgrade";
+      } & BacktestStrategyRequiresUpgradeDetail)
     | ({
         code: "portfolio.strategy.invalid";
       } & PortfolioStrategyInvalidDetail)
@@ -510,7 +568,7 @@ export type CrossSectionalNode = {
 /**
  * CrossSectionalOperator
  */
-export type CrossSectionalOperator = "rank" | "zscore" | "winsorize";
+export type CrossSectionalOperator = "rank" | "zscore" | "winsorize" | "demean";
 
 /**
  * DataFrequency
@@ -562,7 +620,7 @@ export type DataStep = {
    */
   end: string;
   frequency?: DataFrequency;
-  market: Market;
+  market?: Market;
   /**
    * Start
    */
@@ -841,7 +899,6 @@ export type ExecutionStep = {
    * Fee Bps
    */
   fee_bps?: number;
-  order_style?: OrderStyle;
   /**
    * Participation Rate
    */
@@ -1338,17 +1395,7 @@ export type FactorSignal = {
   /**
    * Weight
    */
-  weight: number;
-};
-
-/**
- * FactorStep
- */
-export type FactorStep = {
-  /**
-   * Factors
-   */
-  factors: Array<FactorSignal>;
+  weight?: number;
 };
 
 /**
@@ -1421,12 +1468,13 @@ export type FieldCatalogFacets = {
  * One scalar authoring path with everything an editor needs to explain it.
  *
  * `pointer` is a JSON Pointer template: array positions are written as an asterisk
- * (for example the factor weight row is `/factors/factors/<asterisk>/weight`). Rows of a
+ * (for example the factor weight row is `/factors/<asterisk>/weight`). Rows of a
  * discriminated union share the pointer and differ by `branch` (the member's `kind`).
  * Bounds and metadata come from the constraint catalog; type, enum, nullability, required
  * and default come from the model.
  */
 export type FieldContract = {
+  applicable_when?: ApplicableWhen | null;
   /**
    * Applied Stage
    */
@@ -1447,6 +1495,10 @@ export type FieldContract = {
    * Default
    */
   default?: unknown;
+  /**
+   * Default From
+   */
+  default_from?: string | null;
   /**
    * Description Key
    */
@@ -1857,11 +1909,6 @@ export type NodeContract = {
  */
 export type NodeValueType =
   "numeric_series" | "boolean_series" | "group_series" | "scalar";
-
-/**
- * OrderStyle
- */
-export type OrderStyle = "market";
 
 /**
  * Page
@@ -2786,6 +2833,10 @@ export type RevisionSummary = {
   created_at: string;
   origin: RevisionOrigin;
   /**
+   * Requires Upgrade
+   */
+  requires_upgrade: boolean;
+  /**
    * Revision
    */
   revision: number;
@@ -3030,6 +3081,10 @@ export type SavedRevisionReference = {
  * SavedStrategy
  */
 export type SavedStrategy = {
+  /**
+   * Requires Upgrade
+   */
+  requires_upgrade: boolean;
   spec: StrategySpec;
   /**
    * Spec Hash
@@ -3083,19 +3138,9 @@ export type SecurityRef = {
 export type SelectionMethod = "top_n" | "percentile";
 
 /**
- * SignalMethod
- */
-export type SignalMethod = "weighted_sum" | "rank_threshold";
-
-/**
  * SignalStep
  */
 export type SignalStep = {
-  /**
-   * Entry Percentile
-   */
-  entry_percentile?: number;
-  method?: SignalMethod;
   /**
    * Regime Field Id
    */
@@ -3197,6 +3242,10 @@ export type StrategyDocument = {
   generated: boolean;
   origin: RevisionOrigin;
   /**
+   * Requires Upgrade
+   */
+  requires_upgrade: boolean;
+  /**
    * Revision
    */
   revision: number;
@@ -3276,6 +3325,62 @@ export type StrategyDocumentContractResponse = {
 };
 
 /**
+ * StrategyDocumentInvalidDetail
+ *
+ * `_invalid_document_compiled`가 내보내는 모양: compile·save·revise·upgrade가 공유한다.
+ */
+export type StrategyDocumentInvalidDetail = {
+  /**
+   * Code
+   */
+  code: "strategy_document.invalid";
+  /**
+   * Diagnostics
+   */
+  diagnostics: Array<SourceDiagnostic>;
+  /**
+   * Schema Version
+   */
+  schema_version: string | null;
+  /**
+   * Source Hash
+   */
+  source_hash: string;
+};
+
+/**
+ * StrategyDocumentInvalidResponse
+ */
+export type StrategyDocumentInvalidResponse = {
+  detail: StrategyDocumentInvalidDetail;
+};
+
+/**
+ * StrategyDocumentNotUpgradeableDetail
+ */
+export type StrategyDocumentNotUpgradeableDetail = {
+  /**
+   * Code
+   */
+  code: "strategy_document.not_upgradeable";
+  /**
+   * Message
+   */
+  message: string;
+  /**
+   * Schema Version
+   */
+  schema_version: string | null;
+};
+
+/**
+ * StrategyDocumentNotUpgradeableResponse
+ */
+export type StrategyDocumentNotUpgradeableResponse = {
+  detail: StrategyDocumentNotUpgradeableDetail;
+};
+
+/**
  * StrategyDocumentSchema
  *
  * Runtime JSON Schema of the authoring document; `schema_hash` is the ETag.
@@ -3295,6 +3400,31 @@ export type StrategyDocumentSchema = {
    * Schema Version
    */
   schema_version: string;
+};
+
+/**
+ * StrategyDocumentUpgradeDriftDetail
+ */
+export type StrategyDocumentUpgradeDriftDetail = {
+  /**
+   * Code
+   */
+  code: "strategy_document.upgrade_drift";
+  /**
+   * Message
+   */
+  message: string;
+  /**
+   * Pointer
+   */
+  pointer: string;
+};
+
+/**
+ * StrategyDocumentUpgradeDriftResponse
+ */
+export type StrategyDocumentUpgradeDriftResponse = {
+  detail: StrategyDocumentUpgradeDriftDetail;
 };
 
 /**
@@ -3517,18 +3647,21 @@ export type StrategySpec = {
   /**
    * Description
    */
-  description: string;
-  eligibility: EligibilityStep;
-  execution: ExecutionStep;
-  factors: FactorStep;
+  description?: string;
+  eligibility?: EligibilityStep;
+  execution?: ExecutionStep;
+  /**
+   * Factors
+   */
+  factors: Array<FactorSignal>;
   identity: StrategyIdentity;
   /**
    * Parameters
    */
   parameters?: Array<FloatParameter | IntegerParameter | ChoiceParameter>;
-  portfolio: PortfolioStep;
-  risk: RiskStep;
-  signal: SignalStep;
+  portfolio?: PortfolioStep;
+  risk?: RiskStep;
+  signal?: SignalStep;
   /**
    * Title
    */
@@ -3543,6 +3676,10 @@ export type StrategySummary = {
    * Latest Revision
    */
   latest_revision: number;
+  /**
+   * Requires Upgrade
+   */
+  requires_upgrade: boolean;
   /**
    * Spec Hash
    */
@@ -3959,6 +4096,20 @@ export type TraceStrategyNotFoundResponse = {
 };
 
 /**
+ * TraceStrategyRequiresUpgradeDetail
+ */
+export type TraceStrategyRequiresUpgradeDetail = {
+  /**
+   * Code
+   */
+  code: "trace.strategy.requires_upgrade";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
  * TraceStrategyStaleDetail
  */
 export type TraceStrategyStaleDetail = {
@@ -3990,6 +4141,9 @@ export type TraceUnprocessableResponse = {
     | ({
         code: "trace.request.invalid";
       } & TraceRequestInvalidDetail)
+    | ({
+        code: "trace.strategy.requires_upgrade";
+      } & TraceStrategyRequiresUpgradeDetail)
     | ({
         code: "trace.engine.incompatible";
       } & TraceEngineIncompatibleDetail)
@@ -4044,8 +4198,7 @@ export type UnaryNode = {
 /**
  * UnaryOperator
  */
-export type UnaryOperator =
-  "negate" | "lag" | "rank" | "zscore" | "winsorize" | "neutralize";
+export type UnaryOperator = "negate" | "lag";
 
 /**
  * UniverseCoverageSummary
@@ -4143,6 +4296,24 @@ export type UniversePoint = {
 export type UniversePreview = {
   coverage: UniverseCoverageSummary;
   universe: UniverseHistoryResult;
+};
+
+/**
+ * UpgradedDocument
+ *
+ * A 1.0 source rewritten as 1.1 text plus what that text compiles to (spec D3).
+ */
+export type UpgradedDocument = {
+  compiled: CompiledDocument;
+  format: SourceFormat;
+  /**
+   * Source
+   */
+  source: string;
+  /**
+   * Source Hash
+   */
+  source_hash: string;
 };
 
 /**
@@ -5277,6 +5448,39 @@ export type GetStrategyDocumentSchemaResponses = {
 
 export type GetStrategyDocumentSchemaResponse =
   GetStrategyDocumentSchemaResponses[keyof GetStrategyDocumentSchemaResponses];
+
+export type UpgradeStrategyDocumentData = {
+  body: CompileRequest;
+  path?: never;
+  query?: never;
+  url: "/api/v1/strategy-documents/upgrade";
+};
+
+export type UpgradeStrategyDocumentErrors = {
+  /**
+   * Response 422 Upgradestrategydocument
+   *
+   * Syntax errors, a non-1.0 document, or upgrade rule drift
+   */
+  422:
+    | StrategyDocumentInvalidResponse
+    | StrategyDocumentNotUpgradeableResponse
+    | StrategyDocumentUpgradeDriftResponse
+    | RequestValidationResponse;
+};
+
+export type UpgradeStrategyDocumentError =
+  UpgradeStrategyDocumentErrors[keyof UpgradeStrategyDocumentErrors];
+
+export type UpgradeStrategyDocumentResponses = {
+  /**
+   * Successful Response
+   */
+  200: UpgradedDocument;
+};
+
+export type UpgradeStrategyDocumentResponse =
+  UpgradeStrategyDocumentResponses[keyof UpgradeStrategyDocumentResponses];
 
 export type ReviseStrategyDocumentData = {
   body: ReviseDocumentRequest;

@@ -44,14 +44,14 @@ const CONTRACT: FieldContract[] = [
     maximum: 1,
   },
   {
-    pointer: "/factors/factors/*/graph/nodes/*/field_id",
+    pointer: "/factors/*/graph/nodes/*/field_id",
     branch: "field",
     type: "string",
     required: true,
     catalog: "equity-field",
   },
   {
-    pointer: "/factors/factors/*/graph/nodes/*/factor_id",
+    pointer: "/factors/*/graph/nodes/*/factor_id",
     branch: "saved_factor",
     type: "string",
     required: true,
@@ -136,7 +136,7 @@ const source = (
   schema: {
     schema: SCHEMA,
     schema_hash: "schema-hash-v1",
-    schema_version: "1.0",
+    schema_version: "1.1",
   },
   contract: {
     contract: {
@@ -145,7 +145,7 @@ const source = (
       factor_registry_version: "factor-registry-v1",
       fields: CONTRACT,
       schema_hash: "schema-hash-v1",
-      schema_version: "1.0",
+      schema_version: "1.1",
     },
     equity_catalog_url: "/api/v1/equity/catalog",
     factor_catalog_url: "/api/v1/factors/catalog",
@@ -162,39 +162,35 @@ const source = (
 });
 
 const TREE = {
-  schema_version: "1.0",
+  schema_version: "1.1",
   title: "테스트 전략",
   risk: { max_name_weight: 0.05 },
-  factors: {
-    factors: [
-      {
-        factor_id: "alpha",
-        graph: {
-          nodes: [
-            { node_id: "px", kind: "field", field_id: "close" },
-            {
-              node_id: "saved",
-              kind: "saved_factor",
-              factor_id: "momentum_12m",
-            },
-          ],
-          output_node_id: "px",
-        },
+  factors: [
+    {
+      factor_id: "alpha",
+      graph: {
+        nodes: [
+          { node_id: "px", kind: "field", field_id: "close" },
+          {
+            node_id: "saved",
+            kind: "saved_factor",
+            factor_id: "momentum_12m",
+          },
+        ],
+        output_node_id: "px",
       },
-    ],
-  },
+    },
+  ],
 };
 
 const treeWithDraftNode = (node: Record<string, unknown>) => ({
   ...TREE,
-  factors: {
-    factors: [
-      {
-        ...TREE.factors.factors[0],
-        graph: { nodes: [node], output_node_id: "draft" },
-      },
-    ],
-  },
+  factors: [
+    {
+      ...TREE.factors[0],
+      graph: { nodes: [node], output_node_id: "draft" },
+    },
+  ],
 });
 
 describe("contract projection", () => {
@@ -251,7 +247,7 @@ describe("contract projection", () => {
       const pendingTree = treeWithDraftNode(pendingNode);
       const result = projectContractInspector(
         source(),
-        "/factors/factors/0/graph/nodes/0/kind",
+        "/factors/0/graph/nodes/0/kind",
         pendingTree,
         false,
       );
@@ -268,7 +264,7 @@ describe("contract projection", () => {
 
       const nodeId = projectContractInspector(
         source(),
-        "/factors/factors/0/graph/nodes/0/node_id",
+        "/factors/0/graph/nodes/0/node_id",
         pendingTree,
         false,
       );
@@ -319,7 +315,7 @@ describe("contract projection", () => {
       });
       const operator = projectContractInspector(
         source(),
-        "/factors/factors/0/graph/nodes/0/operator",
+        "/factors/0/graph/nodes/0/operator",
         pendingTree,
         false,
       );
@@ -338,7 +334,7 @@ describe("contract projection", () => {
 
       const fieldId = projectContractInspector(
         source(),
-        "/factors/factors/0/graph/nodes/0/field_id",
+        "/factors/0/graph/nodes/0/field_id",
         pendingTree,
         false,
       );
@@ -353,7 +349,7 @@ describe("contract projection", () => {
   it("joins a field only to the contract-pinned snapshot and exposes PIT metadata", () => {
     const result = projectContractInspector(
       source(),
-      "/factors/factors/0/graph/nodes/0/field_id",
+      "/factors/0/graph/nodes/0/field_id",
       TREE,
       false,
     );
@@ -382,7 +378,7 @@ describe("contract projection", () => {
   it("joins saved factor ids to the contract-pinned registry", () => {
     const result = projectContractInspector(
       source(),
-      "/factors/factors/0/graph/nodes/1/factor_id",
+      "/factors/0/graph/nodes/1/factor_id",
       TREE,
       false,
     );
@@ -417,7 +413,7 @@ describe("contract projection", () => {
     };
     const field = projectContractInspector(
       source({ equityCatalog: mismatchedCatalog }),
-      "/factors/factors/0/graph/nodes/0/field_id",
+      "/factors/0/graph/nodes/0/field_id",
       TREE,
       false,
     );
@@ -441,7 +437,7 @@ describe("contract projection", () => {
     const cases = [
       [undefined, "root"],
       ["/risk", "object"],
-      ["/factors/factors", "array"],
+      ["/factors", "array"],
     ] as const;
     for (const [pointer, shape] of cases) {
       const result = projectContractInspector(source(), pointer, TREE, false);
@@ -460,7 +456,7 @@ describe("ContractInspector UI", () => {
     render(
       <ContractInspector
         source={source()}
-        selectedPointer="/factors/factors/0/graph/nodes/0/operator"
+        selectedPointer="/factors/0/graph/nodes/0/operator"
         tree={treeWithDraftNode({
           node_id: "draft",
           operator: "momentum",
@@ -510,7 +506,7 @@ describe("ContractInspector UI", () => {
     render(
       <ContractInspector
         source={source()}
-        selectedPointer="/factors/factors/0/graph/nodes/0/field_id"
+        selectedPointer="/factors/0/graph/nodes/0/field_id"
         tree={TREE}
         stale={false}
       />,

@@ -18,6 +18,8 @@ const classify = (response: StartBacktest422): string => {
       return `data:${detail.status}`;
     case "portfolio.raw_observation.invalid":
       return `raw:${detail.message}`;
+    case "backtest.strategy.requires_upgrade":
+      return `upgrade:${detail.message}`;
     default: {
       const exhaustive: never = detail;
       return exhaustive;
@@ -45,5 +47,13 @@ describe("generated startBacktest error contract", () => {
         },
       }),
     ).toBe("raw:duplicate field");
+    expect(
+      classify({
+        detail: {
+          code: "backtest.strategy.requires_upgrade",
+          message: "schema 1.0 revision",
+        },
+      }),
+    ).toBe("upgrade:schema 1.0 revision");
   });
 });

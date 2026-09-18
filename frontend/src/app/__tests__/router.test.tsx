@@ -25,7 +25,7 @@ import { App } from "../app";
 const API = "http://localhost:8000";
 
 const spec = (revision: number, title: string) => ({
-  identity: { strategy_id: "s1", revision, schema_version: "1.0" },
+  identity: { strategy_id: "s1", revision, schema_version: "1.1" },
   title,
   description: "",
   data: {
@@ -36,8 +36,12 @@ const spec = (revision: number, title: string) => ({
     frequency: "daily",
   },
   eligibility: { rules: [] },
-  factors: { factors: [] },
-  signal: { method: "weighted_sum", entry_percentile: 0.1 },
+  factors: [],
+  signal: {
+    score_threshold: null,
+    regime_field_id: null,
+    regime_minimum: null,
+  },
   portfolio: {
     side: "long_only",
     selection_count: 20,
@@ -52,7 +56,6 @@ const spec = (revision: number, title: string) => ({
   },
   execution: {
     timing: "next_open",
-    order_style: "market",
     fee_bps: 15,
     slippage_bps: 10,
   },
@@ -62,9 +65,9 @@ const spec = (revision: number, title: string) => ({
 const document = (revision: number, title: string) => ({
   strategy_id: "s1",
   revision,
-  schema_version: "1.0",
+  schema_version: "1.1",
   format: "yaml",
-  source: `schema_version: "1.0"
+  source: `schema_version: "1.1"
 title: ${title}
 `,
   source_hash: "b".repeat(64),
@@ -99,7 +102,7 @@ const backtestSummary = ({
   strategy_provenance: {
     kind: saved ? "saved_revision" : "inline_draft",
     spec_hash: saved ? "1".repeat(64) : "2".repeat(64),
-    schema_version: "1.0",
+    schema_version: "1.1",
     strategy_id: saved ? "s1" : null,
     revision: saved ? 2 : null,
     source_hash: saved ? "b".repeat(64) : "c".repeat(64),
@@ -143,6 +146,7 @@ const server = setupServer(
       {
         strategy_id: "s1",
         latest_revision: 2,
+        requires_upgrade: false,
         title: "Alpha strategy",
         spec_hash: "a".repeat(64),
         updated_at: "2026-09-05T00:00:00Z",
@@ -199,9 +203,9 @@ const server = setupServer(
     return HttpResponse.json({
       format: "yaml",
       source_hash: "b".repeat(64),
-      schema_version: "1.0",
+      schema_version: "1.1",
       spec: spec(1, "퀄리티 모멘텀 v1"),
-      canonical_json: '{"schema_version":"1.0","title":"퀄리티 모멘텀 v1"}',
+      canonical_json: '{"schema_version":"1.1","title":"퀄리티 모멘텀 v1"}',
       spec_hash: "a".repeat(64),
       diagnostics: [],
       echo: body.source,
@@ -211,7 +215,7 @@ const server = setupServer(
     HttpResponse.json({
       schema: { type: "object", properties: {}, additionalProperties: false },
       schema_hash: "h".repeat(64),
-      schema_version: "1.0",
+      schema_version: "1.1",
     }),
   ),
   http.get(`${API}/api/v1/strategy-documents/contract`, () =>
@@ -222,7 +226,7 @@ const server = setupServer(
         factor_registry_version: "v1",
         fields: [],
         schema_hash: "h".repeat(64),
-        schema_version: "1.0",
+        schema_version: "1.1",
       },
       equity_catalog_url: "/api/v1/equity/catalog",
       factor_catalog_url: "/api/v1/factors/catalog",
@@ -526,6 +530,7 @@ describe("App Shell routes", () => {
       return {
         strategy_id: `s${String(number).padStart(2, "0")}`,
         latest_revision: 21,
+        requires_upgrade: false,
         title:
           number <= 2
             ? "Duplicate title"

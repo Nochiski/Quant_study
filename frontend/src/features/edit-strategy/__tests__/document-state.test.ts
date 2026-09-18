@@ -22,7 +22,7 @@ const okOutcome = (hash = "h1"): CompileOutcome => ({
   spec,
   canonicalJson: '{"title":"x"}',
   specHash: hash,
-  schemaVersion: "1.0",
+  schemaVersion: "1.1",
   sourceHash: "s",
   diagnostics: [],
 });
@@ -31,7 +31,7 @@ const withErrors = (kind: "structural" | "semantic"): CompileOutcome => ({
   spec: null,
   canonicalJson: null,
   specHash: null,
-  schemaVersion: "1.0",
+  schemaVersion: "1.1",
   sourceHash: "s",
   diagnostics: [
     {

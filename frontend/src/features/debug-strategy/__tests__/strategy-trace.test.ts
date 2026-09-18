@@ -33,14 +33,14 @@ const context = (): StrategyDebuggerContext => ({
     {
       factorId: "momentum",
       label: "Momentum",
-      pointer: "/factors/factors/0/graph",
+      pointer: "/factors/0/graph",
       outputNodeId: "ranked",
       expectedPlanHash: "plan-hash",
       nodes: [
         {
           nodeId: "ranked",
           operation: "cross_sectional.rank",
-          pointer: "/factors/factors/0/graph/nodes/2",
+          pointer: "/factors/0/graph/nodes/2",
         },
       ],
     },
@@ -56,7 +56,7 @@ const response = (): StrategyTraceResponse => ({
   as_of: "2026-08-31",
   provenance: {
     kind: "inline_draft",
-    schema_version: "1.0",
+    schema_version: "1.1",
     spec_hash: "spec-hash",
     source_hash: "source-hash",
     strategy_id: null,
@@ -142,7 +142,7 @@ describe("strategy trace request contract", () => {
     expanded.factors[0]!.nodes.unshift({
       nodeId: "close",
       operation: "field",
-      pointer: "/factors/factors/0/graph/nodes/0",
+      pointer: "/factors/0/graph/nodes/0",
     });
     const prepared = prepareStrategyTrace(expanded, {
       asOf: "2026-08-31",
@@ -174,7 +174,7 @@ describe("strategy trace request contract", () => {
     expanded.factors[0]!.nodes = Array.from({ length: 101 }, (_, index) => ({
       nodeId: `n${index}`,
       operation: `op.${index}`,
-      pointer: `/factors/factors/0/graph/nodes/${index}`,
+      pointer: `/factors/0/graph/nodes/${index}`,
     }));
     expanded.factors[0]!.outputNodeId = "n100";
 
@@ -187,9 +187,9 @@ describe("strategy trace request contract", () => {
 
     expect(prepared.kind).toBe("ready");
     if (prepared.kind !== "ready") return;
-    expect(prepared.linkedRequests.map((item) => item.node_ids?.length)).toEqual([
-      64, 37,
-    ]);
+    expect(
+      prepared.linkedRequests.map((item) => item.node_ids?.length),
+    ).toEqual([64, 37]);
     expect(prepared.linkedRequests.map((item) => item.limit)).toEqual([64, 37]);
     expect(prepared.selectedRequest.node_ids).toEqual(["n100"]);
   });

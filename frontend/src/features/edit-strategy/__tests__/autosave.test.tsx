@@ -32,14 +32,14 @@ const memoryStorage = (): DraftStorage & { data: Map<string, string> } => {
   };
 };
 
-const ORIGINAL = 'schema_version: "1.0"\ntitle: 원본\n';
+const ORIGINAL = 'schema_version: "1.1"\ntitle: 원본\n';
 
 const revisionSource = (source = ORIGINAL): DocumentSource => ({
   kind: "revision",
   document: {
     strategy_id: "s1",
     revision: 2,
-    schema_version: "1.0",
+    schema_version: "1.1",
     format: "yaml",
     source,
     source_hash: "b".repeat(64),
@@ -47,13 +47,14 @@ const revisionSource = (source = ORIGINAL): DocumentSource => ({
     spec_hash: "2".repeat(64),
     origin: "document",
     generated: false,
+    requires_upgrade: false,
     created_at: "2026-09-04T09:30:00+00:00",
   },
 });
 
 const Harness = ({
   storage,
-  schemaVersion = "1.0",
+  schemaVersion = "1.1",
   source = revisionSource(),
 }: {
   storage: DraftStorage;
@@ -166,7 +167,7 @@ describe("draft store", () => {
       strategyId: "s1",
       baseRevision: 3,
       baseSpecHash: "h",
-      schemaVersion: "1.0",
+      schemaVersion: "1.1",
       savedAt: "2026-09-04T10:00:00.000Z",
     };
     expect(writeDraft(storage, record)).toBe(true);
@@ -211,7 +212,7 @@ describe("useAutosave", () => {
       strategyId: "s1",
       baseRevision: 2,
       baseSpecHash: "2".repeat(64),
-      schemaVersion: "1.0",
+      schemaVersion: "1.1",
     });
     await user.click(screen.getByRole("button", { name: "fake-save" }));
     await waitFor(() =>
@@ -251,7 +252,7 @@ describe("useAutosave", () => {
       strategyId: "s1",
       baseRevision: 2,
       baseSpecHash: "2".repeat(64),
-      schemaVersion: "1.0",
+      schemaVersion: "1.1",
       savedAt: "2026-09-03T23:59:00.000Z",
     });
     const view = await mount({ storage });
@@ -276,7 +277,7 @@ describe("useAutosave", () => {
       strategyId: "s1",
       baseRevision: 2,
       baseSpecHash: "2".repeat(64),
-      schemaVersion: "1.0",
+      schemaVersion: "1.1",
       savedAt: "2026-09-03T23:59:00.000Z",
     });
     await mount({ storage });
@@ -296,7 +297,7 @@ describe("useAutosave", () => {
       strategyId: "s1",
       baseRevision: 2,
       baseSpecHash: "2".repeat(64),
-      schemaVersion: "1.0",
+      schemaVersion: "1.1",
       savedAt: "2026-09-03T23:59:00.000Z",
     });
     await mount({ storage });
@@ -317,7 +318,7 @@ describe("useAutosave", () => {
       schemaVersion: "0.9",
       savedAt: "2026-09-03T23:59:00.000Z",
     });
-    await mount({ storage, schemaVersion: "1.0" });
+    await mount({ storage, schemaVersion: "1.1" });
     const banner = screen.getByRole("region", { name: "복구본" });
     expect(banner).toHaveTextContent("현재 문서와 달라");
     expect(
@@ -339,7 +340,7 @@ describe("useAutosave", () => {
       strategyId: "s1",
       baseRevision: 2,
       baseSpecHash: "2".repeat(64),
-      schemaVersion: "1.0",
+      schemaVersion: "1.1",
       savedAt: "2026-09-03T23:59:00.000Z",
     };
 
@@ -372,7 +373,7 @@ describe("useAutosave", () => {
     const user = userEvent.setup();
     const storage = memoryStorage();
     const recovered =
-      'schema_version: "1.0"\ntitle: 저장됨\ndescription: 복구\n';
+      'schema_version: "1.1"\ntitle: 저장됨\ndescription: 복구\n';
     writeDraft(storage, {
       key: "s1@3",
       format: "yaml",
@@ -380,11 +381,11 @@ describe("useAutosave", () => {
       strategyId: "s1",
       baseRevision: 3,
       baseSpecHash: "3".repeat(64),
-      schemaVersion: "1.0",
+      schemaVersion: "1.1",
       savedAt: "2026-09-03T23:59:00.000Z",
     });
     const view = await mount({ storage });
-    const submitted = 'schema_version: "1.0"\ntitle: 저장됨\n';
+    const submitted = 'schema_version: "1.1"\ntitle: 저장됨\n';
     type(view, submitted);
     await user.click(screen.getByRole("button", { name: "capture-save" }));
     type(view, `${submitted}notes: 후속 편집\n`);

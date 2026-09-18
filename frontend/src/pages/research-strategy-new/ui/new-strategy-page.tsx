@@ -46,7 +46,7 @@ import {
   StrategyIde,
 } from "../../../widgets/strategy-ide";
 
-const STARTER = 'schema_version: "1.0"\ntitle: ""\n';
+const STARTER = 'schema_version: "1.1"\ntitle: ""\n';
 const ROUTE = "/research/strategies/new";
 const NEW_DRAFT: DocumentSource = {
   kind: "new",

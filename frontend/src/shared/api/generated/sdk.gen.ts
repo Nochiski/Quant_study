@@ -103,6 +103,9 @@ import type {
   TraceStrategyData,
   TraceStrategyErrors,
   TraceStrategyResponses,
+  UpgradeStrategyDocumentData,
+  UpgradeStrategyDocumentErrors,
+  UpgradeStrategyDocumentResponses,
   ValidateFactorGraphData,
   ValidateFactorGraphErrors,
   ValidateFactorGraphResponses,
@@ -646,6 +649,31 @@ export const getStrategyDocumentSchema = <ThrowOnError extends boolean = false>(
     GetStrategyDocumentSchemaErrors,
     ThrowOnError
   >({ url: "/api/v1/strategy-documents/schema", ...options });
+
+/**
+ * Upgrade Strategy Document
+ *
+ * Rewrite a schema 1.0 source as 1.1 (comments and order kept) and compile the result.
+ *
+ * The rewrite must parse to exactly what the domain dict transform yields; otherwise the
+ * service refuses with `strategy_document.upgrade_drift` rather than returning text that
+ * would silently mean something else (spec D3).
+ */
+export const upgradeStrategyDocument = <ThrowOnError extends boolean = false>(
+  options: Options<UpgradeStrategyDocumentData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    UpgradeStrategyDocumentResponses,
+    UpgradeStrategyDocumentErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/strategy-documents/upgrade",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
 
 /**
  * Revise Strategy Document

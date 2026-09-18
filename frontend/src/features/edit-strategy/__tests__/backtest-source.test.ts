@@ -18,13 +18,13 @@ import type { ExecutionPlansState } from "../model/use-execution-plans";
 
 const SPEC = { title: "t" } as unknown as StrategySpec;
 const BASE_HASH = "b".repeat(64);
-const TEXT = 'schema_version: "1.0"\ntitle: t\n';
+const TEXT = 'schema_version: "1.1"\ntitle: t\n';
 
 const outcome = (specHash: string | null, errors = false): CompileOutcome => ({
   spec: errors ? null : SPEC,
   canonicalJson: errors ? null : JSON.stringify(SPEC),
   specHash,
-  schemaVersion: "1.0",
+  schemaVersion: "1.1",
   sourceHash: "s".repeat(64),
   diagnostics: errors
     ? [

@@ -13,7 +13,7 @@ const compile = (canonicalJson: string, specHash: string): CompileOutcome => ({
   spec: JSON.parse(canonicalJson) as CompileOutcome["spec"],
   canonicalJson,
   specHash,
-  schemaVersion: "1.0",
+  schemaVersion: "1.1",
   sourceHash: "s".repeat(64),
   diagnostics: [],
 });
@@ -27,7 +27,7 @@ const savedState = (): DocumentState => {
   let state = reduce(initialDocumentState(), {
     type: "load",
     format: "yaml",
-    source: 'schema_version: "1.0"\ntitle: Alpha\n',
+    source: 'schema_version: "1.1"\ntitle: Alpha\n',
     strategyId: "s1",
     baseRevision: 2,
     baseSpecHash: "a".repeat(64),
@@ -41,7 +41,7 @@ const savedState = (): DocumentState => {
     type: "compiled",
     version: state.sourceVersion,
     outcome: compile(
-      '{"schema_version":"1.0","title":"Alpha","nested":{"a/b":1}}',
+      '{"schema_version":"1.1","title":"Alpha","nested":{"a/b":1}}',
       "a".repeat(64),
     ),
   });
@@ -122,8 +122,8 @@ describe("StrategySpec diff projection", () => {
     const base = savedState();
     const state = editAndCompile(
       base,
-      'schema_version: "1.0"\ntitle: Beta\n',
-      '{"schema_version":"1.0","title":"Beta","nested":{"a/b":1}}',
+      'schema_version: "1.1"\ntitle: Beta\n',
+      '{"schema_version":"1.1","title":"Beta","nested":{"a/b":1}}',
       "b".repeat(64),
     );
 
@@ -170,7 +170,7 @@ describe("StrategySpec diff projection", () => {
   it("treats a new draft as source against empty with no invented semantic base", () => {
     const state = reduce(initialDocumentState(), {
       type: "edit",
-      source: 'schema_version: "1.0"\ntitle: New\n',
+      source: 'schema_version: "1.1"\ntitle: New\n',
     });
     const projection = projectDraftDiff(state);
     expect(projection.sourceBase).toBe("empty-draft");

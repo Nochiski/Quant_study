@@ -33,7 +33,6 @@ const SIGNAL_SNIPPET: CanonicalSnippet = {
   label: "signal",
   kind: "section",
   sectionKey: "signal",
-  collectionKey: null,
   identity: null,
   value: { method: "weighted_sum" },
 };

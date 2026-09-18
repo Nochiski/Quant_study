@@ -10,6 +10,7 @@ import {
   type GraphNodeProjection,
 } from "../model/factor-graph-projection";
 import {
+  factorGraphPointer,
   factorIndexAtPointer,
   pointerSelectsNode,
   type ExecutionPlansState,
@@ -325,7 +326,7 @@ export const FactorGraphPanel = ({
             onChange={(event) => {
               const next = Number(event.target.value);
               setChosenFactor(next);
-              onSelectPointer(`/factors/factors/${next}/graph`);
+              onSelectPointer(factorGraphPointer(next));
             }}
           >
             {projection.factors.map((item, index) => (

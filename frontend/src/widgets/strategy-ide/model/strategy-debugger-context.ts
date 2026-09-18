@@ -39,7 +39,7 @@ export const buildStrategyDebuggerAvailability = (
 ): StrategyDebuggerAvailability => {
   const compiled = currentCompile(document);
   if (compiled === null) return { context: null, reason: "document" };
-  if (compiled.spec.factors.factors.length === 0)
+  if (compiled.spec.factors.length === 0)
     return { context: null, reason: "no-factors" };
   if (plans.status !== "ready")
     return { context: null, reason: unavailableReason(plans) };
@@ -85,7 +85,7 @@ export const buildStrategyDebuggerAvailability = (
       },
     ];
   });
-  if (factors.length !== compiled.spec.factors.factors.length)
+  if (factors.length !== compiled.spec.factors.length)
     return { context: null, reason: "execution-plan" };
 
   return {

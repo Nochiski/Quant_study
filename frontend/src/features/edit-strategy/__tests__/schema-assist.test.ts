@@ -52,7 +52,7 @@ const CONTRACT: FieldContract[] = [
     maximum: 1,
   },
   {
-    pointer: "/factors/factors/*/graph/nodes/*/field_id",
+    pointer: "/factors/*/graph/nodes/*/field_id",
     branch: "field",
     type: "string",
     required: true,
@@ -113,7 +113,7 @@ const FACTOR_CATALOG: FactorCatalog = {
 
 const schemaEnvelope = (
   schemaHash: string,
-  schemaVersion = "1.0",
+  schemaVersion = "1.1",
 ): StrategyDocumentSchema => ({
   schema: SCHEMA,
   schema_hash: schemaHash,
@@ -122,7 +122,7 @@ const schemaEnvelope = (
 
 const contractEnvelope = (
   schemaHash: string,
-  schemaVersion = "1.0",
+  schemaVersion = "1.1",
 ): StrategyDocumentContractResponse => ({
   contract: {
     contract_hash: `contract-${schemaHash}`,
@@ -137,24 +137,23 @@ const contractEnvelope = (
 });
 
 const YAML = [
-  'schema_version: "1.0"',
+  'schema_version: "1.1"',
   "title: 테스트",
   "risk:",
   "  gross_exposure: 1",
   "factors:",
-  "  factors:",
-  "    - factor_id: momentum",
-  "      graph:",
-  "        nodes:",
-  "          - node_id: px",
-  "            kind: field",
-  "            field_id: close",
-  "          - node_id: mom",
-  "            kind: time_series",
-  "            input_node_id: ",
-  "          - node_id: unknown",
-  "            ",
-  "        output_node_id: ",
+  "  - factor_id: momentum",
+  "    graph:",
+  "      nodes:",
+  "        - node_id: px",
+  "          kind: field",
+  "          field_id: close",
+  "        - node_id: mom",
+  "          kind: time_series",
+  "          input_node_id: ",
+  "        - node_id: unknown",
+  "          ",
+  "      output_node_id: ",
   "parameters:",
   "  - parameter_id: lookback",
   "    kind: integer",
@@ -273,8 +272,7 @@ describe("schema-driven completion", () => {
     const inNode = await source({
       text: YAML,
       offset:
-        offsetOf(YAML, "            input_node_id: ") -
-        "input_node_id: ".length,
+        offsetOf(YAML, "          input_node_id: ") - "input_node_id: ".length,
       explicit: true,
     });
     const timeSeriesKeys = inNode!.options.map((o) => o.label);
@@ -282,7 +280,7 @@ describe("schema-driven completion", () => {
     expect(timeSeriesKeys).not.toContain("node_id"); // already present
     const unknownKind = await source({
       text: YAML,
-      offset: offsetOf(YAML, "          - node_id: unknown\n            "),
+      offset: offsetOf(YAML, "        - node_id: unknown\n          "),
       explicit: true,
     });
     const labels = unknownKind!.options.map((o) => o.label);
@@ -296,29 +294,29 @@ describe("schema-driven completion", () => {
   it.each([undefined, "not_a_node_kind"])(
     "does not complete a branch-dependent value while kind is %s",
     async (kind) => {
-      const kindLine = kind === undefined ? "" : `            kind: ${kind}\n`;
+      const kindLine = kind === undefined ? "" : `          kind: ${kind}\n`;
       const operatorText = YAML.replace(
-        "          - node_id: unknown\n            ",
-        `          - node_id: unknown\n${kindLine}            operator: mom`,
+        "        - node_id: unknown\n          ",
+        `        - node_id: unknown\n${kindLine}          operator: mom`,
       );
       const operator = await buildCompletionSource(
         deps(stateFor(operatorText)),
       )({
         text: operatorText,
-        offset: offsetOf(operatorText, "            operator: mom"),
+        offset: offsetOf(operatorText, "          operator: mom"),
         explicit: true,
       });
       expect(operator).toBeNull();
 
       const fieldText = YAML.replace(
-        "          - node_id: unknown\n            ",
-        `          - node_id: unknown\n${kindLine}            field_id: clo`,
+        "        - node_id: unknown\n          ",
+        `        - node_id: unknown\n${kindLine}          field_id: clo`,
       );
       const field = await buildCompletionSource(deps(stateFor(fieldText)))({
         text: fieldText,
         offset:
-          fieldText.lastIndexOf("            field_id: clo") +
-          "            field_id: clo".length,
+          fieldText.lastIndexOf("          field_id: clo") +
+          "          field_id: clo".length,
         explicit: true,
       });
       expect(field).toBeNull();
@@ -327,12 +325,12 @@ describe("schema-driven completion", () => {
 
   it("restores branch-specific value completion after kind selects the branch", async () => {
     const text = YAML.replace(
-      "            kind: time_series\n            input_node_id: ",
-      "            kind: time_series\n            operator: mom\n            input_node_id: ",
+      "          kind: time_series\n          input_node_id: ",
+      "          kind: time_series\n          operator: mom\n          input_node_id: ",
     );
     const result = await buildCompletionSource(deps(stateFor(text)))({
       text,
-      offset: offsetOf(text, "            operator: mom"),
+      offset: offsetOf(text, "          operator: mom"),
       explicit: true,
     });
     expect(result?.options.map((option) => option.label)).toContain("momentum");
@@ -345,20 +343,20 @@ describe("schema-driven completion", () => {
     const source = buildCompletionSource(deps(stateFor(YAML)));
     const field = await source({
       text: YAML,
-      offset: offsetOf(YAML, "            field_id: "),
+      offset: offsetOf(YAML, "          field_id: "),
       explicit: true,
     });
     expect(field!.options.map((o) => o.label)).toEqual(["close", "volume"]);
     expect(field!.options[0].detail).toBe("종가");
     const node = await source({
       text: YAML,
-      offset: offsetOf(YAML, "            input_node_id: "),
+      offset: offsetOf(YAML, "          input_node_id: "),
       explicit: true,
     });
     expect(node!.options.map((o) => o.label)).toEqual(["px", "unknown"]);
     const output = await source({
       text: YAML,
-      offset: offsetOf(YAML, "        output_node_id: "),
+      offset: offsetOf(YAML, "      output_node_id: "),
       explicit: true,
     });
     expect(output!.options.map((o) => o.label)).toEqual([
@@ -368,7 +366,7 @@ describe("schema-driven completion", () => {
     ]);
     const kind = await source({
       text: YAML,
-      offset: offsetOf(YAML, "            kind: ") - 0,
+      offset: offsetOf(YAML, "          kind: ") - 0,
       explicit: true,
     });
     expect(kind!.options.map((o) => o.label)).toEqual(
@@ -385,7 +383,7 @@ describe("schema-driven completion", () => {
   });
 
   it("stays silent during IME composition, without a schema, and in JSON", async () => {
-    const offset = offsetOf(YAML, "            field_id: ");
+    const offset = offsetOf(YAML, "          field_id: ");
     const context = { text: YAML, offset, explicit: true };
     expect(
       await buildCompletionSource(deps(stateFor(YAML, { composing: true })))(
@@ -436,8 +434,8 @@ describe("schema-driven hover", () => {
   it("keeps requiredness shared by every unresolved union branch", () => {
     const state = stateFor(YAML);
     for (const pointer of [
-      "/factors/factors/0/graph/nodes/2/node_id",
-      "/factors/factors/0/graph/nodes/2/kind",
+      "/factors/0/graph/nodes/2/node_id",
+      "/factors/0/graph/nodes/2/kind",
     ]) {
       const lines = describePointer(deps(state), pointer, state.parse!.tree);
       expect(lines).toContain("필수");
@@ -447,15 +445,15 @@ describe("schema-driven hover", () => {
   it.each([undefined, "not_a_node_kind"])(
     "requires kind instead of describing an arbitrary operator branch when kind is %s",
     (kind) => {
-      const kindLine = kind === undefined ? "" : `            kind: ${kind}\n`;
+      const kindLine = kind === undefined ? "" : `          kind: ${kind}\n`;
       const text = YAML.replace(
-        "          - node_id: unknown\n            ",
-        `          - node_id: unknown\n${kindLine}            operator: momentum`,
+        "        - node_id: unknown\n          ",
+        `        - node_id: unknown\n${kindLine}          operator: momentum`,
       );
       const state = stateFor(text);
       const lines = describePointer(
         deps(state),
-        "/factors/factors/0/graph/nodes/2/operator",
+        "/factors/0/graph/nodes/2/operator",
         state.parse!.tree,
       );
       expect(lines).toContain(
@@ -488,7 +486,7 @@ describe("schema-driven hover", () => {
   it("uses the branch row for union members and names the value source", () => {
     const lines = describePointer(
       deps(stateFor(YAML)),
-      "/factors/factors/0/graph/nodes/0/field_id",
+      "/factors/0/graph/nodes/0/field_id",
       stateFor(YAML).parse!.tree,
     );
     expect(lines).toContain("필수");

@@ -60,12 +60,21 @@ const documentAndOperation = fc
           identifierArbitrary,
           valueArbitrary,
         )
-        .map(([p, key, value]) => ({
-          kind: "insert-key" as const,
-          parentPointer: p.pointer,
-          key: `new_${key}`,
-          value,
-        })),
+        .chain(([p, key, value]) => {
+          const parent = valueAtPointer(tree, p.pointer).value;
+          const siblings = Object.keys(parent as Record<string, unknown>);
+          // 절반은 형제 키 앞에(`before`), 절반은 마지막 키 뒤에 넣는다.
+          const before = siblings.length
+            ? fc.option(fc.constantFrom(...siblings), { nil: undefined })
+            : fc.constant(undefined);
+          return before.map((target) => ({
+            kind: "insert-key" as const,
+            parentPointer: p.pointer,
+            key: `new_${key}`,
+            value,
+            ...(target === undefined ? {} : { before: target }),
+          }));
+        }),
     );
     if (sequences.length)
       choices.push(
@@ -105,6 +114,39 @@ const commentLines = (text: string): string[] =>
     .filter((line) => /^\s*(?:-\s+)*#/.test(line))
     .map((line) => line.replace(/^\s*(?:-\s+)*/, ""));
 
+/**
+ * 주석 `# c<n>`은 주석 없는 직렬화의 n번째 줄 앞에 놓였다. 그 줄에서 시작하는 가장 얕은 pointer가
+ * 주석의 소유자다(`- k: 1` 줄이면 항목 `/a/0`, `k:` 줄이면 `/k`). `remove`는 소유자가 삭제 대상
+ * pointer 자신이거나 그 아래일 때만 주석을 지울 수 있고, 다른 pointer의 주석은 전부 남아야 한다
+ * (P3-01 2차 리뷰 P2-R2: 관용 범위를 구현이 정한 편집 범위가 아니라 문서 구조로 정한다).
+ */
+const commentOwners = (tree: Record<string, unknown>): Map<string, string> => {
+  const bare = toYaml(tree, "\n", []);
+  const parsed = parseSource(bare, "yaml");
+  if (parsed.status !== "ok") throw new Error("bare document must parse");
+  const depth = (pointer: string): number => pointer.split("/").length;
+  const ownerOfLine = new Map<number, string>();
+  const consider = (pointer: string, line: number): void => {
+    const current = ownerOfLine.get(line);
+    if (current === undefined || depth(pointer) < depth(current))
+      ownerOfLine.set(line, pointer);
+  };
+  // 주석 계획의 줄 번호는 0부터 세므로 parser의 line 기준과 무관하게 offset으로 다시 센다.
+  const lineOf = (offset: number): number =>
+    bare.slice(0, offset).split("\n").length - 1;
+  for (const [pointer, range] of parsed.keyRanges)
+    consider(pointer, lineOf(range.start.offset));
+  // block 컨테이너의 value range는 첫 자식 줄에서 시작하므로 소유자 후보는 키와 시퀀스 항목뿐이다.
+  for (const [pointer, range] of parsed.valueRanges)
+    if (/\/\d+$/.test(pointer)) consider(pointer, lineOf(range.start.offset));
+  const owners = new Map<string, string>();
+  for (const [line, pointer] of ownerOfLine) owners.set(`# c${line}`, pointer);
+  return owners;
+};
+
+const within = (pointer: string, subtree: string): boolean =>
+  pointer === subtree || pointer.startsWith(`${subtree}/`);
+
 describe("source transactions (property)", () => {
   it("edits one line range so the reparsed tree equals the tree operation, other lines and all comments survive", () => {
     fc.assert(
@@ -138,16 +180,22 @@ describe("source transactions (property)", () => {
         expect(nextLines.slice(nextLines.length - tailCount)).toEqual(
           lines.slice(lines.length - tailCount),
         );
-        // 주석은 하나도 사라지지 않는다(P3-01 리뷰 P1-1·P1-2). 삭제된 subtree 안의 주석만 예외다.
+        // 주석은 하나도 사라지지 않는다(P3-01 리뷰 P1-1·P1-2). 삭제된 subtree가 소유한 주석만 예외다.
+        const before = commentLines(source);
+        const kept = commentLines(edit.nextSource);
         if (op.kind !== "remove") {
-          expect(commentLines(edit.nextSource)).toEqual(commentLines(source));
+          expect(kept).toEqual(before);
         } else {
-          const kept = commentLines(edit.nextSource);
-          const removedRange = source.slice(edit.from, edit.to);
-          const dropped = commentLines(removedRange);
-          expect(kept.length + dropped.length).toBe(
-            commentLines(source).length,
+          const owners = commentOwners(tree);
+          const mustSurvive = before.filter((comment) => {
+            const owner = owners.get(comment);
+            if (owner === undefined) throw new Error(`owner of ${comment}`);
+            return !within(owner, op.pointer);
+          });
+          expect(kept.filter((c) => mustSurvive.includes(c))).toEqual(
+            mustSurvive,
           );
+          expect(kept.every((c) => before.includes(c))).toBe(true);
         }
         if (eol === "\r\n")
           expect(edit.nextSource.replaceAll("\r\n", "")).not.toContain("\n");

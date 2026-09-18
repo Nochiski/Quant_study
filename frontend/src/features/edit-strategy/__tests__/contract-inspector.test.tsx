@@ -532,7 +532,7 @@ describe("field applicability in the contract projection (P2-03)", () => {
       screen.getByRole("heading", { name: "적용 조건" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("✕ portfolio.liquidity_field_id 설정"),
+      screen.getByText("✕ portfolio.liquidity_field_id 설정 (기본값으로 판정)"),
     ).toHaveAttribute("data-holds", "false");
     expect(
       screen.getByText("strategy.portfolio.liquidity_field"),

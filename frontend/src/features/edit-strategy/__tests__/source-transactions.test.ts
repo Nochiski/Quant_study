@@ -318,6 +318,277 @@ describe("comments and block scalars (review P1-1·P1-2)", () => {
   });
 });
 
+describe("nested inner first item removal keeps the comment between items (P3-01 2nd review P2-R1)", () => {
+  it("pulls the next line's content up to the outer dash, comment included", () => {
+    expect(
+      ok("a:\n  - - x\n    # y 설명\n    - y\n", {
+        kind: "remove",
+        pointer: "/a/0/0",
+      }).nextSource,
+    ).toBe("a:\n  - # y 설명\n    - y\n");
+    expect(
+      ok("a:\n  - - x\n    - y\n", { kind: "remove", pointer: "/a/0/0" })
+        .nextSource,
+    ).toBe("a:\n  - - y\n");
+  });
+});
+
+describe("insert-key before a sibling, empty values and empty documents (P3-02)", () => {
+  it("inserts after the previous sibling so the comment above `before` keeps describing it", () => {
+    const source = "a: 1\n# b를 설명\nb: 2\nc: 3\n";
+    expect(
+      ok(source, {
+        kind: "insert-key",
+        parentPointer: "",
+        key: "x",
+        value: 0,
+        before: "b",
+      }).nextSource,
+    ).toBe("a: 1\nx: 0\n# b를 설명\nb: 2\nc: 3\n");
+    expect(
+      ok(source, {
+        kind: "insert-key",
+        parentPointer: "",
+        key: "x",
+        value: 0,
+        before: "a",
+      }).nextSource,
+    ).toBe("x: 0\na: 1\n# b를 설명\nb: 2\nc: 3\n");
+    const nested = "m:\n  p: 1\n  q: 2\nz: 0\n";
+    expect(
+      ok(nested, {
+        kind: "insert-key",
+        parentPointer: "/m",
+        key: "x",
+        value: 0,
+        before: "p",
+      }).nextSource,
+    ).toBe("m:\n  x: 0\n  p: 1\n  q: 2\nz: 0\n");
+    expect(
+      ok(nested, {
+        kind: "insert-key",
+        parentPointer: "/m",
+        key: "x",
+        value: 0,
+        before: "q",
+      }).nextSource,
+    ).toBe("m:\n  p: 1\n  x: 0\n  q: 2\nz: 0\n");
+    expect(
+      plan(nested, {
+        kind: "insert-key",
+        parentPointer: "/m",
+        key: "x",
+        value: 0,
+        before: "nope",
+      }),
+    ).toEqual({ status: "error", reason: "not-found" });
+  });
+
+  it("takes the dash position when `before` is the first key of a sequence item", () => {
+    const source = "a:\n  - p: 1\n    q: 2\n";
+    expect(
+      ok(source, {
+        kind: "insert-key",
+        parentPointer: "/a/0",
+        key: "x",
+        value: 0,
+        before: "p",
+      }).nextSource,
+    ).toBe("a:\n  - x: 0\n    p: 1\n    q: 2\n");
+  });
+
+  it("opens a block container under a value-less key, keeping its end-of-line comment", () => {
+    expect(
+      ok("factors:\nz: 1\n", {
+        kind: "insert-item",
+        parentPointer: "/factors",
+        value: { id: "a" },
+      }).nextSource,
+    ).toBe("factors:\n  - id: a\nz: 1\n");
+    expect(
+      ok("risk: # 비움\nz: 1\n", {
+        kind: "insert-key",
+        parentPointer: "/risk",
+        key: "k",
+        value: 1,
+      }).nextSource,
+    ).toBe("risk: # 비움\n  k: 1\nz: 1\n");
+    expect(
+      ok("a:\n  - b:\n", {
+        kind: "insert-item",
+        parentPointer: "/a/0/b",
+        value: 1,
+      }).nextSource,
+    ).toBe("a:\n  - b:\n      - 1\n");
+    expect(
+      plan("factors:\n", {
+        kind: "insert-item",
+        parentPointer: "/factors",
+        value: 1,
+        index: 1,
+      }),
+    ).toEqual({ status: "error", reason: "not-found" });
+  });
+
+  it("treats a blank or comment-only document as an empty root mapping for a root insert-key", () => {
+    const op: SourceOperation = {
+      kind: "insert-key",
+      parentPointer: "",
+      key: "signal",
+      value: { a: 1 },
+    };
+    for (const [source, expected] of [
+      ["", "signal:\n  a: 1"],
+      ["  \n", "signal:\n  a: 1"],
+      ["# 머리말\n", "# 머리말\nsignal:\n  a: 1"],
+      ["{}", "signal:\n  a: 1"],
+    ] as const) {
+      const result = plan(source, op);
+      expect(result.status).toBe("ok");
+      if (result.status === "ok") expect(result.edit.nextSource).toBe(expected);
+    }
+    expect(
+      plan("", { kind: "insert-item", parentPointer: "", value: 1 }),
+    ).toEqual({
+      status: "error",
+      reason: "parse",
+    });
+    expect(
+      plan("", { kind: "insert-key", parentPointer: "/x", key: "k", value: 1 }),
+    ).toEqual({
+      status: "error",
+      reason: "parse",
+    });
+  });
+});
+
+describe("review follow-up: item anchors, anchor option, parent line comments (P3-02)", () => {
+  it("inserts an item after the previous one so the comment above the target keeps describing it", () => {
+    expect(
+      ok("a:\n  # about 0\n  - x\n  - y\n", {
+        kind: "insert-item",
+        parentPointer: "/a",
+        value: "n",
+        index: 0,
+      }).nextSource,
+    ).toBe("a:\n  - n\n  # about 0\n  - x\n  - y\n");
+    expect(
+      ok("a:\n  - x\n  # about 1\n  - y\n", {
+        kind: "insert-item",
+        parentPointer: "/a",
+        value: "n",
+        index: 1,
+      }).nextSource,
+    ).toBe("a:\n  - x\n  - n\n  # about 1\n  - y\n");
+    expect(
+      ok("m:\n  # about p\n  p: 1\nz: 0\n", {
+        kind: "insert-key",
+        parentPointer: "/m",
+        key: "x",
+        value: 0,
+        before: "p",
+      }).nextSource,
+    ).toBe("m:\n  x: 0\n  # about p\n  p: 1\nz: 0\n");
+  });
+
+  it("honours an anchor offset inside the sibling window and ignores one outside it", () => {
+    const source = "a: 1\n# 머리말\n\nb: 2\n";
+    const at = source.indexOf("\nb: 2") + 1; // 빈 줄 뒤, `b` 줄 시작
+    expect(
+      planSourceOperation(
+        source,
+        "yaml",
+        {
+          kind: "insert-key",
+          parentPointer: "",
+          key: "x",
+          value: 0,
+          before: "b",
+        },
+        { anchor: at },
+      ),
+    ).toMatchObject({
+      status: "ok",
+      edit: { nextSource: "a: 1\n# 머리말\n\nx: 0\nb: 2\n" },
+    });
+    // `b` 뒤는 `before: b`의 허용 구간 밖 → 기본 앵커(앞 형제 `a` 줄 끝 뒤).
+    expect(
+      planSourceOperation(
+        source,
+        "yaml",
+        {
+          kind: "insert-key",
+          parentPointer: "",
+          key: "x",
+          value: 0,
+          before: "b",
+        },
+        { anchor: source.length },
+      ),
+    ).toMatchObject({
+      status: "ok",
+      edit: { nextSource: "a: 1\nx: 0\n# 머리말\n\nb: 2\n" },
+    });
+    // 문서 끝(EOL 없음)에 앵커: 줄바꿈을 앞에 붙여 붙인다.
+    expect(
+      planSourceOperation(
+        "a: 1",
+        "yaml",
+        { kind: "insert-key", parentPointer: "", key: "x", value: 0 },
+        { anchor: 4 },
+      ),
+    ).toMatchObject({ status: "ok", edit: { nextSource: "a: 1\nx: 0" } });
+    expect(
+      planSourceOperation(
+        "s:\n  - 1\n  # 둘째 설명\n\n  - 2\n",
+        "yaml",
+        { kind: "insert-item", parentPointer: "/s", value: 9, index: 1 },
+        { anchor: "s:\n  - 1\n  # 둘째 설명\n".length },
+      ),
+    ).toMatchObject({
+      status: "ok",
+      edit: { nextSource: "s:\n  - 1\n  # 둘째 설명\n  - 9\n\n  - 2\n" },
+    });
+  });
+
+  it("keeps the parent line's end-of-line comment when the last child is removed", () => {
+    expect(
+      ok("a: # note\n  b: 1\nz: 2\n", { kind: "remove", pointer: "/a/b" })
+        .nextSource,
+    ).toBe("a: # note\n  {}\nz: 2\n");
+    expect(
+      ok("a: # note\n  - 1\nz: 2\n", { kind: "remove", pointer: "/a/0" })
+        .nextSource,
+    ).toBe("a: # note\n  []\nz: 2\n");
+    expect(
+      ok("a:\n  b: 1\nz: 2\n", { kind: "remove", pointer: "/a/b" }).nextSource,
+    ).toBe("a: {}\nz: 2\n");
+  });
+
+  it("rejects `before` on a value-less parent in the tree operation as the text side does", () => {
+    expect(
+      applyToTree(
+        { a: null },
+        {
+          kind: "insert-key",
+          parentPointer: "/a",
+          key: "x",
+          value: 9,
+          before: "q",
+        },
+      ),
+    ).toBeNull();
+    expect(
+      applyToTree(
+        { a: null },
+        { kind: "insert-key", parentPointer: "/a", key: "x", value: 9 },
+      ),
+    ).toEqual({
+      a: { x: 9 },
+    });
+  });
+});
+
 describe("golden document", () => {
   it("round-trips every scalar of the 1.1 golden through replace-scalar with the same value", () => {
     const parsed = parseSource(GOLDEN, "yaml");

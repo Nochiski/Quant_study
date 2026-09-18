@@ -444,7 +444,8 @@ const ko = {
   "contract.applicable.inapplicable":
     "현재 문서에서는 읽히지 않습니다. {conditions}일 때만 적용됩니다.",
   "contract.applicable.unknown":
-    "조건 필드가 문서에 없어 backend 기본값이 판정합니다(compile 경고 참조).",
+    "조건 필드가 문서에 없고 발행 기본값도 없어 판정하지 못합니다(compile 경고 참조).",
+  "contract.applicable.fromDefault": "(기본값으로 판정)",
   "contract.applicable.ownedByError": "위반 시 보고되는 오류",
   "contract.applicable.badge": "현재 모드에서 읽히지 않음",
   "contract.applicable.condition.set": "{path} 설정",
@@ -1244,7 +1245,8 @@ export const messages = {
     "contract.applicable.inapplicable":
       "Not read in the current document. Applies only when {conditions}.",
     "contract.applicable.unknown":
-      "The condition field is not written; the backend default decides (see compile warnings).",
+      "The condition field is not written and has no published default, so it cannot be decided (see compile warnings).",
+    "contract.applicable.fromDefault": "(decided by default)",
     "contract.applicable.ownedByError": "Reported as error on violation",
     "contract.applicable.badge": "Not read in this mode",
     "contract.applicable.condition.set": "{path} set",

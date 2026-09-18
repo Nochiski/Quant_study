@@ -3,9 +3,9 @@ plan_version: 2
 project: strategy-gui-editing
 project_status: IN_REVIEW
 current_phase: P1,P2,P3
-current_pr: P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01
-active_prs: [P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01]
-parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02, P1-06, P2-03, P3-01]
+current_pr: P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01,P3-02
+active_prs: [P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01, P3-02]
+parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02, P1-06, P2-03, P3-01, P3-02]
 last_updated: 2026-09-18T04:54:16+09:00
 planned_prs: 18
 merged_prs: 0
@@ -25,8 +25,8 @@ progress_percent: 0
 |---|---|
 | Project status | `IN_REVIEW` |
 | Current phase | `P1,P2,P3` |
-| Current/next PR | `P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01` |
-| Active PR | `P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01` |
+| Current/next PR | `P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01,P3-02` |
+| Active PR | `P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01, P3-02` |
 | Progress | `0 / 18 merged (0%)` |
 | Approved | `9 / 18` |
 | Aggregated at | `2026-09-18 04:54 KST` |
@@ -88,16 +88,16 @@ progress_percent: 0
 
 | 항목 | 값 |
 |---|---|
-| PR | `P3-01` |
-| Intent | spec D5 source 트랜잭션 원시 연산 4종(`replace-scalar`·`insert-key`·`insert-item`·`remove`)을 순수 함수 `planSourceOperation`으로, preflight(parse ok ∧ tree == `applyToTree`), property test |
-| Acceptance | WORKFLOW P3-01(+감사 4.5 `not-found`·주석 경계 규칙) |
-| Non-goals | 편집기 연결·스니펫 재구성(P3-02), JSON 편집 |
-| Branch/worktree | `feat/gui-p3-01-source-transactions` (base `feat/gui-p2-03-applicable-when` `610a17c`) |
-| Base SHA | `610a17c` |
-| Head SHA | `fb8a1b4` (WORKFLOW P2-R1 한 줄; 리뷰 대상 `51301cc`, diff freeze `2fba821`) |
-| Diff stat | 신규 model 1·arbitrary 1·테스트 2, package.json/lock(fast-check), SoT 1행, WORKFLOW 1 |
-| Focused tests | source-transactions 10 · property 1(300회 기본, 3000회 로컬 통과) |
-| Full gate | Vitest 490 passed(44 files) · typecheck · lint · build |
+| PR | `P3-02` |
+| Intent | `useSourceTransactions` 훅(편집기 현재 텍스트로 계획 → `replaceRange` 한 번, feedback scope)과 스니펫 삽입을 `insert-key`/`insert-item` 연산 위에 재구성(fragment 조립 제거). P3-01 이월(P2-R1·P2-R2·escape 별칭·빈 `key:` 부모)과 P2-03/P1-06 nit cleanup 포함 |
+| Acceptance | WORKFLOW P3-02(+P3-02 구현 결정: `run(planner)`, `before`/`index`, `options.eol`, 빈 문서·값 없는 `key:` 부모) |
+| Non-goals | Form/Graph 편집(P4/P5), JSON 편집, 훅의 parse 결과 재사용(호출은 확정 시점만) |
+| Branch/worktree | `feat/gui-p3-02-source-transactions-hook` (base `feat/gui-p3-01-source-transactions` `97409f1`) |
+| Base SHA | `97409f1` |
+| Head SHA | `96d6b3b` (review 후속; diff freeze `d13830c`) |
+| Diff stat | frontend model 4(신규 훅 1)·index·테스트 4(신규 1), backend 어댑터 1·테스트 1, WORKFLOW·SoT; 16 files +1019/−231 |
+| Focused tests | use-source-transactions 5 · source-transactions 19 · property 1(3000회 통과) · canonical-snippets 16 · snippet-insertion 3 · contract-inspector 22 |
+| Full gate | Vitest 512 passed(45 files) · typecheck · lint · build · e2e chromium-workflow 5 passed · backend pytest 1,316 passed · ruff · pyright 0 |
 
 ---
 
@@ -137,12 +137,12 @@ Phase exit:
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [x] | `P3-01` | `source-transactions.ts` 원시 연산 4종, preflight, property test | P2-01 | `APPROVED` | [#119](https://github.com/Nochiski/Quant_study/pull/119) · `review_gui_p3_01` 2차 APPROVE(`51301cc`) · WORKFLOW 한 줄 `fb8a1b4` |
-| [ ] | `P3-02` | `useSourceTransactions`, 스니펫 삽입 재구성 | P3-01 | `WAITING` | — |
+| [x] | `P3-02` | `useSourceTransactions`, 스니펫 삽입 재구성 | P3-01 | `APPROVED` | [#120](https://github.com/Nochiski/Quant_study/pull/120) · `review_gui_p3_02` 2차 APPROVE(`96d6b3b`) |
 
 Phase exit:
 
-- [ ] property test가 임의 문서·연산에서 tree 동등·범위 밖 바이트 보존을 증명.
-- [ ] SoT 점검(정본은 source 하나, frontend에 필드 목록 없음).
+- [x] property test가 임의 문서·연산에서 tree 동등·범위 밖 바이트 보존을 증명 (P3-01: 줄 단위 범위 밖 비교·tree deep-equal; P3-02: 주석 소유자 규칙, 줄별 주석 생성기로 `- - x` 회귀 반례 실측).
+- [x] SoT 점검(정본은 source 하나, frontend에 필드 목록 없음) — `audit_gui_phase3` PASS(blocking 0, DEFECT-P3X-001~004 non-blocking, 문서 액션 9 반영, Phase 4 위험 R1~R6 → P4-01/P4-02 착수 전 대응).
 
 ## P4 — Form 편집
 
@@ -180,6 +180,7 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
+| P3-02 | `review_gui_p3_02` | `97409f1` | `96d6b3b` (diff freeze `d13830c`) | APPROVE (1차 REQUEST_CHANGES P1-1 스니펫 위치 회귀·P1-2 property 회귀 방지 주장 반증 + P2 4 → 후속: `options.anchor`로 커서 줄 자리, 삽입 앵커 통일, 생성기 줄별 주석(회귀 되돌리면 279회째 반례 실측), 부모 줄 끝 주석 보존, applyToTree before 거부, nit 3; 2차: 스니펫 20종 프로그램 검증 불일치 0, `#` 휴리스틱 오탐 경로 4종 fail-closed 확인) | 2 (해소) | 확정 시점 호출 규칙은 호출자 규율(P4-02 컨트롤 커밋 규칙으로 처리), `onEditorReady` setState(인라인 람다 호출자 주의), 주석 고아 보존, property 미생성 영역(줄 끝 주석·따옴표 키·flow 내부) | 2026-09-18 |
 | P3-01 | `review_gui_p3_01` | `610a17c` | `fb8a1b4` (리뷰 대상 `51301cc`) | APPROVE (1차 REQUEST_CHANGES P1-1 block scalar range 경계·P1-2 시퀀스/dash 줄 삭제의 주석 삭제 + P2 9 → 후속 `51301cc`: leaf 범위 줄바꿈 trim, `removeLines`·dash 줄 첫 키 규칙, 생성기 커버리지(주석·빈 컨테이너·block scalar·`- - `·dash 줄 키 각 1000건+/4000), 관용 절 제거, 줄 단위 범위 밖 비교; 2차: P1 전부 해소, 회귀 점검 통과, `FC_NUM_RUNS=5000` 통과) | 2 (해소) | P2-R1 `- - x` 안쪽 첫 항목 삭제가 사이 주석을 지움(WORKFLOW 제한 명기, 1.1 문서 경로 밖), P2-R2 property `remove` 관용 절이 pointer 줄 범위보다 넓고 개수 비교(→ P3-02), `const escape` 별칭(→ P3-02), 성능 parse 2회/연산(→ P3-02 훅 설계) | 2026-09-18 |
 | P2-03 | `review_gui_p2_03` | `e77f7ce` | `abafcc7` | APPROVE (1차 REQUEST_CHANGES DEFECT-118-01 Form 배지가 backend가 침묵시킨 기본값 필드에 경고 + P2 8 → 후속: 배지 = compile 경고 pointer, 발행 기본값 resolver, 글리프, signal 섹션, 문구 키 커버리지, `valueAtPointer` 공유, 중립 문구; 2차 실측 Form 배지 = backend 경고 pointer 8문서 일치, Inspector 판정 = `applies_to` 64건 일치) | 1 (해소) | nit 4: `contract.applicable.unknown` 문구가 옛 동작 서술(현재 도달 불가), `fromDefault` 미표시, i18n 커버리지 테스트가 한 단계만 탐색(재귀와 결과 동일), `STARTER` 별칭 중복 → P3-02 cleanup 커밋 후보 | 2026-09-18 |
 | P2-02 | `review_gui_p2_02` | `2a16ebe` | `6278c40` | APPROVE (1차 REQUEST_CHANGES P1-001 e2e seeding 비멱등·P1-002 undo 격리·P2 6 → 2차 P1-001 잔존(재시도 시 `/revisions/1` 저장 409) → 3차 시도별 고유 전략 id로 해소; seeding CLI 4케이스·`--repeat-each 2` 10 passed 실측) | 2 (해소) | suffix가 ms 타임스탬프(충돌 시 fail-closed), 정규식에 id 보간(base36·하이픈만), 동결 전략이 시도마다 누적(목록 페이지 20) | 2026-09-18 |
@@ -195,6 +196,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
+| P3-02 | use-source-transactions 5·source-transactions 22·canonical-snippets 16·snippet-insertion 8·property 1(`FC_NUM_RUNS=3000`)·contract-inspector 22 (감사 `vitest --reporter=json` 실측) | Vitest 512 passed(45 files)·typecheck·lint·build·e2e chromium-workflow 5 passed; backend pytest 1,316 passed·ruff·pyright 0 | 해당 없음(SDK·openapi 무변경) | 해당 없음(공개 UI 동작 동일; 기본값 판정 표시만 추가) | 원격 CI frontend·backend job 대상 | 2026-09-18 |
 | P3-01 | source-transactions 10·property 1(`FC_NUM_RUNS=3000` 통과) | Vitest 490 passed(44 files)·typecheck·lint·build | 해당 없음(SDK 무변경) | 해당 없음(순수 함수) | 원격 CI frontend job 대상 | 2026-09-18 |
 | P2-03 | field-applicability 5·contract projection/UI 3·hover 1·Form 배지 1 | Vitest 478 passed(41 files)·typecheck·lint·build | SDK 무변경(`ApplicableWhen` 타입 재수출만) | 해당 없음 | 원격 CI frontend job 대상 | 2026-09-18 |
 | P1-06 | upgrade-source `periods` 주석 1·frozen 술어 1·syntax 메시지 1·팩터 컬렉션 모호성 1 | backend pytest 1,315·Ruff·Pyright 0; frontend Vitest 468·typecheck·lint·build | `openapi.json`·`runtime-schema.json` 재생성 diff 0, SDK 무변경 | 해당 없음 | 원격 CI backend·frontend job 대상 | 2026-09-18 |
@@ -210,6 +212,10 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-18 KST | Claude | `audit_gui_phase3` 수신: PASS(blocking 0). DEFECT-P3X-001 flow 컬렉션 제한 문구 과대(replace-scalar는 동작)·002 `yes` 따옴표 예시 오류·003 `run`이 `enabled`를 강제하지 않는 계약 미단언·004 feedback scope가 memo identity → 문서 액션 9건 반영(WORKFLOW acceptance 블록 2·제한 문구 2·SoT 행 2·PLAN 2). Phase 2 이월 5: 3 해소, 업그레이드 `replaceRange` 별도 경로는 설계상 잔존(SoT 행에 명기), boolean equals 비교 변동 없음. Phase 4 위험 R1(Form view 활성 시 `editorActive=false`로 전부 거부)·R2(스니펫 훅 자체 인스턴스 → 공유 시 feedback/label 교차)·R3(`formDisabledReason` 중복 판정)·R4(reset이 섹션 마지막 필드에서 주석 삭제)·R5(P4-01 SoT 행이 코드보다 강함)·R6(연타 시 parse 2회 누적) → 결정: 훅이 `disabled` 사유·owner별 feedback을 내고 `editorActive`는 "hidden 편집기가 살아 있는가"(R1·R3, P4-02), 스니펫 훅은 인스턴스 주입 + owner `snippet`(R2, P4-02), R4는 P4-02 테스트·PR 본문 명기, R5는 P4-01 SoT 행을 실제 범위로 축소, R6는 P4-04 e2e 시나리오, 004는 값 비교로 수정(P4-02). Phase 3 exit 2항 체크 | 13.6 Phase 감사 |
+| 2026-09-18 KST | Claude | `review_gui_p3_02` 2차 APPROVE → P3-02 APPROVED. Phase 3 PR 2/2 승인. 게이트 수치 정정(Vitest 512·source-transactions 19·canonical-snippets 16). 다음: Phase 3 exit 감사(`audit_gui_phase3`) → P4-01(#PR 대기, 브랜치 `feat/gui-p4-01-form-projection` 구현 완료)·P4-02(브랜치 `feat/gui-p4-02-form-panel` 구현 완료) PR 개설 | 13.5 판정 |
+| 2026-09-18 KST | Claude | `review_gui_p3_02` 1차 REQUEST_CHANGES(P1-1 스니펫이 커서 줄이 아니라 앞 형제 뒤에 들어가 선행 주석·빈 줄 위로 이동, P1-2 설계 결정 5의 "property가 P2-R1 회귀를 잡는다"가 생성기 밀도 탓에 거짓(6000 샘플 0건); P2-1 insert-key/insert-item의 대상 위 주석 규칙 상반 + 코드 주석 반대, P2-2 부모 접힘 시 `key: # 메모` 줄 끝 주석 소실, P2-3 `applyToTree` 값 없는 부모 + `before` 비대칭, P2-4 nit 4) → 후속 `96d6b3b`: `options.anchor`(형제 구간 안의 커서 줄 자리)로 스니펫 위치 복원 + 테스트 5, 삽입 앵커를 키·항목 공통 "앞 형제 내용 줄 끝 뒤"로 통일, 생성기 줄별 1/3 주석(버그 되돌리면 58회째 반례 실측), 부모 줄 끝 주석 보존(`{}`/`[]` 다음 줄), `applyToTree` before 거부, `run` docstring·타입 가드·barrel 축소, WORKFLOW·PR 본문 정정 → 재검토 요청. 잔여 위험 기록: 확정 시점 호출 규칙은 호출자 규율(P4-02는 텍스트류 blur/Enter·선택류 변경 즉시로 설계, keystroke 호출 없음), `onEditorReady`가 setState(인라인 람다 호출자 주의), 주석 고아 보존, property는 줄 끝 주석·따옴표 키·flow 내부 미생성 | 13.5 재검토 |
+| 2026-09-18 KST | Claude | P3-02 구현·self-check(훅 5·단위 15·property 3000회·Vitest 503·e2e 5) → diff freeze `d13830c`, stacked PR #120(base P3-01), `review_gui_p3_02`(opus) 배정 → IN_REVIEW. 결정: 훅은 `apply(op)` 외 `run(planner)`(스니펫은 커서 줄 부분 키 제거+삽입을 undo 한 번으로), 스니펫 중복 판정은 원문 전체로 먼저, `insert-key.before`는 앞 형제 내용 줄 끝 뒤(주석 소유 유지), 값 없는 `key:`·빈 문서는 삽입 부모로 허용(P2-6 해소), property `remove` 관용은 주석 소유자 규칙(P2-R2)로 대체하고 그 규칙으로 `- - x` 갈래를 코드 수정(P2-R1 대안 2). cleanup 커밋 2건(P2-03 nit 118-10/11/13, P1-06 nit 13/14) | 13.3 diff freeze |
 | 2026-09-18 KST | Claude | `review_gui_p3_01` 2차 APPROVE(P1-1·P1-2 해소, P2 9 전부 해소, 회귀 점검·`FC_NUM_RUNS=5000` 통과) → P3-01 APPROVED. 머지 전 요청 1건(WORKFLOW 알려진 제한에 P2-R1 예외 한 줄) `fb8a1b4` 반영. P3-02로 이월: P2-R2 property `remove` 관용 절 좁히기(pointer 자기 줄 범위)·multiset 비교, `const escape` 별칭 제거, 빈 `key:` 부모 확장(P2-6; 스니펫 재구성이 필요로 함), 훅의 parse 2회 비용은 확정 시점 호출로 한정 | 13.5 판정 |
 | 2026-09-18 KST | Claude | `review_gui_p3_01` 1차 REQUEST_CHANGES(P1-1 block scalar range가 줄바꿈 포함 → 경계 한 줄 초과·silent 주석 삭제, P1-2 시퀀스 항목·dash 줄 첫 키 삭제가 다음 주석 삭제; P2 9: property 관용 절·항등식 단언·생성기 커버리지(주석·빈 컨테이너·block scalar 0건), escape 중복, flow 컬렉션 미지원 사유, 빈 `key:` 부모, `- []` 후행 공백, EOL 혼재) → 후속 `51301cc`(전부 조치, P2-5·6은 WORKFLOW 제한 명기) → 재검토 요청. 잔여 위험 기록: 연산 1회 = parse 2회(67KB 문서 ~720ms) → P3-02 훅에서 parse 결과 재사용/디바운스 설계; 스니펫(커서 줄)·트랜잭션(문서) 들여쓰기 규칙 이원화는 P3-02 스니펫 재구성으로 해소, Phase 3 exit 점검 항목 | 13.5 재검토 |
 | 2026-09-18 KST | Claude | `review_gui_p2_03` 2차 APPROVE → P2-03 APPROVED. Phase 2 PR 3/3 승인. nit 4건(118-10~13)은 P3-02 cleanup 커밋 후보로 기록 | 13.5 판정 |

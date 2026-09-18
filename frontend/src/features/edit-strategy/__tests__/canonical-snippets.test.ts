@@ -181,6 +181,67 @@ describe("canonical StrategySpec snippets", () => {
     expect(result.edit.nextSource.replaceAll("\r\n", "")).not.toContain("\n");
   });
 
+  it.each([
+    [
+      "# 첫 키 설명\nsig\nrisk: {}\n",
+      "# 첫 키 설명\nsignal:\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null\nrisk: {}\n",
+    ],
+    [
+      "risk:\n  a: 1\n# 주석\nsig\ndata: {}\n",
+      "risk:\n  a: 1\n# 주석\nsignal:\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null\ndata: {}\n",
+    ],
+    [
+      "\nsig\nrisk: {}\n",
+      "\nsignal:\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null\nrisk: {}\n",
+    ],
+    [
+      "# c\r\nsig\r\nrisk: {}\r\n",
+      "# c\r\nsignal:\r\n  score_threshold: null\r\n  regime_field_id: null\r\n  regime_minimum: null\r\nrisk: {}\r\n",
+    ],
+  ])(
+    "keeps the snippet on the cursor line below leading comments and blank lines (review P1-1)",
+    (source, expected) => {
+      const snippet = findSnippet(catalog(), "section:signal");
+      const cursor = source.indexOf("sig") + 3;
+      const result = planSnippetEdit(
+        source,
+        "yaml",
+        { from: cursor, to: cursor },
+        snippet,
+      );
+      expect(result.status).toBe("ok");
+      if (result.status !== "ok") return;
+      expect(result.edit.nextSource).toBe(expected);
+      // 교체 범위는 부분 키 `sig`부터 그 줄 끝까지다(머리말은 범위 밖).
+      expect(result.edit.from).toBe(cursor - 3);
+    },
+  );
+
+  it("inserts a factor item on the cursor line, below the comment that describes the next item", () => {
+    const snippet = findSnippet(catalog(), "factor:server.momentum");
+    const source =
+      "factors:\n  # 첫 팩터 설명\n  \n  - factor_id: other\n    label: o\n    direction: high\n    graph: {}\n";
+    const cursor = source.indexOf("  \n  - factor_id") + 2;
+    const result = planSnippetEdit(
+      source,
+      "yaml",
+      { from: cursor, to: cursor },
+      snippet,
+    );
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(
+      result.edit.nextSource.startsWith(
+        "factors:\n  # 첫 팩터 설명\n  - factor_id: server.momentum\n",
+      ),
+    ).toBe(true);
+    expect(
+      result.edit.nextSource.endsWith(
+        "\n  - factor_id: other\n    label: o\n    direction: high\n    graph: {}\n",
+      ),
+    ).toBe(true);
+  });
+
   it("inserts a catalog factor as an indented array item at the cursor", () => {
     const snippet = findSnippet(catalog(), "factor:server.momentum");
     const source = 'schema_version: "1.1"\nfactors:\n  ';

@@ -55,9 +55,17 @@ export const strategyDocumentArbitrary = (): fc.Arbitrary<ArbitraryTree> =>
     )
     .map(([leaf, rest]) => ({ schema_version: "1.1", ...leaf, ...rest }));
 
-/** 줄 인덱스 목록: 각 줄 앞에 그 줄의 들여쓰기로 `# c<n>` 주석 줄을 넣을지 결정한다. */
+/**
+ * 줄 인덱스 목록: 각 줄 앞에 그 줄의 들여쓰기로 `# c<n>` 주석 줄을 넣을지 결정한다. 문서가 대개 10줄
+ * 안팎이므로 줄마다 독립적으로(약 1/3) 뽑아, "두 항목 사이의 주석"·"첫 형제 위의 주석"·"머리말 주석"
+ * 같은 모양이 자주 나오게 한다(P3-02 리뷰 P1-2: 0~40 균등 3개로는 그 모양이 6000 샘플에 0건이었다).
+ */
 export const commentPlanArbitrary = (): fc.Arbitrary<readonly number[]> =>
-  fc.uniqueArray(fc.nat(40), { maxLength: 3 });
+  fc
+    .array(fc.integer({ min: 0, max: 2 }), { minLength: 48, maxLength: 48 })
+    .map((rolls) =>
+      rolls.flatMap((roll, index) => (roll === 0 ? [index] : [])),
+    );
 
 /**
  * tree → YAML 텍스트. 주석은 block scalar 본문 안이 아닌 줄 앞에만 넣는다(들여쓰기가 같은 다음 줄의

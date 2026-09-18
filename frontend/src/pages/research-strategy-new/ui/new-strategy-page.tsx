@@ -51,12 +51,11 @@ import {
  * `__tests__/new-strategy-starter.test.ts`가 fixture로 단언한다(Phase 2 감사 DEFECT-P2X-001).
  */
 export const NEW_STRATEGY_STARTER = 'schema_version: "1.1"\ntitle: ""\n';
-const STARTER = NEW_STRATEGY_STARTER;
 const ROUTE = "/research/strategies/new";
 const NEW_DRAFT: DocumentSource = {
   kind: "new",
   format: "yaml",
-  source: STARTER,
+  source: NEW_STRATEGY_STARTER,
 };
 
 /**

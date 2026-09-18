@@ -157,7 +157,12 @@ def _relocate_comments_of_removed_keys(snapshots: list[_MappingSnapshot]) -> Non
 
 
 def _prepend_before_key(owner: CommentedMap, key: str, lines: str) -> None:
-    """`key` 줄 앞에 독립 주석 줄들을 둔다(ruamel `ca.items[key]` 슬롯 [1] = 키 앞 주석 토큰들)."""
+    """`key` 줄 앞에 독립 주석 줄들을 둔다(ruamel `ca.items[key]` 슬롯 [1] = 키 앞 주석 토큰들).
+
+    `key`가 시퀀스 항목의 첫 키면 ruamel은 `-`만 있는 줄 뒤에 주석과 항목 내용을 다음 줄로 내려
+    찍는다(`-` 단독 줄 + 원래 열의 주석 + 키). 유효한 YAML이고 reparse가 같으므로 그대로 둔다
+    (P1-06 리뷰 nit 13).
+    """
     moved = CommentToken(lines, CommentMark(0))
     slot = owner.ca.items.get(key)
     if slot is None:
@@ -200,14 +205,7 @@ def _finish_emptied_sections(
         following = keys[keys.index(section) + 1 :]
         if not following:
             continue
-        next_key = following[0]
-        moved = CommentToken(tail, CommentMark(0))
-        slot = document.ca.items.get(next_key)
-        if slot is None:
-            document.ca.items[next_key] = [None, [moved], None, None]
-        else:
-            existing = slot[1] if len(slot) > 1 and slot[1] is not None else []
-            slot[1] = [moved, *existing]
+        _prepend_before_key(document, following[0], tail)
 
 
 def upgrade_yaml_source(source: str) -> str:

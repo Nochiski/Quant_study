@@ -4,8 +4,6 @@
  * values are copied from backend-owned contracts. The five category names are UI placement from
  * WORKFLOW P4-05, not a second validation model.
  */
-import { stringify } from "yaml";
-
 import type { FactorDefinition } from "../../../shared/api";
 import {
   escapePointerSegment,
@@ -14,6 +12,12 @@ import {
   type SourceFormat,
 } from "../../../shared/lib/yaml12";
 import { resolveRef, type JsonSchema } from "./schema-navigator";
+import {
+  detectEol,
+  planSourceOperation,
+  type PlannedEdit,
+  type SourceOperation,
+} from "./source-transactions";
 
 export const SNIPPET_CATEGORIES = [
   "data",
@@ -43,13 +47,8 @@ export type SnippetCatalogSource = {
   status: "loading" | "ready" | "unavailable" | "incompatible";
 };
 
-export type SnippetEdit = {
-  from: number;
-  to: number;
-  insert: string;
-  selection: { from: number };
-  nextSource: string;
-};
+/** 커서 줄(반쯤 입력한 키)까지 포함한 단일 범위 편집. 텍스트 조립은 `planSourceOperation`이 했다. */
+export type SnippetEdit = PlannedEdit;
 
 export type SnippetEditFailure =
   "yaml-only" | "selection" | "cursor-context" | "duplicate" | "parse";
@@ -276,51 +275,6 @@ export const buildCanonicalSnippetCatalog = (
   return snippets;
 };
 
-const yamlFragment = (value: unknown): string =>
-  stringify(value, { lineWidth: 0 }).replace(/\n$/, "");
-
-const indentFragment = (
-  fragment: string,
-  indent: string,
-  eol: "\n" | "\r\n",
-): string => fragment.split("\n").join(`${eol}${indent}`);
-
-const fragmentFor = (
-  snippet: CanonicalSnippet,
-  pointer: string,
-  siblings: readonly string[],
-  prefix: string,
-):
-  | { status: "ok"; fragment: string }
-  | { status: "error"; reason: SnippetEditFailure } => {
-  if (snippet.kind === "section") {
-    if (pointer !== "" || !snippet.sectionKey.startsWith(prefix))
-      return { status: "error", reason: "cursor-context" };
-    if (siblings.includes(snippet.sectionKey))
-      return { status: "error", reason: "duplicate" };
-    return {
-      status: "ok",
-      fragment: yamlFragment({ [snippet.sectionKey]: snippet.value }),
-    };
-  }
-
-  // schema 1.1: `factors` 시퀀스 안(항목 추가)이거나, 아직 `factors`가 없는 루트(시퀀스 신설)만 허용한다.
-  const sequencePointer = `/${escapePointerSegment(snippet.sectionKey)}`;
-  if (prefix !== "" && !snippet.sectionKey.startsWith(prefix))
-    return { status: "error", reason: "cursor-context" };
-  if (pointer === sequencePointer && prefix === "")
-    return { status: "ok", fragment: yamlFragment([snippet.value]) };
-  if (pointer === "") {
-    if (siblings.includes(snippet.sectionKey))
-      return { status: "error", reason: "duplicate" };
-    return {
-      status: "ok",
-      fragment: yamlFragment({ [snippet.sectionKey]: [snippet.value] }),
-    };
-  }
-  return { status: "error", reason: "cursor-context" };
-};
-
 const containsSnippetIdentity = (
   tree: Record<string, unknown>,
   snippet: CanonicalSnippet,
@@ -339,8 +293,74 @@ const containsSnippetIdentity = (
 };
 
 /**
- * Plans one cursor-local insertion and preflights the complete next document with the shared
- * YAML 1.2 parser. The caller applies only the returned range edit, never a whole-source append.
+ * 커서 줄(반쯤 입력한 키나 빈 줄)을 통째로 뺀 원문과, 그 줄이 있던 자리(`anchor`). 마지막 줄이면 앞의
+ * EOL을 함께 빼고 anchor는 문서 끝이다. 스니펫은 이 자리에 들어간다(P3-02 리뷰 P1-1: 선행 주석·빈 줄 위로
+ * 올라가지 않는다).
+ */
+const withoutCursorLine = (
+  source: string,
+  lineStart: number,
+  lineEnd: number,
+): { text: string; anchor: number } => {
+  const eol = source.startsWith("\r\n", lineEnd)
+    ? 2
+    : source.startsWith("\n", lineEnd)
+      ? 1
+      : 0;
+  if (eol > 0)
+    return {
+      text: `${source.slice(0, lineStart)}${source.slice(lineEnd + eol)}`,
+      anchor: lineStart,
+    };
+  const previous = source.slice(0, lineStart).replace(/\r?\n$/, "");
+  return {
+    text: `${previous}${source.slice(lineEnd)}`,
+    anchor: previous.length,
+  };
+};
+
+/**
+ * 원문과 다음 원문의 차이를 커서 줄을 포함하는 단일 범위로 만든다. 공통 접두는 커서 줄의 키 시작
+ * (`from`)까지만, 공통 접미는 커서 줄 끝(`lineEnd`)부터만 인정하므로 반쯤 입력한 키가 교체 범위에
+ * 들어간다(편집기 history가 "sig → signal: …" 한 번으로 남는다).
+ */
+const singleRangeEdit = (
+  source: string,
+  next: string,
+  from: number,
+  lineEnd: number,
+): SnippetEdit => {
+  let prefix = 0;
+  while (
+    prefix < from &&
+    prefix < next.length &&
+    source[prefix] === next[prefix]
+  )
+    prefix += 1;
+  let suffix = 0;
+  while (
+    suffix < source.length - lineEnd &&
+    suffix < next.length - prefix &&
+    source[source.length - 1 - suffix] === next[next.length - 1 - suffix]
+  )
+    suffix += 1;
+  const to = source.length - suffix;
+  const insert = next.slice(prefix, next.length - suffix);
+  const cursor = prefix + insert.length;
+  return {
+    from: prefix,
+    to,
+    insert,
+    nextSource: next,
+    selection: { from: cursor, to: cursor },
+  };
+};
+
+/**
+ * 커서 문맥을 `insert-key`/`insert-item` 연산으로 번역한다(P3-02). 텍스트 조립·들여쓰기·EOL·preflight는
+ * 모두 `planSourceOperation`의 몫이고, 이 함수는 (1) 커서 줄의 반쯤 입력한 키를 뺀 원문을 만들고
+ * (2) 커서 줄의 위치를 형제 순서(`before`/`index`)로 옮겨 적은 뒤 (3) 결과를 원문 대비 단일 범위
+ * 편집으로 되돌린다.
  */
 export const planSnippetEdit = (
   source: string,
@@ -359,8 +379,12 @@ export const planSnippetEdit = (
     selection.from !== selection.to
   )
     return { status: "error", reason: "selection" };
-  const current = parseSource(source, "yaml");
-  if (current.status === "ok" && containsSnippetIdentity(current.tree, snippet))
+  // 중복 판정은 커서 문맥보다 먼저, 원문 전체로 한다(커서가 어디든 같은 팩터는 한 번만).
+  const original = parseSource(source, "yaml");
+  if (
+    original.status === "ok" &&
+    containsSnippetIdentity(original.tree, snippet)
+  )
     return { status: "error", reason: "duplicate" };
   const cursor = selection.from;
   const context = describeYamlCursor(source, cursor);
@@ -377,31 +401,78 @@ export const planSnippetEdit = (
         : foundLineEnd;
   if (source.slice(cursor, lineEnd).trim() !== "")
     return { status: "error", reason: "cursor-context" };
-  const indent = source.slice(lineStart, context.from);
-  if (!/^ *$/.test(indent))
+  if (!/^ *$/.test(source.slice(lineStart, context.from)))
+    return { status: "error", reason: "cursor-context" };
+  if (!snippet.sectionKey.startsWith(context.prefix))
     return { status: "error", reason: "cursor-context" };
 
-  const planned = fragmentFor(
-    snippet,
-    context.pointer,
-    context.siblings,
-    context.prefix,
+  const { text: stripped, anchor } = withoutCursorLine(
+    source,
+    lineStart,
+    lineEnd,
   );
-  if (planned.status === "error") return planned;
-  const eol = source.includes("\r\n") ? "\r\n" : "\n";
-  const insert = indentFragment(planned.fragment, indent, eol);
-  const nextSource = `${source.slice(0, context.from)}${insert}${source.slice(lineEnd)}`;
-  if (parseSource(nextSource, "yaml").status !== "ok")
-    return { status: "error", reason: "parse" };
-  const selectionFrom = context.from + insert.length;
+  const parsed = parseSource(stripped, "yaml");
+  const tree = parsed.status === "ok" ? parsed.tree : {};
+  if (original.status !== "ok" && containsSnippetIdentity(tree, snippet))
+    return { status: "error", reason: "duplicate" };
+  // 커서 줄이 빠진 원문에서 커서 줄 뒤에 오던 형제는 offset이 lineStart 이상이다.
+  const after = (pointer: string): boolean => {
+    const range =
+      parsed.keyRanges.get(pointer) ?? parsed.valueRanges.get(pointer);
+    return range !== undefined && range.start.offset >= lineStart;
+  };
+  const sequencePointer = `/${escapePointerSegment(snippet.sectionKey)}`;
+  let op: SourceOperation;
+  if (context.pointer === "") {
+    const before = Object.keys(tree).find((key) =>
+      after(`/${escapePointerSegment(key)}`),
+    );
+    op = {
+      kind: "insert-key",
+      parentPointer: "",
+      key: snippet.sectionKey,
+      value: snippet.kind === "section" ? snippet.value : [snippet.value],
+      ...(before === undefined ? {} : { before }),
+    };
+  } else if (
+    snippet.kind === "factor" &&
+    context.pointer === sequencePointer &&
+    context.prefix === ""
+  ) {
+    const items = tree[snippet.sectionKey];
+    const count = Array.isArray(items) ? items.length : 0;
+    let index = 0;
+    while (index < count && !after(`${sequencePointer}/${index}`)) index += 1;
+    op = {
+      kind: "insert-item",
+      parentPointer: sequencePointer,
+      value: snippet.value,
+      index,
+    };
+  } else {
+    return { status: "error", reason: "cursor-context" };
+  }
+
+  const planned = planSourceOperation(stripped, "yaml", op, {
+    eol: detectEol(source),
+    anchor,
+  });
+  if (planned.status === "error") {
+    const reason: SnippetEditFailure =
+      planned.reason === "exists"
+        ? "duplicate"
+        : planned.reason === "parse"
+          ? "parse"
+          : "cursor-context";
+    return { status: "error", reason };
+  }
   return {
     status: "ok",
-    edit: {
-      from: context.from,
-      to: lineEnd,
-      insert,
-      selection: { from: selectionFrom },
-      nextSource,
-    },
+    edit: singleRangeEdit(
+      source,
+      planned.edit.nextSource,
+      context.from,
+      lineEnd,
+    ),
   };
 };

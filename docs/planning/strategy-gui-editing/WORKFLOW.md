@@ -486,18 +486,19 @@ predicate가 선언에서 파생됨(행마다 `condition`으로 재계산한 결
 ```ts
 export type SourceOperation =
   | { kind: "replace-scalar"; pointer: string; value: Scalar }
-  | { kind: "insert-key"; parentPointer: string; key: string; value: unknown }
+  | { kind: "insert-key"; parentPointer: string; key: string; value: unknown; before?: string }
   | { kind: "insert-item"; parentPointer: string; value: unknown; index?: number }
   | { kind: "remove"; pointer: string };
 export type Scalar = string | number | boolean | null;
 export type PlannedEdit = { from: number; to: number; insert: string; nextSource: string; selection: { from: number; to: number } };
 export type PlanFailure = "yaml-only" | "not-found" | "exists" | "not-scalar" | "not-mapping" | "not-sequence" | "parse";
-export const planSourceOperation = (source: string, format: SourceFormat, op: SourceOperation): { status: "ok"; edit: PlannedEdit } | { status: "error"; reason: PlanFailure };
+export const planSourceOperation = (source: string, format: SourceFormat, op: SourceOperation, options?: { eol?: "\n" | "\r\n"; anchor?: number }): { status: "ok"; edit: PlannedEdit } | { status: "error"; reason: PlanFailure };
 ```
+(`before`·`options`는 P3-02가 추가했다.)
 
 - `replace-scalar`: `valueRanges[pointer]` 범위를 `yaml.stringify(value)` 한 줄 literal로 교체.
-  대상이 mapping/sequence면 `not-scalar`. 문자열은 `yaml`이 필요할 때만 따옴표(예: `"1.0"`, `yes`,
-  빈 문자열).
+  대상이 mapping/sequence면 `not-scalar`. 문자열은 `yaml`이 필요할 때만 따옴표(예: `"1.0"`, `"true"`,
+  빈 문자열; `yes`는 YAML 1.2 core에서 plain 문자열이라 따옴표 없이 나간다).
 - `insert-key`: 부모 value 범위의 마지막 줄 다음에 부모 들여쓰기 + 2칸으로 `key: value` fragment.
   부모가 flow `{}`면 value 범위를 block mapping으로 교체. 키가 이미 있으면 `exists`.
 - `insert-item`: 부모 sequence 끝(또는 `index`) 에 `- ...` fragment. `[]`면 block sequence로 교체.
@@ -506,12 +507,28 @@ export const planSourceOperation = (source: string, format: SourceFormat, op: So
 - 들여쓰기 폭은 문서에서 감지(mapping 아래 첫 중첩 키의 열 → 없으면 첫 시퀀스 항목의 `-` 열 → 2;
   빈 컨테이너 확장에만 쓰이고 일반 삽입은 형제의 실제 열을 복사), EOL은 `\r\n`/`\n` 다수결.
   모든 연산은 `parseSource(nextSource).status === "ok"` preflight.
-- 알려진 제한(P3-01 리뷰): 내용이 있는 flow 컬렉션(`{x: 1}`, `[1, 2]`) 안은 편집하지 않는다(fail-closed,
-  사유는 `parse`/`not-sequence`/`not-found`). 값이 비어 있는 `key:` 부모에 `insert-key`는 `not-mapping`이다
-  (P4-02 착수 전 확장 여부 결정). 삭제된 키/항목 **위**의 독립 주석은 그 자리에 남는다(어느 키의 주석인지
-  YAML이 답하지 않으므로 보수적으로 보존). 단, `- - x`처럼 바깥 `-`와 줄을 공유하는 안쪽 첫 항목 삭제는
-  다음 항목의 `-`까지 지우므로 그 사이 주석이 함께 사라진다(P3-01 2차 리뷰 P2-R1; schema 1.1 문서에는
-  시퀀스의 직접 자식 시퀀스가 없어 실사용 경로 밖).
+- 알려진 제한(P3-01 리뷰): 내용이 있는 flow 컬렉션(`{x: 1}`, `[1, 2]`) 안에는 **삽입·삭제**를 하지 않는다
+  (fail-closed, 사유는 `parse`/`not-sequence`/`not-found`; `replace-scalar`는 flow 안 스칼라도 범위 교체로
+  바꾼다 — Phase 3 감사 DEFECT-P3X-001). 삭제된 키/항목 **위**의 독립 주석은 그 자리에 남는다(어느 키의
+  주석인지 YAML이 답하지 않으므로 보수적으로 보존). 예외는 삭제로 부모가 비어 `{}`/`[]`로 접힐 때뿐이다:
+  그 컨테이너 안에 있던 독립 주석은 함께 사라진다(property test의 주석 소유자 규칙: 키 줄과 항목 줄이
+  소유자이고, `remove`는 대상 pointer와 그 아래가 소유한 주석만 지울 수 있다). 부모 `key:` 줄의 줄 끝
+  주석은 남고 빈 컨테이너가 다음 줄로 간다(`a: # 메모` → `a: # 메모\n  {}`; P3-02 리뷰 P2-2). 줄 끝
+  주석은 property의 `commentLines`(독립 주석 줄만 셈)가 보지 않으므로 단위 테스트가 지킨다.
+- P3-02에서 확장(P3-01 알려진 제한 해소): 값이 비어 있는 `key:`(`factors:` → null)는 삽입 연산의 부모로
+  쓰일 때 빈 컨테이너로 본다(`insert-key`면 `{}`, `insert-item`이면 `[]`, 줄 끝 주석은 그대로 두고 그
+  줄 끝 뒤에 block을 연다). 내용이 전혀 없는 문서(빈 줄·주석뿐, parser는 거부)는 **루트 `insert-key`에
+  한해** 빈 mapping으로 본다(새 문서·스니펫 첫 삽입). 삽입 자리 규칙은 키와 항목이 **같다**: 새 키/항목은
+  **앞 형제의 내용 줄 끝 뒤**에 들어간다(`insert-key.before`·`insert-item.index`; 앞 형제가 없으면 부모
+  `key:` 줄 끝 뒤, 루트 첫 키 앞이면 문서 시작). 그래서 대상 형제 위의 독립 주석은 계속 그 대상을
+  설명한다. `- key:`/`- - x`처럼 dash 줄에 붙은 첫 키/항목 앞에는 그 자리에 들어가고 기존 것이 다음 줄로
+  밀린다(P3-02 리뷰 P2-1로 통일; P3-01의 "대상 `-` 자리" 규칙은 폐기). `planSourceOperation`은
+  `options.anchor`(줄 시작 offset 또는 문서 끝)를 받아 형제 순서가 허용하는 구간(앞 형제 줄 끝 ~ 대상 줄
+  시작) 안이면 그 자리에 넣는다 — 스니펫이 커서 줄 자리를 지키는 데 쓴다(P3-02 리뷰 P1-1: 선행 주석·빈 줄
+  위로 올라가지 않는다). `- - x` 안쪽 첫 항목 삭제는 dash 줄 첫 키와 같은 규칙(자기 내용 줄 끝까지 지우고
+  다음 줄 들여쓰기를 걷음)이라 사이 주석이 남는다(2차 리뷰 P2-R1 대안 2). 이 갈래의 회귀 방지는 단위
+  테스트가 맡고, property는 주석 소유자 규칙을 문서 구조로 고정하는 역할이다(생성기는 줄마다 약 1/3
+  확률로 주석을 넣어 두 항목 사이·첫 형제 위·머리말 주석 모양이 자주 나온다).
 - 범위는 `parseSource`의 `valueRanges`/`keyRanges`에서 **정확히 그 pointer로** 읽는다.
   `locateRange`는 pointer가 없으면 조상 범위로 fallback하므로 `replace-scalar`·`remove`에 쓰면 부모
   전체를 지운다. 없는 pointer는 `not-found`다(Phase 2 감사 4.5). mapping/sequence 노드의 range는
@@ -536,19 +553,36 @@ devDependency `fast-check`.
 
 ```ts
 export type SourceTransactions = {
-  apply: (op: SourceOperation, label: string) => void;
-  feedback: TransactionFeedback;   // idle | applied(label) | error(label, reason)
+  apply: (op: SourceOperation, label: string, owner?: string) => void;
+  run: (planner: SourcePlanner, label: string, owner?: string) => void;   // P3-02: 커서 문맥 계획(스니펫)
+  feedback: TransactionFeedback;   // idle | applied(owner, label) | error(owner, label, reason)
   onEditorReady: (editor: CodeEditorHandle | null) => void;
-  enabled: boolean;               // yaml && !composing && parse ok && editor ready
+  enabled: boolean;               // yaml && editorActive && !composing && parse ok && editor ready
+  disabled: TransactionDisabledReason | null;   // P4-02: enabled가 거짓인 이유(json|inactive|composing|syntax|editor)
 };
-export const useSourceTransactions = (state: DocumentState, editorActive?: boolean): SourceTransactions;
+export const useSourceTransactions = (state: DocumentState, editorActive?: boolean, scope?: unknown): SourceTransactions;
 ```
+(`run`·`scope`는 P3-02, `owner`·`disabled`는 Phase 3 감사 R1~R3 대응으로 P4-02가 추가했다.)
 
 - `apply`는 `planSourceOperation(editor.getText(), ...)` → `replaceRange(from, to, insert, selection)`.
   `state.composing`이면 `composing` 오류. feedback scope는 `documentEpoch`로 초기화(기존 스니펫과 동일).
 - 스니펫: `canonical-snippets.ts`의 fragment 문자열 조립(`fragmentFor`, `indentFragment`)을 제거하고
   `planSnippetEdit`는 커서 context를 `insert-key`/`insert-item` 연산으로 번역만 한다. 기존 스니펫
-  테스트 전부 통과(동작 동일).
+  테스트 전부 통과(동작 동일; 예외는 아래 구현 결정의 중복 판정 한 건).
+- 구현 결정(P3-02): 훅은 `run(planner, label)`도 낸다 — 편집기 현재 텍스트·선택으로 계획하는 함수를
+  같은 적용 경로(`replaceRange` 한 번, scroll, focus, feedback)로 태운다. `apply(op)`는
+  `run(({text}) => planSourceOperation(text, "yaml", op))`이고 스니펫은 `run(({text, selection}) =>
+  planSnippetEdit(...))`이다. 스니펫이 연산 하나로 표현되지 않는 이유: 커서 줄에 반쯤 입력한 키(`sig`)를
+  빼고 나서 연산을 계획해야 하고, 결과는 그 키까지 포함한 단일 범위 편집(history 한 번)이어야 한다.
+  `planSnippetEdit`는 (1) 중복 판정(원문 전체, 커서 문맥보다 먼저; 원문이 parse되지 않으면 커서 줄을 뺀
+  원문으로 — 그래서 parse 실패 문서의 섹션 중복은 예전 `duplicate` 대신 `parse`로 보고될 수 있다, 안전
+  방향) (2) 커서 줄을 뺀 원문과 그 줄의 자리(`anchor`) (3) 커서 줄 뒤에 오던 첫 형제 → `before`, 앞에
+  있던 항목 수 → `index` (4) `planSourceOperation(stripped, op, { eol, anchor })` (5) 원문 대비 단일
+  범위 diff(접두는 키 시작까지, 접미는 커서 줄 끝부터)를 한다. EOL은 원문에서 재고 `options.eol`로
+  넘긴다(커서 줄을 빼면 한 줄 문서가 되어 EOL 정보를 잃는 경우). feedback scope는
+  `documentEpoch` + 호출자 `scope`(스니펫은 카탈로그 status)다. 계획은 편집기 `getText()`로 세우므로
+  연산 1회 = parse 2회(계획·preflight)이고 호출은 keystroke가 아니라 확정(blur·Enter·버튼) 시점만이다
+  (P3-01 리뷰 잔여 위험의 처리 방식; P4-02 필드 편집이 이 규칙을 따른다).
 
 **Phase 3 exit**: SoT 점검(정본이 source 하나인지, 프론트에 필드 목록이 없는지).
 

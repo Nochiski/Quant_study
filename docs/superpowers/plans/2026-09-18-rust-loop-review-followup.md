@@ -645,7 +645,7 @@ python 코어 대비 Peak RSS 배수는 callback 1.18배 → 1.14배, tape 1.22�
 
 항목별 기여는 Task마다 따로 쟀다. Peak RSS를 내린 것은 9.1 하나다(100종목
 callback −8.95MiB, tape −8.53MiB, 300종목 tape −23.44MiB). 9.2는 arena 상주를
-30.4MiB → 약 20KiB로 줄이고 run 구간 peak commit을 −5.16MiB(표본 편차 0.06)
+30.4MiB → 약 20KiB(300종목 기준)로 줄이고 run 구간 peak commit을 −5.16MiB(표본 편차 0.06)
 낮추지만 결과 조회까지의 peak working set은 움직이지 않는다 — 이 실행의 working
 set peak이 arena가 가장 큰 순간이 아니라 결과 조회 구간에서 정해지기 때문이다.
 9.3은 100·300종목에서 Dense를 그대로 고르므로 중립이고(상한은 희소 유니버스용),
@@ -693,6 +693,9 @@ PR 9까지 반영 후 100종목 tape에서 feed 적재(`_load_persistent_feed` +
 - [ ] 이슈 #98 댓글: PR 링크 11개, 최종 표, `.claude/rules/pr-review.md` 양식으로 남은 결정(Phase 3-4). 게이트 전부 통과면 종료 제안.
 - [ ] 이슈 #98 댓글에 후속 항목으로 남길 것: 코어 간 instrument key 충돌 거부 통일(현재 persistent만 거부, python 코어는 완주). #135(`7E+2` 수량 표기). 아래 8.3 항목.
   - [ ] PR 8에서 되돌린 tape 경량 프레임(8.3) — 알림(fill·order_update) 선언 tape 워크로드를 재는 벤치 옵션이 생기면 `make_native_frame`을 다시 올린다. 현재 벤치는 `MARKET`만 선언해 NOTIFY 분기가 돌지 않아 측정으로 유지를 정당화할 수 없었다.
+  - [ ] 라우터 `instrument_not_snapshot` 메시지의 `available` 목록이 `HashMap` 순서(비결정)인데 python(`types/market.py::MarketSnapshot.bar`)은 feed 순서 + `ts=` 접두까지 담는다 — byte 동일이 아니고 이를 고정하는 테스트도 없다(PR 9 이전부터 그랬고 PR 9는 키 타입만 바꿔 동작은 그대로다).
+- [ ] 스펙 "측정 경계" 절에 도구 한계를 남길 것: `scripts/bench_universe.py::peak_rss_bytes()`는 Windows `PeakWorkingSetSize`라 run 도중 잠깐 커밋됐다 풀리는 버퍼를 못 잡는다. PR 9의 큐 arena(300종목 30.4MiB)가 그 예로, working set peak은 움직이지 않고 `PeakPagefileUsage`(peak commit)로만 −5.16MiB가 보였다. 메모리 항목을 이 지표 하나로 판정하면 안 된다.
+- [ ] PR 11 재측정에 **희소 유니버스 1건**(밀도 20% 미만 → `RowIndex::Sparse` 경로)을 추가할 것. 현재 벤치는 100·300종목 모두 밀도 100%라 Dense만 돈다 — Sparse의 `row_at` 해시 조회 비용이 한 번도 측정되지 않았다.
 - [ ] 메모리 `rust-loop-driver-pr-stack.md` 갱신.
 
 ### AC

@@ -41,7 +41,7 @@
       "final_equity": 2739581587.6749997,
       "orders": 982,
       "fills": 978,
-      "peak_rss_after_materialize_bytes": 76877824,
+      "peak_rss_after_materialize_bytes": null,
       "process_peak_rss_bytes": 76877824
     },
     "rust_legacy": {
@@ -74,7 +74,7 @@
       "final_equity": 2739581587.6749997,
       "orders": 982,
       "fills": 978,
-      "peak_rss_after_materialize_bytes": 76877824,
+      "peak_rss_after_materialize_bytes": null,
       "process_peak_rss_bytes": 76877824
     },
     "rust": {
@@ -107,7 +107,7 @@
       "final_equity": 2739581587.6749997,
       "orders": 982,
       "fills": 978,
-      "peak_rss_after_materialize_bytes": 76877824,
+      "peak_rss_after_materialize_bytes": null,
       "process_peak_rss_bytes": 76877824
     }
   }

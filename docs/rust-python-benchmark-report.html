@@ -743,7 +743,7 @@
           <div><span>Rust</span><strong style="color:var(--rust)">0.051s / 0.039s</strong></div>
         </div>
         <div class="insight" style="margin-top:14px"><strong>RSS 게이트:</strong> callback 경로는 1.23×로 통과, tape 경로는 1.28×로 미달입니다 (M6 시점 1.169×). Trace 차이 0. <code>--core all</code>은 세 코어가 한 프로세스를 공유해 RSS가 격리되지 않으므로 정본은 단독 실행입니다.</div>
-        <div class="insight" style="margin-top:14px"><strong>워크벤치 e2e:</strong> 어댑터 전체는 100종목에서 3.001s → 2.337s (<strong>1.28×</strong>). Rust에서 <code>engine.run</code> 0.389s 뒤 구간이 1.130s로 <strong>2.91배</strong>이며 결과 조회 0.542s와 raw artifact 변환 0.515s가 지배적입니다.</div>
+        <div class="insight" style="margin-top:14px"><strong>워크벤치 e2e:</strong> 어댑터 전체는 100종목에서 3.160s → 2.613s (<strong>1.21×</strong>). Rust에서 <code>engine.run</code> 0.407s 뒤 구간이 1.228s로 <strong>3.02배</strong>이며 결과 조회 0.584s와 raw artifact 변환 0.556s가 지배적입니다. HTTP 요청과 같은 모양의 out-of-sample metric window 1개를 포함한 측정입니다.</div>
         <div class="insight" style="margin-top:18px"><strong>데이터 범위:</strong> 저장소 fixture의 전 기간 완주 종목은 4개입니다. 100/300 수치는 실제 KRX 가격 경로를 결정론적으로 복제한 주문 집중 확장 부하입니다.</div>
       </article>
     </section>

@@ -57,7 +57,8 @@
   rust 216.7 MiB = 1.27배(**근접 미달**). 첫 측정은 1.46/1.55배였는데 종료 배치가 Rust wire를 Python
   tuple로 한 번에 복제하는 구간이 원인이라, 레코드 인덱스만 넘기고 payload는 `record_payload(seq)`로
   필요할 때 읽도록 바꾸고 종료 시 큐 arena·tape 프레임을 해제했다.
-- 최종 게이트 판정: 세션당 FFI 0회 **통과**. 100종목 callback 4.22배(목표 2배 **통과**),
+- 최종 게이트 판정 **(2026-09-18 측정 경계 교정으로 무효 — 아래 "2026-09-18 측정 경계 교정"의
+  재판정을 본다)**: 세션당 FFI 0회 **통과**. 100종목 callback 4.22배(목표 2배 **통과**),
   tape 경로 4.73배(최소 3배 **통과**, 목표 5배는 근접 미달). 300종목 callback 3.55배·tape 4.47배(목표 2배 **통과**).
   4종목 fixture 회귀 없음(3.13~5.18배 향상).
 - 남은 Python 시간: feed 적재(열 comprehension), 전략 콜백 본체와 `decision_to_wire`, 결과 조회 시
@@ -454,7 +455,8 @@ M6 측정 판정 (2026-09-03):
 | 실제 4종목 fixture · tape | 0.107초 | 0.039초 | 5.93배 | **2.77배** |
 
 Rust `total`의 절반 안팎이 결과 조회다 (100종목 callback 0.346초 + 0.440초, 300종목 callback
-1.097초 + 1.074초). Python 코어의 조회 구간은 모든 워크로드에서 1마이크로초 미만이다.
+1.097초 + 1.074초). Python 코어의 조회 구간은 모든 워크로드에서 중앙값 0.2~0.9µs, 최대 표본
+2.1µs다 — 이미 만들어진 튜플을 꺼내는 속성 접근 비용뿐이다.
 
 | 코어 격리 Peak RSS (100종목, `--core <one>` 단독 실행) | python | rust | 배수 |
 |---|---|---|---|
@@ -465,17 +467,22 @@ Rust `total`의 절반 안팎이 결과 조회다 (100종목 callback 0.346초 +
 `workload.rss_isolated`가 그 구분을 들고 있다.
 
 워크벤치 e2e (`scripts/bench_workbench_adapter.py --instruments 100 --repeat 3`,
-`benchmarks/baseline/rust-loop-workbench-100.json`): 어댑터 전체 python 3.001초 → rust 2.337초로
-**1.28배**. Rust에서 `engine.run` 0.389초 뒤에 오는 구간이 1.130초로 `engine.run`의 **2.91배**이며,
-그 안에서 결과 조회 0.542초와 raw artifact 변환 0.515초가 지배적이다. `engine.run` 앞의
-dataset→엔진 입력 변환(python 0.479초 / rust 0.555초)과 전략·피드 조립(python 0.136초 /
-rust 0.305초)은 코어와 무관한 같은 Python 코드이므로, 두 코어의 차이는 할당기·GC 상태 차이로
-읽어야 한다. 어느 쪽이든 Rust로 줄일 수 없는 구간이다.
+`benchmarks/baseline/rust-loop-workbench-100.json`, HTTP 요청과 같은 모양의 out-of-sample
+metric window 1개 포함): 어댑터 전체 python 3.160초 → rust 2.613초로 **1.21배**. Rust에서
+`engine.run` 0.407초 뒤에 오는 구간이 1.228초로 `engine.run`의 **3.02배**이며, 그 안에서 결과
+조회 0.584초와 raw artifact 변환 0.556초가 지배적이다.
+
+`engine.run` 앞의 dataset→엔진 입력 변환(python 0.528초 / rust 0.776초)과 전략·피드 조립
+(python 0.175초 / rust 0.176초)은 코어와 무관한 같은 Python 코드다. 회차 사이에
+`gc.collect()`를 넣자 전략·피드 조립의 코어 간 차이는 사라졌고, 남은 dataset 변환 쪽 차이는
+할당기 상태 차이로 읽어야 한다. 어느 쪽이든 Rust로 줄일 수 없는 구간이다.
 
 게이트 재판정 (정직한 경계 기준):
 
 - 100종목 목표 2배: **통과(callback 2.16배, tape 2.04배)**. 2026-09-17 기록의 4.22/4.73배는 무효.
 - 300종목 목표 2배: **미달(callback 1.93배, tape 1.82배)**. 2026-09-17 기록의 3.55/4.47배는 무효.
+- TargetTape 경로 최소 3배 / 목표 5배 (이슈 #98 원문 게이트): **미달(2.04배)**. 최소선도
+  넘지 못한다. 2026-09-17 기록의 4.73배는 조회 비용이 빠진 값이다.
 - 4종목 fixture 회귀 금지: **통과(2.14~2.77배 향상)**.
 - 세션당 FFI 0회: **통과**. 측정 경계와 무관하며 판정이 바뀌지 않는다.
 - Peak RSS 1.25배 이하: callback **통과(1.23배)**, tape **미달(1.28배)**.

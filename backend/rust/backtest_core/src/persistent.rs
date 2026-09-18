@@ -662,20 +662,42 @@ impl PersistentEngine {
     }
 
     /// 종료 여부와 무관한 현재 레코드 인덱스 (전략 예외 시 partial trace 조회용).
-    fn record_batch(&self) -> Vec<RecordIndexWire> {
-        self.records.index()
+    fn record_batch(&self) -> PyResult<Vec<RecordIndexWire>> {
+        self.records.index_for_trace()
     }
 
-    /// 레코드 하나의 payload wire. Python이 공개 객체를 만들 때만 호출한다.
+    /// 레코드 하나의 payload wire. partial trace 조사 같은 단건 디버그용이다.
     fn record_payload(&self, py: Python<'_>, seq: usize) -> PyResult<PyObject> {
         self.records.payload(py, seq)
     }
 
-    fn equity_series(&self) -> Vec<f64> {
+    /// kind 하나의 `(seq, session_index, payload)`를 seq 순서로 한 번에 돌려준다.
+    /// 종료 전 partial trace에서도 동작한다 — 그 시점까지 쌓인 레코드만 답한다.
+    fn record_payloads(&self, py: Python<'_>, kind: u8) -> PyResult<Vec<(u64, usize, PyObject)>> {
+        self.records.payloads_of(py, kind)
+    }
+
+    /// kind 하나의 payload를 `limit`개까지 넘기면서 그 자리를 해제한다. 빈 목록이면 끝이다.
+    ///
+    /// 호출 순서 계약: Python은 `finish()` 직후 `equity_series`/`traded_notional`로 metrics를
+    /// 먼저 계산하고, 그 뒤 결과 조회에서만 kind를 넘겨받는다. 넘긴 payload를
+    /// `record_payload`·`record_payloads`·`equity_series`·`traded_notional`로 다시 읽으면
+    /// 오류다. 모든 레코드를 넘기면 인덱스까지 돌려주므로 `record_batch`도 오류가 된다
+    /// (인덱스는 `finish()`가 이미 Python에 넘겼다).
+    fn drain_payloads(
+        &mut self,
+        py: Python<'_>,
+        kind: u8,
+        limit: usize,
+    ) -> PyResult<Vec<(u64, usize, PyObject)>> {
+        self.records.drain(py, kind, limit)
+    }
+
+    fn equity_series(&self) -> PyResult<Vec<f64>> {
         self.records.equity_series()
     }
 
-    fn traded_notional(&self) -> f64 {
+    fn traded_notional(&self) -> PyResult<f64> {
         self.records.traded_notional()
     }
 

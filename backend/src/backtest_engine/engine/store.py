@@ -909,12 +909,23 @@ class PersistentEventStore(EventStore):
 
         세션·종목 조회표는 `bind_feed`로 받아 둔 feed에서 레코드가 덮는 구간만 잘라 쓴다
         (`_covered_feed`).
+
+        캐시는 종료된 실행에만 둔다. 종료 전 partial trace는 레코드가 더 쌓일 수 있어
+        캐시가 곧 stale이고, 레코드 수를 캐시 키로 쓰면 그 키를 만들려고 조회마다
+        `record_batch()`로 인덱스 전체를 다시 받아야 한다.
         """
+        finished = self._finished_batch
+        if finished is None:
+            return self._persistent_tables(self._runtime.record_batch())
         cached = self._result_tables_cache
-        batch = self._batch()
-        key = len(batch)
-        if cached is not None and cached[0] == key:
+        if cached is not None and cached[0] == len(finished):
             return cached[1]
+        tables = self._persistent_tables(finished)
+        self._result_tables_cache = (len(finished), tables)
+        return tables
+
+    def _persistent_tables(self, batch: list[tuple[int, int, int]]) -> ResultTables:
+        """Rust `result_tables()` 한 번으로 받은 행에 세션·종목 조회표를 붙인다."""
         sessions, instruments = self._covered_feed(batch)
         (
             snapshot_rows,
@@ -924,7 +935,7 @@ class PersistentEventStore(EventStore):
             cost_rows,
             (traded_notional, total_fees, total_slippage_cost),
         ) = self._runtime.result_tables()
-        tables = ResultTables(
+        return ResultTables(
             sessions=sessions,
             instruments=instruments,
             snapshots=tuple(snapshot_rows),
@@ -938,8 +949,6 @@ class PersistentEventStore(EventStore):
                 total_slippage_cost=total_slippage_cost,
             ),
         )
-        self._result_tables_cache = (key, tables)
-        return tables
 
     def _covered_feed(
         self, batch: list[tuple[int, int, int]]

@@ -22,6 +22,49 @@ class PriceField(Enum):
     VOLUME = "volume"
 
 
+def validate_bar_values(
+    symbol: str,
+    ts: datetime,
+    open_price: float,
+    high_price: float,
+    low_price: float,
+    close_price: float,
+    volume: int,
+) -> None:
+    """bar 한 행의 가격·거래량 불변식을 검사한다.
+
+    `Bar` 객체를 만드는 경로와 열(column) 단위로 적재하는 경로가 같은 규칙·같은 메시지를
+    쓰도록 여기가 단일 정본이다. 열 경로는 객체를 만들지 않고 이 함수만 부른다.
+
+    Args:
+        symbol: 메시지에 실을 종목 심볼.
+        ts: 봉 마감 시각.
+        open_price: 시가. high_price: 고가. low_price: 저가. close_price: 종가.
+        volume: 거래량.
+
+    Raises:
+        ValueError: 가격이 0 이하이거나, OHLC 불변식 또는 거래량 부호를 어길 때.
+    """
+    if min(open_price, high_price, low_price, close_price) <= 0:
+        # 가격 0은 거래정지 마커 등 결측의 다른 표기다. 0원 체결·0원 평가가
+        # 회계를 조용히 오염시키므로 적재 단계에서 거른다.
+        raise ValueError(
+            "bar prices must be > 0 — "
+            f"instrument={symbol} ts={ts} "
+            f"o={open_price} h={high_price} l={low_price} c={close_price}"
+        )
+    body_high = max(open_price, close_price)
+    body_low = min(open_price, close_price)
+    if high_price < body_high or low_price > body_low:
+        raise ValueError(
+            "OHLC invariant violated: expected high >= max(open, close) and "
+            f"low <= min(open, close) — instrument={symbol} ts={ts} "
+            f"o={open_price} h={high_price} l={low_price} c={close_price}"
+        )
+    if volume < 0:
+        raise ValueError(f"volume must be >= 0 — instrument={symbol} ts={ts} volume={volume}")
+
+
 @dataclass(frozen=True)
 class Bar:
     """한 종목의 한 시점 시장 상태. DataFeed가 만든 원본이므로 수정하지 않는다.
@@ -38,27 +81,9 @@ class Bar:
     volume: int
 
     def __post_init__(self) -> None:
-        if min(self.open, self.high, self.low, self.close) <= 0:
-            # 가격 0은 거래정지 마커 등 결측의 다른 표기다. 0원 체결·0원 평가가
-            # 회계를 조용히 오염시키므로 Bar 단계에서 거른다.
-            raise ValueError(
-                "bar prices must be > 0 — "
-                f"instrument={self.instrument.symbol} ts={self.ts} "
-                f"o={self.open} h={self.high} l={self.low} c={self.close}"
-            )
-        body_high = max(self.open, self.close)
-        body_low = min(self.open, self.close)
-        if self.high < body_high or self.low > body_low:
-            raise ValueError(
-                "OHLC invariant violated: expected high >= max(open, close) and "
-                f"low <= min(open, close) — instrument={self.instrument.symbol} ts={self.ts} "
-                f"o={self.open} h={self.high} l={self.low} c={self.close}"
-            )
-        if self.volume < 0:
-            raise ValueError(
-                f"volume must be >= 0 — instrument={self.instrument.symbol} "
-                f"ts={self.ts} volume={self.volume}"
-            )
+        validate_bar_values(
+            self.instrument.symbol, self.ts, self.open, self.high, self.low, self.close, self.volume
+        )
 
 
 @dataclass(frozen=True)

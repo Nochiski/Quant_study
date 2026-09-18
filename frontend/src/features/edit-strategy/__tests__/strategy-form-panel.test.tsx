@@ -391,6 +391,33 @@ describe("StrategyFormPanel review follow-up (P4-02 1차)", () => {
   });
 });
 
+describe("StrategyFormPanel section collapse (P4-04)", () => {
+  it("toggles aria-expanded and hides the section body while keeping it in the DOM", async () => {
+    const user = userEvent.setup();
+    renderPanel(MINIMAL, stubTransactions());
+    const toggle = section("risk").getByRole("button", {
+      name: "risk",
+      expanded: true,
+    });
+    const weight = () =>
+      section("risk").queryByRole("spinbutton", named("max_name_weight"));
+    expect(weight()).not.toBeNull();
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    // 접힌 본문은 `hidden`이라 접근성 트리에서 빠지지만 DOM 노드는 남는다(입력 상태 유지).
+    expect(weight()).toBeNull();
+    expect(
+      section("risk").getByRole("spinbutton", {
+        ...named("max_name_weight"),
+        hidden: true,
+      }),
+    ).toBeInTheDocument();
+    await user.keyboard("{Enter}");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(weight()).not.toBeNull();
+  });
+});
+
 describe("StrategyFormPanel reset on the last written field (audit R4)", () => {
   it("collapses the section to `{}` and drops the standalone comment inside it, keeping the key line comment", async () => {
     const user = userEvent.setup();

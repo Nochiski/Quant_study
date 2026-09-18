@@ -290,7 +290,7 @@ export const NewStrategyPage = () => {
           />
         }
         projections={{
-          json: <StrategyProjectionPanel projection={projection} view="json" />,
+          json: <StrategyProjectionPanel projection={projection} />,
           form: (
             <StrategyFormPanel
               projection={form.projection}

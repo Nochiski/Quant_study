@@ -5,13 +5,11 @@ import "./strategy-projection-panel.css";
 
 type StrategyProjectionPanelProps = {
   projection: StrategyProjection;
-  view: "json";
 };
 
 /** backend canonical StrategySpec JSON(읽기 전용). Form view는 P4-04부터 `StrategyFormPanel`이 맡는다. */
 export const StrategyProjectionPanel = ({
   projection,
-  view,
 }: StrategyProjectionPanelProps) => {
   if (projection.status === "unavailable") {
     return (
@@ -24,11 +22,11 @@ export const StrategyProjectionPanel = ({
   return (
     <section
       className="strategy-projection"
-      aria-label={t(`projection.${view}.label`)}
+      aria-label={t("projection.json.label")}
     >
       <header className="strategy-projection__header">
         <div>
-          <strong>{t(`projection.${view}.label`)}</strong>
+          <strong>{t("projection.json.label")}</strong>
           <span>{t("projection.readOnly")}</span>
         </div>
         <Badge tone={projection.stale ? "warn" : "ok"}>

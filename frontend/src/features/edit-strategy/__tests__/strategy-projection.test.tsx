@@ -152,14 +152,12 @@ describe("StrategySpec projection model", () => {
 describe("StrategySpec projection UI", () => {
   const ready = projectStrategySpec(compile());
 
-  // Form view는 P4-04부터 편집 가능한 `StrategyFormPanel`이 맡는다(strategy-form-panel.test.tsx). 배지의 근거가
-  // backend 진단이라는 규칙은 `projection.inapplicablePointers`가 계속 지킨다.
+  // Form view는 P4-04부터 편집 가능한 `StrategyFormPanel`이 맡는다(strategy-form-panel.test.tsx).
   it("labels stale and unavailable projections without offering them as current", () => {
     if (ready.status !== "ready") throw new Error("fixture must project");
     const { rerender } = render(
       <StrategyProjectionPanel
         projection={{ ...ready, stale: true }}
-        view="json"
       />,
     );
     const region = screen.getByRole("region", { name: "StrategySpec JSON" });
@@ -174,7 +172,6 @@ describe("StrategySpec projection UI", () => {
     rerender(
       <StrategyProjectionPanel
         projection={{ status: "unavailable" }}
-        view="json"
       />,
     );
     expect(screen.getByRole("status")).toHaveTextContent(

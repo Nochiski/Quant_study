@@ -7,7 +7,10 @@ import type { JsonSchema } from "./schema-navigator";
 export type FormProjectionState = {
   /** runtime schema가 없으면 null. */
   projection: FormProjection | null;
-  /** 현재 텍스트가 parse되지 않아 같은 문서의 마지막 유효 parse로 그렸다(컨트롤은 잠긴다). */
+  /**
+   * 현재 텍스트의 parse가 **실패**해 같은 문서의 마지막 유효 parse로 그렸다(컨트롤은 잠긴다). parse가 아직
+   * 끝나지 않은 디바운스 구간은 stale이 아니다 — 마지막 유효 parse를 조용히 그린다(리뷰 DEFECT-P404-001).
+   */
   stale: boolean;
   /** 삭제 가드가 참조를 찾을 tree(projection과 같은 parse). */
   tree: unknown;
@@ -22,14 +25,18 @@ export const useFormProjection = (
   schema: JsonSchema | null,
 ): FormProjectionState =>
   useMemo(() => {
-    const current =
-      state.parse !== null &&
-      state.parse.status === "ok" &&
-      state.parsedVersion === state.sourceVersion
+    const parsedCurrent =
+      state.parse !== null && state.parsedVersion === state.sourceVersion
         ? state.parse
         : null;
+    const current =
+      parsedCurrent !== null && parsedCurrent.status === "ok"
+        ? parsedCurrent
+        : null;
+    // "parse 실패"와 "parse 대기"를 구분한다: 대기 중에는 배지·문구 없이 마지막 유효 parse를 그린다.
+    const failed = parsedCurrent !== null && current === null;
     const parse = current ?? state.lastValidParse?.result ?? null;
-    const stale = current === null && parse !== null;
+    const stale = failed && parse !== null;
     const tree = parse !== null ? parse.tree : {};
     if (schema === null) return { projection: null, stale, tree };
     return {

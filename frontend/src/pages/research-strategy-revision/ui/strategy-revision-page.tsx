@@ -344,7 +344,7 @@ export const StrategyRevisionPage = () => {
         projections={{
           json:
             stored.format === "yaml" ? (
-              <StrategyProjectionPanel projection={projection} view="json" />
+              <StrategyProjectionPanel projection={projection} />
             ) : undefined,
           form: (
             <StrategyFormPanel

@@ -127,13 +127,12 @@ export const StrategyFormPanel = ({
           )}
         </span>
       </header>
+      {/* 안내 문단은 role 없음: 실시간 알림(role=status)은 feedback 하나뿐이다(리뷰 DEFECT-P404-010). */}
       {stale ? (
-        <p className="strategy-form__state" role="status">
-          {t("form.panel.stale")}
-        </p>
+        <p className="strategy-form__state">{t("form.panel.stale")}</p>
       ) : null}
       {disabled === "json" ? (
-        <p className="strategy-form__state" role="status">
+        <p className="strategy-form__state">
           {t("form.panel.jsonHint")}
         </p>
       ) : null}

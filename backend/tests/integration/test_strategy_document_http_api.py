@@ -220,3 +220,29 @@ def test_malformed_envelope_is_the_only_422() -> None:
         ).status_code
         == 422
     )
+
+
+def test_inapplicable_field_written_explicitly_is_a_warning_with_its_key_range() -> None:
+    """spec D4 (P1-05): top_n 모드에서 명시한 selection_percentile은 실행을 막지 않는
+    warning이다."""
+    client = TestClient(build_http_app())
+    source = _source("quality_momentum.yaml").replace(
+        "  selection_count: 20", "  selection_count: 20\n  selection_percentile: 0.2"
+    )
+    assert "selection_percentile: 0.2" in source
+
+    result = _compile(client, source)
+
+    assert result["spec_hash"] is not None and result["spec"] is not None
+    warnings = [d for d in result["diagnostics"] if d["code"] == "strategy.field.inapplicable"]
+    assert len(warnings) == 1
+    warning = warnings[0]
+    assert warning["severity"] == "warning" and warning["kind"] == "semantic"
+    assert warning["pointer"] == "/portfolio/selection_percentile"
+    assert warning["range"]["start"]["line"] == source.splitlines().index(
+        "  selection_percentile: 0.2"
+    )
+
+    # 같은 값이라도 생략된 필드에는 경고가 없다.
+    silent = _compile(client, _source("quality_momentum.yaml"))
+    assert not [d for d in silent["diagnostics"] if d["code"] == "strategy.field.inapplicable"]

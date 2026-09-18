@@ -263,7 +263,8 @@ class StrategyAuthoringService:
             return _rejected(parsed, schema_version, diagnostics)
 
         spec = hydration.spec
-        validation = validate_strategy(spec)
+        # 문서에 명시된 pointer만 넘긴다: 적용 불가 경고는 작성된 값에만 해당한다 (spec D4).
+        validation = validate_strategy(spec, written_pointers=parsed.key_ranges.keys())
         diagnostics = tuple(
             SourceDiagnostic(
                 code=issue.code,

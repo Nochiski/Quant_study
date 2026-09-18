@@ -1,15 +1,15 @@
 ---
 plan_version: 2
 project: strategy-gui-editing
-project_status: IN_REVIEW
+project_status: APPROVED
 current_phase: P1
-current_pr: P1-01,P1-02,P1-03,P1-04
-active_prs: [P1-01, P1-02, P1-03, P1-04]
-parallel_window: [P1-01, P1-02, P1-03, P1-04]
-last_updated: 2026-09-18T01:31:12+09:00
+current_pr: P1-01,P1-02,P1-03,P1-04,P1-05
+active_prs: [P1-01, P1-02, P1-03, P1-04, P1-05]
+parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05]
+last_updated: 2026-09-18T02:09:24+09:00
 planned_prs: 17
 merged_prs: 0
-approved_prs: 3
+approved_prs: 5
 progress_percent: 0
 ---
 
@@ -23,13 +23,13 @@ progress_percent: 0
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_REVIEW` |
+| Project status | `APPROVED` |
 | Current phase | `P1` |
-| Current/next PR | `P1-01,P1-02,P1-03,P1-04` |
-| Active PR | `P1-01, P1-02, P1-03, P1-04` |
+| Current/next PR | `P1-01,P1-02,P1-03,P1-04,P1-05` |
+| Active PR | `P1-01, P1-02, P1-03, P1-04, P1-05` |
 | Progress | `0 / 17 merged (0%)` |
-| Approved | `3 / 17` |
-| Aggregated at | `2026-09-18 01:31 KST` |
+| Approved | `5 / 17` |
+| Aggregated at | `2026-09-18 02:09 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -43,6 +43,8 @@ progress_percent: 0
 - Form/Graph 편집은 JSON Pointer 범위의 source 트랜잭션이다. 별도 편집 모델을 두지 않는다(ADR D5 개정).
 - P1 backend PR은 `backend/openapi.json`만 재생성하고 frontend generated SDK는 P2-01이 갱신한다.
 - reviewer 서브에이전트는 Opus로만 배정한다. Phase 종료마다 SoT·책임분리 점검 서브에이전트를 돌린다.
+- 알려진 기존 결함(cleanup 후보): `_explanation.py`가 `selection_method: percentile`에서도 `selection_count`를 "N종목"으로
+  요약해 compile의 적용 불가 경고와 모순된다(P1-05 리뷰 P2-005). 실행 결과에는 영향 없음.
 - 알려진 기존 결함(이 initiative 범위 밖, 별도 이슈 후보): safe codec이 YAML 1.1 value 태그 스칼라 `=`를
   `parse()` 밖으로 `ConstructorError`로 던져 `/compile`·`/upgrade`가 500이 난다(P1-04 리뷰 관찰, base부터 재현).
 - 알려진 간격(P1 merge ~ P5-03): `docs/manual/strategy-workbench/README.md`와 이전 initiative WORKFLOW 2.2의
@@ -74,7 +76,7 @@ progress_percent: 0
 <!-- PLAN:PHASES:START -->
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
-| P1 | Backend schema 1.1 | 5 | 0 | `IN_REVIEW` |
+| P1 | Backend schema 1.1 | 5 | 0 | `APPROVED` |
 | P2 | Frontend 1.1 and upgrade UI | 3 | 0 | `WAITING` |
 | P3 | Source transactions | 2 | 0 | `WAITING` |
 | P4 | Form editing | 4 | 0 | `WAITING` |
@@ -86,16 +88,16 @@ progress_percent: 0
 
 | 항목 | 값 |
 |---|---|
-| PR | `P1-04` |
-| Intent | `POST /strategy-documents/upgrade`: YAML/JSON 원문을 ruamel round-trip으로 1.1 원문으로 변환(주석·순서 보존), dict 경로와의 drift fail-closed, 변환본 컴파일 결과 동봉 |
-| Acceptance | WORKFLOW P1-04 |
-| Non-goals | 적용 조건 경고(P1-05), frontend 배너(P2-02), SDK(P2-01) |
-| Branch/worktree | `feat/gui-p1-04-upgrade-endpoint` (base `feat/gui-p1-03-upgrade-and-frozen-1-0` `9ce5a7d`) |
-| Base SHA | `9ce5a7d` |
-| Head SHA | `f7049fa` (3차 후속; 2차 `d529401`; 후속 2 `92800f7`; P1 `5bd97fe`; diff freeze `0a70484`) |
-| Diff stat | handwritten 10 files +181/−10 + 신규 7 files(adapter·contract·테스트 3·golden 2); generated 제외 |
-| Focused tests | 어댑터 6·서비스 8·HTTP 5 = 19 신규(26 with architecture) |
-| Full gate | backend pytest 1,289 passed · Ruff check clean · Pyright 0 · 추적 openapi == live |
+| PR | `P1-05` |
+| Intent | `FIELD_APPLICABILITY` 조건표(domain), 명시된 필드가 현재 모드에서 읽히지 않으면 compile warning `strategy.field.inapplicable`, runtime schema·FieldContract에 `x-applicable-when` |
+| Acceptance | WORKFLOW P1-05 |
+| Non-goals | frontend 표시(P2-03), 노드 단위 pointer(demean의 quantile 등)는 후속 판단 |
+| Branch/worktree | `feat/gui-p1-05-field-applicability` (base `feat/gui-p1-04-upgrade-endpoint` `294864c`) |
+| Base SHA | `294864c` |
+| Head SHA | `3c70001` (review 후속; diff freeze `b94d4ce`) |
+| Diff stat | handwritten 7 files +206/−5 + 신규 테스트 1(181줄); generated 제외 |
+| Focused tests | applicability 20·document HTTP 13·constraints·application |
+| Full gate | backend pytest 1,313 passed · Ruff check clean · Pyright 0 · 추적 openapi == live |
 
 ---
 
@@ -106,13 +108,13 @@ progress_percent: 0
 | [ ] | `P1-01` | 모델 1.1: `factors` 평탄화, 선택 보일러플레이트, `kind` 우선, fixture·hash golden | 없음 | `APPROVED` | [#108](https://github.com/Nochiski/Quant_study/pull/108) · `review_gui_p1_01` APPROVE (REQUEST_CHANGES P1 1/P2 7 해소) · `5d28996` |
 | [ ] | `P1-02` | 미사용 필드 3개·enum 제거, unary alias 제거, `cross_sectional: demean` | P1-01 | `APPROVED` | [#111](https://github.com/Nochiski/Quant_study/pull/111) · `review_gui_p1_02` APPROVE (P0/P1 0, P2 3 후속 반영 후 유지) · `9a5cccb` |
 | [ ] | `P1-03` | `_upgrade.py` dict 변환, 1.0 row 동결 읽기, saved-reference backtest 422 | P1-02 | `APPROVED` | [#112](https://github.com/Nochiski/Quant_study/pull/112) · `review_gui_p1_03` APPROVE (P0/P1 0, P2 5 후속 반영 후 유지) · `8bd0185` |
-| [ ] | `P1-04` | `POST /strategy-documents/upgrade` (ruamel rt, drift fail-closed) | P1-03 | `IN_REVIEW` | `review_gui_p1_04` (opus) 배정 |
-| [ ] | `P1-05` | `FIELD_APPLICABILITY`, compile warning, `x-applicable-when` | P1-02 | `WAITING` | — |
+| [ ] | `P1-04` | `POST /strategy-documents/upgrade` (ruamel rt, drift fail-closed) | P1-03 | `APPROVED` | [#113](https://github.com/Nochiski/Quant_study/pull/113) · `review_gui_p1_04` APPROVE (4차; P1 4·P2 7 해소) · `f7049fa` |
+| [ ] | `P1-05` | `FIELD_APPLICABILITY`, compile warning, `x-applicable-when` | P1-02 | `APPROVED` | [#114](https://github.com/Nochiski/Quant_study/pull/114) · `review_gui_p1_05` APPROVE (P1-001 철회, P2-002~004 해소) · `3c70001` |
 
 Phase exit:
 
-- [ ] 1.1 fixture 4종 같은 hash, 1.0 fixture 거부, 업그레이드 golden 통과.
-- [ ] 1.0 row 동결 읽기와 변조 fail-closed.
+- [x] 1.1 fixture 4종 같은 hash, 1.0 fixture 거부, 업그레이드 golden 통과 (P1-01·P1-03·P1-04).
+- [x] 1.0 row 동결 읽기와 변조 fail-closed (P1-03).
 - [ ] SoT·책임분리 점검 서브에이전트 결과 기록, `strategy-workbench-sot.md` owner 행 추가.
 
 ## P2 — frontend 1.1
@@ -126,6 +128,7 @@ Phase exit:
 Phase exit:
 
 - [ ] e2e "1.0 revision 열기 → 업그레이드 → 저장 → backtest" green.
+- [ ] `npm run api:generate` 후 `git diff --exit-code -- ../backend/openapi.json src/shared/api/generated` green (P1-04·P1-05 리뷰 권고: P1에서 미룬 SDK 동기를 P2-01이 실제로 흡수했는지 강제).
 - [ ] SoT·책임분리 점검 서브에이전트 결과 기록.
 
 ## P3 — source 트랜잭션
@@ -176,6 +179,8 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
+| P1-05 | `review_gui_p1_05` | `294864c` | `3c70001` | APPROVE (1차 REQUEST_CHANGES P1-001 생성 SDK 미동기는 WORKFLOW 1절 스택 정책 확인 후 reviewer 철회; P2-002 AND 조건·P2-003/004 동일 모양·owned_by_error 해소 실측) | 0 | `_explanation.py`가 percentile 모드에서도 `selection_count`를 "N종목"으로 단언(기존 결함, cleanup 후보); i18n `strategy.contract.applicable.*` 키는 P2-03; spec D4 문구·표(7행→8행, validator 발행)는 P5-03 개정 | 2026-09-18 |
+| P1-04 | `review_gui_p1_04` | `9ce5a7d` | `f7049fa` | APPROVE (1차 REQUEST_CHANGES P1-001 openapi 미재생성·P1-002 422 union 누락·P2 5 → 2차 P1-003 `#####` 500 회귀·P2-006/007 → 3차 P1-004 인접 빈 섹션 비결정 → 4차 APPROVE; 시드 8종×2 배치 결정성, 프로브 전량 재실행) | 4 (해소) | 비어 버린 섹션이 마지막 키면 아래 주석 소실(설계상), 옮겨진 주석의 들여쓰기 유지, `except Exception` 강등은 로그로 구분; 기존 codec `x: =` 500은 별도 이슈 후보 | 2026-09-18 |
 | P1-03 | `review_gui_p1_03` | `9ea8854` | `8bd0185` | APPROVE (P0/P1 0, P2-001~005 후속 확인 후 유지; 적대적 프로브 6종, 동결 head 위 1.1 append·pagination·업그레이드→저장→실행 e2e, CST parity) | 0 | `requires_upgrade` 3개가 dataclass 기본값 탓에 SDK에서 optional로 생성됨(P1-04에서 required로 정리); P1-04 CST golden이 덮어야 할 주석 손실 3종(안쪽 `factors:` 줄끝 주석, 바깥 독립 주석 뒤 시퀀스 들여쓰기, 삭제 키의 주석) | 2026-09-18 |
 | P1-02 | `review_gui_p1_02` | `5d28996` | `9a5cccb` | APPROVE (P0/P1 0, P2-001~003 후속 `fcc3c8c` 확인 후 유지; 적대적 hydrate 10건, demean parity 무작위 200 + 경계 4) | 0 | demean 노드도 winsorize 전용 quantile 파라미터를 받음(P1-05 적용 조건표 후보), enum 순서 미고정, minimal fixture의 `signal` 생략 미단언 | 2026-09-17 |
 | P1-01 | `review_gui_p1_01` | `3aa95d0` | `5d28996` | APPROVE (1차 REQUEST_CHANGES P1-001 계약 의도 단언 부재·P2 7건 → `1d885f5`·`d545f53` 반영, 변이 검증 3종·적대적 hydrate 27종 통과) | 1 (해소) | `default-from` 가드는 생략 시에만 실행(지연 검사, schema builder 불변식은 두 번째 default-from 도입 시 검토); `contract_hash`가 FieldContract 행 모양을 덮지 않음(schema const 변경으로 이번엔 무효화됨); 1.0 row는 P1-03까지 읽기 불가(의도) | 2026-09-17 |
@@ -184,6 +189,8 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
+| P1-05 | applicability 25·document HTTP 13·constraints·schema·application | backend pytest 1,313·Ruff check·Pyright 0; reviewer 독립 재실행 동일 + frontend Vitest 31 실패가 전부 기존(1.1 fixture) 실패임을 확인 | `openapi.json`·`runtime-schema.json` 재생성 diff 0 | 해당 없음 | 원격 CI backend job 대상; frontend·browser-e2e 알려진 빨간불(P2-01/02 exit) | 2026-09-18 |
+| P1-04 | 어댑터 17·서비스 9·HTTP 5·openapi 동기 1 | backend pytest 1,289·Ruff check·Pyright 0; reviewer 독립 재실행 동일 | `openapi.json` 재생성 diff 0 + 추적 동기 테스트 | 해당 없음 | 원격 CI backend job 대상, browser-e2e 알려진 빨간불 | 2026-09-18 |
 | P1-03 | upgrade 8·frozen repository 10·frozen HTTP 5 | backend pytest 1,257·Ruff check·Pyright 0; reviewer 독립 재실행 동일 | `openapi.json`·`runtime-schema.json` 재생성 후 diff 0 | 해당 없음 | 원격 CI backend job 대상, browser-e2e 알려진 빨간불 | 2026-09-18 |
 | P1-02 | hydrate unknown_key 3·invalid_enum 4·demean 문서 1, demean parity 1, 설명 문구 1 | backend pytest 1,232·Ruff check·Pyright 0; reviewer 독립 재실행 동일 | `openapi.json`·`runtime-schema.json` 재생성 후 diff 0 | 해당 없음 | 원격 CI backend job 대상, browser-e2e 알려진 빨간불 | 2026-09-17 |
 | P1-01 | contract fixtures 15·schema 3 신규·hydrate 가드 1·JSON API label 비대칭 1 | backend pytest 1,228·Ruff check·Pyright 0; reviewer 독립 재실행 동일 | `openapi.json`·`runtime-schema.json` 재생성 후 diff 0 (frontend SDK는 P2-01) | 해당 없음(backend) | 원격 CI: backend job 대상, browser-e2e는 알려진 빨간불(WORKFLOW 1절) | 2026-09-17 |
@@ -192,6 +199,10 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-18 KST | Claude | `review_gui_p1_05` 재검토 APPROVE(P1-001 철회) → P1-05 APPROVED. Phase 1 PR 5/5 승인, Phase exit SoT·책임분리 점검 서브에이전트 착수 | 13.5 판정 |
+| 2026-09-18 KST | Claude | `review_gui_p1_05` REQUEST_CHANGES(P1-001 생성 SDK 미동기 — 스택 결정으로 P2-01에서 해소, WORKFLOW 1절에 `api:generate` 게이트까지 명시; P2-002~004) → 후속 `3c70001`(AND 조건, selection_count 행, 동일 모양, owned_by_error 노출), 1,313 passed, 재검토 요청 | 13.5 재검토 |
+| 2026-09-18 KST | Claude | P1-05 구현·self-check(1,310 passed) → diff freeze `b94d4ce`, stacked PR(base P1-04), `review_gui_p1_05`(opus) 배정 → IN_REVIEW. 결정: 기존 error 규칙이 소유한 3행은 warning 없이 스키마 노출만(`owned_by_error`), 기본값과 같은 명시값은 경고 없음(canonical 문서가 조용하도록) | 13.3 diff freeze |
+| 2026-09-18 KST | Claude | `review_gui_p1_04` 4차 APPROVE → P1-04 APPROVED. P1-05 IN_PROGRESS, 브랜치 `feat/gui-p1-05-field-applicability`(base P1-04 `294864c`) | 13.5 판정 |
 | 2026-09-18 KST | Claude | `review_gui_p1_04` 3차 REQUEST_CHANGES(P1-004 인접 두 빈 섹션에서 set 순회 순서·슬롯 pop 탓에 출력 비결정) → 후속 `f7049fa`(문서 순서 고정, 줄끝 슬롯만 비움, 결정성 테스트, drift 강등 시 warning 로그), 1,289 passed, 4차 검토 요청 | 13.5 재검토 |
 | 2026-09-18 KST | Claude | `review_gui_p1_04` 재검토 REQUEST_CHANGES(P1-003 `#####` 줄끝 주석 섹션이 비면 IndexError 500 회귀, P2-006 빈 섹션 경로 아래 주석 소실, P2-007 주석 텍스트 변형) → 후속 `d529401`(원본 토큰 보존, 꼬리를 다음 최상위 키로, 어댑터 예외 전부 drift 422), 1,287 passed, 재검토 요청 | 13.5 재검토 |
 | 2026-09-18 KST | Claude | `review_gui_p1_04` REQUEST_CHANGES(P1-001 openapi 미재생성, P1-002 422 union 누락; P2 5) → P1 후속 `5bd97fe`(union에 invalid 추가, 재생성, 추적 openapi 동기 테스트), P2 후속 `92800f7`(주석 재배치·비어 버린 섹션만·CRLF 통일·예외 분리·재parse 제거), 1,279 passed, 같은 reviewer 재검토 요청. 스코프 밖: 기존 codec `x: =` 500 결함은 별도 이슈 후보로 기록 | 13.5 재검토 |

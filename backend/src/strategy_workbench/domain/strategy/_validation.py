@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
-from collections.abc import Iterator, Mapping
+from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -14,8 +14,10 @@ from strategy_workbench.domain.factor.facade.validation import (
 
 from ._constraints import (
     EXPRESSION_CODES,
+    FIELD_APPLICABILITY,
     SEMANTIC_ONLY_CODES,
     STRATEGY_SCALAR_CONSTRAINTS,
+    field_default,
     resolve_scalar,
 )
 from ._hydrate import SUPPORTED_SCHEMA_VERSIONS
@@ -126,8 +128,37 @@ def _numeric_leaves(value: object, path: str = "") -> Iterator[tuple[str, float]
             yield from _numeric_leaves(item, child_path)
 
 
-def validate_strategy(spec: StrategySpec) -> StrategyValidation:
+def validate_strategy(
+    spec: StrategySpec, *, written_pointers: Collection[str] | None = None
+) -> StrategyValidation:
+    """Semantic validation of a typed spec.
+
+    `written_pointers` names the JSON Pointers the authoring document set explicitly. The typed
+    spec cannot tell a written value from a default, so the applicability warning (spec D4) is
+    only emitted for pointers in this set; callers without a document pass nothing. A written
+    value equal to the model default is silent too: canonical documents (JSON projection, legacy
+    generated source, format conversion) spell out every default and must not warn.
+    """
     issues: list[ValidationIssue] = []
+    written = frozenset(written_pointers or ())
+    for applicability in FIELD_APPLICABILITY:
+        if applicability.owned_by_error is not None:
+            continue  # 아래의 기존 error 규칙이 같은 관계를 보고한다
+        if applicability.pointer not in written or applicability.applies_to(spec):
+            continue
+        if resolve_scalar(spec, applicability.pointer) == field_default(applicability.pointer):
+            continue
+        expectation = " 그리고 ".join(
+            condition.describe() for condition in applicability.conditions
+        )
+        issues.append(
+            semantic_issue(
+                "strategy.field.inapplicable",
+                applicability.path,
+                f"이 필드는 현재 모드에서 읽히지 않습니다: {expectation}일 때만 적용됩니다.",
+                severity=ValidationSeverity.WARNING,
+            )
+        )
     bounded_paths = {constraint.path for constraint in STRATEGY_SCALAR_CONSTRAINTS}
     issues.extend(
         semantic_issue(

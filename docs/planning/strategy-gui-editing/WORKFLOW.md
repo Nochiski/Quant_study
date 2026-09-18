@@ -39,9 +39,12 @@ main
   SDK를 바꾸면 frontend typecheck가 깨져 stack의 모든 PR gate가 실패한다. SDK 재생성과 frontend
   적응은 P2-01이 한 PR에서 한다. 각 P1 PR 본문 `제약사항`에 이 사실을 적는다.
 - 실 DB 주의: P1 merge 전에는 실 SQLite에 1.1 revision을 저장하지 않는다(spec 6절 롤백).
-- **browser-e2e는 P1 PR에서 빨간불이다(알려진 상태)**: Playwright가 실제 backend를 띄우므로 SDK를
-  동결해도 `factors` 응답 모양과 1.0 starter 문서에 걸린다. P1 PR은 backend gate(pytest·Ruff·Pyright·
-  OpenAPI diff)만 merge gate로 삼고, browser-e2e green은 P2-02의 exit 조건이다. 각 P1 PR 본문
+- **CI `frontend`·`browser-e2e` job은 P1 PR에서 빨간불이다(알려진 상태, P1-01부터)**: `frontend` job의
+  `npm run api:generate` 뒤 `git diff --exit-code`(생성 SDK 동기), 공유 fixture(`runtime-schema.json`,
+  `quality_momentum.*`)를 읽는 Vitest, 그리고 실제 backend를 띄우는 Playwright가 모두 1.1 backend에
+  걸린다. SDK만 재생성하면 `spec.factors.factors`를 쓰는 소스 5곳과 테스트 25곳에서 typecheck가
+  깨지므로 P1 PR은 backend gate(pytest·Ruff·Pyright·추적 openapi 동기 테스트)만 merge gate로 삼고,
+  frontend job green은 P2-01(SDK·단위 테스트)과 P2-02(e2e)의 exit 조건이다. 각 P1 PR 본문
   `제약사항`과 PLAN CI 열에 이 사실을 적는다.
 
 ## 2. 공통 gate

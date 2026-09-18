@@ -32,7 +32,12 @@ from datetime import date
 from enum import Enum
 from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
 
-from ._constraints import ScalarConstraint, scalar_constraint_index
+from ._constraints import (
+    FieldApplicability,
+    ScalarConstraint,
+    field_applicability_index,
+    scalar_constraint_index,
+)
 from ._hydrate import SUPPORTED_SCHEMA_VERSIONS, _kind_of
 from ._models import StrategySpec
 
@@ -73,6 +78,27 @@ class FieldContract:
     example: object = None
     applied_stage: str | None = None
     description_key: str | None = None
+    applicable_when: ApplicableWhen | None = None  # `x-applicable-when`: mode that reads the field
+
+
+@dataclass(frozen=True)
+class ApplicableCondition:
+    pointer: str
+    equals: str | None
+    not_null: bool
+
+
+@dataclass(frozen=True)
+class ApplicableWhen:
+    """Same row as `FIELD_APPLICABILITY`, in the shape both the schema and the contract publish.
+
+    `all_of` must all hold for the field to be read. `owned_by_error` names the blocking rule that
+    reports a violation instead of the `strategy.field.inapplicable` warning.
+    """
+
+    all_of: tuple[ApplicableCondition, ...]
+    description_key: str
+    owned_by_error: str | None
 
 
 def strategy_document_schema() -> dict[str, Any]:
@@ -122,6 +148,7 @@ def strategy_field_contracts() -> tuple[FieldContract, ...]:
 class _SchemaBuilder:
     def __init__(self, constraints: Mapping[str, ScalarConstraint]) -> None:
         self._constraints = constraints
+        self._applicability = field_applicability_index()
         self.defs: dict[str, dict[str, Any]] = {}
         self.contracts: list[FieldContract] = []
         self._seen: set[str] = set()
@@ -196,6 +223,9 @@ class _SchemaBuilder:
             constraint = self._constraints.get(child)
             if constraint is not None:
                 schema = {**schema, **_constraint_schema(constraint)}
+            applicability = self._applicability.get(child)
+            if applicability is not None:
+                schema = {**schema, "x-applicable-when": _applicability_schema(applicability)}
             for marker in (
                 "catalog",
                 "reference",
@@ -237,6 +267,7 @@ class _SchemaBuilder:
         inner = schema["anyOf"][0] if nullable else schema
         json_type = inner.get("type")
         constraint = self._constraints.get(pointer)
+        applicability = self._applicability.get(pointer)
         self.contracts.append(
             FieldContract(
                 pointer=pointer,
@@ -260,6 +291,9 @@ class _SchemaBuilder:
                 display_unit=constraint.display_unit if constraint else None,
                 example=constraint.example if constraint else None,
                 applied_stage=constraint.stage.value if constraint else None,
+                applicable_when=(
+                    _applicable_when(applicability) if applicability is not None else None
+                ),
                 description_key=constraint.description_key or None if constraint else None,
             )
         )
@@ -289,6 +323,25 @@ def _json_type(value: object) -> str:
     if isinstance(value, float):
         return "number"
     return "string"
+
+
+def _applicability_schema(row: FieldApplicability) -> dict[str, Any]:
+    # 계약(FieldContract.applicable_when)과 같은 모양(JSON 값): 소비자가 두 endpoint를 같은 코드로
+    # 읽는다. tuple은 list로 내려 JSON 왕복 후에도 fixture 동치가 유지되게 한다.
+    return json.loads(json.dumps(dataclasses.asdict(_applicable_when(row))))
+
+
+def _applicable_when(row: FieldApplicability) -> ApplicableWhen:
+    return ApplicableWhen(
+        all_of=tuple(
+            ApplicableCondition(
+                pointer=condition.pointer, equals=condition.equals, not_null=condition.not_null
+            )
+            for condition in row.conditions
+        ),
+        description_key=row.description_key,
+        owned_by_error=row.owned_by_error,
+    )
 
 
 def _constraint_schema(constraint: ScalarConstraint) -> dict[str, Any]:

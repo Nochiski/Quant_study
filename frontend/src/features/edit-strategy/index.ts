@@ -176,6 +176,7 @@ export {
   graphNodeIds,
   nodeKinds,
   nodePointerOf,
+  nodeReferenceKeys,
   removeNode,
   rewireInput,
   setMissingPolicy,

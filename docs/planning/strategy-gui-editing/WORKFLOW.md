@@ -839,15 +839,21 @@ export const suggestNodeId = (tree, factorPointer, base: string): string;   // b
 - 테스트: 각 함수 정상 1·오류 1, `suggestNodeId` 유일성.
 - 구현 결정(P5-01): `graph-transactions.ts`는 tree·schema만 읽는 순수 모듈이고 텍스트를 만들지 않는다.
   `addNode`는 `nodeKinds`(`schemaAt(nodes)` → `items.oneOf` → `branchKind`)에서 분기를 골라
-  `materializeSchemaValue`로 최소 항목을 만들고 `node_id = suggestNodeId(kind)`, `x-reference: node`
-  필드는 그래프의 마지막 노드 id로 채운다. `graph.nodes`가 있으면 `insert-item`, `nodes`만 없으면 `graph`에
+  `materializeSchemaValue`로 최소 항목을 만들고 `node_id = suggestNodeId(kind)`. 참조 슬롯은
+  `nodeReferenceKeys(schema, branch)`(`schemaFacts(...).reference === "node"` — SoT owner 하나, 리뷰 P1-1)로
+  얻고, 슬롯이 하나뿐인 분기만 그래프의 마지막 노드 id로 채운다(둘 이상이면 빈 문자열, 리뷰 P2-3).
+  `rewireInput(..., schema?)`는 `schema`가 있으면 그 키가 참조 슬롯인지도 검사한다(P2-4). 추가 직후 노드
+  pointer는 재파싱 뒤 `nodePointerOf(tree, factorPointer, nodeId)`로 얻는다(P2-5). `graph.nodes`가 있으면 `insert-item`, `nodes`만 없으면 `graph`에
   `insert-key`, `graph`까지 없으면 팩터에 `graph: { nodes: [node], output_node_id }`를 연다(트랜잭션 한 번).
   `setOutput`·`rewireInput`은 spec 시그니처에 `not-found`(그래프에 없는 id)를 더해 fail-closed다 — 사이클·
   타입은 backend 판정. `removeNode`는 `findReferences(..., { within: "/factors/N/graph" })`로 스코프해
   `*_node_id`·`output_node_id` 참조를 검사한다(감사 R1). `useSourceTransactions`는 `feedbackFor(owner)`를
   내고 Form·스니펫이 자기 슬롯만 읽는다(`feedback`은 마지막 결과로 유지, 감사 R2). `planRemove`는 삭제
-  대상(시퀀스 항목·mapping 키) 바로 위의 연속 독립 주석 줄을 함께 지운다 — 빈 줄에서 멈추고, dash 줄 첫
-  키·안쪽 첫 항목(`- - x`) 경로는 그대로다(감사 R3; property test 주석 소유 규칙 안, `FC_NUM_RUNS=1000`).
+  대상(시퀀스 항목·mapping 키) 바로 위의 연속 독립 주석 줄을 함께 지운다 — 빈 줄에서 멈추고, 주석 블록이
+  문서 첫 줄에서 시작하면 파일 헤더로 보아 남기며(리뷰 P2-2), dash 줄 첫 키·안쪽 첫 항목(`- - x`) 경로는
+  그대로다(감사 R3; property test 주석 소유 규칙 안, `FC_NUM_RUNS=1000`). `- - "#tag"`처럼 안쪽 유일 항목이
+  부모와 같은 줄에 있을 때 인용 스칼라의 `#`을 줄 끝 주석으로 오인해 계획이 실패하던 base 결함도 고쳤다
+  (리뷰 P2-1). 12 kind 메뉴 라벨은 식별자 원문(P4-03 kind select와 같은 결정).
   UI(노드 추가 메뉴·property editor·재연결 슬롯)는 P5-02.
 
 ### P5-02 — Graph UI
@@ -859,7 +865,7 @@ export const suggestNodeId = (tree, factorPointer, base: string): string;   // b
 - 제약(Phase 4 감사 R4): Graph 편집 표면은 backend 실행 plan이 없을 때(빈 그래프 `nodes: []`·compile
   error)도 있어야 한다 — P4-03이 만드는 빈 factor에 첫 노드를 넣는 경로가 이 PR의 출구다. 노드 목록·편집
   컨트롤은 parse tree(Form과 같은 입력)에서 그리고, plan 순서·상태는 plan이 있을 때만 덧입힌다.
-- pointer 규약(감사 R6): Form ↔ Graph 왕복은 노드 단위 `/factors/N/graph/nodes/M`(`nodePointerById`가
+- pointer 규약(감사 R6): Form ↔ Graph 왕복은 노드 단위 `/factors/N/graph/nodes/M`(`nodePointerOf`가
   만드는 pointer)이고 `/factors/N/graph`는 팩터 선택만 한다.
 - 팩터 헤더: "노드 추가" 메뉴(kind 목록은 스키마 `oneOf` 분기에서), `output_node_id` select,
   `missing_policy` select.

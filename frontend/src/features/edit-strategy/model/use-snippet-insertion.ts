@@ -98,9 +98,10 @@ export const useSnippetInsertion = (
     [editorActive, run, shared, source.status],
   );
 
+  // 자기 owner 슬롯만 읽는다(Phase 4 감사 R2). memo 의존성은 슬롯 값이다(리뷰 P2-7: `transactions`는 매 렌더 새 객체).
+  const snippetFeedback = transactions.feedbackFor(SNIPPET_OWNER);
   const feedback = useMemo((): SnippetFeedback => {
-    // 자기 owner 슬롯만 읽는다(Phase 4 감사 R2).
-    const current = transactions.feedbackFor(SNIPPET_OWNER);
+    const current = snippetFeedback;
     if (current.status === "idle" || current.owner !== SNIPPET_OWNER)
       return IDLE;
     if (statusAtInsert === null) return IDLE;
@@ -113,7 +114,7 @@ export const useSnippetInsertion = (
         ? current.reason
         : "cursor-context",
     };
-  }, [statusAtInsert, transactions]);
+  }, [statusAtInsert, snippetFeedback]);
 
   return {
     snippets,

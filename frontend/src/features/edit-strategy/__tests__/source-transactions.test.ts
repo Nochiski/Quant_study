@@ -322,6 +322,18 @@ describe("comments and block scalars (review P1-1·P1-2)", () => {
     expect(ok(crlf, { kind: "remove", pointer: "/a/0" }).nextSource).toBe(
       "a:\r\n  - y\r\n",
     );
+    // 문서 첫 줄부터 시작하는 주석 블록은 파일 헤더라 첫 루트 키를 지워도 남는다(P5-01 리뷰 P2-2).
+    const header = "# 전략 문서 v1.1\n# 작성자: 팀\nschema_version: '1.1'\nname: q\n";
+    expect(ok(header, { kind: "remove", pointer: "/schema_version" }).nextSource).toBe(
+      "# 전략 문서 v1.1\n# 작성자: 팀\nname: q\n",
+    );
+  });
+
+  it("empties an inner sequence whose only item is a quoted scalar containing `#` (review P2-1)", () => {
+    const source = 'zq:\n  l5:\n    - - "#tag"\n';
+    expect(ok(source, { kind: "remove", pointer: "/zq/l5/0/0" }).nextSource).toBe(
+      "zq:\n  l5:\n    - []\n",
+    );
   });
 
   it("expands `- []` and `- {}` without leaving a trailing space", () => {

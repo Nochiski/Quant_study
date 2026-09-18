@@ -19,6 +19,7 @@ export type FindReferencesOptions = {
    * 탐색을 이 pointer 아래로 좁힌다. 네임스페이스가 스코프를 가지면(`graph.nodes`의 `node`: 다른 팩터가
    * 같은 `node_id`를 써도 합법) 호출자가 그 스코프(`/factors/N/graph`)를 넘겨야 한다 — 전역 탐색은
    * 다른 그래프의 정의·출력을 참조로 오탐한다(Phase 4 감사 DEFECT-P4X-002). 생략하면 문서 전체.
+   * `definingPointer`는 `within` 안에 있어야 한다 — 밖이면 정의 자리가 제외되지 않아 참조로 센다(리뷰 P2-6).
    */
   within?: string;
 };

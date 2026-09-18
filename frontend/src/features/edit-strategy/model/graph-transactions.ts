@@ -12,6 +12,7 @@ import {
   materializeSchemaValue,
   resolveRef,
   schemaAt,
+  schemaFacts,
   UnsupportedSchemaShape,
   type JsonSchema,
 } from "./schema-navigator";
@@ -90,6 +91,32 @@ export const nodeKinds = (
   });
 };
 
+/**
+ * 노드 분기 스키마에서 다른 노드를 가리키는 필드 키(`input_node_id`, `left_node_id`, …). 판정은
+ * `schemaFacts(...).reference === "node"` 하나다(SoT: 참조 사실의 owner는 `schemaFacts`; 리뷰 P1-1).
+ * `addNode`의 참조 채우기와 P5-02의 입력 슬롯 목록·`rewireInput` 키 검증이 같은 함수를 쓴다.
+ */
+export const nodeReferenceKeys = (
+  schema: JsonSchema,
+  branch: JsonSchema,
+): string[] => {
+  const properties = isRecord(branch.properties) ? branch.properties : {};
+  return Object.entries(properties).flatMap(([key, property]) => {
+    const node = isRecord(property) ? resolveRef(schema, property) : null;
+    return node !== null && schemaFacts(node).reference === "node" ? [key] : [];
+  });
+};
+
+/** `nodePointer`가 가리키는 노드의 분기 스키마(문서의 `kind`로 해소). 못 찾으면 null. */
+const nodeBranchAt = (
+  schema: JsonSchema,
+  tree: unknown,
+  nodePointer: string,
+): JsonSchema | null => {
+  const resolved = schemaAt(schema, nodePointer, tree);
+  return resolved === null || resolved.branches !== null ? null : resolved.node;
+};
+
 /** `base`, `base_2`, `base_3` … 중 그래프에 없는 첫 id. */
 export const suggestNodeId = (
   tree: unknown,
@@ -105,9 +132,11 @@ export const suggestNodeId = (
 };
 
 /**
- * 노드 추가: `kind` 분기 스키마로 최소 항목을 materialize하고 `node_id`는 `suggestNodeId(kind)`,
- * `x-reference: node` 필드는 빈 문자열 대신 그래프의 마지막 노드 id(즉시 valid 가능). `graph.nodes`가 없으면
- * 키를 열면서 넣는다(P4-03이 만든 빈 팩터는 `nodes: []`라 `insert-item`).
+ * 노드 추가: `kind` 분기 스키마로 최소 항목을 materialize하고 `node_id`는 `suggestNodeId(kind)`. 참조
+ * 슬롯(`nodeReferenceKeys`)이 **하나뿐인** 분기(unary·time_series·cross_sectional·group)는 그 슬롯을 그래프의
+ * 마지막 노드 id로 채워 즉시 valid 가능하게 하고, 둘 이상인 분기(binary·comparison·conditional)는 같은
+ * 노드를 여러 슬롯에 넣으면 `x op x`나 타입 불일치가 되므로 빈 문자열로 두어 사용자가 고르게 한다(리뷰
+ * P2-3). `graph.nodes`가 없으면 키를 열면서 넣는다(P4-03이 만든 빈 팩터는 `nodes: []`라 `insert-item`).
  */
 export const addNode = (
   tree: unknown,
@@ -130,15 +159,9 @@ export const addNode = (
   const ids = graphNodeIds(tree, factorPointer);
   const nodeId = suggestNodeId(tree, factorPointer, kind);
   const last = ids[ids.length - 1] ?? "";
-  const properties = isRecord(branch.properties) ? branch.properties : {};
   const value: Record<string, unknown> = { ...node, node_id: nodeId };
-  for (const [key, property] of Object.entries(properties)) {
-    const resolvedProperty = isRecord(property)
-      ? resolveRef(schema, property)
-      : null;
-    if (resolvedProperty?.["x-reference"] === "node" && last !== "")
-      value[key] = last;
-  }
+  const references = nodeReferenceKeys(schema, branch);
+  if (references.length === 1 && last !== "") value[references[0]!] = last;
   const graph = valueAt(tree, graphPointer(factorPointer));
   const nodes = valueAt(tree, nodesPointer(factorPointer));
   if (Array.isArray(nodes))
@@ -177,13 +200,16 @@ export const setNodeField = (
 
 /**
  * 입력 슬롯 재연결: `inputKey`(`input_node_id`·`left_node_id` …)를 `targetNodeId`로. 자기 자신이면
- * `self`, 같은 그래프에 없는 id면 `not-found`(사이클·타입은 backend가 판정).
+ * `self`, 같은 그래프에 없는 id면 `not-found`(사이클·타입은 backend가 판정). `schema`를 주면 `inputKey`가
+ * 그 노드 분기의 참조 슬롯(`nodeReferenceKeys`)인지도 검사해 아니면 `not-found`(리뷰 P2-4 — 노드 분기는
+ * `additionalProperties: false`라 모르는 키는 compile error가 된다).
  */
 export const rewireInput = (
   tree: unknown,
   nodePointer: string,
   inputKey: string,
   targetNodeId: string,
+  schema?: JsonSchema,
 ): SourceOperation | { error: "self" | "not-found" } => {
   const node = valueAt(tree, nodePointer);
   if (isRecord(node) && node.node_id === targetNodeId) return { error: "self" };
@@ -191,6 +217,11 @@ export const rewireInput = (
   if (factorPointer === nodePointer) return { error: "not-found" };
   if (!graphNodeIds(tree, factorPointer).includes(targetNodeId))
     return { error: "not-found" };
+  if (schema !== undefined) {
+    const branch = nodeBranchAt(schema, tree, nodePointer);
+    if (branch === null || !nodeReferenceKeys(schema, branch).includes(inputKey))
+      return { error: "not-found" };
+  }
   return setScalar(tree, nodePointer, inputKey, targetNodeId);
 };
 

@@ -7,6 +7,7 @@ import {
   graphNodeIds,
   nodeKinds,
   nodePointerOf,
+  nodeReferenceKeys,
   removeNode,
   rewireInput,
   setMissingPolicy,
@@ -89,6 +90,35 @@ describe("graph transactions (P5-01)", () => {
     const next = treeOf(applyPlan(VERBOSE, added.op));
     expect(graphNodeIds(next, F0)).toEqual(["close", "mom_252", "unary"]);
     expect(addNode(tree, F0, "nope", SCHEMA)).toEqual({ error: "unknown-kind" });
+  });
+
+  it("lists node reference keys from schemaFacts and leaves multi-slot kinds unfilled (review P1-1·P2-3)", () => {
+    const tree = treeOf(VERBOSE);
+    const kinds = new Map(nodeKinds(SCHEMA, tree, F0));
+    expect(nodeReferenceKeys(SCHEMA, kinds.get("time_series")!)).toEqual(["input_node_id"]);
+    expect(nodeReferenceKeys(SCHEMA, kinds.get("binary")!)).toEqual(["left_node_id", "right_node_id"]);
+    expect(nodeReferenceKeys(SCHEMA, kinds.get("conditional")!)).toEqual([
+      "predicate_node_id",
+      "true_node_id",
+      "false_node_id",
+    ]);
+    expect(nodeReferenceKeys(SCHEMA, kinds.get("field")!)).toEqual([]);
+    // 참조 슬롯이 둘 이상이면 같은 노드를 여러 슬롯에 넣지 않는다(빈 문자열로 두고 사용자가 고른다).
+    const binary = addNode(tree, F0, "binary", SCHEMA);
+    if ("error" in binary) throw new Error(binary.error);
+    expect(binary.op).toMatchObject({
+      value: { kind: "binary", left_node_id: "", right_node_id: "" },
+    });
+    // `schema`를 주면 분기에 없는 입력 키는 not-found.
+    const node = "/factors/0/graph/nodes/1";
+    expect(rewireInput(tree, node, "left_node_id", "close", SCHEMA)).toEqual({
+      error: "not-found",
+    });
+    expect(rewireInput(tree, node, "input_node_id", "close", SCHEMA)).toEqual({
+      kind: "replace-scalar",
+      pointer: `${node}/input_node_id`,
+      value: "close",
+    });
   });
 
   it("adds the first node to an empty factor graph (P4-03 output) with `insert-item` on `nodes: []`", () => {

@@ -615,6 +615,8 @@ Peak RSS는 `--core rust` 단독 실행값이라 격리돼 있다. `row_index`�
 2. **`feed.current_closes()`가 결정마다 key·symbol을 clone한다** (600건 × 1,231 = 약 74만 건). `HashMap<&str, (&str, f64)>`로 빌려주면 되지만 `RouteContext.bars` 타입과 `route_basic_decision` 시그니처가 바뀐다.
 3. **`feed.session_market()`이 세션마다 `HashMap<String, BarTuple>`을 key clone으로 만든다** (약 37만 건). Python에 노출된 `process_market` 경로와 타입을 공유해 바꾸려면 session.rs까지 이어진다.
 
+셋 다 PR 9에서 처리했다 — 1은 Task 9.4(`snapshot_refs`), 2·3은 Task 9.5다. 남은 것은 `BuyingPower`뿐이며 사유는 PR 9 절에 있다.
+
 ---
 
 ## PR 9 — 레코드·큐 메모리 레이아웃 (`perf/record-and-queue-memory`, base PR 8)
@@ -623,16 +625,41 @@ Peak RSS는 `--core rust` 단독 실행값이라 격리돼 있다. `row_index`�
 
 ### Tasks
 
-- [ ] **9.1** `RecordPayload::Order(Box<OrderWire>)`, `Fill(Box<FillWire>)`, `Snapshot(Box<SnapshotWire>)`, `Decision { native: Option<Box<NativeDecision>> }`. `std::mem::size_of::<RecordPayload>()`를 단언하는 Rust 테스트(≤ 48B).
-- [ ] **9.2** 큐 arena를 free-list slab으로: `queued: Vec<Option<Queued>>` + `free: Vec<usize>`. `push`는 `free.pop()` 슬롯 재사용, `pop`은 `take` 후 `free.push(token)`. heap 엔트리의 `seq`가 순서를 보장하므로 token 재사용은 안전(같은 token이 heap에 두 번 있을 수 없음 — pop 후에만 free). Rust 테스트: 1,000세션 MARKET pre-push 후 슬롯 수가 `sessions + max_live_per_session` 이하.
-- [ ] **9.3** `row_index` 메모리 상한 — PR 8이 더한 `Vec<u32>`(세션 × 종목)는 usize 오버플로만 막고 크기 자체는 무제한이다 (3,000종목 × 5,000세션 = 60MB). `slots > rows × K`면 세션별 해시 폴백으로 내려가거나, 바이트 예산을 넘으면 적재 오류로 거부한다. K와 예산은 실측(300종목 1.5MiB / 행 369,300 = 밀도 약 0.8%)으로 정한다.
-- [ ] **9.4** 측정 후 커밋 정리.
+- [x] **9.1** `RecordPayload`의 큰 variant를 모두 `Box`로. `Order`·`Fill`·`Snapshot`·`Decision.native`에 더해, 인라인으로 두면 enum을 다시 부풀리는 `OrderUpdate`(72B)·`CorporateActionApplied`(48B)도 `OrderUpdateWire`·`CorporateActionAppliedWire`로 떼어 `Box`에 넣었다. `size_of` 단언 테스트가 `RecordPayload` 40B / `NativeRecord` 48B를 고정한다(base 248B).
+- [x] **9.2** 큐 arena를 free-list slab으로: `queued: Vec<Option<Queued>>` + `free_slots: Vec<usize>`. `Queued`의 큰 variant도 `Box`로 옮겨 자리 크기를 232B → 16B로 줄였다. Rust 테스트는 40세션 run 뒤 arena가 `sessions + 8` 이하인지 본다(실측 42).
+- [x] **9.3** `row_index` 상한 — `enum RowIndex { Dense(Vec<u32>), Sparse(Vec<HashMap<u32, u32>>) }`. 적재 오류로 거부하는 대신 밀도로 고른다: `slots × 4B ≤ rows × 20B`(밀도 20%)면 Dense, 아니면 Sparse. 바이트 예산만으로 자르면 빽빽한 대형 피드에서 Sparse가 5배 커지므로 쓰지 않았다. 희소 피드 테스트가 표현 선택과 조회 동치를 함께 본다.
+- [x] **9.4** `Portfolio::snapshot_refs()`로 내부 소비자의 포지션 key 복제 제거. `close_current_session`이 스냅샷을 두 번 만들던 것도 없앴다(마감 스냅샷은 `on_session_close`가 직접 만든다). 라우터까지 빌린 행으로 옮겼고, `BuyingPower`만 남겼다 — `#[pyclass]`라 수명을 못 갖고 `HashMap<String, _>` 둘을 key마다 채워서, 줄이려면 두 맵 병합과 `checkpoint`/`restore` 모양 변경이 필요하다.
+- [x] **9.5** `session_market()`·`current_closes()`가 등록부 문자열을 빌려주도록. 빌림 때문에 `process_market_values`를 계획(`plan_market_ops`, `&self`)과 적용(`apply_market_ops`, `&mut self`)으로 갈랐다.
+- [x] **9.6** 측정·baseline JSON 갱신·문서.
+
+### 실측 A/B (100·300종목 synthetic, `--core rust`, warmup 1 / repeat 5)
+
+| 워크로드 | run base → PR 9 | materialize base → PR 9 | Peak RSS base → PR 9 |
+| --- | --- | --- | --- |
+| 100종목 callback | 0.3130 → 0.2795s (−10.7%) | 0.3578 → 0.3509s (−1.9%) | 203.49 → 194.61MiB (−8.88MiB, −4.4%) |
+| 100종목 tape | 0.2851 → 0.2569s (−9.9%) | 0.3551 → 0.3546s (−0.1%) | 209.57 → 201.55MiB (−8.02MiB, −3.8%) |
+| 300종목 tape | 0.7759 → 0.6948s (−10.5%) | 1.0223 → 1.0259s (+0.4%) | 449.62 → 424.05MiB (−25.57MiB, −5.7%) |
+
+python 코어 대비 Peak RSS 배수는 callback 1.18배 → 1.14배, tape 1.22배 → 1.18배다
+(python 정본은 PR 6 값 170.4MiB / 171.2MiB).
+
+항목별 기여는 Task마다 따로 쟀다. Peak RSS를 내린 것은 9.1 하나다(100종목
+callback −8.95MiB, tape −8.53MiB, 300종목 tape −23.44MiB). 9.2는 arena 상주를
+30.4MiB → 약 20KiB(300종목 기준)로 줄이고 run 구간 peak commit을 −5.16MiB(표본 편차 0.06)
+낮추지만 결과 조회까지의 peak working set은 움직이지 않는다 — 이 실행의 working
+set peak이 arena가 가장 큰 순간이 아니라 결과 조회 구간에서 정해지기 때문이다.
+9.3은 100·300종목에서 Dense를 그대로 고르므로 중립이고(상한은 희소 유니버스용),
+9.4·9.5는 일회성 할당을 없앤 항목이라 근거가 run 시간이다(300종목 tape
+0.7822 → 0.7317 → 0.6889s).
 
 ### AC
 
-- 단위·parity: 전체 스위트.
-- 실측 (**게이트**): 코어 격리 Peak RSS tape·callback이 PR 8 대비 감소, `run_seconds` ±3%.
-- E2E: 불필요 (내부 레이아웃).
+- 단위·parity: 전체 스위트 통과 (1,308 passed / 13 skipped), Rust 37 tests, clippy clean.
+- 실측 (**게이트**): 코어 격리 Peak RSS가 callback −8.88MiB(−4.4%), tape −8.02MiB(−3.8%)로
+  게이트(≥3MiB 또는 ≥1.5%) 통과. `materialize_median_seconds`는 ±3% 안이고
+  `run_median_seconds`는 −10% 전후로 개선이다(회귀 아님).
+- E2E: `tests/integration/test_backtest_http_api.py` 통과, `bench_workbench_adapter.py`
+  100종목 1회 완주 확인.
 
 ---
 
@@ -664,8 +691,11 @@ PR 9까지 반영 후 100종목 tape에서 feed 적재(`_load_persistent_feed` +
 - [ ] 스펙 "2026-09-18 측정 경계 교정" 아래 "최종 판정" 절: 게이트 표(100/300종목 total 배수, 4종목 fixture, RSS, FFI 0회, parity) + 남은 항목.
 - [ ] `docs/rust-python-benchmark-report.html` 갱신, `docs/superpowers/plans/2026-09-17-rust-engine-loop.md` 상단에 이 문서 링크.
 - [ ] 이슈 #98 댓글: PR 링크 11개, 최종 표, `.claude/rules/pr-review.md` 양식으로 남은 결정(Phase 3-4). 게이트 전부 통과면 종료 제안.
-- [ ] 이슈 #98 댓글에 후속 항목으로 남길 것: PR 8에서 되돌린 tape 경량 프레임(8.3)은 FILL/ORDER_UPDATE 알림을 선언한 tape 워크로드 벤치 옵션이 생기면 다시 올린다. 코어 간 instrument key 충돌 거부 통일(현재 persistent만 거부, python 코어는 완주). #135(`7E+2` 수량 표기).
+- [ ] 이슈 #98 댓글에 후속 항목으로 남길 것: 코어 간 instrument key 충돌 거부 통일(현재 persistent만 거부, python 코어는 완주). #135(`7E+2` 수량 표기). 아래 8.3 항목.
   - [ ] PR 8에서 되돌린 tape 경량 프레임(8.3) — 알림(fill·order_update) 선언 tape 워크로드를 재는 벤치 옵션이 생기면 `make_native_frame`을 다시 올린다. 현재 벤치는 `MARKET`만 선언해 NOTIFY 분기가 돌지 않아 측정으로 유지를 정당화할 수 없었다.
+  - [ ] 라우터 `instrument_not_snapshot` 메시지의 `available` 목록이 `HashMap` 순서(비결정)인데 python(`types/market.py::MarketSnapshot.bar`)은 feed 순서 + `ts=` 접두까지 담는다 — byte 동일이 아니고 이를 고정하는 테스트도 없다(PR 9 이전부터 그랬고 PR 9는 키 타입만 바꿔 동작은 그대로다).
+- [ ] 스펙 "측정 경계" 절에 도구 한계를 남길 것: `scripts/bench_universe.py::peak_rss_bytes()`는 Windows `PeakWorkingSetSize`라 run 도중 잠깐 커밋됐다 풀리는 버퍼를 못 잡는다. PR 9의 큐 arena(300종목 30.4MiB)가 그 예로, working set peak은 움직이지 않고 `PeakPagefileUsage`(peak commit)로만 −5.16MiB가 보였다. 메모리 항목을 이 지표 하나로 판정하면 안 된다.
+- [ ] PR 11 재측정에 **희소 유니버스 1건**(밀도 20% 미만 → `RowIndex::Sparse` 경로)을 추가할 것. 현재 벤치는 100·300종목 모두 밀도 100%라 Dense만 돈다 — Sparse의 `row_at` 해시 조회 비용이 한 번도 측정되지 않았다.
 - [ ] 메모리 `rust-loop-driver-pr-stack.md` 갱신.
 
 ### AC
@@ -691,6 +721,6 @@ PR 9까지 반영 후 100종목 tape에서 feed 적재(`_load_persistent_feed` +
 | 6 | `perf/materialize-by-kind` | 리뷰 APPROVE·PR 생성 | #134 | Opus APPROVE (DEFECT-601 반영, RSS 1.18/1.22배 통과) |
 | 7 | `perf/workbench-result-columnar` | 리뷰 조건부 APPROVE·PR 생성 | #136 | Opus (DEFECT-701·캐시·RSS 계측 반영, post-run −48%(경계), e2e 1.26→1.91배) |
 | 8 | `perf/rust-hot-loop` | 리뷰 APPROVE·PR 생성 | #137 | Opus APPROVE (테스트·set_mark·Python key 충돌 거부 반영, 300종목 run −21~22%) |
-| 9 | `perf/record-and-queue-memory` | 대기 | | |
-| 10 | `perf/feed-columnar` | go/no-go 대기 | | |
+| 9 | `perf/record-and-queue-memory` | 리뷰 APPROVE·PR 생성 | #138 | Opus APPROVE (DEFECT-901 반영, RSS 1.14/1.18배, run −10%) |
+| 10 | `perf/feed-columnar` | **go** (PR 9 tip: dataset_to_engine_inputs 30% + strategy_and_feed_build 15%) | | |
 | 11 | `docs/rust-loop-final-gates` | 대기 | | |

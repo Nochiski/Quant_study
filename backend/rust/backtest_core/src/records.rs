@@ -141,6 +141,54 @@ impl FillWire {
     }
 }
 
+/// 주문 상태 변경 wire. Python `OrderUpdateEvent`의 원시 필드.
+#[derive(Clone, Debug)]
+pub(crate) struct OrderUpdateWire {
+    pub(crate) order_id: String,
+    pub(crate) status: String,
+    pub(crate) detail: Option<String>,
+}
+
+impl OrderUpdateWire {
+    pub(crate) fn to_py(&self, py: Python<'_>) -> PyResult<PyObject> {
+        to_object(
+            py,
+            (
+                self.order_id.as_str(),
+                self.status.as_str(),
+                self.detail.as_deref(),
+            ),
+        )
+    }
+}
+
+/// 자본변동 적용 wire. `corporate_action`은 Python side table의 index다.
+#[derive(Clone, Debug)]
+pub(crate) struct CorporateActionAppliedWire {
+    pub(crate) corporate_action: usize,
+    pub(crate) old_quantity: i64,
+    pub(crate) new_quantity: i64,
+    pub(crate) old_average_price: f64,
+    pub(crate) new_average_price: f64,
+    pub(crate) cash_paid: f64,
+}
+
+impl CorporateActionAppliedWire {
+    fn to_py(&self, py: Python<'_>) -> PyResult<PyObject> {
+        to_object(
+            py,
+            (
+                self.corporate_action,
+                self.old_quantity,
+                self.new_quantity,
+                self.old_average_price,
+                self.new_average_price,
+                self.cash_paid,
+            ),
+        )
+    }
+}
+
 /// 스냅샷 wire: `(cash, [(instrument_id, qty, avg, mark, market_value, unrealized)], equity, gross)`.
 #[derive(Clone, Debug)]
 pub(crate) struct SnapshotWire {
@@ -190,30 +238,26 @@ impl NativeDecision {
     }
 }
 
+/// 레코드 payload.
+///
+/// enum은 가장 큰 variant 크기로 고정되므로, 큰 wire는 모두 `Box`로 간접 참조해 둔다.
+/// 그러지 않으면 `OrderWire`(String 8개, 약 232B)가 payload 종류와 무관하게 모든 레코드
+/// 자리를 차지해 `Vec<NativeRecord>`가 레코드 수 × 248B로 상주한다. `Box`로 빼면 레코드
+/// 배열은 종류와 무관한 작은 크기가 되고, 개별 payload 힙은 `drain_payloads`가 그 자리를
+/// `Released`로 바꾸는 순간 바로 반환된다 (`size_of` 단언은 아래 테스트가 고정한다).
 #[derive(Clone, Debug)]
 pub(crate) enum RecordPayload {
     Market,
     Decision {
         decision_id: String,
-        native: Option<NativeDecision>,
+        native: Option<Box<NativeDecision>>,
     },
-    Order(OrderWire),
-    OrderUpdate {
-        order_id: String,
-        status: String,
-        detail: Option<String>,
-    },
-    Fill(FillWire),
-    Snapshot(SnapshotWire),
+    Order(Box<OrderWire>),
+    OrderUpdate(Box<OrderUpdateWire>),
+    Fill(Box<FillWire>),
+    Snapshot(Box<SnapshotWire>),
     CorporateAction(usize),
-    CorporateActionApplied {
-        corporate_action: usize,
-        old_quantity: i64,
-        new_quantity: i64,
-        old_average_price: f64,
-        new_average_price: f64,
-        cash_paid: f64,
-    },
+    CorporateActionApplied(Box<CorporateActionAppliedWire>),
     Cost {
         kind: String,
         instrument_id: Option<u32>,
@@ -232,11 +276,11 @@ impl RecordPayload {
             RecordPayload::Market => KIND_MARKET,
             RecordPayload::Decision { .. } => KIND_DECISION,
             RecordPayload::Order(_) => KIND_ORDER,
-            RecordPayload::OrderUpdate { .. } => KIND_ORDER_UPDATE,
+            RecordPayload::OrderUpdate(_) => KIND_ORDER_UPDATE,
             RecordPayload::Fill(_) => KIND_FILL,
             RecordPayload::Snapshot(_) => KIND_SNAPSHOT,
             RecordPayload::CorporateAction(_) => KIND_CORPORATE_ACTION,
-            RecordPayload::CorporateActionApplied { .. } => KIND_CORPORATE_ACTION_APPLIED,
+            RecordPayload::CorporateActionApplied(_) => KIND_CORPORATE_ACTION_APPLIED,
             RecordPayload::Cost { .. } => KIND_COST,
             RecordPayload::Released { kind } => *kind,
         }
@@ -257,32 +301,11 @@ impl RecordPayload {
                 to_object(py, (decision_id.as_str(), native))
             }
             RecordPayload::Order(order) => order.to_py(py),
-            RecordPayload::OrderUpdate {
-                order_id,
-                status,
-                detail,
-            } => to_object(py, (order_id.as_str(), status.as_str(), detail.as_deref())),
+            RecordPayload::OrderUpdate(update) => update.to_py(py),
             RecordPayload::Fill(fill) => fill.to_py(py),
             RecordPayload::Snapshot(snapshot) => snapshot.to_py(py),
             RecordPayload::CorporateAction(index) => to_object(py, *index),
-            RecordPayload::CorporateActionApplied {
-                corporate_action,
-                old_quantity,
-                new_quantity,
-                old_average_price,
-                new_average_price,
-                cash_paid,
-            } => to_object(
-                py,
-                (
-                    *corporate_action,
-                    *old_quantity,
-                    *new_quantity,
-                    *old_average_price,
-                    *new_average_price,
-                    *cash_paid,
-                ),
-            ),
+            RecordPayload::CorporateActionApplied(applied) => applied.to_py(py),
             RecordPayload::Cost {
                 kind,
                 instrument_id,
@@ -627,7 +650,7 @@ mod tests {
     use super::*;
 
     fn fill(quantity: i64, price: f64) -> RecordPayload {
-        RecordPayload::Fill(FillWire {
+        RecordPayload::Fill(Box::new(FillWire {
             fill_id: "F-000001".into(),
             order_id: "O-000001".into(),
             instrument_id: 0,
@@ -636,16 +659,40 @@ mod tests {
             price,
             fee: 0.0,
             slippage_per_share: 0.0,
-        })
+        }))
     }
 
     fn snapshot(equity: f64) -> RecordPayload {
-        RecordPayload::Snapshot(SnapshotWire {
+        RecordPayload::Snapshot(Box::new(SnapshotWire {
             cash: equity,
             rows: Vec::new(),
             equity,
             gross_exposure: 0.0,
-        })
+        }))
+    }
+
+    /// 레코드 배열은 payload 종류와 무관하게 이 크기로 상주한다 — 가장 큰 wire를 `Box`로
+    /// 빼 둔 구조가 무너지면(어느 variant를 인라인으로 되돌리면) 여기서 먼저 깨진다.
+    ///
+    /// 정확값이 아니라 상한을 단언한다. rustc가 enum 레이아웃(niche 활용 등)을 바꾸면
+    /// 정확값은 우리 코드와 무관하게 흔들리지만, 구조가 무너지면 상한은 크게 넘긴다
+    /// (인라인으로 되돌리면 `RecordPayload`가 240B, `NativeRecord`가 248B다).
+    /// 2026-09-18 x86_64 실측: `RecordPayload` 40B, `NativeRecord` 48B.
+    #[test]
+    fn record_payload_stays_small_enough_for_a_dense_record_array() {
+        assert!(
+            std::mem::size_of::<RecordPayload>() <= 48,
+            "{}",
+            std::mem::size_of::<RecordPayload>()
+        );
+        assert!(
+            std::mem::size_of::<NativeRecord>() <= 64,
+            "{}",
+            std::mem::size_of::<NativeRecord>()
+        );
+        // 인라인으로 두면 레코드 한 자리가 이만큼으로 부푸는 wire들.
+        assert!(std::mem::size_of::<OrderWire>() >= 200);
+        assert!(std::mem::size_of::<FillWire>() >= 96);
     }
 
     #[test]
@@ -788,7 +835,7 @@ mod tests {
     }
 
     fn order(order_id: &str, quantity: i64) -> RecordPayload {
-        RecordPayload::Order(OrderWire {
+        RecordPayload::Order(Box::new(OrderWire {
             order_id: order_id.into(),
             decision_id: "D-000001".into(),
             instrument_id: 0,
@@ -801,7 +848,7 @@ mod tests {
             group_id: None,
             action_index: 0,
             leg_index: None,
-        })
+        }))
     }
 
     #[test]
@@ -812,7 +859,7 @@ mod tests {
         store
             .append(
                 0,
-                RecordPayload::Snapshot(SnapshotWire {
+                RecordPayload::Snapshot(Box::new(SnapshotWire {
                     cash: 5.0,
                     rows: vec![
                         (0, 7, 10.0, 11.0, 77.0, 7.0),
@@ -820,7 +867,7 @@ mod tests {
                     ],
                     equity: 139.0,
                     gross_exposure: 0.9,
-                }),
+                })),
             )
             .unwrap();
         store.append(1, fill(3, 10.0)).unwrap();

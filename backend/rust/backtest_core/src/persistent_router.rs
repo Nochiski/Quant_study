@@ -1,5 +1,5 @@
 use crate::persistent::StoredOrder;
-use crate::portfolio::Portfolio;
+use crate::portfolio::{Portfolio, PositionRefRow};
 use crate::quote::parse_decimal_ratio;
 use pyo3::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -39,7 +39,9 @@ pub(crate) type ActionWire = (
     Vec<BasketLegWire>,
 );
 pub(crate) type DecisionWire = (i64, String, Option<String>, Vec<ActionWire>);
-pub(crate) type CloseWire = (String, f64);
+/// 그날 종가 행: `(symbol, close)`. key와 symbol 모두 피드 등록부에서 빌린다 — 라우팅은
+/// 둘 다 읽기만 하므로 결정마다 종목 수 × 2개씩 나던 `String`이 사라진다.
+pub(crate) type CloseWire<'a> = (&'a str, f64);
 pub(crate) type RoutedOrder = (
     String,
     String,
@@ -98,8 +100,8 @@ impl RouterConfig {
 
 struct RouteContext<'a> {
     decision_id: &'a str,
-    portfolio_positions: &'a [(String, i64, f64, f64, f64, f64)],
-    bars: &'a HashMap<String, CloseWire>,
+    portfolio_positions: &'a [PositionRefRow<'a>],
+    bars: &'a HashMap<&'a str, CloseWire<'a>>,
     orders: &'a mut Vec<StoredOrder>,
     config: &'a RouterConfig,
     allow_short: bool,
@@ -114,7 +116,7 @@ struct RouteContext<'a> {
 }
 
 impl RouteContext<'_> {
-    fn position(&self, key: &str) -> Option<&(String, i64, f64, f64, f64, f64)> {
+    fn position(&self, key: &str) -> Option<&PositionRefRow<'_>> {
         self.position_index
             .get(key)
             .map(|index| &self.portfolio_positions[*index])
@@ -195,16 +197,19 @@ impl RouteContext<'_> {
     }
 
     fn close(&self, target: &TargetWire) -> Result<f64, RouteError> {
-        self.bars.get(&target.1).map(|bar| bar.1).ok_or_else(|| {
-            let available: Vec<_> = self.bars.values().map(|bar| bar.0.as_str()).collect();
-            self.error(
-                "instrument_not_snapshot",
-                format!(
-                    "instrument not in snapshot — requested={} available={available:?}",
-                    target.2
-                ),
-            )
-        })
+        self.bars
+            .get(target.1.as_str())
+            .map(|bar| bar.1)
+            .ok_or_else(|| {
+                let available: Vec<_> = self.bars.values().map(|bar| bar.0).collect();
+                self.error(
+                    "instrument_not_snapshot",
+                    format!(
+                        "instrument not in snapshot — requested={} available={available:?}",
+                        target.2
+                    ),
+                )
+            })
     }
 
     fn integer(&self, target: &TargetWire) -> Result<i64, RouteError> {
@@ -671,7 +676,7 @@ pub(crate) fn route_basic_decision(
     allow_short: bool,
     decision_id: &str,
     decision: &DecisionWire,
-    bars: HashMap<String, CloseWire>,
+    bars: HashMap<&str, CloseWire<'_>>,
 ) -> PyResult<RoutedDecision> {
     if decision.0 != 1 {
         return Ok((
@@ -708,11 +713,12 @@ pub(crate) fn route_basic_decision(
     if decision.3.iter().all(|action| action.0 == "no_action") {
         return Ok((Vec::new(), Vec::new(), Vec::new(), None));
     }
-    let (_, positions, equity, _) = portfolio.snapshot()?;
+    // 라우팅은 포지션 key를 읽기만 한다 — 원장에서 빌려 결정마다 나던 String 복제를 없앤다.
+    let (_, positions, equity, _) = portfolio.snapshot_refs()?;
     // 원장 key는 유일하므로 먼저 들어온 항목만 남기는 `find`와 결과가 같다.
     let mut position_index: HashMap<&str, usize> = HashMap::with_capacity(positions.len());
     for (index, row) in positions.iter().enumerate() {
-        position_index.entry(row.0.as_str()).or_insert(index);
+        position_index.entry(row.0).or_insert(index);
     }
     let mut context = RouteContext {
         decision_id,
@@ -773,11 +779,11 @@ pub(crate) fn route_basic_decision(
                     }
                     if action.2.as_deref() == Some("replace") {
                         for position in &positions {
-                            if !seen.contains(&position.0) {
+                            if !seen.contains(position.0) {
                                 deltas.push((
                                     (
                                         "quantity".to_string(),
-                                        position.0.clone(),
+                                        position.0.to_string(),
                                         String::new(),
                                         String::new(),
                                         None,

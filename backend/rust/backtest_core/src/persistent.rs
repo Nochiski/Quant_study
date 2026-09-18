@@ -6,7 +6,7 @@ use crate::feed::PersistentFeed;
 use crate::persistent_router::{
     DecisionWire, ExecutionWire, RouteError, RoutedOrder, RouterConfig, TargetWire,
 };
-use crate::portfolio::{Portfolio, SnapshotTuple};
+use crate::portfolio::Portfolio;
 use crate::quote::parse_decimal_ratio;
 use crate::records::{RecordIndexWire, RecordStore};
 use crate::session::{self, BarTuple, EntryTuple, Op};
@@ -220,7 +220,10 @@ pub(crate) struct PersistentEngine {
     pub(crate) pending_orders: Vec<StoredOrder>,
     pub(crate) pending_groups: Vec<StoredGroup>,
     pub(crate) event_queue: NativeEventQueue,
+    /// 큐 payload arena. 힙 엔트리는 이 Vec의 index(token)만 들고 다닌다.
     pub(crate) queued: Vec<Option<Queued>>,
+    /// `pop`이 payload를 가져가 비운 arena 자리. `push`가 여기서 먼저 꺼내 쓴다.
+    pub(crate) free_slots: Vec<usize>,
     pub(crate) lifecycle: Lifecycle,
     pub(crate) callback_seq: u64,
     pub(crate) awaiting_session: usize,
@@ -324,10 +327,14 @@ impl PersistentEngine {
         Ok(())
     }
 
-    fn process_market_values(
-        &mut self,
+    /// MARKET 처리 계획만 세운다 — 상태를 바꾸지 않으므로 `&self`다.
+    ///
+    /// 적용(`apply_market_ops`)과 나눠 둔 이유는 빌림이다. `bars`가 피드를 빌린 채
+    /// 들어오므로, 계획 단계까지 `&mut self`를 잡으면 같은 `self`의 피드 빌림과 겹친다.
+    fn plan_market_ops(
+        &self,
         ts: &str,
-        bars: HashMap<String, BarTuple>,
+        bars: &HashMap<&str, BarTuple>,
         fee_rate: f64,
         default_participation: Option<&str>,
         slippage: &(String, f64, f64),
@@ -345,7 +352,7 @@ impl PersistentEngine {
             .filter(|group| self.group_is_open(group))
             .map(StoredGroup::as_tuple)
             .collect();
-        let mut ops = session::process_market_impl(
+        session::process_market_impl(
             ts,
             entries,
             groups,
@@ -354,9 +361,7 @@ impl PersistentEngine {
             fee_rate,
             default_participation,
             slippage,
-        )?;
-        self.apply_market_ops(&mut ops)?;
-        Ok(ops)
+        )
     }
 
     pub(crate) fn activate_pending_internal(&mut self) -> PyResult<()> {
@@ -405,15 +410,21 @@ impl PersistentEngine {
         default_participation: Option<&str>,
         slippage: &(String, f64, f64),
     ) -> PyResult<Vec<Op>> {
-        let (ts, bars) = {
+        self.feed
+            .as_mut()
+            .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?
+            .set_current(session_index)?;
+        // 계획 단계는 피드를 빌린 ts·bars를 그대로 읽는다 — 둘 다 `&self`라 겹치지 않는다.
+        let mut ops = {
             let feed = self
                 .feed
-                .as_mut()
+                .as_ref()
                 .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?;
-            feed.set_current(session_index)?;
-            feed.session_market(session_index)
+            let (ts, bars) = feed.session_market(session_index);
+            self.plan_market_ops(ts, &bars, fee_rate, default_participation, slippage)?
         };
-        self.process_market_values(&ts, bars, fee_rate, default_participation, slippage)
+        self.apply_market_ops(&mut ops)?;
+        Ok(ops)
     }
 
     pub(crate) fn close_current_session(
@@ -422,7 +433,7 @@ impl PersistentEngine {
         short_borrow_bps_annual: f64,
         margin_interest_bps_annual: f64,
         annualization_days: u32,
-    ) -> PyResult<(bool, Vec<CostTuple>, SnapshotTuple)> {
+    ) -> PyResult<(bool, Vec<CostTuple>)> {
         if short_borrow_bps_annual < 0.0 || margin_interest_bps_annual < 0.0 {
             return Err(PyValueError::new_err(format!(
                 "annual cost rates must be >= 0 — short_borrow_bps_annual={short_borrow_bps_annual} margin_interest_bps_annual={margin_interest_bps_annual}"
@@ -440,7 +451,10 @@ impl PersistentEngine {
         let should_dispatch = feed.schedule_matches(schedule)?;
         let marks = feed.current_marks()?;
         self.portfolio.mark_refs(&marks);
-        let (cash, positions, _, _) = self.portfolio.snapshot()?;
+        // 비용 계산은 key를 읽기만 하므로 원장에서 빌린다 — 실제 String이 필요한 것은
+        // 레코드로 나가는 공매도 차입 비용뿐이라, 세션마다 포지션 수만큼 나던 복제가
+        // 공매도 포지션 수만큼으로 줄어든다.
+        let (cash, positions, _, _) = self.portfolio.snapshot_refs()?;
         let borrow_daily = short_borrow_bps_annual / 10_000.0 / f64::from(annualization_days);
         let mut costs = Vec::new();
         if borrow_daily > 0.0 {
@@ -448,11 +462,16 @@ impl PersistentEngine {
                 if position.1 < 0 {
                     let amount = position.4.abs() * borrow_daily;
                     if amount > 0.0 {
-                        costs.push(("short_borrow".to_string(), Some(position.0.clone()), amount));
+                        costs.push((
+                            "short_borrow".to_string(),
+                            Some(position.0.to_string()),
+                            amount,
+                        ));
                     }
                 }
             }
         }
+        drop(positions);
         let interest_daily = margin_interest_bps_annual / 10_000.0 / f64::from(annualization_days);
         if interest_daily > 0.0 && cash < 0.0 {
             let amount = -cash * interest_daily;
@@ -463,7 +482,9 @@ impl PersistentEngine {
         for cost in &costs {
             self.portfolio.charge(cost.2)?;
         }
-        Ok((should_dispatch, costs, self.portfolio.snapshot()?))
+        // 마감 스냅샷은 호출부가 필요할 때 직접 만든다 — 여기서 만들어 돌려주면 key를
+        // 소유해야 하고, 드라이버는 그 key를 instrument id로 바꾼 뒤 바로 버린다.
+        Ok((should_dispatch, costs))
     }
 
     pub(crate) fn apply_corporate_action_ratio(
@@ -530,6 +551,7 @@ impl PersistentEngine {
             pending_groups: Vec::new(),
             event_queue: NativeEventQueue::default(),
             queued: Vec::new(),
+            free_slots: Vec::new(),
             lifecycle: Lifecycle::Ready,
             callback_seq: 0,
             awaiting_session: 0,
@@ -656,6 +678,7 @@ impl PersistentEngine {
     fn finish(&mut self) -> PyResult<Vec<RecordIndexWire>> {
         self.finish_internal()?;
         self.queued = Vec::new();
+        self.free_slots = Vec::new();
         // tape 프레임은 결정 생성에만 쓰였다 — 재구성 정보는 DECISION 레코드에 있다.
         self.tape = None;
         self.event_queue = NativeEventQueue::default();
@@ -861,17 +884,18 @@ mod tests {
     fn market_processing_mutates_persistent_order_state() {
         let mut runtime = PersistentEngine::new(10_000.0, false, false, 1.0).unwrap();
         runtime.orders.push(market_order("O-000001"));
-        let bars = HashMap::from([("X:ONE:equity:KRW".to_string(), (100.0, 110.0, 90.0, 1_000))]);
+        let bars = HashMap::from([("X:ONE:equity:KRW", (100.0, 110.0, 90.0, 1_000))]);
 
-        let ops = runtime
-            .process_market_values(
+        let mut ops = runtime
+            .plan_market_ops(
                 "2026-01-02 00:00:00",
-                bars,
+                &bars,
                 0.0,
                 None,
                 &("none".into(), 0.0, 0.0),
             )
             .unwrap();
+        runtime.apply_market_ops(&mut ops).unwrap();
 
         assert!(runtime.orders.is_empty());
         assert_eq!(ops[0].0, "fill");

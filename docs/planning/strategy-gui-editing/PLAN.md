@@ -6,7 +6,7 @@ current_phase: P1,P2,P3,P4,P5
 current_pr: P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01,P3-02,P4-01,P4-02,P4-03,P4-04,P4-05,P5-01
 active_prs: [P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05, P5-01]
 parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02, P1-06, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05, P5-01]
-last_updated: 2026-09-18T14:22:05+09:00
+last_updated: 2026-09-18T15:02:08+09:00
 planned_prs: 19
 merged_prs: 0
 approved_prs: 15
@@ -29,7 +29,7 @@ progress_percent: 0
 | Active PR | `P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05, P5-01` |
 | Progress | `0 / 19 merged (0%)` |
 | Approved | `15 / 19` |
-| Aggregated at | `2026-09-18 14:22 KST` |
+| Aggregated at | `2026-09-18 15:02 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -94,10 +94,10 @@ progress_percent: 0
 | Non-goals | Graph UI(P5-02), page 연결·e2e·문서 마감(P5-03), 항목 안 배열 편집 |
 | Branch/worktree | `feat/gui-p5-01-graph-transactions` (base `feat/gui-p4-05-nested-lists` `76842ab`; 워크트리 `scad-p4`) |
 | Base SHA | `76842ab` |
-| Head SHA | `1e09b6e` (diff freeze) |
+| Head SHA | `226231d` (review 후속; diff freeze `1e09b6e`) |
 | Diff stat | model 6(신규 `graph-transactions.ts`, `document-references`·`source-transactions`·`use-source-transactions`·`use-snippet-insertion`·`form-transactions`)·ui 1·index·테스트 5(신규 `graph-transactions.test.ts`), WORKFLOW |
 | Focused tests | graph-transactions 7 · source-transactions 20(+선행 주석) · use-source-transactions 8 · form-list 10 · property `FC_NUM_RUNS=1000` |
-| Full gate | Vitest 590 passed(51 files) · typecheck · lint · build |
+| Full gate | Vitest 592 passed(51 files) · typecheck · lint · build · property `FC_NUM_RUNS=2000` |
 
 ---
 
@@ -163,7 +163,7 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P5-01` | `graph-transactions.ts`: 노드 추가·필드·재연결·출력·삭제 가드·id 제안, `findReferences` 스코프, owner별 feedback, `planRemove` 선행 주석 | P4-05 | `IN_REVIEW` | [#131](https://github.com/Nochiski/Quant_study/pull/131) · `review_gui_p5_01` 배정 · diff freeze `1e09b6e` |
+| [ ] | `P5-01` | `graph-transactions.ts`: 노드 추가·필드·재연결·출력·삭제 가드·id 제안, `findReferences` 스코프, owner별 feedback, `planRemove` 선행 주석 | P4-05 | `IN_REVIEW` | [#131](https://github.com/Nochiski/Quant_study/pull/131) · `review_gui_p5_01` 1차 REQUEST_CHANGES(P1 1·P2 8) → 후속 `226231d` 재검토 중 |
 | [ ] | `P5-02` | Graph UI: 노드 추가 메뉴, property editor, 입력 슬롯, 키보드·ARIA | P5-01 | `WAITING` | — |
 | [ ] | `P5-03` | 연결·e2e·문서·규칙 마감, read-only 문구 제거, 로드맵 M8 | P5-02, P4-04 | `WAITING` | — |
 
@@ -219,6 +219,7 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-18 KST | Claude | `review_gui_p5_01` 1차 REQUEST_CHANGES(P1-1 `addNode`가 `x-reference`를 `schemaFacts` 없이 직접 읽음(SoT owner 위반, P4-05 DEFECT-P4X-003 재발); P2 8: `- - "#tag"` 안쪽 유일 항목 삭제 계획 실패(base, property 간헐 red), 문서 머리 주석 삭제, 다중 참조 분기 즉시 valid 불성립, `rewireInput` 키 미검증, P5-02 소비자용 `nodeReferenceKeys` 부재·`nodePointerById` 오기·kind 라벨, `within`·`definingPointer` 짝, 스니펫 memo 죽음, scope 왕복 슬롯 부활(기록)) → 후속 `226231d`: `nodeReferenceKeys`(`schemaFacts(...).reference`) + `addNode`·`rewireInput(schema?)`이 사용, 참조 슬롯 하나뿐인 분기만 마지막 노드로 채움, 머리 주석(offset 0 블록) 보존, `parentLine < to` 가드, `within` 주석, memo 의존성 슬롯 값, WORKFLOW 정정 → 재검토 요청. P5-02(#132, 리뷰 중)·P5-03 브랜치는 리뷰 뒤 rebase | 13.5 재검토 |
 | 2026-09-18 KST | Claude | P5-01 구현·self-check(`graph-transactions.ts` 8함수 + 감사 착수 조건 R1 `findReferences` `within`·R2 `feedbackFor`·R3 `planRemove` 선행 주석), diff freeze `1e09b6e`, stacked PR #131(base P4-05 `76842ab`), `review_gui_p5_01`(opus) 배정 → IN_REVIEW(활성 리뷰 P4-05·P5-01 = 2). 결정: 스코프는 호출자가 옵션으로 넘긴다(모듈은 스키마를 모른다), `feedback`은 유지하고 owner 슬롯을 더한다, 선행 주석은 삭제 대상의 것(빈 줄에서 멈춤), `setOutput`·`rewireInput`에 `not-found` 추가(fail-closed) | 13.3 diff freeze |
 | 2026-09-18 KST | Claude | P4-05 구현·self-check(중첩 목록 섹션 `lists`·`parentPointer/parentWritten`·`listOwners` 진단 소유권, `appendOperation` 부모까지 열기, 패널 재사용, discriminator `schemaFacts`, `x-catalog` 집합 테스트, README·SoT·WORKFLOW·문구), diff freeze `b394dbe`, stacked PR #130(base P4-04 `ef19805`), `review_gui_p4_05`(opus) 배정 → IN_REVIEW. e2e 첫 실행 실패는 감사 에이전트의 backend 환경 재동기화로 `backtest_core` 확장이 빠진 환경 문제(재빌드 후 6/6). 결정: 중첩 배열은 link 필드가 아니라 목록 섹션(루트 목록과 같은 뷰·연산), 항목 안 배열은 `list-link` 유지, DEFECT-P4X-002 스코프는 P5-01 착수 조건 | 13.3 diff freeze |
 | 2026-09-18 KST | Claude | `audit_gui_phase4` 수신: PASS(blocking 0). exit 질문 통과(YAML 텍스트 생성은 `planSourceOperation` 하나, `schemaFacts`·`referenceCandidates`·`materializeSchemaValue` 단일 owner, `schema-assist`·`canonical-snippets`의 마커·enum·default 직접 읽기 0 → Phase 3 R5 해소, 왕복 불변식 바이트·spec_hash 동일). P1: DEFECT-P4X-001 중첩 목록 범위 미확정 → **WORKFLOW 자체 수정: P4-05 추가(19 PR)**, DEFECT-P4X-002 `findReferences` node 스코프 오탐 → P5-01 acceptance에 스코프 인자 결정. Phase 5 위험: R1 스코프, R2 feedback owner별 슬롯(P5-01 결정), R3 `planRemove` 선행 주석(P5-01 결정), R4 plan 없는 Graph 편집 표면(P5-02 제약), R5 빈 `nodes: []` insert-item 가능, R6 노드 pointer 규약(P5-02). 문서 액션 11 반영(WORKFLOW·SoT 행·PLAN·README 2·`form.field.listLink` 문구). Phase 4 exit 2항 체크 | 13.6 Phase 감사 |

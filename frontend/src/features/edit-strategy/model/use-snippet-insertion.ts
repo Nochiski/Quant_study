@@ -99,7 +99,8 @@ export const useSnippetInsertion = (
   );
 
   const feedback = useMemo((): SnippetFeedback => {
-    const current = transactions.feedback;
+    // 자기 owner 슬롯만 읽는다(Phase 4 감사 R2).
+    const current = transactions.feedbackFor(SNIPPET_OWNER);
     if (current.status === "idle" || current.owner !== SNIPPET_OWNER)
       return IDLE;
     if (statusAtInsert === null) return IDLE;
@@ -112,7 +113,7 @@ export const useSnippetInsertion = (
         ? current.reason
         : "cursor-context",
     };
-  }, [statusAtInsert, transactions.feedback]);
+  }, [statusAtInsert, transactions]);
 
   return {
     snippets,

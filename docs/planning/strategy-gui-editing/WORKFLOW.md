@@ -837,6 +837,18 @@ export const suggestNodeId = (tree, factorPointer, base: string): string;   // b
   함께 지운다 — 삽입 앵커 규칙("대상 위 주석은 대상을 설명한다")과 짝을 맞춘다. property test의 주석
   소유 규칙에 반영.
 - 테스트: 각 함수 정상 1·오류 1, `suggestNodeId` 유일성.
+- 구현 결정(P5-01): `graph-transactions.ts`는 tree·schema만 읽는 순수 모듈이고 텍스트를 만들지 않는다.
+  `addNode`는 `nodeKinds`(`schemaAt(nodes)` → `items.oneOf` → `branchKind`)에서 분기를 골라
+  `materializeSchemaValue`로 최소 항목을 만들고 `node_id = suggestNodeId(kind)`, `x-reference: node`
+  필드는 그래프의 마지막 노드 id로 채운다. `graph.nodes`가 있으면 `insert-item`, `nodes`만 없으면 `graph`에
+  `insert-key`, `graph`까지 없으면 팩터에 `graph: { nodes: [node], output_node_id }`를 연다(트랜잭션 한 번).
+  `setOutput`·`rewireInput`은 spec 시그니처에 `not-found`(그래프에 없는 id)를 더해 fail-closed다 — 사이클·
+  타입은 backend 판정. `removeNode`는 `findReferences(..., { within: "/factors/N/graph" })`로 스코프해
+  `*_node_id`·`output_node_id` 참조를 검사한다(감사 R1). `useSourceTransactions`는 `feedbackFor(owner)`를
+  내고 Form·스니펫이 자기 슬롯만 읽는다(`feedback`은 마지막 결과로 유지, 감사 R2). `planRemove`는 삭제
+  대상(시퀀스 항목·mapping 키) 바로 위의 연속 독립 주석 줄을 함께 지운다 — 빈 줄에서 멈추고, dash 줄 첫
+  키·안쪽 첫 항목(`- - x`) 경로는 그대로다(감사 R3; property test 주석 소유 규칙 안, `FC_NUM_RUNS=1000`).
+  UI(노드 추가 메뉴·property editor·재연결 슬롯)는 P5-02.
 
 ### P5-02 — Graph UI
 

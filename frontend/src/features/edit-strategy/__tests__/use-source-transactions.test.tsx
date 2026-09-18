@@ -188,6 +188,36 @@ describe("useSourceTransactions", () => {
     expect(result.current.feedback).toEqual({ status: "idle" });
   });
 
+  it("keeps one feedback slot per owner so a snippet result does not erase the form's (audit R2)", () => {
+    const editor = editorOf(SOURCE);
+    const { result } = renderHook(() =>
+      useSourceTransactions(parsedState(SOURCE)),
+    );
+    act(() => result.current.onEditorReady(editor.handle));
+    act(() => {
+      result.current.apply(
+        { kind: "replace-scalar", pointer: "/risk/max_name_weight", value: 0.1 },
+        "max_name_weight",
+        "form",
+      );
+    });
+    act(() => {
+      result.current.apply({ kind: "remove", pointer: "/nope" }, "nope", "snippet");
+    });
+    expect(result.current.feedback).toMatchObject({ status: "error", owner: "snippet" });
+    expect(result.current.feedbackFor("form")).toEqual({
+      status: "applied",
+      owner: "form",
+      label: "max_name_weight",
+    });
+    expect(result.current.feedbackFor("snippet")).toMatchObject({
+      status: "error",
+      owner: "snippet",
+      reason: "not-found",
+    });
+    expect(result.current.feedbackFor("graph")).toEqual({ status: "idle" });
+  });
+
   it("names the first blocking reason in priority order", () => {
     const editor = editorOf(SOURCE);
     const render = (state: DocumentState, active = true) =>

@@ -146,7 +146,8 @@ const itemSchemaRaw = (
   return isRecord(node) ? resolveRef(schema, node) : null;
 };
 
-const kindOfBranch = (
+/** union 분기의 discriminator 값(`kind` const)과 해소된 분기 스키마. 그래프 노드 union도 같은 모양(P5-01). */
+export const branchKind = (
   schema: JsonSchema,
   member: unknown,
 ): [string, JsonSchema] | null => {
@@ -169,7 +170,7 @@ export const itemKinds = (
   const node = itemSchemaRaw(schema, section);
   if (node === null || !Array.isArray(node.oneOf)) return null;
   return node.oneOf
-    .map((member) => kindOfBranch(schema, member))
+    .map((member) => branchKind(schema, member))
     .filter((entry): entry is [string, JsonSchema] => entry !== null)
     .map(([kind]) => kind);
 };
@@ -189,7 +190,7 @@ export const addItemOperation = (
   if (Array.isArray(raw.oneOf)) {
     node =
       raw.oneOf
-        .map((member) => kindOfBranch(schema, member))
+        .map((member) => branchKind(schema, member))
         .find((entry) => entry !== null && entry[0] === kind)?.[1] ?? null;
   }
   if (node === null) return null;

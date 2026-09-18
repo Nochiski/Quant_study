@@ -136,7 +136,7 @@ export const StrategyFormPanel = ({
           {t("form.panel.jsonHint")}
         </p>
       ) : null}
-      {feedbackText(transactions.feedback)}
+      {feedbackText(transactions.feedbackFor(FORM_OWNER))}
       {projection === null ? (
         <p className="strategy-form__state" role="status">
           {t("form.panel.loading")}

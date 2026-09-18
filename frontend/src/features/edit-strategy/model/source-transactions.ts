@@ -733,7 +733,12 @@ const planRemove = (
     const ownEnd = contentEnd(source, parsed, op.pointer);
     if (ownEnd === null) return "not-found";
     if (!onDashLine(source, dash) || index + 1 >= parent.length) {
-      return removeLines(source, lineStartOf(source, dash), ownEnd, eol);
+      return removeLines(
+        source,
+        leadingCommentsStart(source, lineStartOf(source, dash), eol),
+        ownEnd,
+        eol,
+      );
     }
     const nextLineStart = lineEndOf(source, ownEnd) + eol.length;
     const nextContent =
@@ -765,10 +770,31 @@ const planRemove = (
   if (ownEnd === null) return "not-found";
   return removeLines(
     source,
-    lineStartOf(source, keyRange.start.offset),
+    leadingCommentsStart(source, lineStartOf(source, keyRange.start.offset), eol),
     ownEnd,
     eol,
   );
+};
+
+/**
+ * `lineStart` 줄 바로 위에 붙은 연속 독립 주석 줄(공백 + `#…`)의 시작 offset. 삭제 대상 위의 주석은 그
+ * 대상을 설명하므로 함께 지운다 — 삽입 앵커 규칙("앞 형제 내용 줄 끝 뒤"에 넣어 대상 위 주석이 대상을
+ * 따라간다)의 짝이고 property test의 주석 소유 규칙(소유자 = 그 줄에서 시작하는 pointer) 안이다
+ * (Phase 4 감사 R3: 노드·항목 삭제 뒤 고아 주석). 빈 줄이나 다른 내용을 만나면 멈춘다.
+ */
+const leadingCommentsStart = (
+  source: string,
+  lineStart: number,
+  eol: Eol,
+): number => {
+  let start = lineStart;
+  while (start >= eol.length && source.slice(start - eol.length, start) === eol) {
+    const previousLineStart = lineStartOf(source, start - eol.length);
+    const line = source.slice(previousLineStart, start - eol.length);
+    if (!/^\s*#/.test(line)) break;
+    start = previousLineStart;
+  }
+  return start;
 };
 
 /** `from` 줄부터 `contentEnd`가 속한 줄까지 통째로(EOL 포함) 지운다. 마지막 줄이면 앞 EOL을 지운다. */

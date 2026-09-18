@@ -44,6 +44,13 @@ const stubTransactions = (
   apply: vi.fn(),
   run: vi.fn(),
   feedback: { status: "idle" },
+  // 패널은 자기 owner 슬롯만 읽는다(P5-01): 스텁은 `feedback`이 form 것이면 그것을 돌려준다.
+  feedbackFor: (owner) => {
+    const feedback = overrides.feedback ?? { status: "idle" };
+    return feedback.status !== "idle" && feedback.owner === owner
+      ? feedback
+      : { status: "idle" };
+  },
   onEditorReady: vi.fn(),
   enabled: true,
   disabled: null,

@@ -129,7 +129,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 /** Form이 picker를 아는 `x-catalog` 값. runtime schema fixture의 값 집합과 같아야 한다(테스트가 고정). */
 export const CATALOGS = ["equity-field", "universe", "factor", "subgraph"] as const;
-const NAMESPACES = ["node", "parameter"] as const;
+/** Form이 후보 select를 아는 `x-reference` 네임스페이스. runtime schema fixture의 값 집합과 같아야 한다(테스트가 고정). */
+export const NAMESPACES = ["node", "parameter"] as const;
 
 const controlFor = (
   root: JsonSchema,

@@ -823,11 +823,16 @@ const TextualControl = ({
     committed: string;
     failed: boolean;
   } | null>(null);
-  // 트랜잭션이 적용되어 projection 값이 바뀌면 입력을 그 값으로 되돌린다(렌더 중 파생 상태 조정).
+  // 트랜잭션이 적용되어 projection 값이 바뀌면 입력을 그 값으로 되돌린다(렌더 중 파생 상태 조정). 단
+  // 사용자가 손대지 않은 draft(직전 projection 값 그대로, 또는 방금 확정에 성공한 값)일 때만이다 — 확정 직후
+  // 150ms 안에 같은 필드를 지우고 다시 치는 중이면 되돌리지 않는다. 되돌리면 지운 값이 되살아나 키 입력이
+  // 뒤에 붙어 `100101` 같은 오값이 확정됐다(Phase 5 감사 DEFECT-P5X-001).
+  // `confirmed`는 마지막으로 확정에 성공한 draft(렌더에서 읽으므로 ref가 아니라 state).
   const [seen, setSeen] = useState(committed);
+  const [confirmed, setConfirmed] = useState<string | null>(null);
   if (seen !== committed) {
     setSeen(committed);
-    setDraft(committed);
+    if (draft === seen || draft === confirmed) setDraft(committed);
   }
   const { control } = field;
   const submit = (explicit: boolean): void => {
@@ -848,8 +853,9 @@ const TextualControl = ({
       return;
     }
     submitted.current = { draft, committed, failed: false };
-    if (onCommit(parsed.value) === false)
-      submitted.current = { draft, committed, failed: true };
+    const applied = onCommit(parsed.value) !== false;
+    if (!applied) submitted.current = { draft, committed, failed: true };
+    setConfirmed(applied ? draft : null);
   };
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
     if (event.key === "Enter") {

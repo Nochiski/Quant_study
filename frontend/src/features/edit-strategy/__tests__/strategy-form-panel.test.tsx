@@ -402,6 +402,41 @@ describe("StrategyFormPanel review follow-up (P4-02 1차)", () => {
   });
 });
 
+describe("StrategyFormPanel re-edit right after a commit (audit DEFECT-P5X-001)", () => {
+  it("does not restore the committed value into a draft the user already changed", async () => {
+    const user = userEvent.setup();
+    const apply = vi.fn(() => true);
+    const view = (source: string) => (
+      <StrategyFormPanel
+        projection={projectForm(SCHEMA, parsedState(source).parse, [])}
+        transactions={stubTransactions({ apply })}
+        catalogs={NO_CATALOGS}
+      />
+    );
+    const { rerender } = render(view(MINIMAL));
+    const weight = section("risk").getByRole("spinbutton", named("max_name_weight"));
+    await user.clear(weight);
+    await user.type(weight, "0.1{Enter}");
+    expect(apply).toHaveBeenCalledTimes(1);
+    // 확정 직후(parse 도착 전) 사용자가 값을 지우고 새 값을 치기 시작한다.
+    await user.clear(weight);
+    await user.type(weight, "0.2");
+    // parse가 도착해 projection이 0.1로 바뀐다 — 사용자가 고친 draft는 되돌리지 않는다.
+    rerender(view(MINIMAL.replace("max_name_weight: 0.05", "max_name_weight: 0.1")));
+    expect(weight).toHaveValue(0.2);
+    await user.keyboard("{Enter}");
+    expect(apply).toHaveBeenLastCalledWith(
+      { kind: "replace-scalar", pointer: "/risk/max_name_weight", value: 0.2 },
+      "max_name_weight",
+      "form",
+      { focusEditor: false },
+    );
+    // 사용자가 손대지 않은 입력은 여전히 projection 값으로 정렬된다.
+    rerender(view(MINIMAL.replace("max_name_weight: 0.05", "max_name_weight: 0.3")));
+    expect(weight).toHaveValue(0.3);
+  });
+});
+
 describe("StrategyFormPanel section collapse (P4-04)", () => {
   it("toggles aria-expanded and hides the section body while keeping it in the DOM", async () => {
     const user = userEvent.setup();

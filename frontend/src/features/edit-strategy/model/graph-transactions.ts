@@ -163,10 +163,13 @@ export const suggestNodeId = (
  * 노드를 여러 슬롯에 넣으면 `x op x`나 타입 불일치가 되므로 빈 문자열로 두어 사용자가 고르게 한다(리뷰
  * P2-3). `graph.nodes`가 없으면 키를 열면서 넣는다(P4-03이 만든 빈 팩터는 `nodes: []`라 `insert-item`).
  */
-/** `output_node_id`가 아직 정해지지 않았는가(없음·빈 문자열·null). */
+/**
+ * `output_node_id`가 아직 정해지지 않았는가(없음·빈 문자열). `null`은 제외한다 — `output_node_id:`처럼 값 자리가
+ * 비어 있는 표기는 `replace-scalar`가 parse 단계에서 실패해 노드 추가 전체(all-or-nothing)가 막힌다(#144 재검토).
+ */
 const outputUnset = (graph: unknown): boolean => {
   const output = isRecord(graph) ? graph.output_node_id : undefined;
-  return output === undefined || output === "" || output === null;
+  return output === undefined || output === "";
 };
 
 export const addNode = (

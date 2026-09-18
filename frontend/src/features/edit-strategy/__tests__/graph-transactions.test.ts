@@ -140,6 +140,14 @@ describe("graph transactions (P5-01)", () => {
     const more = addNode(treeOf(source), "/factors/1", "unary", SCHEMA);
     if ("error" in more) throw new Error(more.error);
     expect(more.ops).toHaveLength(1);
+    // 값 자리가 빈 `output_node_id:`(null)는 출력 지정을 붙이지 않는다 — 붙이면 replace-scalar가 parse에서
+    // 실패해 노드 추가 전체가 거부된다(#144 재검토 회귀).
+    const bare = EMPTY_FACTOR.replace('output_node_id: ""', "output_node_id:");
+    const onBare = addNode(treeOf(bare), "/factors/1", "field", SCHEMA);
+    if ("error" in onBare) throw new Error(onBare.error);
+    expect(onBare.ops).toHaveLength(1);
+    const plannedBare = planSourceOperations(bare, "yaml", onBare.ops);
+    expect(plannedBare.status).toBe("ok");
   });
 
   it("opens `graph` or `nodes` when they are missing", () => {

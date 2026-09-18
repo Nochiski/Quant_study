@@ -299,6 +299,43 @@ describe("comments and block scalars (review P1-1·P1-2)", () => {
     );
   });
 
+  it("removes the standalone comments directly above the removed item or key, and stops at a blank line (audit R3)", () => {
+    // 삭제 대상 위의 주석은 대상을 설명한다(삽입 앵커 규칙의 짝) → 함께 지운다. 다음 항목의 주석은 남는다.
+    const items = "a:\n  # x 설명\n  # x 둘째 줄\n  - x\n  # y 설명\n  - y\n";
+    expect(ok(items, { kind: "remove", pointer: "/a/0" }).nextSource).toBe(
+      "a:\n  # y 설명\n  - y\n",
+    );
+    expect(ok(items, { kind: "remove", pointer: "/a/1" }).nextSource).toBe(
+      "a:\n  # x 설명\n  # x 둘째 줄\n  - x\n",
+    );
+    const keys = "a: 1\n# b 설명\nb: 2\nc: 3\n";
+    expect(ok(keys, { kind: "remove", pointer: "/b" }).nextSource).toBe(
+      "a: 1\nc: 3\n",
+    );
+    // 빈 줄로 떨어진 주석은 대상의 것이 아니다.
+    const spaced = "a: 1\n# 섹션 설명\n\nb: 2\nc: 3\n";
+    expect(ok(spaced, { kind: "remove", pointer: "/b" }).nextSource).toBe(
+      "a: 1\n# 섹션 설명\n\nc: 3\n",
+    );
+    // CRLF에서도 같다.
+    const crlf = "a:\r\n  # x 설명\r\n  - x\r\n  - y\r\n";
+    expect(ok(crlf, { kind: "remove", pointer: "/a/0" }).nextSource).toBe(
+      "a:\r\n  - y\r\n",
+    );
+    // 문서 첫 줄부터 시작하는 주석 블록은 파일 헤더라 첫 루트 키를 지워도 남는다(P5-01 리뷰 P2-2).
+    const header = "# 전략 문서 v1.1\n# 작성자: 팀\nschema_version: '1.1'\nname: q\n";
+    expect(ok(header, { kind: "remove", pointer: "/schema_version" }).nextSource).toBe(
+      "# 전략 문서 v1.1\n# 작성자: 팀\nname: q\n",
+    );
+  });
+
+  it("empties an inner sequence whose only item is a quoted scalar containing `#` (review P2-1)", () => {
+    const source = 'zq:\n  l5:\n    - - "#tag"\n';
+    expect(ok(source, { kind: "remove", pointer: "/zq/l5/0/0" }).nextSource).toBe(
+      "zq:\n  l5:\n    - []\n",
+    );
+  });
+
   it("expands `- []` and `- {}` without leaving a trailing space", () => {
     expect(
       ok("a:\n  - []\n", {

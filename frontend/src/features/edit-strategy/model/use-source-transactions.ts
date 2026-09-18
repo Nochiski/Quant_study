@@ -63,8 +63,13 @@ export type SourceTransactions = {
     owner?: string,
     options?: ApplyOptions,
   ) => boolean;
-  /** 마지막 결과. `owner`로 어느 소비자(form·snippet·graph)의 것인지 구분한다(Phase 3 감사 R2). */
+  /** 마지막 결과(소비자 무관). `owner`로 어느 소비자(form·snippet·graph)의 것인지 구분한다(Phase 3 감사 R2). */
   feedback: TransactionFeedback;
+  /**
+   * `owner`의 마지막 결과. 슬롯은 owner별이라 스니펫 결과가 Form의 "반영됨"을 지우지 않는다(Phase 4 감사
+   * R2: Graph가 세 번째 소비자로 들어오기 전에 분리). 소비자는 자기 owner 슬롯만 읽는다.
+   */
+  feedbackFor: (owner: string) => TransactionFeedback;
   onEditorReady: (editor: CodeEditorHandle | null) => void;
   /** yaml 문서이고, 편집기가 활성·준비됐고, IME 조합 중이 아니며, 현재 텍스트의 parse가 ok인 상태. */
   enabled: boolean;
@@ -107,6 +112,9 @@ export const useSourceTransactions = (
   const editor = useRef<CodeEditorHandle | null>(null);
   const [editorReady, setEditorReady] = useState(false);
   const [scoped, setScoped] = useState<ScopedFeedback | null>(null);
+  const [scopedByOwner, setScopedByOwner] = useState<
+    Record<string, ScopedFeedback>
+  >({});
   const onEditorReady = useCallback((next: CodeEditorHandle | null): void => {
     editor.current = next;
     setEditorReady(next !== null);
@@ -129,8 +137,12 @@ export const useSourceTransactions = (
               : null;
   const enabled = disabled === null;
   const setFeedback = useCallback(
-    (value: TransactionFeedback): void =>
-      setScoped({ documentEpoch: state.documentEpoch, scope, value }),
+    (value: TransactionFeedback): void => {
+      const next = { documentEpoch: state.documentEpoch, scope, value };
+      setScoped(next);
+      if (value.status !== "idle")
+        setScopedByOwner((current) => ({ ...current, [value.owner]: next }));
+    },
     [scope, state.documentEpoch],
   );
 
@@ -204,12 +216,27 @@ export const useSourceTransactions = (
   );
 
   // 값으로 비교한다: memo identity에 기대면 React가 memo를 버릴 때 피드백이 조용히 사라진다(감사 DEFECT-P3X-004).
-  const feedback =
-    scoped !== null &&
-    scoped.documentEpoch === state.documentEpoch &&
-    Object.is(scoped.scope, scope)
-      ? scoped.value
+  const live = (entry: ScopedFeedback | null | undefined): TransactionFeedback =>
+    entry !== null &&
+    entry !== undefined &&
+    entry.documentEpoch === state.documentEpoch &&
+    Object.is(entry.scope, scope)
+      ? entry.value
       : IDLE;
+  const feedback = live(scoped);
+  const feedbackFor = useCallback(
+    (owner: string): TransactionFeedback => live(scopedByOwner[owner]),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `live`는 렌더마다 새로 만들지만 같은 값(state·scope)만 닫는다.
+    [scopedByOwner, state.documentEpoch, scope],
+  );
 
-  return { apply, run, feedback, onEditorReady, enabled, disabled };
+  return {
+    apply,
+    run,
+    feedback,
+    feedbackFor,
+    onEditorReady,
+    enabled,
+    disabled,
+  };
 };

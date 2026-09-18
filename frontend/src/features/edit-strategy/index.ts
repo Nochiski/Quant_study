@@ -169,7 +169,21 @@ export {
 export {
   findReferences,
   type DocumentReference,
+  type FindReferencesOptions,
 } from "./model/document-references";
+export {
+  addNode,
+  graphNodeIds,
+  nodeKinds,
+  nodePointerOf,
+  nodeReferenceKeys,
+  removeNode,
+  rewireInput,
+  setMissingPolicy,
+  setNodeField,
+  setOutput,
+  suggestNodeId,
+} from "./model/graph-transactions";
 export { StrategyFormPanel, type FormCatalogs } from "./ui/strategy-form-panel";
 export {
   buildCanonicalSnippetCatalog,

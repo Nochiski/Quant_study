@@ -14,16 +14,27 @@ export type DocumentReference = {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+export type FindReferencesOptions = {
+  /**
+   * 탐색을 이 pointer 아래로 좁힌다. 네임스페이스가 스코프를 가지면(`graph.nodes`의 `node`: 다른 팩터가
+   * 같은 `node_id`를 써도 합법) 호출자가 그 스코프(`/factors/N/graph`)를 넘겨야 한다 — 전역 탐색은
+   * 다른 그래프의 정의·출력을 참조로 오탐한다(Phase 4 감사 DEFECT-P4X-002). 생략하면 문서 전체.
+   * `definingPointer`는 `within` 안에 있어야 한다 — 밖이면 정의 자리가 제외되지 않아 참조로 센다(리뷰 P2-6).
+   */
+  within?: string;
+};
+
 /**
  * `id`를 참조하는 필드 pointer 목록. `definingPointer`(정의하는 항목, 예: `/factors/0`) 아래는
  * 제외하고, 같은 정의 배열의 다른 항목이 가진 정의 키(`/factors/1/factor_id`처럼 배열 항목 바로 아래의
- * `<namespace>_id`)도 참조가 아니라 정의로 보아 제외한다.
+ * `<namespace>_id`)도 참조가 아니라 정의로 보아 제외한다. `options.within`이 있으면 그 subtree만 본다.
  */
 export const findReferences = (
   tree: unknown,
   namespace: string,
   id: string,
   definingPointer = "",
+  options: FindReferencesOptions = {},
 ): DocumentReference[] => {
   const key = `${namespace}_id`;
   const suffix = `_${key}`;
@@ -55,6 +66,18 @@ export const findReferences = (
       visit(child, childPointer);
     }
   };
-  visit(tree, "");
+  const within = options.within ?? "";
+  visit(valueAtPointer(tree, within), within);
   return found;
+};
+
+const valueAtPointer = (tree: unknown, pointer: string): unknown => {
+  let current: unknown = tree;
+  for (const segment of pointer.split("/").slice(1)) {
+    const key = segment.replaceAll("~1", "/").replaceAll("~0", "~");
+    if (Array.isArray(current)) current = current[Number(key)];
+    else if (isRecord(current)) current = current[key];
+    else return undefined;
+  }
+  return current;
 };

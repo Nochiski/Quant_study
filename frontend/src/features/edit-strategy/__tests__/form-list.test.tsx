@@ -93,6 +93,7 @@ const stub = (): SourceTransactions => ({
   apply: vi.fn(),
   run: vi.fn(),
   feedback: { status: "idle" },
+  feedbackFor: () => ({ status: "idle" }),
   onEditorReady: vi.fn(),
   enabled: true,
   disabled: null,
@@ -165,6 +166,35 @@ describe("list transactions (P4-03)", () => {
     expect(findReferences(doc, "factor", "blend", "/factors/1")).toEqual([]);
     expect(
       findReferences(doc, "node", "close", "/factors/0/graph/nodes/0"),
+    ).toEqual([{ pointer: "/factors/0/graph/nodes/1/input_node_id" }]);
+    // 노드 id는 그래프 스코프: 다른 팩터가 같은 `node_id`를 써도 `within`으로 좁히면 참조가 아니다(감사 DEFECT-P4X-002).
+    const shared = {
+      ...doc,
+      factors: [
+        ...(doc.factors as unknown[]),
+        {
+          factor_id: "other",
+          direction: "high",
+          graph: {
+            nodes: [{ kind: "field", node_id: "close", field_id: "price.volume" }],
+            output_node_id: "close",
+          },
+        },
+      ],
+    };
+    expect(
+      findReferences(shared, "node", "close", "/factors/0/graph/nodes/0")
+        .map((r) => r.pointer)
+        .sort(),
+    ).toEqual([
+      "/factors/0/graph/nodes/1/input_node_id",
+      "/factors/2/graph/nodes/0/node_id",
+      "/factors/2/graph/output_node_id",
+    ]);
+    expect(
+      findReferences(shared, "node", "close", "/factors/0/graph/nodes/0", {
+        within: "/factors/0/graph",
+      }),
     ).toEqual([{ pointer: "/factors/0/graph/nodes/1/input_node_id" }]);
     const projected = projectForm(
       SCHEMA,

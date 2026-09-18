@@ -700,7 +700,9 @@ const planRemove = (
     const empty = Array.isArray(parent) ? "[]" : "{}";
     // `key: # 메모`처럼 부모 줄에 줄 끝 주석이 있으면 그 줄은 두고 다음 줄에 빈 컨테이너를 쓴다(P3-02 리뷰 P2-2).
     const parentLine = lineEndOf(source, from);
-    if (source.slice(from, parentLine).includes("#")) {
+    // 줄 끝 주석 분기는 부모 줄 뒤에 자식 줄이 있을 때만 성립한다. `- - "#tag"`처럼 안쪽 유일 항목이 부모와
+    // 같은 줄에 있으면 인용 스칼라 안의 `#`이 주석으로 오인되어 범위가 뒤집혔다(P5-01 리뷰 P2-1).
+    if (parentLine < to && source.slice(from, parentLine).includes("#")) {
       const keyRange = parsed.keyRanges.get(parentPointer);
       const column =
         keyRange?.start.column ??
@@ -733,7 +735,12 @@ const planRemove = (
     const ownEnd = contentEnd(source, parsed, op.pointer);
     if (ownEnd === null) return "not-found";
     if (!onDashLine(source, dash) || index + 1 >= parent.length) {
-      return removeLines(source, lineStartOf(source, dash), ownEnd, eol);
+      return removeLines(
+        source,
+        leadingCommentsStart(source, lineStartOf(source, dash), eol),
+        ownEnd,
+        eol,
+      );
     }
     const nextLineStart = lineEndOf(source, ownEnd) + eol.length;
     const nextContent =
@@ -765,10 +772,33 @@ const planRemove = (
   if (ownEnd === null) return "not-found";
   return removeLines(
     source,
-    lineStartOf(source, keyRange.start.offset),
+    leadingCommentsStart(source, lineStartOf(source, keyRange.start.offset), eol),
     ownEnd,
     eol,
   );
+};
+
+/**
+ * `lineStart` 줄 바로 위에 붙은 연속 독립 주석 줄(공백 + `#…`)의 시작 offset. 삭제 대상 위의 주석은 그
+ * 대상을 설명하므로 함께 지운다 — 삽입 앵커 규칙("앞 형제 내용 줄 끝 뒤"에 넣어 대상 위 주석이 대상을
+ * 따라간다)의 짝이고 property test의 주석 소유 규칙(소유자 = 그 줄에서 시작하는 pointer) 안이다
+ * (Phase 4 감사 R3: 노드·항목 삭제 뒤 고아 주석). 빈 줄이나 다른 내용을 만나면 멈춘다. 주석 블록이 문서
+ * 첫 줄(offset 0)에서 시작하면 파일 헤더로 보아 손대지 않는다(P5-01 리뷰 P2-2: 첫 루트 키를 지울 때 머리
+ * 주석이 사라지던 문제).
+ */
+const leadingCommentsStart = (
+  source: string,
+  lineStart: number,
+  eol: Eol,
+): number => {
+  let start = lineStart;
+  while (start >= eol.length && source.slice(start - eol.length, start) === eol) {
+    const previousLineStart = lineStartOf(source, start - eol.length);
+    const line = source.slice(previousLineStart, start - eol.length);
+    if (!/^\s*#/.test(line)) break;
+    start = previousLineStart;
+  }
+  return start === 0 ? lineStart : start;
 };
 
 /** `from` 줄부터 `contentEnd`가 속한 줄까지 통째로(EOL 포함) 지운다. 마지막 줄이면 앞 EOL을 지운다. */

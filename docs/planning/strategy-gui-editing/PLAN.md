@@ -1,13 +1,13 @@
 ---
 plan_version: 2
 project: strategy-gui-editing
-project_status: APPROVED
+project_status: IN_PROGRESS
 current_phase: P1,P2,P3,P4
-current_pr: P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01,P3-02,P4-01,P4-02,P4-03,P4-04
-active_prs: [P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04]
-parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02, P1-06, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04]
-last_updated: 2026-09-18T13:30:56+09:00
-planned_prs: 18
+current_pr: P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01,P3-02,P4-01,P4-02,P4-03,P4-04,P4-05
+active_prs: [P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05]
+parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02, P1-06, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05]
+last_updated: 2026-09-18T14:09:03+09:00
+planned_prs: 19
 merged_prs: 0
 approved_prs: 15
 progress_percent: 0
@@ -23,13 +23,13 @@ progress_percent: 0
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `APPROVED` |
+| Project status | `IN_PROGRESS` |
 | Current phase | `P1,P2,P3,P4` |
-| Current/next PR | `P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01,P3-02,P4-01,P4-02,P4-03,P4-04` |
-| Active PR | `P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04` |
-| Progress | `0 / 18 merged (0%)` |
-| Approved | `15 / 18` |
-| Aggregated at | `2026-09-18 13:30 KST` |
+| Current/next PR | `P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01,P3-02,P4-01,P4-02,P4-03,P4-04,P4-05` |
+| Active PR | `P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05` |
+| Progress | `0 / 19 merged (0%)` |
+| Approved | `15 / 19` |
+| Aggregated at | `2026-09-18 14:09 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -79,9 +79,9 @@ progress_percent: 0
 | P1 | Backend schema 1.1 | 6 | 0 | `APPROVED` |
 | P2 | Frontend 1.1 and upgrade UI | 3 | 0 | `APPROVED` |
 | P3 | Source transactions | 2 | 0 | `APPROVED` |
-| P4 | Form editing | 4 | 0 | `APPROVED` |
+| P4 | Form editing | 5 | 0 | `IN_PROGRESS` |
 | P5 | Graph editing | 3 | 0 | `WAITING` |
-| **Total** |  | **18** | **0** | **0%** |
+| **Total** |  | **19** | **0** | **0%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
@@ -150,19 +150,20 @@ Phase exit:
 |---|---|---|---|---|---|
 | [ ] | `P4-01` | `form-projection.ts` (schema × tree × 진단) | P3-02, P2-03 | `APPROVED` | [#121](https://github.com/Nochiski/Quant_study/pull/121) · `review_gui_p4_01` 2차 APPROVE(`cd9addf`) |
 | [ ] | `P4-02` | Form 컨트롤·트랜잭션 연결 | P4-01, P3-02 | `APPROVED` | [#122](https://github.com/Nochiski/Quant_study/pull/122) · `review_gui_p4_02` 2차 APPROVE(`f1a76dc`) |
-| [ ] | `P4-03` | 목록 섹션: eligibility rules, parameters, factors 헤더·preset, 참조 가드 | P4-02 | `APPROVED` | [#125](https://github.com/Nochiski/Quant_study/pull/125) · `review_gui_p4_03` 2차 APPROVE(`24ad45a`) |
+| [ ] | `P4-03` | 목록 섹션: 루트 목록(parameters·factors) 헤더·preset, 참조 가드 | P4-02 | `APPROVED` | [#125](https://github.com/Nochiski/Quant_study/pull/125) · `review_gui_p4_03` 2차 APPROVE(`24ad45a`) |
 | [ ] | `P4-04` | IDE·page 연결, stale/JSON 잠금, i18n, e2e, SoT 규칙 개정 | P4-03 | `APPROVED` | [#126](https://github.com/Nochiski/Quant_study/pull/126) · `review_gui_p4_04` 2차 APPROVE(`8c5ade0`) |
+| [ ] | `P4-05` | 중첩 목록(`eligibility.rules`) 편집, Phase 4 감사 후속(discriminator `schemaFacts`·`x-catalog` 집합 테스트·README·문서 액션) | P4-04 | `IN_PROGRESS` | — |
 
 Phase exit:
 
-- [ ] e2e "Form 값 변경 → 주석 유지 → 저장 hash 동일" green.
-- [ ] SoT·책임분리 점검 서브에이전트 결과 기록.
+- [x] e2e "Form 값 변경 → 주석 유지 → 저장 hash 동일" green — P4-04 `chromium-workflow` Form 시나리오(YAML 바이트 동일·`spec_hash`·`source_hash` backend 대조), 6/6.
+- [x] SoT·책임분리 점검 서브에이전트 결과 기록 — `audit_gui_phase4` PASS(blocking 0; P1 2: DEFECT-P4X-001 `eligibility.rules` 편집이 acceptance에만 있고 구현 경로 없음 → P4-05, DEFECT-P4X-002 `findReferences`가 node 스코프를 무시해 같은 `node_id`를 쓰는 다른 팩터의 정의·출력을 참조로 오탐 → P5-01 착수 조건; P2 6: discriminator 직접 읽기(→ P4-05), 카탈로그 이름 사본(→ 테스트, P4-05), 숫자 canonical 표기(기록), 스니펫 훅 버려지는 인스턴스(기록), README read-only 서술(→ P4-05), CodeMirror CRLF→LF 정규화로 편집 없이 저장해도 `source_hash` 변동(기록); 이월 15; Phase 5 위험 R1~R6 → P5-01/02 acceptance에 결정; 문서 액션 11 반영). 왕복 불변식: golden 4케이스 바이트·`spec_hash` 동일.
 
 ## P5 — Graph 편집
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P5-01` | `graph-transactions.ts`: 노드 추가·필드·재연결·출력·삭제 가드·id 제안 | P4-03 | `WAITING` | — |
+| [ ] | `P5-01` | `graph-transactions.ts`: 노드 추가·필드·재연결·출력·삭제 가드·id 제안, `findReferences` 스코프, owner별 feedback, `planRemove` 선행 주석 | P4-05 | `WAITING` | — |
 | [ ] | `P5-02` | Graph UI: 노드 추가 메뉴, property editor, 입력 슬롯, 키보드·ARIA | P5-01 | `WAITING` | — |
 | [ ] | `P5-03` | 연결·e2e·문서·규칙 마감, read-only 문구 제거, 로드맵 M8 | P5-02, P4-04 | `WAITING` | — |
 
@@ -218,6 +219,7 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-18 KST | Claude | `audit_gui_phase4` 수신: PASS(blocking 0). exit 질문 통과(YAML 텍스트 생성은 `planSourceOperation` 하나, `schemaFacts`·`referenceCandidates`·`materializeSchemaValue` 단일 owner, `schema-assist`·`canonical-snippets`의 마커·enum·default 직접 읽기 0 → Phase 3 R5 해소, 왕복 불변식 바이트·spec_hash 동일). P1: DEFECT-P4X-001 중첩 목록 범위 미확정 → **WORKFLOW 자체 수정: P4-05 추가(19 PR)**, DEFECT-P4X-002 `findReferences` node 스코프 오탐 → P5-01 acceptance에 스코프 인자 결정. Phase 5 위험: R1 스코프, R2 feedback owner별 슬롯(P5-01 결정), R3 `planRemove` 선행 주석(P5-01 결정), R4 plan 없는 Graph 편집 표면(P5-02 제약), R5 빈 `nodes: []` insert-item 가능, R6 노드 pointer 규약(P5-02). 문서 액션 11 반영(WORKFLOW·SoT 행·PLAN·README 2·`form.field.listLink` 문구). Phase 4 exit 2항 체크 | 13.6 Phase 감사 |
 | 2026-09-18 KST | Claude | `review_gui_p4_03` 2차 APPROVE(`24ad45a`) → P4-03 APPROVED, `review_gui_p4_04` 2차 APPROVE(`8c5ade0`, 신규 P2 DEFECT-P404-011 기록) → P4-04 APPROVED. Phase 4 PR 4/4 승인(승인 기록은 스택 상위 P4-04 브랜치 PLAN에 합류). 다음: Phase 4 exit 감사(`audit_gui_phase4`, opus) → P5-01 | 13.5 판정 |
 | 2026-09-18 KST | Claude | `review_gui_p4_04` 1차 APPROVE(P1 0·P2 10; 실측: hidden 편집기 유지·replaceRange 1회·문서 경계 누수 없음·undo 2회·view 전환 identity 유지·JSON/stale 잠금). 권고 P2를 후속 `8c5ade0`로 처리: (001) stale을 "같은 버전 parse 실패"로 좁혀 디바운스 구간 STALE 오탐 제거, (003) 섹션 접기 테스트, (005/006/007) `inapplicablePointers`·`view` prop·고아 키 7·고아 CSS 8 삭제, (008) SoT 행 Graph 읽기 전용 단서, (010) 안내 문단 role 제거, (004) PR 본문 정정. 기록: (002) 공유 슬롯 하나라 스니펫 결과가 Form 반영됨을 지움 → P5-01, (009) e2e 팩터 추가 검증 약함, R6 근거는 e2e가 아니라 잠금·route 테스트. P4-03 후속 `24ad45a` 위로 rebase, 재검토 요청 | 13.5 재검토 |
 | 2026-09-18 KST | Claude | P4-04 구현·self-check → P4-03 head `b089e05` 위로 rebase(P4-03 패널 CSS 중괄호 결함은 이 브랜치의 e2e 백테스트 결과 배경 검사가 잡아 P4-03에서 수정), Playwright chromium-workflow 6/6, diff freeze `13fa8d3`, stacked PR #126(base P4-03), `review_gui_p4_04`(opus) 배정 → IN_REVIEW(활성 리뷰 P4-03·P4-04 = 2). 결정: 트랜잭션 인스턴스는 page 하나·`editorActive`는 "handle이 살아 있는가"(스니펫만 source view 게이트), stale은 마지막 유효 parse로 그리되 훅 `disabled: syntax`로 잠금, JSON 문서는 문구 안내(포맷 변환 명령 없음), 섹션 접기는 `aria-expanded` + `hidden`(DOM 유지), 이중 확정 결함은 P4-02 후속으로 이관 | 13.3 diff freeze |

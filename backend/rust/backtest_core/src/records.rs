@@ -52,8 +52,10 @@ fn released_error(seq: u64, kind: u8, operation: &str) -> PyErr {
 }
 
 /// `(seq, session_index, kind)` — Python `PersistentEventStore`가 소비하는 레코드 인덱스 행.
-/// payload는 `record_payloads(kind)`로 kind 단위로만 변환한다 — 배치 전체를 tuple로 복제하면 Rust
-/// wire·Python tuple·공개 객체가 동시에 살아 peak RSS가 커진다.
+/// payload는 이 행과 따로 나른다. 정본 경로는 `drain_payloads(kind, limit)`로, 한 kind를 청크씩
+/// 넘기면서 넘긴 자리를 바로 해제한다. 종료 전 partial trace만 해제하지 않는
+/// `record_payloads(kind)`로 읽는다. 인덱스와 payload를 한 번에 다 나르면 Rust wire·Python
+/// tuple·공개 객체가 동시에 살아 peak RSS가 셋의 합이 된다.
 pub(crate) type RecordIndexWire = (u64, usize, u8);
 
 pub(crate) fn to_object<'py, T>(py: Python<'py>, value: T) -> PyResult<PyObject>

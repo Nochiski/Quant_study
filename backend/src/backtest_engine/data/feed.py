@@ -119,6 +119,18 @@ class DataFeed:
                 f"first={offsets[0]} last={offsets[-1]} rows={rows}"
             )
         instrument_count = len(instruments)
+        # 같은 InstrumentId가 두 index를 차지하면 세션 안 중복 검사(index 기준)를 통과한
+        # 채로 같은 종목이 한 스냅샷에 두 번 담긴다. 그러면 `MarketSnapshot`이 실행 도중
+        # `snapshot_at`에서야 거부하고, Rust 적재는 등록부 key 하나에 심볼 둘로 어긋난다.
+        first_index_of: dict[InstrumentId, int] = {}
+        for index, instrument in enumerate(instruments):
+            first_index = first_index_of.setdefault(instrument, index)
+            if first_index != index:
+                raise ValueError(
+                    "duplicate instrument in feed registry — "
+                    f"instrument={instrument.symbol} indices=[{first_index}, {index}] "
+                    f"registry={instrument_count}"
+                )
         previous_ts: datetime | None = None
         for session_index, ts in enumerate(sessions):
             if previous_ts is not None and ts <= previous_ts:
@@ -181,11 +193,17 @@ class DataFeed:
         return self._sessions
 
     def columns(self) -> FeedColumns:
-        """persistent 경로가 그대로 넘길 열. Bar로 만든 feed는 첫 호출에서 열을 만든다."""
+        """persistent 경로가 그대로 넘길 열.
+
+        `from_columns`로 만든 feed는 보관 중인 열을 그대로 돌려준다. `DataFeed(bars)`로
+        만든 feed는 호출마다 스냅샷에서 새로 판다 — 캐시하면 파생 열(포인터 리스트 6개,
+        123,100행 기준 약 5.8MiB)이 실행 내내 상주하는데, 부르는 쪽은 완주 실행의 적재
+        1회(`_load_persistent_feed`)와 중단된 실행의 종목 조회표(`_covered_feed`)뿐이라
+        그 상주를 정당화하지 못한다 (DEFECT-1002).
+        """
         columns = self._columns
         if columns is None:
-            columns = self._columns_from_snapshots()
-            self._columns = columns
+            return self._columns_from_snapshots()
         return columns
 
     def snapshot_at(self, index: int) -> MarketSnapshot:

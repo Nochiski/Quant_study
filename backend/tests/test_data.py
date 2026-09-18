@@ -217,9 +217,33 @@ class TestDataFeedFromColumns:
         assert list(columns.closes) == expected.closes
         assert list(columns.volumes) == expected.volumes
 
-    def test_columns_survive_repeated_calls(self) -> None:
+    def test_bar_feed_derives_columns_per_call_without_caching(self) -> None:
+        """파생 열을 붙들지 않는다 (DEFECT-1002) — 값은 같고 객체는 매번 새것이다.
+
+        `DataFeed(bars)`로 만든 feed에서 열을 캐시하면 123,100행 기준 약 5.8MiB가 실행
+        내내 상주한다. 부르는 쪽은 적재 1회와 중단 실행의 조회표뿐이라 값만 맞으면 된다.
+        """
         feed = DataFeed(_sample_bars())
+        first = feed.columns()
+        second = feed.columns()
+        assert first == second
+        assert first is not second
+
+    def test_columnar_feed_hands_back_the_stored_columns(self) -> None:
+        """열로 만든 feed는 보관 중인 열을 그대로 준다 — 다시 파생하지 않는다."""
+        feed = _columns_of(_sample_bars()).feed()
         assert feed.columns() is feed.columns()
+
+    def test_duplicate_instrument_in_registry_rejected(self) -> None:
+        """등록부가 같은 종목을 두 index에 담으면 생성 시점에 거부한다.
+
+        index 기준 세션 중복 검사를 통과한 채 한 스냅샷에 같은 종목이 두 번 들어가고,
+        Rust 적재도 등록부 key 하나에 심볼 둘로 어긋난다.
+        """
+        columns = _columns_of(_sample_bars())
+        duplicated = replace(columns, instruments=[columns.instruments[0]] * 2)
+        with pytest.raises(ValueError, match="duplicate instrument in feed registry"):
+            duplicated.feed()
 
     def test_snapshot_at_is_lazy_and_cached(self, monkeypatch: pytest.MonkeyPatch) -> None:
         columns = _columns_of(_sample_bars())

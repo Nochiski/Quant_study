@@ -1,16 +1,16 @@
 ---
 plan_version: 2
 project: strategy-gui-editing
-project_status: APPROVED
-current_phase: P1,P2,P3,P4,P5
-current_pr: P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01,P3-02,P4-01,P4-02,P4-03,P4-04,P4-05,P5-01,P5-02,P5-03
-active_prs: [P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05, P5-01, P5-02, P5-03]
+project_status: COMPLETE
+current_phase: complete
+current_pr: none
+active_prs: []
 parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02, P1-06, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05, P5-01, P5-02, P5-03]
-last_updated: 2026-09-18T18:46:33+09:00
+last_updated: 2026-09-18T19:31:40+09:00
 planned_prs: 19
-merged_prs: 0
+merged_prs: 19
 approved_prs: 19
-progress_percent: 0
+progress_percent: 100
 ---
 
 # schema 1.1 · Form/Graph 편집 실시간 진행 계획
@@ -23,13 +23,13 @@ progress_percent: 0
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `APPROVED` |
-| Current phase | `P1,P2,P3,P4,P5` |
-| Current/next PR | `P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01,P3-02,P4-01,P4-02,P4-03,P4-04,P4-05,P5-01,P5-02,P5-03` |
-| Active PR | `P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05, P5-01, P5-02, P5-03` |
-| Progress | `0 / 19 merged (0%)` |
+| Project status | `COMPLETE` |
+| Current phase | `complete` |
+| Current/next PR | `none` |
+| Active PR | none |
+| Progress | `19 / 19 merged (100%)` |
 | Approved | `19 / 19` |
-| Aggregated at | `2026-09-18 18:46 KST` |
+| Aggregated at | `2026-09-18 19:31 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -76,12 +76,12 @@ progress_percent: 0
 <!-- PLAN:PHASES:START -->
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
-| P1 | Backend schema 1.1 | 6 | 0 | `APPROVED` |
-| P2 | Frontend 1.1 and upgrade UI | 3 | 0 | `APPROVED` |
-| P3 | Source transactions | 2 | 0 | `APPROVED` |
-| P4 | Form editing | 5 | 0 | `APPROVED` |
-| P5 | Graph editing | 3 | 0 | `APPROVED` |
-| **Total** |  | **19** | **0** | **0%** |
+| P1 | Backend schema 1.1 | 6 | 6 | `MERGED` |
+| P2 | Frontend 1.1 and upgrade UI | 3 | 3 | `MERGED` |
+| P3 | Source transactions | 2 | 2 | `MERGED` |
+| P4 | Form editing | 5 | 5 | `MERGED` |
+| P5 | Graph editing | 3 | 3 | `MERGED` |
+| **Total** |  | **19** | **19** | **100%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
@@ -105,12 +105,12 @@ progress_percent: 0
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P1-01` | 모델 1.1: `factors` 평탄화, 선택 보일러플레이트, `kind` 우선, fixture·hash golden | 없음 | `APPROVED` | [#108](https://github.com/Nochiski/Quant_study/pull/108) · `review_gui_p1_01` APPROVE (REQUEST_CHANGES P1 1/P2 7 해소) · `5d28996` |
-| [ ] | `P1-02` | 미사용 필드 3개·enum 제거, unary alias 제거, `cross_sectional: demean` | P1-01 | `APPROVED` | [#111](https://github.com/Nochiski/Quant_study/pull/111) · `review_gui_p1_02` APPROVE (P0/P1 0, P2 3 후속 반영 후 유지) · `9a5cccb` |
-| [ ] | `P1-03` | `_upgrade.py` dict 변환, 1.0 row 동결 읽기, saved-reference backtest 422 | P1-02 | `APPROVED` | [#112](https://github.com/Nochiski/Quant_study/pull/112) · `review_gui_p1_03` APPROVE (P0/P1 0, P2 5 후속 반영 후 유지) · `8bd0185` |
-| [ ] | `P1-04` | `POST /strategy-documents/upgrade` (ruamel rt, drift fail-closed) | P1-03 | `APPROVED` | [#113](https://github.com/Nochiski/Quant_study/pull/113) · `review_gui_p1_04` APPROVE (4차; P1 4·P2 7 해소) · `f7049fa` |
-| [ ] | `P1-05` | `FIELD_APPLICABILITY`, compile warning, `x-applicable-when` | P1-02 | `APPROVED` | [#114](https://github.com/Nochiski/Quant_study/pull/114) · `review_gui_p1_05` APPROVE (P1-001 철회, P2-002~004 해소) · `3c70001` |
-| [ ] | `P1-06` | Phase 1 감사 후속: schema 버전 owner 단일화, 동결 술어 통일, 주석 재배치 일반화, 규칙·spec D4 갱신, P2-01 리뷰 후속 | P1-05, P2-02 | `APPROVED` | [#117](https://github.com/Nochiski/Quant_study/pull/117) · `review_gui_p1_06` APPROVE (P0/P1 0, P2 3 → 후속 `e77f7ce` 확인 요청) · `e77f7ce` |
+| [x] | `P1-01` | 모델 1.1: `factors` 평탄화, 선택 보일러플레이트, `kind` 우선, fixture·hash golden | 없음 | `MERGED` | [#108](https://github.com/Nochiski/Quant_study/pull/108) · `review_gui_p1_01` APPROVE (REQUEST_CHANGES P1 1/P2 7 해소) · `5d28996` · main 머지 [#108](https://github.com/Nochiski/Quant_study/pull/108) 2026-09-18 |
+| [x] | `P1-02` | 미사용 필드 3개·enum 제거, unary alias 제거, `cross_sectional: demean` | P1-01 | `MERGED` | [#111](https://github.com/Nochiski/Quant_study/pull/111) · `review_gui_p1_02` APPROVE (P0/P1 0, P2 3 후속 반영 후 유지) · `9a5cccb` · main 머지 [#111](https://github.com/Nochiski/Quant_study/pull/111) 2026-09-18 |
+| [x] | `P1-03` | `_upgrade.py` dict 변환, 1.0 row 동결 읽기, saved-reference backtest 422 | P1-02 | `MERGED` | [#112](https://github.com/Nochiski/Quant_study/pull/112) · `review_gui_p1_03` APPROVE (P0/P1 0, P2 5 후속 반영 후 유지) · `8bd0185` · main 머지 [#112](https://github.com/Nochiski/Quant_study/pull/112) 2026-09-18 |
+| [x] | `P1-04` | `POST /strategy-documents/upgrade` (ruamel rt, drift fail-closed) | P1-03 | `MERGED` | [#113](https://github.com/Nochiski/Quant_study/pull/113) · `review_gui_p1_04` APPROVE (4차; P1 4·P2 7 해소) · `f7049fa` · main 머지 [#113](https://github.com/Nochiski/Quant_study/pull/113) 2026-09-18 |
+| [x] | `P1-05` | `FIELD_APPLICABILITY`, compile warning, `x-applicable-when` | P1-02 | `MERGED` | [#114](https://github.com/Nochiski/Quant_study/pull/114) · `review_gui_p1_05` APPROVE (P1-001 철회, P2-002~004 해소) · `3c70001` · main 머지 [#114](https://github.com/Nochiski/Quant_study/pull/114) 2026-09-18 |
+| [x] | `P1-06` | Phase 1 감사 후속: schema 버전 owner 단일화, 동결 술어 통일, 주석 재배치 일반화, 규칙·spec D4 갱신, P2-01 리뷰 후속 | P1-05, P2-02 | `MERGED` | [#117](https://github.com/Nochiski/Quant_study/pull/117) · `review_gui_p1_06` APPROVE (P0/P1 0, P2 3 → 후속 `e77f7ce` 확인 요청) · `e77f7ce` · main 머지 [#117](https://github.com/Nochiski/Quant_study/pull/117) 2026-09-18 |
 
 Phase exit:
 
@@ -122,9 +122,9 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P2-01` | generated SDK 1.1, pointer helper·snippet·outline·plan·graph·debugger 적응 | P1-05 | `APPROVED` | [#115](https://github.com/Nochiski/Quant_study/pull/115) · `review_gui_p2_01` APPROVE (P0/P1 0, P2 6 → 후속은 P2-02 브랜치에서) · `802d6e2` |
-| [ ] | `P2-02` | 1.0 문서 업그레이드 배너·동작, e2e fixture/spec 1.1 | P2-01, P1-04 | `APPROVED` | [#116](https://github.com/Nochiski/Quant_study/pull/116) · `review_gui_p2_02` 3차 APPROVE (1차 P1 2·P2 6 → 2차 P1-001 잔존 → 3차 해소) · `6278c40` |
-| [ ] | `P2-03` | Contract Inspector·Problems 적용 조건 표시 | P2-01, P1-05 | `APPROVED` | [#118](https://github.com/Nochiski/Quant_study/pull/118) · `review_gui_p2_03` 2차 APPROVE (1차 P1 1·P2 8 해소; 8문서×8행 판정 대조 일치) · `abafcc7` |
+| [x] | `P2-01` | generated SDK 1.1, pointer helper·snippet·outline·plan·graph·debugger 적응 | P1-05 | `MERGED` | [#115](https://github.com/Nochiski/Quant_study/pull/115) · `review_gui_p2_01` APPROVE (P0/P1 0, P2 6 → 후속은 P2-02 브랜치에서) · `802d6e2` · main 머지 [#115](https://github.com/Nochiski/Quant_study/pull/115) 2026-09-18 |
+| [x] | `P2-02` | 1.0 문서 업그레이드 배너·동작, e2e fixture/spec 1.1 | P2-01, P1-04 | `MERGED` | [#116](https://github.com/Nochiski/Quant_study/pull/116) · `review_gui_p2_02` 3차 APPROVE (1차 P1 2·P2 6 → 2차 P1-001 잔존 → 3차 해소) · `6278c40` · main 머지 [#116](https://github.com/Nochiski/Quant_study/pull/116) 2026-09-18 |
+| [x] | `P2-03` | Contract Inspector·Problems 적용 조건 표시 | P2-01, P1-05 | `MERGED` | [#118](https://github.com/Nochiski/Quant_study/pull/118) · `review_gui_p2_03` 2차 APPROVE (1차 P1 1·P2 8 해소; 8문서×8행 판정 대조 일치) · `abafcc7` · main 머지 [#118](https://github.com/Nochiski/Quant_study/pull/118) 2026-09-18 |
 
 Phase exit:
 
@@ -136,8 +136,8 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P3-01` | `source-transactions.ts` 원시 연산 4종, preflight, property test | P2-01 | `APPROVED` | [#119](https://github.com/Nochiski/Quant_study/pull/119) · `review_gui_p3_01` 2차 APPROVE(`51301cc`) · WORKFLOW 한 줄 `fb8a1b4` |
-| [ ] | `P3-02` | `useSourceTransactions`, 스니펫 삽입 재구성 | P3-01 | `APPROVED` | [#120](https://github.com/Nochiski/Quant_study/pull/120) · `review_gui_p3_02` 2차 APPROVE(`96d6b3b`) |
+| [x] | `P3-01` | `source-transactions.ts` 원시 연산 4종, preflight, property test | P2-01 | `MERGED` | [#119](https://github.com/Nochiski/Quant_study/pull/119) · `review_gui_p3_01` 2차 APPROVE(`51301cc`) · WORKFLOW 한 줄 `fb8a1b4` · main 머지 [#119](https://github.com/Nochiski/Quant_study/pull/119) 2026-09-18 |
+| [x] | `P3-02` | `useSourceTransactions`, 스니펫 삽입 재구성 | P3-01 | `MERGED` | [#120](https://github.com/Nochiski/Quant_study/pull/120) · `review_gui_p3_02` 2차 APPROVE(`96d6b3b`) · main 머지 [#120](https://github.com/Nochiski/Quant_study/pull/120) 2026-09-18 |
 
 Phase exit:
 
@@ -148,11 +148,11 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P4-01` | `form-projection.ts` (schema × tree × 진단) | P3-02, P2-03 | `APPROVED` | [#121](https://github.com/Nochiski/Quant_study/pull/121) · `review_gui_p4_01` 2차 APPROVE(`cd9addf`) |
-| [ ] | `P4-02` | Form 컨트롤·트랜잭션 연결 | P4-01, P3-02 | `APPROVED` | [#122](https://github.com/Nochiski/Quant_study/pull/122) · `review_gui_p4_02` 2차 APPROVE(`f1a76dc`) |
-| [ ] | `P4-03` | 목록 섹션: 루트 목록(parameters·factors) 헤더·preset, 참조 가드 | P4-02 | `APPROVED` | [#125](https://github.com/Nochiski/Quant_study/pull/125) · `review_gui_p4_03` 2차 APPROVE(`24ad45a`) |
-| [ ] | `P4-04` | IDE·page 연결, stale/JSON 잠금, i18n, e2e, SoT 규칙 개정 | P4-03 | `APPROVED` | [#126](https://github.com/Nochiski/Quant_study/pull/126) · `review_gui_p4_04` 2차 APPROVE(`8c5ade0`) |
-| [ ] | `P4-05` | 중첩 목록(`eligibility.rules`) 편집, Phase 4 감사 후속(discriminator `schemaFacts`·`x-catalog` 집합 테스트·README·문서 액션) | P4-04 | `APPROVED` | [#130](https://github.com/Nochiski/Quant_study/pull/130) · `review_gui_p4_05` 1차 APPROVE(`b394dbe`) |
+| [x] | `P4-01` | `form-projection.ts` (schema × tree × 진단) | P3-02, P2-03 | `MERGED` | [#121](https://github.com/Nochiski/Quant_study/pull/121) · `review_gui_p4_01` 2차 APPROVE(`cd9addf`) · main 머지 [#121](https://github.com/Nochiski/Quant_study/pull/121) 2026-09-18 |
+| [x] | `P4-02` | Form 컨트롤·트랜잭션 연결 | P4-01, P3-02 | `MERGED` | [#122](https://github.com/Nochiski/Quant_study/pull/122) · `review_gui_p4_02` 2차 APPROVE(`f1a76dc`) · main 머지 [#122](https://github.com/Nochiski/Quant_study/pull/122) 2026-09-18 |
+| [x] | `P4-03` | 목록 섹션: 루트 목록(parameters·factors) 헤더·preset, 참조 가드 | P4-02 | `MERGED` | [#125](https://github.com/Nochiski/Quant_study/pull/125) · `review_gui_p4_03` 2차 APPROVE(`24ad45a`) · main 머지 [#125](https://github.com/Nochiski/Quant_study/pull/125) 2026-09-18 |
+| [x] | `P4-04` | IDE·page 연결, stale/JSON 잠금, i18n, e2e, SoT 규칙 개정 | P4-03 | `MERGED` | [#126](https://github.com/Nochiski/Quant_study/pull/126) · `review_gui_p4_04` 2차 APPROVE(`8c5ade0`) · main 머지 [#126](https://github.com/Nochiski/Quant_study/pull/126) 2026-09-18 |
+| [x] | `P4-05` | 중첩 목록(`eligibility.rules`) 편집, Phase 4 감사 후속(discriminator `schemaFacts`·`x-catalog` 집합 테스트·README·문서 액션) | P4-04 | `MERGED` | [#130](https://github.com/Nochiski/Quant_study/pull/130) · `review_gui_p4_05` 1차 APPROVE(`b394dbe`) · main 머지 [#130](https://github.com/Nochiski/Quant_study/pull/130) 2026-09-18 |
 
 Phase exit:
 
@@ -163,15 +163,15 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P5-01` | `graph-transactions.ts`: 노드 추가·필드·재연결·출력·삭제 가드·id 제안, `findReferences` 스코프, owner별 feedback, `planRemove` 선행 주석 | P4-05 | `APPROVED` | [#131](https://github.com/Nochiski/Quant_study/pull/131) · `review_gui_p5_01` 2차 APPROVE(`226231d`) |
-| [ ] | `P5-02` | Graph UI: 노드 추가 메뉴, property editor, 입력 슬롯, 키보드·ARIA | P5-01 | `APPROVED` | [#132](https://github.com/Nochiski/Quant_study/pull/132) · `review_gui_p5_02` 2차 APPROVE(`45f01c9`) |
-| [ ] | `P5-03` | 연결·e2e·문서·규칙 마감, read-only 문구 제거, 로드맵 M8 | P5-02, P4-04 | `APPROVED` | [#133](https://github.com/Nochiski/Quant_study/pull/133) · `review_gui_p5_03` 5차 APPROVE(`5de4464`, 문서 `ca46b56`) |
+| [x] | `P5-01` | `graph-transactions.ts`: 노드 추가·필드·재연결·출력·삭제 가드·id 제안, `findReferences` 스코프, owner별 feedback, `planRemove` 선행 주석 | P4-05 | `MERGED` | [#131](https://github.com/Nochiski/Quant_study/pull/131) · `review_gui_p5_01` 2차 APPROVE(`226231d`) · main 머지 [#131](https://github.com/Nochiski/Quant_study/pull/131) 2026-09-18 |
+| [x] | `P5-02` | Graph UI: 노드 추가 메뉴, property editor, 입력 슬롯, 키보드·ARIA | P5-01 | `MERGED` | [#132](https://github.com/Nochiski/Quant_study/pull/132) · `review_gui_p5_02` 2차 APPROVE(`45f01c9`) · main 머지 [#132](https://github.com/Nochiski/Quant_study/pull/132) 2026-09-18 |
+| [x] | `P5-03` | 연결·e2e·문서·규칙 마감, read-only 문구 제거, 로드맵 M8 | P5-02, P4-04 | `MERGED` | [#133](https://github.com/Nochiski/Quant_study/pull/133) · `review_gui_p5_03` 5차 APPROVE(`5de4464`, 문서 `ca46b56`) · main 머지 [#133](https://github.com/Nochiski/Quant_study/pull/133) 2026-09-18 |
 
 Phase exit:
 
 - [x] e2e "노드 추가 → 재연결 → plan 갱신 → 저장" green — P5-03 `chromium-workflow` Graph 시나리오(저장 revision hash = backend compile), 7/7.
 - [x] ADR·SoT·README·manual·로드맵 갱신 — ADR D5 개정·5절 취소선, SoT 전략 의미 행, README 2, 매뉴얼 8절, 로드맵 M8 주석, yaml-ui WORKFLOW 2.1/2.2/2.3(P5-03).
-- [ ] SoT·책임분리 최종 점검 기록.
+- [x] SoT·책임분리 최종 점검 기록 — `audit_gui_phase5` PASS(blocking 0; exit 질문 (a)~(f) 전부 통과, 왕복 불변식 바이트·`spec_hash`·undo 개수 실측, Phase 4 위험 R1~R6 해소; P1 1(DEFECT-P5X-001 확정 직후 같은 필드 재편집 경합)·P2 9는 머지 뒤 backlog). initiative COMPLETE(2026-09-18).
 
 ---
 
@@ -219,10 +219,30 @@ Phase exit:
 | P1-02 | hydrate unknown_key 3·invalid_enum 4·demean 문서 1, demean parity 1, 설명 문구 1 | backend pytest 1,232·Ruff check·Pyright 0; reviewer 독립 재실행 동일 | `openapi.json`·`runtime-schema.json` 재생성 후 diff 0 | 해당 없음 | 원격 CI backend job 대상, browser-e2e 알려진 빨간불 | 2026-09-17 |
 | P1-01 | contract fixtures 15·schema 3 신규·hydrate 가드 1·JSON API label 비대칭 1 | backend pytest 1,228·Ruff check·Pyright 0; reviewer 독립 재실행 동일 | `openapi.json`·`runtime-schema.json` 재생성 후 diff 0 (frontend SDK는 P2-01) | 해당 없음(backend) | 원격 CI: backend job 대상, browser-e2e는 알려진 빨간불(WORKFLOW 1절) | 2026-09-17 |
 
+## 머지 뒤 backlog (audit_gui_phase5 §11, 우선순위)
+
+| 우선 | 항목 | 근거 | 크기 |
+|---:|---|---|---|
+| 1 | DEFECT-P5X-001 — `TextualControl` 되돌리기에 "사용자가 draft를 고치지 않았다" 조건(확정 직후 150ms 안에 같은 필드를 비우고 다시 치면 parse 도착이 옛 값을 되살려 `window: 100101`처럼 이어 붙음, "반영됨" 오보고; undo 1회 복구) | `strategy-form-panel.tsx` `TextualControl` seen/committed 조정 | 한 줄 + 테스트 1 |
+| 2 | DEFECT-P5X-002 — 사용자 매뉴얼 1절 샘플이 schema 1.0 | 첫 실습이 업그레이드 오류로 시작 | 문서 |
+| 3 | DEFECT-P5X-003 — `x-reference` 네임스페이스 리터럴(`NAMESPACES`)을 runtime schema fixture와 묶는 테스트(`CATALOGS`와 대칭) | 새 네임스페이스가 조용히 text 컨트롤로 떨어짐 | 테스트 1 |
+| 4 | P5X-009 — `node_id` 중복 방지 판정 + 참조 id rename(참조 갱신) | 중복이 backend compile error로만 드러남 | 기능 |
+| 5 | P5X-005 — CodeMirror `lineSeparator`로 CRLF 보존 또는 "LF 정규화" 문서화 | 편집 없이 저장해도 `source_hash` 변동 | 설정 1 또는 문서 |
+| 6 | DEFECT-P5X-004 — `removalBlockers`가 SoT 행이 요구한 스코프 없이 `findReferences` 호출(팩터·파라미터는 전역이라 현재 무해) | 계약 명시 | 테스트 또는 인자 |
+| 7 | P5X-006 — `lastStructural`·`lastReady`를 `documentEpoch`에 결속 | 다른 stale 캐시는 전부 epoch에 묶여 있음 | 한 줄 |
+| 8 | P5X-007 — 매뉴얼 8절 스크린샷 | 두 편집 표면을 글로만 설명 | 문서 |
+| 9 | P5X-008 — `graph-transactions.ts` UI 미호출 export 5종 배선 또는 정리 | P5-01 R4-4 규약이 공허 | 정리 |
+| 10 | Phase 1 이월 — `trace.strategy.requires_upgrade` i18n 키, 세 라우트 422 typed화 | P5-03 소유로 지정됐으나 미이행 | 소 |
+| 11 | Phase 2 이월 — DEFECT-P2X-004(사전 누락 시 침묵), -005(적용 조건 문장 이중 소유) | 진단 wire 계약 변경 | 중 |
+| 12 | `database/` ruff 설정 부재 → `--config backend/pyproject.toml` 명시를 WORKFLOW에 | P5-03 부수 권고 | 문서 |
+| 13 | 빈 팩터의 `output_node_id` 자동 지정 비대칭 | 동작은 맞고 compile이 안내 | 소 |
+
 ## 변경 기록
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-18 KST | Claude | **19 PR 머지 완료** — 사용자 지시(전체 E2E 백테스트까지 → CI 통과 → 머지)대로 전체 Playwright 19/19, #133 CI 3 job 초록 확인 후 #106(기획) → #108…#133 순서로 `--merge`. 절차 기록: #106을 `--delete-branch`로 머지하자 GitHub가 base 브랜치 삭제로 #108을 CLOSED 처리(retarget 아님) → base 브랜치를 같은 SHA로 재생성해 reopen·base main으로 편집·재삭제, 이후는 각 PR base를 main으로 먼저 옮긴 뒤 머지하고 브랜치는 끝에 일괄 삭제. 머지 전 스택 체인 검증에서 P4-01에만 있던 PLAN 문서 커밋 `0b4a0bd`가 P4-02 이후에 없어 체인이 끊겨 P4-01 head를 코드 `cd9addf`로 되돌림(리뷰 승인 코드 동일, 변경 기록 한 줄 손실). 머지 뒤 `origin/main` 트리 `2de69fc…` = 사전 `merge-tree` 예측과 일치. 중간 18 PR의 CI는 설계상 빨강(P1: frontend SDK는 P2-01, 전 구간: `FactorStep` ImportError는 P5-03 `c2f90c8`에서 수정) — 게이트는 최상위 #133 CI(머지 ref) | 13.7 머지 |
+| 2026-09-18 KST | Claude | `audit_gui_phase5` 수신: PASS(blocking 0). 게이트 9종 중 8 초록(루트 `database/tests`는 로컬 Windows 환경 사유 72건, 원격 CI 초록). SoT 여섯 질문 통과, 규칙 표 1행 뒤처짐(전략 의미 행의 `findReferences` 스코프 "→ P5-01" → 구현 완료로 정정). 결함 P1 1(DEFECT-P5X-001)·P2 9(매뉴얼 1절 1.0 샘플, `x-reference` 네임스페이스 fixture 결속 없음, `removalBlockers` 스코프, …), 이월 정리 표, 머지 뒤 backlog 13 → 아래 "머지 뒤 backlog" 절 | 13.6 Phase 감사 |
 | 2026-09-18 KST | Claude | `review_gui_p5_03` 5차 APPROVE(`5de4464`) → P5-03 APPROVED. 19 PR 전부 APPROVED. Phase 5 exit 2항 체크. WORKFLOW backend gate에 `database/tests` 추가(`ca46b56`). 다음: 전체 Playwright(백테스트 포함) → `audit_gui_phase5` → PLAN COMPLETE → 사용자 지시대로 #133 CI 초록 확인 후 #106부터 순차 머지 | 13.5 판정 |
 | 2026-09-18 KST | Claude | 머지 준비 중 원격 CI 확인: 스택 중간 PR의 backend job이 `database/scripts/run_mvp_backtest.py`의 `FactorStep` ImportError(P1-01 `factors` 평탄화로 사라진 이름; 로컬 backend pytest는 `database/tests`를 안 돌려 미검출)로 P1-01부터 전부 빨강 → P5-03에 `c2f90c8` 커밋(`factors=(FactorSignal(...),)`), equity 테스트 `test_MVP_B_…` 로컬 통과. 사용자 지시(2026-09-18): 최종 보고 시 전체 E2E(백테스트 포함) → CI 통과 → 스택 머지. P1 PR들은 설계상 frontend CI가 빨강(SDK는 P2-01)이라 게이트는 최상위 #133 CI, 머지는 #106부터 순서대로 `--merge --delete-branch` | 13.3 CI |
 | 2026-09-18 KST | Claude | `review_gui_p5_03` 4차 중간 보고(3차 P1 2·P2 닫힘; 남은 P1: 실제 reducer 경로에서 편집 직후 plan 상태가 `blocked(stale)`(이전 compile spec 잔존, stale 판정이 pending보다 먼저)라 재계산 유지 조건(`pending`만)에 안 걸려 compile 응답 전까지 DAG가 사라짐, 테스트가 실제 경로를 안 탐) → 후속 `f283390`: 유지 조건에 `stale` 추가, 테스트를 stale → pending → loading 경로로, WORKFLOW 문구. Vitest 604/52·build·e2e 7/7 → 재검토 요청 | 13.5 재검토 |

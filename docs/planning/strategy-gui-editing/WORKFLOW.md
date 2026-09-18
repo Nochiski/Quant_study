@@ -933,6 +933,9 @@ export const suggestNodeId = (tree, factorPointer, base: string): string;   // b
 
 **Phase 5 exit**: SoT·책임분리 최종 점검. 전체 e2e green. initiative COMPLETE.
 
+> 2026-09-18: `audit_gui_phase5` PASS(blocking 0), 전체 Playwright 19/19, #133 CI 3 job 초록, 19 PR main 머지 —
+> initiative COMPLETE. 남은 backlog 13건은 PLAN "머지 뒤 backlog" 절.
+
 ---
 
 ## 8. Phase 종료 gate

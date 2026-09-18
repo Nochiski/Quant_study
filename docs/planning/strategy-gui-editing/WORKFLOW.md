@@ -711,6 +711,18 @@ export const projectForm = (schema: JsonSchema, parse: ParsedSource | null, diag
 - 각 항목의 필드는 P4-02 컨트롤 재사용. factor 항목의 `graph`는 "Graph에서 열기" 버튼(view=graph,
   pointer 선택).
 - 테스트: 추가/삭제/참조 거부/kind 분기.
+- 구현 결정(P4-03): `materializeSchemaValue`·`UnsupportedSchemaShape`는 `schema-navigator.ts`로 옮기고
+  스니펫·목록 추가가 같은 함수를 쓴다. 목록 연산은 `form-transactions.ts`(`itemKinds`, `addItemOperation`
+  (union이면 `kind`로 분기 스키마를 골라 materialize, 끝에 `insert-item`), `addPresetItemOperation`(팩터
+  카탈로그 preset = 스니펫 카탈로그의 factor 항목, 이미 있는 identity는 메뉴에서 비활성),
+  `removalBlockers`, `removeItemOperation`, `itemSection`(항목을 `written` object 섹션으로 보아 P4-02
+  컨트롤·`fieldOperation` 재사용)). 참조 탐색은 `model/document-references.ts`의 `findReferences(tree,
+  namespace, id, excludePointer)`: 스키마를 모르고 `<namespace>_id` 키 값이 같은 pointer를 모두 찾는다
+  (`factor_id`·`parameter_id`·`node_id`). 삭제 가드의 namespace는 항목의 첫 `*_id` 문자열 필드에서
+  읽는다. "kind 선택 다이얼로그"는 섹션 헤더의 `kind` select + "항목 추가" 버튼으로 구현(별도 모달 없음).
+  factor 항목의 `graph`는 "Graph에서 열기" 버튼이 `onOpenGraph(pointer)`를 호출하고 page(P4-04)가
+  view=graph·pointer 선택으로 잇는다. 빈 factor의 `graph`는 스키마 materialize 결과(`nodes: []`,
+  `output_node_id: ""`)이며 "최소 field node 1개"는 Graph 노드 추가(P5-01)가 맡는다.
 
 ### P4-04 — IDE·page 연결, 잠금, e2e
 

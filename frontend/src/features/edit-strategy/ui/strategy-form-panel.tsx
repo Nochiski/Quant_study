@@ -16,17 +16,29 @@ import { Badge, Button } from "../../../shared/ui";
 import type {
   FormControl,
   FormField,
+  FormListItem,
   FormProjection,
   FormSection,
 } from "../model/form-projection";
+import type { CanonicalSnippet } from "../model/canonical-snippets";
+import type { DocumentReference } from "../model/document-references";
+import type { DocumentDiagnostic } from "../model/document-state";
 import {
+  addItemOperation,
+  addPresetItemOperation,
   draftOf,
   fieldOperation,
+  itemKinds,
+  itemSection,
   parseDraft,
+  removalBlockers,
+  removeItemOperation,
   resetOperation,
   unsetOperation,
+  type ListSection,
   type ObjectSection,
 } from "../model/form-transactions";
+import type { JsonSchema } from "../model/schema-navigator";
 import type { Scalar } from "../model/source-transactions";
 import type {
   SourceTransactions,
@@ -44,6 +56,14 @@ type StrategyFormPanelProps = {
   projection: FormProjection | null;
   transactions: SourceTransactions;
   catalogs: FormCatalogs;
+  /** 목록 항목 추가가 materialize할 runtime schema(projection과 같은 출처). 없으면 추가 버튼 비활성. */
+  schema?: JsonSchema | null;
+  /** 현재 parse tree(삭제 가드의 참조 탐색용). 없으면 참조 없음으로 본다. */
+  tree?: unknown;
+  /** 팩터 카탈로그 preset(스니펫 카탈로그의 factor 항목) — "카탈로그에서 추가" 메뉴. */
+  catalogSnippets?: readonly CanonicalSnippet[];
+  /** 팩터 항목의 graph를 Graph 화면에서 열기(view=graph, pointer 선택). 없으면 버튼을 그리지 않는다. */
+  onOpenGraph?: (pointer: string) => void;
 };
 
 const UNSET = "__unset__";
@@ -80,6 +100,10 @@ export const StrategyFormPanel = ({
   projection,
   transactions,
   catalogs,
+  schema = null,
+  tree = {},
+  catalogSnippets = [],
+  onOpenGraph,
 }: StrategyFormPanelProps) => {
   const disabled = transactions.disabled;
   return (
@@ -105,8 +129,12 @@ export const StrategyFormPanel = ({
           <FormSectionView
             key={section.pointer === "" ? "root" : section.pointer}
             section={section}
+            schema={schema}
+            tree={tree}
             transactions={transactions}
             catalogs={catalogs}
+            catalogSnippets={catalogSnippets}
+            onOpenGraph={onOpenGraph}
             disabled={disabled !== null}
           />
         ))
@@ -117,29 +145,36 @@ export const StrategyFormPanel = ({
 
 const FormSectionView = ({
   section,
+  schema,
+  tree,
   transactions,
   catalogs,
+  catalogSnippets,
+  onOpenGraph,
   disabled,
 }: {
   section: FormSection;
+  schema: JsonSchema | null;
+  tree: unknown;
   transactions: SourceTransactions;
   catalogs: FormCatalogs;
+  catalogSnippets: readonly CanonicalSnippet[];
+  onOpenGraph: ((pointer: string) => void) | undefined;
   disabled: boolean;
 }) => {
   const title = section.key === "" ? t("form.section.root") : section.key;
   if (section.kind === "list") {
     return (
-      <fieldset className="strategy-form__section" disabled={disabled}>
-        <legend>
-          <code>{title}</code>
-        </legend>
-        <p className="strategy-form__state">
-          {t("form.list.pending").replace(
-            "{count}",
-            String(section.items.length),
-          )}
-        </p>
-      </fieldset>
+      <FormListSectionView
+        section={section}
+        schema={schema}
+        tree={tree}
+        transactions={transactions}
+        catalogs={catalogs}
+        catalogSnippets={catalogSnippets}
+        onOpenGraph={onOpenGraph}
+        disabled={disabled}
+      />
     );
   }
   return (
@@ -151,6 +186,7 @@ const FormSectionView = ({
             {` · ${t("form.section.omitted")}`}
           </span>
         )}
+        {severityBadge(section)}
       </legend>
       {section.fields.map((field) => (
         <FormFieldRow
@@ -165,9 +201,234 @@ const FormSectionView = ({
   );
 };
 
-const severityBadge = (field: FormField): ReactNode => {
-  const errors = field.diagnostics.filter((d) => d.severity === "error");
-  const warnings = field.diagnostics.filter((d) => d.severity === "warning");
+/**
+ * 목록 섹션(P4-03): 항목 추가(스키마 materialize, union이면 `kind` 선택), 팩터 카탈로그 preset 추가,
+ * 삭제(다른 곳이 참조하면 목록을 보여주고 거부), 항목 필드는 P4-02 컨트롤 재사용.
+ */
+const FormListSectionView = ({
+  section,
+  schema,
+  tree,
+  transactions,
+  catalogs,
+  catalogSnippets,
+  onOpenGraph,
+  disabled,
+}: {
+  section: ListSection;
+  schema: JsonSchema | null;
+  tree: unknown;
+  transactions: SourceTransactions;
+  catalogs: FormCatalogs;
+  catalogSnippets: readonly CanonicalSnippet[];
+  onOpenGraph: ((pointer: string) => void) | undefined;
+  disabled: boolean;
+}) => {
+  const kinds = schema === null ? null : itemKinds(schema, section);
+  const [kind, setKind] = useState<string>("");
+  const chosenKind = kinds === null ? null : kind || (kinds[0] ?? "");
+  const addOperation =
+    schema === null ? null : addItemOperation(schema, section, chosenKind);
+  const presets = catalogSnippets.filter(
+    (snippet) =>
+      snippet.kind === "factor" && snippet.sectionKey === section.key,
+  );
+  const presetExists = (snippet: CanonicalSnippet): boolean =>
+    snippet.identity !== null &&
+    section.items.some((item) =>
+      item.fields.some(
+        (field) =>
+          field.key === snippet.identity!.field &&
+          field.written &&
+          Object.is(field.value, snippet.identity!.value),
+      ),
+    );
+  return (
+    <fieldset className="strategy-form__section" disabled={disabled}>
+      <legend>
+        <code>{section.key}</code>
+        <span className="strategy-form__hint">
+          {` · ${t("form.list.count").replace("{count}", String(section.items.length))}`}
+        </span>
+        {severityBadge(section)}
+      </legend>
+      <div className="strategy-form__control">
+        {kinds !== null ? (
+          <select
+            aria-label={`${section.key} · ${t("form.list.kind")}`}
+            value={chosenKind ?? ""}
+            onChange={(event) => setKind(event.target.value)}
+          >
+            {kinds.map((candidate) => (
+              <option key={candidate} value={candidate}>
+                {candidate}
+              </option>
+            ))}
+          </select>
+        ) : null}
+        <Button
+          size="small"
+          disabled={addOperation === null}
+          onClick={() => {
+            if (addOperation !== null)
+              transactions.apply(
+                addOperation,
+                section.key,
+                FORM_OWNER,
+                NO_FOCUS,
+              );
+          }}
+          aria-label={`${section.key} · ${t("form.list.add")}`}
+        >
+          {t("form.list.add")}
+        </Button>
+        {presets.length > 0 ? (
+          <select
+            aria-label={`${section.key} · ${t("form.list.addFromCatalog")}`}
+            value=""
+            onChange={(event) => {
+              const preset = presets.find(
+                (snippet) => snippet.id === event.target.value,
+              );
+              if (preset !== undefined)
+                transactions.apply(
+                  addPresetItemOperation(section, preset.value),
+                  preset.label,
+                  FORM_OWNER,
+                  NO_FOCUS,
+                );
+            }}
+          >
+            <option value="">{t("form.list.addFromCatalog")}</option>
+            {presets.map((snippet) => (
+              <option
+                key={snippet.id}
+                value={snippet.id}
+                disabled={presetExists(snippet)}
+              >
+                {presetExists(snippet)
+                  ? `${snippet.label} · ${t("form.list.presetExists")}`
+                  : snippet.label}
+              </option>
+            ))}
+          </select>
+        ) : null}
+      </div>
+      {section.items.length === 0 ? (
+        <p className="strategy-form__state">{t("form.list.empty")}</p>
+      ) : null}
+      {section.items.map((item) => (
+        <FormListItemView
+          key={item.pointer}
+          section={section}
+          item={item}
+          tree={tree}
+          transactions={transactions}
+          catalogs={catalogs}
+          onOpenGraph={onOpenGraph}
+        />
+      ))}
+    </fieldset>
+  );
+};
+
+const FormListItemView = ({
+  section,
+  item,
+  tree,
+  transactions,
+  catalogs,
+  onOpenGraph,
+}: {
+  section: ListSection;
+  item: FormListItem;
+  tree: unknown;
+  transactions: SourceTransactions;
+  catalogs: FormCatalogs;
+  onOpenGraph: ((pointer: string) => void) | undefined;
+}) => {
+  const [blockers, setBlockers] = useState<DocumentReference[] | null>(null);
+  const asSection = itemSection(section, item);
+  const graphField = item.fields.find(
+    (field) => field.control.kind === "graph-link",
+  );
+  const remove = (): void => {
+    const references = removalBlockers(tree, item);
+    if (references.length > 0) {
+      setBlockers(references);
+      return;
+    }
+    setBlockers(null);
+    transactions.apply(
+      removeItemOperation(item),
+      item.summary,
+      FORM_OWNER,
+      NO_FOCUS,
+    );
+  };
+  return (
+    <section
+      className="strategy-form__item"
+      aria-label={`${section.key} · ${item.summary}`}
+    >
+      <header className="strategy-form__item-header">
+        <strong>
+          <code>{item.summary}</code>
+        </strong>
+        {severityBadge(item)}
+        {item.branches !== null ? (
+          <span className="strategy-form__hint">
+            {t("form.list.branchNeeded").replace(
+              "{kinds}",
+              item.branches.join(", "),
+            )}
+          </span>
+        ) : null}
+        {graphField !== undefined && onOpenGraph !== undefined ? (
+          <Button
+            size="small"
+            tone="ghost"
+            onClick={() => onOpenGraph(graphField.pointer)}
+            aria-label={`${item.summary} · ${t("form.field.openGraph")}`}
+          >
+            {t("form.field.openGraph")}
+          </Button>
+        ) : null}
+        <Button
+          size="small"
+          tone="danger"
+          onClick={remove}
+          aria-label={`${item.summary} · ${t("form.list.remove")}`}
+        >
+          {t("form.list.remove")}
+        </Button>
+      </header>
+      {blockers !== null ? (
+        <p className="strategy-form__invalid" role="alert">
+          {t("form.list.blocked").replace(
+            "{pointers}",
+            blockers.map((reference) => reference.pointer).join(", "),
+          )}
+        </p>
+      ) : null}
+      {item.fields.map((field) => (
+        <FormFieldRow
+          key={field.pointer}
+          section={asSection}
+          field={field}
+          transactions={transactions}
+          catalogs={catalogs}
+        />
+      ))}
+    </section>
+  );
+};
+
+const severityBadge = (owner: {
+  diagnostics: DocumentDiagnostic[];
+}): ReactNode => {
+  const errors = owner.diagnostics.filter((d) => d.severity === "error");
+  const warnings = owner.diagnostics.filter((d) => d.severity === "warning");
   if (errors.length === 0 && warnings.length === 0) return null;
   const first = (errors[0] ?? warnings[0])!;
   return (

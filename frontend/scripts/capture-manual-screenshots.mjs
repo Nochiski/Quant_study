@@ -205,6 +205,11 @@ try {
   await page
     .getByRole("combobox", { name: "실행 core" })
     .selectOption("python");
+  // 6절 표의 값을 먼저 채우고 초기 자본만 0으로 둔다 — 실패 화면(08)도 표와 같은 벤치마크를 보여야 한다(#148 리뷰).
+  await page
+    .getByRole("textbox", { name: "벤치마크 종목 ID" })
+    .fill("sec-005930-1");
+  await page.getByRole("spinbutton", { name: "연환산 거래일" }).fill("252");
   const initialCash = page.getByRole("spinbutton", { name: "초기 자본 (KRW)" });
   await initialCash.fill("0");
   const rejectedRun = page.waitForResponse(
@@ -239,10 +244,6 @@ try {
   await capture(page, "08-backtest-error.png");
 
   await initialCash.fill("100000000");
-  await page
-    .getByRole("textbox", { name: "벤치마크 종목 ID" })
-    .fill("sec-005930-1");
-  await page.getByRole("spinbutton", { name: "연환산 거래일" }).fill("252");
   await expect(page.getByText("준비됨", { exact: true })).toBeVisible();
   await settingsToggle.click();
   const acceptedRun = page.waitForResponse(
@@ -322,6 +323,28 @@ try {
   await page.keyboard.press("Control+K");
   await expect(page.getByRole("dialog")).toBeVisible();
   await capture(page, "12-command-palette.png");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+
+  // 8절: Form 탭(섹션별 필드)과 Graph 탭(노드 목록 + 선택한 노드 속성).
+  await page.getByRole("tab", { name: "Form", exact: true }).click();
+  await expect(page.getByRole("tabpanel", { name: "Form" })).toContainText(
+    "max_name_weight",
+  );
+  await capture(page, "13-form-editing.png");
+
+  await page.getByRole("tab", { name: "Graph", exact: true }).click();
+  const graphEditor = page.getByRole("region", { name: "그래프 편집" });
+  await expect(graphEditor).toBeVisible();
+  await graphEditor
+    .getByRole("button", { name: "노드 편집: mom_252", exact: true })
+    .click();
+  await expect(
+    graphEditor.getByRole("group", { name: /선택한 노드/ }),
+  ).toContainText("input_node_id");
+  // 편집 표면(노드 목록 + 선택한 노드 속성)만 담는다 — 전체 화면은 DAG 카드가 차지해 편집기가 잘린다.
+  await graphEditor.scrollIntoViewIfNeeded();
+  await capture(page, "14-graph-editing.png", graphEditor);
 
   process.stdout.write(`매뉴얼 전략 ID: ${strategyId}\n`);
 } finally {

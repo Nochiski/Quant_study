@@ -51,8 +51,9 @@ uv run maturin develop --manifest-path rust/backtest_core/Cargo.toml --release
 | 배포·실시간·주문·운영 리스크                                | 자동매매 확장을 위한 `향후` 경계이며 아직 실제 주문 기능이 아님  |
 
 YAML 원문은 authoring source, backend의 typed `StrategySpec`은 실행 의미의 단일 정본이다.
-JSON/Form/Graph/Diff는 같은 compile 결과의 read-only projection이며 frontend가 전략 의미나
-`spec_hash`를 별도로 계산하지 않는다. 실제 배포는 편집 중 draft가 아닌
+JSON/Diff는 같은 compile 결과의 read-only projection이고, Form은 runtime schema × parse tree
+projection 위에서 source 트랜잭션으로 YAML을 고치는 편집기다(Graph는 P5 전까지 읽기 전용). frontend가
+전략 의미나 `spec_hash`를 별도로 계산하지 않는다. 실제 배포는 편집 중 draft가 아닌
 `strategy_id + revision + spec_hash` 참조만 허용하는 방향으로 확장한다.
 
 ## 구조

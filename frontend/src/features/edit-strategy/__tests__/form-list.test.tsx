@@ -320,6 +320,66 @@ describe("StrategyFormPanel list sections", () => {
     ).toBeInTheDocument();
   });
 
+  it("edits nested lists: rules inside eligibility open the key or the parent as needed (audit DEFECT-P4X-001)", () => {
+    const rules = (source: string) => {
+      const found = projectForm(SCHEMA, parseSource(source, "yaml"), []).sections.find(
+        (s) => s.key === "eligibility",
+      );
+      if (found === undefined || found.kind !== "object") throw new Error("eligibility");
+      const list = found.lists[0];
+      if (list === undefined) throw new Error("rules");
+      return list;
+    };
+    // `rules: []`가 있으면 그 배열에 insert-item(빈 flow 시퀀스 → block 시퀀스).
+    const written = rules(VERBOSE);
+    expect([written.written, written.parentWritten]).toEqual([true, true]);
+    const intoArray = addItemOperation(SCHEMA, written);
+    expect(intoArray).toMatchObject({
+      kind: "insert-item",
+      parentPointer: "/eligibility/rules",
+    });
+    expect(rootValue(applyPlan(VERBOSE, intoArray), "eligibility")).toMatchObject({
+      rules: [{ field_id: "" }],
+    });
+    // eligibility 자체가 없으면 루트에 부모를 `{ rules: [item] }`로 연다(트랜잭션 한 번).
+    const missing = rules(STARTER);
+    expect([missing.written, missing.parentWritten]).toEqual([false, false]);
+    const viaParent = addItemOperation(SCHEMA, missing);
+    expect(viaParent).toMatchObject({
+      kind: "insert-key",
+      parentPointer: "",
+      key: "eligibility",
+    });
+    expect(rootValue(applyPlan(STARTER, viaParent), "eligibility")).toMatchObject({
+      rules: [{ field_id: "" }],
+    });
+    // 항목 identity 없음(field_id는 카탈로그 참조) → 삭제 가드는 막지 않는다.
+    const withRule = applyPlan(STARTER, viaParent);
+    const item = rules(withRule).items[0]!;
+    expect(item.identityKey).toBeNull();
+    expect(removalBlockers(parseSource(withRule, "yaml").status === "ok" ? (parseSource(withRule, "yaml") as { tree: unknown }).tree : {}, item)).toEqual([]);
+  });
+
+  it("renders nested list controls inside the object section and applies to the nested pointer", async () => {
+    const user = userEvent.setup();
+    const transactions = stub();
+    renderList(VERBOSE, transactions);
+    const eligibility = within(
+      screen.getByRole("group", { name: /^eligibility/ }),
+    );
+    await user.click(eligibility.getByRole("button", { name: "rules · 항목 추가" }));
+    expect(transactions.apply).toHaveBeenLastCalledWith(
+      {
+        kind: "insert-item",
+        parentPointer: "/eligibility/rules",
+        value: expect.objectContaining({ field_id: "" }),
+      },
+      "rules",
+      "form",
+      { focusEditor: false },
+    );
+  });
+
   it("adds to an unwritten list from the panel with insert-key", async () => {
     const user = userEvent.setup();
     const transactions = stub();

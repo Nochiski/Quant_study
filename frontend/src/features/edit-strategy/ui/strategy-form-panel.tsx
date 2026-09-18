@@ -220,6 +220,20 @@ const FormSectionView = ({
             catalogs={catalogs}
           />
         ))}
+        {/* 중첩 목록(`eligibility.rules`)은 루트 목록과 같은 뷰로 편집한다(P4-05). */}
+        {section.lists.map((list) => (
+          <FormListSectionView
+            key={list.pointer}
+            section={list}
+            schema={schema}
+            tree={tree}
+            transactions={transactions}
+            catalogs={catalogs}
+            catalogSnippets={catalogSnippets}
+            onOpenGraph={onOpenGraph}
+            disabled={disabled}
+          />
+        ))}
       </div>
     </fieldset>
   );

@@ -88,6 +88,23 @@ export type FormListItem = {
   diagnostics: DocumentDiagnostic[];
 };
 
+/** 목록 섹션. 루트 배열(`factors`)과 object 섹션 안의 배열(`eligibility.rules`) 모두 이 모양이다. */
+export type FormListSection = {
+  kind: "list";
+  pointer: string;
+  key: string;
+  /** 목록 키가 문서에 있는가. 없으면 항목 추가가 키를 열면서 넣는다(`insert-key`). */
+  written: boolean;
+  /** 목록 키를 담는 부모 pointer(루트 목록은 `""`)와 그 부모가 문서에 있는가(없으면 부모까지 연다). */
+  parentPointer: string;
+  parentWritten: boolean;
+  /** 항목 스키마의 위치(`$ref`면 그 대상, 아니면 `/properties/<key>/items`). */
+  itemSchemaPointer: string;
+  items: FormListItem[];
+  /** 섹션 자신의 pointer와, 어느 항목·필드도 흡수하지 않은 하위 pointer의 진단(`strategy.factor.required` 등). */
+  diagnostics: DocumentDiagnostic[];
+};
+
 export type FormSection =
   | {
       kind: "object";
@@ -95,21 +112,12 @@ export type FormSection =
       key: string;
       written: boolean;
       fields: FormField[];
+      /** 중첩 목록(`eligibility.rules`): object 섹션의 배열 property는 link 필드가 아니라 목록 섹션이다(P4-05). */
+      lists: FormListSection[];
       /** 섹션 자신의 pointer와, 어느 필드도 흡수하지 않은 하위 pointer의 진단. 루트 섹션은 `""`도 받는다. */
       diagnostics: DocumentDiagnostic[];
     }
-  | {
-      kind: "list";
-      pointer: string;
-      key: string;
-      /** 목록 키가 문서에 있는가. 없으면 항목 추가가 키를 열면서 넣는다(`insert-key`). */
-      written: boolean;
-      /** 항목 스키마의 위치(`$ref`면 그 대상, 아니면 `/properties/<key>/items`). */
-      itemSchemaPointer: string;
-      items: FormListItem[];
-      /** 섹션 자신의 pointer와, 어느 항목·필드도 흡수하지 않은 하위 pointer의 진단(`strategy.factor.required` 등). */
-      diagnostics: DocumentDiagnostic[];
-    };
+  | FormListSection;
 
 export type FormProjection = {
   /** 루트 스칼라(`title` 등)는 pointer·key가 빈 문자열인 첫 object 섹션에 모인다. */
@@ -119,7 +127,8 @@ export type FormProjection = {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const CATALOGS = ["equity-field", "universe", "factor", "subgraph"] as const;
+/** Form이 picker를 아는 `x-catalog` 값. runtime schema fixture의 값 집합과 같아야 한다(테스트가 고정). */
+export const CATALOGS = ["equity-field", "universe", "factor", "subgraph"] as const;
 const NAMESPACES = ["node", "parameter"] as const;
 
 const controlFor = (
@@ -227,6 +236,15 @@ const projectField = (
 /** 진단을 흡수한 쪽(필드·항목·섹션)의 공통 모양. 소유권 집계는 이것만 본다. */
 type DiagnosticOwner = { readonly diagnostics: readonly DocumentDiagnostic[] };
 
+/** 목록 섹션이 흡수한 진단 소유자 전부(항목 필드·항목·섹션). */
+const listOwners = (list: FormListSection): DiagnosticOwner[] => [
+  ...list.items.flatMap((item) => [
+    ...item.fields,
+    { diagnostics: item.diagnostics },
+  ]),
+  { diagnostics: list.diagnostics },
+];
+
 /** `owner` pointer 자신 + 그 아래 pointer 중 `owners`가 흡수하지 않은 진단. */
 const unabsorbedDiagnostics = (
   diagnostics: readonly DocumentDiagnostic[],
@@ -329,7 +347,9 @@ const projectListSection = (
   key: string,
   pointer: string,
   arrayNode: JsonSchema,
-): FormSection => {
+  parentPointer = "",
+  parentWritten = true,
+): FormListSection => {
   const itemSchema = isRecord(arrayNode.items) ? arrayNode.items : {};
   const itemSchemaPointer =
     typeof itemSchema.$ref === "string" && itemSchema.$ref.startsWith("#")
@@ -367,6 +387,8 @@ const projectListSection = (
     pointer,
     key,
     written: found.present,
+    parentPointer,
+    parentWritten,
     itemSchemaPointer,
     items: projectedItems,
     diagnostics: unabsorbedDiagnostics(diagnostics, pointer, itemFields),
@@ -401,20 +423,48 @@ export const projectForm = (
         ),
       );
     } else if (facts.type === "object" && isRecord(resolved.node.properties)) {
-      const fields = projectFields(
+      const written = valueAtPointer(tree, pointer).present;
+      const projected = projectFields(
         schema,
         tree,
         diagnostics,
         pointer,
         resolved.node,
       );
+      // 배열 property는 link 필드 대신 중첩 목록 섹션으로 편집한다(P4-05, 감사 DEFECT-P4X-001).
+      const fields = projected.filter(
+        (field) => field.control.kind !== "list-link",
+      );
+      const lists = projected
+        .filter((field) => field.control.kind === "list-link")
+        .flatMap((field) => {
+          const array = schemaAt(schema, field.pointer, tree);
+          return array === null
+            ? []
+            : [
+                projectListSection(
+                  schema,
+                  tree,
+                  diagnostics,
+                  field.key,
+                  field.pointer,
+                  array.node,
+                  pointer,
+                  written,
+                ),
+              ];
+        });
       sections.push({
         kind: "object",
         pointer,
         key,
-        written: valueAtPointer(tree, pointer).present,
+        written,
         fields,
-        diagnostics: unabsorbedDiagnostics(diagnostics, pointer, fields),
+        lists,
+        diagnostics: unabsorbedDiagnostics(diagnostics, pointer, [
+          ...fields,
+          ...lists.flatMap(listOwners),
+        ]),
       });
     } else {
       const field = projectField(
@@ -436,15 +486,10 @@ export const projectForm = (
         section.kind === "object"
           ? [
               ...section.fields,
+              ...section.lists.flatMap(listOwners),
               { diagnostics: section.diagnostics },
             ]
-          : [
-              ...section.items.flatMap((item) => [
-                ...item.fields,
-                { diagnostics: item.diagnostics },
-              ]),
-              { diagnostics: section.diagnostics },
-            ],
+          : listOwners(section),
       ),
     ].flatMap((field) => field.diagnostics.map((d) => d.pointer)),
   );
@@ -459,6 +504,8 @@ export const projectForm = (
         key: "",
         written: true,
         fields: scalarFields,
+        // 루트 배열은 자기 목록 섹션이 된다 — 루트 스칼라 섹션에 중첩 목록은 없다.
+        lists: [],
         diagnostics: rootDiagnostics,
       },
       ...sections,

@@ -15,6 +15,7 @@ import {
   resolveRef,
   UnsupportedSchemaShape,
   type JsonSchema,
+  schemaFacts,
 } from "./schema-navigator";
 import type { Scalar, SourceOperation } from "./source-transactions";
 
@@ -121,6 +122,8 @@ export const itemSection = (
   key: section.key,
   written: true,
   fields: item.fields,
+  // 항목 안의 배열(`choices` 등)은 `list-link` 필드로 남는다(중첩 목록은 object 섹션 전용, P4-05).
+  lists: [],
   diagnostics: item.diagnostics,
 });
 
@@ -151,7 +154,10 @@ const kindOfBranch = (
   const branch = resolveRef(schema, member);
   if (branch === null) return null;
   const properties = isRecord(branch.properties) ? branch.properties : {};
-  const marker = isRecord(properties.kind) ? properties.kind.const : undefined;
+  // discriminator도 `schemaFacts`로 읽는다(감사 DEFECT-P4X-003: const 해석 규칙의 owner는 하나).
+  const marker = isRecord(properties.kind)
+    ? schemaFacts(properties.kind).constValue
+    : undefined;
   return typeof marker === "string" ? [marker, branch] : null;
 };
 
@@ -205,22 +211,28 @@ export const addPresetItemOperation = (
  * 항목을 목록 끝에 넣는 연산. 목록 키가 문서에 없으면(새 전략 starter·생략형 문서) 키를 열면서 첫 항목을
  * 넣는 `insert-key` 한 번이다 — 스니펫(`planSnippetEdit`)·object 섹션(`fieldOperation`)과 같은 규칙
  * (리뷰 DEFECT-125-01: `insert-item`은 키가 없으면 `not-found`라 활성 버튼이 언제나 실패했다).
+ * 중첩 목록(`eligibility.rules`)은 부모 object까지 없으면 루트에 부모를 `{ key: [item] }`로 연다(P4-05).
  */
 const appendOperation = (
   section: ListSection,
   value: unknown,
-): SourceOperation =>
-  section.written
-    ? { kind: "insert-item", parentPointer: section.pointer, value }
-    : {
-        kind: "insert-key",
-        parentPointer: section.pointer.slice(
-          0,
-          section.pointer.lastIndexOf("/"),
-        ),
-        key: section.key,
-        value: [value],
-      };
+): SourceOperation => {
+  if (section.written)
+    return { kind: "insert-item", parentPointer: section.pointer, value };
+  if (section.parentWritten || section.parentPointer === "")
+    return {
+      kind: "insert-key",
+      parentPointer: section.parentPointer,
+      key: section.key,
+      value: [value],
+    };
+  return {
+    kind: "insert-key",
+    parentPointer: "",
+    key: decodeSegment(section.parentPointer.slice(1)),
+    value: { [section.key]: [value] },
+  };
+};
 
 /**
  * 항목 삭제 전 참조 검사: 항목의 identity(`<namespace>_id`)를 문서 다른 곳이 참조하면 그 pointer 목록을

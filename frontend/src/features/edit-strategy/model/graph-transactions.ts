@@ -157,13 +157,6 @@ export const suggestNodeId = (
 };
 
 /**
- * 노드 추가: `kind` 분기 스키마로 최소 항목을 materialize하고 `node_id`는 `suggestNodeId(kind)`. 참조
- * 슬롯(`nodeReferenceKeys`)이 **하나뿐인** 분기(unary·time_series·cross_sectional·group)는 그 슬롯을 그래프의
- * 마지막 노드 id로 채워 즉시 valid 가능하게 하고, 둘 이상인 분기(binary·comparison·conditional)는 같은
- * 노드를 여러 슬롯에 넣으면 `x op x`나 타입 불일치가 되므로 빈 문자열로 두어 사용자가 고르게 한다(리뷰
- * P2-3). `graph.nodes`가 없으면 키를 열면서 넣는다(P4-03이 만든 빈 팩터는 `nodes: []`라 `insert-item`).
- */
-/**
  * `output_node_id`가 아직 정해지지 않았는가(없음·빈 문자열). `null`은 제외한다 — `output_node_id:`처럼 값 자리가
  * 비어 있는 표기는 `replace-scalar`가 parse 단계에서 실패해 노드 추가 전체(all-or-nothing)가 막힌다(#144 재검토).
  */
@@ -172,6 +165,13 @@ const outputUnset = (graph: unknown): boolean => {
   return output === undefined || output === "";
 };
 
+/**
+ * 노드 추가: `kind` 분기 스키마로 최소 항목을 materialize하고 `node_id`는 `suggestNodeId(kind)`. 참조
+ * 슬롯(`nodeReferenceKeys`)이 **하나뿐인** 분기(unary·time_series·cross_sectional·group)는 그 슬롯을 그래프의
+ * 마지막 노드 id로 채워 즉시 valid 가능하게 하고, 둘 이상인 분기(binary·comparison·conditional)는 같은
+ * 노드를 여러 슬롯에 넣으면 `x op x`나 타입 불일치가 되므로 빈 문자열로 두어 사용자가 고르게 한다(리뷰
+ * P2-3). `graph.nodes`가 없으면 키를 열면서 넣는다(P4-03이 만든 빈 팩터는 `nodes: []`라 `insert-item`).
+ */
 export const addNode = (
   tree: unknown,
   factorPointer: string,

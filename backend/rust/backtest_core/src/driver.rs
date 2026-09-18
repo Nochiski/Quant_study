@@ -100,6 +100,11 @@ impl PersistentEngine {
         })
     }
 
+    /// 실행 설정이 있는지만 확인한다 — 값을 쓰지 않는 진입 가드에서 의도를 드러낸다.
+    fn require_configured(&self) -> PyResult<()> {
+        self.settings().map(|_| ())
+    }
+
     fn feed_ref(&self) -> PyResult<&crate::feed::PersistentFeed> {
         self.feed
             .as_ref()
@@ -283,7 +288,7 @@ impl PersistentEngine {
             }
             Lifecycle::Ready | Lifecycle::Running => {}
         }
-        self.settings()?;
+        self.require_configured()?;
         match self.drain_until_callback() {
             Ok(frame) => Ok(frame),
             Err(error) => {
@@ -322,7 +327,8 @@ impl PersistentEngine {
                 }
                 Queued::Notify(payload) => {
                     let session = self.current_session()?;
-                    if self.session_count()? < self.settings()?.warmup_sessions {
+                    // `current_session`이 곧 session_count − 1이다 — 피드에 같은 값을 다시 묻지 않는다.
+                    if session + 1 < self.settings()?.warmup_sessions {
                         continue;
                     }
                     let snapshot = self.snapshot_wire()?;
@@ -450,13 +456,13 @@ impl PersistentEngine {
     fn apply_corporate_action_entry(&mut self, session: usize, index: usize) -> PyResult<()> {
         let entry = self.corporate_actions[index].clone();
         self.record(session, RecordPayload::CorporateAction(index))?;
-        let remaining_by_id: HashMap<String, i64> = self
-            .orders
-            .iter()
-            .map(|order| (order.order_id.clone(), order.remaining))
-            .collect();
         if entry.confirmed {
             // 가격 수준이 무의미해지는 확인된 분할·병합만 대기 주문을 취소한다 (스펙 결정 3).
+            let remaining_by_id: HashMap<String, i64> = self
+                .orders
+                .iter()
+                .map(|order| (order.order_id.clone(), order.remaining))
+                .collect();
             let session_ts = self.feed_ref()?.session_at(session)?.to_string();
             let cancelled = self.cancel_for_key(&entry.key);
             for order_id in cancelled {

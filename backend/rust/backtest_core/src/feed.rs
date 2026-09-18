@@ -265,6 +265,7 @@ impl PersistentFeed {
                 "insufficient_history: requested lookback={lookback} available={available} end={end}"
             )));
         }
+        let field = HistoryField::parse(field)?;
         let ids: Vec<Option<u32>> = keys
             .iter()
             .map(|key| {
@@ -286,23 +287,42 @@ impl PersistentFeed {
                 let value = id
                     .and_then(|id| rows.get(&id).copied())
                     .map(|row| match field {
-                        "open" => self.opens[row],
-                        "high" => self.highs[row],
-                        "low" => self.lows[row],
-                        "close" => self.closes[row],
-                        "volume" => self.volumes[row] as f64,
-                        _ => f64::NAN,
+                        HistoryField::Open => self.opens[row],
+                        HistoryField::High => self.highs[row],
+                        HistoryField::Low => self.lows[row],
+                        HistoryField::Close => self.closes[row],
+                        HistoryField::Volume => self.volumes[row] as f64,
                     })
                     .unwrap_or(f64::NAN);
                 values.push(value);
             }
         }
-        if !matches!(field, "open" | "high" | "low" | "close" | "volume") {
-            return Err(PyValueError::new_err(format!(
-                "unknown history field — field={field:?}"
-            )));
-        }
         Ok((timestamps, values))
+    }
+}
+
+/// `history_window`가 읽는 OHLCV 열. 문자열 판정을 루프 밖에서 한 번만 해 도달 불가 분기를 없앤다.
+#[derive(Clone, Copy)]
+enum HistoryField {
+    Open,
+    High,
+    Low,
+    Close,
+    Volume,
+}
+
+impl HistoryField {
+    fn parse(field: &str) -> PyResult<Self> {
+        match field {
+            "open" => Ok(Self::Open),
+            "high" => Ok(Self::High),
+            "low" => Ok(Self::Low),
+            "close" => Ok(Self::Close),
+            "volume" => Ok(Self::Volume),
+            other => Err(PyValueError::new_err(format!(
+                "unknown history field — field={other:?}"
+            ))),
+        }
     }
 }
 

@@ -615,7 +615,7 @@ PR 9까지 반영 후 100종목 tape에서 feed 적재(`_load_persistent_feed` +
 | 3 | `refactor/drop-dead-persistent-api` | 리뷰 APPROVE·PR 생성 | #127 | Opus APPROVE (Minor 3건 반영) |
 | 4 | `refactor/rust-owns-wire-constants` | 리뷰 APPROVE·PR 생성 | #128 | Opus APPROVE (warmup 단일화·따옴표 parity 반영) |
 | 5 | `refactor/python-sot-context-tape-marker` | 리뷰 APPROVE·PR 생성 | #129 | Opus APPROVE (issubclass 고정 반영) |
-| 6 | `perf/materialize-by-kind` | 대기 | | |
+| 6 | `perf/materialize-by-kind` | 리뷰 APPROVE·PR 생성 | #134 | Opus APPROVE (DEFECT-601 반영, RSS 1.18/1.22배 통과) |
 | 7 | `perf/workbench-result-columnar` | 대기 | | |
 | 8 | `perf/rust-hot-loop` | 대기 | | |
 | 9 | `perf/record-and-queue-memory` | 대기 | | |

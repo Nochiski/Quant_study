@@ -51,7 +51,7 @@ main
 
 | PR 유형 | self-check |
 |---|---|
-| backend | focused pytest → `uv run pytest` 전체 → `uv run ruff check src tests` → `uv run pyright` |
+| backend | focused pytest → `uv run pytest` 전체 → `uv run ruff check src tests` → `uv run pyright` → 계약(모델·facade 이름)이 바뀌면 루트에서 `uv run --project backend pytest database/tests -q`(원격 CI "Equity layer tests"; `database/scripts`가 backend facade를 import한다 — P5-03에서 `FactorStep` ImportError가 P1-01부터 CI를 빨갛게 둔 공백) |
 | API contract | backend 전체 → `uv run python scripts/export_openapi.py openapi.json` → diff 확인 (P2-01부터 `npm run api:generate` 포함) → frontend 전체 |
 | frontend | focused vitest → `npm run typecheck` → `npm run lint` → `npm test` → `npm run build` |
 | E2E 포함 | 위 + `npm run test:e2e` |

@@ -791,6 +791,11 @@ const ko = {
   "form.panel.notice": "YAML source에 바로 반영 · undo 가능",
   "form.panel.enabled": "편집 가능",
   "form.panel.loading": "runtime schema를 불러오는 중입니다.",
+  "form.panel.staleBadge": "STALE",
+  "form.panel.stale":
+    "현재 텍스트가 구문 오류라 마지막 유효 parse를 보여줍니다. source를 고치면 컨트롤이 풀립니다.",
+  "form.panel.jsonHint":
+    "JSON 문서는 Form으로 편집하지 않습니다. YAML 문서로 저장한 뒤 편집하세요.",
   "form.disabled.json": "JSON 문서는 Form으로 편집하지 않습니다",
   "form.disabled.syntax": "구문 오류 · source를 먼저 고치세요",
   "form.disabled.composing": "IME 입력 중",
@@ -1658,6 +1663,11 @@ export const messages = {
     "form.panel.notice": "Applied to the YAML source directly · undoable",
     "form.panel.enabled": "Editable",
     "form.panel.loading": "Loading the runtime schema.",
+    "form.panel.staleBadge": "STALE",
+    "form.panel.stale":
+      "The current text has a syntax error, so the last valid parse is shown. Fix the source to unlock the controls.",
+    "form.panel.jsonHint":
+      "JSON documents are not edited through the form. Save as a YAML document first.",
     "form.disabled.json": "JSON documents are not edited through the form",
     "form.disabled.syntax": "Syntax error · fix the source first",
     "form.disabled.composing": "IME composition in progress",

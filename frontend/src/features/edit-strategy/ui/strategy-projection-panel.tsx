@@ -5,16 +5,10 @@ import "./strategy-projection-panel.css";
 
 type StrategyProjectionPanelProps = {
   projection: StrategyProjection;
-  view: "json" | "form";
+  view: "json";
 };
 
-const valueText = (value: unknown): string => {
-  if (value === undefined) return "—";
-  const serialized = JSON.stringify(value);
-  return serialized === undefined ? String(value) : serialized;
-};
-
-/** Backend-owned canonical StrategySpec rendered without any edit or reserialization path. */
+/** backend canonical StrategySpec JSON(읽기 전용). Form view는 P4-04부터 `StrategyFormPanel`이 맡는다. */
 export const StrategyProjectionPanel = ({
   projection,
   view,
@@ -26,22 +20,6 @@ export const StrategyProjectionPanel = ({
       </p>
     );
   }
-
-  const sections = [
-    {
-      id: "metadata",
-      values: {
-        title: projection.spec.title,
-        description: projection.spec.description,
-      },
-    },
-    // schema 1.1: 컴파일된 spec은 모든 단계를 채워 보내지만 계약상 선택 필드이므로 빈 단계도 그대로 그린다.
-    { id: "data", values: projection.spec.data },
-    { id: "signal", values: projection.spec.signal ?? {} },
-    { id: "portfolio", values: projection.spec.portfolio ?? {} },
-    { id: "risk", values: projection.spec.risk ?? {} },
-    { id: "execution", values: projection.spec.execution ?? {} },
-  ] as const;
 
   return (
     <section
@@ -78,48 +56,9 @@ export const StrategyProjectionPanel = ({
           </dd>
         </div>
       </dl>
-      {view === "json" ? (
-        <pre className="strategy-projection__json">
-          <code>{projection.canonicalJson}</code>
-        </pre>
-      ) : (
-        <div className="strategy-projection__form">
-          {sections.map((section) => (
-            <section key={section.id}>
-              <h2>{t(`projection.section.${section.id}`)}</h2>
-              <dl>
-                {Object.entries(section.values).map(([field, value]) => {
-                  const pointer =
-                    section.id === "metadata"
-                      ? `/${field}`
-                      : `/${section.id}/${field}`;
-                  // 배지의 근거는 backend compile 경고 그대로다(P2-03 리뷰 DEFECT-118-01).
-                  const inapplicable =
-                    projection.inapplicablePointers.has(pointer);
-                  return (
-                    <div key={field}>
-                      <dt>
-                        <code>{field}</code>
-                      </dt>
-                      <dd>
-                        <code>{valueText(value)}</code>
-                        {inapplicable ? (
-                          <>
-                            {" "}
-                            <Badge tone="warn">
-                              {t("contract.applicable.badge")}
-                            </Badge>
-                          </>
-                        ) : null}
-                      </dd>
-                    </div>
-                  );
-                })}
-              </dl>
-            </section>
-          ))}
-        </div>
-      )}
+      <pre className="strategy-projection__json">
+        <code>{projection.canonicalJson}</code>
+      </pre>
     </section>
   );
 };

@@ -135,3 +135,22 @@
   gap: var(--space-2);
   align-items: center;
 }
+
+.strategy-form__badges {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.strategy-form__toggle {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.strategy-form__toggle:focus-visible {
+  outline: 2px solid var(--focus-ring, currentColor);
+  outline-offset: 2px;
+}

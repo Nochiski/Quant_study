@@ -757,6 +757,15 @@ export const projectForm = (schema: JsonSchema, parse: ParsedSource | null, diag
 - e2e: Form에서 `risk.max_name_weight` 변경 → 저장 → hash가 YAML 직접 편집과 동일; factor 추가 →
   plan 갱신.
 - `.claude/rules/strategy-workbench-sot.md` 전략 의미 행 개정, `frontend-testing.md` round-trip 문구.
+- 구현 결정(P4-04): page가 `useSourceTransactions(document, true)` 하나를 만들어 Form과 스니펫에 공유한다
+  (`useSnippetInsertion(..., view === format, transactions)`; 스니펫은 source view가 아닐 때 스스로
+  `editor-inactive`를 낸다). `useFormProjection(state, schema)`가 현재 parse(없으면 같은 문서의 마지막
+  유효 parse, `stale: true`)와 현재 compile 진단으로 `projectForm`을 만든다. stale이면 패널이 STALE
+  배지·안내를 내고 컨트롤은 `disabled: "syntax"`로 잠긴다. JSON 문서는 `disabled: "json"` + "YAML 문서로
+  저장한 뒤 편집" 안내(포맷 변환 명령은 존재하지 않아 링크 대신 문구). 섹션 제목은 `aria-expanded` 토글
+  버튼(키보드 Enter/Space)이고 접힌 섹션은 `hidden`으로 DOM에 남는다. "Graph에서 열기"는 `view=graph`,
+  `path=<graph pointer>`로 이동한다. 읽기 전용 `StrategyProjectionPanel`은 JSON 전용이 됐다. Command
+  palette에는 view 전환 명령만 있다(변경 없음).
 
 **Phase 4 exit**: SoT·책임분리 점검(Form이 필드 목록·기본값·검증을 복제하지 않는지).
 

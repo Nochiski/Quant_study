@@ -1026,6 +1026,94 @@ test.describe("professional YAML workflow", () => {
     expect(migrated.spec_hash).toBe(saved.spec_hash);
   });
 
+  test("edits through the Form with the same hash as a YAML edit and adds a catalog factor that reaches the plan", async ({
+    page,
+  }) => {
+    // 같은 GOLDEN에서 출발하는 전략 둘: 하나는 Form으로, 하나는 YAML로 같은 값을 바꾼다.
+    const title = "P4-04 E2E Form";
+    const base = GOLDEN.replace("퀄리티 모멘텀", title);
+    const viaYaml = base.replace(
+      "max_name_weight: 0.05",
+      "max_name_weight: 0.1",
+    );
+
+    await openEditor(page, "/research/strategies/new");
+    await replaceSource(page, base);
+    await expectPhase(page, "검증 통과");
+    await saveAndWaitForRevision(page, 1);
+    const { strategyId } = strategyIdentity(page);
+
+    await page.getByRole("tab", { name: "Form", exact: true }).click();
+    const form = page.getByRole("region", { name: "Form 편집" });
+    await expect(form).toBeVisible();
+    await expect(form.getByText("편집 가능")).toBeVisible();
+    const risk = form.getByRole("group", { name: /^risk/ });
+    const weight = risk.getByRole("spinbutton", { name: /^max_name_weight/ });
+    await expect(weight).toHaveValue("0.05");
+    await weight.fill("0.1");
+    await weight.press("Enter");
+    await expect(
+      form.getByRole("status").filter({ hasText: "반영됨" }),
+    ).toContainText("max_name_weight 반영됨");
+
+    await page.getByRole("tab", { name: "YAML", exact: true }).click();
+    // Form 편집은 hidden 편집기에 범위 교체 한 번이므로 GOLDEN의 주석·순서가 그대로다.
+    const edited = await currentSource(page);
+    expect(edited).toBe(viaYaml);
+    await expectPhase(page, "검증 통과");
+    await saveAndWaitForRevision(page, 2);
+    const formSaved = requireData(
+      (
+        await getStrategyDocument({
+          client: apiClient,
+          path: { strategy_id: strategyId, revision: 2 },
+        })
+      ).data,
+      "form-edited revision",
+    );
+
+    // 같은 값을 YAML로 직접 쓴 문서를 backend가 compile한 hash와 같다(Form 편집 = source 편집).
+    const yamlSaved = requireData(
+      (
+        await compileStrategyDocument({
+          client: apiClient,
+          body: { source: viaYaml, format: "yaml" },
+        })
+      ).data,
+      "compile yaml-edited source",
+    );
+    expect(formSaved.spec_hash).toBe(yamlSaved.spec_hash);
+    expect(formSaved.source_hash).toBe(yamlSaved.source_hash);
+
+    // 카탈로그에서 팩터 추가 → source에 항목이 생기고 검증을 통과하며 Graph 화면에 새 팩터가 보인다.
+    await page.getByRole("tab", { name: "Form", exact: true }).click();
+    const factors = form.getByRole("group", { name: /^factors/ });
+    const catalog = factors.getByRole("combobox", {
+      name: "factors · 카탈로그에서 추가",
+    });
+    const options = catalog.locator("option:not([disabled])");
+    await expect.poll(async () => options.count()).toBeGreaterThan(1);
+    const addedId = await options.nth(1).getAttribute("value");
+    await catalog.selectOption({ index: 1 });
+    await expect(
+      form.getByRole("status").filter({ hasText: "반영됨" }),
+    ).toBeVisible();
+    await page.getByRole("tab", { name: "YAML", exact: true }).click();
+    const withFactor = await currentSource(page);
+    expect(withFactor).toContain(
+      `factor_id: ${addedId!.replace("factor:", "")}`,
+    );
+    expect(
+      withFactor.startsWith(viaYaml.slice(0, viaYaml.indexOf("factors:"))),
+    ).toBe(true);
+    await expectPhase(page, "검증 통과");
+    await page.getByRole("tab", { name: "Graph", exact: true }).click();
+    // Graph 화면(실행 plan 기반)의 팩터 선택에 새 팩터가 들어온다.
+    await expect(page.getByRole("tabpanel", { name: "Graph" })).toContainText(
+      addedId!.replace("factor:", ""),
+    );
+  });
+
   test("upgrades a frozen 1.0 revision, saves it as 1.1 and backtests it", async ({
     page,
   }) => {

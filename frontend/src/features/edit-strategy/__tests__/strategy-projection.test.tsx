@@ -152,73 +152,8 @@ describe("StrategySpec projection model", () => {
 describe("StrategySpec projection UI", () => {
   const ready = projectStrategySpec(compile());
 
-  it("shows canonical raw values in a read-only professional summary", () => {
-    render(<StrategyProjectionPanel projection={ready} view="form" />);
-
-    expect(
-      screen.getByRole("region", { name: "StrategySpec 요약 Form" }),
-    ).toBeInTheDocument();
-    for (const heading of [
-      "기본 정보",
-      "데이터",
-      "신호",
-      "포트폴리오",
-      "리스크",
-      "실행",
-    ])
-      expect(
-        screen.getByRole("heading", { name: heading }),
-      ).toBeInTheDocument();
-    expect(screen.getByText("max_name_weight")).toBeInTheDocument();
-    expect(screen.getByText("0.05")).toBeInTheDocument();
-    expect(screen.queryByText("strategy_id")).not.toBeInTheDocument();
-    expect(screen.queryByText("revision")).not.toBeInTheDocument();
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-  });
-
-  it("marks exactly the fields the backend compile warned as not read (P2-03)", () => {
-    // 배지의 근거는 backend `strategy.field.inapplicable` 진단이다: frontend가 조건표를 판정하지 않는다.
-    let state = documentReducer(initialDocumentState("yaml", ""), {
-      type: "edit",
-      source: "title: valid\n",
-    });
-    state = documentReducer(state, {
-      type: "parsed",
-      version: state.sourceVersion,
-      result: parseSource("title: valid\n", "yaml"),
-    });
-    const warned = documentReducer(state, {
-      type: "compiled",
-      version: state.sourceVersion,
-      outcome: {
-        ...outcome(),
-        diagnostics: [
-          {
-            code: "strategy.field.inapplicable",
-            kind: "semantic",
-            severity: "warning",
-            pointer: "/portfolio/selection_count",
-            message: "이 필드는 현재 모드에서 읽히지 않습니다",
-            range: null,
-          },
-        ],
-      },
-    });
-    const projection = projectStrategySpec(warned);
-    if (projection.status !== "ready") throw new Error("fixture must project");
-    expect([...projection.inapplicablePointers]).toEqual([
-      "/portfolio/selection_count",
-    ]);
-    render(<StrategyProjectionPanel projection={projection} view="form" />);
-    const badges = screen.getAllByText("현재 모드에서 읽히지 않음");
-    expect(badges).toHaveLength(1);
-    expect(badges[0]!.closest("div")).toHaveTextContent("selection_count");
-    // 경고가 없는 정상 문서(골든)에는 배지가 없다.
-    cleanup();
-    render(<StrategyProjectionPanel projection={ready} view="form" />);
-    expect(screen.queryByText("현재 모드에서 읽히지 않음")).toBeNull();
-  });
-
+  // Form view는 P4-04부터 편집 가능한 `StrategyFormPanel`이 맡는다(strategy-form-panel.test.tsx). 배지의 근거가
+  // backend 진단이라는 규칙은 `projection.inapplicablePointers`가 계속 지킨다.
   it("labels stale and unavailable projections without offering them as current", () => {
     if (ready.status !== "ready") throw new Error("fixture must project");
     const { rerender } = render(

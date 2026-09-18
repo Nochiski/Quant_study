@@ -78,6 +78,16 @@ export const useSnippetInsertion = (
   const insert = useCallback(
     (snippet: CanonicalSnippet): void => {
       setStatusAtInsert(source.status);
+      // page 인스턴스를 공유해도 스니펫은 source view가 활성일 때만 커서에 넣는다(hidden 편집기의 커서는
+      // 사용자가 보지 못한다). 공유 인스턴스의 editorActive는 "handle이 살아 있는가"라 따로 막는다.
+      if (shared !== undefined && !editorActive) {
+        run(
+          () => ({ status: "error", reason: "editor-inactive" }),
+          snippet.label,
+          SNIPPET_OWNER,
+        );
+        return;
+      }
       run(
         ({ text, selection }) =>
           planSnippetEdit(text, "yaml", selection, snippet),
@@ -85,7 +95,7 @@ export const useSnippetInsertion = (
         SNIPPET_OWNER,
       );
     },
-    [run, source.status],
+    [editorActive, run, shared, source.status],
   );
 
   const feedback = useMemo((): SnippetFeedback => {

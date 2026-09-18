@@ -82,6 +82,8 @@ export type FormListItem = {
   fields: FormField[];
   /** 항목 스키마가 union인데 문서가 분기를 고르지 못했을 때의 `kind` 후보. 아니면 null. */
   branches: readonly string[] | null;
+  /** 스키마가 `x-authoring-identity`로 표시한 필드 키(`factor_id`). 삭제 가드의 identity. 없으면 null. */
+  identityKey: string | null;
   /** 항목 자신의 pointer와, 어느 필드도 흡수하지 않은 하위 pointer의 진단(`strategy.parameter.bounds` 등). */
   diagnostics: DocumentDiagnostic[];
 };
@@ -100,6 +102,8 @@ export type FormSection =
       kind: "list";
       pointer: string;
       key: string;
+      /** 목록 키가 문서에 있는가. 없으면 항목 추가가 키를 열면서 넣는다(`insert-key`). */
+      written: boolean;
       /** 항목 스키마의 위치(`$ref`면 그 대상, 아니면 `/properties/<key>/items`). */
       itemSchemaPointer: string;
       items: FormListItem[];
@@ -272,6 +276,16 @@ const projectFields = (
   return fields;
 };
 
+/** 항목 스키마에서 `x-authoring-identity: true`인 속성 키(`$ref` 해소). 없으면 null. */
+const identityKeyOf = (root: JsonSchema, itemNode: JsonSchema): string | null => {
+  const properties = isRecord(itemNode.properties) ? itemNode.properties : {};
+  for (const [key, property] of Object.entries(properties)) {
+    const node = isRecord(property) ? resolveRef(root, property) : null;
+    if (node !== null && node["x-authoring-identity"] === true) return key;
+  }
+  return null;
+};
+
 /**
  * 항목 한 줄 이름: `x-authoring-identity` 값 → 스키마 순서 첫 문자열 값 → 문서 첫 문자열 값 → 번호.
  * 속성 노드는 `$ref`를 풀고 본다(backend가 `kind`를 정의 참조로 바꿔도 const 판정이 유지된다).
@@ -321,8 +335,8 @@ const projectListSection = (
     typeof itemSchema.$ref === "string" && itemSchema.$ref.startsWith("#")
       ? itemSchema.$ref.slice(1)
       : `/properties/${escapePointerSegment(key)}/items`;
-  const value = valueAtPointer(tree, pointer).value;
-  const items = Array.isArray(value) ? value : [];
+  const found = valueAtPointer(tree, pointer);
+  const items = Array.isArray(found.value) ? found.value : [];
   const projectedItems = items.map((item, index): FormListItem => {
     const itemPointer = `${pointer}/${index}`;
     const resolved = schemaAt(root, itemPointer, tree);
@@ -336,6 +350,10 @@ const projectListSection = (
       summary: summarize(root, resolved?.node ?? {}, item, index),
       fields,
       branches: unresolved ? unionKindsAt(root, itemPointer, tree) : null,
+      identityKey:
+        resolved === null || unresolved
+          ? null
+          : identityKeyOf(root, resolved.node),
       diagnostics: unabsorbedDiagnostics(diagnostics, itemPointer, fields),
     };
   });
@@ -348,6 +366,7 @@ const projectListSection = (
     kind: "list",
     pointer,
     key,
+    written: found.present,
     itemSchemaPointer,
     items: projectedItems,
     diagnostics: unabsorbedDiagnostics(diagnostics, pointer, itemFields),

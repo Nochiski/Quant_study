@@ -14,11 +14,16 @@ import {
 import { projectForm } from "../model/form-projection";
 import {
   addItemOperation,
+  addPresetItemOperation,
   itemKinds,
   removalBlockers,
   type ListSection,
 } from "../model/form-transactions";
 import type { JsonSchema } from "../model/schema-navigator";
+import {
+  planSourceOperation,
+  type SourceOperation,
+} from "../model/source-transactions";
 import type { SourceTransactions } from "../model/use-source-transactions";
 import { StrategyFormPanel } from "../ui/strategy-form-panel";
 
@@ -28,6 +33,10 @@ const SCHEMA = JSON.parse(
   readBackendFixture("strategy_documents/runtime-schema.json"),
 ) as JsonSchema;
 const VERBOSE = readBackendFixture("strategy_documents/quality_momentum.yaml");
+const MINIMAL = readBackendFixture(
+  "strategy_documents/quality_momentum.minimal.yaml",
+);
+const STARTER = 'schema_version: "1.1"\ntitle: ""\n';
 
 const FACTOR: FactorDefinition = {
   availability: "implemented",
@@ -64,6 +73,20 @@ const listSection = (source: string, key: string): ListSection => {
   ).sections.find((s) => s.key === key);
   if (found === undefined || found.kind !== "list") throw new Error(key);
   return found;
+};
+
+/** 연산을 실제 planner에 태워 결과 텍스트를 돌려준다(연산의 모양만 보는 스텁과 달리 계획 가능성을 검증). */
+const applyPlan = (source: string, op: SourceOperation | null): string => {
+  if (op === null) throw new Error("operation");
+  const planned = planSourceOperation(source, "yaml", op);
+  if (planned.status !== "ok") throw new Error(planned.reason);
+  return planned.edit.nextSource;
+};
+
+const rootValue = (source: string, key: string): unknown => {
+  const parsed = parseSource(source, "yaml");
+  if (parsed.status !== "ok") throw new Error("parse");
+  return (parsed.tree as Record<string, unknown>)[key];
 };
 
 const stub = (): SourceTransactions => ({
@@ -150,8 +173,45 @@ describe("list transactions (P4-03)", () => {
     ).sections.find((s) => s.key === "factors");
     if (projected === undefined || projected.kind !== "list")
       throw new Error("factors");
+    expect(projected.items[0]!.identityKey).toBe("factor_id");
     expect(removalBlockers(doc, projected.items[0]!)).toHaveLength(1);
     expect(removalBlockers(doc, projected.items[1]!)).toHaveLength(0);
+  });
+
+  it("opens an unwritten list key with one insert-key that the planner accepts (DEFECT-125-01)", () => {
+    // 생략형 문서: parameters 키가 없다(스키마 default []).
+    const parameters = listSection(MINIMAL, "parameters");
+    expect(parameters.written).toBe(false);
+    const add = addItemOperation(SCHEMA, parameters, "integer");
+    expect(add).toMatchObject({
+      kind: "insert-key",
+      parentPointer: "",
+      key: "parameters",
+    });
+    const withParameter = applyPlan(MINIMAL, add);
+    expect(rootValue(withParameter, "parameters")).toMatchObject([
+      { kind: "integer", parameter_id: "" },
+    ]);
+    // 새 전략 starter: factors도 없다 → 카탈로그 preset이 키를 연다.
+    const factors = listSection(STARTER, "factors");
+    expect(factors.written).toBe(false);
+    const withFactor = applyPlan(
+      STARTER,
+      addPresetItemOperation(factors, {
+        factor_id: FACTOR.factor_id,
+        direction: "high",
+        weight: 1,
+        graph: FACTOR.default_graph,
+      }),
+    );
+    expect(rootValue(withFactor, "factors")).toMatchObject([
+      { factor_id: "server.momentum", direction: "high" },
+    ]);
+    // 이미 있는 목록은 그대로 insert-item.
+    expect(
+      addItemOperation(SCHEMA, listSection(withFactor, "factors")),
+    ).toMatchObject({ kind: "insert-item", parentPointer: "/factors" });
+    expect(listSection(withFactor, "factors").written).toBe(true);
   });
 });
 
@@ -258,6 +318,64 @@ describe("StrategyFormPanel list sections", () => {
     expect(
       factors.getByText("생략하면 factor_id 값(momentum)을 씁니다"),
     ).toBeInTheDocument();
+  });
+
+  it("adds to an unwritten list from the panel with insert-key", async () => {
+    const user = userEvent.setup();
+    const transactions = stub();
+    renderList(MINIMAL, transactions);
+    const parameters = within(
+      screen.getByRole("group", { name: /^parameters/ }),
+    );
+    await user.selectOptions(
+      parameters.getByRole("combobox", { name: "parameters · 종류" }),
+      "float",
+    );
+    await user.click(
+      parameters.getByRole("button", { name: "parameters · 항목 추가" }),
+    );
+    expect(transactions.apply).toHaveBeenLastCalledWith(
+      {
+        kind: "insert-key",
+        parentPointer: "",
+        key: "parameters",
+        value: [expect.objectContaining({ kind: "float" })],
+      },
+      "parameters",
+      "form",
+      { focusEditor: false },
+    );
+  });
+
+  it("drops a removal notice once the document changes (P2-2)", async () => {
+    const user = userEvent.setup();
+    const source = VERBOSE.replace(
+      "portfolio:\n",
+      "  - factor_id: blend\n    direction: high\n    graph:\n      nodes:\n        - kind: saved_factor\n          node_id: m\n          factor_id: momentum\n      output_node_id: m\nportfolio:\n",
+    );
+    const view = (text: string) => {
+      const state = parsedState(text);
+      return (
+        <StrategyFormPanel
+          projection={projectForm(SCHEMA, state.parse, [])}
+          schema={SCHEMA}
+          tree={
+            state.parse !== null && state.parse.status === "ok"
+              ? state.parse.tree
+              : {}
+          }
+          transactions={stub()}
+          catalogs={{ equityFields: null, factors: [FACTOR] }}
+        />
+      );
+    };
+    const { rerender } = render(view(source));
+    const factors = () =>
+      within(screen.getByRole("group", { name: /^factors/ }));
+    await user.click(factors().getByRole("button", { name: "momentum · 삭제" }));
+    expect(factors().getByRole("alert")).toHaveTextContent("/factors/1/");
+    rerender(view(source.replace("weight: 0.6", "weight: 0.5")));
+    expect(factors().queryByRole("alert")).toBeNull();
   });
 
   it("refuses to remove an item that another node references and lists the references", async () => {

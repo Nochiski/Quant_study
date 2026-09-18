@@ -188,11 +188,7 @@ export const addItemOperation = (
   }
   if (node === null) return null;
   try {
-    return {
-      kind: "insert-item",
-      parentPointer: section.pointer,
-      value: materializeSchemaValue(schema, node),
-    };
+    return appendOperation(section, materializeSchemaValue(schema, node));
   } catch (error) {
     if (error instanceof UnsupportedSchemaShape) return null;
     throw error;
@@ -203,27 +199,51 @@ export const addItemOperation = (
 export const addPresetItemOperation = (
   section: ListSection,
   value: unknown,
-): SourceOperation => ({
-  kind: "insert-item",
-  parentPointer: section.pointer,
-  value,
-});
+): SourceOperation => appendOperation(section, value);
+
+/**
+ * 항목을 목록 끝에 넣는 연산. 목록 키가 문서에 없으면(새 전략 starter·생략형 문서) 키를 열면서 첫 항목을
+ * 넣는 `insert-key` 한 번이다 — 스니펫(`planSnippetEdit`)·object 섹션(`fieldOperation`)과 같은 규칙
+ * (리뷰 DEFECT-125-01: `insert-item`은 키가 없으면 `not-found`라 활성 버튼이 언제나 실패했다).
+ */
+const appendOperation = (
+  section: ListSection,
+  value: unknown,
+): SourceOperation =>
+  section.written
+    ? { kind: "insert-item", parentPointer: section.pointer, value }
+    : {
+        kind: "insert-key",
+        parentPointer: section.pointer.slice(
+          0,
+          section.pointer.lastIndexOf("/"),
+        ),
+        key: section.key,
+        value: [value],
+      };
 
 /**
  * 항목 삭제 전 참조 검사: 항목의 identity(`<namespace>_id`)를 문서 다른 곳이 참조하면 그 pointer 목록을
- * 돌려주고 삭제는 거부한다(D7 삭제 가드와 같은 규칙). namespace는 항목의 첫 `*_id` 문자열 필드 이름에서
- * 읽는다(`factor_id`·`parameter_id`·`node_id`).
+ * 돌려주고 삭제는 거부한다(D7 삭제 가드와 같은 규칙). identity는 스키마 `x-authoring-identity` 필드
+ * (`item.identityKey`) 우선, 없으면 카탈로그 참조가 아닌 첫 `*_id` 문자열 필드(`parameter_id`·`node_id`).
+ * `field_id` 같은 카탈로그 필드는 정의가 아니라 참조라 identity가 아니다(리뷰 P2-1).
  */
 export const removalBlockers = (
   tree: unknown,
   item: FormListItem,
 ): DocumentReference[] => {
-  const identity = item.fields.find(
-    (field) =>
-      field.key.endsWith("_id") &&
-      field.written &&
-      typeof field.value === "string",
-  );
+  const writtenString = (field: FormField): boolean =>
+    field.written && typeof field.value === "string";
+  const identity =
+    item.fields.find(
+      (field) => field.key === item.identityKey && writtenString(field),
+    ) ??
+    item.fields.find(
+      (field) =>
+        field.key.endsWith("_id") &&
+        field.control.kind !== "catalog" &&
+        writtenString(field),
+    );
   if (identity === undefined) return [];
   const namespace = identity.key.slice(0, -"_id".length);
   return findReferences(

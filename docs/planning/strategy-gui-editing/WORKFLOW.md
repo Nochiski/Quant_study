@@ -731,6 +731,15 @@ export const projectForm = (schema: JsonSchema, parse: ParsedSource | null, diag
   테스트로 패널까지 검증(013). projection: `unabsorbedDiagnostics`의 죽은 `includeRoot` 제거, 진단
   소유권 집계는 `{ diagnostics }` 구조 타입(캐스트 0), `summarize`는 속성 `$ref`를 풀어 const를
   판정한다(P4-01 2차 P2 3건).
+- 리뷰 후속(P4-03 1차): 목록 키가 문서에 없으면(`ListSection.written: false` — 새 전략 starter·생략형
+  문서) 항목 추가·카탈로그 preset이 `insert-key`로 키를 열면서 첫 항목을 넣는다(트랜잭션 한 번;
+  DEFECT-125-01: `insert-item`은 키가 없으면 `not-found`라 활성 버튼이 언제나 실패했다). 테스트는 실제
+  `planSourceOperation`까지 태운다. 삭제 가드 identity는 스키마 `x-authoring-identity` 필드
+  (`FormListItem.identityKey`) 우선, 없으면 카탈로그 참조가 아닌 첫 `*_id`(P2-1). 삭제 거부 안내는 판정을
+  낸 tree에만 붙어 문서가 바뀌면 사라진다(P2-2). 기록만: 항목 삭제 시 선행 독립 주석이 고아로 남는 것은
+  `planRemove`(P3-01) 소관이라 P5-01 노드 삭제와 함께 처리, 괄호 가드는 개수 균형만(P2-4),
+  `saved_factor.factor_id`(backend 팩터 카탈로그) 오탐은 안전 방향(P2-5), union `kind` option은 식별자
+  원문(P2-6).
 
 ### P4-04 — IDE·page 연결, 잠금, e2e
 

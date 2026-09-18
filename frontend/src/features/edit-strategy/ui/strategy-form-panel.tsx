@@ -347,7 +347,13 @@ const FormListItemView = ({
   catalogs: FormCatalogs;
   onOpenGraph: ((pointer: string) => void) | undefined;
 }) => {
-  const [blockers, setBlockers] = useState<DocumentReference[] | null>(null);
+  // 삭제 거부 안내는 그 판정을 낸 문서(tree)에만 붙는다. 문서가 바뀌면(재색인 포함) 렌더 중 파생으로
+  // 사라진다 — React key가 pointer(인덱스)라 인스턴스가 다른 항목에 재사용될 수 있다(리뷰 P2-2).
+  const [blockers, setBlockers] = useState<{
+    tree: unknown;
+    references: DocumentReference[];
+  } | null>(null);
+  const blocked = blockers !== null && blockers.tree === tree ? blockers.references : null;
   const asSection = itemSection(section, item);
   const graphField = item.fields.find(
     (field) => field.control.kind === "graph-link",
@@ -355,7 +361,7 @@ const FormListItemView = ({
   const remove = (): void => {
     const references = removalBlockers(tree, item);
     if (references.length > 0) {
-      setBlockers(references);
+      setBlockers({ tree, references });
       return;
     }
     setBlockers(null);
@@ -403,11 +409,11 @@ const FormListItemView = ({
           {t("form.list.remove")}
         </Button>
       </header>
-      {blockers !== null ? (
+      {blocked !== null ? (
         <p className="strategy-form__invalid" role="alert">
           {t("form.list.blocked").replace(
             "{pointers}",
-            blockers.map((reference) => reference.pointer).join(", "),
+            blocked.map((reference) => reference.pointer).join(", "),
           )}
         </p>
       ) : null}

@@ -322,6 +322,28 @@ try {
   await page.keyboard.press("Control+K");
   await expect(page.getByRole("dialog")).toBeVisible();
   await capture(page, "12-command-palette.png");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+
+  // 8절: Form 탭(섹션별 필드)과 Graph 탭(노드 목록 + 선택한 노드 속성).
+  await page.getByRole("tab", { name: "Form", exact: true }).click();
+  await expect(page.getByRole("tabpanel", { name: "Form" })).toContainText(
+    "max_name_weight",
+  );
+  await capture(page, "13-form-editing.png");
+
+  await page.getByRole("tab", { name: "Graph", exact: true }).click();
+  const graphEditor = page.getByRole("region", { name: "그래프 편집" });
+  await expect(graphEditor).toBeVisible();
+  await graphEditor
+    .getByRole("button", { name: "노드 편집: mom_252", exact: true })
+    .click();
+  await expect(
+    graphEditor.getByRole("group", { name: /선택한 노드/ }),
+  ).toContainText("input_node_id");
+  // 편집 표면(노드 목록 + 선택한 노드 속성)만 담는다 — 전체 화면은 DAG 카드가 차지해 편집기가 잘린다.
+  await graphEditor.scrollIntoViewIfNeeded();
+  await capture(page, "14-graph-editing.png", graphEditor);
 
   process.stdout.write(`매뉴얼 전략 ID: ${strategyId}\n`);
 } finally {

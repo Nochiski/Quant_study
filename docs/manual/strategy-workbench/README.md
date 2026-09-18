@@ -117,9 +117,6 @@ parameters: []
 
 ![검증을 통과한 샘플 전략](assets/02-valid-yaml.png)
 
-> 그림은 1.1 전환 전 화면이라 `factors`가 중첩으로, `signal` 블록이 있는 것으로 보인다. 지금 화면은 위 샘플대로
-> 평탄한 `factors`이고 `signal`이 없다(스크린샷은 전량 재촬영 예정).
-
 ## 2. 숫자 단위 확인하기
 
 왼쪽 `전략 구조`에서 `risk`를 펼치고 `max_name_weight`를 누른다.
@@ -295,6 +292,11 @@ YAML을 직접 치지 않아도 된다. `Form`과 `Graph` 탭에서 고친 값�
   노드인 것은 삭제되지 않는다. backend가 아직 실행 계획을 만들지 못한 그래프(노드가 없는 새 팩터 등)도
   편집할 수 있다.
 - 두 탭 사이는 Form의 `Graph에서 열기`, Graph의 `Form에서 열기`로 오간다.
+
+![Form 탭에서 섹션별 필드 고치기](assets/13-form-editing.png)
+
+![Graph 탭에서 노드를 고르고 속성 고치기](assets/14-graph-editing.png)
+
 - YAML에 구문 오류가 있으면 Form은 마지막으로 읽을 수 있었던 값을 `STALE`로 보여 주고, Form과 Graph의
   컨트롤은 `구문 오류` 배지와 함께 잠긴다. `YAML` 탭에서 오류를 고치면 바로 풀린다. 방금 고친 값이
   반영되는 짧은 순간(0.2초 정도)에는 항목·노드의 추가·삭제 버튼이 잠시 비활성이다. JSON 문서는 Form·Graph에서 고치지 않는다.

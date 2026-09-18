@@ -54,7 +54,7 @@ npm run dev
 가운데 큰 편집창을 클릭하고 내용을 모두 지운 뒤 아래 YAML을 붙여넣는다.
 
 ```yaml
-schema_version: "1.0"
+schema_version: "1.1"
 title: "사용자 매뉴얼 모멘텀"
 description: ""
 data:
@@ -66,25 +66,22 @@ data:
 eligibility:
   rules: []
 factors:
-  factors:
-    - factor_id: momentum
-      label: "모멘텀"
-      direction: high
-      weight: 0.6
-      graph:
-        nodes:
-          - node_id: close
-            field_id: price.close
-            kind: field
-          - node_id: mom_252
-            operator: momentum
-            input_node_id: close
-            window: 252
-            kind: time_series
-        output_node_id: mom_252
-        missing_policy: drop
-signal:
-  method: weighted_sum
+  - factor_id: momentum
+    label: "모멘텀"
+    direction: high
+    weight: 0.6
+    graph:
+      nodes:
+        - node_id: close
+          field_id: price.close
+          kind: field
+        - node_id: mom_252
+          operator: momentum
+          input_node_id: close
+          window: 252
+          kind: time_series
+      output_node_id: mom_252
+      missing_policy: drop
 portfolio:
   selection_count: 2
   rebalance: monthly
@@ -294,6 +291,8 @@ YAML을 직접 치지 않아도 된다. `Form`과 `Graph` 탭에서 고친 값�
 - YAML에 구문 오류가 있으면 Form은 마지막으로 읽을 수 있었던 값을 `STALE`로 보여 주고, Form과 Graph의
   컨트롤은 `구문 오류` 배지와 함께 잠긴다. `YAML` 탭에서 오류를 고치면 바로 풀린다. 방금 고친 값이
   반영되는 짧은 순간(0.2초 정도)에는 항목·노드의 추가·삭제 버튼이 잠시 비활성이다. JSON 문서는 Form·Graph에서 고치지 않는다.
+- 붙여넣거나 연 문서의 줄 끝은 편집창이 LF로 통일한다(Windows 메모장의 CRLF 포함). 그래서 아무것도 고치지 않고
+  저장해도 `source_hash`가 바뀔 수 있다. 전략 의미의 해시(`spec_hash`)는 그대로다.
 
 ## 9. 자주 쓰는 단축키
 

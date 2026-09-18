@@ -54,7 +54,7 @@ npm run dev
 가운데 큰 편집창을 클릭하고 내용을 모두 지운 뒤 아래 YAML을 붙여넣는다.
 
 ```yaml
-schema_version: "1.0"
+schema_version: "1.1"
 title: "사용자 매뉴얼 모멘텀"
 description: ""
 data:
@@ -66,25 +66,22 @@ data:
 eligibility:
   rules: []
 factors:
-  factors:
-    - factor_id: momentum
-      label: "모멘텀"
-      direction: high
-      weight: 0.6
-      graph:
-        nodes:
-          - node_id: close
-            field_id: price.close
-            kind: field
-          - node_id: mom_252
-            operator: momentum
-            input_node_id: close
-            window: 252
-            kind: time_series
-        output_node_id: mom_252
-        missing_policy: drop
-signal:
-  method: weighted_sum
+  - factor_id: momentum
+    label: "모멘텀"
+    direction: high
+    weight: 0.6
+    graph:
+      nodes:
+        - node_id: close
+          field_id: price.close
+          kind: field
+        - node_id: mom_252
+          operator: momentum
+          input_node_id: close
+          window: 252
+          kind: time_series
+      output_node_id: mom_252
+      missing_policy: drop
 portfolio:
   selection_count: 2
   rebalance: monthly
@@ -119,6 +116,9 @@ parameters: []
 선택된 종목과 탈락한 종목을 모두 보기 위해 2로 두었다.
 
 ![검증을 통과한 샘플 전략](assets/02-valid-yaml.png)
+
+> 그림은 1.1 전환 전 화면이라 `factors`가 중첩으로, `signal` 블록이 있는 것으로 보인다. 지금 화면은 위 샘플대로
+> 평탄한 `factors`이고 `signal`이 없다(스크린샷은 전량 재촬영 예정).
 
 ## 2. 숫자 단위 확인하기
 
@@ -180,6 +180,9 @@ max_name_wieght: 0.05
 
 주석만 고쳤다면 원문은 달라도 의미 변경은 없을 수 있다. 실제 매매 동작의 차이를 보려면
 `selection_count`, `max_name_weight`, `fee_bps` 같은 필드가 바뀌었는지 확인한다.
+
+붙여넣거나 연 문서의 줄 끝은 편집창이 LF로 통일한다(Windows 메모장의 CRLF 포함). 그래서 아무것도
+고치지 않고 저장해도 `source_hash`가 바뀔 수 있다. 전략 의미의 해시(`spec_hash`)는 그대로다.
 
 ## 5. 종목이 왜 선택됐는지 확인하기
 

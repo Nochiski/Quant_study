@@ -642,7 +642,7 @@ const ko = {
     "저장된 1.0 revision은 추적할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
   "trace.error.trace.request.invalid": "추적 요청이 올바르지 않습니다: {detail}",
   "trace.error.trace.engine.incompatible":
-    "선택한 실행 엔진이 이 전략을 추적할 수 없습니다: {detail}",
+    "선택한 실행 엔진이 이 전략을 추적할 수 없습니다. 다른 실행 core를 고르세요.",
   "trace.error.trace.capability.unsupported":
     "이 전략은 추적이 아직 지원하지 않는 기능을 씁니다: {detail}",
   "trace.error.trace.strategy.stale":
@@ -1536,7 +1536,7 @@ export const messages = {
       "A stored 1.0 revision cannot be traced. Upgrade it and save a new revision first.",
     "trace.error.trace.request.invalid": "The trace request is invalid: {detail}",
     "trace.error.trace.engine.incompatible":
-      "The selected engine cannot trace this strategy: {detail}",
+      "The selected engine cannot trace this strategy. Choose another execution core.",
     "trace.error.trace.capability.unsupported":
       "This strategy uses a capability tracing does not support yet: {detail}",
     "trace.error.trace.strategy.stale":

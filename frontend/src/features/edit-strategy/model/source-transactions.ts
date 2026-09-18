@@ -15,7 +15,10 @@ import {
  * 정본은 YAML 텍스트 하나다. 각 연산은 pointer가 가리키는 **기존 범위**(parse가 준 key/value range)
  * 하나만 바꾸는 최소 범위 편집(`PlannedEdit`)을 만들고, 결과 텍스트를 같은 parser로 다시 읽어
  * (1) 파싱이 되고 (2) tree가 `applyToTree`의 결과와 같을 때만 돌려준다. 프론트가 문서를 직렬화해
- * 통째로 갈아끼우는 일은 없다(주석·순서·따옴표는 범위 밖에서 그대로다).
+ * 통째로 갈아끼우는 일은 없다(주석·순서·따옴표는 범위 밖에서 그대로다). 예외는 flow 표기 컨테이너
+ * (`{ … }`·`[ … ]`)에 키·항목을 넣을 때다: block은 flow 안에 올 수 없으므로 가장 바깥 flow 컨테이너 전체를
+ * 다시 직렬화해 교체한다 — 그 범위 안의 따옴표·숫자 표기는 정규화되고, 컨테이너 뒤 줄 끝 주석은 `key:`/`-`
+ * 줄에 남긴다(Phase 5 backlog 14).
  *
  * 값이 없는 키(`factors:` → null)는 삽입 연산의 부모로 쓰일 때 빈 컨테이너로 본다(insert-key면 `{}`,
  * insert-item이면 `[]`). 내용이 전혀 없는 문서(빈 줄·주석뿐)는 루트 insert-key에 한해 빈 mapping으로
@@ -327,12 +330,18 @@ const replaceFlowContainer = (
   const value = valueAt(next, top);
   const block = yamlBlock(value);
   const range = parsed.valueRanges.get(top)!;
+  // 닫는 `}`·`]` 뒤 같은 줄의 주석은 컨테이너(`key:`/`-` 줄)의 것이다 — 새 마지막 항목에 붙지 않게 그 줄에
+  // 남긴다(#149 리뷰 P2-4). `to`는 주석까지 삼키고 주석은 삽입 첫머리에 다시 쓴다.
+  const lineEnd = lineEndOf(source, range.end.offset);
+  const tail = source.slice(range.end.offset, lineEnd);
+  const comment = tail.trim().startsWith("#") ? ` ${tail.trim()}` : "";
+  const to = comment === "" ? range.end.offset : lineEnd;
   if (top === "") {
-    // 루트 전체가 flow면 문서 본문을 block mapping으로 바꾼다.
-    const insert = indentLines(block, "", eol);
+    // 루트 전체가 flow면 문서 본문을 block mapping으로 바꾼다(주석은 첫 줄로).
+    const insert = `${comment === "" ? "" : `${comment.trim()}${eol}`}${indentLines(block, "", eol)}`;
     return {
       from: range.start.offset,
-      to: range.end.offset,
+      to,
       insert,
       cursor: range.start.offset + insert.length,
     };
@@ -342,25 +351,16 @@ const replaceFlowContainer = (
     // `key: { … }` → `key:` 뒤에서 줄을 바꾸고 키 열 + 폭으로 들여쓴다.
     const keyColumn = parsed.keyRanges.get(top)!.start.column;
     const indent = " ".repeat(keyColumn + unit);
-    const insert = `${eol}${indent}${indentLines(block, indent, eol)}`;
-    return {
-      from: colon,
-      to: range.end.offset,
-      insert,
-      cursor: colon + insert.length,
-    };
+    const insert = `${comment}${eol}${indent}${indentLines(block, indent, eol)}`;
+    return { from: colon, to, insert, cursor: colon + insert.length };
   }
   const dash = dashOffsetOf(source, range.start.offset);
   if (dash !== null) {
-    // `- { … }` → `-` 뒤에서 줄을 바꾸고 `-` 열 + 폭으로 들여쓴다(빈 `- []`·`- {}` 확장과 같은 모양).
+    // `- { … }` → `-` 뒤에서 줄을 바꾸고 `-` 열 + 폭으로 들여쓴다(빈 `- []`·`- {}` 확장과 같은 모양 —
+    // 문서 고유 폭 `unit`을 쓰므로 2칸이 아닌 문서에서는 예전 `+2`와 다르다, #149 리뷰 P2-5).
     const indent = " ".repeat(dash - lineStartOf(source, dash) + unit);
-    const insert = `${eol}${indent}${indentLines(block, indent, eol)}`;
-    return {
-      from: dash + 1,
-      to: range.end.offset,
-      insert,
-      cursor: dash + 1 + insert.length,
-    };
+    const insert = `${comment}${eol}${indent}${indentLines(block, indent, eol)}`;
+    return { from: dash + 1, to, insert, cursor: dash + 1 + insert.length };
   }
   const indent = " ".repeat(range.start.column);
   const insert = indentLines(block, indent, eol);

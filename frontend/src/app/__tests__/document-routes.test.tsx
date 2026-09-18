@@ -6,7 +6,6 @@ import { createMemoryHistory } from "@tanstack/react-router";
 import {
   act,
   cleanup,
-  configure,
   fireEvent,
   render,
   screen,
@@ -30,9 +29,9 @@ import {
 // page 트리가 Form·Graph 편집기까지 그리게 되어(P4·P5) 전체 실행(52파일 병렬) 부하 배율이 8배를 넘는다 —
 // 케이스 단위 상향으로는 따라잡히지 않아 파일 전체를 올린다(P5-03 3차 리뷰). 단독 실행 최장은 4초대.
 vi.setConfig({ testTimeout: 15_000 });
-// 케이스 timeout만 올려서는 부족했다 — 실제로 먼저 만료되는 것은 `waitFor`/`findBy*`의 기본 1초다(#143 CI 재실행,
-// #144 리뷰 1회차, 로컬 반복에서 같은 파일만 부하 flake; Phase 5 backlog 15). 이 파일의 비동기 대기만 5초로 둔다.
-configure({ asyncUtilTimeout: 5_000 });
+// 비동기 대기 예산(`waitFor`/`findBy*`)은 `shared/config/test-setup.ts`가 단일 owner로 정한다 — 이 파일은 케이스
+// timeout만 올린다. 부하 flake의 원인은 54파일 병렬의 워커 경합(단독 65초, 케이스당 1초)이며 예산은 그쪽에서 조정한다
+// (Phase 5 backlog 15, #149 리뷰 P1-1).
 
 
 import { backtestHistoryQuery } from "../../entities/backtest";

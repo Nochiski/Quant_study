@@ -292,9 +292,10 @@ impl PersistentEngine {
         match self.drain_until_callback() {
             Ok(frame) => Ok(frame),
             Err(error) => {
-                // 세션 처리 중 도메인 오류(자본 소진·음수 현금·정산 bar 없음)는 라우팅 오류와
-                // 같이 runtime을 실패 상태로 고정한다 — 재진입하면 비용은 반영됐지만 SNAPSHOT이
-                // 없는 세션 뒤로 조용히 이어진다.
+                // 드레인에서 올라오는 모든 오류가 runtime을 실패로 고정한다 — 도메인 오류(자본
+                // 소진·음수 현금·정산 bar 없음)뿐 아니라 오용 오류(설정 누락, 큐 토큰 불일치)도
+                // 포함한다. 어느 쪽이든 세션 처리가 중간에 끊긴 상태라, 재진입하면 비용은
+                // 반영됐지만 SNAPSHOT이 없는 세션 뒤로 조용히 이어진다.
                 //
                 // 드레인 안의 `submit_native`가 이미 Failed로 바꿨다면 그쪽 detail이 더 구체적이라
                 // 덮어쓰지 않는다.
@@ -770,7 +771,13 @@ mod tests {
         }
     }
 
+    /// 2세션 피드를 실은 runtime.
+    ///
+    /// 여기서 인터프리터를 올린다 — 드레인 오류를 단언하는 테스트는 실패 경로가
+    /// `PyErr::to_string()`으로 detail을 남기므로 PyErr 포맷에 인터프리터가 필요하고,
+    /// `cargo test` 바이너리에는 기본적으로 인터프리터가 없다. 호출은 멱등하다.
     fn runtime_with(allow_short: bool, settings: RunSettings) -> PersistentEngine {
+        pyo3::prepare_freethreaded_python();
         let mut runtime = PersistentEngine::new(100_000.0, allow_short, false, 1.0).unwrap();
         runtime
             .load_feed(
@@ -989,10 +996,6 @@ mod tests {
         // DEFECT-R01: 세션 처리 도중 난 도메인 오류도 라우팅 오류처럼 runtime을 실패로 고정해야
         // 한다. 고정하지 않으면 비용은 반영됐지만 SNAPSHOT이 없는 세션 뒤로 같은 runtime이
         // 조용히 이어지고 finish()가 정상 종료해버린다.
-        //
-        // 실패 경로가 `PyErr::to_string()`으로 detail을 남기므로 이 테스트만 인터프리터를
-        // 올린다 (다른 드라이버 테스트는 Python API를 건드리지 않는다).
-        pyo3::prepare_freethreaded_python();
         let mut wipeout = settings(0);
         // 숏 차입 이자를 비현실적으로 크게 잡아 세션 1 마감에서 equity를 음수로 만든다.
         wipeout.short_borrow_bps_annual = 1e9;

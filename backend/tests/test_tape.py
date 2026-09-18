@@ -537,3 +537,64 @@ def test_tape_order_materialization_reads_each_kind_once(
         RecordKind.ORDER.code,
         RecordKind.FILL.code,
     ]
+
+
+@RUST_ONLY
+def test_columnar_feed_builds_no_market_snapshot_for_tape_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """열로 적재한 feed는 tape 실행과 결과 테이블 조회 내내 `MarketSnapshot`을 안 만든다.
+
+    tape 경로는 전략 콜백이 없고 워크벤치는 `result_tables()`만 읽는다 — 세션마다 스냅샷
+    객체를 만들면 아무도 읽지 않는 객체를 세션 수만큼 만드는 셈이다. MARKET 레코드를 실제로
+    조회하는 순간에만 만들어지는지도 같이 고정한다.
+    """
+    from backtest_engine.data import feed as feed_module
+    from backtest_engine.types.market import Bar
+
+    built: list[datetime] = []
+    real_snapshot = feed_module.MarketSnapshot
+
+    def counting(*, ts: datetime, bars: tuple[Bar, ...]) -> MarketSnapshot:
+        built.append(ts)
+        return real_snapshot(ts=ts, bars=bars)
+
+    monkeypatch.setattr(feed_module, "MarketSnapshot", counting)
+
+    sessions = [day(n) for n in (1, 2, 3)]
+    feed = DataFeed.from_columns(
+        sessions=sessions,
+        instruments=[_X, _Y],
+        offsets=[0, 2, 4, 5],
+        instrument_ids=[0, 1, 0, 1, 0],
+        opens=[100.0, 50.0, 100.0, 50.0, 110.0],
+        highs=[100.0, 50.0, 100.0, 50.0, 110.0],
+        lows=[100.0, 50.0, 100.0, 50.0, 110.0],
+        closes=[100.0, 50.0, 100.0, 50.0, 110.0],
+        volumes=[1_000, 1_000, 1_000, 1_000, 1_000],
+    )
+    frames = {
+        day(1).date(): TapeFrame(
+            action=SetPortfolioTarget(
+                targets=(WeightTarget(_X, 0.5),),
+                scope=TargetScope.REPLACE,
+                execution=ExecutionPolicy.market_next_open(),
+            ),
+            reason="tape:d1",
+        )
+    }
+    engine = BacktestEngine(RunConfig(run_id="tape-columnar", initial_cash=100_000.0), core="rust")
+    engine.run(_TapeStrategy(frames), feed)
+    tables = engine.event_store.result_tables()
+
+    assert built == []
+    assert tables.sessions == tuple(sessions)
+    assert tables.instruments == (_X, _Y)
+
+    market_sessions = [
+        payload.ts
+        for record in engine.event_store.records
+        if isinstance(payload := record.payload, MarketSnapshot)
+    ]
+    assert market_sessions == sessions
+    assert built == sessions

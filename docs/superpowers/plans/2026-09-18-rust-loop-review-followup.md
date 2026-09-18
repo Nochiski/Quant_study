@@ -671,17 +671,39 @@ set peak이 arena가 가장 큰 순간이 아니라 결과 조회 구간에서 �
 
 PR 9까지 반영 후 100종목 tape에서 feed 적재(`_load_persistent_feed` + `DataFeed.__init__`)가 e2e total의 **10% 미만이면 이 PR은 열지 않고** 이슈 #98 댓글에 수치와 함께 "보류"로 기록한다. 10% 이상이면 진행.
 
-### 설계
+### 설계 (구현 확정)
 
-- `DataFeed.from_columns(sessions: Sequence[datetime], instruments: Sequence[InstrumentId], offsets, instrument_ids, opens, highs, lows, closes, volumes)` 생성자 추가. 내부는 columnar 저장, `snapshots()`·`sessions`는 기존 계약을 lazy로 만족(`MarketSnapshot`은 python 코어와 MARKET 레코드 side table이 필요할 때 세션 단위로 생성·캐시). `DataFeed(bars)`는 유지.
-- `_load_persistent_feed`는 columnar면 배열을 그대로 넘기고(numpy `float64`/`int64` 배열 → pyo3 `PyReadonlyArray`는 새 의존성 `numpy` crate가 필요하므로 **금지**; 대신 `array.array('d')`의 buffer를 `Vec<f64>`로 받는 pyo3 `Vec<f64>` 변환 vs `bytes` 변환을 측정해 빠른 쪽), `Bar` 기반이면 기존 경로.
-- 어댑터는 `request.dataset.bars`에서 바로 columnar를 만든다.
+- `DataFeed.from_columns(*, sessions, instruments, offsets, instrument_ids, opens, highs, lows, closes, volumes)` 생성자 추가. `DataFeed(bars)`는 그대로 스냅샷을 만들고, `columns()`가 처음 불릴 때 열을 만들어 캐시한다. `from_columns`는 열을 갖고 `snapshot_at(index)`에서만 `Bar`·`MarketSnapshot`을 만든다.
+- 검증 정본은 `types/market.py::validate_bar_values` 하나다. `Bar.__post_init__`과 `from_columns`가 같은 함수를 부르므로 메시지가 byte 동일이고, 열 경로는 객체를 만들지 않고 검사한다. 세션 단조는 `TimeReversalError`, 세션 안 종목 중복은 `MarketSnapshot`과 같은 문구의 `ValueError`다.
+- pyo3 `Vec<f64>` 변환을 유지한다. `numpy` crate·`array.array` buffer 경로는 도입하지 않았다 — 실측에서 Python 쪽 bar 루프 제거만으로 목표(50%)를 크게 넘겼고, 새 crate는 "라이브러리 추가 금지" 규칙에 걸린다.
+- `_load_persistent_feed`는 `feed.columns()`를 그대로 `runtime.load_feed`에 넘기고 등록부만 돌려준다. `PersistentEventStore.bind_feed(feed, instruments)`가 스냅샷 튜플 대신 feed를 잡아 MARKET 레코드·콜백 이벤트·`_covered_feed`가 필요한 세션만 만들게 한다.
+- 어댑터 `_columnar_feed(rows)`가 `request.dataset.bars`를 세션별로 묶어 바로 열로 넘긴다. `_instrument`는 종목당 한 번만 부른다.
 
-### AC
+### 실측 (2026-09-18, base 55a40e2 대비 어댑터·feed만 되돌려 back-to-back, CPU 부하 15~34%)
 
-- 단위·parity: `DataFeed.from_columns`와 `DataFeed(bars)`가 같은 `snapshots()`를 내는 테스트, `TimeReversalError` 등 검증 동일, 전체 스위트.
-- 실측: 100종목 tape e2e total에서 feed 구간 50% 이상 감소.
-- E2E (**필수**): `tests/integration` 통과, `bench_workbench_adapter.py` metrics 동일.
+100종목 tape, `bench_workbench_adapter.py --instruments 100 --core all --repeat 5` 중앙값(초).
+after 열은 리뷰 반영(DEFECT-1001·1002·등록부 중복 거부) 후 브랜치 tip에서 다시 기록한
+`benchmarks/baseline/rust-loop-workbench-100.json`과 같은 값이다.
+
+| 구간 | base rust | after rust | base python | after python |
+|---|---|---|---|---|
+| `dataset_to_engine_inputs` | 0.6585 | 0.0002 | 0.5336 | 0.0002 |
+| `strategy_and_feed_build` | 0.1519 | 0.1297 | 0.1346 | 0.1298 |
+| **두 구간 합** | **0.8104** | **0.1299** (−84.0%) | **0.6682** | **0.1300** (−80.5%) |
+| `engine.run` | 0.3105 | 0.2087 | 1.8194 | 2.1438 |
+| e2e total | 1.7038 | 0.9446 | 3.2825 | 3.0359 |
+
+- rust e2e는 1.80배 빨라졌고 python 대비 배수가 1.93배 → 3.21배로 올랐다.
+- python e2e는 −7.5%다. `Bar`·`MarketSnapshot` 생성이 어댑터에서 `engine.run` 안(lazy)으로 옮겨가 `engine.run`이 +17.8%지만, dict 그룹화·종목별 시각 단조 dict가 사라져 총합은 줄었다.
+- 격리 실행 peak RSS: rust 370.3 → 330.4MiB(−39.9), python 346.0 → 318.4MiB(−27.6). 어댑터 경로가 `Bar` 123,100개를 아예 만들지 않는 몫이다.
+- `bench_universe`(엔진 벤치, `DataFeed(bars)` 경로) 100종목 tape `--core rust --repeat 3`: run 0.2571 → 0.2480·0.2431(−3.5~5.4%), total 0.6098 → 0.5946·0.5961, peak RSS 201.9 → 201.2·201.7MiB. DEFECT-1002(파생 열 캐시) 제거 전에는 이 RSS가 207.2MiB였다 — 캐시를 없애 base 수준으로 복귀했다.
+- 측정 주의: `--core all` 한 프로세스에서 rust `compute_analytics`가 0.016초 대신 0.154초로 찍힌다. `gc.disable()`로 같은 벤치를 돌리면 0.0157초이고 `artifacts`도 0.377 → 0.248초로 줄어 — 자동 순환 GC 정지가 어느 구간에 붙느냐의 문제지 새 작업이 아니다. 코어 격리 실행에서는 나타나지 않는다. PR 11 재측정 때 `gc.freeze()` 도입 여부를 판단할 것(도입하면 기존 JSON 전체와 비교 불가).
+
+### AC (달성)
+
+- 단위·parity: `DataFeed(bars)`와 `from_columns`의 `snapshots()`·`sessions`·등록부 동등성, 가격·거래량 위반 메시지 동일, `TimeReversalError`, lazy 생성 가드(`tests/test_tape.py::test_columnar_feed_builds_no_market_snapshot_for_tape_run`), 어댑터 동등성, `columns()` 비캐시 계약, 등록부 중복 거부. `uv run pytest -q` 전체 1,328 passed / 13 skipped, `test_promoted_rust_makes_no_per_session_ffi` 불변.
+- 실측: feed 구간 −84.0% (게이트 50%).
+- E2E: `tests/integration` 163 passed (HTTP golden parity 포함), 벤치가 두 코어 result signature 일치를 실행마다 확인.
 
 ---
 
@@ -722,5 +744,5 @@ PR 9까지 반영 후 100종목 tape에서 feed 적재(`_load_persistent_feed` +
 | 7 | `perf/workbench-result-columnar` | 리뷰 조건부 APPROVE·PR 생성 | #136 | Opus (DEFECT-701·캐시·RSS 계측 반영, post-run −48%(경계), e2e 1.26→1.91배) |
 | 8 | `perf/rust-hot-loop` | 리뷰 APPROVE·PR 생성 | #137 | Opus APPROVE (테스트·set_mark·Python key 충돌 거부 반영, 300종목 run −21~22%) |
 | 9 | `perf/record-and-queue-memory` | 리뷰 APPROVE·PR 생성 | #138 | Opus APPROVE (DEFECT-901 반영, RSS 1.14/1.18배, run −10%) |
-| 10 | `perf/feed-columnar` | **go** (PR 9 tip: dataset_to_engine_inputs 30% + strategy_and_feed_build 15%) | | |
+| 10 | `perf/feed-columnar` | 리뷰 APPROVE·PR 생성 | #141 | Opus REQUEST_CHANGES→APPROVE (쓰레기 파일·열 캐시 RSS 반영, feed −84%, 워크벤치 e2e 3.21배) |
 | 11 | `docs/rust-loop-final-gates` | 대기 | | |

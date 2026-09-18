@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
@@ -18,7 +18,6 @@ from backtest_engine.types.events import (
     StrategyEvent,
 )
 from backtest_engine.types.instruments import AssetClass, InstrumentId
-from backtest_engine.types.market import Bar
 from backtest_engine.types.requirements import StrategyRequirements
 from backtest_engine.types.result_tables import ResultTables
 from backtest_engine.types.strategy import StrategyContext
@@ -29,6 +28,7 @@ from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import 
 from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestExecutionRequest,
     CancellationCheck,
+    MarketBarRecord,
     ProgressCallback,
     RunCancelledError,
 )
@@ -56,6 +56,63 @@ from strategy_workbench.domain.backtest.facade.runs import (
 )
 from strategy_workbench.domain.portfolio.facade.construction import TargetTape
 from strategy_workbench.domain.strategy.facade.specification import StrategySpec
+
+
+def _columnar_feed(rows: Sequence[MarketBarRecord]) -> DataFeed:
+    """dataset 행을 열로 펴 DataFeed를 만든다 — 중간에 `Bar` 객체를 만들지 않는다.
+
+    세션은 오름차순, 한 세션 안 종목은 dataset 입력 순서다. 같은 행 묶음을 `Bar`로 만들어
+    `DataFeed(bars)`에 넣었을 때와 같은 스냅샷 순서다. 가격·거래량 불변식과 세션 단조는
+    `DataFeed.from_columns`가 검사한다 — 어댑터는 모양만 바꾼다.
+
+    Args:
+        rows: dataset이 답한 시장 bar 행. 순서는 세션 기준으로만 쓰인다.
+
+    Returns:
+        열을 그대로 보관하는 DataFeed. persistent Rust 경로는 이 열을 바로 FFI로 넘긴다.
+    """
+    rows_by_session: dict[date, list[MarketBarRecord]] = {}
+    for row in rows:
+        rows_by_session.setdefault(row.session, []).append(row)
+
+    sessions: list[datetime] = []
+    instruments: list[InstrumentId] = []
+    instrument_index: dict[str, int] = {}
+    offsets = [0]
+    instrument_ids: list[int] = []
+    opens: list[float] = []
+    highs: list[float] = []
+    lows: list[float] = []
+    closes: list[float] = []
+    volumes: list[int] = []
+    for session in sorted(rows_by_session):
+        sessions.append(datetime.combine(session, time(15, 30)))
+        for row in rows_by_session[session]:
+            index = instrument_index.get(row.security_id)
+            if index is None:
+                # `_instrument`는 종목당 한 번만 부른다 — 행마다 부르면 유니버스 크기가
+                # 아니라 행 수만큼 InstrumentId를 만든다.
+                index = len(instruments)
+                instrument_index[row.security_id] = index
+                instruments.append(_instrument(row.security_id))
+            instrument_ids.append(index)
+            opens.append(row.open)
+            highs.append(row.high)
+            lows.append(row.low)
+            closes.append(row.close)
+            volumes.append(row.volume)
+        offsets.append(len(instrument_ids))
+    return DataFeed.from_columns(
+        sessions=sessions,
+        instruments=instruments,
+        offsets=offsets,
+        instrument_ids=instrument_ids,
+        opens=opens,
+        highs=highs,
+        lows=lows,
+        closes=closes,
+        volumes=volumes,
+    )
 
 
 def _instrument(security_id: str) -> InstrumentId:
@@ -127,18 +184,6 @@ class BacktestEngineExecutorAdapter:
         self._check_cancelled(cancelled)
         started_at = datetime.now(UTC)
         progress(0.35, "engine.prepare", "Preparing market feed and strategy")
-        bars = tuple(
-            Bar(
-                ts=datetime.combine(item.session, time(15, 30)),
-                instrument=_instrument(item.security_id),
-                open=item.open,
-                high=item.high,
-                low=item.low,
-                close=item.close,
-                volume=item.volume,
-            )
-            for item in request.dataset.bars
-        )
         universe = UniverseResult(
             memberships=tuple(
                 Membership(
@@ -174,7 +219,7 @@ class BacktestEngineExecutorAdapter:
         )
         result = engine.run(
             TargetTapeStrategy(strategy, request.target_tape, self._portfolio_bridge),
-            DataFeed(bars),
+            _columnar_feed(request.dataset.bars),
             corporate_actions=corporate_actions,
             universe=universe,
         )

@@ -8,9 +8,11 @@
 측정 구간:
 
 - `dataset_to_engine_inputs`: `execute()` 시작 → `BacktestEngine` 생성. dataset 레코드를
-  엔진 `Bar`·`UniverseResult`·`CorporateActionEvent`로 옮기는 구간이다.
+  엔진 `UniverseResult`·`CorporateActionEvent`로 옮기는 구간이다. bar 행은 여기서 다루지
+  않는다 — feed를 만드는 `_columnar_feed`가 `run()` 호출 인자라 다음 구간에 들어간다.
 - `strategy_and_feed_build`: `BacktestEngine` 생성 → `run()` 진입. `TargetTapeStrategy`가
-  TargetTape 프레임을 엔진 액션으로 옮기고 `DataFeed`가 bar를 세션으로 묶는 구간이다.
+  TargetTape 프레임을 엔진 액션으로 옮기고, dataset bar 행을 세션별 열로 펴 `DataFeed`를
+  만드는 구간이다.
 - `engine.run`: 엔진 루프만.
 - `result_tables`: `engine.event_store.result_tables()` — 어댑터가 읽는 유일한 결과 조회다.
   Rust 코어는 여기서 레코드를 한 번 훑어 primitive 행을 만들고, Python 코어는 `run()` 안에서

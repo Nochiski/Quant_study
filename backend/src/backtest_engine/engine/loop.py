@@ -442,8 +442,8 @@ class BacktestEngine:
         # 확장 심볼은 드레인 전에 한 번만 해석한다 — except 절에서 해석하면 조회가 실패할 때
         # 원래 예외가 CoreUnavailable에 가려진다.
         route_error_type = route_error_exception()
-        instruments, market_snapshots = self._load_persistent_feed(run, feed)
-        store.bind_feed(feed.sessions, instruments, market_snapshots)
+        instruments = self._load_persistent_feed(run, feed)
+        store.bind_feed(feed, instruments)
         self._configure_persistent_run(run)
 
         # 사건은 해당 종목이 실제로 거래되는 첫 세션(사건 세션 이후)에 적용한다 — 원장의
@@ -612,31 +612,19 @@ class BacktestEngine:
     # --- 세션 처리 -----------------------------------------------------------
 
     @staticmethod
-    def _load_persistent_feed(
-        run: _Run, feed: DataFeed
-    ) -> tuple[tuple[InstrumentId, ...], tuple[MarketSnapshot, ...]]:
+    def _load_persistent_feed(run: _Run, feed: DataFeed) -> tuple[InstrumentId, ...]:
         """전체 feed를 columnar batch로 한 번 전송한다.
 
-        instrument id 순서의 registry와, 호출부가 EventStore에 다시 묶을 세션 스냅샷을 함께
-        돌려준다 — 스냅샷 튜플을 두 번 만들면 대형 feed에서 그만큼 메모리가 더 든다.
+        instrument id 순서의 registry를 돌려준다 — 호출부가 EventStore에 같은 순서로 묶어
+        결과 테이블의 종목 조회표로 쓴다.
         """
         runtime = run.persistent_runtime
         if runtime is None:
             raise CoreUnavailable("persistent Rust feed requires its runtime")
-        # bar 단위 Python 루프는 세션×종목 수만큼 돌아 적재가 실행 시간의 큰 몫이 된다 —
-        # 열마다 comprehension 한 번으로 만들고 registry는 dict 조회 한 번만 한다.
-        snapshots = tuple(feed.snapshots())
-        sessions = [str(snapshot.ts) for snapshot in snapshots]
-        bars = [bar for snapshot in snapshots for bar in snapshot.bars]
-        registry: dict[InstrumentId, int] = {}
-        instrument_ids: list[int] = []
-        for bar in bars:
-            instrument_id = registry.get(bar.instrument)
-            if instrument_id is None:
-                instrument_id = len(registry)
-                registry[bar.instrument] = instrument_id
-            instrument_ids.append(instrument_id)
-        instruments = tuple(registry)
+        # feed가 열을 그대로 준다 — bar 단위 Python 루프도, 열마다 도는 comprehension도 없다.
+        # 열로 적재한 feed(워크벤치 어댑터 경로)는 여기서 `Bar` 객체를 한 개도 만들지 않는다.
+        columns = feed.columns()
+        instruments = columns.instruments
         keys = [instrument_key(instrument) for instrument in instruments]
         # `instrument_key`는 필드를 ':'로 이어 붙이므로 필드 안에 ':'가 있으면 서로 다른
         # InstrumentId가 같은 key를 낼 수 있다 (예: symbol="A:B"와 venue="KRX:A"). 그러면
@@ -654,27 +642,20 @@ class BacktestEngine:
                     f"makes two instruments share one key)"
                 )
         symbols = [instrument.symbol for instrument in instruments]
-        offsets = [0]
-        for snapshot in snapshots:
-            offsets.append(offsets[-1] + len(snapshot.bars))
-        opens = [bar.open for bar in bars]
-        highs = [bar.high for bar in bars]
-        lows = [bar.low for bar in bars]
-        closes = [bar.close for bar in bars]
-        volumes = [bar.volume for bar in bars]
+        sessions = [str(ts) for ts in feed.sessions]
         runtime.load_feed(
             keys,
             symbols,
             sessions,
-            offsets,
-            instrument_ids,
-            opens,
-            highs,
-            lows,
-            closes,
-            volumes,
+            columns.offsets,
+            columns.instrument_ids,
+            columns.opens,
+            columns.highs,
+            columns.lows,
+            columns.closes,
+            columns.volumes,
         )
-        return instruments, snapshots
+        return instruments
 
     def _on_market(self, run: _Run, snapshot: MarketSnapshot) -> None:
         run.history_store.append(snapshot)

@@ -6,37 +6,43 @@
     "rebalance_every": 5,
     "strategy": "callback",
     "synthetic": true,
-    "repeat": 3,
+    "repeat": 5,
     "warmup": 1,
     "rss_isolated": true
   },
   "cores": {
     "python": {
       "run_seconds_samples": [
-        1.7044225000136066,
-        1.6159840999753214,
-        1.6920469000178855
+        1.7080145000072662,
+        1.7053238000080455,
+        1.8068603000137955,
+        1.839300199993886,
+        2.074795599997742
       ],
       "materialize_seconds_samples": [
-        1.400010660290718e-06,
-        8.00006091594696e-07,
-        9.00006853044033e-07
+        1.00000761449337e-06,
+        1.800013706088066e-06,
+        1.0999792721122503e-06,
+        1.1999800335615873e-06,
+        1.100008375942707e-06
       ],
       "total_seconds_samples": [
-        1.704423900024267,
-        1.615984899981413,
-        1.6920478000247385
+        1.7080155000148807,
+        1.7053256000217516,
+        1.8068613999930676,
+        1.8393013999739196,
+        2.074796700006118
       ],
-      "run_median_seconds": 1.6920469000178855,
-      "materialize_median_seconds": 9.00006853044033e-07,
-      "median_seconds": 1.6920478000247385,
+      "run_median_seconds": 1.8068603000137955,
+      "materialize_median_seconds": 1.100008375942707e-06,
+      "median_seconds": 1.8068613999930676,
       "speedup_vs_python": 1.0,
       "run_speedup_vs_python": 1.0,
       "final_equity": 2321985873.9513392,
       "orders": 22243,
       "fills": 22155,
-      "peak_rss_after_materialize_bytes": 177860608,
-      "process_peak_rss_bytes": 177860608
+      "peak_rss_after_materialize_bytes": 178704384,
+      "process_peak_rss_bytes": 178704384
     }
   }
 }

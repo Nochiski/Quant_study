@@ -306,6 +306,13 @@ for m in place_order register_group open_order_states open_group_states drop_gro
 - [x] 커밋 `refactor(engine): persistent 경로 죽은 코드·규칙 위반 정리` (`a1f872d`).
 - 결과: `tests/test_core_parity.py` 통과 수 205 → 203 (포트폴리오 단독 parity −2, 도메인 예외 매핑 −2, persistent 거절 테스트 +2). 전체 스위트 1200 → 1197 passed / 13 skipped (위 −2, `test_target_tape_strategy.py` 중복 테스트 통합 −1).
 
+### 리뷰 반영 (`cb174e5`)
+
+- [x] FFI 테스트의 `queue_push`·`queue_pop`·`record_append`·`record_extend` 0회 단언은 Rust에 없는 이름이라 공허했다. 삭제하고 삭제 메서드 블랙리스트도 공개 이름 전체 집합 단언으로 바꿨다.
+- [x] 엔진 레벨 parity에 `flip` 시나리오 추가 — 롱 +5에서 한 번의 매도 13주로 −8까지 넘어가 평단이 리셋되는 경로(`test_short_selling` 헬퍼 재사용).
+- [x] `identifiers_are_deterministic`을 드라이버 경로 테스트 `identifier_prefixes_come_from_the_paths_that_mint_them`(driver.rs)으로 대체 — `submit_internal`의 D, 라우터의 O·G, `apply_market_ops`의 F를 실제로 읽는다.
+- 결과: `tests/test_core_parity.py` 203 → 206(`flip` 3파라미터), 전체 1197 → 1200 passed / 13 skipped. Rust 테스트 24개 유지.
+
 ### AC
 
 - 단위·parity: 전체 스위트 통과, `test_promoted_rust_makes_no_per_session_ffi`가 삭제 API 부재를 고정. `grep -rn "PersistentPortfolio" src tests` 0건.
@@ -596,7 +603,7 @@ PR 9까지 반영 후 100종목 tape에서 feed 적재(`_load_persistent_feed` +
 |---|---|---|---|---|
 | 1 | `fix/bench-honest-boundary` | 리뷰 APPROVE·PR 생성 | #123 | Opus APPROVE (A01·A02 반영) |
 | 2 | `fix/driver-failed-lifecycle` | 리뷰 APPROVE·PR 생성 | #124 | Opus APPROVE (권고 3건 반영) |
-| 3 | `refactor/drop-dead-persistent-api` | 구현 완료·리뷰 대기 | | |
+| 3 | `refactor/drop-dead-persistent-api` | 리뷰 APPROVE·반영 완료 | | Opus APPROVE (지적 3건 반영 `cb174e5`) |
 | 4 | `refactor/rust-owns-wire-constants` | 대기 | | |
 | 5 | `refactor/python-sot-context-tape-marker` | 대기 | | |
 | 6 | `perf/materialize-by-kind` | 대기 | | |

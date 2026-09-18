@@ -7,6 +7,14 @@ peak RSS와 raw sample을 기록한다.
 `tape`는 같은 목표를 미리 표로 만든 선언형 전략(`DeclarativeTapeStrategy`)이라 persistent Rust
 코어에서 Python 콜백 없이 완주한다 (워크벤치 TargetTape 경로와 같은 형태).
 
+측정 경계는 `engine.run()`과 결과 조회(`snapshots`/`orders`/`fills`) 둘로 나눠 잰다. rust 코어는
+`BacktestResult`가 lazy라 결과를 읽는 시점에 공개 객체를 만들고 python 코어는 `run()` 안에서 이미
+다 만든다. `run()`만 재면 rust 쪽 비용이 배수에서 빠지므로 `speedup_vs_python`은 두 구간의 합
+(total)을 기준으로 한다.
+
+`--core all`은 프로세스 공유라 RSS가 격리되지 않는다 — 세 코어가 같은 프로세스 peak를 받는다.
+Peak RSS 정본은 `--core <one>` 단독 실행이다.
+
 사용법:
     uv run python scripts/bench_universe.py <원장 디렉토리> --instruments 100 --core python
     uv run python scripts/bench_universe.py <원장 디렉토리> --instruments 100 --core all --profile
@@ -26,6 +34,7 @@ import statistics
 import sys
 import time
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
@@ -54,6 +63,19 @@ from backtest_engine.types.requirements import (
 )
 from backtest_engine.types.strategy import StrategyContext
 from backtest_engine.types.tape import TapeFrame
+
+
+@dataclass(frozen=True)
+class Timing:
+    """한 회차의 구간별 wall time과 그 시점까지의 프로세스 peak RSS."""
+
+    run_seconds: float
+    materialize_seconds: float
+    peak_rss_after_materialize_bytes: int
+
+    @property
+    def total_seconds(self) -> float:
+        return self.run_seconds + self.materialize_seconds
 
 
 def peak_rss_bytes() -> int:
@@ -268,7 +290,7 @@ def main(argv: list[str]) -> int:
         f"repeat={args.repeat} warmup={args.warmup}"
     )
 
-    def run_once(core: str) -> tuple[float, tuple[float, int, int]]:
+    def run_once(core: str) -> tuple[Timing, tuple[float, int, int]]:
         engine = BacktestEngine(
             RunConfig(run_id=f"bench-{core}", initial_cash=1_000_000_000, fee_bps=15),
             core=core,
@@ -283,30 +305,48 @@ def main(argv: list[str]) -> int:
             profiler.enable()
         started = time.perf_counter()
         result = engine.run(strategy, feed)
-        elapsed = time.perf_counter() - started
+        run_seconds = time.perf_counter() - started
+        # 결과 조회를 타이머 안에 넣는다 — rust 코어는 여기서 공개 객체를 만들고 python 코어는
+        # run() 안에서 이미 만들었다. 두 코어를 같은 경계로 재야 배수가 뜻을 가진다.
+        materialize_started = time.perf_counter()
+        snapshots, orders, fills = result.snapshots, result.orders, result.fills
+        materialize_seconds = time.perf_counter() - materialize_started
         if profiler is not None:
             profiler.disable()
             pstats.Stats(profiler).sort_stats("cumulative").print_stats(25)
-        final_equity = result.snapshots[-1].equity if result.snapshots else float("nan")
-        return elapsed, (final_equity, len(result.orders), len(result.fills))
+        final_equity = snapshots[-1].equity if snapshots else float("nan")
+        return (
+            Timing(run_seconds, materialize_seconds, peak_rss_bytes()),
+            (final_equity, len(orders), len(fills)),
+        )
 
     for core in cores:
         for _ in range(args.warmup):
             run_once(core)
 
-    elapsed_by_core: dict[str, list[float]] = {core: [] for core in cores}
+    timings_by_core: dict[str, list[Timing]] = {core: [] for core in cores}
     signature_by_core: dict[str, tuple[float, int, int]] = {}
     for _ in range(args.repeat):
         for core in cores:
-            elapsed, signature = run_once(core)
-            elapsed_by_core[core].append(elapsed)
+            timing, signature = run_once(core)
+            timings_by_core[core].append(timing)
             previous = signature_by_core.setdefault(core, signature)
             if previous != signature:
                 raise RuntimeError(
                     f"non-deterministic result for {core}: {previous} != {signature}"
                 )
 
-    baseline = statistics.median(elapsed_by_core["python"]) if "python" in cores else None
+    def medians(core: str) -> tuple[float, float, float]:
+        timings = timings_by_core[core]
+        return (
+            statistics.median(timing.run_seconds for timing in timings),
+            statistics.median(timing.materialize_seconds for timing in timings),
+            statistics.median(timing.total_seconds for timing in timings),
+        )
+
+    baseline_run, _, baseline_total = medians("python") if "python" in cores else (0.0, 0.0, 0.0)
+    has_baseline = "python" in cores
+    core_payload: dict[str, object] = {}
     payload: dict[str, object] = {
         "workload": {
             "instruments": len(instruments),
@@ -317,31 +357,42 @@ def main(argv: list[str]) -> int:
             "synthetic": args.synthetic,
             "repeat": args.repeat,
             "warmup": args.warmup,
+            # --core all은 한 프로세스라 코어별 RSS가 격리되지 않는다.
+            "rss_isolated": len(cores) == 1,
         },
-        "cores": {},
+        "cores": core_payload,
     }
-    core_payload = payload["cores"]
-    assert isinstance(core_payload, dict)
     for core in cores:
-        samples = elapsed_by_core[core]
-        median = statistics.median(samples)
+        timings = timings_by_core[core]
+        run_median, materialize_median, total_median = medians(core)
         final_equity, orders, fills = signature_by_core[core]
-        speedup = baseline / median if baseline is not None else None
+        speedup = baseline_total / total_median if has_baseline else None
+        run_speedup = baseline_run / run_median if has_baseline else None
         core_payload[core] = {
-            "samples_seconds": samples,
-            "median_seconds": median,
+            "run_seconds_samples": [timing.run_seconds for timing in timings],
+            "materialize_seconds_samples": [timing.materialize_seconds for timing in timings],
+            "total_seconds_samples": [timing.total_seconds for timing in timings],
+            "run_median_seconds": run_median,
+            "materialize_median_seconds": materialize_median,
+            "median_seconds": total_median,
             "speedup_vs_python": speedup,
+            "run_speedup_vs_python": run_speedup,
             "final_equity": final_equity,
             "orders": orders,
             "fills": fills,
+            "peak_rss_after_materialize_bytes": timings[-1].peak_rss_after_materialize_bytes,
             "process_peak_rss_bytes": peak_rss_bytes(),
         }
-        speedup_text = f" speedup={speedup:.3f}x" if speedup is not None else ""
+        speedup_text = (
+            f" speedup={speedup:.3f}x(run {run_speedup:.3f}x)"
+            if speedup is not None and run_speedup is not None
+            else ""
+        )
         print(
-            f"core={core} median={median:.6f}s samples="
-            f"{','.join(f'{sample:.6f}' for sample in samples)}{speedup_text} "
+            f"core={core} run={run_median:.6f}s materialize={materialize_median:.6f}s "
+            f"total={total_median:.6f}s{speedup_text} "
             f"orders={orders} fills={fills} final_equity={final_equity:,.0f} "
-            f"process_peak_rss={peak_rss_bytes() / 1024 / 1024:.1f}MiB"
+            f"peak_rss={timings[-1].peak_rss_after_materialize_bytes / 1024 / 1024:.1f}MiB"
         )
 
     if len(signature_by_core) > 1 and len(set(signature_by_core.values())) != 1:

@@ -105,26 +105,27 @@ struct RouteContext<'a> {
     allow_short: bool,
     order_seq: &'a mut u64,
     group_seq: &'a mut u64,
+    /// key → `portfolio_positions` 위치. 결정 시작 시 한 번 만들어 `held`/`market_value`가
+    /// 목표 종목마다 포지션 전체를 훑지 않도록 한다 (종목 수 제곱 탐색 제거).
+    position_index: HashMap<&'a str, usize>,
     routed_sells: HashMap<String, i64>,
     updates: Vec<RoutedUpdate>,
     groups: Vec<RoutedGroup>,
 }
 
 impl RouteContext<'_> {
+    fn position(&self, key: &str) -> Option<&(String, i64, f64, f64, f64, f64)> {
+        self.position_index
+            .get(key)
+            .map(|index| &self.portfolio_positions[*index])
+    }
+
     fn held(&self, key: &str) -> i64 {
-        self.portfolio_positions
-            .iter()
-            .find(|row| row.0 == key)
-            .map(|row| row.1)
-            .unwrap_or(0)
+        self.position(key).map(|row| row.1).unwrap_or(0)
     }
 
     fn market_value(&self, key: &str) -> f64 {
-        self.portfolio_positions
-            .iter()
-            .find(|row| row.0 == key)
-            .map(|row| row.4)
-            .unwrap_or(0.0)
+        self.position(key).map(|row| row.4).unwrap_or(0.0)
     }
 
     fn open_sell_quantity(&self, key: &str) -> i64 {
@@ -708,6 +709,11 @@ pub(crate) fn route_basic_decision(
         return Ok((Vec::new(), Vec::new(), Vec::new(), None));
     }
     let (_, positions, equity, _) = portfolio.snapshot()?;
+    // 원장 key는 유일하므로 먼저 들어온 항목만 남기는 `find`와 결과가 같다.
+    let mut position_index: HashMap<&str, usize> = HashMap::with_capacity(positions.len());
+    for (index, row) in positions.iter().enumerate() {
+        position_index.entry(row.0.as_str()).or_insert(index);
+    }
     let mut context = RouteContext {
         decision_id,
         portfolio_positions: &positions,
@@ -717,6 +723,7 @@ pub(crate) fn route_basic_decision(
         allow_short,
         order_seq,
         group_seq,
+        position_index,
         routed_sells: HashMap::new(),
         updates: Vec::new(),
         groups: Vec::new(),

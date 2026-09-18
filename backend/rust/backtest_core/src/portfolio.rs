@@ -23,6 +23,9 @@ pub(crate) struct Portfolio {
     cash: f64,
     /// Python dict와 같은 삽입 순서를 유지한다 — 스냅샷 순서와 equity 합산 순서가 여기에 의존한다.
     ledgers: Vec<(String, Ledger)>,
+    /// key → `ledgers` 위치. 체결마다 원장을 선형 탐색하던 `ledger_index`를 O(1)로 만든다.
+    /// 삽입 순서 정본은 `ledgers`이고 이 표는 그 위치만 따라간다.
+    ledger_slots: HashMap<String, usize>,
     marks: HashMap<String, f64>,
     allow_short: bool,
     allow_margin: bool,
@@ -30,12 +33,24 @@ pub(crate) struct Portfolio {
 
 impl Portfolio {
     fn ledger_index(&self, key: &str) -> Option<usize> {
-        self.ledgers.iter().position(|(k, _)| k == key)
+        self.ledger_slots.get(key).copied()
+    }
+
+    fn push_ledger(&mut self, key: &str, ledger: Ledger) {
+        self.ledger_slots
+            .insert(key.to_string(), self.ledgers.len());
+        self.ledgers.push((key.to_string(), ledger));
     }
 
     fn remove_ledger(&mut self, key: &str) {
-        if let Some(index) = self.ledger_index(key) {
+        if let Some(index) = self.ledger_slots.remove(key) {
             self.ledgers.remove(index);
+            // 삭제 지점 뒤 항목이 한 칸씩 당겨진다 — 표를 다시 만들지 않고 위치만 내린다.
+            for slot in self.ledger_slots.values_mut() {
+                if *slot > index {
+                    *slot -= 1;
+                }
+            }
         }
     }
 }
@@ -48,6 +63,7 @@ impl Portfolio {
         Self {
             cash: initial_cash,
             ledgers: Vec::new(),
+            ledger_slots: HashMap::new(),
             marks: HashMap::new(),
             allow_short,
             allow_margin,
@@ -125,13 +141,13 @@ impl Portfolio {
                         average_price: price,
                     };
                 }
-                None => self.ledgers.push((
-                    key.to_string(),
+                None => self.push_ledger(
+                    key,
                     Ledger {
                         quantity: new_quantity,
                         average_price: price,
                     },
-                )),
+                ),
             }
         }
         self.cash = new_cash;
@@ -175,7 +191,7 @@ impl Portfolio {
             };
             match self.ledger_index(key) {
                 Some(index) => self.ledgers[index].1 = ledger,
-                None => self.ledgers.push((key.to_string(), ledger)),
+                None => self.push_ledger(key, ledger),
             }
         }
         self.marks.insert(key.to_string(), settlement_price);

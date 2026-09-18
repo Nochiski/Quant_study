@@ -607,7 +607,7 @@ impl PersistentEngine {
                 native,
             },
         )?;
-        let (orders, updates, error) = match self.route_with_id(&decision_id, decision) {
+        let (orders, updates, error) = match self.route_with_id(&decision_id, &decision) {
             Ok(routed) => routed,
             Err(error) => {
                 self.lifecycle = Lifecycle::Failed;
@@ -635,7 +635,7 @@ impl PersistentEngine {
     fn route_with_id(
         &mut self,
         decision_id: &str,
-        decision: DecisionWire,
+        decision: &DecisionWire,
     ) -> PyResult<(
         Vec<OrderWire>,
         Vec<(String, String, String)>,
@@ -648,7 +648,6 @@ impl PersistentEngine {
         for (key, (symbol, _)) in bars.iter() {
             fallback_symbols.insert(key.clone(), symbol.clone());
         }
-        let decision_for_orders = decision.clone();
         let (orders, updates, groups, error) = persistent_router::route_basic_decision(
             &self.portfolio,
             &mut self.orders,
@@ -668,7 +667,7 @@ impl PersistentEngine {
             .map(|order| {
                 StoredOrder::from_routed(
                     order,
-                    &decision_for_orders,
+                    decision,
                     fallback_symbols.get(&order.1).map(String::as_str),
                     decision_id,
                 )

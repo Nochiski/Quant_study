@@ -669,7 +669,7 @@ pub(crate) fn route_basic_decision(
     group_seq: &mut u64,
     allow_short: bool,
     decision_id: &str,
-    decision: DecisionWire,
+    decision: &DecisionWire,
     bars: HashMap<String, CloseWire>,
 ) -> PyResult<RoutedDecision> {
     if decision.0 != 1 {

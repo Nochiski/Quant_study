@@ -431,9 +431,19 @@ describe("StrategyFormPanel re-edit right after a commit (audit DEFECT-P5X-001)"
       "form",
       { focusEditor: false },
     );
-    // 사용자가 손대지 않은 입력은 여전히 projection 값으로 정렬된다.
+    // 확정한 입력은 다시 pristine이라 다음 projection 값으로 정렬된다.
     rerender(view(MINIMAL.replace("max_name_weight: 0.05", "max_name_weight: 0.3")));
     expect(weight).toHaveValue(0.3);
+    // 한 번도 손대지 않은 다른 입력도 외부 변경(스니펫·소스 편집기·undo)을 따라간다(`draft === seen` 경로).
+    const fee = section("execution").getByRole("spinbutton", named("fee_bps"));
+    expect(fee).toHaveValue(15);
+    rerender(view(MINIMAL.replace("fee_bps: 15.0", "fee_bps: 20.0")));
+    expect(fee).toHaveValue(20);
+    // 예전에 확정했던 문자열을 경유해 치는 중에도(0.2까지 쳤을 때 외부 변경 도착) 되돌리지 않는다.
+    await user.clear(weight);
+    await user.type(weight, "0.2");
+    rerender(view(MINIMAL.replace("max_name_weight: 0.05", "max_name_weight: 0.4")));
+    expect(weight).toHaveValue(0.2);
   });
 });
 

@@ -824,21 +824,24 @@ const TextualControl = ({
     failed: boolean;
   } | null>(null);
   // 트랜잭션이 적용되어 projection 값이 바뀌면 입력을 그 값으로 되돌린다(렌더 중 파생 상태 조정). 단
-  // 사용자가 손대지 않은 draft(직전 projection 값 그대로, 또는 방금 확정에 성공한 값)일 때만이다 — 확정 직후
-  // 150ms 안에 같은 필드를 지우고 다시 치는 중이면 되돌리지 않는다. 되돌리면 지운 값이 되살아나 키 입력이
-  // 뒤에 붙어 `100101` 같은 오값이 확정됐다(Phase 5 감사 DEFECT-P5X-001).
-  // `confirmed`는 마지막으로 확정에 성공한 draft(렌더에서 읽으므로 ref가 아니라 state).
+  // 사용자가 손대지 않은(`pristine`) draft일 때만이다 — 확정 직후 150ms 안에 같은 필드를 지우고 다시 치는
+  // 중이면 되돌리지 않는다. 되돌리면 지운 값이 되살아나 키 입력이 뒤에 붙어 `100101` 같은 오값이 확정됐다
+  // (Phase 5 감사 DEFECT-P5X-001). `pristine`은 입력이 바뀌면 꺼지고, 확정(성공·값 그대로)·Escape·되돌리기로
+  // 켜진다. 값 비교가 아니라 플래그인 이유: 예전에 확정했던 문자열을 경유해 치는 중에도 구분되어야 한다.
   const [seen, setSeen] = useState(committed);
-  const [confirmed, setConfirmed] = useState<string | null>(null);
+  const [pristine, setPristine] = useState(true);
   if (seen !== committed) {
     setSeen(committed);
-    if (draft === seen || draft === confirmed) setDraft(committed);
+    if (pristine) setDraft(committed);
   }
   const { control } = field;
   const submit = (explicit: boolean): void => {
     // 값을 되돌리거나 다시 확정하면 이전 무효 안내는 사라진다(DEFECT-P402-003).
     onValid();
-    if (draft === committed) return;
+    if (draft === committed) {
+      setPristine(true);
+      return;
+    }
     const last = submitted.current;
     if (
       last !== null &&
@@ -855,7 +858,7 @@ const TextualControl = ({
     submitted.current = { draft, committed, failed: false };
     const applied = onCommit(parsed.value) !== false;
     if (!applied) submitted.current = { draft, committed, failed: true };
-    setConfirmed(applied ? draft : null);
+    setPristine(applied);
   };
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
     if (event.key === "Enter") {
@@ -864,6 +867,7 @@ const TextualControl = ({
     } else if (event.key === "Escape") {
       event.preventDefault();
       setDraft(committed);
+      setPristine(true);
     }
   };
   const numeric = control.kind === "number";
@@ -879,7 +883,10 @@ const TextualControl = ({
       placeholder={
         placeholderValue === undefined ? undefined : draftOf(placeholderValue)
       }
-      onChange={(event) => setDraft(event.target.value)}
+      onChange={(event) => {
+        setDraft(event.target.value);
+        setPristine(false);
+      }}
       onBlur={() => submit(false)}
       onKeyDown={onKeyDown}
     />

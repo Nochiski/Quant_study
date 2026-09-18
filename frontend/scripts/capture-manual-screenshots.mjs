@@ -205,6 +205,11 @@ try {
   await page
     .getByRole("combobox", { name: "실행 core" })
     .selectOption("python");
+  // 6절 표의 값을 먼저 채우고 초기 자본만 0으로 둔다 — 실패 화면(08)도 표와 같은 벤치마크를 보여야 한다(#148 리뷰).
+  await page
+    .getByRole("textbox", { name: "벤치마크 종목 ID" })
+    .fill("sec-005930-1");
+  await page.getByRole("spinbutton", { name: "연환산 거래일" }).fill("252");
   const initialCash = page.getByRole("spinbutton", { name: "초기 자본 (KRW)" });
   await initialCash.fill("0");
   const rejectedRun = page.waitForResponse(
@@ -239,10 +244,6 @@ try {
   await capture(page, "08-backtest-error.png");
 
   await initialCash.fill("100000000");
-  await page
-    .getByRole("textbox", { name: "벤치마크 종목 ID" })
-    .fill("sec-005930-1");
-  await page.getByRole("spinbutton", { name: "연환산 거래일" }).fill("252");
   await expect(page.getByText("준비됨", { exact: true })).toBeVisible();
   await settingsToggle.click();
   const acceptedRun = page.waitForResponse(

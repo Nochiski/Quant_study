@@ -26,7 +26,10 @@ from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
 
 from ._models import StrategyIdentity, StrategySpec
 
-SUPPORTED_SCHEMA_VERSIONS: tuple[str, ...] = ("1.1",)
+# 새 문서로 받는 유일한 버전. 1.0 문서·저장 row는 `_upgrade.py`의 변환을 거쳐서만 들어온다
+# (spec D2·D3).
+CURRENT_SCHEMA_VERSION = "1.1"
+SUPPORTED_SCHEMA_VERSIONS: tuple[str, ...] = (CURRENT_SCHEMA_VERSION,)
 
 # reason: sentinel shared by every hydrate branch; the walker is generic over dataclass hints,
 # so its intermediate values are `Any` until the top-level isinstance(StrategySpec) check.

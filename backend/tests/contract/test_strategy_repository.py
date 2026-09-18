@@ -225,7 +225,7 @@ def test_sqlite_rejects_a_mismatched_document_envelope_before_writing(tmp_path: 
         source=RevisionSource(SourceFormat.YAML, changed, source_hash_of(changed)),
     )
 
-    with pytest.raises(StrategyRepositoryStorageError, match="source and spec disagree"):
+    with pytest.raises(StrategyRepositoryStorageError, match="cannot be persisted"):
         repository.add(mismatched)
     assert repository.list_strategies(PageRequest()).total == 0
 

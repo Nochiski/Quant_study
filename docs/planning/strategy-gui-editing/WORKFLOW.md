@@ -314,8 +314,9 @@ saved-reference backtest를 거부한다.
 
 **Acceptance**
 
-- `upgrade_document_1_0(yaml.safe_load(quality_momentum.v1_0.yaml)) == yaml.safe_load(quality_momentum.yaml)`
-  (tree 동일). 변환 항목: schema_version, `factors.factors` 평탄화, 세 필드 제거,
+- `upgrade_document_1_0(yaml.safe_load(quality_momentum.v1_0.yaml)) == {**yaml.safe_load(quality_momentum.yaml), "signal": {}}`
+  (제거된 `signal.method` 뒤에 빈 `signal` mapping이 남는다: 변환은 키를 지우지 않는다). 같은 hash.
+  변환 항목: schema_version, `factors.factors` 평탄화, 세 필드 제거,
   `unary rank/zscore/winsorize` → `cross_sectional`, `unary neutralize` → `cross_sectional demean`,
   그 외 불변(기본값을 채우지 않는다).
 - 1.0이 아닌 문서에 호출하면 `ValueError`.
@@ -440,6 +441,9 @@ predicate가 선언에서 파생됨(행마다 `condition`으로 재계산한 결
 - 클릭 → `POST /strategy-documents/upgrade`(TanStack mutation) → 응답 source를
   `CodeEditorHandle.setText`로 적용(undo 1단계) → 문서가 dirty·1.1 compile 흐름.
 - 실패(422 drift/not_upgradeable/네트워크)는 배너 안 오류 문구, source 불변.
+- legacy_json 동결 row(`generated: true`, `requires_upgrade: true`)는 generated source가 이미 1.1이라
+  업그레이드 endpoint를 부르지 않는다. 배너는 "새 revision으로 저장"만 제안한다(P1-03 리뷰 잔여 위험 1).
+- 목록·history 화면은 `StrategySummary.requires_upgrade`·`RevisionSummary.requires_upgrade`로 동결 표시.
 - revision page의 saved reference backtest가 422 `strategy_revision_requires_upgrade`를 받으면
   같은 배너로 안내(run controls는 disabled + 이유).
 - `workbench.workflow.spec.ts`: 1.1 fixture로 갱신 + 시나리오 "1.0 revision 열기 → 업그레이드 →

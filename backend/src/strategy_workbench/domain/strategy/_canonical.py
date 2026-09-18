@@ -83,6 +83,15 @@ def _json_default(value: object) -> str:
     raise TypeError(f"unsupported canonical value — type={type(value).__name__}")
 
 
+def canonical_json_spec_hash(canonical_json: str) -> str:
+    """ADR D3 hash of already-canonical JSON text: sha256 of its UTF-8 bytes.
+
+    The only place the algorithm lives. `strategy_spec_hash` feeds it the current model's
+    canonical text; a stored row from a retired schema version feeds it the exact bytes it
+    stored, since that version's model no longer exists to re-canonicalise.
+    """
+    return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
+
+
 def strategy_spec_hash(spec: StrategySpec) -> str:
-    encoded = canonical_strategy_json(spec).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    return canonical_json_spec_hash(canonical_strategy_json(spec))

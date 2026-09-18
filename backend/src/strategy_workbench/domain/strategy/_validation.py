@@ -18,6 +18,7 @@ from ._constraints import (
     STRATEGY_SCALAR_CONSTRAINTS,
     resolve_scalar,
 )
+from ._hydrate import SUPPORTED_SCHEMA_VERSIONS
 from ._models import (
     ChoiceParameter,
     FloatParameter,
@@ -138,6 +139,18 @@ def validate_strategy(spec: StrategySpec) -> StrategyValidation:
         for path, value in _numeric_leaves(spec)
         if path not in bounded_paths and not math.isfinite(value)
     )
+    if spec.identity.schema_version not in SUPPORTED_SCHEMA_VERSIONS:
+        # 문서 경로는 envelope가 현재 버전을 넣으므로 여기 오지 않는다. JSON spec API가 identity를
+        # 직접 받을 때 은퇴한 버전을 저장·실행하려는 요청을 저장소 무결성 오류(500)가 아니라
+        # 검증 오류로 막는다.
+        issues.append(
+            semantic_issue(
+                "strategy.schema_version.unsupported",
+                "identity.schema_version",
+                "지원하지 않는 schema_version입니다: "
+                f"got={spec.identity.schema_version!r} supported={SUPPORTED_SCHEMA_VERSIONS}",
+            )
+        )
     if not spec.title.strip():
         issues.append(semantic_issue("strategy.title.empty", "title", "전략 이름을 입력하세요."))
     if spec.data.start > spec.data.end:

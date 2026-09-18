@@ -21,8 +21,15 @@ class BacktestRunInvalidDetail:
     message: str
 
 
+@dataclass(frozen=True)
+class BacktestStrategyRequiresUpgradeDetail:
+    code: Literal["backtest.strategy.requires_upgrade"]
+    message: str
+
+
 BacktestUnprocessableDetail: TypeAlias = Annotated[
     BacktestRunInvalidDetail
+    | BacktestStrategyRequiresUpgradeDetail
     | PortfolioStrategyInvalidDetail
     | PortfolioDataUnavailableDetail
     | PortfolioRawObservationInvalidDetail,

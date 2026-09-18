@@ -567,6 +567,9 @@ describe("professional keyboard workflow (P6-03)", () => {
       const history = mount(route);
       const view = await editor();
       replaceText(view, editedSource);
+      // 세 게이트 케이스가 같은 순서: 편집한 원문의 compile이 도착한 뒤 게이트를 본다(#150 재검토 P2-8 —
+      // warm 실행에서도 이 케이스가 실패했다).
+      await waitFor(() => expect(compiledSources).toContain(editedSource));
       await waitFor(() => expect(saveButton()).toBeEnabled());
 
       fireEvent.keyDown(window, { key: "s", ctrlKey: true });
@@ -578,9 +581,11 @@ describe("professional keyboard workflow (P6-03)", () => {
 
   it.each(WORKFLOW_ROUTES)(
     "routes Ctrl+Shift+Enter through the same Backtest gate on $name",
-    async ({ route, backtestSource }) => {
+    async ({ route, initialSource, backtestSource }) => {
       const history = mount(route);
       await editor();
+      // Validate 케이스와 같은 순서: compile 결과가 도착한 뒤 게이트를 본다(cold 실행 1회 flake, #150 리뷰 P1-2).
+      await waitFor(() => expect(compiledSources).toContain(initialSource));
       const run = within(
         globalThis.document.querySelector(".ide__editor-actions")!,
       ).getByRole("button", { name: "백테스트" });

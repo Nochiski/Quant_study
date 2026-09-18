@@ -6,8 +6,8 @@ current_phase: complete
 current_pr: none
 active_prs: []
 parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02, P1-06, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05, P5-01, P5-02, P5-03]
-last_updated: 2026-09-19T00:12:00+09:00
-last_updated: 2026-09-19T00:12:00+09:00
+last_updated: 2026-09-19T01:52:37+09:00
+last_updated: 2026-09-19T01:52:37+09:00
 planned_prs: 19
 merged_prs: 19
 approved_prs: 19
@@ -30,7 +30,7 @@ progress_percent: 100
 | Active PR | none |
 | Progress | `19 / 19 merged (100%)` |
 | Approved | `19 / 19` |
-| Aggregated at | `2026-09-19 00:12 KST` |
+| Aggregated at | `2026-09-19 01:52 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -241,13 +241,15 @@ Phase exit:
 | 15 | ~~route 테스트(`document-routes.test.tsx`)가 전체 실행·CI에서 부하 flake(#143 CI 재실행, #144 리뷰 1회차, 로컬 반복) — 원인은 54파일 병렬의 워커 경합(단독 65초·케이스당 1초)이 전역 비동기 예산 5초를 넘기는 것(케이스 timeout 15초는 먼저 만료되지 않음, #149 리뷰 P1-1)~~ → [#149](https://github.com/Nochiski/Quant_study/pull/149) 완화(예산 10초; 근본은 19행) | 예산 상향(완화) → 파일 분할·워커 격리(근본) | 소 |
 | 16 | ~~저장·revise 422(`strategy_document.invalid`)의 detail에 `message`가 없어 `use-save-document.ts`가 빈 detail만 보여 준다 — #147이 선언한 typed 응답으로 `diagnostics` 첫 항목을 안내(#147 리뷰 관찰)~~ → [#149](https://github.com/Nochiski/Quant_study/pull/149) | 저장 실패 사유가 화면에 안 보임 | 소 |
 | 17 | ~~trace 422·409 코드 중 `trace.request.invalid`·`trace.engine.incompatible`·`trace.capability.unsupported`·`trace.strategy.stale`는 아직 backend 원문 노출 — `trace.error.<code>` 발판 위에 키만 추가~~ → [#149](https://github.com/Nochiski/Quant_study/pull/149) | 위험 5b 범위 밖 잔여 | 소 |
-| 18 | flow 표기 컨테이너에서 삽입은 되지만(`#149`) `remove`는 여전히 block 앵커를 요구한다 — 삽입/삭제 비대칭(#149 리뷰 P2-2) | 같은 `replaceFlowContainer` 경로로 삭제도 열기 | 소 |
-| 19 | route 테스트 부하 flake의 근본은 54파일 병렬의 워커 경합(단독 65초·케이스당 1초) — #149는 전역 비동기 예산을 10초로 올려 완화만 했다. 파일 분할 또는 워커 격리(vitest projects)로 근본 해결 | #149 리뷰 P1-1 | 중 |
+| 18 | ~~flow 표기 컨테이너에서 삽입은 되지만(`#149`) `remove`는 여전히 block 앵커를 요구한다 — 삽입/삭제 비대칭(#149 리뷰 P2-2)~~ → [#150](https://github.com/Nochiski/Quant_study/pull/150) | 같은 `replaceFlowContainer` 경로로 삭제도 열기 | 소 |
+| 19 | ~~route 테스트 부하 flake의 근본은 54파일 병렬의 워커 경합(단독 65초·케이스당 1초) — #149는 전역 비동기 예산을 10초로 올려 완화만 했다. 파일 분할 또는 워커 격리(vitest projects)로 근본 해결~~ → [#150](https://github.com/Nochiski/Quant_study/pull/150) 워커 격리(`projects` + `groupOrder`)로 경합은 제거. 단, 격리 뒤에도 cold 실행 1회에서 백테스트 게이트 케이스가 실패해(리뷰 7회 중 1회) 원인이 경합만은 아니다 → 20행 | #149 리뷰 P1-1, #150 리뷰 P1-2 | 중 |
+| 20 | route 테스트 잔여 flake — 격리(`routes` 프로젝트) 뒤에도 #150 리뷰 14회 중 cold 1회(백테스트 게이트)·warm 1회(Ctrl+S 저장 게이트) 실패. #150이 세 게이트 케이스 모두 compile 도착을 먼저 기다리게 했으나 재현 조건은 미고정. 전체 시간은 직렬화로 98초 → 104~177초 | 실패 시 단언·DOM 스냅샷으로 원인 격리(케이스 timeout 15초 > 예산 10초라 이제 보인다) | 소 |
 
 ## 변경 기록
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-18 KST | Claude | backlog 18·19 처리 PR [#150](https://github.com/Nochiski/Quant_study/pull/150) `fix/gui-backlog-c2`(main 기반): `planRemove`도 flow 부모면 `replaceFlowContainer`(빈 결과는 `{}`/`[]` 인라인), vitest `projects`(unit / routes, `groupOrder: 1`)로 route 파일을 나머지 뒤에 혼자 실행. Vitest 626/54·eslint·tsc·Playwright 19/19. 리뷰 `review_gui_backlog_150` 1차 REQUEST_CHANGES(P1: SoT에 삭제·빈 결과 규칙 누락, backlog 19를 근본 해결로 닫음 — 격리 뒤에도 cold 1회 실패·전체 시간 증가; P2: 값 줄 앞 자기 줄 주석 소실, 루트 `{}`와 주석 불일치, docstring, property 생성기 flow 미커버, exclude 정본 중복, `ROUTE_TESTS` 문자열) → 후속: SoT 문장, 값 줄부터 교체(자기 줄 주석 보존), 주석·docstring, flow property test 상설, `EXCLUDE`·`ISOLATED_TESTS`, 백테스트 게이트 케이스에 compile 대기, 19 재서술·20 신설 → 재검토 APPROVE(P2-1 생성기 4000회 위반 0; 신규 P2-7 생성기가 다음 줄 flow 표본을 못 만듦 → 컨테이너 앞 주석 보존, P2-8 Ctrl+S 케이스에도 compile 대기, 관측: 입력 지연 예산 테스트도 병렬 flake → `ISOLATED_TESTS`에 추가) | 머지 뒤 backlog |
 | 2026-09-18 KST | Claude | backlog 14·15·16·17 처리 PR [#149](https://github.com/Nochiski/Quant_study/pull/149) `fix/gui-backlog-c1`(main 기반): flow 컨테이너 삽입은 가장 바깥 flow부터 block으로(`topmostFlowAncestor`·`replaceFlowContainer`, `detectIndentUnit` flow 키 제외), route 테스트 `asyncUtilTimeout` 5초, `invalidDocumentSummary`(첫 error 진단 → detail), trace 코드 6종 번역(`{detail}` 슬롯). Vitest 622/54·eslint·tsc·Playwright 19/19(stale `backtest_core` 재빌드 뒤). 리뷰 `review_gui_backlog_149` 1차 REQUEST_CHANGES(P1: 파일 안 `asyncUtilTimeout` 5초는 test-setup이 이미 5초라 no-op·flake 재현; P2: `trace.engine.incompatible`은 detail에 message가 없어 디버그 문자열 노출, docstring 모순, flow 뒤 줄 끝 주석 재부착, 비-2칸 문서 출력 변화 미기록, flow 삭제 비대칭 미기록) → 후속: 단일 owner `test-setup.ts` 예산 10초, incompatible 고정 문장 + 빈 슬롯 처리, docstring, 줄 끝 주석을 `key:`/`-` 줄에 유지, 5칸 문서 테스트, backlog 18·19 → 재검토 APPROVE(P2-4 property test 4000회 주석 손실 0; 새 P2-7: 키 줄 주석 뒤 다음 줄 flow 값이면 키 줄 주석 소실 → 후속에서 값 줄부터 교체, 전역 `testTimeout` 15초를 `vite.config.ts`로) | 머지 뒤 backlog |
 | 2026-09-18 KST | Claude | backlog 8 처리 PR [#148](https://github.com/Nochiski/Quant_study/pull/148) `docs/gui-backlog-b4`(main 기반): 캡처 스크립트에 13(Form 탭)·14(그래프 편집 영역) 추가, 14장 전량 재촬영(1.1 화면), 1절 임시 캡션 제거. 리뷰 `review_gui_backlog_148` APPROVE(P2 3: 08 벤치마크가 표와 불일치, `노드 종류`가 화면에 없음, 그림이 불릿 목록을 쪼갬) → 후속에서 스크립트 순서·문구·배치 고치고 14장 재촬영 | 머지 뒤 backlog |
 | 2026-09-18 KST | Claude | backlog 10·11 처리 PR [#147](https://github.com/Nochiski/Quant_study/pull/147) `fix/gui-backlog-b5`(main 기반): create·revise 422를 `StrategyDocumentSave422Response`로 선언(openapi.json·SDK 재생성), `traceErrorMessage`가 `trace.error.<code>` 번역(위험 5b), 매뉴얼 1절 샘플 compile 게이트(#143 리뷰 권고), P2X-004는 P2-03 테스트 118-07로 이미 종결 확인, P2X-005는 "문장은 소비자별 소유"로 SoT 종결. backend pytest 1330·ruff·pyright·frontend 게이트 초록(route 테스트 부하 flake 1건 단독 재통과). 리뷰 `review_gui_backlog_147` APPROVE(P2 3: SoT 문장 경계, 422 description이 warning도 422로 읽힘, 매뉴얼 게이트가 문서 첫 yaml에 결속; NIT docstring) → 후속 `9968d3d`로 전부 반영, backlog 16·17 추가 | 머지 뒤 backlog |

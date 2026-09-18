@@ -677,6 +677,58 @@ describe("flow containers (backlog 14)", () => {
     expect(planned.edit.nextSource).toBe(
       "risk: # 원래\n  # 뒤\n  max_name_weight: 0.05\n  gross_exposure: 1\n",
     );
+    // 키 줄과 값 줄 사이의 자기 줄 주석도 남는다(#150 리뷰 P2-1).
+    const between = "risk:\n  # 사이\n  { max_name_weight: 0.05 }\n";
+    const kept = planSourceOperation(between, "yaml", {
+      kind: "remove",
+      pointer: "/risk/max_name_weight",
+    });
+    if (kept.status !== "ok") throw new Error(kept.reason);
+    expect(kept.edit.nextSource).toBe("risk:\n  # 사이\n  {}\n");
+    const added = planSourceOperation(between, "yaml", {
+      kind: "insert-key",
+      parentPointer: "/risk",
+      key: "g",
+      value: 1,
+    });
+    if (added.status !== "ok") throw new Error(added.reason);
+    expect(added.edit.nextSource).toBe("risk:\n  # 사이\n  max_name_weight: 0.05\n  g: 1\n");
+  });
+
+  it("removes from a flow container by rewriting it as block, and leaves `{}`/`[]` when it empties (backlog 18)", () => {
+    const flow = 'schema_version: "1.1"\nrisk: { max_name_weight: 0.05, gross_exposure: 1 } # 한도\n';
+    const removed = planSourceOperation(flow, "yaml", {
+      kind: "remove",
+      pointer: "/risk/gross_exposure",
+    });
+    if (removed.status !== "ok") throw new Error(removed.reason);
+    expect(removed.edit.nextSource).toBe(
+      'schema_version: "1.1"\nrisk: # 한도\n  max_name_weight: 0.05\n',
+    );
+    const last = planSourceOperation(
+      'schema_version: "1.1"\nrisk: { max_name_weight: 0.05 } # 한도\n',
+      "yaml",
+      { kind: "remove", pointer: "/risk/max_name_weight" },
+    );
+    if (last.status !== "ok") throw new Error(last.reason);
+    expect(last.edit.nextSource).toBe('schema_version: "1.1"\nrisk: {} # 한도\n');
+    // 시퀀스 항목 안의 중첩 flow: 노드 하나를 지우면 팩터 항목 전체가 block으로 열린다.
+    const nested =
+      'factors:\n  - { factor_id: m, graph: { nodes: [{ kind: field, node_id: a }, { kind: field, node_id: b }], output_node_id: a } }\n';
+    const node = planSourceOperation(nested, "yaml", {
+      kind: "remove",
+      pointer: "/factors/0/graph/nodes/1",
+    });
+    if (node.status !== "ok") throw new Error(node.reason);
+    const next = parseSource(node.edit.nextSource, "yaml");
+    if (next.status !== "ok") throw new Error("must parse");
+    expect(
+      (next.tree.factors as { graph: { nodes: { node_id: string }[] } }[])[0]!.graph.nodes.map((n) => n.node_id),
+    ).toEqual(["a"]);
+    expect(node.edit.nextSource).not.toContain("{");
+    const emptied = planSourceOperation("l: [x]\n", "yaml", { kind: "remove", pointer: "/l/0" });
+    if (emptied.status !== "ok") throw new Error(emptied.reason);
+    expect(emptied.edit.nextSource).toBe("l: []\n");
   });
 
   it("expands an empty item container with the document's own indent unit (#149 P2-5)", () => {

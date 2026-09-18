@@ -6,6 +6,7 @@ current_phase: complete
 current_pr: none
 active_prs: []
 parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02, P1-06, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05, P5-01, P5-02, P5-03]
+last_updated: 2026-09-18T21:32:49+09:00
 last_updated: 2026-09-18T20:41:32+09:00
 last_updated: 2026-09-18T20:41:39+09:00
 planned_prs: 19
@@ -30,7 +31,7 @@ progress_percent: 100
 | Active PR | none |
 | Progress | `19 / 19 merged (100%)` |
 | Approved | `19 / 19` |
-| Aggregated at | `2026-09-18 20:41 KST` |
+| Aggregated at | `2026-09-18 21:32 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -237,6 +238,8 @@ Phase exit:
 | 11 | Phase 2 이월 — DEFECT-P2X-004(사전 누락 시 침묵), -005(적용 조건 문장 이중 소유) | 진단 wire 계약 변경 | 중 |
 | 12 | ~~`database/` ruff 설정 부재 → `--config backend/pyproject.toml` 명시를 WORKFLOW에~~ → [#143](https://github.com/Nochiski/Quant_study/pull/143) | P5-03 부수 권고 | 문서 |
 | 13 | ~~빈 팩터의 `output_node_id` 자동 지정 비대칭~~ → [#144](https://github.com/Nochiski/Quant_study/pull/144) | 동작은 맞고 compile이 안내 | 소 |
+| 14 | flow mapping(`{ … }` 한 줄)으로 쓴 팩터·그래프는 `insert-item`부터 계획이 실패하고(base 한계, PLAN 기록), 다중 연산 트랜잭션(`planSourceOperations`)의 all-or-nothing이 그 한계를 노드 추가 같은 주 동작으로 전파한다(#144 3차 리뷰 관찰) | flow 컨테이너를 block으로 여는 연산 또는 안내 문구 | 중 |
+| 15 | route 테스트(`document-routes.test.tsx`)가 전체 실행·CI에서 부하 flake(#143 CI 재실행, #144 리뷰 1회차, 로컬 반복) — 파일 timeout 15s로도 남는 한 틱 지연 | 케이스별 `findBy*`/`waitFor` 정리 또는 워커 격리 | 소 |
 
 ## 변경 기록
 

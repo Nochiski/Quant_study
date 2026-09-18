@@ -94,7 +94,7 @@ progress_percent: 0
 | Non-goals | Form/Graph 편집(P4/P5), JSON 편집, 훅의 parse 결과 재사용(호출은 확정 시점만) |
 | Branch/worktree | `feat/gui-p3-02-source-transactions-hook` (base `feat/gui-p3-01-source-transactions` `97409f1`) |
 | Base SHA | `97409f1` |
-| Head SHA | `d13830c` (diff freeze) |
+| Head SHA | `96d6b3b` (review 후속; diff freeze `d13830c`) |
 | Diff stat | frontend model 4(신규 훅 1)·index·테스트 4(신규 1), backend 어댑터 1·테스트 1, WORKFLOW·SoT; 16 files +1019/−231 |
 | Focused tests | use-source-transactions 5 · source-transactions 15 · property 1(3000회 통과) · canonical-snippets 11 · snippet-insertion 3 · contract-inspector 22 |
 | Full gate | Vitest 503 passed(45 files) · typecheck · lint · build · e2e chromium-workflow 5 passed · backend pytest 1,316 passed · ruff · pyright 0 |
@@ -137,7 +137,7 @@ Phase exit:
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [x] | `P3-01` | `source-transactions.ts` 원시 연산 4종, preflight, property test | P2-01 | `APPROVED` | [#119](https://github.com/Nochiski/Quant_study/pull/119) · `review_gui_p3_01` 2차 APPROVE(`51301cc`) · WORKFLOW 한 줄 `fb8a1b4` |
-| [ ] | `P3-02` | `useSourceTransactions`, 스니펫 삽입 재구성 | P3-01 | `IN_REVIEW` | [#120](https://github.com/Nochiski/Quant_study/pull/120) · `review_gui_p3_02` 배정 · diff freeze `d13830c` |
+| [ ] | `P3-02` | `useSourceTransactions`, 스니펫 삽입 재구성 | P3-01 | `IN_REVIEW` | [#120](https://github.com/Nochiski/Quant_study/pull/120) · `review_gui_p3_02` 1차 REQUEST_CHANGES(P1 2·P2 4) → 후속 `96d6b3b` 재검토 중 |
 
 Phase exit:
 
@@ -211,6 +211,7 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-18 KST | Claude | `review_gui_p3_02` 1차 REQUEST_CHANGES(P1-1 스니펫이 커서 줄이 아니라 앞 형제 뒤에 들어가 선행 주석·빈 줄 위로 이동, P1-2 설계 결정 5의 "property가 P2-R1 회귀를 잡는다"가 생성기 밀도 탓에 거짓(6000 샘플 0건); P2-1 insert-key/insert-item의 대상 위 주석 규칙 상반 + 코드 주석 반대, P2-2 부모 접힘 시 `key: # 메모` 줄 끝 주석 소실, P2-3 `applyToTree` 값 없는 부모 + `before` 비대칭, P2-4 nit 4) → 후속 `96d6b3b`: `options.anchor`(형제 구간 안의 커서 줄 자리)로 스니펫 위치 복원 + 테스트 5, 삽입 앵커를 키·항목 공통 "앞 형제 내용 줄 끝 뒤"로 통일, 생성기 줄별 1/3 주석(버그 되돌리면 58회째 반례 실측), 부모 줄 끝 주석 보존(`{}`/`[]` 다음 줄), `applyToTree` before 거부, `run` docstring·타입 가드·barrel 축소, WORKFLOW·PR 본문 정정 → 재검토 요청. 잔여 위험 기록: 확정 시점 호출 규칙은 호출자 규율(P4-02는 텍스트류 blur/Enter·선택류 변경 즉시로 설계, keystroke 호출 없음), `onEditorReady`가 setState(인라인 람다 호출자 주의), 주석 고아 보존, property는 줄 끝 주석·따옴표 키·flow 내부 미생성 | 13.5 재검토 |
 | 2026-09-18 KST | Claude | P3-02 구현·self-check(훅 5·단위 15·property 3000회·Vitest 503·e2e 5) → diff freeze `d13830c`, stacked PR #120(base P3-01), `review_gui_p3_02`(opus) 배정 → IN_REVIEW. 결정: 훅은 `apply(op)` 외 `run(planner)`(스니펫은 커서 줄 부분 키 제거+삽입을 undo 한 번으로), 스니펫 중복 판정은 원문 전체로 먼저, `insert-key.before`는 앞 형제 내용 줄 끝 뒤(주석 소유 유지), 값 없는 `key:`·빈 문서는 삽입 부모로 허용(P2-6 해소), property `remove` 관용은 주석 소유자 규칙(P2-R2)로 대체하고 그 규칙으로 `- - x` 갈래를 코드 수정(P2-R1 대안 2). cleanup 커밋 2건(P2-03 nit 118-10/11/13, P1-06 nit 13/14) | 13.3 diff freeze |
 | 2026-09-18 KST | Claude | `review_gui_p3_01` 2차 APPROVE(P1-1·P1-2 해소, P2 9 전부 해소, 회귀 점검·`FC_NUM_RUNS=5000` 통과) → P3-01 APPROVED. 머지 전 요청 1건(WORKFLOW 알려진 제한에 P2-R1 예외 한 줄) `fb8a1b4` 반영. P3-02로 이월: P2-R2 property `remove` 관용 절 좁히기(pointer 자기 줄 범위)·multiset 비교, `const escape` 별칭 제거, 빈 `key:` 부모 확장(P2-6; 스니펫 재구성이 필요로 함), 훅의 parse 2회 비용은 확정 시점 호출로 한정 | 13.5 판정 |
 | 2026-09-18 KST | Claude | `review_gui_p3_01` 1차 REQUEST_CHANGES(P1-1 block scalar range가 줄바꿈 포함 → 경계 한 줄 초과·silent 주석 삭제, P1-2 시퀀스 항목·dash 줄 첫 키 삭제가 다음 주석 삭제; P2 9: property 관용 절·항등식 단언·생성기 커버리지(주석·빈 컨테이너·block scalar 0건), escape 중복, flow 컬렉션 미지원 사유, 빈 `key:` 부모, `- []` 후행 공백, EOL 혼재) → 후속 `51301cc`(전부 조치, P2-5·6은 WORKFLOW 제한 명기) → 재검토 요청. 잔여 위험 기록: 연산 1회 = parse 2회(67KB 문서 ~720ms) → P3-02 훅에서 parse 결과 재사용/디바운스 설계; 스니펫(커서 줄)·트랜잭션(문서) 들여쓰기 규칙 이원화는 P3-02 스니펫 재구성으로 해소, Phase 3 exit 점검 항목 | 13.5 재검토 |

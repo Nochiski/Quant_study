@@ -84,12 +84,14 @@ impl NotifyPayload {
 }
 
 /// 큐 payload. token은 `queued` Vec의 index다.
+///
+/// 세션은 큐 엔트리의 정렬 키가 단일 진실 원천이라 payload에 담지 않는다.
 #[derive(Clone, Debug)]
 pub(crate) enum Queued {
-    Market(usize),
+    Market,
     Fill(FillWire),
     Notify(NotifyPayload),
-    SessionClose(usize),
+    SessionClose,
     Order(OrderWire),
 }
 
@@ -125,11 +127,13 @@ impl PersistentEngine {
         self.event_queue.push(session as i64, priority, token)
     }
 
-    fn pop(&mut self) -> PyResult<Option<Queued>> {
+    /// 큐에서 `(세션, payload)`를 꺼낸다. 세션은 `push`가 정렬 키로 넣은 값 그대로다.
+    fn pop(&mut self) -> PyResult<Option<(usize, Queued)>> {
         if self.event_queue.len() == 0 {
             return Ok(None);
         }
-        let token = self.event_queue.pop()? as usize;
+        let (session, token) = self.event_queue.pop()?;
+        let token = token as usize;
         let payload = self
             .queued
             .get_mut(token)
@@ -137,7 +141,7 @@ impl PersistentEngine {
             .ok_or_else(|| {
                 PyValueError::new_err(format!("queue token has no payload — token={token}"))
             })?;
-        Ok(Some(payload))
+        Ok(Some((session as usize, payload)))
     }
 
     fn record(&mut self, session: usize, payload: RecordPayload) -> PyResult<()> {
@@ -260,13 +264,6 @@ impl PersistentEngine {
         Ok(self.feed_ref()?.current_session_count())
     }
 
-    fn current_session(&self) -> PyResult<usize> {
-        let count = self.session_count()?;
-        count.checked_sub(1).ok_or_else(|| {
-            PyValueError::new_err("persistent feed has no current session — process market first")
-        })
-    }
-
     /// 다음 전략 콜백까지 세션을 진행한다. 콜백이 더 없으면 `None`.
     pub(crate) fn drive_internal(&mut self) -> PyResult<Option<CallbackFrame>> {
         match self.lifecycle {
@@ -314,21 +311,23 @@ impl PersistentEngine {
             // Python `_execute`처럼 모든 세션의 MARKET 이벤트를 먼저 큐에 싣는다.
             let sessions = self.feed_ref()?.session_len();
             for session in 0..sessions {
-                self.push(session, PRIORITY_MARKET, Queued::Market(session))?;
+                self.push(session, PRIORITY_MARKET, Queued::Market)?;
             }
             self.started = true;
             self.lifecycle = Lifecycle::Running;
         }
-        while let Some(event) = self.pop()? {
+        while let Some((session, event)) = self.pop()? {
             match event {
-                Queued::Market(session) => self.on_market(session)?,
+                Queued::Market => self.on_market(session)?,
                 Queued::Fill(fill) => {
-                    let session = self.current_session()?;
                     self.record(session, RecordPayload::Fill(fill))?;
                 }
                 Queued::Notify(payload) => {
-                    let session = self.current_session()?;
-                    // `current_session`이 곧 session_count − 1이다 — 피드에 같은 값을 다시 묻지 않는다.
+                    // 큐 엔트리의 세션이 곧 예전 `current_session()`(= session_count − 1)이다.
+                    // MARKET은 세션 안에서 우선순위가 가장 낮아 같은 세션 키의 다른 이벤트보다
+                    // 먼저 팝되고 피드 커서를 그 세션으로 옮긴다. 파생 이벤트는 모두 그때의
+                    // `session`을 키로 push하므로, 팝 시점의 커서와 엔트리 세션이 항상 같다.
+                    // 따라서 warmup 판정(`session + 1 < warmup_sessions`)도 그대로 동치다.
                     if session + 1 < self.settings()?.warmup_sessions {
                         continue;
                     }
@@ -341,7 +340,7 @@ impl PersistentEngine {
                     }
                     return Ok(Some(frame));
                 }
-                Queued::SessionClose(session) => {
+                Queued::SessionClose => {
                     if let Some(snapshot) = self.on_session_close(session)? {
                         let frame = self.make_frame("market", session, None, snapshot)?;
                         if self.tape.is_some() {
@@ -352,7 +351,6 @@ impl PersistentEngine {
                     }
                 }
                 Queued::Order(order) => {
-                    let session = self.current_session()?;
                     self.record(session, RecordPayload::Order(order))?;
                 }
             }
@@ -447,11 +445,7 @@ impl PersistentEngine {
                 }
             }
         }
-        self.push(
-            session,
-            PRIORITY_SESSION_CLOSE,
-            Queued::SessionClose(session),
-        )
+        self.push(session, PRIORITY_SESSION_CLOSE, Queued::SessionClose)
     }
 
     fn apply_corporate_action_entry(&mut self, session: usize, index: usize) -> PyResult<()> {

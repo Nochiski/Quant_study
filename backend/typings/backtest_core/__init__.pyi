@@ -2,6 +2,9 @@
 
 __version__: str
 
+class RouteErrorException(ValueError):
+    """결정 라우팅 오류. `args`는 `(code, message)`이며 `route_error_from`이 엔진 예외로 바꾼다."""
+
 def execution_price(
     order_type: str,
     side: str,

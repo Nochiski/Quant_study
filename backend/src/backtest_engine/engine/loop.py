@@ -48,6 +48,7 @@ from backtest_engine.engine.core import (
     make_portfolio,
     make_pricing,
     make_quote_core,
+    route_error_exception,
     slippage_config,
 )
 from backtest_engine.engine.costs import session_costs
@@ -407,6 +408,9 @@ class BacktestEngine:
         store = run.store
         if runtime is None or not isinstance(store, PersistentEventStore):
             raise CoreUnavailable("persistent Rust path requires its runtime and event store")
+        # 확장 심볼은 드레인 전에 한 번만 해석한다 — except 절에서 해석하면 조회가 실패할 때
+        # 원래 예외가 CoreUnavailable에 가려진다.
+        route_error_type = route_error_exception()
         instruments = self._load_persistent_feed(run, feed)
         market_snapshots = tuple(feed.snapshots())
         store.bind_feed(feed.sessions, instruments, market_snapshots)
@@ -446,7 +450,7 @@ class BacktestEngine:
             # 받지 않는다.
             self._load_target_tape(run, feed, store)
 
-        while (frame := self._drive(runtime)) is not None:
+        while (frame := self._drive(runtime, route_error_type)) is not None:
             event = store.frame_event(frame)
             context = RustStrategyContext(
                 now=store.session_ts(frame.session_index),
@@ -522,15 +526,23 @@ class BacktestEngine:
         runtime.load_target_tape(rows, strategy.idle_reason)
 
     @staticmethod
-    def _drive(runtime: Any) -> Any | None:  # reason: pyo3 확장 모듈(backtest_core) stub 부재
-        """Rust 드라이버를 한 번 전진시키고, 도메인 오류 접두어를 엔진 예외로 바꾼다."""
+    def _drive(
+        runtime: Any,  # reason: pyo3 확장 모듈(backtest_core) stub 부재
+        route_error_type: type[BaseException],
+    ) -> Any | None:
+        """Rust 드라이버를 한 번 전진시키고, 도메인 오류를 엔진 예외로 바꾼다.
+
+        Args:
+            runtime: persistent Rust runtime.
+            route_error_type: 라우팅 오류 예외 타입. 호출 전에 해석해 넘긴다.
+        """
         try:
             return runtime.drive()
+        except route_error_type as error:
+            code, detail = error.args
+            raise route_error_from((code, detail)) from error
         except ValueError as error:
             message = str(error)
-            if message.startswith("route_error:"):
-                _, code, detail = message.split(":", 2)
-                raise route_error_from((code, detail)) from error
             if message.startswith("equity_wiped_out: "):
                 raise EquityWipedOut(message.removeprefix("equity_wiped_out: ")) from error
             if message.startswith("negative_position: "):

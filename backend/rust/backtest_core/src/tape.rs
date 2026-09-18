@@ -14,6 +14,7 @@ use crate::persistent::PersistentEngine;
 use crate::persistent_router::{DecisionWire, ExecutionWire, TargetWire};
 use crate::records::NativeDecision;
 use crate::session::py_tuple;
+use crate::RouteErrorException;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use std::collections::HashMap;
@@ -189,9 +190,7 @@ impl PersistentEngine {
         let (_, error) =
             self.submit_internal(frame.token, submission.decision, Some(submission.native))?;
         if let Some((code, message)) = error {
-            return Err(PyValueError::new_err(format!(
-                "route_error:{code}:{message}"
-            )));
+            return Err(RouteErrorException::new_err((code, message)));
         }
         Ok(())
     }

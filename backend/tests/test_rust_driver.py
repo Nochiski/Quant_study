@@ -51,6 +51,45 @@ def test_equity_wiped_out_is_raised_at_the_same_close_with_the_same_message() ->
 
 
 @RUST_ONLY
+def test_runtime_stays_failed_after_a_session_domain_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DEFECT-R01: 세션 마감 도메인 오류 뒤 같은 runtime을 재사용해도 조용히 이어지지 않는다."""
+    from typing import Any
+
+    from backtest_engine.engine import loop as loop_module
+
+    real_factory = loop_module.make_persistent_runtime
+    runtimes: list[Any] = []
+
+    def capturing(*args: Any, **kwargs: Any) -> Any:
+        runtime = real_factory(*args, **kwargs)
+        runtimes.append(runtime)
+        return runtime
+
+    monkeypatch.setattr(loop_module, "make_persistent_runtime", capturing)
+    bars = (
+        make_bar(day(1), INSTRUMENT, 100.0, 100.0),
+        make_bar(day(2), INSTRUMENT, 100.0, 100.0),
+        make_bar(day(3), INSTRUMENT, 400.0, 400.0),
+    )
+    engine = BacktestEngine(
+        RunConfig(run_id="wipe-out-reuse", initial_cash=2_000.0, fee_bps=0.0), core="rust"
+    )
+    with pytest.raises(EquityWipedOut):
+        engine.run(
+            test_short_selling.ShortStrategy((test_short_selling.target(-10),)), DataFeed(bars)
+        )
+    (runtime,) = runtimes
+    assert runtime.lifecycle_state() == "failed"
+    assert "equity_wiped_out: " in (runtime.failure_detail or "")
+    with pytest.raises(ValueError, match="persistent runtime is failed"):
+        runtime.drive()
+    with pytest.raises(ValueError, match="cannot finish failed"):
+        runtime.finish()
+
+
+@RUST_ONLY
 def test_retained_context_keeps_callback_time_portfolio() -> None:
     """전략이 ctx를 보관했다가 run 종료 후 읽어도 콜백 시점 포트폴리오를 본다."""
     contexts: list[StrategyContext] = []

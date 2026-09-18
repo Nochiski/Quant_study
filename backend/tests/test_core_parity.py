@@ -25,6 +25,7 @@ from backtest_engine.engine.core import (
 from backtest_engine.engine.router import DecisionRouter
 from backtest_engine.engine.slippage import FixedBpsSlippage
 from backtest_engine.errors import (
+    CapabilityNotImplemented,
     CoreUnavailable,
     NegativeCashError,
     NegativePositionError,
@@ -80,6 +81,7 @@ from backtest_engine.types.requirements import (
     EventKind,
     EverySession,
     HistoryRequest,
+    MonthEndSession,
     StrategyRequirements,
 )
 from backtest_engine.types.strategy import Strategy, StrategyContext
@@ -1176,6 +1178,35 @@ def test_persistent_router_error_type_order_and_trace_match_python() -> None:
                 )
             )
         assert failures[0] == failures[1]
+
+
+class _MonthEndStrategy:
+    def requirements(self) -> StrategyRequirements:
+        return StrategyRequirements(
+            histories=(),
+            schedule=MonthEndSession(),
+            events=frozenset({EventKind.MARKET}),
+            actions=frozenset({ActionKind.NO_ACTION}),
+            features=frozenset(),
+        )
+
+    def on_event(self, ctx: StrategyContext, event: StrategyEvent) -> StrategyDecision:
+        del event
+        return StrategyDecision.no_action(ctx.now)
+
+
+def test_month_end_schedule_is_rejected_before_any_core_runs(core: str) -> None:
+    """GAP-2: MonthEndSession은 capability 게이트가 코어보다 먼저 거절한다.
+
+    Rust 드라이버는 `configure_run("month_end")`와 `feed.schedule_matches`로 월말 일정을 이미
+    구현했고 그 동작은 `driver.rs`의 month_end 단위 테스트가 고정한다. Python reference
+    calendar가 없어 두 코어를 나란히 돌리는 parity 시나리오는 아직 만들 수 없다 — 이 테스트가
+    깨지는 날(capability 승격) parity 시나리오를 함께 추가한다.
+    """
+    bars = tuple(make_bar(day(n), INSTRUMENT, 100.0, 100.0) for n in (1, 2, 3))
+    engine = BacktestEngine(RunConfig(run_id="month-end", initial_cash=10_000.0), core=core)
+    with pytest.raises(CapabilityNotImplemented, match="schedule=MonthEndSession"):
+        engine.run(_MonthEndStrategy(), DataFeed(bars))
 
 
 @RUST_ONLY

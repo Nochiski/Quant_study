@@ -100,6 +100,11 @@ impl PersistentEngine {
         })
     }
 
+    /// 실행 설정이 있는지만 확인한다 — 값을 쓰지 않는 진입 가드에서 의도를 드러낸다.
+    fn require_configured(&self) -> PyResult<()> {
+        self.settings().map(|_| ())
+    }
+
     fn feed_ref(&self) -> PyResult<&crate::feed::PersistentFeed> {
         self.feed
             .as_ref()
@@ -283,7 +288,28 @@ impl PersistentEngine {
             }
             Lifecycle::Ready | Lifecycle::Running => {}
         }
-        self.settings()?;
+        self.require_configured()?;
+        match self.drain_until_callback() {
+            Ok(frame) => Ok(frame),
+            Err(error) => {
+                // 드레인에서 올라오는 모든 오류가 runtime을 실패로 고정한다 — 도메인 오류(자본
+                // 소진·음수 현금·정산 bar 없음)뿐 아니라 오용 오류(설정 누락, 큐 토큰 불일치)도
+                // 포함한다. 어느 쪽이든 세션 처리가 중간에 끊긴 상태라, 재진입하면 비용은
+                // 반영됐지만 SNAPSHOT이 없는 세션 뒤로 조용히 이어진다.
+                //
+                // 드레인 안의 `submit_native`가 이미 Failed로 바꿨다면 그쪽 detail이 더 구체적이라
+                // 덮어쓰지 않는다.
+                if !matches!(self.lifecycle, Lifecycle::Failed) {
+                    self.lifecycle = Lifecycle::Failed;
+                    self.failure_message = Some(error.to_string());
+                }
+                Err(error)
+            }
+        }
+    }
+
+    /// `drive_internal`의 본체: 큐를 드레인하다가 전략 콜백이 필요하면 프레임을 돌려준다.
+    fn drain_until_callback(&mut self) -> PyResult<Option<CallbackFrame>> {
         if !self.started {
             // Python `_execute`처럼 모든 세션의 MARKET 이벤트를 먼저 큐에 싣는다.
             let sessions = self.feed_ref()?.session_len();
@@ -302,7 +328,8 @@ impl PersistentEngine {
                 }
                 Queued::Notify(payload) => {
                     let session = self.current_session()?;
-                    if self.session_count()? < self.settings()?.warmup_sessions {
+                    // `current_session`이 곧 session_count − 1이다 — 피드에 같은 값을 다시 묻지 않는다.
+                    if session + 1 < self.settings()?.warmup_sessions {
                         continue;
                     }
                     let snapshot = self.snapshot_wire()?;
@@ -430,13 +457,13 @@ impl PersistentEngine {
     fn apply_corporate_action_entry(&mut self, session: usize, index: usize) -> PyResult<()> {
         let entry = self.corporate_actions[index].clone();
         self.record(session, RecordPayload::CorporateAction(index))?;
-        let remaining_by_id: HashMap<String, i64> = self
-            .orders
-            .iter()
-            .map(|order| (order.order_id.clone(), order.remaining))
-            .collect();
         if entry.confirmed {
             // 가격 수준이 무의미해지는 확인된 분할·병합만 대기 주문을 취소한다 (스펙 결정 3).
+            let remaining_by_id: HashMap<String, i64> = self
+                .orders
+                .iter()
+                .map(|order| (order.order_id.clone(), order.remaining))
+                .collect();
             let session_ts = self.feed_ref()?.session_at(session)?.to_string();
             let cancelled = self.cancel_for_key(&entry.key);
             for order_id in cancelled {
@@ -744,8 +771,14 @@ mod tests {
         }
     }
 
-    fn runtime(warmup: usize) -> PersistentEngine {
-        let mut runtime = PersistentEngine::new(100_000.0, false, false, 1.0).unwrap();
+    /// 2세션 피드를 실은 runtime.
+    ///
+    /// 여기서 인터프리터를 올린다 — 드레인 오류를 단언하는 테스트는 실패 경로가
+    /// `PyErr::to_string()`으로 detail을 남기므로 PyErr 포맷에 인터프리터가 필요하고,
+    /// `cargo test` 바이너리에는 기본적으로 인터프리터가 없다. 호출은 멱등하다.
+    fn runtime_with(allow_short: bool, settings: RunSettings) -> PersistentEngine {
+        pyo3::prepare_freethreaded_python();
+        let mut runtime = PersistentEngine::new(100_000.0, allow_short, false, 1.0).unwrap();
         runtime
             .load_feed(
                 vec![KEY.into()],
@@ -764,8 +797,12 @@ mod tests {
             vec!["no_action".into(), "set_portfolio_target".into()],
             vec![],
         );
-        runtime.run = Some(settings(warmup));
+        runtime.run = Some(settings);
         runtime
+    }
+
+    fn runtime(warmup: usize) -> PersistentEngine {
+        runtime_with(false, settings(warmup))
     }
 
     fn no_action(ts: &str) -> DecisionWire {
@@ -898,5 +935,83 @@ mod tests {
             .submit_internal(frame.token + 1, no_action(&frame.ts), None)
             .is_err());
         assert!(matches!(runtime.lifecycle, Lifecycle::AwaitingDecision(1)));
+    }
+
+    #[test]
+    fn month_end_schedule_dispatches_only_on_the_last_session_of_each_month() {
+        // GAP-2: `configure_run`이 "month_end"를 받고 `feed.schedule_matches`가 판정하지만
+        // 드라이버가 그 판정대로 콜백을 거르는지는 고정된 적이 없었다. Python capability
+        // 게이트가 MonthEndSession을 아직 거절하므로 Python 경로와의 대조는 불가능하다.
+        let mut runtime = PersistentEngine::new(100_000.0, false, false, 1.0).unwrap();
+        runtime
+            .load_feed(
+                vec![KEY.into()],
+                vec!["005930".into()],
+                vec![
+                    "2026-08-31 00:00:00".into(),
+                    "2026-09-01 00:00:00".into(),
+                    "2026-09-30 00:00:00".into(),
+                ],
+                vec![0, 1, 2, 3],
+                vec![0, 0, 0],
+                vec![100.0, 110.0, 120.0],
+                vec![100.0, 110.0, 120.0],
+                vec![100.0, 110.0, 120.0],
+                vec![100.0, 110.0, 120.0],
+                vec![1_000, 1_000, 1_000],
+            )
+            .unwrap();
+        runtime.configure_router(vec!["no_action".into()], vec![]);
+        let mut month_end = settings(0);
+        month_end.schedule = "month_end".into();
+        runtime.run = Some(month_end);
+
+        let mut dispatched = Vec::new();
+        while let Some(frame) = runtime.drive_internal().unwrap() {
+            dispatched.push(frame.session_index);
+            runtime
+                .submit_internal(frame.token, no_action(&frame.ts), None)
+                .unwrap();
+        }
+        runtime.finish_internal().unwrap();
+        // 08-31은 다음 세션이 9월이라 월말, 09-01은 아니고, 마지막 세션은 뒤가 없어 월말이다.
+        assert_eq!(dispatched, vec![0, 2]);
+        assert_eq!(
+            kinds(&runtime),
+            vec![
+                KIND_MARKET,
+                KIND_SNAPSHOT,
+                KIND_DECISION,
+                KIND_MARKET,
+                KIND_SNAPSHOT,
+                KIND_MARKET,
+                KIND_SNAPSHOT,
+                KIND_DECISION,
+            ]
+        );
+    }
+
+    #[test]
+    fn session_close_domain_error_poisons_the_runtime() {
+        // DEFECT-R01: 세션 처리 도중 난 도메인 오류도 라우팅 오류처럼 runtime을 실패로 고정해야
+        // 한다. 고정하지 않으면 비용은 반영됐지만 SNAPSHOT이 없는 세션 뒤로 같은 runtime이
+        // 조용히 이어지고 finish()가 정상 종료해버린다.
+        let mut wipeout = settings(0);
+        // 숏 차입 이자를 비현실적으로 크게 잡아 세션 1 마감에서 equity를 음수로 만든다.
+        wipeout.short_borrow_bps_annual = 1e9;
+        let mut runtime = runtime_with(true, wipeout);
+        let first = runtime.drive_internal().unwrap().unwrap();
+        runtime
+            .submit_internal(first.token, target(&first.ts, -0.5), None)
+            .unwrap();
+        // 세션 1 마감: 차입 비용이 현금을 삼켜 equity_wiped_out.
+        assert!(runtime.drive_internal().is_err());
+        assert_eq!(runtime.lifecycle_state(), "failed");
+        let detail = runtime.failure_message.clone().unwrap();
+        assert!(detail.contains("equity_wiped_out:"), "detail={detail}");
+        // 재진입과 종료 모두 막혀야 한다.
+        assert!(runtime.drive_internal().is_err());
+        assert!(runtime.finish_internal().is_err());
+        assert_eq!(runtime.lifecycle_state(), "failed");
     }
 }

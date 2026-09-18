@@ -6,7 +6,7 @@ current_phase: P1,P2,P3,P4,P5
 current_pr: P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01,P3-02,P4-01,P4-02,P4-03,P4-04,P4-05,P5-01,P5-02,P5-03
 active_prs: [P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05, P5-01, P5-02, P5-03]
 parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02, P1-06, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05, P5-01, P5-02, P5-03]
-last_updated: 2026-09-18T16:19:18+09:00
+last_updated: 2026-09-18T16:37:02+09:00
 planned_prs: 19
 merged_prs: 0
 approved_prs: 18
@@ -29,7 +29,7 @@ progress_percent: 0
 | Active PR | `P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05, P5-01, P5-02, P5-03` |
 | Progress | `0 / 19 merged (0%)` |
 | Approved | `18 / 19` |
-| Aggregated at | `2026-09-18 16:19 KST` |
+| Aggregated at | `2026-09-18 16:37 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -94,7 +94,7 @@ progress_percent: 0
 | Non-goals | DAG 카드 안 편집 컨트롤 병합, `node_id` 중복 방지·참조 갱신 rename, 항목 안 배열 편집, 표현식 DSL |
 | Branch/worktree | `feat/gui-p5-03-wrap-up` (base `feat/gui-p5-02-graph-ui` `4bf6342`; 워크트리 `scad-p43`) |
 | Base SHA | `4bf6342` |
-| Head SHA | `3ffeba3` (review 후속 2; diff freeze `e6a0074`) |
+| Head SHA | `2efc44c` (review 후속 3; diff freeze `e6a0074`) |
 | Diff stat | ui 2(`factor-graph-editor`·`factor-graph-panel`)·model 1(`use-source-transactions`)·page 2·messages·e2e 1·테스트 2, 문서 6(ADR·로드맵·매뉴얼·README 2·SoT)·WORKFLOW |
 | Focused tests | factor-graph-editor 7 · use-source-transactions 8 · document-routes 63 · e2e chromium-workflow 7/7 |
 | Full gate | Vitest 604 passed(52 files) · typecheck · lint · build · property 1000 · Playwright chromium-workflow 7/7 |
@@ -165,7 +165,7 @@ Phase exit:
 |---|---|---|---|---|---|
 | [ ] | `P5-01` | `graph-transactions.ts`: 노드 추가·필드·재연결·출력·삭제 가드·id 제안, `findReferences` 스코프, owner별 feedback, `planRemove` 선행 주석 | P4-05 | `APPROVED` | [#131](https://github.com/Nochiski/Quant_study/pull/131) · `review_gui_p5_01` 2차 APPROVE(`226231d`) |
 | [ ] | `P5-02` | Graph UI: 노드 추가 메뉴, property editor, 입력 슬롯, 키보드·ARIA | P5-01 | `APPROVED` | [#132](https://github.com/Nochiski/Quant_study/pull/132) · `review_gui_p5_02` 2차 APPROVE(`45f01c9`) |
-| [ ] | `P5-03` | 연결·e2e·문서·규칙 마감, read-only 문구 제거, 로드맵 M8 | P5-02, P4-04 | `IN_REVIEW` | [#133](https://github.com/Nochiski/Quant_study/pull/133) · `review_gui_p5_03` 1차 REQUEST_CHANGES(P1 2·P2 11) → 후속 `406976a` → 2차 REQUEST_CHANGES(신규 P1 2·P2 2) → 후속 `3ffeba3` 재검토 중 |
+| [ ] | `P5-03` | 연결·e2e·문서·규칙 마감, read-only 문구 제거, 로드맵 M8 | P5-02, P4-04 | `IN_REVIEW` | [#133](https://github.com/Nochiski/Quant_study/pull/133) · `review_gui_p5_03` 1차 REQUEST_CHANGES(P1 2·P2 11) → 후속 `406976a` → 2차 REQUEST_CHANGES(신규 P1 2·P2 2) → 후속 `3ffeba3` → 3차 REQUEST_CHANGES(P1 2·P2 1) → 후속 `2efc44c` 재검토 중 |
 
 Phase exit:
 
@@ -222,6 +222,7 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-18 KST | Claude | `review_gui_p5_03` 3차 REQUEST_CHANGES(2차 P1 2·P2 해소 확인; 신규 P1 재계산 투영을 blocked에서 버려 편집 경로(blocked pending → loading)에서 기능 소멸·단위 테스트가 ready → loading 직행만 검증, P1 케이스 단위 `SLOW`로는 부하 배율 8배를 못 따라잡아 다른 케이스 red(리뷰어가 1차 권고 철회); P2 Form 목록 잠금이 항목 필드까지 넓음) → 후속 `2efc44c`: `FactorGraphEditing.documentKey`(= `documentEpoch`)로 직전 투영을 문서 경계에만 묶고 blocked(pending)·loading 구간에 유지(테스트: ready → blocked pending → loading 유지, 문서 키 변경 시 폐기), Form은 추가·preset·삭제 버튼만 `settling` 비활성, route 파일 전체 `testTimeout: 15_000` 복구, 매뉴얼·WORKFLOW 문구. 전체 Vitest 2회 초록(604/52), e2e 7/7 → 재검토 요청 | 13.5 재검토 |
 | 2026-09-18 KST | Claude | `review_gui_p5_03` 2차 REQUEST_CHANGES(1차 P1 2·P2 11 전부 해소 확인; 신규 P1-1 구조 변경 직후 150ms 안의 스칼라 확정도 형제 pointer가 밀려 다른 항목에 써짐, P1-2 실제 flake 케이스(514행)에 `SLOW` 누락; P2 재계산 투영이 문서 경계에 안 묶임, Form 목록 버튼 미비활성) → 후속 `3ffeba3`: 훅이 직전 적용 연산의 구조 변경 여부를 ref로 기억해 그때는 `settling` 동안 스칼라도 `pending`(테스트), Form 목록 섹션 fieldset `settling` 잠금, `lastReady`는 loading 외 상태에서 폐기, 514행 `SLOW`, 매뉴얼·WORKFLOW 문구 → 재검토 요청 | 13.5 재검토 |
 | 2026-09-18 KST | Claude | `review_gui_p5_02` 2차 APPROVE(`45f01c9`) → P5-02 APPROVED. `review_gui_p5_03` 1차 REQUEST_CHANGES(P1-1 잠금 완화가 디바운스 구간의 위치 연산을 열어 stale pointer 삭제 연타로 팩터·노드 소실(회귀); P1-2 yaml-ui `WORKFLOW.md` 2.1/2.2/2.3이 read-only·1.0 서술로 잔존; P2 11) → 후속 `406976a`: `apply`가 `settling`(parse 대기) 동안 위치 연산을 `pending`으로 보류(스칼라는 열림) + Graph 추가·삭제 fieldset 비활성 + 훅 테스트, Form `selectedPointer`로 URL path 항목 `aria-current`(왕복 대칭), 재계산 중 배지(OBS-132-05), e2e hash 동치·줄 단위 단언, route timeout 느린 2케이스만 `SLOW`(P4-07은 이미 15s), yaml-ui WORKFLOW 2.1 개정 주석·2.2 골든 예시·2.3, `backend/FACTORS.md`·매뉴얼 STALE 문구·revision page 한글 주석 → 재검토 요청. 기록: 매뉴얼 8절 스크린샷 후속, 모듈 미사용 함수는 계약 | 13.5 재검토 |
 | 2026-09-18 KST | Claude | `review_gui_p5_01` 2차 APPROVE(`226231d`) → P5-01 APPROVED(기록은 스택 상위 P5-03 PLAN). P5-03 구현·self-check(Graph→Form 왕복, Graph e2e, 잠금을 parse 실패로 좁힘, route de-flake, 문서 6·규칙·WORKFLOW), P5-02 후속 `4bf6342` 위로 `--onto` rebase, diff freeze `e6a0074`, stacked PR #133(base P5-02), `review_gui_p5_03`(opus) 배정 → IN_REVIEW(활성 리뷰 P5-02 2차·P5-03 = 2). 결정: `projection.readOnly`(JSON)는 유지, DAG 카드·편집 목록 분리 유지, 디바운스 대기는 잠그지 않음(live 텍스트 preflight) | 13.3 diff freeze |

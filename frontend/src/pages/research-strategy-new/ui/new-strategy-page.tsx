@@ -168,6 +168,17 @@ export const NewStrategyPage = () => {
     },
     [navigate, search],
   );
+  const openForm = useCallback(
+    (pointer: string): void => {
+      void navigate({
+        to: ROUTE,
+
+        search: { ...search, path: pointer, view: "form" },
+        replace: true,
+      });
+    },
+    [navigate, search],
+  );
   const onOutlineEditorReady = outline.onEditorReady;
   const onSnippetEditorReady = snippets.onEditorReady;
   const onTransactionsEditorReady = transactions.onEditorReady;
@@ -305,6 +316,7 @@ export const NewStrategyPage = () => {
               }}
               catalogSnippets={snippets.snippets}
               onOpenGraph={openGraph}
+              selectedPointer={search.path}
             />
           ),
           graph: (
@@ -322,6 +334,8 @@ export const NewStrategyPage = () => {
                   factors:
                     assist.inspectorSource.factorCatalog?.factors ?? null,
                 },
+                onOpenForm: openForm,
+                documentKey: document.documentEpoch,
               }}
               onSelectPointer={(pointer) => selectPointer(pointer, "graph")}
               onOpenSource={(pointer) => {

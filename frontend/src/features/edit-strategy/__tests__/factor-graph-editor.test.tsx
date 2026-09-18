@@ -49,6 +49,7 @@ const stub = (overrides: Partial<SourceTransactions> = {}): SourceTransactions =
   onEditorReady: vi.fn(),
   enabled: true,
   disabled: null,
+  settling: false,
   ...overrides,
 });
 
@@ -56,6 +57,7 @@ const renderEditor = (
   source: string,
   transactions: SourceTransactions,
   selectedPointer?: string,
+  onOpenForm?: (pointer: string) => void,
 ) => {
   const onSelectPointer = vi.fn();
   render(
@@ -70,6 +72,7 @@ const renderEditor = (
         schema: SCHEMA,
         transactions,
         catalogs: { equityFields: null, factors: null },
+        onOpenForm,
       }}
     />,
   );
@@ -217,6 +220,14 @@ describe("FactorGraphEditor (P5-02)", () => {
       "graph",
       { focusEditor: false },
     );
+  });
+
+  it("opens the factor in the Form from the Graph editor (P5-03 round trip)", async () => {
+    const user = userEvent.setup();
+    const onOpenForm = vi.fn();
+    renderEditor(WITH_SPARE, stub(), "/factors/0/graph", onOpenForm);
+    await user.click(editor().getByRole("button", { name: "momentum · Form에서 열기" }));
+    expect(onOpenForm).toHaveBeenCalledWith("/factors/0");
   });
 
   it("locks the editor with the hook's reason and shows only graph-owned feedback", () => {

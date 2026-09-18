@@ -175,7 +175,14 @@ describe("useSourceTransactions", () => {
       { initialProps: { state: stale } },
     );
     act(() => result.current.onEditorReady(editor.handle));
-    expect(result.current.enabled).toBe(false);
+    // parse 대기(버전 지연)는 잠그지 않는다(P5-03: 계획은 편집기 live 텍스트로 세운다). 같은 버전의 parse 실패만 `syntax`.
+    expect(result.current.enabled).toBe(true);
+    expect(result.current.disabled).toBeNull();
+    const broken = parseSource("risk: [", "yaml");
+    rerender({
+      state: { ...parsedState(SOURCE), parse: broken, source: "risk: [" },
+    });
+    expect(result.current.disabled).toBe("syntax");
 
     rerender({ state: parsedState(SOURCE) });
     expect(result.current.enabled).toBe(true);
@@ -186,6 +193,56 @@ describe("useSourceTransactions", () => {
 
     rerender({ state: { ...parsedState(SOURCE), documentEpoch: 1 } });
     expect(result.current.feedback).toEqual({ status: "idle" });
+  });
+
+  it("holds positional operations while the parse settles but still commits scalars (review DEFECT-133-01)", () => {
+    const editor = editorOf(SOURCE);
+    const lagging: DocumentState = { ...parsedState(SOURCE), sourceVersion: 5 };
+    const { result, rerender } = renderHook(
+      ({ state }: { state: DocumentState }) => useSourceTransactions(state),
+      { initialProps: { state: lagging } },
+    );
+    act(() => result.current.onEditorReady(editor.handle));
+    expect(result.current.enabled).toBe(true);
+    expect(result.current.settling).toBe(true);
+    // 위치 연산은 보류: 텍스트 불변, feedback은 pending.
+    let applied: boolean | undefined;
+    act(() => {
+      applied = result.current.apply({ kind: "remove", pointer: "/risk" }, "risk", "form");
+    });
+    expect(applied).toBe(false);
+    expect(editor.handle.replaceRange).not.toHaveBeenCalled();
+    expect(result.current.feedbackFor("form")).toMatchObject({ status: "error", reason: "pending" });
+    // 스칼라 확정은 그대로 계획된다.
+    act(() => {
+      applied = result.current.apply(
+        { kind: "replace-scalar", pointer: "/risk/max_name_weight", value: 0.1 },
+        "max_name_weight",
+        "form",
+      );
+    });
+    expect(applied).toBe(true);
+    expect(editor.text()).toContain("max_name_weight: 0.1");
+    // parse가 따라오면 위치 연산도 열린다.
+    rerender({ state: parsedState(editor.text()) });
+    expect(result.current.settling).toBe(false);
+    act(() => {
+      applied = result.current.apply({ kind: "remove", pointer: "/risk" }, "risk", "form");
+    });
+    expect(applied).toBe(true);
+    expect(editor.text()).not.toContain("max_name_weight");
+    // 직전 연산이 구조 변경이면 parse가 따라오기 전에는 스칼라 확정도 보류한다(형제 pointer가 밀려 있다, 2차 P1-1).
+    rerender({ state: { ...parsedState(editor.text()), sourceVersion: 9 } });
+    expect(result.current.settling).toBe(true);
+    act(() => {
+      applied = result.current.apply(
+        { kind: "replace-scalar", pointer: "/schema_version", value: "1.1" },
+        "schema_version",
+        "form",
+      );
+    });
+    expect(applied).toBe(false);
+    expect(result.current.feedbackFor("form")).toMatchObject({ status: "error", reason: "pending" });
   });
 
   it("keeps one feedback slot per owner so a snippet result does not erase the form's (audit R2)", () => {
@@ -233,9 +290,13 @@ describe("useSourceTransactions", () => {
       render({ ...parsedState(SOURCE), composing: true }).result.current
         .disabled,
     ).toBe("composing");
+    // 같은 버전의 parse가 실패했을 때만 syntax. parse가 아직 없는 초기 상태는 잠그지 않는다(P5-03).
+    expect(render(parsedState("risk: [")).result.current.disabled).toBe(
+      "syntax",
+    );
     expect(
       render(initialDocumentState("yaml", SOURCE)).result.current.disabled,
-    ).toBe("syntax");
+    ).toBe("editor");
     const ready = render(parsedState(SOURCE));
     expect(ready.result.current.disabled).toBe("editor");
     act(() => ready.result.current.onEditorReady(editor.handle));
@@ -249,7 +310,8 @@ describe("useSourceTransactions", () => {
       useSourceTransactions(initialDocumentState("yaml", SOURCE)),
     );
     act(() => result.current.onEditorReady(editor.handle));
-    expect(result.current.enabled).toBe(false);
+    // reducer parse가 없어도(대기) 잠그지 않는다 — 계획은 편집기 live 텍스트로 세운다(P5-03).
+    expect(result.current.enabled).toBe(true);
     act(() =>
       result.current.apply(
         {

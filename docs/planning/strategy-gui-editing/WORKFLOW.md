@@ -51,7 +51,7 @@ main
 
 | PR 유형 | self-check |
 |---|---|
-| backend | focused pytest → `uv run pytest` 전체 → `uv run ruff check src tests` → `uv run pyright` |
+| backend | focused pytest → `uv run pytest` 전체 → `uv run ruff check src tests` → `uv run pyright` → 계약(모델·facade 이름)이 바뀌면 루트에서 `uv run --project backend pytest database/tests -q`(원격 CI "Equity layer tests"; `database/scripts`가 backend facade를 import한다 — P5-03에서 `FactorStep` ImportError가 P1-01부터 CI를 빨갛게 둔 공백) |
 | API contract | backend 전체 → `uv run python scripts/export_openapi.py openapi.json` → diff 확인 (P2-01부터 `npm run api:generate` 포함) → frontend 전체 |
 | frontend | focused vitest → `npm run typecheck` → `npm run lint` → `npm test` → `npm run build` |
 | E2E 포함 | 위 + `npm run test:e2e` |
@@ -903,6 +903,33 @@ export const suggestNodeId = (tree, factorPointer, base: string): string;   // b
   `docs/manual/strategy-workbench/README.md`, `README.md`, `frontend/README.md`, `backend/FACTORS.md`,
   로드맵 M8 "Graph 직접 편집" 체크.
 - 기존 `projection.readOnly`, `graph.readOnly` 문구·코드 제거.
+- 구현 결정(P5-03): Graph → Form 왕복은 편집기 툴바의 "Form에서 열기"(`onOpenForm(/factors/N)` →
+  view=form·path)이고 Form → Graph는 P4-03의 "Graph에서 열기" 그대로다. `graph.readOnly`는 P5-02에서
+  삭제했고 `projection.readOnly`는 JSON projection이 실제로 읽기 전용이라 유지한다(문구 "backend compile
+  결과 · 읽기 전용"). e2e `chromium-workflow`에 "노드 추가 → field_id → 입력 재연결 → 검증 통과 → plan
+  투영에 새 노드 → YAML에 세 줄 반영·앞부분 바이트 동일 → 저장 → Form에서 열기" 시나리오. 문서: ADR
+  머리말·D5 개정 표기·5절 non-goal 취소선, 로드맵 M8 주석, 사용자 매뉴얼 8절(Form·Graph에서 고치기),
+  README·frontend/README, SoT "전략 의미" 행(Form·Graph 편집 = source 트랜잭션). `backend/FACTORS.md`에는
+  Form/Graph 서술이 없어 변경 없음. DAG 카드 안 편집 컨트롤 병합은 하지 않는다(투영과 편집 목록을 별개
+  표면으로 유지 — 카드는 backend plan 순서, 목록은 문서 순서라 두 순서를 한 표면에 섞지 않는다).
+  `useSourceTransactions.disabled`의 `syntax`는 같은 버전의 parse가 **실패**했을 때만이다 — parse 디바운스
+  대기 구간은 잠그지 않는다(계획은 live 텍스트 preflight; P5-02 리뷰 DEFECT-132-03·P4-04 리뷰 base 관찰).
+  Form STALE 판정(P4-04 후속)과 같은 기준이라 배지와 잠금이 함께 움직인다. 단 대기 구간에는 화면이 직전
+  tree라 위치 pointer 연산(`insert-item`·`insert-key`·`remove`)은 `apply`가 `pending`으로 보류하고 UI는
+  추가·삭제 컨트롤을 `settling`으로 비활성화한다(P5-03 리뷰 DEFECT-133-01: 150ms 안의 삭제 연타가 stale
+  pointer로 다른 항목·노드를 지웠다). 직전 적용 연산이 구조 변경이었으면 스칼라 확정도 보류한다(형제 pointer가
+  밀려 다른 항목에 써질 수 있다 — 2차 리뷰 P1-1); 직전이 스칼라였으면 스칼라는 열려 있다. UI 비활성은 Form의
+  추가·preset·삭제 버튼과 Graph 노드 fieldset만(항목 필드는 열어 둔다, 3차 P2). 재계산 배지의 직전 투영은
+  같은 문서(`documentKey` = `documentEpoch`) 안에서만 쓰며 편집 확정 뒤 blocked(stale·pending) → loading 구간을
+  덮는다(3차 P1; 4차: 편집 직후 `blockedReason`은 이전 compile spec 때문에 `stale`이 먼저다). route 테스트 timeout은 파일 전체 15s(부하 배율 8배 이상, 케이스 단위 상향 철회).
+- 리뷰 후속(P5-03 1차): Form 패널이 URL `path`를 받아(`selectedPointer`) 그 pointer 아래 목록 항목을
+  `aria-current`로 강조한다(Graph → Form 왕복 대칭). yaml-ui `WORKFLOW.md` 2.1·2.2·2.3을 1.1·편집 가능으로
+  개정(2.2 예시 = 골든 fixture). e2e는 저장 revision hash를 backend compile과 동치 비교하고 줄 단위 단언.
+  route 테스트 timeout은 느린 5케이스만 `SLOW`(15s). `backend/FACTORS.md`·revision page 머리 주석 정정.
+  Graph 패널은 plan 재조회(loading) 동안 직전 ready 투영을 "재계산 중" 배지와 함께 유지한다(P5-02
+  acceptance, OBS-132-05). 기록: `graph-transactions.ts`의 `removeNode(id)`·`rewireInput`·`setOutput`·
+  `setMissingPolicy`·`nodePointerOf`는 UI가 부르지 않는 모듈 계약(속성·출력·정책·재연결은 필드 컨트롤이
+  같은 연산을 만든다)이며 P5-01 테스트가 고정한다. 매뉴얼 8절 스크린샷은 후속.
 
 **Phase 5 exit**: SoT·책임분리 최종 점검. 전체 e2e green. initiative COMPLETE.
 

@@ -60,12 +60,12 @@ const shortTimestamp = (iso: string): string =>
   iso.length >= 16 ? `${iso.slice(0, 10)} ${iso.slice(11, 16)}` : iso;
 
 /**
- * Saved revision entry (WORKFLOW P2-04). The exact stored document comes from the query cache
- * the route loader warmed up (ADR D4) and becomes the draft base. Saving appends the next
- * revision and the URL follows it. The selected view lives in the URL search and never blocks
- * navigation (ADR D3): the stored format is edited in place, JSON/Form are read-only projections
- * of the current backend compile (or an explicitly stale same-document fallback), and a view that
- * is not implemented yet falls back to the stored format with a notice instead of an empty tab.
+ * 저장된 revision 진입점(WORKFLOW P2-04). 저장된 문서 원문은 route loader가 데운 query cache에서 오고
+ * (ADR D4) draft의 출발점이 된다. 저장은 다음 revision을 덧붙이고 URL이 따라간다. 선택된 view는 URL search에
+ * 있으며 navigation을 막지 않는다(ADR D3): 저장된 포맷을 제자리에서 편집하고, JSON/Diff는 현재 backend
+ * compile(또는 명시적으로 stale인 같은 문서의 fallback)의 읽기 전용 투영이며, Form·Graph는 같은 문서 위의
+ * source 트랜잭션 편집기다(ADR D5 2026-09-18 개정). 아직 없는 view는 빈 탭 대신 안내와 함께 저장된 포맷으로
+ * 돌아간다.
  */
 export const StrategyRevisionPage = () => {
   const { strategyId, revision } = useParams({ from: ROUTE });
@@ -199,6 +199,17 @@ export const StrategyRevisionPage = () => {
         to: ROUTE,
         params: { strategyId, revision },
         search: { ...search, path: pointer, view: "graph" },
+        replace: true,
+      });
+    },
+    [navigate, search, revision, strategyId],
+  );
+  const openForm = useCallback(
+    (pointer: string): void => {
+      void navigate({
+        to: ROUTE,
+        params: { strategyId, revision },
+        search: { ...search, path: pointer, view: "form" },
         replace: true,
       });
     },
@@ -360,6 +371,7 @@ export const StrategyRevisionPage = () => {
               }}
               catalogSnippets={snippets.snippets}
               onOpenGraph={openGraph}
+              selectedPointer={search.path}
             />
           ),
           graph: (
@@ -377,6 +389,8 @@ export const StrategyRevisionPage = () => {
                   factors:
                     assist.inspectorSource.factorCatalog?.factors ?? null,
                 },
+                onOpenForm: openForm,
+                documentKey: document.documentEpoch,
               }}
               onSelectPointer={(pointer) => selectPointer(pointer, "graph")}
               onOpenSource={(pointer) => {

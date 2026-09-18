@@ -54,6 +54,7 @@ const stubTransactions = (
   onEditorReady: vi.fn(),
   enabled: true,
   disabled: null,
+  settling: false,
   ...overrides,
 });
 

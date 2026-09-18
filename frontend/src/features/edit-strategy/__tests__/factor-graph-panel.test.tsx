@@ -6,7 +6,10 @@ import type {
   FactorExplanation,
   FactorGraphRequest,
 } from "../../../shared/api";
+import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import { projectFactorGraphs } from "../model/factor-graph-projection";
+import type { JsonSchema } from "../model/schema-navigator";
+import type { SourceTransactions } from "../model/use-source-transactions";
 import type {
   ExecutionPlansState,
   PlannedFactor,
@@ -270,6 +273,53 @@ describe("FactorGraph projection", () => {
 });
 
 describe("FactorGraphPanel", () => {
+  it("keeps the last plan projection with a recomputing badge while the plan reloads (OBS-132-05)", () => {
+    const schema = JSON.parse(
+      readBackendFixture("strategy_documents/runtime-schema.json"),
+    ) as JsonSchema;
+    const transactions: SourceTransactions = {
+      apply: vi.fn(() => true),
+      run: vi.fn(() => true),
+      feedback: { status: "idle" },
+      feedbackFor: () => ({ status: "idle" }),
+      onEditorReady: vi.fn(),
+      enabled: true,
+      disabled: null,
+      settling: false,
+    };
+    const editing = {
+      tree: { factors: [{ factor_id: "f", direction: "high", graph }] },
+      schema,
+      transactions,
+      catalogs: { equityFields: null, factors: null },
+    };
+    const view = (state: ExecutionPlansState, documentKey = 1) => (
+      <FactorGraphPanel
+        state={state}
+        diagnostics={[]}
+        onSelectPointer={vi.fn()}
+        onOpenSource={vi.fn()}
+        editing={{ ...editing, documentKey }}
+      />
+    );
+    const { rerender } = render(view(readyState()));
+    expect(screen.queryByText("재계산 중")).toBeNull();
+    // 편집 확정 뒤 실제 경로: 이전 compile의 spec이 남아 blocked(stale) → blocked(pending) → loading → ready.
+    // 그동안 직전 투영이 남는다(reducer 실측: stale 판정이 pending보다 먼저다 — 4차 리뷰).
+    rerender(view({ status: "blocked", reason: "stale" }));
+    expect(screen.getByText("재계산 중")).toBeInTheDocument();
+    rerender(view({ status: "blocked", reason: "pending" }));
+    expect(screen.getByText("재계산 중")).toBeInTheDocument();
+    rerender(view({ status: "loading" }));
+    expect(screen.getByText("재계산 중")).toBeInTheDocument();
+    expect(document.querySelector('[data-node-id="signal"]')).not.toBeNull();
+    expect(screen.getByRole("button", { name: "노드 추가" })).toBeInTheDocument();
+    // 다른 문서로 가면(문서 키 변경) 직전 투영을 쓰지 않는다.
+    rerender(view({ status: "loading" }, 2));
+    expect(screen.queryByText("재계산 중")).toBeNull();
+    expect(document.querySelector('[data-node-id="signal"]')).toBeNull();
+  });
+
   it("renders conditional branches, saved references, provenance and exact selection actions", async () => {
     const user = userEvent.setup();
     const onSelectPointer = vi.fn();

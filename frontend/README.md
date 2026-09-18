@@ -6,8 +6,8 @@
 > 전략 authoring은 verbose YAML/JSON source editor 하나를 사용한다
 > ([ADR](../docs/superpowers/specs/2026-09-04-strategy-authoring-contract-adr.md),
 > [PLAN.md](../docs/planning/strategy-workbench-yaml-ui/PLAN.md)). JSON/Diff는 backend가 compile한
-> 같은 StrategySpec의 read-only projection이고, Form은 source 트랜잭션 편집기다(Graph는 P5 전까지
-> 읽기 전용).
+> 같은 StrategySpec의 read-only projection이고, Form과 Graph는 source 트랜잭션 편집기다
+> (`docs/planning/strategy-gui-editing`).
 
 ## M5 Backtest run · professional result
 
@@ -40,7 +40,8 @@ graph를 typed input port, output type/unit, minimum history, inline validation�
 
 저장되는 전략의 의미는 백엔드의 버전된 `StrategySpec`이 소유하며, 이 폴더는 편집 경험과
 시각화만 소유한다. YAML-first 전환 후 Form은 runtime schema × parse tree projection 위의 source
-트랜잭션 편집기이고(`docs/planning/strategy-gui-editing`), Graph는 P5 전까지 read-only projection이다.
+트랜잭션 편집기이고(`docs/planning/strategy-gui-editing`), Graph도 같은 경로로 노드 추가·삭제·속성·재연결·
+출력을 편집한다(DAG 투영은 backend plan 위에 그대로).
 
 ## YAML IDE 키보드 작업 흐름 (P6-03)
 

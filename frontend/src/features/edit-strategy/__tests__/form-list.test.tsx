@@ -97,6 +97,7 @@ const stub = (): SourceTransactions => ({
   onEditorReady: vi.fn(),
   enabled: true,
   disabled: null,
+  settling: false,
 });
 
 describe("list transactions (P4-03)", () => {
@@ -448,6 +449,25 @@ describe("StrategyFormPanel list sections", () => {
       "rules",
       "form",
       { focusEditor: false },
+    );
+  });
+
+  it("marks the list item that the URL path points at (Graph → Form round trip, P5-03)", () => {
+    const state = parsedState(VERBOSE);
+    render(
+      <StrategyFormPanel
+        projection={projectForm(SCHEMA, state.parse, [])}
+        schema={SCHEMA}
+        tree={state.parse !== null && state.parse.status === "ok" ? state.parse.tree : {}}
+        transactions={stub()}
+        catalogs={{ equityFields: null, factors: [FACTOR] }}
+        selectedPointer="/factors/0"
+      />,
+    );
+    const factors = within(screen.getByRole("group", { name: /^factors/ }));
+    expect(factors.getByRole("region", { name: "factors · momentum" })).toHaveAttribute(
+      "aria-current",
+      "true",
     );
   });
 

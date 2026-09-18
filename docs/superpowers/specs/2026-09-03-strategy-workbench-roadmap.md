@@ -685,5 +685,8 @@ authoring 방식을 verbose YAML/JSON source로 전환했다. 이 initiative의 
 - M8 항목 중 revision history/diff, autosave/recovery, revision conflict, keyboard navigation은
   initiative P1-08, P3-06, P3-07, P4-08, P6-02, P6-03이 먼저 제공하며, 해당 PR merge 시 M8
   체크박스를 갱신한다. custom formula editor(표현식 DSL)는 initiative v1 non-goal이며 M8에 남는다.
+- Form·Graph 직접 편집(schema 1.1 GUI 편집 initiative `docs/planning/strategy-gui-editing`, 2026-09-18)은
+  source 트랜잭션으로 제공된다 — Form 필드·목록·중첩 목록, Graph 노드 추가·삭제·속성·입력 재연결·출력.
+  ADR D5 개정 참고.
 - Quick/Advanced 편집기는 ADR D9의 P6-06 migration gate와 실제 browser E2E를 통과한 뒤 제거했다.
   M6 Parameter Search는 YAML route 위의 후속 feature이며 legacy editor 제거의 선행 조건이 아니다.

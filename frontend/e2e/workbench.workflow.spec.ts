@@ -1114,6 +1114,91 @@ test.describe("professional YAML workflow", () => {
     );
   });
 
+  test("adds a node in the Graph editor, rewires an input, refreshes the plan and saves", async ({
+    page,
+  }) => {
+    const title = "P5-03 E2E Graph";
+    await openEditor(page, "/research/strategies/new");
+    await replaceSource(page, GOLDEN.replace("퀄리티 모멘텀", title));
+    await expectPhase(page, "검증 통과");
+    await saveAndWaitForRevision(page, 1);
+    const { strategyId } = strategyIdentity(page);
+
+    await page.getByRole("tab", { name: "Graph", exact: true }).click();
+    const editor = page.getByRole("region", { name: "그래프 편집" });
+    await expect(editor).toBeVisible();
+    await expect(editor.getByText("편집 가능")).toBeVisible();
+
+    // 노드 추가: 새 field 노드가 문서 끝에 들어가고 바로 선택된다.
+    await editor.getByRole("combobox", { name: "노드 종류" }).selectOption("field");
+    await editor.getByRole("button", { name: "노드 추가" }).click();
+    await expect(
+      editor.getByRole("status").filter({ hasText: "반영됨" }),
+    ).toContainText("field 반영됨");
+    const selected = editor.getByRole("group", { name: /선택한 노드/ });
+    const fieldId = selected.getByRole("combobox", { name: /^field_id/ });
+    const fieldOptions = fieldId.locator("option:not([disabled])");
+    await expect.poll(async () => fieldOptions.count()).toBeGreaterThan(1);
+    const chosenField = await fieldOptions.nth(1).getAttribute("value");
+    await fieldId.selectOption({ index: 1 });
+    await expect(
+      editor.getByRole("status").filter({ hasText: "반영됨" }),
+    ).toContainText("field_id 반영됨");
+
+    // 재연결: mom_252의 입력을 새 노드로.
+    await editor.getByRole("button", { name: "노드 편집: mom_252" }).click();
+    await selected
+      .getByRole("combobox", { name: /^input_node_id/ })
+      .selectOption("field");
+    await expect(
+      editor.getByRole("status").filter({ hasText: "반영됨" }),
+    ).toContainText("input_node_id 반영됨");
+
+    // 편집은 source 트랜잭션이라 YAML에 그대로 있고 compile이 다시 통과한다(문서 상태는 source view에 있다).
+    await page.getByRole("tab", { name: "YAML", exact: true }).click();
+    await expectPhase(page, "검증 통과");
+    const edited = await currentSource(page);
+    // 줄 단위 단언: `node_id: field`는 `input_node_id: field`의 부분문자열이라 앞 공백까지 본다.
+    expect(edited).toContain("\n          node_id: field\n");
+    expect(edited).toContain(`\n          field_id: ${chosenField}\n`);
+    expect(edited).toContain("\n          input_node_id: field\n");
+    expect(edited.startsWith(GOLDEN.slice(0, GOLDEN.indexOf("factors:")).replace("퀄리티 모멘텀", title))).toBe(true);
+    await saveAndWaitForRevision(page, 2);
+    const saved = requireData(
+      (
+        await getStrategyDocument({
+          client: apiClient,
+          path: { strategy_id: strategyId, revision: 2 },
+        })
+      ).data,
+      "graph-edited revision",
+    );
+    // Graph 편집 = source 편집: 편집기 텍스트를 backend가 compile한 hash와 저장된 revision의 hash가 같다.
+    const compiled = requireData(
+      (
+        await compileStrategyDocument({
+          client: apiClient,
+          body: { source: edited, format: "yaml" },
+        })
+      ).data,
+      "graph-edited compile",
+    );
+    expect(saved.spec_hash).toBe(compiled.spec_hash);
+    expect(saved.source_hash).toBe(compiled.source_hash);
+
+    // plan 투영(DAG 카드)에 새 노드가 들어온다.
+    await page.getByRole("tab", { name: "Graph", exact: true }).click();
+    await expect(
+      page
+        .getByRole("tabpanel", { name: "Graph" })
+        .getByRole("button", { name: "그래프 노드 선택: field" }),
+    ).toBeVisible();
+
+    // Graph → Form 왕복.
+    await editor.getByRole("button", { name: /Form에서 열기/ }).click();
+    await expect(page.getByRole("region", { name: "Form 편집" })).toBeVisible();
+  });
+
   test("upgrades a frozen 1.0 revision, saves it as 1.1 and backtests it", async ({
     page,
   }) => {

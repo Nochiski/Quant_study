@@ -7,6 +7,12 @@
 > 2026-09-06 P6-06 개정: 제품 소유자의 명시적 결정으로 D9의 M6 선행 조건을 폐기하고
 > YAML-first 전환을 완료한다. M6 Parameter Search는 YAML route에 결합되는 후속 milestone이다.
 >
+> 2026-09-18 GUI 편집 개정: D5를 개정한다 — Form과 Graph는 read-only projection이 아니라 runtime
+> schema × parse tree projection 위의 **source 트랜잭션** 편집기다(JSON pointer 범위의 `replaceRange`
+> 한 번, 주석·순서 보존, undo 한 번). 설계는
+> [schema 1.1 · GUI 편집 spec](./2026-09-17-strategy-schema-1-1-and-gui-editing-design.md) D5~D7,
+> 진행은 [strategy-gui-editing PLAN](../../planning/strategy-gui-editing/PLAN.md).
+>
 > Initiative: [YAML Strategy Workbench](../../planning/strategy-workbench-yaml-ui/README.md) —
 > 범위는 [WORKFLOW.md](../../planning/strategy-workbench-yaml-ui/WORKFLOW.md), PR 진행은
 > [PLAN.md](../../planning/strategy-workbench-yaml-ui/PLAN.md)
@@ -100,7 +106,12 @@ AND semantic blocking error == 0
   inline draft로 실행하고 run manifest에 source/spec provenance를 남긴다 (P1-09, P3-05).
 - 미래 live deployment는 saved revision reference만 허용한다. inline draft는 backtest 전용이다.
 
-### D5. Form과 Graph는 v1에서 read-only projection이다
+### D5. Form과 Graph는 v1에서 read-only projection이다 (2026-09-18 개정: source 트랜잭션 편집기)
+
+> 개정: Form(P4)·Graph(P5)는 이제 편집 가능하다. 편집은 projection을 reserialize하지 않고 runtime
+> schema × parse tree projection 위에서 `SourceOperation`(replace-scalar·insert-key·insert-item·remove)을
+> `planSourceOperation`이 source 텍스트의 최소 범위 하나로 계획해 편집기에 `replaceRange` 한 번으로 적용한다.
+> 그래서 아래 "YAML 주석과 순서를 잃는다"는 우려는 해소됐고 source SoT는 하나다. 아래 원문은 기록용이다.
 
 - JSON, Form, Graph, Diff view는 현재 valid `StrategySpec`을 읽는 projection이며 새 편집
   모델이 아니다. invalid source에서는 last valid 값을 `stale` badge와 함께 보여준다.
@@ -211,7 +222,7 @@ typing을 피하도록 날짜·버전을 quoted string으로 적으며, P0-03이
 기능:
 
 - 표현식 문자열 DSL, 단위 literal, YAML anchor/alias/merge key/custom tag
-- Form/Graph에서 source로의 편집
+- ~~Form/Graph에서 source로의 편집~~ (2026-09-18 개정으로 제공)
 - 자동 merge, 다중 사용자 실시간 편집
 - live trading, deployment, order routing (WORKFLOW 15절 경계만 유지)
 

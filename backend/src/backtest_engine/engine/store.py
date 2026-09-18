@@ -13,7 +13,7 @@ from dataclasses import dataclass, fields, is_dataclass, replace
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from backtest_engine.engine.tape import no_bar_reason
 from backtest_engine.types.actions import (
@@ -49,6 +49,11 @@ from backtest_engine.types.result_tables import (
     SnapshotRow,
 )
 from backtest_engine.types.tape import TapeFrame
+
+if TYPE_CHECKING:
+    # 런타임 import는 두지 않는다 — 저장소는 feed의 조회 메서드만 쓰고, engine 패키지가
+    # data 패키지를 모듈 로드 시점에 끌어오지 않게 한다.
+    from backtest_engine.data.feed import DataFeed
 
 
 class RecordKind(Enum):
@@ -452,8 +457,11 @@ class PersistentEventStore(EventStore):
     """Rust runtime이 소유한 레코드 배치를 공개 Event 객체로 lazy materialize하는 어댑터.
 
     실행 중에는 Python 객체를 만들지 않는다. Rust 레코드 payload는 원시 wire이고, Python 객체가
-    필요한 payload(DECISION의 결정 객체, CORPORATE_ACTION의 입력 사건, MARKET의 feed snapshot)만
-    side table로 보관한다. `records`/`orders()`/`fills()`는 최초 조회 시 seq 순서로 만든다.
+    필요한 payload(DECISION의 결정 객체, CORPORATE_ACTION의 입력 사건)만 side table로 보관한다.
+    MARKET payload는 side table조차 두지 않는다 — 세션 index가 그대로 bind된 feed의 세션을
+    가리키고, `MarketSnapshot`은 그 세션을 실제로 조회할 때 feed가 만든다. tape 실행처럼
+    스냅샷을 아무도 읽지 않는 워크로드는 객체가 한 개도 생기지 않는다.
+    `records`/`orders()`/`fills()`는 최초 조회 시 seq 순서로 만든다.
 
     조회는 kind 단위다. 종료된 실행이면 `drain_payloads(kind, limit)`로 그 kind의 payload를 seq
     순서로 청크씩 넘겨받고 Rust는 넘긴 자리를 바로 해제한다. 종료 전 partial trace는 해제하지
@@ -469,7 +477,7 @@ class PersistentEventStore(EventStore):
         self._runtime = runtime
         self._sessions: tuple[datetime, ...] = ()
         self._instruments: tuple[InstrumentId, ...] = ()
-        self._market_snapshots: tuple[MarketSnapshot, ...] = ()
+        self._feed: DataFeed | None = None
         self._corporate_actions: tuple[CorporateActionEvent, ...] = ()
         self._decisions: dict[str, StrategyDecision] = {}
         # submit_decision이 Rust 안에서 실패하면 decision_id를 못 받는다 — 제출 직전에 잡아둔
@@ -487,15 +495,25 @@ class PersistentEventStore(EventStore):
 
     # --- 실행 중 등록 ---------------------------------------------------------
 
-    def bind_feed(
-        self,
-        sessions: tuple[datetime, ...],
-        instruments: tuple[InstrumentId, ...],
-        market_snapshots: tuple[MarketSnapshot, ...],
-    ) -> None:
-        self._sessions = sessions
+    def bind_feed(self, feed: DataFeed, instruments: tuple[InstrumentId, ...]) -> None:
+        """실행한 feed와 적재 순서의 종목 등록부를 묶는다.
+
+        스냅샷 튜플이 아니라 feed 자체를 잡는다 — MARKET 레코드·콜백 이벤트·결과 테이블이
+        요구하는 세션만 `snapshot_at`으로 만들게 하려면 열을 쥔 쪽이 살아 있어야 한다.
+        """
+        self._feed = feed
+        self._sessions = feed.sessions
         self._instruments = instruments
-        self._market_snapshots = market_snapshots
+
+    def _bound_feed(self) -> DataFeed:
+        feed = self._feed
+        if feed is None:
+            raise RuntimeError(
+                "persistent event store has no bound feed — "
+                f"sessions={len(self._sessions)} instruments={len(self._instruments)} "
+                "(bind_feed must run before any market lookup)"
+            )
+        return feed
 
     def bind_corporate_actions(self, actions: tuple[CorporateActionEvent, ...]) -> None:
         self._corporate_actions = actions
@@ -711,7 +729,7 @@ class PersistentEventStore(EventStore):
         ts = self._sessions[frame.session_index]
         kind = frame.event_kind
         if kind == "market":
-            return self._market_snapshots[frame.session_index]
+            return self._bound_feed().snapshot_at(frame.session_index)
         if kind == "fill":
             return self.fill_from_wire(ts, frame.event)
         if kind == "order_update":
@@ -795,9 +813,10 @@ class PersistentEventStore(EventStore):
         """
         sessions = self._sessions
         if kind is RecordKind.MARKET:
-            # MARKET payload는 Rust에 값이 없다 — 세션 index가 그대로 feed snapshot을 가리킨다.
-            snapshots = self._market_snapshots
-            return lambda session_index, _payload: snapshots[session_index]
+            # MARKET payload는 Rust에 값이 없다 — 세션 index가 그대로 feed 세션을 가리킨다.
+            # 스냅샷 객체는 이 조회가 처음 요구하는 시점에 feed가 만든다.
+            feed = self._bound_feed()
+            return lambda session_index, _payload: feed.snapshot_at(session_index)
         if kind is RecordKind.DECISION:
             return lambda session_index, payload: DecisionRecord(
                 payload[0], self._decision(sessions[session_index], payload[0], payload[1])
@@ -971,9 +990,12 @@ class PersistentEventStore(EventStore):
         session_count = max(session_index for _seq, session_index, _kind in batch) + 1
         if session_count >= total:
             return self._sessions, self._instruments
-        # 종목 순서는 python 코어와 같은 규칙이다 — 덮는 구간 bar의 첫 등장 순서.
+        # 종목 순서는 python 코어와 같은 규칙이다 — 덮는 구간 bar의 첫 등장 순서. 열을
+        # 직접 훑으므로 자르려고 스냅샷 객체를 만들지 않는다.
+        columns = self._bound_feed().columns()
+        instruments = columns.instruments
+        instrument_ids = columns.instrument_ids
         registry: dict[InstrumentId, None] = {}
-        for snapshot in self._market_snapshots[:session_count]:
-            for bar in snapshot.bars:
-                registry.setdefault(bar.instrument, None)
+        for row in range(columns.offsets[session_count]):
+            registry.setdefault(instruments[instrument_ids[row]], None)
         return self._sessions[:session_count], tuple(registry)

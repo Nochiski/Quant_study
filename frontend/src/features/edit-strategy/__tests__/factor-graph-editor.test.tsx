@@ -192,6 +192,15 @@ describe("FactorGraphEditor (P5-02)", () => {
     await user.type(nodeId, "px{Enter}");
     expect(vi.mocked(transactions.apply).mock.calls).toHaveLength(calls);
     expect(selected.getByText("같은 그래프에 이미 있는 node_id입니다")).toBeInTheDocument();
+    // 거부 뒤 다른 곳으로 포커스를 옮겨도(blur) 안내는 남고 적용은 없다(리뷰 P2-1).
+    await user.tab();
+    expect(vi.mocked(transactions.apply).mock.calls).toHaveLength(calls);
+    expect(selected.getByText("같은 그래프에 이미 있는 node_id입니다")).toBeInTheDocument();
+    // Escape로 되돌리면 값과 안내가 함께 원래대로(리뷰 P2-2).
+    await user.click(nodeId);
+    await user.keyboard("{Escape}");
+    expect(nodeId).toHaveValue("close");
+    expect(selected.queryByText("같은 그래프에 이미 있는 node_id입니다")).toBeNull();
   });
 
   it("refuses to remove a referenced node with the referencing pointers, removes an unreferenced one, and re-selects the graph", async () => {

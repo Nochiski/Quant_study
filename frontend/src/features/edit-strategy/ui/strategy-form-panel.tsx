@@ -866,13 +866,15 @@ const TextualControl = ({
   }
   const { control } = field;
   const submit = (explicit: boolean): void => {
-    // 값을 되돌리거나 다시 확정하면 이전 무효 안내는 사라진다(DEFECT-P402-003).
-    onValid();
+    // 값을 되돌리거나(Escape 포함) 다시 확정하면 이전 무효 안내는 사라진다(DEFECT-P402-003).
     if (draft === committed) {
+      onValid();
       setPristine(true);
       return;
     }
     const last = submitted.current;
+    // 같은 값의 재확정은 건너뛴다. 실패한 확정 뒤의 blur도 그렇다 — 이때 안내를 지우면 잘못된 입력만 남는다
+    // (#145 리뷰 P2-1: 중복 `node_id` 거부 뒤 다른 필드를 눌러도 안내가 유지되어야 한다).
     if (
       last !== null &&
       last.draft === draft &&
@@ -880,6 +882,7 @@ const TextualControl = ({
       (!last.failed || !explicit)
     )
       return;
+    onValid();
     const parsed = parseDraft(control, draft);
     if (parsed.status === "invalid") {
       onInvalid(parsed.reason);
@@ -898,6 +901,7 @@ const TextualControl = ({
       event.preventDefault();
       setDraft(committed);
       setPristine(true);
+      onValid();
     }
   };
   const numeric = control.kind === "number";

@@ -12,10 +12,11 @@ import pytest
 
 from backtest_engine import BacktestEngine, RunConfig
 from backtest_engine.data.feed import DataFeed
-from backtest_engine.engine.core import core_available
+from backtest_engine.engine.core import core_available, instrument_key
 from backtest_engine.errors import EquityWipedOut
 from backtest_engine.types.decision import StrategyDecision
 from backtest_engine.types.events import StrategyEvent
+from backtest_engine.types.instruments import AssetClass, InstrumentId
 from backtest_engine.types.market import MarketSnapshot
 from backtest_engine.types.strategy import StrategyContext
 from tests import test_short_selling
@@ -132,6 +133,39 @@ def test_python_strategy_sees_feed_snapshot_objects_for_market_callbacks() -> No
     assert [event is snapshot for event, snapshot in zip(seen, feed.snapshots(), strict=True)] == [
         True
     ] * len(GOLDEN_BARS)
+
+
+@RUST_ONLY
+def test_rust_feed_rejects_two_instruments_that_share_one_key() -> None:
+    """`instrument_key`가 필드를 ':'로 이어 붙이므로 필드 안의 ':'가 두 종목을 한 key로 합친다.
+
+    `("KRX", "A:B")`와 `("KRX:A", "B")`가 둘 다 `KRX:A:B:equity:KRW`를 낸다. 그대로 적재하면
+    원장·마크·심볼 표가 두 종목을 한 종목으로 섞으므로 feed 적재에서 거부해야 한다.
+    """
+    colliding = (
+        InstrumentId(venue="KRX", symbol="A:B", asset_class=AssetClass.EQUITY, currency="KRW"),
+        InstrumentId(venue="KRX:A", symbol="B", asset_class=AssetClass.EQUITY, currency="KRW"),
+    )
+    assert instrument_key(colliding[0]) == instrument_key(colliding[1])
+    bars = tuple(
+        make_bar(day(index), instrument, 100.0, 100.0)
+        for index in (1, 2)
+        for instrument in colliding
+    )
+
+    engine = BacktestEngine(RunConfig(run_id="key-collision", initial_cash=100_000.0), core="rust")
+    with pytest.raises(ValueError) as caught:
+        engine.run(ScriptedStrategy(script=(None, None)), DataFeed(bars))
+    message = str(caught.value)
+    assert message.startswith("instrument key collision — key='KRX:A:B:equity:KRW'")
+    assert "venue='KRX', symbol='A:B'" in message
+    assert "venue='KRX:A', symbol='B'" in message
+
+    # python 코어는 key 개념이 없어 같은 feed를 그대로 완주한다 — 코어 간 거부 통일은 후속 과제.
+    python_engine = BacktestEngine(
+        RunConfig(run_id="key-collision-python", initial_cash=100_000.0), core="python"
+    )
+    python_engine.run(ScriptedStrategy(script=(None, None)), DataFeed(bars))
 
 
 @RUST_ONLY

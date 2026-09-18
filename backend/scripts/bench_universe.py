@@ -383,6 +383,8 @@ def main(argv: list[str]) -> int:
         )
 
     baseline = medians("python") if "python" in cores else None
+    # --core all은 한 프로세스라 코어별 RSS가 격리되지 않는다.
+    rss_isolated = len(cores) == 1
     core_payload: dict[str, object] = {}
     payload: dict[str, object] = {
         "workload": {
@@ -394,8 +396,7 @@ def main(argv: list[str]) -> int:
             "synthetic": args.synthetic,
             "repeat": args.repeat,
             "warmup": args.warmup,
-            # --core all은 한 프로세스라 코어별 RSS가 격리되지 않는다.
-            "rss_isolated": len(cores) == 1,
+            "rss_isolated": rss_isolated,
         },
         "cores": core_payload,
     }
@@ -422,7 +423,10 @@ def main(argv: list[str]) -> int:
             "final_equity": final_equity,
             "orders": orders,
             "fills": fills,
-            "peak_rss_after_materialize_bytes": timings[-1].peak_rss_after_materialize_bytes,
+            # 코어가 프로세스를 공유하면 이 값은 그 코어의 것이 아니므로 null로 남긴다.
+            "peak_rss_after_materialize_bytes": (
+                timings[-1].peak_rss_after_materialize_bytes if rss_isolated else None
+            ),
             "process_peak_rss_bytes": peak_rss_bytes(),
         }
         speedup_text = (
@@ -434,7 +438,11 @@ def main(argv: list[str]) -> int:
             f"core={core} run={run_median:.6f}s materialize={materialize_median:.6f}s "
             f"total={total_median:.6f}s{speedup_text} "
             f"orders={orders} fills={fills} final_equity={final_equity:,.0f} "
-            f"peak_rss={timings[-1].peak_rss_after_materialize_bytes / 1024 / 1024:.1f}MiB"
+            + (
+                f"peak_rss={timings[-1].peak_rss_after_materialize_bytes / 1024 / 1024:.1f}MiB"
+                if rss_isolated
+                else f"process_peak_rss={peak_rss_bytes() / 1024 / 1024:.1f}MiB(shared)"
+            )
         )
 
     if len(signature_by_core) > 1 and len(set(signature_by_core.values())) != 1:

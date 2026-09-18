@@ -18,7 +18,9 @@
 - `artifacts`: `_artifacts()` — 엔진 결과를 raw artifact 레코드로 변환.
 - `analysis_points`: `_artifacts()` 반환 → 첫 `compute_analytics()` 진입. 벤치마크 시계열,
   `AnalysisPoint` 생성, fill 단위 합계(traded notional·수수료·슬리피지)를 모두 포함한다.
-- `compute_analytics`: `compute_analytics()` 호출 누적 (full + metric window).
+- `compute_analytics`: `compute_analytics()` 호출 누적. 기본 요청은 HTTP `_run_body`와 같은
+  모양으로 out-of-sample metric window 하나를 실으므로 full 1회 + window 1회가 누적된다
+  (`--no-metric-windows`로 full 1회만 재는 비교도 가능).
 - `manifest`: `artifacts` 진행 콜백 → `execute()` 반환. manifest·fingerprint 조립.
 
 구간 계측은 어댑터를 수정하지 않고 어댑터 모듈의 `BacktestEngine`·`_artifacts`·
@@ -36,6 +38,7 @@ private 모듈을 직접 import한다 — 프로덕션 코드에서는 facade �
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import statistics
 import sys
@@ -67,10 +70,12 @@ from strategy_workbench.application.backtest_run.facade.ports import (
     UniverseMembershipRecord,
 )
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
+from strategy_workbench.domain.analytics.facade.metrics import MetricScope
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunResult,
     BacktestRunSpec,
     ExecutionCore,
+    MetricWindow,
     StrategyProvenance,
     StrategySourceKind,
 )
@@ -99,8 +104,8 @@ AFTER_RUN_STAGES: tuple[str, ...] = (
     "compute_analytics",
     "manifest",
 )
-# `other`는 total에서 위 구간들을 뺀 잔여다 (진행 콜백 사이 간격, 지표 parity 확인,
-# metric window 슬라이싱 등). 표가 total로 합산되도록 남겨 계측 누락을 드러낸다.
+# `other`는 total에서 위 구간들을 뺀 잔여다 (지표 parity 확인, metric window의
+# `_slice_analytics`, 진행 콜백 사이 간격). 표가 total로 합산되도록 남겨 계측 누락을 드러낸다.
 STAGES: tuple[str, ...] = (
     "dataset_to_engine_inputs",
     "strategy_and_feed_build",
@@ -284,16 +289,37 @@ def compile_bench_tape(
     )
 
 
+def out_of_sample_window(sessions: tuple[date, ...]) -> MetricWindow:
+    """HTTP `_run_body`와 같은 모양의 out-of-sample window 하나.
+
+    거기서는 전체 기간의 뒤쪽 약 1/3을 OOS로 잡는다. 세션 수가 다르므로 같은 비율로 맞춘다.
+    이 window가 있어야 어댑터의 window 루프와 `_slice_analytics`가 실제로 돈다.
+    """
+    start_index = len(sessions) - max(1, len(sessions) // 3)
+    return MetricWindow(
+        scope=MetricScope.OUT_OF_SAMPLE,
+        start=sessions[start_index],
+        end=sessions[-1],
+        label="OOS",
+    )
+
+
 def execution_request(
     core: ExecutionCore,
     spec: StrategySpec,
     tape: TargetTape,
     dataset: BacktestDataset,
+    metric_windows: tuple[MetricWindow, ...],
 ) -> BacktestExecutionRequest:
     spec_hash = strategy_spec_hash(spec)
     return BacktestExecutionRequest(
         run_id=f"bench-workbench-{core.value}",
-        spec=BacktestRunSpec(strategy=spec, core=core, initial_cash=1_000_000_000.0),
+        spec=BacktestRunSpec(
+            strategy=spec,
+            core=core,
+            initial_cash=1_000_000_000.0,
+            metric_windows=metric_windows,
+        ),
         target_tape=tape,
         dataset=dataset,
         strategy_provenance=StrategyProvenance(
@@ -315,8 +341,9 @@ def measure_once(
 
     # reason: 세 래퍼 모두 어댑터의 원래 호출 인자를 그대로 통과시키는 pass-through 계측이다.
     def engine_factory(*args: Any, **kwargs: Any) -> _TimedEngine:
+        engine = real_engine(*args, **kwargs)
         clock.mark("engine_constructed")
-        return _TimedEngine(real_engine(*args, **kwargs), clock)
+        return _TimedEngine(engine, clock)
 
     def timed_artifacts(*args: Any, **kwargs: Any) -> Any:
         started = time.perf_counter()
@@ -405,6 +432,11 @@ def main(argv: Sequence[str]) -> int:
     parser.add_argument("--core", choices=("python", "rust", "all"), default="all")
     parser.add_argument("--repeat", type=int, default=3)
     parser.add_argument("--rebalance-every", type=int, default=5)
+    parser.add_argument(
+        "--no-metric-windows",
+        action="store_true",
+        help="metric window 없이 full 지표만 계산한다 (window 루프 비용을 뺀 비교용)",
+    )
     parser.add_argument("--json-out", type=Path)
     parser.add_argument("--start", type=lambda s: date.fromisoformat(s), default=date(2020, 1, 1))
     parser.add_argument("--end", type=lambda s: date.fromisoformat(s), default=date(2024, 12, 31))
@@ -415,6 +447,7 @@ def main(argv: Sequence[str]) -> int:
     )
     spec = bench_strategy_spec(security_ids, sessions, args.rebalance_every)
     tape = compile_bench_tape(spec, dataset, security_ids, sessions)
+    metric_windows = () if args.no_metric_windows else (out_of_sample_window(sessions),)
     cores = (
         (ExecutionCore.PYTHON, ExecutionCore.RUST)
         if args.core == "all"
@@ -423,7 +456,7 @@ def main(argv: Sequence[str]) -> int:
     print(
         f"instruments={len(security_ids)} sessions={len(sessions)} bars={len(dataset.bars)} "
         f"frames={len(tape.frames)} cores={','.join(core.value for core in cores)} "
-        f"repeat={args.repeat}"
+        f"repeat={args.repeat} metric_windows={len(metric_windows)}"
     )
 
     adapter = BacktestEngineExecutorAdapter()
@@ -432,8 +465,11 @@ def main(argv: Sequence[str]) -> int:
     signatures: dict[ExecutionCore, tuple[object, ...]] = {}
     for _ in range(args.repeat):
         for core in cores:
+            # 앞 회차가 남긴 쓰레기를 타이머 밖에서 치운다. 그러지 않으면 전면 GC가 임의의
+            # 구간에 붙어 그 구간만 부풀어 보인다.
+            gc.collect()
             stages, total, result = measure_once(
-                adapter, execution_request(core, spec, tape, dataset)
+                adapter, execution_request(core, spec, tape, dataset, metric_windows)
             )
             stage_samples[core].append(stages)
             total_samples[core].append(total)
@@ -472,6 +508,7 @@ def main(argv: Sequence[str]) -> int:
             "tape_frames": len(tape.frames),
             "rebalance_every": args.rebalance_every,
             "repeat": args.repeat,
+            "metric_windows": len(metric_windows),
             "synthetic": True,
         },
         "cores": core_payload,
@@ -484,6 +521,9 @@ def main(argv: Sequence[str]) -> int:
         after_run = sum(stage_medians[stage] for stage in AFTER_RUN_STAGES)
         core_payload[core.value] = {
             "stage_seconds": stage_medians,
+            "stage_seconds_samples": {
+                stage: [sample[stage] for sample in stage_samples[core]] for stage in STAGES
+            },
             "total_seconds": total_median,
             "total_seconds_samples": total_samples[core],
             "speedup_vs_python": speedup,

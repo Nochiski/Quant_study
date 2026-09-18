@@ -21,6 +21,10 @@ pub(crate) struct PersistentFeed {
     key_index: HashMap<String, u32>,
     /// key → symbol. 라우팅이 결정마다 쓰는 심볼 폴백 표를 적재 시 한 번만 만든다.
     symbol_by_key: HashMap<String, String>,
+    /// `session * keys.len() + instrument_id` → 행 번호. bar가 없으면 `u32::MAX`.
+    /// 세션별 행 구간을 매번 훑던 `row_of`를 O(1)로 만든다. 4B × 세션 × 종목이 든다
+    /// (300종목 1,231세션 = 1.5MiB).
+    row_index: Vec<u32>,
 }
 
 impl PersistentFeed {
@@ -98,6 +102,33 @@ impl PersistentFeed {
             }
             symbol_by_key.insert(key.clone(), symbol.clone());
         }
+        // 행 번호를 u32로 담으므로 행 수가 u32 범위를 넘으면 인덱스를 만들 수 없다.
+        // `u32::MAX`는 "bar 없음" 표식이라 행 번호로 쓸 수 없다.
+        if rows >= u32::MAX as usize {
+            return Err(PyValueError::new_err(format!(
+                "feed has too many rows for the row index — rows={rows} limit={}",
+                u32::MAX as usize - 1
+            )));
+        }
+        let slots = sessions.len().checked_mul(keys.len()).ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "feed row index size overflows usize — sessions={} registry={}",
+                sessions.len(),
+                keys.len()
+            ))
+        })?;
+        let mut row_index = vec![u32::MAX; slots];
+        for (session, window) in offsets.windows(2).enumerate() {
+            let base = session * keys.len();
+            for (offset, instrument_id) in instrument_ids[window[0]..window[1]].iter().enumerate() {
+                let slot = base + *instrument_id as usize;
+                // 한 세션에 같은 종목 행이 둘이면 앞선 행을 남긴다 — 선형 탐색이 `find`로
+                // 첫 행을 고르던 동작과 같다.
+                if row_index[slot] == u32::MAX {
+                    row_index[slot] = (window[0] + offset) as u32;
+                }
+            }
+        }
         Ok(Self {
             keys,
             symbols,
@@ -112,6 +143,7 @@ impl PersistentFeed {
             current_session: None,
             key_index,
             symbol_by_key,
+            row_index,
         })
     }
 
@@ -129,9 +161,18 @@ impl PersistentFeed {
 
     /// 세션에 해당 종목 bar가 있으면 그 행 번호.
     fn row_of(&self, session: usize, key: &str) -> Option<usize> {
-        let instrument_id = self.instrument_id(key)?;
-        self.row_range(session)
-            .find(|row| self.instrument_ids[*row] == instrument_id)
+        self.row_at(session, self.instrument_id(key)?)
+    }
+
+    /// `row_index` 조회. 세션 범위 밖이거나 그날 bar가 없으면 `None`.
+    fn row_at(&self, session: usize, instrument_id: u32) -> Option<usize> {
+        let slot = session
+            .checked_mul(self.keys.len())?
+            .checked_add(instrument_id as usize)?;
+        match self.row_index.get(slot).copied() {
+            Some(row) if row != u32::MAX => Some(row as usize),
+            _ => None,
+        }
     }
 
     pub(crate) fn has_bar(&self, session: usize, key: &str) -> bool {
@@ -261,10 +302,7 @@ impl PersistentFeed {
         let first = self
             .sessions
             .partition_point(|session| session.as_str() < event_ts);
-        (first..self.sessions.len()).find(|index| {
-            self.row_range(*index)
-                .any(|row| self.instrument_ids[row] == instrument_id)
-        })
+        (first..self.sessions.len()).find(|index| self.row_at(*index, instrument_id).is_some())
     }
 
     pub(crate) fn history_window(
@@ -296,13 +334,9 @@ impl PersistentFeed {
         let timestamps = self.sessions[selected.clone()].to_vec();
         let mut values = Vec::with_capacity(lookback * keys.len());
         for session in selected {
-            let rows: HashMap<u32, usize> = self
-                .row_range(session)
-                .map(|row| (self.instrument_ids[row], row))
-                .collect();
             for id in &ids {
                 let value = id
-                    .and_then(|id| rows.get(&id).copied())
+                    .and_then(|id| self.row_at(session, id))
                     .map(|row| match field {
                         HistoryField::Open => self.opens[row],
                         HistoryField::High => self.highs[row],

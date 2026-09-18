@@ -16,6 +16,7 @@ import pytest
 
 from backtest_engine import BacktestEngine, BacktestResult, RunConfig
 from backtest_engine.data.feed import DataFeed
+from backtest_engine.engine.store import EventStore, RecordKind
 from backtest_engine.errors import CapabilityNotImplemented, UndeclaredActionReturned
 from backtest_engine.types.actions import (
     ActionKind,
@@ -30,9 +31,10 @@ from backtest_engine.types.actions import (
     WeightTarget,
 )
 from backtest_engine.types.decision import StrategyDecision
-from backtest_engine.types.events import OrderStatus, StrategyEvent
+from backtest_engine.types.events import CostAccrued, CostKind, OrderStatus, StrategyEvent
 from backtest_engine.types.market import Bar, PriceField
 from backtest_engine.types.orders import Side
+from backtest_engine.types.portfolio import PortfolioSnapshot, Position
 from backtest_engine.types.requirements import (
     EventKind,
     EverySession,
@@ -40,7 +42,7 @@ from backtest_engine.types.requirements import (
     StrategyRequirements,
 )
 from backtest_engine.types.strategy import StrategyContext
-from tests.conftest import day, make_bar, make_instrument
+from tests.conftest import day, make_bar, make_instrument, make_snapshot
 
 INSTRUMENT = make_instrument()
 
@@ -295,3 +297,175 @@ class TestAdjustPositionGolden:
         assert final.cash == pytest.approx(99_258.54)
         assert int(final.position_qty(INSTRUMENT)) == 6
         assert final.equity == pytest.approx(99_258.54 + 6 * 80.0)
+
+
+class TestResultTables:
+    """`EventStore.result_tables()` — 공개 객체를 거치지 않는 결과 집계 계약.
+
+    골든 시나리오의 손계산 값을 그대로 쓰되, 여기서는 행이 primitive인지와 집계 결합
+    순서가 `sum` 표현식과 bit 동일한지를 고정한다.
+    """
+
+    def test_lookup_tables_follow_feed_and_bar_order(self) -> None:
+        engine, _, _ = run_golden()
+        tables = engine.event_store.result_tables()
+
+        assert tables.sessions == (day(1), day(2), day(3), day(4))
+        assert tables.instruments == (INSTRUMENT,)
+
+    def test_snapshot_rows_are_hand_computed_primitives(self) -> None:
+        engine, _, _ = run_golden()
+        tables = engine.event_store.result_tables()
+
+        sessions = [row[0] for row in tables.snapshots]
+        assert sessions == [0, 1, 2, 3]
+        d1, d2, d3, d4 = tables.snapshots
+        # (session_index, cash, equity, gross_exposure, positions_value)
+        assert d1[1] == pytest.approx(100_000.0)
+        assert d1[4] == 0.0
+        assert d2[1] == pytest.approx(22_923.0)
+        assert d2[2] == pytest.approx(106_923.0)
+        assert d2[4] == pytest.approx(84_000.0)
+        assert d3[2] == pytest.approx(110_423.0)
+        assert d4[1] == pytest.approx(85_860.0)
+        assert d4[4] == 0.0
+        # 스냅샷 4건 중 보유가 있는 D2·D3만 position 행을 남긴다.
+        assert [row[0] for row in tables.positions] == [1, 2]
+        session_index, instrument_index, quantity, average_price, _, market_value, _ = (
+            tables.positions[0]
+        )
+        assert (session_index, instrument_index) == (1, 0)
+        assert quantity == 700
+        assert type(quantity) is int
+        assert average_price == pytest.approx(110.0)
+        assert market_value == pytest.approx(84_000.0)
+
+    def test_order_and_fill_rows_carry_enum_wire_values(self) -> None:
+        engine, _, result = run_golden()
+        tables = engine.event_store.result_tables()
+
+        assert [(row[2], row[3], row[4], row[5], row[6], row[7]) for row in tables.orders] == [
+            (0, 0, "buy", 700, "market", "day"),
+            (2, 0, "sell", 700, "market", "day"),
+        ]
+        assert [row[0] for row in tables.orders] == [order.order_id for order in result.orders]
+        assert [(row[2], row[3], row[4], row[5], row[6]) for row in tables.fills] == [
+            (1, 0, "buy", 700, 110.0),
+            (3, 0, "sell", 700, 90.0),
+        ]
+        assert [row[0] for row in tables.fills] == [fill.fill_id for fill in result.fills]
+        assert [row[1] for row in tables.fills] == [fill.order_id for fill in result.fills]
+        assert tables.costs == ()
+
+    def test_fill_totals_match_the_sum_expressions_bit_for_bit(self) -> None:
+        engine, _, result = run_golden()
+        totals = engine.event_store.result_tables().fill_totals
+
+        assert totals.traded_notional == sum(
+            float(fill.quantity) * fill.price for fill in result.fills
+        )
+        assert totals.total_fees == sum(fill.fee for fill in result.fills)
+        assert totals.total_slippage_cost == sum(
+            float(fill.quantity) * abs(fill.slippage_per_share) for fill in result.fills
+        )
+
+    def test_positions_value_matches_the_sum_expression_bit_for_bit(self) -> None:
+        engine, _, result = run_golden()
+        tables = engine.event_store.result_tables()
+
+        assert [row[4] for row in tables.snapshots] == [
+            sum(position.market_value for position in snapshot.positions)
+            for snapshot in result.snapshots
+        ]
+
+    def test_repeated_calls_reuse_the_built_tables(self) -> None:
+        engine, _, _ = run_golden()
+        store = engine.event_store
+        assert store.result_tables() is store.result_tables()
+
+
+class TestResultTableRejections:
+    """레코드가 테이블 계약을 못 채우면 조용한 값 대체 대신 거부한다."""
+
+    @staticmethod
+    def _store_with_one_session() -> EventStore:
+        store = EventStore()
+        store.append(
+            day(1),
+            RecordKind.MARKET,
+            make_snapshot(day(1), make_bar(day(1), INSTRUMENT, 100.0, 100.0)),
+        )
+        return store
+
+    def test_fractional_quantity_is_refused_instead_of_truncated(self) -> None:
+        store = self._store_with_one_session()
+        store.append(
+            day(1),
+            RecordKind.SNAPSHOT,
+            PortfolioSnapshot(
+                ts=day(1),
+                cash=0.0,
+                positions=(
+                    Position(
+                        instrument=INSTRUMENT,
+                        quantity=Decimal("1.5"),
+                        average_price=100.0,
+                        market_price=100.0,
+                        market_value=150.0,
+                        unrealized_pnl=0.0,
+                    ),
+                ),
+                equity=150.0,
+                gross_exposure=1.0,
+            ),
+        )
+        with pytest.raises(ValueError, match=r"integral share quantities only.*quantity=1.5"):
+            store.result_tables()
+
+    def test_timestamp_outside_the_feed_sessions_is_refused(self) -> None:
+        store = self._store_with_one_session()
+        store.append(
+            day(9),
+            RecordKind.COST,
+            CostAccrued(ts=day(9), kind=CostKind.MARGIN_INTEREST, instrument=None, amount=1.0),
+        )
+        with pytest.raises(ValueError, match=r"not a feed session — record=cost"):
+            store.result_tables()
+
+    def test_instrument_without_a_market_bar_is_refused(self) -> None:
+        store = self._store_with_one_session()
+        other = make_instrument("000660")
+        store.append(
+            day(1),
+            RecordKind.COST,
+            CostAccrued(ts=day(1), kind=CostKind.SHORT_BORROW, instrument=other, amount=1.0),
+        )
+        with pytest.raises(ValueError, match=r"never appeared in a market bar.*000660"):
+            store.result_tables()
+
+    def test_cost_rows_keep_kind_wire_value_and_optional_instrument(self) -> None:
+        store = self._store_with_one_session()
+        store.append(
+            day(1),
+            RecordKind.COST,
+            CostAccrued(ts=day(1), kind=CostKind.SHORT_BORROW, instrument=INSTRUMENT, amount=2.5),
+        )
+        store.append(
+            day(1),
+            RecordKind.COST,
+            CostAccrued(ts=day(1), kind=CostKind.MARGIN_INTEREST, instrument=None, amount=0.5),
+        )
+        assert store.result_tables().costs == (
+            (0, "short_borrow", 0, 2.5),
+            (0, "margin_interest", None, 0.5),
+        )
+
+    def test_new_records_invalidate_the_cached_tables(self) -> None:
+        store = self._store_with_one_session()
+        assert store.result_tables().costs == ()
+        store.append(
+            day(1),
+            RecordKind.COST,
+            CostAccrued(ts=day(1), kind=CostKind.MARGIN_INTEREST, instrument=None, amount=0.5),
+        )
+        assert store.result_tables().costs == ((0, "margin_interest", None, 0.5),)

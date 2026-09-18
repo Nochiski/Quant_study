@@ -39,6 +39,15 @@ from backtest_engine.types.instruments import InstrumentId
 from backtest_engine.types.market import MarketSnapshot
 from backtest_engine.types.orders import OrderType, Side, TimeInForce
 from backtest_engine.types.portfolio import PortfolioSnapshot, Position
+from backtest_engine.types.result_tables import (
+    CostRow,
+    FillRow,
+    FillTotals,
+    OrderRow,
+    PositionRow,
+    ResultTables,
+    SnapshotRow,
+)
 from backtest_engine.types.tape import TapeFrame
 
 
@@ -176,10 +185,27 @@ def _json_bytes(value: Any) -> bytes:
     ).encode("utf-8")
 
 
+def _integral_quantity(quantity: Decimal, *, label: str, ts: datetime, symbol: str) -> int:
+    """결과 테이블용 수량 변환. 커널은 정수 주식 수량만 지원한다.
+
+    소수 수량을 조용히 버림하면 테이블이 원장과 다른 수량을 말하게 된다 — 값이 정수가
+    아니면 어느 레코드였는지와 함께 거부한다.
+    """
+    value = int(quantity)
+    if quantity != value:
+        raise ValueError(
+            "result tables carry integral share quantities only — "
+            f"record={label} ts={ts} instrument={symbol} quantity={quantity}"
+        )
+    return value
+
+
 class EventStore:
     def __init__(self) -> None:
         self._records: list[Record] = []
         self._decision_tape: list[DecisionTapeEntry] = []
+        # 결과 테이블은 레코드가 더 쌓이지 않은 동안만 유효하다 — 캐시 키를 레코드 수로 둔다.
+        self._result_tables_cache: tuple[int, ResultTables] | None = None
 
     def append(self, ts: datetime, kind: RecordKind, payload: RecordPayload) -> None:
         self._records.append(Record(seq=len(self._records), ts=ts, kind=kind, payload=payload))
@@ -259,6 +285,167 @@ class EventStore:
 
     def costs(self) -> tuple[CostAccrued, ...]:
         return tuple(p for p in self._payloads(RecordKind.COST) if isinstance(p, CostAccrued))
+
+    def result_tables(self) -> ResultTables:
+        """결과 집계용 columnar 테이블. 공개 Event 객체 대신 primitive 행으로 답한다.
+
+        Python 코어는 실행 중에 이미 공개 객체를 만들었으므로 여기서는 그 객체에서 행을
+        떠온다. 결과를 자기 레코드로 옮겨 담는 호출자가 중간 객체를 거치지 않게 하는 것이
+        이 계약의 목적이다 (행 의미는 `types/result_tables.py`가 정본).
+
+        세션·종목 인덱스는 MARKET 레코드에서 첫 등장 순서로 매긴다 — persistent 코어가 feed
+        등록부(`_load_persistent_feed`의 registry)에 매기는 순서와 같아야 두 코어의 테이블이
+        동등하다. 그쪽도 세션은 feed 순서, 종목은 bar 첫 등장 순서다.
+
+        Raises:
+            ValueError: 수량이 정수가 아니거나, 레코드가 MARKET 레코드에 없는 세션·종목을
+                가리킬 때.
+        """
+        cached = self._result_tables_cache
+        if cached is not None and cached[0] == len(self._records):
+            return cached[1]
+        tables = self._build_result_tables()
+        self._result_tables_cache = (len(self._records), tables)
+        return tables
+
+    def _build_result_tables(self) -> ResultTables:
+        sessions: list[datetime] = []
+        session_index: dict[datetime, int] = {}
+        instruments: list[InstrumentId] = []
+        instrument_index: dict[InstrumentId, int] = {}
+        for record in self._records:
+            if record.kind is not RecordKind.MARKET or not isinstance(
+                record.payload, MarketSnapshot
+            ):
+                continue
+            if record.payload.ts not in session_index:
+                session_index[record.payload.ts] = len(sessions)
+                sessions.append(record.payload.ts)
+            for bar in record.payload.bars:
+                if bar.instrument not in instrument_index:
+                    instrument_index[bar.instrument] = len(instruments)
+                    instruments.append(bar.instrument)
+
+        def session_of(ts: datetime, label: str) -> int:
+            found = session_index.get(ts)
+            if found is None:
+                raise ValueError(
+                    "record timestamp is not a feed session — "
+                    f"record={label} ts={ts} sessions={len(sessions)} records={len(self._records)}"
+                )
+            return found
+
+        def instrument_of(instrument: InstrumentId, label: str) -> int:
+            found = instrument_index.get(instrument)
+            if found is None:
+                raise ValueError(
+                    "record instrument never appeared in a market bar — "
+                    f"record={label} instrument={instrument.symbol} venue={instrument.venue} "
+                    f"instruments={len(instruments)}"
+                )
+            return found
+
+        snapshots: list[SnapshotRow] = []
+        positions: list[PositionRow] = []
+        orders: list[OrderRow] = []
+        fills: list[FillRow] = []
+        costs: list[CostRow] = []
+        traded_notional = 0.0
+        total_fees = 0.0
+        total_slippage_cost = 0.0
+        for record in self._records:
+            payload = record.payload
+            if record.kind is RecordKind.SNAPSHOT and isinstance(payload, PortfolioSnapshot):
+                session = session_of(payload.ts, "snapshot")
+                # positions_value는 행 순서대로 왼쪽부터 더한다 — Rust와 결합 순서를 맞춘다.
+                positions_value = 0.0
+                for position in payload.positions:
+                    positions_value += position.market_value
+                    positions.append(
+                        (
+                            session,
+                            instrument_of(position.instrument, "position"),
+                            _integral_quantity(
+                                position.quantity,
+                                label="position",
+                                ts=payload.ts,
+                                symbol=position.instrument.symbol,
+                            ),
+                            position.average_price,
+                            position.market_price,
+                            position.market_value,
+                            position.unrealized_pnl,
+                        )
+                    )
+                snapshots.append(
+                    (session, payload.cash, payload.equity, payload.gross_exposure, positions_value)
+                )
+            elif record.kind is RecordKind.ORDER and isinstance(payload, OrderEvent):
+                orders.append(
+                    (
+                        payload.order_id,
+                        payload.decision_id,
+                        session_of(payload.ts, "order"),
+                        instrument_of(payload.instrument, "order"),
+                        payload.side.value,
+                        _integral_quantity(
+                            payload.quantity,
+                            label="order",
+                            ts=payload.ts,
+                            symbol=payload.instrument.symbol,
+                        ),
+                        payload.order_type.value,
+                        payload.time_in_force.value,
+                    )
+                )
+            elif record.kind is RecordKind.FILL and isinstance(payload, FillEvent):
+                quantity = _integral_quantity(
+                    payload.quantity,
+                    label="fill",
+                    ts=payload.ts,
+                    symbol=payload.instrument.symbol,
+                )
+                fills.append(
+                    (
+                        payload.fill_id,
+                        payload.order_id,
+                        session_of(payload.ts, "fill"),
+                        instrument_of(payload.instrument, "fill"),
+                        payload.side.value,
+                        quantity,
+                        payload.price,
+                        payload.fee,
+                        payload.slippage_per_share,
+                    )
+                )
+                traded_notional += quantity * payload.price
+                total_fees += payload.fee
+                total_slippage_cost += quantity * abs(payload.slippage_per_share)
+            elif record.kind is RecordKind.COST and isinstance(payload, CostAccrued):
+                costs.append(
+                    (
+                        session_of(payload.ts, "cost"),
+                        payload.kind.value,
+                        None
+                        if payload.instrument is None
+                        else instrument_of(payload.instrument, "cost"),
+                        payload.amount,
+                    )
+                )
+        return ResultTables(
+            sessions=tuple(sessions),
+            instruments=tuple(instruments),
+            snapshots=tuple(snapshots),
+            positions=tuple(positions),
+            orders=tuple(orders),
+            fills=tuple(fills),
+            costs=tuple(costs),
+            fill_totals=FillTotals(
+                traded_notional=traded_notional,
+                total_fees=total_fees,
+                total_slippage_cost=total_slippage_cost,
+            ),
+        )
 
 
 class PersistentEventStore(EventStore):

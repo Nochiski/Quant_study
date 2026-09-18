@@ -679,28 +679,30 @@ PR 9까지 반영 후 100종목 tape에서 feed 적재(`_load_persistent_feed` +
 - `_load_persistent_feed`는 `feed.columns()`를 그대로 `runtime.load_feed`에 넘기고 등록부만 돌려준다. `PersistentEventStore.bind_feed(feed, instruments)`가 스냅샷 튜플 대신 feed를 잡아 MARKET 레코드·콜백 이벤트·`_covered_feed`가 필요한 세션만 만들게 한다.
 - 어댑터 `_columnar_feed(rows)`가 `request.dataset.bars`를 세션별로 묶어 바로 열로 넘긴다. `_instrument`는 종목당 한 번만 부른다.
 
-### 실측 (2026-09-18, base 55a40e2 대비 어댑터·feed만 되돌려 back-to-back, CPU 부하 20~34%)
+### 실측 (2026-09-18, base 55a40e2 대비 어댑터·feed만 되돌려 back-to-back, CPU 부하 15~34%)
 
 100종목 tape, `bench_workbench_adapter.py --instruments 100 --core all --repeat 5` 중앙값(초).
+after 열은 리뷰 반영(DEFECT-1001·1002·등록부 중복 거부) 후 브랜치 tip에서 다시 기록한
+`benchmarks/baseline/rust-loop-workbench-100.json`과 같은 값이다.
 
 | 구간 | base rust | after rust | base python | after python |
 |---|---|---|---|---|
 | `dataset_to_engine_inputs` | 0.6585 | 0.0002 | 0.5336 | 0.0002 |
-| `strategy_and_feed_build` | 0.1519 | 0.1337 | 0.1346 | 0.1374 |
-| **두 구간 합** | **0.8104** | **0.1339** (−83.5%) | **0.6682** | **0.1376** (−79.4%) |
-| `engine.run` | 0.3105 | 0.2157 | 1.8194 | 2.2172 |
-| e2e total | 1.7038 | 0.9503 | 3.2825 | 3.1368 |
+| `strategy_and_feed_build` | 0.1519 | 0.1297 | 0.1346 | 0.1298 |
+| **두 구간 합** | **0.8104** | **0.1299** (−84.0%) | **0.6682** | **0.1300** (−80.5%) |
+| `engine.run` | 0.3105 | 0.2087 | 1.8194 | 2.1438 |
+| e2e total | 1.7038 | 0.9446 | 3.2825 | 3.0359 |
 
-- rust e2e는 1.79배 빨라졌고 python 대비 배수가 1.93배 → 3.30배로 올랐다.
-- python e2e는 −4.4%다. `Bar`·`MarketSnapshot` 생성이 어댑터에서 `engine.run` 안(lazy)으로 옮겨가 `engine.run`이 +21.9%지만, dict 그룹화·종목별 시각 단조 dict가 사라져 총합은 줄었다.
+- rust e2e는 1.80배 빨라졌고 python 대비 배수가 1.93배 → 3.21배로 올랐다.
+- python e2e는 −7.5%다. `Bar`·`MarketSnapshot` 생성이 어댑터에서 `engine.run` 안(lazy)으로 옮겨가 `engine.run`이 +17.8%지만, dict 그룹화·종목별 시각 단조 dict가 사라져 총합은 줄었다.
 - 격리 실행 peak RSS: rust 370.3 → 330.4MiB(−39.9), python 346.0 → 318.4MiB(−27.6). 어댑터 경로가 `Bar` 123,100개를 아예 만들지 않는 몫이다.
-- `bench_universe`(엔진 벤치, `DataFeed(bars)` 경로) 100종목 tape `--core rust --repeat 3`: run 0.2571 → 0.2267(−11.8%), total 0.6098 → 0.6175(+1.3%), peak RSS 201.9 → 207.2MiB(+5.3). RSS 증가는 `DataFeed(bars)`가 파생한 열을 실행 내내 캐시하기 때문이다(포인터 리스트 6개). 이전에는 `_load_persistent_feed` 지역 변수라 적재 후 해제됐다.
-- 측정 주의: `--core all` 한 프로세스에서 rust `compute_analytics`가 0.016초 대신 0.158초로 찍힌다. `gc.disable()`로 같은 벤치를 돌리면 0.0157초이고 `artifacts`도 0.377 → 0.248초로 줄어 — 자동 순환 GC 정지가 어느 구간에 붙느냐의 문제지 새 작업이 아니다. 코어 격리 실행에서는 나타나지 않는다. PR 11 재측정 때 `gc.freeze()` 도입 여부를 판단할 것(도입하면 기존 JSON 전체와 비교 불가).
+- `bench_universe`(엔진 벤치, `DataFeed(bars)` 경로) 100종목 tape `--core rust --repeat 3`: run 0.2571 → 0.2480·0.2431(−3.5~5.4%), total 0.6098 → 0.5946·0.5961, peak RSS 201.9 → 201.2·201.7MiB. DEFECT-1002(파생 열 캐시) 제거 전에는 이 RSS가 207.2MiB였다 — 캐시를 없애 base 수준으로 복귀했다.
+- 측정 주의: `--core all` 한 프로세스에서 rust `compute_analytics`가 0.016초 대신 0.154초로 찍힌다. `gc.disable()`로 같은 벤치를 돌리면 0.0157초이고 `artifacts`도 0.377 → 0.248초로 줄어 — 자동 순환 GC 정지가 어느 구간에 붙느냐의 문제지 새 작업이 아니다. 코어 격리 실행에서는 나타나지 않는다. PR 11 재측정 때 `gc.freeze()` 도입 여부를 판단할 것(도입하면 기존 JSON 전체와 비교 불가).
 
 ### AC (달성)
 
-- 단위·parity: `DataFeed(bars)`와 `from_columns`의 `snapshots()`·`sessions`·등록부 동등성, 가격·거래량 위반 메시지 동일, `TimeReversalError`, lazy 생성 가드(`tests/test_tape.py::test_columnar_feed_builds_no_market_snapshot_for_tape_run`), 어댑터 동등성. 전체 스위트 1,162 passed / 13 skipped, `test_promoted_rust_makes_no_per_session_ffi` 불변.
-- 실측: feed 구간 −83.5% (게이트 50%).
+- 단위·parity: `DataFeed(bars)`와 `from_columns`의 `snapshots()`·`sessions`·등록부 동등성, 가격·거래량 위반 메시지 동일, `TimeReversalError`, lazy 생성 가드(`tests/test_tape.py::test_columnar_feed_builds_no_market_snapshot_for_tape_run`), 어댑터 동등성, `columns()` 비캐시 계약, 등록부 중복 거부. `uv run pytest -q` 전체 1,328 passed / 13 skipped, `test_promoted_rust_makes_no_per_session_ffi` 불변.
+- 실측: feed 구간 −84.0% (게이트 50%).
 - E2E: `tests/integration` 163 passed (HTTP golden parity 포함), 벤치가 두 코어 result signature 일치를 실행마다 확인.
 
 ---
@@ -742,5 +744,5 @@ PR 9까지 반영 후 100종목 tape에서 feed 적재(`_load_persistent_feed` +
 | 7 | `perf/workbench-result-columnar` | 리뷰 조건부 APPROVE·PR 생성 | #136 | Opus (DEFECT-701·캐시·RSS 계측 반영, post-run −48%(경계), e2e 1.26→1.91배) |
 | 8 | `perf/rust-hot-loop` | 리뷰 APPROVE·PR 생성 | #137 | Opus APPROVE (테스트·set_mark·Python key 충돌 거부 반영, 300종목 run −21~22%) |
 | 9 | `perf/record-and-queue-memory` | 리뷰 APPROVE·PR 생성 | #138 | Opus APPROVE (DEFECT-901 반영, RSS 1.14/1.18배, run −10%) |
-| 10 | `perf/feed-columnar` | 구현·게이트 통과 (feed 구간 −83.5%, rust e2e 1.79배, 배수 1.93→3.30) | | |
+| 10 | `perf/feed-columnar` | 리뷰 REQUEST_CHANGES 반영·게이트 통과 (feed 구간 −84.0%, rust e2e 1.80배, 배수 1.93→3.21) | | |
 | 11 | `docs/rust-loop-final-gates` | 대기 | | |

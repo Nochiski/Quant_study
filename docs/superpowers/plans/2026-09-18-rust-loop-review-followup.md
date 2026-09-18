@@ -744,5 +744,5 @@ after 열은 리뷰 반영(DEFECT-1001·1002·등록부 중복 거부) 후 브�
 | 7 | `perf/workbench-result-columnar` | 리뷰 조건부 APPROVE·PR 생성 | #136 | Opus (DEFECT-701·캐시·RSS 계측 반영, post-run −48%(경계), e2e 1.26→1.91배) |
 | 8 | `perf/rust-hot-loop` | 리뷰 APPROVE·PR 생성 | #137 | Opus APPROVE (테스트·set_mark·Python key 충돌 거부 반영, 300종목 run −21~22%) |
 | 9 | `perf/record-and-queue-memory` | 리뷰 APPROVE·PR 생성 | #138 | Opus APPROVE (DEFECT-901 반영, RSS 1.14/1.18배, run −10%) |
-| 10 | `perf/feed-columnar` | 리뷰 REQUEST_CHANGES 반영·게이트 통과 (feed 구간 −84.0%, rust e2e 1.80배, 배수 1.93→3.21) | | |
+| 10 | `perf/feed-columnar` | 리뷰 APPROVE·PR 생성 | #141 | Opus REQUEST_CHANGES→APPROVE (쓰레기 파일·열 캐시 RSS 반영, feed −84%, 워크벤치 e2e 3.21배) |
 | 11 | `docs/rust-loop-final-gates` | 대기 | | |

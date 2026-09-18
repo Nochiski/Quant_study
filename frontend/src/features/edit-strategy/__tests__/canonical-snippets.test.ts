@@ -78,6 +78,17 @@ describe("canonical StrategySpec snippets", () => {
     });
   });
 
+  it("fails closed when two root arrays both carry authoring markers", () => {
+    // P2-01 리뷰 P2-004: 순서가 유일한 tie-break가 되지 않도록 모호하면 팩터 스니펫을 내지 않는다.
+    const ambiguous = structuredClone(SCHEMA);
+    const root = ambiguous.properties as Record<string, JsonSchema>;
+    root.alternates = root.factors;
+    expect(
+      catalog(ambiguous).some((snippet) => snippet.kind === "factor"),
+    ).toBe(false);
+    expect(catalog().some((snippet) => snippet.kind === "factor")).toBe(true);
+  });
+
   it("fails closed for catalog-only, missing graph and incomplete authoring metadata", () => {
     const unavailable = [
       { ...FACTOR, availability: "catalog_only" as const },

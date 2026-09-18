@@ -30,7 +30,7 @@ export type CanonicalSnippet = {
   category: SnippetCategory;
   /** Backend field name or factor label. */
   label: string;
-  /** Section snippets add a root key; factor snippets append an item to the root `factors` sequence. */
+  /** 섹션 스니펫은 루트 키를 추가하고, 팩터 스니펫은 루트 `factors` 시퀀스에 항목을 추가한다. */
   kind: "section" | "factor";
   sectionKey: string;
   identity: { field: string; value: unknown } | null;
@@ -152,19 +152,21 @@ const rootProperty = (schema: JsonSchema, key: string): JsonSchema | null => {
 };
 
 type FactorAuthoringContract = {
-  /** Root key of the factor sequence (schema 1.1: `factors` is a top-level array). */
+  /** 팩터 시퀀스의 루트 키(schema 1.1: `factors`는 최상위 배열). 이름은 스키마에서 읽는다. */
   sectionKey: string;
   item: JsonSchema;
 };
 
 /**
- * Finds the root array whose item type carries the backend `x-authoring-*` markers. The key name
- * is read from the schema, never assumed, so the UI keeps no copy of the document layout.
+ * 항목 타입이 backend `x-authoring-*` 마커를 가진 루트 배열을 찾는다. 키 이름은 스키마에서 읽고
+ * 가정하지 않으므로 UI는 문서 레이아웃을 복제하지 않는다. 마커가 범용이라 두 개 이상이 매치되면
+ * 순서에 기대지 않고 `null`로 fail-closed한다(P2-01 리뷰 P2-004).
  */
 const factorAuthoringContract = (
   schema: JsonSchema,
 ): FactorAuthoringContract | null => {
   const root = isRecord(schema.properties) ? schema.properties : {};
+  const matches: FactorAuthoringContract[] = [];
   for (const [sectionKey, candidate] of Object.entries(root)) {
     if (!isRecord(candidate)) continue;
     const collection = resolveRef(schema, candidate);
@@ -191,9 +193,9 @@ const factorAuthoringContract = (
           isRecord(property) && property["x-authoring-identity"] === true,
       )
     )
-      return { sectionKey, item };
+      matches.push({ sectionKey, item });
   }
-  return null;
+  return matches.length === 1 ? matches[0]! : null;
 };
 
 const factorValue = (

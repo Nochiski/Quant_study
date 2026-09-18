@@ -237,8 +237,8 @@ class StrategySpec:
 
   `_schema.py::dataclass_schema`: `"default-from" in field.metadata`이면 required에 넣지 않고
   `schema["x-default-from"] = field.metadata["default-from"]`. marker 목록에 `"default-from"` 추가
-  (`x-defines: factor`는 기존 `defines` marker로 자동 노출). `_record_contract`의 required 인자도
-  같은 조건.
+  (`factors`에는 `x-defines`를 두지 않는다 — 3절 P1-01 acceptance 참조). `_record_contract`의
+  required 인자도 같은 조건.
 
 - [ ] **Step 6: 경로·참조 갱신** — `spec.factors.factors` → `spec.factors`,
   `"factors.factors.{i}"` → `"factors.{i}"`, `"/factors/factors/{i}"` → `"/factors/{i}"`를
@@ -420,13 +420,15 @@ predicate가 선언에서 파생됨(행마다 `condition`으로 재계산한 결
 
 - `use-execution-plans.ts`: `factorGraphPointer(i) === "/factors/${i}/graph"`,
   `factorIndexAtPointer("/factors/3/graph/nodes/1") === 3`.
-- `canonical-snippets.ts`: 팩터 collection을 키 이름이 아니라 runtime schema의 `x-defines: factor`로
-  찾는다. 팩터 스니펫은 root sequence 항목으로 삽입되며 `factors` 키가 없으면 `factors:` + 항목을
+- `canonical-snippets.ts`: 팩터 collection을 키 이름이 아니라 항목의 `x-authoring-identity`
+  마커로 찾는다(P1-01 조정: `factors`에 `x-defines`를 두지 않음). 마커가 붙은 루트 배열이 둘 이상이면
+  fail-closed. 팩터 스니펫은 root sequence 항목으로 삽입되며 `factors` 키가 없으면 `factors:` + 항목을
   삽입한다. 스니펫 value에 `label`은 catalog label, `weight`는 `x-authoring-default`.
 - `strategy-debugger-context.ts`, `execution-plan-panel.tsx`, `factor-graph-panel.tsx`,
   `strategy-outline.ts`가 `spec.factors`를 쓴다.
 - `messages.ts`에서 `entry_percentile`·`order_style`·`method` 계약 문구 제거.
-- 단위 테스트 fixture(runtime-schema.json 복사본 포함) 1.1. `npm test`·typecheck·lint·build 통과.
+- 단위 테스트 fixture 1.1(`runtime-schema.json`·`quality_momentum.*`는 backend 공유 fixture를
+  `readBackendFixture`로 읽는다, 복사본 없음). `npm test`·typecheck·lint·build 통과.
 - P1-02의 `strategy.signal.percentile` 문구 제거.
 
 **예상 파일**: generated 17 files(줄 수 제외), 위 5 src + 14 test files.

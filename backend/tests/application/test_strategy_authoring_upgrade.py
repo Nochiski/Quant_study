@@ -108,6 +108,11 @@ def test_syntax_errors_carry_the_codec_diagnostics() -> None:
     compiled = info.value.compiled
     assert compiled.spec is None and compiled.diagnostics
     assert all(d.kind.value == "syntax" for d in compiled.diagnostics)
+    # DEFECT-P1X-004: 로그만 보고도 어떤 요청이 실패했는지 특정할 수 있어야 한다.
+    message = str(info.value)
+    assert f"format={compiled.format.value}" in message
+    assert f"source_hash={compiled.source_hash}" in message
+    assert compiled.diagnostics[0].code in message
 
 
 def test_drift_between_the_two_transform_paths_is_refused_with_a_pointer() -> None:

@@ -27,8 +27,8 @@ from enum import StrEnum
 from typing import ClassVar, Generic, Protocol, TypeVar
 
 from strategy_workbench.domain.strategy.facade.document import (
-    CURRENT_SCHEMA_VERSION,
     SourceFormat,
+    is_frozen_schema_version,
     source_hash_of,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
@@ -116,7 +116,7 @@ class StrategyRevisionRecord:
         version and is never recomputed. Execution by saved reference is refused until the author
         upgrades the source and saves a new revision.
         """
-        return self.spec.identity.schema_version != CURRENT_SCHEMA_VERSION
+        return is_frozen_schema_version(self.spec.identity.schema_version)
 
     def __post_init__(self) -> None:
         # 현재 schema 버전에서만 hash를 재계산해 검증한다. 동결 revision의 hash는 은퇴한

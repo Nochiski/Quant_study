@@ -19,9 +19,20 @@ from __future__ import annotations
 import copy
 from collections.abc import Callable, Mapping, MutableMapping, MutableSequence
 
-from ._hydrate import CURRENT_SCHEMA_VERSION
+from ._models import CURRENT_SCHEMA_VERSION
 
 LEGACY_SCHEMA_VERSION = "1.0"
+
+
+def is_frozen_schema_version(schema_version: str) -> bool:
+    """저장 row가 동결(업그레이드 필요) 이력인가: 현재 버전이 아닌 모든 버전(spec D2).
+
+    port의 `StrategyRevisionRecord.requires_upgrade`와 SQLite codec의 동결 읽기 분기가 같은 술어를
+    쓴다(Phase 1 감사 DEFECT-P1X-003: `== "1.0"`과 `!= CURRENT`가 갈리면 1.2 도입 때 1.1 row가
+    hydrate 실패로 500이 된다).
+    """
+    return schema_version != CURRENT_SCHEMA_VERSION
+
 
 # `unary` operator → (1.1 kind, 1.1 operator). rank/zscore/winsorize는 평가 코드가 cross_sectional로
 # 치환하던 순수 alias였고, neutralize는 cross-sectional demean이었다 (P1-02에서 제거).

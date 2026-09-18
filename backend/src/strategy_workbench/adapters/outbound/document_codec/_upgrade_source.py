@@ -6,8 +6,12 @@
 - YAML: ruamel round-trip(`typ="rt"`) CST. `CommentedMap`/`CommentedSeq`는 `MutableMapping`/
   `MutableSequence`라 step이 그대로 적용된다. 따옴표·키 순서·독립 주석은 보존된다. 삭제되는 키의
   줄끝 주석과 그 키 **위**의 독립 주석은 키와 함께 사라지고, 그 키 **아래**의 독립 주석(다음 키를
-  설명하는 주석)은 자리를 지킨다. 통째로 갈아끼운 `factors.factors` 안쪽 키의 줄끝 주석은 바깥 키로
-  옮겨진다. 줄바꿈은 LF로 통일되고 여러 줄 flow style은 한 줄로 접힌다.
+  설명하는 주석)은 자리를 지킨다. 이 규칙은 어떤 step이 어떤 mapping에서 키를 지우든 같다: 어댑터는
+  step 적용 전후의 키 집합 차이로 삭제를 알아내며 삭제 목록을 따로 갖지 않는다(Phase 1 감사
+  DEFECT-P1X-002). 시퀀스 항목 mapping의 **첫** 키가 지워질 때만 예외가 하나 있다: 그 위의 독립
+  주석은 항목 슬롯이 소유해 (지워진 키를 설명하던 것이지만) 그대로 남고, 아래 주석은 다음 남는 키
+  앞으로 옮겨진다. 통째로 갈아끼운 `factors.factors` 안쪽 키의 줄끝 주석은 바깥 키로 옮겨진다.
+  줄바꿈은 LF로 통일되고 여러 줄 flow style은 한 줄로 접힌다.
 - JSON: 주석이 없으므로 dict 변환 뒤 원문의 들여쓰기 폭으로 다시 직렬화한다.
 
 전제: 호출자가 safe codec으로 parse에 성공했고 tree가 1.0임을 확인했다. 결과 텍스트가 dict 경로와
@@ -21,12 +25,11 @@ import re
 from io import StringIO
 
 from ruamel.yaml import YAML
-from ruamel.yaml.comments import CommentedMap
+from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from ruamel.yaml.error import CommentMark
 from ruamel.yaml.tokens import CommentToken
 
 from strategy_workbench.domain.strategy.facade.document import (
-    REMOVED_FIELDS,
     apply_upgrade_steps,
     upgrade_document_1_0,
 )
@@ -89,30 +92,79 @@ def _set_tail(owner: CommentedMap, key: str, tail: str) -> None:
     ]
 
 
-def _relocate_comments_of_removed_keys(document: CommentedMap) -> None:
-    """삭제될 키 위의 독립 주석은 버리고, 아래의 독립 주석은 다음 키 앞에 남긴다.
+class _MappingSnapshot:
+    """step 적용 전의 mapping 하나.
 
-    ruamel은 "어떤 키 줄부터 다음 키 직전까지"의 주석을 그 키의 슬롯에 담는다. 그래서 그대로
-    `del`하면 삭제 키 **아래**(다음 키를 설명하던) 주석이 사라지고 **위**(삭제 키를 설명하던) 주석은
-    앞 키에 붙어 남는다 — 독자를 오도하는 반대 결과다. 삭제 전에 두 묶음을 맞바꾼다.
+    객체 자체(step은 제자리에서 지운다), 부모 mapping과 그 키, 키 순서를 기억한다.
     """
-    sections = sorted({section for section, _key in REMOVED_FIELDS})
-    for section in sections:
-        block = document.get(section)
-        if not isinstance(block, CommentedMap):
-            continue
-        keys = [str(key) for key in block.keys()]
-        removed = [key for s, key in REMOVED_FIELDS if s == section and key in block]
-        # 뒤에서부터: 앞 형제도 삭제 대상이면 그 형제의 꼬리로 옮긴 주석을 이어서 다시 넘겨야 한다.
-        for key in sorted(removed, key=keys.index, reverse=True):
-            index = keys.index(key)
-            _head, below = _split_token(_eol_token(block, key))
-            if index > 0:
-                # 삭제 키 위의 주석은 앞 형제 키의 슬롯 꼬리에 있다: 버리고 아래 주석으로 바꾼다.
-                _set_tail(block, keys[index - 1], below)
-            else:
-                # 첫 키: 위의 주석은 섹션 키의 슬롯 꼬리에 있다.
-                _set_tail(document, section, below)
+
+    __slots__ = ("block", "keys", "parent", "parent_key")
+
+    def __init__(
+        self, block: CommentedMap, parent: CommentedMap | None, parent_key: str | None
+    ) -> None:
+        self.block = block
+        self.parent = parent
+        self.parent_key = parent_key
+        self.keys = [str(key) for key in block.keys()]
+
+
+def _snapshot_mappings(
+    node: object, parent: CommentedMap | None, parent_key: str | None
+) -> list[_MappingSnapshot]:
+    """문서 순서로 모든 mapping을 모은다. 시퀀스 안의 mapping은 부모 mapping이 없다(None)."""
+    found: list[_MappingSnapshot] = []
+    if isinstance(node, CommentedMap):
+        found.append(_MappingSnapshot(node, parent, parent_key))
+        for key, value in node.items():
+            found.extend(_snapshot_mappings(value, node, str(key)))
+    elif isinstance(node, CommentedSeq):
+        for item in node:
+            found.extend(_snapshot_mappings(item, None, None))
+    return found
+
+
+def _relocate_comments_of_removed_keys(snapshots: list[_MappingSnapshot]) -> None:
+    """지워진 키 위의 독립 주석은 버리고, 아래의 독립 주석은 다음 키 앞에 남긴다.
+
+    ruamel은 "어떤 키 줄부터 다음 키 직전까지"의 주석을 그 키의 슬롯에 담고, 키를 지워도 그 슬롯은
+    `ca.items`에 남는다. 그래서 아무것도 안 하면 지워진 키 **아래**(다음 키를 설명하던) 주석이
+    사라지고 **위**(지워진 키를 설명하던) 주석은 앞 키에 붙어 남는다 — 독자를 오도하는 반대 결과다.
+    step 적용 뒤 mapping마다 "사라진 키의 연속 구간"을 찾아, 구간 마지막 키의 아래 주석을 구간 앞
+    형제(없으면 부모 키)의 꼬리로 옮기고 그 형제의 원래 꼬리(지워진 키를 설명하던 주석)는 버린다.
+    시퀀스 항목 mapping의 첫 키가 지워지면 부모 키가 없으므로 아래 주석을 다음 남는 키의 앞 주석
+    슬롯에 넣는다(P1-06 리뷰 P2-001).
+    """
+    for snapshot in snapshots:
+        block = snapshot.block
+        keys = snapshot.keys
+        index = 0
+        while index < len(keys):
+            if keys[index] in block:
+                index += 1
+                continue
+            start = index
+            while index < len(keys) and keys[index] not in block:
+                index += 1
+            _head, below = _split_token(_eol_token(block, keys[index - 1]))
+            if start > 0:
+                _set_tail(block, keys[start - 1], below)
+            elif snapshot.parent is not None and snapshot.parent_key is not None:
+                _set_tail(snapshot.parent, snapshot.parent_key, below)
+            elif below and index < len(keys):
+                _prepend_before_key(block, keys[index], below)
+            # 남는 키가 하나도 없는 시퀀스 항목: 옮길 곳이 없어 아래 주석은 사라진다.
+
+
+def _prepend_before_key(owner: CommentedMap, key: str, lines: str) -> None:
+    """`key` 줄 앞에 독립 주석 줄들을 둔다(ruamel `ca.items[key]` 슬롯 [1] = 키 앞 주석 토큰들)."""
+    moved = CommentToken(lines, CommentMark(0))
+    slot = owner.ca.items.get(key)
+    if slot is None:
+        owner.ca.items[key] = [None, [moved], None, None]
+        return
+    existing = slot[1] if len(slot) > 1 and slot[1] is not None else []
+    slot[1] = [moved, *existing]
 
 
 def _finish_emptied_sections(
@@ -165,15 +217,14 @@ def upgrade_yaml_source(source: str) -> str:
     if not isinstance(document, CommentedMap):
         raise ValueError(f"YAML source root must be a mapping — got={type(document).__name__}")
     # 문서 순서로 순회한다: set 순서(hash randomization)에 기대면 출력이 프로세스마다 달라진다.
-    removed_sections = {section for section, _key in REMOVED_FIELDS}
     keys_before = {
         str(section): tuple(str(key) for key in block.keys())
         for section in document.keys()
-        if str(section) in removed_sections
-        and isinstance(block := document.get(section), CommentedMap)
+        if isinstance(block := document.get(section), CommentedMap)
     }
-    _relocate_comments_of_removed_keys(document)
+    snapshots = _snapshot_mappings(document, None, None)
     apply_upgrade_steps(document)
+    _relocate_comments_of_removed_keys(snapshots)
     _finish_emptied_sections(document, keys_before)
     buffer = StringIO()
     loader.dump(document, buffer)

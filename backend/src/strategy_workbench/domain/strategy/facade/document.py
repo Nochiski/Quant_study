@@ -14,6 +14,7 @@ from strategy_workbench.domain.strategy._upgrade import (
     UPGRADE_STEPS,
     NotALegacyDocumentError,
     apply_upgrade_steps,
+    is_frozen_schema_version,
     is_legacy_document,
     upgrade_document_1_0,
 )
@@ -32,6 +33,7 @@ __all__ = [
     "hydrate_saved_strategy",
     "apply_upgrade_steps",
     "hydrate_strategy_document",
+    "is_frozen_schema_version",
     "is_legacy_document",
     "source_hash_of",
     "upgrade_document_1_0",

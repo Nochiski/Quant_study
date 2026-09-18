@@ -27,14 +27,17 @@ bootstrap ─> application + adapters
 - `application/<use_case>`: 유스케이스와 그 유스케이스가 요구하는 port를 소유한다.
   concrete adapter를 import하지 않는다.
 - application → application 화살표는 한 유스케이스가 **다른 유스케이스의 outgoing port를
-  소비할 때만** 허용하며, port owner는 그 계약을 먼저 정의한 유스케이스다. 현재 선언된 4개는
+  소비할 때만** 허용하며, port owner는 그 계약을 먼저 정의한 유스케이스다. 현재 선언된 5개는
   `strategy_authoring → strategy_design`, `portfolio_design → strategy_design`,
-  `backtest_run → strategy_design`, `backtest_run → portfolio_design`이다.
+  `portfolio_design → factor_research`, `backtest_run → strategy_design`,
+  `backtest_run → portfolio_design`이다.
   `portfolio_design → strategy_design`은 scoped trace의 saved revision을 repository port로
   해소하기 위한 의존이다. 유스케이스 로직을 빌려 쓰려고 거는 화살표는 아니다.
 - `adapters/inbound/<transport>`: HTTP/SSE/CLI 입력을 application 명령·조회로 변환한다.
 - `adapters/outbound/<provider>`: application이 요구한 port를 DB/파일/엔진으로 구현한다.
-  도메인 정책을 새로 판단하지 않는다.
+  도메인 정책을 새로 판단하지 않는다. 도메인 변환 규칙을 어댑터가 다시 구현하지 않는다.
+  `document_codec`은 domain의 `UPGRADE_STEPS`를 주석·순서를 보존하는 컨테이너 위에서 실행만
+  하며, 결과가 dict 경로와 같은 tree를 내는지는 application이 다시 parse해 검사한다.
 - `bootstrap`: concrete adapter를 선택하고 주입하는 유일한 composition root다.
 - `backend/src/backtest_engine`/`backend/rust/backtest_core`는 실행 커널이다. 접근은 향후
   `adapters/outbound/backtest_engine`에서만 허용한다.

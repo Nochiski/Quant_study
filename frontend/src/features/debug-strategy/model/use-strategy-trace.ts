@@ -188,14 +188,15 @@ const fetchTraceBundle = async (
  * 원문(Phase 1 감사 위험 5b: `trace.strategy.requires_upgrade`가 원문으로 노출됐다 — backtest 경로의
  * `backtest.error.<code>`와 같은 규약).
  */
-export const traceErrorMessage = (error: unknown): string =>
-  error instanceof ApiRequestError
-    ? ((error.code === undefined ? null : tOptional(`trace.error.${error.code}`)) ??
-      error.detail ??
-      error.message)
-    : error instanceof Error
-      ? error.message
-      : String(error);
+export const traceErrorMessage = (error: unknown): string => {
+  if (!(error instanceof ApiRequestError))
+    return error instanceof Error ? error.message : String(error);
+  const translated =
+    error.code === undefined ? null : tOptional(`trace.error.${error.code}`);
+  if (translated === null) return error.detail ?? error.message;
+  // 번역이 `{detail}`을 두면 backend 원문(어느 필드·어느 기능인지)을 그 자리에 넣는다(backlog 17).
+  return translated.replace("{detail}", error.detail ?? error.message);
+};
 
 /**
  * Observes one exact trace query. The query cache owns REST data while this hook owns only the

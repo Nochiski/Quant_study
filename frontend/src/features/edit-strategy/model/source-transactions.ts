@@ -202,8 +202,11 @@ const detectIndentUnit = (
     const segments = pointerSegments(pointer);
     if (segments.length < 2 || /^\d+$/.test(segments[segments.length - 2]!))
       continue;
-    const parentColumn =
-      parsed.keyRanges.get(parentPointerOf(pointer))?.start.column ?? 0;
+    const parentKey = parsed.keyRanges.get(parentPointerOf(pointer));
+    // 부모 키와 같은 줄에 있는 키는 flow `{ a: 1 }` 표기라 들여쓰기 근거가 아니다(backlog 14).
+    if (parentKey !== undefined && parentKey.start.line === range.start.line)
+      continue;
+    const parentColumn = parentKey?.start.column ?? 0;
     if (range.start.column > parentColumn)
       return range.start.column - parentColumn;
   }
@@ -272,6 +275,101 @@ const childKeyColumn = (
     if (range) return range.start.column;
   }
   return null;
+};
+
+/** pointer의 값이 flow 컬렉션(`{ … }`·`[ … ]`)으로 적혀 있는가. 범위 시작 글자로 판정한다. */
+const isFlowContainer = (
+  source: string,
+  parsed: Extract<ParsedSource, { status: "ok" }>,
+  pointer: string,
+): boolean => {
+  const range = parsed.valueRanges.get(pointer);
+  if (range === undefined) return false;
+  const first = source[range.start.offset];
+  return first === "{" || first === "[";
+};
+
+/**
+ * `pointer`에서 위로 올라가며 flow 컬렉션이 이어지는 가장 바깥 pointer. `pointer` 자신이 flow가 아니면 null.
+ * block 컬렉션은 flow 안에 들어갈 수 없으므로, flow 안에 무언가를 넣으려면 여기서부터 block으로 다시 써야 한다.
+ */
+const topmostFlowAncestor = (
+  source: string,
+  parsed: Extract<ParsedSource, { status: "ok" }>,
+  pointer: string,
+): string | null => {
+  if (!isFlowContainer(source, parsed, pointer)) return null;
+  let top = pointer;
+  while (top !== "") {
+    const parent = parentPointerOf(top);
+    if (!isFlowContainer(source, parsed, parent)) break;
+    top = parent;
+  }
+  return top;
+};
+
+/**
+ * flow 컬렉션에 키·항목 넣기(Phase 5 감사 backlog 14): 바깥쪽 flow 컨테이너 전체를 연산 적용 뒤의 값으로 block
+ * 직렬화해 그 범위(`key:` 뒤 또는 `-` 뒤부터 값 끝까지)에 교체한다. 빈 `{}`·`[]`와 `{ a: 1 }`·`[x, y]` 같은
+ * 한 줄 표기를 같은 규칙으로 연다. flow 안 주석은 YAML이 거의 허용하지 않으며 보존하지 않는다 — 결과는
+ * preflight(tree 동치)가 검증한다.
+ */
+const replaceFlowContainer = (
+  source: string,
+  parsed: Extract<ParsedSource, { status: "ok" }>,
+  op: SourceOperation,
+  top: string,
+  eol: Eol,
+  unit: number,
+): Plan | PlanFailure => {
+  const next = applyToTree(parsed.tree, op);
+  if (next === null) return "not-found";
+  const value = valueAt(next, top);
+  const block = yamlBlock(value);
+  const range = parsed.valueRanges.get(top)!;
+  if (top === "") {
+    // 루트 전체가 flow면 문서 본문을 block mapping으로 바꾼다.
+    const insert = indentLines(block, "", eol);
+    return {
+      from: range.start.offset,
+      to: range.end.offset,
+      insert,
+      cursor: range.start.offset + insert.length,
+    };
+  }
+  const colon = afterColon(source, parsed, top);
+  if (colon !== null) {
+    // `key: { … }` → `key:` 뒤에서 줄을 바꾸고 키 열 + 폭으로 들여쓴다.
+    const keyColumn = parsed.keyRanges.get(top)!.start.column;
+    const indent = " ".repeat(keyColumn + unit);
+    const insert = `${eol}${indent}${indentLines(block, indent, eol)}`;
+    return {
+      from: colon,
+      to: range.end.offset,
+      insert,
+      cursor: colon + insert.length,
+    };
+  }
+  const dash = dashOffsetOf(source, range.start.offset);
+  if (dash !== null) {
+    // `- { … }` → `-` 뒤에서 줄을 바꾸고 `-` 열 + 폭으로 들여쓴다(빈 `- []`·`- {}` 확장과 같은 모양).
+    const indent = " ".repeat(dash - lineStartOf(source, dash) + unit);
+    const insert = `${eol}${indent}${indentLines(block, indent, eol)}`;
+    return {
+      from: dash + 1,
+      to: range.end.offset,
+      insert,
+      cursor: dash + 1 + insert.length,
+    };
+  }
+  const indent = " ".repeat(range.start.column);
+  const insert = indentLines(block, indent, eol);
+  return {
+    from: range.start.offset,
+    to: range.end.offset,
+    insert,
+    cursor: range.start.offset + insert.length,
+  };
 };
 
 const parentPointerOf = (pointer: string): string => {
@@ -483,29 +581,15 @@ const planInsertKey = (
       cursor: trimmedEnd + insert.length,
     };
   }
+  // flow 표기(`{}`·`{ a: 1 }`, 또는 flow 안의 mapping)면 바깥 flow 컨테이너부터 block으로 다시 쓴다(backlog 14).
+  const flowTop = topmostFlowAncestor(source, parsed, op.parentPointer);
+  if (flowTop !== null)
+    return replaceFlowContainer(source, parsed, op, flowTop, eol, unit);
   const existingColumn =
     op.parentPointer === ""
       ? 0
       : childKeyColumn(parsed, op.parentPointer, parent);
-  if (existingColumn === null) {
-    // flow `{}`: `key:` 뒤(시퀀스 항목이면 `-` 뒤)부터 value 끝까지를 block mapping으로 교체.
-    const parentRange = parsed.valueRanges.get(op.parentPointer)!;
-    const keyRange = parsed.keyRanges.get(op.parentPointer);
-    const dash = dashOffsetOf(source, parentRange.start.offset);
-    const from =
-      afterColon(source, parsed, op.parentPointer) ??
-      (dash === null ? parentRange.start.offset : dash + 1);
-    const parentColumn =
-      keyRange?.start.column ?? Math.max(0, parentRange.start.column - unit);
-    const indent = " ".repeat(parentColumn + unit);
-    const insert = `${eol}${indent}${indentLines(fragment, indent, eol)}`;
-    return {
-      from,
-      to: parentRange.end.offset,
-      insert,
-      cursor: from + insert.length,
-    };
-  }
+  if (existingColumn === null) return "not-mapping";
   const anchor = insertKeyAnchor(
     source,
     parsed,
@@ -612,25 +696,10 @@ const planInsertItem = (
   if (!Array.isArray(parent)) return "not-sequence";
   const index = op.index ?? parent.length;
   if (index < 0 || index > parent.length) return "not-found";
-  const parentRange = parsed.valueRanges.get(op.parentPointer)!;
-  if (parent.length === 0) {
-    // flow `[]`: `key:` 뒤(시퀀스 항목이면 `-` 뒤)부터 block sequence로 교체. 항목은 부모 키 열 + 폭.
-    const keyRange = parsed.keyRanges.get(op.parentPointer);
-    const dash = dashOffsetOf(source, parentRange.start.offset);
-    const from =
-      afterColon(source, parsed, op.parentPointer) ??
-      (dash === null ? parentRange.start.offset : dash + 1);
-    const parentColumn =
-      keyRange?.start.column ?? Math.max(0, parentRange.start.column - unit);
-    const indent = " ".repeat(parentColumn + unit);
-    const insert = `${eol}${indent}${indentLines(fragment, indent, eol)}`;
-    return {
-      from,
-      to: parentRange.end.offset,
-      insert,
-      cursor: from + insert.length,
-    };
-  }
+  // flow 표기(`[]`·`[x, y]`, 또는 flow 안의 시퀀스)면 바깥 flow 컨테이너부터 block으로 다시 쓴다(backlog 14).
+  const flowTop = topmostFlowAncestor(source, parsed, op.parentPointer);
+  if (flowTop !== null)
+    return replaceFlowContainer(source, parsed, op, flowTop, eol, unit);
   // 항목 열: 첫 항목 자기 `-`의 열(`- - x`처럼 겹친 시퀀스는 안쪽 `-`).
   const dashOf = (i: number): number | null => {
     const item = parsed.valueRanges.get(`${op.parentPointer}/${i}`);

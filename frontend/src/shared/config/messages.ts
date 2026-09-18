@@ -640,6 +640,15 @@ const ko = {
     "저장된 1.0 revision은 실행할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
   "trace.error.trace.strategy.requires_upgrade":
     "저장된 1.0 revision은 추적할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
+  "trace.error.trace.request.invalid": "추적 요청이 올바르지 않습니다: {detail}",
+  "trace.error.trace.engine.incompatible":
+    "선택한 실행 엔진이 이 전략을 추적할 수 없습니다: {detail}",
+  "trace.error.trace.capability.unsupported":
+    "이 전략은 추적이 아직 지원하지 않는 기능을 씁니다: {detail}",
+  "trace.error.trace.strategy.stale":
+    "편집 중인 문서가 저장본과 달라져 추적할 수 없습니다. 저장하거나 저장본을 다시 여세요.",
+  "trace.error.trace.strategy.not_found": "추적할 저장 revision을 찾지 못했습니다.",
+  "trace.error.trace.cancelled": "추적이 취소되었습니다.",
   "ide.meta.schemaVersion": "schema",
   "ide.meta.sourceHash": "source hash",
   "ide.meta.specHash": "spec hash",
@@ -1525,6 +1534,15 @@ export const messages = {
       "A stored 1.0 revision cannot run. Upgrade it and save a new revision first.",
     "trace.error.trace.strategy.requires_upgrade":
       "A stored 1.0 revision cannot be traced. Upgrade it and save a new revision first.",
+    "trace.error.trace.request.invalid": "The trace request is invalid: {detail}",
+    "trace.error.trace.engine.incompatible":
+      "The selected engine cannot trace this strategy: {detail}",
+    "trace.error.trace.capability.unsupported":
+      "This strategy uses a capability tracing does not support yet: {detail}",
+    "trace.error.trace.strategy.stale":
+      "The edited document no longer matches the stored revision. Save it or reopen the stored revision.",
+    "trace.error.trace.strategy.not_found": "The stored revision to trace was not found.",
+    "trace.error.trace.cancelled": "The trace was cancelled.",
     "ide.meta.schemaVersion": "schema",
     "ide.meta.sourceHash": "source hash",
     "ide.meta.specHash": "spec hash",

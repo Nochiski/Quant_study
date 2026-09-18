@@ -44,13 +44,13 @@ import type {
   FactorValidationIssue,
   FieldContract,
   GetEquityCatalogData,
-  InlineDraft,
   GetFactorCatalogData,
-  NodeContract,
+  InlineDraft,
   MetricDefinition,
   MetricValue,
-  PageRevisionSummary,
+  NodeContract,
   PageBacktestRunSummary,
+  PageRevisionSummary,
   PageStrategySummary,
   ResearchCatalog,
   ReviseDocumentRequest,
@@ -62,6 +62,7 @@ import type {
   SourceDiagnostic,
   StrategyDocument,
   StrategyDocumentContractResponse,
+  StrategyDocumentInvalidDetail,
   StrategyDocumentSchema,
   StrategyDraft,
   StrategyDraftConflictDetail,
@@ -133,6 +134,22 @@ const errorField = (
 
 const errorCode = (error: unknown): string | undefined =>
   errorField(error, "code");
+
+/**
+ * 저장·revise·upgrade의 `strategy_document.invalid` detail에는 `message`가 없다 — 첫 error 진단(pointer + 문구)을
+ * detail 문구로 쓴다(Phase 5 감사 backlog 16: 저장 실패 사유가 화면에 비어 있었다).
+ */
+export const invalidDocumentSummary = (error: unknown): string | undefined => {
+  if (errorCode(error) !== "strategy_document.invalid") return undefined;
+  const detail = (error as { detail: Partial<StrategyDocumentInvalidDetail> }).detail;
+  const diagnostics = Array.isArray(detail.diagnostics) ? detail.diagnostics : [];
+  const first =
+    diagnostics.find((item) => item.severity === "error") ?? diagnostics[0];
+  if (first === undefined) return undefined;
+  const pointer = first.pointer === "" ? "/" : first.pointer;
+  const rest = diagnostics.length - 1;
+  return `${pointer}: ${first.message}${rest > 0 ? ` (+${rest})` : ""}`;
+};
 
 /** Runtime check at the HTTP boundary for the generated structured 409 detail. */
 const revisionConflictDetail = (
@@ -236,7 +253,7 @@ const requestError = (
     context,
     responseStatus,
     errorCode(response.error),
-    errorField(response.error, "message"),
+    errorField(response.error, "message") ?? invalidDocumentSummary(response.error),
     conflict?.latest_revision ?? null,
     draftConflict?.current ?? null,
   );

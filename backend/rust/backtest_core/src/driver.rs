@@ -66,11 +66,7 @@ pub(crate) struct CorporateActionEntry {
 #[derive(Clone, Debug)]
 pub(crate) enum NotifyPayload {
     Fill(Box<FillWire>),
-    OrderUpdate {
-        order_id: String,
-        status: String,
-        detail: Option<String>,
-    },
+    OrderUpdate(Box<OrderUpdateWire>),
     CorporateAction(usize),
 }
 
@@ -78,7 +74,7 @@ impl NotifyPayload {
     pub(crate) fn event_kind(&self) -> &'static str {
         match self {
             NotifyPayload::Fill(_) => "fill",
-            NotifyPayload::OrderUpdate { .. } => "order_update",
+            NotifyPayload::OrderUpdate(_) => "order_update",
             NotifyPayload::CorporateAction(_) => "corporate_action",
         }
     }
@@ -86,11 +82,9 @@ impl NotifyPayload {
     pub(crate) fn to_py(&self, py: Python<'_>) -> PyResult<PyObject> {
         match self {
             NotifyPayload::Fill(fill) => fill.to_py(py),
-            NotifyPayload::OrderUpdate {
-                order_id,
-                status,
-                detail,
-            } => to_object(py, (order_id.as_str(), status.as_str(), detail.as_deref())),
+            // `(order_id, status, detail)` wire 모양의 정본은 `OrderUpdateWire`다 —
+            // ORDER_UPDATE 레코드와 NOTIFY 알림이 같은 변환을 쓴다.
+            NotifyPayload::OrderUpdate(update) => update.to_py(py),
             NotifyPayload::CorporateAction(index) => to_object(py, *index),
         }
     }
@@ -201,24 +195,16 @@ impl PersistentEngine {
         detail: Option<String>,
     ) -> PyResult<()> {
         let notify = self.settings()?.notify_order_update;
-        self.record(
-            session,
-            RecordPayload::OrderUpdate(Box::new(OrderUpdateWire {
-                order_id: order_id.clone(),
-                status: status.clone(),
-                detail: detail.clone(),
-            })),
-        )?;
-        if notify {
-            self.push(
-                session,
-                PRIORITY_NOTIFY,
-                Queued::Notify(Box::new(NotifyPayload::OrderUpdate {
-                    order_id,
-                    status,
-                    detail,
-                })),
-            )?;
+        let update = Box::new(OrderUpdateWire {
+            order_id,
+            status,
+            detail,
+        });
+        // 알림 사본은 선언했을 때만 만든다. 레코드가 먼저 들어가야 trace 순서가 python과 같다.
+        let notify_payload = notify.then(|| Box::new(NotifyPayload::OrderUpdate(update.clone())));
+        self.record(session, RecordPayload::OrderUpdate(update))?;
+        if let Some(payload) = notify_payload {
+            self.push(session, PRIORITY_NOTIFY, Queued::Notify(payload))?;
         }
         Ok(())
     }

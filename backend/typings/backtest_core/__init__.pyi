@@ -6,6 +6,9 @@ __version__: str
 # 실행 경로는 읽지 않고 `tests/test_core_parity.py`가 값 일치를 고정한다.
 RECORD_KIND_CODES: dict[str, int]
 EVENT_PRIORITIES: dict[str, int]
+# 행 조회표(Dense / Sparse) 선택에 쓰는 바이트 상수. 여기가 정본이고
+# `scripts/bench_universe.py`가 같은 규칙을 재현할 때 읽는다.
+ROW_INDEX_BYTES: dict[str, int]
 
 class RouteErrorException(ValueError):
     """결정 라우팅 오류. `args`는 `(code, message)`이며 `route_error_from`이 엔진 예외로 바꾼다."""

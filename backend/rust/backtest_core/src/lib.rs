@@ -53,16 +53,23 @@ fn backtest_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
         "EVENT_PRIORITIES",
         wire_constants(m.py(), &driver::EVENT_PRIORITY_NAMES)?,
     )?;
+    m.add(
+        "ROW_INDEX_BYTES",
+        wire_constants(m.py(), &feed::ROW_INDEX_BYTE_NAMES)?,
+    )?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }
 
-/// (name, code) 목록을 Python dict로 바꾼다. Rust wire 상수를 Python 정본과 대조할 수 있게
-/// 모듈 상수로 노출하는 용도다 — 실행 경로는 이 dict를 읽지 않는다.
-fn wire_constants<'py>(py: Python<'py>, names: &[(&str, u8)]) -> PyResult<Bound<'py, PyDict>> {
+/// (name, value) 목록을 Python dict로 바꾼다. Rust 상수를 Python 정본과 대조하거나 Python이
+/// 같은 규칙을 재현할 수 있게 모듈 상수로 노출하는 용도다 — 실행 경로는 이 dict를 읽지 않는다.
+fn wire_constants<'py, T>(py: Python<'py>, names: &[(&str, T)]) -> PyResult<Bound<'py, PyDict>>
+where
+    T: Copy + IntoPyObject<'py>,
+{
     let mapping = PyDict::new(py);
-    for (name, code) in names {
-        mapping.set_item(name, *code)?;
+    for (name, value) in names {
+        mapping.set_item(name, *value)?;
     }
     Ok(mapping)
 }

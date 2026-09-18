@@ -6,9 +6,12 @@ Rust 확장(`backtest_core`)이 설치돼 있지 않으면 rust 파라미터는 
 
 from __future__ import annotations
 
+import importlib
 import random
+import sys
 from collections.abc import Callable
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -172,6 +175,25 @@ def test_event_priorities_match_python_queue() -> None:
     assert backtest_core.EVENT_PRIORITIES == {
         priority.name.lower(): int(priority) for priority in EventPriority
     }
+
+
+@RUST_ONLY
+def test_row_index_bytes_match_bench_fallback() -> None:
+    """행 조회표 표현 선택(Dense / Sparse)에 쓰는 바이트 상수의 정본은 Rust `feed.rs`다.
+    벤치는 확장이 없는 환경을 위해 같은 리터럴을 폴백으로 들고 있으므로 둘이 어긋나면
+    `workload.row_index_expected`가 실제로 고른 표현과 다른 값을 기록한다."""
+    import backtest_core
+
+    # `scripts/`는 패키지가 아니라 실행 스크립트 디렉터리라 sys.path에 없다. 벤치 스크립트가
+    # 서로를 import할 때와 같은 방식으로 이 테스트에서만 잠깐 올린다.
+    scripts = str(Path(__file__).resolve().parents[1] / "scripts")
+    sys.path.insert(0, scripts)
+    try:
+        bench = importlib.import_module("bench_universe")
+    finally:
+        sys.path.remove(scripts)
+
+    assert backtest_core.ROW_INDEX_BYTES == dict(bench.ROW_INDEX_BYTES_FALLBACK)
 
 
 # --- Portfolio -------------------------------------------------------------------

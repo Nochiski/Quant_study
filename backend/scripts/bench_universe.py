@@ -34,10 +34,12 @@ from __future__ import annotations
 import argparse
 import cProfile
 import ctypes
+import importlib
 import json
 import math
 import pstats
 import statistics
+import subprocess
 import sys
 import time
 from collections.abc import Mapping
@@ -327,18 +329,68 @@ def synthetic_universe(
     return instruments, expanded
 
 
-# Rust `feed.rs`의 `DENSE_BYTES_PER_SLOT` / `SPARSE_BYTES_PER_ROW`와 같은 값이다. 이 값이
-# 바뀌면 벤치가 기록하는 `row_index_expected`도 함께 고쳐야 한다 (Rust는 어느 표현을 골랐는지
-# Python에 노출하지 않으므로 선택 규칙을 여기서 다시 계산한다).
-_DENSE_BYTES_PER_SLOT = 4
-_SPARSE_BYTES_PER_ROW = 20
+# 행 조회표 표현 선택에 쓰는 바이트 상수의 정본은 Rust `feed.rs`이고
+# `backtest_core.ROW_INDEX_BYTES`로 노출된다. 확장이 빌드되지 않은 환경(python 코어만 재는
+# 실행)에서도 벤치가 돌아야 하므로 같은 리터럴로 폴백한다 — 폴백 값이 Rust와 어긋나면
+# `tests/test_core_parity.py::test_row_index_bytes_match_bench_fallback`이 잡는다.
+ROW_INDEX_BYTES_FALLBACK: Mapping[str, int] = {"dense_per_slot": 4, "sparse_per_row": 20}
+
+
+def row_index_bytes() -> Mapping[str, int]:
+    """Rust가 노출한 행 조회표 바이트 상수. 확장이 없으면 폴백 리터럴."""
+    try:
+        core = importlib.import_module("backtest_core")
+    except ImportError:
+        return ROW_INDEX_BYTES_FALLBACK
+    exported = getattr(core, "ROW_INDEX_BYTES", None)
+    if not isinstance(exported, dict):
+        return ROW_INDEX_BYTES_FALLBACK
+    return exported
 
 
 def row_index_expected(sessions: int, instruments: int, rows: int) -> str:
-    """Rust `PersistentFeed`가 고를 행 조회표 표현을 같은 규칙으로 재현한다."""
-    if sessions * instruments * _DENSE_BYTES_PER_SLOT <= rows * _SPARSE_BYTES_PER_ROW:
+    """Rust `PersistentFeed`가 고를 행 조회표 표현을 같은 규칙으로 재현한다.
+
+    Rust는 어느 표현을 골랐는지 Python에 노출하지 않으므로 선택 규칙(`slots × 4B ≤ rows × 20B`)을
+    여기서 다시 계산한다. 규칙은 복제하되 상수는 Rust에서 읽는다.
+    """
+    sizes = row_index_bytes()
+    if sessions * instruments * sizes["dense_per_slot"] <= rows * sizes["sparse_per_row"]:
         return "dense"
     return "sparse"
+
+
+def cpu_load_percent() -> int | None:
+    """실행 직전 CPU 부하(%). Windows `Win32_Processor.LoadPercentage`를 읽는다.
+
+    측정 결과를 해석할 때 필요한 조건이므로 JSON에 함께 남긴다 — 부하가 40%를 넘은 실행의
+    절대값은 다른 실행과 비교할 수 없다. PowerShell이 없거나 값을 못 읽으면 `None`이고,
+    그때는 부하를 알 수 없다는 뜻이지 0이라는 뜻이 아니다.
+    """
+    if sys.platform != "win32":
+        return None
+    try:
+        completed = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                "(Get-CimInstance Win32_Processor).LoadPercentage",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    first = completed.stdout.strip().splitlines()
+    if not first:
+        return None
+    try:
+        return int(first[0].strip())
+    except ValueError:
+        return None
 
 
 def main(argv: list[str]) -> int:
@@ -390,11 +442,13 @@ def main(argv: list[str]) -> int:
     slots = len(feed) * len(instruments)
     bar_density = len(bars) / slots if slots else 1.0
     index_kind = row_index_expected(len(feed), len(instruments), len(bars))
+    load = cpu_load_percent()
     print(
         f"instruments={len(instruments)} sessions={len(feed)} "
         f"bars={len(bars)} density={bar_density:.4f} row_index={index_kind} "
         f"cores={','.join(cores)} strategy={args.strategy} "
-        f"repeat={args.repeat} warmup={args.warmup}"
+        f"repeat={args.repeat} warmup={args.warmup} "
+        f"cpu_load={'unknown' if load is None else f'{load}%'}"
     )
 
     def run_once(core: str) -> tuple[Timing, tuple[float, int, int]]:
@@ -466,6 +520,7 @@ def main(argv: list[str]) -> int:
             "requested_density": args.density,
             "bar_density": bar_density,
             "row_index_expected": index_kind,
+            "cpu_load_percent": load,
             "repeat": args.repeat,
             "warmup": args.warmup,
             "rss_isolated": rss_isolated,

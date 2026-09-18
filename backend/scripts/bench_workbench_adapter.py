@@ -55,7 +55,12 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-from bench_universe import load_full_calendar_universe, peak_rss_bytes, synthetic_universe
+from bench_universe import (
+    cpu_load_percent,
+    load_full_calendar_universe,
+    peak_rss_bytes,
+    synthetic_universe,
+)
 
 from backtest_engine import BacktestEngine
 from backtest_engine.engine.store import EventStore
@@ -454,10 +459,12 @@ def main(argv: Sequence[str]) -> int:
         if args.core == "all"
         else (ExecutionCore(args.core),)
     )
+    load = cpu_load_percent()
     print(
         f"instruments={len(security_ids)} sessions={len(sessions)} bars={len(dataset.bars)} "
         f"frames={len(tape.frames)} cores={','.join(core.value for core in cores)} "
-        f"repeat={args.repeat} metric_windows={len(metric_windows)}"
+        f"repeat={args.repeat} metric_windows={len(metric_windows)} "
+        f"cpu_load={'unknown' if load is None else f'{load}%'}"
     )
 
     adapter = BacktestEngineExecutorAdapter()
@@ -515,6 +522,7 @@ def main(argv: Sequence[str]) -> int:
             "repeat": args.repeat,
             "metric_windows": len(metric_windows),
             "synthetic": True,
+            "cpu_load_percent": load,
         },
         # 한 프로세스에서 두 코어를 돌리면 peak RSS가 코어별로 갈라지지 않는다.
         "rss_isolated": rss_isolated,

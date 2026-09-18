@@ -120,6 +120,8 @@
   border: 1px dashed var(--border);
   border-radius: var(--radius-small);
   color: var(--text-muted);
+}
+
 .strategy-form__item {
   display: grid;
   gap: var(--space-2);

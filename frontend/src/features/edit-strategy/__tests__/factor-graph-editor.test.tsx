@@ -93,12 +93,20 @@ describe("FactorGraphEditor (P5-02)", () => {
     expect(editor().getByText("노드가 없습니다 — 노드 추가로 시작하세요")).toBeInTheDocument();
     await user.selectOptions(editor().getByRole("combobox", { name: "노드 종류" }), "field");
     await user.click(editor().getByRole("button", { name: "노드 추가" }));
+    // 빈 그래프의 첫 노드는 출력 노드 지정과 한 트랜잭션이다(backlog 13).
     expect(transactions.apply).toHaveBeenLastCalledWith(
-      {
-        kind: "insert-item",
-        parentPointer: "/factors/1/graph/nodes",
-        value: expect.objectContaining({ kind: "field", node_id: "field" }),
-      },
+      [
+        {
+          kind: "insert-item",
+          parentPointer: "/factors/1/graph/nodes",
+          value: expect.objectContaining({ kind: "field", node_id: "field" }),
+        },
+        {
+          kind: "replace-scalar",
+          pointer: "/factors/1/graph/output_node_id",
+          value: "field",
+        },
+      ],
       "field",
       "graph",
       { focusEditor: false },

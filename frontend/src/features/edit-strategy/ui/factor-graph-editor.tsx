@@ -105,7 +105,7 @@ export const FactorGraphEditor = ({
     const added = addNode(tree, factorPointer, chosenKind, schema);
     if ("error" in added) return;
     const nextIndex = nodes?.items.length ?? 0;
-    if (transactions.apply(added.op, added.nodeId, GRAPH_OWNER, NO_FOCUS))
+    if (transactions.apply(added.ops, added.nodeId, GRAPH_OWNER, NO_FOCUS))
       onSelectPointer(`${graphPointer}/nodes/${nextIndex}`);
   };
   // 삭제는 표시 이름이 아니라 pointer로 한다(리뷰 DEFECT-132-01: 중복·누락 `node_id`에서 다른 노드가 지워졌다).

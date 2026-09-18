@@ -1,10 +1,10 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { CodeEditorHandle } from "../../../shared/ui/code-editor";
 import type { DocumentState } from "./document-state";
 import type { SnippetEditFailure } from "./canonical-snippets";
 import {
-  planSourceOperation,
+  planSourceOperations,
   type PlanFailure,
   type PlannedEdit,
   type SourceOperation,
@@ -49,11 +49,12 @@ export type ApplyOptions = {
 
 export type SourceTransactions = {
   /**
-   * 원시 연산 하나를 편집기 현재 텍스트에 계획·적용한다. 적용했으면 true. 실패하면 텍스트는 그대로고
+   * 원시 연산(하나 또는 순서 있는 여러 개)을 편집기 현재 텍스트에 계획·적용한다. 여러 개면 순차 계획해
+   * 편집 한 번(undo 1회)으로 합친다(`planSourceOperations`). 적용했으면 true. 실패하면 텍스트는 그대로고
    * feedback만 바뀌며 false — 호출자가 feedback 슬롯(인스턴스당 하나)을 다시 읽지 않아도 결과를 안다.
    */
   apply: (
-    op: SourceOperation,
+    op: SourceOperation | readonly SourceOperation[],
     label: string,
     owner?: string,
     options?: ApplyOptions,
@@ -154,6 +155,11 @@ export const useSourceTransactions = (
   // 직전에 적용한 연산이 구조를 바꿨는가(추가·삭제·스니펫). 그 뒤 parse가 따라오기 전에는 형제 pointer가 밀려
   // 있어 스칼라 확정도 다른 항목에 써질 수 있다(P5-03 2차 리뷰 P1-1) → 그때는 스칼라도 보류한다.
   const lastStructural = useRef(false);
+  // 다른 문서를 열면 직전 연산 기억을 버린다 — feedback 슬롯처럼 `documentEpoch`에 결속(Phase 5 감사 P5X-006:
+  // 이전 문서의 구조 변경이 새 문서의 첫 스칼라 확정을 한 번 pending으로 막았다).
+  useEffect(() => {
+    lastStructural.current = false;
+  }, [state.documentEpoch]);
   const setFeedback = useCallback(
     (value: TransactionFeedback): void => {
       const next = { documentEpoch: state.documentEpoch, scope, value };
@@ -221,20 +227,21 @@ export const useSourceTransactions = (
 
   const apply = useCallback(
     (
-      op: SourceOperation,
+      op: SourceOperation | readonly SourceOperation[],
       label: string,
       owner = "default",
       options: ApplyOptions = {},
     ): boolean => {
+      const ops = Array.isArray(op) ? (op as readonly SourceOperation[]) : [op as SourceOperation];
       // 위치 pointer 연산은 직전 편집의 parse가 따라온 뒤에만(P5-03 리뷰 DEFECT-133-01: 150ms 안의 연타가
       // stale pointer로 다른 항목·노드를 지웠다). 스칼라 확정은 값 pointer가 살아 있어 그대로 계획한다.
-      const structural = op.kind !== "replace-scalar";
+      const structural = ops.some((item) => item.kind !== "replace-scalar");
       if (settling && (structural || lastStructural.current)) {
         setFeedback({ status: "error", owner, label, reason: "pending" });
         return false;
       }
       const applied = run(
-        ({ text }) => planSourceOperation(text, "yaml", op),
+        ({ text }) => planSourceOperations(text, "yaml", ops),
         label,
         owner,
         options,

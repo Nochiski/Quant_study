@@ -245,6 +245,57 @@ describe("useSourceTransactions", () => {
     expect(result.current.feedbackFor("form")).toMatchObject({ status: "error", reason: "pending" });
   });
 
+  it("forgets the last structural operation when another document opens (audit P5X-006)", () => {
+    const editor = editorOf(SOURCE);
+    const { result, rerender } = renderHook(
+      ({ state }: { state: DocumentState }) => useSourceTransactions(state),
+      { initialProps: { state: parsedState(SOURCE) } },
+    );
+    act(() => result.current.onEditorReady(editor.handle));
+    act(() => {
+      result.current.apply({ kind: "remove", pointer: "/risk" }, "risk", "form");
+    });
+    expect(editor.text()).not.toContain("risk");
+    // 새 문서(epoch 증가)가 parse를 기다리는 동안의 첫 스칼라 확정은 이전 문서의 구조 변경에 막히지 않는다.
+    act(() => editor.handle.setText(SOURCE));
+    rerender({
+      state: { ...parsedState(SOURCE), documentEpoch: 1, sourceVersion: 3 },
+    });
+    expect(result.current.settling).toBe(true);
+    let applied = false;
+    act(() => {
+      applied = result.current.apply(
+        { kind: "replace-scalar", pointer: "/risk/max_name_weight", value: 0.1 },
+        "max_name_weight",
+        "form",
+      );
+    });
+    expect(applied).toBe(true);
+    expect(editor.text()).toContain("max_name_weight: 0.1");
+  });
+
+  it("applies several operations as one editor edit (planSourceOperations)", () => {
+    const editor = editorOf(SOURCE);
+    const { result } = renderHook(() => useSourceTransactions(parsedState(SOURCE)));
+    act(() => result.current.onEditorReady(editor.handle));
+    let applied = false;
+    act(() => {
+      applied = result.current.apply(
+        [
+          { kind: "replace-scalar", pointer: "/risk/max_name_weight", value: 0.2 },
+          { kind: "insert-key", parentPointer: "/risk", key: "max_gross", value: 1 },
+        ],
+        "risk",
+        "form",
+      );
+    });
+    expect(applied).toBe(true);
+    expect(editor.handle.replaceRange).toHaveBeenCalledTimes(1);
+    expect(editor.text()).toContain("max_name_weight: 0.2");
+    expect(editor.text()).toContain("max_gross: 1");
+    expect(result.current.feedbackFor("form")).toMatchObject({ status: "applied" });
+  });
+
   it("keeps one feedback slot per owner so a snippet result does not erase the form's (audit R2)", () => {
     const editor = editorOf(SOURCE);
     const { result } = renderHook(() =>

@@ -9,7 +9,10 @@ use crate::callback::CallbackFrame;
 use crate::persistent::{Lifecycle, PersistentEngine, StoredGroup, StoredOrder};
 use crate::persistent_router::{self, DecisionWire, RouteError};
 use crate::portfolio::SnapshotTuple;
-use crate::records::{to_object, FillWire, NativeDecision, OrderWire, RecordPayload, SnapshotWire};
+use crate::records::{
+    to_object, CorporateActionAppliedWire, FillWire, NativeDecision, OrderUpdateWire, OrderWire,
+    RecordPayload, SnapshotWire,
+};
 use crate::session::py_float;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -179,11 +182,11 @@ impl PersistentEngine {
         let notify = self.settings()?.notify_order_update;
         self.record(
             session,
-            RecordPayload::OrderUpdate {
+            RecordPayload::OrderUpdate(Box::new(OrderUpdateWire {
                 order_id: order_id.clone(),
                 status: status.clone(),
                 detail: detail.clone(),
-            },
+            })),
         )?;
         if notify {
             self.push(
@@ -336,7 +339,7 @@ impl PersistentEngine {
             match event {
                 Queued::Market => self.on_market(session)?,
                 Queued::Fill(fill) => {
-                    self.record(session, RecordPayload::Fill(fill))?;
+                    self.record(session, RecordPayload::Fill(Box::new(fill)))?;
                 }
                 Queued::Notify(payload) => {
                     // 큐 엔트리의 세션이 곧 피드 커서(`current_session_count()` − 1)다.
@@ -367,7 +370,7 @@ impl PersistentEngine {
                     }
                 }
                 Queued::Order(order) => {
-                    self.record(session, RecordPayload::Order(order))?;
+                    self.record(session, RecordPayload::Order(Box::new(order)))?;
                 }
             }
         }
@@ -506,14 +509,14 @@ impl PersistentEngine {
             {
                 self.record(
                     session,
-                    RecordPayload::CorporateActionApplied {
+                    RecordPayload::CorporateActionApplied(Box::new(CorporateActionAppliedWire {
                         corporate_action: index,
                         old_quantity,
                         new_quantity,
                         old_average_price: old_average,
                         new_average_price: new_average,
                         cash_paid,
-                    },
+                    })),
                 )?;
             }
         }
@@ -567,7 +570,7 @@ impl PersistentEngine {
                 positions.join(", ")
             )));
         }
-        self.record(session, RecordPayload::Snapshot(snapshot.clone()))?;
+        self.record(session, RecordPayload::Snapshot(Box::new(snapshot.clone())))?;
         // warmup 판정은 NOTIFY 분기와 같은 식이다 — 팝된 세션이 곧 피드 커서라는 근거는
         // 그쪽 주석에 있다.
         if should_dispatch && session + 1 >= settings.warmup_sessions {
@@ -614,7 +617,7 @@ impl PersistentEngine {
             session,
             RecordPayload::Decision {
                 decision_id: decision_id.clone(),
-                native,
+                native: native.map(Box::new),
             },
         )?;
         let (orders, updates, error) = match self.route_with_id(&decision_id, &decision) {
@@ -739,14 +742,14 @@ impl PersistentEngine {
                 };
                 self.record(
                     last,
-                    RecordPayload::OrderUpdate {
+                    RecordPayload::OrderUpdate(Box::new(OrderUpdateWire {
                         order_id: order.order_id,
                         status: "cancelled".to_string(),
                         detail: Some(format!(
                             "{reason}instrument={} remaining={}",
                             order.symbol, order.remaining
                         )),
-                    },
+                    })),
                 )?;
             }
         }

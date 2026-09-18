@@ -5,12 +5,45 @@
  * sibling `kind` value in the document, so a `kind` change re-selects the allowed fields.
  */
 
+import type { ApplicableWhen } from "../../../shared/api";
 import {
   decodePointerSegment,
   pointerSegments,
 } from "../../../shared/lib/yaml12";
+import { isApplicableWhen } from "./field-applicability";
 
 export type JsonSchema = Record<string, unknown>;
+
+export type Bound = { value: number; inclusive: boolean };
+
+/**
+ * 스키마 노드 하나가 말하는 사실(WORKFLOW P4-01). Contract Inspector와 Form projection이 같은
+ * 함수로 읽어 컨트롤·범위·단위·카탈로그 해석 규칙을 두 벌 두지 않는다. 값은 전부 backend runtime
+ * schema에서 온다: 여기에 필드 이름·enum·기본값을 적지 않는다.
+ */
+export type SchemaFacts = {
+  type: string;
+  enumValues: readonly string[];
+  hasConst: boolean;
+  constValue: unknown;
+  hasDefault: boolean;
+  defaultValue: unknown;
+  /** `x-default-from`: 생략하면 backend가 이 형제 필드의 값으로 채운다(`label` ← `factor_id`). */
+  defaultFrom: string | null;
+  minimum: Bound | null;
+  maximum: Bound | null;
+  format: string | null;
+  unit: string | null;
+  displayUnit: string | null;
+  descriptionKey: string | null;
+  appliedStage: string | null;
+  catalog: string | null;
+  reference: string | null;
+  applicableWhen: ApplicableWhen | null;
+  /** `examples`의 첫 non-null 값. backend는 없는 예시를 null로 직렬화한다. */
+  example: unknown;
+  hasExample: boolean;
+};
 
 export type ResolvedSchema = {
   node: JsonSchema;
@@ -413,6 +446,85 @@ export const definingArrayFor = (
     }
   }
   return null;
+};
+
+const stringAt = (node: JsonSchema, key: string): string | null =>
+  typeof node[key] === "string" ? (node[key] as string) : null;
+
+/** 한 스키마 노드의 사실. `$ref`·nullable은 이미 풀린 노드(`schemaAt(...).node`)를 받는다. */
+export const schemaFacts = (node: JsonSchema): SchemaFacts => {
+  const own = (key: string): boolean =>
+    Object.prototype.hasOwnProperty.call(node, key);
+  const type = Array.isArray(node.type)
+    ? node.type.map(String).join(" | ")
+    : typeof node.type === "string"
+      ? node.type
+      : "object";
+  const minimum: Bound | null =
+    typeof node.minimum === "number"
+      ? { value: node.minimum, inclusive: true }
+      : typeof node.exclusiveMinimum === "number"
+        ? { value: node.exclusiveMinimum, inclusive: false }
+        : null;
+  const maximum: Bound | null =
+    typeof node.maximum === "number"
+      ? { value: node.maximum, inclusive: true }
+      : typeof node.exclusiveMaximum === "number"
+        ? { value: node.exclusiveMaximum, inclusive: false }
+        : null;
+  const example = Array.isArray(node.examples)
+    ? node.examples.find(
+        (candidate) => candidate !== null && candidate !== undefined,
+      )
+    : undefined;
+  return {
+    type,
+    enumValues: Array.isArray(node.enum) ? node.enum.map(String) : [],
+    hasConst: own("const"),
+    constValue: node.const,
+    hasDefault: own("default"),
+    defaultValue: node.default,
+    defaultFrom: stringAt(node, "x-default-from"),
+    minimum,
+    maximum,
+    format: stringAt(node, "format"),
+    unit: stringAt(node, "x-unit"),
+    displayUnit: stringAt(node, "x-display-unit"),
+    descriptionKey: stringAt(node, "x-description-key"),
+    appliedStage: stringAt(node, "x-applied-stage"),
+    catalog: stringAt(node, "x-catalog"),
+    reference: stringAt(node, "x-reference"),
+    applicableWhen: isApplicableWhen(node["x-applicable-when"])
+      ? node["x-applicable-when"]
+      : null,
+    example,
+    hasExample: example !== undefined,
+  };
+};
+
+/**
+ * `x-reference: <namespace>` 필드가 고를 수 있는 id 목록: 가장 가까운 `x-defines: <namespace>` 배열의
+ * 항목에서 `<namespace>_id`를 읽되 `pointer`가 속한 항목 자신은 뺀다(완성·Form select가 같은 목록).
+ */
+export const referenceCandidates = (
+  root: JsonSchema,
+  pointer: string,
+  namespace: string,
+  tree: unknown,
+): string[] => {
+  const defining = definingArrayFor(root, pointer, namespace, tree);
+  if (defining === null) return [];
+  const selfPrefix = `${defining.pointer}/`;
+  const self = pointer.startsWith(selfPrefix)
+    ? pointer.slice(selfPrefix.length).split("/")[0]
+    : null;
+  return defining.items
+    .map((item, index) =>
+      isObject(item) && String(index) !== self
+        ? item[`${namespace}_id`]
+        : undefined,
+    )
+    .filter((id): id is string => typeof id === "string");
 };
 
 /** Short type label for completion details: `string`, `number ≥0 ≤1`, `enum(a|b)`, `object`. */

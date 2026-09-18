@@ -10,8 +10,9 @@ import { valueAtPointer } from "../../../shared/lib/yaml12";
  * 호출자가 넘긴 `resolveDefault`(backend가 발행한 contract/schema `default`)로 판정하고, 발행된
  * 기본값도 없으면 판정 불가(null)다. frontend가 기본값을 지어내는 일은 없다.
  *
- * Form 배지는 이 모듈을 쓰지 않는다: backend compile이 낸 `strategy.field.inapplicable` 진단
- * pointer가 곧 배지다(명시 기재·기본값과 다름·`owned_by_error` 억제를 backend가 판정).
+ * Form은 회색 처리(`FormField.applicable`)에만 이 모듈을 쓰고, 경고 배지는 backend compile이 낸
+ * `strategy.field.inapplicable` 진단 pointer가 낸다(명시 기재·기본값과 다름·`owned_by_error` 억제를
+ * backend가 판정). Inspector도 같은 판정을 조건 목록으로 보여준다.
  */
 export type ApplicabilityCondition = {
   pointer: string;

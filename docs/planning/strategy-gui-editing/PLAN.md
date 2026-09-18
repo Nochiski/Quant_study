@@ -6,8 +6,8 @@ current_phase: complete
 current_pr: none
 active_prs: []
 parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02, P1-06, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05, P5-01, P5-02, P5-03]
-last_updated: 2026-09-18T23:52:44+09:00
-last_updated: 2026-09-18T23:52:44+09:00
+last_updated: 2026-09-19T00:12:00+09:00
+last_updated: 2026-09-19T00:12:00+09:00
 planned_prs: 19
 merged_prs: 19
 approved_prs: 19
@@ -30,7 +30,7 @@ progress_percent: 100
 | Active PR | none |
 | Progress | `19 / 19 merged (100%)` |
 | Approved | `19 / 19` |
-| Aggregated at | `2026-09-18 23:52 KST` |
+| Aggregated at | `2026-09-19 00:12 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -238,7 +238,7 @@ Phase exit:
 | 12 | ~~`database/` ruff 설정 부재 → `--config backend/pyproject.toml` 명시를 WORKFLOW에~~ → [#143](https://github.com/Nochiski/Quant_study/pull/143) | P5-03 부수 권고 | 문서 |
 | 13 | ~~빈 팩터의 `output_node_id` 자동 지정 비대칭~~ → [#144](https://github.com/Nochiski/Quant_study/pull/144) | 동작은 맞고 compile이 안내 | 소 |
 | 14 | ~~flow mapping(`{ … }` 한 줄)으로 쓴 팩터·그래프는 `insert-item`부터 계획이 실패하고(base 한계, PLAN 기록), 다중 연산 트랜잭션(`planSourceOperations`)의 all-or-nothing이 그 한계를 노드 추가 같은 주 동작으로 전파한다(#144 3차 리뷰 관찰)~~ → [#149](https://github.com/Nochiski/Quant_study/pull/149) | flow 컨테이너를 block으로 여는 연산 또는 안내 문구 | 중 |
-| 15 | ~~route 테스트(`document-routes.test.tsx`)가 전체 실행·CI에서 부하 flake(#143 CI 재실행, #144 리뷰 1회차, 로컬 반복) — 파일 timeout 15s로도 남는 한 틱 지연~~ → [#149](https://github.com/Nochiski/Quant_study/pull/149) | 케이스별 `findBy*`/`waitFor` 정리 또는 워커 격리 | 소 |
+| 15 | ~~route 테스트(`document-routes.test.tsx`)가 전체 실행·CI에서 부하 flake(#143 CI 재실행, #144 리뷰 1회차, 로컬 반복) — 원인은 54파일 병렬의 워커 경합(단독 65초·케이스당 1초)이 전역 비동기 예산 5초를 넘기는 것(케이스 timeout 15초는 먼저 만료되지 않음, #149 리뷰 P1-1)~~ → [#149](https://github.com/Nochiski/Quant_study/pull/149) 완화(예산 10초; 근본은 19행) | 예산 상향(완화) → 파일 분할·워커 격리(근본) | 소 |
 | 16 | ~~저장·revise 422(`strategy_document.invalid`)의 detail에 `message`가 없어 `use-save-document.ts`가 빈 detail만 보여 준다 — #147이 선언한 typed 응답으로 `diagnostics` 첫 항목을 안내(#147 리뷰 관찰)~~ → [#149](https://github.com/Nochiski/Quant_study/pull/149) | 저장 실패 사유가 화면에 안 보임 | 소 |
 | 17 | ~~trace 422·409 코드 중 `trace.request.invalid`·`trace.engine.incompatible`·`trace.capability.unsupported`·`trace.strategy.stale`는 아직 backend 원문 노출 — `trace.error.<code>` 발판 위에 키만 추가~~ → [#149](https://github.com/Nochiski/Quant_study/pull/149) | 위험 5b 범위 밖 잔여 | 소 |
 | 18 | flow 표기 컨테이너에서 삽입은 되지만(`#149`) `remove`는 여전히 block 앵커를 요구한다 — 삽입/삭제 비대칭(#149 리뷰 P2-2) | 같은 `replaceFlowContainer` 경로로 삭제도 열기 | 소 |
@@ -248,7 +248,7 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
-| 2026-09-18 KST | Claude | backlog 14·15·16·17 처리 PR [#149](https://github.com/Nochiski/Quant_study/pull/149) `fix/gui-backlog-c1`(main 기반): flow 컨테이너 삽입은 가장 바깥 flow부터 block으로(`topmostFlowAncestor`·`replaceFlowContainer`, `detectIndentUnit` flow 키 제외), route 테스트 `asyncUtilTimeout` 5초, `invalidDocumentSummary`(첫 error 진단 → detail), trace 코드 6종 번역(`{detail}` 슬롯). Vitest 622/54·eslint·tsc·Playwright 19/19(stale `backtest_core` 재빌드 뒤). 리뷰 `review_gui_backlog_149` 1차 REQUEST_CHANGES(P1: 파일 안 `asyncUtilTimeout` 5초는 test-setup이 이미 5초라 no-op·flake 재현; P2: `trace.engine.incompatible`은 detail에 message가 없어 디버그 문자열 노출, docstring 모순, flow 뒤 줄 끝 주석 재부착, 비-2칸 문서 출력 변화 미기록, flow 삭제 비대칭 미기록) → 후속: 단일 owner `test-setup.ts` 예산 10초, incompatible 고정 문장 + 빈 슬롯 처리, docstring, 줄 끝 주석을 `key:`/`-` 줄에 유지, 5칸 문서 테스트, backlog 18·19 | 머지 뒤 backlog |
+| 2026-09-18 KST | Claude | backlog 14·15·16·17 처리 PR [#149](https://github.com/Nochiski/Quant_study/pull/149) `fix/gui-backlog-c1`(main 기반): flow 컨테이너 삽입은 가장 바깥 flow부터 block으로(`topmostFlowAncestor`·`replaceFlowContainer`, `detectIndentUnit` flow 키 제외), route 테스트 `asyncUtilTimeout` 5초, `invalidDocumentSummary`(첫 error 진단 → detail), trace 코드 6종 번역(`{detail}` 슬롯). Vitest 622/54·eslint·tsc·Playwright 19/19(stale `backtest_core` 재빌드 뒤). 리뷰 `review_gui_backlog_149` 1차 REQUEST_CHANGES(P1: 파일 안 `asyncUtilTimeout` 5초는 test-setup이 이미 5초라 no-op·flake 재현; P2: `trace.engine.incompatible`은 detail에 message가 없어 디버그 문자열 노출, docstring 모순, flow 뒤 줄 끝 주석 재부착, 비-2칸 문서 출력 변화 미기록, flow 삭제 비대칭 미기록) → 후속: 단일 owner `test-setup.ts` 예산 10초, incompatible 고정 문장 + 빈 슬롯 처리, docstring, 줄 끝 주석을 `key:`/`-` 줄에 유지, 5칸 문서 테스트, backlog 18·19 → 재검토 APPROVE(P2-4 property test 4000회 주석 손실 0; 새 P2-7: 키 줄 주석 뒤 다음 줄 flow 값이면 키 줄 주석 소실 → 후속에서 값 줄부터 교체, 전역 `testTimeout` 15초를 `vite.config.ts`로) | 머지 뒤 backlog |
 | 2026-09-18 KST | Claude | backlog 8 처리 PR [#148](https://github.com/Nochiski/Quant_study/pull/148) `docs/gui-backlog-b4`(main 기반): 캡처 스크립트에 13(Form 탭)·14(그래프 편집 영역) 추가, 14장 전량 재촬영(1.1 화면), 1절 임시 캡션 제거. 리뷰 `review_gui_backlog_148` APPROVE(P2 3: 08 벤치마크가 표와 불일치, `노드 종류`가 화면에 없음, 그림이 불릿 목록을 쪼갬) → 후속에서 스크립트 순서·문구·배치 고치고 14장 재촬영 | 머지 뒤 backlog |
 | 2026-09-18 KST | Claude | backlog 10·11 처리 PR [#147](https://github.com/Nochiski/Quant_study/pull/147) `fix/gui-backlog-b5`(main 기반): create·revise 422를 `StrategyDocumentSave422Response`로 선언(openapi.json·SDK 재생성), `traceErrorMessage`가 `trace.error.<code>` 번역(위험 5b), 매뉴얼 1절 샘플 compile 게이트(#143 리뷰 권고), P2X-004는 P2-03 테스트 118-07로 이미 종결 확인, P2X-005는 "문장은 소비자별 소유"로 SoT 종결. backend pytest 1330·ruff·pyright·frontend 게이트 초록(route 테스트 부하 flake 1건 단독 재통과). 리뷰 `review_gui_backlog_147` APPROVE(P2 3: SoT 문장 경계, 422 description이 warning도 422로 읽힘, 매뉴얼 게이트가 문서 첫 yaml에 결속; NIT docstring) → 후속 `9968d3d`로 전부 반영, backlog 16·17 추가 | 머지 뒤 backlog |
 | 2026-09-18 KST | Claude | backlog 4 처리 PR [#145](https://github.com/Nochiski/Quant_study/pull/145) `feat/gui-backlog-b3`(#144 위 스택): `renameNode`(중복·빈 값 거부, 정의 + 같은 그래프 참조 연산 목록) + `FormFieldsEditor.planCommit`(필드 확정 가로채기, `CommitInvalidReason` union으로 i18n 키 타입 검사). Vitest 614/52·eslint·tsc·Playwright 19/19. 리뷰 `review_gui_backlog_145` 1차 APPROVE(P2 3: 거부 뒤 blur가 안내를 지움, Escape가 안내를 남김, 매뉴얼 문장 끊김) → 후속 `a209f5a`(`onValid`를 재확정 가드 뒤로, Escape에 `onValid`, 문장 복원, 편집기 단언 4줄) → 재검토 APPROVE(리뷰어가 Playwright 19/19 재실행) | 머지 뒤 backlog |

@@ -665,6 +665,20 @@ describe("flow containers (backlog 14)", () => {
     expect(onItem.edit.nextSource).toBe("l:\n  - # 항목\n    a: 1\n    b: 2\n");
   });
 
+  it("keeps the key line's own comment when the flow value starts on the next line (#149 re-review P2-7)", () => {
+    const flow = "risk: # 원래\n  { max_name_weight: 0.05 } # 뒤\n";
+    const planned = planSourceOperation(flow, "yaml", {
+      kind: "insert-key",
+      parentPointer: "/risk",
+      key: "gross_exposure",
+      value: 1,
+    });
+    if (planned.status !== "ok") throw new Error(planned.reason);
+    expect(planned.edit.nextSource).toBe(
+      "risk: # 원래\n  # 뒤\n  max_name_weight: 0.05\n  gross_exposure: 1\n",
+    );
+  });
+
   it("expands an empty item container with the document's own indent unit (#149 P2-5)", () => {
     // 5칸 문서: 예전 코드는 항상 `-` 열 + 2였다. 이제 문서 폭을 따른다(tree는 같다).
     const five = "l:\n     - []\n     - x\n";

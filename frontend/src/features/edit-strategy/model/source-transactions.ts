@@ -205,9 +205,13 @@ const detectIndentUnit = (
     const segments = pointerSegments(pointer);
     if (segments.length < 2 || /^\d+$/.test(segments[segments.length - 2]!))
       continue;
-    const parentKey = parsed.keyRanges.get(parentPointerOf(pointer));
-    // 부모 키와 같은 줄에 있는 키는 flow `{ a: 1 }` 표기라 들여쓰기 근거가 아니다(backlog 14).
-    if (parentKey !== undefined && parentKey.start.line === range.start.line)
+    const parentPointer = parentPointerOf(pointer);
+    const parentKey = parsed.keyRanges.get(parentPointer);
+    // flow `{ a: 1 }` 안의 키(부모 키와 같은 줄이거나 다음 줄의 `{ … }`)는 들여쓰기 근거가 아니다(backlog 14).
+    if (
+      (parentKey !== undefined && parentKey.start.line === range.start.line) ||
+      isFlowContainer(source, parsed, parentPointer)
+    )
       continue;
     const parentColumn = parentKey?.start.column ?? 0;
     if (range.start.column > parentColumn)
@@ -346,21 +350,31 @@ const replaceFlowContainer = (
       cursor: range.start.offset + insert.length,
     };
   }
+  // 값이 `key:`/`-`와 다른 줄에서 시작하면(`risk: # 원래` 다음 줄에 `{ … }`) 그 줄은 주석째 그대로 두고 값 줄부터
+  // 교체한다(#149 재검토 P2-7: 콜론 바로 뒤부터 지우면 키 줄 주석이 사라졌다). 닫는 괄호 뒤 주석은 그때 값 자리
+  // 첫 줄에 따로 둔다.
+  const rewrite = (
+    anchorOffset: number,
+    indent: string,
+  ): Plan => {
+    const sameLine = lineEndOf(source, anchorOffset) >= range.start.offset;
+    const from = sameLine ? anchorOffset : lineEndOf(source, anchorOffset);
+    const lead =
+      comment === "" ? "" : sameLine ? comment : `${eol}${indent}${comment.trim()}`;
+    const insert = `${lead}${eol}${indent}${indentLines(block, indent, eol)}`;
+    return { from, to, insert, cursor: from + insert.length };
+  };
   const colon = afterColon(source, parsed, top);
   if (colon !== null) {
     // `key: { … }` → `key:` 뒤에서 줄을 바꾸고 키 열 + 폭으로 들여쓴다.
     const keyColumn = parsed.keyRanges.get(top)!.start.column;
-    const indent = " ".repeat(keyColumn + unit);
-    const insert = `${comment}${eol}${indent}${indentLines(block, indent, eol)}`;
-    return { from: colon, to, insert, cursor: colon + insert.length };
+    return rewrite(colon, " ".repeat(keyColumn + unit));
   }
   const dash = dashOffsetOf(source, range.start.offset);
   if (dash !== null) {
     // `- { … }` → `-` 뒤에서 줄을 바꾸고 `-` 열 + 폭으로 들여쓴다(빈 `- []`·`- {}` 확장과 같은 모양 —
     // 문서 고유 폭 `unit`을 쓰므로 2칸이 아닌 문서에서는 예전 `+2`와 다르다, #149 리뷰 P2-5).
-    const indent = " ".repeat(dash - lineStartOf(source, dash) + unit);
-    const insert = `${comment}${eol}${indent}${indentLines(block, indent, eol)}`;
-    return { from: dash + 1, to, insert, cursor: dash + 1 + insert.length };
+    return rewrite(dash + 1, " ".repeat(dash - lineStartOf(source, dash) + unit));
   }
   const indent = " ".repeat(range.start.column);
   const insert = indentLines(block, indent, eol);

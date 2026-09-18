@@ -4,6 +4,35 @@ use pyo3::exceptions::{PyIndexError, PyValueError};
 use pyo3::prelude::*;
 use std::collections::HashMap;
 
+/// Sparse 표현의 엔트리 하나가 실제로 차지하는 바이트(추정).
+///
+/// std `HashMap<u32, u32>`는 엔트리 8B에 제어 바이트 1B를 쓰고 적재율이 7/8을 넘으면 용량을
+/// 두 배로 키우므로 엔트리당 약 10~18B다. 세션마다 표를 하나씩 두는 비용(`HashMap` 자체가
+/// 48B)까지 얹어 여유 있게 20B로 잡는다.
+const SPARSE_BYTES_PER_ROW: usize = 20;
+
+/// Dense 표현의 슬롯 하나가 차지하는 바이트 (`u32` 행 번호).
+const DENSE_BYTES_PER_SLOT: usize = 4;
+
+/// 세션 × 종목 → 행 번호 조회표.
+///
+/// `Dense`는 `session * 종목수 + instrument_id` 자리에 행 번호를 바로 담는다. 조회가 산술
+/// 한 번이지만 bar 유무와 무관하게 `4B × 세션 × 종목`이 들어, 상장폐지가 쌓인 누적 유니버스
+/// 처럼 실제 행이 슬롯 일부만 채우는 피드에서는 유니버스 × 기간에 비례해 상한 없이 커진다
+/// (3,000종목 × 5,000세션 = 60MiB).
+///
+/// `Sparse`는 세션마다 `HashMap<instrument_id, row>`를 둬 실제 행 수에만 비례한다.
+///
+/// 어느 쪽을 고를지는 두 표현의 메모리가 같아지는 지점이 정한다:
+/// `slots × 4B ≤ rows × 20B`, 즉 밀도 `rows / slots`가 20% 이상이면 Dense가 작다.
+/// (300종목 synthetic은 밀도 100% — 369,300행 / 369,300슬롯 = 1.5MiB로 Dense가 맞다.)
+/// 바이트 예산만으로 자르지 않는 이유는, 빽빽한 대형 피드에서는 Sparse가 오히려 5배 크기
+/// 때문이다 — 큰 Dense 표는 그만큼 bar가 실제로 있다는 뜻이다.
+enum RowIndex {
+    Dense(Vec<u32>),
+    Sparse(Vec<HashMap<u32, u32>>),
+}
+
 /// 실행 시작 시 한 번 적재되는 columnar feed와 u32 instrument registry.
 pub(crate) struct PersistentFeed {
     keys: Vec<String>,
@@ -21,10 +50,9 @@ pub(crate) struct PersistentFeed {
     key_index: HashMap<String, u32>,
     /// key → symbol. 라우팅이 결정마다 쓰는 심볼 폴백 표를 적재 시 한 번만 만든다.
     symbol_by_key: HashMap<String, String>,
-    /// `session * keys.len() + instrument_id` → 행 번호. bar가 없으면 `u32::MAX`.
-    /// 세션별 행 구간을 매번 훑던 `row_of`를 O(1)로 만든다. 4B × 세션 × 종목이 든다
-    /// (300종목 1,231세션 = 1.5MiB).
-    row_index: Vec<u32>,
+    /// 세션 × 종목 행 조회표. 세션별 행 구간을 매번 훑던 `row_of`를 O(1)로 만든다.
+    /// 밀도에 따라 Dense / Sparse를 고른다 — 근거는 `RowIndex` 문서.
+    row_index: RowIndex,
 }
 
 impl PersistentFeed {
@@ -117,18 +145,40 @@ impl PersistentFeed {
                 keys.len()
             ))
         })?;
-        let mut row_index = vec![u32::MAX; slots];
-        for (session, window) in offsets.windows(2).enumerate() {
-            let base = session * keys.len();
-            for (offset, instrument_id) in instrument_ids[window[0]..window[1]].iter().enumerate() {
-                let slot = base + *instrument_id as usize;
-                // 한 세션에 같은 종목 행이 둘이면 앞선 행을 남긴다 — 선형 탐색이 `find`로
-                // 첫 행을 고르던 동작과 같다.
-                if row_index[slot] == u32::MAX {
-                    row_index[slot] = (window[0] + offset) as u32;
+        // 한 세션에 같은 종목 행이 둘이면 두 표현 모두 앞선 행을 남긴다 — 선형 탐색이
+        // `find`로 첫 행을 고르던 동작과 같다.
+        let row_index = if slots.saturating_mul(DENSE_BYTES_PER_SLOT)
+            <= rows.saturating_mul(SPARSE_BYTES_PER_ROW)
+        {
+            let mut dense = vec![u32::MAX; slots];
+            for (session, window) in offsets.windows(2).enumerate() {
+                let base = session * keys.len();
+                for (offset, instrument_id) in
+                    instrument_ids[window[0]..window[1]].iter().enumerate()
+                {
+                    let slot = base + *instrument_id as usize;
+                    if dense[slot] == u32::MAX {
+                        dense[slot] = (window[0] + offset) as u32;
+                    }
                 }
             }
-        }
+            RowIndex::Dense(dense)
+        } else {
+            let mut sparse: Vec<HashMap<u32, u32>> = Vec::with_capacity(sessions.len());
+            for window in offsets.windows(2) {
+                let mut session_rows: HashMap<u32, u32> =
+                    HashMap::with_capacity(window[1] - window[0]);
+                for (offset, instrument_id) in
+                    instrument_ids[window[0]..window[1]].iter().enumerate()
+                {
+                    session_rows
+                        .entry(*instrument_id)
+                        .or_insert((window[0] + offset) as u32);
+                }
+                sparse.push(session_rows);
+            }
+            RowIndex::Sparse(sparse)
+        };
         Ok(Self {
             keys,
             symbols,
@@ -166,12 +216,20 @@ impl PersistentFeed {
 
     /// `row_index` 조회. 세션 범위 밖이거나 그날 bar가 없으면 `None`.
     fn row_at(&self, session: usize, instrument_id: u32) -> Option<usize> {
-        let slot = session
-            .checked_mul(self.keys.len())?
-            .checked_add(instrument_id as usize)?;
-        match self.row_index.get(slot).copied() {
-            Some(row) if row != u32::MAX => Some(row as usize),
-            _ => None,
+        match &self.row_index {
+            RowIndex::Dense(dense) => {
+                let slot = session
+                    .checked_mul(self.keys.len())?
+                    .checked_add(instrument_id as usize)?;
+                match dense.get(slot).copied() {
+                    Some(row) if row != u32::MAX => Some(row as usize),
+                    _ => None,
+                }
+            }
+            RowIndex::Sparse(sparse) => sparse
+                .get(session)?
+                .get(&instrument_id)
+                .map(|row| *row as usize),
         }
     }
 
@@ -479,6 +537,100 @@ mod tests {
                 None => assert!(value.is_nan(), "index={index} value={value}"),
             }
         }
+    }
+
+    /// 희소 피드는 Dense 슬롯 표를 만들지 않고, 조회 결과는 같은 행을 Dense로 담은
+    /// 피드와 key 기준으로 완전히 같아야 한다.
+    ///
+    /// 두 피드는 같은 행을 등록부만 달리해 담는다 — wide는 1,000종목 등록부라 밀도가
+    /// 0.5%(500행 / 100,000슬롯)여서 Sparse를 고르고, narrow는 실제 거래된 20종목만
+    /// 담아 밀도 25%(500행 / 2,000슬롯)라 Dense를 고른다. 조회는 key 문자열로 하므로
+    /// 등록부가 달라도 답이 같아야 한다.
+    #[test]
+    fn sparse_feed_picks_the_hashmap_index_and_answers_like_a_dense_one() {
+        const SESSIONS: usize = 100;
+        const WIDE: usize = 1_000;
+        const USED: usize = 20;
+        const PER_SESSION: usize = 5;
+        const STRIDE: usize = 47;
+
+        let wide_keys: Vec<String> = (0..WIDE).map(|index| format!("I{index:04}")).collect();
+        let wide_symbols: Vec<String> = (0..WIDE).map(|index| format!("S{index:04}")).collect();
+        let narrow_keys: Vec<String> = (0..USED)
+            .map(|slot| wide_keys[slot * STRIDE].clone())
+            .collect();
+        let narrow_symbols: Vec<String> = (0..USED)
+            .map(|slot| wide_symbols[slot * STRIDE].clone())
+            .collect();
+        let sessions: Vec<String> = (0..SESSIONS).map(|index| format!("D{index:04}")).collect();
+
+        let mut offsets = vec![0usize];
+        let mut wide_ids: Vec<u32> = Vec::new();
+        let mut narrow_ids: Vec<u32> = Vec::new();
+        let mut opens: Vec<f64> = Vec::new();
+        for session in 0..SESSIONS {
+            let mut slots: Vec<usize> = (0..PER_SESSION)
+                .map(|offset| (session + offset) % USED)
+                .collect();
+            slots.sort_unstable();
+            for slot in slots {
+                wide_ids.push((slot * STRIDE) as u32);
+                narrow_ids.push(slot as u32);
+                opens.push(100.0 + session as f64 + slot as f64);
+            }
+            offsets.push(wide_ids.len());
+        }
+        let rows = opens.len();
+        assert_eq!(rows, SESSIONS * PER_SESSION);
+        let volumes = vec![1_000i64; rows];
+
+        let build = |keys: Vec<String>, symbols: Vec<String>, ids: Vec<u32>| {
+            PersistentFeed::new(
+                keys,
+                symbols,
+                sessions.clone(),
+                offsets.clone(),
+                ids,
+                opens.clone(),
+                opens.clone(),
+                opens.clone(),
+                opens.clone(),
+                volumes.clone(),
+            )
+            .unwrap()
+        };
+        let sparse = build(wide_keys, wide_symbols, wide_ids);
+        let dense = build(narrow_keys.clone(), narrow_symbols, narrow_ids);
+        assert!(matches!(sparse.row_index, RowIndex::Sparse(_)));
+        assert!(matches!(dense.row_index, RowIndex::Dense(_)));
+
+        let mut present = 0usize;
+        let mut absent = 0usize;
+        for session in 0..SESSIONS {
+            for key in &narrow_keys {
+                let expected = dense.has_bar(session, key);
+                assert_eq!(
+                    sparse.has_bar(session, key),
+                    expected,
+                    "session={session} key={key}"
+                );
+                assert_eq!(
+                    sparse.open_at(session, key),
+                    dense.open_at(session, key),
+                    "session={session} key={key}"
+                );
+                if expected {
+                    present += 1;
+                } else {
+                    absent += 1;
+                }
+            }
+        }
+        assert_eq!(present, rows);
+        assert_eq!(absent, SESSIONS * USED - rows);
+        // 세션 범위 밖과 등록부에 없는 key는 두 표현 모두 "bar 없음"이다.
+        assert!(!sparse.has_bar(SESSIONS, &narrow_keys[0]));
+        assert!(!sparse.has_bar(0, "Z"));
     }
 
     #[test]

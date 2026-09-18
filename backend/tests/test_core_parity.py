@@ -893,22 +893,42 @@ def test_promoted_rust_makes_no_per_session_ffi(
     assert calls["load_corporate_actions"] == 1
     assert calls["finish"] == 1
     # 세션 단위 왕복은 없다.
+    for name in ("queue_push", "queue_pop", "record_append", "record_extend"):
+        assert calls[name] == 0, name
+    # 세션 루프를 Rust가 소유한 뒤 사라진 공개 메서드들 — 다시 노출되면 왕복이 되살아난다.
+    exposed = dir(proxies[0].inner)
     for name in (
-        "process_market_index",
         "process_market",
+        "process_market_index",
         "activate_pending",
         "close_current_session",
         "mark_current_session",
-        "queue_push",
-        "queue_pop",
-        "record_append",
-        "record_extend",
         "portfolio_snapshot",
         "open_order_states",
+        "open_group_states",
         "place_order",
         "register_group",
+        "drop_group",
+        "remove_order",
+        "settle_order",
+        "mark_triggered",
+        "drain_orders",
+        "record_count",
+        "next_decision_id",
+        "next_order_id",
+        "next_fill_id",
+        "next_group_id",
+        "apply_fill",
+        "charge",
+        "apply_corporate_action",
+        "apply_corporate_action_ratio",
+        "cancel_for_key",
+        "mark",
+        "cash",
+        "held_qty",
+        "average_price",
     ):
-        assert calls[name] == 0, name
+        assert name not in exposed, name
     # 결과·지표 조회는 종료 배치와 Rust 누산값만 쓴다.
     assert len(result.fills) == 2
     assert calls["record_batch"] == 0

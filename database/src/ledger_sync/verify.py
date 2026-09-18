@@ -18,12 +18,19 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Protocol
 
-from .layout import CATALOG_META_NAME, MANIFEST_NAME, BuildInfo, Partition, snapshot_id
-from .plan import PARQUET_SUFFIX, list_remote_tables, read_local_manifest, read_remote_manifest
+from .hashing import PartitionHashError, compute_partition_hash
+from .layout import (
+    CATALOG_META_NAME,
+    MANIFEST_NAME,
+    SYNC_DIR,
+    BuildInfo,
+    is_table_name,
+    snapshot_id,
+)
+from .plan import list_remote_tables, read_local_manifest, read_remote_manifest
 from .remote import RemoteFS
-from .state import ORIGIN_REUSED, SyncState
+from .state import ORIGIN_REUSED, STATE_NAME, SyncState
 
 
 class Level(Enum):
@@ -43,6 +50,7 @@ class Finding:
 class VerifyReport:
     findings: list[Finding] = field(default_factory=list)
     checked: dict[str, int] = field(default_factory=dict)
+    skipped: dict[str, int] = field(default_factory=dict)  # 검사할 수 없어 건너뛴 항목(사유별)
 
     @property
     def ok(self) -> bool:
@@ -54,9 +62,48 @@ class VerifyReport:
     def count(self, level: Level, n: int = 1) -> None:
         self.checked[level.value] = self.checked.get(level.value, 0) + n
 
+    def skip(self, reason: str, n: int = 1) -> None:
+        self.skipped[reason] = self.skipped.get(reason, 0) + n
 
-def local_builds(layer_root: Path, state: SyncState) -> dict[str, str]:
-    return {table: ts.build_id for table, ts in state.tables.items()}
+
+NO_TABLES_LABEL = "_state"
+
+
+def require_coverage(layer_root: Path, state: SyncState, report: VerifyReport, *,
+                     tables: Iterable[str] | None = None) -> bool:
+    """검사 대상이 하나도 없으면 "전부 통과" 가 아니라 finding 이다 — state 가 비었거나(pull 전·다른
+    루트) `--tables` 가 state 에 없는 이름이면 아무것도 대조하지 않고 ok 를 내는 silent false-pass
+    를 막는다. 대상이 있으면 True."""
+    if not state.tables:
+        report.add(Level.MANIFEST, NO_TABLES_LABEL,
+                   f"no synced tables in state — nothing to verify (root={layer_root} "
+                   f"state={layer_root / SYNC_DIR / STATE_NAME}); run pull first")
+        return False
+    if tables is not None:
+        unknown = sorted(set(tables) - set(state.tables))
+        for table in unknown:
+            report.add(Level.MANIFEST, table,
+                       f"table not in sync state — nothing to verify "
+                       f"(known={sorted(state.tables)})")
+        if len(unknown) == len(set(tables)):
+            return False
+    return True
+
+
+def local_builds(layer_root: Path) -> dict[str, str]:
+    """디스크의 `<table>/MANIFEST.json` current_build 집합 — `equity.catalog.table_builds`·workbench
+    `_source.table_builds` 와 같은 정의(디렉토리 스캔). state 가 아니라 이것이 카탈로그 snapshot 의
+    입력이므로 대조도 같은 집합으로 한다."""
+    builds: dict[str, str] = {}
+    if not layer_root.is_dir():
+        return builds
+    for directory in sorted(layer_root.iterdir()):
+        if not directory.is_dir() or not is_table_name(directory.name):
+            continue
+        view = read_local_manifest(layer_root, directory.name)
+        if view is not None and view.ok and view.current_build:
+            builds[directory.name] = view.current_build
+    return builds
 
 
 def verify_manifest(remote: RemoteFS, remote_root: str, layer_root: Path, state: SyncState,
@@ -105,13 +152,21 @@ def _verify_catalog_snapshot(layer_root: Path, state: SyncState, report: VerifyR
         report.add(Level.MANIFEST, "_catalog_meta",
                    f"unreadable — path={meta_path} error={error!r}")
         return
-    expected = snapshot_id(local_builds(layer_root, state))
+    on_disk = local_builds(layer_root)
+    expected = snapshot_id(on_disk)
     actual = meta.get("snapshot_id") if isinstance(meta, dict) else None
     report.count(Level.MANIFEST)
     if actual != expected:
         report.add(Level.MANIFEST, "_catalog_meta",
                    f"catalog snapshot_id does not match local builds — catalog={actual!r} "
                    f"local={expected!r} (rebuild: python -m equity catalog)")
+    synced = {table: ts.build_id for table, ts in state.tables.items()}
+    if on_disk != synced:
+        report.add(Level.MANIFEST, NO_TABLES_LABEL,
+                   f"disk MANIFESTs and sync state disagree — only_on_disk="
+                   f"{sorted(set(on_disk) - set(synced))} only_in_state="
+                   f"{sorted(set(synced) - set(on_disk))} build_mismatch="
+                   f"{sorted(t for t in set(on_disk) & set(synced) if on_disk[t] != synced[t])}")
 
 
 def verify_files(remote: RemoteFS, remote_root: str, layer_root: Path, state: SyncState,
@@ -143,12 +198,16 @@ def verify_files(remote: RemoteFS, remote_root: str, layer_root: Path, state: Sy
                 continue
             local_files = local.partition_files(partition.path)
             local_names = {rel.rsplit("/", 1)[-1] for rel in local_files}
+            partition_dir = table_root / partition.path
+            on_disk = {p.name for p in partition_dir.iterdir() if p.is_file()} \
+                if partition_dir.is_dir() else set()
             missing = sorted(set(entries) - local_names)
             extra = sorted(local_names - set(entries))
-            if missing or extra:
+            stray = sorted(on_disk - local_names)
+            if missing or extra or stray:
                 report.add(Level.FILES, table,
                            f"file set differs — path={partition.path} missing={missing} "
-                           f"extra={extra}")
+                           f"extra={extra} stray_on_disk={stray}")
             for rel, rec in local_files.items():
                 name = rel.rsplit("/", 1)[-1]
                 path = table_root / rel
@@ -165,39 +224,6 @@ def verify_files(remote: RemoteFS, remote_root: str, layer_root: Path, state: Sy
                     report.add(Level.FILES, table,
                                f"size differs from remote — {rel} remote={entry.size} "
                                f"local={on_disk}")
-
-
-def content_hash_sql(partition_dir: Path, partition: Partition) -> str:
-    """서버 `_content_hash` 와 같은 값을 내는 SQL — 하이브 컬럼은 꼬리에서 직접 덧붙인다."""
-    glob = str(partition_dir / f"*{PARQUET_SUFFIX}").replace("'", "''")
-    extra = "".join(f", '{value}' AS {key}" for key, value in partition.hive_columns())
-    return ("SELECT count(*), bit_xor(hash(CAST(t AS VARCHAR))) FROM "
-            f"(SELECT *{extra} FROM read_parquet('{glob}', hive_partitioning=false)) t")
-
-
-def format_hash(n: object, h: object) -> str:
-    return f"{int(str(n))}:{'0' if h is None else format(int(str(h)), 'x')}"
-
-
-class _HashRow(Protocol):
-    def fetchone(self) -> tuple[object, ...] | None: ...
-
-
-class HashConnection(Protocol):
-    """duckdb 연결 중 이 모듈이 쓰는 부분(`execute(...).fetchone()`)."""
-
-    def execute(self, query: str) -> _HashRow: ...
-
-
-def compute_partition_hash(connection: HashConnection, partition_dir: Path,
-                           partition: Partition) -> str:
-    """duckdb 연결로 파티션 content_hash 를 계산한다. 파일이 없으면 `0:empty`."""
-    if not any(partition_dir.glob(f"*{PARQUET_SUFFIX}")):
-        return "0:empty"
-    row = connection.execute(content_hash_sql(partition_dir, partition)).fetchone()
-    if row is None:
-        raise RuntimeError(f"content hash query returned no row — dir={partition_dir}")
-    return format_hash(row[0], row[1])
 
 
 def verify_hash(layer_root: Path, state: SyncState, report: VerifyReport, *,
@@ -217,15 +243,23 @@ def verify_hash(layer_root: Path, state: SyncState, report: VerifyReport, *,
                            f"local MANIFEST missing build — build={local.build_id}")
                 continue
             for partition in build.partitions:
+                if not partition.content_hash:
+                    # stage 층 MANIFEST 는 파티션에 content_hash 를 싣지 않는다(`stage/build.py`) —
+                    # 대조할 기준이 없으니 통과도 실패도 아닌 skip 으로 센다.
+                    report.skip("hash_no_reference")
+                    continue
                 report.count(Level.HASH)
                 partition_dir = layer_root / table / partition.path
                 try:
                     actual = compute_partition_hash(connection, partition_dir, partition)
-                except duckdb.Error as error:
-                    # 손상·절단된 parquet 는 예상 가능한 검증 실패다 — 예외가 아니라 finding.
+                except FileNotFoundError:
                     report.add(Level.HASH, table,
-                               f"parquet unreadable — path={partition.path} "
-                               f"dir={partition_dir} error={error!r}")
+                               f"partition directory missing — path={partition.path} "
+                               f"dir={partition_dir}")
+                    continue
+                except PartitionHashError as error:
+                    # 손상·절단된 parquet 는 예상 가능한 검증 실패다 — 예외가 아니라 finding.
+                    report.add(Level.HASH, table, str(error))
                     continue
                 if actual != partition.content_hash:
                     report.add(Level.HASH, table,

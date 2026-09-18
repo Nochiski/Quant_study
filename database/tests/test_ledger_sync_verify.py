@@ -6,14 +6,16 @@ from pathlib import Path
 
 import duckdb
 import pytest
+from ledger_sync.hashing import compute_partition_hash, duckdb_reuse_check
 from ledger_sync.layout import MANIFEST_NAME, Partition, snapshot_id
 from ledger_sync.plan import make_plan
 from ledger_sync.pull import execute_plan
-from ledger_sync.state import load_state, save_state
+from ledger_sync.state import FileRecord, load_state, save_state
 from ledger_sync.verify import (
     Level,
     VerifyReport,
-    compute_partition_hash,
+    local_builds,
+    require_coverage,
     verify_files,
     verify_hash,
     verify_manifest,
@@ -83,7 +85,11 @@ def test_hash_reproduces_server_rule_despite_v_dir_in_local_path(synced) -> None
                                   Partition("v=b1/year=2010", 1, "")) == hashes["year=2010"]
     assert compute_partition_hash(con, root / "security" / "v=b1",
                                   Partition("v=b1", 2, "")) == hashes[""]
-    assert compute_partition_hash(con, root / "nowhere", Partition("v=b1", 0, "")) == "0:empty"
+    with pytest.raises(FileNotFoundError):
+        compute_partition_hash(con, root / "nowhere", Partition("v=b1", 0, ""))
+    empty = root / "security" / "v=empty"
+    empty.mkdir()
+    assert compute_partition_hash(con, empty, Partition("v=empty", 0, "")) == "0:empty"
 
 
 def test_corrupted_parquet_is_a_hash_finding(synced) -> None:
@@ -95,13 +101,12 @@ def test_corrupted_parquet_is_a_hash_finding(synced) -> None:
     con.close()
     state = load_state(root, "equity")
     state.tables["price_daily"].files["v=b1/year=2011/part0.parquet"] = \
-        type(state.tables["price_daily"].files["v=b1/year=2011/part0.parquet"])(
-            target.stat().st_size, "downloaded")
+        FileRecord(target.stat().st_size, "downloaded")
     report = VerifyReport()
     verify_hash(root, state, report, tables=["price_daily"])
     assert [f.level for f in report.findings] == [Level.HASH]
     assert "year=2011" in report.findings[0].detail
-    target.write_bytes(good)
+    del good
 
 
 def test_manifest_level_sees_remote_advance_and_stale_catalog(synced) -> None:
@@ -154,3 +159,101 @@ def test_files_level_flags_manifest_byte_drift_and_missing_disk_file(synced) -> 
     details = [f.detail for f in report.findings]
     assert any("MANIFEST bytes differ" in d for d in details)
     assert any("file missing on disk" in d for d in details)
+
+
+def test_nothing_to_verify_is_a_finding_not_a_pass(tmp_path: Path) -> None:
+    # state 가 없는 루트(pull 전·다른 루트)에서 verify 는 "검사 0건 = 통과" 를 내면 안 된다
+    root = tmp_path / "empty"
+    report = VerifyReport()
+    assert require_coverage(root, load_state(root, "equity"), report) is False
+    assert not report.ok and "nothing to verify" in report.findings[0].detail
+
+
+def test_unknown_tables_filter_is_a_finding(synced) -> None:
+    _, root, _ = synced
+    state = load_state(root, "equity")
+    report = VerifyReport()
+    assert require_coverage(root, state, report, tables=["nope"]) is False
+    assert [f.table for f in report.findings] == ["nope"]
+    report = VerifyReport()
+    assert require_coverage(root, state, report, tables=["security", "nope"]) is True
+    assert [f.table for f in report.findings] == ["nope"]
+
+
+def test_partitions_without_reference_hash_are_skipped_not_failed(tmp_path: Path) -> None:
+    # stage 층 MANIFEST 는 파티션 content_hash 가 없다 — 불일치가 아니라 skip 으로 센다
+    con = duckdb.connect()
+    data = _parquet(con, tmp_path / "srv" / "stg_x" / "part0.parquet", "('005930', 1)")
+    con.close()
+    remote = FakeRemote()
+    remote.put_table("/stage", "stg_x", "b1", {"": {"part0.parquet": data}},
+                     omit_partition_hash=True)
+    root = tmp_path / "local"
+    state = load_state(root, "stage")
+    execute_plan(remote, make_plan(remote, "/stage", root, state, layer="stage"), root, state,
+                 check_space=False)
+    report = VerifyReport()
+    verify_hash(root, load_state(root, "stage"), report)
+    assert report.ok and report.checked == {} and report.skipped == {"hash_no_reference": 1}
+
+
+def test_catalog_snapshot_uses_disk_manifests_like_equity_catalog(synced) -> None:
+    # 카탈로그 snapshot 의 입력 집합은 디스크 MANIFEST 스캔(`equity.catalog.table_builds` 규칙)이다
+    _, root, _ = synced
+    state = load_state(root, "equity")
+    on_disk = local_builds(root)
+    assert on_disk == {t: ts.build_id for t, ts in state.tables.items()}
+    (root / "_catalog_meta.json").write_text(json.dumps({"snapshot_id": snapshot_id(on_disk)}),
+                                             encoding="utf-8")
+    # state 가 모르는 테이블 디렉토리(예전 rsync 잔재)가 있으면 집합이 갈렸다고 지적한다
+    stray = root / "stray_table"
+    (stray / "v=b9").mkdir(parents=True)
+    (stray / "MANIFEST.json").write_bytes(
+        (root / "security" / "MANIFEST.json").read_bytes().replace(b'"security"', b'"stray_table"'))
+    report = VerifyReport()
+    verify_manifest(FakeRemote(files={"/equity/security/MANIFEST.json": b"{}"}), "/equity", root,
+                    state, report)
+    assert any("disk MANIFESTs and sync state disagree" in f.detail
+               and "stray_table" in f.detail for f in report.findings)
+
+
+def test_hash_level_flags_missing_partition_dir_and_files_level_flags_stray_files(synced) -> None:
+    remote, root, _ = synced
+    state = load_state(root, "equity")
+    import shutil
+
+    shutil.rmtree(root / "price_daily" / "v=b1" / "year=2010")
+    report = VerifyReport()
+    verify_hash(root, state, report, tables=["price_daily"])
+    assert any("partition directory missing" in f.detail for f in report.findings)
+    (root / "security" / "v=b1" / "stray.json").write_bytes(b"{}")
+    report = VerifyReport()
+    verify_files(remote, REMOTE, root, state, report, tables=["security"])
+    assert any("stray_on_disk=['stray.json']" in f.detail for f in report.findings)
+
+
+def test_reuse_check_refuses_a_corrupted_partition(synced) -> None:
+    # 크기는 같은데 내용이 바뀐 parquet 는 MANIFEST 해시와 어긋나 재사용되지 않는다
+    _, root, hashes = synced
+    check = duckdb_reuse_check()
+    partition_dir = root / "price_daily" / "v=b1" / "year=2011"
+    ok = Partition("v=b2/year=2011", 2, hashes["year=2011"])
+    assert check(partition_dir, ok) is True
+    target = partition_dir / "part0.parquet"
+    data = bytearray(target.read_bytes())
+    data[len(data) // 2] ^= 0xFF
+    target.write_bytes(bytes(data))
+    assert check(partition_dir, ok) is False
+    assert check(root / "nowhere", ok) is False
+
+
+def test_hash_rule_matches_the_stage_build_source_of_truth(synced) -> None:
+    # `_server_hash` 가 아니라 서버 코드 자체(`stage.build._content_hash`)와 대조한다
+    from stage.build import _content_hash as sot
+
+    _, root, hashes = synced
+    con = duckdb.connect()
+    server_tmp = root.parent / "server_tmp"
+    assert sot(con, str(server_tmp / "price" / "year=2010" / "*.parquet")) == hashes["year=2010"]
+    assert compute_partition_hash(con, root / "price_daily" / "v=b1" / "year=2010",
+                                  Partition("v=b1/year=2010", 1, "")) == hashes["year=2010"]

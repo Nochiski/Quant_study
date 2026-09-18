@@ -80,6 +80,17 @@ def _is_missing(error: OSError) -> bool:
     return isinstance(error, FileNotFoundError) or error.errno == errno.ENOENT
 
 
+def append_known_host(known_hosts: Path, hostname: str, key_name: str, key_base64: str) -> None:
+    """`--accept-new` 가 수락한 호스트키를 known_hosts 에 **한 줄만 덧붙인다**.
+
+    paramiko `AutoAddPolicy` 는 `save_host_keys` 로 파일을 통째로 다시 써서 주석·`@cert-authority`·
+    `@revoked` 마커·paramiko 가 모르는 키 타입 행을 잃는다. 우리는 기존 행을 절대 다시 쓰지 않는다.
+    """
+    known_hosts.parent.mkdir(parents=True, exist_ok=True)
+    with known_hosts.open("a", encoding="utf-8") as handle:
+        handle.write(f"{hostname} {key_name} {key_base64}\n")
+
+
 class SftpRemote:
     """paramiko 기반 `RemoteFS`. 전송 오류는 재접속 + 지수 백오프로 `retries` 회 재시도한다."""
 
@@ -99,9 +110,22 @@ class SftpRemote:
         client = paramiko.SSHClient()
         known_hosts = known_hosts_path()
         if known_hosts.exists():
-            client.load_host_keys(str(known_hosts))
+            # `load_host_keys` 가 아니라 `load_system_host_keys` — 전자는 파일명을 기억해 뒀다가
+            # `AutoAddPolicy` 가 `save_host_keys` 로 파일 전체를 다시 쓰게 만든다(주석·`@revoked`·
+            # 미지원 키 행이 사라진다). 우리는 파일을 절대 다시 쓰지 않는다.
+            client.load_system_host_keys(str(known_hosts))
         if self._accept_new:
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            class AppendOnlyAcceptNew(paramiko.MissingHostKeyPolicy):
+                """모르는 호스트키만 수락(메모리 + known_hosts 한 줄 append). 바뀐 키는
+                `BadHostKeyException` 이 정책보다 먼저 나므로 여전히 거부된다 — OpenSSH
+                `StrictHostKeyChecking=accept-new` 와 같은 의미."""
+
+                def missing_host_key(self, client: paramiko.SSHClient, hostname: str,
+                                     key: paramiko.PKey) -> None:
+                    client.get_host_keys().add(hostname, key.get_name(), key)
+                    append_known_host(known_hosts, hostname, key.get_name(), key.get_base64())
+
+            client.set_missing_host_key_policy(AppendOnlyAcceptNew())
         else:
             client.set_missing_host_key_policy(paramiko.RejectPolicy())
         ep = self._endpoint
@@ -115,8 +139,15 @@ class SftpRemote:
             raise RemoteConnectError(
                 f"host key mismatch — {ep.label} known_hosts={known_hosts} error={error!r}"
             ) from error
+        except paramiko.AuthenticationException as error:
+            raise RemoteConnectError(
+                f"authentication failed — {ep.label} error={error!r} "
+                f"(is the private key the one registered on the server?)"
+            ) from error
         except paramiko.SSHException as error:
-            hint = "" if self._accept_new else " (unknown host key? pass --accept-new)"
+            unknown_host = "not found in known_hosts" in str(error)
+            hint = " (unknown host key — pass --accept-new once)" \
+                if unknown_host and not self._accept_new else ""
             raise RemoteConnectError(
                 f"ssh connect failed — {ep.label} error={error!r}{hint}"
             ) from error
@@ -152,7 +183,9 @@ class SftpRemote:
                 return operation()
             except FileNotFoundError:
                 raise
-            except (OSError, EOFError, paramiko.SSHException) as error:
+            except (OSError, EOFError, paramiko.SSHException, RemoteConnectError) as error:
+                # RemoteConnectError 는 끊긴 뒤 재접속이 아직 안 되는 경우다 — 백오프 뒤 다시
+                # 시도하고, 끝내 안 되면 RemoteTransferError 로 바꿔 호출부(테이블 격리)가 잡는다.
                 last = error
             self.close()
             if attempt < self._retries:

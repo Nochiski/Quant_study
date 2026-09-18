@@ -31,7 +31,7 @@ equity      parquet 29표 + equity.duckdb   data/equity/                ← EQUI
 
 | 경로 | 내용 |
 |---|---|
-| `src/` | 수집기(`backfill_*.py`, `api.py`, `dart_universe.py`, `sweep_disclosure.py`, `master_daily.py`), stage 패키지(`src/stage/`, `python -m stage --table <t>`), equity 패키지(`src/equity/`, `python -m equity build|gate|catalog|contract`), 동기화 패키지(`src/ledger_sync/`, `python -m ledger_sync plan|pull|verify|sync|status` — 협업자 로컬이 서버 equity 층을 SFTP 로 받아 증분 유지), 파일럿 통합층(`build_*.py`·`finalize.py`·`fin_map.py` — STAGE_DESIGN §8 이 파일럿 보존·로직 재사용으로 명시) |
+| `src/` | 수집기(`backfill_*.py`, `api.py`, `dart_universe.py`, `sweep_disclosure.py`, `master_daily.py`), stage 패키지(`src/stage/`, `python -m stage --table <t>`), equity 패키지(`src/equity/`, `python -m equity build|gate|catalog|contract`), 동기화 패키지(`src/ledger_sync/`, `python -m ledger_sync` — 협업자 로컬이 서버 equity 층을 SFTP 로 받아 증분 유지, 동사 목록은 `docs/LEDGER_SYNC.md`), 파일럿 통합층(`build_*.py`·`finalize.py`·`fin_map.py` — STAGE_DESIGN §8 이 파일럿 보존·로직 재사용으로 명시) |
 | `scripts/` | 서버 크론·러너: `daily_evening.sh`(18:05)·`daily_ledger.sh`(06:00)·`daily_build.sh`(08:10)·`watchdog.sh`·`daily_wise.sh`(마스터만), `run_stage.sh`·`run_stage_all.sh`, `run_equity.sh`·`equity_rebuild_all.sh`·`equity_gate_all.sh`, `check_baseline_lock.py`, `fetch_equity_local.sh`(운영자 rsync 용), **`ledger_sync.ps1`·`.sh`·`register_daily_sync.ps1`**(협업자 SFTP 동기화 — `LEDGER_SYNC.md`), `run_survey*.sh` |
 | `tests/` | stage·equity 테스트 |
 | `survey/`, `survey_out/v2/` | 원장 전 테이블·컬럼 어휘 전수 측정과 결과. stage (p,s)·부호·결측 규칙의 실측 근거. 재생성은 서버에서 `scripts/run_survey_v2.sh` |

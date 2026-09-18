@@ -5,7 +5,7 @@
   verify    manifest · files · hash 세 층위 대조. 하나라도 어긋나면 4 (`--offline` 은 hash 만)
   gc        로컬 구판본 정리(current 보호, `--keep`)
   catalog   `python -m equity catalog` 위임 — equity.duckdb 매크로를 로컬 절대경로로 재생성
-  sync      pull → verify(manifest·files) → catalog 를 한 번에. 일일 작업이 부르는 동사.
+  sync      pull → catalog → verify(manifest·files) 를 한 번에. 일일 작업이 부르는 동사.
             결과는 `_sync/last_run.json`, 로그는 `_sync/logs/`
   status    마지막 실행 결과 + 테이블별 로컬 빌드. `--remote` 면 서버 current_build 와 대조해 뒤처진
             테이블을 보여 준다
@@ -27,6 +27,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TextIO
 
+from .hashing import trusting_reuse_check
 from .layout import SYNC_DIR
 from .plan import SyncPlan, TableAction, list_remote_tables, make_plan, read_remote_manifest
 from .pull import (
@@ -40,7 +41,14 @@ from .pull import (
 )
 from .remote import RemoteConnectError, RemoteFS, RemoteTransferError, SftpEndpoint, open_sftp
 from .state import SyncState, load_state
-from .verify import Level, VerifyReport, verify_files, verify_hash, verify_manifest
+from .verify import (
+    Level,
+    VerifyReport,
+    require_coverage,
+    verify_files,
+    verify_hash,
+    verify_manifest,
+)
 
 EXIT_OK = 0
 EXIT_ERROR = 2
@@ -143,7 +151,7 @@ def _report_json(report: PullReport) -> dict[str, object]:
 
 
 def _verify_json(report: VerifyReport) -> dict[str, object]:
-    return {"ok": report.ok, "checked": report.checked,
+    return {"ok": report.ok, "checked": report.checked, "skipped": report.skipped,
             "findings": [asdict(f) | {"level": f.level.value} for f in report.findings]}
 
 
@@ -177,7 +185,8 @@ def _run_pull(remote: RemoteFS, args: argparse.Namespace, layer_root: Path, stat
     if _in_build_window(now):
         log(f"warning: inside server build window (utc={now:%H:%M}) — expect drifted tables")
     plan = make_plan(remote, _remote_root(args), layer_root, state, layer=args.layer,
-                     tables=args.tables, reuse=not args.no_reuse)
+                     tables=args.tables, reuse=not args.no_reuse,
+                     reuse_check=trusting_reuse_check if args.no_reuse_check else None)
     if not args.json:
         _print_plan(plan)
     report = execute_plan(remote, plan, layer_root, state, keep=args.keep,
@@ -190,7 +199,8 @@ def cmd_plan(args: argparse.Namespace) -> int:
     state = load_state(layer_root, args.layer)
     with open_sftp(_endpoint(args), accept_new_host_key=args.accept_new) as remote:
         plan = make_plan(remote, _remote_root(args), layer_root, state, layer=args.layer,
-                         tables=args.tables, reuse=not args.no_reuse)
+                         tables=args.tables, reuse=not args.no_reuse,
+                         reuse_check=trusting_reuse_check if args.no_reuse_check else None)
     if args.json:
         print(json.dumps(_plan_json(plan), ensure_ascii=False, indent=1))
     else:
@@ -238,9 +248,19 @@ def _levels(args: argparse.Namespace) -> list[Level]:
     return [Level(name) for name in args.level]
 
 
+def _reject_conflicting_verify_options(parser: argparse.ArgumentParser,
+                                       args: argparse.Namespace) -> None:
+    """`--offline` 은 원격이 필요한 층위를 조용히 빼면 안 된다 — `--level` 과 같이 오면 거부한다."""
+    if args.verb == "verify" and args.offline and args.level \
+            and set(args.level) != {Level.HASH.value}:
+        parser.error("--offline runs only the hash level; drop --level or drop --offline")
+
+
 def _run_verify(remote: RemoteFS | None, args: argparse.Namespace, layer_root: Path,
                 state: SyncState, levels: Iterable[Level]) -> VerifyReport:
     report = VerifyReport()
+    if not require_coverage(layer_root, state, report, tables=args.tables):
+        return report
     for level in levels:
         if level is Level.HASH:
             verify_hash(layer_root, state, report, tables=args.tables)
@@ -259,7 +279,7 @@ def _print_verify(report: VerifyReport) -> None:
     for f in report.findings:
         print(f"  {f.level.value:8s} {f.table:22s} {f.detail}")
     print(f"== verify: {'ok' if report.ok else 'MISMATCH'} checked={report.checked} "
-          f"findings={len(report.findings)}")
+          f"skipped={report.skipped} findings={len(report.findings)}")
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
@@ -290,6 +310,9 @@ def cmd_gc(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+CATALOG_TIMEOUT_S = 3600  # 실측 8분(2026-09-19); 게이트가 걸리면 더 걸릴 수 있어 넉넉히
+
+
 def catalog_command(equity_root: Path) -> list[str]:
     return [sys.executable, "-m", "equity", "--root", str(equity_root),
             "--stage-root", str(equity_root), "catalog"]
@@ -302,8 +325,13 @@ def run_catalog(equity_root: Path, log: Log) -> int:
     env["PYTHONPATH"] = os.pathsep.join(p for p in (str(src_dir), env.get("PYTHONPATH", "")) if p)
     command = catalog_command(equity_root)
     log(f"== catalog: {' '.join(command)}")
-    completed = subprocess.run(command, env=env, check=False, capture_output=True, text=True,
-                               encoding="utf-8", errors="replace")
+    try:
+        completed = subprocess.run(command, env=env, check=False, capture_output=True, text=True,
+                                   encoding="utf-8", errors="replace",
+                                   timeout=CATALOG_TIMEOUT_S)
+    except subprocess.TimeoutExpired as error:
+        log(f"   catalog timed out after {CATALOG_TIMEOUT_S}s — {error!r}")
+        return EXIT_ERROR
     for stream in (completed.stdout, completed.stderr):
         for line in stream.splitlines():
             log(f"   {line}")
@@ -320,6 +348,22 @@ def cmd_catalog(args: argparse.Namespace) -> int:
     return run_catalog(_layer_root(args), print)
 
 
+LOG_KEEP = 60
+
+
+def _rotate_logs(layer_root: Path) -> None:
+    """`_sync/logs/` 가 무한히 쌓이지 않게 최근 LOG_KEEP 개만 남긴다."""
+    log_dir = layer_root / SYNC_DIR / "logs"
+    if not log_dir.is_dir():
+        return
+    logs = sorted(log_dir.glob("*.log"))
+    for stale in logs[: max(0, len(logs) - LOG_KEEP)]:
+        try:
+            stale.unlink()
+        except OSError:
+            pass  # 열려 있는 로그는 다음 실행이 정리한다
+
+
 def _write_last_run(layer_root: Path, payload: dict[str, object]) -> Path:
     path = layer_root / SYNC_DIR / LAST_RUN_NAME
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -334,7 +378,9 @@ def cmd_sync(args: argparse.Namespace) -> int:
     state = load_state(layer_root, args.layer)
     log, handle, log_path = _log_writer(layer_root, "sync")
     started = datetime.now(UTC)
-    exit_code = EXIT_OK
+    # 예상 밖 예외로 죽어도 last_run.json 에 "성공" 이 남지 않도록 실패로 시작해 성공 경로에서만
+    # 내린다
+    exit_code = EXIT_ERROR
     payload: dict[str, object] = {"started_at_utc": started.isoformat(timespec="seconds"),
                                   "layer": args.layer, "log": str(log_path)}
     try:
@@ -343,27 +389,41 @@ def cmd_sync(args: argparse.Namespace) -> int:
             _print_pull_summary(report)
             payload["pull"] = _report_json(report)
             exit_code = _pull_exit(report)
+            # 카탈로그는 verify 앞에서 돈다 — verify(manifest) 의 카탈로그 snapshot 검사가
+            # "재생성하라" 는 finding 을 내는데, 그 재생성이 바로 이 단계다. pull 이 전송 실패 없이
+            # 끝났으면 (drifted 여도 로컬 빌드 집합 기준으로) 다시 만든다.
+            if args.layer == "equity" and not args.skip_catalog and not report.failed:
+                catalog_rc = run_catalog(layer_root, log)
+                payload["catalog_rc"] = catalog_rc
+                if catalog_rc != EXIT_OK:
+                    exit_code = EXIT_ERROR
             state = load_state(layer_root, args.layer)
             verify_report = _run_verify(remote, args, layer_root, state,
                                         [Level.MANIFEST, Level.FILES])
+            # 이번에 받은(재사용 포함) 테이블은 내용(hash)까지 본다 — 하루치는 파티션 몇 개라 싸다.
+            changed = [r.table for r in report.results if r.outcome is TableOutcome.DONE]
+            if changed and verify_report.ok:
+                verify_hash(layer_root, state, verify_report, tables=changed)
         _print_verify(verify_report)
         payload["verify"] = _verify_json(verify_report)
         if not verify_report.ok and exit_code == EXIT_OK:
             exit_code = EXIT_MISMATCH
-        if args.layer == "equity" and not args.skip_catalog and exit_code == EXIT_OK:
-            catalog_rc = run_catalog(layer_root, log)
-            payload["catalog_rc"] = catalog_rc
-            if catalog_rc != EXIT_OK:
-                exit_code = catalog_rc
+        for warning in report.warnings:
+            log(f"warning: {warning}")
     except (RemoteConnectError, RemoteTransferError, InsufficientDiskSpace) as error:
         log(f"sync aborted — {error}")
         payload["error"] = str(error)
         exit_code = EXIT_ERROR
+    except BaseException as error:
+        payload["error"] = f"unexpected {type(error).__name__}: {error}"
+        exit_code = EXIT_ERROR
+        raise
     finally:
         payload["finished_at_utc"] = datetime.now(UTC).isoformat(timespec="seconds")
         payload["exit_code"] = exit_code
         _write_last_run(layer_root, payload)
         handle.close()
+        _rotate_logs(layer_root)
     print(f"== sync {args.layer}: exit={exit_code} log={log_path}")
     return exit_code
 
@@ -380,13 +440,18 @@ def cmd_status(args: argparse.Namespace) -> int:
         except (OSError, ValueError):
             last = None
     remote_builds: dict[str, str | None] = {}
+    remote_errors: dict[str, str] = {}
     if args.remote:
         with open_sftp(_endpoint(args), accept_new_host_key=args.accept_new) as remote:
             remote_root = _remote_root(args)
             for table in list_remote_tables(remote, remote_root):
                 view = read_remote_manifest(remote, remote_root, table)
-                if view is not None:
-                    remote_builds[table] = view.current_build
+                if view is None:
+                    continue
+                if not view.ok:
+                    remote_errors[table] = view.detail or view.status.value
+                    continue
+                remote_builds[table] = view.current_build
     behind = sorted(t for t, b in remote_builds.items()
                     if t not in state.tables or state.tables[t].build_id != b)
     if args.json:
@@ -394,6 +459,7 @@ def cmd_status(args: argparse.Namespace) -> int:
             "layer": args.layer, "root": str(layer_root), "last_run": last,
             "tables": {t: ts.build_id for t, ts in sorted(state.tables.items())},
             "remote": remote_builds or None, "behind": behind if args.remote else None,
+            "remote_errors": remote_errors or None,
         }, ensure_ascii=False, indent=1))
         return EXIT_OK
     print(f"== status {args.layer} root={layer_root} tables={len(state.tables)} "
@@ -413,7 +479,9 @@ def cmd_status(args: argparse.Namespace) -> int:
     if args.remote:
         for table in sorted(set(remote_builds) - set(state.tables)):
             print(f"   {table:22s} -  remote={remote_builds[table]}  BEHIND")
-        print(f"   behind={len(behind)}")
+        for table, detail in sorted(remote_errors.items()):
+            print(f"   {table:22s} REMOTE_MANIFEST_ERROR {detail}")
+        print(f"   behind={len(behind)} remote_errors={len(remote_errors)}")
     return EXIT_OK
 
 
@@ -437,6 +505,8 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--tables", nargs="+", default=None, help="이 테이블만")
         p.add_argument("--no-reuse", action="store_true",
                        help="content_hash 가 같아도 로컬 재사용 없이 전부 받는다(바이트 동일 사본)")
+        p.add_argument("--no-reuse-check", action="store_true",
+                       help="재사용 직전 로컬 파티션 해시 재계산을 건너뛴다(MANIFEST 값만 믿음)")
         p.add_argument("--keep", type=int, default=KEEP_DEFAULT, help="로컬에 남길 판본 수")
         p.add_argument("--no-space-check", action="store_true")
 
@@ -483,12 +553,20 @@ def _force_utf8_stdio() -> None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     _force_utf8_stdio()
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    _reject_conflicting_verify_options(parser, args)
     try:
         return int(args.fn(args))
     except (RemoteConnectError, RemoteTransferError, InsufficientDiskSpace) as error:
         print(f"error: {error}", file=sys.stderr)
         return EXIT_ERROR
+    except ModuleNotFoundError as error:
+        if error.name in ("paramiko", "duckdb"):
+            print(f"error: dependency missing — {error.name} (run through "
+                  f"database/scripts/ledger_sync.ps1|.sh, which adds it)", file=sys.stderr)
+            return EXIT_ERROR
+        raise
 
 
 if __name__ == "__main__":

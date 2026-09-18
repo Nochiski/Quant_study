@@ -64,11 +64,22 @@ def load_state(layer_root: Path, layer: str) -> SyncState:
     if not isinstance(document, dict):
         raise RuntimeError(f"sync state must be a JSON object — path={path} "
                            f"got={type(document).__name__}")
+    version = document.get("version", STATE_VERSION)
+    if not isinstance(version, int) or version > STATE_VERSION:
+        raise RuntimeError(f"sync state written by a newer ledger_sync — path={path} "
+                           f"version={version!r} supported<={STATE_VERSION}")
     tables: dict[str, TableState] = {}
-    for table, raw in (document.get("tables") or {}).items():
-        files = {rel: FileRecord(int(rec["size"]), str(rec["origin"]))
-                 for rel, rec in (raw.get("files") or {}).items()}
-        tables[table] = TableState(str(raw["build_id"]), files, str(raw.get("synced_at_utc", "")))
+    try:
+        for table, raw in (document.get("tables") or {}).items():
+            files = {rel: FileRecord(int(rec["size"]), str(rec["origin"]))
+                     for rel, rec in (raw.get("files") or {}).items()}
+            tables[table] = TableState(str(raw["build_id"]), files,
+                                       str(raw.get("synced_at_utc", "")))
+    except (KeyError, TypeError, ValueError, AttributeError) as error:
+        raise RuntimeError(
+            f"sync state malformed — path={path} error={error!r} "
+            f"(delete the file to resync from scratch)"
+        ) from error
     return SyncState(layer=str(document.get("layer", layer)), tables=tables,
                      updated_at_utc=str(document.get("updated_at_utc", "")))
 

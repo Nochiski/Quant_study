@@ -6,7 +6,6 @@ import {
   type Page,
 } from "@playwright/test";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -23,52 +22,24 @@ import {
   type BacktestStartResponse,
   type StrategyTraceRequest,
 } from "../src/shared/api/generated";
-import { createClient } from "../src/shared/api/generated/client";
 import { runtimeDatabasePath } from "./runtime";
+import {
+  apiClient,
+  backtest,
+  currentSource,
+  editor,
+  expectPhase,
+  GOLDEN,
+  openEditor,
+  replaceSource,
+  requireData,
+  save,
+  saveAndWaitForRevision,
+  strategyIdentity,
+  validate,
+} from "./workbench-helpers";
 
-const BACKEND = "http://localhost:8000";
-const apiClient = createClient({ baseUrl: BACKEND });
 const ownDirectory = dirname(fileURLToPath(import.meta.url));
-const GOLDEN = readFileSync(
-  resolve(
-    ownDirectory,
-    "../../backend/tests/fixtures/strategy_documents/quality_momentum.yaml",
-  ),
-  "utf8",
-).replace(/\r\n?/gu, "\n");
-
-const editor = (page: Page) =>
-  page.getByRole("textbox", { name: "편집기", exact: true });
-const save = (page: Page) =>
-  page.getByRole("button", { name: "리비전 저장", exact: true });
-const validate = (page: Page) =>
-  page.getByRole("button", { name: "검증", exact: true });
-const backtest = (page: Page) =>
-  page.getByRole("button", { name: "백테스트", exact: true });
-
-const openEditor = async (page: Page, url: string) => {
-  const response = await page.goto(url);
-  expect(response?.ok()).toBe(true);
-  await expect(editor(page)).toBeVisible();
-};
-
-const replaceSource = async (page: Page, source: string) => {
-  await editor(page).fill(source);
-};
-
-const expectPhase = async (page: Page, phase: string) => {
-  await expect(page.getByRole("status", { name: "문서 상태" })).toContainText(
-    phase,
-  );
-};
-
-const requireData = <Value>(
-  data: Value | undefined,
-  operation: string,
-): Value => {
-  if (data === undefined) throw new Error(`${operation} returned no data`);
-  return data;
-};
 
 const rowFor = (region: Locator, securityId: string): Locator =>
   region.getByRole("row").filter({ hasText: securityId });
@@ -149,37 +120,6 @@ const seedFrozenRevisionRows = (): { document: string; legacy: string } => {
     );
   }
   return { document: `frozen-doc${suffix}`, legacy: `frozen-legacy${suffix}` };
-};
-
-const currentSource = async (page: Page) => {
-  await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
-    origin: "http://localhost:5173",
-  });
-  await editor(page).click();
-  await editor(page).press("Control+A");
-  await editor(page).press("Control+C");
-  return page.evaluate(() => navigator.clipboard.readText());
-};
-
-const strategyIdentity = (page: Page) => {
-  const match = new URL(page.url()).pathname.match(
-    /^\/research\/strategies\/([^/]+)\/revisions\/(\d+)$/u,
-  );
-  if (match === null)
-    throw new Error(`Not on a strategy revision: ${page.url()}`);
-  return { strategyId: match[1]!, revision: Number(match[2]) };
-};
-
-const saveAndWaitForRevision = async (page: Page, revision: number) => {
-  await expect(save(page)).toBeEnabled();
-  await save(page).click();
-  await expect(page).toHaveURL(
-    new RegExp(
-      `/research/strategies/[^/]+/revisions/${revision}(?:\\?.*)?$`,
-      "u",
-    ),
-  );
-  await expectPhase(page, "저장됨");
 };
 
 const openConflictingEditor = async (browser: Browser, revisionUrl: string) => {

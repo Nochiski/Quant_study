@@ -12,7 +12,16 @@
 $ErrorActionPreference = "Stop"
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $backend = Join-Path $repoRoot "backend"
-$env:PYTHONPATH = (Join-Path $repoRoot "database\src")
-$env:PYTHONUTF8 = "1"
-& uv run --project $backend --with paramiko python -m ledger_sync @args
-exit $LASTEXITCODE
+# 환경변수는 프로세스 단위라 호출한 셸에도 남는다 — 끝나면 원래 값으로 되돌린다.
+$savedPythonPath = $env:PYTHONPATH
+$savedUtf8 = $env:PYTHONUTF8
+try {
+    $env:PYTHONPATH = (Join-Path $repoRoot "database\src")
+    $env:PYTHONUTF8 = "1"
+    & uv run --project $backend --with "paramiko>=3.4,<4" python -m ledger_sync @args
+    $code = $LASTEXITCODE
+} finally {
+    $env:PYTHONPATH = $savedPythonPath
+    $env:PYTHONUTF8 = $savedUtf8
+}
+exit $code

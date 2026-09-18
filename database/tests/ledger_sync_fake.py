@@ -66,11 +66,13 @@ class FakeRemote:
     # ── 서버 규약 생성기 ─────────────────────────────────────────────────
     def put_table(self, layer_root: str, table: str, build_id: str,
                   partitions: dict[str, dict[str, bytes]], hashes: dict[str, str] | None = None,
-                  *, keep_builds: list[dict[str, object]] | None = None) -> dict[str, object]:
+                  *, keep_builds: list[dict[str, object]] | None = None,
+                  omit_partition_hash: bool = False) -> dict[str, object]:
         """`<layer_root>/<table>/v=<build>/<tail>/<file>` 을 올리고 MANIFEST 를 current 로 바꾼다.
 
         partitions: {tail(""=whole 또는 "year=2010"): {파일명: bytes}}.
         hashes: tail → content_hash (없으면 파일 바이트 길이로 만든 가짜 해시).
+        omit_partition_hash: stage 층처럼 파티션에 content_hash 를 싣지 않는다.
         """
         record_parts: list[dict[str, object]] = []
         for tail, files in partitions.items():
@@ -78,7 +80,10 @@ class FakeRemote:
             for name, data in files.items():
                 self.files[f"{layer_root}/{table}/{rel}/{name}"] = data
             h = (hashes or {}).get(tail) or f"{len(files)}:{sum(len(d) for d in files.values()):x}"
-            record_parts.append({"path": rel, "n_rows": len(files), "content_hash": h})
+            part: dict[str, object] = {"path": rel, "n_rows": len(files)}
+            if not omit_partition_hash:   # stage 층 MANIFEST 는 파티션 content_hash 를 싣지 않는다
+                part["content_hash"] = h
+            record_parts.append(part)
         record: dict[str, object] = {
             "build_id": build_id, "snapshot_id": "", "rules_version": "e1.15.0",
             "built_at_utc": "2026-09-18T13:30:50+00:00", "n_rows": len(record_parts),

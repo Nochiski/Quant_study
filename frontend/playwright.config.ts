@@ -9,6 +9,22 @@ const backendDirectory = resolve(frontendDirectory, "../backend");
 // 격리 런타임 밖에서 실행되면 여기서 거부한다(run-playwright.mjs만 이 변수를 설정한다).
 const runtimeDatabase = runtimeDatabasePath();
 const ci = process.env.CI !== undefined;
+// 실데이터 opt-in: `E2E_REAL_EQUITY_ROOT`(로컬 equity 루트, `ledger_sync sync` 산출)가 있으면 backend 를
+// duckdb 어댑터로 띄우고 `real-equity` project 만 수집한다. 없으면 mock 어댑터 + 릴리스 게이트 project 만.
+// 한 실행의 backend 는 어댑터 하나뿐이라 두 집합은 절대 섞이지 않는다. 셸에 남은
+// STRATEGY_WORKBENCH_EQUITY_* 는 여기서 덮어써 릴리스 게이트가 실데이터로 돌지 않게 한다.
+const realEquityRoot = process.env.E2E_REAL_EQUITY_ROOT ?? "";
+const realEquity = realEquityRoot !== "";
+
+const chromiumUse = (
+  width: 1440 | 1920,
+  height: 900 | 1080,
+  colorScheme: "light" | "dark",
+) => ({
+  browserName: "chromium" as const,
+  viewport: { width, height },
+  colorScheme,
+});
 
 const browserProject = (
   width: 1440 | 1920,
@@ -17,12 +33,28 @@ const browserProject = (
 ) => ({
   name: `chromium-${width}-${colorScheme}`,
   testMatch: /workbench\.infrastructure\.spec\.ts/u,
-  use: {
-    browserName: "chromium" as const,
-    viewport: { width, height },
-    colorScheme,
-  },
+  use: chromiumUse(width, height, colorScheme),
 });
+
+const mockProjects = [
+  browserProject(1440, 900, "light"),
+  browserProject(1440, 900, "dark"),
+  browserProject(1920, 1080, "light"),
+  browserProject(1920, 1080, "dark"),
+  {
+    name: "chromium-workflow",
+    testMatch: /workbench\.workflow\.spec\.ts/u,
+    use: chromiumUse(1440, 900, "light"),
+  },
+];
+
+const realEquityProjects = [
+  {
+    name: "real-equity",
+    testMatch: /workbench\.real-equity\.spec\.ts/u,
+    use: chromiumUse(1440, 900, "light"),
+  },
+];
 
 export default defineConfig({
   testDir: "./e2e",
@@ -67,6 +99,8 @@ export default defineConfig({
       env: {
         ...process.env,
         STRATEGY_WORKBENCH_DB_PATH: runtimeDatabase,
+        STRATEGY_WORKBENCH_EQUITY_ADAPTER: realEquity ? "duckdb" : "mock",
+        STRATEGY_WORKBENCH_EQUITY_ROOT: realEquityRoot,
       },
       url: "http://localhost:8000/api/v1/health",
       reuseExistingServer: false,
@@ -84,30 +118,5 @@ export default defineConfig({
       stderr: "pipe",
     },
   ],
-  projects: [
-    browserProject(1440, 900, "light"),
-    browserProject(1440, 900, "dark"),
-    browserProject(1920, 1080, "light"),
-    browserProject(1920, 1080, "dark"),
-    {
-      name: "chromium-workflow",
-      testMatch: /workbench\.workflow\.spec\.ts/u,
-      use: {
-        browserName: "chromium" as const,
-        viewport: { width: 1440, height: 900 },
-        colorScheme: "light" as const,
-      },
-    },
-    {
-      // 실데이터(duckdb 어댑터) 백테스트 시나리오. spec 이 환경변수를 보고 스스로 skip 하므로
-      // CI(mock)에서는 항상 skipped 로 남고, 로컬에서 `--project real-equity` 로만 의미가 있다.
-      name: "real-equity",
-      testMatch: /workbench\.real-equity\.spec\.ts/u,
-      use: {
-        browserName: "chromium" as const,
-        viewport: { width: 1440, height: 900 },
-        colorScheme: "light" as const,
-      },
-    },
-  ],
+  projects: realEquity ? realEquityProjects : mockProjects,
 });

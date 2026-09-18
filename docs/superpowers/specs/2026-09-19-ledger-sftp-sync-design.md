@@ -44,13 +44,14 @@
 [서버 SFTP]  /equity/<table>/MANIFEST.json, v=<build>/…            (읽기 전용)
      │  paramiko SFTP · known_hosts 엄격 검증 · 재시도
      ▼
-[ledger_sync]  database/src/ledger_sync/   python -m ledger_sync {plan,pull,verify,gc,catalog,sync}
+[ledger_sync]  database/src/ledger_sync/   python -m ledger_sync {plan,pull,verify,gc,catalog,sync,status}
      │  plan   : 원격 MANIFEST 전부 읽기 → 테이블별 (remote_build, local_build, 받을 파일, 재사용 파티션)
      │  pull   : <table>/_incoming/v=<build>/ 에 수신 → 크기 대조 → v=<build>/ 로 rename → MANIFEST 원문 기록
      │  verify : manifest · files · hash 세 층위 대조, 종료 코드로 판정
      │  gc     : 로컬 구판본 정리(keep, current 보호)
-     │  catalog: `python -m equity catalog --root <root>/equity` 위임 (매크로 절대경로 재생성)
-     │  sync   : pull → verify(manifest·files) → catalog 를 한 번에
+     │  catalog: `python -m equity --root <root>/equity --stage-root <root>/equity catalog` 위임
+     │           (매크로 절대경로 재생성; `fetch_equity_local.sh` 와 같은 인자)
+     │  sync   : pull → catalog → verify(manifest·files) 를 한 번에
      ▼
 [로컬 루트]  ~/quant-ledger/data/equity/   (기본. `QL_SYNC_ROOT` 또는 `--root` 로 변경)
      │  <table>/MANIFEST.json (서버 원문 그대로) · v=<build>/… · _sync/state.json · _sync/logs/
@@ -63,7 +64,8 @@
 | 모듈 | 책임 | 의존 |
 |---|---|---|
 | `ledger_sync/remote.py` | `RemoteFS` 프로토콜(`listdir`, `read_bytes`, `download`)과 paramiko 구현 `SftpRemote`. 접속 정보(`host`·`user`·`key`)는 CLI/환경변수. 호스트키는 `~/.ssh/known_hosts` 에 없으면 거부(`--accept-new` 로만 허용). 전송 오류는 지수 백오프 3회 재시도 후 예외 | paramiko |
-| `ledger_sync/layout.py` | MANIFEST 해석(`current_build`, `partitions[].path`, `content_hash`), 테이블 목록 규칙(`_`·`.` 접두 디렉토리와 MANIFEST 없는 디렉토리 제외), 빌드 하나가 가지는 원격 파일 목록 | 없음 |
+| `ledger_sync/layout.py` | MANIFEST 해석(`current_build`, `partitions[].path`, `content_hash`), 테이블 목록 규칙(`_`·`.` 접두 디렉토리와 MANIFEST 없는 디렉토리 제외), 원격 이름 문법 강제(`is_safe_segment` — 경로 주입 차단) | 없음 |
+| `ledger_sync/hashing.py` | 서버 `content_hash` 규칙의 로컬 재현(`content_hash_sql`·`compute_partition_hash`)과 재사용 직전 해시 검사(`duckdb_reuse_check`) | duckdb(지연 import) |
 | `ledger_sync/state.py` | `_sync/state.json`: 테이블별 `{build_id, files: {relpath: {size, origin}}, synced_at_utc}`. `origin` ∈ `downloaded`·`reused` | 없음 |
 | `ledger_sync/plan.py` | 원격·로컬 상태 → `TablePlan`(상태 `up_to_date`·`new_build`·`error`, 받을 파일·재사용 파티션·바이트 수) | layout, state |
 | `ledger_sync/pull.py` | 계획 실행. `_incoming` 수신·크기 대조·rename·MANIFEST 기록·state 갱신·구판본 gc. 끝나면 원격 MANIFEST 를 다시 읽어 수신 중 판본이 바뀐 테이블을 `drifted` 로 보고 | remote, plan, state |
@@ -73,9 +75,9 @@
 
 ### 데이터 흐름 (pull)
 
-1. 원격 `<layer>/` 디렉토리 목록 → 테이블 후보 → 각 `MANIFEST.json` 을 메모리로 읽어 current_build 와 파티션 목록을 얻는다. `_catalog_meta.json`·`baseline.json`·`_contract_meta.json` 은 항상 받는다.
+1. 원격 `<layer>/` 디렉토리 목록 → 테이블 후보 → 각 `MANIFEST.json` 을 메모리로 읽어 current_build 와 파티션 목록을 얻는다. `baseline.json` 은 층 루트에, 서버 `_catalog_meta.json`·`_contract_meta.json` 은 `_sync/remote/` 에 받는다(루트의 `_catalog_meta.json` 은 로컬 `catalog` 산출물 — 리뷰 E 지적).
 2. 로컬 `state.json` 과 대조. 같은 build_id 이고 state 의 파일이 전부 디스크에 같은 크기로 있으면 `up_to_date`.
-3. 새 빌드면 파티션마다: 로컬 직전 빌드에 **같은 파티션 경로 꼬리(`year=YYYY` 또는 whole)이고 content_hash 가 같은** 파티션이 있으면 `reused`(로컬 복사, 하드링크 가능하면 하드링크), 아니면 원격 `listdir` 로 파일 목록을 얻어 `_incoming/v=<build>/…` 로 받는다. `_incoming` 에 같은 크기의 파일이 이미 있으면 건너뛴다(재개).
+3. 새 빌드면 파티션마다: 로컬 직전 빌드(같은 build_id 재수신이면 제외)에 **같은 꼬리(`year=YYYY` 또는 whole)·같은 content_hash·같은 parquet 파일 집합** 파티션이 있고 duckdb 재계산 해시가 MANIFEST 와 맞으면 `reused`(로컬 복사, 하드링크 가능하면 하드링크), 아니면 원격 `listdir` 로 파일 목록을 얻어 `_incoming/v=<build>/…` 로 받는다. `_incoming` 에 같은 크기의 파일이 이미 있으면 건너뛴다(재개, `--no-reuse` 면 잔재를 버린다).
 4. 받은 파일 크기가 원격 stat 과 다르면 그 테이블은 실패로 남기고 다음 테이블로 간다(부분 실패 격리). 성공하면 `_incoming/v=<build>` → `v=<build>` rename, MANIFEST 원문을 `MANIFEST.json` 에 `os.replace`, state 갱신.
 5. 테이블 처리 뒤 원격 MANIFEST 를 다시 읽어 current_build 가 바뀌었으면 `drifted` 로 보고(종료 코드 3). 사용자는 다시 `pull` 하면 된다.
 6. 로컬 gc: `v=*` 중 state 가 아는 current 를 제외하고 최신 `keep-1` 개만 남긴다(기본 keep=2). `_incoming` 의 다른 빌드 잔재도 지운다.
@@ -98,15 +100,15 @@
 |---|---|---|
 | manifest | 테이블 집합·current_build 가 원격과 같다, 로컬 `_catalog_meta.json.snapshot_id` 가 로컬 빌드 집합 해시와 같다 | 4 |
 | files | current_build 파티션 파일 이름·크기가 원격과 같다(reused 제외), MANIFEST 원문 바이트 동일 | 4 |
-| hash | 파티션마다 duckdb 재계산 `content_hash` = MANIFEST(`_meta.json` 의 `partition_content_hash`) | 4 |
+| hash | 파티션마다 duckdb 재계산 `content_hash` = MANIFEST `partitions[].content_hash`(`_meta.json` 은 읽지 않는다) | 4 |
 
-세 층위 다 통과하면 0. 원격 접속 없이도 `hash` 는 돌 수 있다(`--offline`).
+세 층위 다 통과하면 0. 원격 접속 없이도 `hash` 는 돌 수 있다(`--offline`). 검사 대상이 0건이면(state 없음·`--tables` 오타) 통과가 아니라 4 — "검사 안 함" 과 "전부 통과" 를 구분한다(리뷰 C 지적). stage 층 MANIFEST 는 파티션 content_hash 가 없어 hash 층위를 `skipped` 로 센다.
 
 ### E2E (실데이터 백테스트)
 
-- `frontend/e2e/workbench.real-equity.spec.ts`, 새 Playwright project `real-equity`(1440×900 light 한 개). `STRATEGY_WORKBENCH_EQUITY_ADAPTER=duckdb` 와 `STRATEGY_WORKBENCH_EQUITY_ROOT` 가 없으면 `test.skip` 한다 — CI 는 mock 그대로.
+- `frontend/e2e/workbench.real-equity.spec.ts`, Playwright project `real-equity`(1440×900 light 한 개). opt-in 변수 `E2E_REAL_EQUITY_ROOT` 가 있을 때만 config 가 이 project 를 수집하고 backend 를 duckdb 어댑터로 띄운다(없으면 mock 릴리스 게이트 project 만) — 한 실행에 두 어댑터가 섞이지 않는다. 공용 헬퍼는 `frontend/e2e/workbench-helpers.ts`.
 - 시나리오: 워크벤치에서 골든 fixture(252 세션 모멘텀, 유니버스 `krx.common-stock`)의 기간만 2024-01-02~2024-06-28 로 바꿔 저장 → Graph 편집기에서 `price.open` field 노드 추가·`mom_252` 입력 재배선 → YAML 재검증·리비전 2 저장(spec_hash = compile 결과) → 백테스트 실행(`POST /api/v1/backtests` 는 TargetTape 를 동기로 만들어 실데이터에서 약 80초 뒤 202) → 완료 상태, 실데이터 snapshot id(16 hex), 체결·스냅샷·자본곡선 > 0, `total_return` 값 존재 확인.
-- backend 는 Playwright webServer 가 `process.env` 를 그대로 넘기므로 `STRATEGY_WORKBENCH_EQUITY_ADAPTER=duckdb` + ROOT 만 설정하면 된다. 실행: `npm run test:e2e -- --project real-equity`.
+- 실행: `$env:E2E_REAL_EQUITY_ROOT = "$HOME\quant-ledger\data\equity"; npm run test:e2e`.
 
 ## 제약사항
 
@@ -145,8 +147,7 @@
 ## 테스트 계획
 
 - `database/tests/test_ledger_sync_layout.py`: MANIFEST 해석·테이블 제외 규칙·파일 목록.
-- `database/tests/test_ledger_sync_plan.py`: up_to_date / new_build / reused 판정, 바이트 집계.
-- `database/tests/test_ledger_sync_pull.py`: `FakeRemote` 로 수신·원자 rename·재개·크기 불일치 격리·drifted·gc.
+- `database/tests/test_ledger_sync_pull.py`: plan(up_to_date / new_build / reused 판정·파일 집합 대조·자기 재사용 배제)과 pull(`FakeRemote` 로 수신·원자 rename·재개·크기 불일치·로컬 IO 격리·drifted·gc 시각순).
 - `database/tests/test_ledger_sync_verify.py`: 세 층위 판정, reused 제외, hash 재계산(duckdb 로 만든 소형 parquet).
 - `database/tests/test_ledger_sync_cli.py`: 종료 코드·`--json`.
 - 실서버 대상: `sync` 1회 전량 → `verify` 0 → 다음 날 `pull` 로 증분 확인 → 워크벤치 기동·E2E project 통과.

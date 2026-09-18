@@ -7,6 +7,7 @@ from ledger_sync.layout import (
     ManifestStatus,
     Partition,
     build_dir_names,
+    is_safe_segment,
     is_table_name,
     parse_manifest,
     snapshot_id,
@@ -73,3 +74,39 @@ def test_snapshot_id_matches_workbench_rule() -> None:
 
 def test_build_dir_names_are_sorted_v_dirs() -> None:
     assert build_dir_names(["v=b2", "_incoming", "v=b1", "MANIFEST.json"]) == ["v=b1", "v=b2"]
+
+
+def test_remote_names_that_could_escape_the_local_root_are_rejected() -> None:
+    # 원격 MANIFEST 의 build_id·파티션 경로는 그대로 로컬 경로 조각이 된다 — 문법 밖이면 해석 실패
+    evil = "x/../../evil"
+    traversal = parse_manifest("t", _manifest(evil, [_build(evil, [f"v={evil}"])]))
+    assert traversal.status is ManifestStatus.UNSAFE_NAME
+    bad_tail = parse_manifest("t", _manifest("b1", [_build("b1", ["v=b1/../../oops"])]))
+    assert bad_tail.status is ManifestStatus.BAD_PARTITION
+    other_build = parse_manifest("t", _manifest("b1", [_build("b1", ["v=b2/year=2010"])]))
+    assert other_build.status is ManifestStatus.BAD_PARTITION
+    assert parse_manifest("t", _manifest("b1", [_build("b1", ["v=b1/year=2010"])])).ok
+    for name in ("part0.parquet", "_meta.json", "e_20260918T133020_791078Z", "year=2010"):
+        assert is_safe_segment(name)
+    for name in ("..", ".", "a/b", "a\\b", "C:", " x", "", "-x", ".hidden"):
+        assert not is_safe_segment(name)
+
+
+def test_hive_columns_are_url_decoded_and_default_partition_is_null() -> None:
+    assert Partition("v=b/k=a%20b", 1, "h").hive_columns() == (("k", "a b"),)
+    assert Partition("v=b/k=__HIVE_DEFAULT_PARTITION__", 1, "h").hive_columns() == (("k", None),)
+
+
+def test_broken_old_builds_do_not_block_the_current_build() -> None:
+    old = {"build_id": "b0", "partitions": [{"path": "year=2010", "n_rows": None}]}
+    view = parse_manifest("t", _manifest("b2", [old, _build("b2", ["v=b2"])]))
+    assert view.ok and "b0" not in view.builds
+    bad_rows = {"build_id": "b2", "partitions": [{"path": "v=b2", "n_rows": None}]}
+    assert parse_manifest("t", _manifest("b2", [bad_rows])).status is ManifestStatus.BAD_PARTITION
+
+
+def test_snapshot_id_matches_the_equity_catalog_source_of_truth() -> None:
+    from equity.catalog import snapshot_id as sot
+
+    builds = {"price_daily": "e_1", "security": "m_2", "adj_factor": "b_3"}
+    assert snapshot_id(builds) == sot(builds)

@@ -34,16 +34,26 @@ database cannot leak state into a later run.
 ## Real equity data (opt-in)
 
 `workbench.real-equity.spec.ts` runs the graph-edit → save → backtest scenario against the duckdb
-equity adapter instead of the mock. It is collected by the `real-equity` project and skips itself
-unless both variables are set, so CI (mock) always reports it as skipped:
+equity adapter instead of the mock. Set `E2E_REAL_EQUITY_ROOT` to the local equity root produced by
+`database/scripts/ledger_sync.ps1 sync` (see `database/docs/LEDGER_SYNC.md`):
 
 ```text
-$env:STRATEGY_WORKBENCH_EQUITY_ADAPTER = "duckdb"
-$env:STRATEGY_WORKBENCH_EQUITY_ROOT = "$HOME\quant-ledger\data\equity"
-npm run test:e2e -- --project real-equity
+$env:E2E_REAL_EQUITY_ROOT = "$HOME\quant-ledger\data\equity"
+npm run test:e2e
 ```
 
-The local equity root comes from `database/scripts/ledger_sync.ps1 sync` (see
-`database/docs/LEDGER_SYNC.md`). Expect the backtest start request to take about 80 seconds on the
-full common-stock universe: the backend builds the TargetTape synchronously before it returns the
-run id.
+With that variable set, `playwright.config.ts` starts the backend with the duckdb adapter and collects
+only the `real-equity` project; without it, the backend runs the mock adapter and only the release-gate
+projects are collected. The two sets never share a run, so a shell that still has the variable set
+cannot turn the mock baselines into real-data failures. CI never sets the variable.
+
+Requirements and expectations:
+
+- The local copy must cover sessions from at least 2023-01 so the 252-session momentum window has
+  history for the 2024 backtest window; otherwise the failure shows up as a backtest error, not as a
+  data-coverage message.
+- The backend builds the TargetTape synchronously before it returns the run id, so the backtest start
+  request takes about 80 seconds on the full common-stock universe (measured 2026-09-19); the whole
+  spec took about 1.3 minutes.
+- The run-settings default benchmark id `005930` is rejected by the real adapter (issue #154); the
+  spec sets `005930:1` explicitly.

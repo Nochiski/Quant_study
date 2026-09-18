@@ -5,7 +5,8 @@ import json
 from pathlib import Path
 
 import pytest
-from ledger_sync.layout import INCOMING_DIR, MANIFEST_NAME
+from ledger_sync.hashing import trusting_reuse_check
+from ledger_sync.layout import INCOMING_DIR, MANIFEST_NAME, SYNC_DIR
 from ledger_sync.plan import TableAction, make_plan
 from ledger_sync.pull import (
     KEEP_DEFAULT,
@@ -38,7 +39,9 @@ def remote() -> FakeRemote:
 
 def _sync(remote: FakeRemote, root: Path, keep: int = KEEP_DEFAULT):
     state = load_state(root, "equity")
-    plan = make_plan(remote, REMOTE, root, state, layer="equity")
+    # 가짜 parquet 바이트라 duckdb 재계산은 불가 — 재사용 판정 자체는 MANIFEST 값으로 검증한다
+    plan = make_plan(remote, REMOTE, root, state, layer="equity",
+                     reuse_check=trusting_reuse_check)
     report = execute_plan(remote, plan, root, state, keep=keep, check_space=False)
     return plan, report
 
@@ -53,7 +56,11 @@ def test_first_pull_downloads_only_current_builds_and_meta(remote: FakeRemote,
     assert y2010.read_bytes() == b"P10"
     remote_manifest = remote.files[f"{REMOTE}/security/MANIFEST.json"]
     assert (tmp_path / "security" / MANIFEST_NAME).read_bytes() == remote_manifest
-    assert (tmp_path / "baseline.json").exists() and (tmp_path / "_catalog_meta.json").exists()
+    assert (tmp_path / "baseline.json").exists()
+    # 서버 카탈로그 메타는 로컬 catalog 산출물을 덮어쓰지 않는다 — `_sync/remote/` 에만 둔다
+    assert not (tmp_path / "_catalog_meta.json").exists()
+    assert (tmp_path / SYNC_DIR / "remote" / "_catalog_meta.json").read_bytes() == \
+        b'{"snapshot_id": "x"}'
     assert not (tmp_path / "price_daily" / INCOMING_DIR).exists()
     state = load_state(tmp_path, "equity")
     assert state.tables["price_daily"].build_id == "b1"
@@ -102,7 +109,8 @@ def test_no_reuse_downloads_everything(remote: FakeRemote, tmp_path: Path) -> No
                      {"year=2010": {"part0.parquet": b"P10-rewritten", "_meta.json": b"{2}"}},
                      {"year=2010": "1:10"})
     state = load_state(tmp_path, "equity")
-    plan = make_plan(remote, REMOTE, tmp_path, state, layer="equity", reuse=False)
+    plan = make_plan(remote, REMOTE, tmp_path, state, layer="equity", reuse=False,
+                     reuse_check=trusting_reuse_check)
     pd = next(t for t in plan.tables if t.table == "price_daily")
     assert not pd.reuses and len(pd.downloads) == 2
 
@@ -204,3 +212,116 @@ def test_free_space_gate_runs_before_any_transfer(remote: FakeRemote, tmp_path: 
     with pytest.raises(InsufficientDiskSpace):
         execute_plan(remote, plan, tmp_path, state)
     assert not [c for c in remote.calls if c[0] == "download"]
+
+
+def test_unsafe_remote_file_name_stops_the_table(remote: FakeRemote, tmp_path: Path) -> None:
+    remote.files[f"{REMOTE}/security/v=b1/..%5C..%5Cevil.parquet"] = b"x"
+    remote.files[f"{REMOTE}/price_daily/v=b1/year=2010/a b.parquet"] = b"x"
+    plan, report = _sync(remote, tmp_path)
+    for table in ("security", "price_daily"):
+        t = next(t for t in plan.tables if t.table == table)
+        assert t.action is TableAction.NEW_BUILD or "unsafe remote file name" in (t.detail or "")
+    assert next(t for t in plan.tables if t.table == "price_daily").action is TableAction.ERROR
+    assert not (tmp_path / "price_daily" / MANIFEST_NAME).exists()
+
+
+def test_reuse_requires_the_same_file_set_as_remote(remote: FakeRemote, tmp_path: Path) -> None:
+    # content_hash 는 행 해시라 파일 분할이 바뀌어도 같다 — 파일 집합이 다르면 재사용하지 않는다
+    _sync(remote, tmp_path)
+    remote.put_table(REMOTE, "price_daily", "b2",
+                     {"year=2010": {"part0.parquet": b"P10a", "part1.parquet": b"P10b",
+                                    "_meta.json": b"{2}"},
+                      "year=2011": {"part0.parquet": b"P11", "_meta.json": b"{2}"}},
+                     {"year=2010": "1:10", "year=2011": "1:11"})
+    plan, report = _sync(remote, tmp_path)
+    pd = next(t for t in plan.tables if t.table == "price_daily")
+    assert [r.partition_path for r in pd.reuses] == ["v=b2/year=2011"]
+    assert "v=b2/year=2010/part1.parquet" in {t.rel_path for t in pd.downloads}
+    assert report.ok
+    names = sorted(p.name for p in (tmp_path / "price_daily" / "v=b2" / "year=2010").iterdir())
+    assert names == ["_meta.json", "part0.parquet", "part1.parquet"]
+
+
+def test_same_build_repull_does_not_reuse_itself_and_keeps_the_dir_live(remote: FakeRemote,
+                                                                        tmp_path: Path) -> None:
+    _sync(remote, tmp_path)
+    (tmp_path / "price_daily" / "v=b1" / "year=2010" / "_meta.json").unlink()
+    state = load_state(tmp_path, "equity")
+    plan = make_plan(remote, REMOTE, tmp_path, state, layer="equity",
+                     reuse_check=trusting_reuse_check)
+    pd = next(t for t in plan.tables if t.table == "price_daily")
+    assert pd.action is TableAction.NEW_BUILD and not pd.reuses
+    report = execute_plan(remote, plan, tmp_path, state, check_space=False)
+    assert report.ok
+    assert (tmp_path / "price_daily" / "v=b1" / "year=2010" / "_meta.json").exists()
+    assert not (tmp_path / "price_daily" / "v=b1.replaced").exists()
+
+
+def test_local_io_failure_is_isolated_to_the_table(remote: FakeRemote, tmp_path: Path,
+                                                   monkeypatch: pytest.MonkeyPatch) -> None:
+    from ledger_sync import pull as pull_module
+
+    def boom(source: Path, target: Path) -> None:
+        if "price_daily" in str(target):
+            raise PermissionError(32, "sharing violation", str(target))
+        pull_module.os.replace(source, target)
+
+    monkeypatch.setattr(pull_module, "_replace_dir", boom)
+    _, report = _sync(remote, tmp_path)
+    failed = next(r for r in report.results if r.table == "price_daily")
+    assert failed.outcome is TableOutcome.FAILED and "local io failed" in (failed.detail or "")
+    assert next(r for r in report.results if r.table == "security").outcome is TableOutcome.DONE
+    assert (tmp_path / "price_daily" / INCOMING_DIR / "v=b1").is_dir()   # 재개용으로 남는다
+
+
+def test_gc_keeps_newest_by_build_time_and_protects_manifest_current(remote: FakeRemote,
+                                                                     tmp_path: Path) -> None:
+    _sync(remote, tmp_path)
+    table_root = tmp_path / "security"
+    for name in ("v=e_20260919T133000_000000Z", "v=m_20260919T001900_000000Z",
+                 "v=m_20260920T001900_000000Z"):
+        (table_root / name).mkdir()
+    state = load_state(tmp_path, "equity")
+    warnings: list[str] = []
+    removed = gc_table(tmp_path, "security", state, keep=2, warnings=warnings)
+    # current(b1) 보호, 나머지 셋 중 시간순 최신 1개(m_20260920)만 남는다
+    assert sorted(removed) == ["security/v=e_20260919T133000_000000Z",
+                               "security/v=m_20260919T001900_000000Z"]
+    assert (table_root / "v=m_20260920T001900_000000Z").is_dir()
+    assert warnings == []
+    # state 와 MANIFEST 가 다르면 둘 다 보호하고 경고
+    (table_root / "v=b9").mkdir()
+    manifest = table_root / MANIFEST_NAME
+    manifest.write_bytes(manifest.read_bytes().replace(b'"current_build": "b1"',
+                                                       b'"current_build": "b9"'))
+    removed = gc_table(tmp_path, "security", state, keep=1, warnings=warnings)
+    assert "security/v=b9" not in removed and (table_root / "v=b1").is_dir()
+    assert any("state and MANIFEST disagree" in w for w in warnings)
+
+
+def test_no_reuse_discards_incoming_leftovers(remote: FakeRemote, tmp_path: Path) -> None:
+    _sync(remote, tmp_path)
+    remote.put_table(REMOTE, "security", "b2", {"": {"part0.parquet": b"S2" * 10}}, {"": "5:aa"})
+    leftover = tmp_path / "security" / INCOMING_DIR / "v=b2" / "part0.parquet"
+    leftover.parent.mkdir(parents=True)
+    leftover.write_bytes(b"S1" * 10)   # 앞선 재사용 실행이 남긴 구판본 바이트(크기 동일)
+    state = load_state(tmp_path, "equity")
+    plan = make_plan(remote, REMOTE, tmp_path, state, layer="equity", reuse=False,
+                     reuse_check=trusting_reuse_check)
+    execute_plan(remote, plan, tmp_path, state, check_space=False)
+    assert (tmp_path / "security" / "v=b2" / "part0.parquet").read_bytes() == b"S2" * 10
+
+
+def test_malformed_state_reports_path_and_hint(tmp_path: Path) -> None:
+    from ledger_sync.state import state_path
+
+    path = state_path(tmp_path)
+    path.parent.mkdir(parents=True)
+    broken = {"tables": {"security": {"files": {"v=b1/x.parquet": {"size": 1}}}}}
+    path.write_text(json.dumps(broken), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="sync state malformed") as e:
+        load_state(tmp_path, "equity")
+    assert str(path) in str(e.value)
+    path.write_text(json.dumps({"version": 99, "tables": {}}), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="newer ledger_sync"):
+        load_state(tmp_path, "equity")

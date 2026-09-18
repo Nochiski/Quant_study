@@ -15,11 +15,7 @@ from backtest_engine.types.decision import StrategyDecision
 from backtest_engine.types.events import StrategyEvent
 from backtest_engine.types.market import MarketSnapshot
 from backtest_engine.types.strategy import StrategyContext
-from backtest_engine.types.tape import DeclarativeTapeStrategy, TapeFrame
-
-
-def is_declarative_tape(strategy: object) -> bool:
-    return isinstance(strategy, DeclarativeTapeStrategy)
+from backtest_engine.types.tape import TapeFrame
 
 
 def no_bar_reason(reason: str, symbols: Sequence[str]) -> str:

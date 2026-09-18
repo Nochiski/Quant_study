@@ -87,7 +87,7 @@ def test_adapter_delegates_to_evaluate_tape_and_only_adds_its_reasons() -> None:
     frames = strategy.tape_frames()
     assert [frame.reason for frame in frames.values()] == [f"target_tape:{SIGNAL.isoformat()}"]
     assert strategy.on_event(ctx, snapshot) == evaluate_tape(
-        frames, TargetTapeStrategy.idle_reason, ctx, snapshot
+        frames, strategy.idle_reason, ctx, snapshot
     )
 
     # 프레임이 없는 세션은 어댑터의 idle_reason 으로 NoAction 이 된다.
@@ -96,4 +96,4 @@ def test_adapter_delegates_to_evaluate_tape_and_only_adds_its_reasons() -> None:
         _Context(now=idle_ts, positions={}),
         MarketSnapshot(ts=idle_ts, bars=(make_bar(idle_ts, instrument, 100.0, 101.0),)),
     )
-    assert idle == StrategyDecision.no_action(idle_ts, TargetTapeStrategy.idle_reason)
+    assert idle == StrategyDecision.no_action(idle_ts, strategy.idle_reason)

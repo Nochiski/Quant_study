@@ -16,7 +16,7 @@ import pytest
 from backtest_engine import BacktestEngine, RunConfig
 from backtest_engine.data.feed import DataFeed
 from backtest_engine.engine.core import core_available
-from backtest_engine.engine.tape import evaluate_tape, is_declarative_tape
+from backtest_engine.engine.tape import evaluate_tape
 from backtest_engine.errors import UndeclaredActionReturned
 from backtest_engine.types.actions import (
     ActionKind,
@@ -37,7 +37,7 @@ from backtest_engine.types.requirements import (
     StrategyRequirements,
 )
 from backtest_engine.types.strategy import StrategyContext
-from backtest_engine.types.tape import TapeFrame
+from backtest_engine.types.tape import DeclarativeTapeStrategy, TapeFrame
 from tests.conftest import day, make_bar, make_instrument
 
 RUST_ONLY = pytest.mark.skipif(not core_available("rust"), reason="rust core not built")
@@ -137,10 +137,12 @@ def test_sessions_without_a_frame_and_non_market_events_are_idle() -> None:
 # --- Rust 네이티브 경로 패리티 ------------------------------------------------------
 
 
-class _TapeStrategy:
+class _TapeStrategy(DeclarativeTapeStrategy):
     """`DeclarativeTapeStrategy`를 구현하는 최소 전략. python 경로는 on_event, rust 경로는 tape."""
 
-    idle_reason = "tape_idle"
+    @property
+    def idle_reason(self) -> str:
+        return "tape_idle"
 
     def __init__(
         self,
@@ -244,9 +246,51 @@ def _apostrophe_frames() -> dict[date, TapeFrame]:
     }
 
 
-def test_declarative_tape_protocol_is_detected() -> None:
-    assert is_declarative_tape(_TapeStrategy({}))
-    assert not is_declarative_tape(object())
+class _LookAlike:
+    """`_TapeStrategy`와 이름 네 개가 같지만 `DeclarativeTapeStrategy`를 상속하지 않은 전략.
+
+    구조 일치만으로 tape 경로를 고르면 이 전략의 `on_event()`는 한 번도 불리지 않는다 —
+    예외도 경고도 없이 전략 로직이 통째로 건너뛰어진다.
+    """
+
+    idle_reason = "look_alike_idle"
+
+    def __init__(self, frames: Mapping[date, TapeFrame]) -> None:
+        self._frames = frames
+        self.callbacks = 0
+
+    def requirements(self) -> StrategyRequirements:
+        return StrategyRequirements(
+            histories=(),
+            schedule=EverySession(),
+            events=frozenset({EventKind.MARKET}),
+            actions=frozenset({ActionKind.NO_ACTION, ActionKind.SET_PORTFOLIO_TARGET}),
+            features=frozenset(),
+        )
+
+    def tape_frames(self) -> Mapping[date, TapeFrame]:
+        return self._frames
+
+    def on_event(self, ctx: StrategyContext, event: StrategyEvent) -> StrategyDecision:
+        self.callbacks += 1
+        return evaluate_tape(self._frames, self.idle_reason, ctx, event)
+
+
+def test_declarative_tape_requires_explicit_inheritance() -> None:
+    assert isinstance(_TapeStrategy({}), DeclarativeTapeStrategy)
+    assert not isinstance(_LookAlike({}), DeclarativeTapeStrategy)
+    assert not isinstance(object(), DeclarativeTapeStrategy)
+
+
+@RUST_ONLY
+def test_look_alike_strategy_keeps_the_callback_path() -> None:
+    """상속하지 않은 전략은 이름이 다 맞아도 콜백 경로로 실행된다."""
+    strategy = _LookAlike(_delisting_frames())
+    engine = BacktestEngine(RunConfig(run_id="look-alike", initial_cash=100_000.0), core="rust")
+    engine.run(strategy, _delisting_feed())
+
+    assert strategy.callbacks == 4
+    assert engine.event_store.decision_tape != ()
 
 
 @RUST_ONLY

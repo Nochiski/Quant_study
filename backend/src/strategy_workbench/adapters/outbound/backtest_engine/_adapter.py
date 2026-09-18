@@ -23,7 +23,7 @@ from backtest_engine.types.market import Bar
 from backtest_engine.types.orders import Side
 from backtest_engine.types.requirements import StrategyRequirements
 from backtest_engine.types.strategy import StrategyContext
-from backtest_engine.types.tape import TapeFrame
+from backtest_engine.types.tape import DeclarativeTapeStrategy, TapeFrame
 from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import (
     BacktestEnginePortfolioAdapter,
 )
@@ -63,16 +63,19 @@ def _instrument(security_id: str) -> InstrumentId:
     return InstrumentId("XKRX", security_id, AssetClass.EQUITY, "KRW")
 
 
-class TargetTapeStrategy:
+class TargetTapeStrategy(DeclarativeTapeStrategy):
     """컴파일된 TargetTape를 엔진 전략으로 노출한다.
 
-    선언형 tape(`DeclarativeTapeStrategy`)이므로 persistent Rust 경로는 `tape_frames()`를 적재해
-    콜백 없이 실행하고, Python 경로는 `on_event()`가 같은 규칙(`evaluate_tape`)을 적용한다.
+    선언형 tape(`DeclarativeTapeStrategy`)를 상속하므로 persistent Rust 경로는
+    `tape_frames()`를 적재해 콜백 없이 실행하고, Python 경로는 `on_event()`가 같은
+    규칙(`evaluate_tape`)을 적용한다.
     bar 없는 종목 처리(거래정지·기준가 세션은 equity 피드에 행이 없다)는 `evaluate_tape`가
     단일 정본이다.
     """
 
-    idle_reason = "target_tape_idle"
+    @property
+    def idle_reason(self) -> str:
+        return "target_tape_idle"
 
     def __init__(
         self,

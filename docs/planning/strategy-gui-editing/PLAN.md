@@ -6,8 +6,8 @@ current_phase: complete
 current_pr: none
 active_prs: []
 parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02, P1-06, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05, P5-01, P5-02, P5-03]
-last_updated: 2026-09-18T22:18:55+09:00
-last_updated: 2026-09-18T22:18:55+09:00
+last_updated: 2026-09-18T22:21:20+09:00
+last_updated: 2026-09-18T22:21:20+09:00
 planned_prs: 19
 merged_prs: 19
 approved_prs: 19
@@ -30,7 +30,7 @@ progress_percent: 100
 | Active PR | none |
 | Progress | `19 / 19 merged (100%)` |
 | Approved | `19 / 19` |
-| Aggregated at | `2026-09-18 22:18 KST` |
+| Aggregated at | `2026-09-18 22:21 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -239,6 +239,8 @@ Phase exit:
 | 13 | ~~빈 팩터의 `output_node_id` 자동 지정 비대칭~~ → [#144](https://github.com/Nochiski/Quant_study/pull/144) | 동작은 맞고 compile이 안내 | 소 |
 | 14 | flow mapping(`{ … }` 한 줄)으로 쓴 팩터·그래프는 `insert-item`부터 계획이 실패하고(base 한계, PLAN 기록), 다중 연산 트랜잭션(`planSourceOperations`)의 all-or-nothing이 그 한계를 노드 추가 같은 주 동작으로 전파한다(#144 3차 리뷰 관찰) | flow 컨테이너를 block으로 여는 연산 또는 안내 문구 | 중 |
 | 15 | route 테스트(`document-routes.test.tsx`)가 전체 실행·CI에서 부하 flake(#143 CI 재실행, #144 리뷰 1회차, 로컬 반복) — 파일 timeout 15s로도 남는 한 틱 지연 | 케이스별 `findBy*`/`waitFor` 정리 또는 워커 격리 | 소 |
+| 16 | 저장·revise 422(`strategy_document.invalid`)의 detail에 `message`가 없어 `use-save-document.ts`가 빈 detail만 보여 준다 — #147이 선언한 typed 응답으로 `diagnostics` 첫 항목을 안내(#147 리뷰 관찰) | 저장 실패 사유가 화면에 안 보임 | 소 |
+| 17 | trace 422·409 코드 중 `trace.request.invalid`·`trace.engine.incompatible`·`trace.capability.unsupported`·`trace.strategy.stale`는 아직 backend 원문 노출 — `trace.error.<code>` 발판 위에 키만 추가 | 위험 5b 범위 밖 잔여 | 소 |
 
 ## 변경 기록
 

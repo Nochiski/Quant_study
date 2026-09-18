@@ -308,8 +308,9 @@ export const FactorGraphPanel = ({
   } | null>(null);
   if (projected.status === "ready" && lastReady?.state !== state)
     setLastReady({ state, documentKey, projection: projected });
-  // 편집 확정 뒤 plan은 blocked(pending) → loading → ready로 흐른다. 직전 투영은 같은 문서 안에서만 쓰고,
-  // 문서 경계(`documentKey`)가 바뀌면 버린다(3차 리뷰 P1: blocked에서 버리면 편집 경로에서 기능이 사라진다).
+  // 편집 확정 뒤 plan은 blocked(stale: 이전 compile의 spec이 남아 있어 stale 판정이 pending보다 먼저) →
+  // blocked(pending) → loading → ready로 흐른다. 직전 투영은 같은 문서 안에서만 쓰고, 문서 경계(`documentKey`)가
+  // 바뀌면 버린다(3차 리뷰 P1: blocked에서 버리면 편집 경로에서 기능이 사라진다; 4차: `stale`도 같은 구간이다).
   const held =
     lastReady !== null && Object.is(lastReady.documentKey, documentKey)
       ? lastReady
@@ -317,7 +318,8 @@ export const FactorGraphPanel = ({
   const recomputing =
     editing !== undefined &&
     (state.status === "loading" ||
-      (state.status === "blocked" && state.reason === "pending")) &&
+      (state.status === "blocked" &&
+        (state.reason === "stale" || state.reason === "pending"))) &&
     held !== null;
   const projection = recomputing ? held.projection : projected;
   const routeFactor = factorIndexAtPointer(selectedPointer);

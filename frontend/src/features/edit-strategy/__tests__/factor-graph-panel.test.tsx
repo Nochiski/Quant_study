@@ -304,7 +304,10 @@ describe("FactorGraphPanel", () => {
     );
     const { rerender } = render(view(readyState()));
     expect(screen.queryByText("재계산 중")).toBeNull();
-    // 편집 확정 뒤 실제 경로: compile 버전이 밀려 blocked(pending) → loading → ready. 그동안 직전 투영이 남는다.
+    // 편집 확정 뒤 실제 경로: 이전 compile의 spec이 남아 blocked(stale) → blocked(pending) → loading → ready.
+    // 그동안 직전 투영이 남는다(reducer 실측: stale 판정이 pending보다 먼저다 — 4차 리뷰).
+    rerender(view({ status: "blocked", reason: "stale" }));
+    expect(screen.getByText("재계산 중")).toBeInTheDocument();
     rerender(view({ status: "blocked", reason: "pending" }));
     expect(screen.getByText("재계산 중")).toBeInTheDocument();
     rerender(view({ status: "loading" }));

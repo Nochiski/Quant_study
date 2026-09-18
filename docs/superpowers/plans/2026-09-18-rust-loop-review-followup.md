@@ -690,7 +690,7 @@ PR 9까지 반영 후 100종목 tape에서 feed 적재(`_load_persistent_feed` +
 | 5 | `refactor/python-sot-context-tape-marker` | 리뷰 APPROVE·PR 생성 | #129 | Opus APPROVE (issubclass 고정 반영) |
 | 6 | `perf/materialize-by-kind` | 리뷰 APPROVE·PR 생성 | #134 | Opus APPROVE (DEFECT-601 반영, RSS 1.18/1.22배 통과) |
 | 7 | `perf/workbench-result-columnar` | 리뷰 조건부 APPROVE·PR 생성 | #136 | Opus (DEFECT-701·캐시·RSS 계측 반영, post-run −48%(경계), e2e 1.26→1.91배) |
-| 8 | `perf/rust-hot-loop` | 대기 | | |
+| 8 | `perf/rust-hot-loop` | 리뷰 APPROVE·PR 생성 | #137 | Opus APPROVE (테스트·set_mark·Python key 충돌 거부 반영, 300종목 run −21~22%) |
 | 9 | `perf/record-and-queue-memory` | 대기 | | |
 | 10 | `perf/feed-columnar` | go/no-go 대기 | | |
 | 11 | `docs/rust-loop-final-gates` | 대기 | | |

@@ -6,7 +6,7 @@ current_phase: complete
 current_pr: none
 active_prs: []
 parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02, P1-06, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05, P5-01, P5-02, P5-03]
-last_updated: 2026-09-18T20:02:46+09:00
+last_updated: 2026-09-18T20:41:39+09:00
 planned_prs: 19
 merged_prs: 19
 approved_prs: 19
@@ -29,7 +29,7 @@ progress_percent: 100
 | Active PR | none |
 | Progress | `19 / 19 merged (100%)` |
 | Approved | `19 / 19` |
-| Aggregated at | `2026-09-18 20:02 KST` |
+| Aggregated at | `2026-09-18 20:41 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -224,23 +224,24 @@ Phase exit:
 | 우선 | 항목 | 근거 | 크기 |
 |---:|---|---|---|
 | 1 | ~~DEFECT-P5X-001 — `TextualControl` 되돌리기에 "사용자가 draft를 고치지 않았다" 조건(확정 직후 150ms 안에 같은 필드를 비우고 다시 치면 parse 도착이 옛 값을 되살려 `window: 100101`처럼 이어 붙음, "반영됨" 오보고; undo 1회 복구)~~ → [#140](https://github.com/Nochiski/Quant_study/pull/140) | `strategy-form-panel.tsx` `TextualControl` seen/committed 조정 — `pristine`(손대지 않은) draft일 때만 되돌림 | 한 줄 + 테스트 1 |
-| 2 | DEFECT-P5X-002 — 사용자 매뉴얼 1절 샘플이 schema 1.0 | 첫 실습이 업그레이드 오류로 시작 | 문서 |
+| 2 | ~~DEFECT-P5X-002 — 사용자 매뉴얼 1절 샘플이 schema 1.0~~ → [#143](https://github.com/Nochiski/Quant_study/pull/143) | 첫 실습이 업그레이드 오류로 시작 | 문서 |
 | 3 | ~~DEFECT-P5X-003 — `x-reference` 네임스페이스 리터럴(`NAMESPACES`)을 runtime schema fixture와 묶는 테스트(`CATALOGS`와 대칭)~~ → [#140](https://github.com/Nochiski/Quant_study/pull/140) | 새 네임스페이스가 조용히 text 컨트롤로 떨어짐 | 테스트 1 |
 | 4 | P5X-009 — `node_id` 중복 방지 판정 + 참조 id rename(참조 갱신) | 중복이 backend compile error로만 드러남 | 기능 |
-| 5 | P5X-005 — CodeMirror `lineSeparator`로 CRLF 보존 또는 "LF 정규화" 문서화 | 편집 없이 저장해도 `source_hash` 변동 | 설정 1 또는 문서 |
+| 5 | ~~P5X-005 — CodeMirror `lineSeparator`로 CRLF 보존 또는 "LF 정규화" 문서화~~ → [#143](https://github.com/Nochiski/Quant_study/pull/143) | 편집 없이 저장해도 `source_hash` 변동 | 설정 1 또는 문서 |
 | 6 | DEFECT-P5X-004 — `removalBlockers`가 SoT 행이 요구한 스코프 없이 `findReferences` 호출(팩터·파라미터는 전역이라 현재 무해) | 계약 명시 | 테스트 또는 인자 |
 | 7 | P5X-006 — `lastStructural`·`lastReady`를 `documentEpoch`에 결속 | 다른 stale 캐시는 전부 epoch에 묶여 있음 | 한 줄 |
 | 8 | P5X-007 — 매뉴얼 8절 스크린샷 | 두 편집 표면을 글로만 설명 | 문서 |
 | 9 | P5X-008 — `graph-transactions.ts` UI 미호출 export 5종 배선 또는 정리 | P5-01 R4-4 규약이 공허 | 정리 |
 | 10 | Phase 1 이월 — `trace.strategy.requires_upgrade` i18n 키, 세 라우트 422 typed화 | P5-03 소유로 지정됐으나 미이행 | 소 |
 | 11 | Phase 2 이월 — DEFECT-P2X-004(사전 누락 시 침묵), -005(적용 조건 문장 이중 소유) | 진단 wire 계약 변경 | 중 |
-| 12 | `database/` ruff 설정 부재 → `--config backend/pyproject.toml` 명시를 WORKFLOW에 | P5-03 부수 권고 | 문서 |
+| 12 | ~~`database/` ruff 설정 부재 → `--config backend/pyproject.toml` 명시를 WORKFLOW에~~ → [#143](https://github.com/Nochiski/Quant_study/pull/143) | P5-03 부수 권고 | 문서 |
 | 13 | 빈 팩터의 `output_node_id` 자동 지정 비대칭 | 동작은 맞고 compile이 안내 | 소 |
 
 ## 변경 기록
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-18 KST | Claude | backlog 2·5·12 처리 PR [#143](https://github.com/Nochiski/Quant_study/pull/143) `docs/gui-backlog-b1`(main 기반, 문서만): 매뉴얼 1절 샘플을 backend `upgrade_yaml_source` 출력의 1.1로(빈 `signal: {}` 제거), 8절 줄 끝 LF 정규화 안내, SoT 편집기 행에 "CRLF → LF 정규화·`source_hash` 변동 가능·`spec_hash` 불변" 결정, WORKFLOW 게이트 행에 `database/` ruff 실측(설정 없음·CI는 pytest만·backend 규칙 663건). 리뷰 `review_gui_backlog_143` | 머지 뒤 backlog |
 | 2026-09-18 KST | Claude | backlog 1·3 처리 PR [#140](https://github.com/Nochiski/Quant_study/pull/140) `fix/gui-backlog-p5x-001`(main 기반): `TextualControl` 되돌리기 조건을 "손대지 않은 draft"(`pristine` 플래그: 입력이 바뀌거나 확정이 실패하면 꺼지고 확정 성공·Escape로 켜짐)로 좁힘 + 재편집 경합 회귀 테스트(수정 전 red 확인), `NAMESPACES` fixture 결속 테스트. Vitest 606/52·eslint·tsc 초록. 리뷰 `review_gui_backlog_140` 1차 APPROVE(P2 3) → 후속 `9dc1921`(pristine 플래그·손대지 않은 입력 경로 테스트) → 재검토 APPROVE. main 위로 rebase 뒤 본 PLAN 기록 | 머지 뒤 backlog |
 | 2026-09-18 KST | Claude | **19 PR 머지 완료** — 사용자 지시(전체 E2E 백테스트까지 → CI 통과 → 머지)대로 전체 Playwright 19/19, #133 CI 3 job 초록 확인 후 #106(기획) → #108…#133 순서로 `--merge`. 절차 기록: #106을 `--delete-branch`로 머지하자 GitHub가 base 브랜치 삭제로 #108을 CLOSED 처리(retarget 아님) → base 브랜치를 같은 SHA로 재생성해 reopen·base main으로 편집·재삭제, 이후는 각 PR base를 main으로 먼저 옮긴 뒤 머지하고 브랜치는 끝에 일괄 삭제. 머지 전 스택 체인 검증에서 P4-01에만 있던 PLAN 문서 커밋 `0b4a0bd`가 P4-02 이후에 없어 체인이 끊겨 P4-01 head를 코드 `cd9addf`로 되돌림(리뷰 승인 코드 동일, 변경 기록 한 줄 손실). 머지 뒤 `origin/main` 트리 `2de69fc…` = 사전 `merge-tree` 예측과 일치. 중간 18 PR의 CI는 설계상 빨강(P1: frontend SDK는 P2-01, 전 구간: `FactorStep` ImportError는 P5-03 `c2f90c8`에서 수정) — 게이트는 최상위 #133 CI(머지 ref) | 13.7 머지 |
 | 2026-09-18 KST | Claude | `audit_gui_phase5` 수신: PASS(blocking 0). 게이트 9종 중 8 초록(루트 `database/tests`는 로컬 Windows 환경 사유 72건, 원격 CI 초록). SoT 여섯 질문 통과, 규칙 표 1행 뒤처짐(전략 의미 행의 `findReferences` 스코프 "→ P5-01" → 구현 완료로 정정). 결함 P1 1(DEFECT-P5X-001)·P2 9(매뉴얼 1절 1.0 샘플, `x-reference` 네임스페이스 fixture 결속 없음, `removalBlockers` 스코프, …), 이월 정리 표, 머지 뒤 backlog 13 → 아래 "머지 뒤 backlog" 절 | 13.6 Phase 감사 |

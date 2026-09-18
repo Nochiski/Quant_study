@@ -884,6 +884,7 @@ def test_promoted_rust_makes_no_per_session_ffi(
     from collections import Counter
 
     from backtest_engine.engine import loop as loop_module
+    from backtest_engine.engine.store import RecordKind
 
     real_factory = loop_module.make_persistent_runtime
     proxies: list[Any] = []
@@ -956,6 +957,19 @@ def test_promoted_rust_makes_no_per_session_ffi(
     assert calls["record_batch"] == 0
     assert calls["equity_series"] == 1
     assert calls["traded_notional"] == 1
+    # fills 조회는 FILL kind 하나만 청크로 넘겨받는다 (레코드 2건 < 청크) — 단건 조회는 없다.
+    assert calls["drain_payloads"] == 1
+    assert calls["record_payloads"] == 0
+    assert calls["record_payload"] == 0
+    # orders 조회는 결정 복원을 위해 DECISION을 먼저 읽는다 — 주문 수와 무관하게 kind당 한 번.
+    assert len(result.orders) == 2
+    assert calls["drain_payloads"] == 3
+    assert calls["record_payload"] == 0
+    # 넘긴 kind를 다시 읽으면 어느 조회가 어느 레코드에서 막혔는지 알린다.
+    with pytest.raises(RuntimeError, match=r"already released — operation=record_payloads seq="):
+        proxies[0].inner.record_payloads(RecordKind.FILL.code)
+    with pytest.raises(RuntimeError, match=r"already released — operation=traded_notional seq="):
+        proxies[0].inner.traded_notional()
     assert proxies[0].inner.lifecycle_state() == "finished"
 
 

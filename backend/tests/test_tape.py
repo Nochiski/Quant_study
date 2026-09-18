@@ -479,21 +479,26 @@ def test_rust_tape_applies_a_frame_to_every_session_on_that_date() -> None:
 
 
 @RUST_ONLY
-def test_tape_order_materialization_indexes_decisions_once(
+def test_tape_order_materialization_reads_each_kind_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """DEFECT-202: tape 경로의 orders 최초 조회가 결정마다 배치를 다시 훑지 않는다."""
-    from backtest_engine.engine.store import PersistentEventStore
+    from backtest_engine.engine.store import PersistentEventStore, RecordKind
 
-    batch_calls = 0
-    real_batch = PersistentEventStore._batch
+    class CountingRuntime:
+        """`drain_payloads` 호출만 세는 얇은 프록시. 나머지는 실제 runtime에 위임한다."""
 
-    def counting_batch(store: PersistentEventStore) -> list[Any]:
-        nonlocal batch_calls
-        batch_calls += 1
-        return real_batch(store)
+        def __init__(self, inner: Any) -> None:
+            self.inner = inner
+            self.kinds: list[int] = []
 
-    monkeypatch.setattr(PersistentEventStore, "_batch", counting_batch)
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self.inner, name)
+
+        def drain_payloads(self, kind: int, limit: int) -> Any:
+            self.kinds.append(kind)
+            return self.inner.drain_payloads(kind, limit)
+
     frames = {
         day(n).date(): TapeFrame(
             action=SetPortfolioTarget(
@@ -508,17 +513,27 @@ def test_tape_order_materialization_indexes_decisions_once(
     bars = tuple(make_bar(day(n), _X, 100.0, 100.0) for n in (1, 2, 3, 4))
     engine = BacktestEngine(RunConfig(run_id="index-once", initial_cash=100_000.0), core="rust")
     result = engine.run(_TapeStrategy(frames), DataFeed(bars))
-    batch_calls = 0
-    orders = result.orders
-    assert len(orders) == 3
-    # `_batch()`는 캐시된 리스트를 돌려주는 O(1) 호출이다 (ORDER 순회 1회 + 주문당 1회).
-    # 실질 가드는 결정 인덱스가 배치 길이 기준으로 한 번만 만들어졌다는 아래 단언이다.
     store = engine.event_store
     assert isinstance(store, PersistentEventStore)
-    assert batch_calls == len(orders) + 1
-    assert store._decision_index_len == len(store._batch())
-    assert set(store._decision_index) == {f"D-{n:06d}" for n in range(1, 5)}
-    # 인덱스 구축 이후 추가 조회는 인덱스를 다시 만들지 않는다.
-    rebuilt = store._decision_index
+    counting = CountingRuntime(store._runtime)
+    monkeypatch.setattr(store, "_runtime", counting)
+
+    orders = result.orders
+    assert len(orders) == 3
+    # 주문 수와 무관하게 kind당 한 번이다 — ORDER는 결정 복원을 위해 DECISION을 먼저 읽는다.
+    assert counting.kinds == [RecordKind.DECISION.code, RecordKind.ORDER.code]
+    assert [order.decision_id for order in orders] == ["D-000001", "D-000002", "D-000003"]
+
+    # DECISION은 이미 공개 객체가 됐으므로 다시 읽지 않는다.
+    decisions = {record.decision_id: record.decision for record in store.decisions()}
+    assert set(decisions) == {f"D-{n:06d}" for n in range(1, 5)}
+    assert [decisions[f"D-{n:06d}"].reason for n in (1, 2, 3)] == ["tape:d1", "tape:d2", "tape:d3"]
+    assert counting.kinds == [RecordKind.DECISION.code, RecordKind.ORDER.code]
+
+    # 다른 kind 조회는 그 kind만 추가로 읽는다.
     assert result.fills is not None
-    assert store._decision_index is rebuilt
+    assert counting.kinds == [
+        RecordKind.DECISION.code,
+        RecordKind.ORDER.code,
+        RecordKind.FILL.code,
+    ]

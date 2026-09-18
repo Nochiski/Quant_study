@@ -826,8 +826,8 @@ const TextualControl = ({
   // 트랜잭션이 적용되어 projection 값이 바뀌면 입력을 그 값으로 되돌린다(렌더 중 파생 상태 조정). 단
   // 사용자가 손대지 않은(`pristine`) draft일 때만이다 — 확정 직후 150ms 안에 같은 필드를 지우고 다시 치는
   // 중이면 되돌리지 않는다. 되돌리면 지운 값이 되살아나 키 입력이 뒤에 붙어 `100101` 같은 오값이 확정됐다
-  // (Phase 5 감사 DEFECT-P5X-001). `pristine`은 입력이 바뀌면 꺼지고, 확정(성공·값 그대로)·Escape·되돌리기로
-  // 켜진다. 값 비교가 아니라 플래그인 이유: 예전에 확정했던 문자열을 경유해 치는 중에도 구분되어야 한다.
+  // (Phase 5 감사 DEFECT-P5X-001). `pristine`은 입력이 바뀌거나 확정이 실패하면 꺼지고, 확정 성공·값이 같은
+  // 확정·Escape로 켜진다. 값 비교가 아니라 플래그인 이유: 예전에 확정했던 문자열을 경유해 치는 중에도 구분되어야 한다.
   const [seen, setSeen] = useState(committed);
   const [pristine, setPristine] = useState(true);
   if (seen !== committed) {

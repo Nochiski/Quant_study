@@ -13,7 +13,6 @@ use crate::callback::CallbackFrame;
 use crate::persistent::PersistentEngine;
 use crate::persistent_router::{DecisionWire, ExecutionWire, TargetWire};
 use crate::records::NativeDecision;
-use crate::session::py_tuple;
 use crate::RouteErrorException;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -156,11 +155,9 @@ impl PersistentEngine {
                 kept.push((instrument_id, false, 0.0, held));
             }
         }
-        let reason = if no_bar.is_empty() {
-            tape_frame.reason.clone()
-        } else {
-            format!("{} no_bar={}", tape_frame.reason, py_tuple(&no_bar))
-        };
+        // no_bar 사유 조립은 Python `engine/tape.no_bar_reason`이 정본이다 — 여기서는 원본
+        // 사유와 심볼 목록만 넘기고 store가 결정을 복원할 때 붙인다.
+        let reason = tape_frame.reason.clone();
         Ok(NativeSubmission {
             decision: (
                 1,
@@ -301,10 +298,8 @@ mod tests {
         };
         let framed = native.as_ref().unwrap();
         assert_eq!(framed.frame_session, Some(1));
-        assert_eq!(
-            framed.reason,
-            "target_tape:2018-04-27 no_bar=('005930', '000030')"
-        );
+        // no_bar 조립은 Python `engine/tape.no_bar_reason`이 하므로 여기 사유는 원본 그대로다.
+        assert_eq!(framed.reason, "target_tape:2018-04-27");
         assert_eq!(framed.kept, vec![(0, true, 0.4, 0), (1, false, 0.0, 12),]);
         assert_eq!(
             framed.no_bar,

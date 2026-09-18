@@ -14,6 +14,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any
 
+from backtest_engine.engine.tape import no_bar_reason
 from backtest_engine.types.actions import (
     BasketAction,
     PositionTarget,
@@ -325,7 +326,9 @@ class PersistentEventStore(EventStore):
             self._decisions[decision_id] = staged
             self._staged_decision = None
             return staged
-        frame_session, kept_wires, _no_bar, reason = native
+        frame_session, kept_wires, no_bar, reason = native
+        if no_bar:
+            reason = no_bar_reason(reason, no_bar)
         if frame_session is None:
             built = StrategyDecision.no_action(ts, reason)
         else:

@@ -6,7 +6,7 @@ Rust `backtest_core/src/tape.rs`가 같은 규칙으로 결정을 만든다. 규
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import date
 
@@ -20,6 +20,15 @@ from backtest_engine.types.tape import DeclarativeTapeStrategy, TapeFrame
 
 def is_declarative_tape(strategy: object) -> bool:
     return isinstance(strategy, DeclarativeTapeStrategy)
+
+
+def no_bar_reason(reason: str, symbols: Sequence[str]) -> str:
+    """bar 없는 종목을 사유 문자열에 덧붙인다 — 이 포맷의 단일 진실 원천이다.
+
+    Rust tape(`backtest_core/src/tape.rs`)는 사유와 심볼 목록만 넘기고 조립은 하지 않는다.
+    trace가 byte 단위로 같아야 하므로 Python `repr(tuple)` 표기를 두 곳에서 흉내 내지 않는다.
+    """
+    return f"{reason} no_bar={tuple(symbols)}"
 
 
 def evaluate_tape(
@@ -51,5 +60,5 @@ def evaluate_tape(
             kept.append(QuantityTarget(instrument=target.instrument, quantity=held))
     reason = frame.reason
     if untradable:
-        reason += f" no_bar={tuple(untradable)}"
+        reason = no_bar_reason(reason, untradable)
     return StrategyDecision.of(ctx.now, replace(frame.action, targets=tuple(kept)), reason)

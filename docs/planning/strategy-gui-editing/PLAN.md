@@ -1,15 +1,15 @@
 ---
 plan_version: 2
 project: strategy-gui-editing
-project_status: IN_REVIEW
+project_status: APPROVED
 current_phase: P1,P2,P3,P4
-current_pr: P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01,P3-02,P4-01,P4-02,P4-03
-active_prs: [P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03]
-parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02, P1-06, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03]
-last_updated: 2026-09-18T13:16:00+09:00
+current_pr: P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01,P3-02,P4-01,P4-02,P4-03,P4-04
+active_prs: [P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04]
+parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02, P1-06, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04]
+last_updated: 2026-09-18T13:30:56+09:00
 planned_prs: 18
 merged_prs: 0
-approved_prs: 13
+approved_prs: 15
 progress_percent: 0
 ---
 
@@ -23,13 +23,13 @@ progress_percent: 0
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_REVIEW` |
+| Project status | `APPROVED` |
 | Current phase | `P1,P2,P3,P4` |
-| Current/next PR | `P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01,P3-02,P4-01,P4-02,P4-03` |
-| Active PR | `P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03` |
+| Current/next PR | `P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01,P3-02,P4-01,P4-02,P4-03,P4-04` |
+| Active PR | `P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04` |
 | Progress | `0 / 18 merged (0%)` |
-| Approved | `13 / 18` |
-| Aggregated at | `2026-09-18 13:16 KST` |
+| Approved | `15 / 18` |
+| Aggregated at | `2026-09-18 13:30 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -79,7 +79,7 @@ progress_percent: 0
 | P1 | Backend schema 1.1 | 6 | 0 | `APPROVED` |
 | P2 | Frontend 1.1 and upgrade UI | 3 | 0 | `APPROVED` |
 | P3 | Source transactions | 2 | 0 | `APPROVED` |
-| P4 | Form editing | 4 | 0 | `IN_REVIEW` |
+| P4 | Form editing | 4 | 0 | `APPROVED` |
 | P5 | Graph editing | 3 | 0 | `WAITING` |
 | **Total** |  | **18** | **0** | **0%** |
 <!-- PLAN:PHASES:END -->
@@ -88,16 +88,16 @@ progress_percent: 0
 
 | 항목 | 값 |
 |---|---|
-| PR | `P4-03` |
-| Intent | 목록 섹션(`factors`·`parameters`) 편집: 헤더 `kind` select + 항목 추가(스키마 materialize), 팩터 카탈로그 preset, 참조 가드 삭제(`findReferences`), 항목 필드는 P4-02 컨트롤 재사용, "Graph에서 열기". 완성의 `x-catalog`/`x-reference` 읽기를 `schemaFacts`로. P4-01·P4-02 2차 리뷰 non-blocking P2 8건 처리 |
-| Acceptance | WORKFLOW P4-03(+구현 결정·리뷰 잔여 처리) |
-| Non-goals | `eligibility.rules` 중첩 목록 편집(후속), page 연결·hidden 편집기·e2e(P4-04), Graph 노드 편집(P5) |
-| Branch/worktree | `feat/gui-p4-03-form-lists` (base `feat/gui-p4-02-form-panel` `4b3b456`; 워크트리 `scad-p4`) |
-| Base SHA | `4b3b456` |
-| Head SHA | `24ad45a` (review 후속; diff freeze `6460971`; 커밋: 목록 섹션 → 리뷰 잔여 → CSS 중괄호·가드 → 1차 리뷰 후속) |
-| Diff stat | model 4(신규 `document-references.ts`, `form-transactions.ts`·`form-projection.ts`·`canonical-snippets.ts`)·`schema-navigator.ts`·`schema-assist.ts`·hook·ui 2·index·messages·테스트 5(신규 `form-list.test.tsx`), WORKFLOW·SoT 행 |
-| Focused tests | form-list 8 · form-projection 11 · strategy-form-panel 11 · use-source-transactions 7 · canonical-snippets 16 · stylesheets 30 |
-| Full gate | Vitest 578 passed(50 files) · typecheck · lint · build |
+| PR | `P4-04` |
+| Intent | new/revision page에 Form 편집 연결: page가 `useSourceTransactions(document, true)` 하나를 만들어 Form·스니펫이 공유(Phase 3 감사 R1·R2), `useFormProjection`(현재 parse 또는 마지막 유효 parse → STALE 배지·`disabled: syntax` 잠금), JSON 문서 안내, 섹션 접기(`aria-expanded`), `onOpenGraph` → view=graph·pointer 선택, e2e(Form 편집 → YAML 바이트·hash 동일, 카탈로그 팩터 추가 → Graph 반영). Phase 4 마감 |
+| Acceptance | WORKFLOW P4-04(+구현 결정) |
+| Non-goals | Graph 편집(P5), 중첩 목록 `eligibility.rules`(후속), Command palette "Form에서 편집"(두지 않음), 포맷 변환 명령(없음 → JSON은 문구 안내) |
+| Branch/worktree | `feat/gui-p4-04-form-page` (base `feat/gui-p4-03-form-lists` `b089e05`; 워크트리 `scad-p43`) |
+| Base SHA | `81aa14e` (코드 base `24ad45a`) |
+| Head SHA | `8c5ade0` (review 후속; P4-03 후속 `24ad45a` 위로 rebase; diff freeze `13fa8d3`) |
+| Diff stat | page 2·model 2(신규 `use-form-projection.ts`, `use-snippet-insertion.ts`)·ui 3(패널·css·projection-panel JSON 전용)·index·messages·테스트 3(document-routes 갱신, strategy-projection 축소, e2e 시나리오), 규칙 2(`strategy-workbench-sot.md` 전략 의미 행·`frontend-testing.md` round-trip), WORKFLOW |
+| Focused tests | document-routes(Form route 5) · strategy-form-panel 접기 1 · e2e chromium-workflow 6/6(Form 시나리오 포함) |
+| Full gate | Vitest 578 passed(50 files) · typecheck · lint · build · Playwright chromium-workflow 6/6 |
 
 ---
 
@@ -150,8 +150,8 @@ Phase exit:
 |---|---|---|---|---|---|
 | [ ] | `P4-01` | `form-projection.ts` (schema × tree × 진단) | P3-02, P2-03 | `APPROVED` | [#121](https://github.com/Nochiski/Quant_study/pull/121) · `review_gui_p4_01` 2차 APPROVE(`cd9addf`) |
 | [ ] | `P4-02` | Form 컨트롤·트랜잭션 연결 | P4-01, P3-02 | `APPROVED` | [#122](https://github.com/Nochiski/Quant_study/pull/122) · `review_gui_p4_02` 2차 APPROVE(`f1a76dc`) |
-| [ ] | `P4-03` | 목록 섹션: eligibility rules, parameters, factors 헤더·preset, 참조 가드 | P4-02 | `IN_REVIEW` | [#125](https://github.com/Nochiski/Quant_study/pull/125) · `review_gui_p4_03` 1차 REQUEST_CHANGES(P1 1·P2 6) → 후속 `24ad45a` 재검토 중 |
-| [ ] | `P4-04` | IDE·page 연결, stale/JSON 잠금, i18n, e2e, SoT 규칙 개정 | P4-03 | `WAITING` | — |
+| [ ] | `P4-03` | 목록 섹션: eligibility rules, parameters, factors 헤더·preset, 참조 가드 | P4-02 | `APPROVED` | [#125](https://github.com/Nochiski/Quant_study/pull/125) · `review_gui_p4_03` 2차 APPROVE(`24ad45a`) |
+| [ ] | `P4-04` | IDE·page 연결, stale/JSON 잠금, i18n, e2e, SoT 규칙 개정 | P4-03 | `APPROVED` | [#126](https://github.com/Nochiski/Quant_study/pull/126) · `review_gui_p4_04` 2차 APPROVE(`8c5ade0`) |
 
 Phase exit:
 
@@ -180,6 +180,8 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
+| P4-04 | `review_gui_p4_04` | `81aa14e`(코드 `24ad45a`) | `8c5ade0` (diff freeze `13fa8d3`) | APPROVE (1차 APPROVE P1 0·P2 10: STALE 오탐(디바운스 구간), 없는 접기 테스트, 스니펫 결과가 Form 반영됨을 지움, PR 본문 Graph 배선 오기, 죽은 `inapplicablePointers`, 고아 키 7·CSS 8, `view` prop, SoT 행이 Graph 편집을 선행 서술, e2e 팩터 검증 약함, status 2개 → 권고 후속 `8c5ade0`: stale을 같은 버전 parse 실패로 좁힘, 접기 테스트, 고아 제거, role 제거, SoT 단서, 본문 정정; 2차: 확정 직후 STALE false·구문 오류 시 true·복구 즉시, 문서 경계 누수 없음, status 1개, grep 0, rebase가 리뷰 코드 불변) | 0 | DEFECT-P404-011 이미 구문 오류인 문서에서 source를 더 치면 디바운스 150ms 동안 stale=false로 옛 값을 표시 없이 보여줌(잠금·저장 차단은 유지; "갱신 중" 상태 도입 검토), 공유 feedback 슬롯 하나(스니펫 결과가 Form 반영됨을 지움 → P5-01), e2e 팩터 추가 검증은 Graph 탭 텍스트 포함, 확정 직후 150ms 컨트롤 잠금은 base 훅 `disabled: syntax` | 2026-09-18 |
+| P4-03 | `review_gui_p4_03` | `4b3b456` | `24ad45a` (diff freeze `6460971`) | APPROVE (1차 REQUEST_CHANGES P1 DEFECT-125-01 목록 키가 없는 문서(새 전략 starter·생략형)에서 항목 추가·preset이 `insert-item` → `not-found`로 언제나 실패(테스트가 스텁이라 통과) + P2 6 → 후속 `24ad45a`: `ListSection.written`·미작성이면 `insert-key`로 키 열며 첫 항목(실제 planner 테스트), identity는 `x-authoring-identity` 우선·카탈로그 필드 제외, 거부 안내는 tree 바뀌면 해제, 가드 docstring; 2차: CRLF·머리꼬리 주석 문서에서 단일 범위 삽입·undo 1, starter preset → written → 둘째는 insert-item, factors/parameters/EligibilityRule identity 판정 정확) | 1 (해소) | `insert-key`로 여는 블록 내부 들여쓰기가 문서 폭과 무관하게 2칸(source-transactions, 스니펫·object 섹션과 같은 기존 동작), 부모 키까지 없는 중첩 목록은 `not-found`(중첩 목록 편집 전 확인), `factors: {}` 타입 불일치 문서에서 추가 실패(backend가 막음), 항목 삭제 시 선행 독립 주석 고아(`planRemove` → P5-01), `saved_factor.factor_id` 오탐은 안전 방향 | 2026-09-18 |
 | P4-02 | `review_gui_p4_02` | `cd9addf` | `f1a76dc` (diff freeze `5946bf9`) | APPROVE (1차 REQUEST_CHANGES P1 DEFECT-P402-001 list-link 행 "기본값으로"가 배열 전체 삭제 + P2 8 → 후속 `f1a76dc`: 링크·const 행 버튼·컨트롤 제거, 실패 재확정, 무효 안내 해제, aria-labelledby, 토큰·죽은 코드·WORKFLOW·문구 3종, Form 확정 시 focusEditor false; 2차: 링크 행 button 0·textbox 0, focus() 0회·replaceRange 1회, A→B→A 3회 반영, Vitest 539 전체 3회 초록) | 1 (해소) | 009 실패 필드 재확정이 다른 필드 성공 뒤 다시 막히고 오류 문구도 덮임·011 실패 상태 blur마다 재계획·012 `canRetry`가 label로 필드 식별(P4-03 항목은 같은 label) → P4-03에서 필드 로컬 실패 플래그로 처리; 010 passive 행 라벨 CSS·별표·단위 누락 → P4-03; 013 x-default-from placeholder 분기 미도달·패널 미검증 → P4-03 테스트; feedback 단일 슬롯(마지막 결과만 남음) | 2026-09-18 |
 | P4-01 | `review_gui_p4_01` | `bef91cc` | `cd9addf` (diff freeze `d9160ef`) | APPROVE (1차 REQUEST_CHANGES P1 DEFECT-121-01 목록 요약이 const `kind`에 걸림·121-02 섹션·항목 pointer 진단 유실(프로브 13 중 8) + P2 6(example 분기 가드, applicable null 중첩, schema_version 자유 입력, x-default-from 미반영, SoT 행이 스니펫 직접 읽기 미포함, 주석) → 후속 `cd9addf`: summary const 건너뛰기, 섹션·항목 `diagnostics` 슬롯(list-link 하위 흡수), const 컨트롤, defaultFrom, 가드 복원; 2차: 166 pointer 배치 누락 0·중복 0, 골든 412 pointer 차이 0) | 2 (해소) | `unabsorbedDiagnostics`의 `includeRoot` 죽은 파라미터, 진단 집계 `as FormField` 캐스트 4곳, summarize const 판정이 `$ref` 미해소(현재 fixture 인라인) → P4-03에서 처리 | 2026-09-18 |
 | P3-02 | `review_gui_p3_02` | `97409f1` | `96d6b3b` (diff freeze `d13830c`) | APPROVE (1차 REQUEST_CHANGES P1-1 스니펫 위치 회귀·P1-2 property 회귀 방지 주장 반증 + P2 4 → 후속: `options.anchor`로 커서 줄 자리, 삽입 앵커 통일, 생성기 줄별 주석(회귀 되돌리면 279회째 반례 실측), 부모 줄 끝 주석 보존, applyToTree before 거부, nit 3; 2차: 스니펫 20종 프로그램 검증 불일치 0, `#` 휴리스틱 오탐 경로 4종 fail-closed 확인) | 2 (해소) | 확정 시점 호출 규칙은 호출자 규율(P4-02 컨트롤 커밋 규칙으로 처리), `onEditorReady` setState(인라인 람다 호출자 주의), 주석 고아 보존, property 미생성 영역(줄 끝 주석·따옴표 키·flow 내부) | 2026-09-18 |
@@ -216,6 +218,9 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-18 KST | Claude | `review_gui_p4_03` 2차 APPROVE(`24ad45a`) → P4-03 APPROVED, `review_gui_p4_04` 2차 APPROVE(`8c5ade0`, 신규 P2 DEFECT-P404-011 기록) → P4-04 APPROVED. Phase 4 PR 4/4 승인(승인 기록은 스택 상위 P4-04 브랜치 PLAN에 합류). 다음: Phase 4 exit 감사(`audit_gui_phase4`, opus) → P5-01 | 13.5 판정 |
+| 2026-09-18 KST | Claude | `review_gui_p4_04` 1차 APPROVE(P1 0·P2 10; 실측: hidden 편집기 유지·replaceRange 1회·문서 경계 누수 없음·undo 2회·view 전환 identity 유지·JSON/stale 잠금). 권고 P2를 후속 `8c5ade0`로 처리: (001) stale을 "같은 버전 parse 실패"로 좁혀 디바운스 구간 STALE 오탐 제거, (003) 섹션 접기 테스트, (005/006/007) `inapplicablePointers`·`view` prop·고아 키 7·고아 CSS 8 삭제, (008) SoT 행 Graph 읽기 전용 단서, (010) 안내 문단 role 제거, (004) PR 본문 정정. 기록: (002) 공유 슬롯 하나라 스니펫 결과가 Form 반영됨을 지움 → P5-01, (009) e2e 팩터 추가 검증 약함, R6 근거는 e2e가 아니라 잠금·route 테스트. P4-03 후속 `24ad45a` 위로 rebase, 재검토 요청 | 13.5 재검토 |
+| 2026-09-18 KST | Claude | P4-04 구현·self-check → P4-03 head `b089e05` 위로 rebase(P4-03 패널 CSS 중괄호 결함은 이 브랜치의 e2e 백테스트 결과 배경 검사가 잡아 P4-03에서 수정), Playwright chromium-workflow 6/6, diff freeze `13fa8d3`, stacked PR #126(base P4-03), `review_gui_p4_04`(opus) 배정 → IN_REVIEW(활성 리뷰 P4-03·P4-04 = 2). 결정: 트랜잭션 인스턴스는 page 하나·`editorActive`는 "handle이 살아 있는가"(스니펫만 source view 게이트), stale은 마지막 유효 parse로 그리되 훅 `disabled: syntax`로 잠금, JSON 문서는 문구 안내(포맷 변환 명령 없음), 섹션 접기는 `aria-expanded` + `hidden`(DOM 유지), 이중 확정 결함은 P4-02 후속으로 이관 | 13.3 diff freeze |
 | 2026-09-18 KST | Claude | `review_gui_p4_03` 1차 REQUEST_CHANGES(P1 DEFECT-125-01: 목록 키가 문서에 없으면(새 전략 starter·생략형 문서) "항목 추가"·preset이 `insert-item` → `not-found`로 언제나 실패, 테스트가 스텁이라 통과; P2 6: identity 추출이 카탈로그 필드 오인, 삭제 거부 안내가 pointer에 묶여 재색인 뒤 잔존, 삭제 시 선행 주석 고아(`planRemove` 소관), 괄호 가드 개수 균형만, saved_factor 오탐 기록, kind option 원문) → 후속 `24ad45a`: `ListSection.written` + 미작성이면 `insert-key`로 키 열며 첫 항목(실제 planner 테스트), `FormListItem.identityKey`(x-authoring-identity) 우선·카탈로그 필드 제외, 거부 안내는 tree 바뀌면 해제, 가드 docstring, WORKFLOW 기록 → 재검토 요청. 잔여: 주석 고아는 P5-01 노드 삭제와 함께 `planRemove`에서 | 13.5 재검토 |
 | 2026-09-18 KST | Claude | P4-03 구현·self-check → P4-02 승인 head `4b3b456` 위로 rebase, P4-01·P4-02 2차 리뷰 잔여 P2 8건을 둘째 커밋 `6460971`으로 처리(apply/run boolean 반환, 재확정 판정 컨트롤 로컬(Enter 재시도·blur 무시), passive 라벨 CSS, placeholder 패널 테스트, `includeRoot` 제거, 캐스트 0, summarize `$ref`), P4-04 e2e에서 실측한 패널 CSS 닫는 중괄호 누락(번들 뒤쪽 규칙 전부 중첩 → 앱 스타일 소실)을 3커밋으로 수정 + 스타일시트 괄호 균형 테스트(30), diff freeze, stacked PR #125(base P4-02), `review_gui_p4_03`(opus) 배정 → IN_REVIEW. 결정: 참조 탐색은 스키마를 모르는 `<ns>_id`/`*_<ns>_id` 키 규칙(오탐은 삭제 거부 방향), kind 선택은 헤더 select, 빈 factor `graph`는 materialize 결과(최소 노드는 P5-01), `eligibility.rules` 중첩 목록은 후속 | 13.3 diff freeze |
 | 2026-09-18 KST | Claude | `review_gui_p4_02` 2차 APPROVE(`f1a76dc`) → P4-02 APPROVED. Phase 4 PR 2/4 승인. 검증 수치 정정(Vitest 539·panel 11). 잔여 P2 5건(009/011/012 재확정 식별, 010 passive 라벨 CSS, 013 placeholder 패널 검증)은 P4-03에서 처리. 다음: P4-03·P4-04 PR 개설(활성 2) | 13.5 판정 |

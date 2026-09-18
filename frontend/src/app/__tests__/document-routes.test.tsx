@@ -19,6 +19,7 @@ import {
   afterAll,
   afterEach,
   beforeAll,
+  beforeEach,
   describe,
   expect,
   it,
@@ -1439,9 +1440,30 @@ describe("Strategy Outline route integration (P4-01)", () => {
   });
 });
 
-describe("StrategySpec JSON and Form projections (P4-06)", () => {
+describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () => {
+  // 기본 핸들러의 스키마는 비어 있다(properties 없음). Form 섹션은 실제 runtime schema에서 온다.
+  beforeEach(() => {
+    server.use(
+      http.get(`${API}/api/v1/strategy-documents/schema`, () =>
+        HttpResponse.json({
+          schema: RUNTIME_SCHEMA,
+          schema_hash: "h".repeat(64),
+          schema_version: "1.1",
+        }),
+      ),
+    );
+  });
+  const formPanel = () => screen.findByLabelText("Form 편집");
+  // 섹션은 runtime schema query가 끝난 뒤 나타난다.
+  const formSection = async (name: string) =>
+    within(
+      await within(await formPanel()).findByRole("group", {
+        name: new RegExp(`^${name}`),
+      }),
+    );
+
   it.each(["/research/strategies/new", "/research/strategies/s1/revisions/2"])(
-    "shows the same backend-owned projections on %s",
+    "shows the backend JSON projection and a schema-driven Form on %s",
     async (route) => {
       const user = userEvent.setup();
       mount(route);
@@ -1456,13 +1478,15 @@ describe("StrategySpec JSON and Form projections (P4-06)", () => {
       expect(within(json).getByText("현재 문서")).toBeInTheDocument();
 
       await user.click(screen.getByRole("tab", { name: "Form" }));
-      const form = await screen.findByLabelText("StrategySpec 요약 Form");
+      const form = await formPanel();
       await waitFor(() => expect(form).toBeVisible());
-      expect(within(form).getByText('"KRX"')).toBeInTheDocument();
-      expect(within(form).getByText("15")).toBeInTheDocument();
+      // 값은 parse tree에서, 없는 필드는 runtime schema 기본값 placeholder로 온다.
+      const data = await formSection("data");
+      expect(data.getByRole("combobox", { name: /^market/ })).toHaveValue(
+        "KRX",
+      );
       expect(within(form).queryByText("strategy_id")).not.toBeInTheDocument();
       expect(within(form).queryByText("revision")).not.toBeInTheDocument();
-      expect(within(form).queryByRole("textbox")).not.toBeInTheDocument();
     },
   );
 
@@ -1483,7 +1507,7 @@ describe("StrategySpec JSON and Form projections (P4-06)", () => {
 
     await user.click(screen.getByRole("tab", { name: "Form" }));
     await waitFor(() =>
-      expect(screen.getByLabelText("StrategySpec 요약 Form")).toBeVisible(),
+      expect(screen.getByLabelText("Form 편집")).toBeVisible(),
     );
     const hiddenContent = globalThis.document.querySelector(".cm-content");
     expect(hiddenContent).not.toBeNull();
@@ -1504,7 +1528,63 @@ describe("StrategySpec JSON and Form projections (P4-06)", () => {
     expect(view.state.doc.toString()).toBe(STORED);
   });
 
-  it("keeps a stored JSON document as the editable source while Form stays read-only", async () => {
+  it("edits through the Form into the hidden editor, keeps comments, compiles, and undoes in one step", async () => {
+    const commented =
+      '# 문서 머리말\nschema_version: "1.1"\ntitle: 퀄리티 모멘텀 # 제목 메모\nrisk:\n  # 집중도 상한\n  max_name_weight: 0.05\n';
+    server.use(
+      http.get(
+        `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
+        () => HttpResponse.json(document("s1", 2, commented)),
+      ),
+    );
+    const user = userEvent.setup();
+    mount("/research/strategies/s1/revisions/2");
+    const view = await editor();
+    expect(view.state.doc.toString()).toBe(commented);
+    const before = compiledSources.length;
+
+    await user.click(screen.getByRole("tab", { name: "Form" }));
+    const risk = await formSection("risk");
+    const weight = risk.getByRole("spinbutton", { name: /^max_name_weight/ });
+    expect(weight).toHaveValue(0.05);
+    await user.clear(weight);
+    await user.type(weight, "0.1{Enter}");
+
+    const expected = commented.replace(
+      "max_name_weight: 0.05",
+      "max_name_weight: 0.1",
+    );
+    await waitFor(() => expect(view.state.doc.toString()).toBe(expected));
+    expect(within(await formPanel()).getByRole("status")).toHaveTextContent(
+      "max_name_weight 반영됨",
+    );
+    // 편집기 change → reducer → compile 왕복이 같은 텍스트로 일어난다.
+    await waitFor(() => {
+      expect(compiledSources.length).toBeGreaterThan(before);
+      expect(compiledSources[compiledSources.length - 1]).toBe(expected);
+    });
+    await waitFor(() => expect(saveButton()).toBeEnabled());
+
+    // 미작성 필드의 첫 값은 섹션에 insert-key, 문서 다른 부분은 그대로.
+    const data = await formSection("data");
+    await user.selectOptions(
+      data.getByRole("combobox", { name: /^frequency/ }),
+      "daily",
+    );
+    await waitFor(() =>
+      expect(view.state.doc.toString()).toBe(
+        `${expected}data:\n  frequency: daily\n`,
+      ),
+    );
+
+    await user.click(screen.getByRole("tab", { name: "YAML" }));
+    act(() => expect(undo(view)).toBe(true));
+    expect(view.state.doc.toString()).toBe(expected);
+    act(() => expect(undo(view)).toBe(true));
+    expect(view.state.doc.toString()).toBe(commented);
+  });
+
+  it("keeps a stored JSON document as the editable source while the Form is locked", async () => {
     const jsonSource = '{"schema_version":"1.1","title":"JSON source"}';
     server.use(
       http.get(
@@ -1526,16 +1606,25 @@ describe("StrategySpec JSON and Form projections (P4-06)", () => {
     );
 
     await user.click(screen.getByRole("tab", { name: "Form" }));
-    const form = await screen.findByLabelText("StrategySpec 요약 Form");
+    const form = await formPanel();
     expect(form).toBeVisible();
-    expect(within(form).queryByRole("textbox")).not.toBeInTheDocument();
+    expect(
+      within(form).getByText("JSON 문서는 Form으로 편집하지 않습니다"),
+    ).toBeInTheDocument();
+    expect(
+      within(form).getByText("YAML 문서로 저장한 뒤 편집하세요", {
+        exact: false,
+      }),
+    ).toBeInTheDocument();
+    const root = await formSection("기본 정보");
+    expect(root.getByRole("textbox", { name: /^title/ })).toBeDisabled();
     expect(view.state.doc.toString()).toBe(jsonSource);
 
     await user.click(screen.getByRole("tab", { name: "JSON" }));
     expect(view.state.doc.toString()).toBe(jsonSource);
   });
 
-  it("labels the same-document last valid projection stale and never enables execution", async () => {
+  it("labels the Form stale on a syntax error, locks it, and never enables execution", async () => {
     const user = userEvent.setup();
     mount("/research/strategies/s1/revisions/2");
     const view = await editor();
@@ -1544,12 +1633,15 @@ describe("StrategySpec JSON and Form projections (P4-06)", () => {
 
     replaceText(view, 'schema_version: "1.1"\ntitle: [broken\n');
     await user.click(screen.getByRole("tab", { name: "Form" }));
-    const form = await screen.findByLabelText("StrategySpec 요약 Form");
+    const form = await formPanel();
     expect(within(form).getByText("STALE")).toBeInTheDocument();
-    expect(within(form).getByText('"last-valid"')).toBeInTheDocument();
-    expect(within(form).getByRole("status")).toHaveTextContent(
-      "저장·실행에는 사용되지 않습니다",
-    );
+    expect(
+      within(form).getByText("구문 오류 · source를 먼저 고치세요"),
+    ).toBeInTheDocument();
+    const root = await formSection("기본 정보");
+    const title = root.getByRole("textbox", { name: /^title/ });
+    expect(title).toHaveValue("last-valid");
+    expect(title).toBeDisabled();
     expect(saveButton()).toBeDisabled();
     for (const run of screen.getAllByRole("button", { name: /백테스트 실행/ }))
       expect(run).toBeDisabled();

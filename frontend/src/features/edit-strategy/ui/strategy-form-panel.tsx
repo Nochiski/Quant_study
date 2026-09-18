@@ -64,6 +64,8 @@ type StrategyFormPanelProps = {
   catalogSnippets?: readonly CanonicalSnippet[];
   /** 팩터 항목의 graph를 Graph 화면에서 열기(view=graph, pointer 선택). 없으면 버튼을 그리지 않는다. */
   onOpenGraph?: (pointer: string) => void;
+  /** 현재 텍스트가 parse되지 않아 마지막 유효 parse로 그렸다(P4-04). */
+  stale?: boolean;
 };
 
 const UNSET = "__unset__";
@@ -104,6 +106,7 @@ export const StrategyFormPanel = ({
   tree = {},
   catalogSnippets = [],
   onOpenGraph,
+  stale = false,
 }: StrategyFormPanelProps) => {
   const disabled = transactions.disabled;
   return (
@@ -113,12 +116,26 @@ export const StrategyFormPanel = ({
           <strong>{t("form.panel.label")}</strong>
           <span>{t("form.panel.notice")}</span>
         </div>
-        {disabled !== null ? (
-          <Badge tone="warn">{t(`form.disabled.${disabled}`)}</Badge>
-        ) : (
-          <Badge tone="ok">{t("form.panel.enabled")}</Badge>
-        )}
+        <span className="strategy-form__badges">
+          {stale ? (
+            <Badge tone="warn">{t("form.panel.staleBadge")}</Badge>
+          ) : null}
+          {disabled !== null ? (
+            <Badge tone="warn">{t(`form.disabled.${disabled}`)}</Badge>
+          ) : (
+            <Badge tone="ok">{t("form.panel.enabled")}</Badge>
+          )}
+        </span>
       </header>
+      {/* 안내 문단은 role 없음: 실시간 알림(role=status)은 feedback 하나뿐이다(리뷰 DEFECT-P404-010). */}
+      {stale ? (
+        <p className="strategy-form__state">{t("form.panel.stale")}</p>
+      ) : null}
+      {disabled === "json" ? (
+        <p className="strategy-form__state">
+          {t("form.panel.jsonHint")}
+        </p>
+      ) : null}
       {feedbackText(transactions.feedback)}
       {projection === null ? (
         <p className="strategy-form__state" role="status">
@@ -163,6 +180,7 @@ const FormSectionView = ({
   disabled: boolean;
 }) => {
   const title = section.key === "" ? t("form.section.root") : section.key;
+  const [open, setOpen] = useState(true);
   if (section.kind === "list") {
     return (
       <FormListSectionView
@@ -180,7 +198,11 @@ const FormSectionView = ({
   return (
     <fieldset className="strategy-form__section" disabled={disabled}>
       <legend>
-        <code>{title}</code>
+        <SectionToggle
+          title={title}
+          open={open}
+          onToggle={() => setOpen((value) => !value)}
+        />
         {section.written ? null : (
           <span className="strategy-form__hint">
             {` · ${t("form.section.omitted")}`}
@@ -188,18 +210,40 @@ const FormSectionView = ({
         )}
         {severityBadge(section)}
       </legend>
-      {section.fields.map((field) => (
-        <FormFieldRow
-          key={field.pointer}
-          section={section}
-          field={field}
-          transactions={transactions}
-          catalogs={catalogs}
-        />
-      ))}
+      <div hidden={!open}>
+        {section.fields.map((field) => (
+          <FormFieldRow
+            key={field.pointer}
+            section={section}
+            field={field}
+            transactions={transactions}
+            catalogs={catalogs}
+          />
+        ))}
+      </div>
     </fieldset>
   );
 };
+
+/** 섹션 제목 = 접기/펼치기 버튼(키보드: Enter/Space). 접힌 섹션은 DOM에 남긴다(`hidden`). */
+const SectionToggle = ({
+  title,
+  open,
+  onToggle,
+}: {
+  title: string;
+  open: boolean;
+  onToggle: () => void;
+}) => (
+  <button
+    type="button"
+    className="strategy-form__toggle"
+    aria-expanded={open}
+    onClick={onToggle}
+  >
+    <span aria-hidden="true">{open ? "▾" : "▸"}</span> <code>{title}</code>
+  </button>
+);
 
 /**
  * 목록 섹션(P4-03): 항목 추가(스키마 materialize, union이면 `kind` 선택), 팩터 카탈로그 preset 추가,
@@ -243,91 +287,98 @@ const FormListSectionView = ({
           Object.is(field.value, snippet.identity!.value),
       ),
     );
+  const [open, setOpen] = useState(true);
   return (
     <fieldset className="strategy-form__section" disabled={disabled}>
       <legend>
-        <code>{section.key}</code>
+        <SectionToggle
+          title={section.key}
+          open={open}
+          onToggle={() => setOpen((value) => !value)}
+        />
         <span className="strategy-form__hint">
           {` · ${t("form.list.count").replace("{count}", String(section.items.length))}`}
         </span>
         {severityBadge(section)}
       </legend>
-      <div className="strategy-form__control">
-        {kinds !== null ? (
-          <select
-            aria-label={`${section.key} · ${t("form.list.kind")}`}
-            value={chosenKind ?? ""}
-            onChange={(event) => setKind(event.target.value)}
-          >
-            {kinds.map((candidate) => (
-              <option key={candidate} value={candidate}>
-                {candidate}
-              </option>
-            ))}
-          </select>
-        ) : null}
-        <Button
-          size="small"
-          disabled={addOperation === null}
-          onClick={() => {
-            if (addOperation !== null)
-              transactions.apply(
-                addOperation,
-                section.key,
-                FORM_OWNER,
-                NO_FOCUS,
-              );
-          }}
-          aria-label={`${section.key} · ${t("form.list.add")}`}
-        >
-          {t("form.list.add")}
-        </Button>
-        {presets.length > 0 ? (
-          <select
-            aria-label={`${section.key} · ${t("form.list.addFromCatalog")}`}
-            value=""
-            onChange={(event) => {
-              const preset = presets.find(
-                (snippet) => snippet.id === event.target.value,
-              );
-              if (preset !== undefined)
+      <div hidden={!open}>
+        <div className="strategy-form__control">
+          {kinds !== null ? (
+            <select
+              aria-label={`${section.key} · ${t("form.list.kind")}`}
+              value={chosenKind ?? ""}
+              onChange={(event) => setKind(event.target.value)}
+            >
+              {kinds.map((candidate) => (
+                <option key={candidate} value={candidate}>
+                  {candidate}
+                </option>
+              ))}
+            </select>
+          ) : null}
+          <Button
+            size="small"
+            disabled={addOperation === null}
+            onClick={() => {
+              if (addOperation !== null)
                 transactions.apply(
-                  addPresetItemOperation(section, preset.value),
-                  preset.label,
+                  addOperation,
+                  section.key,
                   FORM_OWNER,
                   NO_FOCUS,
                 );
             }}
+            aria-label={`${section.key} · ${t("form.list.add")}`}
           >
-            <option value="">{t("form.list.addFromCatalog")}</option>
-            {presets.map((snippet) => (
-              <option
-                key={snippet.id}
-                value={snippet.id}
-                disabled={presetExists(snippet)}
-              >
-                {presetExists(snippet)
-                  ? `${snippet.label} · ${t("form.list.presetExists")}`
-                  : snippet.label}
-              </option>
-            ))}
-          </select>
+            {t("form.list.add")}
+          </Button>
+          {presets.length > 0 ? (
+            <select
+              aria-label={`${section.key} · ${t("form.list.addFromCatalog")}`}
+              value=""
+              onChange={(event) => {
+                const preset = presets.find(
+                  (snippet) => snippet.id === event.target.value,
+                );
+                if (preset !== undefined)
+                  transactions.apply(
+                    addPresetItemOperation(section, preset.value),
+                    preset.label,
+                    FORM_OWNER,
+                    NO_FOCUS,
+                  );
+              }}
+            >
+              <option value="">{t("form.list.addFromCatalog")}</option>
+              {presets.map((snippet) => (
+                <option
+                  key={snippet.id}
+                  value={snippet.id}
+                  disabled={presetExists(snippet)}
+                >
+                  {presetExists(snippet)
+                    ? `${snippet.label} · ${t("form.list.presetExists")}`
+                    : snippet.label}
+                </option>
+              ))}
+            </select>
+          ) : null}
+        </div>
+        {section.items.length === 0 ? (
+          <p className="strategy-form__state">{t("form.list.empty")}</p>
         ) : null}
+        {section.items.map((item) => (
+          <FormListItemView
+            key={item.pointer}
+            section={section}
+            item={item}
+            tree={tree}
+            transactions={transactions}
+            catalogs={catalogs}
+            onOpenGraph={onOpenGraph}
+          />
+        ))}
       </div>
-      {section.items.length === 0 ? (
-        <p className="strategy-form__state">{t("form.list.empty")}</p>
-      ) : null}
-      {section.items.map((item) => (
-        <FormListItemView
-          key={item.pointer}
-          section={section}
-          item={item}
-          tree={tree}
-          transactions={transactions}
-          catalogs={catalogs}
-          onOpenGraph={onOpenGraph}
-        />
-      ))}
     </fieldset>
   );
 };

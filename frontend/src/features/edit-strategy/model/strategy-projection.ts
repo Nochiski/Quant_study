@@ -14,8 +14,6 @@ export type StrategyProjection =
       specHash: string;
       schemaVersion: string;
       stale: boolean;
-      /** backend compile이 `strategy.field.inapplicable`로 경고한 pointer(명시 기재·기본값과 다름·`owned_by_error` 억제는 backend 판정). */
-      inapplicablePointers: ReadonlySet<string>;
     };
 
 const fromCompile = (
@@ -28,11 +26,6 @@ const fromCompile = (
   specHash: outcome.specHash,
   schemaVersion: outcome.schemaVersion,
   stale,
-  inapplicablePointers: new Set(
-    outcome.diagnostics
-      .filter((diagnostic) => diagnostic.code === "strategy.field.inapplicable")
-      .map((diagnostic) => diagnostic.pointer),
-  ),
 });
 
 /**

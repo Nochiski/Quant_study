@@ -147,6 +147,10 @@ export {
 } from "./model/use-source-transactions";
 export type { SourceOperation } from "./model/source-transactions";
 export {
+  useFormProjection,
+  type FormProjectionState,
+} from "./model/use-form-projection";
+export {
   addItemOperation,
   addPresetItemOperation,
   draftOf,

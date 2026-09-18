@@ -748,7 +748,8 @@ export const projectForm = (schema: JsonSchema, parse: ParsedSource | null, diag
 **Acceptance**
 
 - `new-strategy-page.tsx`, `strategy-revision-page.tsx`의 `projections.form`이 `StrategyFormPanel`.
-  editor handle은 page가 `useSourceTransactions`를 한 번 만들어 Form·Graph·스니펫에 공유.
+  editor handle은 page가 `useSourceTransactions`를 한 번 만들어 Form·스니펫에 공유(Graph는 P5-01에서 같은
+  인스턴스를 받는다).
 - Form view가 활성일 때도 hidden editor가 살아 있어 트랜잭션이 적용되고, YAML view로 돌아가면
   주석·순서가 그대로다(테스트: 주석이 있는 fixture → Form에서 값 변경 → source 문자열에 주석 유지).
 - syntax-invalid: Form은 마지막 valid parse 값을 STALE badge로 보여주고 컨트롤 disabled.
@@ -757,6 +758,24 @@ export const projectForm = (schema: JsonSchema, parse: ParsedSource | null, diag
 - e2e: Form에서 `risk.max_name_weight` 변경 → 저장 → hash가 YAML 직접 편집과 동일; factor 추가 →
   plan 갱신.
 - `.claude/rules/strategy-workbench-sot.md` 전략 의미 행 개정, `frontend-testing.md` round-trip 문구.
+- 구현 결정(P4-04): page가 `useSourceTransactions(document, true)` 하나를 만들어 Form과 스니펫에 공유한다
+  (`useSnippetInsertion(..., view === format, transactions)`; 스니펫은 source view가 아닐 때 스스로
+  `editor-inactive`를 낸다). `useFormProjection(state, schema)`가 현재 parse(없으면 같은 문서의 마지막
+  유효 parse, `stale: true`)와 현재 compile 진단으로 `projectForm`을 만든다. stale이면 패널이 STALE
+  배지·안내를 내고 컨트롤은 `disabled: "syntax"`로 잠긴다. JSON 문서는 `disabled: "json"` + "YAML 문서로
+  저장한 뒤 편집" 안내(포맷 변환 명령은 존재하지 않아 링크 대신 문구). 섹션 제목은 `aria-expanded` 토글
+  버튼(키보드 Enter/Space)이고 접힌 섹션은 `hidden`으로 DOM에 남는다. "Graph에서 열기"는 `view=graph`,
+  `path=<graph pointer>`로 이동한다. 읽기 전용 `StrategyProjectionPanel`은 JSON 전용이 됐다. Command
+  palette에는 view 전환 명령만 있다(변경 없음).
+- 리뷰 후속(P4-04 1차, APPROVE 뒤 권고 처리): `useFormProjection`의 stale은 "같은 버전의 parse가 실패"일
+  때만이다 — parse 디바운스(150ms) 대기 구간은 배지·문구 없이 마지막 유효 parse를 그린다(정상 확정 직후
+  "구문 오류" 오탐, DEFECT-P404-001; 컨트롤 잠금 자체는 훅 `disabled: syntax`가 계속 맡는다). 섹션 접기는
+  테스트로 고정(003). `StrategyProjectionPanel`의 `view` prop·`StrategyProjection.inapplicablePointers`·고아
+  메시지 키 7·고아 CSS 8규칙 삭제(005/006/007). stale·JSON 안내 문단은 role 없음 — 실시간 알림은 feedback
+  하나(010). SoT 행은 Graph가 P5-01 전까지 읽기 전용임을 명시(008). 기록: 공유 인스턴스의 feedback 슬롯이
+  하나라 스니펫 결과가 Form "반영됨"을 지운다(감사 R2 잔여, P4-02 결정 → P5-01에서 소비자별 슬롯 검토),
+  e2e 팩터 추가 검증은 Graph 탭 텍스트 포함(약함, 009), R6의 근거는 e2e가 아니라 확정 직후 잠금과 route
+  테스트(undo 2회 = 트랜잭션 2개)다.
 
 **Phase 4 exit**: SoT·책임분리 점검(Form이 필드 목록·기본값·검증을 복제하지 않는지).
 

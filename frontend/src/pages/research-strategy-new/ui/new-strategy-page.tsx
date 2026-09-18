@@ -9,6 +9,7 @@ import {
   ServerDraftBanner,
   SnippetCatalog,
   SourceEditor,
+  StrategyFormPanel,
   StrategyProjectionPanel,
   StrategyDiffPanel,
   StrategyOutline,
@@ -30,6 +31,8 @@ import {
   useSchemaAssist,
   useOutlineNavigation,
   useSnippetInsertion,
+  useFormProjection,
+  useSourceTransactions,
   useStrategyDocument,
   type DocumentSource,
   type StrategyView,
@@ -144,19 +147,37 @@ export const NewStrategyPage = () => {
     selectedPointer: search.path,
     onSelectedPointer: selectPointer,
   });
+  // source 트랜잭션 인스턴스는 page가 하나 만들어 Form·스니펫이 공유한다(WORKFLOW P4-04). hidden 편집기가
+  // 살아 있으므로 editorActive는 참이고, 스니펫만 source view 게이트를 따로 지킨다.
+  const transactions = useSourceTransactions(document, true);
   const snippets = useSnippetInsertion(
     document,
     assist.snippetSource,
     view === document.format,
+    transactions,
+  );
+  const form = useFormProjection(document, assist.schema);
+  const openGraph = useCallback(
+    (pointer: string): void => {
+      void navigate({
+        to: ROUTE,
+
+        search: { ...search, path: pointer, view: "graph" },
+        replace: true,
+      });
+    },
+    [navigate, search],
   );
   const onOutlineEditorReady = outline.onEditorReady;
   const onSnippetEditorReady = snippets.onEditorReady;
+  const onTransactionsEditorReady = transactions.onEditorReady;
   const onEditorReady = useCallback(
     (editor: CodeEditorHandle | null): void => {
       onOutlineEditorReady(editor);
       onSnippetEditorReady(editor);
+      onTransactionsEditorReady(editor);
     },
-    [onOutlineEditorReady, onSnippetEditorReady],
+    [onOutlineEditorReady, onSnippetEditorReady, onTransactionsEditorReady],
   );
   const runBacktest = useCallback(() => void startBacktest(), [startBacktest]);
   const selectSymbol = useCallback(
@@ -269,8 +290,23 @@ export const NewStrategyPage = () => {
           />
         }
         projections={{
-          json: <StrategyProjectionPanel projection={projection} view="json" />,
-          form: <StrategyProjectionPanel projection={projection} view="form" />,
+          json: <StrategyProjectionPanel projection={projection} />,
+          form: (
+            <StrategyFormPanel
+              projection={form.projection}
+              stale={form.stale}
+              tree={form.tree}
+              schema={assist.schema}
+              transactions={transactions}
+              catalogs={{
+                equityFields:
+                  assist.inspectorSource.equityCatalog?.fields ?? null,
+                factors: assist.inspectorSource.factorCatalog?.factors ?? null,
+              }}
+              catalogSnippets={snippets.snippets}
+              onOpenGraph={openGraph}
+            />
+          ),
           graph: (
             <FactorGraphPanel
               state={executionPlans}

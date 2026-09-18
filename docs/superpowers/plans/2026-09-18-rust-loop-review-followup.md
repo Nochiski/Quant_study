@@ -575,6 +575,8 @@ class _DeclaredContextMethods:
 | 8.7 라우터·원장 인덱스 | 0.812 | 0.793 | 유지 |
 | 8.8 `current_marks` clone 제거 | 0.807 | 0.787 | 유지 |
 
+**남은 할당원 (PR 9 검토):** `Portfolio::snapshot()` 세션당 4회 key clone(약 148만 String), `current_closes()` 74만, `session_market()` 37만. 셋 다 PR 8 범위 밖이고 상세는 아래 AC 절 "남은 레버"에 있다.
+
 이 장비의 측정 잡음이 ±3~5%라 8.1·8.4·8.5·8.8은 단독으로는 오차 범위 안이다. 셋 다 자료구조를 늘리지 않고 일을 덜어내기만 하므로(8.4만 1.5MiB 인덱스를 더한다) 되돌리지 않았고, 대신 아래 back-to-back 측정으로 합산 효과를 고정했다. 8.2와 8.7만 단독으로 잡음을 넘는다.
 
 #### 8.3을 되돌린 이유
@@ -623,7 +625,8 @@ Peak RSS는 `--core rust` 단독 실행값이라 격리돼 있다. `row_index`�
 
 - [ ] **9.1** `RecordPayload::Order(Box<OrderWire>)`, `Fill(Box<FillWire>)`, `Snapshot(Box<SnapshotWire>)`, `Decision { native: Option<Box<NativeDecision>> }`. `std::mem::size_of::<RecordPayload>()`를 단언하는 Rust 테스트(≤ 48B).
 - [ ] **9.2** 큐 arena를 free-list slab으로: `queued: Vec<Option<Queued>>` + `free: Vec<usize>`. `push`는 `free.pop()` 슬롯 재사용, `pop`은 `take` 후 `free.push(token)`. heap 엔트리의 `seq`가 순서를 보장하므로 token 재사용은 안전(같은 token이 heap에 두 번 있을 수 없음 — pop 후에만 free). Rust 테스트: 1,000세션 MARKET pre-push 후 슬롯 수가 `sessions + max_live_per_session` 이하.
-- [ ] **9.3** 측정 후 커밋 정리.
+- [ ] **9.3** `row_index` 메모리 상한 — PR 8이 더한 `Vec<u32>`(세션 × 종목)는 usize 오버플로만 막고 크기 자체는 무제한이다 (3,000종목 × 5,000세션 = 60MB). `slots > rows × K`면 세션별 해시 폴백으로 내려가거나, 바이트 예산을 넘으면 적재 오류로 거부한다. K와 예산은 실측(300종목 1.5MiB / 행 369,300 = 밀도 약 0.8%)으로 정한다.
+- [ ] **9.4** 측정 후 커밋 정리.
 
 ### AC
 
@@ -661,6 +664,7 @@ PR 9까지 반영 후 100종목 tape에서 feed 적재(`_load_persistent_feed` +
 - [ ] 스펙 "2026-09-18 측정 경계 교정" 아래 "최종 판정" 절: 게이트 표(100/300종목 total 배수, 4종목 fixture, RSS, FFI 0회, parity) + 남은 항목.
 - [ ] `docs/rust-python-benchmark-report.html` 갱신, `docs/superpowers/plans/2026-09-17-rust-engine-loop.md` 상단에 이 문서 링크.
 - [ ] 이슈 #98 댓글: PR 링크 11개, 최종 표, `.claude/rules/pr-review.md` 양식으로 남은 결정(Phase 3-4). 게이트 전부 통과면 종료 제안.
+  - [ ] PR 8에서 되돌린 tape 경량 프레임(8.3) — 알림(fill·order_update) 선언 tape 워크로드를 재는 벤치 옵션이 생기면 `make_native_frame`을 다시 올린다. 현재 벤치는 `MARKET`만 선언해 NOTIFY 분기가 돌지 않아 측정으로 유지를 정당화할 수 없었다.
 - [ ] 메모리 `rust-loop-driver-pr-stack.md` 갱신.
 
 ### AC

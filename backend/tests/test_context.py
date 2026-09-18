@@ -3,11 +3,21 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 
-from backtest_engine.engine.context import EngineStrategyContext, HistoryStore
-from backtest_engine.errors import InsufficientHistoryError, UndeclaredDataAccess
+from backtest_engine.engine.context import (
+    EngineStrategyContext,
+    HistoryStore,
+    RustStrategyContext,
+)
+from backtest_engine.engine.store import PersistentEventStore
+from backtest_engine.errors import (
+    InsufficientHistoryError,
+    UndeclaredDataAccess,
+    UniverseNotProvided,
+)
 from backtest_engine.types.actions import NoAction
 from backtest_engine.types.events import OpenOrderSnapshot, OrderEvent
 from backtest_engine.types.instruments import InstrumentId
@@ -39,6 +49,19 @@ def make_context(
 ) -> EngineStrategyContext:
     return EngineStrategyContext(
         now=day(ts_day), snapshot=empty_portfolio(ts_day), history_store=store, declared=declared
+    )
+
+
+def make_rust_context(
+    store: HistoryStore, ts_day: int, declared: frozenset[HistoryRequest]
+) -> RustStrategyContext:
+    """Rust 경로 컨텍스트. 거절 경로는 frame·store를 읽지 않으므로 최소 구성으로 만든다."""
+    return RustStrategyContext(
+        now=day(ts_day),
+        frame=SimpleNamespace(snapshot=(1_000_000.0, [], 1_000_000.0, 0.0), open_orders=[]),
+        store=PersistentEventStore(SimpleNamespace()),
+        history_store=store,
+        declared=declared,
     )
 
 
@@ -130,3 +153,40 @@ def test_open_orders_returns_snapshot_filtered_by_instrument() -> None:
 def test_open_orders_defaults_to_empty() -> None:
     context = make_context(build_store(100), 1, declared=frozenset())
     assert context.open_orders() == ()
+
+
+def test_both_contexts_reject_undeclared_history_with_the_same_message() -> None:
+    """엔진 경로와 Rust 경로의 거절 메시지가 갈라지면 같은 전략이 코어에 따라 다른 진단을
+    받는다. 두 구현이 같은 조회 메서드를 쓰는지 여기서 고정한다."""
+    engine_context = make_context(build_store(100, 101, 102), 3, declared=frozenset())
+    rust_context = make_rust_context(build_store(100, 101, 102), 3, declared=frozenset())
+
+    with pytest.raises(UndeclaredDataAccess) as engine_error:
+        engine_context.history(REQUEST)
+    with pytest.raises(UndeclaredDataAccess) as rust_error:
+        rust_context.history(REQUEST)
+
+    assert str(engine_error.value) == str(rust_error.value)
+
+
+def test_both_contexts_reject_missing_universe_with_the_same_message() -> None:
+    engine_context = make_context(build_store(100), 1, declared=frozenset())
+    rust_context = make_rust_context(build_store(100), 1, declared=frozenset())
+
+    with pytest.raises(UniverseNotProvided) as engine_error:
+        engine_context.universe()
+    with pytest.raises(UniverseNotProvided) as rust_error:
+        rust_context.universe()
+
+    assert str(engine_error.value) == str(rust_error.value)
+
+
+def test_both_contexts_read_the_portfolio_the_same_way() -> None:
+    engine_context = make_context(build_store(100), 1, declared=frozenset())
+    rust_context = make_rust_context(build_store(100), 1, declared=frozenset())
+
+    assert engine_context.cash() == rust_context.cash()
+    assert engine_context.portfolio_value() == rust_context.portfolio_value()
+    assert engine_context.current_weight(INSTRUMENT) == rust_context.current_weight(INSTRUMENT)
+    assert engine_context.position_qty(INSTRUMENT) == rust_context.position_qty(INSTRUMENT)
+    assert engine_context.open_orders() == rust_context.open_orders() == ()

@@ -71,7 +71,6 @@ from backtest_engine.engine.store import (
     PersistentEventStore,
     RecordKind,
 )
-from backtest_engine.engine.tape import is_declarative_tape
 from backtest_engine.engine.wire import (
     decision_to_wire,
     execution_wire,
@@ -468,7 +467,7 @@ class BacktestEngine:
             )
         store.bind_corporate_actions(corporate_actions)
         runtime.load_corporate_actions(rows)
-        if is_declarative_tape(run.strategy):
+        if isinstance(run.strategy, DeclarativeTapeStrategy):
             # 결정 표를 Rust에 넘기면 drive()가 콜백 없이 완주한다 — 아래 루프는 프레임을
             # 받지 않는다.
             self._load_target_tape(run, feed, store)
@@ -523,7 +522,11 @@ class BacktestEngine:
         runtime = run.persistent_runtime
         strategy = run.strategy
         if runtime is None or not isinstance(strategy, DeclarativeTapeStrategy):
-            raise CoreUnavailable("declarative tape requires the persistent runtime")
+            raise CoreUnavailable(
+                "declarative tape requires the persistent runtime and an explicit "
+                f"DeclarativeTapeStrategy subclass — strategy={type(strategy).__name__} "
+                f"runtime={'missing' if runtime is None else 'present'}"
+            )
         # Python 경로는 `frames.get(event.ts.date())`이므로 같은 날짜의 세션(일중 다중 세션)이
         # 여럿이면 모두 같은 프레임을 받는다. 날짜당 index 목록으로 매핑해 Rust에도 같게 배정한다.
         sessions_by_date: dict[date, list[int]] = {}

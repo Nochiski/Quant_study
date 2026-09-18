@@ -152,15 +152,13 @@ def test_floor_delta_shares_identical() -> None:
 
 @RUST_ONLY
 def test_record_kind_codes_match_python_store() -> None:
-    """레코드 kind 코드의 정본은 Python `RecordKind` 선언 순서다. Rust 상수가 어긋나면
-    payload가 엉뚱한 kind로 materialize돼 결과가 조용히 틀어진다."""
+    """레코드 kind 코드의 정본은 Python `RecordKind`가 멤버마다 박아 둔 리터럴이다.
+    Rust 상수가 어긋나면 payload가 엉뚱한 kind로 materialize돼 결과가 조용히 틀어진다."""
     import backtest_core
 
-    from backtest_engine.engine.store import _RECORD_KIND_CODES
+    from backtest_engine.engine.store import RecordKind
 
-    assert backtest_core.RECORD_KIND_CODES == {
-        kind.value: code for kind, code in _RECORD_KIND_CODES.items()
-    }
+    assert backtest_core.RECORD_KIND_CODES == {kind.value: kind.code for kind in RecordKind}
 
 
 @RUST_ONLY

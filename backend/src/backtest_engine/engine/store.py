@@ -42,19 +42,38 @@ from backtest_engine.types.tape import TapeFrame
 
 
 class RecordKind(Enum):
-    MARKET = "market"
-    DECISION = "decision"
-    ORDER = "order"
-    ORDER_UPDATE = "order_update"
-    FILL = "fill"
-    SNAPSHOT = "snapshot"
-    CORPORATE_ACTION = "corporate_action"  # 사건 도착 (적용 여부와 무관)
-    CORPORATE_ACTION_APPLIED = "corporate_action_applied"  # 포지션에 실제 적용된 기록
-    COST = "cost"  # 차입·이자 등 Fill 없는 현금 차감
+    """`value`는 trace 직렬화 이름, `code`는 Rust `records.rs`의 `KIND_*`와 같은 wire 코드다.
+
+    코드는 선언 순서가 아니라 리터럴이다 — 멤버를 추가해도 기존 코드가 밀리지 않는다.
+    순서를 코드로 쓰면 enum 중간에 멤버를 끼워 넣는 순간 Rust가 보낸 코드가 다른 kind로
+    해석돼 trace가 조용히 망가진다. Rust 상수와의 일치는 `tests/test_core_parity.py`가
+    `backtest_core.RECORD_KIND_CODES`로 고정한다.
+
+    `__new__`에서 `_value_`를 이름 문자열로 고정하므로 `.value`는 여전히 `"market"`이다.
+    `(label, code)` 쌍을 그대로 `value`로 두면 `_normalized` 같은 generic enum 처리가 튜플을
+    trace에 흘려 wire 포맷이 조용히 바뀐다.
+    """
+
+    code: int
+
+    def __new__(cls, label: str, code: int) -> RecordKind:
+        member = object.__new__(cls)
+        member._value_ = label
+        member.code = code
+        return member
+
+    MARKET = ("market", 0)
+    DECISION = ("decision", 1)
+    ORDER = ("order", 2)
+    ORDER_UPDATE = ("order_update", 3)
+    FILL = ("fill", 4)
+    SNAPSHOT = ("snapshot", 5)
+    CORPORATE_ACTION = ("corporate_action", 6)  # 사건 도착 (적용 여부와 무관)
+    CORPORATE_ACTION_APPLIED = ("corporate_action_applied", 7)  # 포지션에 실제 적용된 기록
+    COST = ("cost", 8)  # 차입·이자 등 Fill 없는 현금 차감
 
 
-_RECORD_KINDS = tuple(RecordKind)
-_RECORD_KIND_CODES = {kind: code for code, kind in enumerate(_RECORD_KINDS)}
+_RECORD_KIND_BY_CODE: dict[int, RecordKind] = {kind.code: kind for kind in RecordKind}
 
 
 @dataclass(frozen=True)
@@ -295,7 +314,7 @@ class PersistentEventStore(EventStore):
         # 결정마다 배치를 선형 스캔하면 주문 수 × 레코드 수로 커진다 — 배치 길이가 바뀔 때만
         # decision_id → (session_index, native) 인덱스를 다시 만든다.
         if self._decision_index_len != len(batch):
-            decision_code = _RECORD_KIND_CODES[RecordKind.DECISION]
+            decision_code = RecordKind.DECISION.code
             self._decision_index = {}
             for seq, session_index, code in batch:
                 if code == decision_code:
@@ -474,7 +493,7 @@ class PersistentEventStore(EventStore):
         if cached is not None:
             return cached
         ts = self._sessions[session_index]
-        kind = _RECORD_KINDS[kind_code]
+        kind = _RECORD_KIND_BY_CODE[kind_code]
         built: RecordPayload
         if kind is RecordKind.MARKET:
             built = self._market_snapshots[session_index]
@@ -527,7 +546,7 @@ class PersistentEventStore(EventStore):
                 Record(
                     seq=seq,
                     ts=self._sessions[session_index],
-                    kind=_RECORD_KINDS[kind_code],
+                    kind=_RECORD_KIND_BY_CODE[kind_code],
                     payload=self._materialize(seq, session_index, kind_code),
                 )
                 for seq, session_index, kind_code in self._batch()
@@ -535,7 +554,7 @@ class PersistentEventStore(EventStore):
         return self._records_cache
 
     def _payloads(self, kind: RecordKind) -> tuple[RecordPayload, ...]:
-        kind_code = _RECORD_KIND_CODES[kind]
+        kind_code = kind.code
         return tuple(
             self._materialize(seq, session_index, code)
             for seq, session_index, code in self._batch()
@@ -545,7 +564,7 @@ class PersistentEventStore(EventStore):
     def compact_trace(self) -> tuple[tuple[int, int, str], ...]:
         """디버그용 원시 Rust 레코드 인덱스 `(seq, session_index, kind)`."""
         return tuple(
-            (seq, session_index, _RECORD_KINDS[kind_code].value)
+            (seq, session_index, _RECORD_KIND_BY_CODE[kind_code].value)
             for seq, session_index, kind_code in self._batch()
         )
 

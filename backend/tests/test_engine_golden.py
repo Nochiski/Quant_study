@@ -183,6 +183,28 @@ class TestGoldenRun:
         order_ids = {order.order_id for order in store.orders()}
         assert {fill.order_id for fill in store.fills()} == order_ids
 
+    def test_record_kind_is_traced_by_its_name(self) -> None:
+        """trace의 kind 표기는 wire 계약이다.
+
+        python·rust trace 비교는 같은 직렬화기를 쓰므로 두 쪽이 함께 바뀌면 아무 테스트도
+        깨지지 않는다. RecordKind에 wire 코드를 붙이면서 `value`가 튜플로 새어 나가는 회귀를
+        여기서 막는다.
+        """
+        engine, _, _ = run_golden()
+        trace = engine.event_store.normalized_trace()
+        assert trace[0]["kind"] == {
+            "$enum": "backtest_engine.engine.store.RecordKind",
+            "value": "market",
+        }
+        assert {entry["kind"]["value"] for entry in trace} == {
+            "market",
+            "decision",
+            "order",
+            "order_update",
+            "fill",
+            "snapshot",
+        }
+
 
 class TestEngineContracts:
     def test_capability_gate_rejects_before_loop(self) -> None:

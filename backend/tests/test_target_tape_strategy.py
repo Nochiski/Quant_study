@@ -17,6 +17,7 @@ from backtest_engine.types.events import OpenOrderSnapshot
 from backtest_engine.types.instruments import InstrumentId
 from backtest_engine.types.market import MarketSnapshot, PriceWindow
 from backtest_engine.types.requirements import HistoryRequest
+from backtest_engine.types.tape import DeclarativeTapeStrategy
 from strategy_workbench.adapters.outbound.backtest_engine._adapter import TargetTapeStrategy
 from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import (
     BacktestEnginePortfolioAdapter,
@@ -87,7 +88,7 @@ def test_adapter_delegates_to_evaluate_tape_and_only_adds_its_reasons() -> None:
     frames = strategy.tape_frames()
     assert [frame.reason for frame in frames.values()] == [f"target_tape:{SIGNAL.isoformat()}"]
     assert strategy.on_event(ctx, snapshot) == evaluate_tape(
-        frames, TargetTapeStrategy.idle_reason, ctx, snapshot
+        frames, strategy.idle_reason, ctx, snapshot
     )
 
     # 프레임이 없는 세션은 어댑터의 idle_reason 으로 NoAction 이 된다.
@@ -96,4 +97,10 @@ def test_adapter_delegates_to_evaluate_tape_and_only_adds_its_reasons() -> None:
         _Context(now=idle_ts, positions={}),
         MarketSnapshot(ts=idle_ts, bars=(make_bar(idle_ts, instrument, 100.0, 101.0),)),
     )
-    assert idle == StrategyDecision.no_action(idle_ts, TargetTapeStrategy.idle_reason)
+    assert idle == StrategyDecision.no_action(idle_ts, strategy.idle_reason)
+
+
+def test_adapter_strategy_opts_into_the_declarative_tape_path() -> None:
+    """기반 클래스 선언 한 줄이 빠지면 결과는 같고 콜백 경로로만 내려가 테스트가 안 깨진다 —
+    tape 경로 진입은 명시 상속이므로 여기서 고정한다."""
+    assert issubclass(TargetTapeStrategy, DeclarativeTapeStrategy)

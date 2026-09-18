@@ -5,7 +5,10 @@ ADR: docs/superpowers/specs/2026-09-04-strategy-authoring-contract-adr.md (D1, D
 - The payload shape is derived from the dataclass type hints, so there is no second DTO.
 - Unknown keys at any depth, missing required fields, type mismatches, unknown `kind`
   discriminators, bad enum/date literals and unsupported schema versions are structural
-  issues with a JSON Pointer. Nothing is silently defaulted.
+  issues with a JSON Pointer. Only what the model declares as a default is filled in — a
+  dataclass default (schema 1.1 makes the boilerplate sections, `data.market`, factor `weight`
+  optional this way) or a `default-from` sibling field (`label` ← `factor_id`); a missing
+  required field is never guessed.
 - Typed scalar fields normalise `1`/`1.0`, ISO date strings and enum strings; the
   `ParameterValue` union keeps bool/str as-is and folds integral floats to int.
 """
@@ -23,7 +26,7 @@ from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
 
 from ._models import StrategyIdentity, StrategySpec
 
-SUPPORTED_SCHEMA_VERSIONS: tuple[str, ...] = ("1.0",)
+SUPPORTED_SCHEMA_VERSIONS: tuple[str, ...] = ("1.1",)
 
 # reason: sentinel shared by every hydrate branch; the walker is generic over dataclass hints,
 # so its intermediate values are `Any` until the top-level isinstance(StrategySpec) check.
@@ -267,6 +270,7 @@ def _hydrate_dataclass(tp: type, value: object, pointer: str, issues: list[Struc
             )
             failed = True
     kwargs: dict[str, Any] = {}
+    derived_from: dict[str, str] = {}
     for name, field in fields.items():
         if name in value:
             hydrated = _hydrate(hints[name], value[name], _child(pointer, name), issues)
@@ -274,11 +278,30 @@ def _hydrate_dataclass(tp: type, value: object, pointer: str, issues: list[Struc
                 failed = True
             else:
                 kwargs[name] = hydrated
+        elif "default-from" in field.metadata:
+            # 파생 기본값(예: FactorSignal.label ← factor_id). 원천은 같은 dataclass의 필수 필드여야
+            # 한다: 그래야 원천이 문서에 없을 때 그 필드의 missing_field 이슈가 실패를 만들고, 아래
+            # 복사 단계가 KeyError 없이 성립한다. 어긋나면 사용자 문서가 아니라 모델 선언 오류다.
+            source = str(field.metadata["default-from"])
+            source_field = fields.get(source)
+            if (
+                source_field is None
+                or source_field.default is not dataclasses.MISSING
+                or source_field.default_factory is not dataclasses.MISSING
+                or "default-from" in source_field.metadata
+            ):
+                raise TypeError(
+                    "default-from must name a required field of the same dataclass — "
+                    f"type={tp.__name__} field={name!r} source={source!r}"
+                )
+            derived_from[name] = source
         elif field.default is dataclasses.MISSING and field.default_factory is dataclasses.MISSING:
             _issue(issues, "structure.missing_field", _child(pointer, name), f"{name} is required")
             failed = True
     if failed:
         return _MISSING
+    for name, source in derived_from.items():
+        kwargs[name] = kwargs[source]
     return tp(**kwargs)
 
 

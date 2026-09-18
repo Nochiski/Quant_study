@@ -13,6 +13,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
 )
@@ -155,6 +157,48 @@ def test_template_and_golden_fixture_pass_the_runtime_schema() -> None:
     _check(schema, schema, fixture, "")
 
 
+def test_kind_is_the_first_property_of_every_discriminated_branch() -> None:
+    """schema 1.1 S5: editor·snippet·fixture가 노드 종류를 먼저 읽도록 `kind`가 첫 property다."""
+    schema = strategy_document_schema()
+    branches = [
+        *schema["$defs"]["FactorGraph"]["properties"]["nodes"]["items"]["oneOf"],
+        *schema["properties"]["parameters"]["items"]["oneOf"],
+    ]
+    assert branches
+    for option in branches:
+        branch = _resolve(schema, option)
+        assert list(branch["properties"])[0] == "kind", branch["title"]
+
+
+def test_factor_label_is_optional_and_derived_from_factor_id() -> None:
+    """schema 1.1 S3: `label`은 required가 아니며 hydrate가 factor_id를 넣는다."""
+    schema = strategy_document_schema()
+    factor = schema["$defs"]["FactorSignal"]
+    assert factor["properties"]["label"]["x-default-from"] == "factor_id"
+    assert "label" not in factor["required"]
+    assert "factor_id" in factor["required"]
+    assert "default" not in factor["properties"]["label"]
+    contracts = {row.pointer: row for row in strategy_field_contracts()}
+    label = contracts["/factors/*/label"]
+    assert not label.required and not label.has_default
+    assert label.default_from == "factor_id"
+
+
+def test_minimal_document_passes_the_runtime_schema() -> None:
+    """schema 1.1 S3: hydrate가 받아 주는 생략형 문서를 runtime schema도 통과시킨다."""
+    schema = strategy_document_schema()
+    minimal = yaml.safe_load(
+        (FIXTURES / "quality_momentum.minimal.yaml").read_text(encoding="utf-8")
+    )
+    for key in ("description", "eligibility", "parameters"):
+        assert key not in minimal
+    assert "market" not in minimal["data"]
+    _check(schema, schema, minimal, "")
+    without_label = json.loads(json.dumps(minimal))
+    del without_label["factors"][0]["label"]
+    _check(schema, schema, without_label, "")
+
+
 def test_every_factor_node_kind_is_a_discriminated_branch() -> None:
     schema = strategy_document_schema()
     nodes = schema["$defs"]["FactorGraph"]["properties"]["nodes"]["items"]
@@ -200,7 +244,7 @@ def test_schema_properties_are_exactly_the_model_fields_and_nothing_is_hand_writ
     schema = strategy_document_schema()
     model_fields = [f.name for f in dataclass_fields(StrategySpec) if f.name != "identity"]
     assert list(schema["properties"]) == ["schema_version", *model_fields]
-    assert schema["properties"]["schema_version"] == {"type": "string", "const": "1.0"}
+    assert schema["properties"]["schema_version"] == {"type": "string", "const": "1.1"}
     assert schema["required"][0] == "schema_version"
     assert schema["additionalProperties"] is False
     data = schema["$defs"]["DataStep"]
@@ -209,8 +253,8 @@ def test_schema_properties_are_exactly_the_model_fields_and_nothing_is_hand_writ
         "format": "date",
         "pattern": r"^\d{4}-\d{2}-\d{2}$",
     }
-    assert data["properties"]["market"] == {"type": "string", "enum": ["KRX"]}
-    assert data["required"] == ["market", "start", "end", "universe_id"]
+    assert data["properties"]["market"] == {"type": "string", "enum": ["KRX"], "default": "KRX"}
+    assert data["required"] == ["start", "end", "universe_id"]
 
 
 def test_schema_hash_is_stable_and_order_independent() -> None:
@@ -223,9 +267,9 @@ def test_schema_hash_is_stable_and_order_independent() -> None:
 
 def test_field_contracts_cover_every_scalar_path_with_catalog_metadata() -> None:
     contracts = {c.pointer: c for c in strategy_field_contracts()}
-    assert contracts["/schema_version"].const == "1.0"
-    weight = contracts["/factors/factors/*/weight"]
-    assert weight.type == "number" and weight.required and not weight.has_default
+    assert contracts["/schema_version"].const == "1.1"
+    weight = contracts["/factors/*/weight"]
+    assert weight.type == "number" and not weight.required and weight.has_default
     name_weight = contracts["/risk/max_name_weight"]
     assert (name_weight.minimum, name_weight.maximum) == (
         next(
@@ -239,7 +283,7 @@ def test_field_contracts_cover_every_scalar_path_with_catalog_metadata() -> None
     assert name_weight.default == 0.1 and name_weight.has_default
     liquidity = contracts["/portfolio/minimum_liquidity"]
     assert liquidity.nullable and liquidity.default is None and liquidity.has_default
-    node_kind = contracts["/factors/factors/*/graph/nodes/*/kind"]
+    node_kind = contracts["/factors/*/graph/nodes/*/kind"]
     assert node_kind.type == "string"  # one row per union branch shares the pointer template
     for constraint in STRATEGY_SCALAR_CONSTRAINTS:
         assert constraint.pointer in contracts, constraint.pointer
@@ -268,7 +312,7 @@ def test_contract_rows_are_unique_per_pointer_and_branch() -> None:
     rows = strategy_field_contracts()
     keys = [(row.pointer, row.branch) for row in rows]
     assert len(keys) == len(set(keys))
-    kinds = {row.branch for row in rows if row.pointer == "/factors/factors/*/graph/nodes/*/kind"}
+    kinds = {row.branch for row in rows if row.pointer == "/factors/*/graph/nodes/*/kind"}
     assert kinds == set(EXPRESSION_NODE_KINDS)
     assert {row.branch for row in rows if row.pointer == "/risk/max_name_weight"} == {None}
 
@@ -344,10 +388,10 @@ def test_field_contracts_carry_the_identifier_markers() -> None:
     contracts = {c.pointer: c for c in strategy_field_contracts()}
     assert contracts["/eligibility/rules/*/field_id"].catalog == "equity-field"
     assert contracts["/signal/regime_field_id"].catalog == "equity-field"  # nullable keeps it
-    assert contracts["/factors/factors/*/graph/nodes/*/factor_id"].catalog == "factor"
-    assert contracts["/factors/factors/*/graph/nodes/*/input_node_id"].reference == "node"
-    assert contracts["/factors/factors/*/graph/nodes/*/node_id"].catalog is None
-    assert contracts["/factors/factors/*/graph/nodes/*/node_id"].reference is None
+    assert contracts["/factors/*/graph/nodes/*/factor_id"].catalog == "factor"
+    assert contracts["/factors/*/graph/nodes/*/input_node_id"].reference == "node"
+    assert contracts["/factors/*/graph/nodes/*/node_id"].catalog is None
+    assert contracts["/factors/*/graph/nodes/*/node_id"].reference is None
     assert contracts["/risk/max_name_weight"].catalog is None
 
 

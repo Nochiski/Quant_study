@@ -98,7 +98,6 @@ from strategy_workbench.domain.strategy.facade.specification import (
     EligibilityStep,
     FactorDirection,
     FactorSignal,
-    FactorStep,
     Market,
     RebalanceFrequency,
     StrategySpec,
@@ -147,7 +146,7 @@ def _spec(*factors: FactorSignal) -> StrategySpec:
         data=DataStep(
             market=Market.KRX, start=WINDOW[0], end=WINDOW[1], universe_id="krx.common-stock"
         ),
-        factors=FactorStep(factors=factors or (_momentum(), market_cap)),
+        factors=factors or (_momentum(), market_cap),
         portfolio=replace(
             template.portfolio,
             rebalance=RebalanceFrequency.EVERY_N_SESSIONS,
@@ -201,9 +200,9 @@ def test_explain_and_portfolio_compile_identical_plans_from_one_metadata_contrac
         PortfolioPreviewRequest(spec)
     )
 
-    factor_ids = tuple(factor.factor_id for factor in spec.factors.factors)
+    factor_ids = tuple(factor.factor_id for factor in spec.factors)
     plans = {record.factor_id: record.plan for record in result.factor_evaluations}
-    for factor in spec.factors.factors:
+    for factor in spec.factors:
         explanation = research.explain(
             FactorGraphRequest(
                 graph=factor.graph,
@@ -221,7 +220,7 @@ def test_group_field_contract_is_shared_by_explain_portfolio_and_backtest() -> N
     template = client.get("/api/v1/strategies/template").json()
 
     def request_spec(group_field_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
-        factor = template["factors"]["factors"][0]
+        factor = template["factors"][0]
         graph = {
             "nodes": [
                 {"node_id": "close", "field_id": "price.close", "kind": "field"},
@@ -236,7 +235,7 @@ def test_group_field_contract_is_shared_by_explain_portfolio_and_backtest() -> N
             "output_node_id": "neutral",
             "missing_policy": "drop",
         }
-        return ({**template, "factors": {"factors": [{**factor, "graph": graph}]}}, graph)
+        return ({**template, "factors": [{**factor, "graph": graph}]}, graph)
 
     invalid_spec, invalid_graph = request_spec("price.market_cap")
     explain_invalid = client.post("/api/v1/factors/explain", json={"graph": invalid_graph})
@@ -328,8 +327,8 @@ def test_non_numeric_factor_signal_output_is_explainable_but_not_executable(
 ) -> None:
     client = TestClient(build_http_app())
     template = client.get("/api/v1/strategies/template").json()
-    factor = template["factors"]["factors"][0]
-    spec = {**template, "factors": {"factors": [{**factor, "graph": graph}]}}
+    factor = template["factors"][0]
+    spec = {**template, "factors": [{**factor, "graph": graph}]}
 
     explanation = client.post("/api/v1/factors/explain", json={"graph": graph})
     preview = client.post("/api/v1/portfolio/preview", json={"spec": spec})
@@ -462,7 +461,7 @@ def test_unused_by_factor_non_finite_raw_field_fails_before_every_execution_rout
                 strategy_source=InlineDraft(spec, "inline_draft", "raw-contract-probe"),
                 as_of=spec.data.end,
                 security_ids=("sec-005930-1",),
-                factor_id=spec.factors.factors[0].factor_id,
+                factor_id=spec.factors[0].factor_id,
                 include_raw=True,
             )
         )
@@ -520,7 +519,7 @@ def test_duplicate_raw_fields_fail_closed_with_one_code_on_every_http_execution_
     )
     client = TestClient(build_http_app())
     spec = client.get("/api/v1/strategies/template").json()
-    factor = spec["factors"]["factors"][0]
+    factor = spec["factors"][0]
     responses = (
         (
             client.post("/api/v1/portfolio/preview", json={"spec": spec}),
@@ -601,7 +600,7 @@ def test_metadata_raw_snapshot_mismatch_blocks_portfolio_and_backtest(tmp_path: 
 def test_composite_score_is_the_direction_signed_weighted_sum_of_graph_outputs() -> None:
     spec = _spec()
     result = _service().run_pipeline(PortfolioPreviewRequest(spec))
-    weights = {f.factor_id: (f.weight, f.direction) for f in spec.factors.factors}
+    weights = {f.factor_id: (f.weight, f.direction) for f in spec.factors}
 
     assert result.preview.tape.frames, "every-session rebalance must yield frames"
     scored = 0
@@ -632,7 +631,7 @@ def test_composite_score_is_the_direction_signed_weighted_sum_of_graph_outputs()
 def test_graph_evaluation_matches_a_direct_evaluation_over_raw_pit_fields() -> None:
     spec = _spec()
     result = _service().run_pipeline(PortfolioPreviewRequest(spec))
-    momentum = spec.factors.factors[0]
+    momentum = spec.factors[0]
     raw = MockEquityDataAdapter.demo().load_raw_observations(
         RawObservationQuery(
             market="KRX",
@@ -717,7 +716,7 @@ def test_choice_parameter_referenced_by_a_parameter_node_is_a_validation_issue()
 
     issues = {issue.code: issue for issue in validate_strategy(spec).issues}
     assert "strategy.expression.parameter_type" in issues
-    assert issues["strategy.expression.parameter_type"].path == "factors.factors.0.graph.nodes.1"
+    assert issues["strategy.expression.parameter_type"].path == "factors.0.graph.nodes.1"
     with pytest.raises(InvalidPortfolioRequestError):
         _service().run_pipeline(PortfolioPreviewRequest(spec))
 
@@ -745,7 +744,7 @@ def test_saved_factor_reference_is_rejected_up_front_not_silently_missing() -> N
         _service().run_pipeline(PortfolioPreviewRequest(spec))
     (issue,) = excinfo.value.validation.issues
     assert issue.code == "strategy.expression.reference_unsupported"
-    assert issue.path == "factors.factors.1.graph"
+    assert issue.path == "factors.1.graph"
 
 
 def test_unknown_universe_is_a_422_with_the_adapter_detail() -> None:
@@ -766,7 +765,7 @@ def test_backtest_route_rejects_what_preview_rejects_with_the_same_codes() -> No
     client = TestClient(build_http_app())
     template = client.get("/api/v1/strategies/template").json()
     unknown_universe = {**template, "data": {**template["data"], "universe_id": "nope.universe"}}
-    first_factor = template["factors"]["factors"][0]
+    first_factor = template["factors"][0]
     referencing = {
         **first_factor,
         "factor_id": "twin",
@@ -780,7 +779,7 @@ def test_backtest_route_rejects_what_preview_rejects_with_the_same_codes() -> No
     }
     saved_reference = {
         **template,
-        "factors": {"factors": [first_factor, referencing]},
+        "factors": [first_factor, referencing],
     }
 
     for spec, code in (
@@ -940,7 +939,7 @@ def test_raw_observation_warnings_reach_the_preview() -> None:
 def test_preview_warnings_are_recorded_in_the_run_manifest() -> None:
     client = TestClient(build_http_app())
     template = client.get("/api/v1/strategies/template").json()
-    close_factor = template["factors"]["factors"][0]
+    close_factor = template["factors"][0]
     spec = {
         **template,
         "data": {
@@ -948,22 +947,18 @@ def test_preview_warnings_are_recorded_in_the_run_manifest() -> None:
             "start": _WARNING_START.isoformat(),
             "end": WINDOW[1].isoformat(),
         },
-        "factors": {
-            "factors": [
-                close_factor,
-                {
-                    **close_factor,
-                    "factor_id": "size",
-                    "graph": {
-                        **close_factor["graph"],
-                        "nodes": [
-                            {"node_id": "cap", "field_id": "price.market_cap", "kind": "field"}
-                        ],
-                        "output_node_id": "cap",
-                    },
+        "factors": [
+            close_factor,
+            {
+                **close_factor,
+                "factor_id": "size",
+                "graph": {
+                    **close_factor["graph"],
+                    "nodes": [{"node_id": "cap", "field_id": "price.market_cap", "kind": "field"}],
+                    "output_node_id": "cap",
                 },
-            ]
-        },
+            },
+        ],
         "portfolio": {
             **template["portfolio"],
             "rebalance": "every_n_sessions",

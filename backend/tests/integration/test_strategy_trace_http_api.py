@@ -24,14 +24,14 @@ def _scope(client: TestClient, spec: dict[str, Any]) -> tuple[str, list[str], st
     assert preview.status_code == 200, preview.text
     frame = preview.json()["tape"]["frames"][-1]
     security_ids = sorted(item["security_id"] for item in frame["candidates"][:3])
-    factor = spec["factors"]["factors"][0]
+    factor = spec["factors"][0]
     return frame["signal_as_of"], security_ids, factor["factor_id"]
 
 
 def _inline_request(client: TestClient) -> tuple[dict[str, Any], dict[str, Any]]:
     spec = client.get("/api/v1/strategies/template").json()
     as_of, security_ids, factor_id = _scope(client, spec)
-    factor = spec["factors"]["factors"][0]
+    factor = spec["factors"][0]
     return spec, {
         "strategy_source": {"kind": "inline_draft", "spec": spec},
         "as_of": as_of,
@@ -46,7 +46,7 @@ def _inline_request(client: TestClient) -> tuple[dict[str, Any], dict[str, Any]]
 def _save(client: TestClient, spec: dict[str, Any]) -> dict[str, Any]:
     document = copy.deepcopy(spec)
     document.pop("identity")
-    document["schema_version"] = "1.0"
+    document["schema_version"] = "1.1"
     response = client.post(
         "/api/v1/strategy-documents",
         json={
@@ -73,7 +73,7 @@ def test_inline_trace_matches_preview_target_and_is_deterministic() -> None:
     assert payload["provenance"] == {
         "kind": "inline_draft",
         "spec_hash": payload["spec_hash"],
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "strategy_id": None,
         "revision": None,
         "source_hash": None,
@@ -86,13 +86,13 @@ def test_inline_trace_matches_preview_target_and_is_deterministic() -> None:
     assert payload["raw"] and payload["raw_truncated"] is False
     assert {row["kind"] for row in payload["raw"]} == {"observed"}
 
-    factor = spec["factors"]["factors"][0]
+    factor = spec["factors"][0]
     explained = client.post(
         "/api/v1/factors/explain",
         json={
             "graph": factor["graph"],
             "parameter_ids": [item["parameter_id"] for item in spec["parameters"]],
-            "factor_ids": [item["factor_id"] for item in spec["factors"]["factors"]],
+            "factor_ids": [item["factor_id"] for item in spec["factors"]],
         },
     )
     assert explained.status_code == 200, explained.text
@@ -135,7 +135,7 @@ def test_omitted_as_of_resolves_the_latest_executable_frame_for_inline_and_saved
     preview = client.post("/api/v1/portfolio/preview", json={"spec": spec})
     assert preview.status_code == 200, preview.text
     expected = preview.json()["tape"]["frames"][-1]
-    factor = spec["factors"]["factors"][0]
+    factor = spec["factors"][0]
     security_ids = [item["security_id"] for item in expected["candidates"][:2]]
     saved = _save(client, spec)
     sources = (
@@ -173,7 +173,7 @@ def test_explicit_non_rebalance_date_keeps_raw_and_node_partial_trace() -> None:
     spec = client.get("/api/v1/strategies/template").json()
     spec["data"]["end"] = "2026-09-04"
     _, security_ids, factor_id = _scope(client, spec)
-    factor = spec["factors"]["factors"][0]
+    factor = spec["factors"][0]
 
     response = client.post(
         "/api/v1/strategies/debug/trace",
@@ -229,7 +229,7 @@ def test_starting_holdings_change_the_actual_target_and_unknown_holding_is_rejec
     assert preview.status_code == 200, preview.text
     frame = preview.json()["tape"]["frames"][0]
     security_ids = sorted(item["security_id"] for item in frame["candidates"])
-    factor = spec["factors"]["factors"][0]
+    factor = spec["factors"][0]
     request = {
         "strategy_source": {"kind": "inline_draft", "spec": spec},
         "as_of": frame["signal_as_of"],
@@ -286,7 +286,7 @@ def test_trace_preserves_raw_zero_missing_collection_and_coverage_semantics() ->
     spec = client.get("/api/v1/strategies/template").json()
     spec["data"].update({"start": "2024-01-03", "end": "2024-01-09"})
     spec["portfolio"].update({"rebalance": "every_n_sessions", "rebalance_every_n_sessions": 1})
-    factor = spec["factors"]["factors"][0]
+    factor = spec["factors"][0]
     factor["graph"] = {
         "nodes": [
             {
@@ -360,7 +360,7 @@ def test_saved_revision_trace_is_hash_guarded_and_errors_are_structured() -> Non
     assert response.json()["provenance"] == {
         "kind": "saved_revision",
         "spec_hash": saved["spec_hash"],
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "strategy_id": saved["strategy_id"],
         "revision": 1,
         "source_hash": saved["source_hash"],
@@ -440,7 +440,7 @@ def test_non_finite_inline_number_is_a_coded_preflight_error(literal: str) -> No
 @pytest.mark.parametrize(
     ("location", "expected_path"),
     (
-        ("factor_weight", "factors.factors.0.weight"),
+        ("factor_weight", "factors.0.weight"),
         ("constant", ""),
         ("eligibility", "eligibility.rules.0.value"),
         ("signal", "signal.score_threshold"),
@@ -455,14 +455,14 @@ def test_every_unbounded_non_finite_number_is_a_coded_422(
     _, request = _inline_request(client)
     spec = request["strategy_source"]["spec"]
     marker = "__NON_FINITE_NUMBER__"
-    factor = spec["factors"]["factors"][0]
+    factor = spec["factors"][0]
     if location == "factor_weight":
         factor["weight"] = marker
     elif location == "constant":
         factor["graph"]["nodes"].append(
             {"node_id": "non-finite", "value": marker, "kind": "constant"}
         )
-        expected_path = f"factors.factors.0.graph.nodes.{len(factor['graph']['nodes']) - 1}.value"
+        expected_path = f"factors.0.graph.nodes.{len(factor['graph']['nodes']) - 1}.value"
     elif location == "eligibility":
         spec["eligibility"]["rules"] = [
             {"field_id": "price.close", "operator": "gt", "value": marker}
@@ -512,7 +512,7 @@ def test_factor_weight_overflow_is_invalid_before_preview_or_backtest_hashing() 
     client = TestClient(build_http_app())
     spec = client.get("/api/v1/strategies/template").json()
     marker = "__NON_FINITE_NUMBER__"
-    spec["factors"]["factors"][0]["weight"] = marker
+    spec["factors"][0]["weight"] = marker
 
     def raw_json(payload: object) -> str:
         return json.dumps(payload).replace(f'"{marker}"', "1e309")
@@ -536,8 +536,7 @@ def test_factor_weight_overflow_is_invalid_before_preview_or_backtest_hashing() 
     assert validation.status_code == 200
     assert validation.json()["valid"] is False
     assert any(
-        issue["code"] == "strategy.number.non_finite"
-        and issue["path"] == "factors.factors.0.weight"
+        issue["code"] == "strategy.number.non_finite" and issue["path"] == "factors.0.weight"
         for issue in validation.json()["issues"]
     )
     for response in (preview, backtest):
@@ -579,7 +578,7 @@ def test_trace_rejects_non_session_and_unknown_security_but_accepts_non_member()
 def test_finite_factor_overflow_is_the_same_coded_failure_for_all_execution_routes() -> None:
     client = TestClient(build_http_app())
     spec = client.get("/api/v1/strategies/template").json()
-    factor = spec["factors"]["factors"][0]
+    factor = spec["factors"][0]
     factor["graph"] = {
         "nodes": [
             {"node_id": "close", "field_id": "price.close", "kind": "field"},
@@ -621,7 +620,7 @@ def test_finite_factor_overflow_is_the_same_coded_failure_for_all_execution_rout
         } == {
             (
                 "strategy.expression.calculation_non_finite",
-                "factors.factors.0.graph.nodes.2",
+                "factors.0.graph.nodes.2",
                 "overflow",
             )
         }
@@ -633,7 +632,7 @@ def test_starting_holdings_without_a_target_frame_return_a_typed_preflight_error
     spec = client.get("/api/v1/strategies/template").json()
     spec["data"].update({"start": "2026-09-04", "end": "2026-09-04"})
     spec["portfolio"].update({"rebalance": "every_n_sessions", "rebalance_every_n_sessions": 1})
-    factor = spec["factors"]["factors"][0]
+    factor = spec["factors"][0]
 
     response = client.post(
         "/api/v1/strategies/debug/trace",
@@ -657,7 +656,7 @@ def test_omitted_as_of_without_an_executable_frame_returns_a_typed_error() -> No
     spec = client.get("/api/v1/strategies/template").json()
     spec["data"].update({"start": "2026-09-04", "end": "2026-09-04"})
     spec["portfolio"].update({"rebalance": "every_n_sessions", "rebalance_every_n_sessions": 1})
-    factor = spec["factors"]["factors"][0]
+    factor = spec["factors"][0]
 
     response = client.post(
         "/api/v1/strategies/debug/trace",

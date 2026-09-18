@@ -1,39 +1,82 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:strategy-workbench:strategy-document:1.0",
+  "$id": "urn:strategy-workbench:strategy-document:1.1",
   "title": "StrategyDocument",
   "type": "object",
   "properties": {
     "schema_version": {
       "type": "string",
-      "const": "1.0"
+      "const": "1.1"
     },
     "title": {
       "type": "string"
     },
     "description": {
-      "type": "string"
+      "type": "string",
+      "default": ""
     },
     "data": {
       "$ref": "#/$defs/DataStep"
     },
     "eligibility": {
-      "$ref": "#/$defs/EligibilityStep"
+      "$ref": "#/$defs/EligibilityStep",
+      "default": {
+        "rules": []
+      }
     },
     "factors": {
-      "$ref": "#/$defs/FactorStep"
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/FactorSignal"
+      }
     },
     "signal": {
-      "$ref": "#/$defs/SignalStep"
+      "$ref": "#/$defs/SignalStep",
+      "default": {
+        "method": "weighted_sum",
+        "entry_percentile": 0.1,
+        "score_threshold": null,
+        "regime_field_id": null,
+        "regime_minimum": null
+      }
     },
     "portfolio": {
-      "$ref": "#/$defs/PortfolioStep"
+      "$ref": "#/$defs/PortfolioStep",
+      "default": {
+        "side": "long_only",
+        "selection_count": 20,
+        "weighting": "equal",
+        "rebalance": "monthly",
+        "selection_method": "top_n",
+        "short_selection_count": 20,
+        "selection_percentile": 0.1,
+        "rebalance_every_n_sessions": 21,
+        "turnover_buffer_count": 0,
+        "minimum_trade_weight": 0.0,
+        "liquidity_field_id": null,
+        "minimum_liquidity": null
+      }
     },
     "risk": {
-      "$ref": "#/$defs/RiskStep"
+      "$ref": "#/$defs/RiskStep",
+      "default": {
+        "gross_exposure": 1.0,
+        "net_exposure": 1.0,
+        "max_name_weight": 0.1,
+        "max_sector_weight": 0.3,
+        "sector_neutral": false,
+        "risk_field_id": null
+      }
     },
     "execution": {
-      "$ref": "#/$defs/ExecutionStep"
+      "$ref": "#/$defs/ExecutionStep",
+      "default": {
+        "timing": "next_open",
+        "order_style": "market",
+        "participation_rate": 0.1,
+        "fee_bps": 15.0,
+        "slippage_bps": 10.0
+      }
     },
     "parameters": {
       "type": "array",
@@ -60,14 +103,8 @@
   "required": [
     "schema_version",
     "title",
-    "description",
     "data",
-    "eligibility",
-    "factors",
-    "signal",
-    "portfolio",
-    "risk",
-    "execution"
+    "factors"
   ],
   "additionalProperties": false,
   "$defs": {
@@ -79,7 +116,8 @@
           "type": "string",
           "enum": [
             "KRX"
-          ]
+          ],
+          "default": "KRX"
         },
         "start": {
           "type": "string",
@@ -104,7 +142,6 @@
         }
       },
       "required": [
-        "market",
         "start",
         "end",
         "universe_id"
@@ -159,22 +196,22 @@
       "type": "object",
       "title": "FieldNode",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "field"
+        },
         "node_id": {
           "type": "string"
         },
         "field_id": {
           "type": "string",
           "x-catalog": "equity-field"
-        },
-        "kind": {
-          "type": "string",
-          "const": "field"
         }
       },
       "required": [
+        "kind",
         "node_id",
-        "field_id",
-        "kind"
+        "field_id"
       ],
       "additionalProperties": false
     },
@@ -182,21 +219,21 @@
       "type": "object",
       "title": "ConstantNode",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "constant"
+        },
         "node_id": {
           "type": "string"
         },
         "value": {
           "type": "number"
-        },
-        "kind": {
-          "type": "string",
-          "const": "constant"
         }
       },
       "required": [
+        "kind",
         "node_id",
-        "value",
-        "kind"
+        "value"
       ],
       "additionalProperties": false
     },
@@ -204,22 +241,22 @@
       "type": "object",
       "title": "ParameterNode",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "parameter"
+        },
         "node_id": {
           "type": "string"
         },
         "parameter_id": {
           "type": "string",
           "x-reference": "parameter"
-        },
-        "kind": {
-          "type": "string",
-          "const": "parameter"
         }
       },
       "required": [
+        "kind",
         "node_id",
-        "parameter_id",
-        "kind"
+        "parameter_id"
       ],
       "additionalProperties": false
     },
@@ -227,6 +264,10 @@
       "type": "object",
       "title": "UnaryNode",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "unary"
+        },
         "node_id": {
           "type": "string"
         },
@@ -245,10 +286,6 @@
           "type": "string",
           "x-reference": "node"
         },
-        "kind": {
-          "type": "string",
-          "const": "unary"
-        },
         "periods": {
           "anyOf": [
             {
@@ -262,10 +299,10 @@
         }
       },
       "required": [
+        "kind",
         "node_id",
         "operator",
-        "input_node_id",
-        "kind"
+        "input_node_id"
       ],
       "additionalProperties": false
     },
@@ -273,6 +310,10 @@
       "type": "object",
       "title": "BinaryNode",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "binary"
+        },
         "node_id": {
           "type": "string"
         },
@@ -292,18 +333,14 @@
         "right_node_id": {
           "type": "string",
           "x-reference": "node"
-        },
-        "kind": {
-          "type": "string",
-          "const": "binary"
         }
       },
       "required": [
+        "kind",
         "node_id",
         "operator",
         "left_node_id",
-        "right_node_id",
-        "kind"
+        "right_node_id"
       ],
       "additionalProperties": false
     },
@@ -311,6 +348,10 @@
       "type": "object",
       "title": "TimeSeriesNode",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "time_series"
+        },
         "node_id": {
           "type": "string"
         },
@@ -332,21 +373,17 @@
         "window": {
           "type": "integer"
         },
-        "kind": {
-          "type": "string",
-          "const": "time_series"
-        },
         "lag": {
           "type": "integer",
           "default": 0
         }
       },
       "required": [
+        "kind",
         "node_id",
         "operator",
         "input_node_id",
-        "window",
-        "kind"
+        "window"
       ],
       "additionalProperties": false
     },
@@ -354,6 +391,10 @@
       "type": "object",
       "title": "CrossSectionalNode",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "cross_sectional"
+        },
         "node_id": {
           "type": "string"
         },
@@ -369,10 +410,6 @@
           "type": "string",
           "x-reference": "node"
         },
-        "kind": {
-          "type": "string",
-          "const": "cross_sectional"
-        },
         "lower_quantile": {
           "type": "number",
           "default": 0.01
@@ -383,10 +420,10 @@
         }
       },
       "required": [
+        "kind",
         "node_id",
         "operator",
-        "input_node_id",
-        "kind"
+        "input_node_id"
       ],
       "additionalProperties": false
     },
@@ -394,6 +431,10 @@
       "type": "object",
       "title": "GroupNode",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "group"
+        },
         "node_id": {
           "type": "string"
         },
@@ -411,18 +452,14 @@
         "group_field_id": {
           "type": "string",
           "x-catalog": "equity-field"
-        },
-        "kind": {
-          "type": "string",
-          "const": "group"
         }
       },
       "required": [
+        "kind",
         "node_id",
         "operator",
         "input_node_id",
-        "group_field_id",
-        "kind"
+        "group_field_id"
       ],
       "additionalProperties": false
     },
@@ -430,6 +467,10 @@
       "type": "object",
       "title": "ComparisonNode",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "comparison"
+        },
         "node_id": {
           "type": "string"
         },
@@ -450,18 +491,14 @@
         "right_node_id": {
           "type": "string",
           "x-reference": "node"
-        },
-        "kind": {
-          "type": "string",
-          "const": "comparison"
         }
       },
       "required": [
+        "kind",
         "node_id",
         "operator",
         "left_node_id",
-        "right_node_id",
-        "kind"
+        "right_node_id"
       ],
       "additionalProperties": false
     },
@@ -469,6 +506,10 @@
       "type": "object",
       "title": "ConditionalNode",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "conditional"
+        },
         "node_id": {
           "type": "string"
         },
@@ -483,18 +524,14 @@
         "false_node_id": {
           "type": "string",
           "x-reference": "node"
-        },
-        "kind": {
-          "type": "string",
-          "const": "conditional"
         }
       },
       "required": [
+        "kind",
         "node_id",
         "predicate_node_id",
         "true_node_id",
-        "false_node_id",
-        "kind"
+        "false_node_id"
       ],
       "additionalProperties": false
     },
@@ -502,22 +539,22 @@
       "type": "object",
       "title": "SavedFactorNode",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "saved_factor"
+        },
         "node_id": {
           "type": "string"
         },
         "factor_id": {
           "type": "string",
           "x-catalog": "factor"
-        },
-        "kind": {
-          "type": "string",
-          "const": "saved_factor"
         }
       },
       "required": [
+        "kind",
         "node_id",
-        "factor_id",
-        "kind"
+        "factor_id"
       ],
       "additionalProperties": false
     },
@@ -525,22 +562,22 @@
       "type": "object",
       "title": "SavedSubgraphNode",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "saved_subgraph"
+        },
         "node_id": {
           "type": "string"
         },
         "subgraph_id": {
           "type": "string",
           "x-catalog": "subgraph"
-        },
-        "kind": {
-          "type": "string",
-          "const": "saved_subgraph"
         }
       },
       "required": [
+        "kind",
         "node_id",
-        "subgraph_id",
-        "kind"
+        "subgraph_id"
       ],
       "additionalProperties": false
     },
@@ -627,7 +664,8 @@
         },
         "label": {
           "type": "string",
-          "x-authoring-source": "label"
+          "x-authoring-source": "label",
+          "x-default-from": "factor_id"
         },
         "direction": {
           "type": "string",
@@ -639,6 +677,7 @@
         },
         "weight": {
           "type": "number",
+          "default": 1.0,
           "x-authoring-default": 1.0
         },
         "graph": {
@@ -648,26 +687,8 @@
       },
       "required": [
         "factor_id",
-        "label",
         "direction",
-        "weight",
         "graph"
-      ],
-      "additionalProperties": false
-    },
-    "FactorStep": {
-      "type": "object",
-      "title": "FactorStep",
-      "properties": {
-        "factors": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/FactorSignal"
-          }
-        }
-      },
-      "required": [
-        "factors"
       ],
       "additionalProperties": false
     },
@@ -1004,6 +1025,10 @@
       "type": "object",
       "title": "FloatParameter",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "float"
+        },
         "parameter_id": {
           "type": "string"
         },
@@ -1015,10 +1040,6 @@
         },
         "maximum": {
           "type": "number"
-        },
-        "kind": {
-          "type": "string",
-          "const": "float"
         },
         "step": {
           "anyOf": [
@@ -1033,11 +1054,11 @@
         }
       },
       "required": [
+        "kind",
         "parameter_id",
         "default",
         "minimum",
-        "maximum",
-        "kind"
+        "maximum"
       ],
       "additionalProperties": false
     },
@@ -1045,6 +1066,10 @@
       "type": "object",
       "title": "IntegerParameter",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "integer"
+        },
         "parameter_id": {
           "type": "string"
         },
@@ -1057,21 +1082,17 @@
         "maximum": {
           "type": "integer"
         },
-        "kind": {
-          "type": "string",
-          "const": "integer"
-        },
         "step": {
           "type": "integer",
           "default": 1
         }
       },
       "required": [
+        "kind",
         "parameter_id",
         "default",
         "minimum",
-        "maximum",
-        "kind"
+        "maximum"
       ],
       "additionalProperties": false
     },
@@ -1079,6 +1100,10 @@
       "type": "object",
       "title": "ChoiceParameter",
       "properties": {
+        "kind": {
+          "type": "string",
+          "const": "choice"
+        },
         "parameter_id": {
           "type": "string"
         },
@@ -1098,17 +1123,13 @@
               "string"
             ]
           }
-        },
-        "kind": {
-          "type": "string",
-          "const": "choice"
         }
       },
       "required": [
+        "kind",
         "parameter_id",
         "default",
-        "choices",
-        "kind"
+        "choices"
       ],
       "additionalProperties": false
     }

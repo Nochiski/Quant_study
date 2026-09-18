@@ -169,7 +169,7 @@ def _spec():
 
 
 def _request(spec, *, node_ids: tuple[str, ...] = ()) -> StrategyTraceRequest:
-    factor = spec.factors.factors[0]
+    factor = spec.factors[0]
     return StrategyTraceRequest(
         strategy_source=InlineDraft(spec, "inline_draft"),
         as_of=spec.data.end,
@@ -343,11 +343,11 @@ def test_all_non_finite_strategy_leaves_fail_before_metadata_and_raw(
     )
     service = StrategyTraceService(portfolio, InMemoryStrategyRepository())
     spec = _spec()
-    factor = spec.factors.factors[0]
+    factor = spec.factors[0]
     if location == "factor_weight":
         spec = replace(
             spec,
-            factors=replace(spec.factors, factors=(replace(factor, weight=value),)),
+            factors=(replace(factor, weight=value),),
         )
     elif location == "constant":
         graph = replace(
@@ -356,7 +356,7 @@ def test_all_non_finite_strategy_leaves_fail_before_metadata_and_raw(
         )
         spec = replace(
             spec,
-            factors=replace(spec.factors, factors=(replace(factor, graph=graph),)),
+            factors=(replace(factor, graph=graph),),
         )
     elif location == "eligibility":
         spec = replace(
@@ -491,7 +491,7 @@ def test_trace_scope_cancellation_stops_after_first_observation() -> None:
         ),
     )
     options = PortfolioPipelineOptions(
-        trace_factor_id=spec.factors.factors[0].factor_id,
+        trace_factor_id=spec.factors[0].factor_id,
         trace_selection=TraceSelection(
             as_of=(spec.data.end,),
             security_ids=("sec-005930-1",),
@@ -535,7 +535,7 @@ def test_trace_scope_validates_each_requested_date_security_pair() -> None:
         ),
     )
     options = PortfolioPipelineOptions(
-        trace_factor_id=spec.factors.factors[0].factor_id,
+        trace_factor_id=spec.factors[0].factor_id,
         trace_selection=TraceSelection(
             as_of=(first,),
             security_ids=(security_id,),
@@ -562,7 +562,7 @@ def test_factor_output_cancellation_stops_before_target_and_projection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     spec = _spec()
-    factor = spec.factors.factors[0]
+    factor = spec.factors[0]
     stop = Event()
     consumed = 0
 

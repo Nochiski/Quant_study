@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: strategy-gui-editing
-project_status: READY
+project_status: IN_REVIEW
 current_phase: P1
 current_pr: P1-01
-active_prs: []
+active_prs: [P1-01]
 parallel_window: []
-last_updated: 2026-09-17T22:35:15+09:00
+last_updated: 2026-09-17T23:22:58+09:00
 planned_prs: 17
 merged_prs: 0
 approved_prs: 0
@@ -23,13 +23,13 @@ progress_percent: 0
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `READY` |
+| Project status | `IN_REVIEW` |
 | Current phase | `P1` |
 | Current/next PR | `P1-01` |
-| Active PR | none |
+| Active PR | `P1-01` |
 | Progress | `0 / 17 merged (0%)` |
 | Approved | `0 / 17` |
-| Aggregated at | `2026-09-17 22:35 KST` |
+| Aggregated at | `2026-09-17 23:22 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -66,7 +66,7 @@ progress_percent: 0
 <!-- PLAN:PHASES:START -->
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
-| P1 | Backend schema 1.1 | 5 | 0 | `READY` |
+| P1 | Backend schema 1.1 | 5 | 0 | `IN_REVIEW` |
 | P2 | Frontend 1.1 and upgrade UI | 3 | 0 | `WAITING` |
 | P3 | Source transactions | 2 | 0 | `WAITING` |
 | P4 | Form editing | 4 | 0 | `WAITING` |
@@ -82,12 +82,12 @@ progress_percent: 0
 | Intent | schema 1.1 모델: factors 평탄화, 선택 보일러플레이트, kind 우선 |
 | Acceptance | WORKFLOW P1-01 |
 | Non-goals | 미사용 필드·unary alias 제거(P1-02), 1.0 읽기·업그레이드(P1-03/04), frontend(P2) |
-| Branch/worktree | `feat/gui-p1-01-schema-1-1-model` |
-| Base SHA | — |
-| Head SHA | — |
-| Diff stat | — |
-| Focused tests | — |
-| Full gate | — |
+| Branch/worktree | `feat/gui-p1-01-schema-1-1-model` (worktree `scad`) |
+| Base SHA | `3aa95d0` (기획 패키지 commit, PR #106) |
+| Head SHA | `d545f53` (review fix 2; fix 1 `1d885f5`, diff freeze `9fab26b`, PR [#108](https://github.com/Nochiski/Quant_study/pull/108)) |
+| Diff stat | handwritten 37 files +377/−327 + fixture 3개 신규 154줄; generated `openapi.json`·`runtime-schema.json` 제외 |
+| Focused tests | `tests/contract/test_strategy_authoring_fixtures.py` 15 passed (신규 5: minimal 동일 hash, label/weight 기본값, 1.0 거부, nested factors type_mismatch, 알고리즘 golden) |
+| Full gate | backend pytest 1,223 passed · Ruff check clean · Ruff format(변경 파일 중 이 PR이 만든 drift 3개 정리, 기존 drift 3개는 범위 밖) · Pyright 0 errors |
 
 ---
 
@@ -95,7 +95,7 @@ progress_percent: 0
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P1-01` | 모델 1.1: `factors` 평탄화, 선택 보일러플레이트, `kind` 우선, fixture·hash golden | 없음 | `READY` | — |
+| [ ] | `P1-01` | 모델 1.1: `factors` 평탄화, 선택 보일러플레이트, `kind` 우선, fixture·hash golden | 없음 | `IN_REVIEW` | `review_gui_p1_01` (opus) 배정 · [#108](https://github.com/Nochiski/Quant_study/pull/108) |
 | [ ] | `P1-02` | 미사용 필드 3개·enum 제거, unary alias 제거, `cross_sectional: demean` | P1-01 | `WAITING` | — |
 | [ ] | `P1-03` | `_upgrade.py` dict 변환, 1.0 row 동결 읽기, saved-reference backtest 422 | P1-02 | `WAITING` | — |
 | [ ] | `P1-04` | `POST /strategy-documents/upgrade` (ruamel rt, drift fail-closed) | P1-03 | `WAITING` | — |
@@ -178,7 +178,11 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
-| 2026-09-17 KST | Claude | 설계 spec, 기획 패키지(README/WORKFLOW/PLAN/tools) 생성. 17 PR tracker | 제품 소유자 결정 |
+| 2026-09-17 KST | Claude | 리뷰 잔여 P2-003~008 반영 `d545f53`(canonical_payload_json 인코더, FieldContract.default_from, 죽은 헬퍼·docstring·치환 복원, label 비대칭 pin). backend 1,228 passed. reviewer 스코프 밖 관찰(P1 PR에서 browser-e2e 빨간불)을 WORKFLOW 1절에 알려진 상태로 기록 | 13.5 재검토 |
+| 2026-09-17 KST | Claude | `review_gui_p1_01` REQUEST_CHANGES(P1-001 계약 의도 단언 부재, P2-002 default-from KeyError) → 수정 `1d885f5`(schema 단언 3, hydrate 모델 가드 + 테스트), backend 1,227 passed, 같은 reviewer 재검토 요청 | 13.5 재검토 |
+| 2026-09-17 KST | Claude | P1-01 diff freeze `9fab26b`, PR #108(base #106), `review_gui_p1_01`(opus) 배정 → IN_REVIEW | 13.3 diff freeze |
+| 2026-09-17 KST | Claude | P1-01 구현 완료 → SELF_CHECK. 결정: 노드 dataclass는 `kw_only`로 바꾸지 않고 schema builder가 `kind`를 첫 property로 정렬(positional 생성 호출 다수), `factors`에 `x-defines`를 두지 않음(defines↔references 불변식). Rust core는 worktree venv에 `maturin develop`로 빌드 | 13.2 self-check |
+| 2026-09-17 KST | Claude | 설계 spec, 기획 패키지(README/WORKFLOW/PLAN/tools) 생성. 17 PR tracker. 스택 바닥 PR [#106](https://github.com/Nochiski/Quant_study/pull/106) | 제품 소유자 결정 |
 
 ## 갱신 절차
 

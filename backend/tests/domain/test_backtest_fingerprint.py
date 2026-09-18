@@ -72,7 +72,7 @@ def _manifest(strategy_hash: str, spec_hash: str) -> RunManifest:
         slippage_bps=0.0,
         participation_rate=1.0,
         strategy_provenance=StrategyProvenance(
-            StrategySourceKind.SAVED_REVISION, spec_hash, "1.0", "s1", 3, "b" * 64
+            StrategySourceKind.SAVED_REVISION, spec_hash, "1.1", "s1", 3, "b" * 64
         ),
     )
 

@@ -1,5 +1,9 @@
 {
-  "identity": {"strategy_id": "strategy-legacy", "revision": 3, "schema_version": "1.0"},
+  "identity": {
+    "strategy_id": "strategy-legacy",
+    "revision": 3,
+    "schema_version": "1.1"
+  },
   "title": "퀄리티 모멘텀",
   "description": "",
   "data": {
@@ -9,32 +13,36 @@
     "universe_id": "krx.common-stock",
     "frequency": "daily"
   },
-  "eligibility": {"rules": []},
-  "factors": {
-    "factors": [
-      {
-        "factor_id": "momentum",
-        "label": "모멘텀",
-        "direction": "high",
-        "weight": 0.6,
-        "graph": {
-          "nodes": [
-            {"node_id": "close", "field_id": "price.close", "kind": "field"},
-            {
-              "node_id": "mom_252",
-              "operator": "momentum",
-              "input_node_id": "close",
-              "window": 252,
-              "kind": "time_series",
-              "lag": 0
-            }
-          ],
-          "output_node_id": "mom_252",
-          "missing_policy": "drop"
-        }
-      }
-    ]
+  "eligibility": {
+    "rules": []
   },
+  "factors": [
+    {
+      "factor_id": "momentum",
+      "label": "모멘텀",
+      "direction": "high",
+      "weight": 0.6,
+      "graph": {
+        "nodes": [
+          {
+            "kind": "field",
+            "node_id": "close",
+            "field_id": "price.close"
+          },
+          {
+            "kind": "time_series",
+            "node_id": "mom_252",
+            "operator": "momentum",
+            "input_node_id": "close",
+            "window": 252,
+            "lag": 0
+          }
+        ],
+        "output_node_id": "mom_252",
+        "missing_policy": "drop"
+      }
+    }
+  ],
   "signal": {
     "method": "weighted_sum",
     "entry_percentile": 0.1,

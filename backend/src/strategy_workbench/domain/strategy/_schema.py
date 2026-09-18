@@ -45,7 +45,7 @@ class FieldContract:
     """One scalar authoring path with everything an editor needs to explain it.
 
     `pointer` is a JSON Pointer template: array positions are written as an asterisk
-    (for example the factor weight row is `/factors/factors/<asterisk>/weight`). Rows of a
+    (for example the factor weight row is `/factors/<asterisk>/weight`). Rows of a
     discriminated union share the pointer and differ by `branch` (the member's `kind`).
     Bounds and metadata come from the constraint catalog; type, enum, nullability, required
     and default come from the model.
@@ -58,6 +58,7 @@ class FieldContract:
     nullable: bool = False
     default: object = None
     has_default: bool = False
+    default_from: str | None = None  # `x-default-from`: sibling field hydrate copies when absent
     enum: tuple[str, ...] | None = None
     const: str | None = None
     format: str | None = None
@@ -177,7 +178,12 @@ class _SchemaBuilder:
         branch = _kind_of(tp)
         properties: dict[str, Any] = {}
         required: list[str] = []
-        for field in dataclasses.fields(tp):
+        # `kind` discriminator가 있으면 첫 property로 둔다(schema 1.1 S5). editor·snippet·fixture가
+        # 이 순서를 따르므로 사람이 노드를 읽을 때 종류를 먼저 본다. dataclass 인자 순서는 그대로다.
+        ordered_fields = sorted(
+            dataclasses.fields(tp), key=lambda field: 0 if field.name == "kind" else 1
+        )
+        for field in ordered_fields:
             if field.name in exclude:
                 continue
             child = f"{pointer}/{field.name}"
@@ -185,7 +191,7 @@ class _SchemaBuilder:
             has_default, default = _default_of(field)
             if has_default:
                 schema = {**schema, "default": _json_value(default)}
-            else:
+            elif "default-from" not in field.metadata:
                 required.append(field.name)
             constraint = self._constraints.get(child)
             if constraint is not None:
@@ -197,6 +203,7 @@ class _SchemaBuilder:
                 "authoring-source",
                 "authoring-default",
                 "authoring-identity",
+                "default-from",
             ):
                 if marker in field.metadata:
                     schema = {**schema, f"x-{marker}": _json_value(field.metadata[marker])}
@@ -235,10 +242,11 @@ class _SchemaBuilder:
                 pointer=pointer,
                 branch=branch,
                 type="|".join(json_type) if isinstance(json_type, list) else str(json_type),
-                required="default" not in schema,
+                required="default" not in schema and "x-default-from" not in schema,
                 nullable=nullable,
                 default=_json_value(default) if has_default else None,
                 has_default=has_default,
+                default_from=schema.get("x-default-from"),
                 enum=tuple(inner["enum"]) if "enum" in inner else None,
                 const=inner.get("const"),
                 format=inner.get("format"),

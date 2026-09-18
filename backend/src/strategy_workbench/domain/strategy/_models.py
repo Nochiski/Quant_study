@@ -11,6 +11,8 @@ from strategy_workbench.domain.factor.facade.expression import FactorGraph
 CATALOG_UNIVERSE = {"catalog": "universe"}
 CATALOG_EQUITY_FIELD = {"catalog": "equity-field"}
 DEFINES_PARAMETER = {"defines": "parameter"}
+# 생략 시 hydrate가 같은 mapping의 다른 필드 값을 넣는 파생 기본값 (schema 1.1, spec D1 S3).
+DEFAULT_FROM_FACTOR_ID = {"default-from": "factor_id"}
 
 
 def _factor_authoring(source: str, *, identity: bool = False) -> dict[str, object]:
@@ -83,12 +85,12 @@ class OrderStyle(StrEnum):
 class StrategyIdentity:
     strategy_id: str
     revision: int
-    schema_version: str = "1.0"
+    schema_version: str = "1.1"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class DataStep:
-    market: Market
+    market: Market = Market.KRX
     start: date
     end: date
     universe_id: str = field(metadata=CATALOG_UNIVERSE)
@@ -107,18 +109,14 @@ class EligibilityStep:
     rules: tuple[EligibilityRule, ...] = ()
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class FactorSignal:
     factor_id: str = field(metadata=_factor_authoring("factor_id", identity=True))
-    label: str = field(metadata=_factor_authoring("label"))
+    # dataclass default가 아니라 파생 기본값: 문서에서 생략하면 hydrate가 factor_id를 넣는다.
+    label: str = field(metadata={**_factor_authoring("label"), **DEFAULT_FROM_FACTOR_ID})
     direction: FactorDirection = field(metadata=_factor_authoring("preference"))
-    weight: float = field(metadata={"authoring-default": 1.0})
+    weight: float = field(default=1.0, metadata={"authoring-default": 1.0})
     graph: FactorGraph = field(metadata=_factor_authoring("default_graph"))
-
-
-@dataclass(frozen=True)
-class FactorStep:
-    factors: tuple[FactorSignal, ...]
 
 
 @dataclass(frozen=True)
@@ -199,16 +197,16 @@ class ChoiceParameter:
 ParameterDefinition: TypeAlias = FloatParameter | IntegerParameter | ChoiceParameter
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class StrategySpec:
     identity: StrategyIdentity
     title: str
-    description: str
+    description: str = ""
     data: DataStep
-    eligibility: EligibilityStep
-    factors: FactorStep
-    signal: SignalStep
-    portfolio: PortfolioStep
-    risk: RiskStep
-    execution: ExecutionStep
+    eligibility: EligibilityStep = EligibilityStep()
+    factors: tuple[FactorSignal, ...]
+    signal: SignalStep = SignalStep()
+    portfolio: PortfolioStep = PortfolioStep()
+    risk: RiskStep = RiskStep()
+    execution: ExecutionStep = ExecutionStep()
     parameters: tuple[ParameterDefinition, ...] = field(default=(), metadata=DEFINES_PARAMETER)

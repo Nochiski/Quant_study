@@ -1,34 +1,32 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "execution": {"fee_bps": 15, "timing": "next_open"},
   "risk": {"max_name_weight": 0.05},
   "portfolio": {"rebalance": "monthly", "selection_count": 20, "weighting": "equal"},
   "signal": {"method": "weighted_sum", "entry_percentile": 0.1},
-  "factors": {
-    "factors": [
-      {
-        "graph": {
-          "missing_policy": "drop",
-          "output_node_id": "mom_252",
-          "nodes": [
-            {"kind": "field", "node_id": "close", "field_id": "price.close"},
-            {
-              "kind": "time_series",
-              "node_id": "mom_252",
-              "operator": "momentum",
-              "input_node_id": "close",
-              "window": 252,
-              "lag": 0
-            }
-          ]
-        },
-        "weight": 0.6,
-        "direction": "high",
-        "label": "모멘텀",
-        "factor_id": "momentum"
-      }
-    ]
-  },
+  "factors": [
+    {
+      "graph": {
+        "missing_policy": "drop",
+        "output_node_id": "mom_252",
+        "nodes": [
+          {"kind": "field", "node_id": "close", "field_id": "price.close"},
+          {
+            "kind": "time_series",
+            "node_id": "mom_252",
+            "operator": "momentum",
+            "input_node_id": "close",
+            "window": 252,
+            "lag": 0
+          }
+        ]
+      },
+      "weight": 0.6,
+      "direction": "high",
+      "label": "모멘텀",
+      "factor_id": "momentum"
+    }
+  ],
   "eligibility": {"rules": []},
   "data": {
     "frequency": "daily",

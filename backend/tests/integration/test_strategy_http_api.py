@@ -103,3 +103,30 @@ def test_pit_panel_preview_never_exposes_a_future_revision() -> None:
     assert payload["confirmation_required"] is False
     assert [cell["value"] for cell in payload["panel"]["cells"]] == [5_000.0]
     assert 5_400.0 not in [cell["value"] for cell in payload["panel"]["cells"]]
+
+
+def test_json_spec_api_keeps_label_required_while_document_defaults_apply() -> None:
+    """의도된 비대칭(schema 1.1 S3): 문서 hydrate는 `label`을 factor_id로 채우지만, canonical
+    payload만 받는 JSON spec API는 pydantic 모델대로 `label`을 요구한다. dataclass default가 있는
+    `weight`·`data.market`·선택 섹션은 양쪽 모두 생략할 수 있다."""
+    client = TestClient(build_http_app())
+    template = client.get("/api/v1/strategies/template").json()
+
+    without_label = {
+        **template,
+        "factors": [{k: v for k, v in template["factors"][0].items() if k != "label"}],
+    }
+    response = client.post("/api/v1/strategies/validate", json=without_label)
+    assert response.status_code == 422, response.text
+    assert any(error["loc"][-1] == "label" for error in response.json()["detail"])
+
+    relaxed = {
+        k: v
+        for k, v in template.items()
+        if k not in ("signal", "portfolio", "risk", "execution", "eligibility", "description")
+    }
+    relaxed["data"] = {k: v for k, v in template["data"].items() if k != "market"}
+    relaxed["factors"] = [{k: v for k, v in template["factors"][0].items() if k != "weight"}]
+    response = client.post("/api/v1/strategies/validate", json=relaxed)
+    assert response.status_code == 200, response.text
+    assert response.json()["valid"] is True

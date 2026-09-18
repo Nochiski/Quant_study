@@ -50,7 +50,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
 )
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
-GOLDEN_SPEC_HASH = "9eb6872a3ca250dfb78b0887e5b236a98b24fb2ccdf2d6af0540218d49e998fe"
+GOLDEN_SPEC_HASH = "04a3bb86bb541f0503e80b17600196067c17faccf584114ccff7049a960733a2"
 T0 = datetime(2026, 9, 4, 9, 0, tzinfo=UTC)
 
 RepositoryFactory = Callable[[], StrategyRepositoryPort]

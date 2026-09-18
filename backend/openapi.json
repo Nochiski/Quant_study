@@ -944,7 +944,8 @@
             "default": "daily"
           },
           "market": {
-            "$ref": "#/components/schemas/Market"
+            "$ref": "#/components/schemas/Market",
+            "default": "KRX"
           },
           "start": {
             "format": "date",
@@ -957,7 +958,6 @@
           }
         },
         "required": [
-          "market",
           "start",
           "end",
           "universe_id"
@@ -2208,6 +2208,7 @@
             "type": "string"
           },
           "weight": {
+            "default": 1.0,
             "title": "Weight",
             "type": "number"
           }
@@ -2216,26 +2217,9 @@
           "factor_id",
           "label",
           "direction",
-          "weight",
           "graph"
         ],
         "title": "FactorSignal",
-        "type": "object"
-      },
-      "FactorStep": {
-        "properties": {
-          "factors": {
-            "items": {
-              "$ref": "#/components/schemas/FactorSignal"
-            },
-            "title": "Factors",
-            "type": "array"
-          }
-        },
-        "required": [
-          "factors"
-        ],
-        "title": "FactorStep",
         "type": "object"
       },
       "FactorValidationIssue": {
@@ -2349,7 +2333,7 @@
         "type": "object"
       },
       "FieldContract": {
-        "description": "One scalar authoring path with everything an editor needs to explain it.\n\n`pointer` is a JSON Pointer template: array positions are written as an asterisk\n(for example the factor weight row is `/factors/factors/<asterisk>/weight`). Rows of a\ndiscriminated union share the pointer and differ by `branch` (the member's `kind`).\nBounds and metadata come from the constraint catalog; type, enum, nullability, required\nand default come from the model.",
+        "description": "One scalar authoring path with everything an editor needs to explain it.\n\n`pointer` is a JSON Pointer template: array positions are written as an asterisk\n(for example the factor weight row is `/factors/<asterisk>/weight`). Rows of a\ndiscriminated union share the pointer and differ by `branch` (the member's `kind`).\nBounds and metadata come from the constraint catalog; type, enum, nullability, required\nand default come from the model.",
         "properties": {
           "applied_stage": {
             "anyOf": [
@@ -2397,6 +2381,17 @@
           },
           "default": {
             "title": "Default"
+          },
+          "default_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default From"
           },
           "description_key": {
             "anyOf": [
@@ -5503,7 +5498,7 @@
             "type": "integer"
           },
           "schema_version": {
-            "default": "1.0",
+            "default": "1.1",
             "title": "Schema Version",
             "type": "string"
           },
@@ -5631,17 +5626,32 @@
             "$ref": "#/components/schemas/DataStep"
           },
           "description": {
+            "default": "",
             "title": "Description",
             "type": "string"
           },
           "eligibility": {
-            "$ref": "#/components/schemas/EligibilityStep"
+            "$ref": "#/components/schemas/EligibilityStep",
+            "default": {
+              "rules": []
+            }
           },
           "execution": {
-            "$ref": "#/components/schemas/ExecutionStep"
+            "$ref": "#/components/schemas/ExecutionStep",
+            "default": {
+              "fee_bps": 15.0,
+              "order_style": "market",
+              "participation_rate": 0.1,
+              "slippage_bps": 10.0,
+              "timing": "next_open"
+            }
           },
           "factors": {
-            "$ref": "#/components/schemas/FactorStep"
+            "items": {
+              "$ref": "#/components/schemas/FactorSignal"
+            },
+            "title": "Factors",
+            "type": "array"
           },
           "identity": {
             "$ref": "#/components/schemas/StrategyIdentity"
@@ -5665,13 +5675,36 @@
             "type": "array"
           },
           "portfolio": {
-            "$ref": "#/components/schemas/PortfolioStep"
+            "$ref": "#/components/schemas/PortfolioStep",
+            "default": {
+              "minimum_trade_weight": 0.0,
+              "rebalance": "monthly",
+              "rebalance_every_n_sessions": 21,
+              "selection_count": 20,
+              "selection_method": "top_n",
+              "selection_percentile": 0.1,
+              "short_selection_count": 20,
+              "side": "long_only",
+              "turnover_buffer_count": 0,
+              "weighting": "equal"
+            }
           },
           "risk": {
-            "$ref": "#/components/schemas/RiskStep"
+            "$ref": "#/components/schemas/RiskStep",
+            "default": {
+              "gross_exposure": 1.0,
+              "max_name_weight": 0.1,
+              "max_sector_weight": 0.3,
+              "net_exposure": 1.0,
+              "sector_neutral": false
+            }
           },
           "signal": {
-            "$ref": "#/components/schemas/SignalStep"
+            "$ref": "#/components/schemas/SignalStep",
+            "default": {
+              "entry_percentile": 0.1,
+              "method": "weighted_sum"
+            }
           },
           "title": {
             "title": "Title",
@@ -5681,14 +5714,8 @@
         "required": [
           "identity",
           "title",
-          "description",
           "data",
-          "eligibility",
-          "factors",
-          "signal",
-          "portfolio",
-          "risk",
-          "execution"
+          "factors"
         ],
         "title": "StrategySpec",
         "type": "object"

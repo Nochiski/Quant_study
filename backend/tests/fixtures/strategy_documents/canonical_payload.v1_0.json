@@ -1,0 +1,81 @@
+{
+  "data": {
+    "end": "2026-08-31",
+    "frequency": "daily",
+    "market": "KRX",
+    "start": "2021-01-01",
+    "universe_id": "krx.common-stock"
+  },
+  "description": "",
+  "eligibility": {
+    "rules": []
+  },
+  "execution": {
+    "fee_bps": 15.0,
+    "order_style": "market",
+    "participation_rate": 0.1,
+    "slippage_bps": 10.0,
+    "timing": "next_open"
+  },
+  "factors": {
+    "factors": [
+      {
+        "direction": "high",
+        "factor_id": "momentum",
+        "graph": {
+          "missing_policy": "drop",
+          "nodes": [
+            {
+              "field_id": "price.close",
+              "kind": "field",
+              "node_id": "close"
+            },
+            {
+              "input_node_id": "close",
+              "kind": "time_series",
+              "lag": 0,
+              "node_id": "mom_252",
+              "operator": "momentum",
+              "window": 252
+            }
+          ],
+          "output_node_id": "mom_252"
+        },
+        "label": "모멘텀",
+        "weight": 0.6
+      }
+    ]
+  },
+  "parameters": [],
+  "portfolio": {
+    "liquidity_field_id": null,
+    "minimum_liquidity": null,
+    "minimum_trade_weight": 0.0,
+    "rebalance": "monthly",
+    "rebalance_every_n_sessions": 21,
+    "selection_count": 20,
+    "selection_method": "top_n",
+    "selection_percentile": 0.1,
+    "short_selection_count": 20,
+    "side": "long_only",
+    "turnover_buffer_count": 0,
+    "weighting": "equal"
+  },
+  "risk": {
+    "gross_exposure": 1.0,
+    "max_name_weight": 0.05,
+    "max_sector_weight": 0.3,
+    "net_exposure": 1.0,
+    "risk_field_id": null,
+    "sector_neutral": false
+  },
+  "schema_version": "1.0",
+  "signal": {
+    "entry_percentile": 0.1,
+    "method": "weighted_sum",
+    "regime_field_id": null,
+    "regime_minimum": null,
+    "score_threshold": null
+  },
+  "title": "퀄리티 모멘텀"
+}

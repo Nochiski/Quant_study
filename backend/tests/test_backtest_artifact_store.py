@@ -58,7 +58,7 @@ def _result() -> BacktestRunResult:
             slippage_bps=0.0,
             participation_rate=1.0,
             strategy_provenance=StrategyProvenance(
-                StrategySourceKind.INLINE_DRAFT, "strategy", "1.0"
+                StrategySourceKind.INLINE_DRAFT, "strategy", "1.1"
             ),
         ),
         metric_definitions=registry.definitions(),

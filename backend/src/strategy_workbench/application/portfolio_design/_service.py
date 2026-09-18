@@ -233,7 +233,7 @@ class PortfolioDesignService:
                 sorted(
                     {
                         field_id
-                        for factor in spec.factors.factors
+                        for factor in spec.factors
                         for field_id in factor_required_field_ids(factor.graph)
                     }
                 )
@@ -294,7 +294,7 @@ class PortfolioDesignService:
             for parameter in spec.parameters
         )
         evaluations: list[FactorEvaluationRecord] = []
-        for factor_index, factor in enumerate(spec.factors.factors):
+        for factor_index, factor in enumerate(spec.factors):
             checkpoint()
             trace = None
             try:
@@ -321,7 +321,7 @@ class PortfolioDesignService:
                 )
                 issue = semantic_issue(
                     "strategy.expression.calculation_non_finite",
-                    f"factors.factors.{factor_index}.graph.nodes.{node_index}",
+                    f"factors.{factor_index}.graph.nodes.{node_index}",
                     str(error),
                     node_id=error.node_id,
                 )
@@ -395,10 +395,10 @@ class PortfolioDesignService:
         self, spec: StrategySpec, metadata: FactorMetadataSnapshot
     ) -> dict[str, FactorExecutionPlan]:
         parameter_ids = tuple(parameter.parameter_id for parameter in spec.parameters)
-        factor_ids = tuple(factor.factor_id for factor in spec.factors.factors)
+        factor_ids = tuple(factor.factor_id for factor in spec.factors)
         plans: dict[str, FactorExecutionPlan] = {}
         issues = []
-        for factor_index, factor in enumerate(spec.factors.factors):
+        for factor_index, factor in enumerate(spec.factors):
             try:
                 plans[factor.factor_id] = compile_factor_plan(
                     factor.graph,
@@ -412,7 +412,7 @@ class PortfolioDesignService:
                 issues.extend(
                     semantic_issue(
                         factor_issue.code,
-                        f"factors.factors.{factor_index}.graph.{factor_issue.path}",
+                        f"factors.{factor_index}.graph.{factor_issue.path}",
                         factor_issue.message,
                         severity=(
                             ValidationSeverity.ERROR
@@ -604,12 +604,12 @@ def _reject_saved_references(spec: StrategySpec, plans: dict[str, FactorExecutio
         # The domain owns the code registry; minting an issue here goes through the same gate.
         semantic_issue(
             "strategy.expression.reference_unsupported",
-            f"factors.factors.{index}.graph",
+            f"factors.{index}.graph",
             "저장된 팩터/서브그래프 참조는 아직 preview/backtest에서 계산되지 않습니다: "
             f"factor_ids={plan.referenced_factor_ids} "
             f"subgraph_ids={plan.referenced_subgraph_ids}",
         )
-        for index, factor in enumerate(spec.factors.factors)
+        for index, factor in enumerate(spec.factors)
         for plan in (plans[factor.factor_id],)
         if plan.referenced_factor_ids or plan.referenced_subgraph_ids
     )
@@ -630,12 +630,12 @@ def _reject_non_numeric_factor_outputs(
     issues = tuple(
         semantic_issue(
             "strategy.expression.output_type",
-            f"factors.factors.{factor_index}.graph.output_node_id",
+            f"factors.{factor_index}.graph.output_node_id",
             "FactorSignal output must be numeric_series for portfolio/backtest execution: "
             f"actual={output.output_type!r}",
             node_id=plan.output_node_id,
         )
-        for factor_index, factor in enumerate(spec.factors.factors)
+        for factor_index, factor in enumerate(spec.factors)
         for plan in (plans[factor.factor_id],)
         for output in (next(step for step in plan.steps if step.node_id == plan.output_node_id),)
         if output.output_type != NodeValueType.NUMERIC_SERIES.value

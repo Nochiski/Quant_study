@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from strategy_workbench.bootstrap.facade.http import build_http_app
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
-GOLDEN_SPEC_HASH = "9eb6872a3ca250dfb78b0887e5b236a98b24fb2ccdf2d6af0540218d49e998fe"
+GOLDEN_SPEC_HASH = "04a3bb86bb541f0503e80b17600196067c17faccf584114ccff7049a960733a2"
 
 
 def _source(name: str) -> str:
@@ -36,11 +36,11 @@ def test_yaml_and_json_sources_compile_to_the_same_backend_hash() -> None:
     assert yaml_result["diagnostics"] == []
     assert yaml_result["spec_hash"] == GOLDEN_SPEC_HASH == json_result["spec_hash"]
     assert yaml_result["source_hash"] != json_result["source_hash"]
-    assert yaml_result["schema_version"] == "1.0"
+    assert yaml_result["schema_version"] == "1.1"
     assert yaml_result["spec"]["identity"] == {
         "strategy_id": "draft",
         "revision": 0,
-        "schema_version": "1.0",
+        "schema_version": "1.1",
     }
     assert yaml_result["canonical_json"] == json_result["canonical_json"]
     assert '"max_name_weight":0.05' in yaml_result["canonical_json"]
@@ -168,9 +168,7 @@ def test_factor_graph_issue_names_the_node_and_points_into_the_graph() -> None:
     result = _compile(client, source)
 
     assert result["spec"] is None
-    graph_issues = [
-        d for d in result["diagnostics"] if d["pointer"].startswith("/factors/factors/0/graph")
-    ]
+    graph_issues = [d for d in result["diagnostics"] if d["pointer"].startswith("/factors/0/graph")]
     assert graph_issues, result["diagnostics"]
     issue = next(d for d in graph_issues if d["code"] == "strategy.expression.input_missing")
     assert issue["node_id"] == "mom_252"
@@ -183,7 +181,7 @@ def test_semantic_range_for_a_parent_path_falls_back_to_the_parent_node() -> Non
     source = _source("quality_momentum.yaml")
     # Duplicate the factor block: the strategy-level duplicate check fires on `factors`.
     lines = source.splitlines(keepends=True)
-    start = lines.index("factors:\n") + 2
+    start = lines.index("factors:\n") + 1
     end = lines.index("signal:\n")
     source = "".join(lines[:end] + lines[start:end] + lines[end:])
 

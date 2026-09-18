@@ -225,36 +225,30 @@ def test_non_finite_value_never_satisfies_a_bound(
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
 def test_every_unbounded_strategy_numeric_leaf_must_be_finite(value: float) -> None:
     spec = _template()
-    factor = spec.factors.factors[0]
+    factor = spec.factors[0]
     constant_index = len(factor.graph.nodes)
     variants = (
         (
             replace(
                 spec,
-                factors=replace(
-                    spec.factors,
-                    factors=(replace(factor, weight=value),),
-                ),
+                factors=(replace(factor, weight=value),),
             ),
-            "factors.factors.0.weight",
+            "factors.0.weight",
         ),
         (
             replace(
                 spec,
-                factors=replace(
-                    spec.factors,
-                    factors=(
-                        replace(
-                            factor,
-                            graph=replace(
-                                factor.graph,
-                                nodes=(*factor.graph.nodes, ConstantNode("bad", value, "constant")),
-                            ),
+                factors=(
+                    replace(
+                        factor,
+                        graph=replace(
+                            factor.graph,
+                            nodes=(*factor.graph.nodes, ConstantNode("bad", value, "constant")),
                         ),
                     ),
                 ),
             ),
-            f"factors.factors.0.graph.nodes.{constant_index}.value",
+            f"factors.0.graph.nodes.{constant_index}.value",
         ),
         (
             replace(

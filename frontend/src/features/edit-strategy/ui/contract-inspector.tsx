@@ -283,6 +283,9 @@ const ApplicabilitySection = ({
                         condition.path,
                       )
                     : `${condition.path} = ${condition.equals}`}
+                  {condition.fromDefault
+                    ? ` ${t("contract.applicable.fromDefault")}`
+                    : null}
                 </code>
               ))}
             </span>,

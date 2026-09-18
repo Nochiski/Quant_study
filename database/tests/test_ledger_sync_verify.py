@@ -240,9 +240,13 @@ def test_reuse_check_refuses_a_corrupted_partition(synced) -> None:
     ok = Partition("v=b2/year=2011", 2, hashes["year=2011"])
     assert check(partition_dir, ok) is True
     target = partition_dir / "part0.parquet"
-    data = bytearray(target.read_bytes())
-    data[len(data) // 2] ^= 0xFF
-    target.write_bytes(bytes(data))
+    # 같은 스키마·다른 행의 유효한 parquet 로 바꾼다 — 바이트 플립은 플랫폼·duckdb 버전에 따라 그냥
+    # 읽히기도 해서(CI Linux) 결정적이지 않다. 내용이 다르면 해시가 달라 재사용을 거부해야 한다.
+    con = duckdb.connect()
+    con.execute(f"COPY (SELECT '005930' AS ticker, 99 AS close) TO '{target}' (FORMAT PARQUET)")
+    con.close()
+    assert check(partition_dir, ok) is False
+    target.write_bytes(b"PAR1 not really a parquet file PAR1")
     assert check(partition_dir, ok) is False
     assert check(root / "nowhere", ok) is False
 

@@ -89,15 +89,15 @@ ReuseCheck = Callable[[Path, Partition], bool]
 
 def duckdb_reuse_check() -> ReuseCheck:
     """재사용 직전에 로컬 파티션 해시를 다시 계산해 MANIFEST 의 content_hash 와 대조한다 — 크기는
-    같은데 내용이 손상된 parquet 가 다음 빌드로 전파되는 것을 여기서 끊는다. duckdb 연결은 처음
-    쓸 때 한 번 연다."""
-    import duckdb
-
+    같은데 내용이 손상된 parquet 가 다음 빌드로 전파되는 것을 여기서 끊는다. duckdb 는 첫 검사
+    때 import·연결한다(`--no-reuse`·재사용 후보 0건이면 duckdb 없이도 돈다)."""
     connection: HashConnection | None = None
 
     def check(partition_dir: Path, partition: Partition) -> bool:
         nonlocal connection
         if connection is None:
+            import duckdb
+
             connection = duckdb.connect()
         try:
             return compute_partition_hash(connection, partition_dir, partition) \

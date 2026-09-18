@@ -70,19 +70,20 @@ NO_TABLES_LABEL = "_state"
 
 
 def require_coverage(layer_root: Path, state: SyncState, report: VerifyReport, *,
-                     tables: Iterable[str] | None = None) -> bool:
+                     tables: Iterable[str] | None = None,
+                     level: Level = Level.MANIFEST) -> bool:
     """검사 대상이 하나도 없으면 "전부 통과" 가 아니라 finding 이다 — state 가 비었거나(pull 전·다른
     루트) `--tables` 가 state 에 없는 이름이면 아무것도 대조하지 않고 ok 를 내는 silent false-pass
     를 막는다. 대상이 있으면 True."""
     if not state.tables:
-        report.add(Level.MANIFEST, NO_TABLES_LABEL,
+        report.add(level, NO_TABLES_LABEL,
                    f"no synced tables in state — nothing to verify (root={layer_root} "
                    f"state={layer_root / SYNC_DIR / STATE_NAME}); run pull first")
         return False
     if tables is not None:
         unknown = sorted(set(tables) - set(state.tables))
         for table in unknown:
-            report.add(Level.MANIFEST, table,
+            report.add(level, table,
                        f"table not in sync state — nothing to verify "
                        f"(known={sorted(state.tables)})")
         if len(unknown) == len(set(tables)):
@@ -139,10 +140,25 @@ def verify_manifest(remote: RemoteFS, remote_root: str, layer_root: Path, state:
         if table not in seen:
             report.add(Level.MANIFEST, table, "table synced locally but absent on remote")
     if wanted is None:
-        _verify_catalog_snapshot(layer_root, state, report)
+        _verify_disk_matches_state(layer_root, state, report)
+        _verify_catalog_snapshot(layer_root, report)
 
 
-def _verify_catalog_snapshot(layer_root: Path, state: SyncState, report: VerifyReport) -> None:
+def _verify_disk_matches_state(layer_root: Path, state: SyncState, report: VerifyReport) -> None:
+    """디스크 MANIFEST 집합(소비자·카탈로그가 보는 것)과 sync state 가 같은가 — 예전 rsync 잔재나
+    지워진 표를 잡는다. 카탈로그 유무와 무관하게 항상 본다."""
+    on_disk = local_builds(layer_root)
+    synced = {table: ts.build_id for table, ts in state.tables.items()}
+    report.count(Level.MANIFEST)
+    if on_disk != synced:
+        report.add(Level.MANIFEST, NO_TABLES_LABEL,
+                   f"disk MANIFESTs and sync state disagree — only_on_disk="
+                   f"{sorted(set(on_disk) - set(synced))} only_in_state="
+                   f"{sorted(set(synced) - set(on_disk))} build_mismatch="
+                   f"{sorted(t for t in set(on_disk) & set(synced) if on_disk[t] != synced[t])}")
+
+
+def _verify_catalog_snapshot(layer_root: Path, report: VerifyReport) -> None:
     meta_path = layer_root / CATALOG_META_NAME
     if not meta_path.exists():
         return
@@ -152,21 +168,13 @@ def _verify_catalog_snapshot(layer_root: Path, state: SyncState, report: VerifyR
         report.add(Level.MANIFEST, "_catalog_meta",
                    f"unreadable — path={meta_path} error={error!r}")
         return
-    on_disk = local_builds(layer_root)
-    expected = snapshot_id(on_disk)
+    expected = snapshot_id(local_builds(layer_root))
     actual = meta.get("snapshot_id") if isinstance(meta, dict) else None
     report.count(Level.MANIFEST)
     if actual != expected:
         report.add(Level.MANIFEST, "_catalog_meta",
                    f"catalog snapshot_id does not match local builds — catalog={actual!r} "
                    f"local={expected!r} (rebuild: python -m equity catalog)")
-    synced = {table: ts.build_id for table, ts in state.tables.items()}
-    if on_disk != synced:
-        report.add(Level.MANIFEST, NO_TABLES_LABEL,
-                   f"disk MANIFESTs and sync state disagree — only_on_disk="
-                   f"{sorted(set(on_disk) - set(synced))} only_in_state="
-                   f"{sorted(set(synced) - set(on_disk))} build_mismatch="
-                   f"{sorted(t for t in set(on_disk) & set(synced) if on_disk[t] != synced[t])}")
 
 
 def verify_files(remote: RemoteFS, remote_root: str, layer_root: Path, state: SyncState,
@@ -199,11 +207,11 @@ def verify_files(remote: RemoteFS, remote_root: str, layer_root: Path, state: Sy
             local_files = local.partition_files(partition.path)
             local_names = {rel.rsplit("/", 1)[-1] for rel in local_files}
             partition_dir = table_root / partition.path
-            on_disk = {p.name for p in partition_dir.iterdir() if p.is_file()} \
+            on_disk_names = {p.name for p in partition_dir.iterdir() if p.is_file()} \
                 if partition_dir.is_dir() else set()
             missing = sorted(set(entries) - local_names)
             extra = sorted(local_names - set(entries))
-            stray = sorted(on_disk - local_names)
+            stray = sorted(on_disk_names - local_names)
             if missing or extra or stray:
                 report.add(Level.FILES, table,
                            f"file set differs — path={partition.path} missing={missing} "
@@ -215,15 +223,17 @@ def verify_files(remote: RemoteFS, remote_root: str, layer_root: Path, state: Sy
                 if not path.is_file():
                     report.add(Level.FILES, table, f"file missing on disk — {rel}")
                     continue
-                on_disk = path.stat().st_size
-                if on_disk != rec.size:
+                size_on_disk = path.stat().st_size
+                if size_on_disk != rec.size:
                     report.add(Level.FILES, table,
-                               f"size differs from state — {rel} disk={on_disk} state={rec.size}")
+                               f"size differs from state — {rel} disk={size_on_disk} "
+                               f"state={rec.size}")
                 entry = entries.get(name)
-                if entry is not None and rec.origin != ORIGIN_REUSED and entry.size != on_disk:
+                if entry is not None and rec.origin != ORIGIN_REUSED \
+                        and entry.size != size_on_disk:
                     report.add(Level.FILES, table,
                                f"size differs from remote — {rel} remote={entry.size} "
-                               f"local={on_disk}")
+                               f"local={size_on_disk}")
 
 
 def verify_hash(layer_root: Path, state: SyncState, report: VerifyReport, *,

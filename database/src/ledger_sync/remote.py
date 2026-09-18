@@ -65,7 +65,11 @@ class SftpEndpoint:
 
 
 class RemoteConnectError(RuntimeError):
-    """접속·인증·호스트키 실패. 재시도해도 같은 결과라 즉시 중단한다."""
+    """접속 실패(소켓·배너·일시 장애). 끊긴 뒤 재접속 경로에서는 재시도 대상이다."""
+
+
+class RemoteAuthError(RemoteConnectError):
+    """인증·호스트키 실패·키 파일 없음 — 재시도해도 같은 결과라 즉시 중단한다."""
 
 
 class RemoteTransferError(RuntimeError):
@@ -87,7 +91,11 @@ def append_known_host(known_hosts: Path, hostname: str, key_name: str, key_base6
     `@revoked` 마커·paramiko 가 모르는 키 타입 행을 잃는다. 우리는 기존 행을 절대 다시 쓰지 않는다.
     """
     known_hosts.parent.mkdir(parents=True, exist_ok=True)
+    needs_newline = known_hosts.exists() and known_hosts.stat().st_size > 0 \
+        and not known_hosts.read_bytes().endswith(b"\n")
     with known_hosts.open("a", encoding="utf-8") as handle:
+        if needs_newline:
+            handle.write("\n")  # 개행 없이 끝난 마지막 행을 깨뜨리지 않는다
         handle.write(f"{hostname} {key_name} {key_base64}\n")
 
 
@@ -113,7 +121,12 @@ class SftpRemote:
             # `load_host_keys` 가 아니라 `load_system_host_keys` — 전자는 파일명을 기억해 뒀다가
             # `AutoAddPolicy` 가 `save_host_keys` 로 파일 전체를 다시 쓰게 만든다(주석·`@revoked`·
             # 미지원 키 행이 사라진다). 우리는 파일을 절대 다시 쓰지 않는다.
-            client.load_system_host_keys(str(known_hosts))
+            try:
+                client.load_system_host_keys(str(known_hosts))
+            except OSError as error:
+                raise RemoteAuthError(
+                    f"known_hosts unreadable — path={known_hosts} error={error!r}"
+                ) from error
         if self._accept_new:
             class AppendOnlyAcceptNew(paramiko.MissingHostKeyPolicy):
                 """모르는 호스트키만 수락(메모리 + known_hosts 한 줄 append). 바뀐 키는
@@ -130,26 +143,28 @@ class SftpRemote:
             client.set_missing_host_key_policy(paramiko.RejectPolicy())
         ep = self._endpoint
         if not ep.key_path.exists():
-            raise RemoteConnectError(f"private key not found — {ep.label}")
+            raise RemoteAuthError(f"private key not found — {ep.label}")
         try:
             client.connect(ep.host, port=ep.port, username=ep.user, key_filename=str(ep.key_path),
                            look_for_keys=False, allow_agent=False, timeout=self._timeout,
                            banner_timeout=self._timeout, auth_timeout=self._timeout)
         except paramiko.BadHostKeyException as error:
-            raise RemoteConnectError(
+            raise RemoteAuthError(
                 f"host key mismatch — {ep.label} known_hosts={known_hosts} error={error!r}"
             ) from error
         except paramiko.AuthenticationException as error:
-            raise RemoteConnectError(
+            raise RemoteAuthError(
                 f"authentication failed — {ep.label} error={error!r} "
                 f"(is the private key the one registered on the server?)"
             ) from error
         except paramiko.SSHException as error:
             unknown_host = "not found in known_hosts" in str(error)
-            hint = " (unknown host key — pass --accept-new once)" \
-                if unknown_host and not self._accept_new else ""
+            if unknown_host:
+                raise RemoteAuthError(
+                    f"unknown host key — {ep.label} error={error!r} (pass --accept-new once)"
+                ) from error
             raise RemoteConnectError(
-                f"ssh connect failed — {ep.label} error={error!r}{hint}"
+                f"ssh connect failed — {ep.label} error={error!r}"
             ) from error
         except OSError as error:
             raise RemoteConnectError(f"socket error — {ep.label} error={error!r}") from error
@@ -181,8 +196,8 @@ class SftpRemote:
         for attempt in range(1, self._retries + 1):
             try:
                 return operation()
-            except FileNotFoundError:
-                raise
+            except (FileNotFoundError, RemoteAuthError):
+                raise  # 없는 경로·영구 실패(인증·호스트키)는 재시도 대상이 아니다
             except (OSError, EOFError, paramiko.SSHException, RemoteConnectError) as error:
                 # RemoteConnectError 는 끊긴 뒤 재접속이 아직 안 되는 경우다 — 백오프 뒤 다시
                 # 시도하고, 끝내 안 되면 RemoteTransferError 로 바꿔 호출부(테이블 격리)가 잡는다.

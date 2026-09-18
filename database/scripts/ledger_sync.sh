@@ -2,7 +2,7 @@
 # 카엘 서버 SFTP → 로컬 equity 층 동기화 CLI 래퍼 (bash). Windows 는 ledger_sync.ps1.
 #
 #   database/scripts/ledger_sync.sh plan
-#   database/scripts/ledger_sync.sh sync            # pull → verify → catalog
+#   database/scripts/ledger_sync.sh sync            # pull → catalog → verify
 #   database/scripts/ledger_sync.sh verify --level hash
 #   database/scripts/ledger_sync.sh status --remote
 #

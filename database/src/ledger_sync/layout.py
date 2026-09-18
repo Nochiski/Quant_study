@@ -125,27 +125,38 @@ def _partition_path_ok(path: str, build_id: str) -> bool:
     return all(is_safe_segment(segment) for segment in tail.split("/")) if tail else True
 
 
+@dataclass(frozen=True)
+class BuildParseError:
+    """BuildRecord 하나를 읽지 못한 이유. current 빌드면 MANIFEST 전체가 이 status 로 실패한다."""
+
+    status: ManifestStatus
+    detail: str
+
+
 def _parse_build(table: str, build_id: str,
-                 record: dict[str, object]) -> BuildInfo | tuple[ManifestStatus, str]:
-    """BuildRecord 하나. 실패는 (status, detail) — 호출부가 current 인지에 따라 처리한다."""
+                 record: dict[str, object]) -> BuildInfo | BuildParseError:
+    """BuildRecord 하나. 실패는 `BuildParseError` — 호출부가 current 인지에 따라 처리한다."""
     if not is_safe_segment(build_id):
-        return (ManifestStatus.UNSAFE_NAME,
-                f"build_id is not a safe path segment — table={table} build_id={build_id!r}")
+        return BuildParseError(
+            ManifestStatus.UNSAFE_NAME,
+            f"build_id is not a safe path segment — table={table} build_id={build_id!r}")
     partitions: list[Partition] = []
     raw_parts = record.get("partitions") or []
     for part in raw_parts if isinstance(raw_parts, list) else []:
         path = part.get("path") if isinstance(part, dict) else None
         if not isinstance(part, dict) or not isinstance(path, str) \
                 or not _partition_path_ok(path, build_id):
-            return (ManifestStatus.BAD_PARTITION,
-                    f"partition path malformed — table={table} build={build_id} "
-                    f"partition={part!r} (expected v={build_id}[/<safe segment>…])")
+            return BuildParseError(
+                ManifestStatus.BAD_PARTITION,
+                f"partition path malformed — table={table} build={build_id} "
+                f"partition={part!r} (expected v={build_id}[/<safe segment>…])")
         try:
             n_rows = int(str(part.get("n_rows", 0)))
         except (TypeError, ValueError):
-            return (ManifestStatus.BAD_PARTITION,
-                    f"partition n_rows is not an integer — table={table} build={build_id} "
-                    f"path={path} n_rows={part.get('n_rows')!r}")
+            return BuildParseError(
+                ManifestStatus.BAD_PARTITION,
+                f"partition n_rows is not an integer — table={table} build={build_id} "
+                f"path={path} n_rows={part.get('n_rows')!r}")
         partitions.append(Partition(path=path, n_rows=n_rows,
                                     content_hash=str(part.get("content_hash") or "")))
     return BuildInfo(
@@ -185,7 +196,7 @@ def parse_manifest(table: str, raw: bytes) -> ManifestView:
             builds[build_id] = parsed
         elif build_id == current:
             # 어댑터가 읽는 것은 current 뿐이다 — 구판본 레코드가 깨진 것은 테이블을 막지 않는다
-            return _failed(table, raw, *parsed)
+            return _failed(table, raw, parsed.status, parsed.detail)
     if current not in builds:
         return _failed(table, raw, ManifestStatus.CURRENT_NOT_IN_BUILDS,
                        f"current_build not in builds[] — table={table} current={current} "

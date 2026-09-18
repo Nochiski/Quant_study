@@ -209,3 +209,39 @@ def test_status_remote_labels_broken_remote_manifests(remote: FakeRemote, tmp_pa
     assert cli.main([*_base(tmp_path), "--json", "status", "--remote"]) == cli.EXIT_OK
     status = json.loads(capsys.readouterr().out)
     assert status["behind"] == [] and "security" in status["remote_errors"]
+
+
+def test_lock_rejects_a_concurrent_pull_and_is_released_after(remote: FakeRemote, tmp_path: Path,
+                                                                capsys) -> None:
+    lock = tmp_path / "equity" / "_sync" / "lock"
+    lock.parent.mkdir(parents=True)
+    lock.write_text("pid=1\n", encoding="utf-8")
+    assert cli.main([*_base(tmp_path), "pull", "--no-space-check"]) == cli.EXIT_ERROR
+    assert "holds the lock" in capsys.readouterr().err
+    lock.unlink()
+    assert cli.main([*_base(tmp_path), "pull", "--no-space-check"]) == cli.EXIT_OK
+    assert not lock.exists()
+
+
+def test_known_hosts_append_adds_missing_trailing_newline(tmp_path: Path) -> None:
+    from ledger_sync.remote import append_known_host
+
+    known = tmp_path / "known_hosts"
+    known.write_bytes(b"host1 ssh-rsa AAAA")   # 개행 없이 끝난 파일
+    append_known_host(known, "host2", "ssh-ed25519", "BBBB")
+    assert known.read_text(encoding="utf-8") == "host1 ssh-rsa AAAA\nhost2 ssh-ed25519 BBBB\n"
+
+
+def test_log_rotation_keeps_the_newest_by_mtime(tmp_path: Path) -> None:
+    import os
+
+    log_dir = tmp_path / "equity" / "_sync" / "logs"
+    log_dir.mkdir(parents=True)
+    names = [f"sync_{i:03d}.log" for i in range(cli.LOG_KEEP + 3)]
+    for i, name in enumerate(names):
+        path = log_dir / name
+        path.write_text("x", encoding="utf-8")
+        os.utime(path, (1_000_000 - i, 1_000_000 - i))   # 이름순과 반대로 오래된 mtime
+    cli._rotate_logs(tmp_path / "equity")
+    left = sorted(p.name for p in log_dir.glob("*.log"))
+    assert len(left) == cli.LOG_KEEP and "sync_000.log" in left and "sync_062.log" not in left

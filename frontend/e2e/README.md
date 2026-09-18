@@ -53,7 +53,7 @@ Requirements and expectations:
   history for the 2024 backtest window; otherwise the failure shows up as a backtest error, not as a
   data-coverage message.
 - The backend builds the TargetTape synchronously before it returns the run id, so the backtest start
-  request takes about 80 seconds on the full common-stock universe (measured 2026-09-19); the whole
-  spec took about 1.3 minutes.
+  request dominates the run: about 80 seconds of a 1.2-minute spec on the full common-stock universe
+  (measured 2026-09-19, Rust core; the engine itself finishes in about 2 seconds).
 - The run-settings default benchmark id `005930` is rejected by the real adapter (issue #154); the
   spec sets `005930:1` explicitly.

@@ -1,7 +1,7 @@
 # 카엘 서버 SFTP → 로컬 equity 층 동기화 CLI 래퍼 (Windows).
 #
 #   database\scripts\ledger_sync.ps1 plan
-#   database\scripts\ledger_sync.ps1 sync            # pull → verify → catalog (일일 작업이 부르는 동사)
+#   database\scripts\ledger_sync.ps1 sync            # pull → catalog → verify (일일 작업이 부르는 동사)
 #   database\scripts\ledger_sync.ps1 verify --level hash
 #   database\scripts\ledger_sync.ps1 status --remote
 #

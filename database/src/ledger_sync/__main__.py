@@ -198,9 +198,11 @@ def cmd_plan(args: argparse.Namespace) -> int:
     layer_root = _layer_root(args)
     state = load_state(layer_root, args.layer)
     with open_sftp(_endpoint(args), accept_new_host_key=args.accept_new) as remote:
+        # 미리보기는 값싸야 한다 — 재사용 직전 해시 재검사는 pull 이 한다(여기서는 MANIFEST 값만
+        # 본다).
         plan = make_plan(remote, _remote_root(args), layer_root, state, layer=args.layer,
                          tables=args.tables, reuse=not args.no_reuse,
-                         reuse_check=trusting_reuse_check if args.no_reuse_check else None)
+                         reuse_check=trusting_reuse_check)
     if args.json:
         print(json.dumps(_plan_json(plan), ensure_ascii=False, indent=1))
     else:
@@ -211,12 +213,14 @@ def cmd_plan(args: argparse.Namespace) -> int:
 def cmd_pull(args: argparse.Namespace) -> int:
     layer_root = _layer_root(args)
     state = load_state(layer_root, args.layer)
+    _acquire_lock(layer_root)
     log, handle, _ = _log_writer(layer_root, "pull")
     try:
         with open_sftp(_endpoint(args), accept_new_host_key=args.accept_new) as remote:
             report, _ = _run_pull(remote, args, layer_root, state, log)
     finally:
         handle.close()
+        _release_lock(layer_root)
     if args.json:
         print(json.dumps(_report_json(report), ensure_ascii=False, indent=1))
     else:
@@ -259,7 +263,9 @@ def _reject_conflicting_verify_options(parser: argparse.ArgumentParser,
 def _run_verify(remote: RemoteFS | None, args: argparse.Namespace, layer_root: Path,
                 state: SyncState, levels: Iterable[Level]) -> VerifyReport:
     report = VerifyReport()
-    if not require_coverage(layer_root, state, report, tables=args.tables):
+    levels = list(levels)
+    if not require_coverage(layer_root, state, report, tables=args.tables,
+                            level=levels[0] if levels else Level.MANIFEST):
         return report
     for level in levels:
         if level is Level.HASH:
@@ -301,12 +307,19 @@ def cmd_verify(args: argparse.Namespace) -> int:
 def cmd_gc(args: argparse.Namespace) -> int:
     layer_root = _layer_root(args)
     state = load_state(layer_root, args.layer)
+    _acquire_lock(layer_root)
     removed: list[str] = []
-    for table in sorted(state.tables):
-        removed.extend(gc_table(layer_root, table, state, args.keep))
-    print(f"== gc {args.layer}: removed={len(removed)} keep={args.keep}")
+    warnings: list[str] = []
+    try:
+        for table in sorted(state.tables):
+            removed.extend(gc_table(layer_root, table, state, args.keep, warnings))
+    finally:
+        _release_lock(layer_root)
+    print(f"== gc {args.layer}: removed={len(removed)} keep={args.keep} warnings={len(warnings)}")
     for item in removed:
         print(f"  {item}")
+    for warning in warnings:
+        print(f"  warning: {warning}")
     return EXIT_OK
 
 
@@ -349,6 +362,33 @@ def cmd_catalog(args: argparse.Namespace) -> int:
 
 
 LOG_KEEP = 60
+LOCK_NAME = "lock"
+
+
+class LayerLocked(RuntimeError):
+    """같은 층에 pull·gc·sync 가 이미 돌고 있다(`_sync/lock`). 겹쳐 돌면 state.json 을 서로
+    덮어쓴다."""
+
+
+def _acquire_lock(layer_root: Path) -> None:
+    path = layer_root / SYNC_DIR / LOCK_NAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError as error:
+        raise LayerLocked(
+            f"another pull/gc/sync holds the lock — path={path} "
+            f"(remove it if no ledger_sync process is running)"
+        ) from error
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(f"pid={os.getpid()} started={datetime.now(UTC).isoformat()}\n")
+
+
+def _release_lock(layer_root: Path) -> None:
+    try:
+        (layer_root / SYNC_DIR / LOCK_NAME).unlink()
+    except OSError:
+        pass  # 이미 없거나 못 지우면 다음 실행이 안내한다
 
 
 def _rotate_logs(layer_root: Path) -> None:
@@ -356,12 +396,16 @@ def _rotate_logs(layer_root: Path) -> None:
     log_dir = layer_root / SYNC_DIR / "logs"
     if not log_dir.is_dir():
         return
-    logs = sorted(log_dir.glob("*.log"))
-    for stale in logs[: max(0, len(logs) - LOG_KEEP)]:
-        try:
-            stale.unlink()
-        except OSError:
-            pass  # 열려 있는 로그는 다음 실행이 정리한다
+    by_verb: dict[str, list[Path]] = {}
+    for path in log_dir.glob("*.log"):
+        by_verb.setdefault(path.name.split("_", 1)[0], []).append(path)
+    for logs in by_verb.values():  # verb 별로 최근 LOG_KEEP 개 — pull 로그가 sync 에 밀리지 않게
+        logs.sort(key=lambda p: (p.stat().st_mtime, p.name))
+        for stale in logs[: max(0, len(logs) - LOG_KEEP)]:
+            try:
+                stale.unlink()
+            except OSError:
+                pass  # 열려 있는 로그는 다음 실행이 정리한다
 
 
 def _write_last_run(layer_root: Path, payload: dict[str, object]) -> Path:
@@ -376,6 +420,7 @@ def _write_last_run(layer_root: Path, payload: dict[str, object]) -> Path:
 def cmd_sync(args: argparse.Namespace) -> int:
     layer_root = _layer_root(args)
     state = load_state(layer_root, args.layer)
+    _acquire_lock(layer_root)
     log, handle, log_path = _log_writer(layer_root, "sync")
     started = datetime.now(UTC)
     # 예상 밖 예외로 죽어도 last_run.json 에 "성공" 이 남지 않도록 실패로 시작해 성공 경로에서만
@@ -395,15 +440,18 @@ def cmd_sync(args: argparse.Namespace) -> int:
             if args.layer == "equity" and not args.skip_catalog and not report.failed:
                 catalog_rc = run_catalog(layer_root, log)
                 payload["catalog_rc"] = catalog_rc
-                if catalog_rc != EXIT_OK:
-                    exit_code = EXIT_ERROR
+                if catalog_rc != EXIT_OK and exit_code == EXIT_OK:
+                    exit_code = EXIT_ERROR  # 첫 비영 코드(drifted 3)는 유지한다
             state = load_state(layer_root, args.layer)
             verify_report = _run_verify(remote, args, layer_root, state,
                                         [Level.MANIFEST, Level.FILES])
             # 이번에 받은(재사용 포함) 테이블은 내용(hash)까지 본다 — 하루치는 파티션 몇 개라 싸다.
+            # 판본이 안 바뀐 표의 로컬 손상은 여기서 안 보이므로 `--hash-all`(주 1회 권장)로 전량을
+            # 본다.
             changed = [r.table for r in report.results if r.outcome is TableOutcome.DONE]
-            if changed and verify_report.ok:
-                verify_hash(layer_root, state, verify_report, tables=changed)
+            if verify_report.ok and (changed or args.hash_all):
+                verify_hash(layer_root, state, verify_report,
+                            tables=None if args.hash_all else changed)
         _print_verify(verify_report)
         payload["verify"] = _verify_json(verify_report)
         if not verify_report.ok and exit_code == EXIT_OK:
@@ -421,9 +469,14 @@ def cmd_sync(args: argparse.Namespace) -> int:
     finally:
         payload["finished_at_utc"] = datetime.now(UTC).isoformat(timespec="seconds")
         payload["exit_code"] = exit_code
-        _write_last_run(layer_root, payload)
         handle.close()
-        _rotate_logs(layer_root)
+        try:
+            _write_last_run(layer_root, payload)
+            _rotate_logs(layer_root)
+        except OSError as error:
+            # finally 안의 실패가 원인 예외를 가리지 않게 한다 — 기록 실패는 stderr 로만 남긴다
+            print(f"warning: could not write last_run.json — {error!r}", file=sys.stderr)
+        _release_lock(layer_root)
     print(f"== sync {args.layer}: exit={exit_code} log={log_path}")
     return exit_code
 
@@ -532,9 +585,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_catalog = sub.add_parser("catalog", help="equity.duckdb 재생성")
     p_catalog.set_defaults(fn=cmd_catalog)
 
-    p_sync = sub.add_parser("sync", help="pull → verify → catalog")
+    p_sync = sub.add_parser("sync", help="pull → catalog → verify")
     add_pull_options(p_sync)
     p_sync.add_argument("--skip-catalog", action="store_true")
+    p_sync.add_argument("--hash-all", action="store_true",
+                        help="이번에 받은 표만이 아니라 전 표의 파티션 content_hash 를 재계산한다")
     p_sync.set_defaults(fn=cmd_sync)
 
     p_status = sub.add_parser("status", help="마지막 실행·로컬 빌드")
@@ -558,7 +613,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     _reject_conflicting_verify_options(parser, args)
     try:
         return int(args.fn(args))
-    except (RemoteConnectError, RemoteTransferError, InsufficientDiskSpace) as error:
+    except (RemoteConnectError, RemoteTransferError, InsufficientDiskSpace,
+            LayerLocked) as error:
         print(f"error: {error}", file=sys.stderr)
         return EXIT_ERROR
     except ModuleNotFoundError as error:
@@ -567,6 +623,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                   f"database/scripts/ledger_sync.ps1|.sh, which adds it)", file=sys.stderr)
             return EXIT_ERROR
         raise
+    except RuntimeError as error:
+        # state.json 손상·경로 이탈 같은 설정 오류 — traceback 대신 문서화된 종료 코드
+        print(f"error: {error}", file=sys.stderr)
+        return EXIT_ERROR
 
 
 if __name__ == "__main__":

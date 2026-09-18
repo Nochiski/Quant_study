@@ -43,7 +43,7 @@ database\scripts\register_daily_sync.ps1
 | `verify` | `manifest`(current_build·카탈로그 snapshot) · `files`(이름·크기·MANIFEST 바이트) · `hash`(duckdb content_hash 재계산). `--offline` 은 hash 만. **검사 대상이 0건**(state 없음·`--tables` 오타)이면 통과가 아니라 4. stage 층은 파티션 content_hash 가 없어 hash 층위를 `skipped` 로 센다 | 0 · 4(불일치·검사 0건) |
 | `gc` | current 를 제외한 `v=*` 중 최신 `keep-1` 개만 남긴다. `_incoming` 잔재 정리 | 0 |
 | `catalog` | `python -m equity catalog` 위임 — `equity.duckdb` 매크로가 서버 절대경로를 굽고 있어 로컬에서 재생성해야 재무·컨센서스 필드가 산다 | 0 · 2 |
-| `sync` | pull → catalog(전송 실패가 없을 때) → verify(manifest·files). 카탈로그를 verify 앞에서 돌려야 verify 의 「카탈로그 stale」 지적이 그 자리에서 해소된다. `_sync/last_run.json` 에 결과, `_sync/logs/sync_<UTC>.log` 에 로그 | pull 실패 2 · catalog 실패 2 · 불일치 4 · drifted 3 |
+| `sync` | pull → catalog(전송 실패가 없을 때) → verify(manifest·files + 이번에 받은 표의 hash). 카탈로그를 verify 앞에서 돌려야 verify 의 「카탈로그 stale」 지적이 그 자리에서 해소된다. 판본이 안 바뀐 표의 로컬 손상은 보이지 않으므로 `--hash-all`(전 표 hash, 주 1회 권장)을 따로 돌린다. 같은 층에 pull·gc·sync 가 겹치면 `_sync/lock` 으로 거부(2). `_sync/last_run.json` 에 결과, `_sync/logs/` 에 verb 별 최근 60개 로그 | 첫 비영 코드: pull 실패 2 · drifted 3 · catalog 실패 2 · 불일치 4 |
 | `status` | 마지막 실행 결과·테이블별 로컬 빌드. `--remote` 면 서버 current_build 와 대조해 `BEHIND` 표시 | 0 |
 
 `--tables a b` 로 일부 테이블만, `--json` 으로 기계용 출력, `--layer stage` 로 stage 층(같은 규약).
@@ -68,7 +68,7 @@ database\scripts\register_daily_sync.ps1
 
 서버 `stage/build.py:_content_hash` 는 tmp 경로에서 `read_parquet(..., hive_partitioning=true)` 로
 `count(*), bit_xor(hash(CAST(row AS VARCHAR)))` 를 뜬다. 로컬 경로에는 `v=<build>` 가 섞여 hive 를
-켜면 `v` 컬럼이 붙어 값이 달라진다. `ledger_sync.verify.content_hash_sql` 은 hive 를 끄고 꼬리의
+켜면 `v` 컬럼이 붙어 값이 달라진다. `ledger_sync.hashing.content_hash_sql` 은 hive 를 끄고 꼬리의
 `year=YYYY` 만 컬럼으로 덧붙여 같은 struct 문자열을 만든다. 2026-09-19 실측: `security`(whole)·
 `adj_factor`(year 파티션) 전부 서버 MANIFEST 값과 일치(duckdb 1.5.5).
 

@@ -125,9 +125,27 @@ export {
 export type { StrategyOutlineSymbol } from "./model/strategy-outline";
 export {
   useSnippetInsertion,
+  type SnippetFailure,
   type SnippetFeedback,
   type SnippetInsertion,
 } from "./model/use-snippet-insertion";
+export {
+  useSourceTransactions,
+  type SourcePlanner,
+  type SourceTransactions,
+  type TransactionFailure,
+  type TransactionFeedback,
+} from "./model/use-source-transactions";
+export {
+  applyToTree,
+  detectEol,
+  planSourceOperation,
+  type PlanFailure,
+  type PlannedEdit,
+  type PlanResult,
+  type Scalar,
+  type SourceOperation,
+} from "./model/source-transactions";
 export {
   buildCanonicalSnippetCatalog,
   planSnippetEdit,

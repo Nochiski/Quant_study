@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo } from "react";
 
 import type { CodeEditorHandle } from "../../../shared/ui/code-editor";
 import type { DocumentState } from "./document-state";
@@ -9,15 +9,15 @@ import {
   type SnippetCatalogSource,
   type SnippetEditFailure,
 } from "./canonical-snippets";
+import { useSourceTransactions } from "./use-source-transactions";
+
+export type SnippetFailure =
+  SnippetEditFailure | "editor-unavailable" | "composing";
 
 export type SnippetFeedback =
   | { status: "idle" }
   | { status: "inserted"; label: string }
-  | {
-      status: "error";
-      label: string;
-      reason: SnippetEditFailure | "editor-unavailable" | "composing";
-    };
+  | { status: "error"; label: string; reason: SnippetFailure };
 
 export type SnippetInsertion = {
   snippets: readonly CanonicalSnippet[];
@@ -27,106 +27,57 @@ export type SnippetInsertion = {
   insert: (snippet: CanonicalSnippet) => void;
 };
 
-type ScopedFeedback = {
-  scope: object;
-  value: SnippetFeedback;
-};
-
-const IDLE_FEEDBACK: SnippetFeedback = { status: "idle" };
-
-/** Coordinates the editor command handle with pure schema projection and insertion planning. */
+/**
+ * 스니펫 카탈로그(순수 schema projection)와 source 트랜잭션 훅을 잇는다. 삽입은 `planSnippetEdit`가
+ * 커서 문맥을 `insert-key`/`insert-item` 연산으로 번역한 계획을 `useSourceTransactions.run`으로
+ * 적용한다(P3-02). 카탈로그 상태가 ready → unavailable → ready로 바뀌면 이전 구간의 feedback이
+ * 되살아나지 않도록 상태를 scope에 넣는다.
+ */
 export const useSnippetInsertion = (
   state: DocumentState,
   source: SnippetCatalogSource,
   editorActive = true,
 ): SnippetInsertion => {
-  const editor = useRef<CodeEditorHandle | null>(null);
-  const [scopedFeedback, setScopedFeedback] = useState<ScopedFeedback | null>(
-    null,
-  );
-  // A fresh token for every capability transition prevents ready -> unavailable -> ready from
-  // reviving feedback that belonged to the first ready interval.
-  const feedbackScope = useMemo(
-    () => ({ documentEpoch: state.documentEpoch, status: source.status }),
-    [source.status, state.documentEpoch],
+  const transactions = useSourceTransactions(
+    state,
+    editorActive,
+    source.status,
   );
   const snippets = useMemo(
     () => buildCanonicalSnippetCatalog(source),
     [source],
   );
-  const onEditorReady = useCallback((next: CodeEditorHandle | null): void => {
-    editor.current = next;
-  }, []);
-  const setFeedback = useCallback(
-    (value: SnippetFeedback): void => {
-      setScopedFeedback({
-        scope: feedbackScope,
-        value,
-      });
-    },
-    [feedbackScope],
-  );
+  const { run } = transactions;
   const insert = useCallback(
-    (snippet: CanonicalSnippet): void => {
-      if (state.format !== "yaml" || !editorActive) {
-        setFeedback({
-          status: "error",
-          label: snippet.label,
-          reason: "yaml-only",
-        });
-        return;
-      }
-      const current = editor.current;
-      if (current === null) {
-        setFeedback({
-          status: "error",
-          label: snippet.label,
-          reason: "editor-unavailable",
-        });
-        return;
-      }
-      if (state.composing) {
-        setFeedback({
-          status: "error",
-          label: snippet.label,
-          reason: "composing",
-        });
-        return;
-      }
-      const result = planSnippetEdit(
-        current.getText(),
-        state.format,
-        current.getSelection(),
-        snippet,
-      );
-      if (result.status === "error") {
-        setFeedback({
-          status: "error",
-          label: snippet.label,
-          reason: result.reason,
-        });
-        current.focus();
-        return;
-      }
-      const { edit } = result;
-      current.replaceRange(edit.from, edit.to, edit.insert, edit.selection);
-      current.scrollTo(edit.selection.from);
-      current.focus();
-      setFeedback({ status: "inserted", label: snippet.label });
-    },
-    [editorActive, setFeedback, state.composing, state.format],
+    (snippet: CanonicalSnippet): void =>
+      run(
+        ({ text, selection }) =>
+          planSnippetEdit(text, "yaml", selection, snippet),
+        snippet.label,
+      ),
+    [run],
   );
 
-  const feedback =
-    scopedFeedback?.scope === feedbackScope
-      ? scopedFeedback.value
-      : IDLE_FEEDBACK;
+  const feedback = useMemo((): SnippetFeedback => {
+    const current = transactions.feedback;
+    if (current.status === "applied")
+      return { status: "inserted", label: current.label };
+    if (current.status === "error") {
+      // planSnippetEdit는 PlanFailure를 스니펫 실패 코드로 이미 번역했으므로 남는 코드는 이 집합뿐이다.
+      return {
+        status: "error",
+        label: current.label,
+        reason: current.reason as SnippetFailure,
+      };
+    }
+    return current;
+  }, [transactions.feedback]);
 
   return {
     snippets,
     sourceStatus: source.status,
     feedback,
-    onEditorReady,
+    onEditorReady: transactions.onEditorReady,
     insert,
   };
 };

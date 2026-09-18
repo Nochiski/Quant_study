@@ -318,6 +318,150 @@ describe("comments and block scalars (review P1-1·P1-2)", () => {
   });
 });
 
+describe("nested inner first item removal keeps the comment between items (P3-01 2nd review P2-R1)", () => {
+  it("pulls the next line's content up to the outer dash, comment included", () => {
+    expect(
+      ok("a:\n  - - x\n    # y 설명\n    - y\n", {
+        kind: "remove",
+        pointer: "/a/0/0",
+      }).nextSource,
+    ).toBe("a:\n  - # y 설명\n    - y\n");
+    expect(
+      ok("a:\n  - - x\n    - y\n", { kind: "remove", pointer: "/a/0/0" })
+        .nextSource,
+    ).toBe("a:\n  - - y\n");
+  });
+});
+
+describe("insert-key before a sibling, empty values and empty documents (P3-02)", () => {
+  it("inserts after the previous sibling so the comment above `before` keeps describing it", () => {
+    const source = "a: 1\n# b를 설명\nb: 2\nc: 3\n";
+    expect(
+      ok(source, {
+        kind: "insert-key",
+        parentPointer: "",
+        key: "x",
+        value: 0,
+        before: "b",
+      }).nextSource,
+    ).toBe("a: 1\nx: 0\n# b를 설명\nb: 2\nc: 3\n");
+    expect(
+      ok(source, {
+        kind: "insert-key",
+        parentPointer: "",
+        key: "x",
+        value: 0,
+        before: "a",
+      }).nextSource,
+    ).toBe("x: 0\na: 1\n# b를 설명\nb: 2\nc: 3\n");
+    const nested = "m:\n  p: 1\n  q: 2\nz: 0\n";
+    expect(
+      ok(nested, {
+        kind: "insert-key",
+        parentPointer: "/m",
+        key: "x",
+        value: 0,
+        before: "p",
+      }).nextSource,
+    ).toBe("m:\n  x: 0\n  p: 1\n  q: 2\nz: 0\n");
+    expect(
+      ok(nested, {
+        kind: "insert-key",
+        parentPointer: "/m",
+        key: "x",
+        value: 0,
+        before: "q",
+      }).nextSource,
+    ).toBe("m:\n  p: 1\n  x: 0\n  q: 2\nz: 0\n");
+    expect(
+      plan(nested, {
+        kind: "insert-key",
+        parentPointer: "/m",
+        key: "x",
+        value: 0,
+        before: "nope",
+      }),
+    ).toEqual({ status: "error", reason: "not-found" });
+  });
+
+  it("takes the dash position when `before` is the first key of a sequence item", () => {
+    const source = "a:\n  - p: 1\n    q: 2\n";
+    expect(
+      ok(source, {
+        kind: "insert-key",
+        parentPointer: "/a/0",
+        key: "x",
+        value: 0,
+        before: "p",
+      }).nextSource,
+    ).toBe("a:\n  - x: 0\n    p: 1\n    q: 2\n");
+  });
+
+  it("opens a block container under a value-less key, keeping its end-of-line comment", () => {
+    expect(
+      ok("factors:\nz: 1\n", {
+        kind: "insert-item",
+        parentPointer: "/factors",
+        value: { id: "a" },
+      }).nextSource,
+    ).toBe("factors:\n  - id: a\nz: 1\n");
+    expect(
+      ok("risk: # 비움\nz: 1\n", {
+        kind: "insert-key",
+        parentPointer: "/risk",
+        key: "k",
+        value: 1,
+      }).nextSource,
+    ).toBe("risk: # 비움\n  k: 1\nz: 1\n");
+    expect(
+      ok("a:\n  - b:\n", {
+        kind: "insert-item",
+        parentPointer: "/a/0/b",
+        value: 1,
+      }).nextSource,
+    ).toBe("a:\n  - b:\n      - 1\n");
+    expect(
+      plan("factors:\n", {
+        kind: "insert-item",
+        parentPointer: "/factors",
+        value: 1,
+        index: 1,
+      }),
+    ).toEqual({ status: "error", reason: "not-found" });
+  });
+
+  it("treats a blank or comment-only document as an empty root mapping for a root insert-key", () => {
+    const op: SourceOperation = {
+      kind: "insert-key",
+      parentPointer: "",
+      key: "signal",
+      value: { a: 1 },
+    };
+    for (const [source, expected] of [
+      ["", "signal:\n  a: 1"],
+      ["  \n", "signal:\n  a: 1"],
+      ["# 머리말\n", "# 머리말\nsignal:\n  a: 1"],
+      ["{}", "signal:\n  a: 1"],
+    ] as const) {
+      const result = plan(source, op);
+      expect(result.status).toBe("ok");
+      if (result.status === "ok") expect(result.edit.nextSource).toBe(expected);
+    }
+    expect(
+      plan("", { kind: "insert-item", parentPointer: "", value: 1 }),
+    ).toEqual({
+      status: "error",
+      reason: "parse",
+    });
+    expect(
+      plan("", { kind: "insert-key", parentPointer: "/x", key: "k", value: 1 }),
+    ).toEqual({
+      status: "error",
+      reason: "parse",
+    });
+  });
+});
+
 describe("golden document", () => {
   it("round-trips every scalar of the 1.1 golden through replace-scalar with the same value", () => {
     const parsed = parseSource(GOLDEN, "yaml");

@@ -507,11 +507,18 @@ export const planSourceOperation = (source: string, format: SourceFormat, op: So
   빈 컨테이너 확장에만 쓰이고 일반 삽입은 형제의 실제 열을 복사), EOL은 `\r\n`/`\n` 다수결.
   모든 연산은 `parseSource(nextSource).status === "ok"` preflight.
 - 알려진 제한(P3-01 리뷰): 내용이 있는 flow 컬렉션(`{x: 1}`, `[1, 2]`) 안은 편집하지 않는다(fail-closed,
-  사유는 `parse`/`not-sequence`/`not-found`). 값이 비어 있는 `key:` 부모에 `insert-key`는 `not-mapping`이다
-  (P4-02 착수 전 확장 여부 결정). 삭제된 키/항목 **위**의 독립 주석은 그 자리에 남는다(어느 키의 주석인지
-  YAML이 답하지 않으므로 보수적으로 보존). 단, `- - x`처럼 바깥 `-`와 줄을 공유하는 안쪽 첫 항목 삭제는
-  다음 항목의 `-`까지 지우므로 그 사이 주석이 함께 사라진다(P3-01 2차 리뷰 P2-R1; schema 1.1 문서에는
-  시퀀스의 직접 자식 시퀀스가 없어 실사용 경로 밖).
+  사유는 `parse`/`not-sequence`/`not-found`). 삭제된 키/항목 **위**의 독립 주석은 그 자리에 남는다(어느 키의
+  주석인지 YAML이 답하지 않으므로 보수적으로 보존). 예외는 삭제로 부모가 비어 `{}`/`[]`로 접힐 때뿐이다:
+  그 컨테이너 안에 있던 주석은 함께 사라진다(property test의 주석 소유자 규칙: 키 줄과 항목 줄이 소유자이고,
+  `remove`는 대상 pointer와 그 아래가 소유한 주석만 지울 수 있다).
+- P3-02에서 확장(P3-01 알려진 제한 해소): 값이 비어 있는 `key:`(`factors:` → null)는 삽입 연산의 부모로
+  쓰일 때 빈 컨테이너로 본다(`insert-key`면 `{}`, `insert-item`이면 `[]`, 줄 끝 주석은 그대로 두고 그
+  줄 끝 뒤에 block을 연다). 내용이 전혀 없는 문서(빈 줄·주석뿐, parser는 거부)는 **루트 `insert-key`에
+  한해** 빈 mapping으로 본다(새 문서·스니펫 첫 삽입). `insert-key`는 `before`(형제 키)를 받아 그 **앞
+  형제의 내용 줄 끝** 뒤에 넣는다(`before` 키 위의 주석은 계속 `before`를 설명; `before`가 `- key:`
+  dash 줄 첫 키면 그 자리에 들어가고 기존 키는 다음 줄로). `- - x` 안쪽 첫 항목 삭제는 dash 줄 첫 키와
+  같은 규칙(자기 내용 줄 끝까지 지우고 다음 줄 들여쓰기를 걷음)이라 사이 주석이 남는다(2차 리뷰 P2-R1
+  대안 2).
 - 범위는 `parseSource`의 `valueRanges`/`keyRanges`에서 **정확히 그 pointer로** 읽는다.
   `locateRange`는 pointer가 없으면 조상 범위로 fallback하므로 `replace-scalar`·`remove`에 쓰면 부모
   전체를 지운다. 없는 pointer는 `not-found`다(Phase 2 감사 4.5). mapping/sequence 노드의 range는
@@ -549,6 +556,18 @@ export const useSourceTransactions = (state: DocumentState, editorActive?: boole
 - 스니펫: `canonical-snippets.ts`의 fragment 문자열 조립(`fragmentFor`, `indentFragment`)을 제거하고
   `planSnippetEdit`는 커서 context를 `insert-key`/`insert-item` 연산으로 번역만 한다. 기존 스니펫
   테스트 전부 통과(동작 동일).
+- 구현 결정(P3-02): 훅은 `run(planner, label)`도 낸다 — 편집기 현재 텍스트·선택으로 계획하는 함수를
+  같은 적용 경로(`replaceRange` 한 번, scroll, focus, feedback)로 태운다. `apply(op)`는
+  `run(({text}) => planSourceOperation(text, "yaml", op))`이고 스니펫은 `run(({text, selection}) =>
+  planSnippetEdit(...))`이다. 스니펫이 연산 하나로 표현되지 않는 이유: 커서 줄에 반쯤 입력한 키(`sig`)를
+  빼고 나서 연산을 계획해야 하고, 결과는 그 키까지 포함한 단일 범위 편집(history 한 번)이어야 한다.
+  `planSnippetEdit`는 (1) 중복 판정(원문 전체, 커서 문맥보다 먼저) (2) 커서 줄을 뺀 원문 (3) 커서 줄
+  뒤에 오던 첫 형제 → `before`, 앞에 있던 항목 수 → `index` (4) `planSourceOperation(stripped, op,
+  { eol })` (5) 원문 대비 단일 범위 diff(접두는 키 시작까지, 접미는 커서 줄 끝부터)를 한다. EOL은 원문에서
+  재고 `options.eol`로 넘긴다(커서 줄을 빼면 한 줄 문서가 되어 EOL 정보를 잃는 경우). feedback scope는
+  `documentEpoch` + 호출자 `scope`(스니펫은 카탈로그 status)다. 계획은 편집기 `getText()`로 세우므로
+  연산 1회 = parse 2회(계획·preflight)이고 호출은 keystroke가 아니라 확정(blur·Enter·버튼) 시점만이다
+  (P3-01 리뷰 잔여 위험의 처리 방식; P4-02 필드 편집이 이 규칙을 따른다).
 
 **Phase 3 exit**: SoT 점검(정본이 source 하나인지, 프론트에 필드 목록이 없는지).
 

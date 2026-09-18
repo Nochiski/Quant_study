@@ -511,7 +511,10 @@ def _closed_trades(
                 opened_on=state.opened_on,
                 closed_on=session,
                 side="long" if state.quantity > 0 else "short",
-                quantity=str(Decimal(str(closed_quantity)).normalize()),
+                # 지수 표기 금지(#135): `Decimal("700.0").normalize()`는 `7E+2`라 `str()`이
+                # "7E+2"를 냈다. `format(…, "f")`는 같은 값을 "700"으로 — fills·positions의
+                # 정수 문자열과 표현이 맞는다.
+                quantity=format(Decimal(str(closed_quantity)).normalize(), "f"),
                 entry_price=state.average_price,
                 exit_price=price,
                 pnl=gross_pnl - fees,

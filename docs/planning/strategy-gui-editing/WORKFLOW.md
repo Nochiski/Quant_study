@@ -509,7 +509,9 @@ export const planSourceOperation = (source: string, format: SourceFormat, op: So
 - 알려진 제한(P3-01 리뷰): 내용이 있는 flow 컬렉션(`{x: 1}`, `[1, 2]`) 안은 편집하지 않는다(fail-closed,
   사유는 `parse`/`not-sequence`/`not-found`). 값이 비어 있는 `key:` 부모에 `insert-key`는 `not-mapping`이다
   (P4-02 착수 전 확장 여부 결정). 삭제된 키/항목 **위**의 독립 주석은 그 자리에 남는다(어느 키의 주석인지
-  YAML이 답하지 않으므로 보수적으로 보존).
+  YAML이 답하지 않으므로 보수적으로 보존). 단, `- - x`처럼 바깥 `-`와 줄을 공유하는 안쪽 첫 항목 삭제는
+  다음 항목의 `-`까지 지우므로 그 사이 주석이 함께 사라진다(P3-01 2차 리뷰 P2-R1; schema 1.1 문서에는
+  시퀀스의 직접 자식 시퀀스가 없어 실사용 경로 밖).
 - 범위는 `parseSource`의 `valueRanges`/`keyRanges`에서 **정확히 그 pointer로** 읽는다.
   `locateRange`는 pointer가 없으면 조상 범위로 fallback하므로 `replace-scalar`·`remove`에 쓰면 부모
   전체를 지운다. 없는 pointer는 `not-found`다(Phase 2 감사 4.5). mapping/sequence 노드의 range는

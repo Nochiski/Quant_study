@@ -174,15 +174,15 @@ max_name_wieght: 0.05
 
 ![v1과 v2 차이 보기](assets/06-revision-diff.png)
 
-붙여넣거나 연 문서의 줄 끝은 편집창이 LF로 통일한다(Windows 메모장의 CRLF 포함). 그래서 아무것도
-고치지 않고 저장해도 `source_hash`가 바뀔 수 있다. 전략 의미의 해시(`spec_hash`)는 그대로다.
-
 - `원문 변경`은 글자와 주석이 어떻게 바뀌었는지 보여 준다.
 - `의미 변경`은 서버가 정리한 StrategySpec 필드가 바뀌었는지 보여 준다. 제목과 설명도
   StrategySpec에 들어 있으므로 여기에 표시된다.
 
 주석만 고쳤다면 원문은 달라도 의미 변경은 없을 수 있다. 실제 매매 동작의 차이를 보려면
 `selection_count`, `max_name_weight`, `fee_bps` 같은 필드가 바뀌었는지 확인한다.
+
+붙여넣거나 연 문서의 줄 끝은 편집창이 LF로 통일한다(Windows 메모장의 CRLF 포함). 그래서 아무것도
+고치지 않고 저장해도 `source_hash`가 바뀔 수 있다. 전략 의미의 해시(`spec_hash`)는 그대로다.
 
 ## 5. 종목이 왜 선택됐는지 확인하기
 

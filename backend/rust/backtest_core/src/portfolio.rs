@@ -290,6 +290,60 @@ mod tests {
         assert!((gross - 1_200.0 / equity).abs() < 1e-12);
     }
 
+    /// 원장 삭제가 뒤 항목 위치를 한 칸씩 당기므로 `ledger_slots`가 그 시프트를 따라가야 한다.
+    /// 중간 삭제 → 뒤 항목 조회·갱신, 재삽입 위치, 맨 앞 삭제를 순서대로 확인한다.
+    #[test]
+    fn ledger_slots_follow_removal_shift() {
+        let mut portfolio = Portfolio::new(1_000_000.0, false, false);
+        for key in ["a", "b", "c", "d"] {
+            portfolio.apply(key, "buy", 10, 100.0, 0.0).unwrap();
+        }
+        assert_eq!(keys_of(&portfolio), vec!["a", "b", "c", "d"]);
+
+        // 중간 항목 제거 — 뒤의 c·d가 한 칸씩 앞으로 당겨진다.
+        portfolio.apply("b", "sell", 10, 100.0, 0.0).unwrap();
+        assert_eq!(keys_of(&portfolio), vec!["a", "c", "d"]);
+        assert_eq!(portfolio.held_qty("b"), 0);
+        assert_eq!(portfolio.average_price("b"), None);
+        assert_eq!(portfolio.held_qty("c"), 10);
+        assert_eq!(portfolio.held_qty("d"), 10);
+
+        // 당겨진 뒤 항목 갱신이 엉뚱한 원장을 건드리지 않는다.
+        portfolio.apply("d", "buy", 10, 200.0, 0.0).unwrap();
+        assert_eq!(portfolio.held_qty("d"), 20);
+        assert_eq!(portfolio.average_price("d"), Some(150.0));
+        assert_eq!(portfolio.held_qty("c"), 10);
+        assert_eq!(portfolio.average_price("c"), Some(100.0));
+
+        // 재삽입은 Python dict처럼 맨 뒤에 붙는다 (원래 자리로 돌아가지 않는다).
+        portfolio.apply("b", "buy", 5, 300.0, 0.0).unwrap();
+        assert_eq!(keys_of(&portfolio), vec!["a", "c", "d", "b"]);
+        assert_eq!(portfolio.held_qty("b"), 5);
+        assert_eq!(portfolio.average_price("b"), Some(300.0));
+
+        // 맨 앞 제거 — 나머지 셋 전부가 한 칸씩 당겨진다.
+        portfolio.apply("a", "sell", 10, 100.0, 0.0).unwrap();
+        assert_eq!(keys_of(&portfolio), vec!["c", "d", "b"]);
+        for (key, quantity, average) in [("c", 10, 100.0), ("d", 20, 150.0), ("b", 5, 300.0)] {
+            assert_eq!(portfolio.held_qty(key), quantity, "{key}");
+            assert_eq!(portfolio.average_price(key), Some(average), "{key}");
+        }
+
+        // 스냅샷 행 순서가 삽입 순서 정본인 `ledgers`와 같다.
+        portfolio.mark_refs(&[("c", 100.0), ("d", 150.0), ("b", 300.0)]);
+        let (_, positions, _, _) = portfolio.snapshot().unwrap();
+        let rows: Vec<&str> = positions.iter().map(|row| row.0.as_str()).collect();
+        assert_eq!(rows, vec!["c", "d", "b"]);
+    }
+
+    fn keys_of(portfolio: &Portfolio) -> Vec<&str> {
+        portfolio
+            .ledgers
+            .iter()
+            .map(|(key, _)| key.as_str())
+            .collect()
+    }
+
     #[test]
     fn long_to_short_flip_resets_average() {
         let mut portfolio = Portfolio::new(10_000.0, true, false);

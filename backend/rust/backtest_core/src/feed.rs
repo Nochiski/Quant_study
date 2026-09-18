@@ -414,6 +414,73 @@ mod tests {
         assert_eq!(feed.session_len(), 2);
     }
 
+    /// bar가 빠진 세션이 섞인 피드에서 `row_index`가 "그날 행 없음"을 정확히 표시하는지.
+    /// A는 D2에, C는 D1·D2에 bar가 없다.
+    #[test]
+    fn row_index_reports_sessions_without_a_bar() {
+        let mut feed = PersistentFeed::new(
+            vec!["A".into(), "B".into(), "C".into()],
+            vec!["AAA".into(), "BBB".into(), "CCC".into()],
+            vec!["D1".into(), "D2".into(), "D3".into()],
+            vec![0, 2, 3, 6],
+            vec![0, 1, 1, 0, 1, 2],
+            vec![10.0, 20.0, 21.0, 12.0, 22.0, 30.0],
+            vec![11.0, 21.0, 22.0, 13.0, 23.0, 31.0],
+            vec![9.0, 19.0, 20.0, 11.0, 21.0, 29.0],
+            vec![10.5, 20.5, 21.5, 12.5, 22.5, 30.5],
+            vec![100, 200, 300, 400, 500, 600],
+        )
+        .unwrap();
+
+        // has_bar: 결측 세션만 false.
+        let present = [
+            (0, "A", true),
+            (0, "B", true),
+            (0, "C", false),
+            (1, "A", false),
+            (1, "B", true),
+            (1, "C", false),
+            (2, "A", true),
+            (2, "B", true),
+            (2, "C", true),
+        ];
+        for (session, key, expected) in present {
+            assert_eq!(
+                feed.has_bar(session, key),
+                expected,
+                "session={session} key={key}"
+            );
+        }
+        // 등록부에 없는 key는 어느 세션에서도 bar가 없다.
+        assert!(!feed.has_bar(0, "Z"));
+
+        // open_at: 결측 세션은 None, 있는 세션은 그 행의 시가.
+        assert_eq!(feed.open_at(0, "A"), Some(10.0));
+        assert_eq!(feed.open_at(1, "A"), None);
+        assert_eq!(feed.open_at(1, "B"), Some(21.0));
+        assert_eq!(feed.open_at(0, "C"), None);
+        assert_eq!(feed.open_at(2, "C"), Some(30.0));
+
+        // 정산 세션은 사건 시각 이후 그 종목이 실제로 거래된 첫 세션이다.
+        assert_eq!(feed.settlement_session_index("C", "D1"), Some(2));
+        assert_eq!(feed.settlement_session_index("A", "D2"), Some(2));
+
+        // history_window: 결측 세션 값은 NaN으로 채운다 (세션당 요청 종목 순서).
+        feed.set_current(2).unwrap();
+        let (timestamps, values) = feed
+            .history_window(&["A".to_string(), "C".to_string()], "close", 3, "D3")
+            .unwrap();
+        assert_eq!(timestamps, vec!["D1", "D2", "D3"]);
+        let expected = [Some(10.5), None, None, None, Some(12.5), Some(30.5)];
+        assert_eq!(values.len(), expected.len());
+        for (index, (value, want)) in values.iter().zip(expected).enumerate() {
+            match want {
+                Some(want) => assert_eq!(*value, want, "index={index}"),
+                None => assert!(value.is_nan(), "index={index} value={value}"),
+            }
+        }
+    }
+
     #[test]
     fn registry_rejects_one_key_with_two_symbols() {
         let error = PersistentFeed::new(

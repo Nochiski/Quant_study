@@ -24,8 +24,19 @@ mod tape;
 
 use pyo3::prelude::*;
 
+pyo3::create_exception!(
+    backtest_core,
+    RouteErrorException,
+    pyo3::exceptions::PyValueError,
+    "결정 라우팅 오류. args=(code, message)이며 Python 어댑터가 엔진 예외로 바꾼다."
+);
+
 #[pymodule]
 fn backtest_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add(
+        "RouteErrorException",
+        m.py().get_type::<RouteErrorException>(),
+    )?;
     callback::register(m)?;
     execution::register(m)?;
     persistent::register(m)?;

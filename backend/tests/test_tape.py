@@ -17,6 +17,7 @@ from backtest_engine import BacktestEngine, RunConfig
 from backtest_engine.data.feed import DataFeed
 from backtest_engine.engine.core import core_available
 from backtest_engine.engine.tape import evaluate_tape, is_declarative_tape
+from backtest_engine.errors import UndeclaredActionReturned
 from backtest_engine.types.actions import (
     ActionKind,
     ExecutionPolicy,
@@ -139,8 +140,15 @@ class _TapeStrategy:
 
     idle_reason = "tape_idle"
 
-    def __init__(self, frames: Mapping[date, TapeFrame]) -> None:
+    def __init__(
+        self,
+        frames: Mapping[date, TapeFrame],
+        actions: frozenset[ActionKind] = frozenset(
+            {ActionKind.NO_ACTION, ActionKind.SET_PORTFOLIO_TARGET}
+        ),
+    ) -> None:
         self._frames = frames
+        self._actions = actions
         self.callbacks = 0
 
     def requirements(self) -> StrategyRequirements:
@@ -148,7 +156,7 @@ class _TapeStrategy:
             histories=(),
             schedule=EverySession(),
             events=frozenset({EventKind.MARKET}),
-            actions=frozenset({ActionKind.NO_ACTION, ActionKind.SET_PORTFOLIO_TARGET}),
+            actions=self._actions,
             features=frozenset(),
         )
 
@@ -233,6 +241,30 @@ def test_rust_tape_path_matches_python_trace_without_callbacks() -> None:
         "000660",
         "005930",
     ]
+
+
+@RUST_ONLY
+def test_tape_routing_error_raises_the_same_engine_exception_in_both_cores() -> None:
+    """tape 경로 라우팅 오류도 콜백 경로와 같은 엔진 예외로 올라온다 (문자열 인코딩 아님)."""
+    frames = {day(1).date(): _delisting_frames()[day(1).date()]}
+    failures: list[tuple[type[BaseException], str, bytes]] = []
+    for core in ("python", "rust"):
+        # 프레임은 SET_PORTFOLIO_TARGET을 내는데 requirements()는 NO_ACTION만 선언했다.
+        strategy = _TapeStrategy(frames, frozenset({ActionKind.NO_ACTION}))
+        engine = BacktestEngine(
+            RunConfig(run_id="tape-route-error", initial_cash=100_000.0), core=core
+        )
+        with pytest.raises(UndeclaredActionReturned) as caught:
+            engine.run(strategy, _delisting_feed())
+        failures.append(
+            (
+                type(caught.value),
+                str(caught.value).partition(" — ")[0],
+                engine.event_store.trace_bytes(),
+            )
+        )
+    assert failures[0] == failures[1]
+    assert failures[0][1] == "action kind was not declared in requirements()"
 
 
 @RUST_ONLY

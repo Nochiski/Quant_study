@@ -403,6 +403,16 @@ class PersistentPortfolio:
         return built
 
 
+@functools.cache
+def route_error_exception() -> type[BaseException]:
+    """Rust 드라이버가 라우팅 오류에 쓰는 예외 타입. `args`는 `(code, message)`다.
+
+    확장 심볼 조회를 한 곳에 모으고 세션마다 반복되는 import를 피하려고 메모한다.
+    """
+    _require_core("rust_persistent")
+    return cast(type[BaseException], importlib.import_module("backtest_core").RouteErrorException)
+
+
 def make_persistent_runtime(
     initial_cash: float,
     *,

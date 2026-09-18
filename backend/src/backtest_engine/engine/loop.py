@@ -48,6 +48,7 @@ from backtest_engine.engine.core import (
     make_portfolio,
     make_pricing,
     make_quote_core,
+    route_error_exception,
     slippage_config,
 )
 from backtest_engine.engine.costs import session_costs
@@ -523,14 +524,15 @@ class BacktestEngine:
 
     @staticmethod
     def _drive(runtime: Any) -> Any | None:  # reason: pyo3 확장 모듈(backtest_core) stub 부재
-        """Rust 드라이버를 한 번 전진시키고, 도메인 오류 접두어를 엔진 예외로 바꾼다."""
+        """Rust 드라이버를 한 번 전진시키고, 도메인 오류를 엔진 예외로 바꾼다."""
         try:
             return runtime.drive()
+        # 확장 심볼이라 except 절에서 지연 조회한다 — 예외가 났을 때만 평가된다.
+        except route_error_exception() as error:
+            code, detail = error.args
+            raise route_error_from((code, detail)) from error
         except ValueError as error:
             message = str(error)
-            if message.startswith("route_error:"):
-                _, code, detail = message.split(":", 2)
-                raise route_error_from((code, detail)) from error
             if message.startswith("equity_wiped_out: "):
                 raise EquityWipedOut(message.removeprefix("equity_wiped_out: ")) from error
             if message.startswith("negative_position: "):

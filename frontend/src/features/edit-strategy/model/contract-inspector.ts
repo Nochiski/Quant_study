@@ -14,9 +14,15 @@ import type {
 } from "../../../shared/api";
 import {
   escapePointerSegment,
-  pointerSegments,
   templatePointer,
+  valueAtPointer,
 } from "../../../shared/lib/yaml12";
+import {
+  isApplicableWhen,
+  projectApplicability,
+  type DefaultResolver,
+  type FieldApplicability,
+} from "./field-applicability";
 import { discriminatorAt, schemaAt, type JsonSchema } from "./schema-navigator";
 
 export type ContractResourceState = "loading" | "ready" | "error";
@@ -81,6 +87,8 @@ export type ContractFieldProjection = {
   discriminator: ContractDiscriminator | null;
   /** Branches that define this property differently; metadata is withheld until kind resolves. */
   unresolvedBranches: readonly string[] | null;
+  /** backend 조건표 행(`applicable_when`/`x-applicable-when`)의 현재 문서 판정. 행이 없으면 null. */
+  applicability: FieldApplicability | null;
 };
 
 export type ContractCatalogProjection =
@@ -157,9 +165,6 @@ export type ContractInspectorProjection =
       };
     };
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 const own = (value: object, key: string): boolean =>
   Object.prototype.hasOwnProperty.call(value, key);
 
@@ -175,24 +180,7 @@ export const isSchemaContractCompatible = (
   schema.schema_hash === contract.contract.schema_hash &&
   schema.schema_version === contract.contract.schema_version;
 
-export const valueAt = (
-  tree: unknown,
-  pointer: string,
-): { present: boolean; value: unknown } => {
-  let current = tree;
-  for (const segment of pointerSegments(pointer)) {
-    if (Array.isArray(current)) {
-      if (!/^\d+$/.test(segment) || Number(segment) >= current.length)
-        return { present: false, value: undefined };
-      current = current[Number(segment)];
-    } else if (isRecord(current) && own(current, segment)) {
-      current = current[segment];
-    } else {
-      return { present: false, value: undefined };
-    }
-  }
-  return { present: tree !== undefined, value: current };
-};
+export const valueAt = valueAtPointer;
 
 export const contractFor = (
   contract: readonly FieldContract[],
@@ -350,6 +338,23 @@ export const projectContractField = (
     branchDependent || unresolvedDiscriminatorProperty
       ? undefined
       : (row?.const ?? node.const);
+  // 조건 필드가 문서에 없으면 backend가 발행한 기본값(contract 행 → schema node)으로 판정한다.
+  const resolveDefault: DefaultResolver = (conditionPointer) => {
+    const conditionRow = contractFor(contract, conditionPointer, null);
+    if (conditionRow?.has_default === true)
+      return { has: true, value: conditionRow.default };
+    const conditionNode = schemaAt(schema, conditionPointer, tree)?.node;
+    return conditionNode !== undefined && own(conditionNode, "default")
+      ? { has: true, value: conditionNode.default }
+      : { has: false, value: undefined };
+  };
+  // typed contract 행을 우선하고, 같은 모양의 runtime schema 마커는 경계 검사를 거쳐 받는다.
+  const applicableWhen = branchDependent
+    ? null
+    : (row?.applicable_when ??
+      (isApplicableWhen(node["x-applicable-when"])
+        ? node["x-applicable-when"]
+        : null));
   const shape =
     pointer === ""
       ? "root"
@@ -415,6 +420,10 @@ export const projectContractField = (
     },
     discriminator,
     unresolvedBranches,
+    applicability:
+      applicableWhen === null
+        ? null
+        : projectApplicability(applicableWhen, tree, resolveDefault),
   };
 };
 

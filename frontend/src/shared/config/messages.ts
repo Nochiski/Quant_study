@@ -344,6 +344,7 @@ const ko = {
   "projection.specHash": "backend spec hash",
   "projection.section.metadata": "기본 정보",
   "projection.section.data": "데이터",
+  "projection.section.signal": "신호",
   "projection.section.portfolio": "포트폴리오",
   "projection.section.risk": "리스크",
   "projection.section.execution": "실행",
@@ -438,6 +439,28 @@ const ko = {
   "contract.yes": "예",
   "contract.no": "아니요",
   "contract.sessions": "세션",
+  "contract.applicableWhen": "적용 조건",
+  "contract.applicable.holds": "현재 문서에서 읽힙니다.",
+  "contract.applicable.inapplicable":
+    "현재 문서에서는 읽히지 않습니다. {conditions}일 때만 적용됩니다.",
+  "contract.applicable.unknown":
+    "조건 필드가 문서에 없어 backend 기본값이 판정합니다(compile 경고 참조).",
+  "contract.applicable.ownedByError": "위반 시 보고되는 오류",
+  "contract.applicable.badge": "현재 모드에서 읽히지 않음",
+  "contract.applicable.condition.set": "{path} 설정",
+  "contract.applicable.and": " 그리고 ",
+  "strategy.contract.applicable.selection_count":
+    "롱 포트폴리오에 선택할 종목 수",
+  "strategy.contract.applicable.short_selection_count":
+    "숏 포트폴리오에 선택할 종목 수",
+  "strategy.contract.applicable.selection_percentile":
+    "점수 상위에서 선택할 비율",
+  "strategy.contract.applicable.rebalance_every_n_sessions":
+    "리밸런싱 주기(세션 수)",
+  "strategy.contract.applicable.minimum_liquidity": "최소 유동성 하한",
+  "strategy.contract.applicable.sector_neutral": "섹터 중립 여부",
+  "strategy.contract.applicable.risk_field_id": "위험 가중에 쓰는 필드",
+  "strategy.contract.applicable.regime_minimum": "레짐 값 하한",
   "strategy.contract.portfolio.selection_count":
     "롱 포트폴리오에 선택할 종목 수",
   "strategy.contract.portfolio.short_selection_count":
@@ -1120,6 +1143,7 @@ export const messages = {
     "projection.specHash": "Backend spec hash",
     "projection.section.metadata": "Basics",
     "projection.section.data": "Data",
+    "projection.section.signal": "Signal",
     "projection.section.portfolio": "Portfolio",
     "projection.section.risk": "Risk",
     "projection.section.execution": "Execution",
@@ -1215,6 +1239,29 @@ export const messages = {
     "contract.yes": "Yes",
     "contract.no": "No",
     "contract.sessions": "sessions",
+    "contract.applicableWhen": "Applies when",
+    "contract.applicable.holds": "Read in the current document.",
+    "contract.applicable.inapplicable":
+      "Not read in the current document. Applies only when {conditions}.",
+    "contract.applicable.unknown":
+      "The condition field is not written; the backend default decides (see compile warnings).",
+    "contract.applicable.ownedByError": "Reported as error on violation",
+    "contract.applicable.badge": "Not read in this mode",
+    "contract.applicable.condition.set": "{path} set",
+    "contract.applicable.and": " and ",
+    "strategy.contract.applicable.selection_count":
+      "Number of names in the long portfolio",
+    "strategy.contract.applicable.short_selection_count":
+      "Number of names in the short portfolio",
+    "strategy.contract.applicable.selection_percentile":
+      "Fraction selected from the top of the score",
+    "strategy.contract.applicable.rebalance_every_n_sessions":
+      "Rebalance interval in sessions",
+    "strategy.contract.applicable.minimum_liquidity": "Minimum liquidity floor",
+    "strategy.contract.applicable.sector_neutral": "Sector neutrality",
+    "strategy.contract.applicable.risk_field_id":
+      "Field used for risk weighting",
+    "strategy.contract.applicable.regime_minimum": "Regime value floor",
     "strategy.contract.portfolio.selection_count":
       "Number of names in the long portfolio",
     "strategy.contract.portfolio.short_selection_count":

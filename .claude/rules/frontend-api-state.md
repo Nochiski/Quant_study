@@ -21,6 +21,9 @@ paths:
   곳에 두고 사유를 남긴다.
 - frontend validation은 빠른 피드백용이다. 저장·실행 가능 여부의 최종 판정과 오류 코드는
   backend가 소유한다.
+- backend가 코드로 분기하는 422(`ApiRequestError.code`)는 `upgrade.error.<code>`·
+  `backtest.error.<code>`처럼 코드를 키로 하는 문구로 번역한다. 번역이 없으면 일반 문구로
+  떨어지되 원문 detail을 그대로 노출하지 않는다.
 
 ## 상태
 

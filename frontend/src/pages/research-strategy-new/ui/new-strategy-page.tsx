@@ -46,7 +46,12 @@ import {
   StrategyIde,
 } from "../../../widgets/strategy-ide";
 
-const STARTER = 'schema_version: "1.1"\ntitle: ""\n';
+/**
+ * 새 문서 시작 텍스트. `schema_version` 리터럴은 backend runtime schema의 `const`와 같아야 하며
+ * `__tests__/new-strategy-starter.test.ts`가 fixture로 단언한다(Phase 2 감사 DEFECT-P2X-001).
+ */
+export const NEW_STRATEGY_STARTER = 'schema_version: "1.1"\ntitle: ""\n';
+const STARTER = NEW_STRATEGY_STARTER;
 const ROUTE = "/research/strategies/new";
 const NEW_DRAFT: DocumentSource = {
   kind: "new",

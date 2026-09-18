@@ -56,7 +56,7 @@ const settled = (
 const STORED = { revision: 1, generated: false, requires_upgrade: true };
 
 describe("decideDocumentUpgrade", () => {
-  it("offers the upgrade only when backend rejects the version and the text says 1.0", () => {
+  it("offers the upgrade only when the backend rejects the document's schema version", () => {
     expect(
       decideDocumentUpgrade(settled(LEGACY, [UNSUPPORTED]), STORED),
     ).toEqual({ kind: "upgradeable" });
@@ -64,13 +64,14 @@ describe("decideDocumentUpgrade", () => {
     expect(decideDocumentUpgrade(settled(LEGACY), STORED)).toEqual({
       kind: "none",
     });
-    // backend가 거부했지만 텍스트가 1.0이 아니면 (예: "2.0") 변환 입력이 아니다.
+    // backend가 거부하면 텍스트의 버전 문자열이 무엇이든 제안한다: 변환 가능 여부는 업그레이드
+    // endpoint(422 not_upgradeable)가 판정한다(Phase 2 감사 DEFECT-P2X-002: frontend 버전 리터럴 없음).
     expect(
       decideDocumentUpgrade(
         settled('schema_version: "2.0"\ntitle: x\n', [UNSUPPORTED]),
         STORED,
       ),
-    ).toEqual({ kind: "none" });
+    ).toEqual({ kind: "upgradeable" });
     expect(decideDocumentUpgrade(settled(CURRENT), STORED)).toEqual({
       kind: "none",
     });

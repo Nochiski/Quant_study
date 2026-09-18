@@ -20,5 +20,6 @@ export {
   escapePointerSegment,
   isJsonPointer,
   pointerSegments,
+  valueAtPointer,
 } from "./pointer";
 export { locatePointer } from "./source-map";

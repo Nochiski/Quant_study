@@ -451,6 +451,101 @@ describe("contract projection", () => {
   });
 });
 
+describe("field applicability in the contract projection (P2-03)", () => {
+  const PORTFOLIO_ROW: FieldContract = {
+    pointer: "/portfolio/selection_percentile",
+    type: "number",
+    required: false,
+    example: null,
+    applicable_when: {
+      all_of: [
+        {
+          pointer: "/portfolio/selection_method",
+          equals: "percentile",
+          not_null: false,
+        },
+      ],
+      description_key: "strategy.contract.applicable.selection_percentile",
+      owned_by_error: null,
+    },
+  };
+
+  it("reads the typed contract row first and judges it on the current tree", () => {
+    const field = projectContractField(
+      SCHEMA,
+      [...CONTRACT, PORTFOLIO_ROW],
+      "/portfolio/selection_percentile",
+      { ...TREE, portfolio: { selection_method: "top_n" } },
+    );
+    expect(field?.applicability).toMatchObject({
+      applicable: false,
+      descriptionKey: "strategy.contract.applicable.selection_percentile",
+      ownedByError: null,
+    });
+    expect(field?.applicability?.conditions[0]).toMatchObject({
+      path: "portfolio.selection_method",
+      equals: "percentile",
+      holds: false,
+    });
+  });
+
+  it("falls back to the schema's x-applicable-when and judges unwritten conditions on published defaults", () => {
+    // CONTRACT에는 short_selection_count 행이 없다: runtime schema 마커에서 같은 모양을 읽고,
+    // 문서에 portfolio가 없으므로 schema `default`(side long_only)로 판정한다.
+    const byDefault = projectContractField(
+      SCHEMA,
+      CONTRACT,
+      "/portfolio/short_selection_count",
+      TREE,
+    );
+    expect(byDefault?.applicability?.applicable).toBe(false);
+    expect(
+      byDefault?.applicability?.conditions.map((c) => c.fromDefault),
+    ).toEqual([true, true]);
+    expect(byDefault?.applicability?.conditions.map((c) => c.path)).toEqual([
+      "portfolio.side",
+      "portfolio.selection_method",
+    ]);
+    const decided = projectContractField(
+      SCHEMA,
+      CONTRACT,
+      "/portfolio/short_selection_count",
+      { ...TREE, portfolio: { side: "long_only", selection_method: "top_n" } },
+    );
+    expect(decided?.applicability?.applicable).toBe(false);
+    expect(
+      projectContractField(SCHEMA, CONTRACT, "/risk/max_name_weight", TREE)
+        ?.applicability,
+    ).toBeNull();
+  });
+
+  it("renders the conditions, the verdict and the owning error code", () => {
+    render(
+      <ContractInspector
+        source={source()}
+        selectedPointer="/portfolio/minimum_liquidity"
+        tree={{ ...TREE, portfolio: { minimum_liquidity: 1000 } }}
+        stale={false}
+      />,
+    );
+    expect(
+      screen.getByRole("heading", { name: "적용 조건" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("✕ portfolio.liquidity_field_id 설정"),
+    ).toHaveAttribute("data-holds", "false");
+    expect(
+      screen.getByText("strategy.portfolio.liquidity_field"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "현재 문서에서는 읽히지 않습니다. portfolio.liquidity_field_id 설정일 때만 적용됩니다.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("최소 유동성 하한")).toBeInTheDocument();
+  });
+});
+
 describe("ContractInspector UI", () => {
   it("requires a kind before showing a branch-dependent field contract", () => {
     render(

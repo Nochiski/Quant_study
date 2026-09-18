@@ -947,6 +947,7 @@ def test_promoted_rust_makes_no_per_session_ffi(
         "poison",
         "record_batch",
         "record_payloads",
+        "result_tables",
         "settlement_session_index",
         "submit_decision",
         "traded_notional",
@@ -1668,3 +1669,85 @@ def test_execution_policy_validates_participation() -> None:
         ExecutionPolicy(
             ExecutionStyle.MARKET, ExecutionTiming.NEXT_OPEN, TimeInForce.DAY, max_participation=1.5
         )
+
+
+def _all_scenarios() -> dict[str, Callable[[str], tuple[BacktestEngine, BacktestResult]]]:
+    """이 파일이 코어 동등성을 거는 시나리오 전부. 키 충돌이 조용히 시나리오를 먹지 않게
+    `ENGINE_SCENARIOS`만 접두사를 붙인다 (숏 차입·마진 이자가 COST 행을 만드는 유일한 묶음)."""
+    scenarios: dict[str, Callable[[str], tuple[BacktestEngine, BacktestResult]]] = {
+        f"engine:{name}": scenario for name, scenario in ENGINE_SCENARIOS.items()
+    }
+    scenarios.update(_session_scenarios())
+    scenarios.update(_EXTRA_SCENARIOS)
+    scenarios.update(_OPUS_SCENARIOS)
+    expected = (
+        len(ENGINE_SCENARIOS)
+        + len(_session_scenarios())
+        + len(_EXTRA_SCENARIOS)
+        + len(_OPUS_SCENARIOS)
+    )
+    if len(scenarios) != expected:
+        raise AssertionError(
+            f"scenario name collision — merged={len(scenarios)} expected={expected}"
+        )
+    return scenarios
+
+
+def _result_tables(engine: BacktestEngine) -> tuple[object, ...]:
+    """`ResultTables`는 eq=False(세션×종목 규모 비교를 실수로 유발하지 않게)라 필드를 편다."""
+    tables = engine.event_store.result_tables()
+    return (
+        tables.sessions,
+        tables.instruments,
+        tables.snapshots,
+        tables.positions,
+        tables.orders,
+        tables.fills,
+        tables.costs,
+        (
+            tables.fill_totals.traded_notional,
+            tables.fill_totals.total_fees,
+            tables.fill_totals.total_slippage_cost,
+        ),
+    )
+
+
+@pytest.mark.parametrize("rust_core", RUST_ENGINE_CORES)
+@pytest.mark.parametrize("name", sorted(_all_scenarios()))
+def test_result_tables_identical_across_cores(name: str, rust_core: str) -> None:
+    """결과 테이블은 두 코어가 값까지 같아야 한다 (float 포함 — 결합 순서가 계약이다)."""
+    scenario = _all_scenarios()[name]
+    python_engine, _ = scenario("python")
+    rust_engine, _ = scenario(rust_core)
+    assert _result_tables(python_engine) == _result_tables(rust_engine)
+
+
+@RUST_ONLY
+def test_result_tables_are_a_non_destructive_query() -> None:
+    """테이블 조회는 Rust payload를 해제하지 않는다 — 공개 객체 경로가 그대로 남는다."""
+    engine = BacktestEngine(RunConfig(run_id="tables-live", initial_cash=100_000.0), core="rust")
+    result = engine.run(
+        ScriptedStrategy(script=(target_70pct(), None, liquidate(), None)), DataFeed(GOLDEN_BARS)
+    )
+    tables = engine.event_store.result_tables()
+
+    assert [row[0] for row in tables.fills] == [fill.fill_id for fill in result.fills]
+    assert [row[2] for row in tables.snapshots] == [
+        snapshot.equity for snapshot in result.snapshots
+    ]
+    assert [row[0] for row in tables.orders] == [order.order_id for order in result.orders]
+    # 캐시된 테이블은 다시 만들지 않는다.
+    assert engine.event_store.result_tables() is tables
+
+
+@RUST_ONLY
+def test_result_tables_refuse_kinds_that_were_already_materialized() -> None:
+    """공개 객체로 먼저 넘겨 해제한 kind는 테이블에서 조용히 빠지는 대신 오류가 된다."""
+    engine = BacktestEngine(RunConfig(run_id="tables-drained", initial_cash=100_000.0), core="rust")
+    result = engine.run(
+        ScriptedStrategy(script=(target_70pct(), None, liquidate(), None)), DataFeed(GOLDEN_BARS)
+    )
+    assert len(result.fills) == 2
+
+    with pytest.raises(RuntimeError, match=r"already released — operation=result_tables seq="):
+        engine.event_store.result_tables()

@@ -688,6 +688,16 @@ impl PersistentEngine {
         self.records.drain(py, kind, limit)
     }
 
+    /// 결과 집계용 columnar 테이블
+    /// `(snapshot_rows, position_rows, order_rows, fill_rows, cost_rows, fill_totals)`.
+    ///
+    /// 레코드를 한 번 순회해 primitive 행만 만든다 — 행 원소의 의미는 Python
+    /// `backtest_engine/types/result_tables.py`가 정본이다. 비파괴 조회라 payload를 해제하지
+    /// 않으므로 이후 `drain_payloads`로 같은 레코드를 공개 Event 객체로 다시 읽을 수 있다.
+    fn result_tables(&self, py: Python<'_>) -> PyResult<PyObject> {
+        self.records.result_tables(py)
+    }
+
     fn equity_series(&self) -> PyResult<Vec<f64>> {
         self.records.equity_series()
     }

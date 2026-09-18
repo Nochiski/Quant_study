@@ -899,3 +899,41 @@ class PersistentEventStore(EventStore):
     def traded_notional(self) -> float:
         """FILL 레코드 순서로 누산한 체결 금액 (Rust가 같은 결합 순서로 계산)."""
         return float(self._runtime.traded_notional())
+
+    def result_tables(self) -> ResultTables:
+        """Rust `result_tables()` 한 번으로 받는 결과 테이블.
+
+        공개 Event 객체를 거치지 않으므로 kind 배치 조회(`drain_payloads`)를 쓰지 않는다 —
+        비파괴 조회다. 이 조회 뒤에도 `result.snapshots`/`orders`/`fills`는 그대로 공개 객체를
+        만들 수 있고, 반대로 테이블이 읽는 kind를 먼저 넘겨 해제했다면 Rust가 오류로 답한다.
+
+        세션·종목 조회표는 이미 `bind_feed`로 받아 둔 것을 그대로 쓴다.
+        """
+        cached = self._result_tables_cache
+        key = len(self._batch())
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        (
+            snapshot_rows,
+            position_rows,
+            order_rows,
+            fill_rows,
+            cost_rows,
+            (traded_notional, total_fees, total_slippage_cost),
+        ) = self._runtime.result_tables()
+        tables = ResultTables(
+            sessions=self._sessions,
+            instruments=self._instruments,
+            snapshots=tuple(snapshot_rows),
+            positions=tuple(position_rows),
+            orders=tuple(order_rows),
+            fills=tuple(fill_rows),
+            costs=tuple(cost_rows),
+            fill_totals=FillTotals(
+                traded_notional=traded_notional,
+                total_fees=total_fees,
+                total_slippage_cost=total_slippage_cost,
+            ),
+        )
+        self._result_tables_cache = (key, tables)
+        return tables

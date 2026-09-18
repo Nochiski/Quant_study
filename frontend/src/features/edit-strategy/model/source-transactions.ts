@@ -131,7 +131,8 @@ export const applyToTree = (
     case "insert-key": {
       const parent = at(op.parentPointer);
       if (parent === null && op.parentPointer !== "") {
-        // 값 없는 키를 빈 mapping으로 확장한다.
+        // 값 없는 키를 빈 mapping으로 확장한다(형제가 없으니 `before`는 거부, 텍스트 쪽과 동일).
+        if (op.before !== undefined) return null;
         if (!setAt(op.parentPointer, { [op.key]: structuredClone(op.value) }))
           return null;
         return next;
@@ -353,12 +354,90 @@ const afterColon = (
   return colon < 0 ? null : colon + 1;
 };
 
+/**
+ * 삽입 자리. `after-line`은 그 줄 끝 뒤에 `EOL + indent + fragment`, `line-start`는 그 줄 시작에
+ * `indent + fragment + EOL`, `inline-before`는 dash 줄에 붙은 첫 키/항목 자리에 `fragment + EOL + indent`
+ * (기존 것은 다음 줄로 밀린다).
+ */
+type Anchor = {
+  at: number;
+  mode: "after-line" | "line-start" | "inline-before";
+};
+
+const isLineStart = (source: string, offset: number): boolean =>
+  offset === 0 || source[offset - 1] === "\n";
+
+/**
+ * 호출자가 준 offset(스니펫의 커서 줄 자리)이 허용 구간 `[lower, upper]` 안의 줄 시작(또는 문서 끝)이면
+ * 그 자리를 쓴다. 구간 밖이면 기본 앵커를 쓴다(형제 순서와 텍스트 위치가 어긋나면 preflight가 막는다).
+ */
+const anchorFromOption = (
+  source: string,
+  offset: number | undefined,
+  lower: number,
+  upper: number,
+): Anchor | null => {
+  if (offset === undefined || offset < lower || offset > upper) return null;
+  if (isLineStart(source, offset)) return { at: offset, mode: "line-start" };
+  if (offset === source.length) return { at: offset, mode: "after-line" };
+  return null;
+};
+
+const insertAt = (
+  anchor: Anchor,
+  fragment: string,
+  indent: string,
+  eol: Eol,
+): Plan => {
+  const body = indentLines(fragment, indent, eol);
+  if (anchor.mode === "after-line") {
+    const insert = `${eol}${indent}${body}`;
+    return {
+      from: anchor.at,
+      to: anchor.at,
+      insert,
+      cursor: anchor.at + insert.length,
+    };
+  }
+  if (anchor.mode === "line-start") {
+    const insert = `${indent}${body}${eol}`;
+    return {
+      from: anchor.at,
+      to: anchor.at,
+      insert,
+      cursor: anchor.at + insert.length - eol.length,
+    };
+  }
+  const insert = `${body}${eol}${indent}`;
+  return {
+    from: anchor.at,
+    to: anchor.at,
+    insert,
+    cursor: anchor.at + insert.length - eol.length - indent.length,
+  };
+};
+
+/** 부모 `key:` 줄 끝(줄 끝 주석 뒤). 시퀀스 항목이 부모면(`- - x`) 바깥 `-` 뒤. */
+const parentLineEnd = (
+  source: string,
+  parsed: Extract<ParsedSource, { status: "ok" }>,
+  parentPointer: string,
+): number | null => {
+  const colon = afterColon(source, parsed, parentPointer);
+  if (colon !== null) return lineEndOf(source, colon);
+  const parentRange = parsed.valueRanges.get(parentPointer);
+  if (parentRange === undefined) return null;
+  const dash = dashOffsetOf(source, parentRange.start.offset);
+  return dash === null ? null : dash + 1;
+};
+
 const planInsertKey = (
   source: string,
   parsed: Extract<ParsedSource, { status: "ok" }>,
   op: Extract<SourceOperation, { kind: "insert-key" }>,
   eol: Eol,
   unit: number,
+  anchorOffset: number | undefined,
 ): Plan | PlanFailure => {
   const parent = valueAt(parsed.tree, op.parentPointer);
   if (parent === undefined) return "not-found";
@@ -379,51 +458,38 @@ const planInsertKey = (
   if (Object.hasOwn(parent, op.key)) return "exists";
   if (op.before !== undefined && !Object.hasOwn(parent, op.before))
     return "not-found";
-  if (op.parentPointer === "") {
-    if (Object.keys(parent).length === 0) {
-      // flow `{}` 루트면 그 범위를 block mapping으로 교체한다.
-      const rootRange = parsed.valueRanges.get("");
-      if (rootRange !== undefined) {
-        const insert = indentLines(fragment, "", eol);
-        return {
-          from: rootRange.start.offset,
-          to: rootRange.end.offset,
-          insert,
-          cursor: rootRange.start.offset + insert.length,
-        };
-      }
-      // 내용 없는 문서: 주석·빈 줄만 있으면 그 뒤에, 아무것도 없으면 전체를 첫 키로 바꾼다.
-      const trimmedEnd = source.replace(/\s+$/, "").length;
-      const insert =
-        trimmedEnd === 0
-          ? indentLines(fragment, "", eol)
-          : `${eol}${indentLines(fragment, "", eol)}`;
-      const from = trimmedEnd;
+  if (op.parentPointer === "" && Object.keys(parent).length === 0) {
+    // flow `{}` 루트면 그 범위를 block mapping으로 교체한다.
+    const rootRange = parsed.valueRanges.get("");
+    if (rootRange !== undefined) {
+      const insert = indentLines(fragment, "", eol);
       return {
-        from,
-        to: source.length,
+        from: rootRange.start.offset,
+        to: rootRange.end.offset,
         insert,
-        cursor: from + insert.length,
+        cursor: rootRange.start.offset + insert.length,
       };
     }
-    const anchor = insertKeyAnchor(source, parsed, "", parent, op.before);
-    if (anchor === null) return "not-found";
-    const insert = anchor.leading
-      ? `${eol}${indentLines(fragment, "", eol)}`
-      : `${indentLines(fragment, "", eol)}${eol}`;
+    // 내용 없는 문서: 주석·빈 줄만 있으면 그 뒤에, 아무것도 없으면 전체를 첫 키로 바꾼다.
+    const trimmedEnd = source.replace(/\s+$/, "").length;
+    const insert =
+      trimmedEnd === 0
+        ? indentLines(fragment, "", eol)
+        : `${eol}${indentLines(fragment, "", eol)}`;
     return {
-      from: anchor.at,
-      to: anchor.at,
+      from: trimmedEnd,
+      to: source.length,
       insert,
-      cursor: anchor.leading
-        ? anchor.at + insert.length
-        : anchor.at + insert.length - eol.length,
+      cursor: trimmedEnd + insert.length,
     };
   }
-  const parentRange = parsed.valueRanges.get(op.parentPointer)!;
-  const existingColumn = childKeyColumn(parsed, op.parentPointer, parent);
+  const existingColumn =
+    op.parentPointer === ""
+      ? 0
+      : childKeyColumn(parsed, op.parentPointer, parent);
   if (existingColumn === null) {
     // flow `{}`: `key:` 뒤(시퀀스 항목이면 `-` 뒤)부터 value 끝까지를 block mapping으로 교체.
+    const parentRange = parsed.valueRanges.get(op.parentPointer)!;
     const keyRange = parsed.keyRanges.get(op.parentPointer);
     const dash = dashOffsetOf(source, parentRange.start.offset);
     const from =
@@ -440,39 +506,23 @@ const planInsertKey = (
       cursor: from + insert.length,
     };
   }
-  const indent = " ".repeat(existingColumn);
   const anchor = insertKeyAnchor(
     source,
     parsed,
     op.parentPointer,
     parent,
     op.before,
+    anchorOffset,
   );
   if (anchor === null) return "not-found";
-  if (anchor.leading) {
-    const insert = `${eol}${indent}${indentLines(fragment, indent, eol)}`;
-    return {
-      from: anchor.at,
-      to: anchor.at,
-      insert,
-      cursor: anchor.at + insert.length,
-    };
-  }
-  // `before` 키가 자기 `-` 줄에 붙은 첫 키면 그 자리에 새 키를 넣고 기존 키를 다음 줄로 민다.
-  const insert = `${indentLines(fragment, indent, eol)}${eol}${indent}`;
-  return {
-    from: anchor.at,
-    to: anchor.at,
-    insert,
-    cursor: anchor.at + insert.length - eol.length - indent.length,
-  };
+  return insertAt(anchor, fragment, " ".repeat(existingColumn), eol);
 };
 
 /**
- * 새 키가 들어갈 자리. `before`가 없으면 마지막 키 내용 줄 끝(leading: 줄바꿈을 앞에 붙여 붙인다).
- * `before`가 있으면 그 앞 형제의 내용 줄 끝이고, 앞 형제가 없으면 부모 `key:` 줄 끝(루트는 문서 시작에서
- * 줄바꿈을 뒤에 붙인다). `before` 키가 `- key:`처럼 dash 줄의 첫 키면 그 키 자리(leading: false).
- * 앞 형제 뒤에 넣으므로 `before` 키 위의 주석은 계속 `before` 키를 설명한다.
+ * 새 키의 자리. 기본은 **앞 형제의 내용 줄 끝 뒤**다(`before`가 없으면 마지막 키 뒤, 앞 형제가 없으면
+ * 부모 `key:` 줄 끝, 루트 첫 키 앞이면 문서 시작). 그래서 `before` 키 위의 독립 주석은 계속 `before`를
+ * 설명한다. `before`가 `- key:`처럼 dash 줄의 첫 키면 그 자리에 들어가고 기존 키는 다음 줄로 밀린다.
+ * 호출자가 offset을 주면(스니펫의 커서 줄) 앞 형제 뒤 ~ `before` 줄 시작 사이에서 그 자리를 쓴다.
  */
 const insertKeyAnchor = (
   source: string,
@@ -480,32 +530,40 @@ const insertKeyAnchor = (
   parentPointer: string,
   parent: Record<string, unknown>,
   before: string | undefined,
-): { at: number; leading: boolean } | null => {
+  anchorOffset: number | undefined,
+): Anchor | null => {
   const keys = Object.keys(parent);
   const pointerOf = (key: string): string =>
     `${parentPointer}/${escapePointerSegment(key)}`;
-  if (before === undefined) {
-    const last = keys[keys.length - 1];
-    if (last === undefined) return null;
-    const end = contentEnd(source, parsed, pointerOf(last));
-    if (end === null) return null;
-    return { at: lineEndOf(source, end), leading: true };
-  }
-  const position = keys.indexOf(before);
+  const position = before === undefined ? keys.length : keys.indexOf(before);
   if (position < 0) return null;
-  const beforeRange = parsed.keyRanges.get(pointerOf(before));
-  if (beforeRange === undefined) return null;
-  if (onDashLine(source, beforeRange.start.offset))
-    return { at: beforeRange.start.offset, leading: false };
-  if (position > 0) {
-    const end = contentEnd(source, parsed, pointerOf(keys[position - 1]!));
+  const previous = keys[position - 1];
+  let lower: number;
+  if (previous !== undefined) {
+    const end = contentEnd(source, parsed, pointerOf(previous));
     if (end === null) return null;
-    return { at: lineEndOf(source, end), leading: true };
+    lower = lineEndOf(source, end);
+  } else if (parentPointer === "") {
+    lower = 0;
+  } else {
+    const end = parentLineEnd(source, parsed, parentPointer);
+    if (end === null) return null;
+    lower = end;
   }
-  if (parentPointer === "") return { at: 0, leading: false };
-  const colon = afterColon(source, parsed, parentPointer);
-  if (colon === null) return null;
-  return { at: lineEndOf(source, colon), leading: true };
+  const beforeRange =
+    before === undefined ? undefined : parsed.keyRanges.get(pointerOf(before));
+  if (before !== undefined && beforeRange === undefined) return null;
+  if (beforeRange !== undefined && onDashLine(source, beforeRange.start.offset))
+    return { at: beforeRange.start.offset, mode: "inline-before" };
+  const upper =
+    beforeRange === undefined
+      ? source.length
+      : lineStartOf(source, beforeRange.start.offset);
+  const chosen = anchorFromOption(source, anchorOffset, lower, upper);
+  if (chosen !== null) return chosen;
+  if (previous === undefined && parentPointer === "")
+    return { at: 0, mode: "line-start" };
+  return { at: lower, mode: "after-line" };
 };
 
 /** 값 없는 키(`key:` 또는 `key: # c`) 줄 끝 뒤에 block 컨테이너를 연다. 항목/키 열은 부모 키 열 + 폭. */
@@ -520,10 +578,13 @@ const openEmptyValue = (
   const keyRange = parsed.keyRanges.get(parentPointer);
   const colon = afterColon(source, parsed, parentPointer);
   if (keyRange === undefined || colon === null) return "not-found";
-  const at = lineEndOf(source, colon);
   const indent = " ".repeat(keyRange.start.column + unit);
-  const insert = `${eol}${indent}${indentLines(fragment, indent, eol)}`;
-  return { from: at, to: at, insert, cursor: at + insert.length };
+  return insertAt(
+    { at: lineEndOf(source, colon), mode: "after-line" },
+    fragment,
+    indent,
+    eol,
+  );
 };
 
 const planInsertItem = (
@@ -532,6 +593,7 @@ const planInsertItem = (
   op: Extract<SourceOperation, { kind: "insert-item" }>,
   eol: Eol,
   unit: number,
+  anchorOffset: number | undefined,
 ): Plan | PlanFailure => {
   const parent = valueAt(parsed.tree, op.parentPointer);
   if (parent === undefined) return "not-found";
@@ -570,39 +632,41 @@ const planInsertItem = (
     };
   }
   // 항목 열: 첫 항목 자기 `-`의 열(`- - x`처럼 겹친 시퀀스는 안쪽 `-`).
-  const firstItem = parsed.valueRanges.get(`${op.parentPointer}/0`);
-  const firstDash =
-    firstItem === undefined
-      ? null
-      : dashOffsetOf(source, firstItem.start.offset);
+  const dashOf = (i: number): number | null => {
+    const item = parsed.valueRanges.get(`${op.parentPointer}/${i}`);
+    return item === undefined ? null : dashOffsetOf(source, item.start.offset);
+  };
+  const firstDash = dashOf(0);
   if (firstDash === null) return "not-sequence";
-  const itemColumn = firstDash - lineStartOf(source, firstDash);
-  const indent = " ".repeat(itemColumn);
-  if (index < parent.length) {
-    const target = parsed.valueRanges.get(`${op.parentPointer}/${index}`);
-    const dash =
-      target === undefined ? null : dashOffsetOf(source, target.start.offset);
-    if (dash === null) return "not-sequence";
-    // 대상 항목 위의 독립 주석은 대상을 설명하므로 새 항목은 그 주석보다 **위**가 아니라 `-` 자리에
-    // 들어간다(주석은 새 항목이 아니라 밀려난 대상과 함께 남는다).
-    // 대상 항목의 `-` 자리에 새 항목을 넣고 대상은 다음 줄로 밀린다.
-    const insert = `${indentLines(fragment, indent, eol)}${eol}${indent}`;
-    return {
-      from: dash,
-      to: dash,
-      insert,
-      cursor: dash + insert.length - eol.length - indent.length,
-    };
+  const indent = " ".repeat(firstDash - lineStartOf(source, firstDash));
+  // 새 항목의 자리는 키와 같은 규칙이다: **앞 항목의 내용 줄 끝 뒤**(index 0은 부모 `key:` 줄 끝 뒤).
+  // 그래서 대상 항목 위의 독립 주석은 계속 그 대상을 설명한다(P3-02 리뷰 P2-1: insert-key와 통일).
+  // `- - x`처럼 바깥 `-`와 줄을 나눠 쓰는 안쪽 첫 항목 앞에는 그 자리에 넣고 기존 항목을 다음 줄로 민다.
+  let lower: number;
+  if (index === 0) {
+    if (onDashLine(source, firstDash))
+      return insertAt(
+        { at: firstDash, mode: "inline-before" },
+        fragment,
+        indent,
+        eol,
+      );
+    const end = parentLineEnd(source, parsed, op.parentPointer);
+    if (end === null) return "not-found";
+    lower = end;
+  } else {
+    const end = contentEnd(source, parsed, `${op.parentPointer}/${index - 1}`);
+    if (end === null) return "not-found";
+    lower = lineEndOf(source, end);
   }
-  const lastEnd = contentEnd(
-    source,
-    parsed,
-    `${op.parentPointer}/${parent.length - 1}`,
-  );
-  if (lastEnd === null) return "not-found";
-  const at = lineEndOf(source, lastEnd);
-  const insert = `${eol}${indent}${indentLines(fragment, indent, eol)}`;
-  return { from: at, to: at, insert, cursor: at + insert.length };
+  const targetDash = index < parent.length ? dashOf(index) : null;
+  if (index < parent.length && targetDash === null) return "not-sequence";
+  const upper =
+    targetDash === null ? source.length : lineStartOf(source, targetDash);
+  const anchor =
+    anchorFromOption(source, anchorOffset, lower, upper) ??
+    ({ at: lower, mode: "after-line" } as const);
+  return insertAt(anchor, fragment, indent, eol);
 };
 
 const planRemove = (
@@ -610,6 +674,7 @@ const planRemove = (
   parsed: Extract<ParsedSource, { status: "ok" }>,
   op: Extract<SourceOperation, { kind: "remove" }>,
   eol: Eol,
+  unit: number,
 ): Plan | PlanFailure => {
   const parentPointer = parentPointerOf(op.pointer);
   const parent = valueAt(parsed.tree, parentPointer);
@@ -633,6 +698,21 @@ const planRemove = (
     const from =
       colon ?? (dash === null ? parentRange!.start.offset : dash + 1);
     const empty = Array.isArray(parent) ? "[]" : "{}";
+    // `key: # 메모`처럼 부모 줄에 줄 끝 주석이 있으면 그 줄은 두고 다음 줄에 빈 컨테이너를 쓴다(P3-02 리뷰 P2-2).
+    const parentLine = lineEndOf(source, from);
+    if (source.slice(from, parentLine).includes("#")) {
+      const keyRange = parsed.keyRanges.get(parentPointer);
+      const column =
+        keyRange?.start.column ??
+        (dash === null ? 0 : dash - lineStartOf(source, dash));
+      const insert = `${eol}${" ".repeat(column + unit)}${empty}`;
+      return {
+        from: parentLine,
+        to,
+        insert,
+        cursor: parentLine + insert.length,
+      };
+    }
     const insert = ` ${empty}`;
     return { from, to, insert, cursor: from + insert.length };
   }
@@ -742,6 +822,11 @@ export const planSourceOperation = (
   options: {
     /** 줄 종결자를 문서 밖에서 정한다(스니펫이 커서 줄을 뺀 원문을 넘길 때 원래 문서의 EOL). */
     eol?: Eol;
+    /**
+     * 삽입 연산이 들어갈 offset(줄 시작 또는 문서 끝). 형제 순서(`before`/`index`)가 허용하는 구간 안일
+     * 때만 쓰이고, 아니면 기본 앵커(앞 형제 내용 줄 끝 뒤)로 간다. 스니펫이 커서 줄 자리를 지키는 데 쓴다.
+     */
+    anchor?: number;
   } = {},
 ): PlanResult => {
   if (format !== "yaml") return { status: "error", reason: "yaml-only" };
@@ -753,10 +838,10 @@ export const planSourceOperation = (
     op.kind === "replace-scalar"
       ? planReplaceScalar(source, parsed, op)
       : op.kind === "insert-key"
-        ? planInsertKey(source, parsed, op, eol, unit)
+        ? planInsertKey(source, parsed, op, eol, unit, options.anchor)
         : op.kind === "insert-item"
-          ? planInsertItem(source, parsed, op, eol, unit)
-          : planRemove(source, parsed, op, eol);
+          ? planInsertItem(source, parsed, op, eol, unit, options.anchor)
+          : planRemove(source, parsed, op, eol, unit);
   if (typeof plan === "string") return { status: "error", reason: plan };
   const expected = applyToTree(parsed.tree, op);
   if (expected === null) return { status: "error", reason: "not-found" };

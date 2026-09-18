@@ -292,21 +292,31 @@ const containsSnippetIdentity = (
   );
 };
 
-/** 커서 줄(반쯤 입력한 키나 빈 줄)을 통째로 뺀 원문. 마지막 줄이면 앞의 EOL을 함께 뺀다. */
+/**
+ * 커서 줄(반쯤 입력한 키나 빈 줄)을 통째로 뺀 원문과, 그 줄이 있던 자리(`anchor`). 마지막 줄이면 앞의
+ * EOL을 함께 빼고 anchor는 문서 끝이다. 스니펫은 이 자리에 들어간다(P3-02 리뷰 P1-1: 선행 주석·빈 줄 위로
+ * 올라가지 않는다).
+ */
 const withoutCursorLine = (
   source: string,
   lineStart: number,
   lineEnd: number,
-): string => {
+): { text: string; anchor: number } => {
   const eol = source.startsWith("\r\n", lineEnd)
     ? 2
     : source.startsWith("\n", lineEnd)
       ? 1
       : 0;
   if (eol > 0)
-    return `${source.slice(0, lineStart)}${source.slice(lineEnd + eol)}`;
+    return {
+      text: `${source.slice(0, lineStart)}${source.slice(lineEnd + eol)}`,
+      anchor: lineStart,
+    };
   const previous = source.slice(0, lineStart).replace(/\r?\n$/, "");
-  return `${previous}${source.slice(lineEnd)}`;
+  return {
+    text: `${previous}${source.slice(lineEnd)}`,
+    anchor: previous.length,
+  };
 };
 
 /**
@@ -396,7 +406,11 @@ export const planSnippetEdit = (
   if (!snippet.sectionKey.startsWith(context.prefix))
     return { status: "error", reason: "cursor-context" };
 
-  const stripped = withoutCursorLine(source, lineStart, lineEnd);
+  const { text: stripped, anchor } = withoutCursorLine(
+    source,
+    lineStart,
+    lineEnd,
+  );
   const parsed = parseSource(stripped, "yaml");
   const tree = parsed.status === "ok" ? parsed.tree : {};
   if (original.status !== "ok" && containsSnippetIdentity(tree, snippet))
@@ -441,6 +455,7 @@ export const planSnippetEdit = (
 
   const planned = planSourceOperation(stripped, "yaml", op, {
     eol: detectEol(source),
+    anchor,
   });
   if (planned.status === "error") {
     const reason: SnippetEditFailure =

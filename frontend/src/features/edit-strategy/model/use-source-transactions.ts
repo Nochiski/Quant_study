@@ -53,6 +53,10 @@ const IDLE: TransactionFeedback = { status: "idle" };
  *
  * feedback은 `documentEpoch`(다른 문서를 열면 사라진다)와 호출자가 주는 `scope` 값(같은 문서 안에서
  * 기능이 꺼졌다 켜지는 전이)에 묶인다.
+ *
+ * `enabled`는 UI 비활성화용 요약값이다. `apply`/`run`은 그것으로 막지 않고 편집기의 live 텍스트를 다시
+ * parse하므로, reducer의 parse가 stale이거나 실패했어도 편집기 텍스트가 유효하면 적용된다(fail-closed는
+ * `planSourceOperation`의 preflight가 한다).
  */
 export const useSourceTransactions = (
   state: DocumentState,

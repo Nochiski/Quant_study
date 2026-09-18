@@ -14,6 +14,20 @@ import { useSourceTransactions } from "./use-source-transactions";
 export type SnippetFailure =
   SnippetEditFailure | "editor-unavailable" | "composing";
 
+const SNIPPET_FAILURES: ReadonlySet<string> = new Set<SnippetFailure>([
+  "yaml-only",
+  "selection",
+  "cursor-context",
+  "duplicate",
+  "parse",
+  "editor-unavailable",
+  "composing",
+]);
+
+/** `planSnippetEdit`가 PlanFailure를 스니펫 코드로 번역하므로 다른 코드는 오지 않지만, 좁히기는 가드로 한다. */
+const isSnippetFailure = (reason: string): reason is SnippetFailure =>
+  SNIPPET_FAILURES.has(reason);
+
 export type SnippetFeedback =
   | { status: "idle" }
   | { status: "inserted"; label: string }
@@ -63,11 +77,12 @@ export const useSnippetInsertion = (
     if (current.status === "applied")
       return { status: "inserted", label: current.label };
     if (current.status === "error") {
-      // planSnippetEdit는 PlanFailure를 스니펫 실패 코드로 이미 번역했으므로 남는 코드는 이 집합뿐이다.
       return {
         status: "error",
         label: current.label,
-        reason: current.reason as SnippetFailure,
+        reason: isSnippetFailure(current.reason)
+          ? current.reason
+          : "cursor-context",
       };
     }
     return current;

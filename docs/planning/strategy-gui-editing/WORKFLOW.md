@@ -509,16 +509,24 @@ export const planSourceOperation = (source: string, format: SourceFormat, op: So
 - 알려진 제한(P3-01 리뷰): 내용이 있는 flow 컬렉션(`{x: 1}`, `[1, 2]`) 안은 편집하지 않는다(fail-closed,
   사유는 `parse`/`not-sequence`/`not-found`). 삭제된 키/항목 **위**의 독립 주석은 그 자리에 남는다(어느 키의
   주석인지 YAML이 답하지 않으므로 보수적으로 보존). 예외는 삭제로 부모가 비어 `{}`/`[]`로 접힐 때뿐이다:
-  그 컨테이너 안에 있던 주석은 함께 사라진다(property test의 주석 소유자 규칙: 키 줄과 항목 줄이 소유자이고,
-  `remove`는 대상 pointer와 그 아래가 소유한 주석만 지울 수 있다).
+  그 컨테이너 안에 있던 독립 주석은 함께 사라진다(property test의 주석 소유자 규칙: 키 줄과 항목 줄이
+  소유자이고, `remove`는 대상 pointer와 그 아래가 소유한 주석만 지울 수 있다). 부모 `key:` 줄의 줄 끝
+  주석은 남고 빈 컨테이너가 다음 줄로 간다(`a: # 메모` → `a: # 메모\n  {}`; P3-02 리뷰 P2-2). 줄 끝
+  주석은 property의 `commentLines`(독립 주석 줄만 셈)가 보지 않으므로 단위 테스트가 지킨다.
 - P3-02에서 확장(P3-01 알려진 제한 해소): 값이 비어 있는 `key:`(`factors:` → null)는 삽입 연산의 부모로
   쓰일 때 빈 컨테이너로 본다(`insert-key`면 `{}`, `insert-item`이면 `[]`, 줄 끝 주석은 그대로 두고 그
   줄 끝 뒤에 block을 연다). 내용이 전혀 없는 문서(빈 줄·주석뿐, parser는 거부)는 **루트 `insert-key`에
-  한해** 빈 mapping으로 본다(새 문서·스니펫 첫 삽입). `insert-key`는 `before`(형제 키)를 받아 그 **앞
-  형제의 내용 줄 끝** 뒤에 넣는다(`before` 키 위의 주석은 계속 `before`를 설명; `before`가 `- key:`
-  dash 줄 첫 키면 그 자리에 들어가고 기존 키는 다음 줄로). `- - x` 안쪽 첫 항목 삭제는 dash 줄 첫 키와
-  같은 규칙(자기 내용 줄 끝까지 지우고 다음 줄 들여쓰기를 걷음)이라 사이 주석이 남는다(2차 리뷰 P2-R1
-  대안 2).
+  한해** 빈 mapping으로 본다(새 문서·스니펫 첫 삽입). 삽입 자리 규칙은 키와 항목이 **같다**: 새 키/항목은
+  **앞 형제의 내용 줄 끝 뒤**에 들어간다(`insert-key.before`·`insert-item.index`; 앞 형제가 없으면 부모
+  `key:` 줄 끝 뒤, 루트 첫 키 앞이면 문서 시작). 그래서 대상 형제 위의 독립 주석은 계속 그 대상을
+  설명한다. `- key:`/`- - x`처럼 dash 줄에 붙은 첫 키/항목 앞에는 그 자리에 들어가고 기존 것이 다음 줄로
+  밀린다(P3-02 리뷰 P2-1로 통일; P3-01의 "대상 `-` 자리" 규칙은 폐기). `planSourceOperation`은
+  `options.anchor`(줄 시작 offset 또는 문서 끝)를 받아 형제 순서가 허용하는 구간(앞 형제 줄 끝 ~ 대상 줄
+  시작) 안이면 그 자리에 넣는다 — 스니펫이 커서 줄 자리를 지키는 데 쓴다(P3-02 리뷰 P1-1: 선행 주석·빈 줄
+  위로 올라가지 않는다). `- - x` 안쪽 첫 항목 삭제는 dash 줄 첫 키와 같은 규칙(자기 내용 줄 끝까지 지우고
+  다음 줄 들여쓰기를 걷음)이라 사이 주석이 남는다(2차 리뷰 P2-R1 대안 2). 이 갈래의 회귀 방지는 단위
+  테스트가 맡고, property는 주석 소유자 규칙을 문서 구조로 고정하는 역할이다(생성기는 줄마다 약 1/3
+  확률로 주석을 넣어 두 항목 사이·첫 형제 위·머리말 주석 모양이 자주 나온다).
 - 범위는 `parseSource`의 `valueRanges`/`keyRanges`에서 **정확히 그 pointer로** 읽는다.
   `locateRange`는 pointer가 없으면 조상 범위로 fallback하므로 `replace-scalar`·`remove`에 쓰면 부모
   전체를 지운다. 없는 pointer는 `not-found`다(Phase 2 감사 4.5). mapping/sequence 노드의 range는
@@ -561,10 +569,12 @@ export const useSourceTransactions = (state: DocumentState, editorActive?: boole
   `run(({text}) => planSourceOperation(text, "yaml", op))`이고 스니펫은 `run(({text, selection}) =>
   planSnippetEdit(...))`이다. 스니펫이 연산 하나로 표현되지 않는 이유: 커서 줄에 반쯤 입력한 키(`sig`)를
   빼고 나서 연산을 계획해야 하고, 결과는 그 키까지 포함한 단일 범위 편집(history 한 번)이어야 한다.
-  `planSnippetEdit`는 (1) 중복 판정(원문 전체, 커서 문맥보다 먼저) (2) 커서 줄을 뺀 원문 (3) 커서 줄
-  뒤에 오던 첫 형제 → `before`, 앞에 있던 항목 수 → `index` (4) `planSourceOperation(stripped, op,
-  { eol })` (5) 원문 대비 단일 범위 diff(접두는 키 시작까지, 접미는 커서 줄 끝부터)를 한다. EOL은 원문에서
-  재고 `options.eol`로 넘긴다(커서 줄을 빼면 한 줄 문서가 되어 EOL 정보를 잃는 경우). feedback scope는
+  `planSnippetEdit`는 (1) 중복 판정(원문 전체, 커서 문맥보다 먼저; 원문이 parse되지 않으면 커서 줄을 뺀
+  원문으로 — 그래서 parse 실패 문서의 섹션 중복은 예전 `duplicate` 대신 `parse`로 보고될 수 있다, 안전
+  방향) (2) 커서 줄을 뺀 원문과 그 줄의 자리(`anchor`) (3) 커서 줄 뒤에 오던 첫 형제 → `before`, 앞에
+  있던 항목 수 → `index` (4) `planSourceOperation(stripped, op, { eol, anchor })` (5) 원문 대비 단일
+  범위 diff(접두는 키 시작까지, 접미는 커서 줄 끝부터)를 한다. EOL은 원문에서 재고 `options.eol`로
+  넘긴다(커서 줄을 빼면 한 줄 문서가 되어 EOL 정보를 잃는 경우). feedback scope는
   `documentEpoch` + 호출자 `scope`(스니펫은 카탈로그 status)다. 계획은 편집기 `getText()`로 세우므로
   연산 1회 = parse 2회(계획·preflight)이고 호출은 keystroke가 아니라 확정(blur·Enter·버튼) 시점만이다
   (P3-01 리뷰 잔여 위험의 처리 방식; P4-02 필드 편집이 이 규칙을 따른다).

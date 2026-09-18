@@ -231,6 +231,18 @@ describe("useSourceTransactions", () => {
     });
     expect(applied).toBe(true);
     expect(editor.text()).not.toContain("max_name_weight");
+    // 직전 연산이 구조 변경이면 parse가 따라오기 전에는 스칼라 확정도 보류한다(형제 pointer가 밀려 있다, 2차 P1-1).
+    rerender({ state: { ...parsedState(editor.text()), sourceVersion: 9 } });
+    expect(result.current.settling).toBe(true);
+    act(() => {
+      applied = result.current.apply(
+        { kind: "replace-scalar", pointer: "/schema_version", value: "1.1" },
+        "schema_version",
+        "form",
+      );
+    });
+    expect(applied).toBe(false);
+    expect(result.current.feedbackFor("form")).toMatchObject({ status: "error", reason: "pending" });
   });
 
   it("keeps one feedback slot per owner so a snippet result does not erase the form's (audit R2)", () => {

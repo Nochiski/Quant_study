@@ -304,6 +304,14 @@ export const FactorGraphPanel = ({
   } | null>(null);
   if (projected.status === "ready" && lastReady?.state !== state)
     setLastReady({ state, projection: projected });
+  // loading이 아닌 다른 상태(blocked·empty·metadata·error)로 가면 직전 투영을 버린다 — 다른 문서로 이동하는
+  // 동안 이전 문서의 DAG가 남지 않도록(P5-03 2차 리뷰 P2-1).
+  if (
+    projected.status !== "ready" &&
+    projected.status !== "loading" &&
+    lastReady !== null
+  )
+    setLastReady(null);
   const recomputing =
     editing !== undefined && state.status === "loading" && lastReady !== null;
   const projection = recomputing ? lastReady.projection : projected;

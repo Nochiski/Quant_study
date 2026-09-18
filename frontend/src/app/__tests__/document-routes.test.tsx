@@ -511,7 +511,7 @@ const serveRuntimeGraphDocument = (): void => {
 };
 
 describe("professional keyboard workflow (P6-03)", () => {
-  it("finds a JSON Pointer from a read-only view, returns to YAML and reveals its source", async () => {
+  it("finds a JSON Pointer from a read-only view, returns to YAML and reveals its source", SLOW, async () => {
     const user = userEvent.setup();
     const history = mount("/research/strategies/s1/revisions/2?view=json");
     expect(

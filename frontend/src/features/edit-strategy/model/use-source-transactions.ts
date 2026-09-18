@@ -77,8 +77,9 @@ export type SourceTransactions = {
   enabled: boolean;
   /**
    * 직전 편집의 parse가 아직 따라오지 않았다(디바운스). 화면은 직전 tree로 그려져 있으므로 이 동안 위치
-   * pointer를 쓰는 연산(`insert-item`·`insert-key`·`remove`)은 `apply`가 `pending`으로 보류한다 — 스칼라
-   * 확정은 계속 열려 있다. UI는 추가·삭제 컨트롤을 이 값으로 비활성화한다(P5-03 리뷰 DEFECT-133-01).
+   * pointer를 쓰는 연산(`insert-item`·`insert-key`·`remove`)은 `apply`가 `pending`으로 보류하고, 직전 적용
+   * 연산이 구조 변경이었으면 스칼라 확정도 보류한다(형제 pointer가 밀려 있다). UI는 목록·노드 컨트롤을 이
+   * 값으로 비활성화한다(P5-03 리뷰 DEFECT-133-01·2차 P1-1).
    */
   settling: boolean;
   /** `enabled`가 거짓인 이유. UI가 같은 사실을 다시 계산하지 않는다(Phase 3 감사 R3). */
@@ -150,6 +151,9 @@ export const useSourceTransactions = (
               : null;
   const enabled = disabled === null;
   const settling = state.parsedVersion !== state.sourceVersion;
+  // 직전에 적용한 연산이 구조를 바꿨는가(추가·삭제·스니펫). 그 뒤 parse가 따라오기 전에는 형제 pointer가 밀려
+  // 있어 스칼라 확정도 다른 항목에 써질 수 있다(P5-03 2차 리뷰 P1-1) → 그때는 스칼라도 보류한다.
+  const lastStructural = useRef(false);
   const setFeedback = useCallback(
     (value: TransactionFeedback): void => {
       const next = { documentEpoch: state.documentEpoch, scope, value };
@@ -208,6 +212,8 @@ export const useSourceTransactions = (
       current.scrollTo(edit.selection.from);
       if (options.focusEditor !== false) current.focus();
       setFeedback({ status: "applied", owner, label });
+      // 스니펫·`run` 호출자는 위치를 바꾸는 편집이다. `apply`는 스칼라면 아래에서 false로 되돌린다.
+      lastStructural.current = true;
       return true;
     },
     [editorActive, setFeedback, state.composing, state.format],
@@ -222,16 +228,19 @@ export const useSourceTransactions = (
     ): boolean => {
       // 위치 pointer 연산은 직전 편집의 parse가 따라온 뒤에만(P5-03 리뷰 DEFECT-133-01: 150ms 안의 연타가
       // stale pointer로 다른 항목·노드를 지웠다). 스칼라 확정은 값 pointer가 살아 있어 그대로 계획한다.
-      if (settling && op.kind !== "replace-scalar") {
+      const structural = op.kind !== "replace-scalar";
+      if (settling && (structural || lastStructural.current)) {
         setFeedback({ status: "error", owner, label, reason: "pending" });
         return false;
       }
-      return run(
+      const applied = run(
         ({ text }) => planSourceOperation(text, "yaml", op),
         label,
         owner,
         options,
       );
+      if (applied) lastStructural.current = structural;
+      return applied;
     },
     [run, setFeedback, settling],
   );

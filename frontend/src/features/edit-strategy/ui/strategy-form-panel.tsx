@@ -294,8 +294,12 @@ const FormListSectionView = ({
       ),
     );
   const [open, setOpen] = useState(true);
+  // 목록 섹션은 직전 편집의 parse가 따라올 때까지 잠근다(위치 pointer 연산, P5-03 리뷰 DEFECT-133-01).
   return (
-    <fieldset className="strategy-form__section" disabled={disabled}>
+    <fieldset
+      className="strategy-form__section"
+      disabled={disabled || transactions.settling}
+    >
       <legend>
         <SectionToggle
           title={section.key}

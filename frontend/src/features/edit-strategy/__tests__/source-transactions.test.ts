@@ -3,9 +3,10 @@ import { describe, expect, it } from "vitest";
 import { parseSource } from "../../../shared/lib/yaml12";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import {
+  type SourceOperation,
   applyToTree,
   planSourceOperation,
-  type SourceOperation,
+  planSourceOperations,
 } from "../model/source-transactions";
 
 const GOLDEN = readBackendFixture(
@@ -622,6 +623,52 @@ describe("review follow-up: item anchors, anchor option, parent line comments (P
       ),
     ).toEqual({
       a: { x: 9 },
+    });
+  });
+});
+
+describe("planSourceOperations (backlog 13)", () => {
+  const BASE =
+    'schema_version: "1.1"\nrisk:\n  max_name_weight: 0.05\nparameters: []\n';
+
+  it("chains each operation on the previous result and merges them into one edit", () => {
+    const ops: SourceOperation[] = [
+      {
+        kind: "insert-item",
+        parentPointer: "/parameters",
+        value: { parameter_id: "w", value: 1 },
+      },
+      { kind: "replace-scalar", pointer: "/risk/max_name_weight", value: 0.1 },
+    ];
+    const merged = planSourceOperations(BASE, "yaml", ops);
+    if (merged.status !== "ok") throw new Error(merged.reason);
+    const first = planSourceOperation(BASE, "yaml", ops[0]!);
+    if (first.status !== "ok") throw new Error(first.reason);
+    const second = planSourceOperation(first.edit.nextSource, "yaml", ops[1]!);
+    if (second.status !== "ok") throw new Error(second.reason);
+    expect(merged.edit.nextSource).toBe(second.edit.nextSource);
+    // 합친 편집 하나를 원문에 적용하면 최종 텍스트가 된다(undo 1회).
+    const { from, to, insert } = merged.edit;
+    expect(`${BASE.slice(0, from)}${insert}${BASE.slice(to)}`).toBe(
+      merged.edit.nextSource,
+    );
+    expect(merged.edit.selection).toEqual(second.edit.selection);
+  });
+
+  it("fails as a whole when a later step fails and equals planSourceOperation for one op", () => {
+    expect(
+      planSourceOperations(BASE, "yaml", [
+        { kind: "replace-scalar", pointer: "/risk/max_name_weight", value: 0.1 },
+        { kind: "remove", pointer: "/nope" },
+      ]),
+    ).toEqual({ status: "error", reason: "not-found" });
+    const single = { kind: "remove", pointer: "/parameters" } as const;
+    expect(planSourceOperations(BASE, "yaml", [single])).toEqual(
+      planSourceOperation(BASE, "yaml", single),
+    );
+    expect(planSourceOperations(BASE, "yaml", [])).toEqual({
+      status: "error",
+      reason: "not-found",
     });
   });
 });

@@ -11,7 +11,7 @@ import {
   initialDocumentState,
   type DocumentState,
 } from "../model/document-state";
-import { projectForm } from "../model/form-projection";
+import { projectForm, type FormListItem } from "../model/form-projection";
 import {
   addItemOperation,
   addPresetItemOperation,
@@ -430,6 +430,50 @@ describe("StrategyFormPanel list sections", () => {
     const item = rules(withRule).items[0]!;
     expect(item.identityKey).toBeNull();
     expect(removalBlockers(parseSource(withRule, "yaml").status === "ok" ? (parseSource(withRule, "yaml") as { tree: unknown }).tree : {}, item)).toEqual([]);
+  });
+
+  it("scopes the removal guard of graph nodes to their own factor graph (audit DEFECT-P5X-004)", () => {
+    // `close`를 두 팩터가 정의하고 첫 팩터의 `mom_252`만 참조한다. 둘째 팩터의 `close`는 전역 탐색이면 오탐된다.
+    const twoFactors = VERBOSE.replace(
+      "portfolio:\n",
+      "  - factor_id: volume\n    direction: high\n    graph:\n      nodes:\n        - kind: field\n          node_id: close\n          field_id: price.volume\n      output_node_id: px\nportfolio:\n",
+    );
+    const parsed = parseSource(twoFactors, "yaml");
+    if (parsed.status !== "ok") throw new Error("fixture must parse");
+    const nodeItem = (pointer: string): FormListItem => ({
+      pointer,
+      summary: "close",
+      branches: null,
+      identityKey: "node_id",
+      diagnostics: [],
+      fields: [
+        {
+          pointer: `${pointer}/node_id`,
+          templatePointer: "",
+          key: "node_id",
+          control: { kind: "text" },
+          nullable: false,
+          required: true,
+          written: true,
+          value: "close",
+          defaultValue: undefined,
+          hasDefault: false,
+          defaultFrom: null,
+          hasApplicability: false,
+          applicable: null,
+          unit: null,
+          displayUnit: null,
+          descriptionKey: null,
+          diagnostics: [],
+        },
+      ],
+    });
+    expect(removalBlockers(parsed.tree, nodeItem("/factors/1/graph/nodes/0"))).toEqual([]);
+    expect(
+      removalBlockers(parsed.tree, nodeItem("/factors/0/graph/nodes/0")).map(
+        (reference) => reference.pointer,
+      ),
+    ).toEqual(["/factors/0/graph/nodes/1/input_node_id"]);
   });
 
   it("renders nested list controls inside the object section and applies to the nested pointer", async () => {

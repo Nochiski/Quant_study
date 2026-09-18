@@ -128,7 +128,8 @@ export const nodeKinds = (
 /**
  * 노드 분기 스키마에서 다른 노드를 가리키는 필드 키(`input_node_id`, `left_node_id`, …). 판정은
  * `schemaFacts(...).reference === "node"` 하나다(SoT: 참조 사실의 owner는 `schemaFacts`; 리뷰 P1-1).
- * `addNode`의 참조 채우기와 P5-02의 입력 슬롯 목록·`rewireInput` 키 검증이 같은 함수를 쓴다.
+ * `addNode`의 참조 채우기와 P5-02의 입력 슬롯 목록이 같은 함수를 쓴다(`rewireInput` 키 검증은 P5X-008
+ * 정리로 함께 제거).
  */
 export const nodeReferenceKeys = (
   schema: JsonSchema,
@@ -139,16 +140,6 @@ export const nodeReferenceKeys = (
     const node = isRecord(property) ? resolveRef(schema, property) : null;
     return node !== null && schemaFacts(node).reference === "node" ? [key] : [];
   });
-};
-
-/** `nodePointer`가 가리키는 노드의 분기 스키마(문서의 `kind`로 해소). 못 찾으면 null. */
-const nodeBranchAt = (
-  schema: JsonSchema,
-  tree: unknown,
-  nodePointer: string,
-): JsonSchema | null => {
-  const resolved = schemaAt(schema, nodePointer, tree);
-  return resolved === null || resolved.branches !== null ? null : resolved.node;
 };
 
 /** `base`, `base_2`, `base_3` … 중 그래프에 없는 첫 id. */
@@ -166,6 +157,15 @@ export const suggestNodeId = (
 };
 
 /**
+ * `output_node_id`가 아직 정해지지 않았는가(없음·빈 문자열). `null`은 제외한다 — `output_node_id:`처럼 값 자리가
+ * 비어 있는 표기는 `replace-scalar`가 parse 단계에서 실패해 노드 추가 전체(all-or-nothing)가 막힌다(#144 재검토).
+ */
+const outputUnset = (graph: unknown): boolean => {
+  const output = isRecord(graph) ? graph.output_node_id : undefined;
+  return output === undefined || output === "";
+};
+
+/**
  * 노드 추가: `kind` 분기 스키마로 최소 항목을 materialize하고 `node_id`는 `suggestNodeId(kind)`. 참조
  * 슬롯(`nodeReferenceKeys`)이 **하나뿐인** 분기(unary·time_series·cross_sectional·group)는 그 슬롯을 그래프의
  * 마지막 노드 id로 채워 즉시 valid 가능하게 하고, 둘 이상인 분기(binary·comparison·conditional)는 같은
@@ -177,7 +177,7 @@ export const addNode = (
   factorPointer: string,
   kind: string,
   schema: JsonSchema,
-): { op: SourceOperation; nodeId: string } | { error: "unknown-kind" } => {
+): { ops: SourceOperation[]; nodeId: string } | { error: "unknown-kind" } => {
   const branch = nodeKinds(schema, tree, factorPointer).find(
     ([name]) => name === kind,
   )?.[1];
@@ -198,28 +198,43 @@ export const addNode = (
   if (references.length === 1 && last !== "") value[references[0]!] = last;
   const graph = valueAt(tree, graphPointer(factorPointer));
   const nodes = valueAt(tree, nodesPointer(factorPointer));
-  if (Array.isArray(nodes))
-    return {
-      op: { kind: "insert-item", parentPointer: nodesPointer(factorPointer), value },
-      nodeId,
-    };
-  if (isRecord(graph))
-    return {
-      op: {
+  if (Array.isArray(nodes)) {
+    const ops: SourceOperation[] = [
+      { kind: "insert-item", parentPointer: nodesPointer(factorPointer), value },
+    ];
+    // 첫 노드는 출력 노드도 된다(`graph`를 새로 여는 경로와 같은 모양, Phase 5 감사 backlog 13). 출력이
+    // 이미 다른 값이면 두지 않는다. 두 연산은 훅이 한 트랜잭션으로 합친다.
+    if (nodes.length === 0 && outputUnset(graph))
+      ops.push(
+        setScalar(tree, graphPointer(factorPointer), "output_node_id", nodeId),
+      );
+    return { ops, nodeId };
+  }
+  if (isRecord(graph)) {
+    // `nodes` 키가 없는 그래프도 첫 노드라 같은 규칙(리뷰 P2-5).
+    const ops: SourceOperation[] = [
+      {
         kind: "insert-key",
         parentPointer: graphPointer(factorPointer),
         key: "nodes",
         value: [value],
       },
-      nodeId,
-    };
+    ];
+    if (outputUnset(graph))
+      ops.push(
+        setScalar(tree, graphPointer(factorPointer), "output_node_id", nodeId),
+      );
+    return { ops, nodeId };
+  }
   return {
-    op: {
-      kind: "insert-key",
-      parentPointer: factorPointer,
-      key: "graph",
-      value: { nodes: [value], output_node_id: nodeId },
-    },
+    ops: [
+      {
+        kind: "insert-key",
+        parentPointer: factorPointer,
+        key: "graph",
+        value: { nodes: [value], output_node_id: nodeId },
+      },
+    ],
     nodeId,
   };
 };
@@ -233,64 +248,12 @@ export const setNodeField = (
 ): SourceOperation => setScalar(tree, nodePointer, key, value);
 
 /**
- * 입력 슬롯 재연결: `inputKey`(`input_node_id`·`left_node_id` …)를 `targetNodeId`로. 자기 자신이면
- * `self`, 같은 그래프에 없는 id면 `not-found`(사이클·타입은 backend가 판정). `schema`를 주면 `inputKey`가
- * 그 노드 분기의 참조 슬롯(`nodeReferenceKeys`)인지도 검사해 아니면 `not-found`(리뷰 P2-4 — 노드 분기는
- * `additionalProperties: false`라 모르는 키는 compile error가 된다).
- */
-export const rewireInput = (
-  tree: unknown,
-  nodePointer: string,
-  inputKey: string,
-  targetNodeId: string,
-  schema?: JsonSchema,
-): SourceOperation | { error: "self" | "not-found" } => {
-  const node = valueAt(tree, nodePointer);
-  if (isRecord(node) && node.node_id === targetNodeId) return { error: "self" };
-  const factorPointer = nodePointer.replace(/\/graph\/nodes\/\d+$/, "");
-  if (factorPointer === nodePointer) return { error: "not-found" };
-  if (!graphNodeIds(tree, factorPointer).includes(targetNodeId))
-    return { error: "not-found" };
-  if (schema !== undefined) {
-    const branch = nodeBranchAt(schema, tree, nodePointer);
-    if (branch === null || !nodeReferenceKeys(schema, branch).includes(inputKey))
-      return { error: "not-found" };
-  }
-  return setScalar(tree, nodePointer, inputKey, targetNodeId);
-};
-
-/** 출력 노드 지정. 그래프에 없는 id면 `not-found`. */
-export const setOutput = (
-  tree: unknown,
-  factorPointer: string,
-  nodeId: string,
-): SourceOperation | { error: "not-found" } =>
-  graphNodeIds(tree, factorPointer).includes(nodeId)
-    ? setScalar(tree, graphPointer(factorPointer), "output_node_id", nodeId)
-    : { error: "not-found" };
-
-/**
- * 노드 삭제 가드(D7): 같은 그래프 안에서 `*_node_id`·`output_node_id`가 이 노드를 가리키면 거부하고 참조
- * pointer를 돌려준다. 탐색은 그 팩터의 `graph` 아래로 스코프한다(다른 팩터의 같은 id는 참조가 아니다).
- */
-export const removeNode = (
-  tree: unknown,
-  factorPointer: string,
-  nodeId: string,
-): SourceOperation | { error: "referenced"; by: string[] } | { error: "not-found" } => {
-  const pointer = nodePointerOf(tree, factorPointer, nodeId);
-  if (pointer === null) return { error: "not-found" };
-  const by = findReferences(tree, "node", nodeId, pointer, {
-    within: graphPointer(factorPointer),
-  }).map((reference) => reference.pointer);
-  if (by.length > 0) return { error: "referenced", by };
-  return { kind: "remove", pointer };
-};
-
-/**
- * 노드 pointer로 삭제(리뷰 DEFECT-132-01). 화면 표시 이름이 아니라 문서 위치가 정본이다 — `node_id`가
- * 중복이거나 없는 노드에서 `removeNode(id)`는 첫 일치 노드를 지워 다른 노드가 사라진다. 참조 검사는
- * `removeNode`와 같다(그 팩터 `graph` 스코프).
+ * 노드 삭제 가드(D7), pointer 기준(리뷰 DEFECT-132-01). 화면 표시 이름이 아니라 문서 위치가 정본이다 —
+ * `node_id`가 중복이거나 없는 노드에서 id 기반 삭제는 첫 일치 노드를 지워 다른 노드가 사라진다. 같은 그래프
+ * 안에서 `*_node_id`·`output_node_id`가 이 노드를 가리키면 거부하고 참조 pointer를 돌려준다. 탐색은 그
+ * 팩터의 `graph` 아래로 스코프한다(다른 팩터의 같은 id는 참조가 아니다). id 기반 `removeNode`와 `rewireInput`·
+ * `setOutput`·`setMissingPolicy`는 UI가 부르지 않아 정리했다(Phase 5 감사 P5X-008) — 속성·입력·출력·정책은
+ * Form과 같은 필드 컨트롤이 `setNodeField`와 같은 연산을 만든다.
  */
 export const removeNodeAt = (
   tree: unknown,
@@ -310,11 +273,3 @@ export const removeNodeAt = (
     ? { error: "referenced", by }
     : { kind: "remove", pointer: nodePointer };
 };
-
-/** `missing_policy` 확정. */
-export const setMissingPolicy = (
-  tree: unknown,
-  factorPointer: string,
-  policy: string,
-): SourceOperation =>
-  setScalar(tree, graphPointer(factorPointer), "missing_policy", policy);

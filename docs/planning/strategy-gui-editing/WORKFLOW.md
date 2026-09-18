@@ -824,6 +824,11 @@ export const setMissingPolicy = (tree, factorPointer, policy): SourceOperation;
 export const suggestNodeId = (tree, factorPointer, base: string): string;   // base, base_2, base_3 …
 ```
 
+> 2026-09-18 #144(P5X-008 후속): 위 acceptance 중 `rewireInput`·`setOutput`·`removeNode(id)`·`setMissingPolicy`는
+> UI 호출처가 없어 제거됐고(속성·입력·출력·정책은 `FormFieldsEditor`가 같은 연산을 만든다), `addNode`는
+> `{ ops: SourceOperation[]; nodeId }`를 돌려준다(빈 그래프의 첫 노드 + `output_node_id` 지정을 한 트랜잭션으로).
+> 삭제는 pointer 기반 `removeNodeAt`뿐이다. 아래 결정·기록에 남은 네 함수 언급은 당시 구현 기록이다.
+
 - `addNode`는 `$defs/<Kind>Node` 분기 스키마로 최소 항목을 materialize하고 `kind` 첫 키.
   reference 필드는 빈 문자열이 아니라 그래프의 마지막 노드 id로 채운다(즉시 valid 가능).
 - `removeNode`는 **그 팩터 그래프 안으로 스코프된** 참조 탐색으로 `*_node_id`와 `output_node_id`를
@@ -842,11 +847,11 @@ export const suggestNodeId = (tree, factorPointer, base: string): string;   // b
   `materializeSchemaValue`로 최소 항목을 만들고 `node_id = suggestNodeId(kind)`. 참조 슬롯은
   `nodeReferenceKeys(schema, branch)`(`schemaFacts(...).reference === "node"` — SoT owner 하나, 리뷰 P1-1)로
   얻고, 슬롯이 하나뿐인 분기만 그래프의 마지막 노드 id로 채운다(둘 이상이면 빈 문자열, 리뷰 P2-3).
-  `rewireInput(..., schema?)`는 `schema`가 있으면 그 키가 참조 슬롯인지도 검사한다(P2-4). 추가 직후 노드
+  `rewireInput(..., schema?)`는 `schema`가 있으면 그 키가 참조 슬롯인지도 검사한다(P2-4; #144에서 제거). 추가 직후 노드
   pointer는 재파싱 뒤 `nodePointerOf(tree, factorPointer, nodeId)`로 얻는다(P2-5). `graph.nodes`가 있으면 `insert-item`, `nodes`만 없으면 `graph`에
   `insert-key`, `graph`까지 없으면 팩터에 `graph: { nodes: [node], output_node_id }`를 연다(트랜잭션 한 번).
   `setOutput`·`rewireInput`은 spec 시그니처에 `not-found`(그래프에 없는 id)를 더해 fail-closed다 — 사이클·
-  타입은 backend 판정. `removeNode`는 `findReferences(..., { within: "/factors/N/graph" })`로 스코프해
+  타입은 backend 판정(둘 다 #144에서 제거). `removeNode`(→ #144부터 `removeNodeAt`)는 `findReferences(..., { within: "/factors/N/graph" })`로 스코프해
   `*_node_id`·`output_node_id` 참조를 검사한다(감사 R1). `useSourceTransactions`는 `feedbackFor(owner)`를
   내고 Form·스니펫이 자기 슬롯만 읽는다(`feedback`은 마지막 결과로 유지, 감사 R2). `planRemove`는 삭제
   대상(시퀀스 항목·mapping 키) 바로 위의 연속 독립 주석 줄을 함께 지운다 — 빈 줄에서 멈추고, 주석 블록이
@@ -870,7 +875,7 @@ export const suggestNodeId = (tree, factorPointer, base: string): string;   // b
 - 팩터 헤더: "노드 추가" 메뉴(kind 목록은 스키마 `oneOf` 분기에서), `output_node_id` select,
   `missing_policy` select.
 - 노드 카드 선택 → 오른쪽 property editor(P4-02 컨트롤 재사용; `x-reference: node` 필드는 같은
-  그래프의 다른 노드 id select). 입력 슬롯 버튼 → 대상 노드 select → `rewireInput`.
+  그래프의 다른 노드 id select). 입력 슬롯 버튼 → 대상 노드 select → `rewireInput`(구현은 필드 컨트롤이 대신했고 #144에서 제거).
 - 삭제 버튼 → 참조가 있으면 참조 목록 안내, 없으면 `remove`.
 - 편집 후 backend plan이 갱신될 때까지 카드에 "재계산 중" 상태(기존 loading state 재사용).
 - 키보드: 노드 목록 roving tabindex 유지, 메뉴는 `Menu` primitive.
@@ -879,7 +884,7 @@ export const suggestNodeId = (tree, factorPointer, base: string): string;   // b
   으로 `/factors/N/graph`·노드 pointer를 object 섹션으로 projection) — plan이 막혀 있어도(빈 그래프·compile
   error·대기) 팩터 선택·노드 추가·속성 편집이 된다(감사 R4). 노드 속성·입력 재연결·출력·`missing_policy`는
   P4-02 필드 컨트롤(`FormFieldsEditor`, owner `graph`)이고 입력 재연결은 reference select(같은 그래프·자기
-  제외)라 `rewireInput`의 가드와 같은 조건이다. 추가·삭제는 `addNode`/`removeNode`. 노드 추가 직후 새 노드
+  제외)라 `rewireInput`의 가드와 같은 조건이다. 추가·삭제는 `addNode`/`removeNodeAt`(id 기반 `removeNode`는 #144에서 제거). 노드 추가 직후 새 노드
   pointer를 선택하고 선택 노드를 지우면 그래프 pointer로 돌아간다(R6). "노드 추가" 메뉴는 `Menu` 대신 kind
   select + 버튼(P4-03과 같은 결정). DAG 투영(plan 순서)과 편집 목록(문서 순서)은 별개 표면이다 — 카드 안
   편집 컨트롤 병합은 P5-03 검토. "그래프 설정"은 `graph`가 있을 때만(없는 팩터는 노드 추가가 `graph`를 연다).
@@ -929,7 +934,8 @@ export const suggestNodeId = (tree, factorPointer, base: string): string;   // b
   Graph 패널은 plan 재조회(loading) 동안 직전 ready 투영을 "재계산 중" 배지와 함께 유지한다(P5-02
   acceptance, OBS-132-05). 기록: `graph-transactions.ts`의 `removeNode(id)`·`rewireInput`·`setOutput`·
   `setMissingPolicy`·`nodePointerOf`는 UI가 부르지 않는 모듈 계약(속성·출력·정책·재연결은 필드 컨트롤이
-  같은 연산을 만든다)이며 P5-01 테스트가 고정한다. 매뉴얼 8절 스크린샷은 후속.
+  같은 연산을 만든다)이며 P5-01 테스트가 고정한다 — Phase 5 감사 P5X-008 후속에서 `nodePointerOf`만 남기고 네 함수를
+  제거했다. 매뉴얼 8절 스크린샷은 후속.
 
 **Phase 5 exit**: SoT·책임분리 최종 점검. 전체 e2e green. initiative COMPLETE.
 

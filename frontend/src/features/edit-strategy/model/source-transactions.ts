@@ -905,3 +905,51 @@ export const planSourceOperation = (
   }
   return first;
 };
+
+/**
+ * 연산 여러 개를 한 트랜잭션으로: 앞 연산의 `nextSource` 위에 다음 연산을 `planSourceOperation`으로 순차
+ * 계획하고(각 단계가 preflight를 거친다), 원문과 최종 텍스트의 공통 접두·접미를 뺀 구간 하나로 합쳐
+ * 편집기 `replaceRange` 한 번(undo 1회)이 되게 한다. 한 단계라도 실패하면 그 사유로 전체가 실패한다.
+ * 연산 하나면 `planSourceOperation`과 같다(Phase 5 감사 backlog 13: 빈 그래프의 첫 노드 + 출력 지정).
+ */
+export const planSourceOperations = (
+  source: string,
+  format: SourceFormat,
+  ops: readonly SourceOperation[],
+): PlanResult => {
+  if (ops.length === 0) return { status: "error", reason: "not-found" };
+  const eol = detectEol(source);
+  let text = source;
+  let last: PlannedEdit | null = null;
+  for (const op of ops) {
+    const planned = planSourceOperation(text, format, op, { eol });
+    if (planned.status !== "ok") return planned;
+    text = planned.edit.nextSource;
+    last = planned.edit;
+  }
+  if (last === null || ops.length === 1) return { status: "ok", edit: last! };
+  let prefix = 0;
+  while (
+    prefix < source.length &&
+    prefix < text.length &&
+    source[prefix] === text[prefix]
+  )
+    prefix += 1;
+  let suffix = 0;
+  while (
+    suffix < source.length - prefix &&
+    suffix < text.length - prefix &&
+    source[source.length - 1 - suffix] === text[text.length - 1 - suffix]
+  )
+    suffix += 1;
+  return {
+    status: "ok",
+    edit: {
+      from: prefix,
+      to: source.length - suffix,
+      insert: text.slice(prefix, text.length - suffix),
+      nextSource: text,
+      selection: last.selection,
+    },
+  };
+};

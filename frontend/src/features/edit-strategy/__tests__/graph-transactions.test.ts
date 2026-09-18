@@ -8,17 +8,14 @@ import {
   nodeKinds,
   nodePointerOf,
   nodeReferenceKeys,
-  removeNode,
   removeNodeAt,
-  rewireInput,
-  setMissingPolicy,
   setNodeField,
-  setOutput,
   suggestNodeId,
 } from "../model/graph-transactions";
 import type { JsonSchema } from "../model/schema-navigator";
 import {
   planSourceOperation,
+  planSourceOperations,
   type SourceOperation,
 } from "../model/source-transactions";
 
@@ -83,12 +80,12 @@ describe("graph transactions (P5-01)", () => {
     const added = addNode(tree, F0, "unary", SCHEMA);
     if ("error" in added) throw new Error(added.error);
     expect(added.nodeId).toBe("unary");
-    expect(added.op).toMatchObject({
+    expect(added.ops[0]!).toMatchObject({
       kind: "insert-item",
       parentPointer: "/factors/0/graph/nodes",
       value: { kind: "unary", node_id: "unary", input_node_id: "mom_252" },
     });
-    const next = treeOf(applyPlan(VERBOSE, added.op));
+    const next = treeOf(applyPlan(VERBOSE, added.ops[0]!));
     expect(graphNodeIds(next, F0)).toEqual(["close", "mom_252", "unary"]);
     expect(addNode(tree, F0, "nope", SCHEMA)).toEqual({ error: "unknown-kind" });
   });
@@ -107,41 +104,50 @@ describe("graph transactions (P5-01)", () => {
     // 참조 슬롯이 둘 이상이면 같은 노드를 여러 슬롯에 넣지 않는다(빈 문자열로 두고 사용자가 고른다).
     const binary = addNode(tree, F0, "binary", SCHEMA);
     if ("error" in binary) throw new Error(binary.error);
-    expect(binary.op).toMatchObject({
+    expect(binary.ops[0]).toMatchObject({
       value: { kind: "binary", left_node_id: "", right_node_id: "" },
-    });
-    // `schema`를 주면 분기에 없는 입력 키는 not-found.
-    const node = "/factors/0/graph/nodes/1";
-    expect(rewireInput(tree, node, "left_node_id", "close", SCHEMA)).toEqual({
-      error: "not-found",
-    });
-    expect(rewireInput(tree, node, "input_node_id", "close", SCHEMA)).toEqual({
-      kind: "replace-scalar",
-      pointer: `${node}/input_node_id`,
-      value: "close",
     });
   });
 
-  it("adds the first node to an empty factor graph (P4-03 output) with `insert-item` on `nodes: []`", () => {
+  it("adds the first node to an empty factor graph (P4-03 output) and makes it the output in one transaction (backlog 13)", () => {
     const tree = treeOf(EMPTY_FACTOR);
     const added = addNode(tree, "/factors/1", "field", SCHEMA);
     if ("error" in added) throw new Error(added.error);
-    expect(added.op).toMatchObject({
-      kind: "insert-item",
-      parentPointer: "/factors/1/graph/nodes",
-      value: { kind: "field", node_id: "field" },
-    });
-    const source = applyPlan(EMPTY_FACTOR, added.op);
+    expect(added.ops).toEqual([
+      expect.objectContaining({
+        kind: "insert-item",
+        parentPointer: "/factors/1/graph/nodes",
+        value: expect.objectContaining({ kind: "field", node_id: "field" }),
+      }),
+      {
+        kind: "replace-scalar",
+        pointer: "/factors/1/graph/output_node_id",
+        value: "field",
+      },
+    ]);
+    const planned = planSourceOperations(EMPTY_FACTOR, "yaml", added.ops);
+    if (planned.status !== "ok") throw new Error(planned.reason);
+    const source = planned.edit.nextSource;
     expect(graphNodeIds(treeOf(source), "/factors/1")).toEqual(["field"]);
-    // 그 다음 출력 지정도 계획된다(빈 문자열 → replace-scalar).
-    const output = setOutput(treeOf(source), "/factors/1", "field");
-    if ("error" in output) throw new Error(output.error);
-    expect(output).toEqual({
-      kind: "replace-scalar",
-      pointer: "/factors/1/graph/output_node_id",
-      value: "field",
-    });
-    expect(applyPlan(source, output)).toContain('output_node_id: field');
+    expect(source).toContain("output_node_id: field");
+    // 출력이 이미 정해진 빈 그래프는 그대로 두고, 노드가 있는 그래프의 추가는 연산 하나다.
+    const preset = treeOf(
+      EMPTY_FACTOR.replace('output_node_id: ""', "output_node_id: later"),
+    );
+    const kept = addNode(preset, "/factors/1", "field", SCHEMA);
+    if ("error" in kept) throw new Error(kept.error);
+    expect(kept.ops).toHaveLength(1);
+    const more = addNode(treeOf(source), "/factors/1", "unary", SCHEMA);
+    if ("error" in more) throw new Error(more.error);
+    expect(more.ops).toHaveLength(1);
+    // 값 자리가 빈 `output_node_id:`(null)는 출력 지정을 붙이지 않는다 — 붙이면 replace-scalar가 parse에서
+    // 실패해 노드 추가 전체가 거부된다(#144 재검토 회귀).
+    const bare = EMPTY_FACTOR.replace('output_node_id: ""', "output_node_id:");
+    const onBare = addNode(treeOf(bare), "/factors/1", "field", SCHEMA);
+    if ("error" in onBare) throw new Error(onBare.error);
+    expect(onBare.ops).toHaveLength(1);
+    const plannedBare = planSourceOperations(bare, "yaml", onBare.ops);
+    expect(plannedBare.status).toBe("ok");
   });
 
   it("opens `graph` or `nodes` when they are missing", () => {
@@ -153,10 +159,16 @@ describe("graph transactions (P5-01)", () => {
     );
     const viaNodes = addNode(noNodes, "/factors/1", "field", SCHEMA);
     if ("error" in viaNodes) throw new Error(viaNodes.error);
-    expect(viaNodes.op).toMatchObject({
+    expect(viaNodes.ops[0]!).toMatchObject({
       kind: "insert-key",
       parentPointer: "/factors/1/graph",
       key: "nodes",
+    });
+    // `nodes` 키가 없어도 첫 노드라 출력도 함께 정한다(빈 문자열 → replace-scalar, 리뷰 P2-5).
+    expect(viaNodes.ops[1]).toEqual({
+      kind: "replace-scalar",
+      pointer: "/factors/1/graph/output_node_id",
+      value: "field",
     });
     const noGraph = treeOf(
       VERBOSE.replace(
@@ -166,7 +178,7 @@ describe("graph transactions (P5-01)", () => {
     );
     const viaGraph = addNode(noGraph, "/factors/1", "field", SCHEMA);
     if ("error" in viaGraph) throw new Error(viaGraph.error);
-    expect(viaGraph.op).toMatchObject({
+    expect(viaGraph.ops[0]!).toMatchObject({
       kind: "insert-key",
       parentPointer: "/factors/1",
       key: "graph",
@@ -174,7 +186,7 @@ describe("graph transactions (P5-01)", () => {
     });
   });
 
-  it("sets node fields, rewires inputs within the graph, and sets output and missing policy", () => {
+  it("sets node fields: replace-scalar when the key is written, insert-key otherwise", () => {
     const tree = treeOf(VERBOSE);
     const node = "/factors/0/graph/nodes/1";
     expect(setNodeField(tree, node, "window", 126)).toEqual({
@@ -188,27 +200,6 @@ describe("graph transactions (P5-01)", () => {
       key: "lag",
       value: 1,
     });
-    expect(rewireInput(tree, node, "input_node_id", "mom_252")).toEqual({
-      error: "self",
-    });
-    expect(rewireInput(tree, node, "input_node_id", "ghost")).toEqual({
-      error: "not-found",
-    });
-    expect(rewireInput(tree, node, "input_node_id", "close")).toEqual({
-      kind: "replace-scalar",
-      pointer: `${node}/input_node_id`,
-      value: "close",
-    });
-    expect(setOutput(tree, F0, "close")).toEqual({
-      kind: "replace-scalar",
-      pointer: "/factors/0/graph/output_node_id",
-      value: "close",
-    });
-    expect(setOutput(tree, F0, "ghost")).toEqual({ error: "not-found" });
-    expect(setMissingPolicy(tree, F0, "zero")).toMatchObject({
-      pointer: "/factors/0/graph/missing_policy",
-      value: "zero",
-    });
   });
 
   it("removes by pointer when node ids are duplicated or missing (review DEFECT-132-01)", () => {
@@ -218,11 +209,8 @@ describe("graph transactions (P5-01)", () => {
         "        - kind: field\n          node_id: spare\n          field_id: price.volume\n        - kind: field\n          node_id: spare\n          field_id: price.open\n        - kind: field\n          field_id: price.high\n      output_node_id: mom_252\n",
       ),
     );
-    // id 기반은 첫 일치 노드를 고른다(둘째 spare를 누르려 해도 첫째가 지워진다); pointer 기반은 누른 노드를 지운다.
-    expect(removeNode(duplicated, F0, "spare")).toEqual({
-      kind: "remove",
-      pointer: "/factors/0/graph/nodes/2",
-    });
+    // id 기반이면 첫 일치 노드(nodes/2)가 지워졌을 자리 — pointer 기반은 누른 노드를 지운다.
+    expect(nodePointerOf(duplicated, F0, "spare")).toBe("/factors/0/graph/nodes/2");
     expect(removeNodeAt(duplicated, F0, "/factors/0/graph/nodes/3")).toEqual({
       kind: "remove",
       pointer: "/factors/0/graph/nodes/3",
@@ -245,13 +233,13 @@ describe("graph transactions (P5-01)", () => {
   it("refuses to remove a referenced node, scoped to its own graph, and removes an unreferenced one with its leading comment", () => {
     const tree = treeOf(TWO_FACTORS);
     // `close`는 같은 그래프의 `mom_252`가 입력으로 참조한다. 다른 팩터의 같은 id는 참조가 아니다(감사 DEFECT-P4X-002).
-    expect(removeNode(tree, F0, "close")).toEqual({
+    expect(removeNodeAt(tree, F0, nodePointerOf(tree, F0, "close")!)).toEqual({
       error: "referenced",
       by: ["/factors/0/graph/nodes/1/input_node_id"],
     });
-    expect(removeNode(tree, F0, "ghost")).toEqual({ error: "not-found" });
+    expect(nodePointerOf(tree, F0, "ghost")).toBeNull();
     // 출력 노드는 `output_node_id`가 참조한다.
-    expect(removeNode(tree, F0, "mom_252")).toEqual({
+    expect(removeNodeAt(tree, F0, nodePointerOf(tree, F0, "mom_252")!)).toEqual({
       error: "referenced",
       by: ["/factors/0/graph/output_node_id"],
     });
@@ -260,7 +248,7 @@ describe("graph transactions (P5-01)", () => {
       "        - kind: field\n          node_id: close\n          field_id: price.volume\n",
       "        # 거래량 노드\n        - kind: field\n          node_id: close\n          field_id: price.volume\n        - kind: field\n          node_id: px\n          field_id: price.close\n",
     ).replace("      output_node_id: close\nportfolio:", "      output_node_id: px\nportfolio:");
-    const removal = removeNode(treeOf(commented), "/factors/1", "close");
+    const removal = removeNodeAt(treeOf(commented), "/factors/1", "/factors/1/graph/nodes/0");
     if ("error" in removal) throw new Error(removal.error);
     expect(removal).toEqual({ kind: "remove", pointer: "/factors/1/graph/nodes/0" });
     const next = applyPlan(commented, removal);

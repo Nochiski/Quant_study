@@ -238,6 +238,18 @@ const appendOperation = (
 };
 
 /**
+ * 스코프를 갖는 identity 네임스페이스 → 항목 pointer에서 탐색 범위(SoT "전략 의미" 행: 스코프가 있으면
+ * 호출자가 `within`을 넘긴다). `node`는 그 팩터의 `graph` 아래 — 다른 팩터의 같은 `node_id`는 참조가 아니다
+ * (Phase 4 감사 DEFECT-P4X-002, Phase 5 감사 DEFECT-P5X-004). 여기 없는 네임스페이스(`factor`·`parameter`)는
+ * 문서 전역이다.
+ */
+const REFERENCE_SCOPES: Readonly<
+  Record<string, (itemPointer: string) => string | null>
+> = {
+  node: (pointer) => /^(.*\/graph)\/nodes\/\d+$/.exec(pointer)?.[1] ?? null,
+};
+
+/**
  * 항목 삭제 전 참조 검사: 항목의 identity(`<namespace>_id`)를 문서 다른 곳이 참조하면 그 pointer 목록을
  * 돌려주고 삭제는 거부한다(D7 삭제 가드와 같은 규칙). identity는 스키마 `x-authoring-identity` 필드
  * (`item.identityKey`) 우선, 없으면 카탈로그 참조가 아닌 첫 `*_id` 문자열 필드(`parameter_id`·`node_id`).
@@ -261,11 +273,13 @@ export const removalBlockers = (
     );
   if (identity === undefined) return [];
   const namespace = identity.key.slice(0, -"_id".length);
+  const within = REFERENCE_SCOPES[namespace]?.(item.pointer) ?? null;
   return findReferences(
     tree,
     namespace,
     identity.value as string,
     item.pointer,
+    within === null ? {} : { within },
   );
 };
 

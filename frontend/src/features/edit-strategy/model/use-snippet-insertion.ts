@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import type { CodeEditorHandle } from "../../../shared/ui/code-editor";
 import type { DocumentState } from "./document-state";
@@ -9,10 +9,16 @@ import {
   type SnippetCatalogSource,
   type SnippetEditFailure,
 } from "./canonical-snippets";
-import { useSourceTransactions } from "./use-source-transactions";
+import {
+  useSourceTransactions,
+  type SourceTransactions,
+} from "./use-source-transactions";
 
 export type SnippetFailure =
-  SnippetEditFailure | "editor-unavailable" | "composing";
+  SnippetEditFailure | "editor-unavailable" | "editor-inactive" | "composing";
+
+const SNIPPET_OWNER = "snippet";
+const IDLE: SnippetFeedback = { status: "idle" };
 
 const SNIPPET_FAILURES: ReadonlySet<string> = new Set<SnippetFailure>([
   "yaml-only",
@@ -21,6 +27,7 @@ const SNIPPET_FAILURES: ReadonlySet<string> = new Set<SnippetFailure>([
   "duplicate",
   "parse",
   "editor-unavailable",
+  "editor-inactive",
   "composing",
 ]);
 
@@ -51,42 +58,51 @@ export const useSnippetInsertion = (
   state: DocumentState,
   source: SnippetCatalogSource,
   editorActive = true,
+  shared?: SourceTransactions,
 ): SnippetInsertion => {
-  const transactions = useSourceTransactions(
-    state,
-    editorActive,
-    source.status,
-  );
+  // page가 만든 인스턴스를 공유하면(P4-04) 그것을 쓰고, 아니면 자기 것을 만든다.
+  const own = useSourceTransactions(state, editorActive);
+  const transactions = shared ?? own;
   const snippets = useMemo(
     () => buildCanonicalSnippetCatalog(source),
     [source],
   );
   const { run } = transactions;
+  // 카탈로그 상태가 ready → unavailable → ready로 바뀌면 이전 구간의 feedback을 되살리지 않는다:
+  // 상태가 한 번이라도 바뀌면 렌더 중 파생 상태 조정으로 슬롯을 비운다.
+  const [statusAtInsert, setStatusAtInsert] = useState<
+    SnippetCatalogSource["status"] | null
+  >(null);
+  if (statusAtInsert !== null && statusAtInsert !== source.status)
+    setStatusAtInsert(null);
   const insert = useCallback(
-    (snippet: CanonicalSnippet): void =>
+    (snippet: CanonicalSnippet): void => {
+      setStatusAtInsert(source.status);
       run(
         ({ text, selection }) =>
           planSnippetEdit(text, "yaml", selection, snippet),
         snippet.label,
-      ),
-    [run],
+        SNIPPET_OWNER,
+      );
+    },
+    [run, source.status],
   );
 
   const feedback = useMemo((): SnippetFeedback => {
     const current = transactions.feedback;
+    if (current.status === "idle" || current.owner !== SNIPPET_OWNER)
+      return IDLE;
+    if (statusAtInsert === null) return IDLE;
     if (current.status === "applied")
       return { status: "inserted", label: current.label };
-    if (current.status === "error") {
-      return {
-        status: "error",
-        label: current.label,
-        reason: isSnippetFailure(current.reason)
-          ? current.reason
-          : "cursor-context",
-      };
-    }
-    return current;
-  }, [transactions.feedback]);
+    return {
+      status: "error",
+      label: current.label,
+      reason: isSnippetFailure(current.reason)
+        ? current.reason
+        : "cursor-context",
+    };
+  }, [statusAtInsert, transactions.feedback]);
 
   return {
     snippets,

@@ -70,6 +70,7 @@ describe("useSourceTransactions", () => {
     );
     expect(result.current.feedback).toEqual({
       status: "applied",
+      owner: "default",
       label: "max_name_weight",
     });
   });
@@ -110,6 +111,7 @@ describe("useSourceTransactions", () => {
     );
     expect(result.current.feedback).toEqual({
       status: "error",
+      owner: "default",
       label: "nope",
       reason: "not-found",
     });
@@ -124,6 +126,7 @@ describe("useSourceTransactions", () => {
     );
     expect(result.current.feedback).toEqual({
       status: "error",
+      owner: "default",
       label: "risk",
       reason: "composing",
     });
@@ -134,8 +137,9 @@ describe("useSourceTransactions", () => {
     );
     expect(result.current.feedback).toEqual({
       status: "error",
+      owner: "default",
       label: "risk",
-      reason: "yaml-only",
+      reason: "editor-inactive",
     });
 
     act(() => result.current.onEditorReady(null));
@@ -145,6 +149,7 @@ describe("useSourceTransactions", () => {
     );
     expect(result.current.feedback).toEqual({
       status: "error",
+      owner: "default",
       label: "risk",
       reason: "editor-unavailable",
     });
@@ -174,6 +179,57 @@ describe("useSourceTransactions", () => {
 
     rerender({ state: { ...parsedState(SOURCE), documentEpoch: 1 } });
     expect(result.current.feedback).toEqual({ status: "idle" });
+  });
+
+  it("names the first blocking reason in priority order", () => {
+    const editor = editorOf(SOURCE);
+    const render = (state: DocumentState, active = true) =>
+      renderHook(() => useSourceTransactions(state, active));
+    expect(
+      render({ ...parsedState(SOURCE), format: "json" }).result.current
+        .disabled,
+    ).toBe("json");
+    expect(render(parsedState(SOURCE), false).result.current.disabled).toBe(
+      "inactive",
+    );
+    expect(
+      render({ ...parsedState(SOURCE), composing: true }).result.current
+        .disabled,
+    ).toBe("composing");
+    expect(
+      render(initialDocumentState("yaml", SOURCE)).result.current.disabled,
+    ).toBe("syntax");
+    const ready = render(parsedState(SOURCE));
+    expect(ready.result.current.disabled).toBe("editor");
+    act(() => ready.result.current.onEditorReady(editor.handle));
+    expect(ready.result.current.disabled).toBeNull();
+    expect(ready.result.current.enabled).toBe(true);
+  });
+
+  it("still applies when the reducer parse is missing or stale, because it plans on the live editor text (audit DEFECT-P3X-003)", () => {
+    const editor = editorOf(SOURCE);
+    const { result } = renderHook(() =>
+      useSourceTransactions(initialDocumentState("yaml", SOURCE)),
+    );
+    act(() => result.current.onEditorReady(editor.handle));
+    expect(result.current.enabled).toBe(false);
+    act(() =>
+      result.current.apply(
+        {
+          kind: "replace-scalar",
+          pointer: "/risk/max_name_weight",
+          value: 0.2,
+        },
+        "max_name_weight",
+        "form",
+      ),
+    );
+    expect(editor.text()).toContain("max_name_weight: 0.2");
+    expect(result.current.feedback).toEqual({
+      status: "applied",
+      owner: "form",
+      label: "max_name_weight",
+    });
   });
 
   it("runs a caller-provided planner through the same editor path", () => {
@@ -207,6 +263,7 @@ describe("useSourceTransactions", () => {
     );
     expect(result.current.feedback).toEqual({
       status: "error",
+      owner: "default",
       label: "dup",
       reason: "duplicate",
     });

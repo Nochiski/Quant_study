@@ -141,6 +141,7 @@ export {
   useSourceTransactions,
   type SourcePlanner,
   type SourceTransactions,
+  type TransactionDisabledReason,
   type TransactionFailure,
   type TransactionFeedback,
 } from "./model/use-source-transactions";

@@ -783,7 +783,7 @@ describe("document routes (P2-04)", () => {
     expect(view.state.doc.toString()).toBe(prefix);
   });
 
-  it("reports YAML-only from a JSON projection instead of an editor lifecycle error", async () => {
+  it("reports an inactive editor from a JSON projection instead of a readiness error", async () => {
     server.use(
       http.get(`${API}/api/v1/strategy-documents/schema`, () =>
         HttpResponse.json(SIGNAL_SCHEMA_RESPONSE),
@@ -798,8 +798,9 @@ describe("document routes (P2-04)", () => {
       }),
     );
 
+    // projection view에서는 편집기 handle이 비활성이라 "비활성" 사유(Phase 3 감사 R1). 준비 안 됨 오류가 아니다.
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "YAML 편집 화면에서만 사용할 수 있습니다",
+      "소스 편집기가 비활성인 화면에서는 삽입하지 않습니다",
     );
     expect(
       screen.queryByText(/아직 준비되지 않았습니다/),

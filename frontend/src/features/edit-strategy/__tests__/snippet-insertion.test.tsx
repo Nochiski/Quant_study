@@ -73,7 +73,7 @@ describe("snippet insertion coordinator", () => {
     });
   });
 
-  it("reports YAML-only before consulting an unmounted projection editor", () => {
+  it("reports an inactive editor before consulting an unmounted projection editor", () => {
     const state = initialDocumentState("yaml", "");
     const { result } = renderHook(() =>
       useSnippetInsertion(
@@ -88,7 +88,7 @@ describe("snippet insertion coordinator", () => {
     expect(result.current.feedback).toEqual({
       status: "error",
       label: "signal",
-      reason: "yaml-only",
+      reason: "editor-inactive",
     });
   });
 

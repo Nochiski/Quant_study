@@ -330,6 +330,8 @@ const ko = {
   "snippet.error.parse":
     "삽입 결과가 YAML 1.2 문법을 통과하지 않아 변경하지 않았습니다.",
   "snippet.error.editor-unavailable": "소스 편집기가 아직 준비되지 않았습니다.",
+  "snippet.error.editor-inactive":
+    "소스 편집기가 비활성인 화면에서는 삽입하지 않습니다.",
   "snippet.error.composing": "한글 입력을 마친 뒤 다시 삽입하세요.",
   "projection.json.label": "StrategySpec JSON",
   "projection.form.label": "StrategySpec 요약 Form",
@@ -785,6 +787,48 @@ const ko = {
   "history.backtests.open": "실행 열기",
   "problems.compileUnavailable":
     "검증 서버에 연결할 수 없어 이 텍스트를 확인하지 못했습니다. 잠시 후 다시 시도하세요. ({detail})",
+  "form.panel.label": "Form 편집",
+  "form.panel.notice": "YAML source에 바로 반영 · undo 가능",
+  "form.panel.enabled": "편집 가능",
+  "form.panel.loading": "runtime schema를 불러오는 중입니다.",
+  "form.disabled.json": "JSON 문서는 Form으로 편집하지 않습니다",
+  "form.disabled.syntax": "구문 오류 · source를 먼저 고치세요",
+  "form.disabled.composing": "IME 입력 중",
+  "form.disabled.editor": "편집기가 준비되지 않았습니다",
+  "form.disabled.inactive": "편집기가 비활성입니다",
+  "form.section.root": "기본 정보",
+  "form.section.omitted": "문서에 없음 · 값을 넣으면 섹션이 생깁니다",
+  "form.list.pending": "항목 {count}개 · 목록 편집은 다음 단계에서 제공됩니다",
+  "form.field.reset": "기본값으로",
+  "form.field.unset": "설정 안 함",
+  "form.field.unselected": "선택 안 됨",
+  "form.field.graphLink": "Graph 화면에서 편집합니다",
+  "form.field.listLink": "목록 편집은 다음 단계에서 제공됩니다",
+  "form.field.inapplicable": "현재 모드에서는 읽히지 않는 필드입니다",
+  "form.field.defaultHint": "기본값 {value}",
+  "form.field.defaultFromHint": "생략하면 {key} 값({value})을 씁니다",
+  "form.badge.error": "오류 {count}",
+  "form.badge.warning": "경고 {count}",
+  "form.invalid.number": "숫자를 입력하세요",
+  "form.invalid.integer": "정수를 입력하세요",
+  "form.invalid.range": "허용 범위를 벗어났습니다",
+  "form.invalid.date": "YYYY-MM-DD 형식으로 입력하세요",
+  "form.feedback.applied": "{label} 반영됨",
+  "form.feedback.failed": "{label} 반영 실패",
+  "form.feedback.parse":
+    "{label} · 결과 문서가 YAML 1.2로 읽히지 않아 변경하지 않았습니다",
+  "form.feedback.not-found": "{label} · 문서에서 위치를 찾지 못했습니다",
+  "form.feedback.exists": "{label} · 이미 있는 키입니다",
+  "form.feedback.not-scalar":
+    "{label} · 문서의 이 위치가 스칼라가 아니라 바꾸지 않았습니다(source를 확인하세요)",
+  "form.feedback.not-mapping":
+    "{label} · 문서의 이 위치가 mapping이 아니라 넣지 않았습니다(source를 확인하세요)",
+  "form.feedback.not-sequence":
+    "{label} · 문서의 이 위치가 시퀀스가 아니라 넣지 않았습니다(source를 확인하세요)",
+  "form.feedback.composing": "{label} · IME 입력 중에는 변경하지 않습니다",
+  "form.feedback.editor-unavailable": "{label} · 편집기가 준비되지 않았습니다",
+  "form.feedback.editor-inactive": "{label} · 편집기가 비활성입니다",
+  "form.feedback.yaml-only": "{label} · YAML 문서에서만 편집합니다",
 } as const;
 
 export type MessageKey = keyof typeof ko;
@@ -1130,6 +1174,8 @@ export const messages = {
     "snippet.error.parse":
       "The result failed the YAML 1.2 syntax check, so nothing was changed.",
     "snippet.error.editor-unavailable": "The source editor is not ready yet.",
+    "snippet.error.editor-inactive":
+      "Not inserted while the source editor is inactive.",
     "snippet.error.composing": "Finish the IME composition and try again.",
     "projection.json.label": "StrategySpec JSON",
     "projection.form.label": "StrategySpec summary form",
@@ -1598,6 +1644,50 @@ export const messages = {
     "history.backtests.open": "Open run",
     "problems.compileUnavailable":
       "The validation server could not be reached, so this text is unverified. Try again shortly. ({detail})",
+    "form.panel.label": "Form editing",
+    "form.panel.notice": "Applied to the YAML source directly · undoable",
+    "form.panel.enabled": "Editable",
+    "form.panel.loading": "Loading the runtime schema.",
+    "form.disabled.json": "JSON documents are not edited through the form",
+    "form.disabled.syntax": "Syntax error · fix the source first",
+    "form.disabled.composing": "IME composition in progress",
+    "form.disabled.editor": "The editor is not ready",
+    "form.disabled.inactive": "The editor is inactive",
+    "form.section.root": "Basics",
+    "form.section.omitted":
+      "Not in the document · entering a value creates the section",
+    "form.list.pending":
+      "{count} items · list editing arrives in the next step",
+    "form.field.reset": "Reset to default",
+    "form.field.unset": "Not set",
+    "form.field.unselected": "Not selected",
+    "form.field.graphLink": "Edited in the Graph view",
+    "form.field.listLink": "List editing arrives in the next step",
+    "form.field.inapplicable": "Not read in the current mode",
+    "form.field.defaultHint": "Default {value}",
+    "form.field.defaultFromHint": "Omitted → uses {key} ({value})",
+    "form.badge.error": "{count} errors",
+    "form.badge.warning": "{count} warnings",
+    "form.invalid.number": "Enter a number",
+    "form.invalid.integer": "Enter an integer",
+    "form.invalid.range": "Out of the allowed range",
+    "form.invalid.date": "Use the YYYY-MM-DD format",
+    "form.feedback.applied": "{label} applied",
+    "form.feedback.failed": "{label} not applied",
+    "form.feedback.parse":
+      "{label} · the result would not parse as YAML 1.2, nothing changed",
+    "form.feedback.not-found": "{label} · position not found in the document",
+    "form.feedback.exists": "{label} · the key already exists",
+    "form.feedback.not-scalar":
+      "{label} · this position in the document is not a scalar, nothing changed (check the source)",
+    "form.feedback.not-mapping":
+      "{label} · this position in the document is not a mapping, nothing inserted (check the source)",
+    "form.feedback.not-sequence":
+      "{label} · this position in the document is not a sequence, nothing inserted (check the source)",
+    "form.feedback.composing": "{label} · not applied during IME composition",
+    "form.feedback.editor-unavailable": "{label} · the editor is not ready",
+    "form.feedback.editor-inactive": "{label} · the editor is inactive",
+    "form.feedback.yaml-only": "{label} · only YAML documents are edited",
   } satisfies Record<MessageKey, string>,
 } as const;
 

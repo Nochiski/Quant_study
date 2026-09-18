@@ -655,7 +655,8 @@ export const projectForm = (schema: JsonSchema, parse: ParsedSource | null, diag
   enum/boolean/catalog/reference는 변경 즉시 1 트랜잭션. Escape는 입력 취소.
 - `written === false` 필드는 placeholder(기본값, 회색). 값 입력 → `insert-key`. "기본값으로"
   버튼 → `remove`.
-- nullable 필드는 "설정 안 함" 옵션 → `replace-scalar null`(written) 또는 `remove`.
+- nullable 필드는 "설정 안 함" 옵션 → `replace-scalar null`(written). 미작성이고 기본값이 null이면 이미 그
+  상태라 연산·버튼이 없다(구현 결정: `unsetOperation`이 null을 돌려준다).
 - 카탈로그 picker는 기존 `useSchemaAssist`의 catalog query(`equityCatalog`, universe)를 props로
   받는다. feature가 entities/shared만 import.
 - 필드에 diagnostics badge(error/warning)와 `applicable === false` 안내.
@@ -666,6 +667,34 @@ export const projectForm = (schema: JsonSchema, parse: ParsedSource | null, diag
   MSW로 compile 왕복 후 badge 갱신.
 
 **Non-goals**: 목록 섹션(P4-03), 실제 page 연결(P4-04).
+
+- 구현 결정(P4-02): 컨트롤 → 연산 번역은 순수 모듈 `model/form-transactions.ts`(`parseDraft`, `draftOf`,
+  `fieldOperation`, `resetOperation`, `unsetOperation`; 잠금 사유는 훅의 `disabled`)가 하고 패널은 이를
+  `SourceTransactions.apply(op, key)`로 넘긴다. 섹션이 문서에 없을 때(`signal` 생략) 첫 값 입력은
+  루트에 `{ key: value }`를 `insert-key`하는 트랜잭션 **한 번**이다(`planInsertKey`가 nested 값을
+  block으로 직렬화). 텍스트류 입력은 마지막으로 확정한 draft를 기억해 Enter 뒤 blur가 같은 값을 두 번
+  적용하지 않는다. projection 값이 바뀌면 렌더 중 파생 상태 조정으로 draft를 되돌린다(effect에서
+  setState 금지 lint). 카탈로그 picker는 `equity-field`·`factor`만 select이고 `universe`·`subgraph`는
+  카탈로그 endpoint가 없어 텍스트 입력이다(완성과 같은 정책). 배지 근거는 `field.diagnostics`(backend
+  compile), 회색 처리·안내는 `field.applicable`. MSW compile 왕복 후 배지 갱신 테스트는 page가 붙는
+  P4-04로 옮긴다(패널은 projection을 props로만 받는다). 접근성 이름은 `<key>` 또는 `<key>· <unit>`.
+- Phase 3 감사 대응(P4-02): (R1·R3) `useSourceTransactions`가 `disabled: json|inactive|composing|syntax|editor`
+  사유를 직접 내고 패널은 그것만 보여준다(`formDisabledReason` 삭제). `editorActive`는 "편집기 handle이
+  살아 있는가"이며 Form/Graph view가 활성이어도 hidden 편집기가 살아 있으면 참이어야 한다 — page(P4-04)가
+  공유 인스턴스에 그렇게 넘긴다. `run`은 `editorActive`가 거짓이면 `yaml-only`가 아니라 `editor-inactive`를
+  낸다. (R2) feedback은 `owner`(form·snippet·default)를 가지며 `apply(op, label, owner)`로 넘긴다. 패널은
+  owner가 `form`인 것만, 스니펫 훅은 `snippet`인 것만 보여준다. `useSnippetInsertion(state, source,
+  editorActive, shared?)`은 page가 만든 인스턴스를 주입받을 수 있고, 카탈로그 status 전이는 훅 안에서
+  렌더 중 파생 상태로 마스킹한다. (DEFECT-P3X-004) feedback scope는 memo identity가 아니라
+  `documentEpoch`·`scope` 값 비교다. feedback 슬롯은 인스턴스당 하나이고 `owner`로 구분한다(감사가 권고한
+  소비자별 슬롯과의 편차: 마지막 결과 하나만 남는다). (DEFECT-P3X-003) `run`이 `enabled`를 강제하지 않는
+  계약을 테스트로 고정했다. (R4) "기본값으로"가 섹션의 마지막 작성 필드면 부모가 `{}`로 접히며 안의 독립 주석이 사라진다
+  (undo 한 번, 테스트로 고정, PR 본문 명기).
+- 리뷰 후속(P4-02 1차): 링크(`graph-link`·`list-link`)·`const` 행은 편집 컨트롤·"기본값으로"·"설정 안 함"
+  버튼을 렌더하지 않고(DEFECT-P402-001: reset이 배열 전체를 지우던 결함) `<label for>` 대신
+  `aria-labelledby`로 이름을 잇는다(004). 확정이 실패한 필드는 같은 값으로 재확정할 수 있고(002), 값을
+  되돌리면 무효 안내가 사라진다(003). `const` 컨트롤은 읽기 전용 `<code>`, `x-default-from` 필드의
+  placeholder는 형제 필드의 현재 값(P4-01 후속). `PlanFailure` 7종 전부에 Form 문구(008).
 
 ### P4-03 — 목록 섹션
 

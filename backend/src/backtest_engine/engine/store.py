@@ -907,12 +907,15 @@ class PersistentEventStore(EventStore):
         비파괴 조회다. 이 조회 뒤에도 `result.snapshots`/`orders`/`fills`는 그대로 공개 객체를
         만들 수 있고, 반대로 테이블이 읽는 kind를 먼저 넘겨 해제했다면 Rust가 오류로 답한다.
 
-        세션·종목 조회표는 이미 `bind_feed`로 받아 둔 것을 그대로 쓴다.
+        세션·종목 조회표는 `bind_feed`로 받아 둔 feed에서 레코드가 덮는 구간만 잘라 쓴다
+        (`_covered_feed`).
         """
         cached = self._result_tables_cache
-        key = len(self._batch())
+        batch = self._batch()
+        key = len(batch)
         if cached is not None and cached[0] == key:
             return cached[1]
+        sessions, instruments = self._covered_feed(batch)
         (
             snapshot_rows,
             position_rows,
@@ -922,8 +925,8 @@ class PersistentEventStore(EventStore):
             (traded_notional, total_fees, total_slippage_cost),
         ) = self._runtime.result_tables()
         tables = ResultTables(
-            sessions=self._sessions,
-            instruments=self._instruments,
+            sessions=sessions,
+            instruments=instruments,
             snapshots=tuple(snapshot_rows),
             positions=tuple(position_rows),
             orders=tuple(order_rows),
@@ -937,3 +940,31 @@ class PersistentEventStore(EventStore):
         )
         self._result_tables_cache = (key, tables)
         return tables
+
+    def _covered_feed(
+        self, batch: list[tuple[int, int, int]]
+    ) -> tuple[tuple[datetime, ...], tuple[InstrumentId, ...]]:
+        """레코드가 덮는 구간의 세션·종목 조회표 (DEFECT-701).
+
+        중단된 실행은 feed보다 적은 세션만 처리했다. `bind_feed`가 받은 feed 전체를 그대로
+        답하면 MARKET 레코드에서 조회표를 만드는 python 코어보다 긴 `sessions`와, 아직 bar가
+        오지 않은 종목까지 담은 `instruments`를 답하게 된다 — 두 코어 테이블이 갈린다.
+
+        완주한 실행은 구간이 feed 전체라 자르는 비용도 스캔 비용도 치르지 않는다. 마지막
+        레코드가 feed 마지막 세션을 가리키면 session index가 feed 범위를 벗어날 수 없으므로
+        최댓값을 따로 구하지 않아도 구간이 전체임을 안다.
+        """
+        if not batch:
+            return (), ()
+        total = len(self._sessions)
+        if batch[-1][1] + 1 >= total:
+            return self._sessions, self._instruments
+        session_count = max(session_index for _seq, session_index, _kind in batch) + 1
+        if session_count >= total:
+            return self._sessions, self._instruments
+        # 종목 순서는 python 코어와 같은 규칙이다 — 덮는 구간 bar의 첫 등장 순서.
+        registry: dict[InstrumentId, None] = {}
+        for snapshot in self._market_snapshots[:session_count]:
+            for bar in snapshot.bars:
+                registry.setdefault(bar.instrument, None)
+        return self._sessions[:session_count], tuple(registry)

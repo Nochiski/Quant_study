@@ -89,10 +89,15 @@ class ResultTables:
     """
 
     sessions: tuple[datetime, ...]
-    """`session_index` → 세션 ts. feed 세션 전체를 순서대로 담는다."""
+    """`session_index` → 세션 ts. 레코드가 가리키는 세션까지 담는다 (MARKET 레코드 순서).
+
+    중단된 실행(partial trace)에서는 feed 전체가 아니라 그때까지 처리한 세션만 들어간다.
+    두 코어가 같은 테이블을 답해야 하므로 정본은 feed 길이가 아니라 레코드다 — persistent
+    store는 feed 전체를 갖고 있어도 레코드가 덮는 구간까지만 답한다 (DEFECT-701).
+    """
 
     instruments: tuple[InstrumentId, ...]
-    """`instrument_index` → 종목. bar 첫 등장 순서다."""
+    """`instrument_index` → 종목. `sessions`가 덮는 구간의 bar 첫 등장 순서다."""
 
     snapshots: tuple[SnapshotRow, ...]
     """SNAPSHOT 레코드 순서."""

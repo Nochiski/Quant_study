@@ -30,7 +30,7 @@
 | #137 | `perf/rust-hot-loop` | 라우터·원장 O(1) 인덱스, 심볼 표 1회 구축, clone 제거 |
 | #138 | `perf/record-and-queue-memory` | 레코드·큐 payload `Box`화, 큐 arena free-list, 행 조회표 밀도 선택 |
 | #141 | `perf/feed-columnar` | `DataFeed.from_columns` — 어댑터가 `Bar` 객체를 만들지 않는다 |
-| (PR 11) | `docs/rust-loop-final-gates` | 최종 재측정·문서·이 댓글 |
+| #142 | `docs/rust-loop-final-gates` | 최종 재측정·문서·이 댓글 |
 
 ### 최종 게이트 판정
 

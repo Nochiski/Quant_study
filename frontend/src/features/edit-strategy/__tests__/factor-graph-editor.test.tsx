@@ -169,6 +169,31 @@ describe("FactorGraphEditor (P5-02)", () => {
     );
   });
 
+  it("renames a node together with its references and rejects a duplicate id (backlog 4)", async () => {
+    const user = userEvent.setup();
+    const transactions = stub();
+    renderEditor(WITH_SPARE, transactions, "/factors/0/graph/nodes/0");
+    const selected = within(editor().getByRole("group", { name: /선택한 노드/ }));
+    const nodeId = selected.getByRole("textbox", { name: /^node_id/ });
+    await user.clear(nodeId);
+    await user.type(nodeId, "px_close{Enter}");
+    expect(transactions.apply).toHaveBeenLastCalledWith(
+      [
+        { kind: "replace-scalar", pointer: "/factors/0/graph/nodes/0/node_id", value: "px_close" },
+        { kind: "replace-scalar", pointer: "/factors/0/graph/nodes/1/input_node_id", value: "px_close" },
+      ],
+      "node_id",
+      "graph",
+      { focusEditor: false },
+    );
+    const calls = vi.mocked(transactions.apply).mock.calls.length;
+    // 같은 그래프의 `px`로는 못 바꾼다: 적용 없이 사유를 안내한다.
+    await user.clear(nodeId);
+    await user.type(nodeId, "px{Enter}");
+    expect(vi.mocked(transactions.apply).mock.calls).toHaveLength(calls);
+    expect(selected.getByText("같은 그래프에 이미 있는 node_id입니다")).toBeInTheDocument();
+  });
+
   it("refuses to remove a referenced node with the referencing pointers, removes an unreferenced one, and re-selects the graph", async () => {
     const user = userEvent.setup();
     const transactions = stub();

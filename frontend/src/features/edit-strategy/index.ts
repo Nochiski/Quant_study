@@ -180,6 +180,7 @@ export {
   nodePointerOf,
   nodeReferenceKeys,
   removeNodeAt,
+  renameNode,
   selectedNodePointer,
   setNodeField,
   suggestNodeId,

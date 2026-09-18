@@ -839,6 +839,9 @@ const ko = {
   "form.invalid.integer": "정수를 입력하세요",
   "form.invalid.range": "허용 범위를 벗어났습니다",
   "form.invalid.date": "YYYY-MM-DD 형식으로 입력하세요",
+  "form.invalid.duplicateNodeId": "같은 그래프에 이미 있는 node_id입니다",
+  "form.invalid.emptyNodeId": "node_id는 비울 수 없습니다",
+  "form.invalid.missingNode": "노드를 문서에서 찾지 못했습니다",
   "form.feedback.applied": "{label} 반영됨",
   "form.feedback.failed": "{label} 반영 실패",
   "form.feedback.parse":
@@ -1722,6 +1725,9 @@ export const messages = {
     "form.invalid.integer": "Enter an integer",
     "form.invalid.range": "Out of the allowed range",
     "form.invalid.date": "Use the YYYY-MM-DD format",
+    "form.invalid.duplicateNodeId": "This node_id already exists in the graph",
+    "form.invalid.emptyNodeId": "node_id cannot be empty",
+    "form.invalid.missingNode": "The node was not found in the document",
     "form.feedback.applied": "{label} applied",
     "form.feedback.failed": "{label} not applied",
     "form.feedback.parse":

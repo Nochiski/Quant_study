@@ -8,7 +8,11 @@ const EXCLUDE = [...configDefaults.exclude, "e2e/**"];
  * 워커 경합에 민감한 테스트 파일 — `routes` 프로젝트로 나머지가 끝난 뒤 혼자 돈다(아래 `projects`). 단독 실행이
  * 1분을 넘기는 page 트리 테스트가 새로 생기면 여기에 더한다.
  */
-const ISOLATED_TESTS = ["src/app/__tests__/document-routes.test.tsx"];
+const ISOLATED_TESTS = [
+  "src/app/__tests__/document-routes.test.tsx",
+  // 입력 지연 p95 예산(16ms)을 재는 테스트 — 53파일 병렬에서는 예산이 아니라 이웃 워커를 잰다(#150 재검토 관측).
+  "src/shared/ui/code-editor/__tests__/code-editor.performance.test.tsx",
+];
 
 export default defineConfig({
   plugins: [react()],

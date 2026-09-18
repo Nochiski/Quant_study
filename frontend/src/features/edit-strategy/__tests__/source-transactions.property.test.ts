@@ -239,6 +239,9 @@ const flowDocumentAndOperation = documentAndOperation
       });
       const node = doc.getIn(path, true);
       if (!isCollection(node)) return null;
+      // 고른 컨테이너 자신의 앞 주석은 남긴다 — 그래야 yaml이 flow 값을 키와 다른 줄에 찍는 표본(키 줄과
+      // 값 줄 사이 주석, #150 P2-1 경로)이 생성된다(#150 재검토 P2-7).
+      const ownCommentBefore = node.commentBefore;
       visit(node, (_key, child) => {
         if (isNode(child) || isPair(child)) {
           if (isNode(child)) {
@@ -249,6 +252,7 @@ const flowDocumentAndOperation = documentAndOperation
           if (isCollection(child)) child.flow = true;
         }
       });
+      node.commentBefore = ownCommentBefore;
       node.flow = true;
       node.comment = " 꼬리"; // yaml은 `#` 바로 뒤에 붙이므로 앞 공백을 준다.
       const flowSource = doc.toString({ lineWidth: 0 }).replaceAll("\n", eol);

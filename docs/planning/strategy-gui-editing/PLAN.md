@@ -97,7 +97,7 @@ progress_percent: 0
 | Head SHA | `d13830c` (diff freeze) |
 | Diff stat | frontend model 4(신규 훅 1)·index·테스트 4(신규 1), backend 어댑터 1·테스트 1, WORKFLOW·SoT; 16 files +1019/−231 |
 | Focused tests | use-source-transactions 5 · source-transactions 15 · property 1(3000회 통과) · canonical-snippets 11 · snippet-insertion 3 · contract-inspector 22 |
-| Full gate | Vitest 503 passed(45 files) · typecheck · lint · build · e2e chromium-workflow 5 passed · backend upgrade 46 passed(전체 pytest 진행) |
+| Full gate | Vitest 503 passed(45 files) · typecheck · lint · build · e2e chromium-workflow 5 passed · backend pytest 1,316 passed · ruff · pyright 0 |
 
 ---
 
@@ -195,7 +195,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
-| P3-02 | use-source-transactions 5·source-transactions 15·property 1(`FC_NUM_RUNS=3000`)·스니펫 14·contract-inspector 22 | Vitest 503 passed(45 files)·typecheck·lint·build·e2e chromium-workflow 5 passed; backend upgrade 46 passed·ruff·(전체 pytest·pyright 결과는 리뷰 기록에) | 해당 없음(SDK·openapi 무변경) | 해당 없음(공개 UI 동작 동일; 기본값 판정 표시만 추가) | 원격 CI frontend·backend job 대상 | 2026-09-18 |
+| P3-02 | use-source-transactions 5·source-transactions 15·property 1(`FC_NUM_RUNS=3000`)·스니펫 14·contract-inspector 22 | Vitest 503 passed(45 files)·typecheck·lint·build·e2e chromium-workflow 5 passed; backend pytest 1,316 passed·ruff·pyright 0 | 해당 없음(SDK·openapi 무변경) | 해당 없음(공개 UI 동작 동일; 기본값 판정 표시만 추가) | 원격 CI frontend·backend job 대상 | 2026-09-18 |
 | P3-01 | source-transactions 10·property 1(`FC_NUM_RUNS=3000` 통과) | Vitest 490 passed(44 files)·typecheck·lint·build | 해당 없음(SDK 무변경) | 해당 없음(순수 함수) | 원격 CI frontend job 대상 | 2026-09-18 |
 | P2-03 | field-applicability 5·contract projection/UI 3·hover 1·Form 배지 1 | Vitest 478 passed(41 files)·typecheck·lint·build | SDK 무변경(`ApplicableWhen` 타입 재수출만) | 해당 없음 | 원격 CI frontend job 대상 | 2026-09-18 |
 | P1-06 | upgrade-source `periods` 주석 1·frozen 술어 1·syntax 메시지 1·팩터 컬렉션 모호성 1 | backend pytest 1,315·Ruff·Pyright 0; frontend Vitest 468·typecheck·lint·build | `openapi.json`·`runtime-schema.json` 재생성 diff 0, SDK 무변경 | 해당 없음 | 원격 CI backend·frontend job 대상 | 2026-09-18 |

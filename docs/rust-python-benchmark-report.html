@@ -587,7 +587,7 @@
           <span>22,243 orders</span>
           <span>22,155 fills</span>
         </div>
-        <div class="insight" style="margin-top:14px"><strong>전체 매트릭스:</strong> 300종목 callback 4.723s → 2.012s (2.35×), tape 4.471s → 1.841s (2.43×) · 실제 4종목 fixture callback 0.115s → 0.048s (2.41×), tape 0.122s → 0.047s (2.59×). 측정 직전 CPU 부하 15~39%. <strong>경계:</strong> <code>engine.run()</code>과 <code>result.snapshots/orders/fills</code> 조회를 함께 잽니다. <code>run()</code>만 재면 100종목 6.32×/6.83×이고, 남은 배수의 상한은 결과 조회에서 만드는 Python 공개 객체입니다 — Rust total의 60~63%가 그 구간입니다.</div>
+        <div class="insight" style="margin-top:14px"><strong>전체 매트릭스:</strong> 300종목 callback 4.723s → 2.012s (2.35×), tape 4.471s → 1.841s (2.43×) · 실제 4종목 fixture callback 0.115s → 0.048s (2.41×), tape 0.122s → 0.047s (2.59×). 측정 직전 CPU 부하 15~39%. <strong>경계:</strong> <code>engine.run()</code>과 <code>result.snapshots/orders/fills</code> 조회를 함께 잽니다. <code>run()</code>만 재면 100종목 6.32×/6.83×이고, 남은 배수의 상한은 결과 조회에서 만드는 Python 공개 객체입니다 — Rust total의 59~63%가 그 구간입니다.</div>
       </article>
 
       <aside class="card">

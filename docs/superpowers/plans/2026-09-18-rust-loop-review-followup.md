@@ -484,7 +484,7 @@ class _DeclaredContextMethods:
 - 실측 (**게이트**): 코어 격리 Peak RSS(결과 조회 포함) tape·callback 모두 python 대비 **1.25배 이하**. 100종목 tape `materialize_seconds`가 PR 5 대비 30% 이상 감소. `run_seconds` 회귀 ±3% 이내.
 - E2E: `tests/integration` 통과 + `bench_workbench_adapter.py` python/rust metrics 동일.
 
-**결과:** Peak RSS 게이트 **통과** — base 커밋 JSON 기준 callback 1.23배 → 1.18배, tape 1.28배 → 1.22배. `run_seconds` 회귀 **없음**(프로세스마다 1회만 도는 측정에서 0.3559초 → 0.3535초). 조회 시간 **미달** — 같은 프로세스 A/B(각 24 표본, 최솟값)로 tape −12.4%, callback −10.3%로 목표 −30%에 못 미친다. cProfile 기준 FFI는 조회 시간의 약 4%(청크 조회 0.028초/90회)뿐이고, 스냅샷 1,225개가 만드는 `Position` 123,625개가 약 65%다. 남은 비용은 두 코어가 같이 무는 Python 객체 생성이라 FFI 경계로는 줄지 않는다 — 스펙 후속 백로그에 레코드 메모리 레이아웃(`Vec<NativeRecord>` 인라인 슬롯 약 14 MB)과 함께 남겼다.
+**결과:** Peak RSS 게이트 **통과** — base 커밋 JSON 기준 callback 1.23배 → 1.18배, tape 1.28배 → 1.22배. `run_seconds` 회귀 **없음**(프로세스마다 1회만 도는 측정에서 0.3559초 → 0.3535초). 조회 시간 **미달** — 같은 프로세스 A/B(각 24 표본, 최솟값)로 tape −12.4%, callback −10.3%로 목표 −30%에 못 미친다. cProfile 기준 FFI는 조회 시간의 약 4%(청크 조회 0.028초/90회)뿐이고, 스냅샷이 만드는 `Position`이 약 65%다 (프로파일이 센 생성 호출 123,625회. PR 11 tip에서 결과 객체를 직접 세면 스냅샷 1,231개에 `Position` 123,000개다). 남은 비용은 두 코어가 같이 무는 Python 객체 생성이라 FFI 경계로는 줄지 않는다 — 스펙 후속 백로그에 레코드 메모리 레이아웃(`Vec<NativeRecord>` 인라인 슬롯 약 14 MB)과 함께 남겼다.
 
 한 프로세스에서 `--repeat`으로 반복하면 `run_seconds`가 3~7% 느려 보이는데, 직전 회차의 조회가 실제로 메모리를 반납해 다음 회차가 페이지를 다시 폴트하기 때문이다. 프로세스마다 1회만 도는 측정에서 사라지므로 엔진 회귀가 아니라 벤치 하네스의 회차 간 간섭이다.
 

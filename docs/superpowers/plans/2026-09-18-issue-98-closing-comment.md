@@ -9,9 +9,9 @@
 
 2026-09-18 리뷰(Rust·Python·성능 실측 3인)에서 나온 결함·SoT 중복·죽은 코드·성능 여지를 PR 11개로
 해소했다. 계획 문서는
-[`docs/superpowers/plans/2026-09-18-rust-loop-review-followup.md`](../../../docs/superpowers/plans/2026-09-18-rust-loop-review-followup.md)이고
+[`docs/superpowers/plans/2026-09-18-rust-loop-review-followup.md`](https://github.com/Nochiski/Quant_study/blob/main/docs/superpowers/plans/2026-09-18-rust-loop-review-followup.md)이고
 수치의 정본은 스펙
-[`2026-09-01-persistent-rust-engine-implementation.md`](../../../docs/superpowers/specs/2026-09-01-persistent-rust-engine-implementation.md)의
+[`2026-09-01-persistent-rust-engine-implementation.md`](https://github.com/Nochiski/Quant_study/blob/main/docs/superpowers/specs/2026-09-01-persistent-rust-engine-implementation.md)의
 "2026-09-18 최종 판정 (리뷰 후속 PR 1~11)" 절이다.
 
 ### PR 스택
@@ -64,9 +64,17 @@ PR 1 기준선은 개선 전 값이 아니라 **정직한 측정 경계로 처�
 세 코어의 signature는 워크로드마다 동일하다 (100종목 orders 22,243 / fills 22,155 / equity
 2,321,985,874, 300종목 52,344 / 52,121 / 2,402,131,747, 4종목 982 / 978 / 2,739,581,588).
 
+위 배수 6개는 `--core all` JSON에서 가져왔다 — 같은 프로세스에서 세 코어를 교대로 돌려 비교
+조건이 같기 때문이고, 코어 격리 실행은 `--repeat 3`인 데다 callback 짝의 python run 중앙값이
+3.62초로 오염됐다(다른 실행은 1.70초). 오염되지 않은 격리 tape 짝으로 계산하면 2.64배
+(1.6718초 / 0.6322초)로 `--core all`의 2.41배보다 높고, 판정은 어느 쪽이든 같다. 반대로
+워크벤치 구간 수치는 `--core all`에서 순환 GC가 rust `compute_analytics`에 붙어 왜곡되므로
+격리 실행이 정본이다.
+
 `run()`만 보면 5.6~6.8배로 이슈가 예상한 "5배 이상"에 들어간다. total 배수의 상한은 결과
-조회이고, 그 대부분은 FFI가 아니라 Python 공개 객체 생성이다 — 100종목 스냅샷 1,225개가
-종목마다 `Position`을 만들어 123,625개가 된다. 이 계약은 `BacktestResult` 불변 계약 안에 있다.
+조회이고, 그 대부분은 FFI가 아니라 Python 공개 객체 생성이다 — 100종목 결과는 스냅샷 1,231개에
+`Position` 123,000개를 담는다(첫 세션만 빈 스냅샷이고 나머지 1,230개가 종목마다 하나씩).
+이 계약은 `BacktestResult` 불변 계약 안에 있다.
 
 ### 워크벤치 e2e (`scripts/bench_workbench_adapter.py --instruments 100 --repeat 5`)
 
@@ -114,7 +122,11 @@ peak RSS는 python 318.6MiB / rust 329.4MiB로 1.03배다.
 
 뒤 두 줄이 `row_at` 해시 비용의 A/B다. 상장 구간이 246 / 247 세션 차이라 bar 수가 0.4%만 다른데
 표현만 Sparse / Dense로 갈린다. **Sparse가 rust `run()`에서 8.1% 느리다** (bar 수로 정규화하면
-8.5%). 조회표 크기는 이 경계에서 양쪽 모두 약 1.4MiB로 같고, Sparse가 값을 하는 구간은 Dense 표가
+8.5%). 이 값은 보수적 하한이다 — 같은 짝의 python 코어 total이 Sparse 1.368초 / Dense 1.409초로
+Sparse 쪽 워크로드가 2.9% 가볍고(체결 3,009건 vs 3,057건) 행 조회표는 python 경로에 없다. 더
+가벼운 워크로드에서 rust만 느려진 값이므로 워크로드 난이도로 나누면 실제 비용은 약 11%다.
+
+조회표 크기는 이 경계에서 양쪽 모두 약 1.4MiB로 같고, Sparse가 값을 하는 구간은 Dense 표가
 유니버스 × 기간에 비례해 커지는 누적 유니버스다 (3,000종목 × 5,000세션이면 Dense는 60MiB 고정).
 세 코어 결과 signature는 희소 실행에서도 동일하다.
 

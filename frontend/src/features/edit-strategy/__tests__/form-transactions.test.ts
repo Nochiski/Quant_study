@@ -2,11 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import { parseSource } from "../../../shared/lib/yaml12";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
-import { initialDocumentState } from "../model/document-state";
 import { projectForm, type FormField } from "../model/form-projection";
 import {
   fieldOperation,
-  formDisabledReason,
   parseDraft,
   resetOperation,
   unsetOperation,
@@ -147,23 +145,5 @@ describe("fieldOperation", () => {
       pointer: "/signal/regime_field_id",
       value: null,
     });
-  });
-});
-
-describe("formDisabledReason", () => {
-  it("names the first blocking condition in priority order", () => {
-    const base = initialDocumentState("yaml", MINIMAL);
-    expect(formDisabledReason(base, true)).toBeNull();
-    expect(formDisabledReason({ ...base, format: "json" }, false)).toBe("json");
-    expect(formDisabledReason({ ...base, composing: true }, false)).toBe(
-      "composing",
-    );
-    expect(formDisabledReason(base, false)).toBe("syntax");
-    const parsed = {
-      ...base,
-      parse: parseSource(MINIMAL, "yaml"),
-      parsedVersion: base.sourceVersion,
-    };
-    expect(formDisabledReason(parsed, false)).toBe("editor");
   });
 });

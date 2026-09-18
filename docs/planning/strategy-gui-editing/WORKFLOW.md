@@ -677,6 +677,17 @@ export const projectForm = (schema: JsonSchema, parse: ParsedSource | null, diag
   카탈로그 endpoint가 없어 텍스트 입력이다(완성과 같은 정책). 배지 근거는 `field.diagnostics`(backend
   compile), 회색 처리·안내는 `field.applicable`. MSW compile 왕복 후 배지 갱신 테스트는 page가 붙는
   P4-04로 옮긴다(패널은 projection을 props로만 받는다). 접근성 이름은 `<key>` 또는 `<key>· <unit>`.
+- Phase 3 감사 대응(P4-02): (R1·R3) `useSourceTransactions`가 `disabled: json|inactive|composing|syntax|editor`
+  사유를 직접 내고 패널은 그것만 보여준다(`formDisabledReason` 삭제). `editorActive`는 "편집기 handle이
+  살아 있는가"이며 Form/Graph view가 활성이어도 hidden 편집기가 살아 있으면 참이어야 한다 — page(P4-04)가
+  공유 인스턴스에 그렇게 넘긴다. `run`은 `editorActive`가 거짓이면 `yaml-only`가 아니라 `editor-inactive`를
+  낸다. (R2) feedback은 `owner`(form·snippet·default)를 가지며 `apply(op, label, owner)`로 넘긴다. 패널은
+  owner가 `form`인 것만, 스니펫 훅은 `snippet`인 것만 보여준다. `useSnippetInsertion(state, source,
+  editorActive, shared?)`은 page가 만든 인스턴스를 주입받을 수 있고, 카탈로그 status 전이는 훅 안에서
+  렌더 중 파생 상태로 마스킹한다. (DEFECT-P3X-004) feedback scope는 memo identity가 아니라
+  `documentEpoch`·`scope` 값 비교다. (DEFECT-P3X-003) `run`이 `enabled`를 강제하지 않는 계약을 테스트로
+  고정했다. (R4) "기본값으로"가 섹션의 마지막 작성 필드면 부모가 `{}`로 접히며 안의 독립 주석이 사라진다
+  (undo 한 번, 테스트로 고정, PR 본문 명기).
 
 ### P4-03 — 목록 섹션
 

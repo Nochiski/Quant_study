@@ -330,6 +330,8 @@ const ko = {
   "snippet.error.parse":
     "삽입 결과가 YAML 1.2 문법을 통과하지 않아 변경하지 않았습니다.",
   "snippet.error.editor-unavailable": "소스 편집기가 아직 준비되지 않았습니다.",
+  "snippet.error.editor-inactive":
+    "소스 편집기가 비활성인 화면에서는 삽입하지 않습니다.",
   "snippet.error.composing": "한글 입력을 마친 뒤 다시 삽입하세요.",
   "projection.json.label": "StrategySpec JSON",
   "projection.form.label": "StrategySpec 요약 Form",
@@ -793,6 +795,7 @@ const ko = {
   "form.disabled.syntax": "구문 오류 · source를 먼저 고치세요",
   "form.disabled.composing": "IME 입력 중",
   "form.disabled.editor": "편집기가 준비되지 않았습니다",
+  "form.disabled.inactive": "편집기가 비활성입니다",
   "form.section.root": "기본 정보",
   "form.section.omitted": "문서에 없음 · 값을 넣으면 섹션이 생깁니다",
   "form.list.pending": "항목 {count}개 · 목록 편집은 다음 단계에서 제공됩니다",
@@ -817,6 +820,7 @@ const ko = {
   "form.feedback.exists": "{label} · 이미 있는 키입니다",
   "form.feedback.composing": "{label} · IME 입력 중에는 변경하지 않습니다",
   "form.feedback.editor-unavailable": "{label} · 편집기가 준비되지 않았습니다",
+  "form.feedback.editor-inactive": "{label} · 편집기가 비활성입니다",
   "form.feedback.yaml-only": "{label} · YAML 문서에서만 편집합니다",
 } as const;
 
@@ -1163,6 +1167,8 @@ export const messages = {
     "snippet.error.parse":
       "The result failed the YAML 1.2 syntax check, so nothing was changed.",
     "snippet.error.editor-unavailable": "The source editor is not ready yet.",
+    "snippet.error.editor-inactive":
+      "Not inserted while the source editor is inactive.",
     "snippet.error.composing": "Finish the IME composition and try again.",
     "projection.json.label": "StrategySpec JSON",
     "projection.form.label": "StrategySpec summary form",
@@ -1639,6 +1645,7 @@ export const messages = {
     "form.disabled.syntax": "Syntax error · fix the source first",
     "form.disabled.composing": "IME composition in progress",
     "form.disabled.editor": "The editor is not ready",
+    "form.disabled.inactive": "The editor is inactive",
     "form.section.root": "Basics",
     "form.section.omitted":
       "Not in the document · entering a value creates the section",
@@ -1665,6 +1672,7 @@ export const messages = {
     "form.feedback.exists": "{label} · the key already exists",
     "form.feedback.composing": "{label} · not applied during IME composition",
     "form.feedback.editor-unavailable": "{label} · the editor is not ready",
+    "form.feedback.editor-inactive": "{label} · the editor is inactive",
     "form.feedback.yaml-only": "{label} · only YAML documents are edited",
   } satisfies Record<MessageKey, string>,
 } as const;

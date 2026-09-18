@@ -3,7 +3,6 @@
  * `SourceOperation` 하나로 바꾸고, 입력 텍스트를 스키마 컨트롤 규칙으로 읽는다. 텍스트 편집과 preflight는
  * `planSourceOperation`의 몫이고 여기서는 fragment를 조립하지 않는다.
  */
-import type { DocumentState } from "./document-state";
 import type { FormControl, FormField, FormSection } from "./form-projection";
 import type { Scalar, SourceOperation } from "./source-transactions";
 
@@ -97,23 +96,4 @@ export const unsetOperation = (
   if (!field.nullable) return null;
   if (!field.written && field.defaultValue === null) return null;
   return fieldOperation(section, field, null);
-};
-
-export type FormDisabledReason = "json" | "syntax" | "composing" | "editor";
-
-/** 컨트롤을 잠그는 이유(우선순위: 문서 형식 → IME → 구문 → 편집기). `enabled`면 null. */
-export const formDisabledReason = (
-  state: DocumentState,
-  enabled: boolean,
-): FormDisabledReason | null => {
-  if (enabled) return null;
-  if (state.format !== "yaml") return "json";
-  if (state.composing) return "composing";
-  if (
-    state.parse === null ||
-    state.parse.status !== "ok" ||
-    state.parsedVersion !== state.sourceVersion
-  )
-    return "syntax";
-  return "editor";
 };

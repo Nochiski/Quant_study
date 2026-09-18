@@ -12,7 +12,6 @@ import type {
 } from "../../../shared/api";
 import { t, tOptional } from "../../../shared/config";
 import { Badge, Button } from "../../../shared/ui";
-import type { DocumentState } from "../model/document-state";
 import type {
   FormField,
   FormProjection,
@@ -21,7 +20,6 @@ import type {
 import {
   draftOf,
   fieldOperation,
-  formDisabledReason,
   parseDraft,
   resetOperation,
   unsetOperation,
@@ -42,15 +40,16 @@ export type FormCatalogs = {
 type StrategyFormPanelProps = {
   /** null이면 runtime schema를 아직 못 받았다. */
   projection: FormProjection | null;
-  state: DocumentState;
   transactions: SourceTransactions;
   catalogs: FormCatalogs;
 };
 
 const UNSET = "__unset__";
 
+const FORM_OWNER = "form";
+
 const feedbackText = (feedback: TransactionFeedback): ReactNode => {
-  if (feedback.status === "idle") return null;
+  if (feedback.status === "idle" || feedback.owner !== FORM_OWNER) return null;
   if (feedback.status === "applied")
     return (
       <p className="strategy-form__feedback" role="status">
@@ -75,11 +74,10 @@ const feedbackText = (feedback: TransactionFeedback): ReactNode => {
  */
 export const StrategyFormPanel = ({
   projection,
-  state,
   transactions,
   catalogs,
 }: StrategyFormPanelProps) => {
-  const disabled = formDisabledReason(state, transactions.enabled);
+  const disabled = transactions.disabled;
   return (
     <section className="strategy-form" aria-label={t("form.panel.label")}>
       <header className="strategy-form__header">
@@ -195,7 +193,11 @@ const FormFieldRow = ({
   const [invalid, setInvalid] = useState<string | null>(null);
   const commit = (value: Scalar): void => {
     setInvalid(null);
-    transactions.apply(fieldOperation(section, field, value), field.key);
+    transactions.apply(
+      fieldOperation(section, field, value),
+      field.key,
+      FORM_OWNER,
+    );
   };
   const description = tOptional(field.descriptionKey ?? "");
   const control = (
@@ -231,7 +233,9 @@ const FormFieldRow = ({
           <Button
             size="small"
             tone="ghost"
-            onClick={() => transactions.apply(resetOperation(field), field.key)}
+            onClick={() =>
+              transactions.apply(resetOperation(field), field.key, FORM_OWNER)
+            }
             aria-label={`${field.key} · ${t("form.field.reset")}`}
           >
             {t("form.field.reset")}
@@ -241,7 +245,7 @@ const FormFieldRow = ({
           <Button
             size="small"
             tone="ghost"
-            onClick={() => transactions.apply(unset, field.key)}
+            onClick={() => transactions.apply(unset, field.key, FORM_OWNER)}
             aria-label={`${field.key} · ${t("form.field.unset")}`}
           >
             {t("form.field.unset")}

@@ -46,6 +46,7 @@ const stubTransactions = (
   feedback: { status: "idle" },
   onEditorReady: vi.fn(),
   enabled: true,
+  disabled: null,
   ...overrides,
 });
 
@@ -61,7 +62,6 @@ const renderPanel = (
   render(
     <StrategyFormPanel
       projection={projection}
-      state={state}
       transactions={transactions}
       catalogs={NO_CATALOGS}
     />,
@@ -99,6 +99,7 @@ describe("StrategyFormPanel controls", () => {
     expect(transactions.apply).toHaveBeenLastCalledWith(
       { kind: "replace-scalar", pointer: "/risk/max_name_weight", value: 0.1 },
       "max_name_weight",
+      "form",
     );
 
     const fee = section("execution").getByRole("spinbutton", named("fee_bps"));
@@ -107,6 +108,7 @@ describe("StrategyFormPanel controls", () => {
     expect(transactions.apply).toHaveBeenLastCalledWith(
       { kind: "replace-scalar", pointer: "/execution/fee_bps", value: 20 },
       "fee_bps",
+      "form",
     );
 
     const title = section("기본 정보").getByRole("textbox", named("title"));
@@ -147,6 +149,7 @@ describe("StrategyFormPanel controls", () => {
         value: "long_short",
       },
       "side",
+      "form",
     );
     await user.click(
       section("risk").getByRole("checkbox", named("sector_neutral")),
@@ -159,6 +162,7 @@ describe("StrategyFormPanel controls", () => {
         value: true,
       },
       "sector_neutral",
+      "form",
     );
     // signal 섹션은 문서에 없다 → 루트에 섹션째 삽입(트랜잭션 한 번).
     const threshold = section("signal").getByRole(
@@ -174,6 +178,7 @@ describe("StrategyFormPanel controls", () => {
         value: { score_threshold: 0.3 },
       },
       "score_threshold",
+      "form",
     );
     await user.click(
       section("risk").getByRole("button", {
@@ -183,6 +188,7 @@ describe("StrategyFormPanel controls", () => {
     expect(transactions.apply).toHaveBeenLastCalledWith(
       { kind: "remove", pointer: "/risk/max_name_weight" },
       "max_name_weight",
+      "form",
     );
     // 미작성 nullable 필드는 이미 null → "설정 안 함" 버튼이 없다.
     expect(
@@ -193,12 +199,14 @@ describe("StrategyFormPanel controls", () => {
   });
 
   it("locks every control with the reason when transactions are disabled", () => {
-    const transactions = stubTransactions({ enabled: false });
+    const transactions = stubTransactions({
+      enabled: false,
+      disabled: "composing",
+    });
     const state = { ...parsedState(MINIMAL), composing: true };
     render(
       <StrategyFormPanel
         projection={projectForm(SCHEMA, state.parse, [])}
-        state={state}
         transactions={transactions}
         catalogs={NO_CATALOGS}
       />,
@@ -211,7 +219,12 @@ describe("StrategyFormPanel controls", () => {
 
   it("shows diagnostics badges, inapplicable hints, default placeholders and feedback", () => {
     const transactions = stubTransactions({
-      feedback: { status: "error", label: "fee_bps", reason: "parse" },
+      feedback: {
+        status: "error",
+        owner: "form",
+        label: "fee_bps",
+        reason: "parse",
+      },
     });
     const projection = renderPanel(MINIMAL, transactions, [
       {
@@ -253,6 +266,61 @@ describe("StrategyFormPanel controls", () => {
   });
 });
 
+describe("StrategyFormPanel reset on the last written field (audit R4)", () => {
+  it("collapses the section to `{}` and drops the standalone comment inside it, keeping the key line comment", async () => {
+    const user = userEvent.setup();
+    const source = `${MINIMAL}`.replace(
+      "risk:\n  max_name_weight: 0.05\n",
+      "risk: # 리스크 메모\n  # 안쪽 설명\n  max_name_weight: 0.05\n",
+    );
+    let text = source;
+    const editor: CodeEditorHandle = {
+      getText: () => text,
+      setText: vi.fn(),
+      replaceRange: vi.fn((from: number, to: number, insert: string) => {
+        text = `${text.slice(0, from)}${insert}${text.slice(to)}`;
+      }),
+      getSelection: () => ({ from: 0, to: 0 }),
+      setSelection: vi.fn(),
+      offsetToPosition: vi.fn(() => ({ line: 0, column: 0 })),
+      positionToOffset: vi.fn(() => 0),
+      scrollTo: vi.fn(),
+      focus: vi.fn(),
+      getHistoryState: vi.fn(() => null),
+      restoreHistoryState: vi.fn(),
+    };
+    const Harness = () => {
+      const [state] = useState(() => parsedState(source));
+      const transactions = useSourceTransactions(state);
+      return (
+        <>
+          <button
+            type="button"
+            onClick={() => transactions.onEditorReady(editor)}
+          >
+            attach
+          </button>
+          <StrategyFormPanel
+            projection={projectForm(SCHEMA, state.parse, [])}
+            transactions={transactions}
+            catalogs={NO_CATALOGS}
+          />
+        </>
+      );
+    };
+    render(<Harness />);
+    await user.click(screen.getByRole("button", { name: "attach" }));
+    await user.click(
+      section("risk").getByRole("button", {
+        name: "max_name_weight · 기본값으로",
+      }),
+    );
+    // 의도된 동작(WORKFLOW P3-01 알려진 제한): 부모가 접히면 안의 독립 주석은 사라지고 undo 한 번으로 돌아온다.
+    expect(text).toContain("risk: # 리스크 메모\n  {}\n");
+    expect(text).not.toContain("# 안쪽 설명");
+  });
+});
+
 describe("StrategyFormPanel with the real transaction hook", () => {
   it("edits the editor text through one replaceRange whose result parses to the changed value", async () => {
     const user = userEvent.setup();
@@ -288,7 +356,6 @@ describe("StrategyFormPanel with the real transaction hook", () => {
           </button>
           <StrategyFormPanel
             projection={projectForm(SCHEMA, state.parse, [])}
-            state={state}
             transactions={transactions}
             catalogs={NO_CATALOGS}
           />

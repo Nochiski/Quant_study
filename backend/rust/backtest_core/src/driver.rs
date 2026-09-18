@@ -270,10 +270,6 @@ impl PersistentEngine {
         })
     }
 
-    fn session_count(&self) -> PyResult<usize> {
-        Ok(self.feed_ref()?.current_session_count())
-    }
-
     /// 다음 전략 콜백까지 세션을 진행한다. 콜백이 더 없으면 `None`.
     pub(crate) fn drive_internal(&mut self) -> PyResult<Option<CallbackFrame>> {
         match self.lifecycle {
@@ -333,7 +329,7 @@ impl PersistentEngine {
                     self.record(session, RecordPayload::Fill(fill))?;
                 }
                 Queued::Notify(payload) => {
-                    // 큐 엔트리의 세션이 곧 예전 `current_session()`(= session_count − 1)이다.
+                    // 큐 엔트리의 세션이 곧 피드 커서(`current_session_count()` − 1)다.
                     // MARKET은 세션 안에서 우선순위가 가장 낮아 같은 세션 키의 다른 이벤트보다
                     // 먼저 팝되고 피드 커서를 그 세션으로 옮긴다. 파생 이벤트는 모두 그때의
                     // `session`을 키로 push하므로, 팝 시점의 커서와 엔트리 세션이 항상 같다.
@@ -562,7 +558,9 @@ impl PersistentEngine {
             )));
         }
         self.record(session, RecordPayload::Snapshot(snapshot.clone()))?;
-        if should_dispatch && self.session_count()? >= settings.warmup_sessions {
+        // warmup 판정은 NOTIFY 분기와 같은 식이다 — 팝된 세션이 곧 피드 커서라는 근거는
+        // 그쪽 주석에 있다.
+        if should_dispatch && session + 1 >= settings.warmup_sessions {
             return Ok(Some(snapshot));
         }
         Ok(None)

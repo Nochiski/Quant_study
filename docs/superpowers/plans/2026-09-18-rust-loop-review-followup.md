@@ -508,17 +508,33 @@ class _DeclaredContextMethods:
 
 ### Tasks
 
-- [ ] **7.1** `result_tables.py` 타입과 python `EventStore.result_tables()` (기존 객체에서 파생) + 테스트 (`tests/test_engine_golden.py` 패턴으로 golden 값).
-- [ ] **7.2** Rust `*_rows()`/`fill_totals()` + persistent store 오버라이드 + parity 테스트(python/rust `result_tables()` ==).
-- [ ] **7.3** 어댑터 전환. `tests/integration/test_backtest_http_api.py::test_python_reference_and_rust_core_have_golden_result_and_metric_parity`가 그대로 통과해야 한다 (artifacts·series·metrics 동일).
-- [ ] **7.4** `order_from_wire` 미세 최적화 (`_SIDE = {s.value: s for s in Side}` 등 3개 dict, `_decision_by_id` 결과의 `actions` 튜플 캐시). 이건 `result.orders`를 직접 쓰는 외부 호출자를 위한 것.
-- [ ] 커밋 3~4개, 마지막 `perf(workbench): 결과 아티팩트를 엔진 columnar 테이블에서 직접 만든다`.
+- [x] **7.1** `result_tables.py` 타입과 python `EventStore.result_tables()` (기존 객체에서 파생) + 테스트 (`tests/test_engine_golden.py` 패턴으로 golden 값).
+- [x] **7.2** Rust `result_tables()` + persistent store 오버라이드 + parity 테스트(python/rust `result_tables()` ==). 계획의 `*_rows()`/`fill_totals()` 다섯 pymethod 대신 레코드 한 번 순회로 다섯 벡터와 합계를 한꺼번에 답하는 pymethod 하나로 합쳤다 — kind마다 레코드를 다시 훑지 않는다.
+- [x] **7.3** 어댑터 전환. `tests/integration/test_backtest_http_api.py::test_python_reference_and_rust_core_have_golden_result_and_metric_parity`가 그대로 통과한다 (artifacts·series·metrics 동일).
+- [x] **7.4** 생략. 어댑터가 더는 wire 변환을 부르지 않으므로 워크벤치 경로에는 이득이 0이다. `result.orders`를 직접 쓰는 외부 호출자용 미세 최적화는 PR 8 이후 `bench_universe` materialize 수치로 판단한다.
+- [x] 커밋 5개, 기능 커밋의 마지막이 `perf(workbench): 결과 아티팩트를 엔진 columnar 테이블에서 직접 만든다`.
 
 ### AC
 
 - 단위·parity: `result_tables()` python/rust 동등 테스트, golden 테스트, 전체 스위트.
 - 실측 (**게이트**): `bench_workbench_adapter.py --instruments 100 --core all --repeat 3`에서 rust 경로 `engine.run` 이후 구간 합계가 PR 6 대비 50% 이상 감소하고, e2e total 배수(python/rust)가 PR 1 기준선(약 2.0배)보다 커진다. 수치를 PR 본문 표로.
 - E2E (**필수**): `tests/integration/test_backtest_http_api.py -q` 전부 통과. `bench_workbench_adapter.py` JSON에서 두 코어 metrics·series 동일. 프론트 e2e(`browser-e2e` CI job)는 PR CI에서 확인.
+
+**결과:** 단위·parity·E2E **통과** — `result_tables()` 동등을 시나리오 27개 × rust 코어 3종으로 고정했고 `tests/integration` 163건이 전부 통과한다 (HTTP golden parity가 두 코어 artifacts 동등을 단언). 실측 게이트는 **세션 잡음 폭 안에서 50% 경계**다. 같은 장비·같은 빌드에서 base의 어댑터·벤치 스크립트만 되돌려 back-to-back으로 잰 repeat 7 짝(`engine.run` 0.4074초 → 0.4117초로 두 창의 속도가 같다)에서 `engine.run` 이후 합계 1.1679초 → 0.6057초로 **−48.1%**를 기록했고, 리뷰어 재현은 −50.1%다. 다섯 번의 짝 측정이 48.1 / 49.2 / 49.9 / 51.9 / 52.1%, 각자의 `engine.run`으로 정규화한 중앙값이 −49.0%다.
+
+구간별(rust, repeat 7, 초): 결과 조회 0.5285(`result_materialize`) + 0.0004(`event_store_costs`) → 0.0331(`result_tables`)로 **−93.7%**. 이 PR이 옮긴 경계가 여기다. `artifacts` 0.5560 → 0.5110, `analysis_points` 0.0208 → 0.0011. e2e 배수(python/rust)는 1.348배 → 1.915배이고, python 총시간이 같은 회차에 함께 느려진 몫을 빼고 before의 python 3.2041초를 기준으로 재면 1.746배다. 어느 쪽이든 PR 1 기준선을 넘는다.
+
+남은 `artifacts` 0.51초의 84%가 워크벤치 도메인 모델 객체 생성이다 (`RawPosition` 122,595개, frozen dataclass 생성자만 행당 약 1.06µs). 측정해 보고 기각한 미세 최적화: positional 생성자 인자는 7필드 레코드의 인자 이름을 지우는 대가로 구간의 3.5%, list comprehension은 잡음 범위, `str(quantity)`는 positions 루프의 7%다. 더 줄이려면 도메인 모델을 바꿔야 해 이 PR 범위 밖이다.
+
+**python 코어는 e2e 약 10% 느려졌다** (3.2041초 → 3.5142초, `engine.run` 이후 0.6795초 → 0.8434초). python 코어는 공개 객체를 이미 갖고 있어 테이블 생성이 순수 추가 패스이고, 그 비용 0.2206초가 artifacts·analysis_points에서 아낀 0.074초보다 크다 (정수 수량 검사는 그중 0.030초뿐이고 나머지는 패스 자체). 어댑터가 코어별로 분기하는 대안보다 낫다고 판단해, 프로덕션 경로인 rust가 객체 생성을 통째로 건너뛰도록 **참조 코어가 치르는 비용**으로 받아들였다.
+
+### 설계 이탈 (PR 본문에 그대로)
+
+1. `AnalysisPoint`를 snapshot 행에서 다시 만들지 않고 `artifacts.snapshots`에서 만든다. net exposure 공식이 `execute`와 `_artifacts` 두 곳에 있던 중복을 `_artifacts` 하나로 합친다. bit 동일하고 `analysis_points` 구간이 0.0208초 → 0.0011초가 됐다.
+2. `_closed_trades`가 `tables` 외에 미리 만든 `session_dates`·`security_ids`를 함께 받는다. `_artifacts`가 이미 만든 조회표를 다시 만들지 않기 위해서다.
+3. Rust 해제 가드를 kind별로 건다. 테이블이 읽는 SNAPSHOT/ORDER/FILL/COST가 해제됐을 때만 오류이고, DECISION/MARKET을 먼저 공개 객체로 만든 뒤에도 테이블 조회는 답한다.
+
+리뷰 조건부 APPROVE (정확성 결함 0, Minor 1건). DEFECT-701(중단된 실행에서 persistent가 feed 전체를 답해 python 코어와 `sessions`·`instruments`가 갈림)은 `fix(engine): 중단된 실행의 결과 테이블 세션·종목을 레코드 구간으로 자른다`로 반영했다 — `sessions` 계약의 정본을 feed 길이가 아니라 레코드로 고치고 partial trace parity 테스트를 추가했다.
 
 ---
 

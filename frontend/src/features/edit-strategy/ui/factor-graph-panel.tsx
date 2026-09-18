@@ -30,6 +30,8 @@ export type FactorGraphEditing = {
   catalogs: FormCatalogs;
   /** Graph → Form 왕복(P5-03). */
   onOpenForm?: (pointer: string) => void;
+  /** 문서 경계(`documentEpoch`). 바뀌면 "재계산 중"에 쓰는 직전 투영을 버린다(3차 P1). */
+  documentKey?: unknown;
 };
 
 type FactorGraphPanelProps = {
@@ -298,23 +300,26 @@ export const FactorGraphPanel = ({
   const projected = projectFactorGraphs(state);
   // 편집 확정 뒤 backend plan을 다시 받는 동안(loading) 직전 ready 투영을 "재계산 중" 배지와 함께 유지한다 —
   // DAG가 사라졌다 돌아오며 편집기가 점프하지 않도록(P5-02 acceptance, 리뷰 OBS-132-05). 렌더 중 파생 상태.
+  const documentKey = editing?.documentKey;
   const [lastReady, setLastReady] = useState<{
     state: ExecutionPlansState;
+    documentKey: unknown;
     projection: Extract<FactorGraphProjection, { status: "ready" }>;
   } | null>(null);
   if (projected.status === "ready" && lastReady?.state !== state)
-    setLastReady({ state, projection: projected });
-  // loading이 아닌 다른 상태(blocked·empty·metadata·error)로 가면 직전 투영을 버린다 — 다른 문서로 이동하는
-  // 동안 이전 문서의 DAG가 남지 않도록(P5-03 2차 리뷰 P2-1).
-  if (
-    projected.status !== "ready" &&
-    projected.status !== "loading" &&
-    lastReady !== null
-  )
-    setLastReady(null);
+    setLastReady({ state, documentKey, projection: projected });
+  // 편집 확정 뒤 plan은 blocked(pending) → loading → ready로 흐른다. 직전 투영은 같은 문서 안에서만 쓰고,
+  // 문서 경계(`documentKey`)가 바뀌면 버린다(3차 리뷰 P1: blocked에서 버리면 편집 경로에서 기능이 사라진다).
+  const held =
+    lastReady !== null && Object.is(lastReady.documentKey, documentKey)
+      ? lastReady
+      : null;
   const recomputing =
-    editing !== undefined && state.status === "loading" && lastReady !== null;
-  const projection = recomputing ? lastReady.projection : projected;
+    editing !== undefined &&
+    (state.status === "loading" ||
+      (state.status === "blocked" && state.reason === "pending")) &&
+    held !== null;
+  const projection = recomputing ? held.projection : projected;
   const routeFactor = factorIndexAtPointer(selectedPointer);
   // 편집 표면은 backend plan이 없어도(빈 그래프·compile error·대기) 문서의 팩터로 그린다(Phase 4 감사 R4).
   const editor = (factorCount: number, factorSelect: boolean) => {

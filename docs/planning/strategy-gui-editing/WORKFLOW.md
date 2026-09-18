@@ -918,8 +918,10 @@ export const suggestNodeId = (tree, factorPointer, base: string): string;   // b
   tree라 위치 pointer 연산(`insert-item`·`insert-key`·`remove`)은 `apply`가 `pending`으로 보류하고 UI는
   추가·삭제 컨트롤을 `settling`으로 비활성화한다(P5-03 리뷰 DEFECT-133-01: 150ms 안의 삭제 연타가 stale
   pointer로 다른 항목·노드를 지웠다). 직전 적용 연산이 구조 변경이었으면 스칼라 확정도 보류한다(형제 pointer가
-  밀려 다른 항목에 써질 수 있다 — 2차 리뷰 P1-1); 직전이 스칼라였으면 스칼라는 열려 있다. Form 목록 섹션도
-  `settling` 동안 잠근다. 재계산 배지의 직전 투영은 loading이 아닌 상태로 가면 버린다(문서 경계).
+  밀려 다른 항목에 써질 수 있다 — 2차 리뷰 P1-1); 직전이 스칼라였으면 스칼라는 열려 있다. UI 비활성은 Form의
+  추가·preset·삭제 버튼과 Graph 노드 fieldset만(항목 필드는 열어 둔다, 3차 P2). 재계산 배지의 직전 투영은
+  같은 문서(`documentKey` = `documentEpoch`) 안에서만 쓰며 편집 확정 뒤 blocked(pending) → loading 구간을
+  덮는다(3차 P1). route 테스트 timeout은 파일 전체 15s(부하 배율 8배 이상, 케이스 단위 상향 철회).
 - 리뷰 후속(P5-03 1차): Form 패널이 URL `path`를 받아(`selectedPointer`) 그 pointer 아래 목록 항목을
   `aria-current`로 강조한다(Graph → Form 왕복 대칭). yaml-ui `WORKFLOW.md` 2.1·2.2·2.3을 1.1·편집 가능으로
   개정(2.2 예시 = 골든 fixture). e2e는 저장 revision hash를 backend compile과 동치 비교하고 줄 단위 단언.

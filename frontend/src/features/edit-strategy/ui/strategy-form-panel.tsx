@@ -294,12 +294,11 @@ const FormListSectionView = ({
       ),
     );
   const [open, setOpen] = useState(true);
-  // 목록 섹션은 직전 편집의 parse가 따라올 때까지 잠근다(위치 pointer 연산, P5-03 리뷰 DEFECT-133-01).
+  // 추가·preset·삭제(위치 pointer 연산)만 직전 편집의 parse가 따라올 때까지 잠근다(P5-03 리뷰 DEFECT-133-01;
+  // 항목 필드·Graph 열기는 열어 둔다 — 3차 P2). 구조 변경 직후의 스칼라 확정은 훅이 pending으로 보류한다.
+  const settling = transactions.settling;
   return (
-    <fieldset
-      className="strategy-form__section"
-      disabled={disabled || transactions.settling}
-    >
+    <fieldset className="strategy-form__section" disabled={disabled}>
       <legend>
         <SectionToggle
           title={section.key}
@@ -328,7 +327,7 @@ const FormListSectionView = ({
           ) : null}
           <Button
             size="small"
-            disabled={addOperation === null}
+            disabled={addOperation === null || settling}
             onClick={() => {
               if (addOperation !== null)
                 transactions.apply(
@@ -346,6 +345,7 @@ const FormListSectionView = ({
             <select
               aria-label={`${section.key} · ${t("form.list.addFromCatalog")}`}
               value=""
+              disabled={settling}
               onChange={(event) => {
                 const preset = presets.find(
                   (snippet) => snippet.id === event.target.value,
@@ -473,6 +473,7 @@ const FormListItemView = ({
           size="small"
           tone="danger"
           onClick={remove}
+          disabled={transactions.settling}
           aria-label={`${item.summary} · ${t("form.list.remove")}`}
         >
           {t("form.list.remove")}

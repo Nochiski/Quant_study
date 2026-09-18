@@ -293,22 +293,28 @@ describe("FactorGraphPanel", () => {
       transactions,
       catalogs: { equityFields: null, factors: null },
     };
-    const view = (state: ExecutionPlansState) => (
+    const view = (state: ExecutionPlansState, documentKey = 1) => (
       <FactorGraphPanel
         state={state}
         diagnostics={[]}
         onSelectPointer={vi.fn()}
         onOpenSource={vi.fn()}
-        editing={editing}
+        editing={{ ...editing, documentKey }}
       />
     );
     const { rerender } = render(view(readyState()));
     expect(screen.queryByText("재계산 중")).toBeNull();
+    // 편집 확정 뒤 실제 경로: compile 버전이 밀려 blocked(pending) → loading → ready. 그동안 직전 투영이 남는다.
+    rerender(view({ status: "blocked", reason: "pending" }));
+    expect(screen.getByText("재계산 중")).toBeInTheDocument();
     rerender(view({ status: "loading" }));
-    // 직전 ready 투영(DAG 카드)이 남고 배지가 뜬다. 편집 표면도 그대로다.
     expect(screen.getByText("재계산 중")).toBeInTheDocument();
     expect(document.querySelector('[data-node-id="signal"]')).not.toBeNull();
     expect(screen.getByRole("button", { name: "노드 추가" })).toBeInTheDocument();
+    // 다른 문서로 가면(문서 키 변경) 직전 투영을 쓰지 않는다.
+    rerender(view({ status: "loading" }, 2));
+    expect(screen.queryByText("재계산 중")).toBeNull();
+    expect(document.querySelector('[data-node-id="signal"]')).toBeNull();
   });
 
   it("renders conditional branches, saved references, provenance and exact selection actions", async () => {

@@ -335,6 +335,7 @@ export const NewStrategyPage = () => {
                     assist.inspectorSource.factorCatalog?.factors ?? null,
                 },
                 onOpenForm: openForm,
+                documentKey: document.documentEpoch,
               }}
               onSelectPointer={(pointer) => selectPointer(pointer, "graph")}
               onOpenSource={(pointer) => {

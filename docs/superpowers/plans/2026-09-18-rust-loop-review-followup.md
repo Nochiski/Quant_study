@@ -603,7 +603,7 @@ PR 9까지 반영 후 100종목 tape에서 feed 적재(`_load_persistent_feed` +
 |---|---|---|---|---|
 | 1 | `fix/bench-honest-boundary` | 리뷰 APPROVE·PR 생성 | #123 | Opus APPROVE (A01·A02 반영) |
 | 2 | `fix/driver-failed-lifecycle` | 리뷰 APPROVE·PR 생성 | #124 | Opus APPROVE (권고 3건 반영) |
-| 3 | `refactor/drop-dead-persistent-api` | 리뷰 APPROVE·반영 완료 | | Opus APPROVE (지적 3건 반영 `cb174e5`) |
+| 3 | `refactor/drop-dead-persistent-api` | 리뷰 APPROVE·PR 생성 | #127 | Opus APPROVE (Minor 3건 반영) |
 | 4 | `refactor/rust-owns-wire-constants` | 대기 | | |
 | 5 | `refactor/python-sot-context-tape-marker` | 대기 | | |
 | 6 | `perf/materialize-by-kind` | 대기 | | |

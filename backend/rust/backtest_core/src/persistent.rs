@@ -666,11 +666,6 @@ impl PersistentEngine {
         self.records.index_for_trace()
     }
 
-    /// 레코드 하나의 payload wire. partial trace 조사 같은 단건 디버그용이다.
-    fn record_payload(&self, py: Python<'_>, seq: usize) -> PyResult<PyObject> {
-        self.records.payload(py, seq)
-    }
-
     /// kind 하나의 `(seq, session_index, payload)`를 seq 순서로 한 번에 돌려준다.
     /// 종료 전 partial trace에서도 동작한다 — 그 시점까지 쌓인 레코드만 답한다.
     fn record_payloads(&self, py: Python<'_>, kind: u8) -> PyResult<Vec<(u64, usize, PyObject)>> {
@@ -681,7 +676,7 @@ impl PersistentEngine {
     ///
     /// 호출 순서 계약: Python은 `finish()` 직후 `equity_series`/`traded_notional`로 metrics를
     /// 먼저 계산하고, 그 뒤 결과 조회에서만 kind를 넘겨받는다. 넘긴 payload를
-    /// `record_payload`·`record_payloads`·`equity_series`·`traded_notional`로 다시 읽으면
+    /// `record_payloads`·`equity_series`·`traded_notional`로 다시 읽으면
     /// 오류다. 모든 레코드를 넘기면 인덱스까지 돌려주므로 `record_batch`도 오류가 된다
     /// (인덱스는 `finish()`가 이미 Python에 넘겼다).
     fn drain_payloads(

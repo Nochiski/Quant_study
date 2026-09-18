@@ -76,15 +76,15 @@ class RecordKind(Enum):
 
 _RECORD_KIND_BY_CODE: dict[int, RecordKind] = {kind.code: kind for kind in RecordKind}
 
-# Rust wire 문자열 → enum 멤버. `Side(value)` 호출은 값 하나마다 Enum의 __call__ → __new__
-# 경로를 타는데 결과 조회는 주문·체결 수만큼 이 변환을 반복한다. 조회표로 고정해 dict 조회
-# 한 번으로 끝낸다. 모르는 wire 값은 KeyError를 잡아 어느 레코드의 어떤 필드인지 알린다.
 # `drain_payloads` 한 번에 넘겨받을 레코드 수. 이 청크만큼의 wire tuple이 Rust payload·공개
 # 객체와 동시에 살아 있으므로, 조회당 FFI 왕복 수(레코드 수 / 청크)와 그 순간 메모리의
 # 균형점이다. SNAPSHOT wire는 한 행이 보유 종목 수만큼 커서 청크를 크게 잡으면 그 자체가
 # peak가 된다.
 _DRAIN_CHUNK_RECORDS = 512
 
+# Rust wire 문자열 → enum 멤버. `Side(value)` 호출은 값 하나마다 Enum의 __call__ → __new__
+# 경로를 타는데 결과 조회는 주문·체결 수만큼 이 변환을 반복한다. 조회표로 고정해 dict 조회
+# 한 번으로 끝낸다. 모르는 wire 값은 KeyError를 잡아 어느 레코드의 어떤 필드인지 알린다.
 _SIDE_BY_WIRE: dict[str, Side] = {member.value: member for member in Side}
 _ORDER_TYPE_BY_WIRE: dict[str, OrderType] = {member.value: member for member in OrderType}
 _TIF_BY_WIRE: dict[str, TimeInForce] = {member.value: member for member in TimeInForce}

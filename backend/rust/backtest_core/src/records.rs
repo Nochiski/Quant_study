@@ -52,7 +52,7 @@ fn released_error(seq: u64, kind: u8, operation: &str) -> PyErr {
 }
 
 /// `(seq, session_index, kind)` — Python `PersistentEventStore`가 소비하는 레코드 인덱스 행.
-/// payload는 `record_payload(seq)`로 필요할 때만 변환한다 — 배치 전체를 tuple로 복제하면 Rust
+/// payload는 `record_payloads(kind)`로 kind 단위로만 변환한다 — 배치 전체를 tuple로 복제하면 Rust
 /// wire·Python tuple·공개 객체가 동시에 살아 peak RSS가 커진다.
 pub(crate) type RecordIndexWire = (u64, usize, u8);
 
@@ -286,7 +286,7 @@ impl RecordPayload {
                 instrument_id,
                 amount,
             } => to_object(py, (kind.as_str(), *instrument_id, *amount)),
-            RecordPayload::Released { kind } => Err(released_error(seq, *kind, "record_payload")),
+            RecordPayload::Released { kind } => Err(released_error(seq, *kind, "record_payloads")),
         }
     }
 }
@@ -344,17 +344,6 @@ impl RecordStore {
             .enumerate()
             .map(|(seq, record)| (seq as u64, record.session_index, record.payload.kind()))
             .collect()
-    }
-
-    pub(crate) fn payload(&self, py: Python<'_>, seq: usize) -> PyResult<PyObject> {
-        self.ensure_not_drained("record_payload")?;
-        let record = self.records.get(seq).ok_or_else(|| {
-            PyIndexError::new_err(format!(
-                "record seq out of range — seq={seq} records={}",
-                self.records.len()
-            ))
-        })?;
-        record.payload.to_py(py, seq as u64)
     }
 
     /// kind 하나에 속한 레코드를 seq 순서로 모은다. 해제된 payload를 만나면 오류다.
@@ -685,7 +674,7 @@ mod tests {
         let released = RecordPayload::Released { kind: KIND_ORDER };
         assert_eq!(released.kind(), KIND_ORDER);
         // `to_py`는 GIL이 필요하지만 해제 가드는 변환 전에 걸린다 — 오류 문구만 고정한다.
-        let message = released_error(7, KIND_ORDER, "record_payload").to_string();
+        let message = released_error(7, KIND_ORDER, "record_payloads").to_string();
         assert!(message.contains("seq=7"), "{message}");
         assert!(message.contains("kind=order(2)"), "{message}");
     }

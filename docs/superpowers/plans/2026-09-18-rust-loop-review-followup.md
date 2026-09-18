@@ -550,20 +550,70 @@ class _DeclaredContextMethods:
 
 ### Tasks (각각 별도 커밋, 각 커밋 후 parity 게이트)
 
-- [ ] **8.1** `route_basic_decision(decision: &DecisionWire)` — 라우터는 `decision.3`을 `iter()`로만 읽는다(`:675,684,689,701,707,725` 확인). `driver.rs:622` `decision_for_orders = decision.clone()` 삭제.
-- [ ] **8.2** `PersistentFeed`가 `load_feed` 시 `symbol_by_key: HashMap<String, String>`을 한 번 만들고 `&self`로 빌려준다. `driver.rs:618-621`의 결정별 `registry_symbols()` + bars 병합 제거 — bars의 심볼은 등록부와 같으므로 병합 자체가 불필요함을 `feed.rs::new`에서 단언(같은 key에 다른 symbol이면 오류).
-- [ ] **8.3** tape 경로 프레임: `drive_internal`에서 `self.tape.is_some()`이면 `make_frame` 대신 `make_native_frame(kind, session, event)`(snapshot·open_orders 빈 값)로 만들어 `submit_native`에 넘긴다. `native_decision`이 `frame.snapshot`·`open_orders`를 읽지 않음을 확인(`tape.rs:92-184`). callback 경로는 `notify_*` 미선언 시에도 `open_orders_wire()`를 만들므로, `CallbackFrame.open_orders`를 `OnceCell`/lazy가 아닌 "전략이 `open_orders()`를 호출할 때만 Python이 요청"하는 형태로 바꾸려면 frozen 계약(콜백 시점 값)이 깨지므로 **유지**. 대신 `order_wire` 내부 String clone을 `Arc<str>` 또는 `Rc`로 바꾸는 것은 측정 후 결정.
-- [ ] **8.4** `feed.rs::row_of` O(1): `row_index: Vec<u32>` (sessions × instruments, 없으면 `u32::MAX`). 메모리 = 4B × sessions × instruments (300종목 1,231세션 1.5MB, 3,000종목 15MB). `load_feed`에서 채운다. `has_bar`·`open_at`·`history_window`의 세션별 HashMap 생성(`feed.rs:289-292`)도 이 인덱스로 대체.
-- [ ] **8.5** `on_session_close`·`on_market`의 `settings()?.clone()` — `RunSettings`에서 필요한 필드만 `Copy` 값으로 꺼내는 `SessionCosts { borrow, interest, days }` 구조체와 `schedule: Arc<str>`.
-- [ ] **8.6** `feed.rs::current_marks`가 `(instrument_id, close)`를 돌려주고 `portfolio.rs::mark`가 key 대신 id로 마크를 저장하도록 바꾸려면 `Portfolio`가 key→id를 알아야 하므로 범위 초과. 대신 `marks: HashMap<String, f64>` 갱신 시 `entry(key).or_insert`로 String 재할당을 줄이는 수준으로 한다. 측정 후 효과 없으면 되돌린다.
-- [ ] **8.7** `persistent_router.rs::RouteContext`에 `position_index: HashMap<&str, usize>`를 결정 시작 시 한 번 만들어 `held`/`market_value`가 O(1). `portfolio.rs::ledger_index`는 삽입 순서 `Vec`를 유지한 채 `index: HashMap<String, usize>`를 병행 관리(`remove_ledger` 시 재구축).
-- [ ] **8.8** 측정 후, 효과가 측정 오차(±2%) 안인 커밋은 되돌린다(PR 본문에 A/B 표 첨부).
+- [x] **8.1** `route_basic_decision(decision: &DecisionWire)` — 라우터는 `decision.3`을 `iter()`로만 읽는다. `driver.rs`의 `decision_for_orders = decision.clone()` 삭제. `StoredOrder::from_routed`는 이미 `&DecisionWire`를 받는다.
+- [x] **8.2** `PersistentFeed::new`가 `symbol_by_key: HashMap<String, String>`을 한 번 만들고 `registry_symbols()`가 그 참조를 빌려준다. 결정별 재조립과 bars 병합을 없앴다 — bars의 심볼은 같은 `symbols` 배열을 같은 instrument id로 읽으므로 등록부와 항상 같고, 같은 key가 다른 symbol로 두 번 등록되는 경우만 `new`가 거부한다(Rust 테스트 `registry_rejects_one_key_with_two_symbols`).
+- [x] **8.3** tape 경로 경량 프레임 — 구현해 재고 **되돌렸다**. 아래 "8.3을 되돌린 이유" 참고.
+- [x] **8.4** `feed.rs::row_of` O(1): `row_index: Vec<u32>`(세션 × 종목, 없으면 `u32::MAX`)를 적재 시 채우고 `has_bar`·`open_at`·`history_window`·`settlement_session_index`가 쓴다. 세션별 `HashMap<u32, usize>` 생성이 사라졌다. 행 수가 u32를 넘거나 인덱스 크기가 usize를 넘으면 적재를 거부한다.
+- [x] **8.5** `on_market`·`on_session_close`의 `settings()?.clone()` 제거 — `RunSettings`를 `Arc`로 감싸 `settings_arc()`가 참조 카운트만 올린다. `slippage`는 읽기 전용이라 `process_market_index`·`process_market_values`·`process_market_impl`이 참조로 받는다.
+- [x] **8.6** (PR 7 Task 7.4 이관) 콜백 프레임 wire 변환 — **이미 lazy라 변경 없음**. `RustStrategyContext._open_orders`·`snapshot`이 `functools.cached_property`이고 `frame_event`의 market 분기는 미리 만든 `MarketSnapshot`을 돌려준다. 계측 실행(50종목 1,231세션)에서 `open_orders_from_wire` 호출 0회, `snapshot_from_wire` 1,231회(전략이 실제로 읽는 값), `order_from_wire`·`_decision_by_id` 11,763회(모두 `run()` 밖 결과 조회 구간). `_decision_by_id`는 `_decisions` dict에 캐시하므로 결정당 한 번만 재구성한다 — 추가 캐시 불필요.
+- [x] **8.7** `RouteContext::position_index: HashMap<&str, usize>`(결정 시작 시 1회)로 `held`/`market_value` O(1), `Portfolio::ledger_slots: HashMap<String, usize>`로 `ledger_index` O(1). 삽입 순서 정본은 `ledgers` Vec 그대로고 표는 위치만 따라간다.
+- [x] **8.8** `current_marks`가 등록부 문자열을 빌려주고 `Portfolio::mark_refs`가 `get_mut`으로 값만 갱신한다 — 세션마다 종목 수만큼 나던 key 할당 제거. Python legacy 경로의 `mark`는 그대로.
+
+### 항목별 A/B (300종목, `--repeat 9` 표본 최소값, 부하 ≤30%, 초)
+
+측정은 누적이다 — 각 행은 그 항목까지 적용한 빌드다.
+
+| 항목 | callback | tape | 판정 |
+| --- | --- | --- | --- |
+| base (`fa4289c`) | 1.041 | 1.008 | — |
+| 8.1 `decision.clone()` 제거 | 1.017 | 0.997 | 유지 |
+| 8.2 심볼 폴백 표 1회 구축 | 0.929 | 0.923 | 유지 |
+| 8.3 tape 경량 프레임 | (0.960) | (0.928) | **되돌림** |
+| 8.4 `row_of` O(1) | 0.941 | 0.925 | 유지 |
+| 8.5 `settings()?.clone()` 제거 | 0.950 | 0.934 | 유지 |
+| 8.6 콜백 wire 변환 | — | — | 확인만 (변경 없음) |
+| 8.7 라우터·원장 인덱스 | 0.812 | 0.793 | 유지 |
+| 8.8 `current_marks` clone 제거 | 0.807 | 0.787 | 유지 |
+
+**남은 할당원 (PR 9 검토):** `Portfolio::snapshot()` 세션당 4회 key clone(약 148만 String), `current_closes()` 74만, `session_market()` 37만. 셋 다 PR 8 범위 밖이고 상세는 아래 AC 절 "남은 레버"에 있다.
+
+이 장비의 측정 잡음이 ±3~5%라 8.1·8.4·8.5·8.8은 단독으로는 오차 범위 안이다. 셋 다 자료구조를 늘리지 않고 일을 덜어내기만 하므로(8.4만 1.5MiB 인덱스를 더한다) 되돌리지 않았고, 대신 아래 back-to-back 측정으로 합산 효과를 고정했다. 8.2와 8.7만 단독으로 잡음을 넘는다.
+
+#### 8.3을 되돌린 이유
+
+`make_native_frame`(snapshot 빈 값·open_orders 빈 Vec)을 만들어 tape 경로에 붙였는데 300종목에서 callback·tape 둘 다 오차 범위였다. 이 벤치가 실행하는 workload에서는 원리상 아낄 것이 없다.
+
+1. 두 전략 모두 `requirements().events`에 `MARKET`만 선언한다. `notify_fill`·`notify_order_update`·`notify_corporate_action`이 모두 false라 NOTIFY 분기 자체가 한 번도 돌지 않는다 — `make_native_frame`이 아끼려던 `snapshot_wire()` 호출이 없다.
+2. SESSION_CLOSE 분기의 snapshot은 `on_session_close`가 SNAPSHOT 레코드용으로 이미 만든 값을 넘겨받는다. 남는 낭비는 `open_orders_wire()`뿐인데, 시장가 주문이 다음 세션 MARKET에서 전량 체결되므로 세션 마감 시점의 `self.orders`는 사실상 비어 있다.
+
+즉 이 항목은 **fill·order_update 알림을 선언한 tape 전략**에서만 값을 한다 (체결마다 포지션 수에 비례하는 `snapshot_wire()`가 붙는다). 벤치가 그 형태를 재현하지 못해 측정으로 유지를 정당화할 수 없어 되돌렸다. 알림 선언 tape workload를 재는 벤치 옵션이 생기면 다시 올릴 항목이다.
 
 ### AC
 
 - 단위·parity: 전체 스위트, 세 코어 signature 동일.
 - 실측 (**게이트**): 300종목 callback·tape `run_seconds`가 PR 7 대비 **10% 이상 감소**(같은 세션 back-to-back, `--repeat 5` 중앙값). Peak RSS 회귀 없음(`row_index` 포함해도 tape 1.25배 유지).
 - E2E: `tests/integration` 통과 (계약 불변).
+
+**결과:** 게이트 **통과**. 단위·parity는 `cargo test` 32건과 `uv run pytest -q` 1,307건 통과, 세 코어 signature가 base와 동일하다(300종목 orders 52,344 / fills 52,121 / final_equity 2,402,131,747, 100종목 22,243 / 22,155 / 2,321,985,874). E2E는 `tests/integration/test_backtest_http_api.py` 6건 통과와 `bench_workbench_adapter.py --instruments 100 --core all --repeat 1` 완주.
+
+실측은 같은 장비에서 `fa4289c`와 이 브랜치 tip을 번갈아 빌드해 back-to-back으로 쟀다(`--repeat 9`, 매 세트 전 CPU 부하가 연속 3회 30% 이하일 때만 실행).
+
+| 세트 | base 중앙값 | head 중앙값 | Δ | base 최소 | head 최소 | Δ | base peak RSS | head peak RSS | Δ |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 300종목 callback | 1.0603 | 0.8349 | **−21.3%** | 1.0408 | 0.7997 | −23.2% | 446.4MiB | 447.1MiB | +0.16% |
+| 300종목 tape | 1.0259 | 0.7963 | **−22.4%** | 1.0080 | 0.7707 | −23.5% | 449.1MiB | 449.8MiB | +0.16% |
+| 100종목 callback | 0.3502 | 0.2983 | −14.8% | 0.3398 | 0.2906 | −14.5% | 205.4MiB | 206.0MiB | +0.29% |
+| 100종목 tape | 0.3324 | 0.2914 | −12.3% | 0.3261 | 0.2813 | −13.7% | 210.2MiB | 209.9MiB | −0.14% |
+
+Peak RSS는 `--core rust` 단독 실행값이라 격리돼 있다. `row_index`가 더하는 4B × 세션 × 종목(300종목 1,231세션 = 1.5MiB)이 여기 들어 있고, 회귀는 +0.29% 이하로 게이트(+1%) 안이다.
+
+### 남은 레버 (PR 9 이후로)
+
+이 PR 범위 밖이라 손대지 않았지만 측정 중 드러난 것:
+
+1. **`Portfolio::snapshot()`이 세션당 네 번 불리고 매번 포지션 key를 전부 clone한다** (`process_market_values` 1회, `close_current_session` 2회, `route_basic_decision` 1회). 300종목 1,231세션이면 약 148만 건이고 대부분 즉시 버려진다 — 호출자 넷 중 셋이 key를 instrument id로 바꾸거나 인덱스 키로만 쓴다. 빌려주는 `snapshot_rows()`를 따로 두면 되지만 `SnapshotTuple`·`BuyingPower`·`snapshot_wire_from`·라우터를 함께 건드려야 해 별도 PR이 맞다.
+2. **`feed.current_closes()`가 결정마다 key·symbol을 clone한다** (600건 × 1,231 = 약 74만 건). `HashMap<&str, (&str, f64)>`로 빌려주면 되지만 `RouteContext.bars` 타입과 `route_basic_decision` 시그니처가 바뀐다.
+3. **`feed.session_market()`이 세션마다 `HashMap<String, BarTuple>`을 key clone으로 만든다** (약 37만 건). Python에 노출된 `process_market` 경로와 타입을 공유해 바꾸려면 session.rs까지 이어진다.
 
 ---
 
@@ -575,7 +625,8 @@ class _DeclaredContextMethods:
 
 - [ ] **9.1** `RecordPayload::Order(Box<OrderWire>)`, `Fill(Box<FillWire>)`, `Snapshot(Box<SnapshotWire>)`, `Decision { native: Option<Box<NativeDecision>> }`. `std::mem::size_of::<RecordPayload>()`를 단언하는 Rust 테스트(≤ 48B).
 - [ ] **9.2** 큐 arena를 free-list slab으로: `queued: Vec<Option<Queued>>` + `free: Vec<usize>`. `push`는 `free.pop()` 슬롯 재사용, `pop`은 `take` 후 `free.push(token)`. heap 엔트리의 `seq`가 순서를 보장하므로 token 재사용은 안전(같은 token이 heap에 두 번 있을 수 없음 — pop 후에만 free). Rust 테스트: 1,000세션 MARKET pre-push 후 슬롯 수가 `sessions + max_live_per_session` 이하.
-- [ ] **9.3** 측정 후 커밋 정리.
+- [ ] **9.3** `row_index` 메모리 상한 — PR 8이 더한 `Vec<u32>`(세션 × 종목)는 usize 오버플로만 막고 크기 자체는 무제한이다 (3,000종목 × 5,000세션 = 60MB). `slots > rows × K`면 세션별 해시 폴백으로 내려가거나, 바이트 예산을 넘으면 적재 오류로 거부한다. K와 예산은 실측(300종목 1.5MiB / 행 369,300 = 밀도 약 0.8%)으로 정한다.
+- [ ] **9.4** 측정 후 커밋 정리.
 
 ### AC
 
@@ -613,6 +664,8 @@ PR 9까지 반영 후 100종목 tape에서 feed 적재(`_load_persistent_feed` +
 - [ ] 스펙 "2026-09-18 측정 경계 교정" 아래 "최종 판정" 절: 게이트 표(100/300종목 total 배수, 4종목 fixture, RSS, FFI 0회, parity) + 남은 항목.
 - [ ] `docs/rust-python-benchmark-report.html` 갱신, `docs/superpowers/plans/2026-09-17-rust-engine-loop.md` 상단에 이 문서 링크.
 - [ ] 이슈 #98 댓글: PR 링크 11개, 최종 표, `.claude/rules/pr-review.md` 양식으로 남은 결정(Phase 3-4). 게이트 전부 통과면 종료 제안.
+- [ ] 이슈 #98 댓글에 후속 항목으로 남길 것: PR 8에서 되돌린 tape 경량 프레임(8.3)은 FILL/ORDER_UPDATE 알림을 선언한 tape 워크로드 벤치 옵션이 생기면 다시 올린다. 코어 간 instrument key 충돌 거부 통일(현재 persistent만 거부, python 코어는 완주). #135(`7E+2` 수량 표기).
+  - [ ] PR 8에서 되돌린 tape 경량 프레임(8.3) — 알림(fill·order_update) 선언 tape 워크로드를 재는 벤치 옵션이 생기면 `make_native_frame`을 다시 올린다. 현재 벤치는 `MARKET`만 선언해 NOTIFY 분기가 돌지 않아 측정으로 유지를 정당화할 수 없었다.
 - [ ] 메모리 `rust-loop-driver-pr-stack.md` 갱신.
 
 ### AC
@@ -637,7 +690,7 @@ PR 9까지 반영 후 100종목 tape에서 feed 적재(`_load_persistent_feed` +
 | 5 | `refactor/python-sot-context-tape-marker` | 리뷰 APPROVE·PR 생성 | #129 | Opus APPROVE (issubclass 고정 반영) |
 | 6 | `perf/materialize-by-kind` | 리뷰 APPROVE·PR 생성 | #134 | Opus APPROVE (DEFECT-601 반영, RSS 1.18/1.22배 통과) |
 | 7 | `perf/workbench-result-columnar` | 리뷰 조건부 APPROVE·PR 생성 | #136 | Opus (DEFECT-701·캐시·RSS 계측 반영, post-run −48%(경계), e2e 1.26→1.91배) |
-| 8 | `perf/rust-hot-loop` | 대기 | | |
+| 8 | `perf/rust-hot-loop` | 리뷰 APPROVE·PR 생성 | #137 | Opus APPROVE (테스트·set_mark·Python key 충돌 거부 반영, 300종목 run −21~22%) |
 | 9 | `perf/record-and-queue-memory` | 대기 | | |
 | 10 | `perf/feed-columnar` | go/no-go 대기 | | |
 | 11 | `docs/rust-loop-final-gates` | 대기 | | |

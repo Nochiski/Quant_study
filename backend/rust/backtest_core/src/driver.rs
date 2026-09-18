@@ -14,6 +14,7 @@ use crate::session::py_float;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Python `EventPriority`와 같은 값. 같은 세션 안에서 숫자가 작을수록 먼저 처리한다.
 pub(crate) const PRIORITY_MARKET: u8 = 10;
@@ -107,7 +108,16 @@ pub(crate) enum Queued {
 
 impl PersistentEngine {
     fn settings(&self) -> PyResult<&RunSettings> {
-        self.run.as_ref().ok_or_else(|| {
+        self.run.as_deref().ok_or_else(|| {
+            PyValueError::new_err("persistent run is not configured — call configure_run first")
+        })
+    }
+
+    /// 실행 설정을 `self` 빌림과 분리해 꺼낸다. 세션 루프가 `&mut self` 메서드를 부르는 동안에도
+    /// 설정을 읽어야 해서, 예전에는 `RunSettings` 전체를 clone(문자열 3개 할당)했다.
+    /// `Arc` 복제는 참조 카운트 증가뿐이라 세션마다 드는 할당이 사라진다.
+    fn settings_arc(&self) -> PyResult<Arc<RunSettings>> {
+        self.run.clone().ok_or_else(|| {
             PyValueError::new_err("persistent run is not configured — call configure_run first")
         })
     }
@@ -383,7 +393,7 @@ impl PersistentEngine {
             self.apply_corporate_action_entry(session, index)?;
         }
 
-        let settings = self.settings()?.clone();
+        let settings = self.settings_arc()?;
         // 체결 payload가 필요한 주문 메타를 처리 전에 잡아둔다 — 전량 체결된 주문은 ops 적용
         // 중 제거된다.
         let order_meta: HashMap<String, (u32, String)> = self
@@ -400,7 +410,7 @@ impl PersistentEngine {
             session,
             settings.fee_rate,
             settings.default_participation.as_deref(),
-            settings.slippage.clone(),
+            &settings.slippage,
         )?;
         for (kind, order_id, quantity, price, slip, fee, payload) in ops {
             match kind.as_str() {
@@ -519,7 +529,7 @@ impl PersistentEngine {
 
     /// `loop._on_session_close`: 비용·스냅샷 기록 후 일정과 warmup을 만족하면 스냅샷을 돌려준다.
     fn on_session_close(&mut self, session: usize) -> PyResult<Option<SnapshotWire>> {
-        let settings = self.settings()?.clone();
+        let settings = self.settings_arc()?;
         let (should_dispatch, costs, closed) = self.close_current_session(
             &settings.schedule,
             settings.short_borrow_bps_annual,
@@ -607,7 +617,7 @@ impl PersistentEngine {
                 native,
             },
         )?;
-        let (orders, updates, error) = match self.route_with_id(&decision_id, decision) {
+        let (orders, updates, error) = match self.route_with_id(&decision_id, &decision) {
             Ok(routed) => routed,
             Err(error) => {
                 self.lifecycle = Lifecycle::Failed;
@@ -635,20 +645,13 @@ impl PersistentEngine {
     fn route_with_id(
         &mut self,
         decision_id: &str,
-        decision: DecisionWire,
+        decision: &DecisionWire,
     ) -> PyResult<(
         Vec<OrderWire>,
         Vec<(String, String, String)>,
         Option<RouteError>,
     )> {
         let bars = self.feed_ref()?.current_closes()?;
-        // 심볼 폴백은 그날 바뿐 아니라 피드 등록부 전체에서 찾는다 — 바가 끊긴 보유 종목(정지·상폐)의
-        // REPLACE 청산 주문이 "instrument metadata is missing" 으로 run 을 죽이지 않도록.
-        let mut fallback_symbols: HashMap<String, String> = self.feed_ref()?.registry_symbols();
-        for (key, (symbol, _)) in bars.iter() {
-            fallback_symbols.insert(key.clone(), symbol.clone());
-        }
-        let decision_for_orders = decision.clone();
         let (orders, updates, groups, error) = persistent_router::route_basic_decision(
             &self.portfolio,
             &mut self.orders,
@@ -663,12 +666,16 @@ impl PersistentEngine {
         if error.is_some() {
             return Ok((Vec::new(), updates, error));
         }
+        // 심볼 폴백은 그날 바가 아니라 피드 등록부 전체에서 찾는다 — 바가 끊긴 보유 종목(정지·상폐)의
+        // REPLACE 청산 주문이 "instrument metadata is missing" 으로 run 을 죽이지 않도록.
+        // 등록부 표는 적재 시 한 번 만들어 두므로 결정마다 재조립하지 않는다.
+        let fallback_symbols = self.feed_ref()?.registry_symbols();
         let staged_orders = orders
             .iter()
             .map(|order| {
                 StoredOrder::from_routed(
                     order,
-                    &decision_for_orders,
+                    decision,
                     fallback_symbols.get(&order.1).map(String::as_str),
                     decision_id,
                 )
@@ -800,7 +807,7 @@ mod tests {
             vec!["no_action".into(), "set_portfolio_target".into()],
             vec![],
         );
-        runtime.run = Some(settings);
+        runtime.run = Some(Arc::new(settings));
         runtime
     }
 
@@ -1035,7 +1042,7 @@ mod tests {
         runtime.configure_router(vec!["no_action".into()], vec![]);
         let mut month_end = settings(0);
         month_end.schedule = "month_end".into();
-        runtime.run = Some(month_end);
+        runtime.run = Some(Arc::new(month_end));
 
         let mut dispatched = Vec::new();
         while let Some(frame) = runtime.drive_internal().unwrap() {

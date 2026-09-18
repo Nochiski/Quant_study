@@ -116,6 +116,14 @@ from backtest_engine.types.strategy import Strategy
 from backtest_engine.types.tape import DeclarativeTapeStrategy, TapeFrame
 
 
+def _instrument_text(instrument: InstrumentId) -> str:
+    """오류 메시지용 InstrumentId 표기. 어느 필드가 부딪혔는지 보이도록 네 필드를 다 적는다."""
+    return (
+        f"(venue={instrument.venue!r}, symbol={instrument.symbol!r}, "
+        f"asset_class={instrument.asset_class.value!r}, currency={instrument.currency!r})"
+    )
+
+
 class _Run:
     """한 번의 run() 동안만 사는 컴포넌트 묶음. 엔진 인스턴스에 상태를 남기지 않는다."""
 
@@ -630,6 +638,21 @@ class BacktestEngine:
             instrument_ids.append(instrument_id)
         instruments = tuple(registry)
         keys = [instrument_key(instrument) for instrument in instruments]
+        # `instrument_key`는 필드를 ':'로 이어 붙이므로 필드 안에 ':'가 있으면 서로 다른
+        # InstrumentId가 같은 key를 낼 수 있다 (예: symbol="A:B"와 venue="KRX:A"). 그러면
+        # 원장·마크·심볼 표가 두 종목을 한 종목으로 합쳐 조용히 섞인다. Rust 적재도 같은
+        # 상황을 거부하지만(등록부 key 하나에 symbol 둘), 여기서 먼저 잡아야 어느 두 종목이
+        # 부딪혔는지 알려줄 수 있다 — 메시지 정본은 이쪽이다.
+        owner_by_key: dict[str, InstrumentId] = {}
+        for instrument, key in zip(instruments, keys, strict=True):
+            previous = owner_by_key.setdefault(key, instrument)
+            if previous is not instrument:
+                raise ValueError(
+                    f"instrument key collision — key={key!r} instruments=["
+                    f"{_instrument_text(previous)}, {_instrument_text(instrument)}] "
+                    f"registry={len(instruments)} (a ':' inside venue/symbol/currency "
+                    f"makes two instruments share one key)"
+                )
         symbols = [instrument.symbol for instrument in instruments]
         offsets = [0]
         for snapshot in snapshots:

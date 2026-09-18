@@ -23,6 +23,9 @@ pub(crate) struct Portfolio {
     cash: f64,
     /// Python dict와 같은 삽입 순서를 유지한다 — 스냅샷 순서와 equity 합산 순서가 여기에 의존한다.
     ledgers: Vec<(String, Ledger)>,
+    /// key → `ledgers` 위치. 체결마다 원장을 선형 탐색하던 `ledger_index`를 O(1)로 만든다.
+    /// 삽입 순서 정본은 `ledgers`이고 이 표는 그 위치만 따라간다.
+    ledger_slots: HashMap<String, usize>,
     marks: HashMap<String, f64>,
     allow_short: bool,
     allow_margin: bool,
@@ -30,12 +33,42 @@ pub(crate) struct Portfolio {
 
 impl Portfolio {
     fn ledger_index(&self, key: &str) -> Option<usize> {
-        self.ledgers.iter().position(|(k, _)| k == key)
+        self.ledger_slots.get(key).copied()
+    }
+
+    fn push_ledger(&mut self, key: &str, ledger: Ledger) {
+        self.ledger_slots
+            .insert(key.to_string(), self.ledgers.len());
+        self.ledgers.push((key.to_string(), ledger));
+    }
+
+    /// 마크 한 건 갱신 — 두 `mark*` 진입점의 유일한 본문이다. 이미 표에 있는 key는 문자열을
+    /// 새로 만들지 않고 값만 바꾼다 (세션마다 종목 수만큼 나던 할당이 사라진다).
+    fn set_mark(&mut self, key: &str, close: f64) {
+        match self.marks.get_mut(key) {
+            Some(slot) => *slot = close,
+            None => {
+                self.marks.insert(key.to_string(), close);
+            }
+        }
+    }
+
+    /// 세션 종가로 평가 가격 갱신 (Rust 세션 루프 경로 — feed가 등록부 문자열을 빌려준다).
+    pub(crate) fn mark_refs(&mut self, closes: &[(&str, f64)]) {
+        for (key, close) in closes {
+            self.set_mark(key, *close);
+        }
     }
 
     fn remove_ledger(&mut self, key: &str) {
-        if let Some(index) = self.ledger_index(key) {
+        if let Some(index) = self.ledger_slots.remove(key) {
             self.ledgers.remove(index);
+            // 삭제 지점 뒤 항목이 한 칸씩 당겨진다 — 표를 다시 만들지 않고 위치만 내린다.
+            for slot in self.ledger_slots.values_mut() {
+                if *slot > index {
+                    *slot -= 1;
+                }
+            }
         }
     }
 }
@@ -48,6 +81,7 @@ impl Portfolio {
         Self {
             cash: initial_cash,
             ledgers: Vec::new(),
+            ledger_slots: HashMap::new(),
             marks: HashMap::new(),
             allow_short,
             allow_margin,
@@ -125,13 +159,13 @@ impl Portfolio {
                         average_price: price,
                     };
                 }
-                None => self.ledgers.push((
-                    key.to_string(),
+                None => self.push_ledger(
+                    key,
                     Ledger {
                         quantity: new_quantity,
                         average_price: price,
                     },
-                )),
+                ),
             }
         }
         self.cash = new_cash;
@@ -175,17 +209,17 @@ impl Portfolio {
             };
             match self.ledger_index(key) {
                 Some(index) => self.ledgers[index].1 = ledger,
-                None => self.ledgers.push((key.to_string(), ledger)),
+                None => self.push_ledger(key, ledger),
             }
         }
         self.marks.insert(key.to_string(), settlement_price);
         Ok(())
     }
 
-    /// 세션 종가로 평가 가격 갱신.
+    /// 세션 종가로 평가 가격 갱신 (Python `RustPortfolio` 경로 — key를 소유해 넘겨준다).
     pub(crate) fn mark(&mut self, closes: Vec<(String, f64)>) {
         for (key, close) in closes {
-            self.marks.insert(key, close);
+            self.set_mark(&key, close);
         }
     }
 
@@ -259,6 +293,60 @@ mod tests {
         assert_eq!(positions[0].4, 1_200.0);
         assert_eq!(equity, cash + 1_200.0);
         assert!((gross - 1_200.0 / equity).abs() < 1e-12);
+    }
+
+    /// 원장 삭제가 뒤 항목 위치를 한 칸씩 당기므로 `ledger_slots`가 그 시프트를 따라가야 한다.
+    /// 중간 삭제 → 뒤 항목 조회·갱신, 재삽입 위치, 맨 앞 삭제를 순서대로 확인한다.
+    #[test]
+    fn ledger_slots_follow_removal_shift() {
+        let mut portfolio = Portfolio::new(1_000_000.0, false, false);
+        for key in ["a", "b", "c", "d"] {
+            portfolio.apply(key, "buy", 10, 100.0, 0.0).unwrap();
+        }
+        assert_eq!(keys_of(&portfolio), vec!["a", "b", "c", "d"]);
+
+        // 중간 항목 제거 — 뒤의 c·d가 한 칸씩 앞으로 당겨진다.
+        portfolio.apply("b", "sell", 10, 100.0, 0.0).unwrap();
+        assert_eq!(keys_of(&portfolio), vec!["a", "c", "d"]);
+        assert_eq!(portfolio.held_qty("b"), 0);
+        assert_eq!(portfolio.average_price("b"), None);
+        assert_eq!(portfolio.held_qty("c"), 10);
+        assert_eq!(portfolio.held_qty("d"), 10);
+
+        // 당겨진 뒤 항목 갱신이 엉뚱한 원장을 건드리지 않는다.
+        portfolio.apply("d", "buy", 10, 200.0, 0.0).unwrap();
+        assert_eq!(portfolio.held_qty("d"), 20);
+        assert_eq!(portfolio.average_price("d"), Some(150.0));
+        assert_eq!(portfolio.held_qty("c"), 10);
+        assert_eq!(portfolio.average_price("c"), Some(100.0));
+
+        // 재삽입은 Python dict처럼 맨 뒤에 붙는다 (원래 자리로 돌아가지 않는다).
+        portfolio.apply("b", "buy", 5, 300.0, 0.0).unwrap();
+        assert_eq!(keys_of(&portfolio), vec!["a", "c", "d", "b"]);
+        assert_eq!(portfolio.held_qty("b"), 5);
+        assert_eq!(portfolio.average_price("b"), Some(300.0));
+
+        // 맨 앞 제거 — 나머지 셋 전부가 한 칸씩 당겨진다.
+        portfolio.apply("a", "sell", 10, 100.0, 0.0).unwrap();
+        assert_eq!(keys_of(&portfolio), vec!["c", "d", "b"]);
+        for (key, quantity, average) in [("c", 10, 100.0), ("d", 20, 150.0), ("b", 5, 300.0)] {
+            assert_eq!(portfolio.held_qty(key), quantity, "{key}");
+            assert_eq!(portfolio.average_price(key), Some(average), "{key}");
+        }
+
+        // 스냅샷 행 순서가 삽입 순서 정본인 `ledgers`와 같다.
+        portfolio.mark_refs(&[("c", 100.0), ("d", 150.0), ("b", 300.0)]);
+        let (_, positions, _, _) = portfolio.snapshot().unwrap();
+        let rows: Vec<&str> = positions.iter().map(|row| row.0.as_str()).collect();
+        assert_eq!(rows, vec!["c", "d", "b"]);
+    }
+
+    fn keys_of(portfolio: &Portfolio) -> Vec<&str> {
+        portfolio
+            .ledgers
+            .iter()
+            .map(|(key, _)| key.as_str())
+            .collect()
     }
 
     #[test]

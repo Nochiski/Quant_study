@@ -14,6 +14,7 @@ use crate::tape::NativeTape;
 use pyo3::exceptions::{PyKeyError, PyValueError};
 use pyo3::prelude::*;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Lifecycle {
@@ -234,7 +235,7 @@ pub(crate) struct PersistentEngine {
     pub(crate) allow_short: bool,
     pub(crate) router_config: RouterConfig,
     pub(crate) feed: Option<PersistentFeed>,
-    pub(crate) run: Option<RunSettings>,
+    pub(crate) run: Option<Arc<RunSettings>>,
     pub(crate) corporate_actions: Vec<CorporateActionEntry>,
     pub(crate) ca_by_session: HashMap<usize, Vec<usize>>,
     pub(crate) debug_panic_on_market: bool,
@@ -329,7 +330,7 @@ impl PersistentEngine {
         bars: HashMap<String, BarTuple>,
         fee_rate: f64,
         default_participation: Option<&str>,
-        slippage: (String, f64, f64),
+        slippage: &(String, f64, f64),
     ) -> PyResult<Vec<Op>> {
         let (_, positions, equity, _) = self.portfolio.snapshot()?;
         let power_positions = positions
@@ -402,7 +403,7 @@ impl PersistentEngine {
         session_index: usize,
         fee_rate: f64,
         default_participation: Option<&str>,
-        slippage: (String, f64, f64),
+        slippage: &(String, f64, f64),
     ) -> PyResult<Vec<Op>> {
         let (ts, bars) = {
             let feed = self
@@ -438,7 +439,7 @@ impl PersistentEngine {
             .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?;
         let should_dispatch = feed.schedule_matches(schedule)?;
         let marks = feed.current_marks()?;
-        self.portfolio.mark(marks);
+        self.portfolio.mark_refs(&marks);
         let (cash, positions, _, _) = self.portfolio.snapshot()?;
         let borrow_daily = short_borrow_bps_annual / 10_000.0 / f64::from(annualization_days);
         let mut costs = Vec::new();
@@ -583,7 +584,7 @@ impl PersistentEngine {
                 "unsupported persistent schedule — schedule={schedule:?}"
             )));
         }
-        self.run = Some(RunSettings {
+        self.run = Some(Arc::new(RunSettings {
             fee_rate,
             default_participation,
             slippage,
@@ -595,7 +596,7 @@ impl PersistentEngine {
             notify_fill,
             notify_order_update,
             notify_corporate_action,
-        });
+        }));
         Ok(())
     }
 
@@ -868,7 +869,7 @@ mod tests {
                 bars,
                 0.0,
                 None,
-                ("none".into(), 0.0, 0.0),
+                &("none".into(), 0.0, 0.0),
             )
             .unwrap();
 

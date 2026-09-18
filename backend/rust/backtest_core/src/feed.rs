@@ -19,6 +19,12 @@ pub(crate) struct PersistentFeed {
     current_session: Option<usize>,
     /// key → instrument id. 세션 루프가 주문·포지션 key를 wire의 정수 id로 바꿀 때 쓴다.
     key_index: HashMap<String, u32>,
+    /// key → symbol. 라우팅이 결정마다 쓰는 심볼 폴백 표를 적재 시 한 번만 만든다.
+    symbol_by_key: HashMap<String, String>,
+    /// `session * keys.len() + instrument_id` → 행 번호. bar가 없으면 `u32::MAX`.
+    /// 세션별 행 구간을 매번 훑던 `row_of`를 O(1)로 만든다. 4B × 세션 × 종목이 든다
+    /// (300종목 1,231세션 = 1.5MiB).
+    row_index: Vec<u32>,
 }
 
 impl PersistentFeed {
@@ -76,11 +82,53 @@ impl PersistentFeed {
                 keys.len()
             )));
         }
-        let key_index = keys
+        let key_index: HashMap<String, u32> = keys
             .iter()
             .enumerate()
             .map(|(index, key)| (key.clone(), index as u32))
             .collect();
+        // 같은 key가 서로 다른 symbol로 두 번 등록되면 등록부 표(`symbol_by_key`)와 그날 bar가
+        // 실어 나르는 symbol이 갈라진다. 라우팅은 이제 등록부 표만 보므로 여기서 막는다.
+        let mut symbol_by_key: HashMap<String, String> = HashMap::with_capacity(keys.len());
+        for (key, symbol) in keys.iter().zip(symbols.iter()) {
+            if let Some(known) = symbol_by_key.get(key) {
+                if known != symbol {
+                    return Err(PyValueError::new_err(format!(
+                        "feed registry maps one key to two symbols — key={key} symbols=({known}, {symbol}) registry={}",
+                        keys.len()
+                    )));
+                }
+                continue;
+            }
+            symbol_by_key.insert(key.clone(), symbol.clone());
+        }
+        // 행 번호를 u32로 담으므로 행 수가 u32 범위를 넘으면 인덱스를 만들 수 없다.
+        // `u32::MAX`는 "bar 없음" 표식이라 행 번호로 쓸 수 없다.
+        if rows >= u32::MAX as usize {
+            return Err(PyValueError::new_err(format!(
+                "feed has too many rows for the row index — rows={rows} limit={}",
+                u32::MAX as usize - 1
+            )));
+        }
+        let slots = sessions.len().checked_mul(keys.len()).ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "feed row index size overflows usize — sessions={} registry={}",
+                sessions.len(),
+                keys.len()
+            ))
+        })?;
+        let mut row_index = vec![u32::MAX; slots];
+        for (session, window) in offsets.windows(2).enumerate() {
+            let base = session * keys.len();
+            for (offset, instrument_id) in instrument_ids[window[0]..window[1]].iter().enumerate() {
+                let slot = base + *instrument_id as usize;
+                // 한 세션에 같은 종목 행이 둘이면 앞선 행을 남긴다 — 선형 탐색이 `find`로
+                // 첫 행을 고르던 동작과 같다.
+                if row_index[slot] == u32::MAX {
+                    row_index[slot] = (window[0] + offset) as u32;
+                }
+            }
+        }
         Ok(Self {
             keys,
             symbols,
@@ -94,6 +142,8 @@ impl PersistentFeed {
             volumes,
             current_session: None,
             key_index,
+            symbol_by_key,
+            row_index,
         })
     }
 
@@ -111,9 +161,18 @@ impl PersistentFeed {
 
     /// 세션에 해당 종목 bar가 있으면 그 행 번호.
     fn row_of(&self, session: usize, key: &str) -> Option<usize> {
-        let instrument_id = self.instrument_id(key)?;
-        self.row_range(session)
-            .find(|row| self.instrument_ids[*row] == instrument_id)
+        self.row_at(session, self.instrument_id(key)?)
+    }
+
+    /// `row_index` 조회. 세션 범위 밖이거나 그날 bar가 없으면 `None`.
+    fn row_at(&self, session: usize, instrument_id: u32) -> Option<usize> {
+        let slot = session
+            .checked_mul(self.keys.len())?
+            .checked_add(instrument_id as usize)?;
+        match self.row_index.get(slot).copied() {
+            Some(row) if row != u32::MAX => Some(row as usize),
+            _ => None,
+        }
     }
 
     pub(crate) fn has_bar(&self, session: usize, key: &str) -> bool {
@@ -180,21 +239,22 @@ impl PersistentFeed {
 
     /// 피드에 등록된 전 종목의 key → symbol. 그날 바가 없는 보유 종목(정지·상폐)을 청산하는
     /// 주문도 심볼을 찾을 수 있어야 한다 — Python 라우터는 포트폴리오 스냅샷에서 같은 정보를 본다.
-    pub(crate) fn registry_symbols(&self) -> HashMap<String, String> {
-        self.keys
-            .iter()
-            .cloned()
-            .zip(self.symbols.iter().cloned())
-            .collect()
+    ///
+    /// 그날 bar가 싣는 symbol도 같은 `symbols` 배열을 같은 instrument id로 읽으므로 이 표와
+    /// 항상 같다 (key 중복 충돌은 `new`가 거른다). 라우팅은 병합 없이 이 표만 보면 된다.
+    pub(crate) fn registry_symbols(&self) -> &HashMap<String, String> {
+        &self.symbol_by_key
     }
 
-    pub(crate) fn current_marks(&self) -> PyResult<Vec<(String, f64)>> {
+    /// 세션 종가 마크. key는 등록부 문자열을 빌려준다 — 세션마다 종목 수만큼 String을
+    /// 새로 만들지 않도록 `Portfolio::mark_refs`가 참조로 받는다.
+    pub(crate) fn current_marks(&self) -> PyResult<Vec<(&str, f64)>> {
         let index = self.current_index()?;
         Ok(self
             .row_range(index)
             .map(|row| {
                 let instrument = self.instrument_ids[row] as usize;
-                (self.keys[instrument].clone(), self.closes[row])
+                (self.keys[instrument].as_str(), self.closes[row])
             })
             .collect())
     }
@@ -244,10 +304,7 @@ impl PersistentFeed {
         let first = self
             .sessions
             .partition_point(|session| session.as_str() < event_ts);
-        (first..self.sessions.len()).find(|index| {
-            self.row_range(*index)
-                .any(|row| self.instrument_ids[row] == instrument_id)
-        })
+        (first..self.sessions.len()).find(|index| self.row_at(*index, instrument_id).is_some())
     }
 
     pub(crate) fn history_window(
@@ -279,13 +336,9 @@ impl PersistentFeed {
         let timestamps = self.sessions[selected.clone()].to_vec();
         let mut values = Vec::with_capacity(lookback * keys.len());
         for session in selected {
-            let rows: HashMap<u32, usize> = self
-                .row_range(session)
-                .map(|row| (self.instrument_ids[row], row))
-                .collect();
             for id in &ids {
                 let value = id
-                    .and_then(|id| rows.get(&id).copied())
+                    .and_then(|id| self.row_at(session, id))
                     .map(|row| match field {
                         HistoryField::Open => self.opens[row],
                         HistoryField::High => self.highs[row],
@@ -359,6 +412,94 @@ mod tests {
         assert_eq!(feed.open_at(1, "B"), Some(21.0));
         assert_eq!(feed.symbol_of(0), "AAA");
         assert_eq!(feed.session_len(), 2);
+    }
+
+    /// bar가 빠진 세션이 섞인 피드에서 `row_index`가 "그날 행 없음"을 정확히 표시하는지.
+    /// A는 D2에, C는 D1·D2에 bar가 없다.
+    #[test]
+    fn row_index_reports_sessions_without_a_bar() {
+        let mut feed = PersistentFeed::new(
+            vec!["A".into(), "B".into(), "C".into()],
+            vec!["AAA".into(), "BBB".into(), "CCC".into()],
+            vec!["D1".into(), "D2".into(), "D3".into()],
+            vec![0, 2, 3, 6],
+            vec![0, 1, 1, 0, 1, 2],
+            vec![10.0, 20.0, 21.0, 12.0, 22.0, 30.0],
+            vec![11.0, 21.0, 22.0, 13.0, 23.0, 31.0],
+            vec![9.0, 19.0, 20.0, 11.0, 21.0, 29.0],
+            vec![10.5, 20.5, 21.5, 12.5, 22.5, 30.5],
+            vec![100, 200, 300, 400, 500, 600],
+        )
+        .unwrap();
+
+        // has_bar: 결측 세션만 false.
+        let present = [
+            (0, "A", true),
+            (0, "B", true),
+            (0, "C", false),
+            (1, "A", false),
+            (1, "B", true),
+            (1, "C", false),
+            (2, "A", true),
+            (2, "B", true),
+            (2, "C", true),
+        ];
+        for (session, key, expected) in present {
+            assert_eq!(
+                feed.has_bar(session, key),
+                expected,
+                "session={session} key={key}"
+            );
+        }
+        // 등록부에 없는 key는 어느 세션에서도 bar가 없다.
+        assert!(!feed.has_bar(0, "Z"));
+
+        // open_at: 결측 세션은 None, 있는 세션은 그 행의 시가.
+        assert_eq!(feed.open_at(0, "A"), Some(10.0));
+        assert_eq!(feed.open_at(1, "A"), None);
+        assert_eq!(feed.open_at(1, "B"), Some(21.0));
+        assert_eq!(feed.open_at(0, "C"), None);
+        assert_eq!(feed.open_at(2, "C"), Some(30.0));
+
+        // 정산 세션은 사건 시각 이후 그 종목이 실제로 거래된 첫 세션이다.
+        assert_eq!(feed.settlement_session_index("C", "D1"), Some(2));
+        assert_eq!(feed.settlement_session_index("A", "D2"), Some(2));
+
+        // history_window: 결측 세션 값은 NaN으로 채운다 (세션당 요청 종목 순서).
+        feed.set_current(2).unwrap();
+        let (timestamps, values) = feed
+            .history_window(&["A".to_string(), "C".to_string()], "close", 3, "D3")
+            .unwrap();
+        assert_eq!(timestamps, vec!["D1", "D2", "D3"]);
+        let expected = [Some(10.5), None, None, None, Some(12.5), Some(30.5)];
+        assert_eq!(values.len(), expected.len());
+        for (index, (value, want)) in values.iter().zip(expected).enumerate() {
+            match want {
+                Some(want) => assert_eq!(*value, want, "index={index}"),
+                None => assert!(value.is_nan(), "index={index} value={value}"),
+            }
+        }
+    }
+
+    #[test]
+    fn registry_rejects_one_key_with_two_symbols() {
+        let error = PersistentFeed::new(
+            vec!["A".into(), "A".into()],
+            vec!["AAA".into(), "BBB".into()],
+            vec!["D1".into()],
+            vec![0, 1],
+            vec![0],
+            vec![10.0],
+            vec![11.0],
+            vec![9.0],
+            vec![10.5],
+            vec![100],
+        );
+        let error = match error {
+            Ok(_) => panic!("duplicate key with two symbols must be rejected"),
+            Err(error) => error.to_string(),
+        };
+        assert!(error.contains("one key to two symbols"), "{error}");
     }
 
     #[test]

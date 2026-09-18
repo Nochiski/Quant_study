@@ -370,7 +370,7 @@ pub(crate) fn process_market_impl(
     power: &mut BuyingPower,
     fee_rate: f64,
     default_participation: Option<&str>,
-    slippage: (String, f64, f64),
+    slippage: &(String, f64, f64),
 ) -> PyResult<Vec<Op>> {
     let mut entries: Vec<EntryIn> = entries.into_iter().map(EntryIn::from_tuple).collect();
     let mut session = Session {
@@ -379,7 +379,7 @@ pub(crate) fn process_market_impl(
         power,
         fee_rate,
         default_participation,
-        slippage: &slippage,
+        slippage,
         ops: Vec::new(),
     };
     for (group_id, policy, order_ids) in &groups {
@@ -458,7 +458,7 @@ fn process_market(
         power,
         fee_rate,
         default_participation,
-        slippage,
+        &slippage,
     )
 }
 

@@ -1,5 +1,6 @@
 import {
   useId,
+  useRef,
   useState,
   type ChangeEvent,
   type KeyboardEvent,
@@ -13,6 +14,7 @@ import type {
 import { t, tOptional } from "../../../shared/config";
 import { Badge, Button } from "../../../shared/ui";
 import type {
+  FormControl,
   FormField,
   FormProjection,
   FormSection,
@@ -47,6 +49,8 @@ type StrategyFormPanelProps = {
 const UNSET = "__unset__";
 
 const FORM_OWNER = "form";
+/** Form 컨트롤이 포커스를 가진 채 적용한다: 편집기로 포커스를 옮기면 컨트롤 blur가 같은 값을 다시 확정한다. */
+const NO_FOCUS = { focusEditor: false } as const;
 
 const feedbackText = (feedback: TransactionFeedback): ReactNode => {
   if (feedback.status === "idle" || feedback.owner !== FORM_OWNER) return null;
@@ -155,7 +159,6 @@ const FormSectionView = ({
           field={field}
           transactions={transactions}
           catalogs={catalogs}
-          disabled={disabled}
         />
       ))}
     </fieldset>
@@ -176,36 +179,65 @@ const severityBadge = (field: FormField): ReactNode => {
   );
 };
 
+/** 편집 컨트롤이 없는 행(링크·const)은 `<label for>` 대신 `aria-labelledby`로 이름을 잇는다(리뷰 DEFECT-P402-004). */
+const isPassiveControl = (control: FormControl): boolean =>
+  control.kind === "graph-link" ||
+  control.kind === "list-link" ||
+  control.kind === "const";
+
 const FormFieldRow = ({
   section,
   field,
   transactions,
   catalogs,
-  disabled,
 }: {
   section: ObjectSection;
   field: FormField;
   transactions: SourceTransactions;
   catalogs: FormCatalogs;
-  disabled: boolean;
 }) => {
   const id = useId();
+  const labelId = `${id}-label`;
   const [invalid, setInvalid] = useState<string | null>(null);
+  const passive = isPassiveControl(field.control);
+  // 이 필드의 마지막 확정이 실패했으면 같은 값으로 다시 확정할 수 있어야 한다(DEFECT-P402-002).
+  const feedback = transactions.feedback;
+  const lastFailed =
+    feedback.status === "error" &&
+    feedback.owner === FORM_OWNER &&
+    feedback.label === field.key;
+  // `x-default-from`: 생략하면 backend가 형제 키의 값으로 채운다 → placeholder도 그 값(P4-01 DEFECT-121-06).
+  const defaultFromValue =
+    field.defaultFrom === null
+      ? undefined
+      : section.fields.find((sibling) => sibling.key === field.defaultFrom)
+          ?.value;
   const commit = (value: Scalar): void => {
     setInvalid(null);
     transactions.apply(
       fieldOperation(section, field, value),
       field.key,
       FORM_OWNER,
+      NO_FOCUS,
     );
   };
   const description = tOptional(field.descriptionKey ?? "");
   const control = (
     <FieldControl
       id={id}
+      labelId={labelId}
       field={field}
       catalogs={catalogs}
+      canRetry={lastFailed}
+      placeholderValue={
+        field.written
+          ? undefined
+          : field.hasDefault
+            ? field.defaultValue
+            : defaultFromValue
+      }
       onCommit={commit}
+      onValid={() => setInvalid(null)}
       onInvalid={(reason) => setInvalid(t(`form.invalid.${reason}`))}
     />
   );
@@ -218,34 +250,51 @@ const FormFieldRow = ({
         field.applicable === null ? "unknown" : String(field.applicable)
       }
     >
-      <label htmlFor={id} title={field.templatePointer}>
-        <code>{field.key}</code>
-        {field.required ? <span aria-hidden="true"> *</span> : null}
-        {(field.displayUnit ?? field.unit) ? (
-          <span className="strategy-form__unit">
-            {` · ${field.displayUnit ?? field.unit}`}
-          </span>
-        ) : null}
-      </label>
+      {passive ? (
+        <span
+          id={labelId}
+          className="strategy-form__label"
+          title={field.templatePointer}
+        >
+          <code>{field.key}</code>
+        </span>
+      ) : (
+        <label htmlFor={id} title={field.templatePointer}>
+          <code>{field.key}</code>
+          {field.required ? <span aria-hidden="true"> *</span> : null}
+          {(field.displayUnit ?? field.unit) ? (
+            <span className="strategy-form__unit">
+              {` · ${field.displayUnit ?? field.unit}`}
+            </span>
+          ) : null}
+        </label>
+      )}
       <div className="strategy-form__control">
         {control}
-        {field.written && !field.required ? (
+        {!passive && field.written && !field.required ? (
           <Button
             size="small"
             tone="ghost"
             onClick={() =>
-              transactions.apply(resetOperation(field), field.key, FORM_OWNER)
+              transactions.apply(
+                resetOperation(field),
+                field.key,
+                FORM_OWNER,
+                NO_FOCUS,
+              )
             }
             aria-label={`${field.key} · ${t("form.field.reset")}`}
           >
             {t("form.field.reset")}
           </Button>
         ) : null}
-        {unset !== null && field.value !== null ? (
+        {!passive && unset !== null && field.value !== null ? (
           <Button
             size="small"
             tone="ghost"
-            onClick={() => transactions.apply(unset, field.key, FORM_OWNER)}
+            onClick={() =>
+              transactions.apply(unset, field.key, FORM_OWNER, NO_FOCUS)
+            }
             aria-label={`${field.key} · ${t("form.field.unset")}`}
           >
             {t("form.field.unset")}
@@ -268,32 +317,44 @@ const FormFieldRow = ({
             draftOf(field.defaultValue) || "null",
           )}
         </p>
+      ) : !field.written && field.defaultFrom !== null ? (
+        <p className="strategy-form__hint">
+          {t("form.field.defaultFromHint")
+            .replace("{key}", field.defaultFrom)
+            .replace("{value}", draftOf(defaultFromValue) || "null")}
+        </p>
       ) : null}
       {description !== null ? (
         <p className="strategy-form__description">{description}</p>
       ) : null}
-      {disabled ? null : null}
     </div>
   );
 };
 
 type ControlProps = {
   id: string;
+  labelId: string;
   field: FormField;
   catalogs: FormCatalogs;
+  /** 마지막 확정이 실패했으면 같은 draft를 다시 확정할 수 있다. */
+  canRetry: boolean;
+  /** 미작성 필드의 placeholder 값(runtime schema default 또는 `x-default-from` 형제 값). */
+  placeholderValue: unknown;
   onCommit: (value: Scalar) => void;
+  onValid: () => void;
   onInvalid: (reason: "number" | "integer" | "range" | "date") => void;
 };
 
 /** 컨트롤별 커밋 규칙: 텍스트류는 blur/Enter에서 바뀐 값만, 선택류는 변경 즉시. Escape는 입력 취소. */
-const FieldControl = ({
-  id,
-  field,
-  catalogs,
-  onCommit,
-  onInvalid,
-}: ControlProps) => {
+const FieldControl = (props: ControlProps) => {
+  const { id, labelId, field, catalogs, onCommit } = props;
   const { control } = field;
+  if (control.kind === "const")
+    return (
+      <code id={id} aria-labelledby={labelId} className="strategy-form__const">
+        {draftOf(control.value)}
+      </code>
+    );
   if (control.kind === "boolean")
     return (
       <input
@@ -320,15 +381,7 @@ const FieldControl = ({
         : control.kind === "reference"
           ? control.candidates.map((value) => ({ value, label: value }))
           : catalogOptions(control.catalog, catalogs);
-    if (options === null)
-      return (
-        <TextualControl
-          id={id}
-          field={field}
-          onCommit={onCommit}
-          onInvalid={onInvalid}
-        />
-      );
+    if (options === null) return <TextualControl {...props} />;
     const known = options.some((option) => option.value === current);
     return (
       <select
@@ -356,20 +409,13 @@ const FieldControl = ({
   }
   if (control.kind === "graph-link" || control.kind === "list-link")
     return (
-      <span id={id} className="strategy-form__hint">
+      <p id={id} aria-labelledby={labelId} className="strategy-form__hint">
         {control.kind === "graph-link"
           ? t("form.field.graphLink")
           : t("form.field.listLink")}
-      </span>
+      </p>
     );
-  return (
-    <TextualControl
-      id={id}
-      field={field}
-      onCommit={onCommit}
-      onInvalid={onInvalid}
-    />
-  );
+  return <TextualControl {...props} />;
 };
 
 /** 카탈로그 select 항목. 목록이 없는 카탈로그(universe·subgraph)는 null → 텍스트 입력. */
@@ -393,29 +439,42 @@ const catalogOptions = (
 const TextualControl = ({
   id,
   field,
+  canRetry,
+  placeholderValue,
   onCommit,
+  onValid,
   onInvalid,
-}: Omit<ControlProps, "catalogs">) => {
+}: ControlProps) => {
   const committed = draftOf(field.value);
   const [draft, setDraft] = useState(committed);
   // 같은 입력을 Enter와 blur가 연달아 확정해도 트랜잭션은 한 번이다.
-  const [submitted, setSubmitted] = useState<string | null>(null);
+  // 마지막으로 확정한 (draft, committed) 쌍. 같은 committed 값에서 같은 draft를 다시 확정하지 않는다
+  // (Enter 뒤 같은 이벤트 안에서 오는 blur까지 동기적으로 막는다).
+  const submitted = useRef<{ draft: string; committed: string } | null>(null);
   // 트랜잭션이 적용되어 projection 값이 바뀌면 입력을 그 값으로 되돌린다(렌더 중 파생 상태 조정).
   const [seen, setSeen] = useState(committed);
   if (seen !== committed) {
     setSeen(committed);
     setDraft(committed);
-    setSubmitted(null);
   }
   const { control } = field;
   const submit = (): void => {
-    if (draft === committed || draft === submitted) return;
+    // 값을 되돌리거나 다시 확정하면 이전 무효 안내는 사라진다(DEFECT-P402-003).
+    onValid();
+    if (draft === committed) return;
+    if (
+      !canRetry &&
+      submitted.current !== null &&
+      submitted.current.draft === draft &&
+      submitted.current.committed === committed
+    )
+      return;
     const parsed = parseDraft(control, draft);
     if (parsed.status === "invalid") {
       onInvalid(parsed.reason);
       return;
     }
-    setSubmitted(draft);
+    submitted.current = { draft, committed };
     onCommit(parsed.value);
   };
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
@@ -437,7 +496,9 @@ const TextualControl = ({
       min={numeric && control.min?.inclusive ? control.min.value : undefined}
       max={numeric && control.max?.inclusive ? control.max.value : undefined}
       value={draft}
-      placeholder={field.written ? undefined : draftOf(field.defaultValue)}
+      placeholder={
+        placeholderValue === undefined ? undefined : draftOf(placeholderValue)
+      }
       onChange={(event) => setDraft(event.target.value)}
       onBlur={submit}
       onKeyDown={onKeyDown}

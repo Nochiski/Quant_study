@@ -100,6 +100,7 @@ describe("StrategyFormPanel controls", () => {
       { kind: "replace-scalar", pointer: "/risk/max_name_weight", value: 0.1 },
       "max_name_weight",
       "form",
+      { focusEditor: false },
     );
 
     const fee = section("execution").getByRole("spinbutton", named("fee_bps"));
@@ -109,6 +110,7 @@ describe("StrategyFormPanel controls", () => {
       { kind: "replace-scalar", pointer: "/execution/fee_bps", value: 20 },
       "fee_bps",
       "form",
+      { focusEditor: false },
     );
 
     const title = section("기본 정보").getByRole("textbox", named("title"));
@@ -150,6 +152,7 @@ describe("StrategyFormPanel controls", () => {
       },
       "side",
       "form",
+      { focusEditor: false },
     );
     await user.click(
       section("risk").getByRole("checkbox", named("sector_neutral")),
@@ -163,6 +166,7 @@ describe("StrategyFormPanel controls", () => {
       },
       "sector_neutral",
       "form",
+      { focusEditor: false },
     );
     // signal 섹션은 문서에 없다 → 루트에 섹션째 삽입(트랜잭션 한 번).
     const threshold = section("signal").getByRole(
@@ -179,6 +183,7 @@ describe("StrategyFormPanel controls", () => {
       },
       "score_threshold",
       "form",
+      { focusEditor: false },
     );
     await user.click(
       section("risk").getByRole("button", {
@@ -189,6 +194,7 @@ describe("StrategyFormPanel controls", () => {
       { kind: "remove", pointer: "/risk/max_name_weight" },
       "max_name_weight",
       "form",
+      { focusEditor: false },
     );
     // 미작성 nullable 필드는 이미 null → "설정 안 함" 버튼이 없다.
     expect(
@@ -263,6 +269,116 @@ describe("StrategyFormPanel controls", () => {
       ).length,
     ).toBeGreaterThan(0);
     expect(section("data").getByText("기본값 KRX")).toBeInTheDocument();
+  });
+});
+
+describe("StrategyFormPanel review follow-up (P4-02 1차)", () => {
+  it("renders link and const rows without editing controls or reset buttons (DEFECT-P402-001/004)", () => {
+    const source = `${MINIMAL}eligibility:\n  rules:\n    - field_id: liquidity.adv\n      operator: gte\n      value: 1\n`;
+    renderPanel(source, stubTransactions());
+    const eligibility = section("eligibility");
+    expect(
+      eligibility.getByText("목록 편집은 다음 단계에서 제공됩니다"),
+    ).toBeInTheDocument();
+    expect(eligibility.queryByRole("button", { name: /rules ·/ })).toBeNull();
+    expect(eligibility.queryByRole("textbox")).toBeNull();
+    const root = section("기본 정보");
+    expect(root.getByText("1.1")).toHaveAttribute("aria-labelledby");
+    expect(root.queryByRole("textbox", named("schema_version"))).toBeNull();
+    expect(root.queryByRole("button", { name: /schema_version ·/ })).toBeNull();
+  });
+
+  it("lets a failed confirmation be retried with the same value and clears stale invalid hints (DEFECT-P402-002/003)", async () => {
+    const user = userEvent.setup();
+    const state = parsedState(MINIMAL);
+    const projection = projectForm(SCHEMA, state.parse, []);
+    const Harness = ({ failed }: { failed: boolean }) => (
+      <StrategyFormPanel
+        projection={projection}
+        transactions={stubTransactions({
+          apply,
+          feedback: failed
+            ? {
+                status: "error",
+                owner: "form",
+                label: "max_name_weight",
+                reason: "not-found",
+              }
+            : { status: "idle" },
+        })}
+        catalogs={NO_CATALOGS}
+      />
+    );
+    const apply = vi.fn();
+    const { rerender } = render(<Harness failed={false} />);
+    const weight = section("risk").getByRole(
+      "spinbutton",
+      named("max_name_weight"),
+    );
+    await user.clear(weight);
+    await user.type(weight, "0.1{Enter}");
+    expect(apply).toHaveBeenCalledTimes(1);
+    // 실패 feedback이 오면 같은 값으로 다시 확정할 수 있다.
+    rerender(<Harness failed />);
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "문서에서 위치를 찾지 못했습니다",
+    );
+    await user.type(weight, "{Enter}");
+    expect(apply).toHaveBeenCalledTimes(2);
+
+    // 무효 입력 안내는 값을 되돌리면 사라진다.
+    const count = section("portfolio").getByRole(
+      "spinbutton",
+      named("selection_count"),
+    );
+    await user.clear(count);
+    await user.type(count, "2.5");
+    await user.tab();
+    expect(
+      screen
+        .getAllByRole("alert")
+        .some((el) => el.textContent?.includes("정수를 입력하세요")),
+    ).toBe(true);
+    await user.clear(count);
+    await user.type(count, "20");
+    await user.tab();
+    expect(screen.queryByText("정수를 입력하세요")).toBeNull();
+  });
+
+  it("shows the x-default-from sibling value as the placeholder of an omitted field", () => {
+    const source = MINIMAL.replace('    label: "모멘텀"\n', "");
+    const state = parsedState(source);
+    const projection = projectForm(SCHEMA, state.parse, []);
+    const factors = projection.sections.find((s) => s.key === "factors");
+    if (factors === undefined || factors.kind !== "list")
+      throw new Error("factors");
+    const label = factors.items[0]!.fields.find((f) => f.key === "label")!;
+    expect(label).toMatchObject({ written: false, defaultFrom: "factor_id" });
+    // 패널의 placeholder 규칙은 FormFieldRow 단위이므로 object 섹션과 같은 경로를 쓰는 항목 필드는 P4-03이 그린다.
+  });
+
+  it("translates every planner failure into a recovery message (DEFECT-P402-008)", () => {
+    for (const reason of [
+      "not-scalar",
+      "not-mapping",
+      "not-sequence",
+    ] as const) {
+      cleanup();
+      renderPanel(
+        MINIMAL,
+        stubTransactions({
+          feedback: {
+            status: "error",
+            owner: "form",
+            label: "fee_bps",
+            reason,
+          },
+        }),
+      );
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "source를 확인하세요",
+      );
+    }
   });
 });
 

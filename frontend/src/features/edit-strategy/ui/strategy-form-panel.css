@@ -87,7 +87,7 @@
   padding: var(--space-1) var(--space-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-small);
-  background: var(--surface);
+  background: var(--surface-panel);
   color: var(--text);
   font: inherit;
 }
@@ -111,4 +111,11 @@
 .strategy-form__section:disabled .strategy-form__control input,
 .strategy-form__section:disabled .strategy-form__control select {
   opacity: 0.6;
+}
+
+.strategy-form__const {
+  padding: var(--space-1) var(--space-2);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-small);
+  color: var(--text-muted);
 }

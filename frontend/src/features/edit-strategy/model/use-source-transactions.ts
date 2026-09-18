@@ -39,11 +39,27 @@ export type SourcePlanner = (editor: {
   | { status: "ok"; edit: PlannedEdit }
   | { status: "error"; reason: TransactionFailure };
 
+/** 적용 뒤 편집기 처리. Form처럼 다른 컨트롤이 포커스를 가진 소비자는 `focusEditor: false`로 둔다. */
+export type ApplyOptions = {
+  /** 적용 뒤 편집기에 포커스를 준다(기본 true; 스니펫). 포커스 이동이 다른 컨트롤의 blur를 부르면 안 될 때 false. */
+  focusEditor?: boolean;
+};
+
 export type SourceTransactions = {
   /** 원시 연산 하나를 편집기 현재 텍스트에 계획·적용한다. 실패하면 텍스트는 그대로고 feedback만 바뀐다. */
-  apply: (op: SourceOperation, label: string, owner?: string) => void;
+  apply: (
+    op: SourceOperation,
+    label: string,
+    owner?: string,
+    options?: ApplyOptions,
+  ) => void;
   /** 커서 문맥이 필요한 편집(스니펫)처럼 연산 하나로 표현되지 않는 계획을 같은 경로로 적용한다. */
-  run: (planner: SourcePlanner, label: string, owner?: string) => void;
+  run: (
+    planner: SourcePlanner,
+    label: string,
+    owner?: string,
+    options?: ApplyOptions,
+  ) => void;
   /** 마지막 결과. `owner`로 어느 소비자(form·snippet·graph)의 것인지 구분한다(Phase 3 감사 R2). */
   feedback: TransactionFeedback;
   onEditorReady: (editor: CodeEditorHandle | null) => void;
@@ -116,7 +132,12 @@ export const useSourceTransactions = (
   );
 
   const run = useCallback(
-    (planner: SourcePlanner, label: string, owner = "default"): void => {
+    (
+      planner: SourcePlanner,
+      label: string,
+      owner = "default",
+      options: ApplyOptions = {},
+    ): void => {
       if (state.format !== "yaml") {
         setFeedback({ status: "error", owner, label, reason: "yaml-only" });
         return;
@@ -150,21 +171,31 @@ export const useSourceTransactions = (
       });
       if (result.status === "error") {
         setFeedback({ status: "error", owner, label, reason: result.reason });
-        current.focus();
+        if (options.focusEditor !== false) current.focus();
         return;
       }
       const { edit } = result;
       current.replaceRange(edit.from, edit.to, edit.insert, edit.selection);
       current.scrollTo(edit.selection.from);
-      current.focus();
+      if (options.focusEditor !== false) current.focus();
       setFeedback({ status: "applied", owner, label });
     },
     [editorActive, setFeedback, state.composing, state.format],
   );
 
   const apply = useCallback(
-    (op: SourceOperation, label: string, owner = "default"): void =>
-      run(({ text }) => planSourceOperation(text, "yaml", op), label, owner),
+    (
+      op: SourceOperation,
+      label: string,
+      owner = "default",
+      options: ApplyOptions = {},
+    ): void =>
+      run(
+        ({ text }) => planSourceOperation(text, "yaml", op),
+        label,
+        owner,
+        options,
+      ),
     [run],
   );
 

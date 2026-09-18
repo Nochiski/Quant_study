@@ -806,6 +806,7 @@ const ko = {
   "form.field.listLink": "목록 편집은 다음 단계에서 제공됩니다",
   "form.field.inapplicable": "현재 모드에서는 읽히지 않는 필드입니다",
   "form.field.defaultHint": "기본값 {value}",
+  "form.field.defaultFromHint": "생략하면 {key} 값({value})을 씁니다",
   "form.badge.error": "오류 {count}",
   "form.badge.warning": "경고 {count}",
   "form.invalid.number": "숫자를 입력하세요",
@@ -818,6 +819,12 @@ const ko = {
     "{label} · 결과 문서가 YAML 1.2로 읽히지 않아 변경하지 않았습니다",
   "form.feedback.not-found": "{label} · 문서에서 위치를 찾지 못했습니다",
   "form.feedback.exists": "{label} · 이미 있는 키입니다",
+  "form.feedback.not-scalar":
+    "{label} · 문서의 이 위치가 스칼라가 아니라 바꾸지 않았습니다(source를 확인하세요)",
+  "form.feedback.not-mapping":
+    "{label} · 문서의 이 위치가 mapping이 아니라 넣지 않았습니다(source를 확인하세요)",
+  "form.feedback.not-sequence":
+    "{label} · 문서의 이 위치가 시퀀스가 아니라 넣지 않았습니다(source를 확인하세요)",
   "form.feedback.composing": "{label} · IME 입력 중에는 변경하지 않습니다",
   "form.feedback.editor-unavailable": "{label} · 편집기가 준비되지 않았습니다",
   "form.feedback.editor-inactive": "{label} · 편집기가 비활성입니다",
@@ -1658,6 +1665,7 @@ export const messages = {
     "form.field.listLink": "List editing arrives in the next step",
     "form.field.inapplicable": "Not read in the current mode",
     "form.field.defaultHint": "Default {value}",
+    "form.field.defaultFromHint": "Omitted → uses {key} ({value})",
     "form.badge.error": "{count} errors",
     "form.badge.warning": "{count} warnings",
     "form.invalid.number": "Enter a number",
@@ -1670,6 +1678,12 @@ export const messages = {
       "{label} · the result would not parse as YAML 1.2, nothing changed",
     "form.feedback.not-found": "{label} · position not found in the document",
     "form.feedback.exists": "{label} · the key already exists",
+    "form.feedback.not-scalar":
+      "{label} · this position in the document is not a scalar, nothing changed (check the source)",
+    "form.feedback.not-mapping":
+      "{label} · this position in the document is not a mapping, nothing inserted (check the source)",
+    "form.feedback.not-sequence":
+      "{label} · this position in the document is not a sequence, nothing inserted (check the source)",
     "form.feedback.composing": "{label} · not applied during IME composition",
     "form.feedback.editor-unavailable": "{label} · the editor is not ready",
     "form.feedback.editor-inactive": "{label} · the editor is inactive",

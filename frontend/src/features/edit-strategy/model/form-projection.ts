@@ -410,23 +410,19 @@ const objectSectionAt = (
   const fields = projected.filter((field) => field.control.kind !== "list-link");
   const lists = projected
     .filter((field) => field.control.kind === "list-link")
-    .flatMap((field) => {
-      const array = schemaAt(root, field.pointer, tree);
-      return array === null
-        ? []
-        : [
-            projectListSection(
-              root,
-              tree,
-              diagnostics,
-              field.key,
-              field.pointer,
-              array.node,
-              pointer,
-              written,
-            ),
-          ];
-    });
+    .map((field) =>
+      projectListSection(
+        root,
+        tree,
+        diagnostics,
+        field.key,
+        field.pointer,
+        // `projectField`가 같은 pointer를 이미 해소해 list-link를 냈으므로 여기서 null일 수 없다(P4-05 리뷰 P2-4).
+        schemaAt(root, field.pointer, tree)!.node,
+        pointer,
+        written,
+      ),
+    );
   return {
     kind: "object",
     pointer,

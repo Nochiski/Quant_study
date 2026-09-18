@@ -135,6 +135,47 @@ describe("list transactions (P4-03)", () => {
     });
   });
 
+  it("finds union kinds when the discriminator const sits behind a $ref (P4-05 review P2-1)", () => {
+    const schema: JsonSchema = {
+      type: "object",
+      properties: {
+        entries: {
+          type: "array",
+          items: {
+            oneOf: [
+              {
+                type: "object",
+                properties: {
+                  kind: { $ref: "#/$defs/one" },
+                  name: { type: "string" },
+                },
+                required: ["kind", "name"],
+              },
+              {
+                type: "object",
+                properties: { kind: { const: "two" }, size: { type: "integer" } },
+                required: ["kind", "size"],
+              },
+            ],
+          },
+        },
+      },
+      $defs: { one: { const: "one" } },
+    };
+    const entries = projectForm(
+      schema,
+      parseSource("entries: []\n", "yaml"),
+      [],
+    ).sections.find((s) => s.key === "entries");
+    if (entries === undefined || entries.kind !== "list")
+      throw new Error("entries");
+    expect(itemKinds(schema, entries)).toEqual(["one", "two"]);
+    expect(addItemOperation(schema, entries, "one")).toMatchObject({
+      kind: "insert-item",
+      value: { kind: "one", name: "" },
+    });
+  });
+
   it("finds references by `<namespace>_id` outside the defining item", () => {
     const tree = parseSource(
       `${VERBOSE}`.replace(

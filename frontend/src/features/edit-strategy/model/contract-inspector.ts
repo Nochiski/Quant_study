@@ -18,12 +18,18 @@ import {
   valueAtPointer,
 } from "../../../shared/lib/yaml12";
 import {
-  isApplicableWhen,
   projectApplicability,
   type DefaultResolver,
   type FieldApplicability,
 } from "./field-applicability";
-import { discriminatorAt, schemaAt, type JsonSchema } from "./schema-navigator";
+import {
+  discriminatorAt,
+  schemaAt,
+  schemaFacts,
+  type Bound,
+  type JsonSchema,
+  type SchemaFacts,
+} from "./schema-navigator";
 
 export type ContractResourceState = "loading" | "ready" | "error";
 
@@ -41,10 +47,7 @@ export type ContractInspectorSource = {
   };
 };
 
-export type ContractBound = {
-  value: number;
-  inclusive: boolean;
-};
+export type ContractBound = Bound;
 
 export type ContractValue = {
   present: boolean;
@@ -165,9 +168,6 @@ export type ContractInspectorProjection =
       };
     };
 
-const own = (value: object, key: string): boolean =>
-  Object.prototype.hasOwnProperty.call(value, key);
-
 /** One compatibility decision shared by every schema + contract consumer. */
 export const isSchemaContractCompatible = (
   schema: StrategyDocumentSchema | null | undefined,
@@ -217,41 +217,22 @@ const displayValue = (
   return displayUnit === "%" ? `${formatted}%` : `${formatted} ${displayUnit}`;
 };
 
-const stringList = (value: unknown): string[] =>
-  Array.isArray(value) ? value.map(String) : [];
-
-const schemaType = (node: JsonSchema): string => {
-  if (Array.isArray(node.type)) return node.type.map(String).join(" | ");
-  if (typeof node.type === "string") return node.type;
-  if (Array.isArray(node.oneOf)) return "object";
-  return "object";
-};
-
+/** typed contract 행이 우선하고, 같은 사실의 runtime schema 값은 그 다음이다. */
 const lowerBound = (
   row: FieldContract | undefined,
-  node: JsonSchema,
-): ContractBound | null => {
-  if (typeof row?.minimum === "number")
-    return { value: row.minimum, inclusive: !row.exclusive_minimum };
-  if (typeof node.minimum === "number")
-    return { value: node.minimum, inclusive: true };
-  if (typeof node.exclusiveMinimum === "number")
-    return { value: node.exclusiveMinimum, inclusive: false };
-  return null;
-};
+  facts: SchemaFacts,
+): ContractBound | null =>
+  typeof row?.minimum === "number"
+    ? { value: row.minimum, inclusive: !row.exclusive_minimum }
+    : facts.minimum;
 
 const upperBound = (
   row: FieldContract | undefined,
-  node: JsonSchema,
-): ContractBound | null => {
-  if (typeof row?.maximum === "number")
-    return { value: row.maximum, inclusive: !row.exclusive_maximum };
-  if (typeof node.maximum === "number")
-    return { value: node.maximum, inclusive: true };
-  if (typeof node.exclusiveMaximum === "number")
-    return { value: node.exclusiveMaximum, inclusive: false };
-  return null;
-};
+  facts: SchemaFacts,
+): ContractBound | null =>
+  typeof row?.maximum === "number"
+    ? { value: row.maximum, inclusive: !row.exclusive_maximum }
+    : facts.maximum;
 
 const nearestDiscriminator = (
   schema: JsonSchema,
@@ -294,67 +275,56 @@ export const projectContractField = (
   const row = branchDependent
     ? undefined
     : contractFor(contract, pointer, branch);
-  const type = branchDependent ? null : (row?.type ?? schemaType(node));
-  const unit = branchDependent
-    ? null
-    : (row?.unit ??
-      (typeof node["x-unit"] === "string" ? node["x-unit"] : null));
+  const facts = schemaFacts(node);
+  const type = branchDependent ? null : (row?.type ?? facts.type);
+  const unit = branchDependent ? null : (row?.unit ?? facts.unit);
   const displayUnit = branchDependent
     ? null
-    : (row?.display_unit ??
-      (typeof node["x-display-unit"] === "string"
-        ? node["x-display-unit"]
-        : null));
+    : (row?.display_unit ?? facts.displayUnit);
   const hasDefault =
-    !branchDependent && (row?.has_default === true || own(node, "default"));
+    !branchDependent && (row?.has_default === true || facts.hasDefault);
   const defaultValue = branchDependent
     ? undefined
     : row?.has_default === true
       ? row.default
-      : node.default;
+      : facts.defaultValue;
   // The backend serializes an absent optional example as null. Keep null/undefined absent;
   // false, zero and an empty string remain valid examples.
   const contractExample = branchDependent ? undefined : row?.example;
-  const schemaExample =
-    !branchDependent && Array.isArray(node.examples)
-      ? node.examples.find(
-          (candidate) => candidate !== null && candidate !== undefined,
-        )
-      : undefined;
-  const hasExample = contractExample != null || schemaExample !== undefined;
-  const example = contractExample != null ? contractExample : schemaExample;
+  const hasExample =
+    contractExample != null || (!branchDependent && facts.hasExample);
+  const example = contractExample != null ? contractExample : facts.example;
   // When no valid union branch is selected, the first branch's `kind` const is only a
   // traversal artifact. The discriminator variants are the actual contract at this point.
   const enumValues = branchDependent
     ? []
     : unresolvedDiscriminatorProperty
       ? discriminator.variants
-      : (row?.enum ?? stringList(node.enum));
+      : (row?.enum ?? facts.enumValues);
   const hasConst =
     !branchDependent &&
     !unresolvedDiscriminatorProperty &&
-    (row?.const != null || own(node, "const"));
+    (row?.const != null || facts.hasConst);
   const constValue =
     branchDependent || unresolvedDiscriminatorProperty
       ? undefined
-      : (row?.const ?? node.const);
+      : (row?.const ?? facts.constValue);
   // 조건 필드가 문서에 없으면 backend가 발행한 기본값(contract 행 → schema node)으로 판정한다.
   const resolveDefault: DefaultResolver = (conditionPointer) => {
     const conditionRow = contractFor(contract, conditionPointer, null);
     if (conditionRow?.has_default === true)
       return { has: true, value: conditionRow.default };
     const conditionNode = schemaAt(schema, conditionPointer, tree)?.node;
-    return conditionNode !== undefined && own(conditionNode, "default")
-      ? { has: true, value: conditionNode.default }
+    const conditionFacts =
+      conditionNode === undefined ? null : schemaFacts(conditionNode);
+    return conditionFacts?.hasDefault
+      ? { has: true, value: conditionFacts.defaultValue }
       : { has: false, value: undefined };
   };
   // typed contract 행을 우선하고, 같은 모양의 runtime schema 마커는 경계 검사를 거쳐 받는다.
   const applicableWhen = branchDependent
     ? null
-    : (row?.applicable_when ??
-      (isApplicableWhen(node["x-applicable-when"])
-        ? node["x-applicable-when"]
-        : null));
+    : (row?.applicable_when ?? facts.applicableWhen);
   const shape =
     pointer === ""
       ? "root"
@@ -379,35 +349,21 @@ export const projectContractField = (
     hasConst,
     defaultValue,
     hasDefault,
-    minimum: branchDependent ? null : lowerBound(row, node),
-    maximum: branchDependent ? null : upperBound(row, node),
-    format: branchDependent
-      ? null
-      : (row?.format ?? (typeof node.format === "string" ? node.format : null)),
+    minimum: branchDependent ? null : lowerBound(row, facts),
+    maximum: branchDependent ? null : upperBound(row, facts),
+    format: branchDependent ? null : (row?.format ?? facts.format),
     unit,
     displayUnit,
     descriptionKey: branchDependent
       ? null
-      : (row?.description_key ??
-        (typeof node["x-description-key"] === "string"
-          ? node["x-description-key"]
-          : null)),
+      : (row?.description_key ?? facts.descriptionKey),
     example,
     hasExample,
     appliedStage: branchDependent
       ? null
-      : (row?.applied_stage ??
-        (typeof node["x-applied-stage"] === "string"
-          ? node["x-applied-stage"]
-          : null)),
-    catalog: branchDependent
-      ? null
-      : (row?.catalog ??
-        (typeof node["x-catalog"] === "string" ? node["x-catalog"] : null)),
-    reference: branchDependent
-      ? null
-      : (row?.reference ??
-        (typeof node["x-reference"] === "string" ? node["x-reference"] : null)),
+      : (row?.applied_stage ?? facts.appliedStage),
+    catalog: branchDependent ? null : (row?.catalog ?? facts.catalog),
+    reference: branchDependent ? null : (row?.reference ?? facts.reference),
     value: {
       present: selectedValue.present,
       raw: selectedValue.value,

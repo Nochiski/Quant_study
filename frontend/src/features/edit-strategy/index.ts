@@ -130,6 +130,14 @@ export {
   type SnippetInsertion,
 } from "./model/use-snippet-insertion";
 export {
+  projectForm,
+  type FormControl,
+  type FormField,
+  type FormListItem,
+  type FormProjection,
+  type FormSection,
+} from "./model/form-projection";
+export {
   useSourceTransactions,
   type SourcePlanner,
   type SourceTransactions,

@@ -42,13 +42,25 @@ from backtest_engine.types.tape import TapeFrame
 
 
 class RecordKind(Enum):
-    """`label`은 trace 직렬화 이름, `code`는 Rust `records.rs`의 `KIND_*`와 같은 wire 코드다.
+    """`value`는 trace 직렬화 이름, `code`는 Rust `records.rs`의 `KIND_*`와 같은 wire 코드다.
 
     코드는 선언 순서가 아니라 리터럴이다 — 멤버를 추가해도 기존 코드가 밀리지 않는다.
     순서를 코드로 쓰면 enum 중간에 멤버를 끼워 넣는 순간 Rust가 보낸 코드가 다른 kind로
     해석돼 trace가 조용히 망가진다. Rust 상수와의 일치는 `tests/test_core_parity.py`가
     `backtest_core.RECORD_KIND_CODES`로 고정한다.
+
+    `__new__`에서 `_value_`를 이름 문자열로 고정하므로 `.value`는 여전히 `"market"`이다.
+    `(label, code)` 쌍을 그대로 `value`로 두면 `_normalized` 같은 generic enum 처리가 튜플을
+    trace에 흘려 wire 포맷이 조용히 바뀐다.
     """
+
+    code: int
+
+    def __new__(cls, label: str, code: int) -> RecordKind:
+        member = object.__new__(cls)
+        member._value_ = label
+        member.code = code
+        return member
 
     MARKET = ("market", 0)
     DECISION = ("decision", 1)
@@ -59,10 +71,6 @@ class RecordKind(Enum):
     CORPORATE_ACTION = ("corporate_action", 6)  # 사건 도착 (적용 여부와 무관)
     CORPORATE_ACTION_APPLIED = ("corporate_action_applied", 7)  # 포지션에 실제 적용된 기록
     COST = ("cost", 8)  # 차입·이자 등 Fill 없는 현금 차감
-
-    def __init__(self, label: str, code: int) -> None:
-        self.label = label
-        self.code = code
 
 
 _RECORD_KIND_BY_CODE: dict[int, RecordKind] = {kind.code: kind for kind in RecordKind}
@@ -120,12 +128,9 @@ def _normalized(value: Any) -> Any:
     if isinstance(value, datetime):
         return {"$datetime": value.isoformat(timespec="microseconds")}
     if isinstance(value, Enum):
-        # RecordKind는 (label, code) 쌍을 value로 갖는다 — 그대로 내보내면 trace 표기가
-        # 튜플로 바뀌므로 이름은 label로 고정한다.
-        traced = value.label if isinstance(value, RecordKind) else _normalized(value.value)
         return {
             "$enum": f"{type(value).__module__}.{type(value).__qualname__}",
-            "value": traced,
+            "value": _normalized(value.value),
         }
     if is_dataclass(value) and not isinstance(value, type):
         return {
@@ -286,7 +291,7 @@ class PersistentEventStore(EventStore):
     def append(self, ts: datetime, kind: RecordKind, payload: RecordPayload) -> None:
         raise RuntimeError(
             "persistent event store is append-only from the Rust runtime — "
-            f"refusing Python-side append kind={kind.label} ts={ts}"
+            f"refusing Python-side append kind={kind.value} ts={ts}"
         )
 
     def stage_decision(self, decision: StrategyDecision) -> None:
@@ -559,7 +564,7 @@ class PersistentEventStore(EventStore):
     def compact_trace(self) -> tuple[tuple[int, int, str], ...]:
         """디버그용 원시 Rust 레코드 인덱스 `(seq, session_index, kind)`."""
         return tuple(
-            (seq, session_index, _RECORD_KIND_BY_CODE[kind_code].label)
+            (seq, session_index, _RECORD_KIND_BY_CODE[kind_code].value)
             for seq, session_index, kind_code in self._batch()
         )
 

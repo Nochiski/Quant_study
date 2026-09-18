@@ -19,6 +19,8 @@ pub(crate) struct PersistentFeed {
     current_session: Option<usize>,
     /// key → instrument id. 세션 루프가 주문·포지션 key를 wire의 정수 id로 바꿀 때 쓴다.
     key_index: HashMap<String, u32>,
+    /// key → symbol. 라우팅이 결정마다 쓰는 심볼 폴백 표를 적재 시 한 번만 만든다.
+    symbol_by_key: HashMap<String, String>,
 }
 
 impl PersistentFeed {
@@ -76,11 +78,26 @@ impl PersistentFeed {
                 keys.len()
             )));
         }
-        let key_index = keys
+        let key_index: HashMap<String, u32> = keys
             .iter()
             .enumerate()
             .map(|(index, key)| (key.clone(), index as u32))
             .collect();
+        // 같은 key가 서로 다른 symbol로 두 번 등록되면 등록부 표(`symbol_by_key`)와 그날 bar가
+        // 실어 나르는 symbol이 갈라진다. 라우팅은 이제 등록부 표만 보므로 여기서 막는다.
+        let mut symbol_by_key: HashMap<String, String> = HashMap::with_capacity(keys.len());
+        for (key, symbol) in keys.iter().zip(symbols.iter()) {
+            if let Some(known) = symbol_by_key.get(key) {
+                if known != symbol {
+                    return Err(PyValueError::new_err(format!(
+                        "feed registry maps one key to two symbols — key={key} symbols=({known}, {symbol}) registry={}",
+                        keys.len()
+                    )));
+                }
+                continue;
+            }
+            symbol_by_key.insert(key.clone(), symbol.clone());
+        }
         Ok(Self {
             keys,
             symbols,
@@ -94,6 +111,7 @@ impl PersistentFeed {
             volumes,
             current_session: None,
             key_index,
+            symbol_by_key,
         })
     }
 
@@ -180,12 +198,11 @@ impl PersistentFeed {
 
     /// 피드에 등록된 전 종목의 key → symbol. 그날 바가 없는 보유 종목(정지·상폐)을 청산하는
     /// 주문도 심볼을 찾을 수 있어야 한다 — Python 라우터는 포트폴리오 스냅샷에서 같은 정보를 본다.
-    pub(crate) fn registry_symbols(&self) -> HashMap<String, String> {
-        self.keys
-            .iter()
-            .cloned()
-            .zip(self.symbols.iter().cloned())
-            .collect()
+    ///
+    /// 그날 bar가 싣는 symbol도 같은 `symbols` 배열을 같은 instrument id로 읽으므로 이 표와
+    /// 항상 같다 (key 중복 충돌은 `new`가 거른다). 라우팅은 병합 없이 이 표만 보면 된다.
+    pub(crate) fn registry_symbols(&self) -> &HashMap<String, String> {
+        &self.symbol_by_key
     }
 
     pub(crate) fn current_marks(&self) -> PyResult<Vec<(String, f64)>> {
@@ -359,6 +376,27 @@ mod tests {
         assert_eq!(feed.open_at(1, "B"), Some(21.0));
         assert_eq!(feed.symbol_of(0), "AAA");
         assert_eq!(feed.session_len(), 2);
+    }
+
+    #[test]
+    fn registry_rejects_one_key_with_two_symbols() {
+        let error = PersistentFeed::new(
+            vec!["A".into(), "A".into()],
+            vec!["AAA".into(), "BBB".into()],
+            vec!["D1".into()],
+            vec![0, 1],
+            vec![0],
+            vec![10.0],
+            vec![11.0],
+            vec![9.0],
+            vec![10.5],
+            vec![100],
+        );
+        let error = match error {
+            Ok(_) => panic!("duplicate key with two symbols must be rejected"),
+            Err(error) => error.to_string(),
+        };
+        assert!(error.contains("one key to two symbols"), "{error}");
     }
 
     #[test]

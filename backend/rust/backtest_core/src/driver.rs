@@ -642,12 +642,6 @@ impl PersistentEngine {
         Option<RouteError>,
     )> {
         let bars = self.feed_ref()?.current_closes()?;
-        // 심볼 폴백은 그날 바뿐 아니라 피드 등록부 전체에서 찾는다 — 바가 끊긴 보유 종목(정지·상폐)의
-        // REPLACE 청산 주문이 "instrument metadata is missing" 으로 run 을 죽이지 않도록.
-        let mut fallback_symbols: HashMap<String, String> = self.feed_ref()?.registry_symbols();
-        for (key, (symbol, _)) in bars.iter() {
-            fallback_symbols.insert(key.clone(), symbol.clone());
-        }
         let (orders, updates, groups, error) = persistent_router::route_basic_decision(
             &self.portfolio,
             &mut self.orders,
@@ -662,6 +656,10 @@ impl PersistentEngine {
         if error.is_some() {
             return Ok((Vec::new(), updates, error));
         }
+        // 심볼 폴백은 그날 바가 아니라 피드 등록부 전체에서 찾는다 — 바가 끊긴 보유 종목(정지·상폐)의
+        // REPLACE 청산 주문이 "instrument metadata is missing" 으로 run 을 죽이지 않도록.
+        // 등록부 표는 적재 시 한 번 만들어 두므로 결정마다 재조립하지 않는다.
+        let fallback_symbols = self.feed_ref()?.registry_symbols();
         let staged_orders = orders
             .iter()
             .map(|order| {

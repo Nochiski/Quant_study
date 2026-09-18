@@ -44,7 +44,9 @@ export type FormControl =
       candidates: readonly string[];
     }
   /** 팩터 항목의 `graph`: Form은 표시만 하고 편집은 Graph 화면에 넘긴다(spec D6). */
-  | { kind: "graph-link" };
+  | { kind: "graph-link" }
+  /** object 섹션 안의 배열 필드(`eligibility.rules`): 목록 편집(P4-03)이 맡고 스칼라 컨트롤을 두지 않는다. */
+  | { kind: "list-link" };
 
 export type FormField = {
   pointer: string;
@@ -178,7 +180,9 @@ const projectField = (
     key,
     control: isGraphLink
       ? { kind: "graph-link" }
-      : controlFor(root, resolved, pointer, tree),
+      : facts.type === "array"
+        ? { kind: "list-link" }
+        : controlFor(root, resolved, pointer, tree),
     nullable: resolved.nullable,
     required,
     written: found.present,

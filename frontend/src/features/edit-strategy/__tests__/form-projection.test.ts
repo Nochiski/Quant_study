@@ -154,8 +154,8 @@ describe("projectForm", () => {
       written: true,
       value: 0.6,
     });
-    const rules = section(sections, "eligibility");
-    expect(rules.kind).toBe("object");
+    const eligibility = objectFields(sections, "eligibility");
+    expect(field(eligibility, "rules").control).toEqual({ kind: "list-link" });
     expect(section(sections, "parameters")).toMatchObject({
       kind: "list",
       items: [],

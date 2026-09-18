@@ -31,7 +31,7 @@ _UNARY_ALIASES: Mapping[str, tuple[str, str]] = {
     "winsorize": ("cross_sectional", "winsorize"),
     "neutralize": ("cross_sectional", "demean"),
 }
-_REMOVED_FIELDS: tuple[tuple[str, str], ...] = (
+REMOVED_FIELDS: tuple[tuple[str, str], ...] = (
     ("signal", "method"),
     ("signal", "entry_percentile"),
     ("execution", "order_style"),
@@ -40,7 +40,7 @@ _REMOVED_FIELDS: tuple[tuple[str, str], ...] = (
 UpgradeStep = Callable[[MutableMapping[str, object]], None]
 
 
-class DocumentNotUpgradeableError(ValueError):
+class NotALegacyDocumentError(ValueError):
     """The document is not a schema 1.0 document, so no upgrade rule applies."""
 
 
@@ -55,7 +55,7 @@ def _step_flatten_factors(document: MutableMapping[str, object]) -> None:
 
 
 def _step_remove_dead_fields(document: MutableMapping[str, object]) -> None:
-    for section, key in _REMOVED_FIELDS:
+    for section, key in REMOVED_FIELDS:
         block = document.get(section)
         if isinstance(block, MutableMapping) and key in block:
             del block[key]
@@ -100,7 +100,7 @@ def is_legacy_document(document: Mapping[str, object]) -> bool:
 def apply_upgrade_steps(document: MutableMapping[str, object]) -> None:
     """Mutate a 1.0 document (plain or ruamel containers) into 1.1 in place."""
     if not is_legacy_document(document):
-        raise DocumentNotUpgradeableError(
+        raise NotALegacyDocumentError(
             "only schema 1.0 documents can be upgraded — "
             f"schema_version={document.get('schema_version')!r} "
             f"expected={LEGACY_SCHEMA_VERSION!r}"

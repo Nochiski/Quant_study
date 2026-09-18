@@ -17,12 +17,17 @@ excluded from `spec_hash`, and the save flow (P1-06/P1-07) assigns the real stra
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable
+import logging
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from functools import cached_property
 from typing import Any
 
-from strategy_workbench.domain.strategy.facade.document import hydrate_strategy_document
+from strategy_workbench.domain.strategy.facade.document import (
+    hydrate_strategy_document,
+    is_legacy_document,
+    upgrade_document_1_0,
+)
 from strategy_workbench.domain.strategy.facade.schema import (
     FieldContract,
     strategy_document_schema,
@@ -51,6 +56,8 @@ from .ports.outgoing.document_codec import (
     SourceRange,
 )
 
+logger = logging.getLogger(__name__)
+
 DRAFT_IDENTITY = StrategyIdentity(strategy_id="draft", revision=0)
 
 
@@ -58,6 +65,46 @@ DRAFT_IDENTITY = StrategyIdentity(strategy_id="draft", revision=0)
 class CompileRequest:
     source: str
     format: SourceFormat
+
+
+@dataclass(frozen=True)
+class UpgradedDocument:
+    """A 1.0 source rewritten as 1.1 text plus what that text compiles to (spec D3)."""
+
+    format: SourceFormat
+    source: str
+    source_hash: str
+    compiled: CompiledDocument
+
+
+class DocumentNotUpgradeableError(ValueError):
+    """The source parses but is not a schema 1.0 document, so no upgrade rule applies."""
+
+    def __init__(self, schema_version: object) -> None:
+        super().__init__(
+            "only schema 1.0 documents can be upgraded — "
+            f"schema_version={schema_version!r} expected='1.0'"
+        )
+        self.schema_version = schema_version
+
+
+class DocumentUpgradeSyntaxError(ValueError):
+    """The source does not parse; the compile outcome carries the syntax diagnostics."""
+
+    def __init__(self, compiled: CompiledDocument) -> None:
+        super().__init__("source has syntax errors and cannot be upgraded")
+        self.compiled = compiled
+
+
+class DocumentUpgradeDriftError(RuntimeError):
+    """The rewritten text does not parse to the dict-path upgrade: the two paths disagree."""
+
+    def __init__(self, pointer: str, detail: str) -> None:
+        super().__init__(
+            "upgraded source drifts from the domain upgrade transform — "
+            f"pointer={pointer!r} {detail}"
+        )
+        self.pointer = pointer
 
 
 @dataclass(frozen=True)
@@ -151,8 +198,50 @@ class StrategyAuthoringService:
             fields=self._fields,
         )
 
-    def compile(self, request: CompileRequest) -> CompiledDocument:
+    def upgrade(self, request: CompileRequest) -> UpgradedDocument:
+        """Rewrite a 1.0 source as 1.1 with comments kept, fail-closed against rule drift."""
         parsed = self._codec.parse(request.source, format=request.format)
+        if not parsed.ok or parsed.tree is None:
+            raise DocumentUpgradeSyntaxError(_rejected(parsed, None, parsed.diagnostics))
+        if not is_legacy_document(parsed.tree):
+            raise DocumentNotUpgradeableError(parsed.tree.get("schema_version"))
+        expected = upgrade_document_1_0(parsed.tree)
+        try:
+            upgraded = self._codec.upgrade_source(request.source, format=request.format)
+        except Exception as error:  # noqa: BLE001  # reason: 아래 설명대로 어떤 어댑터 실패든 drift다
+            # 어댑터의 전제 위반(rt loader가 safe parse와 다르게 읽는 문서, ruamel이 특정 주석
+            # 배치에서 던지는 IndexError 등)은 untrusted input에 대한 500이 아니라 drift로 강등한다.
+            # safe parse는 이미 통과했으므로 두 경로가 같은 문서를 다르게 봤다는 뜻이고, 응답은
+            # 422 계약 안에 있다.
+            logger.warning(
+                "document upgrade rewrite failed in the codec adapter — treating as drift "
+                "(format=%s, error=%s: %s)",
+                request.format.value,
+                type(error).__name__,
+                error,
+            )
+            raise DocumentUpgradeDriftError(
+                "", f"rewrite failed: {type(error).__name__}: {error}"
+            ) from error
+        reparsed = self._codec.parse(upgraded, format=request.format)
+        if not reparsed.ok or reparsed.tree is None:
+            detail = ", ".join(f"{d.code}@{d.pointer}" for d in reparsed.diagnostics[:3])
+            raise DocumentUpgradeDriftError("", f"rewritten text does not parse: {detail}")
+        mismatch = _first_mismatch(expected, reparsed.tree, "")
+        if mismatch is not None:
+            raise DocumentUpgradeDriftError(*mismatch)
+        compiled = self._compile_parsed(reparsed)
+        return UpgradedDocument(
+            format=request.format,
+            source=upgraded,
+            source_hash=compiled.source_hash,
+            compiled=compiled,
+        )
+
+    def compile(self, request: CompileRequest) -> CompiledDocument:
+        return self._compile_parsed(self._codec.parse(request.source, format=request.format))
+
+    def _compile_parsed(self, parsed: ParsedDocument) -> CompiledDocument:
         if not parsed.ok or parsed.tree is None:
             return _rejected(parsed, None, parsed.diagnostics)
 
@@ -225,6 +314,31 @@ def _structural_range(parsed: ParsedDocument, code: str, pointer: str) -> Source
     if code == "structure.unknown_key" and pointer in parsed.key_ranges:
         return parsed.key_ranges[pointer]
     return parsed.locate(pointer)
+
+
+def _first_mismatch(expected: object, actual: object, pointer: str) -> tuple[str, str] | None:
+    """Deepest JSON Pointer where two parsed trees differ, or None when they are equal."""
+    if isinstance(expected, Mapping) and isinstance(actual, Mapping):
+        for key in sorted(set(expected) | set(actual)):
+            child = f"{pointer}/{str(key).replace('~', '~0').replace('/', '~1')}"
+            if key not in expected or key not in actual:
+                side = "dict-path only" if key in expected else "rewritten text only"
+                return child, f"key present in {side}"
+            found = _first_mismatch(expected[key], actual[key], child)
+            if found is not None:
+                return found
+        return None
+    if isinstance(expected, (list, tuple)) and isinstance(actual, (list, tuple)):
+        if len(expected) != len(actual):
+            return pointer, f"length dict-path={len(expected)} rewritten={len(actual)}"
+        for index, (left, right) in enumerate(zip(expected, actual, strict=True)):
+            found = _first_mismatch(left, right, f"{pointer}/{index}")
+            if found is not None:
+                return found
+        return None
+    if expected != actual or type(expected) is not type(actual):
+        return pointer, f"dict-path={expected!r} rewritten={actual!r}"
+    return None
 
 
 def _pointer_from_path(path: str) -> str:

@@ -152,15 +152,13 @@ def test_floor_delta_shares_identical() -> None:
 
 @RUST_ONLY
 def test_record_kind_codes_match_python_store() -> None:
-    """레코드 kind 코드의 정본은 Python `RecordKind` 선언 순서다. Rust 상수가 어긋나면
-    payload가 엉뚱한 kind로 materialize돼 결과가 조용히 틀어진다."""
+    """레코드 kind 코드의 정본은 Python `RecordKind`가 멤버마다 박아 둔 리터럴이다.
+    Rust 상수가 어긋나면 payload가 엉뚱한 kind로 materialize돼 결과가 조용히 틀어진다."""
     import backtest_core
 
-    from backtest_engine.engine.store import _RECORD_KIND_CODES
+    from backtest_engine.engine.store import RecordKind
 
-    assert backtest_core.RECORD_KIND_CODES == {
-        kind.value: code for kind, code in _RECORD_KIND_CODES.items()
-    }
+    assert backtest_core.RECORD_KIND_CODES == {kind.label: kind.code for kind in RecordKind}
 
 
 @RUST_ONLY
@@ -682,7 +680,7 @@ def _session_scenarios() -> dict[str, Callable[[str], tuple[BacktestEngine, Back
 
 
 def _records(engine: BacktestEngine) -> list[tuple[str, object]]:
-    return [(r.kind.value, r.payload) for r in engine.event_store.records]
+    return [(r.kind.label, r.payload) for r in engine.event_store.records]
 
 
 @pytest.mark.parametrize("rust_core", RUST_ENGINE_CORES)
@@ -1154,12 +1152,12 @@ def test_persistent_finish_keeps_order_fill_results_lazy_and_compact_traceable(
     compact_trace = store.compact_trace()
     assert [row[0] for row in compact_trace] == list(range(len(compact_trace)))
     assert {
-        RecordKind.MARKET.value,
-        RecordKind.DECISION.value,
-        RecordKind.ORDER.value,
-        RecordKind.ORDER_UPDATE.value,
-        RecordKind.FILL.value,
-        RecordKind.SNAPSHOT.value,
+        RecordKind.MARKET.label,
+        RecordKind.DECISION.label,
+        RecordKind.ORDER.label,
+        RecordKind.ORDER_UPDATE.label,
+        RecordKind.FILL.label,
+        RecordKind.SNAPSHOT.label,
     }.issubset({row[2] for row in compact_trace})
     assert materialized == {"order": 0, "fill": 0}
 
@@ -1167,7 +1165,7 @@ def test_persistent_finish_keeps_order_fill_results_lazy_and_compact_traceable(
     assert materialized == {"order": 2, "fill": 0}
     assert isinstance(result.fills, tuple)
     assert materialized == {"order": 2, "fill": 2}
-    assert tuple(record.kind.value for record in store.records) == tuple(
+    assert tuple(record.kind.label for record in store.records) == tuple(
         row[2] for row in compact_trace
     )
 

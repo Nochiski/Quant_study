@@ -468,7 +468,9 @@ Rust `total`의 절반 안팎이 결과 조회다 (100종목 callback 0.346초 +
 `benchmarks/baseline/rust-loop-workbench-100.json`): 어댑터 전체 python 3.001초 → rust 2.337초로
 **1.28배**. Rust에서 `engine.run` 0.389초 뒤에 오는 구간이 1.130초로 `engine.run`의 **2.91배**이며,
 그 안에서 결과 조회 0.542초와 raw artifact 변환 0.515초가 지배적이다. `engine.run` 앞의
-dataset→엔진 입력 변환 0.555초와 전략·피드 조립 0.305초도 코어와 무관하게 남는다.
+dataset→엔진 입력 변환(python 0.479초 / rust 0.555초)과 전략·피드 조립(python 0.136초 /
+rust 0.305초)은 코어와 무관한 같은 Python 코드이므로, 두 코어의 차이는 할당기·GC 상태 차이로
+읽어야 한다. 어느 쪽이든 Rust로 줄일 수 없는 구간이다.
 
 게이트 재판정 (정직한 경계 기준):
 

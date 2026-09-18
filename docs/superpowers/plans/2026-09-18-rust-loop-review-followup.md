@@ -76,20 +76,37 @@ uv run pyright
 
 ### 벤치 측정 표준 (PR 1 이후)
 
+아래를 순서대로 돌리면 `benchmarks/baseline/rust-loop-*.json` **16개**가 전부 재현된다. 실행마다
+직전 CPU 부하를 재고(`powershell -NoProfile -Command "(Get-CimInstance Win32_Processor).LoadPercentage"`)
+40%를 넘으면 기다린다. 부하는 스크립트가 JSON `workload.cpu_load_percent`에도 남긴다.
+
 ```bash
-# 시간 (run + 결과 조회 분리 기록)
+# 시간 (run + 결과 조회 분리 기록). 게이트 배수 6개의 출처다 — 한 프로세스에서 세 코어를
+# 교대로 돌려 비교 조건이 같다.
 uv run python scripts/bench_universe.py tests/fixtures/krx_parquet --instruments 100 --synthetic --core all --strategy callback --warmup 1 --repeat 5 --json-out benchmarks/baseline/rust-loop-100-callback.json
 uv run python scripts/bench_universe.py tests/fixtures/krx_parquet --instruments 100 --synthetic --core all --strategy tape     --warmup 1 --repeat 5 --json-out benchmarks/baseline/rust-loop-100-tape.json
 uv run python scripts/bench_universe.py tests/fixtures/krx_parquet --instruments 300 --synthetic --core all --strategy callback --warmup 1 --repeat 5 --json-out benchmarks/baseline/rust-loop-300-callback.json
 uv run python scripts/bench_universe.py tests/fixtures/krx_parquet --instruments 300 --synthetic --core all --strategy tape     --warmup 1 --repeat 5 --json-out benchmarks/baseline/rust-loop-300-tape.json
 uv run python scripts/bench_universe.py tests/fixtures/krx_parquet --instruments 4 --core all --strategy callback --warmup 1 --repeat 5 --json-out benchmarks/baseline/rust-loop-real-fixture-callback.json
 uv run python scripts/bench_universe.py tests/fixtures/krx_parquet --instruments 4 --core all --strategy tape     --warmup 1 --repeat 5 --json-out benchmarks/baseline/rust-loop-real-fixture-tape.json
-# Peak RSS (코어별 프로세스 격리, 결과 조회 포함)
+
+# 희소 유니버스 (PR 11). 첫 줄이 Sparse 경로 워크로드, 뒤 두 줄이 행 조회표 표현만 갈리는 A/B
+# 짝이다 (상장 구간 246 / 247 세션 — bar 수 0.4% 차이로 Sparse / Dense가 뒤집힌다).
+uv run python scripts/bench_universe.py tests/fixtures/krx_parquet --instruments 300 --synthetic --density 0.15   --core all --strategy tape --warmup 1 --repeat 5 --json-out benchmarks/baseline/rust-loop-300-sparse-tape.json
+uv run python scripts/bench_universe.py tests/fixtures/krx_parquet --instruments 300 --synthetic --density 0.2    --core all --strategy tape --warmup 1 --repeat 5 --json-out benchmarks/baseline/rust-loop-300-boundary-sparse-tape.json
+uv run python scripts/bench_universe.py tests/fixtures/krx_parquet --instruments 300 --synthetic --density 0.2005 --core all --strategy tape --warmup 1 --repeat 5 --json-out benchmarks/baseline/rust-loop-300-boundary-dense-tape.json
+
+# Peak RSS (코어별 프로세스 격리, 결과 조회 포함). RSS 정본이다.
 for core in python rust; do for s in callback tape; do
   uv run python scripts/bench_universe.py tests/fixtures/krx_parquet --instruments 100 --synthetic --core $core --strategy $s --warmup 1 --repeat 3 --json-out benchmarks/baseline/rust-loop-memory-100-$s-$core.json
 done; done
-# 워크벤치 어댑터 e2e 구간 (Phase 3-2)
-uv run python scripts/bench_workbench_adapter.py --instruments 100 --core all --repeat 3 --json-out benchmarks/baseline/rust-loop-workbench-100.json
+
+# 워크벤치 어댑터 e2e 구간 (Phase 3-2). 구간 수치의 정본은 코어 격리 실행이다 —
+# --core all에서는 자동 순환 GC가 rust compute_analytics에 붙어 구간이 왜곡된다.
+for core in python rust; do
+  uv run python scripts/bench_workbench_adapter.py --instruments 100 --core $core --repeat 5 --json-out benchmarks/baseline/rust-loop-workbench-100-$core.json
+done
+uv run python scripts/bench_workbench_adapter.py --instruments 100 --core all --repeat 5 --json-out benchmarks/baseline/rust-loop-workbench-100.json
 ```
 
 ---
@@ -769,7 +786,7 @@ after 열은 리뷰 반영(DEFECT-1001·1002·등록부 중복 거부) 후 브�
 - 실측: 표의 모든 수치가 이 PR 커밋 시점 JSON과 일치. ✅
 - E2E: CI(backend·frontend·browser-e2e) 통과 — PR CI에서 확인.
 - 로컬 게이트: `uv run ruff check src tests scripts` passed, `uv run pyright` 0 errors,
-  `uv run pytest -q` 1,328 passed / 13 skipped, `cargo test` 38 passed.
+  `uv run pytest -q` 1,329 passed / 13 skipped, `cargo test` 38 passed.
 
 ---
 

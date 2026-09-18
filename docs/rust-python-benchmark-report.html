@@ -531,7 +531,7 @@
         <p class="lede">MARKET→FILL→NOTIFY→SESSION_CLOSE→ORDER 드레인을 Rust <code>drive()</code>가 소유합니다. Python은 전략 콜백과 종료 배치에서만 왕복하고, 선언형 tape 전략은 콜백 없이 완주합니다. 아래 수치는 리뷰 후속 PR 1~11을 모두 쌓은 <strong>2026-09-18 최종 재측정</strong>입니다. 타이머는 <code>run()</code>과 결과 조회를 함께 감쌉니다 — 이전 표는 lazy한 Rust 결과의 조회 비용을 밖에 두어 배수가 부풀려져 있었습니다.</p>
       </div>
       <div class="badges" aria-label="측정 조건">
-        <span class="badge good">✓ 1328 Python tests</span>
+        <span class="badge good">✓ 1329 Python tests</span>
         <span class="badge good">✓ 38 Rust tests</span>
         <span class="badge">Rust --release</span>
         <span class="badge">2026-09-18 final gates</span>
@@ -622,7 +622,9 @@
         <div class="fact"><span>세션당 FFI · 0회</span><strong style="color:var(--green)">0회 통과</strong></div>
         <div class="fact"><span>Peak RSS · ≤ 1.25×</span><strong style="color:var(--green)">1.15× / 1.19× 통과 (1.23× / 1.28×)</strong></div>
         <div class="fact"><span>결과 패리티 · 100%</span><strong style="color:var(--green)">통과</strong></div>
-        <div class="fact"><span>워크벤치 e2e</span><strong style="color:var(--green)">3.66× (1.21×)</strong></div>
+      </div>
+      <div class="small-result" style="margin-top:14px">
+        <div><span>참고 · 워크벤치 e2e (게이트 아님)</span><strong style="color:var(--green)">3.66× (PR 1 기준선 1.21×)</strong></div>
       </div>
       <div class="insight" style="margin-top:14px"><strong>남은 한 칸:</strong> TargetTape 경로의 엔진 경계 최소 3×입니다. 워크벤치 e2e에서는 3.23~3.66×로 최소선을 넘지만, 게이트가 정의된 <code>bench_universe.py</code> 경계에서는 2.41×입니다. 남은 거리는 결과 조회에서 만드는 Python 공개 객체이고, 그 계약은 <code>BacktestResult</code> 불변 계약 안에 있습니다.</div>
       <div class="insight" style="margin-top:14px"><strong>희소 유니버스:</strong> 300종목 밀도 15%에서 세 코어 결과가 동일하고 2.42×입니다. 밀도 19.98% / 20.06%로 행 조회표만 Sparse / Dense로 갈리는 A/B에서 Sparse가 <code>run()</code> 기준 <strong>8.1% 느립니다</strong> — 해시 조회 값입니다. Sparse가 값을 하는 구간은 Dense 표가 유니버스 × 기간에 비례해 커지는 누적 유니버스입니다.</div>

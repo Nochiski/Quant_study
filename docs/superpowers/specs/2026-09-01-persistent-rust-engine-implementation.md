@@ -146,7 +146,7 @@
 - 작업 트리의 기존 사용자/선행 변경: 없음
 - 마지막 검증:
   - 2026-09-18 PR 11 tip: `uv run ruff check src tests scripts` — passed,
-    `uv run pyright` — 0 errors, `uv run pytest -q` — 1,328 passed / 13 skipped
+    `uv run pyright` — 0 errors, `uv run pytest -q` — 1,329 passed / 13 skipped
   - `cargo fmt --manifest-path rust/backtest_core/Cargo.toml -- --check` — passed
   - `cargo clippy --manifest-path rust/backtest_core/Cargo.toml --all-targets -- -D warnings`
   - `cargo test --manifest-path rust/backtest_core/Cargo.toml` — 13 passed

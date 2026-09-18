@@ -667,6 +667,17 @@ export const projectForm = (schema: JsonSchema, parse: ParsedSource | null, diag
 
 **Non-goals**: 목록 섹션(P4-03), 실제 page 연결(P4-04).
 
+- 구현 결정(P4-02): 컨트롤 → 연산 번역은 순수 모듈 `model/form-transactions.ts`(`parseDraft`,
+  `fieldOperation`, `resetOperation`, `unsetOperation`, `formDisabledReason`)가 하고 패널은 이를
+  `SourceTransactions.apply(op, key)`로 넘긴다. 섹션이 문서에 없을 때(`signal` 생략) 첫 값 입력은
+  루트에 `{ key: value }`를 `insert-key`하는 트랜잭션 **한 번**이다(`planInsertKey`가 nested 값을
+  block으로 직렬화). 텍스트류 입력은 마지막으로 확정한 draft를 기억해 Enter 뒤 blur가 같은 값을 두 번
+  적용하지 않는다. projection 값이 바뀌면 렌더 중 파생 상태 조정으로 draft를 되돌린다(effect에서
+  setState 금지 lint). 카탈로그 picker는 `equity-field`·`factor`만 select이고 `universe`·`subgraph`는
+  카탈로그 endpoint가 없어 텍스트 입력이다(완성과 같은 정책). 배지 근거는 `field.diagnostics`(backend
+  compile), 회색 처리·안내는 `field.applicable`. MSW compile 왕복 후 배지 갱신 테스트는 page가 붙는
+  P4-04로 옮긴다(패널은 projection을 props로만 받는다). 접근성 이름은 `<key>` 또는 `<key>· <unit>`.
+
 ### P4-03 — 목록 섹션
 
 **Intent**: eligibility rules, parameters, factors 헤더의 추가·삭제·편집.

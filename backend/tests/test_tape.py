@@ -204,6 +204,25 @@ def _delisting_frames() -> dict[date, TapeFrame]:
     }
 
 
+def _no_bar_order_frames() -> dict[date, TapeFrame]:
+    """D3 프레임의 목표 순서를 "미보유 no_bar(C) → 보유 no_bar(Y) → 정상(X)"으로 둔다."""
+
+    def frame(*targets: tuple[InstrumentId, float], reason: str) -> TapeFrame:
+        return TapeFrame(
+            action=SetPortfolioTarget(
+                targets=tuple(WeightTarget(instrument, weight) for instrument, weight in targets),
+                scope=TargetScope.REPLACE,
+                execution=ExecutionPolicy.market_next_open(),
+            ),
+            reason=reason,
+        )
+
+    return {
+        day(1).date(): frame((_X, 0.4), (_Y, 0.4), reason="tape:d1"),
+        day(3).date(): frame((C, 0.1), (_Y, 0.4), (_X, 0.4), reason="tape:d3"),
+    }
+
+
 def test_declarative_tape_protocol_is_detected() -> None:
     assert is_declarative_tape(_TapeStrategy({}))
     assert not is_declarative_tape(object())
@@ -304,6 +323,33 @@ def test_rust_tape_path_makes_one_drive_call(monkeypatch: pytest.MonkeyPatch) ->
     assert calls["load_target_tape"] == 1
     assert len(result.orders) == 2
     assert len(engine.event_store.decisions()) == 4
+
+
+@RUST_ONLY
+def test_no_bar_reason_keeps_target_order_regardless_of_holdings() -> None:
+    """GAP-3: 미보유 no_bar가 보유 no_bar보다 앞에 와도 reason 순서가 두 경로에서 같다.
+
+    Rust는 피드 등록부에 없는 종목을 먼저 걸러내고 보유 여부는 그 다음에 본다 — 두 분기가
+    같은 `no_bar` 리스트에 순서대로 쌓이는지 고정한다.
+    """
+    outcomes = {}
+    for core in ("python", "rust"):
+        engine = BacktestEngine(
+            RunConfig(run_id="tape-no-bar-order", initial_cash=100_000.0), core=core
+        )
+        result = engine.run(_TapeStrategy(_no_bar_order_frames()), _delisting_feed())
+        outcomes[core] = (
+            result,
+            engine.event_store.trace_bytes(),
+            [record.decision.reason for record in engine.event_store.decisions()],
+        )
+    assert outcomes["python"][2] == [
+        "tape:d1",
+        "tape_idle",
+        "tape:d3 no_bar=('000030:1', '000660')",
+        "tape_idle",
+    ]
+    assert outcomes["python"] == outcomes["rust"]
 
 
 @RUST_ONLY

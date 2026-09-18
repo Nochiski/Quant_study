@@ -925,6 +925,60 @@ mod tests {
     }
 
     #[test]
+    fn month_end_schedule_dispatches_only_on_the_last_session_of_each_month() {
+        // GAP-2: `configure_run`이 "month_end"를 받고 `feed.schedule_matches`가 판정하지만
+        // 드라이버가 그 판정대로 콜백을 거르는지는 고정된 적이 없었다. Python capability
+        // 게이트가 MonthEndSession을 아직 거절하므로 Python 경로와의 대조는 불가능하다.
+        let mut runtime = PersistentEngine::new(100_000.0, false, false, 1.0).unwrap();
+        runtime
+            .load_feed(
+                vec![KEY.into()],
+                vec!["005930".into()],
+                vec![
+                    "2026-08-31 00:00:00".into(),
+                    "2026-09-01 00:00:00".into(),
+                    "2026-09-30 00:00:00".into(),
+                ],
+                vec![0, 1, 2, 3],
+                vec![0, 0, 0],
+                vec![100.0, 110.0, 120.0],
+                vec![100.0, 110.0, 120.0],
+                vec![100.0, 110.0, 120.0],
+                vec![100.0, 110.0, 120.0],
+                vec![1_000, 1_000, 1_000],
+            )
+            .unwrap();
+        runtime.configure_router(vec!["no_action".into()], vec![]);
+        let mut month_end = settings(0);
+        month_end.schedule = "month_end".into();
+        runtime.run = Some(month_end);
+
+        let mut dispatched = Vec::new();
+        while let Some(frame) = runtime.drive_internal().unwrap() {
+            dispatched.push(frame.session_index);
+            runtime
+                .submit_internal(frame.token, no_action(&frame.ts), None)
+                .unwrap();
+        }
+        runtime.finish_internal().unwrap();
+        // 08-31은 다음 세션이 9월이라 월말, 09-01은 아니고, 마지막 세션은 뒤가 없어 월말이다.
+        assert_eq!(dispatched, vec![0, 2]);
+        assert_eq!(
+            kinds(&runtime),
+            vec![
+                KIND_MARKET,
+                KIND_SNAPSHOT,
+                KIND_DECISION,
+                KIND_MARKET,
+                KIND_SNAPSHOT,
+                KIND_MARKET,
+                KIND_SNAPSHOT,
+                KIND_DECISION,
+            ]
+        );
+    }
+
+    #[test]
     fn session_close_domain_error_poisons_the_runtime() {
         // DEFECT-R01: 세션 처리 도중 난 도메인 오류도 라우팅 오류처럼 runtime을 실패로 고정해야
         // 한다. 고정하지 않으면 비용은 반영됐지만 SNAPSHOT이 없는 세션 뒤로 같은 runtime이

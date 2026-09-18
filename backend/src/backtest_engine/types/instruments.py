@@ -33,7 +33,7 @@ class InstrumentId:
         )
 
     def __hash__(self) -> int:
-        return self._hash  # type: ignore[attr-defined]  # __post_init__에서 채운 캐시
+        return self._hash  # pyright: ignore[reportAttributeAccessIssue]  # reason: __post_init__ 캐시
 
 
 @dataclass(frozen=True)

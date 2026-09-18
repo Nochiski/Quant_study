@@ -267,12 +267,6 @@ def decision_to_wire(decision: StrategyDecision) -> DecisionWire:
     return decision.schema_version, str(decision.as_of), decision.reason, actions
 
 
-def route_error(error: tuple[str, str] | None) -> Exception | None:
-    if error is None:
-        return None
-    return route_error_from(error)
-
-
 def route_error_from(error: tuple[str, str]) -> Exception:
     """Rust 라우팅 오류 `(code, message)`를 엔진 예외로 바꾼다. 모르는 code는 RuntimeError."""
     code, message = error

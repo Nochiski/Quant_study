@@ -75,7 +75,6 @@ from backtest_engine.engine.tape import is_declarative_tape
 from backtest_engine.engine.wire import (
     decision_to_wire,
     execution_wire,
-    route_error,
     route_error_from,
     supports_basic_decision,
     target_wire,
@@ -142,8 +141,8 @@ class _Run:
         allow_margin = EngineFeature.MARGIN in requirements.features
         self.persistent_runtime: Any | None = None
         if core in PERSISTENT_RUST_CORES:
-            # Rust runtime이 포트폴리오·주문·큐·레코드를 소유한다. Python 쪽 원장/주문 관리자는
-            # 만들지 않는다 — 두 곳에서 같은 상태를 갱신하면 안 된다.
+            # Rust runtime이 포트폴리오·주문·큐·레코드·자본변동 일정을 모두 소유한다.
+            # Python 쪽 짝은 만들지 않는다 — 두 곳에서 같은 상태를 갱신하면 안 된다.
             persistent_runtime = make_persistent_runtime(
                 config.initial_cash,
                 allow_short=allow_short,
@@ -157,7 +156,9 @@ class _Run:
             self.persistent_runtime = persistent_runtime
             self.history_store = PersistentHistoryStore(persistent_runtime)
             self.portfolio: PortfolioLedger | None = None
-            self.order_manager = OrderManager()
+            self.order_manager: OrderManager | None = None
+            self.queue: EventQueue | None = None
+            self.corporate_actions: dict[datetime, list[CorporateActionEvent]] | None = None
         else:
             self.portfolio = make_portfolio(
                 core,
@@ -166,6 +167,8 @@ class _Run:
                 allow_margin=allow_margin,
             )
             self.order_manager = OrderManager()
+            self.queue = EventQueue()
+            self.corporate_actions = defaultdict(list)
         self.core = core
         self.slippage_model = slippage if slippage is not None else NoSlippage()
         self.max_participation = max_participation
@@ -180,7 +183,7 @@ class _Run:
         )
         self.router = (
             None
-            if core in PERSISTENT_RUST_CORES
+            if self.order_manager is None
             else DecisionRouter(requirements.actions, self.order_manager, requirements.features)
         )
         self.store: EventStore = (
@@ -188,8 +191,6 @@ class _Run:
             if self.persistent_runtime is not None
             else EventStore()
         )
-        self.queue = EventQueue()
-        self.corporate_actions: dict[datetime, list[CorporateActionEvent]] = defaultdict(list)
         self.universe: UniverseResult | None = None
 
     def wants(self, kind: EventKind) -> bool:
@@ -325,17 +326,20 @@ class BacktestEngine:
         if run.persistent_runtime is not None:
             return self._execute_persistent(run, feed, tuple(corporate_actions))
 
+        queue = self._queue(run)
+        order_manager = self._orders(run)
+        pending_actions = self._pending_actions(run)
         # 사건은 해당 종목이 실제로 거래되는 첫 세션(사건 세션 이후)에 적용한다 — 원장의
         # 분할 세션이 거래정지 행이라 feed에서 빠지는 경우 다음 거래일 시가로 정산한다.
         for action in corporate_actions:
             settle_ts = self._settlement_session(feed, action)
-            run.corporate_actions[settle_ts].append(action)
+            pending_actions[settle_ts].append(action)
 
         for snapshot in feed.snapshots():
-            run.queue.push(snapshot.ts, EventPriority.MARKET, MarketArrived(snapshot))
+            queue.push(snapshot.ts, EventPriority.MARKET, MarketArrived(snapshot))
 
-        while run.queue:
-            event = run.queue.pop()
+        while queue:
+            event = queue.pop()
             match event:
                 case MarketArrived(snapshot=snapshot):
                     self._on_market(run, snapshot)
@@ -347,12 +351,12 @@ class BacktestEngine:
                 case SessionClose(snapshot=snapshot):
                     self._on_session_close(run, snapshot)
                 case OrderPlaced(order=order):
-                    run.order_manager.place(order)
+                    order_manager.place(order)
                     run.store.append(order.ts, RecordKind.ORDER, order)
 
         # 남은 주문은 결과에서 조용히 사라지지 않도록 취소로 기록한다. 마지막 세션에 낸
         # DAY/IOC/FOK는 "당일 만료", GTC만 "run 종료"가 사유다.
-        remaining_entries = run.order_manager.drain()
+        remaining_entries = order_manager.drain()
         if remaining_entries:
             last_ts = feed.sessions[-1]
         for entry in remaining_entries:
@@ -391,6 +395,26 @@ class BacktestEngine:
             raise CoreUnavailable("python session loop requires a Python-side portfolio ledger")
         return run.portfolio
 
+    @staticmethod
+    def _orders(run: _Run) -> OrderManager:
+        if run.order_manager is None:
+            raise CoreUnavailable("python session loop requires a Python-side order manager")
+        return run.order_manager
+
+    @staticmethod
+    def _queue(run: _Run) -> EventQueue:
+        if run.queue is None:
+            raise CoreUnavailable("python session loop requires a Python-side event queue")
+        return run.queue
+
+    @staticmethod
+    def _pending_actions(run: _Run) -> dict[datetime, list[CorporateActionEvent]]:
+        if run.corporate_actions is None:
+            raise CoreUnavailable(
+                "python session loop requires a Python-side corporate action calendar"
+            )
+        return run.corporate_actions
+
     # --- persistent Rust 경로 ---------------------------------------------------
 
     def _execute_persistent(
@@ -411,8 +435,7 @@ class BacktestEngine:
         # 확장 심볼은 드레인 전에 한 번만 해석한다 — except 절에서 해석하면 조회가 실패할 때
         # 원래 예외가 CoreUnavailable에 가려진다.
         route_error_type = route_error_exception()
-        instruments = self._load_persistent_feed(run, feed)
-        market_snapshots = tuple(feed.snapshots())
+        instruments, market_snapshots = self._load_persistent_feed(run, feed)
         store.bind_feed(feed.sessions, instruments, market_snapshots)
         self._configure_persistent_run(run)
 
@@ -479,9 +502,8 @@ class BacktestEngine:
             )
             store.record_callback(event, decision_id, decision)
             store.register_decision(decision_id, decision)
-            routing_error = route_error(error_wire)
-            if routing_error is not None:
-                raise routing_error
+            if error_wire is not None:
+                raise route_error_from(error_wire)
 
         store.finish()
         return BacktestResult.lazy(
@@ -579,8 +601,14 @@ class BacktestEngine:
     # --- 세션 처리 -----------------------------------------------------------
 
     @staticmethod
-    def _load_persistent_feed(run: _Run, feed: DataFeed) -> tuple[InstrumentId, ...]:
-        """전체 feed를 columnar batch로 한 번 전송하고 instrument id 순서의 registry를 돌려준다."""
+    def _load_persistent_feed(
+        run: _Run, feed: DataFeed
+    ) -> tuple[tuple[InstrumentId, ...], tuple[MarketSnapshot, ...]]:
+        """전체 feed를 columnar batch로 한 번 전송한다.
+
+        instrument id 순서의 registry와, 호출부가 EventStore에 다시 묶을 세션 스냅샷을 함께
+        돌려준다 — 스냅샷 튜플을 두 번 만들면 대형 feed에서 그만큼 메모리가 더 든다.
+        """
         runtime = run.persistent_runtime
         if runtime is None:
             raise CoreUnavailable("persistent Rust feed requires its runtime")
@@ -620,12 +648,13 @@ class BacktestEngine:
             closes,
             volumes,
         )
-        return instruments
+        return instruments, snapshots
 
     def _on_market(self, run: _Run, snapshot: MarketSnapshot) -> None:
         run.history_store.append(snapshot)
         run.store.append(snapshot.ts, RecordKind.MARKET, snapshot)
-        order_manager = run.order_manager
+        order_manager = self._orders(run)
+        queue = self._queue(run)
         portfolio = self._ledger(run)
 
         def update(order_id: str, status: OrderStatus, detail: str | None) -> None:
@@ -637,12 +666,12 @@ class BacktestEngine:
 
         # 자본변동은 이 세션의 어떤 체결보다 먼저 적용한다 — 분할 후 가격으로 체결되는
         # 주문이 분할 전 수량과 섞이면 안 된다.
-        for action in run.corporate_actions.get(snapshot.ts, ()):
+        for action in self._pending_actions(run).get(snapshot.ts, ()):
             self._apply_corporate_action(run, action, snapshot, update)
 
         if run.core == "rust_legacy":
             self._on_market_rust(run, snapshot, update)
-            run.queue.push(snapshot.ts, EventPriority.SESSION_CLOSE, SessionClose(snapshot))
+            queue.push(snapshot.ts, EventPriority.SESSION_CLOSE, SessionClose(snapshot))
             return
 
         # 매도 먼저 처리해 매수가 쓸 수 있는 현금을 확정한다 (결정론적 규칙).
@@ -707,7 +736,7 @@ class BacktestEngine:
                 )
             update(order.order_id, OrderStatus.CANCELLED, reason)
 
-        run.queue.push(snapshot.ts, EventPriority.SESSION_CLOSE, SessionClose(snapshot))
+        queue.push(snapshot.ts, EventPriority.SESSION_CLOSE, SessionClose(snapshot))
 
     def _on_market_rust(
         self,
@@ -717,7 +746,8 @@ class BacktestEngine:
     ) -> None:
         """세션 MARKET 처리를 Rust `process_market`에 맡기고 계획(ops)을 순서대로 적용한다."""
         core = importlib.import_module("backtest_core")
-        order_manager = run.order_manager
+        order_manager = self._orders(run)
+        queue = self._queue(run)
         power = make_buying_power(
             run.core, self._ledger(run).snapshot(snapshot.ts), run.config.max_gross_leverage
         )
@@ -784,11 +814,9 @@ class BacktestEngine:
                         fee=fee,
                         slippage_per_share=slip,
                     )
-                    run.queue.push(fill.ts, EventPriority.FILL, FillOccurred(fill, snapshot))
+                    queue.push(fill.ts, EventPriority.FILL, FillOccurred(fill, snapshot))
                     if run.wants(EventKind.FILL):
-                        run.queue.push(
-                            fill.ts, EventPriority.NOTIFY, StrategyNotify(fill, snapshot)
-                        )
+                        queue.push(fill.ts, EventPriority.NOTIFY, StrategyNotify(fill, snapshot))
                     order_manager.settle(order_id, fill.quantity)
                 case "update":
                     status_text, _, detail = payload.partition("|")
@@ -826,26 +854,28 @@ class BacktestEngine:
     ) -> None:
         """견적을 실제 체결로 확정한다: Fill 큐 적재, 잔량 갱신, 상태 기록, 여력 소모."""
         order = entry.order
+        order_manager = self._orders(run)
+        queue = self._queue(run)
         fill = run.broker.fill(
             quote,
             entry,
             snapshot.bar(order.instrument),
-            run.order_manager.next_fill_id(),
+            order_manager.next_fill_id(),
             quantity,
         )
         power.consume(fill)
-        run.queue.push(fill.ts, EventPriority.FILL, FillOccurred(fill, snapshot))
+        queue.push(fill.ts, EventPriority.FILL, FillOccurred(fill, snapshot))
         if run.wants(EventKind.FILL):
             # FILL 알림은 그 체결이 만든 ORDER_UPDATE 알림보다 먼저 큐에 실린다 (인과 순서).
             # NOTIFY(25) > FILL(20)이라 알림 시점엔 포트폴리오에 이미 반영돼 있다.
-            run.queue.push(fill.ts, EventPriority.NOTIFY, StrategyNotify(fill, snapshot))
-        left = run.order_manager.settle(order.order_id, fill.quantity)
+            queue.push(fill.ts, EventPriority.NOTIFY, StrategyNotify(fill, snapshot))
+        left = order_manager.settle(order.order_id, fill.quantity)
         if left == 0:
             update(order.order_id, OrderStatus.FILLED, None)
         else:
             # STOP/STOP_LIMIT이 발동해 일부만 체결됐으면 잔량은 발동 상태를 유지한다.
             if order.order_type in (OrderType.STOP, OrderType.STOP_LIMIT) and not entry.triggered:
-                run.order_manager.mark_triggered(order.order_id)
+                order_manager.mark_triggered(order.order_id)
             update(order.order_id, OrderStatus.PARTIALLY_FILLED, quote.detail)
 
     def _process_group(
@@ -856,7 +886,7 @@ class BacktestEngine:
         power: BuyingPowerTracker,
         update: Callable[[str, OrderStatus, str | None], None],
     ) -> None:
-        order_manager = run.order_manager
+        order_manager = self._orders(run)
         entries = order_manager.group_entries(group.group_id)
         policy = group.policy
 
@@ -978,13 +1008,12 @@ class BacktestEngine:
             CorporateActionType.SPLIT,
             CorporateActionType.REVERSE_SPLIT,
         )
+        order_manager = self._orders(run)
         remaining_by_id = {
-            entry.order_id: entry.remaining for entry in run.order_manager.open_entries()
+            entry.order_id: entry.remaining for entry in order_manager.open_entries()
         }
         # 가격 수준이 무의미해지는 확인된 분할·병합만 대기 주문을 취소한다 (스펙 결정 3).
-        stale_orders = (
-            run.order_manager.cancel_for_instrument(action.instrument) if confirmed else ()
-        )
+        stale_orders = order_manager.cancel_for_instrument(action.instrument) if confirmed else ()
         for stale in stale_orders:
             stale_remaining = remaining_by_id[stale.order_id]
             update(
@@ -1001,7 +1030,9 @@ class BacktestEngine:
             if applied is not None:
                 run.store.append(snapshot.ts, RecordKind.CORPORATE_ACTION_APPLIED, applied)
         if run.wants(EventKind.CORPORATE_ACTION):
-            run.queue.push(snapshot.ts, EventPriority.NOTIFY, StrategyNotify(action, snapshot))
+            self._queue(run).push(
+                snapshot.ts, EventPriority.NOTIFY, StrategyNotify(action, snapshot)
+            )
 
     def _on_session_close(self, run: _Run, snapshot: MarketSnapshot) -> None:
         portfolio = self._ledger(run)
@@ -1040,6 +1071,7 @@ class BacktestEngine:
         if run.history_store.session_count < run.warmup_sessions:
             return
         ts = market.ts
+        order_manager = self._orders(run)
         if portfolio_snapshot is None:
             portfolio_snapshot = self._ledger(run).snapshot(ts)
         context = EngineStrategyContext(
@@ -1047,11 +1079,11 @@ class BacktestEngine:
             snapshot=portfolio_snapshot,
             history_store=run.history_store,
             declared=run.declared,
-            open_orders_snapshot=run.order_manager.open_orders(),
+            open_orders_snapshot=order_manager.open_orders(),
             universe_source=run.universe,
         )
         decision = run.strategy.on_event(context, event)
-        decision_id = run.order_manager.next_decision_id()
+        decision_id = order_manager.next_decision_id()
         run.store.record_callback(event, decision_id, decision)
         run.store.append(ts, RecordKind.DECISION, DecisionRecord(decision_id, decision))
 
@@ -1061,11 +1093,12 @@ class BacktestEngine:
         for update in routing.updates:
             self._record_update(run, update, market)
         for group in routing.groups:
-            run.order_manager.register_group(group)
+            order_manager.register_group(group)
+        queue = self._queue(run)
         for order in routing.orders:
-            run.queue.push(order.ts, EventPriority.ORDER, OrderPlaced(order))
+            queue.push(order.ts, EventPriority.ORDER, OrderPlaced(order))
 
     def _record_update(self, run: _Run, update: OrderUpdateEvent, market: MarketSnapshot) -> None:
         run.store.append(update.ts, RecordKind.ORDER_UPDATE, update)
         if run.wants(EventKind.ORDER_UPDATE):
-            run.queue.push(update.ts, EventPriority.NOTIFY, StrategyNotify(update, market))
+            self._queue(run).push(update.ts, EventPriority.NOTIFY, StrategyNotify(update, market))

@@ -6,7 +6,7 @@ use crate::feed::PersistentFeed;
 use crate::persistent_router::{
     DecisionWire, ExecutionWire, RouteError, RoutedOrder, RouterConfig, TargetWire,
 };
-use crate::portfolio::{Portfolio, SnapshotTuple};
+use crate::portfolio::Portfolio;
 use crate::quote::parse_decimal_ratio;
 use crate::records::{RecordIndexWire, RecordStore};
 use crate::session::{self, BarTuple, EntryTuple, Op};
@@ -425,7 +425,7 @@ impl PersistentEngine {
         short_borrow_bps_annual: f64,
         margin_interest_bps_annual: f64,
         annualization_days: u32,
-    ) -> PyResult<(bool, Vec<CostTuple>, SnapshotTuple)> {
+    ) -> PyResult<(bool, Vec<CostTuple>)> {
         if short_borrow_bps_annual < 0.0 || margin_interest_bps_annual < 0.0 {
             return Err(PyValueError::new_err(format!(
                 "annual cost rates must be >= 0 — short_borrow_bps_annual={short_borrow_bps_annual} margin_interest_bps_annual={margin_interest_bps_annual}"
@@ -443,7 +443,10 @@ impl PersistentEngine {
         let should_dispatch = feed.schedule_matches(schedule)?;
         let marks = feed.current_marks()?;
         self.portfolio.mark_refs(&marks);
-        let (cash, positions, _, _) = self.portfolio.snapshot()?;
+        // 비용 계산은 key를 읽기만 하므로 원장에서 빌린다 — 실제 String이 필요한 것은
+        // 레코드로 나가는 공매도 차입 비용뿐이라, 세션마다 포지션 수만큼 나던 복제가
+        // 공매도 포지션 수만큼으로 줄어든다.
+        let (cash, positions, _, _) = self.portfolio.snapshot_refs()?;
         let borrow_daily = short_borrow_bps_annual / 10_000.0 / f64::from(annualization_days);
         let mut costs = Vec::new();
         if borrow_daily > 0.0 {
@@ -451,11 +454,16 @@ impl PersistentEngine {
                 if position.1 < 0 {
                     let amount = position.4.abs() * borrow_daily;
                     if amount > 0.0 {
-                        costs.push(("short_borrow".to_string(), Some(position.0.clone()), amount));
+                        costs.push((
+                            "short_borrow".to_string(),
+                            Some(position.0.to_string()),
+                            amount,
+                        ));
                     }
                 }
             }
         }
+        drop(positions);
         let interest_daily = margin_interest_bps_annual / 10_000.0 / f64::from(annualization_days);
         if interest_daily > 0.0 && cash < 0.0 {
             let amount = -cash * interest_daily;
@@ -466,7 +474,9 @@ impl PersistentEngine {
         for cost in &costs {
             self.portfolio.charge(cost.2)?;
         }
-        Ok((should_dispatch, costs, self.portfolio.snapshot()?))
+        // 마감 스냅샷은 호출부가 필요할 때 직접 만든다 — 여기서 만들어 돌려주면 key를
+        // 소유해야 하고, 드라이버는 그 key를 instrument id로 바꾼 뒤 바로 버린다.
+        Ok((should_dispatch, costs))
     }
 
     pub(crate) fn apply_corporate_action_ratio(

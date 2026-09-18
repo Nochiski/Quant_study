@@ -8,7 +8,6 @@
 use crate::callback::CallbackFrame;
 use crate::persistent::{Lifecycle, PersistentEngine, StoredGroup, StoredOrder};
 use crate::persistent_router::{self, DecisionWire, RouteError};
-use crate::portfolio::SnapshotTuple;
 use crate::records::{
     to_object, CorporateActionAppliedWire, FillWire, NativeDecision, OrderUpdateWire, OrderWire,
     RecordPayload, SnapshotWire,
@@ -241,19 +240,17 @@ impl PersistentEngine {
         })
     }
 
+    /// 포트폴리오 스냅샷의 key를 instrument id로 바꿔 wire를 만든다.
+    ///
+    /// key는 원장에서 빌린다 — wire가 담는 것은 id뿐이라 스냅샷 쪽 String은 만들자마자
+    /// 버려질 값이었다.
     pub(crate) fn snapshot_wire(&self) -> PyResult<SnapshotWire> {
-        self.snapshot_wire_from(self.portfolio.snapshot()?)
-    }
-
-    /// 포트폴리오 스냅샷 튜플의 key를 instrument id로 바꾼다 — `close_current_session`이 이미
-    /// 만든 스냅샷을 재사용해 세션마다 원장을 두 번 훑지 않는다.
-    fn snapshot_wire_from(&self, snapshot: SnapshotTuple) -> PyResult<SnapshotWire> {
-        let (cash, rows, equity, gross_exposure) = snapshot;
+        let (cash, rows, equity, gross_exposure) = self.portfolio.snapshot_refs()?;
         let rows = rows
             .into_iter()
             .map(|(key, quantity, average, mark, market_value, unrealized)| {
                 Ok((
-                    self.instrument_id_for_key(&key)?,
+                    self.instrument_id_for_key(key)?,
                     quantity,
                     average,
                     mark,
@@ -556,7 +553,7 @@ impl PersistentEngine {
     /// `loop._on_session_close`: 비용·스냅샷 기록 후 일정과 warmup을 만족하면 스냅샷을 돌려준다.
     fn on_session_close(&mut self, session: usize) -> PyResult<Option<SnapshotWire>> {
         let settings = self.settings_arc()?;
-        let (should_dispatch, costs, closed) = self.close_current_session(
+        let (should_dispatch, costs) = self.close_current_session(
             &settings.schedule,
             settings.short_borrow_bps_annual,
             settings.margin_interest_bps_annual,
@@ -576,7 +573,8 @@ impl PersistentEngine {
                 },
             )?;
         }
-        let snapshot = self.snapshot_wire_from(closed)?;
+        // 비용은 위에서 이미 청구됐으므로 여기서 만든 스냅샷은 마감 직후 상태다.
+        let snapshot = self.snapshot_wire()?;
         if snapshot.equity < 0.0 {
             let feed = self.feed_ref()?;
             let positions: Vec<String> = snapshot

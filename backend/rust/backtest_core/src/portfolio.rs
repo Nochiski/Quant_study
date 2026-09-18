@@ -10,6 +10,10 @@ use std::collections::HashMap;
 pub(crate) type PositionRow = (String, i64, f64, f64, f64, f64);
 /// 스냅샷: `(cash, positions, equity, gross_exposure)`.
 pub(crate) type SnapshotTuple = (f64, Vec<PositionRow>, f64, f64);
+/// key를 원장에서 빌린 스냅샷 포지션 행. `PositionRow`와 원소 순서·의미가 같다.
+pub(crate) type PositionRefRow<'a> = (&'a str, i64, f64, f64, f64, f64);
+/// key를 빌린 스냅샷: `(cash, positions, equity, gross_exposure)`.
+pub(crate) type SnapshotRefTuple<'a> = (f64, Vec<PositionRefRow<'a>>, f64, f64);
 
 #[derive(Clone, Debug)]
 struct Ledger {
@@ -58,6 +62,42 @@ impl Portfolio {
         for (key, close) in closes {
             self.set_mark(key, *close);
         }
+    }
+
+    /// 스냅샷을 key를 빌려 만든다.
+    ///
+    /// Rust 안의 소비자(세션 마감 비용 계산, 스냅샷 wire, 라우팅)는 key를 읽기만 하므로
+    /// 원장 문자열을 그대로 빌린다 — 세션마다 포지션 수만큼 나던 String 할당이 사라진다
+    /// (300종목 × 1,231세션 기준 run당 100만 개 규모). 소유권이 필요한 Python 쪽
+    /// `snapshot()`만 여기서 key를 복제한다.
+    ///
+    /// 포지션은 원장 삽입 순서(Python dict와 동일)이고, equity·gross는 Python의
+    /// `cash + sum(mv)` / `sum(|mv|)`와 같은 결합 순서로 누산한다 (비트 동일성).
+    pub(crate) fn snapshot_refs(&self) -> PyResult<SnapshotRefTuple<'_>> {
+        let mut positions = Vec::with_capacity(self.ledgers.len());
+        let mut total_value = 0.0_f64;
+        let mut gross = 0.0_f64;
+        for (key, ledger) in &self.ledgers {
+            let mark = *self.marks.get(key).ok_or_else(|| {
+                PyValueError::new_err(format!("no mark price for held instrument — key={key}"))
+            })?;
+            let qty_f = ledger.quantity as f64;
+            let market_value = qty_f * mark;
+            let unrealized = (mark - ledger.average_price) * qty_f;
+            total_value += market_value;
+            gross += market_value.abs();
+            positions.push((
+                key.as_str(),
+                ledger.quantity,
+                ledger.average_price,
+                mark,
+                market_value,
+                unrealized,
+            ));
+        }
+        let equity = self.cash + total_value;
+        let gross_exposure = if equity != 0.0 { gross / equity } else { 0.0 };
+        Ok((self.cash, positions, equity, gross_exposure))
     }
 
     fn remove_ledger(&mut self, key: &str) {
@@ -239,34 +279,26 @@ impl Portfolio {
             .map(|i| self.ledgers[i].1.average_price)
     }
 
-    /// 스냅샷: `(cash, positions, equity, gross_exposure)`. 포지션은 원장 삽입 순서(Python dict와
-    /// 동일)이고, equity·gross는 Python의 `cash + sum(mv)` / `sum(|mv|)`와 같은 결합 순서로
-    /// 누산한다 (비트 동일성).
+    /// 스냅샷: `(cash, positions, equity, gross_exposure)`. key를 소유하는 Python 쪽 정본이다.
+    /// 값은 `snapshot_refs`가 정하고 여기서는 key만 복제한다 — 두 경로가 갈라질 수 없다.
     pub(crate) fn snapshot(&self) -> PyResult<SnapshotTuple> {
-        let mut positions = Vec::with_capacity(self.ledgers.len());
-        let mut total_value = 0.0_f64;
-        let mut gross = 0.0_f64;
-        for (key, ledger) in &self.ledgers {
-            let mark = *self.marks.get(key).ok_or_else(|| {
-                PyValueError::new_err(format!("no mark price for held instrument — key={key}"))
-            })?;
-            let qty_f = ledger.quantity as f64;
-            let market_value = qty_f * mark;
-            let unrealized = (mark - ledger.average_price) * qty_f;
-            total_value += market_value;
-            gross += market_value.abs();
-            positions.push((
-                key.clone(),
-                ledger.quantity,
-                ledger.average_price,
-                mark,
-                market_value,
-                unrealized,
-            ));
-        }
-        let equity = self.cash + total_value;
-        let gross_exposure = if equity != 0.0 { gross / equity } else { 0.0 };
-        Ok((self.cash, positions, equity, gross_exposure))
+        let (cash, rows, equity, gross_exposure) = self.snapshot_refs()?;
+        let positions = rows
+            .into_iter()
+            .map(
+                |(key, quantity, average_price, mark, market_value, unrealized)| {
+                    (
+                        key.to_string(),
+                        quantity,
+                        average_price,
+                        mark,
+                        market_value,
+                        unrealized,
+                    )
+                },
+            )
+            .collect();
+        Ok((cash, positions, equity, gross_exposure))
     }
 }
 

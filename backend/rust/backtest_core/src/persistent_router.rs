@@ -1,5 +1,5 @@
 use crate::persistent::StoredOrder;
-use crate::portfolio::Portfolio;
+use crate::portfolio::{Portfolio, PositionRefRow};
 use crate::quote::parse_decimal_ratio;
 use pyo3::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -98,7 +98,7 @@ impl RouterConfig {
 
 struct RouteContext<'a> {
     decision_id: &'a str,
-    portfolio_positions: &'a [(String, i64, f64, f64, f64, f64)],
+    portfolio_positions: &'a [PositionRefRow<'a>],
     bars: &'a HashMap<String, CloseWire>,
     orders: &'a mut Vec<StoredOrder>,
     config: &'a RouterConfig,
@@ -114,7 +114,7 @@ struct RouteContext<'a> {
 }
 
 impl RouteContext<'_> {
-    fn position(&self, key: &str) -> Option<&(String, i64, f64, f64, f64, f64)> {
+    fn position(&self, key: &str) -> Option<&PositionRefRow<'_>> {
         self.position_index
             .get(key)
             .map(|index| &self.portfolio_positions[*index])
@@ -708,11 +708,12 @@ pub(crate) fn route_basic_decision(
     if decision.3.iter().all(|action| action.0 == "no_action") {
         return Ok((Vec::new(), Vec::new(), Vec::new(), None));
     }
-    let (_, positions, equity, _) = portfolio.snapshot()?;
+    // 라우팅은 포지션 key를 읽기만 한다 — 원장에서 빌려 결정마다 나던 String 복제를 없앤다.
+    let (_, positions, equity, _) = portfolio.snapshot_refs()?;
     // 원장 key는 유일하므로 먼저 들어온 항목만 남기는 `find`와 결과가 같다.
     let mut position_index: HashMap<&str, usize> = HashMap::with_capacity(positions.len());
     for (index, row) in positions.iter().enumerate() {
-        position_index.entry(row.0.as_str()).or_insert(index);
+        position_index.entry(row.0).or_insert(index);
     }
     let mut context = RouteContext {
         decision_id,
@@ -773,11 +774,11 @@ pub(crate) fn route_basic_decision(
                     }
                     if action.2.as_deref() == Some("replace") {
                         for position in &positions {
-                            if !seen.contains(&position.0) {
+                            if !seen.contains(position.0) {
                                 deltas.push((
                                     (
                                         "quantity".to_string(),
-                                        position.0.clone(),
+                                        position.0.to_string(),
                                         String::new(),
                                         String::new(),
                                         None,

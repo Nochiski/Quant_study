@@ -3,9 +3,9 @@ plan_version: 2
 project: strategy-gui-editing
 project_status: IN_REVIEW
 current_phase: P1,P2,P3
-current_pr: P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01,P3-02,P4-01
-active_prs: [P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01, P3-02, P4-01]
-parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02, P1-06, P2-03, P3-01, P3-02, P4-01]
+current_pr: P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01,P3-02,P4-01,P4-02
+active_prs: [P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01, P3-02, P4-01, P4-02]
+parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02, P1-06, P2-03, P3-01, P3-02, P4-01, P4-02]
 last_updated: 2026-09-18T04:54:16+09:00
 planned_prs: 18
 merged_prs: 0
@@ -25,8 +25,8 @@ progress_percent: 0
 |---|---|
 | Project status | `IN_REVIEW` |
 | Current phase | `P1,P2,P3` |
-| Current/next PR | `P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01,P3-02,P4-01` |
-| Active PR | `P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01, P3-02, P4-01` |
+| Current/next PR | `P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01,P3-02,P4-01,P4-02` |
+| Active PR | `P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01, P3-02, P4-01, P4-02` |
 | Progress | `0 / 18 merged (0%)` |
 | Approved | `9 / 18` |
 | Aggregated at | `2026-09-18 04:54 KST` |
@@ -88,16 +88,16 @@ progress_percent: 0
 
 | 항목 | 값 |
 |---|---|
-| PR | `P4-01` |
-| Intent | spec D6 Form projection: runtime schema × parse tree × compile 진단 → 섹션/필드 목록 순수 함수 `projectForm`. 스키마 해석 공통 함수 `schemaFacts`·`referenceCandidates`를 `schema-navigator.ts`로 내려 Inspector·완성·Form이 공유 |
-| Acceptance | WORKFLOW P4-01(+구현 결정: 루트 스칼라 섹션, `applicable` vs 진단 분리, graph-link/list-link, summary 규칙) |
-| Non-goals | 편집 컨트롤·트랜잭션 연결(P4-02), 목록 편집(P4-03), page 연결(P4-04) |
-| Branch/worktree | `feat/gui-p4-01-form-projection` (base `feat/gui-p3-02-source-transactions-hook` `bef91cc`) |
-| Base SHA | `bef91cc` |
-| Head SHA | `d9160ef` (diff freeze) |
-| Diff stat | model 4(신규 `form-projection.ts`)·index·테스트 1(신규), WORKFLOW·SoT 1행 |
-| Focused tests | form-projection 7 · contract-inspector 22 · schema-navigator · schema-assist · canonical-snippets 16 (전부 무변경 통과) |
-| Full gate | Vitest 519 passed(46 files) · typecheck · lint · build |
+| PR | `P4-02` |
+| Intent | 편집 가능한 Form 패널: 컨트롤별 커밋 규칙(텍스트류 blur/Enter, 선택류 즉시)으로 `SourceTransactions.apply` 한 번, 미작성 기본값 placeholder·"기본값으로"·"설정 안 함", 진단 배지, 잠금 사유. Phase 3 감사 R1~R4·DEFECT-003/004 대응(훅 `disabled`·owner별 feedback·스니펫 훅 주입) |
+| Acceptance | WORKFLOW P4-02(+구현 결정·Phase 3 감사 대응) |
+| Non-goals | 목록 섹션 편집(P4-03), page 연결·hidden 편집기·e2e(P4-04) |
+| Branch/worktree | `feat/gui-p4-02-form-panel` (base `feat/gui-p4-01-form-projection` `399f02a`; 별도 worktree `scad-p4`) |
+| Base SHA | `399f02a` |
+| Head SHA | `5946bf9` (diff freeze) |
+| Diff stat | model 3(신규 `form-transactions.ts`)·hook 2·ui 2(신규 패널+css)·index·messages·테스트 6(신규 2), WORKFLOW |
+| Focused tests | form-transactions 4 · strategy-form-panel 7 · use-source-transactions 7 · snippet-insertion 3 · document-routes 62 |
+| Full gate | Vitest 532 passed(48 files) · typecheck · lint · build |
 
 ---
 
@@ -149,7 +149,7 @@ Phase exit:
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [ ] | `P4-01` | `form-projection.ts` (schema × tree × 진단) | P3-02, P2-03 | `IN_REVIEW` | [#121](https://github.com/Nochiski/Quant_study/pull/121) · `review_gui_p4_01` 배정 · diff freeze `d9160ef` |
-| [ ] | `P4-02` | 스칼라·enum·boolean·date·nullable·catalog·reference 컨트롤 | P4-01 | `WAITING` | — |
+| [ ] | `P4-02` | Form 컨트롤·트랜잭션 연결 | P4-01, P3-02 | `IN_REVIEW` | [#122](https://github.com/Nochiski/Quant_study/pull/122) · `review_gui_p4_02` 배정 · diff freeze `5946bf9` |
 | [ ] | `P4-03` | 목록 섹션: eligibility rules, parameters, factors 헤더·preset, 참조 가드 | P4-02 | `WAITING` | — |
 | [ ] | `P4-04` | IDE·page 연결, stale/JSON 잠금, i18n, e2e, SoT 규칙 개정 | P4-03 | `WAITING` | — |
 
@@ -196,6 +196,7 @@ Phase exit:
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
+| P4-02 | form-transactions 4·strategy-form-panel 7·use-source-transactions 7·snippet-insertion 3·document-routes 62 | Vitest 532 passed(48 files)·typecheck·lint·build | 해당 없음(SDK 무변경) | page 미연결(P4-04에서 e2e) | 원격 CI frontend job 대상 | 2026-09-18 |
 | P4-01 | form-projection 7·contract-inspector 22·schema-navigator·schema-assist·canonical-snippets 16 | Vitest 519 passed(46 files)·typecheck·lint·build | 해당 없음(SDK 무변경) | 해당 없음(순수 projection, UI 무변경) | 원격 CI frontend job 대상 | 2026-09-18 |
 | P3-02 | use-source-transactions 5·source-transactions 22·canonical-snippets 16·snippet-insertion 8·property 1(`FC_NUM_RUNS=3000`)·contract-inspector 22 (감사 `vitest --reporter=json` 실측) | Vitest 512 passed(45 files)·typecheck·lint·build·e2e chromium-workflow 5 passed; backend pytest 1,316 passed·ruff·pyright 0 | 해당 없음(SDK·openapi 무변경) | 해당 없음(공개 UI 동작 동일; 기본값 판정 표시만 추가) | 원격 CI frontend·backend job 대상 | 2026-09-18 |
 | P3-01 | source-transactions 10·property 1(`FC_NUM_RUNS=3000` 통과) | Vitest 490 passed(44 files)·typecheck·lint·build | 해당 없음(SDK 무변경) | 해당 없음(순수 함수) | 원격 CI frontend job 대상 | 2026-09-18 |
@@ -213,6 +214,7 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-18 KST | Claude | P4-02 구현·self-check(별도 worktree) + Phase 3 감사 대응(R1·R3: 훅 `disabled` 사유 owner, `editor-inactive`; R2: feedback `owner`, 스니펫 훅 주입; R4: reset 주석 삭제 테스트·PR 명기; DEFECT-003 계약 테스트; DEFECT-004 scope 값 비교) → diff freeze `5946bf9`, stacked PR #122(base P4-01), `review_gui_p4_02`(opus) 배정 → IN_REVIEW(P4-01·P4-02 동시 리뷰, parallel_window 2). 사용자 대면 변화: projection view의 스니펫 삽입 안내가 `editor-inactive` 문구로 | 13.3 diff freeze |
 | 2026-09-18 KST | Claude | P4-01 구현·self-check → P3-02 감사 후속 `bef91cc` 위로 rebase, 감사 R5로 SoT 행을 "필드 표시 사실" 범위로 축소, diff freeze `d9160ef`, stacked PR #121(base P3-02), `review_gui_p4_01`(opus) 배정 → IN_REVIEW. 결정: `schemaFacts`/`referenceCandidates`를 navigator로, `applicable`(스키마 판정)과 배지(backend 진단) 분리(Phase 2 감사 이월 결정 확정), 루트 스칼라 `key: ""` 섹션, `properties` object 필드 → graph-link·배열 필드 → list-link, summary 규칙 | 13.3 diff freeze |
 | 2026-09-18 KST | Claude | `audit_gui_phase3` 수신: PASS(blocking 0). DEFECT-P3X-001 flow 컬렉션 제한 문구 과대(replace-scalar는 동작)·002 `yes` 따옴표 예시 오류·003 `run`이 `enabled`를 강제하지 않는 계약 미단언·004 feedback scope가 memo identity → 문서 액션 9건 반영(WORKFLOW acceptance 블록 2·제한 문구 2·SoT 행 2·PLAN 2). Phase 2 이월 5: 3 해소, 업그레이드 `replaceRange` 별도 경로는 설계상 잔존(SoT 행에 명기), boolean equals 비교 변동 없음. Phase 4 위험 R1(Form view 활성 시 `editorActive=false`로 전부 거부)·R2(스니펫 훅 자체 인스턴스 → 공유 시 feedback/label 교차)·R3(`formDisabledReason` 중복 판정)·R4(reset이 섹션 마지막 필드에서 주석 삭제)·R5(P4-01 SoT 행이 코드보다 강함)·R6(연타 시 parse 2회 누적) → 결정: 훅이 `disabled` 사유·owner별 feedback을 내고 `editorActive`는 "hidden 편집기가 살아 있는가"(R1·R3, P4-02), 스니펫 훅은 인스턴스 주입 + owner `snippet`(R2, P4-02), R4는 P4-02 테스트·PR 본문 명기, R5는 P4-01 SoT 행을 실제 범위로 축소, R6는 P4-04 e2e 시나리오, 004는 값 비교로 수정(P4-02). Phase 3 exit 2항 체크 | 13.6 Phase 감사 |
 | 2026-09-18 KST | Claude | `review_gui_p3_02` 2차 APPROVE → P3-02 APPROVED. Phase 3 PR 2/2 승인. 게이트 수치 정정(Vitest 512·source-transactions 19·canonical-snippets 16). 다음: Phase 3 exit 감사(`audit_gui_phase3`) → P4-01(#PR 대기, 브랜치 `feat/gui-p4-01-form-projection` 구현 완료)·P4-02(브랜치 `feat/gui-p4-02-form-panel` 구현 완료) PR 개설 | 13.5 판정 |

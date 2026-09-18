@@ -180,6 +180,7 @@ export {
   nodePointerOf,
   nodeReferenceKeys,
   removeNode,
+  removeNodeAt,
   rewireInput,
   selectedNodePointer,
   setMissingPolicy,

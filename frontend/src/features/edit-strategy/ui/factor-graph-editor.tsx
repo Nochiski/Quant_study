@@ -9,8 +9,9 @@ import {
   authoredFactors,
   GRAPH_OWNER,
   nodeKinds,
-  removeNode,
+  removeNodeAt,
   selectedNodePointer,
+  setNodeField,
 } from "../model/graph-transactions";
 import type { JsonSchema } from "../model/schema-navigator";
 import { factorGraphPointer } from "../model/use-execution-plans";
@@ -56,11 +57,11 @@ export const FactorGraphEditor = ({
   const kinds = nodeKinds(schema, tree, factorPointer);
   const [kind, setKind] = useState<string>("");
   const chosenKind = kind || (kinds[0]?.[0] ?? "");
-  // 삭제 거부 안내는 판정을 낸 tree에만 붙는다(P4-03 리뷰 P2-2와 같은 규칙).
+  // 삭제 거부 안내는 판정을 낸 tree에만 붙는다(P4-03 리뷰 P2-2와 같은 규칙). `by`가 null이면 문서에서 못 찾은 경우.
   const [blocked, setBlocked] = useState<{
     tree: unknown;
-    nodeId: string;
-    by: string[];
+    label: string;
+    by: string[] | null;
   } | null>(null);
   const blockedNow = blocked !== null && blocked.tree === tree ? blocked : null;
   const disabled = transactions.disabled;
@@ -72,6 +73,14 @@ export const FactorGraphEditor = ({
     "graph",
   );
   const nodes = graphSection?.lists.find((list) => list.key === "nodes");
+  // 표시 이름은 `node_id`(없으면 첫 문자열 값)라 겹칠 수 있다 → 겹치면 문서 순번을 붙여 접근성 이름을 유일하게
+  // 한다(리뷰 DEFECT-132-01(b)). 연산은 언제나 pointer로 한다.
+  const labelOf = (index: number): string => {
+    const items = nodes?.items ?? [];
+    const summary = items[index]?.summary ?? "";
+    const duplicated = items.filter((item) => item.summary === summary).length > 1;
+    return duplicated ? `${summary} (${index + 1})` : summary;
+  };
   const nodePointer = selectedNodePointer(selectedPointer, factorPointer);
   const selectedItem =
     nodePointer === null
@@ -95,16 +104,19 @@ export const FactorGraphEditor = ({
     if (transactions.apply(added.op, added.nodeId, GRAPH_OWNER, NO_FOCUS))
       onSelectPointer(`${graphPointer}/nodes/${nextIndex}`);
   };
-  const remove = (nodeId: string): void => {
-    const removal = removeNode(tree, factorPointer, nodeId);
+  // 삭제는 표시 이름이 아니라 pointer로 한다(리뷰 DEFECT-132-01: 중복·누락 `node_id`에서 다른 노드가 지워졌다).
+  const remove = (target: string, label: string): void => {
+    const removal = removeNodeAt(tree, factorPointer, target);
     if ("error" in removal) {
-      if (removal.error === "referenced")
-        setBlocked({ tree, nodeId, by: removal.by });
+      setBlocked({
+        tree,
+        label,
+        by: removal.error === "referenced" ? removal.by : null,
+      });
       return;
     }
-    const removedSelected =
-      removal.kind === "remove" && removal.pointer === nodePointer;
-    if (transactions.apply(removal, nodeId, GRAPH_OWNER, NO_FOCUS) && removedSelected)
+    const removedSelected = target === nodePointer;
+    if (transactions.apply(removal, label, GRAPH_OWNER, NO_FOCUS) && removedSelected)
       onSelectPointer(graphPointer);
   };
 
@@ -166,12 +178,7 @@ export const FactorGraphEditor = ({
               ))}
             </select>
           ) : null}
-          <Button
-            size="small"
-            onClick={add}
-            disabled={chosenKind === ""}
-            aria-label={t("graph.addNode")}
-          >
+          <Button size="small" onClick={add} disabled={chosenKind === ""}>
             {t("graph.addNode")}
           </Button>
         </div>
@@ -179,16 +186,17 @@ export const FactorGraphEditor = ({
           <p className="factor-graph__editor-state">{t("graph.noNodes")}</p>
         ) : (
           <ul className="factor-graph__editor-nodes">
-            {nodes.items.map((item) => {
+            {nodes.items.map((item, index) => {
               const kindField = item.fields.find((field) => field.key === "kind");
               const active = item.pointer === nodePointer;
+              const label = labelOf(index);
               return (
                 <li key={item.pointer} aria-current={active ? "true" : undefined}>
                   <button
                     type="button"
                     className="factor-graph__editor-node"
                     onClick={() => onSelectPointer(item.pointer)}
-                    aria-label={t("graph.editNode").replace("{node}", item.summary)}
+                    aria-label={t("graph.editNode").replace("{node}", label)}
                   >
                     <strong>{item.summary}</strong>
                     {kindField !== undefined ? (
@@ -198,8 +206,8 @@ export const FactorGraphEditor = ({
                   <Button
                     size="small"
                     tone="danger"
-                    onClick={() => remove(item.summary)}
-                    aria-label={`${item.summary} · ${t("graph.removeNode")}`}
+                    onClick={() => remove(item.pointer, label)}
+                    aria-label={`${label} · ${t("graph.removeNode")}`}
                   >
                     {t("graph.removeNode")}
                   </Button>
@@ -210,9 +218,11 @@ export const FactorGraphEditor = ({
         )}
         {blockedNow !== null ? (
           <p className="strategy-form__invalid" role="alert">
-            {t("graph.removeBlocked")
-              .replace("{node}", blockedNow.nodeId)
-              .replace("{pointers}", blockedNow.by.join(", "))}
+            {blockedNow.by === null
+              ? t("graph.removeMissing").replace("{node}", blockedNow.label)
+              : t("graph.removeBlocked")
+                  .replace("{node}", blockedNow.label)
+                  .replace("{pointers}", blockedNow.by.join(", "))}
           </p>
         ) : null}
       </fieldset>
@@ -232,7 +242,37 @@ export const FactorGraphEditor = ({
           {t("graph.selectedNode")}
           {selectedItem !== undefined ? <code>{selectedItem.summary}</code> : null}
         </legend>
-        {nodeSection === null ? (
+        {selectedItem !== undefined && selectedItem.branches !== null ? (
+          // `kind`가 없거나 분기와 안 맞는 노드(리뷰 DEFECT-132-02): P4-03 목록과 같은 kind 선택을 제시한다.
+          <div className="factor-graph__editor-add">
+            <span className="factor-graph__editor-state">
+              {t("form.list.branchNeeded").replace(
+                "{kinds}",
+                selectedItem.branches.join(", "),
+              )}
+            </span>
+            <select
+              aria-label={`${selectedItem.summary} · ${t("form.list.kind")}`}
+              value=""
+              onChange={(event) => {
+                if (event.target.value === "") return;
+                transactions.apply(
+                  setNodeField(tree, selectedItem.pointer, "kind", event.target.value),
+                  "kind",
+                  GRAPH_OWNER,
+                  NO_FOCUS,
+                );
+              }}
+            >
+              <option value="">{t("form.list.kind")}</option>
+              {selectedItem.branches.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : nodeSection === null ? (
           <p className="factor-graph__editor-state">{t("graph.noSelection")}</p>
         ) : (
           <FormFieldsEditor

@@ -438,7 +438,7 @@
 }
 
 .factor-graph__editor-nodes li[aria-current="true"] .factor-graph__editor-node {
-  border-color: var(--accent, currentColor);
+  border-color: var(--accent);
 }
 
 .factor-graph__editor-node {

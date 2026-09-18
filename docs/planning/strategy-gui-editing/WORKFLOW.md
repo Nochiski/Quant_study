@@ -885,6 +885,12 @@ export const suggestNodeId = (tree, factorPointer, base: string): string;   // b
   편집 컨트롤 병합은 P5-03 검토. "그래프 설정"은 `graph`가 있을 때만(없는 팩터는 노드 추가가 `graph`를 연다).
   feedback 문구는 `ui/transaction-feedback.tsx`(Form·Graph 공용). "읽기 전용 투영" 문구는 편집 입력이 있으면
   "편집은 source 트랜잭션"으로 바뀐다(`graph.readOnly` 삭제).
+- 리뷰 후속(P5-02 1차): 삭제는 표시 이름이 아니라 pointer로 한다(`removeNodeAt`; DEFECT-132-01 —
+  `node_id` 중복·누락 문서에서 id 기반 삭제가 다른 노드를 지웠다). 표시 이름이 겹치면 접근성 이름에 문서
+  순번을 붙인다(`close (2) · 삭제`). 못 찾은 노드는 `graph.removeMissing` 안내. `kind`가 분기와 안 맞는
+  노드를 선택하면 P4-03 목록처럼 kind 선택을 제시한다(`setNodeField(kind)`, DEFECT-132-02). reference
+  후보는 중복을 걷는다(132-04). 기록: 확정 직후 parse 디바운스 구간의 편집기 잠금(132-03)은 훅 `disabled`
+  판정을 P5-03에서 "parse 실패"로 좁혀 처리, `node_id` 중복을 막는 판정·참조 갱신 rename은 범위 밖(후속).
 
 ### P5-03 — 연결·e2e·문서·규칙 마감
 

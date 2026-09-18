@@ -149,7 +149,8 @@ const controlFor = (
       return {
         kind: "reference",
         namespace,
-        candidates: referenceCandidates(root, pointer, namespace, tree),
+        // 같은 id가 중복인 문서에서도 option key가 유일하도록 중복을 걷는다(P5-02 리뷰 DEFECT-132-04).
+        candidates: [...new Set(referenceCandidates(root, pointer, namespace, tree))],
       };
   }
   if (facts.enumValues.length > 0)

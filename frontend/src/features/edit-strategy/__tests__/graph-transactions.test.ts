@@ -9,6 +9,7 @@ import {
   nodePointerOf,
   nodeReferenceKeys,
   removeNode,
+  removeNodeAt,
   rewireInput,
   setMissingPolicy,
   setNodeField,
@@ -207,6 +208,37 @@ describe("graph transactions (P5-01)", () => {
     expect(setMissingPolicy(tree, F0, "zero")).toMatchObject({
       pointer: "/factors/0/graph/missing_policy",
       value: "zero",
+    });
+  });
+
+  it("removes by pointer when node ids are duplicated or missing (review DEFECT-132-01)", () => {
+    const duplicated = treeOf(
+      VERBOSE.replace(
+        "      output_node_id: mom_252\n",
+        "        - kind: field\n          node_id: spare\n          field_id: price.volume\n        - kind: field\n          node_id: spare\n          field_id: price.open\n        - kind: field\n          field_id: price.high\n      output_node_id: mom_252\n",
+      ),
+    );
+    // id 기반은 첫 일치 노드를 고른다(둘째 spare를 누르려 해도 첫째가 지워진다); pointer 기반은 누른 노드를 지운다.
+    expect(removeNode(duplicated, F0, "spare")).toEqual({
+      kind: "remove",
+      pointer: "/factors/0/graph/nodes/2",
+    });
+    expect(removeNodeAt(duplicated, F0, "/factors/0/graph/nodes/3")).toEqual({
+      kind: "remove",
+      pointer: "/factors/0/graph/nodes/3",
+    });
+    // 참조 검사는 같다.
+    expect(removeNodeAt(duplicated, F0, "/factors/0/graph/nodes/0")).toMatchObject({
+      error: "referenced",
+      by: ["/factors/0/graph/nodes/1/input_node_id"],
+    });
+    // node_id가 없는 노드도 pointer로 지운다; 없는 pointer는 not-found.
+    expect(removeNodeAt(duplicated, F0, "/factors/0/graph/nodes/4")).toEqual({
+      kind: "remove",
+      pointer: "/factors/0/graph/nodes/4",
+    });
+    expect(removeNodeAt(duplicated, F0, "/factors/0/graph/nodes/9")).toEqual({
+      error: "not-found",
     });
   });
 

@@ -1634,7 +1634,8 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
     replaceText(view, 'schema_version: "1.1"\ntitle: [broken\n');
     await user.click(screen.getByRole("tab", { name: "Form" }));
     const form = await formPanel();
-    expect(within(form).getByText("STALE")).toBeInTheDocument();
+    // stale은 같은 버전의 parse가 실패한 뒤에만 참이다(P4-04 후속) — 디바운스가 끝날 때까지 기다린다.
+    expect(await within(form).findByText("STALE")).toBeInTheDocument();
     expect(
       within(form).getByText("구문 오류 · source를 먼저 고치세요"),
     ).toBeInTheDocument();

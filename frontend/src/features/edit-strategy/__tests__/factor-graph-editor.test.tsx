@@ -19,6 +19,16 @@ const WITH_SPARE = VERBOSE.replace(
   "      output_node_id: mom_252\n",
   "        - kind: field\n          node_id: px\n          field_id: price.volume\n      output_node_id: mom_252\n",
 );
+// 같은 그래프에 `node_id: spare`가 둘(둘 다 미참조)이고 `node_id`가 없는 노드가 하나 더 있는 문서.
+const WITH_DUPLICATE = VERBOSE.replace(
+  "      output_node_id: mom_252\n",
+  "        - kind: field\n          node_id: spare\n          field_id: price.volume\n        - kind: field\n          node_id: spare\n          field_id: price.open\n        - kind: field\n          field_id: price.high\n      output_node_id: mom_252\n",
+);
+// `kind`가 분기와 안 맞는 노드가 있는 문서.
+const WITH_MYSTERY = VERBOSE.replace(
+  "      output_node_id: mom_252\n",
+  "        - node_id: mystery\n          operator: sum\n      output_node_id: mom_252\n",
+);
 // P4-03 "항목 추가"가 만드는 빈 팩터가 둘째로 있는 문서.
 const WITH_EMPTY = VERBOSE.replace(
   "portfolio:\n",
@@ -166,6 +176,47 @@ describe("FactorGraphEditor (P5-02)", () => {
     );
     // 선택돼 있던 노드를 지우면 그래프 pointer로 돌아간다.
     expect(onSelectPointer).toHaveBeenLastCalledWith("/factors/0/graph");
+  });
+
+  it("removes by pointer so duplicate or missing node ids never delete another node (DEFECT-132-01)", async () => {
+    const user = userEvent.setup();
+    const transactions = stub();
+    renderEditor(WITH_DUPLICATE, transactions, "/factors/0/graph");
+    // 참조된 노드(close ← mom_252)는 거부하고 참조 pointer를 알려 준다.
+    await user.click(editor().getByRole("button", { name: "close · 삭제" }));
+    expect(transactions.apply).not.toHaveBeenCalled();
+    expect(editor().getByRole("alert")).toHaveTextContent("/factors/0/graph/nodes/1/input_node_id");
+    // 중복 표시 이름(spare ×2)은 문서 순번으로 구분되고, 누른 행의 pointer가 지워진다(id로 첫 노드를 찾지 않는다).
+    await user.click(editor().getByRole("button", { name: "spare (4) · 삭제" }));
+    expect(transactions.apply).toHaveBeenLastCalledWith(
+      { kind: "remove", pointer: "/factors/0/graph/nodes/3" },
+      "spare (4)",
+      "graph",
+      { focusEditor: false },
+    );
+    // node_id가 없는 노드는 첫 문자열 값(field_id)로 표시되고 역시 pointer로 지운다.
+    await user.click(editor().getByRole("button", { name: "price.high · 삭제" }));
+    expect(transactions.apply).toHaveBeenLastCalledWith(
+      { kind: "remove", pointer: "/factors/0/graph/nodes/4" },
+      "price.high",
+      "graph",
+      { focusEditor: false },
+    );
+  });
+
+  it("offers a kind select for a node whose kind does not resolve (DEFECT-132-02)", async () => {
+    const user = userEvent.setup();
+    const transactions = stub();
+    renderEditor(WITH_MYSTERY, transactions, "/factors/0/graph/nodes/2");
+    const selected = within(editor().getByRole("group", { name: /선택한 노드/ }));
+    expect(selected.queryByText("노드를 선택하면 속성을 편집합니다")).toBeNull();
+    await user.selectOptions(selected.getByRole("combobox", { name: "mystery · 종류" }), "unary");
+    expect(transactions.apply).toHaveBeenLastCalledWith(
+      { kind: "insert-key", parentPointer: "/factors/0/graph/nodes/2", key: "kind", value: "unary" },
+      "kind",
+      "graph",
+      { focusEditor: false },
+    );
   });
 
   it("locks the editor with the hook's reason and shows only graph-owned feedback", () => {

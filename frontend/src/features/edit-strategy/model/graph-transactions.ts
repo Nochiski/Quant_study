@@ -287,6 +287,30 @@ export const removeNode = (
   return { kind: "remove", pointer };
 };
 
+/**
+ * 노드 pointer로 삭제(리뷰 DEFECT-132-01). 화면 표시 이름이 아니라 문서 위치가 정본이다 — `node_id`가
+ * 중복이거나 없는 노드에서 `removeNode(id)`는 첫 일치 노드를 지워 다른 노드가 사라진다. 참조 검사는
+ * `removeNode`와 같다(그 팩터 `graph` 스코프).
+ */
+export const removeNodeAt = (
+  tree: unknown,
+  factorPointer: string,
+  nodePointer: string,
+): SourceOperation | { error: "referenced"; by: string[] } | { error: "not-found" } => {
+  const node = valueAt(tree, nodePointer);
+  if (!isRecord(node)) return { error: "not-found" };
+  const nodeId = typeof node.node_id === "string" ? node.node_id : "";
+  const by =
+    nodeId === ""
+      ? []
+      : findReferences(tree, "node", nodeId, nodePointer, {
+          within: graphPointer(factorPointer),
+        }).map((reference) => reference.pointer);
+  return by.length > 0
+    ? { error: "referenced", by }
+    : { kind: "remove", pointer: nodePointer };
+};
+
 /** `missing_policy` 확정. */
 export const setMissingPolicy = (
   tree: unknown,

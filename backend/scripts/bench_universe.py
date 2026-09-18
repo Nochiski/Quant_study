@@ -15,11 +15,18 @@ peak RSS와 raw sample을 기록한다.
 `--core all`은 프로세스 공유라 RSS가 격리되지 않는다 — 세 코어가 같은 프로세스 peak를 받는다.
 Peak RSS 정본은 `--core <one>` 단독 실행이다.
 
+`--density`는 synthetic 유니버스의 세션 × 종목 격자를 비워 희소 피드를 만든다. Rust feed의
+행 조회표는 밀도 20% 미만에서 `RowIndex::Sparse`(세션별 HashMap)를, 그 이상에서 `Dense`를
+고르므로 이 옵션 없이는 Sparse 경로가 한 번도 돌지 않는다. 어느 쪽이 뽑혔는지는 Rust가
+노출하지 않으므로 같은 규칙을 Python에서 재현해 JSON `workload.row_index_expected`에 남긴다.
+
 사용법:
     uv run python scripts/bench_universe.py <원장 디렉토리> --instruments 100 --core python
     uv run python scripts/bench_universe.py <원장 디렉토리> --instruments 100 --core all --profile
     uv run python scripts/bench_universe.py <원장 디렉토리> --instruments 100 --core all \
         --strategy tape
+    uv run python scripts/bench_universe.py <원장 디렉토리> --instruments 300 --synthetic \
+        --density 0.15 --core all --strategy tape
 """
 
 from __future__ import annotations
@@ -259,10 +266,38 @@ def load_full_calendar_universe(
     return FixtureUniverse(instruments=instruments, bars=loaded.bars)
 
 
+def listing_windows(sessions: int, size: int, density: float) -> tuple[tuple[int, int], ...]:
+    """종목별 상장 구간 `[start, end)`를 세션 인덱스로 돌려준다.
+
+    밀도 `density`를 맞추는 방법은 여럿이지만 여기서는 **순차 상장**을 쓴다. 모든 종목이
+    같은 길이 `round(sessions * density)`의 연속 구간을 갖고, 시작 세션만 0 ~ `sessions -
+    window` 사이에 고르게 흩어진다. 종목마다 bar 수가 같으므로 실제 밀도가 `density`와
+    정확히 같고, 구간이 연속이라 상장·상폐가 한 번씩만 일어나는 실제 누적 유니버스와 같은
+    모양이다 (세포 단위 의사난수로 비우면 한 종목이 살아 있는 내내 bar가 깜빡거려 실제
+    원장에 없는 패턴이 된다).
+
+    `size == 1`이면 시작이 0 하나뿐이라 뒤쪽 세션에 bar가 없어 feed 세션 수 자체가 줄고
+    실효 밀도는 1.0이 된다. 희소 경로 측정은 종목 수가 충분할 때만 뜻이 있다.
+    """
+    window = max(1, min(sessions, round(sessions * density)))
+    spread = sessions - window
+    last = max(size - 1, 1)
+    windows: list[tuple[int, int]] = []
+    for index in range(size):
+        start = spread * index // last
+        windows.append((start, start + window))
+    return tuple(windows)
+
+
 def synthetic_universe(
-    bars: tuple[Bar, ...], size: int
+    bars: tuple[Bar, ...], size: int, density: float = 1.0
 ) -> tuple[tuple[InstrumentId, ...], tuple[Bar, ...]]:
-    """Clone one complete price history into a deterministic order-heavy universe."""
+    """Clone one complete price history into a deterministic order-heavy universe.
+
+    `density`가 1.0 미만이면 `listing_windows`의 순차 상장 구간 밖 bar를 비워 세션 × 종목
+    격자를 희소하게 만든다. Rust `PersistentFeed`는 밀도 20% 미만에서 `RowIndex::Sparse`를
+    고르므로(`feed.rs` `RowIndex` 문서) 그 경로를 재려면 0.2 미만을 준다.
+    """
     by_instrument: dict[InstrumentId, list[Bar]] = {}
     for bar in bars:
         by_instrument.setdefault(bar.instrument, []).append(bar)
@@ -271,6 +306,7 @@ def synthetic_universe(
     instruments = tuple(
         InstrumentId("XKRX", f"SYN{i:06d}", AssetClass.EQUITY, "KRW") for i in range(size)
     )
+    windows = listing_windows(len(template), size, density)
     expanded = tuple(
         Bar(
             ts=bar.ts,
@@ -283,11 +319,26 @@ def synthetic_universe(
         )
         for session_index, bar in enumerate(template)
         for instrument_index, instrument in enumerate(instruments)
+        if windows[instrument_index][0] <= session_index < windows[instrument_index][1]
         for factor in (
             math.exp(0.10 * math.sin(session_index * 0.12 + instrument_index * 0.37)),
         )
     )
     return instruments, expanded
+
+
+# Rust `feed.rs`의 `DENSE_BYTES_PER_SLOT` / `SPARSE_BYTES_PER_ROW`와 같은 값이다. 이 값이
+# 바뀌면 벤치가 기록하는 `row_index_expected`도 함께 고쳐야 한다 (Rust는 어느 표현을 골랐는지
+# Python에 노출하지 않으므로 선택 규칙을 여기서 다시 계산한다).
+_DENSE_BYTES_PER_SLOT = 4
+_SPARSE_BYTES_PER_ROW = 20
+
+
+def row_index_expected(sessions: int, instruments: int, rows: int) -> str:
+    """Rust `PersistentFeed`가 고를 행 조회표 표현을 같은 규칙으로 재현한다."""
+    if sessions * instruments * _DENSE_BYTES_PER_SLOT <= rows * _SPARSE_BYTES_PER_ROW:
+        return "dense"
+    return "sparse"
 
 
 def main(argv: list[str]) -> int:
@@ -304,11 +355,25 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--warmup", type=int, default=0)
     parser.add_argument("--synthetic", action="store_true")
+    parser.add_argument(
+        "--density",
+        type=float,
+        default=1.0,
+        help=(
+            "synthetic 유니버스의 세션 × 종목 격자 밀도 (0 초과 1 이하). 1.0 미만이면 종목마다 "
+            "연속 상장 구간만 bar를 남겨 희소 피드를 만든다. 0.2 미만이면 Rust feed가 "
+            "RowIndex::Sparse를 고른다."
+        ),
+    )
     parser.add_argument("--json-out", type=Path)
     parser.add_argument("--start", type=lambda s: date.fromisoformat(s), default=date(2020, 1, 1))
     parser.add_argument("--end", type=lambda s: date.fromisoformat(s), default=date(2024, 12, 31))
     parser.add_argument("--profile", action="store_true")
     args = parser.parse_args(argv[1:])
+    if not 0.0 < args.density <= 1.0:
+        parser.error(f"--density는 0 초과 1 이하여야 한다 — 받은 값={args.density}")
+    if args.density != 1.0 and not args.synthetic:
+        parser.error("--density는 --synthetic 유니버스에서만 뜻이 있다")
 
     try:
         fixture = load_full_calendar_universe(
@@ -319,12 +384,16 @@ def main(argv: list[str]) -> int:
         return 1
     instruments, bars = fixture.instruments, fixture.bars
     if args.synthetic:
-        instruments, bars = synthetic_universe(bars, args.instruments)
+        instruments, bars = synthetic_universe(bars, args.instruments, args.density)
     feed = DataFeed(bars)
     cores = ("python", "rust_legacy", "rust") if args.core == "all" else (args.core,)
+    slots = len(feed) * len(instruments)
+    bar_density = len(bars) / slots if slots else 1.0
+    index_kind = row_index_expected(len(feed), len(instruments), len(bars))
     print(
         f"instruments={len(instruments)} sessions={len(feed)} "
-        f"bars={len(bars)} cores={','.join(cores)} strategy={args.strategy} "
+        f"bars={len(bars)} density={bar_density:.4f} row_index={index_kind} "
+        f"cores={','.join(cores)} strategy={args.strategy} "
         f"repeat={args.repeat} warmup={args.warmup}"
     )
 
@@ -394,6 +463,9 @@ def main(argv: list[str]) -> int:
             "rebalance_every": args.every,
             "strategy": args.strategy,
             "synthetic": args.synthetic,
+            "requested_density": args.density,
+            "bar_density": bar_density,
+            "row_index_expected": index_kind,
             "repeat": args.repeat,
             "warmup": args.warmup,
             "rss_isolated": rss_isolated,

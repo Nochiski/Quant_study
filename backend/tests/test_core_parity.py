@@ -98,19 +98,28 @@ from tests.test_engine_golden import (
 
 INSTRUMENT = make_instrument()
 RUST_ONLY = pytest.mark.skipif(not core_available("rust"), reason="backtest_core 확장 없음")
+# rust_legacy(= backtest_core.Portfolio 단독 어댑터)를 직접 쓰는 테스트용.
+# deprecation 경고는 의도된 것이라 무시한다.
+LEGACY_DEPRECATION = pytest.mark.filterwarnings("ignore:.*deprecated.*:DeprecationWarning")
 RUST_ENGINE_CORES = [
     pytest.param("rust", marks=RUST_ONLY, id="rust"),
     pytest.param("rust_persistent", marks=RUST_ONLY, id="rust_persistent"),
     pytest.param(
         "rust_legacy",
-        marks=[
-            RUST_ONLY,
-            pytest.mark.filterwarnings("ignore:.*deprecated.*:DeprecationWarning"),
-        ],
+        marks=[RUST_ONLY, LEGACY_DEPRECATION],
         id="rust_legacy",
     ),
 ]
 CORES = ["python", *RUST_ENGINE_CORES]
+# make_portfolio가 단독 원장을 돌려주는 코어. persistent 코어는 PersistentEngine이 원장을 소유한다.
+STANDALONE_PORTFOLIO_CORES = [
+    "python",
+    pytest.param(
+        "rust_legacy",
+        marks=[RUST_ONLY, LEGACY_DEPRECATION],
+        id="rust_legacy",
+    ),
+]
 
 
 @pytest.fixture(params=CORES)
@@ -222,15 +231,18 @@ def scenario(portfolio: PortfolioLedger) -> list[tuple[object, ...]]:
     return trace
 
 
-@pytest.mark.parametrize("rust_core", RUST_ENGINE_CORES)
-def test_portfolio_scenario_identical_across_cores(rust_core: str) -> None:
+@RUST_ONLY
+@LEGACY_DEPRECATION
+def test_portfolio_scenario_identical_across_cores() -> None:
+    """포트폴리오 단독 회계의 parity oracle. 엔진 코어 parity는 trace 비교 테스트가 덮는다."""
     python = scenario(make_portfolio("python", 100_000.0, allow_short=True, allow_margin=False))
-    rust = scenario(make_portfolio(rust_core, 100_000.0, allow_short=True, allow_margin=False))
+    rust = scenario(make_portfolio("rust_legacy", 100_000.0, allow_short=True, allow_margin=False))
     assert python == rust
 
 
-def test_portfolio_errors_map_to_domain_exceptions(core: str) -> None:
-    portfolio = make_portfolio(core, 500.0)
+@pytest.mark.parametrize("core_name", STANDALONE_PORTFOLIO_CORES)
+def test_portfolio_errors_map_to_domain_exceptions(core_name: str) -> None:
+    portfolio = make_portfolio(core_name, 500.0)
     with pytest.raises(NegativeCashError, match="cash"):
         portfolio.apply(fill(Side.BUY, 10, 100.0))
     with pytest.raises(NegativePositionError, match="sell"):
@@ -240,6 +252,14 @@ def test_portfolio_errors_map_to_domain_exceptions(core: str) -> None:
 def test_unavailable_core_is_an_error_not_a_fallback() -> None:
     with pytest.raises(CoreUnavailable, match="nope"):
         make_portfolio("nope", 1.0)
+
+
+@RUST_ONLY
+@pytest.mark.parametrize("core_name", ["rust", "rust_persistent"])
+def test_persistent_core_has_no_standalone_portfolio(core_name: str) -> None:
+    """persistent 코어는 PersistentEngine이 원장을 소유한다 — 단독 어댑터를 주면 안 된다."""
+    with pytest.raises(CoreUnavailable, match="owns its portfolio inside PersistentEngine"):
+        make_portfolio(core_name, 1_000.0)
 
 
 # --- Engine result diff ---------------------------------------------------------
@@ -420,7 +440,7 @@ def test_multi_instrument_equity_is_bit_identical_in_insertion_order() -> None:
         return (s.cash, s.equity, s.gross_exposure, tuple(p.instrument.symbol for p in s.positions))
 
     python = scenario(make_portfolio("python", 3_305_944.3718483075, allow_short=True))
-    rust = scenario(make_portfolio("rust", 3_305_944.3718483075, allow_short=True))
+    rust = scenario(make_portfolio("rust_legacy", 3_305_944.3718483075, allow_short=True))
     assert python == rust
 
 
@@ -432,7 +452,7 @@ def test_instruments_differing_only_in_currency_are_distinct_positions() -> None
     krw = InstrumentId(venue="XKRX", symbol="005930", asset_class=AssetClass.EQUITY, currency="KRW")
     usd = InstrumentId(venue="XKRX", symbol="005930", asset_class=AssetClass.EQUITY, currency="USD")
     results = []
-    for core_name in ("python", "rust"):
+    for core_name in ("python", "rust_legacy"):
         portfolio = make_portfolio(core_name, 1_000_000.0)
         for seq, instrument in enumerate((krw, usd), start=1):
             portfolio.apply(

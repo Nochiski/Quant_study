@@ -246,13 +246,15 @@ impl PersistentFeed {
         &self.symbol_by_key
     }
 
-    pub(crate) fn current_marks(&self) -> PyResult<Vec<(String, f64)>> {
+    /// 세션 종가 마크. key는 등록부 문자열을 빌려준다 — 세션마다 종목 수만큼 String을
+    /// 새로 만들지 않도록 `Portfolio::mark_refs`가 참조로 받는다.
+    pub(crate) fn current_marks(&self) -> PyResult<Vec<(&str, f64)>> {
         let index = self.current_index()?;
         Ok(self
             .row_range(index)
             .map(|row| {
                 let instrument = self.instrument_ids[row] as usize;
-                (self.keys[instrument].clone(), self.closes[row])
+                (self.keys[instrument].as_str(), self.closes[row])
             })
             .collect())
     }

@@ -439,7 +439,7 @@ impl PersistentEngine {
             .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?;
         let should_dispatch = feed.schedule_matches(schedule)?;
         let marks = feed.current_marks()?;
-        self.portfolio.mark(marks);
+        self.portfolio.mark_refs(&marks);
         let (cash, positions, _, _) = self.portfolio.snapshot()?;
         let borrow_daily = short_borrow_bps_annual / 10_000.0 / f64::from(annualization_days);
         let mut costs = Vec::new();

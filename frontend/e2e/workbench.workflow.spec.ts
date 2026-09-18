@@ -5,11 +5,13 @@ import {
   type Locator,
   type Page,
 } from "@playwright/test";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  compileStrategyDocument,
   createStrategy,
   explainFactorGraph,
   getBacktestResult,
@@ -22,6 +24,7 @@ import {
   type StrategyTraceRequest,
 } from "../src/shared/api/generated";
 import { createClient } from "../src/shared/api/generated/client";
+import { runtimeDatabasePath } from "./runtime";
 
 const BACKEND = "http://localhost:8000";
 const apiClient = createClient({ baseUrl: BACKEND });
@@ -116,6 +119,36 @@ const expectBacktestResultPresentation = async (page: Page) => {
   expect(backgrounds.get("1440-light")).not.toBe(backgrounds.get("1440-dark"));
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.emulateMedia({ colorScheme: "light" });
+};
+
+/**
+ * schema 1.0 동결 row 두 개(1.0 YAML 원문 문서, source 없는 legacy JSON)를 backend 테스트 헬퍼로
+ * 격리 SQLite에 직접 심는다. 1.0 인코더는 더 이상 없으므로 API로는 만들 수 없다. revision은 불변이라
+ * serial 그룹 재시도가 같은 DB를 다시 쓰면 지울 수 없으므로 시도마다 고유한 전략 id를 심는다
+ * (`frozen-doc-<suffix>`). DB 경로와 suffix는 공백이 있어도 shell이 쪼개지 않도록 환경 변수로 넘긴다.
+ */
+const seedFrozenRevisionRows = (): { document: string; legacy: string } => {
+  const suffix = `-${Date.now().toString(36)}`;
+  const result = spawnSync(
+    "uv",
+    ["run", "python", "tests/frozen_revision_rows.py"],
+    {
+      cwd: resolve(ownDirectory, "../../backend"),
+      encoding: "utf8",
+      shell: process.platform === "win32",
+      env: {
+        ...process.env,
+        STRATEGY_WORKBENCH_E2E_DB: runtimeDatabasePath(),
+        STRATEGY_WORKBENCH_E2E_SEED_SUFFIX: suffix,
+      },
+    },
+  );
+  if (result.status !== 0) {
+    throw new Error(
+      `frozen revision seeding failed — status=${result.status} stdout=${result.stdout} stderr=${result.stderr}`,
+    );
+  }
+  return { document: `frozen-doc${suffix}`, legacy: `frozen-legacy${suffix}` };
 };
 
 const currentSource = async (page: Page) => {
@@ -606,9 +639,7 @@ test.describe("professional YAML workflow", () => {
             parameter_ids: (savedV4.spec.parameters ?? []).map(
               (parameter) => parameter.parameter_id,
             ),
-            factor_ids: savedV4.spec.factors.map(
-              (item) => item.factor_id,
-            ),
+            factor_ids: savedV4.spec.factors.map((item) => item.factor_id),
             subgraph_ids: [],
           },
         })
@@ -993,5 +1024,115 @@ test.describe("professional YAML workflow", () => {
     expect(migrated.origin).toBe("document");
     expect(migrated.source).toBe(whitespaceOnly);
     expect(migrated.spec_hash).toBe(saved.spec_hash);
+  });
+
+  test("upgrades a frozen 1.0 revision, saves it as 1.1 and backtests it", async ({
+    page,
+  }) => {
+    const frozen = seedFrozenRevisionRows();
+    const nextRevision = 2;
+    const banner = page.getByRole("region", { name: "schema 1.0 문서" });
+    const upgrade = banner.getByRole("button", { name: "1.1로 업그레이드" });
+
+    await openEditor(
+      page,
+      `/research/strategies/${frozen.document}/revisions/1`,
+    );
+    await expectPhase(page, "구조 오류");
+    await expect(banner).toContainText("이 문서는 schema 1.0입니다");
+    await expect(backtest(page)).toBeDisabled();
+    await expect(upgrade).toBeEnabled();
+
+    const upgraded = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname ===
+          "/api/v1/strategy-documents/upgrade",
+    );
+    await upgrade.click();
+    expect((await upgraded).status()).toBe(200);
+    await expect(banner).toContainText("1.1로 다시 썼습니다");
+    const source = await currentSource(page);
+    expect(source).toContain('schema_version: "1.1"');
+    expect(source).not.toContain("  factors:\n");
+    await expectPhase(page, "검증 통과");
+
+    await saveAndWaitForRevision(page, nextRevision);
+    await expect(banner).toHaveCount(0);
+    const savedV2 = requireData(
+      (
+        await getStrategyDocument({
+          client: apiClient,
+          path: { strategy_id: frozen.document, revision: nextRevision },
+        })
+      ).data,
+      "get upgraded frozen-doc revision",
+    );
+    expect(savedV2.schema_version).toBe("1.1");
+    expect(savedV2.requires_upgrade).toBe(false);
+    // 업그레이드는 의미를 바꾸지 않는다: 1.1 golden fixture와 같은 spec hash.
+    const golden = requireData(
+      (
+        await compileStrategyDocument({
+          client: apiClient,
+          body: { source: GOLDEN, format: "yaml" },
+        })
+      ).data,
+      "compile 1.1 golden fixture",
+    );
+    expect(savedV2.spec_hash).toBe(golden.spec_hash);
+
+    await expect(backtest(page)).toBeEnabled();
+    const submittedRun = page.waitForRequest(
+      (request) =>
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === "/api/v1/backtests",
+    );
+    await backtest(page).click();
+    expect((await submittedRun).postDataJSON()).toMatchObject({
+      strategy_source: {
+        kind: "saved_revision",
+        strategy_id: frozen.document,
+        revision: nextRevision,
+        expected_spec_hash: savedV2.spec_hash,
+      },
+    });
+    await expect(page).toHaveURL(/\/research\/backtests\/[^/?]+$/u);
+    await expect(page.getByRole("status", { name: "실행 상태" })).toContainText(
+      "completed",
+      { timeout: 120_000 },
+    );
+
+    // legacy JSON 동결 row: generated source가 이미 1.1이므로 업그레이드 대신 새 revision 저장만 제안한다.
+    await openEditor(page, `/research/strategies/${frozen.legacy}/revisions/1`);
+    await expect(banner).toContainText("schema 1.0 동결 revision입니다");
+    await expect(upgrade).toHaveCount(0);
+    await expectPhase(page, "검증 통과");
+
+    await page.goto("/research/strategies");
+    await expect(
+      page.getByRole("heading", { name: "전략 이력" }),
+    ).toBeVisible();
+    const legacyRow = page
+      .getByRole("row")
+      .filter({ hasText: frozen.legacy })
+      .first();
+    await expect(legacyRow).toContainText("1.0 동결");
+    const docRow = page
+      .getByRole("row")
+      .filter({ hasText: frozen.document })
+      .first();
+    await expect(docRow).toContainText(`v${nextRevision}`);
+    await expect(docRow).not.toContainText("1.0 동결");
+    await docRow.getByRole("button", { name: /Revision 펼치기/u }).click();
+    const revisions = page.getByRole("region", {
+      name: new RegExp(`저장 revision 목록: .*${frozen.document}`, "u"),
+    });
+    await expect(
+      revisions.getByRole("row").filter({ hasText: "v1" }),
+    ).toContainText("1.0 동결");
+    await expect(
+      revisions.getByRole("row").filter({ hasText: `v${nextRevision}` }),
+    ).not.toContainText("1.0 동결");
   });
 });

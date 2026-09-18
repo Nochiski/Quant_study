@@ -44,4 +44,5 @@ export {
   type StrategySummary,
   type StrategyTraceRequest,
   type StrategyTraceResponse,
+  type UpgradedDocument,
 } from "./strategy-workbench";

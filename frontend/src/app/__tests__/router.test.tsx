@@ -522,6 +522,61 @@ describe("App Shell routes", () => {
     ).toHaveAttribute("href", expect.stringContaining("view=diff"));
   });
 
+  it("marks frozen schema 1.0 strategies and revisions in the history lists", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(`${API}/api/v1/strategies`, () =>
+        HttpResponse.json({
+          items: [
+            {
+              strategy_id: "frozen-legacy",
+              latest_revision: 1,
+              requires_upgrade: true,
+              title: "Frozen strategy",
+              spec_hash: "f".repeat(64),
+              updated_at: "2026-09-04T00:00:00Z",
+            },
+          ],
+          total: 1,
+          offset: 0,
+          limit: 20,
+        }),
+      ),
+      http.get(`${API}/api/v1/strategies/:strategyId/revisions`, () =>
+        HttpResponse.json({
+          items: [1, 2].map((revision) => ({
+            strategy_id: "frozen-legacy",
+            revision,
+            requires_upgrade: revision === 1,
+            spec_hash: `${revision}`.repeat(64).slice(0, 64),
+            source_hash: null,
+            source_format: null,
+            origin: "legacy_json",
+            change_note: null,
+            created_at: `2026-09-0${revision}T00:00:00Z`,
+          })),
+          total: 2,
+          offset: 0,
+          limit: 20,
+        }),
+      ),
+    );
+    mount("/research/strategies");
+    const row = (await screen.findByText("Frozen strategy")).closest("tr")!;
+    expect(within(row).getByText("1.0 동결")).toBeInTheDocument();
+    await user.click(
+      within(row).getByRole("button", {
+        name: "Revision 펼치기: Frozen strategy (frozen-legacy)",
+      }),
+    );
+    const revisions = await screen.findByRole("region", {
+      name: "저장 revision 목록: Frozen strategy (frozen-legacy)",
+    });
+    const rows = within(revisions).getAllByRole("row").slice(1);
+    expect(within(rows[0]!).getByText("1.0 동결")).toBeInTheDocument();
+    expect(within(rows[1]!).queryByText("1.0 동결")).toBeNull();
+  });
+
   it("paginates strategy and revision pages with distinct disclosure ownership", async () => {
     const strategyOffsets: number[] = [];
     const revisionOffsets: number[] = [];

@@ -486,6 +486,27 @@ const ko = {
   "leave.leave": "나가기",
   "page.revision.untitled": "제목 없는 전략",
   "page.revision.generated": "legacy JSON에서 생성된 문서",
+  "upgrade.title": "schema 1.0 문서",
+  "upgrade.body":
+    "이 문서는 schema 1.0입니다. 1.1로 업그레이드하면 주석과 순서를 유지한 채 현재 규칙으로 다시 씁니다(실행 취소 1단계).",
+  "upgrade.action": "1.1로 업그레이드",
+  "upgrade.pending": "업그레이드 중…",
+  "upgrade.applied": "1.1로 다시 썼습니다. 검토 후 새 revision으로 저장하세요.",
+  "upgrade.frozenGenerated":
+    "schema 1.0 동결 revision입니다. 생성된 문서는 이미 1.1이므로 편집 후 새 revision으로 저장하세요.",
+  "upgrade.backtestBlocked":
+    "저장된 1.0 revision으로는 백테스트를 실행할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
+  "upgrade.error.editor": "편집기가 준비되지 않아 업그레이드하지 못했습니다.",
+  "upgrade.error.composing": "입력 중에는 업그레이드할 수 없습니다.",
+  "upgrade.error.request":
+    "업그레이드 요청이 실패했습니다. 원문은 그대로입니다. ({detail})",
+  "upgrade.error.strategy_document.upgrade_drift":
+    "업그레이드 결과가 변환 규칙과 어긋나 중단했습니다. 원문은 그대로입니다.",
+  "upgrade.error.strategy_document.not_upgradeable":
+    "schema 1.0 문서만 업그레이드할 수 있습니다.",
+  "upgrade.error.strategy_document.invalid":
+    "구문 오류가 있어 업그레이드할 수 없습니다. 먼저 구문을 고치세요.",
+  "history.frozen": "1.0 동결",
   "assist.type": "타입",
   "assist.required": "필수",
   "assist.optional": "선택",
@@ -578,6 +599,8 @@ const ko = {
   "toolbar.run.open": "백테스트 보기",
   "toolbar.run.accepted": "백테스트 {runId} 접수됨",
   "toolbar.run.failed": "백테스트 시작 실패",
+  "backtest.error.backtest.strategy.requires_upgrade":
+    "저장된 1.0 revision은 실행할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
   "ide.meta.schemaVersion": "schema",
   "ide.meta.sourceHash": "source hash",
   "ide.meta.specHash": "spec hash",
@@ -1245,6 +1268,28 @@ export const messages = {
     "leave.leave": "Leave",
     "page.revision.untitled": "Untitled strategy",
     "page.revision.generated": "Generated from legacy JSON",
+    "upgrade.title": "Schema 1.0 document",
+    "upgrade.body":
+      "This document is schema 1.0. Upgrading rewrites it under the current rules while keeping comments and order (one undo step).",
+    "upgrade.action": "Upgrade to 1.1",
+    "upgrade.pending": "Upgrading…",
+    "upgrade.applied":
+      "Rewritten as 1.1. Review it, then save it as a new revision.",
+    "upgrade.frozenGenerated":
+      "This is a frozen schema 1.0 revision. The generated document is already 1.1: edit it and save a new revision.",
+    "upgrade.backtestBlocked":
+      "A stored 1.0 revision cannot run a backtest. Upgrade it and save a new revision first.",
+    "upgrade.error.editor": "The editor is not ready, so nothing was upgraded.",
+    "upgrade.error.composing": "Cannot upgrade while composing input.",
+    "upgrade.error.request":
+      "The upgrade request failed. The text is unchanged. ({detail})",
+    "upgrade.error.strategy_document.upgrade_drift":
+      "The rewritten text disagreed with the upgrade rules, so it was rejected. The text is unchanged.",
+    "upgrade.error.strategy_document.not_upgradeable":
+      "Only schema 1.0 documents can be upgraded.",
+    "upgrade.error.strategy_document.invalid":
+      "Syntax errors block the upgrade. Fix the syntax first.",
+    "history.frozen": "1.0 frozen",
     "assist.type": "Type",
     "assist.required": "required",
     "assist.optional": "optional",
@@ -1339,6 +1384,8 @@ export const messages = {
     "toolbar.run.open": "View backtest",
     "toolbar.run.accepted": "Backtest {runId} accepted",
     "toolbar.run.failed": "Backtest could not start",
+    "backtest.error.backtest.strategy.requires_upgrade":
+      "A stored 1.0 revision cannot run. Upgrade it and save a new revision first.",
     "ide.meta.schemaVersion": "schema",
     "ide.meta.sourceHash": "source hash",
     "ide.meta.specHash": "spec hash",

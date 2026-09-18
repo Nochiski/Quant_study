@@ -1,16 +1,13 @@
 import { defineConfig } from "@playwright/test";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { runtimeDatabasePath } from "./e2e/runtime";
 
 const frontendDirectory = dirname(fileURLToPath(import.meta.url));
 const backendDirectory = resolve(frontendDirectory, "../backend");
-const runtimeDirectory = process.env.STRATEGY_WORKBENCH_E2E_RUNTIME_DIR;
-if (runtimeDirectory === undefined || !isAbsolute(runtimeDirectory)) {
-  throw new Error(
-    "Run Playwright through `npm run test:e2e` so its isolated runtime can be cleaned up.",
-  );
-}
-const runtimeDatabase = join(runtimeDirectory, "strategy-workbench.sqlite3");
+// 격리 런타임 밖에서 실행되면 여기서 거부한다(run-playwright.mjs만 이 변수를 설정한다).
+const runtimeDatabase = runtimeDatabasePath();
 const ci = process.env.CI !== undefined;
 
 const browserProject = (

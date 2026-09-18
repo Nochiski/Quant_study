@@ -1,15 +1,15 @@
 ---
 plan_version: 2
 project: strategy-gui-editing
-project_status: IN_REVIEW
+project_status: APPROVED
 current_phase: P1,P2,P3,P4,P5
 current_pr: P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01,P3-02,P4-01,P4-02,P4-03,P4-04,P4-05,P5-01,P5-02,P5-03
 active_prs: [P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05, P5-01, P5-02, P5-03]
 parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02, P1-06, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05, P5-01, P5-02, P5-03]
-last_updated: 2026-09-18T17:13:41+09:00
+last_updated: 2026-09-18T18:46:33+09:00
 planned_prs: 19
 merged_prs: 0
-approved_prs: 18
+approved_prs: 19
 progress_percent: 0
 ---
 
@@ -23,13 +23,13 @@ progress_percent: 0
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_REVIEW` |
+| Project status | `APPROVED` |
 | Current phase | `P1,P2,P3,P4,P5` |
 | Current/next PR | `P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01,P3-02,P4-01,P4-02,P4-03,P4-04,P4-05,P5-01,P5-02,P5-03` |
 | Active PR | `P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05, P5-01, P5-02, P5-03` |
 | Progress | `0 / 19 merged (0%)` |
-| Approved | `18 / 19` |
-| Aggregated at | `2026-09-18 17:13 KST` |
+| Approved | `19 / 19` |
+| Aggregated at | `2026-09-18 18:46 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -80,7 +80,7 @@ progress_percent: 0
 | P2 | Frontend 1.1 and upgrade UI | 3 | 0 | `APPROVED` |
 | P3 | Source transactions | 2 | 0 | `APPROVED` |
 | P4 | Form editing | 5 | 0 | `APPROVED` |
-| P5 | Graph editing | 3 | 0 | `IN_REVIEW` |
+| P5 | Graph editing | 3 | 0 | `APPROVED` |
 | **Total** |  | **19** | **0** | **0%** |
 <!-- PLAN:PHASES:END -->
 
@@ -165,12 +165,12 @@ Phase exit:
 |---|---|---|---|---|---|
 | [ ] | `P5-01` | `graph-transactions.ts`: 노드 추가·필드·재연결·출력·삭제 가드·id 제안, `findReferences` 스코프, owner별 feedback, `planRemove` 선행 주석 | P4-05 | `APPROVED` | [#131](https://github.com/Nochiski/Quant_study/pull/131) · `review_gui_p5_01` 2차 APPROVE(`226231d`) |
 | [ ] | `P5-02` | Graph UI: 노드 추가 메뉴, property editor, 입력 슬롯, 키보드·ARIA | P5-01 | `APPROVED` | [#132](https://github.com/Nochiski/Quant_study/pull/132) · `review_gui_p5_02` 2차 APPROVE(`45f01c9`) |
-| [ ] | `P5-03` | 연결·e2e·문서·규칙 마감, read-only 문구 제거, 로드맵 M8 | P5-02, P4-04 | `IN_REVIEW` | [#133](https://github.com/Nochiski/Quant_study/pull/133) · `review_gui_p5_03` 1차 REQUEST_CHANGES(P1 2·P2 11) → 후속 `406976a` → 2차 REQUEST_CHANGES(신규 P1 2·P2 2) → 후속 `3ffeba3` → 3차 REQUEST_CHANGES(P1 2·P2 1) → 후속 `2efc44c` → 4차 중간 보고(P1 1: 편집 직후 blocked 사유가 `stale`) → 후속 `f283390`(4차 중간 보고: P1 닫힘·회귀 없음) + CI 수정 `c2f90c8` 재검토 중 |
+| [ ] | `P5-03` | 연결·e2e·문서·규칙 마감, read-only 문구 제거, 로드맵 M8 | P5-02, P4-04 | `APPROVED` | [#133](https://github.com/Nochiski/Quant_study/pull/133) · `review_gui_p5_03` 5차 APPROVE(`5de4464`, 문서 `ca46b56`) |
 
 Phase exit:
 
-- [ ] e2e "노드 추가 → 재연결 → plan 갱신 → 저장" green.
-- [ ] ADR·SoT·README·manual·로드맵 갱신.
+- [x] e2e "노드 추가 → 재연결 → plan 갱신 → 저장" green — P5-03 `chromium-workflow` Graph 시나리오(저장 revision hash = backend compile), 7/7.
+- [x] ADR·SoT·README·manual·로드맵 갱신 — ADR D5 개정·5절 취소선, SoT 전략 의미 행, README 2, 매뉴얼 8절, 로드맵 M8 주석, yaml-ui WORKFLOW 2.1/2.2/2.3(P5-03).
 - [ ] SoT·책임분리 최종 점검 기록.
 
 ---
@@ -181,6 +181,7 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
+| P5-03 | `review_gui_p5_03` | `4bf6342` | `5de4464` (diff freeze `e6a0074`; 후속 4회 + CI 수정) | APPROVE (1차 P1 2: 잠금 완화가 디바운스 구간 위치 연산을 열어 삭제 연타 데이터 손실·yaml-ui WORKFLOW 잔존 + P2 11 → `406976a`; 2차 P1 2: 구조 변경 직후 스칼라도 밀림·flake 케이스 SLOW 누락 → `3ffeba3`; 3차 P1 2: 재계산 투영이 blocked에서 소멸·케이스 단위 timeout 실패 → `2efc44c`; 4차 P1 1: 편집 직후 사유가 `stale` → `f283390`; CI backend `FactorStep` → `c2f90c8`. 5차: 실제 reducer 40ms 샘플링으로 DAG·배지 연속, 4라운드 프로브 전부 회귀 없음, 스크립트가 도메인 계약과 일치, 원격 CI 3 job pass) | 7 (전부 해소) | 매뉴얼 8절 스크린샷 없음, `lastStructural` ref가 문서 경계에 안 묶임(한 번 과잉 보류, 오기록 없음), compile error 뒤 `pending` 분기가 두 편집 전 DAG를 보일 수 있음, 모듈 미사용 export·`node_id` 중복 방지 부재, 이 PR이 안 돌린 Playwright project 4개(최종 보고 전 전체 실행), backend self-check의 `database/tests` 공백(WORKFLOW gate에 추가 `ca46b56`) | 2026-09-18 |
 | P5-02 | `review_gui_p5_02` | `a0e533d`(P5-01 후속) | `45f01c9` (diff freeze `0097e51`) | APPROVE (1차 REQUEST_CHANGES P1 DEFECT-132-01 노드 삭제가 표시 이름 기반 `nodePointerOf` 첫 일치로 다른 노드를 지움(GUI 도달 가능 silent data loss) + P2 7 → 후속 `45f01c9`: `removeNodeAt`(pointer 정본), 중복 표시 이름 순번, `graph.removeMissing`, kind 미해소 노드 kind select, 후보 `Set`, CSS·aria, stale route 테스트 `findByText`; 2차: 1차 프로브 A2/B2/B 전부 뒤집힘, 접근성 이름 단수 쿼리 구분, P5-01 후속과 맞물림(binary 두 슬롯 빈 select), 132-02 복구까지) | 1 (해소) | OBS-132-05 재컴파일 구간 DAG 목록 소멸·"재계산 중" 미표시(→ P5-03 후속에서 직전 ready 투영 유지 + 배지), 디바운스 잠금(132-03 → P5-03), `node_id` 중복 방지·rename 범위 밖, ready 분기 단위 테스트는 P5-03 e2e | 2026-09-18 |
 | P5-01 | `review_gui_p5_01` | `76842ab` | `226231d` (diff freeze `1e09b6e`) | APPROVE (1차 REQUEST_CHANGES P1-1 `addNode`가 `x-reference`를 `schemaFacts` 없이 직접 읽음(SoT owner 위반) + P2 8 → 후속 `226231d`: `nodeReferenceKeys`(`schemaFacts(...).reference`), 단일 참조 분기만 마지막 노드로 채움, `rewireInput(schema?)` 키 검증, 머리 주석(offset 0 블록) 보존, `parentLine < to` 가드(base의 `- - "#tag"` 실패 + 같은 모양 4건 살아남), memo 의존성; 2차: `x-reference` 직접 읽기 0건, 12분기 실측, base·1차·후속 3자 비교, property 2000×8 전부 통과) | 1 (해소) | 빈 줄로 시작하는 문서의 머리 주석은 여전히 삭제(가드가 offset 0만), `rewireInput`의 `schema`가 선택 인자(P5-02 UI는 reference select라 미호출), 루트가 시퀀스인 문서·flow 컨테이너의 `remove` 계획 실패(base 기존 결함, backlog) | 2026-09-18 |
 | P4-05 | `review_gui_p4_05` | `ef19805` | `b394dbe` | APPROVE (1차; P2 4: `kindOfBranch`가 분기 안 `properties.kind`의 `$ref`를 안 풀어 DEFECT-P4X-003 부분 해소, 중첩 목록이 스키마 순서와 무관하게 스칼라 뒤에 그려짐, `appendOperation` 루트 fallback이 부모 pointer 한 세그먼트 가정, `projectForm`의 `array === null` 죽은 분기; 감사 항목 001/003(부분)/004/007·문서 액션 11 대조, 중첩 목록 실제 planner 경로(`rules: []`·부모 없음·마지막 항목 삭제 → `[]`), 진단 소유권 누락 0·중복 0, 회귀 없음) | 0 | P2-1·P2-4는 P5-02에서 처리, P2-2(표시 순서)·P2-3(단일 세그먼트 부모 가정, Form object 섹션만 해당) 기록 | 2026-09-18 |
@@ -222,6 +223,7 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-18 KST | Claude | `review_gui_p5_03` 5차 APPROVE(`5de4464`) → P5-03 APPROVED. 19 PR 전부 APPROVED. Phase 5 exit 2항 체크. WORKFLOW backend gate에 `database/tests` 추가(`ca46b56`). 다음: 전체 Playwright(백테스트 포함) → `audit_gui_phase5` → PLAN COMPLETE → 사용자 지시대로 #133 CI 초록 확인 후 #106부터 순차 머지 | 13.5 판정 |
 | 2026-09-18 KST | Claude | 머지 준비 중 원격 CI 확인: 스택 중간 PR의 backend job이 `database/scripts/run_mvp_backtest.py`의 `FactorStep` ImportError(P1-01 `factors` 평탄화로 사라진 이름; 로컬 backend pytest는 `database/tests`를 안 돌려 미검출)로 P1-01부터 전부 빨강 → P5-03에 `c2f90c8` 커밋(`factors=(FactorSignal(...),)`), equity 테스트 `test_MVP_B_…` 로컬 통과. 사용자 지시(2026-09-18): 최종 보고 시 전체 E2E(백테스트 포함) → CI 통과 → 스택 머지. P1 PR들은 설계상 frontend CI가 빨강(SDK는 P2-01)이라 게이트는 최상위 #133 CI, 머지는 #106부터 순서대로 `--merge --delete-branch` | 13.3 CI |
 | 2026-09-18 KST | Claude | `review_gui_p5_03` 4차 중간 보고(3차 P1 2·P2 닫힘; 남은 P1: 실제 reducer 경로에서 편집 직후 plan 상태가 `blocked(stale)`(이전 compile spec 잔존, stale 판정이 pending보다 먼저)라 재계산 유지 조건(`pending`만)에 안 걸려 compile 응답 전까지 DAG가 사라짐, 테스트가 실제 경로를 안 탐) → 후속 `f283390`: 유지 조건에 `stale` 추가, 테스트를 stale → pending → loading 경로로, WORKFLOW 문구. Vitest 604/52·build·e2e 7/7 → 재검토 요청 | 13.5 재검토 |
 | 2026-09-18 KST | Claude | `review_gui_p5_03` 3차 REQUEST_CHANGES(2차 P1 2·P2 해소 확인; 신규 P1 재계산 투영을 blocked에서 버려 편집 경로(blocked pending → loading)에서 기능 소멸·단위 테스트가 ready → loading 직행만 검증, P1 케이스 단위 `SLOW`로는 부하 배율 8배를 못 따라잡아 다른 케이스 red(리뷰어가 1차 권고 철회); P2 Form 목록 잠금이 항목 필드까지 넓음) → 후속 `2efc44c`: `FactorGraphEditing.documentKey`(= `documentEpoch`)로 직전 투영을 문서 경계에만 묶고 blocked(pending)·loading 구간에 유지(테스트: ready → blocked pending → loading 유지, 문서 키 변경 시 폐기), Form은 추가·preset·삭제 버튼만 `settling` 비활성, route 파일 전체 `testTimeout: 15_000` 복구, 매뉴얼·WORKFLOW 문구. 전체 Vitest 2회 초록(604/52), e2e 7/7 → 재검토 요청 | 13.5 재검토 |

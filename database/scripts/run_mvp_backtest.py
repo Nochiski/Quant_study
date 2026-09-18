@@ -115,7 +115,8 @@ def momentum_spec(start: date, end: date, universe_id: str, price_field: str, to
         template,
         title=f"MVP-B {FACTOR_ID} on {price_field}",
         data=DataStep(market=Market.KRX, start=start, end=end, universe_id=universe_id),
-        # schema 1.1: `factors`는 `FactorStep` 래퍼 없이 FactorSignal 시퀀스다(GUI 편집 initiative P1-01 평탄화).
+        # schema 1.1: `factors`는 `FactorStep` 래퍼 없이 FactorSignal 시퀀스다
+        # (GUI 편집 initiative P1-01 평탄화).
         factors=(FactorSignal(
             factor_id=FACTOR_ID, label=definition.label, direction=FactorDirection.HIGH,
             weight=1.0, graph=graph),),

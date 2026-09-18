@@ -215,11 +215,35 @@ def test_lock_rejects_a_concurrent_pull_and_is_released_after(remote: FakeRemote
                                                                 capsys) -> None:
     lock = tmp_path / "equity" / "_sync" / "lock"
     lock.parent.mkdir(parents=True)
-    lock.write_text("pid=1\n", encoding="utf-8")
+    lock.write_text(json.dumps({"pid": 1, "started_at_utc": "now"}), encoding="utf-8")
     assert cli.main([*_base(tmp_path), "pull", "--no-space-check"]) == cli.EXIT_ERROR
     assert "holds the lock" in capsys.readouterr().err
-    lock.unlink()
+    # sync 는 락에 막혀도 last_run.json 에 실패를 남겨 status 가 낡은 성공을 보고하지 않는다
+    rc = cli.main([*_base(tmp_path), "sync", "--no-space-check", "--skip-catalog"])
+    assert rc == cli.EXIT_ERROR
+    last = json.loads((tmp_path / "equity" / "_sync" / "last_run.json").read_text(encoding="utf-8"))
+    assert last["exit_code"] == cli.EXIT_ERROR and "holds the lock" in last["error"]
+    capsys.readouterr()
+    assert cli.main([*_base(tmp_path), "status"]) == cli.EXIT_OK
+    assert "lock: held pid=1" in capsys.readouterr().out
+    # --break-lock 은 강제 회수, 정상 종료 뒤에는 락이 없다
+    assert cli.main([*_base(tmp_path), "pull", "--no-space-check", "--break-lock"]) == cli.EXIT_OK
+    assert "reclaiming" in capsys.readouterr().out
+    assert not lock.exists()
+
+
+def test_stale_lock_from_a_dead_run_is_reclaimed(remote: FakeRemote, tmp_path: Path,
+                                                 capsys) -> None:
+    import os
+
+    lock = tmp_path / "equity" / "_sync" / "lock"
+    lock.parent.mkdir(parents=True)
+    lock.write_text(json.dumps({"pid": 99999, "started_at_utc": "old"}), encoding="utf-8")
+    old = lock.stat().st_mtime - cli.LOCK_STALE_S - 60
+    os.utime(lock, (old, old))
+    assert cli.lock_info(tmp_path / "equity")["stale"] is True
     assert cli.main([*_base(tmp_path), "pull", "--no-space-check"]) == cli.EXIT_OK
+    assert "reclaiming stale lock" in capsys.readouterr().out
     assert not lock.exists()
 
 

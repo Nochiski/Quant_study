@@ -43,7 +43,7 @@ database\scripts\register_daily_sync.ps1
 | `verify` | `manifest`(current_build·카탈로그 snapshot) · `files`(이름·크기·MANIFEST 바이트) · `hash`(duckdb content_hash 재계산). `--offline` 은 hash 만. **검사 대상이 0건**(state 없음·`--tables` 오타)이면 통과가 아니라 4. stage 층은 파티션 content_hash 가 없어 hash 층위를 `skipped` 로 센다 | 0 · 4(불일치·검사 0건) |
 | `gc` | current 를 제외한 `v=*` 중 최신 `keep-1` 개만 남긴다. `_incoming` 잔재 정리 | 0 |
 | `catalog` | `python -m equity catalog` 위임 — `equity.duckdb` 매크로가 서버 절대경로를 굽고 있어 로컬에서 재생성해야 재무·컨센서스 필드가 산다 | 0 · 2 |
-| `sync` | pull → catalog(전송 실패가 없을 때) → verify(manifest·files + 이번에 받은 표의 hash). 카탈로그를 verify 앞에서 돌려야 verify 의 「카탈로그 stale」 지적이 그 자리에서 해소된다. 판본이 안 바뀐 표의 로컬 손상은 보이지 않으므로 `--hash-all`(전 표 hash, 주 1회 권장)을 따로 돌린다. 같은 층에 pull·gc·sync 가 겹치면 `_sync/lock` 으로 거부(2). `_sync/last_run.json` 에 결과, `_sync/logs/` 에 verb 별 최근 60개 로그 | 첫 비영 코드: pull 실패 2 · drifted 3 · catalog 실패 2 · 불일치 4 |
+| `sync` | pull → catalog(전송 실패가 없을 때) → verify(manifest·files + 이번에 받은 표의 hash). 카탈로그를 verify 앞에서 돌려야 verify 의 「카탈로그 stale」 지적이 그 자리에서 해소된다. 판본이 안 바뀐 표의 로컬 손상은 보이지 않으므로 `--hash-all`(전 표 hash, 주 1회 권장)을 따로 돌린다. 같은 층에 pull·gc·sync 가 겹치면 `_sync/lock` 으로 거부(2). 비정상 종료가 남긴 락은 3시간이 지나면 자동 회수하고, 그 전이라도 죽은 실행이 확실하면 `--break-lock`. `status` 가 락 보유자·경과를 보여 준다. `_sync/last_run.json` 에 결과, `_sync/logs/` 에 verb 별 최근 60개 로그 | 첫 비영 코드: pull 실패 2 · drifted 3 · catalog 실패 2 · 불일치 4 |
 | `status` | 마지막 실행 결과·테이블별 로컬 빌드. `--remote` 면 서버 current_build 와 대조해 `BEHIND` 표시 | 0 |
 
 `--tables a b` 로 일부 테이블만, `--json` 으로 기계용 출력, `--layer stage` 로 stage 층(같은 규약).

@@ -213,13 +213,15 @@ def cmd_plan(args: argparse.Namespace) -> int:
 def cmd_pull(args: argparse.Namespace) -> int:
     layer_root = _layer_root(args)
     state = load_state(layer_root, args.layer)
-    _acquire_lock(layer_root)
-    log, handle, _ = _log_writer(layer_root, "pull")
+    _acquire_lock(layer_root, break_lock=args.break_lock)
     try:
-        with open_sftp(_endpoint(args), accept_new_host_key=args.accept_new) as remote:
-            report, _ = _run_pull(remote, args, layer_root, state, log)
+        log, handle, _ = _log_writer(layer_root, "pull")
+        try:
+            with open_sftp(_endpoint(args), accept_new_host_key=args.accept_new) as remote:
+                report, _ = _run_pull(remote, args, layer_root, state, log)
+        finally:
+            handle.close()
     finally:
-        handle.close()
         _release_lock(layer_root)
     if args.json:
         print(json.dumps(_report_json(report), ensure_ascii=False, indent=1))
@@ -307,7 +309,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
 def cmd_gc(args: argparse.Namespace) -> int:
     layer_root = _layer_root(args)
     state = load_state(layer_root, args.layer)
-    _acquire_lock(layer_root)
+    _acquire_lock(layer_root, break_lock=args.break_lock)
     removed: list[str] = []
     warnings: list[str] = []
     try:
@@ -365,23 +367,62 @@ LOG_KEEP = 60
 LOCK_NAME = "lock"
 
 
+# 한 번의 sync 상한: pull(초회 1.5GB ≈ 3분) + catalog timeout 1h + verify. 이보다 오래된 락은 비정상
+# 종료(전원 차단·강제 종료)가 남긴 것으로 보고 회수한다 — 스케줄러가 매일 막히는 것을 막는다.
+LOCK_STALE_S = 3 * 3600
+
+
 class LayerLocked(RuntimeError):
     """같은 층에 pull·gc·sync 가 이미 돌고 있다(`_sync/lock`). 겹쳐 돌면 state.json 을 서로
     덮어쓴다."""
 
 
-def _acquire_lock(layer_root: Path) -> None:
-    path = layer_root / SYNC_DIR / LOCK_NAME
-    path.parent.mkdir(parents=True, exist_ok=True)
+def _lock_path(layer_root: Path) -> Path:
+    return layer_root / SYNC_DIR / LOCK_NAME
+
+
+def lock_info(layer_root: Path) -> dict[str, object] | None:
+    """락 파일이 있으면 {pid, started_at_utc, age_s, stale}. 없으면 None."""
+    path = _lock_path(layer_root)
+    if not path.exists():
+        return None
     try:
-        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError as error:
-        raise LayerLocked(
-            f"another pull/gc/sync holds the lock — path={path} "
-            f"(remove it if no ledger_sync process is running)"
-        ) from error
+        document = json.loads(path.read_text(encoding="utf-8"))
+        age_s = max(0.0, datetime.now(UTC).timestamp() - path.stat().st_mtime)
+    except (OSError, ValueError):
+        return {"pid": None, "started_at_utc": None, "age_s": None, "stale": True}
+    if not isinstance(document, dict):
+        document = {}
+    return {"pid": document.get("pid"), "started_at_utc": document.get("started_at_utc"),
+            "age_s": round(age_s), "stale": age_s > LOCK_STALE_S}
+
+
+def _acquire_lock(layer_root: Path, *, break_lock: bool = False,
+                  log: Log | None = None) -> None:
+    path = _lock_path(layer_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    while True:
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            break
+        except FileExistsError as error:
+            info = lock_info(layer_root) or {"stale": True}
+            if not (break_lock or info.get("stale")):
+                raise LayerLocked(
+                    f"another pull/gc/sync holds the lock — path={path} pid={info.get('pid')} "
+                    f"started={info.get('started_at_utc')} age_s={info.get('age_s')} "
+                    f"(if no ledger_sync process is running, rerun with --break-lock)"
+                ) from error
+            # 비정상 종료가 남긴(또는 사용자가 --break-lock 으로 지정한) 락 — 회수하고 계속한다.
+            (log or print)(f"warning: reclaiming {'stale ' if info.get('stale') else ''}lock — "
+                           f"path={path} pid={info.get('pid')} age_s={info.get('age_s')}")
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        handle.write(f"pid={os.getpid()} started={datetime.now(UTC).isoformat()}\n")
+        handle.write(json.dumps({"pid": os.getpid(),
+                                 "started_at_utc": datetime.now(UTC).isoformat()}))
 
 
 def _release_lock(layer_root: Path) -> None:
@@ -420,9 +461,17 @@ def _write_last_run(layer_root: Path, payload: dict[str, object]) -> Path:
 def cmd_sync(args: argparse.Namespace) -> int:
     layer_root = _layer_root(args)
     state = load_state(layer_root, args.layer)
-    _acquire_lock(layer_root)
-    log, handle, log_path = _log_writer(layer_root, "sync")
     started = datetime.now(UTC)
+    try:
+        _acquire_lock(layer_root, break_lock=args.break_lock)
+    except LayerLocked as error:
+        # 스케줄러가 매일 이 코드로 끝나면 status 가 낡은 성공을 계속 보고하면 안 된다 — 기록한다
+        _write_last_run(layer_root, {
+            "started_at_utc": started.isoformat(timespec="seconds"), "layer": args.layer,
+            "error": str(error), "exit_code": EXIT_ERROR,
+            "finished_at_utc": datetime.now(UTC).isoformat(timespec="seconds")})
+        raise
+    log, handle, log_path = _log_writer(layer_root, "sync")
     # 예상 밖 예외로 죽어도 last_run.json 에 "성공" 이 남지 않도록 실패로 시작해 성공 경로에서만
     # 내린다
     exit_code = EXIT_ERROR
@@ -512,11 +561,16 @@ def cmd_status(args: argparse.Namespace) -> int:
             "layer": args.layer, "root": str(layer_root), "last_run": last,
             "tables": {t: ts.build_id for t, ts in sorted(state.tables.items())},
             "remote": remote_builds or None, "behind": behind if args.remote else None,
-            "remote_errors": remote_errors or None,
+            "remote_errors": remote_errors or None, "lock": lock_info(layer_root),
         }, ensure_ascii=False, indent=1))
         return EXIT_OK
     print(f"== status {args.layer} root={layer_root} tables={len(state.tables)} "
           f"state_updated={state.updated_at_utc or '-'}")
+    lock = lock_info(layer_root)
+    if lock is not None:
+        print(f"   lock: held pid={lock.get('pid')} started={lock.get('started_at_utc')} "
+              f"age_s={lock.get('age_s')}"
+              + ("  STALE (rerun with --break-lock or wait)" if lock.get("stale") else ""))
     if last is not None:
         print(f"   last sync: exit={last.get('exit_code')} started={last.get('started_at_utc')} "
               f"finished={last.get('finished_at_utc')}"
@@ -562,6 +616,8 @@ def build_parser() -> argparse.ArgumentParser:
                        help="재사용 직전 로컬 파티션 해시 재계산을 건너뛴다(MANIFEST 값만 믿음)")
         p.add_argument("--keep", type=int, default=KEEP_DEFAULT, help="로컬에 남길 판본 수")
         p.add_argument("--no-space-check", action="store_true")
+        p.add_argument("--break-lock", action="store_true",
+                       help="다른 실행이 남긴 `_sync/lock` 을 강제 회수(그 실행이 죽었을 때만)")
 
     p_plan = sub.add_parser("plan", help="무엇을 받을지 보기")
     add_pull_options(p_plan)
@@ -580,6 +636,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_gc = sub.add_parser("gc", help="로컬 구판본 정리")
     p_gc.add_argument("--keep", type=int, default=KEEP_DEFAULT)
+    p_gc.add_argument("--break-lock", action="store_true")
     p_gc.set_defaults(fn=cmd_gc)
 
     p_catalog = sub.add_parser("catalog", help="equity.duckdb 재생성")

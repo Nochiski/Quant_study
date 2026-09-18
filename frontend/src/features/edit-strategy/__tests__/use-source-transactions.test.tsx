@@ -53,17 +53,19 @@ describe("useSourceTransactions", () => {
     act(() => result.current.onEditorReady(editor.handle));
     expect(result.current.enabled).toBe(true);
 
-    act(() =>
-      result.current.apply(
+    let applied: boolean | undefined;
+    act(() => {
+      applied = result.current.apply(
         {
           kind: "replace-scalar",
           pointer: "/risk/max_name_weight",
           value: 0.1,
         },
         "max_name_weight",
-      ),
-    );
+      );
+    });
 
+    expect(applied).toBe(true);
     expect(editor.handle.replaceRange).toHaveBeenCalledTimes(1);
     expect(editor.text()).toBe(
       'schema_version: "1.1"\nrisk:\n  max_name_weight: 0.1\n',
@@ -106,9 +108,14 @@ describe("useSourceTransactions", () => {
     );
     act(() => result.current.onEditorReady(editor.handle));
 
-    act(() =>
-      result.current.apply({ kind: "remove", pointer: "/nope" }, "nope"),
-    );
+    let applied: boolean | undefined;
+    act(() => {
+      applied = result.current.apply(
+        { kind: "remove", pointer: "/nope" },
+        "nope",
+      );
+    });
+    expect(applied).toBe(false);
     expect(result.current.feedback).toEqual({
       status: "error",
       owner: "default",

@@ -461,21 +461,17 @@ const FormFieldRow = ({
   const labelId = `${id}-label`;
   const [invalid, setInvalid] = useState<string | null>(null);
   const passive = isPassiveControl(field.control);
-  // 이 필드의 마지막 확정이 실패했으면 같은 값으로 다시 확정할 수 있어야 한다(DEFECT-P402-002).
-  const feedback = transactions.feedback;
-  const lastFailed =
-    feedback.status === "error" &&
-    feedback.owner === FORM_OWNER &&
-    feedback.label === field.key;
   // `x-default-from`: 생략하면 backend가 형제 키의 값으로 채운다 → placeholder도 그 값(P4-01 DEFECT-121-06).
   const defaultFromValue =
     field.defaultFrom === null
       ? undefined
       : section.fields.find((sibling) => sibling.key === field.defaultFrom)
           ?.value;
-  const commit = (value: Scalar): void => {
+  // 적용 여부를 컨트롤에 돌려준다: 실패한 확정의 재시도 판정은 컨트롤 로컬이다(P4-02 리뷰 009/012 —
+  // 공유 feedback 슬롯은 다른 필드가 덮고, label은 목록 항목끼리 겹친다).
+  const commit = (value: Scalar): boolean => {
     setInvalid(null);
-    transactions.apply(
+    return transactions.apply(
       fieldOperation(section, field, value),
       field.key,
       FORM_OWNER,
@@ -489,7 +485,6 @@ const FormFieldRow = ({
       labelId={labelId}
       field={field}
       catalogs={catalogs}
-      canRetry={lastFailed}
       placeholderValue={
         field.written
           ? undefined
@@ -503,6 +498,18 @@ const FormFieldRow = ({
     />
   );
   const unset = unsetOperation(section, field);
+  // 라벨 내용은 passive 행(링크·const)도 같다: 필수 별표·단위(P4-02 리뷰 010).
+  const labelBody = (
+    <>
+      <code>{field.key}</code>
+      {field.required ? <span aria-hidden="true"> *</span> : null}
+      {(field.displayUnit ?? field.unit) ? (
+        <span className="strategy-form__unit">
+          {` · ${field.displayUnit ?? field.unit}`}
+        </span>
+      ) : null}
+    </>
+  );
   return (
     <div
       className="strategy-form__field"
@@ -517,17 +524,11 @@ const FormFieldRow = ({
           className="strategy-form__label"
           title={field.templatePointer}
         >
-          <code>{field.key}</code>
+          {labelBody}
         </span>
       ) : (
         <label htmlFor={id} title={field.templatePointer}>
-          <code>{field.key}</code>
-          {field.required ? <span aria-hidden="true"> *</span> : null}
-          {(field.displayUnit ?? field.unit) ? (
-            <span className="strategy-form__unit">
-              {` · ${field.displayUnit ?? field.unit}`}
-            </span>
-          ) : null}
+          {labelBody}
         </label>
       )}
       <div className="strategy-form__control">
@@ -597,11 +598,10 @@ type ControlProps = {
   labelId: string;
   field: FormField;
   catalogs: FormCatalogs;
-  /** 마지막 확정이 실패했으면 같은 draft를 다시 확정할 수 있다. */
-  canRetry: boolean;
   /** 미작성 필드의 placeholder 값(runtime schema default 또는 `x-default-from` 형제 값). */
   placeholderValue: unknown;
-  onCommit: (value: Scalar) => void;
+  /** 값을 트랜잭션으로 넘긴다. 적용됐으면 true(`SourceTransactions.apply`와 같다). */
+  onCommit: (value: Scalar) => boolean;
   onValid: () => void;
   onInvalid: (reason: "number" | "integer" | "range" | "date") => void;
 };
@@ -700,7 +700,6 @@ const catalogOptions = (
 const TextualControl = ({
   id,
   field,
-  canRetry,
   placeholderValue,
   onCommit,
   onValid,
@@ -709,9 +708,14 @@ const TextualControl = ({
   const committed = draftOf(field.value);
   const [draft, setDraft] = useState(committed);
   // 같은 입력을 Enter와 blur가 연달아 확정해도 트랜잭션은 한 번이다.
-  // 마지막으로 확정한 (draft, committed) 쌍. 같은 committed 값에서 같은 draft를 다시 확정하지 않는다
-  // (Enter 뒤 같은 이벤트 안에서 오는 blur까지 동기적으로 막는다).
-  const submitted = useRef<{ draft: string; committed: string } | null>(null);
+  // 마지막으로 확정한 (draft, committed) 쌍과 그 결과. 같은 committed 값에서 같은 draft를 다시 확정하지
+  // 않는다(Enter 뒤 같은 이벤트 안에서 오는 blur까지 동기적으로 막는다). 확정이 실패했으면(`failed`)
+  // Enter로만 다시 시도한다 — blur마다 같은 값을 다시 계획하지 않는다(P4-02 리뷰 009/011).
+  const submitted = useRef<{
+    draft: string;
+    committed: string;
+    failed: boolean;
+  } | null>(null);
   // 트랜잭션이 적용되어 projection 값이 바뀌면 입력을 그 값으로 되돌린다(렌더 중 파생 상태 조정).
   const [seen, setSeen] = useState(committed);
   if (seen !== committed) {
@@ -719,15 +723,16 @@ const TextualControl = ({
     setDraft(committed);
   }
   const { control } = field;
-  const submit = (): void => {
+  const submit = (explicit: boolean): void => {
     // 값을 되돌리거나 다시 확정하면 이전 무효 안내는 사라진다(DEFECT-P402-003).
     onValid();
     if (draft === committed) return;
+    const last = submitted.current;
     if (
-      !canRetry &&
-      submitted.current !== null &&
-      submitted.current.draft === draft &&
-      submitted.current.committed === committed
+      last !== null &&
+      last.draft === draft &&
+      last.committed === committed &&
+      (!last.failed || !explicit)
     )
       return;
     const parsed = parseDraft(control, draft);
@@ -735,13 +740,14 @@ const TextualControl = ({
       onInvalid(parsed.reason);
       return;
     }
-    submitted.current = { draft, committed };
-    onCommit(parsed.value);
+    submitted.current = { draft, committed, failed: false };
+    if (onCommit(parsed.value) === false)
+      submitted.current = { draft, committed, failed: true };
   };
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
     if (event.key === "Enter") {
       event.preventDefault();
-      submit();
+      submit(true);
     } else if (event.key === "Escape") {
       event.preventDefault();
       setDraft(committed);
@@ -761,7 +767,7 @@ const TextualControl = ({
         placeholderValue === undefined ? undefined : draftOf(placeholderValue)
       }
       onChange={(event) => setDraft(event.target.value)}
-      onBlur={submit}
+      onBlur={() => submit(false)}
       onKeyDown={onKeyDown}
     />
   );

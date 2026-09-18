@@ -247,6 +247,19 @@ describe("StrategyFormPanel list sections", () => {
     );
   });
 
+  it("shows the x-default-from sibling value as the placeholder of an omitted item field", () => {
+    // factor `label`은 생략하면 backend가 `factor_id`로 채운다 → placeholder도 그 값(P4-02 리뷰 013).
+    const transactions = stub();
+    renderList(VERBOSE.replace('    label: "모멘텀"\n', ""), transactions);
+    const factors = within(screen.getByRole("group", { name: /^factors/ }));
+    const label = factors.getAllByRole("textbox", { name: /^label/ })[0]!;
+    expect(label).toHaveValue("");
+    expect(label).toHaveAttribute("placeholder", "momentum");
+    expect(
+      factors.getByText("생략하면 factor_id 값(momentum)을 씁니다"),
+    ).toBeInTheDocument();
+  });
+
   it("refuses to remove an item that another node references and lists the references", async () => {
     const user = userEvent.setup();
     const transactions = stub();

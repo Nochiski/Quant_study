@@ -249,6 +249,32 @@ describe("projectForm", () => {
     });
   });
 
+  it("still skips const keys when the property is a $ref to a definition", () => {
+    const schema: JsonSchema = {
+      type: "object",
+      properties: {
+        entries: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              kind: { $ref: "#/$defs/fixedKind" },
+              name: { type: "string" },
+            },
+          },
+        },
+      },
+      $defs: { fixedKind: { const: "fixed" } },
+    };
+    const entries = section(
+      projectForm(schema, parsed("entries:\n  - kind: fixed\n    name: alpha\n"), [])
+        .sections,
+      "entries",
+    );
+    if (entries.kind !== "list") throw new Error("entries is a list");
+    expect(entries.items.map((item) => item.summary)).toEqual(["alpha"]);
+  });
+
   it("exposes const values, x-default-from and the applicability presence flag", () => {
     const { sections } = projectForm(SCHEMA, parsed(MINIMAL), []);
     expect(field(objectFields(sections, ""), "schema_version").control).toEqual(

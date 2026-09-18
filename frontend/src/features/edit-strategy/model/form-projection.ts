@@ -19,6 +19,7 @@ import {
   type DefaultResolver,
 } from "./field-applicability";
 import {
+  resolveRef,
   schemaAt,
   schemaFacts,
   referenceCandidates,
@@ -219,21 +220,22 @@ const projectField = (
   };
 };
 
-/** `owner` pointer 자신 + 그 아래 pointer 중 `fields`가 흡수하지 않은 진단. */
+/** 진단을 흡수한 쪽(필드·항목·섹션)의 공통 모양. 소유권 집계는 이것만 본다. */
+type DiagnosticOwner = { readonly diagnostics: readonly DocumentDiagnostic[] };
+
+/** `owner` pointer 자신 + 그 아래 pointer 중 `owners`가 흡수하지 않은 진단. */
 const unabsorbedDiagnostics = (
   diagnostics: readonly DocumentDiagnostic[],
   owner: string,
-  fields: readonly FormField[],
-  includeRoot = false,
+  owners: readonly DiagnosticOwner[],
 ): DocumentDiagnostic[] => {
   const absorbed = new Set(
-    fields.flatMap((field) => field.diagnostics.map((d) => d.pointer)),
+    owners.flatMap((o) => o.diagnostics.map((d) => d.pointer)),
   );
   return diagnostics.filter(
     (diagnostic) =>
       !absorbed.has(diagnostic.pointer) &&
       (diagnostic.pointer === owner ||
-        (includeRoot && diagnostic.pointer === "") ||
         (owner !== "" && diagnostic.pointer.startsWith(`${owner}/`))),
   );
 };
@@ -270,25 +272,32 @@ const projectFields = (
   return fields;
 };
 
-/** 항목 한 줄 이름: `x-authoring-identity` 값 → 스키마 순서 첫 문자열 값 → 문서 첫 문자열 값 → 번호. */
+/**
+ * 항목 한 줄 이름: `x-authoring-identity` 값 → 스키마 순서 첫 문자열 값 → 문서 첫 문자열 값 → 번호.
+ * 속성 노드는 `$ref`를 풀고 본다(backend가 `kind`를 정의 참조로 바꿔도 const 판정이 유지된다).
+ */
 const summarize = (
+  root: JsonSchema,
   itemNode: JsonSchema,
   item: unknown,
   index: number,
 ): string => {
   if (isRecord(item)) {
     const properties = isRecord(itemNode.properties) ? itemNode.properties : {};
-    for (const [key, property] of Object.entries(properties)) {
+    const resolved = Object.entries(properties).flatMap(([key, property]) => {
+      const node = isRecord(property) ? resolveRef(root, property) : null;
+      return node === null ? [] : [[key, node] as const];
+    });
+    for (const [key, property] of resolved) {
       if (
-        isRecord(property) &&
         property["x-authoring-identity"] === true &&
         typeof item[key] === "string"
       )
         return item[key];
     }
     // `kind`처럼 const로 고정된 값은 항목을 구분하지 못한다(P4-01 리뷰 DEFECT-121-01).
-    for (const [key, property] of Object.entries(properties)) {
-      if (isRecord(property) && schemaFacts(property).hasConst) continue;
+    for (const [key, property] of resolved) {
+      if (schemaFacts(property).hasConst) continue;
       if (typeof item[key] === "string") return item[key];
     }
     // union 항목처럼 분기가 정해지지 않아 스키마 속성이 없으면 문서의 첫 문자열 값을 쓴다.
@@ -324,7 +333,7 @@ const projectListSection = (
         : projectFields(root, tree, diagnostics, itemPointer, resolved.node);
     return {
       pointer: itemPointer,
-      summary: summarize(resolved?.node ?? {}, item, index),
+      summary: summarize(root, resolved?.node ?? {}, item, index),
       fields,
       branches: unresolved ? unionKindsAt(root, itemPointer, tree) : null,
       diagnostics: unabsorbedDiagnostics(diagnostics, itemPointer, fields),
@@ -333,7 +342,7 @@ const projectListSection = (
   const itemFields = projectedItems.flatMap((item) => [
     ...item.fields,
     // 항목이 흡수한 진단도 섹션 몫에서 뺀다.
-    { diagnostics: item.diagnostics } as FormField,
+    { diagnostics: item.diagnostics },
   ]);
   return {
     kind: "list",
@@ -408,14 +417,14 @@ export const projectForm = (
         section.kind === "object"
           ? [
               ...section.fields,
-              { diagnostics: section.diagnostics } as FormField,
+              { diagnostics: section.diagnostics },
             ]
           : [
               ...section.items.flatMap((item) => [
                 ...item.fields,
-                { diagnostics: item.diagnostics } as FormField,
+                { diagnostics: item.diagnostics },
               ]),
-              { diagnostics: section.diagnostics } as FormField,
+              { diagnostics: section.diagnostics },
             ],
       ),
     ].flatMap((field) => field.diagnostics.map((d) => d.pointer)),

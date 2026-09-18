@@ -268,10 +268,11 @@ class PersistentEventStore(EventStore):
     필요한 payload(DECISION의 결정 객체, CORPORATE_ACTION의 입력 사건, MARKET의 feed snapshot)만
     side table로 보관한다. `records`/`orders()`/`fills()`는 최초 조회 시 seq 순서로 만든다.
 
-    조회는 kind 단위다. `record_payloads(kind)` 한 번으로 그 kind의 payload를 seq 순서로 받아
-    전부 공개 객체로 바꾸고, 종료된 실행이면 `release_payloads(kind)`로 Rust 힙을 바로 돌려준다.
-    그래서 `equity_values()`/`traded_notional()`처럼 Rust 레코드를 직접 누산하는 조회는 결과
-    조회보다 **먼저** 불러야 한다 (`loop.py`가 `finish()` 직후 metrics를 계산한다).
+    조회는 kind 단위다. 종료된 실행이면 `drain_payloads(kind, limit)`로 그 kind의 payload를 seq
+    순서로 청크씩 넘겨받고 Rust는 넘긴 자리를 바로 해제한다. 종료 전 partial trace는 해제하지
+    않는 `record_payloads(kind)`로 읽는다. 넘긴 payload는 다시 읽을 수 없으므로
+    `equity_values()`/`traded_notional()`처럼 Rust 레코드를 직접 누산하는 조회는 결과 조회보다
+    **먼저** 불러야 한다 (`loop.py`가 `finish()` 직후 metrics를 계산한다).
     """
 
     # `Any`: backtest_core는 pyo3 확장 모듈이라 stub이 없다 (typings/backtest_core는 레거시

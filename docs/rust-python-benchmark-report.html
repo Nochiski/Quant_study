@@ -526,15 +526,15 @@
   <main class="page">
     <header>
       <div>
-        <div class="eyebrow">Persistent Rust Engine · Loop driver (2026-09-17) · 측정 경계 교정 (2026-09-18)</div>
+        <div class="eyebrow">Persistent Rust Engine · Loop driver (2026-09-17) · 리뷰 후속 스택 최종 판정 (2026-09-18)</div>
         <h1>Rust가 이제<br><span style="color:var(--green)">세션 루프 전체</span>를 돌린다.</h1>
-        <p class="lede">MARKET→FILL→NOTIFY→SESSION_CLOSE→ORDER 드레인을 Rust <code>drive()</code>가 소유합니다. Python은 전략 콜백과 종료 배치에서만 왕복하고, 선언형 tape 전략은 콜백 없이 완주합니다. 아래 수치는 <strong>2026-09-18 재측정</strong>입니다 — 이전 표는 lazy한 Rust 결과의 조회 비용을 타이머 밖에 두어 배수가 부풀려져 있었습니다.</p>
+        <p class="lede">MARKET→FILL→NOTIFY→SESSION_CLOSE→ORDER 드레인을 Rust <code>drive()</code>가 소유합니다. Python은 전략 콜백과 종료 배치에서만 왕복하고, 선언형 tape 전략은 콜백 없이 완주합니다. 아래 수치는 리뷰 후속 PR 1~11을 모두 쌓은 <strong>2026-09-18 최종 재측정</strong>입니다. 타이머는 <code>run()</code>과 결과 조회를 함께 감쌉니다 — 이전 표는 lazy한 Rust 결과의 조회 비용을 밖에 두어 배수가 부풀려져 있었습니다.</p>
       </div>
       <div class="badges" aria-label="측정 조건">
-        <span class="badge good">✓ 1192 Python tests</span>
-        <span class="badge good">✓ 22 Rust tests</span>
+        <span class="badge good">✓ 1328 Python tests</span>
+        <span class="badge good">✓ 38 Rust tests</span>
         <span class="badge">Rust --release</span>
-        <span class="badge">2026-09-18 re-measured</span>
+        <span class="badge">2026-09-18 final gates</span>
       </div>
     </header>
 
@@ -548,34 +548,34 @@
           <p>낮을수록 좋음</p>
         </div>
 
-        <div class="benchmark" role="img" aria-label="callback 전략 100종목: Python 1.700초, Legacy Rust 1.579초, Rust 0.787초">
+        <div class="benchmark" role="img" aria-label="callback 전략 100종목: Python 1.696초, Legacy Rust 1.623초, Rust 0.685초">
           <div class="bench-row">
             <div class="engine-name python">Python</div>
             <div class="track"><div class="bar python" style="--w:100%"></div></div>
-            <div class="bench-value">1.700s</div>
+            <div class="bench-value">1.696s</div>
           </div>
           <div class="bench-row">
             <div class="engine-name legacy">Legacy</div>
-            <div class="track"><div class="bar legacy" style="--w:92.9%"></div></div>
-            <div class="bench-value">1.579s</div>
+            <div class="track"><div class="bar legacy" style="--w:95.7%"></div></div>
+            <div class="bench-value">1.623s</div>
           </div>
           <div class="bench-row">
             <div class="engine-name rust">Rust</div>
-            <div class="track"><div class="bar rust" style="--w:46.3%"></div></div>
-            <div class="bench-value">0.787s</div>
+            <div class="track"><div class="bar rust" style="--w:40.4%"></div></div>
+            <div class="bench-value">0.685s</div>
           </div>
         </div>
-        <div class="axis"><span>0s</span><span>0.4s</span><span>0.9s</span><span>1.3s</span><span>1.7s</span></div>
-        <div class="benchmark" role="img" aria-label="tape 전략 100종목: Python 1.654초, Rust 0.811초" style="margin-top:14px">
+        <div class="axis"><span>0s</span><span>0.4s</span><span>0.8s</span><span>1.3s</span><span>1.7s</span></div>
+        <div class="benchmark" role="img" aria-label="tape 전략 100종목: Python 1.650초, Rust 0.685초" style="margin-top:14px">
           <div class="bench-row">
             <div class="engine-name python">Python · tape</div>
             <div class="track"><div class="bar python" style="--w:100%"></div></div>
-            <div class="bench-value">1.654s</div>
+            <div class="bench-value">1.650s</div>
           </div>
           <div class="bench-row">
             <div class="engine-name rust">Rust · tape</div>
-            <div class="track"><div class="bar rust" style="--w:49.0%"></div></div>
-            <div class="bench-value">0.811s</div>
+            <div class="track"><div class="bar rust" style="--w:41.5%"></div></div>
+            <div class="bench-value">0.685s</div>
           </div>
         </div>
         <div class="axis"><span>0s</span><span>0.4s</span><span>0.8s</span><span>1.2s</span><span>1.7s</span></div>
@@ -587,13 +587,13 @@
           <span>22,243 orders</span>
           <span>22,155 fills</span>
         </div>
-        <div class="insight" style="margin-top:14px"><strong>전체 매트릭스:</strong> 300종목 callback 4.178s → 2.164s (1.93×), tape 4.101s → 2.256s (1.82×) · 실제 4종목 fixture callback 0.110s → 0.051s (2.14×), tape 0.107s → 0.039s (2.77×). 측정 중 CPU 부하 14~18%. <strong>경계:</strong> <code>engine.run()</code>과 <code>result.snapshots/orders/fills</code> 조회를 함께 잽니다. <code>run()</code>만 재면 100종목 4.91×/4.94×지만, Rust 결과는 조회 시점에 만들어지므로 그 배수는 한쪽 비용을 뺀 값입니다.</div>
+        <div class="insight" style="margin-top:14px"><strong>전체 매트릭스:</strong> 300종목 callback 4.723s → 2.012s (2.35×), tape 4.471s → 1.841s (2.43×) · 실제 4종목 fixture callback 0.115s → 0.048s (2.41×), tape 0.122s → 0.047s (2.59×). 측정 직전 CPU 부하 15~39%. <strong>경계:</strong> <code>engine.run()</code>과 <code>result.snapshots/orders/fills</code> 조회를 함께 잽니다. <code>run()</code>만 재면 100종목 6.32×/6.83×이고, 남은 배수의 상한은 결과 조회에서 만드는 Python 공개 객체입니다 — Rust total의 60~63%가 그 구간입니다.</div>
       </article>
 
       <aside class="card">
         <div class="metric-kicker">Python 대비</div>
-        <div class="big-number">2.16×</div>
-        <div class="result-copy">callback 전략에서 실행 시간을 <strong>53.7%</strong> 줄였습니다. 선언형 tape는 <strong>2.04×</strong>. <code>run()</code>만 보면 4.91×입니다.</div>
+        <div class="big-number">2.48×</div>
+        <div class="result-copy">callback 전략에서 실행 시간을 <strong>59.6%</strong> 줄였습니다. 선언형 tape는 <strong>2.41×</strong>. <code>run()</code>만 보면 6.32×입니다.</div>
         <div class="delta">
           <div><span>세션당 FFI</span><strong style="color:var(--green)">0회</strong></div>
           <div><span>결과 차이</span><strong style="color:var(--green)">0</strong></div>
@@ -604,6 +604,28 @@
           <div><span>이전 (M6)</span><strong>1.72×</strong></div>
         </div>
       </aside>
+    </section>
+
+    <section class="section card">
+      <div class="section-title">
+        <div>
+          <div class="metric-kicker">Issue #98 gates · 2026-09-18 최종 판정</div>
+          <h2>게이트 7개 중 6개 통과</h2>
+        </div>
+        <p>괄호는 리뷰 후속 스택 착수 시점(PR 1) 기준선</p>
+      </div>
+      <div class="facts">
+        <div class="fact"><span>100종목 TargetTape · 최소 3×</span><strong style="color:var(--pink)">엔진 2.41× 미달 (2.04×)</strong></div>
+        <div class="fact"><span>100종목 Python 전략 · 최소 2×</span><strong style="color:var(--green)">2.48× 통과 (2.16×)</strong></div>
+        <div class="fact"><span>300종목 · 최소 2×</span><strong style="color:var(--green)">2.35× / 2.43× 통과 (1.93× / 1.82×)</strong></div>
+        <div class="fact"><span>4종목 fixture · 회귀 금지</span><strong style="color:var(--green)">2.41× / 2.59× 통과</strong></div>
+        <div class="fact"><span>세션당 FFI · 0회</span><strong style="color:var(--green)">0회 통과</strong></div>
+        <div class="fact"><span>Peak RSS · ≤ 1.25×</span><strong style="color:var(--green)">1.15× / 1.19× 통과 (1.23× / 1.28×)</strong></div>
+        <div class="fact"><span>결과 패리티 · 100%</span><strong style="color:var(--green)">통과</strong></div>
+        <div class="fact"><span>워크벤치 e2e</span><strong style="color:var(--green)">3.66× (1.21×)</strong></div>
+      </div>
+      <div class="insight" style="margin-top:14px"><strong>남은 한 칸:</strong> TargetTape 경로의 엔진 경계 최소 3×입니다. 워크벤치 e2e에서는 3.23~3.66×로 최소선을 넘지만, 게이트가 정의된 <code>bench_universe.py</code> 경계에서는 2.41×입니다. 남은 거리는 결과 조회에서 만드는 Python 공개 객체이고, 그 계약은 <code>BacktestResult</code> 불변 계약 안에 있습니다.</div>
+      <div class="insight" style="margin-top:14px"><strong>희소 유니버스:</strong> 300종목 밀도 15%에서 세 코어 결과가 동일하고 2.42×입니다. 밀도 19.98% / 20.06%로 행 조회표만 Sparse / Dense로 갈리는 A/B에서 Sparse가 <code>run()</code> 기준 <strong>8.1% 느립니다</strong> — 해시 조회 값입니다. Sparse가 값을 하는 구간은 Dense 표가 유니버스 × 기간에 비례해 커지는 누적 유니버스입니다.</div>
     </section>
 
     <section class="grid hero-grid">
@@ -663,7 +685,7 @@
     <section class="section card target">
       <div class="section-title">
         <div>
-          <div class="metric-kicker">Current architecture · 2026-09-17</div>
+          <div class="metric-kicker">Current architecture · 2026-09-18</div>
           <h2>지금 실행되는 구조</h2>
         </div>
         <p>Persistent Rust Engine이 세션 루프까지 돌린다</p>
@@ -672,8 +694,8 @@
       <div class="target-flow" aria-label="현재 persistent 백테스트 실행 경로">
         <div class="target-node">
           <h3>Python Strategy</h3>
-          <p>선언된 callback에서 전략 판단만 반환합니다. 선언형 tape 전략은 표를 한 번 넘기고 callback 없이 완주합니다.</p>
-          <div class="chips"><span>Requirements</span><span>Decision</span><span>Tape frames</span></div>
+          <p>선언된 callback에서 전략 판단만 반환합니다. 선언형 tape 전략은 표를 한 번 넘기고 callback 없이 완주합니다. 피드는 <code>Bar</code> 객체 없이 열 단위로 들어갑니다.</p>
+          <div class="chips"><span>Requirements</span><span>Decision</span><span>Tape frames</span><span>Columnar feed</span></div>
         </div>
         <div class="arrow">→</div>
         <div class="target-node core">
@@ -684,8 +706,8 @@
         <div class="arrow">→</div>
         <div class="target-node">
           <h3>Python Result</h3>
-          <p>종료 batch를 받고 스냅샷·주문·체결을 요청 시점에 materialize합니다.</p>
-          <div class="chips"><span>Metrics</span><span>Lazy tuples</span><span>Trace</span></div>
+          <p>종료 batch를 kind별 청크로 받아 요청 시점에 materialize하고, 워크벤치는 공개 객체를 건너뛰고 columnar 결과 테이블을 바로 읽습니다.</p>
+          <div class="chips"><span>Metrics</span><span>Lazy tuples</span><span>Result tables</span><span>Trace</span></div>
         </div>
       </div>
 
@@ -695,6 +717,7 @@
         <div class="current-step"><span>M3–M4 · LOOP</span><strong>Feed·History·Queue·Callback</strong></div>
         <div class="current-step"><span>M5 · RESULT</span><strong>Compact store와 lazy batch</strong></div>
         <div class="current-step"><span>2026-09-17 · DRIVER</span><strong>세션 루프·레코드·tape 결정 (FFI 0회)</strong></div>
+        <div class="current-step"><span>2026-09-18 · REVIEW</span><strong>측정 경계 교정·결과 테이블·hot loop·메모리·columnar feed</strong></div>
       </div>
 
       <div class="insight"><strong>승격:</strong> 이제 <code>BacktestEngine(..., core="rust")</code>가 persistent runtime을 선택합니다. 구 세션 코어는 <code>rust_legacy</code>로만 접근 가능하며 deprecation warning을 냅니다.</div>
@@ -725,7 +748,7 @@
             <div class="bench-value">3.282s</div>
           </div>
         </div>
-        <div class="insight"><strong>M6 시점 결과:</strong> Python 대비 <strong>1.618×</strong>. 2026-09-18 정직한 경계로 재측정하면 callback 1.93×, tape 1.82×로 <strong>2× 목표에 미달</strong>합니다 (2026-09-17 기록의 3.55×/4.47×는 조회 비용이 빠진 값).</div>
+        <div class="insight"><strong>M6 시점 결과:</strong> Python 대비 <strong>1.618×</strong>. 2026-09-18 최종 재측정에서는 같은 경계로 callback <strong>2.35×</strong>(4.723s → 2.012s), tape <strong>2.43×</strong>(4.471s → 1.841s)로 <strong>최소 2× 게이트를 통과</strong>합니다. 목표 3×는 미달입니다.</div>
       </article>
 
       <article class="card">
@@ -733,17 +756,17 @@
         <h2 style="margin:6px 0 8px">공개 동작은 그대로</h2>
         <p style="color:var(--muted);font-size:14px">전체 EventStore trace, ID, 오류 순서와 BacktestResult tuple API를 Python reference와 동일하게 유지합니다. Peak RSS는 100종목 코어별 단독 프로세스 측정입니다.</p>
         <div class="small-result">
-          <div><span>RSS · callback</span><strong style="color:var(--green)">1.23×</strong></div>
-          <div><span>RSS · tape</span><strong style="color:var(--pink)">1.28×</strong></div>
+          <div><span>RSS · callback</span><strong style="color:var(--green)">1.15×</strong></div>
+          <div><span>RSS · tape</span><strong style="color:var(--green)">1.19×</strong></div>
           <div><span>허용 기준</span><strong>≤ 1.25×</strong></div>
         </div>
         <div class="small-result">
           <div><span>실제 fixture 4종목</span><strong>callback / tape</strong></div>
-          <div><span>Python</span><strong style="color:var(--python)">0.110s / 0.107s</strong></div>
-          <div><span>Rust</span><strong style="color:var(--rust)">0.051s / 0.039s</strong></div>
+          <div><span>Python</span><strong style="color:var(--python)">0.115s / 0.122s</strong></div>
+          <div><span>Rust</span><strong style="color:var(--rust)">0.048s / 0.047s</strong></div>
         </div>
-        <div class="insight" style="margin-top:14px"><strong>RSS 게이트:</strong> callback 경로는 1.23×로 통과, tape 경로는 1.28×로 미달입니다 (M6 시점 1.169×). Trace 차이 0. <code>--core all</code>은 세 코어가 한 프로세스를 공유해 RSS가 격리되지 않으므로 정본은 단독 실행입니다.</div>
-        <div class="insight" style="margin-top:14px"><strong>워크벤치 e2e:</strong> 어댑터 전체는 100종목에서 3.160s → 2.613s (<strong>1.21×</strong>). Rust에서 <code>engine.run</code> 0.407s 뒤 구간이 1.228s로 <strong>3.02배</strong>이며 결과 조회 0.584s와 raw artifact 변환 0.556s가 지배적입니다. HTTP 요청과 같은 모양의 out-of-sample metric window 1개를 포함한 측정입니다.</div>
+        <div class="insight" style="margin-top:14px"><strong>RSS 게이트:</strong> 두 경로 모두 통과입니다 — callback 169.8MiB → 194.8MiB (1.15×), tape 170.2MiB → 202.1MiB (1.19×). Trace 차이 0. <code>--core all</code>은 세 코어가 한 프로세스를 공유해 RSS가 격리되지 않으므로 정본은 단독 실행입니다. 이 지표는 Windows <code>PeakWorkingSetSize</code>라 run 도중 잠깐 커밋됐다 풀리는 버퍼는 잡지 못합니다.</div>
+        <div class="insight" style="margin-top:14px"><strong>워크벤치 e2e:</strong> 어댑터 전체는 100종목에서 3.332s → 0.911s (<strong>3.66×</strong>, 코어 격리 실행). 한 프로세스에서 번갈아 돌리면 3.223s → 0.998s로 3.23×입니다. Rust에서 <code>engine.run</code> 0.224s 뒤 구간은 0.534s로 <strong>2.39배</strong>이고 그 대부분이 워크벤치 도메인 객체를 만드는 raw artifact 변환 0.452s입니다. HTTP 요청과 같은 모양의 out-of-sample metric window 1개를 포함한 측정입니다.</div>
         <div class="insight" style="margin-top:18px"><strong>데이터 범위:</strong> 저장소 fixture의 전 기간 완주 종목은 4개입니다. 100/300 수치는 실제 KRX 가격 경로를 결정론적으로 복제한 주문 집중 확장 부하입니다.</div>
       </article>
     </section>
@@ -766,7 +789,7 @@
 
     <footer>
       <span>Ryzen 5 5600X · 16GB RAM · Python 3.11 · Rust 1.93 · Windows 10</span>
-      <span>engine.run() + 결과 조회 wall-clock · 데이터 로딩·tape 표 생성 제외 · 2026-09-18 재측정 (2026-09-17·M6 수치는 기록)</span>
+      <span>engine.run() + 결과 조회 wall-clock · 데이터 로딩·tape 표 생성 제외 · 2026-09-18 리뷰 후속 스택 최종 재측정 (2026-09-17·M6 수치는 기록)</span>
     </footer>
   </main>
 </body>

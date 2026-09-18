@@ -664,7 +664,7 @@ PR 9까지 반영 후 100종목 tape에서 feed 적재(`_load_persistent_feed` +
 - [ ] 스펙 "2026-09-18 측정 경계 교정" 아래 "최종 판정" 절: 게이트 표(100/300종목 total 배수, 4종목 fixture, RSS, FFI 0회, parity) + 남은 항목.
 - [ ] `docs/rust-python-benchmark-report.html` 갱신, `docs/superpowers/plans/2026-09-17-rust-engine-loop.md` 상단에 이 문서 링크.
 - [ ] 이슈 #98 댓글: PR 링크 11개, 최종 표, `.claude/rules/pr-review.md` 양식으로 남은 결정(Phase 3-4). 게이트 전부 통과면 종료 제안.
-- [ ] 이슈 #98 댓글에 후속 항목으로 남길 것: PR 8에서 되돌린 tape 경량 프레임(8.3)은 FILL/ORDER_UPDATE 알림을 선언한 tape 워크로드 벤치 옵션이 생기면 다시 올린다. 코어 간 instrument key 충돌 거부 통일(현재 persistent만 거부, python 코어는 완주). #135(`7E+2` 수량 표기).
+- [ ] 이슈 #98 댓글에 후속 항목으로 남길 것: 코어 간 instrument key 충돌 거부 통일(현재 persistent만 거부, python 코어는 완주). #135(`7E+2` 수량 표기). 아래 8.3 항목.
   - [ ] PR 8에서 되돌린 tape 경량 프레임(8.3) — 알림(fill·order_update) 선언 tape 워크로드를 재는 벤치 옵션이 생기면 `make_native_frame`을 다시 올린다. 현재 벤치는 `MARKET`만 선언해 NOTIFY 분기가 돌지 않아 측정으로 유지를 정당화할 수 없었다.
 - [ ] 메모리 `rust-loop-driver-pr-stack.md` 갱신.
 

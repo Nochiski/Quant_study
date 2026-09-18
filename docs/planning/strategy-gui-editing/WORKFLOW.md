@@ -610,8 +610,9 @@ export type FormField = {
   diagnostics: DocumentDiagnostic[];
 };
 export type FormSection =
-  | { kind: "object"; pointer: string; key: string; written: boolean; fields: FormField[] }
-  | { kind: "list"; pointer: string; key: string; itemSchemaPointer: string; items: { pointer: string; summary: string; fields: FormField[]; branches: readonly string[] | null }[] };
+  | { kind: "object"; pointer: string; key: string; written: boolean; fields: FormField[]; diagnostics: DocumentDiagnostic[] }
+  | { kind: "list"; pointer: string; key: string; itemSchemaPointer: string; items: { pointer: string; summary: string; fields: FormField[]; branches: readonly string[] | null; diagnostics: DocumentDiagnostic[] }[]; diagnostics: DocumentDiagnostic[] };
+// FormField에 defaultFrom·hasApplicability, FormControl에 { kind: "const"; value }·"graph-link"·"list-link"가 더해졌다(P4-01 리뷰 후속).
 export const projectForm = (schema: JsonSchema, parse: ParsedSource | null, diagnostics: DocumentDiagnostic[]): FormProjection;
 ```
 
@@ -632,8 +633,14 @@ export const projectForm = (schema: JsonSchema, parse: ParsedSource | null, diag
   규칙)이고, 경고 배지의 근거는 `diagnostics`에 담긴 backend `strategy.field.inapplicable`이다 — 두
   사실은 다르며 P2-03 DEFECT-118-01의 결정을 그대로 잇는다(회색 처리는 `applicable`, 배지는 진단).
   `properties`를 가진 object 필드(현재 스키마에서는 `factors[].graph`뿐)는 `graph-link`이고 그 아래
-  pointer의 진단을 모두 받는다. 목록 항목 `summary`는 `x-authoring-identity` 값 → 스키마 순서 첫
-  문자열 값 → 문서 첫 문자열 값 → `#n`. union 항목이 분기를 못 고르면 `fields: []`·`branches`(kind
+  pointer의 진단을 모두 받는다(`list-link`도 같다). 목록 항목 `summary`는 `x-authoring-identity` 값 →
+  스키마 순서에서 **const가 아닌** 첫 문자열 값(`kind`는 건너뜀, 리뷰 DEFECT-121-01) → 문서 첫 문자열 값 →
+  `#n`. 섹션(object·list)과 목록 항목도 `diagnostics`를 가진다: 자기 pointer와 어느 필드도 흡수하지 않은
+  하위 pointer의 진단(`strategy.factor.required`(`/factors`)·`strategy.parameter.bounds`(`/parameters/<i>`)
+  등 실행 차단 진단이 Form에서 사라지지 않도록, 리뷰 DEFECT-121-02). 문서 전체(`""`)와 어느 섹션에도
+  닿지 않은 pointer의 진단은 루트 섹션이 받는다. `const` 필드는 `{ kind: "const", value }` 컨트롤(읽기
+  전용), `x-default-from`은 `FormField.defaultFrom`으로 실리고 placeholder 값 계산은 패널 몫이다.
+  `hasApplicability`가 "조건표 행 없음"과 "판정 불가"(둘 다 `applicable: null`)를 구분한다. union 항목이 분기를 못 고르면 `fields: []`·`branches`(kind
   후보)를 낸다. `itemSchemaPointer`는 `$ref` 대상(`/$defs/FactorSignal`) 또는
   `/properties/<key>/items`. `parse`가 null이면 모든 필드가 unwritten인 스키마 골격을 낸다.
 

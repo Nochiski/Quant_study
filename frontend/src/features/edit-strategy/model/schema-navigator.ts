@@ -28,6 +28,8 @@ export type SchemaFacts = {
   constValue: unknown;
   hasDefault: boolean;
   defaultValue: unknown;
+  /** `x-default-from`: 생략하면 backend가 이 형제 필드의 값으로 채운다(`label` ← `factor_id`). */
+  defaultFrom: string | null;
   minimum: Bound | null;
   maximum: Bound | null;
   format: string | null;
@@ -482,6 +484,7 @@ export const schemaFacts = (node: JsonSchema): SchemaFacts => {
     constValue: node.const,
     hasDefault: own("default"),
     defaultValue: node.default,
+    defaultFrom: stringAt(node, "x-default-from"),
     minimum,
     maximum,
     format: stringAt(node, "format"),

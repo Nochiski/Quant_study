@@ -293,7 +293,12 @@ export const projectContractField = (
   const contractExample = branchDependent ? undefined : row?.example;
   const hasExample =
     contractExample != null || (!branchDependent && facts.hasExample);
-  const example = contractExample != null ? contractExample : facts.example;
+  const example =
+    contractExample != null
+      ? contractExample
+      : branchDependent
+        ? undefined
+        : facts.example;
   // When no valid union branch is selected, the first branch's `kind` const is only a
   // traversal artifact. The discriminator variants are the actual contract at this point.
   const enumValues = branchDependent

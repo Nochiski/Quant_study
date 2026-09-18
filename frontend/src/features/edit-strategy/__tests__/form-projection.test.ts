@@ -229,6 +229,115 @@ describe("projectForm", () => {
     );
   });
 
+  it("names union items by their identifier, skipping const-fixed keys like kind (DEFECT-121-01)", () => {
+    const source = VERBOSE.replace(
+      "parameters: []\n",
+      "parameters:\n  - kind: float\n    parameter_id: lookback\n    minimum: 1.0\n    maximum: 2.0\n    default: 1.5\n  - kind: float\n    parameter_id: window\n    minimum: 1\n    maximum: 5\n    default: 3\n",
+    );
+    const parameters = section(
+      projectForm(SCHEMA, parsed(source), []).sections,
+      "parameters",
+    );
+    if (parameters.kind !== "list") throw new Error("parameters is a list");
+    expect(parameters.items.map((item) => item.summary)).toEqual([
+      "lookback",
+      "window",
+    ]);
+    expect(field(parameters.items[0]!.fields, "kind").control).toEqual({
+      kind: "const",
+      value: "float",
+    });
+  });
+
+  it("exposes const values, x-default-from and the applicability presence flag", () => {
+    const { sections } = projectForm(SCHEMA, parsed(MINIMAL), []);
+    expect(field(objectFields(sections, ""), "schema_version").control).toEqual(
+      {
+        kind: "const",
+        value: "1.1",
+      },
+    );
+    const factors = section(sections, "factors");
+    if (factors.kind !== "list") throw new Error("factors is a list");
+    expect(field(factors.items[0]!.fields, "label")).toMatchObject({
+      defaultFrom: "factor_id",
+    });
+    const portfolio = objectFields(sections, "portfolio");
+    expect(field(portfolio, "selection_count")).toMatchObject({
+      hasApplicability: true,
+    });
+    expect(field(portfolio, "weighting")).toMatchObject({
+      hasApplicability: false,
+      applicable: null,
+    });
+  });
+
+  it("routes every diagnostic to a field, an item, a section or the root section (DEFECT-121-02)", () => {
+    const source = VERBOSE.replace(
+      "parameters: []\n",
+      "parameters:\n  - kind: float\n    parameter_id: lookback\n    minimum: 2.0\n    maximum: 1.0\n    default: 1.5\n",
+    ).replace(
+      "eligibility:\n  rules: []\n",
+      "eligibility:\n  rules:\n    - field_id: liquidity.adv\n      operator: gte\n      value: 1\n",
+    );
+    const pointers = [
+      "",
+      "/factors",
+      "/factors/0",
+      "/factors/0/weight",
+      "/factors/0/graph/nodes/1",
+      "/parameters",
+      "/parameters/0",
+      "/parameters/0/minimum",
+      "/eligibility",
+      "/eligibility/rules",
+      "/eligibility/rules/0",
+      "/eligibility/rules/0/field_id",
+      "/portfolio/selection_count",
+      "/nope/unknown",
+    ];
+    const diagnostics: DocumentDiagnostic[] = pointers.map((pointer) => ({
+      code: "strategy.probe",
+      kind: "semantic",
+      severity: "error",
+      pointer,
+      message: pointer,
+      range: null,
+    }));
+    const { sections } = projectForm(SCHEMA, parsed(source), diagnostics);
+    const landed: Record<string, string> = {};
+    const claim = (owner: string, list: DocumentDiagnostic[]) => {
+      for (const d of list) {
+        expect(landed[d.pointer]).toBeUndefined();
+        landed[d.pointer] = owner;
+      }
+    };
+    for (const s of sections) {
+      claim(`section ${s.pointer}`, s.diagnostics);
+      if (s.kind === "object")
+        for (const f of s.fields) claim(`field ${f.pointer}`, f.diagnostics);
+      else
+        for (const item of s.items) {
+          claim(`item ${item.pointer}`, item.diagnostics);
+          for (const f of item.fields)
+            claim(`field ${f.pointer}`, f.diagnostics);
+        }
+    }
+    expect(Object.keys(landed).sort()).toEqual([...pointers].sort());
+    expect(landed[""]).toBe("section ");
+    expect(landed["/nope/unknown"]).toBe("section ");
+    expect(landed["/factors"]).toBe("section /factors");
+    expect(landed["/factors/0"]).toBe("item /factors/0");
+    expect(landed["/factors/0/weight"]).toBe("field /factors/0/weight");
+    expect(landed["/factors/0/graph/nodes/1"]).toBe("field /factors/0/graph");
+    expect(landed["/parameters/0"]).toBe("item /parameters/0");
+    expect(landed["/parameters/0/minimum"]).toBe("field /parameters/0/minimum");
+    expect(landed["/eligibility"]).toBe("section /eligibility");
+    expect(landed["/eligibility/rules/0/field_id"]).toBe(
+      "field /eligibility/rules",
+    );
+  });
+
   it("projects the schema with every field unwritten when there is no parse", () => {
     const { sections } = projectForm(SCHEMA, null, []);
     expect(sections.length).toBeGreaterThan(1);

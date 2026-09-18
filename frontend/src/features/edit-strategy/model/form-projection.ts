@@ -43,6 +43,8 @@ export type FormControl =
       namespace: "node" | "parameter";
       candidates: readonly string[];
     }
+  /** 스키마가 `const`로 고정한 값(`schema_version`): 편집 컨트롤 없이 읽기 전용으로 보인다. */
+  | { kind: "const"; value: unknown }
   /** 팩터 항목의 `graph`: Form은 표시만 하고 편집은 Graph 화면에 넘긴다(spec D6). */
   | { kind: "graph-link" }
   /** object 섹션 안의 배열 필드(`eligibility.rules`): 목록 편집(P4-03)이 맡고 스칼라 컨트롤을 두지 않는다. */
@@ -60,7 +62,11 @@ export type FormField = {
   value: unknown;
   defaultValue: unknown;
   hasDefault: boolean;
-  /** 조건표 판정(문서 또는 발행 기본값). 조건표 행이 없으면 null. */
+  /** `x-default-from`: 생략 시 backend가 이 형제 키의 값으로 채운다. placeholder 값은 패널이 tree에서 읽는다. */
+  defaultFrom: string | null;
+  /** 조건표 행이 있는가. `applicable === null`은 행이 없거나(`false`) 판정 불가(`true`)다. */
+  hasApplicability: boolean;
+  /** 조건표 판정(문서 또는 발행 기본값). 조건표 행이 없거나 판정 불가면 null(`hasApplicability`로 구분). */
   applicable: boolean | null;
   unit: string | null;
   displayUnit: string | null;
@@ -70,11 +76,13 @@ export type FormField = {
 
 export type FormListItem = {
   pointer: string;
-  /** 항목을 한 줄로 부르는 이름(스키마 `x-authoring-identity` 값 → 첫 문자열 값 → 번호). */
+  /** 항목을 한 줄로 부르는 이름(스키마 `x-authoring-identity` 값 → const가 아닌 첫 문자열 값 → 번호). */
   summary: string;
   fields: FormField[];
   /** 항목 스키마가 union인데 문서가 분기를 고르지 못했을 때의 `kind` 후보. 아니면 null. */
   branches: readonly string[] | null;
+  /** 항목 자신의 pointer와, 어느 필드도 흡수하지 않은 하위 pointer의 진단(`strategy.parameter.bounds` 등). */
+  diagnostics: DocumentDiagnostic[];
 };
 
 export type FormSection =
@@ -84,6 +92,8 @@ export type FormSection =
       key: string;
       written: boolean;
       fields: FormField[];
+      /** 섹션 자신의 pointer와, 어느 필드도 흡수하지 않은 하위 pointer의 진단. 루트 섹션은 `""`도 받는다. */
+      diagnostics: DocumentDiagnostic[];
     }
   | {
       kind: "list";
@@ -92,6 +102,8 @@ export type FormSection =
       /** 항목 스키마의 위치(`$ref`면 그 대상, 아니면 `/properties/<key>/items`). */
       itemSchemaPointer: string;
       items: FormListItem[];
+      /** 섹션 자신의 pointer와, 어느 항목·필드도 흡수하지 않은 하위 pointer의 진단(`strategy.factor.required` 등). */
+      diagnostics: DocumentDiagnostic[];
     };
 
 export type FormProjection = {
@@ -112,6 +124,7 @@ const controlFor = (
   tree: unknown,
 ): FormControl => {
   const facts = schemaFacts(resolved.node);
+  if (facts.hasConst) return { kind: "const", value: facts.constValue };
   if (facts.catalog !== null) {
     const catalog = CATALOGS.find((known) => known === facts.catalog);
     if (catalog !== undefined) return { kind: "catalog", catalog };
@@ -166,6 +179,9 @@ const projectField = (
   const found = valueAtPointer(tree, pointer);
   const isGraphLink =
     facts.type === "object" && isRecord(resolved.node.properties);
+  const isListLink = facts.type === "array";
+  // link 필드(중첩 object·배열)는 그 아래 pointer의 진단을 모두 받는다(목록·Graph 편집이 맡는 영역).
+  const absorbsDescendants = isGraphLink || isListLink;
   const applicability =
     facts.applicableWhen === null
       ? null
@@ -180,7 +196,7 @@ const projectField = (
     key,
     control: isGraphLink
       ? { kind: "graph-link" }
-      : facts.type === "array"
+      : isListLink
         ? { kind: "list-link" }
         : controlFor(root, resolved, pointer, tree),
     nullable: resolved.nullable,
@@ -189,6 +205,8 @@ const projectField = (
     value: found.present ? found.value : facts.defaultValue,
     defaultValue: facts.defaultValue,
     hasDefault: facts.hasDefault,
+    defaultFrom: facts.defaultFrom,
+    hasApplicability: applicability !== null,
     applicable: applicability === null ? null : applicability.applicable,
     unit: facts.unit,
     displayUnit: facts.displayUnit,
@@ -196,9 +214,28 @@ const projectField = (
     diagnostics: diagnostics.filter(
       (diagnostic) =>
         diagnostic.pointer === pointer ||
-        (isGraphLink && diagnostic.pointer.startsWith(`${pointer}/`)),
+        (absorbsDescendants && diagnostic.pointer.startsWith(`${pointer}/`)),
     ),
   };
+};
+
+/** `owner` pointer 자신 + 그 아래 pointer 중 `fields`가 흡수하지 않은 진단. */
+const unabsorbedDiagnostics = (
+  diagnostics: readonly DocumentDiagnostic[],
+  owner: string,
+  fields: readonly FormField[],
+  includeRoot = false,
+): DocumentDiagnostic[] => {
+  const absorbed = new Set(
+    fields.flatMap((field) => field.diagnostics.map((d) => d.pointer)),
+  );
+  return diagnostics.filter(
+    (diagnostic) =>
+      !absorbed.has(diagnostic.pointer) &&
+      (diagnostic.pointer === owner ||
+        (includeRoot && diagnostic.pointer === "") ||
+        (owner !== "" && diagnostic.pointer.startsWith(`${owner}/`))),
+  );
 };
 
 const requiredKeys = (node: JsonSchema): ReadonlySet<string> =>
@@ -249,7 +286,9 @@ const summarize = (
       )
         return item[key];
     }
-    for (const key of Object.keys(properties)) {
+    // `kind`처럼 const로 고정된 값은 항목을 구분하지 못한다(P4-01 리뷰 DEFECT-121-01).
+    for (const [key, property] of Object.entries(properties)) {
+      if (isRecord(property) && schemaFacts(property).hasConst) continue;
       if (typeof item[key] === "string") return item[key];
     }
     // union 항목처럼 분기가 정해지지 않아 스키마 속성이 없으면 문서의 첫 문자열 값을 쓴다.
@@ -275,31 +314,34 @@ const projectListSection = (
       : `/properties/${escapePointerSegment(key)}/items`;
   const value = valueAtPointer(tree, pointer).value;
   const items = Array.isArray(value) ? value : [];
+  const projectedItems = items.map((item, index): FormListItem => {
+    const itemPointer = `${pointer}/${index}`;
+    const resolved = schemaAt(root, itemPointer, tree);
+    const unresolved = resolved?.branches !== null && resolved !== null;
+    const fields =
+      resolved === null || unresolved
+        ? []
+        : projectFields(root, tree, diagnostics, itemPointer, resolved.node);
+    return {
+      pointer: itemPointer,
+      summary: summarize(resolved?.node ?? {}, item, index),
+      fields,
+      branches: unresolved ? unionKindsAt(root, itemPointer, tree) : null,
+      diagnostics: unabsorbedDiagnostics(diagnostics, itemPointer, fields),
+    };
+  });
+  const itemFields = projectedItems.flatMap((item) => [
+    ...item.fields,
+    // 항목이 흡수한 진단도 섹션 몫에서 뺀다.
+    { diagnostics: item.diagnostics } as FormField,
+  ]);
   return {
     kind: "list",
     pointer,
     key,
     itemSchemaPointer,
-    items: items.map((item, index): FormListItem => {
-      const itemPointer = `${pointer}/${index}`;
-      const resolved = schemaAt(root, itemPointer, tree);
-      const unresolved = resolved?.branches !== null && resolved !== null;
-      return {
-        pointer: itemPointer,
-        summary: summarize(resolved?.node ?? {}, item, index),
-        fields:
-          resolved === null || unresolved
-            ? []
-            : projectFields(
-                root,
-                tree,
-                diagnostics,
-                itemPointer,
-                resolved.node,
-              ),
-        branches: unresolved ? unionKindsAt(root, itemPointer, tree) : null,
-      };
-    }),
+    items: projectedItems,
+    diagnostics: unabsorbedDiagnostics(diagnostics, pointer, itemFields),
   };
 };
 
@@ -331,18 +373,20 @@ export const projectForm = (
         ),
       );
     } else if (facts.type === "object" && isRecord(resolved.node.properties)) {
+      const fields = projectFields(
+        schema,
+        tree,
+        diagnostics,
+        pointer,
+        resolved.node,
+      );
       sections.push({
         kind: "object",
         pointer,
         key,
         written: valueAtPointer(tree, pointer).present,
-        fields: projectFields(
-          schema,
-          tree,
-          diagnostics,
-          pointer,
-          resolved.node,
-        ),
+        fields,
+        diagnostics: unabsorbedDiagnostics(diagnostics, pointer, fields),
       });
     } else {
       const field = projectField(
@@ -356,19 +400,39 @@ export const projectForm = (
       if (field !== null) scalarFields.push(field);
     }
   }
+  // 문서 전체(`""`) 진단과 어느 섹션에도 닿지 않은 루트 직속 진단은 루트 섹션이 받는다.
+  const claimed = new Set(
+    [
+      ...scalarFields,
+      ...sections.flatMap((section) =>
+        section.kind === "object"
+          ? [
+              ...section.fields,
+              { diagnostics: section.diagnostics } as FormField,
+            ]
+          : [
+              ...section.items.flatMap((item) => [
+                ...item.fields,
+                { diagnostics: item.diagnostics } as FormField,
+              ]),
+              { diagnostics: section.diagnostics } as FormField,
+            ],
+      ),
+    ].flatMap((field) => field.diagnostics.map((d) => d.pointer)),
+  );
+  const rootDiagnostics = diagnostics.filter(
+    (diagnostic) => !claimed.has(diagnostic.pointer),
+  );
   return {
     sections: [
-      ...(scalarFields.length > 0
-        ? [
-            {
-              kind: "object" as const,
-              pointer: "",
-              key: "",
-              written: true,
-              fields: scalarFields,
-            },
-          ]
-        : []),
+      {
+        kind: "object" as const,
+        pointer: "",
+        key: "",
+        written: true,
+        fields: scalarFields,
+        diagnostics: rootDiagnostics,
+      },
       ...sections,
     ],
   };

@@ -3,13 +3,13 @@ plan_version: 2
 project: strategy-gui-editing
 project_status: IN_REVIEW
 current_phase: P1,P2,P3,P4,P5
-current_pr: P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01,P3-02,P4-01,P4-02,P4-03,P4-04,P4-05,P5-01,P5-02
-active_prs: [P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05, P5-01, P5-02]
-parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02, P1-06, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05, P5-01, P5-02]
-last_updated: 2026-09-18T15:12:33+09:00
+current_pr: P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01,P3-02,P4-01,P4-02,P4-03,P4-04,P4-05,P5-01,P5-02,P5-03
+active_prs: [P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05, P5-01, P5-02, P5-03]
+parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02, P1-06, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05, P5-01, P5-02, P5-03]
+last_updated: 2026-09-18T15:25:31+09:00
 planned_prs: 19
 merged_prs: 0
-approved_prs: 16
+approved_prs: 17
 progress_percent: 0
 ---
 
@@ -25,11 +25,11 @@ progress_percent: 0
 |---|---|
 | Project status | `IN_REVIEW` |
 | Current phase | `P1,P2,P3,P4,P5` |
-| Current/next PR | `P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01,P3-02,P4-01,P4-02,P4-03,P4-04,P4-05,P5-01,P5-02` |
-| Active PR | `P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05, P5-01, P5-02` |
+| Current/next PR | `P1-01,P1-02,P1-03,P1-04,P1-05,P2-01,P2-02,P1-06,P2-03,P3-01,P3-02,P4-01,P4-02,P4-03,P4-04,P4-05,P5-01,P5-02,P5-03` |
+| Active PR | `P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01, P2-02, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05, P5-01, P5-02, P5-03` |
 | Progress | `0 / 19 merged (0%)` |
-| Approved | `16 / 19` |
-| Aggregated at | `2026-09-18 15:12 KST` |
+| Approved | `17 / 19` |
+| Aggregated at | `2026-09-18 15:25 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -88,16 +88,16 @@ progress_percent: 0
 
 | 항목 | 값 |
 |---|---|
-| PR | `P5-02` |
-| Intent | Graph 편집 표면 `FactorGraphEditor`: parse tree에서 노드 목록·선택 노드 속성·그래프 설정을 그려 plan이 없어도 편집(감사 R4), `addNode`/`removeNode`(P5-01) + P4-02 필드 컨트롤(`FormFieldsEditor`, owner `graph`), 추가 직후 새 노드 pointer 선택·삭제 시 그래프 pointer 복귀(R6), page 2곳 `editing` 전달, `graph.readOnly` 삭제. P4-05 리뷰 P2-1(`$ref` discriminator)·P2-4(죽은 분기) 처리 |
-| Acceptance | WORKFLOW P5-02(+구현 결정) |
-| Non-goals | Form ↔ Graph 왕복 명령·e2e·문서·규칙 마감(P5-03), DAG 카드 안 편집 컨트롤 병합(P5-03 검토), `Menu` primitive |
-| Branch/worktree | `feat/gui-p5-02-graph-ui` (base `feat/gui-p5-01-graph-transactions` `a0e533d`; 주 워크트리 `scad`) |
-| Base SHA | `a0e533d` |
-| Head SHA | `45f01c9` (review 후속; P5-01 후속 `a0e533d` 위로 rebase; diff freeze `0097e51`) |
-| Diff stat | ui 4(신규 `factor-graph-editor.tsx`·`transaction-feedback.tsx`, `factor-graph-panel`·`strategy-form-panel`)·model 3(`form-projection`·`graph-transactions`·`form-transactions`)·css·messages·page 2·index·테스트 2(신규 `factor-graph-editor.test.tsx`), WORKFLOW |
-| Focused tests | factor-graph-editor 4 · factor-graph-panel 6 · strategy-form-panel 12 · form-list 10 · form-projection 13 |
-| Full gate | Vitest 600 passed(52 files) · typecheck · lint · build · Playwright chromium-workflow 6/6 |
+| PR | `P5-03` |
+| Intent | Phase 5·initiative 마감: Graph → Form 왕복("Form에서 열기"), Graph 편집 e2e(노드 추가 → field_id → 재연결 → 검증 통과 → plan 투영 → 저장), 트랜잭션 잠금을 parse 실패로 좁힘(디바운스 구간 잠금 해소, 리뷰 132-03), route 테스트 de-flake(timeout 15s·reveal 대기), ADR D5 개정·로드맵 M8 주석·매뉴얼 8절·README 2·SoT "전략 의미" 행 |
+| Acceptance | WORKFLOW P5-03(+구현 결정) |
+| Non-goals | DAG 카드 안 편집 컨트롤 병합, `node_id` 중복 방지·참조 갱신 rename, 항목 안 배열 편집, 표현식 DSL |
+| Branch/worktree | `feat/gui-p5-03-wrap-up` (base `feat/gui-p5-02-graph-ui` `4bf6342`; 워크트리 `scad-p43`) |
+| Base SHA | `4bf6342` |
+| Head SHA | `e6a0074` (diff freeze; 2커밋: 마감 + 잠금·de-flake) |
+| Diff stat | ui 2(`factor-graph-editor`·`factor-graph-panel`)·model 1(`use-source-transactions`)·page 2·messages·e2e 1·테스트 2, 문서 6(ADR·로드맵·매뉴얼·README 2·SoT)·WORKFLOW |
+| Focused tests | factor-graph-editor 7 · use-source-transactions 8 · document-routes 63 · e2e chromium-workflow 7/7 |
+| Full gate | Vitest 601 passed(52 files) · typecheck · lint · build · Playwright chromium-workflow 7/7 |
 
 ---
 
@@ -163,9 +163,9 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P5-01` | `graph-transactions.ts`: 노드 추가·필드·재연결·출력·삭제 가드·id 제안, `findReferences` 스코프, owner별 feedback, `planRemove` 선행 주석 | P4-05 | `IN_REVIEW` | [#131](https://github.com/Nochiski/Quant_study/pull/131) · `review_gui_p5_01` 1차 REQUEST_CHANGES(P1 1·P2 8) → 후속 `226231d` 재검토 중 |
+| [ ] | `P5-01` | `graph-transactions.ts`: 노드 추가·필드·재연결·출력·삭제 가드·id 제안, `findReferences` 스코프, owner별 feedback, `planRemove` 선행 주석 | P4-05 | `APPROVED` | [#131](https://github.com/Nochiski/Quant_study/pull/131) · `review_gui_p5_01` 2차 APPROVE(`226231d`) |
 | [ ] | `P5-02` | Graph UI: 노드 추가 메뉴, property editor, 입력 슬롯, 키보드·ARIA | P5-01 | `IN_REVIEW` | [#132](https://github.com/Nochiski/Quant_study/pull/132) · `review_gui_p5_02` 1차 REQUEST_CHANGES(P1 1·P2 7) → 후속 `45f01c9` 재검토 중 |
-| [ ] | `P5-03` | 연결·e2e·문서·규칙 마감, read-only 문구 제거, 로드맵 M8 | P5-02, P4-04 | `WAITING` | — |
+| [ ] | `P5-03` | 연결·e2e·문서·규칙 마감, read-only 문구 제거, 로드맵 M8 | P5-02, P4-04 | `IN_REVIEW` | [#133](https://github.com/Nochiski/Quant_study/pull/133) · `review_gui_p5_03` 배정 · diff freeze `e6a0074` |
 
 Phase exit:
 
@@ -181,6 +181,7 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
+| P5-01 | `review_gui_p5_01` | `76842ab` | `226231d` (diff freeze `1e09b6e`) | APPROVE (1차 REQUEST_CHANGES P1-1 `addNode`가 `x-reference`를 `schemaFacts` 없이 직접 읽음(SoT owner 위반) + P2 8 → 후속 `226231d`: `nodeReferenceKeys`(`schemaFacts(...).reference`), 단일 참조 분기만 마지막 노드로 채움, `rewireInput(schema?)` 키 검증, 머리 주석(offset 0 블록) 보존, `parentLine < to` 가드(base의 `- - "#tag"` 실패 + 같은 모양 4건 살아남), memo 의존성; 2차: `x-reference` 직접 읽기 0건, 12분기 실측, base·1차·후속 3자 비교, property 2000×8 전부 통과) | 1 (해소) | 빈 줄로 시작하는 문서의 머리 주석은 여전히 삭제(가드가 offset 0만), `rewireInput`의 `schema`가 선택 인자(P5-02 UI는 reference select라 미호출), 루트가 시퀀스인 문서·flow 컨테이너의 `remove` 계획 실패(base 기존 결함, backlog) | 2026-09-18 |
 | P4-05 | `review_gui_p4_05` | `ef19805` | `b394dbe` | APPROVE (1차; P2 4: `kindOfBranch`가 분기 안 `properties.kind`의 `$ref`를 안 풀어 DEFECT-P4X-003 부분 해소, 중첩 목록이 스키마 순서와 무관하게 스칼라 뒤에 그려짐, `appendOperation` 루트 fallback이 부모 pointer 한 세그먼트 가정, `projectForm`의 `array === null` 죽은 분기; 감사 항목 001/003(부분)/004/007·문서 액션 11 대조, 중첩 목록 실제 planner 경로(`rules: []`·부모 없음·마지막 항목 삭제 → `[]`), 진단 소유권 누락 0·중복 0, 회귀 없음) | 0 | P2-1·P2-4는 P5-02에서 처리, P2-2(표시 순서)·P2-3(단일 세그먼트 부모 가정, Form object 섹션만 해당) 기록 | 2026-09-18 |
 | P4-04 | `review_gui_p4_04` | `81aa14e`(코드 `24ad45a`) | `8c5ade0` (diff freeze `13fa8d3`) | APPROVE (1차 APPROVE P1 0·P2 10: STALE 오탐(디바운스 구간), 없는 접기 테스트, 스니펫 결과가 Form 반영됨을 지움, PR 본문 Graph 배선 오기, 죽은 `inapplicablePointers`, 고아 키 7·CSS 8, `view` prop, SoT 행이 Graph 편집을 선행 서술, e2e 팩터 검증 약함, status 2개 → 권고 후속 `8c5ade0`: stale을 같은 버전 parse 실패로 좁힘, 접기 테스트, 고아 제거, role 제거, SoT 단서, 본문 정정; 2차: 확정 직후 STALE false·구문 오류 시 true·복구 즉시, 문서 경계 누수 없음, status 1개, grep 0, rebase가 리뷰 코드 불변) | 0 | DEFECT-P404-011 이미 구문 오류인 문서에서 source를 더 치면 디바운스 150ms 동안 stale=false로 옛 값을 표시 없이 보여줌(잠금·저장 차단은 유지; "갱신 중" 상태 도입 검토), 공유 feedback 슬롯 하나(스니펫 결과가 Form 반영됨을 지움 → P5-01), e2e 팩터 추가 검증은 Graph 탭 텍스트 포함, 확정 직후 150ms 컨트롤 잠금은 base 훅 `disabled: syntax` | 2026-09-18 |
 | P4-03 | `review_gui_p4_03` | `4b3b456` | `24ad45a` (diff freeze `6460971`) | APPROVE (1차 REQUEST_CHANGES P1 DEFECT-125-01 목록 키가 없는 문서(새 전략 starter·생략형)에서 항목 추가·preset이 `insert-item` → `not-found`로 언제나 실패(테스트가 스텁이라 통과) + P2 6 → 후속 `24ad45a`: `ListSection.written`·미작성이면 `insert-key`로 키 열며 첫 항목(실제 planner 테스트), identity는 `x-authoring-identity` 우선·카탈로그 필드 제외, 거부 안내는 tree 바뀌면 해제, 가드 docstring; 2차: CRLF·머리꼬리 주석 문서에서 단일 범위 삽입·undo 1, starter preset → written → 둘째는 insert-item, factors/parameters/EligibilityRule identity 판정 정확) | 1 (해소) | `insert-key`로 여는 블록 내부 들여쓰기가 문서 폭과 무관하게 2칸(source-transactions, 스니펫·object 섹션과 같은 기존 동작), 부모 키까지 없는 중첩 목록은 `not-found`(중첩 목록 편집 전 확인), `factors: {}` 타입 불일치 문서에서 추가 실패(backend가 막음), 항목 삭제 시 선행 독립 주석 고아(`planRemove` → P5-01), `saved_factor.factor_id` 오탐은 안전 방향 | 2026-09-18 |
@@ -220,6 +221,7 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-18 KST | Claude | `review_gui_p5_01` 2차 APPROVE(`226231d`) → P5-01 APPROVED(기록은 스택 상위 P5-03 PLAN). P5-03 구현·self-check(Graph→Form 왕복, Graph e2e, 잠금을 parse 실패로 좁힘, route de-flake, 문서 6·규칙·WORKFLOW), P5-02 후속 `4bf6342` 위로 `--onto` rebase, diff freeze `e6a0074`, stacked PR #133(base P5-02), `review_gui_p5_03`(opus) 배정 → IN_REVIEW(활성 리뷰 P5-02 2차·P5-03 = 2). 결정: `projection.readOnly`(JSON)는 유지, DAG 카드·편집 목록 분리 유지, 디바운스 대기는 잠그지 않음(live 텍스트 preflight) | 13.3 diff freeze |
 | 2026-09-18 KST | Claude | `review_gui_p5_02` 1차 REQUEST_CHANGES(P1 DEFECT-132-01: 노드 삭제가 표시 이름으로 `nodePointerOf` 첫 일치 노드를 찾아 `node_id` 중복·누락 문서에서 다른 노드를 지움 — GUI만으로 도달 가능한 silent data loss; P2 7: kind 미해소 노드 선택 시 안내 모순, 확정 직후 디바운스 잠금, 중복 후보 option key, CSS 폴백, aria-label 중복, ready 분기 단위 테스트 없음, SoT 행 이월) → 후속 `45f01c9`: `removeNodeAt(tree, factorPointer, nodePointer)`(pointer 정본)로 삭제, 중복 표시 이름은 문서 순번(`spare (4) · 삭제`), 못 찾은 노드 `graph.removeMissing` 안내, kind 미해소 노드는 kind select(`setNodeField(kind)`), reference 후보 `Set` 중복 제거, CSS·aria 정리, stale route 테스트 `findByText`(디바운스 대기 — 전체 실행 flake 원인), P5-01 후속 위로 rebase → 재검토 요청. 잔여: 디바운스 잠금(132-03)은 P5-03에서 훅 `disabled` 판정을 parse 실패로 좁혀 처리, `node_id` 중복 방지·rename은 범위 밖 | 13.5 재검토 |
 | 2026-09-18 KST | Claude | `review_gui_p4_05` 1차 APPROVE(`b394dbe`, P2 4) → P4-05 APPROVED(기록은 스택 상위 P5-02 브랜치 PLAN). P5-02 구현·self-check(편집 표면은 parse tree, `projectObjectSection`, `FormFieldsEditor` owner, plan 없는 상태에서도 편집 — 감사 R4·R6), P4-05 P2-1·P2-4 처리, diff freeze `0097e51`, stacked PR #132(base P5-01 `a0e533d`), `review_gui_p5_02`(opus) 배정 → IN_REVIEW(활성 리뷰 P5-01·P5-02 = 2). 결정: 투영(plan 순서)과 편집 목록(문서 순서)은 별개 표면, 입력 재연결은 reference select(그래프 스코프·자기 제외), 그래프 설정은 `graph`가 있을 때만 | 13.3 diff freeze |
 | 2026-09-18 KST | Claude | `review_gui_p5_01` 1차 REQUEST_CHANGES(P1-1 `addNode`가 `x-reference`를 `schemaFacts` 없이 직접 읽음(SoT owner 위반, P4-05 DEFECT-P4X-003 재발); P2 8: `- - "#tag"` 안쪽 유일 항목 삭제 계획 실패(base, property 간헐 red), 문서 머리 주석 삭제, 다중 참조 분기 즉시 valid 불성립, `rewireInput` 키 미검증, P5-02 소비자용 `nodeReferenceKeys` 부재·`nodePointerById` 오기·kind 라벨, `within`·`definingPointer` 짝, 스니펫 memo 죽음, scope 왕복 슬롯 부활(기록)) → 후속 `226231d`: `nodeReferenceKeys`(`schemaFacts(...).reference`) + `addNode`·`rewireInput(schema?)`이 사용, 참조 슬롯 하나뿐인 분기만 마지막 노드로 채움, 머리 주석(offset 0 블록) 보존, `parentLine < to` 가드, `within` 주석, memo 의존성 슬롯 값, WORKFLOW 정정 → 재검토 요청. P5-02(#132, 리뷰 중)·P5-03 브랜치는 리뷰 뒤 rebase | 13.5 재검토 |

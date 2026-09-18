@@ -326,6 +326,12 @@ class TestDataFeedFromColumns:
         with pytest.raises(ValueError, match="instrument id out of range"):
             columns.feed()
 
+    def test_negative_session_index_is_rejected(self) -> None:
+        """뒤에서 세는 index는 세션 경계가 뒤집혀 빈 스냅샷이 된다 — 조용히 답하지 않는다."""
+        feed = _columns_of(_sample_bars()).feed()
+        with pytest.raises(IndexError, match="must be >= 0"):
+            feed.snapshot_at(-1)
+
     def test_empty_feed_is_supported(self) -> None:
         feed = _Columns([], [], [0], [], [], [], [], [], []).feed()
         assert len(feed) == 0

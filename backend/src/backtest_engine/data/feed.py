@@ -189,7 +189,18 @@ class DataFeed:
         return columns
 
     def snapshot_at(self, index: int) -> MarketSnapshot:
-        """세션 index의 스냅샷. 열로 만든 feed는 이때 Bar 객체를 만들어 캐시한다."""
+        """세션 index의 스냅샷. 열로 만든 feed는 이때 Bar 객체를 만들어 캐시한다.
+
+        Raises:
+            IndexError: index가 세션 범위 밖일 때. 음수를 막는 이유는 Python 리스트 규칙으로
+                뒤에서 세어 버리면 세션 경계가 뒤집혀(`offsets[index] > offsets[index + 1]`)
+                빈 스냅샷을 조용히 돌려주기 때문이다 — 세션 index는 Rust가 보내는 0 기반
+                위치다.
+        """
+        if index < 0:
+            raise IndexError(
+                f"feed session index must be >= 0 — got {index} sessions={len(self._sessions)}"
+            )
         cached = self._snapshots[index]
         if cached is not None:
             return cached

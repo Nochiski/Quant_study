@@ -230,7 +230,7 @@ Phase exit:
 | 5 | ~~P5X-005 — CodeMirror `lineSeparator`로 CRLF 보존 또는 "LF 정규화" 문서화~~ → [#143](https://github.com/Nochiski/Quant_study/pull/143) | 편집 없이 저장해도 `source_hash` 변동 | 설정 1 또는 문서 |
 | 6 | DEFECT-P5X-004 — `removalBlockers`가 SoT 행이 요구한 스코프 없이 `findReferences` 호출(팩터·파라미터는 전역이라 현재 무해) | 계약 명시 | 테스트 또는 인자 |
 | 7 | P5X-006 — `lastStructural`·`lastReady`를 `documentEpoch`에 결속 | 다른 stale 캐시는 전부 epoch에 묶여 있음 | 한 줄 |
-| 8 | P5X-007 — 매뉴얼 8절 스크린샷 | 두 편집 표면을 글로만 설명 | 문서 |
+| 8 | P5X-007 — 매뉴얼 스크린샷 전량 재촬영(8절 신규 + 기존 12장 — 마지막 촬영 `5a7b0b3` 2026-09-06이 1.1 전환 `9fab26b` 이전이라 전부 1.0 화면; #143 리뷰 P2-2) | 두 편집 표면을 글로만 설명, 1·2절 그림이 1.0 구조 | 문서 |
 | 9 | P5X-008 — `graph-transactions.ts` UI 미호출 export 5종 배선 또는 정리 | P5-01 R4-4 규약이 공허 | 정리 |
 | 10 | Phase 1 이월 — `trace.strategy.requires_upgrade` i18n 키, 세 라우트 422 typed화 | P5-03 소유로 지정됐으나 미이행 | 소 |
 | 11 | Phase 2 이월 — DEFECT-P2X-004(사전 누락 시 침묵), -005(적용 조건 문장 이중 소유) | 진단 wire 계약 변경 | 중 |

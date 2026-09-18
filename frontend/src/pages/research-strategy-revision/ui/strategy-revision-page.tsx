@@ -204,6 +204,17 @@ export const StrategyRevisionPage = () => {
     },
     [navigate, search, revision, strategyId],
   );
+  const openForm = useCallback(
+    (pointer: string): void => {
+      void navigate({
+        to: ROUTE,
+        params: { strategyId, revision },
+        search: { ...search, path: pointer, view: "form" },
+        replace: true,
+      });
+    },
+    [navigate, search, revision, strategyId],
+  );
   const onOutlineEditorReady = outline.onEditorReady;
   const onSnippetEditorReady = snippets.onEditorReady;
   const onTransactionsEditorReady = transactions.onEditorReady;
@@ -377,6 +388,7 @@ export const StrategyRevisionPage = () => {
                   factors:
                     assist.inspectorSource.factorCatalog?.factors ?? null,
                 },
+                onOpenForm: openForm,
               }}
               onSelectPointer={(pointer) => selectPointer(pointer, "graph")}
               onOpenSource={(pointer) => {

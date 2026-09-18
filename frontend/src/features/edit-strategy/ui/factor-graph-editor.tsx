@@ -32,6 +32,8 @@ type FactorGraphEditorProps = {
   onSelectPointer: (pointer: string) => void;
   /** plan projection이 없을 때는 팩터 선택도 편집기가 맡는다. */
   factorSelect: boolean;
+  /** "Form에서 열기": 이 팩터의 Form 항목으로 간다(P5-03 왕복, pointer `/factors/N`). */
+  onOpenForm?: (pointer: string) => void;
 };
 
 /**
@@ -50,8 +52,10 @@ export const FactorGraphEditor = ({
   selectedPointer,
   onSelectPointer,
   factorSelect,
+  onOpenForm,
 }: FactorGraphEditorProps) => {
   const factors = authoredFactors(tree);
+  const activeFactorId = factors[factorIndex]?.factorId ?? `#${factorIndex + 1}`;
   const factorPointer = `/factors/${factorIndex}`;
   const graphPointer = factorGraphPointer(factorIndex);
   const kinds = nodeKinds(schema, tree, factorPointer);
@@ -138,6 +142,16 @@ export const FactorGraphEditor = ({
           ) : (
             <Badge tone="ok">{t("graph.editable")}</Badge>
           )}
+          {onOpenForm !== undefined ? (
+            <Button
+              size="small"
+              tone="ghost"
+              onClick={() => onOpenForm(factorPointer)}
+              aria-label={`${activeFactorId} · ${t("graph.openForm")}`}
+            >
+              {t("graph.openForm")}
+            </Button>
+          ) : null}
         </div>
         {factorSelect ? (
           <label>

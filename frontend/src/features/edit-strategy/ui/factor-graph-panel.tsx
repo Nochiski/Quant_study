@@ -28,6 +28,8 @@ export type FactorGraphEditing = {
   schema: JsonSchema | null;
   transactions: SourceTransactions;
   catalogs: FormCatalogs;
+  /** Graph → Form 왕복(P5-03). */
+  onOpenForm?: (pointer: string) => void;
 };
 
 type FactorGraphPanelProps = {
@@ -315,6 +317,7 @@ export const FactorGraphPanel = ({
         selectedPointer={selectedPointer}
         onSelectPointer={onSelectPointer}
         factorSelect={factorSelect}
+        onOpenForm={editing.onOpenForm}
       />
     );
   };

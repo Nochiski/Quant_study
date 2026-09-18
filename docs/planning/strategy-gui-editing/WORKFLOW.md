@@ -903,6 +903,15 @@ export const suggestNodeId = (tree, factorPointer, base: string): string;   // b
   `docs/manual/strategy-workbench/README.md`, `README.md`, `frontend/README.md`, `backend/FACTORS.md`,
   로드맵 M8 "Graph 직접 편집" 체크.
 - 기존 `projection.readOnly`, `graph.readOnly` 문구·코드 제거.
+- 구현 결정(P5-03): Graph → Form 왕복은 편집기 툴바의 "Form에서 열기"(`onOpenForm(/factors/N)` →
+  view=form·path)이고 Form → Graph는 P4-03의 "Graph에서 열기" 그대로다. `graph.readOnly`는 P5-02에서
+  삭제했고 `projection.readOnly`는 JSON projection이 실제로 읽기 전용이라 유지한다(문구 "backend compile
+  결과 · 읽기 전용"). e2e `chromium-workflow`에 "노드 추가 → field_id → 입력 재연결 → 검증 통과 → plan
+  투영에 새 노드 → YAML에 세 줄 반영·앞부분 바이트 동일 → 저장 → Form에서 열기" 시나리오. 문서: ADR
+  머리말·D5 개정 표기·5절 non-goal 취소선, 로드맵 M8 주석, 사용자 매뉴얼 8절(Form·Graph에서 고치기),
+  README·frontend/README, SoT "전략 의미" 행(Form·Graph 편집 = source 트랜잭션). `backend/FACTORS.md`에는
+  Form/Graph 서술이 없어 변경 없음. DAG 카드 안 편집 컨트롤 병합은 하지 않는다(투영과 편집 목록을 별개
+  표면으로 유지 — 카드는 backend plan 순서, 목록은 문서 순서라 두 순서를 한 표면에 섞지 않는다).
 
 **Phase 5 exit**: SoT·책임분리 최종 점검. 전체 e2e green. initiative COMPLETE.
 

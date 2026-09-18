@@ -2,6 +2,11 @@
 
 __version__: str
 
+# Python 정본(`engine/store.RecordKind`, `engine/queue.EventPriority`)과 대조하는 wire 상수.
+# 실행 경로는 읽지 않고 `tests/test_core_parity.py`가 값 일치를 고정한다.
+RECORD_KIND_CODES: dict[str, int]
+EVENT_PRIORITIES: dict[str, int]
+
 class RouteErrorException(ValueError):
     """결정 라우팅 오류. `args`는 `(code, message)`이며 `route_error_from`이 엔진 예외로 바꾼다."""
 

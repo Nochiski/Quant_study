@@ -135,16 +135,6 @@ fn py_list(items: &[String]) -> String {
     format!("[{}]", inner.join(", "))
 }
 
-/// Python `repr(tuple[str, ...])`와 같은 표기 (`()`, `('a',)`, `('a', 'b')`).
-pub(crate) fn py_tuple(items: &[String]) -> String {
-    let inner: Vec<String> = items.iter().map(|s| format!("'{s}'")).collect();
-    if inner.len() == 1 {
-        format!("({},)", inner[0])
-    } else {
-        format!("({})", inner.join(", "))
-    }
-}
-
 /// 계획 항목. Python 루프가 순서대로 적용한다.
 /// `("fill", order_id, quantity, price, slip, fee, "")`
 /// `("update", order_id, 0, 0, 0, 0, "status|detail")`
@@ -480,13 +470,6 @@ pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn py_tuple_matches_python_repr() {
-        assert_eq!(py_tuple(&[]), "()");
-        assert_eq!(py_tuple(&["a".to_string()]), "('a',)");
-        assert_eq!(py_tuple(&["a".to_string(), "b".to_string()]), "('a', 'b')");
-    }
 
     #[test]
     fn py_float_matches_python_repr() {

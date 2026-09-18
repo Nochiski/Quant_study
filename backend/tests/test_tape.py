@@ -43,6 +43,8 @@ from tests.conftest import day, make_bar, make_instrument
 RUST_ONLY = pytest.mark.skipif(not core_available("rust"), reason="rust core not built")
 SIGNAL = date(2018, 4, 27)
 A, B, C = make_instrument("000660:1"), make_instrument("005930:1"), make_instrument("000030:1")
+# 작은따옴표가 든 심볼. feed에 없어 미보유 no_bar 경로를 탄다.
+QUOTED = make_instrument("00'30")
 
 
 class _Context:
@@ -223,6 +225,25 @@ def _no_bar_order_frames() -> dict[date, TapeFrame]:
     }
 
 
+def _apostrophe_frames() -> dict[date, TapeFrame]:
+    """D3 프레임이 작은따옴표가 든 미보유 종목을 요구한다 — 사유에 no_bar로 남는다."""
+
+    def frame(*targets: tuple[InstrumentId, float], reason: str) -> TapeFrame:
+        return TapeFrame(
+            action=SetPortfolioTarget(
+                targets=tuple(WeightTarget(instrument, weight) for instrument, weight in targets),
+                scope=TargetScope.REPLACE,
+                execution=ExecutionPolicy.market_next_open(),
+            ),
+            reason=reason,
+        )
+
+    return {
+        day(1).date(): frame((_X, 0.4), (_Y, 0.4), reason="tape:d1"),
+        day(3).date(): frame((_X, 0.4), (QUOTED, 0.1), reason="tape:d3"),
+    }
+
+
 def test_declarative_tape_protocol_is_detected() -> None:
     assert is_declarative_tape(_TapeStrategy({}))
     assert not is_declarative_tape(object())
@@ -259,6 +280,32 @@ def test_rust_tape_path_matches_python_trace_without_callbacks() -> None:
         "005930",
         "000660",
         "005930",
+    ]
+
+
+@RUST_ONLY
+def test_no_bar_reason_quotes_symbols_containing_an_apostrophe() -> None:
+    """작은따옴표가 든 심볼도 python `repr(tuple)` 표기 그대로 사유에 남는다.
+
+    사유 조립을 Rust가 흉내 내던 시절에는 따옴표를 무조건 작은따옴표로 감싸 `('00'30',)`
+    같은 깨진 문자열이 나왔다. 포맷 정본이 `engine/tape.no_bar_reason` 한 곳이 되어 두 코어가
+    같은 bytes를 남기는지 고정한다.
+    """
+    traces: dict[str, bytes] = {}
+    reasons: dict[str, list[str | None]] = {}
+    for core in ("python", "rust"):
+        engine = BacktestEngine(RunConfig(run_id="tape", initial_cash=100_000.0), core=core)
+        engine.run(_TapeStrategy(_apostrophe_frames()), _delisting_feed())
+        traces[core] = engine.event_store.trace_bytes()
+        reasons[core] = [record.decision.reason for record in engine.event_store.decisions()]
+
+    assert traces["python"] == traces["rust"]
+    assert reasons["python"] == reasons["rust"]
+    assert reasons["rust"] == [
+        "tape:d1",
+        "tape_idle",
+        '''tape:d3 no_bar=("00'30",)''',
+        "tape_idle",
     ]
 
 

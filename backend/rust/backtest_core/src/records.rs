@@ -20,6 +20,20 @@ pub(crate) const KIND_CORPORATE_ACTION: u8 = 6;
 pub(crate) const KIND_CORPORATE_ACTION_APPLIED: u8 = 7;
 pub(crate) const KIND_COST: u8 = 8;
 
+/// wire 상수 대조용 (name, code) 목록. name은 Python `RecordKind`의 value 문자열이다.
+/// `lib.rs`가 모듈 상수로 노출하고 `tests/test_core_parity.py`가 Python 정본과 대조한다.
+pub(crate) const RECORD_KIND_NAMES: [(&str, u8); 9] = [
+    ("market", KIND_MARKET),
+    ("decision", KIND_DECISION),
+    ("order", KIND_ORDER),
+    ("order_update", KIND_ORDER_UPDATE),
+    ("fill", KIND_FILL),
+    ("snapshot", KIND_SNAPSHOT),
+    ("corporate_action", KIND_CORPORATE_ACTION),
+    ("corporate_action_applied", KIND_CORPORATE_ACTION_APPLIED),
+    ("cost", KIND_COST),
+];
+
 /// `(seq, session_index, kind)` — Python `PersistentEventStore`가 소비하는 레코드 인덱스 행.
 /// payload는 `record_payload(seq)`로 필요할 때만 변환한다 — 배치 전체를 tuple로 복제하면 Rust
 /// wire·Python tuple·공개 객체가 동시에 살아 peak RSS가 커진다.

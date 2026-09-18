@@ -363,6 +363,16 @@ ENGINE_SCENARIOS = {
         ),
         DataFeed(test_short_selling.BARS),
     ),
+    # 롱 보유에서 한 번의 체결로 숏으로 넘어간다(평단 리셋). 포트폴리오 단독 시나리오만
+    # 덮던 방향 전환을 엔진 레벨 trace로도 고정한다.
+    "flip": lambda core: _engine_scenario(
+        core,
+        RunConfig(run_id="f", initial_cash=10_000.0, fee_bps=0.0, short_borrow_bps_annual=252.0),
+        test_short_selling.ShortStrategy(
+            (test_short_selling.target(5), test_short_selling.target(-8))
+        ),
+        DataFeed(test_short_selling.BARS),
+    ),
     "margin": lambda core: _engine_scenario(
         core,
         test_margin.config(),
@@ -892,43 +902,29 @@ def test_promoted_rust_makes_no_per_session_ffi(
     assert calls["configure_run"] == 1
     assert calls["load_corporate_actions"] == 1
     assert calls["finish"] == 1
-    # 세션 단위 왕복은 없다.
-    for name in ("queue_push", "queue_pop", "record_append", "record_extend"):
-        assert calls[name] == 0, name
-    # 세션 루프를 Rust가 소유한 뒤 사라진 공개 메서드들 — 다시 노출되면 왕복이 되살아난다.
-    exposed = dir(proxies[0].inner)
-    for name in (
-        "process_market",
-        "process_market_index",
-        "activate_pending",
-        "close_current_session",
-        "mark_current_session",
-        "portfolio_snapshot",
-        "open_order_states",
-        "open_group_states",
-        "place_order",
-        "register_group",
-        "drop_group",
-        "remove_order",
-        "settle_order",
-        "mark_triggered",
-        "drain_orders",
-        "record_count",
-        "next_decision_id",
-        "next_order_id",
-        "next_fill_id",
-        "next_group_id",
-        "apply_fill",
-        "charge",
-        "apply_corporate_action",
-        "apply_corporate_action_ratio",
-        "cancel_for_key",
-        "mark",
-        "cash",
-        "held_qty",
-        "average_price",
-    ):
-        assert name not in exposed, name
+    # Rust가 세션 루프를 소유하므로 공개 메서드는 적재·콜백·종료·조회뿐이다. 블랙리스트가
+    # 아니라 전체 집합을 고정한다 — 사라진 메서드의 재노출과 새 메서드 추가를 함께 잡는다.
+    assert {name for name in dir(proxies[0].inner) if not name.startswith("_")} == {
+        "configure_router",
+        "configure_run",
+        "current_session_count",
+        "drive",
+        "equity_series",
+        "fail_callback",
+        "failure_detail",
+        "finish",
+        "history_window",
+        "lifecycle_state",
+        "load_corporate_actions",
+        "load_feed",
+        "load_target_tape",
+        "poison",
+        "record_batch",
+        "record_payload",
+        "settlement_session_index",
+        "submit_decision",
+        "traded_notional",
+    }
     # 결과·지표 조회는 종료 배치와 Rust 누산값만 쓴다.
     assert len(result.fills) == 2
     assert calls["record_batch"] == 0

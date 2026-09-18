@@ -830,16 +830,6 @@ mod tests {
     }
 
     #[test]
-    fn identifiers_are_deterministic() {
-        let mut runtime = PersistentEngine::new(10_000.0, false, false, 1.0).unwrap();
-        let id = PersistentEngine::next_id;
-        assert_eq!(id(&mut runtime.decision_seq, 'D'), "D-000001");
-        assert_eq!(id(&mut runtime.order_seq, 'O'), "O-000001");
-        assert_eq!(id(&mut runtime.fill_seq, 'F'), "F-000001");
-        assert_eq!(id(&mut runtime.group_seq, 'G'), "G-000001");
-    }
-
-    #[test]
     fn market_processing_mutates_persistent_order_state() {
         let mut runtime = PersistentEngine::new(10_000.0, false, false, 1.0).unwrap();
         runtime.orders.push(market_order("O-000001"));

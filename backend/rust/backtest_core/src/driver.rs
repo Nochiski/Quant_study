@@ -749,6 +749,7 @@ impl PersistentEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::persistent_router::{ExecutionWire, TargetWire};
     use crate::records::{
         KIND_DECISION, KIND_FILL, KIND_MARKET, KIND_ORDER, KIND_ORDER_UPDATE, KIND_SNAPSHOT,
     };
@@ -814,6 +815,22 @@ mod tests {
         )
     }
 
+    fn weight_target(weight: f64) -> TargetWire {
+        (
+            "weight".into(),
+            KEY.into(),
+            "005930".into(),
+            "KRW".into(),
+            None,
+            Some(weight),
+            None,
+        )
+    }
+
+    fn market_next_open() -> ExecutionWire {
+        ("market".into(), "next_open".into(), "day".into(), None)
+    }
+
     fn target(ts: &str, weight: f64) -> DecisionWire {
         (
             1,
@@ -821,19 +838,34 @@ mod tests {
             None,
             vec![(
                 "set_portfolio_target".into(),
-                vec![(
-                    "weight".into(),
-                    KEY.into(),
-                    "005930".into(),
-                    "KRW".into(),
-                    None,
-                    Some(weight),
-                    None,
-                )],
+                vec![weight_target(weight)],
                 Some("replace".into()),
-                Some(("market".into(), "next_open".into(), "day".into(), None)),
+                Some(market_next_open()),
                 None,
                 vec![],
+            )],
+        )
+    }
+
+    /// leg 하나짜리 basket — 라우터가 그룹 id 까지 만드는 경로를 탄다.
+    fn basket(ts: &str, weight: f64) -> DecisionWire {
+        (
+            1,
+            ts.to_string(),
+            None,
+            vec![(
+                "basket".into(),
+                vec![],
+                Some("best_effort".into()),
+                None,
+                None,
+                vec![(
+                    "set_position_target".into(),
+                    Some(weight_target(weight)),
+                    Some(market_next_open()),
+                    None,
+                    None,
+                )],
             )],
         )
     }
@@ -921,6 +953,43 @@ mod tests {
         );
         assert_eq!(runtime.records.traded_notional(), 500.0 * 110.0);
         assert_eq!(runtime.portfolio.held_qty(KEY), 500);
+    }
+
+    #[test]
+    fn identifier_prefixes_come_from_the_paths_that_mint_them() {
+        // 접두어마다 생성 경로가 다르다 — D는 submit_internal, O·G는 라우터, F는
+        // apply_market_ops. 시퀀스 필드와 접두어를 테스트가 직접 짝지으면 코드에서 짝이
+        // 어긋나도 통과하므로, 실제 경로가 내놓은 id 를 읽어 단언한다.
+        let mut runtime = runtime(0);
+        runtime.configure_router(vec!["no_action".into(), "basket".into()], vec![]);
+
+        let first = runtime.drive_internal().unwrap().unwrap();
+        let (decision_id, error) = runtime
+            .submit_internal(first.token, basket(&first.ts, 0.5), None)
+            .unwrap();
+        assert_eq!((decision_id.as_str(), error), ("D-000001", None));
+        let staged: Vec<(&str, Option<&str>)> = runtime
+            .pending_orders
+            .iter()
+            .map(|order| (order.order_id.as_str(), order.group_id.as_deref()))
+            .collect();
+        assert_eq!(staged, vec![("O-000001", Some("G-000001"))]);
+
+        let second = runtime.drive_internal().unwrap().unwrap();
+        let (next_decision_id, _) = runtime
+            .submit_internal(second.token, no_action(&second.ts), None)
+            .unwrap();
+        assert_eq!(next_decision_id, "D-000002");
+        let fills: Vec<(&str, &str)> = runtime
+            .records
+            .records()
+            .iter()
+            .filter_map(|record| match &record.payload {
+                RecordPayload::Fill(fill) => Some((fill.fill_id.as_str(), fill.order_id.as_str())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(fills, vec![("F-000001", "O-000001")]);
     }
 
     #[test]

@@ -9,13 +9,26 @@ import {
   type GraphFactorProjection,
   type GraphNodeProjection,
 } from "../model/factor-graph-projection";
+import type { JsonSchema } from "../model/schema-navigator";
 import {
   factorGraphPointer,
   factorIndexAtPointer,
   pointerSelectsNode,
   type ExecutionPlansState,
 } from "../model/use-execution-plans";
+import type { SourceTransactions } from "../model/use-source-transactions";
+import { authoredFactors } from "../model/graph-transactions";
+import { FactorGraphEditor } from "./factor-graph-editor";
+import type { FormCatalogs } from "./strategy-form-panel";
 import "./factor-graph-panel.css";
+
+/** 편집 입력(P5-02). 없으면 읽기 전용 투영만 그린다(테스트·backend plan 뷰어). */
+export type FactorGraphEditing = {
+  tree: unknown;
+  schema: JsonSchema | null;
+  transactions: SourceTransactions;
+  catalogs: FormCatalogs;
+};
 
 type FactorGraphPanelProps = {
   state: ExecutionPlansState;
@@ -23,6 +36,7 @@ type FactorGraphPanelProps = {
   selectedPointer?: string;
   onSelectPointer: (pointer: string) => void;
   onOpenSource: (pointer: string) => void;
+  editing?: FactorGraphEditing;
 };
 
 const graphDiagnostics = (diagnostics: DocumentDiagnostic[]) =>
@@ -276,29 +290,48 @@ export const FactorGraphPanel = ({
   selectedPointer,
   onSelectPointer,
   onOpenSource,
+  editing,
 }: FactorGraphPanelProps) => {
   const [chosenFactor, setChosenFactor] = useState(0);
   const projection = projectFactorGraphs(state);
-  if (projection.status !== "ready") {
+  const routeFactor = factorIndexAtPointer(selectedPointer);
+  // 편집 표면은 backend plan이 없어도(빈 그래프·compile error·대기) 문서의 팩터로 그린다(Phase 4 감사 R4).
+  const editor = (factorCount: number, factorSelect: boolean) => {
+    if (editing === undefined || editing.schema === null) return null;
+    const index =
+      routeFactor !== null && routeFactor < factorCount
+        ? routeFactor
+        : chosenFactor < factorCount
+          ? chosenFactor
+          : 0;
     return (
-      <GraphState
-        state={projection}
+      <FactorGraphEditor
+        tree={editing.tree}
+        schema={editing.schema}
+        transactions={editing.transactions}
+        catalogs={editing.catalogs}
         diagnostics={diagnostics}
-        onOpenSource={onOpenSource}
+        factorIndex={index}
+        selectedPointer={selectedPointer}
+        onSelectPointer={onSelectPointer}
+        factorSelect={factorSelect}
       />
     );
-  }
-  if (projection.factors.length === 0) {
+  };
+  if (projection.status !== "ready" || projection.factors.length === 0) {
+    const authored = editing === undefined ? [] : authoredFactors(editing.tree);
     return (
-      <GraphState
-        state={{ status: "empty" }}
-        diagnostics={diagnostics}
-        onOpenSource={onOpenSource}
-      />
+      <>
+        <GraphState
+          state={projection.status !== "ready" ? projection : { status: "empty" }}
+          diagnostics={diagnostics}
+          onOpenSource={onOpenSource}
+        />
+        {editor(authored.length, true)}
+      </>
     );
   }
 
-  const routeFactor = factorIndexAtPointer(selectedPointer);
   const activeIndex =
     routeFactor !== null && routeFactor < projection.factors.length
       ? routeFactor
@@ -317,7 +350,9 @@ export const FactorGraphPanel = ({
       <header className="factor-graph__toolbar">
         <div>
           <strong>{t("graph.title")}</strong>
-          <span>{t("graph.readOnly")}</span>
+          <span>
+            {editing === undefined ? t("graph.planOnly") : t("graph.planWithEdit")}
+          </span>
         </div>
         <label>
           <span>{t("plan.factor")}</span>
@@ -395,6 +430,8 @@ export const FactorGraphPanel = ({
           </ol>
         </section>
       ) : null}
+
+      {editor(projection.factors.length, false)}
     </section>
   );
 };

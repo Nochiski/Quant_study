@@ -395,6 +395,70 @@ const projectListSection = (
   };
 };
 
+/** mapping pointer 하나를 object 섹션으로: 스칼라 필드 + 중첩 목록(`lists`) + 진단 소유권. */
+const objectSectionAt = (
+  root: JsonSchema,
+  tree: unknown,
+  diagnostics: readonly DocumentDiagnostic[],
+  key: string,
+  pointer: string,
+  node: JsonSchema,
+): Extract<FormSection, { kind: "object" }> => {
+  const written = valueAtPointer(tree, pointer).present;
+  const projected = projectFields(root, tree, diagnostics, pointer, node);
+  // 배열 property는 link 필드 대신 중첩 목록 섹션으로 편집한다(P4-05, 감사 DEFECT-P4X-001).
+  const fields = projected.filter((field) => field.control.kind !== "list-link");
+  const lists = projected
+    .filter((field) => field.control.kind === "list-link")
+    .flatMap((field) => {
+      const array = schemaAt(root, field.pointer, tree);
+      return array === null
+        ? []
+        : [
+            projectListSection(
+              root,
+              tree,
+              diagnostics,
+              field.key,
+              field.pointer,
+              array.node,
+              pointer,
+              written,
+            ),
+          ];
+    });
+  return {
+    kind: "object",
+    pointer,
+    key,
+    written,
+    fields,
+    lists,
+    diagnostics: unabsorbedDiagnostics(diagnostics, pointer, [
+      ...fields,
+      ...lists.flatMap(listOwners),
+    ]),
+  };
+};
+
+/**
+ * 임의의 mapping pointer(`/factors/N/graph`, `/factors/N/graph/nodes/M`)를 object 섹션으로 projection한다
+ * (P5-02 Graph 편집기가 P4-02 필드 컨트롤을 재사용하는 입력). union 항목은 문서의 `kind`로 분기를 고른다.
+ * 스키마를 따라갈 수 없으면 null.
+ */
+export const projectObjectSection = (
+  schema: JsonSchema,
+  tree: unknown,
+  diagnostics: readonly DocumentDiagnostic[],
+  pointer: string,
+  key: string,
+): Extract<FormSection, { kind: "object" }> | null => {
+  const resolved = schemaAt(schema, pointer, tree);
+  if (resolved === null || resolved.branches !== null) return null;
+  if (!isRecord(resolved.node.properties)) return null;
+  return objectSectionAt(schema, tree, diagnostics, key, pointer, resolved.node);
+};
+
 export const projectForm = (
   schema: JsonSchema,
   parse: ParsedSource | null,
@@ -423,49 +487,9 @@ export const projectForm = (
         ),
       );
     } else if (facts.type === "object" && isRecord(resolved.node.properties)) {
-      const written = valueAtPointer(tree, pointer).present;
-      const projected = projectFields(
-        schema,
-        tree,
-        diagnostics,
-        pointer,
-        resolved.node,
+      sections.push(
+        objectSectionAt(schema, tree, diagnostics, key, pointer, resolved.node),
       );
-      // 배열 property는 link 필드 대신 중첩 목록 섹션으로 편집한다(P4-05, 감사 DEFECT-P4X-001).
-      const fields = projected.filter(
-        (field) => field.control.kind !== "list-link",
-      );
-      const lists = projected
-        .filter((field) => field.control.kind === "list-link")
-        .flatMap((field) => {
-          const array = schemaAt(schema, field.pointer, tree);
-          return array === null
-            ? []
-            : [
-                projectListSection(
-                  schema,
-                  tree,
-                  diagnostics,
-                  field.key,
-                  field.pointer,
-                  array.node,
-                  pointer,
-                  written,
-                ),
-              ];
-        });
-      sections.push({
-        kind: "object",
-        pointer,
-        key,
-        written,
-        fields,
-        lists,
-        diagnostics: unabsorbedDiagnostics(diagnostics, pointer, [
-          ...fields,
-          ...lists.flatMap(listOwners),
-        ]),
-      });
     } else {
       const field = projectField(
         schema,

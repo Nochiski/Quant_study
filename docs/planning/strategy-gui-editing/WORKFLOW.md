@@ -875,6 +875,16 @@ export const suggestNodeId = (tree, factorPointer, base: string): string;   // b
 - 편집 후 backend plan이 갱신될 때까지 카드에 "재계산 중" 상태(기존 loading state 재사용).
 - 키보드: 노드 목록 roving tabindex 유지, 메뉴는 `Menu` primitive.
 - 테스트: 사용자 이벤트 → `replaceRange` 인자, 삭제 가드, plan 갱신 MSW.
+- 구현 결정(P5-02): 편집 표면 `ui/factor-graph-editor.tsx`는 parse tree에서 그린다(`projectObjectSection`
+  으로 `/factors/N/graph`·노드 pointer를 object 섹션으로 projection) — plan이 막혀 있어도(빈 그래프·compile
+  error·대기) 팩터 선택·노드 추가·속성 편집이 된다(감사 R4). 노드 속성·입력 재연결·출력·`missing_policy`는
+  P4-02 필드 컨트롤(`FormFieldsEditor`, owner `graph`)이고 입력 재연결은 reference select(같은 그래프·자기
+  제외)라 `rewireInput`의 가드와 같은 조건이다. 추가·삭제는 `addNode`/`removeNode`. 노드 추가 직후 새 노드
+  pointer를 선택하고 선택 노드를 지우면 그래프 pointer로 돌아간다(R6). "노드 추가" 메뉴는 `Menu` 대신 kind
+  select + 버튼(P4-03과 같은 결정). DAG 투영(plan 순서)과 편집 목록(문서 순서)은 별개 표면이다 — 카드 안
+  편집 컨트롤 병합은 P5-03 검토. "그래프 설정"은 `graph`가 있을 때만(없는 팩터는 노드 추가가 `graph`를 연다).
+  feedback 문구는 `ui/transaction-feedback.tsx`(Form·Graph 공용). "읽기 전용 투영" 문구는 편집 입력이 있으면
+  "편집은 source 트랜잭션"으로 바뀐다(`graph.readOnly` 삭제).
 
 ### P5-03 — 연결·e2e·문서·규칙 마감
 

@@ -21,6 +21,40 @@ import type { Scalar, SourceOperation } from "./source-transactions";
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+/** Graph 편집기의 feedback owner. Form(`form`)·스니펫(`snippet`)과 슬롯을 나눈다(Phase 4 감사 R2). */
+export const GRAPH_OWNER = "graph";
+
+/** 문서(parse tree)의 팩터 목록 — plan projection이 없어도 편집 대상은 여기서 온다(Phase 4 감사 R4). */
+export const authoredFactors = (
+  tree: unknown,
+): { index: number; factorId: string; label: string }[] => {
+  const factors =
+    isRecord(tree) && Array.isArray(tree.factors) ? tree.factors : [];
+  return factors.map((factor, index) => ({
+    index,
+    factorId:
+      isRecord(factor) && typeof factor.factor_id === "string"
+        ? factor.factor_id
+        : `#${index + 1}`,
+    label:
+      isRecord(factor) && typeof factor.label === "string" ? factor.label : "",
+  }));
+};
+
+const NODE_POINTER = /^(\/factors\/\d+\/graph\/nodes\/\d+)(?:\/|$)/;
+
+/** 선택 pointer가 이 팩터의 노드(또는 그 아래 필드)를 가리키면 노드 pointer, 아니면 null(pointer 규약 R6). */
+export const selectedNodePointer = (
+  selectedPointer: string | undefined,
+  factorPointer: string,
+): string | null => {
+  const match = NODE_POINTER.exec(selectedPointer ?? "");
+  return match !== null &&
+    match[1]!.startsWith(`${factorPointer}/graph/nodes/`)
+    ? match[1]!
+    : null;
+};
+
 const valueAt = (tree: unknown, pointer: string): unknown => {
   let current: unknown = tree;
   for (const segment of pointer.split("/").slice(1)) {

@@ -40,10 +40,8 @@ import {
 } from "../model/form-transactions";
 import type { JsonSchema } from "../model/schema-navigator";
 import type { Scalar } from "../model/source-transactions";
-import type {
-  SourceTransactions,
-  TransactionFeedback,
-} from "../model/use-source-transactions";
+import type { SourceTransactions } from "../model/use-source-transactions";
+import { TransactionFeedbackNote } from "./transaction-feedback";
 import "./strategy-form-panel.css";
 
 export type FormCatalogs = {
@@ -73,25 +71,6 @@ const UNSET = "__unset__";
 const FORM_OWNER = "form";
 /** Form 컨트롤이 포커스를 가진 채 적용한다: 편집기로 포커스를 옮기면 컨트롤 blur가 같은 값을 다시 확정한다. */
 const NO_FOCUS = { focusEditor: false } as const;
-
-const feedbackText = (feedback: TransactionFeedback): ReactNode => {
-  if (feedback.status === "idle" || feedback.owner !== FORM_OWNER) return null;
-  if (feedback.status === "applied")
-    return (
-      <p className="strategy-form__feedback" role="status">
-        {t("form.feedback.applied").replace("{label}", feedback.label)}
-      </p>
-    );
-  const reason = tOptional(`form.feedback.${feedback.reason}`);
-  return (
-    <p
-      className="strategy-form__feedback strategy-form__feedback--error"
-      role="alert"
-    >
-      {(reason ?? t("form.feedback.failed")).replace("{label}", feedback.label)}
-    </p>
-  );
-};
 
 /**
  * 편집 가능한 Form 패널(WORKFLOW P4-02). 모든 변경은 `SourceTransactions.apply` 한 번이고 YAML source에
@@ -136,7 +115,10 @@ export const StrategyFormPanel = ({
           {t("form.panel.jsonHint")}
         </p>
       ) : null}
-      {feedbackText(transactions.feedbackFor(FORM_OWNER))}
+      <TransactionFeedbackNote
+        feedback={transactions.feedbackFor(FORM_OWNER)}
+        owner={FORM_OWNER}
+      />
       {projection === null ? (
         <p className="strategy-form__state" role="status">
           {t("form.panel.loading")}
@@ -517,16 +499,47 @@ const isPassiveControl = (control: FormControl): boolean =>
   control.kind === "list-link" ||
   control.kind === "const";
 
+/**
+ * object 섹션의 필드 행 묶음. Graph 편집기(P5-02)가 노드 속성·그래프 설정에 같은 컨트롤을 쓴다 —
+ * `owner`로 feedback 슬롯을 나눈다.
+ */
+export const FormFieldsEditor = ({
+  section,
+  transactions,
+  catalogs,
+  owner = FORM_OWNER,
+}: {
+  section: ObjectSection;
+  transactions: SourceTransactions;
+  catalogs: FormCatalogs;
+  owner?: string;
+}) => (
+  <>
+    {section.fields.map((field) => (
+      <FormFieldRow
+        key={field.pointer}
+        section={section}
+        field={field}
+        transactions={transactions}
+        catalogs={catalogs}
+        owner={owner}
+      />
+    ))}
+  </>
+);
+
 const FormFieldRow = ({
   section,
   field,
   transactions,
   catalogs,
+  owner = FORM_OWNER,
 }: {
   section: ObjectSection;
   field: FormField;
   transactions: SourceTransactions;
   catalogs: FormCatalogs;
+  owner?: string;
 }) => {
   const id = useId();
   const labelId = `${id}-label`;
@@ -545,7 +558,7 @@ const FormFieldRow = ({
     return transactions.apply(
       fieldOperation(section, field, value),
       field.key,
-      FORM_OWNER,
+      owner,
       NO_FOCUS,
     );
   };
@@ -612,7 +625,7 @@ const FormFieldRow = ({
               transactions.apply(
                 resetOperation(field),
                 field.key,
-                FORM_OWNER,
+                owner,
                 NO_FOCUS,
               )
             }
@@ -626,7 +639,7 @@ const FormFieldRow = ({
             size="small"
             tone="ghost"
             onClick={() =>
-              transactions.apply(unset, field.key, FORM_OWNER, NO_FOCUS)
+              transactions.apply(unset, field.key, owner, NO_FOCUS)
             }
             aria-label={`${field.key} · ${t("form.field.unset")}`}
           >

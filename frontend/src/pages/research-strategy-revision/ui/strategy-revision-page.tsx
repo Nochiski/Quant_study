@@ -367,6 +367,17 @@ export const StrategyRevisionPage = () => {
               state={executionPlans}
               diagnostics={currentDiagnostics(document)}
               selectedPointer={search.path}
+              editing={{
+                tree: form.tree,
+                schema: assist.schema,
+                transactions,
+                catalogs: {
+                  equityFields:
+                    assist.inspectorSource.equityCatalog?.fields ?? null,
+                  factors:
+                    assist.inspectorSource.factorCatalog?.factors ?? null,
+                },
+              }}
               onSelectPointer={(pointer) => selectPointer(pointer, "graph")}
               onOpenSource={(pointer) => {
                 outline.requestSourceReveal(pointer);

@@ -173,18 +173,23 @@ export {
 } from "./model/document-references";
 export {
   addNode,
+  authoredFactors,
+  GRAPH_OWNER,
   graphNodeIds,
   nodeKinds,
   nodePointerOf,
   nodeReferenceKeys,
   removeNode,
+  removeNodeAt,
   rewireInput,
+  selectedNodePointer,
   setMissingPolicy,
   setNodeField,
   setOutput,
   suggestNodeId,
 } from "./model/graph-transactions";
 export { StrategyFormPanel, type FormCatalogs } from "./ui/strategy-form-panel";
+export { FactorGraphEditor } from "./ui/factor-graph-editor";
 export {
   buildCanonicalSnippetCatalog,
   planSnippetEdit,

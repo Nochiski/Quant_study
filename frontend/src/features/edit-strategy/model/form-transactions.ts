@@ -155,10 +155,12 @@ export const branchKind = (
   const branch = resolveRef(schema, member);
   if (branch === null) return null;
   const properties = isRecord(branch.properties) ? branch.properties : {};
-  // discriminator도 `schemaFacts`로 읽는다(감사 DEFECT-P4X-003: const 해석 규칙의 owner는 하나).
-  const marker = isRecord(properties.kind)
-    ? schemaFacts(properties.kind).constValue
-    : undefined;
+  // discriminator도 `$ref`를 풀고 `schemaFacts`로 읽는다(감사 DEFECT-P4X-003, P4-05 리뷰 P2-1:
+  // const 해석 규칙의 owner는 하나이고 backend가 `kind`를 정의 참조로 바꿔도 분기를 찾는다).
+  const kindNode = isRecord(properties.kind)
+    ? resolveRef(schema, properties.kind)
+    : null;
+  const marker = kindNode === null ? undefined : schemaFacts(kindNode).constValue;
   return typeof marker === "string" ? [marker, branch] : null;
 };
 

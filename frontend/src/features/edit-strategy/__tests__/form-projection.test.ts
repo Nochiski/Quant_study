@@ -4,9 +4,11 @@ import { parseSource } from "../../../shared/lib/yaml12";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import type { DocumentDiagnostic } from "../model/document-state";
 import {
-  projectForm,
+  CATALOGS,
   type FormField,
+  type FormListSection,
   type FormSection,
+  projectForm,
 } from "../model/form-projection";
 import type { JsonSchema } from "../model/schema-navigator";
 
@@ -154,8 +156,19 @@ describe("projectForm", () => {
       written: true,
       value: 0.6,
     });
-    const eligibility = objectFields(sections, "eligibility");
-    expect(field(eligibility, "rules").control).toEqual({ kind: "list-link" });
+    // object 섹션의 배열 property는 link 필드가 아니라 중첩 목록 섹션이다(P4-05).
+    const eligibility = section(sections, "eligibility");
+    if (eligibility.kind !== "object") throw new Error("eligibility is an object");
+    expect(eligibility.fields.map((f) => f.key)).not.toContain("rules");
+    expect(
+      eligibility.lists.map((list) => [
+        list.key,
+        list.pointer,
+        list.parentPointer,
+        list.parentWritten,
+        list.written,
+      ]),
+    ).toEqual([["rules", "/eligibility/rules", "/eligibility", true, true]]);
     expect(section(sections, "parameters")).toMatchObject({
       kind: "list",
       items: [],
@@ -338,16 +351,19 @@ describe("projectForm", () => {
         landed[d.pointer] = owner;
       }
     };
+    const claimList = (list: FormListSection) => {
+      claim(`section ${list.pointer}`, list.diagnostics);
+      for (const item of list.items) {
+        claim(`item ${item.pointer}`, item.diagnostics);
+        for (const f of item.fields) claim(`field ${f.pointer}`, f.diagnostics);
+      }
+    };
     for (const s of sections) {
-      claim(`section ${s.pointer}`, s.diagnostics);
-      if (s.kind === "object")
+      if (s.kind === "object") {
+        claim(`section ${s.pointer}`, s.diagnostics);
         for (const f of s.fields) claim(`field ${f.pointer}`, f.diagnostics);
-      else
-        for (const item of s.items) {
-          claim(`item ${item.pointer}`, item.diagnostics);
-          for (const f of item.fields)
-            claim(`field ${f.pointer}`, f.diagnostics);
-        }
+        for (const list of s.lists) claimList(list);
+      } else claimList(s);
     }
     expect(Object.keys(landed).sort()).toEqual([...pointers].sort());
     expect(landed[""]).toBe("section ");
@@ -359,9 +375,25 @@ describe("projectForm", () => {
     expect(landed["/parameters/0"]).toBe("item /parameters/0");
     expect(landed["/parameters/0/minimum"]).toBe("field /parameters/0/minimum");
     expect(landed["/eligibility"]).toBe("section /eligibility");
+    expect(landed["/eligibility/rules"]).toBe("section /eligibility/rules");
+    expect(landed["/eligibility/rules/0"]).toBe("item /eligibility/rules/0");
     expect(landed["/eligibility/rules/0/field_id"]).toBe(
-      "field /eligibility/rules",
+      "field /eligibility/rules/0/field_id",
     );
+  });
+
+  it("knows every x-catalog value the runtime schema publishes (audit DEFECT-P4X-004)", () => {
+    const found = new Set<string>();
+    const walk = (node: unknown): void => {
+      if (Array.isArray(node)) node.forEach(walk);
+      else if (typeof node === "object" && node !== null) {
+        const record = node as Record<string, unknown>;
+        if (typeof record["x-catalog"] === "string") found.add(record["x-catalog"]);
+        Object.values(record).forEach(walk);
+      }
+    };
+    walk(SCHEMA);
+    expect([...found].sort()).toEqual([...CATALOGS].sort());
   });
 
   it("projects the schema with every field unwritten when there is no parse", () => {

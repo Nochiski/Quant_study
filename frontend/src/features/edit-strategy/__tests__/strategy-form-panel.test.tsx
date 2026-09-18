@@ -273,15 +273,18 @@ describe("StrategyFormPanel controls", () => {
 });
 
 describe("StrategyFormPanel review follow-up (P4-02 1차)", () => {
-  it("renders link and const rows without editing controls or reset buttons (DEFECT-P402-001/004)", () => {
+  it("renders const rows without editing controls or reset buttons, and nested lists as list sections (DEFECT-P402-001/004, P4-05)", () => {
     const source = `${MINIMAL}eligibility:\n  rules:\n    - field_id: liquidity.adv\n      operator: gte\n      value: 1\n`;
     renderPanel(source, stubTransactions());
     const eligibility = section("eligibility");
+    // `rules`는 더 이상 "기본값으로" 버튼이 있는 link 행이 아니라 항목 추가·삭제가 있는 목록 섹션이다.
+    expect(eligibility.queryByRole("button", { name: "rules · 기본값으로" })).toBeNull();
     expect(
-      eligibility.getByText("목록 편집은 다음 단계에서 제공됩니다"),
+      eligibility.getByRole("button", { name: "rules · 항목 추가" }),
     ).toBeInTheDocument();
-    expect(eligibility.queryByRole("button", { name: /rules ·/ })).toBeNull();
-    expect(eligibility.queryByRole("textbox")).toBeNull();
+    expect(
+      eligibility.getByRole("button", { name: "liquidity.adv · 삭제" }),
+    ).toBeInTheDocument();
     const root = section("기본 정보");
     expect(root.getByText("1.1")).toHaveAttribute("aria-labelledby");
     expect(root.queryByRole("textbox", named("schema_version"))).toBeNull();

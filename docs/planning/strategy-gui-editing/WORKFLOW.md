@@ -28,7 +28,7 @@ main
      └─ P1-01 ─ P1-02 ─ P1-03 ─ P1-04 ─ P1-05   backend schema 1.1
          └─ P2-01 ─ P2-02 ─ P2-03              frontend 1.1
              └─ P3-01 ─ P3-02                  source 트랜잭션
-                 └─ P4-01 ─ P4-02 ─ P4-03 ─ P4-04   Form 편집
+                 └─ P4-01 ─ P4-02 ─ P4-03 ─ P4-04 ─ P4-05   Form 편집
                      └─ P5-01 ─ P5-02 ─ P5-03       Graph 편집
 ```
 
@@ -698,7 +698,8 @@ export const projectForm = (schema: JsonSchema, parse: ParsedSource | null, diag
 
 ### P4-03 — 목록 섹션
 
-**Intent**: eligibility rules, parameters, factors 헤더의 추가·삭제·편집.
+**Intent**: 루트 목록(`parameters`, `factors`) 헤더의 추가·삭제·편집. 중첩 목록(`eligibility.rules`)은
+루트 목록이 아니라 이 PR 범위 밖이며 P4-05가 잇는다(Phase 4 감사 DEFECT-P4X-001로 범위 확정).
 
 **Acceptance**
 
@@ -739,7 +740,8 @@ export const projectForm = (schema: JsonSchema, parse: ParsedSource | null, diag
   낸 tree에만 붙어 문서가 바뀌면 사라진다(P2-2). 기록만: 항목 삭제 시 선행 독립 주석이 고아로 남는 것은
   `planRemove`(P3-01) 소관이라 P5-01 노드 삭제와 함께 처리, 괄호 가드는 개수 균형만(P2-4),
   `saved_factor.factor_id`(backend 팩터 카탈로그) 오탐은 안전 방향(P2-5), union `kind` option은 식별자
-  원문(P2-6).
+  원문(P2-6). 이 PR의 `projectForm`은 **루트** property가 배열일 때만 목록 섹션을 만들고 중첩 배열은
+  `list-link` 읽기 전용 행(하위 진단만 흡수)이었다 — P4-05가 중첩 목록 섹션으로 바꿨다.
 
 ### P4-04 — IDE·page 연결, 잠금, e2e
 
@@ -777,7 +779,30 @@ export const projectForm = (schema: JsonSchema, parse: ParsedSource | null, diag
   e2e 팩터 추가 검증은 Graph 탭 텍스트 포함(약함, 009), R6의 근거는 e2e가 아니라 확정 직후 잠금과 route
   테스트(undo 2회 = 트랜잭션 2개)다.
 
-**Phase 4 exit**: SoT·책임분리 점검(Form이 필드 목록·기본값·검증을 복제하지 않는지).
+### P4-05 — 중첩 목록·감사 후속
+
+**Intent**: Phase 4 감사(`audit_gui_phase4`)가 범위 확정을 요구한 `eligibility.rules` 편집을 잇고, 감사 P2를
+정리한다(WORKFLOW 자체 수정: PR 19개).
+
+**Acceptance**
+
+- `projectForm`: object 섹션의 배열 property는 `list-link` 필드가 아니라 중첩 목록 섹션
+  (`FormSection.lists: FormListSection[]`, `parentPointer`·`parentWritten`)이다. 진단 소유권은 항목·필드·중첩
+  섹션까지 정확히 한 곳(라우팅 테스트 확장).
+- `appendOperation`: 목록 키가 없으면 부모에 `insert-key`, 부모 object까지 없으면 루트에
+  `{ parent: { key: [item] } }`(`fieldOperation`과 같은 규칙, 트랜잭션 한 번). 실제 planner 테스트.
+- 패널: object 섹션 안에서 `FormListSectionView` 재사용(추가·삭제·항목 필드). `EligibilityRule`은
+  identity가 없어(`field_id`는 카탈로그 참조) 삭제 가드가 막지 않는다.
+- 감사 후속: union discriminator를 `schemaFacts`로(DEFECT-P4X-003), runtime schema의 `x-catalog` 값 집합을
+  `CATALOGS`와 대조하는 테스트(004), README 2곳 Form 서술 정정(007), `form.field.listLink` 문구를 사실
+  서술로("이 목록은 YAML에서 편집합니다" — 항목 안의 배열 등 아직 목록 섹션이 아닌 곳).
+- 기록만(감사 P2): 숫자 확정은 canonical 표기(`0.10` → `0.1`, spec_hash 동일)(005), 스니펫 훅이 공유
+  인스턴스가 있어도 자기 인스턴스를 만든다(hooks 규칙, 버려짐)(006), CodeMirror가 CRLF 문서를 LF로
+  적재해 편집 없이 저장해도 `source_hash`가 달라진다(편집기 Phase 2 자산, Form/YAML 동일 적용)(008).
+
+**Phase 4 exit**: SoT·책임분리 점검(Form이 필드 목록·기본값·검증을 복제하지 않는지) —
+`audit_gui_phase4` PASS(blocking 0, P1 2·P2 6, 이월 15, Phase 5 위험 R1~R6, 문서 액션 11). P1 두 건은
+DEFECT-P4X-001(중첩 목록 범위) → P4-05, DEFECT-P4X-002(`findReferences` 그래프 스코프) → P5-01 착수 조건.
 
 ---
 
@@ -801,7 +826,16 @@ export const suggestNodeId = (tree, factorPointer, base: string): string;   // b
 
 - `addNode`는 `$defs/<Kind>Node` 분기 스키마로 최소 항목을 materialize하고 `kind` 첫 키.
   reference 필드는 빈 문자열이 아니라 그래프의 마지막 노드 id로 채운다(즉시 valid 가능).
-- `removeNode`는 `findReferences`로 `*_node_id`와 `output_node_id` 참조를 검사.
+- `removeNode`는 **그 팩터 그래프 안으로 스코프된** 참조 탐색으로 `*_node_id`와 `output_node_id`를
+  검사한다. 현재 `findReferences`는 문서 전역이라 다른 팩터가 같은 `node_id`를 쓰면 오탐한다(Phase 4 감사
+  DEFECT-P4X-002, R1) — `findReferences(tree, namespace, id, definingPointer, { within })` 스코프 인자를
+  먼저 더하고 테스트(두 팩터가 같은 `node_id`)로 고정한다.
+- 결정(Phase 4 감사 R2): Graph를 세 번째 소비자로 붙이기 전에 `useSourceTransactions`의 feedback을 owner별
+  슬롯(`feedbackFor(owner)` 또는 `Record<owner, TransactionFeedback>`)으로 바꾼다. Form·스니펫 소비자는
+  자기 owner 슬롯만 읽는다(스니펫 결과가 Form "반영됨"을 지우던 잔여 해소).
+- 결정(Phase 4 감사 R3): `planRemove`가 삭제 항목 위의 독립 주석(앞 형제 내용 줄 끝 뒤 ~ 항목 시작)을
+  함께 지운다 — 삽입 앵커 규칙("대상 위 주석은 대상을 설명한다")과 짝을 맞춘다. property test의 주석
+  소유 규칙에 반영.
 - 테스트: 각 함수 정상 1·오류 1, `suggestNodeId` 유일성.
 
 ### P5-02 — Graph UI
@@ -810,6 +844,11 @@ export const suggestNodeId = (tree, factorPointer, base: string): string;   // b
 
 **Acceptance**
 
+- 제약(Phase 4 감사 R4): Graph 편집 표면은 backend 실행 plan이 없을 때(빈 그래프 `nodes: []`·compile
+  error)도 있어야 한다 — P4-03이 만드는 빈 factor에 첫 노드를 넣는 경로가 이 PR의 출구다. 노드 목록·편집
+  컨트롤은 parse tree(Form과 같은 입력)에서 그리고, plan 순서·상태는 plan이 있을 때만 덧입힌다.
+- pointer 규약(감사 R6): Form ↔ Graph 왕복은 노드 단위 `/factors/N/graph/nodes/M`(`nodePointerById`가
+  만드는 pointer)이고 `/factors/N/graph`는 팩터 선택만 한다.
 - 팩터 헤더: "노드 추가" 메뉴(kind 목록은 스키마 `oneOf` 분기에서), `output_node_id` select,
   `missing_policy` select.
 - 노드 카드 선택 → 오른쪽 property editor(P4-02 컨트롤 재사용; `x-reference: node` 필드는 같은

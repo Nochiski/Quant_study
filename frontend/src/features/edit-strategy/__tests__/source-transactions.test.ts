@@ -627,6 +627,111 @@ describe("review follow-up: item anchors, anchor option, parent line comments (P
   });
 });
 
+describe("flow containers (backlog 14)", () => {
+  it("rewrites a non-empty flow mapping as a block mapping when a key is inserted", () => {
+    const flow = 'schema_version: "1.1"\nrisk: { max_name_weight: 0.05 }\n';
+    const planned = planSourceOperation(flow, "yaml", {
+      kind: "insert-key",
+      parentPointer: "/risk",
+      key: "gross_exposure",
+      value: 1,
+    });
+    if (planned.status !== "ok") throw new Error(planned.reason);
+    expect(planned.edit.nextSource).toBe(
+      'schema_version: "1.1"\nrisk:\n  max_name_weight: 0.05\n  gross_exposure: 1\n',
+    );
+  });
+
+  it("keeps a trailing comment on the container line instead of the newly inserted key (#149 P2-4)", () => {
+    const flow = 'schema_version: "1.1"\nrisk: { max_name_weight: 0.05 } # 한도\n';
+    const planned = planSourceOperation(flow, "yaml", {
+      kind: "insert-key",
+      parentPointer: "/risk",
+      key: "gross_exposure",
+      value: 1,
+    });
+    if (planned.status !== "ok") throw new Error(planned.reason);
+    expect(planned.edit.nextSource).toBe(
+      'schema_version: "1.1"\nrisk: # 한도\n  max_name_weight: 0.05\n  gross_exposure: 1\n',
+    );
+    const item = 'l:\n  - { a: 1 } # 항목\n';
+    const onItem = planSourceOperation(item, "yaml", {
+      kind: "insert-key",
+      parentPointer: "/l/0",
+      key: "b",
+      value: 2,
+    });
+    if (onItem.status !== "ok") throw new Error(onItem.reason);
+    expect(onItem.edit.nextSource).toBe("l:\n  - # 항목\n    a: 1\n    b: 2\n");
+  });
+
+  it("keeps the key line's own comment when the flow value starts on the next line (#149 re-review P2-7)", () => {
+    const flow = "risk: # 원래\n  { max_name_weight: 0.05 } # 뒤\n";
+    const planned = planSourceOperation(flow, "yaml", {
+      kind: "insert-key",
+      parentPointer: "/risk",
+      key: "gross_exposure",
+      value: 1,
+    });
+    if (planned.status !== "ok") throw new Error(planned.reason);
+    expect(planned.edit.nextSource).toBe(
+      "risk: # 원래\n  # 뒤\n  max_name_weight: 0.05\n  gross_exposure: 1\n",
+    );
+  });
+
+  it("expands an empty item container with the document's own indent unit (#149 P2-5)", () => {
+    // 5칸 문서: 예전 코드는 항상 `-` 열 + 2였다. 이제 문서 폭을 따른다(tree는 같다).
+    const five = "l:\n     - []\n     - x\n";
+    const planned = planSourceOperation(five, "yaml", {
+      kind: "insert-item",
+      parentPointer: "/l/0",
+      value: false,
+    });
+    if (planned.status !== "ok") throw new Error(planned.reason);
+    expect(planned.edit.nextSource).toBe("l:\n     -\n          - false\n     - x\n");
+  });
+
+  it("rewrites a non-empty flow sequence and honours the index", () => {
+    const flow = 'schema_version: "1.1"\nparameters: [{ parameter_id: a, value: 1 }, { parameter_id: c, value: 3 }]\n';
+    const planned = planSourceOperation(flow, "yaml", {
+      kind: "insert-item",
+      parentPointer: "/parameters",
+      index: 1,
+      value: { parameter_id: "b", value: 2 },
+    });
+    if (planned.status !== "ok") throw new Error(planned.reason);
+    const next = parseSource(planned.edit.nextSource, "yaml");
+    if (next.status !== "ok") throw new Error("must parse");
+    expect(
+      (next.tree.parameters as { parameter_id: string }[]).map((p) => p.parameter_id),
+    ).toEqual(["a", "b", "c"]);
+    expect(planned.edit.nextSource).not.toContain("[");
+  });
+
+  it("rewrites from the outermost flow container when the target is nested inside one", () => {
+    // 팩터 하나를 flow mapping 한 줄로 쓴 문서: nodes에 넣으려면 팩터 항목 전체를 block으로 열어야 한다.
+    const flow =
+      'schema_version: "1.1"\nfactors:\n  - { factor_id: m, direction: high, graph: { nodes: [{ kind: field, node_id: close, field_id: price.close }], output_node_id: close } }\nrisk:\n  max_name_weight: 0.05\n';
+    const planned = planSourceOperation(flow, "yaml", {
+      kind: "insert-item",
+      parentPointer: "/factors/0/graph/nodes",
+      value: { kind: "unary", node_id: "u", input_node_id: "close" },
+    });
+    if (planned.status !== "ok") throw new Error(planned.reason);
+    const text = planned.edit.nextSource;
+    expect(text).not.toContain("{");
+    expect(text).toContain("  -\n    factor_id: m\n");
+    expect(text).toContain("          node_id: u\n");
+    // 바깥 문서는 그대로다.
+    expect(text.endsWith("risk:\n  max_name_weight: 0.05\n")).toBe(true);
+    const next = parseSource(text, "yaml");
+    if (next.status !== "ok") throw new Error("must parse");
+    expect(
+      ((next.tree.factors as { graph: { nodes: { node_id: string }[] } }[])[0]!.graph.nodes).map((n) => n.node_id),
+    ).toEqual(["close", "u"]);
+  });
+});
+
 describe("planSourceOperations (backlog 13)", () => {
   const BASE =
     'schema_version: "1.1"\nrisk:\n  max_name_weight: 0.05\nparameters: []\n';

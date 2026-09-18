@@ -460,24 +460,33 @@ class _DeclaredContextMethods:
 - Modify: `backend/src/backtest_engine/engine/store.py`
 - Modify: `backend/tests/test_core_parity.py`, `tests/test_tape.py`
 
-### 설계
+### 설계 (구현 확정)
 
-- Rust `record_payloads(kind: u8) -> Vec<(u64, usize, PyObject)>`: 해당 kind의 `(seq, session_index, payload)`를 seq 순서로 한 번에 돌려준다. 종료 전(partial trace)에도 동작.
-- Rust `release_payloads(kind: u8)`: 해당 kind의 payload를 `RecordPayload::Released`로 바꿔 메모리를 해제한다. `finished == false`면 오류. `equity_series`·`traded_notional`은 `Released`를 만나면 오류(호출 순서는 Python이 `finish()` 직후 metrics 계산으로 고정돼 있음을 `loop.py`에서 확인하고 docstring에 명시).
-- Python `_payloads(kind)`: `_materialized_kinds: set[RecordKind]`에 없으면 `record_payloads(kind.code)`로 받아 전부 materialize해 `_materialized[seq]`에 넣고, `_finished_batch is not None`이면 `release_payloads`. `records` 프로퍼티는 모든 kind에 대해 `_payloads`를 부른 뒤 인덱스 순서로 `Record`를 만든다. `_decision_by_id`의 인덱스도 `record_payloads(DECISION)` 한 번으로 만든다(`_payload(seq)` 개별 호출 제거).
-- `record_payload(seq)`는 `frame_event`·partial trace용으로 유지.
+- Rust `drain_payloads(kind: u8, limit: usize) -> Vec<(u64, usize, PyObject)>`: 해당 kind의 `(seq, session_index, payload)`를 seq 순서로 `limit`개까지 넘기면서 **넘긴 자리를 그 호출 안에서 해제한다**. 빈 목록이면 그 kind는 끝이다. 종료 전에는 레코드가 더 쌓일 수 있어 거부한다. kind별 커서를 들고 있어 청크마다 처음부터 다시 훑지 않는다.
+- Rust `record_payloads(kind: u8)`: 해제하지 않는 kind 단위 조회. 종료 전 partial trace 전용이다 (그 경로는 해제할 수 없다).
+- `RecordPayload::Released { kind }`가 넘긴 자리를 대신하며 원래 kind를 들고 있어 `index()`가 해제 전후로 같은 행을 답한다. 넘긴 payload를 `record_payloads`·`equity_series`·`traded_notional`로 다시 읽으면 조회 이름·seq·kind를 담은 오류다. 호출 순서(`finish()` 직후 metrics → 이후 결과 조회)는 `loop.py`에서 확인하고 docstring에 명시한다. 모든 레코드를 넘기면 인덱스 Vec까지 반납하고(인덱스는 `finish()`가 이미 Python에 넘겼다) 이후 읽기 조회는 빈 답 대신 오류다 — 가져가는 호출인 `drain_payloads`만 빈 목록으로 답한다.
+- Python `_payloads(kind)`: `_kind_payloads: dict[RecordKind, tuple[RecordPayload, ...]]`에 없으면 `drain_payloads(kind.code, 512)`를 빈 청크가 올 때까지 돌려 그 자리에서 공개 객체로 바꾸고 kind별 튜플로 캐시한다. seq → payload 사전은 두지 않는다 — kind별 튜플이 seq 순서이므로 `records` 프로퍼티는 인덱스를 훑으며 kind마다 커서를 하나씩 밀어 조립한다. 종료 전에는 `record_payloads(kind)`로 읽고 해제도 캐시도 하지 않는다.
+- ORDER는 decision_id로 결정을 되살리므로 DECISION을 먼저 materialize해 `_decisions`를 채운다. `_decision_by_id`의 인덱스도 `record_payloads(DECISION)` 한 번으로 만든다(`_payload(seq)` 개별 호출 제거).
+- 단건 `record_payload(seq)`는 삭제한다. `frame_event`는 콜백 프레임 wire를 쓰고 partial trace는 `record_payloads`를 쓰므로 Python 호출자가 남지 않는다.
+
+**원안(kind 통째 배치 + 별도 `release_payloads`)을 쓰지 않은 이유:** 원안대로 먼저 구현해 재보니 tape peak RSS가 216.9 MiB로 **올라갔다**(같은 창에서 python 171.2 MiB 대비 1.27배, 게이트 미달). 한 kind를 통째로 받으면 그 kind의 wire tuple 전부가 Rust payload 전부·완성된 Python 객체 전부와 한순간에 같이 살아, 해제를 나중에 하든 말든 peak가 셋의 합이 되기 때문이다. 청크로 나눠 넘기면서 그 자리에서 해제하면 그 구간이 청크 크기로 묶인다. 청크 크기는 128/512/2048에서 peak RSS가 tape 208.8 / 209.0 / 210.3 MiB, callback 202.0 / 203.0 / 204.5 MiB로 1.5~2.5 MiB 안에서 평탄했고 조회 시간 차이는 측정 노이즈 범위였다 — 가운데인 512를 골랐다.
 
 ### Tasks
 
-- [ ] **6.1** Rust 테스트: `record_payloads(KIND_FILL)`가 seq 순서, `release_payloads` 후 `payload(seq)`가 "released" 오류, finish 전 release 오류. 구현. 커밋 `feat(rust): kind 단위 레코드 payload 배치 조회와 해제`.
-- [ ] **6.2** Python: 위 설계대로 `store.py` 재작성. `tests/test_core_parity.py::test_promoted_rust_makes_no_per_session_ffi`에 `calls["record_payloads"] == 1`(fills 조회 1회), `calls["record_payload"] == 0` 추가. `tests/test_tape.py::test_tape_order_materialization_indexes_decisions_once`를 private 필드 단언 대신 "`record_payloads` 호출 수가 kind 수 이하"로 바꾼다 (리뷰 지적 5절). 커밋 `perf(store): 결과 조회를 kind 배치 FFI로 바꾸고 변환한 Rust payload를 해제`.
-- [ ] **6.3** 실측 후 스펙 후속 백로그 항목 갱신.
+- [x] **6.1** Rust 테스트: `live_records_of(KIND_FILL)`가 seq 순서, 해제 후 조회가 "released" 오류, finish 전 drain 거부, 청크 경계와 kind별 커서, 전부 넘긴 뒤 읽기 조회 오류. 구현. 커밋 `feat(rust): 레코드 payload를 kind 단위로 넘기고 그 자리를 해제한다` (19a8fcb).
+- [x] **6.2** Python: 위 설계대로 `store.py` 재작성. `test_promoted_rust_makes_no_per_session_ffi`가 kind당 `drain_payloads` 1회와 `record_payloads` 0회(종료 전 전용), 넘긴 뒤 재조회 오류를 고정한다. `test_tape_order_materialization_indexes_decisions_once`는 private 필드 단언 대신 kind별 호출 순서를 보는 `..._reads_each_kind_once`로 바꿨다 (리뷰 지적 5절). 커밋 `perf(store): 결과 조회를 kind 청크 FFI로 바꾸고 넘겨받은 payload를 즉시 해제` (3826246).
+- [x] **6.3** 실측 후 스펙 후속 백로그 항목 갱신. 커밋 `docs(spec): 결과 조회 배치화 후 Peak RSS 재측정` (b6a4bac).
+- [x] **리뷰 반영** DEFECT-601(변환 실패로 부분 해제된 kind의 재조회가 짧은 튜플을 돌려주던 것) fix와 죽은 단건 조회 삭제·주석 정리 refactor (a6c934d, 08bcbdf).
 
 ### AC
 
 - 단위·parity: 전체 스위트, `trace_bytes()` parity 전부 통과, FFI 계측 테스트 갱신.
 - 실측 (**게이트**): 코어 격리 Peak RSS(결과 조회 포함) tape·callback 모두 python 대비 **1.25배 이하**. 100종목 tape `materialize_seconds`가 PR 5 대비 30% 이상 감소. `run_seconds` 회귀 ±3% 이내.
 - E2E: `tests/integration` 통과 + `bench_workbench_adapter.py` python/rust metrics 동일.
+
+**결과:** Peak RSS 게이트 **통과** — base 커밋 JSON 기준 callback 1.23배 → 1.18배, tape 1.28배 → 1.22배. `run_seconds` 회귀 **없음**(프로세스마다 1회만 도는 측정에서 0.3559초 → 0.3535초). 조회 시간 **미달** — 같은 프로세스 A/B(각 24 표본, 최솟값)로 tape −12.4%, callback −10.3%로 목표 −30%에 못 미친다. cProfile 기준 FFI는 조회 시간의 약 4%(청크 조회 0.028초/90회)뿐이고, 스냅샷 1,225개가 만드는 `Position` 123,625개가 약 65%다. 남은 비용은 두 코어가 같이 무는 Python 객체 생성이라 FFI 경계로는 줄지 않는다 — 스펙 후속 백로그에 레코드 메모리 레이아웃(`Vec<NativeRecord>` 인라인 슬롯 약 14 MB)과 함께 남겼다.
+
+한 프로세스에서 `--repeat`으로 반복하면 `run_seconds`가 3~7% 느려 보이는데, 직전 회차의 조회가 실제로 메모리를 반납해 다음 회차가 페이지를 다시 폴트하기 때문이다. 프로세스마다 1회만 도는 측정에서 사라지므로 엔진 회귀가 아니라 벤치 하네스의 회차 간 간섭이다.
 
 ---
 
@@ -606,7 +615,7 @@ PR 9까지 반영 후 100종목 tape에서 feed 적재(`_load_persistent_feed` +
 | 3 | `refactor/drop-dead-persistent-api` | 리뷰 APPROVE·PR 생성 | #127 | Opus APPROVE (Minor 3건 반영) |
 | 4 | `refactor/rust-owns-wire-constants` | 리뷰 APPROVE·PR 생성 | #128 | Opus APPROVE (warmup 단일화·따옴표 parity 반영) |
 | 5 | `refactor/python-sot-context-tape-marker` | 리뷰 APPROVE·PR 생성 | #129 | Opus APPROVE (issubclass 고정 반영) |
-| 6 | `perf/materialize-by-kind` | 대기 | | |
+| 6 | `perf/materialize-by-kind` | 리뷰 APPROVE·PR 생성 | #134 | Opus APPROVE (DEFECT-601 반영, RSS 1.18/1.22배 통과) |
 | 7 | `perf/workbench-result-columnar` | 대기 | | |
 | 8 | `perf/rust-hot-loop` | 대기 | | |
 | 9 | `perf/record-and-queue-memory` | 대기 | | |

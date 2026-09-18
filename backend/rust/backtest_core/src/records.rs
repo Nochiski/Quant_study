@@ -5,7 +5,7 @@
 //! payload(DECISION의 결정 객체, CORPORATE_ACTION의 입력 사건)는 id/index만 담고 Python side
 //! table이 실체를 보관한다.
 
-use pyo3::exceptions::PyIndexError;
+use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::{BoundObject, IntoPyObject};
 
@@ -34,9 +34,28 @@ pub(crate) const RECORD_KIND_NAMES: [(&str, u8); 9] = [
     ("cost", KIND_COST),
 ];
 
+/// 오류 메시지용 kind wire 이름. 코드만으로는 어떤 레코드인지 읽히지 않는다.
+fn kind_name(code: u8) -> &'static str {
+    RECORD_KIND_NAMES
+        .iter()
+        .find(|(_, value)| *value == code)
+        .map(|(name, _)| *name)
+        .unwrap_or("unknown")
+}
+
+/// 이미 해제한 payload를 다시 읽으려 할 때의 오류. 어떤 조회가 어느 레코드에서 막혔는지 남긴다.
+fn released_error(seq: u64, kind: u8, operation: &str) -> PyErr {
+    PyRuntimeError::new_err(format!(
+        "record payload was already released — operation={operation} seq={seq} kind={}({kind})",
+        kind_name(kind)
+    ))
+}
+
 /// `(seq, session_index, kind)` — Python `PersistentEventStore`가 소비하는 레코드 인덱스 행.
-/// payload는 `record_payload(seq)`로 필요할 때만 변환한다 — 배치 전체를 tuple로 복제하면 Rust
-/// wire·Python tuple·공개 객체가 동시에 살아 peak RSS가 커진다.
+/// payload는 이 행과 따로 나른다. 정본 경로는 `drain_payloads(kind, limit)`로, 한 kind를 청크씩
+/// 넘기면서 넘긴 자리를 바로 해제한다. 종료 전 partial trace만 해제하지 않는
+/// `record_payloads(kind)`로 읽는다. 인덱스와 payload를 한 번에 다 나르면 Rust wire·Python
+/// tuple·공개 객체가 동시에 살아 peak RSS가 셋의 합이 된다.
 pub(crate) type RecordIndexWire = (u64, usize, u8);
 
 pub(crate) fn to_object<'py, T>(py: Python<'py>, value: T) -> PyResult<PyObject>
@@ -137,7 +156,7 @@ impl SnapshotWire {
             py,
             (
                 self.cash,
-                self.rows.clone(),
+                self.rows.as_slice(),
                 self.equity,
                 self.gross_exposure,
             ),
@@ -163,8 +182,8 @@ impl NativeDecision {
             py,
             (
                 self.frame_session,
-                self.kept.clone(),
-                self.no_bar.clone(),
+                self.kept.as_slice(),
+                self.no_bar.as_slice(),
                 self.reason.as_str(),
             ),
         )
@@ -200,6 +219,11 @@ pub(crate) enum RecordPayload {
         instrument_id: Option<u32>,
         amount: f64,
     },
+    /// Python이 이미 공개 객체로 바꾼 뒤 힙을 돌려준 자리. 원래 kind를 그대로 들고 있어
+    /// `index()`가 해제 전후로 같은 `(seq, session_index, kind)`를 답한다.
+    Released {
+        kind: u8,
+    },
 }
 
 impl RecordPayload {
@@ -214,10 +238,12 @@ impl RecordPayload {
             RecordPayload::CorporateAction(_) => KIND_CORPORATE_ACTION,
             RecordPayload::CorporateActionApplied { .. } => KIND_CORPORATE_ACTION_APPLIED,
             RecordPayload::Cost { .. } => KIND_COST,
+            RecordPayload::Released { kind } => *kind,
         }
     }
 
-    pub(crate) fn to_py(&self, py: Python<'_>) -> PyResult<PyObject> {
+    /// `seq`는 해제된 payload를 만났을 때 어느 레코드인지 알리는 데만 쓴다.
+    pub(crate) fn to_py(&self, py: Python<'_>, seq: u64) -> PyResult<PyObject> {
         match self {
             RecordPayload::Market => Ok(py.None()),
             RecordPayload::Decision {
@@ -262,6 +288,7 @@ impl RecordPayload {
                 instrument_id,
                 amount,
             } => to_object(py, (kind.as_str(), *instrument_id, *amount)),
+            RecordPayload::Released { kind } => Err(released_error(seq, *kind, "record_payloads")),
         }
     }
 }
@@ -276,6 +303,12 @@ pub(crate) struct NativeRecord {
 pub(crate) struct RecordStore {
     records: Vec<NativeRecord>,
     finished: bool,
+    /// kind별로 어디까지 넘겼는지. 청크마다 레코드를 처음부터 다시 훑지 않기 위한 커서다.
+    drain_cursors: [usize; RECORD_KIND_NAMES.len()],
+    /// 이미 넘겨서 해제한 레코드 수.
+    released: usize,
+    /// 모든 레코드를 넘겨 인덱스 Vec까지 돌려준 상태. 이후 조회는 빈 답이 아니라 오류다.
+    drained: bool,
 }
 
 impl RecordStore {
@@ -315,36 +348,161 @@ impl RecordStore {
             .collect()
     }
 
-    pub(crate) fn payload(&self, py: Python<'_>, seq: usize) -> PyResult<PyObject> {
-        let record = self.records.get(seq).ok_or_else(|| {
-            PyIndexError::new_err(format!(
-                "record seq out of range — seq={seq} records={}",
-                self.records.len()
-            ))
-        })?;
-        record.payload.to_py(py)
+    /// kind 하나에 속한 레코드를 seq 순서로 모은다. 해제된 payload를 만나면 오류다.
+    /// payload 변환과 분리해 GIL 없이도 순서·필터·해제 가드를 검사할 수 있게 둔다.
+    fn live_records_of(&self, kind: u8) -> PyResult<Vec<(u64, &NativeRecord)>> {
+        self.ensure_not_drained("record_payloads")?;
+        let mut rows: Vec<(u64, &NativeRecord)> = Vec::new();
+        for (seq, record) in self.records.iter().enumerate() {
+            if record.payload.kind() != kind {
+                continue;
+            }
+            if matches!(record.payload, RecordPayload::Released { .. }) {
+                return Err(released_error(seq as u64, kind, "record_payloads"));
+            }
+            rows.push((seq as u64, record));
+        }
+        Ok(rows)
     }
 
-    /// SNAPSHOT record 순서의 equity — metrics 입력.
-    pub(crate) fn equity_series(&self) -> Vec<f64> {
-        self.records
-            .iter()
-            .filter_map(|record| match &record.payload {
-                RecordPayload::Snapshot(snapshot) => Some(snapshot.equity),
-                _ => None,
-            })
+    /// kind 하나의 `(seq, session_index, payload)`를 seq 순서로 한 번에 돌려준다.
+    pub(crate) fn payloads_of(
+        &self,
+        py: Python<'_>,
+        kind: u8,
+    ) -> PyResult<Vec<(u64, usize, PyObject)>> {
+        self.live_records_of(kind)?
+            .into_iter()
+            .map(|(seq, record)| Ok((seq, record.session_index, record.payload.to_py(py, seq)?)))
             .collect()
     }
 
-    /// FILL record 순서로 `quantity × price`를 누산한다 (Python `traded_notional`과 같은 결합 순서).
-    pub(crate) fn traded_notional(&self) -> f64 {
-        let mut total = 0.0_f64;
-        for record in &self.records {
-            if let RecordPayload::Fill(fill) = &record.payload {
-                total += fill.quantity as f64 * fill.price;
+    /// kind 하나의 payload를 앞에서부터 `limit`개까지 Python으로 넘기면서 그 자리를 해제한다.
+    /// 빈 Vec이면 그 kind는 다 넘긴 것이다.
+    ///
+    /// 한 kind를 통째로 넘기면 wire tuple 전부와 Python 객체 전부와 Rust payload가 한순간에
+    /// 같이 살아 peak RSS가 셋의 합이 된다. 청크로 넘기면서 바로 해제하면 그 구간이 청크
+    /// 크기로 묶인다.
+    pub(crate) fn drain(
+        &mut self,
+        py: Python<'_>,
+        kind: u8,
+        limit: usize,
+    ) -> PyResult<Vec<(u64, usize, PyObject)>> {
+        let seqs = self.next_drain_seqs(kind, limit)?;
+        let mut rows: Vec<(u64, usize, PyObject)> = Vec::with_capacity(seqs.len());
+        for &seq in &seqs {
+            let record = &self.records[seq];
+            let payload = record.payload.to_py(py, seq as u64)?;
+            rows.push((seq as u64, record.session_index, payload));
+        }
+        self.release_seqs(kind, &seqs);
+        Ok(rows)
+    }
+
+    /// 다음으로 넘길 레코드 자리를 고르고 kind 커서를 전진시킨다.
+    /// payload 변환과 분리해 GIL 없이도 사전 조건과 청크 경계를 검사할 수 있게 둔다.
+    fn next_drain_seqs(&mut self, kind: u8, limit: usize) -> PyResult<Vec<usize>> {
+        if !self.finished {
+            return Err(PyRuntimeError::new_err(format!(
+                "cannot drain record payloads before finish — kind={}({kind}) records={}",
+                kind_name(kind),
+                self.records.len()
+            )));
+        }
+        if limit == 0 {
+            return Err(PyValueError::new_err(format!(
+                "drain limit must be > 0 — kind={}({kind}) limit={limit}",
+                kind_name(kind)
+            )));
+        }
+        let slot = usize::from(kind);
+        if slot >= self.drain_cursors.len() {
+            return Err(PyValueError::new_err(format!(
+                "unknown record kind — kind={kind} expected=0..{}",
+                self.drain_cursors.len()
+            )));
+        }
+        // 전부 넘긴 뒤에는 어느 kind를 물어도 "남은 것 없음"이 맞는 답이다 — 조회(읽기)와
+        // 달리 drain은 남은 것을 가져가는 호출이라 빈 답이 손실을 감추지 않는다.
+        let total = self.records.len();
+        let mut seqs: Vec<usize> = Vec::new();
+        let mut cursor = self.drain_cursors[slot];
+        while cursor < total && seqs.len() < limit {
+            let seq = cursor;
+            cursor += 1;
+            let payload = &self.records[seq].payload;
+            if payload.kind() != kind || matches!(payload, RecordPayload::Released { .. }) {
+                continue;
+            }
+            seqs.push(seq);
+        }
+        self.drain_cursors[slot] = cursor;
+        Ok(seqs)
+    }
+
+    /// 넘긴 자리를 해제한다. 전부 넘겼으면 인덱스 Vec까지 돌려준다 — Python이 `finish()`에서
+    /// 이미 인덱스를 받아 갖고 있으므로 Rust가 더 답할 것이 없다.
+    fn release_seqs(&mut self, kind: u8, seqs: &[usize]) {
+        for &seq in seqs {
+            self.records[seq].payload = RecordPayload::Released { kind };
+        }
+        self.released += seqs.len();
+        if !self.records.is_empty() && self.released == self.records.len() {
+            self.records = Vec::new();
+            self.drained = true;
+        }
+    }
+
+    /// 전부 넘긴 뒤의 조회는 빈 답이 아니라 오류여야 한다 — 빈 trace는 조용한 손실이다.
+    fn ensure_not_drained(&self, operation: &str) -> PyResult<()> {
+        if self.drained {
+            return Err(PyRuntimeError::new_err(format!(
+                "record store was fully drained — operation={operation} released={}",
+                self.released
+            )));
+        }
+        Ok(())
+    }
+
+    /// 종료 전 partial trace 조회용 인덱스.
+    pub(crate) fn index_for_trace(&self) -> PyResult<Vec<RecordIndexWire>> {
+        self.ensure_not_drained("record_batch")?;
+        Ok(self.index())
+    }
+
+    /// SNAPSHOT record 순서의 equity — metrics 입력.
+    /// Python은 `finish()` 직후 SNAPSHOT을 해제하기 전에 부른다.
+    pub(crate) fn equity_series(&self) -> PyResult<Vec<f64>> {
+        self.ensure_not_drained("equity_series")?;
+        let mut series: Vec<f64> = Vec::new();
+        for (seq, record) in self.records.iter().enumerate() {
+            match &record.payload {
+                RecordPayload::Snapshot(snapshot) => series.push(snapshot.equity),
+                RecordPayload::Released { kind } if *kind == KIND_SNAPSHOT => {
+                    return Err(released_error(seq as u64, KIND_SNAPSHOT, "equity_series"));
+                }
+                _ => {}
             }
         }
-        total
+        Ok(series)
+    }
+
+    /// FILL record 순서로 `quantity × price`를 누산한다 (Python `traded_notional`과 같은 결합 순서).
+    /// Python은 `finish()` 직후 FILL을 해제하기 전에 부른다.
+    pub(crate) fn traded_notional(&self) -> PyResult<f64> {
+        self.ensure_not_drained("traded_notional")?;
+        let mut total = 0.0_f64;
+        for (seq, record) in self.records.iter().enumerate() {
+            match &record.payload {
+                RecordPayload::Fill(fill) => total += fill.quantity as f64 * fill.price,
+                RecordPayload::Released { kind } if *kind == KIND_FILL => {
+                    return Err(released_error(seq as u64, KIND_FILL, "traded_notional"));
+                }
+                _ => {}
+            }
+        }
+        Ok(total)
     }
 }
 
@@ -393,7 +551,133 @@ mod tests {
         store.append(0, fill(3, 10.0)).unwrap();
         store.append(1, fill(2, 0.1)).unwrap();
         store.append(1, snapshot(2.0)).unwrap();
-        assert_eq!(store.equity_series(), vec![1.0, 2.0]);
-        assert_eq!(store.traded_notional(), 3.0 * 10.0 + 2.0 * 0.1);
+        assert_eq!(store.equity_series().unwrap(), vec![1.0, 2.0]);
+        assert_eq!(store.traded_notional().unwrap(), 3.0 * 10.0 + 2.0 * 0.1);
+    }
+
+    fn filled_store() -> RecordStore {
+        let mut store = RecordStore::default();
+        store.append(0, RecordPayload::Market).unwrap();
+        store.append(0, fill(3, 10.0)).unwrap();
+        store.append(1, snapshot(2.0)).unwrap();
+        store.append(1, fill(2, 0.1)).unwrap();
+        store
+    }
+
+    #[test]
+    fn live_records_of_keeps_seq_order_within_one_kind() {
+        let store = filled_store();
+        let seqs: Vec<u64> = store
+            .live_records_of(KIND_FILL)
+            .unwrap()
+            .into_iter()
+            .map(|(seq, _)| seq)
+            .collect();
+        assert_eq!(seqs, vec![1, 3]);
+        let sessions: Vec<usize> = store
+            .live_records_of(KIND_FILL)
+            .unwrap()
+            .into_iter()
+            .map(|(_, record)| record.session_index)
+            .collect();
+        assert_eq!(sessions, vec![0, 1]);
+        assert!(store.live_records_of(KIND_ORDER).unwrap().is_empty());
+    }
+
+    /// payload 변환(GIL 필요)만 빼고 `drain`이 하는 일을 그대로 한다.
+    fn drain_kind(store: &mut RecordStore, kind: u8, limit: usize) -> Vec<usize> {
+        let seqs = store.next_drain_seqs(kind, limit).unwrap();
+        store.release_seqs(kind, &seqs);
+        seqs
+    }
+
+    #[test]
+    fn drain_rejects_unfinished_store_zero_limit_and_unknown_kind() {
+        let mut store = filled_store();
+        let unfinished = store.next_drain_seqs(KIND_FILL, 8).unwrap_err().to_string();
+        assert!(unfinished.contains("before finish"), "{unfinished}");
+        assert!(unfinished.contains("kind=fill(4)"), "{unfinished}");
+        store.finish().unwrap();
+        let zero = store.next_drain_seqs(KIND_FILL, 0).unwrap_err().to_string();
+        assert!(zero.contains("limit must be > 0"), "{zero}");
+        let unknown = store.next_drain_seqs(99, 8).unwrap_err().to_string();
+        assert!(
+            unknown.contains("unknown record kind — kind=99"),
+            "{unknown}"
+        );
+    }
+
+    #[test]
+    fn drain_hands_out_one_kind_in_seq_order_chunk_by_chunk() {
+        let mut store = filled_store();
+        store.finish().unwrap();
+        assert_eq!(drain_kind(&mut store, KIND_FILL, 1), vec![1]);
+        assert_eq!(drain_kind(&mut store, KIND_FILL, 1), vec![3]);
+        assert!(drain_kind(&mut store, KIND_FILL, 1).is_empty());
+        // 커서는 kind마다 따로다 — FILL을 다 넘겨도 SNAPSHOT은 처음부터 읽는다.
+        assert_eq!(drain_kind(&mut store, KIND_SNAPSHOT, 8), vec![2]);
+    }
+
+    #[test]
+    fn released_kind_is_refused_by_every_reader() {
+        let mut store = filled_store();
+        store.finish().unwrap();
+        assert_eq!(drain_kind(&mut store, KIND_FILL, 8).len(), 2);
+        // 인덱스 행은 그대로 남는다 — 해제는 payload 힙만 돌려준다.
+        assert_eq!(
+            store.index(),
+            vec![
+                (0, 0, KIND_MARKET),
+                (1, 0, KIND_FILL),
+                (2, 1, KIND_SNAPSHOT),
+                (3, 1, KIND_FILL),
+            ]
+        );
+        let batch = store.live_records_of(KIND_FILL).unwrap_err().to_string();
+        assert!(batch.contains("operation=record_payloads"), "{batch}");
+        assert!(batch.contains("seq=1"), "{batch}");
+        assert!(batch.contains("kind=fill(4)"), "{batch}");
+        let notional = store.traded_notional().unwrap_err().to_string();
+        assert!(notional.contains("operation=traded_notional"), "{notional}");
+        // 다른 kind는 그대로 읽힌다.
+        assert_eq!(store.equity_series().unwrap(), vec![2.0]);
+        assert_eq!(store.live_records_of(KIND_SNAPSHOT).unwrap().len(), 1);
+
+        drain_kind(&mut store, KIND_SNAPSHOT, 8);
+        let equity = store.equity_series().unwrap_err().to_string();
+        assert!(equity.contains("operation=equity_series"), "{equity}");
+        assert!(equity.contains("seq=2"), "{equity}");
+    }
+
+    #[test]
+    fn fully_drained_store_answers_errors_not_empty_results() {
+        let mut store = filled_store();
+        store.finish().unwrap();
+        for kind in [KIND_MARKET, KIND_FILL, KIND_SNAPSHOT] {
+            drain_kind(&mut store, kind, 8);
+        }
+        assert!(store.drained);
+        // 아직 한 번도 안 넘긴 kind를 물어도 남은 것이 없다 — drain은 빈 답이 맞다.
+        assert!(drain_kind(&mut store, KIND_ORDER, 8).is_empty());
+        // 읽기 조회는 빈 답 대신 오류여야 한다 — 빈 trace는 조용한 손실이다.
+        for message in [
+            store.index_for_trace().unwrap_err().to_string(),
+            store.live_records_of(KIND_FILL).unwrap_err().to_string(),
+            store.equity_series().unwrap_err().to_string(),
+            store.traded_notional().unwrap_err().to_string(),
+        ] {
+            assert!(message.contains("fully drained"), "{message}");
+            assert!(message.contains("released=4"), "{message}");
+        }
+    }
+
+    #[test]
+    fn released_payload_conversion_reports_the_record() {
+        let released = RecordPayload::Released { kind: KIND_ORDER };
+        assert_eq!(released.kind(), KIND_ORDER);
+        // `to_py`는 GIL이 필요하지만 해제 가드는 변환 전에 걸린다 — 오류 문구만 고정한다.
+        let message = released_error(7, KIND_ORDER, "record_payloads").to_string();
+        assert!(message.contains("seq=7"), "{message}");
+        assert!(message.contains("kind=order(2)"), "{message}");
     }
 }

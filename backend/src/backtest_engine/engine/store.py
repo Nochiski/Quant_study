@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, fields, is_dataclass, replace
 from datetime import datetime
 from decimal import Decimal
@@ -74,6 +75,21 @@ class RecordKind(Enum):
 
 
 _RECORD_KIND_BY_CODE: dict[int, RecordKind] = {kind.code: kind for kind in RecordKind}
+
+# `drain_payloads` 한 번에 넘겨받을 레코드 수. 이 청크만큼의 wire tuple이 Rust payload·공개
+# 객체와 동시에 살아 있으므로, 조회당 FFI 왕복 수(레코드 수 / 청크)와 그 순간 메모리의
+# 균형점이다. SNAPSHOT wire는 한 행이 보유 종목 수만큼 커서 청크를 크게 잡으면 그 자체가
+# peak가 된다.
+_DRAIN_CHUNK_RECORDS = 512
+
+# Rust wire 문자열 → enum 멤버. `Side(value)` 호출은 값 하나마다 Enum의 __call__ → __new__
+# 경로를 타는데 결과 조회는 주문·체결 수만큼 이 변환을 반복한다. 조회표로 고정해 dict 조회
+# 한 번으로 끝낸다. 모르는 wire 값은 KeyError를 잡아 어느 레코드의 어떤 필드인지 알린다.
+_SIDE_BY_WIRE: dict[str, Side] = {member.value: member for member in Side}
+_ORDER_TYPE_BY_WIRE: dict[str, OrderType] = {member.value: member for member in OrderType}
+_TIF_BY_WIRE: dict[str, TimeInForce] = {member.value: member for member in TimeInForce}
+_ORDER_STATUS_BY_WIRE: dict[str, OrderStatus] = {member.value: member for member in OrderStatus}
+_COST_KIND_BY_WIRE: dict[str, CostKind] = {member.value: member for member in CostKind}
 
 
 @dataclass(frozen=True)
@@ -251,6 +267,12 @@ class PersistentEventStore(EventStore):
     실행 중에는 Python 객체를 만들지 않는다. Rust 레코드 payload는 원시 wire이고, Python 객체가
     필요한 payload(DECISION의 결정 객체, CORPORATE_ACTION의 입력 사건, MARKET의 feed snapshot)만
     side table로 보관한다. `records`/`orders()`/`fills()`는 최초 조회 시 seq 순서로 만든다.
+
+    조회는 kind 단위다. 종료된 실행이면 `drain_payloads(kind, limit)`로 그 kind의 payload를 seq
+    순서로 청크씩 넘겨받고 Rust는 넘긴 자리를 바로 해제한다. 종료 전 partial trace는 해제하지
+    않는 `record_payloads(kind)`로 읽는다. 넘긴 payload는 다시 읽을 수 없으므로
+    `equity_values()`/`traded_notional()`처럼 Rust 레코드를 직접 누산하는 조회는 결과 조회보다
+    **먼저** 불러야 한다 (`loop.py`가 `finish()` 직후 metrics를 계산한다).
     """
 
     # `Any`: backtest_core는 pyo3 확장 모듈이라 stub이 없다 (typings/backtest_core는 레거시
@@ -270,7 +292,10 @@ class PersistentEventStore(EventStore):
         self._decision_index: dict[str, tuple[int, Any]] = {}
         self._decision_index_len = -1
         self._finished_batch: list[tuple[int, int, int]] | None = None
-        self._materialized: dict[int, RecordPayload] = {}
+        # 이미 배치로 받아 공개 객체로 바꾸고 Rust payload까지 해제한 kind의 seq 순서 payload.
+        self._kind_payloads: dict[RecordKind, tuple[RecordPayload, ...]] = {}
+        # 조회 도중 변환이 실패해 Rust payload가 부분 해제된 kind → 그때까지 넘겨받은 레코드 수.
+        self._drain_failed: dict[RecordKind, int] = {}
         self._records_cache: tuple[Record, ...] | None = None
 
     # --- 실행 중 등록 ---------------------------------------------------------
@@ -305,27 +330,38 @@ class PersistentEventStore(EventStore):
         # idle 사유는 Rust가 DECISION payload의 reason으로 돌려주므로 여기서는 프레임만 보관한다.
         self._tape_frames = frames_by_session
 
+    def _index_decisions(self) -> None:
+        """decision_id → `(session_index, native)` 인덱스를 DECISION 배치 조회 한 번으로 만든다.
+
+        결정마다 배치를 선형 스캔하면 주문 수 × 레코드 수로 커진다 — 배치 길이가 바뀔 때만
+        다시 만든다. DECISION을 이미 공개 객체로 바꿨다면 `_decisions`가 실체를 갖고 있고
+        Rust payload는 해제됐으므로 인덱스를 다시 읽지 않는다.
+        """
+        if RecordKind.DECISION in self._kind_payloads:
+            return
+        batch = self._batch()
+        if self._decision_index_len == len(batch):
+            return
+        self._decision_index = {
+            decision_id: (session_index, native)
+            for _seq, session_index, (decision_id, native) in self._runtime.record_payloads(
+                RecordKind.DECISION.code
+            )
+        }
+        self._decision_index_len = len(batch)
+
     def _decision_by_id(self, decision_id: str) -> StrategyDecision:
         """ORDER/open order 복원용. tape 결정은 DECISION 레코드를 찾아 먼저 재구성한다."""
         registered = self._decisions.get(decision_id)
         if registered is not None:
             return registered
-        batch = self._batch()
-        # 결정마다 배치를 선형 스캔하면 주문 수 × 레코드 수로 커진다 — 배치 길이가 바뀔 때만
-        # decision_id → (session_index, native) 인덱스를 다시 만든다.
-        if self._decision_index_len != len(batch):
-            decision_code = RecordKind.DECISION.code
-            self._decision_index = {}
-            for seq, session_index, code in batch:
-                if code == decision_code:
-                    decision_id_wire, native = self._payload(seq)
-                    self._decision_index[decision_id_wire] = (session_index, native)
-            self._decision_index_len = len(batch)
+        self._index_decisions()
         found = self._decision_index.get(decision_id)
         if found is None:
             raise KeyError(
                 f"order references a decision that is not in the record batch — "
-                f"decision_id={decision_id} records={len(batch)}"
+                f"decision_id={decision_id} records={len(self._batch())} "
+                f"indexed={len(self._decision_index)} registered={len(self._decisions)}"
             )
         session_index, native = found
         return self._decision(self._sessions[session_index], decision_id, native)
@@ -419,30 +455,46 @@ class PersistentEventStore(EventStore):
             if isinstance(action, BasketAction) and leg_index is not None
             else action
         )
+        try:
+            side_value = _SIDE_BY_WIRE[side]
+            order_type_value = _ORDER_TYPE_BY_WIRE[order_type]
+            tif_value = _TIF_BY_WIRE[time_in_force]
+        except KeyError as unknown:
+            raise ValueError(
+                f"unknown order wire enum value — order_id={order_id} value={unknown.args[0]!r} "
+                f"side={side!r} order_type={order_type!r} time_in_force={time_in_force!r}"
+            ) from unknown
         return OrderEvent(
             order_id=order_id,
             decision_id=decision_id,
             ts=ts,
             instrument=self._instruments[instrument_id],
             quantity=Decimal(quantity),
-            side=Side(side),
+            side=side_value,
             source_action=source_action,
-            order_type=OrderType(order_type),
+            order_type=order_type_value,
             limit_price=None if limit_text is None else Decimal(limit_text),
             stop_price=None if stop_text is None else Decimal(stop_text),
-            time_in_force=TimeInForce(time_in_force),
+            time_in_force=tif_value,
             group_id=group_id,
         )
 
     def fill_from_wire(self, ts: datetime, wire: tuple[Any, ...]) -> FillEvent:
         fill_id, order_id, instrument_id, quantity, side, price, fee, slippage_per_share = wire
+        try:
+            side_value = _SIDE_BY_WIRE[side]
+        except KeyError as unknown:
+            raise ValueError(
+                f"unknown fill side wire value — fill_id={fill_id} order_id={order_id} "
+                f"side={side!r} expected={sorted(_SIDE_BY_WIRE)}"
+            ) from unknown
         return FillEvent(
             fill_id=fill_id,
             order_id=order_id,
             ts=ts,
             instrument=self._instruments[instrument_id],
             quantity=Decimal(quantity),
-            side=Side(side),
+            side=side_value,
             price=price,
             fee=fee,
             slippage_per_share=slippage_per_share,
@@ -450,7 +502,14 @@ class PersistentEventStore(EventStore):
 
     def order_update_from_wire(self, ts: datetime, wire: tuple[Any, ...]) -> OrderUpdateEvent:
         order_id, status, detail = wire
-        return OrderUpdateEvent(ts=ts, order_id=order_id, status=OrderStatus(status), detail=detail)
+        try:
+            status_value = _ORDER_STATUS_BY_WIRE[status]
+        except KeyError as unknown:
+            raise ValueError(
+                f"unknown order status wire value — order_id={order_id} status={status!r} "
+                f"expected={sorted(_ORDER_STATUS_BY_WIRE)}"
+            ) from unknown
+        return OrderUpdateEvent(ts=ts, order_id=order_id, status=status_value, detail=detail)
 
     def open_orders_from_wire(
         self, ts: datetime, rows: list[tuple[tuple[Any, ...], int]]
@@ -477,89 +536,167 @@ class PersistentEventStore(EventStore):
     # --- 레코드 조회 -------------------------------------------------------------
 
     def _batch(self) -> list[tuple[int, int, int]]:
-        """레코드 인덱스 `(seq, session_index, kind_code)`. payload는 `_payload(seq)`로 읽는다."""
+        """레코드 인덱스 `(seq, session_index, kind_code)`. payload는 kind 배치로 따로 읽는다."""
         if self._finished_batch is not None:
             return self._finished_batch
         # 종료 전(전략 예외 등)에는 Rust가 지금까지 쌓은 partial trace를 그대로 읽는다.
         return self._runtime.record_batch()
 
-    def _payload(self, seq: int) -> Any:
-        # 배치 전체를 tuple로 복제하지 않고 레코드마다 한 번만 Rust wire를 읽는다 — Rust 레코드·
-        # Python tuple·공개 객체가 동시에 사는 구간을 없애 peak RSS를 낮춘다.
-        return self._runtime.record_payload(seq)
+    def _payloads(self, kind: RecordKind) -> tuple[RecordPayload, ...]:
+        """kind 하나를 배치 FFI로 받아 공개 객체로 바꾸고 Rust payload를 그때그때 해제한다.
 
-    def _materialize(self, seq: int, session_index: int, kind_code: int) -> RecordPayload:
-        cached = self._materialized.get(seq)
+        kind마다 레코드 인덱스를 다시 훑고 payload를 한 건씩 읽던 경로를 대체한다. 종료된
+        실행이면 `drain_payloads`가 청크 단위로 wire를 넘기면서 그 자리를 바로 해제하므로,
+        Rust payload·wire tuple·공개 객체가 한꺼번에 사는 구간이 청크 크기로 묶인다.
+        kind를 통째로 받으면 그 구간이 kind 전체가 돼 결과 조회 peak RSS가 셋의 합이 된다.
+
+        종료 전(partial trace)에는 레코드가 더 쌓일 수 있어 해제하지 않고 캐시도 남기지
+        않는다. 다음 조회가 그 시점까지의 레코드를 다시 읽는다.
+
+        Raises:
+            RuntimeError: 앞선 조회가 변환 도중 실패해 그 kind가 부분 해제된 상태일 때.
+                Rust가 이미 넘긴 레코드는 되돌릴 수 없으므로 재조회를 짧은 튜플로 답하지
+                않는다.
+        """
+        cached = self._kind_payloads.get(kind)
         if cached is not None:
             return cached
-        ts = self._sessions[session_index]
-        kind = _RECORD_KIND_BY_CODE[kind_code]
-        built: RecordPayload
+        handed_over = self._drain_failed.get(kind)
+        if handed_over is not None:
+            raise RuntimeError(
+                "result query for this record kind failed midway and its Rust payloads were "
+                f"partially released — kind={kind.value} handed_over={handed_over} "
+                f"records={len(self._batch())}; the released records cannot be read again, "
+                "re-run the backtest to rebuild the trace"
+            )
+        if kind is RecordKind.ORDER:
+            # ORDER는 decision_id로 결정을 되살린다 — DECISION을 먼저 공개 객체로 만들어
+            # `_decisions`를 채운다. 그래야 DECISION payload를 넘겨 해제해도 주문이 복원된다.
+            self._payloads(RecordKind.DECISION)
+        build = self._wire_builder(kind)
+        if self._finished_batch is None:
+            return tuple(
+                build(session_index, payload)
+                for _seq, session_index, payload in self._runtime.record_payloads(kind.code)
+            )
+        built: list[RecordPayload] = []
+        handed_over = 0
+        # Rust는 넘긴 청크를 그 자리에서 해제한다 — 변환이 중간에 실패하면 이미 넘어온
+        # 레코드를 되돌릴 수 없다. 그 kind를 poison으로 표시해 다음 조회가 조용히 짧은
+        # 튜플을 돌려주는 대신 무엇이 사라졌는지 알리게 한다.
+        try:
+            while True:
+                chunk = self._runtime.drain_payloads(kind.code, _DRAIN_CHUNK_RECORDS)
+                handed_over += len(chunk)
+                built.extend(
+                    build(session_index, payload) for _seq, session_index, payload in chunk
+                )
+                # 청크가 덜 찼으면 그 kind는 끝이다 — 빈 청크를 받으러 한 번 더 왕복하지 않는다.
+                if len(chunk) < _DRAIN_CHUNK_RECORDS:
+                    break
+        except BaseException:
+            self._drain_failed[kind] = handed_over
+            raise
+        frozen = tuple(built)
+        self._kind_payloads[kind] = frozen
+        return frozen
+
+    def _wire_builder(self, kind: RecordKind) -> Callable[[int, Any], RecordPayload]:
+        """kind마다 한 번만 고르는 wire → 공개 객체 변환기.
+
+        레코드마다 kind를 다시 분기하면 조회 한 번에 레코드 수만큼 같은 판단을 반복한다.
+        """
+        sessions = self._sessions
         if kind is RecordKind.MARKET:
-            built = self._market_snapshots[session_index]
-            self._materialized[seq] = built
-            return built
-        payload = self._payload(seq)
+            # MARKET payload는 Rust에 값이 없다 — 세션 index가 그대로 feed snapshot을 가리킨다.
+            snapshots = self._market_snapshots
+            return lambda session_index, _payload: snapshots[session_index]
         if kind is RecordKind.DECISION:
-            decision_id, native = payload
-            built = DecisionRecord(decision_id, self._decision(ts, decision_id, native))
-        elif kind is RecordKind.ORDER:
-            built = self.order_from_wire(ts, payload)
-        elif kind is RecordKind.ORDER_UPDATE:
-            built = self.order_update_from_wire(ts, payload)
-        elif kind is RecordKind.FILL:
-            built = self.fill_from_wire(ts, payload)
-        elif kind is RecordKind.SNAPSHOT:
-            built = self.snapshot_from_wire(ts, payload)
-        elif kind is RecordKind.CORPORATE_ACTION:
-            built = self._corporate_actions[payload]
-        elif kind is RecordKind.CORPORATE_ACTION_APPLIED:
-            index, old_quantity, new_quantity, old_average, new_average, cash_paid = payload
-            action = self._corporate_actions[index]
-            built = CorporateActionApplied(
-                ts=ts,
-                instrument=action.instrument,
-                action=action,
-                old_quantity=Decimal(old_quantity),
-                new_quantity=Decimal(new_quantity),
-                old_average_price=old_average,
-                new_average_price=new_average,
-                cash_paid=cash_paid,
+            return lambda session_index, payload: DecisionRecord(
+                payload[0], self._decision(sessions[session_index], payload[0], payload[1])
             )
-        elif kind is RecordKind.COST:
-            cost_kind, instrument_id, amount = payload
-            built = CostAccrued(
-                ts=ts,
-                kind=CostKind(cost_kind),
-                instrument=None if instrument_id is None else self._instruments[instrument_id],
-                amount=amount,
+        if kind is RecordKind.ORDER:
+            return lambda session_index, payload: self.order_from_wire(
+                sessions[session_index], payload
             )
-        else:
-            raise TypeError(f"unsupported persistent record kind — kind={kind!r}")
-        self._materialized[seq] = built
-        return built
+        if kind is RecordKind.ORDER_UPDATE:
+            return lambda session_index, payload: self.order_update_from_wire(
+                sessions[session_index], payload
+            )
+        if kind is RecordKind.FILL:
+            return lambda session_index, payload: self.fill_from_wire(
+                sessions[session_index], payload
+            )
+        if kind is RecordKind.SNAPSHOT:
+            return lambda session_index, payload: self.snapshot_from_wire(
+                sessions[session_index], payload
+            )
+        if kind is RecordKind.CORPORATE_ACTION:
+            actions = self._corporate_actions
+            return lambda _session_index, payload: actions[payload]
+        if kind is RecordKind.CORPORATE_ACTION_APPLIED:
+            return self._corporate_action_applied_from_wire
+        if kind is RecordKind.COST:
+            return self._cost_from_wire
+        raise TypeError(f"unsupported persistent record kind — kind={kind!r}")
+
+    def _corporate_action_applied_from_wire(
+        self, session_index: int, payload: Any
+    ) -> CorporateActionApplied:
+        index, old_quantity, new_quantity, old_average, new_average, cash_paid = payload
+        action = self._corporate_actions[index]
+        return CorporateActionApplied(
+            ts=self._sessions[session_index],
+            instrument=action.instrument,
+            action=action,
+            old_quantity=Decimal(old_quantity),
+            new_quantity=Decimal(new_quantity),
+            old_average_price=old_average,
+            new_average_price=new_average,
+            cash_paid=cash_paid,
+        )
+
+    def _cost_from_wire(self, session_index: int, payload: Any) -> CostAccrued:
+        ts = self._sessions[session_index]
+        cost_kind, instrument_id, amount = payload
+        try:
+            cost_kind_value = _COST_KIND_BY_WIRE[cost_kind]
+        except KeyError as unknown:
+            raise ValueError(
+                f"unknown cost kind wire value — ts={ts} kind={cost_kind!r} "
+                f"expected={sorted(_COST_KIND_BY_WIRE)}"
+            ) from unknown
+        return CostAccrued(
+            ts=ts,
+            kind=cost_kind_value,
+            instrument=None if instrument_id is None else self._instruments[instrument_id],
+            amount=amount,
+        )
 
     @property
     def records(self) -> tuple[Record, ...]:
         if self._records_cache is None:
-            self._records_cache = tuple(
-                Record(
-                    seq=seq,
-                    ts=self._sessions[session_index],
-                    kind=_RECORD_KIND_BY_CODE[kind_code],
-                    payload=self._materialize(seq, session_index, kind_code),
+            batch = self._batch()
+            # kind별 payload는 seq 순서라 인덱스를 훑으며 kind마다 커서를 하나씩 밀면
+            # seq → payload 사전(레코드 수만큼 커진다)을 따로 두지 않아도 된다.
+            by_kind = {kind: self._payloads(kind) for kind in RecordKind}
+            cursors = dict.fromkeys(RecordKind, 0)
+            sessions = self._sessions
+            built: list[Record] = []
+            for seq, session_index, kind_code in batch:
+                kind = _RECORD_KIND_BY_CODE[kind_code]
+                cursor = cursors[kind]
+                cursors[kind] = cursor + 1
+                built.append(
+                    Record(
+                        seq=seq,
+                        ts=sessions[session_index],
+                        kind=kind,
+                        payload=by_kind[kind][cursor],
+                    )
                 )
-                for seq, session_index, kind_code in self._batch()
-            )
+            self._records_cache = tuple(built)
         return self._records_cache
-
-    def _payloads(self, kind: RecordKind) -> tuple[RecordPayload, ...]:
-        kind_code = kind.code
-        return tuple(
-            self._materialize(seq, session_index, code)
-            for seq, session_index, code in self._batch()
-            if code == kind_code
-        )
 
     def compact_trace(self) -> tuple[tuple[int, int, str], ...]:
         """디버그용 원시 Rust 레코드 인덱스 `(seq, session_index, kind)`."""

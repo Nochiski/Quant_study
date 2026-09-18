@@ -884,6 +884,7 @@ def test_promoted_rust_makes_no_per_session_ffi(
     from collections import Counter
 
     from backtest_engine.engine import loop as loop_module
+    from backtest_engine.engine.store import RecordKind
 
     real_factory = loop_module.make_persistent_runtime
     proxies: list[Any] = []
@@ -932,6 +933,7 @@ def test_promoted_rust_makes_no_per_session_ffi(
         "configure_router",
         "configure_run",
         "current_session_count",
+        "drain_payloads",
         "drive",
         "equity_series",
         "fail_callback",
@@ -944,7 +946,7 @@ def test_promoted_rust_makes_no_per_session_ffi(
         "load_target_tape",
         "poison",
         "record_batch",
-        "record_payload",
+        "record_payloads",
         "settlement_session_index",
         "submit_decision",
         "traded_notional",
@@ -954,7 +956,65 @@ def test_promoted_rust_makes_no_per_session_ffi(
     assert calls["record_batch"] == 0
     assert calls["equity_series"] == 1
     assert calls["traded_notional"] == 1
+    # fills 조회는 FILL kind 하나만 청크로 넘겨받는다 (레코드 2건 < 청크).
+    # 해제하지 않는 `record_payloads`는 종료 전 partial trace 전용이라 여기서는 안 쓰인다.
+    assert calls["drain_payloads"] == 1
+    assert calls["record_payloads"] == 0
+    # orders 조회는 결정 복원을 위해 DECISION을 먼저 읽는다 — 주문 수와 무관하게 kind당 한 번.
+    assert len(result.orders) == 2
+    assert calls["drain_payloads"] == 3
+    # 넘긴 kind를 다시 읽으면 어느 조회가 어느 레코드에서 막혔는지 알린다.
+    with pytest.raises(RuntimeError, match=r"already released — operation=record_payloads seq="):
+        proxies[0].inner.record_payloads(RecordKind.FILL.code)
+    with pytest.raises(RuntimeError, match=r"already released — operation=traded_notional seq="):
+        proxies[0].inner.traded_notional()
     assert proxies[0].inner.lifecycle_state() == "finished"
+
+
+@RUST_ONLY
+def test_failed_materialization_poisons_the_kind_instead_of_shortening_the_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DEFECT-601: 변환이 청크 중간에 실패하면 이미 해제된 레코드가 조용히 사라진다.
+
+    `drain_payloads`는 넘긴 청크를 그 자리에서 해제하므로, 변환기가 중간에 예외를 던지면
+    Rust 커서는 전진했는데 Python은 그 kind를 캐시하지 못한다. 재조회가 남은 레코드만
+    다시 읽으면 예외 없이 짧은 결과가 나온다.
+    """
+    from backtest_engine.engine.store import PersistentEventStore
+
+    engine = BacktestEngine(RunConfig(run_id="drain-fail", initial_cash=100_000.0), core="rust")
+    result = engine.run(
+        ScriptedStrategy(script=(target_70pct(), None, liquidate(), None)), DataFeed(GOLDEN_BARS)
+    )
+    store = engine.event_store
+    assert isinstance(store, PersistentEventStore)
+
+    real_snapshot_from_wire = PersistentEventStore.snapshot_from_wire
+    conversions = 0
+
+    def failing(self: PersistentEventStore, ts: Any, wire: Any) -> Any:
+        nonlocal conversions
+        conversions += 1
+        if conversions == 2:
+            raise ValueError("forced materialization failure")
+        return real_snapshot_from_wire(self, ts, wire)
+
+    monkeypatch.setattr(PersistentEventStore, "snapshot_from_wire", failing)
+    with pytest.raises(ValueError, match="forced materialization failure"):
+        _ = result.snapshots
+
+    # 변환기를 되돌려도 해제된 레코드는 돌아오지 않는다 — 재조회는 짧은 튜플이 아니라 오류다.
+    monkeypatch.setattr(PersistentEventStore, "snapshot_from_wire", real_snapshot_from_wire)
+    with pytest.raises(RuntimeError, match=r"partially released — kind=snapshot handed_over=4"):
+        _ = result.snapshots
+    with pytest.raises(RuntimeError, match=r"kind=snapshot handed_over=4"):
+        store.snapshots()
+    # 같은 이유로 전체 trace 조립도 막힌다.
+    with pytest.raises(RuntimeError, match=r"kind=snapshot handed_over=4"):
+        _ = store.records
+    # 다른 kind는 멀쩡하다 — poison은 해제된 kind 하나에만 걸린다.
+    assert len(result.fills) == 2
 
 
 @RUST_ONLY

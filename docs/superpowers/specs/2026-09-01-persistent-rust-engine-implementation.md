@@ -491,6 +491,35 @@ metric window 1개 포함): 어댑터 전체 python 3.160초 → rust 2.613초�
 PR(materialize 배치, 워크벤치 columnar 변환, hot loop, 메모리)이 끝난 뒤 같은 경계로 다시 재서
 게이트를 재판정한다.
 
+2026-09-18 결과 조회 배치화 후 재측정 (PR 6):
+
+`PersistentEventStore`가 kind마다 레코드 인덱스 전체를 재스캔하고 payload를 `record_payload(seq)`로
+한 건씩 읽던 경로를 `drain_payloads(kind, 512)` 청크 조회로 바꿨다. Rust는 청크를 넘기면서 그
+자리를 바로 해제하므로 wire tuple·공개 객체·Rust payload가 함께 사는 구간이 청크 크기로 묶인다.
+
+| 코어 격리 Peak RSS (100종목, `--core <one>` 단독, `--warmup 1 --repeat 5`) | python | rust | 배수 |
+|---|---|---|---|
+| callback | 170.4 MiB | 201.6 MiB | **1.18배** (직전 1.23배) |
+| tape | 171.2 MiB | 209.1 MiB | **1.22배** (직전 1.28배) |
+
+결과 조회 시간은 같은 프로세스에서 두 구현을 번갈아 돌린 A/B(각 24 표본, 최솟값 기준)로 쟀다.
+tape 0.4207초 → 0.3687초(**−12.4%**), callback 0.4111초 → 0.3687초(**−10.3%**). 프로세스마다
+1회씩만 도는 측정(6 프로세스)에서는 tape 0.4133초 → 0.3548초(**−14.2%**)이고 `run()`은
+0.3559초 → 0.3535초로 변화가 없다.
+
+한 프로세스 안에서 `--repeat`으로 반복하면 `run()`이 3~7% 느려 보이는데, 이는 직전 회차의
+조회가 실제로 메모리를 반납해 다음 회차가 페이지를 다시 폴트하기 때문이다. 프로세스마다
+1회만 도는 측정에서 사라지므로 엔진 회귀가 아니라 벤치 하네스의 회차 간 간섭이다.
+
+워크벤치 e2e(`--instruments 100 --core all --repeat 1`)의 `result_materialize`는 0.5755초 →
+0.5092초(−11.5%), `event_store_costs`는 0.0026초 → 0.0009초다. 두 코어의 metrics·series는
+그대로 일치한다.
+
+목표였던 조회 시간 −30%에는 못 미친다. cProfile로 보면 FFI는 조회 시간의 3% 수준(청크 조회
+0.028초/90회)이고, 스냅샷 1,225개가 만드는 `Position` 123,625개가 조회의 약 65%를 차지한다.
+남은 비용은 Python 객체 생성이라 FFI 경계를 더 손봐도 줄지 않는다. Peak RSS 쪽도 payload 힙은
+돌려주지만 `Vec<NativeRecord>`의 인라인 슬롯은 남아 있어, 다음 개선은 레코드 메모리 레이아웃이다.
+
 후속 백로그:
 
 - [x] Rust가 다음 전략 callback까지 market, fill, update, close와 queue drain을 진행하는 driver API.
@@ -498,6 +527,13 @@ PR(materialize 배치, 워크벤치 columnar 변환, hot loop, 메모리)이 끝
 - [ ] 서로 다른 실제 종목 100/300개를 포함한 외부 원장으로 성능 게이트 재검증.
 - [x] 워크벤치 end-to-end 구간별 측정 (#98 Phase 3-2). `scripts/bench_workbench_adapter.py`.
 - [x] 종료 배치를 레코드 단위 lazy payload 조회로 (callback 1.23배). tape 1.27배는 후속.
+- [x] 결과 조회를 kind 청크 FFI로 바꾸고 넘겨받은 payload를 즉시 해제 (2026-09-18, 아래 절).
+  callback 1.18배 · tape 1.22배로 둘 다 게이트 통과. materialize 시간은 −10~−14%에 그친다.
+- [ ] 레코드 payload 메모리 레이아웃 (큰 variant를 `Box`로). 해제해도 `Vec<NativeRecord>`의
+  인라인 슬롯(레코드당 약 200 B, 70k 레코드에서 약 14 MB)은 남는다.
+- [ ] 결과 조회 시간의 정본은 Python 공개 객체 생성이다. 100종목 스냅샷 1,225개가 종목마다
+  `Position`을 만들어 123,625개가 되고 그것만으로 조회의 약 65%다. 조회 시간을 더 줄이려면
+  FFI가 아니라 이 객체 수를 건드려야 한다 (두 코어가 같이 무는 비용이라 배수는 안 움직인다).
 
 ## 첫 구현 슬라이스 상세
 

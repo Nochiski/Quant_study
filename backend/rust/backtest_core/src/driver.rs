@@ -66,7 +66,7 @@ pub(crate) struct CorporateActionEntry {
 /// 전략에 전달할 알림 payload (requirements().events에 선언된 것만 큐에 실린다).
 #[derive(Clone, Debug)]
 pub(crate) enum NotifyPayload {
-    Fill(FillWire),
+    Fill(Box<FillWire>),
     OrderUpdate {
         order_id: String,
         status: String,
@@ -100,13 +100,17 @@ impl NotifyPayload {
 /// 큐 payload. token은 `queued` Vec의 index다.
 ///
 /// 세션은 큐 엔트리의 정렬 키가 단일 진실 원천이라 payload에 담지 않는다.
+///
+/// 큰 wire는 `RecordPayload`와 같은 이유로 `Box`에 둔다 — enum은 가장 큰 variant 크기로
+/// arena 한 자리가 고정되므로, 인라인으로 두면 `OrderWire`(약 232B)가 MARKET·SESSION_CLOSE
+/// 자리까지 그 크기로 만든다.
 #[derive(Clone, Debug)]
 pub(crate) enum Queued {
     Market,
-    Fill(FillWire),
-    Notify(NotifyPayload),
+    Fill(Box<FillWire>),
+    Notify(Box<NotifyPayload>),
     SessionClose,
-    Order(OrderWire),
+    Order(Box<OrderWire>),
 }
 
 impl PersistentEngine {
@@ -144,10 +148,26 @@ impl PersistentEngine {
         })
     }
 
+    /// 큐 arena에 payload를 싣고 그 자리(token)를 힙 엔트리에 건다.
+    ///
+    /// `free_slots`에 있는 자리는 `pop`이 payload를 가져가 비운 자리뿐이다. 한 token은
+    /// pop된 뒤에만 반납되므로 같은 token이 힙에 두 번 존재할 수 없고, 따라서 재사용이
+    /// 다른 엔트리의 payload를 덮어쓸 수 없다. 같은 (세션, 우선순위)의 FIFO 순서는 힙
+    /// 엔트리의 `seq`가 정하므로 token 번호를 재사용해도 처리 순서는 그대로다.
+    /// 자리를 반납하지 않으면 arena가 run 전체의 이벤트 수만큼 자라 `finish()`까지 남는다.
     fn push(&mut self, session: usize, priority: u8, payload: Queued) -> PyResult<()> {
-        let token = self.queued.len() as u64;
-        self.queued.push(Some(payload));
-        self.event_queue.push(session as i64, priority, token)
+        let token = match self.free_slots.pop() {
+            Some(token) => {
+                self.queued[token] = Some(payload);
+                token
+            }
+            None => {
+                self.queued.push(Some(payload));
+                self.queued.len() - 1
+            }
+        };
+        self.event_queue
+            .push(session as i64, priority, token as u64)
     }
 
     /// 큐에서 `(세션, payload)`를 꺼낸다. 세션은 `push`가 정렬 키로 넣은 값 그대로다.
@@ -164,6 +184,8 @@ impl PersistentEngine {
             .ok_or_else(|| {
                 PyValueError::new_err(format!("queue token has no payload — token={token}"))
             })?;
+        // 비운 자리는 바로 다음 push가 쓴다 — 그래야 arena가 동시 대기 이벤트 수에 머문다.
+        self.free_slots.push(token);
         Ok(Some((session as usize, payload)))
     }
 
@@ -192,11 +214,11 @@ impl PersistentEngine {
             self.push(
                 session,
                 PRIORITY_NOTIFY,
-                Queued::Notify(NotifyPayload::OrderUpdate {
+                Queued::Notify(Box::new(NotifyPayload::OrderUpdate {
                     order_id,
                     status,
                     detail,
-                }),
+                })),
             )?;
         }
         Ok(())
@@ -339,7 +361,7 @@ impl PersistentEngine {
             match event {
                 Queued::Market => self.on_market(session)?,
                 Queued::Fill(fill) => {
-                    self.record(session, RecordPayload::Fill(Box::new(fill)))?;
+                    self.record(session, RecordPayload::Fill(fill))?;
                 }
                 Queued::Notify(payload) => {
                     // 큐 엔트리의 세션이 곧 피드 커서(`current_session_count()` − 1)다.
@@ -352,7 +374,7 @@ impl PersistentEngine {
                     }
                     let snapshot = self.snapshot_wire()?;
                     let kind = payload.event_kind();
-                    let frame = self.make_frame(kind, session, Some(payload), snapshot)?;
+                    let frame = self.make_frame(kind, session, Some(*payload), snapshot)?;
                     if self.tape.is_some() {
                         self.submit_native(&frame)?;
                         continue;
@@ -370,7 +392,7 @@ impl PersistentEngine {
                     }
                 }
                 Queued::Order(order) => {
-                    self.record(session, RecordPayload::Order(Box::new(order)))?;
+                    self.record(session, RecordPayload::Order(order))?;
                 }
             }
         }
@@ -434,12 +456,13 @@ impl PersistentEngine {
                         fee,
                         slippage_per_share: slip,
                     };
+                    let fill = Box::new(fill);
                     self.push(session, PRIORITY_FILL, Queued::Fill(fill.clone()))?;
                     if settings.notify_fill {
                         self.push(
                             session,
                             PRIORITY_NOTIFY,
-                            Queued::Notify(NotifyPayload::Fill(fill)),
+                            Queued::Notify(Box::new(NotifyPayload::Fill(fill))),
                         )?;
                     }
                 }
@@ -524,7 +547,7 @@ impl PersistentEngine {
             self.push(
                 session,
                 PRIORITY_NOTIFY,
-                Queued::Notify(NotifyPayload::CorporateAction(index)),
+                Queued::Notify(Box::new(NotifyPayload::CorporateAction(index))),
             )?;
         }
         Ok(())
@@ -637,7 +660,7 @@ impl PersistentEngine {
             self.record_update(session, order_id, status, Some(detail))?;
         }
         for order in orders {
-            self.push(session, PRIORITY_ORDER, Queued::Order(order))?;
+            self.push(session, PRIORITY_ORDER, Queued::Order(Box::new(order)))?;
         }
         self.lifecycle = Lifecycle::Running;
         Ok((decision_id, None))
@@ -816,6 +839,78 @@ mod tests {
 
     fn runtime(warmup: usize) -> PersistentEngine {
         runtime_with(false, settings(warmup))
+    }
+
+    /// 종목 하나 × `sessions` 세션짜리 runtime — 큐 arena가 세션 수에 비례해 자라는지 본다.
+    /// 가격은 세션 내내 같게 둔다 — 목표 비중만 바꿔도 매 세션 주문·체결이 나고, 결정
+    /// 시점과 체결 시점의 가격이 같아 과매도로 도메인 오류가 나지 않는다.
+    fn runtime_sessions(sessions: usize, notify: bool) -> PersistentEngine {
+        pyo3::prepare_freethreaded_python();
+        let mut runtime = PersistentEngine::new(100_000.0, false, false, 1.0).unwrap();
+        let timestamps: Vec<String> = (0..sessions)
+            .map(|index| format!("2026-08-{:02} 00:00:00", index + 1))
+            .collect();
+        let closes: Vec<f64> = vec![100.0; sessions];
+        runtime
+            .load_feed(
+                vec![KEY.into()],
+                vec!["005930".into()],
+                timestamps,
+                (0..=sessions).collect(),
+                vec![0; sessions],
+                closes.clone(),
+                closes.clone(),
+                closes.clone(),
+                closes,
+                vec![1_000_000; sessions],
+            )
+            .unwrap();
+        runtime.configure_router(
+            vec!["no_action".into(), "set_portfolio_target".into()],
+            vec![],
+        );
+        let mut settings = settings(0);
+        settings.notify_fill = notify;
+        settings.notify_order_update = notify;
+        runtime.run = Some(Arc::new(settings));
+        runtime
+    }
+
+    /// arena는 run 전체의 이벤트 수가 아니라 "동시에 큐에 떠 있는 이벤트 수"만큼만 커야 한다.
+    ///
+    /// `drain_until_callback`이 시작할 때 세션마다 MARKET을 하나씩 미리 싣기 때문에 하한은
+    /// 세션 수다. 그 뒤 생기는 FILL·NOTIFY·SESSION_CLOSE·ORDER는 이미 팝된 자리를 되쓰므로
+    /// 상수만 더 든다. 자리를 반납하지 않으면 여기가 이벤트 총수(세션당 5~6개)로 벌어진다.
+    #[test]
+    fn queue_arena_reuses_popped_slots_instead_of_growing_per_event() {
+        let sessions = 40;
+        let mut runtime = runtime_sessions(sessions, true);
+        let mut weight = 0.5;
+        while let Some(frame) = runtime.drive_internal().unwrap() {
+            // 리밸런싱은 세션 마감(market) 프레임에서만 한다 — FILL·ORDER_UPDATE 알림
+            // 프레임까지 목표를 다시 내면 같은 세션에 주문이 겹쳐 과매도가 난다.
+            let decision = if frame.event_kind == "market" {
+                let decision = target(&frame.ts, weight);
+                weight = if weight > 0.45 { 0.4 } else { 0.5 };
+                decision
+            } else {
+                no_action(&frame.ts)
+            };
+            runtime
+                .submit_internal(frame.token, decision, None)
+                .unwrap();
+        }
+        // 이벤트 총수는 세션당 MARKET·SESSION_CLOSE·ORDER·FILL·NOTIFY 여럿이라 훨씬 크다.
+        let recorded = runtime.records.records().len();
+        assert!(recorded > sessions * 4, "recorded={recorded}");
+        assert!(
+            runtime.queued.len() <= sessions + 8,
+            "arena={} sessions={sessions}",
+            runtime.queued.len()
+        );
+        // 반납된 자리는 arena 안에만 있다 — free 목록이 arena보다 길면 이중 반납이다.
+        assert!(runtime.free_slots.len() <= runtime.queued.len());
+        runtime.finish_internal().unwrap();
     }
 
     fn no_action(ts: &str) -> DecisionWire {

@@ -220,7 +220,10 @@ pub(crate) struct PersistentEngine {
     pub(crate) pending_orders: Vec<StoredOrder>,
     pub(crate) pending_groups: Vec<StoredGroup>,
     pub(crate) event_queue: NativeEventQueue,
+    /// 큐 payload arena. 힙 엔트리는 이 Vec의 index(token)만 들고 다닌다.
     pub(crate) queued: Vec<Option<Queued>>,
+    /// `pop`이 payload를 가져가 비운 arena 자리. `push`가 여기서 먼저 꺼내 쓴다.
+    pub(crate) free_slots: Vec<usize>,
     pub(crate) lifecycle: Lifecycle,
     pub(crate) callback_seq: u64,
     pub(crate) awaiting_session: usize,
@@ -530,6 +533,7 @@ impl PersistentEngine {
             pending_groups: Vec::new(),
             event_queue: NativeEventQueue::default(),
             queued: Vec::new(),
+            free_slots: Vec::new(),
             lifecycle: Lifecycle::Ready,
             callback_seq: 0,
             awaiting_session: 0,
@@ -656,6 +660,7 @@ impl PersistentEngine {
     fn finish(&mut self) -> PyResult<Vec<RecordIndexWire>> {
         self.finish_internal()?;
         self.queued = Vec::new();
+        self.free_slots = Vec::new();
         // tape 프레임은 결정 생성에만 쓰였다 — 재구성 정보는 DECISION 레코드에 있다.
         self.tape = None;
         self.event_queue = NativeEventQueue::default();

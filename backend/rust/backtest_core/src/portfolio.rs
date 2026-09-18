@@ -42,16 +42,21 @@ impl Portfolio {
         self.ledgers.push((key.to_string(), ledger));
     }
 
-    /// 세션 종가로 평가 가격 갱신 (Rust 세션 루프 경로). 이미 마크가 있는 key는 문자열을
-    /// 새로 만들지 않고 값만 바꾼다 — 세션마다 종목 수만큼 나던 할당이 사라진다.
+    /// 마크 한 건 갱신 — 두 `mark*` 진입점의 유일한 본문이다. 이미 표에 있는 key는 문자열을
+    /// 새로 만들지 않고 값만 바꾼다 (세션마다 종목 수만큼 나던 할당이 사라진다).
+    fn set_mark(&mut self, key: &str, close: f64) {
+        match self.marks.get_mut(key) {
+            Some(slot) => *slot = close,
+            None => {
+                self.marks.insert(key.to_string(), close);
+            }
+        }
+    }
+
+    /// 세션 종가로 평가 가격 갱신 (Rust 세션 루프 경로 — feed가 등록부 문자열을 빌려준다).
     pub(crate) fn mark_refs(&mut self, closes: &[(&str, f64)]) {
         for (key, close) in closes {
-            match self.marks.get_mut(*key) {
-                Some(slot) => *slot = *close,
-                None => {
-                    self.marks.insert((*key).to_string(), *close);
-                }
-            }
+            self.set_mark(key, *close);
         }
     }
 
@@ -211,10 +216,10 @@ impl Portfolio {
         Ok(())
     }
 
-    /// 세션 종가로 평가 가격 갱신 (Python legacy 코어 경로 — key를 이미 소유해 넘겨준다).
+    /// 세션 종가로 평가 가격 갱신 (Python `RustPortfolio` 경로 — key를 소유해 넘겨준다).
     pub(crate) fn mark(&mut self, closes: Vec<(String, f64)>) {
         for (key, close) in closes {
-            self.marks.insert(key, close);
+            self.set_mark(&key, close);
         }
     }
 

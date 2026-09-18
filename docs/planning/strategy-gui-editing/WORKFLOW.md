@@ -942,6 +942,9 @@ export const suggestNodeId = (tree, factorPointer, base: string): string;   // b
 
 > 2026-09-18: `audit_gui_phase5` PASS(blocking 0), 전체 Playwright 19/19, #133 CI 3 job 초록, 19 PR main 머지 —
 > initiative COMPLETE. 남은 backlog 13건은 PLAN "머지 뒤 backlog" 절.
+> Phase 1·2 이월(backlog 10·11) 종결: save·revise 422를 `StrategyDocumentSave422Response`로 typed화(compile은 진단이 200이라
+> 제외), `trace.strategy.requires_upgrade`를 `trace.error.<code>` 규약으로 번역, DEFECT-P2X-004는 P2-03 리뷰 118-07 테스트가 이미
+> 막고 있음을 확인, DEFECT-P2X-005는 "문장은 소비자별 소유"로 SoT에 종결 기록.
 
 ---
 

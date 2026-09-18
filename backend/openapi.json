@@ -8608,11 +8608,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/StrategyDocumentInvalidResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationResponse"
+                    }
+                  ],
+                  "title": "Response 422 Createstrategydocument"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Source has error-severity diagnostics, or malformed envelope"
           }
         },
         "summary": "Create Strategy Document"
@@ -8860,11 +8868,19 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/StrategyDocumentInvalidResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RequestValidationResponse"
+                    }
+                  ],
+                  "title": "Response 422 Revisestrategydocument"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Source has error-severity diagnostics, or malformed envelope"
           }
         },
         "summary": "Revise Strategy Document"

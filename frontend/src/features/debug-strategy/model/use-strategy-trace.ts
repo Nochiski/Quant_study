@@ -7,6 +7,7 @@ import {
   type StrategyTraceRequest,
   type StrategyTraceResponse,
 } from "../../../shared/api";
+import { tOptional } from "../../../shared/config";
 import {
   prepareStrategyTrace,
   responseMatchesStrategyTrace,
@@ -182,9 +183,16 @@ const fetchTraceBundle = async (
   return { anchor, linkedRows, selectedRows, linkedTruncated };
 };
 
-const errorMessage = (error: unknown): string =>
+/**
+ * 추적 요청 오류 문구: backend 422 detail의 `code`에 번역(`trace.error.<code>`)이 있으면 그것을, 없으면 detail
+ * 원문(Phase 1 감사 위험 5b: `trace.strategy.requires_upgrade`가 원문으로 노출됐다 — backtest 경로의
+ * `backtest.error.<code>`와 같은 규약).
+ */
+export const traceErrorMessage = (error: unknown): string =>
   error instanceof ApiRequestError
-    ? (error.detail ?? error.message)
+    ? ((error.code === undefined ? null : tOptional(`trace.error.${error.code}`)) ??
+      error.detail ??
+      error.message)
     : error instanceof Error
       ? error.message
       : String(error);
@@ -253,7 +261,7 @@ export const useStrategyTrace = (
         : {
             kind: "error",
             ...requestOwner,
-            message: errorMessage(query.error),
+            message: traceErrorMessage(query.error),
           };
     return query.data === undefined
       ? null

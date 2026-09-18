@@ -1,4 +1,7 @@
-"""Typed 422 details for the strategy document upgrade endpoint (P1-04)."""
+"""전략 문서 엔드포인트의 typed 422 detail.
+
+P1-04가 upgrade에 만들었고, save·revise는 Phase 1 감사 이월로 같은 모양을 선언한다.
+"""
 
 from __future__ import annotations
 
@@ -54,4 +57,11 @@ StrategyDocumentUpgrade422Response: TypeAlias = (
     | StrategyDocumentNotUpgradeableResponse
     | StrategyDocumentUpgradeDriftResponse
     | RequestValidationResponse
+)
+
+# save·revise의 422: 런타임에 내던 `_invalid_document_compiled` 모양(`strategy_document.invalid`)을
+# OpenAPI에도 선언한다(Phase 1 감사 우선순위 2 — upgrade만 typed였던 비대칭). compile은 진단을
+# 200으로 돌려주므로 422는 요청 봉투 오류뿐이라 그대로 둔다.
+StrategyDocumentSave422Response: TypeAlias = (
+    StrategyDocumentInvalidResponse | RequestValidationResponse
 )

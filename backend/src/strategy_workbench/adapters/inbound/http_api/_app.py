@@ -131,6 +131,7 @@ from ._execution_error_contract import (
 from ._pagination import CANONICAL_PAGE_INTEGER_VALIDATOR
 from ._strategy_document_contract import (
     StrategyDocumentNotUpgradeableDetail,
+    StrategyDocumentSave422Response,
     StrategyDocumentUpgrade422Response,
     StrategyDocumentUpgradeDriftDetail,
 )
@@ -799,6 +800,12 @@ def create_app(
         "/api/v1/strategy-documents",
         operation_id="createStrategyDocument",
         status_code=status.HTTP_201_CREATED,
+        responses={
+            422: {
+                "model": StrategyDocumentSave422Response,
+                "description": "Source has error-severity diagnostics, or malformed envelope",
+            },
+        },
     )
     def create_strategy_document(request: SaveDocumentRequest) -> StrategyDocument:
         """Store a cleanly compiled exact source as revision 1 of a new strategy."""
@@ -815,7 +822,11 @@ def create_app(
             409: {
                 "model": StrategyRevisionConflictResponse,
                 "description": "The expected revision is stale",
-            }
+            },
+            422: {
+                "model": StrategyDocumentSave422Response,
+                "description": "Source has error-severity diagnostics, or malformed envelope",
+            },
         },
     )
     def revise_strategy_document(

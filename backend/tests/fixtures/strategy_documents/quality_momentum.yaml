@@ -28,8 +28,6 @@ factors:
           window: 252
       output_node_id: mom_252
       missing_policy: drop
-signal:
-  method: weighted_sum
 portfolio:
   selection_count: 20
   rebalance: monthly

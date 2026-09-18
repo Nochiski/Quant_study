@@ -3,7 +3,6 @@
   "execution": {"fee_bps": 15, "timing": "next_open"},
   "risk": {"max_name_weight": 0.05},
   "portfolio": {"rebalance": "monthly", "selection_count": 20, "weighting": "equal"},
-  "signal": {"method": "weighted_sum", "entry_percentile": 0.1},
   "factors": [
     {
       "graph": {

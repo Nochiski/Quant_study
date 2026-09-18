@@ -82,6 +82,11 @@ def test_explanation_preserves_pipeline_order() -> None:
         InMemoryStrategyRepository(), new_id=lambda: "unused"
     ).explain(spec)
 
+    summaries = {step.stage: step.summary for step in explanation.steps}
+    # 요약 문구는 모델이 소유한 사실만 말한다.
+    # 1.1에서 사라진 signal.method·order_style은 단언하지 않는다.
+    assert summaries["signal"] == "팩터 1개를 방향·가중치 가중합으로 결합"
+    assert summaries["execution"] == "next_open"
     assert tuple(step.stage for step in explanation.steps) == (
         "data",
         "signal",

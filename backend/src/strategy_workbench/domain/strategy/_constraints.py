@@ -84,19 +84,6 @@ class ScalarConstraint:
 
 STRATEGY_SCALAR_CONSTRAINTS: tuple[ScalarConstraint, ...] = (
     ScalarConstraint(
-        pointer="/signal/entry_percentile",
-        code="strategy.signal.percentile",
-        stage=AppliedStage.SIGNAL,
-        unit=ContractUnit.RATIO,
-        display_unit="%",
-        minimum=0.0,
-        exclusive_minimum=True,
-        maximum=1.0,
-        example=0.1,
-        description_key="strategy.contract.signal.entry_percentile",
-        message="선택 비율은 0보다 크고 1 이하여야 합니다.",
-    ),
-    ScalarConstraint(
         pointer="/portfolio/selection_count",
         code="strategy.portfolio.selection_count",
         stage=AppliedStage.PORTFOLIO,

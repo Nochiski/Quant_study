@@ -3,13 +3,13 @@ plan_version: 2
 project: strategy-gui-editing
 project_status: IN_REVIEW
 current_phase: P1
-current_pr: P1-01
-active_prs: [P1-01]
-parallel_window: []
-last_updated: 2026-09-17T23:22:58+09:00
+current_pr: P1-01,P1-02
+active_prs: [P1-01, P1-02]
+parallel_window: [P1-01, P1-02]
+last_updated: 2026-09-17T23:49:54+09:00
 planned_prs: 17
 merged_prs: 0
-approved_prs: 0
+approved_prs: 1
 progress_percent: 0
 ---
 
@@ -25,11 +25,11 @@ progress_percent: 0
 |---|---|
 | Project status | `IN_REVIEW` |
 | Current phase | `P1` |
-| Current/next PR | `P1-01` |
-| Active PR | `P1-01` |
+| Current/next PR | `P1-01,P1-02` |
+| Active PR | `P1-01, P1-02` |
 | Progress | `0 / 17 merged (0%)` |
-| Approved | `0 / 17` |
-| Aggregated at | `2026-09-17 23:22 KST` |
+| Approved | `1 / 17` |
+| Aggregated at | `2026-09-17 23:49 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -43,6 +43,12 @@ progress_percent: 0
 - Form/Graph 편집은 JSON Pointer 범위의 source 트랜잭션이다. 별도 편집 모델을 두지 않는다(ADR D5 개정).
 - P1 backend PR은 `backend/openapi.json`만 재생성하고 frontend generated SDK는 P2-01이 갱신한다.
 - reviewer 서브에이전트는 Opus로만 배정한다. Phase 종료마다 SoT·책임분리 점검 서브에이전트를 돌린다.
+- 알려진 간격(P1 merge ~ P5-03): `docs/manual/strategy-workbench/README.md`와 이전 initiative WORKFLOW 2.2의
+  YAML 예시가 1.0 모양(`factors.factors`, `signal.method`)이라 그대로 따라 치면 unknown key다. 문서 개정은
+  P5-03이 소유한다.
+- 2026-09-17 절차 조정: 이 세션은 격리 worktree(`scad`)에서 돌고 로컬 `main`은 원본 checkout에 체크아웃되어
+  있어 직접 merge하지 않는다. APPROVE된 PR은 `APPROVED`로 두고 다음 PR의 base 브랜치가 된다(선언된 스택,
+  `parallel_window`에 전부 기록). `MERGED`는 GitHub에서 PR이 병합될 때 제품 소유자 확인 후 표기한다.
 
 ## 상태 값
 
@@ -78,16 +84,16 @@ progress_percent: 0
 
 | 항목 | 값 |
 |---|---|
-| PR | `P1-01` |
-| Intent | schema 1.1 모델: factors 평탄화, 선택 보일러플레이트, kind 우선 |
-| Acceptance | WORKFLOW P1-01 |
-| Non-goals | 미사용 필드·unary alias 제거(P1-02), 1.0 읽기·업그레이드(P1-03/04), frontend(P2) |
-| Branch/worktree | `feat/gui-p1-01-schema-1-1-model` (worktree `scad`) |
-| Base SHA | `3aa95d0` (기획 패키지 commit, PR #106) |
-| Head SHA | `d545f53` (review fix 2; fix 1 `1d885f5`, diff freeze `9fab26b`, PR [#108](https://github.com/Nochiski/Quant_study/pull/108)) |
-| Diff stat | handwritten 37 files +377/−327 + fixture 3개 신규 154줄; generated `openapi.json`·`runtime-schema.json` 제외 |
-| Focused tests | `tests/contract/test_strategy_authoring_fixtures.py` 15 passed (신규 5: minimal 동일 hash, label/weight 기본값, 1.0 거부, nested factors type_mismatch, 알고리즘 golden) |
-| Full gate | backend pytest 1,223 passed · Ruff check clean · Ruff format(변경 파일 중 이 PR이 만든 drift 3개 정리, 기존 drift 3개는 범위 밖) · Pyright 0 errors |
+| PR | `P1-02` |
+| Intent | 미사용 필드 `signal.method`·`signal.entry_percentile`·`execution.order_style`과 enum 제거, `unary` alias(rank/zscore/winsorize/neutralize) 제거, `cross_sectional: demean` 추가 |
+| Acceptance | WORKFLOW P1-02 |
+| Non-goals | 1.0 읽기·업그레이드(P1-03/04), 적용 조건 경고(P1-05), frontend(P2) |
+| Branch/worktree | `feat/gui-p1-02-dead-fields-unary-alias` (base `feat/gui-p1-01-schema-1-1-model` `5d28996`) |
+| Base SHA | `5d28996` |
+| Head SHA | `9a5cccb` (P2 후속; diff freeze `aae4c23`) |
+| Diff stat | handwritten 20 files +79/−92 + P2 후속 4 files; generated `openapi.json`·`runtime-schema.json` 제외 |
+| Focused tests | hydrate unknown_key 3·invalid_enum 4·demean 문서 1, demean parity 1, 설명 문구 1, document API 12 |
+| Full gate | backend pytest 1,232 passed · Ruff check clean · Pyright 0 |
 
 ---
 
@@ -95,8 +101,8 @@ progress_percent: 0
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P1-01` | 모델 1.1: `factors` 평탄화, 선택 보일러플레이트, `kind` 우선, fixture·hash golden | 없음 | `IN_REVIEW` | `review_gui_p1_01` (opus) 배정 · [#108](https://github.com/Nochiski/Quant_study/pull/108) |
-| [ ] | `P1-02` | 미사용 필드 3개·enum 제거, unary alias 제거, `cross_sectional: demean` | P1-01 | `WAITING` | — |
+| [ ] | `P1-01` | 모델 1.1: `factors` 평탄화, 선택 보일러플레이트, `kind` 우선, fixture·hash golden | 없음 | `APPROVED` | [#108](https://github.com/Nochiski/Quant_study/pull/108) · `review_gui_p1_01` APPROVE (REQUEST_CHANGES P1 1/P2 7 해소) · `5d28996` |
+| [ ] | `P1-02` | 미사용 필드 3개·enum 제거, unary alias 제거, `cross_sectional: demean` | P1-01 | `IN_REVIEW` | `review_gui_p1_02` (opus) 배정 |
 | [ ] | `P1-03` | `_upgrade.py` dict 변환, 1.0 row 동결 읽기, saved-reference backtest 422 | P1-02 | `WAITING` | — |
 | [ ] | `P1-04` | `POST /strategy-documents/upgrade` (ruamel rt, drift fail-closed) | P1-03 | `WAITING` | — |
 | [ ] | `P1-05` | `FIELD_APPLICABILITY`, compile warning, `x-applicable-when` | P1-02 | `WAITING` | — |
@@ -168,16 +174,21 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
+| P1-01 | `review_gui_p1_01` | `3aa95d0` | `5d28996` | APPROVE (1차 REQUEST_CHANGES P1-001 계약 의도 단언 부재·P2 7건 → `1d885f5`·`d545f53` 반영, 변이 검증 3종·적대적 hydrate 27종 통과) | 1 (해소) | `default-from` 가드는 생략 시에만 실행(지연 검사, schema builder 불변식은 두 번째 default-from 도입 시 검토); `contract_hash`가 FieldContract 행 모양을 덮지 않음(schema const 변경으로 이번엔 무효화됨); 1.0 row는 P1-03까지 읽기 불가(의도) | 2026-09-17 |
 
 ## 검증 기록
 
 | PR | Focused test | Full gate | API generated clean | Manual UX | CI | Recorded at |
 |---|---|---|---|---|---|---|
+| P1-01 | contract fixtures 15·schema 3 신규·hydrate 가드 1·JSON API label 비대칭 1 | backend pytest 1,228·Ruff check·Pyright 0; reviewer 독립 재실행 동일 | `openapi.json`·`runtime-schema.json` 재생성 후 diff 0 (frontend SDK는 P2-01) | 해당 없음(backend) | 원격 CI: backend job 대상, browser-e2e는 알려진 빨간불(WORKFLOW 1절) | 2026-09-17 |
 
 ## 변경 기록
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-17 KST | Claude | `review_gui_p1_02` APPROVE(P0/P1 0, P2 3) → P2-001~003 후속 `9a5cccb`(unary fallthrough 제거, 설명 문구 모델 사실만, demean 문서 hydrate 테스트), 1,232 passed, 같은 reviewer 확인 요청 | 13.5 |
+| 2026-09-17 KST | Claude | P1-02 구현·self-check(1,231 passed) → diff freeze `aae4c23`, stacked PR(base P1-01), `review_gui_p1_02`(opus) 배정 → IN_REVIEW | 13.3 diff freeze |
+| 2026-09-17 KST | Claude | `review_gui_p1_01` 재검토 APPROVE(`5d28996`) → P1-01 APPROVED. 로컬 main merge 대신 선언된 스택으로 진행(절차 조정 기록). P1-02 IN_PROGRESS, 브랜치 `feat/gui-p1-02-dead-fields-unary-alias`(base P1-01) | 13.5 판정 |
 | 2026-09-17 KST | Claude | 리뷰 잔여 P2-003~008 반영 `d545f53`(canonical_payload_json 인코더, FieldContract.default_from, 죽은 헬퍼·docstring·치환 복원, label 비대칭 pin). backend 1,228 passed. reviewer 스코프 밖 관찰(P1 PR에서 browser-e2e 빨간불)을 WORKFLOW 1절에 알려진 상태로 기록 | 13.5 재검토 |
 | 2026-09-17 KST | Claude | `review_gui_p1_01` REQUEST_CHANGES(P1-001 계약 의도 단언 부재, P2-002 default-from KeyError) → 수정 `1d885f5`(schema 단언 3, hydrate 모델 가드 + 테스트), backend 1,227 passed, 같은 reviewer 재검토 요청 | 13.5 재검토 |
 | 2026-09-17 KST | Claude | P1-01 diff freeze `9fab26b`, PR #108(base #106), `review_gui_p1_01`(opus) 배정 → IN_REVIEW | 13.3 diff freeze |

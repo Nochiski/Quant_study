@@ -25,7 +25,7 @@ from strategy_workbench.domain.strategy.facade.validation import (
 )
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
-GOLDEN_SPEC_HASH = "04a3bb86bb541f0503e80b17600196067c17faccf584114ccff7049a960733a2"
+GOLDEN_SPEC_HASH = "c6bc9c4e38c431f77d7c3c5217ac664d1093f426b5a6d5b705a8571d1992b7d5"
 
 
 def test_warning_only_validation_keeps_spec_and_hash(monkeypatch: pytest.MonkeyPatch) -> None:

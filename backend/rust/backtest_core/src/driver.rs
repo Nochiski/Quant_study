@@ -559,6 +559,11 @@ impl PersistentEngine {
             settings.margin_interest_bps_annual,
             settings.annualization_days,
         )?;
+        // 마감 스냅샷은 COST 레코드를 남기기 **전에** 만든다 — python `loop._on_session_close`가
+        // `marked = portfolio.snapshot(...)`을 COST append 앞에 두기 때문이다. 비용은 이미
+        // 청구됐으므로 정상 경로 값은 어느 쪽이든 같지만, 스냅샷이 실패하면
+        // (`no mark price for held instrument`) partial trace에 COST가 남고 안 남고가 갈린다.
+        let snapshot = self.snapshot_wire()?;
         for (kind, key, amount) in costs {
             let instrument_id = match key {
                 Some(key) => Some(self.instrument_id_for_key(&key)?),
@@ -573,8 +578,8 @@ impl PersistentEngine {
                 },
             )?;
         }
-        // 비용은 위에서 이미 청구됐으므로 여기서 만든 스냅샷은 마감 직후 상태다.
-        let snapshot = self.snapshot_wire()?;
+        // 자본 잠식 검사는 python과 같이 COST append 뒤다 — 잠식으로 멈춘 run의 partial trace에도
+        // 그 세션 비용은 남는다.
         if snapshot.equity < 0.0 {
             let feed = self.feed_ref()?;
             let positions: Vec<String> = snapshot

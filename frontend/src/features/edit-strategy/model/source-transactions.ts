@@ -16,7 +16,7 @@ import {
  * 하나만 바꾸는 최소 범위 편집(`PlannedEdit`)을 만들고, 결과 텍스트를 같은 parser로 다시 읽어
  * (1) 파싱이 되고 (2) tree가 `applyToTree`의 결과와 같을 때만 돌려준다. 프론트가 문서를 직렬화해
  * 통째로 갈아끼우는 일은 없다(주석·순서·따옴표는 범위 밖에서 그대로다). 예외는 flow 표기 컨테이너
- * (`{ … }`·`[ … ]`)에 키·항목을 넣을 때다: block은 flow 안에 올 수 없으므로 가장 바깥 flow 컨테이너 전체를
+ * (`{ … }`·`[ … ]`)에 키·항목을 넣거나 거기서 지울 때다: block은 flow 안에 올 수 없으므로 가장 바깥 flow 컨테이너 전체를
  * 다시 직렬화해 교체한다 — 그 범위 안의 따옴표·숫자 표기는 정규화되고, 컨테이너 뒤 줄 끝 주석은 `key:`/`-`
  * 줄에 남긴다(Phase 5 backlog 14).
  *
@@ -334,6 +334,15 @@ const replaceFlowContainer = (
   const value = valueAt(next, top);
   const block = yamlBlock(value);
   const range = parsed.valueRanges.get(top)!;
+  if (block === "{}" || block === "[]") {
+    // 삭제로 컨테이너가 비면 block으로 열 것이 없다 — flow 빈 컨테이너를 그 자리에 둔다(backlog 18).
+    return {
+      from: range.start.offset,
+      to: range.end.offset,
+      insert: block,
+      cursor: range.start.offset + block.length,
+    };
+  }
   // 닫는 `}`·`]` 뒤 같은 줄의 주석은 컨테이너(`key:`/`-` 줄)의 것이다 — 새 마지막 항목에 붙지 않게 그 줄에
   // 남긴다(#149 리뷰 P2-4). `to`는 주석까지 삼키고 주석은 삽입 첫머리에 다시 쓴다.
   const lineEnd = lineEndOf(source, range.end.offset);
@@ -764,6 +773,11 @@ const planRemove = (
   const exists =
     parsed.valueRanges.has(op.pointer) || parsed.keyRanges.has(op.pointer);
   if (!exists || op.pointer === "") return "not-found";
+  // 부모가 flow 표기(또는 flow 안)면 삽입과 같은 경로로 가장 바깥 flow 컨테이너를 다시 쓴다(backlog 18:
+  // 삽입만 되고 삭제는 block 앵커를 요구하던 비대칭). 비면 `{}`/`[]`가 그 자리에 남는다.
+  const flowTop = topmostFlowAncestor(source, parsed, parentPointer);
+  if (flowTop !== null)
+    return replaceFlowContainer(source, parsed, op, flowTop, eol, unit);
   // 삭제로 부모가 비면 구조를 유지한다: mapping은 `{}`, sequence는 `[]`(루트는 비우지 않는다).
   const emptiesParent =
     parentPointer !== "" &&

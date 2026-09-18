@@ -7,21 +7,36 @@
     "strategy": "callback",
     "synthetic": true,
     "repeat": 3,
-    "warmup": 1
+    "warmup": 1,
+    "rss_isolated": true
   },
   "cores": {
     "rust": {
-      "samples_seconds": [
-        0.5414412000100128,
-        0.5485257999971509,
-        0.4993909999902826
+      "run_seconds_samples": [
+        0.33890130001236685,
+        0.32651320000877604,
+        0.3327415999956429
       ],
-      "median_seconds": 0.5414412000100128,
+      "materialize_seconds_samples": [
+        0.3907929000270087,
+        0.42280979998758994,
+        0.4139374000078533
+      ],
+      "total_seconds_samples": [
+        0.7296942000393756,
+        0.749322999996366,
+        0.7466790000034962
+      ],
+      "run_median_seconds": 0.3327415999956429,
+      "materialize_median_seconds": 0.4139374000078533,
+      "median_seconds": 0.7466790000034962,
       "speedup_vs_python": null,
+      "run_speedup_vs_python": null,
       "final_equity": 2321985873.9513392,
       "orders": 22243,
       "fills": 22155,
-      "process_peak_rss_bytes": 219115520
+      "peak_rss_after_materialize_bytes": 219611136,
+      "process_peak_rss_bytes": 219611136
     }
   }
 }

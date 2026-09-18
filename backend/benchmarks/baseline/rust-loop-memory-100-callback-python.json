@@ -7,21 +7,36 @@
     "strategy": "callback",
     "synthetic": true,
     "repeat": 3,
-    "warmup": 1
+    "warmup": 1,
+    "rss_isolated": true
   },
   "cores": {
     "python": {
-      "samples_seconds": [
-        2.3945382999954745,
-        2.661470199993346,
-        2.9441726000077324
+      "run_seconds_samples": [
+        1.7044225000136066,
+        1.6159840999753214,
+        1.6920469000178855
       ],
-      "median_seconds": 2.661470199993346,
+      "materialize_seconds_samples": [
+        1.400010660290718e-06,
+        8.00006091594696e-07,
+        9.00006853044033e-07
+      ],
+      "total_seconds_samples": [
+        1.704423900024267,
+        1.615984899981413,
+        1.6920478000247385
+      ],
+      "run_median_seconds": 1.6920469000178855,
+      "materialize_median_seconds": 9.00006853044033e-07,
+      "median_seconds": 1.6920478000247385,
       "speedup_vs_python": 1.0,
+      "run_speedup_vs_python": 1.0,
       "final_equity": 2321985873.9513392,
       "orders": 22243,
       "fills": 22155,
-      "process_peak_rss_bytes": 178098176
+      "peak_rss_after_materialize_bytes": 177860608,
+      "process_peak_rss_bytes": 177860608
     }
   }
 }

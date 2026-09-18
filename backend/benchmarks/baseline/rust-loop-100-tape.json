@@ -7,53 +7,108 @@
     "strategy": "tape",
     "synthetic": true,
     "repeat": 5,
-    "warmup": 1
+    "warmup": 1,
+    "rss_isolated": false
   },
   "cores": {
     "python": {
-      "samples_seconds": [
-        2.692262899989146,
-        2.4672467000054894,
-        2.3667492999957176,
-        2.59219499999017,
-        2.566317099990556
+      "run_seconds_samples": [
+        1.6025410000002012,
+        1.624745700013591,
+        1.681938199995784,
+        1.858328399976017,
+        1.6544798999966588
       ],
-      "median_seconds": 2.566317099990556,
+      "materialize_seconds_samples": [
+        1.9000144675374031e-06,
+        1.9999861251562834e-06,
+        4.00003045797348e-07,
+        5.00003807246685e-07,
+        5.00003807246685e-07
+      ],
+      "total_seconds_samples": [
+        1.6025429000146687,
+        1.6247476999997161,
+        1.6819385999988299,
+        1.8583288999798242,
+        1.654480400000466
+      ],
+      "run_median_seconds": 1.6544798999966588,
+      "materialize_median_seconds": 5.00003807246685e-07,
+      "median_seconds": 1.654480400000466,
       "speedup_vs_python": 1.0,
+      "run_speedup_vs_python": 1.0,
       "final_equity": 2321985873.9513392,
       "orders": 22243,
       "fills": 22155,
-      "process_peak_rss_bytes": 280285184
+      "peak_rss_after_materialize_bytes": null,
+      "process_peak_rss_bytes": 257441792
     },
     "rust_legacy": {
-      "samples_seconds": [
-        3.049499700005981,
-        2.6365645000041695,
-        2.939868400004343,
-        2.662356600005296,
-        2.4967478000035044
+      "run_seconds_samples": [
+        1.7100248000060674,
+        1.6368453000031877,
+        1.7732290000130888,
+        1.8664476000121795,
+        1.6671373000135645
       ],
-      "median_seconds": 2.662356600005296,
-      "speedup_vs_python": 0.9639268834180407,
+      "materialize_seconds_samples": [
+        1.100008375942707e-06,
+        9.00006853044033e-07,
+        5.999754648655653e-07,
+        9.00006853044033e-07,
+        4.00003045797348e-07
+      ],
+      "total_seconds_samples": [
+        1.7100259000144433,
+        1.6368462000100408,
+        1.7732295999885537,
+        1.8664485000190325,
+        1.6671377000166103
+      ],
+      "run_median_seconds": 1.7100248000060674,
+      "materialize_median_seconds": 9.00006853044033e-07,
+      "median_seconds": 1.7100259000144433,
+      "speedup_vs_python": 0.9675177434368052,
+      "run_speedup_vs_python": 0.9675180734167063,
       "final_equity": 2321985873.9513392,
       "orders": 22243,
       "fills": 22155,
-      "process_peak_rss_bytes": 280285184
+      "peak_rss_after_materialize_bytes": null,
+      "process_peak_rss_bytes": 257441792
     },
     "rust": {
-      "samples_seconds": [
-        0.5474315000028582,
-        0.5429537000018172,
-        0.5248985999933211,
-        0.5717431000084616,
-        0.4959464999992633
+      "run_seconds_samples": [
+        0.33471900000586174,
+        0.33029529999475926,
+        0.37368240000796504,
+        0.3429928999976255,
+        0.31850620001205243
       ],
-      "median_seconds": 0.5429537000018172,
-      "speedup_vs_python": 4.726585526504317,
+      "materialize_seconds_samples": [
+        0.5224101999774575,
+        0.4470351999916602,
+        0.48655849997885525,
+        0.45801119998213835,
+        0.49297049999586307
+      ],
+      "total_seconds_samples": [
+        0.8571291999833193,
+        0.7773304999864195,
+        0.8602408999868203,
+        0.8010040999797639,
+        0.8114767000079155
+      ],
+      "run_median_seconds": 0.33471900000586174,
+      "materialize_median_seconds": 0.48655849997885525,
+      "median_seconds": 0.8114767000079155,
+      "speedup_vs_python": 2.0388513927563507,
+      "run_speedup_vs_python": 4.942892097453939,
       "final_equity": 2321985873.9513392,
       "orders": 22243,
       "fills": 22155,
-      "process_peak_rss_bytes": 280285184
+      "peak_rss_after_materialize_bytes": null,
+      "process_peak_rss_bytes": 257441792
     }
   }
 }

@@ -7,53 +7,108 @@
     "strategy": "callback",
     "synthetic": true,
     "repeat": 5,
-    "warmup": 1
+    "warmup": 1,
+    "rss_isolated": false
   },
   "cores": {
     "python": {
-      "samples_seconds": [
-        2.7964956000068923,
-        2.671225800004322,
-        2.971594599992386,
-        3.1166360000061104,
-        2.8760466999956407
+      "run_seconds_samples": [
+        1.6362809999845922,
+        1.667043299996294,
+        1.706374000001233,
+        1.6997221000201534,
+        1.701639000006253
       ],
-      "median_seconds": 2.8760466999956407,
+      "materialize_seconds_samples": [
+        1.100008375942707e-06,
+        2.0999868866056204e-06,
+        4.00003045797348e-07,
+        5.00003807246685e-07,
+        8.999777492135763e-07
+      ],
+      "total_seconds_samples": [
+        1.6362820999929681,
+        1.6670453999831807,
+        1.7063744000042789,
+        1.6997226000239607,
+        1.7016398999840021
+      ],
+      "run_median_seconds": 1.6997221000201534,
+      "materialize_median_seconds": 8.999777492135763e-07,
+      "median_seconds": 1.6997226000239607,
       "speedup_vs_python": 1.0,
+      "run_speedup_vs_python": 1.0,
       "final_equity": 2321985873.9513392,
       "orders": 22243,
       "fills": 22155,
-      "process_peak_rss_bytes": 267980800
+      "peak_rss_after_materialize_bytes": null,
+      "process_peak_rss_bytes": 249573376
     },
     "rust_legacy": {
-      "samples_seconds": [
-        2.870392600001651,
-        2.670695099994191,
-        2.88929440001084,
-        3.887709699993138,
-        2.602906600004644
+      "run_seconds_samples": [
+        1.5364283999952022,
+        1.548081999993883,
+        1.5790447999897879,
+        1.6656964000139851,
+        1.632458600011887
       ],
-      "median_seconds": 2.870392600001651,
-      "speedup_vs_python": 1.0019698002266264,
+      "materialize_seconds_samples": [
+        1.6999838408082724e-06,
+        1.00000761449337e-06,
+        3.00002284348011e-07,
+        4.00003045797348e-07,
+        4.00003045797348e-07
+      ],
+      "total_seconds_samples": [
+        1.536430099979043,
+        1.5480830000014976,
+        1.5790450999920722,
+        1.665696800017031,
+        1.6324590000149328
+      ],
+      "run_median_seconds": 1.5790447999897879,
+      "materialize_median_seconds": 4.00003045797348e-07,
+      "median_seconds": 1.5790450999920722,
+      "speedup_vs_python": 1.0764243529412139,
+      "run_speedup_vs_python": 1.07642424080124,
       "final_equity": 2321985873.9513392,
       "orders": 22243,
       "fills": 22155,
-      "process_peak_rss_bytes": 267980800
+      "peak_rss_after_materialize_bytes": null,
+      "process_peak_rss_bytes": 249573376
     },
     "rust": {
-      "samples_seconds": [
-        0.5505311000015354,
-        0.6814650000014808,
-        0.7003667999961181,
-        1.2957070999982534,
-        0.5781121000036364
+      "run_seconds_samples": [
+        0.3626592999789864,
+        0.3745537000067998,
+        0.3464766999823041,
+        0.3304880000068806,
+        0.33781139997881837
       ],
-      "median_seconds": 0.6814650000014808,
-      "speedup_vs_python": 4.2203879876286985,
+      "materialize_seconds_samples": [
+        0.41828830001759343,
+        0.4658126999856904,
+        0.4404477000061888,
+        0.4969003000005614,
+        0.4386575999960769
+      ],
+      "total_seconds_samples": [
+        0.7809475999965798,
+        0.8403663999924902,
+        0.786924399988493,
+        0.827388300007442,
+        0.7764689999748953
+      ],
+      "run_median_seconds": 0.3464766999823041,
+      "materialize_median_seconds": 0.4404477000061888,
+      "median_seconds": 0.786924399988493,
+      "speedup_vs_python": 2.159956661718477,
+      "run_speedup_vs_python": 4.905732766754488,
       "final_equity": 2321985873.9513392,
       "orders": 22243,
       "fills": 22155,
-      "process_peak_rss_bytes": 267980800
+      "peak_rss_after_materialize_bytes": null,
+      "process_peak_rss_bytes": 249573376
     }
   }
 }

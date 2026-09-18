@@ -974,6 +974,52 @@ def test_promoted_rust_makes_no_per_session_ffi(
 
 
 @RUST_ONLY
+def test_failed_materialization_poisons_the_kind_instead_of_shortening_the_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DEFECT-601: 변환이 청크 중간에 실패하면 이미 해제된 레코드가 조용히 사라진다.
+
+    `drain_payloads`는 넘긴 청크를 그 자리에서 해제하므로, 변환기가 중간에 예외를 던지면
+    Rust 커서는 전진했는데 Python은 그 kind를 캐시하지 못한다. 재조회가 남은 레코드만
+    다시 읽으면 예외 없이 짧은 결과가 나온다.
+    """
+    from backtest_engine.engine.store import PersistentEventStore
+
+    engine = BacktestEngine(RunConfig(run_id="drain-fail", initial_cash=100_000.0), core="rust")
+    result = engine.run(
+        ScriptedStrategy(script=(target_70pct(), None, liquidate(), None)), DataFeed(GOLDEN_BARS)
+    )
+    store = engine.event_store
+    assert isinstance(store, PersistentEventStore)
+
+    real_snapshot_from_wire = PersistentEventStore.snapshot_from_wire
+    conversions = 0
+
+    def failing(self: PersistentEventStore, ts: Any, wire: Any) -> Any:
+        nonlocal conversions
+        conversions += 1
+        if conversions == 2:
+            raise ValueError("forced materialization failure")
+        return real_snapshot_from_wire(self, ts, wire)
+
+    monkeypatch.setattr(PersistentEventStore, "snapshot_from_wire", failing)
+    with pytest.raises(ValueError, match="forced materialization failure"):
+        _ = result.snapshots
+
+    # 변환기를 되돌려도 해제된 레코드는 돌아오지 않는다 — 재조회는 짧은 튜플이 아니라 오류다.
+    monkeypatch.setattr(PersistentEventStore, "snapshot_from_wire", real_snapshot_from_wire)
+    with pytest.raises(RuntimeError, match=r"partially released — kind=snapshot handed_over=4"):
+        _ = result.snapshots
+    with pytest.raises(RuntimeError, match=r"kind=snapshot handed_over=4"):
+        store.snapshots()
+    # 같은 이유로 전체 trace 조립도 막힌다.
+    with pytest.raises(RuntimeError, match=r"kind=snapshot handed_over=4"):
+        _ = store.records
+    # 다른 kind는 멀쩡하다 — poison은 해제된 kind 하나에만 걸린다.
+    assert len(result.fills) == 2
+
+
+@RUST_ONLY
 def test_rust_panic_becomes_engine_error_and_poisons_runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

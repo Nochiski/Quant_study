@@ -294,6 +294,8 @@ class PersistentEventStore(EventStore):
         self._finished_batch: list[tuple[int, int, int]] | None = None
         # 이미 배치로 받아 공개 객체로 바꾸고 Rust payload까지 해제한 kind의 seq 순서 payload.
         self._kind_payloads: dict[RecordKind, tuple[RecordPayload, ...]] = {}
+        # 조회 도중 변환이 실패해 Rust payload가 부분 해제된 kind → 그때까지 넘겨받은 레코드 수.
+        self._drain_failed: dict[RecordKind, int] = {}
         self._records_cache: tuple[Record, ...] | None = None
 
     # --- 실행 중 등록 ---------------------------------------------------------
@@ -550,10 +552,23 @@ class PersistentEventStore(EventStore):
 
         종료 전(partial trace)에는 레코드가 더 쌓일 수 있어 해제하지 않고 캐시도 남기지
         않는다. 다음 조회가 그 시점까지의 레코드를 다시 읽는다.
+
+        Raises:
+            RuntimeError: 앞선 조회가 변환 도중 실패해 그 kind가 부분 해제된 상태일 때.
+                Rust가 이미 넘긴 레코드는 되돌릴 수 없으므로 재조회를 짧은 튜플로 답하지
+                않는다.
         """
         cached = self._kind_payloads.get(kind)
         if cached is not None:
             return cached
+        handed_over = self._drain_failed.get(kind)
+        if handed_over is not None:
+            raise RuntimeError(
+                "result query for this record kind failed midway and its Rust payloads were "
+                f"partially released — kind={kind.value} handed_over={handed_over} "
+                f"records={len(self._batch())}; the released records cannot be read again, "
+                "re-run the backtest to rebuild the trace"
+            )
         if kind is RecordKind.ORDER:
             # ORDER는 decision_id로 결정을 되살린다 — DECISION을 먼저 공개 객체로 만들어
             # `_decisions`를 채운다. 그래야 DECISION payload를 넘겨 해제해도 주문이 복원된다.
@@ -565,12 +580,23 @@ class PersistentEventStore(EventStore):
                 for _seq, session_index, payload in self._runtime.record_payloads(kind.code)
             )
         built: list[RecordPayload] = []
-        while True:
-            chunk = self._runtime.drain_payloads(kind.code, _DRAIN_CHUNK_RECORDS)
-            built.extend(build(session_index, payload) for _seq, session_index, payload in chunk)
-            # 청크가 덜 찼으면 그 kind는 끝이다 — 빈 청크를 받으러 한 번 더 왕복하지 않는다.
-            if len(chunk) < _DRAIN_CHUNK_RECORDS:
-                break
+        handed_over = 0
+        # Rust는 넘긴 청크를 그 자리에서 해제한다 — 변환이 중간에 실패하면 이미 넘어온
+        # 레코드를 되돌릴 수 없다. 그 kind를 poison으로 표시해 다음 조회가 조용히 짧은
+        # 튜플을 돌려주는 대신 무엇이 사라졌는지 알리게 한다.
+        try:
+            while True:
+                chunk = self._runtime.drain_payloads(kind.code, _DRAIN_CHUNK_RECORDS)
+                handed_over += len(chunk)
+                built.extend(
+                    build(session_index, payload) for _seq, session_index, payload in chunk
+                )
+                # 청크가 덜 찼으면 그 kind는 끝이다 — 빈 청크를 받으러 한 번 더 왕복하지 않는다.
+                if len(chunk) < _DRAIN_CHUNK_RECORDS:
+                    break
+        except BaseException:
+            self._drain_failed[kind] = handed_over
+            raise
         frozen = tuple(built)
         self._kind_payloads[kind] = frozen
         return frozen

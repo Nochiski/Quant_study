@@ -19,6 +19,7 @@ import {
   type DefaultResolver,
 } from "./field-applicability";
 import {
+  resolveRef,
   schemaAt,
   schemaFacts,
   referenceCandidates,
@@ -81,6 +82,8 @@ export type FormListItem = {
   fields: FormField[];
   /** 항목 스키마가 union인데 문서가 분기를 고르지 못했을 때의 `kind` 후보. 아니면 null. */
   branches: readonly string[] | null;
+  /** 스키마가 `x-authoring-identity`로 표시한 필드 키(`factor_id`). 삭제 가드의 identity. 없으면 null. */
+  identityKey: string | null;
   /** 항목 자신의 pointer와, 어느 필드도 흡수하지 않은 하위 pointer의 진단(`strategy.parameter.bounds` 등). */
   diagnostics: DocumentDiagnostic[];
 };
@@ -99,6 +102,8 @@ export type FormSection =
       kind: "list";
       pointer: string;
       key: string;
+      /** 목록 키가 문서에 있는가. 없으면 항목 추가가 키를 열면서 넣는다(`insert-key`). */
+      written: boolean;
       /** 항목 스키마의 위치(`$ref`면 그 대상, 아니면 `/properties/<key>/items`). */
       itemSchemaPointer: string;
       items: FormListItem[];
@@ -219,21 +224,22 @@ const projectField = (
   };
 };
 
-/** `owner` pointer 자신 + 그 아래 pointer 중 `fields`가 흡수하지 않은 진단. */
+/** 진단을 흡수한 쪽(필드·항목·섹션)의 공통 모양. 소유권 집계는 이것만 본다. */
+type DiagnosticOwner = { readonly diagnostics: readonly DocumentDiagnostic[] };
+
+/** `owner` pointer 자신 + 그 아래 pointer 중 `owners`가 흡수하지 않은 진단. */
 const unabsorbedDiagnostics = (
   diagnostics: readonly DocumentDiagnostic[],
   owner: string,
-  fields: readonly FormField[],
-  includeRoot = false,
+  owners: readonly DiagnosticOwner[],
 ): DocumentDiagnostic[] => {
   const absorbed = new Set(
-    fields.flatMap((field) => field.diagnostics.map((d) => d.pointer)),
+    owners.flatMap((o) => o.diagnostics.map((d) => d.pointer)),
   );
   return diagnostics.filter(
     (diagnostic) =>
       !absorbed.has(diagnostic.pointer) &&
       (diagnostic.pointer === owner ||
-        (includeRoot && diagnostic.pointer === "") ||
         (owner !== "" && diagnostic.pointer.startsWith(`${owner}/`))),
   );
 };
@@ -270,25 +276,42 @@ const projectFields = (
   return fields;
 };
 
-/** 항목 한 줄 이름: `x-authoring-identity` 값 → 스키마 순서 첫 문자열 값 → 문서 첫 문자열 값 → 번호. */
+/** 항목 스키마에서 `x-authoring-identity: true`인 속성 키(`$ref` 해소). 없으면 null. */
+const identityKeyOf = (root: JsonSchema, itemNode: JsonSchema): string | null => {
+  const properties = isRecord(itemNode.properties) ? itemNode.properties : {};
+  for (const [key, property] of Object.entries(properties)) {
+    const node = isRecord(property) ? resolveRef(root, property) : null;
+    if (node !== null && node["x-authoring-identity"] === true) return key;
+  }
+  return null;
+};
+
+/**
+ * 항목 한 줄 이름: `x-authoring-identity` 값 → 스키마 순서 첫 문자열 값 → 문서 첫 문자열 값 → 번호.
+ * 속성 노드는 `$ref`를 풀고 본다(backend가 `kind`를 정의 참조로 바꿔도 const 판정이 유지된다).
+ */
 const summarize = (
+  root: JsonSchema,
   itemNode: JsonSchema,
   item: unknown,
   index: number,
 ): string => {
   if (isRecord(item)) {
     const properties = isRecord(itemNode.properties) ? itemNode.properties : {};
-    for (const [key, property] of Object.entries(properties)) {
+    const resolved = Object.entries(properties).flatMap(([key, property]) => {
+      const node = isRecord(property) ? resolveRef(root, property) : null;
+      return node === null ? [] : [[key, node] as const];
+    });
+    for (const [key, property] of resolved) {
       if (
-        isRecord(property) &&
         property["x-authoring-identity"] === true &&
         typeof item[key] === "string"
       )
         return item[key];
     }
     // `kind`처럼 const로 고정된 값은 항목을 구분하지 못한다(P4-01 리뷰 DEFECT-121-01).
-    for (const [key, property] of Object.entries(properties)) {
-      if (isRecord(property) && schemaFacts(property).hasConst) continue;
+    for (const [key, property] of resolved) {
+      if (schemaFacts(property).hasConst) continue;
       if (typeof item[key] === "string") return item[key];
     }
     // union 항목처럼 분기가 정해지지 않아 스키마 속성이 없으면 문서의 첫 문자열 값을 쓴다.
@@ -312,8 +335,8 @@ const projectListSection = (
     typeof itemSchema.$ref === "string" && itemSchema.$ref.startsWith("#")
       ? itemSchema.$ref.slice(1)
       : `/properties/${escapePointerSegment(key)}/items`;
-  const value = valueAtPointer(tree, pointer).value;
-  const items = Array.isArray(value) ? value : [];
+  const found = valueAtPointer(tree, pointer);
+  const items = Array.isArray(found.value) ? found.value : [];
   const projectedItems = items.map((item, index): FormListItem => {
     const itemPointer = `${pointer}/${index}`;
     const resolved = schemaAt(root, itemPointer, tree);
@@ -324,21 +347,26 @@ const projectListSection = (
         : projectFields(root, tree, diagnostics, itemPointer, resolved.node);
     return {
       pointer: itemPointer,
-      summary: summarize(resolved?.node ?? {}, item, index),
+      summary: summarize(root, resolved?.node ?? {}, item, index),
       fields,
       branches: unresolved ? unionKindsAt(root, itemPointer, tree) : null,
+      identityKey:
+        resolved === null || unresolved
+          ? null
+          : identityKeyOf(root, resolved.node),
       diagnostics: unabsorbedDiagnostics(diagnostics, itemPointer, fields),
     };
   });
   const itemFields = projectedItems.flatMap((item) => [
     ...item.fields,
     // 항목이 흡수한 진단도 섹션 몫에서 뺀다.
-    { diagnostics: item.diagnostics } as FormField,
+    { diagnostics: item.diagnostics },
   ]);
   return {
     kind: "list",
     pointer,
     key,
+    written: found.present,
     itemSchemaPointer,
     items: projectedItems,
     diagnostics: unabsorbedDiagnostics(diagnostics, pointer, itemFields),
@@ -408,14 +436,14 @@ export const projectForm = (
         section.kind === "object"
           ? [
               ...section.fields,
-              { diagnostics: section.diagnostics } as FormField,
+              { diagnostics: section.diagnostics },
             ]
           : [
               ...section.items.flatMap((item) => [
                 ...item.fields,
-                { diagnostics: item.diagnostics } as FormField,
+                { diagnostics: item.diagnostics },
               ]),
-              { diagnostics: section.diagnostics } as FormField,
+              { diagnostics: section.diagnostics },
             ],
       ),
     ].flatMap((field) => field.diagnostics.map((d) => d.pointer)),

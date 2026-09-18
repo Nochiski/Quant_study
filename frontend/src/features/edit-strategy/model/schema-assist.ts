@@ -34,6 +34,7 @@ import {
 import { describeApplicabilityConditions } from "./field-applicability";
 import {
   referenceCandidates,
+  schemaFacts,
   propertyOptions,
   schemaAt,
   typeLabel,
@@ -150,7 +151,7 @@ const identifierOptions = (
   tree: unknown,
   catalogs: AssistCatalogs,
 ): EditorCompletionOption[] | null => {
-  const catalog = resolved.node["x-catalog"];
+  const catalog = schemaFacts(resolved.node).catalog;
   if (typeof catalog === "string") {
     if (catalog === "equity-field") {
       return catalogs.equityFields.map((field) => ({
@@ -170,7 +171,7 @@ const identifierOptions = (
     }
     return []; // universe / subgraph: no catalog endpoint yet, and never a guessed list
   }
-  const reference = resolved.node["x-reference"];
+  const reference = schemaFacts(resolved.node).reference;
   if (typeof reference === "string") {
     return referenceCandidates(schema, pointer, reference, tree).map((id) => ({
       label: id,

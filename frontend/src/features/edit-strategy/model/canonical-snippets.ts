@@ -11,7 +11,12 @@ import {
   parseSource,
   type SourceFormat,
 } from "../../../shared/lib/yaml12";
-import { resolveRef, type JsonSchema } from "./schema-navigator";
+import {
+  materializeSchemaValue,
+  resolveRef,
+  UnsupportedSchemaShape,
+  type JsonSchema,
+} from "./schema-navigator";
 import {
   detectEol,
   planSourceOperation,
@@ -62,87 +67,6 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const owns = (value: object, key: string): boolean =>
   Object.prototype.hasOwnProperty.call(value, key);
-
-const scalarFallback = (node: JsonSchema): unknown => {
-  if (owns(node, "const")) return node.const;
-  if (Array.isArray(node.enum) && node.enum.length > 0) return node.enum[0];
-  if (node.type === "boolean") return false;
-  if (node.type === "integer" || node.type === "number") {
-    if (typeof node.minimum === "number") return node.minimum;
-    if (typeof node.exclusiveMinimum === "number")
-      return node.type === "integer"
-        ? Math.floor(node.exclusiveMinimum) + 1
-        : node.exclusiveMinimum + Number.EPSILON;
-    return 0;
-  }
-  return "";
-};
-
-class UnsupportedSnippetSchema extends Error {}
-
-type MaterializeState = {
-  ancestors: Set<JsonSchema>;
-  budget: { remaining: number };
-};
-
-/** Minimal parseable value whose keys/defaults are taken from one runtime schema node. */
-const materializeSchemaValue = (
-  root: JsonSchema,
-  schemaNode: JsonSchema,
-  state: MaterializeState = {
-    ancestors: new Set(),
-    budget: { remaining: 256 },
-  },
-): unknown => {
-  const node = resolveRef(root, schemaNode);
-  if (node === null)
-    throw new UnsupportedSnippetSchema("unresolvable schema reference");
-  state.budget.remaining -= 1;
-  if (state.budget.remaining < 0 || state.ancestors.has(node))
-    throw new UnsupportedSnippetSchema("recursive or oversized schema");
-  state.ancestors.add(node);
-  try {
-    if (owns(node, "default")) return node.default;
-    if (owns(node, "const")) return node.const;
-    if (Array.isArray(node.anyOf)) {
-      const member = node.anyOf
-        .filter(isRecord)
-        .find((item) => item.type !== "null");
-      return member ? materializeSchemaValue(root, member, state) : null;
-    }
-    if (Array.isArray(node.oneOf)) {
-      const member = node.oneOf.find(isRecord);
-      return member ? materializeSchemaValue(root, member, state) : {};
-    }
-    if (node.type === "array") return [];
-    if (node.type !== "object" && !isRecord(node.properties))
-      return scalarFallback(node);
-
-    const properties = isRecord(node.properties) ? node.properties : {};
-    const required = new Set(
-      Array.isArray(node.required)
-        ? node.required.filter((key): key is string => typeof key === "string")
-        : [],
-    );
-    const value: Record<string, unknown> = {};
-    for (const [key, candidate] of Object.entries(properties)) {
-      if (!isRecord(candidate)) continue;
-      const property = resolveRef(root, candidate);
-      if (property === null)
-        throw new UnsupportedSnippetSchema("unresolvable property reference");
-      if (
-        !required.has(key) &&
-        !owns(candidate, "default") &&
-        !owns(property, "default")
-      )
-        continue;
-      value[key] = materializeSchemaValue(root, candidate, state);
-    }
-    return value;
-  } finally {
-    state.ancestors.delete(node);
-  }
-};
 
 const rootProperty = (schema: JsonSchema, key: string): JsonSchema | null => {
   const properties = isRecord(schema.properties) ? schema.properties : null;
@@ -251,7 +175,7 @@ export const buildCanonicalSnippetCatalog = (
         value: materializeSchemaValue(schema, property),
       });
     } catch (error) {
-      if (!(error instanceof UnsupportedSnippetSchema)) throw error;
+      if (!(error instanceof UnsupportedSchemaShape)) throw error;
     }
   }
 

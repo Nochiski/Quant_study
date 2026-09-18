@@ -553,8 +553,8 @@ devDependency `fast-check`.
 
 ```ts
 export type SourceTransactions = {
-  apply: (op: SourceOperation, label: string, owner?: string) => void;
-  run: (planner: SourcePlanner, label: string, owner?: string) => void;   // P3-02: 커서 문맥 계획(스니펫)
+  apply: (op: SourceOperation, label: string, owner?: string, options?: ApplyOptions) => boolean;   // 적용했으면 true(P4-03)
+  run: (planner: SourcePlanner, label: string, owner?: string, options?: ApplyOptions) => boolean;   // P3-02: 커서 문맥 계획(스니펫); 반환은 apply와 같다
   feedback: TransactionFeedback;   // idle | applied(owner, label) | error(owner, label, reason)
   onEditorReady: (editor: CodeEditorHandle | null) => void;
   enabled: boolean;               // yaml && editorActive && !composing && parse ok && editor ready
@@ -692,8 +692,8 @@ export const projectForm = (schema: JsonSchema, parse: ParsedSource | null, diag
   (undo 한 번, 테스트로 고정, PR 본문 명기).
 - 리뷰 후속(P4-02 1차): 링크(`graph-link`·`list-link`)·`const` 행은 편집 컨트롤·"기본값으로"·"설정 안 함"
   버튼을 렌더하지 않고(DEFECT-P402-001: reset이 배열 전체를 지우던 결함) `<label for>` 대신
-  `aria-labelledby`로 이름을 잇는다(004). 확정이 실패한 필드는 같은 값으로 재확정할 수 있고(002), 값을
-  되돌리면 무효 안내가 사라진다(003). `const` 컨트롤은 읽기 전용 `<code>`, `x-default-from` 필드의
+  `aria-labelledby`로 이름을 잇는다(004). 확정이 실패한 필드는 같은 값으로 재확정할 수 있고(002; 판정은 P4-03에서
+  컨트롤 로컬 플래그로 교체), 값을 되돌리면 무효 안내가 사라진다(003). `const` 컨트롤은 읽기 전용 `<code>`, `x-default-from` 필드의
   placeholder는 형제 필드의 현재 값(P4-01 후속). `PlanFailure` 7종 전부에 Form 문구(008).
 
 ### P4-03 — 목록 섹션
@@ -711,6 +711,35 @@ export const projectForm = (schema: JsonSchema, parse: ParsedSource | null, diag
 - 각 항목의 필드는 P4-02 컨트롤 재사용. factor 항목의 `graph`는 "Graph에서 열기" 버튼(view=graph,
   pointer 선택).
 - 테스트: 추가/삭제/참조 거부/kind 분기.
+- 구현 결정(P4-03): `materializeSchemaValue`·`UnsupportedSchemaShape`는 `schema-navigator.ts`로 옮기고
+  스니펫·목록 추가가 같은 함수를 쓴다. 목록 연산은 `form-transactions.ts`(`itemKinds`, `addItemOperation`
+  (union이면 `kind`로 분기 스키마를 골라 materialize, 끝에 `insert-item`), `addPresetItemOperation`(팩터
+  카탈로그 preset = 스니펫 카탈로그의 factor 항목, 이미 있는 identity는 메뉴에서 비활성),
+  `removalBlockers`, `removeItemOperation`, `itemSection`(항목을 `written` object 섹션으로 보아 P4-02
+  컨트롤·`fieldOperation` 재사용)). 참조 탐색은 `model/document-references.ts`의 `findReferences(tree,
+  namespace, id, excludePointer)`: 스키마를 모르고 `<namespace>_id` 키 값이 같은 pointer를 모두 찾는다
+  (`factor_id`·`parameter_id`·`node_id`). 삭제 가드의 namespace는 항목의 첫 `*_id` 문자열 필드에서
+  읽는다. "kind 선택 다이얼로그"는 섹션 헤더의 `kind` select + "항목 추가" 버튼으로 구현(별도 모달 없음).
+  factor 항목의 `graph`는 "Graph에서 열기" 버튼이 `onOpenGraph(pointer)`를 호출하고 page(P4-04)가
+  view=graph·pointer 선택으로 잇는다. 빈 factor의 `graph`는 스키마 materialize 결과(`nodes: []`,
+  `output_node_id: ""`)이며 "최소 field node 1개"는 Graph 노드 추가(P5-01)가 맡는다.
+- 리뷰 잔여 처리(P4-01·P4-02 2차 non-blocking, P4-03에서): `SourceTransactions.apply`/`run`이 적용
+  여부(boolean)를 돌려주고, 텍스트류 컨트롤은 마지막 확정 `(draft, committed, failed)`를 로컬로
+  기억한다 — 실패한 값은 Enter로만 다시 확정하고 blur는 같은 값을 다시 계획하지 않으며, 공유 feedback
+  슬롯이나 label(목록 항목끼리 겹친다)에 의존하지 않는다(009/011/012; `canRetry` prop 삭제). passive
+  행(링크·const) 라벨도 필수 별표·단위·같은 CSS(010). `x-default-from` placeholder는 목록 항목
+  테스트로 패널까지 검증(013). projection: `unabsorbedDiagnostics`의 죽은 `includeRoot` 제거, 진단
+  소유권 집계는 `{ diagnostics }` 구조 타입(캐스트 0), `summarize`는 속성 `$ref`를 풀어 const를
+  판정한다(P4-01 2차 P2 3건).
+- 리뷰 후속(P4-03 1차): 목록 키가 문서에 없으면(`ListSection.written: false` — 새 전략 starter·생략형
+  문서) 항목 추가·카탈로그 preset이 `insert-key`로 키를 열면서 첫 항목을 넣는다(트랜잭션 한 번;
+  DEFECT-125-01: `insert-item`은 키가 없으면 `not-found`라 활성 버튼이 언제나 실패했다). 테스트는 실제
+  `planSourceOperation`까지 태운다. 삭제 가드 identity는 스키마 `x-authoring-identity` 필드
+  (`FormListItem.identityKey`) 우선, 없으면 카탈로그 참조가 아닌 첫 `*_id`(P2-1). 삭제 거부 안내는 판정을
+  낸 tree에만 붙어 문서가 바뀌면 사라진다(P2-2). 기록만: 항목 삭제 시 선행 독립 주석이 고아로 남는 것은
+  `planRemove`(P3-01) 소관이라 P5-01 노드 삭제와 함께 처리, 괄호 가드는 개수 균형만(P2-4),
+  `saved_factor.factor_id`(backend 팩터 카탈로그) 오탐은 안전 방향(P2-5), union `kind` option은 식별자
+  원문(P2-6).
 
 ### P4-04 — IDE·page 연결, 잠금, e2e
 

@@ -147,6 +147,27 @@ export {
 } from "./model/use-source-transactions";
 export type { SourceOperation } from "./model/source-transactions";
 export {
+  addItemOperation,
+  addPresetItemOperation,
+  draftOf,
+  fieldOperation,
+  itemKinds,
+  itemSection,
+  parseDraft,
+  removalBlockers,
+  removeItemOperation,
+  resetOperation,
+  unsetOperation,
+  type DraftParse,
+  type ListSection,
+  type ObjectSection,
+} from "./model/form-transactions";
+export {
+  findReferences,
+  type DocumentReference,
+} from "./model/document-references";
+export { StrategyFormPanel, type FormCatalogs } from "./ui/strategy-form-panel";
+export {
   buildCanonicalSnippetCatalog,
   planSnippetEdit,
   SNIPPET_CATEGORIES,

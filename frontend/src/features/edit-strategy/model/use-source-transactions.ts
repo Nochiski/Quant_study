@@ -46,20 +46,23 @@ export type ApplyOptions = {
 };
 
 export type SourceTransactions = {
-  /** 원시 연산 하나를 편집기 현재 텍스트에 계획·적용한다. 실패하면 텍스트는 그대로고 feedback만 바뀐다. */
+  /**
+   * 원시 연산 하나를 편집기 현재 텍스트에 계획·적용한다. 적용했으면 true. 실패하면 텍스트는 그대로고
+   * feedback만 바뀌며 false — 호출자가 feedback 슬롯(인스턴스당 하나)을 다시 읽지 않아도 결과를 안다.
+   */
   apply: (
     op: SourceOperation,
     label: string,
     owner?: string,
     options?: ApplyOptions,
-  ) => void;
-  /** 커서 문맥이 필요한 편집(스니펫)처럼 연산 하나로 표현되지 않는 계획을 같은 경로로 적용한다. */
+  ) => boolean;
+  /** 커서 문맥이 필요한 편집(스니펫)처럼 연산 하나로 표현되지 않는 계획을 같은 경로로 적용한다. 반환은 `apply`와 같다. */
   run: (
     planner: SourcePlanner,
     label: string,
     owner?: string,
     options?: ApplyOptions,
-  ) => void;
+  ) => boolean;
   /** 마지막 결과. `owner`로 어느 소비자(form·snippet·graph)의 것인지 구분한다(Phase 3 감사 R2). */
   feedback: TransactionFeedback;
   onEditorReady: (editor: CodeEditorHandle | null) => void;
@@ -137,10 +140,10 @@ export const useSourceTransactions = (
       label: string,
       owner = "default",
       options: ApplyOptions = {},
-    ): void => {
+    ): boolean => {
       if (state.format !== "yaml") {
         setFeedback({ status: "error", owner, label, reason: "yaml-only" });
-        return;
+        return false;
       }
       if (!editorActive) {
         setFeedback({
@@ -149,7 +152,7 @@ export const useSourceTransactions = (
           label,
           reason: "editor-inactive",
         });
-        return;
+        return false;
       }
       const current = editor.current;
       if (current === null) {
@@ -159,11 +162,11 @@ export const useSourceTransactions = (
           label,
           reason: "editor-unavailable",
         });
-        return;
+        return false;
       }
       if (state.composing) {
         setFeedback({ status: "error", owner, label, reason: "composing" });
-        return;
+        return false;
       }
       const result = planner({
         text: current.getText(),
@@ -172,13 +175,14 @@ export const useSourceTransactions = (
       if (result.status === "error") {
         setFeedback({ status: "error", owner, label, reason: result.reason });
         if (options.focusEditor !== false) current.focus();
-        return;
+        return false;
       }
       const { edit } = result;
       current.replaceRange(edit.from, edit.to, edit.insert, edit.selection);
       current.scrollTo(edit.selection.from);
       if (options.focusEditor !== false) current.focus();
       setFeedback({ status: "applied", owner, label });
+      return true;
     },
     [editorActive, setFeedback, state.composing, state.format],
   );
@@ -189,7 +193,7 @@ export const useSourceTransactions = (
       label: string,
       owner = "default",
       options: ApplyOptions = {},
-    ): void =>
+    ): boolean =>
       run(
         ({ text }) => planSourceOperation(text, "yaml", op),
         label,

@@ -309,7 +309,8 @@ describe("StrategyFormPanel review follow-up (P4-02 1차)", () => {
         catalogs={NO_CATALOGS}
       />
     );
-    const apply = vi.fn();
+    // 첫 확정은 실패(apply가 false), 그 뒤는 성공.
+    const apply = vi.fn().mockReturnValueOnce(false);
     const { rerender } = render(<Harness failed={false} />);
     const weight = section("risk").getByRole(
       "spinbutton",
@@ -318,12 +319,20 @@ describe("StrategyFormPanel review follow-up (P4-02 1차)", () => {
     await user.clear(weight);
     await user.type(weight, "0.1{Enter}");
     expect(apply).toHaveBeenCalledTimes(1);
-    // 실패 feedback이 오면 같은 값으로 다시 확정할 수 있다.
     rerender(<Harness failed />);
     expect(screen.getByRole("alert")).toHaveTextContent(
       "문서에서 위치를 찾지 못했습니다",
     );
-    await user.type(weight, "{Enter}");
+    // 실패한 값은 blur로 다시 계획하지 않는다(P4-02 리뷰 011).
+    await user.tab();
+    expect(apply).toHaveBeenCalledTimes(1);
+    // 다른 필드의 성공이 feedback을 덮어도 Enter 재확정은 필드 로컬 판정으로 살아 있다(009/012).
+    rerender(<Harness failed={false} />);
+    await user.click(weight);
+    await user.keyboard("{Enter}");
+    expect(apply).toHaveBeenCalledTimes(2);
+    // 성공한 뒤 같은 값 Enter는 다시 확정하지 않는다.
+    await user.keyboard("{Enter}");
     expect(apply).toHaveBeenCalledTimes(2);
 
     // 무효 입력 안내는 값을 되돌리면 사라진다.

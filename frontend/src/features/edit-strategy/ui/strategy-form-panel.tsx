@@ -16,17 +16,29 @@ import { Badge, Button } from "../../../shared/ui";
 import type {
   FormControl,
   FormField,
+  FormListItem,
   FormProjection,
   FormSection,
 } from "../model/form-projection";
+import type { CanonicalSnippet } from "../model/canonical-snippets";
+import type { DocumentReference } from "../model/document-references";
+import type { DocumentDiagnostic } from "../model/document-state";
 import {
+  addItemOperation,
+  addPresetItemOperation,
   draftOf,
   fieldOperation,
+  itemKinds,
+  itemSection,
   parseDraft,
+  removalBlockers,
+  removeItemOperation,
   resetOperation,
   unsetOperation,
+  type ListSection,
   type ObjectSection,
 } from "../model/form-transactions";
+import type { JsonSchema } from "../model/schema-navigator";
 import type { Scalar } from "../model/source-transactions";
 import type {
   SourceTransactions,
@@ -44,6 +56,14 @@ type StrategyFormPanelProps = {
   projection: FormProjection | null;
   transactions: SourceTransactions;
   catalogs: FormCatalogs;
+  /** 목록 항목 추가가 materialize할 runtime schema(projection과 같은 출처). 없으면 추가 버튼 비활성. */
+  schema?: JsonSchema | null;
+  /** 현재 parse tree(삭제 가드의 참조 탐색용). 없으면 참조 없음으로 본다. */
+  tree?: unknown;
+  /** 팩터 카탈로그 preset(스니펫 카탈로그의 factor 항목) — "카탈로그에서 추가" 메뉴. */
+  catalogSnippets?: readonly CanonicalSnippet[];
+  /** 팩터 항목의 graph를 Graph 화면에서 열기(view=graph, pointer 선택). 없으면 버튼을 그리지 않는다. */
+  onOpenGraph?: (pointer: string) => void;
 };
 
 const UNSET = "__unset__";
@@ -80,6 +100,10 @@ export const StrategyFormPanel = ({
   projection,
   transactions,
   catalogs,
+  schema = null,
+  tree = {},
+  catalogSnippets = [],
+  onOpenGraph,
 }: StrategyFormPanelProps) => {
   const disabled = transactions.disabled;
   return (
@@ -105,8 +129,12 @@ export const StrategyFormPanel = ({
           <FormSectionView
             key={section.pointer === "" ? "root" : section.pointer}
             section={section}
+            schema={schema}
+            tree={tree}
             transactions={transactions}
             catalogs={catalogs}
+            catalogSnippets={catalogSnippets}
+            onOpenGraph={onOpenGraph}
             disabled={disabled !== null}
           />
         ))
@@ -117,29 +145,36 @@ export const StrategyFormPanel = ({
 
 const FormSectionView = ({
   section,
+  schema,
+  tree,
   transactions,
   catalogs,
+  catalogSnippets,
+  onOpenGraph,
   disabled,
 }: {
   section: FormSection;
+  schema: JsonSchema | null;
+  tree: unknown;
   transactions: SourceTransactions;
   catalogs: FormCatalogs;
+  catalogSnippets: readonly CanonicalSnippet[];
+  onOpenGraph: ((pointer: string) => void) | undefined;
   disabled: boolean;
 }) => {
   const title = section.key === "" ? t("form.section.root") : section.key;
   if (section.kind === "list") {
     return (
-      <fieldset className="strategy-form__section" disabled={disabled}>
-        <legend>
-          <code>{title}</code>
-        </legend>
-        <p className="strategy-form__state">
-          {t("form.list.pending").replace(
-            "{count}",
-            String(section.items.length),
-          )}
-        </p>
-      </fieldset>
+      <FormListSectionView
+        section={section}
+        schema={schema}
+        tree={tree}
+        transactions={transactions}
+        catalogs={catalogs}
+        catalogSnippets={catalogSnippets}
+        onOpenGraph={onOpenGraph}
+        disabled={disabled}
+      />
     );
   }
   return (
@@ -151,6 +186,7 @@ const FormSectionView = ({
             {` · ${t("form.section.omitted")}`}
           </span>
         )}
+        {severityBadge(section)}
       </legend>
       {section.fields.map((field) => (
         <FormFieldRow
@@ -165,9 +201,240 @@ const FormSectionView = ({
   );
 };
 
-const severityBadge = (field: FormField): ReactNode => {
-  const errors = field.diagnostics.filter((d) => d.severity === "error");
-  const warnings = field.diagnostics.filter((d) => d.severity === "warning");
+/**
+ * 목록 섹션(P4-03): 항목 추가(스키마 materialize, union이면 `kind` 선택), 팩터 카탈로그 preset 추가,
+ * 삭제(다른 곳이 참조하면 목록을 보여주고 거부), 항목 필드는 P4-02 컨트롤 재사용.
+ */
+const FormListSectionView = ({
+  section,
+  schema,
+  tree,
+  transactions,
+  catalogs,
+  catalogSnippets,
+  onOpenGraph,
+  disabled,
+}: {
+  section: ListSection;
+  schema: JsonSchema | null;
+  tree: unknown;
+  transactions: SourceTransactions;
+  catalogs: FormCatalogs;
+  catalogSnippets: readonly CanonicalSnippet[];
+  onOpenGraph: ((pointer: string) => void) | undefined;
+  disabled: boolean;
+}) => {
+  const kinds = schema === null ? null : itemKinds(schema, section);
+  const [kind, setKind] = useState<string>("");
+  const chosenKind = kinds === null ? null : kind || (kinds[0] ?? "");
+  const addOperation =
+    schema === null ? null : addItemOperation(schema, section, chosenKind);
+  const presets = catalogSnippets.filter(
+    (snippet) =>
+      snippet.kind === "factor" && snippet.sectionKey === section.key,
+  );
+  const presetExists = (snippet: CanonicalSnippet): boolean =>
+    snippet.identity !== null &&
+    section.items.some((item) =>
+      item.fields.some(
+        (field) =>
+          field.key === snippet.identity!.field &&
+          field.written &&
+          Object.is(field.value, snippet.identity!.value),
+      ),
+    );
+  return (
+    <fieldset className="strategy-form__section" disabled={disabled}>
+      <legend>
+        <code>{section.key}</code>
+        <span className="strategy-form__hint">
+          {` · ${t("form.list.count").replace("{count}", String(section.items.length))}`}
+        </span>
+        {severityBadge(section)}
+      </legend>
+      <div className="strategy-form__control">
+        {kinds !== null ? (
+          <select
+            aria-label={`${section.key} · ${t("form.list.kind")}`}
+            value={chosenKind ?? ""}
+            onChange={(event) => setKind(event.target.value)}
+          >
+            {kinds.map((candidate) => (
+              <option key={candidate} value={candidate}>
+                {candidate}
+              </option>
+            ))}
+          </select>
+        ) : null}
+        <Button
+          size="small"
+          disabled={addOperation === null}
+          onClick={() => {
+            if (addOperation !== null)
+              transactions.apply(
+                addOperation,
+                section.key,
+                FORM_OWNER,
+                NO_FOCUS,
+              );
+          }}
+          aria-label={`${section.key} · ${t("form.list.add")}`}
+        >
+          {t("form.list.add")}
+        </Button>
+        {presets.length > 0 ? (
+          <select
+            aria-label={`${section.key} · ${t("form.list.addFromCatalog")}`}
+            value=""
+            onChange={(event) => {
+              const preset = presets.find(
+                (snippet) => snippet.id === event.target.value,
+              );
+              if (preset !== undefined)
+                transactions.apply(
+                  addPresetItemOperation(section, preset.value),
+                  preset.label,
+                  FORM_OWNER,
+                  NO_FOCUS,
+                );
+            }}
+          >
+            <option value="">{t("form.list.addFromCatalog")}</option>
+            {presets.map((snippet) => (
+              <option
+                key={snippet.id}
+                value={snippet.id}
+                disabled={presetExists(snippet)}
+              >
+                {presetExists(snippet)
+                  ? `${snippet.label} · ${t("form.list.presetExists")}`
+                  : snippet.label}
+              </option>
+            ))}
+          </select>
+        ) : null}
+      </div>
+      {section.items.length === 0 ? (
+        <p className="strategy-form__state">{t("form.list.empty")}</p>
+      ) : null}
+      {section.items.map((item) => (
+        <FormListItemView
+          key={item.pointer}
+          section={section}
+          item={item}
+          tree={tree}
+          transactions={transactions}
+          catalogs={catalogs}
+          onOpenGraph={onOpenGraph}
+        />
+      ))}
+    </fieldset>
+  );
+};
+
+const FormListItemView = ({
+  section,
+  item,
+  tree,
+  transactions,
+  catalogs,
+  onOpenGraph,
+}: {
+  section: ListSection;
+  item: FormListItem;
+  tree: unknown;
+  transactions: SourceTransactions;
+  catalogs: FormCatalogs;
+  onOpenGraph: ((pointer: string) => void) | undefined;
+}) => {
+  // 삭제 거부 안내는 그 판정을 낸 문서(tree)에만 붙는다. 문서가 바뀌면(재색인 포함) 렌더 중 파생으로
+  // 사라진다 — React key가 pointer(인덱스)라 인스턴스가 다른 항목에 재사용될 수 있다(리뷰 P2-2).
+  const [blockers, setBlockers] = useState<{
+    tree: unknown;
+    references: DocumentReference[];
+  } | null>(null);
+  const blocked = blockers !== null && blockers.tree === tree ? blockers.references : null;
+  const asSection = itemSection(section, item);
+  const graphField = item.fields.find(
+    (field) => field.control.kind === "graph-link",
+  );
+  const remove = (): void => {
+    const references = removalBlockers(tree, item);
+    if (references.length > 0) {
+      setBlockers({ tree, references });
+      return;
+    }
+    setBlockers(null);
+    transactions.apply(
+      removeItemOperation(item),
+      item.summary,
+      FORM_OWNER,
+      NO_FOCUS,
+    );
+  };
+  return (
+    <section
+      className="strategy-form__item"
+      aria-label={`${section.key} · ${item.summary}`}
+    >
+      <header className="strategy-form__item-header">
+        <strong>
+          <code>{item.summary}</code>
+        </strong>
+        {severityBadge(item)}
+        {item.branches !== null ? (
+          <span className="strategy-form__hint">
+            {t("form.list.branchNeeded").replace(
+              "{kinds}",
+              item.branches.join(", "),
+            )}
+          </span>
+        ) : null}
+        {graphField !== undefined && onOpenGraph !== undefined ? (
+          <Button
+            size="small"
+            tone="ghost"
+            onClick={() => onOpenGraph(graphField.pointer)}
+            aria-label={`${item.summary} · ${t("form.field.openGraph")}`}
+          >
+            {t("form.field.openGraph")}
+          </Button>
+        ) : null}
+        <Button
+          size="small"
+          tone="danger"
+          onClick={remove}
+          aria-label={`${item.summary} · ${t("form.list.remove")}`}
+        >
+          {t("form.list.remove")}
+        </Button>
+      </header>
+      {blocked !== null ? (
+        <p className="strategy-form__invalid" role="alert">
+          {t("form.list.blocked").replace(
+            "{pointers}",
+            blocked.map((reference) => reference.pointer).join(", "),
+          )}
+        </p>
+      ) : null}
+      {item.fields.map((field) => (
+        <FormFieldRow
+          key={field.pointer}
+          section={asSection}
+          field={field}
+          transactions={transactions}
+          catalogs={catalogs}
+        />
+      ))}
+    </section>
+  );
+};
+
+const severityBadge = (owner: {
+  diagnostics: DocumentDiagnostic[];
+}): ReactNode => {
+  const errors = owner.diagnostics.filter((d) => d.severity === "error");
+  const warnings = owner.diagnostics.filter((d) => d.severity === "warning");
   if (errors.length === 0 && warnings.length === 0) return null;
   const first = (errors[0] ?? warnings[0])!;
   return (
@@ -200,21 +467,17 @@ const FormFieldRow = ({
   const labelId = `${id}-label`;
   const [invalid, setInvalid] = useState<string | null>(null);
   const passive = isPassiveControl(field.control);
-  // 이 필드의 마지막 확정이 실패했으면 같은 값으로 다시 확정할 수 있어야 한다(DEFECT-P402-002).
-  const feedback = transactions.feedback;
-  const lastFailed =
-    feedback.status === "error" &&
-    feedback.owner === FORM_OWNER &&
-    feedback.label === field.key;
   // `x-default-from`: 생략하면 backend가 형제 키의 값으로 채운다 → placeholder도 그 값(P4-01 DEFECT-121-06).
   const defaultFromValue =
     field.defaultFrom === null
       ? undefined
       : section.fields.find((sibling) => sibling.key === field.defaultFrom)
           ?.value;
-  const commit = (value: Scalar): void => {
+  // 적용 여부를 컨트롤에 돌려준다: 실패한 확정의 재시도 판정은 컨트롤 로컬이다(P4-02 리뷰 009/012 —
+  // 공유 feedback 슬롯은 다른 필드가 덮고, label은 목록 항목끼리 겹친다).
+  const commit = (value: Scalar): boolean => {
     setInvalid(null);
-    transactions.apply(
+    return transactions.apply(
       fieldOperation(section, field, value),
       field.key,
       FORM_OWNER,
@@ -228,7 +491,6 @@ const FormFieldRow = ({
       labelId={labelId}
       field={field}
       catalogs={catalogs}
-      canRetry={lastFailed}
       placeholderValue={
         field.written
           ? undefined
@@ -242,6 +504,18 @@ const FormFieldRow = ({
     />
   );
   const unset = unsetOperation(section, field);
+  // 라벨 내용은 passive 행(링크·const)도 같다: 필수 별표·단위(P4-02 리뷰 010).
+  const labelBody = (
+    <>
+      <code>{field.key}</code>
+      {field.required ? <span aria-hidden="true"> *</span> : null}
+      {(field.displayUnit ?? field.unit) ? (
+        <span className="strategy-form__unit">
+          {` · ${field.displayUnit ?? field.unit}`}
+        </span>
+      ) : null}
+    </>
+  );
   return (
     <div
       className="strategy-form__field"
@@ -256,17 +530,11 @@ const FormFieldRow = ({
           className="strategy-form__label"
           title={field.templatePointer}
         >
-          <code>{field.key}</code>
+          {labelBody}
         </span>
       ) : (
         <label htmlFor={id} title={field.templatePointer}>
-          <code>{field.key}</code>
-          {field.required ? <span aria-hidden="true"> *</span> : null}
-          {(field.displayUnit ?? field.unit) ? (
-            <span className="strategy-form__unit">
-              {` · ${field.displayUnit ?? field.unit}`}
-            </span>
-          ) : null}
+          {labelBody}
         </label>
       )}
       <div className="strategy-form__control">
@@ -336,11 +604,10 @@ type ControlProps = {
   labelId: string;
   field: FormField;
   catalogs: FormCatalogs;
-  /** 마지막 확정이 실패했으면 같은 draft를 다시 확정할 수 있다. */
-  canRetry: boolean;
   /** 미작성 필드의 placeholder 값(runtime schema default 또는 `x-default-from` 형제 값). */
   placeholderValue: unknown;
-  onCommit: (value: Scalar) => void;
+  /** 값을 트랜잭션으로 넘긴다. 적용됐으면 true(`SourceTransactions.apply`와 같다). */
+  onCommit: (value: Scalar) => boolean;
   onValid: () => void;
   onInvalid: (reason: "number" | "integer" | "range" | "date") => void;
 };
@@ -439,7 +706,6 @@ const catalogOptions = (
 const TextualControl = ({
   id,
   field,
-  canRetry,
   placeholderValue,
   onCommit,
   onValid,
@@ -448,9 +714,14 @@ const TextualControl = ({
   const committed = draftOf(field.value);
   const [draft, setDraft] = useState(committed);
   // 같은 입력을 Enter와 blur가 연달아 확정해도 트랜잭션은 한 번이다.
-  // 마지막으로 확정한 (draft, committed) 쌍. 같은 committed 값에서 같은 draft를 다시 확정하지 않는다
-  // (Enter 뒤 같은 이벤트 안에서 오는 blur까지 동기적으로 막는다).
-  const submitted = useRef<{ draft: string; committed: string } | null>(null);
+  // 마지막으로 확정한 (draft, committed) 쌍과 그 결과. 같은 committed 값에서 같은 draft를 다시 확정하지
+  // 않는다(Enter 뒤 같은 이벤트 안에서 오는 blur까지 동기적으로 막는다). 확정이 실패했으면(`failed`)
+  // Enter로만 다시 시도한다 — blur마다 같은 값을 다시 계획하지 않는다(P4-02 리뷰 009/011).
+  const submitted = useRef<{
+    draft: string;
+    committed: string;
+    failed: boolean;
+  } | null>(null);
   // 트랜잭션이 적용되어 projection 값이 바뀌면 입력을 그 값으로 되돌린다(렌더 중 파생 상태 조정).
   const [seen, setSeen] = useState(committed);
   if (seen !== committed) {
@@ -458,15 +729,16 @@ const TextualControl = ({
     setDraft(committed);
   }
   const { control } = field;
-  const submit = (): void => {
+  const submit = (explicit: boolean): void => {
     // 값을 되돌리거나 다시 확정하면 이전 무효 안내는 사라진다(DEFECT-P402-003).
     onValid();
     if (draft === committed) return;
+    const last = submitted.current;
     if (
-      !canRetry &&
-      submitted.current !== null &&
-      submitted.current.draft === draft &&
-      submitted.current.committed === committed
+      last !== null &&
+      last.draft === draft &&
+      last.committed === committed &&
+      (!last.failed || !explicit)
     )
       return;
     const parsed = parseDraft(control, draft);
@@ -474,13 +746,14 @@ const TextualControl = ({
       onInvalid(parsed.reason);
       return;
     }
-    submitted.current = { draft, committed };
-    onCommit(parsed.value);
+    submitted.current = { draft, committed, failed: false };
+    if (onCommit(parsed.value) === false)
+      submitted.current = { draft, committed, failed: true };
   };
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
     if (event.key === "Enter") {
       event.preventDefault();
-      submit();
+      submit(true);
     } else if (event.key === "Escape") {
       event.preventDefault();
       setDraft(committed);
@@ -500,7 +773,7 @@ const TextualControl = ({
         placeholderValue === undefined ? undefined : draftOf(placeholderValue)
       }
       onChange={(event) => setDraft(event.target.value)}
-      onBlur={submit}
+      onBlur={() => submit(false)}
       onKeyDown={onKeyDown}
     />
   );

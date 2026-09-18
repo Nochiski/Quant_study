@@ -527,6 +527,90 @@ export const referenceCandidates = (
     .filter((id): id is string => typeof id === "string");
 };
 
+const scalarFallback = (node: JsonSchema): unknown => {
+  if (Object.hasOwn(node, "const")) return node.const;
+  if (Array.isArray(node.enum) && node.enum.length > 0) return node.enum[0];
+  if (node.type === "boolean") return false;
+  if (node.type === "integer" || node.type === "number") {
+    if (typeof node.minimum === "number") return node.minimum;
+    if (typeof node.exclusiveMinimum === "number")
+      return node.type === "integer"
+        ? Math.floor(node.exclusiveMinimum) + 1
+        : node.exclusiveMinimum + Number.EPSILON;
+    return 0;
+  }
+  return "";
+};
+
+export class UnsupportedSchemaShape extends Error {}
+
+type MaterializeState = {
+  ancestors: Set<JsonSchema>;
+  budget: { remaining: number };
+};
+
+/**
+ * 한 runtime schema 노드의 최소 유효 값(필수 키·기본값만). 스니펫(P2)과 목록 항목 추가(P4-03)가 같은
+ * 함수를 쓴다. 재귀·과대 스키마·해소 불가 `$ref`는 `UnsupportedSchemaShape`로 fail-closed.
+ */
+export const materializeSchemaValue = (
+  root: JsonSchema,
+  schemaNode: JsonSchema,
+  state: MaterializeState = {
+    ancestors: new Set(),
+    budget: { remaining: 256 },
+  },
+): unknown => {
+  const node = resolveRef(root, schemaNode);
+  if (node === null)
+    throw new UnsupportedSchemaShape("unresolvable schema reference");
+  state.budget.remaining -= 1;
+  if (state.budget.remaining < 0 || state.ancestors.has(node))
+    throw new UnsupportedSchemaShape("recursive or oversized schema");
+  state.ancestors.add(node);
+  try {
+    if (Object.hasOwn(node, "default")) return node.default;
+    if (Object.hasOwn(node, "const")) return node.const;
+    if (Array.isArray(node.anyOf)) {
+      const member = node.anyOf
+        .filter(isObject)
+        .find((item) => item.type !== "null");
+      return member ? materializeSchemaValue(root, member, state) : null;
+    }
+    if (Array.isArray(node.oneOf)) {
+      const member = node.oneOf.find(isObject);
+      return member ? materializeSchemaValue(root, member, state) : {};
+    }
+    if (node.type === "array") return [];
+    if (node.type !== "object" && !isObject(node.properties))
+      return scalarFallback(node);
+
+    const properties = isObject(node.properties) ? node.properties : {};
+    const required = new Set(
+      Array.isArray(node.required)
+        ? node.required.filter((key): key is string => typeof key === "string")
+        : [],
+    );
+    const value: Record<string, unknown> = {};
+    for (const [key, candidate] of Object.entries(properties)) {
+      if (!isObject(candidate)) continue;
+      const property = resolveRef(root, candidate);
+      if (property === null)
+        throw new UnsupportedSchemaShape("unresolvable property reference");
+      if (
+        !required.has(key) &&
+        !Object.hasOwn(candidate, "default") &&
+        !Object.hasOwn(property, "default")
+      )
+        continue;
+      value[key] = materializeSchemaValue(root, candidate, state);
+    }
+    return value;
+  } finally {
+    state.ancestors.delete(node);
+  }
+};
+
 /** Short type label for completion details: `string`, `number ≥0 ≤1`, `enum(a|b)`, `object`. */
 export const typeLabel = (node: JsonSchema): string => {
   if (Array.isArray(node.enum))

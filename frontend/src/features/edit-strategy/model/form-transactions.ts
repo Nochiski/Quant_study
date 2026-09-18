@@ -3,10 +3,23 @@
  * `SourceOperation` 하나로 바꾸고, 입력 텍스트를 스키마 컨트롤 규칙으로 읽는다. 텍스트 편집과 preflight는
  * `planSourceOperation`의 몫이고 여기서는 fragment를 조립하지 않는다.
  */
-import type { FormControl, FormField, FormSection } from "./form-projection";
+import { findReferences, type DocumentReference } from "./document-references";
+import type {
+  FormControl,
+  FormField,
+  FormListItem,
+  FormSection,
+} from "./form-projection";
+import {
+  materializeSchemaValue,
+  resolveRef,
+  UnsupportedSchemaShape,
+  type JsonSchema,
+} from "./schema-navigator";
 import type { Scalar, SourceOperation } from "./source-transactions";
 
 export type ObjectSection = Extract<FormSection, { kind: "object" }>;
+export type ListSection = Extract<FormSection, { kind: "list" }>;
 
 export type DraftParse =
   | { status: "ok"; value: Scalar }
@@ -97,3 +110,151 @@ export const unsetOperation = (
   if (!field.written && field.defaultValue === null) return null;
   return fieldOperation(section, field, null);
 };
+
+/** 목록 항목을 필드 편집의 "섹션"으로 본다: 항목은 문서에 있으므로 `written`이고 필드는 그 아래 `insert-key`/`replace-scalar`. */
+export const itemSection = (
+  section: ListSection,
+  item: FormListItem,
+): ObjectSection => ({
+  kind: "object",
+  pointer: item.pointer,
+  key: section.key,
+  written: true,
+  fields: item.fields,
+  diagnostics: item.diagnostics,
+});
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const decodeSegment = (segment: string): string =>
+  segment.replaceAll("~1", "/").replaceAll("~0", "~");
+
+/** `itemSchemaPointer`가 가리키는 노드(`$ref` 해소 전). */
+const itemSchemaRaw = (
+  schema: JsonSchema,
+  section: ListSection,
+): JsonSchema | null => {
+  let node: unknown = schema;
+  for (const segment of section.itemSchemaPointer.slice(1).split("/")) {
+    if (!isRecord(node)) return null;
+    node = node[decodeSegment(segment)];
+  }
+  return isRecord(node) ? resolveRef(schema, node) : null;
+};
+
+const kindOfBranch = (
+  schema: JsonSchema,
+  member: unknown,
+): [string, JsonSchema] | null => {
+  if (!isRecord(member)) return null;
+  const branch = resolveRef(schema, member);
+  if (branch === null) return null;
+  const properties = isRecord(branch.properties) ? branch.properties : {};
+  const marker = isRecord(properties.kind) ? properties.kind.const : undefined;
+  return typeof marker === "string" ? [marker, branch] : null;
+};
+
+/** 목록 스키마가 union이면 고를 수 있는 `kind` 목록, 아니면 null. */
+export const itemKinds = (
+  schema: JsonSchema,
+  section: ListSection,
+): string[] | null => {
+  const node = itemSchemaRaw(schema, section);
+  if (node === null || !Array.isArray(node.oneOf)) return null;
+  return node.oneOf
+    .map((member) => kindOfBranch(schema, member))
+    .filter((entry): entry is [string, JsonSchema] => entry !== null)
+    .map(([kind]) => kind);
+};
+
+/**
+ * 항목 추가: 스키마에서 최소 항목을 materialize해 `insert-item`(끝에). union이면 `kind`가 필요하다.
+ * 스키마를 따라갈 수 없거나 재귀·과대면 null(버튼 비활성).
+ */
+export const addItemOperation = (
+  schema: JsonSchema,
+  section: ListSection,
+  kind: string | null = null,
+): SourceOperation | null => {
+  const raw = itemSchemaRaw(schema, section);
+  if (raw === null) return null;
+  let node: JsonSchema | null = raw;
+  if (Array.isArray(raw.oneOf)) {
+    node =
+      raw.oneOf
+        .map((member) => kindOfBranch(schema, member))
+        .find((entry) => entry !== null && entry[0] === kind)?.[1] ?? null;
+  }
+  if (node === null) return null;
+  try {
+    return appendOperation(section, materializeSchemaValue(schema, node));
+  } catch (error) {
+    if (error instanceof UnsupportedSchemaShape) return null;
+    throw error;
+  }
+};
+
+/** 미리 만든 값(팩터 카탈로그 preset 등)을 항목으로 추가. */
+export const addPresetItemOperation = (
+  section: ListSection,
+  value: unknown,
+): SourceOperation => appendOperation(section, value);
+
+/**
+ * 항목을 목록 끝에 넣는 연산. 목록 키가 문서에 없으면(새 전략 starter·생략형 문서) 키를 열면서 첫 항목을
+ * 넣는 `insert-key` 한 번이다 — 스니펫(`planSnippetEdit`)·object 섹션(`fieldOperation`)과 같은 규칙
+ * (리뷰 DEFECT-125-01: `insert-item`은 키가 없으면 `not-found`라 활성 버튼이 언제나 실패했다).
+ */
+const appendOperation = (
+  section: ListSection,
+  value: unknown,
+): SourceOperation =>
+  section.written
+    ? { kind: "insert-item", parentPointer: section.pointer, value }
+    : {
+        kind: "insert-key",
+        parentPointer: section.pointer.slice(
+          0,
+          section.pointer.lastIndexOf("/"),
+        ),
+        key: section.key,
+        value: [value],
+      };
+
+/**
+ * 항목 삭제 전 참조 검사: 항목의 identity(`<namespace>_id`)를 문서 다른 곳이 참조하면 그 pointer 목록을
+ * 돌려주고 삭제는 거부한다(D7 삭제 가드와 같은 규칙). identity는 스키마 `x-authoring-identity` 필드
+ * (`item.identityKey`) 우선, 없으면 카탈로그 참조가 아닌 첫 `*_id` 문자열 필드(`parameter_id`·`node_id`).
+ * `field_id` 같은 카탈로그 필드는 정의가 아니라 참조라 identity가 아니다(리뷰 P2-1).
+ */
+export const removalBlockers = (
+  tree: unknown,
+  item: FormListItem,
+): DocumentReference[] => {
+  const writtenString = (field: FormField): boolean =>
+    field.written && typeof field.value === "string";
+  const identity =
+    item.fields.find(
+      (field) => field.key === item.identityKey && writtenString(field),
+    ) ??
+    item.fields.find(
+      (field) =>
+        field.key.endsWith("_id") &&
+        field.control.kind !== "catalog" &&
+        writtenString(field),
+    );
+  if (identity === undefined) return [];
+  const namespace = identity.key.slice(0, -"_id".length);
+  return findReferences(
+    tree,
+    namespace,
+    identity.value as string,
+    item.pointer,
+  );
+};
+
+export const removeItemOperation = (item: FormListItem): SourceOperation => ({
+  kind: "remove",
+  pointer: item.pointer,
+});

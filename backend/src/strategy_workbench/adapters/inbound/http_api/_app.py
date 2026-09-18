@@ -803,7 +803,7 @@ def create_app(
         responses={
             422: {
                 "model": StrategyDocumentSave422Response,
-                "description": "Source compiles with diagnostics, or malformed envelope",
+                "description": "Source has error-severity diagnostics, or malformed envelope",
             },
         },
     )
@@ -825,7 +825,7 @@ def create_app(
             },
             422: {
                 "model": StrategyDocumentSave422Response,
-                "description": "Source compiles with diagnostics, or malformed envelope",
+                "description": "Source has error-severity diagnostics, or malformed envelope",
             },
         },
     )

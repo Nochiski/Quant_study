@@ -5340,7 +5340,7 @@ export type CreateStrategyDocumentErrors = {
   /**
    * Response 422 Createstrategydocument
    *
-   * Source compiles with diagnostics, or malformed envelope
+   * Source has error-severity diagnostics, or malformed envelope
    */
   422: StrategyDocumentInvalidResponse | RequestValidationResponse;
 };
@@ -5504,7 +5504,7 @@ export type ReviseStrategyDocumentErrors = {
   /**
    * Response 422 Revisestrategydocument
    *
-   * Source compiles with diagnostics, or malformed envelope
+   * Source has error-severity diagnostics, or malformed envelope
    */
   422: StrategyDocumentInvalidResponse | RequestValidationResponse;
 };

@@ -23,8 +23,14 @@ MANUAL = (
 
 
 def _first_yaml_block(markdown: str) -> str:
-    blocks = re.findall(r"```yaml\n(.*?)```", markdown, re.S)
-    assert blocks, "매뉴얼에 ```yaml 블록이 없다"
+    """1절("## 1.") 이후의 첫 ```yaml 블록.
+
+    앞 절에 다른 YAML이 끼어도 대상이 바뀌지 않는다(#147 리뷰 P2-3).
+    """
+    section = markdown[markdown.index("\n## 1. ") :]
+    blocks = re.findall(r"```yaml\n(.*?)```", section, re.S)
+    assert blocks, "매뉴얼 1절에 ```yaml 블록이 없다"
+    assert 'title: "사용자 매뉴얼 모멘텀"' in blocks[0], "1절 첫 블록이 실습 샘플이 아니다"
     return blocks[0]
 
 

@@ -8620,7 +8620,7 @@
                 }
               }
             },
-            "description": "Source compiles with diagnostics, or malformed envelope"
+            "description": "Source has error-severity diagnostics, or malformed envelope"
           }
         },
         "summary": "Create Strategy Document"
@@ -8880,7 +8880,7 @@
                 }
               }
             },
-            "description": "Source compiles with diagnostics, or malformed envelope"
+            "description": "Source has error-severity diagnostics, or malformed envelope"
           }
         },
         "summary": "Revise Strategy Document"

@@ -1,4 +1,4 @@
-"""Typed 422 details for the strategy document endpoints.
+"""전략 문서 엔드포인트의 typed 422 detail.
 
 P1-04가 upgrade에 만들었고, save·revise는 Phase 1 감사 이월로 같은 모양을 선언한다.
 """

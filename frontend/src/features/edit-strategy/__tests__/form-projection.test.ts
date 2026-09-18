@@ -8,6 +8,7 @@ import {
   type FormField,
   type FormListSection,
   type FormSection,
+  NAMESPACES,
   projectForm,
 } from "../model/form-projection";
 import type { JsonSchema } from "../model/schema-navigator";
@@ -394,6 +395,21 @@ describe("projectForm", () => {
     };
     walk(SCHEMA);
     expect([...found].sort()).toEqual([...CATALOGS].sort());
+  });
+
+  it("knows every x-reference namespace the runtime schema publishes (audit DEFECT-P5X-003)", () => {
+    const found = new Set<string>();
+    const walk = (node: unknown): void => {
+      if (Array.isArray(node)) node.forEach(walk);
+      else if (typeof node === "object" && node !== null) {
+        const record = node as Record<string, unknown>;
+        if (typeof record["x-reference"] === "string")
+          found.add(record["x-reference"]);
+        Object.values(record).forEach(walk);
+      }
+    };
+    walk(SCHEMA);
+    expect([...found].sort()).toEqual([...NAMESPACES].sort());
   });
 
   it("projects the schema with every field unwritten when there is no parse", () => {

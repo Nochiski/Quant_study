@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import type { CodeEditorHandle } from "../../../shared/ui/code-editor";
 import type { DocumentState } from "./document-state";
@@ -154,12 +154,13 @@ export const useSourceTransactions = (
   const settling = state.parsedVersion !== state.sourceVersion;
   // 직전에 적용한 연산이 구조를 바꿨는가(추가·삭제·스니펫). 그 뒤 parse가 따라오기 전에는 형제 pointer가 밀려
   // 있어 스칼라 확정도 다른 항목에 써질 수 있다(P5-03 2차 리뷰 P1-1) → 그때는 스칼라도 보류한다.
-  const lastStructural = useRef(false);
-  // 다른 문서를 열면 직전 연산 기억을 버린다 — feedback 슬롯처럼 `documentEpoch`에 결속(Phase 5 감사 P5X-006:
-  // 이전 문서의 구조 변경이 새 문서의 첫 스칼라 확정을 한 번 pending으로 막았다).
-  useEffect(() => {
-    lastStructural.current = false;
-  }, [state.documentEpoch]);
+  // 기억은 문서(`documentEpoch`)에 결속한다 — feedback 슬롯과 같은 방식(Phase 5 감사 P5X-006: 이전 문서의
+  // 구조 변경이 새 문서의 첫 스칼라 확정을 한 번 pending으로 막았다). effect가 아니라 값에 epoch를 담아
+  // `apply`에서 비교하므로 렌더·effect 순서에 기대지 않는다(#144 리뷰 P2-4).
+  const lastStructural = useRef<{ documentEpoch: number; structural: boolean }>({
+    documentEpoch: state.documentEpoch,
+    structural: false,
+  });
   const setFeedback = useCallback(
     (value: TransactionFeedback): void => {
       const next = { documentEpoch: state.documentEpoch, scope, value };
@@ -219,10 +220,19 @@ export const useSourceTransactions = (
       if (options.focusEditor !== false) current.focus();
       setFeedback({ status: "applied", owner, label });
       // 스니펫·`run` 호출자는 위치를 바꾸는 편집이다. `apply`는 스칼라면 아래에서 false로 되돌린다.
-      lastStructural.current = true;
+      lastStructural.current = {
+        documentEpoch: state.documentEpoch,
+        structural: true,
+      };
       return true;
     },
-    [editorActive, setFeedback, state.composing, state.format],
+    [
+      editorActive,
+      setFeedback,
+      state.composing,
+      state.documentEpoch,
+      state.format,
+    ],
   );
 
   const apply = useCallback(
@@ -236,7 +246,10 @@ export const useSourceTransactions = (
       // 위치 pointer 연산은 직전 편집의 parse가 따라온 뒤에만(P5-03 리뷰 DEFECT-133-01: 150ms 안의 연타가
       // stale pointer로 다른 항목·노드를 지웠다). 스칼라 확정은 값 pointer가 살아 있어 그대로 계획한다.
       const structural = ops.some((item) => item.kind !== "replace-scalar");
-      if (settling && (structural || lastStructural.current)) {
+      const carried =
+        lastStructural.current.documentEpoch === state.documentEpoch &&
+        lastStructural.current.structural;
+      if (settling && (structural || carried)) {
         setFeedback({ status: "error", owner, label, reason: "pending" });
         return false;
       }
@@ -246,10 +259,14 @@ export const useSourceTransactions = (
         owner,
         options,
       );
-      if (applied) lastStructural.current = structural;
+      if (applied)
+        lastStructural.current = {
+          documentEpoch: state.documentEpoch,
+          structural,
+        };
       return applied;
     },
-    [run, setFeedback, settling],
+    [run, setFeedback, settling, state.documentEpoch],
   );
 
   // 값으로 비교한다: memo identity에 기대면 React가 memo를 버릴 때 피드백이 조용히 사라진다(감사 DEFECT-P3X-004).

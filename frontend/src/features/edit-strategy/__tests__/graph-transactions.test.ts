@@ -156,6 +156,12 @@ describe("graph transactions (P5-01)", () => {
       parentPointer: "/factors/1/graph",
       key: "nodes",
     });
+    // `nodes` 키가 없어도 첫 노드라 출력도 함께 정한다(빈 문자열 → replace-scalar, 리뷰 P2-5).
+    expect(viaNodes.ops[1]).toEqual({
+      kind: "replace-scalar",
+      pointer: "/factors/1/graph/output_node_id",
+      value: "field",
+    });
     const noGraph = treeOf(
       VERBOSE.replace(
         "portfolio:\n",

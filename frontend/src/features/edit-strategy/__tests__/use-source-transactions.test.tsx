@@ -256,7 +256,8 @@ describe("useSourceTransactions", () => {
       result.current.apply({ kind: "remove", pointer: "/risk" }, "risk", "form");
     });
     expect(editor.text()).not.toContain("risk");
-    // 새 문서(epoch 증가)가 parse를 기다리는 동안의 첫 스칼라 확정은 이전 문서의 구조 변경에 막히지 않는다.
+    // 새 문서(epoch 증가)가 parse를 기다리는 동안의 첫 스칼라 확정은 이전 문서의 구조 변경에 막히지 않는다
+    // (기억에 담긴 epoch가 다르면 무시 — effect 없이 값 비교).
     act(() => editor.handle.setText(SOURCE));
     rerender({
       state: { ...parsedState(SOURCE), documentEpoch: 1, sourceVersion: 3 },

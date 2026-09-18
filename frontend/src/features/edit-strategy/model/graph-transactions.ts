@@ -128,7 +128,8 @@ export const nodeKinds = (
 /**
  * 노드 분기 스키마에서 다른 노드를 가리키는 필드 키(`input_node_id`, `left_node_id`, …). 판정은
  * `schemaFacts(...).reference === "node"` 하나다(SoT: 참조 사실의 owner는 `schemaFacts`; 리뷰 P1-1).
- * `addNode`의 참조 채우기와 P5-02의 입력 슬롯 목록·`rewireInput` 키 검증이 같은 함수를 쓴다.
+ * `addNode`의 참조 채우기와 P5-02의 입력 슬롯 목록이 같은 함수를 쓴다(`rewireInput` 키 검증은 P5X-008
+ * 정리로 함께 제거).
  */
 export const nodeReferenceKeys = (
   schema: JsonSchema,
@@ -162,6 +163,12 @@ export const suggestNodeId = (
  * 노드를 여러 슬롯에 넣으면 `x op x`나 타입 불일치가 되므로 빈 문자열로 두어 사용자가 고르게 한다(리뷰
  * P2-3). `graph.nodes`가 없으면 키를 열면서 넣는다(P4-03이 만든 빈 팩터는 `nodes: []`라 `insert-item`).
  */
+/** `output_node_id`가 아직 정해지지 않았는가(없음·빈 문자열·null). */
+const outputUnset = (graph: unknown): boolean => {
+  const output = isRecord(graph) ? graph.output_node_id : undefined;
+  return output === undefined || output === "" || output === null;
+};
+
 export const addNode = (
   tree: unknown,
   factorPointer: string,
@@ -194,25 +201,28 @@ export const addNode = (
     ];
     // 첫 노드는 출력 노드도 된다(`graph`를 새로 여는 경로와 같은 모양, Phase 5 감사 backlog 13). 출력이
     // 이미 다른 값이면 두지 않는다. 두 연산은 훅이 한 트랜잭션으로 합친다.
-    const output = isRecord(graph) ? graph.output_node_id : undefined;
-    if (nodes.length === 0 && (output === undefined || output === ""))
+    if (nodes.length === 0 && outputUnset(graph))
       ops.push(
         setScalar(tree, graphPointer(factorPointer), "output_node_id", nodeId),
       );
     return { ops, nodeId };
   }
-  if (isRecord(graph))
-    return {
-      ops: [
-        {
-          kind: "insert-key",
-          parentPointer: graphPointer(factorPointer),
-          key: "nodes",
-          value: [value],
-        },
-      ],
-      nodeId,
-    };
+  if (isRecord(graph)) {
+    // `nodes` 키가 없는 그래프도 첫 노드라 같은 규칙(리뷰 P2-5).
+    const ops: SourceOperation[] = [
+      {
+        kind: "insert-key",
+        parentPointer: graphPointer(factorPointer),
+        key: "nodes",
+        value: [value],
+      },
+    ];
+    if (outputUnset(graph))
+      ops.push(
+        setScalar(tree, graphPointer(factorPointer), "output_node_id", nodeId),
+      );
+    return { ops, nodeId };
+  }
   return {
     ops: [
       {

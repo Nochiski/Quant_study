@@ -262,13 +262,15 @@ impl PersistentFeed {
         self.offsets[index]..self.offsets[index + 1]
     }
 
-    pub(crate) fn session_market(&self, index: usize) -> (String, HashMap<String, BarTuple>) {
+    /// 세션 타임스탬프와 그날 bar 표. key는 등록부 문자열을 빌려준다 — MARKET 처리는
+    /// key를 읽기만 하므로 세션마다 종목 수만큼 `String`을 새로 만들 이유가 없다.
+    pub(crate) fn session_market(&self, index: usize) -> (&str, HashMap<&str, BarTuple>) {
         let bars = self
             .row_range(index)
             .map(|row| {
                 let instrument = self.instrument_ids[row] as usize;
                 (
-                    self.keys[instrument].clone(),
+                    self.keys[instrument].as_str(),
                     (
                         self.opens[row],
                         self.highs[row],
@@ -278,18 +280,21 @@ impl PersistentFeed {
                 )
             })
             .collect();
-        (self.sessions[index].clone(), bars)
+        (self.sessions[index].as_str(), bars)
     }
 
-    pub(crate) fn current_closes(&self) -> PyResult<HashMap<String, CloseWire>> {
+    /// 그날 종가 표. key와 symbol 모두 등록부 문자열을 빌려준다 — 라우팅은 둘 다 읽기만
+    /// 하므로 결정마다 종목 수 × 2개씩 `String`을 새로 만들 이유가 없다 (`current_marks`와
+    /// 같은 이유).
+    pub(crate) fn current_closes(&self) -> PyResult<HashMap<&str, CloseWire<'_>>> {
         let index = self.current_index()?;
         Ok(self
             .row_range(index)
             .map(|row| {
                 let instrument = self.instrument_ids[row] as usize;
                 (
-                    self.keys[instrument].clone(),
-                    (self.symbols[instrument].clone(), self.closes[row]),
+                    self.keys[instrument].as_str(),
+                    (self.symbols[instrument].as_str(), self.closes[row]),
                 )
             })
             .collect())
@@ -457,7 +462,7 @@ mod tests {
         )
         .unwrap();
         feed.set_current(1).unwrap();
-        assert_eq!(feed.current_closes().unwrap()["B"], ("BBB".into(), 21.5));
+        assert_eq!(feed.current_closes().unwrap()["B"], ("BBB", 21.5));
         assert_eq!(feed.session_market(0).1.len(), 2);
         assert_eq!(feed.settlement_session_index("A", "D1"), Some(0));
         assert_eq!(feed.settlement_session_index("A", "D2"), None);

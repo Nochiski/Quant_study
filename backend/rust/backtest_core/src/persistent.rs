@@ -327,10 +327,14 @@ impl PersistentEngine {
         Ok(())
     }
 
-    fn process_market_values(
-        &mut self,
+    /// MARKET 처리 계획만 세운다 — 상태를 바꾸지 않으므로 `&self`다.
+    ///
+    /// 적용(`apply_market_ops`)과 나눠 둔 이유는 빌림이다. `bars`가 피드를 빌린 채
+    /// 들어오므로, 계획 단계까지 `&mut self`를 잡으면 같은 `self`의 피드 빌림과 겹친다.
+    fn plan_market_ops(
+        &self,
         ts: &str,
-        bars: HashMap<String, BarTuple>,
+        bars: &HashMap<&str, BarTuple>,
         fee_rate: f64,
         default_participation: Option<&str>,
         slippage: &(String, f64, f64),
@@ -348,7 +352,7 @@ impl PersistentEngine {
             .filter(|group| self.group_is_open(group))
             .map(StoredGroup::as_tuple)
             .collect();
-        let mut ops = session::process_market_impl(
+        session::process_market_impl(
             ts,
             entries,
             groups,
@@ -357,9 +361,7 @@ impl PersistentEngine {
             fee_rate,
             default_participation,
             slippage,
-        )?;
-        self.apply_market_ops(&mut ops)?;
-        Ok(ops)
+        )
     }
 
     pub(crate) fn activate_pending_internal(&mut self) -> PyResult<()> {
@@ -408,15 +410,21 @@ impl PersistentEngine {
         default_participation: Option<&str>,
         slippage: &(String, f64, f64),
     ) -> PyResult<Vec<Op>> {
-        let (ts, bars) = {
+        self.feed
+            .as_mut()
+            .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?
+            .set_current(session_index)?;
+        // 계획 단계는 피드를 빌린 ts·bars를 그대로 읽는다 — 둘 다 `&self`라 겹치지 않는다.
+        let mut ops = {
             let feed = self
                 .feed
-                .as_mut()
+                .as_ref()
                 .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?;
-            feed.set_current(session_index)?;
-            feed.session_market(session_index)
+            let (ts, bars) = feed.session_market(session_index);
+            self.plan_market_ops(ts, &bars, fee_rate, default_participation, slippage)?
         };
-        self.process_market_values(&ts, bars, fee_rate, default_participation, slippage)
+        self.apply_market_ops(&mut ops)?;
+        Ok(ops)
     }
 
     pub(crate) fn close_current_session(
@@ -876,17 +884,18 @@ mod tests {
     fn market_processing_mutates_persistent_order_state() {
         let mut runtime = PersistentEngine::new(10_000.0, false, false, 1.0).unwrap();
         runtime.orders.push(market_order("O-000001"));
-        let bars = HashMap::from([("X:ONE:equity:KRW".to_string(), (100.0, 110.0, 90.0, 1_000))]);
+        let bars = HashMap::from([("X:ONE:equity:KRW", (100.0, 110.0, 90.0, 1_000))]);
 
-        let ops = runtime
-            .process_market_values(
+        let mut ops = runtime
+            .plan_market_ops(
                 "2026-01-02 00:00:00",
-                bars,
+                &bars,
                 0.0,
                 None,
                 &("none".into(), 0.0, 0.0),
             )
             .unwrap();
+        runtime.apply_market_ops(&mut ops).unwrap();
 
         assert!(runtime.orders.is_empty());
         assert_eq!(ops[0].0, "fill");

@@ -143,7 +143,7 @@ pub(crate) type Op = (String, String, i64, f64, f64, f64, String);
 
 struct Session<'a> {
     ts: &'a str,
-    bars: &'a HashMap<String, BarTuple>,
+    bars: &'a HashMap<&'a str, BarTuple>,
     power: &'a mut BuyingPower,
     fee_rate: f64,
     default_participation: Option<&'a str>,
@@ -162,7 +162,7 @@ struct QuoteOut {
 
 impl<'a> Session<'a> {
     fn quote(&self, e: &EntryIn) -> PyResult<QuoteOut> {
-        let bar = self.bars.get(&e.key).ok_or_else(|| {
+        let bar = self.bars.get(e.key.as_str()).ok_or_else(|| {
             PyValueError::new_err(format!(
                 "no bar for entry — order_id={} key={}",
                 e.order_id, e.key
@@ -222,7 +222,11 @@ impl<'a> Session<'a> {
     }
 
     fn detail(&self, q: &QuoteOut, e: &EntryIn) -> Option<String> {
-        let bar = self.bars.get(&e.key).copied().unwrap_or((0.0, 0.0, 0.0, 0));
+        let bar = self
+            .bars
+            .get(e.key.as_str())
+            .copied()
+            .unwrap_or((0.0, 0.0, 0.0, 0));
         let power = self.power.available();
         match q.status.as_str() {
             "not_filled" => Some(format!(
@@ -366,7 +370,7 @@ pub(crate) fn process_market_impl(
     ts: &str,
     entries: Vec<EntryTuple>,
     groups: Vec<(String, String, Vec<String>)>,
-    bars: HashMap<String, BarTuple>,
+    bars: &HashMap<&str, BarTuple>,
     power: &mut BuyingPower,
     fee_rate: f64,
     default_participation: Option<&str>,
@@ -375,7 +379,7 @@ pub(crate) fn process_market_impl(
     let mut entries: Vec<EntryIn> = entries.into_iter().map(EntryIn::from_tuple).collect();
     let mut session = Session {
         ts,
-        bars: &bars,
+        bars,
         power,
         fee_rate,
         default_participation,
@@ -388,7 +392,7 @@ pub(crate) fn process_market_impl(
     let mut singles: Vec<usize> = entries
         .iter()
         .enumerate()
-        .filter(|(_, e)| e.group_id.is_none() && bars.contains_key(&e.key))
+        .filter(|(_, e)| e.group_id.is_none() && bars.contains_key(e.key.as_str()))
         .map(|(i, _)| i)
         .collect();
     singles.sort_by(|&a, &b| {
@@ -414,7 +418,7 @@ pub(crate) fn process_market_impl(
         .collect();
     for e in expiring {
         session.remove(&e.order_id);
-        let reason = if bars.contains_key(&e.key) {
+        let reason = if bars.contains_key(e.key.as_str()) {
             format!(
                 "{} order expired unfilled — instrument={} remaining={} ts={}",
                 e.tif, e.symbol, e.remaining, ts
@@ -450,11 +454,14 @@ fn process_market(
         c_str!("backtest_core.process_market() is deprecated; use PersistentEngine"),
         2,
     )?;
+    // deprecated 경로만 소유한 표를 받는다 — 내부 정본은 등록부 문자열을 빌린다.
+    let borrowed: HashMap<&str, BarTuple> =
+        bars.iter().map(|(key, bar)| (key.as_str(), *bar)).collect();
     process_market_impl(
         ts,
         entries,
         groups,
-        bars,
+        &borrowed,
         power,
         fee_rate,
         default_participation,

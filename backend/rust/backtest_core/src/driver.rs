@@ -675,7 +675,13 @@ impl PersistentEngine {
         Vec<(String, String, String)>,
         Option<RouteError>,
     )> {
-        let bars = self.feed_ref()?.current_closes()?;
+        // `feed_ref()`(=`&self`) 대신 필드를 직접 빌린다 — 종가 표가 피드를 빌린 채
+        // 라우터에 들어가므로, `self` 전체를 빌리면 같은 호출의 `&mut self.orders`와 겹친다.
+        let feed = self
+            .feed
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?;
+        let bars = feed.current_closes()?;
         let (orders, updates, groups, error) = persistent_router::route_basic_decision(
             &self.portfolio,
             &mut self.orders,

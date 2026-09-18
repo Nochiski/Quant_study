@@ -6,7 +6,7 @@ current_phase: complete
 current_pr: none
 active_prs: []
 parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02, P1-06, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05, P5-01, P5-02, P5-03]
-last_updated: 2026-09-18T22:21:20+09:00
+last_updated: 2026-09-18T22:16:06+09:00
 last_updated: 2026-09-18T22:21:20+09:00
 planned_prs: 19
 merged_prs: 19
@@ -30,6 +30,7 @@ progress_percent: 100
 | Active PR | none |
 | Progress | `19 / 19 merged (100%)` |
 | Approved | `19 / 19` |
+| Aggregated at | `2026-09-18 22:16 KST` |
 | Aggregated at | `2026-09-18 22:21 KST` |
 <!-- PLAN:SUMMARY:END -->
 
@@ -231,7 +232,7 @@ Phase exit:
 | 5 | ~~P5X-005 — CodeMirror `lineSeparator`로 CRLF 보존 또는 "LF 정규화" 문서화~~ → [#143](https://github.com/Nochiski/Quant_study/pull/143) | 편집 없이 저장해도 `source_hash` 변동 | 설정 1 또는 문서 |
 | 6 | ~~DEFECT-P5X-004 — `removalBlockers`가 SoT 행이 요구한 스코프 없이 `findReferences` 호출(팩터·파라미터는 전역이라 현재 무해)~~ → [#144](https://github.com/Nochiski/Quant_study/pull/144) | 계약 명시 | 테스트 또는 인자 |
 | 7 | ~~P5X-006 — `lastStructural`·`lastReady`를 `documentEpoch`에 결속~~ → [#144](https://github.com/Nochiski/Quant_study/pull/144) | 다른 stale 캐시는 전부 epoch에 묶여 있음 | 한 줄 |
-| 8 | P5X-007 — 매뉴얼 스크린샷 전량 재촬영(8절 신규 + 기존 12장 — 마지막 촬영 `5a7b0b3` 2026-09-06이 1.1 전환 `9fab26b` 이전이라 전부 1.0 화면; #143 리뷰 P2-2) | 두 편집 표면을 글로만 설명, 1·2절 그림이 1.0 구조 | 문서 |
+| 8 | ~~P5X-007 — 매뉴얼 스크린샷 전량 재촬영(8절 신규 + 기존 12장 — 마지막 촬영 `5a7b0b3` 2026-09-06이 1.1 전환 `9fab26b` 이전이라 전부 1.0 화면; #143 리뷰 P2-2)~~ → [#148](https://github.com/Nochiski/Quant_study/pull/148) | 두 편집 표면을 글로만 설명, 1·2절 그림이 1.0 구조 | 문서 |
 | 9 | ~~P5X-008 — `graph-transactions.ts` UI 미호출 export 5종 배선 또는 정리~~ → [#144](https://github.com/Nochiski/Quant_study/pull/144) | P5-01 R4-4 규약이 공허 | 정리 |
 | 10 | ~~Phase 1 이월 — `trace.strategy.requires_upgrade` i18n 키, 세 라우트 422 typed화~~ → [#147](https://github.com/Nochiski/Quant_study/pull/147) | P5-03 소유로 지정됐으나 미이행 | 소 |
 | 11 | ~~Phase 2 이월 — DEFECT-P2X-004(사전 누락 시 침묵), -005(적용 조건 문장 이중 소유)~~ → [#147](https://github.com/Nochiski/Quant_study/pull/147) | 진단 wire 계약 변경 | 중 |
@@ -246,6 +247,7 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-18 KST | Claude | backlog 8 처리 PR [#148](https://github.com/Nochiski/Quant_study/pull/148) `docs/gui-backlog-b4`(main 기반): 캡처 스크립트에 13(Form 탭)·14(그래프 편집 영역) 추가, 14장 전량 재촬영(1.1 화면), 1절 임시 캡션 제거. 리뷰 `review_gui_backlog_148` | 머지 뒤 backlog |
 | 2026-09-18 KST | Claude | backlog 10·11 처리 PR [#147](https://github.com/Nochiski/Quant_study/pull/147) `fix/gui-backlog-b5`(main 기반): create·revise 422를 `StrategyDocumentSave422Response`로 선언(openapi.json·SDK 재생성), `traceErrorMessage`가 `trace.error.<code>` 번역(위험 5b), 매뉴얼 1절 샘플 compile 게이트(#143 리뷰 권고), P2X-004는 P2-03 테스트 118-07로 이미 종결 확인, P2X-005는 "문장은 소비자별 소유"로 SoT 종결. backend pytest 1330·ruff·pyright·frontend 게이트 초록(route 테스트 부하 flake 1건 단독 재통과). 리뷰 `review_gui_backlog_147` APPROVE(P2 3: SoT 문장 경계, 422 description이 warning도 422로 읽힘, 매뉴얼 게이트가 문서 첫 yaml에 결속; NIT docstring) → 후속 `9968d3d`로 전부 반영, backlog 16·17 추가 | 머지 뒤 backlog |
 | 2026-09-18 KST | Claude | backlog 4 처리 PR [#145](https://github.com/Nochiski/Quant_study/pull/145) `feat/gui-backlog-b3`(#144 위 스택): `renameNode`(중복·빈 값 거부, 정의 + 같은 그래프 참조 연산 목록) + `FormFieldsEditor.planCommit`(필드 확정 가로채기, `CommitInvalidReason` union으로 i18n 키 타입 검사). Vitest 614/52·eslint·tsc·Playwright 19/19. 리뷰 `review_gui_backlog_145` 1차 APPROVE(P2 3: 거부 뒤 blur가 안내를 지움, Escape가 안내를 남김, 매뉴얼 문장 끊김) → 후속 `a209f5a`(`onValid`를 재확정 가드 뒤로, Escape에 `onValid`, 문장 복원, 편집기 단언 4줄) → 재검토 APPROVE(리뷰어가 Playwright 19/19 재실행) | 머지 뒤 backlog |
 | 2026-09-18 KST | Claude | backlog 6·7·9·13 처리 PR [#144](https://github.com/Nochiski/Quant_study/pull/144) `fix/gui-backlog-b2`(main 기반): `removalBlockers` `REFERENCE_SCOPES`(node → 팩터 graph), `lastStructural`을 `documentEpoch`에 결속(useEffect), `graph-transactions.ts` 미호출 export 4종·`nodeBranchAt` 제거(`nodePointerOf` 유지), `planSourceOperations`(순차 계획 + 공통 접두·접미 diff로 편집 한 번) + 훅 `apply`가 연산 배열 수용, `addNode`가 `nodes: []`·빈 출력이면 두 연산. Vitest 611/52·eslint·tsc·Playwright 19/19(worktree `scad`의 stale `backtest_core`가 백테스트 시나리오를 한 번 failed로 만들어 maturin 재빌드). 리뷰 `review_gui_backlog_144` 1차 APPROVE(P2 5: JSDoc 끊김·WORKFLOW 잔존 언급·주석·epoch effect 의존·nodes 없는 경로) → 후속 `349ddee` → 2차 REQUEST_CHANGES(`null` 출력을 미지정으로 보아 `output_node_id:` 표기에서 노드 추가 전체가 막힘) → 후속 `0de9d3d`(null 제외 + 회귀 테스트) → 3차 APPROVE(문서 모양 8종 실측; P2 1: `addNode` JSDoc 순서 — 머지 전 정리). backlog 14·15 추가 | 머지 뒤 backlog |

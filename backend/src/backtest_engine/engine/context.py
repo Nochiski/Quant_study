@@ -6,6 +6,7 @@ ctx는 어디서나 접근하는 전역 변수가 아니라 엔진이 매 호출
 
 from __future__ import annotations
 
+import abc
 import functools
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -129,19 +130,27 @@ class PersistentHistoryStore(HistoryStore):
         return PriceWindow(timestamps=timestamps, instruments=request.instruments, values=matrix)
 
 
-@dataclass(frozen=True, eq=False)  # HistoryStore 필드 → eq 비교 무의미
-class EngineStrategyContext:
-    """선언한 데이터만 현재 시점까지 잘라서 돌려주는 엔진 소유 Context 구현체.
+class _DeclaredContextMethods(abc.ABC):
+    """두 Context 구현이 공유하는 읽기 전용 조회 메서드.
 
-    전략별 차이는 Context 클래스가 아니라 declared 데이터와 schedule 값이다.
+    미선언 history 요청과 universe 미제공의 거절 메시지는 이 클래스가 단일 정본이다.
+    전에는 엔진 경로와 Rust 경로가 메시지 문자열까지 복사해 한쪽만 고치면 같은 전략이
+    코어에 따라 다른 진단을 받았다.
+
+    서브클래스는 아래 속성을 dataclass 필드나 property로 제공하고 `_open_orders_view()`를
+    구현한다. `snapshot`은 한쪽이 필드, 다른 쪽이 `cached_property`라 여기서는 값을 두지
+    않고 계약만 선언한다.
     """
 
     now: datetime
     snapshot: PortfolioSnapshot
     history_store: HistoryStore
-    declared: frozenset[HistoryRequest] = field(default_factory=frozenset)
-    open_orders_snapshot: tuple[OpenOrderSnapshot, ...] = ()
-    universe_source: UniverseResult | None = None  # None = 제공 안 됨; 조회 시점에 계산
+    declared: frozenset[HistoryRequest]
+    universe_source: UniverseResult | None
+
+    @abc.abstractmethod
+    def _open_orders_view(self) -> tuple[OpenOrderSnapshot, ...]:
+        """이 컨텍스트 시점에 대기 중인 주문 전체. 필터링은 `open_orders()`가 한다."""
 
     def history(self, request: HistoryRequest) -> PriceWindow:
         if request not in self.declared:
@@ -174,13 +183,32 @@ class EngineStrategyContext:
         return self.universe_source.members(self.now.date())
 
     def open_orders(self, instrument: InstrumentId | None = None) -> tuple[OpenOrderSnapshot, ...]:
+        orders = self._open_orders_view()
         if instrument is None:
-            return self.open_orders_snapshot
-        return tuple(o for o in self.open_orders_snapshot if o.instrument == instrument)
+            return orders
+        return tuple(order for order in orders if order.instrument == instrument)
+
+
+@dataclass(frozen=True, eq=False)  # HistoryStore 필드 → eq 비교 무의미
+class EngineStrategyContext(_DeclaredContextMethods):
+    """선언한 데이터만 현재 시점까지 잘라서 돌려주는 엔진 소유 Context 구현체.
+
+    전략별 차이는 Context 클래스가 아니라 declared 데이터와 schedule 값이다.
+    """
+
+    now: datetime
+    snapshot: PortfolioSnapshot
+    history_store: HistoryStore
+    declared: frozenset[HistoryRequest] = field(default_factory=frozenset)
+    open_orders_snapshot: tuple[OpenOrderSnapshot, ...] = ()
+    universe_source: UniverseResult | None = None  # None = 제공 안 됨; 조회 시점에 계산
+
+    def _open_orders_view(self) -> tuple[OpenOrderSnapshot, ...]:
+        return self.open_orders_snapshot
 
 
 @dataclass(frozen=True, eq=False)
-class RustStrategyContext:
+class RustStrategyContext(_DeclaredContextMethods):
     """Rust callback frame에 묶인 전략 조회 뷰.
 
     포트폴리오·대기 주문은 Rust가 콜백 시점에 고정한 wire이며 전략이 실제로 읽을 때만 공개
@@ -203,36 +231,5 @@ class RustStrategyContext:
     def _open_orders(self) -> tuple[OpenOrderSnapshot, ...]:
         return self.store.open_orders_from_wire(self.now, self.frame.open_orders)
 
-    def history(self, request: HistoryRequest) -> PriceWindow:
-        if request not in self.declared:
-            raise UndeclaredDataAccess(
-                f"history request was not declared in requirements() — "
-                f"requested field={request.field.value} lookback={request.lookback} "
-                f"instruments={[i.symbol for i in request.instruments]} "
-                f"declared_count={len(self.declared)}"
-            )
-        return self.history_store.window(request=request, end=self.now)
-
-    def current_weight(self, instrument: InstrumentId) -> float:
-        return self.snapshot.weight(instrument)
-
-    def position_qty(self, instrument: InstrumentId) -> Decimal:
-        return self.snapshot.position_qty(instrument)
-
-    def cash(self) -> float:
-        return self.snapshot.cash
-
-    def portfolio_value(self) -> float:
-        return self.snapshot.equity
-
-    def universe(self) -> frozenset[InstrumentId]:
-        if self.universe_source is None:
-            raise UniverseNotProvided(
-                f"ctx.universe() requires BacktestEngine.run(..., universe=...) — now={self.now}"
-            )
-        return self.universe_source.members(self.now.date())
-
-    def open_orders(self, instrument: InstrumentId | None = None) -> tuple[OpenOrderSnapshot, ...]:
-        if instrument is None:
-            return self._open_orders
-        return tuple(order for order in self._open_orders if order.instrument == instrument)
+    def _open_orders_view(self) -> tuple[OpenOrderSnapshot, ...]:
+        return self._open_orders

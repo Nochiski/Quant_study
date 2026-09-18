@@ -511,7 +511,7 @@ class _DeclaredContextMethods:
 - [x] **7.1** `result_tables.py` 타입과 python `EventStore.result_tables()` (기존 객체에서 파생) + 테스트 (`tests/test_engine_golden.py` 패턴으로 golden 값).
 - [x] **7.2** Rust `result_tables()` + persistent store 오버라이드 + parity 테스트(python/rust `result_tables()` ==). 계획의 `*_rows()`/`fill_totals()` 다섯 pymethod 대신 레코드 한 번 순회로 다섯 벡터와 합계를 한꺼번에 답하는 pymethod 하나로 합쳤다 — kind마다 레코드를 다시 훑지 않는다.
 - [x] **7.3** 어댑터 전환. `tests/integration/test_backtest_http_api.py::test_python_reference_and_rust_core_have_golden_result_and_metric_parity`가 그대로 통과한다 (artifacts·series·metrics 동일).
-- [x] **7.4** 생략. 어댑터가 더는 wire 변환을 부르지 않으므로 워크벤치 경로에는 이득이 0이다. `result.orders`를 직접 쓰는 외부 호출자용 미세 최적화는 PR 8 이후 `bench_universe` materialize 수치로 판단한다.
+- [x] **7.4** PR 8로 넘긴다. `order_from_wire`/`fill_from_wire`는 죽지 않았다 — `open_orders_from_wire`가 세션마다 미체결 주문 수만큼, `frame_event`가 fill 콜백마다 부르는 hot loop 경로다. 다만 그 낭비의 뿌리(tape 프레임 snapshot·open_orders 조회)가 PR 8 범위와 겹쳐 그쪽에서 함께 처리한다.
 - [x] 커밋 5개, 기능 커밋의 마지막이 `perf(workbench): 결과 아티팩트를 엔진 columnar 테이블에서 직접 만든다`.
 
 ### AC
@@ -524,7 +524,9 @@ class _DeclaredContextMethods:
 
 구간별(rust, repeat 7, 초): 결과 조회 0.5285(`result_materialize`) + 0.0004(`event_store_costs`) → 0.0331(`result_tables`)로 **−93.7%**. 이 PR이 옮긴 경계가 여기다. `artifacts` 0.5560 → 0.5110, `analysis_points` 0.0208 → 0.0011. e2e 배수(python/rust)는 1.348배 → 1.915배이고, python 총시간이 같은 회차에 함께 느려진 몫을 빼고 before의 python 3.2041초를 기준으로 재면 1.746배다. 어느 쪽이든 PR 1 기준선을 넘는다.
 
-남은 `artifacts` 0.51초의 84%가 워크벤치 도메인 모델 객체 생성이다 (`RawPosition` 122,595개, frozen dataclass 생성자만 행당 약 1.06µs). 측정해 보고 기각한 미세 최적화: positional 생성자 인자는 7필드 레코드의 인자 이름을 지우는 대가로 구간의 3.5%, list comprehension은 잡음 범위, `str(quantity)`는 positions 루프의 7%다. 더 줄이려면 도메인 모델을 바꿔야 해 이 PR 범위 밖이다.
+남은 `artifacts` 0.51초의 84%가 워크벤치 도메인 모델 객체 생성이다 (`RawPosition` 122,595개, frozen dataclass 생성자만 행당 약 1.06µs). 측정해 보고 기각한 미세 최적화: positional 생성자 인자는 7필드 레코드의 인자 이름을 지우는 대가로 구간의 3.5%, list comprehension은 잡음 범위, `str(quantity)`는 positions 루프의 7%다.
+
+`Raw*` 여섯 클래스에 `slots=True`를 붙이는 안도 구현해 재고 **되돌렸다**. 단일 코어 rust A/B를 교대로 4회(`--repeat 5`) 돌려 `engine.run`으로 정규화하면 `artifacts/engine.run`이 1.024(무 slots) → 1.053(slots)으로 **약 3% 느리다**. 같은 프로세스 안에서 slots 유무만 다른 dataclass를 비교한 micro도 생성이 14% 느렸다 — frozen dataclass는 어느 쪽이든 `object.__setattr__`를 타는데 CPython 3.11의 key-sharing dict 경로가 slot descriptor보다 빨라서다. 대신 **메모리는 줄었다**: 인스턴스당 184 → 88바이트(−52%), 프로세스 peak RSS 372.7MiB → 355.6MiB(−4.5%). 시간 게이트(3% 이상 이득) 미달이라 이 PR에서는 되돌리고, RSS 관점의 판단은 PR 11로 넘긴다.
 
 **python 코어는 e2e 약 10% 느려졌다** (3.2041초 → 3.5142초, `engine.run` 이후 0.6795초 → 0.8434초). python 코어는 공개 객체를 이미 갖고 있어 테이블 생성이 순수 추가 패스이고, 그 비용 0.2206초가 artifacts·analysis_points에서 아낀 0.074초보다 크다 (정수 수량 검사는 그중 0.030초뿐이고 나머지는 패스 자체). 어댑터가 코어별로 분기하는 대안보다 낫다고 판단해, 프로덕션 경로인 rust가 객체 생성을 통째로 건너뛰도록 **참조 코어가 치르는 비용**으로 받아들였다.
 
@@ -533,6 +535,8 @@ class _DeclaredContextMethods:
 1. `AnalysisPoint`를 snapshot 행에서 다시 만들지 않고 `artifacts.snapshots`에서 만든다. net exposure 공식이 `execute`와 `_artifacts` 두 곳에 있던 중복을 `_artifacts` 하나로 합친다. bit 동일하고 `analysis_points` 구간이 0.0208초 → 0.0011초가 됐다.
 2. `_closed_trades`가 `tables` 외에 미리 만든 `session_dates`·`security_ids`를 함께 받는다. `_artifacts`가 이미 만든 조회표를 다시 만들지 않기 위해서다.
 3. Rust 해제 가드를 kind별로 건다. 테이블이 읽는 SNAPSHOT/ORDER/FILL/COST가 해제됐을 때만 오류이고, DECISION/MARKET을 먼저 공개 객체로 만든 뒤에도 테이블 조회는 답한다.
+
+벤치 스크립트는 코어별 `peak_rss_bytes`를 JSON에 남긴다 (`--core all`은 프로세스 peak가 코어별로 갈라지지 않아 null + `rss_isolated: false`). PR 11의 워크벤치 RSS 재판정 입력이다. 스펙 문서는 PR 11에서 일괄 갱신한다.
 
 리뷰 조건부 APPROVE (정확성 결함 0, Minor 1건). DEFECT-701(중단된 실행에서 persistent가 feed 전체를 답해 python 코어와 `sessions`·`instruments`가 갈림)은 `fix(engine): 중단된 실행의 결과 테이블 세션·종목을 레코드 구간으로 자른다`로 반영했다 — `sessions` 계약의 정본을 feed 길이가 아니라 레코드로 고치고 partial trace parity 테스트를 추가했다.
 

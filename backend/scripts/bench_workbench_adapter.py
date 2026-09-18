@@ -12,10 +12,10 @@
 - `strategy_and_feed_build`: `BacktestEngine` 생성 → `run()` 진입. `TargetTapeStrategy`가
   TargetTape 프레임을 엔진 액션으로 옮기고 `DataFeed`가 bar를 세션으로 묶는 구간이다.
 - `engine.run`: 엔진 루프만.
-- `result_materialize`: `result.snapshots`/`orders`/`fills` 최초 조회. Rust 코어는 여기서
-  공개 객체를 만들고 Python 코어는 `run()` 안에서 이미 만들었으므로 거의 0이다.
-- `event_store_costs`: `engine.event_store.costs()`.
-- `artifacts`: `_artifacts()` — 엔진 결과를 raw artifact 레코드로 변환.
+- `result_tables`: `engine.event_store.result_tables()` — 어댑터가 읽는 유일한 결과 조회다.
+  Rust 코어는 여기서 레코드를 한 번 훑어 primitive 행을 만들고, Python 코어는 `run()` 안에서
+  이미 만든 공개 객체에서 행을 떠온다.
+- `artifacts`: `_artifacts()` — 결과 테이블을 raw artifact 레코드로 변환.
 - `analysis_points`: `_artifacts()` 반환 → 첫 `compute_analytics()` 진입. 벤치마크 시계열,
   `AnalysisPoint` 생성, fill 단위 합계(traded notional·수수료·슬리피지)를 모두 포함한다.
 - `compute_analytics`: `compute_analytics()` 호출 누적. 기본 요청은 HTTP `_run_body`와 같은
@@ -28,7 +28,9 @@
 private 모듈을 직접 import한다 — 프로덕션 코드에서는 facade 경유가 규칙이다.
 
 `--core all`은 한 프로세스에서 두 코어를 모두 돌리므로 시간만 비교 대상이고 RSS는 격리되지
-않는다.
+않는다. 그래서 JSON의 `peak_rss_bytes`는 단일 코어 실행(`--core python` 또는 `--core rust`)일
+때만 값을 담고, `--core all`이면 null이다 (`rss_isolated`가 어느 쪽인지 말한다). peak RSS는
+프로세스 단위 누적 최댓값이라 한 프로세스에서 두 코어를 돌리면 뒤 코어 값이 앞 코어를 포함한다.
 
 사용법:
     uv run python scripts/bench_workbench_adapter.py --instruments 100 --core all --repeat 3
@@ -51,10 +53,11 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-from bench_universe import load_full_calendar_universe, synthetic_universe
+from bench_universe import load_full_calendar_universe, peak_rss_bytes, synthetic_universe
 
 from backtest_engine import BacktestEngine
 from backtest_engine.engine.store import EventStore
+from backtest_engine.types.result_tables import ResultTables
 from backtest_engine.types.results import BacktestResult
 from strategy_workbench.adapters.outbound.backtest_engine import _adapter as adapter_module
 from strategy_workbench.adapters.outbound.backtest_engine.facade.executor import (
@@ -97,8 +100,7 @@ _FACTOR_ID = "price.close"
 _SECTOR_ID = "bench-sector"
 
 AFTER_RUN_STAGES: tuple[str, ...] = (
-    "result_materialize",
-    "event_store_costs",
+    "result_tables",
     "artifacts",
     "analysis_points",
     "compute_analytics",
@@ -141,17 +143,17 @@ class StageClock:
 
 
 class _TimedEventStore:
-    """`costs()` 호출 시간만 재서 위임한다."""
+    """`result_tables()` 호출 시간만 재서 위임한다."""
 
     def __init__(self, delegate: EventStore, clock: StageClock) -> None:
         self._delegate = delegate
         self._clock = clock
 
-    def costs(self) -> tuple[object, ...]:
+    def result_tables(self) -> ResultTables:
         started = time.perf_counter()
-        costs = self._delegate.costs()
-        self._clock.add("event_store_costs", time.perf_counter() - started)
-        return costs
+        tables = self._delegate.result_tables()
+        self._clock.add("result_tables", time.perf_counter() - started)
+        return tables
 
 
 class _TimedEngine:
@@ -173,11 +175,8 @@ class _TimedEngine:
         started = time.perf_counter()
         result = self._delegate.run(*args, **kwargs)
         self._clock.add("engine.run", time.perf_counter() - started)
-        # 조회를 여기서 먼저 끝내 lazy 코어의 공개 객체 생성 비용을 `artifacts` 구간에서
-        # 떼어낸다. 어댑터는 뒤에서 같은 속성을 다시 읽지만 그때는 이미 만들어져 있다.
-        materialize_started = time.perf_counter()
-        _ = (result.snapshots, result.orders, result.fills)
-        self._clock.add("result_materialize", time.perf_counter() - materialize_started)
+        # 공개 객체(`result.snapshots`/`orders`/`fills`)는 일부러 건드리지 않는다 — 어댑터가
+        # 더 이상 읽지 않는 경로를 벤치가 대신 태우면 없앤 비용이 표에 그대로 남는다.
         return result
 
 
@@ -463,6 +462,8 @@ def main(argv: Sequence[str]) -> int:
     stage_samples: dict[ExecutionCore, list[dict[str, float]]] = {core: [] for core in cores}
     total_samples: dict[ExecutionCore, list[float]] = {core: [] for core in cores}
     signatures: dict[ExecutionCore, tuple[object, ...]] = {}
+    # 코어 실행이 끝난 시점의 프로세스 peak RSS. 단일 코어 실행일 때만 그 코어의 값이다.
+    peak_rss_by_core: dict[ExecutionCore, int] = {}
     for _ in range(args.repeat):
         for core in cores:
             # 앞 회차가 남긴 쓰레기를 타이머 밖에서 치운다. 그러지 않으면 전면 GC가 임의의
@@ -471,6 +472,7 @@ def main(argv: Sequence[str]) -> int:
             stages, total, result = measure_once(
                 adapter, execution_request(core, spec, tape, dataset, metric_windows)
             )
+            peak_rss_by_core[core] = peak_rss_bytes()
             stage_samples[core].append(stages)
             total_samples[core].append(total)
             signature = result_signature(result)
@@ -499,6 +501,7 @@ def main(argv: Sequence[str]) -> int:
         if ExecutionCore.PYTHON in cores
         else None
     )
+    rss_isolated = len(cores) == 1
     core_payload: dict[str, object] = {}
     payload: dict[str, object] = {
         "workload": {
@@ -511,6 +514,8 @@ def main(argv: Sequence[str]) -> int:
             "metric_windows": len(metric_windows),
             "synthetic": True,
         },
+        # 한 프로세스에서 두 코어를 돌리면 peak RSS가 코어별로 갈라지지 않는다.
+        "rss_isolated": rss_isolated,
         "cores": core_payload,
     }
     for core in cores:
@@ -531,6 +536,8 @@ def main(argv: Sequence[str]) -> int:
             # `engine.run` 한 번의 비용 대비 그 뒤 어댑터 구간이 몇 배인지. 1보다 크면
             # 엔진을 더 줄여도 워크벤치 체감 배수가 따라오지 않는다는 뜻이다.
             "after_run_over_run_ratio": after_run / run_seconds if run_seconds > 0 else None,
+            # 격리되지 않은 실행에서 값을 담으면 다른 코어의 할당까지 그 코어 수치로 읽힌다.
+            "peak_rss_bytes": peak_rss_by_core[core] if rss_isolated else None,
         }
         speedup_text = f" speedup={speedup:.3f}x" if speedup is not None else ""
         print(f"core={core.value} total={total_median:.6f}s{speedup_text}")
@@ -542,6 +549,12 @@ def main(argv: Sequence[str]) -> int:
             print(
                 f"  after_run={after_run:.6f}s after_run/engine.run={after_run / run_seconds:.3f}x"
             )
+        rss_text = (
+            f"{peak_rss_by_core[core] / 1024 / 1024:.1f}MiB"
+            if rss_isolated
+            else f"{peak_rss_by_core[core] / 1024 / 1024:.1f}MiB(shared, not recorded)"
+        )
+        print(f"  peak_rss={rss_text}")
 
     if args.json_out is not None:
         args.json_out.parent.mkdir(parents=True, exist_ok=True)

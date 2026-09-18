@@ -15,13 +15,12 @@ from backtest_engine.types.decision import StrategyDecision
 from backtest_engine.types.events import (
     CorporateActionEvent,
     CorporateActionType,
-    FillEvent,
     StrategyEvent,
 )
 from backtest_engine.types.instruments import AssetClass, InstrumentId
 from backtest_engine.types.market import Bar
-from backtest_engine.types.orders import Side
 from backtest_engine.types.requirements import StrategyRequirements
+from backtest_engine.types.result_tables import ResultTables
 from backtest_engine.types.strategy import StrategyContext
 from backtest_engine.types.tape import DeclarativeTapeStrategy, TapeFrame
 from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import (
@@ -181,32 +180,29 @@ class BacktestEngineExecutorAdapter:
         )
         self._check_cancelled(cancelled)
         progress(0.78, "analytics", "Calculating professional metrics")
-        costs = engine.event_store.costs()
-        artifacts, outcomes = _artifacts(result, costs)
+        # 엔진 결과는 columnar 테이블로 받는다 — 공개 Event 객체는 여기서 곧바로 raw
+        # artifact로 다시 옮겨질 중간 산물일 뿐이라 만들 이유가 없다.
+        tables = engine.event_store.result_tables()
+        artifacts, outcomes = _artifacts(tables)
         benchmark = _benchmark_values(request)
+        # net exposure 공식은 `_artifacts`가 단일 정본이다 — 여기서 다시 계산하지 않는다.
         points = tuple(
             AnalysisPoint(
-                session=snapshot.ts.date(),
-                equity=snapshot.equity,
-                gross_exposure=snapshot.gross_exposure,
-                net_exposure=(
-                    sum(position.market_value for position in snapshot.positions) / snapshot.equity
-                    if snapshot.equity != 0
-                    else 0.0
-                ),
-                benchmark_equity=benchmark.get(snapshot.ts.date()),
+                session=item.session,
+                equity=item.equity,
+                gross_exposure=item.gross_exposure,
+                net_exposure=item.net_exposure,
+                benchmark_equity=benchmark.get(item.session),
             )
-            for snapshot in result.snapshots
+            for item in artifacts.snapshots
         )
         full_input = AnalyticsInput(
             points=points,
-            traded_notional=sum(float(fill.quantity) * fill.price for fill in result.fills),
+            traded_notional=tables.fill_totals.traded_notional,
             trades=outcomes,
-            total_fees=sum(fill.fee for fill in result.fills),
-            total_slippage_cost=sum(
-                float(fill.quantity) * abs(fill.slippage_per_share) for fill in result.fills
-            ),
-            total_carry_cost=sum(item.amount for item in costs),
+            total_fees=tables.fill_totals.total_fees,
+            total_slippage_cost=tables.fill_totals.total_slippage_cost,
+            total_carry_cost=sum(amount for _session, _kind, _security, amount in tables.costs),
         )
         full = compute_analytics(
             full_input,
@@ -293,71 +289,100 @@ def _benchmark_values(request: BacktestExecutionRequest) -> dict[date, float]:
     return {item.session: request.spec.initial_cash * item.close / first for item in bars}
 
 
-def _artifacts(result, costs) -> tuple[RawArtifactBundle, tuple[TradeOutcome, ...]]:
+def _artifacts(tables: ResultTables) -> tuple[RawArtifactBundle, tuple[TradeOutcome, ...]]:
+    """엔진 결과 테이블을 워크벤치 raw artifact로 옮긴다.
+
+    세션 날짜와 종목 코드는 행마다 다시 만들지 않는다 — position 행이 세션 × 보유 종목 수라
+    행당 `.date()` 한 번이 그대로 유니버스 크기의 비용이 된다.
+    """
+    session_dates = tuple(ts.date() for ts in tables.sessions)
+    security_ids = tuple(instrument.symbol for instrument in tables.instruments)
     snapshots = tuple(
         RawSnapshot(
-            session=item.ts.date(),
-            cash=item.cash,
-            equity=item.equity,
-            gross_exposure=item.gross_exposure,
-            net_exposure=(
-                sum(position.market_value for position in item.positions) / item.equity
-                if item.equity != 0
-                else 0.0
-            ),
+            session=session_dates[session_index],
+            cash=cash,
+            equity=equity,
+            gross_exposure=gross_exposure,
+            net_exposure=positions_value / equity if equity != 0 else 0.0,
         )
-        for item in result.snapshots
+        for session_index, cash, equity, gross_exposure, positions_value in tables.snapshots
     )
     positions = tuple(
         RawPosition(
-            session=snapshot.ts.date(),
-            security_id=position.instrument.symbol,
-            quantity=str(position.quantity),
-            average_price=position.average_price,
-            market_price=position.market_price,
-            market_value=position.market_value,
-            unrealized_pnl=position.unrealized_pnl,
+            session=session_dates[session_index],
+            security_id=security_ids[instrument_index],
+            quantity=str(quantity),
+            average_price=average_price,
+            market_price=market_price,
+            market_value=market_value,
+            unrealized_pnl=unrealized_pnl,
         )
-        for snapshot in result.snapshots
-        for position in snapshot.positions
+        for (
+            session_index,
+            instrument_index,
+            quantity,
+            average_price,
+            market_price,
+            market_value,
+            unrealized_pnl,
+        ) in tables.positions
     )
     orders = tuple(
         RawOrder(
-            order_id=item.order_id,
-            decision_id=item.decision_id,
-            session=item.ts.date(),
-            security_id=item.instrument.symbol,
-            side=item.side.value,
-            quantity=str(item.quantity),
-            order_type=item.order_type.value,
-            time_in_force=item.time_in_force.value,
+            order_id=order_id,
+            decision_id=decision_id,
+            session=session_dates[session_index],
+            security_id=security_ids[instrument_index],
+            side=side,
+            quantity=str(quantity),
+            order_type=order_type,
+            time_in_force=time_in_force,
         )
-        for item in result.orders
+        for (
+            order_id,
+            decision_id,
+            session_index,
+            instrument_index,
+            side,
+            quantity,
+            order_type,
+            time_in_force,
+        ) in tables.orders
     )
     fills = tuple(
         RawFill(
-            fill_id=item.fill_id,
-            order_id=item.order_id,
-            session=item.ts.date(),
-            security_id=item.instrument.symbol,
-            side=item.side.value,
-            quantity=str(item.quantity),
-            price=item.price,
-            fee=item.fee,
-            slippage_per_share=item.slippage_per_share,
+            fill_id=fill_id,
+            order_id=order_id,
+            session=session_dates[session_index],
+            security_id=security_ids[instrument_index],
+            side=side,
+            quantity=str(quantity),
+            price=price,
+            fee=fee,
+            slippage_per_share=slippage_per_share,
         )
-        for item in result.fills
+        for (
+            fill_id,
+            order_id,
+            session_index,
+            instrument_index,
+            side,
+            quantity,
+            price,
+            fee,
+            slippage_per_share,
+        ) in tables.fills
     )
     raw_costs = tuple(
         RawCost(
-            session=item.ts.date(),
-            kind=item.kind.value,
-            security_id=item.instrument.symbol if item.instrument is not None else None,
-            amount=item.amount,
+            session=session_dates[session_index],
+            kind=kind,
+            security_id=None if instrument_index is None else security_ids[instrument_index],
+            amount=amount,
         )
-        for item in costs
+        for session_index, kind, instrument_index, amount in tables.costs
     )
-    trades = _closed_trades(result.fills)
+    trades = _closed_trades(tables, session_dates, security_ids)
     outcomes = tuple(
         TradeOutcome(
             security_id=item.security_id,
@@ -383,13 +408,31 @@ class _OpenTrade:
     opening_slippage: float
 
 
-def _closed_trades(fills: tuple[FillEvent, ...]) -> tuple[RawTrade, ...]:
+def _closed_trades(
+    tables: ResultTables,
+    session_dates: tuple[date, ...],
+    security_ids: tuple[str, ...],
+) -> tuple[RawTrade, ...]:
+    sessions = tables.sessions
     states: dict[str, _OpenTrade] = {}
     trades: list[RawTrade] = []
-    for fill in sorted(fills, key=lambda item: (item.ts, item.fill_id)):
-        security_id = fill.instrument.symbol
-        delta = float(fill.quantity) * (1 if fill.side is Side.BUY else -1)
-        slip = float(fill.quantity) * abs(fill.slippage_per_share)
+    # `(세션 ts, fill_id)` 순서 — 세션 index는 feed 정렬 순서라 ts 정렬과 결과가 같다.
+    for row in sorted(tables.fills, key=lambda item: (sessions[item[2]], item[0])):
+        (
+            _fill_id,
+            _order_id,
+            session_index,
+            instrument_index,
+            side,
+            quantity,
+            price,
+            fee,
+            slippage_per_share,
+        ) = row
+        security_id = security_ids[instrument_index]
+        session = session_dates[session_index]
+        delta = float(quantity) * (1 if side == "buy" else -1)
+        slip = float(quantity) * abs(slippage_per_share)
         state = states.get(security_id)
         if state is None or state.quantity == 0 or state.quantity * delta > 0:
             current_quantity = abs(state.quantity) if state is not None else 0.0
@@ -399,11 +442,11 @@ def _closed_trades(fills: tuple[FillEvent, ...]) -> tuple[RawTrade, ...]:
                 quantity=(1 if delta > 0 else -1) * total,
                 average_price=(
                     ((state.average_price * current_quantity) if state is not None else 0.0)
-                    + fill.price * added
+                    + price * added
                 )
                 / total,
-                opened_on=state.opened_on if state is not None else fill.ts.date(),
-                opening_fees=(state.opening_fees if state is not None else 0.0) + fill.fee,
+                opened_on=state.opened_on if state is not None else session,
+                opening_fees=(state.opening_fees if state is not None else 0.0) + fee,
                 opening_slippage=(state.opening_slippage if state is not None else 0.0) + slip,
             )
             continue
@@ -412,20 +455,20 @@ def _closed_trades(fills: tuple[FillEvent, ...]) -> tuple[RawTrade, ...]:
         closed_quantity = min(open_quantity, fill_quantity)
         open_fraction = closed_quantity / open_quantity
         exit_fraction = closed_quantity / fill_quantity
-        fees = state.opening_fees * open_fraction + fill.fee * exit_fraction
+        fees = state.opening_fees * open_fraction + fee * exit_fraction
         slippage_cost = state.opening_slippage * open_fraction + slip * exit_fraction
         gross_pnl = (
-            (fill.price - state.average_price) * closed_quantity * (1 if state.quantity > 0 else -1)
+            (price - state.average_price) * closed_quantity * (1 if state.quantity > 0 else -1)
         )
         trades.append(
             RawTrade(
                 security_id=security_id,
                 opened_on=state.opened_on,
-                closed_on=fill.ts.date(),
+                closed_on=session,
                 side="long" if state.quantity > 0 else "short",
                 quantity=str(Decimal(str(closed_quantity)).normalize()),
                 entry_price=state.average_price,
-                exit_price=fill.price,
+                exit_price=price,
                 pnl=gross_pnl - fees,
                 fees=fees,
                 slippage_cost=slippage_cost,
@@ -444,9 +487,9 @@ def _closed_trades(fills: tuple[FillEvent, ...]) -> tuple[RawTrade, ...]:
         elif remaining_fill > 0:
             states[security_id] = _OpenTrade(
                 quantity=(1 if delta > 0 else -1) * remaining_fill,
-                average_price=fill.price,
-                opened_on=fill.ts.date(),
-                opening_fees=fill.fee * (1 - exit_fraction),
+                average_price=price,
+                opened_on=session,
+                opening_fees=fee * (1 - exit_fraction),
                 opening_slippage=slip * (1 - exit_fraction),
             )
         else:

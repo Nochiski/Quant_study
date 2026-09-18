@@ -293,6 +293,23 @@ impl RecordPayload {
     }
 }
 
+/// 결과 집계용 columnar 테이블의 Rust 쪽 표현.
+///
+/// 행 원소의 의미는 Python `backtest_engine/types/result_tables.py`가 정본이다. Python 변환은
+/// GIL이 필요하므로 여기서 떼어 둔다 — 순서·결합·해제 가드는 GIL 없이 검사할 수 있다.
+/// 문자열은 레코드에서 빌려 쓴다 (테이블은 한 번 만들어 바로 Python으로 넘긴다).
+#[allow(clippy::type_complexity)]
+#[derive(Debug)]
+pub(crate) struct ResultTableRows<'a> {
+    pub(crate) snapshots: Vec<(usize, f64, f64, f64, f64)>,
+    pub(crate) positions: Vec<(usize, u32, i64, f64, f64, f64, f64)>,
+    pub(crate) orders: Vec<(&'a str, &'a str, usize, u32, &'a str, i64, &'a str, &'a str)>,
+    pub(crate) fills: Vec<(&'a str, &'a str, usize, u32, &'a str, i64, f64, f64, f64)>,
+    pub(crate) costs: Vec<(usize, &'a str, Option<u32>, f64)>,
+    /// `(traded_notional, total_fees, total_slippage_cost)` — FILL 레코드 순서 누산.
+    pub(crate) fill_totals: (f64, f64, f64),
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct NativeRecord {
     pub(crate) session_index: usize,
@@ -488,6 +505,105 @@ impl RecordStore {
         Ok(series)
     }
 
+    /// 결과 집계용 테이블을 레코드 한 번 순회로 만든다.
+    ///
+    /// 비파괴 조회다 — 공개 Event 객체를 만들지 않으므로 payload를 해제하지 않고, 이후
+    /// `drain_payloads`로 같은 레코드를 공개 객체로 다시 읽을 수 있다. 반대로 테이블이 읽는
+    /// kind(SNAPSHOT/ORDER/FILL/COST)를 이미 넘겨 해제했다면 조용히 빠뜨리지 않고 오류다.
+    pub(crate) fn result_table_rows(&self) -> PyResult<ResultTableRows<'_>> {
+        self.ensure_not_drained("result_tables")?;
+        let mut snapshots = Vec::new();
+        let mut positions = Vec::new();
+        let mut orders = Vec::new();
+        let mut fills = Vec::new();
+        let mut costs = Vec::new();
+        let mut traded_notional = 0.0_f64;
+        let mut total_fees = 0.0_f64;
+        let mut total_slippage_cost = 0.0_f64;
+        for (seq, record) in self.records.iter().enumerate() {
+            let session = record.session_index;
+            match &record.payload {
+                RecordPayload::Snapshot(snapshot) => {
+                    // positions_value는 행 순서대로 왼쪽부터 더한다 — Python `sum()`과 같은
+                    // 결합 순서여야 두 코어의 net exposure가 bit 동일하다.
+                    let mut positions_value = 0.0_f64;
+                    for row in &snapshot.rows {
+                        positions_value += row.4;
+                        positions.push((session, row.0, row.1, row.2, row.3, row.4, row.5));
+                    }
+                    snapshots.push((
+                        session,
+                        snapshot.cash,
+                        snapshot.equity,
+                        snapshot.gross_exposure,
+                        positions_value,
+                    ));
+                }
+                RecordPayload::Order(order) => orders.push((
+                    order.order_id.as_str(),
+                    order.decision_id.as_str(),
+                    session,
+                    order.instrument_id,
+                    order.side.as_str(),
+                    order.quantity,
+                    order.order_type.as_str(),
+                    order.tif.as_str(),
+                )),
+                RecordPayload::Fill(fill) => {
+                    fills.push((
+                        fill.fill_id.as_str(),
+                        fill.order_id.as_str(),
+                        session,
+                        fill.instrument_id,
+                        fill.side.as_str(),
+                        fill.quantity,
+                        fill.price,
+                        fill.fee,
+                        fill.slippage_per_share,
+                    ));
+                    traded_notional += fill.quantity as f64 * fill.price;
+                    total_fees += fill.fee;
+                    total_slippage_cost += fill.quantity as f64 * fill.slippage_per_share.abs();
+                }
+                RecordPayload::Cost {
+                    kind,
+                    instrument_id,
+                    amount,
+                } => costs.push((session, kind.as_str(), *instrument_id, *amount)),
+                RecordPayload::Released { kind }
+                    if matches!(*kind, KIND_SNAPSHOT | KIND_ORDER | KIND_FILL | KIND_COST) =>
+                {
+                    return Err(released_error(seq as u64, *kind, "result_tables"));
+                }
+                _ => {}
+            }
+        }
+        Ok(ResultTableRows {
+            snapshots,
+            positions,
+            orders,
+            fills,
+            costs,
+            fill_totals: (traded_notional, total_fees, total_slippage_cost),
+        })
+    }
+
+    /// `result_table_rows`를 Python 튜플 묶음으로 넘긴다.
+    pub(crate) fn result_tables(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let rows = self.result_table_rows()?;
+        to_object(
+            py,
+            (
+                rows.snapshots,
+                rows.positions,
+                rows.orders,
+                rows.fills,
+                rows.costs,
+                rows.fill_totals,
+            ),
+        )
+    }
+
     /// FILL record 순서로 `quantity × price`를 누산한다 (Python `traded_notional`과 같은 결합 순서).
     /// Python은 `finish()` 직후 FILL을 해제하기 전에 부른다.
     pub(crate) fn traded_notional(&self) -> PyResult<f64> {
@@ -669,6 +785,92 @@ mod tests {
             assert!(message.contains("fully drained"), "{message}");
             assert!(message.contains("released=4"), "{message}");
         }
+    }
+
+    fn order(order_id: &str, quantity: i64) -> RecordPayload {
+        RecordPayload::Order(OrderWire {
+            order_id: order_id.into(),
+            decision_id: "D-000001".into(),
+            instrument_id: 0,
+            quantity,
+            side: "buy".into(),
+            order_type: "market".into(),
+            limit_text: None,
+            stop_text: None,
+            tif: "day".into(),
+            group_id: None,
+            action_index: 0,
+            leg_index: None,
+        })
+    }
+
+    #[test]
+    fn result_tables_keep_record_order_and_flatten_positions_per_snapshot() {
+        let mut store = RecordStore::default();
+        store.append(0, RecordPayload::Market).unwrap();
+        store.append(0, order("O-000001", 7)).unwrap();
+        store
+            .append(
+                0,
+                RecordPayload::Snapshot(SnapshotWire {
+                    cash: 5.0,
+                    rows: vec![
+                        (0, 7, 10.0, 11.0, 77.0, 7.0),
+                        (1, 3, 20.0, 19.0, 57.0, -3.0),
+                    ],
+                    equity: 139.0,
+                    gross_exposure: 0.9,
+                }),
+            )
+            .unwrap();
+        store.append(1, fill(3, 10.0)).unwrap();
+        store
+            .append(
+                1,
+                RecordPayload::Cost {
+                    kind: "margin_interest".into(),
+                    instrument_id: None,
+                    amount: 1.5,
+                },
+            )
+            .unwrap();
+
+        let tables = store.result_table_rows().unwrap();
+        // positions_value는 행 순서 좌→우 결합이다.
+        assert_eq!(tables.snapshots, vec![(0, 5.0, 139.0, 0.9, 77.0 + 57.0)]);
+        assert_eq!(
+            tables.positions,
+            vec![
+                (0, 0, 7, 10.0, 11.0, 77.0, 7.0),
+                (0, 1, 3, 20.0, 19.0, 57.0, -3.0),
+            ]
+        );
+        assert_eq!(
+            tables.orders,
+            vec![("O-000001", "D-000001", 0, 0, "buy", 7, "market", "day")]
+        );
+        assert_eq!(
+            tables.fills,
+            vec![("F-000001", "O-000001", 1, 0, "buy", 3, 10.0, 0.0, 0.0)]
+        );
+        assert_eq!(tables.costs, vec![(1, "margin_interest", None, 1.5)]);
+        assert_eq!(tables.fill_totals, (30.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn result_tables_read_kinds_that_are_still_live_and_refuse_released_ones() {
+        let mut store = filled_store();
+        store.finish().unwrap();
+        // MARKET을 넘겨도 테이블이 읽는 kind가 아니므로 그대로 답한다.
+        drain_kind(&mut store, KIND_MARKET, 8);
+        let tables = store.result_table_rows().unwrap();
+        assert_eq!(tables.fills.len(), 2);
+        assert_eq!(tables.snapshots.len(), 1);
+
+        drain_kind(&mut store, KIND_FILL, 8);
+        let message = store.result_table_rows().unwrap_err().to_string();
+        assert!(message.contains("operation=result_tables"), "{message}");
+        assert!(message.contains("kind=fill(4)"), "{message}");
     }
 
     #[test]

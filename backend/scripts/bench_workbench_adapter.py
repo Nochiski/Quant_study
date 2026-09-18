@@ -28,7 +28,9 @@
 private 모듈을 직접 import한다 — 프로덕션 코드에서는 facade 경유가 규칙이다.
 
 `--core all`은 한 프로세스에서 두 코어를 모두 돌리므로 시간만 비교 대상이고 RSS는 격리되지
-않는다.
+않는다. 그래서 JSON의 `peak_rss_bytes`는 단일 코어 실행(`--core python` 또는 `--core rust`)일
+때만 값을 담고, `--core all`이면 null이다 (`rss_isolated`가 어느 쪽인지 말한다). peak RSS는
+프로세스 단위 누적 최댓값이라 한 프로세스에서 두 코어를 돌리면 뒤 코어 값이 앞 코어를 포함한다.
 
 사용법:
     uv run python scripts/bench_workbench_adapter.py --instruments 100 --core all --repeat 3
@@ -51,7 +53,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-from bench_universe import load_full_calendar_universe, synthetic_universe
+from bench_universe import load_full_calendar_universe, peak_rss_bytes, synthetic_universe
 
 from backtest_engine import BacktestEngine
 from backtest_engine.engine.store import EventStore
@@ -460,6 +462,8 @@ def main(argv: Sequence[str]) -> int:
     stage_samples: dict[ExecutionCore, list[dict[str, float]]] = {core: [] for core in cores}
     total_samples: dict[ExecutionCore, list[float]] = {core: [] for core in cores}
     signatures: dict[ExecutionCore, tuple[object, ...]] = {}
+    # 코어 실행이 끝난 시점의 프로세스 peak RSS. 단일 코어 실행일 때만 그 코어의 값이다.
+    peak_rss_by_core: dict[ExecutionCore, int] = {}
     for _ in range(args.repeat):
         for core in cores:
             # 앞 회차가 남긴 쓰레기를 타이머 밖에서 치운다. 그러지 않으면 전면 GC가 임의의
@@ -468,6 +472,7 @@ def main(argv: Sequence[str]) -> int:
             stages, total, result = measure_once(
                 adapter, execution_request(core, spec, tape, dataset, metric_windows)
             )
+            peak_rss_by_core[core] = peak_rss_bytes()
             stage_samples[core].append(stages)
             total_samples[core].append(total)
             signature = result_signature(result)
@@ -496,6 +501,7 @@ def main(argv: Sequence[str]) -> int:
         if ExecutionCore.PYTHON in cores
         else None
     )
+    rss_isolated = len(cores) == 1
     core_payload: dict[str, object] = {}
     payload: dict[str, object] = {
         "workload": {
@@ -508,6 +514,8 @@ def main(argv: Sequence[str]) -> int:
             "metric_windows": len(metric_windows),
             "synthetic": True,
         },
+        # 한 프로세스에서 두 코어를 돌리면 peak RSS가 코어별로 갈라지지 않는다.
+        "rss_isolated": rss_isolated,
         "cores": core_payload,
     }
     for core in cores:
@@ -528,6 +536,8 @@ def main(argv: Sequence[str]) -> int:
             # `engine.run` 한 번의 비용 대비 그 뒤 어댑터 구간이 몇 배인지. 1보다 크면
             # 엔진을 더 줄여도 워크벤치 체감 배수가 따라오지 않는다는 뜻이다.
             "after_run_over_run_ratio": after_run / run_seconds if run_seconds > 0 else None,
+            # 격리되지 않은 실행에서 값을 담으면 다른 코어의 할당까지 그 코어 수치로 읽힌다.
+            "peak_rss_bytes": peak_rss_by_core[core] if rss_isolated else None,
         }
         speedup_text = f" speedup={speedup:.3f}x" if speedup is not None else ""
         print(f"core={core.value} total={total_median:.6f}s{speedup_text}")
@@ -539,6 +549,12 @@ def main(argv: Sequence[str]) -> int:
             print(
                 f"  after_run={after_run:.6f}s after_run/engine.run={after_run / run_seconds:.3f}x"
             )
+        rss_text = (
+            f"{peak_rss_by_core[core] / 1024 / 1024:.1f}MiB"
+            if rss_isolated
+            else f"{peak_rss_by_core[core] / 1024 / 1024:.1f}MiB(shared, not recorded)"
+        )
+        print(f"  peak_rss={rss_text}")
 
     if args.json_out is not None:
         args.json_out.parent.mkdir(parents=True, exist_ok=True)

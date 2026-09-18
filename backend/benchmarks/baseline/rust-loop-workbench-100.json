@@ -1,0 +1,59 @@
+{
+  "workload": {
+    "instruments": 100,
+    "sessions": 1231,
+    "bars": 123100,
+    "tape_frames": 246,
+    "rebalance_every": 5,
+    "repeat": 3,
+    "synthetic": true
+  },
+  "cores": {
+    "python": {
+      "stage_seconds": {
+        "dataset_to_engine_inputs": 0.4794011000194587,
+        "strategy_and_feed_build": 0.13639659999171272,
+        "engine.run": 1.7942970999865793,
+        "result_materialize": 1.2999807950109243e-06,
+        "event_store_costs": 0.003964000003179535,
+        "artifacts": 0.5310904999787454,
+        "analysis_points": 0.02594589997897856,
+        "compute_analytics": 0.011857900011818856,
+        "manifest": 0.05110490001970902,
+        "other": 0.0003958000452257693
+      },
+      "total_seconds": 3.001295800000662,
+      "total_seconds_samples": [
+        2.9948316999943927,
+        3.246003699983703,
+        3.001295800000662
+      ],
+      "speedup_vs_python": 1.0,
+      "after_run_seconds": 0.6239644999732263,
+      "after_run_over_run_ratio": 0.34774870893894516
+    },
+    "rust": {
+      "stage_seconds": {
+        "dataset_to_engine_inputs": 0.5547144000011031,
+        "strategy_and_feed_build": 0.30476630001794547,
+        "engine.run": 0.3885558000183664,
+        "result_materialize": 0.5421587000018917,
+        "event_store_costs": 0.001999999978579581,
+        "artifacts": 0.5152192999958061,
+        "analysis_points": 0.016518799995537847,
+        "compute_analytics": 0.011899400007678196,
+        "manifest": 0.04204689999460243,
+        "other": 5.0900038331747055e-05
+      },
+      "total_seconds": 2.3372820999938995,
+      "total_seconds_samples": [
+        1.9970617000071798,
+        2.4823797999997623,
+        2.3372820999938995
+      ],
+      "speedup_vs_python": 1.2840965153536648,
+      "after_run_seconds": 1.1298430999740958,
+      "after_run_over_run_ratio": 2.907801401808157
+    }
+  }
+}

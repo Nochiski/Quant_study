@@ -43,6 +43,9 @@
 | 실제 4종목 fixture · callback | 0.215초 | 0.223초 | 0.069초 | **3.13배** |
 | 실제 4종목 fixture · tape | 0.192초 | 0.242초 | 0.037초 | **5.18배** |
 
+- **위 표의 배수는 측정 경계가 틀렸다 (DEFECT-301).** 타이머가 `engine.run()`만 감싸 lazy한
+  Rust 결과의 조회 비용이 빠졌다. 정직한 경계로 다시 잰 수치는 아래 "2026-09-18 측정 경계 교정"이
+  정본이며, 이 표는 무엇이 어떻게 틀렸는지를 남기기 위해 기록으로 보존한다.
 - 원본 산출물: `benchmarks/baseline/rust-loop-100-callback.json`, `rust-loop-100-tape.json`,
   `rust-loop-300-callback.json`, `rust-loop-300-tape.json`, `rust-loop-real-fixture-callback.json`,
   `rust-loop-real-fixture-tape.json`. tape 표(`EqualWeightTape`) 생성은 타이머 밖이다 — 워크벤치에서도
@@ -433,12 +436,58 @@ M6 측정 판정 (2026-09-03):
 - 세션당 FFI 0회: **통과**. 왕복은 전략 콜백과 적재·종료 배치뿐이다.
 - Peak RSS 1.25배 이하: callback **통과(1.23배)**, tape **근접 미달(1.27배)**.
 
+2026-09-18 측정 경계 교정 (DEFECT-301):
+
+`scripts/bench_universe.py`의 타이머가 `engine.run()`만 감쌌고 `result.snapshots`·`orders`·
+`fills` 조회는 밖에 있었다. Rust 코어의 `BacktestResult`는 lazy라 결과를 읽는 시점에 공개 객체를
+만들고 Python 코어는 `run()` 안에서 이미 만들므로, 위 2026-09-17 표는 Rust 쪽 비용만 빼고 잰
+값이다. 아래는 조회를 타이머 안에 넣어 두 코어를 같은 경계로 다시 잰 수치다 (2026-09-18,
+`--warmup 1 --repeat 5`, Rust `--release`, 측정 중 CPU 부하 14~18%).
+
+| 워크로드 | python total | rust total | `run()`만 배수 | `run()`+조회 배수 |
+|---|---|---|---|---|
+| 100종목 synthetic · callback | 1.700초 | 0.787초 | 4.91배 | **2.16배** |
+| 100종목 synthetic · tape | 1.654초 | 0.811초 | 4.94배 | **2.04배** |
+| 300종목 synthetic · callback | 4.178초 | 2.164초 | 3.81배 | **1.93배** |
+| 300종목 synthetic · tape | 4.101초 | 2.256초 | 3.94배 | **1.82배** |
+| 실제 4종목 fixture · callback | 0.110초 | 0.051초 | 3.71배 | **2.14배** |
+| 실제 4종목 fixture · tape | 0.107초 | 0.039초 | 5.93배 | **2.77배** |
+
+Rust `total`의 절반 안팎이 결과 조회다 (100종목 callback 0.346초 + 0.440초, 300종목 callback
+1.097초 + 1.074초). Python 코어의 조회 구간은 모든 워크로드에서 1마이크로초 미만이다.
+
+| 코어 격리 Peak RSS (100종목, `--core <one>` 단독 실행) | python | rust | 배수 |
+|---|---|---|---|
+| callback | 169.6 MiB | 209.4 MiB | **1.23배** |
+| tape | 170.3 MiB | 217.9 MiB | **1.28배** |
+
+`--core all`은 세 코어가 한 프로세스를 공유해 같은 peak를 받으므로 RSS 정본이 아니다. JSON의
+`workload.rss_isolated`가 그 구분을 들고 있다.
+
+워크벤치 e2e (`scripts/bench_workbench_adapter.py --instruments 100 --repeat 3`,
+`benchmarks/baseline/rust-loop-workbench-100.json`): 어댑터 전체 python 3.001초 → rust 2.337초로
+**1.28배**. Rust에서 `engine.run` 0.389초 뒤에 오는 구간이 1.130초로 `engine.run`의 **2.91배**이며,
+그 안에서 결과 조회 0.542초와 raw artifact 변환 0.515초가 지배적이다. `engine.run` 앞의
+dataset→엔진 입력 변환 0.555초와 전략·피드 조립 0.305초도 코어와 무관하게 남는다.
+
+게이트 재판정 (정직한 경계 기준):
+
+- 100종목 목표 2배: **통과(callback 2.16배, tape 2.04배)**. 2026-09-17 기록의 4.22/4.73배는 무효.
+- 300종목 목표 2배: **미달(callback 1.93배, tape 1.82배)**. 2026-09-17 기록의 3.55/4.47배는 무효.
+- 4종목 fixture 회귀 금지: **통과(2.14~2.77배 향상)**.
+- 세션당 FFI 0회: **통과**. 측정 경계와 무관하며 판정이 바뀌지 않는다.
+- Peak RSS 1.25배 이하: callback **통과(1.23배)**, tape **미달(1.28배)**.
+
+이 절은 성능 개선이 아니라 측정 교정이다. 코드 동작은 그대로이고 배수만 정직해졌다. 후속
+PR(materialize 배치, 워크벤치 columnar 변환, hot loop, 메모리)이 끝난 뒤 같은 경계로 다시 재서
+게이트를 재판정한다.
+
 후속 백로그:
 
 - [x] Rust가 다음 전략 callback까지 market, fill, update, close와 queue drain을 진행하는 driver API.
 - [x] callback frame의 portfolio/open-order view를 콜백 시점 wire로 고정하고 lazy 변환.
 - [ ] 서로 다른 실제 종목 100/300개를 포함한 외부 원장으로 성능 게이트 재검증.
-- [ ] 워크벤치 end-to-end 구간별 측정 (#98 Phase 3-2).
+- [x] 워크벤치 end-to-end 구간별 측정 (#98 Phase 3-2). `scripts/bench_workbench_adapter.py`.
 - [x] 종료 배치를 레코드 단위 lazy payload 조회로 (callback 1.23배). tape 1.27배는 후속.
 
 ## 첫 구현 슬라이스 상세

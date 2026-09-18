@@ -9,6 +9,7 @@
     "requested_density": 0.15,
     "bar_density": 0.1502843216896832,
     "row_index_expected": "sparse",
+    "cpu_load_percent": 19,
     "repeat": 5,
     "warmup": 1,
     "rss_isolated": false

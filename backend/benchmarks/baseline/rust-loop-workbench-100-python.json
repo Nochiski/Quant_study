@@ -7,7 +7,8 @@
     "rebalance_every": 5,
     "repeat": 5,
     "metric_windows": 1,
-    "synthetic": true
+    "synthetic": true,
+    "cpu_load_percent": 30
   },
   "rss_isolated": true,
   "cores": {

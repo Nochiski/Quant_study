@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# 서버 equity 층을 로컬로 내려받아 워크벤치·백테스트가 읽을 수 있게 만든다.
+# 서버 equity 층을 로컬로 내려받아 워크벤치·백테스트가 읽을 수 있게 만든다 (운영자 rsync 경로).
+# 협업자 SFTP 계정(quantshare, 쉘 없음)은 rsync 가 안 되므로 `ledger_sync.ps1`/`ledger_sync.sh` 를 쓴다
+# (`docs/LEDGER_SYNC.md`).
 #
 #   database/scripts/fetch_equity_local.sh <로컬 경로> [minimal|full]
 #

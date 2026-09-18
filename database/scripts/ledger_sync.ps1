@@ -1,0 +1,18 @@
+# 카엘 서버 SFTP → 로컬 equity 층 동기화 CLI 래퍼 (Windows).
+#
+#   database\scripts\ledger_sync.ps1 plan
+#   database\scripts\ledger_sync.ps1 sync            # pull → verify → catalog (일일 작업이 부르는 동사)
+#   database\scripts\ledger_sync.ps1 verify --level hash
+#   database\scripts\ledger_sync.ps1 status --remote
+#
+# backend 프로젝트 환경(duckdb·pyarrow — `uv sync --extra parquet --extra equity`)에 paramiko 만
+# 얹어 `python -m ledger_sync` 를 돈다. `equity catalog` 위임도 같은 인터프리터를 쓴다.
+# 접속 정보 기본값: 210.217.23.47 / quantshare / ~/.ssh/kael_quant. 환경변수 QL_SYNC_* 로 바꾼다.
+# 로컬 루트 기본값: ~/quant-ledger/data (QL_SYNC_ROOT).
+$ErrorActionPreference = "Stop"
+$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
+$backend = Join-Path $repoRoot "backend"
+$env:PYTHONPATH = (Join-Path $repoRoot "database\src")
+$env:PYTHONUTF8 = "1"
+& uv run --project $backend --with paramiko python -m ledger_sync @args
+exit $LASTEXITCODE

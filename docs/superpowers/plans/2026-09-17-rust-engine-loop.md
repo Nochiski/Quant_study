@@ -1,5 +1,7 @@
 # Rust 실행 루프 이전 구현 계획
 
+> **후속:** 이 계획의 PR 스택(#107 → #109 → #110)을 머지한 뒤 리뷰에서 나온 결함·SoT 중복·성능 여지와 게이트 재판정은 [Rust 루프 드라이버 리뷰 후속 구현 계획](./2026-09-18-rust-loop-review-followup.md)이 잇는다. 게이트 수치의 정본은 그 문서와 스펙의 "2026-09-18 최종 판정" 절이다.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** `core="rust"` 실행 루프(MARKET → FILL → NOTIFY → SESSION_CLOSE → ORDER 드레인)를 Rust `PersistentEngine`이 처음부터 끝까지 소유하게 하고, 워크벤치 TargetTape 전략은 Python 콜백 0회로 완주시킨다. 이슈 #98.

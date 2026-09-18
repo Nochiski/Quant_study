@@ -76,20 +76,37 @@ uv run pyright
 
 ### 벤치 측정 표준 (PR 1 이후)
 
+아래를 순서대로 돌리면 `benchmarks/baseline/rust-loop-*.json` **16개**가 전부 재현된다. 실행마다
+직전 CPU 부하를 재고(`powershell -NoProfile -Command "(Get-CimInstance Win32_Processor).LoadPercentage"`)
+40%를 넘으면 기다린다. 부하는 스크립트가 JSON `workload.cpu_load_percent`에도 남긴다.
+
 ```bash
-# 시간 (run + 결과 조회 분리 기록)
+# 시간 (run + 결과 조회 분리 기록). 게이트 배수 6개의 출처다 — 한 프로세스에서 세 코어를
+# 교대로 돌려 비교 조건이 같다.
 uv run python scripts/bench_universe.py tests/fixtures/krx_parquet --instruments 100 --synthetic --core all --strategy callback --warmup 1 --repeat 5 --json-out benchmarks/baseline/rust-loop-100-callback.json
 uv run python scripts/bench_universe.py tests/fixtures/krx_parquet --instruments 100 --synthetic --core all --strategy tape     --warmup 1 --repeat 5 --json-out benchmarks/baseline/rust-loop-100-tape.json
 uv run python scripts/bench_universe.py tests/fixtures/krx_parquet --instruments 300 --synthetic --core all --strategy callback --warmup 1 --repeat 5 --json-out benchmarks/baseline/rust-loop-300-callback.json
 uv run python scripts/bench_universe.py tests/fixtures/krx_parquet --instruments 300 --synthetic --core all --strategy tape     --warmup 1 --repeat 5 --json-out benchmarks/baseline/rust-loop-300-tape.json
 uv run python scripts/bench_universe.py tests/fixtures/krx_parquet --instruments 4 --core all --strategy callback --warmup 1 --repeat 5 --json-out benchmarks/baseline/rust-loop-real-fixture-callback.json
 uv run python scripts/bench_universe.py tests/fixtures/krx_parquet --instruments 4 --core all --strategy tape     --warmup 1 --repeat 5 --json-out benchmarks/baseline/rust-loop-real-fixture-tape.json
-# Peak RSS (코어별 프로세스 격리, 결과 조회 포함)
+
+# 희소 유니버스 (PR 11). 첫 줄이 Sparse 경로 워크로드, 뒤 두 줄이 행 조회표 표현만 갈리는 A/B
+# 짝이다 (상장 구간 246 / 247 세션 — bar 수 0.4% 차이로 Sparse / Dense가 뒤집힌다).
+uv run python scripts/bench_universe.py tests/fixtures/krx_parquet --instruments 300 --synthetic --density 0.15   --core all --strategy tape --warmup 1 --repeat 5 --json-out benchmarks/baseline/rust-loop-300-sparse-tape.json
+uv run python scripts/bench_universe.py tests/fixtures/krx_parquet --instruments 300 --synthetic --density 0.2    --core all --strategy tape --warmup 1 --repeat 5 --json-out benchmarks/baseline/rust-loop-300-boundary-sparse-tape.json
+uv run python scripts/bench_universe.py tests/fixtures/krx_parquet --instruments 300 --synthetic --density 0.2005 --core all --strategy tape --warmup 1 --repeat 5 --json-out benchmarks/baseline/rust-loop-300-boundary-dense-tape.json
+
+# Peak RSS (코어별 프로세스 격리, 결과 조회 포함). RSS 정본이다.
 for core in python rust; do for s in callback tape; do
   uv run python scripts/bench_universe.py tests/fixtures/krx_parquet --instruments 100 --synthetic --core $core --strategy $s --warmup 1 --repeat 3 --json-out benchmarks/baseline/rust-loop-memory-100-$s-$core.json
 done; done
-# 워크벤치 어댑터 e2e 구간 (Phase 3-2)
-uv run python scripts/bench_workbench_adapter.py --instruments 100 --core all --repeat 3 --json-out benchmarks/baseline/rust-loop-workbench-100.json
+
+# 워크벤치 어댑터 e2e 구간 (Phase 3-2). 구간 수치의 정본은 코어 격리 실행이다 —
+# --core all에서는 자동 순환 GC가 rust compute_analytics에 붙어 구간이 왜곡된다.
+for core in python rust; do
+  uv run python scripts/bench_workbench_adapter.py --instruments 100 --core $core --repeat 5 --json-out benchmarks/baseline/rust-loop-workbench-100-$core.json
+done
+uv run python scripts/bench_workbench_adapter.py --instruments 100 --core all --repeat 5 --json-out benchmarks/baseline/rust-loop-workbench-100.json
 ```
 
 ---
@@ -484,7 +501,7 @@ class _DeclaredContextMethods:
 - 실측 (**게이트**): 코어 격리 Peak RSS(결과 조회 포함) tape·callback 모두 python 대비 **1.25배 이하**. 100종목 tape `materialize_seconds`가 PR 5 대비 30% 이상 감소. `run_seconds` 회귀 ±3% 이내.
 - E2E: `tests/integration` 통과 + `bench_workbench_adapter.py` python/rust metrics 동일.
 
-**결과:** Peak RSS 게이트 **통과** — base 커밋 JSON 기준 callback 1.23배 → 1.18배, tape 1.28배 → 1.22배. `run_seconds` 회귀 **없음**(프로세스마다 1회만 도는 측정에서 0.3559초 → 0.3535초). 조회 시간 **미달** — 같은 프로세스 A/B(각 24 표본, 최솟값)로 tape −12.4%, callback −10.3%로 목표 −30%에 못 미친다. cProfile 기준 FFI는 조회 시간의 약 4%(청크 조회 0.028초/90회)뿐이고, 스냅샷 1,225개가 만드는 `Position` 123,625개가 약 65%다. 남은 비용은 두 코어가 같이 무는 Python 객체 생성이라 FFI 경계로는 줄지 않는다 — 스펙 후속 백로그에 레코드 메모리 레이아웃(`Vec<NativeRecord>` 인라인 슬롯 약 14 MB)과 함께 남겼다.
+**결과:** Peak RSS 게이트 **통과** — base 커밋 JSON 기준 callback 1.23배 → 1.18배, tape 1.28배 → 1.22배. `run_seconds` 회귀 **없음**(프로세스마다 1회만 도는 측정에서 0.3559초 → 0.3535초). 조회 시간 **미달** — 같은 프로세스 A/B(각 24 표본, 최솟값)로 tape −12.4%, callback −10.3%로 목표 −30%에 못 미친다. cProfile 기준 FFI는 조회 시간의 약 4%(청크 조회 0.028초/90회)뿐이고, 스냅샷이 만드는 `Position`이 약 65%다 (프로파일이 센 생성 호출 123,625회. PR 11 tip에서 결과 객체를 직접 세면 스냅샷 1,231개에 `Position` 123,000개다). 남은 비용은 두 코어가 같이 무는 Python 객체 생성이라 FFI 경계로는 줄지 않는다 — 스펙 후속 백로그에 레코드 메모리 레이아웃(`Vec<NativeRecord>` 인라인 슬롯 약 14 MB)과 함께 남겼다.
 
 한 프로세스에서 `--repeat`으로 반복하면 `run_seconds`가 3~7% 느려 보이는데, 직전 회차의 조회가 실제로 메모리를 반납해 다음 회차가 페이지를 다시 폴트하기 때문이다. 프로세스마다 1회만 도는 측정에서 사라지므로 엔진 회귀가 아니라 벤치 하네스의 회차 간 간섭이다.
 
@@ -707,23 +724,69 @@ after 열은 리뷰 반영(DEFECT-1001·1002·등록부 중복 거부) 후 브�
 
 ---
 
-## PR 11 — 최종 재측정·문서·이슈 종료 (`docs/rust-loop-final-gates`, base PR 10 또는 PR 9)
+## PR 11 — 최종 재측정·문서·이슈 종료 (`docs/rust-loop-final-gates`, base PR 10)
 
-- [ ] "벤치 측정 표준" 전부 재실행 (부하 40% 이하), JSON 12개 갱신.
-- [ ] 스펙 "2026-09-18 측정 경계 교정" 아래 "최종 판정" 절: 게이트 표(100/300종목 total 배수, 4종목 fixture, RSS, FFI 0회, parity) + 남은 항목.
-- [ ] `docs/rust-python-benchmark-report.html` 갱신, `docs/superpowers/plans/2026-09-17-rust-engine-loop.md` 상단에 이 문서 링크.
-- [ ] 이슈 #98 댓글: PR 링크 11개, 최종 표, `.claude/rules/pr-review.md` 양식으로 남은 결정(Phase 3-4). 게이트 전부 통과면 종료 제안.
-- [ ] 이슈 #98 댓글에 후속 항목으로 남길 것: 코어 간 instrument key 충돌 거부 통일(현재 persistent만 거부, python 코어는 완주). #135(`7E+2` 수량 표기). 아래 8.3 항목.
-  - [ ] PR 8에서 되돌린 tape 경량 프레임(8.3) — 알림(fill·order_update) 선언 tape 워크로드를 재는 벤치 옵션이 생기면 `make_native_frame`을 다시 올린다. 현재 벤치는 `MARKET`만 선언해 NOTIFY 분기가 돌지 않아 측정으로 유지를 정당화할 수 없었다.
-  - [ ] 라우터 `instrument_not_snapshot` 메시지의 `available` 목록이 `HashMap` 순서(비결정)인데 python(`types/market.py::MarketSnapshot.bar`)은 feed 순서 + `ts=` 접두까지 담는다 — byte 동일이 아니고 이를 고정하는 테스트도 없다(PR 9 이전부터 그랬고 PR 9는 키 타입만 바꿔 동작은 그대로다).
-- [ ] 스펙 "측정 경계" 절에 도구 한계를 남길 것: `scripts/bench_universe.py::peak_rss_bytes()`는 Windows `PeakWorkingSetSize`라 run 도중 잠깐 커밋됐다 풀리는 버퍼를 못 잡는다. PR 9의 큐 arena(300종목 30.4MiB)가 그 예로, working set peak은 움직이지 않고 `PeakPagefileUsage`(peak commit)로만 −5.16MiB가 보였다. 메모리 항목을 이 지표 하나로 판정하면 안 된다.
-- [ ] PR 11 재측정에 **희소 유니버스 1건**(밀도 20% 미만 → `RowIndex::Sparse` 경로)을 추가할 것. 현재 벤치는 100·300종목 모두 밀도 100%라 Dense만 돈다 — Sparse의 `row_at` 해시 조회 비용이 한 번도 측정되지 않았다.
-- [ ] 메모리 `rust-loop-driver-pr-stack.md` 갱신.
+- [x] "벤치 측정 표준" 전부 재실행 (실행 직전 CPU 부하 15~39%), JSON 16개 기록 — 기존 11개
+  재기록 + 희소 3개(`rust-loop-300-sparse-tape`, `-boundary-sparse-tape`, `-boundary-dense-tape`)
+  + 워크벤치 코어 격리 2개(`rust-loop-workbench-100-python`, `-rust`).
+- [x] 스펙 "2026-09-18 측정 경계 교정" 아래 "2026-09-18 최종 판정 (리뷰 후속 PR 1~11)" 절:
+  게이트 표 + 엔진 실측 표 + 워크벤치 e2e 구간 표 + Peak RSS 표 + 희소 유니버스 표 + 남은 항목.
+  "현재 재개 지점" 갱신.
+- [x] `docs/rust-python-benchmark-report.html` 갱신(헤드라인·300종목·memory·e2e 카드 + 게이트
+  판정 카드 신설), `docs/superpowers/plans/2026-09-17-rust-engine-loop.md` 상단에 이 문서 링크.
+- [x] 이슈 #98 댓글 초안 `docs/superpowers/plans/2026-09-18-issue-98-closing-comment.md`.
+  게시는 팀 리드가 한다.
+- [x] `scripts/bench_universe.py --density` — 희소 유니버스 옵션. 종목마다 길이
+  `round(sessions × density)`의 연속 상장 구간만 남긴다(순차 상장). `row_index_expected()`가
+  Rust `feed.rs`의 선택 규칙(`slots × 4B ≤ rows × 20B`)을 재현해 JSON에 남긴다.
+- [x] 스펙 "최종 판정" 절에 `peak_rss_bytes()`(Windows `PeakWorkingSetSize`)의 도구 한계 기록.
+- [ ] 메모리 `rust-loop-driver-pr-stack.md` 갱신 — 팀 리드 몫.
+
+### `gc.freeze()` 검토 결과
+
+넣지 않았다. PR 10이 보고한 잡음(`--core all`에서 rust `compute_analytics`가 0.016초 대신
+0.158초)은 이번 측정에서도 `--core all` 실행에만 나타났고(0.018초 → 0.168초) 코어 격리
+실행에서는 사라진다. 그래서 구간별 수치의 정본을 **격리 실행 JSON**으로 옮기고 `--core all`은
+배수 비교용으로만 쓰기로 했다. 스크립트에 `gc.freeze()`를 넣으면 기존 JSON 전체와 비교가
+끊기고, 벤치 하네스가 프로덕션에 없는 GC 상태를 만들어 측정 자체의 대표성이 떨어진다.
+
+### 최종 판정
+
+| 이슈 #98 게이트 | 최소 | 목표 | PR 1 기준선 | 최종 | 판정 |
+|---|---|---|---|---|---|
+| 100종목 TargetTape 경로 | 3배 | 5배 | 2.04배 | 엔진 2.41배 / 워크벤치 e2e 3.23배 | **미달**(엔진 경계) |
+| 100종목 Python 전략 경로 | 2배 | 3배 | 2.16배 | 2.48배 | **통과**(목표 미달) |
+| 300종목 | 2배 | 3배 | 1.93배 · 1.82배 | 2.35배 · 2.43배 | **통과**(목표 미달) |
+| 실제 4종목 fixture | 회귀 10% 이내 | 현행 이상 | 2.14배 · 2.77배 | 2.41배 · 2.59배 | **통과** |
+| 세션당 FFI | 0회 | — | 0회 | 0회 | **통과** |
+| Peak RSS | 1.25배 이하 | — | 1.23배 · 1.28배 | 1.15배 · 1.19배 | **통과** |
+| 결과 패리티 | 100% | — | 통과 | 통과 | **통과** |
+
+수치의 정본은 스펙의 "2026-09-18 최종 판정" 절이다. 희소 유니버스 A/B(밀도 19.98% Sparse vs
+20.06% Dense, bar 수 0.4% 차이)에서 Sparse가 rust `run()` 기준 **8.1% 느리다**.
+
+### 이슈 #98에 후속 항목으로 남길 것
+
+- [ ] TargetTape 엔진 경계 최소 3배 — 남은 거리는 결과 조회의 Python 공개 객체 생성이다.
+- [ ] PR 8에서 되돌린 tape 경량 프레임(8.3) — 알림(fill·order_update) 선언 tape 워크로드를 재는
+  벤치 옵션이 생기면 `make_native_frame`을 다시 올린다. 현재 벤치는 `MARKET`만 선언해 NOTIFY
+  분기가 돌지 않아 측정으로 유지를 정당화할 수 없었다.
+- [ ] 코어 간 instrument key 충돌 거부 통일 (현재 persistent만 거부, python 코어는 완주).
+- [ ] #135 (`7E+2` 수량 표기).
+- [ ] 라우터 `instrument_not_snapshot` 메시지의 `available` 목록이 `HashMap` 순서(비결정)인데
+  python(`types/market.py::MarketSnapshot.bar`)은 feed 순서 + `ts=` 접두까지 담는다 — byte
+  동일이 아니고 이를 고정하는 테스트도 없다.
+- [ ] `BuyingPower` key clone — `#[pyclass]`라 수명을 못 갖고 `HashMap<String, _>` 둘을 key마다
+  채운다. 줄이려면 두 맵 병합과 `checkpoint`/`restore` 모양 변경이 필요하다.
+- [ ] `engine/store.py` → `engine/tape.py` import 방향 (`no_bar_reason` 정본 단일화의 대가).
+- [ ] 희소 경로 — 선택 규칙(밀도 20%)이 맞는 경계인지 실제 누적 유니버스 원장으로 재확인.
 
 ### AC
 
-- 실측: 표의 모든 수치가 이 PR 커밋 시점 JSON과 일치.
-- E2E: CI(backend·frontend·browser-e2e) 통과.
+- 실측: 표의 모든 수치가 이 PR 커밋 시점 JSON과 일치. ✅
+- E2E: CI(backend·frontend·browser-e2e) 통과 — PR CI에서 확인.
+- 로컬 게이트: `uv run ruff check src tests scripts` passed, `uv run pyright` 0 errors,
+  `uv run pytest -q` 1,329 passed / 13 skipped, `cargo test` 38 passed.
 
 ---
 
@@ -745,4 +808,4 @@ after 열은 리뷰 반영(DEFECT-1001·1002·등록부 중복 거부) 후 브�
 | 8 | `perf/rust-hot-loop` | 리뷰 APPROVE·PR 생성 | #137 | Opus APPROVE (테스트·set_mark·Python key 충돌 거부 반영, 300종목 run −21~22%) |
 | 9 | `perf/record-and-queue-memory` | 리뷰 APPROVE·PR 생성 | #138 | Opus APPROVE (DEFECT-901 반영, RSS 1.14/1.18배, run −10%) |
 | 10 | `perf/feed-columnar` | 리뷰 APPROVE·PR 생성 | #141 | Opus REQUEST_CHANGES→APPROVE (쓰레기 파일·열 캐시 RSS 반영, feed −84%, 워크벤치 e2e 3.21배) |
-| 11 | `docs/rust-loop-final-gates` | 대기 | | |
+| 11 | `docs/rust-loop-final-gates` | 리뷰 APPROVE·PR 생성·이슈 #98 댓글 게시 | #142 | Opus APPROVE (수치 대조 불일치 0, 권고 9건 반영) |

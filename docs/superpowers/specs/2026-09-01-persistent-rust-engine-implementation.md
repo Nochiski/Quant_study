@@ -57,8 +57,8 @@
   rust 216.7 MiB = 1.27배(**근접 미달**). 첫 측정은 1.46/1.55배였는데 종료 배치가 Rust wire를 Python
   tuple로 한 번에 복제하는 구간이 원인이라, 레코드 인덱스만 넘기고 payload는 `record_payload(seq)`로
   필요할 때 읽도록 바꾸고 종료 시 큐 arena·tape 프레임을 해제했다.
-- 최종 게이트 판정 **(2026-09-18 측정 경계 교정으로 무효 — 아래 "2026-09-18 측정 경계 교정"의
-  재판정을 본다)**: 세션당 FFI 0회 **통과**. 100종목 callback 4.22배(목표 2배 **통과**),
+- 최종 게이트 판정 **(2026-09-18 측정 경계 교정으로 무효 — 정본은 아래 "2026-09-18 최종 판정
+  (리뷰 후속 PR 1~11)" 절이다)**: 세션당 FFI 0회 **통과**. 100종목 callback 4.22배(목표 2배 **통과**),
   tape 경로 4.73배(최소 3배 **통과**, 목표 5배는 근접 미달). 300종목 callback 3.55배·tape 4.47배(목표 2배 **통과**).
   4종목 fixture 회귀 없음(3.13~5.18배 향상).
 - 남은 Python 시간: feed 적재(열 comprehension), 전략 콜백 본체와 `decision_to_wire`, 결과 조회 시
@@ -134,14 +134,19 @@
 
 > 이 블록은 작업을 진행할 때마다 최신 상태로 덮어쓴다.
 
-- 현재 단계: #98 Rust 루프 드라이버 — 구현·측정 완료, PR 스택 리뷰 중
-- 현재 작업: PR #107(드라이버) → #109(tape 네이티브) → 벤치·문서 PR
-- 마지막 완료 항목: 세션당 FFI 0회, 선언형 tape 콜백 0회, 벤치 매트릭스 6종 측정
-- 다음 작업: 워크벤치 end-to-end(결과 변환·분석 지표) 구간별 측정으로 다음 병목 확인 (#98 Phase 3-2),
-  Python 코어 삭제 범위는 별도 이슈(#98 Phase 3-4)
+- 현재 단계: #98 리뷰 후속 스택 — PR 1~10 생성 완료(#123 #124 #127 #128 #129 #134 #136 #137 #138 #141),
+  PR 11(`docs/rust-loop-final-gates`)에서 최종 재측정·문서 정리
+- 현재 작업: 최종 게이트 판정 문서화와 이슈 #98 종료 댓글 초안
+  (`docs/superpowers/plans/2026-09-18-issue-98-closing-comment.md`)
+- 마지막 완료 항목: 전 워크로드 재측정 (위 "2026-09-18 최종 판정" 절). 게이트 7개 중 6개 통과,
+  TargetTape 엔진 경계 최소 3배만 미달(2.41배)
+- 다음 작업: 이슈 #98 종료 여부 결정. Python 코어 삭제 범위는 이슈 원문 "결정 필요" 2번
+  (#98 Phase 3-4) — 기본안은 parity oracle을 위해 "테스트 전용 reference 유지"
 - 알려진 blocker: 없음
 - 작업 트리의 기존 사용자/선행 변경: 없음
 - 마지막 검증:
+  - 2026-09-18 PR 11 tip: `uv run ruff check src tests scripts` — passed,
+    `uv run pyright` — 0 errors, `uv run pytest -q` — 1,329 passed / 13 skipped
   - `cargo fmt --manifest-path rust/backtest_core/Cargo.toml -- --check` — passed
   - `cargo clippy --manifest-path rust/backtest_core/Cargo.toml --all-targets -- -D warnings`
   - `cargo test --manifest-path rust/backtest_core/Cargo.toml` — 13 passed
@@ -516,9 +521,137 @@ tape 0.4207초 → 0.3687초(**−12.4%**), callback 0.4111초 → 0.3687초(**�
 그대로 일치한다.
 
 목표였던 조회 시간 −30%에는 못 미친다. cProfile로 보면 FFI는 조회 시간의 3% 수준(청크 조회
-0.028초/90회)이고, 스냅샷 1,225개가 만드는 `Position` 123,625개가 조회의 약 65%를 차지한다.
+0.028초/90회)이고, 스냅샷이 만드는 `Position`이 조회의 약 65%를 차지한다 (프로파일이 센 생성
+호출 123,625회. PR 11 tip에서 결과 객체를 직접 세면 스냅샷 1,231개에 `Position` 123,000개이며,
+623회 차이가 어디서 나는지는 확인하지 않았다).
 남은 비용은 Python 객체 생성이라 FFI 경계를 더 손봐도 줄지 않는다. Peak RSS 쪽도 payload 힙은
 돌려주지만 `Vec<NativeRecord>`의 인라인 슬롯은 남아 있어, 다음 개선은 레코드 메모리 레이아웃이다.
+
+2026-09-18 최종 판정 (리뷰 후속 PR 1~11):
+
+리뷰 후속 스택 PR 1~10(#123 #124 #127 #128 #129 #134 #136 #137 #138 #141)을 전부 쌓은 tip에서
+"벤치 측정 표준"의 전 워크로드를 다시 쟀다 (`--warmup 1 --repeat 5`, Rust `--release`, 실행
+직전 CPU 부하 15~39%). 산출물은 `benchmarks/baseline/rust-loop-*.json` 16개다.
+
+| 이슈 #98 게이트 | 최소 | 목표 | PR 1 기준선 | 최종 | 판정 |
+|---|---|---|---|---|---|
+| 100종목 TargetTape 경로 | 3배 | 5배 | 2.04배 | 엔진 2.41배 / 워크벤치 e2e 3.23배 | 엔진 경계 **미달**, 워크벤치 경계 최소선 통과 |
+| 100종목 Python 전략 경로 | 2배 | 3배 | 2.16배 | 2.48배 | 최소 **통과**, 목표 미달 |
+| 300종목 | 2배 | 3배 | callback 1.93배 · tape 1.82배 | callback 2.35배 · tape 2.43배 | 최소 **통과**, 목표 미달 |
+| 실제 4종목 fixture | 회귀 10% 이내 | 현행 이상 | callback 2.14배 · tape 2.77배 | callback 2.41배 · tape 2.59배 | **통과** |
+| 세션당 FFI | 0회 | — | 0회 | 0회 | **통과** |
+| Peak RSS | Python 대비 1.25배 이하 | — | callback 1.23배 · tape 1.28배 | callback 1.15배 · tape 1.19배 | **통과** |
+| 결과 패리티 | 100% | — | 통과 | 통과 | **통과** |
+
+**어느 실행에서 가져온 수치인가.** 게이트 배수 6개는 `--core all` JSON에서, 워크벤치 구간
+수치는 코어 격리 JSON에서 가져왔다. 엔진 벤치는 `--core all`이 같은 프로세스에서 세 코어를
+교대로 돌려 배수 비교의 조건이 같고, 코어 격리 실행은 `--repeat 3`인 데다
+`rust-loop-memory-100-callback-python.json`의 run 중앙값이 3.62초로 오염돼(다른 실행은 1.70초)
+callback 짝을 배수에 쓸 수 없다. 워크벤치는 반대로 `--core all`에서 자동 순환 GC가 rust
+`compute_analytics`에 붙어 구간 수치가 왜곡되므로 격리 실행이 정본이다. 오염되지 않은 격리
+tape 짝으로 계산하면 100종목 tape가 2.64배(1.6718초 / 0.6322초)로 `--core all`의 2.41배보다
+높다 — 판정은 바뀌지 않는다.
+
+엔진 벤치 상세 (`scripts/bench_universe.py`, 중앙값, `speedup`은 `run()` + 결과 조회 합):
+
+| 워크로드 | python total | rust run | rust 조회 | rust total | 배수 | `run()`만 배수 |
+|---|---|---|---|---|---|---|
+| 100종목 synthetic · callback | 1.696초 | 0.268초 | 0.407초 | 0.685초 | **2.48배** | 6.32배 |
+| 100종목 synthetic · tape | 1.650초 | 0.241초 | 0.430초 | 0.685초 | **2.41배** | 6.83배 |
+| 300종목 synthetic · callback | 4.723초 | 0.837초 | 1.190초 | 2.012초 | **2.35배** | 5.64배 |
+| 300종목 synthetic · tape | 4.471초 | 0.721초 | 1.106초 | 1.841초 | **2.43배** | 6.20배 |
+| 실제 4종목 fixture · callback | 0.115초 | 0.030초 | 0.016초 | 0.048초 | **2.41배** | 3.84배 |
+| 실제 4종목 fixture · tape | 0.122초 | 0.030초 | 0.017초 | 0.047초 | **2.59배** | 4.09배 |
+
+세 코어의 orders / fills / 최종 equity는 워크로드마다 동일하다 (100종목 22,243 / 22,155 /
+2,321,985,874, 300종목 52,344 / 52,121 / 2,402,131,747, 4종목 982 / 978 / 2,739,581,588).
+각 열은 독립된 중앙값이라 `run` + `조회`가 `total`과 정확히 맞아떨어지지는 않는다 — 회차마다
+어느 구간이 느렸는지가 다르기 때문이며, 배수 계산의 정본은 `total` 열이다.
+
+**배수의 상한은 결과 조회다.** Rust `total`의 59~63%(4종목 fixture는 34~37%)가 `run()` 뒤의 결과 조회이고 그 대부분은
+Python 공개 객체 생성이다 — 100종목 결과는 스냅샷 1,231개에 `Position` 123,000개를 담는다
+(첫 세션만 빈 스냅샷이고 나머지 1,230개가 종목마다 하나씩, PR 11 tip에서 직접 셈).
+`run()`만 보면 5.6~6.8배로
+이슈가 예상한 "5배 이상"에 들어간다. 조회를 더 줄이려면 FFI가 아니라 공개 객체 계약 자체를
+건드려야 하고, 그것은 `BacktestResult` 불변 계약 밖이다.
+
+워크벤치 e2e (`scripts/bench_workbench_adapter.py --instruments 100 --repeat 5`, 중앙값):
+
+| 구간 | python | rust |
+|---|---|---|
+| `dataset_to_engine_inputs` | 0.0002초 | 0.0003초 |
+| `strategy_and_feed_build` | 0.1437초 | 0.1373초 |
+| `engine.run` | 2.3242초 | 0.2238초 |
+| `result_tables` | 0.1974초 | 0.0298초 |
+| `artifacts` | 0.5549초 | 0.4522초 |
+| `analysis_points` | 0.0013초 | 0.0015초 |
+| `compute_analytics` | 0.0163초 | 0.0182초 |
+| `manifest` | 0.0645초 | 0.0325초 |
+| **e2e total** | **3.332초** | **0.911초** |
+
+코어 격리 실행 기준 **3.66배**이고, 같은 프로세스에서 두 코어를 번갈아 돌린 `--core all`
+실행에서는 3.223초 / 0.998초로 **3.23배**다. PR 1 기준선 1.21배에서 올라왔다. 구간별 수치의
+정본은 격리 실행이다 — `--core all`에서는 자동 순환 GC가 rust `compute_analytics`에 붙어
+0.018초가 0.168초로 찍힌다. 벤치 스크립트에 `gc.freeze()`는 넣지 않았다(넣으면 기존 JSON
+전체와 비교가 끊긴다). 어댑터 격리 실행 peak RSS는 python 318.6MiB / rust 329.4MiB로 1.03배다.
+
+| 코어 격리 Peak RSS (100종목, `--core <one>` 단독 실행) | python | rust | 배수 |
+|---|---|---|---|
+| callback | 169.8MiB | 194.8MiB | **1.15배** (PR 1 기준선 1.23배) |
+| tape | 170.2MiB | 202.1MiB | **1.19배** (PR 1 기준선 1.28배) |
+
+**측정 도구의 한계 (메모리 항목을 이 지표 하나로 판정하면 안 된다).**
+`scripts/bench_universe.py::peak_rss_bytes()`는 Windows `PROCESS_MEMORY_COUNTERS.PeakWorkingSetSize`
+이므로 run 도중 잠깐 커밋됐다 풀리는 버퍼를 잡지 못한다. PR 9의 큐 arena가 그 예다 — 300종목
+기준 상주가 30.4MiB에서 약 20KiB로 줄었는데 working set peak은 움직이지 않았고
+`PeakPagefileUsage`(peak commit)로만 −5.16MiB가 보였다. 이 실행의 working set peak은 큐가 가장
+큰 순간이 아니라 결과 조회 구간에서 정해지기 때문이다. 어떤 변경이 peak working set을 안
+움직였다는 사실은 "메모리를 안 줄였다"는 뜻이 아니다.
+
+희소 유니버스 (`--density`, PR 11에서 추가):
+
+벤치의 synthetic 유니버스는 밀도 100%라 PR 9가 넣은 `RowIndex::Sparse` 경로가 한 번도 돌지
+않았다. `--density`가 종목마다 길이 `round(sessions × density)`의 연속 상장 구간만 남겨 격자를
+비운다. Rust는 어느 표현을 골랐는지 노출하지 않으므로 벤치가 같은 식(`slots × 4B ≤ rows × 20B`)을
+재현해 JSON `workload.row_index_expected`에 남긴다.
+
+| 워크로드 (300종목 tape) | 밀도 | 행 조회표 | bars | python total | rust run | rust total | 배수 |
+|---|---|---|---|---|---|---|---|
+| `--density 0.15` | 15.03% | Sparse | 55,500 | 1.049초 | 0.200초 | 0.433초 | 2.42배 |
+| `--density 0.2` | 19.98% | Sparse | 73,800 | 1.368초 | 0.245초 | 0.581초 | 2.36배 |
+| `--density 0.2005` | 20.06% | Dense | 74,100 | 1.409초 | 0.227초 | 0.532초 | 2.65배 |
+
+뒤 두 줄이 `row_at` 해시 비용의 A/B다. 상장 구간 246 / 247 세션 차이라 bar 수가 0.4%밖에 안
+다른데 표현만 Sparse / Dense로 갈린다. **Sparse가 rust `run()`에서 8.1% 느리다**(bar 수로
+정규화하면 8.5%).
+
+이 8.1%는 **보수적 하한**이다. 같은 짝의 python 코어 total이 Sparse 1.368초 / Dense 1.409초로
+Sparse 쪽 워크로드가 2.9% 가볍고(체결도 3,009건 vs 3,057건) 행 조회표는 python 경로에 없다.
+즉 더 가벼운 워크로드에서 rust만 느려진 값이므로, 워크로드 난이도 차이로 나누면 실제 비용은
+약 11%다.
+
+조회표 자체 크기는 이 경계에서 양쪽 모두 약 1.4MiB로 같고, Sparse가 값을 하는 구간은 밀도가
+더 낮은 누적 유니버스다 (문서 예: 3,000종목 × 5,000세션에서 Dense는
+60MiB 고정, Sparse는 실제 행 수에만 비례). 세 코어 결과 signature는 희소 실행에서도 동일하다.
+
+희소 워크로드의 성격도 남긴다: 밀도 15%에서 주문 23,315건 중 체결은 1,991건뿐이다. `REPLACE`
+목표가 상폐된 보유 종목을 매도하려 하는데 그 세션에 bar가 없어 day 주문이 만료되기 때문이다.
+밀도 100% 워크로드(주문 52,344 / 체결 52,121)와 체결 비중이 다르므로 두 줄을 서로 빼서
+읽으면 안 된다 — Sparse / Dense 비교는 위 A/B 짝 안에서만 유효하다.
+
+남은 항목:
+
+- TargetTape 엔진 경계 최소 3배. 현재 2.41배이고 남은 거리는 결과 조회(공개 객체 생성)에 있다.
+- 두 게이트의 "목표"(100종목 3배·5배, 300종목 3배)는 미달이며 같은 이유다.
+- 코어 간 instrument key 충돌 거부가 persistent에만 있다 (python 코어는 완주한다).
+- 라우터 `instrument_not_snapshot` 메시지의 `available` 목록이 `HashMap` 순서(비결정)이고
+  python 쪽(`types/market.py::MarketSnapshot.bar`)은 feed 순서 + `ts=` 접두를 담는다. byte
+  동일이 아니고 이를 고정하는 테스트도 없다.
+- `BuyingPower`가 `#[pyclass]`라 수명을 못 갖고 `HashMap<String, _>` 둘을 key마다 채운다.
+- PR 8에서 되돌린 tape 경량 프레임 — 알림(fill·order_update) 선언 tape 워크로드를 재는 벤치
+  옵션이 생기면 다시 올린다.
+- `engine/store.py`가 `engine/tape.py::no_bar_reason`을 import한다. 사유 포맷의 정본을 한 곳으로
+  모은 결과지만 store → tape 방향이 생겼다.
 
 후속 백로그:
 
@@ -531,8 +664,8 @@ tape 0.4207초 → 0.3687초(**−12.4%**), callback 0.4111초 → 0.3687초(**�
   callback 1.18배 · tape 1.22배로 둘 다 게이트 통과. materialize 시간은 −10~−14%에 그친다.
 - [ ] 레코드 payload 메모리 레이아웃 (큰 variant를 `Box`로). 해제해도 `Vec<NativeRecord>`의
   인라인 슬롯(레코드당 약 200 B, 70k 레코드에서 약 14 MB)은 남는다.
-- [ ] 결과 조회 시간의 정본은 Python 공개 객체 생성이다. 100종목 스냅샷 1,225개가 종목마다
-  `Position`을 만들어 123,625개가 되고 그것만으로 조회의 약 65%다. 조회 시간을 더 줄이려면
+- [ ] 결과 조회 시간의 정본은 Python 공개 객체 생성이다. 100종목 결과는 스냅샷 1,231개에
+  `Position` 123,000개를 담고 그것만으로 조회의 약 65%다. 조회 시간을 더 줄이려면
   FFI가 아니라 이 객체 수를 건드려야 한다 (두 코어가 같이 무는 비용이라 배수는 안 움직인다).
 
 ## 첫 구현 슬라이스 상세

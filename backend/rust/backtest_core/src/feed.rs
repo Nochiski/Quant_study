@@ -12,10 +12,19 @@ use std::collections::HashMap;
 /// 세션마다 표를 하나씩 두는 고정비(빈 `HashMap` 48B × 세션 수)는 여기 들어 있지 않다.
 /// 그 고정비가 상대적으로 커지는 구간은 세션당 행이 몇 개뿐인 경우인데, 그때는 `slots`
 /// 자체가 작아 애초에 Dense가 뽑힌다 — 그래서 선택을 뒤집지 않는다.
-const SPARSE_BYTES_PER_ROW: usize = 20;
+pub(crate) const SPARSE_BYTES_PER_ROW: usize = 20;
 
 /// Dense 표현의 슬롯 하나가 차지하는 바이트 (`u32` 행 번호).
-const DENSE_BYTES_PER_SLOT: usize = 4;
+pub(crate) const DENSE_BYTES_PER_SLOT: usize = 4;
+
+/// 행 조회표 표현 선택에 쓰는 바이트 상수. `lib.rs`가 `backtest_core.ROW_INDEX_BYTES`로 노출해
+/// 벤치(`scripts/bench_universe.py::row_index_expected`)가 같은 규칙을 재현할 때 읽는다 —
+/// 실행 경로는 이 표를 쓰지 않고 아래 상수를 직접 쓴다. Rust가 정본이고 Python은 복제하지
+/// 않는다는 뜻이다.
+pub(crate) const ROW_INDEX_BYTE_NAMES: [(&str, usize); 2] = [
+    ("dense_per_slot", DENSE_BYTES_PER_SLOT),
+    ("sparse_per_row", SPARSE_BYTES_PER_ROW),
+];
 
 /// 세션 × 종목 → 행 번호 조회표.
 ///

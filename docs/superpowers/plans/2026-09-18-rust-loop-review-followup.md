@@ -592,7 +592,7 @@ PR 9까지 반영 후 100종목 tape에서 feed 적재(`_load_persistent_feed` +
 
 | PR | 브랜치 | 상태 | PR 링크 | 리뷰 |
 |---|---|---|---|---|
-| 1 | `fix/bench-honest-boundary` | 대기 | | |
+| 1 | `fix/bench-honest-boundary` | 리뷰 APPROVE·PR 생성 | #123 | Opus APPROVE (A01·A02 반영) |
 | 2 | `fix/driver-failed-lifecycle` | 대기 | | |
 | 3 | `refactor/drop-dead-persistent-api` | 대기 | | |
 | 4 | `refactor/rust-owns-wire-constants` | 대기 | | |

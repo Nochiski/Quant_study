@@ -11,20 +11,28 @@ from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
 
+import pytest
+
+from backtest_engine.data.feed import DataFeed
 from backtest_engine.engine.tape import evaluate_tape
 from backtest_engine.types.decision import StrategyDecision
 from backtest_engine.types.events import OpenOrderSnapshot
 from backtest_engine.types.instruments import InstrumentId
-from backtest_engine.types.market import MarketSnapshot, PriceWindow
+from backtest_engine.types.market import Bar, MarketSnapshot, PriceWindow
 from backtest_engine.types.requirements import HistoryRequest
 from backtest_engine.types.tape import DeclarativeTapeStrategy
-from strategy_workbench.adapters.outbound.backtest_engine._adapter import TargetTapeStrategy
+from strategy_workbench.adapters.outbound.backtest_engine._adapter import (
+    TargetTapeStrategy,
+    _columnar_feed,
+    _instrument,
+)
 from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import (
     BacktestEnginePortfolioAdapter,
 )
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
 )
+from strategy_workbench.application.backtest_run.facade.ports import MarketBarRecord
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.domain.portfolio.facade.construction import (
     CandidateSide,
@@ -104,3 +112,63 @@ def test_adapter_strategy_opts_into_the_declarative_tape_path() -> None:
     """기반 클래스 선언 한 줄이 빠지면 결과는 같고 콜백 경로로만 내려가 테스트가 안 깨진다 —
     tape 경로 진입은 명시 상속이므로 여기서 고정한다."""
     assert issubclass(TargetTapeStrategy, DeclarativeTapeStrategy)
+
+
+def _bar_row(session: date, security_id: str, close: float) -> MarketBarRecord:
+    return MarketBarRecord(
+        session=session,
+        security_id=security_id,
+        open=close - 1.0,
+        high=close + 1.0,
+        low=close - 2.0,
+        close=close,
+        volume=1_000,
+    )
+
+
+def _reference_feed(rows: tuple[MarketBarRecord, ...]) -> DataFeed:
+    """이 PR 이전 어댑터가 하던 것: 행마다 `Bar`를 만들어 `DataFeed(bars)`에 넣는다."""
+    return DataFeed(
+        tuple(
+            Bar(
+                ts=datetime.combine(row.session, time(15, 30)),
+                instrument=_instrument(row.security_id),
+                open=row.open,
+                high=row.high,
+                low=row.low,
+                close=row.close,
+                volume=row.volume,
+            )
+            for row in rows
+        )
+    )
+
+
+def test_columnar_feed_matches_the_bar_built_feed() -> None:
+    """dataset 행에서 바로 만든 feed가 `Bar`를 거쳐 만든 feed와 같은 스냅샷·순서를 낸다.
+
+    행이 종목 기준으로 묶여 와도(세션 연속이 아니어도) 세션 묶음과 세션 안 순서가 같아야
+    한다 — 순서가 갈리면 두 코어의 결과 테이블 종목 조회표가 갈린다.
+    """
+    rows = (
+        _bar_row(SIGNAL, "005930", 100.0),
+        _bar_row(EXECUTION, "005930", 101.0),
+        _bar_row(SIGNAL, "000660", 50.0),
+        _bar_row(EXECUTION, "000660", 51.0),
+    )
+    columnar = _columnar_feed(rows)
+    reference = _reference_feed(rows)
+
+    assert columnar.sessions == reference.sessions
+    assert list(columnar.snapshots()) == list(reference.snapshots())
+    assert columnar.columns().instruments == reference.columns().instruments
+
+
+def test_columnar_feed_keeps_the_bar_price_validation() -> None:
+    """검증은 어댑터가 아니라 feed가 한다 — 메시지도 `Bar` 경로와 같아야 한다."""
+    broken = (_bar_row(SIGNAL, "005930", 100.0), _bar_row(EXECUTION, "005930", 0.5))
+    with pytest.raises(ValueError) as columnar:
+        _columnar_feed(broken)
+    with pytest.raises(ValueError) as reference:
+        _reference_feed(broken)
+    assert str(columnar.value) == str(reference.value)

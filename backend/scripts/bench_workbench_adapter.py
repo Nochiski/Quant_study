@@ -12,10 +12,10 @@
 - `strategy_and_feed_build`: `BacktestEngine` 생성 → `run()` 진입. `TargetTapeStrategy`가
   TargetTape 프레임을 엔진 액션으로 옮기고 `DataFeed`가 bar를 세션으로 묶는 구간이다.
 - `engine.run`: 엔진 루프만.
-- `result_materialize`: `result.snapshots`/`orders`/`fills` 최초 조회. Rust 코어는 여기서
-  공개 객체를 만들고 Python 코어는 `run()` 안에서 이미 만들었으므로 거의 0이다.
-- `event_store_costs`: `engine.event_store.costs()`.
-- `artifacts`: `_artifacts()` — 엔진 결과를 raw artifact 레코드로 변환.
+- `result_tables`: `engine.event_store.result_tables()` — 어댑터가 읽는 유일한 결과 조회다.
+  Rust 코어는 여기서 레코드를 한 번 훑어 primitive 행을 만들고, Python 코어는 `run()` 안에서
+  이미 만든 공개 객체에서 행을 떠온다.
+- `artifacts`: `_artifacts()` — 결과 테이블을 raw artifact 레코드로 변환.
 - `analysis_points`: `_artifacts()` 반환 → 첫 `compute_analytics()` 진입. 벤치마크 시계열,
   `AnalysisPoint` 생성, fill 단위 합계(traded notional·수수료·슬리피지)를 모두 포함한다.
 - `compute_analytics`: `compute_analytics()` 호출 누적. 기본 요청은 HTTP `_run_body`와 같은
@@ -55,6 +55,7 @@ from bench_universe import load_full_calendar_universe, synthetic_universe
 
 from backtest_engine import BacktestEngine
 from backtest_engine.engine.store import EventStore
+from backtest_engine.types.result_tables import ResultTables
 from backtest_engine.types.results import BacktestResult
 from strategy_workbench.adapters.outbound.backtest_engine import _adapter as adapter_module
 from strategy_workbench.adapters.outbound.backtest_engine.facade.executor import (
@@ -97,8 +98,7 @@ _FACTOR_ID = "price.close"
 _SECTOR_ID = "bench-sector"
 
 AFTER_RUN_STAGES: tuple[str, ...] = (
-    "result_materialize",
-    "event_store_costs",
+    "result_tables",
     "artifacts",
     "analysis_points",
     "compute_analytics",
@@ -141,17 +141,17 @@ class StageClock:
 
 
 class _TimedEventStore:
-    """`costs()` 호출 시간만 재서 위임한다."""
+    """`result_tables()` 호출 시간만 재서 위임한다."""
 
     def __init__(self, delegate: EventStore, clock: StageClock) -> None:
         self._delegate = delegate
         self._clock = clock
 
-    def costs(self) -> tuple[object, ...]:
+    def result_tables(self) -> ResultTables:
         started = time.perf_counter()
-        costs = self._delegate.costs()
-        self._clock.add("event_store_costs", time.perf_counter() - started)
-        return costs
+        tables = self._delegate.result_tables()
+        self._clock.add("result_tables", time.perf_counter() - started)
+        return tables
 
 
 class _TimedEngine:
@@ -173,11 +173,8 @@ class _TimedEngine:
         started = time.perf_counter()
         result = self._delegate.run(*args, **kwargs)
         self._clock.add("engine.run", time.perf_counter() - started)
-        # 조회를 여기서 먼저 끝내 lazy 코어의 공개 객체 생성 비용을 `artifacts` 구간에서
-        # 떼어낸다. 어댑터는 뒤에서 같은 속성을 다시 읽지만 그때는 이미 만들어져 있다.
-        materialize_started = time.perf_counter()
-        _ = (result.snapshots, result.orders, result.fills)
-        self._clock.add("result_materialize", time.perf_counter() - materialize_started)
+        # 공개 객체(`result.snapshots`/`orders`/`fills`)는 일부러 건드리지 않는다 — 어댑터가
+        # 더 이상 읽지 않는 경로를 벤치가 대신 태우면 없앤 비용이 표에 그대로 남는다.
         return result
 
 

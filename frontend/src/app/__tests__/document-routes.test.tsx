@@ -26,8 +26,9 @@ import {
   vi,
 } from "vitest";
 
-// page 트리가 Form·Graph 편집기까지 그리게 되어(P4·P5) 전체 실행 부하에서 5s를 넘기는 케이스가 생겼다.
-vi.setConfig({ testTimeout: 15_000 });
+// page 트리가 Form·Graph 편집기까지 그리게 되어(P4·P5) 전체 실행 부하에서 5s를 넘기는 느린 케이스.
+const SLOW = { timeout: 15_000 };
+
 
 import { backtestHistoryQuery } from "../../entities/backtest";
 import { strategiesQuery } from "../../entities/strategy";
@@ -652,7 +653,7 @@ describe("professional keyboard workflow (P6-03)", () => {
     },
   );
 
-  it("searches a runtime-schema semantic node identity and reveals its pointer", async () => {
+  it("searches a runtime-schema semantic node identity and reveals its pointer", SLOW, async () => {
     serveRuntimeGraphDocument();
     const user = userEvent.setup();
     const history = mount("/research/strategies/s1/revisions/2?view=json");
@@ -1534,7 +1535,7 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
     expect(view.state.doc.toString()).toBe(STORED);
   });
 
-  it("edits through the Form into the hidden editor, keeps comments, compiles, and undoes in one step", async () => {
+  it("edits through the Form into the hidden editor, keeps comments, compiles, and undoes in one step", SLOW, async () => {
     const commented =
       '# 문서 머리말\nschema_version: "1.1"\ntitle: 퀄리티 모멘텀 # 제목 메모\nrisk:\n  # 집중도 상한\n  max_name_weight: 0.05\n';
     server.use(

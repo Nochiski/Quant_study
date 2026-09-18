@@ -316,6 +316,7 @@ export const NewStrategyPage = () => {
               }}
               catalogSnippets={snippets.snippets}
               onOpenGraph={openGraph}
+              selectedPointer={search.path}
             />
           ),
           graph: (

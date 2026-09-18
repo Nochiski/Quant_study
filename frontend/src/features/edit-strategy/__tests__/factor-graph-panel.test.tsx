@@ -6,7 +6,10 @@ import type {
   FactorExplanation,
   FactorGraphRequest,
 } from "../../../shared/api";
+import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import { projectFactorGraphs } from "../model/factor-graph-projection";
+import type { JsonSchema } from "../model/schema-navigator";
+import type { SourceTransactions } from "../model/use-source-transactions";
 import type {
   ExecutionPlansState,
   PlannedFactor,
@@ -270,6 +273,44 @@ describe("FactorGraph projection", () => {
 });
 
 describe("FactorGraphPanel", () => {
+  it("keeps the last plan projection with a recomputing badge while the plan reloads (OBS-132-05)", () => {
+    const schema = JSON.parse(
+      readBackendFixture("strategy_documents/runtime-schema.json"),
+    ) as JsonSchema;
+    const transactions: SourceTransactions = {
+      apply: vi.fn(() => true),
+      run: vi.fn(() => true),
+      feedback: { status: "idle" },
+      feedbackFor: () => ({ status: "idle" }),
+      onEditorReady: vi.fn(),
+      enabled: true,
+      disabled: null,
+      settling: false,
+    };
+    const editing = {
+      tree: { factors: [{ factor_id: "f", direction: "high", graph }] },
+      schema,
+      transactions,
+      catalogs: { equityFields: null, factors: null },
+    };
+    const view = (state: ExecutionPlansState) => (
+      <FactorGraphPanel
+        state={state}
+        diagnostics={[]}
+        onSelectPointer={vi.fn()}
+        onOpenSource={vi.fn()}
+        editing={editing}
+      />
+    );
+    const { rerender } = render(view(readyState()));
+    expect(screen.queryByText("재계산 중")).toBeNull();
+    rerender(view({ status: "loading" }));
+    // 직전 ready 투영(DAG 카드)이 남고 배지가 뜬다. 편집 표면도 그대로다.
+    expect(screen.getByText("재계산 중")).toBeInTheDocument();
+    expect(document.querySelector('[data-node-id="signal"]')).not.toBeNull();
+    expect(screen.getByRole("button", { name: "노드 추가" })).toBeInTheDocument();
+  });
+
   it("renders conditional branches, saved references, provenance and exact selection actions", async () => {
     const user = userEvent.setup();
     const onSelectPointer = vi.fn();

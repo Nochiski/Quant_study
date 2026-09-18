@@ -15,7 +15,9 @@ export type TransactionFailure =
   | SnippetEditFailure
   | "composing"
   | "editor-unavailable"
-  | "editor-inactive";
+  | "editor-inactive"
+  /** 직전 편집의 parse가 아직 안 끝나 위치 연산(추가·삭제)을 보류했다(P5-03 리뷰 DEFECT-133-01). */
+  | "pending";
 
 /** 트랜잭션을 잠그는 이유(우선순위: 문서 형식 → 편집기 비활성 → IME → 구문/버전 → 편집기 준비). */
 export type TransactionDisabledReason =
@@ -73,6 +75,12 @@ export type SourceTransactions = {
   onEditorReady: (editor: CodeEditorHandle | null) => void;
   /** yaml 문서이고, 편집기가 활성·준비됐고, IME 조합 중이 아니며, 현재 버전의 parse가 실패하지 않은 상태(parse 대기 중은 허용). */
   enabled: boolean;
+  /**
+   * 직전 편집의 parse가 아직 따라오지 않았다(디바운스). 화면은 직전 tree로 그려져 있으므로 이 동안 위치
+   * pointer를 쓰는 연산(`insert-item`·`insert-key`·`remove`)은 `apply`가 `pending`으로 보류한다 — 스칼라
+   * 확정은 계속 열려 있다. UI는 추가·삭제 컨트롤을 이 값으로 비활성화한다(P5-03 리뷰 DEFECT-133-01).
+   */
+  settling: boolean;
   /** `enabled`가 거짓인 이유. UI가 같은 사실을 다시 계산하지 않는다(Phase 3 감사 R3). */
   disabled: TransactionDisabledReason | null;
 };
@@ -99,10 +107,12 @@ const IDLE: TransactionFeedback = { status: "idle" };
  * 기능이 꺼졌다 켜지는 전이)에 묶인다.
  *
  * `enabled`/`disabled`는 UI 비활성화용 요약값이다. `apply`/`run`은 구문·버전 조건으로는 막지 않고
- * 편집기의 live 텍스트를 다시 parse하므로, reducer의 parse가 stale이거나 실패했어도 편집기 텍스트가
- * 유효하면 적용된다(fail-closed는 `planSourceOperation`의 preflight가 한다). Form·Graph는 `enabled`가
- * 참일 때만 연산을 넘긴다(stale pointer는 preflight가 못 잡는다). `editorActive`는 "편집기 handle이
- * 살아 있는가"다: Form/Graph view가 활성이어도 hidden 편집기가 살아 있으면 참이어야 한다(Phase 3 감사 R1).
+ * 편집기의 live 텍스트를 다시 parse하므로, reducer의 parse가 실패했어도 편집기 텍스트가 유효하면
+ * 적용된다(fail-closed는 `planSourceOperation`의 preflight가 한다). 단 preflight는 stale pointer가 다른
+ * 대상을 가리키게 된 것을 잡지 못하므로, parse가 직전 편집을 따라오기 전(`settling`)에는 위치 pointer를
+ * 쓰는 연산(추가·삭제)을 `apply`가 `pending`으로 보류한다. 스칼라 확정은 그 구간에도 열려 있다.
+ * `editorActive`는 "편집기 handle이 살아 있는가"다: Form/Graph view가 활성이어도 hidden 편집기가 살아
+ * 있으면 참이어야 한다(Phase 3 감사 R1).
  */
 export const useSourceTransactions = (
   state: DocumentState,
@@ -139,6 +149,7 @@ export const useSourceTransactions = (
               ? "editor"
               : null;
   const enabled = disabled === null;
+  const settling = state.parsedVersion !== state.sourceVersion;
   const setFeedback = useCallback(
     (value: TransactionFeedback): void => {
       const next = { documentEpoch: state.documentEpoch, scope, value };
@@ -208,14 +219,21 @@ export const useSourceTransactions = (
       label: string,
       owner = "default",
       options: ApplyOptions = {},
-    ): boolean =>
-      run(
+    ): boolean => {
+      // 위치 pointer 연산은 직전 편집의 parse가 따라온 뒤에만(P5-03 리뷰 DEFECT-133-01: 150ms 안의 연타가
+      // stale pointer로 다른 항목·노드를 지웠다). 스칼라 확정은 값 pointer가 살아 있어 그대로 계획한다.
+      if (settling && op.kind !== "replace-scalar") {
+        setFeedback({ status: "error", owner, label, reason: "pending" });
+        return false;
+      }
+      return run(
         ({ text }) => planSourceOperation(text, "yaml", op),
         label,
         owner,
         options,
-      ),
-    [run],
+      );
+    },
+    [run, setFeedback, settling],
   );
 
   // 값으로 비교한다: memo identity에 기대면 React가 memo를 버릴 때 피드백이 조용히 사라진다(감사 DEFECT-P3X-004).
@@ -241,5 +259,6 @@ export const useSourceTransactions = (
     onEditorReady,
     enabled,
     disabled,
+    settling,
   };
 };

@@ -1158,9 +1158,10 @@ test.describe("professional YAML workflow", () => {
     await page.getByRole("tab", { name: "YAML", exact: true }).click();
     await expectPhase(page, "검증 통과");
     const edited = await currentSource(page);
-    expect(edited).toContain("node_id: field");
-    expect(edited).toContain(`field_id: ${chosenField}`);
-    expect(edited).toContain("input_node_id: field");
+    // 줄 단위 단언: `node_id: field`는 `input_node_id: field`의 부분문자열이라 앞 공백까지 본다.
+    expect(edited).toContain("\n          node_id: field\n");
+    expect(edited).toContain(`\n          field_id: ${chosenField}\n`);
+    expect(edited).toContain("\n          input_node_id: field\n");
     expect(edited.startsWith(GOLDEN.slice(0, GOLDEN.indexOf("factors:")).replace("퀄리티 모멘텀", title))).toBe(true);
     await saveAndWaitForRevision(page, 2);
     const saved = requireData(
@@ -1172,7 +1173,18 @@ test.describe("professional YAML workflow", () => {
       ).data,
       "graph-edited revision",
     );
-    expect(saved.spec_hash).toBeTruthy();
+    // Graph 편집 = source 편집: 편집기 텍스트를 backend가 compile한 hash와 저장된 revision의 hash가 같다.
+    const compiled = requireData(
+      (
+        await compileStrategyDocument({
+          client: apiClient,
+          body: { source: edited, format: "yaml" },
+        })
+      ).data,
+      "graph-edited compile",
+    );
+    expect(saved.spec_hash).toBe(compiled.spec_hash);
+    expect(saved.source_hash).toBe(compiled.source_hash);
 
     // plan 투영(DAG 카드)에 새 노드가 들어온다.
     await page.getByRole("tab", { name: "Graph", exact: true }).click();

@@ -176,7 +176,11 @@ export const FactorGraphEditor = ({
         feedback={transactions.feedbackFor(GRAPH_OWNER)}
         owner={GRAPH_OWNER}
       />
-      <fieldset className="factor-graph__editor-section" disabled={disabled !== null}>
+      {/* 추가·삭제는 위치 pointer 연산이라 직전 편집의 parse가 따라올 때까지 잠근다(P5-03 리뷰 DEFECT-133-01). */}
+      <fieldset
+        className="factor-graph__editor-section"
+        disabled={disabled !== null || transactions.settling}
+      >
         <legend>{t("graph.nodesTitle")}</legend>
         <div className="factor-graph__editor-add">
           {kinds.length > 1 ? (

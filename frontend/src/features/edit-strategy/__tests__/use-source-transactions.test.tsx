@@ -195,6 +195,44 @@ describe("useSourceTransactions", () => {
     expect(result.current.feedback).toEqual({ status: "idle" });
   });
 
+  it("holds positional operations while the parse settles but still commits scalars (review DEFECT-133-01)", () => {
+    const editor = editorOf(SOURCE);
+    const lagging: DocumentState = { ...parsedState(SOURCE), sourceVersion: 5 };
+    const { result, rerender } = renderHook(
+      ({ state }: { state: DocumentState }) => useSourceTransactions(state),
+      { initialProps: { state: lagging } },
+    );
+    act(() => result.current.onEditorReady(editor.handle));
+    expect(result.current.enabled).toBe(true);
+    expect(result.current.settling).toBe(true);
+    // 위치 연산은 보류: 텍스트 불변, feedback은 pending.
+    let applied: boolean | undefined;
+    act(() => {
+      applied = result.current.apply({ kind: "remove", pointer: "/risk" }, "risk", "form");
+    });
+    expect(applied).toBe(false);
+    expect(editor.handle.replaceRange).not.toHaveBeenCalled();
+    expect(result.current.feedbackFor("form")).toMatchObject({ status: "error", reason: "pending" });
+    // 스칼라 확정은 그대로 계획된다.
+    act(() => {
+      applied = result.current.apply(
+        { kind: "replace-scalar", pointer: "/risk/max_name_weight", value: 0.1 },
+        "max_name_weight",
+        "form",
+      );
+    });
+    expect(applied).toBe(true);
+    expect(editor.text()).toContain("max_name_weight: 0.1");
+    // parse가 따라오면 위치 연산도 열린다.
+    rerender({ state: parsedState(editor.text()) });
+    expect(result.current.settling).toBe(false);
+    act(() => {
+      applied = result.current.apply({ kind: "remove", pointer: "/risk" }, "risk", "form");
+    });
+    expect(applied).toBe(true);
+    expect(editor.text()).not.toContain("max_name_weight");
+  });
+
   it("keeps one feedback slot per owner so a snippet result does not erase the form's (audit R2)", () => {
     const editor = editorOf(SOURCE);
     const { result } = renderHook(() =>

@@ -295,7 +295,18 @@ export const FactorGraphPanel = ({
   editing,
 }: FactorGraphPanelProps) => {
   const [chosenFactor, setChosenFactor] = useState(0);
-  const projection = projectFactorGraphs(state);
+  const projected = projectFactorGraphs(state);
+  // 편집 확정 뒤 backend plan을 다시 받는 동안(loading) 직전 ready 투영을 "재계산 중" 배지와 함께 유지한다 —
+  // DAG가 사라졌다 돌아오며 편집기가 점프하지 않도록(P5-02 acceptance, 리뷰 OBS-132-05). 렌더 중 파생 상태.
+  const [lastReady, setLastReady] = useState<{
+    state: ExecutionPlansState;
+    projection: Extract<FactorGraphProjection, { status: "ready" }>;
+  } | null>(null);
+  if (projected.status === "ready" && lastReady?.state !== state)
+    setLastReady({ state, projection: projected });
+  const recomputing =
+    editing !== undefined && state.status === "loading" && lastReady !== null;
+  const projection = recomputing ? lastReady.projection : projected;
   const routeFactor = factorIndexAtPointer(selectedPointer);
   // 편집 표면은 backend plan이 없어도(빈 그래프·compile error·대기) 문서의 팩터로 그린다(Phase 4 감사 R4).
   const editor = (factorCount: number, factorSelect: boolean) => {
@@ -356,6 +367,9 @@ export const FactorGraphPanel = ({
           <span>
             {editing === undefined ? t("graph.planOnly") : t("graph.planWithEdit")}
           </span>
+          {recomputing ? (
+            <Badge tone="warn">{t("graph.recomputing")}</Badge>
+          ) : null}
         </div>
         <label>
           <span>{t("plan.factor")}</span>

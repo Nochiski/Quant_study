@@ -360,6 +360,7 @@ const ko = {
   "graph.noSelection": "노드를 선택하면 속성을 편집합니다",
   "graph.noNodes": "노드가 없습니다 — 노드 추가로 시작하세요",
   "graph.noFactors": "팩터가 없습니다 — Form에서 팩터를 추가하세요",
+  "graph.recomputing": "재계산 중",
   "graph.removeMissing": "{node}을(를) 문서에서 찾지 못해 삭제하지 않았습니다",
   "graph.openForm": "Form에서 열기",
   "graph.dag": "백엔드 계획 순서의 팩터 노드와 입력 연결",
@@ -853,6 +854,7 @@ const ko = {
   "form.feedback.composing": "{label} · IME 입력 중에는 변경하지 않습니다",
   "form.feedback.editor-unavailable": "{label} · 편집기가 준비되지 않았습니다",
   "form.feedback.editor-inactive": "{label} · 편집기가 비활성입니다",
+  "form.feedback.pending": "{label} · 직전 편집을 반영하는 중입니다. 잠시 뒤 다시 시도하세요",
   "form.feedback.yaml-only": "{label} · YAML 문서에서만 편집합니다",
 } as const;
 
@@ -1228,6 +1230,7 @@ export const messages = {
     "graph.noSelection": "Select a node to edit its properties",
     "graph.noNodes": "No nodes yet — start with Add node",
     "graph.noFactors": "No factors — add one in the Form",
+    "graph.recomputing": "Recomputing",
     "graph.removeMissing": "{node} was not found in the document, so it was not removed",
     "graph.openForm": "Open in Form",
     "graph.dag": "Factor nodes and input edges in backend plan order",
@@ -1734,6 +1737,7 @@ export const messages = {
     "form.feedback.composing": "{label} · not applied during IME composition",
     "form.feedback.editor-unavailable": "{label} · the editor is not ready",
     "form.feedback.editor-inactive": "{label} · the editor is inactive",
+    "form.feedback.pending": "{label} · the previous edit is still being applied; try again in a moment",
     "form.feedback.yaml-only": "{label} · only YAML documents are edited",
   } satisfies Record<MessageKey, string>,
 } as const;

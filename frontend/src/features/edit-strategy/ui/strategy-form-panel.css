@@ -129,6 +129,11 @@
   border-left: 2px solid var(--border);
 }
 
+/* URL path가 가리키는 항목(Graph "Form에서 열기" 도착 지점, P5-03). */
+.strategy-form__item[aria-current="true"] {
+  border-left-color: var(--accent);
+}
+
 .strategy-form__item-header {
   display: flex;
   flex-wrap: wrap;

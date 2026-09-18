@@ -64,6 +64,8 @@ type StrategyFormPanelProps = {
   onOpenGraph?: (pointer: string) => void;
   /** 현재 텍스트가 parse되지 않아 마지막 유효 parse로 그렸다(P4-04). */
   stale?: boolean;
+  /** URL `path`(Graph "Form에서 열기" 등). 그 pointer 아래의 목록 항목을 `aria-current`로 강조한다(P5-03). */
+  selectedPointer?: string;
 };
 
 const UNSET = "__unset__";
@@ -85,6 +87,7 @@ export const StrategyFormPanel = ({
   tree = {},
   catalogSnippets = [],
   onOpenGraph,
+  selectedPointer,
   stale = false,
 }: StrategyFormPanelProps) => {
   const disabled = transactions.disabled;
@@ -134,6 +137,7 @@ export const StrategyFormPanel = ({
             catalogs={catalogs}
             catalogSnippets={catalogSnippets}
             onOpenGraph={onOpenGraph}
+            selectedPointer={selectedPointer}
             disabled={disabled !== null}
           />
         ))
@@ -150,6 +154,7 @@ const FormSectionView = ({
   catalogs,
   catalogSnippets,
   onOpenGraph,
+  selectedPointer,
   disabled,
 }: {
   section: FormSection;
@@ -159,6 +164,7 @@ const FormSectionView = ({
   catalogs: FormCatalogs;
   catalogSnippets: readonly CanonicalSnippet[];
   onOpenGraph: ((pointer: string) => void) | undefined;
+  selectedPointer: string | undefined;
   disabled: boolean;
 }) => {
   const title = section.key === "" ? t("form.section.root") : section.key;
@@ -173,6 +179,7 @@ const FormSectionView = ({
         catalogs={catalogs}
         catalogSnippets={catalogSnippets}
         onOpenGraph={onOpenGraph}
+        selectedPointer={selectedPointer}
         disabled={disabled}
       />
     );
@@ -213,6 +220,7 @@ const FormSectionView = ({
             catalogs={catalogs}
             catalogSnippets={catalogSnippets}
             onOpenGraph={onOpenGraph}
+            selectedPointer={selectedPointer}
             disabled={disabled}
           />
         ))}
@@ -253,6 +261,7 @@ const FormListSectionView = ({
   catalogs,
   catalogSnippets,
   onOpenGraph,
+  selectedPointer,
   disabled,
 }: {
   section: ListSection;
@@ -262,6 +271,7 @@ const FormListSectionView = ({
   catalogs: FormCatalogs;
   catalogSnippets: readonly CanonicalSnippet[];
   onOpenGraph: ((pointer: string) => void) | undefined;
+  selectedPointer: string | undefined;
   disabled: boolean;
 }) => {
   const kinds = schema === null ? null : itemKinds(schema, section);
@@ -372,6 +382,7 @@ const FormListSectionView = ({
             transactions={transactions}
             catalogs={catalogs}
             onOpenGraph={onOpenGraph}
+            selectedPointer={selectedPointer}
           />
         ))}
       </div>
@@ -386,6 +397,7 @@ const FormListItemView = ({
   transactions,
   catalogs,
   onOpenGraph,
+  selectedPointer,
 }: {
   section: ListSection;
   item: FormListItem;
@@ -393,6 +405,7 @@ const FormListItemView = ({
   transactions: SourceTransactions;
   catalogs: FormCatalogs;
   onOpenGraph: ((pointer: string) => void) | undefined;
+  selectedPointer: string | undefined;
 }) => {
   // 삭제 거부 안내는 그 판정을 낸 문서(tree)에만 붙는다. 문서가 바뀌면(재색인 포함) 렌더 중 파생으로
   // 사라진다 — React key가 pointer(인덱스)라 인스턴스가 다른 항목에 재사용될 수 있다(리뷰 P2-2).
@@ -419,10 +432,15 @@ const FormListItemView = ({
       NO_FOCUS,
     );
   };
+  const selected =
+    selectedPointer !== undefined &&
+    (selectedPointer === item.pointer ||
+      selectedPointer.startsWith(`${item.pointer}/`));
   return (
     <section
       className="strategy-form__item"
       aria-label={`${section.key} · ${item.summary}`}
+      aria-current={selected ? "true" : undefined}
     >
       <header className="strategy-form__item-header">
         <strong>

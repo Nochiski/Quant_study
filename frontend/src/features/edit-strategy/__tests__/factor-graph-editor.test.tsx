@@ -49,6 +49,7 @@ const stub = (overrides: Partial<SourceTransactions> = {}): SourceTransactions =
   onEditorReady: vi.fn(),
   enabled: true,
   disabled: null,
+  settling: false,
   ...overrides,
 });
 

@@ -5338,9 +5338,11 @@ export type CreateStrategyDocumentData = {
 
 export type CreateStrategyDocumentErrors = {
   /**
-   * Validation Error
+   * Response 422 Createstrategydocument
+   *
+   * Source compiles with diagnostics, or malformed envelope
    */
-  422: HttpValidationError;
+  422: StrategyDocumentInvalidResponse | RequestValidationResponse;
 };
 
 export type CreateStrategyDocumentError =
@@ -5500,9 +5502,11 @@ export type ReviseStrategyDocumentErrors = {
    */
   409: StrategyRevisionConflictResponse;
   /**
-   * Validation Error
+   * Response 422 Revisestrategydocument
+   *
+   * Source compiles with diagnostics, or malformed envelope
    */
-  422: HttpValidationError;
+  422: StrategyDocumentInvalidResponse | RequestValidationResponse;
 };
 
 export type ReviseStrategyDocumentError =

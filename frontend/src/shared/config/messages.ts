@@ -638,6 +638,8 @@ const ko = {
   "toolbar.run.failed": "백테스트 시작 실패",
   "backtest.error.backtest.strategy.requires_upgrade":
     "저장된 1.0 revision은 실행할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
+  "trace.error.trace.strategy.requires_upgrade":
+    "저장된 1.0 revision은 추적할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
   "ide.meta.schemaVersion": "schema",
   "ide.meta.sourceHash": "source hash",
   "ide.meta.specHash": "spec hash",
@@ -1521,6 +1523,8 @@ export const messages = {
     "toolbar.run.failed": "Backtest could not start",
     "backtest.error.backtest.strategy.requires_upgrade":
       "A stored 1.0 revision cannot run. Upgrade it and save a new revision first.",
+    "trace.error.trace.strategy.requires_upgrade":
+      "A stored 1.0 revision cannot be traced. Upgrade it and save a new revision first.",
     "ide.meta.schemaVersion": "schema",
     "ide.meta.sourceHash": "source hash",
     "ide.meta.specHash": "spec hash",

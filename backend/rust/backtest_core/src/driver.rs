@@ -22,6 +22,16 @@ pub(crate) const PRIORITY_NOTIFY: u8 = 25;
 pub(crate) const PRIORITY_SESSION_CLOSE: u8 = 30;
 pub(crate) const PRIORITY_ORDER: u8 = 40;
 
+/// wire 상수 대조용 (name, value) 목록. name은 Python `EventPriority` 멤버명의 소문자다.
+/// `lib.rs`가 모듈 상수로 노출하고 `tests/test_core_parity.py`가 Python 정본과 대조한다.
+pub(crate) const EVENT_PRIORITY_NAMES: [(&str, u8); 5] = [
+    ("market", PRIORITY_MARKET),
+    ("fill", PRIORITY_FILL),
+    ("notify", PRIORITY_NOTIFY),
+    ("session_close", PRIORITY_SESSION_CLOSE),
+    ("order", PRIORITY_ORDER),
+];
+
 /// `configure_run`으로 한 번 받는 실행 설정 (RunConfig + requirements 일부).
 #[derive(Clone, Debug)]
 pub(crate) struct RunSettings {

@@ -150,6 +150,32 @@ def test_floor_delta_shares_identical() -> None:
         )
 
 
+@RUST_ONLY
+def test_record_kind_codes_match_python_store() -> None:
+    """레코드 kind 코드의 정본은 Python `RecordKind` 선언 순서다. Rust 상수가 어긋나면
+    payload가 엉뚱한 kind로 materialize돼 결과가 조용히 틀어진다."""
+    import backtest_core
+
+    from backtest_engine.engine.store import _RECORD_KIND_CODES
+
+    assert backtest_core.RECORD_KIND_CODES == {
+        kind.value: code for kind, code in _RECORD_KIND_CODES.items()
+    }
+
+
+@RUST_ONLY
+def test_event_priorities_match_python_queue() -> None:
+    """같은 세션 안의 처리 순서를 정하는 우선순위 값의 정본은 Python `EventPriority`다.
+    Rust 상수가 어긋나면 이벤트 드레인 순서가 python core와 달라진다."""
+    import backtest_core
+
+    from backtest_engine.engine.queue import EventPriority
+
+    assert backtest_core.EVENT_PRIORITIES == {
+        priority.name.lower(): int(priority) for priority in EventPriority
+    }
+
+
 # --- Portfolio -------------------------------------------------------------------
 
 

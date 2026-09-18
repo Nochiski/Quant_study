@@ -23,6 +23,7 @@ mod session;
 mod tape;
 
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 
 pyo3::create_exception!(
     backtest_core,
@@ -44,6 +45,24 @@ fn backtest_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     quote::register(m)?;
     buying_power::register(m)?;
     session::register(m)?;
+    m.add(
+        "RECORD_KIND_CODES",
+        wire_constants(m.py(), &records::RECORD_KIND_NAMES)?,
+    )?;
+    m.add(
+        "EVENT_PRIORITIES",
+        wire_constants(m.py(), &driver::EVENT_PRIORITY_NAMES)?,
+    )?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
+}
+
+/// (name, code) 목록을 Python dict로 바꾼다. Rust wire 상수를 Python 정본과 대조할 수 있게
+/// 모듈 상수로 노출하는 용도다 — 실행 경로는 이 dict를 읽지 않는다.
+fn wire_constants<'py>(py: Python<'py>, names: &[(&str, u8)]) -> PyResult<Bound<'py, PyDict>> {
+    let mapping = PyDict::new(py);
+    for (name, code) in names {
+        mapping.set_item(name, *code)?;
+    }
+    Ok(mapping)
 }

@@ -153,9 +153,14 @@ def test_first_key_removed_from_a_sequence_item_keeps_the_comment_below_it() -> 
     upgraded = RuamelDocumentCodec().upgrade_source(source, format=SourceFormat.YAML)
 
     assert "periods" not in upgraded
-    assert "# z 위 주석 (항목 슬롯)" in upgraded
-    assert f"# 아래 주석 — node_id 설명{LF}" in upgraded
-    assert upgraded.index("# 아래 주석 — node_id 설명") < upgraded.index("node_id: z")
+    # ruamel은 첫 키 앞 주석을 `-` 단독 줄 뒤, 원래 열(12)에 찍고 항목 내용을 다음 줄로 내린다
+    # (P1-06 리뷰 nit 13: 이 모양을 고정).
+    assert (
+        f"          # z 위 주석 (항목 슬롯){LF}"
+        f"        -{LF}"
+        f"            # 아래 주석 — node_id 설명{LF}"
+        f"          node_id: z{LF}"
+    ) in upgraded
     reparsed = RuamelDocumentCodec().parse(upgraded, format=SourceFormat.YAML)
     assert reparsed.ok and reparsed.tree is not None
     assert json.loads(json.dumps(reparsed.tree)) == json.loads(

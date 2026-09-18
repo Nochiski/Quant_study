@@ -1,0 +1,114 @@
+.strategy-form {
+  display: grid;
+  gap: var(--space-3);
+  padding: 0 var(--space-4) var(--space-4);
+  overflow: auto;
+}
+
+.strategy-form__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+}
+
+.strategy-form__header > div {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.strategy-form__header span,
+.strategy-form__state,
+.strategy-form__hint,
+.strategy-form__description {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.strategy-form__feedback {
+  margin: 0;
+  font-size: var(--text-size-small);
+}
+
+.strategy-form__feedback--error,
+.strategy-form__invalid {
+  margin: 0;
+  color: var(--status-error);
+  font-size: var(--text-size-small);
+}
+
+.strategy-form__section {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-raised);
+}
+
+.strategy-form__section legend {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  padding: 0 var(--space-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-size-small);
+}
+
+.strategy-form__field {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.strategy-form__field label {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  font-size: var(--text-size-small);
+}
+
+.strategy-form__unit {
+  color: var(--text-muted);
+}
+
+.strategy-form__control {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.strategy-form__control input,
+.strategy-form__control select {
+  min-width: 12rem;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.strategy-form__control input[type="checkbox"] {
+  min-width: auto;
+}
+
+/* 미작성 필드: 기본값이 회색 placeholder로 보인다(spec D6). */
+.strategy-form__field[data-written="false"] .strategy-form__control input,
+.strategy-form__field[data-written="false"] .strategy-form__control select {
+  color: var(--text-muted);
+  border-style: dashed;
+}
+
+.strategy-form__field[data-applicable="false"] label {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.strategy-form__section:disabled .strategy-form__control input,
+.strategy-form__section:disabled .strategy-form__control select {
+  opacity: 0.6;
+}

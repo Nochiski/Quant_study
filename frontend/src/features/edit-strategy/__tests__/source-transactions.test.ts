@@ -677,6 +677,22 @@ describe("flow containers (backlog 14)", () => {
     expect(planned.edit.nextSource).toBe(
       "risk: # 원래\n  # 뒤\n  max_name_weight: 0.05\n  gross_exposure: 1\n",
     );
+    // 키 줄과 값 줄 사이의 자기 줄 주석도 남는다(#150 리뷰 P2-1).
+    const between = "risk:\n  # 사이\n  { max_name_weight: 0.05 }\n";
+    const kept = planSourceOperation(between, "yaml", {
+      kind: "remove",
+      pointer: "/risk/max_name_weight",
+    });
+    if (kept.status !== "ok") throw new Error(kept.reason);
+    expect(kept.edit.nextSource).toBe("risk:\n  # 사이\n  {}\n");
+    const added = planSourceOperation(between, "yaml", {
+      kind: "insert-key",
+      parentPointer: "/risk",
+      key: "g",
+      value: 1,
+    });
+    if (added.status !== "ok") throw new Error(added.reason);
+    expect(added.edit.nextSource).toBe("risk:\n  # 사이\n  max_name_weight: 0.05\n  g: 1\n");
   });
 
   it("removes from a flow container by rewriting it as block, and leaves `{}`/`[]` when it empties (backlog 18)", () => {

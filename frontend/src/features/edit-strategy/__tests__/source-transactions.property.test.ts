@@ -1,7 +1,12 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
+import { isCollection, isNode, isPair, parseDocument, visit } from "yaml";
 
-import { parseSource, valueAtPointer } from "../../../shared/lib/yaml12";
+import {
+  parseSource,
+  pointerSegments,
+  valueAtPointer,
+} from "../../../shared/lib/yaml12";
 import {
   commentPlanArbitrary,
   identifierArbitrary,
@@ -202,6 +207,137 @@ describe("source transactions (property)", () => {
       }),
       // 로컬 정밀 검사: `FC_NUM_RUNS=3000 npx vitest run <this file>`.
       { numRuns: Number(process.env.FC_NUM_RUNS ?? 300) },
+    );
+  }, 300_000);
+});
+
+/**
+ * block 문서의 비어 있지 않은 컬렉션 하나를 flow 표기(`{ … }`·`[ … ]`)로 바꾸고 닫는 괄호 뒤에 줄 끝 주석
+ * `# 꼬리`를 붙인 문서와, 그 컨테이너 안을 겨냥한 연산 하나(#150 리뷰 P2-4: backlog 14·18 경로의 생성기).
+ * flow 안 주석은 YAML이 거의 허용하지 않으므로 그 subtree의 주석은 지운다.
+ */
+const flowDocumentAndOperation = documentAndOperation
+  .chain(([source, eol, tree]) => {
+    const containers = pointersOf(tree).filter((p) => {
+      if (p.kind === "scalar") return false;
+      const value = valueAtPointer(tree, p.pointer).value;
+      return Array.isArray(value)
+        ? value.length > 0
+        : Object.keys(value as Record<string, unknown>).length > 0;
+    });
+    if (containers.length === 0) return fc.constant(null);
+    return fc.constantFrom(...containers).map((container) => {
+      const doc = parseDocument(source);
+      const path = pointerSegments(container.pointer).map((segment, index, all) => {
+        const parent = valueAtPointer(
+          tree,
+          all.slice(0, index).length === 0
+            ? ""
+            : `/${all.slice(0, index).join("/")}`,
+        ).value;
+        return Array.isArray(parent) ? Number(segment) : segment;
+      });
+      const node = doc.getIn(path, true);
+      if (!isCollection(node)) return null;
+      visit(node, (_key, child) => {
+        if (isNode(child) || isPair(child)) {
+          if (isNode(child)) {
+            child.commentBefore = null;
+            child.comment = null;
+            child.spaceBefore = false;
+          }
+          if (isCollection(child)) child.flow = true;
+        }
+      });
+      node.flow = true;
+      node.comment = " 꼬리"; // yaml은 `#` 바로 뒤에 붙이므로 앞 공백을 준다.
+      const flowSource = doc.toString({ lineWidth: 0 }).replaceAll("\n", eol);
+      const parsed = parseSource(flowSource, "yaml");
+      if (parsed.status !== "ok") return null;
+      return { source: flowSource, eol, tree: parsed.tree, container: container.pointer };
+    });
+  })
+  .filter((doc) => doc !== null)
+  .chain((doc) => {
+    const { source, eol, tree, container } = doc!;
+    const inside = pointersOf(tree).filter((p) => p.pointer.startsWith(`${container}/`));
+    const mappings = pointersOf(tree).filter(
+      (p) => p.kind === "mapping" && (p.pointer === container || p.pointer.startsWith(`${container}/`)),
+    );
+    const sequences = pointersOf(tree).filter(
+      (p) => p.kind === "sequence" && (p.pointer === container || p.pointer.startsWith(`${container}/`)),
+    );
+    const choices: fc.Arbitrary<SourceOperation>[] = [];
+    if (mappings.length)
+      choices.push(
+        fc.tuple(fc.constantFrom(...mappings), identifierArbitrary, valueArbitrary).map(
+          ([p, key, value]) => ({
+            kind: "insert-key" as const,
+            parentPointer: p.pointer,
+            key: `new_${key}`,
+            value,
+          }),
+        ),
+      );
+    if (sequences.length)
+      choices.push(
+        fc.tuple(fc.constantFrom(...sequences), valueArbitrary).map(([p, value]) => ({
+          kind: "insert-item" as const,
+          parentPointer: p.pointer,
+          value,
+        })),
+      );
+    if (inside.length)
+      choices.push(
+        fc.constantFrom(...inside).map((p) => ({ kind: "remove" as const, pointer: p.pointer })),
+      );
+    return fc.tuple(
+      fc.constant(source),
+      fc.constant(eol),
+      fc.constant(tree),
+      fc.constant(container),
+      fc.oneof(...choices),
+    );
+  });
+
+describe("flow containers (property)", () => {
+  it("rewrites the flow container only: reparsed tree equals the tree operation, lines outside survive byte for byte, the trailing comment survives", () => {
+    fc.assert(
+      fc.property(flowDocumentAndOperation, ([source, eol, tree, container, op]) => {
+        const expected = applyToTree(tree, op);
+        expect(expected, `${op.kind} must be valid`).not.toBeNull();
+        const result = planSourceOperation(source, "yaml", op);
+        expect(result.status, JSON.stringify({ op, source })).toBe("ok");
+        if (result.status !== "ok") return;
+        const { edit } = result;
+        const reparsed = parseSource(edit.nextSource, "yaml");
+        expect(reparsed.status).toBe("ok");
+        expect(reparsed.tree).toEqual(expected);
+        // 가장 바깥 flow 컨테이너(여기서는 `container`)의 값 줄 밖은 바이트 동일하다.
+        const parsed = parseSource(source, "yaml");
+        if (parsed.status !== "ok") throw new Error("flow source must parse");
+        const range = parsed.valueRanges.get(container)!;
+        const lines = source.split(eol);
+        const lineOf = (offset: number): number =>
+          source.slice(0, offset).split(eol).length - 1;
+        const first = lineOf(range.start.offset);
+        const last = lineOf(range.end.offset);
+        const nextLines = edit.nextSource.split(eol);
+        expect(nextLines.slice(0, first)).toEqual(lines.slice(0, first));
+        const tailCount = lines.length - last - 1;
+        expect(nextLines.slice(nextLines.length - tailCount)).toEqual(
+          lines.slice(lines.length - tailCount),
+        );
+        // 컨테이너 뒤 줄 끝 주석은 남는다(#149 P2-4).
+        expect(edit.nextSource).toContain("# 꼬리");
+        // flow 밖의 주석은 하나도 사라지지 않는다.
+        const before = commentLines(source);
+        const kept = commentLines(edit.nextSource);
+        expect(kept.filter((c) => before.includes(c))).toEqual(before);
+        if (eol === "\r\n")
+          expect(edit.nextSource.replaceAll("\r\n", "")).not.toContain("\n");
+      }),
+      { numRuns: Number(process.env.FC_NUM_RUNS ?? 200) },
     );
   }, 300_000);
 });

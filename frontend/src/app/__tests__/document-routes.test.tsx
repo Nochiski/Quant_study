@@ -578,9 +578,11 @@ describe("professional keyboard workflow (P6-03)", () => {
 
   it.each(WORKFLOW_ROUTES)(
     "routes Ctrl+Shift+Enter through the same Backtest gate on $name",
-    async ({ route, backtestSource }) => {
+    async ({ route, initialSource, backtestSource }) => {
       const history = mount(route);
       await editor();
+      // Validate 케이스와 같은 순서: compile 결과가 도착한 뒤 게이트를 본다(cold 실행 1회 flake, #150 리뷰 P1-2).
+      await waitFor(() => expect(compiledSources).toContain(initialSource));
       const run = within(
         globalThis.document.querySelector(".ide__editor-actions")!,
       ).getByRole("button", { name: "백테스트" });

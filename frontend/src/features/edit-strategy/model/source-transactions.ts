@@ -316,9 +316,11 @@ const topmostFlowAncestor = (
 };
 
 /**
- * flow 컬렉션에 키·항목 넣기(Phase 5 감사 backlog 14): 바깥쪽 flow 컨테이너 전체를 연산 적용 뒤의 값으로 block
- * 직렬화해 그 범위(`key:` 뒤 또는 `-` 뒤부터 값 끝까지)에 교체한다. 빈 `{}`·`[]`와 `{ a: 1 }`·`[x, y]` 같은
- * 한 줄 표기를 같은 규칙으로 연다. flow 안 주석은 YAML이 거의 허용하지 않으며 보존하지 않는다 — 결과는
+ * flow 컬렉션에 키·항목 넣기·지우기(Phase 5 감사 backlog 14·18): 바깥쪽 flow 컨테이너 전체를 연산 적용 뒤의
+ * 값으로 block 직렬화해 그 범위(`key:` 뒤 또는 `-` 뒤부터 값 끝까지)에 교체한다. 빈 `{}`·`[]`와 `{ a: 1 }`·
+ * `[x, y]` 같은 한 줄 표기를 같은 규칙으로 연다. 지워서 비면 `{}`/`[]`를 그 자리에 둔다(루트 flow 포함 — 빈
+ * 문서는 parse 결과가 null이라 tree 동치를 만족할 수 없다). flow 안 주석은 YAML이 거의 허용하지 않으며
+ * 보존하지 않는다; 컨테이너 뒤 줄 끝 주석과 `key:`/`-` 줄·값 줄 사이의 자기 줄 주석은 남긴다 — 결과는
  * preflight(tree 동치)가 검증한다.
  */
 const replaceFlowContainer = (
@@ -335,7 +337,9 @@ const replaceFlowContainer = (
   const block = yamlBlock(value);
   const range = parsed.valueRanges.get(top)!;
   if (block === "{}" || block === "[]") {
-    // 삭제로 컨테이너가 비면 block으로 열 것이 없다 — flow 빈 컨테이너를 그 자리에 둔다(backlog 18).
+    // 삭제로 컨테이너가 비면 block으로 열 것이 없다 — flow 빈 컨테이너를 그 자리에 둔다(backlog 18). 루트도
+    // 같다: block 루트의 "비우지 않는다"는 마지막 키 삭제를 거부하는 규칙인데, flow 루트는 `{}`로 남아
+    // parse가 되므로 거부할 이유가 없다(#150 리뷰 P2-2).
     return {
       from: range.start.offset,
       to: range.end.offset,
@@ -359,18 +363,26 @@ const replaceFlowContainer = (
       cursor: range.start.offset + insert.length,
     };
   }
-  // 값이 `key:`/`-`와 다른 줄에서 시작하면(`risk: # 원래` 다음 줄에 `{ … }`) 그 줄은 주석째 그대로 두고 값 줄부터
-  // 교체한다(#149 재검토 P2-7: 콜론 바로 뒤부터 지우면 키 줄 주석이 사라졌다). 닫는 괄호 뒤 주석은 그때 값 자리
-  // 첫 줄에 따로 둔다.
+  // 값이 `key:`/`-`와 다른 줄에서 시작하면(`risk: # 원래` 다음 줄에 `{ … }`) 값 줄의 시작부터 교체한다 — 키 줄
+  // 주석과 그 사이 자기 줄 주석이 그대로 남는다(#149 재검토 P2-7, #150 리뷰 P2-1). 닫는 괄호 뒤 주석은 그때
+  // 값 자리 첫 줄에 따로 둔다.
   const rewrite = (
     anchorOffset: number,
     indent: string,
   ): Plan => {
     const sameLine = lineEndOf(source, anchorOffset) >= range.start.offset;
-    const from = sameLine ? anchorOffset : lineEndOf(source, anchorOffset);
-    const lead =
-      comment === "" ? "" : sameLine ? comment : `${eol}${indent}${comment.trim()}`;
-    const insert = `${lead}${eol}${indent}${indentLines(block, indent, eol)}`;
+    if (sameLine) {
+      const insert = `${comment}${eol}${indent}${indentLines(block, indent, eol)}`;
+      return {
+        from: anchorOffset,
+        to,
+        insert,
+        cursor: anchorOffset + insert.length,
+      };
+    }
+    const from = lineStartOf(source, range.start.offset);
+    const lead = comment === "" ? "" : `${indent}${comment.trim()}${eol}`;
+    const insert = `${lead}${indent}${indentLines(block, indent, eol)}`;
     return { from, to, insert, cursor: from + insert.length };
   };
   const colon = afterColon(source, parsed, top);

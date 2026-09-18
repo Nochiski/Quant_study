@@ -240,7 +240,7 @@ mod tests {
             vec!["no_action".into(), "set_portfolio_target".into()],
             vec![],
         );
-        runtime.run = Some(RunSettings {
+        runtime.run = Some(std::sync::Arc::new(RunSettings {
             fee_rate: 0.0,
             default_participation: None,
             slippage: ("none".into(), 0.0, 0.0),
@@ -252,7 +252,7 @@ mod tests {
             notify_fill: false,
             notify_order_update: false,
             notify_corporate_action: false,
-        });
+        }));
         runtime
     }
 

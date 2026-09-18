@@ -273,3 +273,43 @@ export const removeNodeAt = (
     ? { error: "referenced", by }
     : { kind: "remove", pointer: nodePointer };
 };
+
+/**
+ * `node_id` 변경(Phase 5 감사 backlog 4, P5X-009). 같은 그래프에 이미 있는 id면 `duplicate`, 빈 문자열이면
+ * `empty`. 아니면 정의 자리와 같은 그래프 안의 참조(`*_node_id`·`output_node_id`)를 함께 바꾸는 연산 목록을
+ * 돌려주고 훅이 한 트랜잭션(undo 1회)으로 합친다. 다른 팩터의 같은 id는 참조가 아니라 건드리지 않는다.
+ * 판정은 문서 tree 기준이라 YAML에서 손으로 만든 중복은 여전히 compile이 알린다(fail-closed).
+ */
+export const renameNode = (
+  tree: unknown,
+  factorPointer: string,
+  nodePointer: string,
+  nextId: string,
+): SourceOperation[] | { error: "duplicate" | "empty" | "not-found" } => {
+  const node = valueAt(tree, nodePointer);
+  if (!isRecord(node)) return { error: "not-found" };
+  if (nextId === "") return { error: "empty" };
+  const taken = nodesOf(tree, factorPointer).some(
+    (item, index) =>
+      `${nodesPointer(factorPointer)}/${index}` !== nodePointer &&
+      isRecord(item) &&
+      item.node_id === nextId,
+  );
+  if (taken) return { error: "duplicate" };
+  const currentId = typeof node.node_id === "string" ? node.node_id : "";
+  const definition = setScalar(tree, nodePointer, "node_id", nextId);
+  if (currentId === "" || currentId === nextId) return [definition];
+  const references = findReferences(tree, "node", currentId, nodePointer, {
+    within: graphPointer(factorPointer),
+  });
+  return [
+    definition,
+    ...references.map(
+      (reference): SourceOperation => ({
+        kind: "replace-scalar",
+        pointer: reference.pointer,
+        value: nextId,
+      }),
+    ),
+  ];
+};

@@ -9,6 +9,7 @@ import {
   nodePointerOf,
   nodeReferenceKeys,
   removeNodeAt,
+  renameNode,
   setNodeField,
   suggestNodeId,
 } from "../model/graph-transactions";
@@ -255,5 +256,58 @@ describe("graph transactions (P5-01)", () => {
     expect(next).not.toContain("거래량 노드");
     expect(graphNodeIds(treeOf(next), "/factors/1")).toEqual(["px"]);
     expect(graphNodeIds(treeOf(next), F0)).toEqual(["close", "mom_252"]);
+  });
+});
+
+describe("renameNode (backlog 4, P5X-009)", () => {
+  it("renames the definition and every reference inside the same graph in one transaction", () => {
+    const tree = treeOf(TWO_FACTORS);
+    const renamed = renameNode(tree, F0, "/factors/0/graph/nodes/0", "px_close");
+    if ("error" in renamed) throw new Error(renamed.error);
+    expect(renamed).toEqual([
+      { kind: "replace-scalar", pointer: "/factors/0/graph/nodes/0/node_id", value: "px_close" },
+      { kind: "replace-scalar", pointer: "/factors/0/graph/nodes/1/input_node_id", value: "px_close" },
+    ]);
+    const planned = planSourceOperations(TWO_FACTORS, "yaml", renamed);
+    if (planned.status !== "ok") throw new Error(planned.reason);
+    const next = treeOf(planned.edit.nextSource);
+    expect(graphNodeIds(next, F0)).toEqual(["px_close", "mom_252"]);
+    // 다른 팩터의 같은 id(`close`)는 그대로다.
+    expect(graphNodeIds(next, "/factors/1")).toEqual(["close"]);
+    // 출력 노드를 바꾸면 `output_node_id`도 따라간다.
+    const output = renameNode(tree, F0, "/factors/0/graph/nodes/1", "momentum");
+    if ("error" in output) throw new Error(output.error);
+    expect(output.map((op) => ("pointer" in op ? op.pointer : ""))).toEqual([
+      "/factors/0/graph/nodes/1/node_id",
+      "/factors/0/graph/output_node_id",
+    ]);
+  });
+
+  it("refuses duplicates within the graph and empty ids, allows an id used by another factor", () => {
+    const tree = treeOf(TWO_FACTORS);
+    expect(renameNode(tree, F0, "/factors/0/graph/nodes/0", "mom_252")).toEqual({
+      error: "duplicate",
+    });
+    expect(renameNode(tree, F0, "/factors/0/graph/nodes/0", "")).toEqual({ error: "empty" });
+    expect(renameNode(tree, F0, "/factors/0/graph/nodes/9", "x")).toEqual({
+      error: "not-found",
+    });
+    // 둘째 팩터의 `close`를 첫째 팩터의 이름 `mom_252`로: 그래프가 달라 허용된다.
+    const other = renameNode(tree, "/factors/1", "/factors/1/graph/nodes/0", "mom_252");
+    if ("error" in other) throw new Error(other.error);
+    expect(other.map((op) => ("pointer" in op ? op.pointer : ""))).toEqual([
+      "/factors/1/graph/nodes/0/node_id",
+      "/factors/1/graph/output_node_id",
+    ]);
+    // `node_id`가 없던 노드는 정의만 넣는다(insert-key).
+    const missing = treeOf(
+      VERBOSE.replace(
+        "      output_node_id: mom_252\n",
+        "        - kind: field\n          field_id: price.high\n      output_node_id: mom_252\n",
+      ),
+    );
+    expect(renameNode(missing, F0, "/factors/0/graph/nodes/2", "high")).toEqual([
+      { kind: "insert-key", parentPointer: "/factors/0/graph/nodes/2", key: "node_id", value: "high" },
+    ]);
   });
 });

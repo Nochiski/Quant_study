@@ -935,7 +935,8 @@ export const suggestNodeId = (tree, factorPointer, base: string): string;   // b
   acceptance, OBS-132-05). 기록: `graph-transactions.ts`의 `removeNode(id)`·`rewireInput`·`setOutput`·
   `setMissingPolicy`·`nodePointerOf`는 UI가 부르지 않는 모듈 계약(속성·출력·정책·재연결은 필드 컨트롤이
   같은 연산을 만든다)이며 P5-01 테스트가 고정한다 — Phase 5 감사 P5X-008 후속에서 `nodePointerOf`만 남기고 네 함수를
-  제거했다. 매뉴얼 8절 스크린샷은 후속.
+  제거했다. backlog 4: `renameNode`가 `FormFieldsEditor`의 `planCommit`으로 `node_id` 확정을 가로채 중복을 거부하고
+  같은 그래프 참조를 함께 바꾼다. 매뉴얼 8절 스크린샷은 후속.
 
 **Phase 5 exit**: SoT·책임분리 최종 점검. 전체 e2e green. initiative COMPLETE.
 

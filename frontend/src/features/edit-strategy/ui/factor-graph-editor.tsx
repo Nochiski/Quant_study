@@ -10,13 +10,18 @@ import {
   GRAPH_OWNER,
   nodeKinds,
   removeNodeAt,
+  renameNode,
   selectedNodePointer,
   setNodeField,
 } from "../model/graph-transactions";
 import type { JsonSchema } from "../model/schema-navigator";
 import { factorGraphPointer } from "../model/use-execution-plans";
 import type { SourceTransactions } from "../model/use-source-transactions";
-import { FormFieldsEditor, type FormCatalogs } from "./strategy-form-panel";
+import {
+  FormFieldsEditor,
+  type CommitPlanner,
+  type FormCatalogs,
+} from "./strategy-form-panel";
 import { TransactionFeedbackNote } from "./transaction-feedback";
 
 const NO_FOCUS = { focusEditor: false } as const;
@@ -100,6 +105,27 @@ export const FactorGraphEditor = ({
           selectedItem.pointer,
           selectedItem.summary,
         );
+
+  // `node_id` 확정은 rename이다(backlog 4): 중복·빈 값은 거부하고, 아니면 같은 그래프 안 참조까지 한 트랜잭션으로
+  // 바꾼다. 다른 속성은 기본 필드 연산.
+  const planNodeCommit: CommitPlanner = (field, value) => {
+    if (selectedItem === undefined || field.key !== "node_id") return null;
+    const renamed = renameNode(
+      tree,
+      factorPointer,
+      selectedItem.pointer,
+      typeof value === "string" ? value : String(value ?? ""),
+    );
+    if (!("error" in renamed)) return renamed;
+    return {
+      invalid:
+        renamed.error === "duplicate"
+          ? "duplicateNodeId"
+          : renamed.error === "empty"
+            ? "emptyNodeId"
+            : "missingNode",
+    };
+  };
 
   const add = (): void => {
     const added = addNode(tree, factorPointer, chosenKind, schema);
@@ -298,6 +324,7 @@ export const FactorGraphEditor = ({
             transactions={transactions}
             catalogs={catalogs}
             owner={GRAPH_OWNER}
+            planCommit={planNodeCommit}
           />
         )}
       </fieldset>

@@ -39,7 +39,10 @@ import {
   type ObjectSection,
 } from "../model/form-transactions";
 import type { JsonSchema } from "../model/schema-navigator";
-import type { Scalar } from "../model/source-transactions";
+import type {
+  Scalar,
+  SourceOperation,
+} from "../model/source-transactions";
 import type { SourceTransactions } from "../model/use-source-transactions";
 import { TransactionFeedbackNote } from "./transaction-feedback";
 import "./strategy-form-panel.css";
@@ -526,16 +529,35 @@ const isPassiveControl = (control: FormControl): boolean =>
  * object 섹션의 필드 행 묶음. Graph 편집기(P5-02)가 노드 속성·그래프 설정에 같은 컨트롤을 쓴다 —
  * `owner`로 feedback 슬롯을 나눈다.
  */
+/**
+ * 필드 확정을 가로채는 계획(Graph의 `node_id` rename처럼 한 필드가 여러 위치를 바꿀 때). null이면 기본
+ * `fieldOperation`, `invalid`면 그 사유(`form.invalid.<사유>`)를 안내하고 적용하지 않는다.
+ */
+export type CommitInvalidReason =
+  | "duplicateNodeId"
+  | "emptyNodeId"
+  | "missingNode";
+export type CommitPlanner = (
+  field: FormField,
+  value: Scalar,
+) =>
+  | SourceOperation
+  | readonly SourceOperation[]
+  | { invalid: CommitInvalidReason }
+  | null;
+
 export const FormFieldsEditor = ({
   section,
   transactions,
   catalogs,
   owner = FORM_OWNER,
+  planCommit,
 }: {
   section: ObjectSection;
   transactions: SourceTransactions;
   catalogs: FormCatalogs;
   owner?: string;
+  planCommit?: CommitPlanner;
 }) => (
   <>
     {section.fields.map((field) => (
@@ -546,6 +568,7 @@ export const FormFieldsEditor = ({
         transactions={transactions}
         catalogs={catalogs}
         owner={owner}
+        planCommit={planCommit}
       />
     ))}
   </>
@@ -557,12 +580,14 @@ const FormFieldRow = ({
   transactions,
   catalogs,
   owner = FORM_OWNER,
+  planCommit,
 }: {
   section: ObjectSection;
   field: FormField;
   transactions: SourceTransactions;
   catalogs: FormCatalogs;
   owner?: string;
+  planCommit?: CommitPlanner;
 }) => {
   const id = useId();
   const labelId = `${id}-label`;
@@ -578,8 +603,13 @@ const FormFieldRow = ({
   // 공유 feedback 슬롯은 다른 필드가 덮고, label은 목록 항목끼리 겹친다).
   const commit = (value: Scalar): boolean => {
     setInvalid(null);
+    const planned = planCommit?.(field, value) ?? null;
+    if (planned !== null && "invalid" in planned) {
+      setInvalid(t(`form.invalid.${planned.invalid}`));
+      return false;
+    }
     return transactions.apply(
-      fieldOperation(section, field, value),
+      planned ?? fieldOperation(section, field, value),
       field.key,
       owner,
       NO_FOCUS,
@@ -836,13 +866,15 @@ const TextualControl = ({
   }
   const { control } = field;
   const submit = (explicit: boolean): void => {
-    // 값을 되돌리거나 다시 확정하면 이전 무효 안내는 사라진다(DEFECT-P402-003).
-    onValid();
+    // 값을 되돌리거나(Escape 포함) 다시 확정하면 이전 무효 안내는 사라진다(DEFECT-P402-003).
     if (draft === committed) {
+      onValid();
       setPristine(true);
       return;
     }
     const last = submitted.current;
+    // 같은 값의 재확정은 건너뛴다. 실패한 확정 뒤의 blur도 그렇다 — 이때 안내를 지우면 잘못된 입력만 남는다
+    // (#145 리뷰 P2-1: 중복 `node_id` 거부 뒤 다른 필드를 눌러도 안내가 유지되어야 한다).
     if (
       last !== null &&
       last.draft === draft &&
@@ -850,6 +882,7 @@ const TextualControl = ({
       (!last.failed || !explicit)
     )
       return;
+    onValid();
     const parsed = parseDraft(control, draft);
     if (parsed.status === "invalid") {
       onInvalid(parsed.reason);
@@ -868,6 +901,7 @@ const TextualControl = ({
       event.preventDefault();
       setDraft(committed);
       setPristine(true);
+      onValid();
     }
   };
   const numeric = control.kind === "number";

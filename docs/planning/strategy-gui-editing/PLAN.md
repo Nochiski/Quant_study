@@ -6,9 +6,8 @@ current_phase: complete
 current_pr: none
 active_prs: []
 parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02, P1-06, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05, P5-01, P5-02, P5-03]
-last_updated: 2026-09-18T21:45:44+09:00
-last_updated: 2026-09-18T21:45:44+09:00
-last_updated: 2026-09-18T21:45:44+09:00
+last_updated: 2026-09-18T21:57:30+09:00
+last_updated: 2026-09-18T21:57:30+09:00
 planned_prs: 19
 merged_prs: 19
 approved_prs: 19
@@ -31,7 +30,7 @@ progress_percent: 100
 | Active PR | none |
 | Progress | `19 / 19 merged (100%)` |
 | Approved | `19 / 19` |
-| Aggregated at | `2026-09-18 21:45 KST` |
+| Aggregated at | `2026-09-18 21:57 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -228,7 +227,7 @@ Phase exit:
 | 1 | ~~DEFECT-P5X-001 — `TextualControl` 되돌리기에 "사용자가 draft를 고치지 않았다" 조건(확정 직후 150ms 안에 같은 필드를 비우고 다시 치면 parse 도착이 옛 값을 되살려 `window: 100101`처럼 이어 붙음, "반영됨" 오보고; undo 1회 복구)~~ → [#140](https://github.com/Nochiski/Quant_study/pull/140) | `strategy-form-panel.tsx` `TextualControl` seen/committed 조정 — `pristine`(손대지 않은) draft일 때만 되돌림 | 한 줄 + 테스트 1 |
 | 2 | ~~DEFECT-P5X-002 — 사용자 매뉴얼 1절 샘플이 schema 1.0~~ → [#143](https://github.com/Nochiski/Quant_study/pull/143) | 첫 실습이 업그레이드 오류로 시작 | 문서 |
 | 3 | ~~DEFECT-P5X-003 — `x-reference` 네임스페이스 리터럴(`NAMESPACES`)을 runtime schema fixture와 묶는 테스트(`CATALOGS`와 대칭)~~ → [#140](https://github.com/Nochiski/Quant_study/pull/140) | 새 네임스페이스가 조용히 text 컨트롤로 떨어짐 | 테스트 1 |
-| 4 | P5X-009 — `node_id` 중복 방지 판정 + 참조 id rename(참조 갱신) | 중복이 backend compile error로만 드러남 | 기능 |
+| 4 | ~~P5X-009 — `node_id` 중복 방지 판정 + 참조 id rename(참조 갱신)~~ → [#145](https://github.com/Nochiski/Quant_study/pull/145) | 중복이 backend compile error로만 드러남 | 기능 |
 | 5 | ~~P5X-005 — CodeMirror `lineSeparator`로 CRLF 보존 또는 "LF 정규화" 문서화~~ → [#143](https://github.com/Nochiski/Quant_study/pull/143) | 편집 없이 저장해도 `source_hash` 변동 | 설정 1 또는 문서 |
 | 6 | ~~DEFECT-P5X-004 — `removalBlockers`가 SoT 행이 요구한 스코프 없이 `findReferences` 호출(팩터·파라미터는 전역이라 현재 무해)~~ → [#144](https://github.com/Nochiski/Quant_study/pull/144) | 계약 명시 | 테스트 또는 인자 |
 | 7 | ~~P5X-006 — `lastStructural`·`lastReady`를 `documentEpoch`에 결속~~ → [#144](https://github.com/Nochiski/Quant_study/pull/144) | 다른 stale 캐시는 전부 epoch에 묶여 있음 | 한 줄 |
@@ -245,8 +244,8 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-18 KST | Claude | backlog 4 처리 PR [#145](https://github.com/Nochiski/Quant_study/pull/145) `feat/gui-backlog-b3`(#144 위 스택): `renameNode`(중복·빈 값 거부, 정의 + 같은 그래프 참조 연산 목록) + `FormFieldsEditor.planCommit`(필드 확정 가로채기, `CommitInvalidReason` union으로 i18n 키 타입 검사). Vitest 614/52·eslint·tsc·Playwright 19/19. 리뷰 `review_gui_backlog_145` 1차 APPROVE(P2 3: 거부 뒤 blur가 안내를 지움, Escape가 안내를 남김, 매뉴얼 문장 끊김) → 후속 `a209f5a`(`onValid`를 재확정 가드 뒤로, Escape에 `onValid`, 문장 복원, 편집기 단언 4줄) → 재검토 APPROVE(리뷰어가 Playwright 19/19 재실행) | 머지 뒤 backlog |
 | 2026-09-18 KST | Claude | backlog 6·7·9·13 처리 PR [#144](https://github.com/Nochiski/Quant_study/pull/144) `fix/gui-backlog-b2`(main 기반): `removalBlockers` `REFERENCE_SCOPES`(node → 팩터 graph), `lastStructural`을 `documentEpoch`에 결속(useEffect), `graph-transactions.ts` 미호출 export 4종·`nodeBranchAt` 제거(`nodePointerOf` 유지), `planSourceOperations`(순차 계획 + 공통 접두·접미 diff로 편집 한 번) + 훅 `apply`가 연산 배열 수용, `addNode`가 `nodes: []`·빈 출력이면 두 연산. Vitest 611/52·eslint·tsc·Playwright 19/19(worktree `scad`의 stale `backtest_core`가 백테스트 시나리오를 한 번 failed로 만들어 maturin 재빌드). 리뷰 `review_gui_backlog_144` 1차 APPROVE(P2 5: JSDoc 끊김·WORKFLOW 잔존 언급·주석·epoch effect 의존·nodes 없는 경로) → 후속 `349ddee` → 2차 REQUEST_CHANGES(`null` 출력을 미지정으로 보아 `output_node_id:` 표기에서 노드 추가 전체가 막힘) → 후속 `0de9d3d`(null 제외 + 회귀 테스트) → 3차 APPROVE(문서 모양 8종 실측; P2 1: `addNode` JSDoc 순서 — 머지 전 정리). backlog 14·15 추가 | 머지 뒤 backlog |
-| 2026-09-18 KST | Claude | backlog 6·7·9·13 처리 PR [#144](https://github.com/Nochiski/Quant_study/pull/144) `fix/gui-backlog-b2`(main 기반): `removalBlockers` `REFERENCE_SCOPES`(node → 팩터 graph), `lastStructural`을 `documentEpoch`에 결속(useEffect), `graph-transactions.ts` 미호출 export 4종·`nodeBranchAt` 제거(`nodePointerOf` 유지), `planSourceOperations`(순차 계획 + 공통 접두·접미 diff로 편집 한 번) + 훅 `apply`가 연산 배열 수용, `addNode`가 `nodes: []`·빈 출력이면 두 연산. Vitest 611/52·eslint·tsc·Playwright 19/19(worktree `scad`의 stale `backtest_core`가 백테스트 시나리오를 한 번 failed로 만들어 maturin 재빌드). 리뷰 `review_gui_backlog_144` | 머지 뒤 backlog |
 | 2026-09-18 KST | Claude | backlog 2·5·12 처리 PR [#143](https://github.com/Nochiski/Quant_study/pull/143) `docs/gui-backlog-b1`(main 기반, 문서만): 매뉴얼 1절 샘플을 backend `upgrade_yaml_source` 출력의 1.1로(빈 `signal: {}` 제거), 4절 줄 끝 LF 정규화 안내(리뷰 P2-3으로 8절에서 이동), SoT 편집기 행에 "CRLF → LF 정규화·`source_hash` 변동 가능·`spec_hash` 불변" 결정, WORKFLOW 게이트 행에 `database/` ruff 실측(설정 없음·CI는 pytest만·backend 규칙 663건). 리뷰 `review_gui_backlog_143` | 머지 뒤 backlog |
 | 2026-09-18 KST | Claude | backlog 1·3 처리 PR [#140](https://github.com/Nochiski/Quant_study/pull/140) `fix/gui-backlog-p5x-001`(main 기반): `TextualControl` 되돌리기 조건을 "손대지 않은 draft"(`pristine` 플래그: 입력이 바뀌거나 확정이 실패하면 꺼지고 확정 성공·Escape로 켜짐)로 좁힘 + 재편집 경합 회귀 테스트(수정 전 red 확인), `NAMESPACES` fixture 결속 테스트. Vitest 606/52·eslint·tsc 초록. 리뷰 `review_gui_backlog_140` 1차 APPROVE(P2 3) → 후속 `9dc1921`(pristine 플래그·손대지 않은 입력 경로 테스트) → 재검토 APPROVE. main 위로 rebase 뒤 본 PLAN 기록 | 머지 뒤 backlog |
 | 2026-09-18 KST | Claude | **19 PR 머지 완료** — 사용자 지시(전체 E2E 백테스트까지 → CI 통과 → 머지)대로 전체 Playwright 19/19, #133 CI 3 job 초록 확인 후 #106(기획) → #108…#133 순서로 `--merge`. 절차 기록: #106을 `--delete-branch`로 머지하자 GitHub가 base 브랜치 삭제로 #108을 CLOSED 처리(retarget 아님) → base 브랜치를 같은 SHA로 재생성해 reopen·base main으로 편집·재삭제, 이후는 각 PR base를 main으로 먼저 옮긴 뒤 머지하고 브랜치는 끝에 일괄 삭제. 머지 전 스택 체인 검증에서 P4-01에만 있던 PLAN 문서 커밋 `0b4a0bd`가 P4-02 이후에 없어 체인이 끊겨 P4-01 head를 코드 `cd9addf`로 되돌림(리뷰 승인 코드 동일, 변경 기록 한 줄 손실). 머지 뒤 `origin/main` 트리 `2de69fc…` = 사전 `merge-tree` 예측과 일치. 중간 18 PR의 CI는 설계상 빨강(P1: frontend SDK는 P2-01, 전 구간: `FactorStep` ImportError는 P5-03 `c2f90c8`에서 수정) — 게이트는 최상위 #133 CI(머지 ref) | 13.7 머지 |

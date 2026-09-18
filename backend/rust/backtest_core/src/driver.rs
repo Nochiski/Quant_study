@@ -284,6 +284,26 @@ impl PersistentEngine {
             Lifecycle::Ready | Lifecycle::Running => {}
         }
         self.settings()?;
+        match self.drain_until_callback() {
+            Ok(frame) => Ok(frame),
+            Err(error) => {
+                // 세션 처리 중 도메인 오류(자본 소진·음수 현금·정산 bar 없음)는 라우팅 오류와
+                // 같이 runtime을 실패 상태로 고정한다 — 재진입하면 비용은 반영됐지만 SNAPSHOT이
+                // 없는 세션 뒤로 조용히 이어진다.
+                //
+                // 드레인 안의 `submit_native`가 이미 Failed로 바꿨다면 그쪽 detail이 더 구체적이라
+                // 덮어쓰지 않는다.
+                if !matches!(self.lifecycle, Lifecycle::Failed) {
+                    self.lifecycle = Lifecycle::Failed;
+                    self.failure_message = Some(error.to_string());
+                }
+                Err(error)
+            }
+        }
+    }
+
+    /// `drive_internal`의 본체: 큐를 드레인하다가 전략 콜백이 필요하면 프레임을 돌려준다.
+    fn drain_until_callback(&mut self) -> PyResult<Option<CallbackFrame>> {
         if !self.started {
             // Python `_execute`처럼 모든 세션의 MARKET 이벤트를 먼저 큐에 싣는다.
             let sessions = self.feed_ref()?.session_len();
@@ -744,8 +764,8 @@ mod tests {
         }
     }
 
-    fn runtime(warmup: usize) -> PersistentEngine {
-        let mut runtime = PersistentEngine::new(100_000.0, false, false, 1.0).unwrap();
+    fn runtime_with(allow_short: bool, settings: RunSettings) -> PersistentEngine {
+        let mut runtime = PersistentEngine::new(100_000.0, allow_short, false, 1.0).unwrap();
         runtime
             .load_feed(
                 vec![KEY.into()],
@@ -764,8 +784,12 @@ mod tests {
             vec!["no_action".into(), "set_portfolio_target".into()],
             vec![],
         );
-        runtime.run = Some(settings(warmup));
+        runtime.run = Some(settings);
         runtime
+    }
+
+    fn runtime(warmup: usize) -> PersistentEngine {
+        runtime_with(false, settings(warmup))
     }
 
     fn no_action(ts: &str) -> DecisionWire {
@@ -898,5 +922,33 @@ mod tests {
             .submit_internal(frame.token + 1, no_action(&frame.ts), None)
             .is_err());
         assert!(matches!(runtime.lifecycle, Lifecycle::AwaitingDecision(1)));
+    }
+
+    #[test]
+    fn session_close_domain_error_poisons_the_runtime() {
+        // DEFECT-R01: 세션 처리 도중 난 도메인 오류도 라우팅 오류처럼 runtime을 실패로 고정해야
+        // 한다. 고정하지 않으면 비용은 반영됐지만 SNAPSHOT이 없는 세션 뒤로 같은 runtime이
+        // 조용히 이어지고 finish()가 정상 종료해버린다.
+        //
+        // 실패 경로가 `PyErr::to_string()`으로 detail을 남기므로 이 테스트만 인터프리터를
+        // 올린다 (다른 드라이버 테스트는 Python API를 건드리지 않는다).
+        pyo3::prepare_freethreaded_python();
+        let mut wipeout = settings(0);
+        // 숏 차입 이자를 비현실적으로 크게 잡아 세션 1 마감에서 equity를 음수로 만든다.
+        wipeout.short_borrow_bps_annual = 1e9;
+        let mut runtime = runtime_with(true, wipeout);
+        let first = runtime.drive_internal().unwrap().unwrap();
+        runtime
+            .submit_internal(first.token, target(&first.ts, -0.5), None)
+            .unwrap();
+        // 세션 1 마감: 차입 비용이 현금을 삼켜 equity_wiped_out.
+        assert!(runtime.drive_internal().is_err());
+        assert_eq!(runtime.lifecycle_state(), "failed");
+        let detail = runtime.failure_message.clone().unwrap();
+        assert!(detail.contains("equity_wiped_out:"), "detail={detail}");
+        // 재진입과 종료 모두 막혀야 한다.
+        assert!(runtime.drive_internal().is_err());
+        assert!(runtime.finish_internal().is_err());
+        assert_eq!(runtime.lifecycle_state(), "failed");
     }
 }

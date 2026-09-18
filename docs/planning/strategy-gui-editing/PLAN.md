@@ -94,7 +94,7 @@ progress_percent: 0
 | Non-goals | 편집기 연결·스니펫 재구성(P3-02), JSON 편집 |
 | Branch/worktree | `feat/gui-p3-01-source-transactions` (base `feat/gui-p2-03-applicable-when` `610a17c`) |
 | Base SHA | `610a17c` |
-| Head SHA | `51301cc` (review 후속; diff freeze `2fba821`) |
+| Head SHA | `fb8a1b4` (WORKFLOW P2-R1 한 줄; 리뷰 대상 `51301cc`, diff freeze `2fba821`) |
 | Diff stat | 신규 model 1·arbitrary 1·테스트 2, package.json/lock(fast-check), SoT 1행, WORKFLOW 1 |
 | Focused tests | source-transactions 10 · property 1(300회 기본, 3000회 로컬 통과) |
 | Full gate | Vitest 490 passed(44 files) · typecheck · lint · build |
@@ -136,7 +136,7 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P3-01` | `source-transactions.ts` 원시 연산 4종, preflight, property test | P2-01 | `IN_REVIEW` | [#119](https://github.com/Nochiski/Quant_study/pull/119) · `review_gui_p3_01` 1차 REQUEST_CHANGES(P1 2·P2 9) → 후속 `51301cc` 재검토 중 |
+| [x] | `P3-01` | `source-transactions.ts` 원시 연산 4종, preflight, property test | P2-01 | `APPROVED` | [#119](https://github.com/Nochiski/Quant_study/pull/119) · `review_gui_p3_01` 2차 APPROVE(`51301cc`) · WORKFLOW 한 줄 `fb8a1b4` |
 | [ ] | `P3-02` | `useSourceTransactions`, 스니펫 삽입 재구성 | P3-01 | `WAITING` | — |
 
 Phase exit:
@@ -180,6 +180,7 @@ Phase exit:
 
 | PR | Reviewer agent | Base SHA | Final HEAD SHA | Verdict | P0/P1 | Residual risk | Reviewed at |
 |---|---|---|---|---|---:|---|---|
+| P3-01 | `review_gui_p3_01` | `610a17c` | `fb8a1b4` (리뷰 대상 `51301cc`) | APPROVE (1차 REQUEST_CHANGES P1-1 block scalar range 경계·P1-2 시퀀스/dash 줄 삭제의 주석 삭제 + P2 9 → 후속 `51301cc`: leaf 범위 줄바꿈 trim, `removeLines`·dash 줄 첫 키 규칙, 생성기 커버리지(주석·빈 컨테이너·block scalar·`- - `·dash 줄 키 각 1000건+/4000), 관용 절 제거, 줄 단위 범위 밖 비교; 2차: P1 전부 해소, 회귀 점검 통과, `FC_NUM_RUNS=5000` 통과) | 2 (해소) | P2-R1 `- - x` 안쪽 첫 항목 삭제가 사이 주석을 지움(WORKFLOW 제한 명기, 1.1 문서 경로 밖), P2-R2 property `remove` 관용 절이 pointer 줄 범위보다 넓고 개수 비교(→ P3-02), `const escape` 별칭(→ P3-02), 성능 parse 2회/연산(→ P3-02 훅 설계) | 2026-09-18 |
 | P2-03 | `review_gui_p2_03` | `e77f7ce` | `abafcc7` | APPROVE (1차 REQUEST_CHANGES DEFECT-118-01 Form 배지가 backend가 침묵시킨 기본값 필드에 경고 + P2 8 → 후속: 배지 = compile 경고 pointer, 발행 기본값 resolver, 글리프, signal 섹션, 문구 키 커버리지, `valueAtPointer` 공유, 중립 문구; 2차 실측 Form 배지 = backend 경고 pointer 8문서 일치, Inspector 판정 = `applies_to` 64건 일치) | 1 (해소) | nit 4: `contract.applicable.unknown` 문구가 옛 동작 서술(현재 도달 불가), `fromDefault` 미표시, i18n 커버리지 테스트가 한 단계만 탐색(재귀와 결과 동일), `STARTER` 별칭 중복 → P3-02 cleanup 커밋 후보 | 2026-09-18 |
 | P2-02 | `review_gui_p2_02` | `2a16ebe` | `6278c40` | APPROVE (1차 REQUEST_CHANGES P1-001 e2e seeding 비멱등·P1-002 undo 격리·P2 6 → 2차 P1-001 잔존(재시도 시 `/revisions/1` 저장 409) → 3차 시도별 고유 전략 id로 해소; seeding CLI 4케이스·`--repeat-each 2` 10 passed 실측) | 2 (해소) | suffix가 ms 타임스탬프(충돌 시 fail-closed), 정규식에 id 보간(base36·하이픈만), 동결 전략이 시도마다 누적(목록 페이지 20) | 2026-09-18 |
 | P1-06 | `review_gui_p1_06` | `af816a3` | `e77f7ce` | APPROVE (P0/P1 0, P2 3: 시퀀스 항목 첫 키 삭제 시 docstring과 반대로 아래 주석 소실 → 다음 키 앞 주석 슬롯으로 이동 구현, 버전 리터럴 테스트 가드, WORKFLOW 잔재 2곳; relocation probe 4종·0.9/1.2/2.0 row fail-closed 실측) | 0 | 1.1→1.2 도입 시 변환 step 미존재(의도된 제한, 테스트가 상수를 읽어 실패로 드러남); 중첩 mapping이 비는 경우 `_finish_emptied_sections` 미적용(현행 step으로 도달 불가) | 2026-09-18 |
@@ -209,6 +210,7 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
+| 2026-09-18 KST | Claude | `review_gui_p3_01` 2차 APPROVE(P1-1·P1-2 해소, P2 9 전부 해소, 회귀 점검·`FC_NUM_RUNS=5000` 통과) → P3-01 APPROVED. 머지 전 요청 1건(WORKFLOW 알려진 제한에 P2-R1 예외 한 줄) `fb8a1b4` 반영. P3-02로 이월: P2-R2 property `remove` 관용 절 좁히기(pointer 자기 줄 범위)·multiset 비교, `const escape` 별칭 제거, 빈 `key:` 부모 확장(P2-6; 스니펫 재구성이 필요로 함), 훅의 parse 2회 비용은 확정 시점 호출로 한정 | 13.5 판정 |
 | 2026-09-18 KST | Claude | `review_gui_p3_01` 1차 REQUEST_CHANGES(P1-1 block scalar range가 줄바꿈 포함 → 경계 한 줄 초과·silent 주석 삭제, P1-2 시퀀스 항목·dash 줄 첫 키 삭제가 다음 주석 삭제; P2 9: property 관용 절·항등식 단언·생성기 커버리지(주석·빈 컨테이너·block scalar 0건), escape 중복, flow 컬렉션 미지원 사유, 빈 `key:` 부모, `- []` 후행 공백, EOL 혼재) → 후속 `51301cc`(전부 조치, P2-5·6은 WORKFLOW 제한 명기) → 재검토 요청. 잔여 위험 기록: 연산 1회 = parse 2회(67KB 문서 ~720ms) → P3-02 훅에서 parse 결과 재사용/디바운스 설계; 스니펫(커서 줄)·트랜잭션(문서) 들여쓰기 규칙 이원화는 P3-02 스니펫 재구성으로 해소, Phase 3 exit 점검 항목 | 13.5 재검토 |
 | 2026-09-18 KST | Claude | `review_gui_p2_03` 2차 APPROVE → P2-03 APPROVED. Phase 2 PR 3/3 승인. nit 4건(118-10~13)은 P3-02 cleanup 커밋 후보로 기록 | 13.5 판정 |
 | 2026-09-18 KST | Claude | P3-01 구현·self-check(단위 10·property 3000회·Vitest 490) → diff freeze `2fba821`, stacked PR #119(base P2-03), `review_gui_p3_01`(opus) 배정 → IN_REVIEW. 결정: 삽입·삭제 경계는 노드 range가 아니라 leaf·키 범위 최댓값(노드 range가 뒤 주석 줄 포함), 시퀀스 항목은 자기 `-`에 앵커(`- - x`·`- key:` 첫 키), 성공 판정은 preflight parse + `applyToTree` deep-equal, fast-check는 WORKFLOW가 계획한 devDependency. 감사 4.2 SoT 행·4.5 WORKFLOW 규칙 반영 | 13.3 diff freeze |

@@ -48,13 +48,10 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-from bench_universe import synthetic_universe
+from bench_universe import load_full_calendar_universe, synthetic_universe
 
 from backtest_engine import BacktestEngine
-from backtest_engine.adapters.krx_parquet import KrxParquetBarSource, KrxParquetUniverseSource
 from backtest_engine.engine.store import EventStore
-from backtest_engine.ports.market_data import BarQuery, OhlcPolicy
-from backtest_engine.ports.universe import UniverseQuery
 from backtest_engine.types.results import BacktestResult
 from strategy_workbench.adapters.outbound.backtest_engine import _adapter as adapter_module
 from strategy_workbench.adapters.outbound.backtest_engine.facade.executor import (
@@ -184,35 +181,12 @@ def synthetic_dataset(
 ) -> tuple[BacktestDataset, tuple[str, ...], tuple[date, ...]]:
     """실제 KRX fixture 가격 경로를 복제한 synthetic dataset을 만든다.
 
-    `bench_universe.synthetic_universe`가 만든 엔진 `Bar`를 워크벤치 포트 레코드로 옮긴다.
-    두 벤치가 같은 가격 경로를 쓰므로 엔진 벤치 수치와 직접 비교할 수 있다.
+    fixture 로딩과 전 구간 상장 필터는 `bench_universe.load_full_calendar_universe`가 정본이고
+    `synthetic_universe`가 만든 엔진 `Bar`를 워크벤치 포트 레코드로 옮긴다. 두 벤치가 같은 가격
+    경로를 쓰므로 엔진 벤치 수치와 직접 비교할 수 있다.
     """
-    universe = KrxParquetUniverseSource(root).load_universe(
-        UniverseQuery(venue="XKRX", start=start, end=end)
-    )
-    if not universe.ok:
-        raise RuntimeError(
-            f"universe load failed — root={root} start={start} end={end} detail={universe.detail}"
-        )
-    first = min(item.first_session for item in universe.memberships)
-    last = max(item.last_session for item in universe.memberships)
-    full = tuple(
-        item.instrument
-        for item in universe.memberships
-        if item.first_session == first and item.last_session == last
-    )
-    if not full:
-        raise RuntimeError(
-            f"no instrument spans the whole calendar — root={root} first={first} last={last}"
-        )
-    loaded = KrxParquetBarSource(root).load_bars(
-        BarQuery(instruments=full[:1], start=start, end=end, ohlc_policy=OhlcPolicy.CLAMP)
-    )
-    if not loaded.ok:
-        raise RuntimeError(
-            f"bars load failed — root={root} instruments={len(full[:1])} detail={loaded.detail}"
-        )
-    instruments, bars = synthetic_universe(loaded.bars, size)
+    fixture = load_full_calendar_universe(root, start=start, end=end, limit=1)
+    instruments, bars = synthetic_universe(fixture.bars, size)
     records = tuple(
         MarketBarRecord(
             session=bar.ts.date(),
@@ -463,12 +437,12 @@ def main(argv: Sequence[str]) -> int:
             )
             stage_samples[core].append(stages)
             total_samples[core].append(total)
-            previous = signatures.setdefault(core, result_signature(result))
-            current = result_signature(result)
-            if previous != current:
+            signature = result_signature(result)
+            previous = signatures.setdefault(core, signature)
+            if previous != signature:
                 raise RuntimeError(
                     f"non-deterministic workbench result for core={core.value} — "
-                    f"{_first_difference(previous, current)}"
+                    f"{_first_difference(previous, signature)}"
                 )
 
     if len(signatures) > 1:

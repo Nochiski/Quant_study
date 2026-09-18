@@ -205,6 +205,60 @@ class EqualWeightTape:
         return evaluate_tape(self._frames, self.idle_reason, ctx, event)
 
 
+class FixtureLoadError(RuntimeError):
+    """KRX fixture 로딩 실패. 이 스크립트와 `bench_workbench_adapter.py`가 함께 쓴다."""
+
+
+@dataclass(frozen=True)
+class FixtureUniverse:
+    """마스터 캘린더 전 구간에 상장된 종목과 그 bar."""
+
+    instruments: tuple[InstrumentId, ...]
+    bars: tuple[Bar, ...]
+
+
+def load_full_calendar_universe(
+    root: Path, *, start: date, end: date, limit: int
+) -> FixtureUniverse:
+    """fixture에서 전 구간 상장 종목 `limit`개와 그 bar를 읽는다.
+
+    정지·상폐로 bar가 빠지는 종목은 벤치마크 노이즈이므로 마스터 캘린더의 첫·마지막 세션을
+    모두 가진 종목만 남긴다. synthetic 유니버스를 만들 때도 이 함수가 고른 종목이 템플릿이다.
+
+    Raises:
+        FixtureLoadError: universe 또는 bar 로딩이 실패했을 때. detail과 조회 조건을 담는다.
+    """
+    universe = KrxParquetUniverseSource(root).load_universe(
+        UniverseQuery(venue="XKRX", start=start, end=end)
+    )
+    if not universe.ok:
+        raise FixtureLoadError(
+            f"universe load failed: root={root} start={start} end={end} detail={universe.detail}"
+        )
+    first = min(item.first_session for item in universe.memberships)
+    last = max(item.last_session for item in universe.memberships)
+    full = [
+        item.instrument
+        for item in universe.memberships
+        if item.first_session == first and item.last_session == last
+    ]
+    if not full:
+        raise FixtureLoadError(
+            f"no instrument spans the whole calendar: root={root} first={first} last={last} "
+            f"memberships={len(universe.memberships)}"
+        )
+    instruments = tuple(full[:limit])
+    loaded = KrxParquetBarSource(root).load_bars(
+        BarQuery(instruments=instruments, start=start, end=end, ohlc_policy=OhlcPolicy.CLAMP)
+    )
+    if not loaded.ok:
+        raise FixtureLoadError(
+            f"bars load failed: root={root} instruments={len(instruments)} "
+            f"start={start} end={end} detail={loaded.detail}"
+        )
+    return FixtureUniverse(instruments=instruments, bars=loaded.bars)
+
+
 def synthetic_universe(
     bars: tuple[Bar, ...], size: int
 ) -> tuple[tuple[InstrumentId, ...], tuple[Bar, ...]]:
@@ -256,30 +310,14 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--profile", action="store_true")
     args = parser.parse_args(argv[1:])
 
-    universe = KrxParquetUniverseSource(args.root).load_universe(
-        UniverseQuery(venue="XKRX", start=args.start, end=args.end)
-    )
-    if not universe.ok:
-        print(f"universe load failed: {universe.detail}")
-        return 1
-    # 마스터 캘린더 전 구간에 상장된 종목만 (정지·상폐로 bar가 빠지는 종목은 벤치마크 노이즈).
-    first = min(m.first_session for m in universe.memberships)
-    last = max(m.last_session for m in universe.memberships)
-    full = [
-        m.instrument
-        for m in universe.memberships
-        if m.first_session == first and m.last_session == last
-    ]
-    instruments = tuple(full[: args.instruments])
-    loaded = KrxParquetBarSource(args.root).load_bars(
-        BarQuery(
-            instruments=instruments, start=args.start, end=args.end, ohlc_policy=OhlcPolicy.CLAMP
+    try:
+        fixture = load_full_calendar_universe(
+            args.root, start=args.start, end=args.end, limit=args.instruments
         )
-    )
-    if not loaded.ok:
-        print(f"bars load failed: {loaded.detail}")
+    except FixtureLoadError as error:
+        print(error)
         return 1
-    bars = loaded.bars
+    instruments, bars = fixture.instruments, fixture.bars
     if args.synthetic:
         instruments, bars = synthetic_universe(bars, args.instruments)
     feed = DataFeed(bars)
@@ -344,8 +382,7 @@ def main(argv: list[str]) -> int:
             statistics.median(timing.total_seconds for timing in timings),
         )
 
-    baseline_run, _, baseline_total = medians("python") if "python" in cores else (0.0, 0.0, 0.0)
-    has_baseline = "python" in cores
+    baseline = medians("python") if "python" in cores else None
     core_payload: dict[str, object] = {}
     payload: dict[str, object] = {
         "workload": {
@@ -366,8 +403,13 @@ def main(argv: list[str]) -> int:
         timings = timings_by_core[core]
         run_median, materialize_median, total_median = medians(core)
         final_equity, orders, fills = signature_by_core[core]
-        speedup = baseline_total / total_median if has_baseline else None
-        run_speedup = baseline_run / run_median if has_baseline else None
+        if baseline is None:
+            speedup = None
+            run_speedup = None
+        else:
+            baseline_run, _, baseline_total = baseline
+            speedup = baseline_total / total_median
+            run_speedup = baseline_run / run_median
         core_payload[core] = {
             "run_seconds_samples": [timing.run_seconds for timing in timings],
             "materialize_seconds_samples": [timing.materialize_seconds for timing in timings],

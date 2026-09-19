@@ -172,6 +172,15 @@ class FactorEvaluationRecord:
 
 
 @dataclass(frozen=True)
+class _PreparedPipeline:
+    """관측 데이터를 읽기 전에 확정되는 파이프라인 입력(엔진 판정·필드 메타데이터·실행 플랜)."""
+
+    engine: EngineCompatibility
+    metadata: FactorMetadataSnapshot
+    plans: dict[str, FactorExecutionPlan]
+
+
+@dataclass(frozen=True)
 class PortfolioPipelineResult:
     data_snapshot_id: str
     factor_evaluations: tuple[FactorEvaluationRecord, ...]
@@ -198,6 +207,19 @@ class PortfolioDesignService:
     def preview(self, request: PortfolioPreviewRequest) -> PortfolioPreview:
         return self.run_pipeline(request).preview
 
+    def preflight(self, request: PortfolioPreviewRequest) -> EngineCompatibility:
+        """관측 데이터를 읽지 않고 끝나는 검사만 돌려 엔진 호환성을 답한다.
+
+        `run_pipeline` 의 앞부분(스펙 검증·엔진 판정·팩터 메타데이터·실행 플랜·출력 타입/저장 참조
+        거부)과 같은 코드를 타므로, 여기서 통과한 스펙이 파이프라인 앞부분에서 다시 거부되는 일은
+        없다. 원시 관측 로딩과 TargetTape 컴파일은 하지 않으므로 응답 시간이 데이터 구간·유니버스
+        크기에 비례하지 않는다 — 백테스트 시작 요청이 즉시 202 를 돌려주기 위한 사전 검사다(이슈
+        #158). 데이터에 의존하는 실패(관측 계약 위반·스냅샷 불일치·비유한 계산)는 여기서 잡히지
+        않는다.
+        """
+
+        return self._prepare(request.spec, PortfolioPipelineOptions()).engine
+
     def run_pipeline(
         self,
         request: PortfolioPreviewRequest,
@@ -211,39 +233,10 @@ class PortfolioDesignService:
             _raise_if_cancelled(cancelled)
 
         spec = request.spec
-        validation = validate_strategy(spec)
-        if not validation.valid:
-            raise InvalidPortfolioRequestError(validation)
-        checkpoint()
-
-        engine = self._engine_portfolio.assess(spec)
-        if pipeline_options.require_engine_compatible and not engine.compatible:
-            raise IncompatiblePortfolioRequestError(engine)
-        trace_requested = (
-            pipeline_options.trace_selection is not None
-            or pipeline_options.construction_trace_selection is not None
-        )
-        if trace_requested and not isinstance(
-            self._observation_source, CancellableRawObservationPort
-        ):
-            raise TraceObservationCapabilityError(type(self._observation_source).__name__)
-
-        metadata = self._factor_metadata.resolve_factor_fields(
-            tuple(
-                sorted(
-                    {
-                        field_id
-                        for factor in spec.factors
-                        for field_id in factor_required_field_ids(factor.graph)
-                    }
-                )
-            )
-        )
-        plans = self._plans(spec, metadata)
-        _reject_non_numeric_factor_outputs(spec, plans)
-        _reject_saved_references(spec, plans)
-        _validate_trace_selection(pipeline_options, plans)
-        checkpoint()
+        prepared = self._prepare(spec, pipeline_options, checkpoint=checkpoint)
+        engine = prepared.engine
+        metadata = prepared.metadata
+        plans = prepared.plans
         raw_query = RawObservationQuery(
             market=spec.data.market.value,
             universe_id=spec.data.universe_id,
@@ -390,6 +383,50 @@ class PortfolioDesignService:
             construction_trace=construction_trace,
             preview=preview,
         )
+
+    def _prepare(
+        self,
+        spec: StrategySpec,
+        pipeline_options: PortfolioPipelineOptions,
+        *,
+        checkpoint: Callable[[], None] = lambda: None,
+    ) -> _PreparedPipeline:
+        """파이프라인의 데이터 무관 앞부분. `preflight` 와 `run_pipeline` 이 같은 판정을 쓴다."""
+
+        validation = validate_strategy(spec)
+        if not validation.valid:
+            raise InvalidPortfolioRequestError(validation)
+        checkpoint()
+
+        engine = self._engine_portfolio.assess(spec)
+        if pipeline_options.require_engine_compatible and not engine.compatible:
+            raise IncompatiblePortfolioRequestError(engine)
+        trace_requested = (
+            pipeline_options.trace_selection is not None
+            or pipeline_options.construction_trace_selection is not None
+        )
+        if trace_requested and not isinstance(
+            self._observation_source, CancellableRawObservationPort
+        ):
+            raise TraceObservationCapabilityError(type(self._observation_source).__name__)
+
+        metadata = self._factor_metadata.resolve_factor_fields(
+            tuple(
+                sorted(
+                    {
+                        field_id
+                        for factor in spec.factors
+                        for field_id in factor_required_field_ids(factor.graph)
+                    }
+                )
+            )
+        )
+        plans = self._plans(spec, metadata)
+        _reject_non_numeric_factor_outputs(spec, plans)
+        _reject_saved_references(spec, plans)
+        _validate_trace_selection(pipeline_options, plans)
+        checkpoint()
+        return _PreparedPipeline(engine=engine, metadata=metadata, plans=plans)
 
     def _plans(
         self, spec: StrategySpec, metadata: FactorMetadataSnapshot

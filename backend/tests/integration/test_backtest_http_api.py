@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from pathlib import Path
 from threading import Event
 from typing import Any, cast
@@ -20,6 +21,13 @@ from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestDataPort,
 )
 from strategy_workbench.application.backtest_run.facade.runs import BacktestRunService
+from strategy_workbench.application.portfolio_design.facade.design import (
+    EngineCompatibility,
+    PortfolioDesignService,
+    PortfolioPipelineOptions,
+    PortfolioPipelineResult,
+    PortfolioPreviewRequest,
+)
 from strategy_workbench.bootstrap.facade.container import BackendContainer, build_container
 from strategy_workbench.bootstrap.facade.http import build_http_app
 from strategy_workbench.domain.analytics.facade.metrics import build_default_metric_registry
@@ -46,6 +54,48 @@ class _CommitBarrierStore:
     def discard(self, run_id: str) -> None:
         self.discarded.append(run_id)
         self._delegate.discard(run_id)
+
+
+class _TapeBarrierDesign:
+    """run 스레드의 tape 단계(`run_pipeline`) 진입에서 멈추는 테스트용 포트폴리오 설계 서비스."""
+
+    def __init__(self, delegate: PortfolioDesignService) -> None:
+        self._delegate = delegate
+        self.entered = Event()
+        self.release = Event()
+        self.compiled = False
+
+    def preflight(self, request: PortfolioPreviewRequest) -> EngineCompatibility:
+        return self._delegate.preflight(request)
+
+    def run_pipeline(
+        self,
+        request: PortfolioPreviewRequest,
+        *,
+        options: PortfolioPipelineOptions | None = None,
+        cancelled: Callable[[], bool] = lambda: False,
+    ) -> PortfolioPipelineResult:
+        self.entered.set()
+        if not self.release.wait(timeout=30):
+            raise TimeoutError("target tape test barrier was not released")
+        result = self._delegate.run_pipeline(request, options=options, cancelled=cancelled)
+        self.compiled = True
+        return result
+
+
+def _backtests_with_tape_barrier(
+    container: BackendContainer, tmp_path: Path, run_id: str
+) -> tuple[BacktestRunService, _TapeBarrierDesign]:
+    barrier = _TapeBarrierDesign(container.portfolio_design)
+    backtests = BacktestRunService(
+        cast(PortfolioDesignService, barrier),
+        container.strategy_repository,
+        cast(BacktestDataPort, container.equity_data),
+        BacktestEngineExecutorAdapter(build_default_metric_registry()),
+        LocalArtifactStore(tmp_path / "artifacts"),
+        new_id=lambda: run_id,
+    )
+    return backtests, barrier
 
 
 def _app_with_backtests(container: BackendContainer, backtests: BacktestRunService) -> FastAPI:
@@ -226,6 +276,68 @@ def test_cancel_accepted_during_artifact_commit_wins_and_exact_request_replays(
     assert replay_result.json()["manifest"]["run_spec"] == accepted_request.json()
 
 
+def test_start_accepts_the_run_before_the_target_tape_is_compiled(tmp_path: Path) -> None:
+    """이슈 #158: 시작 요청은 TargetTape 계산을 기다리지 않고 202 `queued` 를 돌려준다."""
+    run_id = "run-accepted-before-tape"
+    container = build_container(artifact_root=tmp_path / "unused")
+    backtests, barrier = _backtests_with_tape_barrier(container, tmp_path, run_id)
+    client = TestClient(_app_with_backtests(container, backtests))
+
+    accepted = client.post("/api/v1/backtests", json=_run_body(client, "python"))
+
+    assert accepted.status_code == 202
+    assert accepted.json()["run"]["run_id"] == run_id
+    assert accepted.json()["run"]["status"] == "queued"
+    assert barrier.entered.wait(timeout=30), "run never entered the tape stage"
+    assert barrier.compiled is False
+    in_tape = client.get(f"/api/v1/backtests/{run_id}").json()
+    assert in_tape["status"] == "running"
+    assert in_tape["stage"] == "tape"
+    not_ready = client.get(f"/api/v1/backtests/{run_id}/result")
+    assert not_ready.status_code == 409
+
+    barrier.release.set()
+    state = _wait(client, run_id)
+    assert state["status"] == "completed", state
+    assert barrier.compiled is True
+    events = client.get(f"/api/v1/backtests/{run_id}/events").text
+    assert '"stage":"tape"' in events
+    assert '"stage":"data"' in events
+    assert events.index('"stage":"tape"') < events.index('"stage":"data"')
+
+
+def test_cancel_during_target_tape_compilation_ends_cancelled_without_a_tape(
+    tmp_path: Path,
+) -> None:
+    """이슈 #158: tape 단계에서 취소하면 파이프라인 checkpoint 가 멈추고 `cancelled` 로 끝난다."""
+    run_id = "run-cancel-during-tape"
+    container = build_container(artifact_root=tmp_path / "unused")
+    backtests, barrier = _backtests_with_tape_barrier(container, tmp_path, run_id)
+    client = TestClient(_app_with_backtests(container, backtests))
+
+    accepted = client.post("/api/v1/backtests", json=_run_body(client, "python"))
+    assert accepted.status_code == 202
+    assert barrier.entered.wait(timeout=30), "run never entered the tape stage"
+    try:
+        cancellation = client.post(f"/api/v1/backtests/{run_id}/cancel")
+        assert cancellation.status_code == 200
+        assert cancellation.json()["status"] == "cancel_requested"
+    finally:
+        barrier.release.set()
+
+    state = _wait(client, run_id)
+    assert state["status"] == "cancelled", state
+    assert state["error"] is None
+    assert state["artifact_uri"] is None
+    # 취소는 파이프라인 첫 checkpoint 에서 관측되므로 tape 는 끝까지 만들어지지 않는다.
+    assert barrier.compiled is False
+    events = client.get(f"/api/v1/backtests/{run_id}/events").text
+    assert '"status":"cancel_requested"' in events
+    assert '"status":"cancelled"' in events
+    assert '"status":"completed"' not in events
+    assert '"stage":"data"' not in events
+
+
 def test_python_reference_and_rust_core_have_golden_result_and_metric_parity() -> None:
     client = TestClient(build_http_app())
 
@@ -270,11 +382,10 @@ def test_start_backtest_openapi_declares_every_actual_preflight_error() -> None:
         "detail"
     ]
     assert detail["discriminator"]["propertyName"] == "code"
+    # 관측 데이터 부재·계약 위반은 시작 요청이 아니라 run 상태 `failed` 로 전달된다(이슈 #158).
     assert set(detail["discriminator"]["mapping"]) == {
         "backtest.run.invalid",
         "backtest.strategy.requires_upgrade",
-        "portfolio.data.unavailable",
-        "portfolio.raw_observation.invalid",
         "portfolio.strategy.invalid",
     }
 

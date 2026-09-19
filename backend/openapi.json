@@ -480,8 +480,6 @@
               "mapping": {
                 "backtest.run.invalid": "#/components/schemas/BacktestRunInvalidDetail",
                 "backtest.strategy.requires_upgrade": "#/components/schemas/BacktestStrategyRequiresUpgradeDetail",
-                "portfolio.data.unavailable": "#/components/schemas/PortfolioDataUnavailableDetail",
-                "portfolio.raw_observation.invalid": "#/components/schemas/PortfolioRawObservationInvalidDetail",
                 "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail"
               },
               "propertyName": "code"
@@ -495,12 +493,6 @@
               },
               {
                 "$ref": "#/components/schemas/PortfolioStrategyInvalidDetail"
-              },
-              {
-                "$ref": "#/components/schemas/PortfolioDataUnavailableDetail"
-              },
-              {
-                "$ref": "#/components/schemas/PortfolioRawObservationInvalidDetail"
               }
             ],
             "title": "Detail"

@@ -41,9 +41,10 @@ const REWIRED_FIELD = "price.open";
 // 실데이터 security_id 어휘는 `{ticker}:{span_seq}`(GAP-11). 실행 설정 기본값은 비어 있어(벤치마크 없음,
 // 이슈 #154) 벤치마크 경로까지 검증하려면 어댑터 어휘의 ID 를 명시해야 한다 — 삼성전자 첫 상장 구간.
 const BENCHMARK_SECURITY_ID = "005930:1";
-// 실측(2026-09-19): 시작 요청(TargetTape 동기 계산) 약 80초 + 실행 2초. 하위 예산 합이 테스트 예산 안에
-// 들어와야 하위 단계가 먼저 실패해 원인을 말한다.
-const START_TIMEOUT_MS = 300_000;
+// 시작 요청은 데이터를 읽지 않는 사전 검사만 하고 즉시 202 를 돌려준다(이슈 #158). TargetTape 계산은
+// run 의 `tape` 단계로 옮겨졌다 — 실측(2026-09-19) 6개월 구간 약 80초 + 엔진 2초가 완료 예산에 든다.
+// 하위 예산 합이 테스트 예산 안에 들어와야 하위 단계가 먼저 실패해 원인을 말한다.
+const START_TIMEOUT_MS = 60_000;
 const COMPLETE_TIMEOUT_MS = 300_000;
 const TEST_TIMEOUT_MS = 900_000;
 
@@ -145,8 +146,9 @@ test.describe("real equity data", () => {
         request.method() === "POST" &&
         new URL(request.url()).pathname === "/api/v1/backtests",
     );
-    // POST /api/v1/backtests 는 run id 를 돌려주기 전에 TargetTape(전 유니버스 팩터 평가)를 동기로
-    // 만든다. mock 은 순간이지만 실데이터(공통주 ~2천 종목 × 6개월 + 252 세션 이력)는 약 80초가 걸린다.
+    // POST /api/v1/backtests 는 사전 검사만 하고 바로 run id 를 돌려준다. TargetTape(전 유니버스 팩터
+    // 평가)는 run 의 tape 단계에서 만들어지며 실데이터(공통주 ~2천 종목 × 6개월 + 252 세션 이력)는
+    // 약 80초가 걸린다 — 아래 완료 폴링이 그 시간을 흡수한다.
     const acceptedRun = page.waitForResponse(
       (response) =>
         response.request().method() === "POST" &&

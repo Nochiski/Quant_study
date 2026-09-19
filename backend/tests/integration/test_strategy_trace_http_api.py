@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import copy
 import json
+import time
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import TypeAdapter
 
-from strategy_workbench.adapters.inbound.http_api._backtest_contract import Backtest422Response
 from strategy_workbench.adapters.inbound.http_api._trace_contract import (
     Trace422Response,
     TraceStrategyNotFoundResponse,
@@ -607,7 +607,6 @@ def test_finite_factor_overflow_is_the_same_coded_failure_for_all_execution_rout
     responses = (
         client.post("/api/v1/portfolio/preview", json={"spec": spec}),
         client.post("/api/v1/strategies/debug/trace", json=trace_request),
-        client.post("/api/v1/backtests", json={"strategy": spec, "core": "python"}),
     )
 
     for response in responses:
@@ -624,7 +623,21 @@ def test_finite_factor_overflow_is_the_same_coded_failure_for_all_execution_rout
                 "overflow",
             )
         }
-    TypeAdapter(Backtest422Response).validate_python(responses[-1].json())
+
+    # 오버플로는 팩터를 평가해야 드러난다. 백테스트 시작은 데이터를 읽지 않아 접수되고(이슈 #158)
+    # run 의 tape 단계가 같은 issue 코드·경로를 error 에 실어 실패한다.
+    backtest = client.post("/api/v1/backtests", json={"strategy": spec, "core": "python"})
+    assert backtest.status_code == 202, backtest.text
+    run_id = backtest.json()["run"]["run_id"]
+    state: dict[str, Any] = {}
+    for _ in range(500):
+        state = client.get(f"/api/v1/backtests/{run_id}").json()
+        if state["status"] in {"completed", "failed", "cancelled"}:
+            break
+        time.sleep(0.01)
+    assert state["status"] == "failed", state
+    assert "InvalidPortfolioRequestError" in state["error"]
+    assert "strategy.expression.calculation_non_finite@factors.0.graph.nodes.2" in state["error"]
 
 
 def test_starting_holdings_without_a_target_frame_return_a_typed_preflight_error() -> None:

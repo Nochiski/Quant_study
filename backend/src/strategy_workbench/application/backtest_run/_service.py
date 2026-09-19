@@ -8,6 +8,8 @@ from threading import Event, RLock, Thread
 from strategy_workbench.application.portfolio_design.facade.design import (
     InvalidPortfolioRequestError,
     PortfolioDesignService,
+    PortfolioPipelineCancelledError,
+    PortfolioPipelineOptions,
     PortfolioPreviewRequest,
 )
 from strategy_workbench.application.strategy_design.facade.ports import (
@@ -30,7 +32,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
     StrategySourceKind,
     WarningSeverity,
 )
-from strategy_workbench.domain.portfolio.facade.construction import TargetTape
+from strategy_workbench.domain.strategy.facade.specification import strategy_spec_hash
 from strategy_workbench.domain.strategy.facade.validation import validate_strategy
 
 from .ports.outgoing.artifact_store import BacktestArtifactStorePort
@@ -114,6 +116,13 @@ class BacktestRunService:
         self._lock = RLock()
 
     def start(self, request: BacktestRunSpec) -> BacktestStartResponse:
+        """실행 요청을 받아 즉시 `QUEUED` 로 접수한다.
+
+        요청 스레드에서는 데이터를 읽지 않는 검사(스펙 해석·검증·metric window·엔진 호환성·저장
+        리비전 해시)만 하고, TargetTape 계산은 run 스레드의 `tape` 단계로 넘긴다. 이전에는 tape 를
+        여기서 동기로 만들어 긴 구간에서 응답이 수 분 이상 걸리고 취소 수단이 없었다(이슈 #158).
+        """
+
         spec, provenance = self._resolve(request)
         strategy = spec.strategy
         if strategy is None:  # pragma: no cover - _resolve always fills it
@@ -126,9 +135,12 @@ class BacktestRunService:
                 raise InvalidBacktestRunError(
                     f"metric window exceeds strategy data range: {window.scope.value}"
                 )
-        portfolio = self._portfolio_design.preview(PortfolioPreviewRequest(strategy))
-        if not portfolio.engine.compatible:
+        engine = self._portfolio_design.preflight(PortfolioPreviewRequest(strategy))
+        if not engine.compatible:
             raise InvalidBacktestRunError("strategy exceeds engine capabilities")
+        # TargetTape.strategy_hash 는 같은 spec 의 strategy_spec_hash 다. tape 없이도 provenance 를
+        # 확정할 수 있고, tape 단계가 이 값을 다시 대조한다.
+        executed_hash = strategy_spec_hash(strategy)
         if provenance is None:
             source_hash = (
                 request.strategy_source.source_hash
@@ -137,14 +149,14 @@ class BacktestRunService:
             )
             provenance = StrategyProvenance(
                 kind=StrategySourceKind.INLINE_DRAFT,
-                spec_hash=portfolio.tape.strategy_hash,
+                spec_hash=executed_hash,
                 schema_version=strategy.identity.schema_version,
                 source_hash=source_hash,
             )
-        elif provenance.spec_hash != portfolio.tape.strategy_hash:
+        elif provenance.spec_hash != executed_hash:
             raise RuntimeError(
                 "saved strategy repository hash differs from the executed StrategySpec — "
-                f"stored={provenance.spec_hash!r} executed={portfolio.tape.strategy_hash!r}"
+                f"stored={provenance.spec_hash!r} executed={executed_hash!r}"
             )
         run_id = self._new_id()
         created = self._now()
@@ -169,13 +181,16 @@ class BacktestRunService:
             self._next_accepted_sequence += 1
             self._records[run_id] = record
             self._emit(record, RunStatus.QUEUED, 0.0, "queued", "Run accepted")
+            # 응답은 접수 시점 상태다. 스레드를 띄운 뒤 record.state 를 읽으면 이미 tape 단계로
+            # 바뀌어 있을 수 있어 202 본문의 status 가 비결정이 된다.
+            accepted = record.state
         Thread(
             target=self._run,
-            args=(run_id, spec, portfolio.tape, provenance, portfolio.warnings),
+            args=(run_id, spec, provenance),
             name=f"backtest-{run_id}",
             daemon=True,
         ).start()
-        return BacktestStartResponse(record.state)
+        return BacktestStartResponse(accepted)
 
     def state(self, run_id: str) -> BacktestRunState:
         with self._lock:
@@ -315,16 +330,33 @@ class BacktestRunService:
         self,
         run_id: str,
         spec: BacktestRunSpec,
-        tape: TargetTape,
         provenance: StrategyProvenance,
-        observation_warnings: tuple[str, ...] = (),
     ) -> None:
         record = self._record(run_id)
         strategy = spec.strategy
         if strategy is None:  # pragma: no cover - resolved before the thread starts
             raise InvalidBacktestRunError("resolved run spec has no strategy")
         try:
-            self._update(record, RunStatus.RUNNING, 0.05, "data", "Loading market data")
+            # tape 단계: 원시 관측 로딩 + 팩터 평가 + TargetTape 컴파일. 실데이터에서 실행 시간의
+            # 대부분을 차지하므로 취소 콜백을 파이프라인 checkpoint 에 그대로 건다.
+            self._update(record, RunStatus.RUNNING, 0.02, "tape", "Compiling target tape")
+            try:
+                preview = self._portfolio_design.run_pipeline(
+                    PortfolioPreviewRequest(strategy),
+                    options=PortfolioPipelineOptions(require_engine_compatible=True),
+                    cancelled=record.cancellation.is_set,
+                ).preview
+            except PortfolioPipelineCancelledError as error:
+                raise RunCancelledError("run cancelled while compiling target tape") from error
+            tape = preview.tape
+            if tape.strategy_hash != provenance.spec_hash:
+                raise RuntimeError(
+                    "compiled TargetTape hash differs from the accepted strategy provenance — "
+                    f"run_id={run_id} provenance={provenance.spec_hash!r} "
+                    f"tape={tape.strategy_hash!r}"
+                )
+            self._raise_if_cancelled(record)
+            self._update(record, RunStatus.RUNNING, 0.1, "data", "Loading market data")
             security_ids = tuple(
                 sorted({target.security_id for frame in tape.frames for target in frame.targets})
             )
@@ -342,7 +374,7 @@ class BacktestRunService:
             # every warning the run was built on, not just the market-data ones.
             dataset = replace(
                 dataset,
-                warnings=(*_as_data_warnings(observation_warnings), *dataset.warnings),
+                warnings=(*_as_data_warnings(preview.warnings), *dataset.warnings),
             )
             self._raise_if_cancelled(record)
             self._update(record, RunStatus.RUNNING, 0.25, "engine", "Running backtest engine")
@@ -400,7 +432,7 @@ class BacktestRunService:
                         "Run cancelled",
                     )
                 else:
-                    record.state = replace(record.state, error=f"{type(error).__name__}: {error}")
+                    record.state = replace(record.state, error=_describe_failure(error))
                     self._emit(
                         record,
                         RunStatus.FAILED,
@@ -461,6 +493,21 @@ class BacktestRunService:
     def _raise_if_cancelled(record: _RunRecord) -> None:
         if record.cancellation.is_set():
             raise RunCancelledError("run cancelled")
+
+
+def _describe_failure(error: BaseException) -> str:
+    """run 상태의 `error` 문자열.
+
+    검증 실패는 issue 코드·경로까지 실어야 화면에서 원인을 알 수 있다.
+    """
+
+    text = f"{type(error).__name__}: {error}"
+    if isinstance(error, InvalidPortfolioRequestError):
+        issues = "; ".join(
+            f"{issue.code}@{issue.path}: {issue.message}" for issue in error.validation.issues
+        )
+        return f"{text} — {issues}" if issues else text
+    return text
 
 
 def _as_data_warnings(messages: tuple[str, ...]) -> tuple[DataWarning, ...]:

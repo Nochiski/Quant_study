@@ -14,10 +14,8 @@ const classify = (response: StartBacktest422): string => {
       return `run:${detail.message}`;
     case "portfolio.strategy.invalid":
       return `strategy:${detail.validation.valid}`;
-    case "portfolio.data.unavailable":
-      return `data:${detail.status}`;
-    case "portfolio.raw_observation.invalid":
-      return `raw:${detail.message}`;
+    // `portfolio.data.unavailable` · `portfolio.raw_observation.invalid` 는 시작 요청이 데이터를
+    // 읽지 않게 되면서(이슈 #158) 이 경로의 계약에서 빠졌다. 그 실패는 run 상태 `error` 로 온다.
     case "backtest.strategy.requires_upgrade":
       return `upgrade:${detail.message}`;
     default: {
@@ -42,11 +40,11 @@ describe("generated startBacktest error contract", () => {
     expect(
       classify({
         detail: {
-          code: "portfolio.raw_observation.invalid",
-          message: "duplicate field",
+          code: "portfolio.strategy.invalid",
+          validation: { valid: false, issues: [] },
         },
       }),
-    ).toBe("raw:duplicate field");
+    ).toBe("strategy:false");
     expect(
       classify({
         detail: {

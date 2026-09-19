@@ -308,13 +308,7 @@ export type BacktestUnprocessableResponse = {
       } & BacktestStrategyRequiresUpgradeDetail)
     | ({
         code: "portfolio.strategy.invalid";
-      } & PortfolioStrategyInvalidDetail)
-    | ({
-        code: "portfolio.data.unavailable";
-      } & PortfolioDataUnavailableDetail)
-    | ({
-        code: "portfolio.raw_observation.invalid";
-      } & PortfolioRawObservationInvalidDetail);
+      } & PortfolioStrategyInvalidDetail);
 };
 
 /**

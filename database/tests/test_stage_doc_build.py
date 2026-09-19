@@ -129,3 +129,17 @@ def test_build_rejects_cache_built_for_a_different_document_set(tmp_path: Path) 
     shutil.copytree(cache / snap.snapshot_id, cache / other.snapshot_id)
     with pytest.raises(RuntimeError, match="different document set"):
         build.build_table(rules.RULES["stg_doc_meta"], other, stage_root)
+
+
+def test_build_accepts_an_incremental_cache_for_the_new_snapshot(tmp_path: Path) -> None:
+    """증분 캐시(base 하드링크 + 새 input_hash)로 오늘 판을 짓는다 — 5.1 가드와 5.2 의 접점."""
+    snap, stage_root = _prepared(tmp_path)
+    other = snapshot.make_snapshot({"dart": tmp_path / "dart.db"}, tmp_path / "snapshots",
+                                   snapshot_id="snap_next")
+    s = doc_prepass.incremental(other.files["dart"].path, tmp_path / "documents",
+                                stage_root / "_tmp" / "doc", "snap_next", snap.snapshot_id,
+                                workers=1)
+    assert s.status == "ok" and s.increments[-1]["added"] == 0
+    r = build.build_table(rules.RULES["stg_doc_meta"], other, stage_root)
+    assert r.ok, [g.as_dict() for g in r.gates if g.status is gates.GateStatus.FAIL]
+    assert r.n_rows == 3

@@ -6,8 +6,10 @@
 CLI: PYTHONPATH=src python -m stage.doc_prepass --snapshot-id S [--workers 3] [--years 2020,2021]
      … --scan REGEX --out LIST   디코딩만 해서 정규식에 걸리는 접수번호 목록 (파싱 없음, 분 단위)
      … --repair LIST             목록 문서만 재파싱해 샤드 행을 교체하고 summary 를 캐시에서 재집계
+     … --base-snapshot ID        기준 캐시를 하드링크로 이어받아 차집합만 파싱 (일일 증분)
 파서 규칙이 바뀌면 전량(3h)이 아니라 `--scan` 으로 영향 문서를 찾아 `--repair` 한다. 입력 해시는
-그대로, 수리 이력(시각·건수·파서 버전)은 summary 의 `repairs` 에 남는다.
+그대로, 수리 이력(시각·건수·파서 버전)은 summary 의 `repairs` 에 남는다. 새 스냅샷의 신규 문서는
+`--base-snapshot` 으로 잇는다 — 입력 해시·D0 는 새 스냅샷 기준으로 다시 재고 이력은 `increments`.
 """
 from __future__ import annotations
 
@@ -17,6 +19,7 @@ import io
 import json
 import os
 import re
+import shutil
 import sqlite3
 import sys
 import zipfile
@@ -67,6 +70,7 @@ class PrepassSummary:
     detail: str
     parser_version: str = parsers_doc.PARSER_VERSION
     repairs: list[dict[str, object]] = field(default_factory=list)
+    increments: list[dict[str, object]] = field(default_factory=list)   # --base-snapshot 이력
 
 
 def _shard_of(rcept_no: str) -> str:
@@ -267,7 +271,8 @@ def _iter_docs(files: list[Path]) -> Iterator[list[dict[str, str | None]]]:
 
 
 def summarize_from_cache(cache: Path, snapshot_id: str, input_hash: str, n_missing: int,
-                         d2_limit: float = 0.005, d3_limit: float = 0.01
+                         d2_limit: float = 0.005, d3_limit: float = 0.01,
+                         missing: list[str] | None = None
                          ) -> tuple[PrepassSummary, dict[str, object]]:
     """캐시 파일만으로 summary 를 다시 집계한다 — `run()` 의 ShardResult 집계와 같은 값이어야 한다.
 
@@ -306,7 +311,7 @@ def summarize_from_cache(cache: Path, snapshot_id: str, input_hash: str, n_missi
         for e in es:
             ents[e] += 1
     return _judge(snapshot_id, input_hash, n_docs, modes, tables, unknown, ents, n_missing,
-                  n_open_failed, n_eq, [], d2_limit, d3_limit)
+                  n_open_failed, n_eq, missing or [], d2_limit, d3_limit)
 
 
 def _scan_shard(args: tuple[list[tuple[str, str]], Path, str]) -> list[str]:
@@ -356,6 +361,115 @@ def _replace_rows(path: Path, drop: set[str], add: list[dict[str, str | None]]) 
             out.write(json.dumps(r, ensure_ascii=False))
             out.write("\n")
     os.replace(tmp, path)
+
+
+def _cached_rcept_nos(cache: Path) -> set[str]:
+    """캐시가 이미 담고 있는 접수번호 — parse_log 는 파싱한 문서마다(ZIP 열기 실패 포함) 1행 이상.
+
+    base 스냅샷 DB 가 아니라 캐시에서 읽는다 — 그 스냅샷은 GC 로 사라졌을 수 있고, ZIP 이 없어
+    행이 안 나온 문서는 다음 증분에서 다시 시도해야 한다(그래야 늦게 도착한 ZIP 이 들어온다).
+    """
+    out: set[str] = set()
+    for f in sorted((cache / "stg_doc_parse_log").glob("year=*.jsonl")):
+        with open(f, encoding="utf-8") as fh:
+            for line in fh:
+                if line.strip():
+                    out.add(str(json.loads(line)["rcept_no"]))
+    return out
+
+
+def _link_shards(base: Path, cache: Path) -> int:
+    """base 샤드를 새 캐시로 하드링크(디스크 0). 하드링크를 못 거는 파일시스템이면 복사."""
+    n = 0
+    for t in TABLES:
+        (cache / t).mkdir(parents=True, exist_ok=True)
+        for f in sorted((base / t).glob("year=*.jsonl")):
+            dst = cache / t / f.name
+            try:
+                os.link(f, dst)
+            except OSError:
+                shutil.copyfile(f, dst)
+            n += 1
+    return n
+
+
+def _break_link(path: Path) -> None:
+    """하드링크된 샤드를 쓰기 전에 실제 복사본으로 끊는다 — 안 끊으면 base 캐시가 오염된다."""
+    if not path.exists() or path.stat().st_nlink <= 1:
+        return
+    tmp = path.with_suffix(".jsonl.link")
+    shutil.copyfile(path, tmp)
+    os.replace(tmp, path)
+
+
+def incremental(db: Path, docs_dir: Path, cache_root: Path, snapshot_id: str,
+                base_snapshot_id: str, workers: int = 3, d2_limit: float = 0.005,
+                d3_limit: float = 0.01) -> PrepassSummary:
+    """base 캐시를 이어받아 새 스냅샷의 차집합만 파싱한다 — 전량 3~4.5h 대신 분 단위.
+
+    ① base 샤드를 하드링크 ② `doc_store(zip_ok=1)` 과 base 캐시의 접수번호를 비교해 added·removed
+    ③ added 를 파싱해 해당 샤드만 교체(쓰기 전에 링크를 끊는다 — base 캐시는 읽기 전용)
+    ④ `input_hash`·D0 는 **새 스냅샷 기준으로 다시 계산**한다. `repair()` 처럼 이어받으면 어제 문서
+    집합의 해시가 오늘 판에 실린다(F03). 이력은 `increments`, 캐시 파일 포맷은 그대로다.
+    """
+    if snapshot_id == base_snapshot_id:
+        raise ValueError(f"incremental needs a base other than itself: same snapshot "
+                         f"{snapshot_id} (cache_root={cache_root})")
+    base = cache_root / base_snapshot_id
+    base_summary = base / "summary.json"
+    if not base_summary.exists():
+        raise FileNotFoundError(f"incremental needs an existing base cache summary: "
+                                f"{base_summary}")
+    prev = json.loads(base_summary.read_text(encoding="utf-8"))
+    cache = cache_root / snapshot_id
+    _clear_cache(cache)
+    _link_shards(base, cache)
+    by_shard = _docs_by_shard(db, None, None)
+    cur = {r for docs in by_shard.values() for r, _ in docs}
+    have = _cached_rcept_nos(base)
+    added = cur - have
+    removed = have - cur
+    add_by_shard = {k: [d for d in docs if d[0] in added] for k, docs in by_shard.items()}
+    add_by_shard = {k: docs for k, docs in add_by_shard.items() if docs}
+    drop_by_shard: dict[str, set[str]] = {}
+    for rno in removed:
+        drop_by_shard.setdefault(_shard_of(rno), set()).add(rno)
+    scratch = cache / "_incr"
+    results: list[ShardResult] = []
+    if add_by_shard:
+        _clear_cache(scratch)
+        jobs = [(k, docs, docs_dir, scratch) for k, docs in sorted(add_by_shard.items())]
+        if workers <= 1:
+            results = [_run_shard(j) for j in jobs]
+        else:
+            with ProcessPoolExecutor(max_workers=workers) as ex:
+                results = list(ex.map(_run_shard, jobs))
+    n_missing = sum(r.n_zip_missing for r in results)
+    missing = [rno for r in results for rno in r.missing]
+    for shard in sorted(set(add_by_shard) | set(drop_by_shard)):
+        for t in TABLES:
+            path = cache / t / f"year={shard}.jsonl"
+            _break_link(path)
+            new_rows: list[dict[str, str | None]] = []
+            if shard in add_by_shard:
+                with open(scratch / t / f"year={shard}.jsonl", encoding="utf-8") as fh:
+                    new_rows = [json.loads(line) for line in fh if line.strip()]
+            _replace_rows(path, drop_by_shard.get(shard, set()), new_rows)
+    if add_by_shard:
+        for t in TABLES:
+            for f in (scratch / t).glob("year=*.jsonl"):
+                f.unlink()
+            (scratch / t).rmdir()
+        scratch.rmdir()
+    summary, extra = summarize_from_cache(cache, snapshot_id, input_hash_for(db), n_missing,
+                                          d2_limit, d3_limit, missing)
+    summary.repairs = list(prev.get("repairs", []))
+    summary.increments = list(prev.get("increments", [])) + [{
+        "at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"), "from": base_snapshot_id,
+        "added": len(added), "removed": len(removed),
+        "parser_version": parsers_doc.PARSER_VERSION}]
+    _write_summary(cache, summary, extra)
+    return summary
 
 
 def repair(db: Path, docs_dir: Path, cache_root: Path, snapshot_id: str, rcept_list: set[str],
@@ -420,6 +534,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", type=Path, help="--scan 결과 파일")
     ap.add_argument("--repair", type=Path, metavar="LIST",
                     help="목록 문서만 재파싱해 캐시 행 교체 + summary 재집계")
+    ap.add_argument("--base-snapshot", metavar="ID",
+                    help="기준 캐시 스냅샷 id — 하드링크로 잇고 차집합만 파싱(일일 증분)")
     a = ap.parse_args(argv)
     db = a.snapshot_root / a.snapshot_id / "dart.db"
     cache_root = a.stage_root / "_tmp" / "doc"
@@ -435,6 +551,10 @@ def main(argv: list[str] | None = None) -> int:
         lst = set(a.repair.read_text(encoding="utf-8").split())
         s = repair(db, a.docs_dir, cache_root, a.snapshot_id, lst, a.workers)
         print(f"repaired {len(lst)} documents; parser={s.parser_version} repairs={len(s.repairs)}")
+    elif a.base_snapshot:
+        s = incremental(db, a.docs_dir, cache_root, a.snapshot_id, a.base_snapshot, a.workers)
+        inc = s.increments[-1]
+        print(f"incremental from {a.base_snapshot}: added={inc['added']} removed={inc['removed']}")
     else:
         rl = (set(a.rcept_list.read_text(encoding="utf-8").split()) if a.rcept_list else None)
         s = run(db, a.docs_dir, cache_root, a.snapshot_id, a.workers, years,

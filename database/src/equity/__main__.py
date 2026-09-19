@@ -26,6 +26,7 @@ import sys
 from pathlib import Path
 
 import duckdb
+
 from stage import manifest
 
 from . import baseline as baseline_mod
@@ -226,7 +227,8 @@ def main(argv: list[str] | None = None) -> int:
     p_rb.add_argument("--log-root", type=Path, default=base / "logs" / "equity",
                       help="rebuild_<PASS>/ 가 사는 디렉터리")
     p_rb.add_argument("--before", type=Path, default=None,
-                      help="패스 시작 시점의 {표: current_build} JSON — 있으면 직전 판이 아니라 그 판으로")
+                      help="패스 시작 시점의 {표: current_build} JSON — "
+                           "있으면 직전 판이 아니라 그 판으로")
     p_rb.set_defaults(fn=_cmd_rollback)
 
     a = ap.parse_args(argv)

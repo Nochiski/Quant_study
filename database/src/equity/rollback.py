@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 import json
-
 from pathlib import Path
 
 from stage import manifest
@@ -74,7 +73,8 @@ def rollback_pass(equity_root: Path, pass_name: str, *,
     `before`(패스 시작 시점의 `{표: current_build}` JSON)가 있으면 **그 판**으로, 없으면 직전 판으로.
     아침 확정 빌드가 중간에 실패하면 "직전 판" 은 대개 전날 저녁 잠정판(`e_`)이라 MANIFEST 를 직접
     읽는 공유 소비자가 확정 자리에서 잠정판을 보게 된다(리뷰 REC-13) — 시작 시점 판이 정답이다.
-    시작 시점 판이 이미 GC 됐으면 직전 판으로 폴백한다. 반환값은 `{표: 되돌아간 build_id}`.
+    시작 시점 판이 이미 GC 됐으면 직전 판으로 폴백한다.
+    반환값은 `{표: 되돌아간 build_id}`.
     """
     targets: dict[str, str] = {}
     if before is not None:

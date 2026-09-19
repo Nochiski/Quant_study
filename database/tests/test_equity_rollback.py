@@ -15,6 +15,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 from equity import rollback
 from stage import manifest
 
@@ -104,8 +105,9 @@ def test_CLI가_pass를_되돌린다(tmp_path: Path, capsys: pytest.CaptureFixtu
 
 
 def test_before_맵이_있으면_시작_시점_판으로_되돌린다(tmp_path: Path) -> None:
-    """아침 확정 빌드가 중간에 실패하면 "직전 판" 은 전날 저녁 잠정판(e_)이다 — 그리로 가면 MANIFEST 를
-    직접 읽는 공유 소비자가 확정 자리에서 잠정판을 본다(리뷰 REC-13). 패스 시작 시점 판이 정답이다."""
+    """아침 확정 빌드가 중간에 실패하면 "직전 판" 은 전날 저녁 잠정판(e_)이다 — 그리로 가면
+    MANIFEST 를 직접 읽는 공유 소비자가 확정 자리에서 잠정판을 본다(리뷰 REC-13).
+    패스 시작 시점 판이 정답이다."""
     eq = tmp_path / "equity"
     _table(eq, "price_daily", ["m_1", "e_2", "m_3"])        # m_3 = 이번 패스가 커밋한 판
     _table(eq, "flow_daily", ["m_1", "e_2", "m_3"])

@@ -1,6 +1,12 @@
-import { useEffect, useId, useRef } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+} from "react";
 
 import { t } from "../../../shared/config";
+import { useCommittedRef } from "../../../shared/lib/react";
 import { useBlocker } from "../../../shared/lib/router";
 import { Button } from "../../../shared/ui";
 import "./dirty-leave-guard.css";
@@ -15,19 +21,32 @@ const canRestoreFocus = (element: HTMLElement | null): element is HTMLElement =>
  * Blocks in-app navigation (and the browser's unload) while the draft has unsaved changes
  * (WORKFLOW P2-04). The prompt is an in-page alert dialog so the wording is ours and testable;
  * "머무르기" is the default action because leaving discards work.
+ *
+ * dirty는 `useCommittedRef`로 비추고 blocker는 마운트 때 한 번만 등록한다(Phase 5 backlog 21,
+ * `.claude/rules/frontend-react-effects.md`): passive effect로 ref를 갱신하거나 `disabled: !dirty`로 등록을
+ * 껐다 켜면, 편집으로 dirty가 켜진 commit과 그 effect 사이에 온 이동이 경고 없이 통과해 편집을 버린다.
  */
 export const DirtyLeaveGuard = ({ dirty }: { dirty: boolean }) => {
   const titleId = useId();
   const descriptionId = useId();
-  const latestDirty = useRef(dirty);
-  useEffect(() => {
-    latestDirty.current = dirty;
-  }, [dirty]);
+  const latestDirty = useCommittedRef(dirty);
+  const shouldBlockFn = useCallback(
+    ({
+      current,
+      next,
+    }: {
+      current: { pathname: string };
+      next: { pathname: string };
+    }) => latestDirty.current && current.pathname !== next.pathname,
+    [latestDirty],
+  );
+  const enableBeforeUnload = useCallback(
+    () => latestDirty.current,
+    [latestDirty],
+  );
   const blocker = useBlocker({
-    shouldBlockFn: ({ current, next }) =>
-      latestDirty.current && current.pathname !== next.pathname,
-    enableBeforeUnload: () => latestDirty.current,
-    disabled: !dirty,
+    shouldBlockFn,
+    enableBeforeUnload,
     withResolver: true,
   });
   const stayButton = useRef<HTMLButtonElement>(null);

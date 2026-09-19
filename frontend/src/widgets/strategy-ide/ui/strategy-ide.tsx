@@ -262,7 +262,8 @@ export const StrategyIde = ({
     if (narrow) close(["inspectorOpen", "debuggerOpen"]);
   }, [narrow, close]);
 
-  useEffect(() => {
+  // window 리스너는 layout effect로 설치한다(`.claude/rules/frontend-react-effects.md`, backlog 20·21).
+  useLayoutEffect(() => {
     if (!narrow) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") close(["inspectorOpen", "debuggerOpen"]);
@@ -274,7 +275,8 @@ export const StrategyIde = ({
   // layout effect인 이유: 이 리스너는 화면의 버튼과 같은 게이트(`saveDisabled`·`runDisabled`·`validateDisabled`)를
   // 닫힌 값으로 읽는다. passive effect(`useEffect`)면 버튼이 켜진 commit과 새 리스너 설치 사이에 틈이 생겨, 그
   // 사이에 온 Ctrl+S / Ctrl+Shift+Enter는 옛 닫힌 값(비활성)으로 조용히 버려진다 — route 테스트가 게이트 케이스에서
-  // 드물게 실패하던 원인(Phase 5 backlog 20). layout effect는 commit 안에서 동기로 갈아 끼운다.
+  // 드물게 실패하던 원인(Phase 5 backlog 20). layout effect는 commit 안에서 동기로 갈아 끼운다
+  // (규칙: `.claude/rules/frontend-react-effects.md`).
   useLayoutEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
       if (event.isComposing || event.keyCode === 229) return;

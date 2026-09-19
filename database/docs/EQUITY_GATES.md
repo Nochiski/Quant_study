@@ -555,8 +555,12 @@ FROM correction_link;
 -- 통과: rate >= bl('correction_link','link_rate_min')
 
 -- EG6-P06 : E-G6b (기록형 — 값만 남긴다)
+-- 분모 제외 어휘 정본은 `rules_s11.DATE_CHECK_UNMEASURED` 다. 2026-09-19 감사(DEFECT-F02)가
+-- `not_parsed`(ZIP 은 있고 문서층이 아직 안 본 정정)를 더했다 — `no_page` 는 "ZIP 에 정정신고
+-- 첫 장이 없다" 는 문서 품질 사실이고, 파이프라인 상태를 그 라벨로 접으면 안 된다.
 SELECT count(*) FILTER (WHERE date_check IN ('exact','off_1d'))::DOUBLE
-       / nullif(count(*) FILTER (WHERE date_check NOT IN ('unparsed','no_page','no_zip','n/a')), 0)
+       / nullif(count(*) FILTER (WHERE date_check
+                NOT IN ('unparsed','not_parsed','no_page','no_zip','n/a')), 0)
        AS date_exact_rate
 FROM correction_link;
 
@@ -2406,3 +2410,84 @@ EG20(원주가 불변)은 **`basis='krx'` 행만** 대조한다 — 저녁 행�
 **빌드 시각은 산출에 싣지 않는다.** `dataset_profile` 에 `generated_at` 을 컬럼으로 두면 같은
 입력으로 다시 지어도 값이 달라져 EG5a(같은 inputs → 파티션 content_hash 동일)가 매번 깨진다.
 시각의 정본은 MANIFEST `built_at_utc` 와 `_catalog_meta.json` 의 `written_at_utc` 다.
+
+## 11. 2026-09-19 감사 수정 (파이프라인 전수 감사 플랜 §3 갈래 3)
+
+### 11-1. EG21 (신설, 공용, 폐기형) — 최신 구간 행수 완결성
+
+| 항목 | 내용 |
+|---|---|
+| 대상 | `flow_daily`(S08) · `short_daily`(S09) · `credit_daily`(S10) · `opinion_daily`(S18). 구현은 공용 `gates.eg21_recent_grid` |
+| 왜 | DEFECT-C06 — 일일 운영에서 EG5a 는 매 빌드가 새 stage 판을 고정하므로 **항상** `skip(inputs_changed)` 이고(09-19 실측 29표 전건), EG5c 표본은 `asof_sample_dates` 상한 2026-08-20 에 굳어 있다. 그래서 "어제 들어온 것이 반쯤 비었다" 를 보는 폐기형 검사가 `price_daily` 의 EG14 하나뿐이었다 |
+| 축 | 표 자신의 `content_date_column`(격자 3표 `date` · `opinion_daily` `base_date`). NULL 날짜 행은 뺀다 |
+| 술어 | 날짜를 최신순으로 늘어놓고 ① 최신 `recent_grid_lag_sessions` 개는 판정 밖 ② 그다음 `recent_grid_window` 개가 판정 대상 ③ 그 뒤 `recent_grid_baseline_window` 개의 행수 **중앙값** × `recent_grid_row_ratio_min` 미만인 판정 세션이 하나라도 있으면 FAIL |
+| 상수 | `<table>.recent_grid_window` = 3 · `recent_grid_baseline_window` = 20 · `recent_grid_row_ratio_min` = 0.8 · `recent_grid_lag_sessions` = 0(flow·short·opinion) / **3**(credit — KIS 신용잔고 실입수가 T+3, DEFECT-E01). 미등재면 `skip(no_baseline)` — `rule.consts` 가 아니라 게이트가 `require_const` 로 읽으므로 빌드가 죽지 않는다 |
+| 저녁 행 | `basis` 열이 있는 표는 `basis='krx'` 행만 센다(EG14 와 같은 규약). 위 4표에는 `basis` 열이 없어 실제로는 무해한 방어다 |
+| 창 부족 | `lag + window + baseline_window` 를 채울 세션이 없으면 `skip(no_coverage)` |
+| 기록형 | `recent_sessions`(판정 세션별 행수·비율) · `baseline_median_rows` · `row_floor` · `thin_sessions` |
+
+중앙값을 쓰는 이유는 월말 스냅샷·휴장 전후 한두 날의 튐에 흔들리지 않기 위해서다. 0.8 의 근거는
+서버 실측 진폭이다 — 격자 3표는 2026-09-09~09-18 행수가 2,762~2,766(±0.15%), `opinion_daily` 는
+`base_date` 별 800~817(±2%)이라 하한까지 10배 이상 여유가 있다. 반대로 09-02 WISE v3 정지처럼
+커버가 −67% 나면(종목 2,533 → 839) 걸린다.
+
+**`consensus_daily` 는 의도적으로 등록하지 않는다.** `obs_date` 별 행수가 2 · 6 · 4 · 7,292 ·
+8,338 · 15,629 처럼 월간 스냅샷일과 일간 리비전일 사이에서 세 자릿수 배로 튄다(09-19 서버 실측
+2026-08-11~09-17). 행수 중앙값 비교가 성립하지 않아 붙이면 매일 오탐이다 — 이 표의 최신 구간
+감시는 별도 축(리비전 건수·커버 종목 수)으로 설계해야 하고 TECH_DEBT 로 남긴다.
+`holder_daily`(S15)는 `receipt_axis`·`content_date_column='rcept_dt'` 라 세션 격자가 아니다.
+
+**주의(폐기형의 대가)**: 커버리지가 **정당하게** 영구 감소하면 중앙값이 따라잡을 때까지
+(≈ `baseline_window` 세션) 그 표의 빌드가 매일 폐기된다. 그때는 사람이 원인을 판정하고 필요하면
+`recent_grid_row_ratio_min` 을 그 표에서 낮추는 것이 규약이다.
+
+### 11-2. EG3_price_daily 확장 — `n_evening_rows_not_listed` (기록형, DEFECT-E07)
+
+저녁 잠정 행은 `sql/price_daily.sql` 의 `listed_now`(KRX 일별 마스터 최신일 ∪ ETF 가격 원장
+최신일 — EG14 `universe_n` 과 같은 정의)에 있는 종목으로 제한한다. 키움 `ka10060` 은 정리매매가
+끝난 종목도 하루 더 `dt` 행(거래량 0·극단 가격)을 주기 때문이다. 정본 술어는
+`rules_s04.EVENING_LISTED_SQL`·`evening_listed_predicate()` 이고 `.sql` 과 `eg1_rhs_sql` 이
+같은 문자열을 쓴다(tests 가 공백 정규화로 대조). 걸러진 행수는 폐기하지 않고 기록한다 —
+정상 운영에서도 0 이 아닐 수 있고, 값이 갑자기 커지면 마스터 수집이 밀린 것이다.
+
+**닫히지 않는 잔여**: 폐지일이 T 인 종목은 T−1 마스터(= 마지막 거래일)에 아직 있으므로 저녁
+시점에 알 수 없다. 저녁 판이 그 종목의 T 행을 만드는 것은 그대로 남는다.
+
+### 11-3. `disclosure_version.date_check` 어휘 확장 — `not_parsed` (DEFECT-F02)
+
+§1·§3 의 `date_check` 어휘에 `not_parsed` 가 더해진다. `stg_doc_correction` 행이 없는 갈래를
+셋으로 가른다 — `stg_doc_index.zip_ok` 거짓이면 `no_zip`, 참인데 같은 판으로 고정된
+`stg_doc_meta` 에 그 `rcept_no` 가 없으면 `not_parsed`(문서층이 아직 안 봤다 — 파이프라인 상태),
+있으면 `no_page`(ZIP 은 있는데 정정신고 첫 장이 없다 — 문서 품질 사실). 어휘 정본은
+`rules_s11.DATE_CHECK_VOCAB`·`DATE_CHECK_UNMEASURED` 이고 E-G6b 분모와 EG3 의
+`n_date_check_material_mismatch` 좌변이 둘 다 `not_parsed` 를 포함한다.
+
+### 11-4. EG3_fin_std 확장 — `period_end` 추정 폴백 가시화 (DEFECT-F01)
+
+| 항목 | 내용 |
+|---|---|
+| 왜 | 문서층(`stg_doc_meta`)이 뒤처지면 신규 재무 그룹이 `period_end` 정본을 잃고 `corp.fiscal_month` 추정으로 폴백한다. 결산월이 어긋나거나 없는 법인은 후보가 0개가 되어 `period_unresolved` 로 격리 — `fin_std` 에서 **행째로 사라진다**. 기존 게이트는 전부 못 잡는다(EG7 격리 비율 1.28% < 임계 3% · `n_by_period_end_basis` 는 임계 없음 · `n_period_end_not_document` 는 정의상 0) |
+| 폐기형 | `ratio_period_end_inferred_recent` > `fin_std.fin_std_inferred_recent_ratio_max`(= 0.2) 이면 FAIL. 분모는 `available_date > D − recent_days`(30일) 인 채택 행, 분자는 그중 `period_end_basis='inferred'` |
+| 기록형 | `n_period_end_inferred_recent` · `n_recent_rows` · `recent_from` |
+| 상수 | `fin_std.fin_std_inferred_recent_ratio_max` = 0.2 · `fin_std.inferred_recent_days` = 30. 미등재면 `skip(no_baseline)` |
+| **배포 순서** | 문서층 따라잡기(프리패스 전량 재생성 → `stg_doc_*` 4표 재빌드) **뒤에** 서버에 반영해야 한다. 문서층이 8/31 에 멈춘 상태에서 이 게이트를 켜면 최근 구간이 100% `inferred` 라 `fin_std` 가 매일 폐기된다 |
+
+### 11-5. EG5c 승인 기록 — `catalog --rebase-asof --reason` (DEFECT-C08)
+
+`--rebase-asof` 는 **사람 승인**이므로 `--reason "<왜 승인하는가>"` 가 필수다. 없으면
+`catalog.publish` 가 `ValueError` 로 거부한다. 승인이 실제로 쓰이면(= `n_diff_total > 0`)
+`data/equity/_asof/_approvals/<utcstamp>.json` 에 **영구 기록**한다:
+`{reason, approver(=$USER), approved_at_utc, snapshot_id, n_diff_total, schema_changed_views,
+gate_detail, views{previous_snapshot_id, previous_written_at_utc, n_diff, diff_by_kind,
+diff_keys, columns_added, columns_removed, schema_changed}}`.
+
+위치가 `_asof/<view>/` **밖**인 것이 핵심이다 — 그 안이면 `keep=3`(하루 2판이면 ≈1.5일) GC 가
+지운다. 2026-09-16 22:31 UTC 승인의 유일한 흔적(`_asof/<view>/42aea220.../_meta.json`)이 실제로
+그렇게 사라져 `_failed/catalog_*.json` 만 남았고, 그것은 감사 기록이 아니라 아무도 지우지 않아
+남은 파일이다.
+
+EG5c metrics 에 뷰별 `columns_added`·`columns_removed`·`schema_changed` 와 전체
+`schema_changed_views` 가 실린다. 행 전체 해시 비교라 `changed` 하나로는 **컬럼 추가**와
+**과거 값 변경**을 구별할 수 없었다 — 9/16 의 `n_diff=319,310` 은 전자였고(가격 축이 아닌
+`v_cum_adj`·`v_adj_volume_fwd` 의 n_diff 0 이 증거) 그 판정을 09-19 에 역추적해야 했다.
+이제 FAIL·PASS detail 에도 `schema_changed=[...]` 가 붙는다.

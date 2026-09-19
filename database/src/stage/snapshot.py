@@ -16,7 +16,7 @@ from pathlib import Path
 from . import manifest
 
 SNAPSHOT_PREFIX = "snap_"
-KEEP_DEFAULT = 6      # 저녁 잠정판·아침 확정판으로 하루 2판 → 6판 ≈ 3거래일 (플랜 v2 Task B.1)
+KEEP_DEFAULT = 3      # 판당 ≈16 GB(09-14 실측). 하루 2판이면 1.5거래일 — 결정 9(09-14 사용자): 디스크 우선
 
 
 @dataclass(frozen=True)

@@ -109,7 +109,7 @@ def main():
     print(f"  이미 완료 {len(done):,}건")
 
     gap, calls, t0 = 1.0/RATE, 0, time.time()
-    stat = {"ok":0, "holiday":0, "pending":0, "rate":0, "error":0}
+    stat = {"ok":0, "holiday":0, "pending":0, "rate":0, "error":0, "fatal":0}
     for i, d in enumerate(days):
         for path, tbl, key in EPS:
             if (path, d) in done: continue
@@ -117,7 +117,14 @@ def main():
             rows, v = call(path, d); calls += 1
             now = time.strftime("%Y-%m-%dT%H:%M:%S")
             if v == "fatal":
-                print(f"  [{path}] 401 Unauthorized — 권한 없음. 이 엔드포인트 건너뜀"); break
+                # 401 도 ingest_log 에 남긴다 — 행이 없으면 daily_build 의 krx_step 이 "할 일 없음" 으로
+                # 읽고 재시도 없이 rc 0 을 낸다(DEFECT-A05).
+                print(f"  [{path}] 401 Unauthorized — 권한 없음. 이 엔드포인트 건너뜀")
+                stat["fatal"] += 1
+                con.execute("INSERT OR REPLACE INTO ingest_log VALUES (?,?,?,?,?,?)",
+                            (path, d, 0, "fatal", "401 Unauthorized — AUTH_KEY 만료·권한 없음", now))
+                con.commit()
+                break
             note = None
             if v == "holiday" and cal.is_trading_day(date(int(d[:4]), int(d[4:6]), int(d[6:8]))):
                 v, note = "pending", "empty response on a trading day — not published yet (KRX T+1 08:00 KST)"
@@ -150,6 +157,13 @@ def main():
     el = time.time() - t0
     print(f"\n완료 {el:.0f}초 · {calls:,}콜 · {calls/max(el,1):.2f}콜/s")
     print(f"  {stat}")
+    # 실패를 rc 0 으로 끝내면 08:10 체인이 설계된 60분 재시도 창을 한 번도 쓰지 못한다(DEFECT-A05).
+    # `pending`(= KRX 미공표)은 실패가 아니다 — 셸의 재시도 루프가 따로 본다.
+    bad = stat["rate"] + stat["error"] + stat["fatal"]
+    if bad:
+        print(f"  ✖ 수집 실패 {bad}건 — rate={stat['rate']} error={stat['error']} fatal={stat['fatal']}"
+              + (" (401: AUTH_KEY 확인)" if stat["fatal"] else ""))
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

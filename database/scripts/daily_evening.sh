@@ -9,7 +9,7 @@
 #   ①·③ 의 종료 시각을 로그와 deliver JSON 에 남긴다 — 18:15 잠정 빌드의 트리거 근거다.
 #   휴장·이미 완료도 info 로 보고한다(결정 V2-7: 무소식과 고장을 구분한다). dry-run 만 알림 없음.
 #   사용: daily_evening.sh [--date YYYYMMDD] [--dry-run] [--limit N]
-#   환경: QL_EVENING_NOT_BEFORE=HH:MM (키움 fetch 하한 시각. 기본 18:00)
+#   환경: QL_EVENING_NOT_BEFORE=HH:MM (키움 fetch 하한 시각. 기본 20:00 = 애프터마켓 마감) · QL_KW_EVENING_HHMM (대기 시각, 기본 2105)
 set -uo pipefail
 cd /home/kael/quant-ledger
 export QL_HOME=/home/kael/quant-ledger PYTHONPATH=/home/kael/quant-ledger/src
@@ -58,9 +58,16 @@ KW_LOG=""; DART_LOG=""; WISE_LOG=""; KW_DONE=""; WISE_DONE=""
 # 세 갈래는 서로 다른 원장(kiwoom.db · dart.db · wise.db)만 건드리므로 병렬이 안전하다.
 # 각자 자기 로그에 쓰고 rc 는 `wait <pid>` 로 따로 받는다 — 하나가 죽어도 나머지는 끝까지 간다.
 branch_kiwoom() {
-  echo "──── 키움 fetch+commit 시작 $(kst) ────"
+  # 키움 일별 집계는 KRX 애프터마켓(16:00~20:00, 09-14 시행) 마감 뒤 20:15 안에 정착한다(09-14 촘촘 프로브:
+  # 20:15 값 = 22:05 값). kael-v3 daily_all 이 20:05~20:47 에 같은 앱키를 쓰므로 키움 갈래만 21:05 까지
+  # 기다렸다 받는다(결정 10-(d) 19:05 → 결정 11). DART·WISE 는 18:05 그대로. dry-run 은 기다리지 않는다.
+  local wait_until="${QL_KW_EVENING_HHMM:-2105}"
+  if [ -z "$DRY" ]; then
+    while [ "$(TZ=Asia/Seoul date +%H%M)" -lt "$wait_until" ]; do sleep 60; done
+  fi
+  echo "──── 키움 fetch+commit 시작 $(kst) (하한 ${wait_until:0:2}:${wait_until:2:2} KST) ────"
   $PY -m daily.kw_daily --date "$D" --fetch --tr ka10060,ka10014 --commit \
-     --not-before "${QL_EVENING_NOT_BEFORE:-18:00}" $DRY $LIMIT
+     --not-before "${QL_EVENING_NOT_BEFORE:-20:00}" $DRY $LIMIT
   local rc=$?
   echo "DONE_AT=$(TZ=Asia/Seoul date '+%Y-%m-%dT%H:%M:%S+09:00')"
   echo "──── 키움 종료 rc=$rc $(kst) ────"
@@ -91,10 +98,22 @@ echo "════ [$(kst)] daily_evening 시작 dry=${DRY:-no} ════"
 scripts/sync_calendar.sh || echo "  ! 캘린더 동기화 실패 — 이전 복사본으로 진행"
 D="${DATE_ARG:-$(TZ=Asia/Seoul date +%Y%m%d)}"
 echo "  대상 거래일 D=$D (기본은 오늘 KST — 저녁 슬롯은 당일 데이터를 받는다)"
-if ! $PY -c 'import datetime as dt, sys
+# rc 0 거래일 · 1 휴장 · 2 판정 불가. 종전 `if ! …` 는 KeyError(연도 파일 부재)의 exit 1 을 휴장으로 읽어
+# 소멸성 축(키움 수급·공매도)의 그 세션을 info 한 줄로 영구 결손시켰다(리뷰 REC-2) — build_evening.sh 와 같은 삼분기.
+$PY -c 'import datetime as dt, sys
 from daily import calendar as c
 d = sys.argv[1]
-sys.exit(0 if c.load().is_trading_day(dt.date(int(d[:4]), int(d[4:6]), int(d[6:8]))) else 1)' "$D"; then
+try:
+    ok = c.load().is_trading_day(dt.date(int(d[:4]), int(d[4:6]), int(d[6:8])))
+except Exception as e:  # noqa: BLE001  # reason: 어떤 예외든 "판정 불가" 로 올려 crit 을 내야 한다
+    print(f"calendar error: {type(e).__name__}: {e}", file=sys.stderr)
+    sys.exit(2)
+sys.exit(0 if ok else 1)' "$D"; TD=$?
+if [ "$TD" -eq 2 ]; then
+  echo "  ✗ 캘린더 판정 불가(연도 파일 부재?) — 휴장으로 위장하지 않는다. 중단"
+  [ -z "$DRY" ] && scripts/notify.sh crit "daily_evening 중단 — 캘린더 판정 불가" "D=$D | 로그 $LOG"
+  cat "$RUN" >> "$LOG"; rm -f "$RUN"; exit 2
+elif [ "$TD" -eq 1 ]; then
   SKIPPED="휴장"
   echo "  D=$D 는 거래일이 아니다 — 건너뜀"
 elif [ -z "$DRY" ] && $PY -c 'import sys; from daily import runlog

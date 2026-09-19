@@ -57,8 +57,10 @@ from stage.gates import GateResult, GateStatus
 
 from . import inputs, views
 from .baseline import Baseline
+from .catalog import connect as duckdb_connect
 from .catalog import snapshot_id, table_builds
 from .gates import SkipGate
+from .model import PRICE_BASIS_KRX
 
 if TYPE_CHECKING:                       # 타입만 — 런타임 import 는 load_adapter() 뒤에만 일어난다
     from backtest_engine.ports.market_data import LoadResult
@@ -183,6 +185,23 @@ def _pinned_source(ctx: _Ctx, table: str, stage_table: str) -> str:
         raise SkipGate("no_cross_source", {"table": stage_table, "error": str(e)}) from e
     globs = ", ".join(f"'{g}'" for g in pb.globs)
     return f"read_parquet([{globs}], hive_partitioning=true, union_by_name=true)"
+
+
+def confirmed_source(ctx: _Ctx, table: str) -> str:
+    """산출 테이블의 **확정 행만** 읽는 관계식. `basis` 열이 없으면 표 그대로.
+
+    커널 어댑터는 `basis <> 'krx'` 행을 방출하지 않는다(저녁 잠정 행은 확정 전 값이라 백테스트
+    바에 못 넣는다 — `equity_duckdb.py` `n_provisional`). 계약의 대조축이 같은 필터를 안 걸면
+    저녁 판이 current 인 10시간 40분 동안(평일 22:40 ~ 다음날 09:20) 한쪽만 잠정 행을 세게 되고,
+    `price_kind='reference'` 집계로 표본을 고르는 EGC-05 는 그때마다 다른 종목을 고른다
+    (DEFECT-C05, 2026-09-19 감사). `basis` 는 규칙 e1.15.0 부터 있으므로 옛 판에는 없다 —
+    그때는 필터 없이 읽어 계약이 옛 산출에서도 선다.
+    """
+    src = ctx.source(table)
+    cols = {str(r[0]) for r in ctx.rows(f"DESCRIBE SELECT * FROM {src}")}
+    if "basis" not in cols:
+        return src
+    return f"(SELECT * FROM {src} WHERE basis = '{PRICE_BASIS_KRX}')"
 
 
 def _price_rows(ctx: _Ctx, tickers: list[str]) -> dict[str, list[tuple[object, ...]]]:
@@ -440,7 +459,8 @@ def egc04_actions_equal_factors(ctx: _Ctx) -> GateResult:
 
 
 def egc05_halt_mix_query(ctx: _Ctx) -> GateResult:
-    src = ctx.source("price_daily")
+    # 잠정 행을 세면 `price_kind='reference'` 상위 티커가 저녁 판마다 달라진다(DEFECT-C05)
+    src = confirmed_source(ctx, "price_daily")
     halted = [str(r[0]) for r in ctx.rows(
         f"SELECT ticker, count(*) AS n FROM {src} WHERE price_kind = 'reference' "
         f"GROUP BY 1 ORDER BY n DESC, ticker LIMIT {HALT_TICKERS_N}")]
@@ -516,7 +536,8 @@ def run(equity_root: Path, baseline: Baseline, *, engine_src: Path | None = None
     mod = load_adapter(src)
     builds = table_builds(equity_root)
     sid = snapshot_id(builds)
-    con = duckdb.connect()
+    # 자원 제한은 카탈로그 단계와 같은 값을 쓴다(DEFECT-C04)
+    con = duckdb_connect()
     try:
         ctx = _Ctx(equity_root, con, mod, baseline, venue,
                    {t: views.parquet_source(equity_root, t) for t in builds})
@@ -539,4 +560,4 @@ def run(equity_root: Path, baseline: Baseline, *, engine_src: Path | None = None
 
 
 __all__ = ["ADAPTER_MODULE", "GATES", "META_NAME", "VENUE", "ContractResult",
-           "default_engine_src", "load_adapter", "run"]
+           "confirmed_source", "default_engine_src", "load_adapter", "run"]

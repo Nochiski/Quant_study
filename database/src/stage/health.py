@@ -1,4 +1,4 @@
-"""stage 건전성 C1~C5 — `python -m stage.health` (v1 플랜 P4 Task 4.3 / v2 Task B.1).
+"""stage 건전성 C1~C6 — `python -m stage.health` (v1 플랜 P4 Task 4.3 / v2 Task B.1).
 
 판정은 **MANIFEST.json 과 `_failed/` 만** 읽는다. 원장·스냅샷·parquet 를 열지 않으므로 비용이 0이고
 빌드 뒤 아무 때나 돌려도 같은 답이 나온다. 그래서 C4 "재현성" 도 재빌드가 아니라 다음 술어다 —
@@ -8,9 +8,14 @@
 
   C1  선언된 표 전부가 오늘(KST) 판이고 basis 가 일치한다
   C2  오늘 날짜의 `_failed/<build_id>.json` 이 0건이다
-  C3  append_only 표의 행수가 직전 판보다 줄지 않았다
-  C4  소스 계수가 동결된 표는 content_hash 도 동결이다
+  C3  행수가 직전 판보다 줄지 않았다 — append_only 는 표 전체, 그 밖은 파티션 축
+  C4  소스 계수가 동결된 표는 content_hash 도 동결이다(규칙 판본이 바뀐 판은 대조 제외)
   C5  빌드 소요가 예산(기본 40분) 안이다
+  C6  판이 담은 최신 사실(`max_available_date`)이 대상일 D 의 허용 지연 안이다
+
+C1~C5 는 판이 **언제 커밋됐나**만 본다 — 그래서 어떤 소스의 수집이 조용히 멈춰도 표는 매일 새
+판으로 다시 지어지고 계수도 안 변해 전부 통과한다(09-19 감사 DEFECT-B01: KIS 3표 5주·v3 4표
+2주 정지인데 "5/5 OK"). C6 가 **데이터 축**을 본다 — 허용 지연 선언은 `freshness.py`.
 
 프리패스 캐시가 없어 `run_stage_all.sh` 가 건너뛴 문서층 4표처럼 **의도적으로 안 지은 표**는
 `--skip` 으로 빼며, 뺀 사실은 리포트에 남는다(조용히 통과시키지 않는다).
@@ -22,17 +27,19 @@ import datetime as dt
 import json
 import os
 import sys
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
-from . import manifest, model, rules
+from . import freshness, manifest, model, rules
 
 KST = dt.timezone(dt.timedelta(hours=9))
 BUDGET_S_DEFAULT = 2400          # C5 — 스냅샷 3.8분 + 전량 빌드 22.5분 실측에 여유를 준 40분
 # 문서층 파싱 로그는 파싱 순서·소요가 행에 들어가 소스가 동결돼도 해시가 흔들린다 (v1 Task 4.3)
-C4_EXCLUDE = frozenset({"stg_doc_parse_log"})
+# stg_wise_coverage 의 원장 `ws_coverage` 는 종목당 한 행을 매일 덮어쓴다(checked_at 이동, 행수 2,614 불변) —
+# 계수가 그대로인데 내용이 바뀌는 것이 정상이라 C4 의 "동결" 술어가 맞지 않는다(09-17 00:14 진단 실측).
+C4_EXCLUDE = frozenset({"stg_doc_parse_log", "stg_wise_coverage"})
 
 
 class Status(str, Enum):
@@ -101,8 +108,8 @@ def _pair(stage_root: Path, table: str) -> _Pair:
     return _Pair(table, cur, prev)
 
 
-def _kst_date(rec: manifest.BuildRecord) -> str | None:
-    """판이 커밋된 KST 날짜. 아침 판은 UTC 로 전날이라 시간대 변환을 건너뛰면 안 된다."""
+def _built_time(rec: manifest.BuildRecord) -> dt.datetime | None:
+    """판이 커밋된 시각(UTC aware). `built_at_utc` 가 깨져 있으면 빌드 id 의 시각으로 대신한다."""
     try:
         when = dt.datetime.fromisoformat(rec.built_at_utc)
     except ValueError:
@@ -111,7 +118,20 @@ def _kst_date(rec: manifest.BuildRecord) -> str | None:
         return None
     if when.tzinfo is None:
         when = when.replace(tzinfo=dt.UTC)
-    return when.astimezone(KST).strftime("%Y%m%d")
+    return when
+
+
+def _kst_date(rec: manifest.BuildRecord) -> str | None:
+    """판이 커밋된 KST 날짜. 아침 판은 UTC 로 전날이라 시간대 변환을 건너뛰면 안 된다."""
+    when = _built_time(rec)
+    return None if when is None else when.astimezone(KST).strftime("%Y%m%d")
+
+
+def _since(started_at: str | None) -> dt.datetime | None:
+    if not started_at:
+        return None
+    since = dt.datetime.fromisoformat(started_at)
+    return since.replace(tzinfo=dt.UTC) if since.tzinfo is None else since
 
 
 def _listed(label: str, names: list[str], limit: int = 8) -> str:
@@ -131,15 +151,26 @@ def _g1(rec: manifest.BuildRecord) -> dict[str, object] | None:
     return None
 
 
-def _c1_fresh(pairs: list[_Pair], basis: str, date_kst: str, skipped: list[str]) -> Check:
+def _c1_fresh(pairs: list[_Pair], basis: str, date_kst: str, skipped: list[str],
+              started_at: str | None = None) -> Check:
+    """오늘 판 = `started_at`(체인 시작 UTC) 이 있으면 **그 뒤에 커밋된 판**, 없으면 KST 날짜가 `date_kst` 인 판.
+    날짜만 보면 자정을 넘긴 체인이 갈라진다 — 09-17 00:14 진단 실측: 23:36 시작 체인의 앞 19표(23:36~23:59)가
+    "오늘 판 아님" 으로 폐기됐다. 시각 기준이면 재실행·자정 통과 모두 한 술어로 맞는다."""
+    since = _since(started_at)
+
+    def fresh(rec: manifest.BuildRecord) -> bool:
+        if since is not None:
+            when = _built_time(rec)
+            return when is not None and when >= since
+        return _kst_date(rec) == date_kst
+
     missing = [p.table for p in pairs if p.current is None]
-    stale = [p.table for p in pairs
-             if p.current is not None and _kst_date(p.current) != date_kst]
+    stale = [p.table for p in pairs if p.current is not None and not fresh(p.current)]
     mismatch = [p.table for p in pairs
-                if p.current is not None and _kst_date(p.current) == date_kst
-                and p.current.basis != basis]
+                if p.current is not None and fresh(p.current) and p.current.basis != basis]
     bad = missing + stale + mismatch
-    detail = (f"{len(pairs) - len(bad)}/{len(pairs)}표가 {date_kst} {basis} 판"
+    scope = f"체인 시작({since.astimezone(KST):%H:%M} KST) 이후" if since else date_kst
+    detail = (f"{len(pairs) - len(bad)}/{len(pairs)}표가 {scope} {basis} 판"
               + _listed("판 없음", missing) + _listed("오늘 판 아님", stale)
               + _listed("basis 불일치", mismatch) + _listed("건너뜀", skipped))
     return Check("C1", Status.FAIL if bad else Status.PASS, detail,
@@ -147,33 +178,84 @@ def _c1_fresh(pairs: list[_Pair], basis: str, date_kst: str, skipped: list[str])
                   "stale": stale, "basis_mismatch": mismatch, "skipped": skipped})
 
 
-def _c2_failed(stage_root: Path, date_kst: str) -> Check:
+def _c2_failed(stage_root: Path, date_kst: str, started_at: str | None = None) -> Check:
+    """이번 체인이 낸 게이트 폐기. `started_at`(체인 시작 UTC) 이 있으면 그 뒤에 생긴 `_failed/` 만 센다 —
+    같은 날 앞선 실행이 남긴 폐기 파일을 세면 재실행이 영영 통과하지 못한다(09-12 12:49 실측: 10:11 실행의
+    stg_price_daily 폐기 파일이 12:00 재실행의 C2 를 깨뜨렸다). `started_at` 이 없으면 종전대로 오늘 날짜."""
     d = stage_root / "_failed"
     files = sorted(p.stem for p in d.glob("*.json")) if d.is_dir() else []
+    since = _since(started_at)
     today = []
     for bid in files:
         when = model.build_id_time(bid)
-        if when is not None and when.astimezone(KST).strftime("%Y%m%d") == date_kst:
+        if when is None:
+            continue
+        if since is not None:
+            if when >= since:
+                today.append(bid)
+        elif when.astimezone(KST).strftime("%Y%m%d") == date_kst:
             today.append(bid)
-    detail = f"오늘 게이트 폐기 {len(today)}건 (누적 {len(files)}건)" + _listed("폐기", today)
+    scope = f"체인 시작({since.astimezone(KST):%H:%M} KST) 이후" if since else "오늘"
+    detail = f"{scope} 게이트 폐기 {len(today)}건 (누적 {len(files)}건)" + _listed("폐기", today)
     return Check("C2", Status.FAIL if today else Status.PASS, detail,
-                 {"today": today, "n_files": len(files)})
+                 {"today": today, "n_files": len(files), "since": started_at})
+
+
+def _year_rows(rec: manifest.BuildRecord) -> dict[str, int]:
+    """`{"year=YYYY": n_rows}`. `year=` 라벨이 없는 파티션(whole 표·문서층)은 연도 축이 없어 뺀다."""
+    out: dict[str, int] = {}
+    for part in rec.partitions:
+        label = str(part.get("path", "")).rsplit("/", 1)[-1]
+        if label.startswith("year="):
+            out[label] = int(str(part.get("n_rows", 0)))
+    return out
 
 
 def _c3_monotonic(pairs: list[_Pair], write_modes: Mapping[str, str]) -> Check:
+    """행 손실 비감소. append_only 는 표 전체, 그 밖은 **파티션 축**으로 본다 (DEFECT-B03).
+
+    09-19 감사: C3 이 append_only 46표만 봐서 upsert 11 + first_write_wins 5 표가 대상 밖이었다 —
+    `stg_price_daily`(9,259,578행)·`stg_listing_daily`·키움 수급 5표·v3 4표가 전부 여기 든다. 원장
+    재적재 사고로 과거 구간이 줄면 G1·G5 는 등식(Δsrc=Δstage)이라 정상 처리하고 C4 는 계수가
+    움직였다며 대조를 건너뛰어, **가격 정본이 조용히 줄어도 아무 데도 안 걸린다.**
+
+    upsert 는 **닫힌 연도 파티션**만 본다(올해 파티션은 원장이 아직 쓰고 있어 감소가 정상일 수
+    있다). `first_write_wins` 는 기존 행을 덮지 않으므로 전 파티션을 본다.
+    """
+    this_year = dt.datetime.now(KST).year
     decreased: list[dict[str, object]] = []
-    n_checked = 0
+    n_checked = n_partition_tables = 0
     for p in pairs:
-        if write_modes.get(p.table) != "append_only" or p.current is None or p.previous is None:
+        if p.current is None or p.previous is None:
             continue
-        n_checked += 1
-        if p.current.n_rows < p.previous.n_rows:
-            decreased.append({"table": p.table, "previous": p.previous.n_rows,
-                              "current": p.current.n_rows})
-    detail = f"append_only {n_checked}표 행수 비감소" + _listed(
-        "감소", [f"{d['table']} {d['previous']}→{d['current']}" for d in decreased])
+        mode = write_modes.get(p.table)
+        if mode == "append_only":
+            n_checked += 1
+            if p.current.n_rows < p.previous.n_rows:
+                decreased.append({"table": p.table, "previous": p.previous.n_rows,
+                                  "current": p.current.n_rows})
+            continue
+        if mode not in ("upsert", "first_write_wins"):
+            continue
+        prev_years, cur_years = _year_rows(p.previous), _year_rows(p.current)
+        if not prev_years:
+            continue
+        n_partition_tables += 1
+        for label, before in sorted(prev_years.items()):
+            year = int(label[5:]) if label[5:].isdigit() else None
+            if mode == "upsert" and (year is None or year >= this_year):
+                continue
+            after = cur_years.get(label, 0)     # 파티션이 통째로 사라진 것도 손실이다
+            if after < before:
+                decreased.append({"table": p.table, "partition": label,
+                                  "previous": before, "current": after})
+    detail = (f"append_only {n_checked}표 행수 비감소 · 파티션 축 {n_partition_tables}표"
+              f"(upsert 는 {this_year}년 이전 파티션만)" + _listed(
+                  "감소", [f"{d['table']}{'/' + str(d['partition']) if 'partition' in d else ''} "
+                           f"{d['previous']}→{d['current']}" for d in decreased]))
     return Check("C3", Status.FAIL if decreased else Status.PASS, detail,
-                 {"n_checked": n_checked, "decreased": decreased})
+                 {"n_checked": n_checked, "n_partition_tables": n_partition_tables,
+                  "decreased": decreased})
 
 
 def _c4_frozen(pairs: list[_Pair], unversioned: Collection[str] = ()) -> Check:
@@ -185,9 +267,17 @@ def _c4_frozen(pairs: list[_Pair], unversioned: Collection[str] = ()) -> Check:
     """
     keys = ("n_src", "n_dedup", "n_reject")
     mismatched: list[dict[str, object]] = []
+    rules_changed: list[str] = []
     n_frozen = n_compared = 0
     for p in pairs:
         if p.table in C4_EXCLUDE or p.table in unversioned or p.current is None or p.previous is None:
+            continue
+        if p.current.rules_version != p.previous.rules_version:
+            # 규칙(SQL·available 규칙)이 바뀐 판은 같은 소스여도 산출이 달라지는 것이 정상이다 —
+            # 비교 대상은 같은 규칙 판본의 직전 판뿐(equity EG5a 와 같은 규약). 09-20 00:35 실측:
+            # E08 `available_date=greatest(...)` 가 stg_disclosure 12,697행을 바꿨는데 판본을 안 올려
+            # C4 가 확정 빌드를 세웠다 — 그 자체는 C4 가 맞게 잡은 것이고, 판본을 올리면 여기서 건너뛴다.
+            rules_changed.append(p.table)
             continue
         cur_g1, prev_g1 = _g1(p.current), _g1(p.previous)
         if cur_g1 is None or prev_g1 is None:
@@ -199,10 +289,12 @@ def _c4_frozen(pairs: list[_Pair], unversioned: Collection[str] = ()) -> Check:
         if p.current.content_hash != p.previous.content_hash:
             mismatched.append({"table": p.table, "previous": p.previous.content_hash,
                                "current": p.current.content_hash})
-    detail = f"소스 동결 {n_frozen}표 / 대조 {n_compared}표" + _listed(
-        "해시 불일치", [f"{d['table']} {d['previous']}→{d['current']}" for d in mismatched])
+    detail = (f"소스 동결 {n_frozen}표 / 대조 {n_compared}표"
+              + _listed("해시 불일치", [f"{d['table']} {d['previous']}→{d['current']}" for d in mismatched])
+              + _listed("규칙 판본 변경(대조 제외)", rules_changed))
     return Check("C4", Status.FAIL if mismatched else Status.PASS, detail,
-                 {"n_frozen": n_frozen, "n_compared": n_compared, "mismatched": mismatched})
+                 {"n_frozen": n_frozen, "n_compared": n_compared, "mismatched": mismatched,
+                  "rules_changed": rules_changed})
 
 
 def _c5_elapsed(pairs: list[_Pair], date_kst: str, started_at: str | None,
@@ -245,16 +337,57 @@ def _c5_elapsed(pairs: list[_Pair], date_kst: str, started_at: str | None,
                   "finished_at": end.isoformat(timespec="seconds")})
 
 
+def _c6_fresh(pairs: list[_Pair], date_kst: str,
+              allow: Callable[[str], tuple[int | None, str]] = freshness.judgement) -> Check:
+    """데이터 축 신선도 — 판이 담은 **최신 사실의 날짜**가 D − 허용지연 이상인가 (DEFECT-B01).
+
+    C1 이 "오늘 새로 지었다" 를 보는 동안 원장이 5주 멈춰 있어도 아무도 못 봤다. 허용 지연은
+    캘린더일 단순 정수이고 표별 선언은 `freshness.py` 에 있다 — 동결·희소·비부여 표는 판정하지
+    않고 **사유를 남긴다**(`--skip` 과 같은 원칙: 조용히 통과시키지 않는다).
+    """
+    d = dt.date(int(date_kst[:4]), int(date_kst[4:6]), int(date_kst[6:8]))
+    stale: list[dict[str, object]] = []
+    skipped: dict[str, str] = {}
+    n_checked = 0
+    for p in pairs:
+        if p.current is None:
+            continue                       # 판 자체가 없다 — C1 이 잡는다
+        allow_days, why = allow(p.table)
+        if allow_days is None:
+            skipped[p.table] = why
+            continue
+        got = p.current.max_available_date
+        if not got:
+            skipped[p.table] = freshness.NO_RECORD
+            continue
+        n_checked += 1
+        limit = d - dt.timedelta(days=allow_days)
+        if dt.date.fromisoformat(got) < limit:
+            stale.append({"table": p.table, "max_available_date": got,
+                          "limit": limit.isoformat(), "allow_days": allow_days})
+    detail = (f"{n_checked}표 신선도 (D={date_kst}, 건너뜀 {len(skipped)}표)" + _listed(
+        "지연", [f"{s['table']} {s['max_available_date']}<{s['limit']}" for s in stale]))
+    if stale:
+        status = Status.FAIL
+    elif n_checked:
+        status = Status.PASS
+    else:
+        status = Status.SKIP            # 판정한 표가 0 — 통과로 세지 않는다
+    return Check("C6", status, detail,
+                 {"n_checked": n_checked, "stale": stale, "skipped": skipped})
+
+
 def check_stage(stage_root: Path, basis: str, date_kst: str, *,
                 built_on: str | None = None,
                 tables: Mapping[str, str] | None = None, skip: Collection[str] = (),
                 started_at: str | None = None,
                 budget_s: int = BUDGET_S_DEFAULT) -> StageHealth:
-    """C1~C5 를 판정한다. `tables` 는 표 이름 → write_mode (기본은 stage 규칙 전수).
+    """C1~C6 을 판정한다. `tables` 는 표 이름 → write_mode (기본은 stage 규칙 전수).
 
     `date_kst` 는 대상 거래일(리포트·파일명의 D), `built_on` 은 판이 커밋된 KST 날짜다. 저녁 잠정판은
     둘이 같지만 아침 확정판은 D=T-1 이고 커밋은 T 아침이라 다르다 — C1(오늘 판)·C2(오늘 폐기)·C5(오늘
     소요)는 `built_on` 으로 본다. 생략하면 `date_kst` 와 같다(저녁·수동 빌드 규약).
+    C6(데이터 신선도)만 대상 거래일 `date_kst` 로 본다 — 판이 담아야 할 최신 사실이 D 이기 때문이다.
     """
     if len(date_kst) != 8 or not date_kst.isdigit():
         raise ValueError(f"date must be YYYYMMDD: date_kst={date_kst!r}")
@@ -270,11 +403,12 @@ def check_stage(stage_root: Path, basis: str, date_kst: str, *,
                    if name in write_modes and not getattr(rule, "versioned", True)}
     skipped = sorted(set(skip) & set(write_modes))
     judged = [_pair(stage_root, t) for t in sorted(write_modes) if t not in skipped]
-    checks = (_c1_fresh(judged, basis, built_on, skipped),
-              _c2_failed(stage_root, built_on),
+    checks = (_c1_fresh(judged, basis, built_on, skipped, started_at),
+              _c2_failed(stage_root, built_on, started_at),
               _c3_monotonic(judged, write_modes),
               _c4_frozen(judged, unversioned),
-              _c5_elapsed(judged, built_on, started_at, budget_s))
+              _c5_elapsed(judged, built_on, started_at, budget_s),
+              _c6_fresh(judged, date_kst))
     return StageHealth(date_kst, basis, str(stage_root), checks, built_on)
 
 
@@ -284,7 +418,7 @@ def _split(raw: str) -> tuple[str, ...]:
 
 def main(argv: list[str] | None = None) -> int:
     base = Path(os.environ.get("QL_HOME") or Path(__file__).resolve().parents[2])
-    ap = argparse.ArgumentParser(description="stage 건전성 C1~C5 (읽기 전용)")
+    ap = argparse.ArgumentParser(description="stage 건전성 C1~C6 (읽기 전용)")
     ap.add_argument("--stage-root", type=Path, default=base / "data" / "stage")
     ap.add_argument("--basis", required=True, choices=sorted(model.BASIS_PREFIX))
     ap.add_argument("--date", default=dt.datetime.now(KST).strftime("%Y%m%d"),

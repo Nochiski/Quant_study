@@ -2,6 +2,10 @@
  "_seed": "S09 (short_daily) 가 요구하는 baseline 상수. 오케스트레이터가 data/equity/baseline.json 에 병합한다. 산출 규칙 상수는 없다 — SQL 에 임계·리터럴이 없고(격자 매핑 · 판본 선택 · fill_kind 판정뿐) 컬럼은 stage 원값을 그대로 나른다. 유일한 항목은 EG7 격리 비율 임계다: 격자 3종의 pre_calendar 격리는 「캘린더 하한 2010-01-04」 라는 설계가 만드는 구조적 격리라(DESIGN §4-3 P11 short 58,211) 코드 기본값 0.001(gates.DEFAULT_THRESHOLDS['EG7'])로는 첫 빌드부터 폐기된다. 진짜 회귀 감시는 사유별 정확 건수(GATES §3 ⑪ (d) reject_<reason>)이며, 그 값은 서버 실측 뒤 등재한다 — 절단본 수치를 등재하면 서버에서 틀린다. 기록형 metric(fill_kind 분포 · 겹침 상관·비율 분위수 · 음수 대차 잔고 · n_zero_without_log_evidence_* · n_kiwoom_shard_rows)은 _meta.gates[EG1_short_daily·EG3_short_daily].metrics 에 남고 승격 여부는 서버 실측 뒤 판단한다. EG9(레짐 커버리지, 매트릭스 §2 13행)는 상수 5종(coverage_probe_dates·coverage_min·evidence_rate_min·coverage_return_corr_max·corr_min_months)이 전부 서버 실측이라 S09 범위 밖이다 — EG9-P04(미수집→0)만 EG3_short_daily 가 기록형 n_zero_without_log_evidence_<src> 로 미리 잰다.",
  "measured_at": "2026-09-06",
  "short_daily": {
+  "recent_grid_baseline_window": 20,
+  "recent_grid_lag_sessions": 0,
+  "recent_grid_row_ratio_min": 0.8,
+  "recent_grid_window": 3,
   "thresholds": {
    "EG7": 0.05
   }
@@ -18,6 +22,54 @@
    "growing": false,
    "used_by": "gates.eg7_range(threshold(ctx,'EG7')) — short_daily 빌드",
    "note": "**제안값 — 사람 승인 필요.** 절단본 비율(0.0274)이 서버 예상(0.0056)보다 5배 큰 이유는 슬라이스 15티커가 전부 2010 이전 상장 대형주라 pre-2010 구간의 비중이 과대표되기 때문이다. 0.05 는 둘을 다 덮으면서 '원장의 5% 넘게 격리되면 멈춘다' 는 안전판을 남긴다. 이 임계는 격리 **비율**만 보므로 사유별 회귀는 못 잡는다 — 서버 첫 빌드 뒤 GATES §3 ⑪ (d) 의 short_daily.reject_pre_calendar·reject_off_grid 정확 건수를 등재하는 것이 본 감시축이고, 그때 이 임계는 조여도 된다. 값을 키우면 원장 대량 유실이 통과하고, 0.001(코드 기본값)로 두면 정상 빌드가 폐기된다."
+  },
+  {
+   "table": "short_daily",
+   "metric": "recent_grid_window",
+   "value": 3,
+   "kind": "convention",
+   "sql": "SELECT date_col, count(*) FROM short_daily GROUP BY 1 ORDER BY 1 DESC LIMIT 25  -- 서버 실측 2026-09-09~09-18 행수 2,762~2,766(flow_daily 와 같은 격자)",
+   "inputs": {},
+   "measured_at": "2026-09-19",
+   "growing": false,
+   "used_by": "gates.eg21_recent_grid (EQUITY_GATES §11 EG21)",
+   "note": "2026-09-19 감사 DEFECT-C06 으로 신설. 판정할 최신 세션 수. 하루만 보면 휴장 직후 한 날의 튐에 흔들리고, 넓히면 이미 지난 결손을 매일 다시 폐기한다."
+  },
+  {
+   "table": "short_daily",
+   "metric": "recent_grid_baseline_window",
+   "value": 20,
+   "kind": "convention",
+   "sql": "SELECT date_col, count(*) FROM short_daily GROUP BY 1 ORDER BY 1 DESC LIMIT 25  -- 서버 실측 2026-09-09~09-18 행수 2,762~2,766(flow_daily 와 같은 격자)",
+   "inputs": {},
+   "measured_at": "2026-09-19",
+   "growing": false,
+   "used_by": "gates.eg21_recent_grid (EQUITY_GATES §11 EG21)",
+   "note": "2026-09-19 감사 DEFECT-C06 으로 신설. 비교 중앙값을 내는 직전 세션 수. 20 세션 ≈ 1개월이라 유니버스 증감은 흡수하고 수집 사고는 남는다."
+  },
+  {
+   "table": "short_daily",
+   "metric": "recent_grid_row_ratio_min",
+   "value": 0.8,
+   "kind": "convention",
+   "sql": "SELECT date_col, count(*) FROM short_daily GROUP BY 1 ORDER BY 1 DESC LIMIT 25  -- 서버 실측 2026-09-09~09-18 행수 2,762~2,766(flow_daily 와 같은 격자)",
+   "inputs": {},
+   "measured_at": "2026-09-19",
+   "growing": false,
+   "used_by": "gates.eg21_recent_grid (EQUITY_GATES §11 EG21)",
+   "note": "2026-09-19 감사 DEFECT-C06 으로 신설. 중앙값 대비 행수 하한. 격자 표의 일별 진폭이 ±0.15%(2,762~2,766) 이고 opinion_daily 도 ±2% 라 0.8 은 20배 이상 여유가 있다 — '반쯤 비었다' 만 잡는다."
+  },
+  {
+   "table": "short_daily",
+   "metric": "recent_grid_lag_sessions",
+   "value": 0,
+   "kind": "convention",
+   "sql": "SELECT date_col, count(*) FROM short_daily GROUP BY 1 ORDER BY 1 DESC LIMIT 25  -- 서버 실측 2026-09-09~09-18 행수 2,762~2,766(flow_daily 와 같은 격자)",
+   "inputs": {},
+   "measured_at": "2026-09-19",
+   "growing": false,
+   "used_by": "gates.eg21_recent_grid (EQUITY_GATES §11 EG21)",
+   "note": "2026-09-19 감사 DEFECT-C06 으로 신설. 판정에서 빼는 최신 세션 수. 키움 축은 당일 저녁 입수 — 최신 세션부터 판정한다."
   }
  ]
 }

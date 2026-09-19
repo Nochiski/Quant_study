@@ -49,7 +49,7 @@ def _krx(tmp_path, *, statuses="ok", stk=942, ksq=1820, kospi=51, kosdaq=40, etf
     return str(tmp_path / "krx.db")
 
 
-def _kw(tmp_path, *, n=2563, stale=250, cross_bad=0):
+def _kw(tmp_path, *, n=2563, stale=250, cross_bad=0, vol_bad=0):
     con = sqlite3.connect(tmp_path / "kiwoom.db")
     for tbl in ("ka10008_foreign_holdings", "ka10060_investor_flows", "ka20068_lending_balance", "ka10014_short_selling"):
         con.execute(f"CREATE TABLE {tbl} (ticker TEXT, dt TEXT, poss_stkcnt TEXT, close_pric TEXT, trde_qty TEXT)")
@@ -59,7 +59,8 @@ def _kw(tmp_path, *, n=2563, stale=250, cross_bad=0):
         prev = "100"
         today = "100" if i < stale else "101"
         close = "-1000" if i >= cross_bad else "-999"
-        rows_today.append((tk, D, today, close, "10")); rows_prev.append((tk, DP, prev, "-1000", "10"))
+        vol = "10" if i >= vol_bad else "11"
+        rows_today.append((tk, D, today, close, vol)); rows_prev.append((tk, DP, prev, "-1000", "10"))
     for tbl in ("ka10008_foreign_holdings", "ka10060_investor_flows", "ka20068_lending_balance"):
         con.executemany(f"INSERT INTO {tbl} VALUES (?,?,?,?,?)", rows_today + rows_prev)
     con.executemany("INSERT INTO ka10014_short_selling VALUES (?,?,?,?,?)", rows_today[:2200] + rows_prev[:2250])
@@ -70,9 +71,20 @@ def _kw(tmp_path, *, n=2563, stale=250, cross_bad=0):
     return str(tmp_path / "kiwoom.db")
 
 
+def _kis(tmp_path, max_deal, n=2500):
+    """신용잔고 원장 — `deal_date` 최신일만 바꿔 신선도 게이트를 본다."""
+    con = sqlite3.connect(tmp_path / "kis.db")
+    con.execute("CREATE TABLE kis_credit_balance (row_hash TEXT, req_ticker TEXT, deal_date TEXT, "
+                "dup_seq TEXT, collected_at TEXT)")
+    con.executemany("INSERT INTO kis_credit_balance VALUES (?,?,?,?,?)",
+                    [(f"h{i}", f"{i:06d}", max_deal, "0", "t") for i in range(n)])
+    con.commit(); con.close()
+    return str(tmp_path / "kis.db")
+
+
 def _paths(tmp_path, **kw):
     p = lh.Paths(krx=kw.get("krx", str(tmp_path / "none1.db")), kiwoom=kw.get("kiwoom", str(tmp_path / "none2.db")),
-                 kis=str(tmp_path / "none3.db"), dart=str(tmp_path / "none4.db"), wise=kw.get("wise", str(tmp_path / "none5.db")),
+                 kis=kw.get("kis", str(tmp_path / "none3.db")), dart=str(tmp_path / "none4.db"), wise=kw.get("wise", str(tmp_path / "none5.db")),
                  calendar=_cal(tmp_path), universe_state=str(tmp_path / "universe_kw.json"))
     (tmp_path / "universe_kw.json").write_text(json.dumps({"asof": D, "grace": {}, "n_requested": 2563}), encoding="utf-8")
     return p
@@ -102,7 +114,10 @@ def test_krx_corp_action_candidates_flags_parval_and_shares_changes(tmp_path):
     ))
     rep = lh.run(D, _paths(tmp_path, krx=krx))
     c = _by(rep)["krx.corp_action_candidates"]
-    assert c.level is lh.Level.WARN and c.status is lh.Status.FAIL
+    # 기록형이다 — 한국 시장에서 전환·증자·소각은 매일 몇 건씩 나므로 "0건 기대" 는 매일 FAIL 이고
+    # 사람은 곧 무시한다(DEFECT-A09). 대조는 equity 의 adj_factor·corp_event 가 매일 한다.
+    assert c.level is lh.Level.WARN and c.status is lh.Status.PASS
+    assert "후보 2건 기록" in c.detail
     assert c.value["n"] == 2
     got = {i["code"]: i for i in c.value["items"]}
     assert set(got) == {"000003", "000007"}
@@ -148,10 +163,18 @@ def test_kiwoom_relative_gates_and_cross_source(tmp_path):
 
 
 def test_kiwoom_contamination_and_cross_mismatch_fail(tmp_path):
-    rep = lh.run(D, _paths(tmp_path, krx=_krx(tmp_path, stk=2563), kiwoom=_kw(tmp_path, stale=2540, cross_bad=1)))
+    rep = lh.run(D, _paths(tmp_path, krx=_krx(tmp_path, stk=2563), kiwoom=_kw(tmp_path, stale=2540, vol_bad=1)))
     c = _by(rep)
     assert c["kiwoom.ka10008.stale_pct"].status is lh.Status.FAIL     # 99.1%
-    assert c["kiwoom.krx_cross"].status is lh.Status.FAIL and c["kiwoom.krx_cross"].value["same_close"] == 2562
+    assert c["kiwoom.krx_cross"].status is lh.Status.FAIL and c["kiwoom.krx_cross"].value["same_vol"] == 2562
+
+
+def test_kiwoom_cross_close_mismatch_is_recorded_only(tmp_path):
+    # 09-14 애프터마켓 뒤 키움 종가는 장후 체결가 — 종가만 다르면 PASS, 수는 기록(결정 11)
+    rep = lh.run(D, _paths(tmp_path, krx=_krx(tmp_path, stk=2563), kiwoom=_kw(tmp_path, cross_bad=1)))
+    c = _by(rep)
+    assert c["kiwoom.krx_cross"].status is lh.Status.PASS
+    assert c["kiwoom.krx_cross"].value == {"matched": 2563, "same_close": 2562, "same_vol": 2563}
 
 
 def test_report_json_roundtrip(tmp_path):
@@ -267,7 +290,7 @@ def test_LIST_SHRS가_NULL이_되면_후보로_뜬다(tmp_path) -> None:
     con.commit(); con.close()
     rep = lh.run(D, _paths(tmp_path, krx=krx))
     c = _by(rep)["krx.corp_action_candidates"]
-    assert c.status is lh.Status.FAIL
+    assert c.status is lh.Status.PASS                       # 기록형(A09) — 목록에 남기는 것이 판정이다
     assert [i["code"] for i in c.value["items"]] == ["000003"]
     assert c.value["items"][0]["shares_ratio"] is None
 
@@ -284,3 +307,24 @@ def test_KRX_지수가_줄면_행수_검사는_실패한다(tmp_path) -> None:
     krx = _krx(tmp_path, kospi=50)
     rep = lh.run(D, _paths(tmp_path, krx=krx))
     assert _by(rep)["krx.rows"].status is lh.Status.FAIL
+
+
+# ── KIS 신용잔고 신선도 (DEFECT-A06·E01) ────────────────────────────────────
+def test_kis_credit_fresh_passes_at_d_minus_2(tmp_path):
+    rep = lh.run(D, _paths(tmp_path, kis=_kis(tmp_path, "20260904")))   # D-2 세션 = 정상
+    c = _by(rep)["kis.credit.fresh"]
+    assert c.level is lh.Level.REQUIRED and c.status is lh.Status.PASS and rep.ok
+
+
+def test_kis_credit_fresh_warns_one_session_behind(tmp_path):
+    rep = lh.run(D, _paths(tmp_path, kis=_kis(tmp_path, "20260903")))   # D-3 — 하루 밀렸다
+    c = _by(rep)["kis.credit.fresh"]
+    assert c.level is lh.Level.WARN and c.status is lh.Status.FAIL
+    assert rep.ok                                                        # 경고는 체인을 세우지 않는다
+
+
+def test_kis_credit_fresh_fails_when_two_sessions_behind(tmp_path):
+    rep = lh.run(D, _paths(tmp_path, kis=_kis(tmp_path, "20260902")))   # D-4 — 무음 정지
+    c = _by(rep)["kis.credit.fresh"]
+    assert c.level is lh.Level.REQUIRED and c.status is lh.Status.FAIL
+    assert not rep.ok

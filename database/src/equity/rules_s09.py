@@ -59,7 +59,7 @@ from pathlib import Path
 
 from stage.gates import GateResult, GateStatus
 
-from .gates import EquityGateContext
+from .gates import EquityGateContext, eg21_recent_grid
 from .model import (
     BASIS_VOCAB,
     FILL_EVIDENCE,
@@ -365,9 +365,12 @@ eg3_short_daily.gate_name = "EG3_short_daily"       # type: ignore[attr-defined]
 # 원천별 접미사 컬럼을 나란히 두는 테이블이므로(사용자 확정 09-06) **field_id 하나 = 컬럼 하나**로
 # 선언한다 — 두 원천을 폴백 병합하면 시계열이 원천을 섞는다(FIELD_MAP §2 `short.short_sale_value`).
 # 선언하지 않는 것: `short.short_balance_ratio` 는 공매도량 ÷ 상장주식수라 **비율 계산이 팩터층
-# 몫**이고 이 테이블에 그 컬럼이 없다(FIELD_MAP §2 「진짜 잔고 아님」). KIS 공매도 축
-# (`short_volume_kis_shr`·`short_value_kis_krw` …)과 대차 금액축(`lending_balance_kis_krw`)도
-# field_id 가 없어 선언하지 않는다 — 없는 것을 선언하면 프로파일에 '있는데 늘 빈' 행이 생긴다.
+# 몫**이고 이 테이블에 그 컬럼이 없다(FIELD_MAP §2 「진짜 잔고 아님」). 대차 금액축
+# (`lending_balance_kis_krw`)과 KIS 비율·평균가 축도 field_id 가 없어 선언하지 않는다.
+# **KIS 수량 축 둘은 2026-09-19 감사(DEFECT-E02)로 선언한다** — `scope='internal'` 이라
+# FIELD_MAP §2 어휘·어댑터 `list_fields()` 는 그대로이고, `dataset_profile.coverage_to` 가
+# 원천 정지일(2026-08-14)을 드러내는 것이 목적이다. 선언이 없으면 카탈로그만 보는 소비자는
+# "KIS 축이 9월부터 통째로 NULL" 이라는 사실을 알 길이 없다.
 _SAXIS: tuple[str, str] = ("ticker", "date")
 
 FIELDS: tuple[FieldProfile, ...] = (
@@ -402,6 +405,36 @@ FIELDS: tuple[FieldProfile, ...] = (
                  "이름도 잔고가 아니라 거래량이다 — 진짜 공매도 잔고는 취득 불가로 확정됐다"
                  "(FACTORS §12 F45).",
         coverage_axis="grid_session", axis_columns=_SAXIS),
+    # ── KIS 축(내부 스코프) — 일일 수집 범위 밖. DEFECT-E02 (2026-09-19 감사) ──────
+    FieldProfile(
+        field_id="short.short_sale_volume_kis", columns=("short_volume_kis_shr",),
+        label="공매도 거래량(KIS, 수집 정지)", unit="주", value_type="count",
+        frequency="session", recommended_lag_sessions=1, recommended_lag_days=1,
+        point_in_time=True, requires_confirmation=True,
+        disclosure_basis="원장 날짜 = 매매일. KIS 는 공표 시각을 주지 않는다"
+                         "(stage lag_known=false) → 익일 지식으로 쓴다",
+        evidence="short_daily.short_volume_kis_shr ← stg_short_daily_kis. **일일 수집 범위 밖**"
+                 "이다 — 일일 체인의 KIS 단계는 신용잔고 하나뿐이고(플랜 R10 · "
+                 "`daily_ledger.sh` kis credit) 이 원장은 백필 전용 경로였다. 원장 실측 "
+                 "`max(stck_bsop_date)=2026-08-14` · `max(collected_at)=2026-08-26` 이라 "
+                 "**2026-08-15 이후 셀이 영구 NULL** 이다(`fill_kind_short_kis.kind="
+                 "'not_collected'`). 그 종료일은 이 행의 `coverage_to` 가 말한다 — 선언이 없으면 "
+                 "카탈로그만 보는 소비자는 정지를 알 수 없다(DEFECT-E02). 정본 축은 키움 "
+                 "`short.short_sale_volume` 이고 이 축은 교차검증용이다.",
+        coverage_axis="grid_session", scope="internal", axis_columns=_SAXIS),
+    FieldProfile(
+        field_id="short.borrowed_quantity_kis", columns=("lending_balance_kis_shr",),
+        label="대차잔고(주식수, KIS, 수집 정지)", unit="주", value_type="count",
+        frequency="session", recommended_lag_sessions=1, recommended_lag_days=1,
+        point_in_time=True, requires_confirmation=True,
+        disclosure_basis="원장 날짜 = 대차 잔량 기준일. KIS 는 공표 시각을 주지 않는다"
+                         "(stage lag_known=false) → 익일 지식으로 쓴다",
+        evidence="short_daily.lending_balance_kis_shr ← stg_loan_daily_kis. "
+                 "`short.short_sale_volume_kis` 와 같은 사유로 **일일 수집 범위 밖**이다 — "
+                 "원장 실측 `max(bsop_date)=2026-08-14` · `max(collected_at)=2026-08-27`. "
+                 "종료일은 `coverage_to` 가 드러낸다. 정본 축은 키움 `short.borrowed_quantity` "
+                 "이고(GAP-04 로 단위 확정) 이 축은 교차검증용이다.",
+        coverage_axis="grid_session", scope="internal", axis_columns=_SAXIS),
     FieldProfile(
         field_id="short.borrowed_quantity", columns=("lending_balance_kiwoom_shr",),
         label="대차잔고(주식수, 키움)", unit="주", value_type="count", frequency="session",
@@ -510,7 +543,8 @@ SHORT_DAILY = register(EquityTable(
     available_basis=("default",),
     content_date_column="date",
     reject_reasons=REJECT_REASONS,
-    extra_gates=(eg1_short_daily, eg3_short_daily),
+    # EG21 — 최신 구간 행수 완결성(DEFECT-C06). flow_daily 와 같은 규약.
+    extra_gates=(eg1_short_daily, eg3_short_daily, eg21_recent_grid),
     field_profiles=FIELDS,
 ))
 

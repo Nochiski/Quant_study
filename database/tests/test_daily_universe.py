@@ -2,7 +2,10 @@
 import json
 import sqlite3
 
+from daily import calendar as trading_calendar
 from daily import universe as uni
+
+CAL = trading_calendar.Calendar(frozenset({"20260924", "20260925"}), "kis_cache")
 
 
 def _kw(tmp_path, master_rows, foreign_rows=()):
@@ -33,7 +36,7 @@ def test_first_run_seeds_from_tickers_txt_and_logs_difference(tmp_path):
     seed = tmp_path / "tickers.txt"
     seed.write_text("005930\n000660\n", encoding="utf-8")       # 000660 은 마스터에 upSizeName 공백
     state_path = tmp_path / "universe_kw.json"
-    req = uni.requested(con, state_path=state_path, seed_path=seed, grace_days=5)
+    req = uni.requested(con, state_path=state_path, seed_path=seed, cal=CAL, grace_days=5)
     assert req.tickers == ("000660", "005930", "386380")         # 시드 ∪ 오늘
     assert req.seeded_only == ("000660",)
     state = json.loads(state_path.read_text(encoding="utf-8"))
@@ -51,7 +54,7 @@ def test_grace_expires_after_grace_days_and_reports_missing_tail(tmp_path):
     state_path.write_text(json.dumps({"asof": "20260908", "grace": {
         "000660": {"last_seen": "20260901", "missing_days": 4},
         "000001": {"last_seen": "20260901", "missing_days": 4}}}), encoding="utf-8")
-    req = uni.requested(con, state_path=state_path, seed_path=None, grace_days=5)
+    req = uni.requested(con, state_path=state_path, seed_path=None, cal=CAL, grace_days=5)
     assert "000660" not in req.tickers and "000001" not in req.tickers
     assert req.dropped == ("000001", "000660")
     assert req.tail_missing == ("000001",)
@@ -65,7 +68,7 @@ def test_ticker_gone_from_master_enters_grace_with_last_seen(tmp_path):
                          ("20260909", "005930", "대형주")])
     state_path = tmp_path / "universe_kw.json"
     state_path.write_text(json.dumps({"asof": "20260908", "n_requested": 2, "grace": {}}), encoding="utf-8")
-    req = uni.requested(con, state_path=state_path, seed_path=None, grace_days=5)
+    req = uni.requested(con, state_path=state_path, seed_path=None, cal=CAL, grace_days=5)
     assert req.tickers == ("000660", "005930")                   # 사라진 날에도 요청한다
     state = json.loads(state_path.read_text(encoding="utf-8"))
     assert state["grace"]["000660"] == {"last_seen": "20260908", "missing_days": 1}
@@ -76,8 +79,40 @@ def test_same_day_second_call_does_not_advance_grace(tmp_path):
     con = _kw(tmp_path, [("20260909", "005930", "대형주")])
     state_path = tmp_path / "universe_kw.json"
     state_path.write_text(json.dumps({"asof": "20260909", "n_requested": 2, "grace": {
-        "000660": {"last_seen": "20260908", "missing_days": 2}}}), encoding="utf-8")
-    req = uni.requested(con, state_path=state_path, seed_path=None, grace_days=5)
+        "000660": {"last_seen": "20260907", "missing_days": 2}}}), encoding="utf-8")
+    req = uni.requested(con, state_path=state_path, seed_path=None, cal=CAL, grace_days=5)
     assert "000660" in req.tickers
     state = json.loads(state_path.read_text(encoding="utf-8"))
     assert state["grace"]["000660"]["missing_days"] == 2
+
+
+def test_grace_counts_trading_days_not_calendar_days(tmp_path):
+    # DEFECT-A04: 마스터 스냅샷은 주말에도 찍히므로 스냅샷 날짜가 바뀔 때마다 1씩 올리면 5거래일 유예가
+    # 주말 한 번에 3거래일, 추석 연휴에 1거래일로 줄었다. 9/16(수) 이탈 → 9/19(토) 시점 유예는 2다.
+    con = _kw(tmp_path, [("20260916", "005930", "대형주"), ("20260916", "472220", "소형주"),
+                         ("20260919", "005930", "대형주")])
+    state_path = tmp_path / "universe_kw.json"
+    state_path.write_text(json.dumps({"asof": "20260916", "n_requested": 2, "grace": {}}),
+                          encoding="utf-8")
+    req = uni.requested(con, state_path=state_path, seed_path=None, cal=CAL, grace_days=5)
+    assert "472220" in req.tickers and req.dropped == ()
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["grace"]["472220"] == {"last_seen": "20260916", "missing_days": 2}   # 9/17·9/18 만
+
+
+def test_grace_expiry_needs_five_trading_days_across_a_holiday(tmp_path):
+    # 9/18(금) 이탈 + 추석(9/24·9/25 휴장) → 9/28(월)까지는 4거래일(9/21·22·23·28)이라 아직 유예,
+    # 9/29(화)에 5거래일이 차서 만료된다. 달력일로 세면 9/23 에 벌써 만료다.
+    con = _kw(tmp_path, [("20260918", "005930", "대형주"), ("20260918", "000660", "중형주"),
+                         ("20260928", "005930", "대형주")])
+    state_path = tmp_path / "universe_kw.json"
+    state_path.write_text(json.dumps({"asof": "20260918", "n_requested": 2, "grace": {
+        "000660": {"last_seen": "20260918", "missing_days": 0}}}), encoding="utf-8")
+    req = uni.requested(con, state_path=state_path, seed_path=None, cal=CAL, grace_days=5)
+    assert "000660" in req.tickers and req.dropped == ()
+    assert json.loads(state_path.read_text(encoding="utf-8"))["grace"]["000660"]["missing_days"] == 4
+    con.executemany("INSERT INTO ka10099_stock_master VALUES (?,?,?,?)",
+                    [("20260929", "005930", "대형주", "거래소")])
+    con.commit()
+    req = uni.requested(con, state_path=state_path, seed_path=None, cal=CAL, grace_days=5)
+    assert req.dropped == ("000660",)

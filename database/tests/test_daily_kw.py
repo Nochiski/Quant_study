@@ -52,7 +52,7 @@ def _kiwoom_db(tmp_path, ledger_rows=()):
     return path
 
 
-def _krx_db(tmp_path, date=D, close=None):
+def _krx_db(tmp_path, date=D, close=None, volume=None):
     path = tmp_path / "data" / "raw" / "krx.db"
     path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(path)
@@ -60,8 +60,9 @@ def _krx_db(tmp_path, date=D, close=None):
         con.execute(f"CREATE TABLE {tbl} (bas_dd_req TEXT, ISU_CD TEXT, TDD_CLSPRC TEXT, "
                     "ACC_TRDVOL TEXT)")
     prices = dict(KRX_CLOSE if close is None else close)
+    vols = dict(VOL if volume is None else volume)
     con.executemany("INSERT INTO krx_stk_bydd_trd VALUES (?,?,?,?)",
-                    [(date, t, prices[t], VOL[t]) for t in TICKERS])
+                    [(date, t, prices[t], vols[t]) for t in TICKERS])
     con.commit()
     con.close()
     return path
@@ -216,11 +217,11 @@ def test_merge_writes_only_dates_up_to_d_and_keeps_existing_rows(tmp_path, monke
     assert "changed=2" in row[3] and f"new={len(TICKERS) * 3 * len(kw_daily.TRS) - 2}" in row[3]
 
 
-# ── (d) 크로스소스 불일치 1행이면 머지하지 않는다 ────────────────────────────
-def test_merge_refuses_when_krx_close_differs(tmp_path, monkeypatch):
+# ── (d) 거래량 불일치 1행이면 머지하지 않는다 (종가 불일치는 기록만 — 결정 11, 09-14 애프터마켓) ──
+def test_merge_refuses_when_krx_volume_differs(tmp_path, monkeypatch):
     calls = []
     _prepare(tmp_path, monkeypatch, calls, ledger_rows=_seed_prev())
-    _krx_db(tmp_path, close={"005930": "70000", "000660": "999999"})
+    _krx_db(tmp_path, volume={"005930": VOL["005930"], "000660": "1"})
     assert kw_daily.main(["--fetch", "--date", D]) == 0
     before = _ledger(tmp_path)
     assert kw_daily.main(["--merge", "--date", D]) == 2
@@ -232,6 +233,22 @@ def test_merge_refuses_when_krx_close_differs(tmp_path, monkeypatch):
     finally:
         con.close()
     assert row[0] == "cross_source_failed" and "000660" in row[1]
+
+
+def test_merge_proceeds_when_only_krx_close_differs(tmp_path, monkeypatch):
+    # 09-14 이후 키움 종가는 장후 체결가라 KRX 종가와 다르다 — 거래량이 전건 같으면 머지한다(결정 11)
+    calls = []
+    _prepare(tmp_path, monkeypatch, calls, ledger_rows=_seed_prev())
+    _krx_db(tmp_path, close={"005930": "70000", "000660": "999999"})
+    assert kw_daily.main(["--fetch", "--date", D]) == 0
+    assert kw_daily.main(["--merge", "--date", D]) == 0
+    con = sqlite3.connect(tmp_path / "data" / "raw" / "daily_run.db")
+    try:
+        row = con.execute("SELECT status, detail FROM run WHERE source=? ORDER BY run_id DESC "
+                          "LIMIT 1", ("kiwoom_merge",)).fetchone()
+    finally:
+        con.close()
+    assert row[0] == "ok" and "same_close=1 same_vol=2" in row[1]
 
 
 # ── (e) KRX 에 D 가 아직 없으면 대기(rc 3) ───────────────────────────────────
@@ -330,6 +347,10 @@ def test_cross_source_requires_full_match_and_nonzero_overlap():
     off = {"005930": kw_daily.Quote(70000, 1000), "000660": kw_daily.Quote(250000, 1)}
     check = kw_daily.cross_source(krx, off)
     assert not check.passed and check.n_same_close == 2 and check.n_same_vol == 1
+    assert check.samples == ("000660(krx 250000/2000 vs kw 250000/1)",)   # 표본은 거래량 불일치만
+    close_off = {"005930": kw_daily.Quote(70001, 1000), "000660": kw_daily.Quote(250000, 2000)}
+    check = kw_daily.cross_source(krx, close_off)
+    assert check.passed and check.n_same_close == 1 and check.samples == ()   # 종가만 다르면 통과(결정 11)
     assert kw_daily.cross_source(krx, {}).passed is False          # 겹치는 종목이 0이면 실패
 
 
@@ -471,3 +492,153 @@ def test_commit_with_merge_is_rejected():
     import pytest
     with pytest.raises(SystemExit):
         kw_daily.main(["--merge", "--date", D, "--commit"])
+
+
+# ── (h) 저녁 직행 커버리지·오류 게이트 (DEFECT-A01) ──────────────────────────
+def _many_db(tmp_path, n):
+    """n종목 마스터만 있는 원장(저녁 직행 게이트용). 원장 본 테이블은 커밋이 만든다."""
+    path = tmp_path / "data" / "raw" / "kiwoom.db"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(path)
+    con.execute("CREATE TABLE ka10099_stock_master (snap_date TEXT, code TEXT, upSizeName TEXT, "
+                "marketName TEXT DEFAULT '거래소')")
+    con.executemany("INSERT INTO ka10099_stock_master (snap_date, code, upSizeName) VALUES (?,?,?)",
+                    [(D, f"{i:06d}", "대형주") for i in range(n)])
+    con.commit()
+    con.close()
+    return tuple(f"{i:06d}" for i in range(n))
+
+
+def _prepare_many(tmp_path, monkeypatch, n, *, nodata=(), error=()):
+    """n종목 유니버스 · 지정 종목만 무응답(1901)·오류(9999) 로 돌려주는 ka10060 스텁."""
+    monkeypatch.setenv("QL_HOME", str(tmp_path))
+    monkeypatch.setattr(kw_daily, "RATE_PER_SEC", 10_000.0)
+    tickers = _many_db(tmp_path, n)
+    bad_nodata, bad_error = set(nodata), set(error)
+
+    rows = {"ka10014": ("shrts_trnsn", {"dt": D, "close_pric": "-1", "shrts_qty": "1",
+                                        "ovr_shrts_qty": "1"})}
+
+    def kiwoom(api_id, url, body, cont=None, next_key=None):
+        tk = body["stk_cd"]
+        if tk in bad_nodata:
+            return {"return_code": 3, "return_msg": "[1901:종목정보가 없습니다]"}, {}
+        if tk in bad_error:
+            return {"return_code": 3, "return_msg": "[9999:서버 오류]"}, {}
+        key, row = rows.get(api_id, ("invsr_trde", {"dt": D, "ind_invsr": "1", "frgnr_invsr": "2"}))
+        return {"return_code": 0, "return_msg": "정상", key: [row]}, {}
+
+    module = types.ModuleType("api")
+    module.kiwoom = kiwoom
+    monkeypatch.setitem(sys.modules, "api", module)
+    return tickers
+
+
+def test_commit_fails_when_coverage_below_threshold(tmp_path, monkeypatch):
+    # 2,651종목 중 일부가 유량·HTTP 로 빠져도 status=ok 로 원장 직행하던 경로(A01).
+    tickers = _prepare_many(tmp_path, monkeypatch, 100, nodata=("000001", "000002", "000003"))
+    assert len(tickers) == 100
+    assert kw_daily.main(["--fetch", "--date", D, "--tr", "ka10060", "--commit"]) == 2
+    detail = _run_detail(tmp_path, "kiwoom_fetch")
+    assert "coverage=97/100" in detail and "commit=1" not in detail
+    con = sqlite3.connect(tmp_path / "data" / "raw" / "daily_run.db")
+    try:
+        status = con.execute("SELECT status FROM run ORDER BY run_id DESC LIMIT 1").fetchone()[0]
+    finally:
+        con.close()
+    assert status == "coverage_failed"
+    assert "ka10060_investor_flows" not in _tables(tmp_path)      # 결손판은 원장에 넣지 않는다
+
+
+def test_commit_passes_at_98_percent_coverage_and_reports_it(tmp_path, monkeypatch):
+    _prepare_many(tmp_path, monkeypatch, 100, nodata=("000001",))
+    assert kw_daily.main(["--fetch", "--date", D, "--tr", "ka10060", "--commit"]) == 0
+    detail = _run_detail(tmp_path, "kiwoom_fetch")
+    assert "coverage=99/100" in detail and "errors=0" in detail   # 통과해도 항상 싣는다
+    assert _count(tmp_path, "ka10060_investor_flows") == 99
+
+
+def test_commit_fails_when_errors_exceed_budget(tmp_path, monkeypatch):
+    # 300콜 → ERROR_MAX = max(5, ceil(0.005×300)) = 5. 오류 6건은 커버리지(294/300 = 0.98)를
+    # 통과해도 실패다 — 오류가 쌓이는 날은 결손이 다음 TR·다음 슬롯으로 번진다.
+    _prepare_many(tmp_path, monkeypatch, 300, error=tuple(f"{i:06d}" for i in range(6)))
+    assert kw_daily.main(["--fetch", "--date", D, "--tr", "ka10060", "--commit"]) == 2
+    detail = _run_detail(tmp_path, "kiwoom_fetch")
+    assert "coverage=294/300" in detail and "errors=6" in detail
+    assert "ka10060_investor_flows" not in _tables(tmp_path)
+
+
+def test_morning_fetch_path_is_untouched_by_coverage_gate(tmp_path, monkeypatch):
+    # 아침 경로(--commit 없음)는 결손이 있어도 종전대로 rc 0 — 08:10 은 KRX 대조가 판정한다.
+    _prepare_many(tmp_path, monkeypatch, 100, nodata=("000001", "000002", "000003"))
+    assert kw_daily.main(["--fetch", "--date", D, "--tr", "ka10060"]) == 0
+    assert "coverage=97/100" in _run_detail(tmp_path, "kiwoom_fetch")
+
+
+# ── (i) 정정 카운터 잡음 (DEFECT-A02) ────────────────────────────────────────
+def test_merge_ignores_number_formatting_and_newly_added_columns(tmp_path, monkeypatch):
+    # 9/17~9/19 머지가 사흘 연속 changed=4 를 냈는데 그 중 3건은 "+0.00" vs "0" 표기차였고,
+    # 9/11 의 changed=685,981 은 ensure_table 이 그날 붙인 새 컬럼(기존 행 전부 NULL)이었다.
+    calls = []
+    ledger = [("005930", D_PREV, "-70000.00", "1,000", CLEAN_POSS[D_PREV]["005930"], "ka10008", "old"),
+              ("000660", D_PREV, "250000", "2000", CLEAN_POSS[D_PREV]["000660"], "ka10008", "old")]
+    _prepare(tmp_path, monkeypatch, calls, ledger_rows=ledger)   # chg_qty·wght 는 머지가 새로 붙인다
+    _krx_db(tmp_path)
+    assert kw_daily.main(["--fetch", "--date", D]) == 0
+    assert kw_daily.main(["--merge", "--date", D]) == 0
+    assert "('ka10008', 6, 4, 0)" in _run_detail(tmp_path, "kiwoom_merge")
+
+
+def test_merge_reports_real_corrections_with_values(tmp_path, monkeypatch, capsys):
+    # 진짜 정정(000660 poss_stkcnt +11,745주 류)은 세고, 무엇이 바뀌었는지 로그에 남긴다.
+    calls = []
+    ledger = [(t, D_PREV, CLOSE[t], VOL[t], "999", "ka10008", "old") for t in TICKERS]
+    _prepare(tmp_path, monkeypatch, calls, ledger_rows=ledger)
+    _krx_db(tmp_path)
+    assert kw_daily.main(["--fetch", "--date", D]) == 0
+    assert kw_daily.main(["--merge", "--date", D]) == 0
+    assert "('ka10008', 6, 4, 2)" in _run_detail(tmp_path, "kiwoom_merge")
+    out = capsys.readouterr().out
+    assert "poss_stkcnt" in out and "'999' → '20'" in out
+
+
+def _ledger_history(tmp_path, table, sessions, tickers):
+    """원장에 과거 세션별 행을 심는다 — 종목축이 유니버스가 아닌 TR 의 추세 기준선."""
+    con = sqlite3.connect(tmp_path / "data" / "raw" / "kiwoom.db")
+    con.execute(f'CREATE TABLE IF NOT EXISTS "{table}" ("ticker" TEXT NOT NULL, "dt" TEXT, '
+                '"close_pric" TEXT, "shrts_qty" TEXT, "ovr_shrts_qty" TEXT, "src_api" TEXT, '
+                '"collected_at" TEXT, PRIMARY KEY ("ticker", "dt"))')
+    con.executemany(f'INSERT INTO "{table}" VALUES (?,?,?,?,?,?,?)',
+                    [(t, d, "1", "1", "1", "ka10014", "old") for d in sessions for t in tickers])
+    con.commit()
+    con.close()
+
+
+def test_commit_judges_short_selling_against_its_own_history(tmp_path, monkeypatch):
+    # ka10014 의 종목축은 요청 유니버스가 아니다 — 09-16~09-18 서버 실측 2,129~2,273 / 2,651(80~86%).
+    # 유니버스 비율 0.98 을 그대로 물리면 저녁 체인이 매일 실패한다. 자기 최근 이력과 견준다.
+    tickers = _prepare_many(tmp_path, monkeypatch, 100, nodata=tuple(f"{i:06d}" for i in range(30)))
+    assert len(tickers) == 100
+    _ledger_history(tmp_path, "ka10014_short_selling",
+                    [f"202609{d:02d}" for d in range(1, 6)], [f"{i:06d}" for i in range(80)])
+    # 오늘 70종목(= 최근 평균 80 의 0.875) → 유니버스로 보면 0.70 이지만 추세로는 통과
+    assert kw_daily.main(["--fetch", "--date", D, "--tr", "ka10014", "--commit"]) == 0
+    detail = _run_detail(tmp_path, "kiwoom_fetch")
+    assert "('ka10014', 70)" in detail
+
+
+def test_commit_fails_when_short_selling_coverage_collapses(tmp_path, monkeypatch):
+    _prepare_many(tmp_path, monkeypatch, 100, nodata=tuple(f"{i:06d}" for i in range(60)))
+    _ledger_history(tmp_path, "ka10014_short_selling",
+                    [f"202609{d:02d}" for d in range(1, 6)], [f"{i:06d}" for i in range(80)])
+    # 오늘 40종목 = 평균 80 의 0.50 → 실패
+    assert kw_daily.main(["--fetch", "--date", D, "--tr", "ka10014", "--commit"]) == 2
+    assert "ka10014_short_selling" not in _tables(tmp_path) or _count(tmp_path, "ka10014_short_selling",
+                                                                     "dt=?", (D,)) == 0
+
+
+def test_commit_records_but_does_not_fail_without_history(tmp_path, monkeypatch):
+    _prepare_many(tmp_path, monkeypatch, 100, nodata=tuple(f"{i:06d}" for i in range(60)))
+    assert kw_daily.main(["--fetch", "--date", D, "--tr", "ka10014", "--commit"]) == 0
+    # 기준선이 없으면 판정하지 않는다 — 왜 판정을 못 했는지는 남긴다
+    assert "coverage_basis=ka10014:none" in _run_detail(tmp_path, "kiwoom_fetch")

@@ -553,7 +553,8 @@ def test_저녁_잠정_T_행이_있어도_price_adj_daily_가_지어지고_표�
     n_evening, _ = con.execute(
         "SELECT count(*), count(*) FILTER (WHERE corp_action_pending) FROM adj "
         "WHERE basis = 'evening'").fetchone()
-    assert n_evening == len(P4.EVENING_ROWS)
+    # 상장 축 밖 티커는 price_daily 가 이미 걸렀다(DEFECT-E07) — 여기 오는 것은 남은 행뿐
+    assert n_evening == P4.N_EVENING_OUT
     n_diff = con.execute(
         "SELECT count(*) FROM adj a JOIN px p USING (ticker, date) "
         "WHERE a.basis IS DISTINCT FROM p.basis "

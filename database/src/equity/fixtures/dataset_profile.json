@@ -75,8 +75,8 @@
   "expect": "whol_loan_rmnd_stcn_shr",
   "source": "decl:rules_s10.FIELDS — 주식수 축(금액축 *_amt 는 단위 미상이라 제외)"},
  {"id": "FX-6-023", "key": {"field_id": "credit.margin_balance"},
-  "column": "recommended_lag_sessions", "expect": "1",
-  "source": "decl:rules_s10.FIELDS — KIS 신용잔고는 T+1 공표(available_rule 이 넘긴 몫)"},
+  "column": "recommended_lag_sessions", "expect": "3",
+  "source": "decl:rules_s10.FIELDS — 실입수 T+3(09-19 감사 DEFECT-E01, observed_date − date 전 구간 +3일). 공표는 T+2 이나 체인이 받는 시각이 랙 정본이다"},
  {"id": "FX-6-023", "key": {"field_id": "credit.margin_balance"}, "column": "unit",
   "expect": "주", "source": "decl:rules_s10.FIELDS — stage 접미사 `_stcn_shr`(주수)"}
 ]

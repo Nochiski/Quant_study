@@ -81,7 +81,7 @@ from pathlib import Path
 
 from stage.gates import GateResult, GateStatus
 
-from .gates import EquityGateContext
+from .gates import EquityGateContext, eg21_recent_grid
 from .model import FILL_EVIDENCE, FILL_KINDS, EquityTable, FieldProfile, register
 from .rules_s01 import TICKER_LEN
 
@@ -521,11 +521,15 @@ eg3_credit_daily.gate_name = "EG3_credit_daily"     # type: ignore[attr-defined]
 
 
 # ── S19 필드 선언 (DESIGN §4-7 · FIELD_MAP §2 `credit.*`) ────────────────────
-# **랙 1 세션**. `stg_credit_daily` 가 stage `lag_known=false` 이고 KIS 신용잔고는 실제로 **T+1
-# 공표**다 — 원장 날짜를 당일 지식으로 읽으면 look-ahead 다. STAGE_HANDOFF §2 「lag_known=false 는
-# lag 0 을 적용하면 안 된다」 + FIELD_MAP §1 랙 단위 「나머지 전부 1 세션」. 이 테이블의
-# `available_rule` 이 「공표 랙(T+1)은 팩트 행이 아니라 dataset_profile.recommended_lag_sessions」
-# 라고 적어 둔 그 몫을 여기서 낸다.
+# **랙 3 세션**(09-19 감사 DEFECT-E01 로 1 → 3). `stg_credit_daily` 가 stage `lag_known=false`
+# 이고 KIS 신용잔고는 공표가 T+2 이지만 **우리 체인이 실제로 받는 시각은 T+3 아침 06:00 KST** 다
+# (09-19 실측 `observed_date − date` 전 구간 +3 캘린더일: 09-16→09-19 · 09-15→09-18 ·
+# 09-14→09-17 · 09-11→09-16). 선언 랙이 공표 기준이면 규약대로 `available_date ≤ T−1` 로 거르는
+# 소비자가 **2 세션 앞선 정보**를 쓴다 — 랙 정본은 실입수다. STAGE_HANDOFF §2
+# 「lag_known=false 는 lag 0 을 적용하면 안 된다」. `available_date` 자체는 그대로 둔다
+# (백필 구간의 observed_date 가 2026-08 이라 관측 기준으로 바꾸면 과거 PIT 가 전부 깨진다 —
+# 감사 플랜 §2 결정 1). 이 테이블의 `available_rule` 이 「공표 랙은 팩트 행이 아니라
+# dataset_profile.recommended_lag_sessions」 라고 적어 둔 그 몫을 여기서 낸다.
 # 선언하지 않는 것: `credit.net_buy`(원천에 축이 없다 — 위 docstring 판정) ·
 # `credit.collateral_value`·`credit.loan_value`·`credit.forced_liquidation`(원천 없음) ·
 # `*_amt` 6컬럼(단위 미상, `amt_basis='unknown'`) · 대주 잔고 `whol_stln_rmnd_stcn_shr`
@@ -536,10 +540,12 @@ FIELDS: tuple[FieldProfile, ...] = (
     FieldProfile(
         field_id="credit.margin_balance", columns=("whol_loan_rmnd_stcn_shr",),
         label="신용융자 잔고(주식수)", unit="주", value_type="count", frequency="session",
-        recommended_lag_sessions=1, recommended_lag_days=1, point_in_time=True,
+        recommended_lag_sessions=3, recommended_lag_days=4, point_in_time=True,
         requires_confirmation=False,
-        disclosure_basis="원장 날짜 = 잔고 기준일. KIS 신용잔고는 **T+1 공표**이고 공표 시각 "
-                         "컬럼이 없다(stage lag_known=false) → 1 세션 뒤부터 쓴다",
+        disclosure_basis="원장 날짜 = 잔고 기준일. 공표는 T+2 이나 **우리 체인은 T+3 아침 "
+                         "06:00 KST 에 받는다**(09-19 실측 전 구간 observed − date = +3일) — "
+                         "공표 시각 컬럼이 없어(stage lag_known=false) 실입수 기준 3 세션 "
+                         "뒤부터 쓴다",
         evidence="credit_daily.whol_loan_rmnd_stcn_shr ← stg_credit_daily(KIS 신용잔고) 무수정. "
                  "**주식수 축**이라 단위가 닫혀 있다 — 금액축 `*_amt` 6컬럼은 단위 미상이라"
                  "(`amt_basis='unknown'`, STAGE_HANDOFF §4) 이 field_id 로 나가지 않고, 대주 잔고 "
@@ -615,7 +621,9 @@ CREDIT_DAILY = register(EquityTable(
     available_basis=("default",),
     content_date_column="date",
     reject_reasons=REJECT_REASONS,
-    extra_gates=(eg1_credit_daily, eg3_credit_daily),
+    # EG21 — 최신 구간 행수 완결성(DEFECT-C06). 실입수가 T+3 이라 lag 3 으로 등재한다
+    # (baseline `credit_daily.recent_grid_lag_sessions`, DEFECT-E01 과 같은 근거).
+    extra_gates=(eg1_credit_daily, eg3_credit_daily, eg21_recent_grid),
     field_profiles=FIELDS,
 ))
 

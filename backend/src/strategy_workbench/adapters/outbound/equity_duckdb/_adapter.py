@@ -43,10 +43,12 @@ unavailable 이 됐다 — 표를 읽으면서 그 의존이 끊겼다(매크로
 
 `load_universe` 는 정책 미적용(`krx.all`) — 그날 `universe_daily` 에 있는 전 종목(ETF·우선주 포함,
 생존편향 방지). `load_factor_observations` 는 유니버스 인자가 없어 `RESEARCH_UNIVERSE_ID` 로 답한다.
-`load_backtest_dataset` 은 원주가 bar(`price_kind='reference'` 행·GAP-14 행 미방출, 경고로 건수
-기록) + `security_span` 구간 + `adj_factor` factor_ok 행(S07 과 같은 유형 매핑)이며 `adj_factor` 가
-없으면 예외다 — 분할 구간을 사건 없이 돌리는 백테스트는 조용히 틀린다. 창 안 마지막 bar 뒤의
-사건(정지 중 감자 뒤 상폐)은 엔진이 정산 못 하므로 빼고 경고로 남긴다.
+`load_backtest_dataset` 은 원주가 bar(`price_kind='reference'` 행·GAP-14 행·저녁 잠정 행 미방출,
+경고로 **각각** 건수 기록) + `security_span` 구간 + `adj_factor` factor_ok 행(S07 과 같은 유형
+매핑)이며 `adj_factor` 가 없으면 예외다 — 분할 구간을 사건 없이 돌리는 백테스트는 조용히 틀린다.
+저녁 잠정 행(`basis='evening'`, 규칙 e1.15.0)은 KRX 확정 전 키움 종가라 확정 행과 한 카운터에
+섞지 않는다: "그날 데이터가 깨졌다"(`n_invalid`)와 "잠정이라 뺐다"(`n_provisional`)는 다른 사실이다.
+창 안 마지막 bar 뒤의 사건(정지 중 감자 뒤 상폐)은 엔진이 정산 못 하므로 빼고 경고로 남긴다.
 
 duckdb 는 backend optional extra `equity` 다(`uv sync --extra equity`). 어댑터 생성 시 지연 import
 하고 없으면 `EquityDuckdbSetupError` 로 알린다.
@@ -147,6 +149,10 @@ SECURITY_ID_SEP = ":"
 _CHECKPOINT_ROWS = 256  # 취소 체크포인트 간격(행) — 포트의 `_CHECKPOINT_BATCH` 와 같은 크기
 RESEARCH_UNIVERSE_ID = "krx.common-stock"  # FactorObservationQuery 에 유니버스가 없다 — 계약 기본값
 REFERENCE_KIND = "reference"
+# `price_daily.basis`(규칙 e1.15.0) — 'krx' 확정 / 'evening' 저녁 잠정(키움 종가·거래량만, OHL
+# NULL). 옛 판 루트(e1.5.0 등)에는 컬럼 자체가 없고 그때는 전 행이 확정이다.
+BASIS_COLUMN = "basis"
+CONFIRMED_BASIS = "krx"
 # adj_factor.event_type → 커널 CorporateActionType 값 (S07 `EVENT_TYPE_MAP` 과 같은 판단: ok 행은
 # 전부 시총 불변이라 주식수 증가는 split, 감소는 reverse_split 로 보내 수량이 조정되게 한다)
 EVENT_TYPE_MAP: dict[str, str] = {
@@ -914,9 +920,19 @@ class EquityDuckdbAdapter:
         tickers = tuple(sorted({ticker for ticker, _ in parsed.values()}))
         con = self._connect()
         try:
+            price_columns = {
+                str(row[0])
+                for row in con.execute(
+                    f"DESCRIBE SELECT * FROM {self._source(PRICE_TABLE)}"
+                ).fetchall()
+            }
+            basis_expr = (
+                BASIS_COLUMN if BASIS_COLUMN in price_columns else f"'{CONFIRMED_BASIS}'"
+            )
             price_rows = con.execute(
                 f"""
-                SELECT ticker, date, open, high, low, close, volume_shr, price_kind
+                SELECT ticker, date, open, high, low, close, volume_shr, price_kind,
+                       {basis_expr} AS basis
                 FROM {self._source(PRICE_TABLE)}
                 WHERE ticker IN (SELECT unnest(?::VARCHAR[]))
                   AND date BETWEEN {_lit(query.start)} AND {_lit(query.end)}
@@ -948,8 +964,16 @@ class EquityDuckdbAdapter:
         bars: list[MarketBarRecord] = []
         n_reference = 0
         n_invalid = 0
-        for ticker, raw_date, open_, high, low, close, volume, kind in price_rows:
+        n_provisional = 0
+        for ticker, raw_date, open_, high, low, close, volume, kind, basis in price_rows:
             session = _as_date(raw_date, "price_daily.date")
+            if basis is not None and str(basis) != CONFIRMED_BASIS:
+                # 저녁 잠정 행 — 확정 전 키움 종가라 bar 로 내보내지 않는다(엔진 어댑터
+                # `backtest_engine/adapters/equity_duckdb.py` 와 같은 판단). 구간 루프 **밖**에서
+                # 세는 이유: `security_span` 은 KRX 축(stg_listing_daily)이라 저녁 판에서도 D 에
+                # 멈춰 T 행이 아래 구간 필터에 조용히 걸린다 — 안에서 세면 건수가 0 이 된다.
+                n_provisional += 1
+                continue
             for security_id, key in by_ticker[str(ticker)]:
                 span = spans[key]
                 if not span.first_date <= session <= span.last_date:
@@ -1054,6 +1078,17 @@ class EquityDuckdbAdapter:
                 severity=WarningSeverity.INFO,
             )
         ]
+        if n_provisional:
+            warnings.append(
+                DataWarning(
+                    code="equity.provisional_rows_dropped",
+                    message=(
+                        f"price_daily.basis <> '{CONFIRMED_BASIS}' rows (저녁 잠정판 T 세션 — "
+                        f"KRX 확정 전 키움 종가) are not emitted as bars — "
+                        f"dropped={n_provisional}"
+                    ),
+                )
+            )
         if n_invalid:
             warnings.append(
                 DataWarning(

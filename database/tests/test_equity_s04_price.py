@@ -491,12 +491,17 @@ def test_trading_calendar가_없으면_빌드가_예외로_멈춘다(tmp_path: P
 # ── 저녁 잠정 T 행 (규칙 e1.15.0 · 결정 V2-2 · 플랜 v2 §4 B.2) ────────────────
 
 T_EVENING = date(2026, 8, 21)       # KRX 상한(2026-08-20) 다음 날 — 캘린더에 아직 없다
-# 직전 KRX 종가(2026-08-20 실측): 005930 271,000 · 036220 6,740
+# 직전 KRX 종가(2026-08-20 실측): 005930 271,000 · 036220 6,740 · 069500(ETF) 108,190
+# `999999` 는 KRX 마스터 최신일에 없는 종목 — 키움이 하루 더 주는 폐지 종목 자리다(DEFECT-E07).
 EVENING_ROWS: list[dict[str, object]] = [
     {"ticker": "005930", "date": T_EVENING, "close_krw": 280000, "volume_shr": 20000000},
     {"ticker": "036220", "date": T_EVENING, "close_krw": 10000, "volume_shr": 5000},
+    {"ticker": "069500", "date": T_EVENING, "close_krw": 110000, "volume_shr": 30000000},
     {"ticker": "999999", "date": T_EVENING, "close_krw": 5000, "volume_shr": 0},
 ]
+# 그중 상장 축(마스터 최신일 ∪ ETF 원장 최신일)에 남아 산출로 나가는 행수
+N_EVENING_OUT = 3
+N_EVENING_NOT_LISTED = len(EVENING_ROWS) - N_EVENING_OUT
 
 
 def _evening_stage_root(tmp_path: Path, make_stage_tree,
@@ -529,16 +534,16 @@ def test_KRX에_없는_최신일이_키움에_있으면_잠정_T_행이_생긴�
     r = evening
     assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
     assert r.basis == "evening" and r.build_id.startswith("e_")
-    assert r.n_rows == N_ROWS + len(EVENING_ROWS) and r.n_reject == 0
+    assert r.n_rows == N_ROWS + N_EVENING_OUT and r.n_reject == 0
     eg1 = _gate(r, "EG1").metrics
-    assert eg1["lhs"] == N_ROWS + len(EVENING_ROWS) == eg1["rhs"]
+    assert eg1["lhs"] == N_ROWS + N_EVENING_OUT == eg1["rhs"]
     assert r.out_dir is not None
     assert _query(r.out_dir, "SELECT ticker, \"close\", volume_shr, price_kind, basis, "
                              "corp_action_pending FROM pd WHERE date = DATE '2026-08-21' "
                              "ORDER BY ticker") == [
         ("005930", Decimal(280000), Decimal(20000000), "trade", "evening", False),
         ("036220", Decimal(10000), Decimal(5000), "trade", "evening", True),   # +48% 급등
-        ("999999", Decimal(5000), Decimal(0), "reference", "evening", True)]   # 직전 종가 없음
+        ("069500", Decimal(110000), Decimal(30000000), "trade", "evening", False)]  # ETF 도 남는다
 
 
 def test_잠정_T_행은_OHL_거래대금_주식수가_전부_NULL이다(evening: build.BuildResult) -> None:
@@ -559,7 +564,7 @@ def test_잠정_T_행은_캘린더_밖이어도_격리되지_않는다(evening: 
     assert evening.out_dir is not None
     assert _query(evening.out_dir, "SELECT count(*) FROM pd p WHERE NOT EXISTS "
                                    "(SELECT 1 FROM tc c WHERE c.date = p.date)") == [
-        (len(EVENING_ROWS),)]
+        (N_EVENING_OUT,)]
     assert _gate(evening, "EG3_price_daily").metrics["n_off_calendar"] == 0
 
 
@@ -567,17 +572,45 @@ def test_EG20은_잠정_행을_원주가_변조로_세지_않는다(evening: bui
     eg20 = _gate(evening, "EG20")
     assert eg20.status is GateStatus.PASS
     assert eg20.metrics["n_rows_checked"] == N_ROWS
-    assert eg20.metrics["n_evening_rows_excluded"] == len(EVENING_ROWS)
+    assert eg20.metrics["n_evening_rows_excluded"] == N_EVENING_OUT
 
 
 def test_잠정_행_축이_EG3_price_daily_metric에_남는다(evening: build.BuildResult) -> None:
     m = _gate(evening, "EG3_price_daily").metrics
-    assert m["n_evening_rows"] == len(EVENING_ROWS)
+    assert m["n_evening_rows"] == N_EVENING_OUT
     assert m["evening_date"] == T_EVENING.isoformat()
-    assert m["n_evening_corp_action_pending"] == 2
+    assert m["n_evening_corp_action_pending"] == 1
     assert m["n_evening_value_mismatch"] == 0          # 종가·거래량은 키움 원장 그대로
     assert m["basis_vocab"] == ["krx", "evening"] and m["build_basis"] == "evening"
     assert m["n_basis_outside_vocab"] == 0 and m["n_evening_dates_over_one"] == 0
+
+
+def test_마스터에_없는_종목의_저녁_행은_생기지_않고_기록으로_남는다(
+        evening: build.BuildResult) -> None:
+    """DEFECT-E07 — 키움 ka10060 은 정리매매가 끝난 종목도 하루 더 `dt` 행을 준다.
+
+    그 행을 그대로 실으면 저녁 잠정판을 받아 쓰는 소비자가 이미 폐지된 종목을 마지막 날
+    유니버스에 넣는다(가격이 극단적이라 소형주·저가주 팩터에 노이즈로 들어간다). 상장 축은
+    KRX 일별 마스터 최신일 ∪ ETF 가격 원장 최신일이고, 이는 EG14 의 `universe_n` 과 같은 정의다.
+    빠뜨린 행수는 폐기하지 않고 **기록형 지표**로 남긴다 — 정상 운영에서도 0 이 아닐 수 있다.
+    """
+    assert evening.out_dir is not None
+    assert _query(evening.out_dir,
+                  "SELECT count(*) FROM pd WHERE ticker = '999999'") == [(0,)]
+    m = _gate(evening, "EG3_price_daily").metrics
+    assert m["n_evening_rows_not_listed"] == N_EVENING_NOT_LISTED
+
+
+def test_저녁_상장축은_rules_선언과_sql_리터럴이_같다() -> None:
+    """`kw` CTE · EG1 우변이 한 정의를 쓴다 — 한쪽만 고치면 행수 등식이 조용히 깨진다."""
+    def norm(x: str) -> str:
+        return " ".join(x.split())
+
+    assert norm(rules_s04.EVENING_LISTED_SQL) in norm(_body())
+    assert norm(rules_s04.EVENING_LISTED_SQL) in norm(rules_s04.PRICE_DAILY.eg1_rhs_sql)
+    assert norm(rules_s04.evening_listed_predicate()) in norm(_body())
+    assert norm(rules_s04.evening_listed_predicate()) in norm(
+        rules_s04.PRICE_DAILY.eg1_rhs_sql)
 
 
 def test_아침_확정판에_잠정_행이_남아_있으면_EG3_price_daily가_폐기한다(
@@ -592,7 +625,7 @@ def test_아침_확정판에_잠정_행이_남아_있으면_EG3_price_daily가_�
     assert r.status is build.BuildStatus.GATE_FAILED
     g = _gate(r, "EG3_price_daily")
     assert g.status is GateStatus.FAIL
-    assert g.metrics["n_evening_rows_in_morning_build"] == len(EVENING_ROWS)
+    assert g.metrics["n_evening_rows_in_morning_build"] == N_EVENING_OUT
     assert "n_evening_rows_in_morning_build" in g.detail
 
 
@@ -639,8 +672,8 @@ def test_EG14는_저녁_세션을_판정에서_뺀다(evening: build.BuildResult
     assert g.status is GateStatus.PASS
     assert [s["date"] for s in g.metrics["sessions"]] == ["2026-08-20", "2026-08-19",
                                                           "2026-08-18", "2026-08-14", "2026-08-13"]
-    assert g.metrics["n_evening_rows"] == len(EVENING_ROWS)
-    assert g.metrics["evening_coverage_ratio"] == pytest.approx(len(EVENING_ROWS) / N_UNIVERSE)
+    assert g.metrics["n_evening_rows"] == N_EVENING_OUT
+    assert g.metrics["evening_coverage_ratio"] == pytest.approx(N_EVENING_OUT / N_UNIVERSE)
 
 
 def _thin_tail(tmp_path: Path, name: str, drop: tuple[str, ...]) -> EquityTable:

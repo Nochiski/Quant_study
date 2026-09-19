@@ -252,3 +252,45 @@ def test_FX_N_재상장_구간_합친_사본은_EGC03_FAIL(built: Path, tmp_path
     per = _metrics(r, "EGC-02")["per_date"]
     assert per["2018-05-04"]["only_adapter"] == ["036220"]
     assert per["2024-03-12"]["only_adapter"] == ["036220"]
+
+
+# ── DEFECT-C05: 저녁 잠정 행·신설 표에서도 계약이 선다 (감사 09-19) ────────────
+
+
+def _ctx(con: duckdb.DuckDBPyConnection, src: str) -> Any:
+    return contract._Ctx(root=Path("/tmp/unused"), con=con, mod=None,  # type: ignore[arg-type]
+                         baseline=Baseline(), venue="KRX", tables={"price_daily": src})
+
+
+def test_계약의_price_daily_대조축은_확정_행뿐이다() -> None:
+    """DEFECT-C05 — 커널 어댑터는 `basis <> 'krx'` 행을 방출하지 않는다(잠정 행은 확정 전 값이라
+    백테스트 바에 못 넣는다). 계약의 대조축이 같은 필터를 안 걸면 저녁 판이 current 인
+    10시간 40분 동안 `price_kind='reference'` 집계가 잠정 행까지 세어 표본 선택이 흔들린다.
+    """
+    con = duckdb.connect()
+    try:
+        src = ("(SELECT * FROM (VALUES ('A', DATE '2026-08-20', 'trade', 'krx'), "
+               "('B', DATE '2026-08-21', 'reference', 'evening')) "
+               "AS t(ticker, date, price_kind, basis))")
+        got = contract.confirmed_source(_ctx(con, src), "price_daily")
+        assert con.execute(f"SELECT count(*) FROM {got}").fetchone()[0] == 1
+        assert con.execute(
+            f"SELECT count(*) FROM {got} WHERE price_kind = 'reference'").fetchone()[0] == 0
+        # `basis` 열이 없는 옛 판은 그대로 읽는다(계약이 옛 산출에서도 서야 한다)
+        old = ("(SELECT * FROM (VALUES ('A', DATE '2026-08-20', 'trade')) "
+               "AS t(ticker, date, price_kind))")
+        assert con.execute(
+            f"SELECT count(*) FROM {contract.confirmed_source(_ctx(con, old), 'price_daily')}"
+        ).fetchone()[0] == 1
+    finally:
+        con.close()
+
+
+def test_신설_표가_늘어도_계약_대상은_커밋된_표_전건이다(built: Path,
+                                                      result: contract.ContractResult) -> None:
+    """`coverage_daily`(S24, 09-10 신설)처럼 표가 늘어도 `table_builds` 가 기계적으로 줍는다 —
+    계약이 표 수를 코드에 박아 두지 않았다는 회귀 테스트(DEFECT-C05 의 '28표 고정' 오해 방지)."""
+    from equity.catalog import table_builds
+
+    assert result.builds == table_builds(built)
+    assert set(result.builds) >= {t.name for t in CHAIN}

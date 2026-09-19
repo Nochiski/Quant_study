@@ -20,6 +20,16 @@ from .model import (
     p_headroom,
 )
 
+# G9 교차 조인 술어 — **게이트와 baseline 측정이 같은 모집단을 보도록 한 곳에 둔다**(DEFECT-B02).
+# 09-02 측정 baseline 은 시각 조건이 없는 조인으로 쟀고 게이트는 결정 10·11 로 20:00 KST 컷오프를
+# 쓰게 돼, 두 값이 서로 다른 모집단이 됐다(여유 7행). 축 이름만 형식 인자로 받고 술어 자체는 하나다.
+#   stage 축   : kw="o", ticker="s.ticker", dt8="strftime(s.date, '%Y%m%d')", day="s.date"
+#   원장 축    : kw="f", ticker="p.ISU_CD", dt8="p.BAS_DD", day="strptime(p.BAS_DD, '%Y%m%d')"
+CROSS_JOIN_PREDICATE_SQL = (
+    "{kw}.ticker = {ticker} AND {kw}.dt = {dt8} "
+    "AND (TRY_CAST({kw}.collected_at AS TIMESTAMP) + INTERVAL 9 HOUR) "
+    ">= (CAST({day} AS TIMESTAMP) + INTERVAL 20 HOUR)")
+
 # ── stg_price_daily (KRX stk+ksq bydd, 17컬럼 UNION) ──────────────────────────
 _PRICE_P, _PRICE_S = p_headroom(7)          # 가격 max 7자리
 _FLUC_P, _FLUC_S = p_headroom(9, 2)         # FLUC_RT max 정수 7 + 소수 2 (survey p=9)
@@ -66,13 +76,14 @@ STG_PRICE_DAILY = TableRule(
         Invariant("ohl_pattern", "((open_krw IS NULL)::INT + (high_krw IS NULL)::INT "
                                  "+ (low_krw IS NULL)::INT) NOT IN (0, 3)"),
     ),
-    # G9 는 **다음 날 이후 관측**만 대조한다(2026-09-12, 결정 10): 18:05 저녁 슬롯이 원장에 바로 넣는 당일
-    # 키움 행은 거래량이 시간외 반영 전 잠정치라(09-11 실측 315/2,650 불일치, 다음 날 관측은 0) KRX 확정값과
-    # 다른 것이 정상이다. 당일 관측을 대조하면 확정 빌드가 매일 폐기된다.
+    # G9 는 **당일 20:00 KST 이후 관측**만 대조한다(결정 10 → 결정 11): KRX 애프터마켓이 20:00 에 닫히고
+    # 키움 일별 집계는 20:15 안에 정착한다(09-14 촘촘 프로브: 20:15 값 = 22:05 값). 그 전 관측은 거래량이
+    # 반영 중인 잠정치라 KRX 확정값과 다른 것이 정상이다. 저녁 수집은 21:05(kael-v3 20:05 앱키 공유 회피).
+    # 종가는 대조하되 판정에 넣지 않는다 — 키움 종가는 장후 체결가다(gates.g9_cross_source).
     cross_check=CrossCheck(
         db="kiwoom", table="ka10060_investor_flows",
-        join_sql="o.ticker = s.ticker AND o.dt = strftime(s.date, '%Y%m%d') "
-                 "AND CAST(TRY_CAST(o.collected_at AS TIMESTAMP) + INTERVAL 9 HOUR AS DATE) > s.date",
+        join_sql=CROSS_JOIN_PREDICATE_SQL.format(
+            kw="o", ticker="s.ticker", dt8="strftime(s.date, '%Y%m%d')", day="s.date"),
         close_match_sql="abs(TRY_CAST(o.cur_prc AS BIGINT)) = s.close_krw",
         volume_match_sql="TRY_CAST(o.acc_trde_prica AS BIGINT) = s.volume_shr",
     ),

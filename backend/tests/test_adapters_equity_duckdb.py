@@ -58,6 +58,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
     TimeSeriesOperator,
 )
 from tests.equity_fixture import (
+    WB_EVENING_SESSION,
     WB_HALT_DATE,
     WB_PROFILE_LAG_ZERO,
     WB_SESSIONS,
@@ -597,6 +598,38 @@ def test_backtest_dataset_drops_actions_after_the_last_bar_with_a_warning(
     dropped = dataset.warnings[1]
     assert dropped.severity is WarningSeverity.WARNING
     assert "dropped=1" in dropped.message and "000660:1@2024-01-10:reverse_split" in dropped.message
+
+
+def test_backtest_dataset_counts_provisional_evening_rows_apart_from_invalid_ones(
+    tmp_path: Path,
+) -> None:
+    """저녁 잠정판(e1.15.0 `price_daily.basis='evening'`)의 T 행은 bar 로 나가지 않되
+    **`n_invalid` 와 다른 자리에서** 센다(DEFECT-C07).
+
+    평일 22:40~09:20 KST 동안 equity 의 current 판은 저녁 잠정판이고 T 행은 키움 종가·거래량만
+    있다(OHL NULL, KRX 확정 전). 예전에는 `basis` 를 SELECT 조차 하지 않아 그 행이 "OHLC 가 깨진
+    행"(GAP-14)과 같은 카운터에 섞였다 — 소비자가 "그날 데이터가 깨졌다" 와 "잠정이라 뺐다" 를
+    구별할 수 없었다.
+    """
+    root = build_workbench_root(tmp_path / "equity", evening_session=WB_EVENING_SESSION)
+    dataset = EquityDuckdbAdapter(root).load_backtest_dataset(
+        BacktestDataQuery(date(2024, 1, 11), WB_EVENING_SESSION, ("005930:1",), None)
+    )
+    assert [b.session for b in dataset.bars] == [date(2024, 1, 11), date(2024, 1, 12)]
+    warnings = {w.code: w.message for w in dataset.warnings}
+    assert "equity.invalid_ohlc_rows_dropped" not in warnings
+    assert "dropped=1" in warnings["equity.provisional_rows_dropped"]
+
+
+def test_backtest_dataset_reads_roots_without_the_basis_column(
+    adapter: EquityDuckdbAdapter,
+) -> None:
+    """`basis` 는 e1.15.0 부터다 — 그 컬럼이 없는 옛 판 루트는 전부 확정(krx)으로 읽는다."""
+    dataset = adapter.load_backtest_dataset(
+        BacktestDataQuery(date(2024, 1, 11), date(2024, 1, 12), ("005930:1",), None)
+    )
+    assert [b.session for b in dataset.bars] == [date(2024, 1, 11), date(2024, 1, 12)]
+    assert [w.code for w in dataset.warnings] == ["equity.reference_rows_dropped"]
 
 
 def test_backtest_dataset_refuses_unknown_and_index_ids(adapter: EquityDuckdbAdapter) -> None:

@@ -20,7 +20,7 @@ from pathlib import Path
 
 import duckdb
 
-from . import gates, manifest, parsers
+from . import doc_prepass, gates, manifest, parsers
 from .model import (
     DATE_FORMATS,
     KIND_BOOL,
@@ -82,6 +82,16 @@ def _count(con: duckdb.DuckDBPyConnection, sql: str) -> int:
     if row is None:
         raise RuntimeError(f"count query returned no row: {sql[:200]}")
     return int(str(row[0]))
+
+
+def _max_date(con: duckdb.DuckDBPyConnection, view: str, column: str) -> str | None:
+    """`view.column` 의 최댓값을 ISO 날짜 문자열로. 열이 없거나 전 행 NULL 이면 None (C6 입력)."""
+    cols = {str(d[0]) for d in con.execute(f"SELECT * FROM {view} LIMIT 0").description or ()}
+    if column not in cols:
+        return None
+    row = con.execute(f"SELECT max({_q(column)}) FROM {view}").fetchone()
+    v = None if row is None else row[0]
+    return None if v is None else str(v)[:10]
 
 
 def _signed(expr: str, policy: str) -> str:
@@ -352,6 +362,27 @@ def _current_build_glob(stage_root: Path, table: str) -> str:
     return str(stage_root / table / f"v={m.current_build}" / "**" / "*.parquet")
 
 
+def _recorded_metrics(con: duckdb.DuckDBPyConnection, rule: TableRule, view: str
+                      ) -> dict[str, object]:
+    """판정하지 않는 기록형 지표 — G3 metrics 에 실린다. 원천 품질이 움직이면 여기서 보인다."""
+    a = rule.available
+    if a.kind != "greatest_ymd8" or a.column is None or a.fallback_column is None:
+        return {}
+    col, pfx = _q(a.column), _ymd8_prefix_sql(a.fallback_column)
+    # E08: 접두보다 과거인 행은 available 을 **뒤로 밀었고**(look-ahead 차단), 미래인 행은 그대로다.
+    row = con.execute(f"SELECT count(*) FILTER (WHERE {col} < {pfx}), "
+                      f"count(*) FILTER (WHERE {col} > {pfx}) FROM {view}").fetchone()
+    if row is None:
+        return {}
+    return {"n_rcept_dt_before_no_prefix": int(str(row[0])),
+            "n_rcept_dt_after_no_prefix": int(str(row[1]))}
+
+
+def _ymd8_prefix_sql(column: str) -> str:
+    """텍스트 컬럼 앞 8자리를 DATE 로. 읽히지 않으면 NULL (E08 — 접수번호 접두 = 접수일)."""
+    return f"TRY_CAST(try_strptime(substr({_q(column)}, 1, 8), '%Y%m%d') AS DATE)"
+
+
 def _available_sql(rule: TableRule, con: duckdb.DuckDBPyConnection,
                    stage_root: Path) -> tuple[str, str]:
     """(SELECT 절 조각, JOIN 절 조각). available_date·available_basis 두 컬럼을 낸다."""
@@ -363,6 +394,15 @@ def _available_sql(rule: TableRule, con: duckdb.DuckDBPyConnection,
         fb = _q(a.fallback_column)      # §6 v3 revision: collected_date NULL 행 → base_date/default
         basis = f"CASE WHEN {col} IS NULL THEN 'default' ELSE '{a.basis}' END"
         return f"COALESCE({col}, {fb}) AS available_date, {basis} AS available_basis", ""
+    if a.kind == "greatest_ymd8":
+        # 날짜 컬럼과 "앞 8자리가 YYYYMMDD 인 텍스트 컬럼" 중 **늦은 쪽**. 원천 날짜 오타가
+        # available 을 앞당기는(=look-ahead) 방향을 막는다 (E08 — rules_dart.STG_DISCLOSURE).
+        # 접두가 날짜로 안 읽히면 날짜 컬럼을 그대로 쓴다.
+        if a.column is None or a.fallback_column is None:
+            raise ValueError(f"greatest_ymd8 needs column and fallback_column: table={rule.name}")
+        col, pfx = _q(a.column), _ymd8_prefix_sql(a.fallback_column)
+        return ((f"greatest({col}, COALESCE({pfx}, {col})) AS available_date, "
+                 f"'{a.basis}' AS available_basis"), "")
     if a.kind == "lookup":
         if not (a.table and a.local_key and a.lookup_key and a.lookup_value):
             raise ValueError(f"incomplete lookup rule: table={rule.name} available={a}")
@@ -420,6 +460,15 @@ def _load_file_source(con: duckdb.DuckDBPyConnection, rule: TableRule, snap: Sna
     if summary.get("status") != "ok":
         raise RuntimeError(f"doc prepass gate_failed for snapshot={snap.snapshot_id}: "
                            f"{summary.get('detail')}")
+    # F03 — 캐시는 디렉터리 이름이 아니라 문서 집합으로 본다. 옛 캐시를
+    # 새 스냅샷 id 로 복사·하드링크해도 조용히 통과하던 구멍을 막는다.
+    want = doc_prepass.input_hash_for(snap.files[rule.sources[0].db].path)
+    if summary.get("input_hash") != want:
+        raise RuntimeError(
+            f"doc prepass cache is for a different document set — snapshot={snap.snapshot_id} "
+            f"table={rule.name} cache_input_hash={summary.get('input_hash')} "
+            f"snapshot_input_hash={want}: re-run `python -m stage.doc_prepass --snapshot-id "
+            f"{snap.snapshot_id} [--base-snapshot <prev>]` (cache {cache})")
     glob = str(cache / fs.table / "year=*.jsonl")
     schema = ", ".join(f"{_q(c)}: 'VARCHAR'" for c in fs.columns)
     con.execute(f"CREATE OR REPLACE TEMP TABLE src_all AS SELECT *, 'doc_zip' AS _src "
@@ -523,6 +572,11 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
             con.execute("CREATE OR REPLACE TEMP VIEW stage_pq AS SELECT * FROM stage_ok")
             content_hash = "0:empty"
         n_stage = _count(con, "SELECT count(*) FROM stage_pq")
+        # C6 신선도 입력 (DEFECT-B01): 이 판이 담은 최신 사실·최신 관측의 날짜. 열이 없거나 전 행
+        # NULL(available 비부여 표)이면 None 을 싣고 C6 가 사유와 함께 건너뛴다.
+        max_available_date = _max_date(con, "stage_pq", "available_date")
+        max_observed_date = _max_date(con, "stage_pq", "observed_date")
+        recorded = _recorded_metrics(con, rule, "stage_pq")
 
         fpath = fixtures_path or (stage_root / "fixtures" / f"{rule.name}.json")
         fixtures = json.loads(fpath.read_text(encoding="utf-8")) if fpath.exists() else None
@@ -534,7 +588,8 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
             n_src=n_src, n_dedup=n_dedup, n_dedup_same_day=n_dedup_same_day, n_reject=n_reject, n_stage=n_stage,
             thresholds=thresholds, fixtures=fixtures, baseline=baseline,
             previous_g1=_previous_g1(table_root), cross_alias=cross_alias, current_year=now_year,
-            lookup_miss=lookup_miss, parse_metrics=parse_metrics)
+            lookup_miss=lookup_miss, parse_metrics=parse_metrics,
+            recorded_metrics=recorded)
         results = gates.run_all(ctx)
         gate_dicts = [g.as_dict() for g in results]
         failed = [g for g in results if g.status is gates.GateStatus.FAIL]
@@ -587,6 +642,7 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
     manifest.commit(table_root, manifest.BuildRecord(
         build_id=bid, snapshot_id=snap.snapshot_id, rules_version=RULES_VERSION,
         built_at_utc=datetime.now(UTC).isoformat(timespec="seconds"), n_rows=n_stage,
-        content_hash=content_hash, partitions=partitions, gates=gate_dicts))
+        content_hash=content_hash, partitions=partitions, gates=gate_dicts,
+        max_available_date=max_available_date, max_observed_date=max_observed_date))
     return BuildResult(BuildStatus.OK, rule.name, bid, snap.snapshot_id, n_stage, n_src, n_dedup,
                        n_reject, content_hash, results, round(time.time() - t0, 1), final_dir, None)

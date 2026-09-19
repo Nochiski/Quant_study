@@ -6,17 +6,23 @@
 (09-09 실측: 스카이랩스 386380 상장 09-04·해치텍 0155E0 08-25·니어스랩 417030 08-24 전부 upSizeName 공백).
 첫 실행은 `data/jsonl/tickers.txt`(백필 유니버스 2,602)로 시드해 마스터에는 있으나 규모구분이 빈
 ≈40종목의 갭이 사라지지 않게 한다(리뷰 2차 #2). 마스터에서 사라진 종목(직전 스냅샷에는 있고 오늘 없는
-종목)은 `grace_days` 거래일 동안 계속 요청한 뒤 제외한다. 유예 일수는 **마스터 스냅샷 날짜가 바뀔 때만**
-센다 — kw_daily 와 kis_daily 가 같은 상태 파일을 하루 두 번 읽는다(검수 B F-4). 제외 시점에 그 종목의
+종목)은 `grace_days` 거래일 동안 계속 요청한 뒤 제외한다. 유예 일수는 **마지막 등장일 초과 오늘 스냅샷
+이하의 거래일 수**로 매번 다시 센다(DEFECT-A04) — 마스터 스냅샷은 주말·공휴일에도 찍히므로 스냅샷 날짜가
+바뀔 때마다 1씩 올리면 5거래일 약속이 주말에 3거래일, 추석 연휴에 1거래일로 줄었다. 파생값이라
+kw_daily 와 kis_daily 가 같은 상태 파일을 하루 두 번 읽어도 값이 움직이지 않는다(검수 B F-4). 제외 시점에 그 종목의
 `ka10008.max(dt)` 가 마지막 등장일보다 앞이면 `tail_missing` 으로 알린다. 폐지 종목은 키움이 `rc=0`+0행을
 주므로 더 기다려도 꼬리는 오지 않는다(검수 B F-1) — 조건부 무기한 연장은 4종목을 영구 고착시켰다.
 """
 from __future__ import annotations
 
+import datetime as dt
 import json
 import os
 import sqlite3
+import sys
 from dataclasses import dataclass
+
+from daily.calendar import Calendar
 
 
 @dataclass(frozen=True)
@@ -62,19 +68,30 @@ def _load_state(state_path: str | os.PathLike[str]) -> dict[str, object]:
         return json.load(f)
 
 
+def _as_date(value: str) -> dt.date | None:
+    """'YYYYMMDD' → date. 형식이 아니면 None(호출부가 사유를 알린다)."""
+    if len(value) != 8 or not value.isdigit():
+        return None
+    try:
+        return dt.date(int(value[:4]), int(value[4:6]), int(value[6:8]))
+    except ValueError:
+        return None
+
+
 def _max_dt(con_kw: sqlite3.Connection, ticker: str) -> str | None:
     row = con_kw.execute("SELECT MAX(dt) FROM ka10008_foreign_holdings WHERE ticker=?", (ticker,)).fetchone()
     return None if row is None or row[0] is None else str(row[0])
 
 
 def requested(con_kw: sqlite3.Connection, *, state_path: str | os.PathLike[str],
-              seed_path: str | os.PathLike[str] | None, grace_days: int = 5) -> RequestedUniverse:
+              seed_path: str | os.PathLike[str] | None, cal: Calendar,
+              grace_days: int = 5) -> RequestedUniverse:
     """오늘 요청 유니버스를 만들고 상태 파일을 갱신한다.
 
     상태 파일 = {"asof": snap_date, "n_requested": 요청 종목 수, "grace": {ticker: {"last_seen", "missing_days"}}}.
     grace 는 "마스터에서 사라졌지만 아직 요청 중인" 종목만 담는다. `n_requested` 는 ledger_health 가
-    종목축 테이블의 비율 게이트 분모로 읽는다. `missing_days` 는 마스터 스냅샷 날짜(`asof`)가 바뀐
-    호출에서만 1 오른다.
+    종목축 테이블의 비율 게이트 분모로 읽는다. `missing_days` 는 `last_seen` 초과 오늘 스냅샷 이하의
+    **거래일 수**다(DEFECT-A04) — 저장값이 아니라 파생값이라 같은 날 두 번 호출해도 움직이지 않는다.
     """
     snap = kiwoom_common(con_kw)
     today = set(snap.tickers)
@@ -106,10 +123,16 @@ def requested(con_kw: sqlite3.Connection, *, state_path: str | os.PathLike[str],
     dropped: list[str] = []
     tail_missing: list[str] = []
     for t, g in list(grace.items()):
-        prev_missing = g.get("missing_days", 0)
-        missing = (int(prev_missing) if isinstance(prev_missing, int | str) else 0) + (1 if new_day and not first_run else 0)
-        g["missing_days"] = missing
         last_seen = str(g.get("last_seen", ""))
+        since = _as_date(last_seen)
+        if since is None:              # 손상된 상태 파일 — 조용히 0 으로 되돌리지 않고 저장값을 유지한다
+            prev_missing = g.get("missing_days", 0)
+            missing = int(prev_missing) if isinstance(prev_missing, int | str) and str(prev_missing).isdigit() else 0
+            print(f"[universe] last_seen 을 날짜로 읽을 수 없어 유예 카운트를 유지한다 — "
+                  f"ticker={t} last_seen={last_seen!r} missing_days={missing}", file=sys.stderr)
+        else:
+            missing = cal.count_trading_days(since, _as_date(snap.snap_date) or since)
+        g["missing_days"] = missing
         if missing >= grace_days:
             mx = _max_dt(con_kw, t)
             if mx is None or mx < last_seen:         # 마지막 등장일 데이터를 못 받은 채 만료

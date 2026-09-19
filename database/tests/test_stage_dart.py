@@ -80,6 +80,10 @@ R_A = "20250311001085"      # 삼성전자 FY2024 사업보고서 — rcept_dt 2
 R_B = "20160108000502"      # rcept_dt 2016-01-08
 R_MISS = "20230515000777"   # 공시목록에 없는 접수번호 → 참조표 미스 (available unknown)
 R_1999 = "19990403000009"   # DART 최초기 공시 (docs/archive/dart_census_DS001.md 실측) — 파티션 축 밖
+# E08 실측 행: 엠젠솔루션 09-18 접수건의 rcept_dt 가 20260921(미래)로 들어왔다
+R_FUTURE = "20260918000503"
+# 원장 전수 rcept_dt < rcept_no 접두 12,697행·164사 중 박셀바이오 정기보고서 계열(최소 −654일)
+R_BACKDATED = "20250828000123"
 T0 = "2026-08-30T10:00:00"  # KST 2026-08-30
 T1 = "2026-09-01T17:46:42"  # KST 2026-09-02
 
@@ -107,6 +111,9 @@ DISCLOSURE: list[Row] = [
     _disc("20240701000123", "20240701", corp_cls="E", corp_name="비상장주식회사",
           flr_nm="비상장주식회사", stock_code="", rm=""),            # 종목코드 없음 · 플래그 없음
     _disc(R_1999, "19990403", report_nm="사업보고서 (1998.12)", rm="코"),
+    # E08 — 원천 rcept_dt 오타 2종. 접수번호 앞 8자리가 DART 규약상 접수일이다(SPEC §2-19).
+    _disc(R_FUTURE, "20260921", report_nm="주요사항보고서(자기전환사채만기전취득결정)", rm=""),
+    _disc(R_BACKDATED, "20231113", report_nm="사업보고서 (2023.12)", rm="유"),
 ]
 
 DIVIDEND: list[Row] = [
@@ -357,10 +364,14 @@ def test_rules_route_available_date_by_the_measured_receipt_date() -> None:
         avail = rules.RULES[name].available
         assert avail.kind == "lookup" and avail.table == "stg_rcept_dt_map"
         assert avail.local_key == "rcept_no" and avail.lookup_value == "rcept_dt"
-    for name in ("stg_holder_elestock", "stg_holder_majorstock", "stg_disclosure"):
+    for name in ("stg_holder_elestock", "stg_holder_majorstock"):
         avail = rules.RULES[name].available
         assert avail.kind == "column" and avail.column == "rcept_dt"
         assert avail.basis == "measured"
+    # stg_disclosure 만 접수번호 접두와 대조한다 (E08) — 나머지 둘은 원천에 오타 사례가 없다
+    avail = rules.RULES["stg_disclosure"].available
+    assert avail.kind == "greatest_ymd8" and avail.column == "rcept_dt"
+    assert avail.fallback_column == "rcept_no" and avail.basis == "measured"
 
 
 # ── stg_dividend ───────────────────────────────────────────────────────────────────────────────
@@ -517,12 +528,45 @@ def test_disclosure_folds_page_boundary_duplicates_and_splits_the_rm_flags(
     assert none == ("", False, False, False, "E")
 
 
+def test_disclosure_available_date_는_rcept_dt_와_접수번호_접두_중_늦은_쪽이다(
+    stage: tuple[snapshot.Snapshot, Path]
+) -> None:
+    """DEFECT-E08. 원천 `rcept_dt` 를 무검증으로 승격하면 오타가 그대로 PIT 축이 된다.
+
+    - `rcept_dt` 가 접두보다 **과거**(원장 전수 12,697행): 그 판본은 접수번호 날짜부터 DART 에
+      존재했으므로 rcept_dt 를 그대로 쓰면 최대 654일 **look-ahead** 다 → 접두로 뒤로 민다.
+    - `rcept_dt` 가 접두보다 **미래**(09-18 실측 1행): 보수적 방향이라 그대로 둔다. 이 행은
+      2026-09-21 까지 `available_date <= t` 필터에 안 잡힌다 — 사라지는 게 아니라 늦게 보인다.
+    """
+    r = _build("stg_disclosure", stage, gate_thresholds={"G7": 0.5})
+    con = _read(stage, r)
+    back = _one(con, "SELECT rcept_dt, available_date, available_basis FROM t "
+                     f"WHERE rcept_no = '{R_BACKDATED}'")
+    assert str(back[0]) == "2023-11-13" and str(back[1]) == "2025-08-28" and back[2] == "measured"
+    fut = _one(con, "SELECT rcept_dt, available_date FROM t "
+                    f"WHERE rcept_no = '{R_FUTURE}'")
+    assert str(fut[0]) == "2026-09-21" and str(fut[1]) == "2026-09-21"
+    normal = _one(con, f"SELECT available_date FROM t WHERE rcept_no = '{R_A}'")
+    assert str(normal[0]) == "2025-03-11"       # 접두와 같은 날 — 그대로다
+
+
+def test_disclosure_records_the_rcept_dt_vs_prefix_gap_as_g3_metrics(
+    stage: tuple[snapshot.Snapshot, Path]
+) -> None:
+    """기록형 지표 — 판정하지 않는다. 원천 오타가 늘면 여기서 보인다."""
+    r = _build("stg_disclosure", stage, gate_thresholds={"G7": 0.5})
+    g3 = _gate(r, "G3")
+    assert g3.status is gates.GateStatus.PASS
+    assert g3.metrics["n_rcept_dt_before_no_prefix"] == 1     # R_BACKDATED
+    assert g3.metrics["n_rcept_dt_after_no_prefix"] == 1      # R_FUTURE
+
+
 def test_disclosure_keeps_the_1999_receipt_year_on_the_partition_axis(
     stage: tuple[snapshot.Snapshot, Path]
 ) -> None:
     """관측일 축 하한은 1999(DART 최초 공시 연도) — 1999 접수번호는 격리되지 않는다 (D4 수정)."""
     r = _build("stg_disclosure", stage)
-    assert r.n_src == 5 and r.n_dedup == 1 and r.n_reject == 0 and r.n_rows == 4
+    assert r.n_src == 7 and r.n_dedup == 1 and r.n_reject == 0 and r.n_rows == 6
     assert _gate(r, "G7").metrics["n_out_of_range_rows"] == 0
     con = _read(stage, r)
     assert con.execute(f"SELECT count(*) FROM t WHERE rcept_no = '{R_1999}'").fetchone() == (1,)

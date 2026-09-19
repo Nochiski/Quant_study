@@ -169,4 +169,4 @@ def test_registry_assembles_per_source_modules() -> None:
     assert {t.name for t in rules_dart.TABLES} >= {"stg_rcept_dt_map", "stg_fin"}
     assert {t.name for t in rules_kis.TABLES} >= {"stg_flow_split_daily", "stg_credit_daily"}
     assert rules_wise.TABLES[0].name == "stg_consensus_monthly"
-    assert model.RULES_VERSION == "2.2.3"
+    assert model.RULES_VERSION == "2.3.0"

@@ -36,9 +36,30 @@ SUM="$OUT/summary.tsv"
 : > "$SUM"
 : > "$OUT/STATUS"
 
-ORDER="trading_calendar corp security security_span corp_ticker index_daily price_daily corp_event adj_factor price_adj_daily universe_daily universe_policy flow_daily short_daily credit_daily disclosure_version fin_std holder_daily ownership_snapshot audit_opinion shares_outstanding treasury_stock dividend_event consensus_daily opinion_daily opinion_broker_daily coverage_daily dataset_profile factor_readiness"
+ORDER=$(grep -vE '^\s*(#|$)' "$QL_HOME/scripts/equity_order.txt" | tr '\n' ' ')
+# 정본은 scripts/equity_order.txt 하나다 — 빌드와 재판정이 같은 29표를 돈다(DEFECT-C09).
+[ -n "${ORDER// /}" ] || { echo "!!! scripts/equity_order.txt 가 비었거나 없다" >&2; exit 2; }
+
+# 패스 시작 시점의 포인터를 남긴다 — 실패 롤백은 "직전 판" 이 아니라 이 판으로 돌아간다. 아침 실패의
+# 직전 판은 대개 전날 저녁 잠정판이라 확정 자리에서 잠정판이 보인다(리뷰 REC-13).
+BEFORE="$OUT/before.json"
+# shellcheck disable=SC2086  # reason: ORDER 는 표 이름 목록이라 단어 분리가 의도다
+.venv/bin/python - "$BEFORE" $ORDER <<'PY'
+import json
+import pathlib
+import sys
+
+out = pathlib.Path(sys.argv[1])
+d = {}
+for t in sys.argv[2:]:
+    p = pathlib.Path("data/equity") / t / "MANIFEST.json"
+    if p.exists():
+        d[t] = json.loads(p.read_text(encoding="utf-8")).get("current_build")
+out.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+PY
 
 T_ALL0=$(date +%s)
+ANY_FAIL=""
 for t in $ORDER; do
   T0=$(date +%s)
   echo "=== [$PASS] build $t  basis=${BASIS:-manual}  $(date -u +%FT%TZ)"
@@ -50,7 +71,29 @@ for t in $ORDER; do
   [ "$RC" -eq 0 ] && H=$(.venv/bin/python scripts/equity_manifest_row.py "$t")   # 실패한 표는 MANIFEST 가 없을 수 있다
   printf '%s\t%s\t%s\t%s\n' "$t" "$RC" "$((T1-T0))" "$H" >> "$SUM"
   echo "    rc=$RC  $((T1-T0))s  $H"
-  if [ "$RC" -ne 0 ]; then echo "!!! FAILED $t (rc=$RC) — 중단"; echo "FAILED $t" >> "$OUT/STATUS"; exit "$RC"; fi
+  if [ "$RC" -ne 0 ]; then
+    echo "FAILED $t" >> "$OUT/STATUS"
+    if [ -n "${QL_EQUITY_CONTINUE:-}" ]; then
+      # 진단 모드(2026-09-13): 첫 실패에서 멈추지 않고 끝까지 돌아 실패 표를 한 번에 모은다. 하류 표는
+      # 상류 실패 판(이전 판)을 입력으로 쓰므로 결과 판은 운영에 쓰지 않는다 — summary.tsv 만 읽는다.
+      echo "!!! FAILED $t (rc=$RC) — QL_EQUITY_CONTINUE 라 계속"; ANY_FAIL=1; continue
+    fi
+    # 층 전체 트랜잭션이 없어 여기까지 커밋된 표는 새 판, 뒤의 표는 어제 판으로 남는다 —
+    # 소비자는 MANIFEST 포인터를 정본으로 읽으므로 그 상태가 곧 혼합 판본이다(DEFECT-C03,
+    # 09-11 사례에서 3.5일 유지). 포인터만 직전 판으로 되돌린다(`v=` 는 keep=10 이라 남아 있고
+    # 지우지 않는다). 되돌리기 자체가 실패해도 원래 실패 코드로 나간다.
+    echo "!!! FAILED $t (rc=$RC) — 중단, 이번 판 커밋분을 되돌린다"
+    .venv/bin/python -m equity --root data/equity rollback --pass "$PASS" --before "$BEFORE" \
+      >> "$OUT/rollback.log" 2>&1 || echo "!!! rollback 실패 — $OUT/rollback.log 확인"
+    exit "$RC"
+  fi
 done
 T_ALL1=$(date +%s)
-echo "TOTAL $((T_ALL1-T_ALL0))s" | tee "$OUT/STATUS"
+echo "TOTAL $((T_ALL1-T_ALL0))s" | tee -a "$OUT/STATUS"
+# 마지막 명령이 `[ -n ] && {…}` 이면 실패 표가 없을 때 `[` 의 rc 1 이 스크립트 종료 코드가 된다 —
+# 09-17 00:33 진단 실측: 29표 전부 rc 0 인데 종료 rc 1(09-13 7a885f4 이후 성공 경로가 한 번도 안 돌았다).
+if [ -n "$ANY_FAIL" ]; then
+  echo "!!! 진단 모드 — 실패 표: $(grep FAILED "$OUT/STATUS" | tr '\n' ' ')"
+  exit 1
+fi
+exit 0

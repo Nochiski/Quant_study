@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# 18:15 KST 잠정 빌드 트리거 — 플랜 v2 §4 Task B.1. 저녁 원장이 끝나면 stage·equity 잠정판을 짓는다.
+# 21:20 KST 잠정 빌드 트리거 — 플랜 v2 §4 Task B.1. 저녁 원장이 끝나면 stage·equity 잠정판을 짓는다.
 #   사용: scripts/build_evening.sh [--date YYYYMMDD] [--dry-run]
-#   크론(서버 TZ=UTC. 등록은 오케스트레이터): 15 9 * * 1-5 cd /home/kael/quant-ledger && scripts/build_evening.sh
+#   크론(서버 TZ=UTC. 등록은 오케스트레이터): 20 12 * * 1-5 cd /home/kael/quant-ledger && scripts/build_evening.sh
+#   (09-13 까지 18:15 → 결정 11: 키움 저녁 수집이 21:05 로 옮겨져 인계 파일이 ≈21:20 에 나온다)
 #   순서: 오늘(KST) 거래일 판정 → 저녁 원장 완료 대기 → scripts/build_chain.sh evening
 #   대기 규칙: data/deliver/ledger_evening.json 이 date==오늘 && kiwoom_rc==0 && wise_rc==0 이 될
-#     때까지 60초 간격으로 본다. 한도는 18:40 KST(QL_EVENING_BUILD_DEADLINE 로 조정). DART 는
+#     때까지 60초 간격으로 본다. 한도는 21:45 KST(QL_EVENING_BUILD_DEADLINE 로 조정 — 키움이 21:05 부터 받는다). DART 는
 #     조건이 아니다 — 저녁 스코어링 경로 밖이라 실패해도 빌드는 간다. 다만 저 인계 파일 자체가
 #     세 갈래가 다 끝난 뒤에 쓰이므로, 파일이 보이는 시점엔 dart.db 쓰기도 끝나 있다(스냅샷 안전).
 #   휴장·대기 실패도 반드시 알린다 (결정 V2-7). 알림 없는 경로는 --dry-run 뿐이다.
@@ -75,7 +76,7 @@ if [ -n "$DRY" ]; then
   exec bash scripts/build_chain.sh evening --date "$D" --dry-run
 fi
 
-DEADLINE_HHMM="${QL_EVENING_BUILD_DEADLINE:-18:40}"
+DEADLINE_HHMM="${QL_EVENING_BUILD_DEADLINE:-21:45}"   # 키움 21:05 수집(≈15분) 뒤 인계 파일 ≈21:20
 DEADLINE_TS=$(TZ=Asia/Seoul date -d "$(TZ=Asia/Seoul date +%Y-%m-%d) $DEADLINE_HHMM" +%s)
 say "  저녁 원장 완료 대기 — 한도 $DEADLINE_HHMM KST, 60초 간격"
 WAITED=0

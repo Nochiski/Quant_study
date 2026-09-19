@@ -15,8 +15,7 @@ from .model import DATE_FORMATS, CrossCheck, TableRule
 DEFAULT_THRESHOLDS: dict[str, float] = {
     "G2": 0.0,        # cast_failed 행 비율 상한 (survey v2: 숫자 컬럼 비숫자 0 → 0)
     "G7": 0.001,      # out_of_range 격리 비율 상한 (survey v2 후 확정, 기본 0.1%)
-    "G9_close": 1.0,  # 종가 교차 일치율 하한 (SPEC 100.0000%)
-}
+}   # G9 종가 임계(옛 G9_close 1.0)는 결정 11(09-14 애프터마켓)로 없앴다 — 종가 일치율은 기록만
 YEAR_RANGE_OBSERVED = (1999, 1)   # 관측일 축 [1999(DART 최초 공시), 현재+1] — 키/파티션, reject
 YEAR_RANGE_CONTENT = (1900, 40)   # 내용일 축 [1900, 현재+40] — 비키 날짜, 위반 = 셀 격리
                                   # 1990 은 상장일 1975 를, 1956 은 현물출자일 1952~54 를 격리했다
@@ -60,6 +59,8 @@ class GateContext:
     lookup_miss: int | None = None          # available lookup 미스 행수 (참조표 없는 테이블은 None)
     parse_metrics: dict[str, object] | None = None   # blob 파서 계상 (blob 테이블 아니면 None)
     n_dedup_same_day: int = 0     # n_dedup 에 포함된 "같은 날 판본 접기" 건수(build._stage_sql rn_day)
+    # 판정하지 않는 기록형 지표 — G3 metrics 에 그대로 실린다 (build._recorded_metrics)
+    recorded_metrics: dict[str, object] | None = None
 
 
 def _one(con: duckdb.DuckDBPyConnection, sql: str) -> tuple[object, ...]:
@@ -124,7 +125,8 @@ def g2_cast_loss(ctx: GateContext) -> GateResult:
 
 
 def g3_invariants(ctx: GateContext) -> GateResult:
-    metrics: dict[str, object] = {}
+    # 기록형 지표를 먼저 싣는다 — 판정은 `*_violations` 키만 본다(0 초과여도 폐기하지 않는다).
+    metrics: dict[str, object] = dict(ctx.recorded_metrics or {})
     for inv in ctx.rule.invariants:
         n = _count(ctx.con, f"SELECT count(*) FROM {ctx.stage_view} "
                               f"WHERE {inv.violation_sql}")
@@ -134,7 +136,7 @@ def g3_invariants(ctx: GateContext) -> GateResult:
         metrics["key_uniqueness_violations"] = _count(
             ctx.con, f"SELECT count(*) FROM (SELECT {keys}, count(*) c FROM {ctx.stage_view} "
                      f"GROUP BY ALL HAVING c > 1)")
-    bad = {k: v for k, v in metrics.items() if int(str(v)) > 0}
+    bad = {k: v for k, v in metrics.items() if k.endswith("_violations") and int(str(v)) > 0}
     return GateResult("G3", GateStatus.FAIL if bad else GateStatus.PASS,
                       f"violations={bad}" if bad else "불변식 전부 성립", metrics)
 
@@ -262,13 +264,17 @@ def g9_cross_source(ctx: GateContext) -> GateResult:
     reasons: list[str] = []
     if joined_i == 0:
         reasons.append("joined=0")
-    if close_r < ctx.thresholds["G9_close"]:
-        reasons.append(f"close_match_ratio {close_r:.6f} < {ctx.thresholds['G9_close']}")
+    # 종가 일치율은 기록만 한다(결정 11): 09-14 KRX 애프터마켓 뒤 키움 cur_prc 는 장후 마지막 체결가라
+    # KRX 종가(15:30)와 다른 것이 정상이다(09-14 실측 종가 514/2,649 · 거래량 2,649/2,649). 판정은 거래량 회귀뿐.
     if ctx.baseline is not None:
-        for k in ("close_match_ratio", "volume_match_ratio"):
-            base = ctx.baseline.get(k)
-            if isinstance(base, int | float) and float(str(metrics[k])) < float(base) - 1e-9:
-                reasons.append(f"{k} {metrics[k]} < baseline {base}")
+        base = ctx.baseline.get("volume_match_ratio")
+        # 허용폭은 baseline 선언값이다(DEFECT-B02). 기준값이 서로 다른 술어로 측정돼 여유가 7행까지
+        # 좁아졌던 탓에, 하루치 불일치 증가만으로 stg_price_daily 가 폐기되고 equity 전체가 멈췄다.
+        tol = ctx.baseline.get("volume_match_ratio_tol", 0.0)
+        tol_f = float(tol) if isinstance(tol, int | float) else 0.0
+        metrics["volume_match_ratio_tol"] = tol_f
+        if isinstance(base, int | float) and vol_r < float(base) - tol_f - 1e-9:
+            reasons.append(f"volume_match_ratio {vol_r} < baseline {base} - tol {tol_f}")
     ok = not reasons
     return GateResult("G9", GateStatus.PASS if ok else GateStatus.FAIL,
                       "교차 소스 회귀 유지" if ok else "; ".join(reasons), metrics)

@@ -172,6 +172,10 @@ def check_krx_corp_actions(con: sqlite3.Connection, d: str, d_prev: str) -> Chec
     크로스섹션이 그 하루에 통째로 뒤집힌다. 행수·status 게이트로는 잡히지 않으므로 "기업행위가
     있었을 법한 종목" 을 매일 목록으로 남겨 `adj_factor` 산출과 대조할 수 있게 한다. warn 등급인
     것은 이것이 실패가 아니라 **확인 대상**이기 때문이다.
+
+    판정은 **기록형**이다(DEFECT-A09). 한국 시장에서 전환·증자·소각·액면병합은 매일 몇 건씩 나므로
+    "후보 0건" 을 기대치로 두면 게이트가 매일 FAIL 하고(9/16 10건·9/17 6건·9/18 14건) 사람은 곧
+    무시한다. 후보 목록과 실제 조정의 대조는 equity 의 `adj_factor`·`corp_event` 가 매일 한다.
     """
     items: list[dict[str, object]] = []
     skipped: list[str] = []      # 판정 불가한 시장 — "0건" 으로 위장하지 않는다(검수 R3-02)
@@ -205,12 +209,12 @@ def check_krx_corp_actions(con: sqlite3.Connection, d: str, d_prev: str) -> Chec
                      f"판정 가능한 시장 없음 — {', '.join(skipped)}")
     items.sort(key=lambda x: (str(x["market"]), str(x["code"])))
     skip_txt = f" | 판정 불가 시장: {', '.join(skipped)}" if skipped else ""
-    return Check("krx.corp_action_candidates", Level.WARN,
-                 Status.PASS if not items else Status.FAIL,
+    return Check("krx.corp_action_candidates", Level.WARN, Status.PASS,
                  {"n": len(items), "items": items[:CORP_ACTION_SAMPLE], "judged": judged,
                   "skipped": skipped},
-                 f"{d_prev}→{d} 액면가 변경 또는 주식수 비 ≠ 1(±{SHARES_RATIO_TOL:.1%} 초과) 0건 "
-                 f"[{', '.join(judged)}]{skip_txt} — 있으면 adj_factor 산출과 대조한다 (검수 H1)")
+                 f"{d_prev}→{d} 액면가 변경 또는 주식수 비 ≠ 1(±{SHARES_RATIO_TOL:.1%} 초과) 기록 "
+                 f"[{', '.join(judged)}]{skip_txt} — 대조는 equity adj_factor·corp_event 가 매일 한다 (검수 H1)",
+                 f"후보 {len(items)}건 기록 — adj_factor·corp_event 가 매일 대조한다")
 
 
 # ── KRX (A §6-1) ───────────────────────────────────────────────────────────

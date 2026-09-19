@@ -114,7 +114,10 @@ def test_krx_corp_action_candidates_flags_parval_and_shares_changes(tmp_path):
     ))
     rep = lh.run(D, _paths(tmp_path, krx=krx))
     c = _by(rep)["krx.corp_action_candidates"]
-    assert c.level is lh.Level.WARN and c.status is lh.Status.FAIL
+    # 기록형이다 — 한국 시장에서 전환·증자·소각은 매일 몇 건씩 나므로 "0건 기대" 는 매일 FAIL 이고
+    # 사람은 곧 무시한다(DEFECT-A09). 대조는 equity 의 adj_factor·corp_event 가 매일 한다.
+    assert c.level is lh.Level.WARN and c.status is lh.Status.PASS
+    assert "후보 2건 기록" in c.detail
     assert c.value["n"] == 2
     got = {i["code"]: i for i in c.value["items"]}
     assert set(got) == {"000003", "000007"}
@@ -287,7 +290,7 @@ def test_LIST_SHRS가_NULL이_되면_후보로_뜬다(tmp_path) -> None:
     con.commit(); con.close()
     rep = lh.run(D, _paths(tmp_path, krx=krx))
     c = _by(rep)["krx.corp_action_candidates"]
-    assert c.status is lh.Status.FAIL
+    assert c.status is lh.Status.PASS                       # 기록형(A09) — 목록에 남기는 것이 판정이다
     assert [i["code"] for i in c.value["items"]] == ["000003"]
     assert c.value["items"][0]["shares_ratio"] is None
 

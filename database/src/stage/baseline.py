@@ -7,6 +7,12 @@
 갱신은 사람이 승인한다.
 
   PYTHONPATH=src python -m stage.baseline --snapshot-id <id> [--out data/stage/baseline.json]
+
+전량 재측정은 그날 원장 상태로 24지표를 통째로 느슨하게 만든다. 한 지표만 고쳐야 할 때는
+`--only` 를 쓴다 — 지정한 것만 재고 나머지 값·`measured_at` 은 보존한다 (DEFECT-B02).
+
+  PYTHONPATH=src python -m stage.baseline --snapshot-id <id> \
+      --only stg_price_daily.volume_match_ratio --note "결정 11 술어로 재측정"
 """
 from __future__ import annotations
 
@@ -14,12 +20,14 @@ import argparse
 import json
 import os
 import sys
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 import duckdb
 
+from .rules_krx import CROSS_JOIN_PREDICATE_SQL
 from .snapshot import Snapshot, load_snapshot
 
 
@@ -35,8 +43,12 @@ class Metric:
 _PRICE_COLS = "ISU_CD, BAS_DD, TDD_CLSPRC, TDD_OPNPRC, ACC_TRDVOL"
 _PRICE_UNION = (f"(SELECT {_PRICE_COLS} FROM krx.krx_stk_bydd_trd "
                 f"UNION ALL SELECT {_PRICE_COLS} FROM krx.krx_ksq_bydd_trd)")
-_PRICE_JOIN = (f"FROM {_PRICE_UNION} p JOIN kiwoom.ka10060_investor_flows f "
-               "ON f.ticker = p.ISU_CD AND f.dt = p.BAS_DD")
+# G9 교차 조인 술어는 **게이트와 같은 상수**를 쓴다 (DEFECT-B02 — rules_krx.CROSS_JOIN_PREDICATE_SQL).
+# 여기가 시각 조건 없는 옛 술어로 남아 있던 탓에 baseline 과 게이트가 다른 모집단을 셌다.
+_PRICE_JOIN = (f"FROM {_PRICE_UNION} p JOIN kiwoom.ka10060_investor_flows f ON "
+               + CROSS_JOIN_PREDICATE_SQL.format(
+                   kw="f", ticker="p.ISU_CD", dt8="p.BAS_DD",
+                   day="strptime(p.BAS_DD, '%Y%m%d')"))
 _OHL_ZERO = "TDD_OPNPRC = '0' AND TRY_CAST(ACC_TRDVOL AS BIGINT) > 0"
 _SHARES_NUM = ("etc", "tesstk_co", "isu_stock_totqy", "redc", "now_to_isu_stock_totqy",
                "profit_incnr", "now_to_dcrs_stock_totqy", "istc_totqy", "distb_stock_co",
@@ -116,6 +128,16 @@ METRICS: tuple[Metric, ...] = (
        "SELECT count(*) FROM wise.ws_raw WHERE ep = 'c1010001'", growing=True),
 )
 
+# 게이트가 읽는 **고정 상수** — 측정값이 아니라 선언값이다. (값, 근거).
+# 측정으로 덮이면 안 되므로 `measure()`·`--only` 둘 다 이 선언을 그대로 싣는다.
+CONSTANTS: dict[str, dict[str, tuple[float, str]]] = {
+    "stg_price_daily": {"volume_match_ratio_tol": (
+        5e-5,
+        ("G9 허용폭 (결정 11 후속, 09-19 감사 DEFECT-B02). 기준값 7,595,291행 기준 ≈380행 — "
+         "여유 7행이던 상태에서 하루치 KRX↔키움 거래량 불일치 증가가 stg_price_daily 를 "
+         "폐기시키는 것을 막는다. 저하가 이 폭을 넘으면 그때는 진짜 회귀다"))},
+}
+
 # 테이블별 게이트 임계 — (값, 근거). 없는 테이블은 gates.DEFAULT_THRESHOLDS. CLI 가 덮는다.
 THRESHOLDS: dict[str, dict[str, tuple[float, str]]] = {
     "stg_listing_daily": {"G2": (0.01, "PARVAL 비수치 73,615/9,201,516 = 0.80% (survey v2)")},
@@ -159,6 +181,76 @@ def measure(snap: Snapshot, metrics: tuple[Metric, ...] = METRICS,
                             "value": v, "measured_at": at, "growing": False, "reason": why})
     data.update(tables)
     data["_measured"] = entries
+    _apply_constants(data, at)
+    return data
+
+
+def _entries(data: dict[str, object]) -> list[dict[str, object]]:
+    got = data.get("_measured")
+    entries: list[dict[str, object]] = got if isinstance(got, list) else []
+    data["_measured"] = entries
+    return entries
+
+
+def _block(data: dict[str, object], table: str) -> dict[str, object]:
+    got = data.get(table)
+    block: dict[str, object] = got if isinstance(got, dict) else {}
+    data[table] = block
+    return block
+
+
+def _put(entries: list[dict[str, object]], entry: dict[str, object]) -> None:
+    """같은 (table, metric) 항목이 있으면 제자리에서 갈고, 없으면 끝에 붙인다."""
+    for i, e in enumerate(entries):
+        if e.get("table") == entry["table"] and e.get("metric") == entry["metric"]:
+            entries[i] = entry
+            return
+    entries.append(entry)
+
+
+def _apply_constants(data: dict[str, object], at: str) -> None:
+    """선언 상수(CONSTANTS)를 결과에 싣는다 — 전량 측정이든 `--only` 든 항상 같은 값이 남는다."""
+    entries = _entries(data)
+    for table, consts in CONSTANTS.items():
+        block = _block(data, table)
+        for metric, (v, why) in consts.items():
+            block[metric] = v
+            _put(entries, {"table": table, "metric": metric, "db": "-", "sql": "-", "value": v,
+                           "measured_at": at, "growing": False, "reason": why})
+
+
+def measure_only(snap: Snapshot, current: dict[str, object], keys: Collection[str], *,
+                 metrics: tuple[Metric, ...] = METRICS, measured_at: str | None = None,
+                 note: str = "", memory_limit: str = "3GB") -> dict[str, object]:
+    """`{table}.{metric}` 몇 개만 다시 재고 **나머지 값과 그 `measured_at` 은 그대로 둔다**.
+
+    G9 술어가 바뀌었을 때처럼 한 지표만 재측정해야 하는데, 전량 재측정을 돌리면 그날 원장 상태로
+    24지표가 통째로 느슨해진다(09-09 리뷰 D5-(b) 가 금지를 권고한 경로). 갱신 사실은 해당
+    `_measured` 항목의 `measured_at`·`snapshot_id`·`note` 에 남는다.
+    """
+    wanted = {k: m for m in metrics for k in (f"{m.table}.{m.metric}",) if k in set(keys)}
+    missing = sorted(set(keys) - set(wanted))
+    if missing:
+        raise ValueError(f"unknown baseline metric(s): {missing} "
+                         f"known={sorted(f'{m.table}.{m.metric}' for m in metrics)[:8]}…")
+    at = measured_at or datetime.now(UTC).strftime("%Y-%m-%d")
+    data = json.loads(json.dumps(current))      # 깊은 복사 — 입력을 제자리 수정하지 않는다
+    entries = _entries(data)
+    con = duckdb.connect()
+    con.execute(f"SET memory_limit = '{memory_limit}'")
+    for db, f in snap.files.items():
+        con.execute(f"ATTACH '{f.path}' AS \"{db}\" (TYPE sqlite, READ_ONLY)")
+    for key, m in sorted(wanted.items()):
+        row = con.execute(m.sql).fetchone()
+        if row is None:
+            raise RuntimeError(f"baseline metric returned no row: {key}")
+        v = row[0]
+        value: object = int(v) if isinstance(v, int) else (float(v) if v is not None else None)
+        _block(data, m.table)[m.metric] = value
+        _put(entries, {"table": m.table, "metric": m.metric, "db": m.db, "sql": m.sql,
+                       "value": value, "measured_at": at, "growing": m.growing,
+                       "snapshot_id": snap.snapshot_id, "note": note or f"--only {key} 재측정"})
+    _apply_constants(data, at)
     return data
 
 
@@ -177,14 +269,28 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--snapshot-root", type=Path, default=base / "data" / "snapshots")
     ap.add_argument("--out", type=Path, default=base / "data" / "stage" / "baseline.json")
     ap.add_argument("--memory-limit", default="3GB")
+    ap.add_argument("--only", action="append", default=[], metavar="TABLE.METRIC",
+                    help="이 지표만 다시 잰다(반복 가능). 나머지 값과 measured_at 은 보존된다")
+    ap.add_argument("--note", default="", help="--only 재측정 사유 — _measured 항목에 남는다")
     a = ap.parse_args(argv)
     snap = load_snapshot(a.snapshot_root / a.snapshot_id)
-    data = measure(snap, memory_limit=a.memory_limit)
+    if a.only:
+        if not a.out.exists():
+            print(f"--only 는 기존 baseline 을 갱신한다 — 파일 없음: {a.out}", file=sys.stderr)
+            return 2
+        current = json.loads(a.out.read_text(encoding="utf-8"))
+        data = measure_only(snap, current, a.only, note=a.note, memory_limit=a.memory_limit)
+        touched = set(a.only) | {f"{t}.{m}" for t, c in CONSTANTS.items() for m in c}
+    else:
+        data = measure(snap, memory_limit=a.memory_limit)
+        touched = None
     write(a.out, data)
     entries = data["_measured"]
     if not isinstance(entries, list):
         raise RuntimeError(f"baseline _measured is not a list: {type(entries).__name__}")
     for e in entries:
+        if touched is not None and f"{e['table']}.{e['metric']}" not in touched:
+            continue
         print(f"{e['table']:26s} {e['metric']:30s} {e['value']}" + ("  ★" if e["growing"] else ""))
     print(f"wrote {a.out}")
     return 0

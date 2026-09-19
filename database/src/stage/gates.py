@@ -59,6 +59,8 @@ class GateContext:
     lookup_miss: int | None = None          # available lookup 미스 행수 (참조표 없는 테이블은 None)
     parse_metrics: dict[str, object] | None = None   # blob 파서 계상 (blob 테이블 아니면 None)
     n_dedup_same_day: int = 0     # n_dedup 에 포함된 "같은 날 판본 접기" 건수(build._stage_sql rn_day)
+    # 판정하지 않는 기록형 지표 — G3 metrics 에 그대로 실린다 (build._recorded_metrics)
+    recorded_metrics: dict[str, object] | None = None
 
 
 def _one(con: duckdb.DuckDBPyConnection, sql: str) -> tuple[object, ...]:
@@ -123,7 +125,8 @@ def g2_cast_loss(ctx: GateContext) -> GateResult:
 
 
 def g3_invariants(ctx: GateContext) -> GateResult:
-    metrics: dict[str, object] = {}
+    # 기록형 지표를 먼저 싣는다 — 판정은 `*_violations` 키만 본다(0 초과여도 폐기하지 않는다).
+    metrics: dict[str, object] = dict(ctx.recorded_metrics or {})
     for inv in ctx.rule.invariants:
         n = _count(ctx.con, f"SELECT count(*) FROM {ctx.stage_view} "
                               f"WHERE {inv.violation_sql}")
@@ -133,7 +136,7 @@ def g3_invariants(ctx: GateContext) -> GateResult:
         metrics["key_uniqueness_violations"] = _count(
             ctx.con, f"SELECT count(*) FROM (SELECT {keys}, count(*) c FROM {ctx.stage_view} "
                      f"GROUP BY ALL HAVING c > 1)")
-    bad = {k: v for k, v in metrics.items() if int(str(v)) > 0}
+    bad = {k: v for k, v in metrics.items() if k.endswith("_violations") and int(str(v)) > 0}
     return GateResult("G3", GateStatus.FAIL if bad else GateStatus.PASS,
                       f"violations={bad}" if bad else "불변식 전부 성립", metrics)
 
@@ -265,8 +268,13 @@ def g9_cross_source(ctx: GateContext) -> GateResult:
     # KRX 종가(15:30)와 다른 것이 정상이다(09-14 실측 종가 514/2,649 · 거래량 2,649/2,649). 판정은 거래량 회귀뿐.
     if ctx.baseline is not None:
         base = ctx.baseline.get("volume_match_ratio")
-        if isinstance(base, int | float) and vol_r < float(base) - 1e-9:
-            reasons.append(f"volume_match_ratio {vol_r} < baseline {base}")
+        # 허용폭은 baseline 선언값이다(DEFECT-B02). 기준값이 서로 다른 술어로 측정돼 여유가 7행까지
+        # 좁아졌던 탓에, 하루치 불일치 증가만으로 stg_price_daily 가 폐기되고 equity 전체가 멈췄다.
+        tol = ctx.baseline.get("volume_match_ratio_tol", 0.0)
+        tol_f = float(tol) if isinstance(tol, int | float) else 0.0
+        metrics["volume_match_ratio_tol"] = tol_f
+        if isinstance(base, int | float) and vol_r < float(base) - tol_f - 1e-9:
+            reasons.append(f"volume_match_ratio {vol_r} < baseline {base} - tol {tol_f}")
     ok = not reasons
     return GateResult("G9", GateStatus.PASS if ok else GateStatus.FAIL,
                       "교차 소스 회귀 유지" if ok else "; ".join(reasons), metrics)

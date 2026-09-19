@@ -477,8 +477,20 @@ STG_DISCLOSURE = TableRule(
     fanout=1,
     payload_exclude=_LEDGER_META,
     lag_known=False,
-    available=AvailableRule("column", column="rcept_dt", basis="measured"),
-    key_unique=False,        # append_only: 재수집 판본은 G6 축 (§7). S1b 실측 충돌 0
+    # E08(09-19 감사): 원천 `rcept_dt` 를 무검증으로 승격하면 원천 오타가 그대로 PIT 축이 된다.
+    # ① `rcept_dt` 가 접수번호 접두(=DART 규약상 접수일, SPEC §2-19)보다 **과거**인 행이 원장 전수
+    #    12,697행·164사 실재한다(박셀바이오 정기보고서는 최소 −654일). 그 판본이 DART 에 존재한
+    #    것은 접수번호 날짜부터이므로 rcept_dt 를 그대로 쓰면 **look-ahead** 다.
+    # ② 반대로 **미래**로 들어온 오타도 실재한다(rcept_no 20260918000503 / rcept_dt 20260921).
+    # 둘 중 **늦은 쪽**을 쓴다 — 양방향 모두 보수적이다(늦게 보일 뿐 앞당겨 보이지 않는다).
+    available=AvailableRule("greatest_ymd8", column="rcept_dt", fallback_column="rcept_no",
+                            basis="measured"),
+    # append_only: 재수집 판본은 G6 축 (§7). "S1b 실측 충돌 0" 은 **백필 시점 값이고 지금은 틀리다** —
+    # 일일 운영에서 같은 rcept_no 판본이 쌓인다(09-19 실측 2026 파티션 220,419행 / distinct rcept_no
+    # 219,272 = 1,147건. 예: 20260907000034 을 rm='' 로 09-09, rm='정' 으로 09-15 관측 — 페이로드가
+    # 실제로 다르다). 파생 `rm_corrected_later` 도 판본에 따라 갈린다. **소비자는 GROUP BY 로 접는다**
+    # (equity `sql/fin_std.sql:24-28`·`disclosure_version` 이 그렇게 한다). — DEFECT-E09
+    key_unique=False,
     extras=(
         ExtraColumn("is_correction", "s.\"report_nm\" LIKE '[%정정]%'"),
         *(ExtraColumn(name, f"contains(s.\"rm\", '{code}')") for name, code in _RM_CODES),

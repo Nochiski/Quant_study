@@ -36,7 +36,9 @@ SUM="$OUT/summary.tsv"
 : > "$SUM"
 : > "$OUT/STATUS"
 
-ORDER="trading_calendar corp security security_span corp_ticker index_daily price_daily corp_event adj_factor price_adj_daily universe_daily universe_policy flow_daily short_daily credit_daily disclosure_version fin_std holder_daily ownership_snapshot audit_opinion shares_outstanding treasury_stock dividend_event consensus_daily opinion_daily opinion_broker_daily coverage_daily dataset_profile factor_readiness"
+ORDER=$(grep -vE '^\s*(#|$)' "$QL_HOME/scripts/equity_order.txt" | tr '\n' ' ')
+# 정본은 scripts/equity_order.txt 하나다 — 빌드와 재판정이 같은 29표를 돈다(DEFECT-C09).
+[ -n "${ORDER// /}" ] || { echo "!!! scripts/equity_order.txt 가 비었거나 없다" >&2; exit 2; }
 
 T_ALL0=$(date +%s)
 ANY_FAIL=""

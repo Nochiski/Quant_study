@@ -473,3 +473,18 @@ def test_manifest_load_는_모르는_키를_버린다(tmp_path: Path) -> None:
     m = manifest.load(path)
     assert m.builds[0].build_id == "m_1"
     assert not hasattr(m.builds[0], "future_key_from_v9")
+
+
+def test_c4_skips_tables_whose_rules_version_changed(tmp_path: Path, make_stage_tree) -> None:
+    """규칙 판본이 바뀐 판은 같은 소스여도 산출이 달라지는 것이 정상이다(EG5a 와 같은 규약).
+    09-20 00:35 실측: E08 available 규칙이 stg_disclosure 값을 바꿨는데 판본을 안 올려 C4 가 확정 빌드를
+    세웠다 — 판본을 올린 판은 대조에서 빠지고 `rules_changed` 로 기록된다."""
+    root = _all(tmp_path, make_stage_tree)
+    manifest.commit(root / "stg_a", manifest.BuildRecord(
+        build_id=CUR_BID, snapshot_id="snap_t", rules_version="2.3.0",
+        built_at_utc=CUR_BUILT_AT, n_rows=10, content_hash="10:zz",
+        gates=[{"name": "G1", "status": "pass", "detail": "",
+                "metrics": {"n_src": 10, "fanout": 1, "n_dedup": 0, "n_reject": 0, "n_stage": 10}}]))
+    c4 = _check(_run(root), "C4")
+    assert c4.status is health.Status.PASS
+    assert c4.metrics["rules_changed"] == ["stg_a"] and c4.metrics["mismatched"] == []

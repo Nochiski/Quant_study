@@ -204,7 +204,8 @@ npm run dev
 database\scripts\ledger_sync.ps1 sync
 
 # 2) 매일 10:00 KST 증분 동기화 등록(서버 아침 확정판 뒤). 판본이 바뀐 표만 받고 같은 파티션은 재사용한다
-database\scriptsegister_daily_sync.ps1
+database\scripts
+egister_daily_sync.ps1
 
 # 3) 워크벤치를 실데이터로 기동
 $env:STRATEGY_WORKBENCH_EQUITY_ADAPTER = "duckdb"
@@ -264,3 +265,4 @@ uv run server
 | `frontend-api-state.md`       | frontend API/state                   | 생성 SDK, 서버·draft·UI 상태 소유권                                |
 | `frontend-ui-quality.md`      | frontend UI                          | primitive, token, 접근성, i18n, raw metric                         |
 | `frontend-testing.md`         | frontend test/e2e                    | 사용자 동작·wire 경계 테스트                                       |
+| `frontend-react-effects.md`   | `frontend/src/`                      | React 밖 콜백이 읽는 상태는 commit 시점에 동기화(`useCommittedRef`) |

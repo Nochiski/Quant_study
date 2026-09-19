@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
+import { useCommittedRef } from "../../../shared/lib/react";
 import { locatePointer, locateRange } from "../../../shared/lib/yaml12";
 import type {
   CodeEditorHandle,
@@ -65,8 +66,9 @@ export const useOutlineNavigation = ({
     [currentSnapshot?.nodes],
   );
   const editor = useRef<CodeEditorHandle | null>(null);
-  const latestSnapshot = useRef(snapshot);
-  const latestSelected = useRef(selectedPointer);
+  // 편집기 콜백(커서 이동·선택 변경)이 읽는다 — commit과 같은 시점에 비춘다(backlog 21).
+  const latestSnapshot = useCommittedRef(snapshot);
+  const latestSelected = useCommittedRef(selectedPointer);
   const pendingReveal = useRef<string | null>(null);
   const cursorPublished = useRef<string | null>(null);
   const collapsePublished = useRef<string | null>(null);
@@ -78,10 +80,6 @@ export const useOutlineNavigation = ({
     selection: EditorSelection;
   } | null>(null);
   const routeSelectionKey = useRef<string | null>(null);
-  useEffect(() => {
-    latestSnapshot.current = snapshot;
-    latestSelected.current = selectedPointer;
-  }, [selectedPointer, snapshot]);
 
   const reveal = useCallback(
     (pointer: string): boolean => {
@@ -145,6 +143,8 @@ export const useOutlineNavigation = ({
       onSelectedPointer(pointer === "" ? undefined : pointer, "cursor");
     },
     [
+      latestSelected,
+      latestSnapshot,
       onSelectedPointer,
       selectedPointer,
       state.documentEpoch,
@@ -177,7 +177,7 @@ export const useOutlineNavigation = ({
         "outline-collapse",
       );
     },
-    [onSelectedPointer],
+    [latestSelected, onSelectedPointer],
   );
 
   const requestSourceReveal = useCallback((pointer: string): void => {
@@ -212,7 +212,7 @@ export const useOutlineNavigation = ({
       return;
     cursorPublished.current = pointer;
     onSelectedPointer(pointer === "" ? undefined : pointer, "cursor");
-  }, [onSelectedPointer, selectedPointer, snapshot]);
+  }, [latestSelected, onSelectedPointer, selectedPointer, snapshot]);
 
   // Direct links and browser back/forward also reveal their URL path. A path just published by
   // the cursor is already at the right place and must not expand its whole source range.

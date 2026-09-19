@@ -7,6 +7,7 @@ import {
   type SaveStrategyDraftRequest,
   type StrategyDraft,
 } from "../../../shared/api";
+import { useCommittedRef } from "../../../shared/lib/react";
 import type { DocumentAction, DocumentState } from "./document-state";
 import { matchesServerDraftBase, type ServerDraftBase } from "./server-draft";
 
@@ -118,9 +119,11 @@ export const useServerDraft = (
   const [session, setSession] = useState<Session>(() =>
     initialSession(draftId, schemaVersion),
   );
-  const sessionRef = useRef(session);
-  const stateRef = useRef(state);
-  const schemaVersionRef = useRef(schemaVersion);
+  // 저장 타이머·요청 시점에 읽는 값들 — commit과 같은 시점에 비춘다(backlog 21). sessionRef는 요청 흐름이
+  // 직접 덮어쓰기도 한다(아래).
+  const sessionRef = useCommittedRef(session);
+  const stateRef = useCommittedRef(state);
+  const schemaVersionRef = useCommittedRef(schemaVersion);
   const writeChain = useRef(Promise.resolve());
   const baseOriginals = useRef(new Map<string, string>());
   const knownVersions = useRef(new Map<string, number>());
@@ -131,17 +134,10 @@ export const useServerDraft = (
   });
 
   useEffect(() => {
-    stateRef.current = state;
     if (draftId !== null && !baseOriginals.current.has(draftId)) {
       baseOriginals.current.set(draftId, state.savedSource ?? state.source);
     }
   }, [draftId, state]);
-  useEffect(() => {
-    schemaVersionRef.current = schemaVersion;
-  }, [schemaVersion]);
-  useEffect(() => {
-    sessionRef.current = session;
-  }, [session]);
 
   const remoteQuery = useQuery({
     queryKey: ["strategy-draft", draftId, schemaVersion],
@@ -207,6 +203,8 @@ export const useServerDraft = (
     setSession(next);
   }, [
     draftId,
+    sessionRef,
+    stateRef,
     remoteQuery.data,
     remoteQuery.error,
     remoteQuery.isError,
@@ -302,7 +300,7 @@ export const useServerDraft = (
         setSession(next);
       }
     });
-  }, [draftId]);
+  }, [draftId, schemaVersionRef, sessionRef, stateRef]);
 
   useEffect(() => {
     const before = previousSave.current;
@@ -427,7 +425,7 @@ export const useServerDraft = (
         setSession(next);
       }
     });
-  }, [draftId, schemaVersion, session, state]);
+  }, [draftId, schemaVersion, session, sessionRef, state]);
 
   useEffect(() => {
     if (
@@ -474,7 +472,7 @@ export const useServerDraft = (
     } satisfies Session;
     sessionRef.current = next;
     setSession(next);
-  }, [dispatch]);
+  }, [dispatch, sessionRef]);
 
   const keepLocal = useCallback(() => {
     const current = sessionRef.current;
@@ -573,7 +571,7 @@ export const useServerDraft = (
     } satisfies Session;
     sessionRef.current = next;
     setSession(next);
-  }, []);
+  }, [sessionRef, stateRef]);
 
   const retry = useCallback(() => {
     if (draftId === null) return;
@@ -581,7 +579,7 @@ export const useServerDraft = (
     sessionRef.current = next;
     setSession(next);
     void remoteQuery.refetch();
-  }, [draftId, remoteQuery, schemaVersion]);
+  }, [draftId, remoteQuery, schemaVersion, sessionRef]);
 
   return useMemo(
     () => ({
